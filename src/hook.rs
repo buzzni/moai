@@ -1947,8 +1947,8 @@ fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&Issue) -> bool + 
 
 /// 세션마다 적어 둔 집기를 이 세션의 눈으로 가른 것(moai-4jsy, 사용자 결정) — 줄마다 **마지막으로
 /// 집은** 세션이 이 세션이면 `mine`, 다른 세션이면 `theirs` 다. 다만 **돌았는지 모르는 집기**
-/// (moai-hze6)로는 남이 쥔 줄을 안 가져온다([`Picks::fold`]). 적는 것과 읽는 것은 `cmd/hook.rs`
-/// 가 하고, 여기는 그 답만 받는다.
+/// (moai-hze6)로는 남이 쥔 줄을 안 가져오고, **남의 것도 그렇다**(moai-dbzs) — 표는 누가 적었든 같은
+/// 뜻이다([`Picks::fold`]). 적는 것과 읽는 것은 `cmd/hook.rs` 가 하고, 여기는 그 답만 받는다.
 ///
 /// **트래커에 적지 않는다.** 세션은 이슈의 뜻이 아니라 이 기계의 사정이다 — 훅이 제 표(`board`·
 /// `warn`)를 두는 임시 디렉터리에 둔다. 훅 밖(사람의 터미널)에서 집은 줄은 아무 데도 안 적혀 전과
@@ -1966,7 +1966,8 @@ impl Picks {
 
     /// 집기 한 번을 적는 줄 — `때\tid\t초\t?`. `때` 는 차례를 가르는 벽시계 나노초, `초` 는 줄의 칸
     /// 시각과 견줄 `model::now` 의 초다(못 읽었으면 빈 칸). 끝의 `?` 는 **돌았는지 모르는 집기**다
-    /// (moai-hze6) — `집기 && 무엇 || 집기` 의 뒤 집기처럼 앞이 이기면 안 도는 자리다. 읽는 쪽은
+    /// (moai-hze6·moai-dbzs) — `||` 뒤라 앞이 이기면 안 도는 자리, `&&` 뒤라 앞이 지면 안 도는 자리,
+    /// 조건에 매여 들어선 묶음 안이 모두 그렇다. 읽는 쪽은
     /// [`Picks::fold`] 하나다 — 꼴이 두 자리에 서면 한쪽만 고쳐지는 날 기록이 통째로 안 읽힌다.
     ///
     /// **칸을 늘리기만 한다.** 옛 바이너리의 `fold` 는 앞 셋만 읽고 나머지를 버려, 새 줄도 그대로 읽는다.
@@ -1980,7 +1981,8 @@ impl Picks {
 
     /// 세션마다 적어 둔 집기(`(세션, 그 세션의 글)`)를 `me` 의 눈으로 가른다 — 줄마다 **마지막으로** 집은
     /// 세션이 이긴다. 이 세션과 다른 세션이 같은 때에 집었으면 모르는 쪽(`theirs`)이다 — 그쪽은 풀기만 한다.
-    /// **이 세션 쪽은 `?` 가 안 붙은 줄로만 겨룬다**(moai-hze6) — 남이 쥔 줄이 아예 없을 때만 `?` 줄도 제 것이다.
+    /// **양쪽 다 `?` 가 안 붙은 줄로만 겨룬다**(moai-hze6·moai-dbzs) — 남이 **확실히** 쥔 줄이 아예 없을
+    /// 때만 `?` 줄도 제 것이다.
     /// **판단은 여기 둔다** — `cmd/hook.rs` 는 파일을 읽어 넘길 뿐이다(판단은 `cmd` 에 없다).
     ///
     /// 못 읽는 줄과 **끝이 안 닫힌 줄**은 건너뛴다(리뷰 moai-3k2d.1df) — 적는 중에 읽은 끝토막은
@@ -2004,7 +2006,9 @@ impl Picks {
             sure: Option<u128>,
             /// 이 세션이 적은 마지막 때 — `?` 가 붙은 줄까지. 남이 쥔 줄이 없을 때만 쓴다.
             mine: Option<u128>,
-            /// 다른 세션들의 마지막 때.
+            /// 다른 세션이 **확실히 도는 집기**로 적은 마지막 때 — 제 집기와 겨루는 것은 이것뿐이다.
+            sure_theirs: Option<u128>,
+            /// 다른 세션이 적은 마지막 때 — `?` 가 붙은 줄까지. 제 기록이 아예 없을 때만 쓴다.
             theirs: Option<u128>,
         }
         let mut last: std::collections::BTreeMap<String, Seen> = Default::default();
@@ -2025,6 +2029,9 @@ impl Picks {
                 let seen = last.entry(id.to_string()).or_default();
                 if !mine {
                     seen.theirs = seen.theirs.max(Some(at));
+                    if sure {
+                        seen.sure_theirs = seen.sure_theirs.max(Some(at));
+                    }
                     continue;
                 }
                 // **확실한 것과 모르는 것을 따로 든다**(리뷰 moai-51h9.k8j1). 마지막 한 줄만 들던 판은
@@ -2038,12 +2045,18 @@ impl Picks {
             }
         }
         let mut out = Picks::default();
-        for (id, Seen { sure, mine: m, theirs: t }) in last {
+        for (id, Seen { sure, mine: m, sure_theirs: st, theirs: t }) in last {
             // **돌았는지 모르는 집기는 남의 기록을 안 지운다**(moai-hze6, 사용자 결정). 적기는 적는다 —
             // 기록은 "이 세션이 집었을 수 있다" 를 모으는 자리다. 다만 그것으로 남이 쥔 줄을 제 것으로
             // 삼으면, 안 돈 집기 하나가 남의 일을 초점에 세워 규칙 1 이 막고 `Stop` 이 그것을 닫으라고
             // 붙든다 — 기록은 풀기만 한다(moai-m5mg 의 elsewhere 보존과 같은 자다).
-            match sure > t || (t.is_none() && m.is_some()) {
+            //
+            // **그 표는 남의 줄에서도 같은 뜻이다**(moai-dbzs, 사용자 결정 2026-09-20). 쓰는 쪽만 표를
+            // 달고 읽는 쪽은 버리던 판은, 옆 세션의 안 돈 집기 한 줄이 이 세션이 확실히 쥔 줄을 가져갔다
+            // (리뷰 moai-51h9.q5l 의 6번). 겨루는 자를 `sure_theirs` 로 좁혀 그 줄을 안 빼앗기되, 제
+            // 기록이 아예 없는 줄은 여전히 `?` 한 줄로도 모르는 것이 된다(`t`) — 그쪽이 쥐었을 수 있다는
+            // 뜻이고, 모르는 줄은 풀기만 하니 이것으로 새로 막는 일은 없다(moai-4jsy).
+            match sure > st || (t.is_none() && m.is_some()) {
                 true => out.mine.insert(id),
                 false => out.theirs.insert(id),
             };
@@ -2593,6 +2606,16 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     ///
     /// 이름 없는 네 자리 튜플로 두면 `floor`·`depth`·`held` 가 자리로만 갈려, 하나를 바꿔 적어도
     /// 컴파일이 된다 — 그러면 집기가 조용히 새거나 조용히 막힌다.
+    /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Bailout::cond`]) — 토막 번호와 그것이
+    /// 확실히 도는가다. 번호만 들던 판은 그 집기를 늘 확실한 것으로 세워, `a && if ! 집기; then exit 1;
+    /// fi` 처럼 `if` 자신이 조건에 매인 줄에서 안 돌 수도 있는 집기를 확실한 것으로 적었다(moai-dbzs).
+    #[derive(Clone, Copy)]
+    struct Cond {
+        /// 그 집기의 토막 번호([`segments`] 의 번호).
+        at: usize,
+        /// 그 집기가 확실히 도는가 — `shell_scan` 의 `certain` 이다.
+        sure: bool,
+    }
     struct Bailout {
         /// 그 묶음의 깊이([`Seg::level`]). 여기보다 얕은 자리를 지나오면 묶음을 나온 것이다.
         floor: usize,
@@ -2601,10 +2624,10 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         depth: usize,
         /// 들어설 때의 `after_pick` — 묶음을 지나면 도로 세운다.
         held: Option<usize>,
-        /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**의 토막 번호. 그 집기는 뒤집혀 있어
+        /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Cond`]). 그 집기는 뒤집혀 있어
         /// 적히지 않지만(`negated`), 묶음을 지나온 것은 그것이 이겼다는 뜻이라 쓰기 규칙은 집은
         /// 것으로 센다 — 기록도 같이 세워야 두 자리가 안 갈린다(moai-m5mg).
-        cond: Option<usize>,
+        cond: Option<Cond>,
         /// 지금까지 본 것이 그 꼴인가 — 묶음의 마지막 줄이 `exit` 여야 한다.
         ends: bool,
         /// 그 `exit` 가 **0 아닌 값**을 대는가(moai-4arw, 리뷰 moai-k8j1.209 의 3번) — 겹을 나올 때만
@@ -2687,6 +2710,12 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     // 걷는 쪽으로 같이 쓰면 `a && { 집기; } && 쓰기` 를 막는다 — 그 쓰기는 묶음이 돌아야 닿으니
     // 집기도 돈 것이다.
     let mut iffy: Option<usize> = None;
+    // **조건에 매여 들어간 묶음의 가장 얕은 깊이 — 기록 쪽의 자**(moai-dbzs). `iffy` 와 같은 자리에서
+    // 서고 같은 자로 걷히되, **쥔 것이 있어도 센다**: 저쪽은 "이 묶음이 돌았으면 집기가 이겼다" 를
+    // 나중에 재는 자라 `집기 && { … }` 를 안 세지만, 기록은 명령이 **돌기 전에** 적히니 `집기A &&
+    // { 집기B; }` 의 B 도 A 가 져서 안 돌 수 있다. 그 자리를 확실한 집기로 적으면 정말 쥔 세션에게서
+    // 초점을 빼앗는다([`Picks::fold`]).
+    let mut chancy: Option<usize> = None;
     // 함수 정의의 머리(`f(`)를 본 자리 — 다음 토막이 그 몸통이다.
     let mut fndef: Option<usize> = None;
     // 다시 읽은 겹마다([`Seg::nested`]), 그 겹에 들어설 때의 판 — **나오면 되돌린다.** 새 셸은 제
@@ -2699,8 +2728,9 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     // 나올 때 그 꼴이면 집기가 이긴 채로 잇는다 — 그 묶음이 돌았으면 뒤는 아예 안 돈다.
     let mut bailout: Option<Bailout> = None;
     // 집기로 센 토막의 번호와 그 묶음 깊이, 그리고 **그 집기가 확실히 도는가**. 몸통이 안 돌았을 수
-    // 있는 묶음을 나오면 그 안의 집기는 쥔 것이 없으니 함께 걷고, `집기 && 무엇 || 집기` 의 뒤 집기는
-    // 앞이 이기면 안 도니 적되 확실하지 않다고 적는다(moai-hze6, [`Picks::fold`] 가 읽는다).
+    // 있는 묶음을 나오면 그 안의 집기는 쥔 것이 없으니 함께 걷고, 앞선 이음사(`&&`·`||`)나 조건에 매여
+    // 들어선 묶음에 매인 집기는 적되 확실하지 않다고 적는다(moai-hze6·moai-dbzs, `certain` 이 그 자고
+    // [`Picks::fold`] 가 읽는다).
     let mut picked: Vec<(usize, usize, bool)> = Vec::new();
     // 겹마다 **그 겹에 처음 든 토막의 번호** — 묶음을 나올 때 **그 묶음 안에서** 적은 집기만 걷는다.
     // 깊이만 보던 판은 같은 깊이의 **앞선 형제** 묶음까지 함께 버렸다 — `(집기 A); if …; then 집기 B;
@@ -2712,7 +2742,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
     /// 자리 셋이 저마다 꼬리(`true`)를 손으로 적던 판은, 꼴이 바뀌면 둘만 고쳐질 자리였다.
     fn credit(picked: &mut Vec<(usize, usize, bool)>, b: Option<&Bailout>, home: usize) {
         if let Some(c) = b.and_then(|b| b.cond) {
-            picked.push((c, home, true));
+            picked.push((c.at, home, c.sure));
         }
     }
     fn prune(picked: &mut Vec<(usize, usize, bool)>, from: usize, deeper_than: usize) {
@@ -2847,7 +2877,7 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         if moved.is_some_and(|d| seg.low < d) {
             moved = None;
         }
-        for scope in [&mut strict, &mut lone, &mut sure, &mut sure_e, &mut negated_at, &mut iffy] {
+        for scope in [&mut strict, &mut lone, &mut sure, &mut sure_e, &mut negated_at, &mut iffy, &mut chancy] {
             if scope.is_some_and(|l| seg.floor < l) {
                 *scope = None;
             }
@@ -2896,8 +2926,11 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         // **조건에 매여 묶음에 들어섰다** — 앞이 지거나(`&&`) 이기면(`||`) 이 묶음은 안 돈다. 쥔 것이
         // 있으면 그 조건은 집기 자신이라(`집기 && { … }`) 세지 않는다 — 묶음이 돌았다는 것이 곧
         // 집기가 이겼다는 뜻이다.
-        if matches!(j.op, Op::Or | Op::And) && j.depth < seg.level && !picked_before {
-            iffy = Some(iffy.map_or(seg.level, |l| l.min(seg.level)));
+        if matches!(j.op, Op::Or | Op::And) && j.depth < seg.level {
+            chancy = Some(chancy.map_or(seg.level, |l| l.min(seg.level)));
+            if !picked_before {
+                iffy = Some(iffy.map_or(seg.level, |l| l.min(seg.level)));
+            }
         }
         // **함수 몸통도 안 돈다** — `f() { … }` 는 정의일 뿐이고 그 값은 늘 0 이다. 렉서는 머리를
         // `f(` 한 낱말로 내니(붙은 괄호가 낱말을 안 가른다), 그 **다음** 토막이 몸통의 첫 줄이다.
@@ -2907,10 +2940,17 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
             && seg.level > at
         {
             iffy = Some(iffy.map_or(seg.level, |l| l.min(seg.level)));
+            chancy = Some(chancy.map_or(seg.level, |l| l.min(seg.level)));
         }
         if seg.words.last().is_some_and(|w| w.ends_with('(')) {
             fndef = Some(seg.level);
         }
+        // **이 토막이 확실히 도는가**(moai-dbzs, 사용자 결정 2026-09-20) — 앞선 이음사(`&&`·`||`)에
+        // 매이지도, 조건에 매여 들어선 묶음 안도 아니다. `||` 만 재던 판은 `cargo test && moai mv X
+        // review` 를 확실한 집기로 적어, 앞이 지면 안 도는 줄을 정말 쥔 세션에게서 빼앗았다(리뷰
+        // moai-51h9.q5l 의 7번). 그만큼 넘겨받기(moai-4jsy)가 약해지는 것은 받아들인 대가다 —
+        // `git pull && moai mv X in_progress` 도 이제 `?` 로 적힌다. 표를 읽는 자는 [`Picks::fold`] 다.
+        let certain = !matches!(j.op, Op::And | Op::Or) && chancy.is_none();
         if j.op == Op::Or && j.depth < seg.level && !picked_before {
             // 번호는 **이 토막**의 것이다 — 여기부터가 "앞이 이기면 안 도는" 자리고, 그 앞에 적힌
             // 집기(먼저 쌓인 치환의 것을 포함해)는 이미 돌았다.
@@ -3023,8 +3063,9 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         }
         if picks_up(&seg.words, cfg) && only(n) && !negated && (!or || picked_before) {
             after_pick = Some(after_pick.map_or(seg.level, |d| d.min(seg.level)));
-            // `||` 뒤라서 센 집기는 앞이 이기면 안 돈다 — 적되 확실하지 않다고 적는다(moai-hze6).
-            picked.push((n, seg.level, !or));
+            // 앞선 이음사에 매인 집기는 앞이 어떻게 끝나느냐에 따라 안 돈다 — 적되 확실하지 않다고
+            // 적는다(moai-hze6·moai-dbzs, `certain` 이 그 자다).
+            picked.push((n, seg.level, certain));
         }
         // **집기가 지면 끝내는 묶음이 여기서 열리는가**(moai-ncay) — 두 꼴이고, 먼저 열린 하나만
         // 든다. `|| exit` 한 꼴만 알던 판은 겨루다 진 쪽을 끊는 이 흔한 두 꼴에서 집기를 잃어,
@@ -3061,11 +3102,13 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
             // 처럼 집기의 값이 조건에 안 닿는 줄과, `( ( 집기 ) ); if ! bash -c 'true'` 처럼 앞선 딴
             // 겹의 집기까지 이긴 것으로 읽어 빈손의 쓰기를 넘겼다(리뷰 moai-k8j1.034). 그 글의
             // 토막들은 이 토막 바로 앞에 심겼으니(`handed_from`) 그 번호부터 거슬러 센다.
-            let own = (picks_up(&seg.words, cfg) && only(n)).then_some(n);
+            let own = (picks_up(&seg.words, cfg) && only(n)).then_some(Cond { at: n, sure: certain });
             let cond = own.or_else(|| {
                 let from = handed_from.filter(|_| bang && came.is_some_and(|d| d > seg.level))?;
-                let (c, ..) = picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
-                shell_text(&seg.words).map(|_| *c)
+                // 넘긴 글 안의 집기는 제 표를 이미 달고 있다 — `if` 자신이 조건에 매였으면 그 위에
+                // 한 번 더 매인다(`certain`). 둘 다 서야 확실한 집기다.
+                let &(c, _, sure) = picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
+                shell_text(&seg.words).map(|_| Cond { at: c, sure: sure && certain })
             });
             if let Some(c) = cond {
                 let b =
@@ -4157,6 +4200,23 @@ mod tests {
         let tie = ("me", Picks::line(2, None, "t-1", true));
         assert_eq!(read(&[theirs.clone(), maybe, tie]).mine, set(&["t-1"]), "같은 때의 두 줄이 차례를 탔다");
 
+        // **남이 적은 `?` 줄도 같은 뜻으로 읽는다**(moai-dbzs, 사용자 결정 2026-09-20) — 표를 쓰기만
+        // 하고 읽을 때 버리던 판은, 옆 세션의 안 돈 집기 한 줄이 이 세션이 확실히 쥔 줄을 가져갔다
+        // (리뷰 moai-51h9.q5l 의 6번).
+        let their_maybe = ("you", Picks::line(3, None, "t-1", false));
+        let held = read(&[sure.clone(), their_maybe.clone()]);
+        assert_eq!(held.mine, set(&["t-1"]), "남의 `?` 한 줄이 제 집기를 가져갔다 — {held:?}");
+        // 그래도 읽기는 읽는다 — 제 기록이 없는 줄은 "그쪽이 쥐었을 수 있다" 로 남는다. 모르는 줄은
+        // 풀기만 하니 이것으로 새로 막지 않는다(moai-4jsy).
+        let only_theirs = read(std::slice::from_ref(&their_maybe));
+        assert!(only_theirs.mine.is_empty());
+        assert_eq!(only_theirs.theirs, set(&["t-1"]), "남의 `?` 줄을 아예 안 읽었다");
+        // 남이 뒤에 **확실히** 집었으면 넘어간다 — 마지막으로 집은 세션이 이기는 자는 그대로다(moai-4jsy).
+        assert!(read(&[sure.clone(), ("you", Picks::line(3, None, "t-1", true))]).mine.is_empty(), "넘겨준 줄을 붙들었다");
+        // 제 `?` 는 남의 `?` 도 못 이긴다 — 둘 다 안 돌았을 수 있는 자리다.
+        let both_maybe = read(&[("me", Picks::line(4, None, "t-1", false)), their_maybe]);
+        assert!(both_maybe.mine.is_empty(), "`?` 끼리 겨뤄 제 것이 됐다 — {both_maybe:?}");
+
         // **표가 없는 옛 줄은 확실한 것으로 읽는다** — 새 칸을 늘리기만 했다.
         let old = ("me", "2\tt-1\t\n".to_string());
         assert_eq!(read(&[theirs.clone(), old]).mine, set(&["t-1"]), "옛 줄을 못 읽었다");
@@ -4219,6 +4279,30 @@ mod tests {
             picked_in("moai mv t-1 in_progress --from todo || moai mv t-2 in_progress", &cfg(), &|_| true, &stands),
             [("t-1".to_string(), true), ("t-2".to_string(), false)]
         );
+        // **`&&` 로 이은 집기도 `?` 로 적는다**(moai-dbzs, 사용자 결정 2026-09-20) — 앞이 지면 안 돈다.
+        // `||` 만 재던 판은 `cargo test && moai mv X review` 를 확실한 집기로 적어, 시험이 져서 안 돈
+        // 집기가 정말 쥔 세션에게서 초점을 빼앗았다(리뷰 moai-51h9.q5l 의 7번).
+        let flags = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands);
+        let one = |id: &str, sure: bool| vec![(id.to_string(), sure)];
+        assert_eq!(flags("cargo test && moai mv t-1 review"), one("t-1", false));
+        // 조건에 매여 들어선 묶음 안도 같다 — 앞이 집기여도 그 집기가 질 수 있고, 기록은 명령이 돌기
+        // 전에 적힌다. 쓰기 규칙의 `iffy` 가 이 자리를 안 세는 것과 갈리는 곳이다.
+        assert_eq!(flags("a && { moai mv t-1 in_progress; }"), one("t-1", false));
+        assert_eq!(
+            flags("moai mv t-1 in_progress --from todo && { moai mv t-2 in_progress; }"),
+            [("t-1".to_string(), true), ("t-2".to_string(), false)]
+        );
+        // 그 묶음을 나오면 표는 걷힌다 — 형제 묶음도 다시 선 목록도 확실한 집기다.
+        assert_eq!(flags("a && { echo x; }; { moai mv t-1 in_progress; }"), one("t-1", true));
+        assert_eq!(flags("a && b; moai mv t-1 in_progress"), one("t-1", true));
+        // 셸에 넘긴 글도 그 토막이 매였으면 함께 매인다.
+        assert_eq!(flags("bash -c 'moai mv t-1 in_progress'"), one("t-1", true));
+        assert_eq!(flags("cargo test && bash -c 'moai mv t-1 in_progress'"), one("t-1", false));
+        // **끝내는 묶음의 조건도 같은 자로 잰다**([`Bailout::cond`]) — 그 집기는 뒤집혀 있어 제 자리에
+        // 안 적히고 묶음을 지나며 세워지는데, 꼬리를 `true` 로 박아 두던 판은 `if` 자신이 매인 줄에서
+        // 안 돌 수도 있는 집기를 확실한 것으로 적었다.
+        assert_eq!(flags("if ! moai mv t-1 in_progress --from todo; then exit 1; fi"), one("t-1", true));
+        assert_eq!(flags("cargo test && if ! moai mv t-1 in_progress --from todo; then exit 1; fi"), one("t-1", false));
         // 남의 트래커를 가리킨 토막은 그 트래커에 적힌다 — 여기서는 `only` 가 뺀다.
         assert_eq!(picked_ids("moai -C /x mv t-9 in_progress && moai mv t-1 in_progress", &cfg(), &|k| k == 1, &stands), ["t-1"]);
         // 첫 칸으로 되돌리는 것과 닫는 것은 벌여 놓는 칸이 아니다.
