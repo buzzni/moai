@@ -766,6 +766,92 @@ fn outside_a_repo_it_says_what_to_do() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("moai init"));
 }
 
+/// **`show` 의 목록·트리·상세·이력도 고른 말로 선다**(moai-pk2x). 그리는 자리는 moai-4y5s 가
+/// `view::Screen` 하나로 묶어 두어 이미 말을 들고 있었는데, 아무도 그것을 안 읽어 열 이름과
+/// 줄 이름이 글자로 박혀 있었다.
+///
+/// **자료를 ASCII 로 두고 한글이 남았는지를 센다.** 제목·담당은 옮길 글이 아니라 자료라,
+/// 한글을 섞으면 이 자가 옮긴 글과 안 옮긴 글을 못 가른다. 그래서 담당도 여기서만 ASCII 로
+/// 준다([`ACTOR`] 는 한글이다).
+///
+/// **네 표면을 한 판에서 잰다** — 목록·트리·상세가 `view` 안에서 갈려 있어 한쪽만 옮기기
+/// 쉽고, 이력은 아예 다른 함수다. 한국어도 함께 재는 까닭은 옮긴 것이 사라진 것과 다르다는
+/// 것을 보이려는 것이다.
+///
+/// **아직 한국어로 남은 자리 둘은 여기서 안 잰다** — `view::deferred_for` 의 `미룸 (N일)` 과
+/// `unread_column` 의 칸 한 줄은 탐색기(`tui::draw`)가 같이 쓰는데 그쪽에 말이 안 닿아 있다
+/// (moai-ra67 의 자리). 그래서 이 판에는 미룬 줄도, 손으로 옮긴 묶음도 두지 않는다.
+#[test]
+fn show_speaks_the_picked_language() {
+    const PLAIN_ACTOR: &str = "tester (tester@example.com)";
+    let s = init("showlang");
+    let run = |lang: &str, args: &[&str]| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args)
+            .current_dir(s.path())
+            .env("MOAI_ACTOR", PLAIN_ACTOR)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .env("MOAI_LANG", lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{lang} {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id_of = |args: &[&str]| {
+        let mut v = vec!["add"];
+        v.extend_from_slice(args);
+        v.push("-q");
+        run("en", &v).trim().to_string()
+    };
+
+    let epic = run("en", &["epic", "add", "carrier epic", "-q"]).trim().to_string();
+    let work = id_of(&["a plain issue", "-e", &epic, "--tag", "parser"]);
+    id_of(&["a child of the work", "--parent", &work]);
+    // 에픽 밖의 줄 하나 — 트리의 `에픽 없음` 머리글이 이것으로 선다.
+    id_of(&["an issue outside every epic"]);
+    let shut = id_of(&["work already closed", "-e", &epic]);
+    run("en", &["mv", &shut, "done"]);
+    run("en", &["note", &work, "a note for the next session"]);
+    run("en", &["mv", &work, "in_progress"]);
+
+    // 네 표면. 목록은 숨긴 것(`done`)까지 대고, 상세는 에픽 줄·자식 줄·시각 줄·이력을 함께 낸다.
+    let surfaces: [&[&str]; 4] = [&["show"], &["show", "--tree"], &["show", &work], &["show", &epic]];
+    for args in surfaces {
+        let english = run("en", args);
+        let left: Vec<&str> = english
+            .lines()
+            // **바구니 이름 둘은 아직 한국어다** — `nav::Index::label` 이 짓고 탐색기
+            // (`tui::mod`)가 같은 글자를 두 벌로 들고 있어, 옮기려면 그 두 자리를 함께 봐야
+            // 한다(moai-ra67 과 나란히 선 자리). 그것까지 세면 이 판은 늘 붉은 채로 있어
+            // 새로 새는 글자를 못 드러낸다.
+            .filter(|l| !l.contains("(길 잃음)") && !l.contains("(마일스톤 없음)"))
+            .filter(|l| l.chars().any(|c| ('가'..='힣').contains(&c)))
+            .collect();
+        assert!(left.is_empty(), "영어로 고른 {args:?} 화면에 한국어가 남았다 — {left:#?}");
+    }
+    assert!(run("en", &["show", "--tree"]).contains("no epic"), "트리의 `에픽 없음` 이 안 옮겨졌다");
+
+    // **줄이 실제로 섰는지를 잰다.** 안 선 화면에 한글이 없는 것은 당연해서, 이 확인이 없으면
+    // 자료가 줄어드는 날 위의 고리가 아무것도 안 재면서 초록으로 남는다.
+    let list = run("en", &["show"]);
+    for want in ["Title", "Tags", "Epic", "hidden — `--all`"] {
+        assert!(list.contains(want), "영어 목록에 `{want}` 가 없다\n{list}");
+    }
+    let one = run("en", &["show", &work]);
+    for want in ["Epic ", "Child ", "Created", "Updated", "Started", "History", "created"] {
+        assert!(one.contains(want), "영어 상세에 `{want}` 가 없다\n{one}");
+    }
+    assert!(run("en", &["show", &epic]).contains("Members"), "에픽 상세에 멤버 줄이 없다");
+
+    // **옮긴 것은 사라진 것이 아니다** — 한국어를 고르면 그대로 선다.
+    let korean = run("ko", &["show", &work]);
+    for want in ["에픽", "자식", "생성", "수정", "시작", "이력"] {
+        assert!(korean.contains(want), "한국어 상세에 `{want}` 가 없다\n{korean}");
+    }
+    assert!(run("ko", &["show"]).contains("제목"), "한국어 목록의 열 이름이 사라졌다");
+    assert!(run("ko", &["show", &epic]).contains("멤버"), "한국어 에픽 상세에 멤버 줄이 없다");
+}
+
 // ── `.moai` 밖의 한눈 보기 — 등록한 프로젝트마다 (moai-6au6) ──────────
 
 /// 등록 목록을 **제 임시 파일로** 쓴다. 돌리는 사람의 설정을 읽으면 결과가 기계를 따른다.

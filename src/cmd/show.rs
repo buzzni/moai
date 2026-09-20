@@ -254,7 +254,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
         // 요약 꼬리에 다는 것과 같은 말, 같은 자리(`Hidden`)에서 받는다.
         // **그린 줄은 안 센다** — 걸린 자손 때문에 선 조상이다(moai-wi67).
-        if let Some(n) = tally(&drawn).note() {
+        if let Some(n) = tally(&drawn).note(ctx.lang()) {
             out.push(String::new());
             out.push(n);
         }
@@ -513,7 +513,7 @@ fn one(
     let mut out = view::detail(issue, epic, &children, &seen, &repo.config, &model::now(), raw);
     // 머리 두 줄(제목·칸) 바로 밑이다 — 본문을 읽기 전에 이 줄이 하나뿐이 아님을 안다.
     if let Some(n) = twins {
-        out.insert(2.min(out.len()), view::duplicate_note(n));
+        out.insert(2.min(out.len()), view::duplicate_note(n, ctx.lang()));
     }
     // 묶음을 펼치면 그 밑에 무엇이 있는지까지 보여 준다 — 묶음 하나를 보는
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
@@ -538,7 +538,8 @@ fn one(
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = &roll {
             out.push(format!(
-                "  멤버   {}/{}  {}{}",
+                "  {}   {}/{}  {}{}",
+                view::members_label(ctx.lang()),
                 r.done,
                 r.total,
                 view::bar(r.percent),
@@ -572,8 +573,10 @@ fn one(
             }
         }
     }
-    out.extend(view::commits(&commits));
-    out.extend(view::history(&journal, &repo.config));
+    // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
+    // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
+    out.extend(view::commits(&commits, ctx.lang()));
+    out.extend(view::history(&journal, &repo.config, ctx.lang()));
     Ok(out)
 }
 
