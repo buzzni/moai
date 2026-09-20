@@ -235,14 +235,18 @@ fn last_column(l: &str) -> usize {
     cells(&line[..gap + (tail.len() - tail.trim_start().len())])
 }
 
-/// **아무도 고르지 않으면 지금은 한국어고, 영어는 낱말 하나로 온다**(사용자 결정, 리뷰
-/// moai-80qw.cb8). 옮긴 글이 열 줄뿐이라 기본을 영어로 두면 화면이 두 말로 섞인다 — 옮김이
-/// 화면을 덮을 때 `Lang` 의 `#[default]` 한 줄과 함께 이 기대값이 영어로 바뀐다.
+/// **아무도 고르지 않으면 영어다**(moai-bn1j, 2026-09-20 사용자 결정 — v0.1.0 은 영어로 나간다).
+///
+/// 한때 기본이 한국어였다(리뷰 moai-80qw.cb8) — 옮긴 글이 열 줄뿐이라 영어로 두면 화면이 두
+/// 말로 섞이던 때다. **여기가 그것을 화면으로 재는 자리다**: 단위 시험
+/// (`i18n::tests::nothing_picked_means_english`)은 고르는 자만 보고, 이쪽은 `MOAI_LANG` 을 걷은
+/// 진짜 실행이 영어 화면을 내는지를 본다. 이 시험만은 [`isolated`] 가 박아 둔 `MOAI_LANG=ko`
+/// 를 걷는다 — 다른 시험은 글자를 그대로 견주느라 한국어 화면을 본다.
 ///
 /// **`MOAI_LANG` 으로 한국어·일본어도 함께 잰다** — 고르는 길이 도는지, 그리고 두 칸 글자가
 /// 섞여도 줄이 서는지. 어느 말이든 같은 수를 대는 것으로 그 화면이 같은 화면임을 잰다.
 #[test]
-fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
+fn english_is_the_default_when_nothing_picks_a_language() {
     let s = init("lang");
     ok(s.path(), &["add", "첫 일"]);
     let say = |lang: Option<&str>| {
@@ -256,20 +260,22 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
-    // **아무것도 안 고르면 지금은 한국어다**(사용자 결정) — 옮긴 글이 열 줄뿐이라, 기본을
-    // 영어로 두면 화면이 두 말로 섞인다. 옮김이 화면을 덮으면 이 기대값이 영어로 바뀐다.
+    // **아무것도 안 고르면 영어다.** 고른 영어와 글자까지 같아야 한다 — 다르면 기본값이
+    // 영어가 아니라 "영어 비슷한 무엇" 이다.
     let fallback = say(None);
-    assert!(fallback.contains("이슈 1"), "아무도 안 골랐는데 기본 화면이 아니다\n{fallback}");
+    assert!(fallback.contains("Issues 1"), "아무도 안 골랐는데 영어 화면이 아니다\n{fallback}");
 
-    // **영어는 낱말 하나로 온다** — 기준 말이라 늘 고를 수 있다.
     let english = say(Some("en"));
-    assert!(english.contains("Issues 1"), "MOAI_LANG=en 이 안 들었다\n{english}");
+    assert_eq!(english, fallback, "고른 영어와 기본 화면이 다르다");
     let head = |screen: &str| screen.lines().next().unwrap_or_default().to_string();
     assert!(!head(&english).contains("이슈"), "영어 화면의 머리에 한국어가 남았다\n{english}");
 
+    // **한국어는 낱말 하나로 온다** — 기본이 아닐 뿐 고르면 그대로 선다.
     let korean = say(Some("ko"));
     assert!(korean.contains("이슈 1"), "MOAI_LANG=ko 가 안 들었다\n{korean}");
-    assert_eq!(korean, fallback, "고른 한국어와 기본 화면이 다르다");
+    assert!(!korean.contains("Issues 1"), "한국어 화면의 머리에 영어가 남았다\n{korean}");
+
+    // 로캘은 안 읽는다 — 세 이름을 다 재는 것은 `the_system_locale_does_not_pick_the_language` 다.
 
     // 없는 키는 영어로 떨어진다 — 화면이 비지 않는다.
     let japanese = say(Some("ja_JP.UTF-8"));
@@ -325,11 +331,12 @@ fn a_running_milestone_comes_first_and_nothing_is_blocked() {
 ///
 /// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
 /// 넣는 사람을 받자는 것이지, `LANG`·`LC_ALL`·`LC_MESSAGES` 를 읽는다는 뜻이 아니다. 읽으면
-/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, 옮긴 글이 아직 두 화면뿐이라 그 화면은
-/// 제 말 몇 줄과 영어가 섞인다 — 기본을 한국어로 둔 것과 같은 까닭이다.
+/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, ja·zh·es 는 영어 표 예순 키 가운데 아홉·열
+/// 키뿐이라 그 화면은 제 말 열 줄과 영어 쉰 줄로 섞인다.
 ///
-/// **여는 조건은 `Lang` 의 `#[default]` 를 `En` 으로 옮기는 날과 같다.** 그날 이 시험이
-/// 붉어지면 그때 고르는 층을 셋으로 늘린다.
+/// **여는 조건이던 날(`Lang` 의 `#[default]` 를 `En` 으로 옮기는 날)은 지났다** — 그날
+/// 사용자가 다시 안 읽기로 정했다(moai-bn1j, 2026-09-20). 까닭이 기본값이 아니라 번역의
+/// 양에 있었고, 그 양은 안 변했기 때문이다. 다시 여는 조건은 ja·zh·es 가 영어 표를 덮는 날이다.
 #[test]
 fn the_system_locale_does_not_pick_the_language() {
     let s = init("locale");
@@ -357,16 +364,17 @@ fn the_system_locale_does_not_pick_the_language() {
         String::from_utf8(out.stdout).unwrap()
     };
 
-    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 지금은 한국어다.
+    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 영어다.
     let bare = say(None, "");
-    assert!(bare.contains("이슈 1"), "로캘이 말을 골랐다\n{bare}");
+    assert!(bare.contains("Issues 1"), "로캘이 말을 골랐다\n{bare}");
     assert!(!bare.contains("課題"), "로캘이 말을 골랐다\n{bare}");
 
-    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다.
-    let picked = say(Some("en"), "");
-    assert!(picked.contains("Issues 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
-    let said = say(None, "[i18n]\nlang = \"en\"\n");
-    assert!(said.contains("Issues 1"), "설정이 로캘에 밀렸다\n{said}");
+    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다. **기본값이 아닌 말로
+    // 잰다**: 영어로 재면 로캘을 읽어도 같은 화면이 나와 아무것도 안 잰 것이 된다.
+    let picked = say(Some("ko"), "");
+    assert!(picked.contains("이슈 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
+    let said = say(None, "[i18n]\nlang = \"ko\"\n");
+    assert!(said.contains("이슈 1"), "설정이 로캘에 밀렸다\n{said}");
 }
 
 /// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
@@ -407,10 +415,11 @@ fn the_config_picks_the_language_and_a_bad_one_is_named() {
 
     // **오타는 조용히 기본값이 되지 않는다.** 이 줄이 없으면 고친 설정이 왜 안 듣는지 알 길이 없다.
     let (screen, said) = run("[i18n]\nlang = \"kr\"\n");
-    assert!(screen.contains("이슈 1"), "모르는 값에서 기본값(지금은 한국어)으로 안 떨어졌다\n{screen}");
+    assert!(screen.contains("Issues 1"), "모르는 값에서 기본값(영어)으로 안 떨어졌다\n{screen}");
     assert!(said.contains("`i18n.lang`") && said.contains("\"kr\""), "틀린 설정을 아무도 안 댔다 — {said:?}");
     // 보드도 그것을 안다 — 없으면 "드러난 문제 없다" 가 방금 stderr 에 한 말을 뒤집는다.
-    assert!(screen.contains("사용자 설정에서 못 읽은 것 1건"), "보드가 stderr 의 말을 모른다\n{screen}");
+    // **떨어진 말로 읽는다** — 화면은 영어이므로 찾는 글자도 영어 표의 것이다.
+    assert!(screen.contains("Unread in the user config 1"), "보드가 stderr 의 말을 모른다\n{screen}");
 }
 
 #[test]
@@ -4609,7 +4618,7 @@ fn help_says_what_to_type_next() {
     // 명령 목록도 그대로 있다
     assert!(out.contains("milestone") && out.contains("note"), "{out}");
     // 화면의 말을 바꾸는 길도 선다 — AGENTS.md 에만 있으면 처음 만난 쪽이 못 찾는다(moai-kbky)
-    assert!(out.contains("MOAI_LANG=en") && out.contains("[i18n]"), "{out}");
+    assert!(out.contains("MOAI_LANG=ko") && out.contains("[i18n]"), "{out}");
 }
 
 /// 도움말에서 들여쓰기를 잃은 줄.
