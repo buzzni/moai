@@ -1,9 +1,10 @@
 //! 읽었다고 표시한다(moai-u8oh).
 //!
 //! **트래커에 안 쓴다.** 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에 적으면 읽기만 해도
-//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 내 설정의 `[read]` 표에 **이슈 id → 본 줄의
-//! `updated_at`** 을 적는다(사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) —
-//! 그 뒤에 줄이 바뀌면 다시 안 읽음이 된다.
+//! 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다. 적는 자리는 **그 저장소의 읽음 파일**
+//! ([`crate::read_marks`], moai-omx7)이고, 적는 값은 **이슈 id → 본 줄의 `updated_at`**
+//! (사용자 결정 2026-09-15, 값은 2026-09-19 에 본 때에서 바꿨다 — moai-lyc1) — 그 뒤에 줄이 바뀌면
+//! 다시 안 읽음이 된다. 설정의 옛 `[read]` 는 겹쳐 보기만 하고 다시 안 적는다(사용자 결정 3).
 //!
 //! **읽음은 시키는 때만 선다.** `show` 로 열었다고, 탐색기에서 커서가 지나갔다고 서지 않는다 —
 //! 스치듯 지나간 것을 읽었다고 적으면 이 표시가 곧 아무 말도 안 하게 된다.
@@ -34,9 +35,17 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     if args.all {
         let me = crate::model::actor(ctx.user.as_deref(), &repo.root)?;
         let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
-        // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다.
-        let seen = crate::user_config::read(Some(&path)).read;
-        want.extend(crate::query::unread(&load.issues, &me, &seen).into_iter().map(str::to_string));
+        // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다. 읽음은 이 저장소의
+        // 제 파일에 살고, 옛 `[read]` 는 겹쳐 본다(moai-omx7, 사용자 결정 2026-09-19).
+        let legacy = crate::user_config::read(Some(&path)).read;
+        let marks = crate::read_marks::read(&path, &repo.root, &legacy);
+        // **못 든 까닭은 말한다**(리뷰) — 삼키던 판은 못 읽는 읽음 파일 하나로 `--all` 이 내게 온 것을
+        // 통째로 "안 읽음" 으로 세어 도장을 다시 찍으면서, 왜 그랬는지를 어디에도 안 남겼다. 막지는
+        // 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
+        for why in &marks.problems {
+            eprintln!("moai: {why}");
+        }
+        want.extend(crate::query::unread(&load.issues, &me, &marks.seen).into_iter().map(str::to_string));
     }
     // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
     // 자(`nav::Index::under_group`)다. **없는 묶음은 말한다** — 조용히 빈 손으로 끝나면 사람은 오타를
@@ -62,7 +71,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     missing.extend(want.iter().filter(|id| !known.contains(id.as_str())).cloned());
     let targets: BTreeSet<&str> = want.iter().map(String::as_str).filter(|id| known.contains(id)).collect();
 
-    // 적을 것이 없으면 설정 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
+    // 적을 것이 없으면 읽음 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
     // 아직 아무것도 등록하지 않은 사람의 집에 생긴다.
     //
     // **이미 읽은 줄은 다시 안 적는다**(moai-j038.vna) — 본 뒤로 안 바뀐 줄을 다시 적으면 헛 쓰기고,
@@ -73,10 +82,19 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let fresh: Vec<String> = if targets.is_empty() {
         Vec::new()
     } else {
-        crate::user_config::update(&path, |doc| {
+        // 걷을 것을 **쓸 때만** 센다 — 적을 것이 없는 판에서 줄 수만큼 집합을 짓지 않는다(리뷰).
+        let keep = keep_for_prune(&repo, &load);
+        crate::read_marks::update(&path, &repo.root, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
-            let marks = crate::query::read_marks_of(lines, &doc.read_marks().0);
-            doc.mark_read(&marks)
+            let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
+            let wrote = sheet.mark(&marks)?;
+            // **트래커에 없는 id 를 여기서 걷는다**(moai-dt5q, 사용자 결정 2) — 이 자리는 트래커를 이미
+            // 들고 있다. 닫힌 줄은 안 걷는다: 걷으면 그 줄이 다시 설 때 [NEW] 가 되살아나, 읽음의 뜻이
+            // "본 적 있다" 에서 "최근에 본 적 있다" 로 바뀐다.
+            if let Some(keep) = &keep {
+                sheet.prune(&keep.iter().map(String::as_str).collect());
+            }
+            Ok(wrote)
         })?
     };
 
@@ -98,6 +116,31 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         .iter()
         .map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음")))
         .collect())
+}
+
+/// 걷을 때 **지킬 id 전부** — 되면 `Some`, 이 스냅샷이 트래커 전부를 봤다고 말 못 하면 `None` 이고
+/// 그때는 **안 걷는다**(리뷰).
+///
+/// `prune` 은 "여기 없는 id" 를 지운다. 그러니 `load.issues` 가 트래커의 전부가 아닌 자리마다 조용한
+/// 손실이 되고, 그 자리가 셋이다.
+///
+/// - **못 읽은 줄이 쥔 id.** [`crate::store::Load::reserved_ids`] 가 안다 — 더해서 지킨다
+/// - **JSON 조차 아닌 줄.** 그 줄은 제 id 도 못 내놓아(`LoadError::id` 가 `None`) 무엇을 지킬지 모른다.
+///   모르는 채로 걷으면 줄을 고친 뒤 [NEW] 가 되살아나므로 아예 안 걷는다
+/// - **옆 워크트리에만 있는 줄.** 탐색기는 겹쳐 보기를 켠 채 그 줄에 도장을 찍는데
+///   (`worktree::gather`), 같은 파일을 걷는 이쪽이 루트의 줄만 세면 그 도장이 `moai read` 한 번에
+///   걷힌다 — 두 표면이 한 파일을 쓰니 세는 자도 같아야 한다. 옆을 못 읽었으면(`trouble`) 역시 안 걷는다
+///
+/// 옆을 훑는 값은 **쓸 때만** 치른다(부르는 쪽이 `targets` 가 빈 판에서 안 부른다).
+fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<String>> {
+    if load.errors.iter().any(|e| e.id.is_none()) {
+        return None;
+    }
+    let beside = crate::worktree::gather(repo, true).ok()?;
+    if !beside.trouble.is_empty() {
+        return None;
+    }
+    Some(beside.load.issues.iter().map(|i| i.id.clone()).chain(load.reserved_ids()).collect())
 }
 
 #[derive(serde::Serialize)]
