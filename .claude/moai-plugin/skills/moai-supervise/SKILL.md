@@ -512,7 +512,9 @@ def skip(why, then="사람에게 비워도 된다고만 짚는다"):
         back = None if left is None else gone(kept, left)
         if back is None:
             print("치던 글을 일부 지웠다 — 그 칸에 남은 것을 보고, 위에 옮긴 `치던 글` 에서 겹치는 줄은 빼고 그 창의 사람에게 돌려준다")
-        elif not back:
+        elif not back.strip("\n"):
+            # 빈 줄만 남으면 지운 것이 없다 — 칸의 빈 줄은 위에서 건너뛰므로 치던 글의 빈 줄이
+            # 짝 없이 여기로 흘러든다. 그것만 보고 "지운 것" 이라고 하면 빈 글을 돌려주라 한다.
             print("치던 글은 그 칸에 그대로 있다 — 돌려줄 것이 없다")
         elif back == kept:
             print("치던 글은 이미 지웠다 — 위에 옮긴 `치던 글` 을 그 창의 사람에게 돌려준다")

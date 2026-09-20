@@ -665,6 +665,10 @@ struct Companion {
     /// **까닭이 아니라 자리를 든다**(moai-mfw1). 맨 위의 `blocked_by` 는 막은 자리(경로) 하나인데
     /// 여기만 문장이라, 한 `--json` 안에서 같은 이름의 키가 모양이 둘이었다 — 읽는 쪽이 키 이름으로
     /// 뜻을 못 정한다. 사람이 읽을 한 줄은 [`Companion::why`] 가 그때 짓는다.
+    ///
+    /// **자리를 못 읽었으면 빈 글자다.** `None` 은 "안 막혔다" 이고 빈 글자는 "막혔는데 어디인지
+    /// 모른다" 다 — 여기에 `다른 출처` 같은 사람 말을 담으면 기계가 읽는 키에 옮기지도 않는 한국어
+    /// 문장이 서고, 자리를 기대하고 읽은 쪽이 그것을 저장소 이름으로 쓴다.
     blocked: Option<String>,
 }
 
@@ -674,9 +678,12 @@ impl Companion {
         self.id.split_once('@').map_or(self.id, |(_, m)| m)
     }
 
-    /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다.
+    /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다. 자리를 못 읽었으면(빈 글자) 그 자리를 말로 메운다.
     fn why(&self) -> Option<String> {
-        self.blocked.as_ref().map(|at| format!("`{}` 이 이미 {at} 를 가리킨다", self.market()))
+        self.blocked.as_ref().map(|at| {
+            let at = if at.is_empty() { "다른 출처" } else { at.as_str() };
+            format!("`{}` 이 이미 {at} 를 가리킨다", self.market())
+        })
     }
 
     /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
@@ -728,7 +735,8 @@ fn companions(scope: &str) -> Vec<Companion> {
                 Some(s) if *s == serde_json::json!({"source": "github", "repo": repo}) => (vec![add, install], None),
                 Some(_) => match known.as_ref().and_then(|k| skill::market_repo(k, market)) {
                     Some(at) if at.eq_ignore_ascii_case(repo) => (vec![install], None),
-                    at => (Vec::new(), Some(at.filter(|a| !a.is_empty()).unwrap_or_else(|| "다른 출처".into()))),
+                    // 자리를 못 읽었으면 빈 글자로 둔다 — 사람이 읽을 말은 [`Companion::why`] 가 짓는다.
+                    at => (Vec::new(), Some(at.filter(|a| !a.is_empty()).unwrap_or_default())),
                 },
             };
             Companion { id, steps, blocked }
