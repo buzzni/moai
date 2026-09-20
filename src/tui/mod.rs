@@ -16,6 +16,7 @@ pub mod register;
 pub mod scroll;
 pub mod view;
 
+use crate::i18n::{fill, say};
 use crate::config::Config;
 use crate::model::{Issue, Kind, Status};
 use crate::nav::{Entry, Index, Path, Seg, Twig};
@@ -392,7 +393,7 @@ fn commit_tables(roots: &[std::path::PathBuf], ids: &std::collections::BTreeSet<
 const DISCARDED_KEPT: usize = 8;
 
 /// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
-fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
+fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
     // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
     let stamp = stamp_of(repo);
@@ -428,7 +429,7 @@ fn prepare(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
     // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다(moai-kos1) — 자리 판정이 바로 앞에서 푼 같은
     // 파일을 다시 열어 파고 있었다. 걸음마다 치르던 값이라 쓰기·`SPC r`·프로젝트 들어가기가
     // 그것을 그대로 물었다(이 저장소에서 ~130ms).
-    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides));
+    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides), lang);
     let mut elsewhere = g.trouble;
     elsewhere.extend(said);
     Ok(Fresh {
@@ -485,6 +486,7 @@ fn placed(
     overlaid: bool,
     now: &str,
     dug: &crate::worktree::Dug<'_>,
+    lang: crate::i18n::Lang,
 ) -> (usize, Vec<String>) {
     // **자리는 세션이 선 체크아웃에서 잰다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 지켜볼 것을
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
@@ -497,7 +499,12 @@ fn placed(
         false => unread
             .all
             .iter()
-            .map(|t| format!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display()))
+            .map(|t| {
+                crate::i18n::fill(crate::i18n::say(lang, "tui.place.unread_worktree"), &[
+                    ("branch", &t.branch),
+                    ("path", &t.path.display().to_string()),
+                ])
+            })
             .collect(),
     };
     (usize::from(lost.is_some()), said)
@@ -748,7 +755,7 @@ pub struct App {
     let_go: usize,
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
-    read: fn(&Repo, bool) -> crate::fail::R<Fresh>,
+    read: fn(&Repo, bool, crate::i18n::Lang) -> crate::fail::R<Fresh>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
@@ -975,7 +982,9 @@ impl Site {
     pub fn title_of(&self, id: &str) -> String {
         match self.index.find(id) {
             Some(at) => self.issues[at].title.clone(),
-            None => format!("{id}  {MISSING}"),
+            // 없는 것을 가리키는 참조에 붙이는 말은 **키 하나로 통일한다** — 자리마다 다른 말을
+            // 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
+            None => format!("{id}  {}", say(self.lang, "tui.missing")),
         }
     }
 
@@ -1086,7 +1095,7 @@ impl App {
         // 이 길은 여는 읽기 하나가 한 번 지난다.
         if let Some(repo) = &self.site.repo {
             let dug = crate::worktree::dug(sides);
-            let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug);
+            let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug, self.site.lang);
             self.site.warnings += lost;
             elsewhere.extend(said);
         }
@@ -1180,7 +1189,7 @@ impl App {
             self.discard(handle);
         }
         let Some(repo) = &self.site.repo else { return };
-        let fresh = (self.read)(repo, self.worktree);
+        let fresh = (self.read)(repo, self.worktree, self.site.lang);
         self.receive(fresh);
     }
 
@@ -1197,7 +1206,7 @@ impl App {
             Ok(f) if self.site.repo.as_ref().is_none_or(|r| r.root != f.root) => {}
             Ok(f) => self.apply_fresh(f),
             Err(e) => {
-                self.trouble = Some(format!("다시 읽지 못했다 — {e}"));
+                self.trouble = Some(fill(say(self.site.lang, "tui.reload.failed"), &[("why", &e.to_string())]));
                 self.write_failed = false;
             }
         }
@@ -1259,7 +1268,7 @@ impl App {
         // 이번 것이 담긴 것으로 읽힌다.
         self.notice = None;
         let Some(repo) = &self.site.repo else {
-            self.trouble = Some("쓰지 못했다 — 저장소 없이 연 화면이다".into());
+            self.trouble = Some(say(self.site.lang, "tui.write.no_repo").into());
             self.write_failed = true;
             return None;
         };
@@ -1284,7 +1293,9 @@ impl App {
                     .into_iter()
                     .skip(missed_before)
                     .find(|(r, _)| *r == root)
-                    .map(|(_, why)| format!(" — 이력은 못 남겼다: {}", crate::text::one_line(&why)))
+                    .map(|(_, why)| {
+                        fill(say(self.site.lang, "tui.write.unjournaled"), &[("why", &crate::text::one_line(&why))])
+                    })
                     .unwrap_or_default();
                 self.write_failed = false;
                 self.reload();
@@ -1295,8 +1306,9 @@ impl App {
                     Some(p) => format!("{} · {id}", crate::text::one_line(&p.name)),
                     None => id.clone(),
                 };
+                let lang = self.site.lang;
                 let told = match self.land(&id) {
-                    Landing::Shown => format!("✓ {done} · {what}"),
+                    Landing::Shown => fill(say(lang, "tui.write.landed"), &[("done", done), ("what", &what)]),
                     // **무엇이 가렸는지 가른다**(moai-fmv5) — 보기가 가린 줄에 "Esc 로 푼다" 를 대면
                     // Esc 는 거름망만 풀어 누른 키가 아무것도 안 한다. **둘 다 가렸으면 둘 다 댄다**
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
@@ -1305,16 +1317,27 @@ impl App {
                         let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
                         let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
                         match veil {
-                            Veil { filtered: true, viewed: true } => format!("✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다"),
-                            Veil { filtered: false, viewed: true } => format!("✓ {done} · {what} — 보기에 가려 안 보인다 · {show} 로 모두 보인다"),
-                            Veil { filtered: true, viewed: false } => format!("✓ {done} · {what} — 거름망에 가려 안 보인다 · {clear} 로 푼다"),
+                            Veil { filtered: true, viewed: true } => fill(say(lang, "tui.write.veiled_both"), &[
+                                ("done", done),
+                                ("what", &what),
+                                ("clear", &clear),
+                                ("show", &show),
+                            ]),
+                            Veil { filtered: false, viewed: true } => {
+                                fill(say(lang, "tui.write.veiled_view"), &[("done", done), ("what", &what), ("show", &show)])
+                            }
+                            Veil { filtered: true, viewed: false } => {
+                                fill(say(lang, "tui.write.veiled_filter"), &[("done", done), ("what", &what), ("clear", &clear)])
+                            }
                             // 둘 다 안 가렸는데 줄이 안 섰다 — 오늘은 닿지 않는 갈래다. 숨기는 까닭이 셋째로
                             // 늘면 여기로 떨어지는데, 그때 거름망을 대면 누른 키가 아무것도 안 한다(moai-1jay).
-                            Veil { filtered: false, viewed: false } => format!("✓ {done} · {what} — 목록에 안 보인다"),
+                            Veil { filtered: false, viewed: false } => {
+                                fill(say(lang, "tui.write.veiled"), &[("done", done), ("what", &what)])
+                            }
                         }
                     }
                     // 다시 읽기가 실패했으면 그 까닭은 `trouble` 이 따로 댄다. 담긴 것은 참이다.
-                    Landing::Missing => format!("✓ {done} · {what} — 다시 읽은 목록에 없다"),
+                    Landing::Missing => fill(say(lang, "tui.write.gone"), &[("done", done), ("what", &what)]),
                 };
                 self.notice = Some(told + &unjournaled);
                 Some(id)
@@ -1323,7 +1346,7 @@ impl App {
             // 한 줄이라 줄바꿈이 그대로 가면 그림이 찢어진다 — 한 줄로 잇는다.
             Err(e) => {
                 let why: Vec<&str> = e.message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-                self.trouble = Some(format!("쓰지 못했다 — {}", why.join("  ")));
+                self.trouble = Some(fill(say(self.site.lang, "tui.write.failed"), &[("why", &why.join("  "))]));
                 self.write_failed = true;
                 None
             }
@@ -1657,7 +1680,7 @@ impl App {
                     {
                         std::panic::resume_unwind(payload);
                     }
-                    self.trouble = Some("다시 읽던 중에 멈췄다 — 다음 걸음에 다시 읽는다".into());
+                    self.trouble = Some(say(self.site.lang, "tui.reload.stopped").into());
                 }
             }
             return;
@@ -1675,9 +1698,10 @@ impl App {
             let repo = repo.clone();
             let worktree = self.worktree;
             let read = self.read;
+            let lang = self.site.lang;
             // 받는 쪽이 사라졌으면(사람이 누른 갱신이 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let handle = std::thread::spawn(move || {
-                let _ = tx.send(read(&repo, worktree));
+                let _ = tx.send(read(&repo, worktree, lang));
             });
             self.pending = Some((rx, handle));
         }
@@ -1964,7 +1988,7 @@ impl App {
         }
         self.saved.fields_known = look.fields_known.clone();
         if !problems.is_empty() {
-            self.notice = Some(format!("보기 설정 — {}", problems.join(" · ")));
+            self.notice = Some(fill(say(self.site.lang, "tui.look.problems"), &[("why", &problems.join(" · "))]));
         }
         self.see();
     }
@@ -1993,10 +2017,10 @@ impl App {
                     true
                 }
                 None => {
-                    problems.push(format!(
-                        "`sort = \"{s}\"` 는 모르는 차례다 — {} 중 하나",
-                        keys::Order::ALL.map(keys::Order::name).join("·")
-                    ));
+                    problems.push(fill(say(self.site.lang, "tui.look.bad_sort"), &[
+                        ("word", s),
+                        ("known", &keys::Order::ALL.map(keys::Order::name).join("·")),
+                    ]));
                     false
                 }
             },
@@ -2049,10 +2073,10 @@ impl App {
             let wrote = look.fields_known.as_deref().unwrap_or_default();
             for w in words {
                 if view::Field::named(w).is_none() && !wrote.contains(w) {
-                    problems.push(format!(
-                        "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
-                        view::Field::ALL.map(view::Field::name).join("·")
-                    ));
+                    problems.push(fill(say(self.site.lang, "tui.look.bad_field"), &[
+                        ("word", w),
+                        ("known", &view::Field::ALL.map(view::Field::name).join("·")),
+                    ]));
                 }
             }
             self.fields = fields;
@@ -2096,10 +2120,14 @@ impl App {
             Ok(skipped) => {
                 self.saved = look;
                 if !skipped.is_empty() {
-                    self.notice = Some(format!("보기 일부를 설정에 안 적었다 — {}", skipped.join(" · ")));
+                    self.notice =
+                        Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &skipped.join(" · "))]));
                 }
             }
-            Err(e) => self.notice = Some(format!("보기를 설정에 못 적었다 — {}", crate::text::one_line(&e.to_string()))),
+            Err(e) => {
+                let why = crate::text::one_line(&e.to_string());
+                self.notice = Some(fill(say(self.site.lang, "tui.look.unsaved"), &[("why", &why)]));
+            }
         }
     }
 
@@ -2189,15 +2217,21 @@ impl App {
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
             // 있지만(`App::held`·`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
             Some(t) if t.again() != crate::user_config::Again::Never => None,
-            Some(_) => marks.problems.first().map(|why| format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
+            Some(_) => marks.problems.first().map(|why| {
+                fill(say(site.lang, "tui.read.unheld"), &[("why", &crate::text::one_line(why))])
+            }),
             // **줄 탈이 자리 탈보다 앞선다**(moai-hzfu) — 건너뛴 줄은 이 파일을 정말 읽고 만난
             // 것이라 사람이 고칠 자리가 또렷하다. 자리 탈은 그것이 없을 때만 대고, **제 낱말로**
             // 댄다: 같은 까닭을 두 이름으로 부르면 `r` 이 띄운 줄과 다음 걸음의 줄이 갈린다.
             None => marks
                 .problems
                 .first()
-                .map(|why| format!("읽음에 이상한 줄이 있다 — {}", crate::text::one_line(why)))
-                .or_else(|| where_why.as_ref().map(|why| format!("읽음 자리를 못 풀었다 — {}", crate::text::one_line(why)))),
+                .map(|why| fill(say(site.lang, "tui.read.bad_line"), &[("why", &crate::text::one_line(why))]))
+                .or_else(|| {
+                    where_why.as_ref().map(|why| {
+                        fill(say(site.lang, "tui.read.bad_place"), &[("why", &crate::text::one_line(why))])
+                    })
+                }),
         };
         if marks.trouble.is_none() {
             site.seen = marks.seen;
@@ -2401,11 +2435,11 @@ impl App {
             B::ReadAll => site.unread.iter().filter_map(|id| site.index.find(id)).collect(),
             B::ReadGroup => {
                 let Some(Row::Item(_, e, _)) = &cur else {
-                    self.notice = Some("묶음에 든 줄에서 누른다".into());
+                    self.notice = Some(say(self.site.lang, "tui.read.pick_in_group").into());
                     return;
                 };
                 let Some(group) = self.group_of(seat, e) else {
-                    self.notice = Some("이 줄은 묶음에 안 든다 — 에픽·마일스톤 안에서 누른다".into());
+                    self.notice = Some(say(self.site.lang, "tui.read.not_in_group").into());
                     return;
                 };
                 let Some(site) = self.site_of_seat(seat) else { return };
@@ -2418,7 +2452,7 @@ impl App {
         let ids: std::collections::BTreeSet<&str> =
             targets.iter().filter_map(|&at| site.issues.get(at)).map(|i| i.id.as_str()).collect();
         if ids.is_empty() {
-            self.notice = Some("읽음으로 적을 것이 없다".into());
+            self.notice = Some(say(self.site.lang, "tui.read.nothing").into());
             return;
         }
         let issues = &site.issues;
@@ -2481,7 +2515,8 @@ impl App {
                         (written, problems)
                     }
                     Err(e) => {
-                        self.notice = Some(format!("읽음을 못 적었다 — {}", crate::text::one_line(&e.to_string())));
+                        let why = crate::text::one_line(&e.to_string());
+                        self.notice = Some(fill(say(self.site.lang, "tui.read.unwritten"), &[("why", &why)]));
                         return;
                     }
                 }
@@ -2496,10 +2531,11 @@ impl App {
             }
         };
         self.recount_unread_in(seat);
+        let lang = self.site.lang;
         let said = match written.as_slice() {
-            [] => "읽음으로 적을 것이 없다".to_string(),
-            [one] => format!("✓ 읽음 · {one}"),
-            many => format!("✓ 읽음 · {}줄", many.len()),
+            [] => say(lang, "tui.read.nothing").to_string(),
+            [one] => fill(say(lang, "tui.read.marked_one"), &[("id", one)]),
+            many => fill(say(lang, "tui.read.marked"), &[("n", &many.len().to_string())]),
         };
         // **적었다는 말과 어디에 적었는지를 함께 댄다**(moai-ajh2). 까닭만 세우면 `r` 이 먹었는지를 못
         // 보고, 적었다는 말만 세우면 옛 철자 자리에 적힌 것을 어디서도 못 본다. 여기 낼 것은 스치는 알림
@@ -2633,9 +2669,10 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let read = self.read;
         let worktree = self.worktree;
+        let lang = self.site.lang;
         let sent = repo.clone();
         let handle = std::thread::spawn(move || {
-            let _ = tx.send(read(&sent, worktree));
+            let _ = tx.send(read(&sent, worktree, lang));
         });
         if let Some(layer) = self.layer.as_mut() {
             layer.reading = Some((path, rx, handle));
@@ -2732,7 +2769,9 @@ impl App {
                 }
             }
             // 못 읽었다 — 까닭을 한 줄로 대고 그 프로젝트는 머리줄만 선다. 다시 펴면 다시 간다.
-            Some(Err(e)) => self.notice = Some(format!("줄을 못 읽었다 — {e}")),
+            Some(Err(e)) => {
+                self.notice = Some(fill(say(self.site.lang, "tui.layer.unread_rows"), &[("why", &e.to_string())]));
+            }
             // 읽던 스레드가 죽었다. 루프에서 난 패닉과 같게 되던진다([`App::follow`]).
             None => {
                 if let Err(payload) = handle.join() {
@@ -3275,10 +3314,16 @@ impl App {
                     let g = crate::style::BRANCH_GLYPH;
                     // 스냅샷만 없는 옆은 "없음" 이 아니다 — 그 이름으로 줄에 `⎇` 가 선다(`Origin::named_only`).
                     let named = self.site.origin.named_only();
+                    let lang = self.site.lang;
                     self.notice = Some(match &self.site.unfound {
-                        Some(why) => format!("{g} 옆 워크트리를 못 찾았다 — {}", crate::text::one_line(why)),
-                        None if !named.is_empty() => format!("{g} {} — 겹칠 스냅샷이 없다", named.join(", ")),
-                        None => format!("{g} 옆 워크트리 없음 — 겹칠 줄이 없다"),
+                        Some(why) => fill(say(lang, "tui.worktree.unfound"), &[
+                            ("glyph", g),
+                            ("why", &crate::text::one_line(why)),
+                        ]),
+                        None if !named.is_empty() => {
+                            fill(say(lang, "tui.worktree.no_snapshot"), &[("glyph", g), ("names", &named.join(", "))])
+                        }
+                        None => fill(say(lang, "tui.worktree.none"), &[("glyph", g)]),
                     });
                 }
             }
@@ -3553,7 +3598,7 @@ impl App {
             && self.site.index.find(id).map(|at| self.site.veil(at)).is_some_and(|v| v.viewed && !v.filtered)
         {
             let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
-            self.notice = Some(format!("{id} 는 보기에 가려졌다 · {show} 로 모두 보인다"));
+            self.notice = Some(fill(say(self.site.lang, "tui.veiled_row"), &[("id", id), ("show", &show)]));
         }
         true
     }
@@ -3588,7 +3633,9 @@ impl App {
             .collect();
         let open = open.join("·");
         match &mut self.mode {
-            Mode::Browse => self.notice = Some(format!("붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다")),
+            Mode::Browse => {
+                self.notice = Some(fill(say(self.site.lang, "tui.paste.no_field"), &[("open", &open)]));
+            }
             Mode::Grep(input, _) => {
                 input.paste(s);
                 self.live();
@@ -3618,7 +3665,9 @@ impl App {
             keys::Prompt::Apply => match crate::model::Actor::parse(ask.input.text()) {
                 Some(who) => Some(who),
                 None => {
-                    ask.error = Some(format!("`이름 (메일)` 모양이 아니다 — 예: {ASK_EXAMPLE}"));
+                    let lang = self.site.lang;
+                    ask.error =
+                        Some(fill(say(lang, "tui.ask.malformed"), &[("example", ask_example(lang))]));
                     return;
                 }
             },
@@ -3764,7 +3813,7 @@ impl App {
         // 층이 걷힌 뒤로 이 자리는 **모든 프로젝트를 한 목록으로 보는 화면**이다(moai-3f1b) —
         // 옛 이름(`프로젝트 층`)은 그 밑에 줄이 서지 않던 때의 것이다.
         if self.on_layer() {
-            return "모든 프로젝트".into();
+            return say(self.site.lang, "tui.crumbs.all_projects").into();
         }
         if self.site.path.is_empty() {
             return "/".into();
@@ -3805,12 +3854,13 @@ impl App {
         let text = match got {
             Ok(text) => text,
             Err(why) => {
-                self.notice = Some(format!("담지 않았다 — {}", crate::text::one_line(&why)));
+                let why = crate::text::one_line(&why);
+                self.notice = Some(fill(say(self.site.lang, "tui.jot.not_kept"), &[("why", &why)]));
                 return;
             }
         };
         let Some((title, body)) = jotfile::parse(&text) else {
-            self.notice = Some("담지 않았다 — 제목이 비었다".into());
+            self.notice = Some(say(self.site.lang, "tui.jot.no_title").into());
             return;
         };
         let mut form = Form::new(into);
@@ -3869,13 +3919,14 @@ fn save_idea(app: &mut App) {
         return;
     }
     let at = crate::model::now();
+    let kept = say(app.site.lang, "tui.jot.kept");
     let wrote = app.write(save_idea, move |issues, cfg, reserved, by| {
         let id = crate::store::new_id(issues, cfg, reserved, None, &title);
         let mut idea = Issue::new(id, title, Kind::Idea, Status::new(cfg.first_status()), &at);
         (idea.assignee, idea.assignee_email) = by.as_assignee();
         idea.body = body;
         let (entry, made) = crate::store::admit(issues, cfg, idea, by)?;
-        Ok((vec![entry], Touched { id: made.id, done: "담김" }))
+        Ok((vec![entry], Touched { id: made.id, done: kept }))
     });
     if wrote.is_some() {
         app.mode = Mode::Browse;
@@ -3883,11 +3934,9 @@ fn save_idea(app: &mut App) {
 }
 
 /// 누군지 묻는 칸이 보이는 본보기. 거절문이 댄다.
-pub const ASK_EXAMPLE: &str = "레이븐 (raven@example.com)";
-
-/// 없는 것을 가리키는 참조에 붙이는 말. **한 낱말로 통일한다** — 자리마다
-/// 다른 말을 쓰면 같은 깨짐을 서로 다른 일로 읽는다.
-const MISSING: &str = "(없다)";
+pub fn ask_example(lang: crate::i18n::Lang) -> &'static str {
+    say(lang, "tui.ask.example")
+}
 
 /// 그 마디가 가리키는 줄의 id. 바구니는 제 줄이 없으므로 `None`.
 fn seg_id(seg: &Seg) -> Option<&str> {
@@ -6633,14 +6682,14 @@ mod tests {
         let (theirs, _) = writable("receive-theirs");
         touch_outside(&theirs);
         let other = Repo::at(theirs.path().to_path_buf(), cfg());
-        a.receive(prepare(&other, false));
+        a.receive(prepare(&other, false, a.site.lang));
         assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
         assert!(a.trouble.is_none());
 
         // 제 것은 들인다 — 막은 것이 뿌리 견주기이지 받기 자체가 아니다.
         let mine = a.site.repo.clone().unwrap();
         touch_outside(&mine_dir);
-        a.receive(prepare(&mine, false));
+        a.receive(prepare(&mine, false, a.site.lang));
         assert_eq!(a.site.issues.len(), 2);
     }
 
@@ -6662,8 +6711,8 @@ mod tests {
     }
 
     /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
-    fn lost(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
-        let mut f = prepare(repo, worktree)?;
+    fn lost(repo: &Repo, worktree: bool, lang: crate::i18n::Lang) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree, lang)?;
         f.unfound = worktree.then(|| "git 저장소가 아니다".to_string());
         Ok(f)
     }
@@ -6753,13 +6802,13 @@ mod tests {
         assert_eq!(a.notice, None, "뜻 없는 키가 알림을 안 걷었다");
     }
 
-    fn prepare_found(repo: &Repo, worktree: bool) -> crate::fail::R<Fresh> {
-        let mut f = prepare(repo, worktree)?;
+    fn prepare_found(repo: &Repo, worktree: bool, lang: crate::i18n::Lang) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree, lang)?;
         f.unfound = None;
         Ok(f)
     }
 
-    fn boom(_: &Repo, _: bool) -> crate::fail::R<Fresh> {
+    fn boom(_: &Repo, _: bool, _: crate::i18n::Lang) -> crate::fail::R<Fresh> {
         panic!("버린 읽기가 터졌다")
     }
 

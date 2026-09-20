@@ -736,7 +736,7 @@ impl App {
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
         // 것은 **읽은 뒤**다 — 못 읽으면 선 자리도 깃발도 그대로여야 한다.
         let overlay = true;
-        match (self.read)(&repo, overlay) {
+        match (self.read)(&repo, overlay, self.site.lang) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
                 let leaving = match &self.layer.as_ref().map(|l| &l.at) {
@@ -3109,12 +3109,12 @@ mod tests {
         let own = repo.read().unwrap().issues;
         // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
         // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
-        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default()).0, 1, "전제가 안 섰다");
+        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default(), crate::i18n::Lang::Ko).0, 1, "전제가 안 섰다");
 
         // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
         std::fs::write(main.join(".git/config"), "[core\n").unwrap();
         let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now());
-        let f = super::super::prepare(&repo, true).unwrap();
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko).unwrap();
         assert!(f.unfound.is_some(), "전제: git 이 저장소를 거절하지 않았다");
         assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
 
