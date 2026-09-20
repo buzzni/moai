@@ -1020,6 +1020,16 @@ impl Site {
     }
 }
 
+/// 한 걸음의 읽음 읽기([`App::read_marks_of`]).
+struct Got {
+    marks: crate::read_marks::Marks,
+    stamp: Stamp,
+    /// 읽음 **자리**를 고르다 만난 까닭 — 파일 안의 건너뛴 줄과 **다른 갈래**다(moai-hzfu).
+    /// `Marks::problems` 는 둘을 한 자루에 담는데, 건너뛴 줄이 없으면 이것이 `first()` 가 되어
+    /// "읽음에 이상한 줄이 있다" 로 이름 붙었다.
+    where_why: Option<String>,
+}
+
 impl App {
     /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
     /// [`App::open`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
@@ -2107,10 +2117,33 @@ impl App {
     /// 그 프로젝트의 읽음을 **제 파일에서** 든다(moai-bwce) — 옛 `[read]` 를 겹쳐 보고, 표식을 읽기
     /// **전에** 잰다(뒤에 재면 읽고 다음 걸음 사이에 옆이 쓴 것을 놓친다). 설정 자리를 모르면(시험·설정
     /// 없는 기계) `None` 이고 부르는 쪽은 들고 있던 것을 둔다.
-    fn read_marks_of(&self, root: &std::path::Path) -> Option<(crate::read_marks::Marks, Stamp)> {
+    /// [`App::read_marks_of`] 가 한 걸음에 들어 온 것 — 읽음과 그 파일의 표식, 그리고 **자리를 고르다
+    /// 만난 까닭**(moai-hzfu). 셋을 튜플로 들던 판은 셋째가 붙으면서 부르는 쪽마다 자리를 세게 됐다.
+    fn read_marks_of(&self, root: &std::path::Path) -> Option<Got> {
         let config = self.user_config.as_deref()?;
-        let stamp = crate::store::stamp(&crate::read_marks::path_for(config, root));
+        // **자리를 한 번만 고른다** — 표식이 쓰는 파일과 아래에서 가려낼 자리 까닭이 한 값에서 온다.
+        // `path_for` 로 파일만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
+        let place = crate::read_marks::place_of(config, root);
+        let stamp = crate::store::stamp(&place.at);
         let mut marks = crate::read_marks::read(config, root, &self.legacy_read);
+        // **자리 탈을 줄 탈에서 가려낸다**(moai-hzfu). `Marks::problems` 는 두 갈래를 한 자루에
+        // 담는다 — 자리를 고르다 만난 까닭(`place_of`)과 파일 안의 건너뛴 줄이다. `read` 는 자리
+        // 까닭을 뒤에 붙여 `first()` 가 진짜 까닭을 먼저 보게 하지만, 건너뛴 줄이 하나도 없으면
+        // 그 자리 까닭이 곧 `first()` 라 "읽음에 이상한 줄이 있다" 로 이름 붙었다. `r` 이 띄운
+        // "자리를 못 풀어…" 한 줄이 다음 걸음에 그 이름으로 덮이던 자리다.
+        //
+        // **가르는 자리가 여기인 것은 임시다.** 제 집은 `Marks` 지만(그러면 CLI 도 함께 받는다)
+        // 그 모듈은 지금 옆 워크트리가 쥐었다 — 탐색기 쪽에서만 갈라 두고, 옮길 때 이 블록이
+        // 통째로 걷힌다. `cmd/read.rs` 는 둘 다 stderr 로 내므로 이름이 안 갈려도 틀리지 않는다.
+        //
+        // **값으로 뺀다.** 같은 `place_of` 가 낸 같은 글이라 맞는다. 그 사이에 자리가 바뀌어 글이
+        // 달라지면 못 빼는데, 그때 최악이 지금까지의 이름이다 — 덜 맞는 이름이지 새 탈이 아니다.
+        let mut where_why = None;
+        for why in &place.problems {
+            if let Some(at) = marks.problems.iter().position(|p| p == why) {
+                where_why = Some(marks.problems.remove(at));
+            }
+        }
         // **설정이 사라졌으면 없는 읽음도 사라진 것으로 든다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정
         // 파일 곁의 디렉터리에 산다(`read_marks::path_for`) — autofs·sshfs 홈이 끊기면 둘이 함께
         // 사라진다. 그때 없는 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 빈 표를 들여 내 줄이
@@ -2126,15 +2159,15 @@ impl App {
         {
             marks.trouble = Some(crate::user_config::Trouble::Gone);
         }
-        Some((marks, stamp))
+        Some(Got { marks, stamp, where_why })
     }
 
     /// 들어 온 읽음을 한 [`Site`] 에 얹는다 — **들일지, 표식을 올릴지, 무엇을 말할지가 한 자리에 있다**
     /// (리뷰). [`App::load_read`] 와 [`App::follow_site`] 가 저마다 적던 판은 둘이 이미 갈렸다.
     ///
     /// 돌려주는 것은 화면에 댈 한 줄이다(없으면 `None`) — `notice` 는 `App` 의 것이라 여기서 못 적는다.
-    fn take_read(site: &mut Site, got: (crate::read_marks::Marks, Stamp)) -> Option<String> {
-        let (marks, stamp) = got;
+    fn take_read(site: &mut Site, got: Got) -> Option<String> {
+        let Got { marks, stamp, where_why } = got;
         // **다시 읽을 때는 갈래가 정한다**(moai-po6v) — [`App::follow_config`] 와 **한 자다**
         // ([`crate::user_config::Again`]). 잠깐인 것만 표식을 안 올려 다음 걸음이 같은 차이를 다시 보게
         // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
@@ -2157,7 +2190,14 @@ impl App {
             // 있지만(`App::held`·`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
             Some(t) if t.again() != crate::user_config::Again::Never => None,
             Some(_) => marks.problems.first().map(|why| format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
-            None => marks.problems.first().map(|why| format!("읽음에 이상한 줄이 있다 — {}", crate::text::one_line(why))),
+            // **줄 탈이 자리 탈보다 앞선다**(moai-hzfu) — 건너뛴 줄은 이 파일을 정말 읽고 만난
+            // 것이라 사람이 고칠 자리가 또렷하다. 자리 탈은 그것이 없을 때만 대고, **제 낱말로**
+            // 댄다: 같은 까닭을 두 이름으로 부르면 `r` 이 띄운 줄과 다음 걸음의 줄이 갈린다.
+            None => marks
+                .problems
+                .first()
+                .map(|why| format!("읽음에 이상한 줄이 있다 — {}", crate::text::one_line(why)))
+                .or_else(|| where_why.as_ref().map(|why| format!("읽음 자리를 못 풀었다 — {}", crate::text::one_line(why)))),
         };
         if marks.trouble.is_none() {
             site.seen = marks.seen;
@@ -2171,7 +2211,7 @@ impl App {
         let Some(root) = self.read_root() else { return };
         let Some(got) = self.read_marks_of(&root) else { return };
         // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
-        let took = got.0.trouble.is_none();
+        let took = got.marks.trouble.is_none();
         // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
         // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
         // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
@@ -5577,6 +5617,44 @@ mod tests {
         let told = a.notice.as_deref().unwrap_or_default();
         assert!(told.starts_with("✓ 읽음 · argos-0009"), "적었다는 말이 없다 — {told}");
         assert!(told.contains("자리를 못 풀어"), "자리를 못 푼 까닭을 안 댔다 — {told}");
+    }
+
+    /// **자리 탈을 줄 탈로 부르지 않는다**(moai-hzfu). `Marks::problems` 는 두 갈래를 한 자루에
+    /// 담는다 — 자리를 고르다 만난 까닭과 파일 안의 건너뛴 줄이다. 건너뛴 줄이 하나도 없으면 그
+    /// 자리 까닭이 곧 `first()` 라 "읽음에 이상한 줄이 있다" 로 이름 붙었고, `r` 이 방금 띄운
+    /// "자리를 못 풀어…" 한 줄이 다음 걸음에 그 이름으로 덮였다 — 같은 까닭을 두 이름으로 부르는
+    /// 자리다.
+    ///
+    /// **줄 탈이 있으면 그쪽이 먼저다** — 이 파일을 정말 읽고 만난 것이라 고칠 자리가 또렷하다.
+    #[test]
+    #[cfg(unix)]
+    fn a_place_trouble_is_not_called_a_line_trouble() {
+        let s = Scratch::new("read-marks-place-name");
+        let config = s.path().join("user.toml");
+        std::fs::write(s.path().join("파일"), "x").unwrap();
+        let root = s.path().join("파일/밑");
+        let mut a = app();
+        a.user_config = Some(config.clone());
+
+        // 자리 까닭만 있다 — 읽음 파일은 아예 없다(건너뛸 줄이 없다).
+        let got = a.read_marks_of(&root).expect("설정 자리를 줬는데 안 들었다");
+        assert!(got.where_why.as_deref().is_some_and(|w| w.contains("자리를 못 풀어")), "{:?}", got.where_why);
+        assert!(got.marks.problems.is_empty(), "자리 까닭이 줄 탈 자루에 남았다 — {:?}", got.marks.problems);
+        let told = App::take_read(&mut a.site, got).unwrap_or_default();
+        assert!(told.starts_with("읽음 자리를 못 풀었다"), "자리 탈을 제 낱말로 안 댄다 — {told}");
+
+        // 건너뛴 줄이 있으면 그쪽이 먼저다 — 자리 까닭은 뒤로 물러난다.
+        let sheet = crate::read_marks::path_for(&config, &root);
+        std::fs::create_dir_all(sheet.parent().unwrap()).unwrap();
+        // 때가 낱말이 아닌 줄 하나 — 그 줄만 건너뛰고 나머지는 든다(`trouble` 이 안 선다).
+        // `path` 는 이 뿌리여야 문지기를 지난다(`Sheet::owns`) — 자리를 못 풀었으니 적힌 철자다.
+        let body = format!("path = {:?}\n\n[read]\n\"argos-0009\" = 1\n", root.display().to_string());
+        std::fs::write(&sheet, body).unwrap();
+        let got = a.read_marks_of(&root).expect("읽음 파일을 놓고도 안 들었다");
+        assert!(got.where_why.is_some(), "자리 까닭이 사라졌다");
+        assert!(!got.marks.problems.is_empty(), "건너뛴 줄을 안 댔다");
+        let told = App::take_read(&mut a.site, got).unwrap_or_default();
+        assert!(told.starts_with("읽음에 이상한 줄이 있다"), "줄 탈보다 자리 탈을 먼저 댔다 — {told}");
     }
 
     /// **이 화면이 트래커 전부를 못 봤으면 안 걷는다**(리뷰). 겹쳐 보기를 끄면 `site.issues` 에서 옆
