@@ -5607,6 +5607,10 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     let text = grown[0].split_once(r#""text":""#).expect("text 가 없다").1;
     let text = text.split('"').next().unwrap();
     assert!(text.len() <= limit, "노트가 {}바이트다 — 쓰기가 같은 자로 잰다", text.len());
+    // **상한 아래인 것으로는 모자란다.** 상한을 예산으로 주면 64KB 제목이 만든 줄마다 한 벌씩
+    // 저널에 베껴져 이력이 그 한 줄에 묻힌다 — 상한이 서 있는 까닭이 그것을 막는 데 있다.
+    // 예산은 `cmd::idea::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
+    assert!(text.len() <= 2 * 1024 + head, "가리킴이 아니라 사본이다 — {}바이트", text.len());
     // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
     let head_of = |t: &str| t.chars().take(24).collect::<String>();
     assert!(text.starts_with(&format!("{id} 에서 펼쳤다 — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
