@@ -6065,3 +6065,4 @@
 {"ts":"2026-09-20T07:01:54Z","id":"moai-1rkl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T07:01:54Z","id":"moai-5229","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-20T07:01:55Z","id":"moai-jgnj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T07:05:09Z","id":"moai-0ftu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 넷과 리뷰를 닫고 develop 에 머지했다. 남은 것은 이 에픽이 담은 idea 셋 — moai-cknq(연습과 진짜의 남은 어긋남)·moai-st60(init 이 트래커를 하나 더 세운다)·moai-4y5w(알림이 가르치는 글에 없다)."}
