@@ -366,6 +366,14 @@ fn closes(text: &str, at: usize, open: Option<u8>, shut: u8) -> Option<usize> {
 fn shell_text(words: &[String]) -> Option<Handed> {
     let cmd = command_of(words);
     let (head, rest) = cmd.split_first()?;
+    // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S`·`sudo -s`·`-i`·`doas -s`.
+    // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
+    // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
+    if let Some(Wrapped::Hands { at, glued }) = wrapped(basename(head), rest) {
+        let text = glued.into_iter().chain(rest[at.min(rest.len())..].iter().cloned()).collect::<Vec<_>>().join(" ");
+        // `sudo -s` 혼자는 사람이 쓸 셸을 띄운다 — 넘긴 글이 없다.
+        return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false });
+    }
     match basename(head) {
         "bash" | "sh" | "zsh" | "dash" | "ksh" => {
             let mut it = rest.iter();
@@ -1558,7 +1566,7 @@ fn command_of(words: &[String]) -> &[String] {
             .count();
         at += lead;
         let Some(head) = words.get(at).map(|w| basename(w)) else { return &words[at..] };
-        let Some(skip) = wrapper_args(head, &words[at + 1..]) else { return &words[at..] };
+        let Some(Wrapped::Runs(skip)) = wrapped(head, &words[at + 1..]) else { return &words[at..] };
         let next = at + 1 + skip;
         // 감싸는 명령 뒤가 붙박이면 그 줄은 그냥 진다 — 넘지 않는다([`BUILTINS`]).
         if words.get(next).map(|w| basename(w)).is_some_and(|h| BUILTINS.contains(&h)) {
@@ -1581,12 +1589,22 @@ const BUILTINS: &[&str] = &[
     "esac", "function", "in", "{", "}", "!", "[[", "]]", "coproc",
 ];
 
-/// 감싸는 명령 하나를 넘는 데 드는 **뒤 낱말 수** — 감싸는 명령이 아니거나 그 뒤가 명령이 아니면
-/// `None`([`command_of`]).
+/// 감싸는 명령 하나를 넘은 결과 — 감싸는 명령이 아니면 `None`([`wrapped`]).
+enum Wrapped {
+    /// 뒤 낱말 이만큼을 넘으면 **명령 자리**다.
+    Runs(usize),
+    /// 뒤에 오는 것이 명령이 아니라 **셸에 넘기는 글**이다(moai-drli) — `env -S`·`sudo -s`·`-i`·
+    /// `doas -s`. 붙여 온 값이 있으면 그 글이 먼저고, 뒤 낱말들이 그 뒤에 이어 붙는다.
+    Hands { at: usize, glued: Option<String> },
+    /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`).
+    Stops,
+}
+
+/// 감싸는 명령 하나를 넘는 데 드는 **뒤 낱말 수** — 감싸는 명령이 아니면 `None`([`command_of`]).
 ///
 /// 옵션 꼴은 GNU coreutils 와 sudo 의 것이다. `--long=값` 은 한 낱말이고, 값을 따로 받는 짧은 옵션만
 /// 하나를 더 먹는다. `--` 뒤는 곧 명령이다.
-fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
+fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     /// 감싸는 명령 하나를 아는 만큼.
     ///
     /// 위치로만 갈리던 다섯 자리 튜플을 이름으로 바꿨다 — `takes`·`long`·`stops` 는 셋 다
@@ -1605,12 +1623,26 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
         attach: &'static [&'static str],
         /// 옵션 뒤에 오는 제 자리 인자 수(`timeout 5 …`).
         args: usize,
-        /// **여기서 멈추는 스위치** — 셋 중 하나다. 셸을 열거나(`sudo -s`·`env -S`), 뒤의 명령을
-        /// 아예 안 돌리거나(`sudo -l`·`-v`·`doas -L`·`doas -C`), 그 명령을 **딴 자리에서** 돌린다
-        /// (`env -C DIR`·`sudo -D DIR`). 마지막 것은 [`aimed`] 와 `moved` 가 그 자리를 모르는데,
-        /// 넘겨 주면 남의 트래커에 선 집기가 여기 규칙 2 를 채우고 남의 트래커에 세우는 줄이
-        /// 여기 규칙 1 에 막힌다(리뷰 moai-p836.rv). 모르는 자리는 지어내지 않는다.
+        /// **여기서 멈추는 스위치** — 둘 중 하나다. 뒤의 명령을 아예 안 돌리거나(`sudo -l`·`-v`·
+        /// `doas -L`·`doas -C`), 그 명령을 **딴 자리에서** 돌린다(`env -C DIR`·`sudo -D DIR`).
+        /// 뒤엣것은 [`aimed`] 와 `moved` 가 그 자리를 모르는데, 넘겨 주면 남의 트래커에 선 집기가
+        /// 여기 규칙 2 를 채우고 남의 트래커에 세우는 줄이 여기 규칙 1 에 막힌다(리뷰
+        /// moai-p836.rv). 모르는 자리는 지어내지 않는다.
         stops: &'static [&'static str],
+        /// **그 뒤가 셸에 넘기는 글인 스위치**(moai-drli) — `env -S`·`sudo -s`·`-i`·`doas -s`.
+        /// 한때 `stops` 에 함께 있었는데, 멈추는 까닭이 "그 뒤는 명령이 아니라 글이고 그 글을 읽는
+        /// 것은 렉서의 일" 이면서 정작 렉서([`shell_text`])는 `bash -c` 와 `eval` 만 알아, 그 글을
+        /// 읽는 것이 **아무도 없었다** — `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을
+        /// 통째로 지나갔다. `bash -c` 와 같은 표의 줄로 둔다.
+        ///
+        /// `env -S` 는 사실 셸이 아니라 낱말로 가를 뿐이라, 그 글의 `&&`·`|` 는 낱말로 남는다 —
+        /// 여기서는 셸의 글로 읽어 **더 많이 본다**. 덜 보는 쪽으로 어림잡으면 그 자리가 곧 구멍이고,
+        /// 더 보는 쪽은 한 줄에 여럿을 적은 사람이 저마다 소속을 대는 것으로 끝난다.
+        hands: &'static [&'static str],
+        /// `hands` 스위치가 **값을 그 낱말에 붙여 받는가** — `env -SCMD`·`env --split-string=CMD` 는
+        /// 낱말 안에 글이 있고, `sudo -s` 는 뒤 낱말부터가 글이다. 붙여 받는 것을 안 받는 것으로
+        /// 적으면 뭉치의 남은 글자(`sudo -si` 의 `i`)가 글의 첫 낱말이 된다.
+        glued: bool,
     }
     const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
     const WRAPPERS: &[Wrapper] = &[
@@ -1623,7 +1655,9 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             free: &["--ignore-environment", "--null", "--block-signal", "--default-signal", "--ignore-signal", "--list-signal-handling"],
             attach: &[],
             args: 0,
-            stops: &["-S", "--split-string", "-C", "--chdir"],
+            stops: &["-C", "--chdir"],
+            hands: &["-S", "--split-string"],
+            glued: true,
         },
         Wrapper {
             name: "timeout",
@@ -1633,8 +1667,20 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             attach: &[],
             args: 1,
             stops: &[],
+            hands: &[],
+            glued: false,
         },
-        Wrapper { name: "nice", takes: &["-n"], long: &["--adjustment"], free: &[], attach: &[], args: 0, stops: &[] },
+        Wrapper {
+            name: "nice",
+            takes: &["-n"],
+            long: &["--adjustment"],
+            free: &[],
+            attach: &[],
+            args: 0,
+            stops: &[],
+            hands: &[],
+            glued: false,
+        },
         Wrapper {
             name: "stdbuf",
             takes: &["-i", "-o", "-e"],
@@ -1643,6 +1689,8 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             attach: &[],
             args: 0,
             stops: &[],
+            hands: &[],
+            glued: false,
         },
         Wrapper {
             name: "sudo",
@@ -1654,15 +1702,36 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             attach: &["-h"],
             args: 0,
             // `-l`·`-v` 는 뒤의 명령을 **안 돌린다**(될지만 본다) — 넘기면 안 도는 줄을 막는다.
-            stops: &["-s", "-i", "--shell", "--login", "-e", "--edit", "-l", "--list", "-v", "--validate", "-D", "--chdir"],
+            stops: &["-e", "--edit", "-l", "--list", "-v", "--validate", "-D", "--chdir"],
+            // `sudo -s <명령>`·`-i <명령>` 은 그 낱말들을 이어 붙여 셸에 `-c` 로 넘긴다.
+            hands: &["-s", "-i", "--shell", "--login"],
+            glued: false,
         },
         // `doas -C <설정>` 은 규칙을 시험해 보고 찍기만 한다 — 뒤의 명령을 안 돌린다.
-        Wrapper { name: "doas", takes: &["-u", "-a"], long: &[], free: &[], attach: &[], args: 0, stops: &["-s", "-L", "-C"] },
+        Wrapper {
+            name: "doas",
+            takes: &["-u", "-a"],
+            long: &[],
+            free: &[],
+            attach: &[],
+            args: 0,
+            stops: &["-L", "-C"],
+            hands: &["-s"],
+            glued: false,
+        },
     ];
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
-    let (takes, long, stops) = (w.takes, w.long, w.stops);
+    let (takes, long, stops, hands) = (w.takes, w.long, w.stops, w.hands);
     // `-c` 같은 글자 하나를 `format!` 없이 견준다 — 훅은 Bash 한 번마다 돈다.
     let letter = |set: &[&str], c: char| c.is_ascii() && set.iter().any(|f| f.as_bytes() == [b'-', c as u8]);
+    // 값이 모자라 셸이 거절할 줄 — 넘겨짚지 않는다([`command_of`] 가 여기서 멈춘다).
+    macro_rules! need {
+        ($e:expr) => {
+            if $e.is_none() {
+                return Some(Wrapped::Stops);
+            }
+        };
+    }
     let mut n = 0;
     let mut seen = 0;
     while let Some(word) = rest.get(n) {
@@ -1671,7 +1740,7 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             // **`--` 는 옵션만 끝낸다** — 제 자리 인자는 그 뒤에 온다. 곧장 나가던 판은
             // `timeout -- 5 moai add x` 의 `5` 를 명령으로 읽었다.
             while seen < w.args {
-                rest.get(n)?;
+                need!(rest.get(n));
                 seen += 1;
                 n += 1;
             }
@@ -1693,11 +1762,19 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
         }
         // `--chdir=DIR` 처럼 값을 붙여 온 것도 같은 스위치다.
         if stops.iter().any(|f| word == f || word.strip_prefix(f).is_some_and(|r| r.starts_with('='))) {
-            return None;
+            return Some(Wrapped::Stops);
+        }
+        // **셸에 넘기는 글은 여기서부터다**(moai-drli). `--split-string=글` 은 그 낱말 안에 글이 있다.
+        if let Some(glued) = hands.iter().find_map(|f| {
+            (word == f)
+                .then_some(None)
+                .or_else(|| word.strip_prefix(f).filter(|r| r.starts_with('=')).map(|r| Some(r[1..].to_string())))
+        }) {
+            return Some(Wrapped::Hands { at: n + 1, glued });
         }
         if takes.contains(&word.as_str()) {
             // 값이 없으면(`env -u`) 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
-            rest.get(n + 1)?;
+            need!(rest.get(n + 1));
             n += 2;
             continue;
         }
@@ -1707,7 +1784,7 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             continue;
         }
         if long.contains(&word.as_str()) {
-            rest.get(n + 1)?;
+            need!(rest.get(n + 1));
             n += 2;
             continue;
         }
@@ -1718,7 +1795,7 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
                 && !COMMON.contains(&word.as_str())
                 && !name.chars().all(|c| c.is_ascii_digit())
             {
-                return None;
+                return Some(Wrapped::Stops);
             }
             n += 1;
             continue;
@@ -1731,7 +1808,16 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
         let bytes = word.as_bytes();
         for (at, c) in word.char_indices().skip(1) {
             if letter(stops, c) {
-                return None;
+                return Some(Wrapped::Stops);
+            }
+            // **뭉치 안의 글 스위치**(moai-drli) — `env -iS '글'`·`sudo -ns 명령`. 붙여 받는 것
+            // (`env -S`)은 남은 글자가 곧 글이고, 안 받는 것(`sudo -s`)은 뒤 낱말부터다.
+            if letter(hands, c) {
+                let left = &word[at + c.len_utf8()..];
+                return Some(Wrapped::Hands {
+                    at: n + 1,
+                    glued: (w.glued && !left.is_empty()).then(|| left.to_string()),
+                });
             }
             if letter(takes, c) {
                 // 뒤에 붙은 것이 값이고, 없으면 다음 낱말이다.
@@ -1752,16 +1838,16 @@ fn wrapper_args(head: &str, rest: &[String]) -> Option<usize> {
             stop = false;
         }
         if stop {
-            return None;
+            return Some(Wrapped::Stops);
         }
         if eats {
-            rest.get(n + 1)?;
+            need!(rest.get(n + 1));
         }
         n += 1 + usize::from(eats);
     }
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
-    rest.get(n)?;
-    Some(n)
+    need!(rest.get(n));
+    Some(Wrapped::Runs(n))
 }
 
 fn basename(word: &str) -> &str {
@@ -4634,14 +4720,15 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 규칙 2 를 가렸다 — {cmd}\n{got:?}");
         }
-        // 셸을 여는 스위치와 **모르는 긴 옵션**에서는 멈춘다 — 값을 따로 받는 것이면 그 값을
-        // 명령으로 읽어, 새는 것보다 나쁜 잘못 막음이 난다. 뒤의 명령을 **아예 안 돌리는** 것
-        // (`sudo -l`·`-v`·`doas -C`)과 **딴 자리에서** 돌리는 것(`env -C`·`sudo -D`)도 같다 —
-        // 자리를 넘겨 주면 남의 트래커의 집기가 여기 규칙 2 를 채운다(리뷰 moai-p836.rv).
+        // **모르는 긴 옵션**에서는 멈춘다 — 값을 따로 받는 것이면 그 값을 명령으로 읽어, 새는
+        // 것보다 나쁜 잘못 막음이 난다. 뒤의 명령을 **아예 안 돌리는** 것(`sudo -l`·`-v`·`doas -C`)과
+        // **딴 자리에서** 돌리는 것(`env -C`·`sudo -D`)도 같다 — 자리를 넘겨 주면 남의 트래커의
+        // 집기가 여기 규칙 2 를 채운다(리뷰 moai-p836.rv).
+        //
+        // **셸을 여는 스위치는 이제 여기가 아니다**(moai-drli) — 그 뒤는 명령이 아니라 글이고,
+        // 그 글은 [`shell_text`] 가 읽는다(`a_shell_opening_switch_hands_its_text_to_the_lexer`).
         for cmd in [
-            "sudo -s moai add '딴 일'",
             "env --weird moai add '딴 일'",
-            "env -S \"moai add x\"",
             "sudo -l moai add '딴 일'",
             "sudo -v moai add '딴 일'",
             "doas -C /etc/doas.conf moai add '딴 일'",
@@ -4723,6 +4810,50 @@ mod tests {
         let clock = std::time::Instant::now();
         let _ = guard_create(&all, &cfg(), &here(), &mixed);
         assert!(clock.elapsed() < std::time::Duration::from_secs(2), "겹마다 같은 글을 다시 읽는다 — {:?}", clock.elapsed());
+    }
+
+    /// **셸을 여는 스위치가 넘긴 글도 명령이다**(moai-drli) — `env -S`·`sudo -s`·`sudo -i`·`doas -s`.
+    /// `command_of` 는 그 앞에서 멈추면서 "그 뒤는 글이고 그 글을 읽는 것은 렉서의 일" 이라 적어
+    /// 뒀는데, 정작 렉서는 `bash -c` 와 `eval` 만 알아 **그 글을 읽는 것이 아무도 없었다** —
+    /// `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙 1 을, `sudo -s sed -i …` 가 규칙 2 를
+    /// 통째로 지나갔다. `bash -c` 와 같은 표의 줄로 둔다(2026-09-19 사용자 결정).
+    #[test]
+    fn a_shell_opening_switch_hands_its_text_to_the_lexer() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "env -S \"moai add '딴 일'\"",
+            "env --split-string \"moai add '딴 일'\"",
+            "env --split-string=\"moai add '딴 일'\"",
+            "env -iS \"moai add '딴 일'\"",
+            "env -u FOO -S \"moai add '딴 일'\"",
+            "sudo -s moai add '딴 일'",
+            "sudo -i moai add '딴 일'",
+            "sudo --shell moai add '딴 일'",
+            "sudo --login moai add '딴 일'",
+            "sudo -u 남 -s moai add '딴 일'",
+            "doas -s moai add '딴 일'",
+            "doas -u 남 -s moai add '딴 일'",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "셸을 여는 스위치가 글을 가렸다 — {cmd}");
+        }
+        // 규칙 2 도 같은 길로 샜다 — `sudo -s sed -i …` 는 실제로 그 파일을 고친다.
+        for cmd in ["sudo -s sed -i s/a/b/ src/x.rs", "env -S \"sed -i s/a/b/ src/x.rs\"", "doas -s tee src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "셸을 여는 스위치가 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // 그 글 안의 집기도 같은 자리에서 읽힌다 — 집고 쓰는 한 줄은 지나간다.
+        let picked = "sudo -s moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs";
+        assert_eq!(guard_writes(&[], &cfg(), &here(), root, root, picked), Decision::Pass, "글 안의 집기를 안 읽었다");
+        // **글이 없으면 사람이 쓸 셸이다** — 아무 명령도 없으니 아무것도 비추지 않는다.
+        for cmd in ["sudo -s", "sudo -i", "doas -s", "env -S"] {
+            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "빈 셸을 명령으로 읽었다 — {cmd}");
+        }
+        // **뭉치의 남은 글자는 `env -S` 에서만 값이다** — `sudo -si` 의 `i` 는 스위치지 글이 아니다.
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "sudo -si moai add '딴 일'"), Decision::Deny(_)),
+            "뭉친 스위치의 남은 글자를 글의 첫 낱말로 읽었다"
+        );
     }
 
     /// **따옴표 없는 heredoc 본문의 치환은 명령이다**(moai-t863) — 셸이 그것을 돌려 값을 본문에 끼운다.
