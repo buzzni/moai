@@ -142,6 +142,11 @@ jobs:
           sha256sum -- *.tar.gz >SHA256SUMS
           cat SHA256SUMS
 
+      # 설치 스크립트도 릴리스에 함께 둔다 — 받는 사람이 판마다 그때의 스크립트를
+      # 쓸 수 있다. 합계를 낸 뒤에 넣어, SHA256SUMS 는 산출물만 담는다.
+      - name: install.sh 를 함께 올린다
+        run: cp install.sh dist/
+
       # 릴리스 노트는 CHANGELOG 의 이번 판 절을 그대로 쓴다. 그 절이 없으면 커밋
       # 목록으로 대신한다 — 노트가 없다고 릴리스를 멈추지는 않는다.
       - name: 노트를 고른다

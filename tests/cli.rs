@@ -12415,6 +12415,127 @@ fn a_push_that_carries_a_mismatched_tag_stops() {
     assert_eq!(out.status.code(), Some(1), "어긋난 태그를 밀었는데 지나갔다\n{}", text(&out));
 }
 
+// ── 설치 — 확인하지 못하면 깔지 않는다 ──────────────────────────────
+
+/// 저장소 뿌리의 파일. `install.sh` 는 `scripts/` 가 아니라 뿌리에 선다 — 받는
+/// 사람이 치는 curl 한 줄에 들어가는 주소라 짧아야 한다.
+#[cfg(unix)]
+fn at_root(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
+}
+
+/// `install.sh` 를 돌린다. `MOAI_BASE_URL` 로 가짜 릴리스를 가리켜, 시험이
+/// 네트워크를 타지 않는다.
+#[cfg(unix)]
+fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
+    let mut cmd = isolated("sh");
+    cmd.arg(at_root("install.sh"))
+        .args(more)
+        .env("MOAI_BASE_URL", format!("file://{}", base.display()))
+        .env("MOAI_VERSION", "v9.9.9")
+        .env("MOAI_INSTALL_DIR", dir)
+        .output()
+        .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
+}
+
+/// 이 기계가 받을 산출물의 이름. 스크립트에게 물어, 시험이 타깃 표를 따로 들지
+/// 않는다.
+#[cfg(unix)]
+fn release_name() -> String {
+    let out = isolated("sh")
+        .arg(at_root("install.sh"))
+        .arg("--print-target")
+        .output()
+        .expect("sh 를 실행하지 못했다");
+    assert!(out.status.success(), "타깃을 못 찍었다\n{}", text(&out));
+    format!("moai-v9.9.9-{}", String::from_utf8_lossy(&out.stdout).trim())
+}
+
+/// 가짜 릴리스 하나를 짓는다 — 산출물 한 벌과 그 합계. 돌려주는 것은 산출물이
+/// 놓인 자리와 `.tar.gz` 의 경로다.
+#[cfg(unix)]
+fn fake_release(s: &Scratch) -> (PathBuf, PathBuf) {
+    let base = s.path().join("rel");
+    let here = base.join("v9.9.9");
+    let name = release_name();
+    std::fs::create_dir_all(here.join(&name)).unwrap();
+    std::fs::write(here.join(&name).join("moai"), "#!/bin/sh\necho 가짜 moai\n").unwrap();
+    let packed = shell(&here, &format!("tar czf {name}.tar.gz {name} && rm -rf {name} && sha256sum *.tar.gz > SHA256SUMS"));
+    assert!(packed.status.success(), "가짜 릴리스를 못 지었다\n{}", text(&packed));
+    (base, here.join(format!("{name}.tar.gz")))
+}
+
+/// 시험이 자리를 꾸릴 때만 쓰는 껍데기. 재는 대상은 언제나 `install.sh` 다.
+#[cfg(unix)]
+fn shell(dir: &Path, line: &str) -> Output {
+    isolated("sh").arg("-c").arg(line).current_dir(dir).output().expect("sh 를 실행하지 못했다")
+}
+
+/// 합계가 맞으면 깐다 — 그리고 그때만 깐다(moai-j54h).
+#[cfg(unix)]
+#[test]
+fn installing_checks_the_sum_and_then_places_the_binary() {
+    let s = Scratch::new("install-ok");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "맞는 산출물을 안 깔았다\n{}", text(&out));
+    assert!(dir.join("moai").is_file(), "바이너리가 안 놓였다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("checksums"), "무엇을 쟀는지 안 말한다\n{said}");
+}
+
+/// **받은 것이 다르면 깔지 않는다.** 확인을 건너뛰는 길은 두지 않았다 — 파이프로
+/// 셸에 바로 흘러 들어가는 자리라, 건너뛸 수 있는 확인은 아무도 안 하는 확인이다.
+#[cfg(unix)]
+#[test]
+fn a_tampered_download_is_not_installed() {
+    let s = Scratch::new("install-tampered");
+    let (base, tarball) = fake_release(&s);
+    std::fs::write(&tarball, "이건 산출물이 아니다").unwrap();
+    let dir = s.path().join("bin");
+    let out = install(&base, &dir, &[]);
+    assert!(!out.status.success(), "다른 것을 깔았다\n{}", text(&out));
+    assert!(!dir.join("moai").exists(), "확인에 걸렸는데 자리에 남았다");
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("깔지 않는다"), "왜 멈췄는지 안 말한다\n{said}");
+}
+
+/// 합계 파일 자체가 없으면 **못 재는 것**이지 재서 맞은 것이 아니다.
+#[cfg(unix)]
+#[test]
+fn without_a_sums_file_nothing_is_installed() {
+    let s = Scratch::new("install-nosums");
+    let (base, _) = fake_release(&s);
+    std::fs::remove_file(base.join("v9.9.9/SHA256SUMS")).unwrap();
+    let dir = s.path().join("bin");
+    let out = install(&base, &dir, &[]);
+    assert!(!out.status.success(), "합계 없이 깔았다\n{}", text(&out));
+    assert!(!dir.join("moai").exists(), "합계가 없는데 자리에 놓였다");
+}
+
+/// **이미 있는 moai 를 말없이 덮지 않는다.** 이 이름의 바이너리가 다른 뿌리에서
+/// 온 기계가 있고, 덮는 순간 그쪽의 훅과 lint 가 그 자리에서 깨진다.
+#[cfg(unix)]
+#[test]
+fn an_existing_moai_is_not_overwritten_without_being_told_to() {
+    let s = Scratch::new("install-keeps");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("moai"), "남의 moai").unwrap();
+
+    let out = install(&base, &dir, &[]);
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), "남의 moai", "말없이 덮었다");
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("--force"), "덮는 길을 안 댄다\n{said}");
+
+    let forced = install(&base, &dir, &["--force"]);
+    assert!(forced.status.success(), "--force 로도 못 덮었다\n{}", text(&forced));
+    assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), "남의 moai", "--force 인데 안 덮었다");
+}
+
 /// `scripts/bump-version.sh` 는 두 파일을 **함께** 움직인다(moai-jy55). 하나만
 /// 움직이면 `check-version.sh` 가 재는 두 값이 갈라져, 어긋남을 막으려고 만든
 /// 것이 어긋남을 낸다.
