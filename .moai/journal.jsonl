@@ -6391,3 +6391,8 @@
 {"ts":"2026-09-20T12:59:25Z","id":"moai-l5uf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T12:59:30Z","id":"moai-ra67","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T12:59:33Z","id":"moai-bxek","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"머지 드라이버 알림이 워크트리 가지의 .gitattributes 를 본다"}
+{"ts":"2026-09-20T12:59:33Z","id":"moai-afzu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"declared() 가 absent 만 막아, 선언을 걷은 저장소에서 rotten·alien·stale 이 헛돈다"}
+{"ts":"2026-09-20T12:59:34Z","id":"moai-75cs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"probe 가 stdout 을 안 봐, 모르는 인자를 흘려 듣는 래퍼가 그냥 지나간다"}
+{"ts":"2026-09-20T12:59:34Z","id":"moai-nad3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"merge_driver_absent 에 조용히 시킬 길이 없다"}
+{"ts":"2026-09-20T12:59:35Z","id":"moai-emwg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"merge_driver_absent 힌트가 워크트리의 target 을 클론 전체에 심을 수 있다"}
+{"ts":"2026-09-20T12:59:36Z","id":"moai-2dxc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ensure_lines 가 주석을 규칙으로 세어, 글만 고쳐도 init 이 주석을 덧붙인다"}
