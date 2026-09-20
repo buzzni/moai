@@ -6098,3 +6098,6 @@
 {"ts":"2026-09-20T07:37:15Z","id":"moai-s526","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T07:37:15Z","id":"moai-589b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T07:37:15Z","id":"moai-493a.2om","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"반영 일곱 건. 리뷰가 직접 고친 셋 — 브리프 7-2 의 --milestone none 이 물려받은 소속을 못 끊던 것(-e none 을 함께 준다), 밖 한눈 보기가 ready 만 불러 짧아진 목록을 말없이 내던 것, 보드가 이미 집은 밖의 일까지 나중으로 세던 것. 넘긴 넷을 직접 판단해 넷 다 고쳤다 — 도는 판정을 Stand::busy 에서 읽은 칸으로 옮겨 멤버와 멤버 사이의 틈을 없앴고(1), unblocked 는 거르지 않은 목록으로 견줘 마일스톤 우선을 막음으로 안 읽게 했고(2), 0 건일 때 두 줄 다 입을 다물게 했고(6), 두 칸짜리 설정에는 규칙이 안 선다는 한 줄을 글에 달았다(7). 넘긴 채로 둔 것은 없다."}
+{"ts":"2026-09-20T07:37:35Z","id":"moai-493a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 사용자가 마일스톤을 실제로 세워 굴릴 때 두 가지를 본다 — 도는 판정을 읽은 칸으로 옮겼으니 마일스톤을 세워 두고 첫 멤버를 집기 전까지는 규칙이 안 선다(그때 밖의 일이 그대로 선다), 그리고 두 칸짜리 설정에는 규칙 자체가 없다. 둘 다 글에 적혀 있고 고치려면 사용자 결정이 든다."}
+{"ts":"2026-09-20T07:42:30Z","id":"moai-fdq2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-20T07:42:30Z","id":"moai-zwam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
