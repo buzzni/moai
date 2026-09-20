@@ -666,6 +666,16 @@ pub struct App {
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
     /// 그 읽기로 다시 단다(`App::relayer`) — 층이 서거나 설정이 멀쩡해지면 걷히고, 깨지면 선다.
     pub unlayered: Option<String>,
+    /// 사용자 설정을 못 읽어 **지난 층을 들고 선** 까닭(moai-23pm). 위의 [`App::unlayered`] 와 한
+    /// 물음이고 서는 자리가 다를 뿐이다 — 저쪽은 층을 못 세운 화면, 이쪽은 낡은 층을 든 화면.
+    /// 둘은 함께 서지 않는다(층이 있거나 없거나다).
+    ///
+    /// **`Layer::problems` 에 안 싣는다.** 거기 실으면 배너가 `on_layer()` 로 막아 프로젝트 안에서는
+    /// 아무 말이 없는데, `moai tui` 를 저장소 안에서 띄우면 거기 선다 — 깨진 설정은 시계로도 안 풀려
+    /// (`user_config::Again::Never`) 사람이 `0` 을 안 누르면 그 세션 내내 모른다. 그 칸은 **읽힌**
+    /// 설정의 틀린 줄을 대는 자리로 두고(등록 목록의 일이라 프로젝트 안과 상관이 없다), 파일을 통째로
+    /// 못 읽은 것은 여기로 낸다.
+    pub held: Option<String>,
     /// `--user` 로 **준 값 그대로**(`Ctx::user` 와 같다), 또는 누군지 묻는 칸에서
     /// 받은 것([`Mode::Ask`]). 쓸 때마다 `model::actor` 로 푼다 — 미리 풀어 두면
     /// 설정 없는 기계에서 읽기만 하려던 탐색기가 여는 순간 사람을 묻는다. 읽기는
@@ -1068,6 +1078,7 @@ impl App {
             grep_was: None,
             trouble: None,
             unlayered: None,
+            held: None,
             write_failed: false,
             notice: None,
             body: None,

@@ -911,15 +911,14 @@ impl App {
                 //
                 // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
                 // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
-                if fresh.trouble.is_some() {
+                if fresh.trouble.is_some() || !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh);
-                    return;
-                }
-                if !fresh.registered() {
-                    self.unlayered = unlayered_of(&fresh);
+                    // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
+                    self.held = None;
                     return;
                 }
                 self.unlayered = None;
+                self.held = None;
                 self.layer = Some(fresh);
             }
             Some(mut old) => {
@@ -939,7 +938,13 @@ impl App {
                 // **까닭은 새 읽기의 것으로 갈아 끼운다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면
                 // 지금 무엇이 어긋났는지를 덮는다.
                 if fresh.trouble.is_some() {
-                    old.problems = holding(&fresh, old.registered());
+                    // **까닭은 `App::held` 로 낸다**(moai-23pm) — 층의 `problems` 는 **읽힌** 설정의
+                    // 틀린 줄을 대는 자리라 배너가 `on_layer()` 로 막는다(등록 목록의 일이다). 파일을
+                    // 통째로 못 읽은 것은 그 화면과 상관없이 대야 한다.
+                    //
+                    // **들고 있던 `problems` 는 그대로 둔다** — 지난 읽기의 것이지만 지금 들고 선
+                    // 바로 그 줄들을 설명한다. 갈아 끼우면 왜 저 줄이 빠졌는지가 사라진다.
+                    self.held = holding(&fresh, old.registered());
                     old.trouble = fresh.trouble;
                     self.layer = Some(old);
                     return;
@@ -970,6 +975,8 @@ impl App {
                 // 넘긴다**(리뷰) — 버리면 그 손잡이가 join 도 discard 도 없이 떨어져, 그 스레드가
                 // 터져도 되던질 데가 없다(`App::discarded` 가 막으려는 바로 그 자리). 기다리던
                 // 줄(`wanted`)도 넘긴다: 버리면 펼쳐 놓고 못 읽은 프로젝트가 영영 안 읽힌다.
+                // 읽혔으니 들고 선 까닭을 걷는다 — 다음 읽기가 되면 배너에서 사라져야 한다.
+                self.held = None;
                 fresh.pending = old.pending.take();
                 fresh.reading = old.reading.take();
                 fresh.wanted = std::mem::take(&mut old.wanted);
@@ -1056,8 +1063,9 @@ pub(super) enum Depth {
     Lean,
 }
 
-/// 탈이 난 설정을 **들고 설 때** 층이 대는 까닭(moai-po6v) — 배너가 이것을 한 줄로 줄여 낸다
-/// (`draw::banner`). 층이 선 화면에서 사용자 설정의 말을 내는 자리는 `Layer::problems` 하나다.
+/// 탈이 난 설정을 **들고 설 때** 대는 까닭(moai-po6v) — 배너가 이것을 한 줄로 줄여 낸다
+/// (`draw::banner`). **서는 자리는 [`App::held`] 다**(moai-23pm) — `Layer::problems` 에 실으면
+/// 배너가 `on_layer()` 로 막아 프로젝트 안에서는 아무 말이 없다.
 ///
 /// **들고 있는 것이 없으면 "들고 있다" 고 하지 않는다**(리뷰) — 까닭만 그대로 낸다. 등록한 줄 하나
 /// 없는 층에 대고 그렇게 말하면, 아무것도 안 든 화면에 든 것이 있다고 말하는 꼴이다. 층은 등록한
@@ -1065,17 +1073,20 @@ pub(super) enum Depth {
 ///
 /// 사라진 파일은 `problems` 가 빈다 — 읽기에게는 댈 까닭이 아니라서다(아직 아무것도 등록 안 한
 /// 사람의 정상). 여기서는 다르다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라 말해야 한다.
-fn holding(fresh: &Layer, held: bool) -> Vec<String> {
+fn holding(fresh: &Layer, held: bool) -> Option<String> {
     let said = fresh.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>();
-    if !held {
-        return said;
-    }
     let why = match (said.as_slice(), &fresh.config) {
         ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
         ([], None) => "파일이 사라졌다".to_string(),
         _ => said.join(" · "),
     };
-    vec![format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}")]
+    // **들고 있는 것이 없으면 "들고 있다" 고 하지 않는다**(리뷰) — 까닭만 그대로 낸다. 층은 등록한
+    // 줄이 없어도 선다(`.moai` 밖에서 띄운 화면, `App::on_projects`) — 아무것도 안 든 화면에 대고
+    // 그렇게 말하면 없던 것을 잃었다고 말하는 꼴이다.
+    Some(match held {
+        true => format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}"),
+        false => why,
+    })
 }
 
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
@@ -2735,10 +2746,11 @@ mod tests {
         settle(&mut a);
         std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(names(&a), ["one", "two"], "못 읽은 것으로 층이 사라졌다");
-        let said = &a.layer.as_ref().expect("층이 섰다").problems;
-        assert_eq!(said.len(), 1, "까닭을 한 줄로 안 댔다 — {said:?}");
-        assert!(said[0].contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
-        assert!(said[0].contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
+        // **서는 자리는 `App::held` 다**(moai-23pm) — 층의 `problems` 는 읽힌 설정의 틀린 줄을 대는
+        // 자리라 배너가 프로젝트 안에서 막는다.
+        let said = a.held.clone().expect("들고 선 까닭을 안 댔다");
+        assert!(said.contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
+        assert!(said.contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
     }
 
     /// **설정 파일이 사라져도 지난 것을 들고 선다**(moai-po6v) — autofs·sshfs 홈이 끊기면 설정이 빈
@@ -2803,10 +2815,9 @@ mod tests {
 
         std::fs::write(&cfg, "[tui\n").unwrap();
         a.relayer(None);
-        let said = &a.layer.as_ref().expect("빈 층이 섰다").problems;
-        assert_eq!(said.len(), 1, "깨진 글의 까닭을 안 댔다 — {said:?}");
-        assert!(!said[0].contains("들고 있다"), "안 든 것을 들었다고 말했다 — {said:?}");
-        assert!(said[0].contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
+        let said = a.held.clone().expect("깨진 글의 까닭을 안 댔다");
+        assert!(!said.contains("들고 있다"), "안 든 것을 들었다고 말했다 — {said:?}");
+        assert!(said.contains(&cfg.display().to_string()), "어느 파일인지 안 댔다 — {said:?}");
     }
 
     /// **한 걸음이 등록과 읽음을 한 번의 읽기로 든다**(moai-7yil). 둘은 한 파일에 산다 — 저마다 읽던
@@ -2858,8 +2869,8 @@ mod tests {
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
         assert_eq!(a.config_tried.trouble.map(user_config::Trouble::again), Some(user_config::Again::Never), "깨진 글을 스스로 다시 읽는다");
         assert_eq!(names(&a), ["one", "two"], "오타 하나로 층이 통째로 사라졌다");
-        let said = &a.layer.as_ref().expect("층이 섰다").problems;
-        assert!(said.len() == 1 && said[0].contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
+        let said = a.held.clone().expect("들고 선 까닭을 안 댔다");
+        assert!(said.contains("들고 있다"), "지난 것을 들고 있다는 말이 없다 — {said:?}");
         assert_eq!(
             a.legacy_read.get("argos-0001").map(String::as_str),
             Some("2026-09-14T00:00:00Z"),
