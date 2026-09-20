@@ -1,0 +1,100 @@
+# PR 과 develop 푸시에서 도는 검사. 태그는 릴리스 워크플로가 따로 본다.
+#
+# 잡을 둘로 가른 까닭은 시간이다. `[profile.release]` 의 `lto = true` 가 링크를
+# 분 단위로 만들어, 시험과 한 잡에 두면 clippy 가 30초에 낼 답을 릴리스 링크
+# 뒤에서 기다린다. 둘이 나란히 돌면 벽시계는 느린 쪽 하나다.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+# 같은 가지에 새 커밋이 오면 앞 판을 끊는다. 낡은 판이 러너를 붙들지 않게 한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # 죽은 시험이 어디서 죽었는지 로그만 보고 알게 한다.
+  RUST_BACKTRACE: 1
+
+jobs:
+  # 이것 하나가 required check 로 선다. 갈래를 늘리면 저장소 보호 규칙도 같이
+  # 는다 — 검사를 더할 자리는 새 잡이 아니라 이 잡의 스텝이다.
+  ci-gate:
+    name: clippy · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 도구 판을 적는다
+        run: |
+          rustc --version
+          cargo --version
+          cargo clippy --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-dev-${{ runner.os }}-
+
+      # clippy 와 시험에 `--release` 를 붙이지 않는다 — LTO 링크가 파일 하나
+      # 고칠 때마다 다시 돌아 dev 의 초 단위가 분 단위가 된다 (CLAUDE.md).
+      #
+      # 경고를 오류로 올린다. 새 경고가 붙는 자리는 PR 이고, 쌓인 뒤에 걷으면
+      # 그 판이 통째로 남의 일이 된다. 저장소가 일부러 지고 가는 lint 는
+      # Cargo.toml 의 `[lints.clippy]` 에 까닭과 함께 적혀 있다.
+      - name: clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: test
+        run: cargo test --locked
+
+      # `cargo fmt --check` 는 아직 없다. 저장소가 rustfmt 를 한 번도 안 거쳐
+      # 지금 켜면 3,971 군데가 붉어지고, 맞추는 커밋이 옆에서 도는 워크트리
+      # 셋과 통째로 충돌한다. 그 커밋을 언제 어떻게 치는지는 moai-hwxc 에 있다.
+
+  # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
+  # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
+  size-budget:
+    name: release 바이너리 15MB 예산
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-release-${{ runner.os }}-
+
+      - name: build --release
+        run: cargo build --release --locked
+
+      - name: 예산을 잰다
+        run: |
+          set -euo pipefail
+          limit=$((15 * 1024 * 1024))
+          size=$(stat -c %s target/release/moai)
+          printf 'target/release/moai  %s bytes / %s bytes\n' "$size" "$limit"
+          if [ "$size" -gt "$limit" ]; then
+            echo "::error file=Cargo.toml::바이너리가 15MB 예산을 넘었다 ($size > $limit bytes). lto 를 낮추지 말고 무엇이 들어왔는지 먼저 본다 — 예산이 먼저다."
+            exit 1
+          fi
