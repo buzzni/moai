@@ -279,6 +279,57 @@ fn nothing_picked_means_korean_for_now_and_english_is_one_word_away() {
     assert_eq!(english.lines().count(), japanese.lines().count(), "영어와 일본어의 줄 수가 다르다");
 }
 
+/// **시스템 로캘은 말을 안 고른다**(moai-gv9n, 2026-09-20 사용자 결정).
+///
+/// `Lang::parse` 가 `ja_JP.UTF-8` 모양을 받아 주는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
+/// 넣는 사람을 받자는 것이지, `LANG`·`LC_ALL`·`LC_MESSAGES` 를 읽는다는 뜻이 아니다. 읽으면
+/// 아무것도 안 고른 사람이 제 로캘 말로 보는데, 옮긴 글이 아직 두 화면뿐이라 그 화면은
+/// 제 말 몇 줄과 영어가 섞인다 — 기본을 한국어로 둔 것과 같은 까닭이다.
+///
+/// **여는 조건은 `Lang` 의 `#[default]` 를 `En` 으로 옮기는 날과 같다.** 그날 이 시험이
+/// 붉어지면 그때 고르는 층을 셋으로 늘린다.
+#[test]
+fn the_system_locale_does_not_pick_the_language() {
+    let s = init("locale");
+    ok(s.path(), &["add", "첫 일"]);
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let say = |picked: Option<&str>, body: Option<&str>| {
+        match body {
+            Some(b) => std::fs::write(&config, b).unwrap(),
+            None => std::fs::write(&config, "").unwrap(),
+        }
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            // 세 이름을 다 준다 — 하나만 재면 나머지 둘로 새는 길이 안 잡힌다.
+            .env("LANG", "ja_JP.UTF-8")
+            .env("LC_ALL", "ja_JP.UTF-8")
+            .env("LC_MESSAGES", "ja_JP.UTF-8");
+        match picked {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    // 아무도 안 골랐으면 로캘이 일본어라도 기본값이다 — 지금은 한국어다.
+    let bare = say(None, None);
+    assert!(bare.contains("이슈 1"), "로캘이 말을 골랐다\n{bare}");
+    assert!(!bare.contains("課題"), "로캘이 말을 골랐다\n{bare}");
+
+    // 고른 사람은 그대로 제 말을 본다 — 로캘이 그것을 덮지 않는다.
+    let picked = say(Some("en"), None);
+    assert!(picked.contains("Issues 1"), "MOAI_LANG 이 로캘에 밀렸다\n{picked}");
+    let said = say(None, Some("[i18n]\nlang = \"en\"\n"));
+    assert!(said.contains("Issues 1"), "설정이 로캘에 밀렸다\n{said}");
+}
+
 /// **설정에 적은 말도 든다**(moai-slfv), 그리고 **틀리면 저장소 안에서도 댄다**(리뷰 moai-80qw).
 ///
 /// 여기까지 오는 길(`Doc::lang` → `Registry::lang` → `i18n::pick`)은 `MOAI_LANG` 만 재는
