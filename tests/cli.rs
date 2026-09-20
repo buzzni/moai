@@ -12433,11 +12433,57 @@ fn status_names_a_clone_that_never_planted_the_driver() {
     assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
 }
 
+/// **넓은 자리에 심은 사람을 "안 심었다" 로 조르지 않는다**(리뷰 moai-vbmn.spv).
+///
+/// 심는 자리는 `--local` 이지만 git 이 드라이버를 **찾는** 자리는 system·global 까지다.
+/// `--local` 만 보고 조르던 판은 `git config --global merge.moai.driver` 하나로 모든 저장소가
+/// 도는 사람에게 저장소마다 "병합이 기본 머지로 내려앉는다" 고 말했는데, 그 병합은 실제로
+/// 그 줄이 돌아 안 내려앉는다 — 걷을 길이 없는 거짓말이다.
+///
+/// 비워 둔 키도 "안 심었다" 가 아니다. 그 상태는 git 이 빈 명령을 돌려 **표식 없이 이쪽 것만**
+/// 남기는 자리라, 무해하다는 낱말을 붙일 수 없다 — 무엇이라 부를지 정할 때까지 입을 다문다.
+#[test]
+fn status_does_not_nag_a_driver_planted_in_a_wider_scope() {
+    let s = init("mergescope");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    assert!(ok(root, &["status"]).contains("안 심었다"), "안 심은 클론을 안 댔다");
+
+    // `--local` 이 아니라 `--worktree` 에 심는다 — 넓은 자리를 이 시험 안에서 재는 길이다
+    // (`--global` 은 사람의 `~/.gitconfig` 다). git 은 이것도 제 차례에 찾아 쓴다.
+    //
+    // **이 도구가 지은 모양 그대로, 자리만 없는 곳으로 심는다**(리뷰 moai-vbmn.spv). 아무 글이나
+    // 심던 판은 `planted_word` 가 표식을 못 찾아 어차피 `None` 으로 끝나, 아래 둘째 재기가 어느
+    // 쪽으로 고쳐도 푸르렀다. 모양을 맞춰 두면 넓은 자리를 재는 날 그 줄이 `rotten` 으로 선다.
+    git(root, &["config", "extensions.worktreeConfig", "true"]);
+    let gone = root.join("없는/자리/moai");
+    let wide = format!(
+        "cp %A %A.ours; if '{}' merge-driver %O %A %B %L %P; then rm -f %A.ours; exit 0; fi; exit 1",
+        gone.display()
+    );
+    git(root, &["config", "--worktree", "merge.moai.driver", &wide]);
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "이미 도는 드라이버를 안 심었다고 했다\n{said}");
+
+    // 그 줄은 **재지도 고치라고도 안 한다** — 남이 적은 줄을 "썩었다" 고 안 부르는 자리다.
+    // `kind` 로 잰다: `alien` 의 글에는 `머지 드라이버` 가 안 들어 낱말로는 못 본다.
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "넓은 자리의 줄을 재고 말았다\n{json}");
+
+    // **비워 둔 키는 안 심은 것이 아니다.** 여기도 입을 다문다.
+    git(root, &["config", "--worktree", "--unset", "merge.moai.driver"]);
+    git(root, &["config", "--local", "merge.moai.driver", ""]);
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "비워 둔 키를 안 심은 것으로 읽었다\n{said}");
+}
+
 /// **그 이름의 다른 도구가 선 자리를 "안 돈다" 로 뭉치지 않는다**(moai-zdw4).
 ///
 /// 파일의 모드만 읽던 판이 조용히 지나가던 자리다 — 자리도 있고 실행 권한도 있는데 그 명령은
 /// `merge-driver` 를 모른다. 이름을 `moai` 그대로 두고 배포하기로 한 뒤 받는 쪽에서 가까워졌다.
 /// 사람이 찾으러 갈 곳이 다르므로 낱말을 가른다.
+#[cfg(unix)]
 #[test]
 fn status_names_another_tool_of_that_name() {
     let s = init("mergealien");
@@ -12445,14 +12491,11 @@ fn status_names_another_tool_of_that_name() {
     git(root, &["init", "-q", "."]);
     add(root, &["하나"]);
 
-    // 자리는 멀쩡하고 이 명령만 모른다 — 옛 moai 가 그 꼴이다.
+    // 자리는 멀쩡하고 이 명령만 모른다 — 옛 moai 가 그 꼴이다. **[`write_exe`] 로 내놓는다**
+    // (리뷰 moai-vbmn.spv): `status` 가 이 파일을 곧바로 exec 하는데, 이 프로세스가 쓴 inode 는
+    // 옆 시험의 fork 와 겹쳐 ETXTBSY 로 거절된다 — [`place_exe`] 가 2,400번으로 잰 자리다.
     let other = root.join("옛moai");
-    std::fs::write(&other, "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    write_exe(&other, "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n");
     ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
 
     let said = ok(root, &["status"]);
@@ -12465,8 +12508,13 @@ fn status_names_another_tool_of_that_name() {
     assert!(notices.contains("merge_driver_alien"), "{json}");
 
     // 맨 `--install` 로 다시 심으면 이름 충돌 자체가 사라진다.
+    //
+    // **낱말이 아니라 `kind` 로 잰다**(리뷰 moai-vbmn.spv). 옆의 셋과 달리 이 알림의 글에는
+    // `머지 드라이버` 가 안 든다("그 이름의 다른 도구가 선다") — 그 낱말로 걷혔는지를 재면
+    // `probe` 가 되돌아 `Alien` 을 계속 내도 시험은 푸르다. 걷혔는지를 실제로 재는 자다.
     ok(root, &["merge-driver", "--install", "--as", BIN]);
-    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "다시 심었는데 알림이 남았다");
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "다시 심었는데 알림이 남았다\n{json}");
 }
 
 /// **옛 판으로 심은 줄도 다시 심으라고 한다**(moai-h54i).

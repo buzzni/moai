@@ -2842,8 +2842,17 @@ impl Warning {
     /// 다시 빌드해 자리가 옮겨졌다)에서 그대로 답이다. 워크트리의 `target/` 을 피하라는 말은
     /// `merge-driver --install --help` 와 관리 블록에 이미 있다.
     pub fn merge_driver_rotten(cmd: &str, root: Option<&str>) -> Warning {
+        Warning::merge_driver_unusable("merge_driver_rotten", cmd, root)
+    }
+
+    /// 심어 둔 줄이 **쓸 수 없다**는 알림 둘이 함께 쓰는 꼴 — `rotten` 과 `alien`.
+    ///
+    /// **낱말은 둘이고 고칠 줄은 하나다.** 사람이 봐야 할 것이 달라 `kind` 를 가르지만(`dotfile_rules`
+    /// 와 같은 자리), 치라는 줄은 맨 `--install` 로 같다 — 그 줄을 두 군데 적어 두면 한쪽만 고치는
+    /// 날이 오고, 그때 같은 고침을 두 말로 대게 된다(리뷰 moai-vbmn.spv).
+    fn merge_driver_unusable(kind: &'static str, cmd: &str, root: Option<&str>) -> Warning {
         let hint = Warning::cli_hint(root, "merge-driver --install");
-        Warning::new("merge_driver_rotten", vec![cmd.to_string()]).notice().hint(&hint)
+        Warning::new(kind, vec![cmd.to_string()]).notice().hint(&hint)
     }
 
     /// 심어 둔 명령이 **이 드라이버를 모른다**는 알림(moai-zdw4). 자리도 있고 돌기도 도는데
@@ -2857,8 +2866,7 @@ impl Warning {
     /// 고칠 명령은 맨 `--install` 이다 — 지금 도는 이 바이너리의 절대 경로로 다시 심으면 이름
     /// 충돌 자체가 사라진다.
     pub fn merge_driver_alien(cmd: &str, root: Option<&str>) -> Warning {
-        let hint = Warning::cli_hint(root, "merge-driver --install");
-        Warning::new("merge_driver_alien", vec![cmd.to_string()]).notice().hint(&hint)
+        Warning::merge_driver_unusable("merge_driver_alien", cmd, root)
     }
 
     /// 저장소는 `merge=moai` 를 걸어 뒀는데 이 클론에 **안 심었다**는 알림(moai-9khu,

@@ -376,6 +376,10 @@ pub fn print(ctx: &Ctx) -> R<Vec<String>> {
     Ok(block.lines().map(str::to_string).collect())
 }
 
+// **여기 글을 고치면 이미 심은 저장소가 주석을 둘 든다.** `ensure_lines` 는 줄 단위로 견주어
+// 없는 줄을 덧붙이므로, 주석 한 줄만 고쳐도 다음 `moai init` 이 옛 주석 밑에 새 주석을 붙인다
+// (리뷰 moai-vbmn.spv 에서 실제로 났다). 그래서 이 블록의 글은 규칙이 바뀔 때만 손댄다 —
+// 규칙 없이 글만 고치고 싶으면 그 전에 덧붙임을 막는 길부터 낸다(idea).
 const GITATTRIBUTES: &str = "\
 # moai — 이슈 트래커
 # 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면
@@ -877,23 +881,34 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     /// **선언을 거는 자리와 묻는 자리가 한 글을 쓴다**(moai-9khu). `.gitattributes` 에 쓰는 줄과
     /// `check-attr` 로 묻는 경로가 갈리면 "안 심었다" 알림이 영영 안 서거나(묻는 자리가 틀렸다)
     /// 영영 안 걷힌다(쓰는 자리가 틀렸다) — 둘 다 조용해서 아무도 모른다.
+    ///
+    /// **마지막 줄을 본다**(리뷰 moai-vbmn.spv). git 은 같은 경로에 걸린 규칙 중 **뒤엣것**을
+    /// 쓰므로, 같은 경로를 **글자 그대로** 두 번 거는 날 첫 줄을 보던 판은 틀린 줄을 잰다.
+    ///
+    /// **낱말째 맞춘다.** `starts_with` 만으로는 `.moai/issues.jsonlX` 도 든다.
+    ///
+    /// **여기가 못 잡는 것**(리뷰 moai-vbmn.spv): 뒤에 붙는 것이 글자가 아니라 **패턴**이면
+    /// (`.moai/*.jsonl merge=union`) 이 거르개에 안 걸려 그대로 푸른데, `check-attr` 은 `union` 을
+    /// 답해 알림이 영영 안 선다. 글로 패턴을 푸는 규칙을 여기 또 쓰면 git 과 갈리고 갈리는 쪽은
+    /// 늘 이쪽이라(`declared` 가 `check-attr` 에게 묻는 까닭과 같다), 그 갈래를 실제로 재는 자는
+    /// 임시 저장소에 이 글을 깔고 `status` 를 부르는 `tests/cli.rs` 쪽이다.
     #[test]
     fn the_declared_path_is_the_one_init_writes() {
         let path = crate::cmd::merge_driver::SNAPSHOT;
         let rule = GITATTRIBUTES
             .lines()
-            .find(|l| l.starts_with(path))
+            .rfind(|l| l.strip_prefix(path).is_some_and(|rest| rest.starts_with(char::is_whitespace)))
             .unwrap_or_else(|| panic!("{path} 에 거는 줄이 없다\n{GITATTRIBUTES}"));
         assert!(
             rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
             "그 줄이 드라이버를 안 건다 — {rule}"
         );
     }
-
-    use super::*;
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
     #[test]
