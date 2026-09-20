@@ -71,6 +71,11 @@ pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
     // **명령줄은 이 세션에서 한 번만 읽는다**(moai-uc5v). 규칙마다 제 [`crate::hook::Line`] 을
     // 세우던 판은 Bash 한 번에 같은 글을 여덟 번 읽었고, 겹친 치환은 그 한 번을 이미 비싸게
     // 만든다. `Line` 은 게으르니 명령줄이 없는 호출(`Edit`·`Skill`)은 여기서 아무것도 안 읽는다.
+    //
+    // **접은 것과 그 명령줄은 함께 내려간다**(리뷰 moai-uc5v.ssb). `decide` 가 제 손으로 다시 접던
+    // 판은 규칙이 판정하는 `Call` 과 규칙이 읽는 `Line` 이 따로 서서, 한쪽만 고치는 날 `Call::Shell`
+    // 갈래가 빈 명령줄을 받는다 — 토막이 0개라 규칙 1·2·3 이 모두 지나가고, 훅은 아무 말도 안 해
+    // "명령이 멀쩡했다" 와 구별되지 않는다.
     let call = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input);
     let line = crate::hook::Line::new(match call {
         crate::hook::Call::Shell(cmd) => cmd,
@@ -97,14 +102,17 @@ pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    Ok(decide(ctx, event, &input, &line).map(|said| vec![said]).unwrap_or_default())
+    Ok(decide(ctx, event, &input, call, &line).map(|said| vec![said]).unwrap_or_default())
 }
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
 ///
-/// **`Ctx` 를 통째로 받는다** — 화면 언어([`Ctx::lang`])가 드는 것은 보드 한 줄뿐인데,
-/// 여기서 미리 풀면 툴 부름마다 도는 `PreToolUse` 가 사람의 설정 파일을 매번 읽는다.
-fn decide(ctx: &Ctx, event: Event, input: &Input, line: &crate::hook::Line<'_>) -> Option<String> {
+/// **`Ctx` 를 통째로 받는다** — 화면 언어([`Ctx::lang`])가 드는 것은 **글을 싣는 갈래**뿐이다
+/// (`PreCompact` 의 `carried`, `SessionStart` 의 보드, `Stop` 의 `closing`). 여기서 미리 풀면
+/// 툴 부름마다 도는 `PreToolUse` 가 사람의 설정 파일을 매번 읽는데, 그 갈래는 지금 `ctx.lang()`
+/// 을 한 번도 안 부른다 — 규칙의 거절문을 말묶음으로 옮기는 날 그 갈래에 `say(ctx.lang(), …)`
+/// 를 놓으면 이 값이 도로 돌아온다. 그때는 말을 거절하는 가지 안에서 푼다.
+fn decide(ctx: &Ctx, event: Event, input: &Input, call: crate::hook::Call<'_>, line: &crate::hook::Line<'_>) -> Option<String> {
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
@@ -164,7 +172,6 @@ fn decide(ctx: &Ctx, event: Event, input: &Input, line: &crate::hook::Line<'_>) 
         }),
         Event::PreToolUse => {
             use crate::hook::Call;
-            let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
             let cwd = cwd.clone();
             let (routes, there, aims) = match call {
                 Call::Shell(_) => route(&repo, line, &cwd),

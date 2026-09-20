@@ -27,7 +27,7 @@ use crate::i18n::{Lang, fill, say};
 use crate::model::Issue;
 use crate::report;
 use serde::Deserialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// 훅이 걸리는 자리.
@@ -657,26 +657,29 @@ fn parse(cmd: &str) -> Vec<Seg> {
 pub struct Line<'a> {
     cmd: &'a str,
     read: std::cell::OnceCell<(Vec<Seg>, Option<usize>)>,
-    /// **몇 번 읽었나** — 시험이 "규칙마다 다시 안 읽는다" 를 못박는 자다. 시계로 재면 부하 있는
-    /// 기계에서 흔들리고, 흔들리는 시험은 곧 지워진다.
-    #[cfg(test)]
-    reads: std::cell::Cell<usize>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// **이 갈래가 명령줄을 읽은 횟수** — 시험이 "규칙마다 다시 안 읽는다" 를 못박는 자다(moai-uc5v).
+    /// 시계로 재면 부하 있는 기계에서 흔들리고, 흔들리는 시험은 곧 지워진다.
+    ///
+    /// **[`Line`] 의 필드로 두지 않는다.** `read` 가 [`std::cell::OnceCell`] 이라 제 안의 수는
+    /// 구조적으로 0 아니면 1 이고, 규칙 하나가 제 `Line` 을 안쪽에 새로 세우면 그 수는 **딴 칸**에
+    /// 선다 — 바깥 것은 1 에 머물러, 못박는다던 바로 그 뒷걸음을 못 본다. 한 자리에서 세면 누가
+    /// 세운 `Line` 이든 여기로 온다. 갈래마다 따로라 시험이 나란히 돌아도 안 섞인다.
+    static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 지금까지 읽은 횟수([`READS`]) — 시험은 제 앞뒤를 재서 그 사이의 수를 본다.
+#[cfg(test)]
+fn reads() -> usize {
+    READS.with(std::cell::Cell::get)
 }
 
 impl<'a> Line<'a> {
     pub fn new(cmd: &'a str) -> Line<'a> {
-        Line {
-            cmd,
-            read: std::cell::OnceCell::new(),
-            #[cfg(test)]
-            reads: std::cell::Cell::new(0),
-        }
-    }
-
-    /// 이 줄을 읽은 횟수 — 한 번을 넘으면 규칙 하나가 제 [`Line`] 을 따로 세운 것이다(moai-uc5v).
-    #[cfg(test)]
-    fn reads(&self) -> usize {
-        self.reads.get()
+        Line { cmd, read: std::cell::OnceCell::new() }
     }
 
     /// 읽은 것 — **처음 묻는 쪽이 읽고 그다음부터는 그것을 본다.**
@@ -687,7 +690,7 @@ impl<'a> Line<'a> {
     fn read(&self) -> &(Vec<Seg>, Option<usize>) {
         self.read.get_or_init(|| {
             #[cfg(test)]
-            self.reads.set(self.reads.get() + 1);
+            READS.with(|n| n.set(n.get() + 1));
             Lexer::new(self.cmd).run_over()
         })
     }
@@ -2161,8 +2164,21 @@ fn promotes_into(seg: &[String]) -> bool {
 /// **두 지도를 [`report::ties`] 한 벌로 받는다**(moai-c4nk) — `milestones` 는 제 안에서
 /// `groups` 를 다시 지어, 나란히 부르면 소속 지도가 두 벌 선다. 훅은 도구 호출마다 이 길을
 /// 지난다. `report` 쪽의 같은 자리는 moai-3prn 이 이미 걷었다.
+///
+/// **지도를 이미 가진 쪽은 [`unit_of_in`] 으로 온다**(리뷰 moai-c4nk.ssb) — 안에서 한 벌만 짓게
+/// 해 놓고 부르는 쪽이 곁에서 `groups` 를 또 짓던 판은, 한 벌을 걷고 한 벌을 그대로 뒀다.
 pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str> {
     let (epics, stones) = report::ties(issues);
+    unit_of_in(focus, &epics, &stones)
+}
+
+/// [`unit_of`] 의 몸통 — **이미 푼 소속 지도**로 잰다. `report` 의 `_in` 들과 같은 꼴이다
+/// ([`report::milestones_in`]).
+fn unit_of_in<'a>(
+    focus: &[&'a Issue],
+    epics: &BTreeMap<&'a str, &'a str>,
+    stones: &BTreeMap<&'a str, &'a str>,
+) -> BTreeSet<&'a str> {
     let mut out = BTreeSet::new();
     for i in focus {
         out.insert(i.id.as_str());
@@ -2525,7 +2541,12 @@ fn create_in<'a>(
     if focus.is_empty() {
         return Decision::Pass;
     }
-    let unit = unit_of(issues, focus);
+    // **초점의 단위는 물을 때 짓는다**(리뷰 moai-c4nk.ssb) — [`unit_of`] 는 소속 지도 두 벌을
+    // 짓는데([`report::ties`]), 그것을 묻는 것은 아래 `find` 의 **마지막** `&&` 뿐이고 그 앞의
+    // `creates(seg)` 가 대부분을 거른다. 미리 짓던 판은 `moai mv …`·`cargo test && moai status`
+    // 처럼 아무것도 안 세우는 줄마다 두 벌을 지어 버렸다 — "싼 것부터 잰다"(moai-xppm) 가
+    // [`guard_writes_in`] 에만 서 있던 자리다.
+    let unit = std::cell::OnceCell::new();
 
     // **토막마다 본다.** `cd /repo && moai add …` 의 뒷토막이 진짜 생성이다. **세우는 토막은 모두
     // 본다** — 첫 것만 보던 판은 단위 안에 세운 앞 토막 하나로 뒤의 맨 `moai add` 를 넘겼다. 치환은
@@ -2552,7 +2573,9 @@ fn create_in<'a>(
             // 규칙이 제가 시킨 것을 막는다.
             && !asks_help(args)
             // 단위 안에 세우는 것은 지나간다.
-            && !flag_values(args, &["-e", "--epic", "--parent", "--milestone"]).iter().any(|v| unit.contains(v.as_str()))
+            && !flag_values(args, &["-e", "--epic", "--parent", "--milestone"])
+                .iter()
+                .any(|v| unit.get_or_init(|| unit_of(issues, focus)).contains(v.as_str()))
     });
     let Some((at, seg)) = makes else {
         return Decision::Pass;
@@ -2666,8 +2689,10 @@ fn close_in(
         // 결과**를 지어내라고 요구했다. `closing` 이 같은 줄을 아예 안 세기로
         // 한 것과도 어긋난다 — 한 규칙의 두 짝은 같은 셈법을 써야 한다. 옆 워크트리의 리뷰도
         // 그래서 뺀다 — `closing`·[`guard_review`] 가 안 세는 줄이다(리뷰 moai-dw63.nzw).
-        let unit = unit_of(issues, &held(issues, cfg, away));
-        let epics = report::groups(issues);
+        // 소속 지도는 **한 벌만** 짓는다([`unit_of_in`]) — `unit_of` 에 맡기고 곁에서 `groups` 를
+        // 또 부르던 판은 같은 지도를 두 벌 지었다.
+        let (epics, stones) = report::ties(issues);
+        let unit = unit_of_in(&held(issues, cfg, away), &epics, &stones);
         let out = report::put_off(issues);
         let theirs = theirs(issues, away);
         let open_review = ids.iter().find_map(|id| {
@@ -3667,6 +3692,18 @@ fn writes_text(verbs: &[&str]) -> bool {
     }
 }
 
+/// 이 글에 **한글이 들었는가** — 음절(`가`~`힣`)과 자모 둘(초·중·종성 U+1100 블록, 호환 자모
+/// U+3130 블록)을 본다.
+///
+/// **한 자리에 둔다**(리뷰 moai-8d49.ssb). 이것을 가르는 자가 둘이다: 한국어 글을 넣는 쓰기를
+/// 비출지([`korean_write`])와, 영어로 부른 화면에 한글이 남았는지를 세는 시험
+/// ([`tests::the_loaded_text_speaks_the_language_it_is_handed`]). 시험이 제 자를 따로 두던 판은
+/// 음절만 봐 `ㄱ`·`ㅅ` 만 남은 줄을 못 보고 푸른 채였다 — 재는 자가 도구보다 좁으면 그 시험은
+/// 지키려던 것을 안 지킨다.
+fn hangul(t: &str) -> bool {
+    t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'))
+}
+
 /// 값이 글이 아닌 플래그 — 자리(`-C`)·사람(`--user`·`-a`)·칸(`-s`·`--from`)·태그·소속·종류. 사람 이름도
 /// 태그와 칸 이름도 한글일 수 있다 — 칸을 한글로 지은 보드에서는 `mv` 마다 헛 알림이 섰다.
 const NOT_TEXT: &[&str] = &[
@@ -3691,7 +3728,6 @@ const FIXED_HEADS: &[&str] = &["model:", "다음:", "Regression-of:"];
 /// **흘러드는 글은 그 토막의 것만 본다.** 명령줄 전체에서 한글을 찾던 판은 옆 토막의 커밋 메시지·`--user`
 /// 이름·경로에 알림을 달았고, `"$(cat <<'EOF' … EOF)"` 로 넣은 글은 렉서가 본문을 건너뛰어 놓쳤다.
 pub fn korean_write(line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'_>) -> Option<String> {
-    let hangul = |t: &str| t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'));
     // 렉서는 받은 글자를 옮기기만 하니 명령줄에 한글이 없으면 볼 것이 없다 — 훅은 Bash 마다 돈다.
     if !hangul(line.text()) {
         return None;
@@ -4005,8 +4041,9 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         ));
     }
 
-    let unit = unit_of(issues, &focus);
-    let epics = report::groups(issues);
+    // 소속 지도 한 벌로 잰다 — [`close_in`] 과 같은 자리다.
+    let (epics, stones) = report::ties(issues);
+    let unit = unit_of_in(&focus, &epics, &stones);
     let anchored: Vec<&&Issue> = open
         .iter()
         .filter(|i| {
@@ -4159,7 +4196,9 @@ pub fn closing(
         return grown(warnings, before, lang).map_or(Decision::Pass, Decision::Block);
     }
     let mut lines = Vec::new();
-    let epics = report::groups(issues);
+    // 한 벌로 짓고 아래 `unit_of_in` 에 그대로 준다 — 곁에서 `unit_of` 를 부르던 판은 같은 지도를
+    // 두 벌 지었다(리뷰 moai-c4nk.ssb).
+    let (epics, stones) = report::ties(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
     if !wip.is_empty() {
@@ -4206,10 +4245,10 @@ pub fn closing(
             let shuts = closes.get(i.id.as_str()).copied();
             if let Some(e) = shuts.filter(|_| !is_review(i, &out_of_plan)) {
                 lines.push(format!(
-                    "  moai mv {} {} -m '{}'      {}",
+                    "  moai mv {} {} -m {}      {}",
                     i.id,
                     cfg.first_status(),
-                    say(lang, "hook.waiting_why"),
+                    crate::text::single_quoted(say(lang, "hook.waiting_why")),
                     fill(say(lang, "hook.waiting_hint"), &[("epic", e)])
                 ));
             }
@@ -4218,14 +4257,20 @@ pub fn closing(
                 None => say(lang, "hook.defer_plain").to_string(),
             };
             // 자유 글은 작은따옴표다(moai-1yya) — 이 줄은 옮겨 치는 글이고, 큰따옴표 안의 백틱은 bash 가
-            // 명령으로 푼다.
-            lines.push(format!("  moai defer {} -m '{}'      {when}", i.id, say(lang, "hook.defer_why")));
+            // 명령으로 푼다. **싸는 것은 [`crate::text::single_quoted`] 다** — 글자로 `'…'` 를 두르던
+            // 판은 안에 드는 글이 소스 글자였을 때만 섰다. 말묶음에서 오는 지금은 번역자가 적은 `'`
+            // 하나가 열린 채 끝나는 따옴표를 내밀어, 그대로 친 셸이 다음 줄들을 통째로 삼킨다.
+            lines.push(format!(
+                "  moai defer {} -m {}      {when}",
+                i.id,
+                crate::text::single_quoted(say(lang, "hook.defer_why"))
+            ));
             lines.push(format!("  {}      {}", crate::guide::handoff(&i.id), say(lang, "hook.handoff_hint")));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
-    let unit = unit_of(issues, &wip);
+    let unit = unit_of_in(&wip, &epics, &stones);
     // **옆 워크트리의 리뷰는 안 센다** — 규칙 3([`guard_review`]·[`close_in`])과 같은 자다(리뷰
     // moai-dw63.nzw). 세면 옆 일꾼이 같은 에픽에서 돌리는 리뷰를 이 세션에 "낸 글을 붙이고
     // 닫으라" 고 붙든다. **겹친 줄에서 이미 닫았거나 미룬 리뷰도 안 센다** — 위에서 집은 줄을
@@ -4416,6 +4461,7 @@ fn flag_values(seg: &[String], flags: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Kind, Status};
 
     /// **훅이 싣는 글은 한국어로 잰다.** 이 시험들은 글자를 보고 규칙의 셈을 재는데(moai-8d49 로
     /// 말묶음에 들어간 뒤로도 그 셈은 그대로다), 화면 기본이 영어라 그냥 부르면 영어가 나온다.
@@ -4484,7 +4530,6 @@ mod tests {
     ) -> Decision {
         super::guard_shell_in(issues, cfg, away, root, cwd, &Line::new(cmd), segs, aim)
     }
-    use crate::model::{Kind, Status};
 
     fn cfg() -> Config {
         Config::parse("prefix = \"t\"\n").unwrap()
@@ -4961,6 +5006,11 @@ mod tests {
     /// **규칙 1~4 의 거절문은 아직 여기가 아니다**(2026-09-20 사용자 결정) — 그 첫 줄은
     /// `guide::rule_head` 고, 그 글자는 `moai skill install` 이 심는 AGENTS.md 의 규칙 제목과
     /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서를 같이 정하기 전에는 안 건드린다.
+    /// `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 남는다.
+    ///
+    /// **남은 한글을 표본 하나로 세지 않는다**(리뷰 moai-8d49.ssb). `closing` 의 갈래는 셋이고
+    /// (보통 줄·에픽을 닫는 멤버·열린 리뷰) 갈래마다 남는 줄이 다르다 — 보통 줄 하나로 재고
+    /// "남은 것은 한 줄" 이라 적던 판은, 흔한 리뷰 흐름에서 세 줄이 나오는 것을 못 봤다.
     #[test]
     fn the_loaded_text_speaks_the_language_it_is_handed() {
         // 제목은 자료지 제품 글이 아니다 — 아래에서 "영어 판에 남은 한글" 을 세니 표본을 안 섞는다.
@@ -4983,11 +5033,38 @@ mod tests {
             assert!(said.contains("moai defer t-1"), "{lang:?}: 미룸 줄을 잃었다 — {said}");
         }
         // 영어로 부른 판에 한국어가 남으면 그 줄이 아직 글자로 박힌 것이다 — 거절문(guide)은 안 센다.
-        let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 3, Some(1), Lang::En) else {
-            panic!("안 붙들었다");
+        // **재는 자는 도구의 것 그대로다**([`super::hangul`]) — 음절만 보던 판은 자모만 남은 줄을
+        // 못 봤다(리뷰 moai-8d49.ssb).
+        let english = |issues: &[Issue]| match super::closing(issues, issues, &cfg(), &here(), 3, Some(1), Lang::En) {
+            Decision::Block(said) => said,
+            other => panic!("안 붙들었다 — {other:?}"),
         };
-        let kept: Vec<&str> = said.lines().filter(|l| l.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c))).collect();
-        assert_eq!(kept, ["  moai note t-1 '다음: <이어서 할 것>'      if you will carry on"], "{said}");
+        let kept = |said: &str| said.lines().filter(|l| super::hangul(l)).map(str::to_string).collect::<Vec<_>>();
+        let handoff = format!("  {}      if you will carry on", crate::guide::handoff("t-1"));
+        let only_handoff = std::slice::from_ref(&handoff);
+        let said = english(&all);
+        assert_eq!(kept(&said), only_handoff, "{said}");
+
+        // **에픽을 닫는 멤버의 갈래도 영어로 본다** — `{epic}` 을 채우는 두 글(`hook.waiting_hint`·
+        // `hook.defer_closes`)은 이 갈래에서만 서는데, 위의 표본은 거기 안 닿아 영어 판이 없었다.
+        let shuts = vec![epic("t-e"), all[1].clone(), under("t-2", "done", "t-e")];
+        let said = english(&shuts);
+        assert!(said.contains("moai mv t-1 todo -m 'what are you waiting for'"), "{said}");
+        assert!(said.contains("t-e stays open"), "{said}");
+        assert!(said.contains("t-e set out to do"), "{said}");
+        assert_eq!(kept(&said), only_handoff, "{said}");
+
+        // **열린 리뷰의 갈래에는 아직 한글이 남는다.** `hook.review_open` 은 옮겼지만 그 밑의 두
+        // 걸음은 `guide::REVIEW_STEPS` 에서 오고, 그 글자는 `moai skill install` 이 심는 문서와
+        // 같아야 한다(위 머리글). **여기서 세어 둔다** — 표본이 그 갈래에 안 닿던 판은 "영어 판에
+        // 남은 한글은 한 줄" 이라고 말하면서 흔한 리뷰 흐름에서는 세 줄을 냈다.
+        let tied = vec![epic("t-e"), all[1].clone(), review("t-r", "todo", Some("t-e"))];
+        let said = english(&tied);
+        assert!(said.contains("Review issue t-r is still open"), "{said}");
+        let steps = crate::guide::close_steps("t-r", "moai");
+        let mut want = vec![handoff];
+        want.extend(steps.lines().map(str::to_string));
+        assert_eq!(kept(&said), want, "{said}");
     }
 
     /// **규칙 넷이 명령줄을 한 번만 읽는다**(moai-uc5v). 저마다 [`Lexer`] 를 세우던 판은 Bash 한
@@ -4995,8 +5072,9 @@ mod tests {
     /// 줄이 dev 빌드에서 `guard_shell` 4.59초였다(고친 뒤 2.22초, 흔한 줄도 2.1배 빨라졌다).
     ///
     /// **시계로 재지 않는다** — 부하 있는 기계에서 흔들리고, 흔들리는 시험은 곧 지워진다. 읽은
-    /// 횟수를 [`Line`] 이 세고 여기서 그 수를 못박는다. 규칙 하나가 제 `Line` 을 따로 세우면
-    /// (`Line::new(cmd)` 를 안쪽에 다시 적으면) 이 수가 는다.
+    /// 횟수를 [`READS`] 가 한 자리에서 세고 여기서 그 수를 못박는다. 규칙 하나가 제 [`Line`] 을
+    /// 안쪽에 새로 세우면(`Line::new(cmd)` 를 다시 적으면) 그 읽기도 같은 칸으로 와 이 수가 는다 —
+    /// 수를 `Line` 마다 들던 판은 바깥 것이 1 에 머물러 바로 그 뒷걸음을 못 봤다.
     #[test]
     fn the_rules_read_the_command_line_once() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -5005,15 +5083,29 @@ mod tests {
         // 규칙 넷이 다 할 일이 있는 줄 — tmux·`moai` 규칙·쓰기 셈·리뷰가 저마다 토막을 본다.
         let cmd = "moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs && moai add '딴 일' && /code-review high";
         let line = Line::new(cmd);
+        let before = reads();
         let _ = super::guard_shell_in(&all, &cfg(), &here(), root, root, &line, &all_of, &|_| None);
-        assert_eq!(line.reads(), 1, "규칙마다 명령줄을 다시 읽는다");
+        // **`cmd/hook.rs` 가 같은 줄을 건네는 나머지도 같이 본다**(리뷰 moai-uc5v.ssb) — `guard_shell_in`
+        // 하나만 몰던 판은 `aimed`·`spells_dir`·`korean_write`·`picked_in` 이 제 `Line` 을 안쪽에 다시
+        // 세워도 푸른 채였다. 넷 다 `decide` 가 이 한 줄로 부르는 것이고, 한글 heredoc 을 받는
+        // `korean_write` 가 하필 가장 긴 줄을 본다.
+        let _ = super::aimed(&line, root);
+        let _ = super::spells_dir(&line);
+        let _ = super::korean_write(&line, &|_| true, &|_| None);
+        let _ = super::picked_in(&line, &cfg(), &|_| true, &|_, _| None);
+        assert_eq!(reads() - before, 1, "규칙마다 명령줄을 다시 읽는다");
         // 명령줄을 안 보는 호출은 **아예 안 읽는다** — `Edit`·`Skill` 이 그 자리다.
+        let before = reads();
         let idle = Line::new(cmd);
-        assert_eq!(idle.reads(), 0, "묻지도 않았는데 읽었다");
-        // 그 뒤로는 물을 때마다 같은 것을 본다.
+        assert_eq!(reads() - before, 0, "묻지도 않았는데 읽었다");
+        drop(idle);
+        // 그 뒤로는 물을 때마다 같은 것을 본다. **묻는 것을 `&&`·`||` 로 잇지 않는다** — 그 이음사는
+        // 앞이 답을 내면 뒤를 안 부르니, 표본이 바뀌는 날 묻기가 한 번으로 줄어도 이 수는 그대로다.
         let asked = Line::new(cmd);
-        assert!(!super::calls_review(&asked) || super::calls_review(&asked));
-        assert_eq!(asked.reads(), 1, "물을 때마다 다시 읽는다");
+        let before = reads();
+        let _ = super::calls_review(&asked);
+        let _ = super::calls_review(&asked);
+        assert_eq!(reads() - before, 1, "물을 때마다 다시 읽는다");
     }
 
     /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo` 뒤의

@@ -113,7 +113,7 @@ struct Out<'a> {
 }
 
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
-    fail_if_nothing(&args, ctx.lang())?;
+    fail_if_nothing(&args, ctx)?;
     if let Some(t) = &args.title {
         super::refuse_if_flag_like(t.trim())?;
     }
@@ -336,7 +336,10 @@ fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str) {
     eprintln!("moai: {id} 는 {stood} — {from} {lost}. {verb} {way}");
 }
 
-fn fail_if_nothing(args: &EditArgs, lang: crate::i18n::Lang) -> R<()> {
+/// **말은 거절할 때만 푼다**([`Ctx::lang`]) — `ctx.lang()` 을 인자로 넘기면 그것이 부르는 쪽에서
+/// 먼저 풀려, 아무것도 안 거절하는 판(`--json` 과 "바뀐 것이 없다" 로 일찍 나가는 길까지)이
+/// 사람의 설정 파일을 읽는다. 곁의 넷(`defer`·`link`·`init`)은 거절하는 가지 안에서 푼다.
+fn fail_if_nothing(args: &EditArgs, ctx: &Ctx) -> R<()> {
     let touched = args.title.is_some()
         || args.body.is_some()
         || !args.tag.is_empty()
@@ -345,7 +348,7 @@ fn fail_if_nothing(args: &EditArgs, lang: crate::i18n::Lang) -> R<()> {
         || args.milestone.is_some()
         || args.priority.is_some()
         || args.assignee.is_some();
-    touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(lang, "refuse.edit_nothing")))
+    touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.edit_nothing")))
 }
 
 #[cfg(test)]
