@@ -2396,7 +2396,9 @@ impl App {
             && site.repo.as_ref().is_some_and(|r| stamp_of(r) == site.stamp);
         let known: std::collections::BTreeSet<&str> =
             site.issues.iter().map(|i| i.id.as_str()).chain(site.unreadable.iter().filter_map(Option::as_deref)).collect();
-        let written: Vec<String> = match (self.user_config.clone(), root) {
+        // **자리를 못 푼 까닭도 함께 받는다**(moai-ajh2) — 쓰는 길이 그것을 버리던 판은 옛 철자 자리에
+        // 적고도 "✓ 읽음" 만 세웠다.
+        let (written, problems): (Vec<String>, Vec<String>) = match (self.user_config.clone(), root) {
             (Some(config), Some(root)) => {
                 let wrote = crate::read_marks::update(&config, &root, |sheet| {
                     let marks = pick(&sheet.marks().0);
@@ -2407,7 +2409,7 @@ impl App {
                     Ok((written, sheet.marks().0))
                 });
                 match wrote {
-                    Ok((written, mut seen)) => {
+                    Ok(crate::read_marks::Wrote { value: (written, mut seen), problems }) => {
                         // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 겹쳐만
                         // 보는 자리들은 여기 다시 얹는다 — 옛 철자로 선 파일(moai-f5e3)과 설정의 옛
                         // `[read]`(사용자 결정 3)다. 겹치는 자는 `read_marks::read` 와 **한 함수**다
@@ -2422,7 +2424,7 @@ impl App {
                         // 옆이 쓴 파일의 표식을 제 것으로 박는다 — 그러면 [`App::follow_read`] 가 영영
                         // 같다고 보아 옆의 줄이 이 화면에 안 닿는다(이 표식이 열어 둔 바로 그 길이다).
                         // 다음 걸음이 한 번 더 읽는 값이 그것보다 싸다.
-                        written
+                        (written, problems)
                     }
                     Err(e) => {
                         self.notice = Some(format!("읽음을 못 적었다 — {}", crate::text::one_line(&e.to_string())));
@@ -2436,14 +2438,21 @@ impl App {
                 if let Some(site) = self.site_mut(seat) {
                     site.seen.extend(marks);
                 }
-                written
+                (written, Vec::new())
             }
         };
         self.recount_unread_in(seat);
-        self.notice = Some(match written.as_slice() {
-            [] => "읽음으로 적을 것이 없다".into(),
+        let said = match written.as_slice() {
+            [] => "읽음으로 적을 것이 없다".to_string(),
             [one] => format!("✓ 읽음 · {one}"),
             many => format!("✓ 읽음 · {}줄", many.len()),
+        };
+        // **적었다는 말과 어디에 적었는지를 함께 댄다**(moai-ajh2). 까닭만 세우면 `r` 이 먹었는지를 못
+        // 보고, 적었다는 말만 세우면 옛 철자 자리에 적힌 것을 어디서도 못 본다. 여기 낼 것은 스치는 알림
+        // 한 줄뿐이라([`App::take_read`] 와 같은 자리) 첫 까닭만 댄다.
+        self.notice = Some(match problems.first() {
+            Some(why) => format!("{said} — {}", crate::text::one_line(why)),
+            None => said,
         });
     }
 
@@ -5528,6 +5537,25 @@ mod tests {
         assert_eq!(seen.get("argos-0009"), Some(&stamp), "`r` 이 적은 것을 CLI 의 길이 못 든다");
         assert!(!seen.contains_key("argos-9999"), "트래커에 없는 id 를 안 걷었다 — {seen:?}");
         assert!(!config.exists(), "읽음을 설정 파일에 적었다 — 그 자리는 옛 `[read]` 뿐이다");
+    }
+
+    /// **자리를 못 풀면 적었다는 말과 함께 그것을 댄다**(moai-ajh2). 쓰는 길이 까닭을 버리던 판은 옛
+    /// 철자 자리에 적고도 "✓ 읽음" 만 세워, 눌린 `r` 이 어디에 갔는지 볼 데가 없었다.
+    #[test]
+    #[cfg(unix)]
+    fn marking_says_when_it_could_not_settle_the_root() {
+        let s = Scratch::new("read-marks-tui-why");
+        let config = s.path().join("user.toml");
+        std::fs::write(s.path().join("파일"), "x").unwrap();
+        let root = s.path().join("파일/밑");
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(root, cfg()));
+        a.user_config = Some(config);
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        let told = a.notice.as_deref().unwrap_or_default();
+        assert!(told.starts_with("✓ 읽음 · argos-0009"), "적었다는 말이 없다 — {told}");
+        assert!(told.contains("자리를 못 풀어"), "자리를 못 푼 까닭을 안 댔다 — {told}");
     }
 
     /// **이 화면이 트래커 전부를 못 봤으면 안 걷는다**(리뷰). 겹쳐 보기를 끄면 `site.issues` 에서 옆
