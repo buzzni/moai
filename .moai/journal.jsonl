@@ -5977,3 +5977,7 @@
 {"ts":"2026-09-20T05:09:25Z","id":"moai-7cyf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-20T05:09:26Z","id":"moai-cigu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-20T05:09:27Z","id":"moai-gv9n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-20T05:13:23Z","id":"moai-4qbv.i0g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 에픽 moai-4qbv 끝: 쭉 못 읽는 설정"}
+{"ts":"2026-09-20T05:13:29Z","id":"moai-4qbv.i0g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-20T05:13:37Z","id":"moai-po6v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-20T05:15:41Z","id":"moai-589b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰가 낸 것을 배포 기준으로 갈라 마일스톤 안팎에 둔다"}
