@@ -6408,3 +6408,6 @@
 {"ts":"2026-09-20T13:01:22Z","id":"moai-zdw4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 병합 경로, 재는 자를 바꿨다)"}
 {"ts":"2026-09-20T13:01:22Z","id":"moai-9khu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 병합 경로, 새 알림)"}
 {"ts":"2026-09-20T13:01:23Z","id":"moai-vbmn.spv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=379137 (max — 병합 경로 리뷰, 서브에이전트)"}
+{"ts":"2026-09-20T13:05:22Z","id":"moai-zdw4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T13:05:23Z","id":"moai-9khu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-20T13:05:42Z","id":"moai-vbmn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 리뷰가 넘긴 것은 idea 아홉으로 이 에픽에 붙어 있다 — 먼저 볼 것은 moai-afzu(declared() 를 전체 막이로 올린다). 그것이 서면 moai-nad3(조용한 상태가 없다)의 탈출구가 함께 생긴다"}
