@@ -1996,8 +1996,16 @@ impl App {
                     fields.set(f, on);
                 }
             }
+            // **새 바이너리가 적은 이름은 오타가 아니다**(moai-zwam) — 같은 설정 파일을 옛 것과 새 것이
+            // 번갈아 만지면, 옛 쪽은 제가 모른다는 이유로 그 이름을 오타로 읽어 띄울 때마다 잔소리를
+            // 했다. 고칠 길도 없다: 쓰기 경로는 그 이름을 **일부러 지키고**(`App::adopt_look` 이
+            // `saved.fields` 에서 걸러 `Doc::merge_look` 이 안 빼게 한다) 읽는 쪽만 오타로 봤다.
+            //
+            // 가르는 자는 `fields_known` 이다 — 거기 적혔다는 것은 적은 쪽이 그 열을 알았다는 뜻이다.
+            // 목록에 없는 이름은 그대로 댄다: 손으로 낸 오타가 그것이고, 그때 이 한 줄이 유일한 말이다.
+            let knew = |w: &String| look.fields_known.as_ref().is_some_and(|k| k.contains(w));
             for w in words {
-                if view::Field::named(w).is_none() {
+                if view::Field::named(w).is_none() && !knew(w) {
                     problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
@@ -4210,6 +4218,64 @@ mod tests {
             assert_eq!(b.fields.shows(f), a.fields.shows(f), "{} 이 다음 실행에 달라졌다\n{text}", f.name());
         }
         assert_eq!(b.notice, None, "제가 적은 설정을 읽으며 말이 섰다\n{text}");
+    }
+
+    /// **새 바이너리가 적은 열 이름은 오타가 아니다**(moai-zwam). 같은 설정 파일을 옛 바이너리와
+    /// 새 바이너리가 번갈아 만지면, 옛 쪽은 `fields` 의 새 이름을 제가 모른다는 이유로 오타로 읽어
+    /// 띄울 때마다 잔소리를 했다 — 게다가 고칠 길이 없다: 쓰기 경로(`Doc::merge_look`)는 그 이름을
+    /// **일부러 지킨다**(`App::adopt_look` 이 `saved.fields` 에서 걸러 둔다). 읽는 쪽만 오타로 본 것이다.
+    ///
+    /// 가르는 자는 `fields_known` 이다 — 거기 적혔다는 것은 **적은 쪽이 그 열을 알았다**는 뜻이라
+    /// 오타일 수 없다. 목록에 없는 이름은 그대로 잔소리한다(손으로 낸 오타가 그것이다).
+    #[test]
+    fn a_column_a_newer_binary_wrote_is_not_nagged_as_a_typo() {
+        let known: Vec<String> =
+            view::Field::ALL.into_iter().map(|f| f.name().to_string()).chain(["futurecol".into()]).collect();
+        let newer = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "futurecol".into()]),
+            fields_known: Some(known),
+            ..crate::user_config::Look::default()
+        };
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.adopt_look(&newer, Vec::new());
+        assert_eq!(a.notice, None, "새 바이너리가 적은 열을 오타로 읽었다 — {:?}", a.notice);
+        assert!(a.fields.shows(view::Field::Id), "적힌 열이 안 켜졌다");
+
+        // 손으로 낸 오타는 그대로 잔소리한다 — 아무도 그 이름을 안다고 적지 않았다.
+        let typo = crate::user_config::Look {
+            fields: Some(vec!["id".into(), "priorty".into()]),
+            ..crate::user_config::Look::default()
+        };
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        b.adopt_look(&typo, Vec::new());
+        assert!(b.notice.as_deref().is_some_and(|n| n.contains("priorty")), "오타를 그냥 지나갔다 — {:?}", b.notice);
+    }
+
+    /// **옛 바이너리가 한 번 만져도 새 열 이름이 안 사라진다**(moai-zwam) — 매 저장이 파일 전체를
+    /// 다시 쓰는 길이라, 모르는 이름을 안 지키면 새 바이너리가 켜 둔 열이 옛 쪽의 토글 한 번에
+    /// 지워진다. `moai-zwam` 이 잔소리를 걷은 뒤에도 그 지킴은 그대로여야 한다.
+    #[test]
+    fn an_older_binary_keeps_the_column_names_it_does_not_know() {
+        let s = scratch("fields-newer-binary");
+        let user = s.join("user.toml");
+        let known: Vec<String> =
+            view::Field::ALL.into_iter().map(|f| f.name().to_string()).chain(["futurecol".into()]).collect();
+        let quoted = known.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
+        std::fs::write(&user, format!("[tui]\nfields = [\"id\", \"futurecol\"]\nfields_known = [{quoted}]\n")).unwrap();
+
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        assert_eq!(a.notice, None, "제가 모르는 열을 오타로 읽었다 — {:?}", a.notice);
+        a.hit("SPC c t Esc");
+
+        let text = std::fs::read_to_string(&user).unwrap();
+        let (back, problems) = crate::user_config::read_look(Some(&user));
+        assert!(problems.is_empty(), "{problems:?}\n{text}");
+        let (fields, known) = (back.fields.unwrap_or_default(), back.fields_known.unwrap_or_default());
+        assert!(fields.iter().any(|w| w == "futurecol"), "켜 둔 새 열을 지웠다\n{text}");
+        assert!(known.iter().any(|w| w == "futurecol"), "아는 열 목록에서 새 열을 지웠다\n{text}");
+        assert!(fields.iter().any(|w| w == "tags"), "이쪽이 켠 열을 안 적었다\n{text}");
     }
 
     /// **손으로 적은 표 모양의 거절은 한 번만 말한다**(moai-fdq2). 건너뛴 키를 `App::saved` 에 든
