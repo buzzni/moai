@@ -2116,17 +2116,68 @@ pub fn rollup_of_in(
 /// 에이전트가 `moai show -s todo --type issue --parent none …` 를 매번
 /// 조립하게 두면 조립할 때마다 규칙이 조금씩 달라진다.
 pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    ready_in(issues, cfg).0
+}
+
+/// 도는 마일스톤이 [`ready`] 에 한 일 — 그 마일스톤들과, 그것 때문에 이번에 **안 낸** 밖의 일.
+///
+/// **저장하지 않는다.** 둘 다 줄들을 지금 읽어 낸 값이라, 필드로 적는 순간 멤버를 하나 집거나
+/// 놓을 때마다 남의 줄을 다시 써야 한다 — beads 가 `is_blocked` 를 컬럼으로 들고 있다가
+/// `bd recompute-blocked` 를 만들어야 했던 그 자리다.
+#[derive(Debug, Default)]
+pub struct Focus<'a> {
+    /// 도는 마일스톤의 줄. 없으면 비었고, 그러면 `ready` 는 예전과 같다. **id 가 아니라 줄을
+    /// 든다** — 대는 쪽이 제목을 함께 내야 사람이 어느 마일스톤인지 안다.
+    pub running: Vec<&'a Issue>,
+    /// 도는 마일스톤 밖이라 이번에 안 낸 일. **`p0` 은 안 든다** — 핫픽스는 밖에서도 집는다.
+    pub outside: Vec<&'a Issue>,
+}
+
+/// 도는 마일스톤 — **멤버에서 읽는다**(moai-493a, 2026-09-20 사용자 결정).
+///
+/// 시작한 칸의 멤버가 하나라도 있는 마일스톤이다([`Stand::busy`]). 사람이 손으로 여닫는 축을
+/// 새로 두지 않는 까닭은 그것이 **칸과 따로 도는 둘째 어휘**여서다 — 여는 것을 잊으면 규칙이
+/// 영영 안 서고, 닫는 것을 잊으면 영영 안 풀린다. 칸은 이미 멤버에서 읽으므로 새 필드도 새
+/// 명령도 없이 같은 말을 한다.
+///
+/// **막대(`3/5`)로는 못 잰다.** 묶음은 멤버 하나가 끝나고 나머지가 첫 칸이기만 해도 시작한
+/// 칸으로 읽히는데(`column_of`), 그것은 "반쯤 했다" 지 "지금 누가 하고 있다" 가 아니다.
+///
+/// **미뤄 둔 마일스톤은 안 센다.** 계획에서 뺀 것이 밖의 일을 밀어내면, 미루기가 도리어 규칙을
+/// 세우는 손잡이가 된다.
+fn running_in<'a>(
+    by_id: &BTreeMap<&'a str, &'a Issue>,
+    stands: &BTreeMap<&'a str, Stand<'a, '_>>,
+    out_of_plan: &BTreeSet<&str>,
+) -> Vec<&'a Issue> {
+    stands
+        .iter()
+        .filter(|(id, s)| s.busy && !out_of_plan.contains(*id))
+        .filter_map(|(id, _)| by_id.get(id).copied())
+        .filter(|m| m.kind == Kind::Milestone)
+        .collect()
+}
+
+/// [`ready`] 와 같은 것. **목록이 왜 짧은지도 함께 낸다**(moai-q04l).
+///
+/// 도는 마일스톤이 있으면 그 밖의 일은 `p0` 만 남는다(2026-09-20 사용자 결정) — 밖의 일을
+/// 새로 집지 않는다는 규칙이 여기 한 곳에 선다. **막지는 않는다**: 뺀 줄을 [`Focus::outside`]
+/// 로 함께 내어 부르는 쪽이 그것을 말할 수 있게 한다. 훅이 집기를 거절하면 그것은 게이트고,
+/// 게이트를 안 늘리는 것이 이 도구의 자리다.
+pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus<'a>) {
     let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **막음과 차례가 한 번의 셈을 쓴다.** 끝나가는지를 롤업으로 따로 재면 미룬 멤버를 세는
     // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
-    // 늘어나는 셈은 없다.
+    // 늘어나는 셈은 없다. **도는 마일스톤도 같은 셈에서 읽는다** — 따로 재면 `ready` 가 빼는
+    // 자와 `status` 가 비추는 자가 갈린다.
     let mile_of = milestones(issues);
     let roots = deferred_roots_in(issues, &group, &mile_of);
     let stands = group_stands_in(issues, cfg, &group, &mile_of, &roots);
     let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
-    let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    let running = running_in(&by_id, &stands, &out_of_plan);
+    let (states, waits) = split_stands(stands);
     let eclipsed = eclipsed(issues);
     let mut out: Vec<&Issue> = issues
         .iter()
@@ -2136,18 +2187,37 @@ pub fn ready<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
         })
         .collect();
 
-    // 급한 것 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
+    // **도는 마일스톤 안인가.** 소속은 물려받은 것까지다(`milestones`) — 에픽의 마일스톤이
+    // 그 멤버의 것이므로, 이슈마다 마일스톤을 다시 적은 저장소가 아니어도 선다.
+    let inside = |i: &Issue| {
+        mile_of.get(i.id.as_str()).is_some_and(|m| running.iter().any(|r| r.id == *m))
+    };
+    // **`p0` 은 마일스톤과 무관하게 남는다**(사용자 결정 2) — 핫픽스 자리다. 그 자리가 없으면
+    // 마일스톤이 도는 동안 밖에서 터진 것을 고칠 길이 도구 밖에만 남는다.
+    let mut outside = Vec::new();
+    if !running.is_empty() {
+        let (picks, held) = out.into_iter().partition(|i| inside(i) || i.priority() == 0);
+        out = picks;
+        outside = held;
+    }
+
+    // 급한 것 → 도는 마일스톤 안 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
     // 벌여 놓은 에픽이 줄어든다.
+    //
+    // **급한 것이 먼저고 마일스톤은 그다음이다.** 뒤집으면 밖에 선 `p0` 핫픽스가 마일스톤 안의
+    // `p2` 밑으로 내려간다 — 핫픽스를 밖에서도 집기로 한 결정이 차례에서 도로 무너진다.
     let pct = |i: &Issue| group.get(i.id.as_str()).and_then(|e| progress.get(e)).copied().unwrap_or(0);
     out.sort_by(|a, b| {
         let (pa, pb) = (pct(a), pct(b));
         a.priority()
             .cmp(&b.priority())
+            .then_with(|| inside(b).cmp(&inside(a)))
             .then_with(|| pb.cmp(&pa))
             .then_with(|| a.created_at.cmp(&b.created_at))
             .then_with(|| a.id.cmp(&b.id))
     });
-    out
+    outside.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
+    (out, Focus { running, outside })
 }
 
 /// **이로써 풀린 일** — 쓰기 전(`before`)에는 [`ready`] 가 아니었고 쓴 뒤(`after`)에는
@@ -2703,8 +2773,10 @@ pub fn status_in<'a>(
     let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
-    let (states, waits) = split_stands(stands);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+    // 도는 마일스톤 — `ready` 가 밖의 일을 빼는 자와 **같은 자다**(moai-493a).
+    let running = running_in(&by_id, &stands, &out_of_plan);
+    let (states, waits) = split_stands(stands);
     let work: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
@@ -3050,6 +3122,30 @@ pub fn status_in<'a>(
                 .oldest(oldest)
                 .notice()
                 .hint("moai show --deferred"),
+        );
+    }
+
+    // 6-4. 도는 마일스톤(moai-tvvb). **알림이다** — 고칠 것이 아니라 지금 무엇이 먼저인지를
+    //      대는 줄이고, `ready` 가 밖의 일을 안 내는 까닭이 여기 말고는 설 데가 없다.
+    //
+    //      **도는지는 멤버에서 읽는다**([`running_in`]) — 위에서 이미 잰 `stands` 를 그대로
+    //      쓴다. 여기서 다시 재면 `ready` 가 빼는 자와 이 줄이 비추는 자가 갈린다.
+    //
+    //      **세는 것은 밖에 남은 일이다**, `ready` 가 낼 수 있는 것이 아니다 — 막혔거나 자식이
+    //      열린 줄도 "이번 마일스톤 밖에 남았다" 는 말에는 든다. 두 수가 다를 수 있어 낱말도
+    //      다르게 적는다(`ready` 는 "안 냈다", 여기는 "밖에 남았다").
+    //      **`p0` 은 안 센다** — 밖에 있어도 집는 것이라 이 줄이 미루라고 말하는 대상이 아니다.
+    if !running.is_empty() {
+        let outside = work
+            .iter()
+            .filter(|i| !i.status.is_done() && i.priority() != 0)
+            .filter(|i| !soil.milestone.get(i.id.as_str()).is_some_and(|m| running.iter().any(|r| r.id == *m)))
+            .count();
+        notices.push(
+            Warning::new("milestone_focus", running.iter().map(|m| m.id.clone()).collect())
+                .count(outside)
+                .notice()
+                .hint("moai ready"),
         );
     }
 
@@ -4109,6 +4205,104 @@ mod tests {
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         // p0 → 50% 에픽 멤버 → 0% 에픽 멤버
         assert_eq!(got, ["argos-000d", "argos-000b", "argos-000c"], "{got:?}");
+    }
+
+    /// 마일스톤 하나와 그 안의 에픽·멤버, 그리고 밖에 선 일 둘(`p2`·`p0`).
+    /// `start` 면 안의 멤버 하나를 집은 채로 둔다 — 그것이 "도는 중" 의 뜻이다.
+    fn with_milestone(start: bool) -> Vec<Issue> {
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.title = "v0.1".into();
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some("argos-m001".into());
+        let mut hot = make("argos-000z", Kind::Issue, "todo");
+        hot.priority = Some(0);
+        vec![
+            stone,
+            epic,
+            member("argos-001a", "argos-0001", if start { "in_progress" } else { "todo" }),
+            member("argos-001b", "argos-0001", "todo"),
+            make("argos-000y", Kind::Issue, "todo"), // 밖의 p2
+            hot,                                     // 밖의 p0
+        ]
+    }
+
+    /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-q04l, 2026-09-20 사용자 결정).
+    ///
+    /// 밖의 일은 `p0` 만 남고 나머지는 [`Focus::outside`] 로 빠진다 — 지우는 것이 아니라
+    /// 대는 것이다. 막지 않기로 한 결정이 여기서 서므로, 뺀 줄이 목록에 남아야 부르는 쪽이
+    /// 왜 짧은지 말할 수 있다.
+    #[test]
+    fn a_running_milestone_pulls_its_members_up_and_leaves_only_p0_outside() {
+        let issues = with_milestone(true);
+        let (picks, focus) = ready_in(&issues, &cfg());
+        let got: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+        // 밖의 `p0` 이 먼저다 — 핫픽스는 마일스톤보다 급하다. 그다음이 도는 마일스톤의 남은 멤버.
+        assert_eq!(got, ["argos-000z", "argos-001b"], "{got:?}");
+        assert_eq!(focus.running.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["argos-m001"]);
+        let held: Vec<&str> = focus.outside.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(held, ["argos-000y"], "밖의 p2 를 안 뺐거나 어디에도 안 담았다 — {held:?}");
+    }
+
+    /// **세워 두기만 한 마일스톤은 안 돈다.** 시작을 멤버에서 읽으므로(`Stand::busy`),
+    /// 아무도 집지 않은 동안은 규칙이 서지 않고 밖의 일이 그대로 선다 — 사용자가 고른 대가다.
+    #[test]
+    fn a_milestone_nobody_has_started_changes_nothing() {
+        let issues = with_milestone(false);
+        let (picks, focus) = ready_in(&issues, &cfg());
+        let got: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+        assert!(focus.running.is_empty() && focus.outside.is_empty(), "{focus:?}");
+        assert!(got.contains(&"argos-000y"), "안 도는데 밖의 일을 뺐다 — {got:?}");
+        assert_eq!(got.len(), 4, "{got:?}");
+    }
+
+    /// **미뤄 둔 마일스톤은 안 돈다.** 계획에서 뺀 것이 밖의 일을 밀어내면, 미루기가 도리어
+    /// 규칙을 세우는 손잡이가 된다 — 미룬 묶음의 멤버는 애초에 `ready` 에도 없다.
+    #[test]
+    fn a_deferred_milestone_does_not_run() {
+        let mut issues = with_milestone(true);
+        issues[0].deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let (picks, focus) = ready_in(&issues, &cfg());
+        assert!(focus.running.is_empty(), "{focus:?}");
+        let got: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-000z", "argos-000y"], "미룬 마일스톤이 밖의 일을 밀어냈다 — {got:?}");
+    }
+
+    /// **도는 마일스톤이 둘이면 둘 다 안이다**(사용자 결정 3). 그 안의 차례는 지금까지와 같다.
+    #[test]
+    fn two_running_milestones_are_both_inside() {
+        let mut issues = with_milestone(true);
+        let mut other = make("argos-m002", Kind::Milestone, "todo");
+        other.title = "v0.2".into();
+        let mut epic = make("argos-0002", Kind::Epic, "todo");
+        epic.milestone = Some("argos-m002".into());
+        issues.push(other);
+        issues.push(epic);
+        issues.push(member("argos-002a", "argos-0002", "in_progress"));
+        issues.push(member("argos-002b", "argos-0002", "todo"));
+        let (picks, focus) = ready_in(&issues, &cfg());
+        let running: Vec<&str> = focus.running.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(running, ["argos-m001", "argos-m002"], "{running:?}");
+        let got: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(got, ["argos-000z", "argos-001b", "argos-002b"], "{got:?}");
+    }
+
+    /// **보드가 그것을 알림 한 줄로 댄다**(moai-tvvb). 경고가 아니라 알림이고, 세는 것은
+    /// 밖에 남은 일이다 — `p0` 은 밖에 있어도 집으므로 안 센다.
+    #[test]
+    fn the_board_says_a_milestone_is_running_and_counts_what_waits_outside() {
+        let issues = with_milestone(true);
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let w = st.notices.iter().find(|w| w.kind == "milestone_focus").expect("알림이 없다");
+        assert!(w.notice && !w.fatal, "{w:?}");
+        assert_eq!(w.ids, ["argos-m001"], "{w:?}");
+        assert_eq!(w.count, 1, "밖에 남은 일을 잘못 셌다(p0 을 셌나) — {w:?}");
+        assert!(
+            !st.warnings.iter().any(|w| w.kind == "milestone_focus"),
+            "알림이 경고로 섰다 — 세션을 붙드는 자리가 된다"
+        );
+        // 안 도는 저장소에는 줄이 없다.
+        let quiet = status(&with_milestone(false), &[], &cfg(), "2026-09-11T00:00:00Z");
+        assert!(!quiet.notices.iter().any(|w| w.kind == "milestone_focus"), "{:?}", quiet.notices);
     }
 
     /// **끝나가는지는 칸 셈과 같은 자로 잰다**(moai-ha03). 미룬 멤버까지 센 막대로 재면, 한 번만

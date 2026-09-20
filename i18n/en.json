@@ -56,5 +56,7 @@
   "status.age": "{d}d",
   "status.overlaid": "{trees} overlaid",
   "opening.commands": "Commands: `moai --help`",
-  "opening.commands_here": "Commands: `moai --help`   ·   how to work in this repo: AGENTS.md"
+  "opening.commands_here": "Commands: `moai --help`   ·   how to work in this repo: AGENTS.md",
+  "warn.milestone_focus": "A milestone is running — {n} outside it are left for later (p0 still gets picked)",
+  "ready.outside_held": "{n} outside the running milestone are not listed — finish inside first (p0 still shows)"
 }
