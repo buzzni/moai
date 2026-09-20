@@ -683,6 +683,11 @@ impl App {
                 self.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
+                // **그 프로젝트의 읽음을 여기서 든다**(리뷰) — [`App::leave_project`] 가 `Site` 를 비워
+                // `seen` 이 빈 표라, 안 들면 아래의 들이기가 그 빈 표로 세어 **내게 온 줄이 모두** [NEW]
+                // 로 그려진다. 걸음이 그것을 고치지만 걸음은 최대 700ms 뒤고, 그사이 `SPC m a` 를 누르면
+                // 안 든 표로 잰 "안 읽음" 전부에 도장을 찍는다. 자리는 `me` 를 다시 푸는 바로 여기다.
+                self.load_read();
                 self.cursor = 0;
                 // 떠난 프로젝트의 줄은 `leave_project` 가 이미 비웠다 — 두 프로젝트가 같은 prefix 를
                 // 쓰면(`argos-0001`) 남은 줄의 id 로 들이기가 커서를 붙들어 남의 줄 번호에 섰다.
@@ -2454,7 +2459,7 @@ mod tests {
         let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
-        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 읽음을 들었다");
+        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
 
         // 설정이 바뀌었는데 그 읽기가 진다. 층도 읽어 둔 줄도 그대로여야 한다.
         s.register(&[&one, &two, &three]);
@@ -2463,7 +2468,7 @@ mod tests {
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "잠깐 못 읽은 것으로 층이 사라졌다");
         assert_eq!(a.config_stamp, blind, "못 읽었는데 표식을 올렸다 — 설정이 다시 바뀔 때까지 다시 안 읽는다");
-        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 읽음이 사라졌다");
+        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "못 읽은 설정의 빈 표를 들여 옛 [read] 가 사라졌다");
 
         // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다.
         chmod(&cfg, 0o644);
@@ -2484,7 +2489,7 @@ mod tests {
         a.user_config = Some(cfg.clone());
         a.follow();
         assert_eq!(names(&a), ["one", "two"]);
-        assert!(a.seen.is_empty(), "시험의 전제 — 아직 적어 둔 읽음이 없다");
+        assert!(a.legacy_read.is_empty(), "시험의 전제 — 아직 옛 [read] 가 없다");
 
         // 한 번의 쓰기가 둘을 함께 바꾼다 — 한 걸음 뒤 둘 다 들어 있어야 한다.
         s.register(&[&one, &two, &three]);
@@ -2492,7 +2497,7 @@ mod tests {
         std::fs::write(&cfg, both).unwrap();
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two", "three"], "등록을 안 들었다");
-        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "읽음을 안 들었다");
+        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "옛 [read] 를 안 들었다");
     }
 
     /// **깨진 설정은 다시 읽어도 같다** — 못 읽은 것과 달리 표식을 올리고 그 까닭을 댄다(moai-9p7v).
@@ -2511,16 +2516,16 @@ mod tests {
         let marks = format!("{}\n[read]\nargos-0001 = \"2026-09-14T00:00:00Z\"\n", std::fs::read_to_string(&cfg).unwrap());
         std::fs::write(&cfg, &marks).unwrap();
         settle(&mut a);
-        assert_eq!(a.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 읽음을 들었다");
+        assert_eq!(a.legacy_read.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"), "시험의 전제 — 옛 [read] 를 들었다");
 
         std::fs::write(&cfg, "[[project]\npath = ").unwrap();
         settle(&mut a);
         assert_eq!(a.config_stamp, Some(crate::store::stamp(&cfg)), "깨진 설정의 표식은 올라간다");
         assert!(a.layer.as_ref().is_none_or(|l| l.places.is_empty()), "깨진 설정으로 층이 남았다");
         assert_eq!(
-            a.seen.get("argos-0001").map(String::as_str),
+            a.legacy_read.get("argos-0001").map(String::as_str),
             Some("2026-09-14T00:00:00Z"),
-            "깨진 설정의 빈 표를 들여 읽음이 사라졌다"
+            "깨진 설정의 빈 표를 들여 옛 [read] 가 사라졌다"
         );
     }
 

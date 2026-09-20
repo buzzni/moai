@@ -80,8 +80,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
     // 차례가 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
     app.adopt_look(&reg.look, reg.look_problems);
-    // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
-    app.adopt_read(reg.read);
+    // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
+    app.legacy_read = reg.read;
+    app.load_read();
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
@@ -155,7 +156,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.config_stamp = config_stamp;
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, reg.look_problems);
-    app.adopt_read(reg.read);
+    app.legacy_read = reg.read;
+    app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)

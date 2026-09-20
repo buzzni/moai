@@ -3422,7 +3422,30 @@ const JSON_SWEEP: &[&str] = &[
     "merge-driver",
 ];
 
-/// **읽음은 내 설정에만 적힌다**(moai-u8oh, 사용자 결정) — 트래커 파일은 한 바이트도 안 바뀐다.
+/// 그 설정 곁의 읽음 파일들을 이어 읽는다(moai-omx7) — 읽음은 이제 설정이 아니라
+/// `<설정 디렉터리>/read/<뿌리 해시>.toml` 에 프로젝트마다 하나씩 산다. 아직 아무것도 안 적었으면 빈 글이다.
+///
+/// **어느 뿌리의 것인지 함께 본다**(리뷰) — 이름이 해시라 시험은 그 이름을 못 짓는데, 파일마다 제
+/// 뿌리를 `path` 로 적어 두므로 그것을 견준다. 안 견주던 판은 이 자리에 선 다섯 단언이 **어느**
+/// 뿌리로 적혔는지를 못 가려, 뿌리를 잘못 고르는 버그가 죄다 초록으로 지나갔다(선 체크아웃으로
+/// 고르던 탐색기가 그랬다).
+fn read_sheet(cfg: &std::path::Path, root: &std::path::Path) -> String {
+    let dir = cfg.parent().expect("설정에 디렉터리가 있다").join("read");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return String::new() };
+    let mut files: Vec<std::path::PathBuf> =
+        entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "toml")).collect();
+    files.sort();
+    let mine = format!("path = {:?}", root.display().to_string());
+    files
+        .iter()
+        .map(|p| std::fs::read_to_string(p).expect("방금 본 파일이다"))
+        .inspect(|text| assert!(text.contains(&mine), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// **읽음은 내 설정 곁에만 적힌다**(moai-u8oh 사용자 결정, 자리는 moai-omx7 이 프로젝트마다로 갈랐다) —
+/// 트래커 파일은 한 바이트도 안 바뀌고, 설정 파일의 `[read]` 도 더는 안 적힌다(아래가 그것을 잰다).
 /// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
 /// 적는다 — 물려받은 소속도 센다(moai-u8oh.x85). 없는 줄은 #a-partial 대로 말하고 비영으로 끝나고,
 /// id 를 준 길은 누군지 몰라도 적는다.
@@ -3440,8 +3463,9 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
 
     let out = mine(&["read", &member, "--json"]);
     assert!(out.contains(&member), "{out}");
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg, s.path());
     assert!(saved.contains("[read]") && saved.contains(&member), "{saved}");
+    assert!(!std::fs::read_to_string(&cfg).unwrap_or_default().contains("[read]"), "읽음을 설정 파일에 적었다");
     assert_eq!(issues(s.path()), before, "읽었다고 트래커가 바뀌었다");
 
     // 두 번째는 적을 것이 없다 — 그 뒤로 줄이 안 바뀌어 같은 도장이 이미 적혀 있다(moai-lyc1).
@@ -3506,7 +3530,7 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
 
     // 02:00 에 읽는다 — 적히는 것은 그 줄의 도장(00:00)이다.
     at("2026-09-18T02:00:00Z", &["read", &id]);
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg, s.path());
     assert!(saved.contains(&format!("\"{id}\" = \"2026-09-18T00:00:00Z\"")) || saved.contains(&format!("{id} = \"2026-09-18T00:00:00Z\"")), "{saved}");
 
     // 가지에서 01:30 에 찍힌 고침이 머지로 들어온다 — 읽은 때(02:00)보다 이르지만 본 줄과 다르다.
@@ -3516,8 +3540,10 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
 
     // 옛 값(본 때, 도장보다 늦다)은 옛 뜻대로 읽는다 — 그 뒤로 안 바뀐 줄은 안 읽음이 아니다.
     let old = field(&at("2026-09-18T04:00:00Z", &["add", "옛 바이너리로 읽은 줄", "--json"]), "id");
-    let text = std::fs::read_to_string(&cfg).unwrap();
-    std::fs::write(&cfg, format!("{text}\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
+    // **옛 자리에 적는다** — 옛 바이너리가 적던 곳이 설정의 `[read]` 다. 새 자리의 파일에 없는 id 라
+    // 겹쳐 읽기가 그것을 든다(moai-omx7, 사용자 결정 3).
+    let text = std::fs::read_to_string(&cfg).unwrap_or_default();
+    std::fs::write(&cfg, format!("{text}\n[read]\n\"{old}\" = \"2026-09-18T05:00:00Z\"\n")).unwrap();
     let out = at("2026-09-18T06:00:00Z", &["read", "--all", "--json"]);
     assert!(!out.contains(&old), "옛 값으로 읽은 줄이 다시 [NEW] 로 섰다 — {out}");
 }
@@ -3540,7 +3566,7 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
 
     let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
     assert!(out.contains("argos-0001"), "안 읽은 쌍둥이를 안 적었다 — {out}");
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg, s.path());
     assert!(saved.contains("argos-0001 = \"2026-09-18T05:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
     let out = ok_with(s.path(), &cfg, &["read", "--all", "--json"]);
     assert!(!out.contains("argos-0001"), "읽은 쌍둥이가 여전히 안 읽음이다 — {out}");
@@ -3548,8 +3574,45 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
     // id 를 준 길도 같다 — 뒷줄이 늦으면 뒷줄 것이다.
     std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("2026-09-18T06:00:00Z"), line("2026-09-18T07:00:00Z"))).unwrap();
     ok_with(s.path(), &cfg, &["read", "argos-0001"]);
-    let saved = std::fs::read_to_string(&cfg).unwrap();
+    let saved = read_sheet(&cfg, s.path());
     assert!(saved.contains("argos-0001 = \"2026-09-18T07:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
+}
+
+/// **못 읽는 줄 하나가 그 이슈의 읽음을 걷어 가지 않는다**(리뷰) — 걷기(moai-dt5q)는 "트래커에 없는
+/// id" 를 지우는데, `load.issues` 는 *이 바이너리가 이번에 읽어 낸* 줄이지 트래커가 든 줄이 아니다.
+/// 한 줄이 깨진 동안 부른 `moai read` 하나가 그 이슈의 읽음을 걷으면, 줄을 고친 뒤 [NEW] 가 되살아난다 —
+/// 조용한 손실이고, 그 id 를 아는 자(`Load::reserved_ids`)는 이미 있었다.
+#[test]
+fn a_line_i_cannot_parse_keeps_its_read_mark() {
+    let s = init("readbroken");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let one = field(&mine(&["add", "성한 줄", "--json"]), "id");
+    let two = field(&mine(&["add", "곧 깨질 줄", "--json"]), "id");
+    mine(&["read", &one, &two]);
+    assert!(read_sheet(&cfg, s.path()).contains(&two), "시험의 전제 — 둘 다 적혔다");
+
+    // 한 줄을 못 읽게 만든다 — 그 줄은 여전히 트래커에 있고 **그 id 도 그대로다**. 제목을 수로 바꾼다:
+    // JSON 으로는 성해 `Load` 가 id 를 읽어 내고(`reserved_ids`), `Issue` 로는 안 풀린다. 줄 끝에 쓰레기를
+    // 붙이면 JSON 자체가 깨져 id 마저 못 읽어, 걷는 자가 지킬 것을 모르는 딴 자리가 된다.
+    let at = s.path().join(".moai/issues.jsonl");
+    let text = std::fs::read_to_string(&at).unwrap();
+    let broken: String = text
+        .lines()
+        .map(|l| if l.contains(&two) { format!("{}\n", l.replace("\"title\":\"", "\"title\":0,\"was\":\"")) } else { format!("{l}\n") })
+        .collect();
+    std::fs::write(&at, &broken).unwrap();
+    // 못 읽는 줄은 `status` 가 0 아닌 코드로 댄다(CLAUDE.md — 종료 코드는 데이터가 깨졌을 때만 그렇다).
+    // 그래도 그 id 는 트래커가 쥔 채다 — 걷는 자가 봐야 하는 것이 그것이다.
+    assert!(!moai_with(s.path(), &cfg, &["status", "--json"]).status.success(), "못 읽는 줄을 status 가 안 댔다");
+
+    mine(&["read", &one]);
+    assert!(read_sheet(&cfg, s.path()).contains(&two), "못 읽는 줄의 읽음을 걷었다 — {}", read_sheet(&cfg, s.path()));
+
+    // 줄을 고치면 그 줄은 다시 읽음이다 — [NEW] 로 되살아나지 않는다.
+    std::fs::write(&at, &text).unwrap();
+    let out = mine(&["read", "--all", "--json"]);
+    assert!(!out.contains(&two), "고친 줄이 다시 [NEW] 로 섰다 — {out}");
 }
 
 /// **`-e` 는 그 묶음 밑에 그려진 것만 적는다**(moai-j038.vna) — 트리·`show -e`·탐색기의 `SPC m g` 과 같은
@@ -3581,7 +3644,7 @@ fn reading_a_group_takes_what_is_drawn_under_it() {
     let out = moai_with(s.path(), &cfg, &["read", "-e", &by_field]);
     assert!(!out.status.success(), "묶음이 아닌 줄을 받았다");
     assert!(String::from_utf8_lossy(&out.stderr).contains("에픽·마일스톤"), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(!std::fs::read_to_string(&cfg).unwrap().contains(&format!("{by_field} =")), "거절해 놓고 적었다");
+    assert!(!read_sheet(&cfg, s.path()).contains(&format!("{by_field} =")), "거절해 놓고 적었다");
 }
 
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
@@ -4562,6 +4625,32 @@ fn every_help_heredoc_is_copyable() {
     }
     assert!(seen >= 4, "도움말에서 heredoc 을 {seen}개밖에 못 찾았다");
     assert!(bad.is_empty(), "복사해 못 도는 heredoc:\n{}", bad.join("\n"));
+}
+
+/// **도움말도 자유 글을 작은따옴표로 가르친다** (moai-vj4e, 2026-09-18 사용자 결정).
+///
+/// 큰따옴표로 가르친 `-m`·`-b`·노트는 채운 글에 백틱이나 `$(…)` 가 들면 셸이 명령 치환을
+/// 해 글이 잘린 채 0 으로 끝난다 — 이 저장소의 노트는 백틱을 자주 쓴다. `guide` 의 같은
+/// 이름 시험은 AGENTS 블록과 스킬 글만 훑어 `--help` 를 못 본다. 도움말이 사람과 에이전트가
+/// 가장 먼저 읽는 자리라 여기서 함께 잰다.
+#[test]
+fn every_help_teaches_free_text_in_single_quotes() {
+    let s = init("helpquotes");
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for (path, help) in every_help(&s) {
+        for l in help.lines().filter(|l| l.contains("moai ")) {
+            seen += 1;
+            // 제목 자리도 자유 글이다(moai-1yya) — 이 저장소 제목에는 백틱이 든다.
+            for pat in ["-m \"", "-b \"", "add \"", "note <id> \"", "note moai-4aex \""] {
+                if l.contains(pat) {
+                    bad.push(format!("moai {path} --help: {l}"));
+                }
+            }
+        }
+    }
+    assert!(seen > 40, "`moai` 가 든 도움말 줄을 {seen}개밖에 못 봤다 — 훑기가 헛돌았다");
+    assert!(bad.is_empty(), "자유 글을 큰따옴표로 가르치는 도움말:\n{}", bad.join("\n"));
 }
 
 /// **좁은 터미널에서도 heredoc 여는 줄이 접히지 않는다** (moai-opjn).
@@ -9773,11 +9862,20 @@ fn skill_install_skips_a_korean_marketplace_that_points_elsewhere() {
     let out = c.run(s.path(), &["skill", "install", "--json"], true);
     assert!(out.status.success(), "{}", text(&out));
     let json = String::from_utf8(out.stdout).unwrap();
-    assert!(json.contains("이미 someone/else 를 가리킨다"), "{json}");
+    // **맨 위의 `blocked_by` 와 같은 모양이다**(moai-mfw1) — 막은 자리 하나고, 까닭은 사람
+    // 출력의 몫이다. 한때 여기만 문장이라 같은 이름의 키가 한 출력 안에서 뜻이 둘이었다.
+    assert!(json.contains(r#""blocked_by":"someone/else""#), "{json}");
+    assert!(!json.contains("가리킨다"), "기계 출력에 사람이 읽을 문장이 섰다 — {json}");
     let calls = c.calls()[before..].to_string();
     assert!(!calls.contains("korean-skills"), "남의 이름을 건드렸다\n{calls}");
     assert!(calls.contains("plugin marketplace add epoko77-ai/im-not-ai --scope local"), "아는 출처를 이 범위에 안 적는다\n{calls}");
     assert!(calls.contains("plugin install humanize-korean@im-not-ai --scope local -y"), "{calls}");
+
+    // **빠져나갈 길을 함께 낸다**(moai-mfw1). 까닭만 적던 판은 다시 불러도 늘 건너뛰기만 해,
+    // 훅의 "깔려 있지 않다" 알림이 영영 안 꺼졌다 — moai 의 이름이 막혔을 때와 같은 길이다.
+    let said = text(&c.run(s.path(), &["skill", "install"], true));
+    assert!(said.contains("이미 someone/else 를 가리킨다"), "{said}");
+    assert!(said.contains("claude plugin marketplace remove korean-skills"), "빠져나갈 길이 없다 — {said}");
 }
 
 /// **같은 저장소를 다른 철자로 알면 남의 것으로 안 본다**(리뷰 moai-5wk4.76z). upstream 안내대로

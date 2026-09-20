@@ -34,6 +34,14 @@ impl Repo {
         Repo { root, config, moved_from: None }
     }
 
+    /// 시험용 — **딸린 워크트리에서 루트의 트래커로 옮겨 온** [`Repo`]. [`Repo::here`] 와
+    /// [`Repo::root`] 가 갈린다. [`Repo::at`] 만으로 세운 시험은 둘이 늘 같아, 둘을 헷갈린 자리를
+    /// 하나도 못 잡는다(탐색기가 읽음 파일을 `here()` 로 고르던 자리, 리뷰).
+    #[cfg(test)]
+    pub fn moved(root: PathBuf, config: Config, from: PathBuf) -> Repo {
+        Repo { root, config, moved_from: Some(from) }
+    }
+
     /// 이 세션이 **선 체크아웃** — 트래커를 루트로 옮겨 왔으면 옮겨 오기 전의 자리다(moai-y7go).
     ///
     /// [`Repo::root`] 는 **트래커가 사는 곳**이다. 둘은 딸린 워크트리에서만 갈리는데, 이 저장소는
@@ -839,6 +847,22 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()
         }
     }
     Ok(())
+}
+
+/// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
+pub(crate) fn dir_of(path: &Path) -> &Path {
+    path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
+}
+
+/// 그 파일의 락 자리 — 곁의 `<이름>.lock`.
+///
+/// **락 자리를 세는 자를 하나로 둔다**(리뷰) — 같은 디렉터리에 사는 두 파일이 저마다 락 이름을 세면,
+/// 자리 규칙이 바뀌는 날 한쪽만 따라가 둘이 서로를 안 막는다. [`crate::user_config::update`] 가 두 철자의
+/// 락이 갈렸을 때를 재 뒀다(스무 개 중 열 개가 사라졌다) — 이 도구가 못 견딘다는 그 조용한 손실이다.
+pub(crate) fn lock_beside(path: &Path) -> PathBuf {
+    let mut name = path.file_name().map(std::ffi::OsString::from).unwrap_or_else(|| "config".into());
+    name.push(".lock");
+    dir_of(path).join(name)
 }
 
 /// `flock(2)`. 프로세스가 죽으면 커널이 놓아 준다.

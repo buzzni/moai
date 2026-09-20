@@ -3163,7 +3163,9 @@ pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
     if !missing.is_empty() {
         said.push_str(&format!(
             "\n이 저장소에 {} 이 깔려 있지 않다 — 제 손으로 깔지 말고 사람에게 `moai skill install` 을 다시 \
-             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다.",
+             불러 달라고 청한다. 그것이 moai 와 같은 범위로 함께 깐다. 그 명령이 `건너뛰었다` 를 내면 같은 \
+             이름의 마켓플레이스가 남의 저장소를 가리키는 것이니, 그 줄이 함께 내는 \
+             `claude plugin marketplace remove` 를 먼저 친다 — 그 전에는 몇 번을 불러도 건너뛴다.",
             missing.join("·")
         ));
     }
