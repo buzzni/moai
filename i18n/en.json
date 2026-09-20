@@ -213,5 +213,12 @@
   "tui.field.tally": "counts",
   "tui.field.tags": "tags",
   "tui.field.names": "column names",
-  "tui.field.branch": "branch mark"
+  "tui.field.branch": "branch mark",
+  "tui.menu.root": "menu",
+  "tui.group.project": "project",
+  "tui.group.view": "view",
+  "tui.group.sort": "sort",
+  "tui.group.cell": "columns",
+  "tui.group.read": "read",
+  "tui.badge.hidden": "{names} hidden"
 }

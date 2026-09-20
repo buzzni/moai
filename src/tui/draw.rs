@@ -809,7 +809,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
-    let hidden = app.view.badge(&app.screen_statuses());
+    let hidden = app.view.badge(&app.screen_statuses(), app.site.lang);
     // **한눈 보기에도 보기 뱃지를 세운다**(moai-1xo5) — 거기서도 보기가 줄을 가리므로, 안 세우면
     // 줄이 왜 적은지 말할 자리가 없다. 칸 이름은 지금 선 프로젝트의 것으로 댄다.
     let look = {
@@ -2510,7 +2510,7 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
     if app.filter_text.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
-    keep.push((menu::title(&[LEADER.event()]), menu::ROOT));
+    keep.push((menu::title(&[LEADER.event()]), menu::root(app.site.lang)));
     (optional, keep)
 }
 
@@ -2574,7 +2574,7 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
             spans.push(Span::styled(format!(" {}", e.text()), menu_word(e.is_group())));
         }
     } else {
-        spans.push(Span::raw(format!(" {}", menu::name(held))));
+        spans.push(Span::raw(format!(" {}", menu::name(held, app.site.lang))));
         if grid.hidden > 0 {
             spans.push(Span::styled(format!("  그 밖 {}개 — 창을 넓히면 선다", grid.hidden), dim()));
         }

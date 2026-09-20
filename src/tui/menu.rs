@@ -23,12 +23,10 @@
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
 use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of_key};
+use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
 
-/// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
-/// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC v", "보기"), ("SPC s", "정렬"), ("SPC c", "열"), ("SPC m", "읽음")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -132,7 +130,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
                 out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
-                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq)), state: None });
+                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq, c.lang)), state: None });
             }
             _ => {}
         }
@@ -146,11 +144,13 @@ pub fn title(held: &[KeyEvent]) -> String {
 }
 
 /// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
-pub const ROOT: &str = "메뉴";
+pub fn root(lang: Lang) -> &'static str {
+    say(lang, "tui.menu.root")
+}
 
-/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`보기`).
-pub fn name(held: &[KeyEvent]) -> &'static str {
-    if held.len() <= 1 { ROOT } else { group(held) }
+/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`root`], 하위 층은 묶음의 이름(`보기`).
+pub fn name(held: &[KeyEvent], lang: Lang) -> &'static str {
+    if held.len() <= 1 { root(lang) } else { group(held, lang) }
 }
 
 /// 격자의 줄 수 상한 — 한 열에 6칸, 넘치면 옆 열에 다시 6칸(사용자 결정, moai-r2dt). 처음의
@@ -255,10 +255,21 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
     Grid { rows, columns, hidden: items.len() - (shown * rows).min(items.len()) }
 }
 
-/// 하위 접두어의 이름. 이름이 없으면 `…` 만 — 시험이 막으므로 실제로는 안 선다.
-fn group(seq: &[KeyEvent]) -> &'static str {
-    let t = title(seq);
-    GROUPS.iter().find(|(p, _)| *p == t).map_or("…", |(_, n)| n)
+/// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름이 없으면 `…` 만
+/// 이고, 시험(`every_prefix_in_the_menu_has_a_name`)이 그것을 막으므로 실제로는 안 선다.
+///
+/// **`(접두어, 키)` 표로 두지 않는다.** 표에 키를 담고 `say(lang, key)` 를 한 번만 부르면
+/// `english_has_every_key_the_source_asks_for` 의 읽는 자가 그 키들을 못 봐, 표에만 있고
+/// 아무도 안 부르는 키로 선다.
+fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
+    match title(seq).as_str() {
+        "SPC p" => say(lang, "tui.group.project"),
+        "SPC v" => say(lang, "tui.group.view"),
+        "SPC s" => say(lang, "tui.group.sort"),
+        "SPC c" => say(lang, "tui.group.cell"),
+        "SPC m" => say(lang, "tui.group.read"),
+        _ => "…",
+    }
 }
 
 /// 이 줄이 `seq` 로 시작하나.
@@ -601,7 +612,7 @@ mod tests {
         for b in BROWSE.iter().filter(|b| b.seq.first() == Some(&LEADER)) {
             for n in 2..b.seq.len() {
                 let seq: Vec<KeyEvent> = b.seq[..n].iter().map(|k| k.event()).collect();
-                assert_ne!(group(&seq), "…", "`{}` 에 이름이 없다 — GROUPS 에 더한다", title(&seq));
+                assert_ne!(group(&seq, Lang::Ko), "…", "`{}` 에 이름이 없다 — `group` 에 더한다", title(&seq));
             }
             for key in &b.seq[1..] {
                 assert_eq!(lookup(MENU, &[key.event()]), Lookup::Unknown, "{:?}", b.seq);

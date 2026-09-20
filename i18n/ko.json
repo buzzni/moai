@@ -213,5 +213,12 @@
   "tui.field.tally": "셈",
   "tui.field.tags": "태그",
   "tui.field.names": "열 이름",
-  "tui.field.branch": "옆 가지"
+  "tui.field.branch": "옆 가지",
+  "tui.menu.root": "메뉴",
+  "tui.group.project": "프로젝트",
+  "tui.group.view": "보기",
+  "tui.group.sort": "정렬",
+  "tui.group.cell": "열",
+  "tui.group.read": "읽음",
+  "tui.badge.hidden": "{names} 숨김"
 }
