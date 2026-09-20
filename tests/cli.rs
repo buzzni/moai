@@ -4677,14 +4677,21 @@ fn tui_json_hands_back_a_path_for_every_row() {
 
     let root = ok(s.path(), &["tui", "--json"]);
     assert!(root.contains(r#""kind":"bucket""#), "{root}");
-    assert!(root.contains(r#""path":"길잃음""#), "바구니에 손잡이가 없다 — {root}");
+    assert!(root.contains(r#""path":"lost""#), "바구니에 손잡이가 없다 — {root}");
 
-    let inside = ok(s.path(), &["tui", "--json", "--path", "길잃음"]);
+    let inside = ok(s.path(), &["tui", "--json", "--path", "lost"]);
     assert!(inside.contains(&one), "{inside}");
 
     // 없는 바구니는 조용한 빈 목록이 아니라 거절이다
-    let out = moai(s.path(), &["tui", "--json", "--path", "없음"]);
+    let out = moai(s.path(), &["tui", "--json", "--path", "none"]);
     assert!(!out.status.success(), "없는 바구니를 열어 주었다");
+
+    // **옛 낱말은 안 받는다**(moai-l5uf, 2026-09-20 사용자 결정) — 받는 말을 둘로 두면
+    // 그것이 곧 둘째 어휘다. 배포 전이라 밖에서 이 낱말을 치는 사람이 없어 값이 0 이다.
+    for old in ["길잃음", "없음"] {
+        let out = moai(s.path(), &["tui", "--json", "--path", old]);
+        assert!(!out.status.success(), "옛 낱말 `{old}` 을 아직 받는다");
+    }
 }
 
 /// **못 읽은 줄을 삼키지 않는다.** 다른 읽기 명령과 같이 stderr 로 알리고

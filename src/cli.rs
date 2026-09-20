@@ -438,7 +438,7 @@ IDEA
   `.moai`, the rows of the layer).
 
   `--path` takes an issue id, or one of the two baskets by the word this
-  tool uses for them: 없음 (no milestone) and 길잃음 (lost).")]
+  tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
     /// Called by Claude's hook. Reads an event on stdin
@@ -1024,11 +1024,9 @@ pub struct MergeDriverArgs {
 
 #[derive(Args, Debug)]
 pub struct TuiArgs {
-    // `없음`·`길잃음` 은 화면 글이 아니라 **이 명령이 받는 낱말**이다(`cmd/tui.rs` 의
-    // `NO_MILESTONE`·`LOST`). 도움말을 영어로 옮기면서도 그대로 둔다 — 옮기면 받는 값이
-    // 바뀌어 `--path` 의 계약이 깨진다. 그 낱말을 영어로 세울지는 따로 정할 자리다.
-    // **그래서 `value_name` 에는 안 적는다** — 두 낱말이 열을 열두 칸 넓혀, 이 명령의
-    // 전역 옵션 설명까지 80칸을 넘겼다(moai-l5uf). 받는 낱말은 `after_help` 가 댄다.
+    // `none`·`lost` 는 화면 글이 아니라 **이 명령이 받는 낱말**이다(`cmd/tui.rs` 의
+    // `NO_MILESTONE`·`LOST`). **`value_name` 에는 안 적는다** — 두 낱말이 옵션 열을 넓혀
+    // 이 명령의 전역 옵션 설명까지 80칸을 넘겼다(moai-l5uf). 받는 낱말은 `after_help` 가 댄다.
     /// Open here - a directory opens inside it
     #[arg(long, value_name = "id|basket")]
     pub path: Option<String>,

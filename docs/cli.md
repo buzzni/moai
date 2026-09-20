@@ -1424,7 +1424,7 @@ Options:
   `.moai`, the rows of the layer).
 
   `--path` takes an issue id, or one of the two baskets by the word this
-  tool uses for them: 없음 (no milestone) and 길잃음 (lost).
+  tool uses for them: none (no milestone) and lost.
 ```
 
 ## `moai hook`
