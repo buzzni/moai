@@ -106,6 +106,13 @@ pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
         "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
         crate::store::NOT_A_REPO
     );
+    // **천장에 걸렸으면 그것부터 말한다**(moai-a2kn, 리뷰 moai-0ftu.h80). 세션은 `status` 로
+    // 시작하므로 막힌 사람이 가장 먼저 듣는 말이 여기다 — 안내가 빠지면 "여기서 `init` 하라" 는
+    // 틀린 말을 듣고 제 트래커 옆에 빈 트래커를 하나 더 세운다.
+    if let Some(said) = crate::store::beyond_here() {
+        msg.push('\n');
+        msg.push_str(&said);
+    }
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
     for p in &reg.problems {

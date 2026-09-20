@@ -152,20 +152,52 @@ impl Load {
 pub const NOT_A_REPO: &str =
     "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
 
-/// 천장에 걸려 **안 쓴** 트래커를 가리키는 말(moai-a2kn). [`NOT_A_REPO`] 뒤에 붙는다.
+/// 천장에 걸려 **안 쓴** 트래커를 가리키는 한 줄(moai-a2kn). 부르는 쪽이 [`NOT_A_REPO`] 뒤에
+/// 붙인다 — 그 말을 이미 들고 있는 자리가 둘이다(`discover`·`cmd::nothing_registered`).
 ///
 /// **막는 것이 안내가 되는 자리다.** 지금까지 위쪽 `.moai` 로 쓰던 사람은 이 고침 뒤에 "없다" 를
 /// 만나는데, 그때 도구 안에 길이 없으면 도구 밖으로 나가야 한다. 본 것과 가리키는 법을 함께 댄다.
+///
+/// **다만 남의 것에는 길을 안 준다**(리뷰 moai-0ftu.h80 15번). 천장이 막은 바로 그 자리가 남의
+/// 트래커일 수 있는데, 거기에 `moai -C` 와 `moai project add` 를 일러 주면 막으려던 쓰기를
+/// 안내가 대신 가르친다 — `-C` 는 천장을 그냥 지난다. 그때는 무엇에 걸렸는지만 대고 제 자리로
+/// 돌려보낸다.
 fn beyond_says(at: &Path) -> String {
+    beyond_says_under(at, &mine)
+}
+
+/// [`beyond_says`] 의 속 — [`look_under`] 와 같은 까닭으로 임자를 재는 자를 받는다. 남의 자리를
+/// 만들려면 root 가 있어야 해, 안 받으면 "길을 안 준다" 는 갈래가 어느 기계에서도 안 돈다.
+fn beyond_says_under(at: &Path, mine: &dyn Fn(&Path) -> bool) -> String {
+    if !mine(at) {
+        return format!(
+            "{} 에 `.moai` 가 있지만 임자가 다르다 — 남의 트래커에는 쓰지 않는다. \
+             여기서 `moai init` 하거나 제 프로젝트를 가리킨다",
+            at.display()
+        );
+    }
     // **붙여 넣어 도는 글로 낸다**([`crate::text::shell_word`], moai-dtye). 날것으로 끼우던 판은
     // 빈칸이 든 자리에 `moai -C /w/My Projects/p` 를 일러 줬는데, 껍데기가 그것을 두 인자로 갈라
     // 막힌 사람에게 준 유일한 길이 안 돌았다.
     let quoted = crate::text::shell_word(&at.display().to_string());
     format!(
-        "{NOT_A_REPO}\n{} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
+        "{} 에 `.moai` 가 있지만 여기서 올라가 쓰지 않는다 — \
          `moai -C {quoted} <명령>` 으로 가리키거나 `moai project add {quoted}` 로 등록한다",
         at.display()
     )
+}
+
+/// 선 자리가 천장에 걸렸으면 그 안내 한 줄(moai-a2kn). 없으면 `None`.
+///
+/// `status`·`ready` 는 못 찾은 것을 실패로 안 접고([`Repo::find`]) 등록한 프로젝트를 한눈에
+/// 보여 준다 — 세션이 첫 줄로 치는 명령이 바로 그것들이라, 거기서 안내가 빠지면 천장에 막힌
+/// 사람이 "여기서 `init` 하라" 는 틀린 말부터 듣는다.
+pub fn beyond_here() -> Option<String> {
+    let dir = std::env::current_dir().ok()?;
+    match look(&dir) {
+        Found::Ceiling(ceiling) => above(&ceiling).map(|at| beyond_says(&at)),
+        Found::Root { .. } => None,
+    }
 }
 
 /// 이 프로세스가 **제 체크아웃 밖으로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
@@ -351,7 +383,7 @@ impl Repo {
             // 천장 위를 보는 훑기는 **여기서만** 돈다. `Found` 에 담아 내던 판은 `find`·
             // `find_here`·훅까지 못 찾을 때마다 `/` 까지 훑게 하고는 그 답을 버렸다.
             Found::Ceiling(ceiling) => Err(match above(&ceiling) {
-                Some(at) => beyond_says(&at).into(),
+                Some(at) => format!("{NOT_A_REPO}\n{}", beyond_says(&at)).into(),
                 None => NOT_A_REPO.into(),
             }),
         }
@@ -1194,9 +1226,20 @@ mod tests {
     /// 막힌 사람에게 준 유일한 길(`moai -C …`)이 껍데기에서 두 인자로 갈라졌다.
     #[test]
     fn the_way_out_is_quoted_so_it_can_be_pasted() {
-        let said = beyond_says(Path::new("/w/My Projects/p"));
+        let said = beyond_says_under(Path::new("/w/My Projects/p"), &|_| true);
         assert!(said.contains("moai -C '/w/My Projects/p' <명령>"), "{said}");
         assert!(said.contains("moai project add '/w/My Projects/p'"), "{said}");
+    }
+
+    /// **남의 트래커에는 길을 안 준다**(리뷰 moai-0ftu.h80 15번). 천장이 막은 자리가 남의 것일 수
+    /// 있는데, 거기에 `moai -C` 를 일러 주면 막으려던 쓰기를 안내가 대신 가르친다 — `-C` 는 그
+    /// 자리에서 `.moai` 를 바로 찾으므로 천장을 아예 안 지난다.
+    #[test]
+    fn a_tracker_that_is_not_mine_gets_no_way_in() {
+        let said = beyond_says_under(Path::new("/home/alice/proj"), &|_| false);
+        assert!(said.contains("임자가 다르다"), "{said}");
+        assert!(!said.contains("moai -C") && !said.contains("project add"), "남의 것에 쓰는 길을 댔다\n{said}");
+        assert!(said.contains("moai init"), "제 자리로 안 돌려보낸다 — {said}");
     }
 
     /// **처음 만난 `.moai` 가 이기는 자는 그대로다**(2026-09-20 사용자가 짚었다). 모노레포는
