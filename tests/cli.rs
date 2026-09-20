@@ -5581,6 +5581,34 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
     assert!(line.contains(r#""status":"done""#), "펼쳤는데 안 닫혔다 — {line}");
 }
 
+/// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
+/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말이 31바이트라 제목이 상한 턱밑인
+/// idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직 쓰지도 않은 새 id 를
+/// 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이지 사본이 아니다.
+#[test]
+fn an_idea_titled_up_to_the_limit_still_promotes() {
+    let s = init("promotebig");
+    let limit = 64 * 1024;
+    // 제목 자체는 상한을 지난다 — 머리말을 붙여야 넘는다.
+    let big = "가".repeat(limit / 3);
+    assert!(big.len() <= limit && big.len() + 31 > limit, "{}", big.len());
+    let id = ok(s.path(), &["idea", "add", &big, "-q"]).trim().to_string();
+
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
+    assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
+
+    // 지나갔다는 것이 곧 상한 아래라는 뜻이다 — 쓰기가 같은 자로 잰다. 줄인 자리는 밝혀 둔다.
+    let notes = journal(s.path());
+    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("에서 펼쳤다")).collect();
+    assert_eq!(grown.len(), 1, "펼침 노트가 하나가 아니다 — {}", grown.len());
+    assert!(grown[0].contains("…"), "줄인 것을 안 밝힌다");
+    // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다.
+    assert!(grown[0].contains(&big[..1023]), "제목의 머리가 아니라 딴 데를 담았다");
+
+    // 원래 제목은 그 idea 줄에 그대로 남는다 — 줄인 것은 노트뿐이다.
+    assert!(line_of(s.path(), &id).contains(&big), "idea 줄의 제목이 줄었다");
+}
+
 /// **무엇이 무엇에서 나왔는지는 저널에 적는다.** idea 에 `spawned` 같은
 /// 필드를 들면 그건 파생값이고, 그 순간 에픽을 지울 때 idea 도 손봐야 한다.
 #[test]

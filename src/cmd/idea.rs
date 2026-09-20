@@ -146,13 +146,14 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             .filter(|i| into.is_some() || i.epic.is_none())
             .map(|i| i.id.clone())
             .collect();
+        // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
+        // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
+        // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
+        // 제목은 어느 생각에서 왔는지 보이라는 가리킴이고, 원본은 그 idea 줄에 그대로 남는다.
+        let head = format!("{} 에서 펼쳤다 — ", args.id);
+        let shown = crate::model::fit(&title, crate::model::MAX_TEXT_BYTES.saturating_sub(head.len()));
         for top in &grown {
-            entries.push(JournalEntry::note(
-                top,
-                &format!("{} 에서 펼쳤다 — {title}", args.id),
-                &at,
-                &by,
-            ));
+            entries.push(JournalEntry::note(top, &format!("{head}{shown}"), &at, &by));
         }
         let done = Status::new(crate::config::DONE);
         let note = match into {

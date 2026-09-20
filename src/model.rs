@@ -44,6 +44,30 @@ pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
     ))
 }
 
+/// 도구가 **스스로 짓는** 글에 남의 글 한 토막을 담을 때, 그 토막만 `budget` 바이트에 맞춰
+/// 줄인다(moai-clta). 넘을 때만 줄이고, 줄였으면 `…` 로 밝힌다.
+///
+/// [`check_text_size`] 와 가르는 자는 **누가 적었는가**다. 사람이 적은 글은 잘라 적지 않고
+/// 거절한다 — 무엇이 사라졌는지 적은 쪽이 안다. 도구가 짓는 노트에는 거절할 사람이 없어,
+/// 같은 자로 재면 길이 통째로 막힌다: 제목이 상한 턱밑인 idea 는 `promote` 의 노트 머리말
+/// 31바이트 때문에 펼칠 수조차 없었다. 담기는 것이 **가리킴이지 사본이 아닐 때**만 쓴다 —
+/// 원본은 제 줄에 그대로 남아 있어야 한다.
+pub fn fit(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+    const MARK: &str = "…";
+    if text.len() <= budget {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    // 표식조차 안 들어가면 빈 글이다 — 넘치게 내면 재는 쪽이 도로 거절한다.
+    let Some(mut cut) = budget.checked_sub(MARK.len()) else {
+        return std::borrow::Cow::Borrowed("");
+    };
+    // **글자 가운데서 자르지 않는다** — 한글 한 자가 3바이트라 예사로 걸린다.
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    std::borrow::Cow::Owned(format!("{}{MARK}", &text[..cut]))
+}
+
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —
 /// `kind` 는 무엇인가, `tags` 는 어떤 성격인가.
 ///
@@ -962,6 +986,22 @@ mod tests {
             Status::new("todo"),
             "2026-09-11T04:12:03Z",
         )
+    }
+
+    /// [`fit`] 은 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
+    /// `budget` 을 안 넘는다 — 넘치게 내면 [`check_text_size`] 가 도로 거절해 아무것도 못 고친다.
+    #[test]
+    fn fit_shortens_only_what_must_and_never_mid_character() {
+        assert_eq!(fit("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
+        assert_eq!(fit("", 0), "");
+        // 표식이 3바이트다 — 8바이트 예산에는 다섯 바이트가 남지만 두 글자는 안 들어간다.
+        assert_eq!(fit("가나다", 8), "가…");
+        assert_eq!(fit("가나다", 6), "가…");
+        assert_eq!(fit("가나다", 5), "…", "글자 가운데서 잘랐다");
+        // 표식조차 못 담는 예산에서도 넘치지 않는다.
+        for budget in 0..10 {
+            assert!(fit("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
+        }
     }
 
     /// 최소 형태는 필수 6개뿐이고 키 순서가 고정이다.
