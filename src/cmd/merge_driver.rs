@@ -513,6 +513,74 @@ fn driver_command(cmd: &str) -> String {
     )
 }
 
+/// 심어 둔 드라이버가 **못 도는** 상태의 알림(moai-2ewr).
+///
+/// **안 심은 것은 말하지 않는다.** `moai-w8so` 가 임시 저장소에서 둘을 나란히 쟀다 — 안 심은
+/// 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의 기본 머지가 돌며 표식도
+/// 선다. 그 상태를 조르면 드라이버를 안 쓰기로 한 클론을 영영 조르는 셈이다(`agents_stale` 이
+/// `missing` 을 안 말하는 것과 같은 까닭).
+///
+/// 해로운 것은 **심어 놓고 그 명령이 못 도는 자리**다. 사람은 이슈마다 푸는 것이 돈다고 믿는데
+/// 실제로는 `driver_command` 의 셋째 마디로 내려앉아 기본 머지가 돌고, 그 사실이 어느 화면에도
+/// 안 선다. 이 저장소에서 그 자리는 가깝다 — `--install` 의 기본값은 지금 도는 바이너리의 절대
+/// 경로이고, 워크트리에서 치면 그 워크트리의 `target/` 이 적히는데 `--local` 은 클론이 함께
+/// 쓰는 자리라 그 워크트리를 지우는 순간 모든 체크아웃이 그 상태가 된다.
+///
+/// **모르면 입을 다문다.** 설정을 못 읽었거나 적힌 줄이 이 도구가 지은 모양이 아니면 아무 말도
+/// 안 한다 — 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는 알림이 선다.
+pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
+    let key = format!("merge.{DRIVER}.driver");
+    let planted = crate::git::run(root, &["config", "--get", &key]).ok()?;
+    let planted = planted.trim();
+    if planted.is_empty() {
+        return None;
+    }
+    let word = planted_word(planted)?;
+    if runnable(&word) {
+        return None;
+    }
+    Some(crate::report::Warning::merge_driver_rotten(&word, crate::cmd::init::away_root(root, chdir).as_deref()))
+}
+
+/// 심어 둔 줄에서 **실제로 부르는 명령**을 떼어 낸다. 모양이 이 도구가 지은 것이 아니면 `None`.
+///
+/// [`driver_command`] 가 지은 줄은 `if <명령> merge-driver …` 로 선다. 빈칸이 든 경로는
+/// `shell_word` 가 홑따옴표로 싸는데, 그 안에 홑따옴표가 또 들면(`'/a/it'\''s'`) 떼어 낸 조각이
+/// 실제 경로가 아니다 — 그때는 재지 않는다. `$'…'` 도 같다.
+fn planted_word(planted: &str) -> Option<String> {
+    let rest = planted.strip_prefix("if ").unwrap_or(planted);
+    match rest.strip_prefix('\'') {
+        Some(quoted) => {
+            let end = quoted.find('\'')?;
+            // 이어 붙인 따옴표(`'…'\''…'`)면 여기서 끊은 것이 경로가 아니다.
+            quoted[end + 1..].starts_with(' ').then(|| quoted[..end].to_string())
+        }
+        // `$'…'` 은 풀지 않는다 — 푸는 규칙을 여기 또 쓰면 `shell_word` 와 둘이 어긋난다.
+        None if rest.starts_with('$') => None,
+        None => rest.split_whitespace().next().map(str::to_string),
+    }
+}
+
+/// 그 명령을 껍데기가 실제로 부를 수 있는가. 자리에 `/` 가 들면 그 파일을, 아니면 `PATH` 를 본다.
+fn runnable(cmd: &str) -> bool {
+    if cmd.contains('/') {
+        return is_exe(Path::new(cmd));
+    }
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path).any(|dir| is_exe(&dir.join(cmd)))
+}
+
+fn is_exe(p: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(p) else { return false };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    meta.is_file()
+}
+
 /// `.git/config` 에 드라이버를 심는다.
 ///
 /// **저장소마다 한 번씩 쳐야 한다** — git 은 드라이버 명령을 설정에서만 읽고 설정은
@@ -850,6 +918,41 @@ mod tests {
         assert!(line.ends_with("exec git merge-file -L ours -L base -L theirs %A %O %B"), "{line}");
         // 한 줄이어야 한다 — `git config` 의 값은 줄 하나다.
         assert_eq!(line.lines().count(), 1, "{line}");
+    }
+
+    /// **심어 둔 줄에서 부르는 명령을 떼어 낸다.** 모르는 모양이면 아무 말도 안 한다 —
+    /// 남이 손으로 적은 줄을 "썩었다" 고 부르면 걷을 길이 없는 알림이 선다.
+    #[test]
+    fn the_planted_word_is_read_back_or_not_at_all() {
+        let word = |cmd: &str| planted_word(&driver_command(cmd));
+        assert_eq!(word("/w/moai").as_deref(), Some("/w/moai"));
+        assert_eq!(word("/w/My Work/moai").as_deref(), Some("/w/My Work/moai"));
+        assert_eq!(word("moai").as_deref(), Some("moai"), "PATH 의 낱말도 읽는다");
+        // 홑따옴표가 든 경로는 `shell_query` 가 이어 붙여 싼다 — 떼어 낸 조각이 경로가 아니다.
+        assert_eq!(word("/w/it's/moai"), None);
+        // 제어문자가 든 경로는 `$'…'` 다. 푸는 규칙을 여기 또 쓰지 않는다.
+        assert_eq!(word("/w/a\tb/moai"), None);
+        // 이 도구가 지은 모양이 아니면 재지 않는다 — 다만 옛 판(맨 명령)은 그대로 읽는다.
+        assert_eq!(planted_word("/w/moai merge-driver %O %A %B %L %P").as_deref(), Some("/w/moai"));
+    }
+
+    /// **부를 수 있는지는 파일로 잰다.** 있고 없음이 아니라 실행할 수 있는가다 — 권한을 잃은
+    /// 파일은 git 이 부르지 못하고, 그때가 바로 표식 없이 끝나던 자리다.
+    #[cfg(unix)]
+    #[test]
+    fn runnable_reads_the_file_not_just_its_name() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("moai-runnable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("moai");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!runnable(&p.display().to_string()), "실행 권한이 없는 파일을 돈다고 했다");
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runnable(&p.display().to_string()));
+        assert!(!runnable(&dir.display().to_string()), "디렉터리를 명령으로 읽었다");
+        assert!(!runnable(&dir.join("없다").display().to_string()));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// **빈칸이 든 경로를 감싼다.** 안 감싸면 첫 낱말에서 끊겨 늘 내려앉는 길로만 가고,

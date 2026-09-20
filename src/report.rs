@@ -2565,6 +2565,26 @@ impl Warning {
         Warning::new(kind, missing.iter().map(|l| (*l).to_string()).collect()).notice().hint(&Warning::init_hint(root))
     }
 
+    /// 심은 머지 드라이버가 **못 도는** 상태의 알림(moai-2ewr). 재는 쪽은
+    /// `cmd::merge_driver::notice` 고, `status` 와 훅의 보드가 이것을 `notices` 에 얹는다 —
+    /// [`status`] 는 `&[Issue]` 만 받는 순수 함수라 설정도 파일도 안 읽는다.
+    ///
+    /// **안 심은 것은 여기서 말하지 않는다.** 그 상태는 실측에서 무해했다(`moai-w8so`) — git 의
+    /// 기본 머지가 돌고 표식도 선다. 해로운 것은 심어 놓고 그 명령이 못 도는 자리다: 사람은
+    /// 이슈마다 푸는 것이 돈다고 믿는데 실제로는 안 돌고, 그 사실이 어느 화면에도 안 선다.
+    ///
+    /// **경고가 아니라 알림이다.** 계획이 어긋난 것이 아니라 설치가 어긋난 것이고, 종료 코드는
+    /// 안 바뀐다 — `agents_stale` 과 같은 자리다.
+    ///
+    /// `ids` 에 **적힌 명령**을 그대로 담는다. 어느 경로가 썩었는지가 고치는 데 필요한 전부다.
+    pub fn merge_driver_rotten(cmd: &str, root: Option<&str>) -> Warning {
+        let hint = match root {
+            None => "moai merge-driver --install --as <늘 있는 자리>".to_string(),
+            Some(r) => format!("moai -C {r} merge-driver --install --as <늘 있는 자리>"),
+        };
+        Warning::new("merge_driver_rotten", vec![cmd.to_string()]).notice().hint(&hint)
+    }
+
     /// 고칠 명령. 뿌리가 부른 자리와 다르면 `-C` 로 거기를 댄다 — `init` 은 부른 자리에 심으므로
     /// 그 `-C` 가 없으면 따라 친 쪽에 트래커가 하나 더 선다.
     fn init_hint(root: Option<&str>) -> String {

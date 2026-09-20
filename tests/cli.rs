@@ -11794,6 +11794,38 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
     assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
 }
 
+/// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
+///
+/// 안 심은 클론은 말하지 않는다 — 거기서는 git 의 기본 머지가 돌고 표식도 서서 무해했다
+/// (`moai-w8so`). 해로운 것은 돈다고 믿는데 안 도는 자리다. 셋을 한 자리에서 잰다:
+/// 안 심었을 때 조용한가, 썩었을 때 대는가, 제대로 심으면 걷히는가.
+#[test]
+fn status_names_a_planted_driver_that_cannot_run() {
+    let s = init("mergenotice");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "안 심은 클론을 졸랐다");
+
+    let gone = root.join("없는/자리/moai");
+    ok(root, &["merge-driver", "--install", "--as", &gone.display().to_string()]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("심어 둔 머지 드라이버가 안 돈다"), "못 도는 드라이버를 안 댔다\n{said}");
+    assert!(said.contains(&gone.display().to_string()), "어느 경로인지 안 댄다\n{said}");
+    assert!(said.contains("merge-driver --install --as"), "고칠 명령을 안 댄다\n{said}");
+    // **경고가 아니라 알림이다** — 종료 코드는 안 바뀌고(`ok` 가 그것을 이미 쟀다) `notices` 에 선다.
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    // **알림이지 경고가 아니다** — 경고로 서면 Stop 훅이 세는 수가 늘고 종료 코드 논쟁이 붙는다.
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    let warnings = json.split("\"warnings\":").nth(1).unwrap_or("").split("\"notices\":").next().unwrap_or("").to_string();
+    assert!(notices.contains("merge_driver_rotten"), "{json}");
+    assert!(!warnings.contains("merge_driver_rotten"), "알림이 경고로 섰다\n{json}");
+
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
+}
+
 /// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
 fn append_raw(root: &Path, bytes: &[u8]) {
     let path = root.join(".moai/issues.jsonl");

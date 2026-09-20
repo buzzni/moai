@@ -694,6 +694,10 @@ fn says(w: &Warning) -> String {
         "gitattributes_rules" => {
             format!(".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 저널이 머지에서 충돌하고 줄 끝이 흔들린다")
         }
+        // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr). 안 심은 클론은 git 의 기본 머지가
+        // 돌아 무해했고(moai-w8so), 해로운 것은 심어 놓고 그 자리가 빈 판이다 — 이슈마다 푸는
+        // 것이 돈다고 믿는 쪽만 손해를 본다. 어느 경로인지는 `preview` 가 한 줄로 낸다.
+        "merge_driver_rotten" => "심어 둔 머지 드라이버가 안 돈다 — 병합이 git 의 기본 머지로 내려앉는다".to_string(),
         "unknown_field" => format!("모르는 필드를 들고 있는 줄 {n}건 — 새 바이너리가 쓴 파일일 수 있다"),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
