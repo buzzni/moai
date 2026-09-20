@@ -433,6 +433,15 @@ struct Seg {
     depth: usize,
     /// 파이프의 한 칸이거나 `&` 로 띄운 것 — 제 하위 셸에서 돌아 `cd` 가 뒤로 안 이어진다.
     sub: bool,
+    /// **뒤로 띄운 것 안에 있다**(moai-99df) — 제 토막이 `&` 로 끝났거나, `&` 로 띄운 묶음
+    /// (`{ …; exit 1; } &`·`( … ) &`·`fi &`) 안의 줄이다. `Op::Any` 는 `;`·줄바꿈·`&` 를 한 낱말로
+    /// 읽어 이것을 못 가른다 — 그래서 렉서가 `&` 를 보는 자리에서 바로 적는다.
+    ///
+    /// 두 자리가 읽는다. `exit` 은 **뒤로 띄운 것 안에서는 껍데기를 안 끝내고**([`shell_writes`] 의
+    /// `quits`), 셸에 넘긴 글이 이것으로 끝나면 그 글의 값은 집기의 값이 아니다([`Lexer::relex`] 의
+    /// `apace`). 뒤엣것을 `sub` 로 어림잡던 판은 `{ … } &` 를 못 보고(묶음 뒤의 `&` 는 빈 토막에 온다),
+    /// 뒤로 띄운 파이프라인(`a | 집기 &`)을 파이프라고만 읽었다(리뷰 moai-k8j1.209 의 4·7번).
+    bg: bool,
     /// 몇 겹의 묶음 안인가 — `( … )` 와 `{ … }` 를 함께 센다. [`Join::depth`] 와 같은 자다.
     /// [`Seg::depth`] 로 집기의 깊이를 재면 `{ mv; sed -i …; }` 의 `;` 가 집기보다 깊은 자리로
     /// 읽혀, 집기가 져도 도는 쓰기가 샌다.
@@ -829,7 +838,10 @@ impl<'a> Lexer<'a> {
                 // **뒤로 띄운 것으로 끝나는 글의 값은 0 이다** — `bash -c '집기 &'` 는 집기가 돌기도
                 // 전에 0 으로 끝난다. 그 값은 이 토막의 값이 아니니 치환으로 심는다: 나올 때 집기를
                 // 도로 세운다. 파이프의 마지막 칸은 아니다 — `cat f | 집기` 의 값은 집기의 값이다.
-                let apace = segs.last().is_some_and(|s| s.sub && s.join.op != Op::Pipe);
+                // **글이 뒤로 띄운 것으로 끝나는가**(moai-99df) — 렉서가 `&` 를 보는 자리에서 적어
+                // 둔 표를 읽는다([`Seg::bg`]). `sub` 로 어림잡던 판은 `{ … } &` 로 끝나는 글을 못 보고
+                // (묶음 뒤의 `&` 는 빈 토막에 온다), 뒤로 띄운 파이프라인은 파이프라고만 읽었다.
+                let apace = segs.last().is_some_and(|s| s.bg);
                 // 셸에 넘긴 글은 **겹을 그대로 두고 표만 단다**(moai-54pk) — 치환으로 바꿔 적던 판은
                 // 값을 안 흘리는 김에 그 셸의 errexit 까지 버렸다. `eval` 의 글은 겹이 없으니 그때만
                 // 치환으로 심는다: 값이 제 것이 아닌 것은 같고, 버릴 errexit 도 없다.
@@ -980,6 +992,15 @@ impl<'a> Lexer<'a> {
                 self.flush();
                 if !self.seg.words.is_empty() {
                     self.seg.sub = true;
+                    self.seg.bg = true;
+                }
+                // **묶음을 띄운 `&` 는 빈 토막에 온다**(moai-99df) — `{ …; exit 1; } &` 의 `&` 앞에는
+                // 낱말이 없다. 그 묶음 안의 줄에 거슬러 적는다: 방금 닫힌 묶음(지금 자리보다 깊은
+                // 자리)의 토막들이 그것이다. 적지 않던 판은 그 안의 `exit` 를 껍데기를 끝내는 것으로
+                // 읽어, `집기 || { …; exit 1; } & 쓰기` 가 집기 없이 지나갔다.
+                if self.seg.words.is_empty() && self.join.depth > self.level() {
+                    let home = self.level();
+                    self.all.iter_mut().rev().take_while(|s| s.level > home).for_each(|s| s.bg = true);
                 }
                 self.end_by(Some(Op::Any));
             }
@@ -2738,7 +2759,9 @@ fn shell_scan(cmd: &str, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<Str
         // **이 토막이 제 셸을 끝내는가** — `exit` 은 붙박이라 경로로 오지 않는다(`basename` 을 안 쓴다).
         // `&` 로 띄우거나 파이프의 칸이면 그 하위 셸만 끝난다. 셋이 따로 세던 것을 여기 하나로 모았다 —
         // 한쪽만 `basename` 을 써서 `/bin/exit` 를 끝내는 줄로 읽던 자리다.
-        let quits = !seg.sub && words.first().map(String::as_str) == Some("exit");
+        // **뒤로 띄운 것 안의 `exit` 는 껍데기를 안 끝낸다**(moai-99df) — `{ …; exit 1; } &` 는 제
+        // 하위 셸만 끝내고 바깥은 그대로 돈다. `sub` 만 보던 판은 묶음을 띄운 `&` 를 못 봤다.
+        let quits = !seg.sub && !seg.bg && words.first().map(String::as_str) == Some("exit");
         let mut j = seg.join;
         // `||` 바로 뒤의 토막 — 앞이 져야 돈다. 묶음 밖에서 읽은 `||`(`a || { … }`)는 묶음 안의 첫
         // 명령과 따로 본다. 그 앞이 집기 목록이었는지도 적어 둔다 — `mv A || mv B && …` 는 어느 쪽이든
@@ -4148,6 +4171,13 @@ mod tests {
         for cmd in [
             // 묶음이 안 끝낸다 — 집기가 져도 뒤가 돈다.
             "moai mv t-1 in_progress --from todo || { echo lost >&2; }; sed -i s/a/b/ src/x.rs",
+            // **뒤로 띄운 묶음은 껍데기를 안 끝낸다**(moai-99df) — `&` 로 띄운 `{ …; exit 1; }` 은 제
+            // 하위 셸만 끝내고 바깥은 그대로 돈다. `Op::Any` 가 `;`·`&` 를 한 낱말로 읽어 그 `exit`
+            // 를 껍데기의 끝으로 세던 판은 집기 없이 쓰는 줄을 넘겼다.
+            "moai mv t-1 in_progress --from todo || { echo lost; exit 1; } & sed -i s/a/b/ src/x.rs",
+            "moai mv t-1 in_progress --from todo || ( echo lost; exit 1 ) & sed -i s/a/b/ src/x.rs",
+            "if ! moai mv t-1 in_progress --from todo; then exit 1; fi & sed -i s/a/b/ src/x.rs",
+            "moai mv t-1 in_progress --from todo || exit 1 & sed -i s/a/b/ src/x.rs",
             "if ! moai mv t-1 in_progress --from todo; then echo lost; fi; sed -i s/a/b/ src/x.rs",
             // 몸통에 `exit` 아닌 길이 있다 — 그 길로 오면 집기는 졌다.
             "if ! moai mv t-1 in_progress --from todo; then exit 1; else echo ok; fi; sed -i s/a/b/ src/x.rs",
