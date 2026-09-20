@@ -12,17 +12,18 @@ use std::ffi::OsString;
 /// 파일에 먼저 적어 두는 글. **첫 줄은 비워 둔다** — 편집기가 첫 줄에 커서를 두므로
 /// 곧바로 제목을 친다. 담을 곳의 이름과 경로는 한 줄로 접는다(남이 지은 이름이라
 /// 줄바꿈·제어문자가 들 수 있고, 들면 그 뒷줄이 주석이 아니게 된다).
-pub fn template(into: Option<&Target>) -> String {
+pub fn template(into: Option<&Target>, lang: crate::i18n::Lang) -> String {
+    use crate::i18n::{fill, say};
     let place = match into {
         Some(t) => format!("{}  {}", crate::text::one_line(&t.name), crate::text::one_line(&t.path.display().to_string())),
-        None => "(없다 — 담기지 않는다)".into(),
+        None => say(lang, "tui.jotfile.nowhere").to_string(),
     };
     format!(
-        "\n\
-         # 첫 줄은 제목, 한 줄 띄우고 그 아래가 본문이다. idea 로 담긴다 — 에픽 없이.\n\
-         # '# ' 로 시작하는 줄은 지운다 — 본문의 마크다운 제목은 '##' 부터 쓴다.\n\
-         # 제목을 비우거나 편집기를 오류로 끝내면(vim 의 :cq) 담지 않는다.\n\
-         # 담을 곳: {place}\n"
+        "\n# {}\n# {}\n# {}\n# {}\n",
+        say(lang, "tui.jotfile.how_title"),
+        say(lang, "tui.jotfile.how_comments"),
+        say(lang, "tui.jotfile.how_cancel"),
+        fill(say(lang, "tui.jotfile.into"), &[("place", &place)]),
     )
 }
 
@@ -100,24 +101,24 @@ mod tests {
     /// 제목만 치고 닫으면 그것이 담긴다.
     #[test]
     fn the_template_is_all_comments_and_names_the_target() {
-        let t = template(Some(&target()));
+        let t = template(Some(&target()), crate::i18n::Lang::Ko);
         assert!(t.starts_with('\n'), "첫 줄이 비어 있지 않다 — {t:?}");
         assert!(t.contains("# 담을 곳: argos  /work/argos"), "{t}");
         assert_eq!(parsed(&t), None, "안 고친 글이 담긴다");
         assert_eq!(parsed(&format!("떠오른 것{t}")), some("떠오른 것", None));
-        assert!(template(None).contains("담기지 않는다"));
+        assert!(template(None, crate::i18n::Lang::Ko).contains("담기지 않는다"));
     }
 
     /// 남이 지은 이름에 줄바꿈이 들어도 **안내 줄이 주석 밖으로 새지 않는다.**
     #[test]
     fn a_target_name_with_a_newline_stays_a_comment() {
-        let t = template(Some(&Target { path: "/a\nb".into(), name: "이름\n제목이 될 줄".into() }));
+        let t = template(Some(&Target { path: "/a\nb".into(), name: "이름\n제목이 될 줄".into() }), crate::i18n::Lang::Ko);
         assert_eq!(parsed(&t), None, "{t}");
     }
 
     #[test]
     fn title_then_one_blank_line_then_body() {
-        let t = template(Some(&target()));
+        let t = template(Some(&target()), crate::i18n::Lang::Ko);
         assert_eq!(parsed(&format!("  제목  \n\n첫 줄\n\n셋째 줄\n{t}")), some("제목", Some("첫 줄\n\n셋째 줄")));
         // 빈 줄 없이 이어 써도 둘째 줄부터 본문이다
         assert_eq!(parsed("제목\n본문"), some("제목", Some("본문")));

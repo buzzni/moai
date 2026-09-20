@@ -334,7 +334,7 @@ mod tests {
         for code in [KeyCode::PageDown, KeyCode::End, KeyCode::Down, KeyCode::PageUp, KeyCode::Up, KeyCode::Home] {
             assert!(press(&mut e, code), "{code:?} 를 칸이 안 먹었다");
             e.fit(10);
-            assert_eq!((e.scroll().offset(), e.scroll().mark()), (0, None), "{code:?} 에 굴렀다");
+            assert_eq!((e.scroll().offset(), e.scroll().mark(crate::i18n::Lang::Ko)), (0, None), "{code:?} 에 굴렀다");
             let v = e.view(5, 10);
             assert_eq!(v.lines, vec!["a", "b", "c"], "{code:?}");
             assert_eq!(v.cursor.map(|(_, y)| y), Some(e.row), "{code:?}: 커서가 제 줄에 없다");
@@ -450,7 +450,7 @@ mod tests {
         }
         e.fit(3);
         assert_eq!(e.view(5, 3), View { lines: vec!["5", "6", "7"], cursor: Some((1, 0)) });
-        assert_eq!(e.scroll().mark().as_deref(), Some("↑ 5줄 · ↓ 2줄"));
+        assert_eq!(e.scroll().mark(crate::i18n::Lang::Ko).as_deref(), Some("↑ 5줄 · ↓ 2줄"));
 
         // 칸이 커지면 끝을 지난 자리를 자른다
         e.fit(20);

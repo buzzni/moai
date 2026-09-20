@@ -12,6 +12,7 @@
 //! [`lookup`] 이 [`Lookup::Pending`] 으로 "더 기다린다" 를 낸다. 기다리는 동안의 열은 든 쪽이
 //! [`Chord`] 로 들고 다음 키를 붙여 다시 부른다.
 
+use crate::i18n::{Lang, fill, say};
 use super::scroll::Move;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -248,16 +249,16 @@ pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> V
 
 /// 이동 하나의 낱말. 바는 이동을 `j·k 이동` 으로 묶어 대지만, 기다리는 `g` 뒤에 무엇이 오는지는
 /// 한 이동씩 대야 한다(`g 맨 위`).
-pub fn move_word(m: Move) -> &'static str {
+pub fn move_word(m: Move, lang: Lang) -> &'static str {
     match m {
-        Move::LineUp => "위",
-        Move::LineDown => "아래",
-        Move::HalfUp => "반 쪽 위",
-        Move::HalfDown => "반 쪽 아래",
-        Move::PageUp => "한 쪽 위",
-        Move::PageDown => "한 쪽 아래",
-        Move::Top => "맨 위",
-        Move::Bottom => "맨 아래",
+        Move::LineUp => say(lang, "tui.move.up"),
+        Move::LineDown => say(lang, "tui.move.down"),
+        Move::HalfUp => say(lang, "tui.move.half_up"),
+        Move::HalfDown => say(lang, "tui.move.half_down"),
+        Move::PageUp => say(lang, "tui.move.page_up"),
+        Move::PageDown => say(lang, "tui.move.page_down"),
+        Move::Top => say(lang, "tui.move.top"),
+        Move::Bottom => say(lang, "tui.move.bottom"),
     }
 }
 
@@ -360,14 +361,14 @@ pub enum Order {
 }
 
 impl Order {
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: Lang) -> &'static str {
         match self {
-            Order::Priority => "우선순위",
-            Order::Created => "생성",
-            Order::Updated => "수정",
-            Order::Column => "칸",
-            Order::Assignee => "담당",
-            Order::Title => "제목",
+            Order::Priority => say(lang, "tui.order.priority"),
+            Order::Created => say(lang, "tui.order.created"),
+            Order::Updated => say(lang, "tui.order.updated"),
+            Order::Column => say(lang, "tui.order.column"),
+            Order::Assignee => say(lang, "tui.order.assignee"),
+            Order::Title => say(lang, "tui.order.title"),
         }
     }
 
@@ -576,6 +577,9 @@ pub const BROWSE: &[Bind<Browse>] = {
 /// 켜짐을 가르는 값. **든 쪽이 잰다** — 여기는 `App` 을 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Ctx {
+    /// 화면의 말(moai-9it4). **키 표도 고른 말로 말한다** — 여기 든 낱말은 메뉴와 아랫바에
+    /// 그대로 서는 화면 글이다. 부르는 쪽이 `Site::lang` 에서 채운다(`App::key_ctx`).
+    pub lang: Lang,
     /// 프로젝트 층에 섰나.
     pub layer: bool,
     /// 한눈 보기에 **이슈 줄이 하나라도 섰나**(moai-1xo5) — 펼친 프로젝트가 있는가다. 보기·정렬·
@@ -673,10 +677,9 @@ impl Browse {
             // Bksp·h·← 는 여태 층으로 올라갔다 — 손에 익은 사람도, 낡은 AGENTS.md 를 읽은
             // 에이전트도 그것을 누른다. 대신 갈 키를 대 준다. 뒤의 조용한 갈래는 층이 없어
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
-            Leave if c.root && c.projects > 0 => Err(Off::Why(format!(
-                "{} 는 디렉터리만 올라간다 — 프로젝트 층으로는 {} 로 간다",
-                label(BROWSE, Leave),
-                label(BROWSE, Project(0))
+            Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
+                say(c.lang, "tui.off.leave_dir_only"),
+                &[("leave", &label(BROWSE, Leave)), ("project", &label(BROWSE, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -684,7 +687,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(BROWSE, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
@@ -715,18 +718,18 @@ impl Browse {
     pub fn menu_word(self, c: &Ctx) -> &'static str {
         use Browse::*;
         match self {
-            Jot => "생각 담기",
-            Pick => "등록",
-            Unregister => "목록에서 빼기",
-            Worktree => "워크트리 겹쳐 보기",
-            Raw => "원문↔그리기",
-            ShowAll => "모두 보이기",
-            Detail => "상세 칸",
-            Read => "이 줄을 읽음으로",
-            ReadAll => "안 읽은 것 전부",
-            ReadGroup => "이 묶음의 멤버 전부",
-            Sort(o) => o.word(),
-            Cell(f) => f.word(),
+            Jot => say(c.lang, "tui.menu.jot"),
+            Pick => say(c.lang, "tui.menu.pick"),
+            Unregister => say(c.lang, "tui.menu.unregister"),
+            Worktree => say(c.lang, "tui.menu.worktree"),
+            Raw => say(c.lang, "tui.menu.raw"),
+            ShowAll => say(c.lang, "tui.menu.show_all"),
+            Detail => say(c.lang, "tui.menu.detail"),
+            Read => say(c.lang, "tui.menu.read"),
+            ReadAll => say(c.lang, "tui.menu.read_all"),
+            ReadGroup => say(c.lang, "tui.menu.read_group"),
+            Sort(o) => o.word(c.lang),
+            Cell(f) => f.word(c.lang),
             _ => self.what(c),
         }
     }
@@ -735,15 +738,19 @@ impl Browse {
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
     pub fn state(self, c: &Ctx) -> Option<&'static str> {
         match self {
-            Browse::Worktree => Some(if c.worktree { "[켜짐]" } else { "[꺼짐]" }),
-            Browse::Raw => Some(if c.raw { "[원문]" } else { "[그리기]" }),
-            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0)),
-            Browse::Done => Some(shown(c.done_hidden)),
-            Browse::Deferred => Some(shown(c.deferred_hidden)),
+            Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on")),
+            Browse::Worktree => Some(say(c.lang, "tui.state.off")),
+            Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw")),
+            Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
+            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
+            Browse::Done => Some(shown(c.done_hidden, c.lang)),
+            Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed { "[● 거꾸로]" } else { "[● 차례]" }),
-            Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
-            Browse::Detail => Some(shown(!c.detail)),
+            Browse::Sort(o) if o == c.sorting.by => {
+                Some(if c.sorting.reversed { say(c.lang, "tui.state.reversed") } else { say(c.lang, "tui.state.sorted") })
+            }
+            Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang)),
+            Browse::Detail => Some(shown(!c.detail, c.lang)),
             _ => None,
         }
     }
@@ -767,47 +774,49 @@ impl Browse {
     pub fn what(self, c: &Ctx) -> &'static str {
         use Browse::*;
         match self {
-            Quit => "끝내기",
+            Quit => say(c.lang, "tui.act.quit"),
             FocusNext => c.next_pane,
             FocusPrev => c.prev_pane,
             Focus(Side::Left) => c.left_pane,
             Focus(Side::Right) => c.right_pane,
             // 상세에서는 커서가 없다 — 굴린다.
-            Step(_) if !c.list_focus => "굴리기",
-            Step(_) => "이동",
-            Enter => "들어가기",
-            Leave => "나가기",
-            Expand => "펼침",
-            Collapse => "접기",
-            ExpandAll => "다 펼침",
-            Grep => "검색",
-            Filter => "거름망",
-            Jot => "담기",
-            Pick if c.layer => "등록",
-            Pick => "프로젝트 등록",
-            Unregister => "해제",
-            ClearFilter => "풀기",
-            Worktree if c.worktree => "워크트리 끄기",
-            Worktree => "워크트리",
-            Raw if c.raw => "그리기",
-            Raw => "원문",
+            Step(_) if !c.list_focus => say(c.lang, "tui.act.scroll"),
+            Step(_) => say(c.lang, "tui.act.move"),
+            Enter => say(c.lang, "tui.act.enter"),
+            Leave => say(c.lang, "tui.act.leave"),
+            Expand => say(c.lang, "tui.act.expand"),
+            Collapse => say(c.lang, "tui.act.collapse"),
+            ExpandAll => say(c.lang, "tui.act.expand_all"),
+            Grep => say(c.lang, "tui.act.grep"),
+            Filter => say(c.lang, "tui.act.filter"),
+            Jot => say(c.lang, "tui.act.jot"),
+            Pick if c.layer => say(c.lang, "tui.act.pick"),
+            Pick => say(c.lang, "tui.act.pick_project"),
+            Unregister => say(c.lang, "tui.act.unregister"),
+            ClearFilter => say(c.lang, "tui.act.clear_filter"),
+            Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
+            Worktree => say(c.lang, "tui.act.worktree"),
+            Raw if c.raw => say(c.lang, "tui.act.rendered"),
+            Raw => say(c.lang, "tui.act.raw"),
             // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
-            Column(_) => "칸",
+            Column(_) => say(c.lang, "tui.act.column"),
             // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
-            Project(_) => "프로젝트",
+            Project(_) => say(c.lang, "tui.act.project"),
+            // **칸 이름은 설정에서 온다 — 옮기지 않는다.** `done` 은 기본 설정의 낱말이지 화면 글이
+            // 아니고, 사람이 칸을 다르게 지으면 그 이름이 선다.
             Done => "done",
-            Deferred => "미룸",
-            ShowAll => "모두",
-            Sort(_) => "정렬",
-            Cell(_) => "열",
-            Detail => "상세",
-            Read | ReadAll | ReadGroup => "읽음",
+            Deferred => say(c.lang, "tui.act.deferred"),
+            ShowAll => say(c.lang, "tui.act.show_all"),
+            Sort(_) => say(c.lang, "tui.act.sort"),
+            Cell(_) => say(c.lang, "tui.act.cell"),
+            Detail => say(c.lang, "tui.act.detail"),
+            Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
         }
     }
 }
 
-fn shown(hidden: bool) -> &'static str {
-    if hidden { "[숨김]" } else { "[보임]" }
+fn shown(hidden: bool, lang: Lang) -> &'static str {
+    if hidden { say(lang, "tui.state.hidden") } else { say(lang, "tui.state.shown") }
 }
 
 /// SPC 메뉴가 열린 동안 **표보다 먼저** 받는 키(moai-7sjm). Esc 는 탐색에서 거름망을 풀지만,
@@ -825,10 +834,10 @@ pub const MENU: &[Bind<Menu>] = &[
 ];
 
 impl Menu {
-    pub fn what(self) -> &'static str {
+    pub fn what(self, lang: Lang) -> &'static str {
         match self {
-            Menu::Close => "닫기",
-            Menu::Up => "위로",
+            Menu::Close => say(lang, "tui.act.close"),
+            Menu::Up => say(lang, "tui.act.up"),
         }
     }
 }
@@ -904,17 +913,17 @@ pub const PICK: &[Bind<Pick>] = {
 };
 
 impl Pick {
-    pub fn what(self, show_hidden: bool) -> &'static str {
+    pub fn what(self, show_hidden: bool, lang: Lang) -> &'static str {
         use Pick::*;
         match self {
-            Step(_) => "이동",
-            Enter => "들어가기",
-            Up => "위로",
-            Register => "등록",
-            Hidden if show_hidden => "숨은 것 감추기",
-            Hidden => "숨은 것",
-            Path => "경로 적기",
-            Close => "닫기",
+            Step(_) => say(lang, "tui.act.move"),
+            Enter => say(lang, "tui.act.enter"),
+            Up => say(lang, "tui.act.up"),
+            Register => say(lang, "tui.act.pick"),
+            Hidden if show_hidden => say(lang, "tui.pick.hide_hidden"),
+            Hidden => say(lang, "tui.pick.show_hidden"),
+            Path => say(lang, "tui.pick.path"),
+            Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -957,14 +966,14 @@ pub const JOT: &[Bind<Jot>] = {
 
 impl Jot {
     /// `title` — 포커스가 제목 칸에 있나.
-    pub fn what(self, title: bool) -> &'static str {
+    pub fn what(self, title: bool, lang: Lang) -> &'static str {
         match self {
-            Jot::Save => "담기",
-            Jot::Switch if title => "본문",
-            Jot::Switch => "제목",
-            Jot::Next if title => "본문으로",
-            Jot::Next => "줄 나누기",
-            Jot::Close => "닫기",
+            Jot::Save => say(lang, "tui.jot.save"),
+            Jot::Switch if title => say(lang, "tui.jot.body"),
+            Jot::Switch => say(lang, "tui.jot.title"),
+            Jot::Next if title => say(lang, "tui.jot.to_body"),
+            Jot::Next => say(lang, "tui.jot.newline"),
+            Jot::Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -1803,8 +1812,11 @@ mod tests {
 
     /// 프로젝트 안, 목록 포커스, 상세 칸이 보이는 자리 — 탐색기의 처음값이다. **`detail` 을 켜
     /// 둔다**: 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 늘 꺼진 채로 재어진다.
+    ///
+    /// **말은 한국어로 고정한다** — 아래 시험이 재는 것은 낱말이 표에서 오는가이지 기본 말이
+    /// 무엇인가가 아니다. `menu.rs` 의 fixture 와 같은 까닭이다.
     fn inside() -> Ctx {
-        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+        Ctx { list_focus: true, detail: true, lang: Lang::Ko, ..Ctx::default() }
     }
 
     fn layer() -> Ctx {

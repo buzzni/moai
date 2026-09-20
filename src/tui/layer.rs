@@ -17,6 +17,7 @@
 use super::form::{Form, Target};
 use super::keys::{BROWSE, Browse, JOT, Jot, label};
 use super::{App, Row, Stamp};
+use crate::i18n::{Lang, say};
 use crate::nav::Index;
 use crate::projects::{self, State};
 use crate::store::Repo;
@@ -343,15 +344,15 @@ impl Layer {
     /// 빼면 `0` 으로 층에 올라간 뒤 내려올 길이 없어, 디렉터리처럼 드나든다는 약속이 한
     /// 방향으로만 선다. 등록돼 있으면 그 줄에 표시만 붙는다. 이름은 띄운 자리까지 넣고
     /// 가른다 — 같은 화면에 같은 이름이 둘 서면 안 된다.
-    pub fn read(config: Option<&Path>, launch: Option<&Path>) -> Layer {
-        Layer::of(&user_config::read(config), launch)
+    pub fn read(config: Option<&Path>, launch: Option<&Path>, lang: crate::i18n::Lang) -> Layer {
+        Layer::of(&user_config::read(config), launch, lang)
     }
 
     /// 이미 읽은 설정으로 층을 세운다(moai-u8cs) — 띄울 때 보기와 같은 한 번의 읽기를 나눠 쓴다.
     ///
     /// **설정 자리는 읽은 것(`Registry::path`)에서 든다**(moai-y61p 단계 리뷰). 자리를 따로 받으면 줄은 한 파일에서
     /// 세우고 다시 읽기·등록·해제는 다른 파일에 하는 층이 설 수 있다.
-    pub fn of(reg: &user_config::Registry, launch: Option<&Path>) -> Layer {
+    pub fn of(reg: &user_config::Registry, launch: Option<&Path>, lang: crate::i18n::Lang) -> Layer {
         let found = launch.and_then(|l| reg.projects.iter().position(|p| same_dir(&p.path, l)));
         let mut entries = reg.projects.clone();
         let extra = match (launch, found) {
@@ -383,14 +384,15 @@ impl Layer {
             None => At::Layer,
         };
         Layer {
-            // 기본값은 [`super::Site::lang`] 과 같은 까닭으로 한국어다 — 부른 쪽이 갈아 끼운다.
-            lang: crate::i18n::Lang::Ko,
+            // **말은 여기서 받는다**(moai-9it4) — 밑의 `problems` 가 그 말로 펴지므로, 세운 뒤에
+            // 갈아 끼우면 그 줄만 옛 말로 남는다.
+            lang,
             at,
             places,
             // 설정의 탈은 **편 뒤에** 든다(리뷰) — 화면 말의 탈은 `problems` 가 아니라 자료로 서므로
             // (moai-dpbi) `reg.problems` 만 베끼면 층의 배너가 `lang` 오타를 잃는다. 탐색기의 말은
-            // 아직 한국어라 [`super::SAID`] 로 편다.
-            problems: crate::view::settings_problems(reg, super::SAID),
+            // 말은 부른 쪽이 고른 것이다.
+            problems: crate::view::settings_problems(reg, lang),
             trouble: reg.trouble,
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),
@@ -527,6 +529,12 @@ impl App {
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
     pub fn on_projects(layer: Layer) -> App {
         let mut app = App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
+        // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
+        // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
+        // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
+        // 고른 말이 한국어일 때 못 연 프로젝트의 줄만 영어로 선다(`MOAI_LANG` 이 안 닿는 자리).
+        // 화면에 놓는 것도 여기다 — [`App::with_layer`] 가 반대 방향으로 잇는 것과 짝이다.
+        app.site.lang = layer.lang;
         let mut layer = Layer { at: At::Layer, ..layer };
         layer.launch();
         app.layer = Some(layer);
@@ -542,7 +550,7 @@ impl App {
             return self.with_layer(layer);
         }
         let mut app = self;
-        app.unlayered = unlayered_of(&layer);
+        app.unlayered = unlayered_of(&layer, app.site.lang);
         app
     }
 
@@ -641,7 +649,7 @@ impl App {
                 Some(Row::Project(at)) => at,
                 Some(Row::Item(super::Seat::Place(at), ..)) => at,
                 _ => {
-                    self.notice = Some("담을 프로젝트가 없다 — `moai project add <dir>` 로 등록하면 여기 선다".into());
+                    self.notice = Some(say(self.site.lang, "tui.layer.no_jot_target").into());
                     return;
                 }
             };
@@ -662,7 +670,7 @@ impl App {
         // 담을 곳은 여기서 박힌 그대로 요청에 실려 가고, 돌아온 글이 [`App::edited`] 로 담긴다.
         match &self.editor {
             Some(editor) => {
-                let text = super::jotfile::template(into.as_ref());
+                let text = super::jotfile::template(into.as_ref(), self.site.lang);
                 self.edit = Some(super::Edit { into, text, editor: editor.clone() });
             }
             None => self.mode = super::Mode::Idea(Form::new(into)),
@@ -682,9 +690,13 @@ impl App {
         if self.here() == want {
             return true;
         }
+        let lang = self.site.lang;
         let why = match into {
             // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
-            None => format!("담을 곳 없이 연 폼이다 — {} 로 닫고 프로젝트 안에서 다시 {}", label(JOT, Jot::Close), label(BROWSE, Browse::Jot)),
+            None => crate::i18n::fill(say(lang, "tui.jot.no_place"), &[
+                ("close", &label(JOT, Jot::Close)),
+                ("jot", &label(BROWSE, Browse::Jot)),
+            ]),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
                 match self.layer.as_ref().and_then(|l| l.position(&t.path)) {
@@ -695,20 +707,20 @@ impl App {
                         }
                         // 들어가기가 댄 까닭(못 연 말·못 읽은 말)을 옮긴다. 앞의 글리프는 배너의 `!` 와 겹친다.
                         let said = self.notice.take().unwrap_or_default();
-                        format!("{name} 에 못 들어갔다 · {}", said.trim_start_matches(['·', '!', ' ']).trim_start_matches("들어가지 못했다 — "))
+                        let said = said.trim_start_matches(['·', '!', ' ']).trim_start_matches(enter_failed_head(lang).as_str());
+                        crate::i18n::fill(say(lang, "tui.layer.enter_failed_at"), &[("name", &name), ("said", said)])
                     }
-                    None => format!("{name} 이 프로젝트 층에서 빠졌다 — {} 로 닫고 다시 고른다", label(JOT, Jot::Close)),
+                    None => crate::i18n::fill(say(lang, "tui.layer.dropped"), &[("name", &name), ("close", &label(JOT, Jot::Close))]),
                 }
             }
-            Some(t) => format!(
-                "폼을 연 곳({})과 지금 선 곳이 다르다 — {} 로 닫고 다시 {}",
-                crate::text::one_line(&t.name),
-                label(JOT, Jot::Close),
-                label(BROWSE, Browse::Jot)
-            ),
+            Some(t) => crate::i18n::fill(say(lang, "tui.jot.elsewhere"), &[
+                ("name", &crate::text::one_line(&t.name)),
+                ("close", &label(JOT, Jot::Close)),
+                ("jot", &label(BROWSE, Browse::Jot)),
+            ]),
         };
         self.notice = None;
-        self.trouble = Some(format!("쓰지 못했다 — {}", why.trim()));
+        self.trouble = Some(crate::i18n::fill(say(lang, "tui.write.failed"), &[("why", why.trim())]));
         self.write_failed = true;
         false
     }
@@ -734,7 +746,7 @@ impl App {
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
         // 것은 **읽은 뒤**다 — 못 읽으면 선 자리도 깃발도 그대로여야 한다.
         let overlay = true;
-        match (self.read)(&repo, overlay) {
+        match (self.read)(&repo, overlay, self.site.lang) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
                 let leaving = match &self.layer.as_ref().map(|l| &l.at) {
@@ -788,7 +800,7 @@ impl App {
                 // 들어갈 때와 같은 자리다(`App::first_row`, moai-cm13). 여기서 목록을 또 세지 않는다(moai-go4o).
                 self.apply_fresh(fresh);
             }
-            Err(e) => self.notice = Some(format!("들어가지 못했다 — {e}")),
+            Err(e) => self.notice = Some(format!("{}{e}", enter_failed_head(self.site.lang))),
         }
     }
 
@@ -940,13 +952,13 @@ impl App {
                 // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
                 let Some(repo) = &self.site.repo else { return Relayered::Nothing };
                 let here = Some(repo.here().to_path_buf());
-                let mut fresh = match reg {
-                    Some(reg) => Layer::of(reg, here.as_deref()),
-                    None => Layer::read(self.user_config.as_deref(), here.as_deref()),
-                };
                 // **말은 화면에서 온다**(moai-ra67) — 다시 세운 층은 설정에서 나므로 제 말을 모른다.
-                // 안 이어 주면 설정 파일이 한 번 바뀔 때마다 못 연 프로젝트의 한 줄만 기본 말로 돌아간다.
-                fresh.lang = self.site.lang;
+                // 안 주면 설정 파일이 한 번 바뀔 때마다 못 연 프로젝트의 한 줄만 기본 말로 돌아간다.
+                let lang = self.site.lang;
+                let fresh = match reg {
+                    Some(reg) => Layer::of(reg, here.as_deref(), lang),
+                    None => Layer::read(self.user_config.as_deref(), here.as_deref(), lang),
+                };
                 // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
                 // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
                 // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 댈 까닭이 없으면 `None` 이다 — 없는 파일이
@@ -955,7 +967,7 @@ impl App {
                 // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
                 // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
                 if fresh.trouble.is_some() || !fresh.registered() {
-                    self.unlayered = unlayered_of(&fresh);
+                    self.unlayered = unlayered_of(&fresh, self.site.lang);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
                     return Relayered::Lost;
@@ -965,12 +977,12 @@ impl App {
                 self.layer = Some(fresh);
             }
             Some(mut old) => {
-                let mut fresh = match reg {
-                    Some(reg) => Layer::of(reg, old.launch.as_deref()),
-                    None => Layer::read(old.config.as_deref(), old.launch.as_deref()),
-                };
                 // 말은 화면에서 온다 — 위와 같은 자리다(moai-ra67).
-                fresh.lang = self.site.lang;
+                let lang = self.site.lang;
+                let mut fresh = match reg {
+                    Some(reg) => Layer::of(reg, old.launch.as_deref(), lang),
+                    None => Layer::read(old.config.as_deref(), old.launch.as_deref(), lang),
+                };
                 // **탈이 있으면 들고 있던 층을 두고 까닭을 단다**(moai-po6v, 사용자 결정 2026-09-19).
                 // 빈 층으로 갈아 끼우면 줄이 통째로 사라지는데, 손으로 누르던 비상구(`SPC r`)는
                 // 걷었다(moai-en4u) — 되돌릴 길이 도구 밖에만 남는다.
@@ -994,7 +1006,7 @@ impl App {
                     // 지난 읽기의 까닭이 지금 까닭 옆에 표식도 없이 서서(`draw::banner` 가 `held`
                     // 다음에 `Layer::problems` 를 잇는다), 고친 줄을 다시 고치라고 하거나 같은 글이
                     // 두 번 선다. 한때 이 자리가 통째로 갈아 끼우던 까닭이 그것이다.
-                    self.held = holding(&fresh, old.registered());
+                    self.held = holding(&fresh, old.registered(), self.site.lang);
                     if !old.registered() {
                         old.problems.clear();
                     }
@@ -1145,29 +1157,36 @@ pub(super) enum Relayered {
 /// 사람의 정상). 여기서는 다르다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라 말해야 한다.
 /// **안 들었으면 그대로 `None` 이다**(리뷰) — 없던 것을 잃었다고 말하는 꼴이라, [`unlayered_of`] 가
 /// 빈 `problems` 에 `None` 을 내는 것과 한 답이다.
-fn holding(fresh: &Layer, held: bool) -> Option<String> {
+fn holding(fresh: &Layer, held: bool, lang: Lang) -> Option<String> {
     let said = fresh.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>();
     if !held && said.is_empty() {
         return None;
     }
     let why = match (said.as_slice(), &fresh.config) {
-        ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
-        ([], None) => "파일이 사라졌다".to_string(),
+        ([], Some(p)) => crate::i18n::fill(say(lang, "tui.layer.config_gone_at"), &[("path", &p.display().to_string())]),
+        ([], None) => say(lang, "tui.layer.config_gone").to_string(),
         _ => said.join(" · "),
     };
     Some(match held {
-        true => format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}"),
+        true => crate::i18n::fill(say(lang, "tui.layer.config_stale"), &[("why", &why)]),
         false => why,
     })
+}
+
+/// `들어가지 못했다 — ` 머리. [`App::enter_project`] 가 붙이고 [`App::stand_at`] 이 떼어 제
+/// 문장에 이으므로 **한 자리에서 짓는다** — 두 군데가 글자를 따로 적으면 말을 옮긴 날 떼기가
+/// 조용히 안 먹어 같은 까닭이 두 번 선다.
+fn enter_failed_head(lang: Lang) -> String {
+    format!("{} — ", say(lang, "tui.layer.enter_failed"))
 }
 
 /// 등록한 것이 하나도 안 읽혀 **층을 안 세운** 까닭([`App::unlayered`]) — 설정을 읽다 만난 것이
 /// 있을 때만. 멀쩡한 빈 설정이면 `None` 이다. 띄울 때([`App::attach_layer`])와 설정이 바뀐 뒤
 /// ([`App::relayer`])가 같은 말을 쓴다.
-fn unlayered_of(layer: &Layer) -> Option<String> {
+fn unlayered_of(layer: &Layer, lang: Lang) -> Option<String> {
     (!layer.problems.is_empty()).then(|| {
         let why = layer.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>().join(" · ");
-        format!("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — {why}")
+        crate::i18n::fill(say(lang, "tui.layer.unlayered"), &[("why", &why)])
     })
 }
 
@@ -1285,7 +1304,7 @@ mod tests {
 
     /// 밖에서 띄운 탐색기 — 첫 읽기가 **끝난 뒤**의 것. 읽기는 스레드로 간다([`Layer::launch`]).
     fn layered(cfg: &Path) -> App {
-        let mut a = App::on_projects(Layer::read(Some(cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(cfg), None, crate::i18n::Lang::Ko));
         settle(&mut a);
         a
     }
@@ -1331,7 +1350,7 @@ mod tests {
         let cfg = s.register(&[&one, &two, &bare, &gone, &broken]);
 
         // **첫 화면은 기다리지 않는다**(moai-ezwu) — 줄은 곧바로 서고 셈은 스레드가 채운다.
-        let mut a = App::on_projects(Layer::read(Some(&cfg), None));
+        let mut a = App::on_projects(Layer::read(Some(&cfg), None, crate::i18n::Lang::Ko));
         assert!(a.loading(), "밖에서 띄운 첫 화면이 그 자리에서 다 읽었다 — 등록한 수만큼 멈춘다");
         assert!(a.layer.as_ref().unwrap().places.iter().all(|p| matches!(p.look, Look::Unread)));
         assert_eq!(a.rows(), (0..5).map(Row::Project).collect::<Vec<_>>(), "읽기를 기다리느라 줄이 안 섰다");
@@ -1531,7 +1550,7 @@ mod tests {
             let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
             App::open(repo, load, index, ground, NavPath::new(), stamp)
         };
-        let mut a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
+        let mut a = open().attach_layer(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko));
         assert!(a.layer.is_none(), "깨진 설정으로 층을 세웠다");
         let why = a.unlayered.clone().expect("층이 없는 까닭을 안 들었다");
         assert!(why.contains("TOML") && !why.contains('\n'), "{why:?}");
@@ -1550,7 +1569,7 @@ mod tests {
         assert!(a.unlayered.as_deref().is_some_and(|u| u.contains("TOML")), "다시 깨진 설정의 까닭을 안 달았다 — {:?}", a.unlayered);
 
         std::fs::write(&cfg, "").unwrap();
-        let a = open().attach_layer(Layer::read(Some(&cfg), Some(&here)));
+        let a = open().attach_layer(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko));
         assert!(a.layer.is_none() && a.unlayered.is_none(), "멀쩡한 빈 설정에 까닭을 달았다");
     }
 
@@ -1568,7 +1587,7 @@ mod tests {
         let stamp = stamp_of(&repo);
         let load = repo.read().unwrap();
         let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
-        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here)));
+        let mut a = App::open(repo, load, index, ground, NavPath::new(), stamp).with_layer(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko));
         assert!(!a.on_layer());
         assert_eq!(titles(&a), ["여기 줄"]);
         assert_eq!(a.cursor, 0, "뿌리에 `..` 이 없는데 커서가 한 칸 내려가 섰다");
@@ -1588,7 +1607,7 @@ mod tests {
         assert_eq!(titles(&a), ["여기 줄"], "띄운 자리로 도로 못 내려간다");
 
         // 등록된 자리에서 띄우면 따로 서지 않고 그 줄에 표시만 붙는다.
-        let layer = Layer::read(Some(&cfg), Some(&two));
+        let layer = Layer::read(Some(&cfg), Some(&two), crate::i18n::Lang::Ko);
         assert_eq!(layer.places.iter().map(|p| (p.launched, p.registered)).collect::<Vec<_>>(), [(false, true), (true, true)]);
         assert_eq!(layer.at, At::Project(two.clone()));
     }
@@ -1600,10 +1619,10 @@ mod tests {
         let s = Scratch::fenced("layer-none");
         let here = s.project("here", &[]);
         let cfg = s.register(&[]);
-        assert!(!Layer::read(Some(&cfg), Some(&here)).registered());
-        assert!(!Layer::read(None, Some(&here)).registered(), "설정 자리를 몰라도 층이 섰다");
+        assert!(!Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko).registered());
+        assert!(!Layer::read(None, Some(&here), crate::i18n::Lang::Ko).registered(), "설정 자리를 몰라도 층이 섰다");
         let cfg = s.register(&[&s.join("gone")]);
-        assert!(Layer::read(Some(&cfg), Some(&here)).registered());
+        assert!(Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko).registered());
     }
 
     /// 사용자 설정에 정한 색이 층의 줄까지 실려 온다(moai-o04b) — `draw::project_style` 이 그것을
@@ -1614,7 +1633,7 @@ mod tests {
         let (one, here) = (s.dir("one"), s.dir("here"));
         let cfg = s.register(&[&one]);
         std::fs::write(&cfg, format!("{}color = \"blue\"\n", std::fs::read_to_string(&cfg).unwrap())).unwrap();
-        let layer = Layer::read(Some(&cfg), Some(&here));
+        let layer = Layer::read(Some(&cfg), Some(&here), crate::i18n::Lang::Ko);
         let hues: Vec<_> = layer.places.iter().map(|p| (p.name.as_str(), p.hue.map(crate::style::Hue::name))).collect();
         assert_eq!(hues, [("here", None), ("one", Some("blue"))]);
     }
@@ -1903,6 +1922,22 @@ mod tests {
         // 다시 세운 층도 같은 말을 든다 — 못 연 프로젝트의 한 줄(`shut`)이 여기서 말을 받는다.
         a.relayer(None);
         assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "다시 세운 층이 딴 말을 든다");
+    }
+
+    /// **밖에서 띄운 층도 제가 세워진 말을 그대로 든다**(moai-9it4). 그 층은 `cmd::tui::outside`
+    /// 가 고른 말로 세우고([`Layer::of`]) 얹자마자 [`Layer::launch`] 가 읽기를 띄우는데, 얹는
+    /// 문이 화면의 처음값으로 그 말을 덮던 판은 못 연 프로젝트의 한 줄(`Look::Shut`)만 도구의
+    /// 기본 말로 섰다 — `MOAI_LANG=ko` 가 안 닿는 자리이고, 같은 층의 `problems` 는 이미 고른
+    /// 말로 펴져 있어 한 화면이 두 말로 섰다. 화면의 말도 같은 줄에서 선다.
+    #[test]
+    fn a_layer_built_outside_keeps_the_language_it_was_given() {
+        use crate::i18n::Lang;
+        let s = Scratch::fenced("layer-lang-outside");
+        let one = s.project("one", &[]);
+        let cfg = s.register(&[&one]);
+        let a = App::on_projects(Layer::read(Some(&cfg), None, Lang::En));
+        assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "얹는 문이 층의 말을 덮었다");
+        assert_eq!(a.site.lang, Lang::En, "화면이 층과 다른 말로 섰다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
@@ -2793,7 +2828,7 @@ mod tests {
         let stamp = crate::store::stamp(&cfg);
         let reg = user_config::read(Some(&cfg));
         assert_eq!(reg.trouble, Some(user_config::Trouble::Unreadable), "시험의 전제 — 읽기가 졌다");
-        let mut a = App::on_projects(Layer::of(&reg, None));
+        let mut a = App::on_projects(Layer::of(&reg, None, crate::i18n::Lang::Ko));
         a.user_config = Some(cfg.clone());
         a.config_stamp = Some(stamp);
         a.config_tried.saw(reg.trouble);
@@ -2819,7 +2854,7 @@ mod tests {
         let s = Scratch::fenced("layer-config-blip");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
-        let mut a = App::on_projects(Layer::of(&user_config::Registry::default(), None));
+        let mut a = App::on_projects(Layer::of(&user_config::Registry::default(), None, crate::i18n::Lang::Ko));
         a.user_config = Some(cfg.clone());
         a.config_stamp = Some(crate::store::stamp(&cfg));
         a.config_tried.saw(Some(user_config::Trouble::Reading));
@@ -2901,7 +2936,7 @@ mod tests {
     fn a_config_that_was_never_made_is_not_told_as_lost() {
         let s = Scratch::fenced("layer-config-never");
         let cfg = s.dir("설정").join("config.toml");
-        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None));
+        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None, crate::i18n::Lang::Ko));
         a.user_config = Some(cfg.clone());
         assert!(names(&a).is_empty(), "시험의 전제 — 등록한 줄이 없다");
         a.relayer(None);
@@ -2921,7 +2956,7 @@ mod tests {
         let s = Scratch::fenced("layer-config-empty-broken");
         let cfg = s.dir("설정").join("config.toml");
         std::fs::write(&cfg, "[tui]\n").unwrap();
-        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None));
+        let mut a = App::on_projects(Layer::of(&user_config::read(Some(&cfg)), None, crate::i18n::Lang::Ko));
         a.user_config = Some(cfg.clone());
         assert!(names(&a).is_empty(), "시험의 전제 — 등록한 줄이 없다");
 
@@ -3100,19 +3135,19 @@ mod tests {
         let own = repo.read().unwrap().issues;
         // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
         // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
-        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default()).0, 1, "전제가 안 섰다");
+        assert_eq!(super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default(), crate::i18n::Lang::Ko).0, 1, "전제가 안 섰다");
 
         // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
         std::fs::write(main.join(".git/config"), "[core\n").unwrap();
         let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now());
-        let f = super::super::prepare(&repo, true).unwrap();
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko).unwrap();
         assert!(f.unfound.is_some(), "전제: git 이 저장소를 거절하지 않았다");
         assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
 
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
+        let a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko), g.watched, g.swept, &g.sides, &g.mine);
         assert_eq!(a.site.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
     }
 
@@ -3136,7 +3171,7 @@ mod tests {
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
-        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble), g.watched, g.swept, &g.sides, &g.mine);
+        let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(g.origin, crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko), g.watched, g.swept, &g.sides, &g.mine);
         let paths: std::collections::BTreeSet<PathBuf> = a.site.watched.iter().map(|(p, _)| p.clone()).collect();
         assert_eq!(paths.len(), a.site.watched.len(), "같은 파일을 두 번 지켜본다");
         // 여는 커밋 표는 다 짓게 둔다.
