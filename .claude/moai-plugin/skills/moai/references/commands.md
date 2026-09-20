@@ -103,11 +103,12 @@ claim=$(moai mv "$id" in_progress --json --from "$col") || {
 - **Pass one id at a time.** Several at once mix the rows you won and the rows you
   lost into **one exit code** — the won rows have already moved while the caller
   believes it picked up nothing
-- A lost row stands as one line on stderr (`moai: <id> 는 이미 <칸> 다 — …`) and as
-  `stale: [{"id":…,"status":<the column it stands in>}]` under `--json`. The `이미 <칸> 다`
-  on stdout is **a different thing** — that row was already in the column you asked for,
-  and the exit code is 0. Those two are quoted as the binary prints them, which is Korean
-  either way: they are not in the language bundle, so matching an English phrase finds nothing
+- A lost row stands as one line on stderr (`moai: <id> already stands <column> — not moved`)
+  and as `stale: [{"id":…,"status":<the column it stands in>}]` under `--json`. The
+  `already <column>` on stdout is **a different thing** — that row was already in the column
+  you asked for, and the exit code is 0. Both lines come out of the language bundle, so they
+  read in whatever language the screen is set to — tell the two apart by the exit code and
+  by `--json`, never by the words
 - **Not every non-zero code means "lost".** No identity, the lock being held, a
   mistyped column and a broken row all come back with the same code. Losing a contest
   puts the row on stdout; a failure puts `{"code":…}` on stderr and leaves stdout

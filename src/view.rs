@@ -161,13 +161,9 @@ pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str, lang: Lang) -> Opt
 ///
 /// `roots` 는 풀어야 할 미룸 전부다(`report::deferred_sources`, 가까운 것부터). **다 댄다** —
 /// 하나만 대면 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
-pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
+pub fn shelved_by<S: AsRef<str>>(roots: &[S], lang: Lang) -> String {
     let roots: Vec<&str> = roots.iter().map(AsRef::as_ref).collect();
-    format!(
-        "{} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {} --undo`",
-        roots.join(" · "),
-        roots.join(" ")
-    )
+    fill(say(lang, "mv.shelved_by"), &[("ids", &roots.join(" · ")), ("undo", &roots.join(" "))])
 }
 
 /// 한 줄에 이름을 대는 줄의 수. 넘으면 수로만 댄다.
@@ -1412,15 +1408,15 @@ pub fn unread_column(i: &Issue, col: &str, cfg: &Config, lang: Lang) -> Option<S
 /// 멤버가 없는 묶음은 첫 칸에 서므로(`report::group_states`), 그때 "남은 멤버를 미룬다"
 /// 를 시키면 시킨 대로 한 뒤에도 같은 말이 돌아온다. 빈 묶음도 마찬가지다. 그 자리에서
 /// 실제로 듣는 말은 묶음 제 `defer` 다 — 계획에서 빠지면 보드와 `ready` 에서 함께 빠진다.
-pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool) -> String {
+pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool, lang: Lang) -> String {
+    // **갈래마다 제 `say` 를 적는다**([`says`] 와 같은 까닭) — 키를 도우미로 넘기면 소스를 훑는
+    // 시험(`i18n::tests::keys_in`)이 그 키를 못 본다.
     let fold = match (closing, finished) {
         (false, _) => String::new(),
-        (true, true) => " — 접으려면 남은 멤버를 `moai defer` 한다".to_string(),
-        (true, false) => {
-            format!(" — 끝난 멤버가 없어 닫히지 않는다. 계획에서 빼려면 `moai defer {id}`")
-        }
+        (true, true) => say(lang, "mv.group_fold").to_string(),
+        (true, false) => fill(say(lang, "mv.group_stuck"), &[("id", id)]),
     };
-    format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}")
+    format!("{}{fold}", fill(say(lang, "mv.group_column"), &[("col", col)]))
 }
 
 /// 상세의 막음 한 줄. **탐색기 상세(`tui::draw`)와 같은 낱말이다** — 막힘·풀림·끊김, 미룬

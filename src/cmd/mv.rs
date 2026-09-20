@@ -37,10 +37,15 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     if args.args.len() < 2 {
         return Err(Fail::coded(
+            // **두 줄은 키 둘이다.** 말묶음의 값은 한 줄이라(`i18n` 의
+            // `every_translation_keeps_the_places_english_marks`) 줄 나눔은 부르는 쪽이 짓는다.
             format!(
-                "옮길 칸을 안 적었다 — `moai mv {} <상태>`\n      있는 칸: {}",
-                args.args.join(" "),
-                repo.config.statuses.join(", ")
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.no_status"), &[("ids", &args.args.join(" "))]),
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "mv.no_status_columns"),
+                    &[("columns", &repo.config.statuses.join(", "))]
+                ),
             ),
             super::code::BAD_STATUS,
         ));
@@ -85,9 +90,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         {
             return Err(Fail::coded(
                 format!(
-                    "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                     멤버를 집거나, 묶음은 `moai defer` 로 접는다",
-                    g.id
+                    "{}\n      {}",
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.group_no_from"), &[("id", &g.id)]),
+                    crate::i18n::say(ctx.lang(), "mv.group_no_from_how"),
                 ),
                 super::code::BAD_STATUS,
             ));
@@ -194,7 +199,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {id} 를 못 찾았다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.missing"), &[("id", id)]));
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
@@ -202,7 +207,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 터미널에서 한 줄이 두 번 떴다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {id} 는 이미 {now} 다 — 안 옮겼다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.stale"), &[("id", id), ("now", now)]));
     }
 
     if ctx.json {
@@ -270,7 +275,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         })
         .collect();
     for id in &moved.already {
-        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &format!("이미 {to} 다"))));
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.already"), &[("to", to.as_str())]);
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
@@ -278,7 +284,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),
-            paint(style::DIM, &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id)))
+            paint(
+                style::DIM,
+                &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id), ctx.lang())
+            )
         ));
     }
     // **미뤄 둔 줄을 옮겼으면 말한다.** 칸은 옮겨졌는데 그 줄은 보드에도
@@ -292,7 +301,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
     // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
     for (id, root) in &moved.shelved {
-        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &crate::view::shelved_by(root))));
+        let said = crate::view::shelved_by(root, ctx.lang());
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     // **이 쓰기가 연 것은 한 줄씩.** 없으면 말하지 않는다 — 출력이 전과 같다.
     out.extend(crate::view::freed_lines(&moved.unblocked, &moved.closable, &moved.next, ctx.lang()));

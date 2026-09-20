@@ -193,7 +193,8 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // **아직 계획 밖이면 도로 집을 줄을 댄다.** 제 줄을 풀었든 원래 안 미뤘든,
     // 미룬 에픽·부모 밑이면 그 줄을 도로 집어야 풀린다.
     for (id, root) in &moved.shelved {
-        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &crate::view::shelved_by(root))));
+        let said = crate::view::shelved_by(root, ctx.lang());
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     Ok(out)
 }
