@@ -870,6 +870,15 @@ impl Doc {
         // 다음 실행에서 사라졌다. 보기는 키마다 따로 사는 값이라 한 키가 다른 키의 저장을 막을 까닭이 없다.
         // 차례와 방향은 한 벌이라 하나가 표 모양이면 둘 다 건너뛴다. 건너뛴 키의 까닭을 낸다.
         let t = self.doc.get(TUI).and_then(Item::as_table_like).expect("방금 표로 섰다");
+        // **파일에 그 키가 없으면 이 세션이 이미 적었어도 다시 적는다**(리뷰) — 위의 깃발은 *이 세션이
+        // 적을 것이 남았는가* 를 재는데, 그것만으로는 **파일이 밑에서 바뀐 판**을 못 본다. `saved` 는
+        // 한 번 적고 나면(또는 거절돼 건너뛰고 나면, moai-jr3z) 세션 내내 `new` 와 같아, 그사이 누가
+        // 이 키를 지우거나 설정을 통째로 갈아 끼우면 다음 토글이 `fields` 만 적고 `fields_known` 은
+        // 빼놓는다 — 다음 실행이 그 빈자리를 `Field::BEFORE_KNOWN` 어휘로 읽어 사람이 끈 열을 도로
+        // 켠다(`turning_off_a_new_column_survives_a_trip_through_the_file` 가 막는 그 해다). 걷은
+        // `is_some()` 이 값싸게 해 주던 일이 이것 하나라, 그것만 도로 든다. 더하기로만 적는 키라
+        // (`merge_words` 에 `None` 을 준다) 다시 적어도 남의 이름은 그대로다.
+        known |= !t.contains_key(FIELDS_KNOWN);
         let mut skipped = Vec::new();
         let mut odd = |keys: &[&str], words: bool, go: &mut bool| {
             if !*go {

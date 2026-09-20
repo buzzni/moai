@@ -661,8 +661,8 @@ pub struct App {
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
     /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
     body: Option<draw::Body>,
-    /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 층이 제 `problems` 를 대므로
-    /// 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
+    /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 아래의 [`App::held`] 가 대므로
+    /// (moai-23pm) 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
     /// 그 읽기로 다시 단다(`App::relayer`) — 층이 서거나 설정이 멀쩡해지면 걷히고, 깨지면 선다.
     pub unlayered: Option<String>,
@@ -2003,9 +2003,14 @@ impl App {
             //
             // 가르는 자는 `fields_known` 이다 — 거기 적혔다는 것은 적은 쪽이 그 열을 알았다는 뜻이다.
             // 목록에 없는 이름은 그대로 댄다: 손으로 낸 오타가 그것이고, 그때 이 한 줄이 유일한 말이다.
-            let knew = |w: &String| look.fields_known.as_ref().is_some_and(|k| k.contains(w));
+            //
+            // **위의 `knew` 와 다른 물음이다** — 저기는 *안 적힌* 열을 가르느라 빈 목록과 없는 목록에
+            // 저마다 어휘를 대는데(`EMPTY_KNOWN`·`BEFORE_KNOWN`), 여기는 *적힌* 이름이 그 목록에 들었나
+            // 하나다. 둘 다 얼린 어휘가 이 바이너리의 `Field::ALL` 안에 있어, 그 밖의 이름은 어느 쪽으로
+            // 읽어도 오타다 — 이름을 갈라 그 둘이 한 물음으로 안 보이게 둔다.
+            let wrote = look.fields_known.as_deref().unwrap_or_default();
             for w in words {
-                if view::Field::named(w).is_none() && !knew(w) {
+                if view::Field::named(w).is_none() && !wrote.contains(w) {
                     problems.push(format!(
                         "`fields` 의 `{w}` 는 모르는 열이다 — {} 중에서",
                         view::Field::ALL.map(view::Field::name).join("·")
@@ -2121,7 +2126,7 @@ impl App {
         let told = match marks.trouble {
             // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
-            // 있지만(`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
+            // 있지만(`App::held`·`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
             Some(t) if t.again() != crate::user_config::Again::Never => None,
             Some(_) => marks.problems.first().map(|why| format!("읽음을 못 들었다 — {}", crate::text::one_line(why))),
             None => marks.problems.first().map(|why| format!("읽음에 이상한 줄이 있다 — {}", crate::text::one_line(why))),
@@ -2263,7 +2268,16 @@ impl App {
         //
         // 읽음 파일이 **없는** 것은 여기 안 든다 — 탈이 아니라 아직 아무것도 안 읽은 프로젝트의
         // 정상이고, 그때 모든 줄이 [NEW] 인 것이 맞는 답이다.
-        if site.read_tried.trouble.is_some() && site.seen.is_empty() {
+        //
+        // **[`crate::user_config::Trouble::Gone`] 도 안 든다**(리뷰) — 읽기는 그 갈래를 혼자 안 세운다
+        // ([`crate::read_marks::Marks::trouble`]). 세우는 자리는 [`App::read_marks_of`] 하나고 거기서
+        // 서는 뜻은 "**곁의 설정이** 사라졌다" 다 — 읽음 파일 쪽은 멀쩡히 없는 것으로 읽혔다. **설정을
+        // 아직 안 만든 기계가 그 자리에 그대로 든다**(`user_config::read` 가 없는 파일에 `Gone` 을
+        // 남기고 `cmd::tui` 가 그것을 `App::config_tried` 에 적는다) — 그것까지 세면 처음 띄운 사람에게
+        // **[NEW] 가 한 줄도 안 서고** 까닭도 없다(`Gone` 은 `problems` 가 빈다). 홈이 끊긴 쪽은 들고
+        // 있던 표가 지킨다([`App::take_read`] 가 탈 앞에서 `seen` 을 안 덮는다) — 그 표가 비어 있으면
+        // 애초에 잃을 것이 없어 모든 줄이 [NEW] 인 것이 맞다.
+        if site.read_tried.trouble.is_some_and(|t| t != crate::user_config::Trouble::Gone) && site.seen.is_empty() {
             site.unread.clear();
             return;
         }
@@ -4305,6 +4319,29 @@ mod tests {
         assert!(text.contains("\"assignee\""), "거절된 키 하나가 다른 키의 저장을 막았다\n{text}");
     }
 
+    /// **파일에서 `fields_known` 이 사라지면 다음 저장이 다시 적는다**(리뷰) — 적을 것을 재는 깃발은
+    /// *이 세션이 적을 것이 남았는가* 이고(moai-fdq2), 그것만으로는 **파일이 밑에서 바뀐 판**을 못 본다.
+    /// 한 번 적고 나면 세션 내내 같은 값이라, 그사이 누가 설정을 갈아 끼우면 다음 토글이 `fields` 만
+    /// 적고 이 키는 빼놓는다 — 다음 실행이 그 빈자리를 옛 어휘([`view::Field::BEFORE_KNOWN`])로 읽어
+    /// 사람이 끈 열을 도로 켠다.
+    #[test]
+    fn a_fields_known_that_vanished_from_the_file_is_written_again() {
+        let s = scratch("fields-known-vanished");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\n").unwrap();
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC c t Esc");
+        assert!(std::fs::read_to_string(&user).unwrap().contains("fields_known"), "첫 저장이 아는 열 목록을 안 적었다");
+
+        // 옆에서 설정을 갈아 끼운다 — 이 키가 사라졌다.
+        std::fs::write(&user, "[tui]\nfields = [\"id\"]\n").unwrap();
+        a.hit("SPC c a Esc");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("fields_known"), "사라진 키를 다시 안 적어, 다음 실행이 끈 열을 도로 켠다\n{text}");
+    }
+
     /// **빈 `fields_known` 을 다시 적어도 남의 글은 그대로다**(moai-4gy5) — 매 저장이 설정 파일 전체를
     /// 다시 쓰는 길이라, 모르는 키·주석·다른 표가 한 번의 토글로 조용히 사라지면 되돌릴 방법이 도구
     /// 밖에만 남는다. 이 저장소가 못 견디는 것이 그 조용한 손실이다.
@@ -5586,9 +5623,42 @@ mod tests {
             return;
         }
         a.load_read();
+        // 되돌리는 것이 **견줌보다 앞이다**(리뷰) — 뒤에 두면 견줌이 진 판에서 0o000 인 파일이 그대로
+        // 남는다. 옆의 `entering_a_project_carries_the_read_marks_the_row_already_held` 와 같은 자다.
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(a.site.read_tried.trouble, Some(crate::user_config::Trouble::Unreadable), "시험의 전제 — 못 읽었다");
         assert!(a.site.unread.is_empty(), "모르는 것을 안 읽은 것으로 셌다 — {:?}", a.site.unread);
-        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    /// **설정을 아직 안 만든 기계에서도 [NEW] 가 선다**(리뷰) — "읽음을 못 들었으면 안 센다"
+    /// ([`App::recount_unread_in`])가 삼키던 자리다. 없는 설정은 [`crate::user_config::Trouble::Gone`]
+    /// 이고([`crate::user_config::read`]), 띄우는 길이 그것을 [`App::config_tried`] 에 적는다 —
+    /// 그러면 [`App::read_marks_of`] 가 **없는 읽음 파일까지** `Gone` 으로 올려(홈이 끊긴 것과 못
+    /// 가르니), 처음 띄운 사람의 화면에서 [NEW] 가 통째로 사라졌다. 까닭도 없다: `Gone` 은
+    /// `problems` 가 비어 알림 한 줄도 안 선다.
+    ///
+    /// 갈래를 가려 푼다 — 읽기가 혼자 세우는 갈래(`Unreadable`·`Reading`·`Broken`)만 "모른다" 로 든다.
+    #[test]
+    fn a_machine_that_never_made_a_config_still_marks_new() {
+        let s = Scratch::new("read-marks-no-config");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        // 띄우는 길이 하는 것 — 설정을 한 번 읽어 갈래를 넘긴다(`cmd::tui`).
+        let reg = crate::user_config::read(Some(&config));
+        assert_eq!(reg.trouble, Some(crate::user_config::Trouble::Gone), "시험의 전제 — 없는 설정은 Gone 이다");
+        a.config_tried.saw(reg.trouble);
+        a.load_read();
+        assert_eq!(a.site.read_tried.trouble, Some(crate::user_config::Trouble::Gone), "시험의 전제 — 읽음도 Gone 으로 올랐다");
+        assert!(a.site.unread.contains("argos-0009"), "설정 없는 기계에서 [NEW] 가 한 줄도 안 섰다 — {:?}", a.site.unread);
     }
 
     /// **홈이 끊기면 읽음도 지난 것을 들고 선다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의
@@ -5596,6 +5666,9 @@ mod tests {
     /// 설정만 지키고 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 내 줄이 통째로 [NEW] 로 서고,
     /// 그 화면에서 `SPC m a` 한 번이 프로젝트를 통째로 읽음으로 찍는다 — moai-po6v 가 층에 대해 막은
     /// 그 해가 읽음 쪽에 그대로 남아 있었다.
+    ///
+    /// **없는 설정과 갈리는 자는 들고 있던 표다** — 위 이웃(`a_machine_that_never_made_a_config_still_marks_new`)
+    /// 이 그 반대쪽을 잰다. 둘 다 `Gone` 인데 한쪽은 [NEW] 가 서고 한쪽은 안 선다.
     #[test]
     fn a_home_that_dropped_does_not_turn_every_line_new() {
         let s = Scratch::new("read-marks-home-gone");

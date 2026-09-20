@@ -736,16 +736,27 @@ impl App {
                 self.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
-                // **그 줄이 이미 들고 있던 읽음을 옮겨 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
+                // **그 줄이 이미 들고 있던 읽음을 베껴 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
                 // 들고 선다. 아래의 `load_read` 가 그 파일을 못 읽으면(옛 `sudo moai read` 가 남긴
                 // root 의 파일) 들일 것이 없어 내게 온 줄이 모두 [NEW] 로 서고, 그 화면의 `SPC m a`
-                // 한 번이 그것을 다 찍는다. 세워 둔 줄에서 옮겨 드는 `App::follow_site` 와 같은 자다.
+                // 한 번이 그것을 다 찍는다. 세워 둔 줄에서 드는 [`App::follow_site`] 와 같은 자다.
                 //
                 // **읽기가 되면 아래가 덮는다** — 여기 든 것은 못 읽을 때의 밑값이지 답이 아니다.
-                if let Some(held) = self.layer.as_mut().and_then(|l| l.places.get_mut(at)).and_then(|p| p.site.as_mut()) {
-                    self.site.seen = std::mem::take(&mut held.seen);
-                    self.site.read_stamp = held.read_stamp;
-                    self.site.read_tried = held.read_tried;
+                //
+                // **다만 베낀다**(리뷰) — `follow_site` 는 그 줄의 `Site` 를 통째로 갈아 끼우는 길이라
+                // 옮겨 들어도 되지만("그 줄은 곧 버려진다"), 이 길은 줄을 그대로 두고 들어간다. 옮겨
+                // 들면 그 줄이 **빈 표에 멀쩡한 갈래**로 남아, 그 줄을 다시 세는 자가 내게 온 것을 모두
+                // [NEW] 로 센다([`App::recount_unread_in`] 의 문지기가 갈래를 보므로 그 꼴은 못 막는다)
+                // — 이 이슈가 없애려던 바로 그 화면이다.
+                //
+                // **갈래와 읽어 본 때는 안 든다** — `follow_site` 와 같은 까닭이다. 바로 아래 `load_read`
+                // 가 이 걸음의 읽기로 다시 적어 덮이고, 덮이기 전에 한 번 읽히는 데가 있다(그 `knew`).
+                // 게다가 `Tried::since` 까지 따라와 방금 난 실패가 오래된 것으로 보여, [`owed`] 가 잠깐
+                // 봐 주는 틈(`BLIP`)을 건너뛰고 시계로 내려앉는다.
+                let carried = self.site_mut(super::Seat::Place(at)).map(|h| (h.seen.clone(), h.read_stamp));
+                if let Some((seen, stamp)) = carried {
+                    self.site.seen = seen;
+                    self.site.read_stamp = stamp;
                 }
                 // **그 프로젝트의 읽음을 여기서 든다**(리뷰) — [`App::leave_project`] 가 `Site` 를 비워
                 // `seen` 이 빈 표라, 안 들면 아래의 들이기가 그 빈 표로 세어 **내게 온 줄이 모두** [NEW]
@@ -944,7 +955,15 @@ impl App {
                     //
                     // **들고 있던 `problems` 는 그대로 둔다** — 지난 읽기의 것이지만 지금 들고 선
                     // 바로 그 줄들을 설명한다. 갈아 끼우면 왜 저 줄이 빠졌는지가 사라진다.
+                    //
+                    // **든 줄이 없으면 걷는다**(리뷰) — 그때 그 글이 설명할 줄이 하나도 없다. 두면
+                    // 지난 읽기의 까닭이 지금 까닭 옆에 표식도 없이 서서(`draw::banner` 가 `held`
+                    // 다음에 `Layer::problems` 를 잇는다), 고친 줄을 다시 고치라고 하거나 같은 글이
+                    // 두 번 선다. 한때 이 자리가 통째로 갈아 끼우던 까닭이 그것이다.
                     self.held = holding(&fresh, old.registered());
+                    if !old.registered() {
+                        old.problems.clear();
+                    }
                     old.trouble = fresh.trouble;
                     self.layer = Some(old);
                     return;
@@ -1073,16 +1092,18 @@ pub(super) enum Depth {
 ///
 /// 사라진 파일은 `problems` 가 빈다 — 읽기에게는 댈 까닭이 아니라서다(아직 아무것도 등록 안 한
 /// 사람의 정상). 여기서는 다르다: 들고 있는 것이 있으면 **있던 파일이 사라졌다**는 뜻이라 말해야 한다.
+/// **안 들었으면 그대로 `None` 이다**(리뷰) — 없던 것을 잃었다고 말하는 꼴이라, [`unlayered_of`] 가
+/// 빈 `problems` 에 `None` 을 내는 것과 한 답이다.
 fn holding(fresh: &Layer, held: bool) -> Option<String> {
     let said = fresh.problems.iter().map(|p| crate::text::one_line(p)).collect::<Vec<_>>();
+    if !held && said.is_empty() {
+        return None;
+    }
     let why = match (said.as_slice(), &fresh.config) {
         ([], Some(p)) => format!("{}: 파일이 사라졌다", p.display()),
         ([], None) => "파일이 사라졌다".to_string(),
         _ => said.join(" · "),
     };
-    // **들고 있는 것이 없으면 "들고 있다" 고 하지 않는다**(리뷰) — 까닭만 그대로 낸다. 층은 등록한
-    // 줄이 없어도 선다(`.moai` 밖에서 띄운 화면, `App::on_projects`) — 아무것도 안 든 화면에 대고
-    // 그렇게 말하면 없던 것을 잃었다고 말하는 꼴이다.
     Some(match held {
         true => format!("사용자 설정을 못 읽어 지난 것을 들고 있다 — {why}"),
         false => why,
@@ -2720,8 +2741,8 @@ mod tests {
 
     /// **쭉 못 읽어도 조용하지 않다**(moai-po6v, 사용자 결정 2026-09-19) — 지난 것을 들고 서되 까닭을
     /// 배너에 댄다. 한때 들고 있던 층을 두고 `return` 만 해, 옆 터미널에서 등록한 프로젝트가 영영 안
-    /// 서는데 까닭을 아무 데서도 못 읽었다. 층이 선 화면에서 그 말을 내는 자리는 `Layer::problems`
-    /// 하나다(`draw::banner`).
+    /// 서는데 까닭을 아무 데서도 못 읽었다. 그 말이 서는 자리는 [`App::held`] 다(moai-23pm) —
+    /// `Layer::problems` 에 실으면 배너가 `on_layer()` 로 막아 프로젝트 안에서는 아무 말이 없다.
     #[test]
     #[cfg(unix)]
     fn a_config_we_cannot_read_keeps_the_layer_and_says_why() {
@@ -2796,6 +2817,9 @@ mod tests {
         a.user_config = Some(cfg.clone());
         assert!(names(&a).is_empty(), "시험의 전제 — 등록한 줄이 없다");
         a.relayer(None);
+        // **보는 자리는 `App::held` 다**(리뷰) — `Layer::problems` 를 보던 판은 이 자리가 거기 안
+        // 적게 된 뒤로 무엇을 해도 지나갔다(옆의 두 시험은 옮겼는데 이것만 남았다).
+        assert_eq!(a.held, None, "없던 파일을 잃었다고 말했다 — {:?}", a.held);
         let said = &a.layer.as_ref().expect("빈 층이 섰다").problems;
         assert!(said.is_empty(), "없던 파일을 잃었다고 말했다 — {said:?}");
     }

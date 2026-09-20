@@ -4102,6 +4102,8 @@ pub(super) mod tests {
         assert!(text.contains("지난 것을 들고 있다"), "프로젝트 안에서 들고 선 까닭이 사라졌다 — {text}");
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("TOML 이 깨졌다"), "80칸에서 까닭이 잘렸다 — {:?}", lines[1]);
+        // 형제 둘과 같은 자(리뷰) — 이 글이 셋 중 가장 길어, 머리말이나 글리프 칸이 늘면 여기가 먼저 넘친다.
+        assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
     }
 
     /// **본문은 한 번 펴서 든다**(moai-fauw) — 프레임마다 다시 파던 자리다(`markdown::parse` +
