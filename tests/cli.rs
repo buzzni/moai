@@ -12309,3 +12309,149 @@ fn the_merge_driver_names_the_clashing_ids_in_json() {
     one_json_value(&said);
     assert!(said.contains(&format!("\"conflicts\":[\"{id}\"]")), "충돌 id 를 기계 출력에서 못 읽는다\n{said}");
 }
+
+// ── 릴리스 — 태그와 Cargo.toml 을 한 자로 잰다 ───────────────────────
+
+/// 릴리스 스크립트의 자리. 워크플로가 부르는 이름과 여기서 한 번에 맞춘다.
+#[cfg(unix)]
+fn script(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts").join(name)
+}
+
+/// `Cargo.toml` 의 `[package]` 버전. 시험이 이 값을 베껴 적으면 판을 올린 날
+/// 시험이 함께 붉어진다.
+#[cfg(unix)]
+fn manifest_version() -> String {
+    let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let mut pkg = false;
+    for line in src.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            pkg = line == "[package]";
+        } else if pkg && let Some(rest) = line.strip_prefix("version") {
+            let rest = rest.trim_start().strip_prefix('=').expect("version 줄에 = 가 없다");
+            return rest.trim().trim_matches('"').to_string();
+        }
+    }
+    panic!("Cargo.toml 의 [package] 에서 version 을 못 읽었다");
+}
+
+/// 스크립트를 돌린다. `fed` 를 주면 pre-push 가 stdin 에 흘리는 줄을 흉내 낸다.
+#[cfg(unix)]
+fn run_script(name: &str, args: &[&str], fed: Option<&str>) -> Output {
+    use std::io::Write as _;
+    let said = "bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다";
+    let mut cmd = isolated("bash");
+    // 스크립트가 부르는 `cargo metadata` 가 네트워크로 새지 않게 한다.
+    cmd.arg(script(name)).args(args).env("CARGO_NET_OFFLINE", "true");
+    let Some(fed) = fed else { return cmd.output().expect(said) };
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect(said);
+    child.stdin.take().unwrap().write_all(fed.as_bytes()).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// `scripts/check-version.sh` 를 **실제로 돌린다**(moai-jy55). 이것이 도는 자리는
+/// pre-push 와 릴리스 워크플로, 둘 다 사람이 안 보는 자리다 — 조용히 썩으면
+/// `Cargo.toml` 과 어긋난 태그가 그대로 나가고 받는 사람이 다른 판을 깐다.
+/// bash 가 없는 기계에서는 건너뛰지 않고 실패한다 — 예제 시험과 같은 자리다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_passes_when_the_tag_matches_the_manifest() {
+    let have = manifest_version();
+    let out = run_script("check-version.sh", &[&format!("v{have}")], None);
+    assert!(out.status.success(), "맞는 태그를 막았다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains(&have), "무엇과 무엇을 견줬는지 안 말한다\n{said}");
+}
+
+/// 어긋나면 0 아닌 코드로 멈추고, **고치는 명령을 함께 낸다** — 이 스크립트가
+/// 멈추는 자리에는 사람이 없거나 로그만 있다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_stops_a_tag_the_manifest_does_not_know() {
+    let out = run_script("check-version.sh", &["v9.9.9"], None);
+    assert_eq!(out.status.code(), Some(1), "어긋난 태그가 지나갔다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("bump-version.sh 9.9.9"), "고치는 길을 안 댄다\n{said}");
+}
+
+/// **막는 것은 릴리스이지 사람의 일상 푸시가 아니다.** 가지를 미는 줄과 태그를
+/// 지우는 줄은 읽기만 하고 지나간다.
+#[cfg(unix)]
+#[test]
+fn a_push_that_carries_no_release_tag_goes_through() {
+    let have = manifest_version();
+    let zero = "0".repeat(40);
+    let fed = format!(
+        "refs/heads/develop aaaa refs/heads/develop bbbb\n\
+         refs/tags/v9.9.9 {zero} refs/tags/v9.9.9 cccc\n\
+         refs/tags/v{have} dddd refs/tags/v{have} {zero}\n"
+    );
+    let out = run_script("check-version.sh", &[], Some(&fed));
+    assert!(out.status.success(), "일상 푸시를 막았다\n{}", text(&out));
+}
+
+/// 미는 태그 하나가 어긋나면 그 푸시가 멈춘다.
+#[cfg(unix)]
+#[test]
+fn a_push_that_carries_a_mismatched_tag_stops() {
+    let out = run_script("check-version.sh", &[], Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"));
+    assert_eq!(out.status.code(), Some(1), "어긋난 태그를 밀었는데 지나갔다\n{}", text(&out));
+}
+
+/// `scripts/bump-version.sh` 는 두 파일을 **함께** 움직인다(moai-jy55). 하나만
+/// 움직이면 `check-version.sh` 가 재는 두 값이 갈라져, 어긋남을 막으려고 만든
+/// 것이 어긋남을 낸다.
+#[cfg(unix)]
+#[test]
+fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
+    let s = Scratch::new("bump");
+    let root = s.path();
+    std::fs::create_dir(root.join("scripts")).unwrap();
+    for name in ["bump-version.sh", "check-version.sh"] {
+        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
+    }
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"moai\"\nversion = \"0.1.0\"\n\n[dependencies]\nclap = { version = \"4\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- 쌓여 있던 줄\n\n## [0.1.0] - 2026-09-01\n",
+    )
+    .unwrap();
+
+    let out = isolated("bash")
+        .arg(root.join("scripts/bump-version.sh"))
+        .arg("0.2.0")
+        .env("MOAI_NOW", "2026-09-20T09:00:00Z")
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
+    assert!(out.status.success(), "판을 못 올렸다\n{}", text(&out));
+
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(manifest.contains("version = \"0.2.0\""), "[package] 를 안 움직였다\n{manifest}");
+    // 의존성 표에도 `version` 이 선다. 표를 안 가리면 아무 크레이트의 판이나 집는다.
+    assert!(manifest.contains("clap = { version = \"4\" }"), "의존성 표의 판을 건드렸다\n{manifest}");
+
+    let log = std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap();
+    assert!(log.contains("## [Unreleased]\n\n## [0.2.0] - 2026-09-20\n"), "이번 판을 안 열었다\n{log}");
+    // 쌓여 있던 줄은 이번 판의 것이 된다 — `[Unreleased]` 는 다음 판 자리로 빈 채 남는다.
+    let opened = log.find("## [0.2.0]").unwrap();
+    assert!(log.find("### Added").unwrap() > opened, "쌓인 줄이 [Unreleased] 에 남았다\n{log}");
+
+    // 올린 판의 태그는 그대로 지나간다 — 두 스크립트가 같은 자를 쓴다.
+    let checked = isolated("bash")
+        .arg(root.join("scripts/check-version.sh"))
+        .arg("v0.2.0")
+        .output()
+        .expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
+    assert!(checked.status.success(), "올린 판의 태그를 막았다\n{}", text(&checked));
+}
