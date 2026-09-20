@@ -308,7 +308,8 @@ const KOREAN: &str = r#"**한국어 글은 moai 에 넣기 전에 다듬는다**
 - `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
   거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
 - id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
-- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다"#;
+- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 moai 스킬 안의
+  `references/commands.md` 의 "한국어 글" 에 있다"#;
 
 /// 한국어 글의 자세한 절차 — 참고 문서에만 둔다. 부를 때만 읽힌다.
 ///
@@ -381,7 +382,25 @@ moai idea promote <id> --from - <<'PLAN'
 # 에픽 제목
 - [p1] 첫 이슈 #enhancement
 PLAN
-```"#;
+```
+
+**계획에 적은 줄이 그대로 이슈 제목이 된다.** 담을 때 길어진 idea 제목을 옮겨
+적으면 그 길이가 이슈로 번지니, 펼칠 때 제목을 짧게 새로 적는다 — 원래 글은 그
+idea 에 그대로 남고, 이력의 "<idea id> 에서 펼쳤다" 가 거기로 데려간다."#;
+
+/// 머지 드라이버는 **클론마다 한 번** 심는다(moai-x129). 심는 법이 `moai merge-driver --help`
+/// 에만 있어, 그 명령을 아는 사람만 심을 수 있었다 — 안 심은 클론은 이슈 줄이 이웃이라는
+/// 이유로 부딪치고, 그 충돌을 손으로 푼다.
+const MERGE_DRIVER: &str = r#"`.moai/issues.jsonl` 은 한 줄이 이슈 하나고 id 로 정렬돼 있어,
+서로 다른 이슈를 고친 두 가지가 줄이 이웃이라는 이유로 부딪친다. 머지 드라이버를
+심으면 git 이 그것을 이슈마다 3-way 로 푼다.
+
+    moai merge-driver --install
+
+**클론마다 한 번 친다.** git 은 드라이버 명령을 설정에서만 읽고 설정은 커밋되지
+않는다. 안 심은 클론에서는 `.gitattributes` 의 `merge=moai` 가 그냥 무시되고 git 의
+기본 머지가 돈다 — 안 심으면 지금까지와 같다. 무엇을 어떻게 합치는지는
+`moai merge-driver --help` 에 있다."#;
 
 const DEFERRING: &str = r#"    moai defer <id> -m '다음 분기에'       계획에서 잠시 뺀다
     moai defer <id> --undo                 도로 집는다
@@ -612,6 +631,10 @@ TodoWrite 나 마크다운 TODO 목록을 쓰지 않는다. {NO_GATE}
 건드리지 않고 이 블록만 다시 쓴다. 낡았는지만 보려면 `moai init --check` —
 아무것도 안 쓰고 `current`·`stale`·`missing` 으로 답한다.
 
+### 이슈 파일을 합칠 때
+
+{MERGE_DRIVER}
+
 ### 일한 AI 를 남긴다
 
 {WORK}
@@ -828,6 +851,10 @@ PLAN
 ## 커밋에 id 를 적는다
 
 {COMMITS}
+
+## 이슈 파일을 합칠 때
+
+{MERGE_DRIVER}
 
 ## 일한 AI 를 남긴다
 
@@ -1625,7 +1652,9 @@ fn brief() -> String {
        보는 것이지 사람에게 보이고 묻는 것이 아니다. 쪼갠 안을 사람에게 한 번 보이는 것은 사람이
        직접 청한 일의 걸음이고, 감독이 맡긴 것은 이미 사람이 넘긴 일이다. 설계 결정은 4 로 묻는다.
        그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
-       에픽이 둘 선다
+       에픽이 둘 선다. **제목은 짧게 새로 적는다** — 계획에 적은 줄이 그대로 이슈 제목이 되어,
+       담을 때 길어진 idea 제목을 옮겨 적으면 그 길이가 이슈로 번진다. 원래 글은 그 idea 에
+       남아 이력에서 찾아간다
     2. 멤버를 `moai mv <멤버> in_progress --from todo` 로 집고 루트에서 커밋한다.
        **본 칸을 함께 준다** — 여기는 세션 여럿이 한 `.moai` 를 쓰는 자리라, 옆에서
        먼저 집은 줄을 뒤늦게 덮으면 둘이 같은 일을 한다. 0 아닌 코드가 오면 집힌

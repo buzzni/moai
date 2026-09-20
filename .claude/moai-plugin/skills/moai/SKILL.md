@@ -92,7 +92,8 @@ PLAN
 - `korean-skills:humanizer` 로 AI 티를 걷고, 20줄을 넘으면 `humanize-korean:humanize-korean` 을 더
   거친 뒤, 마지막에 `korean-skills:grammar-checker` 로 맞춤법·띄어쓰기를 본다
 - id·명령·경로·수·코드 조각과 꼴이 정해진 줄(`model: …`·`다음: …`·`Regression-of: …`·`요약: 원문 …`)은 그대로 둔다
-- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 `references/commands.md` 의 "한국어 글" 에 있다
+- 두 플러그인은 `moai skill install` 이 함께 깐다. 자세한 것은 moai 스킬 안의
+  `references/commands.md` 의 "한국어 글" 에 있다
 
 ## 훅이 실제로 보는 것 넷
 
