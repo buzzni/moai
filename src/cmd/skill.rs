@@ -800,7 +800,7 @@ mod tests {
             .collect();
         for (path, head) in [
             ("skills/moai/SKILL.md", "---\nname: moai\n"),
-            ("skills/moai/references/commands.md", "# 전체 명령"),
+            ("skills/moai/references/commands.md", "# Every command"),
             ("skills/moai-supervise/SKILL.md", "---\nname: moai-supervise\n"),
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
