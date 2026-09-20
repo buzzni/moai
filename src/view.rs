@@ -161,13 +161,9 @@ pub fn deferred_for(i: &Issue, root: Option<&str>, now: &str, lang: Lang) -> Opt
 ///
 /// `roots` 는 풀어야 할 미룸 전부다(`report::deferred_sources`, 가까운 것부터). **다 댄다** —
 /// 하나만 대면 그것을 풀고도 여전히 빠진 채 그제야 다음을 댄다(moai-phzi).
-pub fn shelved_by<S: AsRef<str>>(roots: &[S]) -> String {
+pub fn shelved_by<S: AsRef<str>>(roots: &[S], lang: Lang) -> String {
     let roots: Vec<&str> = roots.iter().map(AsRef::as_ref).collect();
-    format!(
-        "{} 를 미뤄 둬서 보드와 ready 에서는 빠져 있다 — `moai defer {} --undo`",
-        roots.join(" · "),
-        roots.join(" ")
-    )
+    fill(say(lang, "mv.shelved_by"), &[("ids", &roots.join(" · ")), ("undo", &roots.join(" "))])
 }
 
 /// 한 줄에 이름을 대는 줄의 수. 넘으면 수로만 댄다.
@@ -1412,15 +1408,15 @@ pub fn unread_column(i: &Issue, col: &str, cfg: &Config, lang: Lang) -> Option<S
 /// 멤버가 없는 묶음은 첫 칸에 서므로(`report::group_states`), 그때 "남은 멤버를 미룬다"
 /// 를 시키면 시킨 대로 한 뒤에도 같은 말이 돌아온다. 빈 묶음도 마찬가지다. 그 자리에서
 /// 실제로 듣는 말은 묶음 제 `defer` 다 — 계획에서 빠지면 보드와 `ready` 에서 함께 빠진다.
-pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool) -> String {
+pub fn group_moved(id: &str, col: &str, closing: bool, finished: bool, lang: Lang) -> String {
+    // **갈래마다 제 `say` 를 적는다**([`says`] 와 같은 까닭) — 키를 도우미로 넘기면 소스를 훑는
+    // 시험(`i18n::tests::keys_in`)이 그 키를 못 본다.
     let fold = match (closing, finished) {
         (false, _) => String::new(),
-        (true, true) => " — 접으려면 남은 멤버를 `moai defer` 한다".to_string(),
-        (true, false) => {
-            format!(" — 끝난 멤버가 없어 닫히지 않는다. 계획에서 빼려면 `moai defer {id}`")
-        }
+        (true, true) => say(lang, "mv.group_fold").to_string(),
+        (true, false) => fill(say(lang, "mv.group_stuck"), &[("id", id)]),
     };
-    format!("묶음의 칸은 멤버에서 읽는다. 서 있는 칸은 {col}{fold}")
+    format!("{}{fold}", fill(say(lang, "mv.group_column"), &[("col", col)]))
 }
 
 /// 상세의 막음 한 줄. **탐색기 상세(`tui::draw`)와 같은 낱말이다** — 막힘·풀림·끊김, 미룬
@@ -2226,8 +2222,78 @@ fn problems(out: &mut Vec<String>, reg: &crate::user_config::Registry, lang: Lan
 /// (moai-dpbi). 사람 화면과 `--json` 의 `problems` 가 이것을 나눠 쓴다: 갈라 적으면 한쪽만
 /// 고쳐져 기계가 받는 목록이 화면과 달라진다.
 pub fn settings_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
-    let said = reg.lang_problems.iter().map(|t| problem(lang, reg.path.as_deref(), t));
-    reg.problems.iter().cloned().chain(said).collect()
+    let at = reg.path.as_deref();
+    let mine = reg.problems.iter().map(|t| config_problem(lang, at, t));
+    let said = reg.lang_problems.iter().map(|t| problem(lang, at, t));
+    mine.chain(said).collect()
+}
+
+/// 설정을 읽다 만난 한 줄([`crate::user_config::ConfigTrouble`], moai-aiid).
+///
+/// **자리를 앞에 단다** — [`problem`] 과 같은 까닭이고 같은 모양이다. 자리를 모른다는 줄만
+/// 그 앞이 빈다: 붙일 파일이 없어서 그 줄이 선 것이다.
+pub fn config_problem(lang: Lang, at: Option<&std::path::Path>, why: &crate::user_config::ConfigTrouble) -> String {
+    use crate::user_config::{ConfigTrouble, PROJECT};
+    let said = match why {
+        ConfigTrouble::NoPlace => say(lang, "warn.config_no_place").to_string(),
+        // **남의 글은 옮기지 않는다** — io·toml 이 낸 줄이라 말묶음에 키를 둘 자리가 없다.
+        ConfigTrouble::Said { said } => said.clone(),
+        ConfigTrouble::NotTables { found } => {
+            fill(say(lang, "warn.config_not_tables"), &[("key", PROJECT), ("is", found)])
+        }
+        ConfigTrouble::Entry { nth, why } => fill(
+            say(lang, "warn.entry_nth"),
+            &[("key", PROJECT), ("n", &nth.to_string()), ("said", &entry_problem(lang, why))],
+        ),
+    };
+    match at {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    }
+}
+
+/// `[[project]]` 항목 하나의 탈. **뒷말은 한 자리에서 붙인다**
+/// ([`crate::user_config::EntryTrouble::falls_back`]) — 줄을 안 버리고 경로로 고른 색으로
+/// 세우는 갈래가 셋이라, 갈래마다 키를 나누면 같은 뒷말이 표에 세 번 선다.
+fn entry_problem(lang: Lang, why: &crate::user_config::EntryTrouble) -> String {
+    use crate::user_config::{COLOR, COLOUR, EntryTrouble, PATH};
+    // **`say` 부름은 갈래마다 제 줄이다**([`problem`] 과 같은 까닭) — 키를 도우미에 넘기면
+    // 소스를 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
+    let said = match why {
+        EntryTrouble::NoPath => fill(say(lang, "warn.entry_no_path"), &[("key", PATH)]),
+        // **`path` 와 `color` 가 한 키를 나눠 쓴다** — 두 줄은 `{key}` 만 다른 같은 글이라,
+        // 키를 갈라 두면 말묶음 다섯이 같은 문장을 두 번씩 이고 한쪽만 고쳐질 자리가 생긴다.
+        EntryTrouble::PathNotAWord { found } => fill(say(lang, "warn.entry_word"), &[("key", PATH), ("is", found)]),
+        // **적힌 값은 따옴표째 낸다** — 빈 값이나 공백만 적은 것이 그대로면 아무것도 안 보인다.
+        EntryTrouble::PathNotAbsolute { raw } => {
+            fill(say(lang, "warn.entry_path_abs"), &[("key", PATH), ("raw", &format!("{raw:?}"))])
+        }
+        EntryTrouble::HueNotAWord { found } => fill(say(lang, "warn.entry_word"), &[("key", COLOR), ("is", found)]),
+        EntryTrouble::HueUnknown(e) => {
+            fill(say(lang, "warn.entry_hue_unknown"), &[("key", COLOR), ("said", &not_a_hue(lang, e))])
+        }
+        EntryTrouble::ColourInstead => fill(say(lang, "warn.entry_colour_instead"), &[("bad", COLOUR), ("key", COLOR)]),
+        EntryTrouble::ColourIgnored => fill(say(lang, "warn.entry_colour_ignored"), &[("bad", COLOUR), ("key", COLOR)]),
+    };
+    match why.falls_back() {
+        true => fill(say(lang, "warn.entry_hue_falls_back"), &[("said", &said)]),
+        false => said,
+    }
+}
+
+/// 팔레트 밖의 색 낱말 한 줄([`crate::user_config::NotAHue`]).
+///
+/// **읽기의 알림과 `moai project color` 의 거절문이 이 하나를 나눠 쓴다** — 명령이 받은 값을
+/// 읽기가 틀렸다고 하거나 그 반대면, 고친 대로 적었는데 또 알림이 선다.
+pub fn not_a_hue(lang: Lang, why: &crate::user_config::NotAHue) -> String {
+    fill(
+        say(lang, "warn.not_a_hue"),
+        &[
+            ("raw", &format!("{:?}", why.raw)),
+            ("known", &crate::style::Hue::names().join("·")),
+            ("auto", crate::user_config::AUTO),
+        ],
+    )
 }
 
 /// 설정에 적은 화면 말이 어긋난 한 줄([`crate::user_config::LangTrouble`]).

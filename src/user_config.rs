@@ -30,14 +30,15 @@ use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
-/// 프로젝트 목록이 사는 키.
-const PROJECT: &str = "project";
-const PATH: &str = "path";
+/// 프로젝트 목록이 사는 키. **키 이름은 글이 아니라 자료다** — 탈을 펴는 쪽
+/// ([`crate::view::config_problem`])이 이 이름을 그대로 대야 사람이 파일에서 그 줄을 찾는다.
+pub const PROJECT: &str = "project";
+pub const PATH: &str = "path";
 /// 프로젝트 색. **사람이 치는 철자는 `color` 하나다** — 전역 `--color`·`NO_COLOR` 와 같다.
-const COLOR: &str = "color";
+pub const COLOR: &str = "color";
 /// 틀리기 쉬운 철자. 받지 않고 알린다 — 조용히 버리면 적었는데 안 먹고, 둘 다 받으면
 /// 둘이 다를 때 어느 쪽이냐는 둘째 규칙이 생긴다.
-const COLOUR: &str = "colour";
+pub const COLOUR: &str = "colour";
 /// 색을 정하지 않은 것 — 경로로 고른다. 명령줄에서는 키를 지우는 낱말이고, 설정에
 /// 적혀 있어도 같은 뜻으로 읽는다.
 pub const AUTO: &str = "auto";
@@ -89,8 +90,9 @@ pub struct Registry {
     pub path: Option<PathBuf>,
     /// 읽을 수 있는 항목. 파일에 적힌 차례 그대로, 같은 경로는 한 번만.
     pub projects: Vec<Project>,
-    /// 사람이 읽을 한 줄씩. 비어 있으면 아무 일 없다.
-    pub problems: Vec<String>,
+    /// 읽다 만난 것. 비어 있으면 아무 일 없다. **말이 아니라 자료다**([`ConfigTrouble`], moai-aiid) —
+    /// 자리(`{파일}: …`)도 펴는 쪽이 붙인다([`crate::view::config_problem`]).
+    pub problems: Vec<ConfigTrouble>,
     /// 적어 둔 화면 언어(moai-slfv). 없으면 `None` 이고 영어로 떨어진다.
     pub lang: Option<String>,
     /// 그 언어를 읽다 만난 까닭(리뷰 moai-80qw) — **말이 아니라 자료다**([`LangTrouble`], moai-dpbi).
@@ -140,6 +142,65 @@ pub enum LangTrouble {
     NotAWord { found: String },
     /// 모르는 말이다 — 적힌 값.
     Unknown { raw: String },
+}
+
+/// 설정을 읽다 만난 것([`Registry::problems`], moai-aiid) — **말이 아니라 자료다**
+/// ([`LangTrouble`] 과 같은 까닭). 글자를 고르는 것은 [`crate::view::config_problem`] 이다.
+///
+/// 한눈 보기가 이 줄들을 `problems` 로 내는데, 지어진 글로 들면 설정을 읽는 길이 화면 말을
+/// 물어야 하고 그 길은 말을 모른다(`Ctx::lang` 의 `OnceLock` 이 제 초기화 안에서 다시 열린다).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigTrouble {
+    /// 설정 파일의 자리를 모른다 — 환경변수가 다 없다. **파일 이름이 안 붙는 유일한 줄**이다.
+    NoPlace,
+    /// 파일을 못 읽었거나 TOML 이 깨졌다 — io·toml 이 낸 글 그대로. **옮길 글이 아니다**:
+    /// 우리가 짓지 않은 남의 글이라 말묶음에 키를 둘 자리가 없다.
+    Said { said: String },
+    /// `project` 가 `[[project]]` 표 배열이 아니다 — 그 자리에 선 것.
+    NotTables { found: String },
+    /// `n` 번째 `[[project]]` 항목의 탈. 몇 번째인지를 함께 드는 것은, 겹쳐 적은 줄이면
+    /// 경로만으로는 어느 줄인지 못 찾아서다.
+    Entry { nth: usize, why: EntryTrouble },
+}
+
+/// `[[project]]` 항목 하나를 읽다 만난 것([`ConfigTrouble::Entry`]).
+///
+/// **색이 틀린 것 셋은 줄을 안 버린다** — 경로로 고른 색으로 서고 까닭만 한 줄 선다.
+/// 그것이 [`EntryTrouble::falls_back`] 이 가르는 자리다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryTrouble {
+    /// `path` 가 없다.
+    NoPath,
+    /// `path` 가 문자열이 아니다 — 그 자리에 선 것.
+    PathNotAWord { found: String },
+    /// `path` 가 절대경로가 아니다 — 적힌 값.
+    PathNotAbsolute { raw: String },
+    /// `color` 가 문자열이 아니다 — 그 자리에 선 것.
+    HueNotAWord { found: String },
+    /// `color` 가 팔레트 밖이다 — 적힌 낱말.
+    HueUnknown(NotAHue),
+    /// `colour` 만 적혔다 — 모르는 키라 색이 안 선다.
+    ColourInstead,
+    /// `color` 와 `colour` 가 함께 적혔다 — `color` 를 읽고 `colour` 는 알린다.
+    ColourIgnored,
+}
+
+impl EntryTrouble {
+    /// 이 탈이 **줄을 버리지 않고 경로로 고른 색으로 세우는** 것인가. 펴는 쪽이 뒷말
+    /// ("지금은 경로로 고른 색을 쓴다")을 붙일지 여기서 묻는다 — 갈래마다 키를 둘로 쪼개면
+    /// 같은 뒷말이 표에 네 번 선다.
+    pub fn falls_back(&self) -> bool {
+        matches!(self, Self::HueNotAWord { .. } | Self::HueUnknown(_) | Self::ColourInstead)
+    }
+}
+
+/// 사람이 적은 색 낱말이 팔레트 밖이다 — 그 낱말([`hue_choice`]).
+///
+/// **설정 읽기와 `moai project color` 가 이 하나를 나눠 쓴다.** 명령이 받은 값을 읽기가 틀렸다고
+/// 하거나 그 반대면, 고친 대로 적었는데 또 알림이 선다. 글은 [`crate::view::not_a_hue`] 가 짓는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotAHue {
+    pub raw: String,
 }
 
 /// 설정을 읽다 만난 탈의 갈래([`Registry::trouble`], moai-9p7v). **가르는 잣대는 다시 읽어 볼 값이다**
@@ -245,12 +306,11 @@ const ELOOP: i32 = i32::MIN;
 /// (`store::Repo::read` 와 같은 까닭).
 pub fn read(path: Option<&Path>) -> Registry {
     let Some(path) = path else {
-        return Registry {
-            problems: vec!["사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 이 다 없다".into()],
-            ..Registry::default()
-        };
+        return Registry { problems: vec![ConfigTrouble::NoPlace], ..Registry::default() };
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
+    // **자리는 `problems` 에 안 붙인다**(moai-aiid) — 그 줄은 자료라 펴는 쪽이
+    // [`Registry::path`] 로 붙인다. 보기·읽음의 줄(`look_problems`)은 아직 지어진 글이라 여기서 붙는다.
     let at = |e: String| format!("{}: {e}", path.display());
     // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
@@ -267,7 +327,7 @@ pub fn read(path: Option<&Path>) -> Registry {
         Ok(doc) => {
             let (projects, problems) = doc.projects();
             reg.projects = projects;
-            reg.problems = problems.into_iter().map(at).collect();
+            reg.problems = problems;
             let (lang, lang_problems) = doc.lang();
             reg.lang = lang;
             // **자리(`{파일}: …`)도 펴는 쪽이 붙인다**([`Registry::path`]) — 여기서 붙이면 말묶음에
@@ -284,7 +344,7 @@ pub fn read(path: Option<&Path>) -> Registry {
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
         // (`App::attach_layer`)가. 보기는 처음값으로 뜨고, 그 뒤의 저장은 제 거절(`broken`)을 따로 댄다.
         Err((e, trouble)) => {
-            reg.problems = vec![at(e)];
+            reg.problems = vec![ConfigTrouble::Said { said: e }];
             reg.trouble = Some(trouble);
         }
     }
@@ -522,15 +582,20 @@ impl Doc {
 
     /// `project` 가 표 배열이 아니면 그 까닭 — 읽기는 알리고 쓰기는 멈춘다. 그 키가 무엇인지 모르는 채로
     /// 항목을 더하거나 빼면 남의 값을 덮는다.
-    fn odd_projects(&self) -> Option<String> {
-        let item = self.doc.get(PROJECT).filter(|i| !i.is_array_of_tables())?;
-        Some(format!("`{PROJECT}` 는 `[[{PROJECT}]]` 표 배열이어야 한다 — 지금은 {}", item.type_name()))
+    /// `project` 가 표 배열이 아니면 **그 자리에 선 것의 이름.** 재는 자는 여기 하나고, 읽기는
+    /// 그것을 자료로([`ConfigTrouble::NotTables`]) 쓰기는 제 거절문으로 같은 답을 쓴다.
+    fn odd_projects(&self) -> Option<&'static str> {
+        self.doc.get(PROJECT).filter(|i| !i.is_array_of_tables()).map(Item::type_name)
     }
 
     /// 목록을 고치는 자리. 없으면 `None`, 모양이 틀리면 거절(`broken`) — [`Doc::odd_projects`].
     fn tables_mut(&mut self) -> R<Option<&mut ArrayOfTables>> {
-        if let Some(why) = self.odd_projects() {
-            return Err(refuse(format!("{why} — 목록을 고치지 않는다. 손으로 고친다")));
+        // 쓰기의 거절문은 아직 박힌 한국어다 — `Doc` 은 화면 말을 모르고, 그것을 물려주려면
+        // 쓰기 길의 거절문을 통째로 옮겨야 한다(moai-wflg 가 그 몫을 든다).
+        if let Some(is) = self.odd_projects() {
+            return Err(refuse(format!(
+                "`{PROJECT}` 는 `[[{PROJECT}]]` 표 배열이어야 한다 — 지금은 {is} — 목록을 고치지 않는다. 손으로 고친다"
+            )));
         }
         Ok(self.doc.get_mut(PROJECT).and_then(Item::as_array_of_tables_mut))
     }
@@ -545,26 +610,30 @@ impl Doc {
     ///
     /// **색이 틀린 항목은 빼지 않는다.** 경로로 고른 색으로 서고 까닭이 한 줄 선다 —
     /// 빼면 색 오타 하나로 한눈 보기에서 저장소가 통째로 사라진다.
-    pub fn projects(&self) -> (Vec<Project>, Vec<String>) {
+    pub fn projects(&self) -> (Vec<Project>, Vec<ConfigTrouble>) {
         let mut out: Vec<Project> = Vec::new();
-        let mut problems: Vec<String> = self.odd_projects().into_iter().collect();
+        let mut problems: Vec<ConfigTrouble> = self
+            .odd_projects()
+            .map(|found| ConfigTrouble::NotTables { found: found.to_string() })
+            .into_iter()
+            .collect();
         for (i, t) in self.tables().into_iter().flat_map(ArrayOfTables::iter).enumerate() {
-            let at = |e: String| format!("{}번째 [[{PROJECT}]]: {e}", i + 1);
+            let at = |why: EntryTrouble| ConfigTrouble::Entry { nth: i + 1, why };
             match entry_path(t) {
                 Ok(path) if out.iter().any(|p| p.path == path) => {}
                 Ok(path) => {
-                    let hue = entry_hue(t).unwrap_or_else(|e| {
-                        problems.push(at(format!("{e} — 지금은 경로로 고른 색을 쓴다")));
+                    let hue = entry_hue(t).unwrap_or_else(|why| {
+                        problems.push(at(why));
                         None
                     });
                     // 둘 다 적혔으면 `color` 를 읽되 `colour` 도 알린다 — 조용히 버리면 뒤에 고쳐
                     // 적은 `colour` 가 안 먹는 까닭을 아무도 말하지 않는다.
                     if t.contains_key(COLOR) && t.contains_key(COLOUR) {
-                        problems.push(at(format!("`{COLOUR}` 는 모르는 키다 — `{COLOR}` 만 읽는다")));
+                        problems.push(at(EntryTrouble::ColourIgnored));
                     }
                     out.push(Project { path, hue });
                 }
-                Err(e) => problems.push(at(e)),
+                Err(why) => problems.push(at(why)),
             }
         }
         (out, problems)
@@ -1435,28 +1504,28 @@ fn header_at(t: &mut Table, at: isize) -> Option<&mut Table> {
 
 /// 항목 표 하나에서 경로를 읽는다. 상대경로는 거절한다 — 부른 자리마다 다른
 /// 디렉터리를 가리키게 된다.
-fn entry_path(t: &Table) -> Result<PathBuf, String> {
+fn entry_path(t: &Table) -> Result<PathBuf, EntryTrouble> {
     let raw = match t.get(PATH) {
-        None => return Err(format!("`{PATH}` 가 없다")),
+        None => return Err(EntryTrouble::NoPath),
         Some(item) => {
-            item.as_str().ok_or_else(|| format!("`{PATH}` 는 문자열이어야 한다 — 지금은 {}", item.type_name()))?
+            item.as_str().ok_or_else(|| EntryTrouble::PathNotAWord { found: item.type_name().to_string() })?
         }
     };
     let p = PathBuf::from(raw);
     if raw.is_empty() || !p.is_absolute() {
-        return Err(format!("`{PATH}` 는 절대경로여야 한다 — {raw:?}"));
+        return Err(EntryTrouble::PathNotAbsolute { raw: raw.to_string() });
     }
     Ok(p)
 }
 
 /// 항목 표 하나에서 정한 색을 읽는다. 없거나 `auto` 면 `None`.
-fn entry_hue(t: &Table) -> Result<Option<Hue>, String> {
+fn entry_hue(t: &Table) -> Result<Option<Hue>, EntryTrouble> {
     match t.get(COLOR) {
-        None if t.contains_key(COLOUR) => Err(format!("`{COLOUR}` 는 모르는 키다 — `{COLOR}` 로 적는다")),
+        None if t.contains_key(COLOUR) => Err(EntryTrouble::ColourInstead),
         None => Ok(None),
         Some(item) => match item.as_str() {
-            Some(s) => hue_choice(s).map_err(|e| format!("`{COLOR}`: {e}")),
-            None => Err(format!("`{COLOR}` 는 문자열이어야 한다 — 지금은 {}", item.type_name())),
+            Some(s) => hue_choice(s).map_err(EntryTrouble::HueUnknown),
+            None => Err(EntryTrouble::HueNotAWord { found: item.type_name().to_string() }),
         },
     }
 }
@@ -1465,13 +1534,11 @@ fn entry_hue(t: &Table) -> Result<Option<Hue>, String> {
 ///
 /// 설정 읽기와 `moai project color` 가 **같은 자로 잰다** — 명령이 받은 값을 읽기가 틀렸다고
 /// 하거나 그 반대면, 고친 대로 적었는데 또 알림이 선다. 받는 이름은 `style` 이 댄다.
-pub fn hue_choice(word: &str) -> Result<Option<Hue>, String> {
+pub fn hue_choice(word: &str) -> Result<Option<Hue>, NotAHue> {
     if word == AUTO {
         return Ok(None);
     }
-    Hue::named(word)
-        .map(Some)
-        .ok_or_else(|| format!("{word:?} 는 프로젝트 색이 아니다 — {} 중 하나, 또는 {AUTO}", Hue::names().join("·")))
+    Hue::named(word).map(Some).ok_or_else(|| NotAHue { raw: word.to_string() })
 }
 
 fn writable(dir: &Path) -> R<&str> {
@@ -1763,7 +1830,7 @@ mod tests {
             let reg = read(Some(&path));
             assert!(reg.projects.is_empty(), "{src:?} → {reg:?}");
             assert_eq!(reg.problems.len(), 1, "{src:?} → {reg:?}");
-            assert!(!reg.problems[0].contains('\n'), "문제는 한 줄이어야 한다 — {:?}", reg.problems[0]);
+            assert!(!said_all(&reg.problems, reg.path.as_deref())[0].contains('\n'), "한 줄이 아니다 — {reg:?}");
 
             let file = std::fs::canonicalize(&path).unwrap().display().to_string();
             for e in [
@@ -1790,7 +1857,10 @@ mod tests {
         std::fs::write(&path, src).unwrap();
         let reg = read(Some(&path));
         assert!(reg.projects.is_empty(), "{reg:?}");
-        assert!(reg.problems.len() == 1 && reg.problems[0].contains("[[project]]"), "{reg:?}");
+        assert!(
+            reg.problems.len() == 1 && said_all(&reg.problems, reg.path.as_deref())[0].contains("[[project]]"),
+            "{reg:?}"
+        );
         assert!(reg.look_problems.is_empty(), "보기가 목록의 모양 때문에 못 읽혔다 — {reg:?}");
         assert_eq!((reg.look.sort.as_deref(), reg.lang.as_deref()), (Some("title"), Some("en")));
         assert_eq!(reg.read.get("m-0001").map(String::as_str), Some("T"));
@@ -1813,7 +1883,13 @@ mod tests {
         let reg = read(Some(&path));
         assert_eq!(reg.projects, [Project { path: "/good".into(), hue: None }]);
         assert_eq!(reg.problems.len(), 3, "{reg:?}");
-        assert!(reg.problems[0].contains("1번째") && reg.problems[0].contains("절대경로"), "{reg:?}");
+        assert_eq!(
+            reg.problems[0],
+            ConfigTrouble::Entry { nth: 1, why: EntryTrouble::PathNotAbsolute { raw: "상대/경로".into() } },
+            "{reg:?}"
+        );
+        let first = &said_all(&reg.problems, reg.path.as_deref())[0];
+        assert!(first.contains("1번째") && first.contains("절대경로"), "{first}");
 
         update(&path, |doc| doc.add(Path::new("/new"))).expect("못 읽는 항목이 쓰기를 막았다");
         let after = std::fs::read_to_string(&path).unwrap();
@@ -1867,21 +1943,38 @@ mod tests {
             [("/ok", Some("green")), ("/red", None), ("/num", None), ("/typo", None), ("/auto", None), ("/case", None)]
         );
         assert_eq!(problems.len(), 4, "{problems:#?}");
-        assert!(problems[0].starts_with("2번째") && problems[0].contains("cyan·green·blue"), "{problems:#?}");
-        assert!(problems[1].contains("문자열"), "{problems:#?}");
-        assert!(problems[2].contains("`colour` 는 모르는 키다"), "{problems:#?}");
-        assert!(problems[3].contains("\"Green\""), "{problems:#?}");
-        assert!(
-            problems.iter().all(|p| p.contains("지금은 경로로 고른 색을 쓴다") && !p.contains('\n')),
-            "{problems:#?}"
+        // **자료로 잰다** — 어느 항목의 무슨 탈인지가 값이고, 글은 그 아래에서 한 번 본다.
+        assert_eq!(
+            problems,
+            [
+                ConfigTrouble::Entry { nth: 2, why: EntryTrouble::HueUnknown(NotAHue { raw: "red".into() }) },
+                ConfigTrouble::Entry { nth: 3, why: EntryTrouble::HueNotAWord { found: "integer".into() } },
+                ConfigTrouble::Entry { nth: 4, why: EntryTrouble::ColourInstead },
+                ConfigTrouble::Entry { nth: 6, why: EntryTrouble::HueUnknown(NotAHue { raw: "Green".into() }) },
+            ]
         );
+        let said = said_all(&problems, None);
+        assert!(said[0].starts_with("2번째") && said[0].contains("cyan·green·blue"), "{said:#?}");
+        assert!(said[1].contains("문자열"), "{said:#?}");
+        assert!(said[2].contains("`colour` 는 모르는 키다"), "{said:#?}");
+        assert!(said[3].contains("\"Green\""), "{said:#?}");
+        // 넷 다 줄을 안 버리는 갈래다 — 뒷말이 붙고, 한 줄로 선다.
+        assert!(said.iter().all(|p| p.contains("지금은 경로로 고른 색을 쓴다") && !p.contains('\n')), "{said:#?}");
 
         // `color` 와 `colour` 가 함께 있으면 `color` 가 서고, `colour` 는 조용히 버리지 않고 알린다.
         let both = "[[project]]\npath = \"/both\"\ncolor = \"green\"\ncolour = \"blue\"\n";
         let (projects, problems) = Doc::parse(both).unwrap().projects();
         assert_eq!(projects[0].hue, Hue::named("green"));
-        assert_eq!(problems.len(), 1, "{problems:#?}");
-        assert!(problems[0].contains("`colour` 는 모르는 키다"), "{problems:#?}");
+        assert_eq!(problems, [ConfigTrouble::Entry { nth: 1, why: EntryTrouble::ColourIgnored }], "{problems:#?}");
+        // 이 갈래만은 색이 섰으므로 뒷말이 안 붙는다.
+        let said = said_all(&problems, None);
+        assert!(said[0].contains("`colour` 는 모르는 키다") && !said[0].contains("경로로 고른 색"), "{said:#?}");
+    }
+
+    /// 자료로 든 탈을 사람 줄로 편다. **글의 모양을 재는 자리는 [`crate::view::config_problem`]
+    /// 하나다** — 시험이 제 글을 따로 지으면 화면과 갈린다.
+    fn said_all(problems: &[ConfigTrouble], at: Option<&Path>) -> Vec<String> {
+        problems.iter().map(|t| crate::view::config_problem(crate::i18n::Lang::Ko, at, t)).collect()
     }
 
     /// 색을 정했다 `auto` 로 되돌리면 처음 바이트로 돌아온다. 같은 색을 다시 정하면 파일을
@@ -2402,7 +2495,9 @@ mod tests {
     fn hue_choice_takes_palette_names_and_auto_only() {
         assert_eq!(hue_choice("blue").unwrap(), Hue::named("blue"));
         assert_eq!(hue_choice(AUTO).unwrap(), None);
-        let e = hue_choice("magenta").unwrap_err();
+        assert_eq!(hue_choice("magenta").unwrap_err(), NotAHue { raw: "magenta".into() });
+        // 글은 한 자리에서 짓는다 — 읽기의 알림과 `moai project color` 의 거절문이 이것을 나눠 쓴다.
+        let e = crate::view::not_a_hue(crate::i18n::Lang::Ko, &NotAHue { raw: "magenta".into() });
         assert!(e.contains("\"magenta\"") && e.contains("cyan·green·blue") && e.contains(AUTO), "{e}");
     }
 
@@ -2467,7 +2562,9 @@ mod tests {
         // 못 여는 자리(디렉터리)도 같다 — 없는 파일(NotFound)만 문제가 아니다.
         let unreadable = read(Some(&d));
         assert!(
-            unreadable.problems.len() == 1 && unreadable.problems[0].starts_with(&format!("{}: ", d.display())),
+            unreadable.problems.len() == 1
+                && said_all(&unreadable.problems, unreadable.path.as_deref())[0]
+                    .starts_with(&format!("{}: ", d.display())),
             "{unreadable:?}"
         );
         assert!(unreadable.look_problems.is_empty(), "못 읽은 파일의 까닭을 보기에도 실었다");
