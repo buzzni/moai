@@ -270,7 +270,7 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'stati
 ///
 /// **알림마다 따로 재지 않는다** — 한 화면에 서는 두 알림이 서로 다른 뿌리를 대면 그 중 하나는
 /// 반드시 엉뚱한 곳을 가리킨다.
-fn away_root(root: &Path, chdir: bool) -> Option<String> {
+pub(crate) fn away_root(root: &Path, chdir: bool) -> Option<String> {
     let here = std::env::current_dir().ok();
     (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()))
 }

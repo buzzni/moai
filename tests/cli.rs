@@ -11744,6 +11744,206 @@ fn an_uninstalled_clone_falls_back_to_gits_own_merge() {
     assert!(line_of(root, &id).contains("\"parser\""), "{}", issues(root));
 }
 
+/// **적은 자리가 썩어도 조용히 잃지 않는다.**
+///
+/// git 은 못 돈 드라이버를 "충돌" 로 읽으면서 `%A` 를 그대로 병합 결과로 삼는다. 심는 줄이
+/// 드라이버만 부르면 그 파일에는 표식이 없고, 그것을 연 사람은 "이미 풀렸다" 로 읽어 `git add`
+/// 한 번에 저쪽을 통째로 버린다 — 안 심은 클론보다 나쁜 자리다(`moai-w8so` 의 실측). 그래서
+/// 심는 줄은 답도 표식도 안 쓰고 실패한 판을 `git merge-file` 로 다시 합친다.
+///
+/// 경로를 없는 자리로 주어 그 판을 만든다. 보는 것은 셋이다 — 병합이 비영으로 끝나는가,
+/// **표식이 파일에 실제로 서는가**, 그리고 그것을 그대로 `git add` 해도 저쪽이 남는가.
+#[test]
+fn a_rotten_driver_path_falls_back_to_gits_own_merge() {
+    let s = init("mergerotten");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", &s.path().join("없는/자리/moai").display().to_string()]);
+    let id = add(root, &["하나"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--title", "저쪽 제목"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &id, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
+    assert!(!out.status.success(), "못 돈 드라이버를 성공으로 읽었다\n{}", text(&out));
+    let merged = issues(root);
+    assert!(
+        merged.contains("<<<<<<<") && merged.contains(">>>>>>>"),
+        "표식 없는 충돌을 남겼다 — `git add` 한 줄에 저쪽이 사라진다\n{merged}"
+    );
+    // 사람이 그대로 받아 적는 판. 표식이 있으니 저쪽 글이 파일에 남아 있다.
+    git(root, &["add", ".moai/issues.jsonl"]);
+    git(root, &["commit", "-qm", "그대로 add"]);
+    assert!(issues(root).contains("저쪽 제목"), "저쪽 고침이 자취 없이 사라졌다\n{}", issues(root));
+}
+
+/// **파일에 이미 있던 표식이 내려앉는 길을 막지 않는다**(리뷰 moai-h6aq.cx8).
+///
+/// 심는 줄이 `%A` 에서 `<<<<<<<` 를 `grep` 으로 찾아 갈랐을 때, **한 번 잘못 푼 흔적**이 그
+/// 파일에 남아 있으면 못 돈 드라이버까지 "사람에게 넘겼다" 로 읽혔다 — 표식 없는 이쪽 파일이
+/// 그대로 남고, 사람은 눈에 익은 옛 표식만 고친 뒤 `git add` 해서 저쪽을 통째로 버린다. 못 읽는
+/// 줄은 `keyed` 가 그대로 들고 가므로 그 흔적은 한 번 들어오면 오래 산다(바로 위 시험이 표식이
+/// 든 파일을 `git add` 한다 — 그 상태가 이 판의 출발점이다).
+///
+/// 그래서 가르는 자를 `%A` 의 내용이 아니라 **드라이버가 `%A` 를 건드렸는가**(`cmp`)로 둔다.
+#[test]
+fn a_marker_already_in_the_file_does_not_disarm_the_fallback() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", &s.path().join("없는/자리/moai").display().to_string()]);
+    let id = add(root, &["하나"]);
+    // 한 번 잘못 푼 흔적. moai 는 못 읽는 줄로 들고 다니고, 병합마다 다시 만난다.
+    append_raw(root, b"<<<<<<< \xea\xb7\xb8\xeb\x95\x8c \xeb\x82\xa8\xea\xb8\xb4 \xec\xa4\x84\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &id, "--title", "저쪽 제목"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &id, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    let out = git_try(root, None, &["merge", "--no-edit", "side"]);
+    assert!(!out.status.success(), "못 돈 드라이버를 성공으로 읽었다\n{}", text(&out));
+    let merged = issues(root);
+    // **저쪽 글이 파일에 서야 한다.** 옛 표식만 남고 저쪽이 없으면 `git add` 한 번에 사라진다.
+    assert!(merged.contains("저쪽 제목"), "옛 표식 때문에 내려앉지 않았다 — 저쪽이 파일에 없다\n{merged}");
+    assert!(merged.contains(">>>>>>>"), "표식을 새로 안 세웠다\n{merged}");
+    git(root, &["add", ".moai/issues.jsonl"]);
+    git(root, &["commit", "-qm", "그대로 add"]);
+    assert!(issues(root).contains("저쪽 제목"), "저쪽 고침이 자취 없이 사라졌다\n{}", issues(root));
+}
+
+/// **빈칸이 든 경로로 심어도 그대로 돈다.**
+///
+/// git 은 드라이버 명령을 `sh -c` 로 돌린다. 감싸지 않은 경로는 첫 낱말에서 끊겨 늘 내려앉는
+/// 길로만 가고, 그 저장소는 드라이버를 심고도 안 심은 것과 같아진다 — 게다가 조용하다.
+/// `%O %A %B %L %P` 가 껍데기를 거쳐 그대로 닿는지도 여기서 함께 잰다.
+#[cfg(unix)]
+#[test]
+fn the_planted_line_survives_a_path_with_a_space() {
+    let s = init("mergespace");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let dir = root.join("빈 칸 든 자리");
+    std::fs::create_dir_all(&dir).unwrap();
+    let shim = dir.join("moai");
+    write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
+    ok(root, &["merge-driver", "--install", "--as", &shim.display().to_string()]);
+
+    let one = add(root, &["첫째"]);
+    let two = add(root, &["둘째"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "빈칸에서 끊겨 내려앉았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\"") && line_of(root, &two).contains("\"parser\""), "{merged}");
+}
+
+/// **다시 심으면 옛 줄을 덮는다.** 값이 둘로 서면 git 은 마지막 것을 쓰는데, 사람이 `--as` 를
+/// 고쳐 치고도 옛 줄이 남아 있다고 읽으면 어느 쪽이 도는지 못 본다. 기본값으로 심은 줄에도
+/// 내려앉는 마디가 서는지를 같은 자리에서 본다 — `--as` 를 준 판만 안전하면 안 된다.
+#[test]
+fn re_installing_replaces_the_line_and_every_line_falls_back() {
+    let s = init("mergereinstall");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", "/w/옛/moai"]);
+    ok(root, &["merge-driver", "--install", "--as", "/w/새/moai"]);
+    let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
+    assert_eq!(planted.lines().count(), 1, "옛 줄이 남았다\n{planted}");
+    assert!(planted.contains("/w/새/moai"), "{planted}");
+    assert!(planted.contains("git merge-file"), "내려앉는 마디가 없다\n{planted}");
+
+    // `--as` 없이 심은 줄도 같다. 기본값은 지금 도는 바이너리의 절대 경로다.
+    ok(root, &["merge-driver", "--install"]);
+    let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
+    assert_eq!(planted.lines().count(), 1, "{planted}");
+    assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
+}
+
+/// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
+///
+/// 안 심은 클론은 말하지 않는다 — 거기서는 git 의 기본 머지가 돌고 표식도 서서 무해했다
+/// (`moai-w8so`). 해로운 것은 돈다고 믿는데 안 도는 자리다. 셋을 한 자리에서 잰다:
+/// 안 심었을 때 조용한가, 썩었을 때 대는가, 제대로 심으면 걷히는가.
+#[test]
+fn status_names_a_planted_driver_that_cannot_run() {
+    let s = init("mergenotice");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "안 심은 클론을 졸랐다");
+
+    let gone = root.join("없는/자리/moai");
+    ok(root, &["merge-driver", "--install", "--as", &gone.display().to_string()]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("심어 둔 머지 드라이버가 안 돈다"), "못 도는 드라이버를 안 댔다\n{said}");
+    assert!(said.contains(&gone.display().to_string()), "어느 경로인지 안 댄다\n{said}");
+    // **힌트는 그대로 칠 수 있는 줄이다** — 자리표시자를 끼우면 그것을 그대로 치는 쪽이 깨진다.
+    assert!(said.contains("moai merge-driver --install"), "고칠 명령을 안 댄다\n{said}");
+    assert!(!said.contains('<') && !said.contains('>'), "힌트에 자리표시자를 남겼다\n{said}");
+    // **경고가 아니라 알림이다** — 종료 코드는 안 바뀌고(`ok` 가 그것을 이미 쟀다) `notices` 에 선다.
+    let json = ok(root, &["status", "--json"]);
+    one_json_value(&json);
+    // **알림이지 경고가 아니다** — 경고로 서면 Stop 훅이 세는 수가 늘고 종료 코드 논쟁이 붙는다.
+    let notices = json.split("\"notices\":").nth(1).expect("notices 가 없다").to_string();
+    let warnings = json.split("\"warnings\":").nth(1).unwrap_or("").split("\"notices\":").next().unwrap_or("").to_string();
+    assert!(notices.contains("merge_driver_rotten"), "{json}");
+    assert!(!warnings.contains("merge_driver_rotten"), "알림이 경고로 섰다\n{json}");
+
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "제대로 심었는데 알림이 안 걷혔다");
+}
+
+/// **옛 판으로 심은 줄도 다시 심으라고 한다**(moai-h54i).
+///
+/// 적힌 명령은 도는데 그 줄에 내려앉는 마디가 없는 자리다. 다시 심는 길은 사람이 치는
+/// `--install` 하나뿐이고 설정은 커밋되지 않으니, 말하지 않으면 그 클론은 영영 옛 줄을 들고
+/// 안내만 "내려앉는다" 로 읽는다 — 적은 자리가 사라지는 날 표식 없이 저쪽이 사라진다.
+#[test]
+fn status_tells_an_old_planted_line_to_be_replanted() {
+    let s = init("mergestaleline");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    // 이 에픽 전의 줄. 명령은 멀쩡하고 마디만 없다.
+    let old = format!("{BIN} merge-driver %O %A %B %L %P");
+    git(root, &["config", "--local", "merge.moai.driver", &old]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("옛 판이다"), "옛 줄을 안 댔다\n{said}");
+    assert!(said.contains(&format!("merge-driver --install --as {BIN}")), "같은 명령으로 다시 심으라고 안 한다\n{said}");
+    assert!(!said.contains("안 돈다"), "도는 명령을 못 돈다고 했다\n{said}");
+
+    // 고칠 명령을 그대로 친다 — 알림이 걷힌다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "다시 심었는데 알림이 남았다");
+
+    // **못 도는 것이 먼저다.** 옛 줄이면서 자리까지 비었으면 자리가 빈 쪽을 말한다.
+    let gone = root.join("없는/자리/moai");
+    git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+    let said = ok(root, &["status"]);
+    assert!(said.contains("안 돈다") && !said.contains("옛 판이다"), "{said}");
+}
+
 /// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
 fn append_raw(root: &Path, bytes: &[u8]) {
     let path = root.join(".moai/issues.jsonl");
