@@ -5856,3 +5856,4 @@
 {"ts":"2026-09-20T03:21:01Z","id":"moai-2ewr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hgmv 에서 펼쳤다 — status 의 드라이버 알림은 심겼는가가 아니라 도는가를 본다"}
 {"ts":"2026-09-20T03:21:01Z","id":"moai-hgmv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h6aq 의 멤버 moai-2ewr 로 펼쳤다"}
 {"ts":"2026-09-20T03:21:01Z","id":"moai-h6aq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-20 사용자 결정: 머지 드라이버를 켜되, 켜기 전에 내려앉는 감싸개를 먼저 넣는다. 근거는 moai-w8so 의 실측이다 — 심은 경로가 비면 git 이 표식 0개로 끝내고, 그 파일을 git add 하면 저쪽 고침이 자취 없이 사라진다. 안 심은 클론(기본 머지)은 표식을 남기니, 못 도는 드라이버가 안 심은 것보다 나쁘다. 이 에픽이 끝나면 루트 클론에 심는다."}
+{"ts":"2026-09-20T03:21:44Z","id":"moai-w8so","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"다섯 중 넷 통과, 못 도는 드라이버가 표식 없이 삼키는 것을 재현. 사용자가 감싸개를 먼저 넣고 켜기로 정했다 — moai-h6aq"}
