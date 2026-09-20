@@ -76,8 +76,10 @@ pub struct Place {
     /// 여기서도 못 잇는다**: 옛 파일의 `path` 가 옛 이름을 가리켜 어느 철자로도 안 풀린다. 그것은
     /// 지우지 않기로 한 결정의 대가다(사용자 결정 2026-09-20).
     ///
-    /// **저절로 합쳐지지는 않는다**(리뷰). 쓰는 길은 지금 자리의 표만 보고 적을 것을 고르므로, 사람이
-    /// 그 줄을 다시 읽음으로 적을 때에만 새 자리로 넘어온다 — 그 전까지 이 읽기 값은 계속 치른다.
+    /// **첫 쓰기 한 번에 합쳐진다**([`update`]) — 그 뒤로 읽기는 여기를 안 연다(`read`). 합치지 않고
+    /// 읽기마다 겹쳐 보던 판은 둘을 낳았다(리뷰 7·13): 걷기가 지금 자리만 줄여 걷은 id 가 다음 읽기에
+    /// 되살아났고(moai-dt5q 가 내건 것이 옛 자리를 가진 사람에게만 꺼졌다), 그 읽기 값을 내내 치렀다.
+    /// 옛 파일은 그래도 그대로 둔다 — 지우는 것은 이 결정이 안 하기로 한 일이다.
     pub past: Vec<PathBuf>,
     /// 자리를 고르다 만난 까닭.
     pub problems: Vec<String>,
@@ -175,7 +177,17 @@ pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Ma
     // **자리를 고르다 만난 까닭은 뒤에 붙인다**(리뷰). 앞에 두던 판은 `problems.first()` 하나만 보는
     // 탐색기가 표를 못 든 진짜 까닭 대신 이것을 대고, 낱말까지 "이상한 줄" 로 어긋났다.
     marks.problems.append(&mut place.problems);
-    older(&place, &mut marks.seen, legacy, &mut marks.problems);
+    // **옛 자리는 지금 자리가 아직 없을 때만 본다**(리뷰 7·13). 첫 쓰기가 그 표를 여기로 합치므로
+    // ([`update`]), 파일이 선 뒤에는 옛 자리에 새로 든 것이 없다 — 그때도 겹쳐 보던 판은 둘을 낳았다.
+    //
+    // - 걷은 id 가 **다음 읽기에 되살아났다.** `prune` 은 지금 자리만 줄이는데 옛 자리는 그대로라,
+    //   moai-dt5q 가 내건 "끝없이 안 자란다" 가 옛 자리를 가진 사람에게만 조용히 꺼졌다
+    // - 옛 자리를 여는 값을 읽기마다 치렀다. 합치고 안 보면 그 값은 처음 한 번뿐이다
+    if !place.at.exists() {
+        older(&place, &mut marks.seen, legacy, &mut marks.problems);
+    } else {
+        overlay(&mut marks.seen, legacy);
+    }
     marks
 }
 
@@ -278,7 +290,8 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
     // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
     // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
-    let (path, root) = at_of(config, root);
+    let place = place_of(config, root);
+    let (path, root, past) = (place.at, place.root, place.past);
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
     // **남이 못 들여다보는 자리에 짓는다**(리뷰). 무엇을 읽었는지는 설정과 같은 갈래의 사적인 값인데,
@@ -305,6 +318,7 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(err(e)),
     };
+    let fresh_sheet = src.is_empty();
     let mut sheet = Sheet::parse(&src)
         .map_err(|e| refuse(format!("{}: {e} — 고치기 전까지 쓰지 않는다", path.display())))?;
     // **남의 읽음 위에 쓰지 않는다** — 해시가 부딪혔다. 재어 본 일이 없는 만큼 드문 자리지만, 조용히
@@ -315,6 +329,19 @@ pub fn update<T>(config: &Path, root: &Path, f: impl FnOnce(&mut Sheet) -> R<T>)
     // **손으로 고칠 거절에는 어느 파일인지 붙인다** — [`crate::user_config::update`] 와 같은 자리이고 같은
     // 까닭이다(리뷰). 이 파일의 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 붙이지 않으면 "손으로
     // 고친다" 가 갈 곳 없는 말이 된다. 붙이는 곳을 부르는 쪽마다 두면 붙인 곳과 잊은 곳이 갈린다.
+    // **처음 짓는 파일이면 옛 자리를 여기로 합친다**(리뷰 13). 읽기가 그 뒤로는 옛 자리를 안 보므로
+    // (`read`), 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다.
+    // 겹치는 차례는 그대로다: 여기 이미 있는 id 는 안 건드린다.
+    if fresh_sheet {
+        let mut older_marks = BTreeMap::new();
+        for old in &past {
+            let got = read_one(old, &root);
+            overlay(&mut older_marks, &got.seen);
+        }
+        if !older_marks.is_empty() {
+            sheet.mark(&older_marks)?;
+        }
+    }
     let out = f(&mut sheet).map_err(|e| match e.code {
         crate::fail::code::BROKEN => Fail::coded(format!("{}: {}", path.display(), e.message), e.code),
         _ => e,
@@ -536,17 +563,25 @@ mod tests {
         // 그 철자로 부르면 읽을 때는 보인다 — 찾는 옛 자리는 **이 부름이 받은 철자**의 것이다.
         assert_eq!(read(&cfg, &slashed, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("옛것"));
 
-        // 적을 때는 새 자리에만 간다 — 옛 파일은 한 바이트도 안 바뀐다.
+        // 적을 때는 새 자리에만 간다 — 옛 파일은 한 바이트도 안 바뀐다. **첫 쓰기가 옛 표를 여기로
+        // 합친다**(리뷰 13) — 그래야 걷기가 지금 자리만 줄여도 걷은 id 가 다음 읽기에 안 되살아난다.
         update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0002", "새것")]))).unwrap();
         assert_eq!(std::fs::read_to_string(&old).unwrap(), before, "옛 철자 파일에 썼다");
         let now = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
-        assert!(now.contains("argos-0002") && !now.contains("argos-0001"), "{now}");
+        assert!(now.contains("argos-0002") && now.contains("argos-0001"), "옛 표를 안 합쳤다 — {now}");
 
-        // 겹쳐 보면 둘 다. 같은 id 면 **지금 자리가 이긴다**.
-        update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0001", "새것이 이긴다")]))).unwrap();
+        // 합쳤으니 옛 파일이 사라져도 그 읽음은 남는다 — 이제 읽기는 옛 자리를 안 연다.
+        std::fs::remove_file(&old).unwrap();
         let seen = read(&cfg, &slashed, &BTreeMap::new()).seen;
-        assert_eq!(seen.get("argos-0001").map(String::as_str), Some("새것이 이긴다"));
+        assert_eq!(seen.get("argos-0001").map(String::as_str), Some("옛것"));
         assert_eq!(seen.len(), 2);
+
+        // 같은 id 를 다시 적으면 **지금 자리가 이긴다**.
+        update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0001", "새것이 이긴다")]))).unwrap();
+        assert_eq!(
+            read(&cfg, &slashed, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str),
+            Some("새것이 이긴다")
+        );
     }
 
     /// **겹치는 차례는 셋이다** — 지금 자리 > 옛 철자 > 설정의 옛 `[read]`. 한 자리에서 갈라지게 두면
