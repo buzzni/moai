@@ -9280,6 +9280,91 @@ fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
     assert!(out.trim().is_empty(), "워크트리의 스냅샷에 main 을 안 겹쳐 집은 리뷰를 막는다\n{out}");
 }
 
+/// **트래커가 정말 갈린 자리에서 `-C <루트>` 를 적은 토막은 루트의 스냅샷으로 잰다**(moai-acf7,
+/// 2026-09-19 사용자 결정). `Repo::find_from` 이 딸린 워크트리를 루트로 옮기면서(moai-y7go) 흔한
+/// 워크트리 세션은 이미 루트를 읽는데, `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리는 안 옮겨 간다 —
+/// 거기서 규약이 시키는 `moai -C <루트> …` 는 루트의 트래커에 쓰면서 판정만 제 낡은 스냅샷으로 받아,
+/// 루트에서 세우고 집은 리뷰가 없는 것이 되어 규칙 3 이 통째로 샜다.
+///
+/// **`cd` 로 옮긴 토막은 지금대로 이 세션의 눈이다** — 규칙 2 는 `There` 로 보낸 토막을 안 세므로
+/// (`guard_moai` 만 돈다) `cd <루트> && sed -i …` 까지 넘기면 쓰기 셈이 그 자리에서 꺼진다.
+#[test]
+fn a_dash_c_at_the_root_is_judged_by_the_roots_snapshot_when_the_trackers_really_split() {
+    let s = Scratch::new("hookaimsplit");
+    let (main, inside, id) = picked_in_a_worktree(&s);
+    let mp = main.display().to_string();
+    let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+
+    // 규약대로 루트에 리뷰를 세우고 집는다 — 워크트리의 스냅샷(HEAD)에는 그 줄이 없다.
+    let r = field(
+        &ok(&main, &["add", "리뷰 — 워크트리 일", "-t", "review", "--parent", &id, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    ok(&main, &["mv", &r, "in_progress"]);
+    assert!(!issues(&inside).contains(&r), "워크트리의 스냅샷이 갈라지지 않았다 — 갈린 자리를 못 잰다");
+
+    // 규칙 3 — 루트의 스냅샷에서 그 리뷰를 찾아 닫는 한 줄을 요구한다.
+    let why = refusal(&here(&format!("moai -C {mp} mv {r} done")));
+    assert!(why.contains(&format!("moai -C {mp} mv {r} done -m")), "루트의 리뷰를 못 보고 지나갔다\n{why}");
+    let out = here(&format!("moai -C {mp} mv {r} done -m '무엇을 반영했나'"));
+    assert!(out.trim().is_empty(), "닫는 한 줄을 준 것을 막았다\n{out}");
+
+    // 규칙 1 — 루트가 쥔 초점으로 막고, 내미는 줄도 루트를 겨눈다.
+    let why = refusal(&here(&format!("moai -C {mp} add '딴 일'")));
+    assert!(why.contains(&format!("moai -C {mp} add '제목' --parent {id}")), "루트의 초점을 못 봤다\n{why}");
+
+    // **`cd` 로만 옮긴 토막은 지금대로 이 세션의 눈이다.** 둘을 가르려고 두 스냅샷을 벌려 놓는다 —
+    // 루트는 아무것도 안 쥐었고, 이 워크트리의 낡은 스냅샷은 갈라질 때의 집기를 그대로 든다.
+    ok(&main, &["mv", &r, "done", "-m", "무엇을 반영했나"]);
+    ok(&main, &["mv", &id, "todo"]);
+    assert!(issues(&inside).contains("in_progress"), "워크트리의 스냅샷이 갈라지지 않았다");
+    let out = here(&format!("moai -C {mp} add '딴 일'"));
+    assert!(out.trim().is_empty(), "`-C <루트>` 를 루트의 스냅샷으로 안 쟀다\n{out}");
+    let why = refusal(&here(&format!("cd {mp} && moai add '딴 일'")));
+    assert!(why.contains(&id), "`cd` 로 옮긴 토막까지 루트로 보냈다\n{why}");
+}
+
+/// **그 토막의 집기는 여전히 이 세션의 것이다**(moai-acf7 의 뒷짝). `-C <루트>` 를 적은 토막을
+/// 루트의 스냅샷으로 재면서 규칙 2 의 **집기 셈**까지 그 자리에서 꺼지던 판은, 규약이 시키는
+/// `moai -C <루트> mv <id> in_progress && sed -i …` 한 줄을 "집은 것 없이 고친다" 며 막았다 —
+/// 방금 집은 바로 그 id 를 집으라고 내밀면서. 판정할 스냅샷을 바꾼 것이지 누가 집었는지를 바꾼
+/// 것이 아니다.
+///
+/// 가르는 자는 `Repo::seen_from` 하나다 — 등록한 옆 프로젝트의 집기는 그대로 여기서 아무것도
+/// 안 쥐어 준다(moai-23ky).
+#[test]
+fn a_pick_spelled_with_dash_c_at_the_root_still_counts_for_rule_two() {
+    let s = Scratch::new("hookaimpick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "루트의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
+    let inside = main.join(".claude/worktrees/w");
+    let mp = main.display().to_string();
+    let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+    assert!(!issues(&inside).contains("in_progress"), "양쪽 다 빈손이어야 규칙 2 를 잰다");
+
+    let picks = format!("moai -C {mp} mv {id} in_progress --from todo && sed -i s/a/b/ src/x.rs");
+    let out = here(&picks);
+    assert!(out.trim().is_empty(), "`-C <루트>` 로 집은 것을 규칙 2 가 안 셌다\n{out}");
+
+    // 남의 프로젝트에서 집은 것은 그대로 아무것도 안 쥐어 준다.
+    let other = s.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q"]);
+    ok(&other, &["init", "argos"]);
+    let far = field(&ok(&other, &["add", "남의 일", "--json"]), "id");
+    let why = refusal(&here(&format!(
+        "moai -C {} mv {far} in_progress --from todo && sed -i s/a/b/ src/x.rs",
+        other.display()
+    )));
+    assert!(why.contains("규칙 2"), "남의 트래커의 집기가 여기 규칙 2 를 채웠다\n{why}");
+}
+
 /// **`moai` 는 그 명령이 가리키는 저장소의 트래커로 판정한다** (moai-23ky) — `-C`·`--dir`
 /// 나 앞의 `cd`. 세션 자리의 트래커로 판정하던 훅은 남의 프로젝트에 세우는 줄을 제
 /// 초점으로 막았고, 남의 프로젝트가 쥔 초점은 못 봤다.
