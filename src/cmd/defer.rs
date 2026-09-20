@@ -46,7 +46,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
         // 하므로(`check_from`) 락 안으로 들어왔다. `bad_status` 를 내는 검사는 묶음 것까지
         // **하나도 빠짐없이** `who?` 위에 선다.
-        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)?;
+        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg, ctx.lang())?;
         // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,
         // moai-8xwi.rzg). 묶음의 칸은 멤버에서 읽고 미루기는 제 줄의 `deferred_at` 에
         // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`

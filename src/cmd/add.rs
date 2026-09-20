@@ -168,7 +168,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
-    repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    repo.config
+        .require_known(status.as_str())
+        .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 

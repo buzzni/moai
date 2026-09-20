@@ -346,6 +346,46 @@ fn the_mv_screen_stands_in_one_language() {
     }
 }
 
+/// **칸 이름 오타의 거절도 고른 말로 선다**(moai-fdk7). `mv` 에서 가장 흔한 두 오타라
+/// 첫 사용자가 바로 만나는 자리인데, 그 글은 `config::require_known` 과 `cmd::check_from`
+/// 이라는 **공용 검사기**에서 와 한국어로 박혀 있었다 — 옮긴 `mv` 표면 바로 옆에서 두 말로 섰다.
+///
+/// **네 표면을 한 판에서 잰다.** 같은 자료(`config::NoSuchColumn`)를 네 곳이 나눠 쓰므로
+/// 한 곳만 옮겨도 나머지가 조용히 남는다. 두 글이 **갈려 있는지**도 함께 본다 — 설정만
+/// 보고 거절한 자리와 줄까지 보고 거절한 자리는 받아 주는 것이 달라(moai-hym7) 같은 말을
+/// 하면 안 된다.
+#[test]
+fn the_column_refusals_stand_in_the_chosen_language() {
+    let s = init("collang");
+    let one = add(s.path(), &["a row"]);
+    let refused = |lang: Option<&str>, args: &[&str]| -> String {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        match lang {
+            Some(l) => cmd.env("MOAI_LANG", l),
+            None => cmd.env_remove("MOAI_LANG"),
+        };
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "{args:?} 를 받아 버렸다 — {}", String::from_utf8_lossy(&out.stdout));
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    // 설정만 보고 거절하는 둘과, 줄까지 보고 거절하는 둘.
+    let by_config: [&[&str]; 2] = [&["add", "x", "-s", "nosuch"], &["mv", &one, "nosuch"]];
+    let by_rows: [&[&str]; 2] = [&["mv", &one, "todo", "--from", "nosuch"], &["show", "-s", "nosuch"]];
+    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
+
+    for args in by_config.iter().chain(by_rows.iter()) {
+        let english = refused(None, args);
+        assert!(english.contains("nosuch"), "어느 칸이 틀렸는지를 안 댔다 — {args:?}\n{english}");
+        assert!(english.contains("todo"), "있는 칸을 안 늘어놓았다 — {args:?}\n{english}");
+        assert!(!hangul(&english), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{english}");
+        assert!(hangul(&refused(Some("ko"), args)), "한국어로 골랐는데 영어로 거절했다 — {args:?}");
+    }
+    // **두 글은 갈려 있다.** 줄까지 보고 거절한 쪽만 "거기 선 줄도 없다" 를 단다.
+    assert!(!refused(None, by_config[0]).contains("no row stands"), "설정만 보고 거절하며 줄까지 봤다고 말한다");
+    assert!(refused(None, by_rows[0]).contains("no row stands"), "줄까지 보고 거절했는데 그 말이 없다");
+}
+
 /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-493a, 2026-09-20 사용자 결정).
 ///
 /// 한 판에서 셋을 잰다 — `ready` 가 밖의 일을 빼고 그 까닭을 대는가, `--json` 이 같은 것을

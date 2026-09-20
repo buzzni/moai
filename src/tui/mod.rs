@@ -1933,7 +1933,8 @@ impl App {
         // 어느 줄이 선 칸이면 받는다 — `show -s`·`--from` 과 같은 술어다(moai-hym7).
         for s in &filter.status {
             if !crate::report::knows_column(&self.site.issues, &self.site.cfg, s) {
-                return Err(crate::cmd::unknown_column(s, &self.site.cfg));
+                let why = crate::cmd::unknown_column(s, &self.site.cfg);
+                return Err(crate::view::no_such_column(self.site.lang, &why));
             }
         }
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
@@ -3809,11 +3810,11 @@ impl App {
         match &self.mode {
             Mode::Filter(q) if !q.text().trim().is_empty() => match self.build_filter(&self.mode) {
                 Err(e) => Some(e),
-                Ok(f) => f
-                    .status
-                    .iter()
-                    .find(|s| !crate::report::knows_column(&self.site.issues, &self.site.cfg, s))
-                    .map(|s| crate::cmd::unknown_column(s, &self.site.cfg)),
+                Ok(f) => {
+                    f.status.iter().find(|s| !crate::report::knows_column(&self.site.issues, &self.site.cfg, s)).map(
+                        |s| crate::view::no_such_column(self.site.lang, &crate::cmd::unknown_column(s, &self.site.cfg)),
+                    )
+                }
             },
             _ => None,
         }

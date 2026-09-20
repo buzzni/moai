@@ -487,16 +487,22 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 /// 전체가 아니라 **바뀐 줄만** 검사하는 것과도 같은 자다.
 ///
 /// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
-pub fn check_from(from: Option<&str>, issues: &[crate::model::Issue], cfg: &crate::config::Config) -> R<()> {
+pub fn check_from(
+    from: Option<&str>,
+    issues: &[crate::model::Issue],
+    cfg: &crate::config::Config,
+    lang: crate::i18n::Lang,
+) -> R<()> {
     // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
     // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
     let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
-    Err(Fail::coded(unknown_column(f, cfg), code::BAD_STATUS))
+    Err(Fail::coded(crate::view::no_such_column(lang, &unknown_column(f, cfg)), code::BAD_STATUS))
 }
 
-/// 모르는 칸을 댈 때의 한 줄 — 쓰기도 읽기도 같은 말을 한다.
-pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> String {
-    format!("`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", "))
+/// 줄까지 보고도 모르는 칸 — 쓰기도 읽기도 **같은 자료**를 낸다(moai-fdk7). 글은
+/// [`crate::view::no_such_column`] 이 짓는다.
+pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config::NoSuchColumn {
+    crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.

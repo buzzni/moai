@@ -175,7 +175,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
     for s in &filter.status {
         if !crate::report::knows_column(&load.issues, &repo.config, s) {
-            return Err(Fail::coded(super::unknown_column(s, &repo.config), super::code::BAD_STATUS));
+            let why = super::unknown_column(s, &repo.config);
+            return Err(Fail::coded(crate::view::no_such_column(ctx.lang(), &why), super::code::BAD_STATUS));
         }
     }
 

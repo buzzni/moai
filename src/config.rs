@@ -394,12 +394,34 @@ impl Config {
 
     /// 모르는 칸을 거부한다. **문장이 여기 하나다** — `add`·`mv`·`show` 와
     /// `Issue::validate` 가 저마다 같은 말을 짓고 있으면 반드시 갈라진다.
-    pub fn require_known(&self, status: &str) -> Result<(), String> {
+    pub fn require_known(&self, status: &str) -> Result<(), NoSuchColumn> {
         if self.knows(status) {
             return Ok(());
         }
-        Err(format!("`{status}` 라는 칸이 없다. 있는 칸: {}", self.statuses.join(", ")))
+        Err(NoSuchColumn { name: status.to_string(), nor_rows: false, known: self.statuses.clone() })
     }
+}
+
+/// 모르는 칸([`Config::require_known`]·[`crate::cmd::unknown_column`]) — **말이 아니라
+/// 자료다**(moai-fdk7, `user_config::ConfigTrouble` 과 같은 까닭). 글은
+/// [`crate::view::no_such_column`] 이 짓는다.
+///
+/// **아는 칸 목록을 함께 든다.** 펴는 쪽이 `Config` 를 다시 들 까닭이 없어지고, 탐색기의
+/// 거름망 줄처럼 설정에서 먼 자리도 같은 글을 짓는다.
+///
+/// **저장 계층은 화면 말을 모른 채 둔다**(사람이 정했다, 2026-09-20). `Issue::validate` 도
+/// 이 자료를 받지만 거기서는 이웃 검사 열셋과 같은 말로 편다 — 파일을 재는 글과 사람이
+/// 보는 글은 다른 것이고, `store::with_write` 에 화면 말을 물려주지 않는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoSuchColumn {
+    /// 사람이 적은 칸 이름.
+    pub name: String,
+    /// **그 칸에 선 줄도 없다.** 줄까지 보고 거절한 자리(`--from`·거름망·`show -s`)에서 서고,
+    /// 설정만 보고 거절한 자리(`add -s`·`mv <칸>`)에서는 안 선다 — 두 거절은 잰 것이 달라
+    /// 같은 말을 하면 안 된다(moai-hym7).
+    pub nor_rows: bool,
+    /// 그 저장소가 아는 칸, 적힌 차례 그대로.
+    pub known: Vec<String>,
 }
 
 #[cfg(test)]

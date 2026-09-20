@@ -2281,6 +2281,22 @@ fn entry_problem(lang: Lang, why: &crate::user_config::EntryTrouble) -> String {
     }
 }
 
+/// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
+///
+/// **두 거절은 잰 것이 다르다.** 설정만 보고 거절한 자리(`add -s`·`mv <칸>`)는 "그런 칸이
+/// 없다" 고, 줄까지 보고 거절한 자리(`--from`·`show -s`·탐색기 거름망)는 "거기 선 줄도
+/// 없다" 고 말한다 — 뒤쪽은 옛 이름에 선 줄이면 받아 주므로(moai-hym7), 같은 말을 하면
+/// 받아 주는 자리와 아닌 자리를 읽는 쪽이 못 가린다.
+pub fn no_such_column(lang: Lang, why: &crate::config::NoSuchColumn) -> String {
+    let known = why.known.join(", ");
+    // **갈래마다 제 `say` 를 적는다**([`problem`] 과 같은 까닭) — 키를 삼항으로 고르면
+    // 소스를 훑는 시험(`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
+    match why.nor_rows {
+        true => fill(say(lang, "refuse.no_column_nor_rows"), &[("name", &why.name), ("known", &known)]),
+        false => fill(say(lang, "refuse.no_column"), &[("name", &why.name), ("known", &known)]),
+    }
+}
+
 /// 팔레트 밖의 색 낱말 한 줄([`crate::user_config::NotAHue`]).
 ///
 /// **읽기의 알림과 `moai project color` 의 거절문이 이 하나를 나눠 쓴다** — 명령이 받은 값을

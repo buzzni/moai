@@ -126,6 +126,8 @@
   "refuse.defer_empty_why": "까닭이 비었다",
   "refuse.edit_nothing": "무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다",
   "refuse.init_no_prefix": "디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`",
+  "refuse.no_column": "`{name}` 라는 칸이 없다. 있는 칸: {known}",
+  "refuse.no_column_nor_rows": "`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {known}",
   "detail.deferred": "미룸",
   "detail.deferred_days": "미룸 ({n}일)",
   "detail.deferred_under": "미룸 — {id} 밑",
