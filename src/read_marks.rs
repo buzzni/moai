@@ -35,7 +35,7 @@ use toml_edit::{Item, Table};
 
 /// 읽음이 사는 표의 이름. 옛 `[read]` 와 같은 낱말이다 — 자리가 바뀌었을 뿐 뜻은 그대로다.
 const READ: &str = "read";
-/// 이 파일이 어느 프로젝트의 것인지 적는 키([`path_for`] 의 해시가 부딪혔는지 여기서 본다).
+/// 이 파일이 어느 프로젝트의 것인지 적는 키([`sheet_at`] 의 해시가 부딪혔는지 여기서 본다).
 const PATH: &str = "path";
 
 /// 같은 자리를 가리키는 철자를 **하나로 모은다** — 링크와 `..`·끝 `/` 를 걷는다(`canonicalize`).
@@ -100,9 +100,8 @@ fn spool_at(dir: &Path, root: &Path) -> PathBuf {
 
 /// 이 부름이 **읽고 쓸 자리**와 그 자리를 고른 뿌리, 그리고 고르다 만난 까닭.
 ///
-/// **고르는 자는 하나다**([`place_of`]·[`at_of`] 가 함께 쓴다). 갈라 두던 판은 못 푼 자리에서 둘이
-/// 다른 파일을 댔다 — 쓰기는 대기 자리로 가는데 표식만 재는 쪽은 읽음 파일을 재, 탐색기가 제가 적은
-/// 것을 못 보았다.
+/// **고르는 자는 하나다**([`place_of`]). 갈라 두던 판은 못 푼 자리에서 둘이 다른 파일을 댔다 —
+/// 쓰기는 대기 자리로 가는데 표식만 재는 쪽은 읽음 파일을 재, 탐색기가 제가 적은 것을 못 보았다.
 fn chosen(dir: &Path, root: &Path) -> (PathBuf, PathBuf, Option<String>) {
     match settle(root) {
         // 못 풀었다 — 이 판의 도장은 대기 자리로 간다. 뿌리는 받은 철자다(문지기와 `claim` 이 그것으로 견준다).
@@ -233,18 +232,6 @@ fn overlay_place(
         places.extend(place.past.iter().map(PathBuf::as_path));
     }
     older(&places, &place.root, seen, legacy, problems);
-}
-
-/// 읽고 쓰는 자리와 그 자리를 고른 푼 뿌리 — **옛 자리는 안 센다.** 쓰는 쪽([`update`])과 표식만 재는
-/// 쪽(`tui::App::follow_read` 은 걸음마다 부른다)은 `past` 를 안 쓰는데, 짓고 버리면 그만큼이 헛일이다(리뷰).
-fn at_of(config: &Path, root: &Path) -> (PathBuf, PathBuf) {
-    let (at, root_of, _) = chosen(dir_of(config), root);
-    (at, root_of)
-}
-
-/// 읽고 쓰는 자리 하나([`Place::at`]).
-pub fn path_for(config: &Path, root: &Path) -> PathBuf {
-    at_of(config, root).0
 }
 
 /// 읽어 낸 읽음과 그때 생긴 말.
@@ -866,7 +853,7 @@ mod tests {
 
         assert_eq!(read(&cfg, &one, &BTreeMap::new()).seen, marks(&[("argos-0001", "A")]));
         assert_eq!(read(&cfg, &two, &BTreeMap::new()).seen, marks(&[("argos-0001", "B")]));
-        assert_ne!(path_for(&cfg, &one), path_for(&cfg, &two));
+        assert_ne!(place_of(&cfg, &one).at, place_of(&cfg, &two).at);
     }
 
     /// **한 저장소를 가리키는 철자가 여럿이어도 한 파일에 쓴다**(moai-f5e3). `Repo::open` 은 받은 철자를
@@ -884,7 +871,12 @@ mod tests {
         for (n, spelling) in spellings.iter().enumerate() {
             let id = format!("argos-{n:04}");
             update(&cfg, spelling, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
-            assert_eq!(path_for(&cfg, spelling), path_for(&cfg, &real), "{} 가 딴 파일로 갔다", spelling.display());
+            assert_eq!(
+                place_of(&cfg, spelling).at,
+                place_of(&cfg, &real).at,
+                "{} 가 딴 파일로 갔다",
+                spelling.display()
+            );
         }
         // 넷이 한 파일에 쌓였고, 어느 철자로 읽어도 넷이 다 보인다.
         let sheets = std::fs::read_dir(dir_of(&cfg).join("read")).unwrap().count();
@@ -916,7 +908,7 @@ mod tests {
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         let before = format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"옛것\"\n", slashed.display().to_string());
         std::fs::write(&old, &before).unwrap();
-        assert_ne!(old, path_for(&cfg, &slashed), "시험의 전제 — 옛 이름과 새 이름이 다르다");
+        assert_ne!(old, place_of(&cfg, &slashed).at, "시험의 전제 — 옛 이름과 새 이름이 다르다");
 
         // 그 철자로 부르면 읽을 때는 보인다 — 찾는 옛 자리는 **이 부름이 받은 철자**의 것이다.
         assert_eq!(read(&cfg, &slashed, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("옛것"));
@@ -925,7 +917,7 @@ mod tests {
         // 합친다**(리뷰 13) — 그래야 걷기가 지금 자리만 줄여도 걷은 id 가 다음 읽기에 안 되살아난다.
         update(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0002", "새것")]))).unwrap();
         assert_eq!(std::fs::read_to_string(&old).unwrap(), before, "옛 철자 파일에 썼다");
-        let now = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        let now = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(now.contains("argos-0002") && now.contains("argos-0001"), "옛 표를 안 합쳤다 — {now}");
 
         // 합쳤으니 옛 파일이 사라져도 그 읽음은 남는다 — 이제 읽기는 옛 자리를 안 연다.
@@ -1055,7 +1047,7 @@ mod tests {
         std::os::unix::fs::symlink("고리", s.join("고리")).unwrap();
         let through = s.join("고리/밑");
         // 못 푼 판이 적는 자리에 손으로 적은 줄 하나를 둔다 — 그 자리가 이 판의 `at` 이다.
-        let at = path_for(&cfg, &through);
+        let at = place_of(&cfg, &through).at;
         std::fs::create_dir_all(dir_of(&at)).unwrap();
         std::fs::write(&at, "[read]\n\"a-0002\" = 3\n").unwrap();
 
@@ -1077,7 +1069,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(dir_of(&at)).unwrap();
         std::fs::write(&at, "[read]\n\"a-0002\" = 3\n\"a-0003\" = \"본 때\"\n").unwrap();
 
@@ -1122,7 +1114,7 @@ mod tests {
         std::os::unix::fs::symlink("real", &gate).unwrap();
         // **받은 철자가 푼 경로와 다르다** — 그래야 떨어진 자리가 다음 판에 옛 자리로 선다.
         let spelling = s.join("문/proj/../proj");
-        let at = path_for(&cfg, &spelling);
+        let at = place_of(&cfg, &spelling).at;
         let fell = spool_at(dir_of(&cfg), &spelling);
         assert_ne!(at, fell, "시험의 전제 — 푼 자리와 대기 자리가 딴 파일이다");
         // **대기 자리는 옛 철자 파일과 이름이 다르다** — 같으면 옛 바이너리가 쓴 파일을 지운다.
@@ -1191,7 +1183,7 @@ mod tests {
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
-        let (at, fell) = (path_for(&cfg, &spelling), spool_at(dir_of(&cfg), &spelling));
+        let (at, fell) = (place_of(&cfg, &spelling).at, spool_at(dir_of(&cfg), &spelling));
         let block = || {
             std::fs::remove_file(&gate).unwrap();
             std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
@@ -1236,7 +1228,7 @@ mod tests {
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
-        let at = path_for(&cfg, &spelling);
+        let at = place_of(&cfg, &spelling).at;
 
         // 지금 자리가 먼저 선다 — 안 그러면 첫 성한 쓰기가 대기 자리를 여기로 합쳐 점 키 자리에 때가 앉는다.
         update(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
@@ -1275,7 +1267,7 @@ mod tests {
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let spelling = s.join("문/proj/../proj");
-        let at = path_for(&cfg, &spelling);
+        let at = place_of(&cfg, &spelling).at;
 
         update(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
@@ -1305,7 +1297,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         // 같은 자리를 딴 철자로 적어 둔 파일.
         let spelled = s.join("proj/../proj");
@@ -1339,8 +1331,8 @@ mod tests {
 
         // 링크 철자로 적어도 파일은 푼 자리의 것 하나다.
         update(&cfg, &link, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
-        let at = path_for(&cfg, &link);
-        assert_eq!(at, path_for(&cfg, &real), "링크와 실제 자리가 딴 파일로 갔다");
+        let at = place_of(&cfg, &link).at;
+        assert_eq!(at, place_of(&cfg, &real).at, "링크와 실제 자리가 딴 파일로 갔다");
         let text = std::fs::read_to_string(&at).unwrap();
         assert!(text.contains(&settled.display().to_string()), "받은 철자를 적었다 — 이름과 짝이 어긋난다\n{text}");
 
@@ -1376,9 +1368,9 @@ mod tests {
 
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         assert!(
-            path_for(&cfg, &root).starts_with(&xdg),
+            place_of(&cfg, &root).at.starts_with(&xdg),
             "읽음이 링크를 따라 나갔다 — {}",
-            path_for(&cfg, &root).display()
+            place_of(&cfg, &root).at.display()
         );
         assert!(!dots.join("read").exists(), "읽음이 dotfiles 저장소 안에 섰다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("A"));
@@ -1392,7 +1384,7 @@ mod tests {
         let root = s.join("proj");
         for dir in ["one", "two"] {
             let cfg = s.join(dir).join("config.toml");
-            assert!(path_for(&cfg, &root).starts_with(s.join(dir)), "{}", path_for(&cfg, &root).display());
+            assert!(place_of(&cfg, &root).at.starts_with(s.join(dir)), "{}", place_of(&cfg, &root).at.display());
         }
     }
 
@@ -1435,9 +1427,13 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value, ["argos-0001"]);
-        let was = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value.is_empty());
-        assert_eq!(std::fs::read_to_string(path_for(&cfg, &root)).unwrap(), was, "같은 때를 다시 적어 파일이 바뀌었다");
+        assert_eq!(
+            std::fs::read_to_string(place_of(&cfg, &root).at).unwrap(),
+            was,
+            "같은 때를 다시 적어 파일이 바뀌었다"
+        );
         assert_eq!(update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap().value, ["argos-0001"]);
     }
 
@@ -1450,7 +1446,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0003.rv", "A")]))).unwrap();
-        let text = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        let text = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(text.contains("\"argos-0003.rv\""), "맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0003.rv", "A")]));
     }
@@ -1463,7 +1459,7 @@ mod tests {
         let s = Scratch::new("read-marks-decor");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
             "path = {:?}\n\n[read]\n# 손으로 적은 까닭\n\"argos-0001\" = \"A\"  # 뒤 주석\n",
@@ -1483,7 +1479,7 @@ mod tests {
         let s = Scratch::new("read-marks-head");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "# 이 파일에 적어 둔 까닭\n").unwrap();
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
@@ -1498,7 +1494,7 @@ mod tests {
         let s = Scratch::new("read-marks-crlf");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, format!("path = {:?}\r\n\r\n[read]\r\n\"argos-0001\" = \"A\"", root.display().to_string()))
             .unwrap();
@@ -1515,7 +1511,7 @@ mod tests {
         let s = Scratch::new("read-marks-odd-path");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "path = 3\n\n[read]\n\"argos-0001\" = \"A\"\n").unwrap();
         assert!(read(&cfg, &root, &BTreeMap::new()).seen.is_empty(), "남의 읽음을 들었다");
@@ -1546,7 +1542,7 @@ mod tests {
         let s = Scratch::new("read-marks-prune-odd");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
@@ -1563,7 +1559,7 @@ mod tests {
         let s = Scratch::new("read-marks-prune-comments");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
             "path = {:?}\n\n[read]\n# 이 파일에 대해 적어 둔 말\n\n\"argos-0001\" = \"A\"\n\"argos-0002\" = \"B\"\n",
@@ -1584,7 +1580,7 @@ mod tests {
         let s = Scratch::new("read-marks-keep");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
             "# 손으로 적은 줄\npath = {:?}\nnote = \"나중 바이너리의 키\"\n\n[read]\n\"argos-0001\" = \"A\"\n",
@@ -1605,7 +1601,7 @@ mod tests {
         let s = Scratch::new("read-marks-collision");
         let cfg = s.join("config.toml");
         let (mine, other) = (s.join("proj"), s.join("남의 것"));
-        let at = path_for(&cfg, &mine);
+        let at = place_of(&cfg, &mine).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"A\"\n", other.display().to_string()))
             .unwrap();
@@ -1629,7 +1625,7 @@ mod tests {
         let s = Scratch::new("read-marks-lenient");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(
             &at,
@@ -1658,7 +1654,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
         let got = read(&cfg, &root, &BTreeMap::new());
         // root 로 돌리면 권한이 안 걸린다 — 그때는 이 시험이 잴 것이 없다.
@@ -1676,7 +1672,7 @@ mod tests {
         let s = Scratch::new("read-marks-broken");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "[read\n\"argos-0001\" = ").unwrap();
         assert!(read(&cfg, &root, &BTreeMap::new()).seen.is_empty());
@@ -1692,7 +1688,7 @@ mod tests {
         let s = Scratch::new("read-marks-odd");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
@@ -1709,7 +1705,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         update(&cfg, &root, |sh| sh.mark(&BTreeMap::new())).unwrap();
-        let at = path_for(&cfg, &root);
+        let at = place_of(&cfg, &root).at;
         assert!(!at.exists(), "빈 쓰기가 파일을 지었다");
         // **락 파일과 디렉터리까지 센다**(moai-dyb7). `.toml` 만 보던 판은 프로젝트마다 쌓이는 0바이트
         // `<해시>.toml.lock` 과 `read/` 를 그대로 지나갔다 — 남의 설정 디렉터리에 남는 쓰레기다.
@@ -1775,23 +1771,27 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         update(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A"), ("argos-0002", "B")]))).unwrap();
-        let was = std::fs::read_to_string(path_for(&cfg, &root)).unwrap();
+        let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         let known: BTreeSet<&str> = ["argos-0001", "argos-0002"].into_iter().collect();
         update(&cfg, &root, |sh| {
             sh.mark(&marks(&[("argos-0001", "A")]))?;
             Ok(sh.prune(&known))
         })
         .unwrap();
-        assert_eq!(std::fs::read_to_string(path_for(&cfg, &root)).unwrap(), was);
+        assert_eq!(std::fs::read_to_string(place_of(&cfg, &root).at).unwrap(), was);
     }
 
     /// **이름은 안 바뀐다** — 바뀌면 모든 사람의 읽음이 한 번에 사라진다. 셈은 [`crate::text::fnv1a64`]
     /// 가 제 시험값으로 못박으므로, 여기서는 **그 셈에 매였다는 것**을 이름으로 못박는다.
     #[test]
     fn the_hash_is_pinned_so_the_names_never_move() {
-        let name = |root: &str| path_for(Path::new("/c/config.toml"), Path::new(root)).file_name().unwrap().to_owned();
+        let name =
+            |root: &str| place_of(Path::new("/c/config.toml"), Path::new(root)).at.file_name().unwrap().to_owned();
         assert_eq!(name("/a/api"), "c812cb6e42a00af2.toml");
         assert_ne!(name("/a/api"), name("/b/api"));
-        assert_eq!(path_for(Path::new("/c/config.toml"), Path::new("/a/api")).parent().unwrap(), Path::new("/c/read"));
+        assert_eq!(
+            place_of(Path::new("/c/config.toml"), Path::new("/a/api")).at.parent().unwrap(),
+            Path::new("/c/read")
+        );
     }
 }
