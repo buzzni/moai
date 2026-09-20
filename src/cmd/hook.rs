@@ -490,16 +490,19 @@ enum Route {
 /// 토막마다 판정할 트래커를 가른다(`hook::aimed`). 가리킨 곳이 없으면 디스크를 안 짚는다 —
 /// 대부분의 호출은 `-C`·`cd` 가 없어 여기서 아무것도 안 읽는다.
 fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>, Vec<Option<PathBuf>>) {
-    let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(x, y)| x == y);
     let mut there: Vec<Repo> = Vec::new();
     // 토막마다 **내미는 줄이 겨눌 자리**([`crate::hook::Toward`]) — 판정할 트래커와 따로 든다. 판정은
     // 이 트래커가 하면서도 겨눌 자리는 딴 곳인 경우가 있다(아직 없는 자리, 아래).
     let mut aims: Vec<Option<PathBuf>> = Vec::new();
+    // 아직 없는 자리를 가리킨 토막에서만 읽는다 — 대부분의 호출은 여기 안 와 명령줄을 다시 안 가른다.
+    let spelled = std::cell::OnceCell::new();
     let routes = crate::hook::aimed(cmd, cwd)
         .into_iter()
-        .map(|dir| {
+        .enumerate()
+        .map(|(k, dir)| {
             let mut aim = None;
-            let route = route_one(repo, &same, &mut there, &mut aim, dir);
+            let spells = || spelled.get_or_init(|| crate::hook::spells_dir(cmd)).get(k).copied().unwrap_or(false);
+            let route = route_one(repo, &mut there, &mut aim, dir, &spells);
             aims.push(aim);
             route
         })
@@ -507,42 +510,65 @@ fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>, Vec<Opti
     (routes, there, aims)
 }
 
+/// 두 뿌리가 같은 자리인가 — 등록 목록이 쓰는 그 자([`crate::user_config::same_dir`])다. 여기에
+/// 따로 두면 훅이 "같은 트래커" 라고 본 줄을 옆 표면이 다른 것으로 세어 조용히 갈린다.
+fn same(a: &Path, b: &Path) -> bool {
+    crate::user_config::same_dir(a, b)
+}
+
 /// [`route`] 의 토막 하나 — 판정할 트래커를 가르고, 내미는 줄이 겨눌 자리를 `aim` 에 적는다.
+/// `spells` 는 그 토막이 **제 낱말로 `-C`·`--dir` 를 적었는가**([`crate::hook::spells_dir`])다.
 fn route_one(
     repo: &Repo,
-    same: &dyn Fn(&Path, &Path) -> bool,
     there: &mut Vec<Repo>,
     aim: &mut Option<PathBuf>,
     dir: Option<PathBuf>,
+    spells: &dyn Fn() -> bool,
 ) -> Route {
     let Some(dir) = dir else { return Route::Here };
-    // **없는 자리는 어디인지 모른다 — 세션의 눈으로 본다.** `Nowhere` 로 보내던 판은
-    // `mkdir d && moai -C d add`·`mkdir d && cd d && moai add` 를 아무도 판정하지 않았는데,
-    // 실행할 때는 `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다.
-    // `cd /없는곳; moai add` 도 `cd` 가 실패해 세션 자리에서 돈다.
-    if !dir.is_dir() {
-        // **겨눌 자리는 그래도 그 자리다**(moai-j2vp) — 판정만 이 트래커가 맡는다. 겨눌
-        // 자리까지 이 트래커로 보던 판은 `mkdir -p /srv/새것 && moai -C /srv/새것 add …` 의
-        // 거절문에서 `-C` 를 통째로 잃어, 옮겨 친 줄이 이 트래커에 섰다.
-        *aim = (!crate::worktree::same_repo(&dir, &repo.root)).then_some(dir);
+    // **자리가 있는지는 한 번만 묻는다** — 두 번 물으면 그 사이에 옆 세션의 `mkdir` 이 끼어, 한 물음은
+    // "없다" 로 다른 물음은 "있다" 로 답한 토막이 아무 데서도 판정되지 않는다.
+    let here_now = dir.is_dir();
+    // **`cd` 로만 옮긴 없는 자리는 세션의 눈으로 본다** — `cd /없는곳; moai add` 는 `cd` 가 실패해
+    // 세션 자리에서 돈다. 적지도 않은 `-C` 를 지어 내밀면 거절문이 있지도 않은 곳을 겨눠, 옮겨 친
+    // 줄이 그대로 실패한다(`git worktree add … && cd <새 워크트리> && moai add` 가 그 모양이다).
+    if !here_now && !spells() {
         return Route::Here;
     }
-    let Ok(Some(found)) = Repo::find_from(&dir) else {
-        return Route::Nowhere;
+    // **아직 없는 자리도 [`Repo::find_from`] 이 그대로 답한다** — 위로 찾는 길(`store::found_root`)은
+    // 글자로 올라가며 `.moai` 만 짚어, 끝 자리가 없어도 만들어졌을 때와 같은 트래커를 낸다. 통째로
+    // `Nowhere` 로 보내던 판은 `mkdir d && moai -C d add` 를 아무도 판정하지 않았는데, 실행할 때는
+    // `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다. 반대로 이 트래커로만
+    // 보던 판은 `mkdir -p <남의 저장소>/새것 && moai -C <남의 저장소>/새것 add` 를 여기서 판정하고
+    // 거절문에는 `-C <남의 저장소>/새것` 을 댔다 — 이 트래커의 에픽 id 를 단 채라, 옮겨 친 줄이 남의
+    // 트래커에 끊긴 참조를 세웠다(리뷰 moai-51h9.k8j1).
+    let Some(found) = Repo::find_from(&dir).ok().flatten() else {
+        // **아직 트래커가 없는 새 자리는 그 자리를 댄다**(moai-j2vp) — 판정은 이 트래커가 맡되,
+        // 옮겨 친 줄이 이 트래커에 서면 안 된다. 있는 자리인데 트래커가 없으면 그 `moai` 는 스스로
+        // 실패하니 아무도 판정하지 않는다.
+        if here_now {
+            return Route::Nowhere;
+        }
+        *aim = Some(dir);
+        return Route::Here;
     };
     if same(&found.root, &repo.root)
         || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
     {
         return Route::Here;
     }
-    *aim = Some(found.root.clone());
-    match there.iter().position(|r| same(&r.root, &found.root)) {
-        Some(n) => Route::There(n),
+    let n = match there.iter().position(|r| same(&r.root, &found.root)) {
+        Some(n) => n,
         None => {
             there.push(found);
-            Route::There(there.len() - 1)
+            there.len() - 1
         }
-    }
+    };
+    // **겨눌 자리는 `there` 가 이미 든 철자다** — 토막마다 제가 푼 철자를 들던 판은, 링크로 같은
+    // 저장소를 두 철자로 가리킨 줄에서 규칙 1(`there` 로 판정한다)과 한국어 알림(`aims` 로 낸다)이
+    // 한 훅 판에 서로 다른 `-C` 를 댔다.
+    *aim = Some(there[n].root.clone());
+    Route::There(n)
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.

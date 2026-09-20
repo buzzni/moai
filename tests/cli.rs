@@ -8973,8 +8973,13 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     assert!(!why.lines().any(|l| l.trim_start().starts_with("moai note")), "맨 moai 로 댄 줄이 남았다\n{why}");
 
     // **한국어 알림도 간 자리를 댄다** — 친 `-C` 글자가 아니다. 워크트리에서 친 줄은 루트로 간다.
+    // **걷지 않은 출력으로 잰다**(리뷰 moai-51h9.k8j1) — [`tool_at`] 은 알림을 통째로 걷어 내
+    // ([`without_korean_notice`]), 거기에 "그 글자가 없다" 를 물으면 알림이 안 서도 참이다.
     let noted = format!("moai -C . note {id} '한국어 노트'");
-    let out = tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&noted)));
+    let raw = hook_in_raw(&s, &inside, "pre-tool-use", &tool_input(&inside, "Bash", &format!("{{\"command\":{}}}", json_str(&noted))));
+    let out = String::from_utf8(raw.stdout).unwrap();
+    assert!(out.contains(KOREAN_NOTICE), "한국어 알림이 안 섰다 — {noted}\n{out}");
+    assert!(out.contains("`moai edit`"), "맨 moai 로 안 댄다\n{out}");
     assert!(!out.contains("-C ."), "친 글자를 알림에 도로 내밀었다\n{out}");
 
     // **아직 없는 자리를 가리킨 줄은 그 자리를 그대로 댄다**(리뷰 moai-51h9.n0z 13번) — 판정은 이
@@ -8984,6 +8989,20 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
     let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
     assert!(why.contains(&format!("moai -C {np} add '제목'")), "없는 자리의 -C 를 버렸다\n{why}");
+
+    // **안 적은 `-C` 는 지어내지 않는다**(리뷰 moai-51h9.k8j1) — 앞의 `cd` 가 없는 자리를 가리키면
+    // 그 `cd` 는 실패하고 `moai` 는 세션 자리에서 돈다. 그 자리를 내밀던 판은 `git worktree add …
+    // && cd <새 워크트리> && moai add` 로 막힌 사람에게 아직 없는 디렉터리를 겨눈, 쳐도 안 도는
+    // 줄을 내밀었다.
+    for typed in [format!("cd {np}; moai add '딴 일'"), format!("mkdir -p {np} && cd {np} && moai add '딴 일'")] {
+        let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&typed))));
+        assert!(why.contains("moai add '제목'"), "맨 moai 로 안 댄다 — {typed}\n{why}");
+        assert!(!why.contains(&np), "안 적은 -C 를 지어냈다 — {typed}\n{why}");
+    }
+    // **이 트래커 밑의 아직 없는 자리도 맨 `moai` 다** — 만들어지면 `moai` 가 위로 찾아 여기에 선다.
+    let sub = format!("mkdir -p {wt}/sub && moai -C {wt}/sub add '딴 일'");
+    let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&sub))));
+    assert!(why.contains("moai add '제목'") && !why.contains("-C"), "제 트래커로 도로 풀리는 -C 를 댔다\n{why}");
 }
 
 /// **겹침과 모름을 한 판에서 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이 함께면 풀릴 것을

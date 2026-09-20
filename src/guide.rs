@@ -87,12 +87,11 @@ pub fn make_review(anchor: &str) -> String {
 /// `moai -C /other` 를 대는데 이 줄만 맨 `moai` 를 내던 판은, 옮겨 친 두 줄이 이 트래커를 겨눠
 /// 거기 없는 리뷰를 닫으라고 했다. 이 자리의 트래커면 맨 `moai` 다.
 pub fn close_steps(id: &str, moai: &str) -> String {
-    REVIEW_STEPS
-        .lines()
-        .skip(1)
-        .map(|l| l.replace("<id>", id).replacen("moai ", &format!("{moai} "), 1))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // 머리는 줄마다 같다 — `map` 안에서 짓던 판은 줄 수만큼 다시 지었다. 줄의 **첫** `moai ` 만
+    // 바꾼다: `REVIEW_STEPS` 의 줄은 들여쓰기 뒤 곧바로 그 낱말로 시작한다
+    // (`the_skill_names_each_rule_as_the_hook_does` 가 그것을 못박는다).
+    let head = format!("{moai} ");
+    REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id).replacen("moai ", &head, 1)).collect::<Vec<_>>().join("\n")
 }
 
 /// 난이도 한 낱말 — **모델과 리뷰 등급을 함께 정하는 그 축**이다. 낱말·모델·잣대 셋.
@@ -1892,6 +1891,10 @@ mod tests {
         assert!(skill.contains(&make_review("--parent <보는 이슈>")), "리뷰를 세우는 줄이 갈라졌다");
         for step in REVIEW_STEPS.lines() {
             assert!(skill.contains(step.trim()), "리뷰 걸음이 갈라졌다 — {step}");
+            // **줄은 들여쓰기 뒤 곧바로 `moai ` 로 시작한다** — [`close_steps`] 가 그 첫 낱말을
+            // 겨눌 트래커의 머리로 바꾼다(moai-j2vp). 설명 글이 앞서는 줄이 하나라도 서면 `-C` 가
+            // 그 글 안에 박히고, 아예 없으면 말없이 맨 `moai` 가 남는다.
+            assert!(step.trim_start().starts_with("moai "), "리뷰 걸음이 moai 로 안 시작한다 — {step}");
         }
     }
 
