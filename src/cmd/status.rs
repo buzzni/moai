@@ -87,8 +87,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **여기서 대는 것은 판정을 가렸는지와 상관없이 못 읽은 것 전부다**(사용자 결정 2026-09-18,
     // 리뷰 moai-rgz9.7vt). 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을 가리킨다는
     // 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은 `Unread::blinding`
-    // 이 따로 센다. 다만 **판 것 가운데** 다 — 이름만으로 자리가 다 잡히면 `workplaces` 가 옆
-    // 스냅샷을 아예 안 연다(moai-7igy 의 문, idea `moai-7p48`).
+    // 이 따로 센다. **판 것에 매이지 않는다**(moai-giz3) — 이름만으로 자리가 다 잡혀 스냅샷을
+    // 안 푸는 길에서도 `workplaces_in` 이 파일을 열어 보고 깨진 것을 세운다.
     let said_already = swept;
     if !said_already {
         for t in &unread.all {

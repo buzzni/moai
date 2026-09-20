@@ -633,14 +633,16 @@ fn holds(
     cfg: &crate::config::Config,
     dug: &Dug<'_>,
 ) -> Option<(BTreeSet<String>, BTreeSet<String>)> {
-    let at = tree.path.join(&disk.rel);
     // **이미 판 것이 있으면 다시 안 판다**(moai-kos1) — 겹쳐 보는 길([`gather`])은 바로 앞에서
     // 같은 파일을 열어 풀었다. 재는 자는 그대로 아래 하나다: 건네받은 것도 안 건네받은 것도
-    // [`holds_of`] 를 지난다.
-    if let Some(side) = dug.get(&canonical(&at)) {
+    // [`holds_of`] 를 지난다. **건네받은 것이 없으면 뿌리를 정규화하지도 않는다** — `canonical`
+    // 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을 헛되이 치르면 안 된다.
+    if !dug.is_empty()
+        && let Some(side) = dug.get(&canonical(&tree.path.join(&disk.rel)))
+    {
         return Some(holds_of(side, mine, cfg));
     }
-    let path = at.join(".moai").join("issues.jsonl");
+    let path = snapshot_in(disk, tree);
     let side = match crate::store::read_snapshot(&path) {
         Ok(Some(side)) => side,
         Ok(None) => return Some(Default::default()),
@@ -690,11 +692,17 @@ fn snapshot_in(disk: &Disk, tree: &Tree) -> PathBuf {
 /// 것은 그 값의 수천분의 일이다. 같은 자리에서 이미 워크트리마다 작은 파일 하나를 읽고 있다
 /// ([`held_here`]). 그래서 이 문과 파는 길의 답이 갈리는 자리가 하나 남는다 — 열려서 첫 바이트도
 /// 읽히는데 그다음이 깨진 파일. 그런 판은 파는 길이 제 답으로 덮는다.
+///
+/// **끊긴 것(`Interrupted`)은 못 읽은 것이 아니다** — `Read::read` 는 `EINTR` 를 스스로 다시
+/// 걸지 않아(`read_exact` 와 다르다), 신호 하나가 멀쩡한 워크트리를 "깨졌다" 로 세울 수 있다.
+/// 여기는 말만 하는 자리라 모를 때는 입을 다무는 쪽이 싸다 — 판정이 걸리는 자리면 파는 길이
+/// 제 답으로 덮는다.
 fn unreadable_snapshot(path: &Path) -> bool {
-    use std::io::Read;
+    use std::io::{ErrorKind, Read};
+    let quiet = |k: ErrorKind| matches!(k, ErrorKind::NotFound | ErrorKind::Interrupted);
     match std::fs::File::open(path) {
-        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
-        Ok(mut f) => f.read(&mut [0u8]).is_err(),
+        Err(e) => !quiet(e.kind()),
+        Ok(mut f) => f.read(&mut [0u8]).is_err_and(|e| !quiet(e.kind())),
     }
 }
 
@@ -795,10 +803,6 @@ pub fn workplaces_in(
         if let Some(dir) = disk.admin.get(&tree.path) {
             place.marked = held_here(dir);
         }
-        // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, idea moai-7p48) — 아래 문이 닫히면
-        // 이 워크트리는 `unknown` 도 `holds` 도 없이 지나가, 깨진 파일이 어느 화면에도 안 섰다.
-        // 그 사실은 자리 판정과 상관없이 고칠 사람이 있어야 고쳐진다([`crate::report::Workplace::broken`]).
-        place.broken = unreadable_snapshot(&snapshot_in(&disk, tree));
     }
     // 이름만으로 자리가 다 잡히면(또는 집은 줄이 없으면) 스냅샷을 한 벌도 안 판다.
     //
@@ -814,6 +818,15 @@ pub fn workplaces_in(
     // `groups` 에서 지워, 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못 가리킨다.
     let all_names = names(linked.iter().copied());
     if footing.picked().values().all(|i| footing.claims(&all_names, i)) {
+        // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, idea moai-7p48) — 이 문이 닫히면
+        // 이 워크트리는 `unknown` 도 `holds` 도 없이 지나가, 깨진 파일이 어느 화면에도 안 섰다.
+        // 그 사실은 자리 판정과 상관없이 고칠 사람이 있어야 고쳐진다([`crate::report::Workplace::broken`]).
+        //
+        // **묻는 곳은 여기 하나다** — 파는 길에서는 아래가 실제로 읽은 답으로 `broken` 을 통째로
+        // 덮으므로, 거기서 또 열어 보면 워크트리마다 버릴 `open` 하나씩이다.
+        for (place, tree) in out.iter_mut().zip(&linked) {
+            place.broken = unreadable_snapshot(&snapshot_in(&disk, tree));
+        }
         return out;
     }
     // 여기서부터가 파는 길이다 — **뜬 때도 여기서 읽는다.** `born` 은 이름 없는 워크트리의
@@ -1061,11 +1074,13 @@ pub fn told_from(here: &Path, path: &Path) -> String {
 /// 아무 데서도 안 말하면 그 워크트리를 고칠 사람이 그것을 영영 모른다 — 고치는 것과 못 센 것은
 /// 다른 말이라 세는 자리를 가른다.
 ///
-/// **둘 다 "판 것 가운데" 다**(리뷰 moai-6ozi.pia 지적 1). [`workplaces`] 는 이름만으로 자리가 다
-/// 잡히면 옆 스냅샷을 한 벌도 안 연다(moai-7igy, 잰 뒤 사람이 정한 문) — 안 연 워크트리는 깨졌어도
-/// `unknown` 이 아니라 여기 안 든다. 그래서 같은 저장소를 `moai status` 는 조용히 지나고
-/// `moai status --worktree` 는 그 워크트리를 댄다. 문을 여는 것은 이 에픽 밖이라 idea `moai-7p48`
-/// 로 담았다.
+/// **`all` 은 판 것에 매이지 않는다**(moai-giz3, idea moai-7p48 이 재현). [`workplaces_in`] 은
+/// 이름만으로 자리가 다 잡히면 옆 스냅샷을 한 벌도 안 푸는데(moai-7igy, 잰 뒤 사람이 정한 문),
+/// 한때는 그 길에서 깨진 파일이 어느 화면에도 안 서서 같은 저장소를 `moai status` 는 조용히
+/// 지나고 `moai status --worktree` 는 그 워크트리를 댔다. 이제 안 파는 길도 파일을 **열어 보고**
+/// (`unreadable_snapshot`) `Workplace::broken` 을 세운다 — 여는 값은 푸는 값의 수천분의 일이고,
+/// 깨진 파일은 고칠 사람이 있어야 고쳐진다. `blinding` 은 여전히 **판 것 가운데** 다 —
+/// "자리를 다 못 셌다" 는 실제로 풀어 봐야 나오는 말이다.
 pub struct Unread {
     /// 스냅샷을 못 읽은 워크트리 전부 — 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고
     /// `옆 워크트리 문제 N건` 이 센다. 기계에는 `status --json` 의 `broken_worktrees` 다(moai-zah3).
@@ -1110,7 +1125,10 @@ pub fn stranded_at_in(
     let blinding: Vec<crate::report::Workplace> =
         crate::report::blinding_in(&footing, &trees).into_iter().cloned().collect();
     // **깨진 것 전부다** — 판정을 가렸는지(`unknown`)가 아니라 그 파일이 깨졌는가다(moai-giz3).
-    let all = trees.into_iter().filter(|t| t.broken).collect();
+    // `unknown` 도 함께 본다: 판 길은 둘을 같이 세우지만(`workplaces_in`), 그 짝을 손으로 맞추는
+    // 자리가 하나라도 어긋나면 `blinding` 이 `all` 의 부분집합이라는 이 구조체의 약속이 깨져
+    // `unreadable_worktrees` 만 서고 `broken_worktrees` 는 비는 화면이 난다.
+    let all = trees.into_iter().filter(|t| t.broken || t.unknown).collect();
     (warning, Unread { all, blinding })
 }
 

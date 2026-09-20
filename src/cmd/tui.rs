@@ -67,6 +67,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
     let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
     let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept, &sides);
+    // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
+    // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
+    // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).
+    drop(sides);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.

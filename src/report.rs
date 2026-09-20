@@ -201,6 +201,11 @@ pub fn deferred_sources_in<'a>(
     mile_of: &BTreeMap<&'a str, &'a str>,
     roots: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<&'a str, Vec<&'a str>> {
+    // 계획에서 빠진 줄이 없으면 짚을 것도 없다 — 답은 아래 걸음과 같은 빈 지도인데, [`Shelf`] 는
+    // 목록을 통째로 한 번 걷는다. 미룬 줄 하나 없는 저장소가 보통이다(`deferred_roots_in` 과 같은 문).
+    if roots.is_empty() {
+        return BTreeMap::new();
+    }
     let shelf = Shelf::new(all, epic_of, mile_of);
     roots
         .iter()
@@ -605,29 +610,9 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
     s.serialize_str(&p.to_string_lossy())
 }
 
-/// 집은 줄([`started`]) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
-/// 키가 없는 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 안 보임" 을 한 지도로 가른다.
-/// 집은 멤버를 둔 묶음도 키를 받는다(멤버에서 굴려 올린다, [`settle`]).
-///
-/// **워크트리가 하나도 없으면 아무 키도 없다**(moai-tbin) — 물을 자리 자체가 없다. 거기서 집은
-/// 줄을 `Lost` 로 채우면, 워크트리를 안 쓰는 저장소(그쪽이 기본이다)의 모든 집은 줄에 빨간
-/// "일하는 워크트리가 안 보인다" 가 붙는다. 한때 그 판정이 부르는 쪽의 `trees.is_empty()` 가드
-/// 두 벌로만 서 있어, 이 순수 함수를 새로 부르는 표면은 그 가드를 세 벌째 적어야 했다.
-///
-/// **자리가 안 보이는 까닭까지 여기서 가른다**(moai-xn9n) — 방금 집어 아직 워크트리가 안 뜬
-/// 것(`STRANDED_GRACE_SECS`, `Place::Fresh`), 못 읽은 워크트리가 있어 모르는 것(`Place::Unknown`),
-/// 정말 자리를 잃은 것(`Place::Lost`)이다. `now` 를 받는 까닭이 이것이다. 한때 이 셋을 [`stranded`]
-/// 만 갈라, `show` 의 `자리` 줄이 방금 집은 줄을 버려진 것처럼 냈다 — 두 표면이 한 답을 내려면
-/// 가르는 자가 하나여야 한다.
-///
-/// **이름이 집은 줄을 하나라도 가리키는 워크트리는 스냅샷의 벌여 놓인 줄([`Workplace::holds`])로
-/// 안 가른다.** 규약상
-/// 워크트리는 main 에서 뜨므로 그 스냅샷에는 갈라질 때 main 에 벌여 놓였던 줄이 전부 있다 —
-/// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
-/// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
 /// 자리 판정이 재는 것 **한 벌** — 집은 줄([`started`], id 로 접은 것)과 소속 지도([`ties`]).
 ///
-/// 자리를 묻는 넷([`places`]·[`blinding`]·[`stranded`]·[`placeable`])과 스냅샷을 팔지 고르는 문
+/// 자리를 묻는 넷([`places`]·[`blinding`]·[`stranded`]·[`placeable_in`])과 스냅샷을 팔지 고르는 문
 /// (`worktree::workplaces`)이 저마다 이 둘을 지어, `moai status`·`moai show` 한 번에 같은 걸음을
 /// 네댓 벌 걸었다(moai-rviv). 걸음이 값싸지 않다 — 집은 줄을 고르는 데 미룸이 조상과 소속을 타고
 /// ([`put_off`]), 그 미룸이 다시 소속 지도를 재료로 쓴다.
@@ -702,6 +687,26 @@ impl<'a, 'c> Footing<'a, 'c> {
 
 // 바이너리는 재료를 든 `_in` 을 부른다([`Footing`], moai-rviv) — 이 꼴은 시험의 짧은 길이다.
 #[cfg(test)]
+/// 집은 줄([`started`]) → 그 일이 [`어디에 서 있는가`](Place). **자리가 안 보이는 줄도 키를 받는다** —
+/// 키가 없는 것은 안 집은 줄이다. 받는 쪽이 "안 집음" 과 "집었는데 안 보임" 을 한 지도로 가른다.
+/// 집은 멤버를 둔 묶음도 키를 받는다(멤버에서 굴려 올린다, [`settle`]).
+///
+/// **워크트리가 하나도 없으면 아무 키도 없다**(moai-tbin) — 물을 자리 자체가 없다. 거기서 집은
+/// 줄을 `Lost` 로 채우면, 워크트리를 안 쓰는 저장소(그쪽이 기본이다)의 모든 집은 줄에 빨간
+/// "일하는 워크트리가 안 보인다" 가 붙는다. 한때 그 판정이 부르는 쪽의 `trees.is_empty()` 가드
+/// 두 벌로만 서 있어, 이 순수 함수를 새로 부르는 표면은 그 가드를 세 벌째 적어야 했다.
+///
+/// **자리가 안 보이는 까닭까지 여기서 가른다**(moai-xn9n) — 방금 집어 아직 워크트리가 안 뜬
+/// 것(`STRANDED_GRACE_SECS`, `Place::Fresh`), 못 읽은 워크트리가 있어 모르는 것(`Place::Unknown`),
+/// 정말 자리를 잃은 것(`Place::Lost`)이다. `now` 를 받는 까닭이 이것이다. 한때 이 셋을 [`stranded`]
+/// 만 갈라, `show` 의 `자리` 줄이 방금 집은 줄을 버려진 것처럼 냈다 — 두 표면이 한 답을 내려면
+/// 가르는 자가 하나여야 한다.
+///
+/// **이름이 집은 줄을 하나라도 가리키는 워크트리는 스냅샷의 벌여 놓인 줄([`Workplace::holds`])로
+/// 안 가른다.** 규약상
+/// 워크트리는 main 에서 뜨므로 그 스냅샷에는 갈라질 때 main 에 벌여 놓였던 줄이 전부 있다 —
+/// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
+/// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
 pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &str) -> BTreeMap<String, Place<'a>> {
     places_in(&Footing::of(issues, cfg), trees, now)
 }
@@ -977,14 +982,10 @@ fn settle<'a>(
 ///
 /// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
 /// 옆 스냅샷을 다 푸는 값을 치르지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
-// 바이너리는 재료를 든 `_in` 을 부른다([`Footing`], moai-rviv) — 이 꼴은 시험의 짧은 길이다.
-#[cfg(test)]
-pub fn placeable(issues: &[Issue], cfg: &Config, i: &Issue) -> bool {
-    placeable_in(&Footing::of(issues, cfg), i)
-}
-
-/// [`placeable`] 과 같은 것. **이미 잰 재료를 받는다**([`Footing`]) — `cmd::show` 는 이 문을
-/// 지난 뒤 곧바로 같은 재료로 자리를 묻는다(`workplaces`·[`places`], moai-rviv).
+///
+/// **재료를 든 꼴 하나뿐이다**([`Footing`], moai-rviv) — 곁의 `places`·`blinding`·`stranded` 는
+/// 시험이 부르는 짧은 길을 곁에 두지만, 이쪽은 부르는 시험이 없어 `#[cfg(test)]` 짝이 그대로
+/// 죽은 코드 경고가 됐다. 시험이 필요해지면 그때 `Footing::of` 를 그 시험에서 부른다.
 pub fn placeable_in(footing: &Footing<'_, '_>, i: &Issue) -> bool {
     let picked = footing.picked();
     if picked.contains_key(i.id.as_str()) {
@@ -1506,7 +1507,7 @@ pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<
     }
     let group = groups(all);
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
-    let (roots, states, waits) = blocking(all, cfg, &group, &by_id);
+    let (roots, states, waits, _) = blocking(all, cfg, &group, &by_id);
     i.blocked_by
         .iter()
         .map(|b| {
@@ -2181,6 +2182,8 @@ fn group_for(kind: Kind, all: &[Issue]) -> BTreeMap<&str, &str> {
 /// **멤버가 없는 에픽도 줄을 갖는다.** 빠뜨리면 "계획만 세우고 안 채운 것"
 /// 이 화면에서 사라져, 정확히 드러내야 할 것이 안 보인다.
 /// **소속 없는 이슈도 묶음을 갖는다.** 같은 이유다.
+// 바이너리는 지도를 든 [`rollup_in`] 을 부른다(moai-g0zx) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     rollup_of(Kind::Epic, issues, cfg)
 }
@@ -2193,6 +2196,8 @@ pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>) -> Vec<Roll> {
 
 /// `kind` 가 에픽이든 마일스톤이든 같은 셈을 한다. **일은 이슈가 한다** —
 /// 에픽은 어느 쪽 집계에도 세지 않는다.
+// 바이너리는 지도를 든 [`rollup_of_in`] 을 부른다(moai-g0zx) — 이 꼴은 시험의 짧은 길이다.
+#[cfg(test)]
 pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     rollup_of_in(kind, issues, cfg, &group_for(kind, issues), &eclipsed(issues))
 }
@@ -2409,18 +2414,22 @@ pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<
 /// 없으면 읽은 칸을 물을 자리가 없다 — 읽은 칸을 묻는 것은 `is_blocked` 뿐이고, 그
 /// 밖의 줄은 제 칸으로 답한다(`column`). 둘 다 조상과 소속을 타는 셈이라, 안 묻는
 /// 저장소에서 그냥 돌리면 `moai ready` 가 부를 때마다 목록을 여러 벌 더 걷는다.
+///
+/// **제가 지은 마일스톤 지도를 함께 낸다**(moai-g0zx) — 뒤에 같은 지도가 또 필요한 쪽([`held`] 의
+/// [`deferred_sources_in`])이 밖에서 미리 지으면, 여기가 안에서 한 벌을 더 지어 한 명령에 둘이 된다.
+/// 위의 빠른 길로 돌아설 때는 비어 있는데, 그때는 `roots` 도 비어 받는 쪽이 그것으로 아무것도 안 짓는다.
 fn blocking<'a, 'c>(
     issues: &'a [Issue],
     cfg: &'c Config,
     epic_of: &BTreeMap<&'a str, &'a str>,
     by_id: &BTreeMap<&'a str, &'a Issue>,
-) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>, Waits<'a>) {
+) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>, Waits<'a>, BTreeMap<&'a str, &'a str>) {
     let shelved = issues.iter().any(is_put_off);
     let by_group = issues.iter().any(|i| {
         i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| is_group(x)))
     });
     if !shelved && !by_group {
-        return (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+        return (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
     }
     // **받은 에픽 지도 위에 쌓는다** — `milestones` 를 그냥 부르면 그 안에서 `groups` 를 한 벌
     // 더 지어, 지도를 건네받은 보람이 없다([`milestones_in`]).
@@ -2431,7 +2440,7 @@ fn blocking<'a, 'c>(
     } else {
         (BTreeMap::new(), BTreeMap::new())
     };
-    (roots, states, waits)
+    (roots, states, waits, mile_of)
 }
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
@@ -2489,9 +2498,11 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     if !issues.iter().any(|i| !i.blocked_by.is_empty()) {
         return Vec::new();
     }
-    let (group, mile_of) = ties(issues);
+    let group = groups(issues);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
-    let (roots, states, waits) = blocking(issues, cfg, &group, &by_id);
+    // **마일스톤 지도도 `blocking` 에게서 받는다** — 밖에서 [`ties`] 로 미리 지으면 `blocking` 이
+    // 제 안에서 같은 것을 한 벌 더 짓는다.
+    let (roots, states, waits, mile_of) = blocking(issues, cfg, &group, &by_id);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     // **도로 집을 곳은 방금 잰 것으로 짓는다** — [`deferred_sources`] 를 그냥 부르면 소속 지도
     // 두 벌과 `blocking` 이 이미 낸 `roots` 를 통째로 다시 짓는다.

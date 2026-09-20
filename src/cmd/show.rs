@@ -234,7 +234,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             .collect();
         return super::json_line(&rows);
     }
-    if args.tree {
+    // **문은 지도를 지은 그 자다**(`tree_now`) — `args.tree` 로 다시 적으면 아래의 `expect` 가
+    // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
+    if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
         // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
@@ -519,7 +521,16 @@ fn one(
         // `report::group_members` 로 고른다.
         let mine: BTreeSet<&str> =
             report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
-        let roll = report::rollup_of(issue.kind, all, &repo.config)
+        // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
+        // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
+        // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).
+        let soil = report::Soil::of(all);
+        let eclipsed = soil.eclipsed();
+        let group = match issue.kind {
+            Kind::Milestone => &soil.milestone,
+            _ => &soil.epic,
+        };
+        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = &roll {
@@ -537,7 +548,7 @@ fn one(
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
         // 멤버라며 저장소 전부를 낸다 — 없는 답보다 틀린 답이 비싸다.
         if !mine.is_empty() {
-            let index = crate::nav::Index::of(all);
+            let index = crate::nav::Index::in_soil(all, &soil);
             let here = index.find(&issue.id).map(|at| {
                 let mut p = index.home_of(at).clone();
                 p.push(index.seg_of(all, at));
@@ -550,7 +561,7 @@ fn one(
                 // (마일스톤 밑의 에픽, 에픽 밑에는 없다), 빈 것을 건네면 그 줄이
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
-                let rolls = report::rollup(all, &repo.config);
+                let rolls = report::rollup_in(all, &repo.config, &soil);
                 out.extend(view::members(all, &index, &keep, &rolls, &here, origin));
             }
         }
