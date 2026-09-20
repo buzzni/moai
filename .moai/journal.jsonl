@@ -6423,3 +6423,6 @@
 {"ts":"2026-09-20T13:14:20Z","id":"moai-dpbi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-20T13:14:21Z","id":"moai-ajh2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 읽음 쓰기 경로, 부르는 쪽 셋을 함께 고쳤다)"}
 {"ts":"2026-09-20T13:14:22Z","id":"moai-dyb7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 락 차례와 동시성, 치우는 길을 버리고 재 보기로 갔다)"}
+{"ts":"2026-09-20T13:14:30Z","id":"moai-pjrr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, 사용자 결정 두 판)"}
+{"ts":"2026-09-20T13:14:30Z","id":"moai-mz0e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, moai-pjrr 과 한 함수)"}
+{"ts":"2026-09-20T13:14:31Z","id":"moai-6ek1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 탐색기 알림, 갈래를 셋으로 갈랐다)"}
