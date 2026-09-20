@@ -6319,3 +6319,4 @@
 {"ts":"2026-09-20T11:21:57Z","id":"moai-q32f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T11:21:57Z","id":"moai-071u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-20T11:22:04Z","id":"moai-wc2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-hwxc 하나가 첫 칸에 남았다 — 저장소를 rustfmt 로 한 번 맞추고 ci-gate 에 `cargo fmt --check` 를 켜는 일이다. moai-jlon 과 moai-hom6 이 develop 에 든 뒤에 친다. 첫 릴리스는 CONTRIBUTING 의 Releasing 절대로, CHANGELOG 의 [Unreleased] 를 손으로 [0.1.0] 으로 바꿔 달고 태그한다."}
+{"ts":"2026-09-20T11:27:17Z","id":"moai-ajh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
