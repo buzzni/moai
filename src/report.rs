@@ -2328,6 +2328,40 @@ pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus
     picks_in(issues, cfg, true)
 }
 
+/// `moai prime` 한 판이 읽어 낸 것 — **집은 것과 다음에 집을 것**.
+///
+/// 세션 첫머리와 접힌 뒤에 다시 주입되는 요약이라, 보드([`status`])가 아니라 이것이다.
+/// 보드는 13KB 를 넘고 경고·흐름·묶음 막대까지 그리는데, 그 자리가 묻는 것은 "내가 무엇을
+/// 쥐고 있었나, 다음은 무엇인가" 둘뿐이다 — 나머지는 읽는 쪽의 맥락을 그만큼 밀어낸다.
+///
+/// **저장하지 않는다.** 여기 든 것은 전부 지금 줄들에서 읽어 낸 값이고, 고르는 자는 이미
+/// 있는 둘([`wip`]·[`ready_in`])이다. 새 자를 세우면 `prime` 이 대는 "다음 일" 과
+/// `moai ready` 가 내미는 줄이 갈린다.
+#[derive(Debug)]
+pub struct Prime<'a> {
+    /// 지금 집은 일 — [`wip`] 와 같은 자다.
+    pub held: Vec<&'a Issue>,
+    /// 다음에 집을 것. [`ready_in`] 의 앞에서 [`PRIME_PICKS`] 개.
+    pub picks: Vec<&'a Issue>,
+    /// `picks` 에 안 실린 나머지 수. **0 이 아니면 잘렸다는 뜻**이라, 받는 쪽이 이 판을
+    /// "집을 것이 셋뿐" 으로 안 읽는다.
+    pub rest: usize,
+    /// 도는 마일스톤이 목록에 한 일 — [`ready_in`] 이 낸 그대로다.
+    pub focus: Focus<'a>,
+}
+
+/// `prime` 이 내미는 다음 일의 수. **셋이다** — 요약 한 판의 값은 짧다는 것이고, 더 보는 말은
+/// `moai ready` 하나다. 이 자름은 사람 쪽과 `--json` 이 **같이** 쓴다: 사람 화면만 자르면
+/// 기계가 읽는 판이 보드만큼 길어져 이 명령이 선 까닭이 사라진다.
+pub const PRIME_PICKS: usize = 3;
+
+/// [`Prime`] 을 읽어 낸다.
+pub fn prime<'a>(issues: &'a [Issue], cfg: &Config) -> Prime<'a> {
+    let (all, focus) = ready_in(issues, cfg);
+    let rest = all.len().saturating_sub(PRIME_PICKS);
+    Prime { held: wip(issues, cfg), picks: all.into_iter().take(PRIME_PICKS).collect(), rest, focus }
+}
+
 /// **막음만 보는 목록** — 도는 마일스톤은 안 본다. [`unblocked`] 가 이것으로 두 판을 견준다.
 ///
 /// 마일스톤 우선은 **막음이 아니다**(리뷰 moai-493a.2om 2). 거른 목록으로 견주면, 마일스톤이

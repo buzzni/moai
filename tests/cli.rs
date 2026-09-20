@@ -3069,6 +3069,74 @@ fn ready_picks_what_can_be_started() {
     assert!(ok(s.path(), &["ready"]).contains(&member));
 }
 
+/// `moai prime` 은 **두 물음만** 답한다 — 무엇을 쥐었나, 다음은 무엇인가.
+///
+/// 보드를 그대로 실으면 이 명령이 선 까닭이 사라지므로, 보드의 것(묶음 막대)이 안 섞이는지와
+/// 보드보다 짧은지를 함께 잰다. **재는 자가 한 자리에 서 있다** — 길이를 숫자로 박으면 글을
+/// 한 줄 고칠 때마다 그 숫자가 틀리고, 그러면 아무도 그 단언을 안 믿는다.
+#[test]
+fn prime_answers_the_two_questions_and_is_not_the_board() {
+    let s = init("prime");
+    let (epic, _member, child, loose) = a_small_tree(&s);
+    ok(s.path(), &["mv", &child, "in_progress"]);
+
+    let out = ok(s.path(), &["prime"]);
+    // 쥔 것은 칸과 함께 선다. 그것이 `in_progress` 냐 `review` 냐로 다음 수가 갈린다.
+    assert!(out.contains(&format!("`{child}`")), "집은 것을 안 실었다\n{out}");
+    assert!(out.contains("in_progress"), "집은 것의 칸을 안 댔다\n{out}");
+    // 다음에 집을 것은 `ready` 와 같은 자가 고른다 — 에픽 자체는 집는 것이 아니다.
+    assert!(out.contains(&format!("`{loose}`")), "다음 일을 안 실었다\n{out}");
+    assert!(!out.contains(&format!("`{epic}`")), "에픽을 집으라고 했다\n{out}");
+    // 보드의 묶음 막대가 섞이면 이것은 보드다. 글이 아니라 **그림**으로 재 말에 안 매인다.
+    // **길이로 재지 않는다** — 닫기 전 목록과 명령은 저장소 크기와 무관하게 늘 실리는 글이라,
+    // 줄 넷짜리 시험 저장소에서는 그것만으로 보드보다 길다. 이 판이 짧은 까닭은 전체 길이가
+    // 아니라 **줄 수가 안 자란다**는 것이고, 그것은 아래 [`prime_cuts_the_next_list_at_three_and_says_what_is_left`]
+    // 가 잰다.
+    assert!(!out.contains('█') && !out.contains('░'), "보드의 막대가 섞였다\n{out}");
+}
+
+/// **셋에서 자르고, 자른 것을 댄다.** 안 대면 이 판이 "집을 것이 셋뿐" 으로 읽혀 `moai ready`
+/// 를 아예 안 부른다. 사람 쪽과 `--json` 이 **같은 수로** 자르는 것까지 함께 잰다 — 한쪽만
+/// 자르면 훅에 건 쪽이 보드만큼 긴 판을 받는다.
+#[test]
+fn prime_cuts_the_next_list_at_three_and_says_what_is_left() {
+    let s = init("primecut");
+    for n in 1..=5 {
+        ok(s.path(), &["add", &format!("할 일 {n}")]);
+    }
+    let out = ok(s.path(), &["prime"]);
+    let picks = out.lines().filter(|l| l.starts_with("- `argos-")).count();
+    assert_eq!(picks, 3, "셋에서 안 잘랐다\n{out}");
+    assert!(out.contains('2'), "남은 수를 안 댔다\n{out}");
+
+    let said = ok(s.path(), &["prime", "--json"]);
+    one_json_value(&said);
+    assert_eq!(said.matches("\"id\":\"argos-").count(), 3, "기계 쪽이 다르게 잘랐다\n{said}");
+    assert!(said.contains("\"rest\":2"), "남은 수를 기계에 안 댔다\n{said}");
+
+    // **저장소가 자라도 이 판은 안 자란다.** 이것이 보드 대신 이 명령이 선 까닭이다 —
+    // 스무 건을 더 넣어도 내미는 줄은 셋 그대로고, 는 것은 "남은 수" 하나다.
+    for n in 6..=25 {
+        ok(s.path(), &["add", &format!("할 일 {n}")]);
+    }
+    let out = ok(s.path(), &["prime"]);
+    assert_eq!(out.lines().filter(|l| l.starts_with("- `argos-")).count(), 3, "저장소를 따라 자랐다\n{out}");
+    assert!(ok(s.path(), &["prime", "--json"]).contains("\"rest\":22"), "남은 수가 안 늘었다");
+}
+
+/// **아무것도 막지 않는다** — 트래커가 없어도 0 이다. 여기서 0 아닌 값을 내면 이것을 세션
+/// 시작 훅에 건 사람의 세션이 "실패" 로 열리고, 그러면 이건 린트고 린트는 곧 게이트다.
+#[test]
+fn prime_never_fails_where_there_is_no_tracker() {
+    let s = Scratch::new("primebare");
+    let out = moai(s.path(), &["prime"]);
+    assert!(out.status.success(), "트래커가 없다고 실패했다");
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("moai init"), "시작하는 말을 안 댔다\n{said}");
+    // 기계 쪽도 같은 자리에서 0 이다.
+    assert!(moai(s.path(), &["prime", "--json"]).status.success(), "--json 이 실패했다");
+}
+
 #[test]
 fn ready_and_tree_speak_json() {
     let s = init("s3json");
@@ -3787,7 +3855,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
-    "init", "add", "status", "ready", "show", "note", "link", "defer", "tui", "edit", "mv", "rm",
+    "init", "add", "status", "ready", "prime", "show", "note", "link", "defer", "tui", "edit", "mv", "rm",
     // `skill` 은 `--dry-run` 으로만 부른다. 진짜 설치는 `claude` 를 부르고
     // 사람의 설정을 건드리므로 훑기가 할 일이 아니다.
     "skill",
@@ -4043,6 +4111,7 @@ fn every_command_still_speaks_json() {
     let cases = [
         vec!["status", "--json"],
         vec!["ready", "--json"],
+        vec!["prime", "--json"],
         vec!["show", "--json"],
         vec!["show", "--tree", "--json"],
         vec!["show", &id, "--json"],
