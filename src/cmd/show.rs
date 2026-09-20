@@ -245,7 +245,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
         let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
         let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
-        let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, &origin);
+        let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, view::Screen::new(ctx.lang()).over(&origin));
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면
         // `0/2` 밑에 줄 하나만 서고 왜 하나가 없는지 아무도 모른다. 목록이
@@ -264,7 +264,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &report::epic_labels(&load.issues),
         asked_deferred,
         &wh,
-        &origin,
+        view::Screen::new(ctx.lang()).over(&origin),
     ))
 }
 
@@ -422,7 +422,7 @@ fn one(
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
-        origin: Some(origin),
+        screen: view::Screen::new(ctx.lang()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
     };
@@ -562,7 +562,7 @@ fn one(
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
                 let rolls = report::rollup_in(all, &repo.config, &soil);
-                out.extend(view::members(all, &index, &keep, &rolls, &here, origin));
+                out.extend(view::members(all, &index, &keep, &rolls, &here, view::Screen::new(ctx.lang()).over(origin)));
             }
         }
     }
