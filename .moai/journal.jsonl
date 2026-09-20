@@ -6426,3 +6426,10 @@
 {"ts":"2026-09-20T13:14:30Z","id":"moai-pjrr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, 사용자 결정 두 판)"}
 {"ts":"2026-09-20T13:14:30Z","id":"moai-mz0e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 자리 판정, moai-pjrr 과 한 함수)"}
 {"ts":"2026-09-20T13:14:31Z","id":"moai-6ek1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 탐색기 알림, 갈래를 셋으로 갈랐다)"}
+{"ts":"2026-09-20T13:15:18Z","id":"moai-9it4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 남은 글자를 말묶음으로 — draw·keys·mod·layer·menu"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-ajh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-dyb7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:24Z","id":"moai-pjrr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:25Z","id":"moai-mz0e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:25Z","id":"moai-6ek1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-20T13:17:40Z","id":"moai-shn2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 멤버 다섯과 리뷰를 8296593 으로 develop 에 머지하고 닫았다. 첫 칸에 다섯이 남았다 — moai-blvx(src/store.rs 를 moai-jlon 이 쥐어 대기), 리뷰가 넘긴 moai-bdej(못 푼 자리의 도장, 고치는 길이 사용자 결정이다)·moai-upna·moai-hzfu·moai-nppo(view.rs 는 옆 세션 자리다)."}
