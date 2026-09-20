@@ -6241,3 +6241,4 @@
 {"ts":"2026-09-20T09:42:58Z","id":"moai-4y5s.jy3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=241605 (xhigh — 그리기 맥락 묶기 중간 판)"}
 {"ts":"2026-09-20T09:42:59Z","id":"moai-4y5s.jy3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"중간 판이다. #1·#2·#3 을 736d70c 로 반영하고 #4~#8 은 까닭과 함께 넘겼다(moai-4q5i 1번, 멤버 moai-uhzk). 에픽 끝 한 판은 moai-uhzk 뒤에 다시 본다."}
 {"ts":"2026-09-20T09:43:08Z","id":"moai-wc2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-20) 셋. 저작권자는 Buzzni Inc. · 저장소는 공개이고 주소는 github.com/buzzni/moai · 배포는 GitHub Releases 와 install.sh 까지다. crates.io 와 Homebrew tap 은 이번 범위 밖이라 idea 로 담는다."}
+{"ts":"2026-09-20T09:43:12Z","id":"moai-uhzk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
