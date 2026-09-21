@@ -18,10 +18,20 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   genuinely be absent (`epic`, `milestone`, `deferred_at`) stay absent.
 - `rust-toolchain.toml` pins the toolchain that builds, formats and lints this
   repository, so `cargo fmt` on a contributor's machine gives what CI sees.
-  `rust-version` in `Cargo.toml` now records the minimum rather than proving it.
+  `rust-version` in `Cargo.toml` is proven by the `msrv` job below rather than by
+  the toolchain CI happens to run.
+- CI restores the pinned toolchain from a cache keyed on `rust-toolchain.toml`,
+  before the first rustup call in each job. Pinning made every job fetch and
+  unpack the toolchain again, and that cost is single-threaded xz rather than
+  bandwidth, so a faster runner does not pay it back.
+- An `msrv` job builds the crate with the `rust-version` read out of
+  `Cargo.toml`, so bumping that one line moves what CI actually walks.
 
 ### Fixed
 
+- `release.yml` restored its cache after `rustup target add` — the first rustup
+  call in that job — so the toolchain was already downloaded by the time the
+  cache arrived.
 - The install one-liner in `README.md` and `install.sh` points at `main`, the
   branch a release is cut from. It pointed at `develop`, so a receiver installed
   a release with a script that release does not carry.
