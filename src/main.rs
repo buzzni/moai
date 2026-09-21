@@ -36,6 +36,7 @@ mod worktree;
 
 use clap::Parser;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// `println!` 은 stdout 이 닫히면 패닉한다. `moai show | head` 처럼 출력을
@@ -116,6 +117,7 @@ fn main() -> ExitCode {
             print(&lines);
             carried();
             unjournaled();
+            unread_journals();
             redirected(!quiet);
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
@@ -263,6 +265,48 @@ fn unjournaled() {
     }
 }
 
+/// 못 읽어 건너뛴 저널 자리를 말한다(moai-6924).
+///
+/// **관대하되 시끄럽게**(2026-09-21 사용자 결정). [`store::Repo::journal_by_id`] 는 못 읽는 파일
+/// 하나에 통째로 지지 않고 읽은 것을 낸다 — 남의 `<메일>.jsonl` 이 0600 으로 서는 것만으로 제
+/// 이력까지 안 보이던 자리다. 그 관대함이 **조용한 손실이 되지 않게** 하는 자가 이 함수다.
+///
+/// **종료 코드를 0 이 아니게 한다.** [`carried`]·[`unjournaled`] 와 갈리는 지점이다: 저쪽은
+/// 쓰기가 담긴 판이라 말만 하지만, 여기는 사람이 **덜 받은 답**을 손에 쥔 판이다. 스냅샷의
+/// 못 읽는 줄을 `cmd::report_load_errors` 가 그렇게 다루는 것과 같은 자다. `--json` 을 읽는
+/// 기계는 이 코드로 "이력이 없다" 와 "못 읽었다" 를 가른다 — `--json` 에 키가 서기 전까지
+/// (moai-f2lc) 가르는 자가 이것 하나뿐이라, 이 줄이 무너지면 반쪽이 아니라 조용한 손실이다.
+///
+/// **자리를 통째로 댄다.** [`unjournaled`] 처럼 저장소 뿌리로 줄이지 않는다 — 여기서 알아야 할
+/// 것은 "어느 저장소냐" 가 아니라 *어느 파일에 `chmod` 를 하느냐* 이고, 그것이 곧 고치는 법이다.
+fn unread_journals() {
+    tell_unread(said_lang(), &store::journal_unread());
+}
+
+/// 길어 온 값에 대고 말하고 깃발을 세운다. **전역을 읽는 것은 위가 하고 여기는 안 읽는다** —
+/// 시험이 이 자리를 직접 불러 종료 코드까지 잰다([`tests::an_unread_journal_makes_the_run_fail`]).
+fn tell_unread(lang: i18n::Lang, unread: &[(PathBuf, String)]) {
+    let lines = unread_lines(lang, unread);
+    if lines.is_empty() {
+        return;
+    }
+    for l in lines {
+        let _ = writeln!(anstream::stderr().lock(), "{}{}", style::paint(style::WARN, "moai: "), l);
+    }
+    // **말한 뒤에 세운다** — 이 줄이 안 나갔는데 코드만 1 이면 사람은 까닭 없는 실패를 본다.
+    cmd::note_partial();
+}
+
+/// 자리마다 한 줄. **순수하다** — 찍지도, 전역을 건드리지도 않는다.
+fn unread_lines(lang: i18n::Lang, unread: &[(PathBuf, String)]) -> Vec<String> {
+    unread
+        .iter()
+        .map(|(at, why)| {
+            i18n::fill(i18n::say(lang, "warn.unread_journal"), &[("at", &at.display().to_string()), ("why", why)])
+        })
+        .collect()
+}
+
 fn print(lines: &[String]) {
     for l in lines {
         outln!("{l}");
@@ -279,4 +323,46 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
         let _ = writeln!(anstream::stderr().lock(), "{}{}", style::paint(style::ERROR, "moai: "), e.message);
     }
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one(at: &str, why: &str) -> Vec<(PathBuf, String)> {
+        vec![(PathBuf::from(at), why.to_string())]
+    }
+
+    /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
+    /// 라, 자리를 안 대면 사람은 무엇을 고쳐야 하는지 모른 채 이력만 잃는다.
+    #[test]
+    fn an_unread_journal_names_the_place_and_the_reason() {
+        let said = unread_lines(i18n::Lang::En, &one(".moai/journal/b_x_com.jsonl", "Permission denied"));
+        assert_eq!(said.len(), 1);
+        assert!(said[0].contains(".moai/journal/b_x_com.jsonl"), "자리를 안 댄다 — {}", said[0]);
+        assert!(said[0].contains("Permission denied"), "까닭을 안 댄다 — {}", said[0]);
+
+        // **말묶음에서 온다** — 한국어 판도 같은 두 값을 든다. 하드코딩한 글이면 여기가 붉어진다.
+        let ko = unread_lines(i18n::Lang::Ko, &one(".moai/journal/b_x_com.jsonl", "Permission denied"));
+        assert_ne!(ko[0], said[0], "말이 안 갈린다");
+        assert!(ko[0].contains(".moai/journal/b_x_com.jsonl") && ko[0].contains("Permission denied"));
+    }
+
+    /// 자리마다 한 줄이고, 없으면 한 줄도 없다 — 빈 것이 곧 [`tell_unread`] 의 문지기다.
+    #[test]
+    fn nothing_unread_says_nothing() {
+        assert!(unread_lines(i18n::Lang::En, &[]).is_empty());
+        assert_eq!(unread_lines(i18n::Lang::En, &one("a.jsonl", "x")).len(), 1);
+    }
+
+    /// **못 읽은 이력이 있으면 종료 코드가 0 이 아니다**(2026-09-21 사용자 결정, moai-6ney).
+    ///
+    /// `--json` 에 키가 서기 전까지(moai-f2lc) 기계가 "이력이 없다" 와 "못 읽었다" 를 가르는
+    /// 자가 이 코드 하나다. `main` 이 [`cmd::had_partial`] 로 갈리므로 그 깃발을 직접 잰다 —
+    /// 깃발은 한 번 서면 안 내려가니 병렬 시험끼리 섞여도 이 쪽은 흔들리지 않는다.
+    #[test]
+    fn an_unread_journal_makes_the_run_fail() {
+        tell_unread(i18n::Lang::En, &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "Permission denied"));
+        assert!(cmd::had_partial(), "덜 받은 답을 0 으로 끝냈다");
+    }
 }

@@ -60,6 +60,7 @@
   "warn.tracker_climbed": "{from} 위로 올라가 {to} 의 트래커를 잡았다 — 여기에는 `.moai` 가 없다",
   "warn.tracker_moved": "{from} 는 딸린 워크트리라 루트의 트래커에 썼다 — {to}",
   "warn.unjournaled": "썼지만 이력은 못 남겼다{whose} — {why}. 이슈는 담겼으니 다시 부르지 않는다",
+  "warn.unread_journal": "{at}: 이 이력을 못 읽어, 보이는 것에서 빠졌다 — {why}",
   "warn.other": "{kind} {n}건",
   "status.put_off": "미룸",
   "status.no_children": "자식 없음",
