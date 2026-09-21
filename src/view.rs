@@ -2362,6 +2362,9 @@ pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> Strin
             (at, fill(say(lang, "sheet.not_ours"), &[("root", &root.display().to_string())]))
         }
         SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
+        // **어느 id 인지를 댄다** — 곁에 선 `Skipped` 는 그 줄을 대지만, 시킨 것 가운데 무엇이 안 적혔는지는
+        // 이 글만 안다(moai-l5ue).
+        SheetTrouble::Held { at, ids } => (at, fill(say(lang, "sheet.held"), &[("ids", &ids.join(", "))])),
         SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
         // 막힌 id 가 없으면 파일을 다 못 읽은 것이다 — 그 까닭은 같은 판에 함께 실린 줄이 댄다.
         SheetTrouble::SpoolKept { at, held } if held.is_empty() => (at, say(lang, "sheet.spool_kept").to_string()),
@@ -2386,20 +2389,19 @@ fn skipped(lang: Lang, why: &crate::read_marks::Skipped) -> String {
 /// 읽음 표에 **안 쓰고 멈춘** 까닭의 글([`crate::read_marks::SheetRefusal`], moai-rtji). 파일은
 /// `read_marks::update` 가 준다 — 그 자리를 아는 것이 거기 하나라서다.
 ///
-/// 손으로 적은 자리([`crate::read_marks::SheetRefusal::Hand`])는 읽는 길이 건너뛰는 것과 **같은 사실**이지만
-/// 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로 고친다" 고 멈춘다.
+/// 손으로 적은 `read = 3`([`crate::read_marks::SheetRefusal::NotATable`])은 읽는 길이 건너뛰는 것과
+/// **같은 사실**이지만 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로
+/// 고친다" 고 멈춘다. 때가 아닌 값이 앉은 *줄 하나*는 이제 안 멈춘다: 그 id 만 건너뛰고
+/// [`crate::read_marks::SheetTrouble::Held`] 로 선다(moai-l5ue).
 pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::SheetRefusal) -> String {
-    use crate::read_marks::{READ, SheetRefusal, Skipped};
+    use crate::read_marks::{READ, SheetRefusal};
     let said = match why {
         SheetRefusal::Unparsable { said } => fill(say(lang, "sheet.refuse_unparsable"), &[("said", said)]),
         SheetRefusal::NotOurs { root } => {
             fill(say(lang, "sheet.refuse_not_ours"), &[("root", &root.display().to_string())])
         }
-        SheetRefusal::Hand(Skipped::NotATable { found }) => {
+        SheetRefusal::NotATable { found } => {
             fill(say(lang, "sheet.refuse_not_a_table"), &[("table", READ), ("is", found)])
-        }
-        SheetRefusal::Hand(Skipped::NotAStamp { id, found }) => {
-            fill(say(lang, "sheet.refuse_not_a_stamp"), &[("table", READ), ("id", id), ("is", found)])
         }
     };
     format!("{}: {said}", at.display())
@@ -3371,8 +3373,11 @@ mod tests {
                 ),
                 (sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() }), "TOML"),
                 (sheet_refusal(lang, &at, &SheetRefusal::NotOurs { root: root.clone() }), "/w/proj"),
-                (sheet_refusal(lang, &at, &SheetRefusal::Hand(stamp.clone())), "argos-0002"),
-                (sheet_refusal(lang, &at, &SheetRefusal::Hand(table.clone())), "[read]"),
+                (
+                    sheet_trouble(lang, &SheetTrouble::Held { at: at.clone(), ids: vec!["argos-0002".into()] }),
+                    "argos-0002",
+                ),
+                (sheet_refusal(lang, &at, &SheetRefusal::NotATable { found: "integer".into() }), "[read]"),
             ];
             for (said, names) in &said {
                 let code = lang.code();
