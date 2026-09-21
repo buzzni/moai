@@ -6997,3 +6997,15 @@
 {"ts":"2026-09-21T12:26:47Z","id":"moai-5e3o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"들어간 프로젝트의 읽음 파일을 층의 사본까지 두 번 잰다"}
 {"ts":"2026-09-21T12:26:57Z","id":"moai-kuib.g9c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=482115 (max — 쓰기 경로와 조용한 손실)"}
 {"ts":"2026-09-21T12:27:12Z","id":"moai-kuib.g9c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯 가운데 열을 고쳤다 — 리뷰가 여섯(29c0323), 넘긴 것 가운데 넷을 내가(7958c4a). 가장 무거운 것은 못 읽는 대기 자리가 [NEW] 를 통째로 지우던 자리와, moai-jfgn 이 뒤집은 전제 때문에 read_marks 시험 스물둘이 성한 길을 안 밟고 있던 것이다. 안 고친 셋은 까닭을 적었다 — 3번은 사용자가 값으로 받은 창이고, 6번은 겹치는 차례(2026-09-19 결정 3)를 다시 여는 일이라 merge_past 의 글에 남겼다. 값 문제 둘은 idea moai-yukd·moai-5e3o 로 넘겼다."}
+{"ts":"2026-09-21T12:39:55Z","id":"moai-h6z3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:55Z","id":"moai-8c35","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:55Z","id":"moai-pkvw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:56Z","id":"moai-h06a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:56Z","id":"moai-fgyg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:56Z","id":"moai-3oz2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:56Z","id":"moai-p5az","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:56Z","id":"moai-77ap","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:57Z","id":"moai-2g7d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:57Z","id":"moai-e7r3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:39:57Z","id":"moai-l7e2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:40:07Z","id":"moai-3oz2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람이 정함(2026-09-21): 시간대 데이터는 시스템 zoneinfo 를 직접 읽는다. 크레이트를 안 들인다 — /etc/localtime 심볼릭 링크로 이름을 얻고 /usr/share/zoneinfo 의 TZif 를 직접 판다. 바이너리 6.0MB 가 안 늘고, 알파인 같은 곳에서 zoneinfo 가 없으면 UTC 로 떨어진다(moai-77ap 이 그 자리다). 그래서 리뷰 등급은 xhigh 그대로다."}
