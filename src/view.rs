@@ -259,6 +259,18 @@ fn marked(branch: Option<&str>, title: &str, cap: usize, style: Style) -> (Strin
     }
 }
 
+/// 끊긴 에픽 참조의 표기 — `(없는 에픽)`. **괄호는 여기 한 자리에서 한 겹만 단다**(moai-snus).
+///
+/// 말묶음의 낱말은 맨몸이고([`crate::report::EpicLabel`]), 감싸는 것은 그리는 쪽이 정한다 —
+/// 그런데 그 "그리는 쪽" 이 네 자리라([`list`]·[`ready`]·[`prime`]·[`detail`]) 저마다 적으면
+/// 한 곳만 고쳐져 화면마다 모양이 갈린다. 한때 `report::epic_labels` 가 제 괄호를 달고 오는
+/// 바람에 `prime` 이 `((없는 에픽))` 을 냈고, 그 뒤로 넷이 같은 `format!` 을 베껴 적었다.
+///
+/// **자르는 것은 부르는 쪽이 한다** — 표의 칸(`EPIC_CAP`)이 있는 자리와 없는 자리가 갈린다.
+fn gone_epic(lang: Lang) -> String {
+    format!("({})", say(lang, "report.epic_gone"))
+}
+
 fn title_style(i: &Issue) -> Style {
     // 제목은 칠하지 않는다 — 내용은 기본색, 주변만 칠한다.
     // 묶음만 예외다. 계획 계층이 한눈에 떠야 한다.
@@ -367,9 +379,14 @@ pub fn list(
     let epics: Vec<String> = issues
         .iter()
         // `—` 는 낱말이 아니라 빈 칸의 표다 — 말묶음에 넣을 것이 없다.
+        // **표기는 그리는 쪽이 정한다**([`crate::report::EpicLabel`]) — 끊긴 참조의 낱말은
+        // [`gone_epic`] 이 괄호에 넣는다. 제목 칸과 한 열에 서므로 맨몸이면 에픽 제목으로 읽힌다.
+        // **자르는 것은 두 갈래가 같다**(리뷰) — 한때 끊긴 쪽만 `clip` 을 안 지나, 이 열만
+        // `EPIC_CAP` 을 넘길 수 있었다(긴 번역이 표를 밀어낸다).
         .map(|i| match epics.get(&(i.id.as_str(), i.kind)) {
             None => "—".into(),
-            Some(t) => clip(t, EPIC_CAP),
+            Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
+            Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
         })
         .collect();
 
@@ -1149,7 +1166,17 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
     // 줄이 이 판의 글로 서서, 읽는 쪽이 그것을 자료가 아니라 시킴으로 읽는다. 곁의
     // [`trail`] 은 id 를 이미 이렇게 편다 — 한 diff 에 선 두 표면이 갈려 있었다.
     let row = |i: &Issue, column: bool| {
-        let epic = epics.get(&(i.id.as_str(), i.kind)).map(|t| format!(" ({})", one_line(t))).unwrap_or_default();
+        // **괄호는 여기서 한 겹만 단다**(moai-snus) — 끊긴 참조도 제 괄호를 안 달고 오므로
+        // (`report::EpicLabel::Gone`) 두 갈래가 같은 모양으로 선다. 한때 그 낱말이 `(없는 에픽)`
+        // 이라 이 줄이 `((없는 에픽))` 을 냈다.
+        let epic = match epics.get(&(i.id.as_str(), i.kind)) {
+            None => String::new(),
+            Some(crate::report::EpicLabel::Named(t)) => format!(" ({})", one_line(t)),
+            // **끊긴 쪽도 [`one_line`] 을 지난다**(리뷰) — 위의 "모든 칸이" 에 이 칸도 든다.
+            // 말묶음의 낱말이라 지금은 줄바꿈이 들 수 없지만, 여기만 비껴 두면 그 낱말에
+            // 줄이 하나 새는 날 `- \`id\`` 줄이 반으로 갈려 뒤 반쪽이 이 판의 글로 선다.
+            Some(crate::report::EpicLabel::Gone) => format!(" {}", one_line(&gone_epic(lang))),
+        };
         let col = if column { format!(" · {}", one_line(i.status.as_str())) } else { String::new() };
         // **남의 가지에서 온 줄에는 그 가지를 단다**(`--worktree`). 안 달면 옆 워크트리가
         // 집은 일이 이 판의 "집은 것" 에 섞여, 읽는 쪽이 제가 쥔 것으로 읽고 이어서 한다.
@@ -1283,9 +1310,12 @@ pub fn ready(
         let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0);
 
         for ((i, (title, w_this)), tag) in picks.iter().zip(&heads).zip(&tags) {
+            // 없는 것(`ready.no_epic`)과 끊긴 것(`report.epic_gone`)은 다른 답이다 — 표기는
+            // [`list`] 와 같은 자리에서 정한다.
             let epic = match epics.get(&(i.id.as_str(), i.kind)) {
                 None => say(lang, "ready.no_epic").to_string(),
-                Some(t) => clip(t, EPIC_CAP),
+                Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
+                Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
             };
             out.push(
                 format!(
@@ -1580,13 +1610,27 @@ pub fn detail(
 
     let lang = seen.screen.lang;
     if let Some(e) = &i.epic {
-        let title = epic.map(|e| e.title.as_str()).unwrap_or(say(lang, "detail.missing_epic"));
+        // **끊긴 참조는 한 낱말로 댄다**(리뷰, moai-snus 의 결을 잇는다) — 여기만 `detail.missing_epic`
+        // 이라는 딴 키를 들어, 같은 자료를 두고 `show` 의 목록은 `(epic not there)` 라 하고 `show <id>`
+        // 는 `(no such epic)` 이라 했다. 게다가 그 낱말만 말묶음에서 제 괄호를 달고 와, 새로 적은
+        // "괄호는 말묶음에 없다" 를 믿고 감싸는 사람이 `((…))` 를 되살릴 자리였다.
         // **묶음 줄의 `epic` 은 소속이 아니다**(moai-fg0t) — 트리도 `-e` 도 그 줄을 에픽 밑에 안
         // 둔다. 멤버와 같은 모양으로 그리면 적은 사람은 에픽 밑에 넣은 줄 안다.
         let stray = if crate::report::is_group(i) {
             format!("  {}", paint(style::DIM, say(lang, "detail.group_has_no_epic")))
         } else {
             String::new()
+        };
+        // **에픽 줄도 제 가지를 단다**(moai-v8jl) — `--worktree` 에서 이 줄만 맨몸이면, 바로 아래
+        // 자식 줄은 `⎇` 를 달고 에픽 줄만 안 달아 읽는 쪽이 그 제목이 어느 가지 것인지 모른다.
+        // 가지를 재는 것은 **그 에픽 id** 다: 이 줄이 겹쳤는가가 아니라 저 줄이 겹쳤는가다.
+        // **자르지 않는다** — 표만 더한다. 이 줄은 여태 제목을 통째로 냈고, 자르는 것은
+        // 이 일이 고치는 것이 아니다(`style::PLAIN` 은 이스케이프를 안 붙여 글자도 그대로다).
+        //
+        // 끊긴 쪽은 가지를 안 잰다 — 그 id 의 줄이 이 목록에 없으니 겹쳤을 것도 없다.
+        let title = match epic {
+            Some(found) => marked(seen.screen.branch(e), &found.title, usize::MAX, style::PLAIN).0,
+            None => gone_epic(lang),
         };
         out.push(format!("  {}   {}  {title}{stray}", row_label(say(lang, "detail.epic"), lang), paint(style::ID, e)));
     }
@@ -2909,6 +2953,52 @@ mod tests {
         BTreeMap::new()
     }
 
+    /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가
+    /// 끊긴 참조를 `(없는 에픽)` 이라는 **글**로 내던 판은 [`prime`] 이 그것을 한 번 더 감싸
+    /// `((없는 에픽))` 을 냈고, 안 감싸는 `ready`·`list` 와 한 화면에서 모양이 갈렸다.
+    ///
+    /// **네 표면을 한 시험에서 나란히 잰다** — 재는 것은 낱말이 아니라 **괄호가 한 겹인가**와
+    /// **넷이 같은 낱말을 대는가**다. 상세는 한때 제 괄호를 단 딴 키(`detail.missing_epic`)를
+    /// 들어, 같은 자료를 두고 목록은 `(epic not there)` 라 하고 `show <id>` 는
+    /// `(no such epic)` 이라 했다(리뷰). 감싸는 자리를 [`gone_epic`] 하나로 모으고 여기서 넷을
+    /// 함께 잰다 — 한 곳만 재면 나머지가 말없이 갈린다.
+    #[test]
+    fn a_dangling_epic_reference_is_wrapped_once_on_every_surface() {
+        let lang = Lang::Ko;
+        let gone = say(lang, "report.epic_gone");
+        assert!(!gone.starts_with('('), "말묶음의 낱말이 제 괄호를 달았다 — 감싸는 쪽마다 겹친다: {gone}");
+        let once = format!("({gone})");
+        let twice = format!("(({gone}))");
+
+        let mut i = issue("argos-0002", "멤버", "todo");
+        i.epic = Some("argos-e001".into());
+        let labels = crate::report::EpicLabels::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
+
+        let p =
+            crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
+        let as_prime = plain(&prime(&p, &labels, Screen::new(lang))).join("\n");
+        let as_ready =
+            plain(&ready(&[&i], &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
+        let as_list = plain(&list(
+            &[i.clone()],
+            &cfg(),
+            Hidden::default(),
+            &labels,
+            Asked::default(),
+            &Default::default(),
+            Screen::new(lang),
+        ))
+        .join("\n");
+        // 상세는 지도를 안 본다 — 못 찾은 에픽이 `None` 으로 온다.
+        let as_detail =
+            plain(&detail(&i, None, &[], &bare_seen(lang), &cfg(), "2026-09-13T00:00:00Z", false)).join("\n");
+
+        for (what, out) in [("prime", &as_prime), ("ready", &as_ready), ("list", &as_list), ("detail", &as_detail)] {
+            assert!(out.contains(&once), "{what} 가 끊긴 참조를 안 댔다 — {out}");
+            assert!(!out.contains(&twice), "{what} 의 괄호가 두 겹이다 — {out}");
+        }
+    }
+
     /// **미룸 한 마디와 묶음 칸 한 줄도 고른 말로 선다**(moai-ra67). 목록은 이미 말묶음에서
     /// 오는데 이 둘만 한국어로 박혀 있어, 영어로 고른 화면이 목록에서는 `deferred` 라 하고
     /// 상세 머리 줄에서는 `미룸` 이라 했다 — 나란히 놓고 보는 사람이 어느 쪽을 믿을지 정하게
@@ -3114,7 +3204,7 @@ mod tests {
         let theirs = vec![issue("argos-0002", "옆 일", "in_progress")];
         let (all, origin) = crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/wt", theirs)]);
         let tagged: crate::report::EpicLabels =
-            all.iter().map(|i| ((i.id.as_str(), i.kind), "에픽".to_string())).collect();
+            all.iter().map(|i| ((i.id.as_str(), i.kind), crate::report::EpicLabel::Named("에픽".into()))).collect();
         let out = plain(&list(
             &all,
             &cfg(),
@@ -3284,7 +3374,8 @@ mod tests {
     fn the_epic_column_shows_a_title() {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
-        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
+        let labels =
+            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
         let out = plain(&list(
             &[i.clone()],
             &cfg(),
@@ -3296,8 +3387,9 @@ mod tests {
         ));
         assert!(out[1].contains("저장 계층") && !out[1].contains("argos-0001"), "{out:#?}");
 
-        // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
-        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), "(없는 에픽)".to_string())]);
+        // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다. **괄호는 이 표가 단다**(moai-snus) —
+        // 값은 `Gone` 하나고, 낱말도 괄호도 그리는 쪽에서 온다.
+        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
         let out = plain(&list(
             &[i],
             &cfg(),
@@ -3433,7 +3525,7 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &no_epics(),
-            Asked { deferred: true, ..Default::default() },
+            Asked { deferred: true },
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -3657,7 +3749,8 @@ mod tests {
         a.epic = Some("argos-0001".into());
         let b = issue("argos-0003", "떠 있는 것", "todo");
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
-        let labels = BTreeMap::from([(("argos-0002", Kind::Issue), "저장 계층".to_string())]);
+        let labels =
+            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();
@@ -3768,6 +3861,46 @@ mod tests {
         assert!(row.contains(&mark), "겹쳐 온 줄에 가지 표가 없다\n{over:#?}");
         let off = draw(&shown, Screen::new(lang));
         assert!(!off.iter().any(|l| l.contains(style::BRANCH_GLYPH)), "안 겹친 화면에 가지 표가 섰다\n{off:#?}");
+    }
+
+    /// **상세의 에픽 줄도 제 가지를 단다**(moai-v8jl). 제 제목·막음 줄·자식 줄은 `⎇` 를
+    /// 다는데 에픽 줄만 맨몸이라, `moai show <id> --worktree` 에서 바로 아래 자식 줄은 표를
+    /// 달고 에픽 줄만 안 달았다 — 읽는 쪽이 그 제목이 어느 가지 것인지 모른다.
+    ///
+    /// **재는 것은 그 에픽 id 의 겹침이다** — 펼친 줄이 아니다. 둘을 갈라 두지 않으면 펼친
+    /// 줄이 겹쳤을 때 에픽 줄에도 같은 표가 서는 되돌림을 못 잡는다.
+    #[test]
+    fn the_epic_row_of_a_detail_carries_the_branch_mark_too() {
+        let lang = Lang::Ko;
+        let mine = vec![Issue::new(
+            "argos-e001".into(),
+            "저장 계층".into(),
+            Kind::Epic,
+            Status::new("todo"),
+            "2026-09-11T04:12:03Z",
+        )];
+        let mut theirs = mine[0].clone();
+        theirs.title = "옆에서 고친 저장 계층".into();
+        theirs.updated_at = "2026-09-12T00:00:00Z".into();
+        theirs.status_since = "2026-09-12T00:00:00Z".into();
+        let (shown, origin) =
+            crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/tmp/feat-x", vec![theirs])]);
+        let epic = shown.iter().find(|i| i.id == "argos-e001").expect("겹친 에픽이 없다");
+
+        let mut member = issue("argos-0002", "멤버", "todo");
+        member.epic = Some("argos-e001".into());
+        let seen = Seen { screen: Screen::new(lang).over(&origin), ..bare_seen(lang) };
+        let out = plain(&detail(&member, Some(epic), &[], &seen, &cfg(), "2026-09-13T00:00:00Z", false));
+
+        let mark = format!("{} feat/x", style::BRANCH_GLYPH);
+        let row =
+            out.iter().find(|l| l.contains("argos-e001")).unwrap_or_else(|| panic!("에픽 줄이 상세에 없다\n{out:#?}"));
+        assert!(row.contains(&mark), "에픽 줄에 가지 표가 없다\n{out:#?}");
+        assert!(row.contains("옆에서 고친 저장 계층"), "에픽 줄이 제목을 잃었다\n{out:#?}");
+
+        // 겹침이 없으면 표도 없다 — 표가 늘 서면 위의 줄만으로는 아무것도 안 잡힌다.
+        let off = plain(&detail(&member, Some(epic), &[], &bare_seen(lang), &cfg(), "2026-09-13T00:00:00Z", false));
+        assert!(!off.iter().any(|l| l.contains(style::BRANCH_GLYPH)), "안 겹친 상세에 가지 표가 섰다\n{off:#?}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.

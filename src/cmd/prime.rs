@@ -171,5 +171,5 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         });
     }
 
-    Ok(view::prime(&p, &report::epic_labels(&load.issues, lang), view::Screen::new(lang).at(ctx.zone()).over(&origin)))
+    Ok(view::prime(&p, &report::epic_labels(&load.issues), view::Screen::new(lang).at(ctx.zone()).over(&origin)))
 }
