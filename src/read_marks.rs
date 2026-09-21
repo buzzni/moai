@@ -1005,11 +1005,25 @@ impl Sheet {
     /// 적는데, [`Sheet::owns`] 는 그것을 바이트째 견줘 남의 것으로 읽는다 — 제가 방금 지은 파일을 다음
     /// 명령이 거절하고, 거절문은 그 파일을 손으로 지우라 하고, 지우면 같은 줄이 다시 적히는 고리였다.
     /// 이름의 해시는 바이트를 그대로 세므로 안 적어도 파일은 제 것이다.
+    /// **머리 주석 밑에 바로 붙지 않는다**(moai-vwrf). 주석만 있던 파일에서 [`Doc::new_table`] 이 그
+    /// 주석을 문서 머리로 올려 두는데(`lift_head_comment`), 라이브러리는 뿌리의 값을 표보다 먼저 그려
+    /// `path` 가 그 주석과 `[read]` 사이에 끼어든다 — 다시 읽으면 그 주석이 `path` 의 꾸밈이 되어,
+    /// 사람이 적어 둔 글이 도구가 적은 한 줄에 매인다. 그래서 빈 줄 하나로 뗀다: `new_table` 이 새 표
+    /// 앞에 두는 그 빈 줄과 같은 자다.
+    ///
+    /// **`f` 보다 먼저 적는 길로 안 간다.** `lift_head_comment` 는 키가 하나도 없을 때만 올리는 자라,
+    /// `path` 를 먼저 적으면 그 문이 닫혀 머리 주석이 `[read]` **밑으로** 밀린다 — 자리를 옮기는 것은
+    /// 꾸밈에 매이는 것보다 나쁘다.
     fn claim(&mut self, root: &Path) {
         if self.doc.root().get(PATH).is_some() || root.to_str().is_none() {
             return;
         }
+        // 머리에 올라온 주석이 있는가 — 빈 글이면 뗄 것이 없다([`Doc::new_table`] 이 안 올린 판).
+        let lifted = self.doc.root().decor().prefix().and_then(|p| p.as_str()).is_some_and(|p| !p.trim().is_empty());
         if write_value(self.doc.root_mut(), PATH, root.display().to_string().into()) {
+            if lifted {
+                self.doc.root_mut().key_mut(PATH).expect("방금 적은 키다").leaf_decor_mut().set_prefix("\n");
+            }
             self.doc.touched();
         }
     }
@@ -2099,6 +2113,16 @@ mod tests {
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.starts_with("# 이 파일에 적어 둔 까닭\n"), "머리 주석이 표 밑으로 밀렸다\n{now}");
+        // **`path` 가 그 주석을 물고 들어가지 않는다**(moai-vwrf). 바로 밑에 붙으면 다시 읽을 때 그
+        // 주석이 `path` 의 꾸밈이 되어, 사람이 적어 둔 글이 도구의 한 줄에 매인다.
+        assert!(
+            now.starts_with("# 이 파일에 적어 둔 까닭\n\npath = "),
+            "머리 주석과 `path` 사이에 빈 줄이 없다\n{now}"
+        );
+        // 두 번째 쓰기가 그 자리를 안 흔든다 — 흔들면 걸음마다 헛 diff 가 난다.
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
+        let again = std::fs::read_to_string(&at).unwrap();
+        assert!(again.starts_with("# 이 파일에 적어 둔 까닭\n\npath = "), "두 번째 쓰기가 머리를 흔들었다\n{again}");
     }
 
     /// **줄 끝과 끝 줄바꿈은 원문대로 돌려준다**(moai-lb0u·moai-r9qa, 리뷰) — 라이브러리는 줄 끝을 `\n`
