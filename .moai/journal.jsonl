@@ -6781,3 +6781,7 @@
 {"ts":"2026-09-21T08:30:32Z","id":"moai-3oz2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 SPC o t 로 시간대를 고른다 — 설정에 적히고 화면만 바꾼다"}
 {"ts":"2026-09-21T08:30:32Z","id":"moai-77ap","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시간대를 못 풀면 UTC 로 떨어지고 한 줄로 알린다 — 정적 musl 판"}
 {"ts":"2026-09-21T08:40:27Z","id":"moai-h6z3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC v 에 done 이 둘이다 — d 를 걷고 번호만 남긴다"}
+{"ts":"2026-09-21T09:06:08Z","id":"moai-vlld","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록의 글리프가 멈춘 것과 미룬 것을 말한다"}
+{"ts":"2026-09-21T09:06:31Z","id":"moai-1p4t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"멈춘 에픽에 ⏯ 를 세운다 — 끝난 멤버가 있는데 도는 멤버가 없다"}
+{"ts":"2026-09-21T09:06:31Z","id":"moai-pkvw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"미룬 줄에 ⏸ 를 세운다 — 낱말은 그대로 두고 글리프를 더한다"}
+{"ts":"2026-09-21T09:06:32Z","id":"moai-fgyg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"새 글리프의 폭을 못박는다 — 표가 어긋나지 않게"}
