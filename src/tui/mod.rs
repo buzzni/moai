@@ -6255,6 +6255,51 @@ mod tests {
         assert_eq!(a.site.read_tried.trouble, None, "읽혔는데 탈이 남았다");
     }
 
+    /// **옛 철자 파일에 적힌 도장도 걸음이 따라간다**(moai-eivo). [`ReadStamp::of`] 가 옛 자리를 재는
+    /// 갈래를 **아무 시험도 안 들고 있었다** — 대기 자리 쪽만 서 있었고(moai-65as), 그 갈래를 지워도
+    /// 모두 푸르렀다. 그러면 `~/.cargo/bin/moai` 같은 옛 바이너리가 옛 철자 자리에 적은 도장이 이
+    /// 화면에 안 닿아, 그 줄이 세션 내내 [NEW] 로 선다.
+    ///
+    /// **지금 자리 파일이 아직 없는 판이다** — 읽기가 옛 자리를 여는 것이 그때뿐이라([`overlay_place`])
+    /// 재는 자와 읽는 자가 같은 조건에 서는지를 여기서 본다.
+    #[test]
+    fn a_stamp_in_an_old_spelling_reaches_the_screen() {
+        let s = Scratch::new("tui-read-past-step");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        // 등록 줄이 든 철자 — 끝 `/` 하나가 딴 이름을 낸다.
+        let slashed = s.path().join("proj/");
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        let mark = |id: &str| {
+            let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
+            format!("\"{id}\" = \"{stamp}\"\n")
+        };
+        let (nine, two) = (mark("argos-0009"), mark("argos-0002"));
+        let place = crate::read_marks::place_of(&config, &slashed);
+        let old = place.past.first().cloned().expect("옛 철자의 자리가 선다");
+        assert!(!place.at.exists(), "시험의 전제 — 지금 자리 파일이 아직 없다");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        let head = format!("path = {:?}\n\n[read]\n", slashed.display().to_string());
+        std::fs::write(&old, format!("{head}{nine}")).unwrap();
+        a.load_read();
+        assert!(!a.site.unread.contains("argos-0009"), "시험의 전제 — 옛 자리의 읽음을 들었다");
+        assert!(a.site.unread.contains("argos-0002"), "시험의 전제 — 아직 안 읽은 줄이 있다");
+
+        // 옛 바이너리가 그 파일에 한 줄 더 적는다 — 지금 자리는 여전히 없다.
+        std::fs::write(&old, format!("{head}{nine}{two}")).unwrap();
+        a.follow();
+        assert!(!a.site.unread.contains("argos-0002"), "옛 철자 파일에 적힌 도장을 걸음이 안 따라갔다");
+    }
+
     /// **못 읽는 대기 자리도 시계가 다시 본다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이 있다는
     /// 뜻이라 못 읽은 판은 이 화면이 도장을 덜 든 것인데, 그 탈이 떨어지던 판은 그것을 "읽음 표의 줄
     /// 하나가 이상하다" 로 대고 시계 되읽기도 안 걸었다 — `chmod` 은 고친 때도 길이도 안 바꾸니, 그
