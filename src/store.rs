@@ -564,22 +564,31 @@ impl Repo {
     ///
     /// 디렉터리가 없으면 옛 한 파일뿐이다 — 저널이 없는 저장소는 고장이 아니다.
     ///
-    /// **못 여는 자리는 조용히 안 넘긴다**(리뷰). 여기서 접으면 사람들의 이력이 통째로 빠진
-    /// 화면이 멀쩡해 보이고 종료 코드도 0 이다 — [`Repo::journal_by_id`] 가 못 읽는 *파일*에
-    /// 대고 세운 바로 그 금이라, 자리에 대해서도 같은 자로 선다. 목록의 줄 하나를 못 읽는 것도
-    /// 같다: 그 줄이 누구의 파일이었는지는 아무도 모른다.
-    fn journal_files(&self) -> R<Vec<PathBuf>> {
+    /// **못 여는 자리는 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney). 여기서
+    /// 멈추면 자리 하나를 못 여는 것만으로 **모든 사람의** 이력이 통째로 안 보인다 — 읽기는
+    /// 관대하고 쓰기는 엄하다는 규약의 자리다. 대신 [`note_unread`] 로 세어 두고, `cmd::run` 이
+    /// 나오면서 stderr 로 대며 비영 종료로 끝낸다. 목록의 줄 하나를 못 읽는 것도 같다: 그 줄이
+    /// 누구의 파일이었는지는 아무도 모르니 그 사실 그대로 센다.
+    fn journal_files(&self) -> Vec<PathBuf> {
         let mut out = vec![self.journal_path()];
         let at = self.journal_dir();
-        let blame = |e: std::io::Error| Fail::new(format!("{}: {e}", at.display()));
         let dir = match std::fs::read_dir(&at) {
             Ok(d) => d,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-            Err(e) => return Err(blame(e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return out,
+            Err(e) => {
+                note_unread(&at, &e);
+                return out;
+            }
         };
         let mut split = Vec::new();
         for e in dir {
-            let p = e.map_err(blame)?.path();
+            let p = match e {
+                Ok(e) => e.path(),
+                Err(e) => {
+                    note_unread(&at, &e);
+                    continue;
+                }
+            };
             // **`is_file` 로 잰다** — `read_dir` 의 `file_type` 은 심볼릭 링크를 따라가지 않아,
             // 디렉터리를 가리키는 링크가 `!is_dir` 을 지나 아래 `fs::read` 에서 EISDIR 로 터진다.
             if p.extension().is_some_and(|x| x == "jsonl") && p.is_file() {
@@ -588,7 +597,7 @@ impl Repo {
         }
         split.sort();
         out.extend(split);
-        Ok(out)
+        out
     }
 
     /// 전부 메모리로 읽는다. 디스크 인덱스는 두지 않는다 — 이전 시도가
@@ -891,20 +900,29 @@ impl Repo {
     /// 글자를 자르지 않는다. 파일이 없으면 빈 손이다 — 저널만 없는 저장소는 고장이 아니다.
     ///
     /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
+    ///
+    /// **못 읽는 *파일*은 넘어가되 [`journal_unread`] 에 선다**(2026-09-21 사용자 결정, moai-6ney).
+    /// 꼴은 그대로 [`R`] 이다 — 오늘 이 함수가 지는 길은 없지만, 부르는 자리(`cmd::show`)를 옆
+    /// 가지가 쥐어 이 판에서 좁히지 못했다. 좁히는 것은 moai-f2lc 다.
     pub fn journal_by_id(
         &self,
         want: &BTreeSet<&str>,
         line: impl Fn(&str) -> bool,
     ) -> R<BTreeMap<String, Vec<JournalEntry>>> {
         let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
-        for path in self.journal_files()? {
+        for path in self.journal_files() {
             let bytes = match std::fs::read(&path) {
                 Ok(b) => b,
                 // 없는 파일은 건너뛴다 — 옛 한 파일이 없는 저장소가 흔하다.
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                // **못 읽는 파일은 조용히 안 넘긴다.** 여기서 건너뛰면 한 사람의 이력이 통째로
-                // 사라진 화면이 멀쩡해 보인다 — 조용한 손실이 이 도구가 못 견디는 하나다.
-                Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
+                // **못 읽는 파일은 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney).
+                // 여기서 멈추던 때는 남의 파일 하나가 0600 으로 서는 것만으로 **제 파일에만**
+                // 이력이 있는 이슈까지 아무것도 안 보였다. 조용한 손실을 막는 일은 이제
+                // [`note_unread`] 와 그것을 대는 `cmd::run` 이 한다 — 종료 코드도 0 이 아니다.
+                Err(e) => {
+                    note_unread(&path, &e);
+                    continue;
+                }
             };
             let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
             for raw in bytes.split(|b| *b == b'\n') {
@@ -1046,6 +1064,36 @@ static MISSED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(
 
 pub fn journal_misses() -> Vec<(PathBuf, String)> {
     MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 못 읽어 건너뛴 저널 자리 — `(자리, io 가 낸 말)`, 만난 차례대로.
+///
+/// **관대하되 시끄럽게**(2026-09-21 사용자 결정, moai-6ney). 저널이 사람마다 갈린 뒤로 파일은
+/// N 개고, 한 체크아웃을 두 계정이 쓰면 남의 `<메일>.jsonl` 이 0600 으로 서는 일이 흔하다.
+/// 그 하나에 [`Repo::journal_by_id`] 가 통째로 지면 **제 파일에만** 이력이 있는 이슈까지
+/// 아무것도 안 보이고, 되돌릴 길은 도구 밖의 `chmod` 뿐이다 — 읽기는 관대하고 쓰기는 엄하다는
+/// 규약이 막는 자리다.
+///
+/// 관대해진 읽기가 **조용해지지 않도록** 세는 자가 이것이다. [`MISSED`]·[`TALLY`] 와 같은 꼴이고
+/// 같은 까닭이다: `store` 는 터미널을 모르므로 세어 두기만 하고, 말하는 자리는 `cmd::run` 하나다.
+/// 그 자리가 stderr 로 대고 `cmd::note_partial` 로 종료 코드까지 0 이 아니게 한다.
+///
+/// **명령 하나가 아니라 프로세스 하나의 것이다.** `moai show` 는 목록과 상세에서 저널을 두 번
+/// 읽으므로 같은 자리를 두 번 만난다 — [`note_unread`] 가 같은 짝을 두 번 안 담는다.
+static UNREAD: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn journal_unread() -> Vec<(PathBuf, String)> {
+    UNREAD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// 못 읽은 자리를 센다. **같은 짝은 한 번만 선다** — 한 명령이 저널을 여러 번 읽어도 사람은
+/// 같은 줄을 두 번 볼 까닭이 없다.
+fn note_unread(at: &Path, said: &std::io::Error) {
+    let (at, said) = (at.to_path_buf(), said.to_string());
+    let mut v = UNREAD.lock().unwrap_or_else(|e| e.into_inner());
+    if !v.iter().any(|(p, s)| *p == at && *s == said) {
+        v.push((at, said));
+    }
 }
 
 /// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
@@ -1958,11 +2006,18 @@ mod tests {
         assert_eq!(journal_file("   "), None);
     }
 
-    /// **못 여는 저널 자리는 빈 이력으로 안 넘긴다**(리뷰). 파일 하나를 못 읽을 때 소리내는 것과
-    /// 같은 자여야 한다 — 자리를 못 열 때만 조용하면 한 저장소의 이력이 통째로 사라진 화면이
-    /// 멀쩡해 보이고 종료 코드까지 0 이다.
+    /// 이 저장소의 자리만 골라 센 것 — [`UNREAD`] 는 프로세스 하나의 것이라 병렬 시험끼리
+    /// 섞인다. 수를 세지 말고 제 뿌리 밑의 짝만 본다.
+    fn unread_under(root: &Path) -> Vec<(PathBuf, String)> {
+        journal_unread().into_iter().filter(|(at, _)| at.starts_with(root)).collect()
+    }
+
+    /// **못 여는 저널 자리는 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney).
+    /// 멈추던 때는 자리 하나를 못 여는 것만으로 모든 사람의 이력이 통째로 안 보였다. 지금은
+    /// 읽던 것을 내고, 못 연 자리를 [`journal_unread`] 에 세운다 — 그것을 대는 자가 `cmd::run`
+    /// 이고, 거기서 종료 코드도 0 이 아니게 된다.
     #[test]
-    fn an_unreadable_journal_dir_is_told_not_swallowed() {
+    fn an_unreadable_journal_dir_is_carried_and_told() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nojournaldir");
         let by = crate::model::someone("raven");
@@ -1975,15 +2030,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.journal_of("argos-4aex").unwrap().len(), 1);
+        assert!(unread_under(d.path()).is_empty(), "멀쩡한 판에서 무언가를 셌다");
 
         let dir = d.join(".moai/journal");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read_dir(&dir).is_ok() {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
             return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
         }
-        let e = r.journal_of("argos-4aex").expect_err("못 여는 자리를 빈 이력으로 넘겼다");
-        assert!(e.message.contains(".moai/journal"), "어느 자리인지 안 댄다 — {}", e.message);
+        assert!(r.journal_of("argos-4aex").unwrap().is_empty(), "못 연 자리에서 이력을 지어냈다");
+        let told = unread_under(d.path());
+        assert_eq!(told.len(), 1, "못 연 자리를 안 셌거나 여러 번 셌다 — {told:?}");
+        assert_eq!(told[0].0, dir, "어느 자리인지 안 댄다 — {told:?}");
+        assert!(!told[0].1.is_empty(), "까닭을 안 댄다");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// **남의 파일 하나가 제 이력까지 막지 않는다**(2026-09-21 사용자 결정, moai-6ney). 한
+    /// 체크아웃을 두 계정이 쓰면 남의 `<메일>.jsonl` 이 0600 으로 서는 일이 흔한데, 그때
+    /// 통째로 지던 자리다 — **제 파일에만** 이력이 있는 이슈까지 아무것도 안 보였다.
+    ///
+    /// 관대해진 읽기가 조용해지지 않는 것까지 한 자리에서 잰다: 읽은 것은 나오고, 못 읽은
+    /// 파일은 [`journal_unread`] 에 선다.
+    #[test]
+    fn an_unreadable_journal_file_is_skipped_and_told() {
+        use std::os::unix::fs::PermissionsExt;
+        let (r, d) = repo("nojournalfile");
+        let mine = crate::model::someone("raven");
+        let theirs = crate::model::someone("other");
+        for by in [&mine, &theirs] {
+            r.with_write(
+                || crate::i18n::Lang::Ko,
+                |i, _, _| {
+                    let id = format!("argos-{}", &by.name[..4]);
+                    i.push(issue(&id));
+                    Ok((vec![JournalEntry::create(&id, "t", T, by)], ()))
+                },
+            )
+            .unwrap();
+        }
+        let theirs_file = d.join(".moai/journal").join(journal_file(&theirs.email).unwrap());
+        assert!(theirs_file.is_file(), "남의 파일이 안 섰다 — {}", theirs_file.display());
+
+        std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&theirs_file).is_ok() {
+            std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        assert_eq!(r.journal_of("argos-rave").unwrap().len(), 1, "제 파일의 이력까지 잃었다");
+        let told = unread_under(d.path());
+        assert_eq!(told.len(), 1, "못 읽은 파일을 안 셌거나 여러 번 셌다 — {told:?}");
+        assert_eq!(told[0].0, theirs_file, "어느 파일인지 안 댄다 — {told:?}");
+
+        // **두 번 읽어도 한 줄이다** — `moai show` 는 목록과 상세에서 저널을 두 번 읽는다.
+        assert!(r.journal_of("argos-othe").unwrap().is_empty());
+        assert_eq!(unread_under(d.path()).len(), 1, "같은 파일을 두 번 셌다");
+        std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     /// **메일이 없으면 아무것도 안 쓴다**(moai-nzlo, 2026-09-21 사용자 결정). `unknown.jsonl` 도,
