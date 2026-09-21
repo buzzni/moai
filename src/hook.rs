@@ -863,6 +863,36 @@ fn deepest() -> usize {
     DEEPEST.with(std::cell::Cell::get)
 }
 
+thread_local! {
+    /// **이 판에서 다시 읽을 수 있는 글자 수**([`Lexer::WORK`]) — 맨 바깥 렉서가 채우고
+    /// [`afford`] 가 쓴다. 갈래마다 따로라 시험이 나란히 돌아도 안 섞인다.
+    static LEFT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 다시 읽을 글 하나의 값을 치른다 — 남은 예산이 모자라면 **그 글을 안 읽는다**(moai-qzy7).
+///
+/// 겹 상한([`Lexer::DEEP`])은 깊이만 막고 **일의 양**은 안 막는다. 예순넷 겹 안에 긴 글이 있으면
+/// 그 글이 겹마다 다시 읽혀, 길이 × 깊이로 는다 — 80KB 한 줄이 dev 빌드에서 20초, 320KB 가 82초였다.
+/// 훅의 제한 시간(15초)을 넘으면 훅이 죽고, **죽은 훅은 규칙 넷을 통째로 연다.** 예산을 다 쓴 뒤
+/// 글을 글로 두는 것은 그보다 늘 낫다 — 바깥 겹은 그대로 판정된다.
+///
+/// **막는 쪽이 아니라 덜 보는 쪽으로 선다.** 예산을 넘겼다고 거절하면 그 거절은 사람이 못 고치는
+/// 것이고(줄이 길다는 것 말고 할 말이 없다), 이 저장소는 잘못 막음을 새는 것보다 비싸게 친다.
+fn afford(len: usize) -> bool {
+    LEFT.with(|l| {
+        let left = l.get();
+        let fits = left >= len;
+        l.set(if fits { left - len } else { 0 });
+        fits
+    })
+}
+
+/// 이 판에서 지금까지 다시 읽은 글자 수 — 시험이 "예산이 실제로 문다" 를 이것으로 본다.
+#[cfg(test)]
+fn spent() -> usize {
+    LEFT.with(|l| Lexer::WORK - l.get())
+}
+
 impl<'a> Lexer<'a> {
     fn new(cmd: &'a str) -> Self {
         Lexer::at(cmd, 0)
@@ -872,6 +902,11 @@ impl<'a> Lexer<'a> {
     fn at(cmd: &'a str, deep: usize) -> Self {
         #[cfg(test)]
         DEEPEST.with(|n| n.set(n.get().max(deep)));
+        // **맨 바깥 렉서가 이 판의 예산을 채운다**([`afford`], moai-qzy7) — 안쪽 렉서는 그것을
+        // 나눠 쓴다. 겹마다 채우면 예산이 곧 깊이에 비례해 늘어, 막으려던 그 곱이 그대로 돌아온다.
+        if deep == 0 {
+            LEFT.with(|l| l.set(Lexer::WORK));
+        }
         Lexer {
             chars: cmd.chars().peekable(),
             all: Vec::new(),
@@ -907,6 +942,17 @@ impl<'a> Lexer<'a> {
     /// 곧 한 줄짜리 우회로다 — 여덟이던 판은 `$( … )` 아홉 겹 46바이트로 규칙 1 을 껐다. 실제
     /// 명령줄은 서넛을 안 넘고, 예순넷 겹은 스택에도 시간에도 값이 없다.
     const DEEP: usize = 64;
+
+    /// 한 명령줄을 읽는 데 **다시 읽기로 쓸 수 있는 글자 수**([`afford`], moai-qzy7).
+    ///
+    /// 겹 상한이 막는 것은 깊이고, 이것이 막는 것은 **양**이다. 둘은 곱으로 서로를 못 대신한다 —
+    /// 예순넷 겹 안의 80KB 글은 깊이로는 상한 안인데 5MB 를 읽는다.
+    ///
+    /// **숫자는 재서 잡는다.** dev 빌드가 초당 200~250KB 를 읽었다(예순넷 겹 80KB 가 20.6초,
+    /// 320KB 가 82.3초). 릴리스는 그보다 여러 곱절 빠르고, 훅은 릴리스 바이너리로 돈다. 2MiB 면
+    /// 최악이 릴리스에서 1초 안팎이고, 사람이 실제로 치는 줄은 여기 근처에도 안 온다 —
+    /// 이 저장소에서 가장 긴 명령줄도 다시 읽는 글이 수백 바이트다.
+    const WORK: usize = 2 << 20;
 
     /// 묶음을 나왔다 — 다음에 쌓는 토막이 그 사이의 가장 얕은 자리를 안다([`Seg::low`]).
     fn sank(&mut self) {
@@ -1107,6 +1153,10 @@ impl<'a> Lexer<'a> {
             // 그 글 끝에서 닫힌 예약어 묶음([`Seg::shut`]) — 받을 토막이 글 안에 없어 이 토막이 든다.
             let mut over: Option<usize> = None;
             for (text, layer) in texts {
+                // 예산을 다 썼으면 남은 글은 글로 둔다 — 겹 상한에 닿은 것과 같은 자리다(moai-qzy7).
+                if !afford(text.len()) {
+                    break;
+                }
                 // 하위 셸이면 한 겹 깊다 — 그 안의 `cd` 가 바깥 자리를 안 흔든다. **`eval` 도 제 토막이
                 // 파이프의 칸이거나 `&` 로 띄운 것이면 하위 셸이다**([`Seg::sub`]) — `eval 'cd /b' | cat`
                 // 의 `cd` 는 뒤로 안 이어지고 `집기 || eval 'exit 1' | cat` 의 `exit` 는 그 칸만 끝낸다.
@@ -1664,7 +1714,7 @@ impl<'a> Lexer<'a> {
         // `$(bash -c "$( … )")` 가 겹마다 셈을 되돌려, 상한이 아무것도 막지 못했다(리뷰 moai-p836.rv).
         let deep = self.deep + 1;
         for text in inner {
-            if deep > Lexer::DEEP {
+            if deep > Lexer::DEEP || !afford(text.len()) {
                 break;
             }
             // 치환마다 바깥 자리에서 새 하위 셸을 연다 — 앞 치환의 셸과 깊이는 같아도 딴 셸이다.
@@ -5617,6 +5667,21 @@ mod tests {
         let _ = guard_create(&all, &cfg(), &here(), &nest(5000));
         let deepest = deepest();
         assert_eq!(deepest, Lexer::DEEP, "겹 상한이 안 섰다 — {deepest} 겹까지 팠다");
+        // **겹 상한은 깊이만 막는다 — 일의 양은 [`Lexer::WORK`] 가 막는다**(moai-qzy7). 예순넷 겹
+        // 안의 긴 글은 겹마다 다시 읽혀 길이 × 깊이로 는다: dev 빌드에서 80KB 한 줄이 20.6초,
+        // 320KB 가 82.3초였고, 훅의 제한 시간(15초)을 넘으면 훅이 죽어 규칙 넷이 통째로 열린다.
+        //
+        // **여기서도 재는 것은 시간이 아니라 예산이다** — 위의 겹 상한과 같은 까닭이다.
+        let big = "echo a; ".repeat(20_000);
+        let heavy = format!("echo {}{big}{}", "$(".repeat(Lexer::DEEP), ")".repeat(Lexer::DEEP));
+        let _ = guard_create(&all, &cfg(), &here(), &heavy);
+        let heavy_spent = spent();
+        assert!(heavy_spent <= Lexer::WORK, "예산을 넘겨 읽었다 — {heavy_spent}");
+        assert!(heavy_spent > Lexer::WORK / 2, "예산이 안 물었다 — {heavy_spent} 만 읽었다");
+        // **사람이 실제로 치는 줄은 이 근처에도 안 온다** — 예산이 낮으면 그것이 곧 우회로다.
+        let _ = guard_create(&all, &cfg(), &here(), "moai mv t-1 in_progress --from todo && bash -c \"moai add x\"");
+        let plain = spent();
+        assert!(plain < 1024, "흔한 줄이 예산을 {plain} 나 썼다");
         // **그 글은 제 토막 자리에 심는다**(리뷰 moai-p836.rv) — 뒤에 몰아 쌓던 판은 줄 끝의 판을
         // 물려받아, 앞선 `&&` 집기를 잃고(잘못 막음) 뒤따르는 `cd` 로 제 쓰기를 지웠다(샜다).
         for cmd in [
