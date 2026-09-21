@@ -6793,3 +6793,29 @@
 {"ts":"2026-09-21T09:15:46Z","id":"moai-jkpa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T09:16:25Z","id":"moai-a4u9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"kind 가 기본값일 때 --json 에서 사라진다"}
 {"ts":"2026-09-21T09:16:30Z","id":"moai-a4u9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:18:21Z","id":"moai-6mk3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 위생 — 다음 판을 내기 전에 서 있어야 할 것"}
+{"ts":"2026-09-21T09:18:21Z","id":"moai-ler5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"태그 검사가 미는 커밋이 아니라 지금 작업본의 Cargo.toml 을 본다"}
+{"ts":"2026-09-21T09:18:21Z","id":"moai-6mk3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mu8w 에서 펼쳤다 — 태그 검사가 미는 커밋이 아니라 지금 작업본의 Cargo.toml 을 본다"}
+{"ts":"2026-09-21T09:18:21Z","id":"moai-mu8w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6mk3 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-2bv4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"셸 글 시험이 벽시계에 매여 부하에서 흔들린다"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-2bv4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-jv3e 에서 펼쳤다 — a_string_handed_to_a_shell_is_read_as_commands 가 벽시계 5초로 흔들린다"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-jv3e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6mk3 의 멤버 moai-2bv4 로 펼쳤다"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-utya","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설치 시험이 릴리스를 안 내는 플랫폼에서 떨어진다"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-utya","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dq4j 에서 펼쳤다 — 설치 시험이 릴리스를 안 내는 플랫폼에서 떨어진다"}
+{"ts":"2026-09-21T09:18:31Z","id":"moai-dq4j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6mk3 의 멤버 moai-utya 로 펼쳤다"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-bn0y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"문서만 바뀐 PR 이 LTO 와 이중 컴파일을 돈다"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-bn0y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fume 에서 펼쳤다 — CI 가 안 써도 되는 빌드를 돈다 — 문서만 바뀐 PR 의 LTO 와 이중 컴파일"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-fume","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6mk3 의 멤버 moai-bn0y 로 펼쳤다"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-io79","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"베껴 적은 두 자리 — 설치 스크립트의 플랫폼 표와 담아 둔 CLI 레퍼런스"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-io79","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7mhf 에서 펼쳤다 — 베껴 적은 두 자리 — 설치 스크립트의 플랫폼 표와 담아 둔 CLI 레퍼런스"}
+{"ts":"2026-09-21T09:18:32Z","id":"moai-7mhf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6mk3 의 멤버 moai-io79 로 펼쳤다"}
+{"ts":"2026-09-21T09:18:39Z","id":"moai-8nkl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:18:45Z","id":"moai-2bv4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"idea moai-vt1v 도 같은 시험을 짚는다 — 그쪽은 부하에서 진 것을, 이쪽은 벽시계 5초에 매인 것을 적었다. 한 자리라 여기서 함께 고친다."}
+{"ts":"2026-09-21T09:18:45Z","id":"moai-vt1v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-2bv4 와 같은 시험(a_string_handed_to_a_shell_is_read_as_commands)이라 그쪽으로 합쳤다. 이쪽은 부하에서 진 것을, 그쪽은 벽시계에 매인 것을 적었는데 고칠 자리는 하나다."}
+{"ts":"2026-09-21T09:23:49Z","id":"moai-pvrx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"상세 창의 자리를 고른다 — SPC o d"}
+{"ts":"2026-09-21T09:24:00Z","id":"moai-0j7c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 알림의 막이라 병합 경로다)"}
+{"ts":"2026-09-21T09:24:08Z","id":"moai-0j7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"선언을 notice() 의 첫 줄로 올려 넷 전부의 막으로 삼았다. 안 쓰기로 한 저장소에서는 설정도 안 읽고 probe 도 안 뜬다. 선언을 걷는 것이 진짜 탈출구가 되는 자리라 moai-47bt 가 이 위에 선다."}
+{"ts":"2026-09-21T09:24:15Z","id":"moai-2g7d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"상세 창을 right·bottom·left·top 으로 세운다 — 설정에 자리 키가 는다"}
+{"ts":"2026-09-21T09:24:15Z","id":"moai-e7r3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC o d 를 눌러 자리를 돌린다 — 메뉴가 안 닫히고 ESC·SPC 로 나온다"}
+{"ts":"2026-09-21T09:24:16Z","id":"moai-l7e2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"세로로 둘 때의 몫과 좁은 창에서 접는 자리를 정한다"}
+{"ts":"2026-09-21T09:24:16Z","id":"moai-v6vo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"SPC o 가지를 moai-pvrx(상세 창의 자리, SPC o d)와 함께 연다 — 먼저 서는 쪽이 가지를 세우고 뒤가 얹는다. 메뉴 낱말과 묶음 이름을 그때 맞춘다."}
