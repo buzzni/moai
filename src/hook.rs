@@ -2963,13 +2963,32 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
         .take(3)
         .map(|i| format!("  moai mv {} in_progress --from {}   {}\n", i.id, i.status.as_str(), i.title))
         .collect();
+    // **남이 쥔 줄을 넘겨받는 길도 함께 댄다**(moai-unvx). `git pull && moai mv <id> in_progress` 로
+    // 이어받으면 그 기록은 `?`(돌았는지 모른다)라 앞 세션의 확실한 줄을 못 이긴다([`Picks::fold`]) —
+    // 앞 세션은 이미 넘긴 일에 붙들리고 이 세션은 빈손으로 여기 막힌다. 지금 낫는 길은 맨 줄로 한 번
+    // 더 집는 것뿐인데 그 안내가 어디에도 없어, 막힌 쪽이 왜 막혔는지조차 몰랐다.
+    //
+    // **여기 오는 줄은 이 세션이 못 쥔 것뿐이다** — 쥔 것이 있으면 위에서 이미 지나갔다([`held`]).
+    let over: String = report::wip(issues, cfg)
+        .into_iter()
+        .take(3)
+        .map(|i| format!("\x20 moai mv {} in_progress   {}\n", i.id, i.title))
+        .collect();
+    let over = if over.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "Some work stands started elsewhere. A pick-up written after `&&` is recorded as\n\
+         \"may not have run\", so it does not take the row over — run it on a line of its own.\n{over}"
+        )
+    };
     // **내미는 명령은 한 줄에 하나다** — 붙여 넣는 쪽이 줄째 옮겨 치기 때문이다. 두 명령을 한 줄에
     // 싣던 판은 그 줄이 갈리는 자리마다 한쪽만 옮겨져 "못 찾았다" 로 끝났다(리뷰 moai-ju21.70g).
     refuse(
         2,
         format!(
             "Changing {} while holding nothing. Which work the change came out of is not recorded.\n\
-         Pick something up and call again.\n{picks}\
+         Pick something up and call again.\n{picks}{over}\
          If it was not in the plan, create it and pick that id up.\n\
          \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
@@ -6377,6 +6396,17 @@ mod tests {
         let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
         assert!(wrote.contains("moai mv t-1 in_progress --from todo"), "{wrote}");
+        // **넘겨받는 길도 함께 댄다**(moai-unvx) — 옆이 쥔 줄은 `--from` 으로 못 집고, `&&` 뒤에
+        // 적은 집기는 `?` 로 적혀 그 줄을 못 가져온다. 안내가 없던 판은 막힌 쪽이 왜 막혔는지도 몰랐다.
+        let taken = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let wrote =
+            denied(&guard_edit(&taken, &cfg(), &away(&["t-1"]), Path::new("/repo"), "/repo/src/x.rs")).to_string();
+        assert!(wrote.contains("run it on a line of its own"), "넘겨받는 길을 안 댄다\n{wrote}");
+        assert!(wrote.contains("\x20 moai mv t-1 in_progress   "), "넘겨받을 줄을 안 댄다\n{wrote}");
+        assert!(!wrote.contains("moai mv t-1 in_progress --from"), "옆이 쥔 줄에 --from 을 댔다\n{wrote}");
+        // 아무도 안 집었으면 그 줄은 안 선다 — 없는 넘겨받기를 일러 주지 않는다.
+        let wrote = denied(&guard_edit(&idle, &cfg(), &here(), Path::new("/repo"), "/repo/src/x.rs")).to_string();
+        assert!(!wrote.contains("run it on a line of its own"), "집힌 것이 없는데 넘겨받으라고 한다\n{wrote}");
     }
 
     /// 집은 것이 있으면 그 단위 안이어야 한다. 밖이면 고칠 명령이 함께 온다.
