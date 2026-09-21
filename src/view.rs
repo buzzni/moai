@@ -2410,8 +2410,12 @@ pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::
 /// 자리를 못 푼 판이 **대기 자리에서 멈췄다**는 줄을 그 까닭 뒤에 잇는다(moai-pm2h).
 ///
 /// 그 파일은 도구가 짓고 이름이 뿌리의 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을
-/// 보고 무엇을 고치라는 것인지 모른다. **지우는 것도 길이라고 말한다** — 대신 그 안에 이미 앉은
-/// 도장을 잃는다는 것까지 한 줄에 둔다. 한쪽만 말하면 사람은 싼 길을 골랐다가 값을 뒤늦게 안다.
+/// 보고 무엇을 고치라는 것인지 모른다.
+///
+/// **시키지 않고 대가만 댄다**(리뷰 moai-kuib.g9c 10번). 한때 이 줄이 "고치거나 지운다" 고 시켰는데,
+/// 앞의 거절문은 저마다 제 길을 이미 시킨다 — `sheet.refuse_not_ours` 는 "손으로 지운다" 고 하므로
+/// 한 줄이 지우라면서 지우지 말라는 꼴이 됐다. 시키는 것은 앞줄에 맡기고, 여기는 그 길을 골랐을 때
+/// 무엇을 잃는지만 댄다.
 pub fn fallen_place(lang: Lang, said: &str) -> String {
     format!("{said} — {}", say(lang, "sheet.fallen_place"))
 }
@@ -3429,6 +3433,12 @@ mod tests {
                     "argos-0002",
                 ),
                 (sheet_refusal(lang, &at, &SheetRefusal::NotATable { found: "integer".into() }), "[read]"),
+                // **떨어진 판의 줄도 이 훑기에 든다**(리뷰 moai-kuib.g9c 10번) — 밖에 두던 동안은 번역이
+                // 채울 자리를 흘려도 잡는 자가 없었다. 앞의 거절문 위에 얹히는 줄이라 그 파일 이름도 앞에 선다.
+                (
+                    fallen_place(lang, &sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() })),
+                    say(lang, "sheet.fallen_place"),
+                ),
             ];
             for (said, names) in &said {
                 let code = lang.code();

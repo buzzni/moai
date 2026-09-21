@@ -4707,6 +4707,34 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     let out = mine(&["read", "--all", "--json"]);
     assert!(out.contains(&late), "안 읽은 줄이 안 들었다 — {out}");
     assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
+    assert!(out.contains(r#""held":[]"#), "막힌 것이 없는 판에 `held` 가 안 섰다 — {out}");
+}
+
+/// **사람이 적은 값에 막힌 id 는 이름으로 나온다**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
+///
+/// `Sheet::mark` 이 그 id 만 건너뛰게 되면서(막힌 줄 하나가 쓰기 전체를 세우지 않는다) 시킨 id 가
+/// `read` 에도 `missing` 에도 안 서고, 남는 것은 `problems` 의 산문뿐이었다 — 사람 없이 도는 고리
+/// (`examples/bash-agent`)는 그것을 "적혔다" 로 세고 지나가 그 줄이 영영 [NEW] 로 선다.
+///
+/// **종료 코드는 안 움직인다.** 막힌 줄은 사람이 적어 둔 값에서 오고, 그 한 줄로 `moai read --all` 이
+/// 비영으로 끝나면 고리는 매 판을 실패로 읽는다 — `ready --json` 의 `held` 와 같은 자다.
+#[test]
+fn read_names_the_ids_a_hand_written_value_held_back() {
+    let s = init("readheld");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let (a, b) = (field(&mine(&["add", "첫째", "--json"]), "id"), field(&mine(&["add", "둘째", "--json"]), "id"));
+    mine(&["read", &a]);
+    // 사람이 `b` 의 자리에 때가 아닌 값을 적어 두었다.
+    let [(sheet, was)]: [(PathBuf, String); 1] = read_sheets(&cfg, s.path()).try_into().expect("읽음 파일이 하나 섰다");
+    std::fs::write(&sheet, format!("{was}\"{b}\" = 3\n")).unwrap();
+
+    let out = moai_with(s.path(), &cfg, &["read", &b, "--json"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "막힌 줄 하나로 비영으로 끝났다 — {}", String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains(&format!(r#""held":["{b}"]"#)), "막힌 id 를 이름으로 안 냈다 — {said}");
+    assert!(said.contains(r#""read":[]"#) && said.contains(r#""missing":[]"#), "{said}");
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "사람이 적은 값을 덮었다");
 }
 
 /// **읽음은 본 때가 아니라 본 줄의 `updated_at` 을 적는다**(moai-lyc1, 사용자 결정 2026-09-19). 본 때를

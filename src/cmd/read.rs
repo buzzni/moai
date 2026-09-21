@@ -32,6 +32,8 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     // 같은 `place_of` 의 한 줄을 물고 온다 — 그대로 내던 판은 한 번 난 탈을 두 줄로 세워, 사람은 두 번
     // 났다고 읽고 로그를 세는 쪽은 두 건으로 센다.
     let mut said: BTreeSet<String> = BTreeSet::new();
+    // 시킨 id 가운데 **사람이 적은 값에 막혀 못 적은 것**(moai-l5ue). 글자 차례로 낸다.
+    let mut held: BTreeSet<String> = BTreeSet::new();
     // `--all` 은 **내게 온 것 가운데** 안 읽은 것이다.
     //
     // **누군지는 여기서만 묻는다**(moai-u8oh.x85). 담당을 재는 것은 `--all` 뿐이고, id 를 받은
@@ -124,6 +126,14 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         // 사람에게도 그렇다. 못 앉힌 것이 있으면 남기고 그 까닭을 여기서 댄다.
         // 막지는 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
         say_why(&wrote.problems, ctx, &mut said);
+        // **막힌 id 는 이름으로 낸다**(리뷰 moai-kuib.g9c 9번). `Sheet::mark` 이 그 id 만 건너뛰게
+        // 되면서(moai-l5ue) 시킨 id 가 `read` 에도 `missing` 에도 안 서고, 남는 것은 `problems` 의
+        // 산문뿐이었다 — 사람 없이 도는 고리(`examples/bash-agent`)는 그것을 "적혔다" 로 세고 지나가
+        // 그 줄이 영영 [NEW] 로 선다. `ready --json` 의 `held` 와 같은 꼴로 낸다.
+        held.extend(wrote.problems.iter().flat_map(|w| match w {
+            crate::read_marks::SheetTrouble::Held { ids, .. } => ids.clone(),
+            _ => Vec::new(),
+        }));
         wrote.value
     };
 
@@ -142,7 +152,14 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         // "적혔다" 로 세고 지나갔다. **늘 서는 배열**이다: 빈 것이 "탈이 없었다" 는 답이라 받는
         // 쪽이 키를 안 가른다. 종료 코드는 그대로 못 찾은 id 만 움직인다 — 막는 값이 아니다.
         let problems: Vec<&str> = said.iter().map(String::as_str).collect();
-        return super::json_line(&Marked { read: &fresh, missing: &missing, problems: &problems, at: &now });
+        let held: Vec<&str> = held.iter().map(String::as_str).collect();
+        return super::json_line(&Marked {
+            read: &fresh,
+            missing: &missing,
+            held: &held,
+            problems: &problems,
+            at: &now,
+        });
     }
     if fresh.is_empty() {
         return Ok(vec![crate::i18n::say(ctx.lang(), "read.nothing").to_string()]);
@@ -208,6 +225,13 @@ fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<Str
 struct Marked<'a> {
     read: &'a [String],
     missing: &'a [String],
+    /// 시킨 id 가운데 **사람이 적은 값에 막혀 못 적은 것**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
+    /// `read` 에도 `missing` 에도 안 서는 셋째 답이다 — `ready --json` 의 `held` 와 같은 꼴이다.
+    ///
+    /// **늘 서는 배열**이고 빈 것이 정상이다. **종료 코드는 안 움직인다** — 막힌 줄은 사람이 적어 둔
+    /// 값에서 오고, 그 한 줄로 `moai read --all` 이 비영으로 끝나면 고리는 매 판을 실패로 읽는다
+    /// ("남의 낡은 줄 하나가 모든 쓰기를 막으면", CLAUDE.md). 다시 해 볼 id 를 고리가 이 배열에서 든다.
+    held: &'a [&'a str],
     /// 읽음을 들고 적다 만난 까닭 — stderr 로 낸 그 글들이다([`say_why`]). 빈 배열이 정상이다.
     problems: &'a [&'a str],
     /// 이 명령이 돈 때다. `[read]` 에 적힌 값이 아니다 — 그것은 줄마다 본 줄의 `updated_at` 이다(moai-lyc1).

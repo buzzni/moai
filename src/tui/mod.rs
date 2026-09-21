@@ -2754,15 +2754,30 @@ impl App {
         };
         self.recount_unread_in(seat);
         let lang = self.site.lang;
-        let said = match written.as_slice() {
-            [] => say(lang, "tui.read.nothing").to_string(),
-            [one] => fill(say(lang, "tui.read.marked_one"), &[("id", one)]),
-            many => fill(say(lang, "tui.read.marked"), &[("n", &many.len().to_string())]),
+        // **막힌 id 는 "적을 것이 없다" 가 아니다**(리뷰 moai-kuib.g9c 7·8). [`crate::read_marks::Sheet::mark`]
+        // 이 그 id 만 건너뛰게 되면서(moai-l5ue) 거절이 사라졌고, 그러면 `written` 이 비어 `r` 은 **이미
+        // 읽은 줄과 같은 말**을 했다. 그 판의 답은 막힌 줄 자신이라 그것을 알림으로 세운다.
+        //
+        // 끝에 붙는 첫 까닭으로는 못 닿는다 — 같은 줄의 [`crate::read_marks::SheetTrouble::Skipped`] 가
+        // 0번 자리로 끼워 넣어져(`write_sheet`) 늘 앞에 서므로, 시킨 id 를 대는 문장은 영영 안 보였다.
+        // 그 차례는 `a_place_trouble_is_not_called_a_line_trouble` 이 읽는 길과 맞춰 못박은 것이라 여기서
+        // 안 건드리고, 고르는 쪽이 제 갈래를 집는다.
+        let held = problems.iter().find(|w| matches!(w, crate::read_marks::SheetTrouble::Held { .. }));
+        let said = match (written.as_slice(), held) {
+            ([], Some(why)) => said_read(lang, why),
+            ([], None) => say(lang, "tui.read.nothing").to_string(),
+            ([one], _) => fill(say(lang, "tui.read.marked_one"), &[("id", one)]),
+            (many, _) => fill(say(lang, "tui.read.marked"), &[("n", &many.len().to_string())]),
         };
         // **적었다는 말과 어디에 적었는지를 함께 댄다**(moai-ajh2). 까닭만 세우면 `r` 이 먹었는지를 못
         // 보고, 적었다는 말만 세우면 옛 철자 자리에 적힌 것을 어디서도 못 본다. 여기 낼 것은 스치는 알림
-        // 한 줄뿐이라([`App::take_read`] 와 같은 자리) 첫 까닭만 댄다.
-        self.notice = Some(match problems.first() {
+        // 한 줄뿐이라([`App::take_read`] 와 같은 자리) 첫 까닭만 댄다 — 위에서 막힌 줄을 이미 세웠으면
+        // 그 줄을 두 번 안 댄다.
+        let why = match (written.is_empty(), held.is_some()) {
+            (true, true) => None,
+            _ => problems.first(),
+        };
+        self.notice = Some(match why {
             Some(why) => format!("{said} — {}", said_read(lang, why)),
             None => said,
         });
@@ -5800,6 +5815,39 @@ mod tests {
         a.hit("SPC m g");
         let left: Vec<&str> = a.site.unread.iter().map(String::as_str).collect();
         assert_eq!(left, ["argos-0009", "argos-0010", "argos-0100"], "에픽을 다 못 읽었거나 밖을 읽었다");
+    }
+
+    /// **막힌 줄에서 누른 `r` 은 "적을 것이 없다" 가 아니다**(리뷰 moai-kuib.g9c 7·8번).
+    ///
+    /// [`crate::read_marks::Sheet::mark`] 이 막힌 id 만 건너뛰게 되면서(moai-l5ue) 거절이 사라졌고,
+    /// 그러면 `written` 이 비어 이 알림이 **이미 읽은 줄과 같은 말**을 했다 — [NEW] 는 그대로인데
+    /// 화면은 다 됐다고 말하는 꼴이다. 끝에 붙는 첫 까닭으로도 못 닿는다: 같은 줄의
+    /// [`crate::read_marks::SheetTrouble::Skipped`] 가 0번 자리로 끼워 넣어져 늘 앞에 선다.
+    #[test]
+    fn r_on_a_row_a_hand_written_value_holds_says_so() {
+        let s = Scratch::new("read-marks-tui-held");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let sheet = crate::read_marks::place_of(&config, &root).at;
+        std::fs::create_dir_all(sheet.parent().unwrap()).unwrap();
+        // 사람이 그 id 의 자리에 때가 아닌 값을 적어 두었다.
+        std::fs::write(&sheet, format!("path = {:?}\n\n[read]\n\"argos-0009\" = 3\n", root.display().to_string()))
+            .unwrap();
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = None;
+
+        a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
+        a.hit("r");
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("argos-0009"), "무엇이 막혔는지를 안 댔다 — {said}");
+        assert_ne!(said, "읽음으로 적을 것이 없다", "막힌 줄을 이미 읽은 줄과 같은 말로 댔다");
+        // **막혔다는 문장이어야 한다** — 같은 줄의 `Skipped`("때를 적은 낱말이어야 한다")는 이 파일에
+        // 그런 줄이 있다는 말이지, 방금 시킨 것이 안 됐다는 말이 아니다.
+        assert!(said.contains("못 적었다"), "막혔다는 문장이 아니라 딴 까닭이 섰다 — {said}");
+        assert!(std::fs::read_to_string(&sheet).unwrap().contains("\"argos-0009\" = 3"), "사람이 적은 값을 덮었다");
     }
 
     /// **`r` 은 `moai read <id>` 와 같은 자다**(moai-j038.vna) — 내게 온 줄이 아니어도, 누군지 몰라도 그

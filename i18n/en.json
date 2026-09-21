@@ -533,7 +533,7 @@
   "sheet.spool_left": "{said} — merged, but the pending place could not be cleared",
   "sheet.spool_kept": "kept the pending place — not all of it could be read; the next write merges it once the reason given with this is gone",
   "sheet.spool_held": "kept the pending place — {ids} cannot land in this project's read file: a hand-written value holds their place there; fix that line and the next write merges them",
-  "sheet.fallen_place": "that file is this run's pending place, taken because the project's place could not be resolved; this run's read marks land nowhere until it is fixed or deleted, and deleting it drops the marks already in it",
+  "sheet.fallen_place": "that file is this run's pending place, taken because the project's place could not be resolved — deleting it drops the marks already in it",
   "sheet.refuse_unparsable": "{said} — nothing is written until that is fixed",
   "sheet.refuse_not_ours": "these are not {root}'s read marks, so nothing is written — delete the file by hand",
   "sheet.refuse_not_a_table": "`{table}` is not a `[{table}]` table ({is}), so no read marks are written — fix it by hand"

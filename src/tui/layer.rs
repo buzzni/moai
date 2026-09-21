@@ -2030,6 +2030,11 @@ mod tests {
                 .cloned()
         };
         assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // **[NEW] 까지 잰다**(리뷰 moai-kuib.g9c). 표만 재던 판은 이 길이 있는 까닭(그 줄의 [NEW] 를
+        // 다시 세는 것)을 안 재, `load_read_in` 의 셈 한 줄을 지워도 푸르렀다. 세려면 그 줄이 내게
+        // 와 있어야 한다 — 프로젝트의 줄에는 담당이 없다.
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
 
         // 옛 바이너리나 사람 손이 설정의 옛 `[read]` 에 적는다 — 이 바이너리는 여기 안 적는다.
         let mut src = std::fs::read_to_string(&cfg).unwrap();
@@ -2039,6 +2044,25 @@ mod tests {
         a.config_stamp = Some(None);
         a.follow_config();
         assert_eq!(seen(&a).as_deref(), Some("2026-09-14T00:00:00Z"), "펼쳐 둔 프로젝트가 바뀐 옛 표를 안 들었다");
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
+    }
+
+    /// 펼친 프로젝트의 줄을 **내게 온 것으로** 만들고 [NEW] 를 한 번 센다 — 세는 자
+    /// ([`App::recount_unread_in`])가 담당을 보므로, 담당 없는 줄에서는 [NEW] 가 한 줄도 안 서서
+    /// 그 셈을 재는 시험이 헛돈다.
+    fn mine(a: &mut App, at: usize) {
+        let seat = crate::tui::Seat::Place(at);
+        let Some(site) = a.site_mut(seat) else { panic!("펼친 줄이 제 Site 를 든다") };
+        for i in &mut site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.recount_unread_in(seat);
+    }
+
+    /// 그 펼친 프로젝트의 [NEW] 집합.
+    fn unread(a: &App, at: usize) -> std::collections::BTreeSet<String> {
+        a.layer.as_ref().unwrap().places[at].site.as_ref().expect("펼친 줄이 제 Site 를 든다").unread.clone()
     }
 
     /// **펼쳐 둔 프로젝트의 읽음도 걸음이 잰다**(moai-c571). `Site::read_stamp` 은 프로젝트마다 서는데
@@ -2065,6 +2089,9 @@ mod tests {
                 .cloned()
         };
         assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // [NEW] 까지 잰다 — 이 길이 있는 까닭이 그 셈이다([`mine`]).
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
 
         // 옆 터미널이 그 프로젝트에 `moai read` 를 돌렸다 — 이 화면의 스냅샷은 그대로다.
         let mark: std::collections::BTreeMap<String, String> =
@@ -2078,6 +2105,7 @@ mod tests {
             Some("2026-09-14T00:00:00Z"),
             "펼친 프로젝트의 읽음을 걸음이 안 쟀다 — 시계를 기다리는 자리로 돌아갔다"
         );
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
