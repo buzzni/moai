@@ -1063,20 +1063,13 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
 /// 이름으로 심으면 안 된다고 적어 둔 바로 그 값이고(`--install` 의 도움말), 상대 자리(`.`·
 /// `bin`)는 병합에서 딴 파일로 풀린다. 껍데기가 그 자리를 쓰는 것과 **심어 둘 값으로 쓰는 것**은
 /// 다른 물음이다.
+///
+/// **돌릴 수 있는가는 [`super::runnable`] 하나가 답한다**(moai-p3kb, 리뷰). 여기 있던 셋째 벌은
+/// `skill`·`tui` 의 것과 글자째 같았는데 모으는 판에서 빠져, 이식성 고침 하나가 저 둘에만 들 뻔했다.
+/// 빈 자리를 거르는 **위의 한 줄이 이 자리만의 것**이고, 그것은 재는 자가 아니라 고르는 자에 붙는다.
 fn on_path(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join(name)).find(|p| runnable(p))
-}
-
-#[cfg(unix)]
-fn runnable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn runnable(p: &Path) -> bool {
-    p.is_file()
+    std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join(name)).find(|p| super::runnable(p))
 }
 
 /// 설정의 세 줄을 적는다 — 심은 드라이버 줄을 낸다.

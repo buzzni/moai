@@ -44,11 +44,12 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has three jobs: one runs clippy and the tests on the dev profile,
-one works out whether anything outside the docs changed, and the third builds
-the release binary and checks it against the 15 MB budget. Only the first is a
-required check, and the third shows as skipped - not failed - on a pull request
-that touched documentation alone.
+minutes. CI has four jobs: one runs clippy and the tests on the dev profile,
+one works out whether anything outside the docs changed, one builds the crate
+with the `rust-version` written in `Cargo.toml`, and the last builds the release
+binary and checks it against the 15 MB budget. Only the first is a required
+check, and the last two show as skipped - not failed - on a pull request that
+touched documentation alone.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -69,8 +70,9 @@ repository — and formats and lints it — with the version written there, and 
 runner shipped that week, and rustfmt moving a line it has never touched turned
 someone else's pull request red. Bumping the pin is its own commit: change the
 channel and carry the `cargo fmt --all` it causes in the same commit, never
-mixed with a change to the code. Note that `rust-version` in `Cargo.toml` now
-records the minimum rather than proving it — nothing builds on that version.
+mixed with a change to the code. `rust-version` in `Cargo.toml` is a separate
+claim, and the `msrv` job proves it: that job reads the line and builds the
+crate with exactly that toolchain, so bumping the line moves what CI walks.
 
 The whole repository was formatted in one commit. `git blame` can step over it
 so that it points at the commit that actually wrote each line, but git only
