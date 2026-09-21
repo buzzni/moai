@@ -421,6 +421,7 @@
   "tui.register.already": "이미 등록돼 있다",
   "tui.register.unreadable": " · ! 못 읽는다 — {why}",
   "tui.register.uninit": " · init 전 — .moai 가 아직 없다",
+  "tui.register.uninit_worktree": " · init 전 — 딸린 워크트리다. 트래커는 주 체크아웃에 산다",
   "tui.register.go_up": " · {key} 로 층에 올라가면 보인다",
   "tui.register.failed": "등록하지 못했다 — {why}",
   "tui.register.config_unread": "사용자 설정을 다시 못 읽었다",

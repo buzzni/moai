@@ -421,6 +421,7 @@
   "tui.register.already": "already registered",
   "tui.register.unreadable": " · ! cannot be read — {why}",
   "tui.register.uninit": " · before init — no .moai yet",
+  "tui.register.uninit_worktree": " · before init — a linked worktree; the tracker lives in the main checkout",
   "tui.register.go_up": " · {key} goes up to the layer and shows it",
   "tui.register.failed": "could not register — {why}",
   "tui.register.config_unread": "the user config could not be read again",
