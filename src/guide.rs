@@ -210,6 +210,11 @@ branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base bran
 someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
 the wrong HEAD leaves no reference at all once `branch -d` runs"#;
 
+/// 밖의 idea 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
+/// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
+/// 일이 밖에 선 채로 돌거나, 일꾼이 무엇을 달지 모른다. `promote` 에는 이 플래그가 없다.
+const MILESTONE_ATTACH: &str = "moai edit <epic> --milestone <milestone>";
+
 /// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
 const SUBDIR: &str = r#"cd "$(git -C <root> rev-parse --show-prefix)""#;
@@ -1226,6 +1231,17 @@ milestone — an idea from outside waits for the next round unless it should sta
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
+**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
+for a milestone and does not carry over the one the idea itself holds, so the epic a worker
+unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
+`{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
+call is yours, here, before you send: either this idea belongs in the release that is
+running and you send it with that milestone, or it does not and you do not send it this
+round. **Telling the worker not to attach a milestone is the same as handing out work
+from outside** — that is how a worker came to pick up a row outside the running release
+(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
+`<milestone>` is `none`.
+
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
 
@@ -1369,9 +1385,15 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
+`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
+when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+epic, which the tool refuses because it is not an id at all. **A wrong id it does not
+refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
+in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off the
+`moai ready` header; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -1881,7 +1903,12 @@ fn brief() -> String {
        unfolding again puts up two epics. **Write a short new title** — a line in the plan
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
-       the history leads back to it
+       the history leads back to it.
+       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
+       milestone is inherited, so the epic alone carries it to every member and to the members
+       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
+       nothing to hang
+         {MILESTONE_ATTACH}
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,
        and overwriting a row picked up beside you means two of you do the same work. A non-zero
@@ -2596,6 +2623,52 @@ mod tests {
             ("can a `Regression-of:` line be written", "되돌림을 안 센다"),
         ] {
             assert!(brief.contains(piece), "{why} — {piece}");
+        }
+    }
+
+    /// **밖의 idea 는 마일스톤을 달아야 들어온다**(moai-6qgz, 2026-09-21).
+    ///
+    /// 앞 시험이 매는 "안의 것이 먼저다" 는 감독이 **무엇을 고를지**만 정한다. 고른 것이 밖의
+    /// idea 일 때 그것을 안으로 들이는 길은 아무 데도 없었고, 그래서 감독이 브리프에 "마일스톤은
+    /// 달지 마라" 고 적어 일꾼이 도는 판 밖의 일을 집었다. 도구는 그것을 그대로 지나 보낸다.
+    ///
+    /// **두 글이 한 줄에 매인다.** 감독의 1 은 들일지를 정하고 일꾼의 1 이 실제로 단다 —
+    /// `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
+    #[test]
+    fn an_idea_from_outside_comes_in_on_a_milestone() {
+        let (supervise, brief) = (supervise(), brief());
+        let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
+
+        for (piece, why) in [
+            (MILESTONE_ATTACH, "감독이 들이는 길을 안 가리킨다"),
+            ("**An idea from outside gets in only by being brought in.**", "밖의 idea 를 들이는 걸음이 없다"),
+            (
+                "**Telling the worker not to attach a milestone is the same as handing out work
+from outside**",
+                "마일스톤을 빼라고 적는 것이 밖의 일을 맡기는 것과 같다는 말이 없다",
+            ),
+            (
+                "**Leave it unfilled** and the worker hangs the placeholder itself",
+                "안 채운 자리가 무엇이 되는지 안 적었다",
+            ),
+        ] {
+            assert!(head.contains(piece), "{why} — {piece}");
+        }
+        // **자리 이름은 목록 줄에서 찾는다** — 바로 아래 풀이 글도 `<milestone>` 를 적어, 감독 쪽
+        // 전체에서 찾으면 목록에서 빠져도 초록이다. 줄의 모양이 바뀌어도 `slot_list` 하나만 따른다.
+        let list = slot_list(head);
+        assert!(list.contains("`<milestone>`"), "3 의 채우는 자리에 마일스톤이 없다 — {list}");
+
+        // 일꾼 쪽은 **1 안에서** 잰다 — 펼치기와 같은 걸음이라야 워크트리가 서기 전에 달린다.
+        let one = brief.find("\n    1.").expect("일꾼 글에 1 이 없다");
+        // 2 는 **1 뒤에서** 찾는다 — 앞에서 찾으면 걸음 앞에 `\n    2.` 로 읽히는 줄이 하나 드는
+        // 날 슬라이스가 거꾸로 서서 시험이 패닉으로 죽는다(옆 시험들이 쓰는 걸음과 같은 꼴이다).
+        let two = one + brief[one..].find("\n    2.").expect("일꾼 글에 2 가 없다");
+        for (piece, why) in [
+            (MILESTONE_ATTACH, "일꾼이 마일스톤을 다는 줄이 1 에 없다"),
+            ("If `<milestone>` is `none`", "아무것도 안 도는 판을 안 적었다"),
+        ] {
+            assert!(brief[one..two].contains(piece), "{why} — {piece}");
         }
     }
 
