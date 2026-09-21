@@ -78,10 +78,14 @@ jobs:
         id: toolchain
         run: |
           set -euo pipefail
-          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          # 따옴표는 둘 다 받고 빈칸도 탭도 지난다. TOML 이 허락하는 꼴을 여기서
+          # 더 좁힐 까닭이 없다.
+          channel=$(sed -n "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" rust-toolchain.toml || true)
+          # **못 읽으면 막지 않는다.** 여기서 지면 판 이름을 못 읽었다는 까닭으로
+          # 멀쩡한 PR 이 붉어진다 — 이 스텝이 하는 일은 캐시를 맞히는 것뿐이고,
+          # 못 맞히면 rustup 이 그대로 받으면 된다. 못 잰 판은 도는 쪽으로 선다.
           if [ -z "$channel" ]; then
-            echo "::error::rust-toolchain.toml 에서 channel 을 못 읽었다"
-            exit 1
+            echo "::warning::rust-toolchain.toml 에서 channel 을 못 읽었다 — 툴체인을 캐시에서 안 푼다"
           fi
           printf 'channel=%s\n' "$channel" >>"$GITHUB_OUTPUT"
 
@@ -89,6 +93,7 @@ jobs:
       # 들어가, 칸마다 담기는 것이 다르다. `ci.yml` 과 열쇠를 나눠 쓰면 musl 을
       # 더한 칸이 담은 것을 거기가 덮어쓰거나 그 반대가 된다.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.toolchain.outputs.channel != ''
         with:
           path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
           key: rustup-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}
