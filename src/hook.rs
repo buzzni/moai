@@ -8387,6 +8387,55 @@ mod tests {
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
     }
 
+    /// **셸에 글을 넘기는 문마다 되풀이 읽기의 값이 같다**(moai-5bht) — 문 하나를 예순네 겹 쌓아도
+    /// 치환(`$( … )`)과 같은 자리에 선다. 새 문을 하나 열 때 그 문이 값을 곱으로 올리지 않는지를
+    /// 여기서 잰다.
+    ///
+    /// **잰 표**(dev 빌드, 예순 겹, `Lexer::WORK` 에서 치른 글자 수).
+    ///
+    /// | 문 | 바이트 | 읽은 글자 | dev |
+    /// |---|---|---|---|
+    /// | `$( … )` | 610 | 18,300 | 7ms |
+    /// | `env -S '…'` | 550 | 14,730 | 12ms |
+    /// | `sudo -s …` | 490 | 14,760 | 15ms |
+    /// | `eval '…'` | 430 | 9,450 | 6ms |
+    /// | **`bash -c "$( … )"`** | **790** | **2,097,140 (예산을 다 씀)** | **7.6초** |
+    ///
+    /// **곱으로 오르는 것은 치환과 셸을 **함께** 쌓은 한 꼴뿐이다.** 열다섯 겹 205바이트부터 2MiB
+    /// 예산을 통째로 쓰고, 그 값이 곧 상한이다 — 릴리스 바이너리로 재면 1.3~3.1초고(같은 줄이 dev
+    /// 에서 5~8초), 훅의 15초 제한 안이다. 그 한 꼴을 여기서 안 재는 것은 dev 에서 8초짜리 시험은
+    /// 지워지기 때문이고, 그 자리는 옆의 `a_string_handed_to_a_shell_is_read_as_commands` 가 아홉 겹으로
+    /// 지킨다.
+    ///
+    /// **그래서 `Lexer::DEEP` 을 낮출 까닭이 안 섰다**(moai-5bht 가 묻던 것) — `env -S`·`sudo -s` 가
+    /// 연 문은 값이 치환과 같고, 상한이 물어야 할 자리는 이미 `Lexer::WORK` 가 물고 있다.
+    #[test]
+    fn every_door_that_hands_a_string_costs_what_a_substitution_costs() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        // 예순 겹 한 줄이 치르는 글자 수 — 잰 것의 네 곱절쯤에 건다. 자릿수가 바뀌면 붉어진다.
+        const ROOM: usize = 64 << 10;
+        let doors: [(&str, &dyn Fn(&str) -> String); 6] = [
+            ("$( … )", &|s: &str| format!("echo \"$({s})\"")),
+            ("eval", &|s: &str| format!("eval '{s}'")),
+            ("env -S", &|s: &str| format!("env -S '{s}'")),
+            ("sudo -s", &|s: &str| format!("sudo -s {s}")),
+            ("su -c", &|s: &str| format!("su -c '{s}'")),
+            ("runuser -u x -c", &|s: &str| format!("runuser -u x -c '{s}'")),
+        ];
+        for (name, wrap) in doors {
+            let mut cmd = "moai add x".to_string();
+            for _ in 0..60 {
+                cmd = wrap(&cmd);
+            }
+            LEFT.with(|l| l.set(Lexer::WORK));
+            let clock = std::time::Instant::now();
+            let _ = guard_create(&all, &cfg(), &here(), &cmd);
+            let (read, took) = (spent(), clock.elapsed());
+            assert!(read < ROOM, "{name} 가 예순 겹에서 {read} 글자를 읽었다 — 값이 곱으로 올랐다");
+            assert!(took < std::time::Duration::from_secs(2), "{name} 가 예순 겹에서 {took:?} 를 썼다");
+        }
+    }
+
     /// **겹에 넘긴 글이 집기로 끝나면 `if !` 가 그것을 본다**(moai-n3wq) — `if ! bash -c '<글>';
     /// then exit 1; fi` 는 그 글이 지면 거기서 끝나니, `fi` 를 지나온 것은 집기가 이겼다는 뜻이다.
     ///
