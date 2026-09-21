@@ -2684,16 +2684,26 @@ pub fn picked_in(
     // **셈은 토막을 안 가리고 낸 뒤 여기서 고른다** — `only` 를 [`shell_scan`] 에 넘기면 그것이 고르는
     // 것은 낼 토막만이 아니라 **사슬**이다(`picked_before`). 남의 트래커를 보는 판에서는 제 토막의
     // 집기가 안 세어져 `a || moai -C /x mv B …` 의 B 가 통째로 빠졌다 — 앞이 지면 B 는 정말 돈다.
-    let counted = shell_scan(line, cfg, &|_| true).1;
+    // **토막마다의 답을 한 번에 접는다**(moai-47zz) — 토막마다 목록 전체를 다시 훑던 판은 토막
+    // 수의 제곱을 썼다. 훅은 도구 호출마다 돌고, 겹친 치환의 긴 줄에서 그 값이 곧 사람이 기다리는
+    // 시간이다.
+    //
+    // **한 토막이 두 번 세어졌으면 모르는 쪽이 이긴다** — `if ! bash -c '집기 A || 집기 B'; then
+    // exit 1; fi` 는 묶음을 지나온 것이 조건이 이겼다는 뜻일 뿐, `||` 뒤의 B 가 돌았다는 뜻은
+    // 아니다(A 가 이겼으면 B 는 안 돈다). 차례에 기대던 판은 같은 물음에 push 순서로 답했다.
+    let mut counted: Vec<Option<bool>> = Vec::new();
+    for (n, sure) in shell_scan(line, cfg, &|_| true).1 {
+        if counted.len() <= n {
+            counted.resize(n + 1, None);
+        }
+        counted[n] = Some(counted[n].unwrap_or(true) && sure);
+    }
     let mut out = Vec::new();
     for (k, seg) in line.words().enumerate() {
         if !only(k) {
             continue;
         }
-        // **한 토막이 두 번 세어졌으면 모르는 쪽이 이긴다** — `if ! bash -c '집기 A || 집기 B'; then
-        // exit 1; fi` 는 묶음을 지나온 것이 조건이 이겼다는 뜻일 뿐, `||` 뒤의 B 가 돌았다는 뜻은
-        // 아니다(A 가 이겼으면 B 는 안 돈다). 차례에 기대던 판은 같은 물음에 push 순서로 답했다.
-        let Some(sure) = counted.iter().filter(|(n, _)| *n == k).map(|(_, sure)| *sure).reduce(|a, b| a && b) else {
+        let Some(sure) = counted.get(k).copied().flatten() else {
             continue;
         };
         let Some(args) = moai_args(seg) else { continue };
