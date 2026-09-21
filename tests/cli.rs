@@ -1261,6 +1261,11 @@ fn a_worktree_split_before_moai_still_refuses_to_plant_a_tracker() {
 /// 워크트리 밑자리를 평평한 "init 전" 으로 읽고 1 로 끝나는 줄을 따라 쳤다.
 ///
 /// **지금 이 부름의 거절은 그대로 꺼진다** — 손잡이를 켠 사람은 여기 심는 것이 뜻이다.
+///
+/// **재는 자리는 여기 하나다**(리뷰). 단위 층에서 같은 것을 재려면 `set_var` 로 프로세스 환경을
+/// 만져야 하는데, 단위 시험은 한 프로세스의 스레드로 나란히 돌아 그 값을 옆 시험이 본다 —
+/// `store::tests::a_worktree_that_carries_no_tracker_is_still_a_worktree` 가 실제로 그것을
+/// 물려받아 붉어졌다. 손잡이를 켜는 것은 **딴 프로세스**로만 잰다.
 #[test]
 fn saying_where_init_goes_does_not_inherit_moai_here() {
     let s = Scratch::new("initwt-here");
