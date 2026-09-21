@@ -149,16 +149,34 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
     Ok((reg, projects))
 }
 
+/// 이 명령이 설 저장소 — `.moai/` 를 가진 디렉터리를 위로 찾는다([`crate::store::Repo::find`]).
+///
+/// **못 찾았다는 말은 이 층이 짓는다**(moai-5j49, 2026-09-21 사용자 결정). 저장 계층은 화면 말을
+/// 모른 채 둔다(2026-09-20) — 거기서 글을 지으면 `Repo::find_from` 과 `with_write` 의 서명에 화면
+/// 말이 번지고, 설정 없이 도는 머지 드라이버까지 닿는다. 그래서 찾기만 저쪽에 두고 말은 여기서 짓는다.
+///
+/// **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** — 등록한 프로젝트를 한눈에 보는 `status` 에
+/// 익은 사람은 `.moai` 밖에서 `add`·`mv` 도 될 줄 알고, 쓰는 명령은 어느 프로젝트인지 모르니
+/// 멈추는 것이 맞다(moai-6au6).
+///
+/// **[`nothing_registered`] 와 같은 키를 쓴다** — 등록한 것이 없는 판은 그 줄 밑에 한 줄을 더
+/// 얹을 뿐이라, 두 자리가 앞줄을 달리 말하면 같은 처지가 두 글로 선다.
+pub fn open_repo(lang: crate::i18n::Lang) -> R<crate::store::Repo> {
+    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(lang, "refuse.not_a_repo")))
+}
+
 /// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
 /// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
 pub fn nothing_registered(reg: &crate::user_config::Registry, lang: crate::i18n::Lang) -> Fail {
-    // 앞줄(`저장소가 아니다`)은 아직 `store` 의 것이라 한국어다 — 저장 계층의 글은 그 층과
-    // 함께 옮긴다(moai-5j49). 뒷줄은 이 층의 것이라 말묶음에서 온다. **그때까지 이 한 덩이는
-    // 두 말로 선다** — 영어로 고른 사람이 첫 줄을 한국어로 받는다. 그 줄이 `Repo::discover` 의
-    // 것이라 여기서만 못 고친다(리뷰).
-    let mut msg = format!("{}\n{}", crate::store::NOT_A_REPO, crate::i18n::say(lang, "opening.nothing_registered"));
+    // **한 덩이가 한 말로 선다**(moai-5j49) — 앞줄이 `store` 의 것이라 한국어로 서던 자리다.
+    // 이제 둘 다 말묶음에서 오고, 앞줄은 [`open_repo`] 가 홀로 쓸 때와 **같은 키**다.
+    let mut msg = format!(
+        "{}\n{}",
+        crate::i18n::say(lang, "refuse.not_a_repo"),
+        crate::i18n::say(lang, "opening.nothing_registered")
+    );
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
     // **읽는 문은 [`crate::view::settings_problems`] 하나다**(리뷰) — 화면 말의 탈은 `problems` 가

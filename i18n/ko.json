@@ -519,5 +519,6 @@
   "refuse.init_prefix_too_long": "접두어는 {max}자까지다 — `{p}` 는 {n}자다. id 를 칠 때마다 붙는다",
   "refuse.init_agents_unreadable": "못 읽는 AGENTS.md 는 덮어쓰지 않는다 — 읽히게 고치거나 `--no-agents` 로 부른다",
   "refuse.init_prefix_fixed_why": "이미 발급된 id 가 전부 그것을 달고 있다",
-  "refuse.init_prefix_short": "짧은 후보: `{short}`"
+  "refuse.init_prefix_short": "짧은 후보: `{short}`",
+  "refuse.not_a_repo": "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다"
 }

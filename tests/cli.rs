@@ -750,6 +750,38 @@ fn the_init_screen_stands_in_one_language() {
     }
 }
 
+/// **`.moai` 밖 첫 화면이 한 말로 선다**(moai-5j49). 등록한 것 없이 아무 명령이나 치면 서는
+/// 줄이라 받은 사람이 가장 먼저 읽는다 — 그런데 읽을 수 있어야 할 쪽(`moai init` 을 치라는
+/// 안내)이 저장 계층에 박혀 있어 영어로 고른 사람에게 한국어로 섰다.
+///
+/// **두 자리가 같은 키를 쓴다.** 등록한 것도 없는 판(`nothing_registered`)은 그 줄 밑에 한 줄을
+/// 더 얹을 뿐이라, 앞줄을 달리 말하면 한 덩이가 두 글로 선다 — 그 판을 줄 수로 함께 잰다.
+#[test]
+fn the_first_screen_outside_a_repo_stands_in_one_language() {
+    let s = Scratch::new("norepo-lang");
+    let out = dir_in(&s, "out");
+    let said = |args: &[&str], lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(&out).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!o.status.success(), "{args:?} 가 `.moai` 밖에서 그냥 섰다");
+        String::from_utf8_lossy(&o.stderr).into_owned()
+    };
+    // 쓰는 명령은 어느 프로젝트인지 몰라 멈춘다 — `cmd::open_repo` 가 홀로 쓰는 자리.
+    for args in [vec!["add", "a title"], vec!["mv", "argos-0001", "done"], vec!["show", "argos-0001"]] {
+        let en = said(&args, None);
+        assert!(en.contains("Not a moai repository"), "{args:?}\n{en}");
+        assert!(!hangul(&en), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{en}");
+        assert!(hangul(&said(&args, Some("ko"))), "한국어를 골랐는데 영어만 섰다 — {args:?}");
+    }
+    // 등록한 것도 없는 판 — 같은 줄 밑에 한 줄이 더 선다.
+    let en = said(&["ready"], None);
+    assert!(en.contains("Not a moai repository"), "{en}");
+    assert!(!hangul(&en), "한 덩이가 두 말로 선다\n{en}");
+    assert_eq!(en.lines().count(), 2, "등록 없음 줄이 빠졌거나 늘었다\n{en}");
+}
+
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
 /// 세션의 에이전트가 없는 명령을 쓰고 있는 명령을 모른다.
 #[test]

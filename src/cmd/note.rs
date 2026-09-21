@@ -10,11 +10,10 @@
 use super::{Ctx, Fail, R};
 use crate::cli::NoteArgs;
 use crate::model::{self, JournalEntry};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx.lang())?;
     // **읽는 것을 락보다 먼저 한다.** `-b -` 는 stdin 을 기다린다. 락을 쥔
     // 뒤에 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다 — 저장소를
     // 찾는 일(`discover`)은 락을 안 잡으므로 그 앞뒤는 상관없다.

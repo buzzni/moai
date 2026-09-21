@@ -10,7 +10,6 @@
 use super::{Ctx, Fail, R};
 use crate::cli::DeferArgs;
 use crate::model::{self, Issue, JournalEntry};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 #[derive(Default)]
@@ -27,7 +26,7 @@ struct Moved {
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx.lang())?;
     let back = args.undo;
     // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
     // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.

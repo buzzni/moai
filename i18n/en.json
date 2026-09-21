@@ -519,5 +519,6 @@
   "refuse.init_prefix_too_long": "A prefix is at most {max} characters — `{p}` is {n}. It rides along every id you type",
   "refuse.init_agents_unreadable": "an AGENTS.md that cannot be read is never overwritten — make it readable, or call with `--no-agents`",
   "refuse.init_prefix_fixed_why": "every id issued so far carries it",
-  "refuse.init_prefix_short": "a shorter candidate: `{short}`"
+  "refuse.init_prefix_short": "a shorter candidate: `{short}`",
+  "refuse.not_a_repo": "Not a moai repository (no `.moai/` found). Start one with `moai init`, or call a repository elsewhere with `moai -C <dir> <command>`"
 }

@@ -7,7 +7,6 @@
 use super::{Ctx, Fail, R};
 use crate::cli::EditArgs;
 use crate::model::{self, Issue};
-use crate::store::Repo;
 use crate::view;
 
 /// 락 안에서 챙겨 나오는 것. **이름을 붙여 둔다** — 같은 모양의 지도 둘을 튜플로
@@ -124,7 +123,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     if let Some(t) = &args.title {
         super::refuse_if_flag_like(t.trim())?;
     }
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx.lang())?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
