@@ -243,6 +243,21 @@ fn calls_review(line: &Line<'_>) -> bool {
     })
 }
 
+/// 이 토막이 **셸에 넘기는 글** — [`handed_text`] 가 읽은 그것이되, **렉서가 이미 읽은 글은
+/// 빼고** 낸다(moai-6qkc).
+///
+/// `eval "$( … )"` 가 돌리는 것은 그 치환의 **값**이지 그 글이 아니다. 그 글은 렉서가 낱말의
+/// 치환으로 읽어 제 토막을 이미 냈는데([`Lexer::end_by`]) 여기서 또 넘기던 판은, 같은 낱말을 두
+/// 길이 각각 토막으로 만들어 집기 한 줄을 세션 장부에 **두 번** 적었다.
+///
+/// **먹은 수(`eaten`)와 견준다**([`Seg::eaten`]) — 덩이가 먹은 수보다 많으면 그중에 렉서가 안 읽은
+/// 것이 있다는 뜻이라 그대로 넘긴다. 따옴표 하나에 답이 뒤집히는 자리라서다: `eval '$( … )'` 의
+/// 치환은 치환으로 안 돌고 `eval` 이 그 **글자**를 읽어 그때 도는데, 세지 않고 빼던 판은 그 줄의
+/// 집기와 쓰기를 통째로 잃었다(빼는 쪽이 곧 구멍인 자리다).
+fn shell_text(words: &[String], eaten: usize) -> Option<Handed> {
+    handed_text(words).filter(|h| !subst_groups(&h.text).is_some_and(|n| n <= eaten))
+}
+
 /// 이 토막이 **셸에 넘기는 글** — `bash -c '…'`·`sh -c`·`eval …` 이다(moai-455j). 그 글은 낱말이
 /// 아니라 명령줄이라, 렉서가 다시 읽어야 규칙이 본다([`Lexer::relex`]).
 ///
@@ -260,7 +275,7 @@ fn calls_review(line: &Line<'_>) -> bool {
 /// 의 글로 `errexit` 를 집고, `bash -oe pipefail -c '쓰기'` 는 `pipefail` 에서 멈춰 아예 None 을 냈다 —
 /// 둘 다 그 안의 쓰기가 규칙에 안 보여 빈손의 쓰기가 샜다. 셋 다 실제로 도는 줄이다(`bash -co errexit
 /// 'echo hi'` 가 `hi` 를 찍는다).
-fn shell_text(words: &[String]) -> Option<Handed> {
+fn handed_text(words: &[String]) -> Option<Handed> {
     // **한 번 훑어 명령 자리와 그 머리를 읽은 답을 함께 받는다**(moai-906o) — `wrapped` 를 여기서
     // 다시 부르던 판은 `command_of` 가 어느 낱말에서 멈췄나를 안 적힌 약속으로 이었다.
     let Cmd { words: cmd, wrap } = command_at(words);
@@ -483,6 +498,48 @@ struct Handed {
     strict: bool,
 }
 
+/// 글이 **온통 치환뿐인가** — 그렇다면 몇 덩이인가(moai-6qkc). `$( … )`·`` ` … ` `` 와 빈칸 말고
+/// 다른 글자가 하나라도 있으면 `None` 이다.
+///
+/// [`shell_text`] 가 이것으로 **이미 읽은 글을 다시 안 읽는다**.
+///
+/// **닫는 자리를 못 찾으면 `None` 이다** — 세는 쪽이 틀리면 그 글을 아무도 안 읽으니, 모르는 쪽은
+/// 읽는 쪽으로 둔다. `$(( … ))` 는 셈이지 치환이 아니라 여기 안 든다 — 명령을 안 돌리니 렉서도
+/// 안 읽고, 두 번 셀 일이 없다.
+fn subst_groups(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let (mut i, mut had) = (0, 0);
+    while i < b.len() {
+        if b[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        let end = match b[i] {
+            b'`' => text[i + 1..].find('`').map(|k| i + k + 2),
+            b'$' if b.get(i + 1) == Some(&b'(') && b.get(i + 2) != Some(&b'(') => {
+                let (mut depth, mut k) = (0usize, i + 1);
+                loop {
+                    match b.get(k) {
+                        Some(b'(') => depth += 1,
+                        Some(b')') => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break Some(k + 1);
+                            }
+                        }
+                        Some(_) => {}
+                        None => break None,
+                    }
+                    k += 1;
+                }
+            }
+            _ => None,
+        };
+        (i, had) = (end?, had + 1);
+    }
+    (had > 0).then_some(had)
+}
+
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
 #[derive(Debug, Default)]
 struct Seg {
@@ -538,6 +595,12 @@ struct Seg {
     fed: Vec<String>,
     /// 이 토막이 연 heredoc 의 번호([`Lexer::docs`]) — 본문은 토막을 닫은 뒤에 읽혀, `run` 이 끝에서 `fed` 로 옮긴다.
     docs: Vec<usize>,
+    /// 렉서가 이 토막의 낱말에서 **읽어 낸 치환의 수**(moai-6qkc) — 제 토막을 낸 것만 센다.
+    ///
+    /// [`shell_text`] 가 이것으로 같은 글을 두 번 안 읽는다. 작은따옴표에 싸여 치환으로 안 돈 글
+    /// (`eval '$( … )'`)은 여기 안 세어져 그대로 넘어가고, 겹 상한이나 예산에 걸려 **안 읽힌**
+    /// 치환도 안 센다 — 안 읽은 것을 읽었다고 세면 그 글을 아무도 안 본다.
+    eaten: usize,
 }
 
 /// 다시 읽은 글 한 겹([`Seg::nested`]) — **새 셸에서 도는 글**이고, 그 글의 맨 윗자리 묶음 깊이
@@ -1150,7 +1213,7 @@ impl<'a> Lexer<'a> {
             // 글마다 **무엇인가**([`Plant`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
             let mut texts: Vec<(&str, Plant)> =
                 docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
-            let own = shell_text(&seg.words);
+            let own = shell_text(&seg.words, seg.eaten);
             texts.extend(
                 own.iter()
                     .map(|h| (h.text.as_str(), if h.fork { Plant::Fork { strict: h.strict } } else { Plant::Eval })),
@@ -1816,6 +1879,9 @@ impl<'a> Lexer<'a> {
         // **다시 읽기의 겹은 치환에도 든다**([`Lexer::DEEP`]) — `Lexer::new` 로 0 부터 다시 세던 판은
         // `$(bash -c "$( … )")` 가 겹마다 셈을 되돌려, 상한이 아무것도 막지 못했다(리뷰 moai-p836.rv).
         let deep = self.deep + 1;
+        // **읽어 낸 치환만 센다**([`Seg::eaten`], moai-6qkc) — 겹 상한과 예산에 걸려 넘어간 것은
+        // 아무도 안 읽었으니, 여기 세면 그 글을 [`shell_text`] 까지 잃는다.
+        let mut eaten = 0;
         for text in inner {
             // 이름표는 렉서가 하나로 센다([`Layer::Subst::nth`]).
             let nth = self.serial;
@@ -1827,6 +1893,7 @@ impl<'a> Lexer<'a> {
             if !afford(text.len()) {
                 continue;
             }
+            eaten += 1;
             // 치환마다 바깥 자리에서 새 하위 셸을 연다 — 앞 치환의 셸과 깊이는 같아도 딴 셸이다.
             self.low = self.low.min(group);
             self.floor = self.floor.min(level);
@@ -1864,6 +1931,7 @@ impl<'a> Lexer<'a> {
             return;
         }
         let mut seg = std::mem::take(&mut self.seg);
+        seg.eaten = eaten;
         seg.depth = group;
         seg.level = level;
         seg.join = self.join;
@@ -4350,7 +4418,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // moai-n3wq 가 적은 `came`·`level` 문턱이다), 거짓 전제를 코드에 두면 그 문턱이
                 // 열리는 날 이쪽이 함께 틀린다.
                 let &p = picked.iter().rev().find(|p| p.at >= from)?;
-                shell_text(&seg.words).map(|_| Pick { sure: p.sure && certain, ..p })
+                shell_text(&seg.words, seg.eaten).map(|_| Pick { sure: p.sure && certain, ..p })
             });
             if let Some(c) = cond {
                 let b = Bailout {
@@ -5718,6 +5786,44 @@ mod tests {
         assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1", "t-3"]);
         assert_eq!(picked_ids(cmd, &cfg(), &|k| k == 0, &stands), ["t-1"]);
         assert!(picked_ids("moai mv t-1 in_progress --help", &cfg(), &|_| true, &stands).is_empty());
+    }
+
+    /// **온통 치환인 글은 셸에 넘긴 글이 아니다**(moai-6qkc) — `eval "$( … )"` 가 돌리는 것은 그
+    /// 치환의 **값**이지 그 글이 아니다. 치환은 제 토막으로 이미 한 번 읽혔는데 그 낱말을 `eval`·
+    /// `-c` 의 글로 또 읽던 판은, 집기 한 줄을 세션 장부에 두 번 적었다.
+    ///
+    /// **맨 명령이 견줄 자리다** — 재는 자가 한 자리에 서야 한다.
+    #[test]
+    fn a_word_that_is_only_substitutions_is_not_the_text_handed_to_a_shell() {
+        let stands = |_: usize, _: &str| None;
+        let mine = |cmd: &str| picked_ids(cmd, &cfg(), &|_| true, &stands);
+        let pick = "moai mv t-1 in_progress --from todo";
+        assert_eq!(mine(pick), ["t-1"], "견줄 자리");
+        for cmd in [
+            format!("eval \"$({pick})\""),
+            format!("bash -c \"$({pick})\""),
+            format!("sh -c \"$({pick})\""),
+            format!("eval \"$(echo hi) $({pick})\""),
+            format!("eval \"`{pick}`\""),
+        ] {
+            assert_eq!(mine(&cmd), ["t-1"], "같은 집기를 두 번 셌다 — {cmd}");
+        }
+        // **따옴표 하나에 답이 뒤집힌다** — 작은따옴표 안의 `$( … )` 는 치환으로 안 돌고, `eval` 이
+        // 그 **글자**를 읽어 그때 돈다. 읽는 자가 렉서에서 여기 하나뿐이라 빼면 통째로 안 보인다.
+        assert_eq!(mine(&format!("eval '$({pick})'")), ["t-1"], "작은따옴표 안의 치환을 잃었다");
+        // **판정은 그대로다** — 두 번 세던 것을 한 번으로 줄일 뿐, 보던 것을 잃지 않는다.
+        // 치환 안의 쓰기는 치환이 정말 돌아서 나고, 작은따옴표 안의 것은 `eval` 이 돌려서 난다.
+        let root = Path::new("/repo");
+        let write = "sed -i s/a/b/ src/x.rs";
+        for cmd in [
+            format!("eval \"$({write})\""),
+            format!("eval '$({write})'"),
+            format!("bash -c \"$({write})\""),
+            format!("eval \"$(echo hi) $({write})\""),
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, &cmd);
+            assert!(matches!(got, Decision::Deny(_)), "치환 안의 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
     }
 
     /// **기록하는 집기는 쓰기 규칙이 집기로 센 것과 같다**(moai-m5mg, 사용자 결정) — 이음사를 안 보던
