@@ -521,6 +521,7 @@
   "init.check_driver": "머지 드라이버: {state} — 여기서는 `moai init` 이 심는다. 클론이면 `moai merge-driver --install`",
   "init.check_worktree": "여기는 딸린 워크트리다 — `moai init` 은 여기 안 선다. 주 체크아웃에서 친다: `{go}`",
   "init.check_worktree_here": "이 셸은 MOAI_HERE=1 이라 `moai init` 이 여기 심는다: `{go}`",
+  "init.check_worktree_shadow": "이 셸은 MOAI_HERE=1 이라 {at} 의 트래커를 읽는다 — 여기 심으면 그것을 가린다",
   "init.already": "이미 심겨 있다. 접두어는 `{prefix}` 다 — 딸린 파일만 다시 맞춘다",
   "init.made": ".moai/ 를 만들었다. 접두어는 `{prefix}` 다",
   "init.columns": "  칸: {columns}",

@@ -1364,6 +1364,22 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// **이 부름이 여기서 실제로 읽는 트래커의 뿌리** — 없으면 `None`.
+///
+/// [`init_belongs_at`] 과 **묻는 것이 다르다.** 그쪽은 "나중의 다른 부름이 어디서 `init` 을 쳐야
+/// 하나" 라 손잡이를 안 보고(moai-ko4y), 이쪽은 "지금 이 셸이 무엇을 읽고 있나" 라 손잡이를 본다.
+/// 가르는 자는 [`Repo::redirect`] 하나고, 찾는 걸음은 [`Repo::find_from`] 과 같은 자([`look`])다 —
+/// 갈라 적으면 한쪽만 옮겨 가는 날 이 답이 읽는 파일과 갈린다.
+///
+/// 쓰는 자리는 `moai init --check` 의 끝줄이다(moai-ha0f, 리뷰 moai-uocc.45o 의 2번) — 손잡이를 켠
+/// 셸에 "여기 심는다" 를 대기 전에, **그 심는 것이 이 셸이 읽던 트래커를 가리는지**를 이 자에게
+/// 묻는다. 딸린 워크트리의 밑자리(`<wt>/src/deep`)가 그 자리다: 손잡이를 켠 셸은 `<wt>/.moai` 를
+/// 읽는데, 그 줄을 따라 치면 `src/deep` 에 아무도 안 읽는 `.moai` 가 서고 원래 줄들은 사라진 것처럼
+/// 보인다.
+pub(crate) fn tracker_in_use(dir: &Path) -> Option<PathBuf> {
+    look(dir).map(|found| Repo::opened_root(&found))
+}
+
 /// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**
 pub(crate) enum Elsewhere {
     /// 이 워크트리를 **다스리는 주 체크아웃의 트래커 자리**. 여기 심은 트래커는 아무도 안 읽어
