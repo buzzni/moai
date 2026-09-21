@@ -161,8 +161,14 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 ///
 /// **[`nothing_registered`] 와 같은 키를 쓴다** — 등록한 것이 없는 판은 그 줄 밑에 한 줄을 더
 /// 얹을 뿐이라, 두 자리가 앞줄을 달리 말하면 같은 처지가 두 글로 선다.
-pub fn open_repo(lang: crate::i18n::Lang) -> R<crate::store::Repo> {
-    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(lang, "refuse.not_a_repo")))
+///
+/// **말은 [`Ctx`] 째로 받아 닫힘 안에서 푼다**(리뷰) — `lang` 을 인자로 받으면 러스트가 부름
+/// **앞에서** 그것을 셈해, 찾기가 이기는 판(= 거의 모든 판)에도 [`Ctx::lang`] 이 사용자 설정을
+/// 열어 파싱한다. 그 자리가 [`Ctx::lang`] 의 "늦게 읽는다" 와 `mv`·`defer`·`edit` 이 저마다
+/// 적어 둔 "말은 거절할 때만 푼다" 가 막던 바로 그것이다 — 이 문 하나가 열한 명령을 한꺼번에
+/// 그쪽으로 끌고 간다. 닫힘 안이면 `.moai` 를 못 찾은 판에서만 푼다.
+pub fn open_repo(ctx: &Ctx) -> R<crate::store::Repo> {
+    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
 }
 
 /// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
@@ -240,7 +246,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(&ctx, scope.as_str(), dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
         Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
-        // 저장소가 아니라 사람의 설정을 고친다 — `Repo::discover` 를 안 지나므로
+        // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),

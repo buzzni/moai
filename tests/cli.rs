@@ -688,7 +688,16 @@ fn init_creates_exactly_three_files() {
 /// 아니라 저장소의 내용이고 영어 하나로 선다 — 그쪽은 `init_creates_exactly_three_files` 가
 /// 잰다. 여기서 재는 것은 **심으면서 사람에게 대는 말**이다.
 ///
-/// 한국어로도 함께 돌린다: 영어만 재면 `ko` 표가 빈 키도 파랗게 지나간다.
+/// **아래 목록이 이 자의 전부다**(리뷰) — `init` 이 낼 수 있는 모든 화면이 아니라 여기 적은
+/// 열한 판이다. 빠진 것은 접두어 모양 검사(`config::check_prefix` — `moai init My_Company`)와
+/// 깨진 `config.toml` 의 파싱 탈이고, 그 열넷은 idea `moai-gbk3` 이 든다. 그쪽을 옮기는 날
+/// 이 목록에 그 판을 더한다.
+///
+/// 한국어로도 함께 돌린다: 영어만 재면 `ko` 표가 빈 키도 파랗게 지나간다. **다만 이 자는
+/// 화면 한 덩이에 한글이 한 자라도 있으면 지나간다** — 새 키 하나가 `ko` 표에서 빠져도 같은
+/// 화면의 다른 줄이 한국어면 안 붉어진다(리뷰가 실제로 다섯을 지워 재 봤다). 키 단위로 재려면
+/// 말묶음 쪽에 자를 세워야 하고, 그것은 `the_mv_screen_stands_in_one_language` 부터 넷이
+/// 함께 받을 일이다.
 #[test]
 fn the_init_screen_stands_in_one_language() {
     let screens = |name: &str, lang: Option<&str>| {
@@ -750,12 +759,16 @@ fn the_init_screen_stands_in_one_language() {
     }
 }
 
-/// **`.moai` 밖 첫 화면이 한 말로 선다**(moai-5j49). 등록한 것 없이 아무 명령이나 치면 서는
-/// 줄이라 받은 사람이 가장 먼저 읽는다 — 그런데 읽을 수 있어야 할 쪽(`moai init` 을 치라는
-/// 안내)이 저장 계층에 박혀 있어 영어로 고른 사람에게 한국어로 섰다.
+/// **`.moai` 밖에서 쓰는 명령의 거절이 한 말로 선다**(moai-5j49). 등록한 것 없이 아무 명령이나
+/// 치면 서는 줄이라 받은 사람이 가장 먼저 읽는다 — 그런데 읽을 수 있어야 할 쪽(`moai init` 을
+/// 치라는 안내)이 저장 계층에 박혀 있어 영어로 고른 사람에게 한국어로 섰다.
 ///
 /// **두 자리가 같은 키를 쓴다.** 등록한 것도 없는 판(`nothing_registered`)은 그 줄 밑에 한 줄을
 /// 더 얹을 뿐이라, 앞줄을 달리 말하면 한 덩이가 두 글로 선다 — 그 판을 줄 수로 함께 잰다.
+///
+/// **맨 `moai` 는 여기서 안 잰다**(리뷰). 인자 없이 부른 판은 `cmd::opening` 이 clap 의 도움말
+/// 뒤에 제 두 줄을 붙이는 딴 길이라 `open_repo` 를 안 지나고, 그 두 줄은 아직 박힌 한국어다 —
+/// idea `moai-a7qo` 가 `mod` 열둘로 세어 든다. 그쪽을 옮기는 날 이 자에 그 판을 더한다.
 #[test]
 fn the_first_screen_outside_a_repo_stands_in_one_language() {
     let s = Scratch::new("norepo-lang");

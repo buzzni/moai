@@ -9,7 +9,7 @@ use crate::model::{self, Issue, JournalEntry};
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
-    let repo = super::open_repo(ctx.lang())?;
+    let repo = super::open_repo(ctx)?;
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 

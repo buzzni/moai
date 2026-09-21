@@ -2982,7 +2982,11 @@ impl Warning {
 
     /// 힌트 한 줄. **`-C` 를 붙이는 규칙은 한 자리다** — 알림마다 제 손으로 지으면 규칙이 바뀔 때
     /// 한쪽만 안 고쳐진다(리뷰 moai-h6aq.cx8).
-    fn cli_hint(root: Option<&str>, tail: &str) -> String {
+    ///
+    /// **알림 밖에서도 이 문으로 든다**(리뷰) — `cmd::init` 의 워크트리 거절과 `--check` 가 같은
+    /// `moai -C <뿌리> init` 을 손으로 짓고 있었다. 뿌리는 이미 감싼 글자로 받는다
+    /// (`init::away_root`·`text::shell_word`).
+    pub(crate) fn cli_hint(root: Option<&str>, tail: &str) -> String {
         match root {
             None => format!("moai {tail}"),
             Some(r) => format!("moai -C {r} {tail}"),

@@ -377,7 +377,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
     // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
     if let Some(main) = &tracker_at {
-        let go = format!("moai -C {} init", crate::text::shell_word(&main.display().to_string()));
+        // **`-C` 를 붙이는 규칙은 한 자리다**(`report::Warning::cli_hint`, 리뷰 moai-h6aq.cx8) —
+        // 알림들과 아래 거절문이 같은 글자를 내야 한다.
+        let go = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
         out.push(fill(say(lang, "init.check_worktree"), &[("go", &go)]));
     }
     Ok(out)
@@ -672,9 +674,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     if let Some(Elsewhere::Worktree(main)) = &elsewhere {
         let there = main.clone();
         let lang = ctx.lang();
-        // **줄바꿈과 들여쓰기는 이 자리가 쥔다** — 말묶음의 값은 한 줄이라는 계약이 있다
-        // (`i18n::tests::every_translation_keeps_the_places_english_marks`). 옮기는 사람이 빈칸을
-        // 세게 두면 한 줄만 어긋나도 화면이 무너진다.
+        // **여러 줄짜리 거절문의 줄바꿈과 이음 들여쓰기는 이 자리가 쥔다** — 말묶음의 값은 한 줄이라는
+        // 계약이 있어(`i18n::tests::every_translation_keeps_the_places_english_marks` 가 제어 글자를
+        // 막는다) `\n` 을 거기 담을 길이 아예 없고, 이음 여섯 칸은 `moai: ` 머리에 맞춘 값이라 옮기는
+        // 사람이 셀 것이 아니다. **보고 줄의 두·네 칸은 반대로 말묶음이 쥔다**(`init.columns` 처럼) —
+        // 그쪽은 stderr 머리와 무관한 이 화면만의 층이고, 저장소의 다른 `warn.*`·`tui.*` 키 서른한 개가
+        // 이미 그 꼴이다. 두 규칙을 섞어 읽지 않는다.
         let why = format!("{}\n      {}", say(lang, "refuse.init_worktree"), there.join(".moai").display());
         // **친 대로 도로 낸다**(리뷰). 접두어를 빠뜨린 줄을 그대로 베끼면 디렉터리 이름에서 만든
         // 접두어가 서는데, 그것은 아래 갈래가 말하듯 **나중에 못 바꾼다** — 따라 친 한 줄이 그 저장소의
@@ -695,12 +700,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // 그것으로 세운 트래커는 그 뒤의 맨 `moai` 가 도로 루트의 것을 읽어 아무도 안 읽는다.
         // 대지 않으면 이 줄이 거절문이 막으려던 바로 그 자리로 사람을 데려간다.
         // **경로는 감싸서 낸다**(`crate::text::shell_word`, moai-0cl3) — 붙여 넣으면 도는
-        // 글자여야 한다. 한눈 보기가 같은 `moai -C … init` 을 내는 자리도 같은 자다
-        // (`view::unopened`·`cmd::project`). 빈칸 하나가 `-C` 를 딴 자리로 보낸다.
-        let there_go = format!("moai -C {} init", crate::text::shell_word(&there.display().to_string()));
+        // 글자여야 한다. 빈칸 하나가 `-C` 를 딴 자리로 보낸다. **`-C` 를 붙이는 규칙 자체는
+        // `report::Warning::cli_hint` 하나다**(리뷰 moai-h6aq.cx8) — 알림과 `--check` 와 이 줄이
+        // 같은 글자를 내야 한다. 한눈 보기(`view::unopened`·`cmd::project`)는 아직 제 손으로 짓는다.
+        let there_go =
+            crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&there.display().to_string())), "init");
         let here_go = format!("MOAI_HERE=1 moai{at} init{same}");
-        // **들여쓰기는 이 자리가 쥔다**(moai-9vwy) — 옮기는 사람이 빈칸을 세게 두면 한 줄만
-        // 어긋나도 화면이 무너진다. 말묶음에는 문장만 둔다.
         return Err(Fail::coded(
             format!(
                 "{why}\n      {}\n      {}\n        {}",
@@ -896,8 +901,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         return super::json_line(&v);
     }
 
-    // **말은 한 번만 푼다** — 아래 줄마다 `ctx.lang()` 을 부르면 그 `OnceLock` 을 판마다 다시
-    // 두드린다. 쓰기 닫힘 안이 아니라 여기서 푸는 것이 리뷰가 잡은 자리와 같은 까닭이다.
+    // **`--json` 을 지난 뒤에 푼다**(리뷰) — 값나가는 것은 되풀이가 아니라 **첫 부름**이다.
+    // 두 번째부터의 `ctx.lang()` 은 이미 채워진 `OnceLock` 한 번 읽기지만, 첫 부름은 사용자
+    // 설정을 열어 파싱한다. 그러니 기계 출력으로 빠지는 판(`super::json_line` 이 위에서 돌아간다)
+    // 은 그 파일을 아예 안 연다. [`check`] 도 같은 자리에서 푼다. 위쪽 거절 갈래들이 `ctx.lang()`
+    // 을 제자리에서 부르는 것도 같은 셈이다 — 거기까지 가면 어차피 사람에게 글을 내야 한다.
     let lang = ctx.lang();
     let mut out = if again {
         vec![fill(say(lang, "init.already"), &[("prefix", &prefix)])]

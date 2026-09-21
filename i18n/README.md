@@ -76,10 +76,14 @@
 `show -s`·탐색기 거름망이 나눠 쓴다, moai-fdk7), 사용자 설정을 **고치다** 멈춘 까닭(moai-wflg),
 그리고 `defer`·`edit`·`note`·`read`·`project add|rm|color|ls` 의 몸통과 `idea promote` 의 거절
 셋(moai-95g1)이 말묶음에서 온다.
-**남은 자리 셋은 트래커가 든다** — 저장 계층의 글 여섯(moai-5j49), 검증 글 열넷(idea moai-gbk3),
-읽음 표의 글 열(moai-rtji). 그 셋이 남은 동안은 한 명령이 두 말로 서는 자리가 있다: `.moai`
-밖에서 등록한 것도 없을 때의 두 줄(`store::NOT_A_REPO` + `opening.nothing_registered`)과,
-못 읽는 프로젝트 한 줄(영어 테두리 안에 `store` 의 한국어 까닭)이 그것이다.
+**`.moai` 를 못 찾았다는 첫 줄은 말묶음에 왔다**(moai-5j49) — `refuse.not_a_repo` 하나를
+`cmd::open_repo` 와 `nothing_registered` 가 함께 쓴다. 등록한 것도 없을 때의 두 줄이 한 말로
+서는 것을 `the_first_screen_outside_a_repo_stands_in_one_language` 가 잰다.
+
+**남은 자리 셋은 트래커가 든다** — 저장 계층에 남은 글 다섯(idea moai-uqxn, 넷이 쓰기 경로
+안이다), 검증 글 열넷(idea moai-gbk3), 읽음 표의 글 열(moai-rtji). 그 셋이 남은 동안은 한
+명령이 두 말로 서는 자리가 있다: 못 읽는 프로젝트 한 줄(영어 테두리 안에 `store` 의 한국어
+까닭), 그리고 `config.toml` 이 깨진 저장소에서 `open_repo` 를 지나 나오는 검증 한 줄이다.
 
 **같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기
 (`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어고, `ready`

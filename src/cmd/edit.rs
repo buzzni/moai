@@ -123,7 +123,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     if let Some(t) = &args.title {
         super::refuse_if_flag_like(t.trim())?;
     }
-    let repo = super::open_repo(ctx.lang())?;
+    let repo = super::open_repo(ctx)?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.

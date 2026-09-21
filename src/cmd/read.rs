@@ -16,7 +16,7 @@ use crate::style::{self, paint};
 use std::collections::BTreeSet;
 
 pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
-    let repo = super::open_repo(ctx.lang())?;
+    let repo = super::open_repo(ctx)?;
     let load = repo.read()?;
     let now = crate::model::now();
     let path = super::project::writable_config(ctx)?;
