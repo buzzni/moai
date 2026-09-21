@@ -630,23 +630,31 @@ pub fn update<T>(
     let at = place.at.clone();
     let fallen = place.fallen;
     write_sheet(place, f).map_err(|stop| {
-        // 여기까지 오면 멈춘 판이다 — 말은 그때만, 락을 놓은 뒤에 묻는다. 떨어진 판의 줄도 같은 말로
-        // 서야 하므로 한 번 물어 둘에 쓴다(`lang` 은 한 번만 부를 수 있다).
-        let lang = lang();
-        let mut fail = match stop {
+        // 여기까지 오면 멈춘 판이다 — 말은 그때만, 락을 놓은 뒤에 묻는다. **거절한 판에서만 묻는다**:
+        // io·락이 낸 것은 이미 글이라 옮길 말이 없는데, 묻는 것은 사용자 설정을 열어 파싱하는 일이다
+        // (`cmd::read` 가 적어 둔 그 덫이다). `lang` 은 한 번만 부를 수 있으므로 한 갈래 안에서 한 번 쓴다.
+        match stop {
             Stop::Failed(e) => e,
             // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
             // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
-            Stop::Refused(why) => Fail::coded(crate::view::sheet_refusal(lang, &at, &why), crate::fail::code::BROKEN),
-        };
-        // **떨어진 판이 멈추면 그 파일이 무엇인지 함께 댄다**(moai-pm2h). 그 자리는 도구가 짓는 대기
-        // 자리고 이름이 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을 보고 무엇을
-        // 고치라는 것인지 모른다 — 그러면 되돌릴 방법이 도구 밖에만 남는다(CLAUDE.md). 성한 판에는
-        // 안 붙인다: 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
-        if fallen {
-            fail.message = crate::view::fallen_place(lang, &fail.message);
+            Stop::Refused(why) => {
+                let lang = lang();
+                let mut said = crate::view::sheet_refusal(lang, &at, &why);
+                // **떨어진 판이 멈추면 그 파일이 무엇인지 함께 댄다**(moai-pm2h). 그 자리는 도구가 짓는
+                // 대기 자리고 이름이 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을 보고
+                // 무엇을 고치라는 것인지 모른다 — 그러면 되돌릴 방법이 도구 밖에만 남는다(CLAUDE.md).
+                // 성한 판에는 안 붙인다: 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
+                //
+                // **거절에만 붙인다**(리뷰). 이 줄은 `at` 을 두고 "고치거나 지우라" 는 말이라, `at` 을
+                // 댄 글에만 선다 — `Stop::Failed` 는 락 파일(`<대기 자리>.lock`)이나 `read/` 디렉터리를
+                // 대기도 하고, 거기 붙이면 도구가 제 락 파일을 가리키며 "지우면 그 안의 도장을 잃는다"
+                // 고 말한다. 손으로 고칠 자리를 댄 것은 거절뿐이다.
+                if fallen {
+                    said = crate::view::fallen_place(lang, &said);
+                }
+                Fail::coded(said, crate::fail::code::BROKEN)
+            }
         }
-        fail
     })
 }
 
@@ -785,7 +793,8 @@ fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal
     // 만 세우고 그 줄은 다음에도 [NEW] 로 선다. 그 줄 자체의 까닭(`Skipped`)은 위에서 이미 섰지만
     // 그것은 "이 파일에 이런 줄이 있다" 이고, 시킨 id 가 그 줄에 막혔다는 말은 여기서만 나온다.
     if !sheet.held.is_empty() {
-        problems.push(SheetTrouble::Held { at: path.clone(), ids: std::mem::take(&mut sheet.held) });
+        let ids = std::mem::take(&mut sheet.held).into_iter().collect();
+        problems.push(SheetTrouble::Held { at: path.clone(), ids });
     }
     // **바뀐 것이 없으면 파일을 안 짓는다.** 어느 프로젝트의 것인지 적는 줄([`Sheet::claim`])도 그때
     // 함께 적는다 — 먼저 적던 판은 그 한 줄이 쓰기를 세워, 적을 것이 없는 `moai read` 하나가 아직
@@ -972,12 +981,16 @@ pub struct Sheet {
     /// **여기 쌓고 [`write_sheet`] 가 한 번에 낸다.** 부르는 쪽마다 물어 싣게 두면 실은 곳과 잊은 곳이
     /// 갈리고([`crate::user_config::fail`] 과 같은 까닭), 그 자리를 아는 것은 [`write_sheet`] 하나다 —
     /// 까닭에는 어느 파일인지가 붙는데 이름이 뿌리의 해시라 사람이 짐작할 수 없다.
-    held: Vec<String>,
+    ///
+    /// **집합이다**(리뷰). [`Sheet::mark`] 은 한 [`Sheet`] 에 여러 번 들 수 있어([`merge_past`] 가 한 번,
+    /// 부른 쪽의 닫은 글이 한 번), 벌이면 같은 id 가 글에 두 번 선다 — `argos-0002, argos-0002 는 못
+    /// 적었다`. 차례도 [`Sheet::mark`] 이 도는 `BTreeMap` 의 것과 같아진다.
+    held: BTreeSet<String>,
 }
 
 impl Sheet {
     fn parse(src: &str) -> Result<Sheet, String> {
-        Ok(Sheet { doc: Doc::parse(src)?, held: Vec::new() })
+        Ok(Sheet { doc: Doc::parse(src)?, held: BTreeSet::new() })
     }
 
     fn changed(&self) -> bool {
@@ -1015,6 +1028,7 @@ impl Sheet {
     /// 적는데, [`Sheet::owns`] 는 그것을 바이트째 견줘 남의 것으로 읽는다 — 제가 방금 지은 파일을 다음
     /// 명령이 거절하고, 거절문은 그 파일을 손으로 지우라 하고, 지우면 같은 줄이 다시 적히는 고리였다.
     /// 이름의 해시는 바이트를 그대로 세므로 안 적어도 파일은 제 것이다.
+    ///
     /// **머리 주석 밑에 바로 붙지 않는다**(moai-vwrf). 주석만 있던 파일에서 [`Doc::new_table`] 이 그
     /// 주석을 문서 머리로 올려 두는데(`lift_head_comment`), 라이브러리는 뿌리의 값을 표보다 먼저 그려
     /// `path` 가 그 주석과 `[read]` 사이에 끼어든다 — 다시 읽으면 그 주석이 `path` 의 꾸밈이 되어,
@@ -1108,12 +1122,16 @@ impl Sheet {
         }
         let mut blocked: BTreeSet<&str> = BTreeSet::new();
         if let Some(item) = self.doc.root().get(READ) {
-            let Some(t) = item.as_table_like() else {
+            if item.as_table_like().is_none() {
                 return Err(SheetRefusal::NotATable { found: item.type_name().to_string() });
-            };
+            }
             // 건너뛸 id 는 **적기 전에 다 고른다** — 적는 고리 안에서 물으면 방금 적은 값이 섞인다.
-            blocked =
-                marks.keys().filter(|id| t.get(id).is_some_and(|v| v.as_str().is_none())).map(String::as_str).collect();
+            //
+            // **재는 자는 이미 있는 둘이다**(리뷰) — 자리가 찼는가([`Sheet::taken`])와 그것이 때인가
+            // ([`Sheet::stamped`]). 여기 셋째 잣대를 적으면 "무엇이 때인가" 를 바꾸는 날 셋이 함께
+            // 움직여야 하고, 갈리는 쪽에 따라 사람이 적은 줄을 덮거나([`Unmerged::held`] 가 막힌 id 를
+            // 앉은 것으로 세어) 대기 자리를 통째로 지운다 — `stamped` 의 글이 적어 둔 그 자리다.
+            blocked = marks.keys().filter(|id| self.taken(id) && !self.stamped(id)).map(String::as_str).collect();
         } else {
             // 주석만 있던 파일이면 머리 주석을 머리에 둔다 — 안 두면 사람이 적어 둔 줄이 `[read]` 밑으로
             // 밀려 마지막 읽음에 붙은 말로 읽힌다(moai-gmdu 에픽 리뷰가 설정에서 고친 그 자리다, 리뷰).
@@ -1127,7 +1145,7 @@ impl Sheet {
                 written.push(id.clone());
             }
         }
-        self.held.extend(blocked.into_iter().map(str::to_string));
+        self.held.extend(blocked.iter().map(|id| (*id).to_string()));
         if !written.is_empty() {
             self.doc.touched();
         }
@@ -1191,6 +1209,8 @@ mod tests {
         let s = Scratch::new("read-marks-split");
         let cfg = s.join("config.toml");
         let (one, two) = (s.join("a/api"), s.join("b/api"));
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
 
         upd(&cfg, &one, |sheet| sheet.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         upd(&cfg, &two, |sheet| sheet.mark(&marks(&[("argos-0001", "B")]))).unwrap();
@@ -2020,6 +2040,7 @@ mod tests {
     fn the_file_stands_beside_the_config_it_was_given() {
         let s = Scratch::new("read-marks-beside");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         for dir in ["one", "two"] {
             let cfg = s.join(dir).join("config.toml");
             assert!(place_of(&cfg, &root).at.starts_with(s.join(dir)), "{}", place_of(&cfg, &root).at.display());
@@ -2033,6 +2054,7 @@ mod tests {
         let s = Scratch::new("read-marks-legacy");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sheet| sheet.mark(&marks(&[("argos-0001", "새것")]))).unwrap();
 
         let legacy = marks(&[("argos-0001", "옛것"), ("argos-0009", "옛것뿐")]);
@@ -2049,6 +2071,7 @@ mod tests {
         let s = Scratch::new("read-marks-prune");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let all = marks(&[("argos-0001", "A"), ("argos-0002", "B"), ("argos-0003", "C")]);
         upd(&cfg, &root, |sheet| sheet.mark(&all)).unwrap();
 
@@ -2064,6 +2087,7 @@ mod tests {
         let s = Scratch::new("read-marks-idempotent");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         assert_eq!(upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value, ["argos-0001"]);
         let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value.is_empty());
@@ -2083,6 +2107,7 @@ mod tests {
         let s = Scratch::new("read-marks-dotted");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0003.rv", "A")]))).unwrap();
         let text = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(text.contains("\"argos-0003.rv\""), "맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
@@ -2097,6 +2122,7 @@ mod tests {
         let s = Scratch::new("read-marks-decor");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
@@ -2117,6 +2143,7 @@ mod tests {
         let s = Scratch::new("read-marks-head");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "# 이 파일에 적어 둔 까닭\n").unwrap();
@@ -2142,6 +2169,7 @@ mod tests {
         let s = Scratch::new("read-marks-crlf");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, format!("path = {:?}\r\n\r\n[read]\r\n\"argos-0001\" = \"A\"", root.display().to_string()))
@@ -2159,6 +2187,7 @@ mod tests {
         let s = Scratch::new("read-marks-odd-path");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "path = 3\n\n[read]\n\"argos-0001\" = \"A\"\n").unwrap();
@@ -2177,6 +2206,7 @@ mod tests {
         let s = Scratch::new("read-marks-nonutf8");
         let cfg = s.join("config.toml");
         let root = s.path().join(std::ffi::OsStr::from_bytes(b"re\xffpo"));
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).expect("제가 지은 파일을 남의 것으로 읽었다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0002", "B")]));
@@ -2190,6 +2220,7 @@ mod tests {
         let s = Scratch::new("read-marks-prune-odd");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
@@ -2207,6 +2238,7 @@ mod tests {
         let s = Scratch::new("read-marks-prune-comments");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
@@ -2228,6 +2260,7 @@ mod tests {
         let s = Scratch::new("read-marks-keep");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!(
@@ -2273,6 +2306,7 @@ mod tests {
         let s = Scratch::new("read-marks-lenient");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(
@@ -2305,6 +2339,7 @@ mod tests {
         let s = Scratch::new("read-marks-eacces");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -2324,6 +2359,7 @@ mod tests {
         let s = Scratch::new("read-marks-broken");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "[read\n\"argos-0001\" = ").unwrap();
@@ -2344,6 +2380,7 @@ mod tests {
         let s = Scratch::new("read-marks-odd");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
@@ -2378,6 +2415,7 @@ mod tests {
         let s = Scratch::new("read-marks-odd-untouched");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\nargos-0002 = 3\n", root.display().to_string());
@@ -2404,6 +2442,7 @@ mod tests {
         let s = Scratch::new("read-marks-empty");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&BTreeMap::new())).unwrap();
         let at = place_of(&cfg, &root).at;
         assert!(!at.exists(), "빈 쓰기가 파일을 지었다");
@@ -2448,6 +2487,7 @@ mod tests {
         let s = Scratch::new("read-marks-concurrent");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let (threads, each) = (8, 5);
         std::thread::scope(|scope| {
             for t in 0..threads {
@@ -2470,6 +2510,7 @@ mod tests {
         let s = Scratch::new("read-marks-idem-bytes");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A"), ("argos-0002", "B")]))).unwrap();
         let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         let known: BTreeSet<&str> = ["argos-0001", "argos-0002"].into_iter().collect();
@@ -2486,6 +2527,10 @@ mod tests {
     ///
     /// **대기 자리도 같은 해시를 쓴다** — 떨어진 판과 그것을 합칠 성한 판이 한 이름으로 만나는 자리라,
     /// 한쪽만 옮기면 합치기가 영영 안 일어난다.
+    ///
+    /// **[`place_of`] 가 그 이름을 고른다는 것도 함께 못박는다**(리뷰) — 없는 뿌리로 물으면 성한 갈래가
+    /// 아니라 대기 자리가 나오므로(moai-jfgn), 그 줄로는 `place_of` 와 [`sheet_at`] 사이의 끈을 못 잰다.
+    /// 끊어지면 모든 사람의 읽음이 고아가 되는 자리다.
     #[test]
     fn the_hash_is_pinned_so_the_names_never_move() {
         let name = |root: &str| sheet_at(Path::new("/c"), Path::new(root)).file_name().unwrap().to_owned();
@@ -2495,9 +2540,15 @@ mod tests {
             spool_at(Path::new("/c"), Path::new("/a/api")).file_name().unwrap(),
             "c812cb6e42a00af2.pending.toml"
         );
-        assert_eq!(
-            place_of(Path::new("/c/config.toml"), Path::new("/a/api")).at.parent().unwrap(),
-            Path::new("/c/read")
-        );
+        // 성한 갈래는 **서 있는 뿌리**로 잰다 — 없는 뿌리는 대기 자리로 떨어진다.
+        let s = Scratch::new("read-marks-hash");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let real = std::fs::canonicalize(&root).unwrap();
+        let place = place_of(&cfg, &root);
+        assert!(!place.fallen, "서 있는 뿌리가 떨어졌다");
+        assert_eq!(place.at, sheet_at(dir_of(&cfg), &real), "성한 판이 읽음 파일의 이름을 안 골랐다");
+        assert_eq!(place.pending.as_deref(), Some(spool_at(dir_of(&cfg), &root).as_path()));
     }
 }

@@ -604,7 +604,18 @@ pub struct Site {
     /// 읽어, 한쪽을 고친 날 다른 쪽이 조용히 옛 뜻으로 남는다.
     ///
     /// 아래 `read_at`(스냅샷을 **들인** 때)과 다른 값이다 — 이름이 닮았으나 재는 파일이 서로 다르다.
+    ///
+    /// **이 값은 지금 자리 파일의 것이다.** 대기 자리는 아래 [`Site::read_pending`] 이 따로 든다.
     read_tried: layer::Tried,
+    /// 대기 자리([`crate::read_marks::Place::pending`])를 마지막으로 들어 본 자취(moai-ocly 리뷰).
+    ///
+    /// **`read_tried` 와 가른다.** 그 파일은 **있으면 아직 안 합친 도장이 있다**는 뜻이라 못 읽은 판은
+    /// 다시 볼 까닭이 되지만([`layer::owed`]), "지금 자리의 표를 못 들었다" 는 뜻은 아니다 —
+    /// [`App::recount_unread_in`] 의 문지기가 `read_tried` 를 그 뜻으로 읽으므로, 한 값에 담으면 못 읽는
+    /// 대기 자리 하나가 **아직 아무것도 안 읽은 프로젝트의 [NEW] 를 통째로 지운다**(그 판은 지금 자리
+    /// 파일이 없어 `seen` 이 비어 있다). 갈래의 뜻은 둘 다 같다
+    /// ([`crate::user_config::Trouble::again`]).
+    read_pending: layer::Tried,
     /// 마지막 읽기를 **들인** 때. 표식이 그대로여도 [`layer::REREAD_EVERY`] 가 지나면 다시 읽는다
     /// ([`App::follow`], moai-z4r4). 들인 때로 찍는 까닭은 층과 같다(`Layer::adopt`) — 시작한 때로
     /// 찍으면 한 번 읽는 데 그만큼 걸리는 자리에서 쉬지 않고 다시 읽는다.
@@ -914,6 +925,7 @@ impl Site {
             seen: Default::default(),
             read_stamp: None,
             read_tried: layer::Tried::default(),
+            read_pending: layer::Tried::default(),
             read_at: None,
             watched: Vec::new(),
             commits: Commits::new(),
@@ -2230,17 +2242,6 @@ impl App {
         }
     }
 
-    /// 읽음 파일을 고르는 뿌리 — **트래커가 사는 곳**(`Repo::root`)이다.
-    ///
-    /// **`App::here()` 가 아니다**(리뷰). 그쪽은 이 세션이 **선 체크아웃**이라, 딸린 워크트리에서는
-    /// 트래커의 자리와 갈린다(`Repo::here`). 읽음의 키는 이슈 id 고 그 id 는 트래커에서 오므로, 자리는
-    /// 트래커를 따라야 한다 — 쓰는 자([`App::mark_read`]·`cmd::read`·[`App::follow_site`])는 처음부터
-    /// `root` 로 골랐는데 읽는 자만 `here()` 로 골라, 워크트리에서 띄운 탐색기가 제가 적은 파일을 다시
-    /// 못 읽었다. `r` 을 누르면 [NEW] 가 내렸다가 다음 걸음에 도로 섰다.
-    fn read_root(&self) -> Option<std::path::PathBuf> {
-        self.site.repo.as_ref().map(|r| r.root.clone())
-    }
-
     /// 그 프로젝트의 읽음을 **제 파일에서** 든다(moai-bwce) — 옛 `[read]` 를 겹쳐 보고, 표식을 읽기
     /// **전에** 잰다(뒤에 재면 읽고 다음 걸음 사이에 옆이 쓴 것을 놓친다). 설정 자리를 모르면(시험·설정
     /// 없는 기계) `None` 이고 부르는 쪽은 들고 있던 것을 둔다.
@@ -2307,11 +2308,21 @@ impl App {
         // **대기 자리를 못 든 것도 다시 볼 까닭이다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이
         // 있다는 뜻이라, 못 읽은 판은 이 화면이 도장을 덜 든 것이다 — 떨어뜨리던 판은 권한으로 못 읽는
         // 대기 자리를 "줄 하나가 이상하다" 로 대고 시계 되읽기도 안 걸어, `chmod` 뒤에도 그 도장이
-        // 다음 쓰기가 표를 움직일 때까지 [NEW] 로 섰다. **표를 들일지는 여기에 안 매단다** — 지금
-        // 자리의 표는 성하니 그대로 든다(아래 `marks.trouble.is_none()`).
-        let why = marks.trouble.or(marks.pending);
-        site.read_tried.saw(why);
-        if why.map(crate::user_config::Trouble::again) != Some(crate::user_config::Again::Step) {
+        // 다음 쓰기가 표를 움직일 때까지 [NEW] 로 섰다.
+        //
+        // **자취는 파일마다 따로 든다**(리뷰, [`Site::read_pending`]). 한 값에 담던 판은
+        // [`App::recount_unread_in`] 의 문지기가 그것을 "지금 자리의 표를 못 들었다" 로 읽어, 못 읽는
+        // 대기 자리 하나가 아직 아무것도 안 읽은 프로젝트의 [NEW] 를 통째로 지웠다 — 그것도 조용히
+        // (`Unreadable` 은 아래에서 말하지 않는 갈래다). 표를 들일지도 지금 자리의 갈래 하나로 가른다
+        // (아래 `marks.trouble.is_none()`).
+        site.read_tried.saw(marks.trouble);
+        site.read_pending.saw(marks.pending);
+        // **표식은 둘 다 잠깐이 아닐 때만 올린다** — 한쪽이 "다음 걸음에" 면 그 걸음이 같은 차이를 다시
+        // 봐야 한다.
+        let step = |t: Option<crate::user_config::Trouble>| {
+            t.map(crate::user_config::Trouble::again) == Some(crate::user_config::Again::Step)
+        };
+        if !step(marks.trouble) && !step(marks.pending) {
             site.read_stamp = Some(stamp);
         }
         // **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 못 들었으면 들고 있던 것을 둔다 — 빈 표를
@@ -2321,7 +2332,12 @@ impl App {
         //
         // **잠깐 못 읽은 것은 말하지 않는다** — 다음 걸음에 다시 읽으므로, 말하면 걸음마다 같은 줄이
         // 서서 사람이 방금 띄운 말을 덮는다(`follow_config` 도 그 갈래에서는 조용히 다시 읽는다).
-        let told = match why {
+        //
+        // **가르는 것은 지금 자리의 갈래다**(리뷰) — 아래 `seen` 을 들일지를 가르는 그 값이다. 대기
+        // 자리의 갈래를 함께 보던 판은 표를 **들이고도** "읽음을 못 들었다"(`tui.read.unheld`)고 말해,
+        // 화면의 상태와 화면의 말이 서로를 부정했다. 대기 자리의 까닭은 `problems` 에 실려 아래 `None`
+        // 갈래의 "줄 하나가 이상하다" 로 제 이름으로 선다.
+        let told = match marks.trouble {
             // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
             // 있지만(`App::held`·`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
@@ -2352,38 +2368,37 @@ impl App {
     /// 지금 선 프로젝트의 읽음을 파일에서 들어 [NEW] 를 다시 센다. 띄울 때(`cmd::tui`), 프로젝트에 들어갈
     /// 때(`App::enter_project`), 그 파일이 바뀐 걸음([`App::follow_read`])이 부른다.
     pub fn load_read(&mut self) {
-        let Some(root) = self.read_root() else { return };
-        let Some(got) = self.read_marks_of(&root) else { return };
-        // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
-        let took = got.marks.trouble.is_none();
-        // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
-        // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
-        // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
-        let knew = self.site.read_tried.trouble.is_none();
-        // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
-        if let Some(told) = Self::take_read(&mut self.site, got) {
-            self.notice = Some(told);
-        }
-        if took || knew {
-            self.recount_unread();
-        }
+        self.load_read_in(Seat::Here);
     }
 
-    /// [`App::load_read`] 의 **층 판**(moai-7irq) — 펼쳐 둔 프로젝트의 읽음을 제 파일에서 다시 들고
-    /// 그 줄의 [NEW] 를 다시 센다.
+    /// [`App::load_read`] 와 같되 **그 프로젝트의** 읽음을 제 파일에서 다시 들고 그 줄의 [NEW] 를
+    /// 다시 센다(moai-7irq).
     ///
     /// 펼친 프로젝트는 제 `Site` 에 제 `seen` 과 `unread` 를 따로 드는데, 세는 자([`App::recount_unread`])
     /// 는 지금 선 프로젝트만 셌다. 그래서 그 줄의 셈을 움직이는 것은 펼치는 길 하나뿐이었고, 그
     /// 사이에 [`App::relayer_with`] 가 옛 `Site` 를 그대로 옮겨 들어 낡은 셈을 살려 두었다.
-    fn load_read_in(&mut self, at: usize) {
-        let seat = Seat::Place(at);
+    ///
+    /// **자리를 받는 자가 하나다**(리뷰) — [`App::recount_unread`] 가 [`App::recount_unread_in`] 의
+    /// `Seat::Here` 인 것과 같은 자다. 층 판을 따로 적던 판은 두 몸이 글자째 같아, 한쪽에만 드는
+    /// 고침이 층의 줄에서만 안 서는 자리를 열어 두었다.
+    fn load_read_in(&mut self, seat: Seat) {
         let Some(site) = self.site_of_seat(seat) else { return };
+        // **뿌리는 트래커가 사는 곳이다**(`Repo::root`), `App::here()` 가 아니다(리뷰). 그쪽은 이
+        // 세션이 **선 체크아웃**이라 딸린 워크트리에서는 트래커의 자리와 갈린다(`Repo::here`). 읽음의
+        // 키는 이슈 id 고 그 id 는 트래커에서 오므로 자리는 트래커를 따라야 한다 — 쓰는 자
+        // ([`App::mark_read`]·`cmd::read`·[`App::follow_site`])는 처음부터 `root` 로 골랐는데 읽는 자만
+        // `here()` 로 골라, 워크트리에서 띄운 탐색기가 제가 적은 파일을 다시 못 읽었다. `r` 을 누르면
+        // [NEW] 가 내렸다가 다음 걸음에 도로 섰다.
         let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return };
-        // **몰랐다가 또 모르는 걸음은 안 센다** — [`App::load_read`] 와 같은 자다.
+        // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
+        // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
+        // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
         let knew = site.read_tried.trouble.is_none();
         let Some(got) = self.read_marks_of(&root) else { return };
+        // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
         let took = got.marks.trouble.is_none();
         let Some(site) = self.site_mut(seat) else { return };
+        // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
         let told = Self::take_read(site, got);
         if let Some(told) = told {
             self.notice = Some(told);
@@ -2400,13 +2415,25 @@ impl App {
     /// **옛 `[read]` 가 바뀐 판에서만 부른다.** 그 표는 이 바이너리가 안 적으니 드문 걸음이고, 값은
     /// 펼친 프로젝트 수만큼의 읽음 파일 읽기다. 걸음마다 돌면 그 값을 늘 치른다.
     fn load_read_in_places(&mut self) {
-        let opened: Vec<usize> = match &self.layer {
-            Some(l) => l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| n).collect(),
-            None => return,
-        };
-        for at in opened {
-            self.load_read_in(at);
+        for seat in self.opened_seats() {
+            self.load_read_in(seat);
         }
+    }
+
+    /// 층에서 **펼쳐 둔** 프로젝트의 자리들 — 표를 들고 있고([`layer::Place::site`]) 접혀 있지 않은 줄이다.
+    ///
+    /// **거르개는 [`App::sites`] 와 같다**(리뷰). 접기([`App::fold`])는 `site` 를 안 버리므로
+    /// (`읽은 것은 안 버린다`) `site.is_some()` 하나로 고르면 **안 보이는 줄까지** 걸음마다 재고 읽는다 —
+    /// 그리는 쪽이 이미 접힌 줄을 빼고 있으니, 재는 쪽도 같은 줄을 봐야 값이 화면과 맞는다. 다시 펼치면
+    /// 그 걸음의 [`App::follow_read`] 가 표식 차이를 보고 바로 든다.
+    fn opened_seats(&self) -> Vec<Seat> {
+        let Some(l) = self.layer.as_ref() else { return Vec::new() };
+        l.places
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.site.is_some() && !self.folded.contains(&p.path))
+            .map(|(n, _)| Seat::Place(n))
+            .collect()
     }
 
     /// **읽음 파일이 바뀌었으면 다시 든다** — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다
@@ -2417,22 +2444,21 @@ impl App {
     ///
     /// **걸음마다 도는 자리다**(리뷰) — 목록을 굴리는 동안 빠른 걸음으로 돌므로, 빌려 쓰고 `stat` 은
     /// 한 번만 한다([`App::follow_config`] 와 같은 모양).
+    ///
     /// **펼쳐 둔 프로젝트도 함께 잰다**(moai-c571). [`Site::read_stamp`] 은 프로젝트마다 서는데 재는
     /// 자가 지금 선 것 하나였다 — 층의 줄은 [`layer::REREAD_EVERY`](60초)가 지나야 다시 읽혀,
     /// 옆 터미널의 `moai -C <다른 프로젝트> read --all` 이 이 화면에 닿는 데 1분이 걸렸다.
     /// 그 명령은 저쪽 `issues.jsonl` 을 안 건드리니 스냅샷 표식으로도 안 잡힌다.
     ///
-    /// 값은 **펼친** 프로젝트마다 `stat` 한둘이다([`ReadStamp::of`]) — 접힌 줄은 들고 있는 표가 없어
-    /// 잴 것도 없다. 걸음마다 이미 도는 스냅샷 표식과 같은 자리이고, 같은 걸음에 읽는 파일 수가 그만큼
-    /// 는다. 한 번 읽는 값이 줄 수만큼인 것에 견주면 작다.
+    /// **고르는 자는 [`App::opened_seats`] 다** — 접힌 줄은 화면에 없으니 안 잰다. 무는 값은 줄마다
+    /// [`crate::read_marks::place_of`] 의 `canonicalize` 하나와 [`ReadStamp::of`] 의 `stat` 한둘이다
+    /// (리뷰가 쟀다: 여기 기계에서 9.5us + 5.3us). `canonicalize` 는 경로 조각마다 한 번 도는 자라
+    /// 스냅샷 표식의 `stat` 하나보다 비싸다 — 걸음은 700ms(읽는 동안 30ms)마다 오므로 펼친 줄 스물까지는
+    /// 한 걸음에 300us 안쪽이지만, 이 자리에 재는 것을 하나 더 얹으려는 사람은 그 값부터 잰다.
     fn follow_read(&mut self) {
         self.follow_read_in(Seat::Here);
-        let opened: Vec<usize> = match &self.layer {
-            Some(l) => l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| n).collect(),
-            None => return,
-        };
-        for at in opened {
-            self.follow_read_in(Seat::Place(at));
+        for seat in self.opened_seats() {
+            self.follow_read_in(seat);
         }
     }
 
@@ -2448,15 +2474,15 @@ impl App {
             // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
             // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
             // 재는 자는 [`layer::owed`] 하나다 — 여기와 저기에 저마다 적으면 갈래를 더한 날 한쪽만 고쳐진다.
-            site.read_stamp != Some(now) || layer::owed(&site.read_tried)
+            //
+            // **대기 자리의 빚도 함께 본다**(moai-ocly) — 자취는 파일마다 따로 들되([`Site::read_pending`])
+            // 다시 읽는 길은 하나라, 어느 쪽이 빚졌든 같은 한 번의 읽기가 둘을 다 든다.
+            site.read_stamp != Some(now) || layer::owed(&site.read_tried) || layer::owed(&site.read_pending)
         };
         if !stale {
             return;
         }
-        match seat {
-            Seat::Here => self.load_read(),
-            Seat::Place(at) => self.load_read_in(at),
-        }
+        self.load_read_in(seat);
     }
 
     /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
@@ -6386,6 +6412,11 @@ mod tests {
     ///
     /// **지금 자리의 표는 그대로 든다** — 버리면 못 읽는 파일 하나가 그 프로젝트를 통째로 [NEW] 로
     /// 세운다. 그 둘을 한 판에서 잰다.
+    ///
+    /// **자취는 [`Site::read_pending`] 이 든다**(리뷰) — [`Site::read_tried`] 에 담던 판은
+    /// [`App::recount_unread_in`] 의 문지기가 그것을 "지금 자리의 표를 못 들었다" 로 읽었다. 그 값을
+    /// 여기서 못박아, 되돌리면
+    /// `an_unreadable_pending_place_does_not_wipe_a_fresh_projects_new` 와 함께 붉어지게 한다.
     #[test]
     #[cfg(unix)]
     fn a_pending_place_we_cannot_read_is_retried_by_the_clock_too() {
@@ -6423,20 +6454,62 @@ mod tests {
         }
         a.load_read();
         assert_eq!(
-            a.site.read_tried.trouble,
+            a.site.read_pending.trouble,
             Some(crate::user_config::Trouble::Unreadable),
             "못 읽는 대기 자리를 줄 하나 탈로 읽었다"
         );
+        assert_eq!(a.site.read_tried.trouble, None, "대기 자리의 탈을 지금 자리의 것으로 들었다");
         assert!(!a.site.unread.contains("argos-0009"), "대기 자리 하나 때문에 지금 자리의 표를 버렸다");
         assert!(a.site.unread.contains("argos-0002"), "시험의 전제 — 대기 자리의 도장은 아직 안 닿았다");
 
         // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다. 시계가 돌아야 다시 본다.
         std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o644)).unwrap();
-        a.site.read_tried.at =
+        a.site.read_pending.at =
             Some(std::time::Instant::now().checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "시계가 돌았는데 대기 자리를 다시 안 읽었다");
-        assert_eq!(a.site.read_tried.trouble, None, "읽혔는데 탈이 남았다");
+        assert_eq!(a.site.read_pending.trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **못 읽는 대기 자리가 아직 아무것도 안 읽은 프로젝트의 [NEW] 를 지우지 않는다**(moai-ocly 리뷰).
+    ///
+    /// 지금 자리 파일이 아직 없는 것은 **탈이 아니라** 아무도 안 읽은 프로젝트의 정상이다 — 그때
+    /// `seen` 은 비고 `trouble` 은 `None` 이다. 대기 자리의 탈을 같은 자취에 담던 판은
+    /// [`App::recount_unread_in`] 의 문지기(`탈이 있는데 표가 비었다`)가 그것을 물어 `unread` 를
+    /// 통째로 지웠고, `Unreadable` 은 말하지 않는 갈래라 **까닭도 안 섰다** — 그 화면은 "다 읽었다" 와
+    /// 구별되지 않는다.
+    #[test]
+    #[cfg(unix)]
+    fn an_unreadable_pending_place_does_not_wipe_a_fresh_projects_new() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("read-marks-spool-fresh");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        // 지금 자리 파일은 **없다** — 아직 아무것도 안 읽었다. 대기 자리만 서 있고 못 읽는다.
+        let place = crate::read_marks::place_of(&config, &root);
+        assert!(!place.at.exists(), "시험의 전제 — 지금 자리 파일이 아직 없다");
+        let spool = place.pending.clone().expect("성한 판에는 대기 자리가 선다");
+        std::fs::create_dir_all(spool.parent().unwrap()).unwrap();
+        std::fs::write(&spool, format!("path = {:?}\n\n[read]\n", root.display().to_string())).unwrap();
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&spool).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        a.load_read();
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!a.site.unread.is_empty(), "못 읽는 대기 자리 하나가 안 읽은 줄을 통째로 지웠다");
     }
 
     /// **읽음은 트래커가 사는 뿌리로 고른다 — 선 체크아웃이 아니다**(리뷰). 딸린 워크트리에서 띄우면

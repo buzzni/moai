@@ -1085,9 +1085,14 @@ pub(crate) enum Elsewhere {
 /// (리뷰 moai-f31d.lhe 12번). 같은 조건을 두 표면이 달리 부르던 자리다.
 ///
 /// **여기 안 든 갈래는 없는 것이 아니다.** `EACCES`·`ELOOP`·`ESTALE` 는 자리가 서 있는데 못 닿은
-/// 것이라, 읽는 쪽은 까닭을 대고 쓰는 쪽은 대기 자리로 간다(`read_marks` 의 `spool_at`, moai-bdej) —
-/// 그것을 "없다" 로 접으면 떨어진 도장이 갈 곳을 잃는다. 가르는 잣대가 [`crate::user_config::unreadable`]
-/// 과 따로 서는 까닭도 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+/// 것이라 읽는 쪽이 **까닭을 댄다** — 없는 자리는 저쪽이 이미 제 낱말로 대므로 조용히 지나간다
+/// ([`crate::read_marks::settle`]). 가르는 잣대가 [`crate::user_config::unreadable`] 과 따로 서는 까닭도
+/// 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+///
+/// **쓰는 쪽은 둘 다 대기 자리로 간다**(moai-jfgn, 2026-09-21 사용자 결정). 한때는 없는 자리만 받은
+/// 철자의 읽음 파일에 적었는데, 링크가 잠깐 바뀌었다 돌아오는 창의 도장을 그 뒤에 아무도 다시 안 봤다
+/// — 그래서 이 갈래는 이제 **떨어지는가**가 아니라 **까닭을 대는가**만 가른다
+/// ([`crate::read_marks::Settled`]).
 pub(crate) fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
 }

@@ -3379,7 +3379,13 @@ mod tests {
                 assert!(!said.contains('{'), "{}: 채울 자리가 남았다 — {said}", lang.code());
             }
             assert!(overlaid.contains("EACCES"), "{}: 열다 진 까닭을 잃었다 — {overlaid}", lang.code());
-            assert!(outside.contains("agent-x"), "{}: 그 워크트리의 자리를 잃었다 — {outside}", lang.code());
+            // **가지 이름이 아니라 자리를 잰다**(리뷰) — `agent-x` 는 가지 이름 안에도 있어, 그것으로
+            // 재면 위의 `contains(branch)` 가 이미 참으로 만든 바늘이 된다. 자리만 만족하는 바늘을 쓴다.
+            assert!(
+                outside.contains(&path.display().to_string()),
+                "{}: 그 워크트리의 자리를 잃었다 — {outside}",
+                lang.code()
+            );
         }
     }
 
