@@ -6857,3 +6857,13 @@
 {"ts":"2026-09-21T09:52:48Z","id":"moai-51it","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 내보내는 쪽 한 자리의 행동 변화, 시험으로 둘렀다)"}
 {"ts":"2026-09-21T09:52:54Z","id":"moai-a4u9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — moai-51it 과 같은 자리, 같은 커밋)"}
 {"ts":"2026-09-21T09:52:59Z","id":"moai-jkpa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 설정 파일 하나와 CI 캐시 키, 사람에게 한 번 물었다)"}
+{"ts":"2026-09-21T09:53:55Z","id":"moai-l5ue","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 쓰기 경로)"}
+{"ts":"2026-09-21T09:53:56Z","id":"moai-l5ue","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"막힌 줄 하나에 쓰기 전체를 세우지 않고 그 id 만 건너뛴다. 건너뛴 id 는 `SheetTrouble::Held` 로 이름째 나간다. `[read]` 가 표가 아닌 판은 적을 표가 없어 그대로 멈춘다."}
+{"ts":"2026-09-21T09:53:57Z","id":"moai-pm2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 쓰기 경로)"}
+{"ts":"2026-09-21T09:53:58Z","id":"moai-pm2h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"멈추는 것은 그대로 둔다(사용자 결정). 거절문에 그 파일이 떨어진 판의 대기 자리라는 것과 지우는 값을 붙였다."}
+{"ts":"2026-09-21T09:53:59Z","id":"moai-jfgn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 쓰기 경로)"}
+{"ts":"2026-09-21T09:54:00Z","id":"moai-jfgn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"없는 자리도 대기 자리로 보낸다(사용자 결정). 그 창 동안 화면이 [NEW] 로 서는 것이 대가다."}
+{"ts":"2026-09-21T09:54:01Z","id":"moai-b3it","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 쓰기 경로)"}
+{"ts":"2026-09-21T09:54:02Z","id":"moai-b3it","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"남길 때 못 앉힌 것만 남긴다. 잣대는 `Unmerged::held` 하나다."}
+{"ts":"2026-09-21T09:54:03Z","id":"moai-ocly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 읽는 길과 탐색기)"}
+{"ts":"2026-09-21T09:54:04Z","id":"moai-ocly","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"`Marks::pending` 이 대기 자리의 탈을 물고 나온다. 다시 볼 때는 둘을 합쳐 고르고, 표를 들일지는 `trouble` 만 본다."}
