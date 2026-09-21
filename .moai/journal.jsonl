@@ -6681,3 +6681,79 @@
 {"ts":"2026-09-21T07:28:40Z","id":"moai-hc9g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v0.1.0 의 moai-5ok8 이 만들었다 — moai prime 이 report::prime 위의 뷰로 섰고 종료 코드는 0 고정이다. 같은 일이라 여기서 닫는다."}
 {"ts":"2026-09-21T07:28:40Z","id":"moai-fv1y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v0.1.0 의 moai-yv87 이 만들었다 — prepare-commit-msg shim 이 MOAI_ACTOR 를 Executed-By 트레일러로 남긴다. 같은 일이라 여기서 닫는다."}
 {"ts":"2026-09-21T07:28:41Z","id":"moai-5t70","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v0.1.0 의 moai-071u 가 만들었다 — 훅 shim 이 없으면 통과·느리면 통과·트래커가 없으면 통과다. 같은 일이라 여기서 닫는다."}
+{"ts":"2026-09-21T07:30:28Z","id":"moai-ohke","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"남은 한국어를 걷는다"}
+{"ts":"2026-09-21T07:30:28Z","id":"moai-uzgp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init·skill·merge-driver 의 안내문과 보기 설정의 글"}
+{"ts":"2026-09-21T07:30:28Z","id":"moai-ohke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-a7qo 에서 펼쳤다 — init·skill·merge-driver 의 안내문이 아직 한국어다 — 남은 자리를 센다"}
+{"ts":"2026-09-21T07:30:28Z","id":"moai-a7qo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ohke 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-yve0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검증 글 열넷 — 저장 계층의 금 반대편"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-yve0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gbk3 에서 펼쳤다 — 검증 글 열넷이 아직 박힌 한국어다 — 저장 계층의 금 반대편"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-gbk3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ohke 의 멤버 moai-yve0 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-iq7j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저장 계층의 글 다섯 — 쓰기 경로 안이라 자료로 내야 한다"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-iq7j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uqxn 에서 펼쳤다 — 저장 계층에 남은 글 다섯이 쓰기 경로 안에 있다"}
+{"ts":"2026-09-21T07:30:37Z","id":"moai-uqxn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ohke 의 멤버 moai-iq7j 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:45Z","id":"moai-t6z9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"머지 드라이버 알림이 실제를 말한다"}
+{"ts":"2026-09-21T07:30:45Z","id":"moai-0j7c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"declared() 가 absent 만 막아 선언을 걷은 저장소에서 헛돈다"}
+{"ts":"2026-09-21T07:30:45Z","id":"moai-t6z9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-afzu 에서 펼쳤다 — declared() 가 absent 만 막아, 선언을 걷은 저장소에서 rotten·alien·stale 이 헛돈다"}
+{"ts":"2026-09-21T07:30:45Z","id":"moai-afzu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T07:30:57Z","id":"moai-8nkl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"알림이 워크트리 가지의 .gitattributes 를 본다"}
+{"ts":"2026-09-21T07:30:57Z","id":"moai-8nkl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bxek 에서 펼쳤다 — 머지 드라이버 알림이 워크트리 가지의 .gitattributes 를 본다"}
+{"ts":"2026-09-21T07:30:57Z","id":"moai-bxek","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-8nkl 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-b5np","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"planted_anywhere 가 git 이 읽는 global 과 다른 것을 본다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-b5np","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8nh8 에서 펼쳤다 — planted_anywhere 가 git 이 읽는 global 과 다른 것을 볼 수 있다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-8nh8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-b5np 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-wwbi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"probe 가 stdout 을 안 봐 모르는 인자를 흘려 듣는 래퍼가 지나간다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-wwbi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-75cs 에서 펼쳤다 — probe 가 stdout 을 안 봐, 모르는 인자를 흘려 듣는 래퍼가 그냥 지나간다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-75cs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-wwbi 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-47bt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"absent 알림을 조용히 시킬 길이 없다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-47bt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nad3 에서 펼쳤다 — merge_driver_absent 에 조용히 시킬 길이 없다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-nad3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-47bt 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-bq6w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"absent 힌트가 워크트리의 target 을 클론 전체에 심을 수 있다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-bq6w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-emwg 에서 펼쳤다 — merge_driver_absent 힌트가 워크트리의 target 을 클론 전체에 심을 수 있다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-emwg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-bq6w 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-2k61","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"probe 의 한도가 spawn 자체와 래퍼의 손자는 못 막는다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-2k61","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bmnt 에서 펼쳤다 — probe 의 한도가 spawn 자체와 래퍼의 손자는 못 막는다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-bmnt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-2k61 로 펼쳤다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-433r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"config 의 값과 자리를 --show-scope 로 한 번에 받는다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-433r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-789t 에서 펼쳤다 — config 의 값과 자리를 --show-scope 로 한 번에 받는다"}
+{"ts":"2026-09-21T07:30:58Z","id":"moai-789t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-t6z9 의 멤버 moai-433r 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:06Z","id":"moai-kuib","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽음과 대기 자리의 남은 모서리"}
+{"ts":"2026-09-21T07:31:06Z","id":"moai-l5ue","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한 줄이 틀렸다고 읽음 쓰기 전체가 멈춘다"}
+{"ts":"2026-09-21T07:31:06Z","id":"moai-kuib","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-qs8r 에서 펼쳤다 — 한 줄이 틀렸다고 읽음 쓰기 전체가 멈춘다"}
+{"ts":"2026-09-21T07:31:06Z","id":"moai-qs8r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T07:31:21Z","id":"moai-pm2h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"깨진 대기 자리 위에서 떨어진 쓰기가 계속 넘어진다"}
+{"ts":"2026-09-21T07:31:21Z","id":"moai-pm2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xnze 에서 펼쳤다 — 깨진 대기 자리 위에서 떨어진 쓰기가 계속 넘어진다"}
+{"ts":"2026-09-21T07:31:21Z","id":"moai-xnze","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-pm2h 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-jfgn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"되돌아오는 자리의 도장이 옛 철자 파일에 남는다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-jfgn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mopw 에서 펼쳤다 — 되돌아오는 자리의 도장이 옛 철자 파일에 남는다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-mopw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-jfgn 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-b3it","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"남긴 대기 자리에서 이미 앉은 도장을 걷어 낸다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-b3it","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-s51x 에서 펼쳤다 — 남긴 대기 자리에서 이미 앉은 도장을 걷어 낸다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-s51x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-b3it 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-ocly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기가 못 읽은 대기 자리를 줄 하나 문제로 댄다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-ocly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xa8m 에서 펼쳤다 — 탐색기가 못 읽은 대기 자리를 줄 하나 문제로 댄다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-xa8m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-ocly 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-vwrf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"주석만 있던 읽음 파일에 path 가 머리 주석을 물고 들어간다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-vwrf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zc2x 에서 펼쳤다 — 주석만 있던 읽음 파일에 path 가 머리 주석을 물고 들어간다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-zc2x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-vwrf 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-eivo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 표식이 읽는 파일 가운데 하나만 잰다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-eivo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0b4b 에서 펼쳤다 — 탐색기의 표식이 읽는 파일 가운데 하나만 잰다"}
+{"ts":"2026-09-21T07:31:22Z","id":"moai-0b4b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-eivo 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-7irq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"펼친 프로젝트의 NEW 가 새 읽음을 안 따라간다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-7irq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6hxc 에서 펼쳤다 — 펼친 프로젝트의 NEW 가 새 읽음을 안 따라간다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-6hxc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-7irq 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-dkth","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 등록 알림이 워크트리 갈래를 모른다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-dkth","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-syw5 에서 펼쳤다 — 탐색기 등록 알림이 워크트리 갈래를 모른다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-syw5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-dkth 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-hs3g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옆 스냅샷을 못 읽었다는 같은 사실이 두 말로 선다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-hs3g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-leqy 에서 펼쳤다 — 옆 스냅샷을 못 읽었다는 같은 사실이 --worktree 유무로 두 말로 선다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-leqy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-hs3g 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-jlc8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 읽음 표는 안 줄어 그 값이 옛 사용자에게만 남는다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-jlc8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hdcf 에서 펼쳤다 — 옛 [read] 표는 안 줄어 moai-dt5q 의 값이 옛 사용자에게만 남는다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-hdcf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-jlc8 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-c571","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한눈 보기의 줄이 옆 터미널의 읽음을 60초까지 모른다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-c571","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-d9rv 에서 펼쳤다 — 한눈 보기의 줄이 옆 터미널의 읽음을 60초까지 모른다"}
+{"ts":"2026-09-21T07:31:23Z","id":"moai-d9rv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kuib 의 멤버 moai-c571 로 펼쳤다"}
+{"ts":"2026-09-21T07:31:33Z","id":"moai-yeai","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CI 가 러너의 rustc 판에 매인다"}
+{"ts":"2026-09-21T07:31:33Z","id":"moai-jkpa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"fmt --check 가 러너의 rustc 를 따라 흔들린다 — rust-toolchain.toml 을 둘까"}
+{"ts":"2026-09-21T07:31:33Z","id":"moai-yeai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ers4 에서 펼쳤다 — fmt --check 가 CI 의 rustc 판에 매여 있다 — rust-toolchain.toml 을 둘까"}
+{"ts":"2026-09-21T07:31:33Z","id":"moai-ers4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yeai 로 펼쳤다 (이슈 1건)"}
