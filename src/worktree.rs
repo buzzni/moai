@@ -293,7 +293,7 @@ pub struct Gathered {
     /// 옆 워크트리를 **찾지 못한** 까닭(git 이 없거나 저장소가 아니다). `trouble` 과 가른다 —
     /// `--worktree` 를 시킨 CLI 는 말하지만, 겹쳐 보기를 기본으로 켜는 탐색기는 git 밖의
     /// 프로젝트를 열 때마다 시키지 않은 배너를 세우게 된다(moai-zcuh). 탐색기는 사람이
-    /// `SPC t w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
+    /// `SPC v w` 로 켰을 때만 알림으로 댄다(`tui::App::unfound`, moai-d5vn).
     pub unfound: Option<Trouble>,
     /// **옆 워크트리를 빠짐없이 열어 봤다** — 겹쳐 보라고 시켰고 목록도 찾았다. 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 `⎇ <가지>: …` 로 이미 섰으니, 자리를 재다 못 읽은 워크트리
@@ -1339,7 +1339,8 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
 ///
 /// 프로젝트 층(`tui::layer`)이 줄마다 걸음마다 잰다(moai-al0x). 층은 자리 판정을 요약에 싣는데
-/// `.moai` 두 파일만 재면 워크트리를 치우거나 띄워도 SPC r 전까지 옛 수를 낸다. 드는 것:
+/// `.moai` 두 파일만 재면 워크트리를 치우거나 띄워도 다음 자동 갱신 전까지 옛 수를 낸다(옛
+/// `SPC r`(다시 읽기)은 moai-en4u 가 걷었다). 드는 것:
 /// - 공용 디렉터리의 `worktrees` — `git worktree add`·`remove`·`prune` 이 그 목록을 바꾼다
 /// - 딸린 워크트리마다 `HEAD` — 가지 이름이 곧 이름 후보다([`names`])
 /// - 딸린 워크트리의 `.git` — 제거 명령 없이 `rm -rf` 로 치운 것은 이것만 사라진다([`gather`] 와 같은 까닭)

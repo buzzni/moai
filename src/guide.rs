@@ -830,7 +830,7 @@ A comma means "or"; the same flag twice means "and".
 When agents each take a git worktree, this worktree's board knows nothing of what
 was picked up and moved beside it. Add `--worktree` to `status`, `ready` or `show`
 and the sibling worktrees' issues are overlaid. The explorer (`moai tui`) opens with
-them overlaid and `SPC t w` turns it off and on.
+them overlaid and `SPC v w` turns it off and on.
 
     moai ready --worktree             work picked up beside you drops out and stands under "held"
     moai status --worktree            the board header says "⎇ <worktrees> overlaid"
