@@ -1127,6 +1127,19 @@ impl<'a> Lexer<'a> {
     /// 다시 훑던 판은 `$(bash -c "$( … )")` 겹마다 같은 글을 두 번 읽어, 아홉 겹 211바이트 한 줄에
     /// 27초를 썼다(리뷰 moai-p836.rv). 훅이 제 시간에 못 끝나면 규칙이 통째로 열린다.
     fn relex(&mut self) {
+        /// 심을 글이 **무엇인가** — 겹([`Layer`])은 이것과 `apace` 를 함께 알고 난 뒤에 한 번만 짓는다.
+        ///
+        /// `Layer::Shell { apace: false }` 를 먼저 짓고 스물다섯 줄 뒤에 그 한 자리를 다시 쓰던 판은,
+        /// 읽는 사람이 지은 자리의 값이 거짓인 줄 몰랐다(리뷰 moai-k8j1.209 의 14번).
+        #[derive(Clone, Copy)]
+        enum Handed {
+            /// 따옴표 없는 heredoc 본문 — 바깥 명령의 **낱말**이다([`Layer::Subst`]).
+            Doc,
+            /// `bash -c '…'`·`sh -c` 의 글 — 새 셸이다. `strict` 는 띄울 때 켠 errexit(moai-j9tx).
+            Fork { strict: bool },
+            /// `eval '…'` 의 글 — 지금 셸에서 돈다. 겹이 없다: 제 `set -e` 도 `cd` 도 바깥에 남는다.
+            Eval,
+        }
         if self.deep >= Lexer::DEEP {
             return;
         }
@@ -1138,16 +1151,14 @@ impl<'a> Lexer<'a> {
                 all.push(seg);
                 continue;
             }
-            // 글마다 무슨 겹으로 심는가 — `None` 이면 겹 없이(`eval`).
-            let mut texts: Vec<(&str, Option<Layer>)> = docs
-                .iter()
-                .filter(|(n, _)| seg.docs.contains(n))
-                .map(|(_, t)| (t.as_str(), Some(Layer::Subst(0))))
-                .collect();
+            // 글마다 **무엇인가**([`Handed`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
+            let mut texts: Vec<(&str, Handed)> =
+                docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Handed::Doc)).collect();
             let own = shell_text(&seg.words);
-            texts.extend(own.iter().map(|h| {
-                (h.text.as_str(), h.fork.then_some(Layer::Shell { top: 0, deep: 0, strict: h.strict, apace: false }))
-            }));
+            texts.extend(
+                own.iter()
+                    .map(|h| (h.text.as_str(), if h.fork { Handed::Fork { strict: h.strict } } else { Handed::Eval })),
+            );
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
             // **글 앞에서 닫힌 묶음도 그렇다**(moai-axqs) — 글은 그것을 낸 토막보다 **먼저** 셈해지니,
@@ -1159,7 +1170,7 @@ impl<'a> Lexer<'a> {
             let mut handed = false;
             // 그 글 끝에서 닫힌 예약어 묶음([`Seg::shut`]) — 받을 토막이 글 안에 없어 이 토막이 든다.
             let mut over: Option<usize> = None;
-            for (text, layer) in texts {
+            for (text, kind) in texts {
                 // 예산을 다 썼으면 그 글은 글로 둔다 — 겹 상한에 닿은 것과 같은 자리다(moai-qzy7).
                 // **뒤의 글은 그대로 본다**(리뷰) — 끊던 판은 앞의 큰 덩이 하나로 같은 토막의 뒤 글이
                 // 통째로 안 읽혔다([`afford`]).
@@ -1179,18 +1190,20 @@ impl<'a> Lexer<'a> {
                 // 둔 표를 읽는다([`Seg::bg`]). `sub` 로 어림잡던 판은 `{ … } &` 로 끝나는 글을 못 보고
                 // (묶음 뒤의 `&` 는 빈 토막에 온다), 뒤로 띄운 파이프라인은 파이프라고만 읽었다.
                 let apace = segs.last().is_some_and(|s| s.bg);
+                // **겹은 여기서 한 번만 짓는다** — `apace` 를 알고 난 뒤다.
+                //
                 // 셸에 넘긴 글은 **겹을 그대로 두고 표만 단다**(moai-54pk) — 치환으로 바꿔 적던 판은
                 // 값을 안 흘리는 김에 그 셸의 errexit 까지 버렸다. `eval` 의 글은 겹이 없으니 그때만
                 // 치환으로 심는다: 값이 제 것이 아닌 것은 같고, 버릴 errexit 도 없다.
-                let layer = match (apace, layer) {
-                    // 이름을 `deep` 으로 두면 이 함수 머리의 **다시 읽기 겹**(`let deep = self.deep`)을
-                    // 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을 다른 쪽으로 옮겨 적어도
-                    // 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
-                    (true, Some(Layer::Shell { top, deep: under, strict, .. })) => {
-                        Some(Layer::Shell { top, deep: under, strict, apace })
-                    }
-                    (true, None) => Some(Layer::Subst(0)),
-                    (_, layer) => layer,
+                //
+                // `Layer::Shell` 의 자리 둘(`top`·`deep`)은 여기서 늘 0 이다 — 바깥 렉서가 제 자리로
+                // 민다([`Layer::shift`]). 이름을 `deep` 으로 두면 이 함수 머리의 **다시 읽기 겹**
+                // (`let deep = self.deep`)을 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을
+                // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
+                let layer = match kind {
+                    Handed::Doc => Some(Layer::Subst(0)),
+                    Handed::Fork { strict } => Some(Layer::Shell { top: 0, deep: 0, strict, apace }),
+                    Handed::Eval => apace.then_some(Layer::Subst(0)),
                 };
                 let sub = usize::from(layer.is_some() || apart);
                 // 치환의 묶음은 바깥 토막의 것이 아니다 — 그 값도 바깥 명령의 값이 아니다.
@@ -8120,6 +8133,34 @@ mod tests {
         }
         assert_eq!(judge("moai -C . mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
+    }
+
+    /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
+    /// 명령의 **낱말**이지 그 명령의 값이 아니라, 안에서 집었다고 바깥 `&&` 가 집기 뒤가 되지
+    /// 않는다. 집었다는 **기록**은 남는다 — 치환은 정말 돈다.
+    ///
+    /// [`Lexer::relex`] 가 겹을 짓는 세 갈래 가운데 이 하나만 시험이 없었다(moai-wlwg 에서 재어
+    /// 봤다 — `Handed::Doc` 을 `Layer::Shell` 로 잘못 지어도 시험이 다 초록이었다). 겹의 종류를
+    /// 고르는 자리를 한 곳으로 모으면서 그 하나가 조용히 뒤집힐 자리를 함께 막는다.
+    #[test]
+    fn a_substitution_in_a_heredoc_body_does_not_hand_its_pick_to_the_outer_list() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let judge = |cmd: &str| guard_writes(&idle, &cfg(), &here(), root, root, cmd);
+        for cmd in [
+            "cat <<EOF && sed -i s/a/b/ src/x.rs\n$(moai mv t-1 in_progress --from todo)\nEOF",
+            // 안에서 이기든 `set -e` 아래 서든 같다 — 새 셸이 아니라 낱말이다.
+            "cat <<EOF && sed -i s/a/b/ src/x.rs\n$(moai mv t-1 in_progress --from todo || exit 1)\nEOF",
+            "cat <<EOF && sed -i s/a/b/ src/x.rs\n$(set -e; moai mv t-1 in_progress --from todo; echo a)\nEOF",
+        ] {
+            assert!(matches!(judge(cmd), Decision::Deny(_)), "heredoc 본문의 치환을 넘긴 글로 읽었다 — {cmd:?}");
+        }
+        // 그래도 돈 것은 돈 것이다 — 기록에는 이 세션의 확실한 집기로 남는다.
+        let stands = |_: usize, _: &str| None;
+        assert_eq!(
+            picked_in("cat <<EOF\n$(moai mv t-1 in_progress --from todo)\nEOF", &cfg(), &|_| true, &stands),
+            [("t-1".to_string(), true)]
+        );
     }
 
     /// **겹 경계에서 판이 통째로 들어가고 통째로 되돌아온다**(moai-fwet) — 한 셸에 매인 자
