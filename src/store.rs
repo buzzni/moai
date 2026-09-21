@@ -1270,35 +1270,64 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()
 /// 아니다. [`Repo::find_from`] 은 그 자리에서 [`crate::worktree::tracker_root`] 로 한
 /// 번 더 옮겨 가므로(moai-y7go), 묻지 않으면 도구가 **제가 안 읽는 트래커**를 댄다.
 pub(crate) fn planted_elsewhere(root: &Path) -> Option<Elsewhere> {
-    // **`MOAI_HERE` 가 이 물음을 통째로 끈다.** 아래 [`Repo::opened_root`] 도 같은
-    // 손잡이를 거치지만(`Repo::redirect`), 여기 한 줄로 세워야 두 갈래가 한 자로 꺼진다 — 그쪽에
-    // 맡기던 판은 켠 것이 어느 갈래를 끄는지가 두 모듈을 오가야 보였다.
-    if here_wanted() {
-        return None;
-    }
-    // **워크트리를 먼저 묻는다.** 워크트리의 루트는 조상이기도 해 아래 자가 같은 자리를 대는데,
-    // 그때 대야 할 말은 "위에 있다" 가 아니라 "여기는 워크트리다" 다.
-    let main = Repo::opened_root(root);
-    if main != root {
-        return Some(Elsewhere::Worktree(main));
-    }
-    let mut at = root.to_path_buf();
-    while at.pop() {
-        if at.join(".moai").is_dir() {
-            // **여기가 두 갈래를 가른다**(리뷰). 워크트리의 **밑자리**에서는 위의 물음이 안 선다 —
-            // [`crate::worktree::main_root`] 는 밑길을 주 체크아웃에 그대로 비추므로
-            // (`<wt>/src` → `<main>/src`), 거기 트래커가 없으면 "워크트리다" 가 아니라고 답한다.
-            // 그대로 두던 판은 워크트리의 `.moai` 를 대며 `moai -C <워크트리> init` 을 시켰는데,
-            // 그 자리의 명령은 모두 루트의 트래커를 쓰고 그 줄을 따라 친 사람은 병합에서 겨룰
-            // 파일을 고쳤다.
-            let main = Repo::opened_root(&at);
-            if main != at {
-                return Some(Elsewhere::Worktree(main));
-            }
-            return Some(Elsewhere::Above(at));
-        }
-    }
-    None
+    // **`MOAI_HERE` 가 이 물음을 통째로 끈다.** [`Repo::opened_root`] 도 같은 손잡이를 거치지만
+    // (`Repo::redirect`), 여기 한 줄로 세워야 두 갈래가 한 자로 꺼진다 — 그쪽에 맡기던 판은 켠
+    // 것이 어느 갈래를 끄는지가 두 모듈을 오가야 보였다.
+    //
+    // **끄는 자리는 여기 하나다**(moai-ko4y, 2026-09-21 사용자 결정). 알맹이([`elsewhere`])는 손잡이를
+    // 안 묻는다 — "지금 이 부름이 거절되는가" 와 "나중에 누가 어디서 `init` 을 쳐야 하나" 는 다른
+    // 물음이고, 뒤엣것은 그 사람의 셸이 무엇을 켰는지 여기서 알 수 없다([`init_belongs_at`]).
+    (!here_wanted()).then(|| elsewhere(root)).flatten()
+}
+
+/// [`planted_elsewhere`] 의 알맹이 — **`MOAI_HERE` 를 안 묻는다.**
+///
+/// **조상 훑기는 [`climb`] 하나다**(moai-c9ty). 글은 "위로 찾는 자와 같은 자" 라 적혀 있는데 걸음을
+/// 다시 적어 두었던 자리고, 두 벌이면 [`look`] 이 "못 들여다보는 조상은 건너뛴다" 를 고치는 날
+/// 이쪽만 옛 걸음으로 남는다. **제 자리는 안 묻는다** — 여기 이미 심겨 있으면 [`crate::cmd::init::run`]
+/// 이 딸린 파일만 다시 맞추므로, `root.parent()` 에서 올라간다.
+///
+/// **딸린 워크트리 안은 어디든 워크트리다**(moai-pk4x, 2026-09-21 사용자 결정). 워크트리 꼭대기만
+/// 묻던 판은 **밑자리**(`<wt>/src/deep`)에서 조상 훑기가 그 꼭대기를 지나 주 체크아웃까지 올라가
+/// [`Elsewhere::Above`] 를 냈고, `init` 은 알림 한 줄만 내고 워크트리 안에 `.moai` 를 심었다 —
+/// 아무도 안 읽고 커밋되면 병합에서 겨루는 파일이다. 가르는 자를 [`crate::worktree::main_root`]
+/// 하나로 둔다: 그것이 답하면 밑자리든 꼭대기든 워크트리고, **찾는 자리도 그것이 비추는 자리**다.
+///
+/// **대는 자리는 나를 다스리는 트래커다.** [`crate::worktree::main_root`] 가 비추는 자리
+/// (`<main>/<밑길>`)를 그대로 대면 그 디렉터리가 없을 때 대는 명령도 안 돌아, **비친 자리에서
+/// 위로 찾은** 트래커를 댄다 — 밑자리든 꼭대기든, 모노레포의 한 칸이든 같은 자 하나로 선다.
+///
+/// **찾기는 주 체크아웃을 안 떠난다**(리뷰). 조상 훑기를 제 자리에서 시작해 찾은 것을 그대로
+/// [`Elsewhere::Worktree`] 에 넣던 판은 그 갈래가 약속한 것(*나를 다스리는 주 체크아웃의 트래커*)을
+/// 셋으로 깼다 — 집에 `.moai` 를 둔 사람은 **모든 저장소의 모든 워크트리**에서 `init` 이 거절당하고
+/// 집을 다시 `init` 하라는 줄을 받았고, 트래커가 이 가지에서 처음 선 저장소는 제 워크트리 안의
+/// 자리를 "주 체크아웃" 으로 들었으며, 워크트리 안에 딴 `.moai` 가 있으면 진짜 주 체크아웃의
+/// 트래커를 아예 안 물었다. 가르는 자는 [`climb`] 의 둘째 값이다 — 제 체크아웃을 두고 올라갔으면
+/// 그것은 "위에 있다" 이지 주 체크아웃이 아니다.
+///
+/// **주 체크아웃 밖에 뜬 워크트리도 같다.** 비친 자리에서 찾으므로 `git worktree add ../side` 처럼
+/// 주 체크아웃 **밖**에 선 워크트리의 밑자리도 잡힌다 — 제 자리에서만 올라가던 판은 거기서 아무것도
+/// 못 찾아 `None` 을 냈고, `init` 이 워크트리 안에 트래커를 심었다(moai-pk4x 가 막는 바로 그것).
+///
+/// **찾은 조상이 다시 옮겨 가면 그 자리를 댄다** — 딸린 워크트리 안에 겹쳐 둔 저장소(`<wt>/vendor`)가
+/// 그 자리다. 안 묻던 판은 도구가 **제가 안 읽는 트래커**를 알림에 댔다.
+///
+/// **옮길 곳이 없으면 그 자리다**(moai-71ht.jlh). 주 체크아웃에도 위에도 트래커가 없는 워크트리 —
+/// 그 가지에서 처음 `init` 하는 자리다 — 는 `None` 이고, 거기 세우는 것이 유일한 길이다. 워크트리라는
+/// 사실만으로 거절하면 트래커를 처음 들이는 길이 통째로 막힌다.
+fn elsewhere(root: &Path) -> Option<Elsewhere> {
+    // 위에서 찾은 자리 — **찾고 나서 한 번 더 옮김을 묻는다.** 딸린 워크트리의 트래커를 잡았으면
+    // 대야 할 말은 "위에 있다" 가 아니라 그것이 옮겨 가는 자리다.
+    let above = || {
+        let at = root.parent().and_then(climb).map(|(at, _)| at)?;
+        Some(crate::worktree::tracker_root(&at).map_or(Elsewhere::Above(at), Elsewhere::Worktree))
+    };
+    // 딸린 워크트리가 아니면 위에서 찾은 것이 답이다 — 조상 훑기는 여기서 처음 돈다.
+    let Some(mirror) = crate::worktree::main_root(root) else { return above() };
+    climb(&mirror)
+        .filter(|(_, left_a_checkout)| !*left_a_checkout)
+        .map(|(at, _)| Elsewhere::Worktree(at))
+        .or_else(above)
 }
 
 /// **"여기서 `moai init` 하라" 를 대도 되는가** — 안 되면 대신 댈 주 체크아웃이다(moai-nppo).
@@ -1318,11 +1347,18 @@ pub(crate) fn planted_elsewhere(root: &Path) -> Option<Elsewhere> {
 /// 선다" 를 냈다 — 그 말은 거짓인 데다, 따라 친 `moai -C <주 체크아웃> init` 은 방금 잰 것과 **다른
 /// 체크아웃**의 `AGENTS.md` 와 딸린 파일을 고쳐, 이 워크트리의 낡은 블록은 영영 낡은 채로 남았다.
 /// 묻는 자리를 여기 두어야 표면이 다섯이 되어도 같은 답이 선다.
+///
+/// **`MOAI_HERE` 를 안 물려받는다**(moai-ko4y, 2026-09-21 사용자 결정) — [`planted_elsewhere`] 가
+/// 아니라 [`elsewhere`] 로 든다. 이 자가 답하는 것은 **나중의 다른 부름**이 어디서 서느냐라, 그
+/// 부름의 셸이 손잡이를 켤지는 여기서 알 수 없다. 물려받던 판은 `MOAI_HERE=1` 인 셸의 `moai status`
+/// 가 워크트리 줄에 `moai -C <워크트리> init` 을 댔는데, 그 줄을 접두어 없이 딴 셸에 붙여 넣으면 1 로
+/// 끝났다 — `MOAI_HERE=1 moai project ls --json` 은 `tracker_at` 을 통째로 뺐다. 지금 프로세스의
+/// 거절은 그대로 꺼진다([`planted_elsewhere`]): 그 손잡이를 켠 사람은 여기 심는 것이 뜻이다.
 pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
     if dir.join(".moai").exists() {
         return None;
     }
-    match planted_elsewhere(dir) {
+    match elsewhere(dir) {
         Some(Elsewhere::Worktree(main)) => Some(main),
         Some(Elsewhere::Above(_)) | None => None,
     }
@@ -1330,8 +1366,9 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 
 /// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**
 pub(crate) enum Elsewhere {
-    /// 딸린 워크트리의 주 체크아웃. 여기 심은 트래커는 아무도 안 읽어 `init` 이 **거절하고**,
-    /// "여기서 `init` 하라" 를 대는 표면들은 **그 자리를 대신 댄다**(moai-nppo).
+    /// 이 워크트리를 **다스리는 주 체크아웃의 트래커 자리**. 여기 심은 트래커는 아무도 안 읽어
+    /// `init` 이 **거절하고**, "여기서 `init` 하라" 를 대는 표면들은 **그 자리를 대신 댄다**(moai-nppo).
+    /// 꼭대기만이 아니라 워크트리 **밑자리**에서도 선다(moai-pk4x) — 고르는 차례는 [`elsewhere`] 에 있다.
     Worktree(PathBuf),
     /// 위에서 찾은 트래커의 뿌리. 여기 세운 것도 읽히므로 **알리기만 한다.**
     Above(PathBuf),
@@ -1358,6 +1395,26 @@ pub(crate) enum Elsewhere {
 /// ([`crate::read_marks::Settled`]).
 pub(crate) fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
+}
+
+/// 같은 자리를 가리키는 철자를 **하나로 모은다** — 링크와 `..`·끝 `/` 를 걷는다. **못 풀면 받은
+/// 철자 그대로다.**
+///
+/// **떨어지는 자를 하나로 둔다**(moai-8csx). 이 여섯 줄이 저마다 적혀 있었다 —
+/// `worktree::canonical`, `cmd::hook` 의 `picks_dir`, `cmd::skill` 의 `which` 와 `same_dir`,
+/// `scratch` 의 `Scratch::real`·`inside_checkout`, 그리고 `cmd::merge_driver` 의 `chosen_command`
+/// (목록에서 빠져 있던 여섯째다, 리뷰). 나중에 정할 것(윈도의 `\\?\` 접두어를 걷을 것인가, 못 푼
+/// 자리를 어떻게 셀 것인가)이 여섯 중 하나에만 닿으면 나머지 다섯은 옛 답을 낸다.
+///
+/// **까닭을 대야 하는 자리는 따로 선다**([`crate::read_marks::settle`]). 거기는 못 푼 까닭이
+/// 사람에게 가는 값이라 [`Settled`](crate::read_marks::Settled) 로 갈라 내고, 여기는 **자리를 못
+/// 고르는 것보다 받은 철자가 낫다** 는 쪽이다(moai-f5e3, 사용자 결정 2026-09-20). 두 물음이 달라
+/// 한 함수로 접지 않는다 — 접으면 부르는 쪽마다 `unwrap_or` 를 다시 적게 되어 지금 자리로 돌아온다.
+///
+/// 견주는 데 쓸 때는 [`crate::user_config::same_dir`] 이 이것의 짝이다 — 둘 다 못 풀면 받은 철자로
+/// 견준다.
+pub(crate) fn real(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
@@ -1642,6 +1699,146 @@ mod tests {
         std::fs::remove_dir_all(side.join(".moai")).unwrap();
         assert_eq!(init_belongs_at(&side), Some(main), "안 심긴 워크트리를 제자리라 했다");
     }
+
+    /// **moai 를 들이기 전 커밋에서 갈라진 워크트리**(moai-pk4x) — 그 안에는 `.moai` 가 한 자리도
+    /// 없어, 조상 훑기가 워크트리 꼭대기를 지나 주 체크아웃까지 올라갔다. 거기 트래커가 있으니
+    /// [`Elsewhere::Above`] 가 서고, `init` 은 알림 한 줄만 내고 **워크트리 안에** 트래커를 심었다 —
+    /// 아무도 안 읽고 커밋되면 병합에서 겨루는 파일이다(moai-mz0e 가 꼭대기에서 막는 바로 그것).
+    ///
+    /// 가르는 자는 [`crate::worktree::main_root`] 다 — 그것이 답하면 위에 무엇이 있든 워크트리다.
+    /// 대는 자리는 **실제로 읽히는 트래커**이지 비친 자리(`<main>/src/deep`, 없는 디렉터리다)가 아니다.
+    #[test]
+    fn a_worktree_that_carries_no_tracker_is_still_a_worktree() {
+        let dir = Scratch::real("init-belongs-bare-wt");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        // moai 를 들이기 **전** 커밋 — 워크트리는 여기서 갈라진다.
+        std::fs::write(main.join("README"), "before moai\n").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "before"]);
+        // 갈라질 자리를 가지로 박아 둔다 — `run_git` 은 낸 글을 안 돌려줘 sha 를 못 읽는다.
+        git(&main, &["branch", "pre"]);
+        moai_at(&main);
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        git(&main, &["add", "-A", "-f"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        git(&main, &["worktree", "add", "-q", "--detach", "side", "pre"]);
+
+        let side = main.join("side");
+        assert!(!side.join(".moai").exists(), "시험의 전제 — 워크트리가 트래커를 들고 왔다");
+        let deep = side.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+
+        match planted_elsewhere(&deep) {
+            Some(Elsewhere::Worktree(at)) => {
+                assert!(crate::user_config::same_dir(&at, &main), "주 체크아웃이 아닌 자리를 댔다 — {}", at.display());
+            }
+            Some(Elsewhere::Above(at)) => panic!("워크트리 밑자리를 '위에 있다' 로 댔다 — {}", at.display()),
+            None => panic!("워크트리 밑자리에 트래커를 심어도 된다고 했다"),
+        }
+        assert!(
+            init_belongs_at(&deep).as_deref().is_some_and(|at| crate::user_config::same_dir(at, &main)),
+            "init 을 댈 자리가 주 체크아웃이 아니다"
+        );
+    }
+
+    /// **주 체크아웃 밖에 뜬 워크트리의 밑자리도 워크트리다**(moai-pk4x, 리뷰). `git worktree add ../side`
+    /// 는 규약의 자리가 아니지만 git 이 막지 않는다 — 거기서는 조상 훑기가 제 자리에서 올라가 봐야
+    /// `.moai` 를 한 자리도 못 만나, `init` 이 **워크트리 안에** 트래커를 심었다. 꼭대기만 답을 냈던
+    /// 것은 비친 자리(`<main>`)가 마침 트래커의 자리여서다.
+    ///
+    /// 찾는 자리를 **비친 자리**로 옮기면 밑자리도 같은 답을 낸다([`elsewhere`]).
+    #[test]
+    fn a_worktree_outside_the_main_checkout_is_a_worktree_all_the_way_down() {
+        let dir = Scratch::real("init-belongs-away-wt");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        std::fs::write(main.join("README"), "before moai\n").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "before"]);
+        git(&main, &["branch", "pre"]);
+        moai_at(&main);
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        git(&main, &["add", "-A", "-f"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        // **주 체크아웃 밖**에 뜬다 — `<scratch>/side` 는 `<scratch>/main` 의 밑이 아니다.
+        git(&main, &["worktree", "add", "-q", "--detach", "../side", "pre"]);
+
+        let side = dir.join("side");
+        assert!(!side.join(".moai").exists(), "시험의 전제 — 워크트리가 트래커를 들고 왔다");
+        let deep = side.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+
+        for at in [side.as_path(), deep.as_path()] {
+            match planted_elsewhere(at) {
+                Some(Elsewhere::Worktree(told)) => assert!(
+                    crate::user_config::same_dir(&told, &main),
+                    "주 체크아웃이 아닌 자리를 댔다 — {} ({})",
+                    told.display(),
+                    at.display()
+                ),
+                Some(Elsewhere::Above(told)) => {
+                    panic!("{} 를 '위에 있다' 로 댔다 — {}", at.display(), told.display())
+                }
+                None => panic!("{} 에 트래커를 심어도 된다고 했다", at.display()),
+            }
+        }
+    }
+
+    /// **워크트리 안의 자리를 "주 체크아웃" 이라 대지 않는다**(리뷰). [`Elsewhere::Worktree`] 는
+    /// *나를 다스리는 주 체크아웃의 트래커 자리* 라는 약속인데, 찾은 조상을 그대로 그 갈래에 넣던
+    /// 판은 **그 조상이 이 워크트리 안**일 때도 그렇게 댔다 — 트래커가 이 가지에서 처음 선 저장소다.
+    /// `init` 은 거절하고 `moai -C <워크트리> init` 을 댔는데, 그 자리는 제가 방금 거절한 그 자리다.
+    ///
+    /// 같은 구멍이 `~/.moai` 를 가진 사람에게는 더 크게 섰다 — 조상 훑기가 저장소를 통째로 지나
+    /// 집을 잡아, **모든 저장소의 모든 워크트리**에서 `init` 이 거절하고 집을 다시 `init` 하라고 댔다.
+    /// 가르는 자는 [`crate::worktree::main_root`] 가 비추는 자리에서 **제 체크아웃을 안 떠나고**
+    /// 찾았는가다([`climb`] 의 둘째 값).
+    #[test]
+    fn a_tracker_inside_the_worktree_is_not_called_the_main_checkout() {
+        let dir = Scratch::real("init-belongs-only-wt");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        std::fs::write(main.join("README"), "no moai here\n").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "before"]);
+        git(&main, &["worktree", "add", "-q", "side", "-b", "side"]);
+        // 트래커는 이 가지에서 처음 섰다 — 주 체크아웃에는 없다.
+        let side = main.join("side");
+        moai_at(&side);
+        std::fs::write(side.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        assert!(!main.join(".moai").exists(), "시험의 전제 — 주 체크아웃에 트래커가 섰다");
+
+        let deep = side.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        match planted_elsewhere(&deep) {
+            Some(Elsewhere::Above(at)) => {
+                assert!(crate::user_config::same_dir(&at, &side), "위의 트래커를 딴 자리로 댔다 — {}", at.display());
+            }
+            Some(Elsewhere::Worktree(at)) => {
+                panic!("워크트리 안의 자리를 주 체크아웃이라 댔다 — {}", at.display())
+            }
+            None => panic!("위에 선 트래커를 한 줄도 안 알렸다"),
+        }
+        // 여기 세운 것은 이 밑에서 실제로 읽힌다([`Repo::find_from`] 이 워크트리의 트래커를 그대로
+        // 든다 — 주 체크아웃에 옮겨 갈 자리가 없다). 그러니 "딴 데서 쳐라" 를 대면 안 된다.
+        assert_eq!(init_belongs_at(&deep), None, "여기 세우면 읽히는데 딴 자리를 댔다");
+    }
+
+    // **`MOAI_HERE` 를 안 물려받는 것은 여기서 안 잰다**(moai-ko4y, 리뷰). 이 층에서 재려면
+    // `set_var` 로 프로세스 환경을 만져야 하는데, 단위 시험은 한 프로세스의 **스레드**로 나란히
+    // 돌아 그 값을 옆 시험이 본다 — 실제로 `a_worktree_that_carries_no_tracker_is_still_a_worktree`
+    // 가 마흔 판에 두 번 `MOAI_HERE=1` 을 물려받아 붉어졌다. `user_config::path_from` 이 환경을
+    // 인자로 받는 것과 `tests_do_not_read_the_runners_home` 이 제 바이너리를 다시 띄우는 것이 같은
+    // 까닭이다. 재는 자리는 CLI 층 하나다 — `tests/cli.rs` 의
+    // `saying_where_init_goes_does_not_inherit_moai_here` 가 손잡이를 켠 **딴 프로세스**로
+    // `--check` 의 `tracker_at` 과 거절이 꺼지는 것을 함께 잰다.
 
     const T: &str = "2026-09-11T04:12:03Z";
 
