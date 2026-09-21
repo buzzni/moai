@@ -1261,9 +1261,14 @@ pub struct Stand<'a, 'c> {
     /// ([`Waiting::Shelved`]) 아직 굴러가는 묶음에서는 미룬 멤버가 있어도 비어 있다. 막대 곁에
     /// 댈 수는 언제나 서야 하므로 여기서 따로 센다.
     ///
-    /// **묶음 제가 받은 미룸으로 빠진 멤버는 안 센다** — [`counted`] 가 그런 멤버를 안 빼기
-    /// 때문이고, 그래야 미뤄 둔 묶음이 `0/N  미룬 N` 으로 제 미룸을 멤버의 미룸인 양 말하지
-    /// 않는다. 그 묶음은 제 줄이 `put_off` 로 이미 말한다.
+    /// **제가 계획 밖인 묶음은 0 이다.** 그 밑은 통째로 계획 밖이라 셀 것이 따로 없고, 그 말은
+    /// 묶음 제 줄이 `put_off` 로 이미 한다 — `0/N  미룬 N` 으로 제 미룸을 멤버의 미룸인 양 두
+    /// 번 말하지 않는다.
+    ///
+    /// **[`counted`] 의 차만으로는 모자라다**(리뷰). 그쪽은 묶음 제 미룸으로 빠진 멤버만 도로
+    /// 세므로, 제 줄도 미뤘고 **멤버 하나가 따로 또 미뤄진** 판에서는 그 하나만 남아 `0/2
+    /// 미룬 1  미룸` 이 선다 — 둘 다 계획 밖인데 화면은 하나가 아직 집을 것이라고 말한다.
+    /// 그래서 셈 앞에서 묶음 제 미룸을 먼저 가른다.
     pub deferred: usize,
 }
 
@@ -1334,7 +1339,15 @@ pub fn group_stands_in<'a, 'c>(
             // **막대가 세는 것에서 칸이 세는 것을 뺀 것**이다(moai-zxwj) — 두 셈이 이미 여기
             // 나란히 서 있으므로 새로 걷는 걸음이 없다. 둘 중 하나만 고치는 날 이 수가 0 이 되어
             // 화면이 먼저 말한다.
-            let deferred = of.len() - counted.len();
+            //
+            // **제가 계획 밖인 묶음은 세지 않는다**(리뷰). `counted` 는 묶음 제 미룸으로 빠진
+            // 멤버를 도로 세므로, 제 줄도 미뤘고 멤버 하나가 따로 또 미뤄진 판에서는 그 차가
+            // 1 이다 — 둘 다 계획 밖인데 `0/2  미룬 1  미룸` 이 서서 하나는 아직 집을 것이라고
+            // 말한다. 그 줄이 할 말은 `put_off` 하나다.
+            let deferred = match roots.contains_key(g.id.as_str()) {
+                true => 0,
+                false => of.len() - counted.len(),
+            };
             (g.id.as_str(), Stand { column, since, busy, waiting, aside, progress, deferred })
         })
         .collect()
@@ -5522,8 +5535,20 @@ mod tests {
         // 묶음 제가 미뤄 멤버가 물려받은 것은 안 센다 — 그 줄은 `put_off` 가 말한다.
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
-        let inherited = vec![epic, member("argos-0002", "argos-0001", "todo")];
+        let inherited = vec![epic.clone(), member("argos-0002", "argos-0001", "todo")];
         assert_eq!(group_stands(&inherited, &cfg)["argos-0001"].deferred, 0, "제 미룸을 멤버의 것인 양 셌다");
+
+        // **제 줄도 미뤘는데 멤버 하나가 따로 또 미뤄진 판**(리뷰). `counted` 는 묶음 제 미룸으로
+        // 빠진 멤버만 도로 세므로 그 차가 1 인데, 둘 다 계획 밖이다 — 그대로 내면 화면이
+        // `0/2  미룬 1  미룸` 으로 "하나는 아직 집을 것" 이라고 거짓을 말한다.
+        let mut twice = member("argos-0003", "argos-0001", "todo");
+        twice.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let both = vec![epic, member("argos-0002", "argos-0001", "todo"), twice];
+        assert_eq!(
+            group_stands(&both, &cfg)["argos-0001"].deferred,
+            0,
+            "통째로 계획 밖인 묶음이 멤버 하나만 미뤘다고 말한다"
+        );
     }
 
     /// `ready` 가 미룬 막음에 대는 도로 집는 말도 풀어야 할 미룸을 다 댄다(moai-g2a1).

@@ -12595,8 +12595,9 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
 ///
 /// **여기가 없으면 `main` 의 `unread_journals()` 를 지워도 아무것도 안 붉어진다** — 단위 시험은
 /// `tell_unread` 를 곧바로 부르므로 그 줄이 `main` 에 서 있는지를, 그러니까 사람이 실제로 보는
-/// 종료 코드를 재지 않는다. 기계가 "이력이 없다" 와 "못 읽었다" 를 가르는 자가 오늘은 그 코드
-/// 하나뿐이라(moai-f2lc 전까지) 그 줄이 조용히 빠지는 것은 반쪽이 아니라 조용한 손실이다.
+/// 종료 코드를 재지 않는다. 어느 줄의 이력이 덜 왔는지는 `show --json` 의 `journal_error` 가
+/// 대지만(moai-f2lc), 저널을 안 읽는 명령이 "이 판이 온전치 않다" 를 말하는 자는 그 코드
+/// 하나뿐이라, 그 줄이 조용히 빠지는 것은 반쪽이 아니라 조용한 손실이다.
 #[cfg(unix)]
 #[test]
 fn an_unreadable_journal_is_named_and_only_my_own_fails_the_run() {
@@ -15772,13 +15773,26 @@ fn an_unread_journal_stands_in_the_json_beside_the_row_it_cost() {
     assert!(row.contains(r#""journal_error":[{"kind":"permission""#), "목록 줄에 안 섰다\n{row}");
 
     // **옆 워크트리의 것은 내 줄에 안 붙는다** — 종료 코드를 안 바꾸는 것과 같은 금이다.
+    //
+    // **목록으로 잰다**(리뷰). 하나를 펼치는 길은 그 줄의 뿌리 저널만 읽으므로, 옆의 잠긴
+    // 파일은 아예 안 만져 `journal_unread()` 가 빈 채로 끝난다 — 뿌리로 가르는 자를 통째로
+    // 걷어내도 그 재기는 파랬다. 겹쳐 온 줄까지 저널을 읽는 자리는 목록(`work_by_id`)이고,
+    // 거기서만 한 판에 두 체크아웃의 자리가 섞인다.
     let theirs = only_journal(&t.feat());
     std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let out = moai(&main, &["show", &t.tied, "--json", "--worktree"]);
+    let out = moai(&main, &["show", "--json", "--worktree"]);
     std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
-    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    let rows = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(out.status.success(), "옆 워크트리의 저널로 실패했다 — {}", String::from_utf8_lossy(&out.stderr));
-    assert!(!shown.contains("journal_error"), "옆 체크아웃의 자리를 내 줄에 달았다\n{shown}");
+    let row = |id: &str| {
+        rows.split("},{")
+            .find(|r| r.contains(&format!(r#""id":"{id}""#)))
+            .unwrap_or_else(|| panic!("{id} 줄이 없다\n{rows}"))
+            .to_string()
+    };
+    // 옆에서만 사는 줄은 제 워크트리의 실패를 달고 선다 — 이 판이 저널을 정말 읽었다는 증거다.
+    assert!(row(&t.made).contains(r#""journal_error":[{"kind":"permission""#), "옆 줄에 안 섰다\n{rows}");
+    assert!(!row(&t.tied).contains("journal_error"), "옆 체크아웃의 자리를 내 줄에 달았다\n{rows}");
     let _ = (&t.epic, &t.picked);
 }
 

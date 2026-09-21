@@ -984,8 +984,9 @@ pub fn status(
             // 넷을 영영 안 해도 100% 가 안 된다. 그것이 정한 값인데 화면이 말하지 않으면 읽는
             // 쪽은 `102/110` 에서 여덟이 남은 줄 알고, 셈이 깨졌다고 읽는다.
             //
-            // **미뤄 둔 묶음에는 안 선다** — `Stand::deferred` 가 제 미룸으로 빠진 멤버를 안
-            // 세므로 0 이고, 그 줄은 위의 `put_off` 가 이미 말한다.
+            // **계획 밖으로 나간 묶음에는 안 선다** — `Stand::deferred` 가 그런 묶음을 0 으로
+            // 내므로(제 미룸으로 빠진 멤버도, 그 위에 따로 미룬 멤버도), 그 줄은 위의 `put_off`
+            // 가 한 낱말로 말한다.
             let aside = set_aside(e.deferred, lang);
             out.push(format!(
                 "  {}  {}  {}  {}/{}{}{}",
@@ -3808,12 +3809,24 @@ mod tests {
         shelved_epic.deferred_at = Some("2026-09-10T00:00:00Z".into());
         let mut member = issue("argos-0002", "멤버", "todo");
         member.epic = Some("argos-0001".into());
-        let under = vec![shelved_epic, member];
+        let under = vec![shelved_epic.clone(), member.clone()];
         let text = table(&under, lang);
         assert!(text.contains(say(lang, "status.put_off")), "미뤄 둔 묶음이라고 안 말한다 — {text}");
         assert!(
             !text.contains(&fill(say(lang, "status.deferred_members"), &[("n", "1")])),
             "제 미룸을 멤버의 것인 양 두 번 말한다 — {text}"
+        );
+
+        // **제 줄도 미뤘는데 멤버 하나를 또 미룬 판도 마찬가지다**(리뷰). 둘 다 계획 밖인데
+        // 꼬리가 서면 `0/2  미룬 1  미룸` 이 되어, 읽는 쪽은 하나가 아직 집을 것이라고 읽는다.
+        let mut twice = issue("argos-0003", "또 미룬 멤버", "todo");
+        twice.epic = Some("argos-0001".into());
+        twice.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let text = table(&[shelved_epic, member, twice], lang);
+        assert!(text.contains(say(lang, "status.put_off")), "미뤄 둔 묶음이라고 안 말한다 — {text}");
+        assert!(
+            !text.contains(&fill(say(lang, "status.deferred_members"), &[("n", "1")])),
+            "통째로 계획 밖인 묶음이 하나는 집을 것이라고 말한다 — {text}"
         );
     }
 

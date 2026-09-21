@@ -1140,8 +1140,10 @@ fn note_unread(root: &Path, at: &Path, err: &std::io::Error) {
 /// io 의 실패를 [`Unread::kind`] 로 접는다.
 ///
 /// **가르는 것은 고칠 수 있는가다.** `permission` 하나만 따로 세우는 까닭은 그것이 `chmod` 한
-/// 줄로 풀리는 유일한 갈래여서고, 나머지는 받는 쪽이 할 일이 같다. `NotFound` 는 여기 안 온다 —
-/// 없는 저널은 고장이 아니라 [`Repo::journal_files`] 와 [`Repo::journal_by_id`] 가 그냥 넘긴다.
+/// 줄로 풀리는 유일한 갈래여서고, 나머지는 받는 쪽이 할 일이 같다. 없는 저널은 고장이 아니라
+/// [`Repo::journal_files`] 와 [`Repo::journal_by_id`] 가 그냥 넘기므로 `NotFound` 는 거의 안
+/// 온다 — `journal/` 안의 끊긴 심볼릭 링크가 [`Repo::journal_files`] 의 `metadata` 에서 하나
+/// 들어오는데, 그것도 `chmod` 로는 안 풀리니 `failed` 가 제자리다.
 fn unread_kind(err: &std::io::Error) -> &'static str {
     match err.kind() {
         std::io::ErrorKind::PermissionDenied => "permission",
