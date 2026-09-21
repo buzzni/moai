@@ -4892,7 +4892,7 @@ pub(super) mod tests {
     #[test]
     fn a_machine_without_an_identity_still_draws_the_header() {
         let mut a = app();
-        a.identify = |_, _| Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR));
+        a.identify = |_, _| Err(crate::model::NoActor::Unknown);
         let lines = render(&mut a, 100, 24);
         let head = lines[..6].join("\n");
         assert!(head.contains("User") && head.contains('—'), "모르는 자리를 안 비웠다\n{head}");
@@ -4908,7 +4908,7 @@ pub(super) mod tests {
     fn the_header_resolves_the_user_once_not_every_frame() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        fn counted(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn counted(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             CALLS.fetch_add(1, Ordering::SeqCst);
             Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() })
         }

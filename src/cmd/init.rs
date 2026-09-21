@@ -811,7 +811,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
         // 바꾸면 그 줄들이 제 접두어를 잃는다.
         (Some(p), true) => {
-            let cur = crate::config::Config::load(&root).map_err(Fail::new)?.prefix;
+            let cur = crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix;
             if p != cur {
                 return Err(Fail::coded(
                     format!(
@@ -832,7 +834,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
         // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
         (Some(p), false) => {
-            crate::config::check_prefix(p).map_err(Fail::new)?;
+            crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
             if p.chars().count() > PREFIX_MAX {
                 return Err(Fail::coded(
                     format!(
@@ -848,7 +850,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
             }
             p.to_string()
         }
-        (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
+        (None, true) => {
+            crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix
+        }
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
@@ -870,7 +876,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
          # How a person is shown: full (`Name (email)`) · name · email\nnaming = \"full\"\n"
     );
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
-    crate::config::Config::parse(&config).map_err(Fail::new)?;
+    crate::config::Config::parse(&config).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
 
     // AGENTS.md 도 **아무것도 심기 전에** 읽는다. 못 읽는 파일(UTF-8 아님·권한)을 빈 글로 치면
     // 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다 — 멈추되, `.moai/` 를 만든 뒤에 멈추면
@@ -1379,7 +1385,7 @@ mod tests {
             assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
             // 줄인 것도 설정이 받는 접두어다.
             crate::config::Config::parse(&format!("prefix = \"{got}\"\n"))
-                .unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
+                .unwrap_or_else(|e| panic!("{full} → {got}: {e:?}"));
         }
     }
 

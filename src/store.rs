@@ -5,6 +5,7 @@
 
 use crate::config::Config;
 use crate::fail::{Fail, R, code};
+use crate::i18n::Lang;
 use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -348,9 +349,11 @@ impl Repo {
     /// 못 찾은 것과 찾았는데 설정이 깨진 것은 다르다. `.moai` 밖에서 부른
     /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
     /// 한눈 보기로 넘기면 제 저장소의 깨진 설정이 남의 프로젝트 목록 뒤에 숨는다.
-    pub fn find() -> R<Option<Repo>> {
+    /// **말은 거절할 때만 묻는다**(moai-iq7j·moai-ivt9) — 설정이 깨진 판에서만 [`Lang`] 을 푼다.
+    /// 값으로 받으면 멀쩡한 판마다 사용자 설정을 열고, 훅은 도구 호출마다 이 길을 지난다.
+    pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
         let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-        Repo::find_from(&dir)
+        Repo::find_from(&dir, lang)
     }
 
     /// [`Repo::find`] 를 준 디렉터리에서 — 훅이 명령이 가리키는 트래커(`-C`·`cd`)를 찾을 때 쓴다.
@@ -372,8 +375,8 @@ impl Repo {
     /// 쓰던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
-    pub fn find_from(dir: &Path) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(Repo::from_found).transpose()
+    pub fn find_from(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
+        Repo::found_root(dir).map(|found| Repo::from_found(found, lang)).transpose()
     }
 
     /// 찾은 자리로 [`Repo`] 를 짓는다 — **옮겨 가는 길은 여기 하나다**([`Repo::find_from`] 이 쓴다).
@@ -385,13 +388,13 @@ impl Repo {
     /// 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
     /// 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
     /// 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
-    fn from_found(found: PathBuf) -> R<Repo> {
+    fn from_found(found: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
         let Some(root) = Repo::redirect(&found) else {
-            return Repo::rooted(found);
+            return Repo::rooted(found, lang);
         };
         // **설정은 한 번만 읽는다** — 찾은 자리로 [`Repo`] 를 지어 놓고 버리던 판은 워크트리의
         // `config.toml` 을 읽고 안 쓴 채 버렸다. 훅이 도구 호출마다 지나는 길이다.
-        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root)? })
+        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root, lang)? })
     }
 
     /// [`Repo::find_from`] 과 같되 **안 옮긴다** — 찾은 자리의 트래커 그대로다.
@@ -399,8 +402,8 @@ impl Repo {
     /// 옮겨 갈 루트를 못 읽을 때(거기 `config.toml` 이 깨졌다) 물러설 자리다. 훅이 그 자리로
     /// 선다 — `moai` 는 크게 실패하는 것이 맞지만, 훅까지 조용해지면 그 한 파일 때문에 저장소의
     /// 모든 워크트리에서 규칙이 통째로 꺼진다(리뷰 moai-71ht.i1u).
-    pub fn find_here(dir: &Path) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(Repo::rooted).transpose()
+    pub fn find_here(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
+        Repo::found_root(dir).map(|root| Repo::rooted(root, lang)).transpose()
     }
 
     /// 이 자리의 트래커가 **옮겨 갈 루트** — 옮기지 않을 자리면 `None`.
@@ -425,8 +428,10 @@ impl Repo {
         look(dir)
     }
 
-    fn rooted(root: PathBuf) -> R<Repo> {
-        let config = Config::load(&root)?;
+    /// **설정의 거절도 자료로 받는다**(moai-ivt9) — `config::Config::load` 는 화면 말을 모르고,
+    /// 펴는 자는 여기 하나다([`crate::view::config_refused`]).
+    fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
+        let config = Config::load(&root).map_err(|why| Fail::new(crate::view::config_refused(lang(), &why)))?;
         Ok(Repo::at(root, config))
     }
 
@@ -462,8 +467,10 @@ impl Repo {
             // 칠 때와 다른 파일이 바뀐다. **위로 찾지 않는다는 계약은 그대로다** — 옮기는 곳은 위가
             // 아니라 같은 나무의 주 체크아웃이고, 거기에 트래커가 없으면 옮기지 않는다.
             Ok(m) if m.is_dir() => match Repo::redirect(dir) {
-                Some(root) => Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root)? })),
-                None => Repo::rooted(dir.to_path_buf()).map(Opened::Repo),
+                Some(root) => {
+                    Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
+                }
+                None => Repo::rooted(dir.to_path_buf(), lang).map(Opened::Repo),
             },
             // `.moai` 가 파일이면 저장소가 아니다 — 위로 찾는 [`Repo::find`] 의 `is_dir` 과 같은 자다.
             Ok(_) => Ok(Opened::Uninit),
@@ -472,7 +479,9 @@ impl Repo {
             // 어느 길도 그 트래커를 안 읽고(CLI 는 위로 찾아 루트로 간다) 커밋하면 병합에서 `config.toml`
             // 이 add/add 로 부딪힌다 — 아무도 안 읽는 파일을 만들라고 시킨 셈이었다.
             Err(e) if gone(&e) => match Repo::redirect(dir) {
-                Some(root) => Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root)? })),
+                Some(root) => {
+                    Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
+                }
                 None => Ok(Opened::Uninit),
             },
             // 권한 없음 따위는 init 전이 아니다. 접으면 "init 하라" 는 틀린 말을 한다.

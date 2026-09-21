@@ -53,7 +53,7 @@ fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
         if let Sel::Is(v) = one
             && v == "me"
         {
-            let me = model::actor(ctx.user.as_deref(), root)?;
+            let me = model::actor(ctx.user.as_deref(), root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
             *one = Sel::Is(format!("{} ({})", me.name, me.email));
         }
     }
@@ -206,7 +206,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let soil = crate::report::Soil::of(&load.issues);
     let tree_now = args.tree && !ctx.json;
     let index = tree_now.then(|| crate::nav::Index::in_soil(&load.issues, &soil));
-    let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil));
+    let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil, ctx.lang()));
     let wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
@@ -275,7 +275,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
-        &report::epic_labels(&load.issues),
+        &report::epic_labels(&load.issues, ctx.lang()),
         asked_deferred,
         &wh,
         screen,
@@ -452,7 +452,7 @@ fn one(
     let root = commit_home(repo, origin, &issue.id);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
-        Err(e) => (Vec::new(), Some(e.told(root))),
+        Err(e) => (Vec::new(), Some(e.told(root, ctx.lang()))),
     };
 
     if ctx.json {
@@ -538,7 +538,7 @@ fn one(
             Kind::Milestone => &soil.milestone,
             _ => &soil.epic,
         };
-        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
+        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed, ctx.lang())
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = &roll {
@@ -570,7 +570,7 @@ fn one(
                 // (마일스톤 밑의 에픽, 에픽 밑에는 없다), 빈 것을 건네면 그 줄이
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
-                let rolls = report::rollup_in(all, &repo.config, &soil);
+                let rolls = report::rollup_in(all, &repo.config, &soil, ctx.lang());
                 // **상세가 이미 든 화면을 그대로 쓴다**(리뷰) — `seen.screen` 이 바로 그 값이고
                 // [`view::Screen`] 은 `Copy` 다. 여기서 다시 지으면 한 번 펼치는 화면 안에 같은
                 // 맥락을 짓는 자리가 둘이 된다.

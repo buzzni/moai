@@ -8084,7 +8084,7 @@ fn an_add_whose_journal_fails_succeeds_and_says_so() {
     let out = moai(s.path(), &["add", "한 번만", "-q"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "담겼는데 실패로 끝났다 — {err}");
-    assert!(err.contains("이력(journal.jsonl)은 못 남겼다"), "{err}");
+    assert!(err.contains("이력은 못 남겼다") && err.contains("journal.jsonl"), "{err}");
     assert_eq!(issues(s.path()).matches("한 번만").count(), 1);
 
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();

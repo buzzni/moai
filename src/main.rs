@@ -48,12 +48,23 @@ macro_rules! outln {
             // 받는 쪽이 닫혔으면 남은 출력만 버린다. 그 밖의 쓰기 실패(디스크가
             // 찼다 등)는 명령이 알 길이 없어, 여기서 끝내야 성공으로 안 보인다.
             if e.kind() != std::io::ErrorKind::BrokenPipe {
-                eprintln!("moai: 출력을 쓰지 못했다: {e}");
+                eprintln!("moai: {}", i18n::fill(i18n::say(said_lang(), "warn.stdout_lost"), &[("why", &e.to_string())]));
                 std::process::exit(1);
             }
             return;
         }
     }};
+}
+
+/// 이 파일의 알림이 쓸 화면 말(moai-vjlh).
+///
+/// **[`cmd::Ctx`] 는 여기까지 안 온다** — `cmd::run` 이 `cli` 째로 삼키고 끝난다. 그래서 사용자
+/// 설정을 한 번 더 읽는데, 이 줄들은 할 말이 있을 때만 서므로(셋 다 먼저 비었는지 본다) 거의
+/// 모든 판에서 읽지 않는다. `OnceLock` 은 한 판에 여러 줄이 설 때(프로젝트마다 한 줄) 같은
+/// 파일을 그만큼 다시 파지 않게 한다.
+fn said_lang() -> i18n::Lang {
+    static LANG: std::sync::OnceLock<i18n::Lang> = std::sync::OnceLock::new();
+    *LANG.get_or_init(|| cmd::lang_of(&user_config::read(user_config::path().as_deref())))
 }
 
 fn main() -> ExitCode {
@@ -138,14 +149,21 @@ fn carried() {
     if tallies.iter().all(|(_, t)| t.carried == 0 && t.seen == 0) {
         return;
     }
-    let here = store::Repo::find().ok().flatten().map(|r| r.root);
+    let lang = said_lang();
+    let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
     for (root, tally) in tallies {
+        // **갈래마다 제 `say` 를 적는다** — 키를 변수로 고르면 소스를 훑는 시험
+        // (`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
         let said = match tally {
-            store::Tally { carried: n @ 1.., .. } => format!("읽을 수 없는 줄 {n}개를 그대로 두고 썼다"),
+            store::Tally { carried: n @ 1.., .. } => {
+                i18n::fill(i18n::say(lang, "warn.carried_wrote"), &[("n", &n.to_string())])
+            }
             store::Tally { seen: 0, .. } => continue,
-            store::Tally { wrote: true, seen: n, .. } => format!("읽을 수 없는 줄 {n}개가 파일에 있다"),
+            store::Tally { wrote: true, seen: n, .. } => {
+                i18n::fill(i18n::say(lang, "warn.carried_seen"), &[("n", &n.to_string())])
+            }
             store::Tally { wrote: false, seen: n, .. } => {
-                format!("읽을 수 없는 줄 {n}개가 파일에 있다, 이번 명령은 그 파일을 안 건드렸다")
+                i18n::fill(i18n::say(lang, "warn.carried_untouched"), &[("n", &n.to_string())])
             }
         };
         let show = match &here {
@@ -157,8 +175,9 @@ fn carried() {
             // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
             // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
             // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
-            "{}{said} — 어느 줄인지는 `{show}` 가 낸다",
-            style::paint(style::WARN, "moai: ")
+            "{}{}",
+            style::paint(style::WARN, "moai: "),
+            i18n::fill(i18n::say(lang, "warn.carried_where"), &[("said", &said), ("show", &show)])
         );
     }
 }
@@ -187,19 +206,23 @@ fn redirected(climbs: bool) {
     for (from, to) in climbs.then(store::climbs).unwrap_or_default() {
         let _ = writeln!(
             anstream::stderr().lock(),
-            "{}{} 위로 올라가 {} 의 트래커를 잡았다 — 여기에는 `.moai` 가 없다",
+            "{}{}",
             style::paint(style::WARN, "moai: "),
-            from.display(),
-            to.display()
+            i18n::fill(
+                i18n::say(said_lang(), "warn.tracker_climbed"),
+                &[("from", &from.display().to_string()), ("to", &to.display().to_string())]
+            )
         );
     }
     for (from, to) in store::redirects() {
         let _ = writeln!(
             anstream::stderr().lock(),
-            "{}{} 는 딸린 워크트리라 루트의 트래커에 썼다 — {}",
+            "{}{}",
             style::paint(style::WARN, "moai: "),
-            from.display(),
-            to.display()
+            i18n::fill(
+                i18n::say(said_lang(), "warn.tracker_moved"),
+                &[("from", &from.display().to_string()), ("to", &to.display().to_string())]
+            )
         );
     }
 }
@@ -215,7 +238,8 @@ fn unjournaled() {
     if missed.is_empty() {
         return;
     }
-    let here = store::Repo::find().ok().flatten().map(|r| r.root);
+    let lang = said_lang();
+    let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
     for (root, why) in missed {
         let whose = match &here {
             Some(h) if *h == root => String::new(),
@@ -223,8 +247,9 @@ fn unjournaled() {
         };
         let _ = writeln!(
             anstream::stderr().lock(),
-            "{}썼지만 이력(journal.jsonl)은 못 남겼다{whose} — {why}. 이슈는 담겼으니 다시 부르지 않는다",
-            style::paint(style::WARN, "moai: ")
+            "{}{}",
+            style::paint(style::WARN, "moai: "),
+            i18n::fill(i18n::say(lang, "warn.unjournaled"), &[("whose", &whose), ("why", &why)])
         );
     }
 }

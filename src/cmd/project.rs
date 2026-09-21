@@ -351,7 +351,8 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
         projects::State::Open { repo, load } => {
             let unreadable = load.unreadable();
             State::Initialized {
-                counts: report::status(&load.issues, &unreadable, &repo.config, now).counts,
+                counts: report::status(&load.issues, &unreadable, &repo.config, now, crate::i18n::Lang::default())
+                    .counts,
                 unreadable: load.errors.len(),
                 columns: &repo.config.statuses,
             }

@@ -5,6 +5,7 @@
 //! `view.rs` 에 있으면 표면이 늘 때마다 같은 것을 다시 짜야 한다.
 
 use crate::config::Config;
+use crate::i18n::say;
 use crate::model::{Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,12 +51,14 @@ pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
 /// 줄이 목록 칸에서만 멤버로 섰다(moai-b5lu). 뒷줄의 종류로 키를 짜면 가려진 줄은
 /// 저절로 못 찾고, 같은 종류의 쌍둥이는 전처럼 같은 칸을 받는다. 찾는 쪽은
 /// `(i.id, i.kind)` 로 묻는다.
-pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
+pub fn epic_labels(all: &[Issue], lang: crate::i18n::Lang) -> EpicLabels<'_> {
+    // **끊긴 참조의 낱말도 화면 말이다**(moai-ivt9) — 이 값은 목록 칸에 그대로 그려진다.
+    let gone = crate::i18n::say(lang, "report.epic_gone");
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     groups(all)
         .into_iter()
         .filter_map(|(id, epic)| {
-            let title = by_id.get(epic).map_or("(없는 에픽)", |e| e.title.as_str());
+            let title = by_id.get(epic).map_or(gone, |e| e.title.as_str());
             by_id.get(id).map(|row| ((id, row.kind), title.to_string()))
         })
         .collect()
@@ -1049,7 +1052,7 @@ pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) ->
     // 하루가 안 된 것에 다 `0일` 이 붙어 "방금 집었다" 로 읽힌다. 안 실으면 보는 쪽이 칸 나이를
     // 내는데 그 값이 똑같으므로 화면은 그대로고, `--json` 에서 속이는 키 하나가 준다.
     (!lost.is_empty())
-        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m '왜'"))
+        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m '<why>'"))
 }
 
 /// 같은 id 를 쓰는 줄이 **둘 이상이면** 그 수. 하나뿐이면 `None`.
@@ -2151,10 +2154,14 @@ pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     rollup_of(Kind::Epic, issues, cfg)
 }
 
+/// 시험이 쓰는 말 — 거절문의 낱말을 재는 자리가 돌리는 사람의 설정에 안 달리게 박아 둔다.
+#[cfg(test)]
+const TEST_LANG: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
 /// [`rollup`] 과 같은 것. **이미 잰 지도를 받는다**([`Soil`]) — `moai show --tree` 는 바로 옆에서
 /// 거름망과 색인을 같은 지도로 짓는다(moai-g0zx).
-pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>) -> Vec<Roll> {
-    rollup_of_in(Kind::Epic, issues, cfg, &soil.epic, &soil.eclipsed())
+pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>, lang: crate::i18n::Lang) -> Vec<Roll> {
+    rollup_of_in(Kind::Epic, issues, cfg, &soil.epic, &soil.eclipsed(), lang)
 }
 
 /// `kind` 가 에픽이든 마일스톤이든 같은 셈을 한다. **일은 이슈가 한다** —
@@ -2162,7 +2169,7 @@ pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>) -> Vec<Roll> {
 // 바이너리는 지도를 든 [`rollup_of_in`] 을 부른다(moai-g0zx) — 이 꼴은 시험의 짧은 길이다.
 #[cfg(test)]
 pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
-    rollup_of_in(kind, issues, cfg, &group_for(kind, issues), &eclipsed(issues))
+    rollup_of_in(kind, issues, cfg, &group_for(kind, issues), &eclipsed(issues), TEST_LANG)
 }
 
 /// [`rollup_of`] 와 같은 것. **그 종류의 소속 지도와 가려짐을 받는다**(moai-oxup) — `status` 는 에픽과
@@ -2174,6 +2181,7 @@ pub fn rollup_of_in(
     cfg: &Config,
     group: &BTreeMap<&str, &str>,
     eclipsed: &impl Fn(&Issue) -> bool,
+    lang: crate::i18n::Lang,
 ) -> Vec<Roll> {
     let tally = |members: &[&Issue]| {
         let counts: BTreeMap<String, usize> = cfg
@@ -2207,9 +2215,10 @@ pub fn rollup_of_in(
     let loose: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !eclipsed(i) && !group.contains_key(i.id.as_str())).collect();
     let (counts, total, done, percent) = tally(&loose);
+    // **갈래마다 제 `say` 를 적는다** — 키를 `match` 의 팔로 넘기면 소스를 훑는 시험의 눈에서 사라진다.
     let none = match kind {
-        Kind::Milestone => "마일스톤 없음",
-        _ => "에픽 없음",
+        Kind::Milestone => say(lang, "report.no_milestone_group"),
+        _ => say(lang, "report.no_epic_group"),
     };
     out.push(Roll { id: None, title: none.into(), counts, total, done, percent, column: None });
     out
@@ -3053,10 +3062,16 @@ pub struct Unreadable<'a> {
 }
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
-pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
+pub fn status(
+    issues: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    lang: crate::i18n::Lang,
+) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
-    status_in(issues, unreadable, cfg, now, &Soil::of(issues))
+    status_in(issues, unreadable, cfg, now, &Soil::of(issues), lang)
 }
 
 /// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고
@@ -3067,6 +3082,7 @@ pub fn status_in<'a>(
     cfg: &Config,
     now: &str,
     soil: &Soil<'a>,
+    lang: crate::i18n::Lang,
 ) -> StatusReport {
     let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
@@ -3093,7 +3109,7 @@ pub fn status_in<'a>(
         cfg.statuses.iter().map(|s| (s.clone(), work.iter().filter(|i| i.status.as_str() == s).count())).collect();
 
     let eclipsed = soil.eclipsed();
-    let rolls = rollup_of_in(Kind::Epic, issues, cfg, group, &eclipsed);
+    let rolls = rollup_of_in(Kind::Epic, issues, cfg, group, &eclipsed, lang);
     // **묶음 줄에는 읽은 칸을 곁들인다.** 막대(`3/5`)는 계획 중 얼마나 했나이고 칸은
     // 지금 할 것이 남았나라, 남은 멤버를 미뤄 접은 묶음은 `1/2` 인 채로 닫혀 있다 —
     // 세션이 여기서 시작하는데 그것을 안 말하면 접은 묶음과 굴러가는 묶음이 같아 보인다.
@@ -3103,7 +3119,7 @@ pub fn status_in<'a>(
     };
     let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
-    let stones: Vec<Roll> = rollup_of_in(Kind::Milestone, issues, cfg, &soil.milestone, &eclipsed)
+    let stones: Vec<Roll> = rollup_of_in(Kind::Milestone, issues, cfg, &soil.milestone, &eclipsed, lang)
         .into_iter()
         .filter(|r| r.id.is_some())
         .map(stood)
@@ -3481,6 +3497,12 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 보드를 [`TEST_LANG`] 으로 잰다 — 셈을 재는 시험이 돌리는 사람의 화면 말에 안 달리게,
+    /// 말을 든 [`super::status`] 를 여기서 한 번 감싼다(moai-ivt9).
+    fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
+        super::status(issues, unreadable, cfg, now, TEST_LANG)
     }
 
     /// 아무것도 안 적은 저장소가 받는 문턱. **기본값을 여기 다시 적지 않는다** —
@@ -6033,7 +6055,7 @@ mod tests {
         let mut held = make("argos-0001", Kind::Idea, "todo");
         held.epic = Some("argos-e001".into());
         let rows = [epic, bare, held];
-        let labels = epic_labels(&rows);
+        let labels = epic_labels(&rows, TEST_LANG);
         assert_eq!(labels.get(&("argos-0001", Kind::Idea)).map(String::as_str), Some("argos-e001 제목"));
         assert_eq!(labels.get(&("argos-0001", Kind::Issue)), None, "가려진 줄이 쌍둥이 에픽을 달았다 — {labels:?}");
 

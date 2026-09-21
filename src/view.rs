@@ -2507,6 +2507,108 @@ pub fn no_such_column(lang: Lang, why: &crate::config::NoSuchColumn) -> String {
     }
 }
 
+/// 누가 하는지 모를 때의 글([`crate::model::NoActor`], moai-ivt9).
+///
+/// **무엇을 주면 되는지를 함께 댄다** — 이 거절은 게이트가 아니라 입력이 모자라다는 말이고,
+/// `--user` 와 `MOAI_ACTOR` 둘 다 사람 없이 채워진다. 어디를 고치는지 안 대면 그 자리에서
+/// 사람을 부르는 것과 같아진다.
+pub fn no_actor(lang: Lang, why: &crate::model::NoActor) -> String {
+    use crate::model::NoActor;
+    // **고칠 명령은 안 옮긴다** — 그대로 쳐야 하는 글자다(`.gitattributes` 가 심는 줄과 같은 까닭).
+    // 말묶음에 안 두는 까닭이 하나 더 있다: 실린 글은 한 줄이어야 해서
+    // (`i18n::tests::every_translation_keeps_the_places_english_marks`) 여러 줄은 여기서 잇는다.
+    const HOW: &str = "  git config user.name  \"Name\"\n  git config user.email \"email\"";
+    match why {
+        NoActor::Unknown => {
+            format!("{}\n\n{HOW}\n\n{}", say(lang, "refuse.no_actor"), say(lang, "refuse.actor_by_hand"))
+        }
+        NoActor::BadIdentity { label } => {
+            let said = fill(say(lang, "refuse.bad_git_identity"), &[("label", &format!("{label:?}"))]);
+            format!("{said}\n\n{HOW}")
+        }
+        NoActor::Malformed { what, raw } => {
+            fill(say(lang, "refuse.actor_malformed"), &[("what", what), ("raw", &format!("{raw:?}"))])
+        }
+    }
+}
+
+/// git 에게 이력을 물었는데 못 받은 한 줄([`crate::git::Error`], moai-ivt9).
+///
+/// **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는 받는 쪽이 할 일이
+/// 다르다. 기계가 가르는 값은 이 글이 아니라 `Told::kind` 다 — 글은 사람의 것이라 화면 말로 선다.
+pub fn git_trouble(lang: Lang, why: &crate::git::Error) -> String {
+    use crate::git::Error;
+    let said = why.said();
+    match why {
+        Error::Spawn(_) => fill(say(lang, "git.spawn"), &[("said", &said)]),
+        Error::Failed(_) => fill(say(lang, "git.failed"), &[("said", &said)]),
+        Error::Stream(_) => fill(say(lang, "git.stream"), &[("said", &said)]),
+        Error::NotUtf8(_) => fill(say(lang, "git.not_utf8"), &[("said", &said)]),
+    }
+}
+
+/// 저장소 설정(`.moai/config.toml`)을 읽다 멈춘 한 줄([`crate::config::Trouble`], moai-ivt9).
+///
+/// **자리는 [`config_refused`] 가 앞에 단다** — 읽은 파일을 아는 자는 [`crate::config::Config::load`]
+/// 뿐이고, 글만 쓰는 [`crate::config::Config::parse`] 는 그 자리를 모른다.
+pub fn config_trouble(lang: Lang, why: &crate::config::Trouble) -> String {
+    use crate::config::{Thresholds, Trouble, Want};
+    // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")` 모양만
+    // 읽어, 키를 `match` 의 팔로 넘기면 그 눈에서 통째로 사라진다([`look_trouble`] 과 같은 자).
+    let want = |w: &Want| match w {
+        Want::Whole => say(lang, "config.want_whole"),
+        Want::Fraction => say(lang, "config.want_fraction"),
+    };
+    let quoted = |s: &str| format!("{s:?}");
+    match why {
+        Trouble::Unreadable { said } => said.clone(),
+        Trouble::Unbalanced { line } => fill(say(lang, "config.unbalanced"), &[("line", &line.to_string())]),
+        Trouble::NotAPair { line } => fill(say(lang, "config.not_a_pair"), &[("line", &line.to_string())]),
+        Trouble::NotQuoted { line, key, raw } => {
+            fill(say(lang, "config.not_quoted"), &[("line", &line.to_string()), ("key", key), ("raw", &quoted(raw))])
+        }
+        Trouble::NumberQuoted { line, key, raw } => {
+            fill(say(lang, "config.number_quoted"), &[("line", &line.to_string()), ("key", key), ("raw", raw)])
+        }
+        Trouble::NotANumber { line, key, want: w, raw } => fill(
+            say(lang, "config.not_a_number"),
+            &[("line", &line.to_string()), ("key", key), ("want", want(w)), ("raw", &quoted(raw))],
+        ),
+        Trouble::RatioRange { key, value } => fill(
+            say(lang, "config.ratio_range"),
+            &[("key", key), ("want", want(&Want::Fraction)), ("value", &value.to_string())],
+        ),
+        Trouble::PrefixCharset { raw } => fill(say(lang, "config.prefix_charset"), &[("raw", &quoted(raw))]),
+        Trouble::PrefixDash { raw } => fill(say(lang, "config.prefix_dash"), &[("raw", &quoted(raw))]),
+        Trouble::FlowDaysZero => say(lang, "config.flow_days_zero").to_string(),
+        Trouble::NoSuchThreshold { line, key } => fill(
+            say(lang, "config.no_such_threshold"),
+            &[("line", &line.to_string()), ("key", key), ("known", &Thresholds::KEYS.join(", "))],
+        ),
+        Trouble::ThresholdInTable { line, named } => {
+            fill(say(lang, "config.threshold_in_table"), &[("line", &line.to_string()), ("named", named)])
+        }
+        Trouble::NoPrefix => say(lang, "config.no_prefix").to_string(),
+        Trouble::NoStatuses => say(lang, "config.no_statuses").to_string(),
+        Trouble::NoDone { raw } => {
+            fill(say(lang, "config.no_done"), &[("done", crate::config::DONE), ("raw", &quoted(raw))])
+        }
+        Trouble::StatusTwice { status } => fill(say(lang, "config.status_twice"), &[("status", status)]),
+        Trouble::NamingUnknown { raw } => fill(
+            say(lang, "config.naming_unknown"),
+            &[("known", &crate::config::Naming::ALL.join("·")), ("raw", &quoted(raw))],
+        ),
+    }
+}
+
+/// [`config_trouble`] 에 읽던 파일의 자리를 앞에 단다([`crate::config::Refused`]).
+///
+/// **자리를 다는 자가 하나다**([`problem`]·[`config_problem`] 과 같은 까닭) — 부르는 쪽마다
+/// 붙이면 같은 까닭이 자리 있는 모양과 없는 모양으로 갈린다.
+pub fn config_refused(lang: Lang, why: &crate::config::Refused) -> String {
+    format!("{}: {}", why.at.display(), config_trouble(lang, &why.why))
+}
+
 /// 팔레트 밖의 색 낱말 한 줄([`crate::user_config::NotAHue`]).
 ///
 /// **읽기의 알림과 `moai project color` 의 거절문이 이 하나를 나눠 쓴다** — 명령이 받은 값을
@@ -2603,6 +2705,30 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// **고를 것이 있는 거절은 고를 것을 댄다**(moai-ivt9). 글이 말묶음으로 가면서 자료 쪽
+    /// 시험은 갈래만 재게 됐는데, 그 갈래가 아는 목록을 안 달고 나가면 "그 값이 아니다" 만
+    /// 듣고 무엇을 적어야 하는지는 설정 파일 어디에도 없다 — 옛 글이 목록을 달고 있던 까닭이다.
+    #[test]
+    fn config_trouble_names_what_it_needs() {
+        use crate::config::Trouble;
+        let said = |why: &Trouble| config_trouble(Lang::En, why);
+        let naming = said(&Trouble::NamingUnknown { raw: "Full".into() });
+        for want in crate::config::Naming::ALL {
+            assert!(naming.contains(want), "{want} 가 빠졌다 — {naming}");
+        }
+        let threshold = said(&Trouble::NoSuchThreshold { line: 2, key: "status_reveiw_days".into() });
+        for want in crate::config::Thresholds::KEYS {
+            assert!(threshold.contains(want), "{want} 가 빠졌다 — {threshold}");
+        }
+        let done = said(&Trouble::NoDone { raw: "todo,review".into() });
+        assert!(done.contains(crate::config::DONE), "{done}");
+        // 자리를 다는 자는 하나다 — `Refused` 를 지나야 파일 이름이 앞에 선다.
+        let at = std::path::PathBuf::from("/x/.moai/config.toml");
+        let refused = config_refused(Lang::En, &crate::config::Refused { at, why: Trouble::NoPrefix });
+        assert!(refused.starts_with("/x/.moai/config.toml: "), "{refused}");
+        assert!(!said(&Trouble::NoPrefix).contains(".moai"), "글 쪽이 자리를 또 단다");
     }
 
     /// **태그 표기는 `tag_parts` 한 자리에서 정한다**(`tag_line` 은 그 조각을 잇는다). `add` 의 확인 줄과
@@ -2715,7 +2841,7 @@ mod tests {
         let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         stuck.blocked_by = vec!["argos-0001".into()];
         let issues = vec![blocker, stuck];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, Lang::Ko);
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -2734,7 +2860,7 @@ mod tests {
         let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         held.blocked_by = vec!["argos-0001".into()];
         let issues = vec![shelved, held];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, Lang::Ko);
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3271,7 +3397,7 @@ mod tests {
     fn a_finished_grouping_is_not_nagged_but_a_folded_one_says_so() {
         let table = |all: &[Issue]| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", Lang::Ko);
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(Lang::Ko)))
                 .join("\n")
         };
@@ -3337,7 +3463,7 @@ mod tests {
         let issues = vec![issue("argos-0001", "첫 일", "todo")];
         let cfg = cfg();
         let now = "2026-09-11T04:12:03Z";
-        let st = crate::report::status(&issues, &[], &cfg, now);
+        let st = crate::report::status(&issues, &[], &cfg, now, Lang::Ko);
         let draw =
             |lang| plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n");
         let (ko, en) = (draw(Lang::Ko), draw(Lang::En));
@@ -3380,7 +3506,7 @@ mod tests {
         let lang = Lang::Ko;
         let mine = vec![issue("argos-0001", "제 줄", "todo")];
         let draw = |issues: &[Issue], screen: Screen| {
-            let st = crate::report::status(issues, &[], &cfg, now);
+            let st = crate::report::status(issues, &[], &cfg, now, Lang::Ko);
             plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen))
         };
         let bare = Origin::default();

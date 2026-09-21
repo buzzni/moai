@@ -115,7 +115,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         return Ok(out);
     }
 
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).

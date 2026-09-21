@@ -259,7 +259,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status(&load.issues, &unreadable, cfg, now);
+    let st = crate::report::status(&load.issues, &unreadable, cfg, now, crate::i18n::Lang::default());
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
@@ -2744,10 +2744,10 @@ mod tests {
     /// 담기면 그 프로젝트 파일에만 선다.
     #[test]
     fn the_question_and_its_retry_stay_on_the_fixed_project() {
-        fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn nobody(user: Option<&str>, root: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             match user {
                 Some(raw) => crate::model::actor(Some(raw), root),
-                None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
+                None => Err(crate::model::NoActor::Unknown),
             }
         }
         let s = Scratch::fenced("layer-jot-ask");

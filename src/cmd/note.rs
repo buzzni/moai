@@ -37,7 +37,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
         return Err(empty(ctx.lang()));
     }
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
     // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).

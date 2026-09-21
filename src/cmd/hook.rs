@@ -127,9 +127,9 @@ fn decide(
     let cwd = std::env::current_dir().ok()?;
     // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
     // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
-    let repo = match Repo::find() {
+    let repo = match Repo::find(crate::i18n::Lang::default) {
         Ok(Some(repo)) => repo,
-        Ok(None) | Err(_) => Repo::find_here(&cwd).ok()??,
+        Ok(None) | Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
     };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
@@ -169,7 +169,7 @@ fn decide(
         }
         Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
             let now = model::now();
-            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.lang());
             // `moai status` 와 같은 알림을 싣는다(`agents_notice`) — 낡은 AGENTS.md 를 모르고
             // 시작하는 것이 바로 이 보드를 받는 새 세션이다. 세션의 셸 자리는 stdin 의 `cwd` 라
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
@@ -261,7 +261,7 @@ fn decide(
                     };
                     match dirs.get_or_init(|| crate::hook::aimed(line, &cwd)).get(k).cloned().flatten() {
                         None => at(&load.issues),
-                        Some(dir) => at(&Repo::find_from(&dir).ok()??.read().ok()?.issues),
+                        Some(dir) => at(&Repo::find_from(&dir, crate::i18n::Lang::default).ok()??.read().ok()?.issues),
                     }
                 };
                 record_picks(input, &repo, &crate::hook::picked_in(line, &repo.config, &mine, &stands));
@@ -276,7 +276,7 @@ fn decide(
         Event::Stop if input.stop_hook_active => Decision::Pass,
         Event::Stop => once_per_session(input, &repo, "stop", || {
             let now = model::now();
-            let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.lang());
             // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
             // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
             // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
@@ -595,7 +595,7 @@ fn route_one(
     // 보던 판은 `mkdir -p <남의 저장소>/새것 && moai -C <남의 저장소>/새것 add` 를 여기서 판정하고
     // 거절문에는 `-C <남의 저장소>/새것` 을 댔다 — 이 트래커의 에픽 id 를 단 채라, 옮겨 친 줄이 남의
     // 트래커에 끊긴 참조를 세웠다(리뷰 moai-51h9.k8j1).
-    let Some(found) = Repo::find_from(&dir).ok().flatten() else {
+    let Some(found) = Repo::find_from(&dir, crate::i18n::Lang::default).ok().flatten() else {
         // **아직 트래커가 없는 새 자리는 그 자리를 댄다**(moai-j2vp) — 판정은 이 트래커가 맡되,
         // 옮겨 친 줄이 이 트래커에 서면 안 된다. 있는 자리인데 트래커가 없으면 그 `moai` 는 스스로
         // 실패하니 아무도 판정하지 않는다.
@@ -691,7 +691,7 @@ fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], un
         return;
     };
     let now = model::now();
-    let st = report::status(issues, unreadable, &repo.config, &now);
+    let st = report::status(issues, unreadable, &repo.config, &now, crate::i18n::Lang::default());
     // `Stop` 과 같은 자 — 알림은 안 센다.
     let n: usize = st.warnings.iter().map(|w| w.count).sum();
     let _ = std::fs::write(path, n.to_string());
