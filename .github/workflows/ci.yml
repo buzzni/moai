@@ -36,6 +36,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # **`main` 은 `develop` 에서 온 PR 만 받는다.** 보호 규칙이 미치는 데는 "직접
+      # 푸시를 막는다" 와 "PR 을 요구한다" 까지고, GitHub 에는 PR 의 소스 가지를
+      # 가두는 규칙이 없다 — 그 한 칸을 이 스텝이 메운다. 판을 내는 길이 하나여야
+      # `main` 의 이력이 판과 판 사이로 읽힌다.
+      #
+      # **체크아웃 앞에 선다.** 받을 것도 지을 것도 없어 몇 초에 끝나는데, 뒤에 두면
+      # 잘못 겨눈 PR 이 clippy 와 시험을 다 돈 뒤에야 그 말을 듣는다.
+      #
+      # 가지 이름은 `${{ }}` 로 스크립트에 붙이지 않고 환경으로 준다 — 이름에 든
+      # 글자가 셸 명령이 되는 자리다 (릴리스 워크플로의 태그 이름과 같은 까닭).
+      - name: main 은 develop 에서 온 PR 만 받는다
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'develop'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          printf '::error::main 은 develop 에서 온 PR 만 받는다 — 지금 소스는 %s 다. 고칠 것은 develop 에 넣고, 판을 낼 때 develop → main PR 하나로 간다.\n' "$HEAD_REF"
+          exit 1
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # 밑의 트래커 검사가 base 와 head 를 둘 다 짚는다.
