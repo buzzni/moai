@@ -445,3 +445,6 @@
 {"ts":"2026-09-21T23:40:17Z","id":"moai-t0qd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 탐색기 상세의 겹침 표)"}
 {"ts":"2026-09-21T23:40:17Z","id":"moai-ctcb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"세대(Layer::rounds·Place::set_at)로 늦게 닿은 쓸기의 답을 줄 하나 단위로 버린다. 못 연 갈래가 쓸기를 통째로 버리던 것은 걷었다."}
 {"ts":"2026-09-21T23:40:17Z","id":"moai-t0qd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"draw::titled 하나로 에픽·마일스톤·막음 줄 셋이 겹침 표를 단다. 표는 값 앞에 서고 폭도 표 몫을 함께 센다."}
+{"ts":"2026-09-21T23:42:43Z","id":"moai-oz13","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T23:42:44Z","id":"moai-65ie","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T23:42:44Z","id":"moai-1tcm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
