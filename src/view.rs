@@ -2228,6 +2228,27 @@ pub fn settings_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<
     mine.chain(said).collect()
 }
 
+/// 탐색기의 보기 알림에 설 줄 — 보기를 읽다 만난 까닭과 **옛 `[read]` 에서 건너뛴 줄**(moai-rtji).
+///
+/// 둘은 한 알림에 서지만 오는 꼴이 다르다 — 보기의 까닭은 글로, 옛 `[read]` 의 것은 자료로 온다
+/// ([`crate::user_config::Registry::read_problems`]). 설정을 읽는 자리는 화면 말을 안 묻으므로 여기서
+/// 편다. **자리를 머리에 붙인다** — 한때 설정 쪽이 글에 붙이던 그 꼴(`{설정}: …`)이라, 안 붙이면
+/// "손으로 고친다" 가 어느 파일인지 모르는 말이 된다.
+///
+/// **띄우는 길과 시험이 이 한 자를 지난다**(리뷰) — `cmd::tui` 에만 두던 판은 시험의 `App::load_look` 이
+/// 옛 `[read]` 의 줄을 못 받아, 그 줄을 빠뜨려도 시험이 푸르렀다. [`settings_problems`] 와 같은 자리다.
+pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
+    let at = reg.path.as_deref();
+    let lines = reg.read_problems.iter().map(|why| {
+        let said = skipped(lang, why);
+        match at {
+            Some(at) => format!("{}: {said}", at.display()),
+            None => said,
+        }
+    });
+    reg.look_problems.iter().cloned().chain(lines).collect()
+}
+
 /// 설정을 읽다 만난 한 줄([`crate::user_config::ConfigTrouble`], moai-aiid).
 ///
 /// **자리를 앞에 단다** — [`problem`] 과 같은 까닭이고 같은 모양이다. 자리를 모른다는 줄만
@@ -2323,6 +2344,62 @@ pub fn write_trouble(lang: Lang, at: Option<&std::path::Path>, why: &crate::user
         Some(at) => format!("{}: {said}", at.display()),
         None => said,
     }
+}
+
+/// 읽음 표를 읽고 쓰다 만난 것 가운데 **안 막는 것**의 글([`crate::read_marks::SheetTrouble`], moai-rtji).
+/// 어느 파일인지를 머리에 붙인다 — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면 "손으로
+/// 지운다" 가 갈 곳 없는 말이 된다.
+///
+/// **말은 부르는 쪽이 준다** — 읽음 모듈은 화면 말을 모른다. `moai read` 는 `Ctx` 로, 탐색기는
+/// `Site::lang` 으로 받아 여기로 넘긴다.
+pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> String {
+    use crate::read_marks::SheetTrouble;
+    let (at, said) = match why {
+        // **남의 글은 옮기지 않는다** — io·toml 이 낸 줄이라 말묶음에 키를 둘 자리가 없다.
+        SheetTrouble::Said { at, said } => (at, said.clone()),
+        SheetTrouble::Unsettled { at, said } => (at, fill(say(lang, "sheet.unsettled"), &[("said", said)])),
+        SheetTrouble::NotOurs { at, root } => {
+            (at, fill(say(lang, "sheet.not_ours"), &[("root", &root.display().to_string())]))
+        }
+        SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
+        SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
+    };
+    format!("{}: {said}", at.display())
+}
+
+/// `[read]` 표에서 건너뛴 줄 하나의 글([`crate::read_marks::Skipped`]). **어느 파일인지는 안 붙인다** —
+/// 같은 줄이 읽음 파일에서도 설정의 옛 `[read]` 에서도 오므로, 붙이는 것은 그 자리를 아는 쪽이다
+/// ([`sheet_trouble`]·옛 `[read]` 의 [`look_problems`]).
+fn skipped(lang: Lang, why: &crate::read_marks::Skipped) -> String {
+    use crate::read_marks::{READ, Skipped};
+    match why {
+        Skipped::NotATable { found } => fill(say(lang, "sheet.not_a_table"), &[("table", READ), ("is", found)]),
+        Skipped::NotAStamp { id, found } => {
+            fill(say(lang, "sheet.not_a_stamp"), &[("key", &format!("{READ}.{id}")), ("is", found)])
+        }
+    }
+}
+
+/// 읽음 표에 **안 쓰고 멈춘** 까닭의 글([`crate::read_marks::SheetRefusal`], moai-rtji). 파일은
+/// `read_marks::update` 가 준다 — 그 자리를 아는 것이 거기 하나라서다.
+///
+/// 손으로 적은 자리([`crate::read_marks::SheetRefusal::Hand`])는 읽는 길이 건너뛰는 것과 **같은 사실**이지만
+/// 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로 고친다" 고 멈춘다.
+pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::SheetRefusal) -> String {
+    use crate::read_marks::{READ, SheetRefusal, Skipped};
+    let said = match why {
+        SheetRefusal::Unparsable { said } => fill(say(lang, "sheet.refuse_unparsable"), &[("said", said)]),
+        SheetRefusal::NotOurs { root } => {
+            fill(say(lang, "sheet.refuse_not_ours"), &[("root", &root.display().to_string())])
+        }
+        SheetRefusal::Hand(Skipped::NotATable { found }) => {
+            fill(say(lang, "sheet.refuse_not_a_table"), &[("table", READ), ("is", found)])
+        }
+        SheetRefusal::Hand(Skipped::NotAStamp { id, found }) => {
+            fill(say(lang, "sheet.refuse_not_a_stamp"), &[("table", READ), ("id", id), ("is", found)])
+        }
+    };
+    format!("{}: {said}", at.display())
 }
 
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
@@ -3254,5 +3331,48 @@ mod tests {
         i.epic = Some("argos-0000".into());
         let out = plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
+    }
+
+    /// **읽음 표의 글은 말마다 그 파일과 그 줄을 댄다**(moai-rtji 리뷰). 글은 말묶음의 자리(`{key}`·`{id}`·
+    /// `{root}`·`{said}`)를 `fill` 에 준 이름으로 채우는데, 두 이름이 갈리면 `{key}` 가 글자 그대로 서고 어느
+    /// 줄인지가 사라진다. 말묶음 시험은 번역을 영어와만 견주므로 영어와 한국어가 함께 갈리면 못 잡고, 읽음
+    /// 모듈의 시험은 자료만 견준다 — 그래서 갈래마다 **모든 말로** 펴 보고 채울 자리가 남았는지 잰다.
+    ///
+    /// **남의 것이라는 글은 "아니다" 로 선다** — `{root}` 는 우리 뿌리다. 영어 글이 "이것은 {root} 의
+    /// 읽음이다, 우리 것이 아니다" 로 뒤집혀 섰던 적이 있다(리뷰).
+    #[test]
+    fn the_read_sheet_texts_name_the_line_in_every_language() {
+        use crate::read_marks::{SheetRefusal, SheetTrouble, Skipped};
+        let at = std::path::PathBuf::from("/홈/설정/read/0123456789abcdef.toml");
+        let root = std::path::PathBuf::from("/w/proj");
+        let stamp = Skipped::NotAStamp { id: "argos-0002".into(), found: "integer".into() };
+        let table = Skipped::NotATable { found: "integer".into() };
+        let not_ours = SheetTrouble::NotOurs { at: at.clone(), root: root.clone() };
+        for lang in Lang::ALL {
+            let said = [
+                (sheet_trouble(lang, &SheetTrouble::Said { at: at.clone(), said: "EACCES".into() }), "EACCES"),
+                (sheet_trouble(lang, &SheetTrouble::Unsettled { at: at.clone(), said: "ELOOP".into() }), "ELOOP"),
+                (sheet_trouble(lang, &not_ours), "/w/proj"),
+                (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: stamp.clone() }), "read.argos-0002"),
+                (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: table.clone() }), "[read]"),
+                (sheet_trouble(lang, &SheetTrouble::SpoolLeft { at: at.clone(), said: "EROFS".into() }), "EROFS"),
+                (sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() }), "TOML"),
+                (sheet_refusal(lang, &at, &SheetRefusal::NotOurs { root: root.clone() }), "/w/proj"),
+                (sheet_refusal(lang, &at, &SheetRefusal::Hand(stamp.clone())), "argos-0002"),
+                (sheet_refusal(lang, &at, &SheetRefusal::Hand(table.clone())), "[read]"),
+            ];
+            for (said, names) in &said {
+                let code = lang.code();
+                assert!(said.starts_with(&format!("{}: ", at.display())), "{code}: 어느 파일인지를 안 댔다 — {said}");
+                assert!(said.contains(names), "{code}: `{names}` 를 안 댔다 — {said}");
+                assert!(!said.contains('{'), "{code}: 채울 자리가 남았다 — {said}");
+            }
+        }
+        for said in [
+            sheet_trouble(Lang::En, &not_ours),
+            sheet_refusal(Lang::En, &at, &SheetRefusal::NotOurs { root: root.clone() }),
+        ] {
+            assert!(said.contains("not /w/proj's"), "남의 것이라는 글이 뒤집혔다 — {said}");
+        }
     }
 }

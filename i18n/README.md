@@ -87,10 +87,14 @@
 `the_init_screen_stands_in_one_language` 가 잰다. `init` 이 **심는** 파일(`.gitattributes`·
 `config.toml`·`AGENTS.md` 블록)은 화면이 아니라 저장소의 내용이라 말묶음에 안 들고 영어 하나로 선다.
 
-**남은 자리 셋은 트래커가 든다** — 저장 계층에 남은 글 다섯(idea moai-uqxn, 넷이 쓰기 경로
-안이다), 검증 글 열넷(idea moai-gbk3), 읽음 표의 글 열(moai-rtji). 그 셋이 남은 동안은 한
-명령이 두 말로 서는 자리가 있다: 못 읽는 프로젝트 한 줄(영어 테두리 안에 `store` 의 한국어
-까닭), 그리고 `config.toml` 이 깨진 저장소에서 `open_repo` 를 지나 나오는 검증 한 줄이다.
+**읽음 표의 글 열도 말묶음에 왔다**(moai-rtji) — `read_marks` 는 자료만 내고(`SheetTrouble`·
+`SheetRefusal`) `view::sheet_trouble`·`sheet_refusal` 이 `sheet.*` 로 편다. `moai read` 의 stderr 와
+멈춘 까닭이 한 말로 서는 것을 `the_read_sheet_speaks_the_chosen_language` 가 잰다.
+
+**남은 자리 둘은 트래커가 든다** — 저장 계층에 남은 글 다섯(idea moai-uqxn, 넷이 쓰기 경로
+안이다), 검증 글 열넷(idea moai-gbk3). 그 둘이 남은 동안은 한 명령이 두 말로 서는 자리가 있다:
+못 읽는 프로젝트 한 줄(영어 테두리 안에 `store` 의 한국어 까닭), 그리고 `config.toml` 이 깨진
+저장소에서 `open_repo` 를 지나 나오는 검증 한 줄이다.
 
 **같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기
 (`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어고, `ready`
@@ -116,9 +120,10 @@
 
 **`--json` 의 사람 글도 고른 말을 따른다**(moai-dpbi 리뷰). `status`·`ready` 의 한눈 보기가 내는
 `trouble` 과 `problems` 는 사람이 읽을 한 줄이라, 이제 `MOAI_LANG`·설정이 고른 말로 나간다(전에는
-늘 한국어였다). **기계가 가르는 값은 여기가 아니다** — `broken_worktrees`·`unreadable_worktrees`
-처럼 `kind` 와 수를 든 곁의 키들이고, 경고도 `report::Warning` 의 `kind` 로 가른다. 그 두 배열을
-글자로 맞춰 읽는 고리가 있으면 말이 바뀔 때 같이 깨진다 — 모양(배열·키)은 그대로다.
+늘 한국어였다). `moai read --json` 의 `problems` 도 그렇다(moai-rtji). **기계가 가르는 값은 여기가
+아니다** — `broken_worktrees`·`unreadable_worktrees` 처럼 `kind` 와 수를 든 곁의 키들이고, 경고도
+`report::Warning` 의 `kind` 로 가른다. 그 두 배열을 글자로 맞춰 읽는 고리가 있으면 말이 바뀔 때 같이
+깨진다 — 모양(배열·키)은 그대로다.
 
 **`[[project]]` 항목의 탈은 `moai project` 와 함께 왔다.** 색 오타·경로 없음은 읽기도 쓰기도
 같은 자(`hue_choice`·`entry_path`)를 쓰므로 한 자리에서 편다(`view::entry_problem`·

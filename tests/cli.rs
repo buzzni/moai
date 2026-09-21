@@ -4599,8 +4599,14 @@ const JSON_SWEEP: &[&str] = &[
 /// 뿌리로 적혔는지를 못 가려, 뿌리를 잘못 고르는 버그가 죄다 초록으로 지나갔다(선 체크아웃으로
 /// 고르던 탐색기가 그랬다).
 fn read_sheet(cfg: &std::path::Path, root: &std::path::Path) -> String {
+    read_sheets(cfg, root).into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n")
+}
+
+/// [`read_sheet`] 가 잇는 조각들 — 파일마다 **자리와 글**이다. 손으로 고칠 파일을 찾는 시험이 이것으로 든다
+/// (리뷰) — 자리만 따로 찾으면 어느 뿌리의 것인지를 견주는 자가 둘로 갈려, 한쪽은 그것을 안 견준다.
+fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, String)> {
     let dir = cfg.parent().expect("설정에 디렉터리가 있다").join("read");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return String::new() };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
     let mut files: Vec<std::path::PathBuf> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
@@ -4612,11 +4618,13 @@ fn read_sheet(cfg: &std::path::Path, root: &std::path::Path) -> String {
     let real = std::fs::canonicalize(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
     let mine = format!("path = {:?}", real.display().to_string());
     files
-        .iter()
-        .map(|p| std::fs::read_to_string(p).expect("방금 본 파일이다"))
-        .inspect(|text| assert!(text.contains(&mine), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display()))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .into_iter()
+        .map(|p| {
+            let text = std::fs::read_to_string(&p).expect("방금 본 파일이다");
+            assert!(text.contains(&mine), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display());
+            (p, text)
+        })
+        .collect()
 }
 
 /// **읽음은 내 설정 곁에만 적힌다**(moai-u8oh 사용자 결정, 자리는 moai-omx7 이 프로젝트마다로 갈랐다) —
@@ -4763,6 +4771,58 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
     ok_with(s.path(), &cfg, &["read", "argos-0001"]);
     let saved = read_sheet(&cfg, s.path());
     assert!(saved.contains("argos-0001 = \"2026-09-18T07:00:00Z\""), "늦은 도장을 안 적었다 — {saved}");
+}
+
+/// **읽음 표의 글도 고른 말로 선다**(moai-rtji). 한때 그 글 열은 읽음 모듈이 한국어로 박아 지어,
+/// `MOAI_LANG=en` 을 준 사람에게도 한국어로 섰다. 지금 그 모듈은 자료만 내고 `moai read` 가 제 말로 편다.
+///
+/// **두 길을 함께 잰다** — 손으로 고친 읽음 파일 하나로 둘이 다 선다.
+///
+/// - **건너뛰고 지나가는 것**(`SheetTrouble`) — 다른 id 의 줄에 때가 아닌 값을 적으면 쓰기는 그 줄을
+///   빼고 나머지를 적은 뒤 까닭을 stderr 에 댄다
+/// - **멈추는 것**(`SheetRefusal`) — 적으려는 id 의 자리에 때가 아닌 값이 있으면 무엇을 적어 둔
+///   것인지 모르는 채 덮지 않고 `broken` 으로 멈춘다. 이 글은 `read_marks::update` 가 **락을 놓은 뒤에**
+///   편다 — 말은 멈췄을 때만 묻는다. 물은 말이 거기까지 가는지를 여기서 잰다
+///
+/// **어느 줄인지도 댄다**(리뷰) — 글은 말묶음의 자리(`{key}`·`{id}`)에 줄 이름을 채워 짓는데, 두 이름이
+/// 갈리면 `{key}` 가 글자 그대로 서고 어느 줄을 고칠지가 사라진다. 말과 파일만 재던 판은 그래도 푸르렀다.
+#[test]
+fn the_read_sheet_speaks_the_chosen_language() {
+    let s = init("readlang");
+    let cfg = s.path().join("user.toml");
+    let a = field(&ok_with(s.path(), &cfg, &["add", "첫째", "--json"]), "id");
+    let b = field(&ok_with(s.path(), &cfg, &["add", "둘째", "--json"]), "id");
+    ok_with(s.path(), &cfg, &["read", &a]);
+    // 손으로 고칠 파일 — 어느 뿌리의 것인지까지 견주는 자로 든다(`read_sheets`).
+    let [(sheet, was)]: [(PathBuf, String); 1] = read_sheets(&cfg, s.path()).try_into().expect("읽음 파일이 하나 섰다");
+    let run = |lang: &str, id: &str| {
+        staged(&["read", id]).current_dir(s.path()).env("MOAI_CONFIG", &cfg).env("MOAI_LANG", lang).output().unwrap()
+    };
+
+    // 건너뛰는 것 — `a` 는 이미 적혔으니 `a` 를 다시 적는 판은 쓸 것이 없지만, 락 안의 훑기가 `b`
+    // 의 줄을 댄다.
+    std::fs::write(&sheet, format!("{was}\"{b}\" = 3\n")).unwrap();
+    for (lang, want) in [("en", "must be a word holding a time"), ("ko", "때를 적은 낱말이어야 한다")] {
+        let out = run(lang, &a);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "건너뛸 줄 하나로 멈췄다 ({lang}) — {err}");
+        assert!(err.contains(want), "{lang} 을 골랐는데 그 말로 안 섰다 — {err}");
+        assert!(err.contains(&format!("read.{b}")), "어느 줄인지를 안 댔다 ({lang}) — {err}");
+        assert!(err.contains(&sheet.display().to_string()), "어느 파일인지를 안 댔다 — {err}");
+        assert!(lang != "en" || !hangul(&err), "영어를 골랐는데 한국어가 섰다 — {err}");
+    }
+
+    // 멈추는 것 — 이번에는 적으려는 id(`b`)의 자리가 손으로 적은 값이다.
+    for (lang, want) in [("en", "so no read marks are written"), ("ko", "읽음을 적지 않는다")] {
+        let out = run(lang, &b);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "손으로 적은 자리를 덮었다 ({lang})");
+        assert!(err.contains(want), "{lang} 을 골랐는데 멈춘 까닭이 그 말로 안 섰다 — {err}");
+        assert!(err.contains(&format!("`{b}`")), "멈춘 까닭에 어느 줄인지를 안 댔다 ({lang}) — {err}");
+        assert!(err.contains(&sheet.display().to_string()), "멈춘 까닭에 어느 파일인지를 안 댔다 — {err}");
+        assert!(lang != "en" || !hangul(&err), "영어를 골랐는데 멈춘 까닭이 한국어로 섰다 — {err}");
+    }
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "손으로 적은 값을 덮었다");
 }
 
 /// **못 읽는 줄 하나가 그 이슈의 읽음을 걷어 가지 않는다**(리뷰) — 걷기(moai-dt5q)는 "트래커에 없는

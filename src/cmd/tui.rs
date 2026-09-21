@@ -99,7 +99,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
     // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
     // 차례가 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
-    app.adopt_look(&reg.look, reg.look_problems);
+    // **말은 화면이 이미 든 것이다**(`App::site.lang`) — 여기서 `ctx.lang()` 을 다시 물으면 밖에서 띄운
+    // 길(`outside`)이 같은 설정을 한 번 더 판다(`super::lang_of` 가 적어 둔 그 까닭이다).
+    app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
     // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
     app.legacy_read = reg.read;
     app.load_read();
@@ -183,7 +185,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 같아, 갈래를 안 넘기면 그 한 번의 실패가 세션 내내 남는다(`App::config_tried`).
     app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
-    app.adopt_look(&reg.look, reg.look_problems);
+    app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
     app.legacy_read = reg.read;
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
