@@ -50,8 +50,23 @@ pub struct Layer {
     pub config: Option<PathBuf>,
     /// `.moai` 안에서 띄웠으면 그 뿌리. 등록돼 있지 않아도 층에 선다.
     launch: Option<PathBuf>,
-    /// 스레드에서 읽고 있는 프로젝트들. 끝나면 [`App::follow`] 가 받는다.
-    pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>)>,
+    /// 스레드에서 읽고 있는 프로젝트들과 **그 쓸기가 뜬 세대**([`Layer::rounds`]). 끝나면
+    /// [`App::follow`] 가 받는다.
+    pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>, u64)>,
+    /// 손으로 세운 줄의 **세대**(moai-ctcb, 사용자 결정 2026-09-21). 층의 줄을 **지금의 디렉터리로**
+    /// 다시 세울 때마다([`Layer::set_by_hand`]) 하나 오르고, 그때 값이 그 줄의 [`Place::set_at`] 에
+    /// 찍힌다. 쓸기는 뜰 때의 값을 [`Layer::pending`] 에 함께 들고, [`Layer::adopt`] 는 제 값보다
+    /// **늦게** 찍힌 줄의 답을 버린다 — 그 답은 그 손질 전의 디렉터리를 잰 것이다.
+    ///
+    /// **사람이 누른 키만 올리는 것이 아니다**(리뷰) — 펼치기가 스레드로 보내는 길
+    /// (`App::read_wanted`)도 [`App::open_place`] 를 거치고, 그 큐는 [`Layer::adopt`] 가 표식이
+    /// 움직인 줄을 `wanted` 에 밀어 넣어 저절로 차기도 한다. 그러니 아무도 키를 안 눌러도 셈은
+    /// 오른다 — 그것을 "키를 눌렀을 때만" 으로 읽으면 답이 왜 버려졌는지를 엉뚱한 데서 찾는다.
+    ///
+    /// **줄마다 도장, 셈은 하나다.** 쓸기 한 벌을 통째로 버리면 프로젝트 하나를 **못** 연 것이
+    /// 나머지 줄의 답까지 버려 [`REREAD_EVERY`] 만큼 옛 셈이 서고, 답에 세대를 실어 오게 하면
+    /// [`look_into`]·[`Looked`] 의 계약이 그것을 지고 간다. 여기 두면 견주기는 줄을 들일 때 한 번이다.
+    rounds: u64,
     /// **펼친 프로젝트의 줄**을 읽고 있는 스레드(moai-12yx) — 어느 프로젝트인지와 받을 곳. 요약을
     /// 읽는 [`Layer::pending`] 과 따로 두는 것은 값이 다르기 때문이다: 요약은 줄마다 작은 셈이고
     /// 이것은 그 프로젝트를 통째로 읽어 색인까지 짓는 일이라, 한 번에 **하나만** 돈다.
@@ -85,6 +100,9 @@ pub struct Place {
     /// 잰다. `None` 이면 곧바로 다시 읽을 줄이다 — 아직 안 읽었거나, 방금 열어 본 줄(`App::open_place`)
     /// 이나 올라오며 떠난 줄([`App::climb`]).
     read_at: Option<std::time::Instant>,
+    /// 이 줄을 **손으로 세운** 세대(moai-ctcb) — [`Layer::rounds`] 의 그때 값이다. 한 번도 손대지
+    /// 않았으면 `0` 이라 어느 쓸기의 답도 들어온다.
+    set_at: u64,
 }
 
 /// 한 줄을 다시 읽을 까닭이 되는 표식.
@@ -397,6 +415,7 @@ impl Layer {
                 look: Look::Unread,
                 marks: Marks::default(),
                 read_at: None,
+                set_at: 0,
                 site: None,
             })
             .collect();
@@ -421,6 +440,7 @@ impl Layer {
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),
             pending: None,
+            rounds: 0,
             reading: None,
             wanted: Vec::new(),
         }
@@ -454,10 +474,32 @@ impl Layer {
     }
 
     /// 그 줄을 **곧바로 다시 읽을 줄로** 둔다 — 셈은 새것이 닿을 때까지 그대로 선다([`App::climb`]).
+    ///
+    /// **손으로 세운 것으로 적는다**(moai-ctcb) — 도는 쓸기는 이 줄을 떠나기 **전**에 잰 것이라,
+    /// 늦게 닿으면 방금 "다시 읽어라" 라고 적은 줄에 그 옛 답을 들이고 시계까지 다시 잰다.
     fn forget(&mut self, path: &Path) {
-        if let Some(p) = self.places.iter_mut().find(|p| p.path == path) {
+        if let Some(at) = self.position(path)
+            && let Some(p) = self.set_by_hand(at)
+        {
             p.read_at = None;
         }
+    }
+
+    /// 그 줄을 **제 손으로 세웠다**고 적고 그 줄을 돌려준다(moai-ctcb) — 세대를 올리고 그 줄에
+    /// 찍는다. 이 뒤에 닿는, 이보다 먼저 뜬 쓸기의 답은 [`Layer::adopt`] 가 버린다.
+    ///
+    /// 부르는 자리는 줄의 상태를 **지금의 디렉터리로** 다시 세우는 곳들이다 —
+    /// [`App::open_place`] 의 두 갈래(연 줄·못 연 줄)와 [`Layer::forget`]. 사람이 누른 키만은
+    /// 아니다: 펼치기가 스레드로 보내는 길(`App::read_wanted`)도 그 갈래로 온다.
+    ///
+    /// **줄을 돌려주는 까닭**은 도장과 그 뒤의 손질이 늘 같은 줄에 가야 해서다 — 부르는 쪽이
+    /// 첨자로 한 번 더 찾으면 그 사이에 목록이 움직였을 때 도장과 손질이 갈린다. **없는 첨자에는
+    /// 세대도 안 올린다**: 찍힌 데 없이 오른 셈은 [`Layer::launch`] 가 든 값과 아무 줄도 못 맞춘다.
+    fn set_by_hand(&mut self, at: usize) -> Option<&mut Place> {
+        let p = self.places.get_mut(at)?;
+        self.rounds += 1;
+        p.set_at = self.rounds;
+        Some(p)
     }
 
     /// 읽어 온 줄 하나를 경로로 맞춰 들인다. 그새 목록에서 빠진 경로는 버린다.
@@ -466,14 +508,32 @@ impl Layer {
     /// 넘게 걸리는 자리(느린 마운트)에서 들이는 순간 이미 낡아, 층이 같은 줄을 쉬지 않고 다시
     /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
     /// 영영 안 보인다.
-    fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>) {
+    /// **제 손으로 세운 줄은 옛 답으로 안 덮는다**(moai-ctcb) — `round` 는 이 답을 지어 온 쓸기가
+    /// 뜰 때의 [`Layer::rounds`] 다. 그 뒤에 손으로 세운 줄([`Place::set_at`])의 답은 버린다:
+    /// 느린 마운트를 훑던 쓸기가 `Look::Shut` 으로 잰 사이에 사람이 그 줄을 열면, 그 답이 방금 연
+    /// 줄의 머리를 "못 읽는다" 로 덮고 `read_at` 까지 다시 찍어 [`Layer::stale`] 이 그 줄을 다시
+    /// 안 고른다 — 살아 있는 이슈 줄 위에 못 읽는다는 머리가 세션 내내 선다. 버린 줄은 `read_at`
+    /// 이 빈 채 남아 다음 걸음의 쓸기가 다시 고른다.
+    ///
+    /// **버리는 것은 그 줄 하나다.** 같은 쓸기가 지어 온 다른 줄은 그대로 들인다 — 손대지 않은
+    /// 줄의 답은 여전히 지금의 것이다.
+    ///
+    /// **들인 것이 있으면 참이다** — 머리의 `↻` 는 그 값으로 선다([`App::follow_layer`]). 버린
+    /// 답에도 시계를 올리면 아무것도 안 바뀐 화면이 "방금 갱신했다" 고 말한다(`App::climb` 이
+    /// 올리지 않는 것과 같은 까닭).
+    fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>, round: u64) -> bool {
         // **줄을 든 프로젝트는 표식이 움직이면 줄도 다시 읽는다**(리뷰). 요약만 새것으로 갈던
         // 때는 머리줄의 셈과 그 밑의 줄이 한 화면에서 다른 말을 했다 — 옆 세션이 닫은 일이 셈
         // 에서는 `✓` 로 올라가는데 줄은 세션 내내 `todo` 였다. 읽으러 가는 자는 [`App::want_site`]
         // 뿐인데 그쪽은 펼칠 때만 불리고, 든 줄이 있으면 아무것도 안 한다.
         let mut again: Vec<PathBuf> = Vec::new();
+        let mut landed = false;
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
+                if p.set_at > round {
+                    continue;
+                }
+                landed = true;
                 if p.marks != l.marks && p.site.is_some() {
                     again.push(p.path.clone());
                 }
@@ -487,6 +547,7 @@ impl Layer {
                 self.wanted.push(path);
             }
         }
+        landed
     }
 
     pub(super) fn position(&self, path: &Path) -> Option<usize> {
@@ -512,7 +573,9 @@ impl Layer {
         let now = crate::model::now();
         let lang = self.lang;
         let handle = std::thread::spawn(move || look_into(&stale, &now, lang, &tx));
-        self.pending = Some((rx, handle));
+        // **뜰 때의 세대를 함께 든다**(moai-ctcb) — 이 쓸기가 재는 것은 지금의 줄이고, 이 뒤에
+        // 손으로 세운 줄에는 이 답이 옛것이다([`Layer::adopt`]).
+        self.pending = Some((rx, handle, self.rounds));
     }
 
     /// 지금 선 자리의 **헤더 번호** — `0` 이 층(`<0> 전체`)이고 그다음이 등록 차례다. 목록에서
@@ -597,13 +660,16 @@ impl App {
 
     /// 도는 층의 요약 쓸기를 놓는다 — 결과는 버리되 손잡이는 [`App::discard`] 가 든다.
     ///
-    /// **버리는 자리가 둘이라 몸은 하나다**(리뷰) — [`App::open_place`] 의 못 연 갈래는 방금 고쳐
-    /// 세운 줄을 늦게 닿은 요약이 덮는 것을 막으려고(moai-800o), [`App::enter_project`] 는 프로젝트
-    /// 안에서 루프가 남의 읽기를 기다리며 빠른 걸음으로 깨는 것을 막으려고(moai-0jqh) 버린다.
-    /// 까닭은 저마다 제자리에 적고, 버리는 법은 여기 한 자리다 — 셋째 자리가 생기는 날
-    /// `discard` 의 셈(`DISCARDED_KEPT`·`let_go`)을 두 벌로 적지 않으려는 것이다.
+    /// **까닭은 하나 남았다**(moai-ctcb) — [`App::enter_project`] 가, 프로젝트 안에서 루프가 남의
+    /// 읽기를 기다리며 빠른 걸음으로 깨는 것을 막으려고 버린다(moai-0jqh). 줄을 고쳐 세우는 자리
+    /// ([`App::open_place`] 의 못 연 갈래)가 여기를 부르던 까닭 — 늦게 닿은 요약이 그것을 덮는다
+    /// (moai-800o) — 은 이제 세대가 든다([`Layer::rounds`]): 그 줄의 답 하나만 버리면 되는 일에
+    /// 쓸기 한 벌을 통째로 버릴 까닭이 없다.
+    ///
+    /// 몸을 그대로 두는 것은 버리는 법이 [`App::discard`] 의 셈(`DISCARDED_KEPT`·`let_go`)에
+    /// 매여 있어서다 — 둘째 자리가 다시 생기는 날 그 셈을 두 벌로 적지 않는다.
     fn drop_layer_sweep(&mut self) {
-        if let Some((_, handle)) = self.layer.as_mut().and_then(|l| l.pending.take()) {
+        if let Some((_, handle, _)) = self.layer.as_mut().and_then(|l| l.pending.take()) {
             self.discard(handle);
         }
     }
@@ -617,22 +683,24 @@ impl App {
     /// 읽기가 제 까닭을 댄다("들어가지 못했다 — …"). 둘 다 안 들어가고 줄도 다시 읽히지만,
     /// **말은 다르다** — 여기서 두 벌로 적은 것이 아니라 읽는 자리가 둘이라 그렇다.
     ///
-    /// **못 연 갈래에서만 도는 층 읽기를 버린다**(moai-800o, 좁힌 것은 moai-0jqh — 사용자 결정
-    /// 2026-09-21). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면 여기서 고쳐 세운 줄
-    /// (`Look::Shut`)을 옛 디렉터리의 값으로 덮는다 — 그 까닭은 **줄을 고쳐 세우는 갈래에만 선다.**
-    /// 버린 줄은 층에 선 다음 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에
-    /// 남았으면 곧바로, 들어갔으면 올라올 때다.
+    /// **도는 층 읽기는 어느 갈래에서도 안 버린다**(moai-ctcb, 사용자 결정 2026-09-21). 두 갈래 다
+    /// 줄을 **지금의 디렉터리로** 다시 세우므로, 이 줄을 재기 **전에** 띄운 쓸기가 늦게 닿으면 방금
+    /// 쓴 것을 옛 값으로 덮는다 — moai-800o 가 적은 까닭이다. 막는 자는 이제 세대다:
+    /// [`Layer::set_by_hand`] 이 이 줄에 도장을 찍으면 [`Layer::adopt`] 가 **그 줄의 답 하나만**
+    /// 버린다. 버린 줄은 `read_at` 이 빈 채 남아 다음 걸음의 쓸기가 다시 고른다([`Layer::stale`]).
     ///
-    /// **연 갈래는 안 버린다.** 한때 여기서 통째로 버려, 펼치기(`l`·`Tab` → [`App::read_wanted`])가
-    /// 세 줄 앞에서 띄운 층의 요약 쓸기를 키 하나마다 죽였다. 느린 마운트에서 `l j l j l …` 이면
-    /// [`super::DISCARDED_KEPT`] 가 차고, 그때 [`App::discard`] 가 아직 도는 것을 놓으며 세션 내내
-    /// 남는 급한 배너를 세웠다 — 그 배너가 세는 것은 사람의 손이 버린 것인데(`DISCARDED_KEPT` 의
-    /// 문서) 아무도 안 시킨 버리기가 거기 섞였다.
+    /// **한때 여기서 쓸기를 통째로 버렸다.** 그러면 프로젝트 하나를 못 연 것이 같은 벌이 지어 오던
+    /// 다른 줄의 답까지 버려 [`REREAD_EVERY`] 만큼 옛 셈이 서고, 펼치기(`l`·`Tab` →
+    /// [`App::read_wanted`])가 세 줄 앞에서 띄운 층의 요약 쓸기를 키 하나마다 죽였다(moai-0jqh).
+    /// 느린 마운트에서 `l j l j l …` 이면 [`super::DISCARDED_KEPT`] 가 차고, 그때 [`App::discard`] 가
+    /// 아직 도는 것을 놓으며 세션 내내 남는 급한 배너를 세웠다 — 그 배너가 세는 것은 사람의 손이
+    /// 버린 것인데(`DISCARDED_KEPT` 의 문서) 아무도 안 시킨 버리기가 거기 섞였다.
     ///
-    /// **무는 대가**: 연 줄은 `read_at` 이 비어 곧 다시 읽힐 줄인데, 그 사이에 옛 쓸기가 닿으면
-    /// [`Layer::adopt`] 가 그 값으로 줄을 세우고 시계를 다시 잰다. 그때 [`REREAD_EVERY`] 만큼 옛 셈이
-    /// 설 수 있다 — 줄이 사라지는 것도 잘못된 상태로 굳는 것도 아니라 셈 하나가 1분 낡는 것이고,
-    /// 키 하나마다 쓸기를 죽이는 쪽보다 싸다고 본다.
+    /// **무는 대가**: 도장을 찍은 줄은 도는 쓸기가 그 줄에 지어 온 **멀쩡한 답도** 잃는다. 펼치기로
+    /// 여기 오는 줄([`Depth::Lean`])이 그렇다 — 그 머리줄의 셈이 도는 쓸기 한 벌이 다 빠지고 다음
+    /// 벌이 그 줄에 닿을 때까지 `읽는 중` 으로 선다([`Layer::launch`] 는 도는 것이 있으면 새로 안
+    /// 띄운다). 줄이 사라지는 것도 잘못된 상태로 굳는 것도 아니라 머리 하나가 한 벌 늦는 것이고,
+    /// 살아 있는 이슈 줄 위에 "못 읽는다" 가 세션 내내 서는 쪽보다 싸다고 본다.
     pub(super) fn open_place(&mut self, at: usize, how: Depth) -> Option<Repo> {
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
@@ -656,15 +724,27 @@ impl App {
             // 들어갔으면 어느 길로 떠나든(올라오기·옆 번호) 올라온 뒤에 다시 읽는다. 셈은 새것이 닿을
             // 때까지 그대로 선다.
             Ok(repo) => {
-                place.read_at = None;
+                // **손으로 세운 것으로 적는다**(moai-ctcb) — 이 줄은 방금 이 자리에서 열어 본
+                // 것이고, 먼저 뜬 쓸기가 잰 것은 그 전의 디렉터리다. 도장을 안 찍으면 늦게 닿은
+                // `Look::Shut` 이 살아 있는 줄을 이고 선 머리를 "못 읽는다" 로 덮고 `read_at` 까지
+                // 다시 찍어, [`Layer::stale`] 이 그 줄을 다시 안 고른다.
+                //
+                // **연 저장소를 장부에 걸지 않는다** — `?` 로 묶으면 도장 한 줄을 못 적은 것이 이미
+                // 열린 것을 버리고 `None` 을 내는데, 부르는 쪽은 그것을 "못 열었다" 로 읽어
+                // ([`App::enter_project`]·`App::read_wanted`) 까닭 한 줄 없이 키가 죽는다. 못 연
+                // 갈래와 달리 여기에는 댈 말도 없다.
+                if let Some(p) = self.layer.as_mut().and_then(|l| l.set_by_hand(at)) {
+                    p.read_at = None;
+                }
                 return Some(repo);
             }
             Err(state) => state,
         };
-        // **여기서 버린다** — 바로 아래가 줄을 고쳐 세우는 자리다. 늦게 닿은 요약이 그것을 덮는
-        // 것을 막는 것이 moai-800o 가 적은 까닭 전부고, 위의 연 갈래에는 덮을 것이 없다.
-        self.drop_layer_sweep();
-        let place = self.layer.as_mut()?.places.get_mut(at)?;
+        // **쓸기는 안 버린다**(moai-ctcb) — 여기서 통째로 버리던 것은 바로 아래가 줄을 고쳐
+        // 세우는 자리이기 때문이었는데(moai-800o), 그러면 프로젝트 하나를 못 연 것이 그 쓸기가
+        // 지어 오던 **다른 줄의 답까지** 버려 [`REREAD_EVERY`] 만큼 옛 셈이 선다. 덮는 것을 막는
+        // 자는 이제 세대다: 이 줄에 도장을 찍으면 그 답만 [`Layer::adopt`] 가 버린다.
+        let place = self.layer.as_mut()?.set_by_hand(at)?;
         place.look = shut(&place.path, &place.name, state, self.site.lang);
         place.marks = marks;
         // 들인 때로 찍는다 — [`Layer::adopt`] 와 같은 자다.
@@ -828,8 +908,11 @@ impl App {
                 // 고른다.
                 //
                 // **버리는 자리가 여기다**(moai-0jqh) — 한때 [`App::open_place`] 가 열든 못 열든
-                // 버려서, 층에 그대로 선 채 펼치기만 한 키(`l`·`Tab`)까지 쓸기를 죽였다. 여기와
-                // `open_place` 의 못 연 갈래, 둘이 서로 다른 까닭으로 버린다.
+                // 버려서, 층에 그대로 선 채 펼치기만 한 키(`l`·`Tab`)까지 쓸기를 죽였다. 이제
+                // 버리는 자리는 **여기 하나다**(moai-ctcb): 줄을 고쳐 세우는 갈래가 늦게 닿은 답에
+                // 덮이는 것은 세대가 막으므로([`Layer::set_by_hand`]), 그 줄의 답 하나면 될 일에
+                // 쓸기 한 벌을 죽일 까닭이 없다. 여기서 버리는 까닭은 그것과 다르다 — 프로젝트
+                // 안에서 남의 읽기를 기다리며 루프가 빠른 걸음으로 깨는 것을 막는 일이다.
                 self.drop_layer_sweep();
                 if let Some(layer) = &mut self.layer {
                     layer.at = At::Project(path);
@@ -1118,6 +1201,10 @@ impl App {
                         p.look = std::mem::replace(&mut o.look, Look::Unread);
                         p.marks = std::mem::take(&mut o.marks);
                         p.read_at = o.read_at;
+                        // **손으로 세운 세대도 옮겨 든다**(moai-ctcb) — 밑에서 도는 쓸기를 그대로
+                        // 넘겨받는데, 도장만 두고 가면 그 쓸기가 뜨기 전의 세대로 선 줄이 되어
+                        // 방금 연 줄이 다시 옛 답에 덮인다.
+                        p.set_at = o.set_at;
                         // **읽어 든 줄도 옮겨 든다**(리뷰). 두고 가면 한눈 보기가 펼쳐 둔 프로젝트가
                         // 통째로 접힌 머리줄만 남는다 — 이 길은 사용자 설정이 바뀔 때마다 도는데
                         // (`App::follow_config`) 보기 토글과 읽음이 **그 파일을 스스로 쓴다.**
@@ -1141,6 +1228,12 @@ impl App {
                 // 줄(`wanted`)도 넘긴다: 버리면 펼쳐 놓고 못 읽은 프로젝트가 영영 안 읽힌다.
                 // 읽혔으니 들고 선 까닭을 걷는다 — 다음 읽기가 되면 배너에서 사라져야 한다.
                 self.held = None;
+                // 세대는 **셈째** 넘긴다(moai-ctcb) — 줄마다 찍힌 도장([`Place::set_at`])은 위에서
+                // 그대로 옮겨 드는데 셈만 0 부터 다시 세면, 앞으로 뜨는 쓸기가 낮은 세대로 서서
+                // 도장 찍힌 줄의 답이 **영영** 버려진다. 그 줄은 `read_at` 이 빈 채 남아
+                // [`Layer::stale`] 이 걸음마다 다시 고르니, 같은 디렉터리를 쉬지 않고 읽으면서
+                // 셈은 끝내 안 선다. 도는 쓸기가 든 값은 그 쓸기가 뜰 때 박혀 여기서 안 바뀐다.
+                fresh.rounds = old.rounds;
                 fresh.pending = old.pending.take();
                 fresh.reading = old.reading.take();
                 fresh.wanted = std::mem::take(&mut old.wanted);
@@ -1167,11 +1260,15 @@ impl App {
     /// 읽을 까닭이 없고, 올라갈 때 낡은 줄을 읽으러 띄운다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
-        while let Some((rx, _)) = &layer.pending {
+        while let Some((rx, _, round)) = &layer.pending {
+            let round = *round;
             match rx.try_recv() {
                 Ok(looked) => {
-                    layer.adopt([looked]);
-                    if layer.at == At::Layer {
+                    // **들인 것이 있을 때만 시계를 올린다**(moai-ctcb) — 머리의 `↻` 가 그 값으로
+                    // "방금 갱신했다" 를 말하는데, 세대가 버린 답은 화면에 아무것도 안 남긴다.
+                    // 올리면 한 시간 틈·날로 재는 경고만 새 시각으로 다시 서고 그것이 매기는 셈은
+                    // 옛것이다. `App::climb` 이 안 올리는 것과 같은 까닭이다.
+                    if layer.adopt([looked], round) && layer.at == At::Layer {
                         self.site.now = crate::model::now();
                     }
                 }
@@ -1179,7 +1276,7 @@ impl App {
                 Err(TryRecvError::Empty) => break,
                 // 다 보냈거나 읽던 스레드가 죽었다 — 죽었으면 받은 읽기와 같게 되던진다(`App::follow`).
                 Err(TryRecvError::Disconnected) => {
-                    if let Some((_, handle)) = layer.pending.take()
+                    if let Some((_, handle, _)) = layer.pending.take()
                         && let Err(payload) = handle.join()
                     {
                         std::panic::resume_unwind(payload);
@@ -1317,6 +1414,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 look,
                 marks: Marks::default(),
                 read_at: Some(std::time::Instant::now()),
+                set_at: 0,
                 site: None,
             })
             .collect(),
@@ -1324,6 +1422,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
         config: None,
         launch: None,
         pending: None,
+        rounds: 0,
         reading: None,
         wanted: Vec::new(),
     }
@@ -1594,7 +1693,8 @@ mod tests {
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
         look_into(std::slice::from_ref(&two), &crate::model::now(), crate::i18n::Lang::Ko, &tx);
-        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {})));
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
         std::fs::remove_dir_all(&two).unwrap();
 
         a.key(key(KeyCode::Down));
@@ -1624,11 +1724,13 @@ mod tests {
 
         let (hold, wait) = std::sync::mpsc::channel::<()>();
         let (_tx, rx) = std::sync::mpsc::channel();
+        let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((
             rx,
             std::thread::spawn(move || {
                 let _ = wait.recv();
             }),
+            round,
         ));
 
         // `l` — 커서가 선 머리줄을 편다. 층에 그대로 선다.
@@ -1653,36 +1755,111 @@ mod tests {
     /// 없다 — 일꾼이 죽어도 시험은 푸르다.
     fn join_threads(a: &mut App) {
         let layer = a.layer.as_mut().expect("층이 선 시험이다");
-        let pending = layer.pending.take().map(|(_, h)| h);
+        let pending = layer.pending.take().map(|(_, h, _)| h);
         let reading = layer.reading.take().map(|(_, _, h)| h);
         for handle in [pending, reading].into_iter().flatten() {
             handle.join().expect("시험이 띄운 스레드가 터졌다");
         }
     }
 
-    /// **못 연 줄에서는 버린다**(moai-800o) — 그 갈래가 줄을 `Look::Shut` 으로 고쳐 세우는 자리라,
-    /// 늦게 닿은 요약이 방금 쓴 그것을 옛 디렉터리의 값으로 덮는다.
+    /// **못 연 줄은 쓸기를 죽이지 않고 그 답만 버린다**(moai-ctcb). 그 갈래는 줄을 `Look::Shut`
+    /// 으로 고쳐 세우는 자리라 늦게 닿은 요약이 방금 쓴 그것을 덮었는데(moai-800o), 쓸기를 통째로
+    /// 죽이면 같은 벌이 지어 오던 **다른 줄의 답까지** 버려 [`REREAD_EVERY`] 만큼 옛 셈이 선다.
+    ///
+    /// 그래서 둘을 함께 잰다 — 못 연 줄의 옛 답은 안 들어오고, 옆 줄의 답은 들어온다.
     #[test]
-    fn a_row_that_will_not_open_still_lets_go_of_the_layer_sweep() {
+    fn a_row_that_will_not_open_drops_the_sweeps_answer_but_not_the_sweep() {
         let s = Scratch::fenced("layer-shut-discards");
         let (one, two) = twins(&s);
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
+
+        // 쓸기가 두 줄을 다 열린 것으로 쟀다. 아직 안 닿았다.
+        let (tx, rx) = std::sync::mpsc::channel();
+        look_into(&[one.clone(), two.clone()], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
+
+        // **one 의 줄을 비워 둔다** — `layered` 가 읽어 둔 그대로 두면 쓸기의 답이 들어오든
+        // 버려지든 그 줄이 같아, 아래의 `Look::Open` 이 아무것도 안 잰다(리뷰).
+        let at_one = a.layer.as_ref().unwrap().position(&one).expect("첫 줄이 층에 있다");
+        a.layer.as_mut().unwrap().places[at_one].look = Look::Unread;
+
+        // 그새 two 가 사라지고, 사람이 그 줄을 연다 — 줄은 여기서 `Look::Shut` 으로 선다.
         std::fs::remove_dir_all(&two).unwrap();
-
-        let (hold, wait) = std::sync::mpsc::channel::<()>();
-        let (_tx, rx) = std::sync::mpsc::channel();
-        a.layer.as_mut().unwrap().pending = Some((
-            rx,
-            std::thread::spawn(move || {
-                let _ = wait.recv();
-            }),
-        ));
-
         let at = a.layer.as_ref().unwrap().position(&two).expect("두 번째 줄이 층에 있다");
         assert!(a.open_place(at, Depth::Whole).is_none(), "시험의 전제 — 사라진 줄은 안 열린다");
-        assert!(a.layer.as_ref().unwrap().pending.is_none(), "고쳐 세운 줄을 덮을 읽기를 안 놓았다");
-        drop(hold);
+        assert!(a.layer.as_ref().unwrap().pending.is_some(), "못 연 줄 하나가 쓸기 한 벌을 통째로 죽였다");
+
+        a.follow();
+        assert!(
+            matches!(look(&a, "two"), Look::Shut { state: Shut::Missing, .. }),
+            "들어가기 전에 띄운 쓸기가 방금 쓴 '없다' 를 열린 줄로 덮었다"
+        );
+        assert!(matches!(look(&a, "one"), Look::Open { .. }), "손대지 않은 줄의 답까지 버렸다");
+        join_threads(&mut a);
+    }
+
+    /// **방금 연 줄도 늦게 닿은 쓸기에 안 덮인다**(moai-ctcb). 느린 마운트를 훑던 쓸기가 프로젝트를
+    /// `Look::Shut` 으로 재고, 그것이 돌아오기 전에 사람이 그 줄을 펼치면(`l`) 연 갈래는
+    /// `read_at` 만 비우고 빠져나간다 — 옛 `Looked` 가 닿으면 [`Layer::adopt`] 가 그 값을 통째로
+    /// 들여, 살아 있는 이슈 줄 위에 "못 읽는다" 는 머리가 선다. `read_at` 이 방금 찍혀
+    /// [`Layer::stale`] 이 그 줄을 다시 안 고르니 저절로 낫지도 않는다.
+    #[test]
+    fn a_sweep_that_started_before_a_row_was_opened_does_not_shut_it() {
+        let s = Scratch::fenced("layer-late-sweep");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        assert!(matches!(look(&a, "two"), Look::Open { .. }), "시험의 전제 — 두 줄 다 열려 있다");
+
+        // 느린 마운트를 훑던 쓸기가 two 를 "못 읽는다" 로 쟀다. 아직 안 닿았다.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stale = Looked {
+            path: two.clone(),
+            marks: Marks::default(),
+            look: shut(&two, "two", State::Unreadable("느린 마운트".into()), crate::i18n::Lang::Ko),
+        };
+        tx.send(stale).unwrap();
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
+
+        // 그새 사람이 그 줄을 펼친다 — 여는 데까지 보고 층에 그대로 선다.
+        let at = a.layer.as_ref().unwrap().position(&two).expect("두 번째 줄이 층에 있다");
+        assert!(a.open_place(at, Depth::Lean).is_some(), "시험의 전제 — 그 줄은 열린다");
+
+        a.follow();
+        assert!(
+            matches!(look(&a, "two"), Look::Open { .. }),
+            "방금 연 줄을 늦게 닿은 쓸기가 '못 읽는다' 로 덮었다 — {:?}",
+            matches!(look(&a, "two"), Look::Shut { .. })
+        );
+        // **저절로 낫는 길도 함께 잰다** — 버린 답이 `read_at` 을 찍고 가면 `stale` 이 그 줄을 다시
+        // 안 골라, 셈이 세션 내내 옛것으로 선다.
+        assert!(
+            a.layer.as_ref().unwrap().stale().contains(&two),
+            "버린 답이 읽은 때를 찍고 가, 그 줄을 다시 읽으러 가는 자가 없다"
+        );
+
+        // **다음 벌이 실제로 들어오는 데까지 본다**(리뷰) — 도장 찍힌 줄이 뒤에 뜬 쓸기의 답도
+        // 버리면 그 줄은 영영 안 선다. 고른다는 것만 재면 [`Layer::launch`] 가 세대를 잘못 드는
+        // 되돌림(도장 뒤에 뜬 쓸기가 낮은 세대로 서는 것)을 못 잡는다. 보낸 쪽을 놓아
+        // `follow_layer` 가 끊김을 보고 새 벌을 띄우게 한다.
+        drop(tx);
+        // 기다리는 법은 [`settle`] 과 같다 — 맨 도는 `follow` 는 스레드가 아직 안 깨어난 사이에
+        // 다 돌아, 부하가 걸린 기계에서 "못 들였다" 고 애먼 데를 가리킨다.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.layer.as_ref().unwrap().stale().contains(&two) {
+            assert!(std::time::Instant::now() < until, "다음 쓸기가 5초 안에 안 끝났다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            a.follow();
+        }
+        // 들어왔다는 것은 **읽은 때가 다시 찍혔다**는 것이다 — 그래야 `stale` 이 그 줄을 놓는다.
+        assert!(
+            !a.layer.as_ref().unwrap().stale().contains(&two),
+            "도장 찍힌 줄은 뒤에 뜬 쓸기의 답도 못 들여, 같은 디렉터리를 쉬지 않고 다시 읽는다"
+        );
+        assert!(matches!(look(&a, "two"), Look::Open { .. }), "다시 읽고도 줄이 안 섰다");
         join_threads(&mut a);
     }
 
@@ -1697,11 +1874,13 @@ mod tests {
 
         let (hold, wait) = std::sync::mpsc::channel::<()>();
         let (_tx, rx) = std::sync::mpsc::channel();
+        let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((
             rx,
             std::thread::spawn(move || {
                 let _ = wait.recv();
             }),
+            round,
         ));
 
         a.key(key(KeyCode::Enter));
