@@ -218,6 +218,10 @@ fn decide(
                 r => !matches!(r, Some(Route::Nowhere)),
             };
             let segs = crate::hook::Segs { judges: &mine, picks: &ours };
+            // **이 줄을 훑는 것도 한 번이다**(moai-44wr) — 규칙 2 와 아래 기록이 같은 걸음을 따로
+            // 걷던 판은 토막마다 그 값을 두 번 치렀고, 막는 판에서는 `settle` 이 판정을 다시 부를
+            // 때마다 또 한 번 걸었다. 설정이 함께 드는 까닭은 [`crate::hook::Scan`] 에 있다.
+            let scan = crate::hook::Scan::new(line, &repo.config);
             // **내미는 줄은 그 토막이 겨눈 트래커를 댄다**(moai-v9sa, 사용자 결정) — 사람이 친 `-C` 의
             // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
             // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
@@ -232,7 +236,7 @@ fn decide(
                     // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
                     // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
                     Call::Shell(_) => {
-                        crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, line, &segs, &toward)
+                        crate::hook::guard_shell_in(issues, away, repo.here(), &cwd, &scan, &segs, &toward)
                     }
                     Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
                     Call::Review => crate::hook::guard_review(issues, &repo.config, away),
@@ -324,10 +328,13 @@ fn decide(
                     };
                     issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string())
                 };
-                record_picks(input, &repo, &crate::hook::picked_in(line, &repo.config, &mine, &stands));
+                record_picks(input, &repo, &crate::hook::picked_in(&scan, &mine, &stands));
+                // **남의 트래커는 제 설정으로 다시 훑는다** — 훑는 답이 `cfg` 에 달렸다
+                // ([`crate::hook::Scan`]). 흔한 줄에는 이 고리가 아예 안 돈다.
                 for (n, other) in there.iter().enumerate() {
                     let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                    record_picks(input, other, &crate::hook::picked_in(line, &other.config, &only, &stands));
+                    let scan = crate::hook::Scan::new(line, &other.config);
+                    record_picks(input, other, &crate::hook::picked_in(&scan, &only, &stands));
                 }
             }
             decision
