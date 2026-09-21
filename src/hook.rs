@@ -3239,7 +3239,15 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 글) — 그래서 겹치는 앞머리를 한 번 세고 그 뒤를 걷는다. 걷을 때마다 앞머리를 다시 훑던 판은
         // 깊이의 제곱을 썼고([`Lexer::DEEP`] 이 예순넷이다), 빈 스택을 막는 줄이 닿지 않는 자리에 섰다.
         let kept = frames.iter().zip(&seg.nested).take_while(|(f, l)| f.layer == **l).count();
+        // **이 토막이 나온 맨 바깥 겹이 뒤로 띄운 것으로 끝나는 글이고, 그 안에서 집기가 이겼는가**
+        // (moai-njji) — 그때는 글의 값이 곧 집기의 값이라, 이 토막은 묶음을 막 나온 토막처럼 제
+        // 이음사로 집기를 끊지 않는다. 끊는 자리는 **다음** 토막의 이음사다([`Lexer::relex`] 의
+        // `feeds` 가 안 띄운 글에 해 주는 것과 같다).
+        // 그 겹에 **들어설 때의** 집기도 함께 든다 — 그 토막이 부정이면(`! bash -e -c '집기; x &'`)
+        // 집기가 이겨야 뒤가 안 도니, 안 띄운 글과 같이 들어설 때의 판으로 돌린다.
+        let (mut won_apace, mut apace_held) = (false, None);
         for f in frames.drain(kept..).rev() {
+            (won_apace, apace_held) = (false, None);
             match f.layer {
                 Layer::Subst(_) => after_pick = f.held,
                 // **새 셸 안에서 집기가 이긴 채로 끝났으면 그 셸의 값도 이긴 것이다**(moai-9xbq) —
@@ -3264,22 +3272,29 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 //   { exit 1; } ); echo d'` 의 괄호는 제 안만 끝내고 자식 셸은 0 이다. 재는 자는
                 //   **겹이 들고 있는** 깊이다([`Layer::Shell`] 의 `deep`) — 겹에 들어선 토막에서
                 //   베껴 오던 판은 글이 `( … )` 로 시작하면 그 깊이를 부풀렸다(리뷰 6번)
-                // - 글이 **뒤로 띄운 것으로 끝나지 않을** 것 — 위의 `apace` 가지가 먼저 받는다
-                //   (moai-99df 가 렉서에 그 표를 놓았다)
+                // - 글이 **뒤로 띄운 것으로 끝나지 않을** 것(`!apace`) — 그 글의 값은 늘 0 이라
+                //   자식이 0 으로 끝난 것이 아무 말도 안 한다(moai-99df 가 렉서에 그 표를 놓았다)
                 //
                 // **뒤로 띄운 것으로 끝나는 글의 값은 집기의 값이 아니다** — 치환처럼 들어설 때의
                 // 집기를 도로 세운다(moai-54pk). errexit 는 그 겹 안에서 이미 제 몫을 했다.
-                Layer::Shell { apace: true, .. } => after_pick = f.held,
-                Layer::Shell { top, deep, .. }
-                    if unrun.is_none_or(|c| top < c)
-                        && (sure.max(sure_e).is_some_and(|l| l >= top)
-                            || bailout.as_ref().is_some_and(|b| b.resolves(top, deep, iffy))) =>
-                {
-                    let home = top.saturating_sub(1);
-                    after_pick = Some(after_pick.map_or(home, |d| d.min(home)));
-                    credit(&mut picked, bailout.as_ref().filter(|b| b.resolves(top, deep, iffy)), home);
+                //
+                // **다만 그 글 안에서 이긴 집기는 이긴 것이다**(moai-njji) — `apace` 는 "글의 값이
+                // 집기의 값이 아니다" 는 뜻이지 그 안에서 이긴 것까지 지우라는 뜻이 아니다.
+                // `bash -e -c '집기; echo done &' && 쓰기` 는 집기가 지면 errexit 가 그 자리에서
+                // 자식을 1 로 끝내니, 바깥 `&&` 에 닿은 것 자체가 집기가 이겼다는 뜻이다. 들어설
+                // 때의 집기를 먼저 되세우던 판은 시킨 대로 친 그 줄을 막았다.
+                Layer::Shell { top, deep, apace, .. } => {
+                    let resolved = (!apace).then(|| bailout.as_ref().filter(|b| b.resolves(top, deep, iffy))).flatten();
+                    let won = sure.max(sure_e).is_some_and(|l| l >= top) || resolved.is_some();
+                    if unrun.is_none_or(|c| top < c) && won {
+                        let home = top.saturating_sub(1);
+                        after_pick = Some(after_pick.map_or(home, |d| d.min(home)));
+                        credit(&mut picked, resolved, home);
+                        (won_apace, apace_held) = (apace, f.held);
+                    } else if apace {
+                        after_pick = f.held;
+                    }
                 }
-                Layer::Shell { .. } => {}
             }
             (strict, lone, sure, sure_e, bailout) = (f.strict, f.lone, f.sure, f.sure_e, f.bailout);
         }
@@ -3459,6 +3474,14 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         } else {
             after_pick = match j.op {
                 Op::Pipe => heads.get(j.depth).copied().flatten(),
+                // 뒤로 띄운 것으로 끝나는 글이 집기로 이겼다 — 그 값이 이 토막의 값이다(moai-njji).
+                _ if won_apace => {
+                    if bang {
+                        apace_held
+                    } else {
+                        after_pick
+                    }
+                }
                 _ => after_pick.and_then(|d| match j {
                     j if j.depth > d => Some(d),
                     j if j.op == Op::And => Some(j.depth),
@@ -7802,6 +7825,14 @@ mod tests {
             // **그 글은 묶음을 막 나온 토막도 아니다**(리뷰 moai-k8j1.209) — 값이 안 흐르니 그 토막은
             // 제 이음사를 그대로 읽어야 한다. 겹만 `Shell` 로 되돌리고 `feeds` 를 안 고치던 판은
             // 앞의 `;` 가 끊은 사슬을 그 토막에서 도로 살려, 아무것도 안 쥔 쓰기를 넘겼다.
+            // **그 글 안에서 이긴 집기도 끊는 자리는 그대로다**(moai-njji) — 끊는 것은 **다음**
+            // 토막의 이음사고, 안 띄운 글이 이미 그렇게 선다. 부정과 안 돌 수도 있는 자리도 같다.
+            "bash -e -c 'moai mv t-1 in_progress --from todo; echo done &'; sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 1; echo x &'; sed -i s/a/b/ src/store.rs",
+            "! bash -e -c 'moai mv t-1 in_progress --from todo; echo x &' && sed -i s/a/b/ src/store.rs",
+            "true || bash -e -c 'moai mv t-1 in_progress --from todo; echo x &' && sed -i s/a/b/ src/store.rs",
+            "bash -e -c 'if false; then moai mv t-1 in_progress --from todo || exit 1; fi; echo x &' && sed -i s/a/b/ src/store.rs",
+            "bash -e -c 'echo hi; moai mv t-1 in_progress --from todo &' && sed -i s/a/b/ src/store.rs",
             "moai mv t-1 in_progress --from todo; bash -c 'cargo build &' && sed -i s/a/b/ src/store.rs",
             "moai mv t-1 in_progress --from todo\nsh -c 'sleep 1 &' && echo x > src/store.rs",
             "true && sh -c '( moai mv t-1 in_progress --from todo & )' && sed -i s/a/b/ src/store.rs",
@@ -7837,6 +7868,12 @@ mod tests {
             // 조건이 셸에 넘긴 글이고 그 글이 집기로 끝난다.
             "if ! bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi; sed -i s/a/b/ src/store.rs",
             "if ! eval 'moai mv t-1 in_progress --from todo'; then exit 1; fi; sed -i s/a/b/ src/store.rs",
+            // **뒤로 띄운 것으로 끝나는 글 안에서 이긴 집기는 이긴 것이다**(moai-njji) — 집기가
+            // 졌으면 자식이 그 자리에서 0 아닌 값으로 끝나, 바깥 `&&` 에 아예 안 닿는다.
+            "bash -e -c 'moai mv t-1 in_progress --from todo; echo done &' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 1; echo x &' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'set -e; moai mv t-1 in_progress --from todo; echo x &' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi; echo x &' && sed -i s/a/b/ src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
