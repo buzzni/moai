@@ -1613,6 +1613,12 @@ pub fn detail(
         } else {
             String::new()
         };
+        // **에픽 줄도 제 가지를 단다**(moai-v8jl) — `--worktree` 에서 이 줄만 맨몸이면, 바로 아래
+        // 자식 줄은 `⎇` 를 달고 에픽 줄만 안 달아 읽는 쪽이 그 제목이 어느 가지 것인지 모른다.
+        // 가지를 재는 것은 **그 에픽 id** 다: 이 줄이 겹쳤는가가 아니라 저 줄이 겹쳤는가다.
+        // **자르지 않는다** — 표만 더한다. 이 줄은 여태 제목을 통째로 냈고, 자르는 것은
+        // 이 일이 고치는 것이 아니다(`style::PLAIN` 은 이스케이프를 안 붙여 글자도 그대로다).
+        let title = marked(seen.screen.branch(e), title, usize::MAX, style::PLAIN).0;
         out.push(format!("  {}   {}  {title}{stray}", row_label(say(lang, "detail.epic"), lang), paint(style::ID, e)));
     }
     // **어디서 하던 일인지 댄다**(moai-6opu) — 세션이 죽은 뒤 이어받는 쪽이 들어갈 자리다. 없으면
@@ -3863,6 +3869,48 @@ mod tests {
         assert!(row.contains(&mark), "겹쳐 온 줄에 가지 표가 없다\n{over:#?}");
         let off = draw(&shown, Screen::new(lang));
         assert!(!off.iter().any(|l| l.contains(style::BRANCH_GLYPH)), "안 겹친 화면에 가지 표가 섰다\n{off:#?}");
+    }
+
+    /// **상세의 에픽 줄도 제 가지를 단다**(moai-v8jl). 제 제목·막음 줄·자식 줄은 `⎇` 를
+    /// 다는데 에픽 줄만 맨몸이라, `moai show <id> --worktree` 에서 바로 아래 자식 줄은 표를
+    /// 달고 에픽 줄만 안 달았다 — 읽는 쪽이 그 제목이 어느 가지 것인지 모른다.
+    ///
+    /// **재는 것은 그 에픽 id 의 겹침이다** — 펼친 줄이 아니다. 둘을 갈라 두지 않으면 펼친
+    /// 줄이 겹쳤을 때 에픽 줄에도 같은 표가 서는 되돌림을 못 잡는다.
+    #[test]
+    fn the_epic_row_of_a_detail_carries_the_branch_mark_too() {
+        let lang = Lang::Ko;
+        let mine = vec![Issue::new(
+            "argos-e001".into(),
+            "저장 계층".into(),
+            Kind::Epic,
+            Status::new("todo"),
+            "2026-09-11T04:12:03Z",
+        )];
+        let mut theirs = mine[0].clone();
+        theirs.title = "옆에서 고친 저장 계층".into();
+        theirs.updated_at = "2026-09-12T00:00:00Z".into();
+        theirs.status_since = "2026-09-12T00:00:00Z".into();
+        let (shown, origin) =
+            crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/tmp/feat-x", vec![theirs])]);
+        let epic = shown.iter().find(|i| i.id == "argos-e001").expect("겹친 에픽이 없다");
+
+        let mut member = issue("argos-0002", "멤버", "todo");
+        member.epic = Some("argos-e001".into());
+        let seen = Seen { screen: Screen::new(lang).over(&origin), ..bare_seen(lang) };
+        let out = plain(&detail(&member, Some(epic), &[], &seen, &cfg(), "2026-09-13T00:00:00Z", false));
+
+        let mark = format!("{} feat/x", style::BRANCH_GLYPH);
+        let row = out
+            .iter()
+            .find(|l| l.contains("argos-e001"))
+            .unwrap_or_else(|| panic!("에픽 줄이 상세에 없다\n{out:#?}"));
+        assert!(row.contains(&mark), "에픽 줄에 가지 표가 없다\n{out:#?}");
+        assert!(row.contains("옆에서 고친 저장 계층"), "에픽 줄이 제목을 잃었다\n{out:#?}");
+
+        // 겹침이 없으면 표도 없다 — 표가 늘 서면 위의 줄만으로는 아무것도 안 잡힌다.
+        let off = plain(&detail(&member, Some(epic), &[], &bare_seen(lang), &cfg(), "2026-09-13T00:00:00Z", false));
+        assert!(!off.iter().any(|l| l.contains(style::BRANCH_GLYPH)), "안 겹친 상세에 가지 표가 섰다\n{off:#?}");
     }
 
     /// 없는 에픽을 가리켜도 상세가 죽지 않는다 — 드러내되 막지 않는다.
