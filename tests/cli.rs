@@ -10670,6 +10670,13 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
     let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
     assert!(why.contains(&format!("moai -C {np} add '<title>'")), "없는 자리의 -C 를 버렸다\n{why}");
+    // **그 자리로 가려면 `init` 부터 든다**(2026-09-21 사용자 결정, moai-bt1f) — 대기만 하고
+    // `init` 을 안 대던 판은 옮겨 쳐도 안 도는 줄을 내밀었다.
+    assert!(why.contains(&format!("moai -C {np} init")), "트래커 없는 자리에 init 을 안 댔다\n{why}");
+    // **이 트래커의 에픽·id 에는 그 `-C` 가 안 붙는다** — 붙으면 그 자리에 없는 id 를 댄 줄이 된다.
+    assert!(why.contains("moai add '<title>' -e "), "에픽 줄이 맨 moai 로 안 선다\n{why}");
+    assert!(!why.contains(&format!("moai -C {np} add '<title>' -e")), "남의 자리에 이 트래커의 에픽을 달았다\n{why}");
+    assert!(!why.contains(&format!("moai -C {np} idea add")), "남의 자리에 idea 를 담으라고 했다\n{why}");
 
     // **안 적은 `-C` 는 지어내지 않는다**(리뷰 moai-51h9.k8j1) — 앞의 `cd` 가 없는 자리를 가리키면
     // 그 `cd` 는 실패하고 `moai` 는 세션 자리에서 돈다. 그 자리를 내밀던 판은 `git worktree add …

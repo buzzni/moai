@@ -208,7 +208,9 @@ fn decide(
             // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
             // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
             // 처럼 어디서 쳤느냐에 따라 달라지는 상대 경로도 풀려 나온다.
-            let toward = |k: usize| aims.get(k).and_then(Option::as_deref);
+            let toward = |k: usize| {
+                aims.get(k).and_then(Option::as_ref).map(|(at, tracker)| crate::hook::Aimed { at, tracker: *tracker })
+            };
             let decision =
                 settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
                     // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
@@ -232,7 +234,7 @@ fn decide(
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
-                                Some(other.root.as_path())
+                                Some(crate::hook::Aimed { at: other.root.as_path(), tracker: true })
                             })
                         })
                     });
@@ -542,11 +544,15 @@ enum Route {
 
 /// 토막마다 판정할 트래커를 가른다(`hook::aimed`). 가리킨 곳이 없으면 디스크를 안 짚는다 —
 /// 대부분의 호출은 `-C`·`cd` 가 없어 여기서 아무것도 안 읽는다.
-fn route(repo: &Repo, line: &crate::hook::Line<'_>, cwd: &Path) -> (Vec<Route>, Vec<Repo>, Vec<Option<PathBuf>>) {
+fn route(
+    repo: &Repo,
+    line: &crate::hook::Line<'_>,
+    cwd: &Path,
+) -> (Vec<Route>, Vec<Repo>, Vec<Option<(PathBuf, bool)>>) {
     let mut there: Vec<Repo> = Vec::new();
     // 토막마다 **내미는 줄이 겨눌 자리**([`crate::hook::Toward`]) — 판정할 트래커와 따로 든다. 판정은
     // 이 트래커가 하면서도 겨눌 자리는 딴 곳인 경우가 있다(아직 없는 자리, 아래).
-    let mut aims: Vec<Option<PathBuf>> = Vec::new();
+    let mut aims: Vec<Option<(PathBuf, bool)>> = Vec::new();
     // 아직 없는 자리를 가리킨 토막에서만 읽는다 — 대부분의 호출은 여기 안 와 명령줄을 다시 안 가른다.
     let spelled = std::cell::OnceCell::new();
     let routes = crate::hook::aimed(line, cwd)
@@ -574,7 +580,7 @@ fn same(a: &Path, b: &Path) -> bool {
 fn route_one(
     repo: &Repo,
     there: &mut Vec<Repo>,
-    aim: &mut Option<PathBuf>,
+    aim: &mut Option<(PathBuf, bool)>,
     dir: Option<PathBuf>,
     spells: &dyn Fn() -> bool,
 ) -> Route {
@@ -602,7 +608,7 @@ fn route_one(
         if here_now {
             return Route::Nowhere;
         }
-        *aim = Some(dir);
+        *aim = Some((dir, false));
         return Route::Here;
     };
     // **제 낱말로 `-C` 를 적어 딴 트래커를 가리킨 토막은 그 트래커가 본다**(moai-acf7, 2026-09-19
@@ -652,7 +658,7 @@ fn route_one(
     // **겨눌 자리는 `there` 가 이미 든 철자다** — 토막마다 제가 푼 철자를 들던 판은, 링크로 같은
     // 저장소를 두 철자로 가리킨 줄에서 규칙 1(`there` 로 판정한다)과 한국어 알림(`aims` 로 낸다)이
     // 한 훅 판에 서로 다른 `-C` 를 댔다.
-    *aim = Some(there[n].root.clone());
+    *aim = Some((there[n].root.clone(), true));
     Route::There(n)
 }
 

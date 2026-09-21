@@ -2669,7 +2669,7 @@ pub fn guard_create(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str) -> D
 /// ([`Toward`]) 시험이 대신 댄다.
 #[cfg(test)]
 pub fn guard_create_toward(issues: &[Issue], cfg: &Config, away: &Away, cmd: &str, at: &Path) -> Decision {
-    create_in(issues, &held(issues, cfg, away), &Line::new(cmd), &|_| true, &|_| Some(at))
+    create_in(issues, &held(issues, cfg, away), &Line::new(cmd), &|_| true, &|_| Some(Aimed::stands(at)))
 }
 
 /// [`guard_create`] 를 `only` 가 고른 토막에만 — 다른 트래커를 가리키는 토막은 그 트래커의
@@ -2732,7 +2732,7 @@ fn create_in<'a>(
     // 워크트리의 스냅샷에 줄을 세웠다 — 루트에는 안 서고 병합에서 스냅샷이 겨룬다. 글자로만은
     // 못 푸는 `-C`(`$VAR`·`~`·`$( … )`)만 그대로 옮긴다([`echo_moai`]) — 버리면 남의 자리를 겨눈
     // 줄이 이 트래커를 겨눈 줄로 바뀐다.
-    let moai = echo_moai(aim(at), seg);
+    let moai = echo_moai(aim(at).and_then(Aimed::standing), seg);
     // **에픽이 없으면 에픽을 대라고 말하지 않는다.** 없는 에픽 자리에 이슈 id 를
     // 넣어 일러 주던 자리다 — 시키는 대로 치면 `moai add '제목' -e <이슈>` 가
     // 만들어지고, `moai status` 에 "에픽으로 쓸 수 없는 것을 가리키는 줄" 이
@@ -2755,6 +2755,22 @@ fn create_in<'a>(
     // 이름은 [`aside_in`] 의 같은 값과 맞춘다 — `aim` 으로 적던 판은 겨눌 트래커를 묻는 매개변수
     // (`aim: Toward`)를 이 자리에서 가려, 위의 `echo_moai(aim(at))` 를 한 줄만 내려도 안 되는 글이 됐다.
     let aims = epics.iter().chain(&loose).copied().collect::<Vec<_>>().join(", ");
+    // **겨눈 자리에 트래커가 없으면 `init` 부터 댄다**(2026-09-21 사용자 결정, moai-bt1f) — 그 자리의
+    // `-C` 를 위의 줄들에 달던 판은 옮겨 쳐도 **안 도는 줄**을 내밀었다. 그 자리에는 트래커가 없어
+    // 실패하고, 달려 있는 에픽 id 는 이 트래커의 것이라 거기서는 어차피 안 선다.
+    //
+    // **자리를 버리지도 않는다** — 사람이 그 자리를 겨눈 데는 뜻이 있다(moai-51h9.n0z 13번이 정한
+    // "그 자리를 그대로 댄다"). 위의 줄들은 여기 트래커의 것으로 서고, 거기로 가려면 무엇이 더 드는지를
+    // 제 줄로 낸다.
+    let fresh: String = aim(at)
+        .filter(|a| !a.tracker)
+        .and_then(|a| a.at.to_str().map(crate::text::shell_word))
+        .map_or_else(String::new, |d| {
+            format!(
+                "\x20 moai -C {d} init\n\
+                 \x20 moai -C {d} add '<title>'   if it really belongs over there — no tracker stands at {d} yet\n"
+            )
+        });
     // **첫 칸에 둔 줄이 일을 열어 두는 것은 에픽뿐이다** — 에픽의 칸은 멤버에서 읽지만, 에픽 없는
     // 일은 자식이 첫 칸에 있어도 그대로 닫힌다. 그때 "첫 칸에 두면 안 닫힌다" 를 비치면 거짓이다.
     // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `idea add` 줄이고, idea 도 첫 칸에 선다.
@@ -2777,7 +2793,7 @@ fn create_in<'a>(
             "You are already holding something — {held}.\n\
          Create it inside that unit, or park it if it belongs outside. An issue created\n\
          outside the focus loses which work it came out of.\n\
-         {into_epic}{under}\
+         {into_epic}{under}{fresh}\
          \x20 {moai} idea add '<title>'              park it if it is not for now\n\
          If {aims} {pledge}, it is not an idea — even when you cannot do it now,\n\
          {keep}"
@@ -2863,7 +2879,7 @@ fn close_in(
                  \"handed on\" is never read again.",
                     r.id,
                     // **닫는 두 걸음도 그 토막이 겨눈 트래커를 댄다**(moai-j2vp) — 규칙 1 과 한 자다.
-                    crate::guide::close_steps(&r.id, &echo_moai(aim(k), seg))
+                    crate::guide::close_steps(&r.id, &echo_moai(aim(k).and_then(Aimed::standing), seg))
                 ),
             );
         }
@@ -3868,7 +3884,7 @@ fn aside_in(
     let Some(first) = aims.first() else {
         return Decision::Pass;
     };
-    let moai = echo_moai(aim(at), seg);
+    let moai = echo_moai(aim(at).and_then(Aimed::standing), seg);
     Decision::Context(format!(
         "The second question of fork 1 — can {} deliver what it promised without the thought you just parked? \
          If not, it is not an idea but this work, unfinished.\n\
@@ -3995,7 +4011,7 @@ pub fn korean_write(line: &Line<'_>, only: &dyn Fn(usize) -> bool, aim: Toward<'
         // `cd src && moai -C .. note …` 에 `moai -C .. edit` 를, 워크트리 안의 `moai -C . note …` 에
         // `moai -C . edit` 를 내밀었다 — 앞엣것은 어디서 치느냐로 자리가 바뀌고, 뒤엣것은 v9sa 가
         // 닫은 바로 그 길(워크트리 스냅샷)이다. 같은 훅 한 판이 거절문과 다른 자리를 대면 안 된다.
-        Some(aim_flag(aim(k), &seg.words))
+        Some(aim_flag(aim(k).and_then(Aimed::standing), &seg.words))
     })
 }
 
@@ -4322,7 +4338,31 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
 /// 거절문과 비춤이 내미는 줄이 **겨눌 트래커** — 토막 번호([`Line::used`] 의 번호)로 묻는다.
 /// `None` 이면 이 자리의 트래커라 맨 `moai` 로 낸다. 자리를 푸는 것은 파일 계통을 아는 `cmd/hook.rs`
 /// 고(`aimed` → `Repo::find_from`, 딸린 워크트리는 루트로 옮겨진다), 여기는 그 답만 받는다.
-pub type Toward<'a> = &'a dyn Fn(usize) -> Option<&'a Path>;
+pub type Toward<'a> = &'a dyn Fn(usize) -> Option<Aimed<'a>>;
+
+/// 토막이 **내미는 줄로 겨눌 자리**([`Toward`]).
+///
+/// 자리 하나만 들던 판은 두 경우를 한 값으로 섞었다 — 트래커가 선 딴 저장소와, 아직 트래커가
+/// 없는 새 자리다. 뒤엣것에 `-C` 를 달아 내밀면 옮겨 친 줄이 그 자리에서 실패한다(moai-bt1f).
+#[derive(Clone, Copy, Debug)]
+pub struct Aimed<'a> {
+    /// 그 자리.
+    pub at: &'a Path,
+    /// 거기 **트래커가 서 있는가**.
+    pub tracker: bool,
+}
+
+impl<'a> Aimed<'a> {
+    /// **트래커가 선 자리**를 겨눈다.
+    pub fn stands(at: &'a Path) -> Aimed<'a> {
+        Aimed { at, tracker: true }
+    }
+
+    /// 트래커가 선 자리만 — 내미는 줄의 `-C` 는 여기서만 선다.
+    fn standing(self) -> Option<&'a Path> {
+        self.tracker.then_some(self.at)
+    }
+}
 
 /// 내미는 줄의 머리 — 겨눌 트래커가 이 자리면 맨 `moai`, 아니면 `moai -C <그 자리>` 다.
 /// `-C` 를 고르는 자는 [`aim_flag`] 고, 여기는 머리를 붙일 뿐이다.
@@ -5843,7 +5883,7 @@ mod tests {
             let dirs = aimed(cmd, root);
             let own = |k: usize| dirs[k].is_none();
             guard_shell_in(&mine, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| {
-                dirs[k].as_deref()
+                dirs[k].as_deref().map(Aimed::stands)
             })
         };
         assert_eq!(judge("moai -C /b add \"딴 일\""), Decision::Pass);
@@ -5854,8 +5894,10 @@ mod tests {
         let theirs = vec![issue("t-9", "in_progress")];
         let cmd = "moai -C /b add \"딴 일\"";
         let dirs = aimed(cmd, root);
-        let why = denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some(), &|k| dirs[k].as_deref()))
-            .to_string();
+        let why = denied(&guard_moai(&theirs, &cfg(), &here(), cmd, &|k| dirs[k].is_some(), &|k| {
+            dirs[k].as_deref().map(Aimed::stands)
+        }))
+        .to_string();
         assert!(why.contains("t-9"), "{why}");
     }
 
@@ -5881,8 +5923,9 @@ mod tests {
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
         let at = Path::new("/repo/sub");
         let all_of = Segs { judges: &|_| true, picks: &|_| true };
-        let aside =
-            guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| Some(at));
+        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| {
+            Some(Aimed::stands(at))
+        });
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
@@ -7743,7 +7786,7 @@ mod tests {
             let dirs = aimed(cmd, root);
             let own = |k: usize| dirs[k].is_none();
             guard_shell_in(&idle, &cfg(), &here(), root, root, cmd, &Segs { judges: &own, picks: &own }, &|k| {
-                dirs[k].as_deref()
+                dirs[k].as_deref().map(Aimed::stands)
             })
         };
         for cmd in [
@@ -8293,7 +8336,7 @@ mod korean_tests {
     #[test]
     fn the_korean_write_names_where_it_went() {
         let here = |_: usize| None;
-        let there = |_: usize| Some(Path::new("/repo/sub"));
+        let there = |_: usize| Some(Aimed::stands(Path::new("/repo/sub")));
         assert_eq!(korean_write("moai note t-1 '한글'", &|_| true, &here).as_deref(), Some(""));
         assert_eq!(
             korean_write("moai -C .. note t-1 '한글'", &|_| true, &here).as_deref(),
@@ -8301,7 +8344,7 @@ mod korean_tests {
             "친 글자를 옮겨 적었다"
         );
         assert_eq!(korean_write("moai -C /x note t-1 '한글'", &|_| true, &there).as_deref(), Some(" -C /repo/sub"));
-        let spaced = |_: usize| Some(Path::new("/a b"));
+        let spaced = |_: usize| Some(Aimed::stands(Path::new("/a b")));
         assert_eq!(korean_write("moai -C '/a b' note t-1 '한글'", &|_| true, &spaced).as_deref(), Some(" -C '/a b'"));
         // 못 푼 자리(변수·`~`)는 친 글자를 그대로 되돌려 준다 — 그 셸이 다시 풀면 같은 자리다.
         assert_eq!(
