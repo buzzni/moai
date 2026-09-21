@@ -104,7 +104,10 @@
 (`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어다. `ready`
 표의 에픽 칸에 서는 `(없는 에픽)` 은 `report.epic_gone` 의 낱말이다 — 여기는 옮겼다
 (moai-ivt9). **괄호는 말묶음에 없다**(moai-snus) — `report::epic_labels` 는 찾았는가만
-값으로 내고(`report::EpicLabel`), 감싸는 표기는 그리는 쪽이 저마다 정한다. 그 밖의 화면
+값으로 내고(`report::EpicLabel`), 감싸는 표기는 그리는 쪽이 정한다. **그 "그리는 쪽" 도 한
+자리다**(리뷰) — `view::gone_epic` 이고, 네 표면(`list`·`ready`·`prime`·`detail`)이 그것을
+부른다. 한때 상세만 제 괄호를 단 딴 키(`detail.missing_epic`)를 들어, 같은 자료를 두고
+목록은 `(epic not there)` 라 하고 `show <id>` 는 `(no such epic)` 이라 했다. 그 밖의 화면
 (`show` 의 상세와 이력, `tui`)도 아직 한국어로 박혀 있다 — 한 낱말이 두 화면에 서면
 (`미룸`·`자식 없음`) 한쪽만 옮긴 동안은 같은 줄이 두 말로 보인다. 남은 자리는 트래커에 있다.
 

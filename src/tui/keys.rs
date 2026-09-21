@@ -355,6 +355,18 @@ pub enum Side {
     Down,
 }
 
+impl Side {
+    /// 가른 축에 놓인 쪽인가 — **이웃이 있는가**다(moai-x7pa). 좌우로 갈랐으면 `h`·`l` 이,
+    /// 위아래로 갈랐으면 `j`·`k` 가 참이다.
+    ///
+    /// **가르는 자는 하나다**(리뷰). 한때 이 식이 여기와 [`super::Pane::step`] 에 글자째 두 벌로
+    /// 적혀 있었다 — 자리를 하나 더하는 날 한쪽만 고쳐지면, 바는 "→ 상세" 라 대는데 키는 아무
+    /// 일도 안 하거나(여기만 고친 판), 닿는 칸을 키가 못 간다(저기만 고친 판).
+    pub fn on_axis(self, at: super::view::DetailAt) -> bool {
+        at.vertical() == matches!(self, Side::Up | Side::Down)
+    }
+}
+
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Order {
@@ -743,13 +755,19 @@ impl Browse {
             FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
             // **이웃은 가른 축에만 있다**(리뷰, moai-x7pa) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
             // 이, 왼쪽이나 오른쪽에 서면 `Ctrl-w j`·`k` 가 제자리다(`Pane::step`, vim 그대로).
-            // 그런데도 바가 "→ 탐색기" 라고 대면 지금 선 칸의 이름을 가리키는 키가 서는 셈이라,
-            // 위의 줄이 막은 것과 같은 거짓말이다. 어느 자리에서든 칸을 도는 것은
-            // `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
+            // 어느 자리에서든 칸을 도는 것은 `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
             //
-            // **가르는 자는 `Pane::step` 과 같은 자다** — 여기와 저기에 저마다 적으면 자리를
-            // 하나 더하는 날 한쪽만 고쳐져, 아무 일도 안 하는 키가 바에 선다.
-            Focus(side) if c.detail_at.vertical() != matches!(side, Side::Up | Side::Down) => Err(Off::Quiet),
+            // **이 줄이 막는 것은 바가 아니다**(리뷰) — `Focus` 는 오늘 바에 안 선다. 바가 이어 누를
+            // 키를 댈 때 고르는 자(`keys::next_keys`)가 `label.is_some()` 으로 거르는데 `Ctrl-w` 의
+            // `h`·`l`·`k`·`j` 는 넷 다 `None` 으로 적혔고, `draw::browse_hints` 도 `FocusNext` 만 댄다.
+            // 위의 줄(`!c.detail`)의 "바가 거짓말한다" 는 `FocusNext` 에 서는 말이다. 여기서 막는
+            // 것은 **켜짐 판정과 `Pane::step` 이 한 말을 하게 하는 것**이고, 그래야 이 키에 낱말을
+            // 붙이는 날(`Some("Ctrl-w h")`) 바가 저절로 맞는다 — 안 막으면 그날 지금 선 칸의 이름이
+            // 그 키의 갈 곳으로 선다.
+            //
+            // **가르는 자는 [`Side::on_axis`] 하나다** — 여기와 `Pane::step` 에 저마다 적으면
+            // 자리를 하나 더하는 날 한쪽만 고쳐져, 둘이 다른 말을 한다.
+            Focus(side) if !side.on_axis(c.detail_at) => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 `0`(전체)까지
             // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.

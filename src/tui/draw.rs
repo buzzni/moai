@@ -91,7 +91,8 @@ fn left_gutter() -> usize {
 pub fn screen(f: &mut Frame, app: &mut App) {
     // **목록은 한 프레임에 한 번만 센다.** 세는 데 이슈 전부를 훑고 정렬까지
     // 하므로, 목록 패널과 상세 패널이 각자 세면 그 일이 한 키 누름에 두 번 더
-    // 돈다. 1,600 이슈에서 그 한 번이 20ms 다.
+    // 돈다. 값은 [`App::rows`] 의 문서가 든다 — 여기에도 적어 두었더니 둘이
+    // 두 배 차이로 갈렸다(리뷰).
     let rows = app.rows();
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());

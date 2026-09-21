@@ -92,7 +92,6 @@
   "detail.epic": "에픽",
   "detail.child": "자식",
   "detail.place": "자리",
-  "detail.missing_epic": "(없는 에픽)",
   "detail.group_has_no_epic": "(묶음은 에픽에 안 든다 — status 가 못 쓸 참조로 댄다)",
   "detail.place_fresh": "아직 안 보인다 — 방금 집었다",
   "detail.place_unknown": "모른다 — 못 읽은 워크트리가 있다",

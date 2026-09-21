@@ -235,8 +235,9 @@ impl Pane {
     /// (`Browse::FocusNext`)는 돈다.
     pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
         use keys::Side::*;
-        // 가른 축과 누른 방향의 축이 다르면 이웃이 없다.
-        if at.vertical() != matches!(side, Up | Down) {
+        // 가른 축과 누른 방향의 축이 다르면 이웃이 없다 — 재는 자는 [`keys::Side::on_axis`]
+        // 하나고, `Browse::enabled` 가 "이 키가 서는가" 를 같은 자로 가른다.
+        if !side.on_axis(at) {
             return self;
         }
         // 앞에 선 칸이 **왼쪽이자 위**다 — 가른 축 하나로 두 방향을 같이 읽는다.
@@ -563,8 +564,12 @@ fn warnings_in<'a>(
 /// `⎇` 워크트리 마크까지 제 것으로 세우기로 했고(사용자 결정 2026-09-19, moai-ucx8), 그러려면 이
 /// 스물몇이 프로젝트마다 한 벌씩 있어야 한다. 흩어 두면 그 한 벌을 고르는 자리가 필드 수만큼 는다.
 ///
-/// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글·누구인가는 화면에 하나뿐이라
-/// [`App`] 에 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
+/// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글은 화면에 하나뿐이라 [`App`] 에
+/// 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
+///
+/// **누구인가는 그 가름의 예외다**([`Site::me`], moai-ropk) — 사람은 화면에 하나지만 *이 프로젝트에서
+/// 그 사람이 누구로 적히는가* 는 뿌리마다 다르다(프로젝트마다 git 설정이 다를 수 있다). 푸는 값이
+/// 비싸 셀 때마다 다시 풀 수 없어, 푼 답을 그 프로젝트 곁에 둔다.
 pub struct Site {
     /// 이 화면의 말(moai-ra67). **탐색기도 고른 말로 선다** — 한때 이 층에 말이 안 닿아
     /// `layer::shut` 이 `Lang::Ko` 를 손으로 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는
@@ -586,15 +591,24 @@ pub struct Site {
     pub repo: Option<Repo>,
     /// **이 프로젝트에서 나는 누구인가** — `이름 (메일)`. [NEW] 를 가르는 자다([`App::recount_unread_in`]).
     ///
-    /// **푸는 자리는 셋이다**(moai-z9pc, moai-j038.vna) — 띄울 때, 프로젝트를 옮길 때, 묻는 칸에서
-    /// 사람을 받을 때. 다시 읽기마다 부르지는 않는다: 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가
-    /// 무너진다(`reading_never_asks_who`).
+    /// **푸는 자리는 넷이다**(moai-z9pc, moai-j038.vna, moai-ropk) — 띄울 때(`cmd::tui`), 프로젝트로
+    /// 들어갈 때([`super::layer::App::enter_project`]), 그 프로젝트를 **읽을 때**([`App::follow_site`]),
+    /// 묻는 칸에서 사람을 받을 때([`App::answer`] → [`App::relearn_me_in_places`]). **세는 자리에서는
+    /// 안 푼다** — [`App::recount_unread_in`] 은 푼 값을 읽기만 한다.
+    ///
+    /// 읽을 때 푸는 것은 "읽기는 사람을 묻지 않는다"(CLAUDE.md)를 안 깬다 — [`App::whoami`] 는
+    /// `git config` 를 물을 뿐 **사람에게** 묻지 않는다(`reading_never_asks_who` 가 재는 것이 그것이다).
     ///
     /// **줄과 같이 산다**(moai-ropk). 프로젝트마다 git 설정이 다를 수 있어 뿌리마다 다시 풀어야 하는데
     /// ([`App::whoami`]), 그 한 번이 `git config` 프로세스 둘이다(띄우기 11ms + 푸는 데 22ms). 한때
     /// 한눈 보기가 그것을 **걸음마다** 풀어 `term.draw` 와 `event::poll` 사이에서 화면이 그만큼 멈췄다.
     /// 여기 두면 그 프로젝트를 읽을 때 한 번 풀리고, 다시 읽을 때 같이 다시 풀린다 — `Site` 를
     /// 갈아 끼우는 길이 곧 다시 푸는 길이라 둘이 어긋날 자리가 없다.
+    ///
+    /// **다만 그 한 번이 아직 UI 실에 선다**(리뷰) — `follow_site` 는 스레드가 읽어 온 것을 **들이는**
+    /// 자리라, 프로세스 둘이 `term.draw` 와 `event::poll` 사이에서 돈다. 걸음마다가 아니라 읽기마다라
+    /// 값은 줄었지만, 옆 세션이 자주 쓰는 저장소에서 펼친 프로젝트가 여럿이면 다시 읽을 때마다 그만큼
+    /// 멈춘다. 옮길 자리는 읽는 스레드(`read_wanted` 의 닫음이 `repo` 를 이미 든다)다.
     ///
     /// **화면이 도는 동안 바뀐 git 설정은 그 프로젝트를 다시 읽을 때까지 안 보인다.** 줄이 그런 것과
     /// 같은 결이라 따로 무르는 자를 두지 않는다(사용자 결정 2026-09-21).
@@ -2490,18 +2504,36 @@ impl App {
     ///
     /// **옛 `[read]` 가 바뀐 판에서만 부른다.** 그 표는 이 바이너리가 안 적으니 드문 걸음이고, 값은
     /// 펼친 프로젝트 수만큼의 읽음 파일 읽기다. 걸음마다 돌면 그 값을 늘 치른다.
+    ///
+    /// **[`App::opened_seats`] 를 안 쓴다**(리뷰) — 그쪽은 걸음마다 도는 [`App::follow_read`] 의
+    /// 거르개라 프로젝트 안에서는 한 줄도 안 낸다(moai-p4ec). 여기는 **한 번뿐인 길**이고 못 든 것을
+    /// 다시 드는 자가 없다: 옛 `[read]` 는 사용자 설정에 살아 그 프로젝트의 읽음 파일 표식을 안
+    /// 건드리므로, 올라온 뒤의 `follow_read` 도 낡은 것을 못 본다. 프로젝트 안에서 그 파일이 바뀌면
+    /// 층의 줄은 세션 내내 옛 표로 [NEW] 를 센다 — 두 번 재는 값보다 그쪽이 비싸다.
     fn load_read_in_places(&mut self) {
-        for seat in self.opened_seats() {
+        for seat in self.seats_with_site() {
             self.load_read_in(seat);
         }
     }
 
     /// 층에서 **펼쳐 둔** 프로젝트의 자리들 — 표를 들고 있고([`layer::Place::site`]) 접혀 있지 않은 줄이다.
+    /// **어디에 서 있는지는 안 본다** — 그것을 가르는 자는 [`App::opened_seats`] 다.
     ///
     /// **거르개는 [`App::sites`] 와 같다**(리뷰). 접기([`App::fold`])는 `site` 를 안 버리므로
     /// (`읽은 것은 안 버린다`) `site.is_some()` 하나로 고르면 **안 보이는 줄까지** 걸음마다 재고 읽는다 —
     /// 그리는 쪽이 이미 접힌 줄을 빼고 있으니, 재는 쪽도 같은 줄을 봐야 값이 화면과 맞는다. 다시 펼치면
     /// 그 걸음의 [`App::follow_read`] 가 표식 차이를 보고 바로 든다.
+    fn seats_with_site(&self) -> Vec<Seat> {
+        let Some(l) = self.layer.as_ref() else { return Vec::new() };
+        l.places
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.site.is_some() && !self.folded.contains(&p.path))
+            .map(|(n, _)| Seat::Place(n))
+            .collect()
+    }
+
+    /// [`App::seats_with_site`] 중 **지금 화면에 선** 것 — 걸음마다 도는 [`App::follow_read`] 의 거르개다.
     ///
     /// **프로젝트 안에서는 한 줄도 없다**(moai-p4ec) — 층의 줄은 그때 화면에 없다([`App::rows`] 가
     /// `on_layer()` 로 가른다). 안 가르면 **들어간 프로젝트를 두 번 잰다**: [`super::layer::App::enter_project`]
@@ -2509,14 +2541,14 @@ impl App {
     /// [`App::follow_read`] 의 `Seat::Here` 옆에 한 번 더 선다. 값은 줄마다 `canonicalize` 하나와
     /// `stat` 한둘이고(9.5us + 5.3us), 나머지 줄까지 치면 프로젝트 안에서는 그 셈이 통째로 헛돈다.
     /// 올라오면 그 걸음의 `follow_read` 가 표식 차이를 보고 바로 든다 — 접었다 편 줄과 같은 길이다.
+    ///
+    /// **한 번뿐인 길은 이것을 쓰면 안 된다** — 건너뛴 것을 다시 드는 자가 걸음뿐이라,
+    /// 걸음이 안 보는 차이(`load_read_in_places` 의 옛 `[read]`)는 영영 안 들어온다.
     fn opened_seats(&self) -> Vec<Seat> {
-        let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) else { return Vec::new() };
-        l.places
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.site.is_some() && !self.folded.contains(&p.path))
-            .map(|(n, _)| Seat::Place(n))
-            .collect()
+        if !self.on_layer() {
+            return Vec::new();
+        }
+        self.seats_with_site()
     }
 
     /// **읽음 파일이 바뀌었으면 다시 든다** — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다
@@ -2682,6 +2714,36 @@ impl App {
         // 프로젝트를 남의 읽음으로 셌다.
         let Site { issues, seen, unread, .. } = site;
         *unread = crate::query::unread(issues, &me, seen).into_iter().map(str::to_string).collect();
+    }
+
+    /// 층에 표를 든 줄마다 누구인지를 **다시 풀고** [NEW] 를 다시 센다 — 묻는 칸이 사람을 받은
+    /// 뒤([`App::answer`])의 자리다.
+    ///
+    /// **없으면 [NEW] 가 영영 안 선다**(리뷰). [`Site::me`] 는 그 프로젝트를 읽을 때 한 번 풀리는데
+    /// ([`App::follow_site`]), 표를 든 줄은 다시 안 읽힌다([`App::want_site`] 가 `site.is_some()` 에
+    /// 서 돌아선다). 그래서 띄울 때 누군지 모르던 기계에서 층의 줄을 펼쳐 놓고 사람을 대면, 지금
+    /// 선 프로젝트만 [NEW] 가 서고 나머지는 세션 내내 한 줄도 안 섰다 — 헤더는 그 사람을 대는데
+    /// 안 읽음은 "모름" 에 머무는, moai-j038.vna 가 막으려던 바로 그 화면이다.
+    ///
+    /// **접힌 줄도 든다** — 접기는 표를 안 버려, 빼면 다시 펼쳐도 옛 값 그대로다.
+    ///
+    /// **값은 프로세스가 아니다** — 여기 닿았다는 것은 `self.user` 가 섰다는 뜻이고, 그러면
+    /// [`crate::model::actor`] 는 첫 갈래에서 답해 `git config` 를 안 띄운다.
+    fn relearn_me_in_places(&mut self) {
+        let seats: Vec<Seat> = match self.layer.as_ref() {
+            Some(l) => {
+                l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| Seat::Place(n)).collect()
+            }
+            None => Vec::new(),
+        };
+        for seat in seats {
+            let root = self.site_of_seat(seat).and_then(|s| s.repo.as_ref()).map(|r| r.root.clone());
+            let me = root.and_then(|root| self.whoami(&root));
+            if let Some(site) = self.site_mut(seat) {
+                site.me = me;
+            }
+            self.recount_unread_in(seat);
+        }
     }
 
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
@@ -2942,8 +3004,18 @@ impl App {
     /// 펴 198줄에 1.15ms — 줄당 약 5.8us 다. moai-b910 이 적은 9.2ms 는 줄 1,700개가 한 화면에 설
     /// 때의 값이고, 그 자리는 이 저장소에서 안 선다. 층에서는 펼친 프로젝트마다 이만큼이 더해진다.
     ///
+    /// **값을 적는 자리는 여기 하나다**(리뷰) — `draw::screen` 이 제 곁에 "1,600 이슈에서 20ms" 를
+    /// 따로 들고 있어, 같은 함수의 값을 두 배 차이로 말하는 글 둘이 스무 줄 사이에 섰다. 그쪽은
+    /// **한 프레임에 한 번** 이라는 규칙만 들고 값은 이 문단을 가리킨다.
+    ///
+    /// **키 하나에 한 번이 아니다** — 그리는 쪽 말고도 [`App::current`]·[`App::settle`]·
+    /// [`App::after_search`]·[`App::key`] 가 저마다 짓는다. 검색에 글자 하나를 치면 두세 판이 돈다.
+    /// 위의 값은 **한 판**의 것이라, 그만큼 곱해 읽는다.
+    ///
     /// **다시 잴 때**: 한 프로젝트가 수천 줄로 펴지거나, 층에 여럿 펼친 화면에서 키 하나가 눈에 띄게
     /// 늦을 때. 그 전에 캐시를 두는 것은 안 난 값을 위해 되돌리기 어려운 자리를 여는 일이다.
+    /// 캐시보다 먼저 볼 것은 **짓는 판을 줄이는 것**이다 — 지은 목록을 받는 몸이 이미 여럿 있다
+    /// (`current_of`·`stand`·`key_ctx`).
     pub fn rows(&self) -> Vec<Row> {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
             let mut rows = Vec::new();
@@ -4035,6 +4107,10 @@ impl App {
             // 띄울 때의 "모름" 에 머물면 한 화면이 두 사람을 말하고, `SPC m a` 는 늘 "적을 것이 없다" 다.
             self.site.me = self.user.clone();
             self.recount_unread();
+            // **층에 펼쳐 둔 줄도 이 사람으로 다시 센다**(리뷰) — 위의 한 줄은 지금 선 프로젝트만
+            // 고친다. [`Site::me`] 가 읽을 때 한 번 풀리는 값이 되면서(moai-ropk), 한때 `whoami` 를
+            // 셀 때마다 풀어 다음 걸음에 저절로 갚던 길이 닫혔다.
+            self.relearn_me_in_places();
             (ask.then)(self);
         }
     }
@@ -7904,14 +7980,18 @@ mod tests {
             // 칸을 도는 키는 그대로 선다 — 그쪽은 어느 자리에서든 무언가 한다.
             assert!(keys::Browse::FocusNext.enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w w 가 걷혔다");
         }
-        for (at, side) in [
-            (DetailAt::Left, keys::Side::Left),
-            (DetailAt::Right, keys::Side::Right),
-            (DetailAt::Top, keys::Side::Up),
-            (DetailAt::Bottom, keys::Side::Down),
+        // **가른 축의 두 쪽이 다 선다** — 한 자리에 한 쪽씩만 재면, 가르는 자를 "상세를 가리키는
+        // 쪽만 선다" 로 좁힌 날 기본 자리(`Right`)의 `Ctrl-w h` 가 말없이 죽는다(리뷰).
+        for (at, sides) in [
+            (DetailAt::Left, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Right, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Top, [keys::Side::Up, keys::Side::Down]),
+            (DetailAt::Bottom, [keys::Side::Up, keys::Side::Down]),
         ] {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
-            assert!(keys::Browse::Focus(side).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w {side:?} 가 걷혔다");
+            for side in sides {
+                assert!(keys::Browse::Focus(side).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w {side:?} 가 걷혔다");
+            }
         }
         a.detail_at = DetailAt::Right;
 
