@@ -6916,3 +6916,9 @@
 {"ts":"2026-09-21T11:06:16Z","id":"moai-6mk3.lgj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=381235 (max — 리뷰 서브에이전트, 지적 15건)"}
 {"ts":"2026-09-21T11:06:19Z","id":"moai-6mk3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 멤버 다섯과 리뷰 반영, 릴리스 게이트·CI·설치·훅 시험)"}
 {"ts":"2026-09-21T11:06:30Z","id":"moai-6mk3.lgj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 열다섯을 전부 받아 커밋 ca42aed 로 고쳤다. 가장 큰 셋은 게이트가 엉뚱한 것을 막던 자리다 — 못 읽는 Cargo.toml 이 어긋남으로 둔갑해 푸시를 막던 것, changes 가 지면 size-budget 이 조용히 건너뛰어지던 것, 두 grep 의 SIGPIPE 가 코드 변경을 글로 읽던 것. 넘긴 15번(changes 잡을 size-budget 안의 스텝으로 접는 것)은 꼴을 그대로 두고 잰 값과 접을 길을 ci.yml 주석에 적었다. 되돌릴 조건은 이 잡이 벽시계의 느린 쪽이 되는 때다"}
+{"ts":"2026-09-21T11:08:55Z","id":"moai-ivt9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설정과 계획 파서에 남은 한국어 마흔여섯 줄"}
+{"ts":"2026-09-21T11:09:05Z","id":"moai-ler5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-21T11:09:05Z","id":"moai-2bv4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-21T11:09:05Z","id":"moai-utya","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-21T11:09:06Z","id":"moai-io79","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-21T11:09:06Z","id":"moai-bn0y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
