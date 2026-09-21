@@ -5383,7 +5383,11 @@ fn counted(path: &str, root: &Path) -> bool {
     if path.is_empty() {
         return false;
     }
-    let Ok(rel) = real_path(path, root).strip_prefix(root).map(Path::to_path_buf) else {
+    // **푼 값을 붙들고 빌려 쓴다.** 한 줄로 이으면 임시값이 그 줄 끝에서 죽어 `to_path_buf` 로
+    // 한 벌을 더 떠야 하는데, 아래는 조각을 훑기만 한다 — Edit·Write 마다, 셸에서 캔 경로마다 도는
+    // 자리라 그 한 벌이 값 없이 쌓인다.
+    let real = real_path(path, root);
+    let Ok(rel) = real.strip_prefix(root) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
     let mut parts = rel.components().map(|c| c.as_os_str().to_str());
@@ -5417,9 +5421,16 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
 /// 없는 철자를 옮겨 치라고 내민다. 판정은 두 철자를 한 자리로 봐야 하고, 내미는 글은 사람이 친
 /// 철자를 지켜야 한다.
 ///
-/// **이름이 `settle` 과 한 글자 차이이던 자리다**(moai-l2he). [`crate::read_marks::settle`] 은
-/// 경로를 통째로 풀고 **못 푼 까닭을 사람에게 돌려주는데** 이쪽은 있는 윗자리만 풀고 아무 말도
-/// 안 한다 — 앞엣것을 익힌 사람이 여기서 뒤엣것을 집으면 틀린 답을 말없이 받는다.
+/// **이름이 `settle` 과 한 글자 차이이던 자리다**(moai-l2he). 가르는 것은 **어디까지 푸는가** 다 —
+/// [`crate::read_marks::settle`] 은 경로를 **통째로** 풀어 없으면 떨어지고, 이쪽은 있는 윗자리까지만
+/// 풀어 아직 없는 파일도 같은 자리로 댄다. 앞엣것을 익힌 사람이 여기서 뒤엣것을 집으면 새로 만드는
+/// 파일에서만 규칙이 꺼진다. (까닭을 대는 것은 가르는 자가 아니다 — `settle` 도 **없는 자리에는
+/// 아무 말도 안 한다**(`Fallen(None)`); 말을 얹는 것은 ELOOP 처럼 딴 탈일 때뿐이다.)
+///
+/// **[`crate::store::real`] 과도 한 낱말 차이다.** 그쪽은 통째로 `canonicalize` 하고 실패하면 준
+/// 철자를 그대로 돌려주므로, 여기에 그것을 끼우면 **아직 없는 파일**에서 안 풀린 철자가 나와
+/// `strip_prefix(root)` 가 빗나간다 — 2026-09-19 에 닫은 바로 그 구멍이다. 이 자리가 쓰는 것은
+/// [`crate::store::real_prefix`] 다.
 fn real_path(path: &str, root: &Path) -> PathBuf {
     // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::store::real_prefix`] 는 접힌 것을 받는다.
     crate::store::real_prefix(&resolve(path, root))
@@ -7828,8 +7839,9 @@ mod tests {
         // 저장소 밖이다 — 붙여 놓은 글자만 보면 안으로 보인다.
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "../elsewhere/x.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "/repo/../elsewhere/x.rs"), Decision::Pass);
-        // **뿌리 위로는 못 올라간다**(moai-i7b6). 뿌리를 뗀 판은 여기서 `repo/src/store.rs` 라는
-        // 상대 경로가 나와 `strip_prefix` 가 빗나갔고, 저장소 안의 파일이 아무 말 없이 지나갔다.
+        // **뿌리 위로는 못 올라간다** — `/..` 은 `/` 다([`crate::store::lexical`]). 모으기 전에도
+        // 같은 답이었으니(`PathBuf::pop` 이 뿌리에서 아무것도 안 한다) 이 줄은 고침을 재는 것이
+        // 아니라 경계를 못박는 것이다.
         assert!(matches!(guard_edit(&all, &cfg(), &here(), root, "/../repo/src/store.rs"), Decision::Deny(_)));
     }
 

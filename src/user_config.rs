@@ -1700,8 +1700,10 @@ pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
     let lexical = crate::store::lexical(&joined);
     let mut out = vec![lexical.clone()];
-    let more = [std::fs::canonicalize(&joined).ok(), Some(crate::store::real_prefix(&lexical)), Some(joined)];
-    for one in more.into_iter().flatten() {
+    // **없을 수 있는 것은 통째 풀기 하나다.** 셋 다 `Option` 이던 판의 모양을 그대로 두면 `Some(` 이
+    // 둘 붙어, 다음에 철자를 더하는 이가 그것을 흉내 낸다.
+    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::store::real_prefix(&lexical), joined]);
+    for one in more {
         if !out.contains(&one) {
             out.push(one);
         }
