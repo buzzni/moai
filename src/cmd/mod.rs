@@ -126,6 +126,31 @@ pub fn clearable(v: &str) -> Option<String> {
     (v != "none").then(|| v.to_string())
 }
 
+/// 껍데기가 이 자리를 **실제로 돌릴 수 있는가** — 있는 파일이고 실행 비트가 섰는가.
+///
+/// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 하고,
+/// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다.
+///
+/// **두 벌이던 것을 모았다**(moai-p3kb) — `skill` 의 `runnable` 과 `tui` 의 `executable` 이 같은
+/// 물음에 저마다 답하고 있었다. 갈리면 이식성 고침 하나가 고친 사람이 기억하는 한 곳에만 든다.
+/// 유닉스가 아닌 데서는 실행 비트가 없어 있는 파일이면 그만이다 — 두 벌 다 그렇게 적혀 있었다.
+///
+/// **이름으로 PATH 를 묻는 두 자리는 여기 안 든다.** `skill` 은 껍데기의 `command -v` 로 묻고
+/// (훅이 실제로 치는 것이 그 명령이라 껍데기가 보는 것과 같아야 한다), `tui` 는 편집기를 고르려고
+/// `PATH` 를 제 손으로 훑는다(띄울 때 한 번, 이름 여럿). 같은 물음처럼 보이지만 답이 갈리는 자리가
+/// 있고(껍데기 함수·별칭), 값도 다르다.
+pub fn runnable(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
 pub fn note_partial() {
     PARTIAL.store(true, Ordering::Relaxed);
 }
@@ -708,6 +733,25 @@ pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
 mod tests {
     use super::*;
     use crate::model::{Issue, Kind, Status};
+
+    /// **실행 비트가 답을 가른다.** `is_file` 만 보던 판은 권한이 빠진 파일을 "돈다" 고 했고,
+    /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.
+    ///
+    /// 재는 자가 한 자리에 선다 — `skill` 과 `tui` 가 저마다 적던 것을 여기로 모았다(moai-p3kb).
+    #[cfg(unix)]
+    #[test]
+    fn only_a_file_with_the_execute_bit_runs() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let s = crate::scratch::Scratch::new("cmd-runnable");
+        let exe = s.join("exe");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        assert!(!runnable(&exe), "실행 비트가 없는데 돈다고 한다");
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runnable(&exe), "실행 비트가 섰는데 안 돈다고 한다");
+        // 디렉터리는 실행 비트가 서 있어도 돌릴 것이 아니고, 없는 자리도 아니다.
+        assert!(!runnable(s.path()), "디렉터리를 돌린다고 한다");
+        assert!(!runnable(&s.join("없다")), "없는 자리를 돈다고 한다");
+    }
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {
         let mut i =
