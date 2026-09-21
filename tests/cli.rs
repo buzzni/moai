@@ -14556,7 +14556,10 @@ fn the_install_table_and_the_release_matrix_name_the_same_targets() {
     let matrix: std::collections::BTreeSet<String> =
         yml.lines().filter_map(|l| l.trim().strip_prefix("- target:")).map(|t| t.trim().to_owned()).collect();
     // 꼴이 바뀌어 아무것도 못 읽으면 **빈 것끼리 같다**로 지나간다 — 그때는 이 시험도 같이 고친다.
-    assert!(!matrix.is_empty(), "release.yml 에서 빌드 행렬을 못 읽었다 — 행렬의 꼴이 바뀌었으면 이 시험도 같이 고친다");
+    assert!(
+        !matrix.is_empty(),
+        "release.yml 에서 빌드 행렬을 못 읽었다 — 행렬의 꼴이 바뀌었으면 이 시험도 같이 고친다"
+    );
 
     let sh = std::fs::read_to_string(at_root("install.sh")).unwrap();
     let table: std::collections::BTreeSet<String> = sh
