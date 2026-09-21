@@ -65,7 +65,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     match lookup(BROWSE, &seq) {
         Lookup::Run(act) if act.enabled(c).is_ok() => {
             // **상태를 대는 동작은 메뉴를 안 닫는다**(사용자 결정 2026-09-19) — 눌러 보며
-            // 맞추는 것이라, 한 번 받고 닫으면 `SPC v d`·`SPC v w` 를 맞출 때마다 메뉴를 다시
+            // 맞추는 것이라, 한 번 받고 닫으면 `SPC v 1`·`SPC v w` 를 맞출 때마다 메뉴를 다시
             // 연다. 판정은 **항목마다**다: 같은 층의 `SPC v a`(모두 보이기)처럼 상태가 없는
             // 것은 한 번에 끝나는 일이라 그대로 닫는다.
             if !act.stateful() {
@@ -342,14 +342,13 @@ mod tests {
     #[test]
     fn the_view_menu_numbers_the_configured_columns() {
         let columns: Vec<String> = ["todo", "in_progress", "done"].map(String::from).to_vec();
-        let c = Ctx { columns: 3, hidden: 0b100, done_hidden: true, ..inside() };
+        let c = Ctx { columns: 3, hidden: 0b100, ..inside() };
         let items = entries(&[k(' '), k('v')], &c, &columns);
-        assert_eq!(keys_of(&items), ["d", "l", "a", "1", "2", "3", "p", "w", "r"]);
+        // **`d` 가 없다**(moai-h6z3) — done 은 제 글자를 안 갖고 번호가 센다. 한때 `d` 와 `3` 이
+        // 같은 설정을 켜고 꺼 이 목록에 `done [숨김]` 이 두 줄 섰다.
+        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "p", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
-        assert_eq!(
-            text[..6],
-            ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]
-        );
+        assert_eq!(text[..5], ["미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
         let mut ch = Chord::default();
         for x in [' ', 'v', '4'] {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
@@ -450,7 +449,8 @@ mod tests {
             ("vw", Browse::Worktree, inside()),
             ("vr", Browse::Raw, inside()),
             ("vp", Browse::Detail, inside()),
-            ("vd", Browse::Done, inside()),
+            // done 은 번호로 선다(moai-h6z3) — 설정의 셋째 칸이 `done` 이다.
+            ("v3", Browse::Column(2), Ctx { columns: 3, ..inside() }),
             ("vl", Browse::Deferred, inside()),
             ("sa", Browse::Sort(super::super::keys::Order::Assignee), inside()),
             ("mg", Browse::ReadGroup, inside()),
@@ -480,12 +480,12 @@ mod tests {
     /// 항목마다다.
     #[test]
     fn toggles_stay_open_until_esc_but_a_plain_item_closes() {
-        let c = inside();
+        let c = Ctx { columns: 3, ..inside() };
         let mut ch = Chord::default();
         feed(&mut ch, &c, k(' '));
         feed(&mut ch, &c, k('v'));
         for _ in 0..3 {
-            assert_eq!(feed(&mut ch, &c, k('d')), Some(Browse::Done));
+            assert_eq!(feed(&mut ch, &c, k('3')), Some(Browse::Column(2)));
             assert_eq!(title(ch.held()), "SPC v", "토글을 되풀이하는데 메뉴가 닫혔다");
         }
         assert_eq!(feed(&mut ch, &c, k('w')), Some(Browse::Worktree), "다른 토글로 이어 못 갔다");
@@ -535,7 +535,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["d", "l", "a", "p", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "p", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -598,10 +598,7 @@ mod tests {
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
-        assert_eq!(
-            keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
-            ["d", "l", "a", "p", "w"]
-        );
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["l", "a", "p", "w"]);
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

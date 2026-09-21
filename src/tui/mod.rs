@@ -2023,7 +2023,7 @@ impl App {
         let view = self.view.clone();
         Self::see_in(&mut self.site, &view);
         // **한눈 보기의 남의 줄에도 같은 보기를 건다**(moai-1xo5, 사용자 결정 2026-09-19) — 보기는
-        // 보는 사람의 것이라 화면에 하나뿐이다. 안 걸면 `SPC v d` 가 지금 선 프로젝트에만 들어,
+        // 보는 사람의 것이라 화면에 하나뿐이다. 안 걸면 `SPC v <칸 번호>` 가 지금 선 프로젝트에만 들어,
         // 같은 화면의 두 프로젝트가 한 토글에 다르게 선다.
         let places = self.layer.as_mut().map_or(0, |l| l.places.len());
         for n in 0..places {
@@ -2835,7 +2835,6 @@ impl App {
                     self.view.toggle(&s);
                 }
             }
-            B::Done => self.view.toggle(crate::config::DONE),
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
@@ -3566,7 +3565,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -3632,7 +3631,6 @@ impl App {
                 .enumerate()
                 .filter(|(_, s)| self.view.hides(s))
                 .fold(0, |bits, (n, _)| bits | 1 << n),
-            done_hidden: self.view.hides(crate::config::DONE),
             deferred_hidden: self.view.hide_deferred,
             sorting: self.order,
             fields: self.fields,
@@ -4302,7 +4300,7 @@ mod tests {
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
         assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
         a.hit("Esc");
@@ -4310,7 +4308,7 @@ mod tests {
 
         a.hit("SPC v l Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
-        // 설정의 넷째 칸이 done 이다 — 번호로 누른 것과 `d` 가 같은 칸을 만진다.
+        // 설정의 넷째 칸이 done 이다 — done 을 켜고 끄는 길은 번호 하나다(moai-h6z3).
         a.hit("SPC v 4 Esc");
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
@@ -5485,7 +5483,7 @@ mod tests {
         a.key(key(KeyCode::Char('l')));
         // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004", "argos-0003"], "done 을 켰는데 멤버가 안 선다");
         a.hit("SPC s p Esc");
@@ -7736,7 +7734,7 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         a.hit("SPC v l Esc");
         a.hit("SPC s u Esc");
         a.hit("SPC s u Esc");
@@ -7775,7 +7773,7 @@ mod tests {
 
         // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다. 겹쳐 적힌 done 은
         // 한 번에 보인다.
-        c.hit("SPC v d Esc");
+        c.hit("SPC v 4 Esc");
         assert!(!c.view.hides(crate::config::DONE), "겹쳐 적힌 done 이 한 번 눌러서는 안 보였다");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(
@@ -7814,7 +7812,7 @@ mod tests {
         assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
         a.hit("Esc");
         a.notice = None;
-        a.hit("SPC v d");
+        a.hit("SPC v 4");
         assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
         a.hit("Esc");
         let text = std::fs::read_to_string(&user).unwrap();
@@ -7871,7 +7869,7 @@ mod tests {
         };
         let (mut a, mut b) = (open(), open());
         a.hit("SPC c a Esc");
-        b.hit("SPC v d Esc");
+        b.hit("SPC v 4 Esc");
         b.hit("SPC s u Esc");
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();

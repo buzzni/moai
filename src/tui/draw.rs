@@ -6449,7 +6449,10 @@ pub(super) mod tests {
             screen.contains("w : 워크트리 겹쳐 보기 [켜짐]") && screen.contains("r : 원문↔그리기 [그리기]"),
             "{screen}"
         );
-        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("d : done [보임]"), "{screen}");
+        // **done 은 번호 줄로만 선다**(moai-h6z3) — 옛 `d : done` 과 `4 : done` 이 한 목록에 나란히
+        // 서서 같은 설정을 켜고 껐다.
+        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
+        assert!(!screen.contains("d : done"), "걷은 `SPC v d` 가 메뉴에 남았다\n{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
 
         // **토글은 창을 안 걷는다** — 눌러 보며 맞추라고 열린 채로 남고, 상태 낱말이 그 자리에서

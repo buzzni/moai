@@ -320,8 +320,6 @@ pub enum Browse {
     /// **SPC 없이 바로 누른다**(사용자 결정). 헤더가 `<0>`~`<9>` 로 그 번호를 대고, 그것이
     /// 이 키를 설명하는 유일한 자리다. `SPC v 1`(칸 토글)과는 SPC 하나로 갈라진다.
     Project(u8),
-    /// done 을 보이고 숨긴다 — 가장 자주 누를 것이라 번호와 따로 선다.
-    Done,
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
     Deferred,
     ShowAll,
@@ -526,9 +524,14 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
-        // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(d·l·a·번호)가
+        // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
         // 먼저, 화면의 꼴(p·w·r)이 뒤다.
-        row!(Done, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
+        //
+        // **done 에는 제 글자가 없다 — 번호가 센다**(moai-h6z3, 2026-09-21 사용자 결정). 옛 `SPC v d`
+        // 는 `SPC v <done 의 번호>` 와 **같은 설정**(`[tui] hidden` 에 `done` 이 드는가)을 켜고 꺼,
+        // 메뉴에 같은 것이 두 줄 섰다. 번호는 칸이 몇이든 서고 설정의 칸 이름을 그대로 대지만 `d` 는
+        // `done` 이라는 낱말을 코드에 박은 둘째 어휘라, 칸 이름을 바꾸면 `d` 만 옛 낱말로 남는다.
+        // `l`(미룸)·`a`(전부)는 남는다 — 그 둘은 칸이 아니라 거름망이라 번호로 못 댄다.
         // 미룸은 `l`(later) — 옛 `z` 는 뜻을 읽을 길이 없었다(사용자 결정).
         row!(Deferred, Some("SPC v l"), LEADER, Key::plain('v'), Key::plain('l')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
@@ -615,7 +618,6 @@ pub struct Ctx {
     pub nested: bool,
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
-    pub done_hidden: bool,
     pub deferred_hidden: bool,
     /// 고른 차례와 그 방향.
     pub sorting: Sorting,
@@ -699,7 +701,7 @@ impl Browse {
             // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
             // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
             // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`).
-            Column(_) | Done | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
+            Column(_) | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
@@ -743,7 +745,6 @@ impl Browse {
             Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw")),
             Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
             Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
-            Browse::Done => Some(shown(c.done_hidden, c.lang)),
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
@@ -768,7 +769,7 @@ impl Browse {
     /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
     pub fn stateful(self) -> bool {
         use Browse::*;
-        matches!(self, Worktree | Raw | Column(_) | Done | Deferred | Sort(_) | Cell(_) | Detail)
+        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail)
     }
 
     /// 사람에게 대는 낱말. **켜고 끄는 것은 지금 상태로 가는 곳을 댄다** — 색이 혼자 뜻을
@@ -804,9 +805,6 @@ impl Browse {
             Column(_) => say(c.lang, "tui.act.column"),
             // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
             Project(_) => say(c.lang, "tui.act.project"),
-            // **칸 이름은 설정에서 온다 — 옮기지 않는다.** `done` 은 기본 설정의 낱말이지 화면 글이
-            // 아니고, 사람이 칸을 다르게 지으면 그 이름이 선다.
-            Done => "done",
             Deferred => say(c.lang, "tui.act.deferred"),
             ShowAll => say(c.lang, "tui.act.show_all"),
             Sort(_) => say(c.lang, "tui.act.sort"),
@@ -1488,7 +1486,6 @@ mod tests {
             (vec![sp, ch('v'), ch('w')], B::Worktree),
             (vec![sp, ch('v'), ch('r')], B::Raw),
             (vec![sp, ch('v'), ch('p')], B::Detail),
-            (vec![sp, ch('v'), ch('d')], B::Done),
             (vec![sp, ch('v'), ch('l')], B::Deferred),
             (vec![sp, ch('v'), ch('a')], B::ShowAll),
             (vec![sp, ch('v'), ch('1')], B::Column(0)),
@@ -1502,6 +1499,9 @@ mod tests {
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
         }
+        // **`SPC v d` 는 걷었다**(moai-h6z3) — done 은 제 글자를 안 갖고 번호(`SPC v <n>`)가 센다.
+        // `v` 뒤에서 모르는 글자라 열이 통째로 버려진다.
+        assert_eq!(lookup(BROWSE, &[sp, ch('v'), ch('d')]), Lookup::Unknown, "걷은 `SPC v d` 가 아직 듣는다");
         let pick = [
             (press(C::Up), Lookup::Run(Pick::Step(Move::LineUp))),
             (press(C::PageDown), Lookup::Run(Pick::Step(Move::PageDown))),

@@ -396,8 +396,9 @@ IDEA
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   View — every toggle except the list columns (SPC c) is here:
-    SPC v d  done [shown/hidden] SPC v l  deferred           SPC v a  show all
+    SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
+             done has no letter of its own: the column that holds it does
     SPC v p  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
