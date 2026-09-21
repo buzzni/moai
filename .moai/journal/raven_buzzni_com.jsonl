@@ -362,3 +362,6 @@
 {"ts":"2026-09-21T20:00:49Z","id":"moai-729n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"su 는 -c 가 없으면 사용자 뒤의 피연산자를 대상 셸의 argv 로 넘긴다 — Wrapped::Shell 로 그 자리들을 들고 shell_argv 가 bash 를 읽듯 읽는다. 로그인은 넘긴 글보다 먼저 보되 getopt 가 본 첫 피연산자일 때만이다. 자리 인자와 -s 로 고른 프로그램은 idea moai-4kus 로 넘겼다."}
 {"ts":"2026-09-21T20:00:49Z","id":"moai-ulaa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"xargs 를 감싸는 명령 표에 넣었다. optional_argument 인 -e·-l 과 --eof·--max-lines 는 값을 안 먹고, 자리표를 세우는 -I·-i·--replace 에서는 멈춘다 — argv 의 낱말이 경로가 아니라서다. 훑은 열넷은 idea moai-5pse, argv 덧붙임은 moai-tq28 로 넘겼다."}
 {"ts":"2026-09-21T20:00:50Z","id":"moai-6qkc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"렉서가 읽어 낸 치환의 글을 Seg::eaten 에 적고, 넘긴 글이 그 글로만 이뤄졌을 때만 뺀다. 본문이 적어 둔 길(덩이만 세어 빼기)은 eval 작은따옴표 줄을 통째로 잃어 쓰던 것이라 안 갔다 — 그 까닭은 이슈 노트에 있다. 장부의 두 줄은 한 줄이 됐다."}
+{"ts":"2026-09-21T20:04:15Z","id":"moai-i7b6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T20:04:15Z","id":"moai-l2he","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T20:04:15Z","id":"moai-p3kb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
