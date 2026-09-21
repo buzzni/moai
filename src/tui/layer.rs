@@ -582,14 +582,23 @@ impl App {
     /// 읽기가 제 까닭을 댄다("들어가지 못했다 — …"). 둘 다 안 들어가고 줄도 다시 읽히지만,
     /// **말은 다르다** — 여기서 두 벌로 적은 것이 아니라 읽는 자리가 둘이라 그렇다.
     ///
-    /// **도는 층 읽기는 버린다**(moai-800o). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면
-    /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
-    /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
-    /// 들어갔으면 올라올 때다.
+    /// **못 연 갈래에서만 도는 층 읽기를 버린다**(moai-800o, 좁힌 것은 moai-0jqh — 사용자 결정
+    /// 2026-09-21). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면 여기서 고쳐 세운 줄
+    /// (`Look::Shut`)을 옛 디렉터리의 값으로 덮는다 — 그 까닭은 **줄을 고쳐 세우는 갈래에만 선다.**
+    /// 버린 줄은 층에 선 다음 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에
+    /// 남았으면 곧바로, 들어갔으면 올라올 때다.
+    ///
+    /// **연 갈래는 안 버린다.** 한때 여기서 통째로 버려, 펼치기(`l`·`Tab` → [`App::read_wanted`])가
+    /// 세 줄 앞에서 띄운 층의 요약 쓸기를 키 하나마다 죽였다. 느린 마운트에서 `l j l j l …` 이면
+    /// [`super::DISCARDED_KEPT`] 가 차고, 그때 [`App::discard`] 가 아직 도는 것을 놓으며 세션 내내
+    /// 남는 급한 배너를 세웠다 — 그 배너가 세는 것은 사람의 손이 버린 것인데(`DISCARDED_KEPT` 의
+    /// 문서) 아무도 안 시킨 버리기가 거기 섞였다.
+    ///
+    /// **무는 대가**: 연 줄은 `read_at` 이 비어 곧 다시 읽힐 줄인데, 그 사이에 옛 쓸기가 닿으면
+    /// [`Layer::adopt`] 가 그 값으로 줄을 세우고 시계를 다시 잰다. 그때 [`REREAD_EVERY`] 만큼 옛 셈이
+    /// 설 수 있다 — 줄이 사라지는 것도 잘못된 상태로 굳는 것도 아니라 셈 하나가 1분 낡는 것이고,
+    /// 키 하나마다 쓸기를 죽이는 쪽보다 싸다고 본다.
     pub(super) fn open_place(&mut self, at: usize, how: Depth) -> Option<Repo> {
-        if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
-            self.discard(handle);
-        }
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
         // **여는 길은 층의 줄과 같다**([`look_one`] 의 `projects::open_one`) — 스냅샷까지 읽어 본다.
@@ -617,6 +626,12 @@ impl App {
             }
             Err(state) => state,
         };
+        // **여기서 버린다** — 바로 아래가 줄을 고쳐 세우는 자리다. 늦게 닿은 요약이 그것을 덮는
+        // 것을 막는 것이 moai-800o 가 적은 까닭 전부고, 위의 연 갈래에는 덮을 것이 없다.
+        if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
+            self.discard(handle);
+        }
+        let place = self.layer.as_mut()?.places.get_mut(at)?;
         place.look = shut(&place.path, &place.name, state, self.site.lang);
         place.marks = marks;
         // 들인 때로 찍는다 — [`Layer::adopt`] 와 같은 자다.
@@ -774,6 +789,17 @@ impl App {
                     _ => None,
                 };
                 self.leave_project(leaving);
+                // **층의 요약 쓸기는 프로젝트 안까지 안 따라간다**(moai-800o) — 안 놓으면
+                // [`App::layer_loading`] 이 참이라 루프가 프로젝트 안에서도 빠른 걸음으로 깨어, 이
+                // 프로젝트와 상관없는 읽기를 기다린다. 버린 줄은 올라올 때 [`Layer::stale`] 이 다시
+                // 고른다.
+                //
+                // **버리는 자리가 여기다**(moai-0jqh) — 한때 [`App::open_place`] 가 열든 못 열든
+                // 버려서, 층에 그대로 선 채 펼치기만 한 키(`l`·`Tab`)까지 쓸기를 죽였다. 여기와
+                // `open_place` 의 못 연 갈래, 둘이 서로 다른 까닭으로 버린다.
+                if let Some((_, handle)) = self.layer.as_mut().and_then(|l| l.pending.take()) {
+                    self.discard(handle);
+                }
                 if let Some(layer) = &mut self.layer {
                     layer.at = At::Project(path);
                 }
@@ -1558,6 +1584,62 @@ mod tests {
             matches!(look(&a, "two"), Look::Shut { state: Shut::Missing, .. }),
             "들어가기 전에 띄운 층 읽기가 방금 쓴 '없다' 를 열린 줄로 덮었다"
         );
+    }
+
+    /// **층에 선 채 펼치기만 한 키는 층의 요약 쓸기를 안 죽인다**(moai-0jqh, 사용자 결정 2026-09-21).
+    /// [`App::open_place`] 가 열든 못 열든 버리던 판은 `l`·`Tab` 한 번이 세 줄 앞에서 띄운 쓸기를
+    /// 죽였다 — moai-800o 가 적은 까닭("늦게 닿은 요약이 방금 쓴 `Look::Shut` 을 덮는다")은 줄을
+    /// 고쳐 세우는 갈래에만 서는데, 펼치기의 성공 갈래는 `read_at` 만 비운다.
+    ///
+    /// 느린 마운트에서 `l j l j l …` 이면 [`super::DISCARDED_KEPT`] 가 차고, 그때 아직 도는 것을
+    /// 놓으며 세션 내내 남는 급한 배너가 섰다.
+    #[test]
+    fn unfolding_a_row_keeps_the_layer_sweep_running() {
+        let s = Scratch::fenced("layer-unfold-keeps");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        let (hold, wait) = std::sync::mpsc::channel::<()>();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        a.layer.as_mut().unwrap().pending = Some((
+            rx,
+            std::thread::spawn(move || {
+                let _ = wait.recv();
+            }),
+        ));
+
+        // `l` — 커서가 선 머리줄을 편다. 층에 그대로 선다.
+        a.key(key(KeyCode::Char('l')));
+        assert!(a.on_layer(), "시험의 전제 — 펼치기는 들어가지 않는다");
+        assert!(a.layer.as_ref().unwrap().pending.is_some(), "펼치기가 층의 요약 쓸기를 죽였다");
+        assert_eq!(a.let_go, 0, "아무도 안 시킨 버리기가 급한 배너를 세웠다");
+        drop(hold);
+    }
+
+    /// **못 연 줄에서는 버린다**(moai-800o) — 그 갈래가 줄을 `Look::Shut` 으로 고쳐 세우는 자리라,
+    /// 늦게 닿은 요약이 방금 쓴 그것을 옛 디렉터리의 값으로 덮는다.
+    #[test]
+    fn a_row_that_will_not_open_still_lets_go_of_the_layer_sweep() {
+        let s = Scratch::fenced("layer-shut-discards");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        std::fs::remove_dir_all(&two).unwrap();
+
+        let (hold, wait) = std::sync::mpsc::channel::<()>();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        a.layer.as_mut().unwrap().pending = Some((
+            rx,
+            std::thread::spawn(move || {
+                let _ = wait.recv();
+            }),
+        ));
+
+        let at = a.layer.as_ref().unwrap().position(&two).expect("두 번째 줄이 층에 있다");
+        assert!(a.open_place(at, Depth::Whole).is_none(), "시험의 전제 — 사라진 줄은 안 열린다");
+        assert!(a.layer.as_ref().unwrap().pending.is_none(), "고쳐 세운 줄을 덮을 읽기를 안 놓았다");
+        drop(hold);
     }
 
     /// **들어가면 층의 읽기를 놓는다**(moai-800o). 안 놓으면 프로젝트 안에서도 `App::loading`
