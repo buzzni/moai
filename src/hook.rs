@@ -535,6 +535,11 @@ enum Layer {
         /// **그 걷힘에 기대지 않는다** — 그것은 딴 자가 딴 까닭으로 해 주는 일이고, 겹을 걷는 자가
         /// 제 일을 하고 있다는 뜻이 아니다. `echo $(set -e) $(집기; 쓰기)` 가 그 둘이 갈리는 날
         /// 샐 자리다.
+        ///
+        /// **번호는 렉서가 하나로 센다**([`Lexer::serial`], 리뷰 moai-bujq.91c) — 심는 자리 둘
+        /// ([`Lexer::end_by`] 와 [`Lexer::relex`])이 저마다 0 부터 세던 판은 그 약속을 반만 지켰다:
+        /// 낱말의 치환과 heredoc 본문의 치환을 함께 든 토막에서 둘 다 `nth: 0` 이 되어, 바로 그
+        /// 두 겹 사이에서 겹을 안 걷었다.
         nth: usize,
     },
     /// `bash -c '…'`·`sh -c` 의 글 — 새 프로세스라 바깥의 `set -e` 도 `||` 도 안 닿는다.
@@ -778,8 +783,10 @@ struct Lexer<'a> {
     /// 쌓는다(moai-xe6e). 치환의 글을 바깥 낱말 하나로만 두던 판은 `echo "$(moai add x)"` 와
     /// `` `moai mv <리뷰> done` `` 을 아무 규칙도 안 보고 넘겼다 — 셸은 그것을 먼저 돌린다.
     inner: Vec<String>,
-    /// **모아 둔 치환 글 전부** — [`Lexer::subs_of`] 만 켠다. 보통은 `None` 이라 값이 안 든다.
-    kept: Option<Vec<String>>,
+    /// **이 렉서가 심은 글마다의 이름표**([`Layer::Subst::nth`]) — 심을 때마다 하나 올린다.
+    /// 심는 자리가 둘이라([`Lexer::end_by`]·[`Lexer::relex`]) 자리마다 0 부터 세면 같은 토막이
+    /// 두 자리에서 심은 겹이 같은 이름을 받는다.
+    serial: usize,
     /// 맨 바깥 치환이 `cur` 의 어디서 시작했나 — 그 안에 든 치환은 다시 읽을 때 센다.
     mark: Option<usize>,
     /// 마지막으로 쌓은 토막 뒤로 내려간 가장 얕은 `( … )` 깊이와 묶음 깊이([`Seg::low`]·[`Seg::floor`]).
@@ -854,7 +861,14 @@ fn spent() -> usize {
 }
 
 impl<'a> Lexer<'a> {
+    /// **맨 바깥 렉서** — 이 판의 예산을 채운다([`afford`], moai-qzy7). 안쪽 렉서는 그것을 나눠
+    /// 쓴다: 겹마다 채우면 예산이 곧 깊이에 비례해 늘어, 막으려던 그 곱이 그대로 돌아온다.
+    ///
+    /// **채우는 자리는 여기 하나다**(리뷰 moai-bujq.91c) — 겹이 0 인지로 [`Lexer::at`] 이 가르던
+    /// 판은 안쪽에서 0 을 건네는 자가 하나 생기는 것만으로 예산이 통째로 도로 찼다
+    /// ([`Lexer::subs_of`] 가 그것이었다). 바깥 자리를 이름으로 가르면 안쪽이 그 자리를 못 든다.
     fn new(cmd: &'a str) -> Self {
+        LEFT.with(|l| l.set(Lexer::WORK));
         Lexer::at(cmd, 0)
     }
 
@@ -862,11 +876,6 @@ impl<'a> Lexer<'a> {
     fn at(cmd: &'a str, deep: usize) -> Self {
         #[cfg(test)]
         DEEPEST.with(|n| n.set(n.get().max(deep)));
-        // **맨 바깥 렉서가 이 판의 예산을 채운다**([`afford`], moai-qzy7) — 안쪽 렉서는 그것을
-        // 나눠 쓴다. 겹마다 채우면 예산이 곧 깊이에 비례해 늘어, 막으려던 그 곱이 그대로 돌아온다.
-        if deep == 0 {
-            LEFT.with(|l| l.set(Lexer::WORK));
-        }
         Lexer {
             chars: cmd.chars().peekable(),
             all: Vec::new(),
@@ -882,7 +891,7 @@ impl<'a> Lexer<'a> {
             join: Join::default(),
             braces: 0,
             inner: Vec::new(),
-            kept: None,
+            serial: 0,
             mark: None,
             low: usize::MAX,
             floor: usize::MAX,
@@ -990,13 +999,7 @@ impl<'a> Lexer<'a> {
         if !self.opaque()
             && let Some(at) = self.mark.take()
         {
-            let text = self.cur[at..].to_string();
-            // [`Lexer::subs_of`] 만 여기 선다 — `inner` 는 토막마다 비워져 본문 하나를 다 읽은
-            // 뒤에는 못 받는다.
-            if let Some(kept) = &mut self.kept {
-                kept.push(text.clone());
-            }
-            self.inner.push(text);
+            self.inner.push(self.cur[at..].to_string());
         }
     }
 
@@ -1096,8 +1099,13 @@ impl<'a> Lexer<'a> {
         ///
         /// `Layer::Shell { apace: false }` 를 먼저 짓고 스물다섯 줄 뒤에 그 한 자리를 다시 쓰던 판은,
         /// 읽는 사람이 지은 자리의 값이 거짓인 줄 몰랐다(리뷰 moai-k8j1.209 의 14번).
+        ///
+        /// **이름이 [`Handed`] 와 갈린다**(리뷰 moai-bujq.91c) — 아래 `own` 이 그 구조체고 같은
+        /// 줄에서 이 갈래를 짓는다. 한 이름으로 두던 판은 그 줄을 읽는 사람이 `h.strict` 와
+        /// `Plant::Fork { strict }` 가 딴 형인 줄 몰랐다. 이 파일이 `deep` 을 두고 적어 둔 것과
+        /// 같은 자리다(리뷰 moai-k8j1.udq).
         #[derive(Clone, Copy)]
-        enum Handed {
+        enum Plant {
             /// 따옴표 없는 heredoc 본문 — 바깥 명령의 **낱말**이다([`Layer::Subst`]).
             Doc,
             /// `bash -c '…'`·`sh -c` 의 글 — 새 셸이다. `strict` 는 띄울 때 켠 errexit(moai-j9tx).
@@ -1116,13 +1124,13 @@ impl<'a> Lexer<'a> {
                 all.push(seg);
                 continue;
             }
-            // 글마다 **무엇인가**([`Handed`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
-            let mut texts: Vec<(&str, Handed)> =
-                docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Handed::Doc)).collect();
+            // 글마다 **무엇인가**([`Plant`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
+            let mut texts: Vec<(&str, Plant)> =
+                docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
             let own = shell_text(&seg.words);
             texts.extend(
                 own.iter()
-                    .map(|h| (h.text.as_str(), if h.fork { Handed::Fork { strict: h.strict } } else { Handed::Eval })),
+                    .map(|h| (h.text.as_str(), if h.fork { Plant::Fork { strict: h.strict } } else { Plant::Eval })),
             );
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
@@ -1135,7 +1143,11 @@ impl<'a> Lexer<'a> {
             let mut handed = false;
             // 그 글 끝에서 닫힌 예약어 묶음([`Seg::shut`]) — 받을 토막이 글 안에 없어 이 토막이 든다.
             let mut over: Option<usize> = None;
-            for (nth, (text, kind)) in texts.into_iter().enumerate() {
+            for (text, kind) in texts {
+                // 이름표는 렉서가 하나로 센다([`Layer::Subst::nth`]) — 심는 자리마다 0 부터 세면
+                // 같은 토막의 낱말 치환과 본문 치환이 같은 이름을 받는다.
+                let nth = self.serial;
+                self.serial += 1;
                 // 예산을 다 썼으면 그 글은 글로 둔다 — 겹 상한에 닿은 것과 같은 자리다(moai-qzy7).
                 // **뒤의 글은 그대로 본다**(리뷰) — 끊던 판은 앞의 큰 덩이 하나로 같은 토막의 뒤 글이
                 // 통째로 안 읽혔다([`afford`]).
@@ -1166,9 +1178,9 @@ impl<'a> Lexer<'a> {
                 // (`let deep = self.deep`)을 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을
                 // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
                 let layer = match kind {
-                    Handed::Doc => Some(Layer::Subst { at: 0, nth }),
-                    Handed::Fork { strict } => Some(Layer::Shell { top: 0, deep: 0, strict, apace }),
-                    Handed::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
+                    Plant::Doc => Some(Layer::Subst { at: 0, nth }),
+                    Plant::Fork { strict } => Some(Layer::Shell { top: 0, deep: 0, strict, apace }),
+                    Plant::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
                 };
                 let sub = usize::from(layer.is_some() || apart);
                 // 치환의 묶음은 바깥 토막의 것이 아니다 — 그 값도 바깥 명령의 값이 아니다.
@@ -1403,14 +1415,38 @@ impl<'a> Lexer<'a> {
     ///
     /// **토막은 안 낸다.** 본문은 명령이 아니라 그 토막에 흘러드는 글이고([`Seg::fed`]), 그 안의
     /// 치환만 따로 심긴다([`Lexer::later`]). 그래서 `end_by`·`relex` 를 안 지나간다.
-    fn subs_of(text: &str) -> Vec<String> {
-        let mut lex = Lexer::at(text, 0);
+    ///
+    /// **겹을 이어받는다 — 0 으로 다시 세지 않는다**(리뷰 moai-bujq.91c). `Lexer::at(_, 0)` 은
+    /// 맨 바깥 렉서의 것이라 [`afford`] 의 예산을 통째로 다시 채운다([`Lexer::at`]). 본문마다
+    /// 채우던 판은 두 자리에서 한꺼번에 무너졌다.
+    ///
+    /// - **예산이 상한을 그만둔다** — `<겹겹의 글>; cat <<EOF … EOF; <겹겹의 글>` 한 줄이 heredoc
+    ///   마다 2MiB 를 도로 채워, 같은 바이트 수의 따옴표 친 heredoc(`<<'EOF'`, 이 자를 안 지난다)
+    ///   보다 두 곱절 넘게 읽었다(dev 로 재서 11.6초 대 28.2초)
+    /// - **되돌이에 상한이 없다** — 본문 안 치환의 heredoc 이 [`Lexer::skip_heredocs`] 를 거쳐
+    ///   여기로 다시 드는데, 겹을 0 으로 세면 [`Lexer::DEEP`] 이 그것을 못 센다. 예순넷에서 멎는
+    ///   대신 8,000 겹까지 내려가 `fatal runtime error: stack overflow` 로 훅이 죽었고(174KB 한 줄),
+    ///   4,000 겹은 31초를 썼다 — 훅의 15초를 넘기면 규칙 넷이 통째로 열린다
+    fn subs_of(text: &str, deep: usize) -> Vec<String> {
+        // 겹 상한에 닿았으면 그 본문은 글로 둔다 — [`Lexer::relex`] 와 같은 자리다(moai-qzy7).
+        if deep > Lexer::DEEP || !afford(text.len()) {
+            return Vec::new();
+        }
+        let mut lex = Lexer::at(text, deep);
         lex.stack.push(Ctx::Doc);
-        lex.kept = Some(Vec::new());
         while let Some(c) = lex.chars.next() {
             lex.step(c);
         }
-        lex.kept.unwrap_or_default()
+        // `inner` 가 곧 모아 둔 글이다 — `Ctx::Doc` 은 아무도 안 걷어 `plain` 이 안 돌고,
+        // 그래서 `end_by` 가 그것을 비우지 않는다.
+        //
+        // **본문 안 치환이 연 heredoc 의 것도 함께 낸다**(리뷰 moai-bujq.91c) — 그 본문은 `cur` 이
+        // 아니라 `docs` 로 흘러(`skip_heredocs`), 그 안의 치환은 `later` 에 선다. 그것을 버리던
+        // 판은 `cat <<TOP … $(x <<E1 … $(쓰기) … E1) … TOP` 의 쓰기를 아무 규칙에도 안 보였다 —
+        // 바깥 치환의 글이 `x <<E1` 까지로 잘려 나가서다. 글자만 세던 옛 자는 본문째 한 덩이로
+        // 내 그 안을 다시 읽는 자가 마저 갈랐고, 그래서 이 구멍은 이 커밋이 새로 연 것이다.
+        lex.inner.extend(lex.later.into_iter().map(|(_, t)| t));
+        lex.inner
     }
 
     /// 따옴표 없는 heredoc 본문 안([`Ctx::Doc`]) — 따옴표는 글자다.
@@ -1685,7 +1721,7 @@ impl<'a> Lexer<'a> {
             // **본문을 다 모은 뒤에 한 번 본다.** 줄마다 보던 판은 줄을 넘는 `$( … )` 를 줄
             // 끝에서 잘라, 이어지는 줄의 `moai add` 를 놓쳤다(리뷰 moai-p836.rv).
             if !quoted {
-                let found = Lexer::subs_of(&self.docs[n]);
+                let found = Lexer::subs_of(&self.docs[n], self.deep + 1);
                 self.later.extend(found.into_iter().map(|t| (n, t)));
             }
         }
@@ -1757,7 +1793,10 @@ impl<'a> Lexer<'a> {
         // **다시 읽기의 겹은 치환에도 든다**([`Lexer::DEEP`]) — `Lexer::new` 로 0 부터 다시 세던 판은
         // `$(bash -c "$( … )")` 가 겹마다 셈을 되돌려, 상한이 아무것도 막지 못했다(리뷰 moai-p836.rv).
         let deep = self.deep + 1;
-        for (nth, text) in inner.into_iter().enumerate() {
+        for text in inner {
+            // 이름표는 렉서가 하나로 센다([`Layer::Subst::nth`]).
+            let nth = self.serial;
+            self.serial += 1;
             if deep > Lexer::DEEP {
                 break;
             }
@@ -2031,6 +2070,9 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         Never,
         /// **이 스위치를 봤을 때만** — `runuser -u <사용자> -- <명령>` 의 `-u` 다. 그 스위치가
         /// 사용자를 제 값으로 먹어, 남은 자리가 명령이 된다.
+        ///
+        /// **봤다는 것은 옵션을 읽는 그 자리에서 적는다**(`saw`) — 다 읽은 뒤 지나온 낱말을 다시
+        /// 훑으면 스위치와 그 **값**이 안 갈린다(리뷰 moai-bujq.91c).
         With(&'static [&'static str]),
     }
     const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
@@ -2170,15 +2212,20 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         // 통째로 안 보이던 자리다. `su -c 'sed -i s/a/b/ src/x.rs'` 는 정말 그 파일을 고치는데
         // 규칙 2 가 그 쓰기를 못 봤고, `su -c 'moai add x'` 는 규칙 1 을 지나갔다.
         //
-        // **뒤 낱말은 명령이 아니라 사용자다**(`runs: false`) — `su alice` 는 alice 의 셸을 띄울
+        // **뒤 낱말은 명령이 아니라 사용자다**([`Runs::Never`]) — `su alice` 는 alice 의 셸을 띄울
         // 뿐이다. `-c` 의 글만 명령이고, 그 글 **뒤**에 오는 것은 사용자와 그 셸의 자리 인자라
         // 글에 안 잇는다([`Text::Line`]).
         //
-        // **`-l`·`--login` 은 멈춘다** — 대상 사용자의 홈으로 옮겨 가 **딴 자리에서** 돈다
-        // (`sudo -i` 와 같은 줄이다). 상대 경로가 어디인지 모르는 자리는 지어내지 않는다.
+        // **그래서 사용자를 지나서도 옵션을 읽는다**(리뷰 moai-bujq.91c) — 둘 다 getopt 를 `+`
+        // 없이 불러 GNU 가 argv 를 섞어 읽으니 `su <사용자> -c '<글>'` 의 `-c` 도 옵션이다. 스크립트가
+        // 가장 흔히 쓰는 철자가 그쪽인데(`su postgres -c '…'`), 첫 피연산자에서 멈추던 판은 그 글을
+        // 아무 규칙에도 안 보여 이 줄이 닫으려던 구멍을 흔한 쪽에 그대로 두었다.
         //
-        // **`runuser -u <사용자> -- <명령>` 은 아직 안 본다** — 그 꼴은 `-c` 없이 명령을 직접
-        // 돌리므로 `runs` 하나로는 못 가른다. 표에 없던 때와 같은 자리에 그대로 둔다.
+        // **`-l`·`--login` 과 홀로 선 `-` 는 멈춘다** — 대상 사용자의 홈으로 옮겨 가 **딴 자리에서**
+        // 돈다(`sudo -i` 와 같은 줄이다). 상대 경로가 어디인지 모르는 자리는 지어내지 않는다.
+        //
+        // **`runuser -u <사용자> -- <명령>` 은 `-c` 없이 명령을 직접 돌린다** — [`Runs::With`] 가
+        // 그 스위치를 보고 가른다(moai-dkph).
         Wrapper {
             name: "su",
             takes: &["-s", "-w", "-g", "-G"],
@@ -2229,6 +2276,20 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     // `sudo -su 남 moai add x` 의 글을 `-u 남 moai add x` 로 잡아 그 글의 명령 자리가 `-u` 가 됐고,
     // 규칙 1~2 가 이 스위치를 도로 통째로 지나갔다. 옵션이 다 끝난 자리가 곧 글이다.
     let mut handed = false;
+    // **`runs` 를 가르는 스위치를 봤는가**([`Runs::With`]) — `runuser -u <사용자>` 의 `-u` 다.
+    //
+    // **옵션을 읽는 그 자리에서 적는다**(리뷰 moai-bujq.91c). 다 읽은 뒤 `rest[..n]` 을 다시 훑던
+    // 판은 **스위치와 값을 못 갈라**, 앞 스위치가 제 값으로 먹은 낱말도 스위치로 셌다 —
+    // `runuser -s -u sed -i s/a/b/ src/x.rs` 는 `-u` 가 `-s` 의 값이라 아무것도 안 도는데 `sed` 를
+    // 명령으로 읽어 잘못 막았고, `runuser -s/usr/bin/bash sed -i …` 는 뭉치에 붙은 **값**의 `u`
+    // 한 글자에 같은 답을 냈다.
+    let mut saw = false;
+    let flags = match w.runs {
+        Runs::With(f) => f,
+        _ => &[][..],
+    };
+    // **명령 자리가 아닌 피연산자를 지나온 자리**(`su <사용자>`) — 거기부터가 명령이면 그 자리다.
+    let mut opnd: Option<usize> = None;
     while let Some(word) = rest.get(n) {
         if word == "--" {
             n += 1;
@@ -2249,6 +2310,25 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         if !word.starts_with('-') || word == "-" {
             // 제 자리 인자(`timeout 5 …`)를 다 먹었으면 여기가 명령 자리다.
             if seen == w.args {
+                // **뒤 낱말이 명령이 아닌 감싸는 명령은 피연산자를 지나서도 옵션을 읽는다**
+                // (리뷰 moai-bujq.91c) — `su`·`runuser` 는 getopt 를 `+` 없이 불러 GNU 가 argv 를
+                // 섞어 읽는다. `su <사용자> -c '<글>'` 의 `-c` 도 그래서 옵션이고, 스크립트가 가장
+                // 흔히 쓰는 꼴이 그것이다(`su postgres -c '…'`). 첫 피연산자에서 멈추던 판은 그
+                // 글을 통째로 안 읽어, moai-qqg2 가 닫으려던 구멍이 흔한 쪽 철자에 그대로
+                // 열려 있었다 — `su 남 -c 'sed -i s/a/b/ src/x.rs'` 가 규칙 2 를 지나갔다.
+                //
+                // **명령 자리로 서는 감싸는 명령은 그러면 안 된다**(`sudo <명령…>`) — 그
+                // 피연산자의 인자를 제 옵션으로 읽는다(`sudo sed -i …` 의 `-i`).
+                if matches!(w.runs, Runs::Never | Runs::With(_)) && !saw {
+                    // **홀로 선 `-` 는 로그인이다** — su 의 man 이 "A mere - implies -l" 이라 적는다.
+                    // 대상 사용자의 홈에서 도니 `-l` 과 같은 줄에 선다([`Wrapped::Stops`]).
+                    if word == "-" {
+                        return Some(Wrapped::Stops);
+                    }
+                    opnd.get_or_insert(n);
+                    n += 1;
+                    continue;
+                }
                 break;
             }
             seen += 1;
@@ -2301,6 +2381,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             continue;
         }
         if takes.contains(&word.as_str()) {
+            saw |= flags.contains(&word.as_str());
             // 값이 없으면(`env -u`) 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
             need!(rest.get(n + 1));
             n += 2;
@@ -2308,10 +2389,12 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         }
         // `--이름=값` 은 값을 달고 있어 한 낱말이다 — 모르는 이름이어도 명령 자리를 안 흔든다.
         if word.starts_with("--") && word.contains('=') {
+            saw |= flags.iter().any(|f| word.strip_prefix(f).is_some_and(|r| r.starts_with('=')));
             n += 1;
             continue;
         }
         if long.contains(&word.as_str()) {
+            saw |= flags.contains(&word.as_str());
             need!(rest.get(n + 1));
             n += 2;
             continue;
@@ -2366,6 +2449,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                 stop = false;
                 continue;
             }
+            // **뭉치 안의 글자도 그 자리에서 적는다** — 값이 시작되기 전의 글자만 스위치다.
+            saw |= letter(flags, c);
             if letter(takes, c) {
                 // 뒤에 붙은 것이 값이고, 없으면 다음 낱말이다.
                 eats = at + c.len_utf8() == bytes.len();
@@ -2400,24 +2485,15 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 여기서 멈춘다 — 그 낱말을 명령으로
     // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
     // ([`Runs`]) — 그 스위치가 사용자를 제 값으로 먹어 남은 자리가 명령이 된다.
-    //
-    // 본 스위치는 **지나온 낱말**에서 읽는다 — 옵션을 읽는 자리가 셋(제 낱말·`--이름=값`·뭉치
-    // 안의 글자)이라, 자리마다 표를 달면 하나를 빠뜨리는 날 그 꼴만 조용히 안 보인다.
-    let runs = match w.runs {
-        Runs::Always => true,
-        Runs::Never => false,
-        Runs::With(flags) => rest[..n].iter().any(|word| {
-            flags.contains(&word.as_str())
-                || flags.iter().any(|f| word.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
-                || (word.starts_with('-') && !word.starts_with("--") && word.chars().skip(1).any(|c| letter(flags, c)))
-        }),
-    };
-    if !runs {
+    if !matches!(w.runs, Runs::Always) && !saw {
         return Some(Wrapped::Stops);
     }
+    // 명령은 **지나온 첫 피연산자**부터다 — 섞어 읽는 감싸는 명령에서 그 자리는 `n` 보다 앞이다
+    // (`runuser <사용자> -u <남> <명령…>`). 안 지났으면 옵션이 끝난 이 자리다.
+    let at = opnd.unwrap_or(n);
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
-    need!(rest.get(n));
-    Some(Wrapped::Runs(n))
+    need!(rest.get(at));
+    Some(Wrapped::Runs(at))
 }
 
 fn basename(word: &str) -> &str {
@@ -3740,6 +3816,9 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 그 겹에 **들어설 때의** 집기도 함께 든다 — 그 토막이 부정이면(`! bash -e -c '집기; x &'`)
         // 집기가 이겨야 뒤가 안 도니, 안 띄운 글과 같이 들어설 때의 판으로 돌린다.
         let mut won_apace = false;
+        // **이 토막이 나온 겹에서 집기가 이긴 채로 나왔는가**(리뷰 moai-bujq.91c) — 아래
+        // `if ! <넘긴 글>` 이 "이 토막에 살아 온 집기가 **이 글 안의 것인가**" 를 이 자로 가린다.
+        let mut won_shell = false;
         for f in frames.drain(kept..).rev() {
             won_apace = false;
             // **겹을 나오며 밖에 남길 집기** — 판에서 이 자 하나만 갈래를 탄다. 나머지는 아래에서
@@ -3788,6 +3867,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                     if unrun.is_none_or(|c| top < c) && won {
                         credit(&mut picked, resolved, home, true);
                         won_apace = apace;
+                        won_shell = true;
                         Some(scope.pick.map_or(home, |d| d.min(home)))
                     } else {
                         // **조건에 매여 못 푼 묶음의 집기는 버리지 않는다**(moai-d5o9 12번,
@@ -4128,8 +4208,20 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 //
                 // 번호는 그것을 안 잃는다. 그 글의 토막들은 이 토막 바로 앞에 심겼으니
                 // (`handed_from`) 그 번호 뒤의 집기는 이 글 안의 것이고, 바깥 목록의 집기는
-                // 그 앞에 적힌다. `came` 이 묻는 것은 이제 하나다 — 이 토막에 집기가 살아 왔는가.
-                let from = handed_from.filter(|_| bang && came.is_some())?;
+                // 그 앞에 적힌다.
+                //
+                // **그래도 `came` 은 제 문턱을 들어야 한다**(리뷰 moai-bujq.91c) — 번호로 바꾸면서
+                // `came` 의 깊이 문턱까지 함께 걷던 판은 두 쪽을 **따로** 채울 수 있게 두었다:
+                // 바깥 `&&` 로 들어온 집기가 `came` 을 채우고, 값이 조건에 안 닿는 글 **가운데**의
+                // 집기가 `cond` 를 채운다. `집기A && if ! bash -c 'echo x; 집기B; echo y'; then
+                // exit 1; fi; 쓰기` 가 그 줄이다 — 조건은 늘 이기는 `echo y` 라 `fi` 를 지난 것이
+                // 아무것도 안 뜻하는데, 없는 묶음이 열려 `;` 뒤의 빈손 쓰기가 샜다.
+                //
+                // 문턱은 둘 중 하나다. **글 안에 선 집기**(`d > seg.level`)이거나, **이 토막이 나온
+                // 겹이 집기를 이긴 채로 내놓았거나**(`won_shell`) — 뒤엣것이 moai-n3wq 가 연 자리고,
+                // 그때만 집기가 바깥 목록의 깊이로 다시 적힌다.
+                let inside = came.is_some_and(|d| d > seg.level) || (won_shell && came.is_some());
+                let from = handed_from.filter(|_| bang && inside)?;
                 // 넘긴 글 안의 집기는 제 표를 이미 달고 있다 — `if` 자신이 조건에 매였으면 그 위에
                 // 한 번 더 매인다(`certain`). 둘 다 서야 확실한 집기다.
                 //
@@ -8573,6 +8665,19 @@ mod tests {
             matches!(judge(&format!("{earlier}; sed -i s/a/b/ src/x.rs")), Decision::Deny(_)),
             "빈손의 쓰기가 샜다"
         );
+        // **두 쪽을 따로 채울 수 없다**(리뷰 moai-bujq.91c) — 바깥 `&&` 로 들어온 집기가 `came` 을
+        // 채우고 값이 조건에 안 닿는 글 **가운데**의 집기가 `cond` 를 채우면, 아무것도 안 뜻하는
+        // `fi` 가 없는 묶음을 열어 `;` 뒤의 빈손 쓰기를 풀어 준다. 조건은 늘 이기는 `echo y` 다.
+        let two = vec![epic("t-e"), under("t-1", "todo", "t-e"), under("t-2", "todo", "t-e")];
+        let judge = |cmd: &str| guard_writes(&two, &cfg(), &here(), root, root, cmd);
+        for tail in ["", " echo z;"] {
+            let held = format!(
+                "moai mv t-1 in_progress --from todo \
+                 && if ! bash -c 'echo x; moai mv t-2 in_progress --from todo; echo y'; then exit 1; fi;{tail} \
+                 sed -i s/a/b/ src/x.rs"
+            );
+            assert!(matches!(judge(&held), Decision::Deny(_)), "빈손의 쓰기가 샜다 — {held}");
+        }
     }
 
     /// **한 자리에 나란히 선 치환 둘은 딴 겹이다**(moai-lwil) — [`shell_scan`] 의 `frames` 가 겹을
@@ -8593,6 +8698,118 @@ mod tests {
         let layers: Vec<Layer> = one.segs().iter().filter_map(|s| s.nested.first().copied()).collect();
         assert_eq!(layers.len(), 2, "심은 토막이 둘이 아니다 — {layers:?}");
         assert_eq!(layers[0], layers[1], "한 치환 안의 토막 둘이 딴 겹으로 선다");
+        // **심는 자리가 둘인 토막도 그렇다**(리뷰 moai-bujq.91c) — 낱말의 치환은 [`Lexer::end_by`]
+        // 가, 본문의 치환은 [`Lexer::relex`] 가 심는다. 자리마다 0 부터 세던 판은 이 한 토막에서
+        // 둘 다 `nth: 0` 이 되어, 바로 그 사이에서 겹을 안 걷었다 — moai-lwil 이 닫으려던 자리가
+        // 반만 닫혀 있었다.
+        let mixed = Line::new("echo \"$(set -e)\" <<EOF\n$(sed -i s/a/b/ src/x.rs)\nEOF");
+        let layers: Vec<Layer> = mixed.segs().iter().filter_map(|s| s.nested.first().copied()).collect();
+        assert_eq!(layers.len(), 2, "심은 토막이 둘이 아니다 — {layers:?}");
+        assert_ne!(layers[0], layers[1], "낱말의 치환과 본문의 치환이 한 겹으로 선다");
+    }
+
+    /// **heredoc 본문을 읽는 자도 예산과 겹을 나눠 쓴다**(리뷰 moai-bujq.91c) — [`Lexer::subs_of`]
+    /// 가 `Lexer::at(_, 0)` 으로 제 렉서를 짓던 판은 맨 바깥 자리의 것을 새로 세, 훅을 지키는
+    /// 상한 둘이 한꺼번에 꺼졌다.
+    ///
+    /// 둘 다 **훅이 제 시간에 못 끝나는 것**으로 끝난다. 죽은 훅은 규칙 넷을 통째로 연다.
+    #[test]
+    fn a_heredoc_body_shares_the_budget_and_the_depth_cap() {
+        let spend = |cmd: &str| {
+            let clock = std::time::Instant::now();
+            let n = Line::new(cmd).segs().len();
+            (spent(), clock.elapsed(), n)
+        };
+        // **예산** — 겹겹의 글 둘 사이에 heredoc 하나를 끼운다. 따옴표 친 종료어는 이 자를 안
+        // 지나니 그쪽이 견줄 자다. 예산을 도로 채우면 안 친 쪽이 곱으로 뛴다(dev 로 재서 11.6초
+        // 대 28.2초였다).
+        let mut blob = "moai add x".to_string();
+        for _ in 0..8 {
+            blob = format!("bash -c \"$({blob})\"");
+        }
+        let (quoted, ..) = spend(&format!("{blob}\ncat <<'E'\nz\nE\n{blob}"));
+        let (plain, ..) = spend(&format!("{blob}\ncat <<E\nz\nE\n{blob}"));
+        assert!(plain <= quoted + 64, "heredoc 하나가 예산을 도로 채웠다 — {plain} 글자 대 {quoted} 글자");
+        // **겹** — 본문 안 치환이 연 heredoc 은 [`Lexer::skip_heredocs`] 를 거쳐 이 자로 다시 든다.
+        // 겹을 0 으로 세던 판은 `Lexer::DEEP` 이 그것을 못 세, 174KB 한 줄이
+        // `fatal runtime error: stack overflow` 로 훅을 죽였고 86KB 한 줄이 31초를 썼다.
+        //
+        // **겹은 스택이 넘기 **전에** 멈추는 만큼만 쌓는다** — 넘으면 시험 바이너리가 통째로
+        // 죽어 옆 시험까지 안 돈다. 여기 수는 고친 뒤 0.3초, 안 고친 판에서 17초라 아래 시계가
+        // 잡는다.
+        const DOWN: usize = 3000;
+        let mut deep = String::new();
+        for i in 0..DOWN {
+            deep.push_str(&format!("$(cat <<T{i}\n"));
+        }
+        deep.push('x');
+        for i in (0..DOWN).rev() {
+            deep.push_str(&format!("\nT{i}\n)"));
+        }
+        let (read, took, _) = spend(&format!("cat <<TOP\n{deep}\nTOP"));
+        assert!(read <= Lexer::WORK, "겹친 heredoc 이 예산을 넘겨 {read} 글자를 읽었다");
+        assert!(took < std::time::Duration::from_secs(5), "겹친 heredoc {DOWN} 겹에 {took:?} 를 썼다");
+    }
+
+    /// **본문 안 치환이 연 heredoc 의 치환도 명령이다**(리뷰 moai-bujq.91c) — 그 본문은 `cur` 이
+    /// 아니라 `docs` 로 흘러 그 안의 치환이 `later` 에 서는데, [`Lexer::subs_of`] 가 그것을 버렸다.
+    /// 글자만 세던 옛 자는 본문째 한 덩이로 내 그 안을 다시 읽는 자가 마저 갈랐으니, 이 구멍은
+    /// heredoc 본문을 렉서로 옮기며 새로 열린 것이다.
+    #[test]
+    fn a_substitution_under_a_heredoc_in_a_heredoc_body_is_still_a_command() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        for cmd in [
+            "cat <<TOP\n$(x <<E1\n$(sed -i s/a/b/ src/x.rs)\nE1\n)\nTOP",
+            "cat <<TOP\n$(cat <<E1\n$(echo hi > src/x.rs)\nE1\n)\nTOP",
+        ] {
+            let got = guard_writes(&idle, &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "본문 안 heredoc 의 치환을 잃었다 — {cmd:?}\n{got:?}");
+        }
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let cmd = "cat <<TOP\n$(x <<E1\n$(moai add '딴 일')\nE1\n)\nTOP";
+        assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "같은 자리의 세움을 잃었다");
+    }
+
+    /// **`su`·`runuser` 는 사용자를 지나서도 옵션을 읽는다**(리뷰 moai-bujq.91c) — 둘 다 getopt 를
+    /// `+` 없이 불러 GNU 가 argv 를 섞어 읽으니 `su <사용자> -c '<글>'` 의 `-c` 도 옵션이다.
+    /// 스크립트가 가장 흔히 쓰는 철자가 그쪽인데(`su postgres -c '…'`), 첫 피연산자에서 멈추던
+    /// 판은 그 글을 아무 규칙에도 안 보여 moai-qqg2 가 닫으려던 구멍이 그대로 열려 있었다.
+    #[test]
+    fn su_reads_the_string_it_hands_over_after_the_user_name() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "su 남 -c 'sed -i s/a/b/ src/x.rs'",
+            "runuser 남 -c 'sed -i s/a/b/ src/x.rs'",
+            "su --shell /bin/bash 남 -c 'sed -i s/a/b/ src/x.rs'",
+            "su 남 --command 'sed -i s/a/b/ src/x.rs'",
+            "timeout 5 su 남 -c 'sed -i s/a/b/ src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "사용자 뒤의 -c 가 넘긴 쓰기를 못 봤다 — {cmd}\n{got:?}");
+        }
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "su 남 -c 'moai add x'"), Decision::Deny(_)),
+            "사용자 뒤의 -c 가 넘긴 세움을 못 봤다"
+        );
+        // **홀로 선 `-` 도 로그인이다** — su 의 man 이 "A mere - implies -l" 이라 적는다. 딴 자리에서
+        // 도니 여기 상대 경로를 지어내지 않는다([`Wrapped::Stops`]).
+        //
+        // **사용자 뒤는 그 셸의 자리 인자지 명령이 아니다** — `su 남 sed -i …` 는 sed 를 안 돌린다.
+        for cmd in [
+            "su - 남 -c 'sed -i s/a/b/ src/x.rs'",
+            "su 남 sed -i s/a/b/ src/x.rs",
+            "runuser 남 sed -i s/a/b/ src/x.rs",
+            // `-u` 가 앞 스위치의 **값**이면 명령이 아니다 — 지나온 낱말을 다시 훑던 판은 둘을
+            // 못 갈라, 아무것도 안 도는 줄의 꼬리를 명령으로 읽어 잘못 막았다.
+            "runuser -s -u sed -i s/a/b/ src/x.rs",
+            "runuser -s/usr/bin/bash sed -i s/a/b/ src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        assert_eq!(command_of(Line::new("su 남 sed").words().next().unwrap())[0], "su");
     }
 
     /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
@@ -8600,7 +8817,7 @@ mod tests {
     /// 않는다. 집었다는 **기록**은 남는다 — 치환은 정말 돈다.
     ///
     /// [`Lexer::relex`] 가 겹을 짓는 세 갈래 가운데 이 하나만 시험이 없었다(moai-wlwg 에서 재어
-    /// 봤다 — `Handed::Doc` 을 `Layer::Shell` 로 잘못 지어도 시험이 다 초록이었다). 겹의 종류를
+    /// 봤다 — `Plant::Doc` 을 `Layer::Shell` 로 잘못 지어도 시험이 다 초록이었다). 겹의 종류를
     /// 고르는 자리를 한 곳으로 모으면서 그 하나가 조용히 뒤집힐 자리를 함께 막는다.
     #[test]
     fn a_substitution_in_a_heredoc_body_does_not_hand_its_pick_to_the_outer_list() {
