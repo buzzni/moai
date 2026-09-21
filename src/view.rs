@@ -2473,17 +2473,19 @@ pub fn problem(lang: Lang, at: Option<&std::path::Path>, why: &crate::user_confi
 /// 옆 워크트리를 겹치다 만난 한 줄([`crate::worktree::Trouble`], moai-dpbi).
 ///
 /// **글리프와 자리는 말이 아니다** — 가지 이름과 경로는 자료고 `⎇` 는 표라, 말묶음에는 `{at}`
-/// 한 자리로 든다(밖 한눈 보기의 `overview.unread_snapshot` 과 같은 자). 번역자가 옮길 것은 그
+/// 한 자리로 든다(밖 한눈 보기의 [`unread_worktree`] 와 같은 자). 번역자가 옮길 것은 그
 /// 앞뒤의 문장뿐이다.
 pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
     use crate::worktree::{Lost, Trouble};
     match why {
-        // **여기만 말묶음을 안 지난다** — 이 갈래는 가지와 열다 진 까닭만 댄다. `--worktree` 를
-        // 안 줬을 때 같은 사실을 대는 [`unread_worktree`] 는 문장을 두르므로, 한 워크트리가 깨진
-        // 것을 두 말로 대고 있다(리뷰가 짚었다). 문장을 맞추는 일은 그 두 갈래를 한 줄로 셀지
-        // (`the_overview_counts_work_with_no_live_worktree` 가 지금 꼴로 가른다)부터 정할 자리라
-        // 탐색기의 말을 옮기는 일(moai-ra67)과 함께 본다.
-        Trouble::Unread { branch, why } => at_branch(branch, why),
+        // **[`unread_worktree`] 와 한 문장이다**(moai-hs3g). 여기만 말묶음을 안 지나던 판은 한
+        // 워크트리가 깨진 것을 두 말로 댔다 — `--worktree` 를 주면 `⎇ 가지: 까닭` 으로, 안 주면
+        // "스냅샷을 못 읽었다 — ⎇ 가지: 자리" 로 섰다. 같은 사실에 두 이름을 주면 보는 쪽이 두 일로
+        // 읽고, 말묶음을 고치는 날 한쪽만 고쳐진다.
+        //
+        // **다른 것은 자리에 드는 것뿐이다** — 열어 본 이쪽은 열다 진 까닭을, 안 열어 본 저쪽은 그
+        // 워크트리의 자리를 싣는다. 둘 다 `⎇ 가지: <무엇>` 한 모양이다([`at_branch`]).
+        Trouble::Unread { branch, why } => unread_said(lang, &at_branch(branch, why)),
         Trouble::Skipped { branch, path, lines } => fill(
             say(lang, "trouble.skipped"),
             &[("at", &at_branch(branch, &path.display().to_string())), ("n", &lines.to_string())],
@@ -2504,9 +2506,17 @@ pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
 
 /// 스냅샷을 못 읽은 옆 워크트리 한 줄 — `moai status` 의 stderr 와 밖 한눈 보기가 **같은 글을
 /// 쓴다**(moai-dpbi). 갈라 적던 판은 같은 일을 두 말로 댔다.
+///
+/// 겹쳐 본 판의 같은 사실은 [`trouble_line`] 이 대는데, **문장은 하나다**(moai-hs3g,
+/// [`unread_said`]).
 pub fn unread_worktree(lang: Lang, branch: &str, path: &std::path::Path) -> String {
-    let at = at_branch(branch, &path.display().to_string());
-    fill(say(lang, "overview.unread_snapshot"), &[("at", &at)])
+    unread_said(lang, &at_branch(branch, &path.display().to_string()))
+}
+
+/// "옆 워크트리의 스냅샷을 못 읽었다 — `<무엇>`" — 겹쳐 본 길([`trouble_line`])과 안 겹쳐 본 길
+/// ([`unread_worktree`])이 **한 자리에서** 짓는다(moai-hs3g).
+fn unread_said(lang: Lang, at: &str) -> String {
+    fill(say(lang, "trouble.unread"), &[("at", at)])
 }
 
 /// `⎇ <가지>: <무엇>` — 옆 워크트리를 대는 자리의 한 모양.
@@ -3345,6 +3355,32 @@ mod tests {
         i.epic = Some("argos-0000".into());
         let out = plain(&detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false));
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
+    }
+
+    /// **못 읽은 옆 워크트리를 두 길이 한 말로 댄다**(moai-hs3g). 겹쳐 본 길([`trouble_line`])만
+    /// 말묶음을 안 지나 `⎇ 가지: 까닭` 으로 섰고, 안 겹친 길([`unread_worktree`])은 문장을 둘렀다 —
+    /// 한 워크트리가 깨진 것이 두 말로 서면 보는 쪽이 두 일로 읽는다.
+    ///
+    /// **자리에 드는 것은 다르다** — 열어 본 쪽은 열다 진 까닭을, 안 열어 본 쪽은 그 워크트리의
+    /// 자리를 싣는다. 그 둘까지 같아지면 겹쳐 본 판이 무엇에 걸렸는지를 잃는다.
+    #[test]
+    fn the_two_paths_call_an_unread_worktree_the_same_thing() {
+        use crate::worktree::Trouble;
+        let branch = "worktree-agent-x";
+        let path = std::path::PathBuf::from("/w/proj/.claude/worktrees/agent-x");
+        for lang in Lang::ALL {
+            let overlaid = trouble_line(lang, &Trouble::Unread { branch: branch.into(), why: "EACCES".into() });
+            let outside = unread_worktree(lang, branch, &path);
+            // **문장이 같다** — 자리에 드는 것만 다르다(열다 진 까닭이냐, 그 워크트리의 자리냐).
+            let (a, b) = (overlaid.split(branch).next(), outside.split(branch).next());
+            assert_eq!(a, b, "{}: 같은 사실을 두 말로 댄다 — {overlaid} / {outside}", lang.code());
+            for said in [&overlaid, &outside] {
+                assert!(said.contains(branch), "{}: 어느 워크트리인지를 안 댔다 — {said}", lang.code());
+                assert!(!said.contains('{'), "{}: 채울 자리가 남았다 — {said}", lang.code());
+            }
+            assert!(overlaid.contains("EACCES"), "{}: 열다 진 까닭을 잃었다 — {overlaid}", lang.code());
+            assert!(outside.contains("agent-x"), "{}: 그 워크트리의 자리를 잃었다 — {outside}", lang.code());
+        }
     }
 
     /// **읽음 표의 글은 말마다 그 파일과 그 줄을 댄다**(moai-rtji 리뷰). 글은 말묶음의 자리(`{key}`·`{id}`·

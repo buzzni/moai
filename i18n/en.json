@@ -10,7 +10,7 @@
   "overview.tally": "Projects {places} · {n}",
   "overview.places": "{places}",
   "overview.picked_more": "{n} more picked up",
-  "overview.unread_snapshot": "Could not read a sibling worktree's snapshot — {at}",
+  "trouble.unread": "Could not read a sibling worktree's snapshot — {at}",
   "overview.worktree_trouble": "Trouble in sibling worktrees {n}",
   "overview.worktree_trouble_above": "Trouble in sibling worktrees {n} — the lines above",
   "overview.warnings": "Warnings {n}",

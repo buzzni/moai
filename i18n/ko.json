@@ -10,7 +10,7 @@
   "overview.tally": "프로젝트 {places}곳 · {n}건",
   "overview.places": "{places}곳",
   "overview.picked_more": "집은 것 {n}건 더",
-  "overview.unread_snapshot": "옆 워크트리의 스냅샷을 못 읽었다 — {at}",
+  "trouble.unread": "옆 워크트리의 스냅샷을 못 읽었다 — {at}",
   "overview.worktree_trouble": "옆 워크트리 문제 {n}건",
   "overview.worktree_trouble_above": "옆 워크트리 문제 {n}건 — 위 줄",
   "overview.warnings": "경고 {n}건",

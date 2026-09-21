@@ -1591,6 +1591,9 @@ fn the_overview_counts_work_with_no_live_worktree() {
     // **못 읽은 워크트리가 있으면 "센 결과 0" 이 아니라 "못 셌다" 다**(리뷰 moai-p3bs.op2) —
     // 밖에서는 옆 스냅샷을 아예 안 여므로, 세지 못했다는 사실이 여기서 사라지면 죽은 세션이
     // 통째로 조용해진다.
+    // 그 문장이 **몇 번** 섰는가 — 겹쳐 본 길과 안 겹친 길이 한 문장을 쓰므로(moai-hs3g) 어느
+    // 판에서도 못 읽은 워크트리 하나에 한 줄이다.
+    let said = |t: &str| t.matches("스냅샷을 못 읽었다 — ⎇").count();
     let snap = one.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
     std::fs::remove_file(&snap).unwrap();
     std::fs::create_dir(&snap).unwrap();
@@ -1611,11 +1614,19 @@ fn the_overview_counts_work_with_no_live_worktree() {
         mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
         "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
     );
+    // 못 읽은 워크트리 하나에 그 문장도 하나다.
+    assert_eq!(said(mine), 1, "한 워크트리를 두 줄로 댔다\n{blind}");
 
     // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
     // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
     // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **기계도 같은 사실을 안쪽과 같은 키로 받는다** — 없으면
     // 밖에서 읽는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다.
+    //
+    // **재는 자는 그 문장이 몇 번 서는가다**(moai-hs3g). 한때 이 자리는 겹쳐 본 판에 그 문장이
+    // **없는지**를 쟀는데, 그때는 두 길이 같은 사실을 두 말로 대고 있었기 때문이다 — 겹쳐 본 길은
+    // `⎇ 가지: 까닭` 만, 안 겹친 길은 문장을 둘러. 문장을 하나로 맞춘 뒤로 그 자는 "한 번 댔다" 와
+    // "안 댔다" 를 못 가른다. 세는 것으로 바꾸면 두 판이 **같은 것**을 재고, 두 번 대는 되돌림은
+    // 2 로 붉어진다.
     let both = isolated(BIN)
         .args(["status", "--worktree"])
         .current_dir(&out)
@@ -1626,7 +1637,9 @@ fn the_overview_counts_work_with_no_live_worktree() {
         .unwrap();
     let both = String::from_utf8(both.stdout).unwrap();
     assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
-    assert!(!block(&both, "one").contains("스냅샷을 못 읽었다 — ⎇"), "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    assert_eq!(said(block(&both, "one")), 1, "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    // 겹쳐 본 길은 열다 진 까닭까지 싣는다 — 안 겹친 길이 그 자리에 대는 것은 워크트리의 자리다.
+    assert!(block(&both, "one").contains("worktree-agent-x"), "어느 워크트리인지를 안 댔다\n{both}");
     let machine = isolated(BIN)
         .args(["status", "--worktree", "--json"])
         .current_dir(&out)
