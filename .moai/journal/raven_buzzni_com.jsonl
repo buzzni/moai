@@ -448,3 +448,13 @@
 {"ts":"2026-09-21T23:42:43Z","id":"moai-oz13","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T23:42:44Z","id":"moai-65ie","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T23:42:44Z","id":"moai-1tcm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T23:45:32Z","id":"moai-a1if","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅의 쓰기 판정 얼개)"}
+{"ts":"2026-09-21T23:45:32Z","id":"moai-wdo8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 되돌림 탐침 하나)"}
+{"ts":"2026-09-21T23:45:33Z","id":"moai-2i0g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 판정 표를 뜨고 견준다)"}
+{"ts":"2026-09-21T23:45:33Z","id":"moai-dvlw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 재서 적는다)"}
+{"ts":"2026-09-21T23:45:34Z","id":"moai-s7we.woz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=270360 (max — 에픽 끝 리뷰)"}
+{"ts":"2026-09-21T23:45:34Z","id":"moai-s7we.woz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯 중 열하나를 받았다(810ca1b). 가장 무거운 것은 2·3·11번 — 갈무리가 규약이 시키는 바로 그 줄에서 한 번도 안 쓰였다. 넘긴 7번은 idea moai-juwb 에 담았고, 14번은 7번과 함께 움직여야 해 같이 두었다. 13·15번은 이 diff 가 잇기만 한 자리라 리뷰 노트에 적어 넘긴다. 판정 표 188블록은 고치기 전과 md5 가 같다."}
+{"ts":"2026-09-21T23:45:34Z","id":"moai-a1if","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-21T23:45:35Z","id":"moai-wdo8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-21T23:45:36Z","id":"moai-2i0g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-21T23:45:36Z","id":"moai-dvlw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
