@@ -2769,6 +2769,24 @@ mod tests {
         let refused = config_refused(Lang::En, &crate::config::Refused { at, why: Trouble::NoPrefix });
         assert!(refused.starts_with("/x/.moai/config.toml: "), "{refused}");
         assert!(!said(&Trouble::NoPrefix).contains(".moai"), "글 쪽이 자리를 또 단다");
+
+        // **줄과 쓰인 값은 반드시 나간다**(리뷰). 자료 쪽 시험은 갈래만 재므로 말묶음에서
+        // `{line}`·`{raw}` 자리가 빠져도 거기서는 안 붉어진다 — 그러면 "몇 줄인지" 와 "무엇을
+        // 적었는지" 가 화면에서만 조용히 사라지고, 설정 파일을 손으로 뒤지는 수밖에 없다.
+        let carries = |why: &Trouble| {
+            let s = said(why);
+            assert!(s.contains('7'), "줄 번호가 빠졌다 — {s}");
+            assert!(s.contains("삐끗"), "쓰인 값이 빠졌다 — {s}");
+        };
+        let key = || "status_wip_limit".to_string();
+        carries(&Trouble::NotQuoted { line: 7, key: key(), raw: "삐끗".into() });
+        carries(&Trouble::NumberQuoted { line: 7, key: key(), raw: "삐끗".into() });
+        carries(&Trouble::NotANumber { line: 7, key: key(), want: crate::config::Want::Whole, raw: "삐끗".into() });
+        carries(&Trouble::NoSuchThreshold { line: 7, key: "삐끗".into() });
+        carries(&Trouble::ThresholdInTable { line: 7, named: "삐끗".into() });
+        let line_only = said(&Trouble::Unbalanced { line: 7 });
+        assert!(line_only.contains('7'), "{line_only}");
+        assert!(said(&Trouble::NotAPair { line: 7 }).contains('7'));
     }
 
     /// **태그 표기는 `tag_parts` 한 자리에서 정한다**(`tag_line` 은 그 조각을 잇는다). `add` 의 확인 줄과
