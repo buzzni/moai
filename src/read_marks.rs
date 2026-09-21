@@ -234,11 +234,13 @@ pub struct Place {
     /// 뒤에는 어느 읽기도 다시 안 연다 — 걷은 id 가 되살아나던 자리(리뷰 7·13, moai-dt5q)는 그대로
     /// 닫혀 있다.
     ///
-    /// **남아 있는 동안은 그 자리가 다시 열린다**(moai-wd5u 리뷰). 다 못 앉힌 판은 파일째 남기므로 이미
-    /// 앉은 도장도 함께 남고, 읽기는 그것을 겹쳐 보고 쓰기는 걸음마다 다시 합친다 — 그사이 걷기가 걷은
-    /// id 는 거기서 되살아나고, 걷는 쓰기는 합쳤다 걷기를 되풀이해 바뀐 것 없는 파일을 다시 적는다. 막힌
-    /// 자리나 못 읽는 파일을 사람이 고칠 때까지 이어진다. 닫으려면 남길 때 대기 자리를 못 앉힌 것만 남도록
-    /// 줄여 적어야 하는데, 그것은 대기 자리를 고쳐 쓰는 새 길이라 여기서 안 열었다.
+    /// **남길 때 못 앉힌 것만 남긴다**(moai-b3it, [`keep_only`]). 파일째 남기던 판은 이미 앉은 도장도
+    /// 함께 남겨, 읽기가 그것을 겹쳐 보고 쓰기가 걸음마다 다시 합쳤다 — 그사이 걷기가 걷은 id 는 거기서
+    /// 되살아나고, 걷는 쓰기는 합쳤다 걷기를 되풀이해 바뀐 것 없는 파일을 다시 적었다. 막힌 자리를
+    /// 사람이 고칠 때까지 이어지던 자리다.
+    ///
+    /// **줄이는 것은 다 읽은 판뿐이다.** 못 읽은 파일은 무엇이 들었는지를 모르는 채 다시 적는 꼴이라
+    /// 그대로 둔다 — 그때는 이미 앉은 도장도 남지만, 잃는 것보다 싸다.
     pub pending: Option<PathBuf>,
     /// **이 부름이 자리를 못 풀어 떨어졌는가**([`settle`]). 그러면 [`Place::at`] 은 읽음 파일이 아니라
     /// 대기 자리다([`spool_at`]) — 그 파일이 깨졌거나 못 읽는 것이면 이 판은 도장을 적을 데가 **아예**
@@ -557,7 +559,8 @@ fn scan(root: &Table, mut on: impl FnMut(&str, &str)) -> Vec<Skipped> {
 /// 짓는 대기 자리([`spool_at`])에 적고, 자리가 다시 풀리는 판이 그것을 [`Place::pending`] 으로 들어
 /// 여기서 합친 뒤 그 파일을 지운다 — **닫는 자가 합치기 자신이다.** 그러니 이 줄은 "철자가 밀렸다" 가
 /// 아니라 "이 판의 도장이 아직 대기 자리에 있다" 로 읽는다. **지우는 것은 다 앉았을 때뿐이다**
-/// (moai-wd5u) — 못 앉힌 것이 있으면 파일을 남기고 [`SheetTrouble::SpoolKept`] 를 싣는다.
+/// (moai-wd5u) — 못 앉힌 것이 있으면 **그것만 남기고**([`keep_only`], moai-b3it)
+/// [`SheetTrouble::SpoolKept`] 를 싣는다.
 ///
 /// 첫 판은 받은 철자의 **읽음 파일**에 적고 파일의 때로 "아직 안 합쳤다" 를 물었는데, 그 물음은 닫히지
 /// 않았다(리뷰 3·4·6·7) — 지금 자리에 아무 쓰기나 들면 때가 올라가 그 도장이 영영 남았고, 옛 파일과
@@ -779,6 +782,23 @@ fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal
     // 한 번 더 합치는 값(같은 것을 다시 얹으니 잃는 것이 없다)뿐이라, 까닭만 싣고 지나간다.
     if let Some((_lock, spool, left)) = merged {
         if !left.all_in() {
+            // **남기는 것은 못 앉힌 것뿐이다**(moai-b3it). 파일째 남기던 판은 막힌 id 하나 때문에 이미
+            // 앉은 도장까지 함께 남겨, 그 뒤에 걷은(`prune`) id 가 읽기에서 되살아나고 걷는 쓰기마다
+            // 같은 줄을 얹었다 지우며 바이트가 같은 표를 다시 적었다 — 사람이 그 줄을 고칠 때까지다.
+            //
+            // **줄이는 잣대는 [`Unmerged::held`] 하나다** — 남길 것을 여기서 따로 헤아리면 잣대가 둘이
+            // 되고, 갈리는 날 앉은 것을 남기거나 못 앉힌 것을 지운다. 뒤쪽은 조용한 손실이다.
+            //
+            // **다 못 읽은 파일은 안 건드린다.** 그때는 무엇이 들었는지를 모르는 채 다시 적는 꼴이다 —
+            // 읽는 길이 건너뛴 줄도 사람이 적은 것이라 함께 사라진다.
+            //
+            // **못 줄여도 넘어지지 않는다** — 도장은 이미 이 표에 있고, 남은 줄은 다음 판이 한 번 더
+            // 얹을 뿐이다(같은 것을 얹으니 잃는 것이 없다).
+            if !left.unread
+                && let Err(said) = keep_only(spool, &left.held)
+            {
+                problems.push(SheetTrouble::SpoolLeft { at: spool.to_path_buf(), said });
+            }
             problems.push(SheetTrouble::SpoolKept { at: spool.to_path_buf(), held: left.held });
         } else if let Err(e) = std::fs::remove_file(spool)
             && e.kind() != std::io::ErrorKind::NotFound
@@ -787,6 +807,27 @@ fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal
         }
     }
     Ok(Wrote { value: out, problems })
+}
+
+/// 남긴 대기 자리에서 **이미 앉은 도장을 걷는다** — `held` 만 남기고 다시 적는다(moai-b3it).
+///
+/// 부르는 쪽이 그 파일의 락을 쥐고, 다 읽은 판에서만 부른다([`write_sheet`]).
+///
+/// **걷는 자는 [`Sheet::prune`] 이다** — 때가 적힌 줄만 걷고 주석과 모르는 키는 그대로 둔다. 대기
+/// 자리도 사람이 열어 보는 파일이고(거절문이 그 이름을 댄다), 맨 `remove` 는 빈 줄 너머의 주석까지
+/// 가져간다.
+///
+/// **바뀐 것이 없으면 안 적는다** — 걷을 것이 없는 판(못 앉힌 것만 든 파일)에서 바이트가 같은 파일을
+/// 다시 적으면 그 때를 보는 걸음마다 탐색기가 다시 읽는다.
+fn keep_only(spool: &Path, held: &[String]) -> Result<(), String> {
+    let src = std::fs::read_to_string(spool).map_err(|e| e.to_string())?;
+    let mut sheet = Sheet::parse(&src)?;
+    let keep: BTreeSet<&str> = held.iter().map(String::as_str).collect();
+    sheet.prune(&keep);
+    if !sheet.changed() {
+        return Ok(());
+    }
+    write_atomic(spool, sheet.render().as_bytes()).map_err(|e| e.to_string())
 }
 
 /// 다른 자리의 표를 이 [`Sheet`] 에 겹친다 — 대기 자리([`Place::pending`])와, 처음 짓는 파일이면
@@ -1620,6 +1661,57 @@ mod tests {
         assert_eq!(seen.get("w").map(String::as_str), Some("창 안에서"), "그 창의 도장을 잃었다");
         assert_eq!(seen.get("z").map(String::as_str), Some("성한 판"));
         assert_eq!(seen.get("y").map(String::as_str), Some("돌아온 뒤"));
+    }
+
+    /// **남긴 대기 자리에는 못 앉힌 것만 남는다**(moai-b3it). 막힌 id 하나 때문에 파일째 남기던 판은 이미
+    /// 앉은 도장까지 함께 남겨, 그 뒤에 걷은 id 가 읽기에서 되살아나고 걷는 쓰기마다 같은 줄을 얹었다
+    /// 지우며 바이트가 같은 표를 다시 적었다.
+    ///
+    /// **되살아나는 데까지 잰다** — 줄이기만 재면 "이미 앉은 것을 남겨도 어차피 같은 값" 으로 읽혀,
+    /// 왜 줄이는지가 시험에서 사라진다.
+    #[test]
+    #[cfg(unix)]
+    fn a_kept_pending_place_holds_only_what_did_not_land() {
+        let s = Scratch::new("read-marks-spool-trim");
+        let cfg = s.join("config.toml");
+        std::fs::create_dir_all(s.join("real/proj")).unwrap();
+        std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
+        let gate = s.join("문");
+        std::os::unix::fs::symlink("real", &gate).unwrap();
+        let spelling = s.join("문/proj");
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
+
+        // 사람이 `a-0002` 자리에 점 키를 적어 두었다 — 그 자리는 막힌다.
+        let at = place_of(&cfg, &spelling).at;
+        let src = std::fs::read_to_string(&at).unwrap().replace("\nz = ", "\na-0002.rv = \"손으로\"\nz = ");
+        std::fs::write(&at, &src).unwrap();
+        assert!(std::fs::read_to_string(&at).unwrap().contains("a-0002.rv"), "시험의 전제 — 점 키를 못 심었다");
+
+        // 떨어진 판이 둘을 적는다 — 하나는 막힌 자리, 하나는 앉을 자리다.
+        std::fs::remove_file(&gate).unwrap();
+        std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a-0002", "떨어진 판"), ("q", "떨어진 판")]))).unwrap();
+        let spool = spool_at(dir_of(&cfg), &spelling);
+        assert!(std::fs::read_to_string(&spool).unwrap().contains("q = "), "시험의 전제 — 둘 다 대기 자리에 갔다");
+
+        // 자리가 돌아온다 — `q` 는 앉고 `a-0002` 는 못 앉는다.
+        std::fs::remove_file(&gate).unwrap();
+        std::os::unix::fs::symlink("real", &gate).unwrap();
+        let wrote = upd(&cfg, &spelling, |sh| sh.mark(&BTreeMap::new())).unwrap();
+        assert!(spool.exists(), "못 앉힌 것이 있는데 대기 자리를 지웠다");
+        let left = std::fs::read_to_string(&spool).unwrap();
+        assert!(left.contains("a-0002"), "못 앉힌 도장을 걷었다 — {left}");
+        assert!(!left.contains("q = "), "이미 앉은 도장을 남겼다 — {left}");
+        assert!(
+            wrote.problems.iter().any(|w| matches!(w, SheetTrouble::SpoolKept { held, .. } if held == &["a-0002"])),
+            "무엇을 못 앉혔는지를 안 댔다 — {:?}",
+            wrote.problems
+        );
+
+        // **걷은 id 가 되살아나지 않는다** — 남은 줄이 `a-0002` 뿐이라 걷기가 지운 `q` 를 다시 안 얹는다.
+        let known: BTreeSet<&str> = ["z"].into_iter().collect();
+        upd(&cfg, &spelling, |sh| Ok(sh.prune(&known))).unwrap();
+        assert_eq!(read(&cfg, &spelling, &BTreeMap::new()).seen.get("q"), None, "걷은 도장이 대기 자리에서 되살아났다");
     }
 
     /// **깨진 대기 자리 위에서 떨어진 판은 멈추되, 그 파일이 무엇인지 함께 댄다**(moai-pm2h,
