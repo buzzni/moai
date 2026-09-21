@@ -102,8 +102,21 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 글자를 말묶음으로 옮길 때마다 시험이 "말이 바뀐 것" 인지 "동작이 바뀐 것" 인지를
         // 못 가른다. 영어 화면은 `english_is_the_default_when_nothing_picks_a_language` 가
         // 이 변수를 걷고 따로 잰다.
-        .env("MOAI_LANG", "ko");
+        .env("MOAI_LANG", "ko")
+        // **깔려 있는 `moai` 를 PATH 에서 뺀다**(moai-bq6w). `merge-driver --install` 의 기본값이
+        // 이제 PATH 의 `moai` 를 고를 수 있어(같은 판이면 그쪽이 워크트리의 `target/` 보다 오래
+        // 산다), 돌리는 사람의 `~/.local/bin/moai` 가 시험의 답을 바꿨다. **git 이 함께 있는
+        // 자리는 남긴다** — moai 는 git 을 부르고, 그 자리까지 빼면 시험이 통째로 못 돈다.
+        .env("PATH", path_without_moai());
     cmd
+}
+
+/// `moai` 가 든 디렉터리를 뺀 `PATH` — git 도 든 자리는 남긴다. [`isolated`] 가 쓴다.
+fn path_without_moai() -> std::ffi::OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let keep: Vec<_> =
+        std::env::split_paths(&path).filter(|d| !d.join("moai").is_file() || d.join("git").is_file()).collect();
+    std::env::join_paths(keep).unwrap_or(path)
 }
 
 // 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들 — 단위 시험(`git::command`)과 **한 파일**을
@@ -843,6 +856,113 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     std::fs::write(&attrs, "# moai — issue tracker\n").unwrap();
     let out = said(None);
     assert!(out.contains("put the merge rules into .gitattributes"), "빠진 규칙을 넣고도 안 댔다\n{out}");
+}
+
+/// **`moai init` 이 머지 드라이버까지 심는다**(moai-08bo, 2026-09-21 사용자 결정).
+///
+/// 앞 판의 `init` 은 `.gitattributes` 에 `merge=moai` 라는 **이름**만 쓰고 그 이름이 가리키는
+/// **명령**은 안 심었다 — 도구가 제 손으로 안 도는 절반을 만들어 두고 나머지를 사람에게 치라고
+/// 했다. 네 갈래를 한자리에서 잰다: 심는가, 말하는가, 다시 불러 죽은 경로를 고치는가,
+/// `--no-driver` 가 빠져나가는가.
+#[test]
+fn init_plants_the_merge_driver_too() {
+    let s = Scratch::new("initdriver");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let said = ok(root, &["init", "argos"]);
+    assert!(said.contains("머지 드라이버를 심었다"), "심고도 말을 안 한다\n{said}");
+    let planted = git(root, &["config", "--get", "merge.moai.driver"]);
+    assert!(planted.contains("merge-driver %O %A %B"), "심은 줄이 이 도구의 것이 아니다\n{planted}");
+    // 심었으니 조용하다 — 클론이 밟던 줄이 만드는 사람에게는 안 선다.
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "심고도 알림이 섰다");
+    // **한 일만 말한다** — 이미 선 줄에 다시 `init` 을 쳐도 심었다고 하지 않는다.
+    let said = ok(root, &["init"]);
+    assert!(!said.contains("머지 드라이버를 심었다"), "안 썼는데 썼다고 한다\n{said}");
+
+    // **다시 부르면 죽은 경로를 고친다.** 워크트리의 `target/` 을 심고 그 워크트리를 지운
+    // 자리가 이것이다.
+    let gone = root.join("없는/자리/moai");
+    git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+    assert!(ok(root, &["status"]).contains("안 돈다"), "썩은 줄을 안 댔다");
+    let said = ok(root, &["init"]);
+    assert!(said.contains("머지 드라이버를 심었다"), "죽은 경로를 안 고쳤다\n{said}");
+    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "고치고도 알림이 남았다");
+
+    // **`--no-driver` 는 `.git/config` 를 안 건드린다.**
+    let other = s.path().join("옆");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q", "."]);
+    let said = ok(&other, &["init", "argos", "--no-driver"]);
+    assert!(!said.contains("머지 드라이버를 심었다"), "안 심기로 했는데 심었다\n{said}");
+    assert!(git(&other, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(), "줄이 섰다");
+    // 안 심었으니 이제 알림이 선다 — 그 갈래는 그대로다.
+    assert!(ok(&other, &["status"]).contains("안 심었다"), "안 심었는데 조용하다");
+}
+
+/// **`moai init --check` 는 드라이버의 자리도 답하고 아무것도 안 쓴다**(moai-08bo).
+#[test]
+fn init_check_says_where_the_driver_stands_and_writes_nothing() {
+    let s = Scratch::new("checkdriver");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--no-driver"]);
+
+    let said = ok(root, &["init", "--check"]);
+    assert!(said.contains("머지 드라이버: absent"), "안 심은 것을 안 댄다\n{said}");
+    let json = ok(root, &["init", "--check", "--json"]);
+    assert!(json.contains("\"driver\":\"absent\""), "{json}");
+    // **아무것도 안 썼다.**
+    assert!(
+        git(root, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(),
+        "--check 가 심었다"
+    );
+
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let json = ok(root, &["init", "--check", "--json"]);
+    assert!(json.contains("\"driver\":\"current\""), "{json}");
+    // 다 맞은 판은 사람 화면에서 조용하다 — `--check` 가 대는 것은 남은 일이다.
+    assert!(!ok(root, &["init", "--check"]).contains("머지 드라이버"), "남은 일이 없는데 한 줄 섰다");
+}
+
+/// **드라이버를 안 쓰기로 한 저장소에 탈출구가 있다**(moai-47bt, 2026-09-21 사용자 결정).
+///
+/// 앞 판은 어느 쪽을 따라도 영영 졸렸다 — 선언을 지우면 `merge_driver_absent` 대신
+/// `gitattributes_rules` 가 `moai init` 힌트와 함께 서고, 그 `init` 이 지운 줄을 다시 덧붙여
+/// 처음으로 돌아왔다. 끊는 자는 git 의 어휘다: 같은 경로에 사람이 `merge` 를 스스로 정해 두면
+/// (`-merge`) `init` 도 알림도 그것을 결정으로 읽는다. 지우는 것이 아니라 **적는 것**이 탈출구다.
+#[test]
+fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
+    let s = init("mergeoptout");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+    assert!(ok(root, &["status"]).contains("안 심었다"), "안 심은 클론을 안 댔다 — 견줄 것이 없다");
+
+    // 사람이 스스로 정한다 — 이 경로에 머지 드라이버를 안 쓴다.
+    std::fs::write(
+        root.join(".gitattributes"),
+        "# 이 저장소는 스냅샷에 머지 드라이버를 안 쓴다\n\
+         .moai/issues.jsonl   text eol=lf -merge\n\
+         .moai/journal.jsonl  text eol=lf merge=union\n",
+    )
+    .unwrap();
+    let said = ok(root, &["status"]);
+    assert!(!said.contains("안 심었다"), "정해 둔 줄을 못 읽고 졸랐다\n{said}");
+    assert!(!said.contains("빠졌다") && !said.contains(".gitattributes"), "규칙이 빠졌다고 한다\n{said}");
+
+    // **`init` 도 그 줄을 안 덮는다** — 덮으면 뒤엣것이 이겨 결정이 조용히 뒤집힌다.
+    // 재는 것은 **규칙 줄**이다: 까닭을 적은 주석은 덧받아도 병합이 안 바뀐다.
+    let rule = |attrs: &str| attrs.lines().any(|l| !l.trim_start().starts_with('#') && l.contains("merge=moai"));
+    ok(root, &["init"]);
+    let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+    assert!(!rule(&attrs), "init 이 결정을 덮었다\n{attrs}");
+    assert!(!ok(root, &["status"]).contains("안 심었다"), "init 뒤에 다시 졸랐다");
+
+    // **줄이 통째로 없어진 판은 그대로 빠진 것이다** — 실수로 지운 것과 일부러 정한 것을 가른다.
+    std::fs::write(root.join(".gitattributes"), "# moai\n").unwrap();
+    ok(root, &["init"]);
+    let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+    assert!(rule(&attrs), "빠진 규칙을 안 썼다\n{attrs}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
@@ -13643,6 +13763,82 @@ fn status_names_a_clone_that_never_planted_the_driver() {
     assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
 }
 
+/// **심을 경로는 `--install` 이 고른다**(moai-bq6w, 2026-09-21 사용자 결정).
+///
+/// 심는 자리(`--local`)는 클론이 함께 쓰는 파일인데 이 저장소의 절차는 일을 모두 워크트리에서
+/// 하므로, 맨 `--install` 은 대개 `<워크트리>/target/release/moai` 를 박았다 — 그 워크트리를
+/// 지우는 날 모든 체크아웃이 죽은 경로를 든다. `PATH` 의 `moai` 가 **같은 판**이면 그쪽이
+/// 오래 사니 그것을 고른다. 같은 판인지는 `--version` 과 실제 부름 둘로 잰다.
+#[cfg(unix)]
+#[test]
+fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
+    let s = init("mergepath");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+
+    // PATH 에 선 같은 판 — `--version` 도 `merge-driver --help` 도 이 바이너리를 그대로 지난다.
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim = bin.join("moai");
+    write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let planted = |path: &str| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["merge-driver", "--install"]).current_dir(root).env("MOAI_ACTOR", ACTOR).env("PATH", path);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        git(root, &["config", "--get", "merge.moai.driver"])
+    };
+    assert!(planted(&path).contains(&shim.display().to_string()), "PATH 의 같은 판을 안 골랐다");
+
+    // **판이 다르면 안 고른다** — 틀리는 값은 덜 이르는 쪽이라야 한다.
+    write_exe(&shim, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'moai 9.9.9'; fi\nexit 0\n");
+    assert!(planted(&path).contains(BIN), "판이 다른데 그것을 심었다");
+
+    // **PATH 에 없으면 지금 바이너리다** — 앞 판이 늘 하던 일이다. git 은 남은 자리다.
+    let bare = path_without_moai();
+    assert!(planted(&bare.to_string_lossy()).contains(BIN), "PATH 에 없는데 딴것을 심었다");
+}
+
+/// **모르는 인자를 흘려 듣고 0 을 내는 래퍼는 그대로 못 지나간다**(moai-wwbi, 2026-09-21 사용자 결정).
+///
+/// 앞 판이 잰 것은 "0 으로 끝났는가" 뿐이라, `#!/bin/sh` 와 `exit 0` 두 줄짜리를 심어도
+/// `moai status` 가 조용했다 — 그 명령은 `merge-driver` 를 모르고 그 저장소의 매 병합이 말없이
+/// 내려앉는다. 도움말이 제 이름을 대는지까지 본다.
+///
+/// **규약이 하나 늘었다** — 심는 명령의 `merge-driver --help` 에 그 낱말이 서야 한다. 이 도구가
+/// 그것을 지키는지를 [`the_planted_command_must_name_the_subcommand_in_its_help`] 가 맨다.
+#[cfg(unix)]
+#[test]
+fn status_names_a_wrapper_that_swallows_what_it_does_not_know() {
+    let s = init("mergeswallow");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // 자리도 있고 0 으로 끝나는데 이 명령을 모른다 — 흘려 듣는 래퍼다.
+    let wrap = root.join("래퍼");
+    write_exe(&wrap, "#!/bin/sh\nexit 0\n");
+    ok(root, &["merge-driver", "--install", "--as", &wrap.display().to_string()]);
+    let json = ok(root, &["status", "--json"]);
+    assert!(json.contains("merge_driver_alien"), "흘려 듣는 래퍼가 그냥 지나갔다\n{json}");
+
+    // 제 이름을 대는 명령은 그대로 통과한다.
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "멀쩡한 드라이버를 붙잡았다\n{json}");
+}
+
+/// **심는 명령은 제 도움말에서 `merge-driver` 를 댄다** — [`status_names_a_wrapper_that_swallows_what_it_does_not_know`]
+/// 가 기대는 규약이고, 이 줄이 그 규약을 맨다. 도움말 글을 고치다 그 낱말이 사라지면 제 바이너리를
+/// 심은 저장소가 모두 `alien` 으로 선다.
+#[test]
+fn the_planted_command_must_name_the_subcommand_in_its_help() {
+    let s = init("mergemarker");
+    let said = ok(s.path(), &["merge-driver", "--help"]);
+    assert!(said.contains("merge-driver"), "도움말이 제 이름을 안 댄다\n{said}");
+}
+
 /// **선언을 걷으면 넷이 다 입을 다문다**(moai-0j7c).
 ///
 /// 앞 판은 `absent` 하나만 선언으로 막아, `merge=moai` 를 걷은 저장소에서도 rotten·alien·stale 이
@@ -13690,7 +13886,8 @@ fn the_merge_driver_notice_reads_the_declaration_where_the_tracker_lives() {
     let main = s.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
     git(&main, &["init", "-q"]);
-    ok(&main, &["init", "argos"]);
+    // **드라이버는 안 심는다** — 재는 것은 알림이 선언을 어디서 읽는가다.
+    ok(&main, &["init", "argos", "--no-driver"]);
     add(&main, &["하나"]);
     git(&main, &["add", "-A"]);
     git(&main, &["commit", "-q", "-m", "세운다"]);

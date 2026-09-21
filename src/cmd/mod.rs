@@ -237,7 +237,9 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
         Cmd::Init { print: true, .. } => init::print(&ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, check: false, print: false } => init::run(&ctx, prefix.as_deref(), no_agents),
+        Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
+            init::run(&ctx, prefix.as_deref(), no_agents, no_driver)
+        }
         Cmd::Hook { event } => hook::run(&ctx, event),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서

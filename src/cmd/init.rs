@@ -1,6 +1,7 @@
 //! `.moai/` 를 심는다. `store` 말고 파일을 만드는 유일한 곳이다.
 
 use super::{Ctx, Fail, R};
+use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::i18n::{fill, say};
 use crate::store::Elsewhere;
@@ -329,8 +330,15 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
     // `moai project add|ls` 와 한눈 보기가 같은 자를 쓴다.
     let tracker_at = crate::store::init_belongs_at(&root);
+    // **드라이버가 어디 서 있는지도 여기서 답한다**(moai-08bo). `init` 이 그것까지 심게 된
+    // 뒤로 `--check` 의 물음은 "블록이 낡았나" 하나가 아니라 "`init` 이 맞추는 것이 다 맞아
+    // 있나" 다. **아무것도 안 쓴다** — 재고 말하는 것이 이 플래그의 전부다.
+    //
+    // 선언을 읽는 자리는 **트래커가 사는 곳**이다(moai-8nkl) — 딸린 워크트리의 가지는 그것을
+    // 안 들 수 있고, 병합에서 걸리는 것은 루트의 선언이다.
+    let driver = crate::cmd::merge_driver::state_at(&root, tracker_at.as_deref().unwrap_or(&root), ctx.chdir);
     if ctx.json {
-        let mut v = serde_json::json!({ "agents": state });
+        let mut v = serde_json::json!({ "agents": state, "driver": driver });
         // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
         //
         // **못 싣는 경로에서도 키만 빠진다**(리뷰). `serde_json::json!(<식>)` 은 속으로
@@ -371,6 +379,11 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
             say(lang, "init.rules_missing"),
             &[("name", name), ("n", &missing.len().to_string()), ("rules", &missing.join(", "))],
         ));
+    }
+    // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
+    // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
+    if !matches!(driver, "off" | "current") {
+        out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
     }
     // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
     // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
@@ -658,6 +671,9 @@ fn covers(have: &str, want: &str) -> bool {
     if have.is_empty() || have.starts_with('#') || have.starts_with('!') || want.starts_with('#') {
         return false;
     }
+    if decided(have, want) {
+        return true;
+    }
     // 끝 `/` 는 "디렉터리만" 이라는 뜻이다. 같은 이름끼리 견줄 때 `have` 만 디렉터리 전용이면
     // (`.moai/lock/`) 파일 `.moai/lock` 을 막지 못하니 덮은 것으로 치지 않는다.
     let dir_only = have.ends_with('/') && !want.ends_with('/');
@@ -666,7 +682,40 @@ fn covers(have: &str, want: &str) -> bool {
     !have.is_empty() && ((have == want && !dir_only) || want.starts_with(&format!("{have}/")))
 }
 
-pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
+/// 같은 경로에 대해 사람이 **머지 속성을 스스로 정한** 줄인가(moai-47bt, 2026-09-21 사용자 결정).
+///
+/// 머지 드라이버를 안 쓰기로 한 저장소에 탈출구가 없던 자리다. 선언(`merge=moai`)을 지우면
+/// `merge_driver_absent` 는 걷히지만 이번엔 "규칙이 빠졌다"(`gitattributes_rules`)가 `moai init`
+/// 힌트와 함께 서고, 그 `init` 이 지운 줄을 다시 덧붙여 처음으로 돌아왔다. 어느 쪽을 따라도
+/// 영영 졸리는 고리다.
+///
+/// **끊는 자는 git 의 어휘다.** 설정에 끄는 키를 두면 어휘가 하나 늘고 그 키는 다른 알림에도
+/// 번진다. 대신 `.gitattributes` 에 사람이 같은 경로로 적어 둔 줄이 `merge` 를 **어떤 꼴로든**
+/// 정하고 있으면(`-merge`·`!merge`·`merge=<다른 것>`·`merge=moai`) 그것을 결정으로 읽는다 —
+/// 지우는 것이 아니라 **적는 것**이 탈출구라, 다음 사람이 그 줄에서 까닭을 읽는다.
+///
+/// **그 경로의 줄은 통째로 사람의 것이 된다** — `text eol=lf` 까지 그쪽이 정한다. 반만 물려받아
+/// 뒤에 우리 줄을 덧붙이면 git 은 뒤엣것을 쓰므로 결정이 조용히 뒤집힌다.
+///
+/// 줄이 통째로 **없어진** 판은 그대로 빠진 것이다(`init` 이 다시 쓴다). 실수로 지운 것과 일부러
+/// 정한 것을 가르는 자리가 여기고, 가르지 않으면 `.gitattributes` 를 잃은 저장소가 영영 조용해진다.
+fn decided(have: &str, want: &str) -> bool {
+    /// 이 줄이 `name` 속성을 정하고 있는가 — `name`·`-name`·`!name`·`name=<값>` 넷이다.
+    fn sets(line: &str, name: &str) -> bool {
+        line.split_whitespace().skip(1).any(|t| {
+            let t = t.trim_start_matches(['-', '!']);
+            t == name || t.strip_prefix(name).is_some_and(|rest| rest.starts_with('='))
+        })
+    }
+    // 앞 `/` 는 뿌리에 못박는 표시일 뿐 가리키는 파일은 같다 — 위의 [`covers`] 와 같은 자다.
+    fn path(l: &str) -> Option<&str> {
+        l.split_whitespace().next().map(|p| p.trim_start_matches('/'))
+    }
+    // 속성이 없는 줄은 `.gitignore` 의 줄이다 — 그쪽은 위의 자로만 잰다.
+    path(have) == path(want) && sets(want, "merge") && sets(have, "merge")
+}
+
+pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -816,6 +865,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES);
     let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE);
+    // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
+    // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
+    // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는
+    // 저장소와 git 저장소가 아닌 자리에는 안 심고, 이미 같은 줄이면 아무것도 안 쓴다.
+    let planting = if no_driver { None } else { Some(crate::cmd::merge_driver::plant_for_init(&root)) };
     // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
@@ -872,7 +926,23 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             "gitattributes": matches!(attrs, Added::Wrote { .. }),
             "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
+            // **늘 서는 키다**(moai-08bo). `--no-driver` 는 `off` 와 같은 낱말을 쓰지 않는다 —
+            // 안 쓰기로 한 저장소와 이번 한 번만 건너뛴 것은 다음에 칠 명령이 다르다.
+            "driver": match &planting {
+                None => "skipped",
+                Some(Planting::Off) => "off",
+                Some(Planting::Already) => "current",
+                Some(Planting::Planted(_)) => "planted",
+                Some(Planting::Failed(_)) => "failed",
+            },
         });
+        // 심은 명령과 못 심은 까닭은 **있을 때만** 싣는다 — 늘 `null` 을 두면 대부분의 줄이
+        // 헛 키를 든다(`shortened_from` 과 같은 자).
+        match &planting {
+            Some(Planting::Planted(cmd)) => v["driver_command"] = serde_json::json!(cmd),
+            Some(Planting::Failed(why)) => v["driver_trouble"] = serde_json::json!(why),
+            _ => {}
+        }
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
@@ -944,6 +1014,14 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
         _ => {}
     }
+    // **한 일만 말한다** — 이미 서 있던 줄과 안 쓰기로 한 저장소는 조용하다. 못 심은 것은
+    // 끊지 않고 말한다: `.git/config` 하나 때문에 트래커를 세운 말까지 삼키면 안 된다
+    // (읽기 전용 AGENTS.md 를 `?` 로 끊지 않는 moai-780n 과 같은 자다).
+    match &planting {
+        Some(Planting::Planted(cmd)) => out.push(fill(say(lang, "init.planted_driver"), &[("cmd", cmd)])),
+        Some(Planting::Failed(why)) => out.push(fill(say(lang, "init.driver_trouble"), &[("why", why)])),
+        _ => {}
+    }
     for (name, done, block) in &untouched {
         // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
         // 갈래를 빠짐없이 적는다: `_` 로 받던 때는 갈래가 하나 느는 날 그것이 말없이 "못 읽어"
@@ -977,7 +1055,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
     // **못 건드린 자리가 있으면 "다 맞아 있다" 가 아니다**(moai-780n) — 못 쓴 AGENTS.md 는 딸린
     // 파일이 둘 다 `Already` 여도 남은 일이다.
-    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents && untouched.is_empty();
+    let did_nothing = attrs == Added::Already
+        && ignore == Added::Already
+        && !agents
+        && untouched.is_empty()
+        && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {
         out.push(say(lang, "init.all_current").to_string());
     }
