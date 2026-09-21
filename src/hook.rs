@@ -1817,6 +1817,14 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         /// 여기 규칙 2 를 채우고 남의 트래커에 세우는 줄이 여기 규칙 1 에 막힌다(리뷰
         /// moai-p836.rv). 모르는 자리는 지어내지 않는다.
         stops: &'static [&'static str],
+        /// **자리를 옮기는 스위치** — 값으로 그 자리를 받는다(`env -C DIR`·`sudo -D DIR`).
+        /// 값이 제자리를 가리키면([`nowhere`]) 아무 일도 안 하니 안 멈추고, 그 밖의 값은
+        /// [`stops`](Wrapper::stops) 와 같다(2026-09-21 사용자 결정, moai-mru7).
+        ///
+        /// **`stops` 와 한 통에 두지 않는다** — 저쪽은 값을 안 받는 깃발이라 값을 읽을 자리가 없고,
+        /// 그러면 `-C .` 가 `-l` 과 같은 줄에 서서 제자리를 가리킨 것도 통째로 멈춘다. 그 한 줄이
+        /// `env -C . -S '<글>'` 의 글을 읽는 자를 아무도 없게 만들었다.
+        chdir: &'static [&'static str],
         /// **그 뒤가 셸에 넘기는 글인 스위치**(moai-drli) — `env -S` 와 `sudo -s`.
         /// 한때 `stops` 에 함께 있었는데, 멈추는 까닭이 "그 뒤는 명령이 아니라 글이고 그 글을 읽는
         /// 것은 렉서의 일" 이면서 정작 렉서([`shell_text`])는 `bash -c` 와 `eval` 만 알아, 그 글을
@@ -1855,7 +1863,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             ],
             attach: &[],
             args: 0,
-            stops: &["-C", "--chdir"],
+            stops: &[],
+            chdir: &["-C", "--chdir"],
             hands: &["-S", "--split-string"],
             glued: true,
         },
@@ -1867,6 +1876,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             attach: &[],
             args: 1,
             stops: &[],
+            chdir: &[],
             hands: &[],
             glued: false,
         },
@@ -1878,6 +1888,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             attach: &[],
             args: 0,
             stops: &[],
+            chdir: &[],
             hands: &[],
             glued: false,
         },
@@ -1889,6 +1900,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             attach: &[],
             args: 0,
             stops: &[],
+            chdir: &[],
             hands: &[],
             glued: false,
         },
@@ -1931,7 +1943,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             // `-s` 와 한 줄로 묶었는데, 같은 결정이 "딴 자리에서 돌리는 것은 멈춘다" 도 함께
             // 세웠다 — 목록과 잣대가 어긋났고 잣대를 따랐다. 넘겨 주면 ~root 의 딴 트래커에서
             // 돌거나 아예 실패하는 집기가 여기 규칙 2 를 채운다(`env -C`·`sudo -D` 와 같은 자리).
-            stops: &["-i", "--login", "-e", "--edit", "-l", "--list", "-v", "--validate", "-D", "--chdir"],
+            stops: &["-i", "--login", "-e", "--edit", "-l", "--list", "-v", "--validate"],
+            chdir: &["-D", "--chdir"],
             // `sudo -s <명령>` 은 그 낱말들을 이어 붙여 셸에 `-c` 로 넘긴다 — 자리는 그대로다.
             hands: &["-s", "--shell"],
             glued: false,
@@ -1949,12 +1962,13 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             attach: &[],
             args: 0,
             stops: &["-s", "-L", "-C"],
+            chdir: &[],
             hands: &[],
             glued: false,
         },
     ];
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
-    let (takes, long, stops, hands) = (w.takes, w.long, w.stops, w.hands);
+    let (takes, long, stops, chdir, hands) = (w.takes, w.long, w.stops, w.chdir, w.hands);
     // `-c` 같은 글자 하나를 `format!` 없이 견준다 — 훅은 Bash 한 번마다 돈다.
     let letter = |set: &[&str], c: char| c.is_ascii() && set.iter().any(|f| f.as_bytes() == [b'-', c as u8]);
     // 값이 모자라 셸이 거절할 줄 — 넘겨짚지 않는다([`command_of`] 가 여기서 멈춘다).
@@ -2001,6 +2015,22 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         // `--chdir=DIR` 처럼 값을 붙여 온 것도 같은 스위치다.
         if stops.iter().any(|f| word == f || word.strip_prefix(f).is_some_and(|r| r.starts_with('='))) {
             return Some(Wrapped::Stops);
+        }
+        // **제자리를 가리킨 `-C`·`-D` 는 아무 일도 안 한다**(moai-mru7) — 그때만 안 멈추고 마저
+        // 읽는다. 값이 없으면 그 줄은 셸이 거절한다.
+        if chdir.iter().any(|f| word == f) {
+            match rest.get(n + 1) {
+                Some(d) if nowhere(d) => n += 2,
+                _ => return Some(Wrapped::Stops),
+            }
+            continue;
+        }
+        if let Some(glued) = chdir.iter().find_map(|f| word.strip_prefix(f).filter(|r| r.starts_with('='))) {
+            if !nowhere(&glued[1..]) {
+                return Some(Wrapped::Stops);
+            }
+            n += 1;
+            continue;
         }
         // **셸에 넘기는 글은 여기서부터다**(moai-drli). `--split-string=글` 은 그 낱말 안에 글이 있다.
         // 값을 받는 스위치(`env -S`)는 여기서 옵션이 끝나고, 값 없는 깃발(`sudo -s`)은 표만 달고
@@ -2057,6 +2087,18 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             if letter(stops, c) {
                 return Some(Wrapped::Stops);
             }
+            // 뭉치 안의 자리 옮김(`env -iC .`) — 뒤에 붙은 것이 값이고, 없으면 다음 낱말이다.
+            // 제자리를 가리킬 때만 값을 먹고 마저 읽는다([`nowhere`], moai-mru7).
+            if letter(chdir, c) {
+                let left = &word[at + c.len_utf8()..];
+                let here = if left.is_empty() { rest.get(n + 1).is_some_and(|d| nowhere(d)) } else { nowhere(left) };
+                if !here {
+                    return Some(Wrapped::Stops);
+                }
+                eats = left.is_empty();
+                stop = false;
+                break;
+            }
             // **뭉치 안의 글 스위치**(moai-drli) — `env -iS '글'`·`sudo -ns 명령`. 값을 받는 것
             // (`env -S`)은 남은 글자가 곧 글이라 옵션이 여기서 끝나고, 값 없는 깃발(`sudo -s`)은
             // 뭉치의 남은 글자도 스위치다 — `sudo -su 남 moai add x` 의 `u` 가 그렇다.
@@ -2111,6 +2153,15 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
 
 fn basename(word: &str) -> &str {
     word.rsplit(['/', '\\']).next().unwrap_or(word)
+}
+
+/// **아무 데도 안 옮기는 자리인가** — `.`·`./`·`././` 다(moai-mru7).
+///
+/// [`wrapped`] 의 `chdir` 만 쓴다. **후하게 잡지 않는다** — 여기서 참이면 그 토막을 **이 트래커의
+/// 것으로** 판정하므로, 진짜 딴 자리를 제자리로 잘못 읽으면 남의 저장소에서 도는 줄이 여기 규칙에
+/// 걸린다. 잘못 막는 쪽이라 새는 것보다 비싸다. `$PWD` 처럼 푸는 자리는 글자로 모르니 거짓이다.
+fn nowhere(d: &str) -> bool {
+    d.starts_with('.') && d.split('/').all(|p| p.is_empty() || p == ".")
 }
 
 /// 이 토막이 `moai` 를 부른다면, 그 뒤의 인자들.
@@ -5383,8 +5434,48 @@ mod tests {
             "doas -s moai add '딴 일'",
             "doas -u 남 -s moai add '딴 일'",
             "doas -su 남 moai add '딴 일'",
+            // 제자리가 아닌 값은 그대로 멈춘다 — `..` 도 `.hidden` 도 딴 자리다.
+            "env -C .. moai add '딴 일'",
+            "env -C .hidden moai add '딴 일'",
+            "env -C \"$PWD\" moai add '딴 일'",
+            "env -iC /남의/저장소 moai add '딴 일'",
+            "sudo -nD /남의/저장소 moai add '딴 일'",
+            // 값이 없으면 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
+            "env -C",
+            "sudo --chdir",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "모르는 꼴을 명령으로 읽었다 — {cmd}");
+        }
+        // **아무 일도 안 하는 자리 옮김은 안 멈춘다**(2026-09-21 사용자 결정, moai-mru7) — `-C .` 는
+        // 제자리라 그 뒤는 여기서 도는 명령이고 그 글은 여기 트래커의 것이다. 한 줄이 규칙을 통째로
+        // 끄던 자리였다 — `stops` 가 `hands` 보다 먼저 서서 `env -C . -S '<글>'` 의 글을 버렸다.
+        for cmd in [
+            "env -C . moai add '딴 일'",
+            "env -C ./ moai add '딴 일'",
+            "env --chdir=. moai add '딴 일'",
+            "env --chdir . moai add '딴 일'",
+            "env -iC . moai add '딴 일'",
+            "env -C. moai add '딴 일'",
+            "env -C . -S \"moai add '딴 일'\"",
+            "sudo -D . moai add '딴 일'",
+            "sudo --chdir=./ moai add '딴 일'",
+            "sudo -D . -s moai add '딴 일'",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "아무 일도 안 하는 -C 가 규칙 1 을 껐다 — {cmd}"
+            );
+        }
+        // 그 집기는 여기 규칙 2 를 채운다 — 정말 여기서 돈다.
+        for cmd in [
+            "env -C . moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs",
+            "sudo -D . -s moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs",
+        ] {
+            assert_eq!(
+                guard_writes(&all, &cfg(), &here(), root, root, cmd),
+                Decision::Pass,
+                "여기서 도는 집기를 안 세었다 — {cmd}"
+            );
         }
         // **돌지도 않는 집기로 빈손의 쓰기가 풀리지 않는다** — 멈추는 까닭이 바로 이것이다.
         for cmd in [
