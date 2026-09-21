@@ -4148,6 +4148,13 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 위에서 걷었다.
         let negated = bang || blocks.negated.is_some();
         // `!` 가 뒤에 여는 괄호, 또는 `! { …`·`! if …` 처럼 제 토막에서 연 묶음 — 그 묶음 전체가 부정이다.
+        //
+        // **가장 얕은 자리가 이긴다**([`open`]) — 그냥 대입하던 판은 안쪽 `!` 가 바깥 `!` 의 자리를
+        // 덮어써, 안쪽 묶음이 닫히는 순간 `left` 가 바깥 부정까지 함께 걷었다(리뷰 moai-bujq.91c 의
+        // 15번). `! ( ! ( true ) ; 집기 ) && 쓰기` 가 그 줄이다 — 괄호의 값은 집기의 값이고 바깥
+        // `!` 가 그것을 뒤집으니 bash 는 **집기가 져야** 그 `&&` 에 닿는데, 부정을 잃은 판은 그
+        // 쓰기를 집기 뒤로 읽어 넘겼다. moai-ueat 이 `open` 을 뽑으며 함께 고쳐진 자리고, 그
+        // 커밋은 스스로를 뜻이 안 바뀌는 정리라 적었다 — 그 글이 틀렸다.
         if let Some(at) = prefix.iter().position(|w| w == "!") {
             if words.is_empty() {
                 open(&mut blocks.negated, seg.level + 1);
@@ -8564,6 +8571,36 @@ mod tests {
         }
         // 견줄 것 — 몸통 **안**의 `exit` 은 그대로 안 센다(moai-unvx 가 연 자리다).
         assert_eq!(flags("die() { exit 1; }; moai mv t-1 in_progress"), [("t-1".to_string(), true)]);
+    }
+
+    /// **겹친 `!` 는 바깥 것이 이긴다**(리뷰 moai-bujq.91c 의 15번) — `! ( ! ( true ) ; 집기 )` 의
+    /// 괄호는 집기의 값으로 끝나고 바깥 `!` 가 그것을 뒤집으니, bash 는 **집기가 져야** 뒤의 `&&`
+    /// 에 닿는다. 그 쓰기는 빈손이다.
+    ///
+    /// 부정의 자리를 그냥 대입하던 판은 안쪽 `!` 가 바깥 것의 자리를 덮어써, 안쪽 괄호가 닫히는
+    /// 순간 바깥 부정까지 함께 걷혔다. moai-ueat 이 `open`(가장 얕은 자리가 이긴다)을 뽑으며 함께
+    /// 고쳐졌는데, 그 커밋은 스스로를 **뜻이 안 바뀌는 정리**라 적었다 — 리뷰가 그 글이 틀렸다고
+    /// 짚었고, 재어 보니 정말 판정이 달라진다. 고침은 옳으니 남기고 여기서 못박는다.
+    #[test]
+    fn a_negation_outside_a_nested_negation_still_holds() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let judge = |cmd: &str| guard_writes(&idle, &cfg(), &here(), root, root, cmd);
+        for cmd in [
+            "! ( ! ( true ) ; moai mv t-1 in_progress --from todo ) && sed -i s/a/b/ src/x.rs",
+            "! ( ! ( true ) ; moai mv t-1 in_progress --from todo ) && echo x > src/x.rs",
+            "! ( ! { true; } ; moai mv t-1 in_progress --from todo ) && sed -i s/a/b/ src/x.rs",
+            // 한 겹만 든 꼴은 처음부터 섰다 — 함께 둔다.
+            "! ( moai mv t-1 in_progress --from todo ) && sed -i s/a/b/ src/x.rs",
+            "! ( ( true ) ; moai mv t-1 in_progress --from todo ) && sed -i s/a/b/ src/x.rs",
+        ] {
+            assert!(matches!(judge(cmd), Decision::Deny(_)), "부정을 잃어 빈손의 쓰기가 샜다 — {cmd}");
+        }
+        // 견줄 것 — 부정이 없으면 그 괄호의 값은 집기의 값이고, 그 뒤는 집기 뒤다.
+        assert_eq!(
+            judge("( ( true ) ; moai mv t-1 in_progress --from todo ) && sed -i s/a/b/ src/x.rs"),
+            Decision::Pass
+        );
     }
 
     /// **셸에 글을 넘기는 문마다 되풀이 읽기의 값이 같다**(moai-5bht) — 문 하나를 예순네 겹 쌓아도
