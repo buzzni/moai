@@ -532,6 +532,7 @@
   "sheet.spool_left": "{said} — 합쳤지만 대기 자리를 못 치웠다",
   "sheet.spool_kept": "대기 자리를 남긴다 — 그 파일을 다 읽지 못했다. 함께 댄 까닭이 풀리면 다음 쓰기가 합친다",
   "sheet.spool_held": "대기 자리를 남긴다 — 이 프로젝트의 읽음 파일에서 {ids} 가 앉을 자리를 사람이 적은 값이 차지하고 있다. 그 줄을 고치면 다음 쓰기가 합친다",
+  "sheet.fallen_place": "그 파일은 자리를 못 푼 이 판의 대기 자리다. 고치거나 지우기 전까지 이 판의 읽음은 어디에도 안 적히고, 지우면 그 안에 이미 있는 도장을 잃는다",
   "sheet.refuse_unparsable": "{said} — 고치기 전까지 쓰지 않는다",
   "sheet.refuse_not_ours": "{root} 의 읽음이 아니라 쓰지 않는다 — 손으로 지운다",
   "sheet.refuse_not_a_table": "`{table}` 가 `[{table}]` 표가 아니라({is}) 읽음을 적지 않는다 — 손으로 고친다"

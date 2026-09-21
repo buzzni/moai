@@ -215,6 +215,7 @@ pub struct Place {
     /// 지운다(moai-wd5u). 못 읽었거나 앉을 자리가 막힌 id 가 있으면 남아 다음 판이 다시 든다.
     ///
     /// 못 푼 판에서는 `None` 이다: 그때는 [`Place::at`] 이 곧 그 자리라 제 자신에 겹칠 일이 없다.
+    /// 그 판인지는 [`Place::fallen`] 이 말한다 — 이 필드의 `None` 으로 묻지 않는다.
     ///
     /// **가르는 자는 있는가 하나다.** 필드도 때도 아니라서 되풀이해 떨어져도 같은 답을 내고, 지운
     /// 뒤에는 어느 읽기도 다시 안 연다 — 걷은 id 가 되살아나던 자리(리뷰 7·13, moai-dt5q)는 그대로
@@ -226,6 +227,15 @@ pub struct Place {
     /// 자리나 못 읽는 파일을 사람이 고칠 때까지 이어진다. 닫으려면 남길 때 대기 자리를 못 앉힌 것만 남도록
     /// 줄여 적어야 하는데, 그것은 대기 자리를 고쳐 쓰는 새 길이라 여기서 안 열었다.
     pub pending: Option<PathBuf>,
+    /// **이 부름이 자리를 못 풀어 떨어졌는가**([`settle`]). 그러면 [`Place::at`] 은 읽음 파일이 아니라
+    /// 대기 자리다([`spool_at`]) — 그 파일이 깨졌거나 못 읽는 것이면 이 판은 도장을 적을 데가 **아예**
+    /// 없다(moai-pm2h).
+    ///
+    /// **멈추는 자리는 그대로 둔다**(2026-09-21 사용자 결정). 깨진 파일에 덮어쓰면 그 안의 도장이
+    /// 통째로 사라지고, 옆으로 치우면 아무도 다시 안 합쳐 발이 묶인다 — 시끄럽게 멈추는 편이 싸다.
+    /// 바꾼 것은 **말**이다: 그 파일 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 어느 파일인지만
+    /// 대면 "손으로 고친다" 가 갈 곳 없는 말이 된다([`update`] 가 그 줄을 붙인다).
+    pub fallen: bool,
     /// 자리를 고르다 만난 까닭.
     pub problems: Vec<SheetTrouble>,
 }
@@ -269,7 +279,14 @@ pub fn place_of(config: &Path, root: &Path) -> Place {
     // 못 푼 판에서는 `at` 이 곧 대기 자리다 — 옛 자리도 대기 자리도 안 든다(제 자신에 겹칠 일이 없고,
     // 옛 철자 파일은 그 판에서 이름이 `at` 과 같아 이미 열려 있다).
     if why.is_some() {
-        return Place { at, root: root_of, past: Vec::new(), pending: None, problems: why.into_iter().collect() };
+        return Place {
+            at,
+            root: root_of,
+            past: Vec::new(),
+            pending: None,
+            fallen: true,
+            problems: why.into_iter().collect(),
+        };
     }
     // 옛 자리는 **뿌리 축 하나**다. 등록한 줄은 이미 푼 경로라(`user_config::resolve_dir`) 흔한 판은
     // 두 철자가 같고, 그때 이 줄은 통째로 `at` 으로 접힌다.
@@ -279,7 +296,7 @@ pub fn place_of(config: &Path, root: &Path) -> Place {
     let past = (root_of.as_os_str() != root.as_os_str()).then(|| sheet_at(dir, root)).into_iter().collect();
     // 대기 자리는 **받은 철자**의 것이다 — 떨어진 판도 같은 철자로 불려 같은 이름을 지었다. 표면마다
     // 제 철자로 부르므로(한눈 보기는 등록 줄, CLI 는 `current_dir`) 저마다 제 대기 자리를 만난다.
-    Place { at, root: root_of, past, pending: Some(spool_at(dir, root)), problems: Vec::new() }
+    Place { at, root: root_of, past, pending: Some(spool_at(dir, root)), fallen: false, problems: Vec::new() }
 }
 
 /// 지금 자리의 표에 **대기 자리와 옛 자리와 옛 `[read]`** 를 차례로 얹는다 — [`read`] 와 탐색기의
@@ -568,11 +585,25 @@ pub fn update<T>(
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
     let place = place_of(config, root);
     let at = place.at.clone();
-    write_sheet(place, f).map_err(|stop| match stop {
-        Stop::Failed(e) => e,
-        // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
-        // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
-        Stop::Refused(why) => Fail::coded(crate::view::sheet_refusal(lang(), &at, &why), crate::fail::code::BROKEN),
+    let fallen = place.fallen;
+    write_sheet(place, f).map_err(|stop| {
+        // 여기까지 오면 멈춘 판이다 — 말은 그때만, 락을 놓은 뒤에 묻는다. 떨어진 판의 줄도 같은 말로
+        // 서야 하므로 한 번 물어 둘에 쓴다(`lang` 은 한 번만 부를 수 있다).
+        let lang = lang();
+        let mut fail = match stop {
+            Stop::Failed(e) => e,
+            // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
+            // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
+            Stop::Refused(why) => Fail::coded(crate::view::sheet_refusal(lang, &at, &why), crate::fail::code::BROKEN),
+        };
+        // **떨어진 판이 멈추면 그 파일이 무엇인지 함께 댄다**(moai-pm2h). 그 자리는 도구가 짓는 대기
+        // 자리고 이름이 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을 보고 무엇을
+        // 고치라는 것인지 모른다 — 그러면 되돌릴 방법이 도구 밖에만 남는다(CLAUDE.md). 성한 판에는
+        // 안 붙인다: 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
+        if fallen {
+            fail.message = crate::view::fallen_place(lang, &fail.message);
+        }
+        fail
     })
 }
 
@@ -1521,6 +1552,47 @@ mod tests {
         let fell = spool_at(dir_of(&cfg), &spelling);
         assert!(fell.exists(), "시험의 전제 — 떨어진 판이 대기 자리에 안 적었다");
         (cfg, spelling, fell)
+    }
+
+    /// **깨진 대기 자리 위에서 떨어진 판은 멈추되, 그 파일이 무엇인지 함께 댄다**(moai-pm2h,
+    /// 2026-09-21 사용자 결정).
+    ///
+    /// 성한 쓰기가 못 읽는 대기 자리를 남기면(moai-wd5u) 그 파일은 다음에 떨어지는 판의 [`Place::at`]
+    /// 이라, 사람이 고칠 때까지 떨어진 `moai read` 가 그 자리에서 멈춘다. 덮어쓰면 그 안의 도장이
+    /// 통째로 사라지고 옆으로 치우면 아무도 다시 안 합치니, 멈추는 것 자체는 그대로 둔다 — 대신 그
+    /// 파일이 **도구가 지은 대기 자리**라는 것과 지우는 값까지 말한다. 이름이 해시라, 안 대면 사람은
+    /// 제가 만든 적 없는 파일을 보고 무엇을 고치라는 것인지 모른다.
+    #[test]
+    #[cfg(unix)]
+    fn a_fallen_write_on_a_broken_pending_place_says_what_that_file_is() {
+        let s = Scratch::new("read-marks-spool-broken");
+        let (cfg, spelling, fell) = fell_once(&s, "a");
+        // 남은 대기 자리가 깨졌다 — 사람이 고치다 말았거나 쓰기가 반만 닿은 꼴이다.
+        std::fs::write(&fell, "[read\n\"a\" = ").unwrap();
+        // 자리가 다시 막힌다 — 이 판은 그 깨진 파일로 떨어진다.
+        let gate = s.join("문");
+        std::fs::remove_file(&gate).unwrap();
+        std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
+
+        let e = upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("y", "다음")]))).unwrap_err();
+        assert_eq!(e.code, crate::fail::code::BROKEN, "{e}");
+        assert!(e.message.contains(&fell.display().to_string()), "어느 파일인지를 안 댔다 — {e}");
+        assert!(
+            e.message.contains(crate::i18n::say(crate::i18n::Lang::Ko, "sheet.fallen_place")),
+            "그 파일이 대기 자리라는 것을 안 댔다 — {e}"
+        );
+        assert_eq!(std::fs::read_to_string(&fell).unwrap(), "[read\n\"a\" = ", "멈추고도 파일을 고쳤다");
+
+        // **성한 판에는 그 줄이 안 붙는다** — 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
+        std::fs::remove_file(&gate).unwrap();
+        std::os::unix::fs::symlink("real", &gate).unwrap();
+        let at = place_of(&cfg, &spelling).at;
+        std::fs::write(&at, "[read\n\"a\" = ").unwrap();
+        let e = upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("y", "다음")]))).unwrap_err();
+        assert!(
+            !e.message.contains(crate::i18n::say(crate::i18n::Lang::Ko, "sheet.fallen_place")),
+            "성한 판의 읽음 파일을 대기 자리라고 했다 — {e}"
+        );
     }
 
     /// **다 못 읽은 대기 자리는 쓰기 한 판 뒤에도 남는다**(moai-wd5u). 지울지를 "쓰기가 넘어지지 않았다"
