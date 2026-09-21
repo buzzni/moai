@@ -316,18 +316,19 @@ impl Hidden {
     }
 }
 
-/// 목록이 **무엇을 물어서 받은 것인가**. 표식([`style::marks`])을 달지 말지가 여기서 온다.
+/// 목록이 **무엇을 물어서 받은 것인가**. 꼬리의 미룸 낱말(`status.put_off`)을 달지 말지가
+/// 여기서 온다.
 ///
 /// **결과의 내용으로 정하지 않는다**(moai-pkvw·moai-h06a). 한때 미룸 표를
 /// `any(|i| !i.is_deferred())` 로 정했는데, 그러면 `--all` 이 마침 전부 미룬 것만 냈을 때 표가
 /// 통째로 사라져 계획 밖의 줄이 일과 똑같이 보였다 — 안 물었는데 사라지는 것이 물어서 붙는
 /// 군더더기보다 나쁘다. 물은 것은 부르는 쪽만 안다.
+///
+/// `idea` 칸은 걷었다(moai-nb6w) — 그 칸이 가르던 것은 줄머리의 `◇` 하나였고 그 표식이 없다.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Asked {
-    /// `--deferred` — 미룬 것만 물었다. 줄마다 같은 표식이 붙어 봐야 자리만 먹는다.
+    /// `--deferred` — 미룬 것만 물었다. 줄마다 같은 낱말이 붙어 봐야 자리만 먹는다.
     pub deferred: bool,
-    /// `idea ls` — idea 만 물었다. 같은 까닭이다.
-    pub idea: bool,
 }
 
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
@@ -383,24 +384,14 @@ pub fn list(
     let w_title = heads.iter().map(|(_, w)| *w).max().unwrap_or(4).max(width(say(lang, "col.title")));
     let w_tags = tags.iter().map(|t| width(t)).max().unwrap_or(0).max(width(say(lang, "col.tags")));
 
-    // **표식은 S 열 안에서 칸 글리프 곁에 선다**(moai-pkvw·moai-h06a) — 칸 글리프를 대신하지
-    // 않는다. 축이 셋이라(`kind`·`status`·`deferred_at`) 칸을 가리면 그 줄이 원래 어느 칸이었는지를
-    // 잃는다.
-    //
-    // **아무 줄에도 표식이 없으면 열이 안 는다.** 폭을 자료에서 재는 것은 `w_tags` 와 같은
-    // 까닭이고, 물어서 받은 것에는 표식을 안 다는 것([`Asked`])은 꼬리의 낱말과 같은 판단이다.
-    let marks: Vec<String> = issues
-        .iter()
-        .map(|i| style::marks(!asked.idea && i.kind == Kind::Idea, mark_deferred && wh.deferred(i)))
-        .collect();
-    let w_marks = marks.iter().map(|m| width(m)).max().unwrap_or(0);
-
     let mut out = Vec::with_capacity(issues.len() + 2);
     let mut head = format!(
         "{}{}{}{}",
         cell(style::HEAD, "ID", w_id + 3),
         cell(style::HEAD, "P", 4),
-        cell(style::HEAD, "S", 3 + w_marks),
+        // **`S` 열은 칸 글리프 하나다**(moai-nb6w) — 한때 그 곁에 표식 둘이 줄마다 붙어 열 폭이
+        // 자료에 따라 늘었고, 그만큼 뒤 열이 밀렸다.
+        cell(style::HEAD, "S", 3),
         // `ID`·`P`·`S` 는 열 이름이 아니라 머리글자라 말묶음에 안 든다 — 어느 말에서도 같다.
         cell(style::HEAD, say(lang, "col.title"), if show_tags || show_epic { w_title + 2 } else { 0 }),
     );
@@ -412,18 +403,15 @@ pub fn list(
     }
     out.push(head.trim_end().to_string());
 
-    for ((((i, (title, w_this)), tag), epic), mark) in issues.iter().zip(&heads).zip(&tags).zip(&epics).zip(&marks) {
+    for (((i, (title, w_this)), tag), epic) in issues.iter().zip(&heads).zip(&tags).zip(&epics) {
         // 묶음은 **멤버에서 읽은 칸**을 그린다. 손으로 둔 칸을 그리면 진행 중인
         // 에픽이 `·` 로 서서 롤업과 한 화면에서 모순된다(moai-j3b3).
         let col = wh.column(i);
         let mut row = format!(
-            "{}{}{}{}  {}",
+            "{}{}{}  {}",
             cell(style::ID, &i.id, w_id + 3),
             cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
             paint(style::status_style(col), style::glyph(col)),
-            // **표식은 흐리게 선다** — 칸 글리프가 먼저 읽히고 표식이 곁들인다. 색이 빠져도 글자가
-            // 남는 것은 `cell` 이 폭을 재고 칠하는 차례가 같기 때문이다.
-            cell(style::DIM, mark, w_marks),
             pad(title, *w_this, if show_tags || show_epic { w_title + 2 } else { 0 }),
         );
         if show_tags {
@@ -3517,14 +3505,14 @@ mod tests {
         assert!(!asked[1].contains("미룸"), "물어서 낸 목록에 군더더기가 붙었다 — {asked:#?}");
     }
 
-    /// **표식은 칸 글리프 곁에 서고 낱말을 안 걷는다**(moai-pkvw·moai-h06a). 축이 셋이라
-    /// (`kind`·`status`·`deferred_at`) 칸 글리프를 대신하면 그 줄이 원래 어느 칸이었는지를 잃는다.
-    /// 미룬 idea 는 둘이 함께 선다.
+    /// **`S` 열은 칸 글리프 하나고 줄마다 같은 폭이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그
+    /// 곁에 표식 둘(idea `◇`·미룸 `‖`)이 줄마다 붙어 열 폭이 자료에 따라 늘었고, 그만큼 제목이
+    /// 밀렸다 — 탐색기에서는 그것이 트리 선을 어긋냈다.
     ///
-    /// **표가 안 어긋난다**(moai-fgyg) — `S` 열은 머리글과 줄이 같은 폭이고, 표식이 는 만큼 제목도
-    /// 같이 밀린다. 그 폭이 한 칸씩인 것은 `style` 쪽 시험이 글자로 못박는다.
+    /// **재는 것은 낱말이 아니라 자리다** — 표식이 안 서는 것만 재면, 폭을 자료에서 다시 재기
+    /// 시작하는 되돌림을 못 잡는다. 미룸 낱말은 꼬리에 그대로 선다(`status.put_off`).
     #[test]
-    fn the_list_marks_ideas_and_deferred_rows_beside_the_column_glyph() {
+    fn the_list_column_is_one_glyph_wide_on_every_row() {
         let plain_work = issue("argos-0001", "일", "todo");
         let mut thought = issue("argos-0002", "생각", "todo");
         thought.kind = Kind::Idea;
@@ -3543,14 +3531,13 @@ mod tests {
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
-        // 칸 글리프가 그대로 서고 표식이 그 곁에 붙는다 — `·` 가 `◇` 로 바뀌지 않는다.
-        // 표식 자리는 두 칸이다 — 가장 넓은 줄(미룬 idea)이 정하고 나머지는 그만큼 채워진다.
-        assert!(rows[1].contains("·    일"), "일에 없는 표식이 붙었다 — {rows:#?}");
-        assert!(rows[2].contains("·◇   생각"), "idea 표식이 칸 글리프를 대신했거나 안 섰다 — {rows:#?}");
-        assert!(rows[3].contains("▸‖   미룬 일"), "미룸 표식이 안 섰다 — {rows:#?}");
-        assert!(rows[4].contains("·◇‖  미룬 생각"), "미룬 idea 에 둘이 함께 안 섰다 — {rows:#?}");
-        // **낱말은 그대로다** — 색이 혼자 뜻을 지지 않는 것이 글리프에도 선다.
-        assert!(rows[3].contains("미룸") && rows[4].contains("미룸"), "글리프가 낱말을 걷었다 — {rows:#?}");
+        // 칸 글리프 하나만 선다 — 종류도 미룸도 줄머리를 안 넓힌다.
+        assert!(rows[1].contains("·  일"), "일의 줄머리가 달라졌다 — {rows:#?}");
+        assert!(rows[2].contains("·  생각"), "idea 에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[3].contains("▸  미룬 일"), "미룬 줄에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[4].contains("·  미룬 생각"), "미룬 idea 에 표식이 붙었다 — {rows:#?}");
+        // **낱말은 그대로다** — 미룸을 말하는 자리는 꼬리의 `status.put_off` 다.
+        assert!(rows[3].contains("미룸") && rows[4].contains("미룸"), "미룸 낱말까지 걷었다 — {rows:#?}");
 
         // 머리글의 `S` 가 제목 앞에서 줄과 같은 자리에 선다 — 갈리면 `Title` 이 값보다 밀려 선다.
         // **칸 수로 잰다** — `find` 가 내는 바이트 자리로 재면 `·`(2바이트)가 든 줄만 어긋난다.
@@ -3559,28 +3546,6 @@ mod tests {
         for (r, title) in rows[1..5].iter().zip(["일", "생각", "미룬 일", "미룬 생각"]) {
             assert_eq!(at(r, title), at_title, "제목 열이 머리글과 어긋났다 — {r:?}");
         }
-    }
-
-    /// **물어서 받은 idea 목록에는 표식을 안 단다**(`moai idea ls`) — 줄마다 같은 표식이 붙어 봐야
-    /// 자리만 먹는다. 미룸 낱말과 같은 판단이고, 가르는 것은 결과의 내용이 아니라 부르는 쪽이다.
-    #[test]
-    fn a_list_that_asked_for_ideas_does_not_mark_every_row() {
-        let mut a = issue("argos-0001", "하나", "todo");
-        a.kind = Kind::Idea;
-        let mut b = issue("argos-0002", "둘", "todo");
-        b.kind = Kind::Idea;
-
-        let asked = plain(&list(
-            &[a, b],
-            &cfg(),
-            Hidden::default(),
-            &no_epics(),
-            Asked { idea: true, ..Default::default() },
-            &Default::default(),
-            Screen::new(Lang::Ko),
-        ));
-        assert!(!asked[1].contains(style::IDEA), "물어서 낸 idea 목록에 군더더기가 붙었다 — {asked:#?}");
-        assert!(!asked[2].contains(style::IDEA), "{asked:#?}");
     }
 
     #[test]
