@@ -1698,10 +1698,12 @@ pub fn resolve_dir(input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<PathB
 /// 고 거절하고, 거절문이 시키는 `add` 가 같은 디렉터리의 둘째 줄을 만든다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
-    let lexical = lexical(&joined);
+    let lexical = crate::store::lexical(&joined);
     let mut out = vec![lexical.clone()];
-    let more = [std::fs::canonicalize(&joined).ok(), real_prefix(&lexical), Some(joined)];
-    for one in more.into_iter().flatten() {
+    // **없을 수 있는 것은 통째 풀기 하나다.** 셋 다 `Option` 이던 판의 모양을 그대로 두면 `Some(` 이
+    // 둘 붙어, 다음에 철자를 더하는 이가 그것을 흉내 낸다.
+    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::store::real_prefix(&lexical), joined]);
+    for one in more {
         if !out.contains(&one) {
             out.push(one);
         }
@@ -1717,20 +1719,6 @@ pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
 /// 선다(TUI 의 고르기 창은 이미 링크를 풀어 `✓ 등록됨` 을 달아 놓고 있다).
 pub fn same_dir(a: &Path, b: &Path) -> bool {
     a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
-}
-
-/// 아직 있는 가장 깊은 조상을 풀고 남은 조각을 그대로 붙인다. `..` 이 없는
-/// (글자로 정리한) 경로를 받는다 — 남은 조각에 `..` 이 있으면 풀린 뒤의 뜻이 달라진다.
-fn real_prefix(p: &Path) -> Option<PathBuf> {
-    let mut rest = Vec::new();
-    let mut cur = p;
-    loop {
-        if let Ok(real) = std::fs::canonicalize(cur) {
-            return Some(rest.iter().rev().fold(real, |acc, c| acc.join(c)));
-        }
-        rest.push(cur.file_name()?);
-        cur = cur.parent()?;
-    }
 }
 
 /// 목록에 보일 이름 — 디렉터리 이름이고, **겹치는 것끼리만** 위 조각을 하나씩
@@ -1780,24 +1768,6 @@ pub fn names(projects: &[Project]) -> Vec<String> {
             return now;
         }
     }
-}
-
-/// `.` 을 버리고 `..` 은 앞 조각을 뗀다. 파일 시스템을 안 본다.
-fn lexical(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                // 뿌리 위로는 못 올라간다 (`/..` 은 `/`).
-                if !matches!(out.components().next_back(), None | Some(Component::RootDir | Component::Prefix(_))) {
-                    out.pop();
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -2996,7 +2966,6 @@ mod tests {
         // `/w/a/../b` 라 적힌 줄은 그 철자로만 찾을 수 있다(`rm`·`color` 가 함께 쓴다).
         assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2"), d.join("gone/../gone2")]);
         assert_eq!(spellings(Path::new("gone/../gone2"), &d)[0], d.join("gone2"), "대표 철자가 밀렸다");
-        assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
     }
 
     /// 이름은 디렉터리 이름이고, 겹치는 것끼리만 위 조각이 붙는다.
