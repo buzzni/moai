@@ -21,7 +21,7 @@ enum Target {
     All,
 }
 
-fn resolve(target: Option<&str>) -> R<Target> {
+fn resolve(target: Option<&str>, lang: crate::i18n::Lang) -> R<Target> {
     match target {
         None => Ok(Target::All),
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
@@ -32,8 +32,9 @@ fn resolve(target: Option<&str>) -> R<Target> {
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
             format!(
-                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone, idea\n      \
-                 id 로 찾으려면 접두어까지 적는다"
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.show_target"), &[("target", t)]),
+                crate::i18n::say(lang, "refuse.show_target_how"),
             ),
             super::code::BAD_TARGET,
         )),
@@ -93,7 +94,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let target = match kind_filter {
         // `moai epic show <id>` 는 그 id 를 그대로 본다. 종류는 목록일 때만 거른다.
         Some(k) if args.target.is_none() => Target::OfKind(k),
-        _ => resolve(args.target.as_deref())?,
+        _ => resolve(args.target.as_deref(), ctx.lang())?,
     };
 
     if let Target::One(id) = &target {
@@ -102,8 +103,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if let Some(flag) = args.tree.then_some("--tree").or_else(|| first_given(&args.filter)) {
             return Err(Fail::coded(
                 format!(
-                    "`{id}` 하나를 펼치는 자리에는 `{flag}` 를 쓸 수 없다.\n      \
-                     거르려면 id 없이 `moai show {flag} …` 다"
+                    "{}\n      {}",
+                    crate::i18n::fill(
+                        crate::i18n::say(ctx.lang(), "refuse.show_filter_on_one"),
+                        &[("id", id), ("flag", flag)]
+                    ),
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.show_filter_how"), &[("flag", flag)]),
                 ),
                 "bad_filter",
             ));
@@ -125,9 +130,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 원문을 받았다고 믿는다 — 위의 필터와 같은 까닭이다.
     if args.raw {
         return Err(Fail::coded(
-            "`--raw` 는 본문이 나오는 자리에서만 뜻이 있다.\n      \
-             `moai show <id> --raw` 처럼 하나를 집어서 쓴다"
-                .to_string(),
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(ctx.lang(), "refuse.show_raw_on_list"),
+                crate::i18n::say(ctx.lang(), "refuse.show_raw_how"),
+            ),
             "bad_filter",
         ));
     }
@@ -135,9 +142,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 도로 안 들어가는 글이 된다.
     if args.as_plan {
         return Err(Fail::coded(
-            "`--as-plan` 은 에픽 하나를 되뽑는다.\n      \
-             `moai show <에픽> --as-plan` 처럼 하나를 집어서 쓴다"
-                .to_string(),
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_on_list"),
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_how"),
+            ),
             super::code::BAD_TARGET,
         ));
     }
@@ -346,17 +355,17 @@ fn work_by_id(
 /// 차례는 목록 차례다. 스냅샷은 id 차례라 만든 차례가 남아 있지 않다.
 fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     if raw {
-        return Err(Fail::coded(
-            "`--as-plan` 과 `--raw` 는 같이 쓸 수 없다 — 되뽑은 계획에는 본문이 없다".to_string(),
-            super::code::BAD_FILTER,
-        ));
+        return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.as_plan_with_raw"), super::code::BAD_FILTER));
     }
     if epic.kind != Kind::Epic {
         return Err(Fail::coded(
             format!(
-                "`{}` 는 {} 다. `--as-plan` 은 에픽을 되뽑는다\n      에픽 목록은 `moai show epic`",
-                epic.id,
-                epic.kind.as_str()
+                "{}\n      {}",
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "refuse.as_plan_not_an_epic"),
+                    &[("id", &epic.id), ("is", epic.kind.as_str())]
+                ),
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_epics"),
             ),
             super::code::BAD_TARGET,
         ));
@@ -371,7 +380,7 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     for id in &lossy {
         // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
         // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
-        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 — 넣기 전에 고친다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)]));
     }
     Ok(md.lines().map(str::to_string).collect())
 }

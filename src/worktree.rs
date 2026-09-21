@@ -1052,7 +1052,8 @@ pub fn note_held(tracker: &Path, at: Option<&Path>, claimed: &[String], released
     // 둘이 같이 고치면 한쪽의 집기가 조용히 사라졌다(잰 판: 1,228번에 159번). 락은 갈아끼우지 않는
     // 파일에 건다 — 표식 자체에 걸면 `write_atomic` 의 rename 뒤로 둘이 다른 inode 를 쥔다.
     // 못 잡으면 그냥 적는다: 표식은 없는 것보다 낡은 것이 낫고, 훅은 무엇이 어긋나도 조용해야 한다.
-    let _lock = crate::store::Lock::acquire(&common.join("moai-held.lock"));
+    // 못 잡은 까닭의 글은 **버린다** — 여기서는 답을 안 쓰므로 말이 설 자리가 없다(moai-iq7j).
+    let _lock = crate::store::Lock::acquire(&common.join("moai-held.lock"), || crate::i18n::Lang::En);
     // 친 자리의 표식 — **같은 저장소의 딸린 워크트리일 때만.** `<공용>/worktrees/<이름>` 의 두 단계
     // 위가 이 저장소의 공용 디렉터리인지로 잰다(남의 저장소에서 친 것과 주 체크아웃은 여기서 빠진다).
     let own = at.and_then(admin_dir).filter(|dir| dir.parent().and_then(Path::parent) == Some(common.as_path()));
@@ -1972,7 +1973,9 @@ mod tests {
         run(&main, &["worktree", "lock", "../t-3"]);
         std::fs::remove_dir_all(base.join("t-3")).unwrap();
 
-        let crate::store::Opened::Repo(repo) = Repo::open(&main).unwrap() else { panic!("저장소가 안 열렸다") };
+        let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+            panic!("저장소가 안 열렸다")
+        };
         let got = gather(&repo, true).unwrap();
         assert_eq!(got.origin.working("t-1"), Some("worktree-t-1"), "스냅샷 없는 워크트리의 이름을 못 봤다");
         assert_eq!(got.origin.working("t-2"), Some("worktree-t-2"), "스냅샷이 깨진 워크트리의 이름을 못 봤다");

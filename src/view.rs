@@ -2230,23 +2230,109 @@ pub fn settings_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<
 
 /// 탐색기의 보기 알림에 설 줄 — 보기를 읽다 만난 까닭과 **옛 `[read]` 에서 건너뛴 줄**(moai-rtji).
 ///
-/// 둘은 한 알림에 서지만 오는 꼴이 다르다 — 보기의 까닭은 글로, 옛 `[read]` 의 것은 자료로 온다
-/// ([`crate::user_config::Registry::read_problems`]). 설정을 읽는 자리는 화면 말을 안 묻으므로 여기서
-/// 편다. **자리를 머리에 붙인다** — 한때 설정 쪽이 글에 붙이던 그 꼴(`{설정}: …`)이라, 안 붙이면
-/// "손으로 고친다" 가 어느 파일인지 모르는 말이 된다.
+/// 둘 다 **자료로 온다**(moai-uzgp 이 보기 쪽도 옮겼다) — 설정을 읽는 자리는 화면 말을 안 묻으므로
+/// 여기서 편다. **자리를 머리에 붙인다** — 한때 설정 쪽이 글에 붙이던 그 꼴(`{설정}: …`)이라,
+/// 안 붙이면 "손으로 고친다" 가 어느 파일인지 모르는 말이 된다.
 ///
 /// **띄우는 길과 시험이 이 한 자를 지난다**(리뷰) — `cmd::tui` 에만 두던 판은 시험의 `App::load_look` 이
 /// 옛 `[read]` 의 줄을 못 받아, 그 줄을 빠뜨려도 시험이 푸르렀다. [`settings_problems`] 와 같은 자리다.
 pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
     let at = reg.path.as_deref();
-    let lines = reg.read_problems.iter().map(|why| {
-        let said = skipped(lang, why);
-        match at {
-            Some(at) => format!("{}: {said}", at.display()),
-            None => said,
+    let told = |said: String| match at {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    };
+    let looks = reg.look_problems.iter().map(|why| told(look_trouble(lang, why)));
+    let reads = reg.read_problems.iter().map(|why| told(skipped(lang, why)));
+    looks.chain(reads).collect()
+}
+
+/// 쓰기가 거절한 까닭의 글([`crate::model::Invalid`], moai-yve0).
+///
+/// **가리키는 말은 부르는 쪽이 준다**(`at`) — 이번 쓰기가 짓는 줄은 거절 뒤에 그 id 가 어디에도
+/// 안 남으므로(moai-1rkl), 이미 선 줄이면 id 를, 새 줄이면 `model::unwritten` 의 제목을 준다.
+/// **id 가 모양에 안 맞는 줄만 그 머리가 없다** — 댈 id 가 없는 것이 곧 그 까닭이라서다.
+pub fn invalid(lang: Lang, at: &crate::store::At, why: &crate::model::Invalid) -> String {
+    let at = match at {
+        crate::store::At::Id(id) => id.clone(),
+        crate::store::At::Unwritten(title) => fill(say(lang, "invalid.unwritten"), &[("title", title)]),
+    };
+    invalid_at(lang, &at, why)
+}
+
+/// [`invalid`] 의 속 — 가리키는 말이 이미 지어졌을 때.
+fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
+    use crate::model::{Field, Invalid};
+    // **낱말은 키로 적는다** — 소스를 훑는 시험이 `say(…, "키")` 모양만 읽는다.
+    let field = |f: &Field| match f {
+        Field::Assignee => say(lang, "invalid.field_assignee"),
+        Field::AssigneeEmail => say(lang, "invalid.field_assignee_email"),
+        Field::Epic => say(lang, "invalid.field_epic"),
+        Field::Milestone => say(lang, "invalid.field_milestone"),
+    };
+    let said = match why {
+        Invalid::Id { id } => return fill(say(lang, "invalid.id"), &[("id", id)]),
+        Invalid::EmptyTitle => say(lang, "invalid.empty_title").to_string(),
+        Invalid::TitleLines => say(lang, "invalid.title_lines").to_string(),
+        Invalid::FieldLines { field: f, value } => {
+            fill(say(lang, "invalid.field_lines"), &[("field", field(f)), ("value", value)])
         }
-    });
-    reg.look_problems.iter().cloned().chain(lines).collect()
+        Invalid::Priority { max, value } => {
+            fill(say(lang, "invalid.priority"), &[("max", &max.to_string()), ("value", value)])
+        }
+        Invalid::Tag { tag } => fill(say(lang, "invalid.tag"), &[("tag", tag)]),
+        Invalid::GroupId { field: f, value } => {
+            fill(say(lang, "invalid.group_id"), &[("field", field(f)), ("value", value)])
+        }
+        Invalid::MilestoneInMilestone { id } => fill(say(lang, "invalid.milestone_in_milestone"), &[("id", id)]),
+        Invalid::SelfBlock => say(lang, "invalid.self_block").to_string(),
+        Invalid::BlockedId { value } => fill(say(lang, "invalid.blocked_id"), &[("value", value)]),
+        Invalid::NoSuchColumn(e) => no_such_column(lang, e),
+    };
+    format!("{at}: {said}")
+}
+
+/// 쓰기 경로가 자료로 들고 나온 까닭의 글([`crate::store::Trouble`], moai-iq7j).
+///
+/// **저장 계층은 화면 말을 모른다**(2026-09-20 사용자 결정) — 락을 쥔 채 도는 자리고, 머지
+/// 드라이버는 사용자 설정을 아예 안 연다. 그래서 글을 짓는 자리가 여기 하나다.
+pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
+    use crate::store::Trouble;
+    match why {
+        Trouble::NotADirectory { at } => fill(say(lang, "store.not_a_directory"), &[("at", at)]),
+        Trouble::DuplicateId { id } => fill(say(lang, "store.duplicate_id"), &[("id", id)]),
+        Trouble::LockBusy { secs } => fill(say(lang, "store.lock_busy"), &[("secs", &secs.to_string())]),
+        // **말이 함께 사라진 줄만 이름을 댄다** — 하나도 없으면 io 가 낸 줄 그대로다.
+        Trouble::JournalLost { said, ids } if ids.is_empty() => said.clone(),
+        Trouble::JournalLost { said, ids } => {
+            fill(say(lang, "store.journal_lost"), &[("said", said), ("ids", &ids.join(" "))])
+        }
+        Trouble::Invalid { at, why } => invalid(lang, at, why),
+    }
+}
+
+/// 보기 설정(`[tui]`)을 읽다 만난 한 줄([`crate::user_config::LookTrouble`], moai-uzgp).
+///
+/// **자리(`{설정}: …`)는 안 붙인다** — 붙이는 자는 [`look_problems`] 하나고, 여기서도 붙이면
+/// 두 번 선다.
+pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String {
+    use crate::user_config::{LookTrouble, TUI, Want};
+    // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests`)은 `say(…, "키")` 모양만 읽어,
+    // 키를 변수나 `match` 의 팔로 넘기면 그 눈에서 통째로 사라진다.
+    let want = |w: &Want| match w {
+        Want::Bool => say(lang, "look.want_bool"),
+        Want::Word => say(lang, "look.want_word"),
+        Want::Words => say(lang, "look.want_words"),
+    };
+    match why {
+        LookTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", TUI), ("found", found)]),
+        LookTrouble::Want { key, want: w, found } => {
+            fill(say(lang, "look.want"), &[("key", &format!("{TUI}.{key}")), ("want", want(w)), ("found", found)])
+        }
+        LookTrouble::NotAWord { key, value } => {
+            fill(say(lang, "look.not_a_word"), &[("key", &format!("{TUI}.{key}")), ("value", value)])
+        }
+    }
 }
 
 /// 설정을 읽다 만난 한 줄([`crate::user_config::ConfigTrouble`], moai-aiid).

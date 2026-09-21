@@ -620,7 +620,7 @@ fn scan(root: &Table, mut on: impl FnMut(&str, &str)) -> Vec<Skipped> {
 pub fn update<T>(
     config: &Path,
     root: &Path,
-    lang: impl FnOnce() -> crate::i18n::Lang,
+    lang: impl Fn() -> crate::i18n::Lang + Copy,
     f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>,
 ) -> R<Wrote<T>> {
     // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
@@ -629,31 +629,28 @@ pub fn update<T>(
     let place = place_of(config, root);
     let at = place.at.clone();
     let fallen = place.fallen;
-    write_sheet(place, f).map_err(|stop| {
-        // 여기까지 오면 멈춘 판이다 — 말은 그때만, 락을 놓은 뒤에 묻는다. **거절한 판에서만 묻는다**:
-        // io·락이 낸 것은 이미 글이라 옮길 말이 없는데, 묻는 것은 사용자 설정을 열어 파싱하는 일이다
-        // (`cmd::read` 가 적어 둔 그 덫이다). `lang` 은 한 번만 부를 수 있으므로 한 갈래 안에서 한 번 쓴다.
-        match stop {
-            Stop::Failed(e) => e,
-            // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
-            // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
-            Stop::Refused(why) => {
-                let lang = lang();
-                let mut said = crate::view::sheet_refusal(lang, &at, &why);
-                // **떨어진 판이 멈추면 그 파일이 무엇인지 함께 댄다**(moai-pm2h). 그 자리는 도구가 짓는
-                // 대기 자리고 이름이 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을 보고
-                // 무엇을 고치라는 것인지 모른다 — 그러면 되돌릴 방법이 도구 밖에만 남는다(CLAUDE.md).
-                // 성한 판에는 안 붙인다: 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
-                //
-                // **거절에만 붙인다**(리뷰). 이 줄은 `at` 을 두고 "고치거나 지우라" 는 말이라, `at` 을
-                // 댄 글에만 선다 — `Stop::Failed` 는 락 파일(`<대기 자리>.lock`)이나 `read/` 디렉터리를
-                // 대기도 하고, 거기 붙이면 도구가 제 락 파일을 가리키며 "지우면 그 안의 도장을 잃는다"
-                // 고 말한다. 손으로 고칠 자리를 댄 것은 거절뿐이다.
-                if fallen {
-                    said = crate::view::fallen_place(lang, &said);
-                }
-                Fail::coded(said, crate::fail::code::BROKEN)
+    // **락의 말도 묻는 길로 넘긴다**(moai-iq7j) — 락을 못 잡아 물러나는 줄은 `store` 가 짓는데,
+    // 그 자리는 화면 말을 모르므로 여기서 묻는 길을 준다. 락을 아직 안 쥔 자리라 제 락에 안 걸린다.
+    write_sheet(place, f, lang).map_err(|stop| match stop {
+        Stop::Failed(e) => e,
+        // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
+        // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
+        Stop::Refused(why) => {
+            let lang = lang();
+            let mut said = crate::view::sheet_refusal(lang, &at, &why);
+            // **떨어진 판이 멈추면 그 파일이 무엇인지 함께 댄다**(moai-pm2h). 그 자리는 도구가 짓는
+            // 대기 자리고 이름이 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을 보고
+            // 무엇을 고치라는 것인지 모른다 — 그러면 되돌릴 방법이 도구 밖에만 남는다(CLAUDE.md).
+            // 성한 판에는 안 붙인다: 거기서 멈춘 파일은 그 프로젝트의 읽음 파일이다.
+            //
+            // **거절에만 붙인다**(리뷰). 이 줄은 `at` 을 두고 그 파일을 어찌할지를 대는 말이라, `at` 을
+            // 댄 글에만 선다 — `Stop::Failed` 는 락 파일(`<대기 자리>.lock`)이나 `read/` 디렉터리를
+            // 대기도 하고, 거기 붙이면 도구가 제 락 파일을 가리키며 "지우면 그 안의 도장을 잃는다"
+            // 고 말한다. 손으로 고칠 자리를 댄 것은 거절뿐이다.
+            if fallen {
+                said = crate::view::fallen_place(lang, &said);
             }
+            Fail::coded(said, crate::fail::code::BROKEN)
         }
     })
 }
@@ -674,7 +671,11 @@ impl From<Fail> for Stop {
 
 /// [`update`] 의 몸통 — 재 보고, 락을 잡고, 읽고, 고치고, 바뀌었으면 쓴다. **돌아올 때 락을 놓는다** — 그
 /// 뒤에야 [`update`] 가 멈춘 까닭의 말을 묻는다.
-fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>) -> Result<Wrote<T>, Stop> {
+fn write_sheet<T>(
+    place: Place,
+    f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>,
+    lang: impl Fn() -> crate::i18n::Lang + Copy,
+) -> Result<Wrote<T>, Stop> {
     let (path, root, past, mut problems) = (place.at, place.root, place.past, place.problems);
     // **대기 자리는 있을 때만 든다** — 있는가가 곧 "아직 다 안 합쳤다" 다([`Place::pending`]).
     let pending = place.pending.filter(|p| p.exists());
@@ -729,7 +730,7 @@ fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal
     let _ = fresh_dir;
     // 락 자리는 [`crate::store::lock_beside`] 가 센다 — 같은 디렉터리의 두 파일이 저마다 세면 자리
     // 규칙이 바뀌는 날 한쪽만 따라가 둘이 서로를 안 막는다(리뷰).
-    let _lock = Lock::acquire(&lock_beside(&path))?;
+    let _lock = Lock::acquire(&lock_beside(&path), lang)?;
 
     // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 표를 고친다.
     let src = match std::fs::read_to_string(&path) {
@@ -773,7 +774,7 @@ fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal
     // 없다. 무엇을 못 앉혔는지([`Unmerged`])는 그 락·자리와 한 값으로 든다 — 대기 자리가 없으면 물을 것도 없다.
     let merged = match &pending {
         Some(spool) => {
-            let lock = Lock::acquire(&lock_beside(spool))?;
+            let lock = Lock::acquire(&lock_beside(spool), lang)?;
             let left = merge_past(&mut sheet, &[spool.as_path()], &root, &mut problems).map_err(Stop::Refused)?;
             Some((lock, spool, left))
         }
@@ -1366,7 +1367,10 @@ mod tests {
             assert!(read(&cfg, &through, &BTreeMap::new()).problems.is_empty(), "읽기가 없는 자리를 탈로 댔다");
             // 그 조건에 저장소 쪽이 내는 답과 **같은 낱말인가** — 갈리면 이 고침이 무른 것이다.
             assert!(
-                matches!(crate::store::Repo::open(&through), Ok(crate::store::Opened::Missing)),
+                matches!(
+                    crate::store::Repo::open(&through, || crate::i18n::Lang::Ko),
+                    Ok(crate::store::Opened::Missing)
+                ),
                 "저장소 쪽은 같은 자리를 달리 읽는다"
             );
 

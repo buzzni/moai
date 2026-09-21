@@ -175,7 +175,7 @@ fn decide(
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
             st.notices.extend(crate::cmd::init::agents_notice(repo.here(), false));
             st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), false));
-            st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), false));
+            st.notices.extend(crate::cmd::merge_driver::notice(&repo, false));
             // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
             // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
             let source = crate::cmd::status::source_of(&repo);
