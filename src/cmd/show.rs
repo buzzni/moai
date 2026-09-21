@@ -277,7 +277,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
-        &report::epic_labels(&load.issues, ctx.lang()),
+        &report::epic_labels(&load.issues),
         asked,
         &wh,
         screen,

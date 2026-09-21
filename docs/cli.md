@@ -1370,7 +1370,8 @@ Options:
   G and End to the bottom, Ctrl-d and Ctrl-u half a page, Ctrl-f and Ctrl-b
   (PageDown and PageUp) a whole page.
   Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
-  other way, Ctrl-w h and Ctrl-w l pick the left and right pane), and every
+  other way; Ctrl-w h and Ctrl-w l pick the left and right pane, Ctrl-w k and
+  Ctrl-w j the top and bottom one when the detail is split that way), and every
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor

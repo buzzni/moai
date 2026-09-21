@@ -67,7 +67,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let wip = report::wip(&load.issues, &repo.config);
 
     let screen = view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin);
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues, ctx.lang()), &wip, &held, &focus, screen))
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
