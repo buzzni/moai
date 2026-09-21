@@ -29,3 +29,14 @@
 {"ts":"2026-09-21T14:07:53Z","id":"moai-vlld.mvi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — TUI 넷을 한 diff 로: done 겹침·목록 글리프·SPC o 가지"}
 {"ts":"2026-09-21T14:08:00Z","id":"moai-vlld.mvi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T14:08:04Z","id":"moai-47zz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T14:08:50Z","id":"moai-vlld.mvi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix 가 백그라운드에서 돈다. 원문을 이 이슈에 노트로 남기고, 내가 받은 것과 넘긴 것을 갈라 적은 뒤 닫는다."}
+{"ts":"2026-09-21T14:08:59Z","id":"moai-hmci","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 둘을 워크트리 worktree-moai-tui 에서 고쳐 커밋했다. 에픽 넷을 한 diff 로 보는 리뷰가 moai-vlld.mvi 에서 돈다 — 그것이 끝나면 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T14:09:06Z","id":"moai-vlld","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 셋을 워크트리 worktree-moai-tui 에서 고쳐 커밋했다. 에픽 넷을 한 diff 로 보는 리뷰가 moai-vlld.mvi 에서 돈다 — 그것이 끝나면 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T14:09:13Z","id":"moai-pvrx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 셋을 워크트리 worktree-moai-tui 에서 고쳐 커밋했다. SPC o 가지를 이 에픽이 세우고 moai-v6vo 가 t 를 얹었다. 리뷰는 moai-vlld.mvi 에서 넷을 한 diff 로 본다."}
+{"ts":"2026-09-21T14:09:21Z","id":"moai-v6vo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 셋을 워크트리 worktree-moai-tui 에서 고쳐 커밋했다. 시간대 자료는 크레이트 없이 src/tz.rs 가 TZif 를 직접 푼다(사용자 결정). 리뷰는 moai-vlld.mvi 에서 넷을 한 diff 로 본다."}
+{"ts":"2026-09-21T14:09:37Z","id":"moai-v6vo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"바이너리를 쟀다: 6,129,736바이트(6.1MB) — 넷을 다 넣은 뒤다. 들이기 전이 6,023,600바이트였으니 시간대가 든 값은 106KB 다. 15MB 예산에 멀다. 크레이트를 들였으면 1~1.5MB 로 잡았던 그 자리다."}
+{"ts":"2026-09-21T14:10:13Z","id":"moai-8csx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T14:10:14Z","id":"moai-c9ty","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T14:10:14Z","id":"moai-pk4x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T14:10:14Z","id":"moai-ko4y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T14:10:14Z","id":"moai-17fd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
