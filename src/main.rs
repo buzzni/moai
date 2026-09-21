@@ -29,6 +29,7 @@ mod store;
 mod style;
 mod text;
 mod tui;
+mod tz;
 mod user_config;
 mod view;
 mod worktree;

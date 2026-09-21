@@ -181,7 +181,15 @@ fn decide(
             let source = crate::cmd::status::source_of(&repo);
             // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
             // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
-            let lines = view::status(&st, &load.issues, &repo.config, &now, &source, 0, view::Screen::new(ctx.lang()));
+            let lines = view::status(
+                &st,
+                &load.issues,
+                &repo.config,
+                &now,
+                &source,
+                0,
+                view::Screen::new(ctx.lang()).at(ctx.zone()),
+            );
             crate::hook::board(&lines, ctx.lang())
         }),
         Event::PreToolUse => {

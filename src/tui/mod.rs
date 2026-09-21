@@ -15,6 +15,7 @@ pub mod picker;
 pub mod register;
 pub mod scroll;
 pub mod view;
+mod zones;
 
 use crate::config::Config;
 use crate::i18n::{fill, say};
@@ -107,6 +108,9 @@ pub enum Mode {
     Pick(picker::Picker),
     /// 층의 `d` 가 묻는 "목록에서 뺄까". `y` 만 뺀다.
     Unregister(register::Unregister),
+    /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
+    /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
+    Zone(zones::Zones),
 }
 
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
@@ -222,13 +226,21 @@ impl Pane {
     }
 
     /// 한 칸 왼쪽·오른쪽. **끝에서는 제자리다** — vi 의 `Ctrl-w h`·`Ctrl-w l` 이 그렇다.
-    pub fn step(self, side: keys::Side) -> Pane {
-        let at = self.at();
-        let to = match side {
-            keys::Side::Left => at.saturating_sub(1),
-            keys::Side::Right => (at + 1).min(Pane::ALL.len() - 1),
-        };
-        Pane::ALL[to]
+    ///
+    /// **그림을 따라간다**(moai-2g7d). 상세가 왼쪽에 서면 `Ctrl-w h` 는 상세로 간다 — 칸의 차례를
+    /// 코드에 박아 두면 자리를 돌린 순간 `h` 가 오른쪽으로 가서, 손에 익은 키가 화면과 거꾸로 선다.
+    ///
+    /// **위아래로 갈랐으면 좌우 이웃이 없다** — vim 그대로 제자리다. 그때 칸을 옮기는 것은
+    /// `Ctrl-w w`(`Browse::FocusNext`)다.
+    pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
+        if at.vertical() {
+            return self;
+        }
+        let (left, right) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
+        match side {
+            keys::Side::Left => left,
+            keys::Side::Right => right,
+        }
     }
 
     /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다.
@@ -798,6 +810,22 @@ pub struct App {
     pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
+    /// 상세 칸이 **어디에** 서나 — `right`·`bottom`·`left`·`top`(moai-2g7d). [`App::detail_open`] 과
+    /// 따로 든다: 보이나 마나와 어디에 서는가는 다른 물음이고, 한 값에 담으면 자리를 고르는 것이
+    /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
+    /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
+    pub detail_at: view::DetailAt,
+    /// 화면의 시각을 적을 시간대(moai-p5az). **화면 하나에 하나다** — 프로젝트를 옮겨도 보는
+    /// 사람은 그대로라, `Site` 가 아니라 여기 산다(보기·정렬과 같은 자리다).
+    ///
+    /// 저장과 `--json` 은 UTC 그대로다. 못 푼 이름은 UTC 로 떨어지고 그 까닭이 배너에 한 줄로
+    /// 선다(moai-77ap) — 막지 않는다.
+    pub zone: crate::tz::Zone,
+    /// 설정에 적을 시간대 이름 — **고른 이름이지 떨어진 UTC 가 아니다**(moai-77ap). 지금 기계에
+    /// 그 자료가 없다고 사람이 고른 것을 지우면, zoneinfo 가 있는 기계로 옮겼을 때 그 설정이
+    /// 사라져 있다. 고른 적 없으면 `None` 이고 그러면 이 키를 안 적는다 — 시스템을 따르는 것이
+    /// 처음값이라, 적어 두면 시스템이 바뀌어도 옛 이름이 따라다닌다.
+    pub saved_zone: Option<String>,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
     /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
@@ -1239,6 +1267,9 @@ impl App {
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
+            detail_at: view::DetailAt::default(),
+            zone: crate::tz::Zone::utc(),
+            saved_zone: None,
             me: None,
             saved: Default::default(),
             list: Scroll::default(),
@@ -1951,7 +1982,9 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q, _) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => String::new(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
+                String::new()
+            }
         };
         if text.trim().is_empty() {
             self.filter_text = None;
@@ -1992,7 +2025,9 @@ impl App {
         let raw = match mode {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => Raw::default(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
+                Raw::default()
+            }
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
@@ -2025,7 +2060,7 @@ impl App {
         let view = self.view.clone();
         Self::see_in(&mut self.site, &view);
         // **한눈 보기의 남의 줄에도 같은 보기를 건다**(moai-1xo5, 사용자 결정 2026-09-19) — 보기는
-        // 보는 사람의 것이라 화면에 하나뿐이다. 안 걸면 `SPC v d` 가 지금 선 프로젝트에만 들어,
+        // 보는 사람의 것이라 화면에 하나뿐이다. 안 걸면 `SPC v <칸 번호>` 가 지금 선 프로젝트에만 들어,
         // 같은 화면의 두 프로젝트가 한 토글에 다르게 선다.
         let places = self.layer.as_mut().map_or(0, |l| l.places.len());
         for n in 0..places {
@@ -2081,6 +2116,19 @@ impl App {
     /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
     /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
+        // **시간대는 시스템에서 먼저 얻고 설정이 덮는다**(moai-p5az·moai-3oz2). 처음값이 시스템을
+        // 따르는 것이라 여기서 푼다 — `App::new` 에서 풀면 그림 시험이 돌리는 기계의 시계를 타고,
+        // 고른 적 없는 사람에게는 CLI(`Ctx::zone`)와 같은 답이어야 한다.
+        //
+        // **못 풀어도 막지 않는다** — UTC 로 떨어지고 그 까닭은 다른 설정 탈과 나란히 한 줄로 선다
+        // (moai-77ap). 사람이 고른 이름이 못 풀린 것도 같은 자리다: 설정의 그 줄은 안 건드린다.
+        //
+        // **고르는 것도 할 말을 고르는 것도 `tz` 한 자다**(`tz::chosen`, 리뷰) — 까닭은 화면이
+        // 실제로 선 시계의 것 하나여야 한다.
+        let (zone, why) = crate::tz::chosen(look.timezone.as_deref());
+        self.zone = zone;
+        self.saved_zone = look.timezone.clone();
+        problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
         // **열만은 파일이 적은 것을 그대로 든다**(moai-6bc0 단계 리뷰). 다른 키는 입힌 결과가 곧 파일의
@@ -2194,6 +2242,12 @@ impl App {
                 self.focus = Pane::Explorer;
             }
         }
+        // **모르는 낱말은 처음값 그대로 둔다**(moai-2g7d) — 읽기는 관대하다. 차례(`sort`)가 모르는
+        // 낱말에서 방향을 버리는 것과 같은 결이고, 파일의 그 줄은 이 세션이 자리를 고르기 전까지
+        // 안 건드린다.
+        if let Some(at) = look.detail_at.as_deref().and_then(view::DetailAt::named) {
+            self.detail_at = at;
+        }
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -2209,6 +2263,8 @@ impl App {
             // 이 바이너리가 아는 열 전부 — 다음에 읽는 쪽이 "안 적힌 것" 을 가를 자다.
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
+            detail_at: Some(self.detail_at.name().to_string()),
+            timezone: self.saved_zone.clone(),
         }
     }
 
@@ -2837,7 +2893,6 @@ impl App {
                     self.view.toggle(&s);
                 }
             }
-            B::Done => self.view.toggle(crate::config::DONE),
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
@@ -3470,7 +3525,7 @@ impl App {
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
-            B::Focus(side) => self.focus = self.focus.step(side),
+            B::Focus(side) => self.focus = self.focus.step(side, self.detail_at),
             B::Step(m) => self.step(m, rows.len()),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
@@ -3568,7 +3623,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Done | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -3584,6 +3639,19 @@ impl App {
                     self.focus = Pane::Explorer;
                 }
                 self.save_look();
+            }
+            // **자리만 돌린다 — 켜지도 끄지도 않는다**(moai-e7r3). 숨긴 상세의 자리를 돌리는 길은
+            // 아예 막혀 있다(`Browse::enabled`). 메뉴는 열린 채로 남아 눌러 보며 자리를 맞춘다.
+            B::DetailAt => {
+                self.detail_at = self.detail_at.next();
+                self.save_look();
+            }
+            // **여는 자리에서 tzdb 를 읽는다**(moai-3oz2) — 띄울 때 읽으면 시간대를 한 번도
+            // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
+            // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
+            B::Timezone => {
+                let (all, why) = crate::tz::names();
+                self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
             }
             B::Raw => {
                 self.raw = !self.raw;
@@ -3634,15 +3702,15 @@ impl App {
                 .enumerate()
                 .filter(|(_, s)| self.view.hides(s))
                 .fold(0, |bits, (n, _)| bits | 1 << n),
-            done_hidden: self.view.hides(crate::config::DONE),
             deferred_hidden: self.view.hide_deferred,
+            detail_at: self.detail_at,
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
             next_pane: self.focus.next().word(self.site.lang),
             prev_pane: self.focus.prev().word(self.site.lang),
-            left_pane: self.focus.step(keys::Side::Left).word(self.site.lang),
-            right_pane: self.focus.step(keys::Side::Right).word(self.site.lang),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang),
         }
     }
 
@@ -3685,6 +3753,7 @@ impl App {
             Mode::Idea(_) => return self.jot(k),
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
+            Mode::Zone(_) => return self.pick_zone(k),
             _ => {}
         }
         let eaten = match &mut self.mode {
@@ -3696,7 +3765,7 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => return,
+            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => return,
         };
         if eaten {
             return self.live();
@@ -3892,6 +3961,8 @@ impl App {
             }
             Mode::Idea(form) => form.paste(s),
             Mode::Pick(picker) => picker.paste(s),
+            // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
+            Mode::Zone(z) => z.paste(s),
             Mode::Unregister(_) => self.mode = Mode::Browse,
         }
     }
@@ -4304,7 +4375,7 @@ mod tests {
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
         assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
         a.hit("Esc");
@@ -4312,7 +4383,7 @@ mod tests {
 
         a.hit("SPC v l Esc");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
-        // 설정의 넷째 칸이 done 이다 — 번호로 누른 것과 `d` 가 같은 칸을 만진다.
+        // 설정의 넷째 칸이 done 이다 — done 을 켜고 끄는 길은 번호 하나다(moai-h6z3).
         a.hit("SPC v 4 Esc");
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
@@ -5487,7 +5558,7 @@ mod tests {
         a.key(key(KeyCode::Char('l')));
         // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004", "argos-0003"], "done 을 켰는데 멤버가 안 선다");
         a.hit("SPC s p Esc");
@@ -7731,6 +7802,137 @@ mod tests {
         );
     }
 
+    /// **`SPC o d` 는 자리를 돌리고 메뉴는 안 닫힌다**(moai-e7r3, 사용자 결정) — `right → bottom →
+    /// left → top → right`. `SPC v` 의 토글과 같은 결이다: 눌러 보며 맞추는 동작이라 한 번 받고
+    /// 닫으면 맞출 때마다 메뉴를 다시 열어야 한다. 나가는 것은 `ESC` 나 연 키 `SPC` 다.
+    ///
+    /// **켜지도 끄지도 않는다** — 상세가 숨어 있으면 이 키는 아예 안 돈다(`Browse::enabled`).
+    /// 켜는 것은 `SPC v p` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
+    #[test]
+    fn spc_o_d_turns_the_detail_pane_round_without_closing_the_menu() {
+        use view::DetailAt;
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        assert_eq!(a.detail_at, DetailAt::Right, "처음 자리가 오른쪽이 아니다");
+
+        a.hit("SPC o");
+        for want in [DetailAt::Bottom, DetailAt::Left, DetailAt::Top, DetailAt::Right] {
+            a.hit("d");
+            assert_eq!(a.detail_at, want, "자리가 차례대로 안 돌았다");
+            assert!(super::menu::open(&a.chord), "자리를 돌렸는데 메뉴가 닫혔다");
+            assert_eq!(super::menu::title(a.chord.held()), "SPC o", "메뉴가 층을 옮겼다");
+        }
+        a.hit("Esc");
+        assert!(!super::menu::open(&a.chord), "Esc 가 메뉴를 안 닫았다");
+        assert!(a.detail_open, "자리를 돌리는 것이 상세를 껐다");
+
+        // **칸 옮기기가 그림을 따라간다**(moai-2g7d) — 상세가 왼쪽이면 `Ctrl-w h` 가 상세로 간다.
+        // 칸의 차례를 코드에 박아 두면 자리를 돌린 순간 손에 익은 키가 화면과 거꾸로 선다.
+        for (at, left, right) in
+            [(DetailAt::Right, Pane::Explorer, Pane::Detail), (DetailAt::Left, Pane::Detail, Pane::Explorer)]
+        {
+            a.detail_at = at;
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Left, at), left, "{at:?} 에서 Ctrl-w h 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Right, at), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
+            }
+        }
+        // 위아래로 갈랐으면 좌우 이웃이 없다 — vim 그대로 제자리고, 옮기는 것은 `Ctrl-w w` 다.
+        // **그래서 그 두 키는 바에도 안 선다**(리뷰) — 지금 선 칸의 이름을 가리키는 키가 서면
+        // 숨긴 상세에서 `Tab` 을 걷은 것과 같은 거짓말이다.
+        for at in [DetailAt::Top, DetailAt::Bottom] {
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Left, at), from, "{at:?} 에서 Ctrl-w h 가 움직였다");
+                assert_eq!(from.step(keys::Side::Right, at), from, "{at:?} 에서 Ctrl-w l 이 움직였다");
+                assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
+            }
+            let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
+            for side in [keys::Side::Left, keys::Side::Right] {
+                assert!(keys::Browse::Focus(side).enabled(&c).is_err(), "{at:?} 에서 Ctrl-w {side:?} 가 섰다");
+            }
+            // 칸을 도는 키는 그대로 선다 — 그쪽은 위아래로도 무언가 한다.
+            assert!(keys::Browse::FocusNext.enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w w 가 걷혔다");
+        }
+        for at in [DetailAt::Left, DetailAt::Right] {
+            let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
+            assert!(keys::Browse::Focus(keys::Side::Left).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w h 가 걷혔다");
+        }
+        a.detail_at = DetailAt::Right;
+
+        // 연 키도 닫는다 — ESC 와 같은 자리다.
+        a.hit("SPC o");
+        a.hit("SPC");
+        assert!(!super::menu::open(&a.chord), "SPC 가 메뉴를 안 닫았다");
+
+        // **숨긴 상세의 자리는 안 돈다** — 눌러도 아무 일이 없는 키는 메뉴에도 안 선다.
+        a.hit("SPC v p Esc");
+        assert!(!a.detail_open);
+        let before = a.detail_at;
+        a.hit("SPC o d Esc");
+        assert_eq!(a.detail_at, before, "숨긴 상세의 자리가 돌았다");
+        assert!(!a.detail_open, "자리 키가 상세를 켰다");
+    }
+
+    /// **`SPC o t` 는 창을 열고, 고른 이름이 설정에 남는다**(moai-3oz2).
+    ///
+    /// 창은 거르는 글로 좁히고 Enter 가 고른다 — 이 기계의 tzdb 는 이름을 천 개 넘게 들어,
+    /// 눌러 돌리는 길로는 고를 수가 없다.
+    ///
+    /// **적는 것은 고른 이름이지 떨어진 UTC 가 아니다**(moai-77ap) — 지금 기계에 그 자료가
+    /// 없다고 사람이 고른 것을 지우면, zoneinfo 가 있는 기계로 옮겼을 때 그 설정이 사라져 있다.
+    #[test]
+    fn spc_o_t_opens_a_window_and_the_name_it_picks_is_what_gets_saved() {
+        let s = scratch("zone-pick");
+        let user = s.join("user.toml");
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.hit("SPC o t");
+        let Mode::Zone(_) = &a.mode else { panic!("SPC o t 가 창을 안 열었다 — {:?}", a.mode) };
+
+        // **모르는 이름도 적는다.** 창은 이 기계의 tzdb 를 읽으므로 없는 기계에서는 목록이
+        // 비는데, 고르는 길과 적는 길은 그 목록과 따로 잰다.
+        a.mode = Mode::Browse;
+        a.set_zone("Mars/Olympus");
+        assert!(a.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("Mars/Olympus")), "{:?}", a.notice);
+        let text = std::fs::read_to_string(&user).expect("시간대가 설정에 안 적혔다");
+        assert!(text.contains("timezone = \"Mars/Olympus\""), "떨어진 UTC 를 적었다 — {text}");
+
+        // **성한 고르기가 남의 알림을 안 지운다**(리뷰) — `notice` 는 한 자리를 나눠 쓰는데,
+        // 여기서 비우면 못 읽은 옆 스냅샷 같은 무관한 배너가 시간대 한 번에 사라진다.
+        a.notice = Some("옆 워크트리를 못 읽었다".into());
+        a.set_zone("UTC");
+        assert_eq!(a.notice.as_deref(), Some("옆 워크트리를 못 읽었다"), "성한 고르기가 남의 알림을 지웠다");
+
+        // **Esc 는 아무것도 안 바꾼다.**
+        let before = a.zone.name().to_string();
+        a.hit("SPC o t");
+        a.hit("Esc");
+        assert!(matches!(a.mode, Mode::Browse), "Esc 가 창을 안 닫았다");
+        assert_eq!(a.zone.name(), before, "Esc 가 시간대를 바꿨다");
+    }
+
+    /// **고른 이름은 다음 실행이 그대로 든다**(moai-3oz2) — 못 푸는 이름이어도 설정의 그 줄은
+    /// 그대로고, 화면만 UTC 로 떨어지며 까닭이 한 줄로 선다(moai-77ap).
+    #[test]
+    fn a_zone_that_cannot_be_resolved_falls_back_to_utc_and_says_so_once() {
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        let look = crate::user_config::Look { timezone: Some("Mars/Olympus".into()), ..Default::default() };
+        let mut said = Vec::new();
+        b.adopt_look(&look, Vec::new());
+        said.extend(b.notice.clone());
+        assert!(b.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
+        assert_eq!(b.saved_zone.as_deref(), Some("Mars/Olympus"), "설정의 줄을 잃었다");
+        // 알림은 한 줄이고 그 이름을 댄다 — `adopt_look` 이 설정 탈들과 나란히 싣는다.
+        assert!(said.iter().any(|n| n.contains("Mars/Olympus")), "까닭을 아무 데도 안 댔다 — {said:?}");
+        // **막지 않는다** — 그려지는 것은 그대로다.
+        assert!(!render_smoke(&mut b).is_empty());
+    }
+
+    /// 그림이 서기는 하는가 — 위 시험이 "막지 않는다" 를 재는 자다.
+    fn render_smoke(a: &mut App) -> Vec<String> {
+        super::draw::tests::render(a, 80, 20)
+    }
+
     /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).
     #[test]
     fn the_look_is_saved_on_each_toggle_and_read_by_the_next_run() {
@@ -7738,15 +7940,18 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         a.hit("SPC v l Esc");
         a.hit("SPC s u Esc");
         a.hit("SPC s u Esc");
         a.hit("SPC c a Esc");
         a.hit("SPC c i Esc");
+        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v p`)과 **따로** 적힌다.
+        a.hit("SPC o d Esc");
         a.hit("SPC v p Esc");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
+        assert!(text.contains("detail_at = \"bottom\""), "상세 칸의 자리가 설정에 안 적혔다 — {text}");
 
         let mut b = App::new(Vec::new(), cfg(), Path::new());
         b.user_config = Some(user.clone());
@@ -7757,6 +7962,8 @@ mod tests {
             "다음 실행이 다른 보기로 떴다"
         );
         assert!(!b.detail_open && !a.detail_open, "숨긴 상세 칸이 다음 실행에 안 이어졌다");
+        assert_eq!(b.detail_at, a.detail_at, "고른 상세 칸의 자리가 다음 실행에 안 이어졌다");
+        assert_eq!(b.detail_at, view::DetailAt::Bottom);
         assert_eq!(b.notice, None);
 
         // 모르는 낱말은 알리고 나머지는 입힌다. 모르는 차례의 방향은 우선순위에 입히지 않는다 — 아무도 안
@@ -7777,7 +7984,7 @@ mod tests {
 
         // 모르는 낱말은 토글 한 번에 지워지지 않는다 — 새 바이너리가 적은 것일 수 있다. 겹쳐 적힌 done 은
         // 한 번에 보인다.
-        c.hit("SPC v d Esc");
+        c.hit("SPC v 4 Esc");
         assert!(!c.view.hides(crate::config::DONE), "겹쳐 적힌 done 이 한 번 눌러서는 안 보였다");
         let text = std::fs::read_to_string(c.user_config.as_ref().unwrap()).unwrap();
         assert!(
@@ -7816,7 +8023,7 @@ mod tests {
         assert!(a.notice.clone().unwrap_or_default().contains("tui.sort"), "{:?}", a.notice);
         a.hit("Esc");
         a.notice = None;
-        a.hit("SPC v d");
+        a.hit("SPC v 4");
         assert_eq!(a.notice, None, "건너뛴 키를 다음 저장에 또 실었다");
         a.hit("Esc");
         let text = std::fs::read_to_string(&user).unwrap();
@@ -7873,7 +8080,7 @@ mod tests {
         };
         let (mut a, mut b) = (open(), open());
         a.hit("SPC c a Esc");
-        b.hit("SPC v d Esc");
+        b.hit("SPC v 4 Esc");
         b.hit("SPC s u Esc");
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();

@@ -1494,10 +1494,10 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         a.hit("SPC s t Esc");
         let (view, order) = (a.view.clone(), a.order);
-        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v d 가 done 을 안 보였다");
+        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 보였다");
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -1943,9 +1943,13 @@ mod tests {
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
             Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
-            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => {
-                None
-            }
+            Mode::Ask(_)
+            | Mode::Browse
+            | Mode::Grep(..)
+            | Mode::Filter(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_) => None,
         }
     }
 
@@ -2422,7 +2426,7 @@ mod tests {
         );
 
         // 보기가 바뀌면 든 것이 다 따라 선다.
-        a.hit("SPC v d");
+        a.hit("SPC v 4");
         assert!(
             a.site_of_place(0).is_some_and(|s| s.shown == [true, true]),
             "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}",

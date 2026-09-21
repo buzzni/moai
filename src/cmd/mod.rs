@@ -43,11 +43,13 @@ pub struct Ctx {
     reg: OnceLock<crate::user_config::Registry>,
     /// 이 판의 화면 언어 — 설정에서 한 번 푼 값([`Ctx::lang`]).
     lang: OnceLock<crate::i18n::Lang>,
+    /// 이 판의 시간대 — 시스템에서 한 번 푼 값([`Ctx::zone`]).
+    zone: OnceLock<(crate::tz::Zone, Option<crate::tz::Trouble>)>,
 }
 
 impl Ctx {
     pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
-        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new() }
+        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: OnceLock::new() }
     }
 
     /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
@@ -77,6 +79,25 @@ impl Ctx {
     /// 값을 **먼저 길어 놓고** `get_or_init` 에 넣는다. 옛 자리가 그렇게 썼던 까닭이다.
     pub fn lang(&self) -> crate::i18n::Lang {
         *self.lang.get_or_init(|| lang_of(self.registry()))
+    }
+
+    /// 이 판이 시각을 적을 시간대(moai-p5az). **CLI 는 시스템을 그대로 따른다** — `TZ` 가
+    /// 먼저고 그다음이 `/etc/localtime` 이다. 설정의 `[tui] timezone` 은 **안 읽는다**: 고르는
+    /// 자리가 탐색기 하나(`SPC o t`)라 그 키는 탐색기의 것이고, 고른 적 없으면 두 표면이 같은
+    /// 시계로 선다.
+    ///
+    /// **못 풀어도 막지 않는다** — UTC 로 떨어지고 까닭은 [`Ctx::zone_trouble`] 이 든다
+    /// (moai-77ap). 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
+    ///
+    /// **말과 같은 결로 늦게 읽는다** — 시각을 그리는 명령만 이 값을 든다.
+    pub fn zone(&self) -> &crate::tz::Zone {
+        &self.zone.get_or_init(crate::tz::Zone::system).0
+    }
+
+    /// 시간대를 풀다 만난 것. `None` 이면 아무 일 없다. **[`Ctx::zone`] 을 부른 뒤에 든다** —
+    /// 안 부른 판은 시각을 안 그리므로 할 말도 없다.
+    pub fn zone_trouble(&self) -> Option<&crate::tz::Trouble> {
+        self.zone.get().and_then(|(_, why)| why.as_ref())
     }
 }
 
@@ -225,55 +246,69 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     }
 }
 
-pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx::new(cli.json, cli.user, cli.dir.is_some());
+pub fn run(mut cli: Cli) -> R<Vec<String>> {
+    let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
+    let out = dispatch(&ctx, cli);
+    // **시간대를 못 풀었으면 한 줄로 알린다**(moai-77ap) — 막지 않는다. 종료 코드도 안 건드리고,
+    // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시각을 그린 명령만 이 자리에 닿는다:
+    // [`Ctx::zone`] 을 안 부른 판은 할 말이 없다([`Ctx::zone_trouble`]).
+    //
+    // **한 줄뿐이다.** 정적 musl 판을 zoneinfo 없는 기계에 받으면 이 일이 **매 명령**에 나므로,
+    // 고치는 법까지 늘어놓으면 그 기계에서는 모든 출력에 안내문이 한 뭉치씩 붙는다.
+    if let Some(why) = ctx.zone_trouble() {
+        eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
+    }
+    out
+}
+
+fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
     let Some(cmd) = cli.cmd else {
-        return opening(&ctx);
+        return opening(ctx);
     };
     match cmd {
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
-        Cmd::Init { check: true, .. } => init::check(&ctx),
+        Cmd::Init { check: true, .. } => init::check(ctx),
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
-        Cmd::Init { print: true, .. } => init::print(&ctx),
+        Cmd::Init { print: true, .. } => init::print(ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
         Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
-            init::run(&ctx, prefix.as_deref(), no_agents, no_driver)
+            init::run(ctx, prefix.as_deref(), no_agents, no_driver)
         }
-        Cmd::Hook { event } => hook::run(&ctx, event),
+        Cmd::Hook { event } => hook::run(ctx, event),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
-        Cmd::MergeDriver(a) => merge_driver::run(&ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(&ctx, scope.as_str(), dry_run),
-        Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
-        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
+        Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
+        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(ctx, scope.as_str(), dry_run),
+        Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
+        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(ctx, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
-        Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
-        Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),
-        Cmd::Project(ProjectCmd::Rm { path }) => project::rm(&ctx, &path),
-        Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(&ctx, &path, &hue),
-        Cmd::Add(a) => add::run(&ctx, a, None),
-        Cmd::Show(a) => show::run(&ctx, a, None),
-        Cmd::Mv(a) => mv::run(&ctx, a),
-        Cmd::Edit(a) => edit::run(&ctx, a),
-        Cmd::Rm(a) => rm::run(&ctx, a),
-        Cmd::Note(a) => note::run(&ctx, a),
-        Cmd::Link(a) => link::run(&ctx, a),
-        Cmd::Defer(a) => defer::run(&ctx, a),
-        Cmd::Read(a) => read::run(&ctx, a),
-        Cmd::Ready(w) => ready::run(&ctx, w.worktree),
-        Cmd::Prime(w) => prime::run(&ctx, w.worktree),
-        Cmd::Status(w) => status::run(&ctx, w.worktree),
-        Cmd::Tui(a) => tui::run(&ctx, a),
-        Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
-        Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
-        Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
+        Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
+        Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
+        Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
+        Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
+        Cmd::Add(a) => add::run(ctx, a, None),
+        Cmd::Show(a) => show::run(ctx, a, None),
+        Cmd::Mv(a) => mv::run(ctx, a),
+        Cmd::Edit(a) => edit::run(ctx, a),
+        Cmd::Rm(a) => rm::run(ctx, a),
+        Cmd::Note(a) => note::run(ctx, a),
+        Cmd::Link(a) => link::run(ctx, a),
+        Cmd::Defer(a) => defer::run(ctx, a),
+        Cmd::Read(a) => read::run(ctx, a),
+        Cmd::Ready(w) => ready::run(ctx, w.worktree),
+        Cmd::Prime(w) => prime::run(ctx, w.worktree),
+        Cmd::Status(w) => status::run(ctx, w.worktree),
+        Cmd::Tui(a) => tui::run(ctx, a),
+        Cmd::Issue(t) => typed(ctx, t, Kind::Issue),
+        Cmd::Epic(t) => typed(ctx, t, Kind::Epic),
+        Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(&ctx, t, Kind::Idea),
-        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, t, Kind::Idea),
+        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
     }
 }
 

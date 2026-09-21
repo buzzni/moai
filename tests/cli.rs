@@ -103,6 +103,12 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 못 가른다. 영어 화면은 `english_is_the_default_when_nothing_picks_a_language` 가
         // 이 변수를 걷고 따로 잰다.
         .env("MOAI_LANG", "ko")
+        // **시간대도 못박는다**(moai-p5az). 화면의 시각은 보는 사람의 시간대로 적히므로
+        // (`view::stamp`), 안 박으면 `Asia/Seoul` 에 앉은 사람의 기계에서만 `moai show` 의
+        // 시각이 아홉 시간 어긋나 수십 줄이 붉어진다 — `MOAI_NOW` 로 시계를 못박는 것과 같은
+        // 까닭이고, 둘 다 없으면 시험이 "동작이 바뀐 것" 과 "기계가 다른 것" 을 못 가른다.
+        // 시간대를 **재는** 시험은 이 변수를 제 손으로 덮는다.
+        .env("TZ", "UTC")
         // **깔려 있는 `moai` 를 PATH 에서 뺀다**(moai-bq6w). `merge-driver --install` 의 기본값이
         // 이제 PATH 의 `moai` 를 고를 수 있어(같은 판이면 그쪽이 워크트리의 `target/` 보다 오래
         // 산다), 돌리는 사람의 `~/.local/bin/moai` 가 시험의 답을 바꿨다. **git 이 함께 있는
@@ -6029,6 +6035,61 @@ fn tui_json_lists_a_directory_without_a_terminal() {
 /// 그 글자를 여기서 줄줄이 재면 낱말을 다듬을 때마다 이 시험이 같이 붉어진다. 말이 명령
 /// 층(`Ctx::lang`)에서 화면까지 닿는가만 보면 되고, 소스에 박힌 글이 다시 새는지는
 /// `tui::input` 의 `the_explorer_holds_no_korean_of_its_own` 이 파일과 줄을 대며 잡는다.
+/// **화면의 시각은 보는 사람의 시간대로, 저장과 `--json` 은 UTC 그대로**(moai-p5az).
+///
+/// `i18n` 이 `kind` 를 안 건드리고 `said` 만 옮긴 것과 같은 줄이다 — 설정이 이미 쓴 줄을 바꾸면
+/// 그건 설정이 아니라 마이그레이션이다.
+///
+/// **못 푸는 이름은 UTC 로 떨어지고 한 줄로 알린다**(moai-77ap). 막지 않는다: 종료 코드도
+/// 그대로고 낼 것을 다 낸다 — 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
+#[test]
+fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
+    let s = init("tz");
+    let id = add(s.path(), &["언제 적힌 줄인가"]);
+
+    let at = |tz: &str| -> String {
+        let out = staged(&["show", &id]).current_dir(s.path()).env("TZ", tz).output().expect("moai 를 못 돌렸다");
+        assert!(out.status.success(), "시간대 {tz} 에서 실패했다");
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    // 시계는 `MOAI_NOW` 로 못박혀 있다 — 04:12 UTC 다. `UTC` 는 자료를 안 보므로
+    // (`tz::Zone::load`) 이 줄만은 tzdb 없는 기계에서도 선다.
+    assert!(at("UTC").contains("2026-09-11 04:12"), "{}", at("UTC"));
+    // **자료가 있는 기계에서만 잰다**(리뷰) — 옮겨 적는 자를 재는 `src/view.rs` 의 시험과 같은
+    // 조심이다. 릴리스가 정적 musl 판이라 zoneinfo 없는 기계도 받는 자리인데(moai-77ap), 거기서
+    // 시험이 붉어지면 "동작이 바뀐 것" 과 "기계에 자료가 없는 것" 을 못 가린다.
+    let tzdb = std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists();
+    if tzdb {
+        assert!(at("Asia/Seoul").contains("2026-09-11 13:12"), "{}", at("Asia/Seoul"));
+        // 날짜를 넘는 쪽도 같은 자로 넘어간다.
+        assert!(at("America/New_York").contains("2026-09-11 00:12"), "{}", at("America/New_York"));
+    }
+
+    // **파일과 `--json` 은 그대로다.**
+    assert!(issues(s.path()).contains(NOW), "스냅샷의 시각이 시간대를 탔다");
+    let json = staged(&["show", &id, "--json"])
+        .current_dir(s.path())
+        .env("TZ", "Asia/Seoul")
+        .output()
+        .expect("moai 를 못 돌렸다");
+    let said = String::from_utf8(json.stdout).unwrap();
+    assert!(said.contains(NOW), "--json 이 시간대를 탔다 — {said}");
+
+    // **못 푸는 이름은 한 줄로 알리고 UTC 로 떨어진다. 막지 않는다.**
+    let out =
+        staged(&["show", &id]).current_dir(s.path()).env("TZ", "Mars/Olympus").output().expect("moai 를 못 돌렸다");
+    assert!(out.status.success(), "못 푼 시간대가 명령을 막았다");
+    let said = String::from_utf8(out.stderr).unwrap();
+    // **한 줄이라는 것이 이 줄의 뜻이다** — 자료가 없는 기계에서는 까닭이 "tzdb 가 없다" 로 바뀌고,
+    // 이름을 안 댄다. 막지 않는 것과 줄 수는 어느 기계에서나 같다.
+    assert_eq!(said.lines().count(), 1, "{said:?}");
+    if tzdb {
+        assert!(said.contains("Mars/Olympus"), "{said:?}");
+    }
+    assert!(String::from_utf8(out.stdout).unwrap().contains("2026-09-11 04:12"), "UTC 로 안 떨어졌다");
+}
+
 #[test]
 fn the_explorer_names_its_baskets_in_the_chosen_language() {
     let s = init("tuilang");
