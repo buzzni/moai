@@ -4094,7 +4094,18 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // 토막들은 이 토막 바로 앞에 심겼으니(`handed_from`) 그 번호부터 거슬러 센다.
             let own = (picks_up(&seg.words, cfg) && only(n)).then_some(Pick { at: n, level: seg.level, sure: certain });
             let cond = own.or_else(|| {
-                let from = handed_from.filter(|_| bang && came.is_some_and(|d| d > seg.level))?;
+                // **"이 글 안의 것인가" 는 번호로 가른다 — 깊이로 가르지 않는다**(moai-n3wq).
+                //
+                // 깊이로 재던 판은 겹을 나오며 집기가 **바깥 목록의 깊이로** 다시 적히는 것을
+                // 잊었다. 안에서 이긴 글(`집기 || exit 1`)과 안에서 풀린 끝내는 묶음
+                // (`if ! 집기; then exit 1; fi`)은 둘 다 그 자리에서 집기를 이 목록의 깊이로
+                // 내놓는데, 그러면 `d > seg.level` 도 `p.level > seg.level` 도 서지 않는다 —
+                // 집기를 **확실히 쥐는** 두 꼴이 기록에 아무것도 안 남겼다.
+                //
+                // 번호는 그것을 안 잃는다. 그 글의 토막들은 이 토막 바로 앞에 심겼으니
+                // (`handed_from`) 그 번호 뒤의 집기는 이 글 안의 것이고, 바깥 목록의 집기는
+                // 그 앞에 적힌다. `came` 이 묻는 것은 이제 하나다 — 이 토막에 집기가 살아 왔는가.
+                let from = handed_from.filter(|_| bang && came.is_some())?;
                 // 넘긴 글 안의 집기는 제 표를 이미 달고 있다 — `if` 자신이 조건에 매였으면 그 위에
                 // 한 번 더 매인다(`certain`). 둘 다 서야 확실한 집기다.
                 //
@@ -4103,7 +4114,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // 넣어 그 전제가 깨진다. 지금은 그 자리에서 판정이 안 바뀌지만(막는 자는 아래
                 // moai-n3wq 가 적은 `came`·`level` 문턱이다), 거짓 전제를 코드에 두면 그 문턱이
                 // 열리는 날 이쪽이 함께 틀린다.
-                let &p = picked.iter().rev().find(|p| p.at >= from && p.level > seg.level)?;
+                let &p = picked.iter().rev().find(|p| p.at >= from)?;
                 shell_text(&seg.words).map(|_| Pick { sure: p.sure && certain, ..p })
             });
             if let Some(c) = cond {
@@ -8374,6 +8385,58 @@ mod tests {
         }
         assert_eq!(judge("moai -C . mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
+    }
+
+    /// **겹에 넘긴 글이 집기로 끝나면 `if !` 가 그것을 본다**(moai-n3wq) — `if ! bash -c '<글>';
+    /// then exit 1; fi` 는 그 글이 지면 거기서 끝나니, `fi` 를 지나온 것은 집기가 이겼다는 뜻이다.
+    ///
+    /// 깊이로 "이 글 안의 것인가" 를 재던 판은 겹을 나오며 집기가 **바깥 목록의 깊이로** 다시
+    /// 적히는 것을 잊었다. 안에서 이긴 글(`집기 || exit 1`)과 안에서 풀린 끝내는 묶음
+    /// (`if ! 집기; then exit 1; fi`)이 그 꼴이고, 둘 다 집기를 **확실히 쥐는데** 기록에 아무것도
+    /// 안 남겼다 — 정말 쥔 세션이 초점을 못 받아 규칙 2 에 막히고, 넘겨받기가 그 줄을 못 짚는다.
+    /// 이 에픽 전부터 그랬다.
+    #[test]
+    fn a_handed_string_that_ends_in_a_pick_up_is_seen_by_the_negated_if() {
+        let root = Path::new("/repo");
+        let idle = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let judge = |cmd: &str| guard_writes(&idle, &cfg(), &here(), root, root, cmd);
+        let stands = |_: usize, _: &str| None;
+        let flags = |cmd: &str| picked_in(cmd, &cfg(), &|_| true, &stands);
+        let one = vec![("t-1".to_string(), true)];
+        for cmd in [
+            "if ! bash -c 'moai mv t-1 in_progress --from todo || exit 1'; then exit 1; fi",
+            "if ! bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'; then exit 1; fi",
+            "if ! sh -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi'; then exit 1; fi",
+            // 한 겹만 든 꼴은 처음부터 섰다 — 함께 둔다. 이 줄만 서 있던 것이 이 버그를 가렸다.
+            "if ! bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi",
+        ] {
+            assert_eq!(flags(cmd), one, "확실히 쥐는 줄이 기록에 아무것도 안 남겼다 — {cmd}");
+            let held = format!("{cmd}; sed -i s/a/b/ src/x.rs");
+            assert_eq!(judge(&held), Decision::Pass, "집기 뒤의 쓰기를 막았다 — {held}");
+        }
+        // **글의 값이 조건에 안 닿으면 그대로 빈손이다** — 더 보는 쪽으로 넘어가지 않았다.
+        for cmd in [
+            "if ! bash -c 'moai mv t-1 in_progress --from todo; echo ok'; then exit 1; fi",
+            "if ! bash -c 'echo a; moai mv t-1 in_progress --from todo; echo b'; then exit 1; fi",
+            "if ! bash -c '( moai mv t-1 in_progress --from todo ); true'; then exit 1; fi",
+            "if ! bash -c 'x=$(moai mv t-1 in_progress --from todo)'; then exit 1; fi",
+            "if ! bash -c 'if false; then moai mv t-1 in_progress --from todo; fi; true'; then exit 1; fi",
+            "if ! bash -c 'bash -c \"moai mv t-1 in_progress --from todo\"; echo ok'; then exit 1; fi",
+            // 부정이 없으면 이 자리가 아니다 — `if bash -c '집기'` 는 집기가 **이겨야** 몸통이 돈다.
+            "if bash -c 'moai mv t-1 in_progress --from todo'; then exit 1; fi",
+        ] {
+            assert!(flags(cmd).is_empty(), "값이 조건에 안 닿는 집기를 적었다 — {cmd}");
+            let held = format!("{cmd}; sed -i s/a/b/ src/x.rs");
+            assert!(matches!(judge(&held), Decision::Deny(_)), "빈손의 쓰기가 샜다 — {held}");
+        }
+        // **앞선 딴 겹의 집기를 이 글의 것으로 읽지 않는다**(리뷰 moai-k8j1.034) — 번호로 가르는
+        // 자가 그 자리를 지킨다. 그 집기는 제 자리에서 적히되, 뒤의 쓰기를 풀어 주지는 않는다.
+        let earlier = "( ( moai mv t-1 in_progress --from todo ) ); if ! bash -c 'true'; then exit 1; fi";
+        assert_eq!(flags(earlier), one);
+        assert!(
+            matches!(judge(&format!("{earlier}; sed -i s/a/b/ src/x.rs")), Decision::Deny(_)),
+            "빈손의 쓰기가 샜다"
+        );
     }
 
     /// **한 자리에 나란히 선 치환 둘은 딴 겹이다**(moai-lwil) — [`shell_scan`] 의 `frames` 가 겹을
