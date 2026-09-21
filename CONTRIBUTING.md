@@ -44,8 +44,11 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has two jobs: one runs clippy and the tests on the dev profile, the
-other builds the release binary and checks it against the 15 MB budget.
+minutes. CI has three jobs: one runs clippy and the tests on the dev profile,
+one works out whether anything outside the docs changed, and the third builds
+the release binary and checks it against the 15 MB budget. Only the first is a
+required check, and the third shows as skipped - not failed - on a pull request
+that touched documentation alone.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
