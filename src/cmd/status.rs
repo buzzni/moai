@@ -55,7 +55,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
     // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
     // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
-    let (lost, unread) = crate::worktree::stranded_at_in(
+    let (lost, unread) = crate::worktree::stranded_at(
         repo.here(),
         &repo.config,
         &load.issues,
@@ -246,7 +246,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
             let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
-            let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
+            // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
+            // 마다 같은 스냅샷을 다시 파, 값이 등록 수만큼 곱해진다. 안쪽 `run` 과 같은 자다.
+            let (lost, unread) =
+                crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
             status.warnings.extend(lost);
             view::Board {
                 cfg: &repo.config,

@@ -524,7 +524,7 @@ fn placed(
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
     // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
     // 옛 수로 섰다(moai-al0x 가 고친 자리다).
-    let (lost, unread) = crate::worktree::stranded_at_in(repo.here(), &repo.config, issues, overlaid, now, dug);
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now, dug);
     let said = match overlaid {
         true => Vec::new(),
         false => unread
