@@ -76,11 +76,20 @@ done
 
 # 내는 판이 둘뿐이라 짝이 안 맞으면 바로 말한다. 조용히 비슷한 것을 깔면 받는
 # 사람이 못 도는 바이너리를 쥔다.
-case "$(uname -s)-$(uname -m)" in
-Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
-Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
-*) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 지금 내는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이다. 소스에서 짓는 길은 README 에 있다" ;;
-esac
+#
+# **`MOAI_TARGET` 은 이 표를 건너뛴다**(moai-utya). 시험이 쓰는 자리다 — 설치 시험은
+# 가짜 릴리스 하나를 지어 **설치 길**을 재는데, 이름을 이 표에서 받으면 판을 안 내는
+# 기계(arm64 리눅스·인텔 맥)에서 그 표가 먼저 죽어 재려던 길에 닿지도 못한다. 그 기계에서도
+# 도구는 소스로 지어 잘 돈다. 합계 확인은 그대로라, 이름을 갈아도 안 맞는 것은 안 깔린다.
+if [ -n "${MOAI_TARGET:-}" ]; then
+  target=$MOAI_TARGET
+else
+  case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
+  Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
+  *) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 지금 내는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이다. 소스에서 짓는 길은 README 에 있다" ;;
+  esac
+fi
 
 if [ "$print_target" = 1 ]; then
   printf '%s\n' "$target"

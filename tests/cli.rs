@@ -14547,17 +14547,25 @@ fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
         .env("MOAI_BASE_URL", format!("file://{}", base.display()))
         .env("MOAI_VERSION", "v9.9.9")
         .env("MOAI_INSTALL_DIR", dir)
+        .env("MOAI_TARGET", FAKE_TARGET)
         .output()
         .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
 }
 
-/// 이 기계가 받을 산출물의 이름. 스크립트에게 물어, 시험이 타깃 표를 따로 들지
-/// 않는다.
+/// 설치 시험이 지어 두는 가짜 릴리스의 타깃 이름. **이 기계에 맞는 판이 있든 없든
+/// 같다**(moai-utya) — 재는 것은 설치 길이지 어느 플랫폼에 내는가가 아니다. 이름을
+/// `install.sh` 의 표에서 받던 판은 판을 안 내는 기계(arm64 리눅스·인텔 맥)에서 그 표가
+/// 먼저 죽어, 도구가 잘 도는 자리에서 `cargo test` 가 떨어졌다.
+///
+/// 표가 실제로 내는 것과 맞는지는 [`the_install_table_and_the_release_matrix_name_the_same_targets`]
+/// 가 따로 본다 — 건너뛰는 시험을 안 둔다는 결정은 그대로다.
+#[cfg(unix)]
+const FAKE_TARGET: &str = "moai-test-unknown-target";
+
+/// 시험이 받을 산출물의 이름.
 #[cfg(unix)]
 fn release_name() -> String {
-    let out = isolated("sh").arg(at_root("install.sh")).arg("--print-target").output().expect("sh 를 실행하지 못했다");
-    assert!(out.status.success(), "타깃을 못 찍었다\n{}", text(&out));
-    format!("moai-v9.9.9-{}", String::from_utf8_lossy(&out.stdout).trim())
+    format!("moai-v9.9.9-{FAKE_TARGET}")
 }
 
 /// 가짜 릴리스 하나를 짓는다 — 산출물 한 벌과 그 합계. 돌려주는 것은 산출물이
