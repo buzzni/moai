@@ -234,7 +234,7 @@ fn decide(
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
-                                Some(crate::hook::Aimed { at: other.root.as_path(), tracker: true })
+                                Some(crate::hook::Aimed::stands(other.root.as_path()))
                             })
                         })
                     });
