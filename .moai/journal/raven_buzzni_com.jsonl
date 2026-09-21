@@ -349,3 +349,5 @@
 {"ts":"2026-09-21T18:34:30Z","id":"moai-tntf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"release.yml 의 캐시를 rustup target add 앞으로 옮겼다. 태그 판이 대개 못 맞히는 것은 주석에 적고 idea moai-uave 로 넘겼다"}
 {"ts":"2026-09-21T18:34:30Z","id":"moai-xkxn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"msrv 잡이 Cargo.toml 의 rust-version 으로 짓는다. 1.88 은 참이고 여기서 밟아 봤다"}
 {"ts":"2026-09-21T18:34:30Z","id":"moai-oydf.9b6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: CONTRIBUTING 의 잡 셈과 MSRV 문장(3a9bade), sed 가 지는 방식(e02a99c), release 캐시 주석의 약속(37b808e). 넘긴 것: 태그 판이 캐시를 못 맞히는 것은 idea moai-uave"}
+{"ts":"2026-09-21T18:36:45Z","id":"moai-f2lc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T18:36:46Z","id":"moai-zxwj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
