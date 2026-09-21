@@ -250,12 +250,48 @@ fn calls_review(line: &Line<'_>) -> bool {
 /// 치환으로 읽어 제 토막을 이미 냈는데([`Lexer::end_by`]) 여기서 또 넘기던 판은, 같은 낱말을 두
 /// 길이 각각 토막으로 만들어 집기 한 줄을 세션 장부에 **두 번** 적었다.
 ///
-/// **먹은 수(`eaten`)와 견준다**([`Seg::eaten`]) — 덩이가 먹은 수보다 많으면 그중에 렉서가 안 읽은
-/// 것이 있다는 뜻이라 그대로 넘긴다. 따옴표 하나에 답이 뒤집히는 자리라서다: `eval '$( … )'` 의
-/// 치환은 치환으로 안 돌고 `eval` 이 그 **글자**를 읽어 그때 도는데, 세지 않고 빼던 판은 그 줄의
-/// 집기와 쓰기를 통째로 잃었다(빼는 쪽이 곧 구멍인 자리다).
-fn shell_text(words: &[String], eaten: usize) -> Option<Handed> {
-    handed_text(words).filter(|h| !subst_groups(&h.text).is_some_and(|n| n <= eaten))
+/// **렉서가 적어 둔 글과 글자째 맞춘다**([`Seg::eaten`]) — 그 글로만 이뤄진 글이라야 뺀다.
+/// 따옴표 하나에 답이 뒤집히는 자리라서다: `eval '$( … )'` 의 치환은 치환으로 안 돌고 `eval` 이
+/// 그 **글자**를 읽어 그때 도는데, 빼는 쪽이 곧 구멍이다.
+///
+/// **수로 견주던 판은 샜다**(리뷰) — 세는 자리가 서로 달랐다. `eaten` 은 **토막 전체**의 치환을
+/// 세는데(옆 낱말도, 리다이렉션 과녁도, 앞에 붙은 대입도 든다) 덩이는 **넘긴 글 하나**의 것이라,
+/// 엉뚱한 치환 하나가 안 읽힌 글을 읽은 것으로 덮었다. 규칙 넷이 다 샜다 —
+/// `bash -c '$(쓰기)' "$(echo hi)"` 도, `eval '$(tmux kill-server)' > "$(mktemp)"` 도 지나갔다.
+fn shell_text(words: &[String], eaten: &[String]) -> Option<Handed> {
+    handed_text(words).filter(|h| eaten.is_empty() || !read_already(&h.text, eaten))
+}
+
+/// 넘긴 글이 **렉서가 이미 읽은 치환뿐인가**(moai-6qkc) — 그렇다면 [`Lexer::relex`] 가 다시 읽을
+/// 것이 없다. 빈칸 말고 다른 글자가 하나라도 남으면 거짓이다.
+///
+/// **읽은 자가 적어 둔 글이 진실이다**([`Seg::eaten`], [`Lexer::leave`]). 괄호를 따로 세던 판은
+/// 따옴표도 `\` 도 안 봐 두 자리에서 어긋났다(리뷰) — `$(moai mv t-1 in_progress -m '1) done')`
+/// 는 따옴표 안의 `)` 에 셈이 끊겨 그 집기를 장부에 **두 번** 적었고, 같은 셈이 안 읽힌 글을
+/// 읽은 것으로 덮어 쓰기를 잃었다. 세는 자가 둘이면 둘이 어긋난다.
+///
+/// 같은 글이 두 번 선 자리(`eval "$(a)" '$(a)'`)에서 하나만 읽혔으면 거짓이다 — 읽은 글은 한 번만
+/// 쓰이니 남은 하나가 짝을 못 찾는다. 그것을 읽는 자가 여기밖에 없어, 빼면 그 줄이 통째로 안 보인다.
+fn read_already(text: &str, eaten: &[String]) -> bool {
+    let mut left: Vec<&str> = eaten.iter().map(String::as_str).collect();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        // 여는 글자와 닫는 글자는 짝이다 — `$( … )` 와 `` ` … ` ``. 둘 다 아니면 치환이 아닌
+        // 글자가 남은 것이고, 그러면 렉서가 아니라 이 글을 받는 셸이 그것을 읽는다.
+        let (open, close) = match rest.as_bytes() {
+            [b'$', b'(', ..] => ("$(", ')'),
+            [b'`', ..] => ("`", '`'),
+            _ => return false,
+        };
+        let Some(at) =
+            left.iter().position(|e| rest[open.len()..].strip_prefix(*e).is_some_and(|r| r.starts_with(close)))
+        else {
+            return false;
+        };
+        rest = rest[open.len() + left.remove(at).len() + close.len_utf8()..].trim_start();
+    }
+    // 아무것도 안 뺐으면 빈 글이다 — 넘긴 글이 아니다.
+    left.len() < eaten.len()
 }
 
 /// 이 토막이 **셸에 넘기는 글** — `bash -c '…'`·`sh -c`·`eval …` 이다(moai-455j). 그 글은 낱말이
@@ -280,18 +316,18 @@ fn handed_text(words: &[String]) -> Option<Handed> {
     // 다시 부르던 판은 `command_of` 가 어느 낱말에서 멈췄나를 안 적힌 약속으로 이었다.
     let Cmd { words: cmd, wrap } = command_at(words);
     let (head, rest) = cmd.split_first()?;
-    // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
-    // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
-    // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
     // **감싸는 명령이 대상 셸에 그대로 넘긴 argv** — `su <사용자> -- -c '<글>'` 이다(moai-729n).
     // 글 하나가 아니라 셸의 명령줄이라 `bash …` 를 읽는 그 자가 읽는다.
     //
     // **넓은 errexit 철자는 안 읽는다**(`wide` 가 거짓) — 대상 셸이 무엇인지 모르기 때문이다.
     // 넓히는 것은 errexit 를 **켜는** 쪽이고, 안 켜진 것을 켜졌다고 읽으면 집기가 더 멀리 이어져
     // 쓰기가 지나간다. 모르는 자리는 안 켜진 것으로 둔다.
-    if let Some(Wrapped::Shell(args)) = &wrap {
-        return shell_argv(args, false);
+    if let Some(Wrapped::Shell(at)) = &wrap {
+        return shell_argv(at.iter().map(|&i| &rest[i]), false);
     }
+    // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
+    // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
+    // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
     if let Some(Wrapped::Hands { at, glued, text: shape }) = wrap {
         let tail = &rest[at..];
         // **`su -c '글'` 의 글은 `bash -c` 의 글이다**(moai-qqg2) — 셸의 명령줄 한 낱말이라 가르지도
@@ -343,7 +379,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false });
     }
     match basename(head) {
-        "bash" | "sh" | "zsh" | "dash" | "ksh" => {
+        sh @ ("bash" | "sh" | "zsh" | "dash" | "ksh") => {
             // **zsh·ksh 는 errexit 를 넓게 적는다**(moai-7ek0) — zsh 는 옵션 이름의 대소문자와
             // 밑줄을 안 가리고(`-o err_exit`) 앞에 붙은 `no` 를 부정으로 읽으며, zsh·ksh93 은
             // `--errexit` 도 받는다.
@@ -353,21 +389,21 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             // bash·dash 는 이 철자를 모르는 옵션으로 거절하고 **아무것도 안 돌리니**, 그 둘에서는
             // 넓히는 것이 곧 안 도는 줄을 errexit 로 읽는 일이다. zsh·ksh 쪽은 거꾸로다 — 받으면
             // 정말 켜지고, 그 판이 안 받으면 그 셸도 아무것도 안 돌린다.
-            shell_argv(rest, matches!(basename(head), "zsh" | "ksh"))
+            shell_argv(rest, matches!(sh, "zsh" | "ksh"))
         }
         "eval" if !rest.is_empty() => Some(Handed { text: rest.join(" "), fork: false, strict: false }),
         _ => None,
     }
 }
 
-/// 셸 하나의 **argv** 를 읽는다 — `bash <여기부터>` 의 그 낱말들이다([`shell_text`]).
+/// 셸 하나의 **argv** 를 읽는다 — `bash <여기부터>` 의 그 낱말들이다([`handed_text`]).
 ///
 /// `su <사용자> -- -c '<글>'` 이 대상 셸에 그대로 넘기는 낱말들도 여기로 온다
 /// ([`Wrapped::Shell`], moai-729n) — 셸을 띄우는 자가 누구든 그 뒤는 같은 자로 읽는다.
 ///
 /// `wide` 면 errexit 의 철자를 zsh·ksh 의 자로 넓혀 읽는다([`errexit_name`]).
-fn shell_argv(rest: &[String], wide: bool) -> Option<Handed> {
-    let mut it = rest.iter();
+fn shell_argv<'a>(argv: impl IntoIterator<Item = &'a String>, wide: bool) -> Option<Handed> {
+    let mut it = argv.into_iter();
     // **띄울 때 켠 errexit**(moai-j9tx) — `bash -e`·`bash -o errexit` 로 띄운 셸은 글의 첫
     // 줄부터 `set -e` 아래다. `+e`·`+o errexit` 가 끄는 것도 셸이 읽는 차례 그대로다.
     let mut strict = false;
@@ -498,48 +534,6 @@ struct Handed {
     strict: bool,
 }
 
-/// 글이 **온통 치환뿐인가** — 그렇다면 몇 덩이인가(moai-6qkc). `$( … )`·`` ` … ` `` 와 빈칸 말고
-/// 다른 글자가 하나라도 있으면 `None` 이다.
-///
-/// [`shell_text`] 가 이것으로 **이미 읽은 글을 다시 안 읽는다**.
-///
-/// **닫는 자리를 못 찾으면 `None` 이다** — 세는 쪽이 틀리면 그 글을 아무도 안 읽으니, 모르는 쪽은
-/// 읽는 쪽으로 둔다. `$(( … ))` 는 셈이지 치환이 아니라 여기 안 든다 — 명령을 안 돌리니 렉서도
-/// 안 읽고, 두 번 셀 일이 없다.
-fn subst_groups(text: &str) -> Option<usize> {
-    let b = text.as_bytes();
-    let (mut i, mut had) = (0, 0);
-    while i < b.len() {
-        if b[i].is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-        let end = match b[i] {
-            b'`' => text[i + 1..].find('`').map(|k| i + k + 2),
-            b'$' if b.get(i + 1) == Some(&b'(') && b.get(i + 2) != Some(&b'(') => {
-                let (mut depth, mut k) = (0usize, i + 1);
-                loop {
-                    match b.get(k) {
-                        Some(b'(') => depth += 1,
-                        Some(b')') => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break Some(k + 1);
-                            }
-                        }
-                        Some(_) => {}
-                        None => break None,
-                    }
-                    k += 1;
-                }
-            }
-            _ => None,
-        };
-        (i, had) = (end?, had + 1);
-    }
-    (had > 0).then_some(had)
-}
-
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
 #[derive(Debug, Default)]
 struct Seg {
@@ -595,12 +589,16 @@ struct Seg {
     fed: Vec<String>,
     /// 이 토막이 연 heredoc 의 번호([`Lexer::docs`]) — 본문은 토막을 닫은 뒤에 읽혀, `run` 이 끝에서 `fed` 로 옮긴다.
     docs: Vec<usize>,
-    /// 렉서가 이 토막의 낱말에서 **읽어 낸 치환의 수**(moai-6qkc) — 제 토막을 낸 것만 센다.
+    /// 렉서가 이 토막에서 **읽어 낸 치환의 글**(moai-6qkc) — 제 토막을 낸 것만 든다.
     ///
-    /// [`shell_text`] 가 이것으로 같은 글을 두 번 안 읽는다. 작은따옴표에 싸여 치환으로 안 돈 글
-    /// (`eval '$( … )'`)은 여기 안 세어져 그대로 넘어가고, 겹 상한이나 예산에 걸려 **안 읽힌**
-    /// 치환도 안 센다 — 안 읽은 것을 읽었다고 세면 그 글을 아무도 안 본다.
-    eaten: usize,
+    /// [`shell_text`] 가 이것과 글자째 맞춰 같은 글을 두 번 안 읽는다. **수로 두던 판은 샜다**
+    /// (리뷰) — 이것은 토막 전체의 것인데 견주는 쪽은 넘긴 글 하나의 것이라, 옆 낱말의 치환
+    /// 하나가 안 읽힌 글을 읽은 것으로 덮었다.
+    ///
+    /// 작은따옴표에 싸여 치환으로 안 돈 글(`eval '$( … )'`)은 여기 안 들어 그대로 넘어가고,
+    /// 겹 상한이나 예산에 걸려 **안 읽힌** 치환도, 아무 토막도 안 낸 치환(`$()`·`$(<f)`)도 안
+    /// 든다 — 안 읽은 것을 읽었다고 적으면 그 글을 아무도 안 본다.
+    eaten: Vec<String>,
 }
 
 /// 다시 읽은 글 한 겹([`Seg::nested`]) — **새 셸에서 도는 글**이고, 그 글의 맨 윗자리 묶음 깊이
@@ -1213,7 +1211,7 @@ impl<'a> Lexer<'a> {
             // 글마다 **무엇인가**([`Plant`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
             let mut texts: Vec<(&str, Plant)> =
                 docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
-            let own = shell_text(&seg.words, seg.eaten);
+            let own = shell_text(&seg.words, &seg.eaten);
             texts.extend(
                 own.iter()
                     .map(|h| (h.text.as_str(), if h.fork { Plant::Fork { strict: h.strict } } else { Plant::Eval })),
@@ -1879,9 +1877,10 @@ impl<'a> Lexer<'a> {
         // **다시 읽기의 겹은 치환에도 든다**([`Lexer::DEEP`]) — `Lexer::new` 로 0 부터 다시 세던 판은
         // `$(bash -c "$( … )")` 가 겹마다 셈을 되돌려, 상한이 아무것도 막지 못했다(리뷰 moai-p836.rv).
         let deep = self.deep + 1;
-        // **읽어 낸 치환만 센다**([`Seg::eaten`], moai-6qkc) — 겹 상한과 예산에 걸려 넘어간 것은
-        // 아무도 안 읽었으니, 여기 세면 그 글을 [`shell_text`] 까지 잃는다.
-        let mut eaten = 0;
+        // **읽어 낸 치환만 적는다**([`Seg::eaten`], moai-6qkc) — 겹 상한과 예산에 걸려 넘어간 것도,
+        // 아무 토막도 안 낸 것(`$()`·`$(<f)`)도 아무도 안 읽었으니, 여기 적으면 그 글을
+        // [`shell_text`] 까지 잃는다. 뒤엣것이 **토막을 낸 뒤에 적는** 까닭이다(리뷰).
+        let mut eaten: Vec<String> = Vec::new();
         for text in inner {
             // 이름표는 렉서가 하나로 센다([`Layer::Subst::nth`]).
             let nth = self.serial;
@@ -1893,11 +1892,12 @@ impl<'a> Lexer<'a> {
             if !afford(text.len()) {
                 continue;
             }
-            eaten += 1;
             // 치환마다 바깥 자리에서 새 하위 셸을 연다 — 앞 치환의 셸과 깊이는 같아도 딴 셸이다.
             self.low = self.low.min(group);
             self.floor = self.floor.min(level);
+            let mut read = false;
             for (m, mut s) in Lexer::at(&text, deep).run().into_iter().enumerate() {
+                read = true;
                 if m > 0 {
                     // 치환 안에서 지나온 자리는 안쪽이 잰 그대로다.
                     self.low = s.low + group + 1;
@@ -1916,6 +1916,9 @@ impl<'a> Lexer<'a> {
                 }
                 s.nested.insert(0, Layer::Subst { at: level + 1, nth });
                 self.push(s);
+            }
+            if read {
+                eaten.push(text);
             }
         }
         if opened {
@@ -2004,7 +2007,7 @@ struct Cmd<'a> {
     /// 그 머리 낱말을 [`wrapped`] 가 어떻게 읽었는가. 감싸는 명령이 아니면 `None` 이고,
     /// 낱말이 다 떨어졌어도 `None` 이다.
     ///
-    /// **한 번만 읽어 함께 낸다**(moai-906o) — [`shell_text`] 가 같은 물음을 다시 묻던 판은 둘을
+    /// **한 번만 읽어 함께 낸다**(moai-906o) — [`handed_text`] 가 같은 물음을 다시 묻던 판은 둘을
     /// 잇는 것이 "`command_of` 이 어느 낱말에서 멈췄나" 라는 **안 적힌 약속**뿐이었다. 멈추는
     /// 까닭 둘([`PREFIXES`] 건너뛰기와 [`BUILTINS`] 지킴이)은 둘째 부름의 답과 안 맞아, 자르는
     /// 자리를 손보면 `Wrapped::Hands` 가 조용히 안 서는데 컴파일은 됐다.
@@ -2067,12 +2070,20 @@ enum Wrapped {
     ///
     /// 글 하나가 아니라 **셸의 명령줄 전체**라 [`Wrapped::Hands`] 와 갈린다: 옵션도 `-c` 도
     /// 스크립트 이름도 섞여 오니, `bash …` 를 읽는 그 자가 그대로 읽는다([`shell_argv`]).
-    /// 낱말이 이어 붙어 있지 않을 수 있어(`su alice ./s.sh -f arg`) 자리가 아니라 낱말을 든다.
-    Shell(Vec<String>),
+    ///
+    /// **자리를 든다** — 다른 갈래와 같은 자다([`Wrapped::Runs`]·[`Wrapped::Hands`]). 낱말이
+    /// 이어 붙어 있지 않아(`su alice ./s.sh -f arg`) 자리 하나가 아니라 자리들을 든다. 낱말을
+    /// 베껴 들던 판은 그 갈래만 홀로 글을 지녀, [`command_of`] 가 안 읽고 버리는 자리마다
+    /// argv 를 통째로 베꼈다(리뷰).
+    ///
+    /// **su 가 제 것으로 먹은 낱말은 여기 없다** — 걷어 낸 피연산자뿐이다. `--` 없이 쓴 줄
+    /// (`su 남 sed -i …`)에서 그 argv 는 옵션으로 시작할 수 없고, su 가 셸에 넘긴 첫 낱말은
+    /// 스크립트 이름이라 [`shell_argv`] 가 아무것도 안 낸다 — 실제로 도는 것도 그러하다.
+    Shell(Vec<usize>),
     /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`), 아니면
     /// 값이 모자라 셸이 거절할 줄이다(`need!`).
     ///
-    /// **[`command_of`] 와 [`shell_text`] 는 이것을 `None` 과 같이 다룬다** — 둘 다 "그 뒤는
+    /// **[`command_of`] 와 [`handed_text`] 는 이것을 `None` 과 같이 다룬다** — 둘 다 "그 뒤는
     /// 명령이 아니다" 라, 그 토막의 머리는 감싸는 명령 자신으로 남는다. 갈라 적을 값이 생기면
     /// 그때 가른다: 지금 갈라 두면 뜻 없는 갈래가 하나 더 설 뿐이다(moai-qqg2).
     Stops,
@@ -2099,7 +2110,7 @@ enum Text {
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
-/// ([`command_of`]·[`shell_text`]).
+/// ([`command_of`]·[`handed_text`]).
 ///
 /// 옵션 꼴은 GNU coreutils 와 sudo 의 것이다. `--long=값` 은 한 낱말이고, 값을 따로 받는 짧은 옵션만
 /// 하나를 더 먹는다. `--` 뒤는 곧 명령이다.
@@ -2139,12 +2150,12 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         chdir: &'static [&'static str],
         /// **그 뒤가 셸에 넘기는 글인 스위치**(moai-drli) — `env -S` 와 `sudo -s`.
         /// 한때 `stops` 에 함께 있었는데, 멈추는 까닭이 "그 뒤는 명령이 아니라 글이고 그 글을 읽는
-        /// 것은 렉서의 일" 이면서 정작 렉서([`shell_text`])는 `bash -c` 와 `eval` 만 알아, 그 글을
+        /// 것은 렉서의 일" 이면서 정작 렉서([`handed_text`])는 `bash -c` 와 `eval` 만 알아, 그 글을
         /// 읽는 것이 **아무도 없었다** — `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을
         /// 통째로 지나갔다. `bash -c` 와 같은 표의 줄로 둔다.
         ///
         /// `env -S` 는 사실 셸이 아니라 낱말로 가를 뿐이라, 그 글의 `&&`·`|`·`>` 는 낱말로 남는다 —
-        /// 그래서 [`shell_text`] 가 그것을 [`split_string`] 으로 가른다. 한때 셸의 글로 읽어
+        /// 그래서 [`handed_text`] 가 그것을 [`split_string`] 으로 가른다. 한때 셸의 글로 읽어
         /// **더 많이 보는** 쪽으로 어림잡았는데, 그 셈이 **집기 축에서는 거꾸로** 선다: 지어낸
         /// 집기는 규칙 2 를 채워 빈손의 쓰기를 풀어 준다(`env -S 'true && moai mv <id> in_progress'
         /// && 쓰기`). 더 보는 것이 늘 안전한 것은 막는 축뿐이다.
@@ -2255,11 +2266,18 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         // 명령 자리를 옳게 짚는 것까지가 이 표의 몫이다.
         //
         // **값을 받는 옵션을 틀리게 적으면 없는 것보다 나쁘다** — 값이 명령 자리로 읽혀 잘못 막는다.
-        // `-e`·`-i`·`-l` 은 값을 **붙여서만** 받아 혼자 서면 값이 없고(`attach`), 긴 이름의 그 셋
-        // (`--eof`·`--replace`·`--max-lines`)도 `optional_argument` 라 값을 따로 안 먹는다.
+        // `-e`·`-l` 은 값을 **붙여서만** 받아 혼자 서면 값이 없고(`attach`), 긴 이름의 그 둘
+        // (`--eof`·`--max-lines`)도 `optional_argument` 라 값을 따로 안 먹는다.
+        //
+        // **자리표를 세우는 스위치에서는 멈춘다**(`-I`·`-i`·`--replace`, 리뷰) — 그것이 서면 argv 에
+        // 보이는 낱말은 경로가 아니라 **자리표**고, 진짜 경로는 파이프 저편에서 온다. 명령 자리로
+        // 넘겨 주던 판은 그 자리표를 경로로 풀어 `ls | xargs -I % sed -i s/a/b/ %` 를 `/repo/%` 에
+        // 쓴다며 막았다 — 아무도 안 고치는 파일이고, 거절문이 빠져나갈 길도 안 댄다. 흔히 쓰는
+        // `{}` 는 [`unknowable`] 이 괄호를 보고 이미 걸러 아무것도 안 보던 자리라, 여기서 멈추는
+        // 것이 그 철자와 같은 답이다. 잘못 막는 것이 새는 것보다 비싸다.
         Wrapper {
             name: "xargs",
-            takes: &["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"],
+            takes: &["-a", "-d", "-E", "-L", "-n", "-P", "-s"],
             long: &["--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-procs", "--process-slot-var"],
             free: &[
                 "--null",
@@ -2267,13 +2285,13 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                 "--no-run-if-empty",
                 "--show-limits",
                 "--exit",
-                "--replace",
+                "--open-tty",
                 "--eof",
                 "--max-lines",
             ],
-            attach: &["-e", "-i", "-l"],
+            attach: &["-e", "-l"],
             args: 0,
-            stops: &[],
+            stops: &["-I", "-i", "--replace"],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2437,7 +2455,12 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     // (moai-729n). `-c` 를 보는 순간 냈더니 맨 뒤의 `-`(로그인)에 닿지 못해, 한 명령의 두 철자가
     // (`su -c '<글>' -` 과 `su - -c '<글>'`) 반대 판정을 받았다. **마지막 것이 이긴다** — su 가
     // `-c` 를 볼 때마다 제 command 를 덮어쓴다.
-    let mut hands_at: Option<(usize, Option<String>)> = None;
+    let mut hands_at: Option<Wrapped> = None;
+    // **`--` 뒤에서 걷은 피연산자는 `ops` 의 몇째부터인가** — 홀로 선 `-` 를 로그인으로 읽는 것은
+    // **getopt 가 본 것**뿐이라서다(리뷰). `--` 뒤는 getopt 가 안 보고 su 가 그대로 피연산자로
+    // 받으니, `su -- - -c '<글>'` 의 `-` 는 사용자 이름이고 그 글은 정말 돈다 — 한 통에 담고
+    // `ops.first()` 만 보던 판은 그것을 로그인으로 읽어 쓰기를 통째로 잃었다.
+    let mut dashed = usize::MAX;
     while let Some(word) = rest.get(n) {
         if word == "--" {
             n += 1;
@@ -2450,8 +2473,14 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             }
             // **`--` 뒤는 남김없이 피연산자다** — su·runuser 는 사용자 뒤의 그것을 대상 셸의 argv 로
             // 잇는다(moai-729n). 그냥 끊던 판은 `su 남 -- -c '<글>'` 의 글을 아무도 안 읽었다.
-            // 다른 감싸는 명령에서는 첫 자리가 곧 `n` 이라 명령 자리가 그대로다.
-            ops.extend(n..rest.len());
+            //
+            // **섞어 읽는 것만 걷는다** — 다른 감싸는 명령은 첫 자리가 곧 `n` 이라 아래
+            // `ops.first().unwrap_or(n)` 이 같은 답을 낸다. 늘 걷던 판은 `env -- <명령…>` 마다
+            // 아무도 안 읽는 벡터를 지었다(리뷰).
+            if mixes {
+                dashed = ops.len();
+                ops.extend(n..rest.len());
+            }
             break;
         }
         // `env -` 는 `-i` 와 같다(환경을 비운다) — 자리 인자로 읽던 판은 `-` 를 명령으로 읽었다.
@@ -2525,7 +2554,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                     if eats {
                         need!(rest.get(n + 1));
                     }
-                    hands_at = Some((n + 1, glued));
+                    hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
                     n += 1 + usize::from(eats);
                     continue;
                 }
@@ -2599,7 +2628,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                     let glued = (!left.is_empty()).then(|| left.to_string());
                     // 섞어 읽는 것은 여기서도 적어 두고 마저 읽는다(moai-729n).
                     if mixes {
-                        hands_at = Some((n + 1, glued));
+                        hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
                         eats = left.is_empty();
                         stop = false;
                         break;
@@ -2639,7 +2668,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         n += 1 + usize::from(eats);
     }
     // 값 없는 글 스위치를 봤으면 **옵션이 끝난 이 자리부터가 글이다**. 뒤가 비어도 괜찮다 —
-    // `sudo -s` 혼자는 사람이 쓸 셸을 띄우고, [`shell_text`] 가 빈 글을 안 읽는다.
+    // `sudo -s` 혼자는 사람이 쓸 셸을 띄우고, [`handed_text`] 가 빈 글을 안 읽는다.
     // **홀로 선 `-` 는 로그인이다** — su 의 man 이 "A mere - implies -l" 이라 적는다. 대상 사용자의
     // 홈에서 도니 `-l` 과 같은 줄에 선다([`Wrapped::Stops`]).
     //
@@ -2648,14 +2677,14 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     //
     // **첫 피연산자일 때만이다** — su 는 getopt 가 걷어 낸 피연산자의 **맨 앞** 하나만 그렇게
     // 본다. `su 남 -c '<글>' -` 의 `-` 는 사용자 뒤라 그 셸의 자리 인자고, 그 글은 여기서 돈다.
-    if mixes && ops.first().is_some_and(|&i| rest[i] == "-") {
+    if mixes && dashed > 0 && ops.first().is_some_and(|&i| rest[i] == "-") {
         return Some(Wrapped::Stops);
     }
     if handed {
         return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
     }
-    if let Some((at, glued)) = hands_at {
-        return Some(Wrapped::Hands { at, glued, text: w.text });
+    if let Some(hands) = hands_at {
+        return Some(hands);
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 그 낱말을 명령으로 읽지 않는다 —
     // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
@@ -2664,7 +2693,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     // **사용자 뒤의 낱말은 대상 셸의 argv 다**(moai-729n) — su 는 `-c` 가 없으면 그 셸을 띄우며
     // 그것을 그대로 넘긴다([`Wrapped::Shell`]). 통째로 멈추던 판은 `su 남 -- -c '<글>'` 을 못 봤다.
     if !matches!(w.runs, Runs::Always) && !saw {
-        let args: Vec<String> = ops.iter().skip(1).map(|&i| rest[i].clone()).collect();
+        let args: Vec<usize> = ops.iter().skip(1).copied().collect();
         // 사용자만 있으면 사람이 쓸 셸을 띄울 뿐이다 — 넘긴 argv 가 없다.
         return Some(if args.is_empty() { Wrapped::Stops } else { Wrapped::Shell(args) });
     }
@@ -4418,7 +4447,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // moai-n3wq 가 적은 `came`·`level` 문턱이다), 거짓 전제를 코드에 두면 그 문턱이
                 // 열리는 날 이쪽이 함께 틀린다.
                 let &p = picked.iter().rev().find(|p| p.at >= from)?;
-                shell_text(&seg.words, seg.eaten).map(|_| Pick { sure: p.sure && certain, ..p })
+                shell_text(&seg.words, &seg.eaten).map(|_| Pick { sure: p.sure && certain, ..p })
             });
             if let Some(c) = cond {
                 let b = Bailout {
@@ -5824,6 +5853,32 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, &cmd);
             assert!(matches!(got, Decision::Deny(_)), "치환 안의 쓰기를 잃었다 — {cmd}\n{got:?}");
         }
+        // **옆의 치환이 안 읽힌 글을 덮지 않는다**(리뷰) — 수로 견주던 판은 세는 자리가 서로
+        // 달랐다. `eaten` 은 **토막 전체**의 치환을 세는데(옆 낱말도, 리다이렉션 과녁도, 앞에
+        // 붙은 대입도 든다) 덩이는 **넘긴 글 하나**의 것이라, 엉뚱한 치환 하나로 규칙 넷이 다
+        // 샜다. 렉서가 적어 둔 글과 글자째 맞추니 그 자가 하나다.
+        for cmd in [
+            format!("bash -c '$({write})' \"$(echo hi)\""),
+            format!("sh -c '$({write})' \"$(echo a)\" \"$(echo b)\""),
+            format!("eval '$({write})' > \"$(echo /tmp/f)\""),
+            format!("X=\"$(echo hi)\" eval '$({write})'"),
+            format!("su 남 -c '$({write})' \"$(echo hi)\""),
+            // **아무 토막도 안 낸 치환은 읽은 것이 아니다** — 세던 판은 이것까지 셌다.
+            format!("bash -c '$({write})' \"$()\""),
+            format!("bash -c '$({write})' \"$(<f)\""),
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, &cmd);
+            assert!(matches!(got, Decision::Deny(_)), "옆 치환이 안 읽힌 글을 덮었다 — {cmd}\n{got:?}");
+        }
+        // 집기 축에서는 거꾸로 샌다 — 그 글의 집기를 잃어 뒤의 쓰기를 잘못 막았다.
+        assert_eq!(mine(&format!("bash -c '$({pick})' \"$(echo hi)\"")), ["t-1"], "옆 치환이 집기를 지웠다");
+        // **따옴표 안의 괄호에 셈이 안 끊긴다**(리뷰) — 괄호를 따로 세던 판은 `'1) done'` 의 `)` 에서
+        // 치환이 닫힌 줄 알아, 빼야 할 글을 못 빼고 그 집기를 장부에 두 번 적었다.
+        assert_eq!(
+            mine(&format!("eval \"$({pick} -m '1) done')\"")),
+            ["t-1"],
+            "따옴표 안의 괄호에 셈이 끊겨 같은 집기를 두 번 셌다"
+        );
     }
 
     /// **기록하는 집기는 쓰기 규칙이 집기로 센 것과 같다**(moai-m5mg, 사용자 결정) — 이음사를 안 보던
@@ -6263,14 +6318,13 @@ mod tests {
             "xargs -n 1 moai add '딴 일'",
             "xargs -rn1 moai add '딴 일'",
             "xargs -P4 moai add '딴 일'",
-            "xargs -I {} moai add '딴 일'",
             "xargs -d , moai add '딴 일'",
             "xargs --max-args=1 moai add '딴 일'",
             "xargs --arg-file /tmp/f moai add '딴 일'",
-            "xargs -i moai add '딴 일'",
-            "xargs -i{} moai add '딴 일'",
-            "xargs --replace moai add '딴 일'",
             "xargs --no-run-if-empty moai add '딴 일'",
+            // `-o` 의 긴 이름이다(리뷰) — 빠뜨리면 모르는 긴 옵션으로 멈춰, 같은 명령의 두 철자가
+            // 반대 판정을 받는다(`xargs -o …` 는 보고 `xargs --open-tty …` 는 안 본다).
+            "xargs --open-tty moai add '딴 일'",
             "sudo moai add '딴 일'",
             "sudo -u 남 -- moai add '딴 일'",
             "env timeout 5 sudo moai add '딴 일'",
@@ -6317,6 +6371,19 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 규칙 2 를 가렸다 — {cmd}\n{got:?}");
         }
+        // **자리표는 경로가 아니다**(리뷰) — `-I`·`-i`·`--replace` 가 서면 argv 의 그 낱말은 파이프
+        // 저편에서 올 경로의 자리표다. 흔한 `{}` 는 [`unknowable`] 이 괄호를 보고 이미 걸렀고,
+        // `%`·`@` 처럼 평범한 글자면 저장소 뿌리에 붙여 풀어 **아무도 안 고치는 파일**을 고친다며
+        // 막았다. 잘못 막는 것이 새는 것보다 비싸다.
+        for cmd in [
+            "ls | xargs -I % sed -i s/a/b/ %",
+            "ls | xargs -I@ sed -i s/a/b/ @",
+            "ls | xargs --replace=% tee %",
+            "ls | xargs -i cp a {}",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "자리표를 경로로 풀어 잘못 막았다 — {cmd}\n{got:?}");
+        }
         // **모르는 긴 옵션**에서는 멈춘다 — 값을 따로 받는 것이면 그 값을 명령으로 읽어, 새는
         // 것보다 나쁜 잘못 막음이 난다. 뒤의 명령을 **아예 안 돌리는** 것(`sudo -l`·`-v`·`doas -C`)과
         // **딴 자리에서** 돌리는 것(`env -C`·`sudo -D`)도 같다 — 자리를 넘겨 주면 남의 트래커의
@@ -6333,6 +6400,16 @@ mod tests {
         for cmd in [
             "env --weird moai add '딴 일'",
             "xargs --weird moai add '딴 일'",
+            // **자리표를 세우는 스위치에서는 멈춘다**(리뷰) — argv 의 낱말이 경로가 아니라
+            // 자리표고, 진짜 경로는 파이프 저편에서 온다. 넘겨 주던 판은 그것을 경로로 풀어
+            // 아무도 안 고치는 파일을 고친다며 막았다.
+            "xargs -I {} moai add '딴 일'",
+            "xargs -I% moai add '딴 일'",
+            "xargs -i moai add '딴 일'",
+            "xargs -i{} moai add '딴 일'",
+            "xargs --replace moai add '딴 일'",
+            "xargs --replace=% moai add '딴 일'",
+            "xargs -ri moai add '딴 일'",
             "sudo -l moai add '딴 일'",
             "sudo -v moai add '딴 일'",
             "doas -C /etc/doas.conf moai add '딴 일'",
@@ -9109,9 +9186,16 @@ mod tests {
             // 뭉친 스위치도 셸이 읽는 그대로다 — `-e` 는 errexit 를 켜고 `-c` 는 글을 받는다.
             "su 남 -- -ec 'sed -i s/a/b/ src/x.rs'",
             "su 남 -- -c -- 'sed -i s/a/b/ src/x.rs'",
+            // 거꾸로 `--` 가 없으면 그 `-c` 는 su 의 것이다 — getopt 가 섞어 읽어 스크립트 이름
+            // 뒤에서도 옵션을 본다. 위의 `--` 쪽과 한 짝이다.
+            "su 남 ./script.sh -c 'sed -i s/a/b/ src/x.rs'",
             // **사용자 뒤의 `-` 는 로그인이 아니다** — su 는 걷어 낸 피연산자의 맨 앞 하나만
             // 그렇게 보고, 여기 `-` 는 그 셸의 자리 인자다. 그 글은 이 자리에서 돈다.
             "su 남 -c 'sed -i s/a/b/ src/x.rs' -",
+            // **`--` 뒤의 `-` 도 로그인이 아니다**(리뷰) — 로그인으로 읽는 것은 getopt 가 본
+            // `-` 뿐인데, `--` 뒤는 getopt 가 안 보고 su 가 그대로 사용자 이름으로 받는다.
+            // 한 통에 담고 맨 앞만 보던 판은 그 글을 통째로 잃었다.
+            "su -- - -c 'sed -i s/a/b/ src/x.rs'",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "대상 셸에 넘긴 argv 의 쓰기를 못 봤다 — {cmd}\n{got:?}");
@@ -9128,6 +9212,10 @@ mod tests {
             // **스크립트의 글은 여기서 안 돈다** — `bash 스크립트.sh` 와 같은 자리다.
             "su 남 -- ./script.sh",
             "su 남 ./script.sh",
+            // **그 뒤의 `-c` 는 그 스크립트의 자리 인자다**(리뷰) — 셸이 옵션이 아닌 첫 낱말에서
+            // 멈춰서다([`shell_argv`]). 쓰기가 아예 없는 줄로만 재던 판은 이 자리를 못 지켰다 —
+            // 어떻게 고쳐도 Pass 라, 멈추는 자리를 옮겨도 시험이 안 붉어졌다.
+            "su 남 -- ./script.sh -c 'sed -i s/a/b/ src/x.rs'",
             // 사용자만 있으면 사람이 쓸 셸을 띄울 뿐이다.
             "su 남",
             "su 남 -- -c",
