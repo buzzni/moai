@@ -336,7 +336,14 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     //
     // 선언을 읽는 자리는 **트래커가 사는 곳**이다(moai-8nkl) — 딸린 워크트리의 가지는 그것을
     // 안 들 수 있고, 병합에서 걸리는 것은 루트의 선언이다.
-    let driver = crate::cmd::merge_driver::state_at(&root, tracker_at.as_deref().unwrap_or(&root), ctx.chdir);
+    //
+    // **그 자리를 대는 자는 [`crate::store::Repo::opened_root`] 다**(리뷰) — `merge_driver::notice`
+    // 가 쓰는 `Repo::root` 와 **같은 자**라야 두 화면이 같은 선언을 읽는다. 위의 `tracker_at`
+    // ([`crate::store::init_belongs_at`])으로 대던 판은 그 자가 "여기 `.moai` 가 있으면 `None`"
+    // 이라, `.moai` 를 커밋하는 저장소(이 저장소가 그렇다)의 워크트리에서는 늘 **워크트리의**
+    // 선언을 읽었다 — moai-8nkl 이 없앤 갈림이 `--check` 에만 그대로 남는다. `tracker_at` 은
+    // "어디서 `init` 을 쳐야 하나" 에 답하는 자라 물음이 다르고, 아래 줄들이 그쪽을 그대로 쓴다.
+    let driver = crate::cmd::merge_driver::state_at(&root, &crate::store::Repo::opened_root(&root), ctx.chdir);
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state, "driver": driver });
         // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
@@ -699,6 +706,16 @@ fn covers(have: &str, want: &str) -> bool {
 ///
 /// 줄이 통째로 **없어진** 판은 그대로 빠진 것이다(`init` 이 다시 쓴다). 실수로 지운 것과 일부러
 /// 정한 것을 가르는 자리가 여기고, 가르지 않으면 `.gitattributes` 를 잃은 저장소가 영영 조용해진다.
+///
+/// **스냅샷의 `merge=union` 은 결정으로 안 읽는다**(리뷰 moai-t6z9.bd6 4번). 그 한 값은 사람이
+/// 고를 수 있는 것이 아니라 이 저장소가 **없애려고 다시 만들어진** 바로 그 실패다 — union 은 같은
+/// id 를 가진 줄 둘을 조용히 남기고, 그것이 CLAUDE.md 가 이름 붙인 데이터 손상이다. 결정으로
+/// 읽으면 `init` 이 규칙을 안 쓰고 [`crate::cmd::merge_driver::declared`] 도 `moai` 가 아니라며
+/// 네 알림을 통째로 재우는데, 그 저장소는 그때부터 스냅샷을 union 으로 합친다. 탈출구는 그대로
+/// 선다: `-merge`·`!merge`·`merge=<union 아닌 것>` 은 여전히 결정이다.
+///
+/// **저널은 반대다.** 그 줄에 걸리는 값이 union 이고(`GITATTRIBUTES`), 거기서는 union 이 맞다 —
+/// 가르는 자는 낱말이 아니라 **그 경로에 무엇이 걸려야 하는가**다.
 fn decided(have: &str, want: &str) -> bool {
     /// 이 줄이 `name` 속성을 정하고 있는가 — `name`·`-name`·`!name`·`name=<값>` 넷이다.
     fn sets(line: &str, name: &str) -> bool {
@@ -711,8 +728,12 @@ fn decided(have: &str, want: &str) -> bool {
     fn path(l: &str) -> Option<&str> {
         l.split_whitespace().next().map(|p| p.trim_start_matches('/'))
     }
+    // 스냅샷에 union 을 건 줄 — 결정이 아니라 고쳐야 할 줄이다.
+    let union_on_snapshot = |l: &str| {
+        path(l) == Some(crate::cmd::merge_driver::SNAPSHOT) && l.split_whitespace().skip(1).any(|t| t == "merge=union")
+    };
     // 속성이 없는 줄은 `.gitignore` 의 줄이다 — 그쪽은 위의 자로만 잰다.
-    path(have) == path(want) && sets(want, "merge") && sets(have, "merge")
+    path(have) == path(want) && sets(want, "merge") && sets(have, "merge") && !union_on_snapshot(have)
 }
 
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
@@ -742,12 +763,20 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 그 셸 자리에 트래커가 하나 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
         // 재는 자는 [`away_root`] 하나다: 알림마다 따로 재면 한 화면의 두 줄이 다른 자리를 댄다.
         let at = away_root(&root, ctx.chdir).map(|r| format!(" -C {r}")).unwrap_or_default();
-        let same = match (prefix, no_agents) {
-            (Some(p), true) => format!(" {} --no-agents", crate::text::quoted(p)),
-            (Some(p), false) => format!(" {}", crate::text::quoted(p)),
-            (None, true) => " --no-agents".to_string(),
-            (None, false) => String::new(),
-        };
+        // **깃발마다 짝을 적지 않는다**(리뷰). 경우를 손으로 다 적던 판은 `--no-driver` 가 늘 때
+        // 그것만 빠졌고, 그 줄을 따라 친 사람은 안 심기로 한 드라이버를 심었다 — `--local` 은
+        // 클론이 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다. 깃발이 하나 늘면 줄도
+        // 하나만 는다.
+        let mut same = String::new();
+        if let Some(p) = prefix {
+            same.push(' ');
+            same.push_str(&crate::text::quoted(p));
+        }
+        for (on, flag) in [(no_agents, " --no-agents"), (no_driver, " --no-driver")] {
+            if on {
+                same.push_str(flag);
+            }
+        }
         // **빠져나가는 길의 값도 함께 댄다**(리뷰). `MOAI_HERE` 는 **이 프로세스 하나**에만 선다 —
         // 그것으로 세운 트래커는 그 뒤의 맨 `moai` 가 도로 루트의 것을 읽어 아무도 안 읽는다.
         // 대지 않으면 이 줄이 거절문이 막으려던 바로 그 자리로 사람을 데려간다.

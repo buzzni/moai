@@ -785,6 +785,15 @@ fn the_issue_command_refusals_stand_in_one_language() {
     let screens = |name: &str, lang: Option<&str>| {
         let s = init(name);
         let id = add(s.path(), &["제목"]);
+        // 묶음 하나를 세워 둔다 — `--from` 을 못 쓴다는 거절은 `mv` 와 `defer` 둘이 같은 글로
+        // 말해야 한다(리뷰). 한쪽만 옮겨졌던 자리다.
+        let group = field(&ok(s.path(), &["add", "묶음", "--type", "epic", "--json"]), "id");
+        // 펼치기 화면을 실제로 세운다. **제목과 계획은 아스키다** — 영어 화면을 재는 잣대가
+        // "한글이 한 자도 없다" 라, 여기 한국어를 두면 그 줄이 제 자료 때문에 붉어진다.
+        let idea = ok(s.path(), &["idea", "add", "a parked thought", "-q"]).trim().to_string();
+        let plan = s.path().join("plan.md");
+        std::fs::write(&plan, "# Storage layer\n- [p1] first issue\n").unwrap();
+        let plan = plan.display().to_string();
         let run = |args: &[&str]| {
             let mut cmd = isolated(BIN);
             cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
@@ -803,12 +812,23 @@ fn the_issue_command_refusals_stand_in_one_language() {
             ("show <id> --tree".to_string(), run(&["show", &id, "--tree"])),
             ("note <nothing>".to_string(), run(&["note", &id])),
             ("link".to_string(), run(&["link", &id])),
-            ("idea promote --dry-run".to_string(), run(&["idea", "add", "생각", "-q"])),
+            // **그 이름의 화면을 실제로 세운다**(리뷰). 여기 `idea add … -q` 를 두던 판은 id 한
+            // 줄만 받아, 두 잣대(빈 줄이 아니다·한글이 없다)가 id 를 재고 통과했다 — 줄의 이름이
+            // 댄 화면과 그 여섯 키(`idea.will_unfold` 무리)는 한 번도 안 섰다.
+            ("idea promote --dry-run".to_string(), run(&["idea", "promote", &idea, "--dry-run", "--from", &plan])),
+            // 같은 거절을 두 명령이 같은 글로 말하는지 — 한쪽만 말묶음으로 옮겨졌던 자리다.
+            ("mv <group> --from".to_string(), run(&["mv", &group, "done", "--from", "todo"])),
+            ("defer <group> --from".to_string(), run(&["defer", &group, "--from", "todo", "-m", "why"])),
         ]
     };
     for (args, said) in screens("cmdlangen", None) {
         assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
         assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    // **한국어 쪽도 잰다**(리뷰) — 위만 두면 `say(Lang::En, …)` 을 박아 둔 자리와 `ko` 표에서
+    // 빠진 키가 똑같이 푸르다. `the_skill_screens_stand_in_one_language` 와 한 꼴이다.
+    for (args, said) in screens("cmdlangko", Some("ko")) {
+        assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
     }
 }
 
@@ -962,6 +982,18 @@ fn init_plants_the_merge_driver_too() {
     assert!(said.contains("머지 드라이버를 심었다"), "죽은 경로를 안 고쳤다\n{said}");
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "고치고도 알림이 남았다");
 
+    // **도는 줄은 안 덮는다**(리뷰). `--as <늘 있는 자리>` 는 워크트리의 `target/` 이 죽는 것을
+    // 막으려고 사람이 일부러 고른 줄인데, 적힌 값이 지금 고를 것과 다르다는 이유만으로 덮던
+    // 판은 `moai init` 한 번이 그것을 지금 도는 바이너리로 갈아 치웠다 — `--local` 은 클론이
+    // 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다.
+    let stable = root.join("늘있는moai");
+    std::fs::copy(BIN, &stable).unwrap();
+    ok(root, &["merge-driver", "--install", "--as", &stable.display().to_string()]);
+    let pinned = git(root, &["config", "--get", "merge.moai.driver"]);
+    let said = ok(root, &["init"]);
+    assert!(!said.contains("머지 드라이버를 심었다"), "일부러 고른 줄을 덮었다\n{said}");
+    assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), pinned, "일부러 고른 줄이 바뀌었다");
+
     // **`--no-driver` 는 `.git/config` 를 안 건드린다.**
     let other = s.path().join("옆");
     std::fs::create_dir_all(&other).unwrap();
@@ -1037,6 +1069,23 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
     ok(root, &["init"]);
     let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
     assert!(rule(&attrs), "빠진 규칙을 안 썼다\n{attrs}");
+
+    // **스냅샷의 `merge=union` 은 결정이 아니다**(리뷰 moai-t6z9.bd6 4번). 그 한 값은 이 저장소가
+    // 없애려고 다시 만들어진 실패 그 자체라 — 같은 id 를 가진 줄 둘 — 받아 주면 `init` 도 알림도
+    // 조용해진 채 스냅샷이 union 으로 합쳐진다. 옛 moai 에서 온 클론이 실제로 그 꼴이다.
+    std::fs::write(
+        root.join(".gitattributes"),
+        "# 옛 판에서 온 줄\n\
+         .moai/issues.jsonl   text eol=lf merge=union\n",
+    )
+    .unwrap();
+    ok(root, &["init"]);
+    let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+    assert!(rule(&attrs), "union 을 결정으로 읽고 규칙을 안 썼다\n{attrs}");
+    // git 은 같은 경로의 **뒤엣줄**을 쓰므로 덧붙인 우리 줄이 이긴다 — 선언이 살아 알림도 깨어난다
+    // (여기서는 위에서 제대로 심어 둔 판이라 `current` 로 선다. `off` 면 넷이 다 잠든 것이다).
+    let json = ok(root, &["init", "--check", "--json"]);
+    assert!(json.contains("\"driver\":\"current\""), "union 이 선언을 재웠다\n{json}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
@@ -13976,7 +14025,12 @@ fn status_sees_a_driver_planted_in_a_relocated_global_config() {
 /// 심는 자리(`--local`)는 클론이 함께 쓰는 파일인데 이 저장소의 절차는 일을 모두 워크트리에서
 /// 하므로, 맨 `--install` 은 대개 `<워크트리>/target/release/moai` 를 박았다 — 그 워크트리를
 /// 지우는 날 모든 체크아웃이 죽은 경로를 든다. `PATH` 의 `moai` 가 **같은 판**이면 그쪽이
-/// 오래 사니 그것을 고른다. 같은 판인지는 `--version` 과 실제 부름 둘로 잰다.
+/// 오래 사니 그것을 고른다.
+///
+/// **같은 판은 바이트가 같은 것이다**(리뷰 moai-t6z9.bd6 9번). `--version` 으로 재던 판은
+/// 이 크레이트의 판이 온 이력에서 `0.1.0` 하나라 두 빌드를 못 갈랐고, 깔려 있던 **옛 빌드**를
+/// 그대로 심었다 — 그 저장소의 병합이 옛 알고리즘으로 합쳐지는데 화면은 둘 다 성하다고 했다.
+/// 그래서 여기 심는 것도 감싼 스크립트가 아니라 **이 바이너리의 복사본**이다.
 #[cfg(unix)]
 #[test]
 fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
@@ -13984,11 +14038,11 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     let root = s.path();
     git(root, &["init", "-q", "."]);
 
-    // PATH 에 선 같은 판 — `--version` 도 `merge-driver --help` 도 이 바이너리를 그대로 지난다.
+    // PATH 에 선 같은 판 — 바이트가 같은 복사본이다.
     let bin = root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let shim = bin.join("moai");
-    write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
+    place_exe(std::path::Path::new(BIN), &shim);
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
     let planted = |path: &str| {
         let mut cmd = isolated(BIN);
@@ -13999,8 +14053,9 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     };
     assert!(planted(&path).contains(&shim.display().to_string()), "PATH 의 같은 판을 안 골랐다");
 
-    // **판이 다르면 안 고른다** — 틀리는 값은 덜 이르는 쪽이라야 한다.
-    write_exe(&shim, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'moai 9.9.9'; fi\nexit 0\n");
+    // **판이 다르면 안 고른다** — 틀리는 값은 덜 이르는 쪽이라야 한다. 감싼 스크립트도 여기 든다:
+    // 부름을 그대로 지나도 바이트가 다르면 같은 판이 아니다.
+    write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
     assert!(planted(&path).contains(BIN), "판이 다른데 그것을 심었다");
 
     // **PATH 에 없으면 지금 바이너리다** — 앞 판이 늘 하던 일이다. git 은 남은 자리다.

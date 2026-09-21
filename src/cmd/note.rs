@@ -40,11 +40,16 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
+    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
+    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
+    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
+    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
+    let lang = ctx.lang();
     repo.with_write(
-        || ctx.lang(),
+        || lang,
         |issues, _, _| {
             if !issues.iter().any(|i| i.id == args.id) {
-                return Err(Fail::not_found(&args.id, ctx.lang()));
+                return Err(Fail::not_found(&args.id, lang));
             }
             Ok((vec![entry.clone()], ()))
         },

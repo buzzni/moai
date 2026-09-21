@@ -30,15 +30,20 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     let edits: Vec<(String, bool)> =
         args.blocks.iter().map(|t| (t.clone(), true)).chain(args.unblocks.iter().map(|t| (t.clone(), false))).collect();
 
+    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
+    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
+    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
+    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
+    let lang = ctx.lang();
     let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(
-        || ctx.lang(),
+        || lang,
         |issues, cfg, _| {
             // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
             // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
             // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
             if !args.blocks.is_empty() {
                 let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
-                    return Err(Fail::not_found(&args.id, ctx.lang()));
+                    return Err(Fail::not_found(&args.id, lang));
                 };
                 // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
                 // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
@@ -48,14 +53,8 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                     return Err(Fail::coded(
                         format!(
                             "{}\n      {}",
-                            crate::i18n::fill(
-                                crate::i18n::say(ctx.lang(), "refuse.link_idea_blocker"),
-                                &[("id", &args.id)]
-                            ),
-                            crate::i18n::fill(
-                                crate::i18n::say(ctx.lang(), "refuse.link_idea_promote"),
-                                &[("id", &args.id)]
-                            ),
+                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocker"), &[("id", &args.id)]),
+                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_promote"), &[("id", &args.id)]),
                         ),
                         super::code::BAD_TARGET,
                     ));
@@ -63,19 +62,19 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             }
             for (target, wants_block) in &edits {
                 let Some(t) = issues.iter().find(|i| &i.id == target) else {
-                    return Err(Fail::not_found(target, ctx.lang()));
+                    return Err(Fail::not_found(target, lang));
                 };
                 // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
                 if *wants_block && crate::report::is_idea(t) {
                     return Err(Fail::coded(
-                        crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.link_idea_blocked"), &[("id", target)]),
+                        crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocked"), &[("id", target)]),
                         super::code::BAD_TARGET,
                     ));
                 }
                 if *wants_block && creates_cycle(issues, &args.id, target) {
                     return Err(Fail::coded(
                         crate::i18n::fill(
-                            crate::i18n::say(ctx.lang(), "refuse.link_cycle"),
+                            crate::i18n::say(lang, "refuse.link_cycle"),
                             &[("id", &args.id), ("target", target)],
                         ),
                         super::code::BAD_INPUT,
@@ -103,9 +102,8 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                 // 이름을 다시 물으면 `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은
                 // 막지도 풀지도 못한다 — 끊긴 참조를 도구 안에서 못 없애는 자리다.
                 // 말은 여기서 편다(moai-yve0) — 이미 선 줄이라 가리키는 말은 그 id 다.
-                t.validate_keeping(cfg, t.status == kept).map_err(|why| {
-                    Fail::new(crate::view::invalid(ctx.lang(), &crate::store::At::Id(t.id.clone()), &why))
-                })?;
+                t.validate_keeping(cfg, t.status == kept)
+                    .map_err(|why| Fail::new(crate::view::invalid(lang, &crate::store::At::Id(t.id.clone()), &why)))?;
                 out.push((t.clone(), wants_block));
             }
             // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는
@@ -124,7 +122,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         // `edit` 과 **한 키다**(`edit.nothing_changed`, moai-95g1) — 같은 문장을 두 벌로 두면
         // 한 도구가 같은 처지를 두 말로 말한다(리뷰). 이 줄과 아래 화살표 줄은 서로 배타라
         // 한 판에 같이 서지 않는다 — 나머지 `link` 의 글은 그 표면의 차례에 옮긴다.
-        let said = crate::i18n::say(ctx.lang(), "edit.nothing_changed");
+        let said = crate::i18n::say(lang, "edit.nothing_changed");
         return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, said))]);
     }
     Ok(touched
@@ -136,8 +134,8 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                 paint(
                     style::DIM,
                     match wants_block {
-                        true => crate::i18n::say(ctx.lang(), "link.blocks"),
-                        false => crate::i18n::say(ctx.lang(), "link.unblocks"),
+                        true => crate::i18n::say(lang, "link.blocks"),
+                        false => crate::i18n::say(lang, "link.unblocks"),
                     }
                 ),
                 paint(style::ID, &t.id),

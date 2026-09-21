@@ -148,6 +148,7 @@
   "defer.undid": "도로 집음",
   "defer.already_in": "이미 계획에 있다",
   "defer.already_out": "이미 미뤄 뒀다",
+  "defer.group_no_from_how": "묶음은 `--from` 없이 미룬다",
   "project.added": "등록함",
   "project.already": "이미 등록돼 있다",
   "project.not_registered": "등록돼 있지 않다",

@@ -148,6 +148,7 @@
   "defer.undid": "back in plan",
   "defer.already_in": "already in the plan",
   "defer.already_out": "already deferred",
+  "defer.group_no_from_how": "Defer a group without `--from`",
   "project.added": "registered",
   "project.already": "already registered",
   "project.not_registered": "not registered",

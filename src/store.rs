@@ -35,6 +35,27 @@ pub enum Trouble {
     Invalid { at: At, why: crate::model::Invalid },
 }
 
+impl Trouble {
+    /// 이 거절의 `--json` 코드 — **자료가 되기 전에 들던 값을 그대로 든다**(리뷰).
+    ///
+    /// 글을 자료로 바꾸면서 갈래마다 달랐던 코드를 [`Repo::with_write`] 가 `broken` 하나로 뭉치던
+    /// 판이 있었다. `fail` 의 머리 글이 적어 둔 그대로 **`code` 는 받는 쪽이 분기하는 값**이라,
+    /// 태그에 쉼표를 하나 넣은 `moai add` 가 "파일이 깨졌다" 로 나갔고 같은 검사를 지나는
+    /// `moai edit`·`moai link` 는 제 손으로 `Fail::new` 를 지어 `error` 를 냈다 — 한 거절이
+    /// 명령마다 다른 코드로 나가는 것이 그 글이 이름 붙여 둔 실패다.
+    ///
+    /// **낱말을 빠짐없이 적는다** — `_` 로 받으면 갈래가 느는 날 새 거절이 말없이 `error` 가 된다.
+    fn code(&self) -> &'static str {
+        match self {
+            // 파일이 상했다 — 사람이 손으로 푼다.
+            Trouble::DuplicateId { .. } => code::BROKEN,
+            Trouble::LockBusy { .. } => code::LOCKED,
+            // 나머지는 부르는 쪽이 준 값이나 자리가 틀린 것이다.
+            Trouble::NotADirectory { .. } | Trouble::JournalLost { .. } | Trouble::Invalid { .. } => code::ERROR,
+        }
+    }
+}
+
 /// 거절이 **가리키는 줄**(moai-1rkl, moai-yve0). 이미 선 줄은 id 로, 이번 쓰기가 짓는 줄은
 /// 제목으로 가리킨다 — 거절은 쓰기를 통째로 물리므로 방금 뽑은 id 는 어디에도 안 남는다.
 ///
@@ -542,7 +563,9 @@ impl Repo {
         let (out, note) = match self.write_locked(&lang, f) {
             Ok(v) => v,
             Err(Stop::Failed(e)) => return Err(e),
-            Err(Stop::Refused(t)) => return Err(Fail::coded(crate::view::store_trouble(lang(), &t), code::BROKEN)),
+            // **코드는 갈래가 쥔다**([`Trouble::code`]) — 여기서 하나로 뭉치면 태그 오타가
+            // "파일이 깨졌다" 로 나간다.
+            Err(Stop::Refused(t)) => return Err(Fail::coded(crate::view::store_trouble(lang(), &t), t.code())),
         };
         // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
         if let Some(t) = note {
@@ -558,7 +581,9 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
-        let _lock = Lock::acquire(&self.dir().join("lock"), || lang())?;
+        // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
+        // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
+        let _lock = Lock::acquire(&self.dir().join("lock"), lang)?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
@@ -656,8 +681,7 @@ impl Repo {
                 // **여기도 id 로 안 부른다**(moai-1rkl) — 위의 크기 검사만 고치고 두면 같은
                 // 쓰기가 한 축에서는 제목을, 다른 축에서는 없는 id 를 댄다. 실제로 `add --from`
                 // 에 `#bug,perf` 한 줄을 준 부름이 `<안 남을 id>: 태그에 …` 를 냈고, 같은 계획을
-                // 두 번 돌리면 그때마다 다른 id 가 나왔다. **갈아 끼우는 자는 한 자리다**
-                // ([`crate::model::point_at_unwritten`]) — 검사마다 따로 적으면 두 벌로 갈린다.
+                // 두 번 돌리면 그때마다 다른 id 가 나왔다.
                 // **가리키는 말은 여기서 고른다**(moai-yve0) — 이번 쓰기가 짓는 줄은 거절 뒤에
                 // 그 id 가 어디에도 안 남으므로(moai-1rkl) 제목 한 토막으로 가리킨다. 글은 락을
                 // 놓은 뒤 [`Repo::with_write`] 가 편다.
