@@ -6780,3 +6780,4 @@
 {"ts":"2026-09-21T08:30:32Z","id":"moai-p5az","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"화면의 시간을 시스템 시간대로 — 저장과 --json 은 UTC 그대로"}
 {"ts":"2026-09-21T08:30:32Z","id":"moai-3oz2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 SPC o t 로 시간대를 고른다 — 설정에 적히고 화면만 바꾼다"}
 {"ts":"2026-09-21T08:30:32Z","id":"moai-77ap","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시간대를 못 풀면 UTC 로 떨어지고 한 줄로 알린다 — 정적 musl 판"}
+{"ts":"2026-09-21T08:40:27Z","id":"moai-h6z3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC v 에 done 이 둘이다 — d 를 걷고 번호만 남긴다"}
