@@ -39,7 +39,7 @@ field on the snapshot.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh
 ```
 
 The installer downloads the release archive **and** `SHA256SUMS`, and refuses to
@@ -51,7 +51,7 @@ with `--version v0.1.0`. Through the pipe those flags belong to the script, not
 to your shell, so they need `-s --`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh \
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0
 ```
 

@@ -1,8 +1,13 @@
 #!/bin/sh
 # moai 를 GitHub 릴리스에서 받아 깐다.
 #
-#   curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh
 #   sh install.sh --version v0.1.0 --dir ~/bin
+#
+# **받는 사람이 밟는 가지는 `main` 이다.** 릴리스를 자르는 가지가 `main` 이고,
+# `develop` 은 아직 안 나간 것이 섞이는 자리다 — 거기를 가리키면 받는 사람이
+# 릴리스에 없는 스크립트로 릴리스를 깐다. `CONTRIBUTING.md` 의 `develop` 은
+# 기여자 흐름이라 그대로다.
 #
 # **checksums 로 확인하지 못하면 깔지 않는다.** 확인을 건너뛰는 길은 없다 —
 # 건너뛸 수 있는 확인은 아무도 안 하는 확인이고, 이 스크립트는 파이프로 셸에

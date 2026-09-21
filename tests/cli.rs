@@ -14405,6 +14405,23 @@ fn the_files_the_release_packs_are_all_there() {
     }
 }
 
+/// 받는 사람이 밟는 한 줄은 `main` 을 가리킨다(moai-vqmx). `develop` 은 아직 안 나간 것이
+/// 섞이는 자리라, 거기를 가리키면 받는 사람이 릴리스에 없는 스크립트로 릴리스를 깐다.
+/// 고쳐 놓아도 다음 사람이 기여자 흐름(`CONTRIBUTING.md` 의 `develop`)을 보고 되돌리기 쉬워
+/// 여기서 맨다 — 그 문서는 기여자 것이라 그대로 둔다.
+#[cfg(unix)]
+#[test]
+fn what_the_receiver_curls_is_main() {
+    for name in ["README.md", "install.sh"] {
+        let text = std::fs::read_to_string(at_root(name)).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };
+            let branch = rest.split('/').next().unwrap_or("");
+            assert_eq!(branch, "main", "{name}:{} 가 `{branch}` 를 가리킨다 — 받는 사람은 main 을 밟는다", n + 1);
+        }
+    }
+}
+
 /// `install.sh` 를 돌린다. `MOAI_BASE_URL` 로 가짜 릴리스를 가리켜, 시험이
 /// 네트워크를 타지 않는다.
 #[cfg(unix)]
