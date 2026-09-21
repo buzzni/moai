@@ -1852,7 +1852,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
                             Line::from(Span::styled(site.index.label(&site.issues, &e, site.lang), bold())),
                             Line::from(""),
                         ];
-                        out.extend(rollup(app, site, &deeper(site, &e), inner.width as usize));
+                        out.extend(rollup(app, site, &e, inner.width as usize));
                         out
                     }
                 },
@@ -2258,7 +2258,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 디렉터리면 그 밑의 셈도 함께.
     if matches!(e, Entry::Dir { .. }) {
         out.push(Line::from(""));
-        out.extend(rollup(app, site, &deeper(site, e), w));
+        out.extend(rollup(app, site, e, w));
     }
 
     if let Some(body) = &i.body {
@@ -2379,8 +2379,11 @@ fn role_style(r: crate::markdown::Role) -> Style {
 /// 그 밑의 진척. **`nav` 가 자리를 정한 그대로 센다** — `report::rollup_of` 로
 /// 세면 자리 규칙과 세는 규칙이 달라 머리글과 줄 수가 어긋난다. 목록 줄의 셈(`n/n`)은 같은 값을 적재 때
 /// 미리 센 것([`crate::nav::Index::tally`])을 읽는다 — 둘이 같다는 것은 `nav` 의 시험이 지킨다.
-fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
-    let progress = site.index.progress(&site.issues, path);
+///
+/// **자리가 아니라 줄을 받는다** — 자리는 안에서 [`deeper`] 로 편다. 막대 곁의 미룬 수(moai-oz13)는
+/// 그 줄이 **가리키는 묶음**의 것이라, 편 자리만으로는 어느 묶음에 물을지가 여기서 사라진다.
+fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
+    let progress = site.index.progress(&site.issues, &deeper(site, e));
     let Some(percent) = progress.percent() else {
         // **없는 것과 안 세는 것은 다르다.** 담아 둔 생각은 자리로는 여기
         // 걸리지만(왼쪽 목록이 그 줄을 낸다) 진행률로는 안 센다 — 세기
@@ -2398,12 +2401,24 @@ fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<
     // 간다 — 지키는 척하는 `.saturating_sub`·`.max` 는 지우고 뜻만 남긴다.
     let cells = w.clamp(10, 24) - 4;
     let filled = crate::text::bar_fill(Some(percent), cells);
-    let mut out = vec![Line::from(vec![
+    let mut bar = vec![
         // 16색 10번 — SPC 메뉴의 키와 같은 색(사용자 결정, moai-a46g).
         Span::styled("█".repeat(filled), Style::new().fg(Color::LightGreen)),
         Span::styled("░".repeat(cells - filled), dim()),
         Span::raw(format!("  {done}/{}  {percent}%", work.len())),
-    ])];
+    ];
+    // **미룬 멤버 수를 막대 곁에 댄다**(moai-oz13) — 보드와 `moai show <묶음>` 이 이미 대는 말인데
+    // 탐색기만 안 댔다. 분모는 미룬 멤버를 그대로 세므로, 그 넷을 영영 안 해도 100% 가 안 된다:
+    // 화면이 말하지 않으면 읽는 쪽은 `102/110` 에서 여덟이 남은 줄 알고 셈이 깨졌다고 읽는다.
+    //
+    // **세는 자도 낱말 짓는 자도 하나다** — 수는 `report::Stand::deferred`([`Site::deferred`]),
+    // 낱말은 [`crate::view::set_aside_word`] 다. 바구니(`Entry::Dir { at: None }`)는 제 줄이 없어
+    // 묶음이 아니고, 그래서 댈 수도 없다.
+    let aside = crate::view::set_aside_word(e.at().and_then(|at| site.deferred(at)), site.lang);
+    if let Some(word) = aside {
+        bar.push(Span::styled(format!("   {word}"), dim()));
+    }
+    let mut out = vec![Line::from(bar)];
 
     // 칸별 건수는 `config` 차례로. **0인 칸은 빼서** 좁은 패널에서 줄이 접히지
     // 않게 한다 — CLI 요약이 쓰는 규칙과 같다.
@@ -3357,6 +3372,50 @@ pub(super) mod tests {
             .expect("에픽 줄이 없다");
         let screen = render(&mut a, 120, 20).join("\n");
         assert!(!screen.contains("자식 없음"), "펼쳐 든 에픽의 상세가 자식 없음이라 말한다\n{screen}");
+    }
+
+    /// **탐색기의 롤업도 미룬 수를 막대 곁에 댄다**(moai-oz13). 보드와 `moai show <묶음>` 이 이미
+    /// 대던 말인데 이 표면만 빠져 있었다 — 분모는 미룬 멤버를 그대로 세므로, 화면이 말하지 않으면
+    /// 읽는 쪽은 남은 하나가 아직 집을 것이라고 읽는다.
+    ///
+    /// **낱말은 말묶음에서 받는다** — 글자를 여기 박으면 `view::set_aside_word` 를 안 거치고도
+    /// 푸른 시험이 되어, 두 표면이 같은 수를 다른 낱말로 말하는 날을 못 잡는다.
+    #[test]
+    fn the_rollup_says_how_many_members_are_deferred() {
+        let mut is = issues();
+        let mut put_off = Issue::new(
+            "argos-0005".into(),
+            "미룬 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        put_off.epic = Some("argos-0001".into());
+        put_off.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        is.push(put_off);
+        let mut a = every(is);
+        // 에픽 줄에 커서를 두면 상세가 그 밑을 센다.
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(
+                |r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0001")),
+            )
+            .expect("에픽 줄이 없다");
+        let screen = render(&mut a, 120, 24).join("\n");
+        let want = crate::i18n::fill(crate::i18n::say(a.site.lang, "status.deferred_members"), &[("n", "1")]);
+        assert!(screen.contains("1/3"), "시험의 전제 — 미룬 멤버가 분모에 선다\n{screen}");
+        assert!(screen.contains(&want), "롤업이 미룬 수를 안 댄다 — {want:?}\n{screen}");
+
+        // 미룬 멤버가 없으면 꼬리도 없다 — 모든 줄에 붙으면 뜻이 사라진다.
+        let mut plain = every(issues());
+        plain.cursor = plain
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| plain.site.issues[at].id == "argos-0001")))
+            .expect("에픽 줄이 없다");
+        let screen = render(&mut plain, 120, 24).join("\n");
+        assert!(!screen.contains(&want), "안 미룬 묶음에 꼬리를 달았다\n{screen}");
     }
 
     /// **가지는 `[NEW]` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지가 줄마다 같은 칸에
