@@ -64,7 +64,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
-    let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape)?;
+    let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape, ctx.lang())?;
     let into = args.epic.as_deref();
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
@@ -102,14 +102,16 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         if ctx.json {
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into);
         }
-        let mut out = vec![paint(style::HEAD, "펼칠 것")];
+        let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.will_unfold"))];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
-        out.push(crate::cmd::add::tally(&drafts));
+        out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
         if let Some(e) = into {
-            out.push(paint(style::DIM, &format!("{e} 의 멤버로 든다")));
+            let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
+            out.push(paint(style::DIM, &said));
         }
-        out.push(paint(style::DIM, &format!("{} 는 done 으로 간다", args.id)));
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.will_close"), &[("id", &args.id)]);
+        out.push(paint(style::DIM, &said));
         return Ok(out);
     }
 
@@ -175,6 +177,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // **예산은 상한이 아니라 [`TITLE_IN_NOTE`] 다**(리뷰 moai-5lwd.n5l 3번). 상한을 그대로
             // 주면 64KB 짜리 제목이 만든 이슈마다 저널에 한 벌씩 베껴져, `moai show` 의 이력이 그
             // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
+            // **저널에 적히는 글은 화면 말을 안 따른다** — 설정이 이미 쓴 줄을 바꾸면 그것은
+            // 설정이 아니라 마이그레이션이다(CLAUDE.md). 같은 저장소의 이력이 사람마다 다른
+            // 말로 남으면 `moai show` 의 이력이 두 말로 갈린다.
             let head = format!("{} 에서 펼쳤다 — ", args.id);
             let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
             // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
@@ -227,17 +232,18 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             status: crate::config::DONE,
         });
     }
-    let mut out = vec![paint(style::HEAD, "펼침")];
+    let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.unfolded"))];
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
-    out.push(crate::cmd::add::tally(&drafts));
+    out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     if let Some(e) = into {
-        out.push(paint(style::DIM, &format!("{e} 의 멤버로 들었다")));
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
+        out.push(paint(style::DIM, &said));
     }
     out.push(format!(
         "{}  {}",
         paint(style::ID, &args.id),
-        paint(style::DIM, "→ done  (펼쳐졌으므로 더 볼 것이 없다)")
+        paint(style::DIM, crate::i18n::say(ctx.lang(), "idea.closed"))
     ));
     Ok(out)
 }

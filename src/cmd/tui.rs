@@ -51,7 +51,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
 
-    refuse_without_terminal()?;
+    refuse_without_terminal(ctx.lang())?;
 
     // 등록한 프로젝트가 있으면 층을 얹는다 — 헤더의 `0` 이 그리로 간다(moai-i784·moai-o133).
     // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
@@ -132,7 +132,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 두 프로젝트 중 하나를 말없이 고르게 된다.
     if args.path.is_some() {
         return Err(Fail::coded(
-            "`--path` 는 프로젝트 안의 id 다 — `moai -C <dir> tui --path <id>` 로 그 프로젝트에서 연다",
+            crate::i18n::say(super::lang_of(&reg), "refuse.tui_path_outside"),
             super::code::BAD_INPUT,
         ));
     }
@@ -170,7 +170,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         let problems = crate::view::settings_problems(&reg, super::lang_of(&reg));
         return super::json_line(&Layered { projects: rows, problems: &problems, config: reg.path.as_deref() });
     }
-    refuse_without_terminal()?;
+    refuse_without_terminal(ctx.lang())?;
     let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
     let mut app = App::on_projects(layer);
     app.site.lang = ctx.lang();
@@ -250,13 +250,16 @@ fn is_zero(n: &usize) -> bool {
 
 /// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
 /// 멈춰 서고, 부른 쪽은 왜 멈췄는지 알 길이 없다.
-fn refuse_without_terminal() -> R<()> {
+fn refuse_without_terminal(lang: crate::i18n::Lang) -> R<()> {
     if std::io::stdout().is_terminal() {
         return Ok(());
     }
     Err(Fail::coded(
-        "터미널이 아니라 탐색기를 띄우지 않는다.\n      \
-         목록만 필요하면 `moai tui --json` 이다",
+        format!(
+            "{}\n      {}",
+            crate::i18n::say(lang, "refuse.tui_needs_a_terminal"),
+            crate::i18n::say(lang, "refuse.tui_json_instead"),
+        ),
         super::code::BAD_INPUT,
     ))
 }
@@ -271,7 +274,10 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 부르고 그것은 `.expect()` 다 — 통제 터미널이 없거나 크기를 못 얻으면
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
-    let mut term = ratatui::try_init().map_err(|e| Fail::new(format!("터미널을 열지 못했다: {e}")))?;
+    let lang = app.site.lang;
+    let mut term = ratatui::try_init().map_err(|e| {
+        Fail::new(crate::i18n::fill(crate::i18n::say(lang, "tui.no_terminal"), &[("why", &e.to_string())]))
+    })?;
     // **붙여넣기를 글로 받는다**(moai-od9q). 안 켜면 붙인 글이 키 하나하나로 와서, 탭은 폼의
     // 칸을 옮기고 줄바꿈은 Enter 로 검색을 걸거나 제목을 떠나며, 탐색 중에 붙인 `q` 는 끝낸다.
     // 끄는 길은 둘이다 — 여기 아래의 정상 끝과 **패닉 훅.** ratatui 의 훅은 raw mode 와 대체
@@ -297,8 +303,8 @@ fn screen(mut app: App) -> R<Vec<String>> {
             .downcast_ref::<&str>()
             .copied()
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("알 수 없는 까닭");
-        eprintln!("moai: 탐색기가 패닉으로 멈췄다 — {why}");
+            .unwrap_or(crate::i18n::say(lang, "tui.panic_unknown_why"));
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "tui.panicked"), &[("why", why)]));
         std::panic::resume_unwind(payload)
     });
     out.map_err(|e| Fail::new(e.to_string()))?;
@@ -559,23 +565,28 @@ fn resume(term: &mut DefaultTerminal) -> std::io::Result<()> {
 /// 열린 채 남는다([`App::edited`]) — 파일에 둘 까닭이 없다. 편집기는 이 프로세스의 stdin·
 /// stdout 을 그대로 받는다. 기다리는 동안 Ctrl-C 가 신호로 오면(raw 로 돌지 않는 편집기)
 /// moai 도 같이 끝난다 — 터미널은 이미 내려 둔 채라 셸은 멀쩡하고, 파일 하나가 남는다.
-fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path) -> Result<String, String> {
+fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate::i18n::Lang) -> Result<String, String> {
+    use crate::i18n::{fill, say};
     use std::io::Write;
-    let (path, mut file) = scratch_file(dir).map_err(|e| format!("임시 파일을 못 만들었다 — {e}"))?;
+    // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests`)이 `say(…, "키")` 모양만 읽어,
+    // 키를 닫힘에 넘기면 그 눈에서 통째로 사라진다.
+    let (path, mut file) =
+        scratch_file(dir).map_err(|e| fill(say(lang, "tui.editor_no_temp_file"), &[("why", &e.to_string())]))?;
     let written = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
     drop(file);
     let got = written
-        .map_err(|e| format!("임시 파일에 못 적었다 — {e}"))
+        .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
             std::process::Command::new("sh")
                 .args(crate::tui::jotfile::argv(editor, &path))
                 .status()
-                .map_err(|e| format!("편집기를 못 띄웠다({editor}) — {e}"))
+                .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
         .and_then(|status| match status.code() {
-            Some(0) => std::fs::read_to_string(&path).map_err(|e| format!("편집기가 남긴 파일을 못 읽었다 — {e}")),
-            Some(code) => Err(format!("편집기가 {code} 로 끝났다({editor})")),
-            None => Err(format!("편집기가 신호로 끝났다({editor})")),
+            Some(0) => std::fs::read_to_string(&path)
+                .map_err(|e| fill(say(lang, "tui.editor_no_read"), &[("why", &e.to_string())])),
+            Some(code) => Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())])),
+            None => Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)])),
         });
     let _ = std::fs::remove_file(&path);
     got
@@ -605,7 +616,8 @@ fn private_file(dir: &std::path::Path, stem: &str) -> std::io::Result<(std::path
             Err(e) => return Err(e),
         }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "빈 이름을 못 찾았다"))
+    // io 의 오류 글이라 영어 하나다 — 부르는 쪽이 제 말로 감싼다(moai-na0d).
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
 
 /// 버릴 뻔한 글을 `dir` 의 새 파일에 **편집기 글과 같은 모양**으로 적고 그 경로를 돌려준다
@@ -634,11 +646,16 @@ fn keep_unsaved(app: &App) {
     let Some((title, body)) = app.unsaved() else { return };
     match rescue(&title, body.as_deref(), &std::env::temp_dir()) {
         Ok(path) => eprintln!(
-            "moai: 담지 못한 생각을 파일로 남겼다 — {}\n      첫 줄이 제목, 한 줄 띄우고 본문이다. 탐색기에서 SPC n 으로 다시 담는다",
-            path.display()
+            "moai: {}\n      {}",
+            crate::i18n::fill(
+                crate::i18n::say(app.site.lang, "tui.unsaved_kept"),
+                &[("at", &path.display().to_string())]
+            ),
+            crate::i18n::say(app.site.lang, "tui.unsaved_kept_how")
         ),
         Err(e) => eprintln!(
-            "moai: 담지 못한 생각을 파일로도 못 남겼다({e}) — 여기 그대로 낸다\n{title}\n\n{}",
+            "moai: {}\n{title}\n\n{}",
+            crate::i18n::fill(crate::i18n::say(app.site.lang, "tui.unsaved_lost"), &[("why", &e.to_string())]),
             body.unwrap_or_default()
         ),
     }
@@ -719,7 +736,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
             suspend();
-            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir());
+            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
             app.edited(edit.into, got);
@@ -873,7 +890,7 @@ mod tests {
     fn the_editor_gets_the_template_and_its_edit_comes_back() {
         let d = Dir::new("ok");
         let editor = d.editor("f=\"$2\"; printf '제목\\n\\n본문\\n' >> \"$f\"");
-        let got = write_in_editor(&editor, "# 안내\n", &d.0).expect("편집기가 돌려주지 않았다");
+        let got = write_in_editor(&editor, "# 안내\n", &d.0, crate::i18n::Lang::Ko).expect("편집기가 돌려주지 않았다");
         assert_eq!(got, "# 안내\n제목\n\n본문\n");
         assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
         assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
@@ -890,11 +907,13 @@ mod tests {
     fn a_failing_editor_gives_a_reason_and_leaves_nothing() {
         let d = Dir::new("fail");
         let editor = d.editor("printf '담길 뻔한 것\\n' > \"$2\"; exit 3");
-        let why = write_in_editor(&editor, "", &d.0).expect_err("비영으로 끝났는데 글을 돌려줬다");
+        let why =
+            write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko).expect_err("비영으로 끝났는데 글을 돌려줬다");
         assert!(why.contains('3'), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
 
-        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0).expect_err("없는 편집기인데 글을 돌려줬다");
+        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0, crate::i18n::Lang::Ko)
+            .expect_err("없는 편집기인데 글을 돌려줬다");
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
     }

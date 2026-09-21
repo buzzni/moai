@@ -43,34 +43,36 @@ fn read_source(from: &str) -> R<String> {
 /// `--var` 는 `이름=값` 이다. `=` 이 없거나 이름이 비거나 변수 이름의 모양(`draft::is_var_name`)이
 /// 아니면 그 인자를 대며 거절하고, **같은 이름을 두 번 주면 거절한다** — 어느 값이 이길지 조용히
 /// 고르면 템플릿이 사람이 안 적은 계획을 찍는다. 이 거절과 `fill` 의 거절은 모두 `bad_input` 이다.
-pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape) -> R<Vec<draft::Draft>> {
+pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape, lang: crate::i18n::Lang) -> R<Vec<draft::Draft>> {
+    use crate::i18n::{fill, say};
     let bad = |msg: String| Fail::coded(msg, super::code::BAD_INPUT);
     let mut pairs: Vec<(&str, &str)> = Vec::new();
     // 틀린 `--var` 는 **전부** 모아 한 번에 말한다 — `fill`·`parse` 가 줄을 그렇게 말하는 것과 같다.
     let mut errors: Vec<String> = Vec::new();
     for raw in vars {
         let Some((name, value)) = raw.split_once('=').filter(|(n, _)| !n.is_empty()) else {
-            errors.push(format!("`--var {raw}` 는 `이름=값` 이 아니다"));
+            errors.push(fill(say(lang, "refuse.var_not_a_pair"), &[("raw", raw)]));
             continue;
         };
+        // **갈래마다 제 키를 적는다** — 키를 변수로 넘기면 소스를 훑는 시험의 눈에서 사라진다.
         let why = if !draft::is_var_name(name) {
             // 이름은 계획이 변수로 읽는 모양 그대로다 — 안 그러면 `{{버전}}` 이 든 계획에 `--var 버전=…` 을
             // 준 사람이 "계획에 없는 변수" 라는 틀린 말을 듣는다.
-            "의 이름은 영문·숫자·`_`·`-` 로 적는다 — 계획의 `{{이름}}` 도 그 모양일 때만 변수다"
+            say(lang, "refuse.var_name_shape")
         } else if value.contains(['\n', '\r']) {
             // 제목은 한 줄이다 — 줄바꿈이 든 값은 여러 줄 제목을 세운다.
-            "의 값에 줄바꿈이 들었다 — 값은 한 줄이다"
+            say(lang, "refuse.var_value_lines")
         } else if value.trim().is_empty() {
             // **빈 값은 거절한다**(사람이 정했다, 리뷰 moai-cypw.nn4). 셸 변수가 비어 `--var version=$VERSION`
             // 이 빈 값이 되면 "릴리스 " 같은 반쯤 채운 제목이 조용히 선다 — 전부 필수가 막으려던 그것이다.
-            "의 값이 비었다 — 채울 값을 준다"
+            say(lang, "refuse.var_value_empty")
         } else if pairs.iter().any(|(k, _)| *k == name) {
-            "를 두 번 줬다 — 어느 값을 쓸지 하나만 준다"
+            say(lang, "refuse.var_twice")
         } else {
             pairs.push((name, value));
             continue;
         };
-        errors.push(format!("`--var {name}` {why}"));
+        errors.push(fill(why, &[("name", name)]));
     }
     if !errors.is_empty() {
         return Err(bad(errors.join("\n      ")));
@@ -115,18 +117,24 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         match kind_override.or(args.kind) {
             None | Some(Kind::Issue) | Some(Kind::Epic) => {}
             Some(Kind::Idea) => {
+                let lang = ctx.lang();
                 return Err(Fail::coded(
-                    "생각은 제목 하나로 담는다 — `moai idea add '반짝 떠오른 것'`\n      \
-                     마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다"
-                        .to_string(),
+                    format!(
+                        "{}\n      {}",
+                        crate::i18n::say(lang, "refuse.plan_is_not_an_idea"),
+                        crate::i18n::say(lang, "refuse.plan_is_not_an_idea_how"),
+                    ),
                     super::code::BAD_INPUT,
                 ));
             }
             Some(Kind::Milestone) => {
+                let lang = ctx.lang();
                 return Err(Fail::coded(
-                    "마크다운은 에픽과 이슈만 낸다 — 마일스톤은 `moai milestone add 'v0.1'` 로 만든다\n      \
-                     만든 뒤 `moai edit <에픽> --milestone <id>` 로 계획을 건다"
-                        .to_string(),
+                    format!(
+                        "{}\n      {}",
+                        crate::i18n::say(lang, "refuse.plan_has_no_milestone"),
+                        crate::i18n::say(lang, "refuse.plan_has_no_milestone_how"),
+                    ),
                     super::code::BAD_INPUT,
                 ));
             }
@@ -137,12 +145,13 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
     if !args.var.is_empty() {
         // idea 가 템플릿을 쓰는 길은 펼치기다 — 위의 `--from` 거절이 idea 에 가리키는 곳과 같게 댄다.
+        let lang = ctx.lang();
         let how = match kind_override.or(args.kind) {
-            Some(Kind::Idea) => "moai idea promote <id> --from <파일> --var 이름=값",
-            _ => "moai add --from <파일> --var 이름=값",
+            Some(Kind::Idea) => crate::i18n::say(lang, "refuse.var_needs_from_idea"),
+            _ => crate::i18n::say(lang, "refuse.var_needs_from_add"),
         };
         return Err(Fail::coded(
-            format!("`--var` 는 `--from` 과 함께 쓴다 — 템플릿 파일의 `{{{{이름}}}}` 을 채우는 것이다\n      `{how}`"),
+            format!("{}\n      `{how}`", crate::i18n::say(lang, "refuse.var_needs_from")),
             super::code::BAD_INPUT,
         ));
     }
@@ -152,17 +161,20 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // `clap` 에 맡길 수 없다: `requires = "from"` 은 제목이 있으면(=`from` 과
     // conflicts) 못 채울 요구로 보고 조용히 건너뛴다.
     if args.dry_run {
+        let lang = ctx.lang();
         return Err(Fail::coded(
-            "`--dry-run` 은 `--from` 과 함께 쓴다 — 하나짜리는 연습할 것이 없다\n      \
-             잘못 만들었으면 `moai rm <id>` 다"
-                .to_string(),
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(lang, "refuse.dry_run_needs_from"),
+                crate::i18n::say(lang, "refuse.dry_run_needs_from_how"),
+            ),
             super::code::BAD_INPUT,
         ));
     }
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
-        return Err(Fail::new("제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다"));
+        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.add_no_title")));
     };
-    super::refuse_if_flag_like(&title)?;
+    super::refuse_if_flag_like(&title, ctx.lang())?;
     let body = read_body(args.body)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
     let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
@@ -184,7 +196,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 && !issues.iter().any(|i| &i.id == p)
             {
                 return Err(Fail::coded(
-                    format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.no_such_parent"), &[("id", p)]),
                     super::code::NOT_FOUND,
                 ));
             }
@@ -195,7 +207,10 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             if let Some(e) = &args.epic
                 && !issues.iter().any(|i| &i.id == e)
             {
-                eprintln!("moai: {e} 라는 에픽이 아직 없다. 그대로 넣는다");
+                eprintln!(
+                    "moai: {}",
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "add.no_such_epic_yet"), &[("id", e)])
+                );
             }
 
             let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
@@ -258,7 +273,7 @@ fn bulk(
     dry_run: bool,
     assignee: Option<String>,
 ) -> R<Vec<String>> {
-    let drafts = read_plan(from, vars, draft::Shape::Plan)?;
+    let drafts = read_plan(from, vars, draft::Shape::Plan, ctx.lang())?;
 
     if dry_run {
         check_plan(&drafts)?;
@@ -266,10 +281,10 @@ fn bulk(
             return json_rehearsal(&drafts, None, None);
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
-        let mut out = vec![paint(style::HEAD, "만들 것")];
+        let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "add.will_make"))];
         out.extend(drafts.iter().map(|d| line_of(d, None)));
         out.push(String::new());
-        out.push(tally(&drafts));
+        out.push(tally(&drafts, ctx.lang()));
         return Ok(out);
     }
 
@@ -290,10 +305,10 @@ fn bulk(
         let rows: Vec<super::Row> = made.iter().map(|i| super::Row::from(i, &read)).collect();
         return super::json_line(&rows);
     }
-    let mut out = vec![paint(style::HEAD, "만듦")];
+    let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "add.made"))];
     out.extend(drafts.iter().zip(&made).map(|(d, i)| line_of(d, Some(&i.id))));
     out.push(String::new());
-    out.push(tally(&drafts));
+    out.push(tally(&drafts, ctx.lang()));
     Ok(out)
 }
 
@@ -452,7 +467,11 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&st
     })
 }
 
-pub fn tally(drafts: &[Draft]) -> String {
+pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {
     let epics = drafts.iter().filter(|d| d.kind == Kind::Epic).count();
-    paint(style::DIM, &format!("에픽 {epics} · 이슈 {}", drafts.len() - epics))
+    let said = crate::i18n::fill(
+        crate::i18n::say(lang, "add.tally"),
+        &[("epics", &epics.to_string()), ("issues", &(drafts.len() - epics).to_string())],
+    );
+    paint(style::DIM, &said)
 }

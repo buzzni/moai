@@ -775,6 +775,43 @@ fn the_init_screen_stands_in_one_language() {
     }
 }
 
+/// **이슈 명령의 거절도 한 말로 선다**(moai-na0d).
+///
+/// `add`·`show`·`idea`·`note`·`link` 의 거절문이 소스에 박힌 한국어였다 — 영어를 고른 사람이
+/// 가장 자주 밟는 자리인데 거기서만 말이 갈렸다. **저널에 적히는 글은 여기 없다**: 펼치기가
+/// 남기는 이력은 설정이 바꾸면 안 되는 글이라 그대로 둔다.
+#[test]
+fn the_issue_command_refusals_stand_in_one_language() {
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = init(name);
+        let id = add(s.path(), &["제목"]);
+        let run = |args: &[&str]| {
+            let mut cmd = isolated(BIN);
+            cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+            with_lang(&mut cmd, lang);
+            let out = cmd.output().expect("moai 를 실행하지 못했다");
+            format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+        };
+        vec![
+            ("add <no title>".to_string(), run(&["add"])),
+            ("add --var".to_string(), run(&["add", "x", "--var", "a"])),
+            ("add --dry-run".to_string(), run(&["add", "x", "--dry-run"])),
+            ("add --parent".to_string(), run(&["add", "x", "--parent", "argos-9999"])),
+            ("show <target>".to_string(), run(&["show", "nonsense"])),
+            ("show --raw".to_string(), run(&["show", "--raw"])),
+            ("show --as-plan".to_string(), run(&["show", "--as-plan"])),
+            ("show <id> --tree".to_string(), run(&["show", &id, "--tree"])),
+            ("note <nothing>".to_string(), run(&["note", &id])),
+            ("link".to_string(), run(&["link", &id])),
+            ("idea promote --dry-run".to_string(), run(&["idea", "add", "생각", "-q"])),
+        ]
+    };
+    for (args, said) in screens("cmdlangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+}
+
 /// **`moai skill` 의 화면도 한 말로 선다**(moai-uzgp).
 ///
 /// `init` 다음으로 새 사용자가 밟는 표면인데 설치·상태·걷기의 안내문이 통째로 박힌 한국어였다.

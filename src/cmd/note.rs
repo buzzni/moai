@@ -27,17 +27,14 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let given = match (args.text, super::add::read_body(args.body)?) {
         (Some(t), _) => t,
         (None, Some(b)) => b,
-        (None, None) if asked => return Err(empty()),
+        (None, None) if asked => return Err(empty(ctx.lang())),
         (None, None) => {
-            return Err(Fail::coded(
-                "무엇을 적을지 안 줬다. 짧으면 자리 인자로, 길면 `-b -` 로 stdin 에서 준다",
-                super::code::BAD_INPUT,
-            ));
+            return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.note_nothing"), super::code::BAD_INPUT));
         }
     };
     let text = given.trim().to_string();
     if text.is_empty() {
-        return Err(empty());
+        return Err(empty(ctx.lang()));
     }
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
@@ -72,6 +69,6 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
 
 /// 빈 메모는 이력을 더럽히기만 한다. `defer` 의 빈 까닭을 안 적기로 한 것과
 /// 같은 판단이다.
-fn empty() -> Fail {
-    Fail::coded("메모가 비었다", super::code::BAD_INPUT)
+fn empty(lang: crate::i18n::Lang) -> Fail {
+    Fail::coded(crate::i18n::say(lang, "refuse.note_empty"), super::code::BAD_INPUT)
 }

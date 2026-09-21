@@ -52,7 +52,13 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     if !dangling.is_empty() {
-        eprintln!("moai: 끊긴 참조가 {}건 남았다 — {}", dangling.len(), dangling.join(" "));
+        eprintln!(
+            "moai: {}",
+            crate::i18n::fill(
+                crate::i18n::say(ctx.lang(), "rm.dangling_left"),
+                &[("n", &dangling.len().to_string()), ("ids", &dangling.join(" "))]
+            )
+        );
     }
 
     if ctx.json {

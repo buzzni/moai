@@ -350,7 +350,7 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 ///
 /// **띄어쓰기가 가른다.** 사람이 쓰는 제목은 낱말이 여럿이고, 오타 난
 /// 플래그는 한 낱말이다. 정말 그 제목을 쓰겠다면 `--` 로 넘긴다.
-pub fn refuse_if_flag_like(title: &str) -> R<()> {
+pub fn refuse_if_flag_like(title: &str, lang: crate::i18n::Lang) -> R<()> {
     // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
     //
     // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
@@ -362,7 +362,9 @@ pub fn refuse_if_flag_like(title: &str) -> R<()> {
     if title.starts_with("--") && !title.contains(char::is_whitespace) {
         return Err(Fail::coded(
             format!(
-                "`{title}` 은 제목이 아니라 플래그로 보인다.\n                       정말 제목이면 `--` 뒤에 둔다 — `moai add -- {title}`"
+                "{}\n                       {}",
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_looks_like_a_flag"), &[("title", title)]),
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_after_dashes"), &[("title", title)]),
             ),
             code::BAD_INPUT,
         ));
@@ -582,7 +584,7 @@ pub fn json_with<T: Appendable>(base: &T, extra: &[(&str, String)]) -> R<Vec<Str
     );
     let mut s = serde_json::to_string(base).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
-        return Err(Fail::new("객체가 아니다"));
+        return Err(Fail::new("not an object"));
     }
     let empty = s == "{}";
     s.pop();
