@@ -231,3 +231,7 @@
 {"ts":"2026-09-21T17:29:17Z","id":"moai-6ney.ja4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 가 도는 중이다. 원문을 이 이슈에 노트로 남기고, 받은 것과 넘긴 것을 -m 에 적어 닫는다. 워크트리는 .claude/worktrees/moai-6ney, 가지는 worktree-moai-6ney, 머지 안 했다"}
 {"ts":"2026-09-21T17:29:17Z","id":"moai-f0zk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(moai-6ney.ja4)의 고침을 받고, 루트에서 develop 에 병합한 뒤 닫는다"}
 {"ts":"2026-09-21T17:29:17Z","id":"moai-6924","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(moai-6ney.ja4)의 고침을 받고, 루트에서 develop 에 병합한 뒤 닫는다"}
+{"ts":"2026-09-21T17:33:32Z","id":"moai-jooo","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더의 빛이 멈춘 화면에서도 루프를 계속 깨운다 — 놀고 있는 보드가 초당 여덟 번 다시 그려진다"}
+{"ts":"2026-09-21T17:33:32Z","id":"moai-pcyf","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더 번호 칸의 폭 셈이 재는 쪽과 그리는 쪽으로 갈린다"}
+{"ts":"2026-09-21T17:33:32Z","id":"moai-y7lv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"로고 글리프가 ambiguous 폭이라 두 칸으로 그리는 터미널에서 헤더가 어긋난다"}
+{"ts":"2026-09-21T17:33:32Z","id":"moai-d3ya","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 화면 폭과 배치 결정"}
