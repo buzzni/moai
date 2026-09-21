@@ -222,3 +222,5 @@
 {"ts":"2026-09-21T17:25:57Z","id":"moai-h06a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
 {"ts":"2026-09-21T17:26:11Z","id":"moai-pkvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 노트의 마지막 줄을 뒤집는다 — 사용자가 done 으로 정했다(2026-09-21).\n\n- 이 일은 실제로 됐다. 글리프를 세웠고 배포까지 갔다. 뒤에 걷은 것은 moai-nb6w 라는\n  제 줄이 따로 있다\n- 칸은 그 줄이 어디 있는가지 그 요구가 아직 서 있는가가 아니다. 앞 노트에서 \"요구가\n  안 풀렸으니 todo\" 라 적은 것이 그 둘을 섞었다\n- 되돌린 까닭과 다시 세울 조건(줄머리 폭을 먼저 푼다)은 앞 노트에 그대로 선다"}
 {"ts":"2026-09-21T17:26:12Z","id":"moai-h06a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pkvw 와 같다 — 사용자가 done 으로 정했다(2026-09-21). 앞 노트의 칸 판단만 뒤집힌다."}
+{"ts":"2026-09-21T17:26:15Z","id":"moai-6924","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:27:07Z","id":"moai-1p4t","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"멈춘 에픽에 ⏯ 를 세운다 — 끝난 멤버가 있는데 도는 멤버가 없다"}
