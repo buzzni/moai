@@ -387,3 +387,11 @@
 {"ts":"2026-09-21T21:12:45Z","id":"moai-i7b6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-21T21:12:46Z","id":"moai-l2he","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-21T21:12:46Z","id":"moai-p3kb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-s7we","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 같은 토막을 두 번 훑지 않는다"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-a1if","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훑은 한 벌을 나눠 쓰는 자리를 세운다"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-wdo8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훑은 횟수를 한 자리에서 세어 되돌림을 잡는다"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-2i0g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"고치기 전후 판정을 글자째 견준다"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-dvlw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"같은 자로 다시 재어 표를 남긴다"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-s7we","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-44wr 에서 펼쳤다 — 훅이 같은 토막을 두 번 훑는다 — picked_in 의 shell_scan 과 aimed"}
+{"ts":"2026-09-21T22:34:34Z","id":"moai-44wr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-s7we 로 펼쳤다 (이슈 4건)"}
+{"ts":"2026-09-21T22:35:02Z","id":"moai-2i0g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
