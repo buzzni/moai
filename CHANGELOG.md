@@ -10,6 +10,22 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `--json` always carries `kind` and `priority`, including on the rows whose
+  snapshot line leaves them out because they hold the default. What the file
+  omits and what the contract omits are two different things — keys that can
+  genuinely be absent (`epic`, `milestone`, `deferred_at`) stay absent.
+- `rust-toolchain.toml` pins the toolchain that builds, formats and lints this
+  repository, so `cargo fmt` on a contributor's machine gives what CI sees.
+  `rust-version` in `Cargo.toml` now records the minimum rather than proving it.
+
+### Fixed
+
+- The install one-liner in `README.md` and `install.sh` points at `main`, the
+  branch a release is cut from. It pointed at `develop`, so a receiver installed
+  a release with a script that release does not carry.
+
 ## [0.1.0] - 2026-09-21
 
 ### Added
