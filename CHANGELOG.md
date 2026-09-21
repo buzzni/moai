@@ -18,6 +18,11 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   now the exit code was the only signal, and it is shared with every other partial
   answer, so a machine could tell "this run was not whole" but never which row.
   A row carries only its own checkout's failures.
+- The epic and milestone bars name how many of their members are deferred
+  (`1/2  deferred 1`), on the board, in `moai show <group>` and in
+  `status --json`. The denominator still counts them — the bar is "of what was
+  promised, how much is done" — so without the count beside it the reader sees a
+  number that never drops and reads the tally as broken.
 - `--json` always carries `kind` and `priority`, including on the rows whose
   snapshot line leaves them out because they hold the default. What the file
   omits and what the contract omits are two different things — keys that can

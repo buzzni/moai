@@ -36,6 +36,19 @@ pub struct Roll {
     /// `derived_status`) — 한 낱말이 두 이름으로 나가면 받는 쪽이 둘을 다 기억해야 한다.
     #[serde(rename = "derived_status", skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
+    /// `total` 가운데 **계획에서 뺀** 멤버의 수([`Stand::deferred`], moai-zxwj).
+    ///
+    /// **분모는 그대로다**(2026-09-21 사용자 결정). 막대는 "한때 내건 것 중 얼마나 했나" 라
+    /// 미룬 멤버도 세고, 그래서 그 넷을 영영 안 해도 100% 가 안 된다 — 그것이 정한 값이다.
+    /// 대신 **수가 왜 안 줄어드는지를 화면에 세우는 자**가 이 값이다. 없으면 읽는 쪽은
+    /// `102/110` 에서 여덟이 남은 줄 알고, 그 가운데 넷은 아무도 집을 일이 아니라는 것을
+    /// 보드만 보고는 알 길이 없다.
+    ///
+    /// `column` 과 **같은 자리에서 채운다** — 둘 다 [`Stand`] 에서 온다. 집계만 필요한
+    /// `rollup` 은 비워 둔다: 이 값은 미룬 뿌리를 타고 올라가야 알고([`counted`]), 그 셈은
+    /// 묶음의 칸을 읽는 걸음이 이미 걷는다. 여기서 다시 걸으면 같은 것을 세는 자가 둘이 된다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deferred: Option<usize>,
 }
 
 /// 줄 → 그것이 속한 에픽 ([`epic_labels`]). 키는 **id 와 그 줄의 종류**다.
@@ -1238,6 +1251,20 @@ pub struct Stand<'a, 'c> {
     /// 했나" 라 미룬 멤버도 세지만, `ready` 가 끝나가는 에픽을 먼저 세울 때 묻는 것은
     /// "몇 번 더 집으면 닫히나" 다. 막대로 재면 한 번에 닫히는 에픽이 뒤에 섰다(moai-ha03).
     pub progress: Option<u8>,
+    /// 멤버 가운데 **칸 셈에서 미뤄 뺀** 수 — `of.len() - counted.len()`(moai-zxwj).
+    ///
+    /// 막대(`Roll::percent`)의 분모는 미룬 멤버를 그대로 세는데(2026-09-21 사용자 결정), 그러면
+    /// `102/110` 의 남은 여덟 가운데 넷은 아무도 집을 일이 아니라는 것이 화면에 없다. 그 수를
+    /// 대는 자가 이것이고, `Roll::deferred` 가 여기서 온다.
+    ///
+    /// **[`Stand::aside`] 와 다른 것을 센다.** 저쪽은 센 멤버가 다 끝났을 때만 서는 목록이라
+    /// ([`Waiting::Shelved`]) 아직 굴러가는 묶음에서는 미룬 멤버가 있어도 비어 있다. 막대 곁에
+    /// 댈 수는 언제나 서야 하므로 여기서 따로 센다.
+    ///
+    /// **묶음 제가 받은 미룸으로 빠진 멤버는 안 센다** — [`counted`] 가 그런 멤버를 안 빼기
+    /// 때문이고, 그래야 미뤄 둔 묶음이 `0/N  미룬 N` 으로 제 미룸을 멤버의 미룸인 양 말하지
+    /// 않는다. 그 묶음은 제 줄이 `put_off` 로 이미 말한다.
+    pub deferred: usize,
 }
 
 /// 묶음이 막을 때 기다리는 것.
@@ -1304,7 +1331,11 @@ pub fn group_stands_in<'a, 'c>(
             let (waiting, aside) = waiting_in(of, &counted);
             let finished = counted.iter().filter(|m| m.status.is_done()).count();
             let progress = (!counted.is_empty()).then(|| (finished * 100 / counted.len()) as u8);
-            (g.id.as_str(), Stand { column, since, busy, waiting, aside, progress })
+            // **막대가 세는 것에서 칸이 세는 것을 뺀 것**이다(moai-zxwj) — 두 셈이 이미 여기
+            // 나란히 서 있으므로 새로 걷는 걸음이 없다. 둘 중 하나만 고치는 날 이 수가 0 이 되어
+            // 화면이 먼저 말한다.
+            let deferred = of.len() - counted.len();
+            (g.id.as_str(), Stand { column, since, busy, waiting, aside, progress, deferred })
         })
         .collect()
 }
@@ -2213,7 +2244,16 @@ pub fn rollup_of_in(
         .map(|e| {
             let of = members.get(e.id.as_str()).map(Vec::as_slice).unwrap_or_default();
             let (counts, total, done, percent) = tally(of);
-            Roll { id: Some(e.id.clone()), title: e.title.clone(), counts, total, done, percent, column: None }
+            Roll {
+                id: Some(e.id.clone()),
+                title: e.title.clone(),
+                counts,
+                total,
+                done,
+                percent,
+                column: None,
+                deferred: None,
+            }
         })
         .collect();
 
@@ -2225,7 +2265,7 @@ pub fn rollup_of_in(
     // 안 딸린 것" 이라는 말이고, 화면에 설 낱말은 `view` 가 제 말묶음에서 고른다
     // (`view::tree` 의 `ready.no_epic`). 여기서 지으면 `report` 가 화면 말을 알아야 하고,
     // 그것은 이 층이 `&[Issue]` 에 대한 순수 함수라는 계약(CLAUDE.md)이 막는 자리다.
-    out.push(Roll { id: None, title: String::new(), counts, total, done, percent, column: None });
+    out.push(Roll { id: None, title: String::new(), counts, total, done, percent, column: None, deferred: None });
     out
 }
 
@@ -3092,6 +3132,8 @@ pub fn status_in<'a>(
     let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
+    // 막대 곁에 댈 미룬 수도 같은 셈에서 받는다([`Stand::deferred`], moai-zxwj).
+    let put_aside: BTreeMap<&str, usize> = stands.iter().map(|(id, s)| (*id, s.deferred)).collect();
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     // 도는 마일스톤 — `ready` 가 밖의 일을 빼는 자와 **같은 자다**(moai-493a).
     let running = running_in(cfg, &by_id, &stands, &out_of_plan);
@@ -3111,9 +3153,13 @@ pub fn status_in<'a>(
     // **묶음 줄에는 읽은 칸을 곁들인다.** 막대(`3/5`)는 계획 중 얼마나 했나이고 칸은
     // 지금 할 것이 남았나라, 남은 멤버를 미뤄 접은 묶음은 `1/2` 인 채로 닫혀 있다 —
     // 세션이 여기서 시작하는데 그것을 안 말하면 접은 묶음과 굴러가는 묶음이 같아 보인다.
+    // **미룬 수도 같은 자리에서 곁들인다**(moai-zxwj) — 막대의 분모는 미룬 멤버를 그대로 세므로
+    // (2026-09-21 사용자 결정), 그 수가 안 줄어드는 까닭이 화면에 없으면 읽는 쪽은 `102/110` 에서
+    // 여덟이 남은 줄 안다. 칸과 **한 자리에서** 곁들이는 까닭은 둘 다 [`Stand`] 가 세기 때문이다.
     let stood = |r: Roll| {
         let column = r.id.as_deref().and_then(|id| states.get(id)).map(|c| c.to_string());
-        Roll { column, ..r }
+        let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
+        Roll { column, deferred, ..r }
     };
     let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
@@ -5444,6 +5490,40 @@ mod tests {
             ["argos-00ee", "argos-00mm"],
             "done 으로 읽은 묶음의 미룸을 뺐다"
         );
+    }
+
+    /// **막대의 분모가 안 줄어드는 까닭을 셀 수 있다**(moai-zxwj, 2026-09-21 사용자 결정).
+    ///
+    /// 막대는 미룬 멤버를 분모에 그대로 두고(`Roll::total`), 칸은 그것을 뺀다(`counted`). 그
+    /// 차이가 [`Stand::deferred`] 고, 화면이 `4/5  미룬 1` 로 대는 수다 — 이 수가 없으면 읽는
+    /// 쪽은 남은 하나를 아무도 안 집는 까닭을 보드에서 알 길이 없다.
+    ///
+    /// **묶음 제 미룸으로는 안 센다.** [`counted`] 가 그런 멤버를 안 빼므로 0 이고, 그 줄은
+    /// `put_off` 가 따로 말한다 — 세면 미뤄 둔 에픽마다 `0/2  미룬 2` 가 서서 제 미룸을
+    /// 멤버의 미룸인 양 두 번 말한다.
+    #[test]
+    fn a_groups_deferred_members_are_counted_beside_the_bar() {
+        let cfg = cfg();
+        let mut shelved = member("argos-0003", "argos-0001", "todo");
+        shelved.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "done"), shelved];
+        let stands = group_stands(&issues, &cfg);
+        assert_eq!(stands["argos-0001"].deferred, 1, "미뤄 뺀 멤버를 안 셌다");
+        // 막대는 그 멤버를 분모에 그대로 둔다 — 둘이 갈리는 것이 이 수가 서는 까닭이다.
+        let rolls = rollup(&issues, &cfg);
+        let roll = roll_of(&rolls, Some("argos-0001"));
+        assert_eq!((roll.done, roll.total), (1, 2), "막대가 미룬 멤버를 분모에서 뺐다");
+        assert_eq!(stands["argos-0001"].column, crate::config::DONE, "칸은 미룬 멤버를 안 센다");
+
+        // 미룬 멤버가 없으면 0 이다 — 꼬리가 모든 줄에 붙으면 뜻이 사라진다.
+        let plain = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "done")];
+        assert_eq!(group_stands(&plain, &cfg)["argos-0001"].deferred, 0);
+
+        // 묶음 제가 미뤄 멤버가 물려받은 것은 안 센다 — 그 줄은 `put_off` 가 말한다.
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let inherited = vec![epic, member("argos-0002", "argos-0001", "todo")];
+        assert_eq!(group_stands(&inherited, &cfg)["argos-0001"].deferred, 0, "제 미룸을 멤버의 것인 양 셌다");
     }
 
     /// `ready` 가 미룬 막음에 대는 도로 집는 말도 풀어야 할 미룸을 다 댄다(moai-g2a1).

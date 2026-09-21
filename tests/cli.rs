@@ -15781,3 +15781,42 @@ fn an_unread_journal_stands_in_the_json_beside_the_row_it_cost() {
     assert!(!shown.contains("journal_error"), "옆 체크아웃의 자리를 내 줄에 달았다\n{shown}");
     let _ = (&t.epic, &t.picked);
 }
+
+/// **막대 곁에 미룬 수가 선다 — 보드와 묶음 상세와 `--json` 셋 다**(moai-zxwj, 2026-09-21
+/// 사용자 결정).
+///
+/// 분모는 미룬 멤버를 그대로 세기로 정했으므로(막대는 "한때 내건 것 중 얼마나 했나" 다), 그
+/// 수가 안 줄어드는 까닭이 화면에 있어야 한다. **세 표면을 한 시험이 함께 잰다** — 세는 자는
+/// `report` 하나인데 읽는 쪽이 셋이라, 한쪽만 얹는 날 같은 묶음이 두 수로 읽힌다.
+#[test]
+fn the_bar_names_how_many_members_are_deferred_on_every_surface() {
+    let s = init("asidebar");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--json"]), "id");
+    let done = add(s.path(), &["끝낼 것", "-e", &epic]);
+    let shelved = add(s.path(), &["미룰 것", "-e", &epic]);
+    ok(s.path(), &["mv", &done, "in_progress"]);
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["defer", &shelved, "-m", "다음 판"]);
+
+    // 보드 — 막대는 `1/2` 로 서고 곁에 미룬 수가 붙는다.
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("1/2"), "막대가 미룬 멤버를 분모에서 뺐다\n{board}");
+    assert!(board.contains("미룬 1"), "보드가 미룬 수를 안 댄다\n{board}");
+
+    // 묶음 상세 — 같은 수, 같은 낱말.
+    let detail = ok(s.path(), &["show", &epic]);
+    assert!(detail.contains("1/2") && detail.contains("미룬 1"), "상세가 보드와 다른 말을 한다\n{detail}");
+
+    // 기계 쪽도 같은 셈이다 — 화면만 고치고 `--json` 을 두고 가면 둘이 갈린다.
+    let json = ok(s.path(), &["status", "--json"]);
+    let roll = json
+        .split("},{")
+        .find(|r| r.contains(&format!(r#""id":"{epic}""#)))
+        .unwrap_or_else(|| panic!("에픽이 없다\n{json}"));
+    assert!(roll.contains(r#""total":2"#) && roll.contains(r#""deferred":1"#), "{roll}");
+
+    // 도로 집으면 수가 사라진다 — 미루기는 되돌릴 수 있고, 이 수는 지금의 값이지 자국이 아니다.
+    ok(s.path(), &["defer", &shelved, "--undo"]);
+    let board = ok(s.path(), &["status"]);
+    assert!(!board.contains("미룬 1"), "도로 집었는데 미룬 수가 남았다\n{board}");
+}

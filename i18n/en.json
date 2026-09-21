@@ -63,6 +63,7 @@
   "warn.unread_journal": "{at}: this history could not be read, so what you are shown is missing it — {why}",
   "warn.other": "{kind} {n}",
   "status.put_off": "deferred",
+  "status.deferred_members": "deferred {n}",
   "status.no_children": "no children",
   "status.folded": "closed",
   "status.more": "{n} more",

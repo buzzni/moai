@@ -63,6 +63,7 @@
   "warn.unread_journal": "{at}: 이 이력을 못 읽어, 보이는 것에서 빠졌다 — {why}",
   "warn.other": "{kind} {n}건",
   "status.put_off": "미룸",
+  "status.deferred_members": "미룬 {n}",
   "status.no_children": "자식 없음",
   "status.folded": "닫힘",
   "status.more": "{n}건 더",

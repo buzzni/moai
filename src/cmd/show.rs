@@ -571,12 +571,17 @@ fn one(
             Kind::Milestone => &soil.milestone,
             _ => &soil.epic,
         };
+        // **미룬 수는 보드와 같은 자에서 온다**([`report::Stand::deferred`], moai-zxwj) — 분모는
+        // 미룬 멤버를 그대로 세므로, 그 수가 안 줄어드는 까닭을 여기서도 댄다. 따로 세면 같은
+        // 묶음을 보드와 상세가 다른 수로 말한다.
+        let deferred = soil.stands(all, &repo.config).get(issue.id.as_str()).map(|s| s.deferred);
         let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
-            .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
+            .find(|r| r.id.as_deref() == Some(issue.id.as_str()))
+            .map(|r| report::Roll { deferred, ..r });
         if let Some(r) = &roll {
             out.push(format!(
-                "  {}   {}/{}  {}{}",
+                "  {}   {}/{}  {}{}{}",
                 view::members_label(ctx.lang()),
                 r.done,
                 r.total,
@@ -584,7 +589,8 @@ fn one(
                 match r.percent {
                     None => String::new(),
                     Some(p) => format!("  {p}%"),
-                }
+                },
+                view::set_aside(r.deferred, ctx.lang()),
             ));
         }
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
