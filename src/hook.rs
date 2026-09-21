@@ -243,86 +243,6 @@ fn calls_review(line: &Line<'_>) -> bool {
     })
 }
 
-/// 글 안의 **명령 치환들**(`$( … )`·`` ` … ` ``) — 따옴표 없는 heredoc 본문에서 셸이 돌릴 것을
-/// 고른다(moai-t863). 여는 글자 뒤부터 짝이 맞는 닫는 글자까지를 낸다.
-///
-/// **작은따옴표 안은 안 본다** — 셸도 heredoc 본문에서는 따옴표를 안 보지만, 치환 **안**의 따옴표는
-/// 본다([`closes`]). 겹친 치환은 바깥 것 하나로 낸다 — 다시 읽는 렉서가 그 안을 또 가른다.
-///
-/// **본문 전체를 한 번에 받는다** — 줄마다 부르던 판은 줄을 넘는 `$( … )` 를 줄 끝에서 잘라,
-/// 이어지는 줄의 `moai add` 를 아무 규칙에도 안 보였다(리뷰 moai-p836.rv).
-fn substitutions(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let b = text.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            // 여기는 heredoc 본문이라 따옴표가 글자다 — `\` 만 다음 한 글자를 감싼다.
-            b'\\' => i += 2,
-            b'$' if b.get(i + 1) == Some(&b'(') => {
-                // **안 닫힌 것은 명령이 아니다** — 셸이 그 줄을 아예 못 읽는다.
-                let Some(end) = closes(text, i + 2, Some(b'('), b')') else { break };
-                // `$((…))` 는 셈이지 명령이 아니다 — 여는 자리에서 가른다.
-                let body = &text[i + 2..end];
-                if !body.starts_with('(') {
-                    out.push(body.to_string());
-                }
-                i = end + 1;
-            }
-            b'`' => {
-                let Some(end) = closes(text, i + 1, None, b'`') else { break };
-                out.push(text[i + 1..end].to_string());
-                i = end + 1;
-            }
-            _ => i += 1,
-        }
-    }
-    out
-}
-
-/// 여는 글자 **뒤**(`at`)부터 짝이 맞는 닫는 글자의 **바이트 자리** — **못 찾으면 `None`** 이다.
-/// 안 닫힌 것은 셸도 못 읽어 그 줄이 아예 안 돈다. 글 끝을 닫는 자리로 치던 판은 markdown 산문의
-/// 짝 없는 백틱 하나로 그 뒤 본문을 통째로 명령으로 읽어, `moai note <id> -b - <<EOF` 로 리뷰 글을
-/// 붙이는 길을 막았다(리뷰 moai-p836.rv).
-///
-/// **따옴표 안의 괄호는 안 센다.** 셸이 그렇게 읽는다 — 괄호만 세던 판은
-/// `$(echo ")" > src/x.rs)` 를 `echo "` 에서 끊어, 그 안의 쓰기를 규칙 2 에 안 보였다.
-/// `open` 이 `None` 이면 겹치지 않는다(`` ` … ` ``).
-///
-/// 돌려주는 자리는 언제나 ASCII 글자의 자리라, 글자 경계에서 자른다.
-fn closes(text: &str, at: usize, open: Option<u8>, shut: u8) -> Option<usize> {
-    let b = text.as_bytes();
-    let mut depth = 1usize;
-    let mut i = at;
-    while i < b.len() {
-        match b[i] {
-            b'\\' => i += 1,
-            b'\'' if open.is_some() => {
-                i += 1;
-                while i < b.len() && b[i] != b'\'' {
-                    i += 1;
-                }
-            }
-            b'"' if open.is_some() => {
-                i += 1;
-                while i < b.len() && b[i] != b'"' {
-                    i += usize::from(b[i] == b'\\') + 1;
-                }
-            }
-            c if Some(c) == open => depth += 1,
-            c if c == shut => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
 /// 이 토막이 **셸에 넘기는 글** — `bash -c '…'`·`sh -c`·`eval …` 이다(moai-455j). 그 글은 낱말이
 /// 아니라 명령줄이라, 렉서가 다시 읽어야 규칙이 본다([`Lexer::relex`]).
 ///
@@ -803,6 +723,15 @@ enum Ctx {
     /// `` `…` `` — 옛 꼴의 명령 치환. [`Subst`](Ctx::Subst) 처럼 안의 글은 바깥의 낱말 하나고,
     /// 따로 새 명령으로 다시 읽는다([`Lexer::inner`]). `\` 가 `` ` ``·`\`·`$` 를 감싼다.
     Tick,
+    /// **따옴표 없는 heredoc 의 본문**(moai-t5op) — 셸은 이것을 큰따옴표 속 글처럼 읽되
+    /// **따옴표가 글자다**: `"` 도 `'` 도 아무것도 안 연다. 특별한 것은 `$( … )`·`` `…` `` 와,
+    /// `$`·`` ` ``·`\`·줄 넘김 앞의 `\` 뿐이다.
+    ///
+    /// 한때 글자만 세는 따로 된 자(`substitutions`+`closes`)가 이 자리를 봤다. 같은 규칙을 두
+    /// 벌로 적은 자리였고 뒤엣것이 늘 약한 쪽이었다 — 따옴표·줄 넘김·겹친 셈에서 차례로 졌고
+    /// (리뷰 moai-p836.rv), 마지막까지 겹친 백틱에 졌다: ````echo \`moai add x\```` 의 안쪽
+    /// 치환을 못 봤다. 렉서는 제 `Ctx` 로 그것을 이미 읽고 있었다.
+    Doc,
 }
 
 /// 다음 낱말이 무엇의 과녁인가.
@@ -849,6 +778,8 @@ struct Lexer<'a> {
     /// 쌓는다(moai-xe6e). 치환의 글을 바깥 낱말 하나로만 두던 판은 `echo "$(moai add x)"` 와
     /// `` `moai mv <리뷰> done` `` 을 아무 규칙도 안 보고 넘겼다 — 셸은 그것을 먼저 돌린다.
     inner: Vec<String>,
+    /// **모아 둔 치환 글 전부** — [`Lexer::subs_of`] 만 켠다. 보통은 `None` 이라 값이 안 든다.
+    kept: Option<Vec<String>>,
     /// 맨 바깥 치환이 `cur` 의 어디서 시작했나 — 그 안에 든 치환은 다시 읽을 때 센다.
     mark: Option<usize>,
     /// 마지막으로 쌓은 토막 뒤로 내려간 가장 얕은 `( … )` 깊이와 묶음 깊이([`Seg::low`]·[`Seg::floor`]).
@@ -951,6 +882,7 @@ impl<'a> Lexer<'a> {
             join: Join::default(),
             braces: 0,
             inner: Vec::new(),
+            kept: None,
             mark: None,
             low: usize::MAX,
             floor: usize::MAX,
@@ -1058,7 +990,13 @@ impl<'a> Lexer<'a> {
         if !self.opaque()
             && let Some(at) = self.mark.take()
         {
-            self.inner.push(self.cur[at..].to_string());
+            let text = self.cur[at..].to_string();
+            // [`Lexer::subs_of`] 만 여기 선다 — `inner` 는 토막마다 비워져 본문 하나를 다 읽은
+            // 뒤에는 못 받는다.
+            if let Some(kept) = &mut self.kept {
+                kept.push(text.clone());
+            }
+            self.inner.push(text);
         }
     }
 
@@ -1094,15 +1032,7 @@ impl<'a> Lexer<'a> {
     /// 아무것도 안 집은 채 지나갔다(새는 쪽).
     fn run_over(mut self) -> (Vec<Seg>, Option<usize>) {
         while let Some(c) = self.chars.next() {
-            match self.stack.last().copied() {
-                None => self.plain(c),
-                Some(Ctx::Single) => self.single(c),
-                Some(Ctx::Ansi) => self.escaped(c, '\''),
-                Some(Ctx::Double) => self.double(c),
-                Some(Ctx::Subst(depth)) => self.subst(c, depth),
-                Some(Ctx::Arith(depth)) => self.arith(c, depth),
-                Some(Ctx::Tick) => self.tick(c),
-            }
+            self.step(c);
         }
         self.end_by(None);
         self.relex();
@@ -1453,6 +1383,58 @@ impl<'a> Lexer<'a> {
     }
 
     /// 명령 치환 안인가. 그 안은 규칙이 가르지 않는 한 덩이다.
+    /// 글자 하나를 **지금 선 자리**([`Ctx`])의 셈으로 읽는다. 한 자리에 둔다 — 갈래를 두 벌로
+    /// 적던 자리가 생기면 새 `Ctx` 를 더할 때 한쪽만 고쳐진다.
+    fn step(&mut self, c: char) {
+        match self.stack.last().copied() {
+            None => self.plain(c),
+            Some(Ctx::Single) => self.single(c),
+            Some(Ctx::Ansi) => self.escaped(c, '\''),
+            Some(Ctx::Double) => self.double(c),
+            Some(Ctx::Doc) => self.doc(c),
+            Some(Ctx::Subst(depth)) => self.subst(c, depth),
+            Some(Ctx::Arith(depth)) => self.arith(c, depth),
+            Some(Ctx::Tick) => self.tick(c),
+        }
+    }
+
+    /// **따옴표 없는 heredoc 본문의 명령 치환들**([`Ctx::Doc`], moai-t5op) — 셸이 돌려 값을 본문에
+    /// 끼우는 것들이다. 겹친 치환은 바깥 것 하나로 낸다 — 다시 읽는 렉서가 그 안을 또 가른다.
+    ///
+    /// **토막은 안 낸다.** 본문은 명령이 아니라 그 토막에 흘러드는 글이고([`Seg::fed`]), 그 안의
+    /// 치환만 따로 심긴다([`Lexer::later`]). 그래서 `end_by`·`relex` 를 안 지나간다.
+    fn subs_of(text: &str) -> Vec<String> {
+        let mut lex = Lexer::at(text, 0);
+        lex.stack.push(Ctx::Doc);
+        lex.kept = Some(Vec::new());
+        while let Some(c) = lex.chars.next() {
+            lex.step(c);
+        }
+        lex.kept.unwrap_or_default()
+    }
+
+    /// 따옴표 없는 heredoc 본문 안([`Ctx::Doc`]) — 따옴표는 글자다.
+    fn doc(&mut self, c: char) {
+        if c == '$' && self.chars.peek() == Some(&'(') {
+            self.dollar();
+        } else if c == '`' {
+            self.cur.push(c);
+            self.enter(Ctx::Tick);
+        } else if c == '\\' {
+            // 셸이 감싸는 것은 넷뿐이다 — 나머지 앞의 `\` 는 글자로 남는다.
+            match self.chars.next() {
+                Some(n @ ('$' | '`' | '\\' | '\n')) => self.cur.push(n),
+                Some(n) => {
+                    self.cur.push('\\');
+                    self.cur.push(n);
+                }
+                None => self.cur.push('\\'),
+            }
+        } else {
+            self.cur.push(c);
+        }
+    }
+
     fn opaque(&self) -> bool {
         self.stack.iter().any(|c| matches!(c, Ctx::Subst(_)))
     }
@@ -1703,7 +1685,7 @@ impl<'a> Lexer<'a> {
             // **본문을 다 모은 뒤에 한 번 본다.** 줄마다 보던 판은 줄을 넘는 `$( … )` 를 줄
             // 끝에서 잘라, 이어지는 줄의 `moai add` 를 놓쳤다(리뷰 moai-p836.rv).
             if !quoted {
-                let found = substitutions(&self.docs[n]);
+                let found = Lexer::subs_of(&self.docs[n]);
                 self.later.extend(found.into_iter().map(|t| (n, t)));
             }
         }
@@ -6395,6 +6377,24 @@ mod tests {
         }
         // 셈(`$((…))`)은 명령이 아니다.
         assert_eq!(guard_create(&all, &cfg(), &here(), "cat <<EOF\n$((1 + 2))\nEOF"), Decision::Pass);
+        // **겹친 백틱도 한 치환이다**(moai-t5op) — `` \` `` 는 그 안에서 또 하나를 연다. 글자만
+        // 세던 자가 마지막까지 못 보던 자리고, 렉서는 제 `Ctx` 로 그것을 이미 읽고 있었다.
+        let nested = "cat <<EOF\n`echo \\`moai add '딴 일'\\``\nEOF";
+        assert!(matches!(guard_create(&all, &cfg(), &here(), nested), Decision::Deny(_)), "겹친 백틱을 안 읽었다");
+        // **본문의 따옴표는 글자다** — 셸도 그렇게 읽는다. 치환 **안**의 따옴표는 따옴표다(위).
+        for cmd in [
+            "cat <<EOF\nit's $(moai add '딴 일')\nEOF",
+            "cat <<EOF\n\"$(moai add '딴 일')\"\nEOF",
+            "cat <<EOF\n# $(moai add '딴 일')\nEOF",
+            "cat <<EOF\n${VAR:-$(moai add '딴 일')}\nEOF",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "본문의 따옴표나 주석 뒤의 치환을 잃었다 — {cmd}"
+            );
+        }
+        // **`\\$(` 는 치환이 아니다** — 셸이 `$` 를 감싼다. 본문에서 `\\` 가 감싸는 것은 넷뿐이다.
+        assert_eq!(guard_create(&all, &cfg(), &here(), "cat <<EOF\n\\$(moai add '딴 일')\nEOF"), Decision::Pass);
         // 본문은 여전히 그 토막에 흘러드는 글이다 — 리뷰 원문을 넣는 길이 안 막힌다.
         let note = "moai note t-1 -b - <<EOF\n무엇을 봤나\nEOF";
         assert_eq!(guard_create(&all, &cfg(), &here(), note), Decision::Pass);
