@@ -348,8 +348,16 @@ fn shell_text(words: &[String]) -> Option<Handed> {
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
     // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
-    if let Some(Wrapped::Hands { at, glued, words: split }) = wrap {
+    if let Some(Wrapped::Hands { at, glued, text: shape }) = wrap {
         let tail = &rest[at..];
+        // **`su -c '글'` 의 글은 `bash -c` 의 글이다**(moai-qqg2) — 셸의 명령줄 한 낱말이라 가르지도
+        // 잇지도 않는다. 그 **뒤**는 사용자와 그 셸의 자리 인자지 글의 일부가 아니다: 이어 붙이던
+        // 판이라면 `su -c 'sed -i s/a/b/ x' alice` 의 `alice` 가 sed 의 또 다른 파일이 되어, 아무도
+        // 안 고치는 파일을 고친다며 잘못 막았을 자리다.
+        if shape == Text::Line {
+            let text = glued.or_else(|| tail.first().cloned()).unwrap_or_default();
+            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false });
+        }
         // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
         // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
         // 벗긴 따옴표를 못 되살려 두 쪽으로 틀렸다 — `sudo -s git commit -m 'a > b'` 의 `>` 가
@@ -370,7 +378,7 @@ fn shell_text(words: &[String]) -> Option<Handed> {
         // 빈손 쓰기를 풀어 줬다. 주석 하나(`env -S '#c' sed -i …`)에 글이 통째로 비던 것도 여기다 —
         // env 는 주석을 버리고 피연산자를 그대로 돌린다.
         let split_out;
-        let tail: &[String] = if split {
+        let tail: &[String] = if shape == Text::Words {
             tail
         } else {
             let (raw, more) = match &glued {
@@ -1900,20 +1908,39 @@ const BUILTINS: &[&str] = &[
 enum Wrapped {
     /// 뒤 낱말 이만큼을 넘으면 **명령 자리**다.
     Runs(usize),
-    /// 뒤에 오는 것이 명령이 아니라 **셸에 넘기는 글**이다(moai-drli) — `env -S` 와 `sudo -s`.
-    /// 붙여 온 값이 있으면 그 글이 먼저고, 뒤 낱말들이 그 뒤에 이어 붙는다.
+    /// 뒤에 오는 것이 명령이 아니라 **셸에 넘기는 글**이다(moai-drli) — `env -S`·`sudo -s`·`su -c`.
     Hands {
         /// 뒤 낱말 이만큼을 넘은 자리부터가 글이다.
         at: usize,
         /// 낱말 안에 붙어 온 글 — `env -SCMD`·`env --split-string=CMD`.
         glued: Option<String>,
-        /// 뒤엣것이 **껍데기가 이미 가른 낱말**인가(`sudo -s 명령 …`), 아니면 안 갈린 원문
-        /// 한 낱말인가(`env -S '글'`). 갈린 낱말은 도로 감싸서 이어야 바깥 껍데기가 벗긴
-        /// 따옴표가 되살아난다 — sudo 가 argv 를 셸에 넘길 때 하는 일이 그 escape 다.
-        words: bool,
+        /// 그 글을 **어떻게 읽는가**([`Text`]).
+        text: Text,
     },
-    /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`).
+    /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`), 아니면
+    /// 값이 모자라 셸이 거절할 줄이다(`need!`).
+    ///
+    /// **[`command_of`] 와 [`shell_text`] 는 이것을 `None` 과 같이 다룬다** — 둘 다 "그 뒤는
+    /// 명령이 아니다" 라, 그 토막의 머리는 감싸는 명령 자신으로 남는다. 갈라 적을 값이 생기면
+    /// 그때 가른다: 지금 갈라 두면 뜻 없는 갈래가 하나 더 설 뿐이다(moai-qqg2).
     Stops,
+}
+
+/// 셸에 넘긴 글을 **어떻게 읽는가**([`Wrapped::Hands`]) — 감싸는 명령마다 다르다.
+///
+/// 이름 없는 불리언 하나로 두던 판은 `glued` 와 한 몸이라(값을 받는 스위치면 늘 원문 한 낱말)
+/// 셋째 꼴이 설 자리가 없었다 — `su -c '글'` 이 바로 그 자리다(moai-qqg2).
+#[derive(Clone, Copy, PartialEq)]
+enum Text {
+    /// **껍데기가 이미 가른 낱말들**(`sudo -s 명령 …`) — 도로 감싸서 잇는다. 그래야 바깥 껍데기가
+    /// 벗긴 따옴표가 되살아난다: sudo 가 argv 를 셸에 넘길 때 하는 일이 그 escape 다.
+    Words,
+    /// **안 갈린 원문 한 낱말과 그 뒤의 피연산자**(`env -S '글'`) — 셸이 아니라 낱말로 가른다
+    /// ([`split_string`]). env 는 제 글을 낱말로만 가르고 피연산자를 그대로 argv 에 잇는다.
+    Split,
+    /// **셸의 명령줄 한 낱말**(`su -c '글'`) — `bash -c` 와 같다. 그대로 넘기고, 뒤엣것은 그 글의
+    /// 것이 아니라 버린다(`su -c '글' <사용자> <인자…>` 의 뒤는 사용자와 그 셸의 자리 인자다).
+    Line,
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
@@ -1967,6 +1994,13 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         /// 집기는 규칙 2 를 채워 빈손의 쓰기를 풀어 준다(`env -S 'true && moai mv <id> in_progress'
         /// && 쓰기`). 더 보는 것이 늘 안전한 것은 막는 축뿐이다.
         hands: &'static [&'static str],
+        /// 그 글을 어떻게 읽는가([`Text`]) — `hands` 가 비었으면 안 쓴다.
+        text: Text,
+        /// **제 뒤의 낱말이 명령인가** — `env <명령>`·`sudo <명령>` 은 참이다. `su <사용자>`·
+        /// `runuser <사용자>` 는 거짓이다: 그 낱말은 사용자지 명령이 아니고, 그 명령은 `-c` 의
+        /// 글로만 온다. 참으로 적으면 사용자 이름을 명령으로 읽어 `su alice` 가 `alice` 라는
+        /// 명령이 된다.
+        runs: bool,
         /// `hands` 스위치가 **값을 받는가** — `env -S` 는 그 자리에서 글을 받아(`-SCMD`·
         /// `--split-string=CMD`·뒤 낱말) 옵션 읽기가 거기서 끝나고, `sudo -s` 는 값 없는 깃발이라
         /// 옵션 읽기가 **계속된다**. 받는 것을 안 받는 것으로 적으면 뭉치의 남은 글자(`sudo -si` 의
@@ -1996,6 +2030,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             stops: &[],
             chdir: &["-C", "--chdir"],
             hands: &["-S", "--split-string"],
+            text: Text::Split,
+            runs: true,
             glued: true,
         },
         Wrapper {
@@ -2008,6 +2044,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             stops: &[],
             chdir: &[],
             hands: &[],
+            text: Text::Words,
+            runs: true,
             glued: false,
         },
         Wrapper {
@@ -2020,6 +2058,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             stops: &[],
             chdir: &[],
             hands: &[],
+            text: Text::Words,
+            runs: true,
             glued: false,
         },
         Wrapper {
@@ -2032,6 +2072,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             stops: &[],
             chdir: &[],
             hands: &[],
+            text: Text::Words,
+            runs: true,
             glued: false,
         },
         Wrapper {
@@ -2077,6 +2119,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &["-D", "--chdir"],
             // `sudo -s <명령>` 은 그 낱말들을 이어 붙여 셸에 `-c` 로 넘긴다 — 자리는 그대로다.
             hands: &["-s", "--shell"],
+            text: Text::Words,
+            runs: true,
             glued: false,
         },
         // `doas -C <설정>` 은 규칙을 시험해 보고 찍기만 한다 — 뒤의 명령을 안 돌린다.
@@ -2094,7 +2138,50 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             stops: &["-s", "-L", "-C"],
             chdir: &[],
             hands: &[],
+            text: Text::Words,
+            runs: true,
             glued: false,
+        },
+        // **`su -c '<글>'` 과 `runuser -c` 는 `bash -c` 와 같은 꼴이다**(moai-qqg2) — 표에 없어
+        // 통째로 안 보이던 자리다. `su -c 'sed -i s/a/b/ src/x.rs'` 는 정말 그 파일을 고치는데
+        // 규칙 2 가 그 쓰기를 못 봤고, `su -c 'moai add x'` 는 규칙 1 을 지나갔다.
+        //
+        // **뒤 낱말은 명령이 아니라 사용자다**(`runs: false`) — `su alice` 는 alice 의 셸을 띄울
+        // 뿐이다. `-c` 의 글만 명령이고, 그 글 **뒤**에 오는 것은 사용자와 그 셸의 자리 인자라
+        // 글에 안 잇는다([`Text::Line`]).
+        //
+        // **`-l`·`--login` 은 멈춘다** — 대상 사용자의 홈으로 옮겨 가 **딴 자리에서** 돈다
+        // (`sudo -i` 와 같은 줄이다). 상대 경로가 어디인지 모르는 자리는 지어내지 않는다.
+        //
+        // **`runuser -u <사용자> -- <명령>` 은 아직 안 본다** — 그 꼴은 `-c` 없이 명령을 직접
+        // 돌리므로 `runs` 하나로는 못 가른다. 표에 없던 때와 같은 자리에 그대로 둔다.
+        Wrapper {
+            name: "su",
+            takes: &["-s", "-w", "-g", "-G"],
+            long: &["--shell", "--whitelist-environment", "--group", "--supp-group"],
+            free: &["--preserve-environment", "--fast", "--pty"],
+            attach: &[],
+            args: 0,
+            stops: &["-l", "--login"],
+            chdir: &[],
+            hands: &["-c", "--command", "--session-command"],
+            text: Text::Line,
+            runs: false,
+            glued: true,
+        },
+        Wrapper {
+            name: "runuser",
+            takes: &["-s", "-w", "-g", "-G", "-u"],
+            long: &["--shell", "--whitelist-environment", "--group", "--supp-group", "--user"],
+            free: &["--preserve-environment", "--fast", "--pty"],
+            attach: &[],
+            args: 0,
+            stops: &["-l", "--login"],
+            chdir: &[],
+            hands: &["-c", "--command", "--session-command"],
+            text: Text::Line,
+            runs: false,
+            glued: true,
         },
     ];
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
@@ -2179,7 +2266,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                 .or_else(|| word.strip_prefix(f).filter(|r| r.starts_with('=')).map(|r| Some(r[1..].to_string())))
         }) {
             if w.glued {
-                return Some(Wrapped::Hands { at: n + 1, glued, words: false });
+                return Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
             }
             // 값 없는 깃발에 `=` 를 단 꼴(`sudo -s=x`)은 그 프로그램이 거절한다 — 붙은 것을 글로
             // 읽지 않는다. 표만 달고 옵션을 마저 읽는다.
@@ -2246,7 +2333,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
                     return Some(Wrapped::Hands {
                         at: n + 1,
                         glued: (!left.is_empty()).then(|| left.to_string()),
-                        words: false,
+                        text: w.text,
                     });
                 }
                 handed = true;
@@ -2282,7 +2369,12 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     // 값 없는 글 스위치를 봤으면 **옵션이 끝난 이 자리부터가 글이다**. 뒤가 비어도 괜찮다 —
     // `sudo -s` 혼자는 사람이 쓸 셸을 띄우고, [`shell_text`] 가 빈 글을 안 읽는다.
     if handed {
-        return Some(Wrapped::Hands { at: n, glued: None, words: true });
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
+    }
+    // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 여기서 멈춘다 — 그 낱말을 명령으로
+    // 읽으면 사용자 이름이 명령이 된다.
+    if !w.runs {
+        return Some(Wrapped::Stops);
     }
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
     need!(rest.get(n));
@@ -6080,6 +6172,41 @@ mod tests {
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "따옴표 안의 글자를 연산자로 읽어 없는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **`su -c '글'`·`runuser -c '글'` 은 `bash -c` 와 같은 꼴이다**(moai-qqg2) — 표에 없어
+        // 통째로 안 보이던 자리다. 이 에픽 전부터 그랬다.
+        for cmd in [
+            "su -c 'moai add x'",
+            "su --command 'moai add x'",
+            "su --session-command 'moai add x'",
+            "su -c 'moai add x' 남",
+            "runuser -c 'moai add x' 남",
+            "runuser --command='moai add x'",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "su·runuser 가 넘긴 글을 아무도 안 읽었다 — {cmd}"
+            );
+        }
+        for cmd in ["su -c 'sed -i s/a/b/ src/x.rs'", "runuser -u 남 -c 'echo x > src/x.rs'"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "su·runuser 가 넘긴 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        let seg = |cmd: &str| Line::new(cmd).words().next().unwrap().to_vec();
+        // **글 뒤엣것은 글이 아니다** — 사용자와 그 셸의 자리 인자다. 이어 붙이던 판이라면
+        // `남` 이 sed 의 또 다른 파일이 되어, 아무도 안 고치는 파일을 고친다며 잘못 막았을 자리다.
+        assert_eq!(seg("su -c 'sed -i s/a/b/ src/x.rs' 남 인자"), ["sed", "-i", "s/a/b/", "src/x.rs"]);
+        // **뒤 낱말은 명령이 아니라 사용자다** — `su 남` 은 남의 셸을 띄울 뿐이고, `su moai` 는
+        // moai 를 안 돌린다. 명령으로 읽던 판이라면 사용자 이름이 곧 명령이 됐다.
+        assert_eq!(command_of(&seg("su 남")).first().map(String::as_str), Some("su"));
+        assert_eq!(guard_create(&all, &cfg(), &here(), "su moai add '딴 일'"), Decision::Pass);
+        // **로그인 셸은 딴 자리에서 돈다** — `sudo -i` 와 같은 줄이다(`env -C`·`sudo -D` 의 이웃).
+        for cmd in ["su -l -c 'sed -i s/a/b/ src/x.rs'", "su -lc 'sed -i s/a/b/ src/x.rs'"] {
+            assert_eq!(
+                guard_writes(&[], &cfg(), &here(), root, root, cmd),
+                Decision::Pass,
+                "딴 자리의 상대 경로를 여기 것으로 지어냈다 — {cmd}"
+            );
         }
         // **지어낸 집기는 규칙을 덜 막게 한다** — 더 보는 쪽이 늘 안전하다는 셈이 집기 축에서는
         // 거꾸로 선다. `env -S` 는 `&&` 를 낱말로 넘겨 `/bin/true` 하나를 돌릴 뿐인데, 그 안의
