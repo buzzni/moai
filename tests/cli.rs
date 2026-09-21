@@ -13974,11 +13974,21 @@ const MANIFEST_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 스크립트를 돌린다. `fed` 를 주면 pre-push 가 stdin 에 흘리는 줄을 흉내 낸다.
 #[cfg(unix)]
 fn run_script(name: &str, args: &[&str], fed: Option<&str>) -> Output {
+    run_script_at(&script(name), None, args, fed)
+}
+
+/// 같은 것을 **딴 클론의 사본**으로 돌린다. 스크립트가 뿌리를 제 자리에서 읽으므로
+/// (`BASH_SOURCE`), 미는 커밋을 지어 재는 시험은 그 클론 안의 사본을 불러야 한다.
+#[cfg(unix)]
+fn run_script_at(path: &Path, dir: Option<&Path>, args: &[&str], fed: Option<&str>) -> Output {
     use std::io::Write as _;
     let said = "bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다";
     let mut cmd = isolated("bash");
     // 스크립트가 부르는 `cargo metadata` 가 네트워크로 새지 않게 한다.
-    cmd.arg(script(name)).args(args).env("CARGO_NET_OFFLINE", "true");
+    cmd.arg(path).args(args).env("CARGO_NET_OFFLINE", "true");
+    if let Some(dir) = dir {
+        cmd.current_dir(dir);
+    }
     let Some(fed) = fed else { return cmd.output().expect(said) };
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect(said);
     // 쓰기가 진 것은 삼킨다 — [`from_stdin`] 과 같은 까닭이다. 줄을 안 읽고 먼저
@@ -14068,6 +14078,72 @@ fn hook_arguments_are_not_read_as_a_tag() {
         Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"),
     );
     assert_eq!(bad.status.code(), Some(1), "어긋난 태그가 지나갔다\n{}", text(&bad));
+}
+
+/// 판을 하나 든 `Cargo.toml`. 시험이 짓는 클론에 놓는다.
+#[cfg(unix)]
+fn manifest_saying(version: &str) -> String {
+    format!("[package]\nname = \"moai\"\nversion = \"{version}\"\n\n[dependencies]\nclap = {{ version = \"4\" }}\n")
+}
+
+/// **재는 것은 미는 커밋이지 작업본이 아니다**(moai-ler5). 작업본만 보던 판은 이미
+/// 다음 판으로 넘어간 자리에서 판이 맞는 옛 태그를 다시 미는 것을 막았다 — 막는
+/// 쪽이 틀리는 자리라, 되돌릴 방법이 도구 밖에만 남는다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_reads_the_manifest_of_the_commit_being_pushed() {
+    let s = Scratch::new("check-version-pushed");
+    let root = s.path().join("clone");
+    std::fs::create_dir_all(root.join("scripts")).unwrap();
+    let copied = root.join("scripts/check-version.sh");
+    std::fs::copy(script("check-version.sh"), &copied).unwrap();
+    git(&root, &["init", "-q", "."]);
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "0.1.0"]);
+    let sha = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    // 작업본은 벌써 다음 판이다.
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.2.0")).unwrap();
+
+    let zero = "0".repeat(40);
+    let line = format!("refs/tags/v0.1.0 {sha} refs/tags/v0.1.0 {zero}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&line));
+    assert!(out.status.success(), "미는 커밋이 든 판이 맞는데 막았다\n{}", text(&out));
+    // **어느 자리를 읽었는지 말한다** — 지나갔든 막혔든 무엇과 견줬는지가 로그에 남아야,
+    // 다음 사람이 작업본과 커밋 중 어느 쪽이 답이었는지를 되짚을 수 있다.
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains(&sha), "어느 자리를 읽었는지 안 말한다\n{said}");
+
+    // 거꾸로도 선다 — 작업본과는 맞지만 미는 커밋과 어긋난 태그는 막힌다.
+    let bad = format!("refs/tags/v0.2.0 {sha} refs/tags/v0.2.0 {zero}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&bad));
+    assert_eq!(out.status.code(), Some(1), "작업본으로 재서 어긋난 태그를 보냈다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    // 그 커밋은 이미 굳었다 — 작업본을 올리라고 하면 미는 것은 그대로다.
+    assert!(said.contains("태그를 다시 단다"), "굳은 커밋에 고치는 길을 안 댄다\n{said}");
+}
+
+/// **커밋에서 못 꺼내면 작업본으로 내려앉는다**(moai-ler5). 얕은 클론과 git 이 없는
+/// 자리가 그것이다 — 거기서 멈추면 재지도 않고 푸시를 막는 셈이 된다.
+#[cfg(unix)]
+#[test]
+fn a_commit_the_clone_does_not_have_falls_back_to_the_working_tree() {
+    let s = Scratch::new("check-version-fallback");
+    let root = s.path().join("clone");
+    std::fs::create_dir_all(root.join("scripts")).unwrap();
+    let copied = root.join("scripts/check-version.sh");
+    std::fs::copy(script("check-version.sh"), &copied).unwrap();
+    git(&root, &["init", "-q", "."]);
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
+
+    // 이 클론에 없는 커밋이다. 작업본이 답이 된다.
+    let zero = "0".repeat(40);
+    let missing = "b".repeat(40);
+    let line = format!("refs/tags/v0.1.0 {missing} refs/tags/v0.1.0 {zero}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&line));
+    assert!(out.status.success(), "못 꺼냈다고 맞는 태그를 막았다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("작업본"), "작업본으로 내려앉은 것을 안 말한다\n{said}");
 }
 
 // ── 설치 — 확인하지 못하면 깔지 않는다 ──────────────────────────────
