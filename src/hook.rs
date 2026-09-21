@@ -3246,14 +3246,24 @@ fn shell_writes(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> 
 /// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
 /// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
 fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
-    /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Bailout::cond`]) — 토막 번호와 그것이
-    /// 확실히 도는가다. 번호만 들던 판은 그 집기를 늘 확실한 것으로 세워, `a && if ! 집기; then exit 1;
-    /// fi` 처럼 `if` 자신이 조건에 매인 줄에서 안 돌 수도 있는 집기를 확실한 것으로 적었다(moai-dbzs).
+    /// **집기로 센 토막 하나**([`picked`]) — 그 번호와 선 묶음 깊이, 그리고 확실히 도는가다.
+    ///
+    /// 이름 없는 세 자리 튜플로 두던 판은 앞의 둘이 같은 형이라 바꿔 적어도 컴파일이 됐다
+    /// (리뷰 moai-51h9.q5l·moai-51h9.3jh 가 두 번 짚은 자리다). 이 파일의 [`Bailout`]·`Seen` 문서가
+    /// 바로 그러지 말라고 적어 둔 자리이기도 하다.
+    ///
+    /// **[`Bailout::cond`] 도 이것을 그대로 든다** — 조건에 선 집기를 따로 접었다 폈다 하던 판은
+    /// 같은 값을 두 번 옮겨 적었고, 읽어 낸 쪽이 깊이를 버려 그 집기가 어느 묶음의 것이었는지를
+    /// 잃었다.
     #[derive(Clone, Copy)]
-    struct Cond {
+    struct Pick {
         /// 그 집기의 토막 번호([`Line::used`] 의 번호).
         at: usize,
-        /// 그 집기가 확실히 도는가 — `shell_scan` 의 `certain` 이다.
+        /// 그 집기가 선 묶음 깊이([`Seg::level`]) — [`prune`] 이 이것으로 걷는다.
+        level: usize,
+        /// 그 집기가 확실히 도는가 — `shell_scan` 의 `certain` 이다. 번호만 들던 판은 조건에 선
+        /// 집기를 늘 확실한 것으로 세워, `a && if ! 집기; then exit 1; fi` 처럼 `if` 자신이 조건에
+        /// 매인 줄에서 안 돌 수도 있는 집기를 확실한 것으로 적었다(moai-dbzs).
         sure: bool,
     }
     /// **집기가 지면 끝내는 묶음** 하나([`shell_writes`], moai-ncay).
@@ -3269,10 +3279,10 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         depth: usize,
         /// 들어설 때의 [`Scope::pick`] — 묶음을 지나면 도로 세운다.
         held: Option<usize>,
-        /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Cond`]). 그 집기는 뒤집혀 있어
+        /// `if ! 집기; then exit 1; fi` 의 **조건에 선 집기**([`Pick`]). 그 집기는 뒤집혀 있어
         /// 적히지 않지만(`negated`), 묶음을 지나온 것은 그것이 이겼다는 뜻이라 쓰기 규칙은 집은
         /// 것으로 센다 — 기록도 같이 세워야 두 자리가 안 갈린다(moai-m5mg).
-        cond: Option<Cond>,
+        cond: Option<Pick>,
         /// 지금까지 본 것이 그 꼴인가 — 묶음의 마지막 줄이 `exit` 여야 한다.
         ends: bool,
         /// 그 `exit` 가 **0 아닌 값**을 대는가(moai-4arw, 리뷰 moai-k8j1.209 의 3번) — 겹을 나올 때만
@@ -3424,7 +3434,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     // 있는 묶음을 나오면 그 안의 집기는 쥔 것이 없으니 함께 걷고, 안 돌 수도 있는 자리의 집기는 적되
     // 확실하지 않다고 적는다(moai-hze6·moai-dbzs). **그 자리를 정하는 자는 `certain` 하나고**
     // [`Picks::fold`] 가 그 답을 읽는다 — 목록을 여기 베껴 적지 않는다.
-    let mut picked: Vec<(usize, usize, bool)> = Vec::new();
+    let mut picked: Vec<Pick> = Vec::new();
     // 겹마다 **그 겹에 처음 든 토막의 번호** — 묶음을 나올 때 **그 묶음 안에서** 적은 집기만 걷는다.
     // 깊이만 보던 판은 같은 깊이의 **앞선 형제** 묶음까지 함께 버렸다 — `(집기 A); if …; then 집기 B;
     // fi` 가 늘 도는 A 까지 잃었다. `seg.floor` 로 걷는 것은 옆의 `strict`·`sure` 와 같은 자다.
@@ -3437,15 +3447,18 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     /// **돌았는지 모르는 것**으로 적는다(moai-d5o9 12번, 2026-09-21 사용자 결정).
     ///
     /// 못 푼 것을 통째로 버리던 판은 `a && bash -c 'if ! 집기; then exit 1; fi'` 에 아무것도 안 적었다 —
-    /// 그 줄은 `a` 가 이기면 정말 집는데, 기록이 비어 정말 쥔 세션이 초점을 못 받았다. `Cond.sure` 가
-    /// "안 돌았을 수 있다" 를 말할 수 있게 된 뒤로 떨어뜨리는 대신 표를 달 수 있다.
-    fn credit(picked: &mut Vec<(usize, usize, bool)>, b: Option<&Bailout>, home: usize, won: bool) {
-        if let Some(c) = b.and_then(|b| b.cond) {
-            picked.push((c.at, home, c.sure && won));
+    /// 그 줄은 `a` 가 이기면 정말 집는데, 기록이 비어 정말 쥔 세션이 초점을 못 받았다. [`Pick::sure`]
+    /// 가 "안 돌았을 수 있다" 를 말할 수 있게 된 뒤로 떨어뜨리는 대신 표를 달 수 있다.
+    ///
+    /// **깊이는 그 묶음을 감싼 목록의 것으로 갈아 적는다**(`home`) — 조건에 선 집기가 제 묶음
+    /// 안에 서 있어도, 그 묶음을 푼 것은 바깥 목록에서 이긴 것이다.
+    fn credit(picked: &mut Vec<Pick>, b: Option<&Bailout>, home: usize, won: bool) {
+        if let Some(p) = b.and_then(|b| b.cond) {
+            picked.push(Pick { level: home, sure: p.sure && won, ..p });
         }
     }
-    fn prune(picked: &mut Vec<(usize, usize, bool)>, from: usize, deeper_than: usize) {
-        picked.retain(|(n, at, _)| *n < from || *at <= deeper_than);
+    fn prune(picked: &mut Vec<Pick>, from: usize, deeper_than: usize) {
+        picked.retain(|p| p.at < from || p.level <= deeper_than);
     }
     let over = line.over();
     for seg in line.segs() {
@@ -3857,7 +3870,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             scope.pick = Some(scope.pick.map_or(seg.level, |d| d.min(seg.level)));
             // 안 돌 수도 있는 자리의 집기는 적되 확실하지 않다고 적는다 — 그 자리를 재는 자는
             // `certain` 하나다(moai-hze6·moai-dbzs).
-            picked.push((n, seg.level, certain));
+            picked.push(Pick { at: n, level: seg.level, sure: certain });
         }
         // **집기가 지면 끝내는 묶음이 여기서 열리는가**(moai-ncay) — 두 꼴이고, 먼저 열린 하나만
         // 든다. `|| exit` 한 꼴만 알던 판은 겨루다 진 쪽을 끊는 이 흔한 두 꼴에서 집기를 잃어,
@@ -3894,14 +3907,19 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // 처럼 집기의 값이 조건에 안 닿는 줄과, `( ( 집기 ) ); if ! bash -c 'true'` 처럼 앞선 딴
             // 겹의 집기까지 이긴 것으로 읽어 빈손의 쓰기를 넘겼다(리뷰 moai-k8j1.034). 그 글의
             // 토막들은 이 토막 바로 앞에 심겼으니(`handed_from`) 그 번호부터 거슬러 센다.
-            let own = (picks_up(&seg.words, cfg) && only(n)).then_some(Cond { at: n, sure: certain });
+            let own = (picks_up(&seg.words, cfg) && only(n)).then_some(Pick { at: n, level: seg.level, sure: certain });
             let cond = own.or_else(|| {
                 let from = handed_from.filter(|_| bang && came.is_some_and(|d| d > seg.level))?;
                 // 넘긴 글 안의 집기는 제 표를 이미 달고 있다 — `if` 자신이 조건에 매였으면 그 위에
                 // 한 번 더 매인다(`certain`). 둘 다 서야 확실한 집기다.
-                let &(c, _, sure) =
-                    picked.iter().rev().take_while(|(m, ..)| *m >= from).find(|(_, at, _)| *at > seg.level)?;
-                shell_text(&seg.words).map(|_| Cond { at: c, sure: sure && certain })
+                //
+                // **차례에 안 기댄다**(리뷰 moai-51h9.3jh 의 13번) — `take_while` 로 거슬러 세던 판은
+                // `picked` 가 토막 번호 차례라고 보았는데, [`credit`] 이 더 작은 번호를 꼬리에 밀어
+                // 넣어 그 전제가 깨진다. 지금은 그 자리에서 판정이 안 바뀌지만(막는 자는 아래
+                // moai-n3wq 가 적은 `came`·`level` 문턱이다), 거짓 전제를 코드에 두면 그 문턱이
+                // 열리는 날 이쪽이 함께 틀린다.
+                let &p = picked.iter().rev().find(|p| p.at >= from && p.level > seg.level)?;
+                shell_text(&seg.words).map(|_| Pick { sure: p.sure && certain, ..p })
             });
             if let Some(c) = cond {
                 let b = Bailout {
@@ -3999,7 +4017,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     if let Some((c, from)) = orelse {
         prune(&mut picked, from, c.saturating_sub(1));
     }
-    (out, picked.into_iter().map(|(n, _, sure)| (n, sure)).collect())
+    (out, picked.into_iter().map(|p| (p.at, p.sure)).collect())
 }
 
 /// 글자만으로는 **어디인지 모르는 경로** — 변수·틸드·글롭·프로세스 치환·`-`. 모르는 자리는
