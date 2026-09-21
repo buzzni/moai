@@ -143,7 +143,9 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn is_default(&self) -> bool {
+    /// 줄에 안 적히는 종류. serde 가 이것으로 키를 걷고, `--json` 을 내는 쪽이 이것으로 그
+    /// 걷힌 키를 도로 세운다(`cmd::Row::of`).
+    pub fn is_default(&self) -> bool {
         *self == Kind::Issue
     }
     pub fn as_str(&self) -> &'static str {

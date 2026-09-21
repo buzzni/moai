@@ -60,6 +60,15 @@ later.
 `cargo fmt --all --check` runs in CI, before clippy and the tests. The width is
 set in `rustfmt.toml`, which also records why that value and not the default.
 
+**The toolchain is pinned in `rust-toolchain.toml`**, so rustup builds this
+repository — and formats and lints it — with the version written there, and your
+`cargo fmt` gives what CI sees. Without the pin CI ran on whatever stable the
+runner shipped that week, and rustfmt moving a line it has never touched turned
+someone else's pull request red. Bumping the pin is its own commit: change the
+channel and carry the `cargo fmt --all` it causes in the same commit, never
+mixed with a change to the code. Note that `rust-version` in `Cargo.toml` now
+records the minimum rather than proving it — nothing builds on that version.
+
 The whole repository was formatted in one commit. `git blame` can step over it
 so that it points at the commit that actually wrote each line, but git only
 reads that list from config, and config is not committed — so turn it on once
