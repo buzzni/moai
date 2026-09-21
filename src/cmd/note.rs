@@ -46,7 +46,7 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
 
     repo.with_write(|issues, _, _| {
         if !issues.iter().any(|i| i.id == args.id) {
-            return Err(Fail::not_found(&args.id));
+            return Err(Fail::not_found(&args.id, ctx.lang()));
         }
         Ok((vec![entry.clone()], ()))
     })?;

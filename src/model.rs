@@ -470,7 +470,12 @@ impl Issue {
     /// 갈 칸은 바뀌는 값이라 `kept_status` 가 서지 않는다.
     pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), String> {
         if !kept_status {
-            cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
+            // **저장 계층은 화면 말을 모른 채 둔다**(사람이 정했다, 2026-09-20, moai-fdk7).
+            // 이 글은 파일을 재다 나온 것이라 이웃 검사 열셋과 같은 말로 선다 — `store` 에
+            // 화면 말을 물려주면 한 함수 안에서 말이 갈린다. 그 열넷을 통째로 옮기는 것은
+            // 따로 든다(idea moai-gbk3). 글을 짓는 자리는 그때도 `view::no_such_column` 하나다.
+            cfg.require_known(self.status.as_str())
+                .map_err(|e| format!("{}: {}", self.id, crate::view::no_such_column(crate::i18n::Lang::Ko, &e)))?;
         }
         self.validate_fields()
     }

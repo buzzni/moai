@@ -23,21 +23,23 @@ const TITLE_IN_NOTE: usize = 2 * 1024;
 
 /// 펼칠 수 없는 것을 펼치라 했을 때. **한 곳에서 만든다** — 연습과 진짜가
 /// 같은 것을 거절하는데 문장이 둘이면, 어느 쪽을 봤느냐로 말이 달라진다.
-fn not_an_idea(id: &str, i: &Issue) -> Fail {
-    Fail::coded(
-        format!("{id} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다", i.kind.as_str()),
-        super::code::BAD_TARGET,
-    )
+fn not_an_idea(id: &str, i: &Issue, lang: crate::i18n::Lang) -> Fail {
+    // **곁의 거절과 한 말로 선다**(리뷰) — `Fail::not_found` 와 [`check_epic`] 이 말묶음에서 오는데
+    // 이것만 박혀 있으면 같은 명령의 세 거절이 두 말로 갈린다.
+    let said = crate::i18n::fill(crate::i18n::say(lang, "refuse.not_an_idea"), &[("id", id), ("is", i.kind.as_str())]);
+    Fail::coded(said, super::code::BAD_TARGET)
 }
 
 /// `-e` 로 받은 것이 멤버를 받을 수 있는 에픽인가. **없거나 에픽이 아니면 거절한다** —
 /// `add -e` 는 없는 에픽을 알리고 넘어가지만, 여기서는 idea 가 닫히므로 틀린 자리에 펼친
 /// 것을 되돌릴 길이 도구 밖에만 남는다.
-fn check_epic(issues: &[Issue], id: &str) -> R<()> {
-    let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id))?;
+fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
+    let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id, lang))?;
     if e.kind != Kind::Epic {
+        // **한 검사의 두 갈래가 한 말로 선다**(리뷰) — 위의 `Fail::not_found` 만 말묶음에서
+        // 오면 같은 `-e` 오타가 갈래마다 다른 말로 나간다.
         return Err(Fail::coded(
-            format!("{id} 는 에픽이 아니라 {} 다 — `-e` 는 멤버를 받을 에픽을 가리킨다", e.kind.as_str()),
+            crate::i18n::fill(crate::i18n::say(lang, "refuse.not_an_epic"), &[("id", id), ("is", e.kind.as_str())]),
             super::code::BAD_TARGET,
         ));
     }
@@ -82,12 +84,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 넘어가 0 으로 끝나는데 연습만 1 로 끝나면, 그것을 거절로 읽은 쪽이
         // 도구가 기꺼이 해 줄 계획을 버린다. 어느 줄인지는 그대로 말한다.
         super::name_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
-        let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id, ctx.lang()))?;
         if !crate::report::is_idea(thought) {
-            return Err(not_an_idea(&args.id, thought));
+            return Err(not_an_idea(&args.id, thought, ctx.lang()));
         }
         if let Some(e) = into {
-            check_epic(&load.issues, e)?;
+            check_epic(&load.issues, e, ctx.lang())?;
         }
         // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
         // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
@@ -113,6 +115,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     }
 
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
+    // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
+    // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
+    let lang = ctx.lang();
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
         // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
         // 늦게 써져도 이른 시각을 들어, 생각의 끝이 시작보다 앞선다(리뷰 moai-u5bk.3wq).
@@ -123,18 +129,18 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
         // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
         // 않을 경우를 위한 `expect` 가 필요 없다.
-        let at_idea = issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        let at_idea = issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id, lang))?;
         let thought = &issues[at_idea];
         // 연습에서 이미 봤을 수도 있지만 다시 본다 — 그 사이에 누가 지우거나
         // 바꿨을 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
         if !crate::report::is_idea(thought) {
-            return Err(not_an_idea(&args.id, thought));
+            return Err(not_an_idea(&args.id, thought, lang));
         }
         let title = thought.title.clone();
         let was = thought.status.clone();
         // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다.
         if let Some(e) = into {
-            check_epic(issues, e)?;
+            check_epic(issues, e, lang)?;
         }
         // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
         // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.

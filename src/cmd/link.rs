@@ -37,7 +37,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
         if !args.blocks.is_empty() {
             let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
-                return Err(Fail::not_found(&args.id));
+                return Err(Fail::not_found(&args.id, ctx.lang()));
             };
             // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
             // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
@@ -56,7 +56,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         }
         for (target, wants_block) in &edits {
             let Some(t) = issues.iter().find(|i| &i.id == target) else {
-                return Err(Fail::not_found(target));
+                return Err(Fail::not_found(target, ctx.lang()));
             };
             // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
             if *wants_block && crate::report::is_idea(t) {
@@ -110,7 +110,11 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
     if touched.is_empty() {
-        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, "바뀐 것이 없다"))]);
+        // `edit` 과 **한 키다**(`edit.nothing_changed`, moai-95g1) — 같은 문장을 두 벌로 두면
+        // 한 도구가 같은 처지를 두 말로 말한다(리뷰). 이 줄과 아래 화살표 줄은 서로 배타라
+        // 한 판에 같이 서지 않는다 — 나머지 `link` 의 글은 그 표면의 차례에 옮긴다.
+        let said = crate::i18n::say(ctx.lang(), "edit.nothing_changed");
+        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, said))]);
     }
     Ok(touched
         .iter()

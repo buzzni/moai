@@ -35,8 +35,11 @@ impl Fail {
     pub fn coded(message: impl Into<String>, code: &'static str) -> Fail {
         Fail { message: message.into(), code }
     }
-    pub fn not_found(id: &str) -> Fail {
-        Fail::coded(format!("{id} 를 못 찾았다"), code::NOT_FOUND)
+    /// 없는 id — **`mv`·`defer` 가 여럿을 훑다 대는 줄과 같은 키를 쓴다**(moai-95g1).
+    /// 한 도구가 같은 처지를 두 낱말로 말하면 읽는 쪽이 둘을 다른 일로 읽는다.
+    pub fn not_found(id: &str, lang: crate::i18n::Lang) -> Fail {
+        let said = crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]);
+        Fail::coded(said, code::NOT_FOUND)
     }
 }
 

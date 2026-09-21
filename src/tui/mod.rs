@@ -1933,7 +1933,8 @@ impl App {
         // 어느 줄이 선 칸이면 받는다 — `show -s`·`--from` 과 같은 술어다(moai-hym7).
         for s in &filter.status {
             if !crate::report::knows_column(&self.site.issues, &self.site.cfg, s) {
-                return Err(crate::cmd::unknown_column(s, &self.site.cfg));
+                let why = crate::cmd::unknown_column(s, &self.site.cfg);
+                return Err(crate::view::no_such_column(self.site.lang, &why));
             }
         }
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
@@ -2187,13 +2188,20 @@ impl App {
         if look == self.saved {
             return;
         }
-        match crate::user_config::update(&path, |doc| doc.merge_look(&self.saved, &look)) {
+        match crate::user_config::update(&path, self.site.lang, |doc| doc.merge_look(&self.saved, &look)) {
             // 건너뛴 키도 든 것으로 옮긴다(moai-jr3z) — 안 옮기면 다음 저장마다 그 차이가 또 실려 같은 알림이
             // 토글마다 선다. 알림은 이번 한 번이고, 파일의 손으로 적은 모양은 그대로다.
             Ok(skipped) => {
                 self.saved = look;
                 if !skipped.is_empty() {
-                    self.notice = Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &skipped.join(" · "))]));
+                    // 건너뛴 키의 까닭도 말묶음에서 온다(moai-wflg) — 자료로 와서 여기서 편다.
+                    // **어느 파일인지를 단다**(리뷰) — 이 줄도 "손으로 고친다" 로 끝나는 갈래라
+                    // `update` 의 거절문과 같은 약속을 진다(moai-gmdu). 탐색기 안에서는 설정의
+                    // 자리를 달리 물을 길이 없어, 안 달면 어느 파일을 고칠지 알 수 없다.
+                    let at = Some(path.as_path());
+                    let why: Vec<String> =
+                        skipped.iter().map(|t| crate::view::write_trouble(self.site.lang, at, t)).collect();
+                    self.notice = Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &why.join(" · "))]));
                 }
             }
             Err(e) => {
@@ -3809,11 +3817,11 @@ impl App {
         match &self.mode {
             Mode::Filter(q) if !q.text().trim().is_empty() => match self.build_filter(&self.mode) {
                 Err(e) => Some(e),
-                Ok(f) => f
-                    .status
-                    .iter()
-                    .find(|s| !crate::report::knows_column(&self.site.issues, &self.site.cfg, s))
-                    .map(|s| crate::cmd::unknown_column(s, &self.site.cfg)),
+                Ok(f) => {
+                    f.status.iter().find(|s| !crate::report::knows_column(&self.site.issues, &self.site.cfg, s)).map(
+                        |s| crate::view::no_such_column(self.site.lang, &crate::cmd::unknown_column(s, &self.site.cfg)),
+                    )
+                }
             },
             _ => None,
         }

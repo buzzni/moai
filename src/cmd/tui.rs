@@ -34,7 +34,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
-    let path = resolve(&index, &load.issues, args.path.as_deref())?;
+    let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.
     if ctx.json {
@@ -315,7 +315,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
 /// **비었는지로 묻지 않는다** — 그것은 `nav::Index::is_dir` 이 이미 아는
 /// 것이고, 비었다고 부모를 대신 열면 빈 에픽을 물었을 때 그 형제들이 답으로
 /// 나와 훑는 쪽이 제자리를 돈다.
-fn resolve(index: &Index, issues: &[Issue], want: Option<&str>) -> R<Path> {
+fn resolve(index: &Index, issues: &[Issue], want: Option<&str>, lang: crate::i18n::Lang) -> R<Path> {
     let Some(want) = want else { return Ok(Path::new()) };
     // 바구니는 제 줄이 없어 id 로 못 부른다. 대신 **없는 바구니는 거절한다** —
     // 없는 자리에 세워 두면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
@@ -326,11 +326,11 @@ fn resolve(index: &Index, issues: &[Issue], want: Option<&str>) -> R<Path> {
     } {
         let path = vec![seg.clone()];
         if index.entries(issues, &path).is_empty() {
-            return Err(Fail::not_found(want));
+            return Err(Fail::not_found(want, lang));
         }
         return Ok(path);
     }
-    let at = index.find(want).ok_or_else(|| Fail::not_found(want))?;
+    let at = index.find(want).ok_or_else(|| Fail::not_found(want, lang))?;
     let mut path = index.home_of(at).clone();
     if index.is_dir(issues, at) {
         path.push(index.seg_of(issues, at));

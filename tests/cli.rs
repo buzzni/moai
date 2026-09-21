@@ -252,10 +252,7 @@ fn english_is_the_default_when_nothing_picks_a_language() {
     let say = |lang: Option<&str>| {
         let mut cmd = isolated(BIN);
         cmd.args(["status"]).current_dir(s.path()).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
-        match lang {
-            Some(l) => cmd.env("MOAI_LANG", l),
-            None => cmd.env_remove("MOAI_LANG"),
-        };
+        with_lang(&mut cmd, lang);
         let out = cmd.output().expect("moai 를 실행하지 못했다");
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
@@ -324,17 +321,13 @@ fn the_mv_screen_stands_in_one_language() {
                     .env("MOAI_ACTOR", ACTOR)
                     .env("MOAI_NOW", NOW)
                     .env("NO_COLOR", "1");
-                match lang {
-                    Some(l) => cmd.env("MOAI_LANG", l),
-                    None => cmd.env_remove("MOAI_LANG"),
-                };
+                with_lang(&mut cmd, lang);
                 let out = cmd.output().expect("moai 를 실행하지 못했다");
                 let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
                 (args.join(" "), said)
             })
             .collect::<Vec<_>>()
     };
-    let hangul = |t: &str| t.chars().any(|c| ('\u{ac00}'..='\u{d7a3}').contains(&c));
 
     for (args, said) in screens("mvlangen", None) {
         assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
@@ -343,6 +336,182 @@ fn the_mv_screen_stands_in_one_language() {
     // 같은 판을 한국어로. 키가 `ko` 표에 안 서 있으면 여기서 영어가 새어 나온다.
     for (args, said) in screens("mvlangko", Some("ko")) {
         assert!(hangul(&said), "한국어로 골랐는데 그 줄이 영어다 — `{args}`\n{said}");
+    }
+}
+
+/// **칸 이름 오타의 거절도 고른 말로 선다**(moai-fdk7). `mv` 에서 가장 흔한 두 오타라
+/// 첫 사용자가 바로 만나는 자리인데, 그 글은 `config::require_known` 과 `cmd::check_from`
+/// 이라는 **공용 검사기**에서 와 한국어로 박혀 있었다 — 옮긴 `mv` 표면 바로 옆에서 두 말로 섰다.
+///
+/// **네 표면을 한 판에서 잰다.** 같은 자료(`config::NoSuchColumn`)를 네 곳이 나눠 쓰므로
+/// 한 곳만 옮겨도 나머지가 조용히 남는다. 두 글이 **갈려 있는지**도 함께 본다 — 설정만
+/// 보고 거절한 자리와 줄까지 보고 거절한 자리는 받아 주는 것이 달라(moai-hym7) 같은 말을
+/// 하면 안 된다.
+#[test]
+fn the_column_refusals_stand_in_the_chosen_language() {
+    let s = init("collang");
+    let one = add(s.path(), &["a row"]);
+    let refused = |lang: Option<&str>, args: &[&str]| -> String {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "{args:?} 를 받아 버렸다 — {}", String::from_utf8_lossy(&out.stdout));
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    // 설정만 보고 거절하는 둘과, 줄까지 보고 거절하는 둘.
+    let by_config: [&[&str]; 2] = [&["add", "x", "-s", "nosuch"], &["mv", &one, "nosuch"]];
+    let by_rows: [&[&str]; 2] = [&["mv", &one, "todo", "--from", "nosuch"], &["show", "-s", "nosuch"]];
+
+    // 영어 판은 **한 번만 띄워 들고 있는다** — 아래에서 다시 부르면 같은 판을 두 번 돌린다(리뷰).
+    let mut english: Vec<String> = Vec::new();
+    for args in by_config.iter().chain(by_rows.iter()) {
+        let said = refused(None, args);
+        assert!(said.contains("nosuch"), "어느 칸이 틀렸는지를 안 댔다 — {args:?}\n{said}");
+        assert!(said.contains("todo"), "있는 칸을 안 늘어놓았다 — {args:?}\n{said}");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{said}");
+        assert!(hangul(&refused(Some("ko"), args)), "한국어로 골랐는데 영어로 거절했다 — {args:?}");
+        english.push(said);
+    }
+    // **두 글은 갈려 있다.** 줄까지 보고 거절한 쪽만 "거기 선 줄도 없다" 를 단다.
+    assert!(!english[0].contains("no row stands"), "설정만 보고 거절하며 줄까지 봤다고 말한다");
+    assert!(english[by_config.len()].contains("no row stands"), "줄까지 보고 거절했는데 그 말이 없다");
+}
+
+/// **설정을 고치다 멈춘 까닭도 고른 말로 선다**(moai-wflg). 읽기의 알림은 moai-aiid 가
+/// 옮겼는데 쓰기의 거절문은 박힌 한국어로 남아, 같은 오타 하나에 `project ls` 는 영어로
+/// 알리고 `project add` 는 한국어로 거절했다.
+///
+/// **네 갈래를 한 판에서 잰다** — 깨진 파일·목록 모양·색 모양·설정 자리 없음. 넷이 `Doc` 의
+/// 다른 자리에서 나므로 한 갈래만 옮겨도 나머지가 조용히 남는다. 종료 코드도 함께 본다:
+/// 손으로 고쳐야 쓰는 것은 `broken` 이라야 기계가 I/O 실패와 가른다(moai-3owm).
+#[test]
+fn the_config_write_refusals_stand_in_the_chosen_language() {
+    let s = Scratch::new("cfgwrite");
+    let one = dir_in(&s, "one");
+    let cfg = registry(&s, &[&one]);
+    let refused = |lang: Option<&str>, src: &str, args: &[&str]| -> String {
+        std::fs::write(&cfg, src).unwrap();
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(s.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "{args:?} 를 받아 버렸다 — {}", String::from_utf8_lossy(&out.stdout));
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let here = one.to_str().unwrap();
+    let cases: [(&str, Vec<&str>, &str); 3] = [
+        // 깨진 TOML — 고치기 전까지 안 쓴다.
+        ("[[project]\n", vec!["project", "add", here], "nothing is written"),
+        // 목록이 표 배열이 아니다 — 목록을 안 고친다.
+        ("project = \"x\"\n", vec!["project", "add", here], "fix it by hand"),
+        // 그 줄의 색이 색 낱말이 아니다 — 덮지 않는다.
+        (
+            &format!("[[project]]\npath = {here:?}\ncolor.x = 1\n"),
+            vec!["project", "color", here, "green"],
+            "fix it by hand",
+        ),
+    ];
+    for (src, args, want) in &cases {
+        let english = refused(None, src, args);
+        assert!(english.contains(want), "{want:?} 가 없다 — {args:?}\n{english}");
+        assert!(english.contains("config.toml"), "어느 파일인지를 안 댔다 — {args:?}\n{english}");
+        assert!(!hangul(&english), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{english}");
+        assert!(hangul(&refused(Some("ko"), src, args)), "한국어로 골랐는데 영어로 거절했다 — {args:?}");
+    }
+    // 코드는 그대로 `broken` 이다 — 글을 옮기며 갈래가 바뀌지 않았다.
+    let json = refused(None, "[[project]\n", &["project", "add", here, "--json"]);
+    assert!(json.contains(r#""code":"broken""#), "{json}");
+
+    // 설정의 자리를 아예 모르면 쓰기는 멈추고, 그 줄도 고른 말로 선다.
+    let no_place = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["project", "add", here])
+            .current_dir(s.path())
+            .env_remove("MOAI_CONFIG")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("HOME")
+            .env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "자리를 모르는데 등록했다");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let english = no_place(None);
+    assert!(english.contains("MOAI_CONFIG"), "고칠 길을 안 댔다\n{english}");
+    assert!(!hangul(&english), "영어 화면에 박힌 한국어가 남았다\n{english}");
+    assert!(hangul(&no_place(Some("ko"))), "한국어로 골랐는데 영어로 거절했다");
+}
+
+/// **한 명령의 몸통도 고른 말로 선다**(moai-95g1). 거절만 옮겨 두었던 동안 `moai defer` 는
+/// 영어 한 줄 위에 `미룸` 을 세웠고, `moai project ls` 는 영어 알림 아래 한국어 몸통을
+/// 세웠다 — 한 덩이 안에서 말이 갈리는 것은 덜 옮긴 것과 다른 일이다.
+///
+/// **여덟 표면을 한 판에서 잰다.** 명령마다 제 글을 짓는 자리라 한 곳만 옮겨도 나머지가
+/// 조용히 남는다. 글자를 하나씩 견주지 않고 **한글이 남았는가**만 보는 것은 낱말을 다듬을
+/// 때마다 이 판이 붉어지지 않게 하려는 것이고, 같은 판을 한국어로도 돌려 키가 `ko` 표에
+/// 서 있는지를 함께 잰다.
+#[test]
+fn the_command_bodies_stand_in_one_language() {
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = Scratch::new(name);
+        let one = dir_in(&s, "one");
+        let bare = dir_in(&s, "bare");
+        ok(&one, &["init", "argos"]);
+        // **제목도 사람 이름도 ASCII 다** — 자료의 한글은 옮길 글이 아니라 이 자가 못 가른다.
+        // 상세가 담당을 그려, 기본 `ACTOR`(한국어 이름)를 쓰면 이 판이 제 자료에 걸린다.
+        let id = add_as(&one, "Tester (t@e.st)", &["a row"]);
+        let cfg = s.path().join("user/config.toml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        let at = |dir: &Path| dir.to_str().unwrap().to_string();
+        let runs: Vec<Vec<String>> = vec![
+            // 계획에서 빼고, 도로 집고, 이미 그런 것까지.
+            vec!["defer".into(), id.clone(), "-m".into(), "later".into()],
+            vec!["defer".into(), id.clone(), "--undo".into()],
+            vec!["defer".into(), id.clone(), "--undo".into()],
+            vec!["defer".into(), "argos-zzzz".into(), "-m".into(), "later".into()],
+            // 고칠 것이 없는 판 — "바뀐 것이 없다".
+            vec!["edit".into(), id.clone(), "-p".into(), "2".into()],
+            vec!["edit".into(), id.clone(), "-p".into(), "2".into()],
+            vec!["edit".into(), id.clone(), "-e".into(), "argos-zzzz".into()],
+            // 없는 id 는 어느 명령에서나 한 낱말이다.
+            vec!["note".into(), "argos-zzzz".into(), "x".into()],
+            // 읽음 — 적을 것이 없는 판, 적는 판, 묶음이 아닌 것을 `-e` 로 준 판.
+            vec!["read".into(), "argos-zzzz".into()],
+            vec!["read".into(), id.clone()],
+            vec!["read".into(), "-e".into(), id.clone()],
+            // 등록·이미 등록·뺌·등록 안 됨·색·이미 그렇다.
+            vec!["project".into(), "add".into(), at(&bare)],
+            vec!["project".into(), "add".into(), at(&bare)],
+            vec!["project".into(), "color".into(), at(&bare), "green".into()],
+            vec!["project".into(), "color".into(), at(&bare), "green".into()],
+            vec!["project".into(), "ls".into()],
+            vec!["project".into(), "rm".into(), at(&bare)],
+            vec!["project".into(), "rm".into(), at(&bare)],
+        ];
+        runs.into_iter()
+            .map(|args| {
+                let mut cmd = isolated(BIN);
+                cmd.args(&args)
+                    .current_dir(&one)
+                    .env("MOAI_ACTOR", "Tester (t@e.st)")
+                    .env("MOAI_NOW", NOW)
+                    .env("MOAI_CONFIG", &cfg)
+                    .env("NO_COLOR", "1");
+                with_lang(&mut cmd, lang);
+                let out = cmd.output().expect("moai 를 실행하지 못했다");
+                let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+                (args.join(" "), said)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (args, said) in screens("bodyen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    for (args, said) in screens("bodyko", Some("ko")) {
+        assert!(hangul(&said), "한국어로 골랐는데 그 덩이가 영어다 — `{args}`\n{said}");
     }
 }
 
@@ -416,10 +585,7 @@ fn the_system_locale_does_not_pick_the_language() {
             .env("LANG", "ja_JP.UTF-8")
             .env("LC_ALL", "ja_JP.UTF-8")
             .env("LC_MESSAGES", "ja_JP.UTF-8");
-        match picked {
-            Some(l) => cmd.env("MOAI_LANG", l),
-            None => cmd.env_remove("MOAI_LANG"),
-        };
+        with_lang(&mut cmd, picked);
         let out = cmd.output().expect("moai 를 실행하지 못했다");
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
@@ -1934,10 +2100,41 @@ fn inside_a_repo_a_registry_changes_nothing() {
 // ── S2 — 칸 옮기기·고치기·지우기·메모, 그리고 필터 ────────────────────
 
 fn add(dir: &Path, args: &[&str]) -> String {
+    add_as(dir, ACTOR, args)
+}
+
+/// [`add`] 와 같되 **사람을 골라 세운다.** 화면에 한글이 남았는지를 재는 판은 담당 이름까지
+/// ASCII 라야 제 자료에 걸리지 않는다 — 기본 [`ACTOR`] 는 한국어 이름이다.
+///
+/// [`add`] 가 이것을 부른다 — 두 벌로 두면 `-q` 와 "낸 글이 곧 id" 라는 앎이 두 자리에 산다(리뷰).
+fn add_as(dir: &Path, who: &str, args: &[&str]) -> String {
     let mut v = vec!["add"];
     v.extend_from_slice(args);
     v.push("-q");
-    ok(dir, &v).trim().to_string()
+    // `staged` 뒤에 세운다 — 환경은 이름마다 마지막이 이기므로 사람만 갈아 끼운다.
+    let out = staged(&v).current_dir(dir).env("MOAI_ACTOR", who).output().expect("moai 를 실행하지 못했다");
+    assert!(out.status.success(), "{v:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// 이 판이 볼 말을 고른다. `None` 은 **아무것도 안 고른 기계**다 — [`isolated`] 가 박아 둔
+/// `MOAI_LANG=ko` 를 걷어야 기본값(영어)이 선다.
+///
+/// 같은 세 줄이 일곱 자리에 베껴져 있었다 — 베낀 자리는 조용히 갈라진다([`staged`] 와 같은 까닭).
+fn with_lang(cmd: &mut Command, lang: Option<&str>) {
+    match lang {
+        Some(l) => cmd.env("MOAI_LANG", l),
+        None => cmd.env_remove("MOAI_LANG"),
+    };
+}
+
+/// 이 글에 **한글이 들었는가** — 음절과 자모 둘(초·중·종성 U+1100 블록, 호환 자모 U+3130 블록).
+///
+/// **도구가 재는 자와 같은 자다**([`crate::hook`] 의 `hangul`, 리뷰 moai-8d49.ssb) — 음절만 보던
+/// 판은 `ㄱ`·`ㅅ` 만 남은 줄을 못 보고 푸른 채였다. 재는 자가 도구보다 좁으면 그 시험은 지키려던
+/// 것을 안 지킨다. 영어 화면에 한글이 남았는지를 재는 판이 넷이라 한 자리에 둔다.
+fn hangul(t: &str) -> bool {
+    t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'))
 }
 
 /// 그 이슈의 줄 하나. 파일 전체를 보면 남의 줄에 걸린다 — 에픽의

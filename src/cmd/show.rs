@@ -108,7 +108,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                 "bad_filter",
             ));
         }
-        let issue = load.get(id).ok_or_else(|| Fail::coded(format!("{id} 를 못 찾았다"), super::code::NOT_FOUND))?;
+        // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 손으로
+        // 같은 글을 지어 두면 `show` 만 옛 말로 남는다(리뷰).
+        let issue = load.get(id).ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
@@ -175,7 +177,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
     for s in &filter.status {
         if !crate::report::knows_column(&load.issues, &repo.config, s) {
-            return Err(Fail::coded(super::unknown_column(s, &repo.config), super::code::BAD_STATUS));
+            let why = super::unknown_column(s, &repo.config);
+            return Err(Fail::coded(crate::view::no_such_column(ctx.lang(), &why), super::code::BAD_STATUS));
         }
     }
 

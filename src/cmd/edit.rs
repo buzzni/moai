@@ -127,10 +127,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
+    // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
+    // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
+    // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
+    let lang = ctx.lang();
 
     let done: Edited = repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
-            return Err(Fail::not_found(&args.id));
+            return Err(Fail::not_found(&args.id, lang));
         };
         let before = i.clone();
 
@@ -245,7 +249,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         if let Some(e) = &out.epic
             && epic.is_none()
         {
-            eprintln!("moai: {e} 라는 에픽이 없다. 그대로 둔다");
+            eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
         }
         let children: Vec<Issue> =
             issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
@@ -279,18 +283,21 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     }
     if let Some(k) = &kept {
         eprintln!(
-            "moai: {} 는 에픽 {} 에 그대로 든다 — 부모 {} 에서 오는 소속이라 -e none 으로 안 끊긴다. 옮기려면 `moai edit {} -e <다른 에픽>`",
-            edited.id, k.epic, k.parent, edited.id
+            "moai: {}",
+            crate::i18n::fill(
+                crate::i18n::say(ctx.lang(), "edit.kept_epic"),
+                &[("id", &edited.id), ("epic", &k.epic), ("parent", &k.parent)],
+            )
         );
     }
     if let Some(k) = &kept_milestone {
-        milestone_kept_line(&edited.id, k, args.milestone.as_deref().unwrap_or("none"));
+        milestone_kept_line(&edited.id, k, args.milestone.as_deref().unwrap_or("none"), ctx.lang());
     }
     if !changed {
         return Ok(vec![format!(
             "{}  {}",
             crate::style::paint(crate::style::ID, &edited.id),
-            crate::style::paint(crate::style::DIM, "바뀐 것이 없다")
+            crate::style::paint(crate::style::DIM, crate::i18n::say(ctx.lang(), "edit.nothing_changed"))
         )]);
     }
     let children: Vec<&Issue> = children.iter().collect();
@@ -314,31 +321,45 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 ///
 /// `none` 은 "안 끊긴다" 로, 다른 마일스톤은 "필드에만 적혔다" 로 말한다(moai-mhxf) —
 /// 앞의 것은 필드가 비워졌는데 소속이 남았고, 뒤의 것은 필드가 바뀌었는데 소속이 안 따라왔다.
-fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str) {
+fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str, lang: crate::i18n::Lang) {
+    use crate::i18n::{fill, say};
     let cut = wrote == "none";
+    // **갈래마다 제 `say` 를 적는다** — 키를 도우미로 고르면 소스를 훑는 시험(`i18n::tests::keys_in`)이
+    // 그 키를 못 본다. 조각을 이어 한 줄로 세우는 것은 그대로다: 자리마다 옮기는 길이 다르다.
     let stood = match &k.milestone {
-        Some(m) => format!("마일스톤 {m} 에 그대로 든다"),
-        None => "어느 마일스톤에도 안 든다".to_string(),
+        Some(m) => fill(say(lang, "edit.stood_in"), &[("milestone", m)]),
+        None => say(lang, "edit.stood_none").to_string(),
     };
-    let lost = if cut {
-        "--milestone none 으로 안 끊긴다".to_string()
-    } else {
-        format!("--milestone {wrote} 는 필드에만 적혔다")
+    let lost = match cut {
+        true => say(lang, "edit.lost_none").to_string(),
+        false => fill(say(lang, "edit.lost_field"), &[("wrote", wrote)]),
     };
     let at = k.epic.as_deref().or(k.parent.as_deref()).unwrap_or_default();
     let (from, way) = match k.way {
-        Way::Pinned => return eprintln!("moai: {id} 는 {stood} — id 가 {at} 밑에 서 있어 {lost}"),
-        Way::Epic => (
-            format!("에픽 {at} 에서 오는 자리라"),
-            format!("`moai edit {id} -e <다른 에픽>` 이나 `moai edit {at} --milestone {wrote}`"),
-        ),
-        Way::Lost => {
-            (format!("못 쓸 에픽 {at} 을 따라 (길 잃음) 에 서 있어"), format!("`moai edit {id} -e <다른 에픽>`"))
+        Way::Pinned => {
+            let said =
+                fill(say(lang, "edit.kept_pinned"), &[("id", id), ("stood", &stood), ("at", at), ("lost", &lost)]);
+            return eprintln!("moai: {said}");
         }
-        Way::Parent => (format!("조상 {at} 에서 오는 자리라"), format!("`moai edit {at} --milestone {wrote}`")),
+        Way::Epic => (
+            fill(say(lang, "edit.from_epic"), &[("at", at)]),
+            fill(say(lang, "edit.go_epic"), &[("id", id), ("at", at), ("wrote", wrote)]),
+        ),
+        Way::Lost => (fill(say(lang, "edit.from_lost"), &[("at", at)]), fill(say(lang, "edit.go_lost"), &[("id", id)])),
+        Way::Parent => (
+            fill(say(lang, "edit.from_parent"), &[("at", at)]),
+            fill(say(lang, "edit.go_parent"), &[("at", at), ("wrote", wrote)]),
+        ),
     };
-    let verb = if cut { "빼려면" } else { "옮기려면" };
-    eprintln!("moai: {id} 는 {stood} — {from} {lost}. {verb} {way}");
+    let verb = match cut {
+        true => say(lang, "edit.verb_cut"),
+        false => say(lang, "edit.verb_move"),
+    };
+    let said = fill(
+        say(lang, "edit.kept_milestone"),
+        &[("id", id), ("stood", &stood), ("from", &from), ("lost", &lost), ("verb", verb), ("way", &way)],
+    );
+    eprintln!("moai: {said}");
 }
 
 /// **말은 거절할 때만 푼다**([`Ctx::lang`]) — `ctx.lang()` 을 인자로 넘기면 그것이 부르는 쪽에서
