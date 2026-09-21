@@ -293,7 +293,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     // **설정은 [`Ctx::registry`] 로 읽는다**(리뷰) — 아래에서 `ctx.lang()` 으로 말을 묻는데, 제 손으로
     // 한 번 더 읽으면 한 명령이 같은 파일을 두 번 판다(moai-u8cs 가 걷어 낸 그것이다).
     let reg = ctx.registry();
-    let projects = projects::open(reg);
+    let projects = projects::open(reg, ctx.lang());
     let now = model::now();
     let rows: Vec<Row> =
         projects.iter().map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) }).collect();

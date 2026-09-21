@@ -40,115 +40,125 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // 번 띄운다. 펴는 자리는 아래, 칸 검사를 다 지난 뒤다.
     let who = model::actor(ctx.user.as_deref(), &repo.root);
 
-    let (moved, read): (Moved, super::Read) = repo.with_write(|issues, cfg, _| {
-        // **칸부터 다 보고 누구인지는 그다음이다** — `mv` 와 같은 차례다. 뒤에 두면 신원
-        // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
-        // 하므로(`check_from`) 락 안으로 들어왔다. `bad_status` 를 내는 검사는 묶음 것까지
-        // **하나도 빠짐없이** `who?` 위에 선다.
-        // 말은 **거절할 때만** 푼다 — `ctx.lang()` 을 인자로 넘기면 락 안에서 사용자 설정을
-        // 여는 일이 오타 없는 판마다 선다(리뷰). `mv` 와 한 모양이다.
-        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)
-            .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
-        // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,
-        // moai-8xwi.rzg). 묶음의 칸은 멤버에서 읽고 미루기는 제 줄의 `deferred_at` 에
-        // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`
-        // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
-        // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
-        let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
-        if from.is_some()
-            && let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i))
-        {
-            return Err(Fail::coded(
-                format!(
-                    "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                     묶음은 `--from` 없이 미룬다",
-                    g.id
-                ),
-                super::code::BAD_STATUS,
-            ));
-        }
-        let by = who?;
-        let mut m = Moved::default();
-        let mut entries = Vec::new();
-        let seen: super::Read =
-            if from.is_some() { super::standing_of(issues, cfg, &asked) } else { Default::default() };
-        for id in &args.ids {
-            // #a-partial: 하나가 없다고 나머지를 안 미루지 않는다.
-            let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
-                m.missing.push(id.clone());
-                continue;
-            };
-            // **본 칸이 그대로일 때만 손댄다.** 락 안에서 다시 읽은 줄로 잰다 —
-            // 옆에서 집어 일하기 시작한 줄을 뒤늦은 미루기가 계획 밖으로 빼면,
-            // 일하던 쪽은 제 일이 보드에서 사라진 까닭을 어디서도 못 읽는다.
-            // 이미 그 모양인지보다 **먼저** 본다(`mv` 와 같은 차례다).
-            if let Some(f) = &from {
-                let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
-                if stands != f.as_str() {
-                    m.stale.push((i.id.clone(), stands.to_string()));
+    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
+    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
+    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
+    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
+    let lang = ctx.lang();
+    let (moved, read): (Moved, super::Read) = repo.with_write(
+        || lang,
+        |issues, cfg, _| {
+            // **칸부터 다 보고 누구인지는 그다음이다** — `mv` 와 같은 차례다. 뒤에 두면 신원
+            // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
+            // 하므로(`check_from`) 락 안으로 들어왔다. `bad_status` 를 내는 검사는 묶음 것까지
+            // **하나도 빠짐없이** `who?` 위에 선다.
+            // 말은 **거절할 때만** 푼다 — `lang` 을 인자로 넘기면 락 안에서 사용자 설정을
+            // 여는 일이 오타 없는 판마다 선다(리뷰). `mv` 와 한 모양이다.
+            super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)
+                .map_err(|e| Fail::coded(crate::view::no_such_column(lang, &e), super::code::BAD_STATUS))?;
+            // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,
+            // moai-8xwi.rzg). 묶음의 칸은 멤버에서 읽고 미루기는 제 줄의 `deferred_at` 에
+            // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`
+            // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
+            // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
+            let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
+            if from.is_some()
+                && let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i))
+            {
+                // **`mv` 와 같은 키를 쓴다**(리뷰) — 한 자로 정한 거절이 두 명령에서 다른 말을
+                // 하면 안 된다. 글을 따로 박아 두던 판은 `mv` 만 옮겨져, 영어를 고른 사람이
+                // `defer` 에서만 이 줄을 한국어로 받았다.
+                return Err(Fail::coded(
+                    format!(
+                        "{}\n      {}",
+                        crate::i18n::fill(crate::i18n::say(lang, "mv.group_no_from"), &[("id", &g.id)]),
+                        // 머리 줄은 `mv` 와 한 글이고, 고칠 길만 이 명령의 것이다 —
+                        // `mv` 의 "묶음은 `moai defer` 로 접는다" 는 여기서 제 자신을 가리킨다.
+                        crate::i18n::say(lang, "defer.group_no_from_how"),
+                    ),
+                    super::code::BAD_STATUS,
+                ));
+            }
+            let by = who?;
+            let mut m = Moved::default();
+            let mut entries = Vec::new();
+            let seen: super::Read =
+                if from.is_some() { super::standing_of(issues, cfg, &asked) } else { Default::default() };
+            for id in &args.ids {
+                // #a-partial: 하나가 없다고 나머지를 안 미루지 않는다.
+                let Some(i) = issues.iter_mut().find(|i| &i.id == id) else {
+                    m.missing.push(id.clone());
+                    continue;
+                };
+                // **본 칸이 그대로일 때만 손댄다.** 락 안에서 다시 읽은 줄로 잰다 —
+                // 옆에서 집어 일하기 시작한 줄을 뒤늦은 미루기가 계획 밖으로 빼면,
+                // 일하던 쪽은 제 일이 보드에서 사라진 까닭을 어디서도 못 읽는다.
+                // 이미 그 모양인지보다 **먼저** 본다(`mv` 와 같은 차례다).
+                if let Some(f) = &from {
+                    let stands = seen.get(&i.id).map(String::as_str).unwrap_or(i.status.as_str());
+                    if stands != f.as_str() {
+                        m.stale.push((i.id.clone(), stands.to_string()));
+                        continue;
+                    }
+                }
+                if i.is_deferred() == !back {
+                    // **시각을 밀지 않는다.** 밀면 "언제부터 미뤄 뒀나" 가 마지막
+                    // 으로 명령을 친 때가 되고, `status` 의 나이가 거짓말한다.
+                    // 적어 온 말은 그래도 버리지 않는다 — 되풀이해 부르는 것이
+                    // 흔하고, 그때 이유가 조용히 사라지면 저널을 못 믿게 된다.
+                    if let Some(msg) = msg {
+                        entries.push(JournalEntry::note(&i.id, msg, &at, &by));
+                    }
+                    m.already.push(i.id.clone());
                     continue;
                 }
-            }
-            if i.is_deferred() == !back {
-                // **시각을 밀지 않는다.** 밀면 "언제부터 미뤄 뒀나" 가 마지막
-                // 으로 명령을 친 때가 되고, `status` 의 나이가 거짓말한다.
-                // 적어 온 말은 그래도 버리지 않는다 — 되풀이해 부르는 것이
-                // 흔하고, 그때 이유가 조용히 사라지면 저널을 못 믿게 된다.
+                i.deferred_at = (!back).then(|| at.clone());
+                // 도로 집으면 `deferred_at` 이 지워져 시각이 안 남는다 — 겹쳐 볼 때 견줄 시각은 여기
+                // 둔다(`Issue::planned_at`).
+                i.planned_at = Some(at.clone());
+                i.updated_at = at.clone();
+                // **필드 변경은 저널에 안 적는다** (CLAUDE.md). 저널을 접어야
+                // 답이 나오는 물음이 생기면 그 답은 스냅샷의 필드가 되어야 하고,
+                // 여기서는 이미 `deferred_at` 이 그 필드다.
                 if let Some(msg) = msg {
                     entries.push(JournalEntry::note(&i.id, msg, &at, &by));
                 }
-                m.already.push(i.id.clone());
-                continue;
+                i.normalize();
+                m.done.push(i.clone());
             }
-            i.deferred_at = (!back).then(|| at.clone());
-            // 도로 집으면 `deferred_at` 이 지워져 시각이 안 남는다 — 겹쳐 볼 때 견줄 시각은 여기
-            // 둔다(`Issue::planned_at`).
-            i.planned_at = Some(at.clone());
-            i.updated_at = at.clone();
-            // **필드 변경은 저널에 안 적는다** (CLAUDE.md). 저널을 접어야
-            // 답이 나오는 물음이 생기면 그 답은 스냅샷의 필드가 되어야 하고,
-            // 여기서는 이미 `deferred_at` 이 그 필드다.
-            if let Some(msg) = msg {
-                entries.push(JournalEntry::note(&i.id, msg, &at, &by));
+            // **물려받은 미룸은 제 줄을 풀어도 안 풀린다.** 미룬 에픽의 멤버에 `--undo`
+            // 를 치면 제 `deferred_at` 이 없어 "이미 계획에 있다" 로 끝났는데, 실제로는
+            // 그 에픽 때문에 여전히 빠져 있었다(moai-kluk). 제 줄을 풀었어도 에픽이 아직
+            // 미뤄져 있으면 같다. **쓰기를 마친 모습에서** 재야 에픽과 멤버를 한 번에 푼
+            // 경우를 헛되이 안 센다.
+            if back && !(m.done.is_empty() && m.already.is_empty()) {
+                let roots = crate::report::deferred_sources(issues);
+                m.shelved = m
+                    .done
+                    .iter()
+                    .map(|i| i.id.as_str())
+                    .chain(m.already.iter().map(String::as_str))
+                    .filter_map(|id| roots.get(id).map(|r| (id.to_string(), r.iter().map(|s| s.to_string()).collect())))
+                    .collect();
+                m.already.retain(|id| !roots.contains_key(id.as_str()));
             }
-            i.normalize();
-            m.done.push(i.clone());
-        }
-        // **물려받은 미룸은 제 줄을 풀어도 안 풀린다.** 미룬 에픽의 멤버에 `--undo`
-        // 를 치면 제 `deferred_at` 이 없어 "이미 계획에 있다" 로 끝났는데, 실제로는
-        // 그 에픽 때문에 여전히 빠져 있었다(moai-kluk). 제 줄을 풀었어도 에픽이 아직
-        // 미뤄져 있으면 같다. **쓰기를 마친 모습에서** 재야 에픽과 멤버를 한 번에 푼
-        // 경우를 헛되이 안 센다.
-        if back && !(m.done.is_empty() && m.already.is_empty()) {
-            let roots = crate::report::deferred_sources(issues);
-            m.shelved = m
-                .done
-                .iter()
-                .map(|i| i.id.as_str())
-                .chain(m.already.iter().map(String::as_str))
-                .filter_map(|id| roots.get(id).map(|r| (id.to_string(), r.iter().map(|s| s.to_string()).collect())))
-                .collect();
-            m.already.retain(|id| !roots.contains_key(id.as_str()));
-        }
-        // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
-        // 안 읽히는 칸을 읽는다(`cmd::Row`).
-        let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
-        let read = super::read_of(issues, cfg, &ids);
-        Ok((entries, (m, read)))
-    })?;
+            // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
+            // 안 읽히는 칸을 읽는다(`cmd::Row`).
+            let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
+            let read = super::read_of(issues, cfg, &ids);
+            Ok((entries, (m, read)))
+        },
+    )?;
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]));
     }
     // 진 줄은 못 찾은 줄과 같은 표면 하나(stderr)와 같은 종료 코드로 선다 —
     // `mv --from` 과 한 자다. 나머지 id 는 그대로 처리한다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!(
-            "moai: {}",
-            crate::i18n::fill(crate::i18n::say(ctx.lang(), "defer.stale"), &[("id", id), ("now", now)])
-        );
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "defer.stale"), &[("id", id), ("now", now)]));
     }
 
     if ctx.json {
@@ -178,8 +188,8 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // **갈래마다 제 `say` 를 적는다** — 키를 `if` 로 고르면 소스를 훑는 시험
     // (`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
     let word = match back {
-        true => crate::i18n::say(ctx.lang(), "defer.undid"),
-        false => crate::i18n::say(ctx.lang(), "defer.did"),
+        true => crate::i18n::say(lang, "defer.undid"),
+        false => crate::i18n::say(lang, "defer.did"),
     };
     let mut out: Vec<String> = moved
         .done
@@ -200,8 +210,8 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             paint(
                 style::DIM,
                 match back {
-                    true => crate::i18n::say(ctx.lang(), "defer.already_in"),
-                    false => crate::i18n::say(ctx.lang(), "defer.already_out"),
+                    true => crate::i18n::say(lang, "defer.already_in"),
+                    false => crate::i18n::say(lang, "defer.already_out"),
                 },
             )
         ));
@@ -209,7 +219,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // **아직 계획 밖이면 도로 집을 줄을 댄다.** 제 줄을 풀었든 원래 안 미뤘든,
     // 미룬 에픽·부모 밑이면 그 줄을 도로 집어야 풀린다.
     for (id, root) in &moved.shelved {
-        let said = crate::view::shelved_by(root, ctx.lang());
+        let said = crate::view::shelved_by(root, lang);
         out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     Ok(out)

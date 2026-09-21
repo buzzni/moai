@@ -332,7 +332,7 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let p = projects::open_one(path, String::new(), None, false);
+    let p = projects::open_one(path, String::new(), None, false, lang);
     let look = match p.state {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
         state => shut(&p.path, &p.name, state, lang),
@@ -601,11 +601,11 @@ impl App {
         //
         // **줄을 곧 스레드가 읽을 자리는 그 한 번도 안 읽는다**([`Depth::Lean`], moai-m59y).
         let opened = match how {
-            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false).state {
+            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false, self.site.lang).state {
                 State::Open { repo, .. } => Ok(repo),
                 state => Err(state),
             },
-            Depth::Lean => projects::open_shallow(&place.path),
+            Depth::Lean => projects::open_shallow(&place.path, self.site.lang),
         };
         let state = match opened {
             // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
@@ -1925,7 +1925,7 @@ mod tests {
 
     /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
     fn ideas_at(dir: &Path) -> Vec<String> {
-        let repo = match Repo::open(dir).unwrap() {
+        let repo = match Repo::open(dir, || crate::i18n::Lang::Ko).unwrap() {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };
@@ -2004,6 +2004,108 @@ mod tests {
         let a = App::on_projects(Layer::read(Some(&cfg), None, Lang::En));
         assert_eq!(a.layer.as_ref().unwrap().lang, Lang::En, "얹는 문이 층의 말을 덮었다");
         assert_eq!(a.site.lang, Lang::En, "화면이 층과 다른 말로 섰다");
+    }
+
+    /// **옛 `[read]` 가 바뀌면 펼쳐 둔 프로젝트의 줄도 따라간다**(moai-7irq). 그 표는 프로젝트마다
+    /// 겹쳐 보는 값인데([`App::read_marks_of`]), 설정이 바뀐 걸음은 지금 선 프로젝트만 다시
+    /// 들었다 — 펼친 줄은 제 `Site` 를 따로 들고 [`App::relayer_with`] 가 그것을 그대로 옮겨
+    /// 오므로, 그 줄의 [NEW] 가 접었다 다시 펼칠 때까지 옛 표로 섰다.
+    #[test]
+    fn a_changed_legacy_read_reaches_an_open_project() {
+        let s = Scratch::fenced("layer-legacy-read");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // **[NEW] 까지 잰다**(리뷰 moai-kuib.g9c). 표만 재던 판은 이 길이 있는 까닭(그 줄의 [NEW] 를
+        // 다시 세는 것)을 안 재, `load_read_in` 의 셈 한 줄을 지워도 푸르렀다. 세려면 그 줄이 내게
+        // 와 있어야 한다 — 프로젝트의 줄에는 담당이 없다.
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
+
+        // 옛 바이너리나 사람 손이 설정의 옛 `[read]` 에 적는다 — 이 바이너리는 여기 안 적는다.
+        let mut src = std::fs::read_to_string(&cfg).unwrap();
+        src.push_str("\n[read]\n\"argos-0001\" = \"2026-09-14T00:00:00Z\"\n");
+        std::fs::write(&cfg, src).unwrap();
+        // 걸음이 바뀐 것을 보게 한다 — 띄울 때 잰 표식 자리다.
+        a.config_stamp = Some(None);
+        a.follow_config();
+        assert_eq!(seen(&a).as_deref(), Some("2026-09-14T00:00:00Z"), "펼쳐 둔 프로젝트가 바뀐 옛 표를 안 들었다");
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
+    }
+
+    /// 펼친 프로젝트의 줄을 **내게 온 것으로** 만들고 [NEW] 를 한 번 센다 — 세는 자
+    /// ([`App::recount_unread_in`])가 담당을 보므로, 담당 없는 줄에서는 [NEW] 가 한 줄도 안 서서
+    /// 그 셈을 재는 시험이 헛돈다.
+    fn mine(a: &mut App, at: usize) {
+        let seat = crate::tui::Seat::Place(at);
+        let Some(site) = a.site_mut(seat) else { panic!("펼친 줄이 제 Site 를 든다") };
+        for i in &mut site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.recount_unread_in(seat);
+    }
+
+    /// 그 펼친 프로젝트의 [NEW] 집합.
+    fn unread(a: &App, at: usize) -> std::collections::BTreeSet<String> {
+        a.layer.as_ref().unwrap().places[at].site.as_ref().expect("펼친 줄이 제 Site 를 든다").unread.clone()
+    }
+
+    /// **펼쳐 둔 프로젝트의 읽음도 걸음이 잰다**(moai-c571). `Site::read_stamp` 은 프로젝트마다 서는데
+    /// 재는 자가 지금 선 것 하나였다 — 옆 터미널의 `moai -C <그 프로젝트> read --all` 은 저쪽
+    /// `issues.jsonl` 을 안 건드리니 스냅샷 표식에도 안 걸려, 그 줄은 [`REREAD_EVERY`](60초)가 지나야
+    /// 읽음을 보았다.
+    #[test]
+    fn a_read_beside_reaches_an_open_project_without_the_clock() {
+        let s = Scratch::fenced("layer-read-step");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // [NEW] 까지 잰다 — 이 길이 있는 까닭이 그 셈이다([`mine`]).
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
+
+        // 옆 터미널이 그 프로젝트에 `moai read` 를 돌렸다 — 이 화면의 스냅샷은 그대로다.
+        let mark: std::collections::BTreeMap<String, String> =
+            [("argos-0001".to_string(), "2026-09-14T00:00:00Z".to_string())].into_iter().collect();
+        crate::read_marks::update(&cfg, &one, || crate::i18n::Lang::Ko, |sh| sh.mark(&mark)).unwrap();
+
+        // **시계는 안 돌린다** — 걸음 하나로 닿아야 한다.
+        a.follow();
+        assert_eq!(
+            seen(&a).as_deref(),
+            Some("2026-09-14T00:00:00Z"),
+            "펼친 프로젝트의 읽음을 걸음이 안 쟀다 — 시계를 기다리는 자리로 돌아갔다"
+        );
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
     }
 
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를

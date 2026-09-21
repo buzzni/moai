@@ -1567,6 +1567,12 @@ Options:
   `.gitattributes` is simply ignored and git's own merge runs - merging is
   exactly as it was without it. When that repository does set merge=moai,
   `moai status` says in one line that it is not installed here.
+
+  **To say this repository does not want the driver, write that decision in
+  `.gitattributes`.** A line for the snapshot that settles merge itself -
+  `.moai/issues.jsonl   text eol=lf -merge` - is read as the decision: `init`
+  leaves that line alone and every merge-driver line goes quiet. Deleting the
+  line instead is read as a gap, and the next `moai init` writes it back.
 ```
 
 ## `moai skill`
@@ -1852,6 +1858,7 @@ Arguments:
 
 Options:
       --no-agents            Leave AGENTS.md alone
+      --no-driver            Leave .git/config alone (plant no merge driver)
       --check                Write nothing; say if the AGENTS.md block is stale
       --print                Write nothing; print that block (to paste it)
       --json                 Machine-readable output. Every human line goes away
@@ -1874,8 +1881,22 @@ Options:
   and with a single word the first 8 characters. A repository already
   installed with a longer prefix is read and written as it is.
 
+  **It installs the merge driver too.** The repository declares merge=moai in
+  `.gitattributes`, and the command that word names lives in .git/config,
+  which is not committed - so init writes both. It picks the `moai` on PATH
+  when that is the same build, else the binary running now, and says which.
+  Run it again and a path that has gone dead is replaced. A clone of a
+  repository that already has a .moai never runs init: there the one line
+  from `moai status` is what asks for `moai merge-driver --install`.
+
+  --no-driver leaves .git/config alone. A repository that wants no driver at
+  all says so in `.gitattributes` - a line for the snapshot that settles
+  merge itself (`.moai/issues.jsonl   text eol=lf -merge`) is read as the
+  decision and init leaves it alone.
+
   --check writes nothing and only answers whether the AGENTS.md block is
-  current, stale or missing. It is non-zero only when a file cannot be read.
+  current, stale or missing, and where the merge driver stands. It is
+  non-zero only when a file cannot be read.
 
   --print only prints that block. That is where to copy it from when the file
   the agent reads is not AGENTS.md - --print and init write the same text.

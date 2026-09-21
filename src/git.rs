@@ -183,6 +183,32 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
 }
 
+/// [`run`] 과 같되 **설정 파일의 자리를 돌리는 변수 셋은 물려준다**(moai-b5np,
+/// [`crate::git_leaks::CONFIG_FILES`]).
+///
+/// **부르는 자리는 하나다** — `merge_driver::planted_anywhere`. 그 물음은 "git 이 병합에서 이
+/// 드라이버를 찾는가" 고, 답은 **git 이 실제로 읽을 파일**에서 나와야 참이다. 걷은 채로 물으면
+/// `GIT_CONFIG_GLOBAL` 로 전역 설정을 딴 파일에 둔 사람(dotfile 관리기·CI 이미지·컨테이너 래퍼)
+/// 에게 "안 심었다 — 병합이 기본 머지로 내려앉는다" 고 하는데, 그 줄은 실제로 돈다.
+///
+/// **넓히는 것은 이 셋뿐이다.** `GIT_DIR` 무리는 그대로 걷는다 — 훅이 준 환경이 **어느 저장소를
+/// 여는가**를 바꾸지 못하게 하는 것이 걷기가 선 까닭이고(moai-g1a3), 그것은 이 물음과 무관하다.
+/// 시험의 격리도 그대로다: `tests/cli.rs` 의 `isolated` 와 `git::isolated` 가 이 셋을 `/dev/null`
+/// 로 **채워** 주므로, 물려받아도 사람의 진짜 `~/.gitconfig` 는 안 드러난다.
+pub fn run_reading_user_config(root: &Path, args: &[&str]) -> Result<String, Error> {
+    let mut cmd = invocation(root, args);
+    for var in crate::git_leaks::CONFIG_FILES {
+        if let Some(v) = std::env::var_os(var) {
+            cmd.env(var, v);
+        }
+    }
+    let out = cmd.output().map_err(Error::Spawn)?;
+    if !out.status.success() {
+        return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+    }
+    String::from_utf8(out.stdout).map_err(Error::NotUtf8)
+}
+
 /// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
 ///
 /// 이력을 통째로 들고 있지 않는다. `%b` 를 더한 뒤로 이력 전체는 커밋 하나에 수백 바이트씩

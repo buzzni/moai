@@ -15,6 +15,74 @@ use std::time::{Duration, Instant};
 /// 락을 못 잡으면 **아무것도 쓰지 않고** 물러난다.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 쓰기 경로가 **말 없이** 들고 나오는 까닭(moai-iq7j, 2026-09-21).
+///
+/// 저장 계층은 화면 말을 모른 채 둔다(2026-09-20 사용자 결정) — `store::with_write` 는 락을 쥔 채
+/// 돌고, 머지 드라이버는 사용자 설정을 아예 안 연다. 그래서 이 자리의 거절은 **자료**이고, 글을
+/// 짓는 자리는 [`crate::view::store_trouble`] 하나다. `user_config::WriteTrouble` 과
+/// `read_marks::SheetRefusal` 이 이미 그 꼴이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trouble {
+    /// 연 자리가 디렉터리가 아니다 — 그 자리([`Repo::open`]).
+    NotADirectory { at: String },
+    /// 같은 id 가 두 번 있다 — 그 id. 짝지을 수가 없으니 아무것도 안 쓴다.
+    DuplicateId { id: String },
+    /// 다른 moai 가 쓰고 있어 물러났다 — 기다린 초.
+    LockBusy { secs: u64 },
+    /// 스냅샷은 담겼는데 저널을 못 적었다 — io 가 낸 말과, 말이 함께 사라진 이슈들.
+    JournalLost { said: String, ids: Vec<String> },
+    /// 쓰려는 줄이 검사에 걸렸다([`crate::model::Invalid`], moai-yve0) — 가리키는 자리와 그 까닭.
+    Invalid { at: At, why: crate::model::Invalid },
+}
+
+impl Trouble {
+    /// 이 거절의 `--json` 코드 — **자료가 되기 전에 들던 값을 그대로 든다**(리뷰).
+    ///
+    /// 글을 자료로 바꾸면서 갈래마다 달랐던 코드를 [`Repo::with_write`] 가 `broken` 하나로 뭉치던
+    /// 판이 있었다. `fail` 의 머리 글이 적어 둔 그대로 **`code` 는 받는 쪽이 분기하는 값**이라,
+    /// 태그에 쉼표를 하나 넣은 `moai add` 가 "파일이 깨졌다" 로 나갔고 같은 검사를 지나는
+    /// `moai edit`·`moai link` 는 제 손으로 `Fail::new` 를 지어 `error` 를 냈다 — 한 거절이
+    /// 명령마다 다른 코드로 나가는 것이 그 글이 이름 붙여 둔 실패다.
+    ///
+    /// **낱말을 빠짐없이 적는다** — `_` 로 받으면 갈래가 느는 날 새 거절이 말없이 `error` 가 된다.
+    fn code(&self) -> &'static str {
+        match self {
+            // 파일이 상했다 — 사람이 손으로 푼다.
+            Trouble::DuplicateId { .. } => code::BROKEN,
+            Trouble::LockBusy { .. } => code::LOCKED,
+            // 나머지는 부르는 쪽이 준 값이나 자리가 틀린 것이다.
+            Trouble::NotADirectory { .. } | Trouble::JournalLost { .. } | Trouble::Invalid { .. } => code::ERROR,
+        }
+    }
+}
+
+/// 거절이 **가리키는 줄**(moai-1rkl, moai-yve0). 이미 선 줄은 id 로, 이번 쓰기가 짓는 줄은
+/// 제목으로 가리킨다 — 거절은 쓰기를 통째로 물리므로 방금 뽑은 id 는 어디에도 안 남는다.
+///
+/// **낱말이 아니라 갈래로 든다** — "새 줄" 은 화면 말이고, 고르는 자리(락 안)는 그 말을 모른다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum At {
+    /// 이미 선 줄 — 그 id.
+    Id(String),
+    /// 아직 안 지은 줄 — 그 제목(한 줄로 접어 60바이트에 맞춘 것).
+    Unwritten(String),
+}
+
+/// [`Repo::write_locked`] 가 멈춘 까닭 — 락을 쥔 자리는 말을 모르므로 거절은 자료로 들고 나온다
+/// (`read_marks::Stop` 과 한 꼴이다).
+enum Stop {
+    /// io·락이 낸 것 — 이미 글이다.
+    Failed(Fail),
+    /// 손으로 고칠 때까지 안 쓴다 — 글은 [`Repo::with_write`] 가 락을 놓은 뒤에 편다.
+    Refused(Trouble),
+}
+
+impl From<Fail> for Stop {
+    fn from(e: Fail) -> Stop {
+        Stop::Failed(e)
+    }
+}
+
 #[derive(Clone)]
 pub struct Repo {
     pub root: PathBuf,
@@ -375,10 +443,16 @@ impl Repo {
     ///
     /// **"없다" 를 가르는 자는 [`gone`] 하나다**(moai-blvx) — 읽음 쪽([`crate::read_marks::settle`])도
     /// 같은 자를 쓴다. 닫은 글로 여기 두던 판은 두 표면이 같은 자리를 달리 불렀다.
-    pub fn open(dir: &Path) -> R<Opened> {
+    ///
+    /// **말은 거절할 때만 묻는다**(moai-iq7j) — 여는 것은 한눈 보기가 줄마다 부르는 길이라
+    /// (`projects::open_shallow`), 값으로 받으면 멀쩡한 줄마다 사용자 설정을 연다.
+    pub fn open(dir: &Path, lang: impl FnOnce() -> crate::i18n::Lang) -> R<Opened> {
         match std::fs::metadata(dir) {
             Ok(m) if m.is_dir() => {}
-            Ok(_) => return Err(Fail::new(format!("디렉터리가 아니다 — {}", dir.display()))),
+            Ok(_) => {
+                let why = Trouble::NotADirectory { at: dir.display().to_string() };
+                return Err(Fail::new(crate::view::store_trouble(lang(), &why)));
+            }
             Err(e) if gone(&e) => return Ok(Opened::Missing),
             Err(e) => return Err(Fail::new(format!("{}: {e}", dir.display()))),
         }
@@ -476,11 +550,40 @@ impl Repo {
     /// 닫는 함수는 `(이슈들, 설정, 못 읽는 줄이 이미 쓰는 id)` 를 받는다.
     /// 셋째 것을 **인자로 주는 까닭**은 안 쓰는 쪽이 잊을 수 없게 하려는
     /// 것이다 — 락 안에서 읽은 것이라 밖에서 다시 구하면 그 사이에 달라진다.
-    pub fn with_write<T, F>(&self, f: F) -> R<T>
+    ///
+    /// **말은 락을 놓은 뒤에 편다**(moai-iq7j, moai-rtji 가 읽음 쪽에 세운 꼴). 이 자리는 화면
+    /// 말을 모른 채 둔다는 2026-09-20 결정 아래 있고, 그래서 `lang` 은 값이 아니라 **묻는 길**이다:
+    /// 아무것도 거절하지 않는 판(= 거의 모든 판)은 사용자 설정을 아예 안 연다. 락 안에서 물으면
+    /// 그 설정이 FIFO 일 때 락을 쥔 채 영영 멈춘다 — 몸통([`Repo::write_locked`])이 멈춘 까닭을
+    /// 자료로 들고 나오고 여기서 편다.
+    pub fn with_write<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
-        let _lock = Lock::acquire(&self.dir().join("lock"))?;
+        let (out, note) = match self.write_locked(&lang, f) {
+            Ok(v) => v,
+            Err(Stop::Failed(e)) => return Err(e),
+            // **코드는 갈래가 쥔다**([`Trouble::code`]) — 여기서 하나로 뭉치면 태그 오타가
+            // "파일이 깨졌다" 로 나간다.
+            Err(Stop::Refused(t)) => return Err(Fail::coded(crate::view::store_trouble(lang(), &t), t.code())),
+        };
+        // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
+        if let Some(t) = note {
+            let said = crate::view::store_trouble(lang(), &t);
+            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
+        }
+        Ok(out)
+    }
+
+    /// [`Repo::with_write`] 의 몸통 — 락을 잡고, 읽고, 고치고, 쓴다. **돌아올 때 락을 놓는다.**
+    /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
+    fn write_locked<T, F>(&self, lang: &impl Fn() -> crate::i18n::Lang, f: F) -> Result<(T, Option<Trouble>), Stop>
+    where
+        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+    {
+        // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
+        // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
+        let _lock = Lock::acquire(&self.dir().join("lock"), lang)?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
@@ -578,17 +681,25 @@ impl Repo {
                 // **여기도 id 로 안 부른다**(moai-1rkl) — 위의 크기 검사만 고치고 두면 같은
                 // 쓰기가 한 축에서는 제목을, 다른 축에서는 없는 id 를 댄다. 실제로 `add --from`
                 // 에 `#bug,perf` 한 줄을 준 부름이 `<안 남을 id>: 태그에 …` 를 냈고, 같은 계획을
-                // 두 번 돌리면 그때마다 다른 id 가 나왔다. **갈아 끼우는 자는 한 자리다**
-                // ([`crate::model::point_at_unwritten`]) — 검사마다 따로 적으면 두 벌로 갈린다.
-                i.validate_keeping(&self.config, kept).map_err(|said| match was {
-                    Some(_) => said,
-                    None => crate::model::point_at_unwritten(&i.id, &i.title, said),
+                // 두 번 돌리면 그때마다 다른 id 가 나왔다.
+                // **가리키는 말은 여기서 고른다**(moai-yve0) — 이번 쓰기가 짓는 줄은 거절 뒤에
+                // 그 id 가 어디에도 안 남으므로(moai-1rkl) 제목 한 토막으로 가리킨다. 글은 락을
+                // 놓은 뒤 [`Repo::with_write`] 가 편다.
+                i.validate_keeping(&self.config, kept).map_err(|why| {
+                    let at = match was {
+                        Some(_) => At::Id(i.id.clone()),
+                        // 제목을 한 줄로 접어 자르는 자는 [`crate::model::fit_title`] 하나다 —
+                        // 크기 거절문이 쓰는 자와 같은 토막이라야 두 말이 같은 줄을 가리킨다.
+                        None => At::Unwritten(crate::model::fit_title(&i.title)),
+                    };
+                    Stop::Refused(Trouble::Invalid { at, why })
                 })?;
             }
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(dup) = first_duplicate(&issues) {
-            return Err(Fail::coded(format!("id 가 두 번 있다 — {dup}"), code::BROKEN));
+            // 락을 쥔 자리라 **글이 아니라 자료로** 물러난다 — 펴는 자는 [`Repo::with_write`] 다.
+            return Err(Stop::Refused(Trouble::DuplicateId { id: dup.to_string() }));
         }
 
         // 내용이 그대로면 스냅샷은 건드리지 않는다 (헛 diff 방지).
@@ -624,24 +735,23 @@ impl Repo {
         //
         // **안 썼으면 그대로 `Err` 다.** `note` 처럼 저널만 적는 쓰기는 저널이 전부라,
         // 거기서 실패하면 아무것도 안 담겼고 다시 부르는 것이 맞다.
+        let mut note = None;
         if !entries.is_empty()
             && let Err(e) = self.append_journal(&entries)
         {
             if !wrote {
-                return Err(e);
+                return Err(e.into());
             }
             // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
             // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
             // 말이었는지 대어 `moai note` 로 다시 적게 한다.
-            let mut worded: Vec<&str> =
-                entries.iter().filter(|j| j.text.is_some() || j.note.is_some()).map(|j| j.id.as_str()).collect();
+            //
+            // **여기서도 글을 안 짓는다**(moai-iq7j) — 락을 쥔 자리라 자료로 들고 나가고,
+            // [`Repo::with_write`] 가 락을 놓은 뒤에 펴서 [`MISSED`] 에 민다.
+            let mut worded: Vec<String> =
+                entries.iter().filter(|j| j.text.is_some() || j.note.is_some()).map(|j| j.id.clone()).collect();
             worded.dedup();
-            let why = if worded.is_empty() {
-                e.message
-            } else {
-                format!("{} (적어 온 말도 안 남았다 — `moai note` 로 다시 적는다: {})", e.message, worded.join(" "))
-            };
-            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), why));
+            note = Some(Trouble::JournalLost { said: e.message, ids: worded });
         }
         // **어디에 썼는지 담아 둔다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의 트래커를
         // 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고 믿고, 그
@@ -657,7 +767,7 @@ impl Repo {
                 moved.push(pair);
             }
         }
-        Ok(out)
+        Ok((out, note))
     }
 
     fn append_journal(&self, entries: &[JournalEntry]) -> R<()> {
@@ -910,14 +1020,11 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
     // 적는다(`Issue::arrive`, moai-38mh).
     issue.arrive(cfg);
     issue.normalize();
-    // **여기서 거절하면 이 id 를 안 댄다**(moai-1rkl). 거절은 쓰기를 통째로 물리므로 방금 뽑은
-    // id 는 어디에도 안 남는데, [`Issue::validate_fields`] 의 말은 일곱 자리가 모두 `<id>: ` 로
-    // 시작한다 — `add --from` 에 `#bug,perf` 한 줄을 준 부름이 없는 id 를 대고, 같은 계획을 두
-    // 번 돌리면 그때마다 다른 id 가 나왔다. 크기 검사만 고치고 두면 같은 쓰기가 축마다 다른
-    // 말을 하므로, **만드는 쓰기가 다 지나는 이 자리**에서 함께 건다.
-    if let Err(said) = issue.validate(cfg) {
-        return Err(crate::model::point_at_unwritten(&issue.id, &issue.title, said).into());
-    }
+    // **검사는 여기서 다시 안 건다**(moai-yve0). 한때 이 자리에도 걸었다 — 거절이 쓰기를 통째로
+    // 물리므로 방금 뽑은 id 는 어디에도 안 남는데 검사의 말이 `<id>: ` 로 시작해, `add --from` 에
+    // `#bug,perf` 한 줄을 준 부름이 없는 id 를 댔다(moai-1rkl). 이제 가리키는 말을 고르는 자가
+    // [`Repo::write_locked`] 하나고, 그쪽도 **아직 없던 줄이면 제목으로** 가리킨다 — 같은 말이
+    // 한 자리에서 나온다. 여기서 또 걸면 그 자리는 화면 말을 모르는 채 글을 지어야 한다.
     let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);
     issues.push(issue.clone());
     Ok((entry, issue))
@@ -935,8 +1042,13 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 /// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다. [`write_atomic_in`] 이 고르는 것은 **임시
 /// 자리뿐**이고 권한은 둘이 한 몸통에서 지킨다 — 임시 자리를 잘못 고르면 찌꺼기가 남지만, 권한을
 /// 잘못 고르면 남이 읽는다. 둘을 같은 무게로 읽고 `write_atomic_as` 를 되살리지 않는다.
+///
+/// **뿌리 없는 경로 하나는 옮기지 않는다**(moai-iq7j). `path.parent()` 가 없는 것은 사람이 밟는
+/// 자리가 아니라 부르는 쪽의 실수이고(뿌리 `/` 나 빈 경로), 이 함수는 머지 드라이버도 부른다 —
+/// 화면 말을 물려주면 git 이 부르는 길이 사용자 설정을 연다. io 가 내는 줄과 같은 결로 영어 한
+/// 줄을 둔다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
+    let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
     write_atomic_in(path, bytes, dir)
 }
 
@@ -948,7 +1060,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// 한 글자도 안 바뀐다.
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
-    let dir = path.parent().ok_or_else(|| Fail::new("경로에 디렉터리가 없다"))?;
+    let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
     let tmp = tmp_dir.join(format!(
         "{}.tmp.{}",
         path.file_name().and_then(|s| s.to_str()).unwrap_or("out"),
@@ -1085,9 +1197,14 @@ pub(crate) enum Elsewhere {
 /// (리뷰 moai-f31d.lhe 12번). 같은 조건을 두 표면이 달리 부르던 자리다.
 ///
 /// **여기 안 든 갈래는 없는 것이 아니다.** `EACCES`·`ELOOP`·`ESTALE` 는 자리가 서 있는데 못 닿은
-/// 것이라, 읽는 쪽은 까닭을 대고 쓰는 쪽은 대기 자리로 간다(`read_marks` 의 `spool_at`, moai-bdej) —
-/// 그것을 "없다" 로 접으면 떨어진 도장이 갈 곳을 잃는다. 가르는 잣대가 [`crate::user_config::unreadable`]
-/// 과 따로 서는 까닭도 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+/// 것이라 읽는 쪽이 **까닭을 댄다** — 없는 자리는 저쪽이 이미 제 낱말로 대므로 조용히 지나간다
+/// ([`crate::read_marks::settle`]). 가르는 잣대가 [`crate::user_config::unreadable`] 과 따로 서는 까닭도
+/// 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+///
+/// **쓰는 쪽은 둘 다 대기 자리로 간다**(moai-jfgn, 2026-09-21 사용자 결정). 한때는 없는 자리만 받은
+/// 철자의 읽음 파일에 적었는데, 링크가 잠깐 바뀌었다 돌아오는 창의 도장을 그 뒤에 아무도 다시 안 봤다
+/// — 그래서 이 갈래는 이제 **떨어지는가**가 아니라 **까닭을 대는가**만 가른다
+/// ([`crate::read_marks::Settled`]).
 pub(crate) fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
 }
@@ -1116,7 +1233,10 @@ pub(crate) fn lock_beside(path: &Path) -> PathBuf {
 pub(crate) struct Lock(std::fs::File);
 
 impl Lock {
-    pub(crate) fn acquire(path: &Path) -> R<Lock> {
+    ///
+    /// **말은 물러날 때만 묻는다**(moai-iq7j) — `lang` 이 값이 아니라 묻는 길인 까닭이고,
+    /// 락을 아직 안 쥔 자리라 여기서 물어도 제 락에 걸리지 않는다.
+    pub(crate) fn acquire(path: &Path, lang: impl FnOnce() -> crate::i18n::Lang) -> R<Lock> {
         let f = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -1132,13 +1252,8 @@ impl Lock {
                         || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
                 {
                     if start.elapsed() >= LOCK_TIMEOUT {
-                        return Err(Fail::coded(
-                            format!(
-                                "{} 초 동안 다른 moai 가 쓰고 있어 물러난다. 아무것도 바뀌지 않았다",
-                                LOCK_TIMEOUT.as_secs()
-                            ),
-                            code::LOCKED,
-                        ));
+                        let why = Trouble::LockBusy { secs: LOCK_TIMEOUT.as_secs() };
+                        return Err(Fail::coded(crate::view::store_trouble(lang(), &why), code::LOCKED));
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 }
@@ -1296,7 +1411,7 @@ mod tests {
         git(&main, &["worktree", "add", "-q", "side", "-b", "side"]);
         let side = main.join("side");
 
-        let Opened::Repo(repo) = Repo::open(&side).unwrap() else { panic!("안 열렸다") };
+        let Opened::Repo(repo) = Repo::open(&side, || crate::i18n::Lang::Ko).unwrap() else { panic!("안 열렸다") };
         assert_eq!(repo.root, main, "등록한 워크트리를 그 자리에서 열었다");
         assert_eq!(repo.here(), side, "어디서 열었는지를 잃었다");
 
@@ -1309,7 +1424,7 @@ mod tests {
         let feat = alone.join("feat");
         std::fs::create_dir_all(feat.join(".moai")).unwrap();
         std::fs::write(feat.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
-        let Opened::Repo(repo) = Repo::open(&feat).unwrap() else { panic!("안 열렸다") };
+        let Opened::Repo(repo) = Repo::open(&feat, || crate::i18n::Lang::Ko).unwrap() else { panic!("안 열렸다") };
         assert_eq!(repo.root, feat, "옮길 곳이 없는데 옮겼다");
         assert_eq!(repo.here(), feat, "안 옮겼는데 옮겼다고 적었다");
     }
@@ -1404,10 +1519,13 @@ mod tests {
     #[test]
     fn writes_and_reads_back() {
         let (r, _d) = repo("rw");
-        r.with_write(|issues, _, _| {
-            issues.push(issue("argos-4aex"));
-            Ok((vec![JournalEntry::create("argos-4aex", "t", T, &crate::model::someone("raven"))], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |issues, _, _| {
+                issues.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::create("argos-4aex", "t", T, &crate::model::someone("raven"))], ()))
+            },
+        )
         .unwrap();
         let load = r.read().unwrap();
         assert_eq!(load.issues.len(), 1);
@@ -1419,12 +1537,15 @@ mod tests {
     #[test]
     fn output_is_sorted_and_deterministic() {
         let (r, d) = repo("sorted");
-        r.with_write(|issues, _, _| {
-            for id in ["argos-4aey", "argos-4aex.ae3", "argos-0001", "argos-4aex"] {
-                issues.push(issue(id));
-            }
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |issues, _, _| {
+                for id in ["argos-4aey", "argos-4aex.ae3", "argos-0001", "argos-4aex"] {
+                    issues.push(issue(id));
+                }
+                Ok((vec![], ()))
+            },
+        )
         .unwrap();
         let src = std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap();
         let ids: Vec<&str> = src.lines().map(|l| l.split('"').nth(3).unwrap()).collect();
@@ -1435,15 +1556,18 @@ mod tests {
     #[test]
     fn unchanged_write_leaves_the_file_alone() {
         let (r, d) = repo("idem");
-        r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            },
+        )
         .unwrap();
         let path = d.join(".moai/issues.jsonl");
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(Duration::from_millis(20));
-        r.with_write(|_, _, _| Ok((vec![], ()))).unwrap();
+        r.with_write(|| crate::i18n::Lang::Ko, |_, _, _| Ok((vec![], ()))).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
     }
 
@@ -1451,14 +1575,18 @@ mod tests {
     #[test]
     fn journal_only_writes_still_land() {
         let (r, _d) = repo("note");
-        r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            },
+        )
         .unwrap();
-        r.with_write(|_, _, _| {
-            Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())),
+        )
         .unwrap();
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
@@ -1480,15 +1608,21 @@ mod tests {
         }
 
         let by = crate::model::someone("raven");
-        r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            Ok((vec![JournalEntry::create("argos-4aex", "t", T, &by)], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::create("argos-4aex", "t", T, &by)], ()))
+            },
+        )
         .expect("스냅샷을 썼는데 실패로 냈다 — 다시 부르면 둘 선다");
         assert_eq!(r.read().unwrap().issues.len(), 1);
         assert!(journal_misses().iter().any(|(root, _)| root == d.path()), "못 남긴 것을 안 셌다");
 
-        let e = r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &by)], ())));
+        let e = r.with_write(
+            || crate::i18n::Lang::Ko,
+            |_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &by)], ())),
+        );
         assert!(e.is_err(), "저널만 적는 쓰기가 아무것도 안 담았는데 성공으로 끝났다");
     }
 
@@ -1562,10 +1696,13 @@ mod tests {
         let (r, d) = repo("broken");
         let path = d.join(".moai/issues.jsonl");
         std::fs::write(&path, "{깨짐\n").unwrap();
-        r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            },
+        )
         .expect("깨진 줄 하나가 쓰기를 막았다");
 
         let after = std::fs::read_to_string(&path).unwrap();
@@ -1574,7 +1711,7 @@ mod tests {
 
         // 두 번째 쓰기에서 줄이 또 움직이지 않는다 (멱등).
         let once = std::fs::read_to_string(&path).unwrap();
-        r.with_write(|_, _, _| Ok((vec![], ()))).unwrap();
+        r.with_write(|| crate::i18n::Lang::Ko, |_, _, _| Ok((vec![], ()))).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), once);
     }
 
@@ -1582,11 +1719,14 @@ mod tests {
     fn refuses_duplicate_ids() {
         let (r, _d) = repo("dup");
         let e = r
-            .with_write(|i, _, _| {
-                i.push(issue("argos-4aex"));
-                i.push(issue("argos-4aex"));
-                Ok((vec![], ()))
-            })
+            .with_write(
+                || crate::i18n::Lang::Ko,
+                |i, _, _| {
+                    i.push(issue("argos-4aex"));
+                    i.push(issue("argos-4aex"));
+                    Ok((vec![], ()))
+                },
+            )
             .unwrap_err()
             .message;
         assert!(e.contains("두 번"), "{e}");
@@ -1604,10 +1744,13 @@ mod tests {
         old.status = Status::new("옛날칸");
         std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
-        r.with_write(|issues, _, _| {
-            issues.push(issue("argos-0002"));
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |issues, _, _| {
+                issues.push(issue("argos-0002"));
+                Ok((vec![], ()))
+            },
+        )
         .expect("낡은 줄 때문에 새 이슈를 못 넣었다");
 
         let load = r.read().unwrap();
@@ -1627,19 +1770,25 @@ mod tests {
         old.status = Status::new("옛날칸");
         std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
-        r.with_write(|issues, _, _| {
-            issues[0].title = "고친 제목".into();
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |issues, _, _| {
+                issues[0].title = "고친 제목".into();
+                Ok((vec![], ()))
+            },
+        )
         .expect("옛 칸에 선 줄의 제목을 못 고쳤다");
         assert_eq!(r.read().unwrap().get("argos-0001").unwrap().title, "고친 제목");
         assert_eq!(r.read().unwrap().get("argos-0001").unwrap().status.as_str(), "옛날칸");
 
         let e = r
-            .with_write(|issues, _, _| {
-                issues[0].status = Status::new("또 없는 칸");
-                Ok((vec![], ()))
-            })
+            .with_write(
+                || crate::i18n::Lang::Ko,
+                |issues, _, _| {
+                    issues[0].status = Status::new("또 없는 칸");
+                    Ok((vec![], ()))
+                },
+            )
             .unwrap_err()
             .message;
         assert!(e.contains("라는 칸이 없다"), "{e}");
@@ -1649,17 +1798,23 @@ mod tests {
     #[test]
     fn a_rejected_write_leaves_the_file_untouched() {
         let (r, d) = repo("rollback");
-        r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            },
+        )
         .unwrap();
         let before = std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap();
-        let _ = r.with_write(|i, _, _| {
-            i.push(issue("argos-4aey"));
-            i[0].status = Status::new("없는칸");
-            Ok((vec![], ()))
-        });
+        let _ = r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aey"));
+                i[0].status = Status::new("없는칸");
+                Ok((vec![], ()))
+            },
+        );
         assert_eq!(std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap(), before);
     }
     /// 못 읽는 줄도 **id 는 내놓는다.** 줄을 `Issue` 로 못 읽는 것과 그 안의
@@ -1696,14 +1851,17 @@ mod tests {
         .unwrap();
 
         let minted = r
-            .with_write(|issues, cfg, reserved| {
-                assert!(reserved.contains("argos-9999"), "못 읽는 줄의 id 를 안 줬다 — {reserved:?}");
-                // 그 줄의 id 를 그대로 노리는 씨앗이라도 다른 것이 나와야 한다.
-                let taken = taken_ids(issues, reserved);
-                let id = crate::id::generate(&cfg.prefix, &taken, "argos-9999");
-                issues.push(issue(&id));
-                Ok((vec![], id))
-            })
+            .with_write(
+                || crate::i18n::Lang::Ko,
+                |issues, cfg, reserved| {
+                    assert!(reserved.contains("argos-9999"), "못 읽는 줄의 id 를 안 줬다 — {reserved:?}");
+                    // 그 줄의 id 를 그대로 노리는 씨앗이라도 다른 것이 나와야 한다.
+                    let taken = taken_ids(issues, reserved);
+                    let id = crate::id::generate(&cfg.prefix, &taken, "argos-9999");
+                    issues.push(issue(&id));
+                    Ok((vec![], id))
+                },
+            )
             .unwrap();
         assert_ne!(minted, "argos-9999", "못 읽는 줄과 같은 id 를 뽑았다");
     }
@@ -1712,21 +1870,21 @@ mod tests {
     #[test]
     fn open_tells_uninit_missing_and_broken_apart() {
         let root = scratch("open");
-        assert!(matches!(Repo::open(&root), Ok(Opened::Repo(r)) if r.root == *root.path()));
+        assert!(matches!(Repo::open(&root, || crate::i18n::Lang::Ko), Ok(Opened::Repo(r)) if r.root == *root.path()));
 
         let bare = root.join("bare");
         std::fs::create_dir_all(&bare).unwrap();
-        assert!(matches!(Repo::open(&bare), Ok(Opened::Uninit)));
+        assert!(matches!(Repo::open(&bare, || crate::i18n::Lang::Ko), Ok(Opened::Uninit)));
         // 위로 찾지 않는다 — 바깥 저장소의 `.moai` 를 제 것으로 내면 안 된다.
-        assert!(matches!(Repo::open(&bare.join("gone")), Ok(Opened::Missing)));
+        assert!(matches!(Repo::open(&bare.join("gone"), || crate::i18n::Lang::Ko), Ok(Opened::Missing)));
         // 경로 중간이 파일이어도 없는 것이다.
         std::fs::write(root.join("file"), "").unwrap();
-        assert!(matches!(Repo::open(&root.join("file/sub")), Ok(Opened::Missing)));
-        assert!(Repo::open(&root.join("file")).is_err(), "파일을 디렉터리로 열었다");
+        assert!(matches!(Repo::open(&root.join("file/sub"), || crate::i18n::Lang::Ko), Ok(Opened::Missing)));
+        assert!(Repo::open(&root.join("file"), || crate::i18n::Lang::Ko).is_err(), "파일을 디렉터리로 열었다");
 
         let broken = root.join("broken");
         std::fs::create_dir_all(broken.join(".moai")).unwrap();
         std::fs::write(broken.join(".moai/config.toml"), "prefix = \"\"\n").unwrap();
-        assert!(Repo::open(&broken).is_err(), "깨진 설정을 init 전으로 접었다");
+        assert!(Repo::open(&broken, || crate::i18n::Lang::Ko).is_err(), "깨진 설정을 init 전으로 접었다");
     }
 }
