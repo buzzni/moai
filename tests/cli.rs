@@ -13643,6 +13643,40 @@ fn status_names_a_clone_that_never_planted_the_driver() {
     assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
 }
 
+/// **선언을 걷으면 넷이 다 입을 다문다**(moai-0j7c).
+///
+/// 앞 판은 `absent` 하나만 선언으로 막아, `merge=moai` 를 걷은 저장소에서도 rotten·alien·stale 이
+/// 그대로 섰다. 거기서 병합은 어차피 늘 기본 머지라 "병합이 기본 머지로 내려앉는다" 가 공허하고,
+/// `--uninstall` 이 없어 `.git/config` 를 손으로 여는 길밖에 남지 않는다 — 걷을 길 없는 알림이다.
+/// 선언을 걷는 것이 진짜 탈출구라는 것을 여기서 맨다.
+///
+/// **프로세스가 안 뜨는 것도 함께 잰다.** 안 쓰기로 한 저장소에서 `status` 를 칠 때마다 남의
+/// 바이너리를 부르지 않는다 — 불렸는지를 그 바이너리가 남기는 파일로 본다.
+#[cfg(unix)]
+#[test]
+fn undeclaring_the_snapshot_silences_every_merge_driver_notice() {
+    let s = init("mergeundeclared");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // 자리는 멀쩡하고 이 명령만 모르는 도구 — 선언이 선 동안은 `alien` 이 선다.
+    let ran = root.join("불렸다");
+    let other = root.join("옛moai");
+    write_exe(&other, &format!("#!/bin/sh\n: > '{}'\nexit 2\n", ran.display()));
+    ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
+    let json = ok(root, &["status", "--json"]);
+    assert!(json.contains("merge_driver_alien"), "{json}");
+    assert!(ran.exists(), "선언이 선 저장소에서 probe 가 안 돌았다");
+
+    // 선언만 걷는다 — `.git/config` 의 줄은 그대로다.
+    std::fs::remove_file(&ran).unwrap();
+    std::fs::write(root.join(".gitattributes"), "# 이 저장소는 드라이버를 안 쓴다\n").unwrap();
+    let json = ok(root, &["status", "--json"]);
+    assert!(!json.contains("merge_driver_"), "선언이 없는데 알림이 섰다\n{json}");
+    assert!(!ran.exists(), "선언이 없는데 probe 가 돌았다");
+}
+
 /// **넓은 자리에 심은 사람을 "안 심었다" 로 조르지 않는다**(리뷰 moai-vbmn.spv).
 ///
 /// 심는 자리는 `--local` 이지만 git 이 드라이버를 **찾는** 자리는 system·global 까지다.

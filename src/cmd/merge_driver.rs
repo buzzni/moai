@@ -584,10 +584,21 @@ fn driver_key() -> String {
 /// 훑어, 사람이 한때 `git config --global merge.moai.driver` 를 적어 뒀으면 심은 적 없는 저장소마다
 /// — git 저장소가 아닌 `.moai` 자리까지 — 이 알림이 서고, 힌트를 따라 쳐도 그것은 `--local` 에
 /// 적으니 영영 안 걷힌다. `install` 이 적는 자리가 `--local` 이므로 재는 자리도 거기다.
+///
+/// **선언이 넷 전부의 막이다**(moai-0j7c). 앞 판은 [`declared`] 로 `absent` 하나만 막아,
+/// `.gitattributes` 에서 `merge=moai` 를 걷은 저장소에서도 rotten·alien·stale 이 그대로 섰다.
+/// 거기서 병합은 어차피 늘 기본 머지였으니 "병합이 기본 머지로 내려앉는다" 가 공허하고, 걷는
+/// 길은 `--uninstall` 이 없어 `.git/config` 를 손으로 여는 것뿐이다 — 걷을 길 없는 알림을
+/// 안 세우는 자리가 여기다. **선언을 걷는 것이 진짜 탈출구가 된다**(moai-47bt 가 찾던 것).
+/// 덤으로 안 쓰기로 한 저장소에서는 [`probe`] 가 프로세스를 아예 안 띄운다.
 pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
     /// 키가 없을 때 git 이 돌려줄 글. **값이 될 수 없는 것이라야 한다** — 심는 줄은 껍데기 명령이고
     /// 제어문자 하나만 든 줄은 그 무엇도 아니다.
     const UNSET: &str = "\u{1}";
+    // **먼저 묻는다.** 뒤로 미루면 안 쓰기로 한 저장소에서도 설정을 읽고 `probe` 가 뜬다.
+    if !declared(root) {
+        return None;
+    }
     let key = driver_key();
     let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
         Ok(v) => v,
@@ -615,8 +626,7 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // **넓게 묻는 것은 조르기 직전뿐이다.** 위의 `--local` 은 그대로다 — 넓은 자리의 줄은
         // 재지도 고치라고 하지도 않는다(남이 적은 줄을 "썩었다" 고 안 부르는 moai-h6aq.cx8 의
         // 규칙이 그 자리다). 여기서 넓은 자리는 **입을 다물 까닭**으로만 쓴다.
-        return (declared(root) && !planted_anywhere(root))
-            .then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
+        return (!planted_anywhere(root)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
     }
     let word = planted_word(planted)?;
     match probe(root, &word) {
@@ -655,7 +665,7 @@ fn planted_anywhere(root: &Path) -> bool {
     crate::git::run(root, &["config", "--get", "--default", "", &driver_key()]).map_or(true, |v| !v.trim().is_empty())
 }
 
-/// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가.
+/// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.
 ///
 /// **딸린 파일을 손으로 읽지 않는다.** 규칙은 `.gitattributes` 하나에만 있는 것이 아니다 —
 /// `.git/info/attributes` 와 위 디렉터리의 파일, 그리고 패턴끼리의 우선순위까지 git 의 규칙이다.
