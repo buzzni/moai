@@ -6788,3 +6788,8 @@
 {"ts":"2026-09-21T09:10:46Z","id":"moai-1p4t","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-21): in_progress 의 글리프는 그대로 둔다. 멈춘 에픽을 따로 표시하는 일은 이번에 안 한다 — 멈춤은 칸이 아니라 판단이고, 그것을 목록 글리프로 세우면 칸 이름으로 가르는 표에 칸 아닌 것이 섞인다."}
 {"ts":"2026-09-21T09:13:54Z","id":"moai-l5ue","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T09:14:42Z","id":"moai-0j7c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:15:36Z","id":"moai-vqmx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:15:41Z","id":"moai-51it","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:15:46Z","id":"moai-jkpa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:16:25Z","id":"moai-a4u9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"kind 가 기본값일 때 --json 에서 사라진다"}
+{"ts":"2026-09-21T09:16:30Z","id":"moai-a4u9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
