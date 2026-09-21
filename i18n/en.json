@@ -10,7 +10,6 @@
   "overview.tally": "Projects {places} · {n}",
   "overview.places": "{places}",
   "overview.picked_more": "{n} more picked up",
-  "overview.unread_snapshot": "Could not read a sibling worktree's snapshot — {at}",
   "overview.worktree_trouble": "Trouble in sibling worktrees {n}",
   "overview.worktree_trouble_above": "Trouble in sibling worktrees {n} — the lines above",
   "overview.warnings": "Warnings {n}",
@@ -430,6 +429,7 @@
   "tui.register.already": "already registered",
   "tui.register.unreadable": " · ! cannot be read — {why}",
   "tui.register.uninit": " · before init — no .moai yet",
+  "tui.register.uninit_worktree": " · before init — a linked worktree; the tracker lives in the main checkout",
   "tui.register.go_up": " · {key} goes up to the layer and shows it",
   "tui.register.failed": "could not register — {why}",
   "tui.register.config_unread": "the user config could not be read again",
@@ -439,6 +439,7 @@
   "tui.register.already_gone": "already off the list · {path}{layer}",
   "tui.register.dropped": "✓ dropped · {paths} — from the list only; the directory and .moai stay{layer}",
   "tui.register.drop_failed": "! could not drop — {why}",
+  "trouble.unread": "Could not read a sibling worktree's snapshot — {at}",
   "trouble.skipped": "{at} — unreadable rows left out of the overlay {n}",
   "trouble.no_git": "Could not run git, so sibling worktrees were not found — {why}",
   "trouble.failed": "Could not find sibling worktrees — {why}",
@@ -731,11 +732,12 @@
   "look.not_a_word": "`{value}` in `{key}` is not a word — skipped",
   "sheet.not_a_table": "`{table}` must be a `[{table}]` table — it is {is}",
   "sheet.not_a_stamp": "`{key}` must be a word holding a time — it is {is}",
+  "sheet.held": "{ids} could not be written — a hand-written value holds their place there; nothing else was held back, and fixing that line lets the next write land them",
   "sheet.spool_left": "{said} — merged, but the pending place could not be cleared",
   "sheet.spool_kept": "kept the pending place — not all of it could be read; the next write merges it once the reason given with this is gone",
   "sheet.spool_held": "kept the pending place — {ids} cannot land in this project's read file: a hand-written value holds their place there; fix that line and the next write merges them",
+  "sheet.fallen_place": "that file is this run's pending place, taken because the project's place could not be resolved — deleting it drops the marks already in it",
   "sheet.refuse_unparsable": "{said} — nothing is written until that is fixed",
   "sheet.refuse_not_ours": "these are not {root}'s read marks, so nothing is written — delete the file by hand",
-  "sheet.refuse_not_a_table": "`{table}` is not a `[{table}]` table ({is}), so no read marks are written — fix it by hand",
-  "sheet.refuse_not_a_stamp": "`{id}` in `{table}` is not a time ({is}), so no read marks are written — fix it by hand"
+  "sheet.refuse_not_a_table": "`{table}` is not a `[{table}]` table ({is}), so no read marks are written — fix it by hand"
 }

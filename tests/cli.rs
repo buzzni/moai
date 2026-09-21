@@ -1835,6 +1835,9 @@ fn the_overview_counts_work_with_no_live_worktree() {
     // **못 읽은 워크트리가 있으면 "센 결과 0" 이 아니라 "못 셌다" 다**(리뷰 moai-p3bs.op2) —
     // 밖에서는 옆 스냅샷을 아예 안 여므로, 세지 못했다는 사실이 여기서 사라지면 죽은 세션이
     // 통째로 조용해진다.
+    // 그 문장이 **몇 번** 섰는가 — 겹쳐 본 길과 안 겹친 길이 한 문장을 쓰므로(moai-hs3g) 어느
+    // 판에서도 못 읽은 워크트리 하나에 한 줄이다.
+    let said = |t: &str| t.matches("스냅샷을 못 읽었다 — ⎇").count();
     let snap = one.join(".claude/worktrees/agent-x/.moai/issues.jsonl");
     std::fs::remove_file(&snap).unwrap();
     std::fs::create_dir(&snap).unwrap();
@@ -1855,11 +1858,19 @@ fn the_overview_counts_work_with_no_live_worktree() {
         mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
         "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
     );
+    // 못 읽은 워크트리 하나에 그 문장도 하나다.
+    assert_eq!(said(mine), 1, "한 워크트리를 두 줄로 댔다\n{blind}");
 
     // **겹쳐 보면 `gather` 가 같은 워크트리를 이미 냈다 — 두 번 세지 않는다**(`status` 의
     // `said_already` 와 같은 자). 겹쳐 세면 깨진 워크트리 하나가 `옆 워크트리 문제 2건` 으로 서서
     // 보는 쪽이 두 곳이 깨진 줄로 읽는다. **기계도 같은 사실을 안쪽과 같은 키로 받는다** — 없으면
     // 밖에서 읽는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다.
+    //
+    // **재는 자는 그 문장이 몇 번 서는가다**(moai-hs3g). 한때 이 자리는 겹쳐 본 판에 그 문장이
+    // **없는지**를 쟀는데, 그때는 두 길이 같은 사실을 두 말로 대고 있었기 때문이다 — 겹쳐 본 길은
+    // `⎇ 가지: 까닭` 만, 안 겹친 길은 문장을 둘러. 문장을 하나로 맞춘 뒤로 그 자는 "한 번 댔다" 와
+    // "안 댔다" 를 못 가른다. 세는 것으로 바꾸면 두 판이 **같은 것**을 재고, 두 번 대는 되돌림은
+    // 2 로 붉어진다.
     let both = isolated(BIN)
         .args(["status", "--worktree"])
         .current_dir(&out)
@@ -1870,7 +1881,9 @@ fn the_overview_counts_work_with_no_live_worktree() {
         .unwrap();
     let both = String::from_utf8(both.stdout).unwrap();
     assert!(block(&both, "one").contains("옆 워크트리 문제 1건"), "한 워크트리를 두 번 셌다\n{both}");
-    assert!(!block(&both, "one").contains("스냅샷을 못 읽었다 — ⎇"), "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    assert_eq!(said(block(&both, "one")), 1, "`gather` 가 낸 워크트리를 한 번 더 댔다\n{both}");
+    // 겹쳐 본 길은 열다 진 까닭까지 싣는다 — 안 겹친 길이 그 자리에 대는 것은 워크트리의 자리다.
+    assert!(block(&both, "one").contains("worktree-agent-x"), "어느 워크트리인지를 안 댔다\n{both}");
     let machine = isolated(BIN)
         .args(["status", "--worktree", "--json"])
         .current_dir(&out)
@@ -5027,6 +5040,34 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     let out = mine(&["read", "--all", "--json"]);
     assert!(out.contains(&late), "안 읽은 줄이 안 들었다 — {out}");
     assert!(!out.contains(&member), "이미 읽은 줄을 다시 적었다 — {out}");
+    assert!(out.contains(r#""held":[]"#), "막힌 것이 없는 판에 `held` 가 안 섰다 — {out}");
+}
+
+/// **사람이 적은 값에 막힌 id 는 이름으로 나온다**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
+///
+/// `Sheet::mark` 이 그 id 만 건너뛰게 되면서(막힌 줄 하나가 쓰기 전체를 세우지 않는다) 시킨 id 가
+/// `read` 에도 `missing` 에도 안 서고, 남는 것은 `problems` 의 산문뿐이었다 — 사람 없이 도는 고리
+/// (`examples/bash-agent`)는 그것을 "적혔다" 로 세고 지나가 그 줄이 영영 [NEW] 로 선다.
+///
+/// **종료 코드는 안 움직인다.** 막힌 줄은 사람이 적어 둔 값에서 오고, 그 한 줄로 `moai read --all` 이
+/// 비영으로 끝나면 고리는 매 판을 실패로 읽는다 — `ready --json` 의 `held` 와 같은 자다.
+#[test]
+fn read_names_the_ids_a_hand_written_value_held_back() {
+    let s = init("readheld");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let (a, b) = (field(&mine(&["add", "첫째", "--json"]), "id"), field(&mine(&["add", "둘째", "--json"]), "id"));
+    mine(&["read", &a]);
+    // 사람이 `b` 의 자리에 때가 아닌 값을 적어 두었다.
+    let [(sheet, was)]: [(PathBuf, String); 1] = read_sheets(&cfg, s.path()).try_into().expect("읽음 파일이 하나 섰다");
+    std::fs::write(&sheet, format!("{was}\"{b}\" = 3\n")).unwrap();
+
+    let out = moai_with(s.path(), &cfg, &["read", &b, "--json"]);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "막힌 줄 하나로 비영으로 끝났다 — {}", String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains(&format!(r#""held":["{b}"]"#)), "막힌 id 를 이름으로 안 냈다 — {said}");
+    assert!(said.contains(r#""read":[]"#) && said.contains(r#""missing":[]"#), "{said}");
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "사람이 적은 값을 덮었다");
 }
 
 /// **읽음은 본 때가 아니라 본 줄의 `updated_at` 을 적는다**(moai-lyc1, 사용자 결정 2026-09-19). 본 때를
@@ -5113,8 +5154,10 @@ fn reading_a_duplicate_id_takes_the_later_stamp_of_the_twins() {
 ///
 /// - **건너뛰고 지나가는 것**(`SheetTrouble`) — 다른 id 의 줄에 때가 아닌 값을 적으면 쓰기는 그 줄을
 ///   빼고 나머지를 적은 뒤 까닭을 stderr 에 댄다
-/// - **멈추는 것**(`SheetRefusal`) — 적으려는 id 의 자리에 때가 아닌 값이 있으면 무엇을 적어 둔
-///   것인지 모르는 채 덮지 않고 `broken` 으로 멈춘다. 이 글은 `read_marks::update` 가 **락을 놓은 뒤에**
+/// - **적으려는 id 가 그 줄에 막힌 것**(`SheetTrouble::Held`, moai-l5ue) — 그 줄만 건너뛰고 0 으로
+///   끝나되, 무엇을 못 적었는지를 이름으로 댄다
+/// - **멈추는 것**(`SheetRefusal`) — `[read]` 자리에 사람이 낱값을 적어 두면 어느 id 도 앉힐 표가
+///   없어 `broken` 으로 멈춘다. 이 글은 `read_marks::update` 가 **락을 놓은 뒤에**
 ///   편다 — 말은 멈췄을 때만 묻는다. 물은 말이 거기까지 가는지를 여기서 잰다
 ///
 /// **어느 줄인지도 댄다**(리뷰) — 글은 말묶음의 자리(`{key}`·`{id}`)에 줄 이름을 채워 짓는데, 두 이름이
@@ -5145,17 +5188,33 @@ fn the_read_sheet_speaks_the_chosen_language() {
         assert!(lang != "en" || !hangul(&err), "영어를 골랐는데 한국어가 섰다 — {err}");
     }
 
-    // 멈추는 것 — 이번에는 적으려는 id(`b`)의 자리가 손으로 적은 값이다.
+    // 막힌 것 — 이번에는 적으려는 id(`b`)의 자리가 손으로 적은 값이다. 그 줄만 건너뛰고 0 으로 끝나되,
+    // 무엇을 못 적었는지를 이름으로 댄다(moai-l5ue).
+    for (lang, want) in [("en", "could not be written"), ("ko", "못 적었다")] {
+        let out = run(lang, &b);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "막힌 줄 하나로 멈췄다 ({lang}) — {err}");
+        assert!(err.contains(want), "{lang} 을 골랐는데 못 적은 까닭이 그 말로 안 섰다 — {err}");
+        assert!(err.contains(&b), "못 적은 까닭에 어느 id 인지를 안 댔다 ({lang}) — {err}");
+        assert!(err.contains(&sheet.display().to_string()), "못 적은 까닭에 어느 파일인지를 안 댔다 — {err}");
+        assert!(lang != "en" || !hangul(&err), "영어를 골랐는데 못 적은 까닭이 한국어로 섰다 — {err}");
+    }
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "손으로 적은 값을 덮었다");
+
+    // 멈추는 것 — `[read]` 자리에 사람이 낱값을 적어 두면 어느 id 도 앉힐 표가 없다.
+    let path_line = was.lines().next().expect("읽음 파일의 첫 줄은 path 다").to_string();
+    assert!(path_line.starts_with("path = "), "시험의 전제 — 첫 줄이 path 가 아니다 — {path_line}");
+    std::fs::write(&sheet, format!("{path_line}\nread = 3\n")).unwrap();
     for (lang, want) in [("en", "so no read marks are written"), ("ko", "읽음을 적지 않는다")] {
         let out = run(lang, &b);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "손으로 적은 자리를 덮었다 ({lang})");
         assert!(err.contains(want), "{lang} 을 골랐는데 멈춘 까닭이 그 말로 안 섰다 — {err}");
-        assert!(err.contains(&format!("`{b}`")), "멈춘 까닭에 어느 줄인지를 안 댔다 ({lang}) — {err}");
+        assert!(err.contains("`read`"), "멈춘 까닭에 어느 줄인지를 안 댔다 ({lang}) — {err}");
         assert!(err.contains(&sheet.display().to_string()), "멈춘 까닭에 어느 파일인지를 안 댔다 — {err}");
         assert!(lang != "en" || !hangul(&err), "영어를 골랐는데 멈춘 까닭이 한국어로 섰다 — {err}");
     }
-    assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "손으로 적은 값을 덮었다");
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains("read = 3"), "손으로 적은 값을 덮었다");
 }
 
 /// **못 읽는 줄 하나가 그 이슈의 읽음을 걷어 가지 않는다**(리뷰) — 걷기(moai-dt5q)는 "트래커에 없는

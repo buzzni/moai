@@ -219,7 +219,17 @@ impl App {
                     .as_deref()
                     .map(|e| fill(say(lang, "tui.register.unreadable"), &[("why", &crate::text::one_line(e))]))
                     .unwrap_or_default();
-                let bare = if added.initialized { "" } else { say(lang, "tui.register.uninit") };
+                // **워크트리 갈래를 그 밑의 줄과 같이 든다**(moai-dkth). 평평한 "init 전" 한 줄만
+                // 대던 판은, 딸린 워크트리를 등록하면 그 밑에 서는 줄(`view::unopened`)이 주
+                // 체크아웃을 대는 동안 이 알림만 ".moai 가 아직 없다" 로 서서 한 화면이 한 일을 두
+                // 말로 적었다. 거짓은 아니지만 사람은 `init` 을 찾아 나선다 — `init` 은 그 자리를
+                // 이미 거절한다(moai-mz0e). 가르는 값은 등록이 이미 물고 온 것이다
+                // (`projects::Added::tracker_at`) — 여기서 다시 묻지 않는다.
+                let bare = match (added.initialized, added.tracker_at.is_some()) {
+                    (true, _) => "",
+                    (false, true) => say(lang, "tui.register.uninit_worktree"),
+                    (false, false) => say(lang, "tui.register.uninit"),
+                };
                 // **층을 못 세웠으면 그것도 댄다**(moai-6ek1). 설정에 쓴 것과 층이 그것을 든 것은
                 // 다른 일이다 — 다시 읽기가 지면 커서를 새 프로젝트에 두는 일도 함께 버려져, 열
                 // 줄짜리 층에서는 조용한 "✓ 등록함" 하나로는 됐는지 알 길이 없다. 다음 걸음의
@@ -539,6 +549,49 @@ mod tests {
         let (held, unlayered) = (a.held.take(), a.unlayered.take());
         assert!(a.relayer_trouble(Relayered::Lost).contains("층은 그대로다"), "까닭이 없다고 입을 다물었다");
         (a.held, a.unlayered) = (held, unlayered);
+    }
+
+    /// **딸린 워크트리를 등록하면 알림도 그 갈래로 선다**(moai-dkth). 평평한 "init 전 — .moai 가
+    /// 아직 없다" 한 줄만 대던 판은, 그 밑에 서는 줄(`view::unopened`)이 주 체크아웃을 대는 동안
+    /// 이 알림만 다른 말로 서서 한 화면이 한 일을 두 말로 적었다. 거짓은 아니지만 사람은 없는
+    /// `init` 을 찾아 나선다 — `init` 은 그 자리를 이미 거절한다(moai-mz0e).
+    ///
+    /// **서는 자리는 워크트리 안의 `.moai` 없는 디렉터리다** — 워크트리 꼭대기 자체는 `Repo::open`
+    /// 이 주 체크아웃으로 옮겨 열어(moai-71ht 셋째 판) 아예 "init 전" 이 아니다. 모노레포의 하위
+    /// 디렉터리를 워크트리 안에서 등록하는 자리가 그 갈래에 남는다.
+    ///
+    /// git 을 안 띄운다 — 자리를 가르는 자(`store::init_belongs_at`)가 파일만 읽는다.
+    #[test]
+    fn registering_a_linked_worktree_says_where_the_tracker_lives() {
+        let s = Scratch::real("wt-register");
+        let mut a = on_layer(&s);
+        // 주 체크아웃과 그 밑의 딸린 워크트리 — 워크트리에는 갈라질 때의 `.moai` 가 함께 왔다.
+        let main = s.project("work/main");
+        let side = s.project("work/main/.claude/worktrees/w1");
+        let admin = main.join(".git").join("worktrees").join("w1");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(main.join(".git").join("HEAD"), "ref: refs/heads/develop\n").unwrap();
+        std::fs::write(admin.join("gitdir"), format!("{}\n", side.join(".git").display())).unwrap();
+        std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+        std::fs::write(side.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+        // 그 워크트리 안의 `.moai` 없는 하위 디렉터리 — 모노레포의 한 칸이다.
+        let inner = s.dir("work/main/.claude/worktrees/w1/apps/a");
+        let belongs = crate::store::init_belongs_at(&inner);
+        assert!(
+            belongs.as_deref().is_some_and(|at| crate::user_config::same_dir(at, &main)),
+            "시험의 전제 — 딸린 워크트리 안으로 안 읽혔다 ({belongs:?})"
+        );
+
+        a.register(&inner);
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("주 체크아웃"), "워크트리 갈래를 모르는 말로 섰다 — {said}");
+        assert!(!said.contains(".moai 가 아직 없다"), "평평한 init 전 줄이 그대로 섰다 — {said}");
+
+        // 워크트리가 아닌 `.moai` 없는 디렉터리는 전과 같은 말이다.
+        let plain = s.dir("work/plain");
+        a.register(&plain);
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains(".moai 가 아직 없다"), "보통 디렉터리의 말까지 바꿨다 — {said}");
     }
 
     /// **디렉터리를 드나들어 모노레포 하위를 등록한다** — `.git` 에서 멈추지 않고 고른 그
