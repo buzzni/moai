@@ -26,8 +26,13 @@ file works exactly as it did.
 **A journal file that cannot be read is skipped, not fatal.** Two accounts
 sharing one checkout is enough for someone else's `<email>.jsonl` to stand 0600,
 and history you can read should not go with it. moai reads the rest, names the
-file and the reason on stderr, and exits non-zero — so a script can tell "no
-history" from "could not read it" by the exit code, and `chmod` is the fix.
+place it could not read and the reason on stderr, and ends non-zero — so a
+shortened history never comes back as a successful "no history", and `chmod` is
+the fix. The exit code is the one every partial answer shares, so it says "this
+run was not whole", not which part; the stderr line is what names the file.
+A neighbouring worktree's journal (`show --worktree` reads history where the row
+came from) is named the same way but leaves the exit code alone — your own files
+are fine, and a neighbour's permissions are not your command failing.
 
 Two habits make recovery cheap, and both are properties of the tool rather than
 advice:

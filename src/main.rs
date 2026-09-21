@@ -61,9 +61,11 @@ macro_rules! outln {
 /// 이 파일의 알림이 쓸 화면 말(moai-vjlh).
 ///
 /// **[`cmd::Ctx`] 는 여기까지 안 온다** — `cmd::run` 이 `cli` 째로 삼키고 끝난다. 그래서 사용자
-/// 설정을 한 번 더 읽는데, 이 줄들은 할 말이 있을 때만 서므로(셋 다 먼저 비었는지 본다) 거의
-/// 모든 판에서 읽지 않는다. `OnceLock` 은 한 판에 여러 줄이 설 때(프로젝트마다 한 줄) 같은
-/// 파일을 그만큼 다시 파지 않게 한다.
+/// 설정을 한 번 더 읽는데, 이 줄들은 할 말이 있을 때만 서므로(`carried`·`unjournaled`·
+/// `unread_journals`·`redirected` 넷 다 먼저 비었는지 본다) 거의 모든 판에서 읽지 않는다.
+/// **넷 다 그래야 한다** — 하나라도 그냥 부르면 도구 호출마다 도는 훅까지 이 읽기를 치른다.
+/// `OnceLock` 은 한 판에 여러 줄이 설 때(프로젝트마다 한 줄) 같은 파일을 그만큼 다시 파지
+/// 않게 한다.
 ///
 /// **값을 먼저 길어 놓고 넣는다**(리뷰) — `cmd::Ctx::lang` 이 이름 대어 적어 둔 덫이다. 설정을
 /// 읽는 길이 언젠가 제 까닭을 `outln!` 로 한 줄 내면, 그 `outln!` 이 여기를 도로 불러 제
@@ -131,6 +133,13 @@ fn main() -> ExitCode {
         // `code` 로 갈라지는 대신 파싱 실패를 만난다 — 진짜 오류가 도구 고장으로 읽힌다.
         Err(e) => {
             if !json {
+                // **넘어진 길에서도 `chmod` 할 자리는 댄다**(리뷰) — 종료 코드는 이미 1 이지만,
+                // 고치는 법을 아는 줄은 이것뿐이다. 다음 판이 성공해야 비로소 듣게 두면, 그 사이의
+                // 답은 이력이 빠진 줄 모르고 쓰인다. `--json` 을 뺀 까닭은 아래 `redirected` 와 같다.
+                //
+                // **`redirected` 보다 먼저다** — 성공한 길과 같은 차례다. 이쪽이 `Repo::find` 를
+                // 한 번 더 지나므로, 뒤에 두면 그 찾기가 적은 자리가 이미 지나간 줄 뒤에 남는다.
+                unread_journals();
                 redirected(!quiet);
             }
             fail(json, &e)
@@ -279,13 +288,28 @@ fn unjournaled() {
 ///
 /// **자리를 통째로 댄다.** [`unjournaled`] 처럼 저장소 뿌리로 줄이지 않는다 — 여기서 알아야 할
 /// 것은 "어느 저장소냐" 가 아니라 *어느 파일에 `chmod` 를 하느냐* 이고, 그것이 곧 고치는 법이다.
+///
+/// **제 뿌리의 것만 코드를 바꾼다**(리뷰). `show --worktree` 는 겹쳐 온 줄의 이력을 그 워크트리의
+/// 저널에서 읽으므로 옆 체크아웃의 자리가 섞인다 — `cmd::gather` 가 옆 워크트리의 깨진 줄에 대해
+/// 못박은 금이 여기도 그대로다. 말은 둘 다 한다.
 fn unread_journals() {
-    tell_unread(said_lang(), &store::journal_unread());
+    let unread = store::journal_unread();
+    // **빈 것이면 말을 안 고른다** — [`said_lang`] 은 사용자 설정을 한 번 더 파므로, 여기가
+    // 그것을 그냥 부르면 *모든* 명령이(도구 호출마다 도는 훅까지) 그 읽기를 치른다.
+    // `carried`·`unjournaled`·`redirected` 셋이 먼저 비었는지 보는 것과 같은 까닭이다.
+    if unread.is_empty() {
+        return;
+    }
+    let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
+    tell_unread(said_lang(), here.as_deref(), &unread);
 }
 
 /// 길어 온 값에 대고 말하고 깃발을 세운다. **전역을 읽는 것은 위가 하고 여기는 안 읽는다** —
 /// 시험이 이 자리를 직접 불러 종료 코드까지 잰다([`tests::an_unread_journal_makes_the_run_fail`]).
-fn tell_unread(lang: i18n::Lang, unread: &[(PathBuf, String)]) {
+///
+/// `here` 를 못 찾았으면(`.moai` 밖에서 끝난 판) 가르지 않고 세운다 — 못 가릴 때 조용한 쪽으로
+/// 떨어지면 그것이 곧 조용한 손실이다.
+fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) {
     let lines = unread_lines(lang, unread);
     if lines.is_empty() {
         return;
@@ -294,14 +318,24 @@ fn tell_unread(lang: i18n::Lang, unread: &[(PathBuf, String)]) {
         let _ = writeln!(anstream::stderr().lock(), "{}{}", style::paint(style::WARN, "moai: "), l);
     }
     // **말한 뒤에 세운다** — 이 줄이 안 나갔는데 코드만 1 이면 사람은 까닭 없는 실패를 본다.
-    cmd::note_partial();
+    if any_mine(here, unread) {
+        cmd::note_partial();
+    }
+}
+
+/// 못 읽은 것 가운데 **제 저장소의 것**이 있는가 — 종료 코드를 바꿀지 가르는 자. **순수하다.**
+///
+/// `here` 가 없으면(`.moai` 밖에서 끝난 판) 가르지 못하니 참이다 — 못 가릴 때 조용한 쪽으로
+/// 떨어지면 그것이 곧 조용한 손실이다.
+fn any_mine(here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) -> bool {
+    unread.iter().any(|(root, ..)| here.is_none_or(|h| h == root))
 }
 
 /// 자리마다 한 줄. **순수하다** — 찍지도, 전역을 건드리지도 않는다.
-fn unread_lines(lang: i18n::Lang, unread: &[(PathBuf, String)]) -> Vec<String> {
+fn unread_lines(lang: i18n::Lang, unread: &[(PathBuf, PathBuf, String)]) -> Vec<String> {
     unread
         .iter()
-        .map(|(at, why)| {
+        .map(|(_, at, why)| {
             i18n::fill(i18n::say(lang, "warn.unread_journal"), &[("at", &at.display().to_string()), ("why", why)])
         })
         .collect()
@@ -329,8 +363,8 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
 mod tests {
     use super::*;
 
-    fn one(at: &str, why: &str) -> Vec<(PathBuf, String)> {
-        vec![(PathBuf::from(at), why.to_string())]
+    fn one(at: &str, why: &str) -> Vec<(PathBuf, PathBuf, String)> {
+        vec![(PathBuf::from("/tmp/moai-6924"), PathBuf::from(at), why.to_string())]
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
@@ -362,7 +396,39 @@ mod tests {
     /// 깃발은 한 번 서면 안 내려가니 병렬 시험끼리 섞여도 이 쪽은 흔들리지 않는다.
     #[test]
     fn an_unread_journal_makes_the_run_fail() {
-        tell_unread(i18n::Lang::En, &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "Permission denied"));
+        let here = PathBuf::from("/tmp/moai-6924");
+        tell_unread(
+            i18n::Lang::En,
+            Some(&here),
+            &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "Permission denied"),
+        );
         assert!(cmd::had_partial(), "덜 받은 답을 0 으로 끝냈다");
+    }
+
+    /// **옆 워크트리의 못 읽는 저널은 말만 하고 종료 코드를 안 바꾼다**(리뷰). `show --worktree`
+    /// 는 겹쳐 온 줄의 이력을 그 워크트리의 저널에서 읽으므로, 여기서 안 가르면 제 파일은
+    /// 멀쩡한 판이 남의 0600 파일 하나로 실패로 읽힌다 — `cmd::gather` 가 옆 워크트리의 깨진
+    /// 줄에 대해 못박은 것과 같은 금이다("옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면
+    /// 제 파일은 멀쩡한데 도구가 실패로 읽힌다").
+    ///
+    /// 깃발은 한 번 서면 안 내려가니 가르는 자([`any_mine`])를 직접 잰다 — 같은 판의 다른
+    /// 시험이 세워 둔 깃발과 섞이지 않는다. **말은 둘 다 한다**: 줄은 그대로 선다.
+    #[test]
+    fn a_neighbours_unread_journal_is_told_but_does_not_fail_the_run() {
+        let mine = PathBuf::from("/tmp/moai-6924");
+        let theirs = vec![(
+            PathBuf::from("/tmp/moai-6ney/side"),
+            PathBuf::from("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"),
+            "Permission denied".to_string(),
+        )];
+        assert!(!any_mine(Some(&mine), &theirs), "옆 워크트리의 것으로 종료 코드를 바꿨다");
+        assert!(any_mine(Some(&mine), &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "denied")));
+        // 어느 저장소인지 못 찾은 판은 가르지 못하니 세운다 — 못 가릴 때 조용해지지 않는다.
+        assert!(any_mine(None, &theirs));
+
+        // **말은 그래도 한다** — 옆의 것도 자리와 까닭을 댄다.
+        let said = unread_lines(i18n::Lang::En, &theirs);
+        assert_eq!(said.len(), 1);
+        assert!(said[0].contains("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"), "{}", said[0]);
     }
 }
