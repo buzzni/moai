@@ -142,3 +142,5 @@
 {"ts":"2026-09-21T16:13:46Z","id":"moai-ko4y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"init_belongs_at 이 손잡이를 안 본다. 남은 갈림은 idea moai-cr0m 이다"}
 {"ts":"2026-09-21T16:13:47Z","id":"moai-17fd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"대기 자리도 옛 철자 파일도 늦은 도장이 이긴다. 못 견주는 값만 자리로 진다"}
 {"ts":"2026-09-21T16:14:09Z","id":"moai-ug47","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 남은 넷은 옆 세션이 그 파일을 놓아야 집는다. `moai-i7b6`·`moai-l2he`·`moai-p3kb` 는 `src/hook.rs`·`src/cmd/hook.rs` 를 moa-issue-4c(에픽 moai-bujq)가 쥐고, `moai-65ie` 는 `src/projects.rs`·`src/cmd/status.rs`·`src/tui/layer.rs` 를 moa-issue-63(에픽 moai-hela)이 쥔다. 미루지 않는다 — 그 넷이 이 에픽을 열어 둔다.\n\n**그 넷은 에픽 끝 리뷰를 안 지났다.** 멤버 다섯은 moai-ug47.h2r(max)로 봤고, 그 범위는 4918b5c 까지다. 남은 넷으로 이 에픽을 닫는 창은 리뷰를 한 번 더 불러야 한다."}
+{"ts":"2026-09-21T16:19:42Z","id":"moai-bujq.91c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 셸 렉서 정리 아홉과 훅이 새던 셋 (에픽 끝)"}
+{"ts":"2026-09-21T16:19:56Z","id":"moai-bujq.91c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
