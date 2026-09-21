@@ -201,3 +201,14 @@
 {"ts":"2026-09-21T17:09:48Z","id":"moai-nb6w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T17:13:01Z","id":"moai-jy78","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"빌드 기다림을 걷은 규약과 2026-09-20 의 OOM 이 어긋난다"}
 {"ts":"2026-09-21T17:13:16Z","id":"moai-hela.2j9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 탐색기와 한눈 보기의 값과 모서리"}
+{"ts":"2026-09-21T17:15:28Z","id":"moai-hela.2j9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-snus","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-v8jl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-x7pa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-n6tm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-p4ec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-ropk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-0jqh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-nb6w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-cucj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-hela.2j9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드로 도는 중이다. 원문 노트와 닫는 한 줄을 남기며 닫고, 그 뒤 에픽을 develop 에 병합한다."}
