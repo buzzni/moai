@@ -2,6 +2,8 @@
 
 use super::{Ctx, Fail, R};
 use crate::config::DEFAULT_STATUSES;
+use crate::i18n::{fill, say};
+use crate::store::Elsewhere;
 use std::path::Path;
 
 /// 여는 마커의 **머리**. 뒤에 메타(`v:`·`hash:`)가 붙고 `-->` 로 닫힌다 — 머리로 찾아야
@@ -126,7 +128,8 @@ fn with_block(existing: &str, block: &str) -> String {
         out.push_str(&body);
         return out;
     };
-    let marker = kept_marker(&existing[start..stop], &written, block).map_or_else(|| begin_marker(block), str::to_string);
+    let marker =
+        kept_marker(&existing[start..stop], &written, block).map_or_else(|| begin_marker(block), str::to_string);
     let mut out = format!("{}{marker}{nl}{written}{END}{nl}", &existing[..start]);
     let mut at = stop;
     for &(s, e) in &found[1..] {
@@ -270,7 +273,7 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'stati
 ///
 /// **알림마다 따로 재지 않는다** — 한 화면에 서는 두 알림이 서로 다른 뿌리를 대면 그 중 하나는
 /// 반드시 엉뚱한 곳을 가리킨다.
-fn away_root(root: &Path, chdir: bool) -> Option<String> {
+pub(crate) fn away_root(root: &Path, chdir: bool) -> Option<String> {
     let here = std::env::current_dir().ok();
     (chdir || here.as_deref() != Some(root)).then(|| crate::text::shell_word(&root.display().to_string()))
 }
@@ -321,8 +324,24 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
     let gaps = dotfile_gaps(&root);
+    // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
+    // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
+    // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
+    // `moai project add|ls` 와 한눈 보기가 같은 자를 쓴다.
+    let tracker_at = crate::store::init_belongs_at(&root);
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state });
+        // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
+        //
+        // **못 싣는 경로에서도 키만 빠진다**(리뷰). `serde_json::json!(<식>)` 은 속으로
+        // `to_value(..).unwrap()` 이라, UTF-8 이 아닌 경로에 `Path` 의 직렬화가 지면 그 `unwrap` 이
+        // 101 로 터진다 — 여기는 `current_dir()` 에서 자리를 받으므로 사람이 그런 이름을 쓰면 닿는다.
+        // 위의 "아닐 때는 키가 없다" 가 이미 받는 쪽의 약속이니, 못 싣는 판도 같은 답으로 접는다.
+        if let Some(main) = &tracker_at
+            && let Ok(at) = serde_json::to_value(main)
+        {
+            v["tracker_at"] = at;
+        }
         if !gaps.is_empty() {
             v["missing"] = serde_json::json!(
                 gaps.iter().map(|(name, _, missing)| (*name, missing)).collect::<std::collections::BTreeMap<_, _>>()
@@ -330,39 +349,88 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
         }
         return super::json_line(&v);
     }
+    let lang = ctx.lang();
     let mut out = vec![match state {
-        BlockState::Current => "AGENTS.md 블록: current — 이 바이너리가 쓸 글과 같다".into(),
+        BlockState::Current => say(lang, "init.block_current").to_string(),
         BlockState::Stale => {
             let text = read_agents(&root.join("AGENTS.md")).map_err(Fail::new)?.unwrap_or_default();
+            // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")`
+            // 모양만 읽어, 키를 변수로 넘기면 그 눈에서 통째로 사라진다.
             match stale_kind(&text) {
-                Stale::Binary =>
-                    "AGENTS.md 블록: stale — 다른 바이너리가 쓴 그대로다. 그쪽이 더 새것일 수 있으니 다시 빌드해 보고 `moai init`"
-                        .into(),
-                Stale::Edited =>
-                    "AGENTS.md 블록: stale — 블록 안을 손으로 고쳤다. `moai init` 은 그 손질을 버린다 (블록 밖의 산문은 안 건드린다)"
-                        .into(),
+                Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
+                Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
             }
         }
-        BlockState::Missing => {
-            "AGENTS.md 블록: missing — `moai init` 이 심는다. `--no-agents` 로 안 쓰기로 했으면 그대로 둔다".into()
-        }
+        BlockState::Missing => say(lang, "init.block_missing").to_string(),
     }];
     // **규칙끼리는 쉼표로 가른다** — `.gitattributes` 의 규칙은 제 안에 띄어쓰기를 여럿 들어
     // (`.moai/journal.jsonl  text eol=lf merge=union`) 띄어쓰기로 이으면 어디서 한 줄이 끝나는지
     // 안 보인다.
     for (name, _, missing) in &gaps {
-        out.push(format!("{name}: 규칙 {}개 빠졌다 ({}) — `moai init`", missing.len(), missing.join(", ")));
+        out.push(fill(
+            say(lang, "init.rules_missing"),
+            &[("name", name), ("n", &missing.len().to_string()), ("rules", &missing.join(", "))],
+        ));
+    }
+    // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
+    // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
+    // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
+    // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
+    if let Some(main) = &tracker_at {
+        // **`-C` 를 붙이는 규칙은 한 자리다**(`report::Warning::cli_hint`, 리뷰 moai-h6aq.cx8) —
+        // 알림들과 아래 거절문이 같은 글자를 내야 한다.
+        let go = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
+        out.push(fill(say(lang, "init.check_worktree"), &[("go", &go)]));
     }
     Ok(out)
 }
 
+/// `moai init --print`. **아무것도 안 쓰고 블록만 찍는다.**
+///
+/// Claude 의 훅이 없는 에이전트는 제 도구가 읽는 파일이 `AGENTS.md` 가 아닐 수
+/// 있다 — 그 파일에 붙여 넣을 글을 여기서 받는다. 계약은 이 글 하나다: 명령
+/// 전부와 `--json` 의 모양이 여기 있으므로, 붙여 넣는 쪽은 도구가 자란 뒤에도
+/// 같은 자리에서 새 글을 받는다.
+///
+/// **새 명령(`onboard`)을 안 둔 것은 `--check` 와 같은 까닭이다**(moai-mstm) —
+/// 쓰는 길과 보는 길이 한 이름에 있어야, 받아 간 글이 낡았을 때 무엇을 칠지
+/// 안다. 글도 `init` 이 쓰는 그것 하나라, 둘이 갈라질 자리가 없다.
+///
+/// `.moai` 가 없어도 선다. 심기 전에 무엇이 붙는지 보는 것이 자연스럽다.
+pub fn print(ctx: &Ctx) -> R<Vec<String>> {
+    let block = crate::guide::agents();
+    if ctx.json {
+        return super::json_line(&serde_json::json!({ "agents": block }));
+    }
+    Ok(block.lines().map(str::to_string).collect())
+}
+
+// **여기 글을 고치면 이미 심은 저장소가 주석을 둘 든다.** [`ensure_lines`] 는 줄 단위로 견주어
+// 없는 줄을 덧붙이므로, 주석 한 줄만 고쳐도 다음 `moai init` 이 옛 주석 밑에 새 주석을 붙인다
+// (리뷰 moai-vbmn.spv 에서 실제로 났다). 그래서 이 블록의 글은 규칙이 바뀔 때만 손댄다 —
+// 규칙 없이 글만 고치고 싶으면 그 전에 덧붙임을 막는 길부터 낸다(idea).
+//
+// **한국어에서 영어로 간 것이 그 한 번이다**(moai-9vwy, 2026-09-21 사용자 결정). 심은 파일은
+// 사람의 저장소에 커밋되어 남으므로, 영어로 고른 사람의 저장소에 한국어 주석이 박히는 것을
+// 그대로 둘 수 없었다. **값은 사용자가 알고 받았다** — 이미 심긴 저장소는 다음 `moai init` 에
+// 옛 일곱 줄 밑에 새 줄을 받고, 그것은 사람이 손으로 지운다. 이 저장소의 `.gitattributes` 는
+// 같은 커밋에서 손으로 갈았다.
+//
+// **말묶음에 안 넣는다.** 심는 파일은 화면이 아니라 저장소의 내용이고, `moai init` 이 심는
+// `AGENTS.md` 블록이 영어 하나로 선 것과 같은 자리다(moai-54k2) — 읽는 사람이 저장소를
+// 함께 쓰는 남들이라 화면 말 설정을 따라가면 한 파일이 사람마다 달라진다.
 const GITATTRIBUTES: &str = "\
-# moai — 이슈 트래커
-# 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면
-# union 이 같은 id 를 가진 줄 두 개를 조용히 남기고, 그건 데이터 손상이다.
-# 진짜 충돌은 사람이 푼다 — 한 줄이 이슈 하나라 실제로 쉽다.
-.moai/issues.jsonl   text eol=lf
-# 저널은 추가 전용이고 순서가 무관하며 상태 계산에 읽히지 않는다. 여기선 맞다.
+# moai — issue tracker
+# The snapshot does not use merge=union. When two branches change the same
+# issue, union quietly leaves two lines carrying one id, and that is data loss.
+# merge=moai pairs the lines by id and resolves each issue 3-way. A real
+# conflict — two people changing the same field — still reaches a person, and
+# one line per issue makes that easy in practice.
+# Install the driver once per clone with `moai merge-driver --install`. In a
+# clone without it this word is ignored and git's default merge runs.
+.moai/issues.jsonl   text eol=lf merge=moai
+# The journal is append-only, order does not matter, and it is never read to
+# compute state. union is right here.
 .moai/journal.jsonl  text eol=lf merge=union
 ";
 
@@ -426,8 +494,10 @@ fn prefix_from(dir: &Path) -> Option<String> {
 /// [`ensure_lines`] 가 한 일.
 #[derive(Debug, PartialEq, Eq)]
 enum Added {
-    /// 빠진 줄을 덧붙였다.
-    Wrote,
+    /// 빠진 줄을 덧붙였다. **규칙이 들었는가를 함께 든다**(리뷰 moai-hom6.qd9 3번) — 주석만
+    /// 덧붙인 판을 "병합 규칙을 넣었다" 로 부르던 자리다. 심는 주석을 영어로 바꾼 뒤(moai-9vwy)
+    /// 이미 심은 저장소의 첫 `moai init` 이 바로 그 판이라 모두가 한 번씩 거짓 줄을 받았다.
+    Wrote { rules: bool },
     /// 이미 다 있었다 — 파일은 안 건드렸다.
     Already,
     /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
@@ -448,7 +518,7 @@ impl Added {
     /// 못 건드린 `(갈래, 까닭)` — 건드렸으면 `None`. 갈래는 `--json` 이 그대로 싣는 낱말이다.
     fn trouble(&self) -> Option<(&'static str, &str)> {
         match self {
-            Added::Wrote | Added::Already => None,
+            Added::Wrote { .. } | Added::Already => None,
             Added::Unreadable(why) => Some(("unreadable", why)),
             Added::Unwritable { why, .. } => Some(("unwritable", why)),
         }
@@ -460,7 +530,7 @@ impl Added {
         let rule = |l: &&str| !l.trim().is_empty() && !l.trim_start().starts_with('#');
         match self {
             Added::Unwritable { missing, .. } => missing.iter().map(String::as_str).filter(rule).collect(),
-            Added::Wrote | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
+            Added::Wrote { .. } | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
         }
     }
 }
@@ -505,13 +575,11 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     }
     tail.push_str(&missing.join("\n"));
     tail.push('\n');
-    let wrote = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(tail.as_bytes()));
+    let wrote =
+        std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(tail.as_bytes()));
     match wrote {
-        Ok(()) => Added::Wrote,
+        // 규칙은 [`missing_rules`] 와 **같은 자**로 가른다 — 주석이 아닌 줄이다.
+        Ok(()) => Added::Wrote { rules: missing.iter().any(|l| !l.trim_start().starts_with('#')) },
         Err(e) => Added::Unwritable { why: e.to_string(), missing: missing.iter().map(|l| (*l).to_string()).collect() },
     }
 }
@@ -601,6 +669,56 @@ fn covers(have: &str, want: &str) -> bool {
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
+    // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
+    // 명령이 하는 일은 딸린 파일을 다시 맞추는 것뿐이라 새 트래커가 서지 않는다.
+    let elsewhere = if dir.exists() { None } else { crate::store::planted_elsewhere(&root) };
+    // **거절하는 자리는 워크트리 하나다.** 위에서 찾은 것은 세우고 아래에서 알린다 — 가른 까닭은
+    // [`crate::store::planted_elsewhere`] 에 있다.
+    if let Some(Elsewhere::Worktree(main)) = &elsewhere {
+        let there = main.clone();
+        let lang = ctx.lang();
+        // **여러 줄짜리 거절문의 줄바꿈과 이음 들여쓰기는 이 자리가 쥔다** — 말묶음의 값은 한 줄이라는
+        // 계약이 있어(`i18n::tests::every_translation_keeps_the_places_english_marks` 가 제어 글자를
+        // 막는다) `\n` 을 거기 담을 길이 아예 없고, 이음 여섯 칸은 `moai: ` 머리에 맞춘 값이라 옮기는
+        // 사람이 셀 것이 아니다. **보고 줄의 두·네 칸은 반대로 말묶음이 쥔다**(`init.columns` 처럼) —
+        // 그쪽은 stderr 머리와 무관한 이 화면만의 층이고, 저장소의 다른 `warn.*`·`tui.*` 키 서른한 개가
+        // 이미 그 꼴이다. 두 규칙을 섞어 읽지 않는다.
+        let why = format!("{}\n      {}", say(lang, "refuse.init_worktree"), there.join(".moai").display());
+        // **친 대로 도로 낸다**(리뷰). 접두어를 빠뜨린 줄을 그대로 베끼면 디렉터리 이름에서 만든
+        // 접두어가 서는데, 그것은 아래 갈래가 말하듯 **나중에 못 바꾼다** — 따라 친 한 줄이 그 저장소의
+        // 모든 id 에 남는다. `--no-agents` 도 일부러 준 것이라 빼면 안 준 사람의 `AGENTS.md` 를 고친다.
+        //
+        // **`-C` 도 되살린다**(리뷰 둘째 판) — `-C` 는 [`crate::main`] 이 `set_current_dir` 로 따르므로
+        // 여기의 "여기" 는 **`-C` 가 가리킨 자리**고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면
+        // 그 셸 자리에 트래커가 하나 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
+        // 재는 자는 [`away_root`] 하나다: 알림마다 따로 재면 한 화면의 두 줄이 다른 자리를 댄다.
+        let at = away_root(&root, ctx.chdir).map(|r| format!(" -C {r}")).unwrap_or_default();
+        let same = match (prefix, no_agents) {
+            (Some(p), true) => format!(" {} --no-agents", crate::text::quoted(p)),
+            (Some(p), false) => format!(" {}", crate::text::quoted(p)),
+            (None, true) => " --no-agents".to_string(),
+            (None, false) => String::new(),
+        };
+        // **빠져나가는 길의 값도 함께 댄다**(리뷰). `MOAI_HERE` 는 **이 프로세스 하나**에만 선다 —
+        // 그것으로 세운 트래커는 그 뒤의 맨 `moai` 가 도로 루트의 것을 읽어 아무도 안 읽는다.
+        // 대지 않으면 이 줄이 거절문이 막으려던 바로 그 자리로 사람을 데려간다.
+        // **경로는 감싸서 낸다**(`crate::text::shell_word`, moai-0cl3) — 붙여 넣으면 도는
+        // 글자여야 한다. 빈칸 하나가 `-C` 를 딴 자리로 보낸다. **`-C` 를 붙이는 규칙 자체는
+        // `report::Warning::cli_hint` 하나다**(리뷰 moai-h6aq.cx8) — 알림과 `--check` 와 이 줄이
+        // 같은 글자를 내야 한다. 한눈 보기(`view::unopened`·`cmd::project`)는 아직 제 손으로 짓는다.
+        let there_go =
+            crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&there.display().to_string())), "init");
+        let here_go = format!("MOAI_HERE=1 moai{at} init{same}");
+        return Err(Fail::coded(
+            format!(
+                "{why}\n      {}\n      {}\n        {}",
+                fill(say(lang, "refuse.init_worktree_there"), &[("go", &there_go)]),
+                fill(say(lang, "refuse.init_worktree_here"), &[("go", &here_go)]),
+                say(lang, "refuse.init_worktree_here_note"),
+            ),
+            super::code::ALREADY_EXISTS,
+        ));
+    }
 
     // 이미 심긴 곳에서 다시 부르면 **딸린 파일만 다시 맞춘다.**
     //
@@ -619,8 +737,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             if p != cur {
                 return Err(Fail::coded(
                     format!(
-                        "접두어는 `{cur}` 로 이미 정해졌다. 나중에 못 바꾼다 —\n      \
-                         이미 발급된 id 가 전부 그것을 달고 있다"
+                        "{}\n      {}",
+                        fill(say(ctx.lang(), "refuse.init_prefix_fixed"), &[("cur", &cur)]),
+                        say(ctx.lang(), "refuse.init_prefix_fixed_why"),
                     ),
                     super::code::ALREADY_EXISTS,
                 ));
@@ -639,10 +758,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             if p.chars().count() > PREFIX_MAX {
                 return Err(Fail::coded(
                     format!(
-                        "접두어는 {PREFIX_MAX}자까지다 — `{p}` 는 {}자다. id 를 칠 때마다 붙는다\n      \
-                         짧은 후보: `{}`",
-                        p.chars().count(),
-                        shorten(p)
+                        "{}\n      {}",
+                        fill(
+                            say(ctx.lang(), "refuse.init_prefix_too_long"),
+                            &[("max", &PREFIX_MAX.to_string()), ("p", p), ("n", &p.chars().count().to_string())],
+                        ),
+                        fill(say(ctx.lang(), "refuse.init_prefix_short"), &[("short", &shorten(p))]),
                     ),
                     super::code::BAD_INPUT,
                 ));
@@ -653,8 +774,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
-            let full = prefix_from(&root)
-                .ok_or_else(|| Fail::new("디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`"))?;
+            let full =
+                prefix_from(&root).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.init_no_prefix")))?;
             let short = shorten(&full);
             if short != full {
                 shortened = Some(full);
@@ -663,10 +784,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         }
     };
 
+    // **심는 파일이라 영어 하나다**(moai-9vwy) — `GITATTRIBUTES` 와 같은 까닭이다. 이쪽은 처음
+    // 지을 때만 써서(`!again`) 이미 심긴 저장소가 받는 것이 없다.
     let config = format!(
-        "# moai — {}\nprefix = \"{prefix}\"\nstatuses = \"{DEFAULT_STATUSES}\"\n\
-         # 화면이 사람을 내는 모양: full(`이름 (메일)`) · name · email\nnaming = \"full\"\n",
-        "이 저장소의 이슈 트래커 설정"
+        "# moai — issue tracker settings for this repository\n\
+         prefix = \"{prefix}\"\nstatuses = \"{DEFAULT_STATUSES}\"\n\
+         # How a person is shown: full (`Name (email)`) · name · email\nnaming = \"full\"\n"
     );
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
     crate::config::Config::parse(&config).map_err(Fail::new)?;
@@ -678,20 +801,14 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     let agents_now = if no_agents {
         None
     } else {
-        let read = read_agents(&agents_path).map_err(|e| {
-            Fail::new(format!("{e}\n      못 읽는 AGENTS.md 는 덮어쓰지 않는다 — 읽히게 고치거나 `--no-agents` 로 부른다"))
-        })?;
+        let read = read_agents(&agents_path)
+            .map_err(|e| Fail::new(format!("{e}\n      {}", say(ctx.lang(), "refuse.init_agents_unreadable"))))?;
         Some(read.unwrap_or_default())
     };
 
     if !again {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        for (name, body) in [
-            ("config.toml", config.as_str()),
-            ("issues.jsonl", ""),
-            ("journal.jsonl", ""),
-        ] {
+        std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", ""), ("journal.jsonl", "")] {
             let p = dir.join(name);
             std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
         }
@@ -702,10 +819,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
-    let untouched: Vec<(&str, &Added, &str)> = [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
-        .into_iter()
-        .filter(|(_, done, _)| done.trouble().is_some())
-        .collect();
+    let untouched: Vec<(&str, &Added, &str)> =
+        [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+            .into_iter()
+            .filter(|(_, done, _)| done.trouble().is_some())
+            .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
@@ -744,22 +862,26 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
     let claude_needs_pointer = agents_now.is_some()
         && root.join("CLAUDE.md").exists()
-        && !std::fs::read_to_string(root.join("CLAUDE.md"))
-            .unwrap_or_default()
-            .contains("AGENTS.md");
+        && !std::fs::read_to_string(root.join("CLAUDE.md")).unwrap_or_default().contains("AGENTS.md");
 
     if ctx.json {
         let mut v = serde_json::json!({
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
-            "gitattributes": attrs == Added::Wrote,
-            "gitignore": ignore == Added::Wrote,
+            "gitattributes": matches!(attrs, Added::Wrote { .. }),
+            "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
         });
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // **위에 트래커가 있었다는 것은 기계에게도 말한다**(moai-pjrr). 사람에게는 알림 한 줄인데
+        // 여기만 조용하면, 고리를 짜는 쪽은 제가 방금 둘째 트래커를 세웠다는 것을 어디서도 못 본다.
+        // 싣는 것은 **그 트래커의 뿌리**다 — `root` 와 같은 자라 견주는 쪽이 꼴을 다시 안 배운다.
+        if let Some(Elsewhere::Above(at)) = &elsewhere {
+            v["above"] = serde_json::json!(at.display().to_string());
         }
         // **못 건드린 자리는 기계에게도 말한다.** `false` 만 보면 "이미 다 있었다" 와 구별이
         // 안 되고, 그 차이가 곧 사람이 손볼 것이 남았는지다.
@@ -773,54 +895,72 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             v["untouched"] = serde_json::json!(
                 untouched
                     .iter()
-                    .filter_map(|(name, done, _)| done.trouble().map(|(kind, why)| (*name, serde_json::json!({ "kind": kind, "why": why }))))
+                    .filter_map(|(name, done, _)| done
+                        .trouble()
+                        .map(|(kind, why)| (*name, serde_json::json!({ "kind": kind, "why": why }))))
                     .collect::<std::collections::BTreeMap<_, _>>()
             );
         }
         return super::json_line(&v);
     }
 
+    // **`--json` 을 지난 뒤에 푼다**(리뷰) — 값나가는 것은 되풀이가 아니라 **첫 부름**이다.
+    // 두 번째부터의 `ctx.lang()` 은 이미 채워진 `OnceLock` 한 번 읽기지만, 첫 부름은 사용자
+    // 설정을 열어 파싱한다. 그러니 기계 출력으로 빠지는 판(`super::json_line` 이 위에서 돌아간다)
+    // 은 그 파일을 아예 안 연다. [`check`] 도 같은 자리에서 푼다. 위쪽 거절 갈래들이 `ctx.lang()`
+    // 을 제자리에서 부르는 것도 같은 셈이다 — 거기까지 가면 어차피 사람에게 글을 내야 한다.
+    let lang = ctx.lang();
     let mut out = if again {
-        vec![format!("이미 심겨 있다. 접두어는 `{prefix}` 다 — 딸린 파일만 다시 맞춘다")]
+        vec![fill(say(lang, "init.already"), &[("prefix", &prefix)])]
     } else {
         vec![
-            format!(".moai/ 를 만들었다. 접두어는 `{prefix}` 다"),
-            format!("  칸: {}", DEFAULT_STATUSES.replace(',', " → ")),
+            fill(say(lang, "init.made"), &[("prefix", &prefix)]),
+            fill(say(lang, "init.columns"), &[("columns", &DEFAULT_STATUSES.replace(',', " → "))]),
         ]
     };
+    // **위에도 트래커가 있으면 세우고 나서 말한다**(moai-pjrr, 2026-09-20 사용자 결정 둘째 판).
+    // 막지 않는 까닭은 [`crate::store::planted_elsewhere`] 에 있다 — 여기 심은 것은 이 밑에서 실제로 읽힌다.
+    // 그래도 말은 해야 한다: 이 줄이 없으면 `<프로젝트>/src/deep` 에 선 사람이 옆 디렉터리와 다른
+    // 파일을 쓰기 시작한 것을 모른 채 "왜 내 이슈가 안 보이나" 를 딴 데서 찾는다.
+    if let Some(Elsewhere::Above(at)) = &elsewhere {
+        out.push(fill(say(lang, "init.tracker_above"), &[("at", &at.join(".moai").display().to_string())]));
+        out.push(say(lang, "init.tracker_above_note").to_string());
+    }
     // 접두어는 나중에 못 바꾸므로 **지금** 말한다 — 이슈를 하나라도 만들면 되돌릴 길이 없다.
     if let Some(full) = &shortened {
-        out.insert(
-            1,
-            format!(
-                "  디렉터리 이름 `{full}` 이 {PREFIX_MAX}자를 넘어 줄였다 — 다른 것을 원하면 이슈를 만들기 전에 \
-                 .moai/ 를 지우고 `moai init <접두어>`"
-            ),
-        );
+        out.insert(1, fill(say(lang, "init.prefix_shortened"), &[("full", full), ("max", &PREFIX_MAX.to_string())]));
     }
-    if attrs == Added::Wrote {
-        out.push("  .gitattributes 에 병합 규칙을 넣었다".into());
+    // **한 일을 한 대로 부른다** — 규칙을 넣은 판과 주석만 맞춘 판은 말이 다르다. 주석만 맞춘
+    // 판도 "이미 다 맞아 있다" 는 아니다: 파일을 고쳤다.
+    match attrs {
+        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitattributes").to_string()),
+        Added::Wrote { rules: false } => {
+            out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitattributes")]))
+        }
+        _ => {}
     }
-    if ignore == Added::Wrote {
-        out.push("  .gitignore 에 moai 가 쓰는 자리(lock·tmp·워크트리)를 넣었다".into());
+    match ignore {
+        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitignore").to_string()),
+        Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
+        _ => {}
     }
     for (name, done, block) in &untouched {
         // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
         // 갈래를 빠짐없이 적는다: `_` 로 받던 때는 갈래가 하나 느는 날 그것이 말없이 "못 읽어"
         // 로 서고 까닭 자리가 빈 채 나갔다(리뷰 moai-humk).
         let head = match done {
-            Added::Unwritable { why, .. } => format!("  {name} 에 못 썼다 — {why}"),
-            Added::Unreadable(why) => format!("  {name} 를 못 읽어 안 건드렸다 — {why}"),
-            Added::Wrote | Added::Already => continue,
+            Added::Unwritable { why, .. } => fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)]),
+            Added::Unreadable(why) => fill(say(lang, "init.unreadable"), &[("name", name), ("why", why)]),
+            Added::Wrote { .. } | Added::Already => continue,
         };
         out.push(head);
         // **댈 줄이 없는 자리도 있다** — AGENTS.md 블록은 줄 몇 개가 아니라 통째로 갈아 끼우는
         // 글이라 손으로 옮겨 적을 것이 아니다. 그 자리는 상태를 보는 길을 대신 댄다(moai-780n).
         if done.hand(block).is_empty() {
-            out.push("    쓸 수 있게 고치고 다시 부른다 — `moai init --check` 가 블록 상태를 말한다".into());
+            out.push(say(lang, "init.untouched_fix").to_string());
             continue;
         }
-        out.push("    손으로 더할 줄 (고치고 `moai init` 을 다시 불러도 된다):".into());
+        out.push(say(lang, "init.untouched_hand").to_string());
         // **한 줄에 하나씩 낸다** — 쉼표로 이으면 붙여 넣은 것이 한 줄이 되어 규칙이 안 선다.
         // `.gitattributes` 는 더 나쁘다: `<패턴> text eol=lf, <패턴> …` 은 첫 패턴에 쓰레기
         // 속성을 달 뿐이라 `journal.jsonl` 이 `merge=union` 을 영영 못 받는다.
@@ -830,7 +970,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         }
     }
     if agents {
-        out.push("  AGENTS.md 블록을 맞췄다".into());
+        out.push(say(lang, "init.agents_synced").to_string());
     }
     // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
     // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
@@ -839,15 +979,15 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // 파일이 둘 다 `Already` 여도 남은 일이다.
     let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents && untouched.is_empty();
     if again && did_nothing {
-        out.push("  이미 다 맞아 있다".into());
+        out.push(say(lang, "init.all_current").to_string());
     }
     if claude_needs_pointer {
         out.push(String::new());
-        out.push("CLAUDE.md 가 있다. 그 안에 `@AGENTS.md` 한 줄을 넣으면 같이 읽힌다".into());
+        out.push(say(lang, "init.claude_pointer").to_string());
     }
     if !again {
         out.push(String::new());
-        out.push("다음:  moai add '첫 이슈'".into());
+        out.push(say(lang, "init.next").to_string());
     }
     Ok(out)
 }
@@ -855,6 +995,33 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **선언을 거는 자리와 묻는 자리가 한 글을 쓴다**(moai-9khu). `.gitattributes` 에 쓰는 줄과
+    /// `check-attr` 로 묻는 경로가 갈리면 "안 심었다" 알림이 영영 안 서거나(묻는 자리가 틀렸다)
+    /// 영영 안 걷힌다(쓰는 자리가 틀렸다) — 둘 다 조용해서 아무도 모른다.
+    ///
+    /// **마지막 줄을 본다**(리뷰 moai-vbmn.spv). git 은 같은 경로에 걸린 규칙 중 **뒤엣것**을
+    /// 쓰므로, 같은 경로를 **글자 그대로** 두 번 거는 날 첫 줄을 보던 판은 틀린 줄을 잰다.
+    ///
+    /// **낱말째 맞춘다.** `starts_with` 만으로는 `.moai/issues.jsonlX` 도 든다.
+    ///
+    /// **여기가 못 잡는 것**(리뷰 moai-vbmn.spv): 뒤에 붙는 것이 글자가 아니라 **패턴**이면
+    /// (`.moai/*.jsonl merge=union`) 이 거르개에 안 걸려 그대로 푸른데, `check-attr` 은 `union` 을
+    /// 답해 알림이 영영 안 선다. 글로 패턴을 푸는 규칙을 여기 또 쓰면 git 과 갈리고 갈리는 쪽은
+    /// 늘 이쪽이라(`declared` 가 `check-attr` 에게 묻는 까닭과 같다), 그 갈래를 실제로 재는 자는
+    /// 임시 저장소에 이 글을 깔고 `status` 를 부르는 `tests/cli.rs` 쪽이다.
+    #[test]
+    fn the_declared_path_is_the_one_init_writes() {
+        let path = crate::cmd::merge_driver::SNAPSHOT;
+        let rule = GITATTRIBUTES
+            .lines()
+            .rfind(|l| l.strip_prefix(path).is_some_and(|rest| rest.starts_with(char::is_whitespace)))
+            .unwrap_or_else(|| panic!("{path} 에 거는 줄이 없다\n{GITATTRIBUTES}"));
+        assert!(
+            rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
+            "그 줄이 드라이버를 안 건다 — {rule}"
+        );
+    }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
     #[test]
@@ -1004,10 +1171,15 @@ mod tests {
         let fresh = with_block("", block);
         let (ours, theirs) = (begin_marker("우리 글\n"), begin_marker("남의 글\n"));
         for (what, text) in [
-            ("마커 줄만", format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n")),
+            (
+                "마커 줄만",
+                format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n=======\n{theirs}\n>>>>>>> b\n{block}{END}\n꼬리\n"),
+            ),
             (
                 "마커와 첫 줄",
-                format!("# 산문\n\n<<<<<<< HEAD\n{ours}\n## 우리\n=======\n{theirs}\n## 남\n>>>>>>> b\n본문\n{END}\n꼬리\n"),
+                format!(
+                    "# 산문\n\n<<<<<<< HEAD\n{ours}\n## 우리\n=======\n{theirs}\n## 남\n>>>>>>> b\n본문\n{END}\n꼬리\n"
+                ),
             ),
             (
                 "diff3",
@@ -1095,7 +1267,8 @@ mod tests {
             assert_eq!(got, want, "{full}");
             assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
             // 줄인 것도 설정이 받는 접두어다.
-            crate::config::Config::parse(&format!("prefix = \"{got}\"\n")).unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
+            crate::config::Config::parse(&format!("prefix = \"{got}\"\n"))
+                .unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
         }
     }
 
@@ -1104,8 +1277,7 @@ mod tests {
     /// 써 보고, 쓴 뒤 `.moai/` 에도 뿌리에도 찌꺼기가 없는지 본다.
     #[test]
     fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
-        // 울타리(`.git`)는 뿌리의 셈을 흐리고 이 시험은 저장소가 필요 없다 — 맨 자리에 선다.
-        let s = crate::scratch::Scratch::in_place(&crate::scratch::base(), "init-tmp");
+        let s = crate::scratch::Scratch::new("init-tmp");
         let agents = s.join("AGENTS.md");
         assert_eq!(tmp_dir(&agents), s.path(), ".moai 가 없으면 옆자리다");
         std::fs::create_dir(s.join(".moai")).unwrap();

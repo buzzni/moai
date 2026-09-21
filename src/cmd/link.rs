@@ -8,29 +8,27 @@ use super::{Ctx, Fail, R};
 use crate::cli::LinkArgs;
 use crate::model::{self, Issue};
 use crate::report::creates_cycle;
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     if args.blocks.is_empty() && args.unblocks.is_empty() {
-        return Err(Fail::new("`--blocks` 나 `--unblocks` 를 적는다"));
+        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.link_needs_side")));
     }
     // 같은 id 가 둘 다에 있으면 어느 쪽이 이기는지 조용히 정하지 않는다.
     if let Some(dup) = args.blocks.iter().find(|b| args.unblocks.contains(b)) {
-        return Err(Fail::new(format!("{dup} 를 막으면서 동시에 막음을 없앨 수는 없다")));
+        return Err(Fail::new(crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "refuse.link_both_ways"),
+            &[("id", dup)],
+        )));
     }
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     let at = model::now();
 
     // `(대상, 막을지 없앨지)`. 어느 쪽에서 왔는지를 갖고 있어야, 다시
     // `args.blocks.contains` 로 되짚어 묻다가 판단을 두 번 다르게 하는
     // 일이 없다.
-    let edits: Vec<(String, bool)> = args
-        .blocks
-        .iter()
-        .map(|t| (t.clone(), true))
-        .chain(args.unblocks.iter().map(|t| (t.clone(), false)))
-        .collect();
+    let edits: Vec<(String, bool)> =
+        args.blocks.iter().map(|t| (t.clone(), true)).chain(args.unblocks.iter().map(|t| (t.clone(), false))).collect();
 
     let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(|issues, cfg, _| {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
@@ -38,7 +36,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
         if !args.blocks.is_empty() {
             let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
-                return Err(Fail::not_found(&args.id));
+                return Err(Fail::not_found(&args.id, ctx.lang()));
             };
             // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
             // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
@@ -57,7 +55,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         }
         for (target, wants_block) in &edits {
             let Some(t) = issues.iter().find(|i| &i.id == target) else {
-                return Err(Fail::not_found(target));
+                return Err(Fail::not_found(target, ctx.lang()));
             };
             // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
             if *wants_block && crate::report::is_idea(t) {
@@ -111,11 +109,11 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
     if touched.is_empty() {
-        return Ok(vec![format!(
-            "{}  {}",
-            paint(style::ID, &args.id),
-            paint(style::DIM, "바뀐 것이 없다")
-        )]);
+        // `edit` 과 **한 키다**(`edit.nothing_changed`, moai-95g1) — 같은 문장을 두 벌로 두면
+        // 한 도구가 같은 처지를 두 말로 말한다(리뷰). 이 줄과 아래 화살표 줄은 서로 배타라
+        // 한 판에 같이 서지 않는다 — 나머지 `link` 의 글은 그 표면의 차례에 옮긴다.
+        let said = crate::i18n::say(ctx.lang(), "edit.nothing_changed");
+        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, said))]);
     }
     Ok(touched
         .iter()

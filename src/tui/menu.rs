@@ -23,12 +23,9 @@
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
 use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of_key};
+use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
-
-/// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름 없는 접두어는
-/// 시험(`every_prefix_in_the_menu_has_a_name`)이 막는다.
-const GROUPS: &[(&str, &str)] = &[("SPC p", "프로젝트"), ("SPC v", "보기"), ("SPC s", "정렬"), ("SPC c", "열"), ("SPC m", "읽음")];
 
 /// 메뉴가 열렸나.
 pub fn open(chord: &Chord) -> bool {
@@ -132,7 +129,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
                 out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
-                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq)), state: None });
+                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq, c.lang)), state: None });
             }
             _ => {}
         }
@@ -146,11 +143,13 @@ pub fn title(held: &[KeyEvent]) -> String {
 }
 
 /// 뿌리의 이름 — 접두어 줄의 `SPC- 메뉴`, 키 바의 `SPC 메뉴`.
-pub const ROOT: &str = "메뉴";
+pub fn root(lang: Lang) -> &'static str {
+    say(lang, "tui.menu.root")
+}
 
-/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`ROOT`], 하위 층은 묶음의 이름(`보기`).
-pub fn name(held: &[KeyEvent]) -> &'static str {
-    if held.len() <= 1 { ROOT } else { group(held) }
+/// 접두어 줄에 적을 지금 층의 이름 — 뿌리는 [`root`], 하위 층은 묶음의 이름(`보기`).
+pub fn name(held: &[KeyEvent], lang: Lang) -> &'static str {
+    if held.len() <= 1 { root(lang) } else { group(held, lang) }
 }
 
 /// 격자의 줄 수 상한 — 한 열에 6칸, 넘치면 옆 열에 다시 6칸(사용자 결정, moai-r2dt). 처음의
@@ -255,10 +254,21 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
     Grid { rows, columns, hidden: items.len() - (shown * rows).min(items.len()) }
 }
 
-/// 하위 접두어의 이름. 이름이 없으면 `…` 만 — 시험이 막으므로 실제로는 안 선다.
-fn group(seq: &[KeyEvent]) -> &'static str {
-    let t = title(seq);
-    GROUPS.iter().find(|(p, _)| *p == t).map_or("…", |(_, n)| n)
+/// 하위 접두어의 이름. 표에는 동작만 있고 묶음의 이름은 없어 여기 둔다 — 이름이 없으면 `…` 만
+/// 이고, 시험(`every_prefix_in_the_menu_has_a_name`)이 그것을 막으므로 실제로는 안 선다.
+///
+/// **`(접두어, 키)` 표로 두지 않는다.** 표에 키를 담고 `say(lang, key)` 를 한 번만 부르면
+/// `english_has_every_key_the_source_asks_for` 의 읽는 자가 그 키들을 못 봐, 표에만 있고
+/// 아무도 안 부르는 키로 선다.
+fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
+    match title(seq).as_str() {
+        "SPC p" => say(lang, "tui.group.project"),
+        "SPC v" => say(lang, "tui.group.view"),
+        "SPC s" => say(lang, "tui.group.sort"),
+        "SPC c" => say(lang, "tui.group.cell"),
+        "SPC m" => say(lang, "tui.group.read"),
+        _ => "…",
+    }
 }
 
 /// 이 줄이 `seq` 로 시작하나.
@@ -297,8 +307,13 @@ mod tests {
 
     /// **`detail` 은 켜 둔다** — 탐색기의 처음값은 상세 칸이 보이는 것이고(`App::detail_open`),
     /// 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 여기서 늘 꺼진 채로 재어진다.
+    ///
+    /// **말은 한국어로 고정한다.** 아래 시험들이 재는 것은 차례와 상태이지 화면 말이 아니라,
+    /// 기본값(`Lang::default()`)을 따라가면 기본값이 바뀔 때마다 여기가 같이 붉어진다. 한국어로
+    /// 박아 두면 그 덤으로 `ko` 표가 이 키들을 실제로 들고 있는지도 재어진다 — 영어 표만
+    /// `english_has_every_key_the_source_asks_for` 가 본다.
     fn inside() -> Ctx {
-        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+        Ctx { list_focus: true, detail: true, lang: crate::i18n::Lang::Ko, ..Ctx::default() }
     }
 
     fn layer() -> Ctx {
@@ -319,17 +334,7 @@ mod tests {
         let root = entries(ch.held(), &inside(), &[]);
         assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, [
-            "검색",
-            "거름망",
-            "생각 담기",
-            "끝내기",
-            "+프로젝트",
-            "+보기",
-            "+정렬",
-            "+열",
-            "+읽음"
-        ]);
+        assert_eq!(what, ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+보기", "+정렬", "+열", "+읽음"]);
     }
 
     /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은
@@ -341,7 +346,10 @@ mod tests {
         let items = entries(&[k(' '), k('v')], &c, &columns);
         assert_eq!(keys_of(&items), ["d", "l", "a", "1", "2", "3", "p", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
-        assert_eq!(text[..6], ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
+        assert_eq!(
+            text[..6],
+            ["done [숨김]", "미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]
+        );
         let mut ch = Chord::default();
         for x in [' ', 'v', '4'] {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
@@ -367,7 +375,8 @@ mod tests {
     /// 상한까지 위에서 아래로 채운 뒤 다음 열로 간다. 키는 열 안에서 오른쪽 맞춤이다(doom 의 `RET`).
     #[test]
     fn the_grid_fills_columns_first_and_lines_up_the_colons() {
-        let items: Vec<Entry> = ["a", "b", "SPC", "d", "e", "f", "g", "h", "i", "j"].iter().map(|k| e(k, "설명")).collect();
+        let items: Vec<Entry> =
+            ["a", "b", "SPC", "d", "e", "f", "g", "h", "i", "j"].iter().map(|k| e(k, "설명")).collect();
         let g = grid(&items, 200, 4);
         assert_eq!((g.rows, g.columns.len(), g.hidden), (4, 3, 0));
         let keys = |c: usize| g.columns[c].iter().map(|p| p.key.trim_start()).collect::<Vec<_>>();
@@ -575,14 +584,24 @@ mod tests {
     fn toggles_show_their_state_in_words() {
         // 화면의 꼴 셋(상세 칸·워크트리·원문)만 본다 — 줄 보기(done·미룸)는 위 시험이 본다.
         let states = |c: Ctx| -> Vec<Option<&'static str>> {
-            entries(&[k(' '), k('v')], &c, &[]).iter().filter(|e| ["p", "w", "r"].contains(&e.key.as_str())).map(|e| e.state).collect()
+            entries(&[k(' '), k('v')], &c, &[])
+                .iter()
+                .filter(|e| ["p", "w", "r"].contains(&e.key.as_str()))
+                .map(|e| e.state)
+                .collect()
         };
         assert_eq!(states(inside()), [Some("[보임]"), Some("[꺼짐]"), Some("[그리기]")]);
-        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]);
+        assert_eq!(
+            states(Ctx { worktree: true, raw: true, ..inside() }),
+            [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]
+        );
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["d", "l", "a", "p", "w"]);
+        assert_eq!(
+            keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
+            ["d", "l", "a", "p", "w"]
+        );
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.
@@ -596,7 +615,7 @@ mod tests {
         for b in BROWSE.iter().filter(|b| b.seq.first() == Some(&LEADER)) {
             for n in 2..b.seq.len() {
                 let seq: Vec<KeyEvent> = b.seq[..n].iter().map(|k| k.event()).collect();
-                assert_ne!(group(&seq), "…", "`{}` 에 이름이 없다 — GROUPS 에 더한다", title(&seq));
+                assert_ne!(group(&seq, Lang::Ko), "…", "`{}` 에 이름이 없다 — `group` 에 더한다", title(&seq));
             }
             for key in &b.seq[1..] {
                 assert_eq!(lookup(MENU, &[key.event()]), Lookup::Unknown, "{:?}", b.seq);

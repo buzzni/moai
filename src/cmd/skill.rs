@@ -26,8 +26,8 @@ struct Place {
     files: Vec<(PathBuf, String)>,
 }
 
-fn place() -> R<Place> {
-    let repo = crate::store::Repo::discover()?;
+fn place(ctx: &Ctx) -> R<Place> {
+    let repo = super::open_repo(ctx)?;
     // **선 체크아웃에 심는다**(리뷰 moai-71ht.jlh) — 트래커만 루트로 옮겨 간다(`Repo::here`).
     // `repo.root` 로 심던 판은 워크트리에서 친 `skill install` 이 루트의 `.claude/` 를 고쳐,
     // 이 가지에서 고친 훅은 이 가지에서 한 번도 안 돌고 남의 체크아웃만 더럽혔다.
@@ -38,15 +38,7 @@ fn place() -> R<Place> {
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let files = plant(&prefix, &root, &exe);
-    Ok(Place {
-        dir: root.join(skill::DIR),
-        market: skill::market(&prefix, &root),
-        root,
-        prefix,
-        exe,
-        on_path,
-        files,
-    })
+    Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
 }
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
@@ -55,7 +47,7 @@ fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
 }
 
 pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files, .. } = place()?;
+    let Place { root, dir, market, exe, files, .. } = place(ctx)?;
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -87,10 +79,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             None => format!("등록: claude plugin install moai@{market} --scope {scope} -y"),
         });
         for c in &companions {
-            out.push(match &c.blocked {
-                Some(why) => format!("함께: 건너뛴다 — {why}"),
-                None => format!("함께: {}", c.shown()),
-            });
+            match c.why() {
+                Some(why) => {
+                    out.push(format!("함께: 건너뛴다 — {why}"));
+                    out.push(c.escape());
+                }
+                None => out.push(format!("함께: {}", c.shown())),
+            }
         }
         return Ok(out);
     }
@@ -99,17 +94,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (path, body) in &files {
         let at = dir.join(path);
         if let Some(parent) = at.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
+            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
         }
         std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
     }
 
     let steps = match &clash {
-        Some(other) => vec![(
-            format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()),
-            false,
-        )],
+        Some(other) => vec![(format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()), false)],
         None => register(&root, &dir, &market, scope, known_at(&market).is_some()),
     };
 
@@ -162,11 +153,16 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
     for (c, ok) in &companions {
-        out.push(match (&c.blocked, ok) {
-            (Some(why), _) => format!("  ! {} 은 건너뛰었다 — {why}", c.id),
-            (None, true) => format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id),
-            (None, false) => format!("  ! {} 을 못 깔았다 — 손으로: {}", c.id, c.shown()),
-        });
+        match (c.why(), ok) {
+            // **빠져나갈 길을 함께 낸다**(moai-mfw1). 이 줄만 있던 판은 다시 부르라고도, 이름을
+            // 어떻게 푸는지도 말하지 않아 — 훅의 알림이 "깔려 있지 않다" 를 영영 되풀이했다.
+            (Some(why), _) => {
+                out.push(format!("  ! {} 은 건너뛰었다 — {why}", c.id));
+                out.push(c.escape());
+            }
+            (None, true) => out.push(format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id)),
+            (None, false) => out.push(format!("  ! {} 을 못 깔았다 — 손으로: {}", c.id, c.shown())),
+        }
     }
     if registered {
         out.push(String::new());
@@ -186,7 +182,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
         // 하위 디렉터리에서 부른 사람이 그 자리에서 치면 없는 디렉터리를 가리킨다.
         // 빈칸 든 경로를 그대로 내면 친 줄이 인자 둘로 갈린다 — 따옴표로 싼다.
-        out.push(format!("  claude plugin marketplace add {} --scope {scope}", crate::text::shell_word(&dir.display().to_string())));
+        out.push(format!(
+            "  claude plugin marketplace add {} --scope {scope}",
+            crate::text::shell_word(&dir.display().to_string())
+        ));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
     Ok(out)
@@ -197,7 +196,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files } = place()?;
+    let Place { root, dir, market, prefix, exe, on_path, files } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !same_dir(other, &dir));
@@ -221,6 +220,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             _ => want.clone(),
         })
         .collect();
+    // **곁 플러그인도 비춘다**(moai-mfw1). `install` 이 함께 깔고 `uninstall` 이 함께 걷는데 이
+    // 화면만 그것을 몰라, 훅이 "깔려 있지 않다" 를 비출 때 무엇이 서 있는지 볼 자리가 없었다.
+    // 세는 자는 훅과 **같다**([`korean_missing`]) — 자가 둘이면 화면과 알림이 엇갈린다.
+    let missing = korean_missing(&root);
+    let companions: Vec<(&str, bool)> =
+        crate::guide::KOREAN_PLUGINS.iter().map(|(id, _)| (*id, !missing.contains(id))).collect();
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
@@ -254,16 +259,19 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            // **늘 서는 배열이다.** 빈 배열과 없는 키를 가르라고 기계에 두는 키가 아니다 —
+            // 곁 플러그인은 늘 둘이고, 깔렸는지만 다르다.
+            "companions": companions
+                .iter()
+                .map(|(id, ok)| serde_json::json!({"id": id, "installed": ok}))
+                .collect::<Vec<_>>(),
         }));
     }
 
     let mark = |ok: bool| if ok { "·" } else { "!" };
     let mut out = vec![format!("moai skill — {}", dir.display())];
     out.push(match (&listed, &clash) {
-        (_, Some(other)) => format!(
-            "  ! 마켓플레이스  `{market}` 이 다른 자리({}) 를 가리킨다",
-            other.display()
-        ),
+        (_, Some(other)) => format!("  ! 마켓플레이스  `{market}` 이 다른 자리({}) 를 가리킨다", other.display()),
         (Some(_), None) => format!("  · 마켓플레이스  `{market}` 등록됨"),
         (None, _) => format!("  ! 마켓플레이스  `{market}` 등록 안 됨"),
     });
@@ -300,6 +308,13 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             }
         ));
     }
+    for (id, ok) in &companions {
+        out.push(format!(
+            "  {} 곁 플러그인   {id}{}",
+            mark(*ok),
+            if *ok { "" } else { " — 없다 (`moai skill install`)" }
+        ));
+    }
     if let Some(hook) = &hooked {
         out.push(match &hook_path {
             Some(path) if path.as_os_str() == hook.as_str() => format!("  · 훅            {hook}"),
@@ -327,7 +342,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
 
 /// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.**
 pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, .. } = place()?;
+    let Place { root, dir, market, .. } = place(ctx)?;
     let clash = clash_of(&market, &dir);
     let target = format!("moai@{market}");
     let installs = installs_here(&target, &root);
@@ -397,9 +412,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     let unplugged = !dry_run && claude && steps.len() >= unplug && steps[..unplug].iter().all(|(_, ok)| *ok);
     let along_steps: Vec<(String, bool)> =
         if unplugged { along.iter().map(|a| (shown(a), run(&root, a))).collect() } else { Vec::new() };
-    let failed = steps.iter().any(|(_, ok)| !ok)
-        || clash.is_some()
-        || (!dry_run && !claude && !plan.is_empty());
+    let failed = steps.iter().any(|(_, ok)| !ok) || clash.is_some() || (!dry_run && !claude && !plan.is_empty());
     if failed {
         super::note_partial();
     }
@@ -465,7 +478,11 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     }
     if unplugged {
         for (cmd, ok) in &along_steps {
-            out.push(if *ok { format!("  · {cmd}") } else { format!("  ! {cmd}  — 실패. 손으로 다시 친다") });
+            out.push(if *ok {
+                format!("  · {cmd}")
+            } else {
+                format!("  ! {cmd}  — 실패. 손으로 다시 친다")
+            });
         }
     } else {
         out.extend(along.iter().map(|a| format!("  - {}  — 앞 걸음이 실패해 안 불렀다", shown(a))));
@@ -491,10 +508,7 @@ fn shown(args: &[String]) -> String {
 /// PATH 에서 찾아지는 그 이름. 훅에 이름을 적어도 되는지, `claude` 를 부를 수
 /// 있는지를 이것이 정한다.
 fn which(name: &str) -> Option<PathBuf> {
-    let out = Command::new("sh")
-        .args(["-c", "command -v -- \"$1\"", "sh", name])
-        .output()
-        .ok()?;
+    let out = Command::new("sh").args(["-c", "command -v -- \"$1\"", "sh", name]).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -576,16 +590,15 @@ fn other_user_moai(target: &str) -> bool {
     plugins.iter().any(|(key, rows)| {
         key.starts_with("moai@")
             && key != target
-            && rows.as_array().is_some_and(|rows| rows.iter().any(|r| r.get("scope").and_then(|s| s.as_str()) == Some("user")))
+            && rows
+                .as_array()
+                .is_some_and(|rows| rows.iter().any(|r| r.get("scope").and_then(|s| s.as_str()) == Some("user")))
     })
 }
 
 /// 설치본 곁에 남은 옛 판 디렉터리의 수.
 fn stale_copies(installs: &[skill::Install]) -> usize {
-    let Some(parent) = installs
-        .first()
-        .and_then(|i| Path::new(&i.install_path).parent().map(Path::to_path_buf))
-    else {
+    let Some(parent) = installs.first().and_then(|i| Path::new(&i.install_path).parent().map(Path::to_path_buf)) else {
         return 0;
     };
     let live: Vec<&str> = installs.iter().map(|i| i.version.as_str()).collect();
@@ -622,7 +635,7 @@ pub fn korean_missing(root: &Path) -> Vec<&'static str> {
     crate::guide::KOREAN_PLUGINS
         .iter()
         .map(|(id, _)| *id)
-        .filter(|id| ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, &is_here).is_empty()))
+        .filter(|id| ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, is_here).is_empty()))
         .collect()
 }
 
@@ -632,12 +645,39 @@ pub fn korean_missing(root: &Path) -> Vec<&'static str> {
 struct Companion {
     id: &'static str,
     steps: Vec<Vec<String>>,
-    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그 까닭. 건너뛴다 — 덮으면 남의 등록을
-    /// 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
+    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그것이 가리키는 자리. 건너뛴다 —
+    /// 덮으면 남의 등록을 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
+    ///
+    /// **까닭이 아니라 자리를 든다**(moai-mfw1). 맨 위의 `blocked_by` 는 막은 자리(경로) 하나인데
+    /// 여기만 문장이라, 한 `--json` 안에서 같은 이름의 키가 모양이 둘이었다 — 읽는 쪽이 키 이름으로
+    /// 뜻을 못 정한다. 사람이 읽을 한 줄은 [`Companion::why`] 가 그때 짓는다.
+    ///
+    /// **자리를 못 읽었으면 빈 글자다.** `None` 은 "안 막혔다" 이고 빈 글자는 "막혔는데 어디인지
+    /// 모른다" 다 — 여기에 `다른 출처` 같은 사람 말을 담으면 기계가 읽는 키에 옮기지도 않는 한국어
+    /// 문장이 서고, 자리를 기대하고 읽은 쪽이 그것을 저장소 이름으로 쓴다.
     blocked: Option<String>,
 }
 
 impl Companion {
+    /// 설치 id 의 `@` 뒤가 마켓플레이스 이름이다.
+    fn market(&self) -> &str {
+        self.id.split_once('@').map_or(self.id, |(_, m)| m)
+    }
+
+    /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다. 자리를 못 읽었으면(빈 글자) 그 자리를 말로 메운다.
+    fn why(&self) -> Option<String> {
+        self.blocked.as_ref().map(|at| {
+            let at = if at.is_empty() { "다른 출처" } else { at.as_str() };
+            format!("`{}` 이 이미 {at} 를 가리킨다", self.market())
+        })
+    }
+
+    /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
+    /// moai 의 이름이 막혔을 때 내는 줄과 같은 길이다.
+    fn escape(&self) -> String {
+        format!("    그 이름을 이제 안 쓰면 `claude plugin marketplace remove {}` 뒤에 다시 부른다", self.market())
+    }
+
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
@@ -678,10 +718,8 @@ fn companions(scope: &str) -> Vec<Companion> {
                 Some(s) if *s == serde_json::json!({"source": "github", "repo": repo}) => (vec![add, install], None),
                 Some(_) => match known.as_ref().and_then(|k| skill::market_repo(k, market)) {
                     Some(at) if at.eq_ignore_ascii_case(repo) => (vec![install], None),
-                    at => {
-                        let at = at.filter(|a| !a.is_empty()).unwrap_or_else(|| "다른 출처".into());
-                        (Vec::new(), Some(format!("`{market}` 이 이미 {at} 를 가리킨다")))
-                    }
+                    // 자리를 못 읽었으면 빈 글자로 둔다 — 사람이 읽을 말은 [`Companion::why`] 가 짓는다.
+                    at => (Vec::new(), Some(at.filter(|a| !a.is_empty()).unwrap_or_default())),
                 },
             };
             Companion { id, steps, blocked }
@@ -720,12 +758,7 @@ fn register(root: &Path, dir: &Path, market: &str, scope: &str, listed: bool) ->
 /// 제 자리로 프로젝트를 정하므로, 하위 디렉터리에서 부르면 엉뚱한 프로젝트에
 /// 적거나 못 찾는다.
 fn run(root: &Path, args: &[String]) -> bool {
-    Command::new("claude")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    Command::new("claude").args(args).current_dir(root).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -745,7 +778,7 @@ mod tests {
             .collect();
         for (path, head) in [
             ("skills/moai/SKILL.md", "---\nname: moai\n"),
-            ("skills/moai/references/commands.md", "# 전체 명령"),
+            ("skills/moai/references/commands.md", "# Every command"),
             ("skills/moai-supervise/SKILL.md", "---\nname: moai-supervise\n"),
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");

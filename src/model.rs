@@ -24,24 +24,96 @@ pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// 대면 에이전트는 대화록을 반으로 잘라 다시 넣는다.
 ///
 /// 리뷰 줄은 [`crate::guide::REVIEW_OVER_LIMIT`] 에서 온다 — 가르치는 글과 거절문이 갈라지면
-/// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<크기>` 는 여기서 채운다: 재 놓은 수를
+/// 큰 리뷰를 닫는 쪽이 두 말 사이에서 멈춘다(moai-b8aj). `<size>` 는 여기서 채운다: 재 놓은 수를
 /// 자리 표시로 도로 내밀면 받는 쪽이 첫 줄에서 그것을 옮겨 적어야 한다.
-pub fn check_text_size(id: &str, what: &str, text: &str) -> R<()> {
+/// `at` 은 **가리키는 말**이지 반드시 id 가 아니다 — 이 쓰기가 짓는 줄은 거절하면 안 남으므로
+/// id 가 아니라 제목으로 가리킨다([`unwritten`], moai-1rkl).
+///
+/// **그 말을 늦게 받는다.** 넘치는 글은 드물고 가리키는 말은 [`unwritten`] 이 제목을 두 벌
+/// 베껴서 짓는데, 미리 지어 넘기던 판은 500줄 계획이면 그 헛일을 500번 하고 전부 버렸다.
+/// 여기서 부르면 거절할 때만 든다.
+pub fn check_text_size(at: impl FnOnce() -> String, what: &str, text: &str) -> R<()> {
     if text.len() <= MAX_TEXT_BYTES {
         return Ok(());
     }
+    let at = at();
     let kb = text.len().div_ceil(1024);
     Err(Fail::coded(
         format!(
-            "{id}: {what} 크기가 {kb}KB 다 — 한 번에 {}KB 까지 적는다. 잘라 적지 않는다\n      \
-             요약을 적고 원문은 파일로 둔다. 리뷰 원문이면 리뷰가 낸 글이지 그 대화록(JSONL)이 아니다\n      \
-             리뷰 원문이면: {}",
+            "{at}: the {what} is {kb}KB — one write takes up to {}KB. Do not write it in slices\n      \
+             Write a summary and keep the original in a file. For a review, that is what the review said, not its transcript (JSONL)\n      \
+             For a review text: {}",
             MAX_TEXT_BYTES / 1024,
             // 두 줄짜리 글이다 — 이어 붙인 줄에도 같은 여섯 칸을 준다(`guide::REVIEW_OVER_LIMIT`).
-            crate::guide::REVIEW_OVER_LIMIT.replace("<크기>", &kb.to_string()).replace('\n', "\n      ")
+            crate::guide::REVIEW_OVER_LIMIT.replace("<size>", &kb.to_string()).replace('\n', "\n      ")
         ),
         code::BAD_INPUT,
     ))
+}
+
+/// 도구가 **스스로 짓는** 글에 남의 글 한 토막을 담을 때, 그 토막만 `budget` 바이트에 맞춰
+/// 줄인다(moai-clta). 넘을 때만 줄이고, 줄였으면 `…` 로 밝힌다.
+///
+/// [`check_text_size`] 와 가르는 자는 **누가 적었는가**다. 사람이 적은 글은 잘라 적지 않고
+/// 거절한다 — 무엇이 사라졌는지 적은 쪽이 안다. 도구가 짓는 노트에는 거절할 사람이 없어,
+/// 같은 자로 재면 길이 통째로 막힌다: 제목이 상한 턱밑인 idea 는 `promote` 의 노트 머리말
+/// (`<id> 길이 + 22`바이트) 때문에 펼칠 수조차 없었다. 담기는 것이 **가리킴이지 사본이 아닐
+/// 때**만 쓴다 — 원본은 제 줄에 그대로 남아 있어야 한다.
+///
+/// **`budget` 은 표식(3바이트)보다 커야 한다.** 그보다 작으면 줄였다는 표식조차 못 담아 빈
+/// 글을 낸다 — 넘치게 내면 [`check_text_size`] 가 도로 거절해 아무것도 못 고치기 때문이고,
+/// 그 자리는 "줄였으면 밝힌다" 를 못 지키는 유일한 갈래다. 지금 그 예산을 주는 부름은 없다.
+///
+/// 자르는 자리는 **글자** 경계지 글자 무리(grapheme) 경계가 아니다. 이음 표식(ZWJ)이나 첫
+/// 자모 하나가 끝에 남을 수 있고, 표식이 그 뒤에 붙는다. 노트에 담는 가리킴에는 그것으로 됐다.
+///
+/// **단위를 이름에 적는다**(moai-jgnj). 이 저장소에는 `fit` 이 셋 더 있고(`markdown`·`tui::draw`·
+/// `tui::scroll`) 그쪽 예산은 **칸**이다. 한글은 3바이트에 2칸이라 칸 예산을 이 자리에 넘기면
+/// 답이 예산의 1.5배로 서고, 그러면 [`check_text_size`] 가 도로 거절해 moai-clta 가 그대로
+/// 돌아온다. 맞는 쪽으로 틀리는 값이 아니라 **소리 없이 넘치는** 값이라 이름으로 가른다.
+pub fn fit_bytes(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
+    const MARK: &str = "…";
+    if text.len() <= budget {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    // 표식조차 안 들어가면 빈 글이다 — 넘치게 내면 재는 쪽이 도로 거절한다.
+    let Some(mut cut) = budget.checked_sub(MARK.len()) else {
+        return std::borrow::Cow::Borrowed("");
+    };
+    // **글자 가운데서 자르지 않는다** — 한글 한 자가 3바이트라 예사로 걸린다.
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    std::borrow::Cow::Owned(format!("{}{MARK}", &text[..cut]))
+}
+
+/// 크기 거절문이 **아직 안 지은 줄**을 가리키는 말(moai-1rkl).
+///
+/// 거절하는 쓰기는 아무것도 안 남기므로 그 줄의 id 는 어디에도 없다. 그런데도 그것을 대던 판은
+/// 받는 쪽을 없는 id 를 찾으러 보냈다 — 같은 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다.
+/// `add` 가 "칸 검사는 id 를 뽑기 **전에** 한다" 로 이미 지키던 자를 크기 검사에도 세운다.
+///
+/// 제목 한 토막을 대는 것은 계획에 여러 줄이 있을 때 **어느 줄인지** 가려야 해서다. 제목 자체가
+/// 넘친 것이면 그 머리가 그대로 표가 된다.
+pub fn unwritten(title: &str) -> String {
+    format!("새 줄 '{}'", fit_bytes(&crate::text::one_line(title), 60))
+}
+
+/// 이미 지어진 거절문의 머리에 선 id 를 [`unwritten`] 의 말로 갈아 끼운다(moai-1rkl).
+///
+/// 크기만 고치고 두면 **같은 쓰기가 축마다 다른 말을 한다.** [`Issue::validate_fields`] 의 말은
+/// 일곱 자리가 모두 `<id>: ` 로 시작하는데, 그 id 가 이번에 뽑은 것이면 거절 뒤에 어디에도 안
+/// 남는다 — `add --from` 에 `#bug,perf` 한 줄을 주면 `<없는 id>: 태그에 …` 가 나오고, 같은
+/// 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다. [`check_text_size`] 가 이미 막아 둔 바로 그
+/// 실패다.
+///
+/// **머리만 간다.** 검사마다 가리키는 자를 따로 두면 그 말이 두 벌로 갈리고, 한쪽만 고치는 날
+/// 이 어긋남이 돌아온다. 머리가 그 꼴이 아니면(`id 형식이 아니다` 는 id 를 따옴표로 댄다) 그대로 둔다.
+pub fn point_at_unwritten(id: &str, title: &str, said: String) -> String {
+    match said.strip_prefix(&format!("{id}: ")) {
+        Some(rest) => format!("{}: {rest}", unwritten(title)),
+        None => said,
+    }
 }
 
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —
@@ -397,6 +469,24 @@ impl Issue {
     /// 영영 못 만진다(moai-hym7, 사람이 정했다). 칸을 **옮기는** 쓰기는 그대로 엄하다 —
     /// 갈 칸은 바뀌는 값이라 `kept_status` 가 서지 않는다.
     pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), String> {
+        if !kept_status {
+            // **저장 계층은 화면 말을 모른 채 둔다**(사람이 정했다, 2026-09-20, moai-fdk7).
+            // 이 글은 파일을 재다 나온 것이라 이웃 검사 열셋과 같은 말로 선다 — `store` 에
+            // 화면 말을 물려주면 한 함수 안에서 말이 갈린다. 그 열넷을 통째로 옮기는 것은
+            // 따로 든다(idea moai-gbk3). 글을 짓는 자리는 그때도 `view::no_such_column` 하나다.
+            cfg.require_known(self.status.as_str())
+                .map_err(|e| format!("{}: {}", self.id, crate::view::no_such_column(crate::i18n::Lang::Ko, &e)))?;
+        }
+        self.validate_fields()
+    }
+
+    /// 칸 이름을 뺀 나머지 검사. **설정이 필요 없는 쪽이다.**
+    ///
+    /// 갈라 둔 까닭은 머지 드라이버다(moai-x2vs) — git 이 주는 것은 임시 파일 셋뿐이라
+    /// 그쪽은 `.moai/config.toml` 을 안 읽는데, 제가 지어 내보내는 줄은 검사해야 한다.
+    /// `kept_status` 가 선 [`Issue::validate_keeping`] 은 사실 `cfg` 를 한 번도 안 쓰므로,
+    /// 그 사실을 타입으로 적어 두면 검사가 두 벌로 갈라질 자리가 없다.
+    pub fn validate_fields(&self) -> Result<(), String> {
         if !crate::id::is_valid(&self.id) {
             return Err(format!("id 형식이 아니다 — {:?}", self.id));
         }
@@ -420,14 +510,8 @@ impl Issue {
                 return Err(format!("{}: {what}은 한 줄이다 — {v:?}", self.id));
             }
         }
-        if !kept_status {
-            cfg.require_known(self.status.as_str()).map_err(|e| format!("{}: {e}", self.id))?;
-        }
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
-            return Err(format!(
-                "{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}",
-                self.id, self.priority
-            ));
+            return Err(format!("{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}", self.id, self.priority));
         }
         for tag in &self.tags {
             if tag.is_empty() || tag.contains(|c: char| c.is_whitespace() || c == ',') {
@@ -513,12 +597,7 @@ impl JournalEntry {
         JournalEntry { title: Some(title.to_string()), ..Self::base("create", id, at, by) }
     }
     pub fn status(id: &str, from: &Status, to: &Status, note: Option<String>, at: &str, by: &Actor) -> JournalEntry {
-        JournalEntry {
-            from: Some(from.0.clone()),
-            to: Some(to.0.clone()),
-            note,
-            ..Self::base("status", id, at, by)
-        }
+        JournalEntry { from: Some(from.0.clone()), to: Some(to.0.clone()), note, ..Self::base("status", id, at, by) }
     }
     pub fn note(id: &str, text: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { text: Some(text.to_string()), ..Self::base("note", id, at, by) }
@@ -824,10 +903,7 @@ fn bad_git_identity(a: &Actor) -> Fail {
 }
 
 fn malformed(what: &str, raw: &str) -> Fail {
-    Fail::coded(
-        format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"),
-        code::BAD_INPUT,
-    )
+    Fail::coded(format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"), code::BAD_INPUT)
 }
 
 /// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을
@@ -868,10 +944,8 @@ pub fn now() -> String {
     {
         return t.trim().to_string();
     }
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let secs =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     format_rfc3339(secs)
 }
 
@@ -893,12 +967,7 @@ pub fn format_rfc3339(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let (y, mo, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
+    format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
@@ -914,7 +983,8 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// `2026-09-11T04:12:03Z` → epoch 초. 형식이 아니면 `None`.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let b = s.as_bytes();
-    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z' {
+    if b.len() != 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' || b[19] != b'Z'
+    {
         return None;
     }
     let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
@@ -945,13 +1015,23 @@ mod tests {
     }
 
     fn issue() -> Issue {
-        Issue::new(
-            "argos-4aex".into(),
-            "제목".into(),
-            Kind::Issue,
-            Status::new("todo"),
-            "2026-09-11T04:12:03Z",
-        )
+        Issue::new("argos-4aex".into(), "제목".into(), Kind::Issue, Status::new("todo"), "2026-09-11T04:12:03Z")
+    }
+
+    /// [`fit_bytes`] 는 **넘을 때만** 줄이고, 줄일 때는 글자 가운데를 안 자른다. 어느 답도
+    /// `budget` 을 안 넘는다 — 넘치게 내면 [`check_text_size`] 가 도로 거절해 아무것도 못 고친다.
+    #[test]
+    fn fit_bytes_shortens_only_what_must_and_never_mid_character() {
+        assert_eq!(fit_bytes("가나다", 9), "가나다", "딱 맞는 글을 줄였다");
+        assert_eq!(fit_bytes("", 0), "");
+        // 표식이 3바이트다 — 8바이트 예산에는 다섯 바이트가 남지만 두 글자는 안 들어간다.
+        assert_eq!(fit_bytes("가나다", 8), "가…");
+        assert_eq!(fit_bytes("가나다", 6), "가…");
+        assert_eq!(fit_bytes("가나다", 5), "…", "글자 가운데서 잘랐다");
+        // 표식조차 못 담는 예산에서도 넘치지 않는다.
+        for budget in 0..10 {
+            assert!(fit_bytes("가나다", budget).len() <= budget, "{budget}바이트 예산이 넘쳤다");
+        }
     }
 
     /// 최소 형태는 필수 6개뿐이고 키 순서가 고정이다.
@@ -978,8 +1058,21 @@ mod tests {
         i.done_at = Some("2026-09-11T06:00:00Z".into());
         let line = serde_json::to_string(&i).unwrap();
         let want = [
-            "id", "title", "kind", "status", "priority", "tags", "assignee", "epic",
-            "milestone", "created_at", "updated_at", "status_since", "body", "done_at", "started_at",
+            "id",
+            "title",
+            "kind",
+            "status",
+            "priority",
+            "tags",
+            "assignee",
+            "epic",
+            "milestone",
+            "created_at",
+            "updated_at",
+            "status_since",
+            "body",
+            "done_at",
+            "started_at",
         ];
         let at: Vec<usize> = want
             .iter()
@@ -1027,7 +1120,10 @@ mod tests {
 
         let mut fresh = issue();
         assert_eq!(fresh.move_to(Status::new("in_progress"), t1, &c), Status::new("todo"), "떠난 칸을 돌려준다");
-        assert_eq!((fresh.status.as_str(), fresh.status_since.as_str(), fresh.updated_at.as_str()), ("in_progress", t1, t1));
+        assert_eq!(
+            (fresh.status.as_str(), fresh.status_since.as_str(), fresh.updated_at.as_str()),
+            ("in_progress", t1, t1)
+        );
         assert_eq!(fresh.started_at.as_deref(), Some(t1));
         fresh.move_to(Status::new("done"), t2, &c);
         fresh.move_to(Status::new("todo"), t3, &c);
@@ -1217,10 +1313,7 @@ mod tests {
         let line = serde_json::to_string(&i).unwrap();
         let want = ["milestone", "blocked_by", "created_at"];
         // milestone 은 비어 있으니 실제로는 blocked_by 와 created_at 만 있다.
-        let at: Vec<usize> = [want[1], want[2]]
-            .iter()
-            .map(|k| line.find(&format!("\"{k}\":")).unwrap())
-            .collect();
+        let at: Vec<usize> = [want[1], want[2]].iter().map(|k| line.find(&format!("\"{k}\":")).unwrap()).collect();
         assert!(at[0] < at[1], "{line}");
     }
 
@@ -1396,7 +1489,8 @@ mod tests {
     /// 담당이 없는데 메일만 남으면 어느 화면도 그릴 줄 모른다.
     #[test]
     fn an_email_never_outlives_its_name() {
-        let mut i = Issue::new("argos-4aex".into(), "t".into(), Kind::Issue, Status::new("todo"), "2026-09-11T05:02:44Z");
+        let mut i =
+            Issue::new("argos-4aex".into(), "t".into(), Kind::Issue, Status::new("todo"), "2026-09-11T05:02:44Z");
         i.assignee_email = Some("raven@buzzni.com".into());
         i.normalize();
         assert_eq!(i.assignee_email, None);
@@ -1456,7 +1550,11 @@ mod tests {
         assert_eq!(said("model: openai/gpt-6 tokens=0").unwrap().2, Some(0), "0 은 모름이 아니다");
         assert_eq!(said("model: opus-5(high)"), Some((None, "opus-5".into(), None, s("high"), None)));
         assert_eq!(said("model: opus-5 (high - 손으로 친 붙임표)").unwrap().4, s("손으로 친 붙임표"));
-        assert_eq!(said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3, s("high"), "반각 줄표에 등급을 잃었다");
+        assert_eq!(
+            said("model: opus-5 (high – 자동 고침의 반각 줄표)").unwrap().3,
+            s("high"),
+            "반각 줄표에 등급을 잃었다"
+        );
         assert_eq!(said("model: anthropic/opus-5.").unwrap().1, "opus-5", "문장 부호를 이름에 붙였다");
     }
 
@@ -1464,7 +1562,9 @@ mod tests {
     #[test]
     fn old_model_lines_still_count() {
         assert_eq!(
-            said("model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다"),
+            said(
+                "model: opus (medium — 표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다). 닫기는 05:03 에 다른 세션이 했다"
+            ),
             Some((None, "opus".into(), None, s("medium"), s("표시 리팩터 두 파일, 쓰기 경로도 동시성도 안 건드린다")))
         );
         assert_eq!(said("model: opus-5 (medium — 감독 스킬 글 (표 포함))").unwrap().4, s("감독 스킬 글 (표 포함)"));
@@ -1503,9 +1603,19 @@ mod tests {
         let journal = vec![
             // 제목은 읽지 않는다 — 꼴에 맞는 제목이라야 이 줄이 그것을 잰다.
             JournalEntry::create("x-1", "model: sonnet-5", "2026-09-18T01:00:00Z", &who),
-            JournalEntry::note("x-1", "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5", "2026-09-18T02:00:00Z", &who),
+            JournalEntry::note(
+                "x-1",
+                "고쳤다\nmodel: anthropic/opus-5 tokens=10 (high — a)\nmodel: anthropic/haiku-4.5",
+                "2026-09-18T02:00:00Z",
+                &who,
+            ),
             // 울타리 안의 줄은 꼴을 옮겨 적은 예다.
-            JournalEntry::note("x-1", "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```", "2026-09-18T02:30:00Z", &who),
+            JournalEntry::note(
+                "x-1",
+                "꼴은 이렇다\n```\nmodel: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)\n```",
+                "2026-09-18T02:30:00Z",
+                &who,
+            ),
             JournalEntry::status(
                 "x-1",
                 &Status::new("review"),

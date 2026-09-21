@@ -7,7 +7,6 @@
 use super::{Ctx, Fail, R};
 use crate::cli::MvArgs;
 use crate::model::{self, Issue, JournalEntry, Status};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 #[derive(Default)]
@@ -27,16 +26,25 @@ struct Moved {
     finished: std::collections::BTreeSet<String>,
     /// `done` 으로 옮겨 **이로써 집을 수 있게 된 일**(moai-942k, `report::unblocked`).
     unblocked: Vec<Issue>,
+    /// 그 쓰기로 **이제 닫을 수 있게 된 부모**(moai-j4xs, `report::Freed::closable`).
+    closable: Vec<Issue>,
+    /// 닫은 줄과 **같은 에픽에서 다음에 집을 것**(moai-j4xs, `report::Freed::next`).
+    next: Vec<Issue>,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     if args.args.len() < 2 {
         return Err(Fail::coded(
+            // **두 줄은 키 둘이다.** 말묶음의 값은 한 줄이라(`i18n` 의
+            // `every_translation_keeps_the_places_english_marks`) 줄 나눔은 부르는 쪽이 짓는다.
             format!(
-                "옮길 칸을 안 적었다 — `moai mv {} <상태>`\n      있는 칸: {}",
-                args.args.join(" "),
-                repo.config.statuses.join(", ")
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.no_status"), &[("ids", &args.args.join(" "))]),
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "mv.no_status_columns"),
+                    &[("columns", &repo.config.statuses.join(", "))]
+                ),
             ),
             super::code::BAD_STATUS,
         ));
@@ -44,7 +52,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let (ids, tail) = args.args.split_at(args.args.len() - 1);
     let to = Status::new(tail[0].clone());
 
-    repo.config.require_known(to.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    repo.config
+        .require_known(to.as_str())
+        .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let from = args.from.map(Status::new);
 
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
@@ -61,7 +71,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
         // 하나도 빠짐없이 `who?` 위에 선다** — 하나라도 아래로 내려가면 그 오타만
         // `no_actor` 로 덮여, 같은 자의 잘못이 명령마다 다른 `code` 로 나간다.
-        super::check_from(from.as_ref().map(Status::as_str), issues, cfg)?;
+        // 말은 **거절할 때만** 푼다 — `ctx.lang()` 을 인자로 넘기면 락 안에서 사용자 설정을
+        // 여는 일이 오타 없는 판마다 선다(리뷰). 위의 `require_known` 과 한 모양이다.
+        super::check_from(from.as_ref().map(Status::as_str), issues, cfg)
+            .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
         // **묶음은 화면이 보여 준 칸으로 잰다**(사람이 정했다, moai-o5ss.l07). 에픽·
         // 마일스톤의 칸은 멤버에서 읽히고 줄에 적힌 칸은 어디서도 안 읽히므로, 적힌 칸과
         // 견주면 보드가 `in_progress` 를 그리는 에픽에 `--from in_progress` 가 "이미
@@ -76,17 +89,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         // 멤버에서 읽고 쓰기는 줄에 적힌 칸에 한다 — 두 축이 갈려 있어, 재는 것이 맞아도
         // 쓰는 것은 아무도 안 지킨다. 겨루는 둘이 같은 에픽에 같은 `--from` 을 걸면 둘 다
         // 이겼다고 믿는다. 먹는 척하는 가드보다 없는 가드가 정직하다.
-        if from.is_some() {
-            if let Some(g) = issues.iter().find(|i| asked_all.contains(&i.id.as_str()) && crate::report::is_group(i)) {
-                return Err(Fail::coded(
-                    format!(
-                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                         멤버를 집거나, 묶음은 `moai defer` 로 접는다",
-                        g.id
-                    ),
-                    super::code::BAD_STATUS,
-                ));
-            }
+        if from.is_some()
+            && let Some(g) = issues.iter().find(|i| asked_all.contains(&i.id.as_str()) && crate::report::is_group(i))
+        {
+            return Err(Fail::coded(
+                format!(
+                    "{}\n      {}",
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.group_no_from"), &[("id", &g.id)]),
+                    crate::i18n::say(ctx.lang(), "mv.group_no_from_how"),
+                ),
+                super::code::BAD_STATUS,
+            ));
         }
         let by = who?;
         let mut m = Moved::default();
@@ -177,16 +190,20 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             .filter(|g| m.read.contains_key(&g.id) && crate::report::has_finished_member(issues, g))
             .map(|g| g.id.clone())
             .collect();
-        // 이로써 풀린 일. 옮긴 것이 없으면 풀린 것도 없다. 판단은 `report` 가 한다.
+        // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
         if let Some(before) = before.filter(|_| !m.done.is_empty()) {
-            m.unblocked = crate::report::unblocked(&before, issues, cfg).into_iter().cloned().collect();
+            let closed: Vec<&str> = m.done.iter().map(|(i, _)| i.id.as_str()).collect();
+            let opened = crate::report::freed(&before, issues, cfg, &closed);
+            m.unblocked = opened.unblocked.into_iter().cloned().collect();
+            m.closable = opened.closable.into_iter().cloned().collect();
+            m.next = opened.next.into_iter().cloned().collect();
         }
         Ok((entries, m))
     })?;
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {id} 를 못 찾았다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
@@ -194,7 +211,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 터미널에서 한 줄이 두 번 떴다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {id} 는 이미 {now} 다 — 안 옮겼다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.stale"), &[("id", id), ("now", now)]));
     }
 
     if ctx.json {
@@ -222,6 +239,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             /// 이로써 집을 수 있게 된 일. **늘 싣는다** — 없으면 `[]`. 다른 목록 키와 같은
             /// 모양이라 받는 쪽이 키가 있는지 가르지 않는다.
             unblocked: Vec<super::Row<'a>>,
+            /// 이제 닫을 수 있게 된 부모. `unblocked` 와 같은 약속으로 **늘 싣는다**.
+            closable: Vec<super::Row<'a>>,
+            /// 같은 에픽에서 다음에 집을 것. `unblocked` 와 같은 약속으로 **늘 싣는다**.
+            next: Vec<super::Row<'a>>,
         }
         return super::json_line(&Out {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
@@ -236,6 +257,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .map(|(id, col)| Stands { id, derived_status: col })
                 .collect(),
             unblocked: moved.unblocked.iter().map(|i| super::Row::of(i, None)).collect(),
+            closable: moved.closable.iter().map(|i| super::Row::of(i, None)).collect(),
+            next: moved.next.iter().map(|i| super::Row::of(i, None)).collect(),
         });
     }
 
@@ -256,11 +279,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         })
         .collect();
     for id in &moved.already {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &format!("이미 {to} 다"))
-        ));
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "mv.already"), &[("to", to.as_str())]);
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
@@ -270,7 +290,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             paint(style::ID, id),
             paint(
                 style::DIM,
-                &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id))
+                &crate::view::group_moved(id, col, to.is_done(), moved.finished.contains(id), ctx.lang())
             )
         ));
     }
@@ -285,13 +305,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // `view::shelved_by` 하나다. 한때 제 줄 쪽 안내만 id 없는 `moai defer --undo`
     // 를 대, 그대로 치면 clap 이 인자가 없다며 거절했다.
     for (id, root) in &moved.shelved {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &crate::view::shelved_by(root))
-        ));
+        let said = crate::view::shelved_by(root, ctx.lang());
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
-    // **이로써 풀린 일은 한 줄.** 없으면 말하지 않는다 — 출력이 전과 같다.
-    out.extend(crate::view::unblocked_line(&moved.unblocked));
+    // **이 쓰기가 연 것은 한 줄씩.** 없으면 말하지 않는다 — 출력이 전과 같다.
+    out.extend(crate::view::freed_lines(&moved.unblocked, &moved.closable, &moved.next, ctx.lang()));
     Ok(out)
 }

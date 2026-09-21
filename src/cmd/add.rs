@@ -95,7 +95,7 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 }
 
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     if let Some(from) = &args.from {
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
         // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른
@@ -159,21 +159,18 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             super::code::BAD_INPUT,
         ));
     }
-    let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
-    else {
-        return Err(Fail::new(
-            "제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다",
-        ));
+    let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
+        return Err(Fail::new("제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다"));
     };
     super::refuse_if_flag_like(&title)?;
     let body = read_body(args.body)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
-    let status = Status::new(
-        args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()),
-    );
+    let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
     // 오류 메시지에 실려 나가고, 받는 쪽은 그게 만들어진 줄 안다.
-    repo.config.require_known(status.as_str()).map_err(|e| Fail::coded(e, super::code::BAD_STATUS))?;
+    repo.config
+        .require_known(status.as_str())
+        .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
@@ -250,10 +247,18 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 ///
 /// 하나씩 만들면 에이전트가 중간에 흘리고, 중간에 죽으면 반만 남은 계획이
 /// 남는다. 한 번의 쓰기라 다 되거나 하나도 안 된다.
-fn bulk(ctx: &Ctx, repo: &Repo, from: &str, vars: &[String], dry_run: bool, assignee: Option<String>) -> R<Vec<String>> {
+fn bulk(
+    ctx: &Ctx,
+    repo: &Repo,
+    from: &str,
+    vars: &[String],
+    dry_run: bool,
+    assignee: Option<String>,
+) -> R<Vec<String>> {
     let drafts = read_plan(from, vars, draft::Shape::Plan)?;
 
     if dry_run {
+        check_plan(&drafts)?;
         if ctx.json {
             return json_rehearsal(&drafts, None, None);
         }
@@ -353,6 +358,29 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
     format!("{indent}{head}  {mark}  {}{tags}", d.title).trim_end().to_string()
 }
 
+/// 계획의 제목들이 상한 안인가 — **연습이 진짜와 같은 것을 보게 하는 자**(moai-5229).
+///
+/// 연습은 사람이 "좋다" 하는 자리다(AGENTS.md 갈림길 3). 크기를 안 재던 판은 66KB 계획에 0 으로
+/// 끝나며 `만들 것` 을 찍고, 같은 부름을 진짜로 하면 거절했다 — 승인한 뒤에 도구가 거절하는 꼴이다.
+///
+/// 재는 자는 진짜와 **한 자리**다([`crate::model::check_text_size`]). 여기에 따로 적으면 상한이
+/// 두 곳에 서고, 한쪽만 고치는 날 이 어긋남이 그대로 돌아온다. 가리키는 말도 같다 —
+/// 연습에도 진짜에도 아직 id 가 없다.
+///
+/// **여기서 거른다고 연습과 진짜가 같아진 것은 아니다.** 진짜는 `store::with_write` 에서
+/// `Issue::validate` 도 지나고 사람 이름도 푼다 — 쉼표가 든 태그(`#bug,perf`)나 git 사용자 정보가
+/// 없는 기계는 아직 연습을 지나 진짜에서 거절당한다. 그 자리를 닫는 길은 검사를 하나씩 옮겨
+/// 적는 것이 아니라 초안을 **id 를 뽑기 전에** 이슈로 빚어 한 번에 재는 것이다.
+pub fn check_plan(drafts: &[Draft]) -> R<()> {
+    for d in drafts {
+        // 가리키는 낱말도 진짜와 한 자리다 — `store::with_write` 가 같은 자리에서 `"title"` 을 준다.
+        // 한글로 두던 판은 영어로 옮긴 거절문 안에 낱말 하나만 한국어로 남아, 연습과 진짜가 같은
+        // 칸을 다른 이름으로 불렀다(리뷰).
+        crate::model::check_text_size(|| crate::model::unwritten(&d.title), "title", &d.title)?;
+    }
+    Ok(())
+}
+
 /// 연습의 기계 출력. **`--dry-run` 도 `--json` 을 지킨다** — 연습은 계획을
 /// 미리 보는 자리인데 거기서만 사람 글이 나오면, 미리 보는 쪽은 파싱에
 /// 실패하고 결국 진짜로 만들어 보고서야 계획을 읽는다.
@@ -406,9 +434,7 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&st
                 // 견주는 쪽이 안 적힌 값을 기본값으로 읽는다.
                 // 안 적혔을 때만 종류를 본다: 우선순위가 없는 종류에 기본값을
                 // 씌우면 에픽이 `p2` 인 줄 안다.
-                priority: d
-                    .priority
-                    .or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
+                priority: d.priority.or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
                 tags: &d.tags,
                 epic: d.epic,
             })

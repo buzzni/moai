@@ -10,10 +10,12 @@ pub mod hook;
 pub mod idea;
 pub mod init;
 pub mod link;
+pub mod merge_driver;
 pub mod mv;
 pub mod note;
-pub mod read;
+pub mod prime;
 pub mod project;
+pub mod read;
 pub mod ready;
 pub mod rm;
 pub mod show;
@@ -24,6 +26,7 @@ pub mod tui;
 use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed};
 use crate::model::Kind;
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use crate::fail::{Fail, R, code};
@@ -36,6 +39,54 @@ pub struct Ctx {
     /// `-C` 로 자리를 옮겨 불렀는가. 그러면 부른 사람의 셸은 여기가 아니다 — 부른 자리에서
     /// 도는 명령(`init`)을 일러 줄 때 `-C <뿌리>` 를 붙여야 엉뚱한 자리에 심지 않는다.
     pub chdir: bool,
+    /// 사용자 설정 — **한 판에 한 번만 읽는다**([`Ctx::registry`]).
+    reg: OnceLock<crate::user_config::Registry>,
+    /// 이 판의 화면 언어 — 설정에서 한 번 푼 값([`Ctx::lang`]).
+    lang: OnceLock<crate::i18n::Lang>,
+}
+
+impl Ctx {
+    pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
+        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new() }
+    }
+
+    /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
+    /// 화면 언어도 같은 파일에서 오는데, 읽는 자리가 갈리면 한 번 부를 때 같은 TOML 을 두 번
+    /// 판다. 그리는 쪽이 제 손으로 다시 읽던 자리(`i18n::current`)를 걷어낸 것이 이 문이다.
+    ///
+    /// **아직 유일한 문은 아니다**(리뷰) — `cmd::tui` 는 제 손으로 `user_config::read` 를 불러
+    /// 층과 보기를 짓는데, 같은 판에서 `ctx.lang()` 도 부르므로 그 명령은 같은 파일을 두 번 판다.
+    /// 옮길 자리다. `cmd::project::ls` 와 `cmd::read` 는 `ctx.lang()` 이 들면서 이 문으로 왔다 —
+    /// **말을 들이는 명령은 설정도 이 문으로 읽는다**, 안 그러면 두 번 판다.
+    pub fn registry(&self) -> &crate::user_config::Registry {
+        self.reg.get_or_init(|| crate::user_config::read(crate::user_config::path().as_deref()))
+    }
+
+    /// 이 판의 화면 언어. **명령 층이 한 번 풀어 그리는 쪽에 준다**(moai-cigu) — `view` 는
+    /// 이것을 인자로 받고 설정을 안 읽는다. 그래야 그리는 시험이 돌리는 사람의 진짜
+    /// `~/.config/moai/config.toml` 을 안 읽는다(옛 자리는 기계마다 다른 시험이었다).
+    ///
+    /// **늦게 읽는다.** 언어가 드는 자리는 `status`·`ready` 와 훅이 세션에 싣는 보드
+    /// (`cmd::hook`)뿐인데 `run` 에서 미리 풀면 `moai add` 한 줄에도 설정 파일이 딸려 온다.
+    ///
+    /// **[`Ctx::registry`] 를 `get_or_init` 안에서 부르는 것은 자물쇠가 둘이라서다**(리뷰
+    /// moai-80qw 가 옛 `i18n::picked` 에 적어 둔 덫). 설정을 읽는 길(`user_config::read` →
+    /// `Doc::lang`)은 제 글자를 화면에 내는 자리라, 그 글자가 언젠가 이 말로 나가려고
+    /// `Ctx::lang` 을 도로 부르면 `lang` 의 `OnceLock` 이 제 초기화 안에서 다시 열린다 —
+    /// 재진입은 영영 안 풀리고 모든 명령이 아무 말 없이 멈춘다. 그 줄을 쓰게 되는 날에는
+    /// 값을 **먼저 길어 놓고** `get_or_init` 에 넣는다. 옛 자리가 그렇게 썼던 까닭이다.
+    pub fn lang(&self) -> crate::i18n::Lang {
+        *self.lang.get_or_init(|| lang_of(self.registry()))
+    }
+}
+
+/// 이미 읽어 든 설정에서 화면 말을 고른다 — [`Ctx::lang`] 과 **같은 자**다. 제 손으로
+/// `user_config::read` 를 부르는 길(`cmd::tui::outside`)이 말을 물으려고 `ctx.lang()` 을 부르면
+/// [`Ctx::registry`] 가 같은 파일을 한 번 더 읽는다(moai-u8cs 가 걷어 낸 바로 그것이다). 고르는
+/// 규칙을 두 벌로 적지 않으려고 여기 한 자리에 둔다.
+pub fn lang_of(reg: &crate::user_config::Registry) -> crate::i18n::Lang {
+    let env = std::env::var("MOAI_LANG").ok();
+    crate::i18n::pick(env.as_deref(), reg.lang.as_deref())
 }
 
 /// 할 수 있는 것은 다 하고, 된 것과 안 된 것을 둘 다 보고한 뒤 비영 종료한다.
@@ -67,10 +118,12 @@ pub fn had_partial() -> bool {
 /// 깃발은 안 세운다. 옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면
 /// 제 파일은 멀쩡한데 도구가 실패로 읽힌다. 제 파일의 못 읽는 줄은 전과 같이
 /// `load.errors` 에 남아 부르는 쪽이 제 길로 알린다.
-pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
+/// **말은 여기서 고른다**(moai-dpbi) — `worktree::gather` 는 자료만 낸다(`worktree::Trouble`).
+/// 이 줄은 `moai status` 의 첫 화면 곁에 서므로, 그 화면과 같은 말이어야 한다.
+pub fn gather(ctx: &Ctx, repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
     let g = crate::worktree::gather(repo, worktree)?;
     for t in g.unfound.iter().chain(&g.trouble) {
-        eprintln!("{t}");
+        eprintln!("{}", crate::view::trouble_line(ctx.lang(), t));
     }
     Ok(g)
 }
@@ -87,64 +140,93 @@ pub fn gather(repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::G
 /// `worktree` 면 프로젝트마다 옆 워크트리를 겹친다. 옆에서 만난 문제는 stderr 가 아니라
 /// 그 프로젝트의 줄(`Project::trouble`)이 말한다 — 여럿을 한 번에 보는 화면에서 stderr 의
 /// 한 줄은 어느 프로젝트의 것인지 모른다.
-pub fn registered(worktree: bool) -> R<(crate::user_config::Registry, Vec<crate::projects::Project>)> {
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry, Vec<crate::projects::Project>)> {
+    let reg = ctx.registry();
     if reg.projects.is_empty() {
-        return Err(nothing_registered(&reg));
+        return Err(nothing_registered(reg, ctx.lang()));
     }
-    let projects = crate::projects::open_with(&reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree);
     Ok((reg, projects))
+}
+
+/// 이 명령이 설 저장소 — `.moai/` 를 가진 디렉터리를 위로 찾는다([`crate::store::Repo::find`]).
+///
+/// **못 찾았다는 말은 이 층이 짓는다**(moai-5j49, 2026-09-21 사용자 결정). 저장 계층은 화면 말을
+/// 모른 채 둔다(2026-09-20) — 거기서 글을 지으면 `Repo::find_from` 과 `with_write` 의 서명에 화면
+/// 말이 번지고, 설정 없이 도는 머지 드라이버까지 닿는다. 그래서 찾기만 저쪽에 두고 말은 여기서 짓는다.
+///
+/// **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** — 등록한 프로젝트를 한눈에 보는 `status` 에
+/// 익은 사람은 `.moai` 밖에서 `add`·`mv` 도 될 줄 알고, 쓰는 명령은 어느 프로젝트인지 모르니
+/// 멈추는 것이 맞다(moai-6au6).
+///
+/// **[`nothing_registered`] 와 같은 키를 쓴다** — 등록한 것이 없는 판은 그 줄 밑에 한 줄을 더
+/// 얹을 뿐이라, 두 자리가 앞줄을 달리 말하면 같은 처지가 두 글로 선다.
+///
+/// **말은 [`Ctx`] 째로 받아 닫힘 안에서 푼다**(리뷰) — `lang` 을 인자로 받으면 러스트가 부름
+/// **앞에서** 그것을 셈해, 찾기가 이기는 판(= 거의 모든 판)에도 [`Ctx::lang`] 이 사용자 설정을
+/// 열어 파싱한다. 그 자리가 [`Ctx::lang`] 의 "늦게 읽는다" 와 `mv`·`defer`·`edit` 이 저마다
+/// 적어 둔 "말은 거절할 때만 푼다" 가 막던 바로 그것이다 — 이 문 하나가 열한 명령을 한꺼번에
+/// 그쪽으로 끌고 간다. 닫힘 안이면 `.moai` 를 못 찾은 판에서만 푼다.
+pub fn open_repo(ctx: &Ctx) -> R<crate::store::Repo> {
+    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
 }
 
 /// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
 /// 같은 말을 내고 0 으로 끝난다(moai-ynsb).
 /// 화면의 `tui` 는 멈추지 않고 빈 층에서 `SPC p a` 를 댄다(moai-r8kl).
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
-pub fn nothing_registered(reg: &crate::user_config::Registry) -> Fail {
+pub fn nothing_registered(reg: &crate::user_config::Registry, lang: crate::i18n::Lang) -> Fail {
+    // **한 덩이가 한 말로 선다**(moai-5j49) — 앞줄이 `store` 의 것이라 한국어로 서던 자리다.
+    // 이제 둘 다 말묶음에서 오고, 앞줄은 [`open_repo`] 가 홀로 쓸 때와 **같은 키**다.
     let mut msg = format!(
-        "{}\n등록한 프로젝트도 없다 — `moai project add <dir>` 로 더하면 `.moai` 밖에서 한눈에 본다",
-        crate::store::NOT_A_REPO
+        "{}\n{}",
+        crate::i18n::say(lang, "refuse.not_a_repo"),
+        crate::i18n::say(lang, "opening.nothing_registered")
     );
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
-    for p in &reg.problems {
-        msg.push_str(&format!("\n{}", crate::text::one_line(p)));
+    // **읽는 문은 [`crate::view::settings_problems`] 하나다**(리뷰) — 화면 말의 탈은 `problems` 가
+    // 아니라 `lang_problems` 에 자료로 서므로(moai-dpbi), `reg.problems` 를 그냥 훑으면 `lang` 오타가
+    // 이 줄에서만 조용히 사라진다.
+    for p in crate::view::settings_problems(reg, lang) {
+        msg.push_str(&format!("\n{}", crate::text::one_line(&p)));
     }
     Fail::new(msg)
 }
 
 /// 읽다 만난 잘못된 줄을 stderr 로 알린다. 결과는 그대로 낸다.
-pub fn report_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
+pub fn report_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors: &[crate::store::LoadError]) {
     if errors.is_empty() {
         return;
     }
     note_partial();
-    name_load_errors(path, errors);
+    name_load_errors(lang, path, errors);
 }
 
 /// 같은 말을 하되 **부분 실패 깃발은 안 세운다.** 읽기가 답을 덜 낸 자리
 /// (`show`·`ready`)는 비영 종료가 맞지만, 쓰기와 짝을 이루는 자리(`promote`
 /// 의 연습)는 진짜 실행이 그 줄 때문에 멈추지 않으므로 연습만 실패로 끝나면
 /// 안 된다 — 그것을 거절로 읽은 쪽은 도구가 기꺼이 해 줄 계획을 버린다.
-pub fn name_load_errors(path: &std::path::Path, errors: &[crate::store::LoadError]) {
+///
+/// **이 줄도 말묶음에서 온다**(moai-dpbi 리뷰) — 바로 곁에서 `gather` 가 옆 워크트리의 같은
+/// 사실을 고른 말로 내므로(`cmd::gather`), 여기만 한국어면 한 명령의 stderr 가 두 말로 선다.
+pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors: &[crate::store::LoadError]) {
+    use crate::i18n::{fill, say};
     if errors.is_empty() {
         return;
     }
-    eprintln!(
-        "{}: 읽을 수 없는 줄 {}개",
-        path.display(),
-        errors.len()
-    );
+    let at = path.display().to_string();
+    eprintln!("{}", fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
     for e in errors.iter().take(5) {
-        eprintln!("  {}줄: {}", e.line, e.message);
+        eprintln!("{}", fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("why", &e.message)]));
     }
     if errors.len() > 5 {
-        eprintln!("  … {}개 더", errors.len() - 5);
+        eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(errors.len() - 5).to_string())]));
     }
 }
 
 pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx { json: cli.json, user: cli.user, chdir: cli.dir.is_some() };
+    let ctx = Ctx::new(cli.json, cli.user, cli.dir.is_some());
     let Some(cmd) = cli.cmd else {
         return opening(&ctx);
     };
@@ -152,15 +234,19 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
         Cmd::Init { check: true, .. } => init::check(&ctx),
+        // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
+        Cmd::Init { print: true, .. } => init::print(&ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, check: false } => init::run(&ctx, prefix.as_deref(), no_agents),
+        Cmd::Init { prefix, no_agents, check: false, print: false } => init::run(&ctx, prefix.as_deref(), no_agents),
         Cmd::Hook { event } => hook::run(&ctx, event),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => {
-            skill::install(&ctx, scope.as_str(), dry_run)
-        }
+        // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
+        // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
+        // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
+        Cmd::MergeDriver(a) => merge_driver::run(&ctx, a),
+        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(&ctx, scope.as_str(), dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
         Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
-        // 저장소가 아니라 사람의 설정을 고친다 — `Repo::discover` 를 안 지나므로
+        // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),
@@ -176,13 +262,15 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
         Cmd::Defer(a) => defer::run(&ctx, a),
         Cmd::Read(a) => read::run(&ctx, a),
         Cmd::Ready(w) => ready::run(&ctx, w.worktree),
+        Cmd::Prime(w) => prime::run(&ctx, w.worktree),
         Cmd::Status(w) => status::run(&ctx, w.worktree),
         Cmd::Tui(a) => tui::run(&ctx, a),
         Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
-        Cmd::Idea(IdeaCmd::Add(a)) => add::run(&ctx, a, Some(Kind::Idea)),
-        Cmd::Idea(IdeaCmd::Show(a)) => show::run(&ctx, a, Some(Kind::Idea)),
+        // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
+        // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(&ctx, t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
     }
 }
@@ -204,24 +292,24 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     // 같은 말·같은 종료 코드로 그 설정을 댄다. 도움말로 접으면 "아직 moai 저장소가 아니다"
     // 를 믿은 사람이 제 저장소에 `init` 을 다시 친다 (moai-byih).
     let outside = matches!(found, Ok(None));
-    let reg = outside.then(|| crate::user_config::read(crate::user_config::path().as_deref()));
-    let registered = reg.as_ref().is_some_and(|r| !r.projects.is_empty());
+    let reg = outside.then(|| ctx.registry());
+    let registered = reg.is_some_and(|r| !r.projects.is_empty());
     if outside && !registered {
         let mut help = Vec::new();
-        crate::cli::Cli::command()
-            .write_help(&mut help)
-            .map_err(|e| Fail::new(e.to_string()))?;
-        let mut out: Vec<String> =
-            String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
+        crate::cli::Cli::command().write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
+        let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
-        out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
-        out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
+        // **이 에픽이 내건 첫 화면이 이것이다**(리뷰 moai-hom6.qd9 4번). `.moai` 밖에서 맨 `moai` 를
+        // 친 사람이 가장 먼저 읽는 두 줄인데, 앞의 도움말이 영어로 선 채 여기만 한국어였다.
+        // 말은 이미 위에서 설정을 연 판이라(`ctx.registry()`) 새로 여는 것이 없다.
+        out.push(crate::i18n::say(ctx.lang(), "opening.not_a_repo_yet").to_string());
+        out.push(crate::i18n::say(ctx.lang(), "opening.register_to_view").to_string());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
         // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready` 는 이미 이 줄을 대고
         // (`nothing_registered`), `tui --json` 은 `problems` 에 싣는다. 도움말 자리라 종료 코드는 그대로 0 이다.
-        for p in reg.iter().flat_map(|r| &r.problems) {
-            out.push(crate::style::paint(crate::style::WARN, &format!("! {}", crate::text::one_line(p))));
+        for p in reg.iter().flat_map(|r| crate::view::settings_problems(r, ctx.lang())) {
+            out.push(crate::style::paint(crate::style::WARN, &format!("! {}", crate::text::one_line(&p))));
         }
         return Ok(out);
     }
@@ -232,14 +320,16 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     }
     out.push(String::new());
     let here = !registered && std::path::Path::new("AGENTS.md").exists();
-    out.push(crate::style::paint(
-        crate::style::DIM,
-        if here {
-            "명령: `moai --help`   ·   이 저장소에서 일하는 법: AGENTS.md"
-        } else {
-            "명령: `moai --help`"
-        },
-    ));
+    // **이 꼬리도 말묶음에서 온다**(리뷰) — 바로 위의 `status` 가 통째로 제 말로 나오는데
+    // 여기만 한국어로 박혀 있으면, 세션이 가장 많이 치는 맨몸 `moai` 의 **마지막 줄**이
+    // 화면과 다른 말로 선다. **키가 둘인 것은 AGENTS.md 를 댈지 말지가 여기서 정하는
+    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.idea_pile` 과 같다).
+    let lang = ctx.lang();
+    let tail = match here {
+        true => crate::i18n::say(lang, "opening.commands_here"),
+        false => crate::i18n::say(lang, "opening.commands"),
+    };
+    out.push(crate::style::paint(crate::style::DIM, tail));
     Ok(out)
 }
 
@@ -284,9 +374,7 @@ pub fn refuse_if_flag_like(title: &str) -> R<()> {
 /// 키가 알파벳 순으로 재배열되고, 그러면 파일과 `--json` 이 서로 다른 순서를
 /// 말한다. 눈으로 훑을 때 `id` 가 줄 가운데에 있는 것도 그 탓이다.
 pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
-    serde_json::to_string(v)
-        .map(|s| vec![s])
-        .map_err(|e| Fail::new(e.to_string()))
+    serde_json::to_string(v).map(|s| vec![s]).map_err(|e| Fail::new(e.to_string()))
 }
 
 /// 이슈 한 줄의 기계 출력. 묶음이면 **멤버에서 읽은 칸**을 `derived_status` 로
@@ -428,16 +516,26 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 /// 전체가 아니라 **바뀐 줄만** 검사하는 것과도 같은 자다.
 ///
 /// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
-pub fn check_from(from: Option<&str>, issues: &[crate::model::Issue], cfg: &crate::config::Config) -> R<()> {
+///
+/// **말이 아니라 자료를 낸다**(리뷰) — 글을 여기서 지으면 부르는 쪽이 `ctx.lang()` 을 인자로
+/// 넘겨야 하고, 인자는 락 **안에서** 먼저 셈해진다. [`Ctx::lang`] 의 첫 부름은 사용자 설정을
+/// 열어 파싱하므로, 오타가 없는 판까지 트래커 락을 쥔 채 남의 파일을 읽게 된다 — `model::actor`
+/// 를 락 밖으로 뺀 것과 같은 까닭이다(`cmd/mv.rs`). 거절할 때만 펴면 그 일이 아예 안 난다.
+pub fn check_from(
+    from: Option<&str>,
+    issues: &[crate::model::Issue],
+    cfg: &crate::config::Config,
+) -> Result<(), crate::config::NoSuchColumn> {
     // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
     // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
     let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
-    Err(Fail::coded(unknown_column(f, cfg), code::BAD_STATUS))
+    Err(unknown_column(f, cfg))
 }
 
-/// 모르는 칸을 댈 때의 한 줄 — 쓰기도 읽기도 같은 말을 한다.
-pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> String {
-    format!("`{name}` 라는 칸이 없고 거기 선 줄도 없다. 있는 칸: {}", cfg.statuses.join(", "))
+/// 줄까지 보고도 모르는 칸 — 쓰기도 읽기도 **같은 자료**를 낸다(moai-fdk7). 글은
+/// [`crate::view::no_such_column`] 이 짓는다.
+pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config::NoSuchColumn {
+    crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
@@ -541,10 +639,7 @@ pub fn stale(rows: &[(String, String)]) -> Vec<Stale<'_>> {
 
 /// (줄, 풀어야 할 미룸 전부 — 가까운 것부터).
 pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
-    pairs
-        .iter()
-        .map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots })
-        .collect()
+    pairs.iter().map(|(id, roots)| Shelved { id, root: roots.first().map_or("", String::as_str), roots }).collect()
 }
 
 #[cfg(test)]
@@ -553,7 +648,8 @@ mod tests {
     use crate::model::{Issue, Kind, Status};
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {
-        let mut i = Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
+        let mut i =
+            Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
         for (k, v) in rest {
             i.rest.insert(k.to_string(), serde_json::Value::String(v.to_string()));
         }
@@ -564,7 +660,12 @@ mod tests {
     /// 않는 모르는 필드와 곁들인 `derived_status` 는 그대로 남는다.
     #[test]
     fn every_appended_key_wins_over_an_unknown_field_and_nothing_else_is_lost() {
-        let i = row_with(&[("members", "가짜"), ("shelved_by", "가짜"), ("duplicate_lines", "가짜"), ("due", "2026-10-01")]);
+        let i = row_with(&[
+            ("members", "가짜"),
+            ("shelved_by", "가짜"),
+            ("duplicate_lines", "가짜"),
+            ("due", "2026-10-01"),
+        ]);
         let row = Row::of(&i, Some("in_progress"));
         let extra = [
             ("members", "[]".to_string()),

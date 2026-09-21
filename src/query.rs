@@ -50,8 +50,19 @@ impl<'a> Where<'a> {
     /// 서로의 재료라, 따로 부르면 `groups` 만 서너 번 돈다. 이미 잰 것을 든 쪽(탐색기의 `tui::Ground`)은
     /// 이것을 안 부르고 제 지도를 빌려 **필드 이름으로** 짓는다(moai-fbdg) — 같은 타입의 지도가 넷이라
     /// 차례로 넘기면 `states` 와 `since` 가 바뀌어도 컴파일된다.
+    // 바이너리는 지도를 든 [`Where::from_soil`] 을 부른다(moai-g0zx) — 이 꼴은 시험의 짧은 길이다.
+    #[cfg(test)]
     pub fn of(all: &'a [Issue], cfg: &'a crate::config::Config) -> Where<'a> {
-        let soil = crate::report::Soil::of(all);
+        Where::from_soil(all, cfg, crate::report::Soil::of(all))
+    }
+
+    /// [`Where::of`] 와 같은 것. **이미 잰 지도를 받는다** — `moai show --tree` 는 같은 명령 안에서
+    /// 색인(`nav::Index`)과 에픽 굴림도 지으므로, 저마다 재면 `groups` 가 세 벌 돈다(moai-g0zx).
+    ///
+    /// **지도를 통째로 받는다**(`&Soil` 이 아니다) — 거름망은 그 지도를 제 필드로 들고 사는데,
+    /// 빌려 받으면 그 지도가 사는 동안 거름망도 거기 매인다. 받은 쪽이 옮겨 담는 것은 한 번이고,
+    /// 부르는 쪽은 색인처럼 지도를 먼저 쓰는 것을 다 쓴 뒤에 이것을 짓는다.
+    pub fn from_soil(all: &'a [Issue], cfg: &'a crate::config::Config, soil: crate::report::Soil<'a>) -> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
@@ -204,10 +215,8 @@ fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String
 }
 
 /// 있는 필터 항목. 모르는 키를 만나면 이 목록을 그대로 보여준다.
-pub const KEYS: &[&str] = &[
-    "status", "tag", "no-tag", "epic", "milestone", "parent", "priority", "assignee", "type",
-    "grep", "stale",
-];
+pub const KEYS: &[&str] =
+    &["status", "tag", "no-tag", "epic", "milestone", "parent", "priority", "assignee", "type", "grep", "stale"];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
 ///
@@ -263,20 +272,14 @@ impl Filter {
         // 명령이 생각을 숨기면 세어 놓고 못 보여 주는 수가 된다 — `idea_pile`
         // 이 미뤄 둔 것을 빼서 피한 바로 그 덫이고, 여기서는 세는 쪽을 못
         // 좁히니(좁히면 미뤄 둔 에픽이 아무 데서도 안 보인다) 보는 쪽을 연다.
-        let ideas =
-            raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
+        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
         let deferred = raw.deferred.then_some(true);
         Ok(Filter {
             status: once(&raw.status, "-s", "상태")?,
-            tags: raw
-                .tag
-                .iter()
-                .map(|t| split_tags(t))
-                .filter(|v: &Vec<String>| !v.is_empty())
-                .collect(),
+            tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
             no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
             epic: sel(once(&raw.epic, "-e", "에픽")?),
             milestone: sel(once(&raw.milestone, "--milestone", "마일스톤")?),
@@ -368,7 +371,9 @@ impl Filter {
             let value = map.get(i.id.as_str()).copied();
             sel.is_empty()
                 || (!eclipsed
-                    && sel.iter().any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
+                    && sel
+                        .iter()
+                        .any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
         };
         if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
             return false;
@@ -430,10 +435,7 @@ fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
             "grep" => raw.grep = Some(v),
             "stale" => raw.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?),
             _ => {
-                return Err(format!(
-                    "`{k}` 라는 필터 항목이 없다.\n      있는 것: {}",
-                    KEYS.join(", ")
-                ));
+                return Err(format!("`{k}` 라는 필터 항목이 없다.\n      있는 것: {}", KEYS.join(", ")));
             }
         }
     }
@@ -452,10 +454,7 @@ fn split_tags(raw: &str) -> Vec<String> {
 
 /// 쉼표는 여기서도 또는이다. `none` 이 섞이면 "없는 것" 도 함께 고른다.
 fn sel(values: Vec<String>) -> Vec<Sel> {
-    values
-        .into_iter()
-        .map(|v| if v == "none" { Sel::Unset } else { Sel::Is(v) })
-        .collect()
+    values.into_iter().map(|v| if v == "none" { Sel::Unset } else { Sel::Is(v) }).collect()
 }
 
 /// 담당 한 항을 잰다. **맡길 때 쓴 문자열 그대로 찾을 수 있어야 한다** —
@@ -620,7 +619,10 @@ pub fn changed_since_seen(i: &Issue, seen: &BTreeMap<String, String>) -> bool {
 /// 하나만 바뀌어도 그 id 를 세우는데, 뒷줄 하나의 도장만 적으면 앞줄이 늘 더 늦어 [NEW] 가 영영 안
 /// 내리고 `moai read --all` 은 "적을 것이 없다" 만 되뇐다. 본 때를 적던 때는 그 때가 둘 다를 덮었다.
 /// 부르는 쪽은 id 로 거르지 말고 그 id 의 줄을 전부 넘긴다.
-pub fn read_marks_of<'a>(lines: impl IntoIterator<Item = &'a Issue>, seen: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+pub fn read_marks_of<'a>(
+    lines: impl IntoIterator<Item = &'a Issue>,
+    seen: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
     let mut marks: BTreeMap<String, String> = BTreeMap::new();
     for i in lines.into_iter().filter(|i| changed_since_seen(i, seen)) {
         match marks.get_mut(&i.id) {
@@ -650,7 +652,10 @@ fn caseless(a: &str, b: &str) -> std::cmp::Ordering {
     let same = |a: &str, b: &str| a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     if a.is_ascii() && b.is_ascii() {
         let n = same(a, b);
-        return a.as_bytes()[n..].iter().map(u8::to_ascii_lowercase).cmp(b.as_bytes()[n..].iter().map(u8::to_ascii_lowercase));
+        return a.as_bytes()[n..]
+            .iter()
+            .map(u8::to_ascii_lowercase)
+            .cmp(b.as_bytes()[n..].iter().map(u8::to_ascii_lowercase));
     }
     if a.contains('Σ') || b.contains('Σ') {
         return a.to_lowercase().cmp(&b.to_lowercase());
@@ -672,10 +677,12 @@ mod tests {
     #[test]
     fn unread_counts_what_came_to_me_and_changed_since_i_looked() {
         let at = |id: &str, who: Option<&str>, when: &str| {
-            let mut i = Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+            let mut i =
+                Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
             i.assignee = who.map(String::from);
             // 사람마다 제 메일 — 하나로 뭉뚱그리면 메일로 찾을 때 남의 줄까지 걸린다.
-            i.assignee_email = who.map(|w| if w == "레이븐" { "raven@buzzni.com" } else { "narae@buzzni.com" }.to_string());
+            i.assignee_email =
+                who.map(|w| if w == "레이븐" { "raven@buzzni.com" } else { "narae@buzzni.com" }.to_string());
             i.updated_at = when.to_string();
             i
         };
@@ -686,10 +693,10 @@ mod tests {
         member.epic = Some("a-0001".into());
         let issues = vec![
             epic,
-            member,                                   // 내 에픽의 멤버 — 남이 만들어도 내게 온 것
-            at("a-0002.rv", None, late),              // 그 줄의 리뷰(자식)
-            at("a-0003", Some("나래"), late),          // 남의 줄
-            at("a-0004", Some("레이븐"), early),       // 내 줄, 본 뒤로 안 바뀜
+            member,                              // 내 에픽의 멤버 — 남이 만들어도 내게 온 것
+            at("a-0002.rv", None, late),         // 그 줄의 리뷰(자식)
+            at("a-0003", Some("나래"), late),    // 남의 줄
+            at("a-0004", Some("레이븐"), early), // 내 줄, 본 뒤로 안 바뀜
         ];
         let seen: BTreeMap<String, String> =
             [("a-0001".to_string(), early.to_string()), ("a-0004".to_string(), early.to_string())].into();
@@ -723,9 +730,16 @@ mod tests {
         let columns = ["review", "todo", "done"];
         let statuses: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
         let sorted = |key, reversed| {
-            let mut idx = vec![0, 1, 2];
+            let mut idx = [0, 1, 2];
             idx.sort_by(|&x, &y| {
-                order_by(key, reversed, (&issues[x], columns[x]), (&issues[y], columns[y]), &statuses, crate::config::Naming::Full)
+                order_by(
+                    key,
+                    reversed,
+                    (&issues[x], columns[x]),
+                    (&issues[y], columns[y]),
+                    &statuses,
+                    crate::config::Naming::Full,
+                )
             });
             idx.iter().map(|&i| issues[i].id.as_str()).collect::<Vec<_>>()
         };
@@ -742,7 +756,9 @@ mod tests {
         mailed[1].assignee_email = Some("zed@example.com".into()); // 가람
         let by = |naming| {
             let mut idx = [0, 1];
-            idx.sort_by(|&x, &y| order_by(SortKey::Assignee, false, (&mailed[x], "todo"), (&mailed[y], "todo"), &statuses, naming));
+            idx.sort_by(|&x, &y| {
+                order_by(SortKey::Assignee, false, (&mailed[x], "todo"), (&mailed[y], "todo"), &statuses, naming)
+            });
             idx.map(|i| mailed[i].id.as_str())
         };
         assert_eq!(by(crate::config::Naming::Name), ["a-3", "a-1"]);
@@ -755,7 +771,9 @@ mod tests {
         (cased[1].title, cased[1].assignee) = ("apple".into(), Some("alice".into())); // a-3
         let by_key = |key| {
             let mut idx = [0, 1];
-            idx.sort_by(|&x, &y| order_by(key, false, (&cased[x], "todo"), (&cased[y], "todo"), &statuses, crate::config::Naming::Full));
+            idx.sort_by(|&x, &y| {
+                order_by(key, false, (&cased[x], "todo"), (&cased[y], "todo"), &statuses, crate::config::Naming::Full)
+            });
             idx.map(|i| cased[i].id.as_str())
         };
         assert_eq!(by_key(SortKey::Title), ["a-3", "a-1"], "제목이 대소문자를 접어 가나다로 안 섰다");
@@ -795,13 +813,8 @@ mod tests {
     }
 
     fn issue(id: &str, status: &str, tags: &[&str]) -> Issue {
-        let mut i = Issue::new(
-            id.into(),
-            format!("{id} 제목"),
-            Kind::Issue,
-            Status::new(status),
-            "2026-09-01T00:00:00Z",
-        );
+        let mut i =
+            Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new(status), "2026-09-01T00:00:00Z");
         i.tags = s(tags);
         i
     }
@@ -929,12 +942,7 @@ mod tests {
         let mut i = issue("a-0042", "todo", &["parser"]);
         i.title = "저장 계층".into();
         i.body = Some("원자적 쓰기".into());
-        let cases = [
-            ("0042", GrepIn::Id),
-            ("저장", GrepIn::Title),
-            ("pars", GrepIn::Tag),
-            ("원자", GrepIn::Body),
-        ];
+        let cases = [("0042", GrepIn::Id), ("저장", GrepIn::Title), ("pars", GrepIn::Tag), ("원자", GrepIn::Body)];
         for (q, only) in cases {
             let mut f = f();
             f.grep = Some(q.into());
@@ -1009,16 +1017,15 @@ mod tests {
     /// 한 뜻이라면 두 번 쓴 것을 나무라는 자리도 하나여야 한다.
     #[test]
     fn a_filter_string_stacks_with_the_flags_it_mirrors() {
-        let e = Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() })
-            .unwrap_err();
+        let e =
+            Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() }).unwrap_err();
         assert!(e.contains("동시에"), "{e}");
-        let e = Filter::build(Raw { filter: s(&["status=todo", "status=review"]), ..Raw::default() })
-            .unwrap_err();
+        let e = Filter::build(Raw { filter: s(&["status=todo", "status=review"]), ..Raw::default() }).unwrap_err();
         assert!(e.contains("동시에"), "{e}");
 
         // 태그는 쌓이는 쪽이라 둘 다 걸린다 (반복=그리고).
-        let f = Filter::build(Raw { tag: s(&["bug"]), filter: s(&["tag=parser"]), all: true, ..Raw::default() })
-            .unwrap();
+        let f =
+            Filter::build(Raw { tag: s(&["bug"]), filter: s(&["tag=parser"]), all: true, ..Raw::default() }).unwrap();
         assert!(hit(&f, &issue("a-0001", "todo", &["bug", "parser"])));
         assert!(!hit(&f, &issue("a-0002", "todo", &["bug"])));
 
@@ -1030,13 +1037,13 @@ mod tests {
     /// `--filter` 는 플래그와 정확히 같은 뜻이다.
     #[test]
     fn filter_string_equals_the_flags() {
-        let flags = Filter::build(Raw { status: s(&["todo"]), tag: s(&["bug"]), epic: s(&["none"]), ..Raw::default() }).unwrap();
-        let string = Filter::build(Raw { filter: s(&["status=todo", "tag=bug", "epic=none"]), ..Raw::default() }).unwrap();
-        for i in [
-            issue("a-0001", "todo", &["bug"]),
-            issue("a-0002", "review", &["bug"]),
-            issue("a-0003", "todo", &["perf"]),
-        ] {
+        let flags = Filter::build(Raw { status: s(&["todo"]), tag: s(&["bug"]), epic: s(&["none"]), ..Raw::default() })
+            .unwrap();
+        let string =
+            Filter::build(Raw { filter: s(&["status=todo", "tag=bug", "epic=none"]), ..Raw::default() }).unwrap();
+        for i in
+            [issue("a-0001", "todo", &["bug"]), issue("a-0002", "review", &["bug"]), issue("a-0003", "todo", &["perf"])]
+        {
             assert_eq!(hit(&flags, &i), hit(&string, &i), "{}", i.id);
         }
     }
@@ -1089,12 +1096,7 @@ mod tests {
         let mut i = issue("a-0001", "todo", &[]);
         i.assignee = Some("철수".into());
         i.assignee_email = Some("chulsu@example.com".into());
-        let f = Filter::build(Raw {
-            assignee: s(&["철수,other@example.com"]),
-            all: true,
-            ..Raw::default()
-        })
-        .unwrap();
+        let f = Filter::build(Raw { assignee: s(&["철수,other@example.com"]), all: true, ..Raw::default() }).unwrap();
         assert!(hit(&f, &i));
     }
 
@@ -1105,21 +1107,13 @@ mod tests {
         let mut i = issue("a-0001", "todo", &[]);
         i.assignee = Some("철수".into());
         i.assignee_email = Some("chulsu@example.com".into());
-        let f = Filter::build(Raw {
-            assignee: s(&["철수 (chulsu@example.com)"]),
-            all: true,
-            ..Raw::default()
-        })
-        .unwrap();
+        let f =
+            Filter::build(Raw { assignee: s(&["철수 (chulsu@example.com)"]), all: true, ..Raw::default() }).unwrap();
         assert!(hit(&f, &i));
 
         // 이름을 바꾼 사람도 옛 줄에서 사라지지 않는다 — 메일 한쪽만 맞아도 된다.
-        let f = Filter::build(Raw {
-            assignee: s(&["레이븐 (chulsu@example.com)"]),
-            all: true,
-            ..Raw::default()
-        })
-        .unwrap();
+        let f =
+            Filter::build(Raw { assignee: s(&["레이븐 (chulsu@example.com)"]), all: true, ..Raw::default() }).unwrap();
         assert!(hit(&f, &i));
     }
 
@@ -1129,12 +1123,7 @@ mod tests {
         let mut i = issue("a-0001", "todo", &[]);
         i.assignee = Some("철수".into());
         i.assignee_email = Some("Chulsu@Example.com".into());
-        let f = Filter::build(Raw {
-            assignee: s(&["chulsu@example.com"]),
-            all: true,
-            ..Raw::default()
-        })
-        .unwrap();
+        let f = Filter::build(Raw { assignee: s(&["chulsu@example.com"]), all: true, ..Raw::default() }).unwrap();
         assert!(hit(&f, &i));
     }
 
@@ -1167,11 +1156,7 @@ mod tests {
 
     #[test]
     fn sorting_puts_the_urgent_first_then_id() {
-        let mut v = vec![
-            issue("a-0003", "todo", &[]),
-            issue("a-0001", "todo", &[]),
-            issue("a-0002", "todo", &[]),
-        ];
+        let mut v = vec![issue("a-0003", "todo", &[]), issue("a-0001", "todo", &[]), issue("a-0002", "todo", &[])];
         v[0].priority = Some(0);
         sort_for_display(&mut v);
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
@@ -1236,7 +1221,11 @@ mod tests {
             i.milestone = m.map(Into::into);
             i
         };
-        let all = vec![stone("argos-m002", None), stone("argos-m001", Some("argos-m002")), issue("argos-m001.aa1", "todo", &[])];
+        let all = vec![
+            stone("argos-m002", None),
+            stone("argos-m001", Some("argos-m002")),
+            issue("argos-m001.aa1", "todo", &[]),
+        ];
         let cfg = cfg();
         let wh = Where::of(&all, &cfg);
         let picked = |m: &str| -> Vec<&str> {

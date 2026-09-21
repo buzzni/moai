@@ -8,9 +8,9 @@
 
 use super::{Ctx, R};
 use crate::model;
+use crate::projects::{Entry, Overview, Seen};
 use crate::report;
 use crate::store::Repo;
-use crate::projects::{Entry, Overview, Seen};
 use crate::view;
 
 /// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
@@ -25,7 +25,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find()? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, .. } = super::gather(&repo, worktree)?;
+    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =
+        super::gather(ctx, &repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
     // **그 줄이 쓰는 id** 까지 넘긴다 — id 가 있어야 산 줄과의 중복이
@@ -51,7 +52,17 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 자다. 트래커의 자리로 재던 판은 루트로 옮겨 간 워크트리 안에서 `status` 만 자리를 파, 같은
     // 자리에서 `show` 는 아무 말도 안 하는데 보드는 `자리 없다` 를 댔다(moai-6opu.p65 가 한 곳에
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now);
+    // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
+    // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
+    // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
+    let (lost, unread) = crate::worktree::stranded_at_in(
+        repo.here(),
+        &repo.config,
+        &load.issues,
+        swept,
+        &now,
+        &crate::worktree::dug(&sides, &mine),
+    );
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
     // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
@@ -77,12 +88,13 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **여기서 대는 것은 판정을 가렸는지와 상관없이 못 읽은 것 전부다**(사용자 결정 2026-09-18,
     // 리뷰 moai-rgz9.7vt). 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을 가리킨다는
     // 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은 `Unread::blinding`
-    // 이 따로 센다. 다만 **판 것 가운데** 다 — 이름만으로 자리가 다 잡히면 `workplaces` 가 옆
-    // 스냅샷을 아예 안 연다(moai-7igy 의 문, idea `moai-7p48`).
+    // 이 따로 센다. **판 것에 매이지 않는다**(moai-giz3) — 이름만으로 자리가 다 잡혀 스냅샷을
+    // 안 푸는 길에서도 `workplaces_in` 이 파일을 열어 보고 깨진 것을 세운다.
     let said_already = swept;
     if !said_already {
         for t in &unread.all {
-            eprintln!("옆 워크트리의 스냅샷을 못 읽었다 — ⎇ {}: {}", t.branch, t.path.display());
+            // 글은 `view` 한 자리에서 짓는다(moai-dpbi) — 밖 한눈 보기가 같은 줄을 낸다.
+            eprintln!("{}", view::unread_worktree(ctx.lang(), &t.branch, &t.path));
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
@@ -93,6 +105,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     st.notices.extend(crate::cmd::init::agents_notice(repo.here(), ctx.chdir));
     // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
     st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), ctx.chdir));
+    // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
+    // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
+    // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
+    st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
@@ -104,9 +120,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 뒤집는다(moai-cuw2). **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이라
     // `agents_stale` 과 같은 자리고, 종료 코드는 안 바뀐다. 말을 고를 때 이미 읽은 것이라
     // 설정을 다시 읽지 않는다.
-    let said = crate::i18n::problems();
-    for line in said {
-        eprintln!("{line}");
+    // 글은 말을 고른 뒤에 편다(moai-dpbi) — 설정을 읽는 길은 말을 모른다(`user_config::LangTrouble`).
+    let reg = ctx.registry();
+    let said = &reg.lang_problems;
+    for why in said {
+        eprintln!("{}", view::problem(ctx.lang(), reg.path.as_deref(), why));
     }
     if !said.is_empty() {
         st.notices.push(report::Warning::user_config(said.len()));
@@ -151,7 +169,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
         // 지도를 받아 "겹쳐 봤는데 옆에 아무것도 없다" 로 읽는다.
         if worktree {
-            extra.push(("branches", serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?));
+            extra.push((
+                "branches",
+                serde_json::to_string(&origin.branches()).map_err(|e| super::Fail::new(e.to_string()))?,
+            ));
         }
         if extra.is_empty() {
             return super::json_line(&st);
@@ -164,8 +185,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &repo.config,
         &now,
         &source_of(&repo),
-        &origin,
         trouble,
+        view::Screen::new(ctx.lang()).over(&origin),
     ))
 }
 
@@ -194,15 +215,18 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 말은 그대로 댄다: 저장소가 아니라는 것, 등록하는 길, 목록이 빈 까닭. `ready` 는
     // [`super::registered`] 로 여전히 멈춘다 — 그쪽 계약은 따로 정한다. `tui --json` 은 같은 객체로
     // 0 이다(moai-yxae).
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
+    let reg = ctx.registry();
     if reg.projects.is_empty() {
         if ctx.json {
-            let none: Overview<()> = Overview { projects: Vec::new(), problems: &reg.problems, config: reg.path.as_deref() };
+            // 설정의 탈은 **편 뒤에** 싣는다(moai-dpbi) — 화면과 같은 목록이다(`view::settings_problems`).
+            let problems = view::settings_problems(reg, ctx.lang());
+            let none: Overview<()> =
+                Overview { projects: Vec::new(), problems: &problems, config: reg.path.as_deref() };
             return super::json_line(&none);
         }
-        return Ok(super::nothing_registered(&reg).message.lines().map(str::to_string).collect());
+        return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
-    let projects = crate::projects::open_with(&reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree);
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
     // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는
@@ -249,8 +273,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         struct Said<'a> {
             status: &'a report::StatusReport,
             picked: Vec<super::Row<'a>>,
-            #[serde(skip_serializing_if = "<[String]>::is_empty")]
-            trouble: &'a [String],
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            trouble: Vec<String>,
             /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
             /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
             /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
@@ -271,14 +295,16 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 seen: s.map(|b| Said {
                     status: &b.status,
                     picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
-                    trouble: &p.trouble,
+                    // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
+                    trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                     unreadable_worktrees: &b.blind,
                     broken_worktrees: &b.unread,
                 }),
             })
             .collect();
-        let all = Overview { projects: entries, problems: &reg.problems, config: reg.path.as_deref() };
+        let problems = view::settings_problems(reg, ctx.lang());
+        let all = Overview { projects: entries, problems: &problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_status(&projects, &seen, &reg))
+    Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang())))
 }

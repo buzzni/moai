@@ -69,7 +69,9 @@ pub enum Act {
 }
 
 /// 빈 제목을 거절하는 말. 무엇을 하면 되는지까지 댄다.
-pub const EMPTY_TITLE: &str = "제목이 비었다 — 제목 한 줄이면 담긴다";
+pub fn empty_title(lang: crate::i18n::Lang) -> &'static str {
+    crate::i18n::say(lang, "tui.form.empty_title")
+}
 
 impl Form {
     /// 담을 곳을 박은 빈 폼.
@@ -106,7 +108,7 @@ impl Form {
     /// - **Esc** 닫기. 적던 것이 있으면 한 번 묻고, `y` 만 버린다. 다른 키는 폼으로
     ///   돌아가며 **글자로 들어가지 않는다** — 물음을 못 보고 친 글자가 엉뚱한 자리에
     ///   찍히면 안 된다
-    pub fn key(&mut self, k: KeyEvent) -> Act {
+    pub fn key(&mut self, k: KeyEvent, lang: crate::i18n::Lang) -> Act {
         if self.leaving {
             self.leaving = false;
             return match lookup(CONFIRM, &[k]) {
@@ -117,7 +119,7 @@ impl Form {
         // 키의 뜻은 표([`JOT`])에서 읽는다.
         let act = lookup(JOT, &[k]);
         match act {
-            Lookup::Run(Jot::Save) => return self.save(),
+            Lookup::Run(Jot::Save) => return self.save(lang),
             // 터미널에 따라 `Shift-Tab` 이 `BackTab` 으로도 Shift 붙은 `Tab` 으로도 온다 — 표가 한 줄로 받는다.
             Lookup::Run(Jot::Switch) => {
                 self.field = self.field.other();
@@ -166,9 +168,9 @@ impl Form {
         self.error = None;
     }
 
-    fn save(&mut self) -> Act {
+    fn save(&mut self, lang: crate::i18n::Lang) -> Act {
         if self.title().is_empty() {
-            self.error = Some(EMPTY_TITLE.into());
+            self.error = Some(empty_title(lang).into());
             self.field = Field::Title;
             return Act::Stay;
         }
@@ -181,8 +183,11 @@ mod tests {
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
+    /// 시험은 한국어로 잰다 — `ko` 표가 이 키들을 실제로 드는지도 함께 재는 자리다.
+    const KO: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
     fn press(f: &mut Form, code: KeyCode) -> Act {
-        f.key(KeyEvent::new(code, KeyModifiers::NONE))
+        f.key(KeyEvent::new(code, KeyModifiers::NONE), KO)
     }
 
     fn type_in(f: &mut Form, s: &str) {
@@ -198,9 +203,9 @@ mod tests {
         press(&mut f, KeyCode::Tab);
         type_in(&mut f, "본문");
         assert_eq!((f.title.text(), f.body.text().as_str(), f.field), ("제목", "본문", Field::Body));
-        f.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        f.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), KO);
         assert_eq!(f.field, Field::Title);
-        f.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+        f.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), KO);
         assert_eq!(f.field, Field::Body, "Shift 붙은 Tab 이 안 돌았다");
     }
 
@@ -222,20 +227,20 @@ mod tests {
         // F2 는 걷었다(moai-7sjm) — 제목이 있어도 아무 일도 없다.
         let mut f = Form::default();
         type_in(&mut f, "생각");
-        assert_eq!(f.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)), Act::Stay, "걷은 F2 가 담았다");
+        assert_eq!(f.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE), KO), Act::Stay, "걷은 F2 가 담았다");
         let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         let mut f = Form::default();
         press(&mut f, KeyCode::Tab);
         type_in(&mut f, "본문만");
-        assert_eq!(f.key(save), Act::Stay, "{save:?}: 빈 제목으로 담았다");
-        assert_eq!((f.error.as_deref(), f.field), (Some(EMPTY_TITLE), Field::Title), "{save:?}");
+        assert_eq!(f.key(save, KO), Act::Stay, "{save:?}: 빈 제목으로 담았다");
+        assert_eq!((f.error.as_deref(), f.field), (Some(empty_title(KO)), Field::Title), "{save:?}");
         // 빈칸뿐인 제목도 빈 제목이다
         type_in(&mut f, "   ");
-        assert_eq!(f.key(save), Act::Stay);
+        assert_eq!(f.key(save, KO), Act::Stay);
         // 치면 까닭이 걷힌다
         type_in(&mut f, "생각");
         assert_eq!(f.error, None, "치기 시작했는데 까닭이 남았다");
-        assert_eq!(f.key(save), Act::Save, "{save:?}");
+        assert_eq!(f.key(save, KO), Act::Save, "{save:?}");
         assert_eq!(f.title(), "생각");
     }
 
@@ -261,7 +266,11 @@ mod tests {
             press(&mut f, KeyCode::Esc);
             assert_eq!(press(&mut f, KeyCode::Esc), Act::Stay, "Esc 두 번에 버렸다");
             press(&mut f, KeyCode::Esc);
-            assert_eq!(f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)), Act::Stay, "Ctrl-Y 로 버렸다");
+            assert_eq!(
+                f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL), KO),
+                Act::Stay,
+                "Ctrl-Y 로 버렸다"
+            );
             press(&mut f, KeyCode::Esc);
             assert_eq!(press(&mut f, KeyCode::Char('y')), Act::Close);
         }
@@ -273,7 +282,7 @@ mod tests {
     /// 다른 키처럼 물음만 거두고 글은 안 넣는다.
     #[test]
     fn a_paste_stays_in_the_focused_field() {
-        let mut f = Form { error: Some(EMPTY_TITLE.into()), ..Form::default() };
+        let mut f = Form { error: Some(empty_title(KO).into()), ..Form::default() };
         f.paste("첫 줄\t이어서\n둘째 줄\n");
         assert_eq!((f.title.text(), f.body.text().as_str(), f.field), ("첫 줄 이어서 둘째 줄", "", Field::Title));
         assert_eq!(f.error, None, "붙였는데 까닭이 남았다");

@@ -1,6 +1,6 @@
 //! 등록한 프로젝트 목록을 고치고 본다 — `moai project add|ls|rm|color`.
 //!
-//! **저장소가 아니라 사람의 설정이다.** 그래서 `Repo::discover` 를 부르지 않고
+//! **저장소가 아니라 사람의 설정이다.** 그래서 `cmd::open_repo` 를 부르지 않고
 //! `.moai` 밖 어디서도 선다. 누가 했는지도 묻지 않는다 — 이력이 남는 파일이
 //! 아니라서, 사람을 모르는 기계에서 등록이 멈추면 도구가 고장 난 것으로 보인다.
 //!
@@ -20,9 +20,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config()?;
+    let config = writable_config(ctx)?;
     // 적는 길은 TUI 층의 `a` 와 하나다 — 링크 풀기·멱등·`.moai` 를 준 자리에서만 보기.
-    let projects::Added { path: dir, added, initialized, unreadable } = projects::add(&config, input, &cwd()?)?;
+    // **자리는 여는 자리에서 함께 세어 온다**(리뷰 10번) — 그리는 쪽이 다시 물으면 `Repo::open`
+    // 이 이미 푼 답을 더 무거운 자로 또 풀고, 그 값을 `project ls` 는 줄마다 치른다.
+    let projects::Added { path: dir, added, initialized, tracker_at, unreadable } =
+        projects::add(&config, input, &cwd(ctx.lang())?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -35,35 +38,70 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             /// **읽을 때는 키가 없다.** 늘 달면 전부터 내던 줄이 바뀐다.
             #[serde(skip_serializing_if = "Option::is_none")]
             error: Option<&'a str>,
+            /// `init` 이 여기 안 서는 딸린 워크트리면 **트래커가 설 주 체크아웃**(moai-nppo) —
+            /// 사람 줄이 대는 그 자리다. **아닐 때는 키가 없다**: 늘 달면 전부터 내던 줄이 바뀌고,
+            /// 있는 것 자체가 "여기에 `init` 하지 마라" 라 받는 쪽이 값을 또 가를 것이 없다.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tracker_at: Option<PathBuf>,
             config: &'a Path,
         }
         let error = unreadable.as_deref();
-        return super::json_line(&Out { path: &dir, added, initialized, error, config: &config });
+        return super::json_line(&Out { path: &dir, added, initialized, error, tracker_at, config: &config });
     }
 
     let shown = one_line(&dir.display().to_string());
-    let mut out = vec![if added {
-        format!("등록함  {shown}")
-    } else {
-        format!("{}  {shown}", paint(style::DIM, "이미 등록돼 있다"))
+    // **갈래마다 제 `say` 를 적되 갈림은 하나다** — 키를 고르는 `match` 와 칠하는 `match` 를
+    // 따로 두면 갈래가 하나 늘 때 한쪽만 고쳐진다(리뷰).
+    let mut out = vec![match added {
+        true => format!("{}  {shown}", crate::i18n::say(ctx.lang(), "project.added")),
+        false => format!("{}  {shown}", paint(style::DIM, crate::i18n::say(ctx.lang(), "project.already"))),
     }];
     // 한 줄은 `project ls` 의 끝 칸과 같은 말이다 — 두 화면이 같은 디렉터리를 달리 부르지 않는다.
     if let Some(error) = &unreadable {
-        out.push(format!("  {} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)));
+        let why = crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "overview.project_unreadable"),
+            &[("why", &one_line(error))],
+        );
+        out.push(format!("  {} {why}", paint(style::ERROR, "!")));
     }
     if !initialized {
-        out.push(paint(
-            style::DIM,
-            &format!("  init 전 — .moai 가 아직 없다. `moai -C {} init` 으로 시작하면 보인다", shell_word(&dir.display().to_string())),
-        ));
+        out.push(paint(style::DIM, &format!("  {}", uninit_line(&dir, tracker_at.as_deref(), ctx.lang()))));
     }
     Ok(out)
 }
 
+/// `init` 전인 한 줄. **딸린 워크트리면 여기가 아니라 주 체크아웃을 댄다**(moai-nppo).
+///
+/// 대던 `moai -C <여기> init` 은 그 자리에서 1 로 끝난다(moai-mz0e 가 거절을 세웠다) — 그러니
+/// 등록한 워크트리 한 줄은 영영 `init 전` 으로 서고, 사람이 그 줄을 따라 쳐도 아무것도 안 바뀌었다.
+///
+/// **대는 명령은 `init` 이 아니라 등록이다**(리뷰 5번). 여기서 자리가 서려면 주 체크아웃에 트래커가
+/// **이미** 있어야 하므로([`crate::worktree::tracker_root`]), `moai -C <주 체크아웃> init` 은 0 으로
+/// 끝나고 아무것도 안 바꾼다 — 그 줄을 대면 1 로 끝나던 명령이 "0 으로 끝나고 안 열린다" 로
+/// 바뀔 뿐이라 기계로 읽는 쪽에는 도리어 나쁘다. 이 줄이 열릴 길은 그쪽을 등록하는 것 하나다.
+///
+/// 빼는 것(`moai project rm`)은 안 댄다 — 지우는 쪽은 사람이 정한다.
+///
+/// 글은 한눈 보기와 **한 키에서 온다**(moai-95g1) — 한때 같은 문장을 손으로 맞춰 두었고,
+/// 그런 자리는 한쪽만 고쳐지는 날 두 화면이 같은 처지를 달리 부른다.
+fn uninit_line(dir: &Path, tracker_at: Option<&Path>, lang: crate::i18n::Lang) -> String {
+    let word = |at: &Path| shell_word(&at.display().to_string());
+    match tracker_at {
+        Some(main) => crate::i18n::fill(
+            crate::i18n::say(lang, "overview.uninit_worktree"),
+            &[("go", &format!("moai project add {}", word(main)))],
+        ),
+        None => crate::i18n::fill(
+            crate::i18n::say(lang, "overview.uninit"),
+            &[("go", &format!("moai -C {} init", word(dir)))],
+        ),
+    }
+}
+
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config()?;
+    let config = writable_config(ctx)?;
     // 빼는 길은 TUI 층의 `d` 와 하나다 — 철자 여럿으로 견주고, 설정 파일이 없으면 안 만든다.
-    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd()?)?;
+    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd(ctx.lang())?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -80,13 +118,14 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if removed.is_empty() {
         return Ok(vec![format!(
             "{}  {}",
-            paint(style::DIM, "등록돼 있지 않다"),
+            paint(style::DIM, crate::i18n::say(ctx.lang(), "project.not_registered")),
             one_line(&spelled.display().to_string())
         )]);
     }
+    let dropped = crate::i18n::say(ctx.lang(), "project.dropped");
     let mut out: Vec<String> =
-        removed.iter().map(|p| format!("뺌  {}", one_line(&p.display().to_string()))).collect();
-    out.push(paint(style::DIM, "  목록에서만 뺐다 — 디렉터리와 그 .moai 는 그대로다"));
+        removed.iter().map(|p| format!("{dropped}  {}", one_line(&p.display().to_string()))).collect();
+    out.push(paint(style::DIM, &format!("  {}", crate::i18n::say(ctx.lang(), "project.list_only"))));
     Ok(out)
 }
 
@@ -100,15 +139,21 @@ pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
 /// - 같은 색이면 파일을 안 건드린다(`Doc::set_hue`)
 /// - 손으로 적은 표 모양 `color`(`color.x = 1`)는 덮지 않고 멈춘다 — 그 줄을 사람이 고친다
 pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
-    let hue = user_config::hue_choice(word).map_err(|e| Fail::coded(e, code::BAD_INPUT))?;
-    let config = writable_config()?;
-    let spellings = user_config::spellings(input, &cwd()?);
+    // 글은 읽기의 알림과 한 자리에서 짓는다([`crate::view::not_a_hue`]) — 재는 자가 하나여도
+    // 글이 둘이면 같은 오타에 화면과 거절문이 다른 말을 한다.
+    let hue = user_config::hue_choice(word)
+        .map_err(|e| Fail::coded(crate::view::not_a_hue(ctx.lang(), &e), code::BAD_INPUT))?;
+    let config = writable_config(ctx)?;
+    let spellings = user_config::spellings(input, &cwd(ctx.lang())?);
     let not_registered = || {
         let shown = one_line(&spellings[0].display().to_string());
         Fail::coded(
-            format!(
-                "등록돼 있지 않다 — {shown} · `moai project add {}` 로 먼저 더한다",
-                shell_word(&spellings[0].display().to_string())
+            crate::i18n::fill(
+                crate::i18n::say(ctx.lang(), "project.not_registered_yet"),
+                &[
+                    ("path", &shown),
+                    ("go", &format!("moai project add {}", shell_word(&spellings[0].display().to_string()))),
+                ],
             ),
             code::NOT_FOUND,
         )
@@ -117,7 +162,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     if !config.exists() {
         return Err(not_registered());
     }
-    let (before, changed) = user_config::update(&config, |doc| {
+    let (before, changed) = user_config::update(&config, ctx.lang(), |doc| {
         let found = doc.projects().0.into_iter().find(|p| spellings.contains(&p.path));
         // **맞은 줄이 없어도 부른다**(moai-gmdu 에픽 리뷰) — 목록의 모양이 틀렸으면(`project = [{ … }]`)
         // `projects()` 가 비어 "등록돼 있지 않다" 로 새고, 그 말이 시키는 `add` 는 모양 때문에 거절된다.
@@ -157,12 +202,15 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     let now = hue.unwrap_or_else(|| Hue::of_path(&before.path));
     let word = paint(style::project_colour(&before.path, Some(now)), now.name());
     let said = match hue {
-        Some(_) => format!("색 {word}"),
-        None => format!("색 {AUTO} — 경로로 고른다 ({word})", AUTO = user_config::AUTO),
+        Some(_) => crate::i18n::fill(crate::i18n::say(ctx.lang(), "project.colour"), &[("colour", &word)]),
+        None => crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "project.colour_auto"),
+            &[("auto", user_config::AUTO), ("colour", &word)],
+        ),
     };
     let mut line = format!("{said}  {shown}");
     if !changed {
-        line = format!("{}  {line}", paint(style::DIM, "이미 그렇다"));
+        line = format!("{}  {line}", paint(style::DIM, crate::i18n::say(ctx.lang(), "project.already_so")));
     }
     Ok(vec![line])
 }
@@ -195,7 +243,15 @@ enum State<'a> {
         columns: &'a [String],
     },
     /// 디렉터리는 있는데 `.moai` 가 없다 — 등록한 뒤 `moai init` 하면 보인다.
-    Uninitialized,
+    ///
+    /// **딸린 워크트리면 그 `init` 이 여기 안 선다**(moai-nppo) — 그때 `tracker_at` 이 대신 설 주
+    /// 체크아웃을 든다. 낱말(`uninitialized`)은 그대로 둔다: 상태는 달라지지 않았고, 이미 나간
+    /// 낱말을 바꾸면 읽던 쪽이 멀쩡한 줄을 모르는 상태로 읽는다.
+    Uninitialized {
+        /// **아닐 때는 키가 없다** — `Initialized` 곁의 값들과 같은 자다.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tracker_at: Option<&'a Path>,
+    },
     /// 디렉터리가 없다. 옮겼거나 지웠다. 목록에서 빼는 것은 사람의 몫이다.
     Missing,
     /// 설정이 깨졌거나, 스냅샷을 못 읽거나, 등록한 경로가 디렉터리가 아니다.
@@ -234,13 +290,13 @@ struct Row<'a> {
 /// 부른 스크립트가 도구가 고장 난 줄 안다 (`moai status` 가 막지 않는 것과 같다).
 /// 등록한 프로젝트의 `.moai` 가 깨진 것도 같다 — 그 줄에만 선다.
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
-    let reg = user_config::read(user_config::path().as_deref());
-    let projects = projects::open(&reg);
+    // **설정은 [`Ctx::registry`] 로 읽는다**(리뷰) — 아래에서 `ctx.lang()` 으로 말을 묻는데, 제 손으로
+    // 한 번 더 읽으면 한 명령이 같은 파일을 두 번 판다(moai-u8cs 가 걷어 낸 그것이다).
+    let reg = ctx.registry();
+    let projects = projects::open(reg);
     let now = model::now();
-    let rows: Vec<Row> = projects
-        .iter()
-        .map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) })
-        .collect();
+    let rows: Vec<Row> =
+        projects.iter().map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) }).collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -249,15 +305,18 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
             projects: &'a [Row<'a>],
             problems: &'a [String],
         }
-        return super::json_line(&Out { config: reg.path.as_deref(), projects: &rows, problems: &reg.problems });
+        // 설정의 탈은 **편 뒤에** 싣는다(리뷰) — 화면 말의 탈은 `problems` 가 아니라 `lang_problems`
+        // 에 자료로 서므로(moai-dpbi), `reg.problems` 를 그냥 실으면 `lang` 오타가 여기서만 사라진다.
+        let problems = crate::view::settings_problems(reg, ctx.lang());
+        return super::json_line(&Out { config: reg.path.as_deref(), projects: &rows, problems: &problems });
     }
 
-    for p in &reg.problems {
-        eprintln!("moai: {}", one_line(p));
+    for p in crate::view::settings_problems(reg, ctx.lang()) {
+        eprintln!("moai: {}", one_line(&p));
     }
     let mut out = Vec::new();
     if rows.is_empty() {
-        out.push("등록한 프로젝트가 없다 — `moai project add <디렉터리>` 로 더한다".into());
+        out.push(crate::i18n::say(ctx.lang(), "project.none").into());
     } else {
         let names: Vec<String> = rows.iter().map(|r| one_line(r.name)).collect();
         let paths: Vec<String> = rows.iter().map(|r| one_line(&r.path.display().to_string())).collect();
@@ -271,12 +330,16 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
                 paint(style::project_colour(r.path, r.hue), name),
                 " ".repeat(name_w - width(name)),
                 " ".repeat(path_w - width(path)),
-                said(&r.state),
+                said(&r.state, ctx.lang()),
             ));
         }
     }
     if let Some(config) = &reg.path {
-        out.push(paint(style::DIM, &format!("설정: {}", one_line(&config.display().to_string()))));
+        let line = crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "project.config_at"),
+            &[("at", &one_line(&config.display().to_string()))],
+        );
+        out.push(paint(style::DIM, &line));
     }
     Ok(out)
 }
@@ -293,7 +356,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
                 columns: &repo.config.statuses,
             }
         }
-        projects::State::Uninit => State::Uninitialized,
+        projects::State::Uninit(at) => State::Uninitialized { tracker_at: at.as_deref() },
         projects::State::Missing => State::Missing,
         projects::State::Unreadable(e) => State::Unreadable { error: e },
     }
@@ -301,7 +364,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
 
 /// 목록 한 줄의 끝 칸. 칸별 수는 한눈 보기의 보드 줄과 같은 글리프·낱말이되 한 줄에
 /// 들게 사이를 좁힌다. **색이 혼자 뜻을 지지 않는다** — 글리프와 낱말이 늘 곁에 선다.
-fn said(state: &State) -> String {
+fn said(state: &State, lang: crate::i18n::Lang) -> String {
     match state {
         State::Initialized { counts, unreadable, columns } => {
             let mut cols: Vec<String> = columns
@@ -315,29 +378,47 @@ fn said(state: &State) -> String {
                 })
                 .collect();
             if *unreadable > 0 {
-                cols.push(format!("{} 읽을 수 없는 줄 {unreadable}개", paint(style::ERROR, "!")));
+                let why = crate::i18n::fill(
+                    crate::i18n::say(lang, "warn.unreadable_line"),
+                    &[("n", &unreadable.to_string())],
+                );
+                cols.push(format!("{} {why}", paint(style::ERROR, "!")));
             }
             cols.join("  ")
         }
-        State::Uninitialized => paint(style::DIM, "init 전"),
-        State::Missing => paint(style::WARN, "디렉터리가 없다"),
+        // **워크트리면 여기가 아니라 주 체크아웃이다**(moai-nppo) — `add` 의 줄과 같은 말이다.
+        State::Uninitialized { tracker_at: Some(_) } => {
+            paint(style::DIM, crate::i18n::say(lang, "project.uninit_worktree"))
+        }
+        State::Uninitialized { .. } => paint(style::DIM, crate::i18n::say(lang, "project.uninit")),
+        State::Missing => paint(style::WARN, crate::i18n::say(lang, "overview.missing")),
         // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
-        State::Unreadable { error } => format!("{} 못 읽는다 — {}", paint(style::ERROR, "!"), one_line(error)),
+        State::Unreadable { error } => {
+            let why =
+                crate::i18n::fill(crate::i18n::say(lang, "overview.project_unreadable"), &[("why", &one_line(error))]);
+            format!("{} {why}", paint(style::ERROR, "!"))
+        }
     }
 }
 
 /// 쓸 설정 파일의 자리. 모르면 **쓰기는 멈춘다** — 어디에 적었는지 모르는 등록은
 /// 다음 `ls` 에서 안 보이는 등록이다. `moai read` 도 이것을 부른다 — 같은 조건에 두 명령이
 /// 다른 말(고칠 길을 대는 말과 안 대는 말)을 하지 않게(moai-j038.vna).
-pub(super) fn writable_config() -> R<PathBuf> {
-    user_config::path().ok_or_else(|| {
-        Fail::coded(
-            "사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다",
-            code::ERROR,
-        )
-    })
+///
+/// **말이 아니라 [`Ctx`] 를 받는다**(리뷰) — `ctx.lang()` 을 인자로 주면 자리를 아는 판까지
+/// 사용자 설정을 열어 파싱한다. 그 첫 부름을 늦춰 둔 것이 [`Ctx::lang`] 의 약속이고, 이 줄은
+/// 자리를 **모를 때만** 서므로 거절문을 짓는 자리에서 물으면 된다.
+pub(super) fn writable_config(ctx: &Ctx) -> R<PathBuf> {
+    // 읽기가 같은 자리를 못 찾았을 때 대는 줄(`ConfigTrouble::NoPlace`)과 **한 뿌리에서 나온다** —
+    // 한쪽은 "없다" 고 알리고 다른 쪽은 "고칠 길" 을 대므로 글은 둘이지만, 낱말이 갈리면 같은
+    // 처지를 두 말로 읽는다.
+    user_config::path().ok_or_else(|| Fail::coded(crate::i18n::say(ctx.lang(), "refuse.config_no_place"), code::ERROR))
 }
 
-fn cwd() -> R<PathBuf> {
-    std::env::current_dir().map_err(|e| Fail::new(format!("지금 자리를 모른다: {e}")))
+fn cwd(lang: crate::i18n::Lang) -> R<PathBuf> {
+    // OS 가 낸 글은 그대로 나르되 **무엇을 하다 났는지는 우리가 댄다**(리뷰) — errno 한 줄은
+    // 주어가 없어, 준 디렉터리가 없는 것인지 설정이 없는 것인지 여기가 없어진 것인지 안 갈린다.
+    // 남의 글을 `{said}` 로 감싸는 것은 `refuse.config_unparsable` 과 한 자다.
+    std::env::current_dir()
+        .map_err(|e| Fail::new(crate::i18n::fill(crate::i18n::say(lang, "refuse.no_cwd"), &[("said", &e.to_string())])))
 }

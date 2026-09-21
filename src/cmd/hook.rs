@@ -15,7 +15,7 @@ use crate::store::Repo;
 use crate::{model, view};
 use serde::Serialize;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 계약이 받는 모양. 이벤트 이름이 안에 한 번 더 들어간다.
 #[derive(Serialize)]
@@ -57,7 +57,7 @@ struct Hold {
     reason: String,
 }
 
-pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
     // 색은 언제나 끈다. 훅의 stdout 은 사람이 아니라 파서가 읽는다 —
     // 이스케이프가 한 바이트라도 섞이면 계약 JSON 이 통째로 버려진다.
     anstream::ColorChoice::Never.write_global();
@@ -68,13 +68,27 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
     }
     let input: Input = serde_json::from_str(&raw).unwrap_or_default();
 
+    // **명령줄은 이 세션에서 한 번만 읽는다**(moai-uc5v). 규칙마다 제 [`crate::hook::Line`] 을
+    // 세우던 판은 Bash 한 번에 같은 글을 여덟 번 읽었고, 겹친 치환은 그 한 번을 이미 비싸게
+    // 만든다. `Line` 은 게으르니 명령줄이 없는 호출(`Edit`·`Skill`)은 여기서 아무것도 안 읽는다.
+    //
+    // **접은 것과 그 명령줄은 함께 내려간다**(리뷰 moai-uc5v.ssb). `decide` 가 제 손으로 다시 접던
+    // 판은 규칙이 판정하는 `Call` 과 규칙이 읽는 `Line` 이 따로 서서, 한쪽만 고치는 날 `Call::Shell`
+    // 갈래가 빈 명령줄을 받는다 — 토막이 0개라 규칙 1·2·3 이 모두 지나가고, 훅은 아무 말도 안 해
+    // "명령이 멀쩡했다" 와 구별되지 않는다.
+    let call = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input);
+    let line = crate::hook::Line::new(match call {
+        crate::hook::Call::Shell(cmd) => cmd,
+        _ => "",
+    });
+
     // **규칙 4 는 자리도 트래커도 묻기 전에 본다**(moai-zis7) — 사람의 tmux 서버는 트래커와 무관하다.
     // 트래커를 찾은 뒤에만 보던 판은 스크래치패드로 `cd` 해 둔 세션(그 자리가 이미 지워졌어도)의
     // `tmux kill-server` 를 그대로 보냈고, 막을 때마다 옆 워크트리를 겹쳐 다시 재는 값(`settle`)을
     // 치렀다 — 스냅샷이 바뀌어도 답이 같은 판정이다(리뷰 moai-ju21.70g).
     if event == Event::PreToolUse
-        && let crate::hook::Call::Shell(cmd) = crate::hook::Call::read(input.tool_name.as_deref(), &input.tool_input)
-        && let refusal @ Decision::Deny(_) = crate::hook::guard_tmux(cmd)
+        && matches!(call, crate::hook::Call::Shell(_))
+        && let refusal @ Decision::Deny(_) = crate::hook::guard_tmux(&line)
     {
         return Ok(answer(event, refusal).into_iter().collect());
     }
@@ -88,20 +102,34 @@ pub fn run(_ctx: &Ctx, event: Event) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    Ok(decide(event, &input).map(|line| vec![line]).unwrap_or_default())
+    Ok(decide(ctx, event, &input, call, &line).map(|said| vec![said]).unwrap_or_default())
 }
 
 /// 답을 내되, 못 내면 아무 말도 하지 않는다.
-fn decide(event: Event, input: &Input) -> Option<String> {
+///
+/// **`Ctx` 를 통째로 받는다** — 화면 언어([`Ctx::lang`])가 드는 것은 **글을 싣는 갈래**뿐이다
+/// (`PreCompact` 의 `carried`, `SessionStart` 의 보드, `Stop` 의 `closing`). 여기서 미리 풀면
+/// 툴 부름마다 도는 `PreToolUse` 가 사람의 설정 파일을 매번 읽는데, 그 갈래는 지금 `ctx.lang()`
+/// 을 한 번도 안 부른다 — 규칙의 거절문을 말묶음으로 옮기는 날 그 갈래에 `say(ctx.lang(), …)`
+/// 를 놓으면 이 값이 도로 돌아온다. 그때는 말을 거절하는 가지 안에서 푼다.
+fn decide(
+    ctx: &Ctx,
+    event: Event,
+    input: &Input,
+    call: crate::hook::Call<'_>,
+    line: &crate::hook::Line<'_>,
+) -> Option<String> {
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
     // (사람이 그것을 본다), 훅은 이 자리의 트래커로 선다. 읽는 것은 갈라진 스냅샷이지만 아무
     // 말도 안 하는 것보다 낫다.
     let cwd = std::env::current_dir().ok()?;
-    let repo = match Repo::discover() {
-        Ok(repo) => repo,
-        Err(_) => Repo::find_here(&cwd).ok()??,
+    // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
+    // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
+    let repo = match Repo::find() {
+        Ok(Some(repo)) => repo,
+        Ok(None) | Err(_) => Repo::find_here(&cwd).ok()??,
     };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
@@ -126,7 +154,13 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
             let (away, latest) = releasing(input, &repo, &load.issues);
-            crate::hook::carried(&load.issues, latest.as_deref().unwrap_or(&load.issues), &repo.config, &away)
+            crate::hook::carried(
+                &load.issues,
+                latest.as_deref().unwrap_or(&load.issues),
+                &repo.config,
+                &away,
+                ctx.lang(),
+            )
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
@@ -141,50 +175,65 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
             st.notices.extend(crate::cmd::init::agents_notice(repo.here(), false));
             st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), false));
+            st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), false));
             // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
             // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
             let source = crate::cmd::status::source_of(&repo);
-            let lines =
-                view::status(
-                    &st,
-                    &load.issues,
-                    &repo.config,
-                    &now,
-                    &source,
-                    &crate::worktree::Origin::default(),
-                    0,
-                );
-            crate::hook::board(&lines)
+            // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
+            // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
+            let lines = view::status(&st, &load.issues, &repo.config, &now, &source, 0, view::Screen::new(ctx.lang()));
+            crate::hook::board(&lines, ctx.lang())
         }),
         Event::PreToolUse => {
             use crate::hook::Call;
-            let call = Call::read(input.tool_name.as_deref(), &input.tool_input);
             let cwd = cwd.clone();
-            let (routes, there) = match call {
-                Call::Shell(cmd) => route(&repo, cmd, &cwd),
-                _ => (Vec::new(), Vec::new()),
+            let (routes, there, aims) = match call {
+                Call::Shell(_) => route(&repo, line, &cwd),
+                _ => (Vec::new(), Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
-            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
-                // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
-                // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
-                // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
-                // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
-                Call::Shell(cmd) => crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, cmd, &mine),
-                Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
-                Call::Review => crate::hook::guard_review(issues, &repo.config, away),
-                Call::Other => Decision::Pass,
-            });
+            // **갈라 놓은 제 트래커를 가리킨 토막의 집기도 이 세션의 것이다**(moai-acf7 의 뒷짝).
+            // 규칙 1·3 은 그 트래커가 보지만([`Route::There`]), 규칙 2 의 집기 셈까지 그 자리에서
+            // 꺼지면 규약이 시키는 `moai -C <루트> mv <id> in_progress && sed -i …` 가 집고도 막힌다 —
+            // 방금 집은 그 id 를 집으라고 내밀면서. 가르는 자는 `Repo::seen_from` 이 적어 둔 것
+            // 하나다: 그 트래커를 **이 체크아웃의 눈으로** 본다면 그 집기는 여기 것이다. 등록한 옆
+            // 프로젝트와 `.moai` 가 여럿인 모노레포의 옆 칸은 제 자리를 그대로 들어 여기 안 든다
+            // (moai-23ky 가 그은 트래커 경계다).
+            let ours = |k: usize| match routes.get(k) {
+                Some(Route::There(n)) => there.get(*n).is_some_and(|r| same(r.here(), repo.here())),
+                r => !matches!(r, Some(Route::Nowhere)),
+            };
+            let segs = crate::hook::Segs { judges: &mine, picks: &ours };
+            // **내미는 줄은 그 토막이 겨눈 트래커를 댄다**(moai-v9sa, 사용자 결정) — 사람이 친 `-C` 의
+            // 글자가 아니라 [`route`] 가 푼 자리다. `Repo::find_from` 이 딸린 워크트리를 루트로 옮기니
+            // (moai-y7go) 거절문이 워크트리의 스냅샷을 겨누는 길이 닫히고, `moai -C .`·`cd src && moai -C ..`
+            // 처럼 어디서 쳤느냐에 따라 달라지는 상대 경로도 풀려 나온다.
+            let toward = |k: usize| aims.get(k).and_then(Option::as_deref);
+            let decision =
+                settle(input, &repo, &load.issues, away_of(&repo, &load.issues), &|issues, away| match call {
+                    // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
+                    // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+                    // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
+                    // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
+                    Call::Shell(_) => {
+                        crate::hook::guard_shell_in(issues, &repo.config, away, repo.here(), &cwd, line, &segs, &toward)
+                    }
+                    Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
+                    Call::Review => crate::hook::guard_review(issues, &repo.config, away),
+                    Call::Other => Decision::Pass,
+                });
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
-            if let Call::Shell(cmd) = call {
+            if let Call::Shell(_) = call {
                 for (n, other) in there.iter().enumerate() {
                     decision = decision.then(|| {
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         settle(input, other, &load.issues, away_of(other, &load.issues), &|issues, away| {
-                            crate::hook::guard_moai(issues, &other.config, away, cmd, &only)
+                            crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
+                                Some(other.root.as_path())
+                            })
                         })
                     });
                 }
@@ -192,7 +241,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 // 안 넣었다. 트래커가 없는 자리를 가리킨 토막도 안 넣는다 — 그 `moai` 는 스스로 실패한다.
                 // 깔렸는지는 비출 때만 장부를 읽는다.
                 decision = decision.then(|| {
-                    match crate::hook::korean_write(cmd, &|k| routes.get(k) != Some(&Route::Nowhere)) {
+                    match crate::hook::korean_write(line, &|k| routes.get(k) != Some(&Route::Nowhere), &toward) {
                         Some(at) => crate::hook::korean_notice(&at, &crate::cmd::skill::korean_missing(&repo.root)),
                         None => Decision::Pass,
                     }
@@ -202,21 +251,23 @@ fn decide(event: Event, input: &Input) -> Option<String> {
             // 안 돈다. **`--from` 에 질 집기는 안 적는다**(`hook::picked_in`) — 그 토막이 겨눈 트래커의 지금
             // 칸을 댄다. 적던 판은 진 쪽을 마지막으로 집은 세션으로 세어, 진 쪽이 이긴 쪽의 줄로 붙들리고
             // 막혔다(리뷰 moai-3k2d.1df). 명령이 돌기 전과 도는 사이에 옆이 집는 틈은 남는다.
-            if let Call::Shell(cmd) = call
+            if let Call::Shell(_) = call
                 && !decision.blocks()
             {
                 let dirs = std::cell::OnceCell::new();
                 let stands = |k: usize, id: &str| -> Option<String> {
-                    let at = |issues: &[model::Issue]| issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string());
-                    match dirs.get_or_init(|| crate::hook::aimed(cmd, &cwd)).get(k).cloned().flatten() {
+                    let at = |issues: &[model::Issue]| {
+                        issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string())
+                    };
+                    match dirs.get_or_init(|| crate::hook::aimed(line, &cwd)).get(k).cloned().flatten() {
                         None => at(&load.issues),
                         Some(dir) => at(&Repo::find_from(&dir).ok()??.read().ok()?.issues),
                     }
                 };
-                record_picks(input, &repo, &crate::hook::picked_in(cmd, &repo.config, &mine, &stands));
+                record_picks(input, &repo, &crate::hook::picked_in(line, &repo.config, &mine, &stands));
                 for (n, other) in there.iter().enumerate() {
                     let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                    record_picks(input, other, &crate::hook::picked_in(cmd, &other.config, &only, &stands));
+                    record_picks(input, other, &crate::hook::picked_in(line, &other.config, &only, &stands));
                 }
             }
             decision
@@ -240,6 +291,7 @@ fn decide(event: Event, input: &Input) -> Option<String> {
                 &away,
                 warnings,
                 baseline(input, &repo),
+                ctx.lang(),
             )
         }),
     };
@@ -250,25 +302,24 @@ fn decide(event: Event, input: &Input) -> Option<String> {
 fn answer(event: Event, decision: Decision) -> Option<String> {
     match decision {
         Decision::Pass => None,
-        Decision::Context(context) => serde_json::to_string(&Out {
-            specific: Specific { event: event.wire(), context },
-        })
-        .ok(),
-        Decision::Deny(reason) => serde_json::to_string(&Refusal {
-            specific: RefusalBody { event: event.wire(), decision: "deny", reason },
-        })
-        .ok(),
-        Decision::Block(reason) => {
-            serde_json::to_string(&Hold { decision: "block", reason }).ok()
+        Decision::Context(context) => {
+            serde_json::to_string(&Out { specific: Specific { event: event.wire(), context } }).ok()
         }
+        Decision::Deny(reason) => {
+            serde_json::to_string(&Refusal { specific: RefusalBody { event: event.wire(), decision: "deny", reason } })
+                .ok()
+        }
+        Decision::Block(reason) => serde_json::to_string(&Hold { decision: "block", reason }).ok(),
     }
 }
 
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
 ///
 /// 워크트리의 스냅샷은 main 에서 방금 세우고 집은 줄을 모른다 — 그것만 보고 막으면 시킨 대로
-/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, 까닭은 제 스냅샷의 것을 낸다(고칠 명령이 이 자리의
-/// 트래커에 듣는다). **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
+/// 한 일이 막힌다. 겹쳐 봐도 막힐 때만 막고, **까닭은 마지막으로 다시 본 판의 것**이다
+/// (moai-15c2) — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다. 고칠 명령이 이 자리의
+/// 트래커에 듣는 것은 [`crate::hook::Toward`] 가 따로 지킨다.
+/// **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
 ///
 /// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
 /// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
@@ -284,41 +335,43 @@ fn settle(
     if first == Decision::Pass {
         return first;
     }
-    if first.blocks()
-        && let Some((fresh, beside)) = crate::worktree::fresh(repo, issues.to_vec())
-    {
-        // **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서 읽는다(moai-m62u).
-        // `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제 이름이 비는데, 겹쳐
-        // 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로 재던 판은 제 이름
-        // 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰 moai-3k2d.1df).
-        let mut again = judge(&fresh, &beside);
-        if !again.blocks() {
-            // **겹쳐 보고 푼 답의 비추는 줄도 좁힌다**(리뷰 moai-3k2d.1df). 겹친 초점에는 옆 세션이 방금
-            // 집은 줄이 들어, 안 좁히면 `idea add` 에 비추는 물음이 남의 에픽을 대고 `idea promote -e
-            // <남의 에픽>` 을 시킨다 — 아래 좁힌 길이 막는 바로 그것이다. 좁혀서 막히면 넓은 답을 그대로
-            // 낸다: 좁힌 초점은 풀기만 한다.
-            if let Decision::Context(_) = again {
-                let mut narrow = beside;
-                if add_unsure(input, repo, &fresh, &mut narrow) {
-                    let narrowed = judge(&fresh, &narrow);
-                    if !narrowed.blocks() {
-                        again = narrowed;
-                    }
-                }
-            }
-            return again;
-        }
+    // **겹침과 모름을 한 판에 얹어 한 번 다시 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이
+    // 함께일 때 풀릴 것을 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제
+    // 스냅샷으로 쟀다. **겹친 줄은 겹친 목록의 이름으로 잰다** — 옆 이름도 제 이름도 그 목록에서
+    // 읽는다(moai-m62u). `base` 는 제 스냅샷에 집은 줄이 없으면 워크트리를 안 읽어([`away_of`]) 제
+    // 이름이 비는데, 겹쳐 보는 까닭이 바로 그 스냅샷이 main 의 집기를 모를 때다 — 빈 이름으로
+    // 재던 판은 제 이름 워크트리의 멤버를 옆 에픽 워크트리에 넘겨 규칙 2 로 막았다(리뷰
+    // moai-3k2d.1df). **겹쳐 보기는 막을 때만 치른다** — 비추기만 하는 답은 제 줄로 좁히기만 한다.
+    let overlaid = first.blocks().then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten();
+    let seen = overlaid.is_some();
+    // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
+    // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
+    let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
+        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), beside),
+        None => (std::borrow::Cow::Borrowed(issues), base),
+    };
+    // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
+    // 훑는 일)을 안 치른다. 겹치지 않은 판은 `first` 가 곧 이 답이라 다시 재지 않는다.
+    let wide = if seen { judge(&rows, &narrow) } else { first };
+    if wide == Decision::Pass {
+        return wide;
     }
-    // **누구의 것인지 모르는 줄을 빼고 한 번 더 본다**(moai-ntl6, 사용자 결정 B). 좁은 초점으로도
-    // 막히면 그 까닭을 낸다 — 옆 워크트리가 쥐었을 일을 초점으로 대지 않는다. **비추는 줄도 같은
-    // 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로 비추면, 그 세션을 남의
-    // 에픽에 세우는 길로 보낸다. 좁힌 초점은 풀기만 한다: 비추기만 하던 명령을 좁혀서 막지는 않는다.
-    let mut narrow = base;
-    if !add_unsure(input, repo, issues, &mut narrow) {
-        return first;
+    // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
+    // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
+    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
+    let added = add_unsure(input, repo, &rows, &mut narrow);
+    if !added {
+        return wide;
     }
-    let again = judge(issues, &narrow);
-    if again.blocks() && !first.blocks() { first } else { again }
+    // 막히면 **그 판정의 까닭**을 낸다 — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다.
+    let again = judge(&rows, &narrow);
+    // **좁힌 초점은 풀기만 한다**: 덜 좁힌 판이 안 막는데 좁혀서 막으면 덜 좁힌 답을 낸다. 둘을 함께
+    // 본 판이 겹쳐 보기가 푼 것을 도로 막던 자리다 — 모름은 초점에서 빼기만 하고, 초점이 비면 규칙 2 가
+    // 막는다. 사용자 결정 moai-4jsy 의 "새로 막는 일은 없다" 가 여기에도 선다.
+    //
+    // **`first` 를 따로 다시 대지 않는다** — `first` 가 안 막으면 겹쳐 보지도 않아(`first.blocks()`)
+    // `wide` 가 곧 `first` 다. 두 자로 적던 판은 같은 것을 두 번 물었다.
+    if again.blocks() && !wide.blocks() { wide } else { again }
 }
 
 /// **옆 워크트리가 쥔 일은 제 초점이 아니다** (`hook::held`). 워크트리 목록은 집은 것이 있을 때만
@@ -360,7 +413,8 @@ fn releasing(input: &Input, repo: &Repo, issues: &[model::Issue]) -> (crate::hoo
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
         return (away, None);
     }
-    let still = !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
+    let still =
+        !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
     let latest = still.then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten().map(|(fresh, _)| fresh);
     (away, latest)
 }
@@ -389,7 +443,7 @@ fn picks_dir(repo: &Repo) -> std::path::PathBuf {
 }
 
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 전과 같은 판정이다.
-fn record_picks(input: &Input, repo: &Repo, ids: &[String]) {
+fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     use std::io::Write;
     if ids.is_empty() {
         return;
@@ -405,7 +459,7 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[String]) {
     let now = now.as_nanos();
     // 줄의 칸 시각(`status_since`)과 견줄 때는 같은 시계로 잰다 — `MOAI_NOW` 가 서면 그것이다.
     let stamp = crate::model::parse_rfc3339(&model::now());
-    let lines: String = ids.iter().map(|id| crate::hook::Picks::line(now, stamp, id)).collect();
+    let lines: String = ids.iter().map(|(id, sure)| crate::hook::Picks::line(now, stamp, id, *sure)).collect();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(&sid)) {
         let _ = f.write_all(lines.as_bytes());
     }
@@ -422,7 +476,12 @@ fn prune_picks(dir: &Path, sid: &str) {
         if entry.file_name() == sid {
             continue;
         }
-        let stale = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age > KEEP);
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > KEEP);
         if stale {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -436,14 +495,13 @@ fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hoo
     let Ok(dir) = std::fs::read_dir(picks_dir(repo)) else { return Default::default() };
     // **보통 파일만 읽는다** — 임시 디렉터리라 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의
     // 파일을 읽힌다(리뷰 moai-3k2d.1df). 적는 쪽은 보통 파일만 만든다.
-    let files = dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
-        let text = std::fs::read_to_string(entry.path()).ok()?;
-        Some((entry.file_name().to_string_lossy().into_owned(), text))
-    });
-    let since: std::collections::BTreeMap<&str, i64> = issues
-        .iter()
-        .filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?)))
-        .collect();
+    let files =
+        dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
+            let text = std::fs::read_to_string(entry.path()).ok()?;
+            Some((entry.file_name().to_string_lossy().into_owned(), text))
+        });
+    let since: std::collections::BTreeMap<&str, i64> =
+        issues.iter().filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?))).collect();
     crate::hook::Picks::fold(&me, files, &|id| since.get(id).copied())
 }
 
@@ -466,11 +524,15 @@ fn safe_sid(input: &Input) -> Option<String> {
 /// 안 그러면 `-C <루트>` 한 번으로 규칙 1 을 넘는다. 누구의 초점인가는 여전히 **이름**이 가른다
 /// (`away_of` 가 `Repo::here` 로 읽는다), 가리킨 디렉터리가 아니다.
 ///
-/// [`Route::There`] 는 그래서 **다른 저장소**의 트래커만 받는다 — 등록한 옆 프로젝트다(moai-23ky).
+/// [`Route::There`] 는 그래서 대개 **다른 저장소**의 트래커다 — 등록한 옆 프로젝트다(moai-23ky).
 /// 한때 같은 저장소의 옆 워크트리도 여기로 갔는데, 그때는 그 워크트리의 `.moai` 가 따로 있었다.
+/// **같은 저장소 안이어도 트래커가 정말 갈린 자리는 여기로 간다**(moai-acf7) — `MOAI_HERE=1` 을 든
+/// 워크트리가 그 자리고, 그 토막이 **제 낱말로 `-C` 를 적었을 때만**이다. `.moai` 가 여럿인
+/// 모노레포는 `worktree::same_repo` 가 애초에 안 세 이 커밋 전부터 여기로 왔다 — 그쪽의 집기는
+/// [`crate::hook::Segs::picks`] 도 이 자리의 것으로 안 센다.
 #[derive(Debug, PartialEq)]
 enum Route {
-    /// 세션 자리의 트래커 — 같은 저장소 안이면 어디를 가리켜도 여기다(`worktree::same_repo`).
+    /// 세션 자리의 트래커 — 같은 저장소 안이면 대개 어디를 가리켜도 여기다(`worktree::same_repo`).
     Here,
     /// 가리킨 자리에 트래커가 없다. `moai` 가 스스로 실패하니 아무도 판정하지 않는다.
     Nowhere,
@@ -480,38 +542,118 @@ enum Route {
 
 /// 토막마다 판정할 트래커를 가른다(`hook::aimed`). 가리킨 곳이 없으면 디스크를 안 짚는다 —
 /// 대부분의 호출은 `-C`·`cd` 가 없어 여기서 아무것도 안 읽는다.
-fn route(repo: &Repo, cmd: &str, cwd: &Path) -> (Vec<Route>, Vec<Repo>) {
-    let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().zip(std::fs::canonicalize(b).ok()).is_some_and(|(x, y)| x == y);
+fn route(repo: &Repo, line: &crate::hook::Line<'_>, cwd: &Path) -> (Vec<Route>, Vec<Repo>, Vec<Option<PathBuf>>) {
     let mut there: Vec<Repo> = Vec::new();
-    let routes = crate::hook::aimed(cmd, cwd)
+    // 토막마다 **내미는 줄이 겨눌 자리**([`crate::hook::Toward`]) — 판정할 트래커와 따로 든다. 판정은
+    // 이 트래커가 하면서도 겨눌 자리는 딴 곳인 경우가 있다(아직 없는 자리, 아래).
+    let mut aims: Vec<Option<PathBuf>> = Vec::new();
+    // 아직 없는 자리를 가리킨 토막에서만 읽는다 — 대부분의 호출은 여기 안 와 명령줄을 다시 안 가른다.
+    let spelled = std::cell::OnceCell::new();
+    let routes = crate::hook::aimed(line, cwd)
         .into_iter()
-        .map(|dir| {
-            let Some(dir) = dir else { return Route::Here };
-            // **없는 자리는 어디인지 모른다 — 세션의 눈으로 본다.** `Nowhere` 로 보내던 판은
-            // `mkdir d && moai -C d add`·`mkdir d && cd d && moai add` 를 아무도 판정하지 않았는데,
-            // 실행할 때는 `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다.
-            // `cd /없는곳; moai add` 도 `cd` 가 실패해 세션 자리에서 돈다.
-            if !dir.is_dir() {
-                return Route::Here;
-            }
-            let Ok(Some(found)) = Repo::find_from(&dir) else {
-                return Route::Nowhere;
-            };
-            if same(&found.root, &repo.root)
-                || (!crate::worktree::is_linked(&found.root) && crate::worktree::same_repo(&found.root, &repo.root))
-            {
-                return Route::Here;
-            }
-            match there.iter().position(|r| same(&r.root, &found.root)) {
-                Some(n) => Route::There(n),
-                None => {
-                    there.push(found);
-                    Route::There(there.len() - 1)
-                }
-            }
+        .enumerate()
+        .map(|(k, dir)| {
+            let mut aim = None;
+            let spells = || spelled.get_or_init(|| crate::hook::spells_dir(line)).get(k).copied().unwrap_or(false);
+            let route = route_one(repo, &mut there, &mut aim, dir, &spells);
+            aims.push(aim);
+            route
         })
         .collect();
-    (routes, there)
+    (routes, there, aims)
+}
+
+/// 두 뿌리가 같은 자리인가 — 등록 목록이 쓰는 그 자([`crate::user_config::same_dir`])다. 여기에
+/// 따로 두면 훅이 "같은 트래커" 라고 본 줄을 옆 표면이 다른 것으로 세어 조용히 갈린다.
+fn same(a: &Path, b: &Path) -> bool {
+    crate::user_config::same_dir(a, b)
+}
+
+/// [`route`] 의 토막 하나 — 판정할 트래커를 가르고, 내미는 줄이 겨눌 자리를 `aim` 에 적는다.
+/// `spells` 는 그 토막이 **제 낱말로 `-C`·`--dir` 를 적었는가**([`crate::hook::spells_dir`])다.
+fn route_one(
+    repo: &Repo,
+    there: &mut Vec<Repo>,
+    aim: &mut Option<PathBuf>,
+    dir: Option<PathBuf>,
+    spells: &dyn Fn() -> bool,
+) -> Route {
+    let Some(dir) = dir else { return Route::Here };
+    // **자리가 있는지는 한 번만 묻는다** — 두 번 물으면 그 사이에 옆 세션의 `mkdir` 이 끼어, 한 물음은
+    // "없다" 로 다른 물음은 "있다" 로 답한 토막이 아무 데서도 판정되지 않는다.
+    let here_now = dir.is_dir();
+    // **`cd` 로만 옮긴 없는 자리는 세션의 눈으로 본다** — `cd /없는곳; moai add` 는 `cd` 가 실패해
+    // 세션 자리에서 돈다. 적지도 않은 `-C` 를 지어 내밀면 거절문이 있지도 않은 곳을 겨눠, 옮겨 친
+    // 줄이 그대로 실패한다(`git worktree add … && cd <새 워크트리> && moai add` 가 그 모양이다).
+    if !here_now && !spells() {
+        return Route::Here;
+    }
+    // **아직 없는 자리도 [`Repo::find_from`] 이 그대로 답한다** — 위로 찾는 길(`store::found_root`)은
+    // 글자로 올라가며 `.moai` 만 짚어, 끝 자리가 없어도 만들어졌을 때와 같은 트래커를 낸다. 통째로
+    // `Nowhere` 로 보내던 판은 `mkdir d && moai -C d add` 를 아무도 판정하지 않았는데, 실행할 때는
+    // `d` 가 있어 `moai` 가 위로 찾아 이 트래커에 세운다 — 규칙 1 이 샜다. 반대로 이 트래커로만
+    // 보던 판은 `mkdir -p <남의 저장소>/새것 && moai -C <남의 저장소>/새것 add` 를 여기서 판정하고
+    // 거절문에는 `-C <남의 저장소>/새것` 을 댔다 — 이 트래커의 에픽 id 를 단 채라, 옮겨 친 줄이 남의
+    // 트래커에 끊긴 참조를 세웠다(리뷰 moai-51h9.k8j1).
+    let Some(found) = Repo::find_from(&dir).ok().flatten() else {
+        // **아직 트래커가 없는 새 자리는 그 자리를 댄다**(moai-j2vp) — 판정은 이 트래커가 맡되,
+        // 옮겨 친 줄이 이 트래커에 서면 안 된다. 있는 자리인데 트래커가 없으면 그 `moai` 는 스스로
+        // 실패하니 아무도 판정하지 않는다.
+        if here_now {
+            return Route::Nowhere;
+        }
+        *aim = Some(dir);
+        return Route::Here;
+    };
+    // **제 낱말로 `-C` 를 적어 딴 트래커를 가리킨 토막은 그 트래커가 본다**(moai-acf7, 2026-09-19
+    // 사용자 결정). 같은 저장소 안이라도 `Repo::find_from` 이 옮겨 주지 않는 자리가 있다 —
+    // `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리와, `.moai` 가 여럿인 모노레포다. 그 자리에서
+    // `moai -C <루트> mv <리뷰> done` 은 루트의 트래커에 쓰는데, 이 스냅샷에는 그 리뷰가 없어
+    // 규칙 3 이 통째로 샜다. 옮겨 주는 흔한 자리(맨 워크트리 세션)는 위의 `same` 이 먼저 잡으니
+    // **값은 갈라진 트래커를 `-C` 로 가리킨 호출에만 붙는다**.
+    //
+    // **`cd` 로 옮긴 토막은 지금대로 여기다** — 규칙 2 는 `There` 로 보낸 토막을 안 세므로
+    // (`guard_moai` 만 돈다), `cd <루트> && sed -i …` 를 넘기면 쓰기 셈이 그 자리에서 꺼진다.
+    // `-C` 를 적은 토막은 `moai` 를 부르는 토막이라 셀 쓰기가 없다([`crate::hook::spells_dir`]).
+    if same(&found.root, &repo.root)
+        || (!crate::worktree::is_linked(&found.root)
+            && crate::worktree::same_repo(&found.root, &repo.root)
+            && !spells())
+    {
+        return Route::Here;
+    }
+    // **갈라 놓은 제 트래커에서 루트를 가리킨 것은 여전히 이 세션이다**(moai-acf7). 스냅샷만 루트의
+    // 것으로 바꾸고 **누구인가는 이 체크아웃에서 읽는다**(`Repo::here`) — 루트의 눈으로 이름까지
+    // 읽으면 이 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어, 시킨 대로 세우고 집은 리뷰를 규칙 3 이
+    // 못 본다. `away_of`·`worktree::fresh` 가 이미 `here()` 로 이름을 읽는 그 자다(moai-y7go).
+    //
+    // **닿는 것은 `MOAI_HERE=1` 워크트리 하나다** — `tracker_root` 는 git 꼭대기의 트래커만 답해,
+    // `.moai` 가 여럿인 모노레포는 여기 안 든다. 그쪽은 `same_repo` 도 못 세 이 줄 전에 이미
+    // `There` 로 가고(`tracker_place` 의 뿌리 상대경로가 갈린다) 집기도 여기 것이 아니다 — 이
+    // 커밋 전부터 그랬다. 옆 칸의 집기를 이 칸의 것으로 세려면 "같은 저장소인가" 라는 **다른 자**가
+    // 있어야 하고, 그것은 moai-23ky 가 정한 트래커 경계를 다시 여는 결정이다.
+    //
+    // **트래커를 이미 옮겨 온 세션에는 안 묻는다** — 옮겨 왔으면 `repo.root` 가 곧 그 루트라
+    // ([`crate::store::Repo::from_found`]) 그 물음의 답이 `repo.root` 고, 여기 오는 길은
+    // `found.root != repo.root` 뿐이라 늘 거짓이다. 맨 `Path` 견줌 하나로 거르지 않으면 토막마다
+    // `tracker_root` 가 디스크를 훑는다 — 흔한 워크트리 세션이 답 없는 물음의 값만 치른다.
+    let own = repo.here() == repo.root.as_path();
+    let found = match own.then(|| crate::worktree::tracker_root(repo.here())).flatten() {
+        Some(root) if same(&root, &found.root) => found.seen_from(repo.here().to_path_buf()),
+        _ => found,
+    };
+    let n = match there.iter().position(|r| same(&r.root, &found.root)) {
+        Some(n) => n,
+        None => {
+            there.push(found);
+            there.len() - 1
+        }
+    };
+    // **겨눌 자리는 `there` 가 이미 든 철자다** — 토막마다 제가 푼 철자를 들던 판은, 링크로 같은
+    // 저장소를 두 철자로 가리킨 줄에서 규칙 1(`there` 로 판정한다)과 한국어 알림(`aims` 로 낸다)이
+    // 한 훅 판에 서로 다른 `-C` 를 댔다.
+    *aim = Some(there[n].root.clone());
+    Route::There(n)
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.
@@ -524,12 +666,7 @@ fn baseline(input: &Input, repo: &Repo) -> Option<usize> {
 ///
 /// 표를 남기는 자리는 시스템 임시 디렉터리다. `.moai/` 에 두면 세션 부스러기가
 /// 저장소에 쌓이고, 그것을 `.gitignore` 로 막는 일이 또 생긴다.
-fn once_per_session(
-    input: &Input,
-    repo: &Repo,
-    what: &str,
-    make: impl FnOnce() -> Decision,
-) -> Decision {
+fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() -> Decision) -> Decision {
     let Some(path) = session_file(input, repo, what) else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
         // 한 번 빠지는 것이 매 프롬프트 도배보다 싸다.
@@ -549,12 +686,7 @@ fn once_per_session(
 ///
 /// 훅이 여는 세션마다 덮어쓴다. 재개도 새 세션이고, 재개 시점의 경고가
 /// 그 세션이 물려받은 빚이다.
-fn write_baseline(
-    input: &Input,
-    repo: &Repo,
-    issues: &[crate::model::Issue],
-    unreadable: &[report::Unreadable],
-) {
+fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], unreadable: &[report::Unreadable]) {
     let Some(path) = session_file(input, repo, "warn") else {
         return;
     };

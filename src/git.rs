@@ -173,11 +173,7 @@ fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
 /// 끊기면 흘려 읽는 길에서만 git 이 이쪽의 입력을 물려받는다.
 fn invocation(root: &Path, args: &[&str]) -> std::process::Command {
     let mut cmd = command();
-    cmd.arg("-C")
-        .arg(root)
-        .args(["-c", "i18n.logOutputEncoding=UTF-8"])
-        .args(args)
-        .stdin(std::process::Stdio::null());
+    cmd.arg("-C").arg(root).args(["-c", "i18n.logOutputEncoding=UTF-8"]).args(args).stdin(std::process::Stdio::null());
     cmd
 }
 
@@ -365,7 +361,9 @@ pub(crate) fn trailed(body: &str) -> impl Iterator<Item = &str> {
 /// 트레일러 줄인가. 낱말은 대소문자를 안 가린다 — `refs:` 로 적는 사람이 흔하다.
 fn is_trailer(line: &str) -> bool {
     // **글자 경계로 자른다** — 바이트로 자르면 한글로 시작하는 줄에서 panic 한다(`get` 은 None 이다).
-    ["refs:", "closes:", "fixes:"].iter().any(|head| line.get(..head.len()).is_some_and(|h| h.eq_ignore_ascii_case(head)))
+    ["refs:", "closes:", "fixes:"]
+        .iter()
+        .any(|head| line.get(..head.len()).is_some_and(|h| h.eq_ignore_ascii_case(head)))
 }
 
 /// 글을 id 가 될 수 있는 낱말로 가른다 — **경계를 정하는 자는 이것 하나다.**
@@ -549,7 +547,9 @@ pub(crate) mod tests {
     #[test]
     fn told_names_each_failure() {
         let io = |k| std::io::Error::new(k, "x");
-        let dir = std::env::temp_dir();
+        // **뿌리로 잡는다** — `not_a_repo` 를 재는 자리라 체크아웃 밖이어야 하고, 그것을
+        // 보장하는 자는 `scratch::base` 다(moai-izeo). 맨 `temp_dir()` 은 그 보장 밖이다.
+        let dir = crate::scratch::base();
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir).kind, "no_git");
         assert_eq!(Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir).kind, "failed");
         assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir).kind, "stream");
@@ -655,10 +655,9 @@ pub(crate) mod tests {
     #[test]
     fn a_repo_without_commits_is_empty_not_broken() {
         let dir = crate::scratch::Scratch::new("git-unborn");
-        // 임시 자리가 체크아웃 안이면 "저장소 밖" 이 이 기계에 없다 — 울타리 밑이다(moai-boc6).
-        if !crate::scratch::fenced_base() {
-            assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
-        }
+        // **어느 기계에서나 "저장소 밖" 이다** — 임시 자리는 체크아웃 밖에서 잡힌다(moai-izeo).
+        // `TMPDIR` 이 체크아웃 안인 기계에서 이 단언만 건너뛰던 자리다.
+        assert!(table(&dir, &["moai-aaaa"]).is_err(), "저장소 밖인데 빈 표를 냈다");
         run_git(&dir, None, &["init", "-q"]);
         assert!(table(&dir, &["moai-aaaa"]).unwrap().is_empty(), "커밋 없는 저장소를 실패로 셌다");
     }
@@ -714,10 +713,14 @@ pub(crate) mod tests {
 
         let ids = ["moai-aaaa", "moai-bbbb", "moai-cccc", "moai-dddd"];
         let got = table(&dir, &ids).unwrap();
-        let has = |id: &str| got.get(id).is_some_and(|c: &Vec<Commit>| c.iter().any(|c| c.subject.contains("가지를 합친다")));
+        let has =
+            |id: &str| got.get(id).is_some_and(|c: &Vec<Commit>| c.iter().any(|c| c.subject.contains("가지를 합친다")));
         assert!(has("moai-dddd"), "제목의 id 를 못 찾았다");
         assert!(has("moai-cccc"), "본문의 Refs: 트레일러를 안 셌다 — squash 를 쓰면 여기만 남는다");
-        assert!(!has("moai-aaaa") && !has("moai-bbbb"), "본문에 옮겨진 제목까지 셌다 — 트래커 커밋이 나열한 id 가 죄다 걸린다");
+        assert!(
+            !has("moai-aaaa") && !has("moai-bbbb"),
+            "본문에 옮겨진 제목까지 셌다 — 트래커 커밋이 나열한 id 가 죄다 걸린다"
+        );
         // `show` 도 같은 답이다.
         let one = table(&dir, &["moai-cccc"]).unwrap();
         assert_eq!(one["moai-cccc"].len(), 1, "show 가 트레일러를 안 셌다 — 두 표면이 갈렸다");
@@ -808,9 +811,10 @@ pub(crate) mod tests {
         let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(out.status.success(), "훅의 환경에서 git 을 부르는 시험이 깨졌다\n{said}");
         // 안쪽이 아무것도 안 돌고 초록으로 끝나면 이 시험은 아무것도 안 본 것이다.
-        for ran in
-            ["a_real_log_matches_subjects_and_trailers_not_plain_bodies", "a_moved_head_in_any_worktree_changes_a_watched_stamp"]
-        {
+        for ran in [
+            "a_real_log_matches_subjects_and_trailers_not_plain_bodies",
+            "a_moved_head_in_any_worktree_changes_a_watched_stamp",
+        ] {
             assert!(said.contains(&format!("{ran} ... ok")), "안쪽에서 {ran} 가 돌지 않았다\n{said}");
         }
     }
@@ -858,17 +862,12 @@ pub(crate) mod tests {
     fn the_leak_list_covers_what_git_calls_local() {
         // **`isolated` 로 띄운다** — `git::tests` 의 git 은 모두 그렇다. 맨 `command()` 면 돌리는 사람의
         // 전역·시스템 설정을 읽고 카고의 자리에서 돈다.
-        let out = isolated(Path::new(env!("CARGO_MANIFEST_DIR")))
-            .args(["rev-parse", "--local-env-vars"])
-            .output()
-            .unwrap();
+        let out =
+            isolated(Path::new(env!("CARGO_MANIFEST_DIR"))).args(["rev-parse", "--local-env-vars"]).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let said = String::from_utf8_lossy(&out.stdout).into_owned();
-        let missing: Vec<&str> = said
-            .lines()
-            .map(str::trim)
-            .filter(|n| !n.is_empty() && !REPO.contains(n) && !TEST.contains(n))
-            .collect();
+        let missing: Vec<&str> =
+            said.lines().map(str::trim).filter(|n| !n.is_empty() && !REPO.contains(n) && !TEST.contains(n)).collect();
         assert!(missing.is_empty(), "git 이 대는 지역 환경이 목록에 없다 — git_leaks.rs 에 더한다: {missing:?}");
     }
 
@@ -876,7 +875,8 @@ pub(crate) mod tests {
     /// 가르치는 예시 제목을 이 자로 읽는다.
     #[test]
     fn ids_in_splits_words_the_way_the_table_reads_them() {
-        let got: Vec<&str> = ids_in("fix: 리뷰 (moai-aaaa.b1c, moai-bbbb). worktree-moai-cccc 에서 moai-dddd를 봤다").collect();
+        let got: Vec<&str> =
+            ids_in("fix: 리뷰 (moai-aaaa.b1c, moai-bbbb). worktree-moai-cccc 에서 moai-dddd를 봤다").collect();
         assert_eq!(got, ["moai-aaaa.b1c", "moai-bbbb", "worktree-moai-cccc", "moai-dddd"]);
         assert_eq!(ids_in("chore(tracker): 없음 v1.2 a-b").count(), 0, "id 모양이 아닌 낱말을 id 로 읽었다");
     }
@@ -890,7 +890,10 @@ pub(crate) mod tests {
         let git = |at: &str, args: &[&str]| run_git(&dir, Some(at), args);
         git("2026-01-03T09:00:00Z", &["init", "-q"]);
         git("2026-01-03T09:00:00Z", &["commit", "-q", "--allow-empty", "-m", "feat: 고친다 (moai-aaaa)"]);
-        git("2026-01-03T10:00:00Z", &["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c) moai-aaaa.b1c"]);
+        git(
+            "2026-01-03T10:00:00Z",
+            &["commit", "-q", "--allow-empty", "-m", "fix: 리뷰 (moai-aaaa.b1c) moai-aaaa.b1c"],
+        );
         // rebase 로 옛 작성 시각이 커밋 시각이 된 커밋 — `--since` 는 여기서 걷기를 끊는다.
         git("2025-12-01T00:00:00Z", &["commit", "-q", "--allow-empty", "-m", "chore(tracker): moai-aaaa 를 닫는다"]);
 
@@ -898,7 +901,10 @@ pub(crate) mod tests {
         let subjects = |c: &[Commit]| c.iter().map(|c| (c.subject.clone(), c.tracker)).collect::<Vec<_>>();
         assert_eq!(
             subjects(&table["moai-aaaa"]),
-            [("chore(tracker): moai-aaaa 를 닫는다".to_string(), true), ("feat: 고친다 (moai-aaaa)".to_string(), false)],
+            [
+                ("chore(tracker): moai-aaaa 를 닫는다".to_string(), true),
+                ("feat: 고친다 (moai-aaaa)".to_string(), false)
+            ],
             "날짜가 거꾸로 선 커밋 밑을 못 봤다"
         );
         assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");

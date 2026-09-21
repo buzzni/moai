@@ -10,7 +10,6 @@
 use super::{Ctx, Fail, R};
 use crate::cli::DeferArgs;
 use crate::model::{self, Issue, JournalEntry};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 #[derive(Default)]
@@ -27,13 +26,13 @@ struct Moved {
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     let back = args.undo;
     // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
     // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
     let msg = args.msg.as_deref().map(str::trim).filter(|m| !m.is_empty());
     if args.msg.is_some() && msg.is_none() {
-        return Err(Fail::new("까닭이 비었다"));
+        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.defer_empty_why")));
     }
     let from = args.from.map(crate::model::Status::new);
     let at = model::now();
@@ -46,24 +45,27 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
         // 하므로(`check_from`) 락 안으로 들어왔다. `bad_status` 를 내는 검사는 묶음 것까지
         // **하나도 빠짐없이** `who?` 위에 선다.
-        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)?;
+        // 말은 **거절할 때만** 푼다 — `ctx.lang()` 을 인자로 넘기면 락 안에서 사용자 설정을
+        // 여는 일이 오타 없는 판마다 선다(리뷰). `mv` 와 한 모양이다.
+        super::check_from(from.as_ref().map(crate::model::Status::as_str), issues, cfg)
+            .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
         // **묶음에는 `--from` 을 못 쓴다 — `mv` 와 한 자다**(사람이 정했다,
         // moai-8xwi.rzg). 묶음의 칸은 멤버에서 읽고 미루기는 제 줄의 `deferred_at` 에
         // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`
         // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
         // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
         let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
-        if from.is_some() {
-            if let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i)) {
-                return Err(Fail::coded(
-                    format!(
-                        "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
-                         묶음은 `--from` 없이 미룬다",
-                        g.id
-                    ),
-                    super::code::BAD_STATUS,
-                ));
-            }
+        if from.is_some()
+            && let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i))
+        {
+            return Err(Fail::coded(
+                format!(
+                    "묶음의 칸은 멤버에서 읽는다 — {} 에는 `--from` 을 못 쓴다\n      \
+                     묶음은 `--from` 없이 미룬다",
+                    g.id
+                ),
+                super::code::BAD_STATUS,
+            ));
         }
         let by = who?;
         let mut m = Moved::default();
@@ -137,13 +139,16 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {id} 를 못 찾았다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     // 진 줄은 못 찾은 줄과 같은 표면 하나(stderr)와 같은 종료 코드로 선다 —
     // `mv --from` 과 한 자다. 나머지 id 는 그대로 처리한다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {id} 는 이미 {now} 다 — 그대로 뒀다");
+        eprintln!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(ctx.lang(), "defer.stale"), &[("id", id), ("now", now)])
+        );
     }
 
     if ctx.json {
@@ -170,7 +175,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         });
     }
 
-    let word = if back { "도로 집음" } else { "미룸" };
+    // **갈래마다 제 `say` 를 적는다** — 키를 `if` 로 고르면 소스를 훑는 시험
+    // (`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
+    let word = match back {
+        true => crate::i18n::say(ctx.lang(), "defer.undid"),
+        false => crate::i18n::say(ctx.lang(), "defer.did"),
+    };
     let mut out: Vec<String> = moved
         .done
         .iter()
@@ -187,17 +197,20 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),
-            paint(style::DIM, if back { "이미 계획에 있다" } else { "이미 미뤄 뒀다" })
+            paint(
+                style::DIM,
+                match back {
+                    true => crate::i18n::say(ctx.lang(), "defer.already_in"),
+                    false => crate::i18n::say(ctx.lang(), "defer.already_out"),
+                },
+            )
         ));
     }
     // **아직 계획 밖이면 도로 집을 줄을 댄다.** 제 줄을 풀었든 원래 안 미뤘든,
     // 미룬 에픽·부모 밑이면 그 줄을 도로 집어야 풀린다.
     for (id, root) in &moved.shelved {
-        out.push(format!(
-            "{}  {}",
-            paint(style::ID, id),
-            paint(style::DIM, &crate::view::shelved_by(root))
-        ));
+        let said = crate::view::shelved_by(root, ctx.lang());
+        out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
     }
     Ok(out)
 }

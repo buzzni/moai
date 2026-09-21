@@ -34,6 +34,28 @@ impl Repo {
         Repo { root, config, moved_from: None }
     }
 
+    /// 시험용 — **딸린 워크트리에서 루트의 트래커로 옮겨 온** [`Repo`]. [`Repo::here`] 와
+    /// [`Repo::root`] 가 갈린다. [`Repo::at`] 만으로 세운 시험은 둘이 늘 같아, 둘을 헷갈린 자리를
+    /// 하나도 못 잡는다(탐색기가 읽음 파일을 `here()` 로 고르던 자리, 리뷰).
+    #[cfg(test)]
+    pub fn moved(root: PathBuf, config: Config, from: PathBuf) -> Repo {
+        Repo { root, config, moved_from: Some(from) }
+    }
+
+    /// 같은 트래커를 **딴 체크아웃의 눈으로** — [`Repo::here`] 만 갈아 끼운다.
+    ///
+    /// 훅이 쓴다(moai-acf7): `MOAI_HERE=1` 로 제 `.moai` 를 든 워크트리가 `moai -C <루트> …` 를 치면
+    /// 판정할 스냅샷은 루트의 것이지만 **누구인가는 그 워크트리**다. 이름을 루트에서 읽으면 그
+    /// 워크트리가 쥔 일이 통째로 "옆의 것" 이 되어(`worktree::away`) 규칙이 제 일을 못 본다.
+    ///
+    /// **읽기 전용 [`Repo`] 에만 쓴다.** `moved_from` 을 읽는 자리는 [`Repo::here`] 말고 둘 더
+    /// 있고(`note_held` 의 물러설 자리, [`with_write`] 가 [`MOVED`] 에 미는 줄), 그 둘에게 이
+    /// 값은 거짓말이다 — 아무것도 옮겨 오지 않았다. 지금 부르는 자리(`cmd/hook.rs` 의 `route_one`)
+    /// 는 그 [`Repo`] 로 `read()` 만 한다. 여기로 쓰는 길이 생기면 `moved_from` 을 쪼갠다.
+    pub fn seen_from(self, here: PathBuf) -> Repo {
+        Repo { moved_from: Some(here), ..self }
+    }
+
     /// 이 세션이 **선 체크아웃** — 트래커를 루트로 옮겨 왔으면 옮겨 오기 전의 자리다(moai-y7go).
     ///
     /// [`Repo::root`] 는 **트래커가 사는 곳**이다. 둘은 딸린 워크트리에서만 갈리는데, 이 저장소는
@@ -80,7 +102,7 @@ pub fn remember_invoked() {
 /// `MOAI_HERE=0` 을 켬으로 읽어, 끄려던 사람에게 말없이 갈라진 스냅샷을 줬다.
 /// 켜는 낱말만 켠다 — `crate::skill` 의 `MOAI_BLESS` 와 같은 자다(거기도 `MOAI_BLESS=0` 이
 /// 커밋된 트리를 다시 쓰던 자리였다).
-fn here_wanted() -> bool {
+pub(crate) fn here_wanted() -> bool {
     let v = std::env::var_os("MOAI_HERE");
     let v = v.as_ref().map(|v| v.to_string_lossy().trim().to_ascii_lowercase());
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
@@ -138,11 +160,100 @@ impl Load {
     }
 }
 
-/// `.moai` 를 못 찾았을 때의 말. **다른 곳의 저장소를 부르는 길(`-C`)을 함께 댄다** —
-/// 등록한 프로젝트를 한눈에 보는 `status` 에 익은 사람은 `.moai` 밖에서 `add`·`mv` 도
-/// 될 줄 알고, 쓰는 명령은 어느 프로젝트인지 모르니 멈추는 것이 맞다(moai-6au6).
-pub const NOT_A_REPO: &str =
-    "moai 저장소가 아니다 (.moai/ 를 못 찾았다). `moai init` 으로 시작하거나, 다른 곳의 저장소면 `moai -C <dir> <명령>` 으로 부른다";
+// **`.moai` 를 못 찾았다는 말은 이 층에 없다**(moai-5j49, 2026-09-21 사용자 결정). `.moai` 밖에서
+// 아무 명령이나 치면 서는 첫 화면이라 영어로 골라 온 사람이 가장 먼저 읽는 줄인데, 저장 계층은
+// 화면 말을 모른 채 둔다는 2026-09-20 결정이 그 줄을 여기 묶어 두고 있었다. 이제 찾기만 여기서
+// 하고(`Repo::find`) 못 찾은 것을 말로 옮기는 자리는 `crate::cmd::open_repo` 하나다.
+//
+// **나머지 다섯은 여기 남는다**(같은 결정) — `디렉터리가 아니다`·`id 가 두 번 있다`·
+// `적어 온 말도 안 남았다`·`경로에 디렉터리가 없다`·락 시간초과. 넷이 `Repo::with_write` 와
+// `Lock` 안이라, 거기까지 영어로 세우려면 `crate::fail::Fail` 이 자료를 들고 나중에 펴지는
+// 꼴이 되어야 한다 — `Fail::message` 를 읽는 자리가 열일곱이고, 쓰기 경로의 오류 꼴이 통째로
+// 바뀐다. 0.1.1 로 미뤘다(idea `moai-uqxn`). `config::Config` 의 검증 글 열넷도 `open_repo` 를
+// 지나 사람에게 닿지만 그쪽은 이 층이 아니다(idea `moai-gbk3`).
+//
+// **`///` 로 적지 않는다**(리뷰) — 이 글이 딸릴 항목은 지워진 `NOT_A_REPO` 였다. 문서 주석으로
+// 두면 바로 아래 [`CLIMBED`] 에 들러붙어, 상관없는 static 의 요약 줄이 이 글이 된다.
+
+/// 이 프로세스가 **제 체크아웃 밖으로 올라가 잡은 트래커** — `(선 자리, 잡은 뿌리)`.
+///
+/// [`MOVED`] 와 **같은 꼴로** 담아 두기만 하고 `main` 이 찍는다. 담는 자리는 다르다 — 아래를 본다.
+///
+/// **제 체크아웃 안에서 올라간 것은 한 줄도 안 낸다.** 제 저장소의 하위 디렉터리에 선 사람에게
+/// 매번 알리면 그건 소음이고, 소음은 곧 아무도 안 읽는 줄이다. 남는 것은 잡은 트래커가 내가 선
+/// 체크아웃 **밖**일 때뿐이고(`~/.moai` 하나가 홈 아래 전부를 잡는 꼴, 그리고 `.moai` 없는 클론
+/// 안에서 그 위의 트래커를 잡는 꼴), 그게 바로 알릴 값이 있는 자리다.
+///
+/// **적는 말이 "썼다" 가 아니다.** 여기 담기는 것은 *찾기*의 결과라 `status`·`ready`·`show` 도
+/// 지난다 — `MOVED` 처럼 "썼다" 로 적으면 읽기만 한 명령이 일어나지 않은 쓰기를 주장한다.
+static CLIMBED: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+
+/// 올라가 잡은 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다.
+pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
+    CLIMBED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// `.moai` 를 가진 조상을 찾는다 — **위로 끝까지 간다.**
+///
+/// **천장을 두었다가 걷었다**(moai-a2kn, 2026-09-20 사용자 결정 둘째 판). 한때 "내 것이 아닌
+/// 디렉터리로는 안 올라간다" 를 세웠는데, 둘째 판 리뷰가 재 보니 값이 무거웠다.
+///
+/// - **훅이 조용히 꺼졌다.** 훅은 트래커를 읽기만 하는데(`cmd::hook` 에 `with_write` 가 없다)
+///   천장에 걸리면 [`Repo::find`] 가 못 찾고 `decide` 가 `None` 을 내어, 규칙 셋이
+///   stderr 한 줄 없이 통째로 꺼졌다. 막아서 얻는 것이 없는 자리에서 잃는 것만 컸다
+/// - **임자(uid)로 재는 것이 양쪽으로 틀렸다.** 조에 공유한 체크아웃·CI 가 받아 둔 체크아웃·
+///   `sudo` 는 제 트래커를 잃고, 모두 uid 0 인 컨테이너에서는 아무것도 안 막았다
+/// - **거절문이 준 길이 도리어 가르쳤다.** `moai -C <남의 자리>` 는 천장을 그냥 지나고,
+///   `여기서 moai init` 은 트래커를 하나 더 세운다
+///
+/// 남은 것은 **읽기는 관대하고 쓰기는 엄하다** 는 규약 그대로다 — 찾기는 안 막고, 못 쓰는
+/// 트래커는 쓰기가 제 자리에서 거절한다(파일 권한이 이미 그 문이다). 대신 어느 트래커를
+/// 잡았는지를 [`CLIMBED`] 가 한 줄로 비춘다.
+fn look(from: &Path) -> Option<PathBuf> {
+    let (root, climbed) = climb(from)?;
+    // **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
+    // 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
+    // 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+    if climbed && std::env::current_dir().is_ok_and(|cwd| cwd == from) {
+        let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+        let pair = (from.to_path_buf(), root.clone());
+        if !told.contains(&pair) {
+            told.push(pair);
+        }
+    }
+    Some(root)
+}
+
+/// 찾은 뿌리와 **체크아웃을 두고 올라왔는가**. 뒤의 값이 알림을 가른다.
+///
+/// 가르는 자는 오는 길에 지난 `.git` 이다 — 트래커보다 **아래**에 있는 `.git` 은 "내가 선
+/// 체크아웃을 두고 그 밖의 트래커를 잡았다" 는 뜻이고, 그것이 알릴 값이 있는 모양이다.
+///
+/// - `.moai` 없는 클론 안에서 친 `add` 가 그 위의 `~/.moai` 에 드는 것 — 알린다
+/// - `P/vendor`(겹쳐 둔 저장소)에서 P 의 트래커를 쓰는 것 — 알린다. 일부러 살려 둔 길이지만
+///   어느 트래커에 드는지는 보여야 한다
+/// - 모노레포의 `top/projA/sub` 가 `top/projA/.moai` 를 잡는 것 — 조용하다(같은 체크아웃 안)
+/// - git 을 안 쓰는 프로젝트의 하위 디렉터리 — 조용하다. 거기서는 "내 프로젝트 위" 와 "남의
+///   트래커 위" 를 가를 값이 아예 없어, 매번 한 줄을 내면 그건 소음이고 소음은 곧 아무도 안
+///   읽는 줄이다. 이 한 자리는 못 본 채로 둔다
+fn climb(from: &Path) -> Option<(PathBuf, bool)> {
+    let mut dir = from.to_path_buf();
+    let mut left_a_checkout = false;
+    loop {
+        // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
+        // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
+        // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
+        if dir.join(".moai").is_dir() {
+            return Some((dir, left_a_checkout));
+        }
+        if !left_a_checkout {
+            left_a_checkout = dir.join(".git").exists();
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
 
 /// 디렉터리 하나를 [`Repo::open`] 으로 연 결과.
 ///
@@ -163,12 +274,8 @@ pub enum Opened {
 }
 
 impl Repo {
-    /// `.moai/` 를 가진 디렉터리를 위로 찾는다. 깊이를 코드에 박지 않는다.
-    pub fn discover() -> R<Repo> {
-        Repo::find()?.ok_or_else(|| NOT_A_REPO.into())
-    }
-
-    /// [`Repo::discover`] 와 같되 **못 찾은 것을 실패로 접지 않는다** — `None`.
+    /// `.moai/` 를 가진 디렉터리를 위로 찾는다 — **못 찾은 것을 실패로 접지 않는다**(`None`).
+    /// 깊이를 코드에 박지 않는다([`look`]). 못 찾은 것을 말로 옮기는 자리는 [`crate::cmd::open_repo`] 다.
     ///
     /// 못 찾은 것과 찾았는데 설정이 깨진 것은 다르다. `.moai` 밖에서 부른
     /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
@@ -198,18 +305,25 @@ impl Repo {
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
     pub fn find_from(dir: &Path) -> R<Option<Repo>> {
-        let Some(found) = Repo::found_root(dir) else { return Ok(None) };
-        // **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
-        // 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
-        // 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
-        // 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
-        // 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
+        Repo::found_root(dir).map(Repo::from_found).transpose()
+    }
+
+    /// 찾은 자리로 [`Repo`] 를 짓는다 — **옮겨 가는 길은 여기 하나다**([`Repo::find_from`] 이 쓴다).
+    /// 옮기지 않는 [`Repo::find_here`] 와 갈라 두지 않으면 한쪽만 `MOAI_HERE` 를 보거나 한쪽만
+    /// 워크트리를 안 옮긴다.
+    ///
+    /// **`MOAI_HERE` 는 이 체크아웃에 쓴다.** 일부러 갈라 놓는 자리다 — 옆 스냅샷이 갈라진 상태를
+    /// 짓는 시험과, 그 워크트리에서만 쓰는 트래커를 든 사람이다. 옮기는 것은 막는 것이 아니라
+    /// 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
+    /// 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
+    /// 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
+    fn from_found(found: PathBuf) -> R<Repo> {
         let Some(root) = Repo::redirect(&found) else {
-            return Repo::rooted(found).map(Some);
+            return Repo::rooted(found);
         };
         // **설정은 한 번만 읽는다** — 찾은 자리로 [`Repo`] 를 지어 놓고 버리던 판은 워크트리의
         // `config.toml` 을 읽고 안 쓴 채 버렸다. 훅이 도구 호출마다 지나는 길이다.
-        Ok(Some(Repo { moved_from: Some(found), ..Repo::rooted(root)? }))
+        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root)? })
     }
 
     /// [`Repo::find_from`] 과 같되 **안 옮긴다** — 찾은 자리의 트래커 그대로다.
@@ -240,18 +354,7 @@ impl Repo {
     /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
     /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
     fn found_root(dir: &Path) -> Option<PathBuf> {
-        let mut dir = dir.to_path_buf();
-        loop {
-            // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
-            // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
-            // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
-            if dir.join(".moai").is_dir() {
-                return Some(dir);
-            }
-            if !dir.pop() {
-                return None;
-            }
-        }
+        look(dir)
     }
 
     fn rooted(root: PathBuf) -> R<Repo> {
@@ -269,11 +372,10 @@ impl Repo {
     ///
     /// 경로는 **받은 철자 그대로** 뿌리가 된다. 링크를 풀지 않는다 — 풀지 말지는
     /// 경로를 가진 쪽(`user_config::resolve_dir`)이 이미 정했다.
+    ///
+    /// **"없다" 를 가르는 자는 [`gone`] 하나다**(moai-blvx) — 읽음 쪽([`crate::read_marks::settle`])도
+    /// 같은 자를 쓴다. 닫은 글로 여기 두던 판은 두 표면이 같은 자리를 달리 불렀다.
     pub fn open(dir: &Path) -> R<Opened> {
-        let gone = |e: &std::io::Error| {
-            // 경로 중간이 파일이면(`file/sub`) `NotADirectory` 다 — 없는 것과 같다.
-            matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
-        };
         match std::fs::metadata(dir) {
             Ok(m) if m.is_dir() => {}
             Ok(_) => return Err(Fail::new(format!("디렉터리가 아니다 — {}", dir.display()))),
@@ -413,11 +515,30 @@ impl Repo {
         // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
         // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
         // 본문은 아래 바뀐 줄에서 — 둘 다 스냅샷을 쓰기 전이라 거절하면 아무것도 안 남는다.
+        //
+        // **이 쓰기가 짓는 줄은 id 로 안 부른다**(moai-1rkl) — 거절하면 그 id 는 어디에도 안 남아,
+        // 받는 쪽이 없는 것을 찾으러 간다. 그 줄의 제목 한 토막으로 가리킨다.
         for e in &entries {
-            for (what, t) in [("노트", &e.text), ("메모", &e.note)] {
-                if let Some(t) = t {
-                    crate::model::check_text_size(&e.id, what, t)?;
-                }
+            for (what, t) in [("note", &e.text), ("memo", &e.note)] {
+                let Some(t) = t else { continue };
+                // **가리키는 말은 거절할 때만 짓는다**([`crate::model::check_text_size`] 가 늦게
+                // 부른다). 미리 지으면 `create` 처럼 글이 없는 저널 줄까지 `original` 과 `issues` 를
+                // 통째로 훑고 제목을 두 벌 베낀다 — 8,000줄 계획이면 락을 쥔 채 그 헛일이 8,000번이다.
+                //
+                // **제목은 저널 줄에도 있다.** 스냅샷에서 못 찾는 줄(같은 쓰기가 세우고 다시
+                // 지운 줄)에 빈 글로 떨어지던 판은 `새 줄 ''` 을 냈다 — id 도 제목도 아니라,
+                // 받는 쪽에 손잡이가 하나도 안 남는다. `create`·`rm` 이 옮겨 적은 `title` 을
+                // 다음 자리로 두고, 그것마저 없으면 id 라도 댄다.
+                let at = || match original.iter().any(|o| o.id == e.id) {
+                    true => e.id.clone(),
+                    false => {
+                        match issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).or(e.title.as_deref()) {
+                            Some(t) => crate::model::unwritten(t),
+                            None => e.id.clone(),
+                        }
+                    }
+                };
+                crate::model::check_text_size(at, what, t)?;
             }
         }
 
@@ -432,13 +553,20 @@ impl Repo {
                 // 남는다. 저널의 `title` 을 위에서 재지 않는 것은 그것이 스냅샷 제목의 사본이라서다 —
                 // 거기서 재면 옛 큰 제목을 든 줄을 `rm` 으로도 못 치운다.
                 for (what, now, before) in [
-                    ("제목", Some(&i.title), was.map(|o| &o.title)),
-                    ("본문", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
+                    ("title", Some(&i.title), was.map(|o| &o.title)),
+                    ("body", i.body.as_ref(), was.and_then(|o| o.body.as_ref())),
                 ] {
                     if let Some(text) = now
                         && now != before
                     {
-                        crate::model::check_text_size(&i.id, what, text)?;
+                        // 이번에 지은 줄이면 id 가 아니라 제목으로 가리킨다(moai-1rkl).
+                        // **거절할 때만 짓는다** — 넘치는 글은 드물고 `unwritten` 은 제목을 두 벌
+                        // 베낀다. 500줄 계획이면 그 헛일을 500번 하고 전부 버리던 자리다.
+                        let at = || match was {
+                            Some(_) => i.id.clone(),
+                            None => crate::model::unwritten(&i.title),
+                        };
+                        crate::model::check_text_size(at, what, text)?;
                     }
                 }
                 // **칸을 안 건드린 쓰기는 칸 이름을 다시 안 묻는다**(moai-hym7, 사람이
@@ -447,7 +575,15 @@ impl Repo {
                 // 고치는 것까지 막으면 그 줄은 도구 안에서 영영 못 만진다. 옮기는 쓰기는
                 // 그대로 엄하다: 갈 칸은 이번에 쓰는 값이라 여기가 서지 않는다.
                 let kept = was.is_some_and(|o| o.status == i.status);
-                i.validate_keeping(&self.config, kept)?;
+                // **여기도 id 로 안 부른다**(moai-1rkl) — 위의 크기 검사만 고치고 두면 같은
+                // 쓰기가 한 축에서는 제목을, 다른 축에서는 없는 id 를 댄다. 실제로 `add --from`
+                // 에 `#bug,perf` 한 줄을 준 부름이 `<안 남을 id>: 태그에 …` 를 냈고, 같은 계획을
+                // 두 번 돌리면 그때마다 다른 id 가 나왔다. **갈아 끼우는 자는 한 자리다**
+                // ([`crate::model::point_at_unwritten`]) — 검사마다 따로 적으면 두 벌로 갈린다.
+                i.validate_keeping(&self.config, kept).map_err(|said| match was {
+                    Some(_) => said,
+                    None => crate::model::point_at_unwritten(&i.id, &i.title, said),
+                })?;
             }
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
@@ -497,11 +633,8 @@ impl Repo {
             // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
             // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
             // 말이었는지 대어 `moai note` 로 다시 적게 한다.
-            let mut worded: Vec<&str> = entries
-                .iter()
-                .filter(|j| j.text.is_some() || j.note.is_some())
-                .map(|j| j.id.as_str())
-                .collect();
+            let mut worded: Vec<&str> =
+                entries.iter().filter(|j| j.text.is_some() || j.note.is_some()).map(|j| j.id.as_str()).collect();
             worded.dedup();
             let why = if worded.is_empty() {
                 e.message
@@ -777,7 +910,14 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
     // 적는다(`Issue::arrive`, moai-38mh).
     issue.arrive(cfg);
     issue.normalize();
-    issue.validate(cfg)?;
+    // **여기서 거절하면 이 id 를 안 댄다**(moai-1rkl). 거절은 쓰기를 통째로 물리므로 방금 뽑은
+    // id 는 어디에도 안 남는데, [`Issue::validate_fields`] 의 말은 일곱 자리가 모두 `<id>: ` 로
+    // 시작한다 — `add --from` 에 `#bug,perf` 한 줄을 준 부름이 없는 id 를 대고, 같은 계획을 두
+    // 번 돌리면 그때마다 다른 id 가 나왔다. 크기 검사만 고치고 두면 같은 쓰기가 축마다 다른
+    // 말을 하므로, **만드는 쓰기가 다 지나는 이 자리**에서 함께 건다.
+    if let Err(said) = issue.validate(cfg) {
+        return Err(crate::model::point_at_unwritten(&issue.id, &issue.title, said).into());
+    }
     let entry = JournalEntry::create(&issue.id, &issue.title, &issue.created_at, by);
     issues.push(issue.clone());
     Ok((entry, issue))
@@ -841,6 +981,133 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()
     Ok(())
 }
 
+/// 이 자리에 트래커를 세우면 무엇이 어긋나는가(moai-pjrr·moai-mz0e) — 없으면 `None`.
+///
+/// 묻는 것은 **명령이 어느 트래커로 가는가** 하나인데, 자리마다 답이 달라 [`Elsewhere`] 로 가른다.
+///
+/// - **딸린 워크트리**([`Elsewhere::Worktree`]): 워크트리 안에서 친 `moai` 는 주 체크아웃의 트래커를
+///   읽고 쓴다(moai-y7go). 여기 심은 `.moai` 는 **아무도 안 읽고**, 커밋되면 병합에서 겨룬다 —
+///   그래서 거절한다
+/// - **위에 트래커가 있는 하위 디렉터리**([`Elsewhere::Above`]): 여기 세우면 이 밑의 명령은 여기
+///   것을 쓰고 옆 디렉터리는 위의 것을 쓴다. 심은 것이 **읽히기는 한다** — 그래서 알리기만 한다
+///
+/// **둘을 가른 것은 값이 다르기 때문이다**(2026-09-20 사용자 결정 둘째 판). 위로 찾기에는 경계를
+/// 그을 자가 없다 — 천장을 두었다가 걷은 것이 같은 날의 moai-a2kn 이고, 그 결정은 "`여기서
+/// moai init` 은 트래커를 하나 더 세운다" 를 **살아 있는 길**로 적었다. `~/.moai` 를 둔 사람의 새
+/// 프로젝트마다 거절을 세우면 그 길이 막힌다. 워크트리는 다르다: 거기 심은 것은 어느 명령도 안 읽어,
+/// 알림 한 줄로 두면 사람이 그것을 모른 채 커밋한다.
+///
+/// `MOAI_HERE` 는 둘 다 끈다 — 그 워크트리에서만 쓰는 트래커를 일부러 두는 길이다.
+///
+/// **위로 찾는 자는 `.moai` 가 디렉터리인가로 가른다** — [`look`] 의 위로 찾기와 같은 자다.
+/// `config.toml` 까지 봐야 트래커라고 세는 자리도 있지만([`crate::worktree::tracker_root`]), 여기서
+/// 물어야 하는 것은 "명령이 어디로 가는가" 라 그쪽 자를 쓰면 설정이 빠진 `.moai` 위에서 둘이 갈린다.
+///
+/// **찾은 자리에서 한 번 더 옮김을 묻는다**(리뷰) — `.moai` 를 가진 조상을 찾았다고 거기가 끝이
+/// 아니다. [`Repo::find_from`] 은 그 자리에서 [`crate::worktree::tracker_root`] 로 한
+/// 번 더 옮겨 가므로(moai-y7go), 묻지 않으면 도구가 **제가 안 읽는 트래커**를 댄다.
+pub(crate) fn planted_elsewhere(root: &Path) -> Option<Elsewhere> {
+    // **`MOAI_HERE` 가 이 물음을 통째로 끈다.** 아래 [`Repo::opened_root`] 도 같은
+    // 손잡이를 거치지만(`Repo::redirect`), 여기 한 줄로 세워야 두 갈래가 한 자로 꺼진다 — 그쪽에
+    // 맡기던 판은 켠 것이 어느 갈래를 끄는지가 두 모듈을 오가야 보였다.
+    if here_wanted() {
+        return None;
+    }
+    // **워크트리를 먼저 묻는다.** 워크트리의 루트는 조상이기도 해 아래 자가 같은 자리를 대는데,
+    // 그때 대야 할 말은 "위에 있다" 가 아니라 "여기는 워크트리다" 다.
+    let main = Repo::opened_root(root);
+    if main != root {
+        return Some(Elsewhere::Worktree(main));
+    }
+    let mut at = root.to_path_buf();
+    while at.pop() {
+        if at.join(".moai").is_dir() {
+            // **여기가 두 갈래를 가른다**(리뷰). 워크트리의 **밑자리**에서는 위의 물음이 안 선다 —
+            // [`crate::worktree::main_root`] 는 밑길을 주 체크아웃에 그대로 비추므로
+            // (`<wt>/src` → `<main>/src`), 거기 트래커가 없으면 "워크트리다" 가 아니라고 답한다.
+            // 그대로 두던 판은 워크트리의 `.moai` 를 대며 `moai -C <워크트리> init` 을 시켰는데,
+            // 그 자리의 명령은 모두 루트의 트래커를 쓰고 그 줄을 따라 친 사람은 병합에서 겨룰
+            // 파일을 고쳤다.
+            let main = Repo::opened_root(&at);
+            if main != at {
+                return Some(Elsewhere::Worktree(main));
+            }
+            return Some(Elsewhere::Above(at));
+        }
+    }
+    None
+}
+
+/// **"여기서 `moai init` 하라" 를 대도 되는가** — 안 되면 대신 댈 주 체크아웃이다(moai-nppo).
+///
+/// [`planted_elsewhere`] 의 두 갈래 가운데 [`Elsewhere::Worktree`] 하나만 든다. `init` 이 거절하는
+/// 자리가 그것뿐이라, 표면들이 묻는 것도 그 하나다 — [`Elsewhere::Above`] 는 세워지고 `init` 이
+/// 세우고 나서 알리므로 대는 말을 바꿀 까닭이 없다.
+///
+/// **가르는 자를 여기 하나로 둔다.** 한눈 보기(`view::unopened`)·`moai project add|ls`·
+/// `moai init --check` 가 저마다 갈래를 풀면 한 곳을 고친 날 나머지가 옛 말을 한다 — 등록한
+/// 워크트리 한 줄이 영영 `init 전` 으로 서고 그 줄이 대는 명령이 1 로 끝나던 자리가 그것이다.
+///
+/// **이미 여기 심겨 있으면 안 묻는다**(리뷰) — [`crate::cmd::init::run`] 의 `dir.exists()` 와 같은
+/// 자다. 거절은 **새 트래커가 설 때만** 서고, 심겨 있는 자리에서 `init` 이 하는 일은 딸린 파일을
+/// 다시 맞추는 것뿐이라 0 으로 끝난다. 그 물음을 부르는 쪽 하나에만 두던 판은 `.moai` 를 커밋하는
+/// 저장소(여기가 그렇다)의 **모든 워크트리**에서 `moai init --check` 가 "`moai init` 은 여기 안
+/// 선다" 를 냈다 — 그 말은 거짓인 데다, 따라 친 `moai -C <주 체크아웃> init` 은 방금 잰 것과 **다른
+/// 체크아웃**의 `AGENTS.md` 와 딸린 파일을 고쳐, 이 워크트리의 낡은 블록은 영영 낡은 채로 남았다.
+/// 묻는 자리를 여기 두어야 표면이 다섯이 되어도 같은 답이 선다.
+pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
+    if dir.join(".moai").exists() {
+        return None;
+    }
+    match planted_elsewhere(dir) {
+        Some(Elsewhere::Worktree(main)) => Some(main),
+        Some(Elsewhere::Above(_)) | None => None,
+    }
+}
+
+/// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**
+pub(crate) enum Elsewhere {
+    /// 딸린 워크트리의 주 체크아웃. 여기 심은 트래커는 아무도 안 읽어 `init` 이 **거절하고**,
+    /// "여기서 `init` 하라" 를 대는 표면들은 **그 자리를 대신 댄다**(moai-nppo).
+    Worktree(PathBuf),
+    /// 위에서 찾은 트래커의 뿌리. 여기 세운 것도 읽히므로 **알리기만 한다.**
+    Above(PathBuf),
+}
+
+/// **그 자리가 없다는 뜻인가** — 있고 없고를 가르는 잣대는 도구에 하나다(moai-blvx).
+///
+/// 경로 가운데가 파일이면(`file/sub`) `NotADirectory` 다. 그 자리는 **없는 것**이지 잠깐 못 보는
+/// 것이 아니라, `NotFound` 와 한 낱말로 읽는다.
+///
+/// [`Repo::open`] 안에 닫힌 글로 있던 것을 꺼냈다. 숨어 있던 동안 [`crate::read_marks::settle`] 은
+/// `NotFound` 만 조용히 지나가, 등록한 줄의 경로 가운데가 파일로 바뀌면 저장소 쪽은 조용히 "없다"
+/// 로 지나가는데 읽음 쪽은 적재마다 "자리를 못 풀어 적힌 철자로 든다 — Not a directory" 를 냈다
+/// (리뷰 moai-f31d.lhe 12번). 같은 조건을 두 표면이 달리 부르던 자리다.
+///
+/// **여기 안 든 갈래는 없는 것이 아니다.** `EACCES`·`ELOOP`·`ESTALE` 는 자리가 서 있는데 못 닿은
+/// 것이라, 읽는 쪽은 까닭을 대고 쓰는 쪽은 대기 자리로 간다(`read_marks` 의 `spool_at`, moai-bdej) —
+/// 그것을 "없다" 로 접으면 떨어진 도장이 갈 곳을 잃는다. 가르는 잣대가 [`crate::user_config::unreadable`]
+/// 과 따로 서는 까닭도 그것이다: 그쪽은 **다시 해 볼 값**을 가르고 이쪽은 **있는가**를 가른다.
+pub(crate) fn gone(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
+}
+
+/// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
+pub(crate) fn dir_of(path: &Path) -> &Path {
+    path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
+}
+
+/// 그 파일의 락 자리 — 곁의 `<이름>.lock`.
+///
+/// **락 자리를 세는 자를 하나로 둔다**(리뷰) — 같은 디렉터리에 사는 두 파일이 저마다 락 이름을 세면,
+/// 자리 규칙이 바뀌는 날 한쪽만 따라가 둘이 서로를 안 막는다. [`crate::user_config::update`] 가 두 철자의
+/// 락이 갈렸을 때를 재 뒀다(스무 개 중 열 개가 사라졌다) — 이 도구가 못 견딘다는 그 조용한 손실이다.
+pub(crate) fn lock_beside(path: &Path) -> PathBuf {
+    let mut name = path.file_name().map(std::ffi::OsString::from).unwrap_or_else(|| "config".into());
+    name.push(".lock");
+    dir_of(path).join(name)
+}
+
 /// `flock(2)`. 프로세스가 죽으면 커널이 놓아 준다.
 ///
 /// 직접 만든 락 파일(`O_EXCL`)을 쓰지 않는 이유가 이것이다 — 죽으면 찌꺼기가
@@ -860,7 +1127,10 @@ impl Lock {
         loop {
             match f.try_lock_exclusive() {
                 Ok(()) => return Ok(Lock(f)),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+                {
                     if start.elapsed() >= LOCK_TIMEOUT {
                         return Err(Fail::coded(
                             format!(
@@ -910,8 +1180,97 @@ impl Drop for Lock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
     use crate::model::{Kind, Status};
+    use crate::scratch::Scratch;
+
+    /// `<자리>/a/b/c` 를 만든다. 위로 찾기를 재는 시험들이 함께 쓴다.
+    fn tree(name: &str) -> Scratch {
+        let s = Scratch::new(name);
+        std::fs::create_dir_all(s.join("a/b/c")).unwrap();
+        s
+    }
+
+    fn moai_at(dir: &Path) {
+        std::fs::create_dir_all(dir.join(".moai")).unwrap();
+    }
+
+    /// 찾은 뿌리만 — 못 찾았으면 `None`. 시험 대부분은 [`climb`] 의 둘째 값을 안 본다.
+    fn root_of(found: &Option<(PathBuf, bool)>) -> Option<&Path> {
+        found.as_ref().map(|(root, _)| root.as_path())
+    }
+
+    /// **체크아웃을 두고 올라왔는가** — 알릴지를 가르는 값이다.
+    fn climbed_out(found: &Option<(PathBuf, bool)>) -> bool {
+        matches!(found, Some((_, true)))
+    }
+
+    /// **처음 만난 `.moai` 가 이기고, 위로 끝까지 간다**(2026-09-20 사용자가 짚었다). 모노레포는
+    /// `.git` 하나에 하위 프로젝트마다 `.moai` 가 설 수 있다 — "저장소마다 트래커 하나" 로 읽는
+    /// 자를 두면 그 사람들이 제 트래커를 잃는다.
+    #[test]
+    fn each_project_in_a_monorepo_keeps_its_own_tracker() {
+        let s = tree("look-monorepo");
+        std::fs::create_dir_all(s.join(".git")).unwrap();
+        moai_at(s.path());
+        std::fs::create_dir_all(s.join("projA/sub")).unwrap();
+        std::fs::create_dir_all(s.join("projB/sub")).unwrap();
+        moai_at(&s.join("projA"));
+
+        let a = climb(&s.join("projA/sub"));
+        assert_eq!(root_of(&a), Some(s.join("projA").as_path()), "제 `.moai` 를 두고 모노레포 꼭대기로 갔다");
+        // 꼭대기의 `.git` 이 `projA` 를 품으니 그 안에서 올라간 것이다 — 알릴 일이 아니다.
+        assert!(!climbed_out(&a), "한 체크아웃 안에서 올라간 것을 밖이라고 했다");
+        let b = climb(&s.join("projB/sub"));
+        assert_eq!(root_of(&b), Some(s.path()), "`.moai` 없는 하위가 꼭대기의 것을 못 잡았다");
+        assert!(!climbed_out(&b), "한 체크아웃 안에서 올라간 것을 밖이라고 했다");
+    }
+
+    /// **겹쳐 둔 저장소에서도 바깥 프로젝트의 트래커를 쓴다.** git 꼭대기를 천장으로 두었다가
+    /// 걷어낸 까닭이다 — `P/vendor` 는 vendoring·서브모듈의 흔한 모양이고, 거기서 끊으면
+    /// moai-d3sy 가 고친 자리(사람을 P 에서 읽는다)가 도로 무너진다.
+    #[test]
+    fn a_repo_nested_in_a_project_still_writes_to_that_project() {
+        let s = tree("look-vendor");
+        moai_at(s.path());
+        let vendor = s.join("vendor");
+        std::fs::create_dir_all(vendor.join(".git")).unwrap();
+        let found = climb(&vendor);
+        assert_eq!(root_of(&found), Some(s.path()));
+        // 겹쳐 둔 저장소를 **두고** 올라갔다 — 어느 트래커에 드는지는 보여야 한다.
+        assert!(climbed_out(&found), "체크아웃을 두고 올라간 것을 안 알린다");
+    }
+
+    /// **알리는 자는 오는 길에 지난 `.git` 하나다.** 세 자리를 가른다.
+    ///
+    /// - `.moai` 없는 클론 **안**에서 그 위의 트래커를 잡는 자리 — 알린다. 알릴 값이 있는 꼴이
+    ///   바로 이것이고, "위로 오는 길 어딘가에 `.git` 이 있었나" 로 재던 판은 여기를 조용히 넘겼다
+    /// - 트래커가 선 자리가 곧 체크아웃 꼭대기인 자리 — 안 알린다. 제 저장소의 하위 디렉터리에 선
+    ///   사람에게 매번 한 줄을 내면 그건 소음이고, 소음은 아무도 안 읽는다
+    /// - **git 이 아예 없는 자리 — 안 알린다.** 거기서는 "내 프로젝트 위" 와 "남의 트래커 위" 를
+    ///   가를 값이 없다. 한때 알리던 자리인데, 그러면 git 을 안 쓰는 프로젝트의 하위 디렉터리에서
+    ///   친 **모든** 명령에 한 줄이 서서 도리어 못 읽는 줄이 됐다(리뷰 moai-0ftu.h80 3번)
+    #[test]
+    fn climbing_out_of_a_checkout_is_told_of_but_climbing_inside_one_is_not() {
+        let s = tree("look-climb-leak");
+        moai_at(s.path());
+        std::fs::create_dir_all(s.join("a/.git")).unwrap();
+        let leak = climb(&s.join("a/b"));
+        assert_eq!(root_of(&leak), Some(s.path()));
+        assert!(climbed_out(&leak), "`.moai` 없는 클론을 두고 올라간 것을 조용히 넘겼다");
+
+        let t = tree("look-climb-git");
+        std::fs::create_dir_all(t.join(".git")).unwrap();
+        moai_at(t.path());
+        let inside = climb(&t.join("a/b"));
+        assert_eq!(root_of(&inside), Some(t.path()));
+        assert!(!climbed_out(&inside), "체크아웃 안에서 올라간 것을 알렸다 — 소음이다");
+
+        let u = tree("look-climb-nogit");
+        moai_at(u.path());
+        let bare = climb(&u.join("a/b"));
+        assert_eq!(root_of(&bare), Some(u.path()));
+        assert!(!climbed_out(&bare), "git 이 없는 자리에서 매번 알린다 — 소음이다");
+    }
 
     /// **등록한 자리가 딸린 워크트리면 루트의 트래커를 연다**(moai-y7go, 리뷰 moai-71ht.jlh
     /// 사용자 결정) — 탐색기의 프로젝트 층이 이 문으로 열므로, 안 옮기면 같은 자리를 CLI 로 칠 때와
@@ -953,6 +1312,69 @@ mod tests {
         let Opened::Repo(repo) = Repo::open(&feat).unwrap() else { panic!("안 열렸다") };
         assert_eq!(repo.root, feat, "옮길 곳이 없는데 옮겼다");
         assert_eq!(repo.here(), feat, "안 옮겼는데 옮겼다고 적었다");
+    }
+
+    /// **위에 트래커가 있으면 그 자리를 찾아 낸다**(moai-pjrr). 막지는 않는다 — 여기 심은 것은 이
+    /// 밑에서 읽히고, 위로 찾기에는 경계를 그을 자가 없다(같은 날 moai-a2kn 이 천장을 걷었다).
+    /// 부르는 쪽이 이 값으로 알림 한 줄을 세운다.
+    ///
+    /// **`.moai` 가 디렉터리인가로 가른다** — 위로 찾는 [`look`] 과 같은 자다. 그 자가 갈리면
+    /// 여기서 지나간 자리를 명령이 잡는다.
+    ///
+    /// 한때 `cmd/init.rs` 에 섰다 — [`planted_elsewhere`] 가 이리로 오면서 그 파일의 것은 하나도
+    /// 안 재게 되었고, 재는 자와 시험이 갈리면 여기를 고치는 사람이 시험을 못 찾는다(리뷰).
+    #[test]
+    fn a_subdir_under_a_tracker_finds_the_one_above() {
+        let s = Scratch::new("init-above");
+        let deep = s.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(planted_elsewhere(&deep).is_none(), "트래커가 없는데 자리를 댔다");
+
+        moai_at(s.path());
+        match planted_elsewhere(&deep) {
+            Some(Elsewhere::Above(at)) => assert_eq!(at, s.path(), "댄 자리가 트래커의 자리가 아니다"),
+            Some(Elsewhere::Worktree(main)) => panic!("워크트리가 아닌데 워크트리라 했다 — {}", main.display()),
+            None => panic!("위의 트래커를 못 봤다"),
+        }
+
+        // 그 자리 자신은 안 묻는다 — 여기 이미 심겨 있으면 `run` 이 딸린 파일만 다시 맞춘다.
+        assert!(planted_elsewhere(s.path()).is_none(), "제 트래커를 남의 것으로 댔다");
+    }
+
+    /// **이미 심겨 있는 자리는 "여기 안 선다" 가 아니다**(리뷰) — [`init_belongs_at`] 은
+    /// [`crate::cmd::init::run`] 과 **같은 물음**에 답해야 한다. `run` 은 `.moai` 가 이미 있으면 안
+    /// 묻고 딸린 파일만 다시 맞춰 0 으로 끝나므로, 그 자리에서 "주 체크아웃에서 친다" 를 대면 대는
+    /// 말이 거짓이고 따라 친 명령은 **다른 체크아웃**의 `AGENTS.md` 를 고친다.
+    ///
+    /// `.moai` 를 커밋하는 저장소(이 저장소가 그렇다)에서는 워크트리마다 `.moai` 가 함께 와,
+    /// 그 갈래가 **모든 워크트리 세션**에 섰다. 밑자리는 그대로 주 체크아웃을 댄다 — 거기는 `run` 도
+    /// 거절하는 자리다.
+    #[test]
+    fn a_worktree_that_already_carries_a_tracker_is_not_sent_away() {
+        let dir = Scratch::real("init-belongs");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        moai_at(&main);
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        git(&main, &["worktree", "add", "-q", "side", "-b", "side"]);
+        let side = main.join("side");
+
+        // 가지가 `.moai` 를 함께 들고 왔다 — `moai init` 은 여기서 0 으로 끝난다.
+        assert!(side.join(".moai").is_dir(), "워크트리가 트래커를 안 들고 왔다");
+        assert_eq!(init_belongs_at(&side), None, "심겨 있는 워크트리를 딴 데로 보냈다");
+
+        // 밑자리에는 안 심겼다 — 거기는 `run` 도 거절하니 주 체크아웃을 댄다.
+        let deep = side.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(init_belongs_at(&deep), Some(main.clone()), "밑자리가 주 체크아웃을 못 댔다");
+
+        // 트래커를 걷으면 그 자리도 주 체크아웃을 댄다 — 가르는 것은 `.moai` 가 여기 있는가다.
+        std::fs::remove_dir_all(side.join(".moai")).unwrap();
+        assert_eq!(init_belongs_at(&side), Some(main), "안 심긴 워크트리를 제자리라 했다");
     }
 
     const T: &str = "2026-09-11T04:12:03Z";
@@ -1005,10 +1427,7 @@ mod tests {
         })
         .unwrap();
         let src = std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap();
-        let ids: Vec<&str> = src
-            .lines()
-            .map(|l| l.split('"').nth(3).unwrap())
-            .collect();
+        let ids: Vec<&str> = src.lines().map(|l| l.split('"').nth(3).unwrap()).collect();
         assert_eq!(ids, ["argos-0001", "argos-4aex", "argos-4aex.ae3", "argos-4aey"]);
     }
 
@@ -1037,8 +1456,10 @@ mod tests {
             Ok((vec![], ()))
         })
         .unwrap();
-        r.with_write(|_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())))
-            .unwrap();
+        r.with_write(|_, _, _| {
+            Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ()))
+        })
+        .unwrap();
         let j = r.journal_of("argos-4aex").unwrap();
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
@@ -1160,12 +1581,14 @@ mod tests {
     #[test]
     fn refuses_duplicate_ids() {
         let (r, _d) = repo("dup");
-        let e = r.with_write(|i, _, _| {
-            i.push(issue("argos-4aex"));
-            i.push(issue("argos-4aex"));
-            Ok((vec![], ()))
-        })
-        .unwrap_err().message;
+        let e = r
+            .with_write(|i, _, _| {
+                i.push(issue("argos-4aex"));
+                i.push(issue("argos-4aex"));
+                Ok((vec![], ()))
+            })
+            .unwrap_err()
+            .message;
         assert!(e.contains("두 번"), "{e}");
     }
 
@@ -1179,11 +1602,7 @@ mod tests {
         let (r, d) = repo("stale_row");
         let mut old = issue("argos-0001");
         old.status = Status::new("옛날칸");
-        std::fs::write(
-            d.join(".moai/issues.jsonl"),
-            format!("{}\n", serde_json::to_string(&old).unwrap()),
-        )
-        .unwrap();
+        std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
         r.with_write(|issues, _, _| {
             issues.push(issue("argos-0002"));
@@ -1206,11 +1625,7 @@ mod tests {
         let (r, d) = repo("stale_touch");
         let mut old = issue("argos-0001");
         old.status = Status::new("옛날칸");
-        std::fs::write(
-            d.join(".moai/issues.jsonl"),
-            format!("{}\n", serde_json::to_string(&old).unwrap()),
-        )
-        .unwrap();
+        std::fs::write(d.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&old).unwrap())).unwrap();
 
         r.with_write(|issues, _, _| {
             issues[0].title = "고친 제목".into();
@@ -1254,9 +1669,7 @@ mod tests {
     /// 본체와 어긋날 자리가 없다. 정규식으로 긁었으면 그 순간 파서가 둘이 된다.
     #[test]
     fn an_unreadable_line_still_yields_its_id() {
-        let load = parse_issues(
-            "{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n",
-        );
+        let load = parse_issues("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
         assert_eq!(load.errors.len(), 1);
         assert_eq!(load.errors[0].id.as_deref(), Some("argos-9999"));
         assert_eq!(load.reserved_ids().iter().next().map(String::as_str), Some("argos-9999"));

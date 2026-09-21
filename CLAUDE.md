@@ -215,7 +215,8 @@
 ## 한국어 글
 
 moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 한국어 글쓰기 플러그인 둘로 다듬어서
-넣는다(2026-09-18 사용자 결정, `moai-5wk4`). 규칙은 @AGENTS.md 의 "한국어 글" 에 있다.
+넣는다(2026-09-18 사용자 결정, `moai-5wk4`). 규칙은 @AGENTS.md 의 "Korean text" 에 있다
+(심는 블록이 영어로 통일되며 그 절의 이름이 바뀌었다, `moai-54k2`).
 
 - **까는 것은 `moai skill install` 이다.** moai 와 같은 scope 로 두 플러그인을 함께 깐다(`moai-lr1s`).
   사용자 전역에 깔지 않고, 에이전트가 스스로 `claude plugin install` 을 부르지 않는다
@@ -235,10 +236,14 @@ moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 �
 | 무엇을 | 등급 | 고르는 자 |
 |---|---|---|
 | 에픽 끝 | 한 칸 위 | `low` 뿐이면 `medium`, `medium` 이 있으면 `high`, `high` 가 있으면 `xhigh` — 멤버를 아래 세 줄로 잰다 |
-| | `max` | **쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 하나라도 있는 에픽** |
-| 에픽 밖 이슈 하나 | `low` | 글·주석·한 줄 고침, 동작이 안 바뀐다 |
-| | `medium` | 한 파일 안의 동작 변경, 시험으로 둘러싸인 것 |
-| | `high` | 여러 파일·쓰기 경로·동시성·저장 형식·훅, 되돌리기 어려운 것 |
+| | `max` | **any member touched the write path, concurrency, the storage format or hooks** 인 에픽 |
+| 에픽 밖 이슈 하나 | `low` | text, comments, a one-line fix; behaviour unchanged |
+| | `medium` | a behaviour change inside one file, ringed by tests |
+| | `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo |
+
+**잣대 칸이 영어인 것은 계약이다** — `moai init` 이 심는 블록과 감독 스킬이 영어로 통일된
+2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
+`the_rubric_is_the_review_table` 이 이 표의 그 칸과 글자째 견준다. 한쪽만 고치면 붉어진다.
 
 표면을 가로지르거나 설계 결정이 여럿 섞인 에픽은 한 칸 더 올린다. 망설여지면 한
 칸 올린다. 리뷰 모델은 그 등급을 따른다 — `medium` 이면 sonnet, `high` 부터 opus.
@@ -331,8 +336,8 @@ moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 �
 
 가르는 것은 **지금 집을 것인가** 다 — 에픽 안에서 나온 것이면 하나를 더 묻는다(아래).
 
-    moai add "무엇이 어긋났는지" -t chore     집을 것. 보드에 선다
-    moai idea add "이렇게 하면 어떨까"        나중에 볼 것. 일로 세지 않는다
+    moai add '무엇이 어긋났는지' -t chore     집을 것. 보드에 선다
+    moai idea add '이렇게 하면 어떨까'        나중에 볼 것. 일로 세지 않는다
 
 무언가 집고 있으면 앞의 줄은 그대로 치면 훅의 규칙 1 에 막힌다. 집은 일의
 에픽 안(`-e <에픽>`)이나 그 일의 자식(`--parent <id>`)으로 세운다 — 거절문이

@@ -1,268 +1,353 @@
-# 전체 명령
+# Every command
 
-`moai --help` 와 `moai <명령> --help` 가 참이다. 이 파일은 그 요약이라
-어긋나면 도움말이 이긴다.
+`moai --help` and `moai <command> --help` are the truth. This file is a summary of
+them, so where they differ the help wins.
 
-## 묶음은 둘이다
+## There are two kinds of group
 
-    moai epic add '저장 계층'                      에픽
-    moai milestone add 'v0.1'                      마일스톤
-    moai add '제목' -e <에픽> --milestone <마일스톤>
-    moai show <에픽|마일스톤 id>                   그 밑에 무엇이 있는지
-    moai show --milestone <id>                     그 마일스톤에 딸린 전부
+    moai epic add '<storage layer>'                an epic
+    moai milestone add 'v0.1'                      a milestone
+    moai add '<title>' -e <epic> --milestone <milestone>
+    moai show <epic|milestone id>                  what stands under it
+    moai show --milestone <id>                     everything attached to that milestone
 
-**소속은 물려받는다.** 자식은 부모의 에픽을, 이슈는 제 에픽의 마일스톤을
-물려받는다. `--parent <에픽>` 으로 만든 자식은 그 에픽에 든다. 이슈마다 다시
-적지 않는다 — 에픽을 옮기면 멤버가 따라온다.
+**Belonging is inherited.** A child inherits its parent's epic, an issue inherits
+its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
+Do not write it again on every issue — move the epic and the members come along.
 
-**묶음의 칸은 멤버에서 읽는다.** 에픽·마일스톤을 `moai mv` 로 옮기지 않는다 —
-멤버를 하나 집으면 `in_progress` 로, 다 끝나면 `done` 으로 저절로 선다. 남은
-멤버가 있는데 접으려면 그 멤버를 `moai defer` 한다 — 끝난 멤버가 하나도 없으면
-미뤄도 첫 칸이니, 그때는 묶음을 `moai defer` 해 계획에서 뺀다.
+**A group's column is read from its members.** Do not `moai mv` an epic or a
+milestone — pick up one member and it stands `in_progress`, finish them all and it
+stands `done`, by itself. To give up on a group while members are left, `moai defer`
+those members — and if no member ever finished, deferring them leaves it in the
+first column, so defer the group itself to take it out of the plan.
 
-## 거름망
+**While a milestone is running, what is inside it comes first.** Whether it is
+running is read the same way as above — if even one member stands in a started
+column, it is running. There is no command that opens it and no new field.
 
-쉼표는 "또는", 같은 플래그를 두 번 쓰면 "그리고" 다.
+- `moai ready` gives out the work inside it and leaves only `p0` outside. What is
+  running, and how many it held back, is one line under the list; on the board it is a `moai status` notice
+- **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
+  slot. In the ordering `p0` comes first and the milestone second
+- **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
+  through. What is already picked up is simply finished — the same ground as never taking work back late
+- If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
+- **A setup with only two columns has no running milestone** — there is no column
+  that says "started but not finished", so the rule itself does not stand. In that
+  setup `ready` and the board are as they were
 
-    moai show -s todo -t bug          todo 이면서 bug
-    moai show -s todo,review          todo 또는 review
-    moai show -e none                 에픽 없는 것
-    moai show --deferred              미뤄 둔 것만
-    moai show --stale 7               지금 칸에 이레 넘게 머문 것
-    moai show --tree                  에픽 → 이슈 → 자식
+## Filters
 
-## 워크트리 함께 보기
+A comma means "or"; the same flag twice means "and".
 
-에이전트가 git 워크트리를 하나씩 잡고 일하면, 지금 워크트리의 보드는 옆에서
-집고 옮긴 것을 모른다. `status`·`ready`·`show` 에 `--worktree` 를 붙이면 옆
-워크트리의 이슈를 겹쳐 본다. 탐색기(`moai tui`)는 겹친 채로 열고 `SPC t w` 가 끄고 켠다.
+    moai show -s todo -t bug          todo and bug
+    moai show -s todo,review          todo or review
+    moai show -e none                 the ones with no epic
+    moai show --deferred              only what is deferred
+    moai show --stale 7               stuck in the current column for more than seven days
+    moai show --tree                  epic → issue → child
 
-    moai ready --worktree             옆에서 집은 일은 빠지고 "잡고 있는 것" 에 선다
-    moai status --worktree            보드 머리에 "⎇ <워크트리들> 겹쳐 봄"
-    moai show --worktree --json       옆에서 온 줄에만 "branch" 키
+## Seeing the worktrees together
 
-같은 id 는 계획에서의 자리를 늦게 바꾼 줄 — 칸을 옮기거나(`status_since`) 미루거나
-도로 집은(`planned_at`) 때가 늦은 줄 — 이 서고, 같으면 `updated_at` 이 늦은 줄, 그것도
-같으면 지금 브랜치의 줄이다 — 필드만 고친 것은 옆에서 집은 것을 풀지 않고, 옆에서 늦게
-미룬 것은 여기서 먼저 집은 칸에 가려지지 않는다.
-여기서 `rm` 한 줄은 옆 줄로 되살아나지 않는다 — 갈라진 자리(`git merge-base`)에
-있던 줄이면 여기서 지운 것으로 읽는다. 단 옆에서 그 뒤에 집거나 고친 줄은 선다.
-메모(`moai note`)는 스냅샷을 안 바꿔 고친 것으로 안 센다 — 옆에서 메모만 남긴 줄은 숨고,
-그 메모는 브랜치를 합칠 때 저널에서 드러난다.
-지금 브랜치가 아닌 줄은 제목 앞에 `⎇ <브랜치>` 가 붙는다. **보여줄 때만
-겹친다** — 어느 파일도 바뀌지 않는다.
+When agents each take a git worktree, this worktree's board knows nothing of what
+was picked up and moved beside it. Add `--worktree` to `status`, `ready` or `show`
+and the sibling worktrees' issues are overlaid. The explorer (`moai tui`) opens with
+them overlaid and `SPC t w` turns it off and on.
 
-**쓰기는 루트의 트래커로 간다.** 딸린 워크트리 안에서 부른 `moai` 는 주 체크아웃의
-`.moai` 를 읽고 쓴다 — 워크트리의 스냅샷을 고치면 병합에서 그 파일이 충돌하고, 푸는 길이
-도구 밖에만 남기 때문이다. 어디에 썼는지는 한 줄로 알린다. 그 워크트리의 트래커를 일부러
-고치려면 `MOAI_HERE=1` 을 준다 — 옆 스냅샷이 갈라진 상태를 짓는 자리다.
+    moai ready --worktree             work picked up beside you drops out and stands under "held"
+    moai status --worktree            the board header says "⎇ <worktrees> overlaid"
+    moai show --worktree --json       only rows from beside you carry a "branch" key
 
-## 겨루는 집기 — `mv`·`defer` 의 `--from <칸>`
+For the same id, the row that changed its place in the plan last wins — the later
+column move (`status_since`) or defer / undefer (`planned_at`); on a tie the later
+`updated_at`; on a tie again the row on the current branch. So a field-only edit does
+not undo a pick-up made beside you, and a later defer made beside you is not hidden
+behind a column you picked up here first.
+A row `rm`-ed here does not come back as the sibling's row — if it existed at the
+point they split (`git merge-base`), it is read as deleted here. A row picked up or
+changed beside you after that does stand.
+A memo (`moai note`) does not change the snapshot, so it does not count as a change —
+a row that only got a memo beside you stays hidden, and that memo surfaces from the
+journal when the branches are merged.
+A row that is not on the current branch carries `⎇ <branch>` before its title.
+**They are overlaid for showing only** — no file changes.
 
-같은 `.moai` 를 여럿이 쓰면 `ready` 와 `mv` 사이에 옆 세션이 같은 줄을 집는다.
-`--from <칸>` 은 **본 칸이 그대로일 때만** 옮긴다 — 락 안에서 다시 보므로 그
-사이에 달라진 줄은 건드리지 않는다. 안 쓰면 지금까지처럼 아무것도 막지 않는다.
+**Writes go to the root's tracker.** A `moai` called inside a linked worktree reads
+and writes the main checkout's `.moai` — editing the worktree's snapshot makes that
+file conflict on the merge, and then the only way out is outside the tool. One line
+says where it wrote. To edit that worktree's tracker on purpose, pass `MOAI_HERE=1` —
+that is the place that builds a state where the sibling snapshots have diverged.
 
-부르는 모양은 moai 저장소의 `examples/bash-agent/agent.sh` 가 끝까지 보여 준다. 줄여 적으면
-이렇다 — `col` 은 `ready` 가 낸 그 줄의 칸이고, 집었는지는 `moved` 가 말한다.
+## Contested pick-up — `--from <column>` on `mv` and `defer`
+
+When several sessions share one `.moai`, a session beside you picks up the same row
+between your `ready` and your `mv`. `--from <column>` moves it **only while the
+column you saw still holds** — it is re-read inside the lock, so a row that changed
+in between is not touched. Without it nothing is blocked, as before.
+
+The shape of the call is shown end to end in the moai repository's `examples/bash-agent/agent.sh`.
+Cut short it is this — `col` is the column of that row as `ready` gave it, and `moved`
+says whether you got it.
 
 ```sh
 row=$(moai ready --json | jq -c '.ready[0]')
 id=$(jq -r '.id' <<<"$row")
 col=$(jq -r '.status' <<<"$row")
 claim=$(moai mv "$id" in_progress --json --from "$col") || {
-  [ -n "$claim" ] || exit 1          # stdout 이 비면 겨루기가 아니라 실패다
-  continue                           # 졌다 — 다음 일로
+  [ -n "$claim" ] || exit 1          # empty stdout is a failure, not a lost contest
+  continue                           # lost — on to the next
 }
 [ "$(jq '.moved | length' <<<"$claim")" -gt 0 ] || continue
 ```
 
-- **id 는 하나씩 준다.** 여럿을 한 번에 주면 이긴 줄과 진 줄이 **한 종료 코드**에
-  섞인다 — 이긴 줄은 이미 옮겨졌는데 부르는 쪽은 아무것도 못 집은 줄 안다
-- 진 줄은 stderr 한 줄(`moai: <id> 는 이미 <칸> 다 — …`)로 서고 `--json` 에는
-  `stale: [{"id":…,"status":<서 있는 칸>}]` 로 선다. stdout 의 `이미 <칸> 다` 는
-  **다른 말이다** — 그쪽은 이미 갈 칸에 있던 줄이고 종료 코드가 0 이다
-- **0 아닌 코드가 전부 "졌다" 는 아니다.** 신원 없음·락 걸림·칸 오타·깨진 줄도
-  같은 코드로 온다. 겨루다 진 것은 줄을 stdout 에 내고, 실패는 `{"code":…}` 를
-  stderr 에 내며 stdout 이 빈다 — 실패를 "남이 집었다" 로 읽으면 같은 줄이 다시
-  나와 엉뚱한 까닭을 대며 멈춘다
-- **`--from` 이 맞았다고 집은 것은 아니다.** 첫 칸이 곧 집는 칸인 설정에서는 칸이
-  맞고도 아무것도 안 옮기고 `already` 로 0 을 낸다 — `moved` 를 함께 본다
-- **묶음(에픽·마일스톤)에는 `--from` 을 못 쓴다** — 거절한다(`bad_status`). 묶음의
-  칸은 멤버에서 읽고 쓰기는 줄에 적힌 칸(미루기면 `deferred_at`)에 하므로, 재는 축과
-  쓰는 축이 갈려 겨루는 둘이 **다 이긴다.** 먹는 척하는 가드가 없는 가드보다 나쁘다 —
-  멤버를 집거나, 묶음은 `--from` 없이 `moai defer` 로 접는다
-- `defer` 의 `--from` 도 **칸**을 본다. 미루기는 칸을 안 바꾸므로, 옆에서 집어 칸이
-  움직인 줄은 걸러 내지만 **둘 다 미루는** 겨루기는 이것으로 안 갈린다
-- `--from` 은 **아는 칸이거나 어느 줄이 실제로 선 칸**을 받는다. 아무도 안 선 이름은
-  거절한다(`bad_status`) — 오타를 "안 맞았다" 로 읽으면 아무것도 안 하면서 코드만
-  내, 부르는 쪽이 까닭을 못 읽는다. 거절이 노리는 것은 오타지 낡음이 아니라서,
-  `config` 에서 칸 이름을 고친 뒤에도 옛 이름에 선 줄은 그 이름으로 집을 수 있다
+- **Pass one id at a time.** Several at once mix the rows you won and the rows you
+  lost into **one exit code** — the won rows have already moved while the caller
+  believes it picked up nothing
+- A lost row stands as one line on stderr (`moai: <id> already stands <column> — not moved`)
+  and as `stale: [{"id":…,"status":<the column it stands in>}]` under `--json`. The
+  `already <column>` on stdout is **a different thing** — that row was already in the column
+  you asked for, and the exit code is 0. Both lines come out of the language bundle, so they
+  read in whatever language the screen is set to — tell the two apart by the exit code and
+  by `--json`, never by the words
+- **Not every non-zero code means "lost".** No identity, the lock being held, a
+  mistyped column and a broken row all come back with the same code. Losing a contest
+  puts the row on stdout; a failure puts `{"code":…}` on stderr and leaves stdout
+  empty — read a failure as "someone else took it" and the same row comes round again
+  and stops with the wrong reason
+- **`--from` matching is not the same as picking up.** In a setup where the first
+  column is also the working column, the column matches, nothing moves, and it exits 0
+  with `already` — look at `moved` as well
+- **`--from` cannot be used on a group (epic, milestone)** — it is refused
+  (`bad_status`). A group's column is read from its members while the write goes to the
+  column on the row itself (`deferred_at` for a defer), so the axis you measure and the
+  axis you write diverge and **both** contestants win. A guard that pretends to bite is
+  worse than no guard — pick up a member, or give up on the group with `moai defer` and
+  no `--from`
+- `defer`'s `--from` also looks at the **column**. A defer does not change the column,
+  so it filters out a row whose column moved because it was picked up beside you, but a
+  contest where **both sides defer** is not decided by it
+- `--from` takes **a column it knows, or a column some row actually stands in**. A name
+  nobody stands in is refused (`bad_status`) — read a typo as "it did not match" and it
+  does nothing while returning a code, and the caller cannot read why. What the refusal
+  is aimed at is the typo, not staleness, so after you rename a column in `config` a row
+  still standing in the old name can be picked up by that old name
 
-## 한 번에 만들기
+## Creating in one go
 
-`#` 줄은 에픽, `-` 줄은 바로 위 에픽의 이슈다. `[pN]` 과 `#태그` 는 없어도 된다.
-제목이 `[` 로 시작하거나 끝에 `#낱말` 이 붙으면 `\[`·`\#` 로 적는다 (`- \[WIP] 이슈 \#12`).
+A `#` line is an epic; a `-` line is an issue of the epic just above it. `[pN]` and
+`#tag` are optional. If a title starts with `[` or ends with `#word`, write it as
+`\[` / `\#` (`- \[WIP] issue \#12`).
 
 ```sh
 moai add --from - <<'PLAN'
-# 저장 계층
-- [p1] 원자적으로 쓴다 #enhancement
-- 잘린 줄을 복구한다 #bug
+# Storage layer
+- [p1] write atomically #enhancement
+- recover a truncated line #bug
 PLAN
 ```
 
-`--dry-run` 이 heredoc 오타로 엉뚱한 여섯 개를 만드는 것을 막는다.
+`--dry-run` keeps a heredoc typo from creating six of the wrong things.
 
-되풀이하는 계획은 파일로 두고 `{{이름}}` 을 `--var 이름=값` 으로 채운다(이름은 영문·숫자·`_`·`-`,
-빈칸 없이). 저장소의 `.moai/templates/<이름>.md` 에 두는 것이 관례고 `--from <경로>` 로 부른다.
-변수는 전부 필수다 — 못 채운 이름·빈 값·줄바꿈이 든 값·계획에 없는 이름·같은 이름 두 번은 거절하고
-아무것도 안 만든다. 값은 적힌 그대로 제목 글자가 되므로 변수는 제목 자리에만 둔다(태그·우선순위
-자리면 거절). 템플릿의 제목에 글자 `{{` 를 쓰려면 `\{{` 로 적는다. `{{` 바로 앞의 역슬래시는 쌍으로 센다 —
-글자 역슬래시 뒤에 변수를 두려면 `\\{{이름}}` 이다(`C:\\{{dir}}`). `idea promote --from` 도 같은
-`--var` 를 받는다.
+Keep a plan you repeat in a file and fill `{{name}}` with `--var name=value` (the
+name takes letters, digits, `_` and `-`, no spaces). By convention it lives in the
+repository at `.moai/templates/<name>.md` and is called with `--from <path>`.
+Every variable is required — a name you did not fill, an empty value, a value with a
+newline in it, a name not in the plan, and the same name twice are all refused and
+create nothing. The value becomes the title text exactly as written, so put variables
+in title positions only (in a tag or priority position it is refused). To put a literal
+`{{` in a template title, write `\{{`. A backslash immediately before `{{` is counted
+in pairs — for a literal backslash followed by a variable, write `\\{{name}}`
+(`C:\\{{dir}}`). `idea promote --from` takes the same `--var`.
 
     moai add --from .moai/templates/release.md --var version=1.2 --dry-run
 
-## 여러 프로젝트
+## Several projects
 
-    moai project add <dir>                 내 설정에 등록한다 (`.moai` 가 없어도 받는다)
-    moai project ls                        등록한 것과 그 상태
+    moai project add <dir>                 register it in my config (accepted even without `.moai`)
+    moai project ls                        what is registered and how it stands
 
-`.moai` 밖에서 부른 `moai`·`moai status`·`moai ready` 는 등록한 프로젝트를
-프로젝트마다 한눈에 낸다. `--worktree` 를 붙이면 프로젝트마다 옆 워크트리도
-겹친다. 그 밖의 명령은 어느 프로젝트인지 모르니
-`moai -C <dir> <명령>` 으로 부른다. `moai tui` 의 `0` 은 등록한 프로젝트를 한
-목록으로 낸다 — 프로젝트마다 머리줄이 서고 그 밑에 그 프로젝트의 줄이 선다.
-`.moai` 밖이면 거기서 시작하고, 안이면 그 프로젝트 안에서 시작한다.
-맨 위 헤더가 프로젝트마다 번호를 대고, 그 숫자를 그대로 누르면 바로 옮겨 간다 — `0` 이 한 목록이다.
-머리줄에서 `l`·`→` 이 펼치고(그때 그 프로젝트를 읽는다) `h`·`←` 이 접으며, `Enter` 가 그 안으로 들어간다.
-담기(`SPC n`)와 읽음(`r`)은 커서가 선 줄의 프로젝트로 가고, 검색·거름망은 프로젝트 안에서만 건다.
-거기서 `SPC p a` 로 디렉터리를 골라 등록하고(모노레포 하위도 따로), `SPC p d` 로 목록에서 뺀다.
-등록한 것이 없으면 밖에서 띄워도 빈 목록이 서서 `SPC p a` 를 댄다.
+Called outside a `.moai`, `moai`, `moai status` and `moai ready` give an overview
+of every registered project, one block each. Add `--worktree` and each project
+overlays its sibling worktrees too. Other commands cannot tell which project you
+mean, so call them as `moai -C <dir> <command>`. In `moai tui`, `0` puts every
+registered project into one list — a header row per project with that project's
+rows under it. Outside a `.moai` it opens there; inside one it opens within that
+project. The top header numbers each project, and pressing that number jumps
+straight to it — `0` is the single list.
+On a header row, `l`/`→` expands it (that is when the project is read) and `h`/`←`
+folds it; `Enter` goes inside. Parking (`SPC n`) and marking read (`r`) go to the
+project of the row under the cursor, and search and filters apply within a project only.
+From there, `SPC p a` picks a directory to register (a monorepo subdirectory
+counts separately) and `SPC p d` takes one off the list. With nothing registered,
+opening outside still shows an empty list that points at `SPC p a`.
 
-## 화면의 말
+## The language on screen
 
-지금 기본은 한국어다 — 옮긴 글이 아직 적어, 옮김이 화면을 덮으면 기본이 영어로 바뀐다.
-다른 말로 보려면 `MOAI_LANG=en moai status` 처럼 주거나, 사용자 설정에 `[i18n]` 의
-`lang = "en"` 을 적는다 (환경변수가 설정을 이긴다). 되는 말은 en·ko·zh·ja·es 고,
-그 말에 아직 없는 글은 영어로 나온다. 번역을 보태는 길은 moai 저장소의 `i18n/README.md` 에 있다.
+English is the default. For another language, pass it as in `MOAI_LANG=ko moai status`,
+or write `lang = "ko"` under `[i18n]` in your user config (the environment variable
+wins over the config). The languages are en, ko, zh, ja and es, and text a language
+does not carry yet comes out in English — the two that are full right now are en and ko.
+**The system locale (`LANG`, `LC_ALL`) is not read**: it changes only through one of
+those two ways. How to add a translation is in the moai repository's `i18n/README.md`.
 
-## 담아 둔 생각을 펼치기
+## Unfolding a parked thought
 
-    moai idea add '반짝 떠오른 것'                 담기
-    moai idea add '긴 생각' -b -                   본문은 stdin 에서
-    moai idea ls                                   쌓인 것 보기
-    moai show -g <키워드>                          이미 적어 뒀는지 찾기
+    moai idea add '<what just came to mind>'       park it
+    moai idea add '<a longer thought>' -b -        the body comes from stdin
+    moai idea ls                                   see what has piled up
+    moai show -g <keyword>                         find out whether it is written down already
 
-때가 되면 하나를 에픽과 이슈로 펼친다. 펼치면 그 생각은 닫힌다.
+When the time comes, unfold one into an epic and issues. Unfolding closes the thought.
 
 ```sh
 moai idea promote <id> --from - <<'PLAN'
-# 에픽 제목
-- [p1] 첫 이슈 #enhancement
+# Epic title
+- [p1] first issue #enhancement
 PLAN
 ```
 
-## 미루기
+**A line in the plan becomes the issue title verbatim.** Copy over an idea title
+that grew long while you parked it and that length spreads into the issues, so
+write a short new title when you unfold — the original text stays on that idea,
+and the history line about being unfolded from it leads back there.
 
-    moai defer <id> -m '다음 분기에'       계획에서 잠시 뺀다
-    moai defer <id> --undo                 도로 집는다
-    moai show --deferred                   미뤄 둔 것만 본다
+## Deferring
 
-칸도 종류도 안 바뀐다 — 같은 줄이 그대로 돌아온다. 미룬 것은 `moai ready` 와
-보드와 경고에서 빠지고, `moai status` 가 한 줄로 그것을 비춘다. 에픽·마일스톤·
-부모를 미루면 그 밑의 일도 같이 빠진다.
+    moai defer <id> -m '<next quarter>'    take it out of the plan for a while
+    moai defer <id> --undo                 take it back
+    moai show --deferred                   see only what is deferred
 
-## 사람
+Neither the column nor the kind changes — the same row comes back as it was.
+What is deferred drops out of `moai ready`, the board and the warnings, and
+`moai status` shines one line on it. Defer an epic, a milestone or a parent and
+the work under it drops out with it.
 
-**담당은 저절로 붙는다** — 만든 사람이 담당이다. 남에게 맡기려면
-`-a "이름 (메일)"`, 임자 없이 두려면 `-a none`. 이름과 메일은 `git config`
-에서 오고, 거기 없으면 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 준다.
+## People
 
-## 이슈에 적는 글 — 예시
+**The assignee comes for free** — whoever created it is the assignee. To hand it to
+someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
+email come from `git config`, and when they are not there you pass them with
+`--user "Name (email)"` or `MOAI_ACTOR`.
 
-규칙은 `SKILL.md` 의 "이슈에 적는 글" 에 있다. 여기는 그것을 지킨 한 벌이다.
-제목은 인자로, 본문은 `-b -` 로 넘긴다.
+## What to write in an issue — an example
+
+The rule is under "What to write in an issue" in `SKILL.md`. This is one set that keeps it.
+The title goes as an argument, the body through `-b -`.
 
 ```sh
-moai add '빈 태그를 못 걸러 필터가 전부를 낸다' -t bug -e <에픽> -b - <<'BODY'
-- 무엇: 태그를 정규화할 때 빈 낱말이 그대로 남는다
-- 무엇을 봤나: 그 태그로 거른 목록이 아무것도 안 거르고 전부를 낸다
-- 어디: 태그를 정규화하는 자리(<파일>:<줄>). 빈 낱말을 거르면 끝난다
+moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'BODY'
+- What: normalizing tags leaves an empty word in place
+- What I saw: a list filtered by that tag filters nothing and returns everything
+- Where: where tags are normalized (<file>:<line>). Dropping the empty word ends it
 BODY
 ```
 
-흔한 어긋남 셋.
+Three common ways it goes wrong.
 
-- **제목에 겪은 일을 다 적는다** — "어제 …하다가 …해서 …인 것 같은데 확인이 필요함".
-  보드와 `ready` 는 그 줄을 잘라 내고, 자른 앞쪽에는 대개 무엇이 어긋났는지가 없다
-- **본문을 문단으로 적는다** — 다음 세션은 그 문단에서 "어디를 고치는가" 를 다시 찾아야 한다.
-  판단과 근거와 다음 걸음을 줄로 가르면 `moai show` 한 번으로 끝난다
-- **이모지로 급한 것을 알린다** — 급한 것은 우선순위(`-p 1`)로 적는다. `ready` 가 읽는 것은 그쪽이다
+- **The title carries the whole story** — "yesterday while I was … it … so I think … needs checking".
+  The board and `ready` cut that line off, and what went wrong is usually not in the part that survives
+- **The body is written in paragraphs** — the next session has to dig "where it gets fixed" back out of them.
+  Split the call, the evidence and the next step into lines and one `moai show` is enough
+- **Emoji mark what is urgent** — urgency goes in the priority (`-p 1`). That is the one `ready` reads
 
-## 한국어 글
+## Korean text
 
-늘 보이는 규칙은 `SKILL.md` 의 "한국어 글" 에 있다. 여기는 그 절차다.
+The always-visible rule is under "Korean text" in `SKILL.md`. This is the procedure.
 
-- 리뷰 원문은 줄이거나 판단을 섞지 않고 문장만 다듬는다 — 규칙 3 이 `그대로` 옮기라는 것은 그 뜻이다.
-  줄이는 것은 64KB 를 넘을 때뿐이고, 그때는 `요약:` 으로 밝힌다
-- 20줄을 넘는 글은 저장소 밖(스크래치패드나 임시 디렉터리)으로 옮겨 그 자리를 cwd 로 두고
-  `humanize-korean:humanize-korean` 을 부른다. 이 스킬은 cwd 에 `_workspace/` 를 만든다 — 다 쓰면 지운다
-- 다 쓰면 저장소로 돌아온다 — 훅은 세션이 선 자리로 트래커를 찾아, 밖에 선 채로는 규칙이 하나도 안 선다
-- 다듬은 글이 뜻을 바꿨으면 원래 글로 돌아간다. 다듬기는 문장을 고치는 것이지 사실을 고치는 것이 아니다
-- 플러그인이 없으면 에이전트가 스스로 깔지 않는다 — 사람에게 `moai skill install` 을 다시 부르라고
-  청한다. 그것이 moai 와 같은 scope 로 아래 둘을 함께 깐다. 없어도 moai 는 아무것도 막지 않는다
+- For review text, polish the sentences only — do not shorten it and do not mix your own call in.
+  That is what rule 3 means by taking the reviewer's own words. Shorten it only past 64KB, and say so with `Summary:`
+- Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
+  make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
+- Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
+- If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
+- If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
+  That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing
 
     korean-skills@korean-skills     https://github.com/DaleSeo/korean-skills
     humanize-korean@im-not-ai       https://github.com/epoko77-ai/im-not-ai
 
-## 커밋에 id 를 적는다
+## Name the id in the commit
 
-커밋 제목에 그 커밋이 닿은 이슈 id 를 적는다 — `feat: 막음 줄을 그린다 (<id>)`.
-moai 는 커밋을 이슈에 저장하지 않는다. `moai show <id>` 와 탐색기 상세가 **커밋 제목에 적힌
-id** 로 그 이슈의 커밋을 그때그때 찾아 낸다. 해시를 노트에 옮겨 적지 않는다 — squash·rebase
-한 번에 낡고, 이슈를 닫는 커밋은 제 해시를 미리 모른다.
+Put the id of the issue a commit touched in the commit subject — `feat: draw the blocked line (<id>)`.
+moai does not store commits on the issue. `moai show <id>` and the explorer detail
+find that issue's commits on the spot, **by the id written in the subject**. Do not
+copy hashes into notes — one squash or rebase makes them stale, and the commit that
+closes an issue does not know its own hash in advance.
 
-- **제목에** 적는다. 본문은 `Refs:`·`Closes:`·`Fixes:` 로 시작하는 줄만 센다 — 그 밖의 본문에
-  적힌 id 는 안 센다(트래커 커밋이 줄줄이 대는 id 가 죄다 그 이슈의 커밋으로 서면 안 된다)
-- **squash 로 합치는 저장소는 트레일러를 단다.** squash 는 합친 커밋들의 제목을 본문으로 옮겨
-  버려, 제목만으로는 그 커밋들이 통째로 사라진다 — `Refs: <id>` 한 줄이 그것을 지킨다
-- id 는 낱말째 맞춘다. 자식(`<id>.x1y`)의 커밋은 부모의 것이 아니다 — 리뷰를 반영한 커밋은
-  리뷰 이슈 id 로 그 리뷰에 붙고, 워크트리를 합치는 `merge: … (<id>)` 가 그 일에 붙는다
-- 집기·닫기만 담는 커밋은 `chore(tracker):` 로 시작한다. 상세는 그것을 빼고 그린다
-  (`--json` 의 `commits` 에는 `tracker` 표시와 함께 남는다)
-- `moai show <id> --json` 의 `commits` 는 **늘 있다.** 빈 배열은 "그 id 를 적은 커밋이 없다" 는
-  뜻이고, git 을 못 읽었을 때만 `commits_error` 가 선다 — 기계가 "아직 아무도 안 고쳤다" 와
-  "여기서는 못 물어봤다" 를 가르라고 둔 것이다. 그 값은 `kind`·`said` 를 든 객체다. 가르는 것은
-  `kind`(`no_git`·`not_a_repo`·`stream`·`encoding`·`failed`)고, `said` 는 사람이 읽을 한 줄이라
-  낱말로 맞추지 않는다
+- Put it **in the subject**. In the body, only lines that open with a trailer word count — `Refs:`, `Closes:`, `Fixes:`.
+  An id written anywhere else in the body does not (a tracker commit lists a whole run of
+  ids, and they must not all stand as that issue's commits)
+- **A repository that squashes adds the trailer.** A squash moves the subjects of the
+  commits it folded into the body, so by subject alone those commits vanish whole —
+  one `Refs: <id>` line keeps them
+- Ids match whole-word. A child's commit (`<id>.x1y`) is not the parent's — a commit
+  that takes review findings in belongs to the review by the review issue's id, and the
+  `merge: … (<id>)` that folds a worktree in belongs to the work
+- A commit that carries nothing but a pick-up or a close starts with `chore(tracker):`.
+  The detail leaves those out of the drawing (they stay in `--json`'s `commits`, flagged `tracker`)
+- `commits` in `moai show <id> --json` is **always there.** An empty array means "no
+  commit names that id", and `commits_error` stands only when git could not be read —
+  it is there so a machine can tell "nobody has touched it yet" from "it could not be
+  asked here". That value is an object with `kind` and `said`. What you branch on is
+  `kind` (`no_git`, `not_a_repo`, `stream`, `encoding`, `failed`); `said` is one line
+  for a person to read, so do not match on its words
 
-## 일한 AI 를 남긴다
+## When the issue file has to be merged
 
-닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다. 필드가 아니라 노트다.
+In `.moai/issues.jsonl` one line is one issue and the file is sorted by id, so two
+branches that changed different issues collide for no reason other than their lines
+being neighbours. Install the merge driver and git resolves that per issue, 3-way.
 
-    moai note <id> 'model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)'
+    moai merge-driver --install
 
-- 회사는 `anthropic`·`openai`·`google`, 모델은 실제 이름(`opus-5`·`sonnet-5`), 등급은 리뷰 등급과 같은 낱말
-- **토큰을 모르면 `tokens=` 를 뺀다.** 0 도 어림값도 적지 않는다 — 빈 칸과 0 과 거짓 값은 셋 다 다르다
-- **id 하나에 하나.** 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다
-- **자유 글은 작은따옴표로 싼다** — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 풀어 글이 잘린
-  채 0 으로 끝난다. 글에 작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
-- `moai show <id> --json` 의 `work` 가 그 줄들을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는 줄은
-  값이 안 될 뿐 노트로 남는다. 줄 머리에서 시작한 줄만 센다 — 들여 쓴 줄과 울타리 안의 줄은 예로 읽는다
-- 목록 `moai show [거르개] --json` 도 줄마다 같은 `work` 를 낸다 — 여러 이슈를 더할 때는 id 마다
-  부르지 말고 목록을 한 번 부른다
+**Run it once per clone.** git reads the driver command from config only, and
+config is not committed. In a clone without it, `merge=moai` in `.gitattributes`
+is simply ignored and git's default merge runs — merging is exactly as it was
+before. `moai status` still says one line about it not being installed: a reminder
+not to quietly miss the one thing each clone needs, and it blocks nothing.
 
-## 리뷰가 낸 글을 찾는 법
+**If the path it recorded disappears, merging falls back to git's default.** What
+gets recorded is the absolute path of the binary that was running. When that path
+is empty git treats it as a conflict but leaves this side's file as it was, and
+without markers in it whoever runs `git add` throws the other side away whole —
+which is why the install writes neither an answer nor markers and re-merges the
+failed run with `git merge-file`. The markers stand, and the worst case is the
+same as a clone with nothing installed. Keeping the path alive is still better:
+the fallback loses the per-issue resolution. The place it records (`--local`) is
+shared by the clone, so running it from a linked worktree's `target/` puts every
+checkout in that state the moment the worktree is removed. Pass `--as` with a
+path that will not disappear. What is merged and how is in
+`moai merge-driver --help`.
 
-리뷰 전문은 파일에 남아 있다. 끝났다는 알림에 `task-id` 가 실려 오고, 그것이
-곧 파일 이름이다.
+## Name the AI that did the work
 
-    ~/.claude/projects/<프로젝트>/<세션>/subagents/agent-<task-id>.jsonl
+Before you close it, leave one line on the issue naming the AI that actually did the
+work. It is a note, not a field.
 
-리뷰 전문은 **마지막 `SubagentHandback` 호출에 실린 `message`** 다. 그 호출이 없을
-때만 **마지막 `text` 블록**이다.
+    moai note <id> 'model: <vendor>/<model> tokens=<count> (<grade> — <why>)'
+
+- The vendor is `anthropic`, `openai` or `google`; the model is its real name (`opus-5`, `sonnet-5`); the grade uses the same words as the review grades
+- **If you do not know the token count, drop `tokens=`.** Do not write 0 and do not estimate — blank, 0 and a false number are three different things
+- **One line per id.** Write the same line on several ids and the tokens multiply by the number of ids
+- **Quote free text with single quotes** — inside double quotes the shell expands
+  backticks and `$(…)` as commands, so the text is cut off and the call ends in 0.
+  If the text itself contains a single quote, stream it from stdin with `-b -`
+- `work` in `moai show <id> --json` reads those lines out. It is **always an array**,
+  and a line that does not fit the form simply does not become a value — it stays a
+  note. Only lines that start at the beginning of a line count; indented lines and
+  lines inside a fence are read as examples
+- A list, `moai show [filters] --json`, gives the same `work` on every row — when you
+  are adding several issues up, call the list once instead of calling per id
+
+## How to find what a review said
+
+The full review text stays in a file. The notice that it finished carries a
+`task-id`, and that is the file name.
+
+    ~/.claude/projects/<project>/<session>/subagents/agent-<task-id>.jsonl
+
+The full text is the **`message` of the last `SubagentHandback` call**. Only when
+there is no such call is it the **last `text` block**.
 
 ```sh
 python3 -c "
@@ -273,51 +358,57 @@ b=[c for l in open(sys.argv[1])
 h=[(c.get('input') or {}).get('message') or '' for c in b
    if c.get('type') == 'tool_use' and c.get('name') == 'SubagentHandback']
 t=[c['text'] for c in b if c.get('type') == 'text']
-print(h[-1] if h else t[-1] if t else '')" <그 파일> | moai note <리뷰 id> -b -
+print(h[-1] if h else t[-1] if t else '')" <that file> | moai note <review id> -b -
 ```
 
-**넘겨준 판에서는 마지막 `text` 블록이 원문이 아니다.** 보고를 그 호출로 넘긴
-서브에이전트는 그 뒤에 "보고를 보냈다" 같은 맺음말을 한 줄 더 적는다 — 마지막
-`text` 만 집으면 200바이트짜리 맺음말이 원문으로 남고, 넘는지 재는 것도 그 글로
-잰다. 조용히 어긋나는 자리라 위의 한 줄이 넘겨준 보고를 먼저 본다.
+**Where the report was handed back, the last `text` block is not the review text.**
+A subagent that handed its report over through that call writes one more closing line
+after it, something like "report sent" — take the last `text` only and a 200-byte
+closing line stands in as the review text, and the size check measures that instead.
+It goes wrong quietly, so the one-liner above looks at the handed-back report first.
 
-**마지막 줄을 그냥 집지 않는다.** 한 턴의 블록이 줄마다 나뉘어 적히고 생각·
-도구 호출도 섞여, 마지막 줄이 글이 아닐 때가 있다. 그러면 빈 글이 넘어가고
-`moai note` 가 "메모가 비었다" 로 멈춘다 — 시끄럽게 멈추니 잃지는 않지만,
-한 번에 되는 편이 낫다.
+**Do not simply take the last line.** One turn's blocks are written line by line with
+thinking and tool calls mixed in, so the last line is sometimes not text at all. Then
+an empty text is passed on and `moai note` stops with `메모가 비었다` — quoted as the binary
+prints it, which is Korean in every language, so matching a translation finds nothing. It stops
+loudly, so nothing is lost, but getting it right the first time is better.
 
-**요약만 적고 원문을 버리지 않는다.** 요약은 이쪽의 판단이고 원문은 리뷰어가
-한 말이다. 판단은 다시 할 수 있지만 버린 원문은 못 되돌린다.
+**Do not keep the summary and throw the original away.** A summary is your own call;
+the original is what the reviewer said. A call can be made again; a discarded original
+cannot be recovered.
 
-**넘칠 때만 줄인다.** 한 번에 적는 글은 64KB 까지라, 그보다 큰 원문은 `moai note` 가
-거절한다.
-원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,
-건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다.
-요약이라고 밝혀 두어야 다음 사람이 그 글을 리뷰어의 말로 잘못 읽지 않고, 첫 줄의
-`agent-<task-id>` 가 위 파일 이름이라 원문으로 돌아갈 길이 남는다. **쪼개 여러 노트로 적지 않는다** — 저널은 덧붙이기만 해 쪼갠 판이
-영영 남고, 사람이 고른 길은 요약이다(moai-b8aj). 울타리와 들여쓰기를 그대로 두는 까닭은
-옮겨 적은 `model:` 줄이 줄 머리에 서면 아무도 안 한 일이 `work` 에 서기 때문이다.
+**Shorten it only when it overflows.** One write takes up to 64KB, so `moai note`
+refuses text larger than that.
+If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
+the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone.
+Saying it is a summary keeps the next person from reading it as the reviewer's words,
+and the `agent-<task-id>` on the first line is the file name above, so the way back to
+the original stays open. **Do not split it across several notes** — the journal only
+appends, so a split stays forever, and the way the person chose is the summary (moai-b8aj).
+Fences and indentation are left alone because a `model:` line copied over, standing at
+the beginning of a line, puts work nobody did into `work`.
 
-## 훅
+## The hook
 
-    moai hook <event>    Claude 의 훅이 부른다. 사람이 손으로 부를 일은 없다
+    moai hook <event>    Claude's hooks call this. A person never runs it by hand
 
-`moai skill install` 이 심은 플러그인이 이것을 부른다. 무엇이 어긋나도 종료
-코드는 0 이다 — 훅이 시끄러우면 사람이 훅을 꺼 버리고, 꺼진 규칙은 없는
-규칙이다.
+The plugin planted by `moai skill install` is what calls it. Whatever goes wrong the
+exit code is 0 — a noisy hook gets turned off, and a rule that is off is no rule.
 
-**git 훅 안에서 불러도 된다.** git 훅과 딸린 워크트리의 `rebase -x` 는 `GIT_DIR`
-무리를 내보내고 그것은 `git -C <경로>` 를 이기지만, moai 는 git 을 띄우기 전에
-그 변수들을 걷는다. 그래서 어느 **저장소**를 읽는지는 `-C` 나 `.moai` 찾기가
-정한다 — 저장소 A 의 훅에서 부른 `moai -C B` 의 커밋 칸과 `--worktree` 는 B 의
-이력만 읽는다.
+**It may be called from inside a git hook.** git hooks and a linked worktree's
+`rebase -x` export the `GIT_DIR` family, and those beat `git -C <path>`, but moai
+strips those variables before it starts git. So which **repository** is read is decided
+by `-C` or by the search for `.moai` — a `moai -C B` called from repository A's hook
+reads only B's history for the commit column and for `--worktree`.
 
-**사람도 B 에서 온다.** 바깥이 `git -c user.name=…` 으로 부른 훅이 물려주는 값도
-걷는다 — `-C` 로 남의 프로젝트에 적을 때 그 값이 따라가면 B 의 저널에 남의 이름이
-영구히 남는다. 그래서 A 의 저장소 설정에만 있는 이름은 이제 안 읽힌다: B 에도
-전역에도 이름이 없으면 쓰기가 사람을 못 찾아 멈추고, 훅 안에서 멈추면 그 커밋이
-실패한다. 그 자리에서는 `--user "이름 (메일)"` 이나 `MOAI_ACTOR` 로 못 박는다.
+**The person comes from B too.** A value a hook inherits because the caller ran
+`git -c user.name=…` is stripped as well — carry that through a `-C` write into
+someone else's project and their name stays in B's journal forever. So a name that
+exists only in A's repository config is no longer read: with no name in B and none
+globally, the write cannot find a person and stops, and stopping inside a hook fails
+that commit. In that spot, pin it with `--user "Name (email)"` or `MOAI_ACTOR`.
 
-**어느 디렉터리에서 부르든 같다.** 사람도 커밋 칸도 그 트래커의 `.moai` 뿌리에서
-읽는다 — 프로젝트 안에 다른 저장소가 겹쳐 있어도(서브모듈·`vendor`) 거기서 부른
-`moai` 가 그 저장소의 이름을 적지 않는다.
+**It is the same whichever directory you call it from.** Both the person and the
+commit column are read from that tracker's `.moai` root — even with another repository
+nested inside the project (a submodule, `vendor`), a `moai` called in there does not
+write that repository's name.

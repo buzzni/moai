@@ -1,12 +1,12 @@
 {
-  "description": "이 저장소의 이슈 트래커. 보드를 세션에 싣고, 새 이슈가 집고 있는 단위 밖으로 새는 것을 막는다.",
+  "description": "This repository's issue tracker. Loads the board into the session and keeps new issues from leaking outside the unit you picked up.",
   "hooks": {
     "PreToolUse": [
       {
         "hooks": [
           {
             "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use || exit 0",
-            "statusMessage": "moai 규칙을 본다...",
+            "statusMessage": "checking the moai rules...",
             "timeout": 15,
             "type": "command"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start || exit 0",
-            "statusMessage": "moai 경고를 센다...",
+            "statusMessage": "counting moai warnings...",
             "timeout": 15,
             "type": "command"
           }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop || exit 0",
-            "statusMessage": "moai 상태를 견준다...",
+            "statusMessage": "comparing the moai state...",
             "timeout": 15,
             "type": "command"
           }
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit || exit 0",
-            "statusMessage": "moai 보드를 읽는다...",
+            "statusMessage": "reading the moai board...",
             "timeout": 15,
             "type": "command"
           }
@@ -52,5 +52,5 @@
     ]
   },
   "name": "moai",
-  "version": "42.802.526"
+  "version": "266.246.34"
 }

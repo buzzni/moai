@@ -28,25 +28,25 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, .. } =
+    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, sides, mine, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
     crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
-    let path = resolve(&index, &load.issues, args.path.as_deref())?;
+    let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.
     if ctx.json {
         // **못 읽은 줄을 삼키지 않는다.** 화면 쪽은 배너로 말하지만 이 길에는
         // 배너가 없다 — 여기서 안 알리면 목록이 조용히 짧아지고, 부른 쪽은
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
-        super::report_load_errors(&repo.issues_path(), &load.errors);
+        super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
-            .map(|e| Row::of(&index, &load.issues, &states, e))
+            .map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang()))
             .collect();
         return super::json_line(&rows);
     }
@@ -65,8 +65,25 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
     // 이 가지의 커밋을 잃고 집기 표식도 안 적혔다.
-    let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()));
-    let mut app = App::open(repo, load, index, ground, path, stamp).overlaid(origin, trouble, watched, swept);
+    // 층의 말은 여기서 준다(moai-9it4) — 층이 세우며 짓는 글이 그 말로 선다. 얹는 문
+    // (`App::with_layer`)이 화면의 말과 다시 맞춘다(moai-ra67).
+    let layer = crate::tui::layer::Layer::of(&reg, Some(repo.here()), ctx.lang());
+    // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 다시 읽기(`tui::prepare`)도 제 말을 들고
+    // 가므로(moai-9it4) 여는 화면과 같은 자로 편다 — 둘이 갈리면 배너가 걸음마다 말을 바꾼다.
+    let trouble = crate::tui::said_trouble(&trouble, ctx.lang());
+    let mut app = App::open(repo, load, index, ground, path, stamp);
+    // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
+    // **겹치기 전에 놓는다**(moai-9it4) — `overlaid` 가 자리 판정의 글(`tui::placed` 의
+    // `view::unread_worktree`)을 화면의 말로 편다. 뒤에 놓던 판은 그 한 줄만 도구의 기본 말로
+    // 서서, 바로 위에서 고른 말로 편 `trouble` 과 한 배너에 두 말이 섞였다.
+    app.site.lang = ctx.lang();
+    let mut app = app.overlaid(origin, trouble, watched, swept, &sides, &mine);
+    // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
+    // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
+    // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).
+    // 겹치기 전에 잰 바닥(moai-mafv)도 같은 자리에서 버린다 — 다시 읽기는 제 것을 잰다.
+    drop(sides);
+    drop(mine);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
@@ -75,13 +92,19 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.config_stamp = config_stamp;
+    // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
+    // 같아, 갈래를 안 넘기면 그 한 번의 실패가 세션 내내 남는다(`App::config_tried`).
+    app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp). 못 읽은 설정의 까닭은 보기가 아니라 층이 댄다 —
     // 얹는 쪽(`App::attach_layer`)이 배너에 달고 `look_problems` 에는 그 까닭이 없다(moai-5jsn). 그래서 둘의
     // 차례에 걸린 것은 없다(moai-gmdu 에픽 리뷰). 한때는 `with_layer` 가 첫 화면의 커서를 `..` 너머로 밀어
     // 차례가 걸렸는데, 뿌리의 `..` 을 걷으면서(moai-i784) 그 밀기는 없어졌다(moai-2kyl 단계 리뷰).
-    app.adopt_look(&reg.look, reg.look_problems);
-    // 적어 둔 읽음도 같은 한 번의 읽기에서 온다(moai-z9pc).
-    app.adopt_read(reg.read);
+    // **말은 화면이 이미 든 것이다**(`App::site.lang`) — 여기서 `ctx.lang()` 을 다시 물으면 밖에서 띄운
+    // 길(`outside`)이 같은 설정을 한 번 더 판다(`super::lang_of` 가 적어 둔 그 까닭이다).
+    app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
+    app.legacy_read = reg.read;
+    app.load_read();
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
@@ -141,11 +164,16 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             })
             .collect();
         // 사용자 설정의 문제는 `problems` 에 싣는다 — 한눈 보기·`project ls` 와 같은 자리다.
-        // 제어문자는 serde 가 이스케이프한다.
-        return super::json_line(&Layered { projects: rows, problems: &reg.problems, config: reg.path.as_deref() });
+        // 제어문자는 serde 가 이스케이프한다. **거쳐 가는 문은 `view::settings_problems` 하나다**(리뷰) —
+        // 화면 말의 탈은 자료로 따로 서므로(moai-dpbi) `reg.problems` 만 실으면 `lang` 오타를 잃는다.
+        // 말은 이미 읽은 설정에서 고른다([`super::lang_of`]) — `ctx.lang()` 은 같은 파일을 또 판다.
+        let problems = crate::view::settings_problems(&reg, super::lang_of(&reg));
+        return super::json_line(&Layered { projects: rows, problems: &problems, config: reg.path.as_deref() });
     }
     refuse_without_terminal()?;
-    let mut app = App::on_projects(crate::tui::layer::Layer::of(&reg, None));
+    let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
+    let mut app = App::on_projects(layer);
+    app.site.lang = ctx.lang();
     app.user = ctx.user.clone();
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
     // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
@@ -153,9 +181,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     app.config_stamp = config_stamp;
+    // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
+    // 같아, 갈래를 안 넘기면 그 한 번의 실패가 세션 내내 남는다(`App::config_tried`).
+    app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
-    app.adopt_look(&reg.look, reg.look_problems);
-    app.adopt_read(reg.read);
+    app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    app.legacy_read = reg.read;
+    app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     screen(app)
@@ -285,7 +317,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
 /// **비었는지로 묻지 않는다** — 그것은 `nav::Index::is_dir` 이 이미 아는
 /// 것이고, 비었다고 부모를 대신 열면 빈 에픽을 물었을 때 그 형제들이 답으로
 /// 나와 훑는 쪽이 제자리를 돈다.
-fn resolve(index: &Index, issues: &[Issue], want: Option<&str>) -> R<Path> {
+fn resolve(index: &Index, issues: &[Issue], want: Option<&str>, lang: crate::i18n::Lang) -> R<Path> {
     let Some(want) = want else { return Ok(Path::new()) };
     // 바구니는 제 줄이 없어 id 로 못 부른다. 대신 **없는 바구니는 거절한다** —
     // 없는 자리에 세워 두면 빈 목록이 나오고, 사람은 자료가 사라진 줄 안다.
@@ -296,11 +328,11 @@ fn resolve(index: &Index, issues: &[Issue], want: Option<&str>) -> R<Path> {
     } {
         let path = vec![seg.clone()];
         if index.entries(issues, &path).is_empty() {
-            return Err(Fail::not_found(want));
+            return Err(Fail::not_found(want, lang));
         }
         return Ok(path);
     }
-    let at = index.find(want).ok_or_else(|| Fail::not_found(want))?;
+    let at = index.find(want).ok_or_else(|| Fail::not_found(want, lang))?;
     let mut path = index.home_of(at).clone();
     if index.is_dir(issues, at) {
         path.push(index.seg_of(issues, at));
@@ -332,9 +364,15 @@ struct Row {
 }
 
 impl Row {
-    fn of(index: &Index, issues: &[Issue], states: &std::collections::BTreeMap<&str, &str>, e: &Entry) -> Row {
+    fn of(
+        index: &Index,
+        issues: &[Issue],
+        states: &std::collections::BTreeMap<&str, &str>,
+        e: &Entry,
+        lang: crate::i18n::Lang,
+    ) -> Row {
         let dir = matches!(e, Entry::Dir { .. });
-        let title = index.label(issues, e);
+        let title = index.label(issues, e, lang);
         match e.at() {
             Some(at) => Row {
                 id: Some(issues[at].id.clone()),
@@ -367,8 +405,16 @@ impl Row {
 }
 
 /// 바구니를 `--path` 로 부르는 이름. 바구니는 제 줄이 없어 id 가 없다.
-const NO_MILESTONE: &str = "없음";
-const LOST: &str = "길잃음";
+///
+/// **영어다**(moai-l5uf, 2026-09-20 사용자 결정). 한때 `없음`·`길잃음` 이었는데, 도움말이
+/// 영어로 서면서 영어 화면이 받는 값만 한국어로 남았다. 옛 낱말은 **안 받는다** — 받는 말을
+/// 둘로 두면 그것이 곧 둘째 어휘고, 지우려면 남의 스크립트를 깨야 한다. v0.1.0 을 안 내보낸
+/// 지금은 밖에서 이 낱말을 치는 사람이 없어 값이 0 이다.
+///
+/// **`--json` 의 `path` 도 이 낱말을 낸다.** 내는 말과 받는 말이 갈리면 그 출력을 그대로
+/// `--path` 에 넣는 고리가 끊긴다 — 기계가 읽고 다시 치는 자리라 한 낱말이어야 한다.
+const NO_MILESTONE: &str = "none";
+const LOST: &str = "lost";
 
 // ── 화면 ──────────────────────────────────────────────────────────────
 
@@ -739,7 +785,12 @@ mod tests {
         take(&mut app, Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)));
         take(&mut app, Event::Paste("a\tb\r".into()));
         assert_eq!(app.mode, Mode::Grep(Input::new("a b"), crate::query::GrepIn::All));
-        let release = KeyEvent::new_with_kind_and_state(KeyCode::Esc, KeyModifiers::NONE, KeyEventKind::Release, KeyEventState::NONE);
+        let release = KeyEvent::new_with_kind_and_state(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+            KeyEventState::NONE,
+        );
         take(&mut app, Event::Key(release));
         assert!(matches!(app.mode, Mode::Grep(..)), "뗀 키를 먹었다");
     }
@@ -856,7 +907,11 @@ mod tests {
         let d = Dir::new("rescue");
         let one = rescue("못 담길 것", Some("## 설계\n둘째 줄"), &d.0).expect("못 남겼다");
         let text = std::fs::read_to_string(&one).unwrap();
-        assert_eq!(crate::tui::jotfile::parse(&text), Some(("못 담길 것".to_string(), Some("## 설계\n둘째 줄".to_string()))), "{text:?}");
+        assert_eq!(
+            crate::tui::jotfile::parse(&text),
+            Some(("못 담길 것".to_string(), Some("## 설계\n둘째 줄".to_string()))),
+            "{text:?}"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -864,7 +919,10 @@ mod tests {
         }
         let two = rescue("제목만", None, &d.0).expect("못 남겼다");
         assert_ne!(one, two, "앞서 남긴 파일을 덮었다");
-        assert_eq!(crate::tui::jotfile::parse(&std::fs::read_to_string(&two).unwrap()), Some(("제목만".to_string(), None)));
+        assert_eq!(
+            crate::tui::jotfile::parse(&std::fs::read_to_string(&two).unwrap()),
+            Some(("제목만".to_string(), None))
+        );
     }
 
     /// 임시 파일은 **있는 이름을 안 연다** — 남이 먼저 둔 파일에 적은 생각을 쓰지 않는다.
@@ -874,7 +932,8 @@ mod tests {
         let (a, _fa) = scratch_file(&d.0).unwrap();
         // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
         let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
-        let theirs: Vec<std::path::PathBuf> = (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+        let theirs: Vec<std::path::PathBuf> =
+            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
         for p in &theirs {
             std::fs::write(p, "남의 것").unwrap();
         }

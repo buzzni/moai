@@ -13,6 +13,7 @@
 //! [`Chord`] 로 들고 다음 키를 붙여 다시 부른다.
 
 use super::scroll::Move;
+use crate::i18n::{Lang, fill, say};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const CTRL_ALT: KeyModifiers = KeyModifiers::CONTROL.union(KeyModifiers::ALT);
@@ -248,16 +249,16 @@ pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> V
 
 /// 이동 하나의 낱말. 바는 이동을 `j·k 이동` 으로 묶어 대지만, 기다리는 `g` 뒤에 무엇이 오는지는
 /// 한 이동씩 대야 한다(`g 맨 위`).
-pub fn move_word(m: Move) -> &'static str {
+pub fn move_word(m: Move, lang: Lang) -> &'static str {
     match m {
-        Move::LineUp => "위",
-        Move::LineDown => "아래",
-        Move::HalfUp => "반 쪽 위",
-        Move::HalfDown => "반 쪽 아래",
-        Move::PageUp => "한 쪽 위",
-        Move::PageDown => "한 쪽 아래",
-        Move::Top => "맨 위",
-        Move::Bottom => "맨 아래",
+        Move::LineUp => say(lang, "tui.move.up"),
+        Move::LineDown => say(lang, "tui.move.down"),
+        Move::HalfUp => say(lang, "tui.move.half_up"),
+        Move::HalfDown => say(lang, "tui.move.half_down"),
+        Move::PageUp => say(lang, "tui.move.page_up"),
+        Move::PageDown => say(lang, "tui.move.page_down"),
+        Move::Top => say(lang, "tui.move.top"),
+        Move::Bottom => say(lang, "tui.move.bottom"),
     }
 }
 
@@ -360,14 +361,14 @@ pub enum Order {
 }
 
 impl Order {
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: Lang) -> &'static str {
         match self {
-            Order::Priority => "우선순위",
-            Order::Created => "생성",
-            Order::Updated => "수정",
-            Order::Column => "칸",
-            Order::Assignee => "담당",
-            Order::Title => "제목",
+            Order::Priority => say(lang, "tui.order.priority"),
+            Order::Created => say(lang, "tui.order.created"),
+            Order::Updated => say(lang, "tui.order.updated"),
+            Order::Column => say(lang, "tui.order.column"),
+            Order::Assignee => say(lang, "tui.order.assignee"),
+            Order::Title => say(lang, "tui.order.title"),
         }
     }
 
@@ -576,6 +577,9 @@ pub const BROWSE: &[Bind<Browse>] = {
 /// 켜짐을 가르는 값. **든 쪽이 잰다** — 여기는 `App` 을 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Ctx {
+    /// 화면의 말(moai-9it4). **키 표도 고른 말로 말한다** — 여기 든 낱말은 메뉴와 아랫바에
+    /// 그대로 서는 화면 글이다. 부르는 쪽이 `Site::lang` 에서 채운다(`App::key_ctx`).
+    pub lang: Lang,
     /// 프로젝트 층에 섰나.
     pub layer: bool,
     /// 한눈 보기에 **이슈 줄이 하나라도 섰나**(moai-1xo5) — 펼친 프로젝트가 있는가다. 보기·정렬·
@@ -673,10 +677,9 @@ impl Browse {
             // Bksp·h·← 는 여태 층으로 올라갔다 — 손에 익은 사람도, 낡은 AGENTS.md 를 읽은
             // 에이전트도 그것을 누른다. 대신 갈 키를 대 준다. 뒤의 조용한 갈래는 층이 없어
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
-            Leave if c.root && c.projects > 0 => Err(Off::Why(format!(
-                "{} 는 디렉터리만 올라간다 — 프로젝트 층으로는 {} 로 간다",
-                label(BROWSE, Leave),
-                label(BROWSE, Project(0))
+            Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
+                say(c.lang, "tui.off.leave_dir_only"),
+                &[("leave", &label(BROWSE, Leave)), ("project", &label(BROWSE, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -684,7 +687,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(format!("거름망은 프로젝트 안의 줄에 건다 — {} 로 들어가서 건다", label(BROWSE, Enter))))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(BROWSE, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
@@ -715,18 +718,18 @@ impl Browse {
     pub fn menu_word(self, c: &Ctx) -> &'static str {
         use Browse::*;
         match self {
-            Jot => "생각 담기",
-            Pick => "등록",
-            Unregister => "목록에서 빼기",
-            Worktree => "워크트리 겹쳐 보기",
-            Raw => "원문↔그리기",
-            ShowAll => "모두 보이기",
-            Detail => "상세 칸",
-            Read => "이 줄을 읽음으로",
-            ReadAll => "안 읽은 것 전부",
-            ReadGroup => "이 묶음의 멤버 전부",
-            Sort(o) => o.word(),
-            Cell(f) => f.word(),
+            Jot => say(c.lang, "tui.menu.jot"),
+            Pick => say(c.lang, "tui.menu.pick"),
+            Unregister => say(c.lang, "tui.menu.unregister"),
+            Worktree => say(c.lang, "tui.menu.worktree"),
+            Raw => say(c.lang, "tui.menu.raw"),
+            ShowAll => say(c.lang, "tui.menu.show_all"),
+            Detail => say(c.lang, "tui.menu.detail"),
+            Read => say(c.lang, "tui.menu.read"),
+            ReadAll => say(c.lang, "tui.menu.read_all"),
+            ReadGroup => say(c.lang, "tui.menu.read_group"),
+            Sort(o) => o.word(c.lang),
+            Cell(f) => f.word(c.lang),
             _ => self.what(c),
         }
     }
@@ -735,15 +738,21 @@ impl Browse {
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
     pub fn state(self, c: &Ctx) -> Option<&'static str> {
         match self {
-            Browse::Worktree => Some(if c.worktree { "[켜짐]" } else { "[꺼짐]" }),
-            Browse::Raw => Some(if c.raw { "[원문]" } else { "[그리기]" }),
-            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0)),
-            Browse::Done => Some(shown(c.done_hidden)),
-            Browse::Deferred => Some(shown(c.deferred_hidden)),
+            Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on")),
+            Browse::Worktree => Some(say(c.lang, "tui.state.off")),
+            Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw")),
+            Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
+            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
+            Browse::Done => Some(shown(c.done_hidden, c.lang)),
+            Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed { "[● 거꾸로]" } else { "[● 차례]" }),
-            Browse::Cell(f) => Some(shown(!c.fields.shows(f))),
-            Browse::Detail => Some(shown(!c.detail)),
+            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
+                say(c.lang, "tui.state.reversed")
+            } else {
+                say(c.lang, "tui.state.sorted")
+            }),
+            Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang)),
+            Browse::Detail => Some(shown(!c.detail, c.lang)),
             _ => None,
         }
     }
@@ -767,47 +776,49 @@ impl Browse {
     pub fn what(self, c: &Ctx) -> &'static str {
         use Browse::*;
         match self {
-            Quit => "끝내기",
+            Quit => say(c.lang, "tui.act.quit"),
             FocusNext => c.next_pane,
             FocusPrev => c.prev_pane,
             Focus(Side::Left) => c.left_pane,
             Focus(Side::Right) => c.right_pane,
             // 상세에서는 커서가 없다 — 굴린다.
-            Step(_) if !c.list_focus => "굴리기",
-            Step(_) => "이동",
-            Enter => "들어가기",
-            Leave => "나가기",
-            Expand => "펼침",
-            Collapse => "접기",
-            ExpandAll => "다 펼침",
-            Grep => "검색",
-            Filter => "거름망",
-            Jot => "담기",
-            Pick if c.layer => "등록",
-            Pick => "프로젝트 등록",
-            Unregister => "해제",
-            ClearFilter => "풀기",
-            Worktree if c.worktree => "워크트리 끄기",
-            Worktree => "워크트리",
-            Raw if c.raw => "그리기",
-            Raw => "원문",
+            Step(_) if !c.list_focus => say(c.lang, "tui.act.scroll"),
+            Step(_) => say(c.lang, "tui.act.move"),
+            Enter => say(c.lang, "tui.act.enter"),
+            Leave => say(c.lang, "tui.act.leave"),
+            Expand => say(c.lang, "tui.act.expand"),
+            Collapse => say(c.lang, "tui.act.collapse"),
+            ExpandAll => say(c.lang, "tui.act.expand_all"),
+            Grep => say(c.lang, "tui.act.grep"),
+            Filter => say(c.lang, "tui.act.filter"),
+            Jot => say(c.lang, "tui.act.jot"),
+            Pick if c.layer => say(c.lang, "tui.act.pick"),
+            Pick => say(c.lang, "tui.act.pick_project"),
+            Unregister => say(c.lang, "tui.act.unregister"),
+            ClearFilter => say(c.lang, "tui.act.clear_filter"),
+            Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
+            Worktree => say(c.lang, "tui.act.worktree"),
+            Raw if c.raw => say(c.lang, "tui.act.rendered"),
+            Raw => say(c.lang, "tui.act.raw"),
             // 칸의 이름은 설정에서 온다 — 메뉴가 이름을 붙인다(`menu::entries`).
-            Column(_) => "칸",
+            Column(_) => say(c.lang, "tui.act.column"),
             // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
-            Project(_) => "프로젝트",
+            Project(_) => say(c.lang, "tui.act.project"),
+            // **칸 이름은 설정에서 온다 — 옮기지 않는다.** `done` 은 기본 설정의 낱말이지 화면 글이
+            // 아니고, 사람이 칸을 다르게 지으면 그 이름이 선다.
             Done => "done",
-            Deferred => "미룸",
-            ShowAll => "모두",
-            Sort(_) => "정렬",
-            Cell(_) => "열",
-            Detail => "상세",
-            Read | ReadAll | ReadGroup => "읽음",
+            Deferred => say(c.lang, "tui.act.deferred"),
+            ShowAll => say(c.lang, "tui.act.show_all"),
+            Sort(_) => say(c.lang, "tui.act.sort"),
+            Cell(_) => say(c.lang, "tui.act.cell"),
+            Detail => say(c.lang, "tui.act.detail"),
+            Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
         }
     }
 }
 
-fn shown(hidden: bool) -> &'static str {
-    if hidden { "[숨김]" } else { "[보임]" }
+fn shown(hidden: bool, lang: Lang) -> &'static str {
+    if hidden { say(lang, "tui.state.hidden") } else { say(lang, "tui.state.shown") }
 }
 
 /// SPC 메뉴가 열린 동안 **표보다 먼저** 받는 키(moai-7sjm). Esc 는 탐색에서 거름망을 풀지만,
@@ -825,10 +836,10 @@ pub const MENU: &[Bind<Menu>] = &[
 ];
 
 impl Menu {
-    pub fn what(self) -> &'static str {
+    pub fn what(self, lang: Lang) -> &'static str {
         match self {
-            Menu::Close => "닫기",
-            Menu::Up => "위로",
+            Menu::Close => say(lang, "tui.act.close"),
+            Menu::Up => say(lang, "tui.act.up"),
         }
     }
 }
@@ -904,17 +915,17 @@ pub const PICK: &[Bind<Pick>] = {
 };
 
 impl Pick {
-    pub fn what(self, show_hidden: bool) -> &'static str {
+    pub fn what(self, show_hidden: bool, lang: Lang) -> &'static str {
         use Pick::*;
         match self {
-            Step(_) => "이동",
-            Enter => "들어가기",
-            Up => "위로",
-            Register => "등록",
-            Hidden if show_hidden => "숨은 것 감추기",
-            Hidden => "숨은 것",
-            Path => "경로 적기",
-            Close => "닫기",
+            Step(_) => say(lang, "tui.act.move"),
+            Enter => say(lang, "tui.act.enter"),
+            Up => say(lang, "tui.act.up"),
+            Register => say(lang, "tui.act.pick"),
+            Hidden if show_hidden => say(lang, "tui.pick.hide_hidden"),
+            Hidden => say(lang, "tui.pick.show_hidden"),
+            Path => say(lang, "tui.pick.path"),
+            Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -957,14 +968,14 @@ pub const JOT: &[Bind<Jot>] = {
 
 impl Jot {
     /// `title` — 포커스가 제목 칸에 있나.
-    pub fn what(self, title: bool) -> &'static str {
+    pub fn what(self, title: bool, lang: Lang) -> &'static str {
         match self {
-            Jot::Save => "담기",
-            Jot::Switch if title => "본문",
-            Jot::Switch => "제목",
-            Jot::Next if title => "본문으로",
-            Jot::Next => "줄 나누기",
-            Jot::Close => "닫기",
+            Jot::Save => say(lang, "tui.jot.save"),
+            Jot::Switch if title => say(lang, "tui.jot.body"),
+            Jot::Switch => say(lang, "tui.jot.title"),
+            Jot::Next if title => say(lang, "tui.jot.to_body"),
+            Jot::Next => say(lang, "tui.jot.newline"),
+            Jot::Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -991,7 +1002,9 @@ pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
     }
     let cs: Vec<char> = name.chars().collect();
     match cs[..] {
-        [a, b] if a == b && a.is_ascii_alphabetic() => Some(vec![KeyEvent::new(KeyCode::Char(a), KeyModifiers::NONE); 2]),
+        [a, b] if a == b && a.is_ascii_alphabetic() => {
+            Some(vec![KeyEvent::new(KeyCode::Char(a), KeyModifiers::NONE); 2])
+        }
         _ => None,
     }
 }
@@ -1091,7 +1104,10 @@ mod tests {
             assert_eq!(one(BROWSE, press(KeyCode::Char(c))), Lookup::Unknown, "상한 너머 {c} 가 표에 있다");
         }
         // SPC 뒤의 숫자는 그대로 칸 토글이다 — 두 길이 안 겹친다.
-        assert_eq!(lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('v')), press(KeyCode::Char('1'))]), Lookup::Run(Browse::Column(0)));
+        assert_eq!(
+            lookup(BROWSE, &[pressed(&LEADER), press(KeyCode::Char('v')), press(KeyCode::Char('1'))]),
+            Lookup::Run(Browse::Column(0))
+        );
     }
 
     /// **맨 숫자는 등록한 수만큼만 듣는다**(moai-o133). 층이 없으면 `0` 까지 조용하고, 등록한
@@ -1127,8 +1143,16 @@ mod tests {
         }
         // vi 의 쪽 이동은 Ctrl 만 — Alt 가 함께 붙으면 아니다(`Key::chord`).
         for (c, m) in [('d', Move::HalfDown), ('u', Move::HalfUp), ('f', Move::PageDown), ('b', Move::PageUp)] {
-            assert_eq!(one(BROWSE, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Browse::Step(m)), "Ctrl-{c}");
-            assert_eq!(one(PICK, with(KeyCode::Char(c), KeyModifiers::CONTROL)), Lookup::Run(Pick::Step(m)), "창 Ctrl-{c}");
+            assert_eq!(
+                one(BROWSE, with(KeyCode::Char(c), KeyModifiers::CONTROL)),
+                Lookup::Run(Browse::Step(m)),
+                "Ctrl-{c}"
+            );
+            assert_eq!(
+                one(PICK, with(KeyCode::Char(c), KeyModifiers::CONTROL)),
+                Lookup::Run(Pick::Step(m)),
+                "창 Ctrl-{c}"
+            );
             for mods in [KeyModifiers::ALT, CTRL_ALT] {
                 assert_eq!(one(BROWSE, with(KeyCode::Char(c), mods)), Lookup::Unknown, "{mods:?}-{c}");
                 assert_eq!(one(PICK, with(KeyCode::Char(c), mods)), Lookup::Unknown, "창 {mods:?}-{c}");
@@ -1160,7 +1184,11 @@ mod tests {
         let list = Ctx { list_focus: true, detail: true, ..Ctx::default() };
         for act in [Browse::Expand, Browse::ExpandAll] {
             assert_eq!(act.enabled(&Ctx { group: true, ..list }), Ok(()), "묶음 줄에서 {act:?} 가 꺼졌다");
-            assert_eq!(act.enabled(&Ctx { group: false, ..list }), Err(Off::Quiet), "묶음이 아닌 줄에서 {act:?} 가 켜졌다");
+            assert_eq!(
+                act.enabled(&Ctx { group: false, ..list }),
+                Err(Off::Quiet),
+                "묶음이 아닌 줄에서 {act:?} 가 켜졌다"
+            );
             // 잎은 묶음이 아니다 — 옛 갈래도 그대로 막힌다.
             assert_eq!(act.enabled(&Ctx { group: false, leaf: true, ..list }), Err(Off::Quiet));
         }
@@ -1259,7 +1287,8 @@ mod tests {
         assert_eq!(c.feed(BROWSE, g), Some(Browse::Step(Move::Top)));
         assert!(!c.waiting());
 
-        for k in [press(KeyCode::Char('x')), press(KeyCode::Char('j')), press(KeyCode::Esc), press(KeyCode::Char(' '))] {
+        for k in [press(KeyCode::Char('x')), press(KeyCode::Char('j')), press(KeyCode::Esc), press(KeyCode::Char(' '))]
+        {
             assert_eq!(c.feed(BROWSE, g), None);
             assert_eq!(c.feed(BROWSE, k), None, "`g` 뒤의 {k:?} 가 제 뜻을 했다");
             assert!(!c.waiting(), "`g` 뒤의 {k:?} 가 열을 안 버렸다");
@@ -1365,10 +1394,18 @@ mod tests {
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
-        assert_eq!(label(BROWSE, Browse::Enter), "Enter", "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다");
+        assert_eq!(
+            label(BROWSE, Browse::Enter),
+            "Enter",
+            "숨은 별칭 `l` 이 이름에 섰다 — 층의 거절문이 `Enter·l 로` 가 된다"
+        );
         assert_eq!(label(PICK, Pick::Path), "g p");
         assert_eq!(label(BROWSE, Browse::Quit), "SPC q");
-        assert_eq!(label(BROWSE, Browse::Grep), "/", "숨은 별칭 `SPC /` 가 이름에 섰다 — 층의 거절문·붙여넣기 안내가 둘을 댄다");
+        assert_eq!(
+            label(BROWSE, Browse::Grep),
+            "/",
+            "숨은 별칭 `SPC /` 가 이름에 섰다 — 층의 거절문·붙여넣기 안내가 둘을 댄다"
+        );
     }
 
     /// **옮기기 전 코드가 받던 키가 같은 동작이 된다**(moai-gaum 의 키 목록). 수식키가 붙은 모양도
@@ -1534,8 +1571,34 @@ mod tests {
         let words: Vec<&str> = named.iter().map(|(w, _)| w.as_str()).collect();
         assert!(!words.iter().any(|w| w.starts_with('F') && parse(w).is_some()), "도움말이 걷은 F키를 댄다: {words:?}");
         for must in [
-            "Ctrl-C", "SPC q", "SPC f", "SPC n", "SPC /", "SPC p a", "SPC p d", "SPC v w", "SPC v r", "SPC s p", "SPC", "Enter",
-            "Backspace", "Shift-Tab", "j", "k", "h", "l", "gg", "G", "Ctrl-d", "Ctrl-u", "Ctrl-f", "Ctrl-b", "Ctrl-S", "Esc", "/", "g p",
+            "Ctrl-C",
+            "SPC q",
+            "SPC f",
+            "SPC n",
+            "SPC /",
+            "SPC p a",
+            "SPC p d",
+            "SPC v w",
+            "SPC v r",
+            "SPC s p",
+            "SPC",
+            "Enter",
+            "Backspace",
+            "Shift-Tab",
+            "j",
+            "k",
+            "h",
+            "l",
+            "gg",
+            "G",
+            "Ctrl-d",
+            "Ctrl-u",
+            "Ctrl-f",
+            "Ctrl-b",
+            "Ctrl-S",
+            "Esc",
+            "/",
+            "g p",
             ".",
         ] {
             assert!(words.contains(&must), "도움말에서 `{must}` 를 못 뽑았다 — 뽑기가 헛돈다: {words:?}");
@@ -1573,24 +1636,50 @@ mod tests {
         // (지울 말, 바꿀 말, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
         for (phrase, instead, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
-            ("Tab·Shift-Tab 이 찾을 자리를", "찾을 자리를", &["Tab"][..], &["PROMPT: Tab", "PROMPT: Shift-Tab"][..]),
+            (
+                "Tab and Shift-Tab pick where it",
+                "it picks where it",
+                &["Tab"][..],
+                &["PROMPT: Tab", "PROMPT: Shift-Tab"][..],
+            ),
             // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
-            ("검색·거름망 칸은 Enter 로 걸고 Esc 로 그만두며", "검색·거름망 칸은 그 칸에서 걸고 그만두며", &["Enter", "Esc"][..], &["PROMPT: Enter", "PROMPT: Esc"][..]),
+            (
+                "The search and filter fields take Enter to apply and Esc to give up",
+                "The search and filter fields apply and give up",
+                &["Enter", "Esc"][..],
+                &["PROMPT: Enter", "PROMPT: Esc"][..],
+            ),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
-            ("(Enter 로 가고 Esc 로", "(가고", &["Enter", "Esc"][..], &["PATH: Enter", "PATH: Esc"][..]),
+            (
+                "(Enter goes, Esc gives up)",
+                "(as you would expect)",
+                &["Enter", "Esc"][..],
+                &["PATH: Enter", "PATH: Esc"][..],
+            ),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
-            ("Enter 로 들어가고 Backspace 로 나온다", "들어가고 나온다", &["Enter", "Backspace"][..], &["BROWSE: Enter", "BROWSE: Bksp"][..]),
+            (
+                "Enter goes in, Backspace comes back out",
+                "it goes in and comes back out",
+                &["Enter", "Backspace"][..],
+                &["BROWSE: Enter", "BROWSE: Bksp"][..],
+            ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
-            ("창은 Esc 로 닫는다", "창은 닫는다", &["Esc"][..], &["PICK: Esc"][..]),
+            ("The window closes on Esc", "The window closes", &["Esc"][..], &["PICK: Esc"][..]),
             // 거꾸로 — 목록의 Esc(거름망 풀기)가 같은 문단의 메뉴 문장(`Esc 로 나간다`·`Esc 닫기`)으로
             // 지나가면 안 된다. 그 문장들을 MENU 의 것으로 안 적으면 여기서 붉어진다.
-            ("Esc 가 걸어 둔 거름망을 푼다", "걸어 둔 거름망을 푼다", &["Esc"][..], &["BROWSE: Esc"][..]),
+            ("Esc clears the filter you set", "it clears the filter you set", &["Esc"][..], &["BROWSE: Esc"][..]),
         ] {
-            assert!(help.contains(phrase), "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다");
+            assert!(
+                help.contains(phrase),
+                "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다"
+            );
             let broken = help.replace(phrase, instead);
             let everywhere: Vec<String> = keys_in(&broken).into_iter().map(|(w, _)| w).collect();
             for k in still {
-                assert!(everywhere.iter().any(|w| w == k), "도움말 전체에서 {k} 가 사라져 증명이 안 된다 — 옛 시험도 잡았을 경우다");
+                assert!(
+                    everywhere.iter().any(|w| w == k),
+                    "도움말 전체에서 {k} 가 사라져 증명이 안 된다 — 옛 시험도 잡았을 경우다"
+                );
             }
             let missing = missing_in(&broken);
             for w in want {
@@ -1600,13 +1689,13 @@ mod tests {
     }
 
     /// 목록 문단의 첫머리 말.
-    const LIST: &str = "j·k 나 ↑↓ 로 이동";
+    const LIST: &str = "j and k or the arrow keys move";
     /// SPC 메뉴 문단.
-    const SPC: &str = "그 밖의 동작은 SPC";
+    const SPC: &str = "The rest lives in the menu";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
-    const PICKER: &str = "SPC p a 는 디렉터리를 골라";
+    const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
-    const JOTTING: &str = "SPC n 은 프로젝트 안";
+    const JOTTING: &str = "SPC n opens the jot form";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -1620,15 +1709,15 @@ mod tests {
     /// 문단에서 `Esc 가 걸어 둔 거름망을 푼다` 를 지워도 안 잡힌다(리뷰 moai-osgw.mez).
     const SENTENCES: &[(&str, &str, &str)] = &[
         // 목록(BROWSE)과 Enter·Esc 를 나눠 쓴다.
-        ("PROMPT", LIST, "검색·거름망 칸은"),
+        ("PROMPT", LIST, "The search and filter fields"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
-        ("MENU", SPC, "메뉴는 그 자리에서"),
+        ("MENU", SPC, "stands up only what works"),
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
         // Esc 는 메뉴를 닫는 Esc 지 거름망을 푸는 Esc 가 아니다.
-        ("MENU", SPC, "켜고 끄는 것과 정렬"),
-        ("MENU", SPC, "그 층은 아랫줄 오른쪽에"),
+        ("MENU", SPC, "Toggles and sorts"),
+        ("MENU", SPC, "That level says so at the bottom right"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
-        ("PATH", PICKER, "적는 칸을 연다("),
+        ("PATH", PICKER, "field to type a path"),
     ];
 
     /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.
@@ -1647,15 +1736,17 @@ mod tests {
 
     /// `head` 로 시작하는 문단.
     fn paragraph<'h>(help: &'h str, head: &str) -> &'h str {
-        help.split("\n\n")
-            .find(|p| p.trim_start().starts_with(head))
-            .unwrap_or_else(|| panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS·SENTENCES 를 고친다"))
+        help.split("\n\n").find(|p| p.trim_start().starts_with(head)).unwrap_or_else(|| {
+            panic!("`{head}` 로 시작하는 문단을 못 찾았다 — 도움말 문단이 바뀌었으면 SECTIONS·SENTENCES 를 고친다")
+        })
     }
 
     /// `par` 문단 안에서 `head` 부터 첫 `.` 까지.
     fn sentence<'h>(help: &'h str, par: &str, head: &str) -> &'h str {
         let p = paragraph(help, par);
-        let start = p.find(head).unwrap_or_else(|| panic!("`{par}` 문단에 `{head}` 로 시작하는 문장이 없다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다"));
+        let start = p.find(head).unwrap_or_else(|| {
+            panic!("`{par}` 문단에 `{head}` 로 시작하는 문장이 없다 — 도움말 문장이 바뀌었으면 SENTENCES 를 고친다")
+        });
         let rest = &p[start..];
         &rest[..rest.find('.').map_or(rest.len(), |e| e + 1)]
     }
@@ -1692,15 +1783,24 @@ mod tests {
         const MOVES: [Bind<Pick>; 14] = moves!(Pick::Step, Key::bare);
         let moves: Vec<&str> = MOVES.iter().filter_map(|b| b.label).collect();
         let told = |text: &str, seq: &[Key]| {
-            keys_in(text).into_iter().any(|(_, k)| k.len() == seq.len() && seq.iter().zip(&k).all(|(key, ev)| key.matches(*ev)))
+            keys_in(text)
+                .into_iter()
+                .any(|(_, k)| k.len() == seq.len() && seq.iter().zip(&k).all(|(key, ev)| key.matches(*ev)))
         };
         let mut missing = Vec::new();
         for (table, rows) in tables {
             // 좁힌 표는 제 문장을 **모두** 잇는다 — 한 표가 문장 여럿을 가질 수 있다.
-            let mine: Vec<&str> =
-                SENTENCES.iter().filter(|(t, ..)| *t == table).map(|(_, par, head)| sentence(help, par, head)).collect();
+            let mine: Vec<&str> = SENTENCES
+                .iter()
+                .filter(|(t, ..)| *t == table)
+                .map(|(_, par, head)| sentence(help, par, head))
+                .collect();
             let own = if mine.is_empty() {
-                let heads = SECTIONS.iter().find(|(t, _)| *t == table).map(|(_, h)| *h).unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
+                let heads = SECTIONS
+                    .iter()
+                    .find(|(t, _)| *t == table)
+                    .map(|(_, h)| *h)
+                    .unwrap_or_else(|| panic!("{table} 의 범위가 SECTIONS·SENTENCES 에 없다"));
                 scope(help, heads)
             } else {
                 mine.join("\n")
@@ -1803,8 +1903,11 @@ mod tests {
 
     /// 프로젝트 안, 목록 포커스, 상세 칸이 보이는 자리 — 탐색기의 처음값이다. **`detail` 을 켜
     /// 둔다**: 숨김을 fixture 의 처음값으로 두면 Tab·원문↔그리기가 늘 꺼진 채로 재어진다.
+    ///
+    /// **말은 한국어로 고정한다** — 아래 시험이 재는 것은 낱말이 표에서 오는가이지 기본 말이
+    /// 무엇인가가 아니다. `menu.rs` 의 fixture 와 같은 까닭이다.
     fn inside() -> Ctx {
-        Ctx { list_focus: true, detail: true, ..Ctx::default() }
+        Ctx { list_focus: true, detail: true, lang: Lang::Ko, ..Ctx::default() }
     }
 
     fn layer() -> Ctx {
@@ -1872,9 +1975,16 @@ mod tests {
     fn the_old_menu_keys_are_gone() {
         let sp = pressed(&LEADER);
         let ch = |c| press(KeyCode::Char(c));
-        for old in [vec![sp, ch('r')], vec![sp, ch('t')], vec![sp, ch('o')], vec![sp, ch('s'), ch('d')], vec![sp, ch('s'), ch('z')],
-            vec![sp, ch('s'), ch('1')], vec![sp, ch('c'), ch('g')], vec![sp, ch('m'), ch('r')]]
-        {
+        for old in [
+            vec![sp, ch('r')],
+            vec![sp, ch('t')],
+            vec![sp, ch('o')],
+            vec![sp, ch('s'), ch('d')],
+            vec![sp, ch('s'), ch('z')],
+            vec![sp, ch('s'), ch('1')],
+            vec![sp, ch('c'), ch('g')],
+            vec![sp, ch('m'), ch('r')],
+        ] {
             assert_eq!(lookup(BROWSE, &old), Lookup::Unknown, "옛 키 {} 가 산다", super::super::menu::title(&old));
         }
     }

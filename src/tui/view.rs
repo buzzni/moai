@@ -58,12 +58,13 @@ impl View {
     /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
     /// 그 이름은 버리지 않고 들고 있다 — 그 칸이 있는 프로젝트로 돌아가면 다시 숨는다. 여기서는 줄도
     /// 안 숨긴다([`View::shows`]).
-    pub fn badge(&self, known: &[String]) -> Option<String> {
+    pub fn badge(&self, known: &[String], lang: crate::i18n::Lang) -> Option<String> {
         let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
         if self.hide_deferred {
-            names.push("미룸");
+            names.push(crate::i18n::say(lang, "tui.act.deferred"));
         }
-        (!names.is_empty()).then(|| format!("{} 숨김", names.join("·")))
+        (!names.is_empty())
+            .then(|| crate::i18n::fill(crate::i18n::say(lang, "tui.badge.hidden"), &[("names", &names.join("·"))]))
     }
 }
 
@@ -86,19 +87,21 @@ pub enum Field {
 }
 
 impl Field {
-    pub fn word(self) -> &'static str {
+    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
+        use crate::i18n::say;
         match self {
+            // **`id` 는 낱말이 아니라 이름이다** — 옮기지 않는다.
             Field::Id => "id",
-            Field::Priority => "우선순위",
-            Field::Assignee => "담당",
-            Field::Created => "생성",
-            Field::Updated => "수정",
-            Field::Tally => "셈",
-            Field::Tags => "태그",
-            Field::Names => "열 이름",
+            Field::Priority => say(lang, "tui.field.priority"),
+            Field::Assignee => say(lang, "tui.field.assignee"),
+            Field::Created => say(lang, "tui.field.created"),
+            Field::Updated => say(lang, "tui.field.updated"),
+            Field::Tally => say(lang, "tui.field.tally"),
+            Field::Tags => say(lang, "tui.field.tags"),
+            Field::Names => say(lang, "tui.field.names"),
             // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
-            Field::Branch => "옆 가지",
+            Field::Branch => say(lang, "tui.field.branch"),
         }
     }
 
@@ -117,6 +120,9 @@ impl Field {
         1 << self as u16
     }
 
+    /// 이 바이너리가 아는 열 전부 — 자라는 목록이다. **열을 더하는 사람이 고치는 것은 여기뿐이다**:
+    /// 밑의 [`BEFORE_KNOWN`](Field::BEFORE_KNOWN)·[`EMPTY_KNOWN`](Field::EMPTY_KNOWN) 은 옛 설정 파일이
+    /// 무엇을 뜻했는지를 적어 둔 기록이라, 거기 더하면 이미 적힌 설정의 뜻이 그날 바뀐다(moai-4gy5).
     pub const ALL: [Field; 9] = [
         Field::Id,
         Field::Priority,
@@ -148,7 +154,35 @@ impl Field {
     /// `fields_known` 이 없던 때(moai-3fnf 앞)의 어휘 — 그때 이미 있던 열이다. 그 설정에서 안 적힌
     /// 이 열들은 **사람이 끈 것**이고, 여기 없는 열(열 이름 줄·⎇)은 그 바이너리가 몰랐던 것이라
     /// 기본값으로 선다.
-    pub const BEFORE_KNOWN: [Field; 7] = [
+    ///
+    /// **열을 더하는 사람은 이 목록을 건드리지 않는다**(moai-8mq9.p38 리뷰) — 밑의
+    /// [`EMPTY_KNOWN`](Field::EMPTY_KNOWN) 과 같은 까닭이다. 여기 더하면 그 열이 `fields_known` 이
+    /// 없던 설정 전부에서 "알면서 껐다" 로 서 그날 꺼진다. 한때 이 금지가 `EMPTY_KNOWN` 에만 적혀 있어,
+    /// 여덟 줄 사이에 선 두 기록 중 하나만 지키면 되는 것으로 읽혔다.
+    /// `the_before_known_list_is_frozen_at_the_seven_columns_of_that_day` 가 이름과 차례를 들고 선다.
+    pub const BEFORE_KNOWN: [Field; 7] =
+        [Field::Id, Field::Priority, Field::Assignee, Field::Created, Field::Updated, Field::Tally, Field::Tags];
+
+    /// 손으로 적은 `fields_known = []` 의 뜻(moai-4gy5, 사용자 결정 2026-09-18) — **2026-09-20 의 아홉
+    /// 열로 얼렸다.** 빈 목록은 "적는 쪽이 모든 열을 알았다" 인데, 그 "모든" 을 [`Field::ALL`] 로 읽으면
+    /// 뜻이 바이너리를 따라 움직인다: 오늘 `[]` 를 적은 사람의 설정에서 내일 더한 기본-켠 열이 "알면서
+    /// 껐다" 로 서 영영 안 뜨고, 그 설정을 먼저 만진 바이너리가 어느 쪽이냐에 따라 갈린다(moai-3fnf 가
+    /// 막으려던 것). 얼려 두면 나중 열은 [`BEFORE_KNOWN`](Field::BEFORE_KNOWN) 밖의 열과 같이 기본값으로
+    /// 선다.
+    ///
+    /// **얼림이 사는 값은 차례 독립이다**(moai-8mq9.p38 리뷰가 고친 글). 한때 여기 "그 설정을 다시 적어도
+    /// 뜻이 안 바뀐다" 고 적혀 있었는데, 다시 적히는 것을 잇는 자는 이 상수가 아니라 `App::look_now` 와
+    /// `Doc::merge_look` 의 더하기 전용 합침이다 — 손으로 적은 `[]` 는 **첫 저장에**
+    /// 이 바이너리의 이름 아홉으로 채워지고, 그 저장은 아무것도 안 바꾼 보기 키 한 번에도 일어난다.
+    /// 이 상수가 사는 것은 그 첫 읽기가 **어느 바이너리에서 일어나든 같은 열을 낸다**는 것이다: 옛 것이
+    /// 먼저 만지든 새 것이 먼저 만지든 한 자리로 모인다. `Field::ALL` 로 읽으면 그 둘이 갈렸다.
+    ///
+    /// **열을 더하는 사람은 이 목록을 건드리지 않는다.** 여기 더하면 이미 적힌 `[]` 설정의 뜻이 그날
+    /// 바뀐다 — 그것이 얼린 까닭이다. **열을 빼는 날에는** 갈래가 사라져 이 목록이 안 여물므로 고칠 수밖에
+    /// 없는데, 그때 고치는 것은 "그 열을 목록에서 뺀다" 가 아니라 "그 열은 이제 아무 뜻도 못 진다" 는
+    /// 결정이다 — 빼기 전에 `[]` 설정이 그 열을 어떻게 읽어야 하는지를 먼저 정한다.
+    /// `the_empty_fields_known_list_is_frozen_at_todays_nine_columns` 가 이름과 차례를 그대로 들고 선다.
+    pub const EMPTY_KNOWN: [Field; 9] = [
         Field::Id,
         Field::Priority,
         Field::Assignee,
@@ -156,6 +190,8 @@ impl Field {
         Field::Updated,
         Field::Tally,
         Field::Tags,
+        Field::Names,
+        Field::Branch,
     ];
 
     pub fn named(name: &str) -> Option<Field> {
@@ -181,7 +217,7 @@ impl Default for Fields {
 /// 그날 **컴파일이 멈추게** 못 박는다(moai-ggqf, moai-7pd5 가 적어 둔 것).
 const _: () = assert!(
     widest_bit() < u16::BITS,
-    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라"
+    "열이 Fields 의 비트 폭을 넘었다 — Fields 와 Field::bit 를 더 넓은 정수로 옮겨라" // i18n:터지는-글
 );
 
 /// [`Field::ALL`] 가운데 가장 큰 비트 자리. `Field::bit` 이 쓰는 그 자리다.
@@ -252,6 +288,45 @@ mod tests {
         assert!(!f.shows(Field::Id) && f.shows(Field::Priority), "끈 것을 끄며 켰거나 옆 열을 건드렸다");
     }
 
+    /// **손으로 적은 빈 `fields_known` 의 뜻은 얼린 아홉 열이다**(moai-4gy5, 사용자 결정 2026-09-18).
+    /// 이름과 차례를 그대로 적어 못박는다 — **열을 더하는 사람은 이 목록을 건드리지 않는다.** `Field::ALL`
+    /// 로 읽으면 `[]` 의 뜻이 바이너리를 따라 움직여, 나중에 생긴 기본-켠 열이 그 설정에서 영영 안 뜬다.
+    ///
+    /// **조각으로 견준다**(moai-8mq9.p38 리뷰) — `[Field; 9]` 끼리 견주면 길이가 붙어, 이 시험이 잡으려던
+    /// 바로 그 실수(열을 하나 더해 `[Field; 10]` 으로 늘림)가 `mismatched types` 로 멈춰 여기 적은 까닭이
+    /// 한 글자도 안 나온다. 조각끼리면 길이가 달라도 여물어, 멈추는 자리에 까닭이 함께 선다.
+    #[test]
+    fn the_empty_fields_known_list_is_frozen_at_todays_nine_columns() {
+        assert_eq!(
+            Field::EMPTY_KNOWN.map(Field::name).as_slice(),
+            ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"].as_slice(),
+            "얼린 목록이 바뀌었다 — 새 열은 여기 넣지 않는다(moai-4gy5). \
+             이미 적힌 `fields_known = []` 설정의 뜻이 그날 바뀐다"
+        );
+    }
+
+    /// **`fields_known` 이 없던 때의 목록도 얼린 기록이다**(moai-8mq9.p38 리뷰). 위의 것만 못박아 두면,
+    /// 여덟 줄 사이에 선 두 기록 중 하나만 지키면 되는 것으로 읽힌다 — 여기 열을 더하면 `fields_known`
+    /// 이 없던 설정 전부에서 그 열이 "알면서 껐다" 로 서 그날 꺼진다(moai-3fnf 가 막으려던 것의 거울).
+    ///
+    /// 얼린 아홉이 이 일곱을 다 품는 것도 함께 잰다 — 품지 않으면 "키가 없다" 와 "키가 비었다" 가 같은
+    /// 열을 두고 갈려, 사람이 같은 뜻으로 적은 두 꼴이 다른 화면을 낸다.
+    #[test]
+    fn the_before_known_list_is_frozen_at_the_seven_columns_of_that_day() {
+        assert_eq!(
+            Field::BEFORE_KNOWN.map(Field::name).as_slice(),
+            ["id", "priority", "assignee", "created", "updated", "tally", "tags"].as_slice(),
+            "옛 어휘가 바뀌었다 — 새 열은 여기 넣지 않는다(moai-3fnf)"
+        );
+        for f in Field::BEFORE_KNOWN {
+            assert!(
+                Field::EMPTY_KNOWN.contains(&f),
+                "{} 이 얼린 아홉에서 빠졌다 — 없는 `fields_known` 과 빈 `fields_known` 이 그 열을 두고 갈린다",
+                f.name()
+            );
+        }
+    }
+
     /// **열마다 제 비트를 쓴다**(moai-ggqf) — 둘이 같은 비트를 쓰면 하나를 끄며 다른 하나가 꺼진다.
     /// `Field::ALL` 에 빠진 열도 여기서 걸린다: 빠진 열은 설정에 저장되지도, 폭 가드에 세이지도 않는다.
     #[test]
@@ -279,7 +354,14 @@ mod tests {
             };
             assert!(in_all);
         }
-        assert_eq!(Field::ALL.len(), 9, "열을 더했으면 ALL 과 이 시험을 함께 고친다");
+        // **여기가 열을 더하는 사람이 멈추는 자리다**(moai-8mq9.p38 리뷰) — 그래서 건드릴 목록과 건드리면
+        // 안 될 목록을 함께 댄다. `EMPTY_KNOWN`·`BEFORE_KNOWN` 은 옛 설정이 무엇을 뜻했는지의 기록이라,
+        // 거기 새 열을 더하면 이미 적힌 설정의 뜻이 그날 바뀐다.
+        assert_eq!(
+            Field::ALL.len(),
+            9,
+            "열을 더했으면 ALL 과 이 시험을 함께 고친다 — EMPTY_KNOWN 과 BEFORE_KNOWN 은 그대로 둔다(moai-4gy5)"
+        );
     }
 
     /// 이 프로젝트의 칸 — 시험마다 같은 설정이다.
@@ -325,14 +407,14 @@ mod tests {
     #[test]
     fn the_badge_names_what_is_hidden() {
         let known: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
-        assert_eq!(View::default().badge(&known), None);
-        assert_eq!(View::hiding("done").badge(&known).as_deref(), Some("done 숨김"));
+        assert_eq!(View::default().badge(&known, crate::i18n::Lang::Ko), None);
+        assert_eq!(View::hiding("done").badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true };
-        assert_eq!(v.badge(&known).as_deref(), Some("review·done·미룸 숨김"));
+        assert_eq!(v.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸 숨김"));
         // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
         let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
-        assert_eq!(elsewhere.badge(&known).as_deref(), Some("done 숨김"));
-        assert_eq!(View::hiding("blocked").badge(&known), None);
+        assert_eq!(elsewhere.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
+        assert_eq!(View::hiding("blocked").badge(&known, crate::i18n::Lang::Ko), None);
     }
 
     #[test]

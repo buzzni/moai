@@ -36,16 +36,25 @@ pub struct Project {
     /// 옆 워크트리를 겹치다 만난 것. **그 프로젝트 줄에서 말하고 막지 않는다** — stderr 로
     /// 흘리면 어느 프로젝트의 말인지 모르고, 비영 종료하면 남의 워크트리 하나로 한눈 보기
     /// 전체가 실패로 읽힌다.
-    pub trouble: Vec<String>,
+    pub trouble: Vec<crate::worktree::Trouble>,
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`worktree::Gathered::swept`) — 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 이미 섰다.
     pub swept: bool,
 }
 
 pub enum State {
-    Open { repo: Repo, load: Load },
+    Open {
+        repo: Repo,
+        load: Load,
+    },
     /// 디렉터리는 있는데 `.moai/` 가 없다 — 나중에 `moai init` 하면 보인다.
-    Uninit,
+    ///
+    /// **딸린 워크트리면 트래커가 사는 주 체크아웃을 함께 든다**(moai-nppo, 리뷰 10·11번).
+    /// 여기서 한 번 세는 까닭은 [`Repo::open`] 이 이미 그 물음을 풀고 답을 버렸기
+    /// 때문이고(`Repo::redirect` 가 `None` 이라 이 갈래로 왔다), 그리는 쪽이 저마다 다시
+    /// 세면 `view` 가 줄마다 `canonicalize` 와 관리 파일 읽기를 치른다 — 그쪽은 순수
+    /// 함수라는 글을 머리에 달고 있고, 탐색기의 층은 그 줄을 시계마다 다시 그린다.
+    Uninit(Option<PathBuf>),
     /// 디렉터리가 없다.
     Missing,
     /// 설정이 깨졌거나 못 읽는다. 사람이 읽을 한 줄.
@@ -106,6 +115,22 @@ pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, workt
     Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
+/// **여는 데까지만** 본다 — 스냅샷은 안 읽는다(moai-m59y). 줄을 곧 스레드가 읽을 자리가 쓴다
+/// (`tui::App::read_wanted`): 거기서 [`open_one`] 을 부르면 UI 실이 `issues.jsonl` 을 한 번 파싱하고
+/// 일꾼이 또 한 번 파, "스레드로 펼친다" 가 그 한 판을 그 자리에서 치른다.
+///
+/// **못 여는 갈래는 [`open_one`] 과 같은 자다** — `Uninit`·`Missing`·`Unreadable` 셋은 [`Repo::open`]
+/// 이 가르므로 스냅샷을 안 읽어도 답이 같다. 갈리는 것은 하나뿐이다: 열리지만 **스냅샷이 못 읽히는**
+/// 저장소를 여기서는 `Ok` 로 답한다 — 그 까닭은 곧 일꾼의 읽기가 제 길로 댄다.
+pub fn open_shallow(path: &Path) -> Result<Repo, State> {
+    match Repo::open(path) {
+        Ok(Opened::Repo(repo)) => Ok(repo),
+        Ok(Opened::Uninit) => Err(State::Uninit(crate::store::init_belongs_at(path))),
+        Ok(Opened::Missing) => Err(State::Missing),
+        Err(e) => Err(State::Unreadable(e.message)),
+    }
+}
+
 impl State {
     /// 준 디렉터리 그 자리를 연다. **실패하지 않는다** — 못 여는 것도 상태다.
     ///
@@ -117,18 +142,20 @@ impl State {
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
     /// 옆 워크트리를 못 찾은 것(git 밖)도 문제로 든다 — 겹쳐 보라고 시킨 것이다.
-    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<String>, bool) {
+    ///
+    /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
+    /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
+    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<crate::worktree::Trouble>, bool) {
         let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
-        match Repo::open(dir) {
-            Ok(Opened::Repo(repo)) => match crate::worktree::gather(&repo, worktree) {
-                Ok(g) => {
-                    let trouble = g.unfound.into_iter().chain(g.trouble).collect();
-                    (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
-                }
-                Err(e) => lone(State::Unreadable(e.message)),
-            },
-            Ok(Opened::Uninit) => lone(State::Uninit),
-            Ok(Opened::Missing) => lone(State::Missing),
+        let repo = match open_shallow(dir) {
+            Ok(repo) => repo,
+            Err(state) => return lone(state),
+        };
+        match crate::worktree::gather(&repo, worktree) {
+            Ok(g) => {
+                let trouble = g.unfound.into_iter().chain(g.trouble).collect();
+                (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
+            }
             Err(e) => lone(State::Unreadable(e.message)),
         }
     }
@@ -142,7 +169,7 @@ impl Project {
     pub fn seen<'a, T>(&'a self, f: impl FnOnce(&'a Repo, &'a Load) -> T) -> Seen<'a, T> {
         match &self.state {
             State::Open { repo, load } => Seen::Ok(f(repo, load)),
-            State::Uninit => Seen::Uninit,
+            State::Uninit(at) => Seen::Uninit { tracker_at: at.as_deref() },
             State::Missing => Seen::Missing,
             State::Unreadable(e) => Seen::Unreadable { error: e },
         }
@@ -158,9 +185,16 @@ pub enum Seen<'a, T> {
     /// `moai project ls --json` 과 같은 낱말이다 — 같은 상태를 두 명령이 달리 부르면
     /// 둘을 함께 읽는 쪽이 두 낱말을 다 알아야 한다.
     #[serde(rename = "uninitialized")]
-    Uninit,
+    Uninit {
+        /// 딸린 워크트리라 여기서 `moai init` 이 안 서면 **트래커가 사는 주 체크아웃**.
+        /// **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tracker_at: Option<&'a Path>,
+    },
     Missing,
-    Unreadable { error: &'a str },
+    Unreadable {
+        error: &'a str,
+    },
 }
 
 impl<'a, T> Seen<'a, T> {
@@ -168,7 +202,7 @@ impl<'a, T> Seen<'a, T> {
     pub fn map<'b, U>(&'b self, f: impl FnOnce(&'b T) -> U) -> Seen<'a, U> {
         match self {
             Seen::Ok(t) => Seen::Ok(f(t)),
-            Seen::Uninit => Seen::Uninit,
+            Seen::Uninit { tracker_at } => Seen::Uninit { tracker_at: *tracker_at },
             Seen::Missing => Seen::Missing,
             Seen::Unreadable { error } => Seen::Unreadable { error },
         }
@@ -204,6 +238,9 @@ pub struct Added {
     /// 그 디렉터리에 `.moai` 가 있나. 없으면 "init 전" 이다. 못 봐서 모르면(권한) `true` 쪽이다 —
     /// 그 까닭은 `unreadable` 이 대고, "init 하라" 는 틀린 말을 하지 않는다.
     pub initialized: bool,
+    /// 딸린 워크트리라 여기서 `moai init` 이 안 서면 **트래커가 사는 주 체크아웃**(moai-nppo).
+    /// 여는 자리에서 함께 세므로 그리는 쪽이 다시 묻지 않는다 — [`Seen::Uninit`] 과 한 값이다.
+    pub tracker_at: Option<PathBuf>,
     /// 등록은 했는데 그 저장소를 못 읽는다 — 설정이 깨졌거나 스냅샷을 못 연다. 사람이 읽을
     /// 한 줄. **등록을 막지 않는다** — 쓰는 곳은 사람의 설정이지 그 저장소가 아니다.
     pub unreadable: Option<String>,
@@ -216,9 +253,9 @@ pub struct Added {
 /// 상대경로는 `cwd` 에 붙이고 링크를 푼다. 디렉터리가 있어야 하지만 `.moai` 는 없어도
 /// 된다. **`.moai` 는 준 디렉터리에서만** 본다 — 위로 찾아 올라가면 모노레포의 `apps/a`
 /// 가 루트의 `.moai` 를 제 것으로 읽고, 그러면 따로 등록한 뜻이 없다.
-pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
-    let dir = crate::user_config::resolve_dir(input, cwd)?;
-    let added = crate::user_config::update(config, |doc| {
+pub fn add(config: &Path, input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<Added> {
+    let dir = crate::user_config::resolve_dir(input, cwd, lang)?;
+    let added = crate::user_config::update(config, lang, |doc| {
         // **링크를 풀어서도 견준다.** `Doc::add` 는 파일 시스템을 안 보는 자리라 글자로만
         // 재는데, 목록에 링크 철자(`/w/link`)로 적힌 줄이 있으면 푼 경로(`/w/real`)가 또
         // 실려 같은 저장소가 두 줄로 선다. TUI 의 고르기 창은 이미 링크를 풀어 그 줄에
@@ -231,12 +268,13 @@ pub fn add(config: &Path, input: &Path, cwd: &Path) -> R<Added> {
     })?;
     // **한 번 열어 둘 다 읽는다.** `.moai` 를 따로 `is_dir` 로 보면 권한이 없어 못 본 `.moai`
     // 가 "init 전" 으로 접혀, 못 읽는다는 줄 옆에 `init` 하라는 틀린 말이 선다 (`Repo::open`).
-    let (initialized, unreadable) = match State::at(&dir) {
-        State::Unreadable(e) => (true, Some(e)),
-        State::Uninit | State::Missing => (false, None),
-        State::Open { .. } => (true, None),
+    let (initialized, tracker_at, unreadable) = match State::at(&dir) {
+        State::Unreadable(e) => (true, None, Some(e)),
+        State::Uninit(at) => (false, at, None),
+        State::Missing => (false, None, None),
+        State::Open { .. } => (true, None, None),
     };
-    Ok(Added { path: dir, added, initialized, unreadable })
+    Ok(Added { path: dir, added, initialized, tracker_at, unreadable })
 }
 
 /// 뺀 결과 — [`remove`] 가 낸다.
@@ -253,12 +291,12 @@ pub struct Removed {
 /// 견주는 철자는 [`crate::user_config::spellings`] 다(글자로 정리한 것과 링크를 푼 것).
 /// **설정 파일이 없으면 뺄 것도 없다.** 그대로 `update` 로 가면 빈 목록에서 아무것도 안
 /// 빼려고 설정 디렉터리를 만든다 — 아무 일도 안 한 명령이 사람의 `~/.config` 에 흔적을 남긴다.
-pub fn remove(config: &Path, input: &Path, cwd: &Path) -> R<Removed> {
+pub fn remove(config: &Path, input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<Removed> {
     // 준 철자 그대로까지 [`crate::user_config::spellings`] 가 댄다 — `color` 와 같은
     // 목록이라야 한쪽이 빼는 줄을 다른 쪽이 없다고 하지 않는다. 대표 철자(`spelled`)는 앞의 것이다.
     let spellings = crate::user_config::spellings(input, cwd);
     let removed: Vec<PathBuf> = if config.exists() {
-        crate::user_config::update(config, |doc| {
+        crate::user_config::update(config, lang, |doc| {
             let hit: Vec<PathBuf> =
                 doc.projects().0.into_iter().map(|p| p.path).filter(|p| spellings.contains(p)).collect();
             doc.remove(&spellings)?;

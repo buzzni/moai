@@ -1,7 +1,12 @@
-# moai — 이슈 트래커
-# 스냅샷에는 merge=union 을 쓰지 않는다. 두 브랜치가 같은 이슈를 고치면
-# union 이 같은 id 를 가진 줄 두 개를 조용히 남기고, 그건 데이터 손상이다.
-# 진짜 충돌은 사람이 푼다 — 한 줄이 이슈 하나라 실제로 쉽다.
-.moai/issues.jsonl   text eol=lf
-# 저널은 추가 전용이고 순서가 무관하며 상태 계산에 읽히지 않는다. 여기선 맞다.
+# moai — issue tracker
+# The snapshot does not use merge=union. When two branches change the same
+# issue, union quietly leaves two lines carrying one id, and that is data loss.
+# merge=moai pairs the lines by id and resolves each issue 3-way. A real
+# conflict — two people changing the same field — still reaches a person, and
+# one line per issue makes that easy in practice.
+# Install the driver once per clone with `moai merge-driver --install`. In a
+# clone without it this word is ignored and git's default merge runs.
+.moai/issues.jsonl   text eol=lf merge=moai
+# The journal is append-only, order does not matter, and it is never read to
+# compute state. union is right here.
 .moai/journal.jsonl  text eol=lf merge=union

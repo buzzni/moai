@@ -7,20 +7,22 @@
 //! **크레이트를 들이지 않는다**(사용자 결정). 이 도구의 글에는 복수형·지역 서식 규칙이 거의
 //! 없어 표 하나와 [`say`] 하나면 되고, 새 축의 의존성은 전이 의존과 빌드 시간을 새로 진다.
 
-
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// 화면에 쓸 수 있는 언어. **영어가 기준이다** — 없는 키는 영어로 떨어지고, 새 키는 영어부터다.
+/// **기본값도 영어다**(moai-bn1j, 2026-09-20 사용자 결정 — v0.1.0 은 영어로 나간다).
 ///
-/// **다만 지금 기본값은 한국어다**(사용자 결정, 리뷰 moai-80qw.cb8). 말묶음에 든 글이 아직
-/// 열 줄이라, 기본을 영어로 두면 아무것도 안 고른 사람의 화면이 영어 두어 줄과 한국어 열
-/// 몇 줄로 **섞인다** — 덜 옮긴 것보다 나쁘다. 옮김이 화면을 덮을 때 이 `#[default]` 한 줄을
-/// `En` 으로 옮기는 것이 예정된 끝이고, 그때까지 영어는 `MOAI_LANG=en`·설정으로 본다.
+/// 한때 기본이 한국어였다(리뷰 moai-80qw.cb8). 말묶음에 든 글이 열 줄뿐이던 때라, 영어로 두면
+/// 아무것도 안 고른 사람의 화면이 영어 두어 줄과 한국어 열 몇 줄로 **섞였기** 때문이다 — 그
+/// 조건이 "옮김이 화면을 덮을 때 `#[default]` 를 `En` 으로 옮긴다" 였고, 여기가 그 자리다.
+/// **되돌리지 않는다**: 받는 사람이 읽을 수 있는 말이 무엇인지는 옮김의 양이 아니라 배포가
+/// 정하고, 덜 옮긴 화면은 영어로 떨어져 읽히지만 안 배운 말로 선 화면은 안 읽힌다.
+/// 한국어는 `MOAI_LANG=ko`·설정으로 본다 — 두 길 다 [`pick`] 이 받는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lang {
-    En,
     #[default]
+    En,
     Ko,
     Zh,
     Ja,
@@ -62,6 +64,17 @@ impl Lang {
 ///
 /// **환경이 설정을 이긴다**: 설정은 그 사람의 평소 값이고 환경은 이번 한 번이다. 둘 다
 /// 모르는 값이면 기본값으로 떨어진다 — 여기서 멈추면 글자 하나 때문에 도구가 안 도는 셈이다.
+///
+/// **시스템 로캘(`LANG`·`LC_ALL`·`LC_MESSAGES`)은 안 읽는다**(moai-gv9n, 2026-09-20 사용자
+/// 결정). [`Lang::parse`] 가 `ko_KR.UTF-8` 모양을 받는 것은 `MOAI_LANG` 에 로캘을 그대로 붙여
+/// 넣는 사람을 받자는 것이지 로캘을 읽는다는 뜻이 아니다.
+///
+/// **그 결정의 여는 조건이 왔고, 사용자가 다시 안 읽기로 정했다**(moai-bn1j, 2026-09-20).
+/// 조건은 "`#[default]` 를 `En` 으로 옮기는 날" 이었는데, 옮기고 보니 까닭이 그대로 남았다 —
+/// 영어 표가 백 키를 넘긴 지금 ja·zh·es 는 아홉·열 키뿐이라, 로캘을 읽으면 `ja_JP` 기계가 일본어
+/// 열 줄과 영어 아흔 줄로 **섞인 화면**을 본다. 그것이 gv9n 이 이 층을 안 연 바로 그 까닭이다.
+/// 다 찬 말은 ko 하나고, 그 하나를 위해 로캘을 읽으면 "다 찬 말" 이라는 둘째 어휘가 코드에
+/// 생긴다. **다시 여는 조건**: ja·zh·es 가 영어 표를 덮는 날 셋을 함께 잰다.
 pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
     env.filter(|s| !s.trim().is_empty())
         .and_then(Lang::parse)
@@ -69,47 +82,7 @@ pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
         .unwrap_or_default()
 }
 
-/// 이 판이 쓸 언어와, 설정에서 그것을 읽다 만난 까닭 — **한 프로세스에 한 번만 정한다.**
-///
-/// 매 줄 설정 파일을 다시 읽을 까닭이 없고, 한 번 돌 동안 말이 바뀌면 같은 화면에 두 말이
-/// 섞인다. 고르는 자(`MOAI_LANG` → 설정 → 영어)는 [`pick`] 하나고 그쪽이 시험을 받는다 —
-/// 여기는 환경과 파일에서 값을 길어 오는 껍데기다.
-///
-/// **긷는 것은 `get_or_init` 밖에서 한다**(리뷰 moai-80qw). 설정을 읽는 길
-/// (`user_config::read` → `Doc::lang`)은 제 글자를 화면에 내는 자리고, 그 글자가 언젠가
-/// [`t`] 를 지나면 닫히는 중인 문을 안에서 다시 두드리는 꼴이 된다 — `OnceLock` 의 재진입은
-/// 영영 안 풀리고, 모든 명령이 아무 말 없이 멈춘다. 값을 먼저 길어 두면 그럴 자리가 없다.
-fn picked() -> &'static (Lang, Vec<String>) {
-    static PICKED: OnceLock<(Lang, Vec<String>)> = OnceLock::new();
-    if let Some(got) = PICKED.get() {
-        return got;
-    }
-    let env = std::env::var("MOAI_LANG").ok();
-    let reg = crate::user_config::read(crate::user_config::path().as_deref());
-    let lang = pick(env.as_deref(), reg.lang.as_deref());
-    PICKED.get_or_init(|| (lang, reg.lang_problems))
-}
-
-/// 이 판이 실제로 쓸 언어.
-pub fn current() -> Lang {
-    picked().0
-}
-
-/// 설정에 적은 말이 틀렸을 때의 한 줄(리뷰 moai-80qw). 비어 있으면 아무 일 없다.
-///
-/// **막지 않는다** — 대는 쪽은 stderr 로 말만 하고 종료 코드를 안 건드린다. 글자 하나 때문에
-/// 도구가 안 도는 것처럼 보이면 안 된다는 것은 [`pick`] 이 영어로 떨어지는 까닭과 같다.
-/// 여기서 새로 읽지 않는다 — 말을 고를 때 이미 읽은 것을 그대로 낸다.
-pub fn problems() -> &'static [String] {
-    &picked().1
-}
-
-/// 지금 언어로 그 키의 글자. 부르는 자리는 이것 하나만 쓴다.
-pub fn t(key: &'static str) -> &'static str {
-    say(current(), key)
-}
-
-/// 글 안의 `{이름}` 자리를 채운다 — `fill(t("status.issues"), &[("n", "12")])`.
+/// 글 안의 `{이름}` 자리를 채운다 — `fill(say(lang, "status.issues"), &[("n", "12")])`.
 ///
 /// **자리는 이름으로 둔다**(`{n}`), 차례가 아니다. 번역은 말차례가 달라지는 일이라, 자리를
 /// 차례로 두면 번역자가 순서를 바꾸는 순간 값이 엉뚱한 자리에 든다. 모르는 이름은 그대로
@@ -188,9 +161,9 @@ mod tests {
     }
 
     /// **환경이 먼저, 그다음이 설정, 없으면 기본값이다.** 모르는 값에서 멈추지 않는다 —
-    /// 글자 하나 때문에 도구가 안 도는 셈이 된다. 기본값이 무엇인지는 여기서 안 박는다:
-    /// 그것은 옮김이 얼마나 찼는지에 따라 바뀌는 값이고([`Lang::default`]), 이 시험이 재는
-    /// 것은 **고르는 차례**다.
+    /// 글자 하나 때문에 도구가 안 도는 셈이 된다. 기본값이 무엇인지는 여기서 안 박는다 —
+    /// 이 시험이 재는 것은 **고르는 차례**뿐이다. 그 값은 [`nothing_picked_means_english`] 가
+    /// 이름을 대고 못 박는다.
     #[test]
     fn the_environment_wins_then_the_setting_then_the_default() {
         assert_eq!(pick(Some("ko"), Some("ja")), Lang::Ko, "환경이 설정에 졌다");
@@ -201,6 +174,21 @@ mod tests {
         // 영어는 **기준**이라 고르면 늘 잡힌다 — 기본값이 무엇이든.
         assert_eq!(pick(Some("en"), Some("ko")), Lang::En);
         assert_eq!(pick(Some("kr"), Some("ko")), Lang::Ko, "모르는 환경값이 설정까지 버렸다");
+    }
+
+    /// **아무것도 안 고르면 영어다**(moai-bn1j, 2026-09-20 사용자 결정 — v0.1.0 은 영어로 나간다).
+    ///
+    /// 위 시험은 **고르는 차례**만 재고 기본값이 무엇인지는 일부러 안 박는다. 그 값은 한때
+    /// 옮김이 얼마나 찼는지에 따라 바뀌는 값이었지만, 이제는 배포가 정한 값이다 — 한 줄
+    /// (`#[default]`)이라 리팩터 중에 말없이 미끄러지기 쉬워 여기서 이름을 대고 못 박는다.
+    /// **로캘도 여기서 잰다**: 로캘 모양의 값을 환경에 둬도 `MOAI_LANG` 이 아니면 안 읽는다
+    /// ([`pick`]). 이 자를 시험 밖에서 재는 것은 `tests/cli.rs` 가 화면으로 한다.
+    #[test]
+    fn nothing_picked_means_english() {
+        assert_eq!(Lang::default(), Lang::En);
+        assert_eq!(pick(None, None), Lang::En);
+        assert_eq!(pick(Some(""), None), Lang::En, "빈 환경변수는 안 준 것이다");
+        assert_eq!(pick(Some("kr"), None), Lang::En, "모르는 값에서 멈췄다");
     }
 
     /// **채운 값은 다시 안 본다**(리뷰 moai-80qw) — 그리고 `vars` 의 차례가 결과를 안 바꾼다.
@@ -243,8 +231,12 @@ mod tests {
 
     /// **영어 표가 소스가 쓰는 키를 다 갖는다**(moai-f2a6) — 새 키는 영어부터다.
     ///
-    /// 소스에서 `t("…")`·`say(…, "…")` 가 든 키를 읽어 영어 표와 견준다. 없는 키는 화면에
+    /// 소스에서 `say(…, "…")` 가 든 키를 읽어 영어 표와 견준다. 없는 키는 화면에
     /// `status.issues` 같은 글자로 그대로 나므로, 이 시험이 그 자리를 **붙이기 전에** 잡는다.
+    ///
+    /// **그러니 키는 `say` 부름에 그대로 적는다.** 도우미에 키만 넘기면(`one("warn.…")`)
+    /// 읽는 자가 그 줄을 못 보고, 이 시험은 파란 채로 구멍이 뚫린다 — `view::says` 의
+    /// 도우미가 **찾아 온 글**을 받는 까닭이 이것이다.
     /// 다른 언어는 **안 잰다**(사용자 결정) — 다섯을 함께 채우게 하면 글 한 줄 고칠 때마다
     /// 다섯을 고쳐야 하고, 모르는 언어에 기계번역이 들어온다. 그쪽은 영어로 떨어진다.
     #[test]
@@ -277,34 +269,47 @@ mod tests {
         assert!(asked.len() >= 2, "소스에서 키를 하나도 못 읽었다 — 읽는 자가 헛돈다");
         let missing: Vec<&(String, String)> = asked.iter().filter(|(k, _)| !en.contains_key(k)).collect();
         assert!(missing.is_empty(), "영어 표에 없는 키를 소스가 부른다 — {missing:#?}");
+        // **반대쪽도 센다**(리뷰) — 위의 비교는 읽는 자가 **본** 키만 재므로, 키를 도우미에
+        // 숨기면(`one("warn.…")`) 그 키는 양쪽에서 함께 사라져 이 시험이 파란 채로 구멍이
+        // 뚫린다. 실제로 `view::says` 의 스물한 줄이 그렇게 숨었고, 바로 위 주석이 "시험이
+        // 잡는다" 고 말하는 동안 틀린 키를 적어도 아무 데서도 안 붉어졌다. 영어 표에 있는데
+        // 아무도 안 부르는 키는 **지운 자리의 찌꺼기이거나 숨은 부름**이고, 둘 다 여기서
+        // 이름을 댄다 — 아직 안 이은 키를 미리 적어 두지 않는다.
+        let unasked: Vec<&String> = en.keys().filter(|k| !asked.iter().any(|(a, _)| a == *k)).collect();
+        assert!(
+            unasked.is_empty(),
+            "영어 표에 있는데 소스가 안 부르는 키 — 지웠으면 표에서도 지우고, \
+             부르고 있다면 키를 `say(lang, \"…\")` 에 그대로 적는다: {unasked:#?}"
+        );
     }
 
-    /// `t("키")`·`say(…, "키")` 의 키만 뽑는다. 이 시험 자신이 쓰는 글(`"nothing.here"` 같은)은
+    /// `say(…, "키")` 의 키만 뽑는다. 이 시험 자신이 쓰는 글(`"nothing.here"` 같은)은
     /// 부르는 모양이 아니라 안 걸린다.
+    ///
+    /// **부르는 모양은 하나다.** 한때 `t("키")` 도 읽었는데 그 함수는 걷혔다(moai-cigu) —
+    /// 없는 모양을 계속 읽으면 다음 사람이 두 입구가 다 산 줄로 읽는다.
     fn keys_in(line: &str) -> Vec<String> {
+        const HEAD: &str = "say(";
         let mut out = Vec::new();
-        for (head, skip) in [("t(\"", 0), ("say(", 1)] {
-            let mut rest = line;
-            let mut eaten = 0usize;
-            while let Some(at) = rest.find(head) {
-                // **이름 끝의 `t(` 는 이 부름이 아니다** — `parent("…")`·`insert("…")` 가 그렇게 걸렸다.
-                // 앞 글자가 이름의 일부면 건너뛴다. `i18n::t(` 의 `:` 는 이름 글자가 아니라 지나간다.
-                let before = line[..eaten + at].chars().next_back();
-                let joined = before.is_some_and(|c| c.is_alphanumeric() || c == '_');
-                eaten += at + head.len();
-                rest = &rest[at + head.len()..];
-                if joined {
-                    continue;
-                }
-                // `say(lang, "키")` 는 따옴표가 둘째 인자다 — 여는 따옴표까지 건너뛴다.
-                let quoted = if skip == 0 { Some(rest) } else { rest.split_once('"').map(|(_, r)| r) };
-                let Some(quoted) = quoted else { continue };
-                if let Some((key, _)) = quoted.split_once('"')
-                    && key.contains('.')
-                    && !key.contains(' ')
-                {
-                    out.push(key.to_string());
-                }
+        let mut rest = line;
+        let mut eaten = 0usize;
+        while let Some(at) = rest.find(HEAD) {
+            // **이름 끝의 `say(` 는 이 부름이 아니다** — `essay("…")` 같은 이름이 그렇게 걸린다.
+            // 앞 글자가 이름의 일부면 건너뛴다. `i18n::say(` 의 `:` 는 이름 글자가 아니라 지나간다.
+            let before = line[..eaten + at].chars().next_back();
+            let joined = before.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            eaten += at + HEAD.len();
+            rest = &rest[at + HEAD.len()..];
+            if joined {
+                continue;
+            }
+            // `say(lang, "키")` 는 따옴표가 둘째 인자다 — 여는 따옴표까지 건너뛴다.
+            let Some(quoted) = rest.split_once('"').map(|(_, r)| r) else { continue };
+            if let Some((key, _)) = quoted.split_once('"')
+                && key.contains('.')
+                && !key.contains(' ')
+            {
+                out.push(key.to_string());
             }
         }
         out
@@ -359,6 +364,20 @@ mod tests {
     /// 그래서 **번역이 든 키만** 영어와 견준다 — 자리 이름이 같은지, 값이 비지 않았는지.
     /// 키가 아예 없는 것은 안 잰다(es 의 `status.milestone_label`): 그쪽은 영어가 받고,
     /// 다섯을 함께 채우게 하지 않는 것이 결정이다.
+    /// **한국어 표는 영어 표의 키를 다 든다**(리뷰 moai-hom6.qd9 8번). ko 는 en 과 함께 **다 찬**
+    /// 두 말이라(AGENTS.md "The language on screen"), 한 키가 빠지면 한국어를 고른 사람이 그 줄만
+    /// 영어로 받는다 — 영어로 떨어지니 화면이 비지 않아 어느 시험도 안 붉어진다. 화면마다 한글이
+    /// 한 자라도 섰는가만 재던 판(`the_init_screen_stands_in_one_language`)은 새 키 다섯을 지워도
+    /// 푸르렀다: 한 화면에 한 줄만 한국어로 남아도 지나간다.
+    ///
+    /// **다른 셋(zh·ja·es)은 안 잰다** — 빈 키를 영어가 받게 두는 것이 결정이다(위 시험의 글).
+    #[test]
+    fn korean_carries_every_key_english_does() {
+        let (en, ko) = (table(Lang::En), table(Lang::Ko));
+        let missing: Vec<&str> = en.keys().filter(|k| !ko.contains_key(*k)).map(String::as_str).collect();
+        assert!(missing.is_empty(), "한국어 표에 영어 키가 빠졌다 — {missing:?}");
+    }
+
     #[test]
     fn every_translation_keeps_the_places_english_marks() {
         let en = table(Lang::En);

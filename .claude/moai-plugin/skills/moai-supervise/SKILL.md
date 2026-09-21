@@ -1,150 +1,180 @@
 ---
 name: moai-supervise
-description: 같은 저장소에서 놀고 있는 Claude 세션들에 쌓인 idea 를 하나씩 나눠 주고 보고를 받을 때 쓴다. "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜" 가 나오면.
+description: Use when handing the ideas piled up on one repository, one at a time, to the Claude sessions idling on it and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work", "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
-# moai-supervise — 놀고 있는 세션에 idea 를 나눠 준다
+# moai-supervise — hand ideas out to the sessions that are idling
 
-감독은 **고르고, 보내고, 확인한다.** 코드를 고치지 않고, 병합하지 않고, 일꾼
-대신 설계를 정하지 않는다. 병합은 일꾼이 한다. 겹치는 병합은 감독이 보낼 때 파일을
-갈라 막고(1), 그래도 부딪히면 일꾼이 워크트리로 돌아가 푼다.
+The supervisor **picks, sends and checks.** It does not fix code, it does not merge,
+and it does not settle design in a worker's place. The workers merge. Overlapping
+merges are prevented by splitting the files when the supervisor sends (1), and where
+they still collide the worker goes back into its worktree and resolves them.
 
-**보낸 일은 늘 워크트리에서 한다** — 저장소에 워크트리 규약이 없어도. 일꾼 여럿이 한 루트
-체크아웃을 같이 쓰니, 루트에서 고치면 서로의 편집과 커밋이 섞인다. 워크트리는
-`<루트>/.claude/worktrees/` 에 서고 `moai init` 이 그 경로를 gitignore 에 적는다.
+**Work you send out is always done in a worktree** — even if the repository has no
+worktree convention. Several workers share one root checkout, so fixing things in the
+root mixes their edits and commits together. Worktrees stand in
+`<root>/.claude/worktrees/`, and `moai init` writes that path into the gitignore.
 
-**본 가지는 바퀴를 시작할 때 한 번 읽는다.** 일꾼이 워크트리를 뜨고 병합하는
-곳이 루트 체크아웃이라 그 체크아웃의 지금 가지가 본 가지다 — 원격의 기본 가지는 루트와
-다를 수 있고 낡았을 수 있다. 루트 체크아웃은 `git worktree list` 의 첫 자리라, 아래 한 줄은
-저장소 어디서 불러도 — 워크트리 안에서도 — 루트의 가지를 낸다. 아무것도 안 나오면 git 이 낸
-오류를 보고 멈춘다.
+**Read the base branch once, at the start of the round.** The place a worker branches
+its worktree from and merges back into is the root checkout, so that checkout's current
+branch is the base branch — the remote's default branch may differ from the root and may
+be stale. The root checkout is the first entry of `git worktree list`, so the line below
+gives the root's branch no matter where in the repository you call it, inside a worktree
+included. If nothing comes out, report the error git gave and stop.
 
 ```sh
-if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "루트가 detached 다" >&2; fi; fi
+if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "the root is detached" >&2; fi; fi
 ```
 
-**루트가 detached 면 보내지 않는다.** 일꾼의 집기 커밋과 병합이 가지 없는 HEAD 에 서고,
-확인(`merge-base <본 가지>`)과 `worktree add` 가 실패하고, `branch -d` 가 그 일의 유일한
-참조를 지운다. 원격의 기본 가지로 대신 읽지 않는다 — 루트가 그 가지에 서 있지 않으니 같은
-사고다. 사람에게 루트를 가지에 세워 달라고 하고 멈춘다.
+**If the root is detached, do not send.** The worker's pick-up commit and its merge
+land on a HEAD with no branch, the check (`merge-base <base branch>`) and `worktree add`
+fail, and `branch -d` deletes that work's only reference. Do not read the remote's
+default branch instead — the root does not stand on that branch, so it is the same
+accident. Ask the person to put the root on a branch, and stop.
 
-읽은 이름을 아래 명령의 `<본 가지>` 와 일꾼에게 싣는 글의 `<본 가지>` 에 채운다.
-**일꾼은 다시 읽지 않는다** — 워크트리 안에서 읽으면 제 가지가 나온다.
+Fill the name you read into `<base branch>` in the commands below and in the text you
+send the worker. **The worker does not read it again** — read inside a worktree, it
+gives that worktree's own branch.
 
-## 한 바퀴
+## One round
 
-**0. 먼저 거둔다 — 자리를 잃은 일.** 세션이 죽으면 집은 줄은 `in_progress` 로 남고
-아무도 이어 하지 않는다. 새 idea 를 고르기 전에 본다.
+**0. Reclaim first — work that lost its place.** When a session dies the row it picked
+up stays `in_progress` and nobody carries it on. Look at this before picking new ideas.
 
-    moai status --json                     warnings 에서 kind 가 "stranded" 인 것의 ids
-                                           (워크트리 안이면 `--worktree` 를 붙여야 선다)
-    moai show <id>                         `자리` 줄 — 아래 네 낱말 중 하나
-                                           (워크트리 안이면 여기도 `--worktree` 가 있어야 선다)
+    moai status --json                     the ids of warnings whose kind is "stranded"
+                                           (inside a worktree it stands only with `--worktree`)
+    moai show <id>                         the `Place` line — one of the four words below
+                                           (inside a worktree this too needs `--worktree`)
 
-`stranded` 는 집었는데 살아 있는 워크트리가 그 일을 안 쥔 줄이다 — 워크트리가 사라졌거나,
-**워크트리 없이 루트에서 하던 일**이다. 둘은 이 줄만으로 안 갈린다: 2 의 세션 목록에서 루트에
-산 세션이 있으면 그쪽일 수 있으니, 맡기기 전에 그 세션에 무엇을 쥐고 있는지 묻는다.
+`stranded` is a row that was picked up while no live worktree holds that work — either
+the worktree is gone, or **the work was being done in the root with no worktree**. This
+row alone does not tell the two apart: if the session list in 2 shows a session living
+in the root it may be that one, so ask that session what it is holding before handing
+the work on.
 
-`자리` 줄(`--json` 의 `place`)은 넷이다. **맡기는 것은 `없다` 하나뿐이다.**
+The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
 
-    <경로> (<가지>)   at        거기서 돈다. 들어가 이어 한다
-    아직 안 보인다     fresh     방금 집었다 — 일꾼이 워크트리를 띄우는 틈이다. 그냥 둔다
-    모른다             unknown   **못 읽은 옆 워크트리가 있다.** 거기일 수 있으니 안 맡긴다
-    없다               lost      자리를 잃었다 — 이것만 거둔다
+    <path> (<branch>)  at        it runs there. Go in and carry on
+    not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
+    unknown            unknown   **a sibling worktree could not be read.** It may be there, so do not hand it on
+    none               lost      it lost its place — only this one is reclaimed
 
-**`stranded` 가 조용한 것이 곧 거둘 것이 없다는 뜻은 아니다.** 이름이 아무 집은 줄도 안
-가리키는 옆 스냅샷을 못 읽으면 자리 판정이 통째로 `모른다` 로 접혀 이 경고가 저장소째로 잠긴다.
-`status --json` 의 `unreadable_worktrees` 키가 서 있으면 **그 워크트리를 먼저 고치고 다시 본다** —
-그 전에 읽은 빈 목록은 "없다" 가 아니라 "못 셌다" 다.
+**`stranded` being quiet does not mean there is nothing to reclaim.** If a sibling
+snapshot that names no picked-up row cannot be read, the place verdict folds into
+`unknown` for everything and this warning is locked for the whole repository. When the
+`unreadable_worktrees` key stands under `status --json`, **fix that worktree and look
+again** — an empty list read before that is not "none", it is "not counted".
 
-**사람 화면의 `옆 워크트리 문제 N건` 은 이것과 다른 수다.** 그쪽은 연 스냅샷 가운데 못 읽은 워크트리를
-**전부** 세고, 겹쳐 보다 만난 딴 문제(못 푸는 줄이 섞인 스냅샷, 워크트리 목록을 못 읽음)까지
-함께 센다 — 못 읽어도 이름이 집은 줄을 가리키는 워크트리는 그 줄이 이미 제 자리에 서서
-판정을 안 가리므로, 그 줄만 서 있을 때는 `stranded` 를 그대로 믿어도 된다. 고칠 것이 있다는
-말이지 못 셌다는 말이 아니다 — 못 셌는지는 `unreadable_worktrees` 하나가 답한다. 스냅샷이 깨진
-워크트리는 기계에도 `status --json` 의 `broken_worktrees` 가 댄다 — 고칠 워크트리를 찾을 때는
-그 키를 본다. 다만 **연 스냅샷 가운데**다: 이름이 집은 줄을 다 가리키면 옆 스냅샷을 한 벌도
-안 열어 깨졌어도 이 키가 안 선다. 키가 없는 것은 "깨진 것이 없다" 가 아니다.
+**The `Trouble in sibling worktrees <n>` on the person's screen is a different number.**
+That one counts **every** worktree it could not read among the snapshots it opened, and
+counts the other problems met while overlaying too (a snapshot with unparseable rows,
+a worktree list that could not be read) — a worktree that could not be read but whose
+name points at a picked-up row does not hide the verdict, because that row already
+stands in its own place, so while only such rows stand you can trust `stranded` as it
+is. It says there is something to fix, not that it could not count — whether it could
+count is answered by `unreadable_worktrees` alone. A worktree with a broken snapshot is
+named to machines too, by `broken_worktrees` under `status --json` — look at that key
+when you are hunting for the worktree to fix. But it is **among the snapshots opened**:
+if the names point at every picked-up row, not one sibling snapshot is opened and the
+key does not stand even though one is broken. No key does not mean "nothing is broken".
 
-집은 지 한 시간이 안 된 줄은 안 뜬다(일꾼이 워크트리를 띄우는 틈이다). **워크트리는
-남았는데 거기서 일하던 세션이 죽은 것은 `stranded` 에 안 뜬다** — `git worktree list` 의
-워크트리 중 2 의 스크립트에 `워크트리` 줄로 안 나오는 것이 그것이다.
+A row picked up less than an hour ago does not show (that is the gap while a worker
+raises its worktree). **A worktree that is still there while the session working in it
+died does not show under `stranded`** — it is the worktree in `git worktree list` that
+the script in 2 does not print as a `worktree` row.
 
-- 그런 일이 있으면 **새 idea 보다 먼저** 놀고 있는 세션 하나에 이어 하기를 맡긴다. 3 의
-  글 대신 아래를 싣고, 그 뒤에 3 의 글의 **4-1 부터 끝까지**를 통째로 잇는다 — 4-1 을 빼면
-  이어받은 일꾼이 워크트리 안에서 트래커를 고치고, 끝을 자르면 닫은 뒤의 걸음(창 비우기)이
-  빠진다. 자리표시자는 3 에서 적은 대로 채운다(`<옆 일>` 도 — 4-3 이 그 줄을 가리킨다)
+- When there is such work, hand carrying it on to one idle session **before any new
+  idea**. Send the text below in place of the text in 3, and after it append the text
+  of 3 whole, **from 4-1 to the end** — leave 4-1 out and the worker taking over edits
+  the tracker inside the worktree; cut the end off and the step after closing (clearing
+  the window) is missing. Fill the placeholders as 3 says to (`<other work>` too — 4-3
+  points at that line)
 
-      감독 세션(<내 이름>)이 <에픽> 의 멈춘 일을 맡긴다 — 앞 세션이 끝을 못 냈다.
-      먼저 읽을 것: moai show <에픽> (이력·노트) · moai show <멤버> (자리도 — 자리는 일에만 선다)
-      모델: <모델> (<난이도> — <까닭>) — 난이도로 고른 제안이다. 모델은 `/model` 로 바꾸는데 그것은
-         사람만 친다 — 이 창이 그 모델이 아니면 창을 보는 사람에게 청해 맞추고, 읽어 보니 더
-         어려우면 다시 잰 난이도의 짝 모델로 같은 길로 올린다 — 한 칸씩이 아니다(haiku → sonnet → opus).
-         `low` 로 받았는데 `high` 면 `opus` 이다. 에픽 끝 리뷰의 등급(7)도 이 잣대로
-         멤버를 재어 고른다
-      옆에서 도는 일: <옆 일> — 그 파일은 건드리지 않는다(4-3)
-      본 가지: <본 가지> — 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
-      루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
-      `git -C <루트> symbolic-ref -q HEAD` 가 `refs/heads/<본 가지>` 가 아니면(detached 이거나 누가
-      가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
-      참조가 하나도 안 남는다
-      루트: <루트> — 2 의 `루트 자리`. 트래커를 고치는 것은 언제나 이 자리다(3 의 글의 4-1)
-      - 워크트리가 있으면 EnterWorktree(path) 로 들어가 `git log <본 가지>..HEAD` 와
-        `git status` 로 어디까지 했는지 읽고 이어 한다
-      - 없으면 루트에서 다시 뜬다. 가지가 남아 있으면 그 가지로
-        (`git worktree add .claude/worktrees/<에픽> worktree-<에픽>`), 없으면
-        `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
-      - **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리에 들어간 뒤 그 안의
-        같은 하위로 옮겨 거기서 일한다 — 꼭대기에 서면 `moai` 가 루트의 `.moai` 를 찾아 쓰고, 훅은
-        `.claude/` 아래의 편집을 안 센다
-          cd "$(git -C <루트> rev-parse --show-prefix)"
-      - 멤버의 칸은 이미 집혀 있다 — 다시 집지 않는다
-      - 9-1 의 노트는 이 창의 몫만 적는다. 까닭 끝에 `거둔 일, 앞 세션 몫은 모른다` 를 붙인다 —
-        앞 세션의 모델과 토큰은 어디에도 안 적혀, 없으면 멤버 전체를 이 창이 한 것으로 읽는다
-      - 아래 걸음들이 가리키는 `2` 는 **경로를 준 트래커 커밋**이다 — 루트는 모든 세션이
-        같이 쓰니 `git commit -m "…" -- .moai/` 로 친다. 병합이 열려 있으면(MERGE_HEAD)
-        git 이 거절하니 그 병합이 끝나기를 기다렸다 다시 친다
+      Supervisor session (<my name>) is handing you the stalled work in <epic> — the previous session did not finish it.
+      Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
+      Model: <model> (<difficulty> — <why>) — a suggestion picked by difficulty. The model is
+         changed with `/model`, and only a person types that — if this window is not on that model,
+         ask the person watching the window to match it, and if it reads harder than it looked,
+         raise it the same way to the model that pairs with the difficulty you just measured — not
+         one step at a time (haiku → sonnet → opus). Handed `low` but it is `high`, the model is `opus`.
+         The grade of the epic-end review (7) is measured on this same rubric, member by member
+      Work running alongside: <other work> — do not touch those files (4-3)
+      Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
+      Before you commit or merge in the root, **only check** that the root still stands on that
+      branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
+      someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
+      the wrong HEAD leaves no reference at all once `branch -d` runs
+      Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
+      - If the worktree is there, go in with EnterWorktree(path), read how far it got with
+        `git log <base branch>..HEAD` and `git status`, and carry on
+      - If it is not, raise it again from the root. If the branch survives, on that branch
+        (`git worktree add .claude/worktrees/<epic> worktree-<epic>`); if it does not,
+        `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>`
+      - **If the root is not the top of the repository** (a subdirectory project in a
+        monorepo), go into the worktree and then move to the same subdirectory inside it and
+        work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
+        hook does not count edits under `.claude/`
+          cd "$(git -C <root> rev-parse --show-prefix)"
+      - The member's column is already picked up — do not pick it up again
+      - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
+        session's share is unknown` to the end of the reason — the previous session's model and
+        tokens are written nowhere, and without it the whole member reads as this window's work
+      - The `2` the steps below point at is **the tracker commit with a path** — the root is
+        shared by every session, so run `git commit -m "…" -- .moai/`. If a merge is open
+        (MERGE_HEAD) git refuses it, so wait for that merge to finish and run it again
 
-- **이어 할지 놓을지는 감독이 정하지 않는다.** 놓을 일로 보이면(`moai mv <id> todo`·
-  `moai defer <id> -m '왜'`) 사람에게 묻는다
-- 이어 하기를 맡긴 일은 idea 와 같이 그 보고를 확인할 때까지 다시 안 보낸다
+- **Whether it is carried on or put down is not the supervisor's call.** If it looks like
+  work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
+- Work handed on to be carried is, like an idea, not sent again until its report is checked
 
-**1. 고른다.** 쌓인 idea 에서 지금 벌여 놓은 일과 부딪히지 않는 것만 남긴다.
+**1. Pick.** Out of the ideas that have piled up, keep only the ones that do not collide
+with what is open right now.
 
-    moai idea ls                           쌓인 것
-    moai show -s in_progress,review        집혀 있는 것
-    moai show <id>                         그 idea 가 어디를 건드리는가
+    moai idea ls                           what has piled up
+    moai show -s in_progress,review        what is picked up
+    moai show <id>                         what that idea touches
 
-`git worktree list` 도 본다. 이미 선 워크트리나 집힌 에픽과 **같은 파일·같은
-영역**을 건드리는 idea 는 이번 바퀴에서 뺀다 — 둘이 같은 곳을 고치면 병합에서
-한쪽이 다른 쪽을 기다린다. **이번 바퀴에 함께 보내는 idea 끼리도 견준다** — 일꾼은
-받은 뒤에야 워크트리를 세우니, 방금 보낸 것은 아직 위 목록에 안 뜬다. 다음 idea 를
-보낼 때도 이 셈을 다시 한다. 첫 칸 멤버만 남아 열린 에픽(브리프 7-1 이 남긴 것)은 `in_progress`
-로 떠도 집힌 것이 아니다 — 워크트리도 집은 멤버도 없으니 그것으로 idea 를 빼지 않는다.
+Look at `git worktree list` too. An idea that touches the **same files, the same area**
+as a worktree already standing or an epic already picked up comes out of this round —
+when two of them change the same place, one waits for the other at the merge. **Compare
+the ideas you send in this same round against each other too** — a worker only raises
+its worktree after it receives the work, so what you just sent is not in the lists above
+yet. Do this count again for every further idea. An epic left open with only
+first-column members (what brief 7-1 left behind) shows as `in_progress` but is not
+picked up — there is no worktree and no picked-up member, so do not drop ideas over it.
 
-**보낸 idea 는 그 보고를 확인할 때까지 후보에서 뺀다.** 일꾼이 펼치기 전까지는
-`moai idea ls` 에 그대로 남아, 둘째 일꾼에게 같은 idea 가 또 간다.
+**If a milestone is running, what is inside it comes first.** The header of `moai ready`
+says what is running and how many it held back outside it, and the `moai status` notice
+shines on the same thing. Then what you send this round is work attached to that
+milestone — an idea from outside waits for the next round unless it should stand as `p0`.
+**The tool does not block this** (a pick-up goes straight through), which is why the
+place to decide is here. If two milestones are running, both are inside.
 
-**2. 일꾼을 찾는다.** `ListAgents` 는 세션의 자리(cwd)를 안 보여 준다.
-Claude Code 가 세션마다 적어 두는 `~/.claude/sessions/*.json` 을 읽는다
-(`CLAUDE_CONFIG_DIR` 를 옮겼으면 그 아래다). 모노레포의 하위 프로젝트면 `.moai` 가
-있는 그 하위가 루트다. 스크립트는 첫 줄 `루트 자리` 에 그 `<루트>` 를 내고, 루트가 저장소
-꼭대기가 아니면 `하위` 줄에 꼭대기에서 루트까지의 경로를 낸다 — 워크트리는 저장소 전체로 서니
-일꾼이 그 안의 같은 하위로 들어가야 한다(브리프 3).
+**An idea you sent comes out of the candidates until its report is checked.** Until the
+worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+
+**2. Find a worker.** `ListAgents` does not show a session's place (cwd). Read
+`~/.claude/sessions/*.json`, which Claude Code writes per session (under
+`CLAUDE_CONFIG_DIR` if you moved it). For a subdirectory project in a monorepo, the
+subdirectory that has `.moai` is the root. The script prints that `<root>` on the first
+line, `root dir` (a session row below is labelled `root` — a different word on purpose,
+so the path and a session never get read for each other), and if the root is not the top of the repository it prints the path from
+the top down to the root on a `subdir` line — a worktree stands for the whole
+repository, so the worker has to go into the same subdirectory inside it (brief 3).
 
 ```sh
 python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
 import glob, json, os, subprocess, sys
 if not sys.argv[1]:
-    sys.exit("git 저장소 안에서 부른다")
+    sys.exit("call this inside a git repository")
 top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
 while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
     here = os.path.dirname(here)
 root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 trees = os.path.join(root, ".claude", "worktrees") + os.sep
-print("루트 자리", root)
+print("root dir", root)
 if os.path.relpath(here, top) != ".":
-    print("하위    ", os.path.relpath(here, top))
+    print("subdir", os.path.relpath(here, top))
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 def parents(pid):
     while pid > 1:
@@ -154,16 +184,39 @@ def parents(pid):
         except OSError:
             return
         pid = int(out) if out.isdigit() else 0
+def reachable():
+    """Can this supervisor reach the tmux server. If not, it cannot ask about a single pane."""
+    try:
+        r = subprocess.run(["tmux", "display-message", "-p", '#{pid}'], capture_output=True, text=True)
+    except OSError:
+        return False
+    return r.returncode == 0 and r.stdout.strip().isdigit()
+tmux_up = reachable()
 def detached(s):
-    """세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지 않았는가 — 떼어 낸 시험 서버의 판이다."""
+    """Was the tmux pane the session file names not spawned by that session on this server —
+    that is, a pane on a separate test server.
+
+    **None when it cannot be asked** — that is unknown, not detached. When the supervisor runs
+    outside tmux or a sandbox blocks the socket, every question comes back empty, and reading
+    that as detached filtered out every session in the root so nobody got any work (with no
+    line saying why).
+    """
     pane = str(s.get("tmux") or "").rpartition(".")[2]
     if not pane.startswith("%"):
         return False
+    if not tmux_up:
+        return None
     try:
-        owner = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{pane_pid}'], capture_output=True, text=True).stdout.strip()
+        r = subprocess.run(["tmux", "display-message", "-p", "-t", pane, '#{pane_pid}'], capture_output=True, text=True)
     except OSError:
-        return False
-    return not owner.isdigit() or int(owner) not in parents(int(s["pid"]))
+        return None
+    owner = r.stdout.strip()
+    # Reaching the server but not finding the pane means it is not this server's pane — that is detached.
+    if r.returncode != 0 or not owner.isdigit():
+        return True
+    return int(owner) not in parents(int(s["pid"]))
+if not tmux_up:
+    print("cannot reach tmux — a test pane cannot be told apart. A test claude may be mixed into `root` below")
 unread = 0
 for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     try:
@@ -178,290 +231,420 @@ for f in glob.glob(os.path.join(home, "sessions", "*.json")):
     if cwd is None:
         unread += 1
     elif cwd == root and detached(s):
-        print("떼어 낸 판", s.get("status"), s.get("name"))
+        print("test pane", s.get("status"), s.get("name"))
     elif cwd == root:
-        print("루트    ", s.get("status"), s.get("name"))
+        print("root    ", s.get("status"), s.get("name"))
     elif cwd.startswith(trees):
-        print("워크트리", s.get("status"), s.get("name"), cwd)
+        print("worktree", s.get("status"), s.get("name"), cwd)
 if unread:
-    print("못 읽은 파일", unread)
+    print("unreadable files", unread)
 PY
 ```
 
-- **맡기는 것은 자리가 루트이고 `idle`·`waiting` 인 세션뿐이다.** `busy` 는
-  일하는 중이고, 그 밖의 값(`shell` 따위)은 뜻을 모르니 맡기지 않는다
-- **보낸 idea 의 보고를 아직 확인하지 않은 세션은 뺀다.** 일꾼은 펼치고 집고 병합하는
-  동안 루트에 있다 — 사람의 답이나 권한을 기다리면 `waiting`, 턴을 마치면 `idle` 로 뜬다
-- **`떼어 낸 판` 은 맡기지 않는다.** 세션 파일이 대는 tmux 판을 이 서버에서 그 세션이 낳지
-  않았다 — 떼어 낸 tmux 서버(`-L`)에서 띄운 시험용 `claude` 다. 자리가 루트라도 일꾼이 아니다
-- 자리가 `<루트>/.claude/worktrees/*` 인 세션은 이 저장소에서 **일하는 중**이다.
-  지켜보되 맡기지 않는다
-- **다른 디렉터리의 세션은 건드리지 않는다**
-- **맡기기를 거절한 세션은 후보에서 빼고 다시 보내지 않는다.** 제 사람이 준 일만
-  받는 세션이 있다 — 한 번 거절했으면 그 뒤로는 알림도 걸지 않는다
-- 파일은 세션이 끝나도 남고, 그 pid 를 다른 프로세스가 다시 쓰면 산 것처럼 읽힌다.
-  보내기 전에 그 이름이 `ListAgents` 에도 뜨는지 한 번 본다
-- 이 파일은 문서에 없는 속 파일이라 판이 바뀌면 필드가 달라질 수 있다. 스크립트가
-  `못 읽은 파일` 을 내거나 못 돌면 `ListAgents` 로 이름을 보고, **이 기계의 세션에만**
-  `pwd` 와 지금 하는 일을 물어 가린다 — 원격·클라우드 세션은 같은 경로를 대도 다른
-  체크아웃이다
+- **Hand work only to a session whose place is the root and whose status is `idle` or
+  `waiting`.** `busy` is working, and the other values (`shell` and such) mean something
+  you do not know, so do not hand work to them
+- **Leave out a session whose sent idea has not had its report checked.** A worker is in
+  the root while it unfolds, picks up and merges — it shows `waiting` when it is waiting
+  on a person's answer or a permission, and `idle` when it finishes a turn
+- **Do not hand work to a `test pane` row.** The tmux pane the session file names was not
+  spawned by that session on this server — it is a test `claude` raised on a separate
+  tmux server (`-L`). Even with the root as its place, it is not a worker. The row is
+  labelled `test pane`, not `detached`, on purpose: in this skill `detached` is the root's
+  git HEAD (`If the root is detached, do not send`), and one word for both would stop a
+  whole round over a test pane
+- **If tmux cannot be reached at all, do not filter.** When the supervisor runs outside
+  tmux or a sandbox blocks the socket, not one pane can be asked about — read that as
+  detached and every session in the root drops out and nobody gets any work. The script
+  prints one line, `cannot reach tmux`, and leaves them in, so take it that a test
+  `claude` may be mixed into `root` and look at the names once more with `ListAgents`
+  before you send
+- A session whose place is `<root>/.claude/worktrees/*` is **working** in this
+  repository. Watch it, but do not hand it work
+- **Do not touch sessions in other directories**
+- **A session that refused the work comes out of the candidates and is not sent to
+  again.** Some sessions take work only from their own person — once one has refused,
+  do not even leave a notification on it after that
+- The file survives the session, and if another process reuses that pid it reads as
+  alive. Before you send, check once that the name also shows in `ListAgents`
+- This file is an internal one, not in the documentation, so its fields may differ from
+  release to release. If the script prints `unreadable files` or does not run, look at
+  the names with `ListAgents` and tell them apart by asking — **only sessions on this
+  machine** — for `pwd` and what they are doing; a remote or cloud session is a
+  different checkout even when it names the same path
 
-**2-1. 모델을 고른다 — 난이도 한 낱말로.** 에픽 끝 리뷰의 등급(브리프 7)도 이 잣대로 멤버를
-재어 가른다. 축을 둘로 두면 브리프가 판단을 두 벌 들고, 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
+**2-1. Pick a model — by one word of difficulty.** The grade of the epic-end review
+(brief 7) is measured on this same rubric, member by member. Keep two axes and the brief
+carries two sets of judgement, and on the day they differ the cheap model takes the
+write path.
 
-| 난이도 | 무엇으로 재나 | 모델 |
+| Level | How it is measured | Model |
 |---|---|---|
-| `low` | 글·주석·한 줄 고침, 동작이 안 바뀐다 | `haiku` |
-| `medium` | 한 파일 안의 동작 변경, 시험으로 둘러싸인 것 | `sonnet` |
-| `high` | 여러 파일·쓰기 경로·동시성·저장 형식·훅, 되돌리기 어려운 것 | `opus` |
+| `low` | text, comments, a one-line fix; behaviour unchanged | `haiku` |
+| `medium` | a behaviour change inside one file, ringed by tests | `sonnet` |
+| `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo | `opus` |
 
-에픽 끝의 리뷰는 멤버를 따로 안 보니 그 에픽의 유일한 리뷰다(브리프 5·7 이 일꾼에게 싣는다).
+The epic-end review is that epic's only review, because the members are not reviewed
+separately (brief 5 and 7 carry that to the worker).
 
-**등급은 가장 무거운 멤버의 난이도에서 한 칸 위다** — `low` 뿐이면 `medium`, `medium` 이
-있으면 `high`, `high` 가 있으면 `xhigh`.
-**쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 하나라도 있으면** `max` 다.
-표면을 가로지르거나 설계 결정이 여럿이면 한 칸 더 올린다. 망설여지면 한 칸 올린다.
-에픽 끝 리뷰의 모델은 등급을 따른다 — `medium` 이면 `sonnet`, `high` 부터는 `opus`.
+**The grade is one step above the heaviest member's difficulty** — `medium` if the members
+are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
+**If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
+Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
 
-감독은 코드를 읽기 전에 고르므로 이것은 제안이고, 마지막 자는 이슈를 읽은 일꾼이다.
-도는 세션의 모델은 `SendMessage` 로도 설정으로도 못 바꾼다 — 그 창의 사람이 `/model` 로 바꾼다.
+The supervisor picks before reading any code, so this is a suggestion; the last word
+belongs to the worker who read the issue. A running session's model cannot be changed by
+`SendMessage` and cannot be changed by config — the person in that window changes it
+with `/model`.
 
-**3. 보낸다.** 놀고 있는 세션 하나에 idea **하나**를 `SendMessage` 로 보낸다.
-일꾼은 이 대화를 모르니 아래 글을
-`<내 이름>`·`<id>`·`<제목>`·`<본 가지>`·`<모델>`·`<난이도>`·`<까닭>`·`<옆 일>`·`<루트>` 를 채워
-**통째로** 싣는다 — 일꾼이 받는 것은 이 글뿐이라, 일꾼이 지킬 것은 모두 이 안에 있다.
-`<루트>` 는 2 의 `루트 자리` 다. **안 채우면** 일꾼이 워크트리 안에서 제 자리를 루트로 읽는다.
-`<모델>`·`<난이도>`·`<까닭>` 은 2-1 에서 고른 짝과 그 까닭이다. **안 채우면** 그 자리표시자가
-그대로 실려, 일꾼이 닫을 때 남기는 노트가 무엇이 일했는지 대신 `<모델>` 이라고 적는다.
-`<까닭>` 에는 작은따옴표를 쓰지 않는다 — 9-1 의 작은따옴표를 닫아 뒤의 글이 셸로 샌다.
-`<옆 일>` 은 1 에서 잰 옆 워크트리와 이번 바퀴에 함께 보낸 일, 그리고 그 일이 쥔 파일이다 —
-없으면 `없다`. 감독이 보내기 전에 잰 것은 에픽 도중 새로 필요해진 파일까지 못 덮으니, 일꾼이
-그 파일을 만나면 고치지 않고 멤버로 남겨 보고한다(브리프 4-3).
-`<등급>` 는 채우지 않는다 — 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리다.
-`<회사>`·`<수>` 도 채우지 않는다 — 9-1 에서 일꾼이 제 창에서 읽어 채우는 회사와 토큰이다.
+**3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
+nothing of this conversation, so send the text below **whole** — it is all the worker
+receives, so everything the worker has to keep is inside it.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
+reads its own place as the root.
+`<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
+**Leave them unfilled** and those placeholders travel as they are, so the note the worker
+leaves when it closes says `<model>` instead of what actually did the work.
+Do not use a single quote inside `<why>` — it closes the single quote in 9-1 and the rest
+of the text leaks into the shell.
+`<other work>` is the sibling worktrees you measured in 1, the work you send in this same
+round, and the files that work holds — `none` if there is none. What the supervisor
+measured before sending cannot cover a file that turns out to be needed mid-epic, so when
+the worker meets such a file it does not fix it: it leaves it as a member and reports it
+(brief 4-3).
+Do not fill `<grade>` — that is the review grade the worker picks in 7, after developing.
+Do not fill `<vendor>` or `<count>` either — those are the vendor and the token count the
+worker reads in its own window in 9-1.
 
-    감독 세션(<내 이름>)이 idea <id> 를 맡긴다 — <제목>.
-    먼저 읽을 것: moai show <id>
-    모델: <모델> (<난이도> — <까닭>) — 난이도로 고른 제안이다. 모델은 `/model` 로 바꾸는데 그것은
-       사람만 친다 — 이 창이 그 모델이 아니면 창을 보는 사람에게 청해 맞추고, 읽어 보니 더
-       어려우면 다시 잰 난이도의 짝 모델로 같은 길로 올린다 — 한 칸씩이 아니다(haiku → sonnet → opus).
-       `low` 로 받았는데 `high` 면 `opus` 이다. 에픽 끝 리뷰의 등급(7)도 이 잣대로
-       멤버를 재어 고른다
-    옆에서 도는 일: <옆 일> — 그 파일은 건드리지 않는다(4-3)
-    본 가지: <본 가지> — 아래의 가지 이름이다. 감독이 루트에서 읽어 채웠으니 다시 읽지 않는다.
-    루트에서 커밋·병합하기 전에는 루트가 아직 그 가지에 서 있는지 **대조만** 한다 —
-    `git -C <루트> symbolic-ref -q HEAD` 가 `refs/heads/<본 가지>` 가 아니면(detached 이거나 누가
-    가지를 바꿨다) 치지 말고 감독에게 알리고 멈춘다. 엉뚱한 HEAD 에 선 병합은 `branch -d` 뒤에
-    참조가 하나도 안 남는다
-    1. 루트에서 펼친다 — idea 를 일감으로 바꾸는 길은 `moai idea promote <id> --from -`
-       하나다. 이슈 하나짜리여도 에픽 + 이슈로 펼친다. `--dry-run` 을 먼저 본다 — 이 창이
-       보는 것이지 사람에게 보이고 묻는 것이 아니다. 쪼갠 안을 사람에게 한 번 보이는 것은 사람이
-       직접 청한 일의 걸음이고, 감독이 맡긴 것은 이미 사람이 넘긴 일이다. 설계 결정은 4 로 묻는다.
-       그 idea 가 이미 done 이면(누가 펼쳤다) 펼치지 말고 감독에게 알린다 — 다시 펼치면
-       에픽이 둘 선다
-    2. 멤버를 `moai mv <멤버> in_progress --from todo` 로 집고 루트에서 커밋한다.
-       **본 칸을 함께 준다** — 여기는 세션 여럿이 한 `.moai` 를 쓰는 자리라, 옆에서
-       먼저 집은 줄을 뒤늦게 덮으면 둘이 같은 일을 한다. 0 아닌 코드가 오면 집힌
-       것이니 그 멤버는 두고 감독에게 알린다. 루트는 모든 세션이
-       같이 쓴다 — 남이 병합을 열어 둔 사이(MERGE_HEAD)에 친 커밋은 그 병합을 제 제목으로
-       봉인한다. 그래서 트래커 커밋에는 경로를 준다. 병합이 열려 있으면 git 이 거절하니,
-       그 병합이 끝나기를 기다렸다 다시 친다
-         git commit -m "chore(tracker): <에픽> 를 워크트리에서 집는다" -- .moai/
-    3. 2 의 커밋 뒤 곧바로 `git worktree add -b worktree-<에픽> .claude/worktrees/<에픽> <본 가지>`
-       로 로컬 <본 가지> 에서 뜨고 EnterWorktree(path) 로 들어간다. 이름은 idea id 가 아니라
-       펼친 에픽 id 다. 워크트리가 서기 전에는 루트의 다른 세션들이 이 멤버를 제 초점으로 읽는다.
-       **루트가 저장소 꼭대기가 아니면**(모노레포의 하위 프로젝트) 워크트리는 저장소 전체로
-       서니, 들어간 뒤 그 안의 같은 하위로 옮겨 거기서 일한다 — 워크트리 꼭대기에 서면 `moai` 가
-       위로 올라가 루트의 `.moai` 를 찾아 쓰고, 훅은 `.claude/` 아래의 편집을 안 센다
-         cd "$(git -C <루트> rev-parse --show-prefix)"
-    4. 노트에 없는 설계 결정은 추측하지 말고 AskUserQuestion 으로 묻는다 —
-       사람이 일꾼 창을 보고 있다
-    4-1. **트래커는 언제나 루트의 것을 고친다.** `<루트>` 는 감독이 채운 루트 체크아웃의
-       자리다 — 워크트리 안에서 짐작하지 않는다. **도구가 그것을 스스로
-       옮긴다** — 워크트리 안에서 친 맨 `moai` 도 루트의 트래커를 읽고 쓰고, 썼으면
-       어디에 썼는지 한 줄로 알린다. `moai -C <루트> <명령>` 으로 적어도 같은 자리라 그대로 써도
-       된다. 루트에 트래커가 없는 가지가 아니면 옮겨 가지 않는 자리는 `MOAI_HERE` 를 켠 것뿐이니
-       **켜지 않는다** — 켜면 그
-       워크트리의 `.moai` 가 바뀌어, 병합할 때 스냅샷이 충돌한다(합쳐도 남의 줄을 덮는다).
-       에픽 도중 담는 idea 에는 `-e <에픽>` 을 붙인다 — 에픽을 열어 두지는 않고, 창을 비우거나
-       일을 이어받아도 7-1 이 그것으로 되찾는다. **리뷰 서브에이전트에게도** 같은 말을 준다.
-       워크트리의 `.moai` 가 그래도 바뀌었으면 `git checkout -- .moai` 로 되돌리고, 그 줄이 이미
-       커밋됐으면 그 커밋까지 되돌린 뒤 루트에서 다시 담는다
-    4-2. **tmux 를 시험하면 떼어 낸 서버에서만 한다** — 모든 호출에 `env -u TMUX tmux -L <고유 이름>`.
-       이름에는 에픽 id 를 담아 옆 일꾼·리뷰 서브에이전트의 시험 서버와 안 겹치게 한다. `-S <소켓>`
-       도 되지만 소켓 경로는 유닉스 한도(100바이트 남짓)를 넘으면 안 서, 스크래치패드 안은 대개
-       너무 길다. `-L`/`-S` 없는 `kill-server`·`kill-session` 은 쓰지 않는다: tmux 안에서 맨 `tmux` 는
-       사람의 기본 서버로 가 모든 세션을 죽이고, `TMUX_TMPDIR` 로는 안 갇힌다. 속에서 `tmux` 를
-       부르는 스크립트는 손으로 `-L` 을 못 주니, 진짜 `tmux` 를 절대 경로로 부르며 `-L` 을 끼우는
-       감싸개를 `PATH` 앞에 두고 돌린다. 남이 띄운 판에는 키를 보내지 않는다. 그 서버에서 시험용
-       `claude` 를 띄우면 cwd 를 루트 밖(스크래치패드)으로 둔다 — 루트에서 띄운 세션은 감독의
-       세션 목록에 놀고 있는 일꾼으로 낀다.
-       **리뷰 서브에이전트에게도** 이 말을 준다 — 서버 전체를 죽인 것이 리뷰 서브에이전트였다
-    4-3. **옆에서 도는 일이 쥔 파일을 건드려야 하면 고치지 않는다** — 머리의 `옆에서 도는 일`
-       이 대는 파일, 또는 `git worktree list` 의 옆 가지가 이미 고친 파일
-       (`git diff --name-only <본 가지>...<옆 가지>`). 둘이 같은 곳을 고치면 병합에서 한쪽이
-       다른 쪽을 기다린다. 이 에픽이 내건 것이 그것 없이 안 이뤄지면 idea 가 아니라 멤버다 —
-       `moai -C <루트> add '<무엇을>' -e <에픽>` 로 세워 첫 칸에 두고, 11 에서 **옆이 쥐어 남긴
-       멤버**로 그 옆 일과 함께 댄다. 감독이 그 일이 끝난 뒤 보낸다. 미루지 않는다
-    4-4. **moai 에 넣는 한국어 글은 한국어 글쓰기 플러그인으로 다듬는다** — 한글이 든 제목·본문·
-       노트·`-m`·리뷰 원문 노트 전부. `korean-skills:humanizer` 로 윤문하고, 20줄을 넘으면 저장소 밖
-       (스크래치패드)에서 `humanize-korean:humanize-korean` 을 더 거친 뒤 그 `_workspace/` 를 지우고
-       워크트리로 돌아와(밖에 선 채로는 훅이 트래커를 못 찾아 규칙이 안 선다),
-       마지막에 `korean-skills:grammar-checker` 로 맞춤법을 본다. id·명령·경로·수는 그대로 두고,
-       9-1 의 모델 줄과 12 의 `다음:` 줄, `Regression-of:` 줄, 줄인 리뷰 원문의 `요약:` 첫 줄은
-       다듬지 않는다. **리뷰 서브에이전트에게도** 이 말을 준다
-    5. **멤버마다 리뷰하지 않는다.** 멤버 하나가 끝나면 시험을 돌리고 커밋해 다음 멤버로
-       간다 — 리뷰는 멤버가 다 끝난 뒤 7 에서 에픽 전체를 한 번 본다. 리뷰 한 판이 비싸
-       멤버 수만큼 부르지 않는다. 멤버 1 의 버그 위에 멤버 2 가 쌓이는 값은 그 한 번에서
-       같이 고친다.
-       `low`·`medium`·`high` 는 머리의 모델을 고른 잣대이고, 7 의 등급을 고를 때도 이것으로 멤버를 잰다.
-       `low` — 글·주석·한 줄 고침, 동작이 안 바뀐다
-       `medium` — 한 파일 안의 동작 변경, 시험으로 둘러싸인 것
-       `high` — 여러 파일·쓰기 경로·동시성·저장 형식·훅, 되돌리기 어려운 것
-    6. 멤버의 일이 다 끝나면 워크트리에서 <본 가지> 를 받아 충돌을 풀고 시험을 돌린다. 고칠
-       것은 여기서 고친다 — 워크트리가 남아 있는 동안 루트에서는 규칙 2 가 편집을 막는다
-    7. 병합 전에 에픽 전체를 `/code-review <등급> --fix` 로 본다 — 멤버를 따로 안 봤으니
-       이 한 번이 유일한 리뷰다.
-       **등급은 가장 무거운 멤버의 난이도에서 한 칸 위다** — `low` 뿐이면 `medium`, `medium` 이
-       있으면 `high`, `high` 가 있으면 `xhigh`.
-       **쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 하나라도 있으면** `max` 다.
-       표면을 가로지르거나 설계 결정이 여럿이면 한 칸 더 올린다. 망설여지면 한 칸 올린다.
-       에픽 끝 리뷰의 모델은 등급을 따른다 — `medium` 이면 `sonnet`, `high` 부터는 `opus`.
-       창이 그 모델이 아니면 부르기 전에 창을 보는 사람에게 `/model <그 모델>` 을 청한다 —
-       `/model opus` 처럼(리뷰 에이전트는 창의 모델을 물려받는다).
-       고른 등급과 까닭은 관점(`-b`)에 한 줄로 적는다. 가지가 <본 가지> 를 떠난 자리
-       (`git merge-base <본 가지> HEAD`)부터의 diff 다. 6 에서 <본 가지> 를 받았으니 충돌을 푼
-       자리도 든다. 리뷰 이슈를 세운다(규칙 3)
-         moai add '리뷰 — <무엇을 보는가>' -t review --parent <에픽> -b '<무엇을 왜 보는가>'
-       이 줄도 워크트리에서 부르니 4-1 대로 `moai -C <루트>` 로 친다. 반영은 별도 fix: 커밋,
-       넘긴 것은 이슈 번호와 함께 노트.
-       루트에서 세우거나 집은 리뷰 이슈를 워크트리의 훅이 못 봐서 막힐 때만 — 훅이 트래커를
-       루트로 옮기기 전의 바이너리면 그
-       워크트리의 스냅샷만 읽는다 — 같은 관점·등급·`--fix` 범위로 리뷰 서브에이전트를
-       돌린다. 서브에이전트는 창의 모델을 물려받으니 `Agent` 의 `model` 에 위 등급의 모델을
-       준다. 리뷰 이슈·관점(`-b`)·원문 노트·닫는 `-m` 은 그대로 남긴다. 관점이 없다
-       같은 다른 거절은 돌아가지 않고 거절문이 내는 명령대로 고친다
-    7-1. 병합 전에 에픽 도중 담은 idea(`moai -C <루트> show --type idea -e <에픽>` 과 이 창이
-       기억하는 것)와 리뷰가 넘긴 것을 되짚는다 — **에픽이 내건
-       것이 그것 없이도 이뤄지는가.** 아니면 idea 가 아니라 안 끝난 멤버다. 담을 때 "지금 할
-       일이 아니다" 로 가른 것에 이것이 섞인다 — 사람의 결정을 기다리던 것, 옆 일꾼이 그 파일을
-       쥐어 밖으로 뺀 것. 7 의 리뷰가 넘긴 것까지 보려고 7 뒤에 둔다. 그런 idea 는 선 에픽의
-       멤버로 펼친다 — 계획에는 `- 이슈` 줄만 적고, idea 는 저절로 닫히며 출처가 남는다. 워크트리에서
-       치니 줄에 루트를 박아 둔다(4-1). **그 idea 가 이미 done 이면 펼치지 않는다** — 누가 펼쳤거나
-       8 에서 돌아와 다시 도는 길이다. promote 는 닫힌 idea 도 또 펼쳐 같은 멤버가 둘 선다
-         moai -C <루트> idea promote <idea id> -e <에픽> --from -
-       되찾은 멤버는 여기서 하지 않고 첫 칸에 둔 채 병합한다 — 7 의 리뷰를 안 지난 일이 병합에
-       섞이지 않고, 남은 멤버가 에픽을 열어 둔다. 그 멤버를 `defer` 하지 않는다. 미루면 에픽이
-       목적을 못 이룬 채 닫힌다. 7 의 리뷰는 그 멤버를 못 봤으니 12 의 `다음:` 노트에 적는다 —
-       그 멤버로 에픽을 닫는 창이 에픽 끝 리뷰를 다시 부른다
-    8. ExitWorktree(keep) 로 루트로 돌아온다 — 워크트리 안에서 그것을 지우면 세션의
-       자리가 사라진 디렉터리에 남아 감독이 다시는 이 세션을 루트로 못 본다.
-       병합 전에 루트가 <본 가지> 에 서 있는지 대조한다 — 어긋나면 병합하지 않고 감독에게 알린다
-         git symbolic-ref -q HEAD                  refs/heads/<본 가지> 여야 한다
-       루트에서 **한 번에** 병합한다. 옆 일꾼과 겹치는 것은 감독이 보낼 때 갈랐고, 그래도
-       부딪히면 아래처럼 되돌리고 워크트리에서 푼다 — 옆 세션을 찾아 알리지 않는다.
-       `--no-commit` 을 쓰지 않는다. `--no-ff` 가 없으면 fast-forward 로 끝나 병합 커밋이 안 선다
-         git merge --no-ff worktree-<에픽> -m "merge: …"
-       루트의 `.moai` 에 커밋 안 된 옆 세션의 줄이 있으면 병합이 거절된다 — 2 처럼 경로를
-       준 커밋으로 먼저 담는다. 충돌로 멈추면 루트에서 풀지 않는다 — `git merge --abort`
-       로 되돌리고 EnterWorktree(path) 로 워크트리에 돌아가 6 부터 다시 한다
-    9. 병합이 실제로 끝났으면 루트에서 `git worktree remove .claude/worktrees/<에픽>` 과
-       `git branch -d worktree-<에픽>` 으로 워크트리와 가지를 지운다
-    9-1. 닫기 전에 **무엇이 이 일을 했는지** 이 창이 한 멤버마다 한 줄로 남긴다 — 7-1·4-3 에서 첫 칸에
-       남긴 멤버는 아무도 안 했으니 빼고. 머리의 제안이 아니라
-       이 창에서 **실제로 돈 모델**이다. 아래 줄은 감독이 제안으로 채워 보냈으니, 올렸거나 창이
-       처음부터 다른 모델이었으면 모델·난이도를 실제 것으로 고치고 까닭에 그 까닭을 적는다 —
-       다음 사람이 "이만한 일에 무엇이 붙었나" 를 거기서 읽는다. 필드가 아니라 노트다:
-       저널은 상태 계산에 안 읽히고 파생값은 저장하지 않는다. `<회사>`·`<수>` 는 감독이 안 채운다 —
-       회사는 `anthropic`·`openai`·`google`, 모델은 `/model` 의 별명이 아니라 실제 이름(`opus-5`) —
-       감독이 채운 `<모델>` 은 별명(`opus`)이니 모델을 안 바꿨어도 실제 이름으로 고친다.
-       `<수>` 는 이 창이 쓴 토큰이다. **토큰을 모르면 `tokens=<수>` 를 통째로 뺀다** — 0 도 어림값도
-       적지 않는다. **id 하나에 한 줄** — 여러 id 에 같은 글을 적으면 토큰이 id 수만큼 불어난다.
-       창의 토큰은 멤버마다 가를 수 없으니 **한 멤버에만** 적고, 나머지 멤버의 줄은 `tokens=<수>` 를 뺀다.
-       자유 글은 작은따옴표로 싼다 — 큰따옴표 안의 백틱·`$(…)` 은 셸이 명령으로 푼다. 글에
-       작은따옴표가 들면 `-b -` 로 stdin 에서 흘린다
-         moai note <멤버> 'model: <회사>/<모델> tokens=<수> (<난이도> — <까닭>)'
-    10. 그 뒤에 닫는다. **`moai mv <멤버> done` 은 그 병합이 실제로 끝난 뒤에만 친다** —
-       병합 전에 옮겼다가 되돌린 일꾼이 있었다. 7-1·4-3 에서 첫 칸에 남긴 멤버는 닫지 않는다 — 그
-       멤버가 에픽을 열어 둔다. 워크트리가 남아 있으면 훅이 이 일을 옆
-       워크트리의 것으로 읽어 `-m` 없는 리뷰 닫기를 못 막는다. 리뷰 이슈는 무엇이
-       나왔는지를 남기며 닫는다
-         moai note <리뷰 id> -b - < <리뷰 원문>   리뷰가 낸 글을 그대로(64KB 를 넘으면 요약)
-         moai mv <리뷰 id> done -m '<무엇을 반영하고 무엇을 넘겼나>'
-       원문이 64KB 를 넘으면 요약한다 — 첫 줄에 `요약: 원문 <크기>KB agent-<task-id>` 를 적고,
-       건마다 번호와 자리는 둔 채 문장만 줄인다. 울타리와 들여쓰기는 그대로 둔다
-       시험 통과를 보고 2 처럼 경로를 준 커밋으로 루트에 남긴다
-    11. SendMessage to "<내 이름>" 로 보고 — 머지 해시, 펼친 에픽 id, 한두 줄 요약,
-       넘긴 것·새 idea, 7-1 에서 되찾아 첫 칸에 남긴 멤버, 4-3 에서 옆이 쥐어 남긴 멤버와 그 옆 일
-    12. 마지막으로 **창을 비워도 되는 때를 알린다.** 이어받을 한 줄을 남겨
-       (`moai note <에픽> '다음: …'`) 2 처럼 경로를 준 커밋으로 루트에 담고 — 10 의 커밋 뒤에
-       적은 줄이라 안 담으면 공유 루트에 남아 남의 커밋에 쓸려 들어간다 — 그 창을 보는 사람에게
-       한 줄로, 지금 `/clear` 해도 된다고. 맥락은 대화가 아니라 트래커에 산다: 이슈 본문·노트·
-       리뷰 원문·커밋 메시지. 제 맥락 사용량을 볼 수 있으면 그 수도 그 줄에 담는다.
-       **반대도 같은 줄에서 말한다** — 리뷰가 백그라운드에서 도는 중, 머지 충돌을 푸는 중,
-       사람의 답을 기다리는 중, 감독의 다음 글이 이 창에 온 뒤에는 지우지 말라고. 그때 지우면
-       아직 트래커에 안 옮긴 것이나 받은 글이 사라진다.
-       tmux 면 감독이 보고를 확인하고 이 창에 `/clear` 를 직접 칠 수 있다 — 감독은 `다음:` 노트가
-       선 것을 보고 친다. 그래서 그 노트가 마지막 걸음이다: 남은 일(백그라운드 리뷰 따위)이 있으면
-       노트 전에 끝내고, 못 끝내면 노트 전에 감독에게 그렇다고 한 줄 더 보낸다(보고는 11 에서
-       이미 갔다) — 감독은 그런 창을 비우지 않는다
+    Supervisor session (<my name>) is handing you idea <id> — <title>.
+    Read first: moai show <id>
+    Model: <model> (<difficulty> — <why>) — a suggestion picked by difficulty. The model is
+       changed with `/model`, and only a person types that — if this window is not on that model,
+       ask the person watching the window to match it, and if it reads harder than it looked,
+       raise it the same way to the model that pairs with the difficulty you just measured — not
+       one step at a time (haiku → sonnet → opus). Handed `low` but it is `high`, the model is `opus`.
+       The grade of the epic-end review (7) is measured on this same rubric, member by member
+    Work running alongside: <other work> — do not touch those files (4-3)
+    Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
+    Before you commit or merge in the root, **only check** that the root still stands on that
+    branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
+    someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
+    the wrong HEAD leaves no reference at all once `branch -d` runs
+    1. Unfold it in the root — the one way to turn an idea into work is
+       `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
+       issue. Look at `--dry-run` first — that is for this window to see, not to show a person
+       and ask. Showing a split plan to a person once is a step of work a person asked for
+       directly; what a supervisor hands you is work a person already passed on. Design
+       decisions are asked in 4.
+       If that idea is already done (someone unfolded it), do not unfold: tell the supervisor —
+       unfolding again puts up two epics. **Write a short new title** — a line in the plan
+       becomes the issue title verbatim, so copying over an idea title that grew long while it
+       was parked spreads that length into the issues. The original text stays on that idea and
+       the history leads back to it
+    2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
+       **Pass the column you saw** — this is a place where several sessions share one `.moai`,
+       and overwriting a row picked up beside you means two of you do the same work. A non-zero
+       code means it is taken, so leave that member and tell the supervisor. The root is shared
+       by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
+       merge with its own subject. So give the tracker commit a path. With a merge open git
+       refuses it, so wait for that merge to finish and run it again
+         git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+    3. Right after the commit in 2, branch from the local <base branch> with
+       `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in with
+       EnterWorktree(path). The name is the unfolded epic's id, not the idea's. Until the worktree
+       stands, the other sessions in the root read this member as their own focus.
+       **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
+       worktree stands for the whole repository, so once inside, move to the same subdirectory in
+       it and work there — standing at the worktree top, `moai` walks up and finds the root's
+       `.moai` to write, and the hook does not count edits under `.claude/`
+         cd "$(git -C <root> rev-parse --show-prefix)"
+    4. Do not guess a design decision that is not in the notes — ask with AskUserQuestion; a
+       person is watching the worker's window
+    4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
+       filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
+       that by itself** — even a bare `moai` typed inside the worktree reads and writes the
+       root's tracker, and when it writes, one line says where. `moai -C <root> <command>` lands
+       in the same place, so writing it that way is fine too. Short of a branch with no tracker
+       in the root, the only thing that stops the move is `MOAI_HERE`, so **do not turn it on** —
+       turn it on and that worktree's `.moai` changes, and the snapshots conflict on the merge
+       (and merging them overwrites someone else's rows).
+       Put `-e <epic>` on an idea you park mid-epic — it does not keep the epic open, and 7-1
+       reclaims it through that even if the window is cleared or the work is taken over.
+       **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
+       undo it with `git checkout -- .moai`, and if the row was already committed, undo that
+       commit too and park it again from the root
+    4-2. **If you test tmux, do it on a separate server only** — `env -u TMUX tmux -L <unique name>`
+       on every call. Put the epic id in the name so it cannot collide with the test servers of
+       the workers beside you or of a review subagent. `-S <socket>` works too, but a socket path
+       does not stand past the unix limit (about 100 bytes), and a scratchpad path is usually too
+       long. Never use `kill-server` or `kill-session` without `-L`/`-S`: inside tmux a bare
+       `tmux` goes to the person's default server and kills every session, and `TMUX_TMPDIR` does
+       not fence it in. A script that calls `tmux` inside itself cannot be given `-L` by hand, so
+       run it with a wrapper at the front of `PATH` that calls the real `tmux` by absolute path
+       and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
+       `claude` on that server, keep its cwd outside the root (the scratchpad) — a session raised
+       in the root slips into the supervisor's session list as an idle worker.
+       **Give a review subagent these words too** — it was a review subagent that killed a whole server
+    4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
+       the files named by `Work running alongside` in the header, or files a sibling branch in
+       `git worktree list` already changed
+       (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
+       same place, one waits for the other at the merge. If this epic cannot deliver what it
+       promised without that, it is not an idea but a member — create it with
+       `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 11
+       as **a member left because the work beside it holds the file**, together with that other
+       work. The supervisor sends it once that work is done. Do not defer it
+    4-4. **Polish Korean text going into moai with the Korean writing plugins** — every title,
+       body, note, `-m` and review-text note that carries Hangul. Polish with
+       `korean-skills:humanizer`, and when it runs past 20 lines put it through
+       `humanize-korean:humanize-korean` outside the repository (the scratchpad), delete that
+       `_workspace/`, come back into the worktree (standing outside it the hook cannot find the
+       tracker and no rule stands), and finish with `korean-skills:grammar-checker` for spelling.
+       Leave ids, commands, paths and numbers as they are, and do not polish the model line in
+       9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:` first line of a
+       shortened review text. **Give a review subagent these words too**
+    5. **Do not review member by member.** When one member is finished, run the tests, commit and
+       move to the next — the review looks at the whole epic once, in 7, after every member is
+       finished. One review is expensive; do not call it as many times as there are members. The
+       cost of member 2 piling onto a bug in member 1 is paid in that one review.
+       `low`·`medium`·`high` is the rubric the model in the header was picked on, and the same rubric measures
+       the members when you pick the grade in 7.
+       `low` — text, comments, a one-line fix; behaviour unchanged
+       `medium` — a behaviour change inside one file, ringed by tests
+       `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
+    6. When the members' work is all done, pull <base branch> into the worktree, resolve the
+       conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
+       edits in the root
+    7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
+       not reviewed separately, so this once is the only review.
+       **The grade is one step above the heaviest member's difficulty** — `medium` if the members
+       are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
+       **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
+       Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+       The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
+       If the window is not on that model, ask the person watching it for `/model <that model>`
+       before you call — as in `/model opus` (a review agent inherits the window's model).
+       Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
+       where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
+       <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
+       (rule 3)
+         moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
+       This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1. What
+       you take in goes in a separate fix: commit; what you hand on goes in a note with the issue id.
+       Only when the worktree's hook cannot see a review issue created or picked up in the root
+       and blocks you — a binary from before the hook moved the tracker to the root reads that
+       worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
+       scope. A subagent inherits the window's model, so pass the model for the grade above in
+       `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
+       `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
+       the way the refusal's own command says
+    7-1. Before merging, go back over the ideas parked mid-epic
+       (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
+       review handed on — **can the epic deliver what it promised without them.** If not, it is
+       not an idea but an unfinished member. What you sorted as "not for now" while parking has
+       these mixed in — the one waiting on a person's decision, the one pushed out because a
+       worker beside you held that file. This step sits after 7 so that it sees what 7's review
+       handed on too. Unfold such an idea as a member of the epic already standing — write only
+       `- issue` lines in the plan; the idea closes by itself and its source stays. You type this
+       from the worktree, so pin the root into the line (4-1). **If that idea is already done, do
+       not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
+       promote unfolds a closed idea too, and the same member stands twice
+         moai -C <root> idea promote <idea id> -e <epic> --from -
+       Do not do a reclaimed member here: merge with it left in the first column — work that has
+       not been through 7's review does not get mixed into the merge, and a member still standing
+       keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
+       promise delivered. 7's review did not see that member, so write it in the `Next:` note in
+       12 — the window that closes the epic with that member calls the epic-end review again
+    7-2. **If the epic ran inside a milestone, sort what you handed on once more, by the release
+       bar.** A review makes its findings without regard to the release bar, so fixing all of them
+       inside pushes the release out by as many findings as there are, and sending all of them
+       outside ships with bugs in. This window is what sorts them — you already decided in 7 what
+       to take in and what to hand on, so this is the extension of that. **Bug-level stays
+       inside**: create it as a member of that epic (`-e <epic>`) or under an epic in the same
+       milestone. **What this release can do without goes outside** — not "not doing it", but
+       "not in this release"
+         moai -C <root> edit <that row> -e none --milestone none
+       **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
+       `--milestone none` alone changes nothing and comes back with one line saying the place
+       comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
+       so take it out of the epic here as well. That the row stops keeping the epic open is the
+       point: it is a row decided out of this release.
+       **Bug-level is measured with the words that already exist** — does a `#bug` tag fit, and
+       can a `Regression-of:` line be written (did something already merged break). Those two are
+       inside; the rest is outside. A new axis is not made because it would become a fourth
+       vocabulary beside the column, the kind and the defer
+    8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
+       session's place stays in a directory that is gone, and the supervisor never sees this
+       session in the root again.
+       Before merging, check that the root stands on <base branch> — if it does not, do not merge:
+       tell the supervisor
+         git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
+       Merge in the root, **in one call**. Overlap with the workers beside you was split when the
+       supervisor sent the work, and where it still collides, undo as below and resolve in the
+       worktree — do not go looking for the other session to tell it. Do not use `--no-commit`.
+       Without `--no-ff` it ends as a fast-forward and no merge commit stands
+         git merge --no-ff worktree-<epic> -m "merge: …"
+       If the root's `.moai` holds uncommitted rows from another session the merge is refused —
+       take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
+       resolve it in the root — undo with `git merge --abort`, go back into the worktree with
+       EnterWorktree(path) and run again from 6
+    9. Once the merge has really landed, remove the worktree and the branch from the root with
+       `git worktree remove .claude/worktrees/<epic>` and `git branch -d worktree-<epic>`
+    9-1. Before closing, leave one line per member **on what did this work** in this window —
+       leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
+       suggestion in the header but the model that **actually ran** in this window. The line below
+       was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
+       a different model from the start, correct the model and the difficulty to the real ones and
+       write why in the reason — the next person reads "what was put on work of this size" there.
+       It is a note, not a field: the journal is not read to compute state and derived values are
+       not stored. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
+       `anthropic`, `openai` or `google`, and the model is its real name (`opus-5`), not the
+       `/model` alias — the `<model>` the supervisor filled in is an alias (`opus`), so correct it
+       to the real name even if you did not change models.
+       `<count>` is the tokens this window used. **If you do not know the token count, drop
+       `tokens=<count>` whole** — do not write 0 and do not estimate. **One line per id** —
+       write the same line on several ids and the tokens multiply by the number of ids. A window's
+       tokens cannot be split per member, so write them on **one member only** and leave
+       `tokens=<count>` out of the other members' lines.
+       Quote free text with single quotes — inside double quotes the shell expands backticks and
+       `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
+         moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+    10. Close them after that. **Run `moai mv <member> done` only once that merge has really
+       landed** — a worker moved them before the merge and had to undo it. Do not close the
+       members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
+       the worktree still stands, the hook reads this work as a sibling worktree's and cannot
+       refuse a review closed without `-m`. Close the review issue leaving what came out of it
+         moai note <review id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
+         moai mv <review id> done -m '<what you took in, what you handed on>'
+       If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
+       the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
+       Leave the tests passing in the root with a commit with a path, as in 2
+    11. Report with SendMessage to "<my name>" — the merge hash, the unfolded epic's id, a line or
+       two of summary, what you handed on and any new ideas, the members reclaimed in 7-1 and left
+       in the first column, and the members left in 4-3 because the work beside you held the file,
+       with that other work named
+    12. Finally, **say when the window can be cleared.** Leave the line to take over from
+       (`moai note <epic> 'Next: …'`), take it into the root with a commit with a path as in 2 —
+       it is written after the commit in 10, so leaving it out leaves it in the shared root where
+       someone else's commit sweeps it up — and tell the person watching that window, in one line,
+       that a `/clear` is fine now. The context lives in the tracker, not in the conversation:
+       issue bodies, notes, review texts, commit messages. If you can see your own context usage,
+       put that number in the line too.
+       **Say the opposite in the same line** — not to clear while a review is running in the
+       background, while a merge conflict is being resolved, while waiting on a person's answer,
+       or after the supervisor's next message has arrived in this window. Clearing then loses what
+       is not yet moved into the tracker, or the message that arrived.
+       On tmux the supervisor may check the report and type `/clear` into this window itself — the
+       supervisor types it once it sees the `Next:` note stand. That is why the note is the last
+       step: if anything is left (a background review, say), finish it before the note, and if you
+       cannot, send the supervisor one more line saying so before the note (the report already went
+       in 11) — the supervisor does not clear such a window
 
-**4. 기다린다.** 일하는 세션에는 메시지 없이 `notify_when_idle: true` 로
-걸어 둔다. **`ListAgents` 를 되풀이해 훑지 않는다** — 알림이 온다. 알림은 한 번뿐이라,
-보고 없이 온 알림(일꾼이 사람에게 묻고 턴을 마쳤다)이면 다시 걸어 둔다.
+**4. Wait.** On a working session, leave `notify_when_idle: true` with no message.
+**Do not sweep `ListAgents` over and over** — the notification comes. It comes once only,
+so if it arrives without a report (the worker asked the person something and finished its
+turn), leave it again.
 
-감독이 루트에 있으면, 일꾼이 멤버를 집고 워크트리를 세우기 전의 틈에 감독의 턴이
-끝날 때 훅이 그 멤버를 "아직 집고 있는 것" 으로 붙든다. **그 멤버는 일꾼의 것이다** —
-옮기거나 미루거나 노트를 달지 않고 그대로 턴을 마친다.
+If the supervisor is in the root, then in the gap after the worker picks the member up
+and before it raises its worktree, the hook holds that member as "still picked up" when
+the supervisor's turn ends. **That member is the worker's** — do not move it, do not
+defer it, do not put a note on it; just finish the turn.
 
-**5. 보고를 확인하고 다음을 보낸다.** 보고를 믿기 전에 셋을 본다.
+**5. Check the report and send the next.** Look at three things before you believe a report.
 
-    git merge-base --is-ancestor <머지 해시> <본 가지> && echo 있다   머지가 본 가지에 있는가
-    moai show <에픽>                       펼친 에픽과 멤버가 done 인가
-    git worktree list                      그 워크트리가 사라졌는가
+    git merge-base --is-ancestor <merge hash> <base branch> && echo yes   is the merge on the base branch
+    moai show <epic>                       are the unfolded epic and its members done
+    git worktree list                      is that worktree gone
 
-**옆이 쥐어 남긴 멤버**(브리프 4-3)는 그 옆 일의 보고를 확인한 뒤 놀고 있는 세션에 보낸다.
-3 의 글을 싣되 `<id>` 에 에픽을 채우고, 1 대신 "이미 펼친 에픽이다 — promote 하지 않고 첫 칸
-멤버를 2 부터 집는다" 를 적는다. 그 전에는 1 의 셈에서 그 파일을 쥔 일로 친다. 그 멤버도 7-1 의
-것처럼 done 이 아니어도 맞다 — 에픽을 열어 두니 에픽도 done 이 아니다.
+**A member left because the work beside it holds the file** (brief 4-3) goes to an idle
+session after that other work's report is checked. Send the text of 3 but fill `<id>`
+with the epic, and in place of 1 write "this epic is already unfolded — do not promote;
+pick up the first-column members from 2 on". Until then, count it in 1 as work holding
+that file. Like the ones from 7-1, that member is right even when it is not done — it
+keeps the epic open, so the epic is not done either.
 
-보고가 브리프 7-1 에서 첫 칸에 남겼다고 댄 멤버는 done 이 아니어도 맞다 — 그 멤버가 에픽을 열어
-두니 에픽도 done 이 아니다. 그 멤버는 idea 가 아니라 1 의 목록에 안 뜨니, 남긴 까닭(사람의
-결정·옆이 쥔 파일)과 함께 사람에게 전한다.
+A member the report says was left in the first column by brief 7-1 is right even when it
+is not done — that member keeps the epic open, so the epic is not done either. It is not
+an idea and it does not show in 1's list, so pass it to the person along with the reason
+it was left (a person's decision, a file held beside it).
 
-보고가 맞고 **그 세션이 턴을 마쳤으면**(보고는 11 이고 일꾼은 12 를 마저 한다) 그 창이
-비우기 좋은 자리라고 짚어 줄 수 있다 — 일꾼도 제 창에서 그렇게 말한다(브리프 12). 셋이
-보는 것은 머지·닫기·워크트리뿐이라 노트까지 읽지는 않는다. **짚었으면 다음 idea 는 사람이
-그 창을 비웠거나 안 비운다고 한 뒤에 보낸다** — 먼저 보낸 글은 뒤늦은 `/clear` 에 같이
-사라지고, 그 idea 와 세션은 오지 않을 보고를 기다리며 후보에서 빠져 있다.
+If the report holds and **that session has finished its turn** (the report is 11 and the
+worker still has 12 to do), you may point out that the window is at a good place to be
+cleared — the worker says the same in its own window (brief 12). The three checks look
+only at the merge, the closing and the worktree; they do not read the notes. **Once you
+have pointed it out, send the next idea only after the person has cleared that window or
+said they will not** — a message sent before that disappears with a late `/clear`, and
+that idea and that session sit out of the candidates waiting for a report that will never
+come.
 
-`<에픽>` 은 보고에 실린 에픽 id 다. idea 는 펼칠 때 이미 done 이 되고 멤버를 안 보여 줘,
-`moai show <id>` 로는 일이 끝났는지 모른다 — 보고에 없으면 그 idea 의 이력 "… 로
-펼쳤다" 에서 읽는다.
+`<epic>` is the epic id carried in the report. An idea is already done once it is
+unfolded and it does not show its members, so `moai show <id>` cannot tell you whether
+the work finished — when the report does not carry it, read it from that idea's history
+line about being unfolded.
 
-셋이 맞으면 — tmux 면 5-1 로 그 창을 먼저 비우고 — 그 세션에 다음 idea 를 보낸다.
-어긋나면 그 세션에 무엇이 남았는지 묻고, 대신 끝내지 않는다.
+If the three hold — on tmux, clear the window first with 5-1 — send the next idea to that
+session. If they do not, ask that session what is left, and do not finish it in its place.
 
-**5-1. tmux 면 감독이 그 창을 비운다.** 사람에게 짚고 기다리는 대신 감독이 그 판에
-`/clear` 를 친다. 셋이 맞은 뒤에만, 그리고 `moai show <에픽>` 의 이력에 일꾼이 12 에서
-남긴 `다음:` 노트가 선 뒤에만 부른다 — 그 노트가 12 의 마지막 걸음이라, 없으면 일꾼이
-아직 트래커에 옮기는 중이다. 노트는 **보고 뒤에** 선 것만 센다 — `다음:` 은 끝을 못 낸
-세션이 남기는 이어받기 줄이기도 해서, 0 에서 거둔 에픽에는 앞 세션의 것이 이미 있다.
-보고(11)는 12 보다 먼저 오니 보고를 받은 때는 대개 노트가 아직 없고 일꾼은 `busy` 다 —
-사람에게 짚지 말고 4 의 알림을 걸어 두고, 그 알림이 온 뒤에 본다. 비우면 그 일꾼이 쥔
-대화가 통째로 사라지니 확인보다 먼저 부르지 않는다. `<세션>` 은 보고를 보낸 세션의 이름,
-`<루트>` 는 2 의 `루트 자리` 다.
+**5-1. On tmux, the supervisor clears the window.** Instead of pointing it out to the
+person and waiting, the supervisor types `/clear` into that pane. Call it only after the
+three hold, and only after the `Next:` note the worker leaves in 12 stands in the history
+of `moai show <epic>` — that note is the last step of 12, so without it the worker is
+still moving things into the tracker. Only a note that stands **after the report** counts
+— `Next:` is also the hand-over line a session leaves when it could not finish, so an
+epic reclaimed in 0 already has the previous session's one. The report (11) comes before
+12, so when a report arrives the note is usually not there yet and the worker is `busy` —
+do not point it out to the person: leave the notification from 4 and look after it
+arrives. Clearing erases the whole conversation that worker holds, so never call it
+before the check. `<session>` is the name of the session that sent the report, and
+`<root>` is the `root dir` from 2.
 
 ```sh
-python3 - '<세션>' '<에픽>' '<내 이름>' '<루트>' <<'PY'
+python3 - '<session>' '<epic>' '<my name>' '<root>' <<'PY'
 import glob, json, os, re, subprocess, sys, time
 name, epic, me, root = sys.argv[1:5]
 home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 erased = False
-def skip(why, then="사람에게 비워도 된다고만 짚는다"):
-    print("안 비운다 —", why, "—", then)
+def gone(kept, left):
+    """**Only the lines erased** from the draft. What is left stands in order as lines of the
+    earlier screen (`shrunk`), so those are subtracted and the rest returned. If what is left is
+    not a line of the draft (the person typed meanwhile), None — what was erased cannot be told."""
+    rest = iter(kept.split("\n"))
+    out = []
+    for line in left.split("\n"):
+        if not line:
+            continue
+        for k in rest:
+            if k == line:
+                break
+            out.append(k)
+        else:
+            return None
+    out.extend(rest)
+    return "\n".join(out)
+def skip(why, then="only point out to the person that it can be cleared"):
+    print("not clearing —", why, "—", then)
     if erased:
-        print("치던 글은 이미 지웠다 — 위에 옮긴 `치던 글` 을 그 창의 사람에게 돌려준다")
+        # **Give back only what was erased.** Stop after erasing one line and the rest is still
+        # in the box — give the whole draft back and the person pastes the lines still in their
+        # box on top of it, so the same lines stand twice.
+        left = draft(pane)
+        if left and dim_only(pane):
+            left = ""
+        back = None if left is None else gone(kept, left)
+        if back is None:
+            print("erased part of the draft — look at what is left in that box and give the person of that window the `draft` copied above, minus the lines that overlap")
+        elif not back.strip("\n"):
+            # Only blank lines left means nothing was erased — blank lines in the box are skipped
+            # above, so the draft's blank lines flow in here unpaired. Calling that "erased" would
+            # tell the supervisor to hand back an empty text.
+            print("the draft is still in that box — there is nothing to hand back")
+        elif back == kept:
+            print("the draft is already erased — give the person of that window the `draft` copied above")
+        else:
+            print("erased from the draft — hand back only this to the person of that window. The rest is still in that box")
+            print(back)
     sys.exit(0)
 def tmux(*args):
     return subprocess.run(["tmux", *args], capture_output=True, text=True)
@@ -495,16 +678,18 @@ def draft(pane):
     box = []
     for line in lines[at[-1] :] if at else []:
         if line.startswith("─"):
-            # 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은 두 칸 — 그만큼만 벗겨 들여쓰기를 지킨다.
-            # 그 앞머리가 아닌 줄은 안 자른다 — 화면이 달리 그리는 날 두 글자가 말없이 깎이고,
-            # 옮긴 글이 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
+            # The first line is the prompt and one space, the following lines two — strip only
+            # that much and the indentation survives. Lines without that prefix are not cut: the
+            # day the screen draws differently two characters would vanish silently, and the copy
+            # is the only one the person has left, so nobody would see it shrink.
             head = (PROMPT + " ", "  ")
             return "\n".join((l[2:] if l[:2] in head else l[1:] if l[:1] == PROMPT else l).rstrip() for l in box).strip("\n")
         box.append(line)
 def grey(code):
-    """이 글자색이 흐린 회색인가. 256색 회색 계단과 참색(r=g=b) 을 함께 본다 — Claude Code 의
-    색은 테마의 16진값이라, 판이 참색을 받으면 `38;5;244` 가 아니라 `38;2;136;136;136` 으로 온다.
-    검정 쪽은 회색이 아니다 — 밝은 테마는 사람이 친 글을 `rgb(0,0,0)` 으로 그린다."""
+    """Is this foreground colour a dim grey. Look at both the 256-colour grey ramp and true colour
+    (r=g=b) — Claude Code's colours are the theme's hex values, so a pane that takes true colour
+    gets `38;2;136;136;136` rather than `38;5;244`. The black end is not grey — a light theme draws
+    text the person typed as `rgb(0,0,0)`."""
     n = code.split(";")
     if code == "90":
         return True
@@ -514,9 +699,9 @@ def grey(code):
         return len(set(n[2:])) == 1 and 64 <= int(n[2]) < 160
     return False
 def sgr(code, was):
-    """SGR 한 조각을 (흐림 속성, 흐린 글자색, 뒤집힘) 으로 접는다. tmux 는 글자색을 따로 내보내고
-    (`\x1b[2m\x1b[37m`) 속성은 한 조각에 모은다 — 속성이 하나 빠지면 리셋을 앞에 붙여 `0;2`,
-    둘이 한꺼번에 서면 `2;3` 이다. 그래서 속성 조각은 낱낱이 읽는다."""
+    """Fold one SGR piece into (dim attribute, dim foreground, reverse). tmux emits the foreground
+    separately (`\x1b[2m\x1b[37m`) and gathers attributes into one piece — drop one attribute and it
+    prefixes a reset, `0;2`; set two at once and it is `2;3`. So attribute pieces are read one by one."""
     attr, fg, rev = was
     n = code.split(";")
     if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
@@ -532,17 +717,20 @@ def sgr(code, was):
             rev = p == "7"
     return attr, fg, rev
 def dim_only(pane):
-    """입력 칸에 보이는 글이 모두 흐린 색인가 — 사람이 친 글이 아니라 Claude Code 의 제안 글이다."""
+    """Is every visible character in the input box dim — that is, Claude Code's suggestion text
+    rather than text the person typed."""
     lines = screen(pane, True)
     bare = lambda l: re.sub(SGR, "", l)
-    # 입력 칸은 `draft` 와 **같은 줄**에서 연다. `in` 으로 찾으면 사람이 친 글에 든 프롬프트
-    # 표시가 그 아래로 끌고 가 위의 사람 글을 못 본다. 상자 끝도 `startswith` 로 본다 — 사람이
-    # 붙여 넣은 줄 속의 붙임표 하나에 그 자리에서 참을 내면 사람의 글 뒤에 `/clear` 가 붙는다.
+    # Open the input box on the **same line** as `draft`. Searching with `in` lets a prompt glyph
+    # inside text the person typed drag it further down, so the person's text above is missed. The
+    # end of the box is read with `startswith` too — return true on one dash inside a pasted line
+    # and `/clear` lands after the person's text.
     at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
     if not at:
         return False
-    # 색은 화면 맨 위부터 접는다 — tmux 는 줄이 바뀌어도 같은 색을 다시 내보내지 않아, 접힌
-    # 제안 글의 둘째 줄은 색 조각 없이 온다. 흐린 글자를 하나도 못 봤으면 참이 아니다.
+    # Fold the colours from the top of the screen — tmux does not re-emit the same colour across a
+    # line break, so the second line of a wrapped suggestion arrives with no colour piece. If no dim
+    # character was seen at all, it is not true.
     was, prompt, cursor, seen = (False, False, False), True, True, False
     for n, line in enumerate(lines):
         if n > at[-1] and bare(line).startswith("─"):
@@ -555,8 +743,9 @@ def dim_only(pane):
                 continue
             if n == at[-1] and prompt and piece:
                 piece, prompt = piece[1:], False
-            # Claude Code 는 빈 칸의 커서를 제안 글 첫 글자에 뒤집어 그린다(흐림 없이). 프롬프트
-            # 줄의 첫 글자가 뒤집혀 있으면 그 한 칸만 커서로 빼고, 나머지는 그대로 센다.
+            # Claude Code draws the cursor of an empty box reversed over the first character of the
+            # suggestion (with no dim). If the first character of the prompt line is reversed, take
+            # that one cell out as the cursor and count the rest as it is.
             if n == at[-1] and cursor and piece.strip():
                 cursor = False
                 if was[2] and not (was[0] or was[1]):
@@ -569,42 +758,43 @@ def dim_only(pane):
 def looks(fmt):
     return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
 def shrunk(now, was):
-    """지우기가 깎은 글인가. 한 번 지우면 줄 하나가 비고 다음 줄이 올라올 뿐이라, 남은 줄은 모두
-    앞 판의 줄과 **같은 줄**로 차례대로 선다(빈 줄은 방금 비운 줄이다). 안 맞는 줄이 있으면 그새
-    사람이 친 글이다 — 줄 안에 드는지만 보면 새로 친 한 글자나 다시 친 앞머리가 앞 판의 어느
-    줄에든 들어 못 가른다."""
+    """Is this text the erasing pared down. One erase only empties a line and pulls the next one up,
+    so every line left stands in order as **the same line** of the earlier screen (a blank line is
+    the one just emptied). A line that does not match is text the person typed meanwhile — testing
+    only whether a line is contained in the earlier screen cannot tell them apart, because one newly
+    typed character or a retyped prefix is contained in some earlier line."""
     rest = iter(was.split("\n"))
     return all(not line or line in rest for line in now.split("\n"))
 QUIET = '#{pane_in_mode}#{pane_synchronized}'
 if not os.environ.get("TMUX"):
-    skip("tmux 밖이다")
+    skip("outside tmux")
 try:
     tmux("-V")
 except OSError:
-    skip("tmux 가 없다")
+    skip("no tmux")
 f, s = session()
 if not s:
-    skip("산 세션 " + name + " 을 하나로 못 찾았다")
+    skip("could not find exactly one live session named " + name)
 pane = str(s.get("tmux") or "").rpartition(".")[2]
 if not pane.startswith("%"):
-    skip("세션 파일에 판이 없다")
+    skip("no pane in the session file")
 if pane == os.environ.get("TMUX_PANE"):
-    skip("감독 제 창이다")
+    skip("the supervisor's own window")
 if s.get("status") != "idle":
-    skip("idle 이 아니다 — " + str(s.get("status")), "4 의 알림을 걸어 두고 그 알림이 온 뒤에 다시 부른다")
+    skip("not idle — " + str(s.get("status")), "leave the notification from 4 and call again after it arrives")
 cwd = str(s.get("cwd") or "")
 if not cwd or os.path.realpath(cwd) != os.path.realpath(root):
-    skip("루트에 없다 — 아직 워크트리 안이다")
+    skip("not in the root — still inside a worktree")
 owner = looks('#{pane_pid}')
 if not owner.isdigit() or int(owner) not in parents(int(s["pid"])):
-    skip("판 " + pane + " 이 그 세션의 것이 아니다")
+    skip("pane " + pane + " does not belong to that session")
 if looks(QUIET) != "00":
-    skip("판이 복사 모드이거나(사람이 스크롤해 읽는 중) 다른 판과 묶여 있다")
+    skip("the pane is in copy mode (the person is scrolling to read) or synchronized with others")
 kept = draft(pane)
 if kept is None:
-    skip("입력 칸을 못 읽었다")
+    skip("could not read the input box")
 if kept:
-    print("치던 글 —", name, pane)
+    print("draft —", name, pane)
     print(kept)
 seen, ghost = kept, None
 for _ in range(20):
@@ -612,19 +802,22 @@ for _ in range(20):
     if left == "" and ghost is None:
         break
     if left is None or looks(QUIET) != "00":
-        skip("지우던 입력 칸을 놓쳤다")
-    # 흐린 글로 보고 지워 본 글이 바뀌었으면 제안 글이 아니었다 — 제안 글은 안 지워진다. 위에 옮겼다.
+        skip("lost the input box while erasing")
+    # If text taken for dim changed when erased, it was not suggestion text — suggestions do not
+    # erase. It is already copied above.
     if ghost is not None and left != ghost:
-        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
-    # 지우는 사이에 사람이 친 글은 옮긴 적이 없다 — 더 지우면 사람에게 남은 복사가 없다(사용자 결정).
+        skip("the person is typing", "stopped erasing. Also hand back the `dim text that appeared meanwhile` copied above to the person of that window")
+    # Text the person typed while erasing was never copied out — erase more and no copy is left for
+    # them (user decision).
     if not shrunk(left, seen):
         if not dim_only(pane):
-            print("그새 친 글 —", name, pane)
+            print("typed meanwhile —", name, pane)
             print(left)
-            skip("사람이 치고 있다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
-        # 사람의 글을 다 지운 빈 칸에는 흐린 제안 글이 다시 선다 — 친 글이 아니니 멈추지 않는다.
-        # 색으로만 가르지도 않는다: 옮겨 두고 지워 보아, 지워지면 흐리게 그린 사람 글이다(위 `ghost`).
-        print("그새 선 흐린 글 —", name, pane)
+            skip("the person is typing", "stopped erasing. Only point out to the person that it can be cleared")
+        # A box emptied of the person's text gets dim suggestion text again — it is not typed text,
+        # so do not stop. Do not tell them apart by colour alone either: copy it out and try
+        # erasing, and if it erases it was the person's text drawn dim (`ghost` above).
+        print("dim text that appeared meanwhile —", name, pane)
         print(left)
         ghost = left
     seen = left
@@ -632,37 +825,39 @@ for _ in range(20):
     tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
     time.sleep(0.2)
 else:
-    # 지워 보고 가른다(사용자 결정): 마지막 한 번에도 안 지워진 글이 모두 흐린 색이면 사람이 친
-    # 것이 아니라 Claude Code 의 제안 글이다 — 그것은 `/clear` 앞에 붙지 않으니 그대로 친다.
-    # 치던 글과 같기를 바라지 않는다 — 사람의 글을 지운 빈 칸에 제안 글이 다시 서면, 치던 글은
-    # 이미 옮겼고 남은 것은 제안 글뿐이다.
+    # Tell them apart by erasing (user decision): if text that survived even the last stroke is all
+    # dim, it is not what the person typed but Claude Code's suggestion — that does not land in front
+    # of `/clear`, so type it. Do not require it to equal the draft — when a suggestion reappears in
+    # a box emptied of the person's text, the draft is already copied out and only the suggestion is
+    # left.
     rest = draft(pane)
     if ghost is not None and rest != ghost:
-        skip("사람이 치고 있다", "지우기를 멈췄다. 위에 옮긴 `그새 선 흐린 글` 도 그 창의 사람에게 돌려준다")
+        skip("the person is typing", "stopped erasing. Also hand back the `dim text that appeared meanwhile` copied above to the person of that window")
     if rest and rest == left and dim_only(pane):
         if rest == kept:
-            print("위의 `치던 글` 은 흐린 제안 글이었다 — 사람이 친 것이 아니다")
+            print("the `draft` above was dim suggestion text — the person did not type it")
             erased = False
-            # 사람의 글이 아니니 상태줄에 "감독 창에 옮겼다" 고 말하지 않는다 — 그 말을 읽은 사람이
-            # 감독 창에서 제가 쓴 적 없는 글을 찾는다.
+            # It is not the person's text, so do not say "copied into the supervisor's window" on the
+            # status line — a person who reads that goes hunting in the supervisor's window for text
+            # they never wrote.
             kept = ""
         elif rest == ghost:
-            print("위의 `그새 선 흐린 글` 은 제안 글이었다 — 사람이 친 것이 아니다")
+            print("the `dim text that appeared meanwhile` above was suggestion text — the person did not type it")
     elif rest != "":
-        # 하나도 안 지워졌으면 그 글은 아직 그 칸에 있다 — "이미 지웠다" 고 하면 감독이 그 창에
-        # 그대로 있는 글을 사람에게 한 벌 더 돌려준다.
+        # If nothing was erased, that text is still in the box — say "already erased" and the
+        # supervisor hands the person a second copy of text that is sitting right there.
         erased = rest != kept
-        skip("입력 칸을 못 비웠다")
+        skip("could not empty the input box")
 if (read(f) or {}).get("status") != "idle":
-    skip("그새 idle 이 아니다")
+    skip("no longer idle")
 if looks(QUIET) != "00":
-    skip("그새 판이 복사 모드로 갔다")
-# 마지막으로 읽은 뒤에 사람이 쳤으면 `/clear` 가 그 글 뒤에 붙는다 — 치기 직전에 한 번 더 읽는다.
-# 비었거나 그대로거나 흐린 제안 글만 새로 섰으면 친다.
+    skip("the pane went into copy mode meanwhile")
+# If the person typed after the last read, `/clear` lands after that text — read once more right
+# before typing. Type it when the box is empty, unchanged, or holds only new dim suggestion text.
 last = draft(pane)
 if last is None or (last not in ("", left) and not dim_only(pane)):
-    skip("그새 입력 칸에 글이 섰다", "지우기를 멈췄다. 사람에게 비워도 된다고만 짚는다")
-say ="감독 " + me + ": " + epic + " 보고를 확인했다 — 이 창을 /clear 한다" + (". 치던 글은 감독 창에 옮겼다" if kept else "")
+    skip("text appeared in the input box meanwhile", "stopped erasing. Only point out to the person that it can be cleared")
+say ="supervisor " + me + ": checked the report for " + epic + " — clearing this window" + (". The draft is copied into the supervisor's window" if kept else "")
 for client in tmux("list-clients", "-t", pane, "-F", '#{client_name}').stdout.split("\n"):
     if client:
         tmux("display-message", "-c", client, "-d", "8000", "-t", pane, say)
@@ -673,93 +868,114 @@ for _ in range(30):
     time.sleep(0.5)
     now = read(f)
     if now and now.get("sessionId") != s.get("sessionId"):
-        print("비웠다 —", name, pane, epic)
+        print("cleared —", name, pane, epic)
         sys.exit(0)
-print("비웠는지 모른다 —", name, pane, "— 다음 글을 보내기 전에 그 창을 본다")
+print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next text")
 PY
 ```
 
-- **맡긴 세션에만 부른다.** 보고를 보낸 세션이 곧 일꾼이라 감독 제 창과 다른 감독의 창은
-  이름에서 이미 빠진다. 스크립트도 제 판(`$TMUX_PANE`)은 한 번 더 거른다
-- **tmux 가 없으면 조용히 건너뛴다.** `$TMUX` 가 없거나 `tmux` 가 없으면 `안 비운다` 한 줄을
-  내고 0 으로 끝난다 — 그때는 위처럼 사람에게 짚고 기다린다. 스크립트가 `안 비운다` 를 내면
-  그 줄의 끝이 말하는 대로 한다 — `idle 이 아니다` 만 알림을 기다려 다시 부르고, 나머지는
-  사람에게 짚는다
-- **`idle` 인 판에만 친다.** `busy`·`waiting`·`shell` 에 치면 도는 턴이나 사람의 답 사이에
-  글자가 끼어든다. 보내기 직전에 한 번 더 읽는다. 일꾼이 12 에서 "지우지 말라" 고 한
-  때 — 리뷰가 백그라운드에서 도는 중, 머지 충돌을 푸는 중, 사람의 답을 기다리는 중 — 도
-  그대로 산다. 보고나 그 뒤에 온 글에 그런 것이 남았다고 적혀 있으면 부르지 않는다
-- **복사 모드인 판, `synchronize-panes` 로 묶인 판에도 치지 않는다.** 복사 모드면 사람이
-  스크롤해 읽는 중이고, 친 글자가 복사 모드의 키로 가 `/` 가 검색을 연다. 묶인 판이면
-  친 글자가 그 창의 판 모두로 가 옆 일꾼의 대화까지 지운다
-- **판은 세션 파일의 `tmux` 필드(`세션:@창.%판`)에서 읽고, 그 판의 프로세스가 그 세션을
-  낳았는지 본다.** 세션 파일은 세션이 끝나도 남고 판 번호는 다시 쓰여, 낡은 파일이 가리키는
-  판에는 남의 세션이 산다
-- **치던 글은 지우고 친다**(사용자 결정). 그대로 치면 `치던 글/clear` 가 일꾼에게 프롬프트로
-  간다. 지우기 전에 화면에서 그 글을 읽어 `치던 글` 로 감독 창에 옮기고, 그 판을 보는
-  클라이언트의 상태줄에 한 줄이 그렇다고 말한다 — 사람은 그 글을 감독 창에서 찾는다. Claude
-  Code 의 `Ctrl+Y` 는 여러 줄 글의 마지막 줄만 되살려 기댈 수 없다. 입력 칸은 Claude Code
-  화면에서 프롬프트 표시(U+276F)가 선 마지막 줄로 읽는다. 그 화면도 세션 파일처럼 문서에 없는
-  것이라, 못 읽으면 치지 않는 쪽으로 넘어진다. 지우다가 멈추면 `치던 글은 이미 지웠다` 가
-  따라 나온다 — 그때는 옮긴 글을 그 창의 사람에게 돌려준다
-- **옮길 때 앞머리 두 칸만 벗긴다**(사용자 결정). 첫 줄은 프롬프트와 빈칸 하나, 이어지는 줄은
-  두 칸이고 나머지는 화면 그대로다 — 줄마다 다듬으면 들여쓴 코드가 납작해져 돌아간다.
-  그 앞머리가 아닌 줄은 **안 자른다** — 화면이 달리 그리는 날 두 글자가 말없이 깎이는데, 옮긴
-  글은 사람에게 남은 단 하나의 복사라 줄어든 것을 아무도 못 본다.
-  화면이 접은 줄과 사람이 친 줄바꿈은 가를 수 없으니, 옮긴 글에 줄바꿈이 하나 더 보일 수 있다
-- **안 지워지는 글은 지워 보고 가른다**(사용자 결정). Claude Code 가 빈 칸에 띄우는 흐린 제안
-  글은 사람이 친 것이 아니라 지워지지도 않는다. 스무 번 쳐도 그대로이고 그 글이 모두 흐린
-  색이면(`capture-pane -e`) 제안 글로 보고 `/clear` 를 친다 — 제안 글은 `/clear` 앞에 안 붙는다.
-  색으로만 가르지 않는 까닭은, 사람이 친 글을 흐리게 그리는 판이 있으면 그 글 뒤에 `/clear` 가
-  붙기 때문이다. 지워지는 글은 언제나 사람의 것으로 본다. Claude Code 는 빈 칸의 커서를 제안 글
-  첫 글자에 뒤집어 그리니 그 한 칸은 글로 안 센다. 사람의 글을 지운 빈 칸에 제안 글이 다시
-  서도 같다 — 치던 글은 이미 옮겼으니 그대로 친다
-- **지우는 사이에 사람이 치면 멈춘다**(사용자 결정). 한 번 지울 때마다 입력 칸을 다시 읽어,
-  앞 판의 줄에서 깎인 것이 아닌 글이 보이면 곧바로 멈추고 `/clear` 를 치지 않는다 — 그 글은 옮긴
-  적이 없어 더 지우면 사람에게 남은 복사가 없다. 새 글은 `그새 친 글` 로 감독 창에 옮기고, 앞서
-  지운 것은 `치던 글은 이미 지웠다` 가 말한다. 합쳐서 계속 지우는 길은 안 고른다 — 사람이 치는
-  중에 `/clear` 가 그 글 뒤에 붙는다. 남은 줄은 앞 판의 줄과 **같아야** 깎인 것이다 — 줄 안에
-  드는지만 보면 새로 친 한 글자가 앞 판 어느 줄에든 든다. 새로 선 글이 모두 흐리면 사람의 글을
-  지운 빈 칸에 다시 선 제안 글일 수 있어 멈추지 않고 `그새 선 흐린 글` 로 옮겨 둔 채 지워 본다 —
-  지워지면 사람이 친 글로 보고 멈춘다. `/clear` 를 치기 직전에도 입력 칸을 한 번 더 읽는다
-- **비우기와 다음 배정을 한 호흡에 하지 않는다.** `/clear` 는 큐에 쌓인 글을 함께 지운다.
-  스크립트가 `비웠다` 를 낸 — 세션 id 가 바뀐 — 뒤에 다음 idea 를 보내고, `비웠는지 모른다`
-  면 그 창이 어떤지 보기 전에는 보내지 않는다
-- **비웠으면 제 창에 한 줄 남긴다** — `<세션> 판 %N 을 비웠다 (<에픽>)`. 사람이 그 창을
-  보다가 화면이 사라진 까닭을 감독 창에서 찾는다
-- **시험으로 살아 있는 일꾼의 창에 치지 않는다.** 시험할 판은 **떼어 낸 tmux 서버**에 띄우고,
-  그 서버에 닿는 호출 **모두** — `new-session`·`send-keys`·`capture-pane`·`display-message`·
-  `list-clients`·`kill-session` — 에 같은 이름을 준다. 이름에는 에픽 id 를 담아 옆 일꾼·리뷰
-  서브에이전트의 시험 서버와 안 겹치게 한다. 스크립트를 그 판에 돌릴 때는 `-L` 을 끼워 넣는
-  `tmux` 감싸개를 `PATH` 앞에 둔다 — 감싸개는 진짜 `tmux` 를 **절대 경로로** 불러야 제 자신을
-  다시 부르지 않는다. 스크립트 자체는 `env -u TMUX` 없이 부른다 — `$TMUX` 가 없으면 `tmux 밖이다`
-  로 건너뛴다
+- **Call it only on a session you handed work to.** The session that sent the report is the
+  worker, so the supervisor's own window and another supervisor's window are already out by
+  name. The script filters its own pane (`$TMUX_PANE`) once more as well
+- **With no tmux it skips quietly.** If `$TMUX` is unset or `tmux` is missing it prints one
+  `not clearing` line and exits 0 — then point it out to the person and wait, as above. When
+  the script prints `not clearing`, do what the end of that line says — only `not idle` means
+  wait for the notification and call again; for the rest, point it out to the person
+- **Type only into an `idle` pane.** Typing into `busy`, `waiting` or `shell` slips characters
+  into a running turn or between a person's answers. Read once more right before sending. The
+  times the worker said "do not clear" in 12 — a review running in the background, a merge
+  conflict being resolved, waiting on a person's answer — hold here too. If the report or a
+  message after it says any of that is left, do not call it
+- **Do not type into a pane in copy mode, or a pane tied together by `synchronize-panes`
+  either.** Copy mode means the person is scrolling to read, and the characters typed go to
+  copy-mode keys where `/` opens a search. In a tied pane the characters go to every pane of
+  that window and erase the conversation of the worker next door too
+- **Read the pane from the session file's `tmux` field (`session:@window.%pane`) and check
+  that the pane's process spawned that session.** The session file survives the session and
+  pane numbers are reused, so someone else's session lives in the pane a stale file names
+- **Erase the draft before typing** (user decision). Type over it and `<draft>/clear` goes to
+  the worker as a prompt. Before erasing, read that text off the screen and copy it into the
+  supervisor's window as `draft`, and one line on the status line of every client watching
+  that pane says so — the person looks for that text in the supervisor's window. Claude
+  Code's `Ctrl+Y` restores only the last line of a multi-line text, so it cannot be relied
+  on. The input box is read as the last line of the Claude Code screen where the prompt glyph
+  (U+276F) stands. That screen, like the session file, is undocumented, so where it cannot be
+  read it falls towards not typing. If erasing stops midway, **only the lines erased so far**
+  come out with it — `the draft is already erased` when it all went, and `erased from the
+  draft` gives the lines when it stopped after one. The rest is still in the box, so handing
+  the whole draft back would make the same lines stand twice. If what is left is not a line
+  of the draft (the person typed meanwhile) what was erased cannot be told, and then it says
+  to look at that box and leave the overlapping lines out
+- **Strip only the two leading columns when copying** (user decision). The first line is the
+  prompt and one space, the following lines two spaces, and the rest is the screen as it is —
+  trim every line and indented code comes back flattened. Lines that do not carry that prefix
+  are **not cut** — the day the screen draws differently two characters would be shaved off
+  silently, and the copy is the only one the person has left, so nobody would see it shrink.
+  A line the screen wrapped cannot be told from a newline the person typed, so the copy may
+  show one newline more than there was
+- **Tell text that will not erase apart by erasing it** (user decision). The dim suggestion
+  Claude Code floats in an empty box is not what the person typed, and it does not erase.
+  When it survives twenty strokes and all of it is dim (`capture-pane -e`), take it as a
+  suggestion and type `/clear` — a suggestion does not land in front of `/clear`. Colour
+  alone does not decide it, because on a build that draws the person's text dim `/clear`
+  would land after that text. Text that erases is always taken as the person's. Claude Code
+  draws the cursor of an empty box reversed over the suggestion's first character, so that one
+  cell does not count as text. A suggestion reappearing in a box emptied of the person's text
+  is the same — the draft is already copied out, so type it
+- **Stop if the person types while you erase** (user decision). Read the input box again after
+  every stroke, and the moment text appears that was not pared down from the earlier screen,
+  stop and do not type `/clear` — that text was never copied out, so erasing more leaves the
+  person no copy. Copy the new text into the supervisor's window as `typed meanwhile`, and
+  `the draft is already erased` speaks for what went before. Merging them and erasing on is
+  not the road taken — while the person types, `/clear` lands after their text. A line left
+  must be **equal** to a line of the earlier screen to count as pared down — test only
+  whether it is contained and one newly typed character is contained in some earlier line.
+  If the new text is all dim it may be a suggestion that reappeared in a box emptied of the
+  person's text, so do not stop: copy it out as `dim text that appeared meanwhile` and try
+  erasing — if it erases, take it as the person's text and stop. Read the input box once more
+  right before typing `/clear` too
+- **Do not clear and assign in one breath.** `/clear` erases what is queued along with it.
+  Send the next idea after the script prints `cleared` — after the session id changed — and
+  on `cannot tell whether it cleared`, do not send before you have looked at that window
+- **Leave one line in your own window when you clear** — `cleared <session> pane %N (<epic>)`.
+  A person who was watching that window finds in the supervisor's window why the screen went away
+- **Do not type into a live worker's window while testing.** Raise the pane you are testing
+  on a **separate tmux server** and give the same name to **every** call that reaches that
+  server — `new-session`, `send-keys`, `capture-pane`, `display-message`, `list-clients`,
+  `kill-session`. Put the epic id in the name so it cannot collide with the test servers of
+  the workers beside you or of a review subagent. To run the script in that pane, put a
+  `tmux` wrapper that inserts `-L` at the front of `PATH` — the wrapper has to call the real
+  `tmux` **by absolute path** so it does not call itself again. Call the script itself without
+  `env -u TMUX` — with no `$TMUX` it skips as `outside tmux`
 
-      env -u TMUX tmux -L <고유 이름> new-session -d -s <판> …
-      env -u TMUX tmux -L <고유 이름> capture-pane -p -t <판>
-      mkdir -p <스크래치패드>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <고유 이름> "$@"\n' "$(command -v tmux)" > <스크래치패드>/bin/tmux
-      chmod +x <스크래치패드>/bin/tmux; PATH=<스크래치패드>/bin:$PATH python3 - …      스크립트를 그 판에
-      env -u TMUX tmux -L <고유 이름> kill-server          치울 때 — 그 이름의 서버만 죽는다
+      env -u TMUX tmux -L <unique name> new-session -d -s <pane> …
+      env -u TMUX tmux -L <unique name> capture-pane -p -t <pane>
+      mkdir -p <scratchpad>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <unique name> "$@"\n' "$(command -v tmux)" > <scratchpad>/bin/tmux
+      chmod +x <scratchpad>/bin/tmux; PATH=<scratchpad>/bin:$PATH python3 - …      the script into that pane
+      env -u TMUX tmux -L <unique name> kill-server          to clean up — only the server of that name dies
 
-  **`-L`/`-S` 없는 `tmux kill-server`·`kill-session` 은 쓰지 않는다.** tmux 안에서 맨 `tmux` 는 `$TMUX` 를 따라
-  사람의 기본 서버로 가, 그 기계의 판과 세션이 모두 한꺼번에 죽는다. `TMUX_TMPDIR` 로는 안
-  갇힌다 — `$TMUX` 가 이긴다. 맨 `tmux new-session -d` 도 기본 서버에 판을 세우는 것이라 격리가
-  아니다 — 치우려면 기본 서버에 `kill-*` 를 쳐야 하고, 그 길로 서버 전체가 죽은 적이 있다
+  **Never use `tmux kill-server` or `kill-session` without `-L`/`-S`.** Inside tmux a bare
+  `tmux` follows `$TMUX` to the person's default server, and every pane and session on that
+  machine dies at once. `TMUX_TMPDIR` does not fence it in — `$TMUX` wins.
+  A bare `tmux new-session -d` is not isolation either, because it raises the pane on the
+  default server — cleaning up then means running `kill-*` against the default server, and
+  that road has killed a whole server before
 
-## 공유 루트
+## The shared root
 
-루트 체크아웃은 **모든 세션이 같이 쓴다.** 한 세션이 병합을 열어 둔 사이(`MERGE_HEAD`)에
-다른 세션이 트래커 노트를 커밋하면, 그 커밋이 남의 병합을 제 제목으로 봉인한다 — 실제로
-그렇게 됐다. 그래서 감독이든 일꾼이든 루트에서는:
+The root checkout is **shared by every session.** While one session has a merge open
+(`MERGE_HEAD`), another session committing a tracker note seals that merge with its own
+subject — that has actually happened. So in the root, supervisor and worker alike:
 
-- 트래커 커밋에 경로를 준다 — `git commit -m "…" -- .moai/`. 병합이 열려 있으면 git 이
-  경로 준 커밋을 거절하니, 그 병합을 연 세션이 끝낼 때까지 기다렸다 다시 친다. 경로 없는
-  `git commit` 은 `git status` 를 보고 쳐도 그 병합을 그대로 봉인한다
-- 제 병합은 `git merge --no-ff <가지> -m "…"` 한 번으로 끝낸다. `--no-commit` 을 쓰지 않는다.
-  충돌로 멈추면 루트에서 풀지 않고 `git merge --abort` 한다
+- Give the tracker commit a path — `git commit -m "…" -- .moai/`. With a merge open git
+  refuses a commit with a path, so wait until the session that opened it finishes and run it
+  again. A `git commit` without a path seals that merge even when you ran `git status` first
+- Finish your own merge in one call, `git merge --no-ff <branch> -m "…"`. Do not use
+  `--no-commit`. If it stops on a conflict, do not resolve it in the root: `git merge --abort`
 
-## 멈출 때
+## When to stop
 
-- 부딪히지 않는 idea 가 없거나 놀고 있는 세션이 없으면 사람에게 그렇게 말하고
-  멈춘다 — 부딪히는 idea 를 억지로 보내지 않는다
-- 일꾼이 사람의 결정을 기다리면 감독이 대신 답하지 않는다. 결정은 사람의 것이다
+- If there is no idea that does not collide, or no session idling, say so to the person and
+  stop — do not force a colliding idea out
+- If a worker is waiting on a person's decision, the supervisor does not answer in their
+  place. The decision is the person's

@@ -7,26 +7,38 @@ use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
 use crate::draft::Shape;
 use crate::model::{self, Issue, JournalEntry, Kind, Status};
-use crate::store::Repo;
 use crate::style::{self, paint};
+
+/// 펼침 노트에 담는 제목 한 토막의 예산(리뷰 moai-5lwd.n5l 3번).
+///
+/// **상한(`MAX_TEXT_BYTES`)을 주지 않는다.** 그것은 "한 번에 적을 수 있는 가장 큰 글" 이고,
+/// 이 노트는 가리킴이다 — 상한을 주면 제목 64KB 가 만든 이슈마다 저널에 한 벌씩 베껴져
+/// `moai show` 의 이력이 그 한 줄에 묻힌다. 상한이 서 있는 까닭이 바로 그것을 막는 데 있다.
+///
+/// 2KB 는 **재고 골랐다** — 이 저장소의 이슈 1,439줄에서 가장 긴 제목이 516바이트다. 네 곱절
+/// 넉넉하니 여태 선 노트도, 사람이 손으로 칠 만한 제목도 여기서 안 잘린다. 잘리는 것은 제목이
+/// 본문 노릇을 하는 줄뿐이고, 그때도 원본은 그 idea 줄에 그대로 있다.
+const TITLE_IN_NOTE: usize = 2 * 1024;
 
 /// 펼칠 수 없는 것을 펼치라 했을 때. **한 곳에서 만든다** — 연습과 진짜가
 /// 같은 것을 거절하는데 문장이 둘이면, 어느 쪽을 봤느냐로 말이 달라진다.
-fn not_an_idea(id: &str, i: &Issue) -> Fail {
-    Fail::coded(
-        format!("{id} 는 idea 가 아니라 {} 다 — 펼치면 까닭 없이 닫힌다", i.kind.as_str()),
-        super::code::BAD_TARGET,
-    )
+fn not_an_idea(id: &str, i: &Issue, lang: crate::i18n::Lang) -> Fail {
+    // **곁의 거절과 한 말로 선다**(리뷰) — `Fail::not_found` 와 [`check_epic`] 이 말묶음에서 오는데
+    // 이것만 박혀 있으면 같은 명령의 세 거절이 두 말로 갈린다.
+    let said = crate::i18n::fill(crate::i18n::say(lang, "refuse.not_an_idea"), &[("id", id), ("is", i.kind.as_str())]);
+    Fail::coded(said, super::code::BAD_TARGET)
 }
 
 /// `-e` 로 받은 것이 멤버를 받을 수 있는 에픽인가. **없거나 에픽이 아니면 거절한다** —
 /// `add -e` 는 없는 에픽을 알리고 넘어가지만, 여기서는 idea 가 닫히므로 틀린 자리에 펼친
 /// 것을 되돌릴 길이 도구 밖에만 남는다.
-fn check_epic(issues: &[Issue], id: &str) -> R<()> {
-    let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id))?;
+fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
+    let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id, lang))?;
     if e.kind != Kind::Epic {
+        // **한 검사의 두 갈래가 한 말로 선다**(리뷰) — 위의 `Fail::not_found` 만 말묶음에서
+        // 오면 같은 `-e` 오타가 갈래마다 다른 말로 나간다.
         return Err(Fail::coded(
-            format!("{id} 는 에픽이 아니라 {} 다 — `-e` 는 멤버를 받을 에픽을 가리킨다", e.kind.as_str()),
+            crate::i18n::fill(crate::i18n::say(lang, "refuse.not_an_epic"), &[("id", id), ("is", e.kind.as_str())]),
             super::code::BAD_TARGET,
         ));
     }
@@ -48,7 +60,7 @@ fn check_epic(issues: &[Issue], id: &str) -> R<()> {
 /// **3번을 필드로 만들지 않는다.** `idea.spawned = [에픽 id]` 를 들면 에픽을
 /// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
@@ -70,14 +82,21 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **깃발은 안 세운다.** 진짜 `promote` 는 못 읽는 줄을 그대로 들고
         // 넘어가 0 으로 끝나는데 연습만 1 로 끝나면, 그것을 거절로 읽은 쪽이
         // 도구가 기꺼이 해 줄 계획을 버린다. 어느 줄인지는 그대로 말한다.
-        super::name_load_errors(&repo.issues_path(), &load.errors);
-        let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        super::name_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
+        let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id, ctx.lang()))?;
         if !crate::report::is_idea(thought) {
-            return Err(not_an_idea(&args.id, thought));
+            return Err(not_an_idea(&args.id, thought, ctx.lang()));
         }
         if let Some(e) = into {
-            check_epic(&load.issues, e)?;
+            check_epic(&load.issues, e, ctx.lang())?;
         }
+        // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
+        // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
+        //
+        // **순서도 진짜와 같다.** 맨 앞에 두던 판은 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
+        // 냈는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
+        // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
+        crate::cmd::add::check_plan(&drafts)?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
@@ -95,6 +114,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     }
 
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
+    // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
+    // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
+    let lang = ctx.lang();
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
         // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
         // 늦게 써져도 이른 시각을 들어, 생각의 끝이 시작보다 앞선다(리뷰 moai-u5bk.3wq).
@@ -105,19 +128,18 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
         // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
         // 않을 경우를 위한 `expect` 가 필요 없다.
-        let at_idea =
-            issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id))?;
+        let at_idea = issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id, lang))?;
         let thought = &issues[at_idea];
         // 연습에서 이미 봤을 수도 있지만 다시 본다 — 그 사이에 누가 지우거나
         // 바꿨을 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
         if !crate::report::is_idea(thought) {
-            return Err(not_an_idea(&args.id, thought));
+            return Err(not_an_idea(&args.id, thought, lang));
         }
         let title = thought.title.clone();
         let was = thought.status.clone();
         // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다.
         if let Some(e) = into {
-            check_epic(issues, e)?;
+            check_epic(issues, e, lang)?;
         }
         // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
         // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.
@@ -141,24 +163,33 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         //
         // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
         // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
-        let grown: Vec<String> = made
-            .iter()
-            .filter(|i| into.is_some() || i.epic.is_none())
-            .map(|i| i.id.clone())
-            .collect();
+        let grown: Vec<String> =
+            made.iter().filter(|i| into.is_some() || i.epic.is_none()).map(|i| i.id.clone()).collect();
+        // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
+        // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
+        // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
+        // 제목은 어느 생각에서 왔는지 보이라는 가리킴이고, 원본은 그 idea 줄에 그대로 남는다.
+        //
+        // **예산은 상한이 아니라 [`TITLE_IN_NOTE`] 다**(리뷰 moai-5lwd.n5l 3번). 상한을 그대로
+        // 주면 64KB 짜리 제목이 만든 이슈마다 저널에 한 벌씩 베껴져, `moai show` 의 이력이 그
+        // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
+        let head = format!("{} 에서 펼쳤다 — ", args.id);
+        let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
+        // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
+        // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
+        let grew = format!("{head}{shown}");
         for top in &grown {
-            entries.push(JournalEntry::note(
-                top,
-                &format!("{} 에서 펼쳤다 — {title}", args.id),
-                &at,
-                &by,
-            ));
+            entries.push(JournalEntry::note(top, &grew, &at, &by));
         }
         let done = Status::new(crate::config::DONE);
         let note = match into {
             Some(e) => format!("{e} 의 멤버 {} 로 펼쳤다", grown.join(" ")),
             None => format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len()),
         };
+        // **이 노트도 같은 자로 잰다.** 계획에 줄 수 상한이 없어 id 목록만으로도 상한을 넘는데
+        // (재 봤다: 8,000줄 계획이 79KB), 그러면 위와 똑같이 펼칠 길이 통째로 막힌 채 거절문이
+        // 남지도 않을 id 를 댄다. 도구가 짓는 글에는 줄일 사람이 없다는 것이 `fit_bytes` 의 규칙이다.
+        let note = crate::model::fit_bytes(&note, crate::model::MAX_TEXT_BYTES).into_owned();
         // **이미 닫힌 것을 또 닫지 않는다.** `done → done` 을 적으면 저널에
         // 일어나지도 않은 전이가 남고, `status_since` 가 움직여 "언제 닫혔나"
         // 가 마지막 `promote` 시각으로 밀린다. 적어 온 말은 그래도 버리지
