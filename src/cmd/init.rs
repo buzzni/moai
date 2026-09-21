@@ -392,17 +392,39 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     if !matches!(driver, "off" | "current") {
         out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
     }
-    // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
+    // **어디서 쳐야 하는지를 끝에 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
     // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
     // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
     // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
     if let Some(main) = &tracker_at {
-        // **`-C` 를 붙이는 규칙은 한 자리다**(`report::Warning::cli_hint`, 리뷰 moai-h6aq.cx8) —
-        // 알림들과 아래 거절문이 같은 글자를 내야 한다.
-        let go = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
-        out.push(fill(say(lang, "init.check_worktree"), &[("go", &go)]));
+        out.extend(check_worktree(lang, main, away_root(&root, ctx.chdir).as_deref(), crate::store::here_wanted()));
     }
     Ok(out)
+}
+
+/// `--check` 의 끝줄 — **어디서 `init` 을 쳐야 하는가**, 그리고 **이 셸이 갈렸는가**.
+///
+/// **손잡이를 켠 셸에서는 줄이 둘이다**(moai-ha0f, 2026-09-21 사용자 결정). 첫 줄이 대는 자리는
+/// [`crate::store::init_belongs_at`] 이 내는 것이고 그 자는 `MOAI_HERE` 를 **안 본다**(moai-ko4y) —
+/// 나중의 다른 부름이 어디서 서느냐에 답하는 자라, 그 부름의 셸이 손잡이를 켤지는 여기서 알 수 없다.
+/// 그 결정을 그대로 두면 `MOAI_HERE=1` 인 셸에서 이 줄이 "여기 안 선다" 를 말하는데 **같은 셸의**
+/// `moai init` 은 여기 심고 0 으로 끝난다 — 한 명령의 답이 둘로 갈린다. 둘째 줄이 그 갈림을 메운다:
+/// 첫 줄은 손잡이 없는 셸에 대한 답으로 그대로 맞고, 둘째 줄이 이 셸에 대한 답을 댄다.
+///
+/// **대는 명령에 접두어를 박는다.** 손잡이는 **이 프로세스 하나**에 서므로, 접두어 없는 줄을 베껴
+/// 딴 셸에 붙여 넣으면 그 줄은 [`run`] 의 거절로 1 로 끝난다 — moai-ko4y 가 표면을 물려받게 두지
+/// 않은 까닭이 그것이고, 접두어를 박은 줄은 어느 셸에서도 같은 일을 한다.
+///
+/// **`-C` 를 붙이는 규칙은 한 자리다**([`crate::report::Warning::cli_hint`], 리뷰 moai-h6aq.cx8) —
+/// 알림들과 [`run`] 의 거절문이 같은 글자를 내야 한다. 여기 두 줄도 그 자를 거친다.
+fn check_worktree(lang: crate::i18n::Lang, main: &Path, away: Option<&str>, here: bool) -> Vec<String> {
+    let there = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
+    let mut out = vec![fill(say(lang, "init.check_worktree"), &[("go", &there)])];
+    if here {
+        let go = format!("MOAI_HERE=1 {}", crate::report::Warning::cli_hint(away, "init"));
+        out.push(fill(say(lang, "init.check_worktree_here"), &[("go", &go)]));
+    }
+    out
 }
 
 /// `moai init --print`. **아무것도 안 쓰고 블록만 찍는다.**
@@ -1134,6 +1156,35 @@ mod tests {
     /// 답해 알림이 영영 안 선다. 글로 패턴을 푸는 규칙을 여기 또 쓰면 git 과 갈리고 갈리는 쪽은
     /// 늘 이쪽이라(`declared` 가 `check-attr` 에게 묻는 까닭과 같다), 그 갈래를 실제로 재는 자는
     /// 임시 저장소에 이 글을 깔고 `status` 를 부르는 `tests/cli.rs` 쪽이다.
+    /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에
+    /// 대한 답이라 그대로 서고, 둘째 줄이 **이 셸**의 답을 댄다 — 한 줄만 두던 판은 `MOAI_HERE=1`
+    /// 인 셸에서 "여기 안 선다, 주 체크아웃에서 쳐라" 를 냈는데 같은 셸의 `moai init` 은 여기 심고
+    /// 0 으로 끝났다.
+    ///
+    /// **둘째 줄에 접두어가 박혀 있는가를 함께 잰다.** 손잡이는 이 프로세스 하나에 서므로 접두어
+    /// 없는 줄은 베껴 딴 셸에 붙여 넣으면 1 로 끝난다 — 표면이 손잡이를 안 물려받는
+    /// (moai-ko4y) 값을 이 접두어가 갚는다.
+    ///
+    /// **환경을 안 만진다**(`store::tests` 의 같은 자리 글). 단위 시험은 한 프로세스의 스레드로
+    /// 나란히 돌아 `set_var` 로 켠 값을 옆 시험이 본다 — 갈림을 인자로 받는 까닭이 그것이고,
+    /// 손잡이를 실제로 읽는 자리([`crate::store::here_wanted`])는 부르는 쪽 한 줄이다.
+    #[test]
+    fn a_split_shell_gets_a_second_line() {
+        let main = Path::new("/main");
+        let plain = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), false);
+        assert_eq!(plain.len(), 1, "손잡이 없는 셸에 줄이 둘 섰다 — {plain:?}");
+        assert!(plain[0].contains("moai -C /main init"), "주 체크아웃을 안 댔다 — {}", plain[0]);
+
+        let split = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), true);
+        assert_eq!(split.len(), 2, "갈린 셸에 둘째 줄이 없다 — {split:?}");
+        assert_eq!(split[0], plain[0], "첫 줄이 손잡이를 물려받았다 — {}", split[0]);
+        assert!(split[1].contains("MOAI_HERE=1 moai -C /wt init"), "빠져나가는 길을 안 댔다 — {}", split[1]);
+
+        // `-C` 없이 부른 판은 그 자리도 없다 — 붙는 규칙은 `cli_hint` 하나가 쥔다.
+        let here = check_worktree(crate::i18n::Lang::En, main, None, true);
+        assert!(here[1].contains("MOAI_HERE=1 moai init"), "맨 명령을 안 댔다 — {}", here[1]);
+    }
+
     #[test]
     fn the_declared_path_is_the_one_init_writes() {
         let path = crate::cmd::merge_driver::SNAPSHOT;

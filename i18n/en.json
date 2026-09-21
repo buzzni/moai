@@ -520,6 +520,7 @@
   "init.rules_missing": "{name}: {n} rules missing ({rules}) — `moai init`",
   "init.check_driver": "merge driver: {state} — `moai init` plants it here; in a clone it is `moai merge-driver --install`",
   "init.check_worktree": "This is a linked worktree — `moai init` does not stand here. Run it in the main checkout: `{go}`",
+  "init.check_worktree_here": "this shell has MOAI_HERE=1, so `moai init` plants one here instead: `{go}`",
   "init.already": "Already planted. The prefix is `{prefix}` — only the dotfiles are brought back in line",
   "init.made": "Made .moai/. The prefix is `{prefix}`",
   "init.columns": "  columns: {columns}",
