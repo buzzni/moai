@@ -95,7 +95,7 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 }
 
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     if let Some(from) = &args.from {
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
         // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른

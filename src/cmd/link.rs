@@ -8,7 +8,6 @@ use super::{Ctx, Fail, R};
 use crate::cli::LinkArgs;
 use crate::model::{self, Issue};
 use crate::report::creates_cycle;
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
@@ -22,7 +21,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             &[("id", dup)],
         )));
     }
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     let at = model::now();
 
     // `(대상, 막을지 없앨지)`. 어느 쪽에서 왔는지를 갖고 있어야, 다시

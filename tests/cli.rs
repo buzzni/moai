@@ -669,7 +669,180 @@ fn init_creates_exactly_three_files() {
     assert!(!attrs.contains("issues.jsonl   text eol=lf merge=union"), "{attrs}");
     // **까닭도 같이 심는다.** 이 주석이 왜 `issues.jsonl` 에 union 을 걸면 안 되는지 적은 유일한
     // 자리다 — 빼면 새 저장소가 그 까닭 없이 서고, 다음 사람이 union 을 다시 건다.
-    assert!(attrs.contains("# 스냅샷에는 merge=union 을 쓰지 않는다"), "규칙만 심고 까닭을 뺐다\n{attrs}");
+    //
+    // **심는 글은 영어 하나다**(moai-9vwy, 2026-09-21 사용자 결정) — 화면 말을 안 따른다.
+    // 저장소에 커밋되어 남는 파일이라 함께 쓰는 사람마다 달라지면 안 된다. 이 시험은
+    // `MOAI_LANG=ko` 로 도는데(`isolated`), 그 아래에서도 영어여야 그것이 지켜진 것이다.
+    assert!(attrs.contains("# The snapshot does not use merge=union"), "규칙만 심고 까닭을 뺐다\n{attrs}");
+    assert!(!hangul(&attrs), "심는 파일에 화면 말이 샜다\n{attrs}");
+    let config = std::fs::read_to_string(s.path().join(".moai/config.toml")).unwrap();
+    assert!(!hangul(&config), "심는 설정에 화면 말이 샜다\n{config}");
+}
+
+/// **`moai init` 한 덩이가 한 말로 선다**(moai-9vwy). `README` 의 Quick Start 가 깔고 나서
+/// 가장 먼저 치라고 가르치는 명령이라, 여기서 말이 갈리면 영어로 고른 사람의 첫인상이
+/// 통째로 한국어다. 재는 자는 `the_mv_screen_stands_in_one_language` 와 같다 — 글자를
+/// 하나하나 견주지 않고 **한글이 한 자라도 남았는가**만 본다.
+///
+/// **심는 파일은 여기서 안 잰다.** `.gitattributes`·`config.toml`·`AGENTS.md` 블록은 화면이
+/// 아니라 저장소의 내용이고 영어 하나로 선다 — 그쪽은 `init_creates_exactly_three_files` 가
+/// 잰다. 여기서 재는 것은 **심으면서 사람에게 대는 말**이다.
+///
+/// **아래 목록이 이 자의 전부다**(리뷰) — `init` 이 낼 수 있는 모든 화면이 아니라 여기 적은
+/// 열한 판이다. 빠진 것은 접두어 모양 검사(`config::check_prefix` — `moai init My_Company`)와
+/// 깨진 `config.toml` 의 파싱 탈이고, 그 열넷은 idea `moai-gbk3` 이 든다. 그쪽을 옮기는 날
+/// 이 목록에 그 판을 더한다.
+///
+/// 한국어로도 함께 돌린다: 영어만 재면 `ko` 표가 빈 키도 파랗게 지나간다. **다만 이 자는
+/// 화면 한 덩이에 한글이 한 자라도 있으면 지나간다** — 새 키 하나가 `ko` 표에서 빠져도 같은
+/// 화면의 다른 줄이 한국어면 안 붉어진다(리뷰가 실제로 다섯을 지워 재 봤다). 키 단위로 재려면
+/// 말묶음 쪽에 자를 세워야 하고, 그것은 `the_mv_screen_stands_in_one_language` 부터 넷이
+/// 함께 받을 일이다.
+#[test]
+fn the_init_screen_stands_in_one_language() {
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = Scratch::new(name);
+        let run = |dir: &Path, args: &[&str]| {
+            let mut cmd = isolated(BIN);
+            cmd.args(args).current_dir(dir).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+            with_lang(&mut cmd, lang);
+            let out = cmd.output().expect("moai 를 실행하지 못했다");
+            format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+        };
+        let home = s.path().join("proj");
+        std::fs::create_dir_all(&home).unwrap();
+        // 차례가 곧 상태다 — 앞의 판이 뒤의 판을 만든다.
+        let mut said: Vec<(String, String)> = vec![
+            ("init".into(), run(&home, &["init", "argos"])),
+            ("init again".into(), run(&home, &["init"])),
+            ("init --check".into(), run(&home, &["init", "--check"])),
+            // 접두어를 바꾸려 든 판.
+            ("init other-prefix".into(), run(&home, &["init", "other"])),
+        ];
+        // 새 자리에 너무 긴 접두어를 준 판.
+        let long = s.path().join("my-company-backend-service");
+        std::fs::create_dir_all(&long).unwrap();
+        said.push(("init <long>".into(), run(&long, &["init", "mycompanybackend"])));
+        // 이름에서 만든 접두어를 줄인 판.
+        said.push(("init <shortened>".into(), run(&long, &["init"])));
+        // 위에도 트래커가 있는 하위 디렉터리 — 세우고 나서 알린다.
+        let under = home.join("apps/web");
+        std::fs::create_dir_all(&under).unwrap();
+        said.push(("init <under>".into(), run(&under, &["init", "web"])));
+        // 못 읽는 AGENTS.md — 덮어쓰지 않고 멈춘다.
+        let bad = s.path().join("badagents");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("AGENTS.md"), [0x66, 0x66, 0xff, 0xfe]).unwrap();
+        said.push(("init <bad AGENTS.md>".into(), run(&bad, &["init", "bad"])));
+        // 딸린 워크트리 — 거절문 넉 줄.
+        let wtmain = s.path().join("wtmain");
+        std::fs::create_dir_all(&wtmain).unwrap();
+        git(&wtmain, &["init", "-q"]);
+        run(&wtmain, &["init", "argoswt"]);
+        git(&wtmain, &["add", "-A"]);
+        git(&wtmain, &["commit", "-q", "-m", "init"]);
+        git(&wtmain, &["worktree", "add", "-q", ".claude/worktrees/wt", "-b", "worktree-wt"]);
+        let deep = wtmain.join(".claude/worktrees/wt/src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        said.push(("init <worktree>".into(), run(&deep, &["init", "argoswt"])));
+        said.push(("init --check <worktree>".into(), run(&deep, &["init", "--check"])));
+        said
+    };
+
+    for (args, said) in screens("initlangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    // 한국어를 고른 사람은 같은 자리에서 한국어를 본다 — 키가 `ko` 표에도 서 있다는 뜻이다.
+    for (args, said) in screens("initlangko", Some("ko")) {
+        assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
+    }
+}
+
+/// **`.moai` 밖에서 쓰는 명령의 거절이 한 말로 선다**(moai-5j49). 등록한 것 없이 아무 명령이나
+/// 치면 서는 줄이라 받은 사람이 가장 먼저 읽는다 — 그런데 읽을 수 있어야 할 쪽(`moai init` 을
+/// 치라는 안내)이 저장 계층에 박혀 있어 영어로 고른 사람에게 한국어로 섰다.
+///
+/// **두 자리가 같은 키를 쓴다.** 등록한 것도 없는 판(`nothing_registered`)은 그 줄 밑에 한 줄을
+/// 더 얹을 뿐이라, 앞줄을 달리 말하면 한 덩이가 두 글로 선다 — 그 판을 줄 수로 함께 잰다.
+///
+/// **맨 `moai` 도 여기서 잰다**(리뷰 moai-hom6.qd9 4번). 인자 없이 부른 판은 `cmd::opening` 이
+/// clap 의 도움말 뒤에 제 두 줄을 붙이는 딴 길이라 `open_repo` 를 안 지난다 — 그 두 줄이 박힌
+/// 한국어로 남아 있었고, 이 에픽이 내건 "첫 화면" 이 바로 그 판이라 함께 옮겼다. 0 으로 끝나는
+/// 판이라 위의 거절들과 따로 잰다.
+#[test]
+fn the_first_screen_outside_a_repo_stands_in_one_language() {
+    let s = Scratch::new("norepo-lang");
+    let out = dir_in(&s, "out");
+    let said = |args: &[&str], lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(&out).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!o.status.success(), "{args:?} 가 `.moai` 밖에서 그냥 섰다");
+        String::from_utf8_lossy(&o.stderr).into_owned()
+    };
+    // 쓰는 명령은 어느 프로젝트인지 몰라 멈춘다 — `cmd::open_repo` 가 홀로 쓰는 자리.
+    for args in [vec!["add", "a title"], vec!["mv", "argos-0001", "done"], vec!["show", "argos-0001"]] {
+        let en = said(&args, None);
+        assert!(en.contains("Not a moai repository"), "{args:?}\n{en}");
+        assert!(!hangul(&en), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{en}");
+        assert!(hangul(&said(&args, Some("ko"))), "한국어를 골랐는데 영어만 섰다 — {args:?}");
+    }
+    // 등록한 것도 없는 판 — 같은 줄 밑에 한 줄이 더 선다.
+    let en = said(&["ready"], None);
+    assert!(en.contains("Not a moai repository"), "{en}");
+    assert!(!hangul(&en), "한 덩이가 두 말로 선다\n{en}");
+    assert_eq!(en.lines().count(), 2, "등록 없음 줄이 빠졌거나 늘었다\n{en}");
+
+    // 맨 `moai` — 도움말 뒤에 두 줄. 0 으로 끝나고 stdout 에 선다.
+    let bare = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.current_dir(&out).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "맨 moai 가 `.moai` 밖에서 멈췄다\n{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let en = bare(None);
+    assert!(en.contains("moai init"), "맨 moai 가 시작할 길을 안 댔다\n{en}");
+    assert!(!hangul(&en), "맨 moai 의 첫 화면에 박힌 한국어가 남았다\n{en}");
+    assert!(hangul(&bare(Some("ko"))), "한국어를 골랐는데 맨 moai 가 영어만 냈다");
+}
+
+/// **옛 한국어 주석을 든 저장소의 첫 `moai init` 이 한 일을 한 대로 말한다**(리뷰 moai-hom6.qd9
+/// 3번). 심는 주석을 영어로 바꾼 뒤(moai-9vwy) 이미 심은 저장소는 그 주석을 덧받는데 — 그것은
+/// 사용자가 알고 받은 값이다 — 그 판을 "병합 규칙을 넣었다" 로 불렀다. 규칙은 그대로였으니
+/// 거짓 줄이다. 한 번씩 모두가 받는 줄이라 시험으로 못박는다.
+///
+/// **규칙이 정말 빠진 판은 여전히 규칙이라 부른다** — 두 갈래를 한자리에서 잰다.
+#[test]
+fn an_old_planting_hears_that_only_the_comments_changed() {
+    let s = init("oldcomments");
+    let attrs = s.path().join(".gitattributes");
+    // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
+    std::fs::write(
+        &attrs,
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/journal.jsonl  text eol=lf merge=union\n",
+    )
+    .unwrap();
+    let said = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["init"]).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let out = said(None);
+    assert!(out.contains("brought the comments in .gitattributes up to date"), "주석만 맞춘 것을 안 댔다\n{out}");
+    assert!(!out.contains("put the merge rules"), "규칙은 그대로인데 규칙을 넣었다고 한다\n{out}");
+    assert!(!out.contains("everything is already in line"), "파일을 고치고도 다 맞아 있다고 한다\n{out}");
+
+    // 규칙이 정말 빠진 판 — 그때는 규칙을 넣었다고 한다.
+    std::fs::write(&attrs, "# moai — issue tracker\n").unwrap();
+    let out = said(None);
+    assert!(out.contains("put the merge rules into .gitattributes"), "빠진 규칙을 넣고도 안 댔다\n{out}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새

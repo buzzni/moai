@@ -26,8 +26,8 @@ struct Place {
     files: Vec<(PathBuf, String)>,
 }
 
-fn place() -> R<Place> {
-    let repo = crate::store::Repo::discover()?;
+fn place(ctx: &Ctx) -> R<Place> {
+    let repo = super::open_repo(ctx)?;
     // **선 체크아웃에 심는다**(리뷰 moai-71ht.jlh) — 트래커만 루트로 옮겨 간다(`Repo::here`).
     // `repo.root` 로 심던 판은 워크트리에서 친 `skill install` 이 루트의 `.claude/` 를 고쳐,
     // 이 가지에서 고친 훅은 이 가지에서 한 번도 안 돌고 남의 체크아웃만 더럽혔다.
@@ -47,7 +47,7 @@ fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
 }
 
 pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files, .. } = place()?;
+    let Place { root, dir, market, exe, files, .. } = place(ctx)?;
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -196,7 +196,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files } = place()?;
+    let Place { root, dir, market, prefix, exe, on_path, files } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !same_dir(other, &dir));
@@ -342,7 +342,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
 
 /// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.**
 pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, .. } = place()?;
+    let Place { root, dir, market, .. } = place(ctx)?;
     let clash = clash_of(&market, &dir);
     let target = format!("moai@{market}");
     let installs = installs_here(&target, &root);

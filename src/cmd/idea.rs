@@ -7,7 +7,6 @@ use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
 use crate::draft::Shape;
 use crate::model::{self, Issue, JournalEntry, Kind, Status};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 /// 펼침 노트에 담는 제목 한 토막의 예산(리뷰 moai-5lwd.n5l 3번).
@@ -61,7 +60,7 @@ fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
 /// **3번을 필드로 만들지 않는다.** `idea.spawned = [에픽 id]` 를 들면 에픽을
 /// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };

@@ -7,7 +7,6 @@
 use super::{Ctx, Fail, R};
 use crate::cli::MvArgs;
 use crate::model::{self, Issue, JournalEntry, Status};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 #[derive(Default)]
@@ -34,7 +33,7 @@ struct Moved {
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     if args.args.len() < 2 {
         return Err(Fail::coded(
             // **두 줄은 키 둘이다.** 말묶음의 값은 한 줄이라(`i18n` 의

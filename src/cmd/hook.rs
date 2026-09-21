@@ -125,9 +125,11 @@ fn decide(
     // (사람이 그것을 본다), 훅은 이 자리의 트래커로 선다. 읽는 것은 갈라진 스냅샷이지만 아무
     // 말도 안 하는 것보다 낫다.
     let cwd = std::env::current_dir().ok()?;
-    let repo = match Repo::discover() {
-        Ok(repo) => repo,
-        Err(_) => Repo::find_here(&cwd).ok()??,
+    // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
+    // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
+    let repo = match Repo::find() {
+        Ok(Some(repo)) => repo,
+        Ok(None) | Err(_) => Repo::find_here(&cwd).ok()??,
     };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서

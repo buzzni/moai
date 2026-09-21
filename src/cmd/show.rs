@@ -85,7 +85,7 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 }
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     let crate::worktree::Gathered { load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);

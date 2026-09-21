@@ -6,11 +6,10 @@
 use super::{Ctx, R};
 use crate::cli::RmArgs;
 use crate::model::{self, Issue, JournalEntry};
-use crate::store::Repo;
 use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
-    let repo = Repo::discover()?;
+    let repo = super::open_repo(ctx)?;
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
 
