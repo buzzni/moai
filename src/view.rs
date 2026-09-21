@@ -2363,6 +2363,9 @@ pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> Strin
         }
         SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
         SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
+        // 막힌 id 가 없으면 파일을 다 못 읽은 것이다 — 그 까닭은 같은 판의 앞줄이 댄다.
+        SheetTrouble::SpoolKept { at, held } if held.is_empty() => (at, say(lang, "sheet.spool_kept").to_string()),
+        SheetTrouble::SpoolKept { at, held } => (at, fill(say(lang, "sheet.spool_held"), &[("ids", &held.join(", "))])),
     };
     format!("{}: {said}", at.display())
 }
@@ -3356,6 +3359,11 @@ mod tests {
                 (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: stamp.clone() }), "read.argos-0002"),
                 (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: table.clone() }), "[read]"),
                 (sheet_trouble(lang, &SheetTrouble::SpoolLeft { at: at.clone(), said: "EROFS".into() }), "EROFS"),
+                (sheet_trouble(lang, &SheetTrouble::SpoolKept { at: at.clone(), held: Vec::new() }), ""),
+                (
+                    sheet_trouble(lang, &SheetTrouble::SpoolKept { at: at.clone(), held: vec!["argos-0002".into()] }),
+                    "argos-0002",
+                ),
                 (sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() }), "TOML"),
                 (sheet_refusal(lang, &at, &SheetRefusal::NotOurs { root: root.clone() }), "/w/proj"),
                 (sheet_refusal(lang, &at, &SheetRefusal::Hand(stamp.clone())), "argos-0002"),
