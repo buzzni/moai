@@ -2041,6 +2041,45 @@ mod tests {
         assert_eq!(seen(&a).as_deref(), Some("2026-09-14T00:00:00Z"), "펼쳐 둔 프로젝트가 바뀐 옛 표를 안 들었다");
     }
 
+    /// **펼쳐 둔 프로젝트의 읽음도 걸음이 잰다**(moai-c571). `Site::read_stamp` 은 프로젝트마다 서는데
+    /// 재는 자가 지금 선 것 하나였다 — 옆 터미널의 `moai -C <그 프로젝트> read --all` 은 저쪽
+    /// `issues.jsonl` 을 안 건드리니 스냅샷 표식에도 안 걸려, 그 줄은 [`REREAD_EVERY`](60초)가 지나야
+    /// 읽음을 보았다.
+    #[test]
+    fn a_read_beside_reaches_an_open_project_without_the_clock() {
+        let s = Scratch::fenced("layer-read-step");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+
+        // 옆 터미널이 그 프로젝트에 `moai read` 를 돌렸다 — 이 화면의 스냅샷은 그대로다.
+        let mark: std::collections::BTreeMap<String, String> =
+            [("argos-0001".to_string(), "2026-09-14T00:00:00Z".to_string())].into_iter().collect();
+        crate::read_marks::update(&cfg, &one, || crate::i18n::Lang::Ko, |sh| sh.mark(&mark)).unwrap();
+
+        // **시계는 안 돌린다** — 걸음 하나로 닿아야 한다.
+        a.follow();
+        assert_eq!(
+            seen(&a).as_deref(),
+            Some("2026-09-14T00:00:00Z"),
+            "펼친 프로젝트의 읽음을 걸음이 안 쟀다 — 시계를 기다리는 자리로 돌아갔다"
+        );
+    }
+
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
     /// 비우고 [`App::load_read`] 가 파일에서 다시 드는데, 그 파일을 못 읽으면(옛 `sudo moai read` 가
     /// 남긴 root 의 파일) 들일 것이 없어 **내게 온 줄이 모두** [NEW] 로 선다 — 그 화면의 `SPC m a`

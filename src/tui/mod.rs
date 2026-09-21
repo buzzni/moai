@@ -586,8 +586,11 @@ pub struct Site {
     /// [NEW] 를 내렸다. 읽음 파일이 프로젝트마다 갈렸으니([`crate::read_marks`]) 화면의 표도 여기 산다.
     pub seen: std::collections::BTreeMap<String, String>,
     /// 그 읽음 파일의 표식. 걸음이 이것을 재, 옆 터미널의 `moai read` 가 적은 줄이 이 화면에 닿는다
-    /// ([`App::follow_config`], moai-j038.vna). 한때 설정 파일의 표식이 그 길이었는데, 읽음이 설정 밖으로
+    /// ([`App::follow_read`], moai-j038.vna). 한때 설정 파일의 표식이 그 길이었는데, 읽음이 설정 밖으로
     /// 나가면서 설정은 더 안 바뀐다 — 그 길을 여기로 옮겼다.
+    ///
+    /// **재는 것은 펼친 프로젝트마다다**(moai-c571). 이 필드는 프로젝트마다 서는데 한때 재는 자가 지금
+    /// 선 것 하나여서, 층의 줄은 [`layer::REREAD_EVERY`] 가 지나야 옆 터미널의 읽음을 보았다.
     ///
     /// **없는 것과 못 찾은 것을 가른다**(`Option<…>`, [`App::config_stamp`] 와 같은 자) — 아직 안 든
     /// 프로젝트는 `None` 이고, 읽음 파일이 없는 것은 `Some(…)` 안의 `at` 이 `None` 이다. 하나로 들면
@@ -2414,20 +2417,46 @@ impl App {
     ///
     /// **걸음마다 도는 자리다**(리뷰) — 목록을 굴리는 동안 빠른 걸음으로 돌므로, 빌려 쓰고 `stat` 은
     /// 한 번만 한다([`App::follow_config`] 와 같은 모양).
+    /// **펼쳐 둔 프로젝트도 함께 잰다**(moai-c571). [`Site::read_stamp`] 은 프로젝트마다 서는데 재는
+    /// 자가 지금 선 것 하나였다 — 층의 줄은 [`layer::REREAD_EVERY`](60초)가 지나야 다시 읽혀,
+    /// 옆 터미널의 `moai -C <다른 프로젝트> read --all` 이 이 화면에 닿는 데 1분이 걸렸다.
+    /// 그 명령은 저쪽 `issues.jsonl` 을 안 건드리니 스냅샷 표식으로도 안 잡힌다.
+    ///
+    /// 값은 **펼친** 프로젝트마다 `stat` 한둘이다([`ReadStamp::of`]) — 접힌 줄은 들고 있는 표가 없어
+    /// 잴 것도 없다. 걸음마다 이미 도는 스냅샷 표식과 같은 자리이고, 같은 걸음에 읽는 파일 수가 그만큼
+    /// 는다. 한 번 읽는 값이 줄 수만큼인 것에 견주면 작다.
     fn follow_read(&mut self) {
-        let (Some(config), Some(repo)) = (self.user_config.as_deref(), self.site.repo.as_ref()) else { return };
-        // **재는 자리는 [`ReadStamp::of`] 가 정한다**(moai-65as) — 여기서 파일을 따로 고르면
-        // [`App::read_marks_of`] 와 갈려, 걸음이 제가 이미 읽은 것을 다시 읽거나 영영 안 읽는다.
-        // 쓰는 자리 하나를 재던 판이 그렇게 갈렸다.
-        let now = ReadStamp::of(&crate::read_marks::place_of(config, &repo.root));
-        // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
-        // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
-        // 재는 자는 [`layer::owed`] 하나다 — 여기와 저기에 저마다 적으면 갈래를 더한 날 한쪽만 고쳐진다.
-        let owed = layer::owed(&self.site.read_tried);
-        if self.site.read_stamp == Some(now) && !owed {
+        self.follow_read_in(Seat::Here);
+        let opened: Vec<usize> = match &self.layer {
+            Some(l) => l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| n).collect(),
+            None => return,
+        };
+        for at in opened {
+            self.follow_read_in(Seat::Place(at));
+        }
+    }
+
+    /// 그 프로젝트의 읽음 파일이 바뀌었으면 다시 든다 — [`App::follow_read`] 의 한 자리.
+    fn follow_read_in(&mut self, seat: Seat) {
+        let stale = {
+            let (Some(config), Some(site)) = (self.user_config.as_deref(), self.site_of_seat(seat)) else { return };
+            let Some(repo) = site.repo.as_ref() else { return };
+            // **재는 자리는 [`ReadStamp::of`] 가 정한다**(moai-65as) — 여기서 파일을 따로 고르면
+            // [`App::read_marks_of`] 와 갈려, 걸음이 제가 이미 읽은 것을 다시 읽거나 영영 안 읽는다.
+            // 쓰는 자리 하나를 재던 판이 그렇게 갈렸다.
+            let now = ReadStamp::of(&crate::read_marks::place_of(config, &repo.root));
+            // **빚진 읽기는 표식이 그대로여도 한다**([`App::follow_config`] 와 한 자, moai-po6v) — 권한을
+            // 되돌리는 `chmod` 은 표식을 안 바꿔, 표식만 보면 그 한 번이 세션 내내 [NEW] 를 세워 둔다.
+            // 재는 자는 [`layer::owed`] 하나다 — 여기와 저기에 저마다 적으면 갈래를 더한 날 한쪽만 고쳐진다.
+            site.read_stamp != Some(now) || layer::owed(&site.read_tried)
+        };
+        if !stale {
             return;
         }
-        self.load_read();
+        match seat {
+            Seat::Here => self.load_read(),
+            Seat::Place(at) => self.load_read_in(at),
+        }
     }
 
     /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
