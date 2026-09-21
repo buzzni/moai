@@ -6617,3 +6617,5 @@
 {"ts":"2026-09-21T00:56:41Z","id":"moai-9vwy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 의 안내문 예순넷을 영어로 — 받은 사람이 가장 먼저 치는 명령"}
 {"ts":"2026-09-21T00:56:51Z","id":"moai-a7qo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-21: init 64 줄을 멤버 moai-9vwy 로 갈라 v0.1.0 에 넣었다. 이 idea 에는 나머지 109 줄이 남는다 — skill 53 · merge_driver 22 · tui 20 · add 14 · mod 12 · idea 9 · show 4 · link 3 · rm 2 · note 2 · edit 1. 0.1.1 에서 본다."}
 {"ts":"2026-09-21T00:56:51Z","id":"moai-rtji","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-21 사용자 결정: 0.1.1 로 미룬다. 읽음 표의 글 열은 사람이 매일 보는 자리가 아니고, v0.1.0 은 받은 사람이 밟는 차례(.moai 밖 첫 화면 → moai init)까지를 영어로 세우는 데서 끊는다."}
+{"ts":"2026-09-21T00:58:07Z","id":"moai-9vwy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T00:58:07Z","id":"moai-5j49","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
