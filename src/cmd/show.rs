@@ -235,11 +235,23 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
         // `show <id> --json` 을 500번 부르면 저널 전체를 500번 읽는다 — 여기서는 뿌리마다
         // 한 번 읽어 id 로 가른다.
-        let work = work_by_id(&repo, &origin, &shown)?;
+        let work = work_by_id(&repo, &origin, &shown);
+        // **못 읽은 저널은 저널을 읽은 **뒤**에 묻는다** — `work_by_id` 가 그 읽기다. 뿌리마다
+        // 한 번 접어 두고 줄마다 그 줄의 뿌리 것을 빌린다(`home`): 줄 수만큼 글을 다시 짓지 않고,
+        // 겹쳐 온 줄은 제 워크트리의 실패만 달고 선다.
+        let unread = crate::store::journal_unread();
+        let errors: std::collections::BTreeMap<&std::path::Path, Vec<super::JournalError>> = shown
+            .iter()
+            .map(|i| home(&repo, &origin, &i.id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|root| (root, super::journal_errors(ctx.lang(), &unread, Some(root))))
+            .collect();
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
                 row: super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin),
+                journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
                 // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
                 // 옛 `work` 가 그 자리에서 거짓을 싣는다.
@@ -297,6 +309,10 @@ struct Listed<'a> {
     #[serde(flatten)]
     row: super::Row<'a>,
     work: &'a [model::Work],
+    /// 이 줄의 이력이 **덜 왔다**(moai-f2lc). 그 줄의 뿌리에서 못 읽은 저널이 있을 때만 선다 —
+    /// 없는 것이 곧 "이 줄의 이력은 다 왔다" 라, `commits_error` 와 같은 약속이다.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    journal_error: &'a [super::JournalError],
 }
 
 /// 줄이 온 워크트리의 moai 뿌리 — **이력(저널)을 거기서 읽는다**(`Origin::root`). 스냅샷은
@@ -334,18 +350,18 @@ fn work_by_id(
     repo: &Repo,
     origin: &crate::worktree::Origin,
     shown: &[Issue],
-) -> R<std::collections::BTreeMap<String, Vec<model::Work>>> {
+) -> std::collections::BTreeMap<String, Vec<model::Work>> {
     let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
     for i in shown {
         by_root.entry(home(repo, origin, &i.id)).or_default().insert(i.id.as_str());
     }
     let mut out = std::collections::BTreeMap::new();
     for (root, ids) in by_root {
-        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work)? {
+        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work) {
             out.insert(id, model::work_of(&journal));
         }
     }
-    Ok(out)
+    out
 }
 
 /// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.
@@ -404,7 +420,8 @@ fn one(
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
-    let journal = at_home(repo, home(repo, origin, &issue.id)).journal_of(&issue.id)?;
+    let journal_root = home(repo, origin, &issue.id);
+    let journal = at_home(repo, journal_root).journal_of(&issue.id);
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
@@ -506,6 +523,20 @@ fn one(
         if let Some(why) = &commits_error {
             extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
+        // **이력이 덜 왔으면 그렇다고 말한다**(moai-f2lc). 여기까지 오면 저널은 이미 읽혔다 —
+        // 못 읽은 파일은 `journal` 에서 말없이 빠져 있고, 그 침묵을 가르는 자가 이 키다.
+        //
+        // **종료 코드만으로는 못 가른다.** `cmd::PARTIAL` 은 못 읽는 스냅샷 줄과 진 `mv` 겨룸까지
+        // 함께 쓰는 한 깃발이라(moai-6924 가 그것 하나로 버티던 자리다), 받는 쪽은 "이 판이 온전치
+        // 않다" 까지만 안다. 어느 이슈의 **이력이** 덜 왔는지는 이 키만 말한다.
+        //
+        // **키가 없으면 다 왔다.** `commits_error` 와 같은 약속이고, `commits` 와 달리 빈 배열을
+        // 안 내는 까닭은 `journal` 이 이미 늘 서기 때문이다 — 빈 `journal` 옆의 이 키가 있고 없고가
+        // 곧 "이력이 없다" 와 "못 읽었다" 의 가름이다.
+        let unread = super::journal_errors(ctx.lang(), &crate::store::journal_unread(), Some(journal_root));
+        if !unread.is_empty() {
+            extra.push(("journal_error", serde_json::to_string(&unread).map_err(|e| Fail::new(e.to_string()))?));
+        }
         // 이 일을 한 AI — 노트의 `model:` 줄을 읽은 값(moai-8f2g). 저장하지 않는다.
         //
         // **키는 늘 선다**(2026-09-18 사용자 결정). 한 이슈에 여러 세션·모델이 줄을 남기니 배열이고,
@@ -540,12 +571,17 @@ fn one(
             Kind::Milestone => &soil.milestone,
             _ => &soil.epic,
         };
+        // **미룬 수는 보드와 같은 자에서 온다**([`report::Stand::deferred`], moai-zxwj) — 분모는
+        // 미룬 멤버를 그대로 세므로, 그 수가 안 줄어드는 까닭을 여기서도 댄다. 따로 세면 같은
+        // 묶음을 보드와 상세가 다른 수로 말한다.
+        let deferred = soil.stands(all, &repo.config).get(issue.id.as_str()).map(|s| s.deferred);
         let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
-            .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
+            .find(|r| r.id.as_deref() == Some(issue.id.as_str()))
+            .map(|r| report::Roll { deferred, ..r });
         if let Some(r) = &roll {
             out.push(format!(
-                "  {}   {}/{}  {}{}",
+                "  {}   {}/{}  {}{}{}",
                 view::members_label(ctx.lang()),
                 r.done,
                 r.total,
@@ -553,7 +589,8 @@ fn one(
                 match r.percent {
                     None => String::new(),
                     Some(p) => format!("  {p}%"),
-                }
+                },
+                view::set_aside(r.deferred, ctx.lang()),
             ));
         }
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
@@ -603,7 +640,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let listed = Listed { row: super::super::Row::of(&i, None), work: &[] };
+        let listed = Listed { row: super::super::Row::of(&i, None), work: &[], journal_error: &[] };
         let added = super::super::keys_beyond(&i, &listed);
         assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
         for k in &added {

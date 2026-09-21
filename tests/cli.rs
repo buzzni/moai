@@ -12595,8 +12595,9 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
 ///
 /// **여기가 없으면 `main` 의 `unread_journals()` 를 지워도 아무것도 안 붉어진다** — 단위 시험은
 /// `tell_unread` 를 곧바로 부르므로 그 줄이 `main` 에 서 있는지를, 그러니까 사람이 실제로 보는
-/// 종료 코드를 재지 않는다. 기계가 "이력이 없다" 와 "못 읽었다" 를 가르는 자가 오늘은 그 코드
-/// 하나뿐이라(moai-f2lc 전까지) 그 줄이 조용히 빠지는 것은 반쪽이 아니라 조용한 손실이다.
+/// 종료 코드를 재지 않는다. 어느 줄의 이력이 덜 왔는지는 `show --json` 의 `journal_error` 가
+/// 대지만(moai-f2lc), 저널을 안 읽는 명령이 "이 판이 온전치 않다" 를 말하는 자는 그 코드
+/// 하나뿐이라, 그 줄이 조용히 빠지는 것은 반쪽이 아니라 조용한 손실이다.
 #[cfg(unix)]
 #[test]
 fn an_unreadable_journal_is_named_and_only_my_own_fails_the_run() {
@@ -15720,4 +15721,116 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
         .output()
         .expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
     assert!(checked.status.success(), "올린 판의 태그를 막았다\n{}", text(&checked));
+}
+
+/// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).
+///
+/// **여기가 없으면 키를 더해 놓고 그 키가 닿는지 아무도 안 잰다.** 단위 시험은
+/// `cmd::journal_errors` 가 옳은 줄을 짓는 데까지만 가므로, `show` 가 그것을 실제로 달았는지는
+/// 바이너리를 돌려야 안다 — moai-6ney 리뷰 3번이 잡은 자리가 그것이었다(`main` 이
+/// `unread_journals()` 를 부르는지 아무도 안 재서 그 줄을 지워도 483개가 다 파랬다).
+///
+/// 종료 코드로는 못 가른다 — `cmd::PARTIAL` 은 못 읽는 스냅샷 줄과 진 `mv` 겨룸까지 함께 쓰는
+/// 한 깃발이라 "이 판이 온전치 않다" 까지만 말한다. 어느 이슈의 **이력이** 덜 왔는지는 이 키다.
+#[cfg(unix)]
+#[test]
+fn an_unread_journal_stands_in_the_json_beside_the_row_it_cost() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = trees("wtjsonunread");
+    let main = t.main();
+
+    // 멀쩡한 판에는 키가 없다 — 그 빔이 곧 "이력이 다 왔다" 이다.
+    let clean = ok(&main, &["show", &t.tied, "--json"]);
+    assert!(!clean.contains("journal_error"), "멀쩡한 판에 키를 달았다\n{clean}");
+    assert!(clean.contains(r#""journal":"#), "이력 키가 아예 없다\n{clean}");
+
+    // 제 저장소의 저널을 잠근다 — 줄은 그대로 서고 이력만 빠진다.
+    let mine = only_journal(&main);
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&mine).is_ok() {
+        std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return; // root 는 권한을 안 본다
+    }
+    let one = moai(&main, &["show", &t.tied, "--json"]);
+    let listed = moai(&main, &["show", "--json"]);
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let shown = String::from_utf8_lossy(&one.stdout).to_string();
+    one_json_value(&shown);
+    // **가르는 자는 `kind` 다** — `said` 는 운영체제가 지은 글이라 `LANG` 과 libc 에 따라 바뀐다.
+    assert!(shown.contains(r#""journal_error":[{"kind":"permission""#), "키가 꼴대로 안 섰다\n{shown}");
+    assert!(shown.contains(&mine.display().to_string()), "어느 파일에 chmod 할지를 안 댔다\n{shown}");
+    // 이력은 빠졌는데 줄은 그대로다 — 통째로 지던 자리다.
+    assert!(shown.contains(r#""journal":[]"#), "이력만 빠지고 줄이 서야 한다\n{shown}");
+    assert!(shown.contains(&t.tied), "이력 하나로 줄까지 잃었다\n{shown}");
+
+    // 목록도 줄마다 같은 것을 낸다.
+    let rows = String::from_utf8_lossy(&listed.stdout).to_string();
+    let row = rows
+        .split("},{")
+        .find(|r| r.contains(&format!(r#""id":"{}""#, t.tied)))
+        .unwrap_or_else(|| panic!("그 줄이 없다\n{rows}"));
+    assert!(row.contains(r#""journal_error":[{"kind":"permission""#), "목록 줄에 안 섰다\n{row}");
+
+    // **옆 워크트리의 것은 내 줄에 안 붙는다** — 종료 코드를 안 바꾸는 것과 같은 금이다.
+    //
+    // **목록으로 잰다**(리뷰). 하나를 펼치는 길은 그 줄의 뿌리 저널만 읽으므로, 옆의 잠긴
+    // 파일은 아예 안 만져 `journal_unread()` 가 빈 채로 끝난다 — 뿌리로 가르는 자를 통째로
+    // 걷어내도 그 재기는 파랬다. 겹쳐 온 줄까지 저널을 읽는 자리는 목록(`work_by_id`)이고,
+    // 거기서만 한 판에 두 체크아웃의 자리가 섞인다.
+    let theirs = only_journal(&t.feat());
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = moai(&main, &["show", "--json", "--worktree"]);
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let rows = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "옆 워크트리의 저널로 실패했다 — {}", String::from_utf8_lossy(&out.stderr));
+    let row = |id: &str| {
+        rows.split("},{")
+            .find(|r| r.contains(&format!(r#""id":"{id}""#)))
+            .unwrap_or_else(|| panic!("{id} 줄이 없다\n{rows}"))
+            .to_string()
+    };
+    // 옆에서만 사는 줄은 제 워크트리의 실패를 달고 선다 — 이 판이 저널을 정말 읽었다는 증거다.
+    assert!(row(&t.made).contains(r#""journal_error":[{"kind":"permission""#), "옆 줄에 안 섰다\n{rows}");
+    assert!(!row(&t.tied).contains("journal_error"), "옆 체크아웃의 자리를 내 줄에 달았다\n{rows}");
+    let _ = (&t.epic, &t.picked);
+}
+
+/// **막대 곁에 미룬 수가 선다 — 보드와 묶음 상세와 `--json` 셋 다**(moai-zxwj, 2026-09-21
+/// 사용자 결정).
+///
+/// 분모는 미룬 멤버를 그대로 세기로 정했으므로(막대는 "한때 내건 것 중 얼마나 했나" 다), 그
+/// 수가 안 줄어드는 까닭이 화면에 있어야 한다. **세 표면을 한 시험이 함께 잰다** — 세는 자는
+/// `report` 하나인데 읽는 쪽이 셋이라, 한쪽만 얹는 날 같은 묶음이 두 수로 읽힌다.
+#[test]
+fn the_bar_names_how_many_members_are_deferred_on_every_surface() {
+    let s = init("asidebar");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--json"]), "id");
+    let done = add(s.path(), &["끝낼 것", "-e", &epic]);
+    let shelved = add(s.path(), &["미룰 것", "-e", &epic]);
+    ok(s.path(), &["mv", &done, "in_progress"]);
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["defer", &shelved, "-m", "다음 판"]);
+
+    // 보드 — 막대는 `1/2` 로 서고 곁에 미룬 수가 붙는다.
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("1/2"), "막대가 미룬 멤버를 분모에서 뺐다\n{board}");
+    assert!(board.contains("미룬 1"), "보드가 미룬 수를 안 댄다\n{board}");
+
+    // 묶음 상세 — 같은 수, 같은 낱말.
+    let detail = ok(s.path(), &["show", &epic]);
+    assert!(detail.contains("1/2") && detail.contains("미룬 1"), "상세가 보드와 다른 말을 한다\n{detail}");
+
+    // 기계 쪽도 같은 셈이다 — 화면만 고치고 `--json` 을 두고 가면 둘이 갈린다.
+    let json = ok(s.path(), &["status", "--json"]);
+    let roll = json
+        .split("},{")
+        .find(|r| r.contains(&format!(r#""id":"{epic}""#)))
+        .unwrap_or_else(|| panic!("에픽이 없다\n{json}"));
+    assert!(roll.contains(r#""total":2"#) && roll.contains(r#""deferred":1"#), "{roll}");
+
+    // 도로 집으면 수가 사라진다 — 미루기는 되돌릴 수 있고, 이 수는 지금의 값이지 자국이 아니다.
+    ok(s.path(), &["defer", &shelved, "--undo"]);
+    let board = ok(s.path(), &["status"]);
+    assert!(!board.contains("미룬 1"), "도로 집었는데 미룬 수가 남았다\n{board}");
 }

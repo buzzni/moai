@@ -36,7 +36,6 @@ mod worktree;
 
 use clap::Parser;
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// `println!` 은 stdout 이 닫히면 패닉한다. `moai show | head` 처럼 출력을
@@ -283,8 +282,9 @@ fn unjournaled() {
 /// **종료 코드를 0 이 아니게 한다.** [`carried`]·[`unjournaled`] 와 갈리는 지점이다: 저쪽은
 /// 쓰기가 담긴 판이라 말만 하지만, 여기는 사람이 **덜 받은 답**을 손에 쥔 판이다. 스냅샷의
 /// 못 읽는 줄을 `cmd::report_load_errors` 가 그렇게 다루는 것과 같은 자다. `--json` 을 읽는
-/// 기계는 이 코드로 "이력이 없다" 와 "못 읽었다" 를 가른다 — `--json` 에 키가 서기 전까지
-/// (moai-f2lc) 가르는 자가 이것 하나뿐이라, 이 줄이 무너지면 반쪽이 아니라 조용한 손실이다.
+/// 기계는 이 코드로 "이 판이 온전치 않다" 를 안다. 어느 이슈의 **이력이** 덜 왔는지는
+/// `show --json` 의 `journal_error` 가 따로 말하지만(moai-f2lc), 그 키는 저널을 읽는 명령에만
+/// 서므로 나머지 판을 가르는 자는 여전히 이 코드다 — 이 줄이 무너지면 조용한 손실이다.
 ///
 /// **자리를 통째로 댄다.** [`unjournaled`] 처럼 저장소 뿌리로 줄이지 않는다 — 여기서 알아야 할
 /// 것은 "어느 저장소냐" 가 아니라 *어느 파일에 `chmod` 를 하느냐* 이고, 그것이 곧 고치는 법이다.
@@ -309,7 +309,7 @@ fn unread_journals() {
 ///
 /// `here` 를 못 찾았으면(`.moai` 밖에서 끝난 판) 가르지 않고 세운다 — 못 가릴 때 조용한 쪽으로
 /// 떨어지면 그것이 곧 조용한 손실이다.
-fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) {
+fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[store::Unread]) {
     let lines = unread_lines(lang, unread);
     if lines.is_empty() {
         return;
@@ -327,18 +327,17 @@ fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[(Path
 ///
 /// `here` 가 없으면(`.moai` 밖에서 끝난 판) 가르지 못하니 참이다 — 못 가릴 때 조용한 쪽으로
 /// 떨어지면 그것이 곧 조용한 손실이다.
-fn any_mine(here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) -> bool {
-    unread.iter().any(|(root, ..)| here.is_none_or(|h| h == root))
+fn any_mine(here: Option<&std::path::Path>, unread: &[store::Unread]) -> bool {
+    unread.iter().any(|u| here.is_none_or(|h| h == u.root))
 }
 
 /// 자리마다 한 줄. **순수하다** — 찍지도, 전역을 건드리지도 않는다.
-fn unread_lines(lang: i18n::Lang, unread: &[(PathBuf, PathBuf, String)]) -> Vec<String> {
-    unread
-        .iter()
-        .map(|(_, at, why)| {
-            i18n::fill(i18n::say(lang, "warn.unread_journal"), &[("at", &at.display().to_string()), ("why", why)])
-        })
-        .collect()
+///
+/// **글을 여기서 안 짓는다**(moai-f2lc) — `--json` 의 `journal_error` 가 같은 줄을 내므로
+/// [`cmd::journal_errors`] 하나가 짓고 여기는 그 `said` 를 편다. 두 자리에서 지으면 같은
+/// 실패를 stderr 와 기계 출력이 다른 말로 말한다.
+fn unread_lines(lang: i18n::Lang, unread: &[store::Unread]) -> Vec<String> {
+    cmd::journal_errors(lang, unread, None).into_iter().map(|e| e.said).collect()
 }
 
 fn print(lines: &[String]) {
@@ -362,9 +361,14 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
-    fn one(at: &str, why: &str) -> Vec<(PathBuf, PathBuf, String)> {
-        vec![(PathBuf::from("/tmp/moai-6924"), PathBuf::from(at), why.to_string())]
+    fn at(root: &str, at: &str, why: &str) -> store::Unread {
+        store::Unread { root: PathBuf::from(root), at: PathBuf::from(at), kind: "permission", said: why.to_string() }
+    }
+
+    fn one(at: &str, why: &str) -> Vec<store::Unread> {
+        vec![self::at("/tmp/moai-6924", at, why)]
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
@@ -391,8 +395,9 @@ mod tests {
 
     /// **못 읽은 이력이 있으면 종료 코드가 0 이 아니다**(2026-09-21 사용자 결정, moai-6ney).
     ///
-    /// `--json` 에 키가 서기 전까지(moai-f2lc) 기계가 "이력이 없다" 와 "못 읽었다" 를 가르는
-    /// 자가 이 코드 하나다. `main` 이 [`cmd::had_partial`] 로 갈리므로 그 깃발을 직접 잰다 —
+    /// `show --json` 의 `journal_error` 가 어느 줄이 값을 치렀는지를 대고(moai-f2lc), 저널을
+    /// 안 읽는 명령에서 "이 판이 온전치 않다" 를 말하는 자는 이 코드 하나로 남는다.
+    /// `main` 이 [`cmd::had_partial`] 로 갈리므로 그 깃발을 직접 잰다 —
     /// 깃발은 한 번 서면 안 내려가니 병렬 시험끼리 섞여도 이 쪽은 흔들리지 않는다.
     #[test]
     fn an_unread_journal_makes_the_run_fail() {
@@ -416,11 +421,8 @@ mod tests {
     #[test]
     fn a_neighbours_unread_journal_is_told_but_does_not_fail_the_run() {
         let mine = PathBuf::from("/tmp/moai-6924");
-        let theirs = vec![(
-            PathBuf::from("/tmp/moai-6ney/side"),
-            PathBuf::from("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"),
-            "Permission denied".to_string(),
-        )];
+        let theirs =
+            vec![at("/tmp/moai-6ney/side", "/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl", "Permission denied")];
         assert!(!any_mine(Some(&mine), &theirs), "옆 워크트리의 것으로 종료 코드를 바꿨다");
         assert!(any_mine(Some(&mine), &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "denied")));
         // 어느 저장소인지 못 찾은 판은 가르지 못하니 세운다 — 못 가릴 때 조용해지지 않는다.

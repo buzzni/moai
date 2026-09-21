@@ -890,8 +890,8 @@ impl Repo {
     ///
     /// 이 함수가 `Vec<Issue>` 를 돌려주게 되는 날이 저널을 상태의 원천으로
     /// 삼기 시작한 날이고, 이전 시도가 거기서 복잡해졌다.
-    pub fn journal_of(&self, id: &str) -> R<Vec<JournalEntry>> {
-        Ok(self.journal_by_id(&BTreeSet::from([id]), |_| true)?.remove(id).unwrap_or_default())
+    pub fn journal_of(&self, id: &str) -> Vec<JournalEntry> {
+        self.journal_by_id(&BTreeSet::from([id]), |_| true).remove(id).unwrap_or_default()
     }
 
     /// 여러 id 의 이력을 **파일 한 번 읽기로** 가른다(moai-p8qj). 없는 id 는 키가 안 선다.
@@ -914,13 +914,16 @@ impl Repo {
     /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
     ///
     /// **못 읽는 *파일*은 넘어가되 [`journal_unread`] 에 선다**(2026-09-21 사용자 결정, moai-6ney).
-    /// 꼴은 그대로 [`R`] 이다 — 오늘 이 함수가 지는 길은 없지만, 부르는 자리(`cmd::show`)를 옆
-    /// 가지가 쥐어 이 판에서 좁히지 못했다. 좁히는 것은 moai-f2lc 다.
+    ///
+    /// **그래서 이 함수는 지지 않는다**(moai-f2lc). 한때 꼴이 [`R`] 이었던 것은 못 읽는 파일
+    /// 하나에 통째로 지던 때의 자취고, 관대해진 뒤로는 지는 길이 하나도 안 남았다 — 부르는
+    /// 자리마다 `?` 가 영영 안 터질 자리에 서 있었고, 그러면 **나중에 정말 질 길이 생겨도
+    /// 오늘과 구별되지 않는다.** 못 읽은 것은 값이 아니라 [`journal_unread`] 로 나간다.
     pub fn journal_by_id(
         &self,
         want: &BTreeSet<&str>,
         line: impl Fn(&str) -> bool,
-    ) -> R<BTreeMap<String, Vec<JournalEntry>>> {
+    ) -> BTreeMap<String, Vec<JournalEntry>> {
         let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
         for path in self.journal_files() {
             let bytes = match std::fs::read(&path) {
@@ -955,7 +958,7 @@ impl Repo {
             // 그 차례를 세우는 자가 [`Repo::journal_files`] 다.
             v.sort_by(|a, b| a.ts.cmp(&b.ts));
         }
-        Ok(out)
+        out
     }
 }
 
@@ -1078,7 +1081,26 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
     MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// 못 읽어 건너뛴 저널 자리 — `(저장소 뿌리, 자리, io 가 낸 말)`, 만난 차례대로.
+/// 못 읽어 건너뛴 저널 자리 하나 — 어느 저장소의 어느 파일을 왜 못 읽었나.
+///
+/// **`kind` 는 기계의 것이고 `said` 는 사람의 것이다**([`crate::git::Told`] 와 같은 가름,
+/// moai-f2lc). `said` 는 운영체제가 지은 글이라 `LANG` 과 libc 에 따라 바뀌고 우리가 안 옮긴다 —
+/// 받는 쪽이 그것을 부분 문자열로 맞추면 그 줄은 기계마다 다르게 읽힌다. 가르는 자는 `kind` 다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unread {
+    /// 그 저널이 사는 저장소의 뿌리. `main` 이 제 것과 옆 워크트리의 것을 이것으로 가른다.
+    pub root: PathBuf,
+    /// 못 읽은 자리 — 파일이거나, 훑지 못한 `journal/` 디렉터리다. **고치는 법이 곧 이 자리에
+    /// 대는 `chmod`** 라, 줄이지 않고 통째로 든다.
+    pub at: PathBuf,
+    /// `permission`·`failed`. 늘어날 수 있으므로 받는 쪽은 모르는 값을 `failed` 처럼 다룬다 —
+    /// 고칠 수 있는 하나(`chmod`)를 가르는 것이 이 값의 일이다.
+    pub kind: &'static str,
+    /// io 가 낸 말. **안 옮긴다** — 무엇을 못 했는지는 말묶음의 `warn.unread_journal` 이 앞에 붙인다.
+    pub said: String,
+}
+
+/// 못 읽어 건너뛴 저널 자리, 만난 차례대로([`Unread`]).
 ///
 /// **관대하되 시끄럽게**(2026-09-21 사용자 결정, moai-6ney). 저널이 사람마다 갈린 뒤로 파일은
 /// N 개고, 한 체크아웃을 두 계정이 쓰면 남의 `<메일>.jsonl` 이 0600 으로 서는 일이 흔하다.
@@ -1099,19 +1121,33 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
 /// 멀쩡한 판이 비영 종료했다 — `cmd::gather` 가 옆 워크트리의 깨진 줄에 대해 못박은 것과
 /// 같은 금이다("옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면 제 파일은 멀쩡한데
 /// 도구가 실패로 읽힌다"). 말하는 것은 둘 다 하고, 종료 코드를 바꾸는 것은 제 뿌리뿐이다.
-static UNREAD: std::sync::Mutex<Vec<(PathBuf, PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
+static UNREAD: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
 
-pub fn journal_unread() -> Vec<(PathBuf, PathBuf, String)> {
+pub fn journal_unread() -> Vec<Unread> {
     UNREAD.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// 못 읽은 자리를 센다. **같은 짝은 한 번만 선다** — 한 명령이 저널을 여러 번 읽어도 사람은
 /// 같은 줄을 두 번 볼 까닭이 없다.
-fn note_unread(root: &Path, at: &Path, said: &std::io::Error) {
-    let (root, at, said) = (root.to_path_buf(), at.to_path_buf(), said.to_string());
+fn note_unread(root: &Path, at: &Path, err: &std::io::Error) {
+    let one = Unread { root: root.to_path_buf(), at: at.to_path_buf(), kind: unread_kind(err), said: err.to_string() };
     let mut v = UNREAD.lock().unwrap_or_else(|e| e.into_inner());
-    if !v.iter().any(|(r, p, s)| *r == root && *p == at && *s == said) {
-        v.push((root, at, said));
+    if !v.contains(&one) {
+        v.push(one);
+    }
+}
+
+/// io 의 실패를 [`Unread::kind`] 로 접는다.
+///
+/// **가르는 것은 고칠 수 있는가다.** `permission` 하나만 따로 세우는 까닭은 그것이 `chmod` 한
+/// 줄로 풀리는 유일한 갈래여서고, 나머지는 받는 쪽이 할 일이 같다. 없는 저널은 고장이 아니라
+/// [`Repo::journal_files`] 와 [`Repo::journal_by_id`] 가 그냥 넘기므로 `NotFound` 는 거의 안
+/// 온다 — `journal/` 안의 끊긴 심볼릭 링크가 [`Repo::journal_files`] 의 `metadata` 에서 하나
+/// 들어오는데, 그것도 `chmod` 로는 안 풀리니 `failed` 가 제자리다.
+fn unread_kind(err: &std::io::Error) -> &'static str {
+    match err.kind() {
+        std::io::ErrorKind::PermissionDenied => "permission",
+        _ => "failed",
     }
 }
 
@@ -2085,7 +2121,7 @@ mod tests {
         let load = r.read().unwrap();
         assert_eq!(load.issues.len(), 1);
         assert!(load.errors.is_empty());
-        assert_eq!(r.journal_of("argos-4aex").unwrap().len(), 1);
+        assert_eq!(r.journal_of("argos-4aex").len(), 1);
     }
 
     /// 임의 순서로 넣어도 파일은 언제나 id 순이고, 자식이 부모 밑에 붙는다.
@@ -2151,8 +2187,8 @@ mod tests {
 
     /// 이 저장소의 자리만 골라 센 것 — [`UNREAD`] 는 프로세스 하나의 것이라 병렬 시험끼리
     /// 섞인다. 수를 세지 말고 제 뿌리 밑의 짝만 본다.
-    fn unread_under(root: &Path) -> Vec<(PathBuf, PathBuf, String)> {
-        journal_unread().into_iter().filter(|(_, at, _)| at.starts_with(root)).collect()
+    fn unread_under(root: &Path) -> Vec<Unread> {
+        journal_unread().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
 
     /// **못 여는 저널 자리는 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney).
@@ -2172,7 +2208,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(r.journal_of("argos-4aex").unwrap().len(), 1);
+        assert_eq!(r.journal_of("argos-4aex").len(), 1);
         assert!(unread_under(d.path()).is_empty(), "멀쩡한 판에서 무언가를 셌다");
 
         let dir = d.join(".moai/journal");
@@ -2184,15 +2220,18 @@ mod tests {
         // **재기부터 하고 권한을 되돌린 뒤에 견준다**(리뷰) — 견주다 넘어지면 0000 인 자리가
         // 그대로 남아 [`crate::scratch::Scratch`] 의 `Drop` 이 못 치우고, 죽은 pid 의 임시
         // 디렉터리가 기계에 쌓인다(`scratch` 모듈이 이름 대어 걷어낸 바로 그 새는 자리다).
-        let got = r.journal_of("argos-4aex").unwrap();
+        let got = r.journal_of("argos-4aex");
         let told = unread_under(d.path());
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(got.is_empty(), "못 연 자리에서 이력을 지어냈다");
         assert_eq!(told.len(), 1, "못 연 자리를 안 셌거나 여러 번 셌다 — {told:?}");
-        assert_eq!(told[0].0, r.root, "어느 저장소인지 안 댄다 — {told:?}");
-        assert_eq!(told[0].1, dir, "어느 자리인지 안 댄다 — {told:?}");
-        assert!(!told[0].2.is_empty(), "까닭을 안 댄다");
+        assert_eq!(told[0].root, r.root, "어느 저장소인지 안 댄다 — {told:?}");
+        assert_eq!(told[0].at, dir, "어느 자리인지 안 댄다 — {told:?}");
+        assert!(!told[0].said.is_empty(), "까닭을 안 댄다");
+        // **`chmod` 로 풀리는 갈래를 기계가 가른다**(moai-f2lc) — `said` 는 운영체제가 지은
+        // 글이라 `LANG` 과 libc 에 따라 바뀌니, 받는 쪽이 그것을 부분 문자열로 맞추면 안 된다.
+        assert_eq!(told[0].kind, "permission", "권한으로 막힌 자리를 그렇게 안 댄다 — {told:?}");
     }
 
     /// **이름은 읽히는데 잴 수 없는 자리도 센다**(리뷰, moai-6ney). `chmod 400 .moai/journal` 은
@@ -2221,13 +2260,14 @@ mod tests {
             std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
             return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
         }
-        let got = r.journal_of("argos-4aex").unwrap();
+        let got = r.journal_of("argos-4aex");
         let told = unread_under(d.path());
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(got.is_empty(), "못 잰 자리에서 이력을 지어냈다");
         assert_eq!(told.len(), 1, "못 잰 파일을 안 셌거나 여러 번 셌다 — {told:?}");
-        assert_eq!(told[0].1, mine, "어느 파일인지 안 댄다 — {told:?}");
+        assert_eq!(told[0].at, mine, "어느 파일인지 안 댄다 — {told:?}");
+        assert_eq!(told[0].kind, "permission", "{told:?}");
     }
 
     /// **남의 파일 하나가 제 이력까지 막지 않는다**(2026-09-21 사용자 결정, moai-6ney). 한
@@ -2263,15 +2303,16 @@ mod tests {
         }
         // **두 번 읽어도 한 줄이다** — `moai show` 는 목록과 상세에서 저널을 두 번 읽는다.
         // 재기부터 하고 권한을 되돌린 뒤에 견준다(위와 같은 까닭).
-        let mine_hist = r.journal_of("argos-rave").unwrap();
+        let mine_hist = r.journal_of("argos-rave");
         let once = unread_under(d.path());
-        let theirs_hist = r.journal_of("argos-othe").unwrap();
+        let theirs_hist = r.journal_of("argos-othe");
         let twice = unread_under(d.path());
         std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o644)).unwrap();
 
         assert_eq!(mine_hist.len(), 1, "제 파일의 이력까지 잃었다");
         assert_eq!(once.len(), 1, "못 읽은 파일을 안 셌거나 여러 번 셌다 — {once:?}");
-        assert_eq!(once[0].1, theirs_file, "어느 파일인지 안 댄다 — {once:?}");
+        assert_eq!(once[0].at, theirs_file, "어느 파일인지 안 댄다 — {once:?}");
+        assert_eq!(once[0].kind, "permission", "{once:?}");
         assert!(theirs_hist.is_empty());
         assert_eq!(twice.len(), 1, "같은 파일을 두 번 셌다");
     }
@@ -2320,7 +2361,7 @@ mod tests {
             |_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ())),
         )
         .unwrap();
-        let j = r.journal_of("argos-4aex").unwrap();
+        let j = r.journal_of("argos-4aex");
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
     }

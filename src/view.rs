@@ -483,6 +483,21 @@ pub fn bar(percent: Option<u8>) -> String {
     }
 }
 
+/// 막대 곁에 대는 **미룬 멤버 수**([`crate::report::Roll::deferred`], moai-zxwj). 셀 것이 없거나
+/// 0 이면 빈 글이다 — 없는 것을 `미룬 0` 으로 말하면 모든 줄에 같은 꼬리가 붙어 뜻이 사라진다.
+///
+/// **한 자리에서 짓는다** — 보드(`status`)와 묶음 상세(`show <묶음>`)가 이것을 같이 쓴다. 둘이
+/// 따로 지으면 같은 수가 두 낱말로 나가고, 한쪽만 고치는 날 한 화면 안에서 말이 갈린다.
+/// 앞의 빈칸까지 여기서 든다: 붙이는 쪽이 저마다 띄우면 자리 폭이 표마다 달라진다.
+pub fn set_aside(deferred: Option<usize>, lang: crate::i18n::Lang) -> String {
+    match deferred {
+        Some(n @ 1..) => {
+            paint(style::DIM, &format!("   {}", fill(say(lang, "status.deferred_members"), &[("n", &n.to_string())])))
+        }
+        _ => String::new(),
+    }
+}
+
 /// 에픽 → 멤버 → 자식으로 접어 낸다.
 ///
 /// `shown` 은 이미 걸러진 것들이다. **걸러진 뒤에도 에픽 줄은 남긴다** —
@@ -964,13 +979,23 @@ pub fn status(
                 }
                 _ => String::new(),
             };
+            // **수가 왜 안 줄어드는지를 막대 곁에 댄다**(moai-zxwj, 2026-09-21 사용자 결정).
+            // 분모는 미룬 멤버를 그대로 세므로 — 막대는 "한때 내건 것 중 얼마나 했나" 다 — 그
+            // 넷을 영영 안 해도 100% 가 안 된다. 그것이 정한 값인데 화면이 말하지 않으면 읽는
+            // 쪽은 `102/110` 에서 여덟이 남은 줄 알고, 셈이 깨졌다고 읽는다.
+            //
+            // **계획 밖으로 나간 묶음에는 안 선다** — `Stand::deferred` 가 그런 묶음을 0 으로
+            // 내므로(제 미룸으로 빠진 멤버도, 그 위에 따로 미룬 멤버도), 그 줄은 위의 `put_off`
+            // 가 한 낱말로 말한다.
+            let aside = set_aside(e.deferred, lang);
             out.push(format!(
-                "  {}  {}  {}  {}/{}{}",
+                "  {}  {}  {}  {}/{}{}{}",
                 paint(style::ID, e.id.as_deref().unwrap_or("")),
                 pad(title, *w_this, w_title + 2),
                 bar(e.percent),
                 e.done,
                 e.total,
+                aside,
                 note,
             ));
         }
@@ -3741,6 +3766,68 @@ mod tests {
         all.push(rest);
         let text = table(&all);
         assert!(text.contains("1/2") && text.contains("닫힘"), "접은 묶음을 안 비춘다 — {text}");
+    }
+
+    /// **막대 곁에 미룬 수를 댄다**(moai-zxwj, 2026-09-21 사용자 결정). 분모는 미룬 멤버를 그대로
+    /// 세기로 정했으므로 — 막대는 "한때 내건 것 중 얼마나 했나" 다 — 그 수가 안 줄어드는 까닭이
+    /// 화면에 있어야 한다. 없으면 읽는 쪽은 `1/2` 에서 하나가 남은 줄 알고, 그것을 아무도 안
+    /// 집는 것을 보고 셈이 깨졌다고 읽는다.
+    #[test]
+    fn the_bar_says_how_many_of_its_members_are_deferred() {
+        let table = |all: &[Issue], lang| {
+            let cfg = cfg();
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(lang)))
+                .join("\n")
+        };
+        let mut epic = issue("argos-0001", "에픽", "todo");
+        epic.kind = Kind::Epic;
+        let mut done = issue("argos-0002", "끝난 멤버", "done");
+        done.epic = Some("argos-0001".into());
+        let mut rest = issue("argos-0003", "미룬 멤버", "todo");
+        rest.epic = Some("argos-0001".into());
+        rest.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let all = vec![epic.clone(), done.clone(), rest];
+
+        // **글자는 말묶음에서 온다** — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
+        let lang = Lang::Ko;
+        let want = fill(say(lang, "status.deferred_members"), &[("n", "1")]);
+        let text = table(&all, lang);
+        assert!(text.contains("1/2") && text.contains(&want), "미룬 수를 막대 곁에 안 댄다 — {text}");
+        assert_ne!(want, fill(say(Lang::En, "status.deferred_members"), &[("n", "1")]), "말이 안 갈린다");
+        assert!(
+            table(&all, Lang::En).contains(&fill(say(Lang::En, "status.deferred_members"), &[("n", "1")])),
+            "영어 판에 안 선다"
+        );
+
+        // 미룬 멤버가 없으면 꼬리가 없다 — 모든 줄에 붙으면 뜻이 사라진다.
+        let plain_epic = vec![epic.clone(), done];
+        assert!(!table(&plain_epic, lang).contains(&want), "안 미룬 묶음에 꼬리를 달았다");
+
+        // **미뤄 둔 묶음에는 안 선다** — 제 미룸으로 빠진 멤버는 안 세고, 그 줄은 `미룸` 이 말한다.
+        let mut shelved_epic = epic;
+        shelved_epic.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let mut member = issue("argos-0002", "멤버", "todo");
+        member.epic = Some("argos-0001".into());
+        let under = vec![shelved_epic.clone(), member.clone()];
+        let text = table(&under, lang);
+        assert!(text.contains(say(lang, "status.put_off")), "미뤄 둔 묶음이라고 안 말한다 — {text}");
+        assert!(
+            !text.contains(&fill(say(lang, "status.deferred_members"), &[("n", "1")])),
+            "제 미룸을 멤버의 것인 양 두 번 말한다 — {text}"
+        );
+
+        // **제 줄도 미뤘는데 멤버 하나를 또 미룬 판도 마찬가지다**(리뷰). 둘 다 계획 밖인데
+        // 꼬리가 서면 `0/2  미룬 1  미룸` 이 되어, 읽는 쪽은 하나가 아직 집을 것이라고 읽는다.
+        let mut twice = issue("argos-0003", "또 미룬 멤버", "todo");
+        twice.epic = Some("argos-0001".into());
+        twice.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let text = table(&[shelved_epic, member, twice], lang);
+        assert!(text.contains(say(lang, "status.put_off")), "미뤄 둔 묶음이라고 안 말한다 — {text}");
+        assert!(
+            !text.contains(&fill(say(lang, "status.deferred_members"), &[("n", "1")])),
+            "통째로 계획 밖인 묶음이 하나는 집을 것이라고 말한다 — {text}"
+        );
     }
 
     #[test]

@@ -7804,7 +7804,7 @@ mod tests {
         assert_eq!(a.site.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0001", "argos-0002"]);
         assert_eq!(a.site.index.find("argos-0002"), Some(1), "색인이 다시 안 섰다 — 손으로 넣은 것이다");
         let repo = a.site.repo.clone().unwrap();
-        assert_eq!(repo.journal_of("argos-0002").unwrap()[0].by, "레이븐");
+        assert_eq!(repo.journal_of("argos-0002")[0].by, "레이븐");
         assert!(a.trouble.is_none(), "다시 읽었는데 옛 까닭이 남았다");
 
         assert_eq!(a.site.stamp, stamp_of(&repo), "표식을 다시 안 잡았다");
@@ -8474,7 +8474,7 @@ mod tests {
             (Some("레이븐"), Some("raven@example.com"))
         );
         assert!(idea.id.starts_with("argos-"), "{}", idea.id);
-        let journal = repo.journal_of(&idea.id).unwrap();
+        let journal = repo.journal_of(&idea.id);
         assert_eq!(journal.len(), 1);
         assert_eq!(
             (journal[0].kind.as_str(), journal[0].title.as_deref(), journal[0].by.as_str()),
@@ -8685,7 +8685,7 @@ mod tests {
         // 이어진 쓰기도 같은 뒤처리를 받는다 — Enter 가 알림을 걷은 뒤에 쓰기가 제 알림을 단다.
         assert_eq!(on(&a), Some(made[0].id.clone()), "묻고 이어진 쓰기가 만든 줄에 안 섰다");
         assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
-        let journal = repo.journal_of(&made[0].id).unwrap();
+        let journal = repo.journal_of(&made[0].id);
         assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
         // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
