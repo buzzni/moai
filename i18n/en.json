@@ -520,5 +520,8 @@
   "refuse.init_agents_unreadable": "an AGENTS.md that cannot be read is never overwritten — make it readable, or call with `--no-agents`",
   "refuse.init_prefix_fixed_why": "every id issued so far carries it",
   "refuse.init_prefix_short": "a shorter candidate: `{short}`",
-  "refuse.not_a_repo": "Not a moai repository (no `.moai/` found). Start one with `moai init`, or call a repository elsewhere with `moai -C <dir> <command>`"
+  "refuse.not_a_repo": "Not a moai repository (no `.moai/` found). Start one with `moai init`, or call a repository elsewhere with `moai -C <dir> <command>`",
+  "opening.not_a_repo_yet": "This is not a moai repository yet — start one with `moai init`",
+  "opening.register_to_view": "To see projects elsewhere at a glance from here, register them with `moai project add <dir>`",
+  "init.wrote_comments": "  brought the comments in {name} up to date"
 }

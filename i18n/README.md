@@ -65,6 +65,9 @@
   (`every_translation_keeps_the_places_english_marks`)
 - 다섯 말에서 `ready` 표의 열이 같은 칸에 서는가 (`every_language_keeps_the_ready_table_in_line`)
 - 실린 JSON 다섯이 다 읽히고 제 파일을 가리키는가 (`every_bundle_parses_and_is_wired_to_its_own_file`)
+- 한국어 표가 영어 표의 키를 다 드는가 (`korean_carries_every_key_english_does`). ko 는 en 과 함께
+  **다 찬** 말이라, 한 키가 빠지면 그 줄만 영어로 떨어져 화면이 비지 않는다 — 화면을 재는 시험은
+  그것을 못 본다. 다른 셋은 빈 키를 영어가 받게 두므로 안 잰다
 
 ## 아직 다 안 옮긴 화면
 
@@ -78,7 +81,11 @@
 셋(moai-95g1)이 말묶음에서 온다.
 **`.moai` 를 못 찾았다는 첫 줄은 말묶음에 왔다**(moai-5j49) — `refuse.not_a_repo` 하나를
 `cmd::open_repo` 와 `nothing_registered` 가 함께 쓴다. 등록한 것도 없을 때의 두 줄이 한 말로
-서는 것을 `the_first_screen_outside_a_repo_stands_in_one_language` 가 잰다.
+서는 것을 `the_first_screen_outside_a_repo_stands_in_one_language` 가 잰다. 인자 없이 부른 맨
+`moai` 의 두 줄(`opening.not_a_repo_yet`·`opening.register_to_view`)도 같은 시험이 잰다.
+받은 사람이 그다음에 치는 `moai init` 의 화면(`init.*`·`refuse.init_*`)도 말묶음에 왔다(moai-9vwy) —
+`the_init_screen_stands_in_one_language` 가 잰다. `init` 이 **심는** 파일(`.gitattributes`·
+`config.toml`·`AGENTS.md` 블록)은 화면이 아니라 저장소의 내용이라 말묶음에 안 들고 영어 하나로 선다.
 
 **남은 자리 셋은 트래커가 든다** — 저장 계층에 남은 글 다섯(idea moai-uqxn, 넷이 쓰기 경로
 안이다), 검증 글 열넷(idea moai-gbk3), 읽음 표의 글 열(moai-rtji). 그 셋이 남은 동안은 한

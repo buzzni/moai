@@ -494,8 +494,10 @@ fn prefix_from(dir: &Path) -> Option<String> {
 /// [`ensure_lines`] 가 한 일.
 #[derive(Debug, PartialEq, Eq)]
 enum Added {
-    /// 빠진 줄을 덧붙였다.
-    Wrote,
+    /// 빠진 줄을 덧붙였다. **규칙이 들었는가를 함께 든다**(리뷰 moai-hom6.qd9 3번) — 주석만
+    /// 덧붙인 판을 "병합 규칙을 넣었다" 로 부르던 자리다. 심는 주석을 영어로 바꾼 뒤(moai-9vwy)
+    /// 이미 심은 저장소의 첫 `moai init` 이 바로 그 판이라 모두가 한 번씩 거짓 줄을 받았다.
+    Wrote { rules: bool },
     /// 이미 다 있었다 — 파일은 안 건드렸다.
     Already,
     /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
@@ -516,7 +518,7 @@ impl Added {
     /// 못 건드린 `(갈래, 까닭)` — 건드렸으면 `None`. 갈래는 `--json` 이 그대로 싣는 낱말이다.
     fn trouble(&self) -> Option<(&'static str, &str)> {
         match self {
-            Added::Wrote | Added::Already => None,
+            Added::Wrote { .. } | Added::Already => None,
             Added::Unreadable(why) => Some(("unreadable", why)),
             Added::Unwritable { why, .. } => Some(("unwritable", why)),
         }
@@ -528,7 +530,7 @@ impl Added {
         let rule = |l: &&str| !l.trim().is_empty() && !l.trim_start().starts_with('#');
         match self {
             Added::Unwritable { missing, .. } => missing.iter().map(String::as_str).filter(rule).collect(),
-            Added::Wrote | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
+            Added::Wrote { .. } | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
         }
     }
 }
@@ -576,7 +578,8 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     let wrote =
         std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(tail.as_bytes()));
     match wrote {
-        Ok(()) => Added::Wrote,
+        // 규칙은 [`missing_rules`] 와 **같은 자**로 가른다 — 주석이 아닌 줄이다.
+        Ok(()) => Added::Wrote { rules: missing.iter().any(|l| !l.trim_start().starts_with('#')) },
         Err(e) => Added::Unwritable { why: e.to_string(), missing: missing.iter().map(|l| (*l).to_string()).collect() },
     }
 }
@@ -866,8 +869,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
-            "gitattributes": attrs == Added::Wrote,
-            "gitignore": ignore == Added::Wrote,
+            "gitattributes": matches!(attrs, Added::Wrote { .. }),
+            "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
         });
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
@@ -927,11 +930,19 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     if let Some(full) = &shortened {
         out.insert(1, fill(say(lang, "init.prefix_shortened"), &[("full", full), ("max", &PREFIX_MAX.to_string())]));
     }
-    if attrs == Added::Wrote {
-        out.push(say(lang, "init.wrote_gitattributes").to_string());
+    // **한 일을 한 대로 부른다** — 규칙을 넣은 판과 주석만 맞춘 판은 말이 다르다. 주석만 맞춘
+    // 판도 "이미 다 맞아 있다" 는 아니다: 파일을 고쳤다.
+    match attrs {
+        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitattributes").to_string()),
+        Added::Wrote { rules: false } => {
+            out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitattributes")]))
+        }
+        _ => {}
     }
-    if ignore == Added::Wrote {
-        out.push(say(lang, "init.wrote_gitignore").to_string());
+    match ignore {
+        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitignore").to_string()),
+        Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
+        _ => {}
     }
     for (name, done, block) in &untouched {
         // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
@@ -940,7 +951,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         let head = match done {
             Added::Unwritable { why, .. } => fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)]),
             Added::Unreadable(why) => fill(say(lang, "init.unreadable"), &[("name", name), ("why", why)]),
-            Added::Wrote | Added::Already => continue,
+            Added::Wrote { .. } | Added::Already => continue,
         };
         out.push(head);
         // **댈 줄이 없는 자리도 있다** — AGENTS.md 블록은 줄 몇 개가 아니라 통째로 갈아 끼우는

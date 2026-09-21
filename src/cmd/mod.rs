@@ -299,8 +299,11 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
         crate::cli::Cli::command().write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
         let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
-        out.push("여기는 아직 moai 저장소가 아니다 — `moai init` 으로 시작한다".into());
-        out.push("다른 곳의 프로젝트를 여기서 한눈에 보려면 `moai project add <dir>` 로 등록한다".into());
+        // **이 에픽이 내건 첫 화면이 이것이다**(리뷰 moai-hom6.qd9 4번). `.moai` 밖에서 맨 `moai` 를
+        // 친 사람이 가장 먼저 읽는 두 줄인데, 앞의 도움말이 영어로 선 채 여기만 한국어였다.
+        // 말은 이미 위에서 설정을 연 판이라(`ctx.registry()`) 새로 여는 것이 없다.
+        out.push(crate::i18n::say(ctx.lang(), "opening.not_a_repo_yet").to_string());
+        out.push(crate::i18n::say(ctx.lang(), "opening.register_to_view").to_string());
         // **목록이 빈 까닭이 설정의 문제면 그것을 댄다.** 세션은 여기서 시작하는데, 설정이
         // 깨져 등록한 것이 안 읽힌 사람에게 "등록한 것이 없다, 더하라" 만 하면 정반대를
         // 믿고 깨진 파일에 `project add` 를 친다. `status`·`ready` 는 이미 이 줄을 대고

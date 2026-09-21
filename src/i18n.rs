@@ -364,6 +364,20 @@ mod tests {
     /// 그래서 **번역이 든 키만** 영어와 견준다 — 자리 이름이 같은지, 값이 비지 않았는지.
     /// 키가 아예 없는 것은 안 잰다(es 의 `status.milestone_label`): 그쪽은 영어가 받고,
     /// 다섯을 함께 채우게 하지 않는 것이 결정이다.
+    /// **한국어 표는 영어 표의 키를 다 든다**(리뷰 moai-hom6.qd9 8번). ko 는 en 과 함께 **다 찬**
+    /// 두 말이라(AGENTS.md "The language on screen"), 한 키가 빠지면 한국어를 고른 사람이 그 줄만
+    /// 영어로 받는다 — 영어로 떨어지니 화면이 비지 않아 어느 시험도 안 붉어진다. 화면마다 한글이
+    /// 한 자라도 섰는가만 재던 판(`the_init_screen_stands_in_one_language`)은 새 키 다섯을 지워도
+    /// 푸르렀다: 한 화면에 한 줄만 한국어로 남아도 지나간다.
+    ///
+    /// **다른 셋(zh·ja·es)은 안 잰다** — 빈 키를 영어가 받게 두는 것이 결정이다(위 시험의 글).
+    #[test]
+    fn korean_carries_every_key_english_does() {
+        let (en, ko) = (table(Lang::En), table(Lang::Ko));
+        let missing: Vec<&str> = en.keys().filter(|k| !ko.contains_key(*k)).map(String::as_str).collect();
+        assert!(missing.is_empty(), "한국어 표에 영어 키가 빠졌다 — {missing:?}");
+    }
+
     #[test]
     fn every_translation_keeps_the_places_english_marks() {
         let en = table(Lang::En);

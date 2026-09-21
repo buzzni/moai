@@ -766,9 +766,10 @@ fn the_init_screen_stands_in_one_language() {
 /// **두 자리가 같은 키를 쓴다.** 등록한 것도 없는 판(`nothing_registered`)은 그 줄 밑에 한 줄을
 /// 더 얹을 뿐이라, 앞줄을 달리 말하면 한 덩이가 두 글로 선다 — 그 판을 줄 수로 함께 잰다.
 ///
-/// **맨 `moai` 는 여기서 안 잰다**(리뷰). 인자 없이 부른 판은 `cmd::opening` 이 clap 의 도움말
-/// 뒤에 제 두 줄을 붙이는 딴 길이라 `open_repo` 를 안 지나고, 그 두 줄은 아직 박힌 한국어다 —
-/// idea `moai-a7qo` 가 `mod` 열둘로 세어 든다. 그쪽을 옮기는 날 이 자에 그 판을 더한다.
+/// **맨 `moai` 도 여기서 잰다**(리뷰 moai-hom6.qd9 4번). 인자 없이 부른 판은 `cmd::opening` 이
+/// clap 의 도움말 뒤에 제 두 줄을 붙이는 딴 길이라 `open_repo` 를 안 지난다 — 그 두 줄이 박힌
+/// 한국어로 남아 있었고, 이 에픽이 내건 "첫 화면" 이 바로 그 판이라 함께 옮겼다. 0 으로 끝나는
+/// 판이라 위의 거절들과 따로 잰다.
 #[test]
 fn the_first_screen_outside_a_repo_stands_in_one_language() {
     let s = Scratch::new("norepo-lang");
@@ -793,6 +794,55 @@ fn the_first_screen_outside_a_repo_stands_in_one_language() {
     assert!(en.contains("Not a moai repository"), "{en}");
     assert!(!hangul(&en), "한 덩이가 두 말로 선다\n{en}");
     assert_eq!(en.lines().count(), 2, "등록 없음 줄이 빠졌거나 늘었다\n{en}");
+
+    // 맨 `moai` — 도움말 뒤에 두 줄. 0 으로 끝나고 stdout 에 선다.
+    let bare = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.current_dir(&out).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "맨 moai 가 `.moai` 밖에서 멈췄다\n{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let en = bare(None);
+    assert!(en.contains("moai init"), "맨 moai 가 시작할 길을 안 댔다\n{en}");
+    assert!(!hangul(&en), "맨 moai 의 첫 화면에 박힌 한국어가 남았다\n{en}");
+    assert!(hangul(&bare(Some("ko"))), "한국어를 골랐는데 맨 moai 가 영어만 냈다");
+}
+
+/// **옛 한국어 주석을 든 저장소의 첫 `moai init` 이 한 일을 한 대로 말한다**(리뷰 moai-hom6.qd9
+/// 3번). 심는 주석을 영어로 바꾼 뒤(moai-9vwy) 이미 심은 저장소는 그 주석을 덧받는데 — 그것은
+/// 사용자가 알고 받은 값이다 — 그 판을 "병합 규칙을 넣었다" 로 불렀다. 규칙은 그대로였으니
+/// 거짓 줄이다. 한 번씩 모두가 받는 줄이라 시험으로 못박는다.
+///
+/// **규칙이 정말 빠진 판은 여전히 규칙이라 부른다** — 두 갈래를 한자리에서 잰다.
+#[test]
+fn an_old_planting_hears_that_only_the_comments_changed() {
+    let s = init("oldcomments");
+    let attrs = s.path().join(".gitattributes");
+    // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
+    std::fs::write(
+        &attrs,
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/journal.jsonl  text eol=lf merge=union\n",
+    )
+    .unwrap();
+    let said = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["init"]).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+        with_lang(&mut cmd, lang);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let out = said(None);
+    assert!(out.contains("brought the comments in .gitattributes up to date"), "주석만 맞춘 것을 안 댔다\n{out}");
+    assert!(!out.contains("put the merge rules"), "규칙은 그대로인데 규칙을 넣었다고 한다\n{out}");
+    assert!(!out.contains("everything is already in line"), "파일을 고치고도 다 맞아 있다고 한다\n{out}");
+
+    // 규칙이 정말 빠진 판 — 그때는 규칙을 넣었다고 한다.
+    std::fs::write(&attrs, "# moai — issue tracker\n").unwrap();
+    let out = said(None);
+    assert!(out.contains("put the merge rules into .gitattributes"), "빠진 규칙을 넣고도 안 댔다\n{out}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
