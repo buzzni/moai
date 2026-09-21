@@ -54,9 +54,10 @@ impl Ctx {
     /// 화면 언어도 같은 파일에서 오는데, 읽는 자리가 갈리면 한 번 부를 때 같은 TOML 을 두 번
     /// 판다. 그리는 쪽이 제 손으로 다시 읽던 자리(`i18n::current`)를 걷어낸 것이 이 문이다.
     ///
-    /// **아직 유일한 문은 아니다**(리뷰) — `cmd::tui`·`cmd::project::ls`·`cmd::read` 는 제
-    /// 손으로 `user_config::read` 를 부른다. 지금은 그 명령들이 이 문을 안 지나 두 번 파는
-    /// 판이 없지만, 그쪽에 `ctx.lang()` 을 들이는 날은 이 문으로 함께 옮긴다.
+    /// **아직 유일한 문은 아니다**(리뷰) — `cmd::tui` 는 제 손으로 `user_config::read` 를 불러
+    /// 층과 보기를 짓는데, 같은 판에서 `ctx.lang()` 도 부르므로 그 명령은 같은 파일을 두 번 판다.
+    /// 옮길 자리다. `cmd::project::ls` 와 `cmd::read` 는 `ctx.lang()` 이 들면서 이 문으로 왔다 —
+    /// **말을 들이는 명령은 설정도 이 문으로 읽는다**, 안 그러면 두 번 판다.
     pub fn registry(&self) -> &crate::user_config::Registry {
         self.reg.get_or_init(|| crate::user_config::read(crate::user_config::path().as_deref()))
     }
@@ -154,7 +155,9 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 /// 목록이 빈 까닭이 사용자 설정의 문제일 수 있어 그것도 붙인다.
 pub fn nothing_registered(reg: &crate::user_config::Registry, lang: crate::i18n::Lang) -> Fail {
     // 앞줄(`저장소가 아니다`)은 아직 `store` 의 것이라 한국어다 — 저장 계층의 글은 그 층과
-    // 함께 옮긴다(moai-yn5x). 뒷줄은 이 층의 것이라 말묶음에서 온다.
+    // 함께 옮긴다(moai-5j49). 뒷줄은 이 층의 것이라 말묶음에서 온다. **그때까지 이 한 덩이는
+    // 두 말로 선다** — 영어로 고른 사람이 첫 줄을 한국어로 받는다. 그 줄이 `Repo::discover` 의
+    // 것이라 여기서만 못 고친다(리뷰).
     let mut msg = format!("{}\n{}", crate::store::NOT_A_REPO, crate::i18n::say(lang, "opening.nothing_registered"));
     // 사람의 설정 파일에서 온 글이다 — 제어문자를 걷고 한 줄로 접는다. 이 말은 줄 단위로
     // 읽히므로(`fail` 이 그대로 stderr 에 쓴다) 여러 줄이 섞이면 어디까지가 한 까닭인지 흐려진다.
@@ -486,16 +489,20 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
 /// 전체가 아니라 **바뀐 줄만** 검사하는 것과도 같은 자다.
 ///
 /// 줄을 봐야 하므로 락 안에서 잰다 — 밖에서 재면 그 사이 마지막 줄이 그 칸을 떠난다.
+///
+/// **말이 아니라 자료를 낸다**(리뷰) — 글을 여기서 지으면 부르는 쪽이 `ctx.lang()` 을 인자로
+/// 넘겨야 하고, 인자는 락 **안에서** 먼저 셈해진다. [`Ctx::lang`] 의 첫 부름은 사용자 설정을
+/// 열어 파싱하므로, 오타가 없는 판까지 트래커 락을 쥔 채 남의 파일을 읽게 된다 — `model::actor`
+/// 를 락 밖으로 뺀 것과 같은 까닭이다(`cmd/mv.rs`). 거절할 때만 펴면 그 일이 아예 안 난다.
 pub fn check_from(
     from: Option<&str>,
     issues: &[crate::model::Issue],
     cfg: &crate::config::Config,
-    lang: crate::i18n::Lang,
-) -> R<()> {
+) -> Result<(), crate::config::NoSuchColumn> {
     // 아는가를 가르는 것은 `report` 다 — 읽는 쪽(`show -s`·탐색기 필터)과 **같은 술어**를
     // 써야 옮길 수는 있는데 못 찾는 줄이 안 생긴다.
     let Some(f) = from.filter(|f| !crate::report::knows_column(issues, cfg, f)) else { return Ok(()) };
-    Err(Fail::coded(crate::view::no_such_column(lang, &unknown_column(f, cfg)), code::BAD_STATUS))
+    Err(unknown_column(f, cfg))
 }
 
 /// 줄까지 보고도 모르는 칸 — 쓰기도 읽기도 **같은 자료**를 낸다(moai-fdk7). 글은

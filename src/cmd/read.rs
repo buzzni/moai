@@ -19,7 +19,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let load = repo.read()?;
     let now = crate::model::now();
-    let path = super::project::writable_config(ctx.lang())?;
+    let path = super::project::writable_config(ctx)?;
 
     // 있는 id 는 **한 번 모아 견준다**(moai-j038.vna) — `Load::get` 은 줄 전부를 뒤에서부터 훑으므로
     // 받은 id 마다 부르면 `--all`·`-e` 가 줄 수의 제곱으로 느려진다(1만 줄에 안 읽은 5천이면 1초 가까이).
@@ -41,8 +41,11 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
         // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다. 읽음은 이 저장소의
         // 제 파일에 살고, 옛 `[read]` 는 겹쳐 본다(moai-omx7, 사용자 결정 2026-09-19).
-        let legacy = crate::user_config::read(Some(&path)).read;
-        let marks = crate::read_marks::read(&path, &repo.root, &legacy);
+        // **설정은 [`super::Ctx::registry`] 로 읽는다**(리뷰) — 위에서 `writable_config(ctx)`
+        // 이 이미 그 문을 지나므로, 제 손으로 한 번 더 읽으면 한 명령이 같은 파일을 두 번 판다
+        // (moai-u8cs 가 걷어 낸 그것이고, `Ctx::registry` 의 머리글이 `cmd::read` 를 이름으로 댄다).
+        let legacy = &ctx.registry().read;
+        let marks = crate::read_marks::read(&path, &repo.root, legacy);
         // **못 든 까닭은 말한다**(리뷰) — 삼키던 판은 못 읽는 읽음 파일 하나로 `--all` 이 내게 온 것을
         // 통째로 "안 읽음" 으로 세어 도장을 다시 찍으면서, 왜 그랬는지를 어디에도 안 남겼다. 막지는
         // 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
@@ -59,10 +62,13 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
                 missing.insert(group.clone());
             }
             Some(g) if !crate::report::is_group(g) => {
-                return Err(Fail::coded(
-                    format!("`-e` 는 에픽·마일스톤을 받는다 — {group} 는 {} 다", g.kind.as_str()),
-                    super::code::BAD_INPUT,
-                ));
+                // 이 명령의 거절과 몸통이 **한 말로 선다**(리뷰) — 없는 id 만 말묶음에서 오고
+                // 나머지가 박혀 있으면 한 판의 stderr 와 stdout 이 두 말로 갈린다.
+                let said = crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "refuse.read_not_a_group"),
+                    &[("id", group), ("is", g.kind.as_str())],
+                );
+                return Err(Fail::coded(said, super::code::BAD_INPUT));
             }
             Some(_) => {
                 let index = crate::nav::Index::of(&load.issues);
@@ -115,7 +121,8 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let missing: Vec<String> = missing.into_iter().collect();
     for id in &missing {
         super::note_partial();
-        eprintln!("moai: {id} 를 못 찾았다");
+        // `mv`·`defer` 와 **한 키다**(`refuse.not_found`, moai-95g1) — 손으로 지으면 이 명령만 옛 말로 남는다.
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     if ctx.json {
         // **기계도 그 까닭을 받는다**(moai-ajh2). stderr 한 줄만 내던 판은 고리를 짜는 쪽이 그것을
@@ -126,9 +133,10 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         return super::json_line(&Marked { read: &fresh, missing: &missing, problems: &problems, at: &now });
     }
     if fresh.is_empty() {
-        return Ok(vec!["읽음으로 적을 것이 없다".to_string()]);
+        return Ok(vec![crate::i18n::say(ctx.lang(), "read.nothing").to_string()]);
     }
-    Ok(fresh.iter().map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, "읽음"))).collect())
+    let marked = crate::i18n::say(ctx.lang(), "read.marked");
+    Ok(fresh.iter().map(|id| format!("{}  {}", paint(style::ID, id), paint(style::DIM, marked))).collect())
 }
 
 /// 읽음을 들고 적다 만난 까닭을 stderr 로 — **같은 글은 한 번만.**

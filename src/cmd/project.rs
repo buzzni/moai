@@ -20,12 +20,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config(ctx.lang())?;
+    let config = writable_config(ctx)?;
     // 적는 길은 TUI 층의 `a` 와 하나다 — 링크 풀기·멱등·`.moai` 를 준 자리에서만 보기.
     // **자리는 여는 자리에서 함께 세어 온다**(리뷰 10번) — 그리는 쪽이 다시 물으면 `Repo::open`
     // 이 이미 푼 답을 더 무거운 자로 또 풀고, 그 값을 `project ls` 는 줄마다 치른다.
     let projects::Added { path: dir, added, initialized, tracker_at, unreadable } =
-        projects::add(&config, input, &cwd()?, ctx.lang())?;
+        projects::add(&config, input, &cwd(ctx.lang())?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -50,13 +50,11 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     }
 
     let shown = one_line(&dir.display().to_string());
-    let said = match added {
-        true => crate::i18n::say(ctx.lang(), "project.added"),
-        false => crate::i18n::say(ctx.lang(), "project.already"),
-    };
+    // **갈래마다 제 `say` 를 적되 갈림은 하나다** — 키를 고르는 `match` 와 칠하는 `match` 를
+    // 따로 두면 갈래가 하나 늘 때 한쪽만 고쳐진다(리뷰).
     let mut out = vec![match added {
-        true => format!("{said}  {shown}"),
-        false => format!("{}  {shown}", paint(style::DIM, said)),
+        true => format!("{}  {shown}", crate::i18n::say(ctx.lang(), "project.added")),
+        false => format!("{}  {shown}", paint(style::DIM, crate::i18n::say(ctx.lang(), "project.already"))),
     }];
     // 한 줄은 `project ls` 의 끝 칸과 같은 말이다 — 두 화면이 같은 디렉터리를 달리 부르지 않는다.
     if let Some(error) = &unreadable {
@@ -101,9 +99,9 @@ fn uninit_line(dir: &Path, tracker_at: Option<&Path>, lang: crate::i18n::Lang) -
 }
 
 pub fn rm(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
-    let config = writable_config(ctx.lang())?;
+    let config = writable_config(ctx)?;
     // 빼는 길은 TUI 층의 `d` 와 하나다 — 철자 여럿으로 견주고, 설정 파일이 없으면 안 만든다.
-    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd()?, ctx.lang())?;
+    let projects::Removed { spelled, removed } = projects::remove(&config, input, &cwd(ctx.lang())?, ctx.lang())?;
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -145,8 +143,8 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
     // 글이 둘이면 같은 오타에 화면과 거절문이 다른 말을 한다.
     let hue = user_config::hue_choice(word)
         .map_err(|e| Fail::coded(crate::view::not_a_hue(ctx.lang(), &e), code::BAD_INPUT))?;
-    let config = writable_config(ctx.lang())?;
-    let spellings = user_config::spellings(input, &cwd()?);
+    let config = writable_config(ctx)?;
+    let spellings = user_config::spellings(input, &cwd(ctx.lang())?);
     let not_registered = || {
         let shown = one_line(&spellings[0].display().to_string());
         Fail::coded(
@@ -406,14 +404,21 @@ fn said(state: &State, lang: crate::i18n::Lang) -> String {
 /// 쓸 설정 파일의 자리. 모르면 **쓰기는 멈춘다** — 어디에 적었는지 모르는 등록은
 /// 다음 `ls` 에서 안 보이는 등록이다. `moai read` 도 이것을 부른다 — 같은 조건에 두 명령이
 /// 다른 말(고칠 길을 대는 말과 안 대는 말)을 하지 않게(moai-j038.vna).
-pub(super) fn writable_config(lang: crate::i18n::Lang) -> R<PathBuf> {
+///
+/// **말이 아니라 [`Ctx`] 를 받는다**(리뷰) — `ctx.lang()` 을 인자로 주면 자리를 아는 판까지
+/// 사용자 설정을 열어 파싱한다. 그 첫 부름을 늦춰 둔 것이 [`Ctx::lang`] 의 약속이고, 이 줄은
+/// 자리를 **모를 때만** 서므로 거절문을 짓는 자리에서 물으면 된다.
+pub(super) fn writable_config(ctx: &Ctx) -> R<PathBuf> {
     // 읽기가 같은 자리를 못 찾았을 때 대는 줄(`ConfigTrouble::NoPlace`)과 **한 뿌리에서 나온다** —
     // 한쪽은 "없다" 고 알리고 다른 쪽은 "고칠 길" 을 대므로 글은 둘이지만, 낱말이 갈리면 같은
     // 처지를 두 말로 읽는다.
-    user_config::path().ok_or_else(|| Fail::coded(crate::i18n::say(lang, "refuse.config_no_place"), code::ERROR))
+    user_config::path().ok_or_else(|| Fail::coded(crate::i18n::say(ctx.lang(), "refuse.config_no_place"), code::ERROR))
 }
 
-fn cwd() -> R<PathBuf> {
-    // OS 가 낸 글을 그대로 나른다 — 우리가 지은 글이 아니다.
-    std::env::current_dir().map_err(|e| Fail::new(format!("{e}")))
+fn cwd(lang: crate::i18n::Lang) -> R<PathBuf> {
+    // OS 가 낸 글은 그대로 나르되 **무엇을 하다 났는지는 우리가 댄다**(리뷰) — errno 한 줄은
+    // 주어가 없어, 준 디렉터리가 없는 것인지 설정이 없는 것인지 여기가 없어진 것인지 안 갈린다.
+    // 남의 글을 `{said}` 로 감싸는 것은 `refuse.config_unparsable` 과 한 자다.
+    std::env::current_dir()
+        .map_err(|e| Fail::new(crate::i18n::fill(crate::i18n::say(lang, "refuse.no_cwd"), &[("said", &e.to_string())])))
 }

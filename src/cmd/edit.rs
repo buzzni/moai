@@ -127,10 +127,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let repo = Repo::discover()?;
     let body = super::add::read_body(args.body.clone())?;
     let at = model::now();
+    // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
+    // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
+    // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
+    let lang = ctx.lang();
 
     let done: Edited = repo.with_write(|issues, cfg, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
-            return Err(Fail::not_found(&args.id, ctx.lang()));
+            return Err(Fail::not_found(&args.id, lang));
         };
         let before = i.clone();
 
@@ -245,7 +249,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         if let Some(e) = &out.epic
             && epic.is_none()
         {
-            eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "edit.no_such_epic"), &[("id", e)]));
+            eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
         }
         let children: Vec<Issue> =
             issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();

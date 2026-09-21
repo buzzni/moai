@@ -225,10 +225,19 @@ pub enum WriteTrouble {
 impl WriteTrouble {
     /// 이 까닭이 달고 나갈 코드. **손으로 고쳐야 쓰는 것은 `broken`**(moai-3owm, 사용자 결정
     /// 2026-09-18) — 받는 쪽이 I/O 실패와 가른다. 사람이 방금 친 값이 틀린 것은 `bad_input` 이다.
+    /// **갈래를 빠짐없이 적는다** — `_` 로 덮으면 새 갈래가 말없이 `broken` 을 달고 나간다(리뷰).
+    /// 글을 짓는 [`crate::view::write_trouble`] 은 이미 아홉을 다 적으므로, 한쪽만 덮개를 두면
+    /// 컴파일러가 묻는 축과 안 묻는 축이 갈린다. `broken` 은 "사람이 파일을 고쳐야 쓴다" 는 약속이라,
+    /// 사람이 방금 친 값이 틀린 갈래가 여기에 섞이면 받는 쪽을 멀쩡한 설정으로 보낸다.
     pub fn code(&self) -> &'static str {
         match self {
             Self::PathNotUtf8 { .. } | Self::PathNotAbsolute { .. } | Self::NotADirectory { .. } => code::BAD_INPUT,
-            _ => code::BROKEN,
+            Self::Unparsable { .. }
+            | Self::LinkDangling { .. }
+            | Self::NotTables { .. }
+            | Self::HueNotPlain { .. }
+            | Self::LookNotATable { .. }
+            | Self::LookKeyNotPlain { .. } => code::BROKEN,
         }
     }
 }
@@ -450,13 +459,17 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(err(path, e)),
     };
-    let mut doc =
-        Doc::parse(&src).map_err(|e| fail(lang, Some(path), &WriteTrouble::Unparsable { said: e.clone() }))?;
+    let mut doc = Doc::parse(&src).map_err(|e| fail(lang, Some(path), &WriteTrouble::Unparsable { said: e }))?;
     // **손으로 고칠 거절에는 어느 파일인지 붙인다**(moai-gmdu 에픽 리뷰) — 설정의 자리는 환경(`MOAI_CONFIG`·
     // XDG)이 골라 사람이 모를 수 있다. 문서(`Doc`)는 제 자리를 모르고 여기는 안다: 깨진 설정을 대는 위의
     // 거절문과 같은 모양으로 한 곳에서 붙인다. 부르는 쪽마다 붙이게 두면 붙인 곳(`project color`)과 잊은
     // 곳(`project add`·`rm`·`read`·탐색기)이 갈린다.
-    let out = f(&mut doc).map_err(|e| fail(lang, Some(path), &e))?;
+    // **자리를 다는 것은 손으로 파일을 고쳐야 하는 갈래뿐이다**(`broken`, 리뷰). 사람이 방금 친
+    // 값이 틀린 것(`bad_input` — 경로가 UTF-8 이 아니다·절대경로가 아니다)은 제 글에 그 값을
+    // 이미 들고 있어, 앞에 설정 파일 이름을 달면 멀쩡한 설정을 고치라는 말로 읽힌다. 옛 줄이
+    // `match e.code { BROKEN => 붙인다, _ => 그대로 }` 였던 까닭이고, [`crate::view::write_trouble`]
+    // 의 머리글이 "자리를 제 글에 이미 든 갈래만 앞이 빈다" 고 적어 둔 그 갈림이다.
+    let out = f(&mut doc).map_err(|e| fail(lang, (e.code() == code::BROKEN).then_some(path), &e))?;
     // **바꾼 것이 없으면 건드리지 않는다.** 렌더 결과를 원문과 견주지 않고 깃발을
     // 보는 까닭은, 라이브러리가 어느 날 공백 하나를 달리 내더라도 헛 쓰기가 안
     // 생기게 하려는 것이다.

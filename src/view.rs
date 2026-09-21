@@ -2308,9 +2308,10 @@ pub fn write_trouble(lang: Lang, at: Option<&std::path::Path>, why: &crate::user
         WriteTrouble::LookKeyNotPlain { key, found } => {
             fill(say(lang, "refuse.look_key_not_plain"), &[("key", &format!("{TUI}.{key}")), ("is", found)])
         }
-        WriteTrouble::PathNotUtf8 { at } => {
-            fill(say(lang, "refuse.path_not_utf8"), &[("at", &at.display().to_string())])
-        }
+        // **적힌 바이트째 낸다** — `display()` 는 탈이 난 바로 그 바이트를 U+FFFD 로 바꿔, 제 까닭을
+        // 지운 글이 된다(리뷰). `Debug` 는 `\xNN` 으로 펴므로 사람이 어느 자리인지 보고 되칠 수 있다.
+        // 바로 아래 `PathNotAbsolute` 와 한 모양이다.
+        WriteTrouble::PathNotUtf8 { at } => fill(say(lang, "refuse.path_not_utf8"), &[("at", &format!("{at:?}"))]),
         WriteTrouble::PathNotAbsolute { raw } => {
             fill(say(lang, "refuse.path_not_absolute"), &[("raw", &format!("{raw:?}"))])
         }

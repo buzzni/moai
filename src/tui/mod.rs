@@ -2195,8 +2195,12 @@ impl App {
                 self.saved = look;
                 if !skipped.is_empty() {
                     // 건너뛴 키의 까닭도 말묶음에서 온다(moai-wflg) — 자료로 와서 여기서 편다.
+                    // **어느 파일인지를 단다**(리뷰) — 이 줄도 "손으로 고친다" 로 끝나는 갈래라
+                    // `update` 의 거절문과 같은 약속을 진다(moai-gmdu). 탐색기 안에서는 설정의
+                    // 자리를 달리 물을 길이 없어, 안 달면 어느 파일을 고칠지 알 수 없다.
+                    let at = Some(path.as_path());
                     let why: Vec<String> =
-                        skipped.iter().map(|t| crate::view::write_trouble(self.site.lang, None, t)).collect();
+                        skipped.iter().map(|t| crate::view::write_trouble(self.site.lang, at, t)).collect();
                     self.notice = Some(fill(say(self.site.lang, "tui.look.skipped"), &[("why", &why.join(" · "))]));
                 }
             }

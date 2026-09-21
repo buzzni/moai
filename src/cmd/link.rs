@@ -110,7 +110,11 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
     if touched.is_empty() {
-        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, "바뀐 것이 없다"))]);
+        // `edit` 과 **한 키다**(`edit.nothing_changed`, moai-95g1) — 같은 문장을 두 벌로 두면
+        // 한 도구가 같은 처지를 두 말로 말한다(리뷰). 이 줄과 아래 화살표 줄은 서로 배타라
+        // 한 판에 같이 서지 않는다 — 나머지 `link` 의 글은 그 표면의 차례에 옮긴다.
+        let said = crate::i18n::say(ctx.lang(), "edit.nothing_changed");
+        return Ok(vec![format!("{}  {}", paint(style::ID, &args.id), paint(style::DIM, said))]);
     }
     Ok(touched
         .iter()
