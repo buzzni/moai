@@ -721,6 +721,7 @@
   "store.not_a_directory": "디렉터리가 아니다 — {at}",
   "store.duplicate_id": "id 가 두 번 있다 — {id}",
   "store.lock_busy": "{secs} 초 동안 다른 moai 가 쓰고 있어 물러난다. 아무것도 바뀌지 않았다",
+  "store.no_journal_email": "{id}: 저널은 적는 사람의 메일로 갈리는데 이 줄에는 메일이 없다. 아무것도 안 적었다",
   "store.journal_lost": "{said} (적어 온 말도 안 남았다 — `moai note` 로 다시 적는다: {ids})",
   "look.not_a_table": "`{key}` 는 `[{key}]` 표여야 한다 — 지금은 {found}",
   "look.want": "`{key}` 는 {want} 한다 — 지금은 {found}",

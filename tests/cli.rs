@@ -673,7 +673,7 @@ fn init_creates_exactly_three_files() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    assert_eq!(names, ["config.toml", "issues.jsonl", "journal.jsonl"]);
+    assert_eq!(names, ["config.toml", "issues.jsonl"]);
 
     let attrs = std::fs::read_to_string(s.path().join(".gitattributes")).unwrap();
     assert!(attrs.contains("journal.jsonl  text eol=lf merge=union"), "{attrs}");
@@ -930,7 +930,8 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
     std::fs::write(
         &attrs,
-        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/journal.jsonl  text eol=lf merge=union\n",
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n\
+         .moai/journal.jsonl  text eol=lf merge=union\n.moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
     let said = |lang: Option<&str>| {
@@ -1049,7 +1050,8 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
         root.join(".gitattributes"),
         "# 이 저장소는 스냅샷에 머지 드라이버를 안 쓴다\n\
          .moai/issues.jsonl   text eol=lf -merge\n\
-         .moai/journal.jsonl  text eol=lf merge=union\n",
+         .moai/journal.jsonl  text eol=lf merge=union\n\
+         .moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
     let said = ok(root, &["status"]);
@@ -1159,7 +1161,6 @@ fn init_keeps_a_new_prefix_short() {
     std::fs::create_dir_all(old.join(".moai")).unwrap();
     std::fs::write(old.join(".moai/config.toml"), "prefix = \"my-company-backend\"\n").unwrap();
     std::fs::write(old.join(".moai/issues.jsonl"), "").unwrap();
-    std::fs::write(old.join(".moai/journal.jsonl"), "").unwrap();
     assert!(ok(&old, &["init"]).contains("이미 심겨 있다"));
     assert!(
         ok(&old, &["init", "my-company-backend"]).contains("이미 심겨 있다"),
@@ -1906,7 +1907,7 @@ fn outside_a_repo_each_registered_project_stands_apart_even_with_the_same_ids() 
     ok(&one, &["init", "argos"]);
     let id = add(&one, &["같은 줄"]);
     std::fs::create_dir_all(two.join(".moai")).unwrap();
-    for f in ["config.toml", "issues.jsonl", "journal.jsonl"] {
+    for f in ["config.toml", "issues.jsonl"] {
         std::fs::copy(one.join(".moai").join(f), two.join(".moai").join(f)).unwrap();
     }
     ok(&two, &["mv", &id, "in_progress"]);
@@ -2164,7 +2165,7 @@ fn outside_a_repo_each_project_wears_its_own_colour_and_only_colour_changes() {
     let todo = add(&dirs[0], &["집을 일"]);
     for d in &dirs[1..] {
         std::fs::create_dir_all(d.join(".moai")).unwrap();
-        for f in ["config.toml", "issues.jsonl", "journal.jsonl"] {
+        for f in ["config.toml", "issues.jsonl"] {
             std::fs::copy(dirs[0].join(".moai").join(f), d.join(".moai").join(f)).unwrap();
         }
     }
@@ -2563,8 +2564,37 @@ fn line_of(dir: &Path, id: &str) -> String {
         .to_string()
 }
 
+/// 이 저장소가 **지금 적고 있는** 저널 파일 하나(moai-nzlo). 시험은 사람 하나로 도므로 하나다.
+fn journal_file(dir: &Path) -> PathBuf {
+    let mut split: Vec<PathBuf> = std::fs::read_dir(dir.join(".moai/journal"))
+        .expect("저널 디렉터리가 없다 — 아직 아무것도 안 적었다")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .collect();
+    split.sort();
+    assert_eq!(split.len(), 1, "사람 하나로 도는 시험인데 저널 파일이 여럿이다 — {split:?}");
+    split.remove(0)
+}
+
+/// 저널 전부 — 옛 한 파일과 `.moai/journal/` 의 파일을 이름 차례로 잇는다(moai-b7cq).
+///
+/// **파일이 여럿인 것이 정상 꼴이라** 시험도 한 파일을 집지 않는다. 차례는 `Repo::journal_files`
+/// 와 같다: 옛 한 파일이 먼저, 그다음 이름 순.
 fn journal(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join(".moai/journal.jsonl")).unwrap()
+    let mut out = std::fs::read_to_string(dir.join(".moai/journal.jsonl")).unwrap_or_default();
+    let mut split: Vec<PathBuf> = std::fs::read_dir(dir.join(".moai/journal"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .collect();
+    split.sort();
+    for p in split {
+        out.push_str(&std::fs::read_to_string(p).unwrap());
+    }
+    out
 }
 
 #[test]
@@ -2766,7 +2796,7 @@ fn a_torn_journal_line_breaks_neither_the_list_nor_the_history() {
     let s = init("tornjournal");
     let id = add(s.path(), &["일"]);
     ok(s.path(), &["note", &id, "model: anthropic/opus-5 tokens=7 (low — 멀쩡한 줄)"]);
-    let path = s.path().join(".moai/journal.jsonl");
+    let path = journal_file(s.path());
     let mut torn = std::fs::read(&path).unwrap();
     // 한글 한 글자(`한` = ED 95 9C)의 앞 두 바이트에서 끊긴 덧붙이기.
     torn.extend_from_slice(
@@ -6974,14 +7004,59 @@ fn a_whole_plan_gets_an_assignee_too() {
 fn an_old_journal_line_without_an_email_still_shows() {
     let s = init("oldjournal");
     let id = add(s.path(), &["제목"]);
+    // **옛 한 파일에 적는다** — 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고, 그 옛 파일도
+    // 읽을 때 드는 N 중 하나다(moai-1vkb). 옮기는 마이그레이션이 없다는 것이 여기서 선다.
     let path = s.path().join(".moai/journal.jsonl");
-    let mut j = std::fs::read_to_string(&path).unwrap();
-    j.push_str(&format!(
-        "{{\"ts\":\"2026-09-01T00:00:00Z\",\"id\":\"{id}\",\"kind\":\"note\",\"by\":\"옛사람\",\"text\":\"옛 메모\"}}\n"
-    ));
-    std::fs::write(&path, j).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "{{\"ts\":\"2026-09-01T00:00:00Z\",\"id\":\"{id}\",\"kind\":\"note\",\"by\":\"옛사람\",\"text\":\"옛 메모\"}}\n"
+        ),
+    )
+    .unwrap();
     let out = ok(s.path(), &["show", &id]);
     assert!(out.contains("옛 메모") && out.contains("옛사람"), "{out}");
+}
+
+/// **저널은 적는 사람의 메일로 갈린다**(moai-b7cq, 2026-09-21 사용자 결정). 옛 한 파일은
+/// 그대로 두고 읽을 때 함께 든다 — 옮기는 마이그레이션은 없다.
+///
+/// 여기서 한 번에 재는 것이 셋이다. 파일 이름이 메일에서 오는가(moai-nzlo), 옛 파일과 새
+/// 파일이 **시간 차례로** 한 이력이 되는가(moai-1vkb), `.gitattributes` 에 두 줄이 다 서는가
+/// (moai-a6ob). 셋은 한 결정의 세 면이라 갈라 두면 한쪽만 되돌아가도 안 붉어진다.
+#[test]
+fn the_journal_is_filed_by_email_beside_the_old_one() {
+    let s = init("journalsplit");
+    let id = add(s.path(), &["갈린다"]);
+
+    // 이름이 아니라 메일에서 온다 — `@` 와 `.` 는 `_` 다. 옛 한 파일은 아무도 안 짓는다.
+    let mine = s.path().join(".moai/journal/tester_example_com.jsonl");
+    assert!(mine.is_file(), "메일로 지은 파일이 없다 — {:?}", std::fs::read_dir(s.path().join(".moai/journal")));
+    assert!(!s.path().join(".moai/journal.jsonl").exists(), "옛 한 파일을 새로 지었다");
+    assert!(std::fs::read_to_string(&mine).unwrap().contains(&id), "새 줄이 제 파일에 없다");
+
+    // 옛 파일의 줄이 **사이에** 든다 — 앞도 뒤도 아닌 시간 차례다.
+    std::fs::write(
+        s.path().join(".moai/journal.jsonl"),
+        format!(
+            "{{\"ts\":\"2000-01-01T00:00:00Z\",\"id\":\"{id}\",\"kind\":\"note\",\"by\":\"맨처음\",\"text\":\"맨 처음\"}}\n\
+             {{\"ts\":\"2099-01-01T00:00:00Z\",\"id\":\"{id}\",\"kind\":\"note\",\"by\":\"맨나중\",\"text\":\"맨 나중\"}}\n"
+        ),
+    )
+    .unwrap();
+    ok(s.path(), &["note", &id, "가운데"]);
+    let out = ok(s.path(), &["show", &id]);
+    let at = |w: &str| out.find(w).unwrap_or_else(|| panic!("{w} 가 이력에 없다\n{out}"));
+    assert!(at("맨 처음") < at("가운데") && at("가운데") < at("맨 나중"), "두 파일이 시간으로 안 섞였다\n{out}");
+
+    // **두 줄이 다 선다** — 옛 한 파일을 든 저장소가 아직 있고, 그 파일도 union 이라야 한다.
+    let attrs = std::fs::read_to_string(s.path().join(".gitattributes")).unwrap();
+    for rule in [".moai/journal.jsonl  text eol=lf merge=union", ".moai/journal/*.jsonl  text eol=lf merge=union"] {
+        assert!(attrs.lines().any(|l| l.trim() == rule), "`{rule}` 이 없다\n{attrs}");
+    }
+    // 규칙이 다 선 저장소는 `.gitattributes` 를 두고 조르지 않는다.
+    let said = ok(s.path(), &["status"]);
+    assert!(!said.contains(".gitattributes"), "다 적어 두고도 빠졌다고 한다\n{said}");
 }
 
 /// 표기는 **화면만** 바꾼다. 파일은 언제나 이름과 메일을 갈라서 든다 —
@@ -8074,17 +8149,19 @@ fn a_journal_only_write_claims_no_rewrite() {
 fn an_add_whose_journal_fails_succeeds_and_says_so() {
     use std::os::unix::fs::PermissionsExt;
     let s = init("journalfail");
-    let journal = s.path().join(".moai/journal.jsonl");
-    std::fs::write(&journal, "").unwrap();
-    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
-    if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+    // 저널은 `.moai/journal/<메일>.jsonl` 이라 막을 자리가 디렉터리다(moai-nzlo) — 파일 하나를
+    // 잠가도 첫 쓰기가 옆에 새 이름으로 연다.
+    let journal = s.path().join(".moai/journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
         return; // root 는 권한을 안 본다
     }
 
     let out = moai(s.path(), &["add", "한 번만", "-q"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "담겼는데 실패로 끝났다 — {err}");
-    assert!(err.contains("이력은 못 남겼다") && err.contains("journal.jsonl"), "{err}");
+    assert!(err.contains("이력은 못 남겼다") && err.contains(".moai/journal/"), "{err}");
     assert_eq!(issues(s.path()).matches("한 번만").count(), 1);
 
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -12218,7 +12295,7 @@ fn worktree_keeps_ready_from_offering_what_another_worktree_picked() {
 #[test]
 fn worktree_writes_nothing_and_skips_trees_without_a_snapshot() {
     let t = trees("wtquiet");
-    let files = |d: &Path| (issues(d), std::fs::read_to_string(d.join(".moai/journal.jsonl")).unwrap());
+    let files = |d: &Path| (issues(d), journal(d));
     let (m0, f0) = (files(&t.main()), files(&t.feat()));
     for args in [
         vec!["status", "--worktree"],
@@ -12820,11 +12897,12 @@ fn project_writes_keep_the_config_files_permissions() {
 fn repo_writes_keep_the_snapshot_files_permissions() {
     use std::os::unix::fs::PermissionsExt as _;
     let s = init("repo-perms");
-    let files = [s.path().join(".moai/issues.jsonl"), s.path().join(".moai/journal.jsonl")];
+    // 저널 파일은 첫 쓰기가 세운다(moai-nzlo) — 권한을 걸려면 그 뒤여야 한다.
+    let id = add(s.path(), &["권한"]);
+    let files = [s.path().join(".moai/issues.jsonl"), journal_file(s.path())];
     for f in &files {
         std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    let id = add(s.path(), &["권한"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
     ok(s.path(), &["note", &id, "메모"]);
     for f in &files {

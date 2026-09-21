@@ -2308,6 +2308,12 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
             fill(say(lang, "store.journal_lost"), &[("said", said), ("ids", &ids.join(" "))])
         }
         Trouble::Invalid { at, why } => invalid(lang, at, why),
+        // **고치는 길은 "누군지 모른다" 와 한 벌이다** — 저널 파일 이름이 메일에서 오므로 모자란
+        // 것이 같고, 두 자리가 달리 대면 같은 처지에 손이 둘이 된다.
+        Trouble::NoJournalEmail { id } => {
+            let said = fill(say(lang, "store.no_journal_email"), &[("id", id)]);
+            format!("{said}\n\n{}", no_actor(lang, &crate::model::NoActor::Unknown))
+        }
     }
 }
 

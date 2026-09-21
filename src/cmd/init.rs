@@ -451,7 +451,11 @@ const GITATTRIBUTES: &str = "\
 .moai/issues.jsonl   text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
+# It is filed per writer, by email — `.moai/journal/raven_buzzni_com.jsonl`.
+# Several files is the normal shape, and the old single file is still read as
+# one of them, so both lines stand.
 .moai/journal.jsonl  text eol=lf merge=union
+.moai/journal/*.jsonl  text eol=lf merge=union
 ";
 
 // **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 `.claude/worktrees/` 에
@@ -892,7 +896,10 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
 
     if !again {
         std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", ""), ("journal.jsonl", "")] {
+        // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
+        // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
+        // 그 파일은 이제 읽기만 하는 옛 자리다. 빈 디렉터리는 git 이 안 담으므로 미리 만들지도 않는다.
+        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", "")] {
             let p = dir.join(name);
             std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
         }

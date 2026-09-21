@@ -7884,10 +7884,11 @@ mod tests {
     fn a_save_whose_journal_fails_closes_as_saved_and_says_so() {
         use std::os::unix::fs::PermissionsExt;
         let (scratch, mut a) = writable("jot-nojournal");
-        let journal = scratch.join(".moai/journal.jsonl");
-        std::fs::write(&journal, "").unwrap();
-        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
-        if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+        // 저널은 `.moai/journal/<메일>.jsonl` 이라 막을 자리가 디렉터리다(moai-nzlo).
+        let journal = scratch.join(".moai/journal");
+        std::fs::create_dir_all(&journal).unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(journal.join("probe")).is_ok() {
             return; // root 는 권한을 안 본다
         }
         jotting(&mut a, "한 번만");
