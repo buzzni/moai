@@ -224,3 +224,10 @@
 {"ts":"2026-09-21T17:26:12Z","id":"moai-h06a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pkvw 와 같다 — 사용자가 done 으로 정했다(2026-09-21). 앞 노트의 칸 판단만 뒤집힌다."}
 {"ts":"2026-09-21T17:26:15Z","id":"moai-6924","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T17:27:07Z","id":"moai-1p4t","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"멈춘 에픽에 ⏯ 를 세운다 — 끝난 멤버가 있는데 도는 멤버가 없다"}
+{"ts":"2026-09-21T17:28:35Z","id":"moai-6ney.ja4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 못 읽는 저널을 넘기는 읽기와 그것을 대는 자리"}
+{"ts":"2026-09-21T17:28:42Z","id":"moai-6ney.ja4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:29:04Z","id":"moai-xlpc","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"본문 칸(tui::edit::Editor)에 되돌리기(Ctrl-Z)와 글 처음·끝(Ctrl-Home/End)"}
+{"ts":"2026-09-21T17:29:04Z","id":"moai-bx2q","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"? 로 여는 전체 키 팝업 — 모드마다 되는 키를 lazygit·yazi 처럼 한 창에, 치는 대로 거르기"}
+{"ts":"2026-09-21T17:29:17Z","id":"moai-6ney.ja4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: /code-review xhigh --fix 가 도는 중이다. 원문을 이 이슈에 노트로 남기고, 받은 것과 넘긴 것을 -m 에 적어 닫는다. 워크트리는 .claude/worktrees/moai-6ney, 가지는 worktree-moai-6ney, 머지 안 했다"}
+{"ts":"2026-09-21T17:29:17Z","id":"moai-f0zk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(moai-6ney.ja4)의 고침을 받고, 루트에서 develop 에 병합한 뒤 닫는다"}
+{"ts":"2026-09-21T17:29:17Z","id":"moai-6924","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 에픽 끝 리뷰(moai-6ney.ja4)의 고침을 받고, 루트에서 develop 에 병합한 뒤 닫는다"}
