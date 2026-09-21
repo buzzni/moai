@@ -7780,6 +7780,18 @@ mod tests {
             // **파이프의 칸이거나 `&` 로 띄운 `eval` 은 하위 셸이다** — 그 `exit` 는 그 칸만 끝낸다.
             // 묶음째 문 것도 같다(moai-4arw) — `|` 앞의 빈 토막에 거슬러 적는다.
             "moai mv t-1 in_progress --from todo || { echo fail; exit 1; } | cat; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || { exit 1; } | cat; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || { exit 1; } & sed -i s/a/b/ src/store.rs",
+            // **파이프의 칸인 묶음은 제 하위 셸이다**(moai-gu8b) — 그 안의 `exit` 는 바깥 셸을 안
+            // 끝낸다. 깊이를 안 세던 판은 그 묶음 안에 겹이 하나 들면 끝낸 것으로 읽어 샜다.
+            "moai mv t-1 in_progress --from todo || { bash -c 'x'; exit 1; } | cat; sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || { bash -c 'x'; exit 1; } & sed -i s/a/b/ src/store.rs",
+            "moai mv t-1 in_progress --from todo || { eval 'x'; exit 1; } | cat; sed -i s/a/b/ src/store.rs",
+            // 집기째 묶음에 든 꼴도 같다 — 그 묶음이 파이프의 칸이면 `|| exit 1` 은 제 하위 셸만
+            // 끝내고, 파이프라인의 값은 마지막 칸(`cat`)의 것이라 뒤의 `;`·`&&` 가 그대로 닿는다.
+            "{ moai mv t-1 in_progress --from todo || exit 1; } | cat; sed -i s/a/b/ src/store.rs",
+            "{ bash -c 'moai mv t-1 in_progress --from todo || exit 1'; } | cat && sed -i s/a/b/ src/store.rs",
+            "{ if ! moai mv t-1 in_progress --from todo; then exit 1; fi; } | cat; sed -i s/a/b/ src/store.rs",
             "moai mv t-1 in_progress --from todo || eval 'exit 1' | cat; sed -i s/a/b/ src/store.rs",
             "moai mv t-1 in_progress --from todo || eval 'exit 1' & sed -i s/a/b/ src/store.rs",
             // 그 `cd` 도 뒤로 안 이어진다 — 뒤의 상대 경로는 저장소 안이다.
