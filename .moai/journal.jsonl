@@ -6770,3 +6770,4 @@
 {"ts":"2026-09-21T08:02:06Z","id":"moai-51it","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"priority 가 기본값일 때 null 로 나온다 — 기본값이 늘 선다"}
 {"ts":"2026-09-21T08:02:06Z","id":"moai-ch4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7vlq 에서 펼쳤다 — json 의 priority 가 기본값일 때 null 로 나온다"}
 {"ts":"2026-09-21T08:02:06Z","id":"moai-7vlq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ch4z 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T08:20:08Z","id":"moai-08bo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai init 이 머지 드라이버까지 심는다 — 지금은 이름만 쓰고 명령은 안 심는다"}
