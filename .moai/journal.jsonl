@@ -6876,3 +6876,5 @@
 {"ts":"2026-09-21T09:56:30Z","id":"moai-c62d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰는 moai-ch4z.639 가 세 에픽을 한 판으로 봤다 (high). 다음: 없다 — 받는 사람이 밟는 길은 main 으로 섰고 시험이 그것을 맨다"}
 {"ts":"2026-09-21T09:56:37Z","id":"moai-yeai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰는 moai-ch4z.639 가 세 에픽을 한 판으로 봤다 (high). 다음: 핀이 더한 값 하나가 남았다 — 잡마다 1.97.1 을 새로 받는 것(idea moai-86ob). MSRV 1.88 을 아무도 안 밟는 것은 idea moai-16wi"}
 {"ts":"2026-09-21T09:56:44Z","id":"moai-ch4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 둘로 닫는다 — priority(moai-51it)와 훑다 찾은 kind(moai-a4u9). 다음: 없다 — 줄을 내는 표면은 모두 cmd::Row 를 지나고 rm --json 만 일부러의 예외다. 늘 서는 키는 README·CHANGELOG·심긴 블록에 적혔다"}
+{"ts":"2026-09-21T10:05:37Z","id":"moai-ler5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:05:38Z","id":"moai-433r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
