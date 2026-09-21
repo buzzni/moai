@@ -1474,13 +1474,16 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
 fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
     use crate::git::Error;
     crate::git::run(root, args).map_err(|e| {
-        let (lost, why) = match e {
-            Error::Spawn(e) => (Lost::NoGit, e.to_string()),
-            Error::Failed(err) => (Lost::Failed, err),
-            Error::Stream(e) => (Lost::Stream, e.to_string()),
-            Error::NotUtf8(e) => (Lost::Encoding, e.to_string()),
+        // **git 이 댄 말을 뽑는 자는 하나다**([`crate::git::Error::said`], 리뷰) — 여기서 다시
+        // 훑으면 한 enum 에 대한 같은 `match` 가 세 파일에 서고, 팔 하나를 고쳐도 컴파일러가
+        // 나머지를 안 잡는다. 갈래([`Lost`])만 여기서 고른다.
+        let lost = match e {
+            Error::Spawn(_) => Lost::NoGit,
+            Error::Failed(_) => Lost::Failed,
+            Error::Stream(_) => Lost::Stream,
+            Error::NotUtf8(_) => Lost::Encoding,
         };
-        Trouble::Unfound { lost, why }
+        Trouble::Unfound { lost, why: e.said() }
     })
 }
 

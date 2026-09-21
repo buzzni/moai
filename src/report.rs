@@ -50,12 +50,14 @@ pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
 /// 줄이 목록 칸에서만 멤버로 섰다(moai-b5lu). 뒷줄의 종류로 키를 짜면 가려진 줄은
 /// 저절로 못 찾고, 같은 종류의 쌍둥이는 전처럼 같은 칸을 받는다. 찾는 쪽은
 /// `(i.id, i.kind)` 로 묻는다.
-pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
+pub fn epic_labels(all: &[Issue], lang: crate::i18n::Lang) -> EpicLabels<'_> {
+    // **끊긴 참조의 낱말도 화면 말이다**(moai-ivt9) — 이 값은 목록 칸에 그대로 그려진다.
+    let gone = crate::i18n::say(lang, "report.epic_gone");
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     groups(all)
         .into_iter()
         .filter_map(|(id, epic)| {
-            let title = by_id.get(epic).map_or("(없는 에픽)", |e| e.title.as_str());
+            let title = by_id.get(epic).map_or(gone, |e| e.title.as_str());
             by_id.get(id).map(|row| ((id, row.kind), title.to_string()))
         })
         .collect()
@@ -1049,7 +1051,7 @@ pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) ->
     // 하루가 안 된 것에 다 `0일` 이 붙어 "방금 집었다" 로 읽힌다. 안 실으면 보는 쪽이 칸 나이를
     // 내는데 그 값이 똑같으므로 화면은 그대로고, `--json` 에서 속이는 키 하나가 준다.
     (!lost.is_empty())
-        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m '왜'"))
+        .then(|| Warning::new("stranded", ids_of(&lost)).hint("moai mv <id> todo  ·  moai defer <id> -m '<why>'"))
 }
 
 /// 같은 id 를 쓰는 줄이 **둘 이상이면** 그 수. 하나뿐이면 `None`.
@@ -2151,6 +2153,10 @@ pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     rollup_of(Kind::Epic, issues, cfg)
 }
 
+/// 시험이 쓰는 말 — 거절문의 낱말을 재는 자리가 돌리는 사람의 설정에 안 달리게 박아 둔다.
+#[cfg(test)]
+const TEST_LANG: crate::i18n::Lang = crate::i18n::Lang::Ko;
+
 /// [`rollup`] 과 같은 것. **이미 잰 지도를 받는다**([`Soil`]) — `moai show --tree` 는 바로 옆에서
 /// 거름망과 색인을 같은 지도로 짓는다(moai-g0zx).
 pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>) -> Vec<Roll> {
@@ -2207,11 +2213,11 @@ pub fn rollup_of_in(
     let loose: Vec<&Issue> =
         issues.iter().filter(|i| is_work(i) && !eclipsed(i) && !group.contains_key(i.id.as_str())).collect();
     let (counts, total, done, percent) = tally(&loose);
-    let none = match kind {
-        Kind::Milestone => "마일스톤 없음",
-        _ => "에픽 없음",
-    };
-    out.push(Roll { id: None, title: none.into(), counts, total, done, percent, column: None });
+    // **이 줄의 이름은 여기서 안 짓는다**(리뷰) — `id` 가 `None` 인 것이 이미 "어느 묶음에도
+    // 안 딸린 것" 이라는 말이고, 화면에 설 낱말은 `view` 가 제 말묶음에서 고른다
+    // (`view::tree` 의 `ready.no_epic`). 여기서 지으면 `report` 가 화면 말을 알아야 하고,
+    // 그것은 이 층이 `&[Issue]` 에 대한 순수 함수라는 계약(CLAUDE.md)이 막는 자리다.
+    out.push(Roll { id: None, title: String::new(), counts, total, done, percent, column: None });
     out
 }
 
@@ -6033,7 +6039,7 @@ mod tests {
         let mut held = make("argos-0001", Kind::Idea, "todo");
         held.epic = Some("argos-e001".into());
         let rows = [epic, bare, held];
-        let labels = epic_labels(&rows);
+        let labels = epic_labels(&rows, TEST_LANG);
         assert_eq!(labels.get(&("argos-0001", Kind::Idea)).map(String::as_str), Some("argos-e001 제목"));
         assert_eq!(labels.get(&("argos-0001", Kind::Issue)), None, "가려진 줄이 쌍둥이 에픽을 달았다 — {labels:?}");
 

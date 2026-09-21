@@ -5,6 +5,7 @@
 
 use crate::config::Config;
 use crate::fail::{Fail, R, code};
+use crate::i18n::Lang;
 use crate::model::{Actor, Issue, JournalEntry};
 use fs2::FileExt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,6 +34,8 @@ pub enum Trouble {
     JournalLost { said: String, ids: Vec<String> },
     /// 쓰려는 줄이 검사에 걸렸다([`crate::model::Invalid`], moai-yve0) — 가리키는 자리와 그 까닭.
     Invalid { at: At, why: crate::model::Invalid },
+    /// 적을 저널 줄에 메일이 없다([`file_entries`], moai-nzlo) — 그 줄의 id.
+    NoJournalEmail { id: String },
 }
 
 impl Trouble {
@@ -50,6 +53,8 @@ impl Trouble {
             // 파일이 상했다 — 사람이 손으로 푼다.
             Trouble::DuplicateId { .. } => code::BROKEN,
             Trouble::LockBusy { .. } => code::LOCKED,
+            // 고칠 곳이 argv 가 아니라 사용자 정보다 — `model::NoActor` 와 같은 코드로 나간다.
+            Trouble::NoJournalEmail { .. } => code::NO_ACTOR,
             // 나머지는 부르는 쪽이 준 값이나 자리가 틀린 것이다.
             Trouble::NotADirectory { .. } | Trouble::JournalLost { .. } | Trouble::Invalid { .. } => code::ERROR,
         }
@@ -348,9 +353,11 @@ impl Repo {
     /// 못 찾은 것과 찾았는데 설정이 깨진 것은 다르다. `.moai` 밖에서 부른
     /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
     /// 한눈 보기로 넘기면 제 저장소의 깨진 설정이 남의 프로젝트 목록 뒤에 숨는다.
-    pub fn find() -> R<Option<Repo>> {
+    /// **말은 거절할 때만 묻는다**(moai-iq7j·moai-ivt9) — 설정이 깨진 판에서만 [`Lang`] 을 푼다.
+    /// 값으로 받으면 멀쩡한 판마다 사용자 설정을 열고, 훅은 도구 호출마다 이 길을 지난다.
+    pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
         let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-        Repo::find_from(&dir)
+        Repo::find_from(&dir, lang)
     }
 
     /// [`Repo::find`] 를 준 디렉터리에서 — 훅이 명령이 가리키는 트래커(`-C`·`cd`)를 찾을 때 쓴다.
@@ -372,8 +379,8 @@ impl Repo {
     /// 쓰던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
-    pub fn find_from(dir: &Path) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(Repo::from_found).transpose()
+    pub fn find_from(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
+        Repo::found_root(dir).map(|found| Repo::from_found(found, lang)).transpose()
     }
 
     /// 찾은 자리로 [`Repo`] 를 짓는다 — **옮겨 가는 길은 여기 하나다**([`Repo::find_from`] 이 쓴다).
@@ -385,13 +392,13 @@ impl Repo {
     /// 옮기는 것이므로, 되돌릴 손잡이 하나를 두는 값이 싸다. **끄는 값도 받는다** — 글이 `=1` 로
     /// 적혀 있어 `MOAI_HERE=0` 을 "아니오" 로 읽고 쓰는 쪽이 생기는데, 있기만 하면 켜던 판은
     /// 그 사람에게 말없이 갈라진 스냅샷을 줬다(리뷰 moai-71ht.jlh).
-    fn from_found(found: PathBuf) -> R<Repo> {
+    fn from_found(found: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
         let Some(root) = Repo::redirect(&found) else {
-            return Repo::rooted(found);
+            return Repo::rooted(found, lang);
         };
         // **설정은 한 번만 읽는다** — 찾은 자리로 [`Repo`] 를 지어 놓고 버리던 판은 워크트리의
         // `config.toml` 을 읽고 안 쓴 채 버렸다. 훅이 도구 호출마다 지나는 길이다.
-        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root)? })
+        Ok(Repo { moved_from: Some(found), ..Repo::rooted(root, lang)? })
     }
 
     /// [`Repo::find_from`] 과 같되 **안 옮긴다** — 찾은 자리의 트래커 그대로다.
@@ -399,8 +406,8 @@ impl Repo {
     /// 옮겨 갈 루트를 못 읽을 때(거기 `config.toml` 이 깨졌다) 물러설 자리다. 훅이 그 자리로
     /// 선다 — `moai` 는 크게 실패하는 것이 맞지만, 훅까지 조용해지면 그 한 파일 때문에 저장소의
     /// 모든 워크트리에서 규칙이 통째로 꺼진다(리뷰 moai-71ht.i1u).
-    pub fn find_here(dir: &Path) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(Repo::rooted).transpose()
+    pub fn find_here(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
+        Repo::found_root(dir).map(|root| Repo::rooted(root, lang)).transpose()
     }
 
     /// 이 자리의 트래커가 **옮겨 갈 루트** — 옮기지 않을 자리면 `None`.
@@ -425,8 +432,10 @@ impl Repo {
         look(dir)
     }
 
-    fn rooted(root: PathBuf) -> R<Repo> {
-        let config = Config::load(&root)?;
+    /// **설정의 거절도 자료로 받는다**(moai-ivt9) — `config::Config::load` 는 화면 말을 모르고,
+    /// 펴는 자는 여기 하나다([`crate::view::config_refused`]).
+    fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
+        let config = Config::load(&root).map_err(|why| Fail::new(crate::view::config_refused(lang(), &why)))?;
         Ok(Repo::at(root, config))
     }
 
@@ -462,8 +471,10 @@ impl Repo {
             // 칠 때와 다른 파일이 바뀐다. **위로 찾지 않는다는 계약은 그대로다** — 옮기는 곳은 위가
             // 아니라 같은 나무의 주 체크아웃이고, 거기에 트래커가 없으면 옮기지 않는다.
             Ok(m) if m.is_dir() => match Repo::redirect(dir) {
-                Some(root) => Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root)? })),
-                None => Repo::rooted(dir.to_path_buf()).map(Opened::Repo),
+                Some(root) => {
+                    Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
+                }
+                None => Repo::rooted(dir.to_path_buf(), lang).map(Opened::Repo),
             },
             // `.moai` 가 파일이면 저장소가 아니다 — 위로 찾는 [`Repo::find`] 의 `is_dir` 과 같은 자다.
             Ok(_) => Ok(Opened::Uninit),
@@ -472,7 +483,9 @@ impl Repo {
             // 어느 길도 그 트래커를 안 읽고(CLI 는 위로 찾아 루트로 간다) 커밋하면 병합에서 `config.toml`
             // 이 add/add 로 부딪힌다 — 아무도 안 읽는 파일을 만들라고 시킨 셈이었다.
             Err(e) if gone(&e) => match Repo::redirect(dir) {
-                Some(root) => Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root)? })),
+                Some(root) => {
+                    Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
+                }
                 None => Ok(Opened::Uninit),
             },
             // 권한 없음 따위는 init 전이 아니다. 접으면 "init 하라" 는 틀린 말을 한다.
@@ -528,8 +541,54 @@ impl Repo {
     pub fn issues_path(&self) -> PathBuf {
         self.dir().join("issues.jsonl")
     }
+    /// **옛 한 파일.** 새 줄은 여기 안 간다 — 읽을 때 [`Repo::journal_files`] 가 드는 N 개 중
+    /// 하나일 뿐이다(moai-b7cq). 옮기는 마이그레이션은 없다: 두 꼴이 계속 나란히 산다.
     pub fn journal_path(&self) -> PathBuf {
         self.dir().join("journal.jsonl")
+    }
+
+    /// 사람마다 갈린 저널이 사는 자리 — `.moai/journal/<메일>.jsonl`(moai-b7cq).
+    ///
+    /// **파일이 여럿인 것이 정상 꼴이다**(2026-09-21 사용자 결정). 사람이 여럿이면 메일도
+    /// 여럿이라, 읽는 쪽은 처음부터 N 개를 합치게 짜여 있다 — 메일이 바뀌어 하나 더 서는 것은
+    /// 값이 0 이다.
+    pub fn journal_dir(&self) -> PathBuf {
+        self.dir().join("journal")
+    }
+
+    /// 읽을 저널 파일 전부 — 옛 한 파일이 먼저, 그다음 [`Repo::journal_dir`] 의 것이 이름 차례로.
+    ///
+    /// **차례가 계약이다.** 같은 `ts` 를 든 줄은 [`Repo::journal_by_id`] 의 안정 정렬이 읽은
+    /// 차례 그대로 두므로, 파일 차례가 흔들리면 같은 저장소에서 부를 때마다 이력의 차례가
+    /// 바뀐다. `read_dir` 의 차례는 파일시스템의 것이라 정해져 있지 않아 이름으로 세운다.
+    ///
+    /// 디렉터리가 없으면 옛 한 파일뿐이다 — 저널이 없는 저장소는 고장이 아니다.
+    ///
+    /// **못 여는 자리는 조용히 안 넘긴다**(리뷰). 여기서 접으면 사람들의 이력이 통째로 빠진
+    /// 화면이 멀쩡해 보이고 종료 코드도 0 이다 — [`Repo::journal_by_id`] 가 못 읽는 *파일*에
+    /// 대고 세운 바로 그 금이라, 자리에 대해서도 같은 자로 선다. 목록의 줄 하나를 못 읽는 것도
+    /// 같다: 그 줄이 누구의 파일이었는지는 아무도 모른다.
+    fn journal_files(&self) -> R<Vec<PathBuf>> {
+        let mut out = vec![self.journal_path()];
+        let at = self.journal_dir();
+        let blame = |e: std::io::Error| Fail::new(format!("{}: {e}", at.display()));
+        let dir = match std::fs::read_dir(&at) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(blame(e)),
+        };
+        let mut split = Vec::new();
+        for e in dir {
+            let p = e.map_err(blame)?.path();
+            // **`is_file` 로 잰다** — `read_dir` 의 `file_type` 은 심볼릭 링크를 따라가지 않아,
+            // 디렉터리를 가리키는 링크가 `!is_dir` 을 지나 아래 `fs::read` 에서 EISDIR 로 터진다.
+            if p.extension().is_some_and(|x| x == "jsonl") && p.is_file() {
+                split.push(p);
+            }
+        }
+        split.sort();
+        out.extend(split);
+        Ok(out)
     }
 
     /// 전부 메모리로 읽는다. 디스크 인덱스는 두지 않는다 — 이전 시도가
@@ -645,6 +704,11 @@ impl Repo {
             }
         }
 
+        // **저널이 갈 파일은 스냅샷을 쓰기 전에 정한다**(moai-nzlo) — 바로 위 크기 검사와 같은
+        // 까닭이다. 쓴 뒤에 알면 그 거절은 "썼지만 이력은 못 남겼다" 로 떨어져, 주인 없는 줄을
+        // 막자는 결정이 알림 한 줄로 주저앉는다.
+        let filed = file_entries(&entries).map_err(Stop::Refused)?;
+
         for i in issues.iter_mut() {
             i.normalize();
             let was = original.iter().find(|o| o.id == i.id);
@@ -736,8 +800,8 @@ impl Repo {
         // **안 썼으면 그대로 `Err` 다.** `note` 처럼 저널만 적는 쓰기는 저널이 전부라,
         // 거기서 실패하면 아무것도 안 담겼고 다시 부르는 것이 맞다.
         let mut note = None;
-        if !entries.is_empty()
-            && let Err(e) = self.append_journal(&entries)
+        if !filed.is_empty()
+            && let Err(e) = self.append_journal(&filed)
         {
             if !wrote {
                 return Err(e.into());
@@ -770,20 +834,35 @@ impl Repo {
         Ok((out, note))
     }
 
-    fn append_journal(&self, entries: &[JournalEntry]) -> R<()> {
-        let path = self.journal_path();
-        let mut buf = String::new();
-        for e in entries {
-            buf.push_str(&serde_json::to_string(e).map_err(|e| Fail::new(e.to_string()))?);
-            buf.push('\n');
+    /// 적을 줄을 **파일마다 나눠 담는다**(moai-nzlo). 한 판의 줄이 한 사람의 것이 아닐 수 있어
+    /// (`--user` 를 섞어 부르는 고리) 갈래는 줄마다 본다 — 그래야 이름이 늘 그 줄의 임자에서 온다.
+    fn append_journal(&self, filed: &[(String, Vec<&JournalEntry>)]) -> R<()> {
+        let dir = self.journal_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+        for (name, entries) in filed {
+            let path = dir.join(name);
+            let mut buf = String::new();
+            for e in entries {
+                buf.push_str(&serde_json::to_string(e).map_err(|e| Fail::new(e.to_string()))?);
+                buf.push('\n');
+            }
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+            f.write_all(buf.as_bytes()).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+            f.sync_all().map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
         }
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
-        f.write_all(buf.as_bytes()).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
-        f.sync_all().map_err(|e| Fail::new(format!("{}: {e}", path.display())))
+        // **자리도 적는다**(리뷰, [`write_atomic_in`] 과 같은 자). 첫 쓰기가 디렉터리와 파일을
+        // 함께 새로 짓는데, `sync_all` 은 그 파일의 내용만 적고 **자리의 이름은 안 적는다** —
+        // 전원이 나가면 스냅샷은 남고 저널 파일이 통째로 사라진다. 옛 한 파일은 `init` 이 지어
+        // 커밋까지 된 이름이라 이 틈이 없었다.
+        #[cfg(unix)]
+        if let Ok(d) = std::fs::File::open(&dir) {
+            let _ = d.sync_all();
+        }
+        Ok(())
     }
 
     /// `moai show <id>` 의 이력 전용. **접지 않는다.**
@@ -817,31 +896,103 @@ impl Repo {
         want: &BTreeSet<&str>,
         line: impl Fn(&str) -> bool,
     ) -> R<BTreeMap<String, Vec<JournalEntry>>> {
-        let path = self.journal_path();
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-            Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
-        };
-        let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
         let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
-        for raw in bytes.split(|b| *b == b'\n') {
-            // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
-            let Ok(l) = std::str::from_utf8(raw) else { continue };
-            let l = l.strip_suffix('\r').unwrap_or(l);
-            if l.trim().is_empty() || !line(l) {
-                continue;
-            }
-            let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
-            if want.contains(e.id.as_str()) {
-                out.entry(e.id.clone()).or_default().push(e);
+        for path in self.journal_files()? {
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                // 없는 파일은 건너뛴다 — 옛 한 파일이 없는 저장소가 흔하다.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                // **못 읽는 파일은 조용히 안 넘긴다.** 여기서 건너뛰면 한 사람의 이력이 통째로
+                // 사라진 화면이 멀쩡해 보인다 — 조용한 손실이 이 도구가 못 견디는 하나다.
+                Err(e) => return Err(Fail::new(format!("{}: {e}", path.display()))),
+            };
+            let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
+            for raw in bytes.split(|b| *b == b'\n') {
+                // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
+                let Ok(l) = std::str::from_utf8(raw) else { continue };
+                let l = l.strip_suffix('\r').unwrap_or(l);
+                if l.trim().is_empty() || !line(l) {
+                    continue;
+                }
+                let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
+                if want.contains(e.id.as_str()) {
+                    out.entry(e.id.clone()).or_default().push(e);
+                }
             }
         }
         for v in out.values_mut() {
+            // **안정 정렬이다** — 같은 `ts` 를 든 줄은 읽은 차례 그대로 남는다.
+            // 그 차례를 세우는 자가 [`Repo::journal_files`] 다.
             v.sort_by(|a, b| a.ts.cmp(&b.ts));
         }
         Ok(out)
     }
+}
+
+/// 메일에서 저널 파일 이름을 짓는다 — `raven@buzzni.com` 이면 `raven_buzzni_com.jsonl`(moai-nzlo).
+///
+/// **이름이 아니라 메일로 짓는다**(2026-09-21 사용자 결정). 이름에는 한글과 빈칸이 들고, 메일은
+/// ASCII 로만 서면서 사람이 읽을 수 있으며, 줄마다 `by_email` 이 이미 있다.
+///
+/// `@` 와 `.` 를 `_` 로, ASCII 낱말·숫자·`-`·`_` 밖의 글자도 `_` 로 접는다. **큰 글자는 내린다** —
+/// 접지 않으면 글자 크기를 안 가리는 파일시스템(macOS·Windows)에서만 두 메일이 한 파일로 합쳐져,
+/// 같은 저장소가 기계마다 다른 수의 파일을 갖는다. 접히더라도 줄마다 `by_email` 이 있어 읽는
+/// 쪽은 여전히 가른다.
+///
+/// 글자 하나가 글자 하나로 가므로 결과는 빈 이름도, `.`·`..` 도, 경로 조각도 될 수 없다 —
+/// 이름을 디렉터리에 이어 붙이는 자리가 여기 하나라 그 보장이 여기서 선다.
+///
+/// **길이도 여기서 자른다**(리뷰). 접은 글자는 다 ASCII 한 바이트라 글자 수가 곧 바이트 수고,
+/// 파일 이름의 상한(`NAME_MAX`, 흔히 255)을 넘기면 `open` 이 ENAMETOOLONG 으로 진다 — 그 실패는
+/// **스냅샷을 쓴 뒤에** 나서 "썼지만 이력은 못 남겼다" 로 떨어지고, 그 사람의 이력은 그 뒤로도
+/// 영영 안 남는다. 잘린 이름이 겹쳐도 줄마다 `by_email` 이 있어 읽는 쪽은 가른다.
+pub fn journal_file(email: &str) -> Option<String> {
+    /// `.jsonl` 여섯 자를 붙일 자리를 남긴 상한. 실제 메일이 닿을 수 있는 길이가 아니다.
+    const CAP: usize = 200;
+    let email = email.trim();
+    if email.is_empty() {
+        return None;
+    }
+    let name: String = email
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' | '-' | '_' => c,
+            'A'..='Z' => c.to_ascii_lowercase(),
+            _ => '_',
+        })
+        .take(CAP)
+        .collect();
+    Some(format!("{name}.jsonl"))
+}
+
+/// 적을 줄을 갈 파일마다 모은다 — **스냅샷을 쓰기 전에** 부른다(moai-nzlo).
+///
+/// 메일이 없는 줄이 하나라도 있으면 아무것도 안 쓰고 멈춘다. `unknown.jsonl` 도, 이름으로 지은
+/// 파일도 두지 않는다(2026-09-21 사용자 결정) — 이력이 남는 것이 목적인 파일에 주인 없는 줄을
+/// 채우느니 한 번 물어보는 편이 싸다. 게이트가 아닌 까닭은 `--user` 와 `MOAI_ACTOR` 둘 다 사람
+/// 없이 채워지기 때문이고, 쓰지 않는 `status`·`ready`·`show` 는 여기를 안 지난다.
+///
+/// **[`crate::model::Actor`] 가 이미 막는다** — 메일 없는 사람으로는 만들어지지도 않으므로
+/// (`Actor::is_sane`) 이 거절은 손으로 지은 줄에만 선다. 그래도 두는 것은 파일 이름을 정하는
+/// 자리가 여기 하나여서다: 여기서 안 막으면 그 줄이 갈 곳이 없다.
+fn file_entries(entries: &[JournalEntry]) -> Result<Vec<(String, Vec<&JournalEntry>)>, Trouble> {
+    // **메일로 모으고 이름은 갈래마다 한 번 짓는다** — 한 판의 줄은 거의 다 한 사람의 것이라,
+    // 줄마다 접으면 같은 주소를 줄 수만큼 다시 접어 버린다. 모으는 꼴은 바로 위
+    // [`Repo::journal_by_id`] 와 같은 `BTreeMap` 이다(리뷰).
+    let mut by_email: BTreeMap<&str, Vec<&JournalEntry>> = BTreeMap::new();
+    for e in entries {
+        let who = e.by_email.as_deref().map(str::trim).filter(|m| !m.is_empty());
+        let Some(who) = who else { return Err(Trouble::NoJournalEmail { id: e.id.clone() }) };
+        by_email.entry(who).or_default().push(e);
+    }
+    by_email
+        .into_iter()
+        .map(|(who, v)| match journal_file(who) {
+            Some(name) => Ok((name, v)),
+            // 다듬고도 이름이 안 서는 주소 — 위에서 빈 것은 이미 걸렀으니 여기 오지 않는다.
+            None => Err(Trouble::NoJournalEmail { id: v[0].id.clone() }),
+        })
+        .collect()
 }
 
 /// 이 프로세스의 `with_write` 들이 못 읽는 줄에 대해 본 것.
@@ -1571,6 +1722,84 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
     }
 
+    /// **파일 이름은 메일에서 온다**(moai-nzlo). 접는 자리가 여기 하나라, 이름이 경로 조각이
+    /// 되거나 기계마다 달라지는 것을 여기서 막는다.
+    #[test]
+    fn a_journal_file_is_named_by_the_email() {
+        for (email, want) in [
+            ("raven@buzzni.com", "raven_buzzni_com.jsonl"),
+            // 큰 글자를 내린다 — 안 내리면 글자 크기를 안 가리는 파일시스템에서만 둘이 하나가 된다.
+            ("Raven@Buzzni.COM", "raven_buzzni_com.jsonl"),
+            // ASCII 낱말·숫자·`-`·`_` 밖은 다 `_` 다.
+            // 글자 하나가 글자 하나다 — 바이트로 세면 한글 한 자가 `_` 셋이 된다.
+            ("레이븐+메일@a.b", "_______a_b.jsonl"),
+            ("a-b_c1@x.io", "a-b_c1_x_io.jsonl"),
+            // 경로가 될 수 있는 글자는 남지 않는다 — 디렉터리에 이어 붙이는 자리가 여기 하나다.
+            ("../../etc/passwd@x", "______etc_passwd_x.jsonl"),
+        ] {
+            let got = journal_file(email).unwrap_or_else(|| panic!("{email:?} 를 안 받았다"));
+            assert_eq!(got, want, "{email:?}");
+            assert!(!got.contains(['/', '\\']) && got != ".jsonl", "{email:?} → {got}");
+        }
+        assert_eq!(journal_file(""), None);
+        assert_eq!(journal_file("   "), None);
+    }
+
+    /// **못 여는 저널 자리는 빈 이력으로 안 넘긴다**(리뷰). 파일 하나를 못 읽을 때 소리내는 것과
+    /// 같은 자여야 한다 — 자리를 못 열 때만 조용하면 한 저장소의 이력이 통째로 사라진 화면이
+    /// 멀쩡해 보이고 종료 코드까지 0 이다.
+    #[test]
+    fn an_unreadable_journal_dir_is_told_not_swallowed() {
+        use std::os::unix::fs::PermissionsExt;
+        let (r, d) = repo("nojournaldir");
+        let by = crate::model::someone("raven");
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::create("argos-4aex", "t", T, &by)], ()))
+            },
+        )
+        .unwrap();
+        assert_eq!(r.journal_of("argos-4aex").unwrap().len(), 1);
+
+        let dir = d.join(".moai/journal");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read_dir(&dir).is_ok() {
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        let e = r.journal_of("argos-4aex").expect_err("못 여는 자리를 빈 이력으로 넘겼다");
+        assert!(e.message.contains(".moai/journal"), "어느 자리인지 안 댄다 — {}", e.message);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// **메일이 없으면 아무것도 안 쓴다**(moai-nzlo, 2026-09-21 사용자 결정). `unknown.jsonl` 도,
+    /// 이름으로 지은 파일도 두지 않는다 — 이력이 남는 것이 목적인 파일이라 주인 없는 줄을
+    /// 채우느니 한 번 물어보는 편이 싸다.
+    ///
+    /// **스냅샷도 안 나간다.** 쓴 뒤에 알면 그 거절이 "썼지만 이력은 못 남겼다" 로 떨어져,
+    /// 막자는 결정이 알림 한 줄로 주저앉는다.
+    #[test]
+    fn a_journal_line_without_an_email_writes_nothing() {
+        let (r, d) = repo("nomail");
+        let by = crate::model::someone("raven");
+        let e = r
+            .with_write(
+                || crate::i18n::Lang::Ko,
+                |i, _, _| {
+                    i.push(issue("argos-4aex"));
+                    let mut j = JournalEntry::create("argos-4aex", "t", T, &by);
+                    j.by_email = None;
+                    Ok((vec![j], ()))
+                },
+            )
+            .expect_err("메일 없는 줄을 받아 적었다");
+        assert_eq!(e.code, code::NO_ACTOR, "{}", e.message);
+        assert!(e.message.contains("argos-4aex"), "어느 줄인지 안 댄다 — {}", e.message);
+        assert!(r.read().unwrap().issues.is_empty(), "스냅샷이 나갔다");
+        assert!(!d.join(".moai/journal").exists(), "빈 자리를 지었다");
+    }
+
     /// 스냅샷을 안 바꾸는 기록(`note`)도 저널에는 남아야 한다.
     #[test]
     fn journal_only_writes_still_land() {
@@ -1600,10 +1829,12 @@ mod tests {
     fn a_write_whose_journal_fails_still_lands_but_a_journal_only_one_does_not() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("journalfail");
-        let journal = d.join(".moai/journal.jsonl");
-        std::fs::write(&journal, "").unwrap();
-        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
-        if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+        // **막는 것은 자리다**(moai-nzlo) — 저널은 이제 `.moai/journal/<메일>.jsonl` 이라 파일
+        // 하나를 잠가도 첫 쓰기가 옆에 새 이름으로 연다. 디렉터리를 잠그면 그 안에 못 짓는다.
+        let journal = d.join(".moai/journal");
+        std::fs::create_dir_all(&journal).unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(journal.join("probe")).is_ok() {
             return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
         }
 

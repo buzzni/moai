@@ -4,7 +4,7 @@
 //! **엄격하게 읽는다** — 설정 오타가 조용히 통과하면 id 접두어가 틀어지거나
 //! 상태 목록이 비고, 둘 다 되돌리기 어렵다.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 상태 목록을 안 적었을 때의 칸반 컬럼.
 pub const DEFAULT_STATUSES: &str = "todo,in_progress,review,done";
@@ -20,7 +20,7 @@ pub const DONE: &str = "done";
 /// `title = "규칙 #1"` 이 조용히 깨진다.
 ///
 /// 따옴표가 짝이 안 맞으면 어디까지가 값인지 알 수 없다. 세어서 넘기지 말고 거절한다.
-fn strip_comment(line: &str, n: usize) -> Result<&str, String> {
+fn strip_comment(line: &str, n: usize) -> Result<&str, Trouble> {
     let mut quoted = false;
     let mut cut = line.len();
     for (i, c) in line.char_indices() {
@@ -34,7 +34,7 @@ fn strip_comment(line: &str, n: usize) -> Result<&str, String> {
         }
     }
     if quoted {
-        return Err(format!("{n}줄: 따옴표가 짝이 맞지 않는다"));
+        return Err(Trouble::Unbalanced { line: n });
     }
     Ok(&line[..cut])
 }
@@ -64,7 +64,7 @@ struct Entry<'s> {
 /// 키마다 다시 훑던 때는 `Config::parse` 한 번이 파일을 열두 번 지났다 — 문턱 여덟에
 /// `scalar` 셋, 거기에 `check_keys` 가 한 번 더였다. 훑는 자가 하나라 주석·따옴표·테이블
 /// 규칙도 한 곳에만 산다.
-fn entries(src: &str) -> Result<Vec<Entry<'_>>, String> {
+fn entries(src: &str) -> Result<Vec<Entry<'_>>, Trouble> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src); // BOM
     let mut out = Vec::new();
     let mut table = None;
@@ -79,7 +79,7 @@ fn entries(src: &str) -> Result<Vec<Entry<'_>>, String> {
             table = Some(t.strip_suffix(']').unwrap_or(t).trim());
             continue;
         }
-        let (k, v) = l.split_once('=').ok_or_else(|| format!("{n}줄: `키 = \"값\"` 형식이 아니다"))?;
+        let (k, v) = l.split_once('=').ok_or(Trouble::NotAPair { line: n })?;
         out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
     }
     Ok(out)
@@ -92,9 +92,9 @@ fn raw<'s>(es: &[Entry<'s>], key: &str) -> Option<(&'s str, usize)> {
 }
 
 /// 최상위 `키 = "값"` 하나를 읽는다.
-fn text(es: &[Entry<'_>], key: &str) -> Result<Option<String>, String> {
+fn text(es: &[Entry<'_>], key: &str) -> Result<Option<String>, Trouble> {
     let Some((v, n)) = raw(es, key) else { return Ok(None) };
-    let v = value(v).ok_or_else(|| format!("{n}줄: `{key}` 의 값은 큰따옴표로 감싸야 한다 — {v:?}"))?;
+    let v = value(v).ok_or_else(|| Trouble::NotQuoted { line: n, key: key.into(), raw: v.into() })?;
     Ok(Some(v.to_string()))
 }
 
@@ -104,30 +104,30 @@ fn text(es: &[Entry<'_>], key: &str) -> Result<Option<String>, String> {
 ///
 /// **못 읽은 수를 기본값으로 덮지 않는다.** 덮으면 고쳐 적은 값이 안 먹는 까닭을
 /// 설정 파일만 보고는 못 찾는다 — 임계값을 파일로 뺀 뜻이 거기서 사라진다.
-fn number<T: std::str::FromStr>(es: &[Entry<'_>], key: &str, what: &str) -> Result<Option<T>, String> {
+fn number<T: std::str::FromStr>(es: &[Entry<'_>], key: &str, want: Want) -> Result<Option<T>, Trouble> {
     let Some((v, n)) = raw(es, key) else { return Ok(None) };
     if v.starts_with('"') {
-        return Err(format!("{n}줄: `{key}` 는 수다 — 따옴표를 뺀다 ({v})"));
+        return Err(Trouble::NumberQuoted { line: n, key: key.into(), raw: v.into() });
     }
-    v.parse::<T>().map(Some).map_err(|_| format!("{n}줄: `{key}` 는 {what} — {v:?}"))
+    v.parse::<T>().map(Some).map_err(|_| Trouble::NotANumber { line: n, key: key.into(), want, raw: v.into() })
 }
 
 /// 날수. 음수를 막으려고 `u32` 로 읽고 넓힌다 — `-1` 이 통과하면 그 경고가 모든 줄에 선다.
-fn days(es: &[Entry<'_>], key: &str, default: i64) -> Result<i64, String> {
-    Ok(number::<u32>(es, key, "0 이상의 정수다")?.map_or(default, i64::from))
+fn days(es: &[Entry<'_>], key: &str, default: i64) -> Result<i64, Trouble> {
+    Ok(number::<u32>(es, key, Want::Whole)?.map_or(default, i64::from))
 }
 
 /// 건수.
-fn count(es: &[Entry<'_>], key: &str, default: usize) -> Result<usize, String> {
-    Ok(number::<usize>(es, key, "0 이상의 정수다")?.unwrap_or(default))
+fn count(es: &[Entry<'_>], key: &str, default: usize) -> Result<usize, Trouble> {
+    Ok(number::<usize>(es, key, Want::Whole)?.unwrap_or(default))
 }
 
 /// 비율. `0.15` 가 15% 다 — 백분율로 적지 않는다. 1 을 넘기면 그 경고가 영영 안 서는데,
 /// 끄려는 뜻이었다면 그것은 임계값이 아니라 없는 손잡이다. 조용히 끄느니 거절한다.
-fn ratio(es: &[Entry<'_>], key: &str, default: f64) -> Result<f64, String> {
-    let Some(v) = number::<f64>(es, key, "0 과 1 사이의 소수다")? else { return Ok(default) };
+fn ratio(es: &[Entry<'_>], key: &str, default: f64) -> Result<f64, Trouble> {
+    let Some(v) = number::<f64>(es, key, Want::Fraction)? else { return Ok(default) };
     if !(0.0..=1.0).contains(&v) {
-        return Err(format!("`{key}` 는 0 과 1 사이의 소수다 — {v}"));
+        return Err(Trouble::RatioRange { key: key.into(), value: v });
     }
     Ok(v)
 }
@@ -151,7 +151,7 @@ pub enum Naming {
 }
 
 impl Naming {
-    const ALL: [&'static str; 3] = ["full", "name", "email"];
+    pub const ALL: [&'static str; 3] = ["full", "name", "email"];
 
     fn parse(raw: &str) -> Option<Naming> {
         match raw {
@@ -167,12 +167,12 @@ impl Naming {
 /// 그것은 새로 심을 때만 거는 규칙이다(`cmd::init::PREFIX_MAX`). 읽는 자리와 심는 자리가 같은
 /// 규칙을 쓰도록 한 곳에 둔다 — 심는 자리가 길이를 먼저 보면 모양이 틀린 긴 접두어에 그 자체로
 /// 틀린 짧은 후보를 댔다(리뷰 moai-f7xs.z1x).
-pub fn check_prefix(prefix: &str) -> Result<(), String> {
+pub fn check_prefix(prefix: &str) -> Result<(), Trouble> {
     if !prefix.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-') {
-        return Err(format!("`prefix` 는 소문자·숫자·`-` 만 쓴다 — {prefix:?}"));
+        return Err(Trouble::PrefixCharset { raw: prefix.into() });
     }
     if prefix.starts_with('-') || prefix.ends_with('-') {
-        return Err(format!("`prefix` 는 `-` 로 시작하거나 끝날 수 없다 — {prefix:?}"));
+        return Err(Trouble::PrefixDash { raw: prefix.into() });
     }
     Ok(())
 }
@@ -248,7 +248,7 @@ impl Thresholds {
     /// 모르는 키는 거절한다. 여느 모르는 키와 달리 여기서 엄한 까닭은, 이 값들이 고치고
     /// 나서 화면이 안 바뀌는 것으로만 확인되는 자리라서다: `status_reveiw_days = 1` 은
     /// 조용히 통과하면 영영 안 먹고, 왜 안 먹는지 설정 파일에는 아무 자취가 없다.
-    const KEYS: [&'static str; 8] = [
+    pub const KEYS: [&'static str; 8] = [
         "status_review_days",
         "status_wip_days",
         "status_blocked_days",
@@ -259,7 +259,7 @@ impl Thresholds {
         "status_idea_pile",
     ];
 
-    fn parse(es: &[Entry<'_>]) -> Result<Thresholds, String> {
+    fn parse(es: &[Entry<'_>]) -> Result<Thresholds, Trouble> {
         let d = Thresholds::DEFAULT;
         let t = Thresholds {
             review_days: days(es, "status_review_days", d.review_days)?,
@@ -274,7 +274,7 @@ impl Thresholds {
         // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
         // 그것은 비추는 수를 끈 것이지 낮춘 것이 아니다.
         if t.flow_days == 0 {
-            return Err("`status_flow_days` 는 1 이상이다 — 0 이면 흐름이 늘 0 으로 선다".into());
+            return Err(Trouble::FlowDaysZero);
         }
         Ok(t)
     }
@@ -285,7 +285,7 @@ impl Thresholds {
     /// 자연스러워서 실제로 그렇게 적히고, 이 파서는 테이블을 안 읽으므로 그 줄이 **조용히 안
     /// 먹는다** — 오타를 소리내는 것과 똑같은 까닭으로 이것도 소리내야 한다. 고치고 나서 화면이
     /// 안 바뀌는 것으로만 확인되는 자리라, 넘기면 왜 안 먹는지 설정 파일에 아무 자취가 없다.
-    fn check_keys(es: &[Entry<'_>]) -> Result<(), String> {
+    fn check_keys(es: &[Entry<'_>]) -> Result<(), Trouble> {
         for e in es {
             let flat = format!("status_{}", e.key);
             let known = Thresholds::KEYS.contains(&e.key);
@@ -295,16 +295,11 @@ impl Thresholds {
                 (true, true, _) => e.key.to_string(),
                 (true, _, true) | (false, _, true) => flat,
                 (false, false, _) if e.key.starts_with("status_") => {
-                    return Err(format!(
-                        "{}줄: `{}` 라는 설정이 없다. 있는 것: {}",
-                        e.line,
-                        e.key,
-                        Thresholds::KEYS.join(", ")
-                    ));
+                    return Err(Trouble::NoSuchThreshold { line: e.line, key: e.key.to_string() });
                 }
                 _ => continue,
             };
-            return Err(format!("{}줄: 문턱은 테이블 없이 맨 위에 적는다 — `{named} = …`", e.line));
+            return Err(Trouble::ThresholdInTable { line: e.line, named });
         }
         Ok(())
     }
@@ -323,34 +318,34 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(root: &Path) -> Result<Config, String> {
+    pub fn load(root: &Path) -> Result<Config, Refused> {
         let path = root.join(".moai/config.toml");
-        let src = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Config::parse(&src).map_err(|e| format!("{}: {e}", path.display()))
+        let at = |why| Refused { at: path.clone(), why };
+        let src = std::fs::read_to_string(&path).map_err(|e| at(Trouble::Unreadable { said: e.to_string() }))?;
+        Config::parse(&src).map_err(at)
     }
 
-    pub fn parse(src: &str) -> Result<Config, String> {
+    pub fn parse(src: &str) -> Result<Config, Trouble> {
         // **파일은 한 번만 훑는다**([`entries`]) — 키마다 다시 훑으면 키 수 × 줄 수다.
         let es = &entries(src)?;
-        let prefix = text(es, "prefix")?.filter(|p| !p.is_empty()).ok_or("`prefix` 가 없다")?;
+        let prefix = text(es, "prefix")?.filter(|p| !p.is_empty()).ok_or(Trouble::NoPrefix)?;
         check_prefix(&prefix)?;
 
         let raw = text(es, "statuses")?.unwrap_or_else(|| DEFAULT_STATUSES.into());
         let statuses: Vec<String> = raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         if statuses.is_empty() {
-            return Err("`statuses` 가 비었다".into());
+            return Err(Trouble::NoStatuses);
         }
         if !statuses.iter().any(|s| s == DONE) {
-            return Err(format!("`statuses` 에 `{DONE}` 이 있어야 한다 — {raw:?}"));
+            return Err(Trouble::NoDone { raw });
         }
         if let Some(dup) = statuses.iter().enumerate().find(|(i, s)| statuses[..*i].contains(s)) {
-            return Err(format!("`statuses` 에 `{}` 가 두 번 있다", dup.1));
+            return Err(Trouble::StatusTwice { status: dup.1.clone() });
         }
 
         let naming = match text(es, "naming")? {
             None => Naming::default(),
-            Some(raw) => Naming::parse(&raw)
-                .ok_or_else(|| format!("`naming` 은 {} 중 하나다 — {raw:?}", Naming::ALL.join("·")))?,
+            Some(raw) => Naming::parse(&raw).ok_or(Trouble::NamingUnknown { raw })?,
         };
 
         Thresholds::check_keys(es)?;
@@ -402,6 +397,69 @@ impl Config {
     }
 }
 
+/// 설정을 읽다 멈춘 까닭 — **말이 아니라 자료다**(moai-ivt9, [`NoSuchColumn`] 과 같은 까닭).
+/// 글은 [`crate::view::config_trouble`] 이 짓는다.
+///
+/// `.moai/config.toml` 은 **쓰기 경로가 지나는 자리다** — `store::Repo::rooted` 가 읽고, 훅이
+/// 도구 호출마다 그 길로 든다. 거기서 글을 지으면 찾기의 서명에 화면 말이 번지고, 말을 모른 채
+/// 도는 자리(머지 드라이버·한눈 보기의 줄마다 열기)까지 사용자 설정을 열게 된다 — moai-iq7j 가
+/// `store::Trouble` 로 그은 금이고 여기가 그 금의 이쪽이다.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Trouble {
+    /// 파일을 못 읽었다 — io 가 낸 말. **이미 글이다**(운영체제의 것이라 안 옮긴다).
+    Unreadable { said: String },
+    /// 따옴표가 짝이 안 맞는다 — 그 줄.
+    Unbalanced { line: usize },
+    /// `키 = "값"` 꼴이 아니다 — 그 줄.
+    NotAPair { line: usize },
+    /// 글인데 큰따옴표가 없다 — 그 줄·키·쓰인 그대로.
+    NotQuoted { line: usize, key: String, raw: String },
+    /// 수인데 따옴표를 둘렀다 — 그 줄·키·쓰인 그대로.
+    NumberQuoted { line: usize, key: String, raw: String },
+    /// 수를 못 읽었다 — 그 줄·키·바라는 꼴·쓰인 그대로.
+    NotANumber { line: usize, key: String, want: Want, raw: String },
+    /// 비율이 0 과 1 밖이다 — 키와 읽힌 값.
+    RatioRange { key: String, value: f64 },
+    /// `prefix` 에 못 쓰는 글자가 들었다 — 쓰인 그대로.
+    PrefixCharset { raw: String },
+    /// `prefix` 가 `-` 로 시작하거나 끝난다 — 쓰인 그대로.
+    PrefixDash { raw: String },
+    /// 흐름 창이 0 이다. 비추는 수를 끈 것이지 낮춘 것이 아니다.
+    FlowDaysZero,
+    /// `status_` 로 시작하는데 없는 설정이다 — 그 줄·키. **아는 키는 [`Thresholds::KEYS`] 가 댄다.**
+    NoSuchThreshold { line: usize, key: String },
+    /// 문턱을 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
+    ThresholdInTable { line: usize, named: String },
+    /// `prefix` 가 없다.
+    NoPrefix,
+    /// `statuses` 가 비었다.
+    NoStatuses,
+    /// `statuses` 에 `done` 이 없다 — 쓰인 그대로.
+    NoDone { raw: String },
+    /// 한 칸이 두 번 적혔다 — 그 칸.
+    StatusTwice { status: String },
+    /// `naming` 이 모르는 값이다 — 쓰인 그대로.
+    NamingUnknown { raw: String },
+}
+
+/// 수가 어떤 꼴이어야 하는가([`Trouble::NotANumber`]). **낱말이 아니라 갈래로 든다** —
+/// 고르는 자리([`number`])는 화면 말을 모른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Want {
+    /// `0` 이상의 정수.
+    Whole,
+    /// `0` 과 `1` 사이의 소수.
+    Fraction,
+}
+
+/// 어느 파일을 읽다 멈췄는가([`Config::load`]). 파싱만 하는 [`Config::parse`] 는 자리를 모르므로
+/// [`Trouble`] 만 낸다 — 자리를 붙이는 자가 하나여야 같은 까닭이 두 모양으로 서지 않는다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refused {
+    pub at: PathBuf,
+    pub why: Trouble,
+}
+
 /// 모르는 칸([`Config::require_known`]·[`crate::cmd::unknown_column`]) — **말이 아니라
 /// 자료다**(moai-fdk7, `user_config::ConfigTrouble` 과 같은 까닭). 글은
 /// [`crate::view::no_such_column`] 이 짓는다.
@@ -435,19 +493,22 @@ mod tests {
     }
 
     /// 오타를 조용히 통과시키면 왜 표기가 안 바뀌는지 아무도 못 찾는다.
+    ///
+    /// **낱말이 아니라 갈래로 잰다**(moai-ivt9) — 글은 말묶음으로 갔고, 고른 말에 따라
+    /// 달라진다. 무엇을 댈지는 `view::tests::config_trouble_names_what_it_needs` 가 잰다.
     #[test]
     fn a_misspelled_naming_is_refused() {
         for raw in ["Full", "이름", "", "name,email"] {
             let src = format!("prefix = \"argos\"\nnaming = \"{raw}\"\n");
             let e = Config::parse(&src).unwrap_err();
-            assert!(e.contains("full·name·email"), "{raw:?}: {e}");
+            assert_eq!(e, Trouble::NamingUnknown { raw: raw.to_string() }, "{raw:?}");
         }
         assert_eq!(Config::parse("prefix = \"argos\"\nnaming = \"email\"\n").unwrap().naming, Naming::Email);
     }
 
     /// 글 하나를 원본에서 바로 읽는다 — 줄 모으기([`entries`])와 글 읽기([`text`])를 한 번에
     /// 지나는 시험용 길이다. 도는 코드는 `Config::parse` 가 줄을 한 번 모아 나눠 쓴다.
-    fn scalar(src: &str, key: &str) -> Result<Option<String>, String> {
+    fn scalar(src: &str, key: &str) -> Result<Option<String>, Trouble> {
         text(&entries(src)?, key)
     }
 
@@ -470,14 +531,14 @@ mod tests {
 
     #[test]
     fn refuses_sloppy_values() {
+        let quoted = |raw: &str| Trouble::NotQuoted { line: 1, key: "prefix".into(), raw: raw.into() };
         for (src, want) in [
-            ("prefix = argos\n", "큰따옴표"),
-            ("prefix = \"argos\" 오타\n", "큰따옴표"),
-            ("prefix = \"argos\n", "짝이 맞지"),
-            ("prefix\n", "형식이 아니다"),
+            ("prefix = argos\n", quoted("argos")),
+            ("prefix = \"argos\" 오타\n", quoted("\"argos\" 오타")),
+            ("prefix = \"argos\n", Trouble::Unbalanced { line: 1 }),
+            ("prefix\n", Trouble::NotAPair { line: 1 }),
         ] {
-            let e = scalar(src, "prefix").unwrap_err();
-            assert!(e.contains(want), "{src:?} → {e:?}");
+            assert_eq!(scalar(src, "prefix").unwrap_err(), want, "{src:?}");
         }
     }
 
@@ -555,7 +616,7 @@ status_idea_pile     = 16
     #[test]
     fn a_quoted_number_is_refused() {
         let e = Config::parse("prefix = \"a\"\nstatus_wip_limit = \"3\"\n").unwrap_err();
-        assert!(e.contains("따옴표를 뺀다"), "{e}");
+        assert_eq!(e, Trouble::NumberQuoted { line: 2, key: "status_wip_limit".into(), raw: "\"3\"".into() });
     }
 
     /// **오타가 조용히 통과하면 안 먹는 까닭을 설정 파일만 보고는 못 찾는다.**
@@ -563,7 +624,9 @@ status_idea_pile     = 16
     #[test]
     fn a_misspelled_threshold_key_is_refused() {
         let e = Config::parse("prefix = \"a\"\nstatus_reveiw_days = 1\n").unwrap_err();
-        assert!(e.contains("status_reveiw_days") && e.contains("status_review_days"), "{e}");
+        // 아는 키 목록은 [`Thresholds::KEYS`] 에서 펴는 쪽이 달고, `status_review_days` 가 그 안에 있다.
+        assert_eq!(e, Trouble::NoSuchThreshold { line: 2, key: "status_reveiw_days".into() });
+        assert!(Thresholds::KEYS.contains(&"status_review_days"));
         // 주석 안의 오타는 오타가 아니다.
         Config::parse("prefix = \"a\"\n# status_reveiw_days = 1\n").unwrap();
         // `statuses` 는 `status_` 로 시작하지 않는다 — 칸 목록을 오타로 읽으면 안 된다.
@@ -573,17 +636,18 @@ status_idea_pile     = 16
     /// 못 읽는 수를 기본값으로 덮지 않는다 — 덮으면 고친 값이 안 먹는다.
     #[test]
     fn refuses_a_threshold_that_is_not_a_number() {
+        let whole =
+            |key: &str, raw: &str| Trouble::NotANumber { line: 2, key: key.into(), want: Want::Whole, raw: raw.into() };
         for (src, want) in [
-            ("status_wip_limit = 셋\n", "0 이상의 정수"),
-            ("status_review_days = -1\n", "0 이상의 정수"),
-            ("status_review_days = 1.5\n", "0 이상의 정수"),
-            ("status_no_epic_ratio = 15\n", "0 과 1 사이"),
-            ("status_no_epic_ratio = -0.1\n", "0 과 1 사이"),
+            ("status_wip_limit = 셋\n", whole("status_wip_limit", "셋")),
+            ("status_review_days = -1\n", whole("status_review_days", "-1")),
+            ("status_review_days = 1.5\n", whole("status_review_days", "1.5")),
+            ("status_no_epic_ratio = 15\n", Trouble::RatioRange { key: "status_no_epic_ratio".into(), value: 15.0 }),
+            ("status_no_epic_ratio = -0.1\n", Trouble::RatioRange { key: "status_no_epic_ratio".into(), value: -0.1 }),
             // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
-            ("status_flow_days = 0\n", "1 이상"),
+            ("status_flow_days = 0\n", Trouble::FlowDaysZero),
         ] {
-            let e = Config::parse(&format!("prefix = \"a\"\n{src}")).unwrap_err();
-            assert!(e.contains(want), "{src:?} → {e:?}");
+            assert_eq!(Config::parse(&format!("prefix = \"a\"\n{src}")).unwrap_err(), want, "{src:?}");
         }
     }
 
@@ -599,14 +663,14 @@ status_idea_pile     = 16
     /// 이것도 소리내야 한다. 고친 뒤 화면이 안 바뀌는 것으로만 확인되는 자리라서다.
     #[test]
     fn a_threshold_written_under_a_table_is_refused() {
-        for src in [
-            "prefix = \"a\"\n[status]\nreview_days = 1\n",
-            "prefix = \"a\"\n[status]\nstatus_review_days = 1\n",
+        for (src, line) in [
+            ("prefix = \"a\"\n[status]\nreview_days = 1\n", 3),
+            ("prefix = \"a\"\n[status]\nstatus_review_days = 1\n", 3),
             // 맨 위에 접두어 없이 적은 것도 같다 — 그 이름의 설정은 없다.
-            "prefix = \"a\"\nreview_days = 1\n",
+            ("prefix = \"a\"\nreview_days = 1\n", 2),
         ] {
             let e = Config::parse(src).unwrap_err();
-            assert!(e.contains("테이블 없이 맨 위에") && e.contains("status_review_days"), "{src:?} → {e:?}");
+            assert_eq!(e, Trouble::ThresholdInTable { line, named: "status_review_days".into() }, "{src:?}");
         }
         // 문턱이 아닌 키는 테이블 안에 있어도 그대로 넘긴다 — 모르는 키는 여전히 자유다.
         Config::parse("prefix = \"a\"\n[아무거나]\nfoo = \"x\"\n").unwrap();
@@ -616,21 +680,20 @@ status_idea_pile     = 16
     #[test]
     fn a_key_inside_a_table_is_not_a_top_level_key() {
         let e = Config::parse("[아무거나]\nprefix = \"argos\"\n").unwrap_err();
-        assert!(e.contains("`prefix` 가 없다"), "{e}");
+        assert_eq!(e, Trouble::NoPrefix);
     }
 
     #[test]
     fn refuses_broken_config() {
         for (src, want) in [
-            ("statuses = \"todo,done\"\n", "`prefix` 가 없다"),
-            ("prefix = \"Argos\"\n", "소문자"),
-            ("prefix = \"-a\"\n", "`-` 로 시작"),
-            ("prefix = \"a\"\nstatuses = \"todo,review\"\n", "`done` 이 있어야"),
-            ("prefix = \"a\"\nstatuses = \" , \"\n", "비었다"),
-            ("prefix = \"a\"\nstatuses = \"todo,todo,done\"\n", "두 번"),
+            ("statuses = \"todo,done\"\n", Trouble::NoPrefix),
+            ("prefix = \"Argos\"\n", Trouble::PrefixCharset { raw: "Argos".into() }),
+            ("prefix = \"-a\"\n", Trouble::PrefixDash { raw: "-a".into() }),
+            ("prefix = \"a\"\nstatuses = \"todo,review\"\n", Trouble::NoDone { raw: "todo,review".into() }),
+            ("prefix = \"a\"\nstatuses = \" , \"\n", Trouble::NoStatuses),
+            ("prefix = \"a\"\nstatuses = \"todo,todo,done\"\n", Trouble::StatusTwice { status: "todo".into() }),
         ] {
-            let e = Config::parse(src).unwrap_err();
-            assert!(e.contains(want), "{src:?} → {e:?}");
+            assert_eq!(Config::parse(src).unwrap_err(), want, "{src:?}");
         }
     }
 }

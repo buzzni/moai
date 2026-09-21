@@ -127,9 +127,9 @@ fn decide(
     let cwd = std::env::current_dir().ok()?;
     // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
     // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
-    let repo = match Repo::find() {
+    let repo = match Repo::find(crate::i18n::Lang::default) {
         Ok(Some(repo)) => repo,
-        Ok(None) | Err(_) => Repo::find_here(&cwd).ok()??,
+        Ok(None) | Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
     };
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
@@ -263,7 +263,7 @@ fn decide(
                     };
                     match dirs.get_or_init(|| crate::hook::aimed(line, &cwd)).get(k).cloned().flatten() {
                         None => at(&load.issues),
-                        Some(dir) => at(&Repo::find_from(&dir).ok()??.read().ok()?.issues),
+                        Some(dir) => at(&Repo::find_from(&dir, crate::i18n::Lang::default).ok()??.read().ok()?.issues),
                     }
                 };
                 record_picks(input, &repo, &crate::hook::picked_in(line, &repo.config, &mine, &stands));
@@ -601,7 +601,8 @@ fn route_one(
     // 보던 판은 `mkdir -p <남의 저장소>/새것 && moai -C <남의 저장소>/새것 add` 를 여기서 판정하고
     // 거절문에는 `-C <남의 저장소>/새것` 을 댔다 — 이 트래커의 에픽 id 를 단 채라, 옮겨 친 줄이 남의
     // 트래커에 끊긴 참조를 세웠다(리뷰 moai-51h9.k8j1).
-    let (found, broken) = match Repo::find_from(&dir) {
+    // **말은 안 묻는다** — 넘어진 까닭을 사람에게 낼 일이 없는 자리다(`broken` 만 쓴다).
+    let (found, broken) = match Repo::find_from(&dir, crate::i18n::Lang::default) {
         Ok(found) => (found, false),
         Err(_) => (None, true),
     };

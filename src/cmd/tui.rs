@@ -14,7 +14,7 @@ use std::io::IsTerminal;
 pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트의 층에서 시작한다(moai-ujpu). **설정이 깨진 저장소
     // 안(`Err`)은 층으로 새지 않는다** — 제 저장소의 깨진 설정이 남의 목록 뒤에 숨는다.
-    let Some(repo) = Repo::find()? else {
+    let Some(repo) = Repo::find(|| ctx.lang())? else {
         return outside(ctx, args);
     };
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가

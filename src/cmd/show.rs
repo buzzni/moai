@@ -53,7 +53,7 @@ fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
         if let Sel::Is(v) = one
             && v == "me"
         {
-            let me = model::actor(ctx.user.as_deref(), root)?;
+            let me = model::actor(ctx.user.as_deref(), root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
             *one = Sel::Is(format!("{} ({})", me.name, me.email));
         }
     }
@@ -275,7 +275,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
-        &report::epic_labels(&load.issues),
+        &report::epic_labels(&load.issues, ctx.lang()),
         asked_deferred,
         &wh,
         screen,
@@ -452,7 +452,7 @@ fn one(
     let root = commit_home(repo, origin, &issue.id);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
-        Err(e) => (Vec::new(), Some(e.told(root))),
+        Err(e) => (Vec::new(), Some(e.told(root, ctx.lang()))),
     };
 
     if ctx.json {
