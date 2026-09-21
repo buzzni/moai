@@ -3363,37 +3363,17 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     // { 집기B; }` 의 B 도 A 가 져서 안 돌 수 있다. 그 자리를 확실한 집기로 적으면 정말 쥔 세션에게서
     // 초점을 빼앗는다([`Picks::fold`]).
     let mut chancy: Option<usize> = None;
-    // 함수 정의의 머리(`f(`)를 본 자리와 그 이름 — 다음 토막이 그 몸통이다.
-    let mut fndef: Option<(usize, String)> = None;
-    /// 함수 몸통 하나가 **적은 집기의 토막 번호 범위**(moai-d5o9 11번) — `to` 가 없으면 아직 몸통 안이다.
-    struct Body {
-        name: String,
-        /// 몸통의 묶음 깊이([`Seg::level`]) — 이보다 얕은 자리를 지나오면 몸통이 끝났다.
-        ///
-        /// **머리 자리 바로 안쪽(`at + 1`)이다 — 첫 줄의 깊이가 아니다**(리뷰). 첫 줄로 적던 판은
-        /// 첫 줄이 겹문이면(`f() { if …; fi; 집기; }`) `fi` 를 지나며 몸통이 끝난 것으로 읽혀,
-        /// 그 뒤의 집기가 몸통 밖에 섰다. 옆의 `iffy`·`chancy` 도 같은 자로 선다.
-        level: usize,
-        /// 이 몸통이 선 **셸**([`Layer::Shell`] 의 수)과 그때의 **하위 셸 깊이**([`Seg::depth`]) —
-        /// 부르는 자리가 같은 셸의 같거나 더 안쪽 하위 셸일 때만 그 함수를 안다(리뷰). 안 재던
-        /// 판은 `bash -c 'f() { 집기; }'; f` 와 `( f() { 집기; } ); f` 처럼 **그 셸에 있지도 않은**
-        /// 이름을 부른 줄을 확실한 집기로 적어, 정말 쥔 세션에게서 줄을 뺏었다.
-        shells: usize,
-        depth: usize,
-        from: usize,
-        to: Option<usize>,
-    }
-    /// 한 명령줄에서 **몸통을 뒤쫓을 함수의 수**(리뷰) — 닫는 자리와 부르는 자리가 둘 다 이 목록을
-    /// 훑으므로, 안 막으면 값이 정의 수의 제곱으로 는다(`f(){ :; };` 이만 개 한 줄이 dev 에서 3초,
-    /// 십만 개가 90초다). [`Lexer::DEEP`]·[`Lexer::WORK`] 와 같은 자리고, 그 둘은 다시 읽는 글만
-    /// 막아 맨 바깥의 이 자리에 안 닿는다. 넘친 쪽은 **덜 보는 쪽**으로 선다 — 그 몸통의 집기는
-    /// 부르는 줄이 있어도 `?` 로 남는다.
-    const BODIES: usize = 256;
-    // **정의는 안 돌지만 부르면 돈다**(moai-d5o9 11번, 2026-09-21 사용자 결정) — 몸통의 집기는
-    // `chancy` 가 `?` 로 적는데, 그 이름을 **확실히 도는 자리에서 부르면** 그 집기는 정말 돈다.
-    // 부르는 줄을 안 읽던 판은 `f() { moai mv X …; }; f` 를 언제까지나 `?` 로 두어, 정말 쥔 세션이
-    // 초점을 못 받았다.
-    let mut bodies: Vec<Body> = Vec::new();
+    // 함수 정의의 머리(`f(`)를 본 자리 — 다음 토막이 그 몸통이다.
+    let mut fndef: Option<usize> = None;
+    // **지금 함수 정의의 몸통 안인가** — 그 묶음 깊이다(`머리 자리 + 1`).
+    //
+    // 정의는 안 돌고, 그 안의 `exit` 도 안 돈다. 옆의 `iffy`·`chancy` 와 한 자리에서 서고 같은 자로
+    // 걷히되, 저 둘은 "안 돌 수도 있는 묶음" 을 통째로 세는 자라 **몸통인가**를 따로 못 말한다.
+    //
+    // **깊이는 머리 자리 바로 안쪽이다 — 첫 줄의 깊이가 아니다**(리뷰 moai-r3l9.u69). 첫 줄로 적던
+    // 판은 첫 줄이 겹문이면(`f() { if …; fi; 집기; }`) `fi` 를 지나며 몸통이 끝난 것으로 읽혀, 그
+    // 뒤의 집기가 몸통 밖에 서고 **확실한 집기로** 적혔다.
+    let mut body: Option<usize> = None;
     // **앞에서 껍데기가 끝났을 수 있는 자리의 하위 셸 깊이**(moai-d5o9 3번, 2026-09-21 사용자 결정) —
     // 조건에 매인 `exit` 을 지나왔다. `cargo test || exit 1; moai mv X review` 와 `if ! cargo test;
     // then exit 1; fi; moai mv X review` 는 앞이 지면 집기가 아예 안 도는데, `sure`·`sure_e`·
@@ -3606,14 +3586,12 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         if bailed.is_some_and(|d| seg.low < d) {
             bailed = None;
         }
-        for scope in [&mut strict, &mut lone, &mut sure, &mut sure_e, &mut negated_at, &mut iffy, &mut chancy] {
+        for scope in
+            [&mut strict, &mut lone, &mut sure, &mut sure_e, &mut negated_at, &mut iffy, &mut chancy, &mut body]
+        {
             if scope.is_some_and(|l| seg.floor < l) {
                 *scope = None;
             }
-        }
-        // 몸통을 나왔다 — 그 함수가 적은 집기는 여기까지다([`Body`]).
-        for b in bodies.iter_mut().filter(|b| b.to.is_none() && seg.floor < b.level) {
-            b.to = Some(k);
         }
         // 이 토막의 이음사는 **든 겹 바깥**의 것이다 — 첫 토막이 바깥 이음사를 받는다([`Lexer::relex`]).
         // 그래서 아래 `set -e` 의 셈은 **겹을 열기 전의** 판과 그 판의 맨 윗자리로 한다. 겹을 열었을
@@ -3669,19 +3647,14 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // `f(` 한 낱말로 내니(붙은 괄호가 낱말을 안 가른다), 그 **다음** 토막이 몸통의 첫 줄이다.
         // 머리에서 바로 적으면 안 된다 — 몸통의 첫 줄은 머리 자리를 지나 내려오니(`seg.floor`)
         // 위의 걷기가 그것을 곧바로 지운다.
-        if let Some((at, name)) = fndef.take()
+        if let Some(at) = fndef.take()
             && seg.level > at
         {
-            // 이 토막부터가 몸통이다 — 여기서 적는 집기가 그 함수의 것이다. 깊이는 **머리 자리 바로
-            // 안쪽**이다([`Body::level`]) — 첫 줄의 깊이로 적으면 첫 줄이 겹문일 때 몸통이 일찍 끝난다.
-            let inside = at + 1;
-            if bodies.len() < BODIES {
-                let shells = seg.nested.iter().filter(|l| matches!(l, Layer::Shell { .. })).count();
-                bodies.push(Body { name, level: inside, shells, depth: seg.depth, from: k, to: None });
-            }
-            // 둘을 한 자리에서 세운다 — 함수 몸통은 쓰기 규칙에도 기록에도 똑같이 "안 돈다" 라,
+            // 셋을 한 자리에서 세운다 — 함수 몸통은 쓰기 규칙에도 기록에도 똑같이 "안 돈다" 라,
             // 따로 적으면 한쪽만 고쳐지는 날 갈린다. 걷는 자리도 한 벌이다(위의 `scope` 고리).
-            for slot in [&mut iffy, &mut chancy] {
+            // 깊이는 **머리 자리 바로 안쪽**이다([`body`]).
+            let inside = at + 1;
+            for slot in [&mut iffy, &mut chancy, &mut body] {
                 *slot = Some(slot.map_or(inside, |l| l.min(inside)));
             }
         }
@@ -3696,11 +3669,11 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // `iffy`·`chancy` 와 같은 자리고, 그래서 몸통을 연 **뒤에** 잰다. 안 가리던 판은
         // `die() { echo "$1" >&2; exit 1; }` 한 줄이 그 뒤의 모든 집기를 `?` 로 적어, 정말 쥔
         // 세션이 제 초점을 잃고 규칙 2 에 막혔다 — moai-unvx 가 고치려던 바로 그 자리를 새로 열었다.
-        if quits && !bodies.iter().any(|b| b.to.is_none()) {
+        if quits && body.is_none() {
             bailed = Some(bailed.map_or(seg.depth, |d| d.min(seg.depth)));
         }
-        if let Some(head) = seg.words.last().and_then(|w| w.strip_suffix('(')).filter(|h| !h.is_empty()) {
-            fndef = Some((seg.level, head.to_string()));
+        if seg.words.last().is_some_and(|w| w.ends_with('(')) {
+            fndef = Some(seg.level);
         }
         if j.op == Op::Or && j.depth < seg.level && !picked_before {
             // 번호는 **이 토막**의 것이다 — 여기부터가 "앞이 이기면 안 도는" 자리고, 그 앞에 적힌
@@ -3760,39 +3733,6 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 보던 판은 `cargo test || exit 1; moai mv X review` 를 확실한 집기로 적었다. 같은 뜻을
         // `&&` 로 쓴 줄은 이미 `?` 였다.
         let certain = certain && bailed.is_none();
-        // **확실히 도는 자리에서 함수를 불렀다**(moai-d5o9 11번) — 그 몸통의 집기는 정말 돈다.
-        // 몸통이 아직 안 끝난 이름(되돌이)은 범위가 안 닫혀 여기 안 든다.
-        //
-        // **여기서 그 이름이 정말 그 함수인가를 함께 잰다**(리뷰) — 올리는 것은 `?` 를 확실한
-        // 집기로 바꾸는 일이고, 잘못 올리면 안 돈 집기 하나가 정말 쥔 세션에게서 줄을 뺏는다
-        // ([`Picks::fold`]). 셋이 걸린다.
-        //
-        // - **마지막 정의가 이긴다** — 다시 정의하면 앞엣것은 죽은 글이다. 여기서 보이는 몸통
-        //   가운데 마지막 것 하나만 본다
-        // - **같은 셸의 것이어야 한다**([`Body::shells`]) — `bash -c 'f() { 집기; }'; f` 의 `f` 는
-        //   자식 셸과 함께 사라졌고, `( f() { 집기; } ); f` 도 괄호 밖에는 없다
-        // - **경로로 부른 것과 감싼 것은 함수가 아니다** — `/bin/f` 도 `sudo f` 도 함수를 안 부른다.
-        //   `basename` 과 [`command_of`] 가 둘을 같은 이름으로 만드니 여기서 도로 가른다(`!` 만 빼고)
-        // - **부르는 자리가 정의의 제 자리여야 한다**(`b.level == seg.level + 1`) — `certain` 은
-        //   앞선 이음사와 `chancy` 만 보고, 예약어 묶음(`if`·`while`·`case`)의 몸통은 둘 다 안 건드린다.
-        //   그래서 `if false; then f; fi` 의 부름이 확실한 것으로 읽혀 안 돈 집기를 올렸다. 묶음 안의
-        //   부름은 통째로 `?` 로 둔다 — 늘 도는 `{ … }` 까지 함께 빠지는 것은 덜 보는 쪽의 값이다
-        let calls = seg.words.first().is_some_and(|w| !w.contains(['/', '\\'])) && prefix.iter().all(|w| w == "!");
-        if certain
-            && calls
-            && let Some(name) = head
-            && let Some(b) = bodies.iter().rev().find(|b| {
-                b.name == name
-                    && b.level == seg.level + 1
-                    && b.shells == seg.nested.iter().filter(|l| matches!(l, Layer::Shell { .. })).count()
-                    && b.depth <= seg.depth
-            })
-            && let Some(to) = b.to
-        {
-            for p in picked.iter_mut().filter(|(m, _, _)| (b.from..to).contains(m)) {
-                p.2 = true;
-            }
-        }
         // 이음사가 제 깊이보다 깊으면 묶음을 막 나온 토막 — `( … ) > f` 의 `> f` 다. 그 묶음에
         // 들어설 때의 판으로 쓰고, 묶음의 값은 그대로 뒤로 흐른다. 이음사로 읽던 판은 안쪽 `;` 로
         // 집기를 끊어 `(mv) > /dev/null && sed -i …` 를 막았다.
@@ -5354,31 +5294,20 @@ mod tests {
         assert_eq!(flags("set -e; moai mv t-1 in_progress"), one("t-1", false));
         // `set -e` 를 안 켰으면 그대로다 — `;` 뒤는 앞이 져도 돈다.
         assert_eq!(flags("cargo test; moai mv t-1 review"), one("t-1", true));
-        // **부른 함수의 몸통은 정말 돈다**(moai-d5o9 11번, 2026-09-21 사용자 결정) — 정의는 안 돌지만
-        // 부르면 돈다. 부르는 줄을 안 읽던 판은 이것을 언제까지나 `?` 로 두었다.
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; f"), one("t-1", true));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }\nf"), one("t-1", true));
-        // 안 부르면 그대로 `?` 고, 안 돌 수도 있는 자리에서 부른 것도 그대로다.
+        // **함수 몸통의 집기는 부르는 줄이 있어도 `?` 다** — moai-d5o9 11번으로 한 번 올렸다가
+        // 에픽 끝 리뷰(moai-r3l9.u69)에서 되돌렸다(2026-09-21 사용자 결정). 좁히기를 넷이나 더해도
+        // `f() { cargo test && moai mv X; }; f` 가 확실한 집기로 남았다 — 몸통 안의 제 까닭으로
+        // `?` 인 것과 몸통이라서 `?` 인 것을 이 한 걸음으로는 못 가른다. 무엇보다 올린 것은 기록
+        // 축뿐이라, 같은 줄이 쓰기 규칙에는 빈손으로 서서 moai-m5mg 가 닫은 갈림이 다시 열렸다.
+        //
+        // 잘못 올린 집기는 정말 쥔 세션에게서 줄을 빼앗아 그 세션을 규칙 2 로 막는다 — `?` 로 두는
+        // 값(남이 쥔 줄을 못 가져온다)보다 비싸다. 두 축이 함께 함수를 읽는 길은 moai-ueat 이 연다.
+        assert_eq!(flags("f() { moai mv t-1 in_progress; }; f"), one("t-1", false));
         assert_eq!(flags("f() { moai mv t-1 in_progress; }"), one("t-1", false));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; cargo test && f"), one("t-1", false));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; g"), one("t-1", false));
-        // 몸통 안에서 제 이름을 부르는 것(되돌이)은 아직 안 닫힌 범위라 안 센다.
-        assert_eq!(flags("f() { moai mv t-1 in_progress; f; }"), one("t-1", false));
-        // **그 이름이 정말 그 함수일 때만 올린다**(리뷰) — 잘못 올리면 안 돈 집기 하나가 정말 쥔
-        // 세션에게서 줄을 뺏는다. 마지막 정의가 이기고, 딴 셸·하위 셸에서 지은 것은 여기 없고,
-        // 경로로 부르거나 감싼 것은 함수가 아니며, 안 돌 수도 있는 묶음 안의 부름은 그대로 `?` 다.
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; f() { echo hi; }; f"), one("t-1", false));
-        assert_eq!(flags("bash -c 'f() { moai mv t-1 in_progress; }'; f"), one("t-1", false));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; /bin/f"), one("t-1", false));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; sudo f"), one("t-1", false));
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }; if false; then f; fi"), one("t-1", false));
-        // 같은 셸 안이면 하위 셸에서 불러도 그 함수를 안다 — 자식 셸(`bash -c`)과 갈리는 자리다.
-        assert_eq!(flags("f() { moai mv t-1 in_progress; }\n( f )"), one("t-1", false));
-        assert_eq!(flags("bash -c 'f() { moai mv t-1 in_progress; }; f'"), one("t-1", true));
         // **몸통은 머리 자리 바로 안쪽부터 `}` 까지다**(리뷰) — 첫 줄의 깊이로 재던 판은 첫 줄이
-        // 겹문이면 `fi` 를 지나며 몸통이 끝난 것으로 읽혀, 그 뒤의 집기가 몸통 밖에 섰다.
+        // 겹문이면 `fi` 를 지나며 몸통이 끝난 것으로 읽혀, 그 뒤의 집기가 몸통 밖에 서고 **확실한
+        // 집기로** 적혔다. 되돌린 뒤에도 이 자리는 남는다 — `chancy` 가 몸통을 세는 자다.
         assert_eq!(flags("f() { if true; then :; fi; moai mv t-1 in_progress; }"), one("t-1", false));
-        assert_eq!(flags("f() { if true; then :; fi; moai mv t-1 in_progress; }; f"), one("t-1", true));
         // **앞에서 껍데기가 끝났을 수 있는 자리도 `?` 다**(moai-d5o9 3번, 2026-09-21 사용자 결정) —
         // 앞이 지면 그 `exit` 이 돌아 집기가 아예 안 돈다. 앞선 이음사만 보던 판은 이 둘을 확실한
         // 집기로 적어, 같은 뜻을 `&&` 로 쓴 줄과 답이 갈렸다.
