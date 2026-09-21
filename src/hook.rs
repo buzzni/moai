@@ -1,7 +1,7 @@
 //! 훅이 무엇을 낼지 정한다. **순수 함수다** — 이벤트와 `&[Issue]` 만 보고
 //! 아무것도 찍지 않고 저장소를 읽지 않는다.
 //!
-//! **예외는 한 자리, [`settled`] 뿐이다**(2026-09-20 사용자 결정, 리뷰 moai-1upp.nwq).
+//! **예외는 한 자리, [`real_path`] 뿐이다**(2026-09-20 사용자 결정, 리뷰 moai-1upp.nwq).
 //! 규칙 2 는 "이 경로가 저장소 안인가" 를 묻는데, 같은 자리를 가리키는 두 철자를 한
 //! 자리로 보려면 링크를 풀어야 하고 그것은 파일 시스템에만 있다. 판정을 `cmd/` 로
 //! 올리면 `guard_shell_in` 이 셸 토막에서 캐낸 경로마다 푸는 손잡이를 인자로 더 받아야
@@ -5383,7 +5383,11 @@ fn counted(path: &str, root: &Path) -> bool {
     if path.is_empty() {
         return false;
     }
-    let Ok(rel) = settled(path, root).strip_prefix(root).map(Path::to_path_buf) else {
+    // **푼 값을 붙들고 빌려 쓴다.** 한 줄로 이으면 임시값이 그 줄 끝에서 죽어 `to_path_buf` 로
+    // 한 벌을 더 떠야 하는데, 아래는 조각을 훑기만 한다 — Edit·Write 마다, 셸에서 캔 경로마다 도는
+    // 자리라 그 한 벌이 값 없이 쌓인다.
+    let real = real_path(path, root);
+    let Ok(rel) = real.strip_prefix(root) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
     let mut parts = rel.components().map(|c| c.as_os_str().to_str());
@@ -5400,21 +5404,12 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
     // `.moai/../src/store.rs` 는 첫 조각이 `.moai` 라 안 세는 자리로 보이고,
     // `../elsewhere/x.rs` 는 `strip_prefix` 가 그대로 붙어 저장소 안으로 보인다.
     // 파일이 아직 없을 수도 있으므로 디스크를 짚지 않고 글자로만 접는다 — 링크를 푸는 것은
-    // 규칙 2 의 판정([`settled`])만 따로 한다.
-    let mut out = PathBuf::new();
-    for c in joined.components() {
-        match c {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
+    // 규칙 2 의 판정([`real_path`])만 따로 한다.
+    crate::store::lexical(&joined)
 }
 
-/// **규칙 2 가 견주는 자리.** [`resolve`] 위에 링크 철자를 푸는 한 겹을 얹는다.
+/// **규칙 2 가 견주는 자리.** [`resolve`] 위에 링크 철자를 푸는 한 겹을 얹는다
+/// ([`crate::store::real_prefix`], 2026-09-19 사용자 결정).
 ///
 /// 같은 자리를 두 철자로 부르면 `strip_prefix` 가 어긋나 저장소 안의 파일이 밖으로 보이고,
 /// 규칙 2 가 통째로 샌다 — 훅의 `root` 는 `current_dir()` 에서 와 늘 풀린 철자인데(`getcwd` 가
@@ -5425,26 +5420,24 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
 /// 값은 거절문이 사람에게 내미는 명령의 경로로 그대로 선다 — 거기서 링크를 풀면 사람이 친 적
 /// 없는 철자를 옮겨 치라고 내민다. 판정은 두 철자를 한 자리로 봐야 하고, 내미는 글은 사람이 친
 /// 철자를 지켜야 한다.
-fn settled(path: &str, root: &Path) -> PathBuf {
-    let folded = resolve(path, root);
-    // **있는 가장 긴 윗자리를 풀고 나머지를 다시 붙인다**(2026-09-19 사용자 결정) — 아직 없는
-    // 파일도 그 윗자리까지는 같게 풀리므로, 새로 만드는 파일과 이미 있는 파일이 같은 답을 받는다.
-    // 통째로 `canonicalize` 하던 길은 없는 파일에서 실패해 준 철자를 그대로 돌려주고, 그러면
-    // 만드는 쪽에서만 규칙이 꺼진다. **`..` 는 [`resolve`] 가 이미 접었다** — 다시 접지 않는다.
-    for head in folded.ancestors() {
-        if let Ok(real) = std::fs::canonicalize(head) {
-            // **떼어 내기는 실패하지 않는다** — `head` 는 `folded` 의 조상이다. 이것을 `if let` 으로
-            // 받아 넘기면 못 뗀 자리에서 한 칸 더 짧은 조상으로 내려가, 엉뚱한 윗자리로 푼 경로를
-            // 아무 말 없이 답으로 낸다. 남은 조각이 비면 `join` 이 끝에 가름선만 붙이는데,
-            // `Path` 의 견주기와 `strip_prefix` 는 조각으로 도니 두 쪽 다 같은 답이다.
-            return real.join(folded.strip_prefix(head).expect("조상에서 떼어 낸다"));
-        }
-    }
-    folded
+///
+/// **이름이 `settle` 과 한 글자 차이이던 자리다**(moai-l2he). 가르는 것은 **어디까지 푸는가** 다 —
+/// [`crate::read_marks::settle`] 은 경로를 **통째로** 풀어 없으면 떨어지고, 이쪽은 있는 윗자리까지만
+/// 풀어 아직 없는 파일도 같은 자리로 댄다. 앞엣것을 익힌 사람이 여기서 뒤엣것을 집으면 새로 만드는
+/// 파일에서만 규칙이 꺼진다. (까닭을 대는 것은 가르는 자가 아니다 — `settle` 도 **없는 자리에는
+/// 아무 말도 안 한다**(`Fallen(None)`); 말을 얹는 것은 ELOOP 처럼 딴 탈일 때뿐이다.)
+///
+/// **[`crate::store::real`] 과도 한 낱말 차이다.** 그쪽은 통째로 `canonicalize` 하고 실패하면 준
+/// 철자를 그대로 돌려주므로, 여기에 그것을 끼우면 **아직 없는 파일**에서 안 풀린 철자가 나와
+/// `strip_prefix(root)` 가 빗나간다 — 2026-09-19 에 닫은 바로 그 구멍이다. 이 자리가 쓰는 것은
+/// [`crate::store::real_prefix`] 다.
+fn real_path(path: &str, root: &Path) -> PathBuf {
+    // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::store::real_prefix`] 는 접힌 것을 받는다.
+    crate::store::real_prefix(&resolve(path, root))
 }
 
 fn rel_to(path: &str, root: &Path) -> String {
-    settled(path, root).strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| path.to_string())
+    real_path(path, root).strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| path.to_string())
 }
 
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
@@ -7846,6 +7839,10 @@ mod tests {
         // 저장소 밖이다 — 붙여 놓은 글자만 보면 안으로 보인다.
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "../elsewhere/x.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "/repo/../elsewhere/x.rs"), Decision::Pass);
+        // **뿌리 위로는 못 올라간다** — `/..` 은 `/` 다([`crate::store::lexical`]). 모으기 전에도
+        // 같은 답이었으니(`PathBuf::pop` 이 뿌리에서 아무것도 안 한다) 이 줄은 고침을 재는 것이
+        // 아니라 경계를 못박는 것이다.
+        assert!(matches!(guard_edit(&all, &cfg(), &here(), root, "/../repo/src/store.rs"), Decision::Deny(_)));
     }
 
     /// **링크 철자로 부른 파일도 저장소 안이다.** 훅의 `root` 는 `current_dir()` 이 준 풀린

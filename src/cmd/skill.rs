@@ -539,29 +539,17 @@ fn which(name: &str) -> Option<PathBuf> {
 /// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
 /// 실행할 수 있을 때만 그 자리다 — 훅 명령의 `command -v … && "<exe>"` 와 같은 셈.
 ///
-/// `is_file` 만 보던 판은 실행 권한이 빠진 파일을 "있다" 고 했다. 훅은 그때 권한
-/// 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다. 이름으로 적힌 훅은
+/// 실행할 수 있는가는 [`super::runnable`] 하나가 답한다 — `is_file` 만 보던 판은 실행 권한이
+/// 빠진 파일을 "있다" 고 했다. 이름으로 적힌 훅은
 /// 찾은 자리를 **함께 보인다** — PATH 의 `moai` 가 남의 moai 여도 훅은 돈다.
 fn runs(exe: &str, on_path: Option<&Path>) -> Option<PathBuf> {
     if exe.contains('/') {
         let path = Path::new(exe);
-        runnable(path).then(|| path.to_path_buf())
+        super::runnable(path).then(|| path.to_path_buf())
     } else if exe == "moai" {
         on_path.map(Path::to_path_buf)
     } else {
         which(exe)
-    }
-}
-
-fn runnable(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-    #[cfg(not(unix))]
-    {
-        path.is_file()
     }
 }
 
