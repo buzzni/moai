@@ -1066,7 +1066,10 @@ impl<'a> Lexer<'a> {
             }));
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
-            let (low, floor) = (seg.low, seg.floor);
+            // **글 앞에서 닫힌 묶음도 그렇다**(moai-axqs) — 글은 그것을 낸 토막보다 **먼저** 셈해지니,
+            // 처음 심는 토막이 그 표식을 안 받으면 몸통이 안 돈 집기가 글 안의 쓰기로 이어진다
+            // (`if false; then 집기; fi && bash -c '쓰기'`). 글을 안 낀 같은 줄은 처음부터 막혔다.
+            let (low, floor, shut) = (seg.low, seg.floor, seg.shut);
             let mut first = true;
             // 셸에 넘긴 글이 토막을 냈다 — 글을 낸 토막이 그 묶음을 닫는다.
             let mut handed = false;
@@ -1113,10 +1116,12 @@ impl<'a> Lexer<'a> {
                     over = over.into_iter().chain(left.map(|l| l + level + 1)).min();
                 }
                 for (m, mut s) in segs.into_iter().enumerate() {
+                    // 이 토막이 **바깥에서 내려온 첫 토막인가** — 아래 두 자리가 같은 것을 묻는다.
+                    let lead = m == 0 && std::mem::take(&mut first);
                     if m == 0 {
                         // 바깥에서 내려온 토막 — 지나온 자리는 바깥 자리다. 맨 처음 것은 이음사도,
                         // 앞 토막 뒤로 지나온 자리도 바깥의 것을 받는다(`집기 && bash -c '쓰기'`).
-                        if std::mem::take(&mut first) {
+                        if lead {
                             (s.low, s.floor, s.join) = (low, floor, join);
                         } else {
                             (s.low, s.floor) = (depth, level);
@@ -1129,7 +1134,7 @@ impl<'a> Lexer<'a> {
                     }
                     s.depth += depth + sub;
                     s.level += level + 1;
-                    s.shut = s.shut.map(|l| l + level + 1);
+                    s.shut = s.shut.map(|l| l + level + 1).into_iter().chain(lead.then_some(shut).flatten()).min();
                     // 제자리에서 민다 — 새 목록을 지으면 토막마다 겹마다 힙을 한 번씩 잡아,
                     // `$( … )` 예순네 겹 202바이트 한 줄이 1,104번에서 3,184번으로 뛴다.
                     for l in &mut s.nested {
@@ -1151,7 +1156,12 @@ impl<'a> Lexer<'a> {
             }
             // **글 끝에서 닫힌 묶음은 이 토막이 지나온 것이다** — 몸통이 안 돌았으면 그 값은 0 이라,
             // 그 안의 집기가 이 토막의 `&&` 로 이어지지 않는다([`shell_writes`]).
-            seg.shut = seg.shut.into_iter().chain(over).min();
+            //
+            // **글 앞에서 닫힌 묶음은 이제 처음 심는 토막의 것이다**(moai-axqs) — 닫힌 묶음과 이 토막
+            // 사이에 그 글이 선다. 여기 그대로 두면 [`shell_scan`] 이 그 표식을 두 번 읽어, 그 글
+            // 안에서 **정말 돈** 집기까지 안 돈 것으로 걷는다(`if false; then :; fi && bash -c '집기'`).
+            let before = first.then_some(seg.shut).flatten();
+            seg.shut = before.into_iter().chain(over).min();
             all.push(seg);
         }
         self.all = all;
@@ -7751,6 +7761,17 @@ mod tests {
             "sh -c 'case y in x) moai mv t-1 in_progress --from todo;; esac' && sed -i s/a/b/ src/store.rs",
             "eval 'while false; do moai mv t-1 in_progress --from todo; done' && sed -i s/a/b/ src/store.rs",
             "bash -c \"bash -c 'if false; then moai mv t-1 in_progress --from todo; fi'\" && sed -i s/a/b/ src/store.rs",
+            // **글 앞에서 닫힌 묶음은 그 글의 첫 토막이 든다**(moai-axqs) — 글은 그것을 낸 토막보다
+            // 먼저 셈해져, 처음 심는 토막이 그 표식을 안 받으면 몸통이 안 돈 집기가 글 안의 쓰기까지
+            // 이어졌다. 같은 줄에서 `bash -c` 를 뺀 꼴은 처음부터 막혔다(위).
+            "if false; then moai mv t-1 in_progress --from todo; fi && bash -c 'sed -i s/a/b/ src/store.rs'",
+            "case y in x) moai mv t-1 in_progress --from todo;; esac && sh -c 'echo x > src/store.rs'",
+            "while false; do moai mv t-1 in_progress --from todo; done && eval 'sed -i s/a/b/ src/store.rs'",
+            "if false; then moai mv t-1 in_progress --from todo; fi && bash -c 'echo a' && sed -i s/a/b/ src/store.rs",
+            // **파이프의 칸인 `cd` 는 제 하위 셸의 것이다** — 그 뒤의 상대 경로는 저장소 안이다.
+            // `aimed` 는 이미 그렇게 읽는데 쓰기 쪽만 안 보던 판은, 어디인지 모른다며 버려 샜다.
+            "cd /tmp | cat; echo x > src/store.rs",
+            "cd /tmp & sed -i s/a/b/ src/store.rs",
             // **0 으로 끝내는 묶음은 안 푼다**(리뷰 moai-k8j1.209) — 자식 셸이 0 으로 끝나면 집기가
             // 졌어도 바깥 `&&` 에 닿는다. 맨 바깥의 `exit 0` 은 뒤가 아예 안 돌아 다르다(아래 목록).
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 0; }' && sed -i s/a/b/ src/store.rs",
@@ -7848,6 +7869,10 @@ mod tests {
         // 닫힌 묶음의 표식은 값이 흐르는가와 따로 서야 이 줄이 걷힌다([`Lexer::relex`] 의 `over`).
         assert!(mine("bash -c 'if false; then moai mv t-1 in_progress --from todo & fi'").is_empty());
         assert!(mine("sh -c 'case y in x) moai mv t-1 in_progress --from todo & ;; esac'").is_empty());
+        // **글 앞에서 닫힌 묶음은 그 글 안의 집기까지 걷지는 않는다**(moai-axqs) — 닫힌 것은 그 묶음의
+        // 몸통이고, 글은 그 뒤에 돈다. 표식을 처음 심는 토막에 얹으면서 여기가 함께 걸릴 자리였다.
+        assert_eq!(mine("if false; then true; fi && bash -c 'moai mv t-1 in_progress --from todo'"), ["t-1"]);
+        assert!(mine("if false; then moai mv t-1 in_progress --from todo; fi && bash -c 'echo ok'").is_empty());
     }
 
     /// **띄울 때의 플래그는 셸이 읽는 그대로 읽는다**(moai-j9tx, 리뷰 moai-k8j1.034) — `-o`·`-O` 는
