@@ -1606,7 +1606,20 @@ fn branch_mark(site: &Site, at: usize, fields: super::view::Fields) -> Option<St
         return None;
     }
     let b = site.origin.working(&site.issues[at].id)?;
-    Some(format!("{} {}", style::BRANCH_GLYPH, crate::text::clip_front(b, BRANCH_CAP)))
+    branch_tag(b, BRANCH_CAP)
+}
+
+/// `⎇ <가지>` 한 자리 — 글리프를 앞에 두고 **이름은 앞에서 자른다**. 목록 줄([`branch_mark`])과
+/// 상세의 라벨 줄([`field`])이 **같은 자를 쓴다**: 자르는 자가 둘이면 같은 가지가 화면 위아래에서
+/// 다른 글로 선다.
+///
+/// `cap` 은 부르는 쪽이 쥔 칸이고, [`BRANCH_CAP`] 이 그 위의 상한이다 — 넓다고 이름이 표를 밀어
+/// 내지 않는다. **이름이 한 글자도 못 서면 표를 아예 안 낸다**: `⎇ …` 는 어느 가지인지를 못
+/// 대면서 값의 몫만 먹는다. 남은 것이 `…` 뿐인가로 가른다 — `clip_front` 은 살린 꼬리 앞에 그것을
+/// 붙이므로, 그것만 남았다는 것이 곧 한 글자도 못 살렸다는 뜻이다.
+fn branch_tag(b: &str, cap: usize) -> Option<String> {
+    let cut = crate::text::clip_front(b, cap.min(BRANCH_CAP));
+    (!cut.is_empty() && cut != "…").then(|| format!("{} {cut}", style::BRANCH_GLYPH))
 }
 
 /// 묶음 줄의 끝난/일 셈(`n/n`) — 셈을 껐거나, 묶음이 아니거나, 셀 일이 없으면 빈 글이다. 자는 상세
@@ -2179,7 +2192,15 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         // 맨몸이면, 같은 막음을 두 화면이 다른 줄로 말한다. **자리는 값 앞이다**: 이 패널의
         // 값은 글리프와 id 로 시작하므로 CLI 처럼 제목 바로 앞에 끼우면 칠이 값 글 속으로
         // 들어가고, 앞에 세우면 에픽·마일스톤 줄의 표와 한 칸에 선다.
-        let (mark, title) = titled(site, b);
+        //
+        // **끊긴 쪽은 가지도 제목도 안 잰다** — CLI 도 그 갈래에서 `marked` 를 안 부른다
+        // (`view::block_line` 의 `Blocker::Missing`). 그 id 의 줄이 이 목록에 없으니 겹쳤을 것도
+        // 없고, "못 찾는다" 는 줄에 가지를 달면 없다는 말과 어긋난다. 프레임마다 도는 자리라
+        // 안 쓰는 제목도 안 짓는다 — `Blocker::Missing` 은 `at` 이 없는 갈래 하나다(`report::blocker`).
+        let (mark, title) = match at {
+            Some(_) => titled(site, b),
+            None => (None, String::new()),
+        };
         let (waiting, aside) = at.map_or((crate::report::Waiting::Live, &[][..]), |at| site.waits(at));
         let (label, text) = match crate::report::blocker(at.map(|at| site.column(at)), root.is_some(), waiting) {
             Blocker::Missing => {
@@ -2414,25 +2435,31 @@ fn label_width(rows: &[Labelled]) -> usize {
     rows.iter().map(|(k, ..)| crate::text::width(k)).max().unwrap_or(0)
 }
 
-/// 상세의 라벨 줄 하나 — 이름, 그 값이 가리키는 줄의 **겹침 표**(`⎇ <가지>`, 없으면 `None`),
-/// 값. 표를 값 글에 이어 붙이지 않는 것은 칠이 갈리기 때문이다 — 가지는 [`branch`] 로 서고
-/// 값은 맨몸이다.
+/// 상세의 라벨 줄 하나 — 이름, 그 값이 가리키는 줄이 **겹쳐 온 가지**(맨몸 이름, 안 겹쳤으면
+/// `None`), 값. 표를 값 글에 이어 붙이지 않는 것은 칠이 갈리기 때문이다 — 가지는 [`branch`] 로
+/// 서고 값은 맨몸이다. **자르는 것은 [`field`] 다**: 그 자리에서만 줄에 남은 칸을 안다.
 type Labelled = (String, Option<String>, String);
 
-/// 라벨 줄. 겹침 표는 **값 앞에** 선다 — CLI 상세와 같은 자리다(`view::marked`). 뒤에 달면 긴
-/// 제목의 `…` 뒤로 밀려, 정작 어느 가지의 제목인지가 먼저 사라진다.
-fn field<'a>(k: &str, mark: Option<&str>, v: &str, w: usize, room: usize) -> Line<'a> {
+/// 라벨 줄. 겹침 표는 **값 앞에** 선다 — CLI 는 제목 바로 앞에 끼우지만(`view::marked`) 이 패널의
+/// 값은 글리프와 id 로 시작해 그 자리면 칠이 값 글 속으로 들어간다. 까닭은 [`about`] 의 막음 줄에
+/// 적었다. 뒤에 달면 긴 제목의 `…` 뒤로 밀려, 정작 어느 가지의 제목인지가 먼저 사라진다.
+fn field<'a>(k: &str, from: Option<&str>, v: &str, w: usize, room: usize) -> Line<'a> {
     let pad = w.saturating_sub(crate::text::width(k));
-    let mut spans = vec![Span::styled(format!("{k}{}", " ".repeat(pad)), dim()), Span::raw(" ")];
-    // 표도 값 몫에서 센다 — 안 세면 표가 붙은 줄만 폭을 넘겨 위젯이 말없이 자른다.
-    let taken = mark.map_or(0, |m| crate::text::width(m) + 1);
+    let mut spans = Vec::with_capacity(5);
+    spans.push(Span::styled(format!("{k}{}", " ".repeat(pad)), dim()));
+    spans.push(Span::raw(" "));
+    // 표도 **우리가 자른다** — 폭을 값 몫에서 세기만 하고 표 자체를 안 자르면, 좁은 패널에서
+    // 나가는 자리의 [`fit`] 이 뒤에서 또 잘라 앞뒤가 다 잘린 이름(`…tree-moai-h…`)이 선다.
+    // 앞에서 자르는 까닭 — 꼬리의 id 가 일한다 — 이 그때 통째로 죽고, 그 꼴은 다른 가지로 읽힌다.
+    // 자리 셈은 `라벨 + 빈칸 + 글리프 + 빈칸 + 이름 + 빈칸` 이라 이름의 몫이 `room - w - 4` 다.
+    let mark = from.and_then(|b| branch_tag(b, room.saturating_sub(w + 4)));
+    let taken = mark.as_deref().map_or(0, |m| crate::text::width(m) + 1);
     if let Some(m) = mark {
-        spans.push(Span::styled(m.to_string(), branch()));
+        spans.push(Span::styled(m, branch()));
         spans.push(Span::raw(" "));
     }
     // 값이 넘치면 **잘렸다고 말하며** 자른다. 위젯에 맡기면 표시 없이 사라진다.
-    let v = crate::text::clip(v, room.saturating_sub(w + 1 + taken));
-    spans.push(Span::raw(v.to_string()));
+    spans.push(Span::raw(crate::text::clip(v, room.saturating_sub(w + 1 + taken))));
     Line::from(spans)
 }
 
@@ -2440,12 +2467,10 @@ fn field<'a>(k: &str, mark: Option<&str>, v: &str, w: usize, room: usize) -> Lin
 /// 쓴다 — 한 자리만 표를 달면 같은 패널 안에서 어느 줄이 옆 가지 것인지가 줄마다 갈린다.
 ///
 /// 재는 것은 **그 id** 의 겹침이다(CLI 상세와 같다, `view::detail` 의 에픽 줄) — 펼친 줄이
-/// 겹쳤는가가 아니라 가리키는 줄이 겹쳤는가다. 가지 이름은 목록 줄과 같은 [`BRANCH_CAP`] 에서
-/// 자른다: 자르는 자가 둘이면 같은 가지가 화면 위아래에서 다른 글로 선다.
+/// 겹쳤는가가 아니라 가리키는 줄이 겹쳤는가다. **자르지 않고 맨몸으로 준다**: 줄에 남은 칸을
+/// 아는 것은 [`field`] 뿐이고, 여기서 한 번 자르면 그쪽이 또 잘라 앞뒤가 다 잘린 이름이 선다.
 fn titled(site: &Site, id: &str) -> (Option<String>, String) {
-    let mark =
-        site.origin.branch(id).map(|b| format!("{} {}", style::BRANCH_GLYPH, crate::text::clip_front(b, BRANCH_CAP)));
-    (mark, site.title_of(id))
+    (site.origin.branch(id).map(str::to_string), site.title_of(id))
 }
 
 /// 프로젝트 이름을 칠하는 **한 곳** — 경로 줄·층의 줄·층의 상세가 모두 이것을 부른다.
@@ -3235,6 +3260,17 @@ pub(super) mod tests {
         assert_eq!(squeezed.focus, Pane::Detail, "자리가 선 상세에서 포커스가 걷혔다");
     }
 
+    /// 한 줄에서 **상세 칸**만 떼어 낸다 — 칸이 둘 다 선 줄이 아니면 `None`.
+    ///
+    /// **`│` 하나로 가르지 않는다**(리뷰) — 포커스가 선 칸은 굵은 테두리(`┃`)라 `│` 로만 가르면
+    /// 포커스가 상세로 옮겨간 판에서 목록 칸이 잡히고, 목록의 가지 그림(`twig_lead`)도 제 칸 안에
+    /// `│` 를 그어 조각을 하나 더 만든다. 둘 다 가르고 빈 조각을 뺀 **마지막**이 상세다 —
+    /// `the_detail_pane_is_not_glued_to_its_border` 가 쓰는 자와 같다.
+    fn detail_pane(l: &str) -> Option<&str> {
+        let panes: Vec<&str> = l.split(['│', '┃']).filter(|s| !s.is_empty()).collect();
+        (panes.len() >= 2).then(|| panes[panes.len() - 1])
+    }
+
     /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.
     /// 이름 줄은 제 시험(`the_list_names_its_columns_where_the_values_stand`)이 켜서 본다.
     fn every(issues: Vec<Issue>) -> App {
@@ -3902,9 +3938,15 @@ pub(super) mod tests {
             Status::new("todo"),
             "2026-09-01T00:00:00Z",
         );
+        // **막는 줄도 함께 잰다** — 표를 다는 자리가 셋인데 둘만 걸면, 셋 중 손이 가장 많이 간
+        // 갈래(`Blocker` 를 낱말로 옮기는 `match`)에서 표가 빠져도 시험이 푸르다. 막는 것은 그
+        // 마일스톤이다 — 줄을 새로 세우면 목록의 모양이 바뀌어 아래의 걸음이 딴 줄에 선다.
         for r in &mut rows {
             if r.id == "argos-0001" {
                 r.milestone = Some("argos-m001".into());
+            }
+            if r.kind == Kind::Issue {
+                r.blocked_by = vec!["argos-m001".into()];
             }
         }
         rows.push(stone);
@@ -3933,8 +3975,8 @@ pub(super) mod tests {
         let mark = format!("{} feat/x", style::BRANCH_GLYPH);
         // **상세 칸만 본다** — 머리의 경로 줄이 그 에픽·마일스톤 이름을 대고 그 오른쪽 끝이 겹쳐
         // 보기가 켜졌다는 `⎇` 를 대므로, 화면 전체에서 찾으면 표를 안 달아도 그 줄이 걸린다.
-        let pane: Vec<&str> = text.lines().filter_map(|l| l.split('│').nth(1)).collect();
-        for key in ["tui.about.epic", "tui.about.milestone"] {
+        let pane: Vec<&str> = text.lines().filter_map(detail_pane).collect();
+        for key in ["tui.about.epic", "tui.about.milestone", "tui.block.open"] {
             let label = crate::i18n::say(crate::i18n::Lang::Ko, key);
             let row = pane
                 .iter()
@@ -3951,6 +3993,60 @@ pub(super) mod tests {
         bare.hit("j Enter j Enter j");
         let off = render(&mut bare, 160, 20).join("\n");
         assert!(!off.contains(style::BRANCH_GLYPH), "안 겹친 상세에 가지 표가 섰다\n{off}");
+    }
+
+    /// **좁은 패널에서도 가지 이름은 한 번만 잘린다**(moai-t0qd 리뷰). 표의 폭을 값 몫에서 세기만
+    /// 하고 표 자체를 안 자르면, 줄이 패널을 넘어 나가는 자리의 [`fit`] 이 뒤에서 또 자른다 —
+    /// 앞에서 자른 이름(`…tree-moai-hela2`)이 `…tree-moai-h…` 가 되어 앞뒤가 다 잘린다. 앞에서
+    /// 자르는 까닭이 꼬리의 id 가 일해서인데([`BRANCH_CAP`] 의 문서), 그 꼴은 그 까닭을 통째로
+    /// 죽이고 다른 워크트리로 읽힌다.
+    ///
+    /// 규약의 `worktree-moai-<id>` 로 잰다 — 짧은 이름(`feat/x`)은 어느 폭에서도 안 잘려,
+    /// 위의 시험만으로는 이 자리가 한 번도 안 서 본다.
+    #[test]
+    fn a_branch_mark_in_a_narrow_pane_is_cut_once_and_keeps_its_tail() {
+        let rows = issues();
+        let mut theirs: Vec<Issue> = rows.iter().filter(|i| i.id == "argos-0001").cloned().collect();
+        for t in &mut theirs {
+            t.title = format!("옆에서 고친 {}", t.title);
+            t.updated_at = "2026-09-12T00:00:00Z".into();
+            t.status_since = "2026-09-12T00:00:00Z".into();
+        }
+        let mut a = as_opened(rows);
+        let (shown, origin) = crate::worktree::overlay(
+            a.site.issues.clone(),
+            &[crate::worktree::Side::new("worktree-moai-hela2", "/wt/hela2", theirs)],
+        );
+        a.adopt(shown);
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a.hit("j Enter j");
+
+        let label = crate::i18n::say(crate::i18n::Lang::Ko, "tui.about.epic");
+        let mut measured = 0;
+        for w in [50u16, 60, 70, 80, 100, 160] {
+            let text = render(&mut a, w, 20).join("\n");
+            let pane: Vec<&str> = text.lines().filter_map(detail_pane).collect();
+            let Some(row) = pane.iter().find(|l| l.trim_start().starts_with(label)) else {
+                continue; // 그 폭에서는 상세가 그 줄을 낼 자리가 없다 — 잴 것도 없다.
+            };
+            let Some(name) = row.split(style::BRANCH_GLYPH).nth(1).and_then(|t| t.split_whitespace().next()) else {
+                continue; // 이름이 한 글자도 못 서면 표를 아예 안 낸다([`branch_tag`]).
+            };
+            measured += 1;
+            // **재는 것은 "한 번만, 앞에서" 다.** 꼬리의 몇 글자가 남는지는 폭이 정하므로 못 박지
+            // 않는다 — `clip_front` 은 `…` 를 **앞에** 붙이니, 이름이 `…` 로 끝났다는 것은 누군가
+            // 뒤에서 한 번 더 잘랐다는 뜻이고 그 자는 [`fit`] 하나다.
+            assert!(
+                !name.ends_with('…'),
+                "폭 {w} 에서 가지 이름이 뒤에서 또 잘렸다 — 앞뒤가 다 잘린 이름은 남의 가지로 읽힌다: {name:?}"
+            );
+            assert!(
+                "worktree-moai-hela2".ends_with(name.trim_start_matches('…')),
+                "폭 {w} 에서 남은 글이 그 가지의 꼬리가 아니다: {name:?}"
+            );
+        }
+        // 위의 `assert` 가 한 번도 안 서면 시험이 빈 채로 푸르다 — 표가 선 폭이 있었는지를 센다.
+        assert!(measured > 0, "어느 폭에서도 가지 표가 안 섰다 — 잰 것이 없다");
     }
 
     /// **닫힌 줄에는 ⎇ 가 안 선다**(moai-9a8m) — 머지하고 안 치운 워크트리의 이름은 일이 끝난
