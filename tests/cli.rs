@@ -775,6 +775,40 @@ fn the_init_screen_stands_in_one_language() {
     }
 }
 
+/// **`moai skill` 의 화면도 한 말로 선다**(moai-uzgp).
+///
+/// `init` 다음으로 새 사용자가 밟는 표면인데 설치·상태·걷기의 안내문이 통째로 박힌 한국어였다.
+/// 여기서 재는 것은 `claude` 가 없는 기계다 — 그 판이 곁 플러그인·훅·설치 줄을 한 화면에 다 낸다.
+#[test]
+fn the_skill_screens_stand_in_one_language() {
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = init(name);
+        let run = |args: &[&str]| {
+            let mut cmd = isolated(BIN);
+            cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+            // `claude` 가 없는 기계 — 손으로 칠 줄과 건너뛴 까닭이 그때 다 선다.
+            cmd.env("PATH", "/nonexistent");
+            with_lang(&mut cmd, lang);
+            let out = cmd.output().expect("moai 를 실행하지 못했다");
+            format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+        };
+        vec![
+            ("skill install --dry-run".to_string(), run(&["skill", "install", "--dry-run"])),
+            ("skill install".to_string(), run(&["skill", "install"])),
+            ("skill status".to_string(), run(&["skill", "status"])),
+            ("skill uninstall --dry-run".to_string(), run(&["skill", "uninstall", "--dry-run"])),
+            ("skill uninstall".to_string(), run(&["skill", "uninstall"])),
+        ]
+    };
+    for (args, said) in screens("skilllangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    for (args, said) in screens("skilllangko", Some("ko")) {
+        assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
+    }
+}
+
 /// **`.moai` 밖에서 쓰는 명령의 거절이 한 말로 선다**(moai-5j49). 등록한 것 없이 아무 명령이나
 /// 치면 서는 줄이라 받은 사람이 가장 먼저 읽는다 — 그런데 읽을 수 있어야 할 쪽(`moai init` 을
 /// 치라는 안내)이 저장 계층에 박혀 있어 영어로 고른 사람에게 한국어로 섰다.

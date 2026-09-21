@@ -35,6 +35,7 @@
 
 use super::{Ctx, Fail, R};
 use crate::cli::MergeDriverArgs;
+use crate::i18n::{fill, say};
 use crate::model::Issue;
 use crate::store::Repo;
 use serde::Deserialize;
@@ -106,10 +107,9 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
         return install(ctx, args.as_command.as_deref());
     }
     let (Some(base), Some(ours), Some(theirs)) = (&args.base, &args.ours, &args.theirs) else {
-        return Err(Fail::coded(
-            "머지 드라이버는 `%O %A %B` 세 자리를 받는다. 심는 길은 `moai merge-driver --install`",
-            super::code::BAD_INPUT,
-        ));
+        // **여기까지가 사람이 친 길이다**(moai-uzgp) — 자리를 안 주고 부를 수 있는 것은 사람뿐이라,
+        // 이 거절문만 화면 말을 안다. 아래 git 이 부르는 길은 그대로 둔다.
+        return Err(Fail::coded(say(ctx.lang(), "refuse.driver_places"), super::code::BAD_INPUT));
     };
     // **셋 다 먼저, 바이트로 읽는다.** `ours` 는 답을 쓸 자리이기도 해서, 쓰기 시작한 뒤에
     // theirs 를 못 읽으면 지운 것도 안 쓴 것도 아닌 파일이 남는다.
@@ -167,6 +167,9 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
     }
 }
 
+/// **이 줄은 화면 말을 모른다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 병합마다 부르는 길이라
+/// 여기서 사용자 설정을 열면 병합마다 그 파일이 열리고, 저장 계층을 화면 말에서 떼어 둔 결정의
+/// 까닭이 바로 이 길이다. 명령줄로 친 길(`--install`·자리를 안 준 부름)만 제 말로 편다.
 fn clash_fail(clashes: &[String], what: &str) -> Fail {
     Fail::coded(format!("{what}: {}건은 사람이 푼다 — {}", clashes.len(), clashes.join(" ")), super::code::BROKEN)
 }
@@ -964,7 +967,9 @@ fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
 /// 쓴다 — 이름만으로는 못 가른다), [`probe`] 가 `Runs` 라야 한다. 둘 중 하나라도 어긋나면 지금
 /// 바이너리를 적는다 — 틀리는 값은 **덜 이르는 쪽**이라야 한다.
 fn chosen_command(here: &Path) -> Result<String, String> {
-    let mine = std::env::current_exe().map_err(|e| format!("이 바이너리의 자리를 모른다: {e}"))?;
+    // **까닭은 자료로 낸다** — 부르는 두 자리(`install` 과 `plant_for_init`)가 저마다 제 말로
+    // 편다(moai-uzgp). 여기서 글을 지으면 이 함수가 화면 말을 알아야 한다.
+    let mine = std::env::current_exe().map_err(|e| e.to_string())?;
     let Some(found) = on_path(DRIVER) else { return Ok(mine.display().to_string()) };
     // 같은 파일이면 고를 것이 없다 — 이름으로 적으면 git 이 병합에서 쓸 `PATH` 에 기대는 것이
     // 하나 늘 뿐이다.
@@ -1034,7 +1039,9 @@ fn plant_config(here: &Path, cmd: &str) -> Result<String, String> {
     let recursive = format!("merge.{DRIVER}.recursive");
     let key = driver_key();
     for (k, v) in [
-        (name.as_str(), "moai issues.jsonl — 이슈마다 3-way"),
+        // **심는 값이라 영어 하나다**(moai-uzgp) — `.gitattributes` 의 블록과 같은 까닭이다.
+        // 설정에 앉아 저장소가 함께 쓰는 글이라 이 세션이 고른 말을 따라가면 안 된다.
+        (name.as_str(), "moai issues.jsonl — three-way per issue"),
         (recursive.as_str(), "binary"),
         (key.as_str(), driver.as_str()),
     ] {
@@ -1117,7 +1124,8 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
     // 안 하므로 맨 `moai` 라고 적으면 PATH 에 없는 기계에서 조용히 안 돈다.
     let cmd = match as_command {
         Some(c) => c.to_string(),
-        None => chosen_command(&here).map_err(Fail::new)?,
+        None => chosen_command(&here)
+            .map_err(|why| Fail::new(fill(say(ctx.lang(), "refuse.driver_no_own_path"), &[("why", &why)])))?,
     };
     let key = driver_key();
     let driver = plant_config(&here, &cmd).map_err(Fail::new)?;
@@ -1129,17 +1137,20 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
         }
         return super::json_line(&Planted { driver: &driver, attribute: format!("{SNAPSHOT} merge={DRIVER}") });
     }
+    // **사람이 친 길만 화면 말을 안다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 `%O %A %B` 로
+    // 부르는 길은 사용자 설정을 안 연다 — 저장 계층을 화면 말에서 떼어 둔 결정과 같은 자리다.
+    let lang = ctx.lang();
     Ok(vec![
         format!("{key} = {driver}"),
-        format!("`.gitattributes` 의 `{SNAPSHOT} merge={DRIVER}` 가 이것을 부른다 — 없으면 `moai init` 이 넣는다"),
-        "클론마다 한 번씩 친다. 안 친 클론은 git 의 기본 머지가 돈다".into(),
+        fill(say(lang, "driver.installed_attribute"), &[("rule", &format!("{SNAPSHOT} merge={DRIVER}"))]),
+        say(lang, "driver.installed_per_clone").to_string(),
         // **적은 자리가 사라져도 조용히 잃지는 않는다** — 심는 줄이 `git merge-file` 로
         // 내려앉으므로(`driver_command`) 최악이 안 심은 클론과 같아진다. 그래도 자리는
         // 지키는 편이 낫다: 내려앉은 판은 이슈마다 푼 것을 못 쓰고 사람 손으로 간다.
         // 딸린 워크트리에서 쳐도 이 줄은 **클론이 함께 쓰는** `.git/config` 에 앉으므로
         // (`--local` 은 공용 자리다), 그 워크트리를 지우면 클론 전체가 그 상태가 된다.
-        "적은 자리가 사라지면 git 의 기본 머지로 내려앉는다 — 표식은 서지만 이슈마다 푸는 값은 잃는다".into(),
-        "워크트리의 `target/` 을 가리키면 그 워크트리를 지울 때 같이 죽는다. 그때는 다시 치거나 `--as <늘 있는 자리>` 로 심는다".into(),
+        say(lang, "driver.installed_falls_back").to_string(),
+        say(lang, "driver.installed_worktree").to_string(),
     ])
 }
 
