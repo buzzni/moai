@@ -41,7 +41,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     // 없다. 위에서 먼저 풀면 git 설정 없는 기계에서 `moai read <id>` 가 통째로 넘어졌다. 탐색기의
     // `r` 도 같은 자다 — 누군지 몰라도, 내게 온 줄이 아니어도 그 줄을 적는다.
     if args.all {
-        let me = crate::model::actor(ctx.user.as_deref(), &repo.root)?;
+        let me = crate::model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
         let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
         // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다. 읽음은 이 저장소의
         // 제 파일에 살고, 옛 `[read]` 는 겹쳐 본다(moai-omx7, 사용자 결정 2026-09-19).
@@ -61,7 +61,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         say_why(&marks.problems, ctx, &mut said);
         want.extend(crate::query::unread(&load.issues, &me, &marks.seen).into_iter().map(str::to_string));
     }
-    // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
+    // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m g` 가 부르는 것과 같은
     // 자(`nav::Index::under_group`)다. **없는 묶음은 말한다** — 조용히 빈 손으로 끝나면 사람은 오타를
     // 친 줄 모르고 다 적힌 줄 안다. **묶음이 아닌 줄은 적기 전에 거절한다** — 이슈를 주면 그 줄 하나만
     // 적고 0 으로 끝나, "그 밑까지" 를 시킨 사람은 다 적힌 줄 안다.

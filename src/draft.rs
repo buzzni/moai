@@ -23,6 +23,7 @@
 //! 이스케이프하는 것이 마크다운을 쓰는 것보다 훨씬 잘 깨진다. 그리고 사람도
 //! 이 마크다운은 손으로 쓴다.
 
+use crate::i18n::{Lang, fill as say_fill, say};
 use crate::model::{Issue, Kind, normalize_tag};
 
 #[derive(Debug, PartialEq)]
@@ -39,19 +40,27 @@ pub struct Draft {
 ///
 /// 태그는 **끝에서부터** 뗀다 — 제목 가운데의 `#` 은 제목의 일부다
 /// (`--json 이 #1 에서 깨진다`).
-fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>), String> {
+fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, Vec<String>), String> {
+    // **거절할 때만 짓는다**(`store::with_write` 가 같은 자로 적어 둔 규칙, 리뷰) — 줄머리에서
+    // 미리 지으면 8,000줄 계획이 제 줄을 8,000번 `Debug` 로 베껴 놓고 전부 버린다.
+    let at = || n.to_string();
     let mut rest = raw.trim();
     let mut priority = None;
 
     if let Some(after) = rest.strip_prefix('[') {
-        let (tag, tail) = after.split_once(']').ok_or_else(|| format!("{n}줄: `[` 를 닫지 않았다 — {raw:?}"))?;
+        let (tag, tail) = after.split_once(']').ok_or_else(|| {
+            say_fill(say(lang, "draft.unclosed_bracket"), &[("line", &at()), ("raw", &format!("{raw:?}"))])
+        })?;
         let p = tag
             .trim()
             .strip_prefix('p')
             .and_then(|d| d.parse::<u8>().ok())
             .filter(|p| *p <= crate::model::MAX_PRIORITY)
             .ok_or_else(|| {
-                format!("{n}줄: `[{tag}]` 는 우선순위가 아니다. `[p0]`~`[p{}]`", crate::model::MAX_PRIORITY)
+                say_fill(
+                    say(lang, "draft.not_a_priority"),
+                    &[("line", &at()), ("tag", tag), ("max", &crate::model::MAX_PRIORITY.to_string())],
+                )
             })?;
         priority = Some(p);
         rest = tail.trim();
@@ -75,7 +84,7 @@ fn split_parts(raw: &str, n: usize) -> Result<(String, Option<u8>, Vec<String>),
     tags.reverse();
 
     if rest.is_empty() {
-        return Err(format!("{n}줄: 제목이 없다 — {raw:?}"));
+        return Err(say_fill(say(lang, "draft.no_title"), &[("line", &at()), ("raw", &format!("{raw:?}"))]));
     }
     // 제목 끝쪽에 이어진 `\#낱말` 은 태그가 아니라 제목의 `#낱말` 이다(moai-a5pz). 가운데
     // 것은 원래 태그로 안 읽히므로 이스케이프도 안 하고 풀지도 않는다 — render 와 같은 자리.
@@ -175,12 +184,16 @@ fn expand<'a>(s: &'a str, vars: &[(&str, &str)]) -> (String, Vec<&'a str>) {
 ///   태그 자리(`#{{t}}`)의 변수는 그 태그를 대며 거절한다 — 제목의 글자 `#` 뒤에 두려면 `\#{{t}}`
 /// - **`\{{` 는 글자 `{{` 다**(moai-xqxu) — 역슬래시를 떼고 변수로 세지 않는다. [`render`] 가 제목과
 ///   태그의 `{{` 를 그렇게 써서, 되뽑은 계획이 채우지 않은 변수로 거절되지 않는다
+///
+/// **시험만 부른다** — 도는 길은 [`fill_as`] 를 지난다([`parse`] 와 같은 자). 말을 [`Lang::Ko`] 로
+/// 박아 두는 것은 거절문의 낱말을 재는 시험이 돌리는 사람의 설정에 안 달리게 하려는 것이다.
+#[cfg(test)]
 pub fn fill(src: &str, vars: &[(&str, &str)]) -> Result<Vec<Draft>, String> {
-    fill_as(src, vars, Shape::Plan)
+    fill_as(src, vars, Shape::Plan, Lang::Ko)
 }
 
 /// [`fill`] 을 [`Shape`] 대로 읽는다.
-pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape) -> Result<Vec<Draft>, String> {
+pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape, lang: Lang) -> Result<Vec<Draft>, String> {
     let (_, names) = expand(src, vars);
     let quote = |v: &[&str]| v.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join("·");
     let missing: Vec<&str> = names.iter().copied().filter(|n| !vars.iter().any(|(k, _)| k == n)).collect();
@@ -192,16 +205,13 @@ pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape) -> Result<Vec<Dra
     }
     let mut errors = Vec::new();
     if !missing.is_empty() {
-        errors.push(format!(
-            "채우지 않은 변수 {} — `--var 이름=값` 으로 준다. 글자 `{{{{` 면 `\\{{{{` 로 적는다",
-            quote(&missing)
-        ));
+        errors.push(say_fill(say(lang, "draft.var_missing"), &[("names", &quote(&missing))]));
     }
     if !unknown.is_empty() {
-        errors.push(format!("계획에 없는 변수 {} — 이름이 맞는지 본다", quote(&unknown)));
+        errors.push(say_fill(say(lang, "draft.var_unknown"), &[("names", &quote(&unknown))]));
     }
     // 형식은 값 없이도 읽힌다 — 변수 거절이 있어도 줄 거절까지 한 번에 말한다.
-    let mut drafts = parse_as(src, shape).unwrap_or_else(|e| {
+    let mut drafts = parse_as(src, shape, lang).unwrap_or_else(|e| {
         errors.push(e);
         Vec::new()
     });
@@ -212,9 +222,7 @@ pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape) -> Result<Vec<Dra
         for t in &mut d.tags {
             let (tag, found) = expand(t, vars);
             if !found.is_empty() {
-                errors.push(format!(
-                    "태그 `#{t}` 에 변수가 들었다 — 값은 제목 글자라 태그를 못 정한다. 제목의 `#` 이면 `\\#` 로 적는다"
-                ));
+                errors.push(say_fill(say(lang, "draft.tag_has_var"), &[("tag", t.as_str())]));
             }
             *t = tag;
         }
@@ -228,7 +236,7 @@ pub fn fill_as(src: &str, vars: &[(&str, &str)], shape: Shape) -> Result<Vec<Dra
 /// [`parse_as`] 를 [`Shape::Plan`] 으로. 시험만 부른다 — 쓰는 길은 [`fill_as`] 를 지난다.
 #[cfg(test)]
 pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
-    parse_as(src, Shape::Plan)
+    parse_as(src, Shape::Plan, Lang::Ko)
 }
 
 /// 계획이 무엇을 세우는가. 형식은 하나고, 다른 것은 `#` 줄이 설 자리가 있느냐뿐이다.
@@ -243,7 +251,7 @@ pub enum Shape {
 
 /// 못 읽은 줄은 **전부** 모아 한 번에 말한다. 하나씩 고치게 하면 여섯 줄짜리
 /// heredoc 을 여섯 번 다시 보낸다.
-pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
+pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, String> {
     let mut out: Vec<Draft> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let mut epic: Option<usize> = None;
@@ -254,25 +262,30 @@ pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
         if l.is_empty() {
             continue;
         }
+        // **거절할 때만 짓는다**(리뷰) — `shown` 은 제 줄을 `Debug` 로 통째로 베끼는 자리라,
+        // 줄머리에서 지으면 멀쩡한 8,000줄 계획이 그 헛일을 8,000번 하고 전부 버린다.
+        // `store::with_write` 가 같은 까닭으로 가리키는 말을 닫힘에 담아 둔 것과 한 자다.
+        let at = || n.to_string();
+        let shown = || format!("{l:?}");
         let (kind, body) = match l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")) {
             Some(b) => (Kind::Issue, b),
             None => match l.strip_prefix("# ") {
                 Some(b) => (Kind::Epic, b),
                 None => {
-                    errors.push(format!("{n}줄: `# 에픽` 도 `- 이슈` 도 아니다 — {l:?}"));
+                    errors.push(say_fill(say(lang, "draft.not_a_line"), &[("line", &at()), ("raw", &shown())]));
                     continue;
                 }
             },
         };
         if kind == Kind::Epic && shape == Shape::Members {
-            errors.push(format!("{n}줄: 선 에픽에 펼칠 때는 `# 에픽` 을 적지 않는다 — `- 이슈` 만 적는다 — {l:?}"));
+            errors.push(say_fill(say(lang, "draft.no_epic_line"), &[("line", &at()), ("raw", &shown())]));
             continue;
         }
         if kind == Kind::Issue && epic.is_none() && shape == Shape::Plan {
-            errors.push(format!("{n}줄: 어느 에픽의 이슈인지 알 수 없다. 위에 `# 에픽 제목` 을 둔다 — {l:?}"));
+            errors.push(say_fill(say(lang, "draft.no_epic_above"), &[("line", &at()), ("raw", &shown())]));
             continue;
         }
-        match split_parts(body, n) {
+        match split_parts(body, n, lang) {
             Err(e) => errors.push(e),
             Ok((title, priority, tags)) => {
                 if kind == Kind::Epic {
@@ -287,11 +300,12 @@ pub fn parse_as(src: &str, shape: Shape) -> Result<Vec<Draft>, String> {
         return Err(errors.join("\n      "));
     }
     if out.is_empty() {
+        // **갈래마다 제 `say` 를 적는다** — 키를 `match` 의 팔로 넘기면 소스를 훑는 시험의 눈에서 사라진다.
         return Err(match shape {
-            Shape::Plan => "읽을 것이 없다. `# 에픽 제목` 과 `- 이슈 제목` 을 적는다",
-            Shape::Members => "읽을 것이 없다. `- 이슈 제목` 을 적는다",
+            Shape::Plan => say(lang, "draft.nothing_plan"),
+            Shape::Members => say(lang, "draft.nothing_members"),
         }
-        .into());
+        .to_string());
     }
     Ok(out)
 }
@@ -377,7 +391,10 @@ pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
             // `add --from` 이 도로 읽는 길 **그 자체**로 읽는다 — [`fill`] 에 빈 변수로(moai-xqxu). 제목·
             // 우선순위·태그는 줄머리와 상관없이 같게 읽히므로 줄마다 에픽 줄로 넣는다 — 이슈 줄은 위에
             // 에픽이 있어야 읽힌다. 길을 따로 짜 맞추면 읽는 길이 바뀌는 날 이쪽만 옛 길로 남는다.
-            let read = fill(&format!("# {}\n", body(i)), &[]).ok().and_then(|d| d.into_iter().next());
+            // **말은 아무거나 된다** — 읽힌 값만 견주고 거절문은 `ok()` 가 버린다.
+            let read = fill_as(&format!("# {}\n", body(i)), &[], Shape::Plan, Lang::default())
+                .ok()
+                .and_then(|d| d.into_iter().next());
             read.map(|d| (d.title, d.priority, d.tags))
                 != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone()))
         })

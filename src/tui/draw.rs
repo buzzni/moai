@@ -30,6 +30,22 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
 const LEFT: u16 = 55;
 
+/// 위아래로 가를 때 **목록**이 가져가는 높이(moai-l7e2). **[`LEFT`] 와 다른 자다** — 가로의 55%
+/// 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹는다. 상세는 한 줄이 한 줄이라 폭보다 적게
+/// 든다: id·제목·칸·날짜에 여남은 줄이면 서고, 목록은 줄이 많을수록 값이 는다.
+const ABOVE: u16 = 70;
+
+/// 위아래로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 넉 줄. 가로의 [`DETAIL_MIN_H`] 와 같은
+/// 자리고, 단위만 칸에서 줄로 바뀐다.
+const DETAIL_MIN_V: u16 = 6;
+
+/// 좌우로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 여덟 칸. 세로의 [`DETAIL_MIN_V`] 와 짝이다.
+const DETAIL_MIN_H: u16 = 10;
+
+/// 위아래로 갈랐을 때 **목록**의 바닥 — 테두리 둘과 줄 하나. [`super::menu::BODY_MIN`] 과 같은
+/// 꼴이다: 커서가 선 줄이 안 보이면 상세가 무엇에 대한 것인지를 잃는다.
+const LIST_MIN_V: u16 = 3;
+
 /// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
 
@@ -112,15 +128,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Constraint::Length(keys_h),
     ])
     .areas(area);
-    // **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다.
-    // 숨겼을 때 상세의 자리는 **없다**(`None`) — 폭 0 짜리 유령 칸을 몸통 오른쪽 끝 밖에 두면
-    // 그것이 자리인 줄 알고 그리는 코드가 언젠가 버퍼 밖에 대고 말없이 아무것도 안 그린다.
-    let (left, right) = if app.detail_open {
-        let [left, right] = Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
-        (left, Some(right))
-    } else {
-        (body, None)
-    };
+    let (left, right) = split_body(body, app);
+    // **안 선 칸에는 포커스가 못 선다**(리뷰, moai-l7e2). 세로로 접힌 상세는 `detail_open` 이 켜진
+    // 채로 자리가 없다 — 그대로 두면 `Ctrl-w w` 가 안 그려진 칸으로 가고, 거기서 ↑↓ 는 보이지 않는
+    // 글을 굴려 목록이 멈춘 것처럼 보인다. 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은
+    // 자고, 접는 판단은 자리를 아는 쪽(여기)만 할 수 있어 그린 뒤에 되돌린다.
+    if right.is_none() {
+        app.focus = Pane::Explorer;
+    }
 
     // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
     // 들고 있다가 아래에서 스피너와 함께 센다.
@@ -165,6 +180,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     match &mut app.mode {
         Mode::Idea(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
+        Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -239,6 +255,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             }
             None => pick_keys(f, p, keys, app.site.lang),
         },
+        // 거르는 칸이 늘 서 있다 — 이름이 천 개 넘어 글자로 좁히지 못하면 고를 길이 없다.
+        Mode::Zone(z) => {
+            let lang = app.site.lang;
+            let help = fill(
+                say(lang, "tui.prompt.hang"),
+                &[("apply", &label(PROMPT, Prompt::Apply)), ("cancel", &label(PROMPT, Prompt::Cancel))],
+            );
+            let help = prompt_help(&help, lang);
+            prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
+        }
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
@@ -355,6 +381,58 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &p.list, at, "", true, lang);
+}
+
+/// 시간대 고르는 창(moai-3oz2) — 이름 목록과, 지금 쓰는 것에 붙는 낱말.
+///
+/// **빈 목록에는 까닭이 선다**(moai-77ap). 까닭 없이 비면 이 창이 "시간대가 없다" 로 서서
+/// 무엇이 잘못됐는지 아무 데도 안 적힌다 — 정적 musl 판을 zoneinfo 없는 기계에 받은 자리다.
+fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let inner = at.width.saturating_sub(2) as usize;
+    let rows = z.shown();
+    let now = say(lang, "tui.tz.now");
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|n| {
+            let mut spans = vec![Span::raw((*n).to_string())];
+            // **지금 쓰는 것에 낱말이 붙는다** — 색이 혼자 뜻을 지지 않는다.
+            if z.is_now(n) {
+                spans.push(Span::styled(format!("  {now}"), dim()));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.tz.title")));
+    if let Some(why) = &z.trouble {
+        block = block.title_bottom(Line::from(Span::styled(
+            clip(&format!(" {} ", crate::text::one_line(&crate::view::zone_trouble(lang, why))), inner),
+            dim(),
+        )));
+    } else if rows.is_empty() {
+        // tzdb 는 있는데 거르는 글에 하나도 안 걸렸다 — 그것은 탈이 아니라 글이 좁은 것이다.
+        block = block
+            .title_bottom(Line::from(Span::styled(clip(&format!(" {} ", say(lang, "tui.tz.none")), inner), dim())));
+    }
+    let selected = (!rows.is_empty()).then_some(z.cursor.min(rows.len().saturating_sub(1)));
+    z.list.fit(at.height.saturating_sub(2) as usize, rows.len());
+    if let Some(n) = selected {
+        z.list.reveal(n);
+    }
+    let mut state = ListState::default().with_offset(z.list.offset()).with_selected(selected);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
+    scroll_mark(f, &z.list, at, "", true, lang);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
@@ -820,6 +898,42 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 /// 표에서 한 번 집어 짧은 글 하나를 잇는 것뿐이라 그리는 걸음에 얹어도 된다.
 fn version_said(lang: Lang) -> String {
     format!("{} · {}", env!("CARGO_PKG_VERSION"), say(lang, "tui.version.unchecked"))
+}
+
+/// 몸통을 목록과 상세로 가른다 — `(목록, 상세)`.
+///
+/// **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다. 숨겼을 때
+/// 상세의 자리는 **없다**(`None`): 폭 0 짜리 유령 칸을 몸통 끝 밖에 두면 그것이 자리인 줄 알고
+/// 그리는 코드가 언젠가 버퍼 밖에 대고 말없이 아무것도 안 그린다.
+///
+/// **자리는 사람이 고른다**(`SPC o d`, moai-2g7d) — `right`·`bottom`·`left`·`top`. 가르는 자가 둘이다:
+///
+/// - **가로는 폭, 세로는 높이다.** [`LEFT`] 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹으므로
+///   세로는 [`ABOVE`] 로 따로 잰다
+/// - **낮으면 세로로는 아예 안 연다**(moai-l7e2). 가로의 [`DETAIL_MIN_H`] 는 좁아도 두 칸이 서지만, 세로로
+///   눌린 목록은 커서가 선 줄조차 못 내 상세가 무엇에 대한 것인지를 잃는다. 그때는 숨긴 것과 같은
+///   답(`None`)을 내 목록이 몸통을 다 쓴다 — [`super::menu::BODY_MIN`] 이 격자를 접는 것과 같은 꼴이다
+///
+/// **자리를 맞바꿀 때 몫도 함께 따라간다**([`super::view::DetailAt::first`]) — 목록이 늘 큰
+/// 쪽이다. 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서 55%·70% 를 가져가, 자리를 한 번
+/// 돌렸을 뿐인데 목록이 반으로 준다.
+fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
+    if !app.detail_open {
+        return (body, None);
+    }
+    let at = app.detail_at;
+    if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
+        return (body, None);
+    }
+    let (share, least) = if at.vertical() { (ABOVE, DETAIL_MIN_V) } else { (LEFT, DETAIL_MIN_H) };
+    // 앞에 서는 쪽이 첫 조각이다 — 목록의 몫(`share`)은 어느 쪽에 서든 목록을 따라간다.
+    let hold = if at.first() {
+        [Constraint::Min(least), Constraint::Percentage(share)]
+    } else {
+        [Constraint::Percentage(share), Constraint::Min(least)]
+    };
+    let [a, b] = if at.vertical() { Layout::vertical(hold).areas(body) } else { Layout::horizontal(hold).areas(body) };
+    if at.first() { (b, Some(a)) } else { (a, Some(b)) }
 }
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
@@ -1414,6 +1528,9 @@ fn trail_width(app: &App, e: &Entry) -> usize {
 fn head_width(site: &Site, at: usize, twig: &Twig, fields: super::view::Fields, cols: Head) -> usize {
     // 칸 글리프는 도는 줄이든 아니든 두 칸이다(`row_glyph`). 좁아서 스피너를 걷는 것(`Head::still`)은
     // 걷기 셈 **뒤의** 일이라 여기에 안 든다.
+    //
+    // **줄마다 달라지는 항이 없다**(moai-nb6w) — 한때 그 곁의 표식을 줄마다 재서 더했고, 그 셈이
+    // 줄과 갈리면 제목이 한두 칸 말없이 잘렸다(`row_line` 의 `debug_assert_eq!` 가 잡던 자리).
     cols.lead(fields) + 2 + 1 + lead_extras(site, at, fields) + twig_width(twig)
 }
 
@@ -1889,6 +2006,9 @@ fn glyph_of(app: &App, site: &Site, at: usize) -> &'static str {
 /// 이름이 없어 색만으로 갈렸다 — 색이 혼자 뜻을 지면 안 된다. 움직임은 곁들이고 뜻은
 /// 글리프가 진다(`⠋▸`·`⠋?`). 안 도는 줄은 한 칸 띄워 두 글자 자리를 맞춘다 — 줄마다 제목이
 /// 들쭉날쭉하면 훑어 내려갈 수 없다. 상세 머리와 건수는 칸 이름을 곁에 적으므로 [`glyph_of`] 다.
+///
+/// **줄머리는 늘 두 칸이다**(moai-nb6w) — 한때 그 곁에 표식 둘(idea `◇`·미룸 `‖`)이 줄마다 붙어,
+/// 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다. 까닭과 되살릴 때 먼저 풀 것은 `style` 에 적어 두었다.
 fn row_glyph(app: &App, site: &Site, at: usize) -> String {
     let col = style::glyph(site.column(at));
     if site.spins(at) { format!("{}{col}", style::spin_frame(app.spin)) } else { format!(" {col}") }
@@ -1938,6 +2058,9 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 넘친 첨자에는 댈 것이 없다(moai-m59y) — 막음은 짚는 자리에 둔다. 부르는 쪽에 두면 그 줄과
     // 이 줄이 230줄 떨어져, 다음 부르는 쪽은 적히지 않은 약속을 물려받는다.
     let Some(i) = site.issues.get(idx) else { return Vec::new() };
+    // 시각은 **보는 사람의 시간대로** 적는다(moai-p5az) — CLI 상세와 같은 자다(`view::stamp`).
+    // 고른 시간대는 화면 하나에 하나라 `App` 이 든다: 프로젝트를 옮겨도 보는 사람은 그대로다.
+    let zone = &app.zone;
     // 걸린 검색이 보는 자리마다 **왜 걸렸는지** 여기서 칠한다(moai-lw7i). 목록 줄은 id·제목만 칠하는데
     // 태그·본문은 목록에 없고, **id·제목도 목록에서 잘린다** — 좁으면 id 열이 걷히고(`Head::of`) 긴 제목은
     // 찾은 글자 앞에서 `…` 로 끊겨, 걸린 줄에 칠한 글자가 하나도 없었다(moai-xemz 리뷰).
@@ -2090,11 +2213,11 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
-    fields.push((say(site.lang, "tui.field.created").into(), crate::view::stamp(&i.created_at)));
-    fields.push((say(site.lang, "tui.field.updated").into(), crate::view::stamp(&i.updated_at)));
+    fields.push((say(site.lang, "tui.field.created").into(), crate::view::stamp(&i.created_at, zone)));
+    fields.push((say(site.lang, "tui.field.updated").into(), crate::view::stamp(&i.updated_at, zone)));
     // **시작·끝도 같은 자다**(moai-38mh) — 어느 줄에 세울지(아직 안 떠난 줄·묶음은 안 세운다)까지
     // `view::span_of` 가 정한다. 여기만 없으면 탐색기로 보는 사람에게는 틀린 시각이 안 보인다.
-    if let Some((start, end)) = crate::view::span_of(i) {
+    if let Some((start, end)) = crate::view::span_of(i, zone) {
         fields.push((say(site.lang, "tui.about.started").into(), start));
         fields.push((say(site.lang, "tui.about.ended").into(), end));
     }
@@ -2954,6 +3077,125 @@ pub(super) mod tests {
     /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
+    }
+
+    /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에
+    /// 표식 둘(idea `◇`·미룸 `‖`)이 붙어, 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다 — 같은 층의
+    /// 형제 줄이 저마다 다른 자리에서 시작했다.
+    ///
+    /// **재는 것은 표식이 없는 것과 줄머리 폭 둘이다.** 표식만 재면 폭을 다시 자료에서 재기
+    /// 시작하는 되돌림을 못 잡는데, 이 결정이 지키는 것이 그 폭이다.
+    ///
+    /// 되살리려면 그 폭 문제를 먼저 푼다 — 까닭과 조건은 `style` 에 적어 두었고, 원래 요구는
+    /// moai-pkvw·moai-h06a 가 들고 있다.
+    #[test]
+    fn the_explorer_row_head_is_two_columns_on_every_row() {
+        let make = |id: &str, title: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), title.into(), kind, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        let mut thought = make("argos-0002", "담은 생각", Kind::Idea, "todo");
+        thought.priority = Some(2);
+        let mut shelved_epic = make("argos-0005", "미룬 에픽", Kind::Epic, "todo");
+        shelved_epic.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        // 제 `deferred_at` 이 없는 멤버다 — 미룸을 에픽에서 물려받는다.
+        let mut inherited = make("argos-0006", "물려받은 멤버", Kind::Issue, "in_progress");
+        inherited.epic = Some("argos-0005".into());
+        // 그 곁의 형제는 idea 다 — 셋이 저마다 다른 축을 물고 한 층에 선다.
+        let mut sibling = make("argos-0007", "곁의 생각", Kind::Idea, "todo");
+        sibling.epic = Some("argos-0005".into());
+
+        let mut a = every([issues(), vec![thought, shelved_epic, inherited, sibling]].concat());
+        // **상세를 닫는다** — 한 줄에 두 칸이 나란히 그려지면 아래의 자리 재기가 상세 쪽 글자까지 센다.
+        a.detail_open = false;
+        // 미룬 에픽의 멤버까지 펼친다 — 물려받은 미룸을 재는 줄이 그것이다.
+        a.cursor = 1;
+        a.hit("l");
+        let text = render(&mut a, 100, 20).join("\n");
+
+        // 칸 글리프 다음은 곧바로 빈 칸이다 — 종류도 미룸도 그 사이에 안 낀다.
+        assert!(text.contains("· 담은 생각"), "idea 줄머리가 두 칸이 아니다\n{text}");
+        // 미룬 에픽도 멤버에서 읽은 제 칸(`▸`)을 그대로 말한다.
+        assert!(text.contains("▸ 미룬 에픽"), "미룬 에픽의 줄머리가 두 칸이 아니다\n{text}");
+        // 이 줄은 `in_progress` 지만 계획 밖이라 안 돈다(`Site::spins`) — 멈춘 `▸` 로 선다.
+        assert!(text.contains("▸ └─ 물려받은 멤버"), "물려받은 미룸의 줄머리가 두 칸이 아니다\n{text}");
+        assert!(!text.contains('◇') && !text.contains('‖'), "걷은 표식이 다시 섰다\n{text}");
+
+        // **같은 층의 줄은 같은 자리에서 시작한다** — 이 결정이 지키는 것이 그 자리다. 셋은 저마다
+        // 다른 축을 물었다: 미룬 에픽(미룸), 담은 생각·곁의 생각(종류). 표식이 돌아오면 붙은 줄만
+        // 안으로 밀려 여기서 붉어진다.
+        let at = |title: &str| {
+            let line = text.lines().find(|l| l.contains(title)).unwrap_or_else(|| panic!("{title} 줄이 없다\n{text}"));
+            crate::text::width(&line[..line.find(title).expect("바로 위에서 찾았다")])
+        };
+        let (epic, one, two) = (at("미룬 에픽"), at("담은 생각"), at("곁의 생각"));
+        assert_eq!((epic, one), (epic, epic), "미룸·종류가 줄머리를 넓혔다 — {epic} vs {one}\n{text}");
+        assert_eq!(one, two, "같은 층의 두 줄이 다른 자리에서 시작한다 — {one} vs {two}\n{text}");
+    }
+
+    /// **상세는 네 자리에 서고, 어디에 서든 목록이 큰 쪽이다**(moai-2g7d·moai-l7e2).
+    ///
+    /// 자리를 맞바꾸면서 몫까지 따라가야 한다 — 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서
+    /// 55%·70% 를 가져가, 자리를 한 번 돌렸을 뿐인데 목록이 반으로 준다.
+    ///
+    /// **가로와 세로는 다른 자다** — 폭의 55% 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹는다.
+    #[test]
+    fn the_detail_pane_stands_where_it_was_told_and_never_outgrows_the_list() {
+        use super::super::view::DetailAt;
+        let mut a = app();
+        let body = Rect::new(0, 0, 100, 40);
+        for at in DetailAt::ALL {
+            a.detail_at = at;
+            let (list, detail) = split_body(body, &a);
+            let detail = detail.unwrap_or_else(|| panic!("{at:?} 에서 상세의 자리가 없다"));
+            // 두 조각이 몸통을 남김 없이 채우고 겹치지 않는다.
+            assert_eq!(list.area() + detail.area(), body.area(), "{at:?} 에서 몸통에 빈 자리나 겹침이 생겼다");
+            assert!(list.area() > detail.area(), "{at:?} 에서 상세가 목록보다 넓다");
+            match at {
+                DetailAt::Right => assert!(detail.x > list.x && detail.y == list.y, "{at:?} {detail:?}"),
+                DetailAt::Left => assert!(detail.x < list.x && detail.y == list.y, "{at:?} {detail:?}"),
+                DetailAt::Bottom => assert!(detail.y > list.y && detail.x == list.x, "{at:?} {detail:?}"),
+                DetailAt::Top => assert!(detail.y < list.y && detail.x == list.x, "{at:?} {detail:?}"),
+            }
+        }
+
+        // **숨기면 자리가 아예 없다**(moai-ymnu) — 어느 자리를 골라 뒀든 그대로다.
+        a.detail_open = false;
+        for at in DetailAt::ALL {
+            a.detail_at = at;
+            assert_eq!(split_body(body, &a), (body, None), "{at:?} 에서 숨긴 상세가 자리를 먹었다");
+        }
+
+        // **낮으면 세로로는 안 연다**(moai-l7e2) — 눌린 목록은 커서가 선 줄조차 못 내, 상세가 무엇에
+        // 대한 것인지를 잃는다. 가로는 그 높이에서도 그대로 선다: 좁아지는 것은 폭이 아니다.
+        a.detail_open = true;
+        let low = Rect::new(0, 0, 100, LIST_MIN_V + DETAIL_MIN_V - 1);
+        for at in [DetailAt::Top, DetailAt::Bottom] {
+            a.detail_at = at;
+            assert_eq!(split_body(low, &a), (low, None), "{at:?} 가 낮은 창에서 접히지 않았다");
+        }
+        for at in [DetailAt::Left, DetailAt::Right] {
+            a.detail_at = at;
+            assert!(split_body(low, &a).1.is_some(), "{at:?} 가 높이 때문에 접혔다");
+        }
+        // 딱 바닥만큼이면 선다 — 문턱이 바닥 **미만**에 걸린다.
+        a.detail_at = DetailAt::Bottom;
+        let just = Rect::new(0, 0, 100, LIST_MIN_V + DETAIL_MIN_V);
+        let (list, detail) = split_body(just, &a);
+        let detail = detail.expect("바닥만큼인 창에서 접혔다");
+        assert!(list.height >= LIST_MIN_V && detail.height >= DETAIL_MIN_V, "{list:?} {detail:?}");
+
+        // **안 선 칸에는 포커스가 못 선다**(리뷰). 접힌 상세는 `detail_open` 이 켜진 채로 자리가
+        // 없다 — 거기 포커스가 남으면 ↑↓ 가 보이지 않는 글을 굴려 목록이 멈춘 것처럼 보인다.
+        // 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은 자다.
+        let mut squeezed = app();
+        squeezed.detail_at = DetailAt::Bottom;
+        squeezed.focus = Pane::Detail;
+        render(&mut squeezed, 100, 10);
+        assert_eq!(squeezed.focus, Pane::Explorer, "접힌 상세에 포커스가 남았다");
+        // 자리가 서는 창에서는 그대로 둔다 — 걷는 것은 자리가 없을 때뿐이다.
+        squeezed.focus = Pane::Detail;
+        render(&mut squeezed, 100, 40);
+        assert_eq!(squeezed.focus, Pane::Detail, "자리가 선 상세에서 포커스가 걷혔다");
     }
 
     /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.
@@ -4892,7 +5134,7 @@ pub(super) mod tests {
     #[test]
     fn a_machine_without_an_identity_still_draws_the_header() {
         let mut a = app();
-        a.identify = |_, _| Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR));
+        a.identify = |_, _| Err(crate::model::NoActor::Unknown);
         let lines = render(&mut a, 100, 24);
         let head = lines[..6].join("\n");
         assert!(head.contains("User") && head.contains('—'), "모르는 자리를 안 비웠다\n{head}");
@@ -4908,7 +5150,7 @@ pub(super) mod tests {
     fn the_header_resolves_the_user_once_not_every_frame() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        fn counted(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn counted(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             CALLS.fetch_add(1, Ordering::SeqCst);
             Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() })
         }
@@ -6449,7 +6691,10 @@ pub(super) mod tests {
             screen.contains("w : 워크트리 겹쳐 보기 [켜짐]") && screen.contains("r : 원문↔그리기 [그리기]"),
             "{screen}"
         );
-        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("d : done [보임]"), "{screen}");
+        // **done 은 번호 줄로만 선다**(moai-h6z3) — 옛 `d : done` 과 `4 : done` 이 한 목록에 나란히
+        // 서서 같은 설정을 켜고 껐다.
+        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
+        assert!(!screen.contains("d : done"), "걷은 `SPC v d` 가 메뉴에 남았다\n{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
 
         // **토글은 창을 안 걷는다** — 눌러 보며 맞추라고 열린 채로 남고, 상태 낱말이 그 자리에서

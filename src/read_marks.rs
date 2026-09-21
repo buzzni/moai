@@ -337,8 +337,9 @@ fn overlay_place(
     legacy: &BTreeMap<String, String>,
     problems: &mut Vec<SheetTrouble>,
 ) -> Option<crate::user_config::Trouble> {
-    // **대기 자리가 먼저다** — 떨어진 판이 옛 자리보다 나중에 적힌 것이다. 겹치는 차례는 나중에 적힌
-    // 것이 이기는 쪽으로 세운다(`overlay` 는 먼저 든 것을 안 덮는다).
+    // **차례가 아니라 도장이 가른다**(moai-17fd) — 대기 자리도 옛 철자 파일도 *줄의 `updated_at`* 을
+    // 적으므로, 어느 쪽을 먼저 얹든 가장 늦은 것이 남는다(`overlay_later`). 차례로 세우던 판은 둘 중
+    // 나중에 적힌 쪽을 **디스크 차례로 짐작**했는데, 그 짐작이 틀리는 자리가 리뷰 8 이었다.
     let spool = place.pending.as_deref().filter(|p| p.exists());
     let past: Vec<&Path> =
         if place.at.exists() { Vec::new() } else { place.past.iter().map(PathBuf::as_path).collect() };
@@ -394,6 +395,10 @@ pub struct Marks {
 /// 때는 **이 파일이 이긴다**: 옛 표는 이 바이너리가 다시 안 적는 지나간 값이고, 새 자리의 값이 그 뒤에
 /// 적힌 것이다.
 ///
+/// **옛 철자 파일은 그 자가 아니다**(moai-17fd, 2026-09-21 사용자 결정) — 거기에는 옆에 도는 옛
+/// 바이너리가 지금도 적으므로 **늦은 도장이 이긴다**([`overlay_later`]). 자리로 가르는 것과 도장으로
+/// 가르는 것을 나눈 잣대는 *그 파일에 지금도 적히는가* 하나다.
+///
 /// **안 걷는 값은 잰 것이다**(moai-jlc8, 2026-09-21 사용자 결정). 그 표는 설정에 남아 있어, 보기
 /// 토글·`moai project add` 같은 **설정 쓰기**가 걸음마다 그것을 통째로 읽고 되쓴다 — moai-dt5q 가 잰
 /// 1만 항목에 35~100ms 다. 새로 시작하는 사람은 0 이고(그 표가 아예 없다) 이 바이너리는 거기 안 적으니
@@ -440,7 +445,9 @@ fn older(
     let mut pending = None;
     for (old, is_spool) in spool.map(|p| (p, true)).into_iter().chain(past_places.iter().map(|p| (*p, false))) {
         let mut past = read_one(old, root);
-        overlay(seen, &past.seen);
+        // **둘 다 도장으로 가른다**(moai-17fd) — 대기 자리에도 옛 철자 파일에도 *줄의 `updated_at`*
+        // 이 적히므로 같은 뜻의 도장끼리다. 옛 `[read]` 만 자리로 진다(아래 [`overlay`]).
+        overlay_later(seen, &past.seen);
         problems.append(&mut past.problems);
         if is_spool {
             pending = past.trouble;
@@ -517,6 +524,49 @@ pub fn overlay(marks: &mut BTreeMap<String, String>, legacy: &BTreeMap<String, S
             marks.insert(id.clone(), when.clone());
         }
     }
+}
+
+/// 옛 **철자 파일**을 겹친다 — **늦은 도장이 이긴다**(moai-17fd, 2026-09-21 사용자 결정).
+///
+/// [`overlay`] 와 가르는 것은 **그 파일에 지금도 적히는가**다. 옛 `[read]` 는 이 바이너리가 다시 안
+/// 적는 지나간 값이라 자리로 가르는 것이 맞지만(사용자 결정 3, 2026-09-19), 옛 철자 파일은 옆에 도는
+/// **옛 바이너리가 지금도 거기 적는다** — 새 바이너리가 T1 에 적고 줄이 바뀐 뒤 옛 바이너리가
+/// T2(>T1)에 옛 자리에 적으면, 자리로 가르는 판은 T1 을 들어 그 줄이 [NEW] 로 선 채 남았다. 옛
+/// 바이너리로 몇 번을 다시 읽어도 같았다.
+///
+/// **옛 `[read]` 에는 안 쓴다.** 그 값은 *본 때*고 여기 값은 *줄의 `updated_at`* 이라(moai-lyc1),
+/// 글자로 견주면 뜻이 다른 둘을 견주는 것이다. 자로 세우는 것은 **같은 뜻의 도장끼리**뿐이다.
+///
+/// 견주는 자는 [`crate::query::read_marks_of`] 와 같다 — 글자 차례(`>=`)로 늦은 것을 고른다. 때가
+/// 아닌 값(사람이 적어 둔 낱말)도 글자로 견주는데, 그 줄은 도구가 안 짓는 값이라 자를 따로 두지 않는다.
+fn overlay_later(marks: &mut BTreeMap<String, String>, older: &BTreeMap<String, String>) {
+    for (id, when) in older {
+        match marks.get(id) {
+            Some(here) if !later(here, when) => {}
+            _ => {
+                marks.insert(id.clone(), when.clone());
+            }
+        }
+    }
+}
+
+/// `when` 이 `here` **보다 늦은 도장인가** — 둘 다 이 도구가 짓는 꼴일 때만 참이다.
+///
+/// **못 견주는 값은 자리로 진다**(리뷰). 읽는 길은 관대해서([`read_table`]) 사람이 `"어제 읽음"`
+/// 처럼 낱말로 적어 둔 줄도 읽음으로 드는데, 글자 차례로 재면 RFC3339 는 모두 `2` 로 시작하므로
+/// 그런 낱말이 **모든 진짜 도장을 이긴다.** 그 낱말이 지금 자리 파일에 들어앉으면
+/// [`crate::query::changed_since_seen`] 의 `updated_at > seen` 이 영영 거짓이라, 그 줄은 다시는
+/// [NEW] 로 안 선다 — 조용한 손실이다.
+///
+/// 그래서 **견줄 수 있을 때만** 늦은 것이 이기고, 아니면 여기 선 것이 그대로 남는다
+/// (이 자리가 서기 전과 똑같다). *무엇이 읽음인가*는 안 좁힌다 — [`scan`]·[`read_table`] 은 그대로
+/// 관대하고, 좁아진 것은 **견주는 자리** 하나다. 재는 자는 [`crate::model::parse_rfc3339`] 로,
+/// 이 도구가 때를 읽는 자 그대로다.
+fn later(here: &str, when: &str) -> bool {
+    matches!(
+        (crate::model::parse_rfc3339(here), crate::model::parse_rfc3339(when)),
+        (Some(a), Some(b)) if a < b
+    )
 }
 
 /// `[read]` 표를 **관대하게** 읽는다 — 낱말이 아닌 값은 까닭 한 줄로 대고 건너뛴다. 표가 없으면 빈 표다.
@@ -693,13 +743,25 @@ fn write_sheet<T>(
         // 재 보기의 까닭은 **돌아설 때만** 싣는다 — 안 돌아서면 락 안의 합치기가 같은 줄을 다시 내므로,
         // 둘 다 실으면 한 판의 한 탈이 두 줄로 선다.
         let mut why = Vec::new();
-        // 락 안의 차례와 **같은 것을 잰다** — 파일이 아직 없으니 옛 자리도 다 든다.
-        let mut trying: Vec<&Path> = pending.as_deref().into_iter().collect();
-        trying.extend(past.iter().map(PathBuf::as_path));
+        // 락 안의 차례와 **같은 것을 잰다** — 파일이 아직 없으니 옛 자리도 다 든다. 나누는 자리도 같다:
+        // 대기 자리를 먼저 합치고 옛 철자 파일을 그 위에 얹는다(moai-17fd). 한 번에 합치던 판은 두
+        // 파일을 한 표로 모아 락 안과 나누는 자리가 달랐고, [`Unmerged`] 도 한 값으로 섞였다.
+        //
         // 재 보기는 아무것도 안 지우지만 **남긴 까닭은 여기서도 싣는다**(moai-wd5u 리뷰) — 그 줄은 지웠다는
         // 말이 아니라 대기 자리가 아직 서 있다는 말이고([`update`] 가 약속한 그 줄이다), 부르는 쪽은 제
         // 판이 어느 길로 갔는지 모른다. 막힌 id 는 빈 표에서 안 나오니 여기서 서는 것은 못 읽은 판뿐이다.
-        let left = merge_past(&mut trial, &trying, &root, &mut why).map_err(Stop::Refused)?;
+        let spooled: Vec<&Path> = pending.as_deref().into_iter().collect();
+        let mut left = merge_past(&mut trial, &spooled, &root, &mut why).map_err(Stop::Refused)?;
+        let older = past.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+        let then = merge_past(&mut trial, &older, &root, &mut why).map_err(Stop::Refused)?;
+        // **못 읽은 것은 한 값으로 센다** — 대기 자리를 남길지는 "이 판이 다 들었는가" 하나로 갈린다.
+        //
+        // **막힌 id 는 안 합친다**(리뷰). [`Unmerged::held`] 는 *대기 자리가* 못 앉힌 id 라는 뜻이고
+        // ([`SheetTrouble::SpoolKept`] 가 그 파일을 대며 그 목록을 낸다, [`keep_only`] 가 그것으로
+        // 줄인다), 옛 철자 파일의 id 를 거기 섞으면 그 파일에 없는 id 를 "대기 자리에 막혔다" 로
+        // 댄다. 지금은 비어 있어 보이는 차이가 없다 — 빈 표에 첫 합치기가 막힐 자리가 없으니 둘째
+        // 합치기의 `held` 는 늘 빈 것이다 — 그래서 고칠 자리도 지금뿐이다.
+        left.unread |= then.unread;
         let out = called(&mut trial)?;
         // 재 보기에서는 막힐 자리가 없다([`Sheet::held`]) — 빈 표에 [`merge_past`] 가 얹은 것은 도구가
         // 지은 도장뿐이고, 사람이 적어 둔 값은 아직 안 읽은 **지금 자리 파일**에만 있다. 그것은 락 안에서
@@ -781,12 +843,16 @@ fn write_sheet<T>(
         None => None,
     };
     // **옛 자리는 처음 짓는 파일일 때만 합친다**(리뷰 13). 읽기도 그때만 보므로([`overlay_place`])
-    // 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다. 겹치는
-    // 차례는 그대로다: 여기 이미 있는 id 는 안 건드린다.
+    // 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다.
+    //
+    // **겹치는 차례는 도장이 가른다**([`Sheet::outdated_by`], moai-17fd) — 방금 앉은 대기 자리의
+    // 도장이라도 옛 철자 파일의 것이 더 늦으면 그쪽이 선다. 그 파일에는 옆에 도는 옛 바이너리가
+    // 지금도 적는다. 사람이 적어 둔 줄과 못 견주는 값은 그대로 막힌 채다([`later`]).
+    //
     // 옛 파일은 안 지우므로 못 앉힌 것을 안 센다 — 까닭은 `problems` 로 이미 나간다.
     if fresh_sheet {
-        merge_past(&mut sheet, &past.iter().map(PathBuf::as_path).collect::<Vec<_>>(), &root, &mut problems)
-            .map_err(Stop::Refused)?;
+        let older = past.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+        merge_past(&mut sheet, &older, &root, &mut problems).map_err(Stop::Refused)?;
     }
     let out = called(&mut sheet)?;
     // **못 적은 id 는 여기서 낸다**(moai-l5ue). [`Sheet::mark`] 은 막힌 줄 하나에 쓰기 전체를 세우는
@@ -878,8 +944,10 @@ fn keep_only(spool: &Path, held: &[String]) -> Result<(), String> {
 /// 옛 철자 파일은 처음 짓는 판에서만 들어 그 한 번을 놓치면 다음 판이 안 여는데, 그 자리는 이 결정이
 /// 안 하기로 한 일(옛 파일을 안 건드린다)의 대가다.
 ///
-/// **여기 이미 선 id 는 안 건드린다** — 읽는 길의 [`overlay`] 와 같은 차례고(이 파일이 이긴다), 그것을
-/// [`update`] 가 약속한 글이다. 걸러야 하는 까닭이 둘이다(리뷰).
+/// **차례는 도장이 가른다**([`overlay_later`], moai-17fd) — 읽는 길과 같다. 여기 이미 선 id 라도
+/// 겹치는 쪽의 도장이 **더 늦으면** 그쪽이 선다. 아래 두 까닭 가운데 **첫째만** 그만큼 풀린다 —
+/// 사람이 적어 둔 줄은 그대로 막힌 채고([`Sheet::outdated_by`]), 못 견주는 값도 자리로 진다
+/// ([`later`]). 걸러야 하는 까닭이 둘이다(리뷰).
 ///
 /// - [`Sheet::mark`] 는 [`crate::user_config::write_value`] 로 **덮어쓴다.** 처음 짓는 파일에만 겹치던
 ///   동안은 빈 표에만 닿아 부딪칠 일이 없었는데, 대기 자리는 선 표에도 겹친다 — 안 거르면 그 자리의
@@ -893,18 +961,26 @@ fn keep_only(spool: &Path, held: &[String]) -> Result<(), String> {
 ///   자다([`Sheet::taken`]) — 거기서는 `mark` 이 쓰기를 통째로 거절하므로, 걸러 두지 않으면 옛
 ///   자리를 합치려는 것만으로 **읽음을 적는 모든 명령**이 그 한 줄에 선다
 ///
-/// **거꾸로 놓친 자리는 아직 열려 있다**(moai-bdej 리뷰 8). 떨어진 판이 적는 것도 그 줄의 `updated_at`
-/// 이라([`crate::query::read_marks_of`]), 여기 이미 선 id 에 **더 늦은** 도장이 떨어져 있으면 그것이
-/// 조용히 버려진다 — 그 줄은 사람이 다시 읽을 때까지 [NEW] 로 선다. 고치는 길은 `늦은 것이 이긴다`
-/// 로, 그 규칙은 이 저장소에 이미 있다(`read_marks_of` 가 같은 id 의 줄에서 가장 늦은 도장을 고른다).
-/// 여기서 안 바꾼 까닭은 [`overlay`] 의 차례가 **사람의 결정**(2026-09-19 결정 3, `이 파일이 이긴다`)
-/// 이고 `the_three_places_overlay_in_one_order` 가 때가 아닌 글자로 그것을 못박아서다 — 늦은 것을
-/// 고르려면 읽는 길까지 함께 옮겨야 하고, 그것은 이 자리의 고침이 아니라 그 결정을 다시 여는 일이다.
+/// **거꾸로 놓친 자리가 닫혔다**(moai-bdej 리뷰 8 → moai-17fd, 2026-09-21 사용자 결정 둘). 겹치는
+/// 두 자리에 적는 것도 그 줄의 `updated_at` 이라([`crate::query::read_marks_of`]), 여기 이미 선 id 에
+/// **더 늦은** 도장이 있으면 그것이 조용히 버려졌다 — 그 줄은 사람이 다시 읽을 때까지 [NEW] 로 섰고,
+/// [`keep_only`] 가 그것을 앉은 것으로 세어 대기 자리에서 걷어 근거까지 지웠다.
 ///
-/// **그 구멍은 이제 디스크에서도 닫힌다**(리뷰 moai-kuib.g9c 6번). 파일째 남기던 동안은 그 늦은 도장이
-/// 대기 자리에 남아 사람이 눈으로 꺼낼 수는 있었는데, [`keep_only`] 가 못 앉힌 것만 남기면서 함께
-/// 걷힌다 — 앉은 것으로 세어지는 id 이기 때문이다. 도구가 그것을 다시 볼 길은 전에도 없었고(이 파일이
-/// 늘 이긴다) 줄이는 값이 그보다 크다고 보아 그대로 둔다. 되돌리려면 위의 차례부터 다시 연다.
+/// - **옛 철자 파일**에는 옆에 도는 **옛 바이너리가 지금도 적는다**
+/// - **대기 자리**에는 이 바이너리가 떨어진 판에 적는다. 첫 판에서는 자리로 가르기로 했는데, 그
+///   결정이 선 표가 틀렸다(둘째 판) — 그 자리는 **늘 지금 자리 파일에 졌고**, 실제로 닿는 길은
+///   옛 철자 파일보다 여기다. 옛 파일은 첫 쓰기 전에만 열리고 대기 자리는 언제든 열린다
+///
+/// 2026-09-19 결정 3(`이 파일이 이긴다`)은 **옛 `[read]`** 에 대해 그대로 선다 — 그 값은 이 바이너리가
+/// 다시 안 적는 지나간 값이고, 뜻도 다르다(본 때 vs 줄의 `updated_at`, moai-lyc1). 자로 세운 것은
+/// **같은 뜻의 도장끼리**뿐이라, 그 표는 [`older`] 에서 [`overlay`] 로 든다.
+///
+/// **닿는 데까지가 처음 짓는 판이다**(리뷰). 옛 철자 파일은 읽기도 쓰기도 지금 자리 파일이 **없을
+/// 때만** 연다([`overlay_place`]·`fresh_sheet`) — 그러니 위 글이 그리는 차례(새 바이너리가 T1 에
+/// 적고, 옛 바이너리가 T2 에 옛 자리에 적는다)에서 늦은 도장이 실제로 살아나는 것은 **T1 이 아직
+/// 파일을 안 지은 동안**뿐이다. 첫 쓰기가 지금 자리를 세우고 나면 옛 파일은 다시 안 열려, 그 뒤의
+/// T2 는 전처럼 안 보인다. 넓히려면 읽는 길의 그 문부터 다시 여는 것이고(리뷰 7·13 이 값을 재고
+/// 닫은 문이다), 그것은 이 자리의 고침이 아니다.
 fn merge_past(
     sheet: &mut Sheet,
     past: &[&Path],
@@ -918,27 +994,34 @@ fn merge_past(
         // **읽기가 무엇이든 말했으면 다 든 것이 아니다** — 못 열었거나(`Said`), 깨졌거나 남의 것이거나,
         // 건너뛴 줄이 있다. 건너뛴 줄은 도구가 안 짓는 값이라 사람이 적은 것이고, 지우면 그것도 함께 간다.
         left.unread |= got.trouble.is_some() || !got.problems.is_empty();
-        overlay(&mut older_marks, &got.seen);
+        // **파일이 여럿이면 그들끼리도 늦은 도장이 이긴다.** [`place_of`] 가 짓는 `past` 도 `pending`
+        // 도 지금은 0개 아니면 1개라 같은 id 가 두 번 닿을 일이 없는데, 여기 [`overlay`] 를 박아 두면
+        // 셋째 옛 자리가 붙는 날 그 줄만 **말없이** 자리로 갈린다 — 견줄 시험이 없는 만큼.
+        overlay_later(&mut older_marks, &got.seen);
         problems.append(&mut got.problems);
     }
     // 여기 이미 자리가 선 id 는 거른다(위 글의 두 까닭) — 거른 것도 버리지 않고 아래에서 함께 잰다.
+    // **때가 선 자리의 더 이른 도장**만 한 자리 더 연다([`Sheet::outdated_by`]): 사람이 적어 둔 줄과
+    // 못 견주는 값은 그대로 막힌 채다.
     let (fresh, here): (BTreeMap<String, String>, BTreeMap<String, String>) =
-        older_marks.into_iter().partition(|(id, _)| !sheet.taken(id));
+        older_marks.into_iter().partition(|(id, when)| !sheet.taken(id) || sheet.outdated_by(id, when));
     if !fresh.is_empty() {
         sheet.mark(&fresh)?;
     }
     // **앉았는가는 합친 뒤의 표에 묻는다**(moai-wd5u) — 읽는 길이 도장으로 드는 꼴(낱말)이 그 id 에
     // 섰는가([`Sheet::stamped`]). `mark` 가 무엇을 거절할지를 앞질러 헤아리면 그 잣대를 한 벌 더 들게 되고,
     // 둘이 갈리는 날 막힌 id 를 앉은 것으로 세어 대기 자리째 지운다. **이미 때가 선 id 는 앉은 것으로
-    // 센다** — 이 파일이 이기는 차례(사용자 결정)가 거른 것이라, 남겨도 다음 판이 또 거를 뿐 대기 자리만
-    // 영영 선다. 그 도장이 여기 것보다 늦었으면 그것을 잃는데, 그 구멍은 위 글의 리뷰 8 이다. 남는 것은
-    // 자리가 막힌 id 다 — 사람이 고치면 다음 판이 그것을 앉힌다.
+    // 센다** — 그 도장이 여기 것보다 **이른** 것이라 남겨도 다음 판이 또 거를 뿐 대기 자리만 영영
+    // 선다. 늦은 도장은 이제 [`Sheet::outdated_by`] 로 자리를 얻으니(위 글의 리뷰 8) 여기서 잃는
+    // 것이 없다 — 남는 것은 사람이 적어 둔 줄에 막힌 id 와 못 견주는 값뿐이고, 사람이 고치면 다음
+    // 판이 그것을 앉힌다.
     left.held = fresh.keys().chain(here.keys()).filter(|id| !sheet.stamped(id)).cloned().collect();
     Ok(left)
 }
 
-/// [`merge_past`] 가 **못 앉힌 것** — 비었으면 그 파일들이 든 id 가 다 이 표에 때로 섰다(moai-wd5u). 이미 선
-/// id 의 더 늦은 도장은 이 파일이 이기는 차례로 버려진다 — [`merge_past`] 의 리뷰 8 구멍이다.
+/// [`merge_past`] 가 **못 앉힌 것** — 비었으면 그 파일들이 든 id 가 다 이 표에 때로 섰다(moai-wd5u).
+/// 더 늦은 도장은 이제 자리를 얻는다([`Sheet::outdated_by`], moai-17fd) — 남는 것은 사람이 적어 둔
+/// 줄에 막힌 id 와 못 견주는 값([`later`])이다.
 ///
 /// 대기 자리를 지워도 되는가를 이것 하나로 가른다. "쓰기가 넘어지지 않았다" 로 가르던 판은 못 읽은
 /// 대기 자리(권한 `0o000` 이어도 지우기는 디렉터리 권한만 본다)와 앉을 자리가 막힌 id 의 도장을
@@ -1086,11 +1169,35 @@ impl Sheet {
     /// 헤아렸는데, 그 잣대가 `mark` 의 것과 갈리면 막힌 id 를 앉은 것으로 세어 대기 자리째 지운다 —
     /// 합친 결과를 읽는 길의 눈으로 보면 그 둘이 갈릴 자리가 없다.
     fn stamped(&self, id: &str) -> bool {
-        self.doc
-            .root()
-            .get(READ)
-            .and_then(Item::as_table_like)
-            .is_some_and(|t| t.get(id).is_some_and(|v| v.as_str().is_some()))
+        self.stamp_of(id).is_some()
+    }
+
+    /// 그 id 에 선 **도장**([`Sheet::stamped`]·[`Sheet::outdated_by`] 가 이것 하나로 묻는다).
+    ///
+    /// **자를 한 벌만 둔다**(리뷰) — [`Sheet::mark`] 의 글이 "여기 셋째 잣대를 적으면 *무엇이 때인가*
+    /// 를 바꾸는 날 셋이 함께 움직여야 한다" 고 적어 둔 그 자리다. 두 물음이 표를 저마다 훑던 판은
+    /// 그 셋째가 이미 서 있었다.
+    ///
+    /// **무엇이 때인가는 여기서 안 넓힌다** — 읽는 길([`scan`])과 같이 *낱말이면 도장*이다. 사람이
+    /// 손으로 적은 낱말도 그러므로 도장으로 읽힌다([`Sheet::outdated_by`] 의 글이 그 한계를 댄다).
+    fn stamp_of(&self, id: &str) -> Option<&str> {
+        self.doc.root().get(READ).and_then(Item::as_table_like).and_then(|t| t.get(id)).and_then(Item::as_str)
+    }
+
+    /// 그 id 에 선 도장이 `when` **보다 이른가** — 옛 철자 파일을 합칠 때 덮어도 되는 자리다
+    /// (moai-17fd).
+    ///
+    /// **때가 선 자리에만 참이다.** 사람이 적어 둔 점 키(`a-0002.rv = …`)와 **낱말이 아닌** 값은
+    /// [`Sheet::stamp_of`] 에서 걸러져 거짓이고, `[read]` 가 표가 아닌 판도 그렇다 — [`Sheet::mark`]
+    /// 이 안 덮는 자리를 여기서 열면 그 결정이 뒷문으로 뒤집힌다. 견주는 자는 [`overlay_later`] 와
+    /// 같다(글자 차례).
+    ///
+    /// **못 견주는 값은 안 덮는다**([`later`], 리뷰). 사람이 `"어제 읽음"` 처럼 **낱말로** 적어 둔
+    /// 줄도 읽는 길은 읽음으로 드는데, 글자 차례로만 재면 RFC3339 가 모두 `2` 로 시작해 그런 낱말이
+    /// 모든 진짜 도장을 이긴다 — 그것이 지금 자리 파일에 앉으면 그 줄은 다시는 [NEW] 로 안 선다.
+    /// 둘 다 이 도구가 짓는 꼴일 때만 늦은 것이 이기고, 아니면 여기 선 것이 그대로 남는다.
+    fn outdated_by(&self, id: &str, when: &str) -> bool {
+        self.stamp_of(id).is_some_and(|here| later(here, when))
     }
 
     /// 적어 둔 읽음. **관대하게 읽는다** — 낱말이 아닌 값은 까닭 한 줄로 대고 건너뛴다
@@ -1304,8 +1411,13 @@ mod tests {
         );
     }
 
-    /// **겹치는 차례는 셋이다** — 지금 자리 > 옛 철자 > 설정의 옛 `[read]`. 한 자리에서 갈라지게 두면
-    /// 넷째가 붙는 날 한쪽만 따라간다.
+    /// **겹치는 차례는 셋이고, 가르는 자는 둘이다.** 지금 자리와 옛 철자 파일은 **늦은 도장**이
+    /// 이기고(moai-17fd, 2026-09-21 사용자 결정), 설정의 옛 `[read]` 는 **자리**로 진다
+    /// (사용자 결정 3, 2026-09-19). 한 자리에서 갈라지게 두면 넷째가 붙는 날 한쪽만 따라간다.
+    ///
+    /// **옛 `[read]` 에 가장 늦은 도장을 준다** — 그래도 져야 한다. 그 값은 *본 때*고 나머지는 *줄의
+    /// `updated_at`* 이라(moai-lyc1) 견줄 수 있는 둘이 아니고, 그 표에는 이 바이너리가 다시 안 적는다.
+    /// 때가 아닌 글자로 재던 판은 한글 차례가 우연히 맞아 무엇도 안 지켰다.
     #[test]
     fn the_three_places_overlay_in_one_order() {
         let s = Scratch::new("read-marks-three");
@@ -1313,21 +1425,134 @@ mod tests {
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
 
+        let (past, here, latest) = ("2026-09-20T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-25T00:00:00Z");
         let slashed = s.join("proj/");
         let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(
             &old,
-            format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n\"b\" = \"옛 철자\"\n", slashed.display().to_string()),
+            format!("path = {:?}\n\n[read]\n\"a\" = \"{past}\"\n\"b\" = \"{past}\"\n", slashed.display().to_string()),
         )
         .unwrap();
-        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("a", "지금 자리")]))).unwrap();
-        let legacy = marks(&[("a", "옛 표"), ("b", "옛 표"), ("c", "옛 표")]);
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("a", here)]))).unwrap();
+        let legacy = marks(&[("a", latest), ("b", latest), ("c", latest)]);
 
         let seen = read(&cfg, &slashed, &legacy).seen;
-        assert_eq!(seen.get("a").map(String::as_str), Some("지금 자리"));
-        assert_eq!(seen.get("b").map(String::as_str), Some("옛 철자"));
-        assert_eq!(seen.get("c").map(String::as_str), Some("옛 표"));
+        assert_eq!(seen.get("a").map(String::as_str), Some(here), "지금 자리의 늦은 도장이 밀렸다");
+        assert_eq!(seen.get("b").map(String::as_str), Some(past), "옛 철자 파일만 든 줄을 잃었다");
+        assert_eq!(seen.get("c").map(String::as_str), Some(latest), "옛 표만 든 줄을 잃었다");
+    }
+
+    /// **옛 철자 파일의 늦은 도장이 이긴다**(moai-17fd, 2026-09-21 사용자 결정) — 그 파일에는 옆에 도는
+    /// **옛 바이너리가 지금도 적는다.** 자리로만 가르던 판은 여기 이미 선 id 를 안 건드려, 새 바이너리가
+    /// T1 에 적고 줄이 바뀐 뒤 옛 바이너리가 T2(>T1)에 적은 도장이 조용히 버려졌다 — 그 줄은 옛
+    /// 바이너리로 몇 번을 다시 읽어도 [NEW] 로 섰다(`merge_past` 의 리뷰 8 구멍).
+    ///
+    /// **읽는 길과 쓰는 길을 한 시험에서 잰다** — 갈리면 화면과 파일이 한 id 를 달리 든다.
+    /// 거꾸로(옛 자리가 더 이르다) 서는 줄도 함께 잰다: 늦은 것이 이기는 자라야 자가 선다.
+    #[test]
+    fn an_older_spelling_with_a_later_stamp_wins() {
+        let s = Scratch::new("read-marks-later");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let (early, mid, late) = ("2026-09-19T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-23T00:00:00Z");
+        let slashed = s.join("proj/");
+        let dir = dir_of(&cfg);
+        let spool = spool_at(dir, &slashed);
+        std::fs::create_dir_all(spool.parent().unwrap()).unwrap();
+        let claim = format!("path = {:?}\n\n[read]\n", slashed.display().to_string());
+        // 대기 자리 — 이 바이너리가 떨어진 판에 적은 것.
+        std::fs::write(&spool, format!("{claim}\"d\" = \"{early}\"\n\"e\" = \"{late}\"\n")).unwrap();
+        // 옛 철자 파일 — 옆에 도는 옛 바이너리가 적은 것. `d` 는 더 늦고 `e` 는 더 이르다.
+        std::fs::write(sheet_at(dir, &slashed), format!("{claim}\"d\" = \"{late}\"\n\"e\" = \"{early}\"\n")).unwrap();
+
+        let seen = read(&cfg, &slashed, &BTreeMap::new()).seen;
+        assert_eq!(seen.get("d").map(String::as_str), Some(late), "읽기가 옛 자리의 늦은 도장을 버렸다");
+        assert_eq!(seen.get("e").map(String::as_str), Some(late), "읽기가 옛 자리의 이른 도장에 밀렸다");
+
+        // 쓰는 길도 같은 답이어야 한다 — 처음 짓는 파일에 둘이 다 합쳐진다.
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("z", mid)]))).unwrap();
+        let sheet = Sheet::parse(&std::fs::read_to_string(place_of(&cfg, &slashed).at).unwrap()).unwrap();
+        let (landed, _) = sheet.marks();
+        assert_eq!(landed.get("d").map(String::as_str), Some(late), "쓰기가 옛 자리의 늦은 도장을 버렸다");
+        assert_eq!(landed.get("e").map(String::as_str), Some(late), "쓰기가 옛 자리의 이른 도장에 밀렸다");
+        assert_eq!(landed.get("z").map(String::as_str), Some(mid), "부른 쪽이 시킨 줄을 잃었다");
+    }
+
+    /// **대기 자리의 늦은 도장도 이긴다**(moai-17fd, 2026-09-21 사용자 결정 둘째 판). 첫 판은 대기
+    /// 자리를 자리로 가르기로 했는데, 그 결정이 선 표가 틀렸다 — "대기 자리는 늦은 것이 이긴다" 로
+    /// 적혀 있었지만 그 자리는 **늘 지금 자리 파일에 졌다.** 더 늦은 도장은 버려지고 [`keep_only`] 가
+    /// 그것을 앉은 것으로 세어 파일에서 걷어, 근거까지 지운 채 0 으로 끝났다 — 그 줄은 사람이 다시
+    /// 읽을 때까지 [NEW] 로 선다.
+    ///
+    /// **실제로 닿는 길은 여기다.** 옛 철자 파일은 지금 자리 파일이 서기 전에만 열리는데(리뷰),
+    /// 대기 자리는 떨어진 판이 있을 때마다 열린다.
+    #[test]
+    fn a_pending_place_with_a_later_stamp_wins() {
+        let s = Scratch::new("read-marks-spool-later");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let (early, late) = ("2026-09-19T00:00:00Z", "2026-09-23T00:00:00Z");
+        let dir = dir_of(&cfg);
+        // 지금 자리에 이른 도장이 선다 — 이 판이 파일을 짓는다.
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("a", early)]))).unwrap();
+        // 떨어진 판이 같은 `a` 에 **더 늦은** 도장을 대기 자리에 적었다.
+        let spool = spool_at(dir, &root);
+        std::fs::write(&spool, format!("path = {:?}\n\n[read]\n\"a\" = \"{late}\"\n", root.display().to_string()))
+            .unwrap();
+
+        assert_eq!(
+            read(&cfg, &root, &BTreeMap::new()).seen.get("a").map(String::as_str),
+            Some(late),
+            "읽기가 대기 자리의 늦은 도장을 버렸다"
+        );
+
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("z", early)]))).unwrap();
+        let sheet = Sheet::parse(&std::fs::read_to_string(place_of(&cfg, &root).at).unwrap()).unwrap();
+        assert_eq!(sheet.marks().0.get("a").map(String::as_str), Some(late), "쓰기가 대기 자리의 늦은 도장을 버렸다");
+        assert!(!spool.exists(), "다 앉았는데 대기 자리가 남았다");
+    }
+
+    /// **못 견주는 값은 안 덮는다**([`later`], 리뷰). 읽는 길은 관대해서 사람이 낱말로 적어 둔 줄도
+    /// 읽음으로 드는데, 글자 차례로만 재면 RFC3339 가 모두 `2` 로 시작해 그런 낱말이 **모든 진짜
+    /// 도장을 이긴다.** 그 낱말이 지금 자리 파일에 앉으면 `updated_at > seen` 이 영영 거짓이라 그
+    /// 줄은 다시는 [NEW] 로 안 선다 — 이 도구가 못 견디는 그 조용한 손실이다.
+    ///
+    /// 자리로 가르던 때는 `taken` 이 그것을 막았다. 도장으로 가르는 문을 열면서 같이 열린 자리라,
+    /// 문을 여는 이 판이 함께 닫는다. **좁아진 것은 견주는 자리 하나다** — 그 낱말은 옛 자리에도
+    /// 그대로 남고, 지금 자리에 그 id 가 없으면 전처럼 그대로 앉는다.
+    #[test]
+    fn a_word_that_is_not_a_stamp_never_beats_one() {
+        let s = Scratch::new("read-marks-word");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let (here, word) = ("2026-09-21T00:00:00Z", "어제 읽음");
+        let slashed = s.join("proj/");
+        let dir = dir_of(&cfg);
+        let spool = spool_at(dir, &slashed);
+        std::fs::create_dir_all(spool.parent().unwrap()).unwrap();
+        let claim = format!("path = {:?}\n\n[read]\n", slashed.display().to_string());
+        // 대기 자리에 선 **진짜 도장** — 이 바이너리가 떨어진 판에 적은 것이다.
+        std::fs::write(&spool, format!("{claim}\"a\" = \"{here}\"\n")).unwrap();
+        // 옛 철자 파일 — 사람이 낱말로 적어 두었다. `a` 는 위의 도장과 부딪치고 `b` 는 안 부딪친다.
+        std::fs::write(sheet_at(dir, &slashed), format!("{claim}\"a\" = \"{word}\"\n\"b\" = \"{word}\"\n")).unwrap();
+
+        let seen = read(&cfg, &slashed, &BTreeMap::new()).seen;
+        assert_eq!(seen.get("a").map(String::as_str), Some(here), "읽기에서 낱말이 진짜 도장을 덮었다");
+        assert_eq!(seen.get("b").map(String::as_str), Some(word), "자리가 빈 id 까지 막았다");
+
+        // 쓰는 길도 같은 답이다 — 대기 자리가 먼저 앉고 옛 철자 파일이 그 위에 선다.
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("z", here)]))).unwrap();
+        let sheet = Sheet::parse(&std::fs::read_to_string(place_of(&cfg, &slashed).at).unwrap()).unwrap();
+        let (landed, _) = sheet.marks();
+        assert_eq!(landed.get("a").map(String::as_str), Some(here), "쓰기에서 낱말이 진짜 도장을 덮었다");
+        assert_eq!(landed.get("b").map(String::as_str), Some(word), "자리가 빈 id 까지 막았다");
     }
 
     /// **못 푸는 자리는 받은 철자로 떨어지고 까닭을 댄다**(사용자 결정 2026-09-20). 지워진 뿌리를

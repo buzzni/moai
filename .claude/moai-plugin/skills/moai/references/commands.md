@@ -52,7 +52,7 @@ A comma means "or"; the same flag twice means "and".
 When agents each take a git worktree, this worktree's board knows nothing of what
 was picked up and moved beside it. Add `--worktree` to `status`, `ready` or `show`
 and the sibling worktrees' issues are overlaid. The explorer (`moai tui`) opens with
-them overlaid and `SPC t w` turns it off and on.
+them overlaid and `SPC v w` turns it off and on.
 
     moai ready --worktree             work picked up beside you drops out and stands under "held"
     moai status --worktree            the board header says "⎇ <worktrees> overlaid"
@@ -369,9 +369,9 @@ It goes wrong quietly, so the one-liner above looks at the handed-back report fi
 
 **Do not simply take the last line.** One turn's blocks are written line by line with
 thinking and tool calls mixed in, so the last line is sometimes not text at all. Then
-an empty text is passed on and `moai note` stops with `메모가 비었다` — quoted as the binary
-prints it, which is Korean in every language, so matching a translation finds nothing. It stops
-loudly, so nothing is lost, but getting it right the first time is better.
+an empty text is passed on and `moai note` stops, saying the memo is empty. It stops loudly with a
+non-zero exit code, so nothing is lost — but do not match on the words: that line is screen text
+and comes out in whatever language the screen speaks. Getting it right the first time is better.
 
 **Do not keep the summary and throw the original away.** A summary is your own call;
 the original is what the reviewer said. A call can be made again; a discarded original

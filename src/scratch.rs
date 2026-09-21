@@ -68,6 +68,8 @@ impl Scratch {
     /// 철자와 시험이 든 철자가 다르면 견주는 시험이 헛돈다.
     pub fn real(name: &str) -> Scratch {
         let mut s = Scratch::new(name);
+        // **여기만 터진다** — 방금 지은 디렉터리라 못 푸는 것은 시험 자리가 성치 않다는 뜻이고,
+        // 받은 철자로 떨어지면([`crate::store::real`]) 견주는 시험이 까닭 없이 붉어진다.
         s.0 = std::fs::canonicalize(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
         s
     }
@@ -166,7 +168,7 @@ fn pick(wanted: PathBuf, aways: &[&Path]) -> Result<PathBuf, String> {
         // **링크를 풀어 넘긴다** — macOS 의 `/tmp` 는 `/private/tmp` 로 가는 링크라, 안 풀면
         // 도구가 내는 철자와 시험이 든 철자가 갈려 경로를 견주는 시험이 통째로 헛돈다
         // ([`Scratch::real`] 이 자리마다 풀던 것을 뿌리에서 한 번에 푼다).
-        let away = std::fs::canonicalize(&away).unwrap_or(away);
+        let away = real(&away);
         eprintln!(
             "moai 시험: 임시 자리({})가 체크아웃 안이라 {} 로 옮긴다 — \
              그대로 두면 시험이 바깥 저장소의 .moai 를 잡는다",
@@ -204,8 +206,16 @@ fn usable(dir: &Path) -> bool {
 /// **링크를 푼 자리로 잰다** — `TMPDIR` 이 체크아웃 안을 가리키는 링크면 글자로 된 조상에는
 /// `.git` 이 없는데 git 은 실제 자리(`getcwd`)로 위를 찾는다.
 pub fn inside_checkout(dir: &Path) -> bool {
-    let real = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    real.ancestors().any(|d| d.join(".git").exists() || d.join(".moai").is_dir())
+    real(dir).ancestors().any(|d| d.join(".git").exists() || d.join(".moai").is_dir())
+}
+
+/// [`crate::store::real`] 과 같은 자 — **여기만 제 몸으로 든다.**
+///
+/// 이 파일은 `tests/cli.rs` 가 `#[path]` 로 함께 들어(dev-dependency 0개, CLAUDE.md "테스트"),
+/// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::store` 가 없다. 한 자로 모으는 결정(moai-8csx)이
+/// 닿지 못하는 한 자리고, 갈리면 시험 자리가 링크를 달리 푼다 — 그래서 글로 맨다.
+fn real(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// `dir` 에 아무것도 없는 저장소를 세운다([`Scratch::fenced`] 가 왜 세 개인지 적는다).

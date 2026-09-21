@@ -68,6 +68,74 @@ impl View {
     }
 }
 
+/// 상세 칸이 서는 자리(moai-2g7d). **보이나 마나와 따로다** — 보이나 마나는 [`Look::detail`] 이고
+/// (`SPC v p`), 이것은 보일 때 **어디에** 서는가다(`SPC o d`). 숨기면 자리가 아예 없다(`None`,
+/// moai-ymnu)는 판단은 그대로다.
+///
+/// **가로와 세로는 다른 자다.** `Right`·`Left` 는 폭 비율이지만 `Top`·`Bottom` 은 높이다 — 가로의
+/// 몫을 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹는다. 몫을 정하는 것은 그리는 쪽
+/// (`draw::LEFT`·`draw::ABOVE`)이고, 여기는 어느 쪽인가만 안다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailAt {
+    #[default]
+    Right,
+    Bottom,
+    Left,
+    Top,
+}
+
+impl DetailAt {
+    /// 차례대로 도는 다음 자리 — `right → bottom → left → top → right`(moai-e7r3, 사용자 결정).
+    /// `SPC v` 의 토글과 같은 결이다: 누를 때마다 다음으로 가고 메뉴는 안 닫힌다.
+    pub fn next(self) -> DetailAt {
+        match self {
+            DetailAt::Right => DetailAt::Bottom,
+            DetailAt::Bottom => DetailAt::Left,
+            DetailAt::Left => DetailAt::Top,
+            DetailAt::Top => DetailAt::Right,
+        }
+    }
+
+    /// 위·아래인가 — 높이를 가르는 자리다. 몫과 접는 자리가 가로와 다른 것이 여기서 갈린다.
+    pub fn vertical(self) -> bool {
+        matches!(self, DetailAt::Top | DetailAt::Bottom)
+    }
+
+    /// 목록보다 **앞에** 서나 — 왼쪽·위다. 가르는 쪽이 그린 두 자리를 맞바꾼다.
+    pub fn first(self) -> bool {
+        matches!(self, DetailAt::Left | DetailAt::Top)
+    }
+
+    /// 화면에 대는 낱말. **색이 혼자 뜻을 지지 않는다** — 메뉴 줄이 지금 자리를 낱말로 댄다.
+    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
+        use crate::i18n::say;
+        match self {
+            DetailAt::Right => say(lang, "tui.at.right"),
+            DetailAt::Bottom => say(lang, "tui.at.bottom"),
+            DetailAt::Left => say(lang, "tui.at.left"),
+            DetailAt::Top => say(lang, "tui.at.top"),
+        }
+    }
+
+    /// 설정 파일에 적는 이름 — 화면 낱말과 따로다([`Field::name`] 과 같은 까닭). 설정은 말을
+    /// 안 따라간다: 화면 말을 바꿨다고 이미 적힌 줄의 뜻이 바뀌면 그건 설정이 아니라 마이그레이션이다.
+    pub fn name(self) -> &'static str {
+        match self {
+            DetailAt::Right => "right",
+            DetailAt::Bottom => "bottom",
+            DetailAt::Left => "left",
+            DetailAt::Top => "top",
+        }
+    }
+
+    pub const ALL: [DetailAt; 4] = [DetailAt::Right, DetailAt::Bottom, DetailAt::Left, DetailAt::Top];
+
+    /// 모르는 이름은 `None` — 읽는 쪽이 그때 처음값을 세운다. **읽기는 관대하다.**
+    pub fn named(name: &str) -> Option<DetailAt> {
+        DetailAt::ALL.into_iter().find(|a| a.name() == name)
+    }
+}
+
 /// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {

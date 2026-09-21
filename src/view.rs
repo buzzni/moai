@@ -52,12 +52,29 @@ pub struct Screen<'a> {
     /// 빌려 주는 것과 **뜻이 같아서**([`Origin::branch`]·[`Origin::labels`] 가 둘 다 빈 답을 낸다)
     /// 겹칠 것이 없는 자리가 빈 값을 지어낼 일이 없다.
     origin: Option<&'a Origin>,
+    /// 시각을 옮겨 적을 시간대(moai-p5az). **`None` 은 저장된 그대로(UTC)다.**
+    ///
+    /// **여기는 말과 다르다** — `lang` 에 `Default` 를 안 둔 것은 안 물어본 말이 조용히 한국어로
+    /// 서기 때문인데, 시간대의 처음값은 **저장된 값 그 자체**라 지어낸 답이 아니다. 명령 층이
+    /// [`Screen::at`] 으로 사람의 시간대를 얹고, 안 얹은 자리는 지금까지 그리던 그대로 선다.
+    /// 명령 층이 빠짐없이 얹는 것은 `every_command_screen_carries_the_zone` 이 글로 잰다.
+    zone: Option<&'a crate::tz::Zone>,
 }
 
 impl<'a> Screen<'a> {
     /// 겹쳐 보지 않은 화면.
     pub fn new(lang: Lang) -> Self {
-        Self { lang, origin: None }
+        Self { lang, origin: None, zone: None }
+    }
+
+    /// 같은 화면을 이 사람의 시간대로. 명령 층이 한 번 얹는다(`Ctx::zone`).
+    pub fn at(self, zone: &'a crate::tz::Zone) -> Self {
+        Self { zone: Some(zone), ..self }
+    }
+
+    /// 시각을 옮겨 적을 시간대. 안 얹었으면 저장된 그대로(UTC)다.
+    fn zone(&self) -> &'a crate::tz::Zone {
+        self.zone.unwrap_or(crate::tz::Zone::stored())
     }
 
     /// 같은 말로, 이 출처를 겹친 화면. **한눈 보기가 프로젝트마다 이것으로 바꿔 쓴다** —
@@ -99,7 +116,11 @@ fn rcell(style: Style, text: &str, w: usize) -> String {
 /// **연도를 낸다.** 상세는 정확해야 하는 자리다 — 해를 넘긴 저장소에서
 /// `09-11` 만 보이면 작년인지 올해인지 화면으로는 못 가린다. 짧게 적는 것은
 /// [`short_stamp`] 고, 그쪽은 줄이 빽빽한 이력에만 쓴다.
-pub fn stamp(at: &str) -> String {
+///
+/// **보는 사람의 시간대로 옮겨 적는다**(moai-p5az) — 저장된 글자는 UTC 그대로고 `--json` 도
+/// 그대로다. 옮기는 자리가 여기 하나여서, 화면에 서는 시각이 한 자로 모인다.
+pub fn stamp(at: &str, z: &crate::tz::Zone) -> String {
+    let at = z.shift(at);
     match (at.get(..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
         _ => at.to_string(),
@@ -109,7 +130,8 @@ pub fn stamp(at: &str) -> String {
 /// `2026-09-11T15:18:26Z` → `09-11 15:18`. **이력 줄 전용이다** — 한 줄에
 /// 시각·글·사람이 함께 들어가는 자리라 연도까지 적을 칸이 없다. 언제인지가
 /// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다.
-pub fn short_stamp(at: &str) -> String {
+pub fn short_stamp(at: &str, z: &crate::tz::Zone) -> String {
+    let at = z.shift(at);
     match (at.get(5..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
         _ => at.to_string(),
@@ -294,16 +316,31 @@ impl Hidden {
     }
 }
 
+/// 목록이 **무엇을 물어서 받은 것인가**. 꼬리의 미룸 낱말(`status.put_off`)을 달지 말지가
+/// 여기서 온다.
+///
+/// **결과의 내용으로 정하지 않는다**(moai-pkvw·moai-h06a). 한때 미룸 표를
+/// `any(|i| !i.is_deferred())` 로 정했는데, 그러면 `--all` 이 마침 전부 미룬 것만 냈을 때 표가
+/// 통째로 사라져 계획 밖의 줄이 일과 똑같이 보였다 — 안 물었는데 사라지는 것이 물어서 붙는
+/// 군더더기보다 나쁘다. 물은 것은 부르는 쪽만 안다.
+///
+/// `idea` 칸은 걷었다(moai-nb6w) — 그 칸이 가르던 것은 줄머리의 `◇` 하나였고 그 표식이 없다.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Asked {
+    /// `--deferred` — 미룬 것만 물었다. 줄마다 같은 낱말이 붙어 봐야 자리만 먹는다.
+    pub deferred: bool,
+}
+
 /// 목록. 비어 있으면 빈 줄이 아니라 왜 비었는지를 말한다.
 ///
-/// `asked_deferred` 는 **부르는 쪽이 미룬 것만 달라고 했는가**다. 그때는
-/// 줄마다 `미룸` 을 달아 봐야 자리만 먹는다.
+/// `asked` 는 **부르는 쪽이 무엇만 달라고 했는가**다([`Asked`]) — 미룬 것만·생각만 물었으면
+/// 줄마다 같은 표식이 붙어 봐야 자리만 먹는다.
 pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
     epics: &crate::report::EpicLabels,
-    asked_deferred: bool,
+    asked: Asked,
     wh: &crate::query::Where,
     screen: Screen,
 ) -> Vec<String> {
@@ -322,7 +359,7 @@ pub fn list(
     // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
     // 안 물었는데 사라지는 것이 물어서 붙는 군더더기보다 나쁘다.
-    let mark_deferred = !asked_deferred;
+    let mark_deferred = !asked.deferred;
     let heads: Vec<(String, usize)> =
         issues.iter().map(|i| marked(screen.branch(&i.id), &i.title, TITLE_CAP, title_style(i))).collect();
     let tags: Vec<String> = issues.iter().map(tags_of).collect();
@@ -349,6 +386,8 @@ pub fn list(
         "{}{}{}{}",
         cell(style::HEAD, "ID", w_id + 3),
         cell(style::HEAD, "P", 4),
+        // **`S` 열은 칸 글리프 하나다**(moai-nb6w) — 한때 그 곁에 표식 둘이 줄마다 붙어 열 폭이
+        // 자료에 따라 늘었고, 그만큼 뒤 열이 밀렸다.
         cell(style::HEAD, "S", 3),
         // `ID`·`P`·`S` 는 열 이름이 아니라 머리글자라 말묶음에 안 든다 — 어느 말에서도 같다.
         cell(style::HEAD, say(lang, "col.title"), if show_tags || show_epic { w_title + 2 } else { 0 }),
@@ -561,9 +600,9 @@ fn walk(
         // "마일스톤 없음" 이지 "에픽 없음" 이 아니다.
         let lang = cx.screen.lang;
         // **이름은 말묶음에서 온다 — 집계의 `title` 이 아니다.** `report` 는 `&[Issue]` 에 대한
-        // 순수 함수라 화면 말을 모르고, 그 자리(`report::loose_title`)의 글자는 한국어로 박혀
-        // 있다. 집계가 있든 없든 여기서 대는 이름이 같아야 한 화면이 한 말로 선다 — `ready` 가
-        // 같은 줄에 대는 말과 **키도 같다**.
+        // 순수 함수라 화면 말을 모르고, 그래서 `id` 없는 집계 줄의 `title` 은 빈 글이다
+        // (`report::rollup_of_in`). 집계가 있든 없든 여기서 대는 이름이 같아야 한 화면이 한 말로
+        // 선다 — `ready` 가 같은 줄에 대는 말과 **키도 같다**.
         let title = say(lang, "ready.no_epic");
         match path.is_empty().then(|| cx.rolls.iter().find(|r| r.id.is_none())).flatten() {
             Some(roll) => out.push(head(roll, title, n, None, lang)),
@@ -1478,11 +1517,11 @@ fn block_line(b: &crate::report::Block, branch: Option<&str>, now: &str, lang: L
 /// 그리면 머리 줄은 `in_progress` 인데 그 밑에 `끝` 이 선다(리뷰 moai-u5bk.3wq).
 ///
 /// 빈 쪽은 `—` 다 — 이 필드 전에 집은 줄을 닫으면 시작은 모르고 끝만 선다.
-pub fn span_of(i: &Issue) -> Option<(String, String)> {
+pub fn span_of(i: &Issue, z: &crate::tz::Zone) -> Option<(String, String)> {
     if is_group(i) || (i.started_at.is_none() && i.done_at.is_none()) {
         return None;
     }
-    let at = |t: &Option<String>| t.as_deref().map_or_else(|| "—".to_string(), stamp);
+    let at = |t: &Option<String>| t.as_deref().map_or_else(|| "—".to_string(), |t| stamp(t, z));
     Some((at(&i.started_at), at(&i.done_at)))
 }
 
@@ -1617,13 +1656,14 @@ pub fn detail(
     // **두 줄의 이름 칸을 같은 폭으로 맞춘다.** 한국어는 `생성`·`시작` 이 두 글자로 나란했지만
     // 말이 바뀌면 길이가 갈린다 — 폭을 여기서 재야 `시작` 줄의 시각이 `생성` 줄의 시각 밑에
     // 선다(아래 `gap` 이 그것을 잇는다).
+    let z = seen.screen.zone();
     let (left, right) = stamp_labels(lang);
     out.push(format!(
         "  {}   {}      {}  {}{}",
         left(say(lang, "detail.created")),
-        paint(style::DIM, &stamp(&i.created_at)),
+        paint(style::DIM, &stamp(&i.created_at, z)),
         right(say(lang, "detail.updated")),
-        paint(style::DIM, &stamp(&i.updated_at)),
+        paint(style::DIM, &stamp(&i.updated_at, z)),
         paint(style::DIM, &age),
     ));
     // **시작·끝도 사람에게 보인다**(moai-38mh). 적히기만 하고 어느 화면에도 안 서는 필드는
@@ -1631,10 +1671,10 @@ pub fn detail(
     // 첫 칸인 줄에 빈 자리를 그리면 생성·수정 줄이 두 배로 길어진다.
     // **끝은 `done_at` 이 섰다고 닫힌 것이 아니다** — 되돌린 줄에도 남는다. 그래서 칸은 위의
     // 머리 줄이 말하고 여기는 시각만 말한다. 어느 줄에 세우는지는 `span_of` 가 정한다.
-    if let Some((start, end)) = span_of(i) {
+    if let Some((start, end)) = span_of(i, z) {
         // 빈 시작(`—`)은 **윗줄의 생성 시각과 같은 폭으로** 채운다 — 안 채우면 `끝` 이 `수정`
         // 밑에서 열다섯 칸 왼쪽으로 붙는다.
-        let gap = width(&stamp(&i.created_at)).saturating_sub(width(&start));
+        let gap = width(&stamp(&i.created_at, z)).saturating_sub(width(&start));
         out.push(format!(
             "  {}   {}{}      {}  {}",
             left(say(lang, "detail.started")),
@@ -1813,7 +1853,11 @@ pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
 }
 
 /// 저널을 **그대로 찍는다. 접지 않는다.**
-pub fn history(journal: &[JournalEntry], cfg: &Config, lang: Lang) -> Vec<String> {
+///
+/// `screen` 에서 말과 시간대를 함께 받는다 — 상세와 같은 자로 시각을 적어야 한 화면의 두
+/// 덩어리가 다른 시계로 서지 않는다.
+pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
+    let (lang, z) = (screen.lang, screen.zone());
     let mut out = Vec::new();
     if !journal.is_empty() {
         out.push(String::new());
@@ -1821,7 +1865,7 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, lang: Lang) -> Vec<String
         for e in journal {
             // 메모는 여러 줄일 수 있다. 한 원소에 `\n` 을 담으면 "원소 하나가
             // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
-            let ts = short_stamp(&e.ts);
+            let ts = short_stamp(&e.ts, z);
             let pad = " ".repeat(width(&ts) + 5);
             for (n, l) in entry(e, cfg, lang).split('\n').enumerate() {
                 out.push(match n {
@@ -2308,6 +2352,12 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
             fill(say(lang, "store.journal_lost"), &[("said", said), ("ids", &ids.join(" "))])
         }
         Trouble::Invalid { at, why } => invalid(lang, at, why),
+        // **고치는 길은 "누군지 모른다" 와 한 벌이다** — 저널 파일 이름이 메일에서 오므로 모자란
+        // 것이 같고, 두 자리가 달리 대면 같은 처지에 손이 둘이 된다.
+        Trouble::NoJournalEmail { id } => {
+            let said = fill(say(lang, "store.no_journal_email"), &[("id", id)]);
+            format!("{said}\n\n{}", no_actor(lang, &crate::model::NoActor::Unknown))
+        }
     }
 }
 
@@ -2333,6 +2383,22 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
             fill(say(lang, "look.not_a_word"), &[("key", &format!("{TUI}.{key}")), ("value", value)])
         }
     }
+}
+
+/// 시간대를 풀다 만난 한 줄([`crate::tz::Trouble`], moai-77ap).
+///
+/// **막는 말이 아니다** — 어느 갈래든 화면은 UTC 로 서고 일은 그대로 돈다. 그래서 고치는 법을
+/// 늘어놓지 않는다: zoneinfo 없는 기계에서는 이 줄이 **매 명령**에 나므로, 안내문을 달면 그
+/// 기계의 모든 출력에 한 뭉치씩 붙는다.
+pub fn zone_trouble(lang: Lang, why: &crate::tz::Trouble) -> String {
+    use crate::tz::Trouble;
+    let said = match why {
+        Trouble::NoTzdb { at } => fill(say(lang, "tz.no_tzdb"), &[("at", &at.display().to_string())]),
+        Trouble::Unknown { name } => fill(say(lang, "tz.unknown"), &[("name", name)]),
+        Trouble::Unreadable { name, said } => fill(say(lang, "tz.unreadable"), &[("name", name), ("said", said)]),
+        Trouble::NoSystemZone => say(lang, "tz.no_system_zone").to_string(),
+    };
+    format!("moai: {said}")
 }
 
 /// 설정을 읽다 만난 한 줄([`crate::user_config::ConfigTrouble`], moai-aiid).
@@ -2522,6 +2588,117 @@ pub fn no_such_column(lang: Lang, why: &crate::config::NoSuchColumn) -> String {
     }
 }
 
+/// 누가 하는지 모를 때의 글([`crate::model::NoActor`], moai-ivt9).
+///
+/// **무엇을 주면 되는지를 함께 댄다** — 이 거절은 게이트가 아니라 입력이 모자라다는 말이고,
+/// `--user` 와 `MOAI_ACTOR` 둘 다 사람 없이 채워진다. 어디를 고치는지 안 대면 그 자리에서
+/// 사람을 부르는 것과 같아진다.
+pub fn no_actor(lang: Lang, why: &crate::model::NoActor) -> String {
+    use crate::model::NoActor;
+    // **고칠 명령은 안 옮긴다** — 그대로 쳐야 하는 글자다(`.gitattributes` 가 심는 줄과 같은 까닭).
+    // 말묶음에 안 두는 까닭이 하나 더 있다: 실린 글은 한 줄이어야 해서
+    // (`i18n::tests::every_translation_keeps_the_places_english_marks`) 여러 줄은 여기서 잇는다.
+    //
+    // **다만 따옴표 안은 채워 넣을 자리라 옮긴다**(리뷰) — 명령은 `git config user.name` 까지고
+    // 그 뒤는 사람이 제 이름으로 바꿀 글이다. 바로 아래 `refuse.actor_by_hand` 가 `--user
+    // "이름 (메일)"` 로 옮겨 서는데 여기만 영어로 두면, 한 거절문이 자리 표시를 두 말로 대어
+    // 받는 쪽이 `Name` 을 글자 그대로 친다.
+    let how = format!(
+        "  git config user.name  {:?}\n  git config user.email {:?}",
+        say(lang, "refuse.word_name"),
+        say(lang, "refuse.word_email")
+    );
+    match why {
+        NoActor::Unknown => {
+            format!("{}\n\n{how}\n\n{}", say(lang, "refuse.no_actor"), say(lang, "refuse.actor_by_hand"))
+        }
+        NoActor::BadIdentity { label } => {
+            let said = fill(say(lang, "refuse.bad_git_identity"), &[("label", &format!("{label:?}"))]);
+            format!("{said}\n\n{how}")
+        }
+        NoActor::Malformed { what, raw } => {
+            fill(say(lang, "refuse.actor_malformed"), &[("what", what), ("raw", &format!("{raw:?}"))])
+        }
+    }
+}
+
+/// git 에게 이력을 물었는데 못 받은 한 줄([`crate::git::Error`], moai-ivt9).
+///
+/// **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는 받는 쪽이 할 일이
+/// 다르다. 기계가 가르는 값은 이 글이 아니라 `Told::kind` 다 — 글은 사람의 것이라 화면 말로 선다.
+pub fn git_trouble(lang: Lang, why: &crate::git::Error) -> String {
+    use crate::git::Error;
+    let said = why.said();
+    match why {
+        Error::Spawn(_) => fill(say(lang, "git.spawn"), &[("said", &said)]),
+        Error::Failed(_) => fill(say(lang, "git.failed"), &[("said", &said)]),
+        Error::Stream(_) => fill(say(lang, "git.stream"), &[("said", &said)]),
+        Error::NotUtf8(_) => fill(say(lang, "git.not_utf8"), &[("said", &said)]),
+    }
+}
+
+/// 저장소 설정(`.moai/config.toml`)을 읽다 멈춘 한 줄([`crate::config::Trouble`], moai-ivt9).
+///
+/// **자리는 [`config_refused`] 가 앞에 단다** — 읽은 파일을 아는 자는 [`crate::config::Config::load`]
+/// 뿐이고, 글만 쓰는 [`crate::config::Config::parse`] 는 그 자리를 모른다.
+pub fn config_trouble(lang: Lang, why: &crate::config::Trouble) -> String {
+    use crate::config::{Thresholds, Trouble, Want};
+    // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")` 모양만
+    // 읽어, 키를 `match` 의 팔로 넘기면 그 눈에서 통째로 사라진다([`look_trouble`] 과 같은 자).
+    let want = |w: &Want| match w {
+        Want::Whole => say(lang, "config.want_whole"),
+        Want::Fraction => say(lang, "config.want_fraction"),
+    };
+    let quoted = |s: &str| format!("{s:?}");
+    match why {
+        Trouble::Unreadable { said } => said.clone(),
+        Trouble::Unbalanced { line } => fill(say(lang, "config.unbalanced"), &[("line", &line.to_string())]),
+        Trouble::NotAPair { line } => fill(say(lang, "config.not_a_pair"), &[("line", &line.to_string())]),
+        Trouble::NotQuoted { line, key, raw } => {
+            fill(say(lang, "config.not_quoted"), &[("line", &line.to_string()), ("key", key), ("raw", &quoted(raw))])
+        }
+        Trouble::NumberQuoted { line, key, raw } => {
+            fill(say(lang, "config.number_quoted"), &[("line", &line.to_string()), ("key", key), ("raw", raw)])
+        }
+        Trouble::NotANumber { line, key, want: w, raw } => fill(
+            say(lang, "config.not_a_number"),
+            &[("line", &line.to_string()), ("key", key), ("want", want(w)), ("raw", &quoted(raw))],
+        ),
+        Trouble::RatioRange { key, value } => fill(
+            say(lang, "config.ratio_range"),
+            &[("key", key), ("want", want(&Want::Fraction)), ("value", &value.to_string())],
+        ),
+        Trouble::PrefixCharset { raw } => fill(say(lang, "config.prefix_charset"), &[("raw", &quoted(raw))]),
+        Trouble::PrefixDash { raw } => fill(say(lang, "config.prefix_dash"), &[("raw", &quoted(raw))]),
+        Trouble::FlowDaysZero => say(lang, "config.flow_days_zero").to_string(),
+        Trouble::NoSuchThreshold { line, key } => fill(
+            say(lang, "config.no_such_threshold"),
+            &[("line", &line.to_string()), ("key", key), ("known", &Thresholds::KEYS.join(", "))],
+        ),
+        Trouble::ThresholdInTable { line, named } => {
+            fill(say(lang, "config.threshold_in_table"), &[("line", &line.to_string()), ("named", named)])
+        }
+        Trouble::NoPrefix => say(lang, "config.no_prefix").to_string(),
+        Trouble::NoStatuses => say(lang, "config.no_statuses").to_string(),
+        Trouble::NoDone { raw } => {
+            fill(say(lang, "config.no_done"), &[("done", crate::config::DONE), ("raw", &quoted(raw))])
+        }
+        Trouble::StatusTwice { status } => fill(say(lang, "config.status_twice"), &[("status", status)]),
+        Trouble::NamingUnknown { raw } => fill(
+            say(lang, "config.naming_unknown"),
+            &[("known", &crate::config::Naming::ALL.join("·")), ("raw", &quoted(raw))],
+        ),
+    }
+}
+
+/// [`config_trouble`] 에 읽던 파일의 자리를 앞에 단다([`crate::config::Refused`]).
+///
+/// **자리를 다는 자가 하나다**([`problem`]·[`config_problem`] 과 같은 까닭) — 부르는 쪽마다
+/// 붙이면 같은 까닭이 자리 있는 모양과 없는 모양으로 갈린다.
+pub fn config_refused(lang: Lang, why: &crate::config::Refused) -> String {
+    format!("{}: {}", why.at.display(), config_trouble(lang, &why.why))
+}
+
 /// 팔레트 밖의 색 낱말 한 줄([`crate::user_config::NotAHue`]).
 ///
 /// **읽기의 알림과 `moai project color` 의 거절문이 이 하나를 나눠 쓴다** — 명령이 받은 값을
@@ -2628,6 +2805,48 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// **고를 것이 있는 거절은 고를 것을 댄다**(moai-ivt9). 글이 말묶음으로 가면서 자료 쪽
+    /// 시험은 갈래만 재게 됐는데, 그 갈래가 아는 목록을 안 달고 나가면 "그 값이 아니다" 만
+    /// 듣고 무엇을 적어야 하는지는 설정 파일 어디에도 없다 — 옛 글이 목록을 달고 있던 까닭이다.
+    #[test]
+    fn config_trouble_names_what_it_needs() {
+        use crate::config::Trouble;
+        let said = |why: &Trouble| config_trouble(Lang::En, why);
+        let naming = said(&Trouble::NamingUnknown { raw: "Full".into() });
+        for want in crate::config::Naming::ALL {
+            assert!(naming.contains(want), "{want} 가 빠졌다 — {naming}");
+        }
+        let threshold = said(&Trouble::NoSuchThreshold { line: 2, key: "status_reveiw_days".into() });
+        for want in crate::config::Thresholds::KEYS {
+            assert!(threshold.contains(want), "{want} 가 빠졌다 — {threshold}");
+        }
+        let done = said(&Trouble::NoDone { raw: "todo,review".into() });
+        assert!(done.contains(crate::config::DONE), "{done}");
+        // 자리를 다는 자는 하나다 — `Refused` 를 지나야 파일 이름이 앞에 선다.
+        let at = std::path::PathBuf::from("/x/.moai/config.toml");
+        let refused = config_refused(Lang::En, &crate::config::Refused { at, why: Trouble::NoPrefix });
+        assert!(refused.starts_with("/x/.moai/config.toml: "), "{refused}");
+        assert!(!said(&Trouble::NoPrefix).contains(".moai"), "글 쪽이 자리를 또 단다");
+
+        // **줄과 쓰인 값은 반드시 나간다**(리뷰). 자료 쪽 시험은 갈래만 재므로 말묶음에서
+        // `{line}`·`{raw}` 자리가 빠져도 거기서는 안 붉어진다 — 그러면 "몇 줄인지" 와 "무엇을
+        // 적었는지" 가 화면에서만 조용히 사라지고, 설정 파일을 손으로 뒤지는 수밖에 없다.
+        let carries = |why: &Trouble| {
+            let s = said(why);
+            assert!(s.contains('7'), "줄 번호가 빠졌다 — {s}");
+            assert!(s.contains("삐끗"), "쓰인 값이 빠졌다 — {s}");
+        };
+        let key = || "status_wip_limit".to_string();
+        carries(&Trouble::NotQuoted { line: 7, key: key(), raw: "삐끗".into() });
+        carries(&Trouble::NumberQuoted { line: 7, key: key(), raw: "삐끗".into() });
+        carries(&Trouble::NotANumber { line: 7, key: key(), want: crate::config::Want::Whole, raw: "삐끗".into() });
+        carries(&Trouble::NoSuchThreshold { line: 7, key: "삐끗".into() });
+        carries(&Trouble::ThresholdInTable { line: 7, named: "삐끗".into() });
+        let line_only = said(&Trouble::Unbalanced { line: 7 });
+        assert!(line_only.contains('7'), "{line_only}");
+        assert!(said(&Trouble::NotAPair { line: 7 }).contains('7'));
     }
 
     /// **태그 표기는 `tag_parts` 한 자리에서 정한다**(`tag_line` 은 그 조각을 잇는다). `add` 의 확인 줄과
@@ -2797,7 +3016,7 @@ mod tests {
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
             &no_epics(),
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -2817,7 +3036,7 @@ mod tests {
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
             &no_epics(),
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -2834,7 +3053,7 @@ mod tests {
                 &cfg(),
                 Hidden { done: 0, ..Hidden::default() },
                 &no_epics(),
-                false,
+                Asked::default(),
                 &Default::default(),
                 Screen::new(Lang::Ko)
             ))[0],
@@ -2846,7 +3065,7 @@ mod tests {
                 &cfg(),
                 Hidden { done: 3, ..Hidden::default() },
                 &no_epics(),
-                false,
+                Asked::default(),
                 &Default::default(),
                 Screen::new(Lang::Ko)
             ))[0]
@@ -2862,7 +3081,7 @@ mod tests {
             &cfg(),
             Hidden { done: 5, ..Hidden::default() },
             &no_epics(),
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -2879,7 +3098,7 @@ mod tests {
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
             &no_epics(),
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -2901,7 +3120,7 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &tagged,
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko).over(&origin),
         ));
@@ -2915,7 +3134,7 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &tagged,
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko).over(&origin),
         );
@@ -3000,7 +3219,7 @@ mod tests {
         ];
         // 이력은 부르는 쪽이 붙인다 — `moai show` 가 묶음의 멤버를 그 앞에 끼운다.
         let mut lines = detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false);
-        lines.extend(history(&j, &cfg(), Lang::Ko));
+        lines.extend(history(&j, &cfg(), Screen::new(Lang::Ko)));
         let out = plain(&lines);
         let joined = out.join("\n");
         assert!(joined.contains("첫 줄") && joined.contains("둘째 줄"), "{joined}");
@@ -3071,7 +3290,7 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &labels,
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -3079,8 +3298,15 @@ mod tests {
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다
         let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), "(없는 에픽)".to_string())]);
-        let out =
-            plain(&list(&[i], &cfg(), Hidden::default(), &dangling, false, &Default::default(), Screen::new(Lang::Ko)));
+        let out = plain(&list(
+            &[i],
+            &cfg(),
+            Hidden::default(),
+            &dangling,
+            Asked::default(),
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
         assert!(out[1].contains("(없는 에픽)"), "{out:#?}");
     }
 
@@ -3114,6 +3340,69 @@ mod tests {
         assert_eq!(title_style(&stone), style::EPIC);
     }
 
+    /// **시각은 화면에서만 옮겨 적힌다**(moai-p5az) — 저장된 글자는 UTC 그대로고 `--json` 도
+    /// 그대로다. 옮기는 자리가 [`stamp`]·[`short_stamp`] 둘이라, 화면에 서는 시각이 한 자로 모인다.
+    ///
+    /// **못 읽은 글은 그대로 돌려준다** — 지어낸 시각은 그 줄이 언제인지를 잃는다.
+    #[test]
+    fn a_stamp_is_written_in_the_zone_the_screen_carries() {
+        let seoul = crate::tz::Zone::load("Asia/Seoul");
+        let utc = crate::tz::Zone::utc();
+        assert_eq!(stamp("2026-09-21T08:24:58Z", &utc), "2026-09-21 08:24");
+        assert_eq!(short_stamp("2026-09-21T08:24:58Z", &utc), "09-21 08:24");
+        // tzdb 가 없는 기계에서는 이 자리를 못 잰다 — **거기서도 도구는 돈다**(moai-77ap).
+        if let Ok(seoul) = seoul {
+            assert_eq!(stamp("2026-09-21T08:24:58Z", &seoul), "2026-09-21 17:24");
+            assert_eq!(short_stamp("2026-09-21T08:24:58Z", &seoul), "09-21 17:24");
+            // 날짜를 넘는 자리도 같은 자로 넘어간다.
+            assert_eq!(stamp("2026-09-21T23:00:00Z", &seoul), "2026-09-22 08:00");
+        }
+        for odd in ["", "언제", "2026-09-21"] {
+            assert_eq!(stamp(odd, &utc), odd, "못 읽은 글을 건드렸다");
+        }
+    }
+
+    /// **명령 층이 화면에 시간대를 빠짐없이 얹는다**(moai-p5az). [`Screen::new`] 만으로 뜬 화면은
+    /// 저장된 그대로(UTC)라 — 지어낸 답은 아니지만 사람의 시계도 아니다. 한 자리만 빠뜨리면 그
+    /// 명령만 옛 시계로 서고, 다른 화면과 몇 시간 어긋난 시각이 나란히 선다.
+    ///
+    /// **글로 잰다.** 타입으로 막으려면 `Screen::new` 가 시간대를 받아야 하는데, 그러면 화면을
+    /// 짓는 시험 수십 자리가 UTC 를 손으로 적게 된다 — 시험이 재려는 것은 시간대가 아니다.
+    #[test]
+    fn every_command_screen_carries_the_zone() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/cmd");
+        let mut seen = 0usize;
+        let mut bare: Vec<String> = Vec::new();
+        let mut walk = vec![std::path::PathBuf::from(dir)];
+        while let Some(at) = walk.pop() {
+            for e in std::fs::read_dir(&at).expect("src/cmd 를 못 읽었다") {
+                let path = e.expect("src/cmd 를 못 읽었다").path();
+                if path.is_dir() {
+                    walk.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("명령 파일을 못 읽었다");
+                let name = path.file_name().expect("파일 이름").to_string_lossy().into_owned();
+                for (n, line) in src.lines().enumerate() {
+                    // 주석에 적힌 이름은 글이지 부르는 자리가 아니다.
+                    let code = line.split("//").next().unwrap_or("");
+                    if !code.contains("Screen::new(") {
+                        continue;
+                    }
+                    seen += 1;
+                    if !code.contains(".at(") {
+                        bare.push(format!("{name}:{}", n + 1));
+                    }
+                }
+            }
+        }
+        assert!(seen >= 8, "명령 층에서 화면을 짓는 자리를 못 찾았다 — 이 시험이 아무것도 안 잰다");
+        assert!(bare.is_empty(), "시간대를 안 얹은 화면 — `.at(ctx.zone())` 을 붙인다: {bare:?}");
+    }
+
     /// **안 물었는데 표가 사라지지 않는다.** 표를 달지 말지를 결과의 내용으로
     /// 정하면(`전부 미룬 것인가`) `--all` 이 마침 미룬 것만 냈을 때 계획 밖의
     /// 줄이 일과 똑같이 보인다. 물어서 붙는 군더더기보다 안 물었는데 사라지는
@@ -3131,7 +3420,7 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &no_epics(),
-            false,
+            Asked::default(),
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
@@ -3144,11 +3433,54 @@ mod tests {
             &cfg(),
             Hidden::default(),
             &no_epics(),
-            true,
+            Asked { deferred: true, ..Default::default() },
             &Default::default(),
             Screen::new(Lang::Ko),
         ));
         assert!(!asked[1].contains("미룸"), "물어서 낸 목록에 군더더기가 붙었다 — {asked:#?}");
+    }
+
+    /// **`S` 열은 칸 글리프 하나고 줄마다 같은 폭이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그
+    /// 곁에 표식 둘(idea `◇`·미룸 `‖`)이 줄마다 붙어 열 폭이 자료에 따라 늘었고, 그만큼 제목이
+    /// 밀렸다 — 탐색기에서는 그것이 트리 선을 어긋냈다.
+    ///
+    /// **재는 것은 낱말이 아니라 자리다** — 표식이 안 서는 것만 재면, 폭을 자료에서 다시 재기
+    /// 시작하는 되돌림을 못 잡는다. 미룸 낱말은 꼬리에 그대로 선다(`status.put_off`).
+    #[test]
+    fn the_list_column_is_one_glyph_wide_on_every_row() {
+        let plain_work = issue("argos-0001", "일", "todo");
+        let mut thought = issue("argos-0002", "생각", "todo");
+        thought.kind = Kind::Idea;
+        let mut put_off = issue("argos-0003", "미룬 일", "in_progress");
+        put_off.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut both = issue("argos-0004", "미룬 생각", "todo");
+        both.kind = Kind::Idea;
+        both.deferred_at = Some("2026-09-01T00:00:00Z".into());
+
+        let rows = plain(&list(
+            &[plain_work, thought, put_off, both],
+            &cfg(),
+            Hidden::default(),
+            &no_epics(),
+            Asked::default(),
+            &Default::default(),
+            Screen::new(Lang::Ko),
+        ));
+        // 칸 글리프 하나만 선다 — 종류도 미룸도 줄머리를 안 넓힌다.
+        assert!(rows[1].contains("·  일"), "일의 줄머리가 달라졌다 — {rows:#?}");
+        assert!(rows[2].contains("·  생각"), "idea 에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[3].contains("▸  미룬 일"), "미룬 줄에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[4].contains("·  미룬 생각"), "미룬 idea 에 표식이 붙었다 — {rows:#?}");
+        // **낱말은 그대로다** — 미룸을 말하는 자리는 꼬리의 `status.put_off` 다.
+        assert!(rows[3].contains("미룸") && rows[4].contains("미룸"), "미룸 낱말까지 걷었다 — {rows:#?}");
+
+        // 머리글의 `S` 가 제목 앞에서 줄과 같은 자리에 선다 — 갈리면 `Title` 이 값보다 밀려 선다.
+        // **칸 수로 잰다** — `find` 가 내는 바이트 자리로 재면 `·`(2바이트)가 든 줄만 어긋난다.
+        let at = |line: &str, title: &str| width(&line[..line.find(title).expect("제목이 없다")]);
+        let at_title = at(&rows[0], "제목");
+        for (r, title) in rows[1..5].iter().zip(["일", "생각", "미룬 일", "미룬 생각"]) {
+            assert_eq!(at(r, title), at_title, "제목 열이 머리글과 어긋났다 — {r:?}");
+        }
     }
 
     #[test]

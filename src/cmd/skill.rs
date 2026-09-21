@@ -214,7 +214,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let Place { root, dir, market, prefix, exe, on_path, files } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
-    let clash = listed.clone().filter(|other| !same_dir(other, &dir));
+    let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
     let installs = installs_here(&format!("moai@{market}"), &root);
     let claude = which("claude").is_some();
     // 실제로 불리는 것은 `claude` 가 복사해 간 매니페스트다. **복사본이 사라진
@@ -533,7 +533,7 @@ fn which(name: &str) -> Option<PathBuf> {
         return None;
     }
     let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!found.is_empty()).then(|| std::fs::canonicalize(&found).unwrap_or_else(|_| found.into()))
+    (!found.is_empty()).then(|| crate::store::real(Path::new(&found)))
 }
 
 /// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
@@ -591,14 +591,14 @@ fn known_at(market: &str) -> Option<PathBuf> {
 
 /// 같은 이름이 **남의 자리**를 가리키면 그 자리.
 fn clash_of(market: &str, dir: &Path) -> Option<PathBuf> {
-    known_at(market).filter(|other| !same_dir(other, dir))
+    known_at(market).filter(|other| !crate::user_config::same_dir(other, dir))
 }
 
 /// 설치 id(`moai@<market>`·함께 까는 것) 하나의 설치 중 **이 저장소에 드는 것**. 셋(`status`·`uninstall`·
 /// [`korean_missing`])이 한 자로 잰다.
 fn installs_here(id: &str, root: &Path) -> Vec<skill::Install> {
     ledger("installed_plugins.json")
-        .map(|l| skill::installs_of(&l, id, |p| same_dir(Path::new(p), root)))
+        .map(|l| skill::installs_of(&l, id, |p| crate::user_config::same_dir(Path::new(p), root)))
         .unwrap_or_default()
 }
 
@@ -633,11 +633,6 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
         .unwrap_or(0)
 }
 
-fn same_dir(a: &Path, b: &Path) -> bool {
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    real(a) == real(b)
-}
-
 /// 이 저장소에 **안 깔린** 한국어 글쓰기 플러그인 — 사용자 범위이거나 `projectPath` 가 여기인 설치가
 /// 없는 것. 훅이 알림에 붙인다(moai-6rrb). 장부를 못 읽으면 전부 안 깔린 것으로 읽는다 — 알림이 "다시
 /// 깔라" 고 한 줄 더 말할 뿐 아무것도 막지 않는다.
@@ -651,7 +646,9 @@ pub fn korean_missing(root: &Path) -> Vec<&'static str> {
     let ledger = ledger("installed_plugins.json");
     let home = |p: &Path| crate::worktree::main_root(p).unwrap_or_else(|| p.to_path_buf());
     let here = home(root);
-    let is_here = |p: &str| same_dir(Path::new(p), root) || same_dir(&home(Path::new(p)), &here);
+    let is_here = |p: &str| {
+        crate::user_config::same_dir(Path::new(p), root) || crate::user_config::same_dir(&home(Path::new(p)), &here)
+    };
     crate::guide::KOREAN_PLUGINS
         .iter()
         .map(|(id, _)| *id)

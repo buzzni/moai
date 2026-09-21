@@ -3,7 +3,7 @@
 //! 자식이나 에픽 멤버가 남아 끊긴 참조가 되는 것은 **막지 않고 알린다.**
 //! `moai status` 가 끊긴 참조를 드러내므로 여기서 막을 이유가 없다.
 
-use super::{Ctx, R};
+use super::{Ctx, Fail, R};
 use crate::cli::RmArgs;
 use crate::model::{self, Issue, JournalEntry};
 use crate::style::{self, paint};
@@ -11,7 +11,7 @@ use crate::style::{self, paint};
 pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
 
     let (gone, missing, dangling): (Vec<Issue>, Vec<String>, Vec<String>) = repo.with_write(
         || ctx.lang(),

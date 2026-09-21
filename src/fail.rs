@@ -41,6 +41,12 @@ impl Fail {
         let said = crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]);
         Fail::coded(said, code::NOT_FOUND)
     }
+
+    /// 누가 하는지 모른다([`crate::model::NoActor`], moai-ivt9) — **코드는 자료가 든다.**
+    /// 명령마다 제 코드를 고르면 같은 거절이 명령마다 다른 값으로 나간다.
+    pub fn no_actor(why: &crate::model::NoActor, lang: crate::i18n::Lang) -> Fail {
+        Fail::coded(crate::view::no_actor(lang, why), why.code())
+    }
 }
 
 impl std::fmt::Display for Fail {

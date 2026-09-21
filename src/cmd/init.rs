@@ -392,17 +392,70 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     if !matches!(driver, "off" | "current") {
         out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
     }
-    // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
+    // **어디서 쳐야 하는지를 끝에 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
     // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
     // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
     // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
     if let Some(main) = &tracker_at {
-        // **`-C` 를 붙이는 규칙은 한 자리다**(`report::Warning::cli_hint`, 리뷰 moai-h6aq.cx8) —
-        // 알림들과 아래 거절문이 같은 글자를 내야 한다.
-        let go = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
-        out.push(fill(say(lang, "init.check_worktree"), &[("go", &go)]));
+        // **이 셸이 무엇을 읽고 있는지는 손잡이가 켜졌을 때만 묻는다** — 꺼진 셸에서는 둘째 줄이
+        // 아예 안 서므로 물어도 쓸 데가 없고, 이 물음은 조상을 훑는다.
+        let here = crate::store::here_wanted();
+        let reading = here.then(|| crate::store::tracker_in_use(&root)).flatten();
+        out.extend(check_worktree(lang, main, away_root(&root, ctx.chdir).as_deref(), here, reading.as_deref()));
     }
     Ok(out)
+}
+
+/// `--check` 의 끝줄 — **어디서 `init` 을 쳐야 하는가**, 그리고 **이 셸이 갈렸는가**.
+///
+/// **손잡이를 켠 셸에서는 줄이 둘이다**(moai-ha0f, 2026-09-21 사용자 결정). 첫 줄이 대는 자리는
+/// [`crate::store::init_belongs_at`] 이 내는 것이고 그 자는 `MOAI_HERE` 를 **안 본다**(moai-ko4y) —
+/// 나중의 다른 부름이 어디서 서느냐에 답하는 자라, 그 부름의 셸이 손잡이를 켤지는 여기서 알 수 없다.
+/// 그 결정을 그대로 두면 `MOAI_HERE=1` 인 셸에서 이 줄이 "여기 안 선다" 를 말하는데 **같은 셸의**
+/// `moai init` 은 여기 심고 0 으로 끝난다 — 한 명령의 답이 둘로 갈린다. 둘째 줄이 그 갈림을 메운다:
+/// 첫 줄은 손잡이 없는 셸에 대한 답으로 그대로 맞고, 둘째 줄이 이 셸에 대한 답을 댄다.
+///
+/// **대는 명령에 접두어를 박는다.** 손잡이는 **이 프로세스 하나**에 서므로, 접두어 없는 줄을 베껴
+/// 딴 셸에 붙여 넣으면 그 줄은 [`run`] 의 거절로 1 로 끝난다 — moai-ko4y 가 표면을 물려받게 두지
+/// 않은 까닭이 그것이고, 접두어를 박은 줄은 어느 셸에서도 같은 일을 한다.
+///
+/// **`-C` 를 붙이는 규칙은 한 자리다**([`crate::report::Warning::cli_hint`], 리뷰 moai-h6aq.cx8) —
+/// 알림들과 [`run`] 의 거절문이 같은 글자를 내야 한다. 여기 두 줄도 그 자를 거친다.
+///
+/// **심는 것이 이 셸이 읽던 트래커를 가리면 대는 말이 바뀐다**(리뷰 moai-uocc.45o 의 2번,
+/// 2026-09-21 사용자 결정). 딸린 워크트리의 **밑자리**(`<wt>/src/deep`)가 그 자리다 — 손잡이를 켠
+/// 셸은 `<wt>/.moai` 를 읽는데([`crate::store::tracker_in_use`]), 거기 대고 "여기 심는다" 를 그대로
+/// 내면 따라 친 사람이 `src/deep` 에 아무도 안 읽는 `.moai` 를 세운다. 그 뒤의 `add` 는 그리로 가고
+/// 먼저 쓴 줄들은 사라진 것처럼 보이며, 그 파일은 병합에서 겨룬다 — moai-pk4x 가 `init` 에서 막는
+/// 바로 그것을 안내가 권하게 된다.
+///
+/// **주 체크아웃을 가리는 것은 이 갈래가 아니다.** 손잡이를 켠 셸에서 워크트리 꼭대기에 심는 것도
+/// 위의 트래커를 가리지만, 그것이 moai-ko4y 가 열어 둔 길이고 [`run`] 의 거절문도 그 값을 함께
+/// 댄다(`refuse.init_worktree_here_note`). 가르는 자는 "읽고 있는 것이 첫 줄이 대는 자리와 같은가"
+/// 하나다.
+fn check_worktree(
+    lang: crate::i18n::Lang,
+    main: &Path,
+    away: Option<&str>,
+    here: bool,
+    reading: Option<&Path>,
+) -> Vec<String> {
+    let there = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
+    let mut out = vec![fill(say(lang, "init.check_worktree"), &[("go", &there)])];
+    if !here {
+        return out;
+    }
+    match reading.filter(|at| !crate::user_config::same_dir(at, main)) {
+        Some(at) => {
+            let at = at.join(".moai").display().to_string();
+            out.push(fill(say(lang, "init.check_worktree_shadow"), &[("at", &at)]));
+        }
+        None => {
+            let go = format!("MOAI_HERE=1 {}", crate::report::Warning::cli_hint(away, "init"));
+            out.push(fill(say(lang, "init.check_worktree_here"), &[("go", &go)]));
+        }
+    }
+    out
 }
 
 /// `moai init --print`. **아무것도 안 쓰고 블록만 찍는다.**
@@ -451,7 +504,11 @@ const GITATTRIBUTES: &str = "\
 .moai/issues.jsonl   text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
+# It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.
+# Several files is the normal shape, and the old single file is still read as
+# one of them, so both lines stand.
 .moai/journal.jsonl  text eol=lf merge=union
+.moai/journal/*.jsonl  text eol=lf merge=union
 ";
 
 // **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 `.claude/worktrees/` 에
@@ -811,7 +868,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
         // 바꾸면 그 줄들이 제 접두어를 잃는다.
         (Some(p), true) => {
-            let cur = crate::config::Config::load(&root).map_err(Fail::new)?.prefix;
+            let cur = crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix;
             if p != cur {
                 return Err(Fail::coded(
                     format!(
@@ -832,7 +891,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
         // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
         (Some(p), false) => {
-            crate::config::check_prefix(p).map_err(Fail::new)?;
+            crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
             if p.chars().count() > PREFIX_MAX {
                 return Err(Fail::coded(
                     format!(
@@ -848,7 +907,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
             }
             p.to_string()
         }
-        (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
+        (None, true) => {
+            crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix
+        }
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
@@ -870,7 +933,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
          # How a person is shown: full (`Name (email)`) · name · email\nnaming = \"full\"\n"
     );
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
-    crate::config::Config::parse(&config).map_err(Fail::new)?;
+    crate::config::Config::parse(&config).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
 
     // AGENTS.md 도 **아무것도 심기 전에** 읽는다. 못 읽는 파일(UTF-8 아님·권한)을 빈 글로 치면
     // 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다 — 멈추되, `.moai/` 를 만든 뒤에 멈추면
@@ -886,7 +949,10 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
 
     if !again {
         std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", ""), ("journal.jsonl", "")] {
+        // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
+        // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
+        // 그 파일은 이제 읽기만 하는 옛 자리다. 빈 디렉터리는 git 이 안 담으므로 미리 만들지도 않는다.
+        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", "")] {
             let p = dir.join(name);
             std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
         }
@@ -1134,6 +1200,51 @@ mod tests {
         );
     }
 
+    /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에
+    /// 대한 답이라 그대로 서고, 둘째 줄이 **이 셸**의 답을 댄다 — 한 줄만 두던 판은 `MOAI_HERE=1`
+    /// 인 셸에서 "여기 안 선다, 주 체크아웃에서 쳐라" 를 냈는데 같은 셸의 `moai init` 은 여기 심고
+    /// 0 으로 끝났다.
+    ///
+    /// **둘째 줄에 접두어가 박혀 있는가를 함께 잰다.** 손잡이는 이 프로세스 하나에 서므로 접두어
+    /// 없는 줄은 베껴 딴 셸에 붙여 넣으면 1 로 끝난다 — 표면이 손잡이를 안 물려받는
+    /// (moai-ko4y) 값을 이 접두어가 갚는다.
+    ///
+    /// **환경을 안 만진다**(`store::tests` 의 같은 자리 글). 단위 시험은 한 프로세스의 스레드로
+    /// 나란히 돌아 `set_var` 로 켠 값을 옆 시험이 본다 — 갈림을 인자로 받는 까닭이 그것이고,
+    /// 손잡이를 실제로 읽는 자리([`crate::store::here_wanted`])는 부르는 쪽 한 줄이다.
+    #[test]
+    fn a_split_shell_gets_a_second_line() {
+        let main = Path::new("/main");
+        let plain = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), false, None);
+        assert_eq!(plain.len(), 1, "손잡이 없는 셸에 줄이 둘 섰다 — {plain:?}");
+        assert!(plain[0].contains("moai -C /main init"), "주 체크아웃을 안 댔다 — {}", plain[0]);
+
+        let split = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), true, Some(main));
+        assert_eq!(split.len(), 2, "갈린 셸에 둘째 줄이 없다 — {split:?}");
+        assert_eq!(split[0], plain[0], "첫 줄이 손잡이를 물려받았다 — {}", split[0]);
+        assert!(split[1].contains("MOAI_HERE=1 moai -C /wt init"), "빠져나가는 길을 안 댔다 — {}", split[1]);
+
+        // `-C` 없이 부른 판은 그 자리도 없다 — 붙는 규칙은 `cli_hint` 하나가 쥔다.
+        let here = check_worktree(crate::i18n::Lang::En, main, None, true, None);
+        assert!(here[1].contains("MOAI_HERE=1 moai init"), "맨 명령을 안 댔다 — {}", here[1]);
+    }
+
+    /// **읽고 있는 트래커를 가리라고 대지 않는다**(리뷰 moai-uocc.45o 의 2번, 2026-09-21 사용자
+    /// 결정). 딸린 워크트리의 밑자리에서 손잡이를 켠 셸은 `<wt>/.moai` 를 읽는데, 거기 "여기
+    /// 심는다" 를 그대로 내면 따라 친 사람이 `src/deep` 에 아무도 안 읽는 `.moai` 를 세우고 먼저 쓴
+    /// 줄들은 사라진 것처럼 보인다 — `moai init` 이 막는 자리를 안내가 권하게 된다.
+    ///
+    /// **주 체크아웃을 가리는 것은 이 갈래가 아니다** — 위의 시험이 그쪽(`reading == main`)을 재고,
+    /// 그때는 빠져나가는 길을 그대로 댄다.
+    #[test]
+    fn a_shell_that_already_reads_one_is_not_told_to_shadow_it() {
+        let main = Path::new("/main");
+        let said = check_worktree(crate::i18n::Lang::En, main, None, true, Some(Path::new("/main/wt")));
+        assert_eq!(said.len(), 2, "밑자리에서 둘째 줄이 없다 — {said:?}");
+        assert!(said[1].contains("/main/wt/.moai"), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
+        assert!(!said[1].contains("MOAI_HERE=1 moai init"), "가릴 명령을 그대로 댔다 — {}", said[1]);
+    }
+
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
     #[test]
     fn the_block_is_replaced_never_repeated() {
@@ -1379,7 +1490,7 @@ mod tests {
             assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
             // 줄인 것도 설정이 받는 접두어다.
             crate::config::Config::parse(&format!("prefix = \"{got}\"\n"))
-                .unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
+                .unwrap_or_else(|e| panic!("{full} → {got}: {e:?}"));
         }
     }
 

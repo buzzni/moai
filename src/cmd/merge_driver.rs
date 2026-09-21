@@ -1024,8 +1024,9 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // 링크가 다 풀린 값인데 `PATH` 의 철자는 안 풀린 값이다 — `/usr/local/bin/moai` 가 같은
     // 파일을 가리키는 심볼릭 링크면 둘이 갈려, 같은 바이너리를 두 번 띄워 재고도 "딴것" 으로
     // 읽었다. 못 풀면 적힌 철자 그대로 견준다: 여기서 틀리는 값은 **덜 이르는 쪽**이다.
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    if real(&found) == real(&mine) {
+    // 푸는 자는 [`crate::store::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
+    // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰).
+    if crate::store::real(&found) == crate::store::real(&mine) {
         return Ok(mine.display().to_string());
     }
     let word = found.display().to_string();
@@ -1114,18 +1115,13 @@ fn plant_config(here: &Path, cmd: &str) -> Result<String, String> {
 
 /// git 이 댄 까닭만 — **moai 의 글은 안 섞는다**(리뷰).
 ///
-/// [`crate::git::Error`] 의 `Display` 는 한국어 머리를 붙인다(`git 이 이력을 못 냈다 — …`).
-/// 그것을 그대로 들면 못 심은 까닭이 영어 화면의 `init.driver_trouble` 한가운데에 한국어
-/// 한 문장으로 박히고, `--json` 의 `driver_trouble` 로도 그대로 나간다 — 저장 계층을 화면 말에서
+/// 무엇을 못 했는지를 앞에 붙이는 것은 [`crate::view::git_trouble`] 이고 그것은 화면 말로 선다.
+/// 그 글을 여기서 들면 못 심은 까닭이 영어 화면의 `init.driver_trouble` 한가운데에 남의 말 한
+/// 문장으로 박히고, `--json` 의 `driver_trouble` 로도 그대로 나간다 — 저장 계층을 화면 말에서
 /// 떼어 둔 결정이 글 한 줄로 도로 새는 자리다. git 의 stderr 는 git 의 말이라 이쪽이 고를 것이
-/// 아니고, `worktree::trouble` 이 이미 같은 꼴로 푼다.
+/// 아니고, **가르는 자는 [`crate::git::Error::said`] 하나다**(리뷰) — `worktree::git` 도 같은 자다.
 fn git_said(e: crate::git::Error) -> String {
-    use crate::git::Error;
-    match e {
-        Error::Spawn(e) | Error::Stream(e) => e.to_string(),
-        Error::Failed(why) => why,
-        Error::NotUtf8(e) => e.to_string(),
-    }
+    e.said()
 }
 
 /// `moai init` 이 심을 때 일어난 일(moai-08bo).

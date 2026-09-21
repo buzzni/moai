@@ -12,7 +12,7 @@ use crate::view;
 
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트마다 집을 것. 안이면 아래 그대로다 (결정 3).
-    let Some(repo) = Repo::find()? else {
+    let Some(repo) = Repo::find(|| ctx.lang())? else {
         return overview(ctx, worktree);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
@@ -66,8 +66,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
     let wip = report::wip(&load.issues, &repo.config);
 
-    let screen = view::Screen::new(ctx.lang()).over(&origin);
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
+    let screen = view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin);
+    Ok(view::ready(&picks, &report::epic_labels(&load.issues, ctx.lang()), &wip, &held, &focus, screen))
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
@@ -124,5 +124,5 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let all = Overview { projects: entries, problems: &problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_ready(&projects, &seen, reg, view::Screen::new(ctx.lang())))
+    Ok(view::projects_ready(&projects, &seen, reg, view::Screen::new(ctx.lang()).at(ctx.zone())))
 }
