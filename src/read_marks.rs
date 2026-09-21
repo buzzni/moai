@@ -336,17 +336,13 @@ fn overlay_place(
     seen: &mut BTreeMap<String, String>,
     legacy: &BTreeMap<String, String>,
     problems: &mut Vec<SheetTrouble>,
-) {
-    let mut places: Vec<&Path> = Vec::new();
+) -> Option<crate::user_config::Trouble> {
     // **대기 자리가 먼저다** — 떨어진 판이 옛 자리보다 나중에 적힌 것이다. 겹치는 차례는 나중에 적힌
     // 것이 이기는 쪽으로 세운다(`overlay` 는 먼저 든 것을 안 덮는다).
-    if let Some(spool) = place.pending.as_deref().filter(|p| p.exists()) {
-        places.push(spool);
-    }
-    if !place.at.exists() {
-        places.extend(place.past.iter().map(PathBuf::as_path));
-    }
-    older(&places, &place.root, seen, legacy, problems);
+    let spool = place.pending.as_deref().filter(|p| p.exists());
+    let past: Vec<&Path> =
+        if place.at.exists() { Vec::new() } else { place.past.iter().map(PathBuf::as_path).collect() };
+    older(spool, &past, &place.root, seen, legacy, problems)
 }
 
 /// 읽어 낸 읽음과 그때 생긴 말.
@@ -377,6 +373,13 @@ pub struct Marks {
     /// 이고, 그것을 아는 쪽은 부르는 탐색기다 — 세우는 자리는 `App::read_marks_of` 다
     /// (moai-4qbv.i0g 리뷰). 읽음 파일은 설정 파일 곁의 디렉터리에 살아 둘이 함께 사라진다.
     pub trouble: Option<crate::user_config::Trouble>,
+    /// **대기 자리를 못 든 까닭**([`Place::pending`], moai-ocly). `trouble` 과 가르는 까닭은 값이 달라서다 —
+    /// 지금 자리의 표는 성하니 `seen` 은 그대로 들되, 아직 안 합친 도장을 이 판이 덜 들었으므로 **다시
+    /// 볼 까닭**은 된다. 갈래의 뜻은 `trouble` 과 같다([`crate::user_config::Trouble::again`]).
+    ///
+    /// 한 값으로 묶던 판은 둘 중 하나를 잃었다 — `trouble` 로 올리면 못 읽는 대기 자리 하나가 성한 표를
+    /// 버려 그 프로젝트가 통째로 [NEW] 로 서고, 떨어뜨리면 그 파일이 낫는 때를 아무도 안 본다.
+    pub pending: Option<crate::user_config::Trouble>,
 }
 
 /// 그 프로젝트의 읽음. **실패하지 않는다** — 못 읽거나 깨졌으면 [`Marks::trouble`] 과 까닭 한 줄이다.
@@ -398,7 +401,7 @@ pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Ma
     marks.problems.append(&mut place.problems);
     // 대기 자리와 옛 자리와 옛 `[read]` — 가르는 자는 [`overlay_place`] 에 있다. **읽기는 아무것도
     // 안 지운다**: 대기 자리를 닫는 것은 쓰기이고, 그때까지는 읽기마다 얹어 화면이 그 도장을 든다.
-    overlay_place(&place, &mut marks.seen, legacy, &mut marks.problems);
+    marks.pending = overlay_place(&place, &mut marks.seen, legacy, &mut marks.problems);
     marks
 }
 
@@ -410,19 +413,31 @@ pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Ma
 ///
 /// **옛 자리의 탈은 `trouble` 로 안 올린다.** 그 파일은 있을 수도 없을 수도 있는 것이라, 그것 하나로
 /// 지금 자리의 성한 표를 버리면 안 된다 — 까닭만 곁들인다.
+///
+/// **대기 자리는 다르다**(moai-ocly). 그 파일은 **있으면 아직 안 합친 도장이 있다**는 뜻이라, 못 읽은
+/// 것은 "있을 수도 없을 수도" 가 아니라 이 판이 도장을 덜 든 것이다 — 그래서 그 탈만 물고 나온다
+/// ([`Marks::pending`]). 지금 자리의 표는 그대로 낸다: 버리면 못 읽은 파일 하나가 그 프로젝트를
+/// 통째로 [NEW] 로 세운다. 부르는 쪽은 이것으로 **다시 볼 때**를 고른다 — 한때 이 탈이 떨어져,
+/// 권한으로 못 읽는 대기 자리를 탐색기가 "줄 하나가 이상하다" 로 대고 시계 되읽기도 안 걸었다.
 fn older(
+    spool: Option<&Path>,
     past_places: &[&Path],
     root: &Path,
     seen: &mut BTreeMap<String, String>,
     legacy: &BTreeMap<String, String>,
     problems: &mut Vec<SheetTrouble>,
-) {
-    for old in past_places {
+) -> Option<crate::user_config::Trouble> {
+    let mut pending = None;
+    for (old, is_spool) in spool.map(|p| (p, true)).into_iter().chain(past_places.iter().map(|p| (*p, false))) {
         let mut past = read_one(old, root);
         overlay(seen, &past.seen);
         problems.append(&mut past.problems);
+        if is_spool {
+            pending = past.trouble;
+        }
     }
     overlay(seen, legacy);
+    pending
 }
 
 /// 락 안에서 든 표에 [`read`] 와 **같은 차례로** 옛 자리와 옛 `[read]` 를 얹는다 — 탐색기의 `r` 이 제가
@@ -478,7 +493,7 @@ fn read_one(path: &Path, root: &Path) -> Marks {
             }
         },
     };
-    Marks { seen, problems, trouble }
+    Marks { seen, problems, trouble, pending: None }
 }
 
 /// 옛 `[read]` 를 겹친다 — **새 자리가 이긴다**(사용자 결정 3). 겹치는 자가 둘이 되면 그 규칙도 둘이
@@ -1997,7 +2012,7 @@ mod tests {
         upd(&cfg, &root, |sheet| sheet.mark(&marks(&[("argos-0001", "새것")]))).unwrap();
 
         let legacy = marks(&[("argos-0001", "옛것"), ("argos-0009", "옛것뿐")]);
-        let Marks { seen, problems, trouble } = read(&cfg, &root, &legacy);
+        let Marks { seen, problems, trouble, pending: _ } = read(&cfg, &root, &legacy);
         assert_eq!(seen, marks(&[("argos-0001", "새것"), ("argos-0009", "옛것뿐")]));
         assert!(problems.is_empty(), "{problems:?}");
         assert!(trouble.is_none(), "성한 읽기에 탈이 섰다 — {trouble:?}");
@@ -2205,7 +2220,7 @@ mod tests {
         std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"A\"\n", other.display().to_string()))
             .unwrap();
 
-        let Marks { seen, problems, trouble } = read(&cfg, &mine, &BTreeMap::new());
+        let Marks { seen, problems, trouble, pending: _ } = read(&cfg, &mine, &BTreeMap::new());
         assert!(seen.is_empty(), "남의 읽음을 들었다 — {seen:?}");
         assert_eq!(problems.len(), 1, "{problems:?}");
         // 사람이 고쳐야 같아지는 탈이다 — 다시 읽어도 같으니 `Broken` 이다(`Reading` 이면 걸음마다 다시 읽는다).

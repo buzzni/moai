@@ -2301,8 +2301,14 @@ impl App {
         // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
         // 안 바꿔 표식으로는 영영 못 벗어난다 — 그래서 표식은 올리고 시계로 다시 본다
         // ([`App::follow_read`]). 깨진 것·남의 것은 사람이 고쳐야 같아지고 고치면 파일이 바뀐다.
-        site.read_tried.saw(marks.trouble);
-        if marks.trouble.map(crate::user_config::Trouble::again) != Some(crate::user_config::Again::Step) {
+        // **대기 자리를 못 든 것도 다시 볼 까닭이다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이
+        // 있다는 뜻이라, 못 읽은 판은 이 화면이 도장을 덜 든 것이다 — 떨어뜨리던 판은 권한으로 못 읽는
+        // 대기 자리를 "줄 하나가 이상하다" 로 대고 시계 되읽기도 안 걸어, `chmod` 뒤에도 그 도장이
+        // 다음 쓰기가 표를 움직일 때까지 [NEW] 로 섰다. **표를 들일지는 여기에 안 매단다** — 지금
+        // 자리의 표는 성하니 그대로 든다(아래 `marks.trouble.is_none()`).
+        let why = marks.trouble.or(marks.pending);
+        site.read_tried.saw(why);
+        if why.map(crate::user_config::Trouble::again) != Some(crate::user_config::Again::Step) {
             site.read_stamp = Some(stamp);
         }
         // **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 못 들었으면 들고 있던 것을 둔다 — 빈 표를
@@ -2312,7 +2318,7 @@ impl App {
         //
         // **잠깐 못 읽은 것은 말하지 않는다** — 다음 걸음에 다시 읽으므로, 말하면 걸음마다 같은 줄이
         // 서서 사람이 방금 띄운 말을 덮는다(`follow_config` 도 그 갈래에서는 조용히 다시 읽는다).
-        let told = match marks.trouble {
+        let told = match why {
             // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
             // 있지만(`App::held`·`Layer::problems`) 여기 낼 것은 스치는 알림 한 줄뿐이다.
@@ -6246,6 +6252,66 @@ mod tests {
             Some(std::time::Instant::now().checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "시계가 돌았는데 다시 안 읽었다");
+        assert_eq!(a.site.read_tried.trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **못 읽는 대기 자리도 시계가 다시 본다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이 있다는
+    /// 뜻이라 못 읽은 판은 이 화면이 도장을 덜 든 것인데, 그 탈이 떨어지던 판은 그것을 "읽음 표의 줄
+    /// 하나가 이상하다" 로 대고 시계 되읽기도 안 걸었다 — `chmod` 은 고친 때도 길이도 안 바꾸니, 그
+    /// 도장은 다음 쓰기가 표를 움직일 때까지 [NEW] 로 섰다.
+    ///
+    /// **지금 자리의 표는 그대로 든다** — 버리면 못 읽는 파일 하나가 그 프로젝트를 통째로 [NEW] 로
+    /// 세운다. 그 둘을 한 판에서 잰다.
+    #[test]
+    #[cfg(unix)]
+    fn a_pending_place_we_cannot_read_is_retried_by_the_clock_too() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("read-marks-clock-spool");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut a = app();
+        for i in &mut a.site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.me = Some("레이븐 (raven@example.com)".into());
+
+        let mark = |id: &str| {
+            let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
+            format!("\"{id}\" = \"{stamp}\"\n")
+        };
+        let (nine, two) = (mark("argos-0009"), mark("argos-0002"));
+        let place = crate::read_marks::place_of(&config, &root);
+        std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+        let head = format!("path = {:?}\n\n[read]\n", root.display().to_string());
+        std::fs::write(&place.at, format!("{head}{nine}")).unwrap();
+        // 떨어진 판이 남긴 대기 자리 — 그 안의 도장을 권한이 막는다.
+        let spool = place.pending.clone().expect("성한 판에는 대기 자리가 선다");
+        std::fs::write(&spool, format!("{head}{two}")).unwrap();
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&spool).is_ok() {
+            // 권한이 안 먹는 자리(root)에서는 흉내 낼 수 없다.
+            std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return;
+        }
+        a.load_read();
+        assert_eq!(
+            a.site.read_tried.trouble,
+            Some(crate::user_config::Trouble::Unreadable),
+            "못 읽는 대기 자리를 줄 하나 탈로 읽었다"
+        );
+        assert!(!a.site.unread.contains("argos-0009"), "대기 자리 하나 때문에 지금 자리의 표를 버렸다");
+        assert!(a.site.unread.contains("argos-0002"), "시험의 전제 — 대기 자리의 도장은 아직 안 닿았다");
+
+        // 권한만 되돌린다 — 파일은 그대로라 표식도 그대로다. 시계가 돌아야 다시 본다.
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o644)).unwrap();
+        a.site.read_tried.at =
+            Some(std::time::Instant::now().checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        a.follow();
+        assert!(!a.site.unread.contains("argos-0002"), "시계가 돌았는데 대기 자리를 다시 안 읽었다");
         assert_eq!(a.site.read_tried.trouble, None, "읽혔는데 탈이 남았다");
     }
 
