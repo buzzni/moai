@@ -14481,6 +14481,11 @@ fn the_cross_version_smoke_script_still_runs() {
 /// 도움말과 갈라지는데, **갈라진 레퍼런스는 없는 것보다 나쁘다** — 읽는 사람이
 /// 그것을 믿고 친다. 그래서 글은 `--help` 한 곳에만 있고 그 파일은 옮겨 적은
 /// 것이며, 여기서 다시 지어 견준다.
+///
+/// **담는 것을 그대로 둔다**(moai-io79, 2026-09-21 사용자 결정). 도움말 한 글자가 파일을
+/// 통째로 다시 쓰므로 여기 서는 diff 는 1,750줄짜리가 되는데, 저장소만 보고 명령을 읽을 수
+/// 있는 값이 그 크기보다 크다고 보았다. 대신 큰 diff 가 정상이라는 줄을 파일 머리에 적어
+/// (`scripts/gen-cli-docs.sh` 의 머리글), 다음 사람이 그것을 사고로 안 읽게 한다.
 #[cfg(unix)]
 #[test]
 fn the_cli_reference_matches_the_help() {
@@ -14534,6 +14539,36 @@ fn what_the_receiver_curls_is_main() {
             let branch = rest.split('/').next().unwrap_or("");
             assert_eq!(branch, "main", "{name}:{} 가 `{branch}` 를 가리킨다 — 받는 사람은 main 을 밟는다", n + 1);
         }
+    }
+}
+
+/// `install.sh` 의 플랫폼 표와 `release.yml` 의 빌드 행렬은 같은 것을 두 번 적는다
+/// (moai-io79). 한쪽에 칸을 더하면 다른 쪽이 조용히 낡고, 받는 사람은 없는 파일을 받는다.
+///
+/// **베낌을 없애는 대신 여기서 맨다**(2026-09-21 사용자 결정). 워크플로가 셸 스크립트의
+/// 출력으로 행렬을 지으면 진실은 하나가 되지만 `release.yml` 만 보고는 무엇을 짓는지 못
+/// 읽는다 — 두 파일은 혼자 읽히고, 갈라지는 순간 이 시험이 이름을 대며 붉어진다.
+/// 못 내는 기계에 대는 말도 같은 이름을 든 셋째 자리라 함께 본다.
+#[cfg(unix)]
+#[test]
+fn the_install_table_and_the_release_matrix_name_the_same_targets() {
+    let yml = std::fs::read_to_string(at_root(".github/workflows/release.yml")).unwrap();
+    let matrix: std::collections::BTreeSet<String> =
+        yml.lines().filter_map(|l| l.trim().strip_prefix("- target:")).map(|t| t.trim().to_owned()).collect();
+    // 꼴이 바뀌어 아무것도 못 읽으면 **빈 것끼리 같다**로 지나간다 — 그때는 이 시험도 같이 고친다.
+    assert!(!matrix.is_empty(), "release.yml 에서 빌드 행렬을 못 읽었다 — 행렬의 꼴이 바뀌었으면 이 시험도 같이 고친다");
+
+    let sh = std::fs::read_to_string(at_root("install.sh")).unwrap();
+    let table: std::collections::BTreeSet<String> = sh
+        .lines()
+        .filter_map(|l| l.split_once(") target="))
+        .map(|(_, rest)| rest.trim().trim_end_matches(";;").trim().to_owned())
+        .collect();
+    assert_eq!(table, matrix, "install.sh 의 플랫폼 표와 release.yml 의 빌드 행렬이 갈라졌다");
+
+    let said = sh.lines().find(|l| l.contains("이 기계에 맞는 판이 없다")).expect("못 내는 기계에 대는 말이 없다");
+    for target in &matrix {
+        assert!(said.contains(target.as_str()), "못 내는 기계에 대는 말이 {target} 을 안 댄다\n{said}");
     }
 }
 
