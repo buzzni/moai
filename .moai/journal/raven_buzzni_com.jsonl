@@ -235,3 +235,9 @@
 {"ts":"2026-09-21T17:33:32Z","id":"moai-pcyf","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"헤더 번호 칸의 폭 셈이 재는 쪽과 그리는 쪽으로 갈린다"}
 {"ts":"2026-09-21T17:33:32Z","id":"moai-y7lv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"로고 글리프가 ambiguous 폭이라 두 칸으로 그리는 터미널에서 헤더가 어긋난다"}
 {"ts":"2026-09-21T17:33:32Z","id":"moai-d3ya","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 화면 폭과 배치 결정"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-uafe","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai import --from beads-jsonl` — beads·옛 moai 스냅샷을 옮겨 오는 단방향 가져오기"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-5org","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"집기 기록의 남은 모서리 — 접힌 뒤 기록 없는 제 집기, 여러 사용자의 /tmp, 벽시계, separate-git-dir"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-b9xk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"자리 판정의 남은 모서리 — show --worktree 의 겹쳐 보기 판정, ↻ 시각, 사라졌다 돌아온 워크트리, 다섯 자리의 조립"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-8kom","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 템플릿의 단계 사이 의존 — 계획 마크다운에 막음 문법(needs → blocked_by)을 두고 draft::render 도 되뽑는다"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-maav","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"설정 칸·색 없는 시작 칸에서 글에 적힌 스피너 글자로 깬다"}
+{"ts":"2026-09-21T17:36:38Z","id":"moai-rhxy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"beads 에서 빌려 올 표면"}
