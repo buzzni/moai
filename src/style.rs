@@ -162,38 +162,25 @@ pub fn glyph(status: &str) -> &'static str {
     }
 }
 
-/// 미룬 줄의 표식 — `‖`(U+2016 DOUBLE VERTICAL LINE), moai-pkvw.
-///
-/// **`⏸`(U+23F8)를 안 쓴다.** 그쪽은 이모지 표현이 붙어 터미널·폰트에 따라 색이 입고 두 칸으로
-/// 그려진다 — 스피너 두 칸이 표를 어긋낸 `moai-prp5` 의 자리가 그대로 다시 선다. `‖` 는 이모지
-/// 표현이 없어 어디서나 글자로만 서고, 폭 분류가 [`glyph`] 의 `▸`(U+25B8)와 같은 East Asian
-/// Ambiguous 라 새 위험이 안 는다. 모양도 일시정지 두 막대 그대로다.
-pub const DEFERRED: &str = "‖";
-
-/// idea 줄의 표식 — `◇`(U+25C7 WHITE DIAMOND), moai-h06a.
-///
-/// 빈 속이 뜻과 맞는다 — idea 는 아직 일이 아니다. 속이 찬 `▸`·`✓` 와 한눈에 갈리고 `○`(모르는
-/// 칸)와도 모양이 갈린다. 고른 잣대는 [`DEFERRED`] 와 같다.
-pub const IDEA: &str = "◇";
-
-/// 칸 글리프 **곁에** 서는 표식(moai-pkvw·moai-h06a). 대신 서지 않는다 — 축이 셋이라
-/// (`kind`·`status`·`deferred_at`) 칸이 진 뜻을 가리면 그 줄이 원래 어느 칸이었는지를 잃는다.
-/// 미룬 idea 는 둘이 함께 선다.
-///
-/// **낱말을 걷지 않는다.** "색이 혼자 뜻을 지지 않는다" 가 글리프에도 서서, 목록 꼬리의
-/// `status.put_off` 와 상세·`--json` 의 낱말은 그대로 남고 이것은 거기 더해진다.
-///
-/// 차례는 축의 차례다 — 칸(글리프) · 종류(`◇`) · 미룸(`‖`).
-pub fn marks(idea: bool, deferred: bool) -> String {
-    let mut out = String::new();
-    if idea {
-        out.push_str(IDEA);
-    }
-    if deferred {
-        out.push_str(DEFERRED);
-    }
-    out
-}
+// **줄머리에 서던 표식 둘(idea `◇`·미룸 `‖`)을 걷었다**(moai-nb6w, 사용자 결정 2026-09-21).
+//
+// 축 셋(`kind`·`status`·`deferred_at`)을 글리프로 다 세우려던 것인데, 표식이 하나만 붙어도
+// 줄머리가 한 칸 길어진다 — 없는 줄은 두 칸(` ·`), idea 는 세 칸(` ·◇`), 미룬 idea 는 네
+// 칸이다. 그래서 한 목록 안에서 트리 선이 줄마다 다른 자리에 섰다.
+//
+//     moai-3y1p   ·◇ ├─ init 이 .gitattributes 의 …
+//     moai-7cpd   ·◇‖ └─ Regression-of 표식을 세어 …
+//
+// 자리를 옮기는 것으로는 안 된다 — 미룸을 스피너 자리로 보내도 `◇` 가 남아 같은 어긋남이
+// 그대로 선다. 남은 것은 칸 글리프 하나고, 그래서 **줄머리는 늘 두 칸이다**.
+//
+// **되돌리려면 줄머리 폭을 먼저 푼다.** 표식을 다시 세우는 일은 글자 하나를 더하는 일이
+// 아니라, 폭이 줄마다 달라도 트리 선이 안 어긋나게 하는 일이다. 그 길을 안 풀고 상수만
+// 되살리면 위의 화면이 그대로 돌아온다. 원래 요구(미룬 줄과 idea 줄을 목록에서 가른다)는
+// 아직 서 있다 — moai-pkvw·moai-h06a 가 `todo` 로 그것을 들고 있다.
+//
+// **낱말은 그대로다.** "색이 혼자 뜻을 지지 않는다" 를 지키는 것은 목록 꼬리의
+// `status.put_off` 와 상세·`--json` 의 낱말이고, 그것들은 표식과 따로 산다.
 
 /// 시작한 칸이 도는 걸음. ora 기본 세트를 그대로 옮겼다 — 검증된 것을
 /// 다시 재느니 그대로 가져온다.
@@ -271,32 +258,21 @@ mod tests {
         assert_eq!(glyph("설정으로_더한_칸"), "○");
     }
 
-    /// **표식과 칸 글리프는 한 칸씩이고 글자 하나씩이다**(moai-fgyg). 표가 어긋나는 자리가 여기다 —
+    /// **칸 글리프는 한 칸씩이고 글자 하나씩이다**(moai-fgyg). 표가 어긋나는 자리가 여기다 —
     /// `moai-prp5` 에서 스피너 두 칸이 목록을 어긋낸 그 자리다.
     ///
-    /// **코드포인트를 글자로 못박는다.** 폭은 글자가 정하므로, 모양이 비슷하다고 `⏸`(U+23F8)·
-    /// `⏯`(U+23EF) 로 바꾸는 순간 이모지 표현이 붙어 터미널에 따라 두 칸으로 그려진다 — 그것이
-    /// `‖`(U+2016)·`◇`(U+25C7)를 고른 까닭이라, 바꾸려면 이 줄을 먼저 지나야 한다.
+    /// **코드포인트를 글자로 못박는다.** 폭은 글자가 정하므로, 모양이 비슷하다고 이모지 표현이
+    /// 붙은 글자로 바꾸는 순간 터미널에 따라 두 칸으로 그려진다.
+    ///
+    /// 줄머리에 서던 표식 둘은 걷었다(moai-nb6w) — 까닭은 이 파일 위쪽에 있다. 되살릴 때 이 시험이
+    /// 재던 것(글자 하나·한 칸)은 그때도 서야 하지만, 먼저 풀 것은 **줄머리 폭**이다.
     #[test]
-    fn the_marks_and_the_column_glyphs_are_one_column_each() {
-        assert_eq!(DEFERRED, "\u{2016}", "미룸 표식이 U+2016 이 아니다");
-        assert_eq!(IDEA, "\u{25C7}", "idea 표식이 U+25C7 이 아니다");
-        let all = [DEFERRED, IDEA, glyph("todo"), glyph("in_progress"), glyph("review"), glyph("done"), glyph("?")];
-        for g in all {
+    fn the_column_glyphs_are_one_column_each() {
+        for st in ["todo", "in_progress", "review", "done", "?"] {
+            let g = glyph(st);
             assert_eq!(g.chars().count(), 1, "{g:?} 가 글자 하나가 아니다");
             assert_eq!(crate::text::width(g), 1, "{g:?} 가 한 칸이 아니다");
         }
-        // 표식은 **겹쳐 선다** — 미룬 idea 는 둘이 함께 서고 그때가 가장 넓다.
-        assert_eq!(crate::text::width(&marks(false, false)), 0);
-        assert_eq!(crate::text::width(&marks(true, false)), 1);
-        assert_eq!(crate::text::width(&marks(false, true)), 1);
-        assert_eq!(crate::text::width(&marks(true, true)), 2);
-        // 차례는 축의 차례다 — 종류가 먼저, 미룸이 뒤.
-        assert_eq!(marks(true, true), format!("{IDEA}{DEFERRED}"));
-        // 표식이 칸 글리프와 겹치면 어느 쪽이 무엇인지 못 가린다.
-        let columns: std::collections::BTreeSet<&str> =
-            ["todo", "in_progress", "review", "done", "모르는 칸"].iter().map(|s| glyph(s)).collect();
-        assert!(!columns.contains(DEFERRED) && !columns.contains(IDEA), "표식이 칸 글리프와 같은 글자다");
     }
 
     /// 프레임이 겹치지 않고 한 바퀴 돌면 처음으로 돌아온다. 어느 칸이 도는지는

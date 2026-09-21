@@ -198,9 +198,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     //
     // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다.
-    // **표식은 물은 것을 따른다**(moai-pkvw·moai-h06a) — 미룬 것만·idea 만 물었으면 줄마다 같은
-    // 표식이 붙어 봐야 자리만 먹는다. 결과의 내용으로 정하지 않는 까닭은 [`view::Asked`] 에 있다.
-    let asked = view::Asked { deferred: filter.deferred.is_some(), idea: filter.kind == Some(model::Kind::Idea) };
+    // **꼬리의 미룸 낱말은 물은 것을 따른다**(moai-pkvw) — 미룬 것만 물었으면 줄마다 같은 낱말이
+    // 붙어 봐야 자리만 먹는다. 결과의 내용으로 정하지 않는 까닭은 [`view::Asked`] 에 있다.
+    let asked = view::Asked { deferred: filter.deferred.is_some() };
     let wide = Filter { all: true, ideas: true, ..filter.clone() };
     // **소속 지도는 한 벌이다**(moai-g0zx) — 거름망과 트리의 색인·에픽 굴림이 저마다 지으면
     // `groups` 가 한 명령에 세 벌 돈다. 지도를 빌려 쓰는 둘을 먼저 짓고, 그것을 제 필드로 들고
