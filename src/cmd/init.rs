@@ -1156,6 +1156,19 @@ mod tests {
     /// 답해 알림이 영영 안 선다. 글로 패턴을 푸는 규칙을 여기 또 쓰면 git 과 갈리고 갈리는 쪽은
     /// 늘 이쪽이라(`declared` 가 `check-attr` 에게 묻는 까닭과 같다), 그 갈래를 실제로 재는 자는
     /// 임시 저장소에 이 글을 깔고 `status` 를 부르는 `tests/cli.rs` 쪽이다.
+    #[test]
+    fn the_declared_path_is_the_one_init_writes() {
+        let path = crate::cmd::merge_driver::SNAPSHOT;
+        let rule = GITATTRIBUTES
+            .lines()
+            .rfind(|l| l.strip_prefix(path).is_some_and(|rest| rest.starts_with(char::is_whitespace)))
+            .unwrap_or_else(|| panic!("{path} 에 거는 줄이 없다\n{GITATTRIBUTES}"));
+        assert!(
+            rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
+            "그 줄이 드라이버를 안 건다 — {rule}"
+        );
+    }
+
     /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에
     /// 대한 답이라 그대로 서고, 둘째 줄이 **이 셸**의 답을 댄다 — 한 줄만 두던 판은 `MOAI_HERE=1`
     /// 인 셸에서 "여기 안 선다, 주 체크아웃에서 쳐라" 를 냈는데 같은 셸의 `moai init` 은 여기 심고
@@ -1183,19 +1196,6 @@ mod tests {
         // `-C` 없이 부른 판은 그 자리도 없다 — 붙는 규칙은 `cli_hint` 하나가 쥔다.
         let here = check_worktree(crate::i18n::Lang::En, main, None, true);
         assert!(here[1].contains("MOAI_HERE=1 moai init"), "맨 명령을 안 댔다 — {}", here[1]);
-    }
-
-    #[test]
-    fn the_declared_path_is_the_one_init_writes() {
-        let path = crate::cmd::merge_driver::SNAPSHOT;
-        let rule = GITATTRIBUTES
-            .lines()
-            .rfind(|l| l.strip_prefix(path).is_some_and(|rest| rest.starts_with(char::is_whitespace)))
-            .unwrap_or_else(|| panic!("{path} 에 거는 줄이 없다\n{GITATTRIBUTES}"));
-        assert!(
-            rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
-            "그 줄이 드라이버를 안 건다 — {rule}"
-        );
     }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
