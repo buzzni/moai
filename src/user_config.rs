@@ -966,6 +966,7 @@ impl Doc {
             fields: look_words(t, FIELDS, &mut problems),
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
+            detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
         // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
@@ -1024,6 +1025,7 @@ impl Doc {
         // `saved` 가 그것을 들어 둘이 같아진다 — 그때부터 이 키는 안 본다.
         let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
+        let mut detail_at = base.detail_at != new.detail_at;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
         // 적어 둔 것인지 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다).
@@ -1065,6 +1067,7 @@ impl Doc {
         odd(&[FIELDS], true, &mut fields);
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
+        odd(&[DETAIL_AT], false, &mut detail_at);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
         let mut left = String::new();
@@ -1091,6 +1094,9 @@ impl Doc {
         }
         if detail {
             changed |= put_value(t, DETAIL, new.detail.map(toml_edit::Value::from), &mut left);
+        }
+        if detail_at {
+            changed |= put_value(t, DETAIL_AT, new.detail_at.as_deref().map(toml_edit::Value::from), &mut left);
         }
         self.dirty |= changed;
         // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij).
@@ -1124,6 +1130,10 @@ const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
+/// 상세 칸이 서는 자리(moai-2g7d) — [`DETAIL`] 과 **따로다**. 그쪽은 보이나 마나고 이것은 어디에
+/// 서는가다. 한 키에 둘을 담으면(`detail = "right"` 로 켬까지) 옛 줄(`detail = true`)이 파싱에서
+/// 떨어져 사람이 끈 상세가 도로 켜진다.
+const DETAIL_AT: &str = "detail_at";
 const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
@@ -1135,6 +1145,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// hidden = ["done"]
 /// hide_deferred = false
 /// detail = true
+/// detail_at = "right"
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
@@ -1168,6 +1179,10 @@ pub struct Look {
     pub fields_known: Option<Vec<String>>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu).
     pub detail: Option<bool>,
+    /// 상세 칸이 서는 자리 — `right`·`bottom`·`left`·`top`(moai-2g7d). **낱말로 든다**: 무슨 낱말이
+    /// 있는지는 탐색기가 안다(`tui::view::DetailAt`). 모르는 낱말은 탐색기가 처음값으로 세우고
+    /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
+    pub detail_at: Option<String>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
@@ -2596,6 +2611,7 @@ mod tests {
             fields: Some(vec!["id".into(), "assignee".into()]),
             fields_known: None,
             detail: Some(false),
+            detail_at: Some("bottom".into()),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -2807,6 +2823,7 @@ mod tests {
             fields: Some(vec!["id".into()]),
             fields_known: None,
             detail: Some(true),
+            detail_at: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };

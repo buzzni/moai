@@ -267,6 +267,7 @@ fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
         "SPC s" => say(lang, "tui.group.sort"),
         "SPC c" => say(lang, "tui.group.cell"),
         "SPC m" => say(lang, "tui.group.read"),
+        "SPC o" => say(lang, "tui.group.options"),
         _ => "…",
     }
 }
@@ -332,9 +333,14 @@ mod tests {
         assert!(open(&ch));
         assert_eq!(title(ch.held()), "SPC");
         let root = entries(ch.held(), &inside(), &[]);
-        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m"]);
+        // **`+옵션` 은 끝이다**(moai-2g7d) — 표의 차례가 곧 메뉴의 차례고, 가장 드물게 누르는 묶음을
+        // 끝에 둔다. 보기·정렬·열이 *무엇이 서는가* 라면 옵션은 *선 것을 이 사람에게 어떻게 그릴까* 다.
+        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m", "o"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
-        assert_eq!(what, ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+보기", "+정렬", "+열", "+읽음"]);
+        assert_eq!(
+            what,
+            ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+보기", "+정렬", "+열", "+읽음", "+옵션"]
+        );
     }
 
     /// **칸 토글은 설정의 칸 이름을 번호에 붙이고, 있는 칸 수만큼만 선다**(moai-fmv5). 숨김은
@@ -556,7 +562,9 @@ mod tests {
         let root_layer = entries(&[k(' ')], &layer(), &[]);
         // 층에서는 읽음(`SPC m`)도 안 선다(moai-j038.vna) — 층의 줄은 프로젝트라 읽을 줄이 없고, 서면
         // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
-        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "v"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
+        // 옵션(`o`)은 층에서도 선다 — 상세 칸은 층에도 있고, 그리는 자리는 프로젝트의 것이 아니라
+        // 보는 사람의 것이다.
+        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");

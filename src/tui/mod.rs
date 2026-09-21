@@ -222,13 +222,21 @@ impl Pane {
     }
 
     /// 한 칸 왼쪽·오른쪽. **끝에서는 제자리다** — vi 의 `Ctrl-w h`·`Ctrl-w l` 이 그렇다.
-    pub fn step(self, side: keys::Side) -> Pane {
-        let at = self.at();
-        let to = match side {
-            keys::Side::Left => at.saturating_sub(1),
-            keys::Side::Right => (at + 1).min(Pane::ALL.len() - 1),
-        };
-        Pane::ALL[to]
+    ///
+    /// **그림을 따라간다**(moai-2g7d). 상세가 왼쪽에 서면 `Ctrl-w h` 는 상세로 간다 — 칸의 차례를
+    /// 코드에 박아 두면 자리를 돌린 순간 `h` 가 오른쪽으로 가서, 손에 익은 키가 화면과 거꾸로 선다.
+    ///
+    /// **위아래로 갈랐으면 좌우 이웃이 없다** — vim 그대로 제자리다. 그때 칸을 옮기는 것은
+    /// `Ctrl-w w`(`Browse::FocusNext`)다.
+    pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
+        if at.vertical() {
+            return self;
+        }
+        let (left, right) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
+        match side {
+            keys::Side::Left => left,
+            keys::Side::Right => right,
+        }
     }
 
     /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다.
@@ -798,6 +806,11 @@ pub struct App {
     pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
+    /// 상세 칸이 **어디에** 서나 — `right`·`bottom`·`left`·`top`(moai-2g7d). [`App::detail_open`] 과
+    /// 따로 든다: 보이나 마나와 어디에 서는가는 다른 물음이고, 한 값에 담으면 자리를 고르는 것이
+    /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
+    /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
+    pub detail_at: view::DetailAt,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
     /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
@@ -1239,6 +1252,7 @@ impl App {
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
+            detail_at: view::DetailAt::default(),
             me: None,
             saved: Default::default(),
             list: Scroll::default(),
@@ -2192,6 +2206,12 @@ impl App {
                 self.focus = Pane::Explorer;
             }
         }
+        // **모르는 낱말은 처음값 그대로 둔다**(moai-2g7d) — 읽기는 관대하다. 차례(`sort`)가 모르는
+        // 낱말에서 방향을 버리는 것과 같은 결이고, 파일의 그 줄은 이 세션이 자리를 고르기 전까지
+        // 안 건드린다.
+        if let Some(at) = look.detail_at.as_deref().and_then(view::DetailAt::named) {
+            self.detail_at = at;
+        }
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -2207,6 +2227,7 @@ impl App {
             // 이 바이너리가 아는 열 전부 — 다음에 읽는 쪽이 "안 적힌 것" 을 가를 자다.
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
+            detail_at: Some(self.detail_at.name().to_string()),
         }
     }
 
@@ -3467,7 +3488,7 @@ impl App {
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
-            B::Focus(side) => self.focus = self.focus.step(side),
+            B::Focus(side) => self.focus = self.focus.step(side, self.detail_at),
             B::Step(m) => self.step(m, rows.len()),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
@@ -3582,6 +3603,12 @@ impl App {
                 }
                 self.save_look();
             }
+            // **자리만 돌린다 — 켜지도 끄지도 않는다**(moai-e7r3). 숨긴 상세의 자리를 돌리는 길은
+            // 아예 막혀 있다(`Browse::enabled`). 메뉴는 열린 채로 남아 눌러 보며 자리를 맞춘다.
+            B::DetailAt => {
+                self.detail_at = self.detail_at.next();
+                self.save_look();
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -3632,13 +3659,14 @@ impl App {
                 .filter(|(_, s)| self.view.hides(s))
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             deferred_hidden: self.view.hide_deferred,
+            detail_at: self.detail_at,
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
             next_pane: self.focus.next().word(self.site.lang),
             prev_pane: self.focus.prev().word(self.site.lang),
-            left_pane: self.focus.step(keys::Side::Left).word(self.site.lang),
-            right_pane: self.focus.step(keys::Side::Right).word(self.site.lang),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang),
         }
     }
 
@@ -7727,6 +7755,64 @@ mod tests {
         );
     }
 
+    /// **`SPC o d` 는 자리를 돌리고 메뉴는 안 닫힌다**(moai-e7r3, 사용자 결정) — `right → bottom →
+    /// left → top → right`. `SPC v` 의 토글과 같은 결이다: 눌러 보며 맞추는 동작이라 한 번 받고
+    /// 닫으면 맞출 때마다 메뉴를 다시 열어야 한다. 나가는 것은 `ESC` 나 연 키 `SPC` 다.
+    ///
+    /// **켜지도 끄지도 않는다** — 상세가 숨어 있으면 이 키는 아예 안 돈다(`Browse::enabled`).
+    /// 켜는 것은 `SPC v p` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
+    #[test]
+    fn spc_o_d_turns_the_detail_pane_round_without_closing_the_menu() {
+        use view::DetailAt;
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        assert_eq!(a.detail_at, DetailAt::Right, "처음 자리가 오른쪽이 아니다");
+
+        a.hit("SPC o");
+        for want in [DetailAt::Bottom, DetailAt::Left, DetailAt::Top, DetailAt::Right] {
+            a.hit("d");
+            assert_eq!(a.detail_at, want, "자리가 차례대로 안 돌았다");
+            assert!(super::menu::open(&a.chord), "자리를 돌렸는데 메뉴가 닫혔다");
+            assert_eq!(super::menu::title(a.chord.held()), "SPC o", "메뉴가 층을 옮겼다");
+        }
+        a.hit("Esc");
+        assert!(!super::menu::open(&a.chord), "Esc 가 메뉴를 안 닫았다");
+        assert!(a.detail_open, "자리를 돌리는 것이 상세를 껐다");
+
+        // **칸 옮기기가 그림을 따라간다**(moai-2g7d) — 상세가 왼쪽이면 `Ctrl-w h` 가 상세로 간다.
+        // 칸의 차례를 코드에 박아 두면 자리를 돌린 순간 손에 익은 키가 화면과 거꾸로 선다.
+        for (at, left, right) in
+            [(DetailAt::Right, Pane::Explorer, Pane::Detail), (DetailAt::Left, Pane::Detail, Pane::Explorer)]
+        {
+            a.detail_at = at;
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Left, at), left, "{at:?} 에서 Ctrl-w h 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Right, at), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
+            }
+        }
+        // 위아래로 갈랐으면 좌우 이웃이 없다 — vim 그대로 제자리고, 옮기는 것은 `Ctrl-w w` 다.
+        for at in [DetailAt::Top, DetailAt::Bottom] {
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Left, at), from, "{at:?} 에서 Ctrl-w h 가 움직였다");
+                assert_eq!(from.step(keys::Side::Right, at), from, "{at:?} 에서 Ctrl-w l 이 움직였다");
+                assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
+            }
+        }
+        a.detail_at = DetailAt::Right;
+
+        // 연 키도 닫는다 — ESC 와 같은 자리다.
+        a.hit("SPC o");
+        a.hit("SPC");
+        assert!(!super::menu::open(&a.chord), "SPC 가 메뉴를 안 닫았다");
+
+        // **숨긴 상세의 자리는 안 돈다** — 눌러도 아무 일이 없는 키는 메뉴에도 안 선다.
+        a.hit("SPC v p Esc");
+        assert!(!a.detail_open);
+        let before = a.detail_at;
+        a.hit("SPC o d Esc");
+        assert_eq!(a.detail_at, before, "숨긴 상세의 자리가 돌았다");
+        assert!(!a.detail_open, "자리 키가 상세를 켰다");
+    }
+
     /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).
     #[test]
     fn the_look_is_saved_on_each_toggle_and_read_by_the_next_run() {
@@ -7740,9 +7826,12 @@ mod tests {
         a.hit("SPC s u Esc");
         a.hit("SPC c a Esc");
         a.hit("SPC c i Esc");
+        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v p`)과 **따로** 적힌다.
+        a.hit("SPC o d Esc");
         a.hit("SPC v p Esc");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
+        assert!(text.contains("detail_at = \"bottom\""), "상세 칸의 자리가 설정에 안 적혔다 — {text}");
 
         let mut b = App::new(Vec::new(), cfg(), Path::new());
         b.user_config = Some(user.clone());
@@ -7753,6 +7842,8 @@ mod tests {
             "다음 실행이 다른 보기로 떴다"
         );
         assert!(!b.detail_open && !a.detail_open, "숨긴 상세 칸이 다음 실행에 안 이어졌다");
+        assert_eq!(b.detail_at, a.detail_at, "고른 상세 칸의 자리가 다음 실행에 안 이어졌다");
+        assert_eq!(b.detail_at, view::DetailAt::Bottom);
         assert_eq!(b.notice, None);
 
         // 모르는 낱말은 알리고 나머지는 입힌다. 모르는 차례의 방향은 우선순위에 입히지 않는다 — 아무도 안

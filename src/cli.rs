@@ -412,6 +412,9 @@ IDEA
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
+  Options — how this screen draws what stands, not which rows stand:
+    SPC o d  detail pane goes right, bottom, left, top — press again to turn
+             it. Whether it stands at all is SPC v p
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.

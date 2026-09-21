@@ -30,6 +30,19 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
 const LEFT: u16 = 55;
 
+/// 위아래로 가를 때 **목록**이 가져가는 높이(moai-l7e2). **[`LEFT`] 와 다른 자다** — 가로의 55%
+/// 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹는다. 상세는 한 줄이 한 줄이라 폭보다 적게
+/// 든다: id·제목·칸·날짜에 여남은 줄이면 서고, 목록은 줄이 많을수록 값이 는다.
+const ABOVE: u16 = 70;
+
+/// 위아래로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 넉 줄. 가로의 `Min(10)` 과 같은 자리고,
+/// 단위만 칸에서 줄로 바뀐다.
+const DETAIL_MIN_V: u16 = 6;
+
+/// 위아래로 갈랐을 때 **목록**의 바닥 — 테두리 둘과 줄 하나. [`super::menu::BODY_MIN`] 과 같은
+/// 꼴이다: 커서가 선 줄이 안 보이면 상세가 무엇에 대한 것인지를 잃는다.
+const LIST_MIN_V: u16 = 3;
+
 /// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
 
@@ -112,15 +125,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Constraint::Length(keys_h),
     ])
     .areas(area);
-    // **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다.
-    // 숨겼을 때 상세의 자리는 **없다**(`None`) — 폭 0 짜리 유령 칸을 몸통 오른쪽 끝 밖에 두면
-    // 그것이 자리인 줄 알고 그리는 코드가 언젠가 버퍼 밖에 대고 말없이 아무것도 안 그린다.
-    let (left, right) = if app.detail_open {
-        let [left, right] = Layout::horizontal([Constraint::Percentage(LEFT), Constraint::Min(10)]).areas(body);
-        (left, Some(right))
-    } else {
-        (body, None)
-    };
+    let (left, right) = split_body(body, app);
 
     // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
     // 들고 있다가 아래에서 스피너와 함께 센다.
@@ -820,6 +825,42 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 /// 표에서 한 번 집어 짧은 글 하나를 잇는 것뿐이라 그리는 걸음에 얹어도 된다.
 fn version_said(lang: Lang) -> String {
     format!("{} · {}", env!("CARGO_PKG_VERSION"), say(lang, "tui.version.unchecked"))
+}
+
+/// 몸통을 목록과 상세로 가른다 — `(목록, 상세)`.
+///
+/// **상세를 숨기면 목록이 폭을 다 쓴다**(moai-ymnu) — 빈 칸을 남겨 두면 숨긴 뜻이 없다. 숨겼을 때
+/// 상세의 자리는 **없다**(`None`): 폭 0 짜리 유령 칸을 몸통 끝 밖에 두면 그것이 자리인 줄 알고
+/// 그리는 코드가 언젠가 버퍼 밖에 대고 말없이 아무것도 안 그린다.
+///
+/// **자리는 사람이 고른다**(`SPC o d`, moai-2g7d) — `right`·`bottom`·`left`·`top`. 가르는 자가 둘이다:
+///
+/// - **가로는 폭, 세로는 높이다.** [`LEFT`] 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹으므로
+///   세로는 [`ABOVE`] 로 따로 잰다
+/// - **낮으면 세로로는 아예 안 연다**(moai-l7e2). 가로의 `Min(10)` 은 좁아도 두 칸이 서지만, 세로로
+///   눌린 목록은 커서가 선 줄조차 못 내 상세가 무엇에 대한 것인지를 잃는다. 그때는 숨긴 것과 같은
+///   답(`None`)을 내 목록이 몸통을 다 쓴다 — [`super::menu::BODY_MIN`] 이 격자를 접는 것과 같은 꼴이다
+///
+/// **자리를 맞바꿀 때 몫도 함께 따라간다**([`super::view::DetailAt::first`]) — 목록이 늘 큰
+/// 쪽이다. 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서 55%·70% 를 가져가, 자리를 한 번
+/// 돌렸을 뿐인데 목록이 반으로 준다.
+fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
+    if !app.detail_open {
+        return (body, None);
+    }
+    let at = app.detail_at;
+    let (share, least) = if at.vertical() { (ABOVE, DETAIL_MIN_V) } else { (LEFT, 10) };
+    if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
+        return (body, None);
+    }
+    // 앞에 서는 쪽이 첫 조각이다 — 목록의 몫(`share`)은 어느 쪽에 서든 목록을 따라간다.
+    let hold = if at.first() {
+        [Constraint::Min(least), Constraint::Percentage(share)]
+    } else {
+        [Constraint::Percentage(share), Constraint::Min(least)]
+    };
+    let [a, b] = if at.vertical() { Layout::vertical(hold).areas(body) } else { Layout::horizontal(hold).areas(body) };
+    if at.first() { (b, Some(a)) } else { (a, Some(b)) }
 }
 
 fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
@@ -3011,6 +3052,59 @@ pub(super) mod tests {
             text.contains(&format!("▸{} └─ 물려받은 멤버", style::DEFERRED)),
             "물려받은 미룸에 표식이 안 섰다\n{text}"
         );
+    }
+
+    /// **상세는 네 자리에 서고, 어디에 서든 목록이 큰 쪽이다**(moai-2g7d·moai-l7e2).
+    ///
+    /// 자리를 맞바꾸면서 몫까지 따라가야 한다 — 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서
+    /// 55%·70% 를 가져가, 자리를 한 번 돌렸을 뿐인데 목록이 반으로 준다.
+    ///
+    /// **가로와 세로는 다른 자다** — 폭의 55% 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹는다.
+    #[test]
+    fn the_detail_pane_stands_where_it_was_told_and_never_outgrows_the_list() {
+        use super::super::view::DetailAt;
+        let mut a = app();
+        let body = Rect::new(0, 0, 100, 40);
+        for at in DetailAt::ALL {
+            a.detail_at = at;
+            let (list, detail) = split_body(body, &a);
+            let detail = detail.unwrap_or_else(|| panic!("{at:?} 에서 상세의 자리가 없다"));
+            // 두 조각이 몸통을 남김 없이 채우고 겹치지 않는다.
+            assert_eq!(list.area() + detail.area(), body.area(), "{at:?} 에서 몸통에 빈 자리나 겹침이 생겼다");
+            assert!(list.area() > detail.area(), "{at:?} 에서 상세가 목록보다 넓다");
+            match at {
+                DetailAt::Right => assert!(detail.x > list.x && detail.y == list.y, "{at:?} {detail:?}"),
+                DetailAt::Left => assert!(detail.x < list.x && detail.y == list.y, "{at:?} {detail:?}"),
+                DetailAt::Bottom => assert!(detail.y > list.y && detail.x == list.x, "{at:?} {detail:?}"),
+                DetailAt::Top => assert!(detail.y < list.y && detail.x == list.x, "{at:?} {detail:?}"),
+            }
+        }
+
+        // **숨기면 자리가 아예 없다**(moai-ymnu) — 어느 자리를 골라 뒀든 그대로다.
+        a.detail_open = false;
+        for at in DetailAt::ALL {
+            a.detail_at = at;
+            assert_eq!(split_body(body, &a), (body, None), "{at:?} 에서 숨긴 상세가 자리를 먹었다");
+        }
+
+        // **낮으면 세로로는 안 연다**(moai-l7e2) — 눌린 목록은 커서가 선 줄조차 못 내, 상세가 무엇에
+        // 대한 것인지를 잃는다. 가로는 그 높이에서도 그대로 선다: 좁아지는 것은 폭이 아니다.
+        a.detail_open = true;
+        let low = Rect::new(0, 0, 100, LIST_MIN_V + DETAIL_MIN_V - 1);
+        for at in [DetailAt::Top, DetailAt::Bottom] {
+            a.detail_at = at;
+            assert_eq!(split_body(low, &a), (low, None), "{at:?} 가 낮은 창에서 접히지 않았다");
+        }
+        for at in [DetailAt::Left, DetailAt::Right] {
+            a.detail_at = at;
+            assert!(split_body(low, &a).1.is_some(), "{at:?} 가 높이 때문에 접혔다");
+        }
+        // 딱 바닥만큼이면 선다 — 문턱이 바닥 **미만**에 걸린다.
+        a.detail_at = DetailAt::Bottom;
+        let just = Rect::new(0, 0, 100, LIST_MIN_V + DETAIL_MIN_V);
+        let (list, detail) = split_body(just, &a);
+        let detail = detail.expect("바닥만큼인 창에서 접혔다");
+        assert!(list.height >= LIST_MIN_V && detail.height >= DETAIL_MIN_V, "{list:?} {detail:?}");
     }
 
     /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.
