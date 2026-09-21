@@ -693,7 +693,7 @@
   "invalid.milestone_in_milestone": "a milestone does not sit in another milestone — a milestone stands at the root. When creating one leave `--milestone` out; on a row already written, empty it with `moai edit {id} --milestone none`",
   "invalid.self_block": "it cannot block itself",
   "invalid.blocked_id": "blocked_by is not an id — {value}",
-  "report.epic_gone": "(epic not there)",
+  "report.epic_gone": "epic not there",
   "refuse.no_actor": "there is no telling who is doing this — the git user details are not there.",
   "refuse.word_name": "Name",
   "refuse.word_email": "email",

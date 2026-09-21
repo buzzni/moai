@@ -38,10 +38,24 @@ pub struct Roll {
     pub column: Option<String>,
 }
 
-/// 줄 → 그것이 속한 에픽의 제목 ([`epic_labels`]). 키는 **id 와 그 줄의 종류**다.
-pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
+/// 줄 → 그것이 속한 에픽 ([`epic_labels`]). 키는 **id 와 그 줄의 종류**다.
+pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), EpicLabel>;
 
-/// 줄 → 그것이 속한 에픽의 **제목**. 화면이 필요한 것은 id 가 아니라
+/// 한 줄이 속한 에픽 — 제목이거나, 적힌 id 의 줄이 없거나.
+///
+/// **말이 아니라 자료다**(moai-ivt9 의 결을 잇는다). 한때 못 찾은 것을 `report.epic_gone`
+/// 의 글로 여기서 지어 냈는데, 그 글이 제 괄호를 달고 있어 감싸는 쪽마다 표기가 갈렸다 —
+/// [`crate::view::prime`] 은 한 번 더 감싸 `((없는 에픽))` 을 냈고 `ready`·`list` 는 안
+/// 감쌌다. 표기를 정하는 자리는 그리는 쪽이고, 여기는 **찾았는가**만 말한다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EpicLabel {
+    /// 찾았다 — 그 에픽의 제목.
+    Named(String),
+    /// `epic` 은 적혔는데 그 id 의 줄이 이 파일에 없다.
+    Gone,
+}
+
+/// 줄 → 그것이 속한 에픽([`EpicLabel`]). 화면이 필요한 것은 id 가 아니라
 /// 제목이고, 소속 판정(`groups`)과 제목 찾기를 한 번에 끝내 둔다.
 ///
 /// **키에 종류를 싣는다.** `groups` 는 id 지도라 같은 id 의 뒷줄 — 그 줄의 종류로 —
@@ -50,15 +64,13 @@ pub type EpicLabels<'a> = BTreeMap<(&'a str, Kind), String>;
 /// 줄이 목록 칸에서만 멤버로 섰다(moai-b5lu). 뒷줄의 종류로 키를 짜면 가려진 줄은
 /// 저절로 못 찾고, 같은 종류의 쌍둥이는 전처럼 같은 칸을 받는다. 찾는 쪽은
 /// `(i.id, i.kind)` 로 묻는다.
-pub fn epic_labels(all: &[Issue], lang: crate::i18n::Lang) -> EpicLabels<'_> {
-    // **끊긴 참조의 낱말도 화면 말이다**(moai-ivt9) — 이 값은 목록 칸에 그대로 그려진다.
-    let gone = crate::i18n::say(lang, "report.epic_gone");
+pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
     groups(all)
         .into_iter()
         .filter_map(|(id, epic)| {
-            let title = by_id.get(epic).map_or(gone, |e| e.title.as_str());
-            by_id.get(id).map(|row| ((id, row.kind), title.to_string()))
+            let label = by_id.get(epic).map_or(EpicLabel::Gone, |e| EpicLabel::Named(e.title.clone()));
+            by_id.get(id).map(|row| ((id, row.kind), label))
         })
         .collect()
 }
@@ -2152,10 +2164,6 @@ fn group_for(kind: Kind, all: &[Issue]) -> BTreeMap<&str, &str> {
 pub fn rollup(issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     rollup_of(Kind::Epic, issues, cfg)
 }
-
-/// 시험이 쓰는 말 — 거절문의 낱말을 재는 자리가 돌리는 사람의 설정에 안 달리게 박아 둔다.
-#[cfg(test)]
-const TEST_LANG: crate::i18n::Lang = crate::i18n::Lang::Ko;
 
 /// [`rollup`] 과 같은 것. **이미 잰 지도를 받는다**([`Soil`]) — `moai show --tree` 는 바로 옆에서
 /// 거름망과 색인을 같은 지도로 짓는다(moai-g0zx).
@@ -6039,8 +6047,8 @@ mod tests {
         let mut held = make("argos-0001", Kind::Idea, "todo");
         held.epic = Some("argos-e001".into());
         let rows = [epic, bare, held];
-        let labels = epic_labels(&rows, TEST_LANG);
-        assert_eq!(labels.get(&("argos-0001", Kind::Idea)).map(String::as_str), Some("argos-e001 제목"));
+        let labels = epic_labels(&rows);
+        assert_eq!(labels.get(&("argos-0001", Kind::Idea)), Some(&EpicLabel::Named("argos-e001 제목".into())));
         assert_eq!(labels.get(&("argos-0001", Kind::Issue)), None, "가려진 줄이 쌍둥이 에픽을 달았다 — {labels:?}");
 
         // 앞줄 이슈는 에픽·마일스톤이 있고 뒷줄 생각은 없다 — 경고가 쌍둥이 값으로 세는 쪽.

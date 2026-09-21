@@ -102,8 +102,9 @@
 
 **같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기
 (`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어다. `ready`
-표의 에픽 칸에 서는 `(없는 에픽)` 은 `report::epic_labels` 가 `report.epic_gone` 으로
-짓는다 — 여기는 옮겼다(moai-ivt9). 그 밖의 화면
+표의 에픽 칸에 서는 `(없는 에픽)` 은 `report.epic_gone` 의 낱말이다 — 여기는 옮겼다
+(moai-ivt9). **괄호는 말묶음에 없다**(moai-snus) — `report::epic_labels` 는 찾았는가만
+값으로 내고(`report::EpicLabel`), 감싸는 표기는 그리는 쪽이 저마다 정한다. 그 밖의 화면
 (`show` 의 상세와 이력, `tui`)도 아직 한국어로 박혀 있다 — 한 낱말이 두 화면에 서면
 (`미룸`·`자식 없음`) 한쪽만 옮긴 동안은 같은 줄이 두 말로 보인다. 남은 자리는 트래커에 있다.
 
