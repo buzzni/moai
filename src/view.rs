@@ -2448,6 +2448,9 @@ pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> Strin
             (at, fill(say(lang, "sheet.not_ours"), &[("root", &root.display().to_string())]))
         }
         SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
+        // **어느 id 인지를 댄다** — 곁에 선 `Skipped` 는 그 줄을 대지만, 시킨 것 가운데 무엇이 안 적혔는지는
+        // 이 글만 안다(moai-l5ue).
+        SheetTrouble::Held { at, ids } => (at, fill(say(lang, "sheet.held"), &[("ids", &ids.join(", "))])),
         SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
         // 막힌 id 가 없으면 파일을 다 못 읽은 것이다 — 그 까닭은 같은 판에 함께 실린 줄이 댄다.
         SheetTrouble::SpoolKept { at, held } if held.is_empty() => (at, say(lang, "sheet.spool_kept").to_string()),
@@ -2472,23 +2475,35 @@ fn skipped(lang: Lang, why: &crate::read_marks::Skipped) -> String {
 /// 읽음 표에 **안 쓰고 멈춘** 까닭의 글([`crate::read_marks::SheetRefusal`], moai-rtji). 파일은
 /// `read_marks::update` 가 준다 — 그 자리를 아는 것이 거기 하나라서다.
 ///
-/// 손으로 적은 자리([`crate::read_marks::SheetRefusal::Hand`])는 읽는 길이 건너뛰는 것과 **같은 사실**이지만
-/// 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로 고친다" 고 멈춘다.
+/// 손으로 적은 `read = 3`([`crate::read_marks::SheetRefusal::NotATable`])은 읽는 길이 건너뛰는 것과
+/// **같은 사실**이지만 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로
+/// 고친다" 고 멈춘다. 때가 아닌 값이 앉은 *줄 하나*는 이제 안 멈춘다: 그 id 만 건너뛰고
+/// [`crate::read_marks::SheetTrouble::Held`] 로 선다(moai-l5ue).
 pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::SheetRefusal) -> String {
-    use crate::read_marks::{READ, SheetRefusal, Skipped};
+    use crate::read_marks::{READ, SheetRefusal};
     let said = match why {
         SheetRefusal::Unparsable { said } => fill(say(lang, "sheet.refuse_unparsable"), &[("said", said)]),
         SheetRefusal::NotOurs { root } => {
             fill(say(lang, "sheet.refuse_not_ours"), &[("root", &root.display().to_string())])
         }
-        SheetRefusal::Hand(Skipped::NotATable { found }) => {
+        SheetRefusal::NotATable { found } => {
             fill(say(lang, "sheet.refuse_not_a_table"), &[("table", READ), ("is", found)])
-        }
-        SheetRefusal::Hand(Skipped::NotAStamp { id, found }) => {
-            fill(say(lang, "sheet.refuse_not_a_stamp"), &[("table", READ), ("id", id), ("is", found)])
         }
     };
     format!("{}: {said}", at.display())
+}
+
+/// 자리를 못 푼 판이 **대기 자리에서 멈췄다**는 줄을 그 까닭 뒤에 잇는다(moai-pm2h).
+///
+/// 그 파일은 도구가 짓고 이름이 뿌리의 해시라, 어느 파일인지만 대면 사람은 제가 만든 적 없는 파일을
+/// 보고 무엇을 고치라는 것인지 모른다.
+///
+/// **시키지 않고 대가만 댄다**(리뷰 moai-kuib.g9c 10번). 한때 이 줄이 "고치거나 지운다" 고 시켰는데,
+/// 앞의 거절문은 저마다 제 길을 이미 시킨다 — `sheet.refuse_not_ours` 는 "손으로 지운다" 고 하므로
+/// 한 줄이 지우라면서 지우지 말라는 꼴이 됐다. 시키는 것은 앞줄에 맡기고, 여기는 그 길을 골랐을 때
+/// 무엇을 잃는지만 댄다.
+pub fn fallen_place(lang: Lang, said: &str) -> String {
+    format!("{said} — {}", say(lang, "sheet.fallen_place"))
 }
 
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
@@ -2548,17 +2563,19 @@ pub fn problem(lang: Lang, at: Option<&std::path::Path>, why: &crate::user_confi
 /// 옆 워크트리를 겹치다 만난 한 줄([`crate::worktree::Trouble`], moai-dpbi).
 ///
 /// **글리프와 자리는 말이 아니다** — 가지 이름과 경로는 자료고 `⎇` 는 표라, 말묶음에는 `{at}`
-/// 한 자리로 든다(밖 한눈 보기의 `overview.unread_snapshot` 과 같은 자). 번역자가 옮길 것은 그
+/// 한 자리로 든다(밖 한눈 보기의 [`unread_worktree`] 와 같은 자). 번역자가 옮길 것은 그
 /// 앞뒤의 문장뿐이다.
 pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
     use crate::worktree::{Lost, Trouble};
     match why {
-        // **여기만 말묶음을 안 지난다** — 이 갈래는 가지와 열다 진 까닭만 댄다. `--worktree` 를
-        // 안 줬을 때 같은 사실을 대는 [`unread_worktree`] 는 문장을 두르므로, 한 워크트리가 깨진
-        // 것을 두 말로 대고 있다(리뷰가 짚었다). 문장을 맞추는 일은 그 두 갈래를 한 줄로 셀지
-        // (`the_overview_counts_work_with_no_live_worktree` 가 지금 꼴로 가른다)부터 정할 자리라
-        // 탐색기의 말을 옮기는 일(moai-ra67)과 함께 본다.
-        Trouble::Unread { branch, why } => at_branch(branch, why),
+        // **[`unread_worktree`] 와 한 문장이다**(moai-hs3g). 여기만 말묶음을 안 지나던 판은 한
+        // 워크트리가 깨진 것을 두 말로 댔다 — `--worktree` 를 주면 `⎇ 가지: 까닭` 으로, 안 주면
+        // "스냅샷을 못 읽었다 — ⎇ 가지: 자리" 로 섰다. 같은 사실에 두 이름을 주면 보는 쪽이 두 일로
+        // 읽고, 말묶음을 고치는 날 한쪽만 고쳐진다.
+        //
+        // **다른 것은 자리에 드는 것뿐이다** — 열어 본 이쪽은 열다 진 까닭을, 안 열어 본 저쪽은 그
+        // 워크트리의 자리를 싣는다. 둘 다 `⎇ 가지: <무엇>` 한 모양이다([`at_branch`]).
+        Trouble::Unread { branch, why } => unread_said(lang, &at_branch(branch, why)),
         Trouble::Skipped { branch, path, lines } => fill(
             say(lang, "trouble.skipped"),
             &[("at", &at_branch(branch, &path.display().to_string())), ("n", &lines.to_string())],
@@ -2579,9 +2596,17 @@ pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
 
 /// 스냅샷을 못 읽은 옆 워크트리 한 줄 — `moai status` 의 stderr 와 밖 한눈 보기가 **같은 글을
 /// 쓴다**(moai-dpbi). 갈라 적던 판은 같은 일을 두 말로 댔다.
+///
+/// 겹쳐 본 판의 같은 사실은 [`trouble_line`] 이 대는데, **문장은 하나다**(moai-hs3g,
+/// [`unread_said`]).
 pub fn unread_worktree(lang: Lang, branch: &str, path: &std::path::Path) -> String {
-    let at = at_branch(branch, &path.display().to_string());
-    fill(say(lang, "overview.unread_snapshot"), &[("at", &at)])
+    unread_said(lang, &at_branch(branch, &path.display().to_string()))
+}
+
+/// "옆 워크트리의 스냅샷을 못 읽었다 — `<무엇>`" — 겹쳐 본 길([`trouble_line`])과 안 겹쳐 본 길
+/// ([`unread_worktree`])이 **한 자리에서** 짓는다(moai-hs3g).
+fn unread_said(lang: Lang, at: &str) -> String {
+    fill(say(lang, "trouble.unread"), &[("at", at)])
 }
 
 /// `⎇ <가지>: <무엇>` — 옆 워크트리를 대는 자리의 한 모양.
@@ -3422,6 +3447,38 @@ mod tests {
         assert!(out.iter().any(|l| l.contains("(없는 에픽)")), "{out:#?}");
     }
 
+    /// **못 읽은 옆 워크트리를 두 길이 한 말로 댄다**(moai-hs3g). 겹쳐 본 길([`trouble_line`])만
+    /// 말묶음을 안 지나 `⎇ 가지: 까닭` 으로 섰고, 안 겹친 길([`unread_worktree`])은 문장을 둘렀다 —
+    /// 한 워크트리가 깨진 것이 두 말로 서면 보는 쪽이 두 일로 읽는다.
+    ///
+    /// **자리에 드는 것은 다르다** — 열어 본 쪽은 열다 진 까닭을, 안 열어 본 쪽은 그 워크트리의
+    /// 자리를 싣는다. 그 둘까지 같아지면 겹쳐 본 판이 무엇에 걸렸는지를 잃는다.
+    #[test]
+    fn the_two_paths_call_an_unread_worktree_the_same_thing() {
+        use crate::worktree::Trouble;
+        let branch = "worktree-agent-x";
+        let path = std::path::PathBuf::from("/w/proj/.claude/worktrees/agent-x");
+        for lang in Lang::ALL {
+            let overlaid = trouble_line(lang, &Trouble::Unread { branch: branch.into(), why: "EACCES".into() });
+            let outside = unread_worktree(lang, branch, &path);
+            // **문장이 같다** — 자리에 드는 것만 다르다(열다 진 까닭이냐, 그 워크트리의 자리냐).
+            let (a, b) = (overlaid.split(branch).next(), outside.split(branch).next());
+            assert_eq!(a, b, "{}: 같은 사실을 두 말로 댄다 — {overlaid} / {outside}", lang.code());
+            for said in [&overlaid, &outside] {
+                assert!(said.contains(branch), "{}: 어느 워크트리인지를 안 댔다 — {said}", lang.code());
+                assert!(!said.contains('{'), "{}: 채울 자리가 남았다 — {said}", lang.code());
+            }
+            assert!(overlaid.contains("EACCES"), "{}: 열다 진 까닭을 잃었다 — {overlaid}", lang.code());
+            // **가지 이름이 아니라 자리를 잰다**(리뷰) — `agent-x` 는 가지 이름 안에도 있어, 그것으로
+            // 재면 위의 `contains(branch)` 가 이미 참으로 만든 바늘이 된다. 자리만 만족하는 바늘을 쓴다.
+            assert!(
+                outside.contains(&path.display().to_string()),
+                "{}: 그 워크트리의 자리를 잃었다 — {outside}",
+                lang.code()
+            );
+        }
+    }
+
     /// **읽음 표의 글은 말마다 그 파일과 그 줄을 댄다**(moai-rtji 리뷰). 글은 말묶음의 자리(`{key}`·`{id}`·
     /// `{root}`·`{said}`)를 `fill` 에 준 이름으로 채우는데, 두 이름이 갈리면 `{key}` 가 글자 그대로 서고 어느
     /// 줄인지가 사라진다. 말묶음 시험은 번역을 영어와만 견주므로 영어와 한국어가 함께 갈리면 못 잡고, 읽음
@@ -3457,8 +3514,17 @@ mod tests {
                 ),
                 (sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() }), "TOML"),
                 (sheet_refusal(lang, &at, &SheetRefusal::NotOurs { root: root.clone() }), "/w/proj"),
-                (sheet_refusal(lang, &at, &SheetRefusal::Hand(stamp.clone())), "argos-0002"),
-                (sheet_refusal(lang, &at, &SheetRefusal::Hand(table.clone())), "[read]"),
+                (
+                    sheet_trouble(lang, &SheetTrouble::Held { at: at.clone(), ids: vec!["argos-0002".into()] }),
+                    "argos-0002",
+                ),
+                (sheet_refusal(lang, &at, &SheetRefusal::NotATable { found: "integer".into() }), "[read]"),
+                // **떨어진 판의 줄도 이 훑기에 든다**(리뷰 moai-kuib.g9c 10번) — 밖에 두던 동안은 번역이
+                // 채울 자리를 흘려도 잡는 자가 없었다. 앞의 거절문 위에 얹히는 줄이라 그 파일 이름도 앞에 선다.
+                (
+                    fallen_place(lang, &sheet_refusal(lang, &at, &SheetRefusal::Unparsable { said: "TOML".into() })),
+                    say(lang, "sheet.fallen_place"),
+                ),
             ];
             for (said, names) in &said {
                 let code = lang.code();
