@@ -128,8 +128,8 @@ jobs:
       # `clippy-driver` 로 짓고 시험은 `rustc` 로 지어 산출물을 못 나눠 쓴다
       # (cargo#12369) — 판마다 35초다. 걷으려면 둘을 딴 잡으로 가르거나 clippy 를
       # 빼야 하는데, 앞은 required check 를 늘리고 뒤는 새 경고가 PR 에서 안 잡힌다.
-      # 35초는 그 둘보다 싸다. 위의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
-      # LTO 한 판(5분)이다.
+      # 35초는 그 둘보다 싸다. 밑의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
+      # LTO 한 판(65~84초, 그 잡의 머리글에 잰 값이 있다)이다.
       - name: test
         run: cargo test --locked
 
