@@ -6757,3 +6757,4 @@
 {"ts":"2026-09-21T07:31:33Z","id":"moai-jkpa","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"fmt --check 가 러너의 rustc 를 따라 흔들린다 — rust-toolchain.toml 을 둘까"}
 {"ts":"2026-09-21T07:31:33Z","id":"moai-yeai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ers4 에서 펼쳤다 — fmt --check 가 CI 의 rustc 판에 매여 있다 — rust-toolchain.toml 을 둘까"}
 {"ts":"2026-09-21T07:31:33Z","id":"moai-ers4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yeai 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T07:36:10Z","id":"moai-v52i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널을 사람마다 갈라 둘까 — 섞인 이력을 각자 파일로"}
