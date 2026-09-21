@@ -4931,6 +4931,45 @@ fn reading_a_group_takes_what_is_drawn_under_it() {
     assert!(!read_sheet(&cfg, s.path()).contains(&format!("{by_field} =")), "거절해 놓고 적었다");
 }
 
+/// **기본값이라 줄에 안 적힌 종류와 우선순위도 `--json` 에는 선다**(moai-51it·moai-a4u9).
+/// 파일이 기본값을 안 적는 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의
+/// 뜻은 쓰는 쪽만 안다 — 읽는 쪽에서는 `jq -r .priority` 가 "p2" 와 "모른다" 를 한 `null` 로
+/// 받는다. 사람 화면은 같은 줄을 늘 `p2` 로 그려 왔다.
+///
+/// **줄을 내는 표면마다 잰다.** 세우는 자리가 `Row` 하나라 한 곳만 보면 될 듯하지만, 그 하나를
+/// 안 지나는 표면이 생기는 것이 이 시험이 잡는 것이다.
+#[test]
+fn every_surface_speaks_the_default_kind_and_priority() {
+    let s = Scratch::new("jsondefaults");
+    ok(s.path(), &["init", "argos", "--json"]);
+    let made = ok(s.path(), &["add", "기본값인 줄", "--json"]);
+    let id = field(&made, "id");
+    let plain = |out: &str, what: &str| {
+        assert!(out.contains(r#""kind":"issue""#), "{what}: 종류가 빠졌다\n{out}");
+        assert!(out.contains(r#""priority":2"#), "{what}: 우선순위가 빠졌다\n{out}");
+    };
+    plain(&made, "add");
+    for args in [
+        &["show", &id, "--json"][..],
+        &["show", "--json"],
+        &["show", "--tree", "--json"],
+        &["ready", "--json"],
+        // `note --json` 은 줄이 아니라 저널 한 칸을 낸다 — 여기서 잴 표면이 아니다.
+        &["edit", &id, "--tag", "bug", "--json"],
+        &["mv", &id, "in_progress", "--json"],
+        &["defer", &id, "--json"],
+    ] {
+        plain(&ok(s.path(), args), &args.join(" "));
+    }
+
+    // **줄이 든 값은 그대로 한 번만 선다.** 세우는 자리가 줄과 `Row` 둘이라, 줄이 들고 있을 때도
+    // 세우면 한 객체에 같은 키가 둘 서서 깐깐한 파서가 거절한다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-p", "1", "--json"]);
+    assert_eq!(epic.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{epic}");
+    assert_eq!(epic.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{epic}");
+    assert!(epic.contains(r#""kind":"epic""#) && epic.contains(r#""priority":1"#), "{epic}");
+}
+
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
 fn every_command_still_speaks_json() {
@@ -13963,14 +14002,35 @@ fn script(name: &str) -> PathBuf {
 #[cfg(unix)]
 const MANIFEST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// pre-push 줄의 자리 채우개 sha. **마흔 자를 다 적는다** (리뷰 moai-6mk3.lgj) — 짧은
+/// 16진수는 git 이 제 저장소에서 풀어 버린다. 넉 자짜리를 쓰던 판은 `bbbb` 와 `cccc` 가
+/// 이 저장소에서 실제로 블롭과 트리로 풀렸고, [`at_commit`] 이 그 줄을 `git show` 에
+/// 넘기게 된 뒤로는 돌리는 사람의 클론이 무엇을 들었나가 답을 갈랐다.
+#[cfg(unix)]
+const NO_SUCH_SHA: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+/// 태그를 지우는 줄의 sha — 전부 0 이다.
+#[cfg(unix)]
+const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
+
 /// 스크립트를 돌린다. `fed` 를 주면 pre-push 가 stdin 에 흘리는 줄을 흉내 낸다.
 #[cfg(unix)]
 fn run_script(name: &str, args: &[&str], fed: Option<&str>) -> Output {
+    run_script_at(&script(name), None, args, fed)
+}
+
+/// 같은 것을 **딴 클론의 사본**으로 돌린다. 스크립트가 뿌리를 제 자리에서 읽으므로
+/// (`BASH_SOURCE`), 미는 커밋을 지어 재는 시험은 그 클론 안의 사본을 불러야 한다.
+#[cfg(unix)]
+fn run_script_at(path: &Path, dir: Option<&Path>, args: &[&str], fed: Option<&str>) -> Output {
     use std::io::Write as _;
     let said = "bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다";
     let mut cmd = isolated("bash");
     // 스크립트가 부르는 `cargo metadata` 가 네트워크로 새지 않게 한다.
-    cmd.arg(script(name)).args(args).env("CARGO_NET_OFFLINE", "true");
+    cmd.arg(path).args(args).env("CARGO_NET_OFFLINE", "true");
+    if let Some(dir) = dir {
+        cmd.current_dir(dir);
+    }
     let Some(fed) = fed else { return cmd.output().expect(said) };
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect(said);
     // 쓰기가 진 것은 삼킨다 — [`from_stdin`] 과 같은 까닭이다. 줄을 안 읽고 먼저
@@ -14011,11 +14071,10 @@ fn the_version_check_stops_a_tag_the_manifest_does_not_know() {
 #[test]
 fn a_push_that_carries_no_release_tag_goes_through() {
     let have = MANIFEST_VERSION;
-    let zero = "0".repeat(40);
     let fed = format!(
-        "refs/heads/develop aaaa refs/heads/develop bbbb\n\
-         refs/tags/v9.9.9 {zero} refs/tags/v9.9.9 cccc\n\
-         refs/tags/v{have} dddd refs/tags/v{have} {zero}\n"
+        "refs/heads/develop {NO_SUCH_SHA} refs/heads/develop {ZERO_SHA}\n\
+         refs/tags/v9.9.9 {ZERO_SHA} refs/tags/v9.9.9 {NO_SUCH_SHA}\n\
+         refs/tags/v{have} {NO_SUCH_SHA} refs/tags/v{have} {ZERO_SHA}\n"
     );
     let out = run_script("check-version.sh", &[], Some(&fed));
     assert!(out.status.success(), "일상 푸시를 막았다\n{}", text(&out));
@@ -14036,7 +14095,8 @@ fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
 #[cfg(unix)]
 #[test]
 fn a_push_that_carries_a_mismatched_tag_stops() {
-    let out = run_script("check-version.sh", &[], Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"));
+    let fed = format!("refs/tags/v9.9.9 {NO_SUCH_SHA} refs/tags/v9.9.9 {ZERO_SHA}\n");
+    let out = run_script("check-version.sh", &[], Some(&fed));
     assert_eq!(out.status.code(), Some(1), "어긋난 태그를 밀었는데 지나갔다\n{}", text(&out));
 }
 
@@ -14046,20 +14106,108 @@ fn a_push_that_carries_a_mismatched_tag_stops() {
 #[cfg(unix)]
 #[test]
 fn hook_arguments_are_not_read_as_a_tag() {
-    let out = run_script(
-        "check-version.sh",
-        &["origin", "https://example.invalid"],
-        Some("refs/heads/develop aaaa refs/heads/develop bbbb\n"),
-    );
+    let plain = format!("refs/heads/develop {NO_SUCH_SHA} refs/heads/develop {ZERO_SHA}\n");
+    let out = run_script("check-version.sh", &["origin", "https://example.invalid"], Some(&plain));
     assert!(out.status.success(), "훅 인자를 태그로 읽어 일상 푸시를 막았다\n{}", text(&out));
 
     // 줄에 어긋난 태그가 있으면 그때는 막는다 — 인자가 아니라 stdin 이 답이다.
-    let bad = run_script(
-        "check-version.sh",
-        &["origin", "https://example.invalid"],
-        Some("refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n"),
-    );
+    let fed = format!("refs/tags/v9.9.9 {NO_SUCH_SHA} refs/tags/v9.9.9 {ZERO_SHA}\n");
+    let bad = run_script("check-version.sh", &["origin", "https://example.invalid"], Some(&fed));
     assert_eq!(bad.status.code(), Some(1), "어긋난 태그가 지나갔다\n{}", text(&bad));
+}
+
+/// 판을 하나 든 `Cargo.toml`. 시험이 짓는 클론에 놓는다.
+#[cfg(unix)]
+fn manifest_saying(version: &str) -> String {
+    format!("[package]\nname = \"moai\"\nversion = \"{version}\"\n\n[dependencies]\nclap = {{ version = \"4\" }}\n")
+}
+
+/// **재는 것은 미는 커밋이지 작업본이 아니다**(moai-ler5). 작업본만 보던 판은 이미
+/// 다음 판으로 넘어간 자리에서 판이 맞는 옛 태그를 다시 미는 것을 막았다 — 막는
+/// 쪽이 틀리는 자리라, 되돌릴 방법이 도구 밖에만 남는다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_reads_the_manifest_of_the_commit_being_pushed() {
+    let s = Scratch::new("check-version-pushed");
+    // 클론은 [`clone_with_scripts`] 가 짓는다 — 손으로 다시 적으면 스크립트가 옆 파일을
+    // 하나 더 쥐는 날 이 시험만 안 따라와, 재려던 것과 상관없는 자리에서 붉어진다.
+    let root = clone_with_scripts(&s);
+    let copied = root.join("scripts/check-version.sh");
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "0.1.0"]);
+    let sha = git(&root, &["rev-parse", "HEAD"]).trim().to_owned();
+    // 작업본은 벌써 다음 판이다.
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.2.0")).unwrap();
+
+    let line = format!("refs/tags/v0.1.0 {sha} refs/tags/v0.1.0 {ZERO_SHA}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&line));
+    assert!(out.status.success(), "미는 커밋이 든 판이 맞는데 막았다\n{}", text(&out));
+    // **어느 자리를 읽었는지 말한다** — 지나갔든 막혔든 무엇과 견줬는지가 로그에 남아야,
+    // 다음 사람이 작업본과 커밋 중 어느 쪽이 답이었는지를 되짚을 수 있다.
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains(&sha), "어느 자리를 읽었는지 안 말한다\n{said}");
+
+    // 거꾸로도 선다 — 작업본과는 맞지만 미는 커밋과 어긋난 태그는 막힌다.
+    let bad = format!("refs/tags/v0.2.0 {sha} refs/tags/v0.2.0 {ZERO_SHA}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&bad));
+    assert_eq!(out.status.code(), Some(1), "작업본으로 재서 어긋난 태그를 보냈다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    // 그 커밋은 이미 굳었다 — 작업본을 올리라고 하면 미는 것은 그대로다.
+    //
+    // **두 길을 가르는 글자까지 본다** (리뷰 moai-6mk3.lgj). 두 고치는 길이 다 "태그를 다시
+    // 단다" 로 끝나, 거기까지만 재던 판은 갈래가 뒤집혀도 초록으로 섰다.
+    assert!(said.contains("태그를 그 커밋에 다시 단다"), "굳은 커밋에 고치는 길을 안 댄다\n{said}");
+    assert!(!said.contains("로 맞추고 태그를 다시 단다"), "굳은 커밋에 작업본만 맞추라고 한다\n{said}");
+}
+
+/// **커밋에서 못 꺼내면 작업본으로 내려앉는다**(moai-ler5). 얕은 클론과 git 이 없는
+/// 자리가 그것이다 — 거기서 멈추면 재지도 않고 푸시를 막는 셈이 된다.
+#[cfg(unix)]
+#[test]
+fn a_commit_the_clone_does_not_have_falls_back_to_the_working_tree() {
+    let s = Scratch::new("check-version-fallback");
+    let root = clone_with_scripts(&s);
+    let copied = root.join("scripts/check-version.sh");
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
+
+    // 이 클론에 없는 커밋이다. 작업본이 답이 된다.
+    let line = format!("refs/tags/v0.1.0 {NO_SUCH_SHA} refs/tags/v0.1.0 {ZERO_SHA}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&line));
+    assert!(out.status.success(), "못 꺼냈다고 맞는 태그를 막았다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("작업본"), "작업본으로 내려앉은 것을 안 말한다\n{said}");
+}
+
+/// **판을 못 읽은 것은 도구의 사정이라 2 로 끝난다** (리뷰 moai-6mk3.lgj). `die` 를
+/// [`working_version`] 안으로 옮기면서 그 `exit 2` 가 명령 치환의 하위 셸에 갇혔고,
+/// `compare … || bad=1` 이 `set -e` 까지 꺼 스크립트가 빈 판을 들고 계속 갔다 — 태그를
+/// 미는 줄에서 "못 읽었다"(2)가 "어긋난다"(1)로 둔갑해, 1 만 막기로 한 pre-push shim 이
+/// 도구 사정으로 사람의 푸시를 막았다.
+///
+/// [`a_check_that_cannot_read_the_manifest_does_not_block_the_push`] 가 이것을 못 잡은 것은
+/// 그쪽이 태그 없는 줄만 먹여 `compare` 에 닿지도 않아서다.
+#[cfg(unix)]
+#[test]
+fn a_tag_push_whose_manifest_cannot_be_read_is_not_the_gate() {
+    let s = Scratch::new("check-version-unreadable");
+    let root = clone_with_scripts(&s);
+    let copied = root.join("scripts/check-version.sh");
+    // `[package]` 가 없다 — 워크스페이스로 옮기는 중이거나 병합이 덜 끝난 자리다.
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+    let line = format!("refs/tags/v0.1.0 {NO_SUCH_SHA} refs/tags/v0.1.0 {ZERO_SHA}\n");
+    let out = run_script_at(&copied, Some(&root), &[], Some(&line));
+    assert_eq!(out.status.code(), Some(2), "못 읽은 것을 어긋난 것으로 냈다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("version 을 못 읽었다"), "왜 못 쟀는지 안 말한다\n{said}");
+    // 빈 판으로 견준 자리가 없다 — 그 줄이 서면 사람은 고칠 데가 없는 길을 받는다.
+    assert!(!said.contains("어긋난다"), "빈 판을 들고 어긋났다고 말한다\n{said}");
+
+    // 훅까지 얹어서도 본다 — 막는 것은 `compare` 의 1 하나다.
+    assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
+    let ran = push_hook(&root, &line);
+    assert!(ran.status.success(), "판을 못 읽었다고 태그 푸시를 막았다\n{}", text(&ran));
 }
 
 // ── 설치 — 확인하지 못하면 깔지 않는다 ──────────────────────────────
@@ -14337,7 +14485,7 @@ fn the_hook_says_nothing_when_the_check_is_not_there() {
     assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
     std::fs::remove_file(root.join("scripts/check-version.sh")).unwrap();
 
-    let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
+    let ran = push_hook(&root, &format!("refs/tags/v9.9.9 {NO_SUCH_SHA} refs/tags/v9.9.9 {ZERO_SHA}\n"));
     assert!(ran.status.success(), "잴 것이 없는데 막았다\n{}", text(&ran));
 }
 
@@ -14353,7 +14501,7 @@ fn a_check_that_cannot_read_the_manifest_does_not_block_the_push() {
     // `[package]` 가 없는 `Cargo.toml` — 워크스페이스로 옮기는 중이거나 병합이 덜 끝난 자리다.
     std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
 
-    let ran = push_hook(&root, "refs/heads/develop aaaa refs/heads/develop bbbb\n");
+    let ran = push_hook(&root, &format!("refs/heads/develop {NO_SUCH_SHA} refs/heads/develop {ZERO_SHA}\n"));
     assert!(ran.status.success(), "판을 못 읽었다고 태그 없는 푸시를 막았다\n{}", text(&ran));
 }
 
@@ -14366,12 +14514,13 @@ fn the_hook_stops_a_tag_that_disagrees_with_the_manifest() {
     let root = clone_with_scripts(&s);
     assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
 
-    let ran = push_hook(&root, "refs/tags/v9.9.9 abcd refs/tags/v9.9.9 0000\n");
+    let ran = push_hook(&root, &format!("refs/tags/v9.9.9 {NO_SUCH_SHA} refs/tags/v9.9.9 {ZERO_SHA}\n"));
     assert!(!ran.status.success(), "어긋난 태그가 지나갔다\n{}", text(&ran));
     let said = String::from_utf8_lossy(&ran.stderr).into_owned();
     assert!(said.contains("bump-version.sh 9.9.9"), "고치는 길을 안 댄다\n{said}");
 
-    let fine = push_hook(&root, &format!("refs/tags/v{v} abcd refs/tags/v{v} 0000\n", v = MANIFEST_VERSION));
+    let fine =
+        push_hook(&root, &format!("refs/tags/v{v} {NO_SUCH_SHA} refs/tags/v{v} {ZERO_SHA}\n", v = MANIFEST_VERSION));
     assert!(fine.status.success(), "맞는 태그를 막았다\n{}", text(&fine));
 }
 
@@ -14397,6 +14546,11 @@ fn the_cross_version_smoke_script_still_runs() {
 /// 도움말과 갈라지는데, **갈라진 레퍼런스는 없는 것보다 나쁘다** — 읽는 사람이
 /// 그것을 믿고 친다. 그래서 글은 `--help` 한 곳에만 있고 그 파일은 옮겨 적은
 /// 것이며, 여기서 다시 지어 견준다.
+///
+/// **담는 것을 그대로 둔다**(moai-io79, 2026-09-21 사용자 결정). 도움말 한 글자가 파일을
+/// 통째로 다시 쓰므로 여기 서는 diff 는 1,750줄짜리가 되는데, 저장소만 보고 명령을 읽을 수
+/// 있는 값이 그 크기보다 크다고 보았다. 대신 큰 diff 가 정상이라는 줄을 파일 머리에 적어
+/// (`scripts/gen-cli-docs.sh` 의 머리글), 다음 사람이 그것을 사고로 안 읽게 한다.
 #[cfg(unix)]
 #[test]
 fn the_cli_reference_matches_the_help() {
@@ -14436,6 +14590,121 @@ fn the_files_the_release_packs_are_all_there() {
     }
 }
 
+/// 받는 사람이 밟는 한 줄은 `main` 을 가리킨다(moai-vqmx). `develop` 은 아직 안 나간 것이
+/// 섞이는 자리라, 거기를 가리키면 받는 사람이 릴리스에 없는 스크립트로 릴리스를 깐다.
+/// 고쳐 놓아도 다음 사람이 기여자 흐름(`CONTRIBUTING.md` 의 `develop`)을 보고 되돌리기 쉬워
+/// 여기서 맨다 — 그 문서는 기여자 것이라 그대로 둔다.
+#[cfg(unix)]
+#[test]
+fn what_the_receiver_curls_is_main() {
+    for name in ["README.md", "install.sh"] {
+        let text = std::fs::read_to_string(at_root(name)).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };
+            let branch = rest.split('/').next().unwrap_or("");
+            assert_eq!(branch, "main", "{name}:{} 가 `{branch}` 를 가리킨다 — 받는 사람은 main 을 밟는다", n + 1);
+        }
+    }
+}
+
+/// `install.sh` 의 플랫폼 표와 `release.yml` 의 빌드 행렬은 같은 것을 두 번 적는다
+/// (moai-io79). 한쪽에 칸을 더하면 다른 쪽이 조용히 낡고, 받는 사람은 없는 파일을 받는다.
+///
+/// **베낌을 없애는 대신 여기서 맨다**(2026-09-21 사용자 결정). 워크플로가 셸 스크립트의
+/// 출력으로 행렬을 지으면 진실은 하나가 되지만 `release.yml` 만 보고는 무엇을 짓는지 못
+/// 읽는다 — 두 파일은 혼자 읽히고, 갈라지는 순간 이 시험이 이름을 대며 붉어진다.
+/// 못 내는 기계에 대는 말도 같은 이름을 든 셋째 자리라 함께 본다.
+#[cfg(unix)]
+#[test]
+fn the_install_table_and_the_release_matrix_name_the_same_targets() {
+    let matrix = release_matrix();
+
+    let sh = std::fs::read_to_string(at_root("install.sh")).unwrap();
+    let table: std::collections::BTreeSet<String> = sh
+        .lines()
+        .filter_map(|l| l.split_once(") target="))
+        .map(|(_, rest)| rest.trim().trim_end_matches(";;").trim().to_owned())
+        .collect();
+    assert_eq!(table, matrix, "install.sh 의 플랫폼 표와 release.yml 의 빌드 행렬이 갈라졌다");
+
+    // **주석이 아니라 `die` 줄을 집는다** (리뷰 moai-6mk3.lgj) — 그 말을 그대로 옮겨 적은
+    // 주석이 위에 서면 첫 줄 집기가 그것을 답으로 내, 시험이 이름을 하나도 못 보고 붉어진다.
+    let said =
+        sh.lines().find(|l| l.contains("die \"이 기계에 맞는 판이 없다")).expect("못 내는 기계에 대는 말이 없다");
+    // **양쪽으로 본다** (같은 리뷰). 이름마다 `contains` 로 훑던 판은 한 칸을 **뺀** 자리를 못
+    // 봤다 — 표와 행렬에서 같이 뺀 이름이 이 말에는 그대로 남아, 안 내는 판을 계속 댄다.
+    // 앞가지가 겹치는 이름(`…-darwin` 과 `…-darwin20`)도 `contains` 로는 안 갈린다. 이음표
+    // 둘 이상이 타깃 세 마디의 꼴이고, `$(uname -s)` 의 `-s` 는 거기서 빠진다.
+    let named: std::collections::BTreeSet<String> = said
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .filter(|w| w.matches('-').count() >= 2)
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(named, matrix, "못 내는 기계에 대는 말이 행렬과 갈라졌다\n{said}");
+}
+
+/// `release.yml` 의 빌드 행렬. **한 자리에서 읽는다** — 이름을 대는 시험이 둘이라, 행렬의
+/// 꼴이 바뀌는 날 고칠 자리가 둘로 갈리면 한쪽만 따라온다.
+#[cfg(unix)]
+fn release_matrix() -> std::collections::BTreeSet<String> {
+    let yml = std::fs::read_to_string(at_root(".github/workflows/release.yml")).unwrap();
+    let matrix: std::collections::BTreeSet<String> =
+        yml.lines().filter_map(|l| l.trim().strip_prefix("- target:")).map(|t| t.trim().to_owned()).collect();
+    // 꼴이 바뀌어 아무것도 못 읽으면 **빈 것끼리 같다**로 지나간다 — 그때는 이 시험도 같이 고친다.
+    assert!(
+        !matrix.is_empty(),
+        "release.yml 에서 빌드 행렬을 못 읽었다 — 행렬의 꼴이 바뀌었으면 이 시험도 같이 고친다"
+    );
+    matrix
+}
+
+/// **표를 글로만 견주지 않는다** (리뷰 moai-6mk3.lgj). `MOAI_TARGET` 이 들어오면서 설치
+/// 시험이 죄다 그 이름을 쥐게 되었고, `release_name` 도 더는 `--print-target` 을 안 불러
+/// `uname` 표와 그 플래그를 **아무 시험도 안 돌리게** 됐다 — 위의 시험은 파일을 글로 읽어,
+/// `case` 가 통째로 안 닿아도 초록으로 선다.
+///
+/// **어느 기계에서나 선다.** 판을 내는 기계는 행렬의 이름을 찍고, 안 내는 기계(arm64
+/// 리눅스·인텔 맥)는 1 로 멈추며 제 말을 한다 — 둘 다 표가 돌았다는 증거다.
+#[cfg(unix)]
+#[test]
+fn printing_the_target_runs_the_platform_table() {
+    // 돌리는 사람이 내보내 둔 값이 새면 재려던 것이 아니라 그 기계를 잰다.
+    let bare = || {
+        let mut cmd = isolated("sh");
+        cmd.arg(at_root("install.sh")).arg("--print-target").env_remove("MOAI_TARGET").env_remove("MOAI_BASE_URL");
+        cmd
+    };
+    let out = bare().output().expect("sh 를 실행하지 못했다");
+    let printed = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if out.status.success() {
+        assert!(release_matrix().contains(&printed), "표가 행렬에 없는 이름을 찍었다 — {printed}");
+    } else {
+        assert_eq!(out.status.code(), Some(1), "판이 없는 기계에서 엉뚱한 코드로 끝났다\n{}", text(&out));
+        let cried = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(cried.contains("이 기계에 맞는 판이 없다"), "판이 없는 기계에 댈 말을 안 한다\n{cried}");
+    }
+
+    // **덮개는 가짜 릴리스를 가리킬 때만 듣는다** — 그 자리 밖에서는 표가 이긴다.
+    let alone = bare().env("MOAI_TARGET", FAKE_TARGET).output().expect("sh 를 실행하지 못했다");
+    assert_eq!(String::from_utf8_lossy(&alone.stdout).trim(), printed, "덮개가 받는 사람의 길에서도 들었다");
+
+    let both = bare()
+        .env("MOAI_TARGET", FAKE_TARGET)
+        .env("MOAI_BASE_URL", "file:///moai-nowhere")
+        .output()
+        .expect("sh 를 실행하지 못했다");
+    assert!(both.status.success(), "시험이 쓰는 자리에서 덮개가 안 들었다\n{}", text(&both));
+    assert_eq!(String::from_utf8_lossy(&both.stdout).trim(), FAKE_TARGET, "덮개가 준 이름을 안 찍었다");
+
+    // 이름에 든 길 조각은 받는 자리를 `$work` 밖으로 옮긴다 — 덫이 못 치우는 자리다.
+    let crooked = bare()
+        .env("MOAI_TARGET", "../../moai-pwn")
+        .env("MOAI_BASE_URL", "file:///moai-nowhere")
+        .output()
+        .expect("sh 를 실행하지 못했다");
+    assert!(!crooked.status.success(), "길 조각이 든 이름을 받았다\n{}", text(&crooked));
+}
+
 /// `install.sh` 를 돌린다. `MOAI_BASE_URL` 로 가짜 릴리스를 가리켜, 시험이
 /// 네트워크를 타지 않는다.
 #[cfg(unix)]
@@ -14446,17 +14715,25 @@ fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
         .env("MOAI_BASE_URL", format!("file://{}", base.display()))
         .env("MOAI_VERSION", "v9.9.9")
         .env("MOAI_INSTALL_DIR", dir)
+        .env("MOAI_TARGET", FAKE_TARGET)
         .output()
         .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
 }
 
-/// 이 기계가 받을 산출물의 이름. 스크립트에게 물어, 시험이 타깃 표를 따로 들지
-/// 않는다.
+/// 설치 시험이 지어 두는 가짜 릴리스의 타깃 이름. **이 기계에 맞는 판이 있든 없든
+/// 같다**(moai-utya) — 재는 것은 설치 길이지 어느 플랫폼에 내는가가 아니다. 이름을
+/// `install.sh` 의 표에서 받던 판은 판을 안 내는 기계(arm64 리눅스·인텔 맥)에서 그 표가
+/// 먼저 죽어, 도구가 잘 도는 자리에서 `cargo test` 가 떨어졌다.
+///
+/// 표가 실제로 내는 것과 맞는지는 [`the_install_table_and_the_release_matrix_name_the_same_targets`]
+/// 가 따로 본다 — 건너뛰는 시험을 안 둔다는 결정은 그대로다.
+#[cfg(unix)]
+const FAKE_TARGET: &str = "moai-test-unknown-target";
+
+/// 시험이 받을 산출물의 이름.
 #[cfg(unix)]
 fn release_name() -> String {
-    let out = isolated("sh").arg(at_root("install.sh")).arg("--print-target").output().expect("sh 를 실행하지 못했다");
-    assert!(out.status.success(), "타깃을 못 찍었다\n{}", text(&out));
-    format!("moai-v9.9.9-{}", String::from_utf8_lossy(&out.stdout).trim())
+    format!("moai-v9.9.9-{FAKE_TARGET}")
 }
 
 /// 가짜 릴리스 하나를 짓는다 — 산출물 한 벌과 그 합계. 돌려주는 것은 산출물이
@@ -14565,11 +14842,9 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
     for name in ["bump-version.sh", "check-version.sh"] {
         std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
     }
-    std::fs::write(
-        root.join("Cargo.toml"),
-        "[package]\nname = \"moai\"\nversion = \"0.1.0\"\n\n[dependencies]\nclap = { version = \"4\" }\n",
-    )
-    .unwrap();
+    // 의존성 표를 함께 든 `Cargo.toml` 은 [`manifest_saying`] 이 짓는다 — 같은 글을 두 군데
+    // 적으면 한쪽만 손본 날 `[package]` 표를 가리는 자가 반만 시험된다.
+    std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
     std::fs::write(
         root.join("CHANGELOG.md"),
         "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- 쌓여 있던 줄\n\n## [0.1.0] - 2026-09-01\n",

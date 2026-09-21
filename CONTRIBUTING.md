@@ -44,8 +44,11 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has two jobs: one runs clippy and the tests on the dev profile, the
-other builds the release binary and checks it against the 15 MB budget.
+minutes. CI has three jobs: one runs clippy and the tests on the dev profile,
+one works out whether anything outside the docs changed, and the third builds
+the release binary and checks it against the 15 MB budget. Only the first is a
+required check, and the third shows as skipped - not failed - on a pull request
+that touched documentation alone.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -59,6 +62,15 @@ later.
 
 `cargo fmt --all --check` runs in CI, before clippy and the tests. The width is
 set in `rustfmt.toml`, which also records why that value and not the default.
+
+**The toolchain is pinned in `rust-toolchain.toml`**, so rustup builds this
+repository — and formats and lints it — with the version written there, and your
+`cargo fmt` gives what CI sees. Without the pin CI ran on whatever stable the
+runner shipped that week, and rustfmt moving a line it has never touched turned
+someone else's pull request red. Bumping the pin is its own commit: change the
+channel and carry the `cargo fmt --all` it causes in the same commit, never
+mixed with a change to the code. Note that `rust-version` in `Cargo.toml` now
+records the minimum rather than proving it — nothing builds on that version.
 
 The whole repository was formatted in one commit. `git blame` can step over it
 so that it points at the commit that actually wrote each line, but git only

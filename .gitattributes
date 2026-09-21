@@ -10,3 +10,8 @@
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
 .moai/journal.jsonl  text eol=lf merge=union
+# docs/cli.md is rendered from the binary's own help by scripts/gen-cli-docs.sh,
+# so one changed word rewrites the whole file. Marking it generated collapses
+# that diff in review instead of asking every reader to scroll past it; the file
+# itself says the same thing in prose for anyone reading it outside GitHub.
+docs/cli.md          linguist-generated=true
