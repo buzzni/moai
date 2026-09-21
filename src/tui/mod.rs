@@ -5699,6 +5699,7 @@ mod tests {
         let s = Scratch::new("read-marks-tui");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         // **읽음은 그 프로젝트의 제 파일에 산다**(moai-bwce) — 뿌리를 알아야 그 파일을 고른다.
         let sheet = crate::read_marks::place_of(&config, &root).at;
         let mut a = app();
@@ -5816,6 +5817,7 @@ mod tests {
         let s = Scratch::new("read-marks-one-place");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
@@ -5917,6 +5919,7 @@ mod tests {
         let s = Scratch::new("read-marks-narrow");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let elsewhere = [("argos-9999".to_string(), "옆에서 찍은 것".to_string())].into_iter().collect();
         let sheet = || crate::read_marks::read(&config, &root, &std::collections::BTreeMap::new()).seen;
 
@@ -5956,6 +5959,7 @@ mod tests {
         let s = Scratch::new("read-marks-lenient-tui");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -5996,6 +6000,7 @@ mod tests {
         let s = Scratch::new("read-marks-unknown");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -6039,6 +6044,7 @@ mod tests {
         let s = Scratch::new("read-marks-no-config");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -6078,6 +6084,7 @@ mod tests {
         let s = Scratch::new("read-marks-home-gone");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -6137,6 +6144,7 @@ mod tests {
         let s = Scratch::new("read-marks-pending");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         // [NEW] 는 내게 온 줄에 선다 — 안 맡기면 셀 줄이 하나도 없어 전제부터 안 선다.
         for i in &mut a.site.issues {
@@ -6185,6 +6193,7 @@ mod tests {
         let s = Scratch::new("read-marks-clock");
         let config = s.path().join("user.toml");
         let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());
@@ -6249,6 +6258,7 @@ mod tests {
         let s = Scratch::new("read-marks-worktree");
         let config = s.path().join("user.toml");
         let (root, worktree) = (s.path().join("proj"), s.path().join("proj/.claude/worktrees/w1"));
+        std::fs::create_dir_all(&worktree).unwrap();
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());

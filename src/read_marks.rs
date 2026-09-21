@@ -127,26 +127,26 @@ pub enum SheetRefusal {
 /// 과 탐색기 적재마다 "자리를 못 풀어 적힌 철자로 든다 — Not a directory" 를 냈다(리뷰 moai-f31d.lhe
 /// 12번). 없는 자리는 저쪽이 이미 제 낱말로 대므로(`디렉터리가 없다`) 여기서 한 번 더 댈 것이 없다.
 ///
-/// **없는 자리는 대기 자리로 안 간다.** 떨어진 판의 대기 자리(moai-bdej)는 "자리는 서 있는데 못
-/// 닿았다"(`EACCES`·`ELOOP`·`ESTALE`)를 위한 것이고, 그때는 다음 성한 판이 합쳐 준다. 없는 자리에는
-/// 합쳐 줄 다음 판이 없다 — 그 뿌리로는 [`crate::store::Repo::open`] 이 `Missing` 을 내 읽을 이슈부터
-/// 없으니, 도장을 대기 자리에 쌓으면 아무도 안 여는 파일만 남는다.
+/// **없는 자리도 대기 자리로 간다**(moai-jfgn, 2026-09-21 사용자 결정). 한때는 안 갔다 — 없는 자리에는
+/// 합쳐 줄 다음 판이 없다고 보았다. 그 말은 **영영 죽은 뿌리**에 대해서만 참이었다: 링크 하나가 잠깐
+/// 파일로 바뀌었다가 돌아오는 창에서는 그 창에 찍힌 도장이 받은 철자의 읽음 파일로 갔고, 자리가 다시
+/// 풀린 뒤에는 그것이 [`Place::past`] 라 **처음 짓는 파일일 때만** 합쳐졌다 — 지금 자리 파일이 이미
+/// 서 있는 흔한 판에서는 그 도장을 아무도 다시 안 봤다. 탐색기를 띄워 둔 채 그 링크가 바뀌면 `r` 이
+/// 그 창에 든다.
 ///
-/// **다만 그 말은 영영 죽은 뿌리에 대해서만 참이다**(리뷰 7번). 링크 하나가 잠깐 파일로 바뀌었다가
-/// 돌아오는 판에서는, 그 창에 찍힌 도장이 받은 철자의 읽음 파일로 가고 자리가 다시 풀린 뒤에는 그것이
-/// [`Place::past`] 라 **처음 짓는 파일일 때만** 합쳐진다 — 지금 자리 파일이 이미 있으면 그 도장은
-/// 조용히 남겨진다. 탐색기를 띄워 둔 채 그 링크가 바뀌면 `r` 이 그 창에 든다.
+/// 대가는 그 창 동안의 화면이다 — 읽기가 지금 자리 파일 대신 대기 자리를 보므로 그 창에 선 줄은
+/// [NEW] 로 선다. 그 창에는 [`crate::store::Repo::open`] 이 `Missing` 을 내 읽을 이슈부터 없고, 창이
+/// 닫히면 다음 성한 쓰기가 합쳐 도장이 제자리로 돌아온다. 영영 죽은 뿌리에는 아무도 안 여는 대기
+/// 자리가 남는데, 그 뿌리로는 읽을 이슈가 없어 적힐 도장도 거의 없다 — 잃는 쪽이 더 비싸다.
 ///
-/// 이 구멍은 `NotADirectory` 가 새로 연 것이 아니라 `NotFound` 가 처음부터 가진 것이다 — 없는 자리를
-/// 받은 철자로 떨어뜨리는 길(moai-f5e3, 사용자 결정 2026-09-20)이 곧 그 구멍이고, 여기서는 그 길에
-/// 갈래 하나를 더 맞췄을 뿐이다. 닫으려면 "없는 자리도 대기 자리로 보낸다" 로 가야 하는데, 그러면
-/// 읽기가 지금 자리 파일을 못 봐 그 창 동안 모든 줄이 [NEW] 로 선다 — moai-bdej 의 차례 결정을 다시
-/// 여는 일이라 여기서 안 뒤집는다. 그 물음은 idea 로 담았다.
-fn settle(path: &Path) -> (PathBuf, Option<SheetTrouble>) {
+/// **까닭은 안 댄다.** 없는 자리는 [`crate::store::Repo::open`] 이 이미 제 낱말로 대므로(`디렉터리가
+/// 없다`) 여기서 한 번 더 댈 것이 없다 — 떨어지는 것과 까닭을 대는 것은 **다른 물음**이라 [`Settled`]
+/// 가 둘을 가른다.
+fn settle(path: &Path) -> Settled {
     match std::fs::canonicalize(path) {
-        Ok(real) => (real, None),
-        Err(e) if crate::store::gone(&e) => (path.to_path_buf(), None),
-        Err(e) => (path.to_path_buf(), Some(SheetTrouble::Unsettled { at: path.to_path_buf(), said: e.to_string() })),
+        Ok(real) => Settled::Here(real),
+        Err(e) if crate::store::gone(&e) => Settled::Fallen(None),
+        Err(e) => Settled::Fallen(Some(SheetTrouble::Unsettled { at: path.to_path_buf(), said: e.to_string() })),
     }
 }
 
@@ -176,12 +176,25 @@ fn spool_at(dir: &Path, root: &Path) -> PathBuf {
 ///
 /// **고르는 자는 하나다**([`place_of`]). 갈라 두던 판은 못 푼 자리에서 둘이 다른 파일을 댔다 —
 /// 쓰기는 대기 자리로 가는데 표식만 재는 쪽은 읽음 파일을 재, 탐색기가 제가 적은 것을 못 보았다.
-fn chosen(dir: &Path, root: &Path) -> (PathBuf, PathBuf, Option<SheetTrouble>) {
+fn chosen(dir: &Path, root: &Path) -> (PathBuf, PathBuf, bool, Option<SheetTrouble>) {
     match settle(root) {
         // 못 풀었다 — 이 판의 도장은 대기 자리로 간다. 뿌리는 받은 철자다(문지기와 `claim` 이 그것으로 견준다).
-        (_, Some(why)) => (spool_at(dir, root), root.to_path_buf(), Some(why)),
-        (real, None) => (sheet_at(dir, &real), real, None),
+        Settled::Fallen(why) => (spool_at(dir, root), root.to_path_buf(), true, why),
+        Settled::Here(real) => (sheet_at(dir, &real), real, false, None),
     }
+}
+
+/// [`settle`] 이 낸 것 — **떨어졌는가**와, 떨어졌으면 사람에게 댈 까닭.
+///
+/// **둘을 가른다**(moai-jfgn). 까닭이 있는가로 떨어졌는가를 묻던 판은 없는 자리를 조용히 지나가게
+/// 하려다(moai-blvx) 그 판까지 성한 자리로 셌고, 그래서 그 창의 도장이 받은 철자의 읽음 파일에
+/// 남았다. 조용한 것과 떨어진 것은 다른 물음이다.
+enum Settled {
+    /// 풀었다 — 그 자리의 읽음 파일에 적는다.
+    Here(PathBuf),
+    /// 못 풀었다 — 이 판의 도장은 대기 자리로 간다([`spool_at`]). 까닭이 `None` 이면 **없는 자리**고,
+    /// 그 말은 [`crate::store::Repo::open`] 이 이미 제 낱말로 댄다.
+    Fallen(Option<SheetTrouble>),
 }
 
 /// 한 프로젝트의 읽음이 사는 자리들.
@@ -275,10 +288,12 @@ pub struct Place {
 /// 마이그레이션이 아니고 읽음을 잃는 사람도 없다(옛 `[read]` 를 겹쳐 보는 것과 같은 꼴이다).
 pub fn place_of(config: &Path, root: &Path) -> Place {
     let dir = dir_of(config);
-    let (at, root_of, why) = chosen(dir, root);
+    let (at, root_of, fell, why) = chosen(dir, root);
     // 못 푼 판에서는 `at` 이 곧 대기 자리다 — 옛 자리도 대기 자리도 안 든다(제 자신에 겹칠 일이 없고,
     // 옛 철자 파일은 그 판에서 이름이 `at` 과 같아 이미 열려 있다).
-    if why.is_some() {
+    //
+    // **가르는 것은 떨어졌는가지 까닭이 있는가가 아니다**(moai-jfgn) — 없는 자리는 조용히 떨어진다.
+    if fell {
         return Place {
             at,
             root: root_of,
@@ -1215,6 +1230,10 @@ mod tests {
     /// **없는 것은 탈이 아니다** — 설정도 읽음 파일도 처음에는 없다. 가르는 자는
     /// [`crate::store::gone`] 하나라 `NotFound` 와 `NotADirectory` 가 한 낱말로 읽힌다(moai-blvx).
     ///
+    /// **다만 조용한 것과 떨어지는 것은 다른 물음이다**(moai-jfgn, 2026-09-21 사용자 결정) — 없는
+    /// 자리도 대기 자리로 떨어지되 까닭은 안 댄다. 한 물음으로 묶던 판은 그 창의 도장을 받은 철자의
+    /// 읽음 파일에 남겨, 자리가 돌아온 뒤에 아무도 그것을 다시 안 봤다.
+    ///
     /// **두 줄이 한자리에 선다**(리뷰의 "재는 자가 한 자리에 서 있는가"). 없는 자리가 조용한 것과 못
     /// 닿은 자리가 말하는 것은 같은 갈림의 두 쪽이라, 갈라 두면 한쪽을 고친 날 다른 쪽이 안 무른다.
     #[test]
@@ -1223,7 +1242,9 @@ mod tests {
         let cfg = s.join("config.toml");
         let gone = s.join("사라진 것");
         let place = place_of(&cfg, &gone);
-        assert_eq!(place.at, sheet_at(dir_of(&cfg), &gone));
+        assert_eq!(place.at, spool_at(dir_of(&cfg), &gone), "없는 자리를 대기 자리로 안 보냈다");
+        assert!(place.fallen, "없는 자리를 성한 자리로 셌다");
+        assert_eq!(place.pending, None, "제 자신을 대기 자리로도 들었다");
         assert_eq!(place.root, gone, "못 푼 자리를 뿌리로 안 들었다");
         assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
 
@@ -1236,7 +1257,7 @@ mod tests {
             let through = s.join("파일/밑");
             let place = place_of(&cfg, &through);
             assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
-            assert_eq!(place.at, sheet_at(dir_of(&cfg), &through), "없는 자리를 대기 자리로 보냈다");
+            assert_eq!(place.at, spool_at(dir_of(&cfg), &through), "없는 자리를 대기 자리로 안 보냈다");
             assert!(read(&cfg, &through, &BTreeMap::new()).problems.is_empty(), "읽기가 없는 자리를 탈로 댔다");
             // 그 조건에 저장소 쪽이 내는 답과 **같은 낱말인가** — 갈리면 이 고침이 무른 것이다.
             assert!(
@@ -1530,8 +1551,9 @@ mod tests {
     /// 떨어진 판 하나를 지나 **자리가 다시 풀린** 곳 — 지금 자리 파일과, `fell_id` 의 도장 하나를 든 대기
     /// 자리가 함께 선다. 대기 자리를 성한 표에 합치는 시험들이 이 하나로 판을 짓는다.
     ///
-    /// - **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 이제 **없는 자리**로
-    ///   읽혀 조용히 지나가고, 떨어진 도장이 대기 자리로 안 간다
+    /// - **막는 것은 고리다**(`ELOOP`, moai-blvx) — 파일을 두어 막던 판은 그 자리가 **없는 자리**로 읽혀
+    ///   까닭 없이 조용히 떨어진다. 도장은 이제 그 판에서도 대기 자리로 가므로(moai-jfgn) 합치기를 재는
+    ///   데는 쓸 수 있지만, 까닭을 함께 재는 시험은 고리라야 선다
     /// - **받은 철자가 푼 경로와 다르다** — `a_stamp_that_fell_to_…` 의 그 문이다
     /// - **지금 자리가 먼저 선다**(`z`) — 떨어진 뒤에 세우면 그 첫 성한 쓰기가 대기 자리를 합쳐, 시험이
     ///   손으로 막으려는 자리에 때가 먼저 앉는다
@@ -1552,6 +1574,52 @@ mod tests {
         let fell = spool_at(dir_of(&cfg), &spelling);
         assert!(fell.exists(), "시험의 전제 — 떨어진 판이 대기 자리에 안 적었다");
         (cfg, spelling, fell)
+    }
+
+    /// **자리가 없던 창의 도장도 자리가 돌아오면 합쳐진다**(moai-jfgn, 2026-09-21 사용자 결정).
+    ///
+    /// 링크 하나가 잠깐 사라졌다 돌아오는 창에 탐색기의 `r` 이 든다. 그 창의 도장을 받은 철자의 **읽음
+    /// 파일**로 보내던 판은, 자리가 풀린 뒤 그것이 [`Place::past`] 라 처음 짓는 파일일 때만 합쳐졌다 —
+    /// 지금 자리 파일이 이미 선 흔한 판에서는 아무도 다시 안 봤다. 지금은 대기 자리로 가므로 다음 성한
+    /// 쓰기가 합치고 지운다.
+    ///
+    /// **창 동안 읽기가 지금 자리를 안 보는 것이 그 대가다** — 그것도 함께 잰다. 무르면 여기부터
+    /// 붉어져야 사람이 무엇을 되돌렸는지 안다.
+    #[test]
+    #[cfg(unix)]
+    fn a_stamp_from_a_window_with_no_place_joins_the_next_healthy_write() {
+        let s = Scratch::new("read-marks-gone-window");
+        let cfg = s.join("config.toml");
+        std::fs::create_dir_all(s.join("real/proj")).unwrap();
+        let gate = s.join("문");
+        std::os::unix::fs::symlink("real", &gate).unwrap();
+        let spelling = s.join("문/proj");
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "성한 판")]))).unwrap();
+        let at = place_of(&cfg, &spelling).at;
+        assert!(at.exists(), "시험의 전제 — 지금 자리 파일이 이미 섰다");
+
+        // 자리가 사라진다 — 고리도 권한도 아닌 **없는 자리**다.
+        std::fs::remove_file(&gate).unwrap();
+        let place = place_of(&cfg, &spelling);
+        assert!(place.fallen, "없는 자리를 성한 자리로 셌다");
+        assert!(place.problems.is_empty(), "없는 자리를 탈로 댔다 — {:?}", place.problems);
+        let spool = spool_at(dir_of(&cfg), &spelling);
+        assert_eq!(place.at, spool, "없는 자리의 도장을 대기 자리로 안 보냈다");
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("w", "창 안에서")]))).unwrap();
+        assert!(spool.exists(), "그 창의 도장이 대기 자리에 안 갔다");
+        // **대가**: 그 창 동안 읽기는 지금 자리 파일을 안 본다.
+        let in_window = read(&cfg, &spelling, &BTreeMap::new()).seen;
+        assert_eq!(in_window.get("z"), None, "창 동안 지금 자리를 봤다 — 결정이 뒤집혔다");
+        assert_eq!(in_window.get("w").map(String::as_str), Some("창 안에서"));
+
+        // 자리가 돌아온다 — 다음 성한 쓰기가 합치고 지운다.
+        std::os::unix::fs::symlink("real", &gate).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("y", "돌아온 뒤")]))).unwrap();
+        assert!(!spool.exists(), "다 앉았는데 대기 자리를 남겼다");
+        let seen = read(&cfg, &spelling, &BTreeMap::new()).seen;
+        assert_eq!(seen.get("w").map(String::as_str), Some("창 안에서"), "그 창의 도장을 잃었다");
+        assert_eq!(seen.get("z").map(String::as_str), Some("성한 판"));
+        assert_eq!(seen.get("y").map(String::as_str), Some("돌아온 뒤"));
     }
 
     /// **깨진 대기 자리 위에서 떨어진 판은 멈추되, 그 파일이 무엇인지 함께 댄다**(moai-pm2h,
@@ -2274,12 +2342,18 @@ mod tests {
 
     /// **이름은 안 바뀐다** — 바뀌면 모든 사람의 읽음이 한 번에 사라진다. 셈은 [`crate::text::fnv1a64`]
     /// 가 제 시험값으로 못박으므로, 여기서는 **그 셈에 매였다는 것**을 이름으로 못박는다.
+    ///
+    /// **대기 자리도 같은 해시를 쓴다** — 떨어진 판과 그것을 합칠 성한 판이 한 이름으로 만나는 자리라,
+    /// 한쪽만 옮기면 합치기가 영영 안 일어난다.
     #[test]
     fn the_hash_is_pinned_so_the_names_never_move() {
-        let name =
-            |root: &str| place_of(Path::new("/c/config.toml"), Path::new(root)).at.file_name().unwrap().to_owned();
+        let name = |root: &str| sheet_at(Path::new("/c"), Path::new(root)).file_name().unwrap().to_owned();
         assert_eq!(name("/a/api"), "c812cb6e42a00af2.toml");
         assert_ne!(name("/a/api"), name("/b/api"));
+        assert_eq!(
+            spool_at(Path::new("/c"), Path::new("/a/api")).file_name().unwrap(),
+            "c812cb6e42a00af2.pending.toml"
+        );
         assert_eq!(
             place_of(Path::new("/c/config.toml"), Path::new("/a/api")).at.parent().unwrap(),
             Path::new("/c/read")
