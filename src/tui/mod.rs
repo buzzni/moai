@@ -225,21 +225,26 @@ impl Pane {
         Pane::ALL[(self.at() + Pane::ALL.len() - 1) % Pane::ALL.len()]
     }
 
-    /// 한 칸 왼쪽·오른쪽. **끝에서는 제자리다** — vi 의 `Ctrl-w h`·`Ctrl-w l` 이 그렇다.
+    /// 한 칸 그쪽으로. **이웃이 없으면 제자리다** — vi 의 `Ctrl-w h`·`j`·`k`·`l` 이 그렇다.
     ///
     /// **그림을 따라간다**(moai-2g7d). 상세가 왼쪽에 서면 `Ctrl-w h` 는 상세로 간다 — 칸의 차례를
     /// 코드에 박아 두면 자리를 돌린 순간 `h` 가 오른쪽으로 가서, 손에 익은 키가 화면과 거꾸로 선다.
     ///
-    /// **위아래로 갈랐으면 좌우 이웃이 없다** — vim 그대로 제자리다. 그때 칸을 옮기는 것은
-    /// `Ctrl-w w`(`Browse::FocusNext`)다.
+    /// **가른 축이 아닌 방향은 제자리다**(moai-x7pa) — 좌우로 갈랐으면 `j`·`k` 가, 위아래로
+    /// 갈랐으면 `h`·`l` 이 vim 그대로 안 움직인다. 어느 자리에서든 `Ctrl-w w`
+    /// (`Browse::FocusNext`)는 돈다.
     pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
-        if at.vertical() {
+        use keys::Side::*;
+        // 가른 축과 누른 방향의 축이 다르면 이웃이 없다 — 재는 자는 [`keys::Side::on_axis`]
+        // 하나고, `Browse::enabled` 가 "이 키가 서는가" 를 같은 자로 가른다.
+        if !side.on_axis(at) {
             return self;
         }
-        let (left, right) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
+        // 앞에 선 칸이 **왼쪽이자 위**다 — 가른 축 하나로 두 방향을 같이 읽는다.
+        let (first, last) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
         match side {
-            keys::Side::Left => left,
-            keys::Side::Right => right,
+            Left | Up => first,
+            Right | Down => last,
         }
     }
 
@@ -559,8 +564,12 @@ fn warnings_in<'a>(
 /// `⎇` 워크트리 마크까지 제 것으로 세우기로 했고(사용자 결정 2026-09-19, moai-ucx8), 그러려면 이
 /// 스물몇이 프로젝트마다 한 벌씩 있어야 한다. 흩어 두면 그 한 벌을 고르는 자리가 필드 수만큼 는다.
 ///
-/// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글·누구인가는 화면에 하나뿐이라
-/// [`App`] 에 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
+/// **보는 사람의 것은 안 든다** — 커서·굴린 자리·정렬·열·보기 토글은 화면에 하나뿐이라 [`App`] 에
+/// 남는다. 여기 드는 것은 *그 프로젝트가 무엇인가* 와 *그 안에서 어디를 보나* 다.
+///
+/// **누구인가는 그 가름의 예외다**([`Site::me`], moai-ropk) — 사람은 화면에 하나지만 *이 프로젝트에서
+/// 그 사람이 누구로 적히는가* 는 뿌리마다 다르다(프로젝트마다 git 설정이 다를 수 있다). 푸는 값이
+/// 비싸 셀 때마다 다시 풀 수 없어, 푼 답을 그 프로젝트 곁에 둔다.
 pub struct Site {
     /// 이 화면의 말(moai-ra67). **탐색기도 고른 말로 선다** — 한때 이 층에 말이 안 닿아
     /// `layer::shut` 이 `Lang::Ko` 를 손으로 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는
@@ -580,6 +589,32 @@ pub struct Site {
     pub path: Path,
     /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
     pub repo: Option<Repo>,
+    /// **이 프로젝트에서 나는 누구인가** — `이름 (메일)`. [NEW] 를 가르는 자다([`App::recount_unread_in`]).
+    ///
+    /// **푸는 자리는 넷이다**(moai-z9pc, moai-j038.vna, moai-ropk) — 띄울 때(`cmd::tui`), 프로젝트로
+    /// 들어갈 때([`super::layer::App::enter_project`]), 그 프로젝트를 **읽을 때**([`App::follow_site`]),
+    /// 묻는 칸에서 사람을 받을 때([`App::answer`] → [`App::relearn_me_in_places`]). **세는 자리에서는
+    /// 안 푼다** — [`App::recount_unread_in`] 은 푼 값을 읽기만 한다.
+    ///
+    /// 읽을 때 푸는 것은 "읽기는 사람을 묻지 않는다"(CLAUDE.md)를 안 깬다 — [`App::whoami`] 는
+    /// `git config` 를 물을 뿐 **사람에게** 묻지 않는다(`reading_never_asks_who` 가 재는 것이 그것이다).
+    ///
+    /// **줄과 같이 산다**(moai-ropk). 프로젝트마다 git 설정이 다를 수 있어 뿌리마다 다시 풀어야 하는데
+    /// ([`App::whoami`]), 그 한 번이 `git config` 프로세스 둘이다(띄우기 11ms + 푸는 데 22ms). 한때
+    /// 한눈 보기가 그것을 **걸음마다** 풀어 `term.draw` 와 `event::poll` 사이에서 화면이 그만큼 멈췄다.
+    /// 여기 두면 그 프로젝트를 읽을 때 한 번 풀리고, 다시 읽을 때 같이 다시 풀린다 — `Site` 를
+    /// 갈아 끼우는 길이 곧 다시 푸는 길이라 둘이 어긋날 자리가 없다.
+    ///
+    /// **다만 그 한 번이 아직 UI 실에 선다**(리뷰) — `follow_site` 는 스레드가 읽어 온 것을 **들이는**
+    /// 자리라, 프로세스 둘이 `term.draw` 와 `event::poll` 사이에서 돈다. 걸음마다가 아니라 읽기마다라
+    /// 값은 줄었지만, 옆 세션이 자주 쓰는 저장소에서 펼친 프로젝트가 여럿이면 다시 읽을 때마다 그만큼
+    /// 멈춘다. 옮길 자리는 읽는 스레드(`read_wanted` 의 닫음이 `repo` 를 이미 든다)다.
+    ///
+    /// **화면이 도는 동안 바뀐 git 설정은 그 프로젝트를 다시 읽을 때까지 안 보인다.** 줄이 그런 것과
+    /// 같은 결이라 따로 무르는 자를 두지 않는다(사용자 결정 2026-09-21).
+    ///
+    /// `None` 이면 **모른다** — 그때 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
+    pub me: Option<String>,
     /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
     /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
     pub now: String,
@@ -803,11 +838,6 @@ pub struct App {
     /// 옛 바이너리나 옆 세션이 읽음을 잃는다. 프로젝트의 읽음 파일에 없는 id 만 여기서 든다
     /// ([`crate::read_marks::read`]). 설정이 바뀌면 [`App::follow_config`] 가 다시 든다.
     pub legacy_read: std::collections::BTreeMap<String, String>,
-    /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
-    /// 푼다(moai-z9pc, moai-j038.vna) — 헤더(`told_user`)가 뿌리와 `user` 가 바뀔 때 다시 푸는 것과 같은
-    /// 자다. 다시 읽기마다 부르지는 않는다 — 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가 무너진다
-    /// (`reading_never_asks_who`). 모르면 `None` 이고 그러면 [NEW] 가 한 줄도 안 선다.
-    pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
     /// 상세 칸이 **어디에** 서나 — `right`·`bottom`·`left`·`top`(moai-2g7d). [`App::detail_open`] 과
@@ -946,6 +976,7 @@ impl Site {
             cfg,
             path,
             repo: None,
+            me: None,
             now: crate::model::now(),
             unreadable,
             warnings: 0,
@@ -1270,7 +1301,6 @@ impl App {
             detail_at: view::DetailAt::default(),
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
-            me: None,
             saved: Default::default(),
             list: Scroll::default(),
             quit: false,
@@ -2474,19 +2504,26 @@ impl App {
     ///
     /// **옛 `[read]` 가 바뀐 판에서만 부른다.** 그 표는 이 바이너리가 안 적으니 드문 걸음이고, 값은
     /// 펼친 프로젝트 수만큼의 읽음 파일 읽기다. 걸음마다 돌면 그 값을 늘 치른다.
+    ///
+    /// **[`App::opened_seats`] 를 안 쓴다**(리뷰) — 그쪽은 걸음마다 도는 [`App::follow_read`] 의
+    /// 거르개라 프로젝트 안에서는 한 줄도 안 낸다(moai-p4ec). 여기는 **한 번뿐인 길**이고 못 든 것을
+    /// 다시 드는 자가 없다: 옛 `[read]` 는 사용자 설정에 살아 그 프로젝트의 읽음 파일 표식을 안
+    /// 건드리므로, 올라온 뒤의 `follow_read` 도 낡은 것을 못 본다. 프로젝트 안에서 그 파일이 바뀌면
+    /// 층의 줄은 세션 내내 옛 표로 [NEW] 를 센다 — 두 번 재는 값보다 그쪽이 비싸다.
     fn load_read_in_places(&mut self) {
-        for seat in self.opened_seats() {
+        for seat in self.seats_with_site() {
             self.load_read_in(seat);
         }
     }
 
     /// 층에서 **펼쳐 둔** 프로젝트의 자리들 — 표를 들고 있고([`layer::Place::site`]) 접혀 있지 않은 줄이다.
+    /// **어디에 서 있는지는 안 본다** — 그것을 가르는 자는 [`App::opened_seats`] 다.
     ///
     /// **거르개는 [`App::sites`] 와 같다**(리뷰). 접기([`App::fold`])는 `site` 를 안 버리므로
     /// (`읽은 것은 안 버린다`) `site.is_some()` 하나로 고르면 **안 보이는 줄까지** 걸음마다 재고 읽는다 —
     /// 그리는 쪽이 이미 접힌 줄을 빼고 있으니, 재는 쪽도 같은 줄을 봐야 값이 화면과 맞는다. 다시 펼치면
     /// 그 걸음의 [`App::follow_read`] 가 표식 차이를 보고 바로 든다.
-    fn opened_seats(&self) -> Vec<Seat> {
+    fn seats_with_site(&self) -> Vec<Seat> {
         let Some(l) = self.layer.as_ref() else { return Vec::new() };
         l.places
             .iter()
@@ -2494,6 +2531,24 @@ impl App {
             .filter(|(_, p)| p.site.is_some() && !self.folded.contains(&p.path))
             .map(|(n, _)| Seat::Place(n))
             .collect()
+    }
+
+    /// [`App::seats_with_site`] 중 **지금 화면에 선** 것 — 걸음마다 도는 [`App::follow_read`] 의 거르개다.
+    ///
+    /// **프로젝트 안에서는 한 줄도 없다**(moai-p4ec) — 층의 줄은 그때 화면에 없다([`App::rows`] 가
+    /// `on_layer()` 로 가른다). 안 가르면 **들어간 프로젝트를 두 번 잰다**: [`super::layer::App::enter_project`]
+    /// 는 그 줄의 `Site` 를 가져가지 않고 베껴 가므로 층에 제 사본이 남고, 그 사본이
+    /// [`App::follow_read`] 의 `Seat::Here` 옆에 한 번 더 선다. 값은 줄마다 `canonicalize` 하나와
+    /// `stat` 한둘이고(9.5us + 5.3us), 나머지 줄까지 치면 프로젝트 안에서는 그 셈이 통째로 헛돈다.
+    /// 올라오면 그 걸음의 `follow_read` 가 표식 차이를 보고 바로 든다 — 접었다 편 줄과 같은 길이다.
+    ///
+    /// **한 번뿐인 길은 이것을 쓰면 안 된다** — 건너뛴 것을 다시 드는 자가 걸음뿐이라,
+    /// 걸음이 안 보는 차이(`load_read_in_places` 의 옛 `[read]`)는 영영 안 들어온다.
+    fn opened_seats(&self) -> Vec<Seat> {
+        if !self.on_layer() {
+            return Vec::new();
+        }
+        self.seats_with_site()
     }
 
     /// **읽음 파일이 바뀌었으면 다시 든다** — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다
@@ -2626,13 +2681,10 @@ impl App {
         // **누구인가는 그 프로젝트의 뿌리에서 푼다** — 프로젝트마다 git 설정이 다를 수 있고,
         // 안 풀면 남의 프로젝트의 `[NEW]` 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트>
         // read --all` 과 다른 줄을 센다(`App::enter_project` 가 들어갈 때 하는 것과 같은 자다).
-        let me = match seat {
-            Seat::Here => self.me.clone(),
-            Seat::Place(n) => match self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()) {
-                Some(site) => site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root)),
-                None => return,
-            },
-        };
+        // **푼 값을 읽기만 한다**([`Site::me`], moai-ropk) — 한눈 보기의 줄에서 여기 `whoami` 를
+        // 부르던 판은 걸음마다 `git config` 프로세스 둘을 띄웠고(11ms + 22ms), 그것이 `term.draw` 와
+        // `event::poll` 사이에서 돌아 그대로 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리다.
+        let Some(me) = self.site_of_seat(seat).map(|s| s.me.clone()) else { return };
         let Some(site) = self.site_mut(seat) else { return };
         let Some(me) = me else {
             site.unread.clear();
@@ -2662,6 +2714,36 @@ impl App {
         // 프로젝트를 남의 읽음으로 셌다.
         let Site { issues, seen, unread, .. } = site;
         *unread = crate::query::unread(issues, &me, seen).into_iter().map(str::to_string).collect();
+    }
+
+    /// 층에 표를 든 줄마다 누구인지를 **다시 풀고** [NEW] 를 다시 센다 — 묻는 칸이 사람을 받은
+    /// 뒤([`App::answer`])의 자리다.
+    ///
+    /// **없으면 [NEW] 가 영영 안 선다**(리뷰). [`Site::me`] 는 그 프로젝트를 읽을 때 한 번 풀리는데
+    /// ([`App::follow_site`]), 표를 든 줄은 다시 안 읽힌다([`App::want_site`] 가 `site.is_some()` 에
+    /// 서 돌아선다). 그래서 띄울 때 누군지 모르던 기계에서 층의 줄을 펼쳐 놓고 사람을 대면, 지금
+    /// 선 프로젝트만 [NEW] 가 서고 나머지는 세션 내내 한 줄도 안 섰다 — 헤더는 그 사람을 대는데
+    /// 안 읽음은 "모름" 에 머무는, moai-j038.vna 가 막으려던 바로 그 화면이다.
+    ///
+    /// **접힌 줄도 든다** — 접기는 표를 안 버려, 빼면 다시 펼쳐도 옛 값 그대로다.
+    ///
+    /// **값은 프로세스가 아니다** — 여기 닿았다는 것은 `self.user` 가 섰다는 뜻이고, 그러면
+    /// [`crate::model::actor`] 는 첫 갈래에서 답해 `git config` 를 안 띄운다.
+    fn relearn_me_in_places(&mut self) {
+        let seats: Vec<Seat> = match self.layer.as_ref() {
+            Some(l) => {
+                l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| Seat::Place(n)).collect()
+            }
+            None => Vec::new(),
+        };
+        for seat in seats {
+            let root = self.site_of_seat(seat).and_then(|s| s.repo.as_ref()).map(|r| r.root.clone());
+            let me = root.and_then(|root| self.whoami(&root));
+            if let Some(site) = self.site_mut(seat) {
+                site.me = me;
+            }
+            self.recount_unread_in(seat);
+        }
     }
 
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
@@ -2913,6 +2995,27 @@ impl App {
     /// 되돌리지 않을 선).
     ///
     /// **아직 안 읽은 프로젝트는 머리줄만 선다** — 읽는 것은 펼칠 때다(moai-12yx).
+    ///
+    /// **프레임마다 다시 짓는다. 캐시를 안 둔다**(moai-cucj, 사용자 결정 2026-09-21). 캐시에는 손으로
+    /// 거는 무효화가 열 곳 가까이 드는데(쓰기·읽음·펼침·접기·거름망·보기·차례·층 다시 세우기·
+    /// 프로젝트 오가기), 하나를 빠뜨리면 화면이 **옛 줄로 선다** — 값이 느린 것보다 나쁜 되돌림이다.
+    ///
+    /// 2026-09-21 에 이 저장소(이슈 1,727줄)로 다시 쟀다(dev, 스무 판의 최솟값): 뿌리 16us, 통째로
+    /// 펴 198줄에 1.15ms — 줄당 약 5.8us 다. moai-b910 이 적은 9.2ms 는 줄 1,700개가 한 화면에 설
+    /// 때의 값이고, 그 자리는 이 저장소에서 안 선다. 층에서는 펼친 프로젝트마다 이만큼이 더해진다.
+    ///
+    /// **값을 적는 자리는 여기 하나다**(리뷰) — `draw::screen` 이 제 곁에 "1,600 이슈에서 20ms" 를
+    /// 따로 들고 있어, 같은 함수의 값을 두 배 차이로 말하는 글 둘이 스무 줄 사이에 섰다. 그쪽은
+    /// **한 프레임에 한 번** 이라는 규칙만 들고 값은 이 문단을 가리킨다.
+    ///
+    /// **키 하나에 한 번이 아니다** — 그리는 쪽 말고도 [`App::current`]·[`App::settle`]·
+    /// [`App::after_search`]·[`App::key`] 가 저마다 짓는다. 검색에 글자 하나를 치면 두세 판이 돈다.
+    /// 위의 값은 **한 판**의 것이라, 그만큼 곱해 읽는다.
+    ///
+    /// **다시 잴 때**: 한 프로젝트가 수천 줄로 펴지거나, 층에 여럿 펼친 화면에서 키 하나가 눈에 띄게
+    /// 늦을 때. 그 전에 캐시를 두는 것은 안 난 값을 위해 되돌리기 어려운 자리를 여는 일이다.
+    /// 캐시보다 먼저 볼 것은 **짓는 판을 줄이는 것**이다 — 지은 목록을 받는 몸이 이미 여럿 있다
+    /// (`current_of`·`stand`·`key_ctx`).
     pub fn rows(&self) -> Vec<Row> {
         if let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) {
             let mut rows = Vec::new();
@@ -3006,6 +3109,11 @@ impl App {
                 // 바구니를 다른 말로 부른다.
                 site.lang = self.site.lang;
                 site.repo = repo;
+                // **누군지도 여기서 푼다**(moai-ropk) — 그 프로젝트의 뿌리에서, 읽을 때 한 번.
+                // [`super::layer::App::enter_project`] 가 들어가며 하는 것과 같은 자다. 프로젝트마다
+                // git 설정이 다를 수 있어 뿌리마다 풀어야 하고, 그 한 번이 프로세스 둘이라 [NEW] 를
+                // 세는 자리에서 걸음마다 부르면 화면이 그만큼 멈춘다.
+                site.me = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root));
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
                 site.warnings = fresh.warnings;
@@ -3711,6 +3819,8 @@ impl App {
             prev_pane: self.focus.prev().word(self.site.lang),
             left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang),
             right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang),
         }
     }
 
@@ -3995,8 +4105,12 @@ impl App {
             self.user = Some(crate::model::label(&who.name, Some(&who.email), crate::config::Naming::Full));
             // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더는 이 사람을 대는데 안 읽음이
             // 띄울 때의 "모름" 에 머물면 한 화면이 두 사람을 말하고, `SPC m a` 는 늘 "적을 것이 없다" 다.
-            self.me = self.user.clone();
+            self.site.me = self.user.clone();
             self.recount_unread();
+            // **층에 펼쳐 둔 줄도 이 사람으로 다시 센다**(리뷰) — 위의 한 줄은 지금 선 프로젝트만
+            // 고친다. [`Site::me`] 가 읽을 때 한 번 풀리는 값이 되면서(moai-ropk), 한때 `whoami` 를
+            // 셀 때마다 풀어 다음 걸음에 저절로 갚던 길이 닫혔다.
+            self.relearn_me_in_places();
             (ask.then)(self);
         }
     }
@@ -5783,7 +5897,7 @@ mod tests {
         }
         // 시계를 고정한다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         let all = a.site.unread.len();
         assert_eq!(all, a.site.issues.len(), "내 줄인데 안 읽음이 빠졌다");
@@ -5822,7 +5936,7 @@ mod tests {
             i.assignee_email = Some("raven@example.com".into());
         }
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         // 마일스톤 안에 서서 에픽을 펼치고, 그 멤버 줄에 선다.
         a.key(key(KeyCode::Enter));
@@ -5861,7 +5975,7 @@ mod tests {
             i.assignee_email = Some("raven@example.com".into());
         }
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         let all = a.site.unread.len();
         let stand = |a: &mut App, path: Path, id: &str| {
@@ -5912,7 +6026,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
 
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
         a.hit("r");
@@ -5944,7 +6058,7 @@ mod tests {
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = None;
+        a.site.me = None;
         a.recount_unread();
         assert!(a.site.unread.is_empty(), "누군지 모르는데 [NEW] 가 섰다");
 
@@ -5963,7 +6077,7 @@ mod tests {
             root.display().to_string()
         );
         std::fs::write(&sheet, &later).unwrap();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         assert!(a.site.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
@@ -6014,7 +6128,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
         a.load_read();
         assert_eq!(
             a.site.seen.get("argos-0001").map(String::as_str),
@@ -6055,7 +6169,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
 
         // 트래커에 없는 줄이 읽음 파일에 남아 있다 — 지운 이슈의 읽음은 아무도 다시 안 본다.
         crate::read_marks::update(
@@ -6201,7 +6315,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
         let at = crate::read_marks::place_of(&config, &root).at;
@@ -6242,7 +6356,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 파일이 없는 것은 탈이 아니다 — 그때는 다 [NEW] 가 맞다.
         a.load_read();
@@ -6286,7 +6400,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 띄우는 길이 하는 것 — 설정을 한 번 읽어 갈래를 넘긴다(`cmd::tui`).
         let reg = crate::user_config::read(Some(&config));
@@ -6326,7 +6440,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         std::fs::write(&config, "[[project]]\npath = \"/a\"\n").unwrap();
         let stamp = &a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
@@ -6387,7 +6501,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6435,7 +6549,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6505,7 +6619,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6555,7 +6669,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6616,7 +6730,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 지금 자리 파일은 **없다** — 아직 아무것도 안 읽었다. 대기 자리만 서 있고 못 읽는다.
         let place = crate::read_marks::place_of(&config, &root);
@@ -6653,7 +6767,7 @@ mod tests {
         a.site.repo = Some(crate::store::Repo::moved(root.clone(), cfg(), worktree.clone()));
         assert_ne!(a.here().as_deref(), Some(root.as_path()), "시험의 전제 — 선 자리와 뿌리가 갈렸다");
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
 
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
@@ -6718,7 +6832,7 @@ mod tests {
                 i.assignee = Some("레이븐".into());
                 i.assignee_email = Some("raven@example.com".into());
             }
-            a.me = Some("레이븐 (raven@example.com)".into());
+            a.site.me = Some("레이븐 (raven@example.com)".into());
             a.recount_unread();
             assert!(a.site.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.site.unread);
             a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
@@ -7836,25 +7950,48 @@ mod tests {
                 assert_eq!(from.step(keys::Side::Right, at), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
             }
         }
-        // 위아래로 갈랐으면 좌우 이웃이 없다 — vim 그대로 제자리고, 옮기는 것은 `Ctrl-w w` 다.
+        // **위아래로 가른 자리에는 `Ctrl-w j`·`k` 가 간다**(moai-x7pa) — 좌우로 갈랐을 때의
+        // `h`·`l` 과 같은 자다. 앞에 선 칸(`DetailAt::first`)이 왼쪽이자 위다.
+        for (at, first, last) in
+            [(DetailAt::Bottom, Pane::Explorer, Pane::Detail), (DetailAt::Top, Pane::Detail, Pane::Explorer)]
+        {
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Up, at), first, "{at:?} 에서 Ctrl-w k 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Down, at), last, "{at:?} 에서 Ctrl-w j 가 엉뚱한 칸으로 갔다");
+            }
+        }
+        // **이웃은 가른 축에만 있다** — vim 그대로 제자리고, 어느 자리에서든 도는 것은 `Ctrl-w w` 다.
         // **그래서 그 두 키는 바에도 안 선다**(리뷰) — 지금 선 칸의 이름을 가리키는 키가 서면
         // 숨긴 상세에서 `Tab` 을 걷은 것과 같은 거짓말이다.
-        for at in [DetailAt::Top, DetailAt::Bottom] {
-            for from in Pane::ALL {
-                assert_eq!(from.step(keys::Side::Left, at), from, "{at:?} 에서 Ctrl-w h 가 움직였다");
-                assert_eq!(from.step(keys::Side::Right, at), from, "{at:?} 에서 Ctrl-w l 이 움직였다");
-                assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
-            }
+        for (at, away) in [
+            (DetailAt::Top, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Bottom, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Left, [keys::Side::Up, keys::Side::Down]),
+            (DetailAt::Right, [keys::Side::Up, keys::Side::Down]),
+        ] {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
-            for side in [keys::Side::Left, keys::Side::Right] {
+            for side in away {
+                for from in Pane::ALL {
+                    assert_eq!(from.step(side, at), from, "{at:?} 에서 Ctrl-w {side:?} 가 움직였다");
+                    assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
+                }
                 assert!(keys::Browse::Focus(side).enabled(&c).is_err(), "{at:?} 에서 Ctrl-w {side:?} 가 섰다");
             }
-            // 칸을 도는 키는 그대로 선다 — 그쪽은 위아래로도 무언가 한다.
+            // 칸을 도는 키는 그대로 선다 — 그쪽은 어느 자리에서든 무언가 한다.
             assert!(keys::Browse::FocusNext.enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w w 가 걷혔다");
         }
-        for at in [DetailAt::Left, DetailAt::Right] {
+        // **가른 축의 두 쪽이 다 선다** — 한 자리에 한 쪽씩만 재면, 가르는 자를 "상세를 가리키는
+        // 쪽만 선다" 로 좁힌 날 기본 자리(`Right`)의 `Ctrl-w h` 가 말없이 죽는다(리뷰).
+        for (at, sides) in [
+            (DetailAt::Left, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Right, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Top, [keys::Side::Up, keys::Side::Down]),
+            (DetailAt::Bottom, [keys::Side::Up, keys::Side::Down]),
+        ] {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
-            assert!(keys::Browse::Focus(keys::Side::Left).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w h 가 걷혔다");
+            for side in sides {
+                assert!(keys::Browse::Focus(side).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w {side:?} 가 걷혔다");
+            }
         }
         a.detail_at = DetailAt::Right;
 
@@ -8553,7 +8690,7 @@ mod tests {
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
         // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
         // 띄울 때의 "모름" 에 머물면 방금 담은 제 줄에도 [NEW] 가 안 선다.
-        assert_eq!(a.me.as_deref(), Some("레이븐 (raven@example.com)"));
+        assert_eq!(a.site.me.as_deref(), Some("레이븐 (raven@example.com)"));
         assert!(a.site.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.site.unread);
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 
