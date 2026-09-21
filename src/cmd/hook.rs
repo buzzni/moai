@@ -195,8 +195,14 @@ fn decide(
         Event::PreToolUse => {
             use crate::hook::Call;
             let cwd = cwd.clone();
+            // **토막이 가리킨 자리는 한 번만 푼다**(moai-47zz) — [`route`] 와 아래 `stands` 가 저마다
+            // 부르던 판은 같은 명령줄에 같은 답을 두 번 물었다. 한 자리에서 풀어 나눠 쓴다.
+            let dirs = match call {
+                Call::Shell(_) => crate::hook::aimed(line, &cwd),
+                _ => Vec::new(),
+            };
             let (routes, there, aims) = match call {
-                Call::Shell(_) => route(&repo, line, &cwd),
+                Call::Shell(_) => route(&repo, line, &dirs),
                 _ => (Vec::new(), Vec::new(), Vec::new()),
             };
             let mine = |k: usize| !matches!(routes.get(k), Some(r) if *r != Route::Here);
@@ -264,15 +270,59 @@ fn decide(
             if let Call::Shell(_) = call
                 && !decision.blocks()
             {
-                let dirs = std::cell::OnceCell::new();
-                let stands = |k: usize, id: &str| -> Option<String> {
-                    let at = |issues: &[model::Issue]| {
-                        issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string())
+                // **같은 트래커를 토막마다 다시 열지 않는다**(moai-47zz) — 토막과 id 마다 디스크를
+                // 훑어 스냅샷을 통째로 다시 읽던 판은, 이 저장소가 스스로 일러 주는
+                // `moai -C <루트> mv <id> …` 꼴에서 그 파일을 토막 수 곱하기 id 수만큼 읽었다.
+                // 가리킨 자리가 같으면 한 번만 읽고, [`route`] 가 이미 푼 트래커는 그대로 쓴다.
+                //
+                // **`--from` 이 없으면 아무도 안 묻는다**(리뷰 moai-bujq.91c) — `picked_in` 은
+                // `--from` 이 선 토막에서만 `stands` 를 부른다. 미리 읽어 두던 판은 `moai -C <루트>
+                // show` 한 줄에도 그 스냅샷을 통째로 갈라, 이 줄이 줄이려던 값을 **도구 호출마다**
+                // 도로 치렀다(이 저장소의 1,700줄짜리 트래커로 재서 한 판에 67ms).
+                //
+                // **글자로 본다** — `picked_in` 이 `mv` 를 그렇게 보는 것과 같은 자다. 따옴표를
+                // 끼워 적은 `--fro"m"` 은 여기 안 걸리지만 저쪽 `mv` 문턱도 같이 안 걸리니, 새
+                // 어긋남을 여는 것이 아니다. 훅은 도구 호출마다 돈다.
+                let asks = matches!(call, Call::Shell(cmd) if cmd.contains("--from"));
+                // 자리마다 그 스냅샷의 자리 — `None` 이면 이 세션의 것이다.
+                let mut seen: Vec<(&Path, Option<usize>)> = Vec::new();
+                let mut snaps: Vec<Option<Vec<model::Issue>>> = Vec::new();
+                // 토막마다 그 스냅샷의 자리 — 없으면 이 세션의 것이다(가리킨 곳이 없는 흔한 토막).
+                let mut snap_at: Vec<Option<usize>> = Vec::new();
+                for (k, dir) in dirs.iter().enumerate().filter(|_| asks) {
+                    let Some(dir) = dir else {
+                        snap_at.push(None);
+                        continue;
                     };
-                    match dirs.get_or_init(|| crate::hook::aimed(line, &cwd)).get(k).cloned().flatten() {
-                        None => at(&load.issues),
-                        Some(dir) => at(&Repo::find_from(&dir, crate::i18n::Lang::default).ok()??.read().ok()?.issues),
+                    if let Some((_, at)) = seen.iter().find(|(p, _)| *p == dir.as_path()) {
+                        snap_at.push(*at);
+                        continue;
                     }
+                    let found = match routes.get(k) {
+                        Some(Route::There(n)) => there.get(*n).map(std::borrow::Cow::Borrowed),
+                        _ => {
+                            Repo::find_from(dir, crate::i18n::Lang::default).ok().flatten().map(std::borrow::Cow::Owned)
+                        }
+                    };
+                    // **이 세션의 트래커면 이미 손에 있다** — 같은 파일을 한 판에 두 번 가르지
+                    // 않는다. `cd <제 밑> && moai mv …` 와 워크트리에서 루트를 겨눈 흔한 꼴이 그
+                    // 자리다([`crate::store::Repo::find_from`] 이 루트로 옮겨 준다).
+                    let at = match found {
+                        Some(r) if same(&r.root, &repo.root) => None,
+                        found => {
+                            snaps.push(found.and_then(|r| r.read().ok()).map(|l| l.issues));
+                            Some(snaps.len() - 1)
+                        }
+                    };
+                    seen.push((dir.as_path(), at));
+                    snap_at.push(at);
+                }
+                let stands = |k: usize, id: &str| -> Option<String> {
+                    let issues = match snap_at.get(k).copied().flatten() {
+                        None => &load.issues,
+                        Some(n) => snaps[n].as_deref()?,
+                    };
+                    issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string())
                 };
                 record_picks(input, &repo, &crate::hook::picked_in(line, &repo.config, &mine, &stands));
                 for (n, other) in there.iter().enumerate() {
@@ -552,7 +602,7 @@ enum Route {
 fn route(
     repo: &Repo,
     line: &crate::hook::Line<'_>,
-    cwd: &Path,
+    dirs: &[Option<PathBuf>],
 ) -> (Vec<Route>, Vec<Repo>, Vec<Option<(PathBuf, bool)>>) {
     let mut there: Vec<Repo> = Vec::new();
     // 토막마다 **내미는 줄이 겨눌 자리**([`crate::hook::Toward`]) — 판정할 트래커와 따로 든다. 판정은
@@ -560,13 +610,13 @@ fn route(
     let mut aims: Vec<Option<(PathBuf, bool)>> = Vec::new();
     // 아직 없는 자리를 가리킨 토막에서만 읽는다 — 대부분의 호출은 여기 안 와 명령줄을 다시 안 가른다.
     let spelled = std::cell::OnceCell::new();
-    let routes = crate::hook::aimed(line, cwd)
-        .into_iter()
+    let routes = dirs
+        .iter()
         .enumerate()
         .map(|(k, dir)| {
             let mut aim = None;
             let spells = || spelled.get_or_init(|| crate::hook::spells_dir(line)).get(k).copied().unwrap_or(false);
-            let route = route_one(repo, &mut there, &mut aim, dir, &spells);
+            let route = route_one(repo, &mut there, &mut aim, dir.clone(), &spells);
             aims.push(aim);
             route
         })

@@ -9877,7 +9877,50 @@ fn a_pick_that_loses_its_from_race_is_not_recorded() {
     assert!(at("winner", "stop", None).contains(&format!("moai mv {id}")), "이긴 쪽이 제 줄을 놓았다");
 }
 
-/// **오래 안 적힌 세션의 집기 기록은 치운다**(리뷰 moai-3k2d.1df). 훅은 판정마다 기록 디렉터리를 통째로
+/// **`--from` 의 본 칸은 그 토막이 겨눈 트래커에서 읽는다**(moai-47zz) — `moai -C <남> mv <id>
+/// in_progress --from todo` 는 남의 트래커에 쓰니, 이길지 질지도 그쪽 스냅샷이 답한다. 훅이 이미
+/// 푼 그 트래커(`route`)를 나눠 쓰는 대신 세션 자리의 스냅샷으로 답하면 두 트래커가 조용히 갈려,
+/// 저쪽에서 이미 집힌 줄을 이 세션의 집기로 적고 정말 쥔 세션에게서 초점을 빼앗는다.
+///
+/// 옆 프로젝트를 겨눈 집기가 `--from` 으로 겨루는 자리를 여기서 못박는다 — 위의
+/// [`a_pick_that_loses_its_from_race_is_not_recorded`] 가 재는 것은 세션 자리의 트래커뿐이다.
+#[test]
+fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
+    let s = Scratch::new("hookpickaimed");
+    let (main, other) = (s.path().join("main"), s.path().join("other"));
+    for at in [&main, &other] {
+        std::fs::create_dir_all(at).unwrap();
+        git(at, &["init", "-q"]);
+        ok(at, &["init", "argos"]);
+    }
+    let id = field(&ok(&other, &["add", "옆 트래커의 일", "--json"]), "id");
+    let at = |session: &str, event: &str, cmd: Option<&str>, run_in: &Path| {
+        let body = cmd.map_or(String::new(), |c| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(c))
+        });
+        let where_ = if event == "stop" { run_in } else { &main };
+        let input =
+            format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&where_.display().to_string()));
+        String::from_utf8(hook_in(&s, run_in, event, &input).stdout).unwrap()
+    };
+    let pick = format!("moai -C {} mv {id} in_progress --from todo", other.display());
+    // 이긴 쪽 — 옆 트래커에서 아직 `todo` 라 정말 옮긴다. 그 집기는 이 세션의 것으로 적힌다.
+    assert!(at("winner", "pre-tool-use", Some(&pick), &main).trim().is_empty());
+    ok(&other, &["mv", &id, "in_progress", "--from", "todo"]);
+    assert!(at("winner", "stop", None, &other).contains(&format!("moai mv {id}")), "겨눈 트래커의 집기를 안 적었다");
+    // 진 쪽 — 훅이 본 뒤에 도는 명령은 옆 트래커의 낡은 칸이라 안 옮긴다. 안 옮기니 적을 것도 없다.
+    assert!(at("loser", "pre-tool-use", Some(&pick), &main).trim().is_empty());
+    assert!(
+        !moai(&main, &["-C", &other.display().to_string(), "mv", &id, "in_progress", "--from", "todo"])
+            .status
+            .success(),
+        "진 집기가 옮겼다"
+    );
+    let lost = at("loser", "stop", None, &other);
+    assert!(lost.trim().is_empty(), "진 집기를 겨눈 트래커의 줄로 붙든다\n{lost}");
+}
+
+/// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 훅은 판정마다 기록 디렉터리를 통째로
 /// 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 적을 때 두 주
 /// 넘게 안 적힌 남의 파일을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다.
 #[test]
