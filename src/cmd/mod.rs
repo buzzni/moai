@@ -145,7 +145,7 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
     if reg.projects.is_empty() {
         return Err(nothing_registered(reg, ctx.lang()));
     }
-    let projects = crate::projects::open_with(reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree, ctx.lang());
     Ok((reg, projects))
 }
 

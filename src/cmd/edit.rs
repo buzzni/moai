@@ -131,144 +131,154 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
     let lang = ctx.lang();
 
-    let done: Edited = repo.with_write(|issues, cfg, _| {
-        let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
-            return Err(Fail::not_found(&args.id, lang));
-        };
-        let before = i.clone();
+    let done: Edited = repo.with_write(
+        || ctx.lang(),
+        |issues, cfg, _| {
+            let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
+                return Err(Fail::not_found(&args.id, lang));
+            };
+            let before = i.clone();
 
-        if let Some(t) = &args.title {
-            i.title = t.trim().to_string();
-        }
-        // `--body` 를 적었으면 적은 대로 된다. **빈 것도 적은 것이다** —
-        // `-b ""` 든 빈 stdin 이든 지운다는 뜻이고, 둘이 갈리면 파이프로
-        // 본문을 만들어 넣는 쪽이 옛 본문을 지우지 못한다.
-        if args.body.is_some() {
-            i.body = body.clone();
-        }
-        for t in &args.tag {
-            let t = model::normalize_tag(t);
-            if !t.is_empty() && !i.tags.contains(&t) {
-                i.tags.push(t);
+            if let Some(t) = &args.title {
+                i.title = t.trim().to_string();
             }
-        }
-        if !args.untag.is_empty() {
-            let drop: Vec<String> = args.untag.iter().map(|t| model::normalize_tag(t)).collect();
-            i.tags.retain(|t| !drop.contains(t));
-        }
-        if let Some(e) = &args.epic {
-            i.epic = super::clearable(e);
-        }
-        if let Some(m) = &args.milestone {
-            i.milestone = super::clearable(m);
-        }
-        if let Some(p) = args.priority {
-            i.priority = Some(p);
-        }
-        if let Some(a) = &args.assignee {
-            (i.assignee, i.assignee_email) = match super::clearable(a) {
-                Some(v) => model::split_assignee(&v),
-                None => (None, None),
-            };
-        }
+            // `--body` 를 적었으면 적은 대로 된다. **빈 것도 적은 것이다** —
+            // `-b ""` 든 빈 stdin 이든 지운다는 뜻이고, 둘이 갈리면 파이프로
+            // 본문을 만들어 넣는 쪽이 옛 본문을 지우지 못한다.
+            if args.body.is_some() {
+                i.body = body.clone();
+            }
+            for t in &args.tag {
+                let t = model::normalize_tag(t);
+                if !t.is_empty() && !i.tags.contains(&t) {
+                    i.tags.push(t);
+                }
+            }
+            if !args.untag.is_empty() {
+                let drop: Vec<String> = args.untag.iter().map(|t| model::normalize_tag(t)).collect();
+                i.tags.retain(|t| !drop.contains(t));
+            }
+            if let Some(e) = &args.epic {
+                i.epic = super::clearable(e);
+            }
+            if let Some(m) = &args.milestone {
+                i.milestone = super::clearable(m);
+            }
+            if let Some(p) = args.priority {
+                i.priority = Some(p);
+            }
+            if let Some(a) = &args.assignee {
+                (i.assignee, i.assignee_email) = match super::clearable(a) {
+                    Some(v) => model::split_assignee(&v),
+                    None => (None, None),
+                };
+            }
 
-        i.normalize();
-        // **안 바꾼 칸은 다시 안 묻는다 — `store::with_write` 와 한 자다**(moai-hym7).
-        // 여기서만 엄하면 그쪽을 푼 것이 헛일이 된다: `config` 에서 칸 이름을 고친 뒤
-        // 옛 이름에 선 줄은 제목 하나 못 고쳐 도구 안에서 영영 못 만진다 — 풀려던 바로
-        // 그 자리다. 탐색기는 `with_write` 만 지나므로 두 표면이 갈리기까지 했다.
-        // **칸을 견줘서 정한다** — `true` 로 박으면 여기에 칸을 고치는 길이 나는 날
-        // 그 오타가 조용히 지나간다.
-        i.validate_keeping(cfg, i.status == before.status)?;
-        // 바뀐 것이 없어도 실패가 아니다. `mv` 가 이미 그 칸일 때 0 으로
-        // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
-        // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
-        let changed = *i != before;
-        // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
-        // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
-        // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
-        let cut = args.epic.as_deref().is_some_and(|e| super::clearable(e).is_none());
-        let kept = |issues: &[Issue]| {
-            cut.then(|| crate::report::epic_from_parent(issues, &args.id))
-                .flatten()
-                .map(|(e, p)| Inherited { epic: e.to_string(), parent: p.to_string() })
-        };
-        // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다. 다른
-        // 마일스톤을 적어도 진다(moai-mhxf): 필드는 X 가 되는데 줄은 에픽·조상이 선 곳에
-        // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 졌는지와 옮길 길은
-        // `report` 가 가른다 — 여기서는 무엇을 적었는지만 넘긴다.
-        let wrote_milestone = args.milestone.as_deref().map(super::clearable);
-        let kept_milestone = |issues: &[Issue]| {
-            use crate::report::Above;
-            let wrote = wrote_milestone.as_ref()?;
-            let (m, above) = crate::report::milestone_from_above(issues, &args.id, wrote.as_deref())?;
-            let (epic, parent, way) = match above {
-                Above::Epic(e) => (Some(e), None, Way::Epic),
-                Above::Lost(e) => (Some(e), None, Way::Lost),
-                Above::Parent(p) => (None, Some(p), Way::Parent),
-                Above::Pinned(p) => (None, Some(p), Way::Pinned),
+            i.normalize();
+            // **안 바꾼 칸은 다시 안 묻는다 — `store::with_write` 와 한 자다**(moai-hym7).
+            // 여기서만 엄하면 그쪽을 푼 것이 헛일이 된다: `config` 에서 칸 이름을 고친 뒤
+            // 옛 이름에 선 줄은 제목 하나 못 고쳐 도구 안에서 영영 못 만진다 — 풀려던 바로
+            // 그 자리다. 탐색기는 `with_write` 만 지나므로 두 표면이 갈리기까지 했다.
+            // **칸을 견줘서 정한다** — `true` 로 박으면 여기에 칸을 고치는 길이 나는 날
+            // 그 오타가 조용히 지나간다.
+            // **말은 여기서 편다**(moai-yve0) — 검사는 자료로 거절하고(`model::Invalid`), 이미 선
+            // 줄이라 가리키는 말은 그 id 다. `lang` 은 위에서 락 밖에 풀어 둔 값이다.
+            i.validate_keeping(cfg, i.status == before.status)
+                .map_err(|why| Fail::new(crate::view::invalid(lang, &crate::store::At::Id(i.id.clone()), &why)))?;
+            // 바뀐 것이 없어도 실패가 아니다. `mv` 가 이미 그 칸일 때 0 으로
+            // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
+            // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
+            let changed = *i != before;
+            // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
+            // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
+            // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
+            let cut = args.epic.as_deref().is_some_and(|e| super::clearable(e).is_none());
+            let kept = |issues: &[Issue]| {
+                cut.then(|| crate::report::epic_from_parent(issues, &args.id))
+                    .flatten()
+                    .map(|(e, p)| Inherited { epic: e.to_string(), parent: p.to_string() })
             };
-            Some(InheritedMilestone {
-                milestone: m.map(str::to_string),
-                epic: epic.map(str::to_string),
-                parent: parent.map(str::to_string),
-                way,
-            })
-        };
-        if !changed {
-            // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
-            // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
-            let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+            // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다. 다른
+            // 마일스톤을 적어도 진다(moai-mhxf): 필드는 X 가 되는데 줄은 에픽·조상이 선 곳에
+            // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 졌는지와 옮길 길은
+            // `report` 가 가른다 — 여기서는 무엇을 적었는지만 넘긴다.
+            let wrote_milestone = args.milestone.as_deref().map(super::clearable);
+            let kept_milestone = |issues: &[Issue]| {
+                use crate::report::Above;
+                let wrote = wrote_milestone.as_ref()?;
+                let (m, above) = crate::report::milestone_from_above(issues, &args.id, wrote.as_deref())?;
+                let (epic, parent, way) = match above {
+                    Above::Epic(e) => (Some(e), None, Way::Epic),
+                    Above::Lost(e) => (Some(e), None, Way::Lost),
+                    Above::Parent(p) => (None, Some(p), Way::Parent),
+                    Above::Pinned(p) => (None, Some(p), Way::Pinned),
+                };
+                Some(InheritedMilestone {
+                    milestone: m.map(str::to_string),
+                    epic: epic.map(str::to_string),
+                    parent: parent.map(str::to_string),
+                    way,
+                })
+            };
+            if !changed {
+                // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
+                // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
+                let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+                let kept = kept(issues);
+                let kept_milestone = kept_milestone(issues);
+                return Ok((
+                    vec![],
+                    Edited {
+                        issue: before,
+                        epic: None,
+                        children: Vec::new(),
+                        shelved: Vec::new(),
+                        read,
+                        changed: false,
+                        kept,
+                        kept_milestone,
+                        // 바뀐 것이 없으면 상세를 안 그린다.
+                        blocked: Blocked::default(),
+                    },
+                ));
+            }
+            i.updated_at = at.clone();
+            let out = i.clone();
+
+            // 상세를 그릴 재료를 **여기서** 챙긴다. 락을 놓은 뒤 파일을 다시 읽으면
+            // 1만 줄을 두 번 파싱하고(측정: 한 번 더 읽는 데만 25%), 그 틈에 남이
+            // 쓴 것이 섞여 방금 쓴 이슈와 주변이 어긋난다.
+            let epic = out.epic.as_ref().and_then(|e| issues.iter().find(|x| &x.id == e).cloned());
+            // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다.
+            if let Some(e) = &out.epic
+                && epic.is_none()
+            {
+                eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
+            }
+            let children: Vec<Issue> =
+                issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
+            // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
+            let near: Vec<&str> =
+                std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
+            // 상세가 미룸을 말하려면 **물려받은 것까지** 필요하다 — 미룬 에픽으로 옮기는
+            // 순간 그 줄이 계획에서 빠진다. 같은 까닭으로 락 안에서 본 모습으로 잰다.
+            let shelved: Vec<(String, String)> = crate::report::deferred_roots(issues)
+                .into_iter()
+                .filter(|(id, _)| near.contains(id))
+                .map(|(id, root)| (id.to_string(), root.to_string()))
+                .collect();
+            // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
+            let read = super::read_of(issues, cfg, &near);
             let kept = kept(issues);
             let kept_milestone = kept_milestone(issues);
-            return Ok((
+            // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
+            let blocked = Blocked::of(issues, cfg, &out);
+            Ok((
                 vec![],
-                Edited {
-                    issue: before,
-                    epic: None,
-                    children: Vec::new(),
-                    shelved: Vec::new(),
-                    read,
-                    changed: false,
-                    kept,
-                    kept_milestone,
-                    // 바뀐 것이 없으면 상세를 안 그린다.
-                    blocked: Blocked::default(),
-                },
-            ));
-        }
-        i.updated_at = at.clone();
-        let out = i.clone();
-
-        // 상세를 그릴 재료를 **여기서** 챙긴다. 락을 놓은 뒤 파일을 다시 읽으면
-        // 1만 줄을 두 번 파싱하고(측정: 한 번 더 읽는 데만 25%), 그 틈에 남이
-        // 쓴 것이 섞여 방금 쓴 이슈와 주변이 어긋난다.
-        let epic = out.epic.as_ref().and_then(|e| issues.iter().find(|x| &x.id == e).cloned());
-        // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다.
-        if let Some(e) = &out.epic
-            && epic.is_none()
-        {
-            eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
-        }
-        let children: Vec<Issue> =
-            issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
-        // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
-        let near: Vec<&str> = std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
-        // 상세가 미룸을 말하려면 **물려받은 것까지** 필요하다 — 미룬 에픽으로 옮기는
-        // 순간 그 줄이 계획에서 빠진다. 같은 까닭으로 락 안에서 본 모습으로 잰다.
-        let shelved: Vec<(String, String)> = crate::report::deferred_roots(issues)
-            .into_iter()
-            .filter(|(id, _)| near.contains(id))
-            .map(|(id, root)| (id.to_string(), root.to_string()))
-            .collect();
-        // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
-        let read = super::read_of(issues, cfg, &near);
-        let kept = kept(issues);
-        let kept_milestone = kept_milestone(issues);
-        // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
-        let blocked = Blocked::of(issues, cfg, &out);
-        Ok((vec![], Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked }))
-    })?;
+                Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked },
+            ))
+        },
+    )?;
 
     let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
     if ctx.json {

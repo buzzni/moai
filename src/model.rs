@@ -95,26 +95,27 @@ pub fn fit_bytes(text: &str, budget: usize) -> std::borrow::Cow<'_, str> {
 ///
 /// 제목 한 토막을 대는 것은 계획에 여러 줄이 있을 때 **어느 줄인지** 가려야 해서다. 제목 자체가
 /// 넘친 것이면 그 머리가 그대로 표가 된다.
+///
+/// **영어 하나다**(moai-yve0). 이 말이 붙는 곳은 [`check_text_size`] 의 거절문이고, 그 글은 심는
+/// 안내(`guide::REVIEW_OVER_LIMIT`)를 안고 있어 통째로 영어다(moai-9vwy) — 낱말 하나만 한국어로
+/// 두면 한 줄 안에서 말이 갈린다. **검증의 거절은 이 말을 안 쓴다**: 그쪽은 가리키는 말도 자료로
+/// 들고 나가(`store::At`) `view` 가 고른 말로 편다.
 pub fn unwritten(title: &str) -> String {
-    format!("새 줄 '{}'", fit_bytes(&crate::text::one_line(title), 60))
+    format!("new line '{}'", fit_title(title))
 }
 
-/// 이미 지어진 거절문의 머리에 선 id 를 [`unwritten`] 의 말로 갈아 끼운다(moai-1rkl).
+/// 가리키는 말에 담을 **제목 한 토막** — 한 줄로 접어 60바이트에 맞춘다.
 ///
-/// 크기만 고치고 두면 **같은 쓰기가 축마다 다른 말을 한다.** [`Issue::validate_fields`] 의 말은
-/// 일곱 자리가 모두 `<id>: ` 로 시작하는데, 그 id 가 이번에 뽑은 것이면 거절 뒤에 어디에도 안
-/// 남는다 — `add --from` 에 `#bug,perf` 한 줄을 주면 `<없는 id>: 태그에 …` 가 나오고, 같은
-/// 계획을 두 번 돌리면 그때마다 다른 id 가 나왔다. [`check_text_size`] 가 이미 막아 둔 바로 그
-/// 실패다.
-///
-/// **머리만 간다.** 검사마다 가리키는 자를 따로 두면 그 말이 두 벌로 갈리고, 한쪽만 고치는 날
-/// 이 어긋남이 돌아온다. 머리가 그 꼴이 아니면(`id 형식이 아니다` 는 id 를 따옴표로 댄다) 그대로 둔다.
-pub fn point_at_unwritten(id: &str, title: &str, said: String) -> String {
-    match said.strip_prefix(&format!("{id}: ")) {
-        Some(rest) => format!("{}: {rest}", unwritten(title)),
-        None => said,
-    }
+/// [`unwritten`] 과 검증의 거절(`store::At::Unwritten`)이 **같은 토막**을 든다. 따로 자르면 같은
+/// 줄을 두 말이 다른 길이로 가리키고, 한쪽만 고치는 날 그 어긋남이 조용히 돌아온다.
+pub fn fit_title(title: &str) -> String {
+    fit_bytes(&crate::text::one_line(title), 60).to_string()
 }
+
+// **글에 손대어 가리키는 자는 없앴다**(moai-yve0). 한때 [`point_at_unwritten`] 이 이미 지어진
+// 거절문의 머리(`<id>: `)를 [`unwritten`] 의 말로 갈아 끼웠다 — 검사가 글을 짓던 때의 자리다.
+// 이제 검사는 자료로 거절하고([`Invalid`]) **가리키는 말을 부르는 쪽이 고르므로**, 갈아 끼울
+// 글 자체가 없다. 고르는 자리는 `store::Repo::write_locked` 하나다.
 
 /// 이슈의 구조적 종류. `tags` 와 축이 다르다 —
 /// `kind` 는 무엇인가, `tags` 는 어떤 성격인가.
@@ -456,11 +457,6 @@ impl Issue {
         }
     }
 
-    /// 쓰기는 읽기보다 엄하다. 읽기는 아는 만큼 보여주고, 쓰기는 거부한다.
-    pub fn validate(&self, cfg: &crate::config::Config) -> Result<(), String> {
-        self.validate_keeping(cfg, false)
-    }
-
     /// [`Issue::validate`] 와 같되, `kept_status` 면 **칸 이름은 다시 묻지 않는다**.
     ///
     /// 엄함은 *지금 쓰는 줄*에 대한 것이고(CLAUDE.md), 그 안에서도 **이번에 쓰는 값**에
@@ -468,14 +464,13 @@ impl Issue {
     /// 미루거나(`defer`) 제목만 고치려 해도 칸 이름 때문에 막히면 그 줄은 도구 안에서
     /// 영영 못 만진다(moai-hym7, 사람이 정했다). 칸을 **옮기는** 쓰기는 그대로 엄하다 —
     /// 갈 칸은 바뀌는 값이라 `kept_status` 가 서지 않는다.
-    pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), String> {
+    pub fn validate_keeping(&self, cfg: &crate::config::Config, kept_status: bool) -> Result<(), Invalid> {
         if !kept_status {
             // **저장 계층은 화면 말을 모른 채 둔다**(사람이 정했다, 2026-09-20, moai-fdk7).
-            // 이 글은 파일을 재다 나온 것이라 이웃 검사 열셋과 같은 말로 선다 — `store` 에
-            // 화면 말을 물려주면 한 함수 안에서 말이 갈린다. 그 열넷을 통째로 옮기는 것은
-            // 따로 든다(idea moai-gbk3). 글을 짓는 자리는 그때도 `view::no_such_column` 하나다.
-            cfg.require_known(self.status.as_str())
-                .map_err(|e| format!("{}: {}", self.id, crate::view::no_such_column(crate::i18n::Lang::Ko, &e)))?;
+            // 그래서 이 검사도 **자료로** 거절한다(moai-yve0) — 칸 이름 하나는 이미 자료였고
+            // (`config::NoSuchColumn`), 이제 이웃 열셋이 같은 꼴이다. 글을 짓는 자리는
+            // `view::invalid` 하나고, 칸 이름 줄은 그 안에서 `view::no_such_column` 을 부른다.
+            cfg.require_known(self.status.as_str()).map_err(Invalid::NoSuchColumn)?;
         }
         self.validate_fields()
     }
@@ -486,16 +481,16 @@ impl Issue {
     /// 그쪽은 `.moai/config.toml` 을 안 읽는데, 제가 지어 내보내는 줄은 검사해야 한다.
     /// `kept_status` 가 선 [`Issue::validate_keeping`] 은 사실 `cfg` 를 한 번도 안 쓰므로,
     /// 그 사실을 타입으로 적어 두면 검사가 두 벌로 갈라질 자리가 없다.
-    pub fn validate_fields(&self) -> Result<(), String> {
+    pub fn validate_fields(&self) -> Result<(), Invalid> {
         if !crate::id::is_valid(&self.id) {
-            return Err(format!("id 형식이 아니다 — {:?}", self.id));
+            return Err(Invalid::Id { id: format!("{:?}", self.id) });
         }
         let t = self.title.trim();
         if t.is_empty() {
-            return Err(format!("{}: 제목이 비었다", self.id));
+            return Err(Invalid::EmptyTitle);
         }
         if self.title.contains('\n') {
-            return Err(format!("{}: 제목은 한 줄이다", self.id));
+            return Err(Invalid::TitleLines);
         }
         // 담당도 한 줄이다. `view::history` 와 상세는 "원소 하나가 한 줄" 로
         // 서 있어서, 담당에 든 줄바꿈 하나가 뒤따르는 줄의 열을 통째로 잃게
@@ -503,26 +498,26 @@ impl Issue {
         //
         // **메일도 같이 잰다.** 화면에 나가는 것은 둘을 합친 한 줄이라, 어느
         // 쪽에 든 줄바꿈이든 같은 자리를 부순다.
-        for (what, v) in [("담당", &self.assignee), ("담당 메일", &self.assignee_email)] {
+        for (what, v) in [(Field::Assignee, &self.assignee), (Field::AssigneeEmail, &self.assignee_email)] {
             if let Some(v) = v
                 && v.contains(['\n', '\r'])
             {
-                return Err(format!("{}: {what}은 한 줄이다 — {v:?}", self.id));
+                return Err(Invalid::FieldLines { field: what, value: format!("{v:?}") });
             }
         }
         if self.priority.is_some_and(|p| p > MAX_PRIORITY) {
-            return Err(format!("{}: 우선순위는 0~{MAX_PRIORITY} 다 — {:?}", self.id, self.priority));
+            return Err(Invalid::Priority { max: MAX_PRIORITY, value: format!("{:?}", self.priority) });
         }
         for tag in &self.tags {
             if tag.is_empty() || tag.contains(|c: char| c.is_whitespace() || c == ',') {
-                return Err(format!("{}: 태그에 공백이나 쉼표를 넣지 않는다 — {tag:?}", self.id));
+                return Err(Invalid::Tag { tag: format!("{tag:?}") });
             }
         }
-        for (what, v) in [("에픽", &self.epic), ("마일스톤", &self.milestone)] {
+        for (what, v) in [(Field::Epic, &self.epic), (Field::Milestone, &self.milestone)] {
             if let Some(v) = v
                 && !crate::id::is_valid(v)
             {
-                return Err(format!("{}: {what} id 형식이 아니다 — {v:?}", self.id));
+                return Err(Invalid::GroupId { field: what, value: format!("{v:?}") });
             }
         }
         // **마일스톤 줄은 다른 마일스톤에 들지 않는다**(moai-bg55, 사용자와 정함). 그 필드는
@@ -530,21 +525,73 @@ impl Issue {
         // 안다. 지금 쓰는 줄만 잰다(`store::with_write`): 이미 적힌 옛 줄은 읽히고, 그 줄을
         // 손댈 때 비우는 길을 댄다.
         if self.kind == Kind::Milestone && self.milestone.is_some() {
-            return Err(format!(
-                "{}: 마일스톤은 다른 마일스톤에 들지 않는다 — 마일스톤은 뿌리에 선다. 만들 때면 `--milestone` 을 빼고, 이미 적힌 줄이면 `moai edit {} --milestone none` 으로 비운다",
-                self.id, self.id
-            ));
+            return Err(Invalid::MilestoneInMilestone { id: self.id.clone() });
         }
         for b in &self.blocked_by {
             if b == &self.id {
-                return Err(format!("{}: 스스로를 막을 수 없다", self.id));
+                return Err(Invalid::SelfBlock);
             }
             if !crate::id::is_valid(b) {
-                return Err(format!("{}: blocked_by id 형식이 아니다 — {b:?}", self.id));
+                return Err(Invalid::BlockedId { value: format!("{b:?}") });
             }
         }
         Ok(())
     }
+}
+
+/// 쓰기가 거절한 까닭 — **말이 아니라 자료다**(moai-yve0, 2026-09-21).
+///
+/// 저장 계층은 화면 말을 모른 채 둔다(2026-09-20 사용자 결정). 이 검사는 `store::with_write` 가
+/// 락을 쥔 채 부르고 머지 드라이버도 부르므로, 말을 물려주면 그 둘의 서명에 화면 말이 번진다.
+/// 글을 짓는 자리는 [`crate::view::invalid`] 하나다.
+///
+/// **가리키는 말(`<id>: `)은 여기 없다** — 이번 쓰기가 짓는 줄은 거절 뒤에 그 id 가 어디에도 안
+/// 남아(moai-1rkl), 부르는 쪽이 id 를 댈지 [`unwritten`] 의 제목을 댈지 고른다. [`check_text_size`]
+/// 가 이미 그 꼴이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Invalid {
+    /// id 가 모양에 안 맞는다 — 적힌 값(따옴표째).
+    Id {
+        id: String,
+    },
+    EmptyTitle,
+    TitleLines,
+    /// 한 줄이어야 하는 필드에 줄바꿈이 들었다.
+    FieldLines {
+        field: Field,
+        value: String,
+    },
+    Priority {
+        max: u8,
+        value: String,
+    },
+    Tag {
+        tag: String,
+    },
+    /// 묶음 id 가 모양에 안 맞는다.
+    GroupId {
+        field: Field,
+        value: String,
+    },
+    /// 마일스톤이 다른 마일스톤에 들었다 — 비우는 명령에 쓸 id 를 든다.
+    MilestoneInMilestone {
+        id: String,
+    },
+    SelfBlock,
+    BlockedId {
+        value: String,
+    },
+    /// 그 칸 이름이 설정에 없다 — 이미 자료다(`config::NoSuchColumn`).
+    NoSuchColumn(crate::config::NoSuchColumn),
+}
+
+/// [`Invalid`] 가 가리키는 필드 — 낱말은 [`crate::view::invalid`] 가 고른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Assignee,
+    AssigneeEmail,
+    Epic,
+    Milestone,
 }
 
 /// `.moai/journal.jsonl` 의 한 줄. **추가만 한다.**
@@ -1326,16 +1373,22 @@ mod tests {
         assert_eq!(i.blocked_by, ["argos-0001", "argos-0002"]);
     }
 
+    /// 자료가 된 거절을 한국어로 펴서 견준다(moai-yve0) — 글을 짓는 자는 이제 `view` 다.
+    /// 견주는 낱말이 그대로라, 이 시험들은 **말묶음의 `ko` 표에 키가 서 있는지도 함께 잰다.**
+    fn refusal(e: &Invalid) -> String {
+        crate::view::invalid(crate::i18n::Lang::Ko, &crate::store::At::Id("argos-0001".into()), e)
+    }
+
     #[test]
     fn validate_refuses_self_block_and_bad_blocker_id() {
         let c = cfg();
         let mut i = issue();
         i.blocked_by = vec![i.id.clone()];
-        assert!(i.validate(&c).unwrap_err().contains("스스로를 막을"));
+        assert!(refusal(&i.validate_keeping(&c, false).unwrap_err()).contains("스스로를 막을"));
 
         let mut i = issue();
         i.blocked_by = vec!["이상한".into()];
-        assert!(i.validate(&c).unwrap_err().contains("blocked_by id 형식"));
+        assert!(refusal(&i.validate_keeping(&c, false).unwrap_err()).contains("blocked_by id 형식"));
     }
 
     #[test]
@@ -1385,23 +1438,23 @@ mod tests {
         ] {
             let mut i = issue();
             mutate(&mut i);
-            let e = i.validate(&c).unwrap_err();
+            let e = refusal(&i.validate_keeping(&c, false).unwrap_err());
             assert!(e.contains(want), "{want} 를 기대했는데 {e:?}");
         }
-        assert!(issue().validate(&c).is_ok());
+        assert!(issue().validate_keeping(&c, false).is_ok());
 
         // 마일스톤 줄은 제 milestone 을 못 든다(moai-bg55). 다른 종류는 여전히 든다.
         let mut stone = issue();
         stone.kind = Kind::Milestone;
-        assert!(stone.validate(&c).is_ok());
+        assert!(stone.validate_keeping(&c, false).is_ok());
         stone.milestone = Some("argos-9k2p".into());
-        let e = stone.validate(&c).unwrap_err();
+        let e = refusal(&stone.validate_keeping(&c, false).unwrap_err());
         assert!(e.contains("다른 마일스톤에 들지 않는다") && e.contains("--milestone none"), "{e:?}");
         for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
             let mut i = issue();
             i.kind = kind;
             i.milestone = Some("argos-9k2p".into());
-            assert!(i.validate(&c).is_ok(), "{kind:?} 가 마일스톤을 못 들었다");
+            assert!(i.validate_keeping(&c, false).is_ok(), "{kind:?} 가 마일스톤을 못 들었다");
         }
     }
 

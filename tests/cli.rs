@@ -3436,13 +3436,16 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     ] {
         let err = String::from_utf8_lossy(&moai(s.path(), &args).stderr).to_string();
         match standing {
+            // **크기 거절문은 통째로 영어다**(moai-9vwy 가 옮겼고 moai-yve0 이 가리키는 말까지
+            // 맞췄다) — 심는 안내를 안고 있는 글이라 낱말 하나만 한국어로 둘 수 없다. 검증의
+            // 거절은 고른 말로 서고, 그쪽 가리키는 말은 `a_validation_refusal_…` 이 잰다.
             None => {
-                assert!(err.contains("새 줄"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
+                assert!(err.contains("new line"), "{what}: 안 지은 줄을 안 가리킨다\n{err}");
                 assert!(!err.contains("argos-"), "{what}: 쓰지도 않은 id 를 댔다\n{err}");
             }
             Some(id) => {
                 assert!(err.contains(id), "{what}: 이미 선 줄을 id 로 안 부른다\n{err}");
-                assert!(!err.contains("새 줄"), "{what}: 이미 선 줄을 안 지은 줄이라 했다\n{err}");
+                assert!(!err.contains("new line"), "{what}: 이미 선 줄을 안 지은 줄이라 했다\n{err}");
             }
         }
     }
@@ -3453,6 +3456,7 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     let tagged = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 멤버 #bug,perf\n");
     let err = String::from_utf8_lossy(&tagged.stderr).to_string();
     assert!(!tagged.status.success(), "쉼표가 든 태그를 받았다");
+    // 이쪽은 검증의 거절이라 고른 말(여기서는 한국어)로 선다.
     assert!(err.contains("새 줄"), "안 지은 줄을 안 가리킨다\n{err}");
     assert!(!err.contains("argos-"), "쓰지도 않은 id 를 댔다\n{err}");
 
@@ -3468,7 +3472,7 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
         let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
-        assert!(err.contains("64KB") && err.contains("새 줄"), "{args:?}\n{err}");
+        assert!(err.contains("64KB") && err.contains("new line"), "{args:?}\n{err}");
     }
     ok(s.path(), &["rm", &thought]);
 
@@ -4071,6 +4075,62 @@ fn only_broken_data_makes_status_fail() {
     let out = at(s.path(), NOW, &["status"]);
     assert!(String::from_utf8_lossy(&out.stdout).contains("id 가 두 번 있다"));
     assert!(!out.status.success(), "깨진 데이터를 보고 0 으로 끝냈다");
+}
+
+/// **쓰기 경로의 거절도 고른 말로 선다**(moai-iq7j).
+///
+/// `store::with_write` 는 락을 쥔 채 도는 자리라 화면 말을 모른 채 두기로 했고(2026-09-20 사용자
+/// 결정), 그 바람에 그 안의 거절문이 박힌 한국어였다. 이제 멈춘 까닭은 자료로 락 밖으로 나와
+/// `view` 에서 펴진다 — 영어를 고른 사람도 제 말로 읽는다.
+#[test]
+fn a_refusal_from_the_write_path_stands_in_the_chosen_language() {
+    let s = init("writelang");
+    let id = add(s.path(), &["제목"]);
+    // 같은 줄을 한 번 더 — 머지를 잘못 풀었을 때 나오는 모양이고, 쓰기가 거기서 멈춘다.
+    let line = line_of(s.path(), &id);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{line}\n{line}\n")).unwrap();
+
+    let said = |lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["add", "새 줄"]).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW);
+        with_lang(&mut cmd, lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "겹친 id 위에 썼다");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let en = said(None);
+    assert!(en.contains("an id stands twice") && en.contains(&id), "{en}");
+    assert!(!hangul(&en), "영어를 골랐는데 한국어가 섰다\n{en}");
+    assert!(said(Some("ko")).contains("id 가 두 번 있다"), "한국어를 골랐는데 영어가 섰다");
+}
+
+/// **검증의 거절도 고른 말로 선다**(moai-yve0).
+///
+/// 열네 줄이 소스에 박힌 한국어였다 — 저장 계층이 화면 말을 모른 채 서 있어야 해서 거기 묶여
+/// 있었다. 이제 `model::Invalid` 자료로 거절하고 `view::invalid` 가 편다. **가리키는 말은 그대로다**
+/// (moai-1rkl): 아직 안 지은 줄은 id 가 아니라 제목으로 가리킨다.
+#[test]
+fn a_validation_refusal_stands_in_the_chosen_language() {
+    let s = init("validlang");
+    let id = add(s.path(), &["제목"]);
+    let said = |args: &[&str], lang: Option<&str>| {
+        let mut cmd = isolated(BIN);
+        cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW);
+        with_lang(&mut cmd, lang);
+        let out = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(!out.status.success(), "거절할 줄을 받았다 — {args:?}");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    // 이미 선 줄 — 가리키는 말은 그 id 다.
+    let en = said(&["edit", &id, "--tag", "two words"], None);
+    assert!(en.contains("no whitespace or commas in a tag") && en.contains(&id), "{en}");
+    assert!(!hangul(&en), "영어 화면에 박힌 한국어가 남았다\n{en}");
+    assert!(said(&["edit", &id, "--tag", "두 낱말"], Some("ko")).contains("태그에 공백이나 쉼표"), "ko 표에 키가 없다");
+
+    // 아직 안 지은 줄 — id 가 아니라 제목으로 가리킨다.
+    let en = said(&["add", "a new line", "--tag", "two words"], None);
+    assert!(en.contains("new line") || en.contains("새 줄"), "안 지은 줄을 안 가리킨다\n{en}");
+    assert!(!en.contains("argos-"), "쓰지도 않은 id 를 댔다\n{en}");
 }
 
 /// `warnings[].kind` 가 타입 붙은 열거값이라 받는 쪽이 산문을 안 읽는다.

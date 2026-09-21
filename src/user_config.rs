@@ -449,7 +449,7 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
     let err = |p: &Path, e: std::io::Error| Fail::new(format!("{}: {e}", p.display()));
     let dir = dir_of(path);
     std::fs::create_dir_all(dir).map_err(|e| err(dir, e))?;
-    let lock = Lock::acquire(&lock_beside(path))?;
+    let lock = Lock::acquire(&lock_beside(path), || lang)?;
 
     // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
     // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
@@ -481,7 +481,7 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
         })
     };
     let _real_lock = match resolved.as_deref() {
-        Some(r) if !held(r) => Some(Lock::acquire(&lock_beside(r))?),
+        Some(r) if !held(r) => Some(Lock::acquire(&lock_beside(r), || lang)?),
         _ => None,
     };
     let path = real;

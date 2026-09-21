@@ -43,12 +43,15 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let entry = JournalEntry::note(&args.id, &text, &at, &by);
 
-    repo.with_write(|issues, _, _| {
-        if !issues.iter().any(|i| i.id == args.id) {
-            return Err(Fail::not_found(&args.id, ctx.lang()));
-        }
-        Ok((vec![entry.clone()], ()))
-    })?;
+    repo.with_write(
+        || ctx.lang(),
+        |issues, _, _| {
+            if !issues.iter().any(|i| i.id == args.id) {
+                return Err(Fail::not_found(&args.id, ctx.lang()));
+            }
+            Ok((vec![entry.clone()], ()))
+        },
+    )?;
 
     // 저널에 적은 **그 줄을 그대로** 낸다. `serde_json::json!` 은 `Value` 를
     // 거치고 `Value` 의 맵은 알파벳 순이라, 파일과 `--json` 이 서로 다른

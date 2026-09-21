@@ -226,7 +226,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         }
         return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
-    let projects = crate::projects::open_with(reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree, ctx.lang());
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
     // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는

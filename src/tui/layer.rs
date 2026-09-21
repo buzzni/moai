@@ -332,7 +332,7 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let p = projects::open_one(path, String::new(), None, false);
+    let p = projects::open_one(path, String::new(), None, false, lang);
     let look = match p.state {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
         state => shut(&p.path, &p.name, state, lang),
@@ -601,11 +601,11 @@ impl App {
         //
         // **줄을 곧 스레드가 읽을 자리는 그 한 번도 안 읽는다**([`Depth::Lean`], moai-m59y).
         let opened = match how {
-            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false).state {
+            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false, self.site.lang).state {
                 State::Open { repo, .. } => Ok(repo),
                 state => Err(state),
             },
-            Depth::Lean => projects::open_shallow(&place.path),
+            Depth::Lean => projects::open_shallow(&place.path, self.site.lang),
         };
         let state = match opened {
             // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
@@ -1925,7 +1925,7 @@ mod tests {
 
     /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
     fn ideas_at(dir: &Path) -> Vec<String> {
-        let repo = match Repo::open(dir).unwrap() {
+        let repo = match Repo::open(dir, || crate::i18n::Lang::Ko).unwrap() {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };

@@ -30,7 +30,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     let edits: Vec<(String, bool)> =
         args.blocks.iter().map(|t| (t.clone(), true)).chain(args.unblocks.iter().map(|t| (t.clone(), false))).collect();
 
-    let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(|issues, cfg, _| {
+    let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(|| ctx.lang(), |issues, cfg, _| {
         // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
         // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
         // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
@@ -94,7 +94,9 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             // (moai-hym7). 막음은 `blocked_by` 에 쓰지 칸에 쓰지 않으므로, 여기서 칸
             // 이름을 다시 물으면 `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은
             // 막지도 풀지도 못한다 — 끊긴 참조를 도구 안에서 못 없애는 자리다.
-            t.validate_keeping(cfg, t.status == kept)?;
+            // 말은 여기서 편다(moai-yve0) — 이미 선 줄이라 가리키는 말은 그 id 다.
+            t.validate_keeping(cfg, t.status == kept)
+                .map_err(|why| Fail::new(crate::view::invalid(ctx.lang(), &crate::store::At::Id(t.id.clone()), &why)))?;
             out.push((t.clone(), wants_block));
         }
         // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는

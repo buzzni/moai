@@ -177,36 +177,39 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read): (Issue, super::Read) = repo.with_write(|issues, cfg, reserved| {
-        if let Some(p) = &args.parent
-            && !issues.iter().any(|i| &i.id == p)
-        {
-            return Err(Fail::coded(
-                format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
-                super::code::NOT_FOUND,
-            ));
-        }
-        let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
+    let (made, read): (Issue, super::Read) = repo.with_write(
+        || ctx.lang(),
+        |issues, cfg, reserved| {
+            if let Some(p) = &args.parent
+                && !issues.iter().any(|i| &i.id == p)
+            {
+                return Err(Fail::coded(
+                    format!("{p} 를 못 찾았다 — 부모가 없는 자식은 만들지 않는다"),
+                    super::code::NOT_FOUND,
+                ));
+            }
+            let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
 
-        // 없는 에픽을 가리키는 것은 막지 않고 **알려만 준다** — 에픽을 나중에
-        // 만드는 순서가 실제로 있고, 끊긴 참조는 `moai status` 가 드러낸다.
-        if let Some(e) = &args.epic
-            && !issues.iter().any(|i| &i.id == e)
-        {
-            eprintln!("moai: {e} 라는 에픽이 아직 없다. 그대로 넣는다");
-        }
+            // 없는 에픽을 가리키는 것은 막지 않고 **알려만 준다** — 에픽을 나중에
+            // 만드는 순서가 실제로 있고, 끊긴 참조는 `moai status` 가 드러낸다.
+            if let Some(e) = &args.epic
+                && !issues.iter().any(|i| &i.id == e)
+            {
+                eprintln!("moai: {e} 라는 에픽이 아직 없다. 그대로 넣는다");
+            }
 
-        let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
-        issue.epic = args.epic.clone();
-        issue.milestone = args.milestone.clone();
-        issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
-        issue.priority = args.priority;
-        (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
-        issue.body = body.clone();
-        let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
-        let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
-        Ok((vec![entry], (issue, read)))
-    })?;
+            let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
+            issue.epic = args.epic.clone();
+            issue.milestone = args.milestone.clone();
+            issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
+            issue.priority = args.priority;
+            (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
+            issue.body = body.clone();
+            let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
+            let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
+            Ok((vec![entry], (issue, read)))
+        },
+    )?;
 
     if ctx.json {
         return super::json_line(&super::Row::from(&made, &read));
@@ -273,12 +276,15 @@ fn bulk(
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root)?;
     let who = assignee_of(assignee.as_deref(), &by);
-    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(|issues, cfg, reserved| {
-        let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, &who, &by, &at)?;
-        let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-        let read = super::read_of(issues, cfg, &ids);
-        Ok((entries, (made, read)))
-    })?;
+    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
+        || ctx.lang(),
+        |issues, cfg, reserved| {
+            let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, &who, &by, &at)?;
+            let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
+            let read = super::read_of(issues, cfg, &ids);
+            Ok((entries, (made, read)))
+        },
+    )?;
 
     if ctx.json {
         let rows: Vec<super::Row> = made.iter().map(|i| super::Row::from(i, &read)).collect();

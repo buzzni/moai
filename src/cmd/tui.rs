@@ -138,7 +138,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     }
     if ctx.json {
         let now = crate::model::now();
-        let projects = crate::projects::open(&reg);
+        let projects = crate::projects::open(&reg, super::lang_of(&reg));
         let rows: Vec<ProjectRow> = projects
             .iter()
             .map(|p| {
