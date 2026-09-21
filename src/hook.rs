@@ -1887,7 +1887,7 @@ const PREFIXES: &[&str] =
 /// 예약어·접두 명령을 지나친다. 셋이 따로 세던 것을 여기 하나로 모았다 —
 /// 서로 다른 셈이 이미 서로 다른 답을 내고 있었다.
 ///
-/// **감싸는 명령도 넘는다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo`·`doas` 는 뒤에 오는
+/// **감싸는 명령도 넘는다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`xargs`·`sudo`·`doas` 는 뒤에 오는
 /// 명령을 그대로 돌린다. 못 넘던 판은 `env moai add x`·`timeout 5 moai add x`·`sudo tee src/x.rs`
 /// 를 아무 규칙에도 안 보였다 — 규칙 1~3 이 낱말 하나로 샜다.
 ///
@@ -2134,6 +2134,40 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             long: &["--input", "--output", "--error"],
             free: &[],
             attach: &[],
+            args: 0,
+            stops: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
+        // 표에 없어 `echo x | xargs sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
+        // 넘겼고, `ls | xargs moai add x` 가 규칙 1 을 지나갔다. 파이프로 이어 쓰는 꼴이라 에이전트가
+        // 실제로 치는 줄이다.
+        //
+        // **읽은 낱말 뒤에 제 입력이 더 붙는다** — 그것은 파이프 저편에서 오니 여기서 모른다.
+        // 명령 자리를 옳게 짚는 것까지가 이 표의 몫이다.
+        //
+        // **값을 받는 옵션을 틀리게 적으면 없는 것보다 나쁘다** — 값이 명령 자리로 읽혀 잘못 막는다.
+        // `-e`·`-i`·`-l` 은 값을 **붙여서만** 받아 혼자 서면 값이 없고(`attach`), 긴 이름의 그 셋
+        // (`--eof`·`--replace`·`--max-lines`)도 `optional_argument` 라 값을 따로 안 먹는다.
+        Wrapper {
+            name: "xargs",
+            takes: &["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"],
+            long: &["--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-procs", "--process-slot-var"],
+            free: &[
+                "--null",
+                "--interactive",
+                "--no-run-if-empty",
+                "--show-limits",
+                "--exit",
+                "--replace",
+                "--eof",
+                "--max-lines",
+            ],
+            attach: &["-e", "-i", "-l"],
             args: 0,
             stops: &[],
             chdir: &[],
@@ -6022,7 +6056,7 @@ mod tests {
         assert_eq!(reads() - before, 1, "물을 때마다 다시 읽는다");
     }
 
-    /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`sudo` 뒤의
+    /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`xargs`·`sudo` 뒤의
     /// 명령을 규칙이 본다. 값을 먹는 옵션도 안다. 모르는 꼴이면 **거기서 멈춘다** — 넘겨짚어 엉뚱한
     /// 낱말을 명령으로 읽으면 새는 것보다 나쁜 잘못 막음이 난다.
     #[test]
@@ -6038,6 +6072,21 @@ mod tests {
             "nice -n 5 moai add '딴 일'",
             "nice -5 moai add '딴 일'",
             "stdbuf -o0 moai add '딴 일'",
+            // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa). 값을 **붙여서만** 받는 `-i`·`-e`·`-l` 은
+            // 혼자 서면 다음 낱말을 안 먹는다 — 먹는 것으로 적으면 `moai` 가 값이 되어 `add` 가
+            // 명령으로 읽힌다.
+            "xargs moai add '딴 일'",
+            "xargs -n 1 moai add '딴 일'",
+            "xargs -rn1 moai add '딴 일'",
+            "xargs -P4 moai add '딴 일'",
+            "xargs -I {} moai add '딴 일'",
+            "xargs -d , moai add '딴 일'",
+            "xargs --max-args=1 moai add '딴 일'",
+            "xargs --arg-file /tmp/f moai add '딴 일'",
+            "xargs -i moai add '딴 일'",
+            "xargs -i{} moai add '딴 일'",
+            "xargs --replace moai add '딴 일'",
+            "xargs --no-run-if-empty moai add '딴 일'",
             "sudo moai add '딴 일'",
             "sudo -u 남 -- moai add '딴 일'",
             "env timeout 5 sudo moai add '딴 일'",
@@ -6073,7 +6122,14 @@ mod tests {
             );
         }
         // 빈손의 쓰기도 같다.
-        for cmd in ["env sed -i s/a/b/ src/x.rs", "sudo tee src/x.rs", "timeout 5 tee -a src/x.rs"] {
+        for cmd in [
+            "env sed -i s/a/b/ src/x.rs",
+            "sudo tee src/x.rs",
+            "timeout 5 tee -a src/x.rs",
+            // 파이프로 이어 쓰는 꼴이 `xargs` 가 가장 흔히 서는 자리다(moai-ulaa).
+            "echo x | xargs sed -i s/a/b/ src/x.rs",
+            "ls | xargs -n 1 tee src/x.rs",
+        ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 규칙 2 를 가렸다 — {cmd}\n{got:?}");
         }
@@ -6092,6 +6148,7 @@ mod tests {
         // 넘겨 주면 **돌지도 않거나 딴 트래커에서 도는 집기**가 여기 규칙 2 를 채운다.
         for cmd in [
             "env --weird moai add '딴 일'",
+            "xargs --weird moai add '딴 일'",
             "sudo -l moai add '딴 일'",
             "sudo -v moai add '딴 일'",
             "doas -C /etc/doas.conf moai add '딴 일'",
