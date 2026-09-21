@@ -7048,3 +7048,27 @@
 {"ts":"2026-09-21T13:38:56Z","id":"moai-unvx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-21T13:38:56Z","id":"moai-d5o9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (max — 훅의 판정과 쓰기 셈. 에픽 끝 리뷰는 moai-r3l9.u69 에 따로 적었다)"}
 {"ts":"2026-09-21T13:38:56Z","id":"moai-d5o9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-21T13:40:35Z","id":"moai-fwet","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"shell_scan 의 흩어진 판을 한 묶음으로 — 일곱 번째로 하나를 빠뜨렸다"}
+{"ts":"2026-09-21T13:40:35Z","id":"moai-fwet","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wmpj 에서 펼쳤다 — shell_scan 의 흩어진 판을 한 묶음으로 — 일곱 번째로 하나를 빠뜨렸다"}
+{"ts":"2026-09-21T13:40:35Z","id":"moai-wmpj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-fwet 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-47zz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"picked_in 이 명령줄을 두 번 가르고 stands 가 이미 푼 자리를 다시 푼다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-47zz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-bbeo 에서 펼쳤다 — picked_in 이 명령줄을 두 번 가르고, stands 가 route 가 이미 푼 자리를 다시 푼다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-bbeo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-47zz 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-wlwg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"겹을 나오는 자리의 다듬기 셋 — 같은 몸통 두 갈래, 세 벌로 적은 기록, 두 번 짓는 Layer"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-wlwg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-q6db 에서 펼쳤다 — 겹을 나오는 자리의 다듬기 셋 — 같은 몸통 두 갈래, 세 벌로 적은 집기 기록, 두 번 짓는 Layer"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-q6db","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-wlwg 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-lwil","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Layer 가 깊이만 들어 형제 치환을 한 겹으로 읽는다 — 문서도 낡았다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-lwil","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tq6h 에서 펼쳤다 — Layer 가 깊이만 들어 형제 치환을 한 겹으로 읽는다 — relex·end_by 문서도 낡았다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-tq6h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-lwil 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-906o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"command_of 와 shell_text 가 wrapped 를 두 번 부른다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-906o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-l2n0 에서 펼쳤다 — command_of 와 shell_text 가 wrapped 를 두 번 부른다"}
+{"ts":"2026-09-21T13:40:36Z","id":"moai-l2n0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-906o 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-w94f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"shell_scan 의 picked 가 이름 없는 세 자리 튜플이다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-w94f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-v4lw 에서 펼쳤다 — shell_scan 의 picked 가 이름 없는 세 자리 튜플이다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-v4lw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-w94f 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-qqg2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Wrapped::Stops 를 아무도 안 읽는다 — su -c·runuser -c 도 안 보인다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-qqg2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-se9g 에서 펼쳤다 — Wrapped::Stops 를 아무도 안 읽는다 — su -c·runuser -c 도 안 보인다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-se9g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-qqg2 로 펼쳤다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-5bht","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"env -S·sudo -s 가 연 되풀이 읽기의 값을 잰다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-5bht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-rang 에서 펼쳤다 — env -S·sudo -s 가 연 되풀이 읽기의 값을 잰다"}
+{"ts":"2026-09-21T13:40:37Z","id":"moai-rang","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-bujq 의 멤버 moai-5bht 로 펼쳤다"}
