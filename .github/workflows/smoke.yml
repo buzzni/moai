@@ -62,7 +62,7 @@ jobs:
           # **ci.yml 의 size-budget 과 열쇠를 나눠 쓴다.** 같은 열쇠에 같은 `target/` 을
           # 담으면 둘 중 먼저 끝난 쪽만 올라가고 진 쪽은 수백 MB 를 싸서 올렸다가 거절당한다.
           # 이긴 판은 그대로 굳어, 밤마다 그 낡은 `target/release` 를 풀고 LTO 를 다시 건다.
-          key: cargo-smoke-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-smoke-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-smoke-${{ runner.os }}-
 
       - name: build --release

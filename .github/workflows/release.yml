@@ -79,7 +79,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-rel-${{ matrix.target }}-
 
       - name: build
