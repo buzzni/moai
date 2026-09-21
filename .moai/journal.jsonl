@@ -6867,3 +6867,12 @@
 {"ts":"2026-09-21T09:54:02Z","id":"moai-b3it","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"남길 때 못 앉힌 것만 남긴다. 잣대는 `Unmerged::held` 하나다."}
 {"ts":"2026-09-21T09:54:03Z","id":"moai-ocly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 읽는 길과 탐색기)"}
 {"ts":"2026-09-21T09:54:04Z","id":"moai-ocly","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"`Marks::pending` 이 대기 자리의 탈을 물고 나온다. 다시 볼 때는 둘을 합쳐 고르고, 표를 들일지는 `trouble` 만 본다."}
+{"ts":"2026-09-21T09:55:24Z","id":"moai-eivo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T09:55:56Z","id":"moai-vqmx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"설치 한 줄 셋을 main 으로 옮기고, 되돌리는 것을 매는 시험을 뒀다"}
+{"ts":"2026-09-21T09:56:01Z","id":"moai-51it","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"내보내는 쪽 한 자리(cmd::Row)에서 기본값을 세운다. 스냅샷과 정규화는 그대로다"}
+{"ts":"2026-09-21T09:56:07Z","id":"moai-a4u9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"priority 와 같은 자리에서 함께 세운다. 훑다 찾아 에픽 멤버로 세웠다"}
+{"ts":"2026-09-21T09:56:14Z","id":"moai-jkpa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"사람이 저장소 전체 핀을 골랐다. rust-toolchain.toml 에 1.97.1 을 박고 캐시 키에 그 파일을 넣었다"}
+{"ts":"2026-09-21T09:56:20Z","id":"moai-ch4z.639","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 심긴 블록에 계약을 적었다(9e03ed9), CHANGELOG 는 리뷰가 고쳤다. 넘긴 것: ~/.rustup 캐시는 idea moai-86ob, 묶음의 priority 는 그대로 둔다"}
+{"ts":"2026-09-21T09:56:30Z","id":"moai-c62d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰는 moai-ch4z.639 가 세 에픽을 한 판으로 봤다 (high). 다음: 없다 — 받는 사람이 밟는 길은 main 으로 섰고 시험이 그것을 맨다"}
+{"ts":"2026-09-21T09:56:37Z","id":"moai-yeai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰는 moai-ch4z.639 가 세 에픽을 한 판으로 봤다 (high). 다음: 핀이 더한 값 하나가 남았다 — 잡마다 1.97.1 을 새로 받는 것(idea moai-86ob). MSRV 1.88 을 아무도 안 밟는 것은 idea moai-16wi"}
+{"ts":"2026-09-21T09:56:44Z","id":"moai-ch4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 둘로 닫는다 — priority(moai-51it)와 훑다 찾은 kind(moai-a4u9). 다음: 없다 — 줄을 내는 표면은 모두 cmd::Row 를 지나고 rm --json 만 일부러의 예외다. 늘 서는 키는 README·CHANGELOG·심긴 블록에 적혔다"}
