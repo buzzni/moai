@@ -385,6 +385,16 @@ fn shell_text(words: &[String]) -> Option<Handed> {
     }
     match basename(head) {
         "bash" | "sh" | "zsh" | "dash" | "ksh" => {
+            // **zsh·ksh 는 errexit 를 넓게 적는다**(moai-7ek0) — zsh 는 옵션 이름의 대소문자와
+            // 밑줄을 안 가리고(`-o err_exit`) 앞에 붙은 `no` 를 부정으로 읽으며, zsh·ksh93 은
+            // `--errexit` 도 받는다.
+            //
+            // **머리 낱말이 그 둘일 때만 넓힌다.** 넓히는 것은 errexit 를 **켜는** 쪽이고, 켜면
+            // 집기가 더 멀리 이어져 쓰기가 더 지나간다 — 안 켜진 것을 켜졌다고 읽으면 샌다.
+            // bash·dash 는 이 철자를 모르는 옵션으로 거절하고 **아무것도 안 돌리니**, 그 둘에서는
+            // 넓히는 것이 곧 안 도는 줄을 errexit 로 읽는 일이다. zsh·ksh 쪽은 거꾸로다 — 받으면
+            // 정말 켜지고, 그 판이 안 받으면 그 셸도 아무것도 안 돌린다.
+            let wide = matches!(basename(head), "zsh" | "ksh");
             let mut it = rest.iter();
             // **띄울 때 켠 errexit**(moai-j9tx) — `bash -e`·`bash -o errexit` 로 띄운 셸은 글의 첫
             // 줄부터 `set -e` 아래다. `+e`·`+o errexit` 가 끄는 것도 셸이 읽는 차례 그대로다.
@@ -402,7 +412,11 @@ fn shell_text(words: &[String]) -> Option<Handed> {
                     it.next();
                     continue;
                 }
-                if w.starts_with("--") {
+                // 긴 이름으로 적은 errexit(`zsh --errexit`·`--no_err_exit`) — 값을 안 받는다.
+                if let Some(name) = w.strip_prefix("--") {
+                    if wide && let Some(v) = errexit_name(name, wide) {
+                        strict = v;
+                    }
                     continue;
                 }
                 // `-`·`+` 로 여는 짧은 옵션 뭉치. 아니면 옵션이 끝난 것이고, 그 낱말이 글이거나 스크립트다.
@@ -417,8 +431,11 @@ fn shell_text(words: &[String]) -> Option<Handed> {
                         'e' => strict = on,
                         'o' | 'O' => {
                             let val = it.next();
-                            if f == 'o' && val.is_some_and(|v| v == "errexit") {
-                                strict = on;
+                            if f == 'o'
+                                && let Some(v) = val.and_then(|v| errexit_name(v, wide))
+                            {
+                                // `+o noerrexit` 는 켠다 — 부정 둘이 겹친다.
+                                strict = on == v;
                             }
                         }
                         _ => {}
@@ -433,6 +450,20 @@ fn shell_text(words: &[String]) -> Option<Handed> {
         "eval" if !rest.is_empty() => Some(Handed { text: rest.join(" "), fork: false, strict: false }),
         _ => None,
     }
+}
+
+/// 셸 옵션 이름이 errexit 인가 — **켜는 이름인가 끄는 이름인가**를 함께 낸다(moai-7ek0).
+/// `None` 이면 딴 옵션이다.
+///
+/// `wide` 면 zsh 의 자로 읽는다 — 대소문자와 밑줄을 안 가리고(`ERR_EXIT`), 앞에 붙은 `no` 가
+/// 부정이다(`noerrexit`). 아니면 글자째 `errexit` 하나뿐이다(bash·dash·ksh93 의 자).
+fn errexit_name(name: &str, wide: bool) -> Option<bool> {
+    if !wide {
+        return (name == "errexit").then_some(true);
+    }
+    let flat: String = name.chars().filter(|c| *c != '_').flat_map(char::to_lowercase).collect();
+    let (on, base) = flat.strip_prefix("no").map_or((true, flat.as_str()), |r| (false, r));
+    (base == "errexit").then_some(on)
 }
 
 /// `env -S` 가 글 하나를 **낱말로** 가르는 자 — 셸이 아니다(GNU coreutils 의 `--split-string`).
@@ -8034,6 +8065,14 @@ mod tests {
             // 옵션이 아닌 낱말에서 멈춘다 — 그 글은 스크립트의 인자라 안 돈다.
             "bash script.sh -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
             "bash -e -- -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            // **zsh·ksh 의 넓은 철자**(moai-7ek0) — zsh 는 대소문자와 밑줄을 안 가리고, 둘 다
+            // 긴 이름을 받는다. `+o` 에 부정 이름이 겹치면 켜는 것이다.
+            "zsh -o err_exit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh -o ERR_EXIT -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh --errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh --err_exit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "ksh --errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh +o noerrexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -8053,6 +8092,18 @@ mod tests {
             "bash -E -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
             // `--rcfile` 은 뒤 낱말을 제 값으로 받는다 — 그 `-e` 는 파일 이름이다.
             "bash --rcfile -e -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            // **넓은 철자는 zsh·ksh 에서만이다**(moai-7ek0) — bash·dash 는 이것을 모르는 옵션으로
+            // 거절하고 아무것도 안 돌린다. 여기서 켜진 것으로 읽으면 안 도는 줄이 쓰기를 푼다.
+            "bash --errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "dash -o err_exit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "sh --errexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            // 끄는 이름과 딴 이름은 켜는 것이 아니다.
+            "zsh -o noerrexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh -o no_err_exit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh --noerrexit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh +o err_exit -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh -o errexitfoo -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
+            "zsh --errexitfoo -c 'moai mv t-1 in_progress --from todo; sed -i s/a/b/ src/store.rs'",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
