@@ -162,6 +162,39 @@ pub fn glyph(status: &str) -> &'static str {
     }
 }
 
+/// 미룬 줄의 표식 — `‖`(U+2016 DOUBLE VERTICAL LINE), moai-pkvw.
+///
+/// **`⏸`(U+23F8)를 안 쓴다.** 그쪽은 이모지 표현이 붙어 터미널·폰트에 따라 색이 입고 두 칸으로
+/// 그려진다 — 스피너 두 칸이 표를 어긋낸 `moai-prp5` 의 자리가 그대로 다시 선다. `‖` 는 이모지
+/// 표현이 없어 어디서나 글자로만 서고, 폭 분류가 [`glyph`] 의 `▸`(U+25B8)와 같은 East Asian
+/// Ambiguous 라 새 위험이 안 는다. 모양도 일시정지 두 막대 그대로다.
+pub const DEFERRED: &str = "‖";
+
+/// idea 줄의 표식 — `◇`(U+25C7 WHITE DIAMOND), moai-h06a.
+///
+/// 빈 속이 뜻과 맞는다 — idea 는 아직 일이 아니다. 속이 찬 `▸`·`✓` 와 한눈에 갈리고 `○`(모르는
+/// 칸)와도 모양이 갈린다. 고른 잣대는 [`DEFERRED`] 와 같다.
+pub const IDEA: &str = "◇";
+
+/// 칸 글리프 **곁에** 서는 표식(moai-pkvw·moai-h06a). 대신 서지 않는다 — 축이 셋이라
+/// (`kind`·`status`·`deferred_at`) 칸이 진 뜻을 가리면 그 줄이 원래 어느 칸이었는지를 잃는다.
+/// 미룬 idea 는 둘이 함께 선다.
+///
+/// **낱말을 걷지 않는다.** "색이 혼자 뜻을 지지 않는다" 가 글리프에도 서서, 목록 꼬리의
+/// `status.put_off` 와 상세·`--json` 의 낱말은 그대로 남고 이것은 거기 더해진다.
+///
+/// 차례는 축의 차례다 — 칸(글리프) · 종류(`◇`) · 미룸(`‖`).
+pub fn marks(idea: bool, deferred: bool) -> String {
+    let mut out = String::new();
+    if idea {
+        out.push_str(IDEA);
+    }
+    if deferred {
+        out.push_str(DEFERRED);
+    }
+    out
+}
+
 /// 시작한 칸이 도는 걸음. ora 기본 세트를 그대로 옮겼다 — 검증된 것을
 /// 다시 재느니 그대로 가져온다.
 pub const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -236,6 +269,34 @@ mod tests {
         let uniq: std::collections::BTreeSet<_> = g.iter().collect();
         assert_eq!(uniq.len(), g.len(), "{g:?}");
         assert_eq!(glyph("설정으로_더한_칸"), "○");
+    }
+
+    /// **표식과 칸 글리프는 한 칸씩이고 글자 하나씩이다**(moai-fgyg). 표가 어긋나는 자리가 여기다 —
+    /// `moai-prp5` 에서 스피너 두 칸이 목록을 어긋낸 그 자리다.
+    ///
+    /// **코드포인트를 글자로 못박는다.** 폭은 글자가 정하므로, 모양이 비슷하다고 `⏸`(U+23F8)·
+    /// `⏯`(U+23EF) 로 바꾸는 순간 이모지 표현이 붙어 터미널에 따라 두 칸으로 그려진다 — 그것이
+    /// `‖`(U+2016)·`◇`(U+25C7)를 고른 까닭이라, 바꾸려면 이 줄을 먼저 지나야 한다.
+    #[test]
+    fn the_marks_and_the_column_glyphs_are_one_column_each() {
+        assert_eq!(DEFERRED, "\u{2016}", "미룸 표식이 U+2016 이 아니다");
+        assert_eq!(IDEA, "\u{25C7}", "idea 표식이 U+25C7 이 아니다");
+        let all = [DEFERRED, IDEA, glyph("todo"), glyph("in_progress"), glyph("review"), glyph("done"), glyph("?")];
+        for g in all {
+            assert_eq!(g.chars().count(), 1, "{g:?} 가 글자 하나가 아니다");
+            assert_eq!(crate::text::width(g), 1, "{g:?} 가 한 칸이 아니다");
+        }
+        // 표식은 **겹쳐 선다** — 미룬 idea 는 둘이 함께 서고 그때가 가장 넓다.
+        assert_eq!(crate::text::width(&marks(false, false)), 0);
+        assert_eq!(crate::text::width(&marks(true, false)), 1);
+        assert_eq!(crate::text::width(&marks(false, true)), 1);
+        assert_eq!(crate::text::width(&marks(true, true)), 2);
+        // 차례는 축의 차례다 — 종류가 먼저, 미룸이 뒤.
+        assert_eq!(marks(true, true), format!("{IDEA}{DEFERRED}"));
+        // 표식이 칸 글리프와 겹치면 어느 쪽이 무엇인지 못 가린다.
+        let columns: std::collections::BTreeSet<&str> =
+            ["todo", "in_progress", "review", "done", "모르는 칸"].iter().map(|s| glyph(s)).collect();
+        assert!(!columns.contains(DEFERRED) && !columns.contains(IDEA), "표식이 칸 글리프와 같은 글자다");
     }
 
     /// 프레임이 겹치지 않고 한 바퀴 돌면 처음으로 돌아온다. 어느 칸이 도는지는

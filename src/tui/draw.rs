@@ -1340,7 +1340,9 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     // 글리프와 제목이 한 칸 당겨졌다 — 머리가 딱 들어가는 폭마다 그랬다(머리를 걷는 셈이 걷힌 글리프
     // 한 칸을 전제하므로). 이름 줄의 `S` 도 같은 셈을 본다.
     if cols.still {
-        let still = style::glyph(site.column(at)).to_string();
+        // **표식([`row_marks`])은 안 걷는다** — 걷는 것은 움직임(스피너)이고 표식은 뜻이다. 걷으면
+        // 좁은 창에서 미룬 줄과 idea 가 산 일과 똑같이 서는데, 그 자리가 바로 이 에픽이 고친 자리다.
+        let still = format!("{}{}", style::glyph(site.column(at)), row_marks(site, at));
         head_w = head_w - crate::text::width(&head[glyph_at].content) + crate::text::width(&still);
         head[glyph_at] = Span::styled(still, glyph_style(site.column(at)));
     }
@@ -1413,8 +1415,13 @@ fn trail_width(app: &App, e: &Entry) -> usize {
 /// 줄을 다 짓지 않으려고(moai-wt4n). 줄(`row_line`)이 지은 폭과 같은지는 거기서 늘 견준다.
 fn head_width(site: &Site, at: usize, twig: &Twig, fields: super::view::Fields, cols: Head) -> usize {
     // 칸 글리프는 도는 줄이든 아니든 두 칸이다(`row_glyph`). 좁아서 스피너를 걷는 것(`Head::still`)은
-    // 걷기 셈 **뒤의** 일이라 여기에 안 든다.
-    cols.lead(fields) + 2 + 1 + lead_extras(site, at, fields) + twig_width(twig)
+    // 걷기 셈 **뒤의** 일이라 여기에 안 든다. 그 곁의 표식([`row_marks`])은 줄마다 달라 재서 더한다.
+    cols.lead(fields)
+        + 2
+        + crate::text::width(&row_marks(site, at))
+        + 1
+        + lead_extras(site, at, fields)
+        + twig_width(twig)
 }
 
 /// 켠 오른쪽 열 가운데 **이 머리 폭의 줄에 들어가는 것** — 좁으면 사람이 정한 차례로 걷는다(날짜 →
@@ -1891,7 +1898,22 @@ fn glyph_of(app: &App, site: &Site, at: usize) -> &'static str {
 /// 들쭉날쭉하면 훑어 내려갈 수 없다. 상세 머리와 건수는 칸 이름을 곁에 적으므로 [`glyph_of`] 다.
 fn row_glyph(app: &App, site: &Site, at: usize) -> String {
     let col = style::glyph(site.column(at));
-    if site.spins(at) { format!("{}{col}", style::spin_frame(app.spin)) } else { format!(" {col}") }
+    let marks = row_marks(site, at);
+    if site.spins(at) { format!("{}{col}{marks}", style::spin_frame(app.spin)) } else { format!(" {col}{marks}") }
+}
+
+/// 칸 글리프 곁에 서는 표식 — 미룸 `‖`(moai-pkvw)과 idea `◇`(moai-h06a). **칸 글리프를 대신하지
+/// 않는다**: 축이 셋이라(`kind`·`status`·`deferred_at`) 칸을 가리면 그 줄이 원래 어느 칸이었는지를
+/// 잃는다. 미룬 idea 는 둘이 함께 선다.
+///
+/// **물려받은 미룸도 센다**(`Index::deferred_root`) — 미룬 에픽의 멤버가 표 없이 서면 계획 밖의
+/// 줄이 일과 똑같이 보인다. 도는 줄을 가르는 [`super::Site::spins`] 와 같은 자다.
+///
+/// **폭은 [`head_width`] 가 같이 재야 한다** — 갈리면 걷는 셈이 줄보다 좁게 잡아 제목이 한두 칸
+/// 말없이 잘린다(그 자리의 `debug_assert_eq!` 가 잡는다).
+fn row_marks(site: &Site, at: usize) -> String {
+    let i = &site.issues[at];
+    style::marks(i.kind == crate::model::Kind::Idea, site.index.deferred_root(&i.id).is_some())
 }
 
 /// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
@@ -2954,6 +2976,41 @@ pub(super) mod tests {
     /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
+    }
+
+    /// **탐색기의 목록도 미룸과 생각을 말한다**(moai-pkvw·moai-h06a). CLI 목록과 같은 표식이 칸
+    /// 글리프 곁에 서고, 칸 글리프를 대신하지 않는다.
+    ///
+    /// **물려받은 미룸도 단다** — 미룬 에픽의 멤버가 표 없이 서면 계획 밖의 줄이 일과 똑같이 보인다.
+    /// 그것이 `moai show --all` 과 여기가 같은 자(`Index::deferred_root`)를 쓰는 까닭이다.
+    #[test]
+    fn the_explorer_list_marks_ideas_and_deferred_rows_beside_the_column_glyph() {
+        let make = |id: &str, title: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), title.into(), kind, Status::new(st), "2026-09-01T00:00:00Z")
+        };
+        let mut thought = make("argos-0002", "담은 생각", Kind::Idea, "todo");
+        thought.priority = Some(2);
+        let mut shelved_epic = make("argos-0005", "미룬 에픽", Kind::Epic, "todo");
+        shelved_epic.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        // 제 `deferred_at` 이 없는 멤버다 — 물려받은 미룸으로만 표식이 선다.
+        let mut inherited = make("argos-0006", "물려받은 멤버", Kind::Issue, "in_progress");
+        inherited.epic = Some("argos-0005".into());
+
+        let mut a = every([issues(), vec![thought, shelved_epic, inherited]].concat());
+        // 미룬 에픽의 멤버까지 펼친다 — 물려받은 미룸을 재는 줄이 그것이다.
+        a.cursor = 1;
+        a.hit("l");
+        let text = render(&mut a, 100, 20).join("\n");
+
+        assert!(text.contains(&format!("·{} 담은 생각", style::IDEA)), "idea 표식이 안 섰다\n{text}");
+        // **칸 글리프를 대신하지 않는다** — 미룬 에픽도 멤버에서 읽은 제 칸(`▸`)을 그대로 말한다.
+        assert!(text.contains(&format!("▸{} 미룬 에픽", style::DEFERRED)), "미룸 표식이 안 섰다\n{text}");
+        // 물려받은 미룸도 단다. 이 줄은 `in_progress` 지만 계획 밖이라 안 돌아(`Site::spins`) 멈춘
+        // `▸` 로 선다 — 표식과 스피너가 서로 자리를 빼앗지 않는다.
+        assert!(
+            text.contains(&format!("▸{} └─ 물려받은 멤버", style::DEFERRED)),
+            "물려받은 미룸에 표식이 안 섰다\n{text}"
+        );
     }
 
     /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.
