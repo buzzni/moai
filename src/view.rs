@@ -2363,7 +2363,7 @@ pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> Strin
         }
         SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
         SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
-        // 막힌 id 가 없으면 파일을 다 못 읽은 것이다 — 그 까닭은 같은 판의 앞줄이 댄다.
+        // 막힌 id 가 없으면 파일을 다 못 읽은 것이다 — 그 까닭은 같은 판에 함께 실린 줄이 댄다.
         SheetTrouble::SpoolKept { at, held } if held.is_empty() => (at, say(lang, "sheet.spool_kept").to_string()),
         SheetTrouble::SpoolKept { at, held } => (at, fill(say(lang, "sheet.spool_held"), &[("ids", &held.join(", "))])),
     };
@@ -3359,7 +3359,12 @@ mod tests {
                 (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: stamp.clone() }), "read.argos-0002"),
                 (sheet_trouble(lang, &SheetTrouble::Skipped { at: at.clone(), why: table.clone() }), "[read]"),
                 (sheet_trouble(lang, &SheetTrouble::SpoolLeft { at: at.clone(), said: "EROFS".into() }), "EROFS"),
-                (sheet_trouble(lang, &SheetTrouble::SpoolKept { at: at.clone(), held: Vec::new() }), ""),
+                // 막힌 id 가 없는 판은 **그 글 자체**를 바늘로 든다 — 빈 바늘은 무엇이 서도 맞아, 갈래를 가르는
+                // 조건이 뒤틀려 없는 줄을 고치라는 글이 서도 이 시험이 푸르렀다.
+                (
+                    sheet_trouble(lang, &SheetTrouble::SpoolKept { at: at.clone(), held: Vec::new() }),
+                    say(lang, "sheet.spool_kept"),
+                ),
                 (
                     sheet_trouble(lang, &SheetTrouble::SpoolKept { at: at.clone(), held: vec!["argos-0002".into()] }),
                     "argos-0002",

@@ -1061,7 +1061,7 @@ impl Site {
 struct ReadStamp {
     /// 읽고 쓰는 자리([`crate::read_marks::Place::at`]).
     at: Stamp,
-    /// 대기 자리([`crate::read_marks::Place::pending`]). **있는가가 곧 "아직 안 합쳤다" 라** 생기는
+    /// 대기 자리([`crate::read_marks::Place::pending`]). **있는가가 곧 "아직 다 안 합쳤다" 라** 생기는
     /// 것도 지워지는 것도 이 값이 바뀌는 일이다 — `exists` 를 따로 묻지 않는다. 못 푼 판에서는
     /// `at` 이 곧 그 자리라 잴 것이 없다(`Place::pending` 이 `None` 이다).
     pending: Stamp,
