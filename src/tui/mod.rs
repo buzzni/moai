@@ -2366,6 +2366,46 @@ impl App {
         }
     }
 
+    /// [`App::load_read`] 의 **층 판**(moai-7irq) — 펼쳐 둔 프로젝트의 읽음을 제 파일에서 다시 들고
+    /// 그 줄의 [NEW] 를 다시 센다.
+    ///
+    /// 펼친 프로젝트는 제 `Site` 에 제 `seen` 과 `unread` 를 따로 드는데, 세는 자([`App::recount_unread`])
+    /// 는 지금 선 프로젝트만 셌다. 그래서 그 줄의 셈을 움직이는 것은 펼치는 길 하나뿐이었고, 그
+    /// 사이에 [`App::relayer_with`] 가 옛 `Site` 를 그대로 옮겨 들어 낡은 셈을 살려 두었다.
+    fn load_read_in(&mut self, at: usize) {
+        let seat = Seat::Place(at);
+        let Some(site) = self.site_of_seat(seat) else { return };
+        let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return };
+        // **몰랐다가 또 모르는 걸음은 안 센다** — [`App::load_read`] 와 같은 자다.
+        let knew = site.read_tried.trouble.is_none();
+        let Some(got) = self.read_marks_of(&root) else { return };
+        let took = got.marks.trouble.is_none();
+        let Some(site) = self.site_mut(seat) else { return };
+        let told = Self::take_read(site, got);
+        if let Some(told) = told {
+            self.notice = Some(told);
+        }
+        if took || knew {
+            self.recount_unread_in(seat);
+        }
+    }
+
+    /// 펼쳐 둔 프로젝트 **전부**의 읽음을 다시 든다([`App::load_read_in`], moai-7irq) — 옛 `[read]` 가
+    /// 바뀐 걸음이 여기 든다. 그 표는 프로젝트마다 겹쳐 보는 값이라([`App::read_marks_of`]) 바뀌면 층의
+    /// 줄도 함께 낡는다.
+    ///
+    /// **옛 `[read]` 가 바뀐 판에서만 부른다.** 그 표는 이 바이너리가 안 적으니 드문 걸음이고, 값은
+    /// 펼친 프로젝트 수만큼의 읽음 파일 읽기다. 걸음마다 돌면 그 값을 늘 치른다.
+    fn load_read_in_places(&mut self) {
+        let opened: Vec<usize> = match &self.layer {
+            Some(l) => l.places.iter().enumerate().filter(|(_, p)| p.site.is_some()).map(|(n, _)| n).collect(),
+            None => return,
+        };
+        for at in opened {
+            self.load_read_in(at);
+        }
+    }
+
     /// **읽음 파일이 바뀌었으면 다시 든다** — 옆 터미널의 `moai read` 가 이 화면에 닿는 길이다
     /// (moai-j038.vna). 한때 그 길은 설정 파일의 표식이었는데, 읽음이 설정 밖으로 나가며 설정은 더 안
     /// 바뀐다(moai-bwce) — 그래서 그 파일의 표식을 따로 잰다.
@@ -2442,11 +2482,21 @@ impl App {
         //
         // 같으면 안 든다 — 보기 토글이 `[tui]` 만 고쳐도 이 길은 돌고(스스로 쓴다), 다시 드는 일은
         // 읽음 파일 읽기와 `query::unread` 의 줄 수만큼 걷기다.
-        if reg.trouble.is_none() && self.legacy_read != reg.read {
+        let moved = reg.trouble.is_none() && self.legacy_read != reg.read;
+        if moved {
             self.legacy_read = std::mem::take(&mut reg.read);
             self.load_read();
         }
         self.relayer_with(Some(&reg), None);
+        // **층의 줄도 그 표를 겹쳐 본다**(moai-7irq) — 위의 [`App::load_read`] 는 지금 선 프로젝트만
+        // 든다. 펼쳐 둔 프로젝트는 제 `seen` 을 따로 드는데 그 안에 이 옛 표가 섞여 있어, 여기서 안
+        // 들면 그 줄의 [NEW] 가 접었다 다시 펼칠 때까지 옛 표로 선다.
+        //
+        // **다시 세운 층 뒤에 든다** — [`App::relayer_with`] 가 옛 `Site` 를 옮겨 들면서 첨자를 다시
+        // 매기므로, 앞에서 들면 자리가 어긋난다.
+        if moved {
+            self.load_read_in_places();
+        }
     }
 
     /// 안 읽은 줄을 다시 센다. **누군지 모르면 아무것도 안 센다** — 읽기는 사람을 묻지 않는다

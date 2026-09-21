@@ -2006,6 +2006,41 @@ mod tests {
         assert_eq!(a.site.lang, Lang::En, "화면이 층과 다른 말로 섰다");
     }
 
+    /// **옛 `[read]` 가 바뀌면 펼쳐 둔 프로젝트의 줄도 따라간다**(moai-7irq). 그 표는 프로젝트마다
+    /// 겹쳐 보는 값인데([`App::read_marks_of`]), 설정이 바뀐 걸음은 지금 선 프로젝트만 다시
+    /// 들었다 — 펼친 줄은 제 `Site` 를 따로 들고 [`App::relayer_with`] 가 그것을 그대로 옮겨
+    /// 오므로, 그 줄의 [NEW] 가 접었다 다시 펼칠 때까지 옛 표로 섰다.
+    #[test]
+    fn a_changed_legacy_read_reaches_an_open_project() {
+        let s = Scratch::fenced("layer-legacy-read");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+
+        // 옛 바이너리나 사람 손이 설정의 옛 `[read]` 에 적는다 — 이 바이너리는 여기 안 적는다.
+        let mut src = std::fs::read_to_string(&cfg).unwrap();
+        src.push_str("\n[read]\n\"argos-0001\" = \"2026-09-14T00:00:00Z\"\n");
+        std::fs::write(&cfg, src).unwrap();
+        // 걸음이 바뀐 것을 보게 한다 — 띄울 때 잰 표식 자리다.
+        a.config_stamp = Some(None);
+        a.follow_config();
+        assert_eq!(seen(&a).as_deref(), Some("2026-09-14T00:00:00Z"), "펼쳐 둔 프로젝트가 바뀐 옛 표를 안 들었다");
+    }
+
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
     /// 비우고 [`App::load_read`] 가 파일에서 다시 드는데, 그 파일을 못 읽으면(옛 `sudo moai read` 가
     /// 남긴 root 의 파일) 들일 것이 없어 **내게 온 줄이 모두** [NEW] 로 선다 — 그 화면의 `SPC m a`
