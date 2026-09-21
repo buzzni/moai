@@ -144,3 +144,15 @@
 {"ts":"2026-09-21T16:14:09Z","id":"moai-ug47","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: 첫 칸에 남은 넷은 옆 세션이 그 파일을 놓아야 집는다. `moai-i7b6`·`moai-l2he`·`moai-p3kb` 는 `src/hook.rs`·`src/cmd/hook.rs` 를 moa-issue-4c(에픽 moai-bujq)가 쥐고, `moai-65ie` 는 `src/projects.rs`·`src/cmd/status.rs`·`src/tui/layer.rs` 를 moa-issue-63(에픽 moai-hela)이 쥔다. 미루지 않는다 — 그 넷이 이 에픽을 열어 둔다.\n\n**그 넷은 에픽 끝 리뷰를 안 지났다.** 멤버 다섯은 moai-ug47.h2r(max)로 봤고, 그 범위는 4918b5c 까지다. 남은 넷으로 이 에픽을 닫는 창은 리뷰를 한 번 더 불러야 한다."}
 {"ts":"2026-09-21T16:19:42Z","id":"moai-bujq.91c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 셸 렉서 정리 아홉과 훅이 새던 셋 (에픽 끝)"}
 {"ts":"2026-09-21T16:19:56Z","id":"moai-bujq.91c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T16:20:28Z","id":"moai-fwet","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 한 셸에 매인 판 일곱을 Scope 로. 쓰기 경로의 겹 경계다)"}
+{"ts":"2026-09-21T16:20:28Z","id":"moai-47zz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — route 와 stands 가 같은 답을 두 번 묻던 자리. 트래커를 다시 읽는 길이다)"}
+{"ts":"2026-09-21T16:20:28Z","id":"moai-w94f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — picked 의 세 자리 튜플에 이름을 줬다. 판정은 안 바뀐다)"}
+{"ts":"2026-09-21T16:20:28Z","id":"moai-wlwg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — relex 가 겹을 한 번만 짓는다. Doc 갈래에 시험이 없던 것을 메웠다)"}
+{"ts":"2026-09-21T16:20:28Z","id":"moai-906o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — command_of 와 shell_text 를 한 번 읽기로. 안 적힌 약속을 코드로 옮겼다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-lwil","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 형제 치환 둘에 제 이름을. 낡은 글 셋을 지금 셈에 맞췄다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-5bht","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 잰 것과 시험뿐이다. 코드는 안 바뀐다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-t5op","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — heredoc 본문을 렉서의 Ctx 로. 겹친 백틱이 새던 자리를 함께 닫았다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-ueat","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 묶음에 매인 판 넷을 Blocks 로. 묶음 스택까지만 간 것은 2026-09-21 사용자 결정)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-qqg2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — su -c·runuser -c 가 넘긴 글을 읽는다. 훅이 통째로 못 보던 문이다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-dkph","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — runuser -u … -- <명령> 을 본다. sudo -u·doas -u 는 재어 보고 안 고쳤다)"}
+{"ts":"2026-09-21T16:20:29Z","id":"moai-n3wq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 깊이 대신 번호로 가른다. 더 보는 쪽으로 안 넘어간 것을 일곱 꼴로 쟀다)"}
