@@ -404,3 +404,10 @@
 {"ts":"2026-09-21T22:44:22Z","id":"moai-s7we","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"v0.1.1 에 단다 — 감독이 브리프에 \"마일스톤을 달지 마라\" 고 적은 것이 잘못이었다(2026-09-21 사용자 지적). 도는 마일스톤이 있으면 집는 것은 그 안이거나 p0 핫픽스여야 한다. 마일스톤을 안 넓히려고 적은 줄이 규칙을 깼다. 일꾼의 잘못이 아니다."}
 {"ts":"2026-09-21T22:44:58Z","id":"moai-4097","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 도는 마일스톤을 건너뛰고 일을 맡긴다"}
 {"ts":"2026-09-21T22:44:58Z","id":"moai-6qgz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 절차에 마일스톤 문을 세운다"}
+{"ts":"2026-09-21T22:54:46Z","id":"moai-oz13","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 롤업이 막대 곁의 미룬 수를 안 읽는다"}
+{"ts":"2026-09-21T22:55:03Z","id":"moai-hjly.jm8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 못 읽은 저널의 자료화와 막대 곁의 미룬 수"}
+{"ts":"2026-09-21T22:55:10Z","id":"moai-hjly.jm8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T22:55:28Z","id":"moai-hjly.jm8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: `/code-review high --fix` 가 도는 중이다. 원문을 이 이슈에 노트로 남기고, 받은 것과 넘긴 것을 `-m` 에 적어 닫는다. 워크트리는 `.claude/worktrees/moai-hjly`, 가지는 `worktree-moai-hjly`, 머지 안 했다. develop 은 `781cb59` 로 이미 받았다."}
+{"ts":"2026-09-21T22:56:01Z","id":"moai-f2lc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 `62f12f3` 에 서 있고 develop 도 받았다(`781cb59`). `/code-review high --fix` 가 도는 중이라 그것이 끝나면 받은 것을 얹고, 워크트리 `worktree-moai-hjly` 를 develop 에 병합한 뒤 닫는다. 이것을 닫으면 에픽 moai-6ney 가 닫힌다."}
+{"ts":"2026-09-21T22:56:01Z","id":"moai-zxwj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 `bf45c9f` 에 서 있다. 사람이 정한 것 — 분모는 미룬 멤버를 그대로 세고 막대 곁에 `미룬 N` 을 댄다. 보드·묶음 상세·`status --json` 셋은 섰고 탐색기는 moai-oz13 으로 남겼다. `/code-review high --fix` 가 끝나면 받은 것을 얹고 병합한 뒤 닫는다."}
+{"ts":"2026-09-21T22:56:01Z","id":"moai-hjly.jm8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: `/code-review high --fix` 를 기다리는 중이다. 원문을 이 이슈에 노트로 남기고, 받은 것과 넘긴 것을 `-m` 에 적어 닫는다. 그 뒤에 `worktree-moai-hjly` 를 develop 에 병합하고 moai-f2lc·moai-zxwj 를 닫는다."}
