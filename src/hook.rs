@@ -813,6 +813,15 @@ struct Lexer<'a> {
     deep: usize,
 }
 
+/// 이 판에서 렉서가 닿은 가장 깊은 겹([`Lexer::DEEP`]). **시험만 읽는다** — 상한이 되돌이를
+/// 실제로 막는지는 벽시계가 아니라 이 값이 답한다(moai-2bv4). 시간으로 재던 판은 상한이 아니라
+/// 그때 기계에 걸린 부하를 재, 세션 예닐곱이 같이 도는 자리에서 붉어졌다.
+///
+/// 시험들이 한 판에서 나란히 도니 이 값은 모두의 가장 깊은 자리다. 재는 것이 "상한을 넘은 적이
+/// 없다" 라 그래도 답은 같고, 넘은 판은 어느 시험이 넘겼든 붉어져야 맞다.
+#[cfg(test)]
+static DEEPEST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 impl<'a> Lexer<'a> {
     fn new(cmd: &'a str) -> Self {
         Lexer::at(cmd, 0)
@@ -820,6 +829,8 @@ impl<'a> Lexer<'a> {
 
     /// 다시 읽기의 겹을 이어받는 렉서 — [`Lexer::relex`] 와 치환이 쓴다.
     fn at(cmd: &'a str, deep: usize) -> Self {
+        #[cfg(test)]
+        DEEPEST.fetch_max(deep, std::sync::atomic::Ordering::Relaxed);
         Lexer {
             chars: cmd.chars().peekable(),
             all: Vec::new(),
@@ -5388,9 +5399,18 @@ mod tests {
         );
         assert_eq!(guard_create(&all, &cfg(), &here(), &nest(Lexer::DEEP + 4)), Decision::Pass, "상한 없이 파고든다");
         // 상한이 실제로 되돌이를 막는다 — 막던 것이 없으면 여기서 스택이 넘쳐 훅이 통째로 죽는다.
-        let clock = std::time::Instant::now();
+        //
+        // **재는 것은 겹이지 시간이 아니다**(moai-2bv4). 벽시계 5초로 걸려 있던 판은 상한이 아니라
+        // 그때 기계에 걸린 부하를 재, 혼자 돌면 2.4초인 것이 부하 17~20 에서 6.2초로 붉어졌다 —
+        // 흔들리는 시험은 다음 사람이 "내 고침이 깼다" 로 읽어 시간을 태운다. [`DEEPEST`] 가
+        // 렉서가 실제로 닿은 겹을 들고, 상한이 없으면 그 값이 5,000 으로 선다.
+        //
+        // **닿은 자리가 상한과 같아야 한다.** `<=` 로만 재면 자국이 아예 안 걸린 판(0 겹)도
+        // 지나가, 시험이 아무것도 안 재면서 초록으로 선다.
+        DEEPEST.store(0, std::sync::atomic::Ordering::Relaxed);
         let _ = guard_create(&all, &cfg(), &here(), &nest(5000));
-        assert!(clock.elapsed() < std::time::Duration::from_secs(5), "겹을 안 막는다 — {:?}", clock.elapsed());
+        let deepest = DEEPEST.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(deepest, Lexer::DEEP, "겹 상한이 안 섰다 — {deepest} 겹까지 팠다");
         // **그 글은 제 토막 자리에 심는다**(리뷰 moai-p836.rv) — 뒤에 몰아 쌓던 판은 줄 끝의 판을
         // 물려받아, 앞선 `&&` 집기를 잃고(잘못 막음) 뒤따르는 `cd` 로 제 쓰기를 지웠다(샜다).
         for cmd in [
