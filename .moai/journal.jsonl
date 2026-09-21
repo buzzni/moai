@@ -6666,3 +6666,4 @@
 {"ts":"2026-09-21T04:50:15Z","id":"moai-wd5u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"대기 자리는 도장이 다 앉았을 때만 지운다. 못 읽은 판과 자리가 막힌 id 는 남기고 SpoolKept 로 까닭을 싣는다. 리뷰 moai-shn2.zkl 가 max 로 보고 12건을 받았다."}
 {"ts":"2026-09-21T04:50:27Z","id":"moai-shn2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 에픽이 닫혔고(17/17) v0.1.0 이 96/96 이다. 남은 것은 릴리스 절차 하나 — 감독이 CHANGELOG 를 채우고 사람의 허락을 받아 태그한다"}
 {"ts":"2026-09-21T04:52:55Z","id":"moai-gpbw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.0 을 낸다 — CHANGELOG·main 가지·PR"}
+{"ts":"2026-09-21T04:54:18Z","id":"moai-gpbw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
