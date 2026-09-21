@@ -3902,7 +3902,7 @@ pub(super) mod tests {
         // 시계를 고정한다 — 읽음은 이제 본 줄의 `updated_at` 을 적어(moai-lyc1) 시계를 안 타지만, 화면의
         // 날짜 칸이 `App::now` 로 재므로 그대로 둔다.
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("테스터 (tester@example.com)".into());
+        a.site.me = Some("테스터 (tester@example.com)".into());
         a.recount_unread();
         assert!(!a.site.unread.is_empty(), "내 줄인데 안 읽음이 하나도 없다");
 

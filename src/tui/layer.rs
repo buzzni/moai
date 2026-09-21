@@ -782,7 +782,7 @@ impl App {
                 // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
                 // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
                 // 들이기(`apply_fresh`)가 세므로 그 **앞**이다.
-                self.me = self.whoami(&repo.root);
+                self.site.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
                 // **그 줄이 이미 들고 있던 읽음을 베껴 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
@@ -2180,6 +2180,32 @@ mod tests {
             Some("2026-09-14T00:00:00Z"),
             "들어가며 들고 있던 읽음을 버렸다 — 이 프로젝트가 통째로 [NEW] 로 선다"
         );
+    }
+
+    /// **[NEW] 를 세는 걸음이 누군지 묻지 않는다**(moai-ropk). 한눈 보기의 줄에서
+    /// [`crate::tui::App::recount_unread_in`] 이 걸음마다 `whoami` 를 풀어 `git config` 프로세스 둘을
+    /// 띄웠고(띄우기 11ms + 푸는 데 22ms), 그것이 `term.draw` 와 `event::poll` 사이에서 돌아 그대로
+    /// 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리 하나고([`crate::tui::Site::me`]), 세는
+    /// 자는 푼 값을 읽기만 한다.
+    ///
+    /// **묻는 자를 패닉으로 세운다** — 값을 재는 시험은 기계마다 흔들려 되돌림을 못 잡는다. 이 자리가
+    /// 다시 풀기 시작하면 여기서 터진다.
+    #[test]
+    fn counting_new_rows_on_the_layer_does_not_ask_who_i_am() {
+        fn refuse(_: Option<&str>, _: &Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            panic!("[NEW] 를 세는 걸음이 누군지 물었다")
+        }
+        let s = Scratch::fenced("layer-whoami-once");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.site_of_place(0).is_some_and(|s| s.me.is_some()), "시험의 전제 — 읽을 때 한 번 풀었다");
+
+        a.identify = refuse;
+        for _ in 0..3 {
+            a.recount_unread_in(crate::tui::Seat::Place(0));
+            a.recount_unread_in(crate::tui::Seat::Here);
+        }
     }
 
     /// **프로젝트 안에서는 층의 줄을 안 잰다**(moai-p4ec). [`App::enter_project`] 는 그 줄의 `Site` 를

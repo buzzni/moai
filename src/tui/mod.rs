@@ -584,6 +584,23 @@ pub struct Site {
     pub path: Path,
     /// 어디서 읽어 왔나. 시험은 저장소 없이 App 을 세우므로 없을 수 있다.
     pub repo: Option<Repo>,
+    /// **이 프로젝트에서 나는 누구인가** — `이름 (메일)`. [NEW] 를 가르는 자다([`App::recount_unread_in`]).
+    ///
+    /// **푸는 자리는 셋이다**(moai-z9pc, moai-j038.vna) — 띄울 때, 프로젝트를 옮길 때, 묻는 칸에서
+    /// 사람을 받을 때. 다시 읽기마다 부르지는 않는다: 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가
+    /// 무너진다(`reading_never_asks_who`).
+    ///
+    /// **줄과 같이 산다**(moai-ropk). 프로젝트마다 git 설정이 다를 수 있어 뿌리마다 다시 풀어야 하는데
+    /// ([`App::whoami`]), 그 한 번이 `git config` 프로세스 둘이다(띄우기 11ms + 푸는 데 22ms). 한때
+    /// 한눈 보기가 그것을 **걸음마다** 풀어 `term.draw` 와 `event::poll` 사이에서 화면이 그만큼 멈췄다.
+    /// 여기 두면 그 프로젝트를 읽을 때 한 번 풀리고, 다시 읽을 때 같이 다시 풀린다 — `Site` 를
+    /// 갈아 끼우는 길이 곧 다시 푸는 길이라 둘이 어긋날 자리가 없다.
+    ///
+    /// **화면이 도는 동안 바뀐 git 설정은 그 프로젝트를 다시 읽을 때까지 안 보인다.** 줄이 그런 것과
+    /// 같은 결이라 따로 무르는 자를 두지 않는다(사용자 결정 2026-09-21).
+    ///
+    /// `None` 이면 **모른다** — 그때 [NEW] 가 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 화면이다.
+    pub me: Option<String>,
     /// 읽은 그 순간의 시각. **프레임마다가 아니라 적재마다 잡는다** — 매번
     /// 다시 잡으면 "3일 넘게" 같은 판정이 초 단위로 깜빡인다.
     pub now: String,
@@ -807,11 +824,6 @@ pub struct App {
     /// 옛 바이너리나 옆 세션이 읽음을 잃는다. 프로젝트의 읽음 파일에 없는 id 만 여기서 든다
     /// ([`crate::read_marks::read`]). 설정이 바뀌면 [`App::follow_config`] 가 다시 든다.
     pub legacy_read: std::collections::BTreeMap<String, String>,
-    /// 내가 누구인가 — `이름 (메일)`. **띄울 때, 프로젝트를 옮길 때, 묻는 칸에서 사람을 받을 때만**
-    /// 푼다(moai-z9pc, moai-j038.vna) — 헤더(`told_user`)가 뿌리와 `user` 가 바뀔 때 다시 푸는 것과 같은
-    /// 자다. 다시 읽기마다 부르지는 않는다 — 그 길이 열리면 "읽기는 사람을 묻지 않는다" 가 무너진다
-    /// (`reading_never_asks_who`). 모르면 `None` 이고 그러면 [NEW] 가 한 줄도 안 선다.
-    pub me: Option<String>,
     /// 오른쪽 상세 칸이 보이나(moai-ymnu). 숨기면 목록이 폭을 다 쓴다. 설정에 남는다.
     pub detail_open: bool,
     /// 상세 칸이 **어디에** 서나 — `right`·`bottom`·`left`·`top`(moai-2g7d). [`App::detail_open`] 과
@@ -950,6 +962,7 @@ impl Site {
             cfg,
             path,
             repo: None,
+            me: None,
             now: crate::model::now(),
             unreadable,
             warnings: 0,
@@ -1274,7 +1287,6 @@ impl App {
             detail_at: view::DetailAt::default(),
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
-            me: None,
             saved: Default::default(),
             list: Scroll::default(),
             quit: false,
@@ -2637,13 +2649,10 @@ impl App {
         // **누구인가는 그 프로젝트의 뿌리에서 푼다** — 프로젝트마다 git 설정이 다를 수 있고,
         // 안 풀면 남의 프로젝트의 `[NEW]` 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트>
         // read --all` 과 다른 줄을 센다(`App::enter_project` 가 들어갈 때 하는 것과 같은 자다).
-        let me = match seat {
-            Seat::Here => self.me.clone(),
-            Seat::Place(n) => match self.layer.as_ref().and_then(|l| l.places.get(n)).and_then(|p| p.site.as_ref()) {
-                Some(site) => site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root)),
-                None => return,
-            },
-        };
+        // **푼 값을 읽기만 한다**([`Site::me`], moai-ropk) — 한눈 보기의 줄에서 여기 `whoami` 를
+        // 부르던 판은 걸음마다 `git config` 프로세스 둘을 띄웠고(11ms + 22ms), 그것이 `term.draw` 와
+        // `event::poll` 사이에서 돌아 그대로 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리다.
+        let Some(me) = self.site_of_seat(seat).map(|s| s.me.clone()) else { return };
         let Some(site) = self.site_mut(seat) else { return };
         let Some(me) = me else {
             site.unread.clear();
@@ -3017,6 +3026,11 @@ impl App {
                 // 바구니를 다른 말로 부른다.
                 site.lang = self.site.lang;
                 site.repo = repo;
+                // **누군지도 여기서 푼다**(moai-ropk) — 그 프로젝트의 뿌리에서, 읽을 때 한 번.
+                // [`super::layer::App::enter_project`] 가 들어가며 하는 것과 같은 자다. 프로젝트마다
+                // git 설정이 다를 수 있어 뿌리마다 풀어야 하고, 그 한 번이 프로세스 둘이라 [NEW] 를
+                // 세는 자리에서 걸음마다 부르면 화면이 그만큼 멈춘다.
+                site.me = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root));
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
                 site.warnings = fresh.warnings;
@@ -4008,7 +4022,7 @@ impl App {
             self.user = Some(crate::model::label(&who.name, Some(&who.email), crate::config::Naming::Full));
             // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더는 이 사람을 대는데 안 읽음이
             // 띄울 때의 "모름" 에 머물면 한 화면이 두 사람을 말하고, `SPC m a` 는 늘 "적을 것이 없다" 다.
-            self.me = self.user.clone();
+            self.site.me = self.user.clone();
             self.recount_unread();
             (ask.then)(self);
         }
@@ -5796,7 +5810,7 @@ mod tests {
         }
         // 시계를 고정한다(`an_unread_line_wears_new_until_it_is_read` 와 같은 까닭).
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         let all = a.site.unread.len();
         assert_eq!(all, a.site.issues.len(), "내 줄인데 안 읽음이 빠졌다");
@@ -5835,7 +5849,7 @@ mod tests {
             i.assignee_email = Some("raven@example.com".into());
         }
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         // 마일스톤 안에 서서 에픽을 펼치고, 그 멤버 줄에 선다.
         a.key(key(KeyCode::Enter));
@@ -5874,7 +5888,7 @@ mod tests {
             i.assignee_email = Some("raven@example.com".into());
         }
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         let all = a.site.unread.len();
         let stand = |a: &mut App, path: Path, id: &str| {
@@ -5925,7 +5939,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
 
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
         a.hit("r");
@@ -5957,7 +5971,7 @@ mod tests {
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
         a.site.now = "2026-09-13T13:42:07Z".into();
-        a.me = None;
+        a.site.me = None;
         a.recount_unread();
         assert!(a.site.unread.is_empty(), "누군지 모르는데 [NEW] 가 섰다");
 
@@ -5976,7 +5990,7 @@ mod tests {
             root.display().to_string()
         );
         std::fs::write(&sheet, &later).unwrap();
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
         assert!(a.site.unread.contains("argos-0001"), "화면의 표가 옆에서 적은 것을 벌써 안다 — 시험의 전제가 틀렸다");
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0001").expect("줄이 없다");
@@ -6027,7 +6041,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
         a.load_read();
         assert_eq!(
             a.site.seen.get("argos-0001").map(String::as_str),
@@ -6068,7 +6082,7 @@ mod tests {
         let mut a = app();
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = None;
+        a.site.me = None;
 
         // 트래커에 없는 줄이 읽음 파일에 남아 있다 — 지운 이슈의 읽음은 아무도 다시 안 본다.
         crate::read_marks::update(
@@ -6214,7 +6228,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let stamp = a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
         let at = crate::read_marks::place_of(&config, &root).at;
@@ -6255,7 +6269,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 파일이 없는 것은 탈이 아니다 — 그때는 다 [NEW] 가 맞다.
         a.load_read();
@@ -6299,7 +6313,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 띄우는 길이 하는 것 — 설정을 한 번 읽어 갈래를 넘긴다(`cmd::tui`).
         let reg = crate::user_config::read(Some(&config));
@@ -6339,7 +6353,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         std::fs::write(&config, "[[project]]\npath = \"/a\"\n").unwrap();
         let stamp = &a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at.clone();
@@ -6400,7 +6414,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6448,7 +6462,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6518,7 +6532,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(slashed.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6568,7 +6582,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         let mark = |id: &str| {
             let stamp = &a.site.issues.iter().find(|i| i.id == id).unwrap().updated_at;
@@ -6629,7 +6643,7 @@ mod tests {
         }
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
 
         // 지금 자리 파일은 **없다** — 아직 아무것도 안 읽었다. 대기 자리만 서 있고 못 읽는다.
         let place = crate::read_marks::place_of(&config, &root);
@@ -6666,7 +6680,7 @@ mod tests {
         a.site.repo = Some(crate::store::Repo::moved(root.clone(), cfg(), worktree.clone()));
         assert_ne!(a.here().as_deref(), Some(root.as_path()), "시험의 전제 — 선 자리와 뿌리가 갈렸다");
         a.user_config = Some(config.clone());
-        a.me = Some("레이븐 (raven@example.com)".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
         a.recount_unread();
 
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
@@ -6731,7 +6745,7 @@ mod tests {
                 i.assignee = Some("레이븐".into());
                 i.assignee_email = Some("raven@example.com".into());
             }
-            a.me = Some("레이븐 (raven@example.com)".into());
+            a.site.me = Some("레이븐 (raven@example.com)".into());
             a.recount_unread();
             assert!(a.site.unread.contains("argos-0009"), "{act}: 시험의 전제가 틀렸다 — {:?}", a.site.unread);
             a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
@@ -8585,7 +8599,7 @@ mod tests {
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
         // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
         // 띄울 때의 "모름" 에 머물면 방금 담은 제 줄에도 [NEW] 가 안 선다.
-        assert_eq!(a.me.as_deref(), Some("레이븐 (raven@example.com)"));
+        assert_eq!(a.site.me.as_deref(), Some("레이븐 (raven@example.com)"));
         assert!(a.site.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.site.unread);
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 

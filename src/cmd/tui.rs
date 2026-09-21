@@ -88,7 +88,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
     let root = app.here().unwrap_or_else(|| ".".into());
-    app.me = app.whoami(&root);
+    app.site.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.config_stamp = config_stamp;
@@ -178,7 +178,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
     // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
     // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
-    app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    app.site.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     app.config_stamp = config_stamp;
     // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
