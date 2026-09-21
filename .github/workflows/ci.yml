@@ -120,13 +120,70 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      # **크레이트를 두 번 컴파일하는 것은 그대로 둔다**(moai-bn0y). clippy 는
+      # `clippy-driver` 로 짓고 시험은 `rustc` 로 지어 산출물을 못 나눠 쓴다
+      # (cargo#12369) — 판마다 35초다. 걷으려면 둘을 딴 잡으로 가르거나 clippy 를
+      # 빼야 하는데, 앞은 required check 를 늘리고 뒤는 새 경고가 PR 에서 안 잡힌다.
+      # 35초는 그 둘보다 싸다. 위의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
+      # LTO 한 판(5분)이다.
       - name: test
         run: cargo test --locked
+
+  # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `size-budget` 만 이 답을 쓴다
+  # (moai-bn0y). 문서 한 줄만 바뀐 판도 LTO 빌드를 통째로 돌던 것이 한 판 5분이었다.
+  #
+  # **이 잡을 required check 로 삼지 않는다.** required 는 `ci-gate` 하나고, 그것은
+  # 무엇이 바뀌었든 언제나 돈다 — 여기서 갈라도 문서 PR 이 보고를 못 받아 영영
+  # 안 머지되는 일이 없는 까닭이다. 워크플로에 `paths-ignore` 를 거는 길이 한 줄로
+  # 짧지만, 그쪽은 `ci-gate` 까지 같이 세워 바로 그 덫을 놓는다.
+  #
+  # **못 재는 판은 도는 쪽으로 선다.** 갈라진 자리를 못 짚으면(첫 푸시·force·손으로
+  # 돌린 판) `true` 다 — 덜 재는 것보다 더 재는 것이 싸다. 짚었는데 바뀐 것이 하나도
+  # 없으면 그때는 잴 것이 없는 것이라 안 돈다.
+  changes:
+    name: 무엇이 바뀌었나
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.look.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 갈라진 자리를 짚으려면 이력이 있어야 한다.
+          fetch-depth: 0
+
+      - name: 바뀐 경로를 본다
+        id: look
+        env:
+          # PR 은 base 와 head 를, `develop` 푸시는 앞 꼭대기와 지금을 준다.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          # **갈라진 자리에서 잰다.** 두 점으로 재면 PR 이 뜬 뒤 develop 에 쌓인 커밋까지
+          # "이 PR 이 고쳤다" 로 잡힌다 — 위의 포크 검사와 같은 자리다.
+          if [ -n "$BASE" ] && [ -n "$HEAD" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            fork=$(git merge-base "$BASE" "$HEAD")
+            touched=$(git diff --name-only "$fork" "$HEAD")
+            printf '%s\n' "$touched"
+            # 글만 바뀌었으면 바이너리는 그대로다. 그 밖의 무엇이든 하나라도 있으면 잰다 —
+            # 목록을 "안 재도 되는 것" 쪽으로 적어, 새로 생긴 경로는 저절로 재는 쪽에 선다.
+            if printf '%s\n' "$touched" | grep -v '^$' | grep -qvE '(\.md$|^docs/|^\.moai/|^LICENSE$)'; then
+              code=true
+            else
+              code=false
+            fi
+          fi
+          printf '바이너리에 닿는 변경: %s\n' "$code" >>"$GITHUB_STEP_SUMMARY"
+          printf 'code=%s\n' "$code" >>"$GITHUB_OUTPUT"
 
   # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
   size-budget:
     name: release 바이너리 15MB 예산
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
