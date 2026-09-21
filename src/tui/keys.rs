@@ -289,8 +289,9 @@ pub enum Browse {
     Quit,
     FocusNext,
     FocusPrev,
-    /// 한 칸 왼쪽·오른쪽으로 — `Ctrl-w h`·`Ctrl-w l`. **순환이 아니다**: 끝에서 누르면
-    /// 제자리다. 칸이 늘어도 `h`·`l` 이 가리키는 쪽이 안 흔들리라고 다음·앞과 따로 둔다.
+    /// 한 칸 그쪽으로 — `Ctrl-w h`·`l`·`k`·`j`. **순환이 아니다**: 이웃이 없으면 제자리고
+    /// (가른 축이 아닌 방향, 그 축의 끝) 칸이 늘어도 그 글자가 가리키는 쪽이 안 흔들리라고
+    /// 다음·앞과 따로 둔다.
     Focus(Side),
     /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 상세면 굴리기.
     Step(Move),
@@ -350,6 +351,8 @@ pub enum Browse {
 pub enum Side {
     Left,
     Right,
+    Up,
+    Down,
 }
 
 /// 목록 차례. **조각이라 `query::SortKey` 를 모른다** — `App` 이 둘을 잇는다.
@@ -468,19 +471,26 @@ pub const BROWSE: &[Bind<Browse>] = {
     const MOVES: [Bind<Browse>; 14] = moves!(Browse::Step, Key::any);
     &[
         // **칸 옮기기는 vi 의 창 이동이다**(moai-oudf, 사용자 결정) — `Tab` 은 목록의 재귀
-        // 펼침이 받는다. `Ctrl-w` 뒤의 글자는 vim 그대로다: `w` 다음 칸, `W` 앞 칸, `h`·`l`
-        // 은 **가는 칸을 집어** 준다(순환이 아니라 그 칸으로 간다 — 왼쪽 끝에서 `Ctrl-w h`
-        // 는 제자리다).
+        // 펼침이 받는다. `Ctrl-w` 뒤의 글자는 vim 그대로다: `w` 다음 칸, `W` 앞 칸, `h`·`l`·
+        // `k`·`j` 는 **가는 칸을 집어** 준다(순환이 아니라 그 칸으로 간다 — 왼쪽 끝에서
+        // `Ctrl-w h` 는 제자리다).
         row!(FocusNext, Some("Ctrl-w w"), Key::chord('w'), Key::plain('w')),
         row!(FocusPrev, None, Key::chord('w'), Key::plain('W')),
         row!(Focus(Side::Left), None, Key::chord('w'), Key::plain('h')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
+        // **위아래로 가른 자리에는 `j`·`k` 가 간다**(moai-x7pa) — 상세를 위·아래에 세우면
+        // (`DetailAt::Top`·`Bottom`) 좌우 이웃이 없어 `h`·`l` 이 둘 다 제자리다. vim 그대로
+        // 네 방향을 다 두면 어느 자리에서 눌러도 손에 익은 키가 이웃 칸으로 간다.
+        row!(Focus(Side::Up), None, Key::chord('w'), Key::plain('k')),
+        row!(Focus(Side::Down), None, Key::chord('w'), Key::plain('j')),
         // **Ctrl 을 쥔 채 이어 누른 꼴도 받는다** — vim 의 `Ctrl-w Ctrl-w` 다. "vim 그대로" 라
         // 적어 두고 이 꼴을 빼면, 손이 익은 사람이 Ctrl 을 놓지 않고 두 번 누를 때 열이 통째로
         // 버려지고(`Chord::feed`) 그 다음 키가 처음부터 다시 읽혀 `j` 가 커서를 옮긴다.
         row!(FocusNext, None, Key::chord('w'), Key::chord('w')),
         row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(Focus(Side::Up), None, Key::chord('w'), Key::chord('k')),
+        row!(Focus(Side::Down), None, Key::chord('w'), Key::chord('j')),
         MOVES[0],
         MOVES[1],
         MOVES[2],
@@ -645,12 +655,14 @@ pub struct Ctx {
     pub fields: super::view::Fields,
     /// 오른쪽 상세 칸이 보이나.
     pub detail: bool,
-    /// 칸을 옮기는 키가 가는 칸의 이름 — 다음·앞은 순환이고, 왼쪽·오른쪽은 끝에서
-    /// 제자리라 넷이 다 다를 수 있다.
+    /// 칸을 옮기는 키가 가는 칸의 이름 — 다음·앞은 순환이고, 네 방향은 이웃이 없으면
+    /// 제자리라 여섯이 다 다를 수 있다.
     pub next_pane: &'static str,
     pub prev_pane: &'static str,
     pub left_pane: &'static str,
     pub right_pane: &'static str,
+    pub up_pane: &'static str,
+    pub down_pane: &'static str,
 }
 
 /// 켜지지 않은 까닭.
@@ -729,11 +741,15 @@ impl Browse {
             // **자리 고르기도 상세가 서 있을 때만이다**(moai-e7r3) — 숨긴 칸의 자리를 돌리면 아무
             // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v p` 고, 그 줄은 여기 없다.
             FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
-            // **좌우 이웃은 좌우로 갈랐을 때만 있다**(리뷰) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
-            // 은 제자리다(`Pane::step`, vim 그대로). 그런데도 바가 "→ 탐색기" 라고 대면 지금 선 칸의
-            // 이름을 가리키는 키가 서는 셈이라, 위의 줄이 막은 것과 같은 거짓말이다. 그때 칸을 옮기는
-            // 것은 `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
-            Focus(_) if c.detail_at.vertical() => Err(Off::Quiet),
+            // **이웃은 가른 축에만 있다**(리뷰, moai-x7pa) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
+            // 이, 왼쪽이나 오른쪽에 서면 `Ctrl-w j`·`k` 가 제자리다(`Pane::step`, vim 그대로).
+            // 그런데도 바가 "→ 탐색기" 라고 대면 지금 선 칸의 이름을 가리키는 키가 서는 셈이라,
+            // 위의 줄이 막은 것과 같은 거짓말이다. 어느 자리에서든 칸을 도는 것은
+            // `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
+            //
+            // **가르는 자는 `Pane::step` 과 같은 자다** — 여기와 저기에 저마다 적으면 자리를
+            // 하나 더하는 날 한쪽만 고쳐져, 아무 일도 안 하는 키가 바에 선다.
+            Focus(side) if c.detail_at.vertical() != matches!(side, Side::Up | Side::Down) => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 `0`(전체)까지
             // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
@@ -812,6 +828,8 @@ impl Browse {
             FocusPrev => c.prev_pane,
             Focus(Side::Left) => c.left_pane,
             Focus(Side::Right) => c.right_pane,
+            Focus(Side::Up) => c.up_pane,
+            Focus(Side::Down) => c.down_pane,
             // 상세에서는 커서가 없다 — 굴린다.
             Step(_) if !c.list_focus => say(c.lang, "tui.act.scroll"),
             Step(_) => say(c.lang, "tui.act.move"),
@@ -1372,6 +1390,8 @@ mod tests {
             (with(C::Char('w'), ctrl), Browse::FocusNext),
             (with(C::Char('h'), ctrl), Browse::Focus(Side::Left)),
             (with(C::Char('l'), ctrl), Browse::Focus(Side::Right)),
+            (with(C::Char('k'), ctrl), Browse::Focus(Side::Up)),
+            (with(C::Char('j'), ctrl), Browse::Focus(Side::Down)),
         ] {
             let seq = [with(C::Char('w'), ctrl), second];
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "Ctrl 을 쥔 채 이어 누른 {second:?}");

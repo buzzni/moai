@@ -225,21 +225,25 @@ impl Pane {
         Pane::ALL[(self.at() + Pane::ALL.len() - 1) % Pane::ALL.len()]
     }
 
-    /// 한 칸 왼쪽·오른쪽. **끝에서는 제자리다** — vi 의 `Ctrl-w h`·`Ctrl-w l` 이 그렇다.
+    /// 한 칸 그쪽으로. **이웃이 없으면 제자리다** — vi 의 `Ctrl-w h`·`j`·`k`·`l` 이 그렇다.
     ///
     /// **그림을 따라간다**(moai-2g7d). 상세가 왼쪽에 서면 `Ctrl-w h` 는 상세로 간다 — 칸의 차례를
     /// 코드에 박아 두면 자리를 돌린 순간 `h` 가 오른쪽으로 가서, 손에 익은 키가 화면과 거꾸로 선다.
     ///
-    /// **위아래로 갈랐으면 좌우 이웃이 없다** — vim 그대로 제자리다. 그때 칸을 옮기는 것은
-    /// `Ctrl-w w`(`Browse::FocusNext`)다.
+    /// **가른 축이 아닌 방향은 제자리다**(moai-x7pa) — 좌우로 갈랐으면 `j`·`k` 가, 위아래로
+    /// 갈랐으면 `h`·`l` 이 vim 그대로 안 움직인다. 어느 자리에서든 `Ctrl-w w`
+    /// (`Browse::FocusNext`)는 돈다.
     pub fn step(self, side: keys::Side, at: view::DetailAt) -> Pane {
-        if at.vertical() {
+        use keys::Side::*;
+        // 가른 축과 누른 방향의 축이 다르면 이웃이 없다.
+        if at.vertical() != matches!(side, Up | Down) {
             return self;
         }
-        let (left, right) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
+        // 앞에 선 칸이 **왼쪽이자 위**다 — 가른 축 하나로 두 방향을 같이 읽는다.
+        let (first, last) = if at.first() { (Pane::Detail, Pane::Explorer) } else { (Pane::Explorer, Pane::Detail) };
         match side {
-            keys::Side::Left => left,
-            keys::Side::Right => right,
+            Left | Up => first,
+            Right | Down => last,
         }
     }
 
@@ -3711,6 +3715,8 @@ impl App {
             prev_pane: self.focus.prev().word(self.site.lang),
             left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang),
             right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang),
         }
     }
 
@@ -7836,25 +7842,44 @@ mod tests {
                 assert_eq!(from.step(keys::Side::Right, at), right, "{at:?} 에서 Ctrl-w l 이 엉뚱한 칸으로 갔다");
             }
         }
-        // 위아래로 갈랐으면 좌우 이웃이 없다 — vim 그대로 제자리고, 옮기는 것은 `Ctrl-w w` 다.
+        // **위아래로 가른 자리에는 `Ctrl-w j`·`k` 가 간다**(moai-x7pa) — 좌우로 갈랐을 때의
+        // `h`·`l` 과 같은 자다. 앞에 선 칸(`DetailAt::first`)이 왼쪽이자 위다.
+        for (at, first, last) in
+            [(DetailAt::Bottom, Pane::Explorer, Pane::Detail), (DetailAt::Top, Pane::Detail, Pane::Explorer)]
+        {
+            for from in Pane::ALL {
+                assert_eq!(from.step(keys::Side::Up, at), first, "{at:?} 에서 Ctrl-w k 가 엉뚱한 칸으로 갔다");
+                assert_eq!(from.step(keys::Side::Down, at), last, "{at:?} 에서 Ctrl-w j 가 엉뚱한 칸으로 갔다");
+            }
+        }
+        // **이웃은 가른 축에만 있다** — vim 그대로 제자리고, 어느 자리에서든 도는 것은 `Ctrl-w w` 다.
         // **그래서 그 두 키는 바에도 안 선다**(리뷰) — 지금 선 칸의 이름을 가리키는 키가 서면
         // 숨긴 상세에서 `Tab` 을 걷은 것과 같은 거짓말이다.
-        for at in [DetailAt::Top, DetailAt::Bottom] {
-            for from in Pane::ALL {
-                assert_eq!(from.step(keys::Side::Left, at), from, "{at:?} 에서 Ctrl-w h 가 움직였다");
-                assert_eq!(from.step(keys::Side::Right, at), from, "{at:?} 에서 Ctrl-w l 이 움직였다");
-                assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
-            }
+        for (at, away) in [
+            (DetailAt::Top, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Bottom, [keys::Side::Left, keys::Side::Right]),
+            (DetailAt::Left, [keys::Side::Up, keys::Side::Down]),
+            (DetailAt::Right, [keys::Side::Up, keys::Side::Down]),
+        ] {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
-            for side in [keys::Side::Left, keys::Side::Right] {
+            for side in away {
+                for from in Pane::ALL {
+                    assert_eq!(from.step(side, at), from, "{at:?} 에서 Ctrl-w {side:?} 가 움직였다");
+                    assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
+                }
                 assert!(keys::Browse::Focus(side).enabled(&c).is_err(), "{at:?} 에서 Ctrl-w {side:?} 가 섰다");
             }
-            // 칸을 도는 키는 그대로 선다 — 그쪽은 위아래로도 무언가 한다.
+            // 칸을 도는 키는 그대로 선다 — 그쪽은 어느 자리에서든 무언가 한다.
             assert!(keys::Browse::FocusNext.enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w w 가 걷혔다");
         }
-        for at in [DetailAt::Left, DetailAt::Right] {
+        for (at, side) in [
+            (DetailAt::Left, keys::Side::Left),
+            (DetailAt::Right, keys::Side::Right),
+            (DetailAt::Top, keys::Side::Up),
+            (DetailAt::Bottom, keys::Side::Down),
+        ] {
             let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
-            assert!(keys::Browse::Focus(keys::Side::Left).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w h 가 걷혔다");
+            assert!(keys::Browse::Focus(side).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w {side:?} 가 걷혔다");
         }
         a.detail_at = DetailAt::Right;
 
