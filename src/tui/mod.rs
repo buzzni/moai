@@ -1091,6 +1091,17 @@ impl ReadStamp {
     }
 }
 
+/// 읽음 표의 까닭 하나를 화면의 말로 편 **한 줄**(moai-rtji). 읽음 모듈은 자료만 내므로
+/// ([`crate::read_marks::SheetTrouble`]) 여기서 편다 — 걸음의 알림([`App::take_read`])과 `r` 의
+/// 알림이 **한 자**로 편다. 둘이 저마다 펴면 같은 까닭을 두 줄로 달리 부른다(moai-hzfu 가 이름으로
+/// 막은 그 어긋남이다).
+///
+/// **한 줄로 접는다** — 그 글은 사람의 경로와 `io::Error` 를 품어 줄바꿈이 들 수 있는데, 알림은 한
+/// 줄이다.
+fn said_read(lang: crate::i18n::Lang, why: &crate::read_marks::SheetTrouble) -> String {
+    crate::text::one_line(&crate::view::sheet_trouble(lang, why))
+}
+
 /// 한 걸음의 읽음 읽기([`App::read_marks_of`]).
 struct Got {
     marks: crate::read_marks::Marks,
@@ -1098,7 +1109,9 @@ struct Got {
     /// 읽음 **자리**를 고르다 만난 까닭 — 파일 안의 건너뛴 줄과 **다른 갈래**다(moai-hzfu).
     /// `Marks::problems` 는 둘을 한 자루에 담는데, 건너뛴 줄이 없으면 이것이 `first()` 가 되어
     /// "읽음에 이상한 줄이 있다" 로 이름 붙었다.
-    where_why: Option<String>,
+    ///
+    /// 글이 아니라 자료다(moai-rtji) — [`App::take_read`] 가 화면의 말로 편다.
+    where_why: Option<crate::read_marks::SheetTrouble>,
 }
 
 impl App {
@@ -2303,18 +2316,18 @@ impl App {
             Some(_) => marks
                 .problems
                 .first()
-                .map(|why| fill(say(site.lang, "tui.read.unheld"), &[("why", &crate::text::one_line(why))])),
+                .map(|why| fill(say(site.lang, "tui.read.unheld"), &[("why", &said_read(site.lang, why))])),
             // **줄 탈이 자리 탈보다 앞선다**(moai-hzfu) — 건너뛴 줄은 이 파일을 정말 읽고 만난
             // 것이라 사람이 고칠 자리가 또렷하다. 자리 탈은 그것이 없을 때만 대고, **제 낱말로**
             // 댄다: 같은 까닭을 두 이름으로 부르면 `r` 이 띄운 줄과 다음 걸음의 줄이 갈린다.
             None => marks
                 .problems
                 .first()
-                .map(|why| fill(say(site.lang, "tui.read.bad_line"), &[("why", &crate::text::one_line(why))]))
+                .map(|why| fill(say(site.lang, "tui.read.bad_line"), &[("why", &said_read(site.lang, why))]))
                 .or_else(|| {
                     where_why
                         .as_ref()
-                        .map(|why| fill(say(site.lang, "tui.read.bad_place"), &[("why", &crate::text::one_line(why))]))
+                        .map(|why| fill(say(site.lang, "tui.read.bad_place"), &[("why", &said_read(site.lang, why))]))
                 }),
         };
         if marks.trouble.is_none() {
@@ -2577,50 +2590,53 @@ impl App {
             .collect();
         // **자리를 못 푼 까닭도 함께 받는다**(moai-ajh2) — 쓰는 길이 그것을 버리던 판은 옛 철자 자리에
         // 적고도 "✓ 읽음" 만 세웠다.
-        let (written, problems): (Vec<String>, Vec<String>) = match (self.user_config.clone(), root) {
-            (Some(config), Some(root)) => {
-                let wrote = crate::read_marks::update(&config, &root, |sheet| {
-                    let marks = pick(&sheet.marks().0);
-                    let written = sheet.mark(&marks)?;
-                    if fresh_enough {
-                        sheet.prune(&known);
-                    }
-                    Ok((written, sheet.marks().0))
-                });
-                match wrote {
-                    Ok(crate::read_marks::Wrote { value: (written, mut seen), problems }) => {
-                        // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 겹쳐만
-                        // 보는 자리들은 여기 다시 얹는다 — 옛 철자로 선 파일(moai-f5e3)과 설정의 옛
-                        // `[read]`(사용자 결정 3)다. 겹치는 자는 `read_marks::read` 와 **한 함수**다
-                        // (`read_marks::overlay_older`, 리뷰). 둘로 두면 옛 표를 걷는 날 한쪽만 걷힌다 —
-                        // 실제로 갈렸을 때 `r` 한 번이 옛 철자 파일의 읽음을 화면에서 지워, 적을 것이
-                        // 없는 판(이미 읽은 줄)에서는 파일이 안 바뀌어 [NEW] 가 이 세션 내내 섰다.
-                        crate::read_marks::overlay_older(&config, &root, &mut seen, &self.legacy_read);
-                        if let Some(site) = self.site_mut(seat) {
-                            site.seen = seen;
+        let (written, problems): (Vec<String>, Vec<crate::read_marks::SheetTrouble>) =
+            match (self.user_config.clone(), root) {
+                (Some(config), Some(root)) => {
+                    // 말은 **락 밖에서** 이미 서 있다 — 화면이 든 값이라 여기서 무엇도 새로 열지 않는다
+                    // (`read_marks::update` 가 락을 쥔 채 멈춘 까닭을 펴는 데 쓴다, moai-rtji).
+                    let wrote = crate::read_marks::update(&config, &root, self.site.lang, |sheet| {
+                        let marks = pick(&sheet.marks().0);
+                        let written = sheet.mark(&marks)?;
+                        if fresh_enough {
+                            sheet.prune(&known);
                         }
-                        // **쓴 뒤에 표식을 박지 않는다**(리뷰). 여기서 재면 락을 놓은 **뒤**라, 그 틈에
-                        // 옆이 쓴 파일의 표식을 제 것으로 박는다 — 그러면 [`App::follow_read`] 가 영영
-                        // 같다고 보아 옆의 줄이 이 화면에 안 닿는다(이 표식이 열어 둔 바로 그 길이다).
-                        // 다음 걸음이 한 번 더 읽는 값이 그것보다 싸다.
-                        (written, problems)
-                    }
-                    Err(e) => {
-                        let why = crate::text::one_line(&e.to_string());
-                        self.notice = Some(fill(say(self.site.lang, "tui.read.unwritten"), &[("why", &why)]));
-                        return;
+                        Ok((written, sheet.marks().0))
+                    });
+                    match wrote {
+                        Ok(crate::read_marks::Wrote { value: (written, mut seen), problems }) => {
+                            // 파일의 표를 그대로 든다 — 옆 터미널이 그사이 적은 줄까지 함께 온다. 겹쳐만
+                            // 보는 자리들은 여기 다시 얹는다 — 옛 철자로 선 파일(moai-f5e3)과 설정의 옛
+                            // `[read]`(사용자 결정 3)다. 겹치는 자는 `read_marks::read` 와 **한 함수**다
+                            // (`read_marks::overlay_older`, 리뷰). 둘로 두면 옛 표를 걷는 날 한쪽만 걷힌다 —
+                            // 실제로 갈렸을 때 `r` 한 번이 옛 철자 파일의 읽음을 화면에서 지워, 적을 것이
+                            // 없는 판(이미 읽은 줄)에서는 파일이 안 바뀌어 [NEW] 가 이 세션 내내 섰다.
+                            crate::read_marks::overlay_older(&config, &root, &mut seen, &self.legacy_read);
+                            if let Some(site) = self.site_mut(seat) {
+                                site.seen = seen;
+                            }
+                            // **쓴 뒤에 표식을 박지 않는다**(리뷰). 여기서 재면 락을 놓은 **뒤**라, 그 틈에
+                            // 옆이 쓴 파일의 표식을 제 것으로 박는다 — 그러면 [`App::follow_read`] 가 영영
+                            // 같다고 보아 옆의 줄이 이 화면에 안 닿는다(이 표식이 열어 둔 바로 그 길이다).
+                            // 다음 걸음이 한 번 더 읽는 값이 그것보다 싸다.
+                            (written, problems)
+                        }
+                        Err(e) => {
+                            let why = crate::text::one_line(&e.to_string());
+                            self.notice = Some(fill(say(self.site.lang, "tui.read.unwritten"), &[("why", &why)]));
+                            return;
+                        }
                     }
                 }
-            }
-            _ => {
-                let marks = pick(&site.seen);
-                let written = marks.keys().cloned().collect();
-                if let Some(site) = self.site_mut(seat) {
-                    site.seen.extend(marks);
+                _ => {
+                    let marks = pick(&site.seen);
+                    let written = marks.keys().cloned().collect();
+                    if let Some(site) = self.site_mut(seat) {
+                        site.seen.extend(marks);
+                    }
+                    (written, Vec::new())
                 }
-                (written, Vec::new())
-            }
-        };
+            };
         self.recount_unread_in(seat);
         let lang = self.site.lang;
         let said = match written.as_slice() {
@@ -2632,7 +2648,7 @@ impl App {
         // 보고, 적었다는 말만 세우면 옛 철자 자리에 적힌 것을 어디서도 못 본다. 여기 낼 것은 스치는 알림
         // 한 줄뿐이라([`App::take_read`] 와 같은 자리) 첫 까닭만 댄다.
         self.notice = Some(match problems.first() {
-            Some(why) => format!("{said} — {}", crate::text::one_line(why)),
+            Some(why) => format!("{said} — {}", said_read(lang, why)),
             None => said,
         });
     }
@@ -5802,7 +5818,7 @@ mod tests {
         a.me = None;
 
         // 트래커에 없는 줄이 읽음 파일에 남아 있다 — 지운 이슈의 읽음은 아무도 다시 안 본다.
-        crate::read_marks::update(&config, &root, |sheet| {
+        crate::read_marks::update(&config, &root, crate::i18n::Lang::Ko, |sheet| {
             sheet.mark(&[("argos-9999".to_string(), "옛것".to_string())].into_iter().collect())
         })
         .unwrap();
@@ -5863,7 +5879,11 @@ mod tests {
 
         // 자리 까닭만 있다 — 읽음 파일은 아예 없다(건너뛸 줄이 없다).
         let got = a.read_marks_of(&root).expect("설정 자리를 줬는데 안 들었다");
-        assert!(got.where_why.as_deref().is_some_and(|w| w.contains("자리를 못 풀어")), "{:?}", got.where_why);
+        assert!(
+            matches!(got.where_why, Some(crate::read_marks::SheetTrouble::Unsettled { .. })),
+            "{:?}",
+            got.where_why
+        );
         assert!(got.marks.problems.is_empty(), "자리 까닭이 줄 탈 자루에 남았다 — {:?}", got.marks.problems);
         let told = App::take_read(&mut a.site, got).unwrap_or_default();
         assert!(told.starts_with("읽음 자리를 못 풀었다"), "자리 탈을 제 낱말로 안 댄다 — {told}");
@@ -5898,7 +5918,7 @@ mod tests {
         a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
         a.user_config = Some(config.clone());
         a.worktree = false;
-        crate::read_marks::update(&config, &root, |sh| sh.mark(&elsewhere)).unwrap();
+        crate::read_marks::update(&config, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&elsewhere)).unwrap();
         a.cursor = row_ids(&a).iter().position(|id| id == "argos-0009").expect("줄이 없다");
         a.hit("r");
         assert!(sheet().contains_key("argos-9999"), "겹쳐 보기가 꺼진 채로 옆 워크트리의 도장을 걷었다");
@@ -6261,7 +6281,7 @@ mod tests {
         a.user_config = Some(config.clone());
 
         // 남의 프로젝트에 같은 id 로 읽음이 적혀 있다 — 이쪽 쓰기가 그것을 밀면 안 된다.
-        crate::read_marks::update(&config, &other, |sheet| {
+        crate::read_marks::update(&config, &other, crate::i18n::Lang::Ko, |sheet| {
             sheet.mark(&[("argos-0009".to_string(), "남의 것".to_string())].into_iter().collect())
         })
         .unwrap();

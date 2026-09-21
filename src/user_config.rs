@@ -109,9 +109,15 @@ pub struct Registry {
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
     pub look: Look,
-    /// 보기·읽음을 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
+    /// 보기를 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
     /// 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
     pub look_problems: Vec<String>,
+    /// 옛 `[read]` 에서 **건너뛴 줄** — 말이 아니라 자료다([`crate::read_marks::Skipped`], moai-rtji).
+    ///
+    /// 한때 `look_problems` 에 글로 섞어 실었다. 그 글은 읽음 모듈이 한국어로 박아 지은 것이라, 영어를
+    /// 고른 사람의 탐색기에도 이 한 줄은 한국어로 섰다. 이 파일의 자리(`path`)를 붙여 펴는 것은 말을 아는
+    /// 쪽이다(`cmd::tui` 가 `look_problems` 곁에 잇는다) — 설정을 읽는 이 자리는 화면 말을 안 묻는다.
+    pub read_problems: Vec<crate::read_marks::Skipped>,
     /// 이슈 id → **내가 마지막으로 본 줄의 `updated_at`**(RFC3339, moai-50mn — 옛 바이너리는 본 때를 적었다,
     /// moai-lyc1). 여기 없는 줄은 한 번도 안 본 것이다.
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
@@ -386,7 +392,7 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.look_problems = problems.into_iter().map(at).collect();
             let (read, problems) = doc.read_marks();
             reg.read = read;
-            reg.look_problems.extend(problems.into_iter().map(at));
+            reg.read_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
@@ -490,14 +496,6 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
 /// 그것을 붙인다(moai-gmdu 에픽 리뷰). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
 pub(crate) fn fail(lang: crate::i18n::Lang, at: Option<&Path>, why: &WriteTrouble) -> Fail {
     Fail::coded(crate::view::write_trouble(lang, at, why), why.code())
-}
-
-/// 아직 **제 글을 짓는** 쓰기 하나 — 읽음 표([`crate::read_marks`])다. 설정 쪽은 자료로
-/// 옮겼고([`WriteTrouble`], moai-wflg) 읽음 표는 글·자리 판정·합치기가 한 덩이라 따로 든다
-/// (moai-rtji). 코드는 설정 쪽과 같은 `broken` 이다 — 둘 다 사람이 파일을 손으로 고쳐야 쓴다는
-/// 뜻이라 받는 쪽이 I/O 실패와 가른다(moai-3owm, 사용자 결정 2026-09-18).
-pub(crate) fn refuse(message: String) -> Fail {
-    Fail::coded(message, code::BROKEN)
 }
 
 /// 설정 파일이 실제로 선 자리(`update`). 있으면 링크를 다 푼 경로다. **없는데 링크면 링크를 따라간 자리**다 — dotfiles 는
@@ -1080,7 +1078,7 @@ impl Doc {
     ///
     /// **읽는 자는 하나다**([`crate::read_marks::read_table`], 리뷰) — 옛 표와 새 읽음 파일이 같은 모양이라
     /// 둘이 저마다 읽으면 모양이 자라는 날 한쪽만 따라가고, 그 한쪽은 남은 읽음을 조용히 버린다.
-    pub fn read_marks(&self) -> (BTreeMap<String, String>, Vec<String>) {
+    pub fn read_marks(&self) -> (BTreeMap<String, String>, Vec<crate::read_marks::Skipped>) {
         crate::read_marks::read_table(self.root())
     }
 }

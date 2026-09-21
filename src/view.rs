@@ -2325,6 +2325,62 @@ pub fn write_trouble(lang: Lang, at: Option<&std::path::Path>, why: &crate::user
     }
 }
 
+/// 읽음 표를 읽고 쓰다 만난 것 가운데 **안 막는 것**의 글([`crate::read_marks::SheetTrouble`], moai-rtji).
+/// 어느 파일인지를 머리에 붙인다 — 이름이 뿌리의 해시라 사람이 짐작할 수 없어, 안 붙이면 "손으로
+/// 지운다" 가 갈 곳 없는 말이 된다.
+///
+/// **말은 부르는 쪽이 준다** — 읽음 모듈은 화면 말을 모른다. `moai read` 는 `Ctx` 로, 탐색기는
+/// `Site::lang` 으로 받아 여기로 넘긴다.
+pub fn sheet_trouble(lang: Lang, why: &crate::read_marks::SheetTrouble) -> String {
+    use crate::read_marks::SheetTrouble;
+    let (at, said) = match why {
+        // **남의 글은 옮기지 않는다** — io·toml 이 낸 줄이라 말묶음에 키를 둘 자리가 없다.
+        SheetTrouble::Said { at, said } => (at, said.clone()),
+        SheetTrouble::Unsettled { at, said } => (at, fill(say(lang, "sheet.unsettled"), &[("said", said)])),
+        SheetTrouble::NotOurs { at, root } => {
+            (at, fill(say(lang, "sheet.not_ours"), &[("root", &root.display().to_string())]))
+        }
+        SheetTrouble::Skipped { at, why } => (at, skipped(lang, why)),
+        SheetTrouble::SpoolLeft { at, said } => (at, fill(say(lang, "sheet.spool_left"), &[("said", said)])),
+    };
+    format!("{}: {said}", at.display())
+}
+
+/// `[read]` 표에서 건너뛴 줄 하나의 글([`crate::read_marks::Skipped`]). **어느 파일인지는 안 붙인다** —
+/// 같은 줄이 읽음 파일에서도 설정의 옛 `[read]` 에서도 오므로, 붙이는 것은 그 자리를 아는 쪽이다
+/// ([`sheet_trouble`]·`cmd::tui` 의 옛 `[read]`).
+pub fn skipped(lang: Lang, why: &crate::read_marks::Skipped) -> String {
+    use crate::read_marks::{READ, Skipped};
+    match why {
+        Skipped::NotATable { found } => fill(say(lang, "sheet.not_a_table"), &[("table", READ), ("is", found)]),
+        Skipped::NotAStamp { id, found } => {
+            fill(say(lang, "sheet.not_a_stamp"), &[("key", &format!("{READ}.{id}")), ("is", found)])
+        }
+    }
+}
+
+/// 읽음 표에 **안 쓰고 멈춘** 까닭의 글([`crate::read_marks::SheetRefusal`], moai-rtji). 파일은
+/// `read_marks::update` 가 준다 — 그 자리를 아는 것이 거기 하나라서다.
+///
+/// 손으로 적은 자리([`crate::read_marks::SheetRefusal::Hand`])는 읽는 길이 건너뛰는 것과 **같은 사실**이지만
+/// 글이 다르다 — 읽기는 "건너뛴다" 고 지나가고, 쓰기는 "안 적는다 — 손으로 고친다" 고 멈춘다.
+pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::SheetRefusal) -> String {
+    use crate::read_marks::{READ, SheetRefusal, Skipped};
+    let said = match why {
+        SheetRefusal::Unparsable { said } => fill(say(lang, "sheet.refuse_unparsable"), &[("said", said)]),
+        SheetRefusal::NotOurs { root } => {
+            fill(say(lang, "sheet.refuse_not_ours"), &[("root", &root.display().to_string())])
+        }
+        SheetRefusal::Hand(Skipped::NotATable { found }) => {
+            fill(say(lang, "sheet.refuse_not_a_table"), &[("table", READ), ("is", found)])
+        }
+        SheetRefusal::Hand(Skipped::NotAStamp { id, found }) => {
+            fill(say(lang, "sheet.refuse_not_a_stamp"), &[("table", READ), ("id", id), ("is", found)])
+        }
+    };
+    format!("{}: {said}", at.display())
+}
+
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
 ///
 /// **두 거절은 잰 것이 다르다.** 설정만 보고 거절한 자리(`add -s`·`mv <칸>`)는 "그런 칸이
