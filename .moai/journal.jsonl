@@ -6652,3 +6652,4 @@
 {"ts":"2026-09-21T03:42:23Z","id":"moai-rtji","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 쓰기 경로의 글을 자료로 옮기고 락 경계를 지킨다)"}
 {"ts":"2026-09-21T03:42:23Z","id":"moai-rtji","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"읽음 표의 글 열을 말묶음으로 옮겼다. read_marks 는 자료만 내고 view 가 편다. 말은 부르는 쪽이 넘기고, 락 안에서는 새로 여는 것이 없다"}
 {"ts":"2026-09-21T03:42:24Z","id":"moai-hom6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다음: moai-hom6 은 moai-rtji 병합으로 닫혔다. v0.1.0 은 첫 화면과 `moai init` 까지로 선을 그었고, 남은 박힌 한국어는 idea moai-a7qo·moai-uqxn·moai-gbk3 이 든다. moai-shn2 가 moai-wd5u(대기 자리 손실, p1)로 다시 열렸으니 태그 전에 닫는다. 그 뒤 릴리스 절차 — CHANGELOG 와 태그는 감독이 사람의 허락을 받아 한다"}
+{"ts":"2026-09-21T03:43:25Z","id":"moai-wd5u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
