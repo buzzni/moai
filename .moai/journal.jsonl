@@ -6922,3 +6922,36 @@
 {"ts":"2026-09-21T11:09:05Z","id":"moai-utya","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-21T11:09:06Z","id":"moai-io79","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-21T11:09:06Z","id":"moai-bn0y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-21T11:10:47Z","id":"moai-na0d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 표면 여덟의 글을 옮긴다)"}
+{"ts":"2026-09-21T11:10:55Z","id":"moai-na0d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"여덟 표면의 거절문과 안내를 옮겼다. 저널에 적히는 글과 expect 의 글은 그대로 둔다 — 앞은 설정이 바꾸면 안 되는 글이고 뒤는 화면이 아니다. 설정과 계획 파서에 남은 마흔여섯 줄은 moai-ivt9 로 세웠다."}
+{"ts":"2026-09-21T11:15:11Z","id":"moai-t6z9.bd6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 머지 드라이버 알림과 남은 한국어 두 에픽"}
+{"ts":"2026-09-21T11:15:18Z","id":"moai-t6z9.bd6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T11:15:45Z","id":"moai-t6z9.bd6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 배경에서 도는 중이다. 끝나면 원문을 이 이슈에 노트로 붙이고, 고친 것과 넘긴 것을 -m 에 적어 닫는다. 그 뒤 루트에서 develop 에 병합하고 트래커를 커밋한다."}
+{"ts":"2026-09-21T11:21:57Z","id":"moai-r3l9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 아직 새는 자리 — 못 읽고 지나가거나 엉뚱하게 막는다"}
+{"ts":"2026-09-21T11:21:57Z","id":"moai-mru7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"아무 일도 안 하는 -C 하나가 셸 글 읽기를 통째로 끈다"}
+{"ts":"2026-09-21T11:21:57Z","id":"moai-r3l9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cg96 에서 펼쳤다 — 아무 일도 안 하는 -C 하나가 셸 글 읽기를 통째로 끈다"}
+{"ts":"2026-09-21T11:21:57Z","id":"moai-cg96","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-axqs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"셸 글 앞에서 닫힌 묶음을 심은 글이 모른다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-axqs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9abk 에서 펼쳤다 — 셸 글 앞에서 닫힌 묶음을 심은 글이 모른다 — if false; then 집기; fi && bash -c '쓰기' 가 샌다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-9abk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-axqs 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-gu8b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"파이프의 칸인 묶음은 하위 셸인데 Seg::depth 가 그것을 모른다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-gu8b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pxis 에서 펼쳤다 — 파이프의 칸인 묶음은 하위 셸인데 Seg::depth 가 그것을 모른다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-pxis","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-gu8b 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-njji","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"뒤로 띄운 것으로 끝나는 글이 이미 이긴 집기까지 버린다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-njji","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-1zyx 에서 펼쳤다 — 뒤로 띄운 것으로 끝나는 글은 이미 이긴 집기까지 버린다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-1zyx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-njji 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-7ek0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"zsh·ksh 의 errexit 철자를 못 읽는다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-7ek0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dmri 에서 펼쳤다 — zsh·ksh 의 errexit 철자를 못 읽는다 — -o err_exit 과 --errexit"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-dmri","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-7ek0 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-bt1f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"겨눈 자리에 트래커가 없으면 못 도는 줄을 내민다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-bt1f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-722b 에서 펼쳤다 — 겨눈 자리에 트래커가 없으면 못 도는 줄을 내민다"}
+{"ts":"2026-09-21T11:22:11Z","id":"moai-722b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-bt1f 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-qzy7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"겹친 치환이 훅의 제한 시간을 넘긴다 — 깊이만 막고 일의 양은 안 막는다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-qzy7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ir6o 에서 펼쳤다 — 겹친 $(bash -c \"$( … )\") 가 훅의 제한 시간을 넘긴다 — DEEP 은 깊이만 막고 일의 양은 안 막는다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-ir6o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-qzy7 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-d5o9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"집기 표를 더 넓히거나 좁힐 자리 셋"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-d5o9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pz50 에서 펼쳤다 — `?` 를 더 넓히거나 좁힐 자리 셋 — 앞에서 끝난 껍데기·함수 몸통·떨어지는 기록"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-pz50","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-d5o9 로 펼쳤다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-unvx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"넘겨받기가 && 로는 안 돈다 — 앞 세션의 확실한 줄이 그대로 이긴다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-unvx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-d5ev 에서 펼쳤다 — 넘겨받기가 `&&` 로는 안 돈다 — 앞 세션의 확실한 줄이 그대로 이긴다"}
+{"ts":"2026-09-21T11:22:12Z","id":"moai-d5ev","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r3l9 의 멤버 moai-unvx 로 펼쳤다"}
