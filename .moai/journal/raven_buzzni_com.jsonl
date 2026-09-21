@@ -466,3 +466,4 @@
 {"ts":"2026-09-21T23:46:45Z","id":"moai-6qgz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"두 글이 갈릴 자리를 MILESTONE_ATTACH 하나로 맸다. 도구는 여전히 아무것도 막지 않는다"}
 {"ts":"2026-09-21T23:46:45Z","id":"moai-6qgz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"들이는 결정은 감독 1 에, 다는 걸음은 일꾼 1 에 두고 한 줄로 맸다"}
 {"ts":"2026-09-21T23:46:57Z","id":"moai-6qgz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 model: 줄의 tokens=125000 은 어림값이다. 규약은 모르면 빼라고 하니 그 수는 통계에서 빼고 읽는다"}
+{"ts":"2026-09-21T23:48:40Z","id":"moai-omww","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
