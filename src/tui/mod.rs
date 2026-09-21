@@ -1370,7 +1370,9 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let written = by.and_then(|by| repo.with_write(|issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        // 탐색기는 화면 말을 이미 쥐고 있다 — 묻는 길이지만 여는 파일이 없다.
+        let lang = self.site.lang;
+        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(touched) => {
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면

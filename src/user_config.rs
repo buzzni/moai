@@ -109,9 +109,9 @@ pub struct Registry {
     /// 탐색기를 띄우면 층과 보기가 저마다 파일을 읽고 파싱해 한 번 띄울 때 설정을 두세 번 읽었다.
     /// 까닭을 `problems` 와 따로 드는 것은 대는 자리가 달라서다 — 층의 문제는 층이, 보기의 문제는 알림이 댄다.
     pub look: Look,
-    /// 보기를 읽다 만난 까닭. `problems`(층이 대는 것)와 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나
-    /// 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
-    pub look_problems: Vec<String>,
+    /// 보기를 읽다 만난 까닭 — **말이 아니라 자료다**([`LookTrouble`], moai-uzgp). `problems`(층이 대는 것)와
+    /// 따로 든다 — 대는 자리가 다르다. 파일을 못 읽었거나 깨진 까닭은 여기 없다 — 층만 댄다(moai-5jsn).
+    pub look_problems: Vec<LookTrouble>,
     /// 옛 `[read]` 에서 **건너뛴 줄** — 말이 아니라 자료다([`crate::read_marks::Skipped`], moai-rtji).
     ///
     /// 한때 `look_problems` 에 글로 섞어 실었다. 그 글은 읽음 모듈이 한국어로 박아 지은 것이라, 영어를
@@ -149,6 +149,33 @@ pub enum LangTrouble {
     NotAWord { found: String },
     /// 모르는 말이다 — 적힌 값.
     Unknown { raw: String },
+}
+
+/// 적어 둔 탐색기 보기(`[tui]`)를 읽다 만난 것([`Doc::look`]) — **말이 아니라 자료다**(moai-uzgp).
+///
+/// 한때 여기서 글을 지었다. 그 글은 한국어로 박혀 있어, 영어를 고른 사람도 보기 설정을 틀리면
+/// 탐색기 알림 한 줄을 한국어로 봤다. [`LangTrouble`]·[`crate::read_marks::Skipped`] 가 이미
+/// 그 꼴이고, 펴는 자리는 [`crate::view::look_trouble`] 하나다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LookTrouble {
+    /// `[tui]` 가 표가 아니다 — 그 자리에 선 것.
+    NotATable { found: String },
+    /// 그 키의 모양이 틀리다 — 키 이름, 바라는 꼴, 그 자리에 선 것.
+    Want { key: String, want: Want, found: String },
+    /// 낱말 배열의 원소 하나가 낱말이 아니다 — 키 이름과 그 값. 그 원소만 건너뛴다.
+    NotAWord { key: String, value: String },
+}
+
+/// [`LookTrouble::Want`] 가 바라는 꼴. **낱말이 아니라 갈래로 든다** — 글로 들면 말묶음이
+/// 반쪽만 옮겨진다(`낱말이어야` 를 영어 문장에 끼울 자리가 없다).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Want {
+    /// `true`·`false`
+    Bool,
+    /// 낱말 하나
+    Word,
+    /// 낱말 배열
+    Words,
 }
 
 /// 설정을 읽다 만난 것([`Registry::problems`], moai-aiid) — **말이 아니라 자료다**
@@ -364,10 +391,8 @@ pub fn read(path: Option<&Path>) -> Registry {
         return Registry { problems: vec![ConfigTrouble::NoPlace], ..Registry::default() };
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
-    // **자리는 `problems` 에 안 붙인다**(moai-aiid) — 그 줄은 자료라 펴는 쪽이
-    // [`Registry::path`] 로 붙인다. 보기의 줄(`look_problems`)은 아직 지어진 글이라 여기서 붙고, 옛 `[read]`
-    // 에서 건너뛴 줄(`read_problems`)은 자료라 펴는 쪽이 붙인다([`crate::view::look_problems`], moai-rtji).
-    let at = |e: String| format!("{}: {e}", path.display());
+    // **자리는 어느 줄에도 여기서 안 붙인다**(moai-aiid, moai-uzgp) — 셋 다 자료라 펴는 쪽이
+    // [`Registry::path`] 로 붙인다([`crate::view::look_problems`]).
     // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
         // **없는 파일은 까닭을 안 댄다**(아직 아무것도 등록 안 한 사람의 정상) — 갈래만 남긴다.
@@ -391,7 +416,7 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.lang_problems = lang_problems;
             let (look, problems) = doc.look();
             reg.look = look;
-            reg.look_problems = problems.into_iter().map(at).collect();
+            reg.look_problems = problems;
             let (read, problems) = doc.read_marks();
             reg.read = read;
             reg.read_problems = problems;
@@ -424,7 +449,7 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
     let err = |p: &Path, e: std::io::Error| Fail::new(format!("{}: {e}", p.display()));
     let dir = dir_of(path);
     std::fs::create_dir_all(dir).map_err(|e| err(dir, e))?;
-    let lock = Lock::acquire(&lock_beside(path))?;
+    let lock = Lock::acquire(&lock_beside(path), || lang)?;
 
     // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
     // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
@@ -456,7 +481,7 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
         })
     };
     let _real_lock = match resolved.as_deref() {
-        Some(r) if !held(r) => Some(Lock::acquire(&lock_beside(r))?),
+        Some(r) if !held(r) => Some(Lock::acquire(&lock_beside(r), || lang)?),
         _ => None,
     };
     let path = real;
@@ -923,24 +948,24 @@ impl Doc {
 
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
     /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
-    pub fn look(&self) -> (Look, Vec<String>) {
+    pub fn look(&self) -> (Look, Vec<LookTrouble>) {
         let mut problems = Vec::new();
         let Some(item) = self.doc.get(TUI) else {
             return (Look::default(), problems);
         };
         let Some(t) = item.as_table_like() else {
-            problems.push(format!("`{TUI}` 는 `[{TUI}]` 표여야 한다 — 지금은 {}", item.type_name()));
+            problems.push(LookTrouble::NotATable { found: item.type_name().to_string() });
             return (Look::default(), problems);
         };
         let word = |i: &Item| i.as_str().map(String::from);
         let mut look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
-            hide_deferred: look_one(t, HIDE_DEFERRED, "true·false 여야", Item::as_bool, &mut problems),
-            sort: look_one(t, SORT, "낱말이어야", word, &mut problems),
-            sort_reversed: look_one(t, SORT_REVERSED, "true·false 여야", Item::as_bool, &mut problems),
+            hide_deferred: look_one(t, HIDE_DEFERRED, Want::Bool, Item::as_bool, &mut problems),
+            sort: look_one(t, SORT, Want::Word, word, &mut problems),
+            sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
-            detail: look_one(t, DETAIL, "true·false 여야", Item::as_bool, &mut problems),
+            detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
         // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
@@ -1148,19 +1173,20 @@ pub struct Look {
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
 /// 그 까닭은 층이 댄다(moai-5jsn). 탐색기는 처음값으로 뜬다. **시험만 부른다** — 띄우는 길은 [`read`] 한 번으로 층과 보기를 함께 얻는다.
 #[cfg(test)]
-pub fn read_look(path: Option<&Path>) -> (Look, Vec<String>) {
+pub fn read_look(path: Option<&Path>) -> (Look, Vec<LookTrouble>) {
     let reg = read(path);
     (reg.look, reg.look_problems)
 }
 
-fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String>) -> Option<Vec<String>> {
-    let a = look_one(t, key, "낱말 배열이어야", Item::as_array, problems)?;
+fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<LookTrouble>) -> Option<Vec<String>> {
+    let a = look_one(t, key, Want::Words, Item::as_array, problems)?;
     Some(
         a.iter()
             .filter_map(|v| {
                 let w = v.as_str().map(String::from);
                 if w.is_none() {
-                    problems.push(format!("`{TUI}.{key}` 의 `{}` 는 낱말이 아니다 — 건너뛴다", v.to_string().trim()));
+                    problems
+                        .push(LookTrouble::NotAWord { key: key.to_string(), value: v.to_string().trim().to_string() });
                 }
                 w
             })
@@ -1168,20 +1194,23 @@ fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<String
     )
 }
 
-/// 값 하나를 읽는다 — 없으면 `None`, 모양이 틀리면 `None` 과 까닭 한 줄(`want` 는 `낱말이어야` 처럼
-/// "한다" 앞에 올 말). 낱말·참거짓·낱말 배열이 저마다 같은 틀을 적고 있었다(moai-u8cs, 배열은 moai-y61p 단계 리뷰).
+/// 값 하나를 읽는다 — 없으면 `None`, 모양이 틀리면 `None` 과 까닭 하나([`LookTrouble::Want`]).
+/// 낱말·참거짓·낱말 배열이 저마다 같은 틀을 적고 있었다(moai-u8cs, 배열은 moai-y61p 단계 리뷰).
 /// `pick` 은 표 안의 값을 빌려 낼 수 있다(`Item::as_array`) — 그래서 수명을 표에 묶는다.
+///
+/// **바라는 꼴은 갈래로 받는다**(moai-uzgp) — 글로 받던 판은 `낱말이어야` 를 여기서 이어 붙여,
+/// 영어를 고른 사람의 탐색기에도 이 줄이 한국어로 섰다.
 fn look_one<'a, T>(
     t: &'a dyn toml_edit::TableLike,
     key: &str,
-    want: &str,
+    want: Want,
     pick: impl Fn(&'a Item) -> Option<T>,
-    problems: &mut Vec<String>,
+    problems: &mut Vec<LookTrouble>,
 ) -> Option<T> {
     let item = t.get(key)?;
     let v = pick(item);
     if v.is_none() {
-        problems.push(format!("`{TUI}.{key}` 는 {want} 한다 — 지금은 {}", item.type_name()));
+        problems.push(LookTrouble::Want { key: key.to_string(), want, found: item.type_name().to_string() });
     }
     v
 }
@@ -2600,9 +2629,10 @@ mod tests {
         let reg = read(Some(&path));
         assert_eq!(reg.projects.len(), 1);
         assert_eq!(reg.look.sort.as_deref(), Some("title"));
+        // **자료다**(moai-uzgp) — 자리도 말도 펴는 쪽이 붙인다(`view::look_problems`).
         assert_eq!(
             reg.look_problems,
-            [format!("{}: `tui.hide_deferred` 는 true·false 여야 한다 — 지금은 integer", path.display())]
+            [LookTrouble::Want { key: HIDE_DEFERRED.to_string(), want: Want::Bool, found: "integer".to_string() }]
         );
         assert!(reg.problems.is_empty(), "보기의 까닭이 층으로 샜다: {:?}", reg.problems);
 
@@ -2619,7 +2649,7 @@ mod tests {
             "{unreadable:?}"
         );
         assert!(unreadable.look_problems.is_empty(), "못 읽은 파일의 까닭을 보기에도 실었다");
-        assert_eq!(read(None).look_problems, Vec::<String>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
+        assert_eq!(read(None).look_problems, Vec::<LookTrouble>::new(), "자리를 모르는 것은 보기의 문제가 아니다");
     }
 
     /// **언어는 `[i18n] lang` 에서 읽는다**(moai-slfv) — 사람의 설정이지 프로젝트의 것이 아니다.
@@ -2665,13 +2695,14 @@ mod tests {
         assert_eq!(look.sort, None);
         assert_eq!(look.fields, Some(vec!["id".to_string()]));
         assert_eq!(look.hide_deferred, Some(true));
-        // 까닭 글은 판독기를 한 틀(`look_one`)로 모으기 전의 글 그대로다 — 글자로 박는다(moai-y61p 단계 리뷰).
+        // **까닭은 자료다**(moai-uzgp) — 키와 바라는 꼴과 그 자리에 선 것, 셋으로 박는다. 글로
+        // 박던 판은 그 글이 한국어라, 영어를 고른 사람의 탐색기에도 이 줄이 한국어로 섰다.
         assert_eq!(
             problems,
             [
-                "`tui.hidden` 는 낱말 배열이어야 한다 — 지금은 string",
-                "`tui.sort` 는 낱말이어야 한다 — 지금은 integer",
-                "`tui.fields` 의 `7` 는 낱말이 아니다 — 건너뛴다",
+                LookTrouble::Want { key: HIDDEN.into(), want: Want::Words, found: "string".into() },
+                LookTrouble::Want { key: SORT.into(), want: Want::Word, found: "integer".into() },
+                LookTrouble::NotAWord { key: FIELDS.into(), value: "7".into() },
             ]
         );
 

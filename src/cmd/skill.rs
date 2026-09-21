@@ -10,6 +10,7 @@
 //! 절반을 해 놓고 아무 말 없이 실패하는 것이 제일 나쁘다.
 
 use super::{Ctx, Fail, R};
+use crate::i18n::{fill, say};
 use crate::skill;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -69,22 +70,30 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "companions": companions.iter().map(Companion::json).collect::<Vec<_>>(),
             }));
         }
-        let mut out = vec![format!("심을 것 — {}", dir.display())];
+        let lang = ctx.lang();
+        let mut out = vec![fill(say(lang, "skill.plan_head"), &[("dir", &dir.display().to_string())])];
         for (path, body) in &files {
-            out.push(format!("  {:<44} {}줄", path.display(), body.lines().count()));
+            let n = body.lines().count().to_string();
+            out.push(format!("  {:<44} {}", path.display(), fill(say(lang, "skill.plan_lines"), &[("n", &n)])));
         }
         out.push(String::new());
         out.push(match &clash {
-            Some(other) => format!("등록: 건너뛴다 — `{market}` 이 이미 {} 를 가리킨다", other.display()),
-            None => format!("등록: claude plugin install moai@{market} --scope {scope} -y"),
+            Some(other) => fill(
+                say(lang, "skill.plan_register_skipped"),
+                &[("market", &market), ("at", &other.display().to_string())],
+            ),
+            None => fill(
+                say(lang, "skill.plan_register"),
+                &[("cmd", &format!("claude plugin install moai@{market} --scope {scope} -y"))],
+            ),
         });
         for c in &companions {
-            match c.why() {
+            match c.why(lang) {
                 Some(why) => {
-                    out.push(format!("함께: 건너뛴다 — {why}"));
-                    out.push(c.escape());
+                    out.push(fill(say(lang, "skill.plan_companion_skipped"), &[("why", &why)]));
+                    out.push(c.escape(lang));
                 }
-                None => out.push(format!("함께: {}", c.shown())),
+                None => out.push(fill(say(lang, "skill.plan_companion"), &[("cmd", &c.shown())])),
             }
         }
         return Ok(out);
@@ -99,9 +108,15 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
     }
 
+    // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
+    // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
+    let lang = ctx.lang();
     let steps = match &clash {
-        Some(other) => vec![(format!("`{market}` 이 이미 {} 를 가리킨다 — 등록은 건너뛴다", other.display()), false)],
-        None => register(&root, &dir, &market, scope, known_at(&market).is_some()),
+        Some(other) => vec![(
+            fill(say(lang, "skill.market_taken"), &[("market", &market), ("at", &other.display().to_string())]),
+            false,
+        )],
+        None => register(lang, &root, &dir, &market, scope, known_at(&market).is_some()),
     };
 
     // **등록이 안 됐으면 비영으로 끝낸다.** 파일은 심었어도 훅은 안 선다 —
@@ -147,26 +162,26 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         }));
     }
 
-    let mut out = vec![format!("{} 에 심었다", dir.display())];
-    out.push(format!("  훅이 부를 것: {exe} hook <event>"));
+    let mut out = vec![fill(say(lang, "skill.planted"), &[("dir", &dir.display().to_string())])];
+    out.push(fill(say(lang, "skill.hook_call"), &[("cmd", &format!("{exe} hook <event>"))]));
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
     for (c, ok) in &companions {
-        match (c.why(), ok) {
+        match (c.why(lang), ok) {
             // **빠져나갈 길을 함께 낸다**(moai-mfw1). 이 줄만 있던 판은 다시 부르라고도, 이름을
             // 어떻게 푸는지도 말하지 않아 — 훅의 알림이 "깔려 있지 않다" 를 영영 되풀이했다.
             (Some(why), _) => {
-                out.push(format!("  ! {} 은 건너뛰었다 — {why}", c.id));
-                out.push(c.escape());
+                out.push(fill(say(lang, "skill.companion_skipped"), &[("id", c.id), ("why", &why)]));
+                out.push(c.escape(lang));
             }
-            (None, true) => out.push(format!("  · {} 을 함께 깔았다 (--scope {scope})", c.id)),
-            (None, false) => out.push(format!("  ! {} 을 못 깔았다 — 손으로: {}", c.id, c.shown())),
+            (None, true) => out.push(fill(say(lang, "skill.companion_installed"), &[("id", c.id), ("scope", scope)])),
+            (None, false) => out.push(fill(say(lang, "skill.companion_failed"), &[("id", c.id), ("cmd", &c.shown())])),
         }
     }
     if registered {
         out.push(String::new());
-        out.push("Claude 를 다시 열면 든다. 이미 열려 있는 세션은 옛 판을 계속 쓴다".into());
+        out.push(say(lang, "skill.reopen_claude").to_string());
     } else if clash.is_some() {
         // **하지 말라던 것을 일러 주지 않는다.** 여기서 `marketplace add` 를
         // 내면, 시킨 대로 한 사람이 남의 저장소 등록을 이쪽으로 돌려놓는다 —
@@ -174,11 +189,11 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         out.push(String::new());
         // `--scope` 를 바꿔 보라고 하지 않는다 — 이름은 기계 하나에서 전역이라,
         // 어느 범위로 심어도 같은 자리에서 걸려 아무것도 안 바뀐다.
-        out.push(format!("그 저장소를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에"));
-        out.push("다시 부른다. 한 이름을 두 자리가 함께 쓸 수는 없다".into());
+        out.push(fill(say(lang, "skill.market_drop_first"), &[("market", &market)]));
+        out.push(say(lang, "skill.market_one_place").to_string());
     } else {
         out.push(String::new());
-        out.push("등록은 손으로 마친다:".into());
+        out.push(say(lang, "skill.register_by_hand").to_string());
         // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
         // 하위 디렉터리에서 부른 사람이 그 자리에서 치면 없는 디렉터리를 가리킨다.
         // 빈칸 든 경로를 그대로 내면 친 줄이 인자 둘로 갈린다 — 따옴표로 싼다.
@@ -268,76 +283,88 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         }));
     }
 
+    let lang = ctx.lang();
     let mark = |ok: bool| if ok { "·" } else { "!" };
+    // 줄 하나 — `  <글리프> <이름 칸><나머지>`. **이름 칸은 표시 폭으로 맞춘다**([`label`]).
+    let row = |ok: bool, name: &str, rest: &str| format!("  {} {}{rest}", mark(ok), label(name));
     let mut out = vec![format!("moai skill — {}", dir.display())];
+    let market_row = say(lang, "skill.row_market");
     out.push(match (&listed, &clash) {
-        (_, Some(other)) => format!("  ! 마켓플레이스  `{market}` 이 다른 자리({}) 를 가리킨다", other.display()),
-        (Some(_), None) => format!("  · 마켓플레이스  `{market}` 등록됨"),
-        (None, _) => format!("  ! 마켓플레이스  `{market}` 등록 안 됨"),
+        (_, Some(other)) => row(
+            false,
+            market_row,
+            &fill(say(lang, "skill.market_elsewhere"), &[("market", &market), ("at", &other.display().to_string())]),
+        ),
+        (Some(_), None) => row(true, market_row, &fill(say(lang, "skill.market_listed"), &[("market", &market)])),
+        (None, _) => row(false, market_row, &fill(say(lang, "skill.market_unlisted"), &[("market", &market)])),
     });
     // **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때
     // 등록을 건너뛰어, 시킨 대로 해도 아무것도 안 바뀐다 — 어느 줄에서 일러 주든
     // 같은 덫이다. 빠져나갈 길은 이 한 줄에만 댄다.
     if clash.is_some() {
-        out.push(format!(
-            "    그 자리를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에 `moai skill install`"
-        ));
+        out.push(fill(say(lang, "skill.market_escape_here"), &[("market", &market)]));
     }
+    let install_row = say(lang, "skill.row_install");
     if installs.is_empty() {
-        out.push(if clash.is_some() {
-            "  ! 설치          없음".into()
-        } else {
-            "  ! 설치          없음 — `moai skill install` 로 심는다".into()
-        });
+        // 막힌 자리에서는 심으라고 하지 않는다 — 위의 한 줄이 빠져나갈 길을 이미 댔다.
+        let said = match clash.is_some() {
+            true => say(lang, "skill.no_install"),
+            false => say(lang, "skill.no_install_plant"),
+        };
+        out.push(row(false, install_row, said));
     }
     for (i, (copy, want)) in installs.iter().zip(copies.iter().zip(&wants)) {
         let current = i.version == *want;
         let found = copy.is_some();
-        let advice = if clash.is_some() { String::new() } else { format!(": moai skill install --scope {}", i.scope) };
-        out.push(format!(
-            "  {} 설치          {}  판 {}{}",
-            mark(current && found),
-            i.scope,
-            i.version,
-            if !found {
-                format!("  — 설치본({})이 없다. 훅이 안 실린다{advice}", i.install_path)
-            } else if current {
-                String::new()
-            } else {
-                format!("  — 심을 판은 {want}. 다시 심는다{advice}")
-            }
-        ));
+        let advice = if clash.is_some() {
+            String::new()
+        } else {
+            fill(say(lang, "skill.install_advice"), &[("scope", &i.scope)])
+        };
+        let head = fill(say(lang, "skill.install_at"), &[("scope", &i.scope), ("version", &i.version)]);
+        let tail = if !found {
+            fill(say(lang, "skill.install_copy_gone"), &[("at", &i.install_path), ("advice", &advice)])
+        } else if current {
+            String::new()
+        } else {
+            fill(say(lang, "skill.install_stale"), &[("want", want), ("advice", &advice)])
+        };
+        out.push(row(current && found, install_row, &format!("{head}{tail}")));
     }
+    let companion_row = say(lang, "skill.row_companion");
     for (id, ok) in &companions {
-        out.push(format!(
-            "  {} 곁 플러그인   {id}{}",
-            mark(*ok),
-            if *ok { "" } else { " — 없다 (`moai skill install`)" }
-        ));
+        let tail = if *ok { String::new() } else { say(lang, "skill.companion_gone").to_string() };
+        out.push(row(*ok, companion_row, &format!("{id}{tail}")));
     }
+    let hook_row = say(lang, "skill.row_hook");
     if let Some(hook) = &hooked {
         out.push(match &hook_path {
-            Some(path) if path.as_os_str() == hook.as_str() => format!("  · 훅            {hook}"),
-            Some(path) => format!("  · 훅            {hook} → {}", path.display()),
-            None => format!("  ! 훅            {hook}  — 없거나 실행할 수 없다. 훅은 조용히 아무것도 안 한다"),
+            Some(path) if path.as_os_str() == hook.as_str() => row(true, hook_row, hook),
+            Some(path) => row(true, hook_row, &format!("{hook} → {}", path.display())),
+            None => row(false, hook_row, &format!("{hook}  {}", say(lang, "skill.hook_unrunnable"))),
         });
         if *hook != exe {
-            out.push(format!(
-                "    지금 부른 moai({exe}) 는 훅이 부르는 것과 다르다 — 여기서 심으면 훅이 그것을 부르게 바뀐다"
-            ));
+            out.push(fill(say(lang, "skill.hook_is_another_moai"), &[("exe", &exe)]));
         }
     }
-    out.push(format!(
-        "  {} claude        {}",
-        mark(claude),
-        if claude { "PATH 에 있다" } else { "PATH 에 없다 — 심을 수도 걷을 수도 없다" }
-    ));
+    let claude_said = match claude {
+        true => say(lang, "skill.claude_on_path"),
+        false => say(lang, "skill.claude_off_path"),
+    };
+    out.push(row(claude, "claude", claude_said));
     if stale > 0 {
         // **치우지 않는다.** 캐시는 `claude` 의 것이고, 돌고 있는 세션이 그중
         // 하나를 물고 있을 수 있다. 수만 비춘다.
-        out.push(format!("    옛 판 {stale}개가 claude 캐시에 남아 있다 (치우는 것은 claude 의 몫)"));
+        out.push(fill(say(lang, "skill.stale_copies"), &[("n", &stale.to_string())]));
     }
     Ok(out)
+}
+
+/// 이름 칸을 **표시 폭**으로 맞춘다(moai-uzgp). 한글은 한 글자가 두 칸이라 `{:<14}` 로 맞추면
+/// 말마다 이 표가 어긋난다 — `text::width` 가 CLI 표와 탐색기가 함께 쓰는 자다.
+fn label(what: &str) -> String {
+    const WIDE: usize = 14;
+    format!("{what}{}", " ".repeat(WIDE.saturating_sub(crate::text::width(what))))
 }
 
 /// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.**
@@ -439,25 +466,21 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         }));
     }
 
+    let lang = ctx.lang();
     if let Some(other) = &clash {
         return Ok(vec![
-            format!("! `{market}` 은 다른 자리({}) 의 등록이다 — 건드리지 않는다", other.display()),
-            "  그 저장소에서 `moai skill uninstall` 을 부른다".into(),
+            fill(say(lang, "skill.remove_elsewhere"), &[("market", &market), ("at", &other.display().to_string())]),
+            say(lang, "skill.remove_elsewhere_there").to_string(),
         ]);
     }
     if plan.is_empty() {
-        return Ok(vec![format!("걷어낼 것이 없다 — `{market}` 은 claude 에 등록돼 있지 않다")]);
+        return Ok(vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]);
     }
-    let kept_lines = kept.iter().map(|id| {
-        format!(
-            "  - {id} 은 두고 간다 — 다른 저장소의 moai 도 사용자 범위에서 쓴다. 걷으려면: claude plugin uninstall {id} --scope user"
-        )
-    });
+    let kept_lines = kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]));
     if dry_run || !claude {
-        let mut out = vec![if dry_run {
-            "부를 것:".to_string()
-        } else {
-            "! claude 를 PATH 에서 못 찾았다. 손으로 걷는다:".to_string()
+        let mut out = vec![match dry_run {
+            true => say(lang, "skill.plan_calls").to_string(),
+            false => say(lang, "skill.no_claude_by_hand").to_string(),
         }];
         out.extend(plan.iter().chain(&along).map(|a| format!("  {}", shown(a))));
         out.extend(kept_lines);
@@ -465,35 +488,32 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     }
     // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
     // 첫 줄이 성공이면 사람은 첫 줄을 믿는다.
-    let mut out = vec![if failed {
-        format!("! `{market}` 을 다 걷지 못했다")
-    } else {
-        format!("`{market}` 을 걷었다")
+    let mut out = vec![match failed {
+        true => fill(say(lang, "skill.removed_partly"), &[("market", &market)]),
+        false => fill(say(lang, "skill.removed"), &[("market", &market)]),
     }];
+    let failed_tail = say(lang, "skill.step_failed");
+    let skipped_tail = say(lang, "skill.step_not_called");
     for (cmd, ok) in &steps {
-        out.push(format!("  {} {cmd}{}", if *ok { "·" } else { "!" }, if *ok { "" } else { "  — 실패" }));
+        out.push(format!("  {} {cmd}{}", if *ok { "·" } else { "!" }, if *ok { "" } else { failed_tail }));
     }
     for a in &plan[steps.len()..] {
-        out.push(format!("  - {}  — 앞 걸음이 실패해 안 불렀다", shown(a)));
+        out.push(format!("  - {}{skipped_tail}", shown(a)));
     }
     if unplugged {
         for (cmd, ok) in &along_steps {
-            out.push(if *ok {
-                format!("  · {cmd}")
-            } else {
-                format!("  ! {cmd}  — 실패. 손으로 다시 친다")
+            out.push(match ok {
+                true => format!("  · {cmd}"),
+                false => format!("  ! {cmd}  {}", say(lang, "skill.step_failed_retry")),
             });
         }
     } else {
-        out.extend(along.iter().map(|a| format!("  - {}  — 앞 걸음이 실패해 안 불렀다", shown(a))));
+        out.extend(along.iter().map(|a| format!("  - {}{skipped_tail}", shown(a))));
     }
     out.extend(kept_lines);
     out.push(String::new());
-    out.push("이미 열려 있는 Claude 세션은 옛 훅을 계속 부른다 — 다시 열어야 완전히 걷힌다".into());
-    out.push(format!(
-        "심은 파일({}/)은 남긴다. 돌고 있는 세션이 물고 있을 수 있다 — 세션을 닫은 뒤 지워도 된다",
-        skill::DIR
-    ));
+    out.push(say(lang, "skill.reopen_to_finish").to_string());
+    out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
     Ok(out)
 }
 
@@ -665,17 +685,18 @@ impl Companion {
     }
 
     /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다. 자리를 못 읽었으면(빈 글자) 그 자리를 말로 메운다.
-    fn why(&self) -> Option<String> {
+    fn why(&self, lang: crate::i18n::Lang) -> Option<String> {
         self.blocked.as_ref().map(|at| {
-            let at = if at.is_empty() { "다른 출처" } else { at.as_str() };
-            format!("`{}` 이 이미 {at} 를 가리킨다", self.market())
+            let elsewhere = say(lang, "skill.some_other_source");
+            let at = if at.is_empty() { elsewhere } else { at.as_str() };
+            fill(say(lang, "skill.market_taken_short"), &[("market", self.market()), ("at", at)])
         })
     }
 
     /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
     /// moai 의 이름이 막혔을 때 내는 줄과 같은 길이다.
-    fn escape(&self) -> String {
-        format!("    그 이름을 이제 안 쓰면 `claude plugin marketplace remove {}` 뒤에 다시 부른다", self.market())
+    fn escape(&self, lang: crate::i18n::Lang) -> String {
+        fill(say(lang, "skill.market_escape"), &[("market", self.market())])
     }
 
     fn json(&self) -> serde_json::Value {
@@ -729,17 +750,24 @@ fn companions(scope: &str) -> Vec<Companion> {
 
 /// `claude` 에 등록한다. **사람의 `settings.json` 은 우리가 안 건드린다** —
 /// `claude` 가 제 손으로 두 키만 넣는다.
-fn register(root: &Path, dir: &Path, market: &str, scope: &str, listed: bool) -> Vec<(String, bool)> {
+fn register(
+    lang: crate::i18n::Lang,
+    root: &Path,
+    dir: &Path,
+    market: &str,
+    scope: &str,
+    listed: bool,
+) -> Vec<(String, bool)> {
     let mut steps = Vec::new();
     let dir = dir.display().to_string();
     if !listed {
         steps.push((
-            "마켓플레이스를 알렸다".to_string(),
+            say(lang, "skill.step_market_added").to_string(),
             run(root, &argv(&["plugin", "marketplace", "add", &dir, "--scope", scope])),
         ));
     } else {
         steps.push((
-            "마켓플레이스를 다시 읽혔다".to_string(),
+            say(lang, "skill.step_market_updated").to_string(),
             run(root, &argv(&["plugin", "marketplace", "update", market])),
         ));
     }
@@ -750,7 +778,7 @@ fn register(root: &Path, dir: &Path, market: &str, scope: &str, listed: bool) ->
     // **`-y` 를 준다.** `claude` 는 stdout 이 TTY 가 아니면 그것을 요구하고,
     // 여기서는 언제나 파이프다 — 없으면 이 갈래가 늘 실패한다.
     let updated = run(root, &argv(&["plugin", "update", &target, "--scope", scope, "-y"]));
-    steps.push(("플러그인을 등록했다".to_string(), installed || updated));
+    steps.push((say(lang, "skill.step_plugin_registered").to_string(), installed || updated));
     steps
 }
 

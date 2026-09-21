@@ -62,15 +62,15 @@ pub enum State {
 }
 
 /// 등록 목록 차례 그대로 연다. **실패하지 않는다.**
-pub fn open(reg: &Registry) -> Vec<Project> {
-    open_with(reg, false)
+pub fn open(reg: &Registry, lang: crate::i18n::Lang) -> Vec<Project> {
+    open_with(reg, false, lang)
 }
 
 /// [`open`] 과 같되, `worktree` 면 연 프로젝트마다 옆 워크트리를 겹친다
 /// (`worktree::gather` — `.moai` 안의 `--worktree` 와 같은 자다, moai-x0gb).
-pub fn open_with(reg: &Registry, worktree: bool) -> Vec<Project> {
+pub fn open_with(reg: &Registry, worktree: bool, lang: crate::i18n::Lang) -> Vec<Project> {
     let named: Vec<_> = reg.projects.iter().zip(crate::user_config::names(&reg.projects)).collect();
-    each(&named, |(p, name)| open_one(&p.path, name.clone(), p.hue, worktree))
+    each(&named, |(p, name)| open_one(&p.path, name.clone(), p.hue, worktree, lang))
 }
 
 /// 프로젝트마다 **제 스레드에서** `f` 를 부르고 받은 차례 그대로 모은다(moai-b7o3).
@@ -110,8 +110,14 @@ pub fn each<'a, T: Sync, U: Send>(items: &'a [T], f: impl Fn(&'a T) -> U + Sync)
 
 /// 한 자리만 연다 — 이름은 부르는 쪽이 정한다(등록 목록 전체에서 갈리는 파생값이라, 한 줄만
 /// 보고는 못 정한다). 탐색기의 프로젝트 층이 줄마다 제 스레드에서 이것을 부른다(`tui::layer`).
-pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, worktree: bool) -> Project {
-    let (state, origin, trouble, swept) = State::at_with(path, worktree);
+pub fn open_one(
+    path: &Path,
+    name: String,
+    hue: Option<crate::style::Hue>,
+    worktree: bool,
+    lang: crate::i18n::Lang,
+) -> Project {
+    let (state, origin, trouble, swept) = State::at_with(path, worktree, lang);
     Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
 }
 
@@ -122,8 +128,8 @@ pub fn open_one(path: &Path, name: String, hue: Option<crate::style::Hue>, workt
 /// **못 여는 갈래는 [`open_one`] 과 같은 자다** — `Uninit`·`Missing`·`Unreadable` 셋은 [`Repo::open`]
 /// 이 가르므로 스냅샷을 안 읽어도 답이 같다. 갈리는 것은 하나뿐이다: 열리지만 **스냅샷이 못 읽히는**
 /// 저장소를 여기서는 `Ok` 로 답한다 — 그 까닭은 곧 일꾼의 읽기가 제 길로 댄다.
-pub fn open_shallow(path: &Path) -> Result<Repo, State> {
-    match Repo::open(path) {
+pub fn open_shallow(path: &Path, lang: crate::i18n::Lang) -> Result<Repo, State> {
+    match Repo::open(path, || lang) {
         Ok(Opened::Repo(repo)) => Ok(repo),
         Ok(Opened::Uninit) => Err(State::Uninit(crate::store::init_belongs_at(path))),
         Ok(Opened::Missing) => Err(State::Missing),
@@ -136,8 +142,8 @@ impl State {
     ///
     /// 한눈 보기·`project ls`·`project add` 가 같은 자로 잰다. 등록이 따로 들여다보면
     /// 설정이 깨진 저장소를 `add` 는 조용히 받고 `ls` 는 "못 읽는다" 로 말한다 (moai-9omq).
-    fn at(dir: &Path) -> State {
-        State::at_with(dir, false).0
+    fn at(dir: &Path, lang: crate::i18n::Lang) -> State {
+        State::at_with(dir, false, lang).0
     }
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
@@ -145,9 +151,13 @@ impl State {
     ///
     /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
     /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
-    fn at_with(dir: &Path, worktree: bool) -> (State, crate::worktree::Origin, Vec<crate::worktree::Trouble>, bool) {
+    fn at_with(
+        dir: &Path,
+        worktree: bool,
+        lang: crate::i18n::Lang,
+    ) -> (State, crate::worktree::Origin, Vec<crate::worktree::Trouble>, bool) {
         let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
-        let repo = match open_shallow(dir) {
+        let repo = match open_shallow(dir, lang) {
             Ok(repo) => repo,
             Err(state) => return lone(state),
         };
@@ -268,7 +278,7 @@ pub fn add(config: &Path, input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> 
     })?;
     // **한 번 열어 둘 다 읽는다.** `.moai` 를 따로 `is_dir` 로 보면 권한이 없어 못 본 `.moai`
     // 가 "init 전" 으로 접혀, 못 읽는다는 줄 옆에 `init` 하라는 틀린 말이 선다 (`Repo::open`).
-    let (initialized, tracker_at, unreadable) = match State::at(&dir) {
+    let (initialized, tracker_at, unreadable) = match State::at(&dir, lang) {
         State::Unreadable(e) => (true, None, Some(e)),
         State::Uninit(at) => (false, at, None),
         State::Missing => (false, None, None),

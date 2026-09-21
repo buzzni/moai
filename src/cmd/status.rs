@@ -108,7 +108,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
     // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
     // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
-    st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), ctx.chdir));
+    st.notices.extend(crate::cmd::merge_driver::notice(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
@@ -226,7 +226,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         }
         return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
-    let projects = crate::projects::open_with(reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree, ctx.lang());
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
     // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는
