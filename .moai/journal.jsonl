@@ -6765,3 +6765,8 @@
 {"ts":"2026-09-21T07:57:50Z","id":"moai-b7cq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-v52i 에서 펼쳤다 — 저널을 사람마다 갈라 둘까 — 섞인 이력을 각자 파일로"}
 {"ts":"2026-09-21T07:57:50Z","id":"moai-v52i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-b7cq 로 펼쳤다 (이슈 3건)"}
 {"ts":"2026-09-21T07:58:04Z","id":"moai-b7cq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"설계는 idea moai-v52i 본문에 있다 — 파일 이름은 메일에서(@·. 을 _ 로, ASCII 밖은 _ 로 접는다), 메일이 없으면 0 아닌 코드로 멈춘다(unknown.jsonl 을 두지 않는다), 파일이 여럿인 것이 정상 꼴이라 메일이 바뀌어도 옛 파일을 그대로 두고 둘 다 읽는다. 이력을 옮기는 마이그레이션은 없다."}
+{"ts":"2026-09-21T08:01:58Z","id":"moai-7vlq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"json 의 priority 가 기본값일 때 null 로 나온다"}
+{"ts":"2026-09-21T08:02:06Z","id":"moai-ch4z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 이 늘 답한다 — 빈 자리를 안 남긴다"}
+{"ts":"2026-09-21T08:02:06Z","id":"moai-51it","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"priority 가 기본값일 때 null 로 나온다 — 기본값이 늘 선다"}
+{"ts":"2026-09-21T08:02:06Z","id":"moai-ch4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-7vlq 에서 펼쳤다 — json 의 priority 가 기본값일 때 null 로 나온다"}
+{"ts":"2026-09-21T08:02:06Z","id":"moai-7vlq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ch4z 로 펼쳤다 (이슈 1건)"}
