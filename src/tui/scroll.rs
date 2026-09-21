@@ -69,6 +69,12 @@ impl Scroll {
         self.offset
     }
 
+    /// 마지막으로 그려진 높이 — 한 쪽이 몇 줄인가. 아직 안 그렸으면 0 이라, 부르는 쪽이
+    /// 바닥을 잡는다(`SPC o t` 의 PgUp/PgDn 이 그렇게 쓴다).
+    pub fn page(&self) -> usize {
+        self.height
+    }
+
     /// 굴릴 수 있는 끝. **내용이 칸보다 짧으면 0 이다** — 짧은 것은 아예 안 구른다.
     fn last(&self) -> usize {
         self.len.saturating_sub(self.height)

@@ -15,6 +15,7 @@ pub mod picker;
 pub mod register;
 pub mod scroll;
 pub mod view;
+mod zones;
 
 use crate::config::Config;
 use crate::i18n::{fill, say};
@@ -107,6 +108,9 @@ pub enum Mode {
     Pick(picker::Picker),
     /// 층의 `d` 가 묻는 "목록에서 뺄까". `y` 만 뺀다.
     Unregister(register::Unregister),
+    /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
+    /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
+    Zone(zones::Zones),
 }
 
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
@@ -811,6 +815,17 @@ pub struct App {
     /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
     /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
     pub detail_at: view::DetailAt,
+    /// 화면의 시각을 적을 시간대(moai-p5az). **화면 하나에 하나다** — 프로젝트를 옮겨도 보는
+    /// 사람은 그대로라, `Site` 가 아니라 여기 산다(보기·정렬과 같은 자리다).
+    ///
+    /// 저장과 `--json` 은 UTC 그대로다. 못 푼 이름은 UTC 로 떨어지고 그 까닭이 배너에 한 줄로
+    /// 선다(moai-77ap) — 막지 않는다.
+    pub zone: crate::tz::Zone,
+    /// 설정에 적을 시간대 이름 — **고른 이름이지 떨어진 UTC 가 아니다**(moai-77ap). 지금 기계에
+    /// 그 자료가 없다고 사람이 고른 것을 지우면, zoneinfo 가 있는 기계로 옮겼을 때 그 설정이
+    /// 사라져 있다. 고른 적 없으면 `None` 이고 그러면 이 키를 안 적는다 — 시스템을 따르는 것이
+    /// 처음값이라, 적어 두면 시스템이 바뀌어도 옛 이름이 따라다닌다.
+    pub saved_zone: Option<String>,
     /// 설정에 적혀 있다고 이 세션이 아는 보기 — 읽은 뒤와 적은 뒤의 [`App::look_now`](moai-2kyl 단계 리뷰).
     /// **적을 때 이것과 지금의 차이만 옮긴다**(`Doc::merge_look`). 화면이 든 보기를 통째로 적으면 그사이
     /// 옆 탐색기·손·새 바이너리가 적은 것을 토글 한 번이 되돌린다. 새 바이너리가 적은 모르는 낱말을 들고
@@ -1253,6 +1268,8 @@ impl App {
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
+            zone: crate::tz::Zone::utc(),
+            saved_zone: None,
             me: None,
             saved: Default::default(),
             list: Scroll::default(),
@@ -1963,7 +1980,9 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q, _) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => String::new(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
+                String::new()
+            }
         };
         if text.trim().is_empty() {
             self.filter_text = None;
@@ -2004,7 +2023,9 @@ impl App {
         let raw = match mode {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => Raw::default(),
+            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
+                Raw::default()
+            }
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
@@ -2093,6 +2114,25 @@ impl App {
     /// 입힌 뒤의 보기를 `App::saved` 로 든다 — 모르는 낱말·틀린 값은 화면의 보기에 없으니, 이 세션이
     /// 그 키를 안 바꾸는 한 적을 때 파일의 것이 그대로 남는다(`Doc::merge_look`).
     pub fn adopt_look(&mut self, look: &crate::user_config::Look, mut problems: Vec<String>) {
+        // **시간대는 시스템에서 먼저 얻고 설정이 덮는다**(moai-p5az·moai-3oz2). 처음값이 시스템을
+        // 따르는 것이라 여기서 푼다 — `App::new` 에서 풀면 그림 시험이 돌리는 기계의 시계를 타고,
+        // 고른 적 없는 사람에게는 CLI(`Ctx::zone`)와 같은 답이어야 한다.
+        //
+        // **못 풀어도 막지 않는다** — UTC 로 떨어지고 그 까닭은 다른 설정 탈과 나란히 한 줄로 선다
+        // (moai-77ap). 사람이 고른 이름이 못 풀린 것도 같은 자리다: 설정의 그 줄은 안 건드린다.
+        let (system, why) = crate::tz::Zone::system();
+        self.zone = system;
+        problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));
+        self.saved_zone = look.timezone.clone();
+        if let Some(name) = look.timezone.as_deref() {
+            match crate::tz::Zone::load(name) {
+                Ok(z) => self.zone = z,
+                Err(w) => {
+                    self.zone = crate::tz::Zone::utc();
+                    problems.push(crate::view::zone_trouble(self.site.lang, &w));
+                }
+            }
+        }
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
         // **열만은 파일이 적은 것을 그대로 든다**(moai-6bc0 단계 리뷰). 다른 키는 입힌 결과가 곧 파일의
@@ -2228,6 +2268,7 @@ impl App {
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
             detail_at: Some(self.detail_at.name().to_string()),
+            timezone: self.saved_zone.clone(),
         }
     }
 
@@ -3609,6 +3650,13 @@ impl App {
                 self.detail_at = self.detail_at.next();
                 self.save_look();
             }
+            // **여는 자리에서 tzdb 를 읽는다**(moai-3oz2) — 띄울 때 읽으면 시간대를 한 번도
+            // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
+            // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
+            B::Timezone => {
+                let (all, why) = crate::tz::names();
+                self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -3709,6 +3757,7 @@ impl App {
             Mode::Idea(_) => return self.jot(k),
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
+            Mode::Zone(_) => return self.pick_zone(k),
             _ => {}
         }
         let eaten = match &mut self.mode {
@@ -3720,7 +3769,7 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) => return,
+            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => return,
         };
         if eaten {
             return self.live();
@@ -3916,6 +3965,11 @@ impl App {
             }
             Mode::Idea(form) => form.paste(s),
             Mode::Pick(picker) => picker.paste(s),
+            // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
+            Mode::Zone(z) => {
+                z.typing.paste(s);
+                z.settle();
+            }
             Mode::Unregister(_) => self.mode = Mode::Browse,
         }
     }
@@ -7811,6 +7865,61 @@ mod tests {
         a.hit("SPC o d Esc");
         assert_eq!(a.detail_at, before, "숨긴 상세의 자리가 돌았다");
         assert!(!a.detail_open, "자리 키가 상세를 켰다");
+    }
+
+    /// **`SPC o t` 는 창을 열고, 고른 이름이 설정에 남는다**(moai-3oz2).
+    ///
+    /// 창은 거르는 글로 좁히고 Enter 가 고른다 — 이 기계의 tzdb 는 이름을 천 개 넘게 들어,
+    /// 눌러 돌리는 길로는 고를 수가 없다.
+    ///
+    /// **적는 것은 고른 이름이지 떨어진 UTC 가 아니다**(moai-77ap) — 지금 기계에 그 자료가
+    /// 없다고 사람이 고른 것을 지우면, zoneinfo 가 있는 기계로 옮겼을 때 그 설정이 사라져 있다.
+    #[test]
+    fn spc_o_t_opens_a_window_and_the_name_it_picks_is_what_gets_saved() {
+        let s = scratch("zone-pick");
+        let user = s.join("user.toml");
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.hit("SPC o t");
+        let Mode::Zone(_) = &a.mode else { panic!("SPC o t 가 창을 안 열었다 — {:?}", a.mode) };
+
+        // **모르는 이름도 적는다.** 창은 이 기계의 tzdb 를 읽으므로 없는 기계에서는 목록이
+        // 비는데, 고르는 길과 적는 길은 그 목록과 따로 잰다.
+        a.mode = Mode::Browse;
+        a.set_zone("Mars/Olympus");
+        assert!(a.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("Mars/Olympus")), "{:?}", a.notice);
+        let text = std::fs::read_to_string(&user).expect("시간대가 설정에 안 적혔다");
+        assert!(text.contains("timezone = \"Mars/Olympus\""), "떨어진 UTC 를 적었다 — {text}");
+
+        // **Esc 는 아무것도 안 바꾼다.**
+        let before = a.zone.name().to_string();
+        a.hit("SPC o t");
+        a.hit("Esc");
+        assert!(matches!(a.mode, Mode::Browse), "Esc 가 창을 안 닫았다");
+        assert_eq!(a.zone.name(), before, "Esc 가 시간대를 바꿨다");
+    }
+
+    /// **고른 이름은 다음 실행이 그대로 든다**(moai-3oz2) — 못 푸는 이름이어도 설정의 그 줄은
+    /// 그대로고, 화면만 UTC 로 떨어지며 까닭이 한 줄로 선다(moai-77ap).
+    #[test]
+    fn a_zone_that_cannot_be_resolved_falls_back_to_utc_and_says_so_once() {
+        let mut b = App::new(Vec::new(), cfg(), Path::new());
+        let look = crate::user_config::Look { timezone: Some("Mars/Olympus".into()), ..Default::default() };
+        let mut said = Vec::new();
+        b.adopt_look(&look, Vec::new());
+        said.extend(b.notice.clone());
+        assert!(b.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
+        assert_eq!(b.saved_zone.as_deref(), Some("Mars/Olympus"), "설정의 줄을 잃었다");
+        // 알림은 한 줄이고 그 이름을 댄다 — `adopt_look` 이 설정 탈들과 나란히 싣는다.
+        assert!(said.iter().any(|n| n.contains("Mars/Olympus")), "까닭을 아무 데도 안 댔다 — {said:?}");
+        // **막지 않는다** — 그려지는 것은 그대로다.
+        assert!(!render_smoke(&mut b).is_empty());
+    }
+
+    /// 그림이 서기는 하는가 — 위 시험이 "막지 않는다" 를 재는 자다.
+    fn render_smoke(a: &mut App) -> Vec<String> {
+        super::draw::tests::render(a, 80, 20)
     }
 
     /// **보기·정렬·열은 누를 때마다 사용자 설정에 적히고 다음 실행이 읽는다**(moai-2bzp).

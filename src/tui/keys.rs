@@ -332,6 +332,9 @@ pub enum Browse {
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
     /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v p`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
+    /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
+    /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
+    Timezone,
     /// 이 줄을 읽음으로(moai-z9pc). 바로 누르는 `r` 이다 — 가장 자주 하는 것이라.
     Read,
     /// 이 프로젝트의 안 읽은 것 전부. **보이는 줄만이 아니다** — 거름망·칸 숨김·지금 디렉터리와
@@ -588,6 +591,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // **어느 것도 이슈를 안 건드린다** — 설정에만 적히고 화면만 바꾼다. 설정이 이미 쓴 줄을
         // 바꾸면 그건 설정이 아니라 마이그레이션이다.
         row!(DetailAt, Some("SPC o d"), LEADER, Key::plain('o'), Key::plain('d')),
+        row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
     ]
 };
 
@@ -832,6 +836,7 @@ impl Browse {
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
+            Timezone => say(c.lang, "tui.act.timezone"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
         }
     }
@@ -1998,6 +2003,10 @@ mod tests {
     /// 는 정렬(ranger 의 order)이었고 그것은 `SPC s` 가 가져갔다. 지금 이 글자는 옵션이라, **그 밑의
     /// 옛 정렬 글자들이 하나도 안 도는 것**이 두 지도가 함께 살지 않는다는 뜻이다 — 손에 익은 대로
     /// `SPC o u` 를 눌러도 아무 일이 없고, 메뉴에 무엇이 섰는지가 화면에 그대로 보인다.
+    ///
+    /// **`SPC o t` 만 빠진다** — 옛 정렬의 `t`(제목) 자리에 시간대가 섰다(moai-3oz2). 그 한 글자는
+    /// 두 지도가 겹치는 자리라, 옛 손버릇이 제목 정렬 대신 창을 연다. 창이 제 이름을 달고 서고
+    /// Esc 로 그대로 닫히므로 조용히 딴 일을 하지는 않는다.
     #[test]
     fn the_old_menu_keys_are_gone() {
         let sp = pressed(&LEADER);
@@ -2016,7 +2025,6 @@ mod tests {
             vec![sp, ch('o'), ch('u')],
             vec![sp, ch('o'), ch('a')],
             vec![sp, ch('o'), ch('s')],
-            vec![sp, ch('o'), ch('t')],
         ] {
             assert_eq!(lookup(BROWSE, &old), Lookup::Unknown, "옛 키 {} 가 산다", super::super::menu::title(&old));
         }

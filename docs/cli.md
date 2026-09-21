@@ -1390,8 +1390,9 @@ Options:
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   View — every toggle except the list columns (SPC c) is here:
-    SPC v d  done [shown/hidden] SPC v l  deferred           SPC v a  show all
+    SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
+             done has no letter of its own: the column that holds it does
     SPC v p  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
@@ -1405,6 +1406,12 @@ Options:
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
+  Options — how this screen draws what stands, not which rows stand:
+    SPC o d  detail pane goes right, bottom, left, top — press again to turn
+             it. Whether it stands at all is SPC v p
+    SPC o t  the timezone times are written in. It opens a window with the
+             names this machine knows. Type to narrow it down and pick one.
+             Stored times stay UTC, and so does --json
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.

@@ -186,7 +186,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &now,
         &source_of(&repo),
         trouble,
-        view::Screen::new(ctx.lang()).over(&origin),
+        view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin),
     ))
 }
 
@@ -306,5 +306,5 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let all = Overview { projects: entries, problems: &problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang())))
+    Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang()).at(ctx.zone())))
 }

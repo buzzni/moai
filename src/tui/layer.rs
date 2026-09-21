@@ -1941,9 +1941,13 @@ mod tests {
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
             Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
-            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => {
-                None
-            }
+            Mode::Ask(_)
+            | Mode::Browse
+            | Mode::Grep(..)
+            | Mode::Filter(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_) => None,
         }
     }
 

@@ -170,6 +170,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     match &mut app.mode {
         Mode::Idea(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
+        Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -244,6 +245,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             }
             None => pick_keys(f, p, keys, app.site.lang),
         },
+        // 거르는 칸이 늘 서 있다 — 이름이 천 개 넘어 글자로 좁히지 못하면 고를 길이 없다.
+        Mode::Zone(z) => {
+            let lang = app.site.lang;
+            let help = fill(
+                say(lang, "tui.prompt.hang"),
+                &[("apply", &label(PROMPT, Prompt::Apply)), ("cancel", &label(PROMPT, Prompt::Cancel))],
+            );
+            let help = prompt_help(&help, lang);
+            prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
+        }
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
@@ -360,6 +371,58 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &p.list, at, "", true, lang);
+}
+
+/// 시간대 고르는 창(moai-3oz2) — 이름 목록과, 지금 쓰는 것에 붙는 낱말.
+///
+/// **빈 목록에는 까닭이 선다**(moai-77ap). 까닭 없이 비면 이 창이 "시간대가 없다" 로 서서
+/// 무엇이 잘못됐는지 아무 데도 안 적힌다 — 정적 musl 판을 zoneinfo 없는 기계에 받은 자리다.
+fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let inner = at.width.saturating_sub(2) as usize;
+    let rows = z.shown();
+    let now = say(lang, "tui.tz.now");
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|n| {
+            let mut spans = vec![Span::raw((*n).to_string())];
+            // **지금 쓰는 것에 낱말이 붙는다** — 색이 혼자 뜻을 지지 않는다.
+            if z.is_now(n) {
+                spans.push(Span::styled(format!("  {now}"), dim()));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.tz.title")));
+    if let Some(why) = &z.trouble {
+        block = block.title_bottom(Line::from(Span::styled(
+            clip(&format!(" {} ", crate::text::one_line(&crate::view::zone_trouble(lang, why))), inner),
+            dim(),
+        )));
+    } else if rows.is_empty() {
+        // tzdb 는 있는데 거르는 글에 하나도 안 걸렸다 — 그것은 탈이 아니라 글이 좁은 것이다.
+        block = block
+            .title_bottom(Line::from(Span::styled(clip(&format!(" {} ", say(lang, "tui.tz.none")), inner), dim())));
+    }
+    let selected = (!rows.is_empty()).then_some(z.cursor.min(rows.len().saturating_sub(1)));
+    z.list.fit(at.height.saturating_sub(2) as usize, rows.len());
+    if let Some(n) = selected {
+        z.list.reveal(n);
+    }
+    let mut state = ListState::default().with_offset(z.list.offset()).with_selected(selected);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
+    scroll_mark(f, &z.list, at, "", true, lang);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
@@ -2001,6 +2064,9 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 넘친 첨자에는 댈 것이 없다(moai-m59y) — 막음은 짚는 자리에 둔다. 부르는 쪽에 두면 그 줄과
     // 이 줄이 230줄 떨어져, 다음 부르는 쪽은 적히지 않은 약속을 물려받는다.
     let Some(i) = site.issues.get(idx) else { return Vec::new() };
+    // 시각은 **보는 사람의 시간대로** 적는다(moai-p5az) — CLI 상세와 같은 자다(`view::stamp`).
+    // 고른 시간대는 화면 하나에 하나라 `App` 이 든다: 프로젝트를 옮겨도 보는 사람은 그대로다.
+    let zone = &app.zone;
     // 걸린 검색이 보는 자리마다 **왜 걸렸는지** 여기서 칠한다(moai-lw7i). 목록 줄은 id·제목만 칠하는데
     // 태그·본문은 목록에 없고, **id·제목도 목록에서 잘린다** — 좁으면 id 열이 걷히고(`Head::of`) 긴 제목은
     // 찾은 글자 앞에서 `…` 로 끊겨, 걸린 줄에 칠한 글자가 하나도 없었다(moai-xemz 리뷰).
@@ -2153,11 +2219,11 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
-    fields.push((say(site.lang, "tui.field.created").into(), crate::view::stamp(&i.created_at)));
-    fields.push((say(site.lang, "tui.field.updated").into(), crate::view::stamp(&i.updated_at)));
+    fields.push((say(site.lang, "tui.field.created").into(), crate::view::stamp(&i.created_at, zone)));
+    fields.push((say(site.lang, "tui.field.updated").into(), crate::view::stamp(&i.updated_at, zone)));
     // **시작·끝도 같은 자다**(moai-38mh) — 어느 줄에 세울지(아직 안 떠난 줄·묶음은 안 세운다)까지
     // `view::span_of` 가 정한다. 여기만 없으면 탐색기로 보는 사람에게는 틀린 시각이 안 보인다.
-    if let Some((start, end)) = crate::view::span_of(i) {
+    if let Some((start, end)) = crate::view::span_of(i, zone) {
         fields.push((say(site.lang, "tui.about.started").into(), start));
         fields.push((say(site.lang, "tui.about.ended").into(), end));
     }

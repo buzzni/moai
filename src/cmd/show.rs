@@ -252,7 +252,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
     // **화면은 한 번 짓는다** — 트리와 목록은 갈라져 서지만 같은 맥락으로 그리므로, 두 자리에서
     // 따로 지으면 한쪽만 고치는 날 같은 명령의 두 표면이 다른 말이나 다른 출처로 선다.
-    let screen = view::Screen::new(ctx.lang()).over(&origin);
+    let screen = view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin);
     if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
@@ -437,7 +437,7 @@ fn one(
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
-        screen: view::Screen::new(ctx.lang()).over(origin),
+        screen: view::Screen::new(ctx.lang()).at(ctx.zone()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
     };
@@ -583,7 +583,7 @@ fn one(
     // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
     // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
     out.extend(view::commits(&commits, ctx.lang()));
-    out.extend(view::history(&journal, &repo.config, ctx.lang()));
+    out.extend(view::history(&journal, &repo.config, seen.screen));
     Ok(out)
 }
 
