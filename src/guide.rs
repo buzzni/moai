@@ -1231,9 +1231,9 @@ milestone — an idea from outside waits for the next round unless it should sta
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** An idea carries no milestone
-and `moai idea promote` has no flag for one, so the epic a worker unfolds stands outside
-the release until the milestone is attached to it. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
+for a milestone and does not carry over the one the idea itself holds, so the epic a worker
+unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
 `{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -1390,7 +1390,10 @@ Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>
 reads its own place as the root.
 `<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
 when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
-epic, which the tool refuses as an id it does not know.
+epic, which the tool refuses because it is not an id at all. **A wrong id it does not
+refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
+in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off the
+`moai ready` header; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -2644,7 +2647,6 @@ mod tests {
 from outside**",
                 "마일스톤을 빼라고 적는 것이 밖의 일을 맡기는 것과 같다는 말이 없다",
             ),
-            ("`<milestone>`, `<model>`", "3 의 채우는 자리에 마일스톤이 없다"),
             (
                 "**Leave it unfilled** and the worker hangs the placeholder itself",
                 "안 채운 자리가 무엇이 되는지 안 적었다",
@@ -2652,10 +2654,16 @@ from outside**",
         ] {
             assert!(head.contains(piece), "{why} — {piece}");
         }
+        // **자리 이름은 목록 줄에서 찾는다** — 바로 아래 풀이 글도 `<milestone>` 를 적어, 감독 쪽
+        // 전체에서 찾으면 목록에서 빠져도 초록이다. 줄의 모양이 바뀌어도 `slot_list` 하나만 따른다.
+        let list = slot_list(head);
+        assert!(list.contains("`<milestone>`"), "3 의 채우는 자리에 마일스톤이 없다 — {list}");
 
         // 일꾼 쪽은 **1 안에서** 잰다 — 펼치기와 같은 걸음이라야 워크트리가 서기 전에 달린다.
         let one = brief.find("\n    1.").expect("일꾼 글에 1 이 없다");
-        let two = brief.find("\n    2.").expect("일꾼 글에 2 가 없다");
+        // 2 는 **1 뒤에서** 찾는다 — 앞에서 찾으면 걸음 앞에 `\n    2.` 로 읽히는 줄이 하나 드는
+        // 날 슬라이스가 거꾸로 서서 시험이 패닉으로 죽는다(옆 시험들이 쓰는 걸음과 같은 꼴이다).
+        let two = one + brief[one..].find("\n    2.").expect("일꾼 글에 2 가 없다");
         for (piece, why) in [
             (MILESTONE_ATTACH, "일꾼이 마일스톤을 다는 줄이 1 에 없다"),
             ("If `<milestone>` is `none`", "아무것도 안 도는 판을 안 적었다"),

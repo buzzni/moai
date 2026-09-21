@@ -150,9 +150,9 @@ milestone — an idea from outside waits for the next round unless it should sta
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** An idea carries no milestone
-and `moai idea promote` has no flag for one, so the epic a worker unfolds stands outside
-the release until the milestone is attached to it. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
+for a milestone and does not carry over the one the idea itself holds, so the epic a worker
+unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
 `moai edit <epic> --milestone <milestone>` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -317,7 +317,10 @@ Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>
 reads its own place as the root.
 `<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
 when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
-epic, which the tool refuses as an id it does not know.
+epic, which the tool refuses because it is not an id at all. **A wrong id it does not
+refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
+in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off the
+`moai ready` header; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
