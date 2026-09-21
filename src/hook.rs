@@ -604,7 +604,19 @@ enum Layer {
     /// 명령 치환(`$( … )`·`` `…` ``)과 따옴표 없는 heredoc 본문의 치환 — 바깥 명령의 **낱말**이 된다.
     /// 그 값은 바깥 명령의 값이 아니고, bash 는 그 안에 바깥의 `set -e` 를 안 물려준다. 바깥 목록이
     /// 그 안의 errexit 를 끌 수도 있다 — `x=$(set -e; …) || true`.
-    Subst(usize),
+    Subst {
+        /// 그 치환의 묶음 깊이([`Seg::level`]).
+        at: usize,
+        /// **한 자리에 나란히 선 치환들 가운데 몇째인가**(moai-lwil) — 깊이만 들던 판은 형제 치환
+        /// 둘이 같은 값이라([`shell_scan`] 의 `frames` 가 `==` 로 견준다) 그 사이에서 겹을 안 걷었다.
+        /// 앞 치환의 판이 뒤 치환으로 그대로 넘어가는데, 지금은 뒤 치환의 첫 토막이 제 이음사와
+        /// 제 자리를 들고 와 그 판을 곧바로 걷어 판정이 안 바뀐다.
+        ///
+        /// **그 걷힘에 기대지 않는다** — 그것은 딴 자가 딴 까닭으로 해 주는 일이고, 겹을 걷는 자가
+        /// 제 일을 하고 있다는 뜻이 아니다. `echo $(set -e) $(집기; 쓰기)` 가 그 둘이 갈리는 날
+        /// 샐 자리다.
+        nth: usize,
+    },
     /// `bash -c '…'`·`sh -c` 의 글 — 새 프로세스라 바깥의 `set -e` 도 `||` 도 안 닿는다.
     Shell {
         /// 그 글의 맨 윗자리 묶음 깊이([`Seg::level`]) — 새 셸은 제 `set -e` 를 여기서 센다.
@@ -633,7 +645,7 @@ impl Layer {
     /// 바깥 렉서가 이 겹을 제 자리로 옮긴다 — 깊이는 [`Seg::level`] 과 같이 민다.
     fn shift(self, by: usize, under: usize) -> Layer {
         match self {
-            Layer::Subst(l) => Layer::Subst(l + by),
+            Layer::Subst { at, nth } => Layer::Subst { at: at + by, nth },
             Layer::Shell { top, deep, strict, apace } => {
                 Layer::Shell { top: top + by, deep: deep + under, strict, apace }
             }
@@ -1116,8 +1128,19 @@ impl<'a> Lexer<'a> {
     ///
     /// **그 글을 낸 토막 바로 앞에 심는다.** 뒤에 몰아 쌓던 판은 줄 끝의 판을 물려받아, 뒤따르는
     /// `cd` 가 그 앞의 쓰기를 모르는 자리로 지웠고(샜다), 앞선 `집기 && bash -c '쓰기'` 의 `&&` 를
-    /// 잃어 시킨 대로 쓴 줄을 막았다(리뷰 moai-p836.rv). 심는 셈은 치환([`Lexer::end_by`])의 것과
-    /// 같다 — 첫 토막이 바깥 이음사를 받고, 나머지는 안쪽이 잰 자리를 그대로 옮긴다.
+    /// 잃어 시킨 대로 쓴 줄을 막았다(리뷰 moai-p836.rv).
+    ///
+    /// **치환([`Lexer::end_by`])과 나누는 것은 뼈대뿐이다** — 처음 심는 토막이 바깥 이음사를 받고,
+    /// 나머지는 안쪽이 잰 자리를 바깥 깊이만큼 밀어 옮긴다. 한때 "셈이 같다" 고 적어 뒀는데 네
+    /// 군데가 다르다(moai-lwil).
+    ///
+    /// - **하위 셸 깊이**: 치환은 늘 한 겹 더하고, 여기는 `sub` 가 0 일 수 있다 — `eval` 은 지금
+    ///   셸에서 돌아 하위 셸이 아니다
+    /// - **지나온 자리**(`low`·`floor`): 치환은 **바깥 렉서**의 것을 고쳐 다음 토막이 받게 하고,
+    ///   여기는 심는 토막에 **직접** 적는다. 여기서는 그 토막(`seg`)이 이미 손에 있다
+    /// - **닫힌 묶음**(`shut`): 여기만 바깥 토막이 들고 있던 것을 처음 심는 토막에 얹고, 글 끝에서
+    ///   닫힌 것(`over`)을 글을 낸 토막에 돌려준다
+    /// - **겹**: 치환은 늘 [`Layer::Subst`] 하나고, 여기는 글의 종류에 따라 `Shell`·`Subst`·없음이다
     ///
     /// **글의 값은 그 글을 낸 토막의 값이다** — `bash -c`·`eval` 은 글의 마지막 명령의 값으로 끝난다.
     /// 그래서 그 글은 `( … )` 묶음처럼 한 겹 깊이 심고, 글을 낸 토막은 **그 묶음을 막 나온 토막**으로
@@ -1130,8 +1153,10 @@ impl<'a> Lexer<'a> {
     /// **`eval` 은 하위 셸이 아니다** — 지금 셸에서 돌아 그 글의 `cd` 가 바깥에 남는다. 그래서 `{ … }`
     /// 처럼 묶음 깊이([`Seg::level`])만 더하고 하위 셸 깊이([`Seg::depth`])와 겹([`Seg::nested`])은 안
     /// 더한다. 글을 그 자리에 납작하게 풀지 않는 것은 `집기 && eval 'a; b'` 의 `b` 도 집기 뒤라서다 —
-    /// 풀면 `;` 가 바깥 목록의 끊김으로 읽혀 시킨 대로 친 줄을 막는다. 그 대가로 `eval 'set -e'` 는
-    /// `{ set -e; }` 처럼 묶음 밖으로 안 이어진다(모르는 쪽, 막는 쪽으로 선다).
+    /// 풀면 `;` 가 바깥 목록의 끊김으로 읽혀 시킨 대로 친 줄을 막는다. 그 대가로 **`eval` 글 안의
+    /// `set -e` 는 그 글 안에서만 선다** — `{ set -e; }` 처럼 묶음 밖으로 안 이어진다(모르는 쪽,
+    /// 막는 쪽으로 선다). `eval 'set -e'` 하나만 그렇다고 적어 뒀던 판은 좁았다(moai-lwil) —
+    /// 글 안 어디에 선 `set -e` 든 같다.
     ///
     /// **제 토막만 본다**(겹이 없는 것). 치환에서 옮겨 온 토막은 그 안쪽 렉서가 이미 다시 읽었다 —
     /// 다시 훑던 판은 `$(bash -c "$( … )")` 겹마다 같은 글을 두 번 읽어, 아홉 겹 211바이트 한 줄에
@@ -1180,7 +1205,7 @@ impl<'a> Lexer<'a> {
             let mut handed = false;
             // 그 글 끝에서 닫힌 예약어 묶음([`Seg::shut`]) — 받을 토막이 글 안에 없어 이 토막이 든다.
             let mut over: Option<usize> = None;
-            for (text, kind) in texts {
+            for (nth, (text, kind)) in texts.into_iter().enumerate() {
                 // 예산을 다 썼으면 그 글은 글로 둔다 — 겹 상한에 닿은 것과 같은 자리다(moai-qzy7).
                 // **뒤의 글은 그대로 본다**(리뷰) — 끊던 판은 앞의 큰 덩이 하나로 같은 토막의 뒤 글이
                 // 통째로 안 읽혔다([`afford`]).
@@ -1211,9 +1236,9 @@ impl<'a> Lexer<'a> {
                 // (`let deep = self.deep`)을 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을
                 // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
                 let layer = match kind {
-                    Handed::Doc => Some(Layer::Subst(0)),
+                    Handed::Doc => Some(Layer::Subst { at: 0, nth }),
                     Handed::Fork { strict } => Some(Layer::Shell { top: 0, deep: 0, strict, apace }),
-                    Handed::Eval => apace.then_some(Layer::Subst(0)),
+                    Handed::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
                 };
                 let sub = usize::from(layer.is_some() || apart);
                 // 치환의 묶음은 바깥 토막의 것이 아니다 — 그 값도 바깥 명령의 값이 아니다.
@@ -1221,11 +1246,11 @@ impl<'a> Lexer<'a> {
                 // 뜻하는 것이 바로 그것이다. 겹만 `Shell` 로 되돌리고 이 자를 안 고치던 판은 그 토막을
                 // **묶음을 막 나온 토막**으로 세워(`handed`) 제 이음사를 안 읽게 만들었고,
                 // `집기; bash -c '무엇 &' && 쓰기` 의 `;` 가 끊은 사슬이 도로 살아나 빈손의 쓰기가 샜다.
-                let feeds = !matches!(layer, Some(Layer::Subst(_)) | Some(Layer::Shell { apace: true, .. }));
+                let feeds = !matches!(layer, Some(Layer::Subst { .. }) | Some(Layer::Shell { apace: true, .. }));
                 // **글 끝에서 닫힌 묶음의 표식은 값과 따로 논다** — 그 묶음은 값이 흐르든 말든 정말
                 // 닫혔고, 몸통이 안 돌았으면 그 안의 집기는 안 돌았다. 값과 한 자로 세던 판은
                 // `bash -c 'if false; then 집기 & fi'` 의 안 돈 집기를 기록에 남겼다.
-                if !matches!(layer, Some(Layer::Subst(_))) {
+                if !matches!(layer, Some(Layer::Subst { .. })) {
                     over = over.into_iter().chain(left.map(|l| l + level + 1)).min();
                 }
                 for (m, mut s) in segs.into_iter().enumerate() {
@@ -1264,6 +1289,11 @@ impl<'a> Lexer<'a> {
                 // 심은 글에서 제 자리로 돌아왔다 — 지나온 자리는 이제 제 자리다.
                 (seg.low, seg.floor) = (depth, level);
             }
+            // **글을 낸 토막은 그 묶음을 막 나온 토막으로 선다** — 이음사의 깊이를 제 깊이보다
+            // 깊게 둔다. 이음사의 **종류**는 안 건드린다: 파이프의 칸(`a | bash -c '…'`)이면 그
+            // 깊이로 [`shell_scan`] 의 `heads`·`piped` 가 잘리는데, 그 자리는 위의 `gate` 가
+            // `j.depth > seg.level` 로 먼저 가려 파이프 가지를 아예 안 탄다. 판정은 안 바뀐다
+            // (moai-lwil 에서 짚은 자리다).
             if handed {
                 seg.join.depth = level + 1;
             }
@@ -1745,7 +1775,7 @@ impl<'a> Lexer<'a> {
         // **다시 읽기의 겹은 치환에도 든다**([`Lexer::DEEP`]) — `Lexer::new` 로 0 부터 다시 세던 판은
         // `$(bash -c "$( … )")` 가 겹마다 셈을 되돌려, 상한이 아무것도 막지 못했다(리뷰 moai-p836.rv).
         let deep = self.deep + 1;
-        for text in inner {
+        for (nth, text) in inner.into_iter().enumerate() {
             if deep > Lexer::DEEP {
                 break;
             }
@@ -1773,7 +1803,7 @@ impl<'a> Lexer<'a> {
                 for l in &mut s.nested {
                     *l = l.shift(level + 1, group + 1);
                 }
-                s.nested.insert(0, Layer::Subst(level + 1));
+                s.nested.insert(0, Layer::Subst { at: level + 1, nth });
                 self.push(s);
             }
         }
@@ -3503,7 +3533,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         match frames.last().map(|f| f.layer) {
             None => Some(0),
             Some(Layer::Shell { top, .. }) => Some(top),
-            Some(Layer::Subst(_)) => None,
+            Some(Layer::Subst { .. }) => None,
         }
     }
     let mut out = Vec::new();
@@ -3652,7 +3682,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // **겹을 나오며 밖에 남길 집기** — 판에서 이 자 하나만 갈래를 탄다. 나머지는 아래에서
             // 들어설 때의 것으로 통째로 되돌아간다([`Scope`]).
             let pick = match f.layer {
-                Layer::Subst(_) => f.saved.pick,
+                Layer::Subst { .. } => f.saved.pick,
                 // **새 셸 안에서 집기가 이긴 채로 끝났으면 그 셸의 값도 이긴 것이다**(moai-9xbq) —
                 // `bash -c '집기 || exit 1; echo done'` 은 집기가 지면 거기서 끝나, 여기 온 것은
                 // 이겼다는 뜻이다. 그 안의 `sure` 는 아래 자로 걷히니 나올 때 집기로 옮겨 적는다.
@@ -8292,6 +8322,26 @@ mod tests {
         }
         assert_eq!(judge("moai -C . mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
         assert_eq!(judge("cat a > /tmp/x && moai mv t-1 in_progress && echo x > src/store.rs"), Decision::Pass);
+    }
+
+    /// **한 자리에 나란히 선 치환 둘은 딴 겹이다**(moai-lwil) — [`shell_scan`] 의 `frames` 가 겹을
+    /// `==` 로 견주니, 깊이만 들던 판은 형제 치환 둘을 한 겹으로 읽어 그 사이에서 겹을 안 걷었다.
+    /// 앞 치환의 판이 뒤 치환으로 그대로 넘어간다.
+    ///
+    /// **지금은 그것으로 판정이 안 바뀐다** — 심은 토막이 제 `low`·`floor` 를 안쪽이 잰 값으로
+    /// 들고 와, 앞 치환이 제 겹에서 세운 것은 그 자로 곧바로 걷힌다. 그러나 그것은 **딴 자가 딴
+    /// 까닭으로** 해 주는 일이다. 겹을 걷는 자가 제 일을 하고 있는지는 여기서 잰다.
+    #[test]
+    fn two_substitutions_side_by_side_are_two_layers() {
+        let line = Line::new("echo $(set -e) $(sed -i s/a/b/ src/x.rs)");
+        let layers: Vec<Layer> = line.segs().iter().filter_map(|s| s.nested.first().copied()).collect();
+        assert_eq!(layers.len(), 2, "심은 토막이 둘이 아니다 — {layers:?}");
+        assert_ne!(layers[0], layers[1], "형제 치환 둘이 한 겹으로 선다");
+        // 한 치환 안의 토막 둘은 **같은** 겹이다 — 그 사이에서는 겹을 안 걷는 것이 맞다.
+        let one = Line::new("echo $(set -e; sed -i s/a/b/ src/x.rs)");
+        let layers: Vec<Layer> = one.segs().iter().filter_map(|s| s.nested.first().copied()).collect();
+        assert_eq!(layers.len(), 2, "심은 토막이 둘이 아니다 — {layers:?}");
+        assert_eq!(layers[0], layers[1], "한 치환 안의 토막 둘이 딴 겹으로 선다");
     }
 
     /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
