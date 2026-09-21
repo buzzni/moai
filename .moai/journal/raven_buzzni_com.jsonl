@@ -170,3 +170,8 @@
 {"ts":"2026-09-21T16:22:09Z","id":"moai-dkph","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-21T16:22:09Z","id":"moai-n3wq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-21T16:22:09Z","id":"moai-bujq.91c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 도는 중이다. 받으면 원문을 이 이슈에 노트로 남기고, 반영한 것과 넘긴 것을 -m 에 적어 닫는다. 그 뒤 develop 에 병합하고 멤버 열둘을 닫는다 — 차례는 moai-bujq 의 Next 노트에 있다."}
+{"ts":"2026-09-21T16:23:10Z","id":"moai-uocc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"MOAI_HERE 를 켠 셸에서 init 안내가 갈린다"}
+{"ts":"2026-09-21T16:23:10Z","id":"moai-ha0f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"손잡이를 켠 셸에 init --check 가 줄 하나를 더 낸다"}
+{"ts":"2026-09-21T16:23:10Z","id":"moai-uocc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-cr0m 에서 펼쳤다 — MOAI_HERE 가 한 명령의 답을 둘로 가른다"}
+{"ts":"2026-09-21T16:23:10Z","id":"moai-cr0m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uocc 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T16:23:25Z","id":"moai-ha0f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
