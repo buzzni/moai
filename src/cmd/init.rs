@@ -451,7 +451,7 @@ const GITATTRIBUTES: &str = "\
 .moai/issues.jsonl   text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
-# It is filed per writer, by email — `.moai/journal/raven_buzzni_com.jsonl`.
+# It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.
 # Several files is the normal shape, and the old single file is still read as
 # one of them, so both lines stand.
 .moai/journal.jsonl  text eol=lf merge=union

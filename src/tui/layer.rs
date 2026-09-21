@@ -259,7 +259,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status(&load.issues, &unreadable, cfg, now, crate::i18n::Lang::default());
+    let st = crate::report::status(&load.issues, &unreadable, cfg, now);
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
@@ -1910,7 +1910,9 @@ mod tests {
             assert_eq!((&a.mode, &a.notice), (&Mode::Browse, &None), "{m:?}-F7 가 뜻을 했다");
         }
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
-        assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
+        // **저널은 `.moai/journal/<메일>.jsonl` 이다**(moai-nzlo) — 옛 한 파일을 재면 아무도 안
+        // 짓는 자리를 재는 셈이라, 남의 프로젝트에 적어도 이 줄이 안 붉어진다(리뷰).
+        assert!(!one.join(".moai/journal").exists() && !two.join(".moai/journal").exists());
 
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
@@ -2682,7 +2684,8 @@ mod tests {
 
         assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
         assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
-        assert!(!one.join(".moai/journal.jsonl").exists());
+        // 저널만 새는 것을 잡는 줄이다 — 재는 자리는 `.moai/journal/` 이다(moai-nzlo, 리뷰).
+        assert!(!one.join(".moai/journal").exists());
         let n = a.notice.clone().unwrap_or_default();
         assert!(n.starts_with("✓ 담김 · two · argos-"), "알림이 프로젝트를 안 댄다 — {n:?}");
     }

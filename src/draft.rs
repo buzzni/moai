@@ -41,13 +41,15 @@ pub struct Draft {
 /// 태그는 **끝에서부터** 뗀다 — 제목 가운데의 `#` 은 제목의 일부다
 /// (`--json 이 #1 에서 깨진다`).
 fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, Vec<String>), String> {
-    let at = n.to_string();
+    // **거절할 때만 짓는다**(`store::with_write` 가 같은 자로 적어 둔 규칙, 리뷰) — 줄머리에서
+    // 미리 지으면 8,000줄 계획이 제 줄을 8,000번 `Debug` 로 베껴 놓고 전부 버린다.
+    let at = || n.to_string();
     let mut rest = raw.trim();
     let mut priority = None;
 
     if let Some(after) = rest.strip_prefix('[') {
         let (tag, tail) = after.split_once(']').ok_or_else(|| {
-            say_fill(say(lang, "draft.unclosed_bracket"), &[("line", &at), ("raw", &format!("{raw:?}"))])
+            say_fill(say(lang, "draft.unclosed_bracket"), &[("line", &at()), ("raw", &format!("{raw:?}"))])
         })?;
         let p = tag
             .trim()
@@ -57,7 +59,7 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, V
             .ok_or_else(|| {
                 say_fill(
                     say(lang, "draft.not_a_priority"),
-                    &[("line", &at), ("tag", tag), ("max", &crate::model::MAX_PRIORITY.to_string())],
+                    &[("line", &at()), ("tag", tag), ("max", &crate::model::MAX_PRIORITY.to_string())],
                 )
             })?;
         priority = Some(p);
@@ -82,7 +84,7 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, V
     tags.reverse();
 
     if rest.is_empty() {
-        return Err(say_fill(say(lang, "draft.no_title"), &[("line", &at), ("raw", &format!("{raw:?}"))]));
+        return Err(say_fill(say(lang, "draft.no_title"), &[("line", &at()), ("raw", &format!("{raw:?}"))]));
     }
     // 제목 끝쪽에 이어진 `\#낱말` 은 태그가 아니라 제목의 `#낱말` 이다(moai-a5pz). 가운데
     // 것은 원래 태그로 안 읽히므로 이스케이프도 안 하고 풀지도 않는다 — render 와 같은 자리.
@@ -260,24 +262,27 @@ pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, Strin
         if l.is_empty() {
             continue;
         }
-        let at = n.to_string();
-        let shown = format!("{l:?}");
+        // **거절할 때만 짓는다**(리뷰) — `shown` 은 제 줄을 `Debug` 로 통째로 베끼는 자리라,
+        // 줄머리에서 지으면 멀쩡한 8,000줄 계획이 그 헛일을 8,000번 하고 전부 버린다.
+        // `store::with_write` 가 같은 까닭으로 가리키는 말을 닫힘에 담아 둔 것과 한 자다.
+        let at = || n.to_string();
+        let shown = || format!("{l:?}");
         let (kind, body) = match l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")) {
             Some(b) => (Kind::Issue, b),
             None => match l.strip_prefix("# ") {
                 Some(b) => (Kind::Epic, b),
                 None => {
-                    errors.push(say_fill(say(lang, "draft.not_a_line"), &[("line", &at), ("raw", &shown)]));
+                    errors.push(say_fill(say(lang, "draft.not_a_line"), &[("line", &at()), ("raw", &shown())]));
                     continue;
                 }
             },
         };
         if kind == Kind::Epic && shape == Shape::Members {
-            errors.push(say_fill(say(lang, "draft.no_epic_line"), &[("line", &at), ("raw", &shown)]));
+            errors.push(say_fill(say(lang, "draft.no_epic_line"), &[("line", &at()), ("raw", &shown())]));
             continue;
         }
         if kind == Kind::Issue && epic.is_none() && shape == Shape::Plan {
-            errors.push(say_fill(say(lang, "draft.no_epic_above"), &[("line", &at), ("raw", &shown)]));
+            errors.push(say_fill(say(lang, "draft.no_epic_above"), &[("line", &at()), ("raw", &shown())]));
             continue;
         }
         match split_parts(body, n, lang) {

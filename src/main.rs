@@ -62,9 +62,17 @@ macro_rules! outln {
 /// 설정을 한 번 더 읽는데, 이 줄들은 할 말이 있을 때만 서므로(셋 다 먼저 비었는지 본다) 거의
 /// 모든 판에서 읽지 않는다. `OnceLock` 은 한 판에 여러 줄이 설 때(프로젝트마다 한 줄) 같은
 /// 파일을 그만큼 다시 파지 않게 한다.
+///
+/// **값을 먼저 길어 놓고 넣는다**(리뷰) — `cmd::Ctx::lang` 이 이름 대어 적어 둔 덫이다. 설정을
+/// 읽는 길이 언젠가 제 까닭을 `outln!` 로 한 줄 내면, 그 `outln!` 이 여기를 도로 불러 제
+/// 초기화 안에서 `get_or_init` 을 다시 연다 — 재진입은 안 풀리고 모든 명령이 말없이 멈춘다.
 fn said_lang() -> i18n::Lang {
     static LANG: std::sync::OnceLock<i18n::Lang> = std::sync::OnceLock::new();
-    *LANG.get_or_init(|| cmd::lang_of(&user_config::read(user_config::path().as_deref())))
+    if let Some(lang) = LANG.get() {
+        return *lang;
+    }
+    let picked = cmd::lang_of(&user_config::read(user_config::path().as_deref()));
+    *LANG.get_or_init(|| picked)
 }
 
 fn main() -> ExitCode {

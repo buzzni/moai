@@ -561,9 +561,9 @@ fn walk(
         // "마일스톤 없음" 이지 "에픽 없음" 이 아니다.
         let lang = cx.screen.lang;
         // **이름은 말묶음에서 온다 — 집계의 `title` 이 아니다.** `report` 는 `&[Issue]` 에 대한
-        // 순수 함수라 화면 말을 모르고, 그 자리(`report::loose_title`)의 글자는 한국어로 박혀
-        // 있다. 집계가 있든 없든 여기서 대는 이름이 같아야 한 화면이 한 말로 선다 — `ready` 가
-        // 같은 줄에 대는 말과 **키도 같다**.
+        // 순수 함수라 화면 말을 모르고, 그래서 `id` 없는 집계 줄의 `title` 은 빈 글이다
+        // (`report::rollup_of_in`). 집계가 있든 없든 여기서 대는 이름이 같아야 한 화면이 한 말로
+        // 선다 — `ready` 가 같은 줄에 대는 말과 **키도 같다**.
         let title = say(lang, "ready.no_epic");
         match path.is_empty().then(|| cx.rolls.iter().find(|r| r.id.is_none())).flatten() {
             Some(roll) => out.push(head(roll, title, n, None, lang)),
@@ -2538,14 +2538,23 @@ pub fn no_actor(lang: Lang, why: &crate::model::NoActor) -> String {
     // **고칠 명령은 안 옮긴다** — 그대로 쳐야 하는 글자다(`.gitattributes` 가 심는 줄과 같은 까닭).
     // 말묶음에 안 두는 까닭이 하나 더 있다: 실린 글은 한 줄이어야 해서
     // (`i18n::tests::every_translation_keeps_the_places_english_marks`) 여러 줄은 여기서 잇는다.
-    const HOW: &str = "  git config user.name  \"Name\"\n  git config user.email \"email\"";
+    //
+    // **다만 따옴표 안은 채워 넣을 자리라 옮긴다**(리뷰) — 명령은 `git config user.name` 까지고
+    // 그 뒤는 사람이 제 이름으로 바꿀 글이다. 바로 아래 `refuse.actor_by_hand` 가 `--user
+    // "이름 (메일)"` 로 옮겨 서는데 여기만 영어로 두면, 한 거절문이 자리 표시를 두 말로 대어
+    // 받는 쪽이 `Name` 을 글자 그대로 친다.
+    let how = format!(
+        "  git config user.name  {:?}\n  git config user.email {:?}",
+        say(lang, "refuse.word_name"),
+        say(lang, "refuse.word_email")
+    );
     match why {
         NoActor::Unknown => {
-            format!("{}\n\n{HOW}\n\n{}", say(lang, "refuse.no_actor"), say(lang, "refuse.actor_by_hand"))
+            format!("{}\n\n{how}\n\n{}", say(lang, "refuse.no_actor"), say(lang, "refuse.actor_by_hand"))
         }
         NoActor::BadIdentity { label } => {
             let said = fill(say(lang, "refuse.bad_git_identity"), &[("label", &format!("{label:?}"))]);
-            format!("{said}\n\n{HOW}")
+            format!("{said}\n\n{how}")
         }
         NoActor::Malformed { what, raw } => {
             fill(say(lang, "refuse.actor_malformed"), &[("what", what), ("raw", &format!("{raw:?}"))])
@@ -2872,7 +2881,7 @@ mod tests {
         let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         stuck.blocked_by = vec!["argos-0001".into()];
         let issues = vec![blocker, stuck];
-        let st = crate::report::status(&issues, &[], &cfg(), now, Lang::Ko);
+        let st = crate::report::status(&issues, &[], &cfg(), now);
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -2891,7 +2900,7 @@ mod tests {
         let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         held.blocked_by = vec!["argos-0001".into()];
         let issues = vec![shelved, held];
-        let st = crate::report::status(&issues, &[], &cfg(), now, Lang::Ko);
+        let st = crate::report::status(&issues, &[], &cfg(), now);
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3428,7 +3437,7 @@ mod tests {
     fn a_finished_grouping_is_not_nagged_but_a_folded_one_says_so() {
         let table = |all: &[Issue]| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", Lang::Ko);
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(Lang::Ko)))
                 .join("\n")
         };
@@ -3494,7 +3503,7 @@ mod tests {
         let issues = vec![issue("argos-0001", "첫 일", "todo")];
         let cfg = cfg();
         let now = "2026-09-11T04:12:03Z";
-        let st = crate::report::status(&issues, &[], &cfg, now, Lang::Ko);
+        let st = crate::report::status(&issues, &[], &cfg, now);
         let draw =
             |lang| plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n");
         let (ko, en) = (draw(Lang::Ko), draw(Lang::En));
@@ -3537,7 +3546,7 @@ mod tests {
         let lang = Lang::Ko;
         let mine = vec![issue("argos-0001", "제 줄", "todo")];
         let draw = |issues: &[Issue], screen: Screen| {
-            let st = crate::report::status(issues, &[], &cfg, now, Lang::Ko);
+            let st = crate::report::status(issues, &[], &cfg, now);
             plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen))
         };
         let bare = Origin::default();

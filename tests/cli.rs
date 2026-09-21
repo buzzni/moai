@@ -666,7 +666,7 @@ fn the_config_picks_the_language_and_a_bad_one_is_named() {
 }
 
 #[test]
-fn init_creates_exactly_three_files() {
+fn init_creates_exactly_two_files() {
     let s = init("init");
     let mut names: Vec<String> = std::fs::read_dir(s.path().join(".moai"))
         .unwrap()
@@ -701,7 +701,7 @@ fn init_creates_exactly_three_files() {
 /// 하나하나 견주지 않고 **한글이 한 자라도 남았는가**만 본다.
 ///
 /// **심는 파일은 여기서 안 잰다.** `.gitattributes`·`config.toml`·`AGENTS.md` 블록은 화면이
-/// 아니라 저장소의 내용이고 영어 하나로 선다 — 그쪽은 `init_creates_exactly_three_files` 가
+/// 아니라 저장소의 내용이고 영어 하나로 선다 — 그쪽은 `init_creates_exactly_two_files` 가
 /// 잰다. 여기서 재는 것은 **심으면서 사람에게 대는 말**이다.
 ///
 /// **아래 목록이 이 자의 전부다**(리뷰) — `init` 이 낼 수 있는 모든 화면이 아니라 여기 적은

@@ -538,7 +538,7 @@ fn warnings_in<'a>(
     let lines: Vec<crate::report::Unreadable> =
         unreadable.iter().map(|id| crate::report::Unreadable { id: id.as_deref() }).collect();
     // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
-    crate::report::status_in(issues, &lines, cfg, now, soil, crate::i18n::Lang::default()).warnings.len()
+    crate::report::status_in(issues, &lines, cfg, now, soil).warnings.len()
 }
 
 /// 프로젝트 하나에 딸린 것 — 그 프로젝트의 줄과, 그 줄을 재고 그리는 데 드는 모든 것(moai-pqmg).
@@ -1375,10 +1375,11 @@ impl App {
         };
         // 탐색기는 화면 말을 이미 쥐고 있다 — 묻는 길이지만 여는 파일이 없다.
         let lang = self.site.lang;
-        let by = (self.identify)(self.user.as_deref(), &repo.root)
-            .map_err(|e| (e.code(), crate::fail::Fail::no_actor(&e, lang)));
-        if let Err((code, e)) = &by
-            && *code == crate::fail::code::NO_ACTOR
+        // **코드는 `Fail` 이 이미 든다** — `Fail::no_actor` 가 `NoActor::code()` 로 채운다.
+        // 곁들여 들고 다니면 늘 같아야 할 둘을 타입이 안 묶는다(리뷰).
+        let by = (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang));
+        if let Err(e) = &by
+            && e.code == crate::fail::code::NO_ACTOR
         {
             let back = std::mem::replace(&mut self.mode, Mode::Browse);
             let why = e.message.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
@@ -1388,9 +1389,7 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let written = by
-            .map_err(|(_, e)| e)
-            .and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(touched) => {
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면

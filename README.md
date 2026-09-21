@@ -25,12 +25,14 @@ should I work on next, and what did we already decide about it. A web tracker
 answers neither from inside the repository, and a Markdown TODO list answers
 neither after the third session.
 
-moai keeps the whole thing in two append-friendly files under `.moai/`:
+moai keeps the whole thing in append-friendly files under `.moai/`:
 
 - `issues.jsonl` — one line per issue, sorted by id. **The snapshot is the
   truth.** Nothing is folded, replayed or recomputed to answer a question.
-- `journal.jsonl` — who created, moved, noted or removed what. It is history
-  for humans, and it is never read to compute state.
+- `journal/<email>.jsonl` — who created, moved, noted or removed what, one file
+  per writer so two people never collide on a merge. It is history for humans,
+  and it is never read to compute state. The older single `journal.jsonl` is
+  still read where it exists; nothing is written there any more.
 
 Everything else follows from those two sentences. A question that can only be
 answered by folding the journal is a question whose answer should have been a

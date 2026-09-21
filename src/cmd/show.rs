@@ -206,7 +206,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let soil = crate::report::Soil::of(&load.issues);
     let tree_now = args.tree && !ctx.json;
     let index = tree_now.then(|| crate::nav::Index::in_soil(&load.issues, &soil));
-    let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil, ctx.lang()));
+    let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil));
     let wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
@@ -538,7 +538,7 @@ fn one(
             Kind::Milestone => &soil.milestone,
             _ => &soil.epic,
         };
-        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed, ctx.lang())
+        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
         if let Some(r) = &roll {
@@ -570,7 +570,7 @@ fn one(
                 // (마일스톤 밑의 에픽, 에픽 밑에는 없다), 빈 것을 건네면 그 줄이
                 // 집계를 잃어 `에픽 1건` 처럼 나온다 — 같은 에픽이 `moai show
                 // --tree` 와 다르게 읽힌다.
-                let rolls = report::rollup_in(all, &repo.config, &soil, ctx.lang());
+                let rolls = report::rollup_in(all, &repo.config, &soil);
                 // **상세가 이미 든 화면을 그대로 쓴다**(리뷰) — `seen.screen` 이 바로 그 값이고
                 // [`view::Screen`] 은 `Copy` 다. 여기서 다시 지으면 한 번 펼치는 화면 안에 같은
                 // 맥락을 짓는 자리가 둘이 된다.

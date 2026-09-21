@@ -38,7 +38,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .map(|id| report::Unreadable { id })
         .collect();
     let now = model::now();
-    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.lang());
+    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
@@ -244,7 +244,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
             // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따르되, 재는
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
-            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.lang());
+            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
             let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
             status.warnings.extend(lost);
