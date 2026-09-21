@@ -735,6 +735,24 @@ fn reads() -> usize {
     READS.with(std::cell::Cell::get)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// **이 갈래가 명령줄을 훑은 횟수**([`shell_scan`]) — 시험이 "한 판에 한 번만 훑는다" 를 못박는
+    /// 자다(moai-44wr). [`READS`] 와 같은 꼴이고 같은 까닭이다: 시계로 재면 부하 있는 기계에서
+    /// 흔들리고, 흔들리는 시험은 곧 지워진다.
+    ///
+    /// **[`Scan`] 의 필드로 두지 않는다.** 갈무리가 [`std::cell::OnceCell`] 이라 제 안의 수는
+    /// 구조적으로 0 아니면 1 이고, 부르는 쪽이 제 `Scan` 을 새로 세우면 그 수는 **딴 칸**에 선다 —
+    /// 못박는다던 바로 그 뒷걸음을 못 본다. 한 자리에서 세면 누가 세운 `Scan` 이든 여기로 온다.
+    /// 리뷰 moai-3bry.uea 3번이 `Line` 에서 똑같은 자리를 짚었다.
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 지금까지 훑은 횟수([`SCANS`]).
+#[cfg(test)]
+fn scans() -> usize {
+    SCANS.with(std::cell::Cell::get)
+}
 
 impl<'a> Line<'a> {
     pub fn new(cmd: &'a str) -> Line<'a> {
@@ -3770,6 +3788,8 @@ fn shell_writes(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> 
 /// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
 /// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
 fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
+    #[cfg(test)]
+    SCANS.with(|n| n.set(n.get() + 1));
     /// **집기로 센 토막 하나**([`picked`]) — 그 번호와 선 묶음 깊이, 그리고 확실히 도는가다.
     ///
     /// 이름 없는 세 자리 튜플로 두던 판은 앞의 둘이 같은 형이라 바꿔 적어도 컴파일이 됐다
@@ -6360,6 +6380,50 @@ mod tests {
         let _ = super::calls_review(&asked);
         let _ = super::calls_review(&asked);
         assert_eq!(reads() - before, 1, "물을 때마다 다시 읽는다");
+    }
+
+    /// **한 판은 명령줄을 한 번만 훑는다**(moai-44wr). 읽기는 [`Line`] 이 한 번으로 줄였지만 읽은
+    /// 토막을 **훑는** 걸음은 겹쳐 있었다 — 규칙 2 가 한 번, 세션의 기록이 한 번, 그리고 막는 판에서는
+    /// `settle` 이 판정을 다시 부를 때마다 또 한 번.
+    ///
+    /// **시계로 재지 않는다** — [`SCANS`] 가 한 자리에서 세고 여기서 그 수를 못박는다. 부르는 쪽이
+    /// 제 [`Scan`] 을 새로 세우면 그 훑기도 같은 칸으로 와 이 수가 는다.
+    #[test]
+    fn one_turn_scans_the_command_line_once() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        let all_of = Segs { judges: &|_| true, picks: &|_| true };
+        // 규칙 2 와 기록이 둘 다 볼 것이 있는 줄 — 집기도 쓰기도 선다.
+        let cmd = "moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs";
+        let line = Line::new(cmd);
+        let cfg = cfg();
+        let scan = Scan::new(&line, &cfg);
+        let before = scans();
+        let _ = super::guard_shell_in(&all, &here(), root, root, &scan, &all_of, &|_| None);
+        let _ = super::picked_in(&scan, &|_| true, &|_, _| None);
+        assert_eq!(scans() - before, 1, "같은 토막을 두 번 훑는다");
+
+        // **되돌림 탐침** — 부르는 쪽이 제 `Scan` 을 새로 세우는 것이 이 시험이 잡아야 할 뒷걸음이고,
+        // 그때 수가 실제로 는다. 세는 자리를 `Scan` 안에 두면 이 단언이 못 선다.
+        let again = Scan::new(&line, &cfg);
+        let before = scans();
+        let _ = super::picked_in(&again, &|_| true, &|_, _| None);
+        assert_eq!(scans() - before, 1, "새로 세운 `Scan` 의 훑기가 안 세어졌다");
+
+        // 토막을 가려 묻는 판은 **다시 훑는 것이 맞다** — `only` 는 낼 토막만이 아니라 사슬을
+        // 고르므로, 안 가리고 훑은 답을 뒤에서 거를 수 없다([`Scan::writes`]).
+        let some = Segs { judges: &|_| true, picks: &|k| k == 1 };
+        let scan = Scan::new(&line, &cfg);
+        let before = scans();
+        let _ = super::guard_shell_in(&all, &here(), root, root, &scan, &some, &|_| None);
+        let _ = super::picked_in(&scan, &|_| true, &|_, _| None);
+        assert_eq!(scans() - before, 2, "가려 묻는 판과 안 가린 판이 같은 벌을 봤다");
+
+        // 훑을 일이 없는 호출은 **아예 안 훑는다** — `Scan` 은 게으르다.
+        let idle = Scan::new(&line, &cfg);
+        let before = scans();
+        assert_eq!(scans() - before, 0, "묻지도 않았는데 훑었다");
+        drop(idle);
     }
 
     /// **감싸는 명령은 명령 자리를 안 가린다**(moai-455j) — `env`·`timeout`·`nice`·`stdbuf`·`xargs`·`sudo` 뒤의
