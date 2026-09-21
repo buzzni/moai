@@ -6983,3 +6983,8 @@
 {"ts":"2026-09-21T12:04:27Z","id":"moai-t6z9.bd6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=411330 (max — 병합 경로와 쓰기 경로를 한 diff 로 본다)"}
 {"ts":"2026-09-21T12:04:36Z","id":"moai-t6z9.bd6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯 건 중 열넷을 고쳤다(리뷰가 열하나, 넘긴 것 중 셋을 이어서). 고침은 c3d0053 하나다. 안 고친 하나는 state_at 이 모든 침묵을 current 로 접는 것 — notice 와 같은 어휘라 일부러 뒀고, 바꾸면 --check 의 계약에 낱말이 는다. 리팩터 제안 넷은 이번 diff 밖이라 안 건드렸다."}
 {"ts":"2026-09-21T12:04:48Z","id":"moai-ohke","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 에픽의 diff 도 moai-t6z9.bd6 리뷰가 함께 봤다 — 같은 파일을 두 에픽이 함께 만져 한 diff 로 봤고, 거기서 나온 고침(c3d0053)에 이 에픽의 자리도 들어 있다(defer 의 박힌 한국어, git 의 한국어 Display, 거절의 code, 락 밖에서 말 풀기)."}
+{"ts":"2026-09-21T12:11:50Z","id":"moai-qzy7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:13:02Z","id":"moai-ivt9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:13:07Z","id":"moai-nzlo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:13:20Z","id":"moai-1vkb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T12:13:24Z","id":"moai-a6ob","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
