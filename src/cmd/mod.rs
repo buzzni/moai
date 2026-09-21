@@ -488,11 +488,53 @@ pub const OURS: &[&str] = &[
     "place",
     "commits",
     "commits_error",
+    "journal_error",
     "work",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",
 ];
+
+/// 기계에 낼 **못 읽은 저널** — `show --json` 의 `journal_error` 한 자리(moai-f2lc).
+///
+/// `commits_error` 와 같은 꼴이고 같은 까닭이다(`git::Told`): `kind` 가 가르는 자이고 `said` 는
+/// 사람이 읽을 한 줄이다. **다른 것은 배열이라는 것뿐** — git 은 한 번 물어 한 번 지지만, 저널은
+/// 사람마다 갈린 N 개라 한 판에 여럿이 안 읽힐 수 있고, 그중 하나만 대면 나머지는 조용해진다.
+///
+/// **경로를 안 자른다.** `commits_error` 는 자르는데(같은 JSON 의 `workplaces` 가 자르므로) 여기는
+/// 그 자리가 곧 고치는 법이다 — `chmod` 를 어디에 하는지가 이 값의 쓸모다.
+#[derive(Debug, serde::Serialize)]
+pub struct JournalError {
+    /// `permission`·`failed`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
+    pub kind: &'static str,
+    /// 사람이 읽을 한 줄 — `main` 이 stderr 로 내는 줄과 **같은 글이다**. 두 자리에서 따로
+    /// 지으면 같은 실패를 화면과 `--json` 이 다른 말로 말한다.
+    pub said: String,
+}
+
+/// 못 읽은 저널을 기계 꼴로 접는다. `root` 를 주면 **그 저장소의 것만** 고른다 —
+/// `show --worktree` 는 겹쳐 온 줄의 이력을 그 워크트리의 저널에서 읽으므로(`show::home`),
+/// 한 판의 목록에 여러 체크아웃의 자리가 섞인다. 줄 곁에 다는 키는 **그 줄의 뿌리**의 것이라야
+/// "이 줄의 이력이 덜 왔다" 라는 말이 된다. `None` 이면 다 든다(`main` 의 stderr).
+///
+/// **순수하다** — 전역을 안 읽는다. 읽는 자는 부르는 쪽이다.
+pub fn journal_errors(
+    lang: crate::i18n::Lang,
+    unread: &[crate::store::Unread],
+    root: Option<&std::path::Path>,
+) -> Vec<JournalError> {
+    unread
+        .iter()
+        .filter(|u| root.is_none_or(|r| u.root == r))
+        .map(|u| JournalError {
+            kind: u.kind,
+            said: crate::i18n::fill(
+                crate::i18n::say(lang, "warn.unread_journal"),
+                &[("at", &u.at.display().to_string()), ("why", &u.said)],
+            ),
+        })
+        .collect()
+}
 
 impl<'a> Row<'a> {
     /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
@@ -832,5 +874,51 @@ mod tests {
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
         assert!(matches!(Row::of(&i, None).issue, std::borrow::Cow::Borrowed(_)));
+    }
+
+    fn unread(root: &str, at: &str) -> crate::store::Unread {
+        crate::store::Unread {
+            root: std::path::PathBuf::from(root),
+            at: std::path::PathBuf::from(at),
+            kind: "permission",
+            said: "Permission denied".to_string(),
+        }
+    }
+
+    /// **줄 곁에 다는 것은 그 줄의 뿌리의 실패뿐이다**(moai-f2lc). `show --worktree` 는 겹쳐 온
+    /// 줄의 이력을 그 워크트리의 저널에서 읽으므로 한 판에 여러 체크아웃의 자리가 섞인다 —
+    /// 안 가르면 제 파일은 멀쩡한 줄이 남의 0600 파일 하나로 "이력이 덜 왔다" 를 달고 선다.
+    /// `main` 이 종료 코드를 제 뿌리로만 가르는 것(`any_mine`)과 같은 금이다.
+    #[test]
+    fn a_rows_journal_error_names_only_its_own_root() {
+        let all =
+            [unread("/w/mine", "/w/mine/.moai/journal/a.jsonl"), unread("/w/side", "/w/side/.moai/journal/b.jsonl")];
+        let lang = crate::i18n::Lang::En;
+
+        let mine = journal_errors(lang, &all, Some(std::path::Path::new("/w/mine")));
+        assert_eq!(mine.len(), 1, "{mine:?}");
+        assert!(mine[0].said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", mine[0].said);
+        assert!(!mine[0].said.contains("/w/side"), "옆 체크아웃의 자리를 이 줄에 달았다 — {}", mine[0].said);
+
+        // 뿌리를 안 주면 다 든다 — `main` 의 stderr 는 옆의 것도 말한다.
+        assert_eq!(journal_errors(lang, &all, None).len(), 2);
+        // 못 읽은 것이 하나도 없으면 한 줄도 없다 — 그 빔이 곧 "이력이 다 왔다" 이다.
+        assert!(journal_errors(lang, &[], None).is_empty());
+    }
+
+    /// **가르는 자는 `kind` 고 `said` 는 사람의 것이다**(moai-f2lc) — `commits_error` 와 같은
+    /// 약속이다. `said` 는 말묶음에서 오므로 말이 갈리면 글자도 갈리는데, `kind` 는 그대로다:
+    /// 받는 쪽이 `said` 로 갈라 읽으면 그 고리는 화면 말 설정 하나로 조용히 깨진다.
+    #[test]
+    fn the_kind_is_the_machines_and_the_said_is_the_persons() {
+        let one = [unread("/w/mine", "/w/mine/.moai/journal/a.jsonl")];
+        let en = journal_errors(crate::i18n::Lang::En, &one, None);
+        let ko = journal_errors(crate::i18n::Lang::Ko, &one, None);
+        assert_eq!(en[0].kind, ko[0].kind, "말이 갈렸다고 `kind` 까지 갈렸다");
+        assert_ne!(en[0].said, ko[0].said, "말이 안 갈린다 — 말묶음을 안 지났다");
+        for e in [&en[0], &ko[0]] {
+            assert!(e.said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", e.said);
+            assert!(e.said.contains("Permission denied"), "{}", e.said);
+        }
     }
 }

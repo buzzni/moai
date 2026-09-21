@@ -15721,3 +15721,63 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
         .expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
     assert!(checked.status.success(), "올린 판의 태그를 막았다\n{}", text(&checked));
 }
+
+/// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).
+///
+/// **여기가 없으면 키를 더해 놓고 그 키가 닿는지 아무도 안 잰다.** 단위 시험은
+/// `cmd::journal_errors` 가 옳은 줄을 짓는 데까지만 가므로, `show` 가 그것을 실제로 달았는지는
+/// 바이너리를 돌려야 안다 — moai-6ney 리뷰 3번이 잡은 자리가 그것이었다(`main` 이
+/// `unread_journals()` 를 부르는지 아무도 안 재서 그 줄을 지워도 483개가 다 파랬다).
+///
+/// 종료 코드로는 못 가른다 — `cmd::PARTIAL` 은 못 읽는 스냅샷 줄과 진 `mv` 겨룸까지 함께 쓰는
+/// 한 깃발이라 "이 판이 온전치 않다" 까지만 말한다. 어느 이슈의 **이력이** 덜 왔는지는 이 키다.
+#[cfg(unix)]
+#[test]
+fn an_unread_journal_stands_in_the_json_beside_the_row_it_cost() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = trees("wtjsonunread");
+    let main = t.main();
+
+    // 멀쩡한 판에는 키가 없다 — 그 빔이 곧 "이력이 다 왔다" 이다.
+    let clean = ok(&main, &["show", &t.tied, "--json"]);
+    assert!(!clean.contains("journal_error"), "멀쩡한 판에 키를 달았다\n{clean}");
+    assert!(clean.contains(r#""journal":"#), "이력 키가 아예 없다\n{clean}");
+
+    // 제 저장소의 저널을 잠근다 — 줄은 그대로 서고 이력만 빠진다.
+    let mine = only_journal(&main);
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&mine).is_ok() {
+        std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return; // root 는 권한을 안 본다
+    }
+    let one = moai(&main, &["show", &t.tied, "--json"]);
+    let listed = moai(&main, &["show", "--json"]);
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let shown = String::from_utf8_lossy(&one.stdout).to_string();
+    one_json_value(&shown);
+    // **가르는 자는 `kind` 다** — `said` 는 운영체제가 지은 글이라 `LANG` 과 libc 에 따라 바뀐다.
+    assert!(shown.contains(r#""journal_error":[{"kind":"permission""#), "키가 꼴대로 안 섰다\n{shown}");
+    assert!(shown.contains(&mine.display().to_string()), "어느 파일에 chmod 할지를 안 댔다\n{shown}");
+    // 이력은 빠졌는데 줄은 그대로다 — 통째로 지던 자리다.
+    assert!(shown.contains(r#""journal":[]"#), "이력만 빠지고 줄이 서야 한다\n{shown}");
+    assert!(shown.contains(&t.tied), "이력 하나로 줄까지 잃었다\n{shown}");
+
+    // 목록도 줄마다 같은 것을 낸다.
+    let rows = String::from_utf8_lossy(&listed.stdout).to_string();
+    let row = rows
+        .split("},{")
+        .find(|r| r.contains(&format!(r#""id":"{}""#, t.tied)))
+        .unwrap_or_else(|| panic!("그 줄이 없다\n{rows}"));
+    assert!(row.contains(r#""journal_error":[{"kind":"permission""#), "목록 줄에 안 섰다\n{row}");
+
+    // **옆 워크트리의 것은 내 줄에 안 붙는다** — 종료 코드를 안 바꾸는 것과 같은 금이다.
+    let theirs = only_journal(&t.feat());
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = moai(&main, &["show", &t.tied, "--json", "--worktree"]);
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "옆 워크트리의 저널로 실패했다 — {}", String::from_utf8_lossy(&out.stderr));
+    assert!(!shown.contains("journal_error"), "옆 체크아웃의 자리를 내 줄에 달았다\n{shown}");
+    let _ = (&t.epic, &t.picked);
+}

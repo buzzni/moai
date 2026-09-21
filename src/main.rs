@@ -36,7 +36,6 @@ mod worktree;
 
 use clap::Parser;
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// `println!` 은 stdout 이 닫히면 패닉한다. `moai show | head` 처럼 출력을
@@ -309,7 +308,7 @@ fn unread_journals() {
 ///
 /// `here` 를 못 찾았으면(`.moai` 밖에서 끝난 판) 가르지 않고 세운다 — 못 가릴 때 조용한 쪽으로
 /// 떨어지면 그것이 곧 조용한 손실이다.
-fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) {
+fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[store::Unread]) {
     let lines = unread_lines(lang, unread);
     if lines.is_empty() {
         return;
@@ -327,18 +326,17 @@ fn tell_unread(lang: i18n::Lang, here: Option<&std::path::Path>, unread: &[(Path
 ///
 /// `here` 가 없으면(`.moai` 밖에서 끝난 판) 가르지 못하니 참이다 — 못 가릴 때 조용한 쪽으로
 /// 떨어지면 그것이 곧 조용한 손실이다.
-fn any_mine(here: Option<&std::path::Path>, unread: &[(PathBuf, PathBuf, String)]) -> bool {
-    unread.iter().any(|(root, ..)| here.is_none_or(|h| h == root))
+fn any_mine(here: Option<&std::path::Path>, unread: &[store::Unread]) -> bool {
+    unread.iter().any(|u| here.is_none_or(|h| h == u.root))
 }
 
 /// 자리마다 한 줄. **순수하다** — 찍지도, 전역을 건드리지도 않는다.
-fn unread_lines(lang: i18n::Lang, unread: &[(PathBuf, PathBuf, String)]) -> Vec<String> {
-    unread
-        .iter()
-        .map(|(_, at, why)| {
-            i18n::fill(i18n::say(lang, "warn.unread_journal"), &[("at", &at.display().to_string()), ("why", why)])
-        })
-        .collect()
+///
+/// **글을 여기서 안 짓는다**(moai-f2lc) — `--json` 의 `journal_error` 가 같은 줄을 내므로
+/// [`cmd::journal_errors`] 하나가 짓고 여기는 그 `said` 를 편다. 두 자리에서 지으면 같은
+/// 실패를 stderr 와 기계 출력이 다른 말로 말한다.
+fn unread_lines(lang: i18n::Lang, unread: &[store::Unread]) -> Vec<String> {
+    cmd::journal_errors(lang, unread, None).into_iter().map(|e| e.said).collect()
 }
 
 fn print(lines: &[String]) {
@@ -362,9 +360,14 @@ fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
-    fn one(at: &str, why: &str) -> Vec<(PathBuf, PathBuf, String)> {
-        vec![(PathBuf::from("/tmp/moai-6924"), PathBuf::from(at), why.to_string())]
+    fn at(root: &str, at: &str, why: &str) -> store::Unread {
+        store::Unread { root: PathBuf::from(root), at: PathBuf::from(at), kind: "permission", said: why.to_string() }
+    }
+
+    fn one(at: &str, why: &str) -> Vec<store::Unread> {
+        vec![self::at("/tmp/moai-6924", at, why)]
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
@@ -416,11 +419,8 @@ mod tests {
     #[test]
     fn a_neighbours_unread_journal_is_told_but_does_not_fail_the_run() {
         let mine = PathBuf::from("/tmp/moai-6924");
-        let theirs = vec![(
-            PathBuf::from("/tmp/moai-6ney/side"),
-            PathBuf::from("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"),
-            "Permission denied".to_string(),
-        )];
+        let theirs =
+            vec![at("/tmp/moai-6ney/side", "/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl", "Permission denied")];
         assert!(!any_mine(Some(&mine), &theirs), "옆 워크트리의 것으로 종료 코드를 바꿨다");
         assert!(any_mine(Some(&mine), &one("/tmp/moai-6924/.moai/journal/b_x_com.jsonl", "denied")));
         // 어느 저장소인지 못 찾은 판은 가르지 못하니 세운다 — 못 가릴 때 조용해지지 않는다.

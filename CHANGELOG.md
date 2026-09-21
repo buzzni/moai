@@ -12,6 +12,12 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- `show --json`, for one issue and for a list, carries `journal_error` beside a
+  row whose history came up short — `kind` (`permission`, `failed`) to branch on
+  and `said` naming the file to `chmod`, the same shape as `commits_error`. Until
+  now the exit code was the only signal, and it is shared with every other partial
+  answer, so a machine could tell "this run was not whole" but never which row.
+  A row carries only its own checkout's failures.
 - `--json` always carries `kind` and `priority`, including on the rows whose
   snapshot line leaves them out because they hold the default. What the file
   omits and what the contract omits are two different things — keys that can
