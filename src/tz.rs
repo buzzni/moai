@@ -206,33 +206,16 @@ fn env_name() -> Option<String> {
 /// 그대로 잘라 내려 하면 어느 접두어와도 안 맞아 이름을 못 얻고, 그 기계에서는 화면이 UTC 로
 /// 서면서 매 명령에 "시스템이 제 시간대를 안 댄다" 가 붙는다 — 이 기능이 고치려던 바로 그 자리다.
 ///
-/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다. 물어야 하는 자리(링크의 링크, 링크인
-/// tzdb 디렉터리)는 부르는 쪽이 `canonicalize` 로 한 번 더 댄다.
+/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다([`crate::store::lexical`]). 물어야 하는
+/// 자리(링크의 링크, 링크인 tzdb 디렉터리)는 부르는 쪽이 `canonicalize` 로 한 번 더 댄다.
 fn name_under(at: &Path, dir: &Path) -> Option<String> {
     let full = match at.is_absolute() {
         true => at.to_path_buf(),
         // `/etc/localtime` 의 링크라 기준은 `/etc` 다.
-        false => flatten(&Path::new("/etc").join(at)),
+        false => crate::store::lexical(&Path::new("/etc").join(at)),
     };
     let name = full.strip_prefix(dir).ok()?.to_str()?;
     (!name.is_empty()).then(|| name.to_string())
-}
-
-/// 경로의 `.`·`..` 를 **글자로만** 접는다. `canonicalize` 와 달리 파일 시스템을 안 본다 —
-/// 없는 자리도 접을 수 있어야 하고, 접는 값이 이름 하나를 얻는 값보다 크면 안 된다.
-fn flatten(at: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for part in at.components() {
-        match part {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 /// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다
@@ -479,9 +462,8 @@ mod tests {
         assert_eq!(name_under(Path::new("/usr/share/zoneinfo/Asia/Tokyo"), zone), Some("Asia/Tokyo".into()));
         // `TZ=:/etc/localtime` 은 tzdb 밖이라 이름이 아니다 — 다음 자리로 내려간다.
         assert_eq!(name_under(Path::new("/etc/localtime"), zone), None);
-        // `..` 은 글자로만 접는다 — 없는 자리도 접힌다.
-        assert_eq!(flatten(Path::new("/etc/../usr/share/zoneinfo/UTC")), PathBuf::from("/usr/share/zoneinfo/UTC"));
-        assert_eq!(flatten(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        // `..` 은 글자로만 접는다 — 없는 자리도 접힌다. 상대 링크는 `/etc` 를 기준으로 삼는다.
+        assert_eq!(name_under(Path::new("../usr/share/zoneinfo/UTC"), zone), Some("UTC".into()));
     }
 
     /// 손으로 지은 TZif 를 판 1·판 2 두 꼴로 읽는다. **판 2 면 뒤 자료를 읽는다** — 앞의 32비트

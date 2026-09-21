@@ -1496,8 +1496,68 @@ pub(crate) fn gone(e: &std::io::Error) -> bool {
 ///
 /// 견주는 데 쓸 때는 [`crate::user_config::same_dir`] 이 이것의 짝이다 — 둘 다 못 풀면 받은 철자로
 /// 견준다.
+///
+/// **자리를 푸는 자는 이 셋이다**(moai-i7b6). 통째로 푸는 이것, 글자로만 접는 [`lexical`], 그리고
+/// 아직 있는 윗자리까지만 푸는 [`real_prefix`]. 아직 없는 파일을 판정하는 자리는 셋째를 쓴다 —
+/// 이것은 거기서 실패해 준 철자를 그대로 돌려준다.
 pub(crate) fn real(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
+/// (훅은 이제 만들 파일을 판정한다), 접는 값이 얻는 값보다 크면 안 된다(시간대 이름 하나).
+///
+/// **뿌리 위로는 못 올라간다**(`/..` 은 `/`). 이 한 줄이 빠진 판은 [`real`] 의 짝인 판정이
+/// 조용히 뒤집힌다 — `/../repo/src/x.rs` 가 `repo/src/x.rs` 라는 **상대** 경로로 접혀
+/// `strip_prefix(root)` 가 빗나가고, 훅의 규칙 2 는 그것을 저장소 밖으로 읽어 지나간다.
+///
+/// **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라진다(`a/../../b` 는
+/// `b`) — 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다. 지금 부르는 셋이 다 그렇게 한다.
+///
+/// **세 벌이 저마다 적혀 있던 것을 모았다**(moai-i7b6) — `hook::resolve` 의 속, `user_config` 의
+/// `lexical`, `tz` 의 `flatten`. 뿌리 막음을 든 것은 셋 가운데 하나뿐이었다.
+pub(crate) fn lexical(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(out.components().next_back(), None | Some(Component::RootDir | Component::Prefix(_))) {
+                    out.pop();
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// **아직 있는 가장 깊은 조상을 풀고 남은 조각을 그대로 붙인다.** 못 풀면 받은 철자 그대로다
+/// ([`real`] 과 같은 쪽 — 자리를 못 고르는 것보다 받은 철자가 낫다).
+///
+/// [`real`] 이 통째로 `canonicalize` 하는 것과 갈리는 자리는 **없는 파일**이다. 통째 풀기는 거기서
+/// 실패해 준 철자를 그대로 돌려주는데, 조상에 링크가 있으면(`TMPDIR` 이 링크인 기계, macOS 의
+/// `/tmp`·`/var`, 링크로 건 프로젝트) 그 철자는 이미 풀린 철자와 안 맞는다. 그래서 새로 만드는
+/// 파일과 이미 있는 파일이 서로 다른 답을 받는다 — 훅의 규칙 2 는 만드는 쪽에서만 꺼지고, 등록
+/// 목록에서 빼는 길은 사라진 디렉터리를 못 찾는다.
+///
+/// **`..` 이 없는 경로를 받는다**([`lexical`] 을 먼저 지난다). 남은 조각에 `..` 이 있으면 링크를
+/// 푼 뒤의 뜻이 달라진다.
+///
+/// **두 벌이던 것을 모았다**(moai-i7b6) — `hook::settled` 와 `user_config::real_prefix` 가 같은
+/// 알고리즘을 저마다 적고 있었다(리뷰 moai-1upp.nwq 가 두 벌을 돌려 모든 표본에서 같은 답을 봤다).
+pub(crate) fn real_prefix(p: &Path) -> PathBuf {
+    for head in p.ancestors() {
+        if let Ok(real) = std::fs::canonicalize(head) {
+            // **떼어 내기는 실패하지 않는다** — `head` 는 `p` 의 조상이다. 이것을 `if let` 으로 받아
+            // 넘기면 못 뗀 자리에서 한 칸 더 짧은 조상으로 내려가, 엉뚱한 윗자리로 푼 경로를 아무 말
+            // 없이 답으로 낸다. 남은 조각이 비면 `join` 이 끝에 가름선만 붙이는데, `Path` 의 견주기와
+            // `strip_prefix` 는 조각으로 도니 두 쪽 다 같은 답이다.
+            return real.join(p.strip_prefix(head).expect("조상에서 떼어 낸다"));
+        }
+    }
+    p.to_path_buf()
 }
 
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
@@ -1588,6 +1648,42 @@ mod tests {
     use super::*;
     use crate::model::{Kind, Status};
     use crate::scratch::Scratch;
+
+    /// **글자로만 접는다** — 파일 시스템을 안 본다. 셋이 저마다 적고 있던 것을 여기로 모았으니
+    /// (`hook::resolve`·`user_config::spellings`·`tz::name_under`), 재는 자도 여기 하나다.
+    ///
+    /// **뿌리 막음이 이 시험의 값이다.** 셋 가운데 하나만 들고 있었고, 안 든 쪽에서는
+    /// `/../repo/x` 가 상대 경로로 접혀 `strip_prefix` 가 빗나갔다(훅의 규칙 2 가 새던 자리,
+    /// `a_dotdot_path_lands_where_it_really_is`).
+    #[test]
+    fn folding_dots_never_climbs_past_the_root() {
+        assert_eq!(lexical(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+        assert_eq!(lexical(Path::new("/..")), PathBuf::from("/"));
+        // **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라지므로
+        // (`a/../../b` 는 `../b` 가 아니라 `b`), 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다.
+        assert_eq!(lexical(Path::new("a/../../b")), PathBuf::from("b"));
+    }
+
+    /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는
+    /// 파일에서 실패해 준 철자가 그대로 나오고, 조상이 링크면 그 철자는 풀린 철자와 안 맞는다 —
+    /// 훅의 규칙 2 가 **만드는 쪽에서만** 꺼지던 자리다.
+    #[cfg(unix)]
+    #[test]
+    fn the_deepest_living_ancestor_is_the_one_that_resolves() {
+        let s = Scratch::new("store-real-prefix");
+        let real = s.join("real");
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        std::os::unix::fs::symlink(&real, s.join("link")).unwrap();
+        let here = std::fs::canonicalize(&real).unwrap();
+
+        assert_eq!(real_prefix(&s.join("link/src")), here.join("src"));
+        // 아직 없는 파일도 같은 자리다.
+        assert_eq!(real_prefix(&s.join("link/src/새파일.rs")), here.join("src/새파일.rs"));
+        // 조상이 하나도 안 풀리면 받은 철자 그대로다 — 자리를 못 고르는 것보다 낫다(`real` 과
+        // 같은 쪽). 절대 경로에서는 뿌리가 늘 풀리므로 그 판은 상대 철자에서만 선다.
+        assert_eq!(real_prefix(Path::new("없는자리/x")), PathBuf::from("없는자리/x"));
+    }
 
     /// `<자리>/a/b/c` 를 만든다. 위로 찾기를 재는 시험들이 함께 쓴다.
     fn tree(name: &str) -> Scratch {
