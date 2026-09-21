@@ -328,7 +328,7 @@ pub struct Marks {
 /// ([`crate::user_config::read`] 와 같은 자다).
 ///
 /// **낱말이 아닌 줄 하나는 못 든 것이 아니다.** 그 줄만 건너뛰고 나머지는 그대로 낸다([`read_table`]) —
-/// `trouble` 은 안 선다. 옛 `[read]` 도 같은 자로 읽힌다(`look_problems` 가 `trouble` 을 안 세우는 그것).
+/// `trouble` 은 안 선다. 옛 `[read]` 도 같은 자로 읽힌다(`Registry::read_problems` 가 `trouble` 을 안 세우는 그것).
 ///
 /// **옛 `[read]` 를 겹쳐 본다**(사용자 결정 3, 2026-09-19). 옮기지 않고 읽기만 한다 — 옛 줄을 건드리면
 /// 그것은 설정이 아니라 마이그레이션이고, 그 사이 도는 옛 바이너리나 옆 세션이 읽음을 잃는다. 겹칠
@@ -527,28 +527,55 @@ fn scan(root: &Table, mut on: impl FnMut(&str, &str)) -> Vec<Skipped> {
 ///
 /// 그래서 `f` 는 **두 번 돌 수 있다** — 재 보기 한 번, 락 안의 진짜 쓰기 한 번. 준 [`Sheet`] 밖에
 /// 자국을 남기면 안 된다.
+///
+/// **멈춘 까닭의 말은 멈췄을 때만, 락을 놓은 뒤에 묻는다**(moai-rtji 리뷰). 그래서 `lang` 은 값이 아니라
+/// 묻는 길이다. 값으로 받던 판은 러스트가 부름 앞에서 그것을 셈해, 아무것도 안 거절하는 판(= 거의 모든
+/// 판이고 `moai read --json` 으로 끝나는 길까지다)에도 사용자 설정을 열어 파싱했다 — `cmd::open_repo` 가
+/// 적어 둔 덫이고, `mv`·`edit` 의 "말은 거절할 때만 푼다" 가 막던 것이다. 락 안에서 물으면 그 설정이
+/// FIFO 일 때 락을 쥔 채 영영 멈추므로(moai-hom6 의 두 리뷰), 몸통([`write_sheet`])은 멈춘 까닭을 자료로
+/// 들고 나오고 여기서 락을 놓은 뒤에 편다.
 pub fn update<T>(
     config: &Path,
     root: &Path,
-    lang: crate::i18n::Lang,
+    lang: impl FnOnce() -> crate::i18n::Lang,
     f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>,
 ) -> R<Wrote<T>> {
     // **자리는 락 밖에서 고른다.** `canonicalize` 는 락이 필요 없는데, 안에서 하면 쓰는 이마다 그만큼
     // 더 기다린다(리뷰). 푼 뿌리를 함께 받아 문지기와 [`Sheet::claim`] 에 그대로 넘긴다 — 여기서 다시
     // 풀면 이름을 고른 값과 견주는 값이 갈린다.
     let place = place_of(config, root);
+    let at = place.at.clone();
+    write_sheet(place, f).map_err(|stop| match stop {
+        Stop::Failed(e) => e,
+        // **파일은 여기서 붙인다** — 자리를 아는 것이 이 함수 하나라서다([`crate::user_config::fail`] 과
+        // 같은 자리다). 부르는 쪽마다 붙이게 두면 붙인 곳과 잊은 곳이 갈린다.
+        Stop::Refused(why) => Fail::coded(crate::view::sheet_refusal(lang(), &at, &why), crate::fail::code::BROKEN),
+    })
+}
+
+/// [`write_sheet`] 가 멈춘 까닭 — 락을 쥔 자리는 말을 모르므로 거절은 자료로 들고 나온다.
+enum Stop {
+    /// io·락이 낸 것 — 이미 글이다.
+    Failed(Fail),
+    /// 손으로 고칠 때까지 안 쓴다 — 글은 [`update`] 가 락을 놓은 뒤에 편다.
+    Refused(SheetRefusal),
+}
+
+impl From<Fail> for Stop {
+    fn from(e: Fail) -> Stop {
+        Stop::Failed(e)
+    }
+}
+
+/// [`update`] 의 몸통 — 재 보고, 락을 잡고, 읽고, 고치고, 바뀌었으면 쓴다. **돌아올 때 락을 놓는다** — 그
+/// 뒤에야 [`update`] 가 멈춘 까닭의 말을 묻는다.
+fn write_sheet<T>(place: Place, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>) -> Result<Wrote<T>, Stop> {
     let (path, root, past, mut problems) = (place.at, place.root, place.past, place.problems);
     // **대기 자리는 있을 때만 든다** — 있는가가 곧 "아직 안 합쳤다" 다([`Place::pending`]).
     let pending = place.pending.filter(|p| p.exists());
     let dir = dir_of(&path);
     let err = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
-    // **멈춘 까닭은 여기서 한 번 편다**(moai-rtji) — 자리를 아는 것이 이 함수 하나라 파일도 여기서 붙인다
-    // ([`crate::user_config::fail`] 과 같은 자리다). 말은 **부르는 쪽이 락 밖에서 이미 푼 것**을 받는다:
-    // 여기서 물으면 사용자 설정을 락을 쥔 채 열게 되고, 그 설정이 FIFO 면 락을 쥔 채 영영 멈춘다
-    // (moai-hom6 의 두 리뷰가 `check_from`·`open_repo(lang)` 에서 잰 그 멈춤이다).
-    let refused =
-        |why: SheetRefusal| Fail::coded(crate::view::sheet_refusal(lang, &path, &why), crate::fail::code::BROKEN);
-    let called = |sheet: &mut Sheet| f(sheet).map_err(refused);
+    let called = |sheet: &mut Sheet| f(sheet).map_err(Stop::Refused);
     // **짓기 전에 재 본다**(moai-dyb7). 없는 파일은 빈 것으로 들고, 옛 자리도 그대로 겹쳐 본다 — 락 안의
     // 차례와 **같은 것을 재야** 한다. 빼먹으면 옛 자리에만 있는 읽음이 합쳐질 판을 "쓸 것이 없다" 로 읽어,
     // 합치기가 다음 쓰기까지 미뤄진다.
@@ -556,14 +583,14 @@ pub fn update<T>(
     // 그 뒤에 옆에서 파일이 서도 잃는 것은 없다 — 여기서 "쓸 것이 없다" 가 나오려면 빈 표에 대고도 적을
     // 것이 없었다는 뜻이고, 그것은 어느 표에 대고도 적을 것이 없다.
     if !path.exists() {
-        let mut trial = Sheet::parse("").map_err(|said| refused(SheetRefusal::Unparsable { said }))?;
+        let mut trial = Sheet::parse("").map_err(|said| Stop::Refused(SheetRefusal::Unparsable { said }))?;
         // 재 보기의 까닭은 **돌아설 때만** 싣는다 — 안 돌아서면 락 안의 합치기가 같은 줄을 다시 내므로,
         // 둘 다 실으면 한 판의 한 탈이 두 줄로 선다.
         let mut why = Vec::new();
         // 락 안의 차례와 **같은 것을 잰다** — 파일이 아직 없으니 옛 자리도 다 든다.
         let mut trying: Vec<&Path> = pending.as_deref().into_iter().collect();
         trying.extend(past.iter().map(PathBuf::as_path));
-        merge_past(&mut trial, &trying, &root, &mut why).map_err(refused)?;
+        merge_past(&mut trial, &trying, &root, &mut why).map_err(Stop::Refused)?;
         let out = called(&mut trial)?;
         if !trial.changed() {
             problems.append(&mut why);
@@ -592,14 +619,14 @@ pub fn update<T>(
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(err(e)),
+        Err(e) => return Err(err(e).into()),
     };
     let fresh_sheet = src.is_empty();
-    let mut sheet = Sheet::parse(&src).map_err(|said| refused(SheetRefusal::Unparsable { said }))?;
+    let mut sheet = Sheet::parse(&src).map_err(|said| Stop::Refused(SheetRefusal::Unparsable { said }))?;
     // **남의 읽음 위에 쓰지 않는다** — 해시가 부딪혔다. 재어 본 일이 없는 만큼 드문 자리지만, 조용히
     // 섞는 것이 이 에픽이 고치는 바로 그 해라 멈춘다.
     if !sheet.owns(&root) {
-        return Err(refused(SheetRefusal::NotOurs { root: root.clone() }));
+        return Err(Stop::Refused(SheetRefusal::NotOurs { root: root.clone() }));
     }
     // **손으로 고칠 거절에는 어느 파일인지 붙인다** — [`crate::user_config::update`] 와 같은 자리이고 같은
     // 까닭이다(리뷰). 이 파일의 이름은 뿌리의 해시라 사람이 짐작할 수 없어, 붙이지 않으면 "손으로
@@ -632,14 +659,14 @@ pub fn update<T>(
         None => None,
     };
     if let Some((_, spool)) = &held {
-        merge_past(&mut sheet, &[spool.as_path()], &root, &mut problems).map_err(refused)?;
+        merge_past(&mut sheet, &[spool.as_path()], &root, &mut problems).map_err(Stop::Refused)?;
     }
     // **옛 자리는 처음 짓는 파일일 때만 합친다**(리뷰 13). 읽기도 그때만 보므로([`overlay_place`])
     // 합치는 자리는 여기 하나다 — 옛 파일은 그대로 두니 지우는 것도 옮기는 것도 아니다. 겹치는
     // 차례는 그대로다: 여기 이미 있는 id 는 안 건드린다.
     if fresh_sheet {
         merge_past(&mut sheet, &past.iter().map(PathBuf::as_path).collect::<Vec<_>>(), &root, &mut problems)
-            .map_err(refused)?;
+            .map_err(Stop::Refused)?;
     }
     let out = called(&mut sheet)?;
     // **바뀐 것이 없으면 파일을 안 짓는다.** 어느 프로젝트의 것인지 적는 줄([`Sheet::claim`])도 그때
@@ -904,6 +931,13 @@ mod tests {
         pairs.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect()
     }
 
+    /// [`update`] 를 한국어로 부른다 — **여기 시험은 멈춘 글을 안 견준다**(코드와 갈래만 본다). 말을 받는
+    /// 자리가 바뀌어도 쉰여덟 부름이 따라 움직이지 않게 한 자리에 둔다(`user_config` 시험의 `upd` 와 같은
+    /// 까닭이다). 글은 `view` 의 시험이 말마다 잰다.
+    fn upd<T>(config: &Path, root: &Path, f: impl Fn(&mut Sheet) -> Result<T, SheetRefusal>) -> R<Wrote<T>> {
+        update(config, root, || crate::i18n::Lang::Ko, f)
+    }
+
     /// **프로젝트마다 제 파일이다**(moai-omx7) — 이름이 같은 디렉터리 둘이 같은 id 를 써도 서로의
     /// 읽음을 안 민다. 그 섞임이 이 에픽을 연 까닭이다.
     #[test]
@@ -912,8 +946,8 @@ mod tests {
         let cfg = s.join("config.toml");
         let (one, two) = (s.join("a/api"), s.join("b/api"));
 
-        update(&cfg, &one, crate::i18n::Lang::Ko, |sheet| sheet.mark(&marks(&[("argos-0001", "A")]))).unwrap();
-        update(&cfg, &two, crate::i18n::Lang::Ko, |sheet| sheet.mark(&marks(&[("argos-0001", "B")]))).unwrap();
+        upd(&cfg, &one, |sheet| sheet.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &two, |sheet| sheet.mark(&marks(&[("argos-0001", "B")]))).unwrap();
 
         assert_eq!(read(&cfg, &one, &BTreeMap::new()).seen, marks(&[("argos-0001", "A")]));
         assert_eq!(read(&cfg, &two, &BTreeMap::new()).seen, marks(&[("argos-0001", "B")]));
@@ -934,7 +968,7 @@ mod tests {
         let spellings = [root.clone(), s.join("proj/"), s.join("proj/../proj"), real.clone()];
         for (n, spelling) in spellings.iter().enumerate() {
             let id = format!("argos-{n:04}");
-            update(&cfg, spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
+            upd(&cfg, spelling, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
             assert_eq!(
                 place_of(&cfg, spelling).at,
                 place_of(&cfg, &real).at,
@@ -979,7 +1013,7 @@ mod tests {
 
         // 적을 때는 새 자리에만 간다 — 옛 파일은 한 바이트도 안 바뀐다. **첫 쓰기가 옛 표를 여기로
         // 합친다**(리뷰 13) — 그래야 걷기가 지금 자리만 줄여도 걷은 id 가 다음 읽기에 안 되살아난다.
-        update(&cfg, &slashed, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "새것")]))).unwrap();
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0002", "새것")]))).unwrap();
         assert_eq!(std::fs::read_to_string(&old).unwrap(), before, "옛 철자 파일에 썼다");
         let now = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(now.contains("argos-0002") && now.contains("argos-0001"), "옛 표를 안 합쳤다 — {now}");
@@ -991,8 +1025,7 @@ mod tests {
         assert_eq!(seen.len(), 2);
 
         // 같은 id 를 다시 적으면 **지금 자리가 이긴다**.
-        update(&cfg, &slashed, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "새것이 이긴다")])))
-            .unwrap();
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("argos-0001", "새것이 이긴다")]))).unwrap();
         assert_eq!(
             read(&cfg, &slashed, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str),
             Some("새것이 이긴다")
@@ -1016,7 +1049,7 @@ mod tests {
             format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n\"b\" = \"옛 철자\"\n", slashed.display().to_string()),
         )
         .unwrap();
-        update(&cfg, &slashed, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "지금 자리")]))).unwrap();
+        upd(&cfg, &slashed, |sh| sh.mark(&marks(&[("a", "지금 자리")]))).unwrap();
         let legacy = marks(&[("a", "옛 표"), ("b", "옛 표"), ("c", "옛 표")]);
 
         let seen = read(&cfg, &slashed, &legacy).seen;
@@ -1086,7 +1119,7 @@ mod tests {
         std::os::unix::fs::symlink("고리", s.join("고리")).unwrap();
         let through = s.join("고리/밑");
 
-        let wrote = update(&cfg, &through, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "A")]))).unwrap();
+        let wrote = upd(&cfg, &through, |sh| sh.mark(&marks(&[("a", "A")]))).unwrap();
         assert_eq!(wrote.problems.len(), 1, "쓰는 길이 까닭을 버렸다 — {:?}", wrote.problems);
         assert!(matches!(wrote.problems[0], SheetTrouble::Unsettled { .. }), "{:?}", wrote.problems[0]);
         assert_eq!(wrote.value, vec!["a".to_string()], "말만 하고 안 적었다 — {:?}", wrote.value);
@@ -1094,7 +1127,7 @@ mod tests {
         // 성한 자리는 조용하다 — 빈 `problems` 가 정상이다.
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let wrote = update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        let wrote = upd(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert!(wrote.problems.is_empty(), "성한 자리를 탈로 댔다 — {:?}", wrote.problems);
     }
 
@@ -1116,7 +1149,7 @@ mod tests {
         std::fs::create_dir_all(dir_of(&at)).unwrap();
         std::fs::write(&at, "[read]\n\"a-0002\" = 3\n").unwrap();
 
-        let wrote = update(&cfg, &through, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
+        let wrote = upd(&cfg, &through, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
         assert_eq!(wrote.problems.len(), 2, "둘 다 안 댔다 — {:?}", wrote.problems);
         assert!(
             matches!(&wrote.problems[0], SheetTrouble::Skipped { why: Skipped::NotAStamp { id, .. }, .. } if id == "a-0002"),
@@ -1135,7 +1168,8 @@ mod tests {
     /// 손으로 적은 `"a-0002" = 3` 한 줄이 있으면 `moai read --all` 은 그것을 대는데 `moai read <id>`
     /// 는 조용했고, 그 줄은 견줌에서도 빠져 쓰는 길이 "이미 읽었는가" 를 그 줄 없이 쟀다.
     ///
-    /// **재는 자는 한 자리다** — 두 길의 글을 글자째 견준다. 한쪽만 고치면 여기가 붉어진다.
+    /// **재는 자는 한 자리다** — 두 길이 낸 자료를 통째로 견준다. 한쪽만 고치면 여기가 붉어진다. 그 자료가
+    /// 글로 설 때 줄 이름을 대는지는 `view` 의 시험(`the_read_sheet_texts_name_the_line_in_every_language`)이 잰다.
     #[test]
     fn writing_says_which_line_it_skipped() {
         let s = Scratch::new("read-marks-skipped");
@@ -1146,7 +1180,7 @@ mod tests {
         std::fs::create_dir_all(dir_of(&at)).unwrap();
         std::fs::write(&at, "[read]\n\"a-0002\" = 3\n\"a-0003\" = \"본 때\"\n").unwrap();
 
-        let wrote = update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
+        let wrote = upd(&cfg, &root, |sh| sh.mark(&marks(&[("a-0001", "A")]))).unwrap();
         assert_eq!(wrote.value, vec!["a-0001".to_string()], "말만 하고 안 적었다 — {:?}", wrote.value);
         assert_eq!(wrote.problems.len(), 1, "쓰는 길이 건너뛴 줄을 버렸다 — {:?}", wrote.problems);
         assert!(
@@ -1164,7 +1198,7 @@ mod tests {
         // 성한 표는 조용하다 — 빈 `problems` 가 정상이다.
         let clean = s.join("proj2");
         std::fs::create_dir_all(&clean).unwrap();
-        let wrote = update(&cfg, &clean, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        let wrote = upd(&cfg, &clean, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert!(wrote.problems.is_empty(), "성한 표를 탈로 댔다 — {:?}", wrote.problems);
     }
 
@@ -1198,14 +1232,13 @@ mod tests {
         assert_ne!(fell, sheet_at(dir_of(&cfg), &spelling), "대기 자리가 옛 철자 파일과 한 이름이다");
 
         // 여러 달치 도장이 이미 선 사람.
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "먼저")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a", "먼저")]))).unwrap();
         assert!(at.exists(), "성한 판이 제 자리에 안 적었다");
 
         // 뿌리 윗자리가 잠깐 막힌 한 판 — 자리를 못 풀어 도장이 받은 철자 파일로 간다.
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
-        let wrote =
-            update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("b", "떨어진 판")]))).unwrap();
+        let wrote = upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("b", "떨어진 판")]))).unwrap();
         assert_eq!(wrote.problems.len(), 1, "떨어진 것을 안 댔다 — {:?}", wrote.problems);
         assert!(fell.exists(), "떨어진 판이 대기 자리에 안 적었다");
         // **읽기는 그 사이에도 그 도장을 든다** — 닫는 것은 쓰기라, 화면이 [NEW] 로 서 있지 않는다.
@@ -1214,7 +1247,7 @@ mod tests {
         // 자리가 다시 풀린 판이 그것을 합치고 **지운다** — 지금 자리 파일이 이미 있어도.
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("c", "나중")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("c", "나중")]))).unwrap();
         assert!(!fell.exists(), "합쳤는데 대기 자리가 남았다");
         let seen = read(&cfg, &spelling, &BTreeMap::new()).seen;
         assert_eq!(seen.get("b").map(String::as_str), Some("떨어진 판"), "떨어진 도장을 잃었다 — {seen:?}");
@@ -1222,25 +1255,21 @@ mod tests {
 
         // **합친 뒤에는 안 연다** — 걷은 id 가 되살아나던 자리(리뷰 7·13)는 그대로 닫혀 있다.
         let keep = BTreeSet::from(["c"]);
-        assert_eq!(
-            update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| Ok(sh.prune(&keep))).unwrap().value,
-            2,
-            "안 걷었다"
-        );
+        assert_eq!(upd(&cfg, &spelling, |sh| Ok(sh.prune(&keep))).unwrap().value, 2, "안 걷었다");
         assert_eq!(read(&cfg, &spelling, &BTreeMap::new()).seen.len(), 1, "걷은 도장이 대기 자리에서 되살아났다");
 
         // **푼 철자로 부른 쓰기는 대기 자리를 닫지 않는다**(리뷰 3). 한때 가르는 자가 파일의 때라,
         // 그 한 번이 창을 영영 닫아 떨어진 도장이 그대로 남았다.
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("d", "또 떨어진 판")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("d", "또 떨어진 판")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
         let real = std::fs::canonicalize(&spelling).unwrap();
         assert_ne!(real.as_os_str(), spelling.as_os_str(), "시험의 전제 — 푼 철자가 받은 철자와 다르다");
-        update(&cfg, &real, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("e", "푼 철자로")]))).unwrap();
+        upd(&cfg, &real, |sh| sh.mark(&marks(&[("e", "푼 철자로")]))).unwrap();
         assert!(fell.exists(), "푼 철자로 부른 쓰기가 대기 자리를 닫았다");
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("f", "그 뒤")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("f", "그 뒤")]))).unwrap();
         let seen = read(&cfg, &spelling, &BTreeMap::new()).seen;
         assert_eq!(seen.get("d").map(String::as_str), Some("또 떨어진 판"), "되풀이해 떨어진 도장을 잃었다 — {seen:?}");
         assert!(!fell.exists(), "합쳤는데 대기 자리가 남았다");
@@ -1276,16 +1305,15 @@ mod tests {
         };
 
         // 지금 자리에 `a` 의 **새 도장**이 선다.
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "새 때")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a", "새 때")]))).unwrap();
         assert_eq!(read(&cfg, &spelling, &BTreeMap::new()).seen.get("a").map(String::as_str), Some("새 때"));
 
         // 떨어진 판이 같은 `a` 를 **낡은 도장**으로, 그리고 새 `b` 를 대기 자리에 적는다.
         block();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "낡은 때"), ("b", "떨어진 판")])))
-            .unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a", "낡은 때"), ("b", "떨어진 판")]))).unwrap();
         assert!(fell.exists(), "떨어진 판이 대기 자리에 안 적었다");
         clear();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("c", "또")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("c", "또")]))).unwrap();
 
         let seen = read(&cfg, &spelling, &BTreeMap::new()).seen;
         assert_eq!(seen.get("a").map(String::as_str), Some("새 때"), "대기 자리가 새 도장을 되돌렸다 — {seen:?}");
@@ -1314,11 +1342,11 @@ mod tests {
         let at = place_of(&cfg, &spelling).at;
 
         // 지금 자리가 먼저 선다 — 안 그러면 첫 성한 쓰기가 대기 자리를 여기로 합쳐 점 키 자리에 때가 앉는다.
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
         // 떨어진 판이 `a-0002` 를 때로 적는다.
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a-0002", "떨어진 판")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a-0002", "떨어진 판")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
 
@@ -1327,7 +1355,7 @@ mod tests {
         std::fs::write(&at, &src).unwrap();
         assert!(std::fs::read_to_string(&at).unwrap().contains("a-0002.rv"), "시험의 전제 — 점 키를 못 심었다");
 
-        let wrote = update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("y", "다음")])));
+        let wrote = upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("y", "다음")])));
         assert!(wrote.is_ok(), "점 키 하나가 쓰기를 막았다 — {:?}", wrote.err());
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("a-0002.rv = \"손으로\""), "사람이 적은 줄을 덮었다 — {now}");
@@ -1352,10 +1380,10 @@ mod tests {
         let spelling = s.join("문/proj/../proj");
         let at = place_of(&cfg, &spelling).at;
 
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
-        update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("a", "떨어진 판")]))).unwrap();
+        upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("a", "떨어진 판")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
 
@@ -1364,11 +1392,11 @@ mod tests {
         std::fs::write(&at, format!("{path}\nread = 3\n")).unwrap();
 
         // 적을 것이 없는 판은 그대로 지나간다 — 옛 자리를 합치려다 거절로 끝나지 않는다.
-        let quiet = update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&BTreeMap::new()));
+        let quiet = upd(&cfg, &spelling, |sh| sh.mark(&BTreeMap::new()));
         assert!(quiet.is_ok(), "적을 것 없는 쓰기가 남의 줄에 막혔다 — {:?}", quiet.err());
         assert!(std::fs::read_to_string(&at).unwrap().contains("read = 3"), "사람이 적은 줄을 덮었다");
         // 부른 쪽의 제 id 는 그대로 거절당한다 — 그것이 지금 쓰는 줄이다.
-        let mine = update(&cfg, &spelling, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("y", "내가 쓰는 줄")])));
+        let mine = upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("y", "내가 쓰는 줄")])));
         assert!(mine.is_err(), "깨진 `[read]` 에 제 줄을 적었다");
     }
 
@@ -1389,7 +1417,7 @@ mod tests {
         let got = read(&cfg, &root, &BTreeMap::new());
         assert_eq!(got.trouble, None, "{:?}", got.problems);
         assert_eq!(got.seen.get("a").map(String::as_str), Some("A"), "제 파일을 남의 것으로 읽었다");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("b", "B")]))).unwrap();
         assert_eq!(
             read(&cfg, &root, &BTreeMap::new()).seen.get("b").map(String::as_str),
             Some("B"),
@@ -1413,7 +1441,7 @@ mod tests {
         let settled = std::fs::canonicalize(&link).unwrap();
 
         // 링크 철자로 적어도 파일은 푼 자리의 것 하나다.
-        update(&cfg, &link, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &link, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         let at = place_of(&cfg, &link).at;
         assert_eq!(at, place_of(&cfg, &real).at, "링크와 실제 자리가 딴 파일로 갔다");
         let text = std::fs::read_to_string(&at).unwrap();
@@ -1424,7 +1452,7 @@ mod tests {
         let got = read(&cfg, &real, &BTreeMap::new());
         assert_eq!(got.trouble, None, "제가 지은 파일을 남의 것으로 읽었다 — {:?}", got.problems);
         assert_eq!(got.seen.get("argos-0001").map(String::as_str), Some("A"));
-        update(&cfg, &real, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
+        upd(&cfg, &real, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
     }
 
     /// **읽음은 설정 철자가 가리키는 자리에 선다 — 링크를 따라가지 않는다**(moai-f5e3, 리뷰가 잰 것).
@@ -1449,7 +1477,7 @@ mod tests {
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
 
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         assert!(
             place_of(&cfg, &root).at.starts_with(&xdg),
             "읽음이 링크를 따라 나갔다 — {}",
@@ -1478,7 +1506,7 @@ mod tests {
         let s = Scratch::new("read-marks-legacy");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sheet| sheet.mark(&marks(&[("argos-0001", "새것")]))).unwrap();
+        upd(&cfg, &root, |sheet| sheet.mark(&marks(&[("argos-0001", "새것")]))).unwrap();
 
         let legacy = marks(&[("argos-0001", "옛것"), ("argos-0009", "옛것뿐")]);
         let Marks { seen, problems, trouble } = read(&cfg, &root, &legacy);
@@ -1495,10 +1523,10 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         let all = marks(&[("argos-0001", "A"), ("argos-0002", "B"), ("argos-0003", "C")]);
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sheet| sheet.mark(&all)).unwrap();
+        upd(&cfg, &root, |sheet| sheet.mark(&all)).unwrap();
 
         let known: BTreeSet<&str> = ["argos-0001", "argos-0003"].into_iter().collect();
-        let gone = update(&cfg, &root, crate::i18n::Lang::Ko, |sheet| Ok(sheet.prune(&known))).unwrap();
+        let gone = upd(&cfg, &root, |sheet| Ok(sheet.prune(&known))).unwrap();
         assert_eq!(gone.value, 1);
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0003", "C")]));
     }
@@ -1509,26 +1537,15 @@ mod tests {
         let s = Scratch::new("read-marks-idempotent");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        assert_eq!(
-            update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value,
-            ["argos-0001"]
-        );
+        assert_eq!(upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value, ["argos-0001"]);
         let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
-        assert!(
-            update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")])))
-                .unwrap()
-                .value
-                .is_empty()
-        );
+        assert!(upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap().value.is_empty());
         assert_eq!(
             std::fs::read_to_string(place_of(&cfg, &root).at).unwrap(),
             was,
             "같은 때를 다시 적어 파일이 바뀌었다"
         );
-        assert_eq!(
-            update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap().value,
-            ["argos-0001"]
-        );
+        assert_eq!(upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap().value, ["argos-0001"]);
     }
 
     /// **`.` 이 든 자식 id 는 따옴표에 싼 낱말 키로 적는다**(moai-j038.vna) — 맨 키로 적히면 다음 읽기가
@@ -1539,7 +1556,7 @@ mod tests {
         let s = Scratch::new("read-marks-dotted");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0003.rv", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0003.rv", "A")]))).unwrap();
         let text = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         assert!(text.contains("\"argos-0003.rv\""), "맨 키로 적었다 — 다음 읽기가 못 찾는다\n{text}");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0003.rv", "A")]));
@@ -1560,7 +1577,7 @@ mod tests {
             root.display().to_string()
         );
         std::fs::write(&at, &src).unwrap();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "B")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("# 손으로 적은 까닭"), "키 위의 주석이 사라졌다\n{now}");
         assert!(now.contains("\"argos-0001\" = \"B\"  # 뒤 주석"), "뒤 주석이나 따옴표가 사라졌다\n{now}");
@@ -1576,7 +1593,7 @@ mod tests {
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "# 이 파일에 적어 둔 까닭\n").unwrap();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.starts_with("# 이 파일에 적어 둔 까닭\n"), "머리 주석이 표 밑으로 밀렸다\n{now}");
     }
@@ -1592,7 +1609,7 @@ mod tests {
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, format!("path = {:?}\r\n\r\n[read]\r\n\"argos-0001\" = \"A\"", root.display().to_string()))
             .unwrap();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(!now.replace("\r\n", "").contains('\n'), "줄 끝이 LF 로 접혔다 — {now:?}");
         assert!(!now.ends_with('\n'), "없던 끝 줄바꿈을 더했다 — {now:?}");
@@ -1609,7 +1626,7 @@ mod tests {
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         std::fs::write(&at, "path = 3\n\n[read]\n\"argos-0001\" = \"A\"\n").unwrap();
         assert!(read(&cfg, &root, &BTreeMap::new()).seen.is_empty(), "남의 읽음을 들었다");
-        let e = update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
+        let e = upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
         assert_eq!(e.code, crate::fail::code::BROKEN, "{e}");
     }
 
@@ -1623,9 +1640,8 @@ mod tests {
         let s = Scratch::new("read-marks-nonutf8");
         let cfg = s.join("config.toml");
         let root = s.path().join(std::ffi::OsStr::from_bytes(b"re\xffpo"));
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")])))
-            .expect("제가 지은 파일을 남의 것으로 읽었다");
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).expect("제가 지은 파일을 남의 것으로 읽었다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0002", "B")]));
     }
 
@@ -1642,11 +1658,7 @@ mod tests {
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = BTreeSet::new();
-        assert_eq!(
-            update(&cfg, &root, crate::i18n::Lang::Ko, |sh| Ok(sh.prune(&known))).unwrap().value,
-            0,
-            "때가 아닌 자리를 걷었다"
-        );
+        assert_eq!(upd(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 0, "때가 아닌 자리를 걷었다");
         assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "걷을 것이 없는데 파일을 고쳤다");
     }
 
@@ -1666,7 +1678,7 @@ mod tests {
         );
         std::fs::write(&at, &src).unwrap();
         let known: BTreeSet<&str> = ["argos-0002"].into_iter().collect();
-        assert_eq!(update(&cfg, &root, crate::i18n::Lang::Ko, |sh| Ok(sh.prune(&known))).unwrap().value, 1);
+        assert_eq!(upd(&cfg, &root, |sh| Ok(sh.prune(&known))).unwrap().value, 1);
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("# 이 파일에 대해 적어 둔 말"), "걷기가 빈 줄 너머의 주석을 데려갔다\n{now}");
         assert!(!now.contains("argos-0001"), "걷을 것을 안 걷었다\n{now}");
@@ -1686,7 +1698,7 @@ mod tests {
             root.display().to_string()
         );
         std::fs::write(&at, &src).unwrap();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap();
         let now = std::fs::read_to_string(&at).unwrap();
         assert!(now.contains("# 손으로 적은 줄"), "{now}");
         assert!(now.contains("note = \"나중 바이너리의 키\""), "{now}");
@@ -1710,7 +1722,7 @@ mod tests {
         assert_eq!(problems.len(), 1, "{problems:?}");
         // 사람이 고쳐야 같아지는 탈이다 — 다시 읽어도 같으니 `Broken` 이다(`Reading` 이면 걸음마다 다시 읽는다).
         assert_eq!(trouble, Some(crate::user_config::Trouble::Broken), "{trouble:?}");
-        let e = update(&cfg, &mine, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
+        let e = upd(&cfg, &mine, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
         assert_eq!(e.code, crate::fail::code::BROKEN, "{e}");
         assert!(std::fs::read_to_string(&at).unwrap().contains("argos-0001"), "남의 파일을 덮었다");
     }
@@ -1756,7 +1768,7 @@ mod tests {
         let s = Scratch::new("read-marks-eacces");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         let at = place_of(&cfg, &root).at;
         std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
         let got = read(&cfg, &root, &BTreeMap::new());
@@ -1780,7 +1792,7 @@ mod tests {
         std::fs::write(&at, "[read\n\"argos-0001\" = ").unwrap();
         assert!(read(&cfg, &root, &BTreeMap::new()).seen.is_empty());
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).problems.len(), 1);
-        let e = update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap_err();
+        let e = upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap_err();
         assert_eq!(e.code, crate::fail::code::BROKEN, "{e}");
     }
 
@@ -1795,7 +1807,7 @@ mod tests {
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
         std::fs::write(&at, &src).unwrap();
-        let e = update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
+        let e = upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).unwrap_err();
         assert_eq!(e.code, crate::fail::code::BROKEN, "{e}");
         assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "거절하고도 파일을 고쳤다");
     }
@@ -1807,7 +1819,7 @@ mod tests {
         let s = Scratch::new("read-marks-empty");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&BTreeMap::new())).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&BTreeMap::new())).unwrap();
         let at = place_of(&cfg, &root).at;
         assert!(!at.exists(), "빈 쓰기가 파일을 지었다");
         // **락 파일과 디렉터리까지 센다**(moai-dyb7). `.toml` 만 보던 판은 프로젝트마다 쌓이는 0바이트
@@ -1816,7 +1828,7 @@ mod tests {
         assert!(!dir_of(&at).exists(), "빈 쓰기가 `read/` 를 지었다");
 
         // 쓸 것이 있으면 셋 다 선다 — 재 보기가 진짜 쓰기를 삼키지 않는다.
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         assert!(at.exists(), "쓸 것이 있는데 안 적었다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen.get("argos-0001").map(String::as_str), Some("A"));
     }
@@ -1836,7 +1848,7 @@ mod tests {
             .unwrap();
 
         // 적을 것은 없다 — 옛 자리의 한 줄만이 쓸 까닭이다.
-        update(&cfg, &slashed, crate::i18n::Lang::Ko, |sh| sh.mark(&BTreeMap::new())).unwrap();
+        upd(&cfg, &slashed, |sh| sh.mark(&BTreeMap::new())).unwrap();
         assert_eq!(
             read(&cfg, &slashed, &BTreeMap::new()).seen.get("a").map(String::as_str),
             Some("옛 철자"),
@@ -1858,7 +1870,7 @@ mod tests {
                 scope.spawn(move || {
                     for i in 0..each {
                         let id = format!("argos-{t}{i:02}");
-                        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
+                        upd(&cfg, &root, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
                     }
                 });
             }
@@ -1873,11 +1885,10 @@ mod tests {
         let s = Scratch::new("read-marks-idem-bytes");
         let cfg = s.join("config.toml");
         let root = s.join("proj");
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| sh.mark(&marks(&[("argos-0001", "A"), ("argos-0002", "B")])))
-            .unwrap();
+        upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A"), ("argos-0002", "B")]))).unwrap();
         let was = std::fs::read_to_string(place_of(&cfg, &root).at).unwrap();
         let known: BTreeSet<&str> = ["argos-0001", "argos-0002"].into_iter().collect();
-        update(&cfg, &root, crate::i18n::Lang::Ko, |sh| {
+        upd(&cfg, &root, |sh| {
             sh.mark(&marks(&[("argos-0001", "A")]))?;
             Ok(sh.prune(&known))
         })

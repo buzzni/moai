@@ -2023,7 +2023,7 @@ mod tests {
         a.user = Some("레이븐 (raven@example.com)".into());
         let seen: std::collections::BTreeMap<String, String> =
             [("argos-0001".to_string(), "2026-09-14T00:00:00Z".to_string())].into_iter().collect();
-        crate::read_marks::update(&cfg, &one, crate::i18n::Lang::Ko, |sh| sh.mark(&seen)).unwrap();
+        crate::read_marks::update(&cfg, &one, || crate::i18n::Lang::Ko, |sh| sh.mark(&seen)).unwrap();
 
         a.want_site(0);
         settle(&mut a);

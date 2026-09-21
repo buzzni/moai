@@ -41,15 +41,20 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         let me = crate::model::label(&me.name, Some(&me.email), crate::config::Naming::Full);
         // 적어 둔 읽음은 **여기서만** 든다 — 안 읽은 줄을 가르는 것은 `--all` 뿐이다. 읽음은 이 저장소의
         // 제 파일에 살고, 옛 `[read]` 는 겹쳐 본다(moai-omx7, 사용자 결정 2026-09-19).
-        // **설정은 [`super::Ctx::registry`] 로 읽는다**(리뷰) — 위에서 `writable_config(ctx)`
-        // 이 이미 그 문을 지나므로, 제 손으로 한 번 더 읽으면 한 명령이 같은 파일을 두 번 판다
-        // (moai-u8cs 가 걷어 낸 그것이고, `Ctx::registry` 의 머리글이 `cmd::read` 를 이름으로 댄다).
+        // **설정은 [`super::Ctx::registry`] 로 읽는다**(리뷰) — 한 번 판 것을 들고 있어, 같은 명령의 다른
+        // 자리(말을 고르는 `ctx.lang()`)가 다시 물어도 파일을 두 번 안 판다(moai-u8cs 가 걷어 낸 그것이고,
+        // `Ctx::registry` 의 머리글이 `cmd::read` 를 이름으로 댄다).
+        //
+        // **설정을 여는 것은 이 `--all` 길뿐이다.** 위의 `writable_config(ctx)` 는 자리만 풀고 파일은 안
+        // 연다 — 거기 든 `ctx.lang()` 은 자리를 못 찾았을 때만 돈다. 한때 이 주석이 "위에서 이미 그 문을
+        // 지난다" 고 적어, `moai read <id>` 에 말을 미리 묻는 한 줄을 더해도 값이 없는 것처럼 보였다 —
+        // 실제로는 설정을 안 열던 길에 파싱 한 번이 얹혀, 설정이 FIFO 면 그 명령이 멈췄다(moai-rtji 리뷰).
         let legacy = &ctx.registry().read;
         let marks = crate::read_marks::read(&path, &repo.root, legacy);
         // **못 든 까닭은 말한다**(리뷰) — 삼키던 판은 못 읽는 읽음 파일 하나로 `--all` 이 내게 온 것을
         // 통째로 "안 읽음" 으로 세어 도장을 다시 찍으면서, 왜 그랬는지를 어디에도 안 남겼다. 막지는
         // 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
-        say_why(&marks.problems, ctx.lang(), &mut said);
+        say_why(&marks.problems, ctx, &mut said);
         want.extend(crate::query::unread(&load.issues, &me, &marks.seen).into_iter().map(str::to_string));
     }
     // `-e <묶음>` 은 그 묶음 줄과 **그 밑에 그려진 것 전부** — 목록에서 `SPC m r` 이 부르는 것과 같은
@@ -95,9 +100,10 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         // **집합은 닫은 글 밖에서 한 번 짓는다**(리뷰) — [`crate::read_marks::update`] 는 그 글을 두 번
         // 돌릴 수 있어(짓기 전 재 보기), 안에서 지으면 줄 수만큼의 짓기가 판마다 두 번 선다.
         let keep: Option<BTreeSet<&str>> = keep.as_ref().map(|k| k.iter().map(String::as_str).collect());
-        // **말은 락 밖에서 푼다**(moai-rtji) — `update` 는 읽음 파일의 락을 쥔 채 멈춘 까닭을 펴므로, 그
-        // 안에서 말을 물으면 사용자 설정을 락을 쥔 채 열게 된다. 설정이 FIFO 면 거기서 영영 멈춘다.
-        let lang = ctx.lang();
+        // **말은 멈췄을 때만 묻는다**(moai-rtji 리뷰) — `update` 는 묻는 길을 받아 거절할 때만, 읽음 파일의
+        // 락을 놓은 뒤에 부른다. 값으로 넘기던 판은 아무것도 안 거절하는 판(`--json` 으로 끝나는 길까지)에도
+        // 사용자 설정을 열어 파싱했다 — [`super::open_repo`] 가 적어 둔 그 덫이다.
+        let lang = || ctx.lang();
         let wrote = crate::read_marks::update(&path, &repo.root, lang, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
             let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
@@ -114,7 +120,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         // 값을 잃는 쪽은 이쪽이다. 떨어진 판의 도장은 도구가 짓는 **대기 자리**에 가고, 다음 성한 쓰기가
         // 그것을 합치고 지운다(`read_marks::spool_at`, moai-bdej) — 이미 도장이 선 사람에게도 그렇다.
         // 막지는 않는다 — 종료 코드는 못 찾은 id 만 움직인다(#a-partial).
-        say_why(&wrote.problems, lang, &mut said);
+        say_why(&wrote.problems, ctx, &mut said);
         wrote.value
     };
 
@@ -153,9 +159,12 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
 ///
 /// **글은 여기서 편다**(moai-rtji) — 읽음 모듈은 자료만 내고([`crate::read_marks::SheetTrouble`]) 화면
 /// 말을 모른다. 같은 글을 한 번만 내는 잣대는 **편 글**이다: 두 길이 같은 자료를 내면 같은 글이 된다.
-fn say_why(whys: &[crate::read_marks::SheetTrouble], lang: crate::i18n::Lang, said: &mut BTreeSet<String>) {
+///
+/// **말은 댈 것이 있을 때만 묻는다**([`Ctx`] 째로 받는다, 리뷰) — 빈 판이 거의 모든 판인데, 말을 인자로
+/// 받으면 그 판마다 사용자 설정을 연다([`super::open_repo`] 가 적어 둔 덫).
+fn say_why(whys: &[crate::read_marks::SheetTrouble], ctx: &Ctx, said: &mut BTreeSet<String>) {
     for why in whys {
-        let line = crate::text::one_line(&crate::view::sheet_trouble(lang, why));
+        let line = crate::text::one_line(&crate::view::sheet_trouble(ctx.lang(), why));
         if said.insert(line.clone()) {
             eprintln!("moai: {line}");
         }

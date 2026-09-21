@@ -116,7 +116,8 @@ pub struct Registry {
     ///
     /// 한때 `look_problems` 에 글로 섞어 실었다. 그 글은 읽음 모듈이 한국어로 박아 지은 것이라, 영어를
     /// 고른 사람의 탐색기에도 이 한 줄은 한국어로 섰다. 이 파일의 자리(`path`)를 붙여 펴는 것은 말을 아는
-    /// 쪽이다(`cmd::tui` 가 `look_problems` 곁에 잇는다) — 설정을 읽는 이 자리는 화면 말을 안 묻는다.
+    /// 쪽이다([`crate::view::look_problems`] 가 `look_problems` 곁에 잇는다) — 설정을 읽는 이 자리는 화면
+    /// 말을 안 묻는다.
     pub read_problems: Vec<crate::read_marks::Skipped>,
     /// 이슈 id → **내가 마지막으로 본 줄의 `updated_at`**(RFC3339, moai-50mn — 옛 바이너리는 본 때를 적었다,
     /// moai-lyc1). 여기 없는 줄은 한 번도 안 본 것이다.
@@ -364,7 +365,8 @@ pub fn read(path: Option<&Path>) -> Registry {
     };
     let mut reg = Registry { path: Some(path.to_path_buf()), ..Registry::default() };
     // **자리는 `problems` 에 안 붙인다**(moai-aiid) — 그 줄은 자료라 펴는 쪽이
-    // [`Registry::path`] 로 붙인다. 보기·읽음의 줄(`look_problems`)은 아직 지어진 글이라 여기서 붙는다.
+    // [`Registry::path`] 로 붙인다. 보기의 줄(`look_problems`)은 아직 지어진 글이라 여기서 붙고, 옛 `[read]`
+    // 에서 건너뛴 줄(`read_problems`)은 자료라 펴는 쪽이 붙인다([`crate::view::look_problems`], moai-rtji).
     let at = |e: String| format!("{}: {e}", path.display());
     // 못 읽은 것과 깨진 것을 가른다(moai-9p7v) — 앞의 것만 다시 해 볼 값이 있다([`Trouble`]).
     let parsed = match std::fs::read_to_string(path) {
