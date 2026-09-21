@@ -23,6 +23,12 @@ every `.jsonl` under `.moai/journal/` plus the old single file and orders them b
 timestamp — there is no migration, and a repository that still has only the old
 file works exactly as it did.
 
+**A journal file that cannot be read is skipped, not fatal.** Two accounts
+sharing one checkout is enough for someone else's `<email>.jsonl` to stand 0600,
+and history you can read should not go with it. moai reads the rest, names the
+file and the reason on stderr, and exits non-zero — so a script can tell "no
+history" from "could not read it" by the exit code, and `chmod` is the fix.
+
 Two habits make recovery cheap, and both are properties of the tool rather than
 advice:
 
