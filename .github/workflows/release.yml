@@ -69,6 +69,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # 툴체인을 캐시에서 푼다 — 까닭과 잰 값은 `ci.yml` 의 `ci-gate` 에 있다.
+      #
+      # **밑의 `rustup target add` 보다 앞에 선다.** 그것이 이 잡에서 rustup 을
+      # 처음 부르는 자리라, 뒤에 두면 캐시를 풀기도 전에 박아 둔 판을 통째로
+      # 받는다 — 캐시가 아무것도 안 벌어 주던 자리다.
+      - name: 박아 둔 판을 읽는다
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          if [ -z "$channel" ]; then
+            echo "::error::rust-toolchain.toml 에서 channel 을 못 읽었다"
+            exit 1
+          fi
+          printf 'channel=%s\n' "$channel" >>"$GITHUB_OUTPUT"
+
+      # **열쇠에 타깃이 든다.** 밑에서 더한 타깃의 std 가 툴체인 자리 안으로
+      # 들어가, 칸마다 담기는 것이 다르다. `ci.yml` 과 열쇠를 나눠 쓰면 musl 을
+      # 더한 칸이 담은 것을 거기가 덮어쓰거나 그 반대가 된다.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
+          key: rustup-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}
+
+      # 캐시가 맞은 판에서는 이미 자리에 있어 아무것도 안 받는다.
       - name: 타깃을 받는다
         run: rustup target add ${{ matrix.target }}
 
