@@ -2490,8 +2490,15 @@ impl App {
     /// (`읽은 것은 안 버린다`) `site.is_some()` 하나로 고르면 **안 보이는 줄까지** 걸음마다 재고 읽는다 —
     /// 그리는 쪽이 이미 접힌 줄을 빼고 있으니, 재는 쪽도 같은 줄을 봐야 값이 화면과 맞는다. 다시 펼치면
     /// 그 걸음의 [`App::follow_read`] 가 표식 차이를 보고 바로 든다.
+    ///
+    /// **프로젝트 안에서는 한 줄도 없다**(moai-p4ec) — 층의 줄은 그때 화면에 없다([`App::rows`] 가
+    /// `on_layer()` 로 가른다). 안 가르면 **들어간 프로젝트를 두 번 잰다**: [`super::layer::App::enter_project`]
+    /// 는 그 줄의 `Site` 를 가져가지 않고 베껴 가므로 층에 제 사본이 남고, 그 사본이
+    /// [`App::follow_read`] 의 `Seat::Here` 옆에 한 번 더 선다. 값은 줄마다 `canonicalize` 하나와
+    /// `stat` 한둘이고(9.5us + 5.3us), 나머지 줄까지 치면 프로젝트 안에서는 그 셈이 통째로 헛돈다.
+    /// 올라오면 그 걸음의 `follow_read` 가 표식 차이를 보고 바로 든다 — 접었다 편 줄과 같은 길이다.
     fn opened_seats(&self) -> Vec<Seat> {
-        let Some(l) = self.layer.as_ref() else { return Vec::new() };
+        let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) else { return Vec::new() };
         l.places
             .iter()
             .enumerate()

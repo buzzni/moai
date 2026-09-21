@@ -2182,6 +2182,30 @@ mod tests {
         );
     }
 
+    /// **프로젝트 안에서는 층의 줄을 안 잰다**(moai-p4ec). [`App::enter_project`] 는 그 줄의 `Site` 를
+    /// 가져가지 않고 **베껴** 가므로 층에 제 사본이 남는다 — 재는 자가 층의 줄을 함께 돌면 지금 선 그
+    /// 프로젝트의 읽음 파일을 `Seat::Here` 와 층의 사본으로 **두 번** 잰다. 층의 줄은 그때 화면에도
+    /// 없다(`App::rows` 가 `on_layer()` 로 가른다).
+    ///
+    /// **올라오면 바로 든다** — 접었다 편 줄과 같은 길이라 표식 차이를 그 걸음의 `follow_read` 가 본다.
+    #[test]
+    fn inside_a_project_the_layer_rows_are_not_measured() {
+        let s = Scratch::fenced("layer-read-twice");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert_eq!(a.opened_seats(), vec![crate::tui::Seat::Place(0)], "시험의 전제 — 펼친 줄을 잰다");
+
+        a.enter_project(0);
+        assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+        assert!(a.layer.as_ref().unwrap().places[0].site.is_some(), "시험의 전제 — 층에 사본이 남는다");
+        assert!(a.opened_seats().is_empty(), "들어간 프로젝트를 층의 사본까지 두 번 잰다");
+
+        a.climb();
+        assert!(a.on_layer(), "시험의 전제 — 올라왔다");
+        assert_eq!(a.opened_seats(), vec![crate::tui::Seat::Place(0)], "올라왔는데 다시 안 잰다");
+    }
+
     /// **한눈 보기는 프로젝트마다 머리줄 하나와 그 밑의 줄을 한 목록으로 세운다**(moai-eyre, 사용자
     /// 결정 2026-09-19). 줄은 제 프로젝트를 [`super::Seat`] 으로 들고 다녀, 같은 id 를 쓰는 두
     /// 프로젝트가 한 트리에서 안 섞인다. 아직 안 읽은 프로젝트는 머리줄만 서고(읽는 것은 펼칠
