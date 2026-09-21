@@ -428,3 +428,5 @@
 {"ts":"2026-09-21T23:16:53Z","id":"moai-zxwj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 마일스톤 셈의 뜻과 세 표면)"}
 {"ts":"2026-09-21T23:16:53Z","id":"moai-zxwj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"분모는 미룬 멤버를 그대로 세고 막대 곁에 미룬 수를 댄다(사람 결정). 세는 자는 Stand::deferred 하나고 보드·묶음 상세·status --json 셋이 그것을 읽는다. 탐색기는 옆 가지가 파일을 쥐어 moai-oz13 으로 남겼다."}
 {"ts":"2026-09-21T23:16:53Z","id":"moai-f2lc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"show --json 과 목록이 journal_error 를 줄 곁에 낸다 — kind 로 가르고 said 로 chmod 할 자리를 댄다. 글은 cmd::journal_errors 하나가 지어 stderr 와 기계 출력이 한 말을 한다. journal_by_id 와 journal_of 의 R 은 지는 길이 없어 걷었다."}
+{"ts":"2026-09-21T23:18:28Z","id":"moai-a0j9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤에 기한을 두고 든 시간을 멤버에서 잰다"}
+{"ts":"2026-09-21T23:18:28Z","id":"moai-4s7e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈마다 에이전트가 느낀 난이도를 1~5 로 남긴다"}
