@@ -60,6 +60,7 @@
   "warn.tracker_climbed": "{from} climbed up and took the tracker at {to} — there is no `.moai` here",
   "warn.tracker_moved": "{from} is a linked worktree, so the write went to the root's tracker — {to}",
   "warn.unjournaled": "written, but the history could not be kept{whose} — {why}. The issue landed, so do not call it again",
+  "warn.unread_journal": "{at}: this history could not be read, so what you are shown is missing it — {why}",
   "warn.other": "{kind} {n}",
   "status.put_off": "deferred",
   "status.no_children": "no children",

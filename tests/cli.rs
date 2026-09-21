@@ -12590,6 +12590,70 @@ fn worktree_trouble_is_told_but_never_fails_the_command() {
     assert!(ok(bare.path(), &["status"]).contains("드러난 문제 없다"));
 }
 
+/// **못 읽는 저널은 자리를 대고 비영으로 끝낸다 — 옆 워크트리의 것은 말만 한다**(moai-6924,
+/// moai-6ney, 리뷰).
+///
+/// **여기가 없으면 `main` 의 `unread_journals()` 를 지워도 아무것도 안 붉어진다** — 단위 시험은
+/// `tell_unread` 를 곧바로 부르므로 그 줄이 `main` 에 서 있는지를, 그러니까 사람이 실제로 보는
+/// 종료 코드를 재지 않는다. 기계가 "이력이 없다" 와 "못 읽었다" 를 가르는 자가 오늘은 그 코드
+/// 하나뿐이라(moai-f2lc 전까지) 그 줄이 조용히 빠지는 것은 반쪽이 아니라 조용한 손실이다.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_journal_is_named_and_only_my_own_fails_the_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = trees("wtunread");
+    let main = t.main();
+
+    // 옆 워크트리의 저널을 잠근다 — 겹쳐 보면 그 줄의 이력을 저쪽에서 읽는다.
+    let theirs = only_journal(&t.feat());
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&theirs).is_ok() {
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return; // root 는 권한을 안 본다
+    }
+    let out = moai(&main, &["show", &t.picked, "--worktree"]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(out.status.success(), "옆 워크트리의 저널 때문에 실패했다 — {err}");
+    assert!(err.contains(&theirs.display().to_string()), "옆의 못 읽는 자리를 안 댔다 — {err}");
+
+    // 제 저장소의 저널이면 같은 일이 비영으로 끝난다.
+    let mine = only_journal(&main);
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = moai(&main, &["show", &t.tied]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "덜 받은 답을 0 으로 끝냈다 — {err}");
+    assert!(err.contains(&mine.display().to_string()), "어느 파일에 chmod 할지를 안 댔다 — {err}");
+    // **나머지는 그대로 나온다** — 통째로 지던 자리라 이력만 빠지고 줄은 선다.
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&t.tied), "이력 하나로 줄까지 잃었다");
+
+    // **훑을 수 없는 자리도 같다**(리뷰) — `chmod 400` 은 이름은 읽히고 `stat` 은 안 되는 자리라
+    // `Path::is_file` 이 실패를 `false` 로 접으면 **말없이** 이력이 통째로 빠진다.
+    let dir = main.join(".moai/journal");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o400)).unwrap();
+    let out = moai(&main, &["show", &t.tied]);
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if std::fs::metadata(&mine).is_err() {
+        assert!(!out.status.success(), "못 잰 저널을 0 으로 넘겼다 — {err}");
+        assert!(err.contains(&mine.display().to_string()), "못 잰 파일을 안 댔다 — {err}");
+    }
+    let _ = &t.epic;
+}
+
+/// 그 체크아웃의 `.moai/journal/` 에 하나뿐인 저널 파일. 시험이 심는 사람은 하나다.
+fn only_journal(root: &Path) -> PathBuf {
+    let mut split: Vec<PathBuf> = std::fs::read_dir(root.join(".moai/journal"))
+        .unwrap_or_else(|e| panic!("{}: {e}", root.display()))
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .collect();
+    split.sort();
+    assert_eq!(split.len(), 1, "저널 파일이 하나가 아니다 — {split:?}");
+    split.remove(0)
+}
+
 /// **stderr 의 경고도 말묶음에서 온다**(moai-dpbi). 기본이 영어인데(moai-bn1j) 이 줄만 한국어로
 /// 남으면 세션이 시작하는 화면이 두 말로 선다 — 설정에 `lang` 을 잘못 적은 영어 사용자가 가장
 /// 읽어야 할 줄이 그 줄이다.
