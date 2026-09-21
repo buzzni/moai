@@ -30,7 +30,7 @@ jobs:
     # 빌드 행렬이 이 뒤에 선다 — 여기가 매달리면 행렬이 기본 6시간을 기다린다.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # 태그 이름은 `${{ }}` 로 스크립트에 붙이지 않는다 — 이름에 든 글자가 셸
       # 명령이 되는 자리다. 환경으로 준다.
@@ -67,12 +67,12 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 타깃을 받는다
         run: rustup target add ${{ matrix.target }}
 
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -105,7 +105,7 @@ jobs:
           tar czf "$name.tar.gz" "$name"
           printf 'name=%s\n' "$name" >>"$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.pack.outputs.name }}
           path: ${{ steps.pack.outputs.name }}.tar.gz
@@ -121,9 +121,9 @@ jobs:
       # 릴리스를 만드는 잡 하나만 쓰기를 든다.
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
