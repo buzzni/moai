@@ -89,3 +89,4 @@
 {"ts":"2026-09-21T14:41:12Z","id":"moai-ug47.h2r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드로 돈다. 끝나면 원문을 여기 노트로 남기고, 지적을 반영한 뒤 develop 에 병합하고 멤버 다섯과 이 리뷰를 닫는다"}
 {"ts":"2026-09-21T14:46:12Z","id":"moai-lwil","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T14:46:23Z","id":"moai-dkph","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"runuser -u <사용자> -- <명령> 을 아직 안 본다"}
+{"ts":"2026-09-21T14:53:03Z","id":"moai-dkph","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
