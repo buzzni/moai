@@ -669,7 +669,85 @@ fn init_creates_exactly_three_files() {
     assert!(!attrs.contains("issues.jsonl   text eol=lf merge=union"), "{attrs}");
     // **까닭도 같이 심는다.** 이 주석이 왜 `issues.jsonl` 에 union 을 걸면 안 되는지 적은 유일한
     // 자리다 — 빼면 새 저장소가 그 까닭 없이 서고, 다음 사람이 union 을 다시 건다.
-    assert!(attrs.contains("# 스냅샷에는 merge=union 을 쓰지 않는다"), "규칙만 심고 까닭을 뺐다\n{attrs}");
+    //
+    // **심는 글은 영어 하나다**(moai-9vwy, 2026-09-21 사용자 결정) — 화면 말을 안 따른다.
+    // 저장소에 커밋되어 남는 파일이라 함께 쓰는 사람마다 달라지면 안 된다. 이 시험은
+    // `MOAI_LANG=ko` 로 도는데(`isolated`), 그 아래에서도 영어여야 그것이 지켜진 것이다.
+    assert!(attrs.contains("# The snapshot does not use merge=union"), "규칙만 심고 까닭을 뺐다\n{attrs}");
+    assert!(!hangul(&attrs), "심는 파일에 화면 말이 샜다\n{attrs}");
+    let config = std::fs::read_to_string(s.path().join(".moai/config.toml")).unwrap();
+    assert!(!hangul(&config), "심는 설정에 화면 말이 샜다\n{config}");
+}
+
+/// **`moai init` 한 덩이가 한 말로 선다**(moai-9vwy). `README` 의 Quick Start 가 깔고 나서
+/// 가장 먼저 치라고 가르치는 명령이라, 여기서 말이 갈리면 영어로 고른 사람의 첫인상이
+/// 통째로 한국어다. 재는 자는 `the_mv_screen_stands_in_one_language` 와 같다 — 글자를
+/// 하나하나 견주지 않고 **한글이 한 자라도 남았는가**만 본다.
+///
+/// **심는 파일은 여기서 안 잰다.** `.gitattributes`·`config.toml`·`AGENTS.md` 블록은 화면이
+/// 아니라 저장소의 내용이고 영어 하나로 선다 — 그쪽은 `init_creates_exactly_three_files` 가
+/// 잰다. 여기서 재는 것은 **심으면서 사람에게 대는 말**이다.
+///
+/// 한국어로도 함께 돌린다: 영어만 재면 `ko` 표가 빈 키도 파랗게 지나간다.
+#[test]
+fn the_init_screen_stands_in_one_language() {
+    let screens = |name: &str, lang: Option<&str>| {
+        let s = Scratch::new(name);
+        let run = |dir: &Path, args: &[&str]| {
+            let mut cmd = isolated(BIN);
+            cmd.args(args).current_dir(dir).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
+            with_lang(&mut cmd, lang);
+            let out = cmd.output().expect("moai 를 실행하지 못했다");
+            format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+        };
+        let home = s.path().join("proj");
+        std::fs::create_dir_all(&home).unwrap();
+        // 차례가 곧 상태다 — 앞의 판이 뒤의 판을 만든다.
+        let mut said: Vec<(String, String)> = vec![
+            ("init".into(), run(&home, &["init", "argos"])),
+            ("init again".into(), run(&home, &["init"])),
+            ("init --check".into(), run(&home, &["init", "--check"])),
+            // 접두어를 바꾸려 든 판.
+            ("init other-prefix".into(), run(&home, &["init", "other"])),
+        ];
+        // 새 자리에 너무 긴 접두어를 준 판.
+        let long = s.path().join("my-company-backend-service");
+        std::fs::create_dir_all(&long).unwrap();
+        said.push(("init <long>".into(), run(&long, &["init", "mycompanybackend"])));
+        // 이름에서 만든 접두어를 줄인 판.
+        said.push(("init <shortened>".into(), run(&long, &["init"])));
+        // 위에도 트래커가 있는 하위 디렉터리 — 세우고 나서 알린다.
+        let under = home.join("apps/web");
+        std::fs::create_dir_all(&under).unwrap();
+        said.push(("init <under>".into(), run(&under, &["init", "web"])));
+        // 못 읽는 AGENTS.md — 덮어쓰지 않고 멈춘다.
+        let bad = s.path().join("badagents");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("AGENTS.md"), [0x66, 0x66, 0xff, 0xfe]).unwrap();
+        said.push(("init <bad AGENTS.md>".into(), run(&bad, &["init", "bad"])));
+        // 딸린 워크트리 — 거절문 넉 줄.
+        let wtmain = s.path().join("wtmain");
+        std::fs::create_dir_all(&wtmain).unwrap();
+        git(&wtmain, &["init", "-q"]);
+        run(&wtmain, &["init", "argoswt"]);
+        git(&wtmain, &["add", "-A"]);
+        git(&wtmain, &["commit", "-q", "-m", "init"]);
+        git(&wtmain, &["worktree", "add", "-q", ".claude/worktrees/wt", "-b", "worktree-wt"]);
+        let deep = wtmain.join(".claude/worktrees/wt/src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        said.push(("init <worktree>".into(), run(&deep, &["init", "argoswt"])));
+        said.push(("init --check <worktree>".into(), run(&deep, &["init", "--check"])));
+        said
+    };
+
+    for (args, said) in screens("initlangen", None) {
+        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    }
+    // 한국어를 고른 사람은 같은 자리에서 한국어를 본다 — 키가 `ko` 표에도 서 있다는 뜻이다.
+    for (args, said) in screens("initlangko", Some("ko")) {
+        assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
+    }
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
