@@ -2026,11 +2026,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         hands: &'static [&'static str],
         /// 그 글을 어떻게 읽는가([`Text`]) — `hands` 가 비었으면 안 쓴다.
         text: Text,
-        /// **제 뒤의 낱말이 명령인가** — `env <명령>`·`sudo <명령>` 은 참이다. `su <사용자>`·
-        /// `runuser <사용자>` 는 거짓이다: 그 낱말은 사용자지 명령이 아니고, 그 명령은 `-c` 의
-        /// 글로만 온다. 참으로 적으면 사용자 이름을 명령으로 읽어 `su alice` 가 `alice` 라는
-        /// 명령이 된다.
-        runs: bool,
+        /// **제 뒤의 낱말이 명령인가**([`Runs`]).
+        runs: Runs,
         /// `hands` 스위치가 **값을 받는가** — `env -S` 는 그 자리에서 글을 받아(`-SCMD`·
         /// `--split-string=CMD`·뒤 낱말) 옵션 읽기가 거기서 끝나고, `sudo -s` 는 값 없는 깃발이라
         /// 옵션 읽기가 **계속된다**. 받는 것을 안 받는 것으로 적으면 뭉치의 남은 글자(`sudo -si` 의
@@ -2038,6 +2035,21 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         /// `sudo -s -u 남 moai add x` 와 `sudo -su 남 moai add x` 의 글은 `moai add x` 지 `-u 남 …`
         /// 이 아니다(둘 다 규칙이 통째로 샜다).
         glued: bool,
+    }
+    /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
+    ///
+    /// 불리언으로 두던 판은 `runuser` 가 설 자리가 없었다(moai-dkph) — 그것은 스위치에 따라
+    /// 갈린다. 늘 참으로 적으면 `runuser alice` 의 사용자 이름이 명령이 되고, 늘 거짓으로 적으면
+    /// `runuser -u alice -- sed -i …` 의 쓰기를 아무도 안 본다.
+    #[derive(Clone, Copy)]
+    enum Runs {
+        /// 늘 명령이다 — `env <명령>`·`sudo <명령>`·`timeout 5 <명령>`.
+        Always,
+        /// 아무 때도 아니다 — `su <사용자>` 의 뒤는 사용자다. 명령은 `-c` 의 글로만 온다.
+        Never,
+        /// **이 스위치를 봤을 때만** — `runuser -u <사용자> -- <명령>` 의 `-u` 다. 그 스위치가
+        /// 사용자를 제 값으로 먹어, 남은 자리가 명령이 된다.
+        With(&'static [&'static str]),
     }
     const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
     const WRAPPERS: &[Wrapper] = &[
@@ -2061,7 +2073,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &["-C", "--chdir"],
             hands: &["-S", "--split-string"],
             text: Text::Split,
-            runs: true,
+            runs: Runs::Always,
             glued: true,
         },
         Wrapper {
@@ -2075,7 +2087,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &[],
             text: Text::Words,
-            runs: true,
+            runs: Runs::Always,
             glued: false,
         },
         Wrapper {
@@ -2089,7 +2101,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &[],
             text: Text::Words,
-            runs: true,
+            runs: Runs::Always,
             glued: false,
         },
         Wrapper {
@@ -2103,7 +2115,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &[],
             text: Text::Words,
-            runs: true,
+            runs: Runs::Always,
             glued: false,
         },
         Wrapper {
@@ -2150,7 +2162,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             // `sudo -s <명령>` 은 그 낱말들을 이어 붙여 셸에 `-c` 로 넘긴다 — 자리는 그대로다.
             hands: &["-s", "--shell"],
             text: Text::Words,
-            runs: true,
+            runs: Runs::Always,
             glued: false,
         },
         // `doas -C <설정>` 은 규칙을 시험해 보고 찍기만 한다 — 뒤의 명령을 안 돌린다.
@@ -2169,7 +2181,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &[],
             text: Text::Words,
-            runs: true,
+            runs: Runs::Always,
             glued: false,
         },
         // **`su -c '<글>'` 과 `runuser -c` 는 `bash -c` 와 같은 꼴이다**(moai-qqg2) — 표에 없어
@@ -2196,7 +2208,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &["-c", "--command", "--session-command"],
             text: Text::Line,
-            runs: false,
+            runs: Runs::Never,
             glued: true,
         },
         Wrapper {
@@ -2210,7 +2222,9 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             chdir: &[],
             hands: &["-c", "--command", "--session-command"],
             text: Text::Line,
-            runs: false,
+            // **`-u <사용자>` 를 봤으면 남은 자리가 명령이다**(moai-dkph) — `runuser -u root --
+            // sed -i …` 는 정말 그 파일을 고친다. 그 스위치가 없으면 뒤 낱말은 사용자다.
+            runs: Runs::With(&["-u", "--user"]),
             glued: true,
         },
     ];
@@ -2402,8 +2416,21 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 여기서 멈춘다 — 그 낱말을 명령으로
-    // 읽으면 사용자 이름이 명령이 된다.
-    if !w.runs {
+    // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
+    // ([`Runs`]) — 그 스위치가 사용자를 제 값으로 먹어 남은 자리가 명령이 된다.
+    //
+    // 본 스위치는 **지나온 낱말**에서 읽는다 — 옵션을 읽는 자리가 셋(제 낱말·`--이름=값`·뭉치
+    // 안의 글자)이라, 자리마다 표를 달면 하나를 빠뜨리는 날 그 꼴만 조용히 안 보인다.
+    let runs = match w.runs {
+        Runs::Always => true,
+        Runs::Never => false,
+        Runs::With(flags) => rest[..n].iter().any(|word| {
+            flags.contains(&word.as_str())
+                || flags.iter().any(|f| word.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
+                || (word.starts_with('-') && !word.starts_with("--") && word.chars().skip(1).any(|c| letter(flags, c)))
+        }),
+    };
+    if !runs {
         return Some(Wrapped::Stops);
     }
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
@@ -6230,8 +6257,33 @@ mod tests {
         // moai 를 안 돌린다. 명령으로 읽던 판이라면 사용자 이름이 곧 명령이 됐다.
         assert_eq!(command_of(&seg("su 남")).first().map(String::as_str), Some("su"));
         assert_eq!(guard_create(&all, &cfg(), &here(), "su moai add '딴 일'"), Decision::Pass);
+        // **`-u <사용자>` 를 봤으면 남은 자리는 명령이다**(moai-dkph) — `runuser -u root -- sed -i …`
+        // 는 글을 넘기는 것이 아니라 명령을 그대로 돌린다. `sudo -u`·`doas -u` 도 같은 꼴이고,
+        // 그 둘은 `-u` 가 값을 먹는 스위치라 이 커밋 전부터 보였다. 함께 못박는다.
+        for cmd in [
+            "runuser -u 남 -- sed -i s/a/b/ src/x.rs",
+            "runuser -u 남 sed -i s/a/b/ src/x.rs",
+            "runuser --user=남 -- sed -i s/a/b/ src/x.rs",
+            "runuser -nu 남 -- sed -i s/a/b/ src/x.rs",
+            "sudo -u 남 sed -i s/a/b/ src/x.rs",
+            "doas -u 남 sed -i s/a/b/ src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "사용자를 갈아 돌린 쓰기를 못 봤다 — {cmd}\n{got:?}");
+        }
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "runuser -u 남 -- moai add x"), Decision::Deny(_)),
+            "사용자를 갈아 세운 줄을 못 봤다"
+        );
+        // **`-u` 가 없으면 뒤 낱말은 사용자다** — `runuser 남` 은 남의 셸을 띄울 뿐이다.
+        assert_eq!(command_of(&seg("runuser 남")).first().map(String::as_str), Some("runuser"));
+        assert_eq!(guard_create(&all, &cfg(), &here(), "runuser moai add '딴 일'"), Decision::Pass);
         // **로그인 셸은 딴 자리에서 돈다** — `sudo -i` 와 같은 줄이다(`env -C`·`sudo -D` 의 이웃).
-        for cmd in ["su -l -c 'sed -i s/a/b/ src/x.rs'", "su -lc 'sed -i s/a/b/ src/x.rs'"] {
+        for cmd in [
+            "su -l -c 'sed -i s/a/b/ src/x.rs'",
+            "su -lc 'sed -i s/a/b/ src/x.rs'",
+            "runuser -lu 남 -- sed -i s/a/b/ src/x.rs",
+        ] {
             assert_eq!(
                 guard_writes(&[], &cfg(), &here(), root, root, cmd),
                 Decision::Pass,
