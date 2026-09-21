@@ -218,3 +218,7 @@
 {"ts":"2026-09-21T17:23:01Z","id":"moai-zxwj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 진행이 미룬 것을 분모에서 가른다"}
 {"ts":"2026-09-21T17:23:01Z","id":"moai-hjly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-u1xz 에서 펼쳤다 — 마일스톤 진행 막대가 미룬 것을 분모에 센다"}
 {"ts":"2026-09-21T17:23:01Z","id":"moai-u1xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hjly 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T17:25:57Z","id":"moai-pkvw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-21T17:25:57Z","id":"moai-h06a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-21T17:26:11Z","id":"moai-pkvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 노트의 마지막 줄을 뒤집는다 — 사용자가 done 으로 정했다(2026-09-21).\n\n- 이 일은 실제로 됐다. 글리프를 세웠고 배포까지 갔다. 뒤에 걷은 것은 moai-nb6w 라는\n  제 줄이 따로 있다\n- 칸은 그 줄이 어디 있는가지 그 요구가 아직 서 있는가가 아니다. 앞 노트에서 \"요구가\n  안 풀렸으니 todo\" 라 적은 것이 그 둘을 섞었다\n- 되돌린 까닭과 다시 세울 조건(줄머리 폭을 먼저 푼다)은 앞 노트에 그대로 선다"}
+{"ts":"2026-09-21T17:26:12Z","id":"moai-h06a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pkvw 와 같다 — 사용자가 done 으로 정했다(2026-09-21). 앞 노트의 칸 판단만 뒤집힌다."}
