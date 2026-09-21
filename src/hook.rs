@@ -821,8 +821,8 @@ impl<'a> Line<'a> {
 /// 겹을 함께 세는 한 걸음이라, 같은 걸음을 두 번 걷는 것은 그대로 두 배다.
 ///
 /// **두 물음의 `only` 가 같을 때만 한 벌이다.** 기록은 토막을 안 가리고 묻고([`picked_in`] 이
-/// 왜 그런지를 적는다), 규칙 2 는 이 자리의 집기로 셀 토막만 묻는다([`Segs::picks`]) — 토막이
-/// 다 [`crate::cmd::hook::Route::Here`] 인 흔한 판에서 둘은 같다. 다르면 그 `only` 로 다시 훑는다:
+/// 왜 그런지를 적는다), 규칙 2 는 이 자리의 집기로 셀 토막만 묻는다([`Segs::picks`]) — **집기로 셀
+/// 토막에서** 둘이 같으면 한 벌이고([`Scan::whole_for`]), 다르면 그 `only` 로 다시 훑는다:
 /// `only` 는 낼 토막만이 아니라 **사슬**을 고르므로, 안 가리고 훑은 답을 뒤에서 거를 수 없다.
 ///
 /// **설정을 함께 든다.** 훑는 답이 `cfg` 에 달렸다 — `picks_up` 이 벌여 놓는 칸을 그것으로 센다.
@@ -857,15 +857,27 @@ impl<'a> Scan<'a> {
         self.whole.get_or_init(|| shell_scan(self.line, self.cfg, &|_| true))
     }
 
-    /// **이 `only` 가 토막을 다 고르는가** — 고르면 갈무리한 벌이 곧 그 답이다. 토막 수만큼 술어를
-    /// 부르는 것뿐이라 훑기 한 판보다 몇 자릿수 싸다([`Line::used`] 의 번호로 묻는다 — 규칙이
-    /// 토막을 세는 그 차례다).
+    /// **이 `only` 가 훑기의 답을 안 바꾸는가** — 안 바꾸면 갈무리한 벌이 곧 그 답이다.
+    /// [`shell_scan`] 이 `only` 를 묻는 자리는 **집기로 셀 토막뿐이다**([`picks_up`] 이 `&&` 앞에
+    /// 선다) — 집기가 아닌 토막을 `only` 가 빼도 두 벌은 글자째 같다. 그러니 묻는 것도 거기까지다.
+    ///
+    /// **토막을 다 고르는가로 묻던 판은 흔한 줄에서 갈무리를 한 번도 못 썼다** — `cd /tmp && sed -i …`
+    /// 나 `moai -C <남의 트래커> show && sed -i …` 는 집기가 아닌 토막 하나가 `cmd/hook.rs` 의
+    /// `Route::Nowhere`·`Route::There` 라 `only` 가 거기서 지고, 규약이 시키는 바로 그 꼴이다.
+    /// 술어를 집기 토막에만 묻는 것이기도 하다 — 그 `ours` 는 뿌리 둘을 견주느라 디스크를 짚을 수
+    /// 있어, 토막마다 묻던 판은 막는 호출마다 그 값을 세 번 치렀다.
+    ///
+    /// 번호는 [`Line::used`] 의 차례다 — 규칙이 토막을 세는 그 차례고, `shell_scan` 이 `only(n)` 에
+    /// 대는 번호다. 토막마다 [`picks_up`] 하나라 훑기 한 판보다 몇 자릿수 싸다. 낱말 없는 토막
+    /// (`> f` 만)은 `picks_up` 이 빈손에 지므로 애초에 물을 자리가 아니고, 그런 토막뿐인 줄에서
+    /// 이것이 참인 것도 같은 까닭이다 — 물을 자리가 없다.
     fn whole_for(&self, only: &dyn Fn(usize) -> bool) -> bool {
-        (0..self.line.words().count()).all(only)
+        self.line.words().enumerate().all(|(k, seg)| !picks_up(seg, self.cfg) || only(k))
     }
 
-    /// 쓰는 파일들([`shell_writes`]) — `only` 가 토막을 다 고르면 갈무리한 벌에서 **빌리고**, 아니면
-    /// 그 `only` 로 다시 훑는다. 빌려 주는 것이 요점이다: 통째로 베끼면 아낀 것을 도로 치른다.
+    /// 쓰는 파일들([`shell_writes`]) — `only` 가 훑기의 답을 안 바꾸면([`Scan::whole_for`]) 갈무리한
+    /// 벌에서 **빌리고**, 바꾸면 그 `only` 로 다시 훑는다. 빌려 주는 것이 요점이다: 통째로 베끼면
+    /// 아낀 것을 도로 치른다.
     fn writes(&self, only: &dyn Fn(usize) -> bool) -> std::borrow::Cow<'_, [String]> {
         match self.whole_for(only) {
             true => std::borrow::Cow::Borrowed(&self.whole().0),
@@ -3607,7 +3619,8 @@ fn guard_writes_in(
     // 소속 지도를 짓는 [`held`] 보다 싸다. 거꾸로 재던 판은 Bash 마다 초점부터 지었다.
     //
     // **훑기는 한 벌을 빌린다**([`Scan::writes`], moai-44wr) — `settle` 이 막는 판에서 이 판정을
-    // 세 번까지 다시 부르고, 그 뒤로 기록([`picked_in`])이 또 한 번 묻는다.
+    // 세 번까지 다시 부르고, 그 뒤로 기록([`picked_in`])이 또 한 번 묻는다. **빌리는 것은 `only` 가
+    // 집기 토막을 다 고를 때다** — 남의 트래커를 겨눈 집기가 섞인 줄은 그 셋을 저마다 다시 훑는다.
     let writes = scan.writes(only);
     if writes.is_empty() || !held(issues, scan.cfg(), away).is_empty() {
         return Decision::Pass;
@@ -6399,7 +6412,14 @@ mod tests {
         let cfg = cfg();
         let scan = Scan::new(&line, &cfg);
         let before = scans();
-        let _ = super::guard_shell_in(&all, &here(), root, root, &scan, &all_of, &|_| None);
+        // **`settle` 이 판정을 다시 부르는 것까지 한 벌이다** — 갈무리가 `cmd/hook.rs` 의 `settle`
+        // **밖**에 서야 그 되부름이 공짜다. 한 번만 부르던 판은 갈무리를 그 닫힘 안으로 옮겨도
+        // 푸른 채라, 막는 호출이 옛 값으로 조용히 돌아갔다.
+        for _ in 0..3 {
+            let said = super::guard_shell_in(&all, &here(), root, root, &scan, &all_of, &|_| None);
+            // 규칙 1 이 먼저 막으면 규칙 2 가 아예 안 돌아 이 수가 우연히 맞는다.
+            assert!(!said.blocks(), "규칙 2 앞에서 막혀 훑을 일이 없었다 — {said:?}");
+        }
         let _ = super::picked_in(&scan, &|_| true, &|_, _| None);
         assert_eq!(scans() - before, 1, "같은 토막을 두 번 훑는다");
 
@@ -6410,18 +6430,46 @@ mod tests {
         let _ = super::picked_in(&again, &|_| true, &|_, _| None);
         assert_eq!(scans() - before, 1, "새로 세운 `Scan` 의 훑기가 안 세어졌다");
 
-        // 토막을 가려 묻는 판은 **다시 훑는 것이 맞다** — `only` 는 낼 토막만이 아니라 사슬을
-        // 고르므로, 안 가리고 훑은 답을 뒤에서 거를 수 없다([`Scan::writes`]).
+        // **집기 토막을 가려 묻는 판은 다시 훑는 것이 맞다** — `only` 는 낼 토막만이 아니라 사슬을
+        // 고르므로, 안 가리고 훑은 답을 뒤에서 거를 수 없다([`Scan::writes`]). 여기서 뺀 0번이 바로
+        // 그 집기다.
         let some = Segs { judges: &|_| true, picks: &|k| k == 1 };
-        let scan = Scan::new(&line, &cfg);
+        let gated = Scan::new(&line, &cfg);
         let before = scans();
-        let _ = super::guard_shell_in(&all, &here(), root, root, &scan, &some, &|_| None);
-        let _ = super::picked_in(&scan, &|_| true, &|_, _| None);
+        let _ = super::guard_shell_in(&all, &here(), root, root, &gated, &some, &|_| None);
+        let _ = super::picked_in(&gated, &|_| true, &|_, _| None);
         assert_eq!(scans() - before, 2, "가려 묻는 판과 안 가린 판이 같은 벌을 봤다");
 
-        // 훑을 일이 없는 호출은 **아예 안 훑는다** — `Scan` 은 게으르다.
-        let idle = Scan::new(&line, &cfg);
+        // **집기가 아닌 토막을 빼는 것은 답을 안 바꾼다**([`Scan::whole_for`]) — `shell_scan` 은
+        // `only` 를 집기로 셀 토막에서만 묻는다. 여기서 뺀 1번은 `sed` 라 그 물음에 안 든다.
+        // 토막을 다 고르는가로 묻던 판은 `cd /tmp && sed -i …` 처럼 규약이 시키는 흔한 줄에서
+        // 갈무리를 한 번도 못 썼다.
+        let most = Segs { judges: &|_| true, picks: &|k| k == 0 };
+        let kept = Scan::new(&line, &cfg);
         let before = scans();
+        let _ = super::guard_shell_in(&all, &here(), root, root, &kept, &most, &|_| None);
+        // 기록도 함께 묻는다 — 규칙 2 가 갈무리를 버리면 그 한 벌이 여기서 새로 서서 수가 는다.
+        // 규칙 2 만 몰던 판은 버리든 말든 한 번이라 이 단언이 못 섰다.
+        let _ = super::picked_in(&kept, &|_| true, &|_, _| None);
+        assert_eq!(scans() - before, 1, "집기가 아닌 토막 하나에 갈무리를 버렸다");
+
+        // **세는 것만으로는 모자란다** — 빌려 준 벌이 그 `only` 로 훑은 것과 같은 답이어야 갈무리가
+        // 성립한다. 값을 안 보던 판은 `whole_for` 가 넓어지는 날 규칙 2 가 조용히 꺼졌다.
+        let (whole, head, tail) = (|_: usize| true, |k: usize| k == 0, |k: usize| k == 1);
+        let asked: [&dyn Fn(usize) -> bool; 3] = [&whole, &head, &tail];
+        for picks in asked {
+            let fresh = Scan::new(&line, &cfg);
+            assert_eq!(
+                fresh.writes(picks).into_owned(),
+                super::shell_writes(&line, &cfg, picks),
+                "빌려 준 벌이 그 `only` 로 훑은 것과 다르다"
+            );
+        }
+
+        // 훑을 일이 없는 호출은 **아예 안 훑는다** — `Scan` 은 게으르다. **세기 전에 세운다**:
+        // 뒤에 세우면 `Scan::new` 이 훑어도 그 수가 `before` 에 묻혀, 이 단언이 못 선다.
+        let before = scans();
+        let idle = Scan::new(&line, &cfg);
         assert_eq!(scans() - before, 0, "묻지도 않았는데 훑었다");
         drop(idle);
     }

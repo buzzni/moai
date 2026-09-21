@@ -331,10 +331,14 @@ fn decide(
                 record_picks(input, &repo, &crate::hook::picked_in(&scan, &mine, &stands));
                 // **남의 트래커는 제 설정으로 다시 훑는다** — 훑는 답이 `cfg` 에 달렸다
                 // ([`crate::hook::Scan`]). 흔한 줄에는 이 고리가 아예 안 돈다.
+                //
+                // **이름을 달리 준다** — 위의 `scan` 과 형이 같아 그냥 `scan` 으로 두면 이 줄을
+                // 지우거나 밖으로 옮겨도 컴파일이 되고, 그때 집기는 **제 설정의 칸 이름**으로
+                // 세어진다(`picks_up` 이 `cfg` 에서 읽는 그것이다).
                 for (n, other) in there.iter().enumerate() {
                     let only = |k: usize| routes.get(k) == Some(&Route::There(n));
-                    let scan = crate::hook::Scan::new(line, &other.config);
-                    record_picks(input, other, &crate::hook::picked_in(&scan, &only, &stands));
+                    let theirs = crate::hook::Scan::new(line, &other.config);
+                    record_picks(input, other, &crate::hook::picked_in(&theirs, &only, &stands));
                 }
             }
             decision
