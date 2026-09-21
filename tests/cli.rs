@@ -1223,6 +1223,79 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
 }
 
+/// **moai 를 들이기 전 커밋에서 갈라진 워크트리도 워크트리다**(moai-pk4x). 그 안에는 `.moai` 가 한
+/// 자리도 없어, 자리 판정의 조상 훑기가 워크트리 꼭대기를 지나 주 체크아웃까지 올라갔다 — 거기
+/// 트래커가 있으니 "위에도 트래커가 있다" 한 줄만 내고 `init` 이 **워크트리 안에** 트래커를 심었다.
+/// 아무도 안 읽고(`moai` 는 루트의 트래커를 쓴다, moai-y7go) 커밋되면 병합에서 겨루는 파일이라,
+/// moai-mz0e 가 꼭대기에서 막는 바로 그것이 밑자리로 샌 자리다.
+#[test]
+fn a_worktree_split_before_moai_still_refuses_to_plant_a_tracker() {
+    let s = Scratch::new("initwt-bare");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    // moai 를 들이기 **전** 커밋에 가지를 박고, 워크트리는 거기서 갈라진다.
+    std::fs::write(main.join("README"), "before moai\n").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "before"]);
+    git(&main, &["branch", "pre"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "--detach", ".claude/worktrees/argos-wt", "pre"]);
+
+    let wt = main.join(".claude/worktrees/argos-wt");
+    assert!(!wt.join(".moai").exists(), "시험의 전제 — 워크트리가 트래커를 들고 왔다");
+    let deep = wt.join("src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let out = moai(&deep, &["init", "argos"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "아무도 안 읽을 자리에 세웠다 — {err}");
+    assert!(err.contains("딸린 워크트리"), "워크트리를 그냥 '위의 트래커' 로 댔다 — {err}");
+    assert!(err.contains("/main/.moai"), "주 체크아웃의 트래커를 안 댔다 — {err}");
+    assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+
+    // 꼭대기도 같다 — 거기 `.moai` 가 없는 것은 이 워크트리가 처음이다.
+    let out = moai(&wt, &["init", "argos"]);
+    assert!(!out.status.success(), "워크트리 꼭대기에 세웠다 — {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **알리는 표면은 `MOAI_HERE` 를 안 물려받는다**(moai-ko4y, 2026-09-21 사용자 결정). `--check` 의
+/// `tracker_at` 은 **나중의 다른 부름**이 어디서 서느냐에 답하는 자라, 지금 셸이 손잡이를 켰는지와
+/// 무관하다. 물려받던 판은 `MOAI_HERE=1` 인 셸에서 그 키가 통째로 빠져, 사람 없이 도는 고리가
+/// 워크트리 밑자리를 평평한 "init 전" 으로 읽고 1 로 끝나는 줄을 따라 쳤다.
+///
+/// **지금 이 부름의 거절은 그대로 꺼진다** — 손잡이를 켠 사람은 여기 심는 것이 뜻이다.
+///
+/// **재는 자리는 여기 하나다**(리뷰). 단위 층에서 같은 것을 재려면 `set_var` 로 프로세스 환경을
+/// 만져야 하는데, 단위 시험은 한 프로세스의 스레드로 나란히 돌아 그 값을 옆 시험이 본다 —
+/// `store::tests::a_worktree_that_carries_no_tracker_is_still_a_worktree` 가 실제로 그것을
+/// 물려받아 붉어졌다. 손잡이를 켜는 것은 **딴 프로세스**로만 잰다.
+#[test]
+fn saying_where_init_goes_does_not_inherit_moai_here() {
+    let s = Scratch::new("initwt-here");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let here = |args: &[&str]| ok_env(&deep, NOW, &[("MOAI_HERE", "1")], args);
+    let json = here(&["init", "--check", "--json"]);
+    assert!(json.contains("tracker_at"), "손잡이를 켰다고 댈 자리를 통째로 뺐다\n{json}");
+    let real = std::fs::canonicalize(&main).unwrap().display().to_string();
+    assert!(json.contains(&real), "주 체크아웃이 아닌 자리를 댔다\n{json}");
+
+    // 거절은 그대로 꺼진다 — 켠 사람의 `init` 은 여기 심는다([`ok_env`] 가 0 을 잰다).
+    here(&["init", "argos"]);
+    assert!(deep.join(".moai").is_dir(), "켰는데 안 심었다");
+}
+
 /// **"여기서 `init` 하라" 를 대는 표면들도 그 갈림을 안다**(moai-nppo). 거절은 이미 서 있는데
 /// (`init_in_a_worktree_points_at_the_main_checkout`) 대는 쪽이 그것을 몰라, 등록한 워크트리
 /// 밑자리 한 줄이 영영 `init 전` 으로 섰고 그 줄이 대는 명령은 1 로 끝났다.

@@ -19,7 +19,7 @@
 //! `&[Issue]` 만 받는다 — 그쪽은 이 기능이 있는 줄 모른다.
 
 use crate::model::Issue;
-use crate::store::{Load, Repo};
+use crate::store::{Load, Repo, real};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -391,25 +391,25 @@ impl<'a> Dug<'a> {
     /// **뿌리를 정규화해 맞춘다** — 겹치기는 git 에게 물어 목록을 얻고([`others_of`]) 자리 셈은 git 이
     /// 적어 둔 파일만 읽어([`on_disk`]), 같은 워크트리가 글자만 다른 경로로 올 수 있다. 못 맞추면 그
     /// 워크트리만 예전처럼 다시 판다 — 최악이 지금과 같다. **건네받은 것이 없으면 뿌리를 정규화하지도
-    /// 않는다** — `canonical` 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을
+    /// 않는다** — `store::real` 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을
     /// 헛되이 치르면 안 된다.
     fn side(&self, root: &Path) -> Option<&'a [Issue]> {
         match self.sides.is_empty() {
             true => None,
-            false => self.sides.get(&canonical(root)).copied(),
+            false => self.sides.get(&real(root)).copied(),
         }
     }
 
     /// 자리 셈이 견줄 바닥을 부르는 쪽이 이미 쟀으면 그것 — **그 파일이 그 파일일 때만.**
     fn floor(&self, snapshot: &Path) -> Option<&'a Floor> {
         let mine = self.mine?;
-        (!mine.at.as_os_str().is_empty() && canonical(&mine.at) == canonical(snapshot)).then_some(mine)
+        (!mine.at.as_os_str().is_empty() && real(&mine.at) == real(snapshot)).then_some(mine)
     }
 }
 
 /// 판 것([`Gathered::sides`]·[`Gathered::mine`])을 자리 셈([`workplaces_in`])이 찾을 모양으로.
 pub fn dug<'a>(sides: &'a [Side], mine: &'a Floor) -> Dug<'a> {
-    Dug { sides: sides.iter().map(|s| (canonical(&s.root), s.issues.as_slice())).collect(), mine: Some(mine) }
+    Dug { sides: sides.iter().map(|s| (real(&s.root), s.issues.as_slice())).collect(), mine: Some(mine) }
 }
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리의 스냅샷을 겹친다.
@@ -617,13 +617,13 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
 fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), Trouble> {
     let top = git(root, &["rev-parse", "--show-toplevel"])?;
-    let top = canonical(Path::new(top.trim_end_matches('\n')));
-    let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
+    let top = real(Path::new(top.trim_end_matches('\n')));
+    let rel = real(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
     // `-z` 는 git 2.36 부터다. 그 전 git 에서 거절되면 줄로 가른 것을 NUL 로 바꿔
     // 같은 파서로 읽는다 — 줄바꿈 든 경로만 잃고, 겹쳐 보기 전체를 잃지는 않는다.
     let listed = git(root, &["worktree", "list", "--porcelain", "-z"])
         .or_else(|_| git(root, &["worktree", "list", "--porcelain"]).map(|s| s.replace('\n', "\0")))?;
-    let (mine, others): (Vec<Tree>, Vec<Tree>) = parse(&listed).into_iter().partition(|t| canonical(&t.path) == top);
+    let (mine, others): (Vec<Tree>, Vec<Tree>) = parse(&listed).into_iter().partition(|t| real(&t.path) == top);
     Ok((
         mine.into_iter().next(),
         others
@@ -1004,7 +1004,7 @@ fn own_git(root: &Path) -> Option<(&Path, PathBuf, bool)> {
         return Some((top, dotgit, false));
     }
     let text = std::fs::read_to_string(&dotgit).ok()?;
-    Some((top, canonical(&top.join(text.trim_end().strip_prefix("gitdir:")?.trim())), true))
+    Some((top, real(&top.join(text.trim_end().strip_prefix("gitdir:")?.trim())), true))
 }
 
 /// 이 체크아웃이 딸린 워크트리면 git 이 그 몫으로 들고 있는 디렉터리(`<공용>/worktrees/<이름>`) —
@@ -1041,7 +1041,7 @@ pub fn note_held(tracker: &Path, at: Option<&Path>, claimed: &[String], released
         return;
     }
     let Some((_, common, false)) = own_git(tracker) else { return };
-    let common = canonical(&common);
+    let common = real(&common);
     // 딸린 워크트리가 하나도 없으면 표식도 없다 — 워크트리를 안 쓰는 저장소의 흔한 길에서 락 파일
     // 하나도 안 만든다.
     if !common.join("worktrees").is_dir() {
@@ -1058,7 +1058,7 @@ pub fn note_held(tracker: &Path, at: Option<&Path>, claimed: &[String], released
     // 위가 이 저장소의 공용 디렉터리인지로 잰다(남의 저장소에서 친 것과 주 체크아웃은 여기서 빠진다).
     let own = at.and_then(admin_dir).filter(|dir| dir.parent().and_then(Path::parent) == Some(common.as_path()));
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(common.join("worktrees"))
-        .map(|rd| rd.filter_map(Result::ok).map(|e| canonical(&e.path())).collect())
+        .map(|rd| rd.filter_map(Result::ok).map(|e| real(&e.path())).collect())
         .unwrap_or_default();
     if let Some(own) = &own
         && !dirs.contains(own)
@@ -1133,7 +1133,7 @@ pub fn tracker_root(root: &Path) -> Option<PathBuf> {
 /// 저장소 디렉터리가 맡아(moai-3aec), 이제는 시험이 [`git_dirs`] 의 훑기를 재는 데만 쓴다.
 #[cfg(test)]
 fn top_of(root: &Path) -> Option<PathBuf> {
-    git_dirs(root).map(|(top, _)| canonical(top))
+    git_dirs(root).map(|(top, _)| real(top))
 }
 
 /// **main 워크트리의 꼭대기** — 자리 경로를 여기서 잰다(moai-fygk).
@@ -1149,7 +1149,7 @@ fn top_of(root: &Path) -> Option<PathBuf> {
 /// 잰다 — git 이 적어 둔 파일을 다시 안 읽는다. 그래서 **늘 자가 있다** — 목록을 읽었으면 공용
 /// 디렉터리도 이미 찾은 것이다.
 fn main_top(disk: &Disk) -> PathBuf {
-    disk.main().map_or_else(|| canonical(&disk.common), |t| canonical(&t.path))
+    disk.main().map_or_else(|| real(&disk.common), |t| real(&t.path))
 }
 
 /// 워크트리 경로를 [`main_top`] 에서 잰 것으로. **늘 상대 경로다**(moai-xpd7·moai-3aec, 2026-09-18
@@ -1160,7 +1160,7 @@ fn main_top(disk: &Disk) -> PathBuf {
 /// `--json` 의 `path` 가 `""` 로 나간다. 겹치는 머리가 없으면(다른 드라이브) 그대로 둔다 — 잴 자가 없다.
 fn from_top(top: &Path, path: &Path) -> PathBuf {
     use std::path::Component;
-    let path = canonical(path);
+    let path = real(path);
     let (up, down): (Vec<Component>, Vec<Component>) = (top.components().collect(), path.components().collect());
     let same = up.iter().zip(&down).take_while(|(a, b)| a == b).count();
     if same == 0 {
@@ -1178,7 +1178,7 @@ fn from_top(top: &Path, path: &Path) -> PathBuf {
 /// "이 판을 어느 파일에서 읽었나" 를 댈 때 쓴다(`cmd::status`): 딸린 워크트리 안에서는 그 자리의
 /// `.moai` 가 아니라 루트의 트래커라, `.moai/issues.jsonl` 로 못박아 두면 보드가 안 읽은 파일을 댄다.
 pub fn told_from(here: &Path, path: &Path) -> String {
-    from_top(&canonical(here), path).display().to_string()
+    from_top(&real(here), path).display().to_string()
 }
 
 /// 자리를 재다 못 읽은 워크트리들 — **두 사실을 두 채널로 가른다**(사용자 결정 2026-09-18, 리뷰
@@ -1284,7 +1284,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
             // 자리로 풀면 멀쩡한 워크트리가 "사라졌다" 로 빠진다(`join` 은 절대 경로면 그대로 둔다).
             let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
                 .ok()
-                .and_then(|g| canonical(&dir.join(g.trim_end())).parent().map(Path::to_path_buf))
+                .and_then(|g| real(&dir.join(g.trim_end())).parent().map(Path::to_path_buf))
                 .filter(|p| p.exists())
             else {
                 continue;
@@ -1294,12 +1294,12 @@ fn on_disk(root: &Path) -> Option<Disk> {
             all.push((Tree { path, label, head: String::new() }, true));
         }
     }
-    let top = canonical(top);
-    let rel = canonical(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
+    let top = real(top);
+    let rel = real(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
     let all = all
         .into_iter()
         .map(|(t, linked)| {
-            let me = canonical(&t.path) == top;
+            let me = real(&t.path) == top;
             (t, linked, me)
         })
         .collect();
@@ -1330,7 +1330,7 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     }
     // 둘 다 풀고 견준다 — [`same_repo`]·[`on_disk`] 와 같은 자다. `main` 은 이미 푼 경로라, 푸지 않은
     // 쪽의 조각을 붙이면 없는 자리가 선다.
-    let rel = canonical(root).strip_prefix(canonical(top)).ok()?.to_path_buf();
+    let rel = real(root).strip_prefix(real(top)).ok()?.to_path_buf();
     let main = common.parent()?;
     // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
     Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
@@ -1393,7 +1393,7 @@ fn git_dirs(root: &Path) -> Option<(&Path, PathBuf)> {
     }
     let up = std::fs::read_to_string(own.join("commondir")).ok()?;
     // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
-    Some((top, canonical(&own.join(up.trim_end()))))
+    Some((top, real(&own.join(up.trim_end()))))
 }
 
 /// 두 뿌리가 **같은 git 저장소의 워크트리에서 같은 자리의 트래커인가** — 공용 git 디렉터리가
@@ -1420,8 +1420,8 @@ pub fn same_repo(a: &Path, b: &Path) -> bool {
 /// 제 뿌리로 적고, 기록이 갈리면 전처럼 판정한다.
 pub fn tracker_place(root: &Path) -> Option<(PathBuf, PathBuf)> {
     let (top, common) = git_dirs(root)?;
-    let rel = canonical(root).strip_prefix(canonical(top)).map(Path::to_path_buf).ok()?;
-    Some((canonical(&common), rel))
+    let rel = real(root).strip_prefix(real(top)).map(Path::to_path_buf).ok()?;
+    Some((real(&common), rel))
 }
 
 /// 워크트리 이름에서 id 후보를 읽는다 — 경로의 끝 이름, 가지 이름, `worktree-` 를 뗀 가지 이름.
@@ -1486,12 +1486,6 @@ fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
         };
         Trouble::Unfound { lost, why: e.said() }
     })
-}
-
-/// 견줄 수 있는 경로. 못 풀면(사라진 경로) 받은 그대로 — 그런 경로는 어차피
-/// 제 워크트리와 같을 수 없다.
-fn canonical(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 #[cfg(test)]
@@ -1572,7 +1566,7 @@ mod tests {
         // 건네받은 바닥은 그 줄을 `early` 로 든다 — 디스크를 다시 팠으면 답이 갈린다.
         let handed = Floor::of(at, &[issue("m-0001", "todo", early)]);
         assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "건네받은 바닥을 두고 그 파일을 다시 팠다");
-        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `canonical`) — 부르는 쪽이 든 자리는
+        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `store::real`) — 부르는 쪽이 든 자리는
         // `Repo` 가 찾아 오른 경로고 자리 셈의 것은 git 이 적어 둔 목록에서 지은 경로라, 같은 파일이
         // 글자만 다르게 올 수 있다. 정규화를 걷으면 이 줄이 먼저 붉어진다.
         let spelt = main.join(".moai").join("..").join(".moai").join("issues.jsonl");
@@ -1800,13 +1794,13 @@ mod tests {
         assert!(above.is_some_and(|t| t != *bare.path()), "임시 자리가 체크아웃 밖이다 — 이 시험이 흉내 낼 것이 없다");
 
         let dir = crate::scratch::Scratch::fenced_in(&inside, "fence");
-        assert_eq!(top_of(dir.path()).as_deref(), Some(canonical(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
+        assert_eq!(top_of(dir.path()).as_deref(), Some(real(dir.path()).as_path()), "훑기가 울타리를 넘어갔다");
         assert!(away(dir.path()).names.is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
         assert!(away(&dir.join("nowhere")).names.is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
         let git_top =
             crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
-        assert_eq!(git_top.ok(), Some(canonical(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
+        assert_eq!(git_top.ok(), Some(real(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
     }
 
     /// **딸린 워크트리의 트래커는 주 워크트리의 같은 자리로 옮겨 간다**(moai-y7go) — 하위 디렉터리의
@@ -1815,7 +1809,7 @@ mod tests {
     #[test]
     fn a_linked_tracker_points_at_the_main_one() {
         let scratch = crate::scratch::Scratch::fenced("main-root");
-        let base = canonical(scratch.path());
+        let base = real(scratch.path());
         let main = base.join("main");
         std::fs::create_dir_all(main.join("sub")).unwrap();
         let run = |dir: &Path, args: &[&str]| {
