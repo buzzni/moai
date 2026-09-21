@@ -214,3 +214,7 @@
 {"ts":"2026-09-21T17:16:24Z","id":"moai-hela.2j9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드로 도는 중이다. 원문 노트와 닫는 한 줄을 남기며 닫고, 그 뒤 에픽을 develop 에 병합한다."}
 {"ts":"2026-09-21T17:20:43Z","id":"moai-vlld","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"글리프를 걷어 이 에픽이 낸 것이 화면에 없다(5850aa1). 다시 세우려면 줄머리 폭을 먼저 푼다 — 표식이 붙어도 두 칸으로 서는 길을 찾기 전에는 같은 자리로 돌아온다. moai-fgyg 의 노트가 그 자리를 댄다."}
 {"ts":"2026-09-21T17:21:34Z","id":"moai-u1xz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 진행 막대가 미룬 것을 분모에 센다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-hjly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 셈이 미룬 것을 어떻게 세는가"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-zxwj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 진행이 미룬 것을 분모에서 가른다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-hjly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-u1xz 에서 펼쳤다 — 마일스톤 진행 막대가 미룬 것을 분모에 센다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-u1xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hjly 로 펼쳤다 (이슈 1건)"}
