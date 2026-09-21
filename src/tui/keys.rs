@@ -729,6 +729,11 @@ impl Browse {
             // **자리 고르기도 상세가 서 있을 때만이다**(moai-e7r3) — 숨긴 칸의 자리를 돌리면 아무
             // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v p` 고, 그 줄은 여기 없다.
             FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
+            // **좌우 이웃은 좌우로 갈랐을 때만 있다**(리뷰) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
+            // 은 제자리다(`Pane::step`, vim 그대로). 그런데도 바가 "→ 탐색기" 라고 대면 지금 선 칸의
+            // 이름을 가리키는 키가 서는 셈이라, 위의 줄이 막은 것과 같은 거짓말이다. 그때 칸을 옮기는
+            // 것은 `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
+            Focus(_) if c.detail_at.vertical() => Err(Off::Quiet),
             Column(n) if usize::from(n) >= c.columns => Err(Off::Quiet),
             // 등록한 프로젝트가 없으면 층 자체가 없다 — 헤더도 번호를 안 대므로 `0`(전체)까지
             // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.

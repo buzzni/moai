@@ -35,9 +35,12 @@ const LEFT: u16 = 55;
 /// 든다: id·제목·칸·날짜에 여남은 줄이면 서고, 목록은 줄이 많을수록 값이 는다.
 const ABOVE: u16 = 70;
 
-/// 위아래로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 넉 줄. 가로의 `Min(10)` 과 같은 자리고,
-/// 단위만 칸에서 줄로 바뀐다.
+/// 위아래로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 넉 줄. 가로의 [`DETAIL_MIN_H`] 와 같은
+/// 자리고, 단위만 칸에서 줄로 바뀐다.
 const DETAIL_MIN_V: u16 = 6;
+
+/// 좌우로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 여덟 칸. 세로의 [`DETAIL_MIN_V`] 와 짝이다.
+const DETAIL_MIN_H: u16 = 10;
 
 /// 위아래로 갈랐을 때 **목록**의 바닥 — 테두리 둘과 줄 하나. [`super::menu::BODY_MIN`] 과 같은
 /// 꼴이다: 커서가 선 줄이 안 보이면 상세가 무엇에 대한 것인지를 잃는다.
@@ -126,6 +129,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     ])
     .areas(area);
     let (left, right) = split_body(body, app);
+    // **안 선 칸에는 포커스가 못 선다**(리뷰, moai-l7e2). 세로로 접힌 상세는 `detail_open` 이 켜진
+    // 채로 자리가 없다 — 그대로 두면 `Ctrl-w w` 가 안 그려진 칸으로 가고, 거기서 ↑↓ 는 보이지 않는
+    // 글을 굴려 목록이 멈춘 것처럼 보인다. 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은
+    // 자고, 접는 판단은 자리를 아는 쪽(여기)만 할 수 있어 그린 뒤에 되돌린다.
+    if right.is_none() {
+        app.focus = Pane::Explorer;
+    }
 
     // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
     // 들고 있다가 아래에서 스피너와 함께 센다.
@@ -900,7 +910,7 @@ fn version_said(lang: Lang) -> String {
 ///
 /// - **가로는 폭, 세로는 높이다.** [`LEFT`] 를 높이에 그대로 쓰면 상세가 화면을 반 넘게 먹으므로
 ///   세로는 [`ABOVE`] 로 따로 잰다
-/// - **낮으면 세로로는 아예 안 연다**(moai-l7e2). 가로의 `Min(10)` 은 좁아도 두 칸이 서지만, 세로로
+/// - **낮으면 세로로는 아예 안 연다**(moai-l7e2). 가로의 [`DETAIL_MIN_H`] 는 좁아도 두 칸이 서지만, 세로로
 ///   눌린 목록은 커서가 선 줄조차 못 내 상세가 무엇에 대한 것인지를 잃는다. 그때는 숨긴 것과 같은
 ///   답(`None`)을 내 목록이 몸통을 다 쓴다 — [`super::menu::BODY_MIN`] 이 격자를 접는 것과 같은 꼴이다
 ///
@@ -912,10 +922,10 @@ fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
         return (body, None);
     }
     let at = app.detail_at;
-    let (share, least) = if at.vertical() { (ABOVE, DETAIL_MIN_V) } else { (LEFT, 10) };
     if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
         return (body, None);
     }
+    let (share, least) = if at.vertical() { (ABOVE, DETAIL_MIN_V) } else { (LEFT, DETAIL_MIN_H) };
     // 앞에 서는 쪽이 첫 조각이다 — 목록의 몫(`share`)은 어느 쪽에 서든 목록을 따라간다.
     let hold = if at.first() {
         [Constraint::Min(least), Constraint::Percentage(share)]
@@ -3171,6 +3181,19 @@ pub(super) mod tests {
         let (list, detail) = split_body(just, &a);
         let detail = detail.expect("바닥만큼인 창에서 접혔다");
         assert!(list.height >= LIST_MIN_V && detail.height >= DETAIL_MIN_V, "{list:?} {detail:?}");
+
+        // **안 선 칸에는 포커스가 못 선다**(리뷰). 접힌 상세는 `detail_open` 이 켜진 채로 자리가
+        // 없다 — 거기 포커스가 남으면 ↑↓ 가 보이지 않는 글을 굴려 목록이 멈춘 것처럼 보인다.
+        // 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은 자다.
+        let mut squeezed = app();
+        squeezed.detail_at = DetailAt::Bottom;
+        squeezed.focus = Pane::Detail;
+        render(&mut squeezed, 100, 10);
+        assert_eq!(squeezed.focus, Pane::Explorer, "접힌 상세에 포커스가 남았다");
+        // 자리가 서는 창에서는 그대로 둔다 — 걷는 것은 자리가 없을 때뿐이다.
+        squeezed.focus = Pane::Detail;
+        render(&mut squeezed, 100, 40);
+        assert_eq!(squeezed.focus, Pane::Detail, "자리가 선 상세에서 포커스가 걷혔다");
     }
 
     /// **열 이름 줄은 꺼 둔다**(moai-3fnf) — 줄 하나를 먹어 좁은 창 시험의 자리 셈을 다 바꾼다.

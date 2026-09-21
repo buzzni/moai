@@ -2122,19 +2122,13 @@ impl App {
         //
         // **못 풀어도 막지 않는다** — UTC 로 떨어지고 그 까닭은 다른 설정 탈과 나란히 한 줄로 선다
         // (moai-77ap). 사람이 고른 이름이 못 풀린 것도 같은 자리다: 설정의 그 줄은 안 건드린다.
-        let (system, why) = crate::tz::Zone::system();
-        self.zone = system;
-        problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));
+        //
+        // **고르는 것도 할 말을 고르는 것도 `tz` 한 자다**(`tz::chosen`, 리뷰) — 까닭은 화면이
+        // 실제로 선 시계의 것 하나여야 한다.
+        let (zone, why) = crate::tz::chosen(look.timezone.as_deref());
+        self.zone = zone;
         self.saved_zone = look.timezone.clone();
-        if let Some(name) = look.timezone.as_deref() {
-            match crate::tz::Zone::load(name) {
-                Ok(z) => self.zone = z,
-                Err(w) => {
-                    self.zone = crate::tz::Zone::utc();
-                    problems.push(crate::view::zone_trouble(self.site.lang, &w));
-                }
-            }
-        }
+        problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
         // **열만은 파일이 적은 것을 그대로 든다**(moai-6bc0 단계 리뷰). 다른 키는 입힌 결과가 곧 파일의
@@ -3968,10 +3962,7 @@ impl App {
             Mode::Idea(form) => form.paste(s),
             Mode::Pick(picker) => picker.paste(s),
             // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
-            Mode::Zone(z) => {
-                z.typing.paste(s);
-                z.settle();
-            }
+            Mode::Zone(z) => z.paste(s),
             Mode::Unregister(_) => self.mode = Mode::Browse,
         }
     }
@@ -7846,12 +7837,24 @@ mod tests {
             }
         }
         // 위아래로 갈랐으면 좌우 이웃이 없다 — vim 그대로 제자리고, 옮기는 것은 `Ctrl-w w` 다.
+        // **그래서 그 두 키는 바에도 안 선다**(리뷰) — 지금 선 칸의 이름을 가리키는 키가 서면
+        // 숨긴 상세에서 `Tab` 을 걷은 것과 같은 거짓말이다.
         for at in [DetailAt::Top, DetailAt::Bottom] {
             for from in Pane::ALL {
                 assert_eq!(from.step(keys::Side::Left, at), from, "{at:?} 에서 Ctrl-w h 가 움직였다");
                 assert_eq!(from.step(keys::Side::Right, at), from, "{at:?} 에서 Ctrl-w l 이 움직였다");
                 assert_ne!(from.next(), from, "Ctrl-w w 마저 제자리다");
             }
+            let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
+            for side in [keys::Side::Left, keys::Side::Right] {
+                assert!(keys::Browse::Focus(side).enabled(&c).is_err(), "{at:?} 에서 Ctrl-w {side:?} 가 섰다");
+            }
+            // 칸을 도는 키는 그대로 선다 — 그쪽은 위아래로도 무언가 한다.
+            assert!(keys::Browse::FocusNext.enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w w 가 걷혔다");
+        }
+        for at in [DetailAt::Left, DetailAt::Right] {
+            let c = keys::Ctx { detail: true, detail_at: at, ..a.key_ctx(&[]) };
+            assert!(keys::Browse::Focus(keys::Side::Left).enabled(&c).is_ok(), "{at:?} 에서 Ctrl-w h 가 걷혔다");
         }
         a.detail_at = DetailAt::Right;
 
@@ -7893,6 +7896,12 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("Mars/Olympus")), "{:?}", a.notice);
         let text = std::fs::read_to_string(&user).expect("시간대가 설정에 안 적혔다");
         assert!(text.contains("timezone = \"Mars/Olympus\""), "떨어진 UTC 를 적었다 — {text}");
+
+        // **성한 고르기가 남의 알림을 안 지운다**(리뷰) — `notice` 는 한 자리를 나눠 쓰는데,
+        // 여기서 비우면 못 읽은 옆 스냅샷 같은 무관한 배너가 시간대 한 번에 사라진다.
+        a.notice = Some("옆 워크트리를 못 읽었다".into());
+        a.set_zone("UTC");
+        assert_eq!(a.notice.as_deref(), Some("옆 워크트리를 못 읽었다"), "성한 고르기가 남의 알림을 지웠다");
 
         // **Esc 는 아무것도 안 바꾼다.**
         let before = a.zone.name().to_string();

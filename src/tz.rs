@@ -153,21 +153,105 @@ fn safe_join(dir: &Path, name: &str) -> Option<PathBuf> {
 
 /// 시스템이 대는 이름. `TZ` 가 먼저고, 그다음이 `/etc/localtime` 이 가리키는 자리다.
 fn system_name() -> Option<String> {
-    // `TZ=:Asia/Seoul` 처럼 콜론을 다는 꼴이 있다(POSIX). `TZ=UTC+9` 같은 POSIX 규칙 글은
-    // 이름이 아니라 규칙이라 안 받는다 — 받으면 이름으로 tzdb 를 뒤지다 못 찾고 UTC 로 떨어진다.
-    if let Some(raw) = std::env::var_os("TZ") {
-        let raw = raw.to_string_lossy().trim_start_matches(':').to_string();
-        if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)) {
-            return Some(raw);
-        }
+    if let Some(name) = env_name() {
+        return Some(name);
     }
     let link = std::fs::read_link("/etc/localtime").ok()?;
     let dir = zoneinfo();
     // 링크가 tzdb 안을 가리키면 그 아래 경로가 곧 이름이다. 밖을 가리키면 이름을 모른다 —
     // 자료는 읽을 수 있어도 **무엇이라 불러야 할지**를 모르므로 설정에 적을 수 없다.
-    let rel = link.strip_prefix(&dir).ok().or_else(|| link.strip_prefix("/usr/share/zoneinfo").ok())?;
-    let name = rel.to_str()?.to_string();
-    (!name.is_empty()).then_some(name)
+    name_under(&link, &dir)
+        .or_else(|| name_under(&link, Path::new("/usr/share/zoneinfo")))
+        // **글자로 못 맞추면 그때만 파일 시스템에 묻는다**(리뷰) — 링크가 또 링크이거나
+        // (`/etc/localtime` → `/etc/zoneinfo/…`), tzdb 디렉터리 자체가 링크인 기계가 있다
+        // (macOS 의 `/usr/share/zoneinfo` → `/var/db/timezone/zoneinfo`). 거기서 포기하면 화면이
+        // UTC 로 서면서 **매 명령**에 "시스템이 제 시간대를 안 댄다" 가 붙는다.
+        .or_else(|| {
+            let real = std::fs::canonicalize("/etc/localtime").ok()?;
+            [std::fs::canonicalize(&dir).ok(), std::fs::canonicalize("/usr/share/zoneinfo").ok()]
+                .into_iter()
+                .flatten()
+                .find_map(|root| name_under(&real, &root))
+        })
+}
+
+/// `TZ` 가 대는 이름. 없거나 이름 꼴이 아니면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
+fn env_name() -> Option<String> {
+    // `TZ=:Asia/Seoul` 처럼 콜론을 다는 꼴이 있다(POSIX).
+    let raw = std::env::var_os("TZ")?.to_string_lossy().trim_start_matches(':').to_string();
+    // **빈 `TZ` 는 UTC 다**(POSIX) — 설정해 두고 비운 것은 "여기는 UTC 로 보겠다" 는 말이지
+    // "안 정했다" 가 아니다. 안 받고 `/etc/localtime` 으로 내려가면 같은 기계의 다른 도구와
+    // 시각이 갈린다.
+    if raw.is_empty() {
+        return Some("UTC".into());
+    }
+    // 경로로 준 꼴(`TZ=:/etc/localtime`·`TZ=/usr/share/zoneinfo/Asia/Seoul`)은 링크와 **같은 자**로
+    // 푼다(리뷰). 이름으로 넘기면 `safe_join` 이 절대 경로를 막아 `Unknown` 이 되고, 그렇게 둔
+    // 기계에서는 매 명령에 "이 시간대를 모른다" 가 붙는다. tzdb 밖을 가리키면 이름을 모르는
+    // 것이라 다음 자리(`/etc/localtime`)로 내려간다.
+    if raw.starts_with('/') {
+        let at = PathBuf::from(&raw);
+        return name_under(&at, &zoneinfo()).or_else(|| name_under(&at, Path::new("/usr/share/zoneinfo")));
+    }
+    // **이름 꼴만 받는다.** `TZ=<+09>-9` 같은 POSIX 규칙 글은 이름이 아니다. `EST5EDT`·`Etc/GMT+9`
+    // 처럼 숫자와 부호를 쓰는 **진짜 이름**이 있어 숫자로는 못 가르므로, 가르는 것은 글자뿐이다 —
+    // 그물을 빠져나온 규칙 글은 tzdb 에서 못 찾고 UTC 로 떨어지며 한 줄로 알린다.
+    raw.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)).then_some(raw)
+}
+
+/// `at` 이 `dir` 밑을 가리키면 그 아래 경로가 곧 시간대 이름이다.
+///
+/// **상대 링크를 푼다**(리뷰). systemd 의 `timedatectl set-timezone` 은 `/etc/localtime` 을
+/// `../usr/share/zoneinfo/<이름>` 으로 건다 — 절대로 거는 배포판도 있어 둘 다 산다. 상대인 것을
+/// 그대로 잘라 내려 하면 어느 접두어와도 안 맞아 이름을 못 얻고, 그 기계에서는 화면이 UTC 로
+/// 서면서 매 명령에 "시스템이 제 시간대를 안 댄다" 가 붙는다 — 이 기능이 고치려던 바로 그 자리다.
+///
+/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다. 물어야 하는 자리(링크의 링크, 링크인
+/// tzdb 디렉터리)는 부르는 쪽이 `canonicalize` 로 한 번 더 댄다.
+fn name_under(at: &Path, dir: &Path) -> Option<String> {
+    let full = match at.is_absolute() {
+        true => at.to_path_buf(),
+        // `/etc/localtime` 의 링크라 기준은 `/etc` 다.
+        false => flatten(&Path::new("/etc").join(at)),
+    };
+    let name = full.strip_prefix(dir).ok()?.to_str()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// 경로의 `.`·`..` 를 **글자로만** 접는다. `canonicalize` 와 달리 파일 시스템을 안 본다 —
+/// 없는 자리도 접을 수 있어야 하고, 접는 값이 이름 하나를 얻는 값보다 크면 안 된다.
+fn flatten(at: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in at.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다
+/// ([`Zone::system`]).
+///
+/// **까닭은 화면이 실제로 선 시계의 것 하나다**(리뷰). 시스템을 못 풀었어도 고른 이름이 서면
+/// 시스템 쪽 까닭은 할 말이 아니다 — 화면은 그 이름으로 서는데 "시각은 UTC 로 선다" 가 나란히
+/// 붙으면 둘 중 어느 쪽을 믿을지 사람이 정해야 한다. `/etc/localtime` 을 상대 링크로 거는 기계
+/// (systemd 의 `timedatectl`)가 흔해서 실제로 겹치는 자리다.
+///
+/// 못 푼 이름은 UTC 로 떨어지고 **그 이름의** 까닭을 댄다 — 막지 않는다(moai-77ap).
+pub fn chosen(picked: Option<&str>) -> (Zone, Option<Trouble>) {
+    match picked {
+        None => Zone::system(),
+        Some(name) => match Zone::load(name) {
+            Ok(z) => (z, None),
+            Err(why) => (Zone::utc(), Some(why)),
+        },
+    }
 }
 
 /// 이 기계가 아는 이름 전부 — 고르는 창(`SPC o t`)이 읽는다. 차례는 이름순이다.
@@ -186,13 +270,19 @@ pub fn names() -> (Vec<String>, Option<Trouble>) {
         return (Vec::new(), Some(Trouble::NoTzdb { at: dir }));
     }
     let mut out = Vec::new();
-    walk(&dir, &dir, &mut out);
+    walk(&dir, &dir, &mut out, DEEP);
     out.sort();
     out.dedup();
     (out, None)
 }
 
-fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
+/// 몇 층까지 내려가나. tzdb 가 가장 깊은 자리는 두 층이고(`America/Argentina/Buenos_Aires`),
+/// 나머지는 여유다. **바닥이 있어야 하는 까닭은 링크다**(리뷰) — `at.is_dir()` 은 심볼릭 링크를
+/// 따라가므로, tzdb 안에 제 위를 가리키는 링크가 하나 있으면 끝없이 내려가다 스택이 터진다.
+/// 이 자리는 `TZDIR` 로 갈아 끼울 수 있어 남이 지은 디렉터리일 수도 있다.
+const DEEP: usize = 8;
+
+fn walk(dir: &Path, root: &Path, out: &mut Vec<String>, left: usize) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -205,7 +295,8 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
         }
         // `file_type` 은 심볼릭 링크를 안 따라간다 — 링크도 자료라 열어 본다.
         match at.is_dir() {
-            true => walk(&at, root, out),
+            true if left > 0 => walk(&at, root, out, left - 1),
+            true => {}
             false if is_tzif(&at) => out.push(name.to_string()),
             false => {}
         }
@@ -364,6 +455,35 @@ mod tests {
         assert_eq!(safe_join(dir, "UTC"), Some(dir.join("UTC")));
     }
 
+    /// **`/etc/localtime` 은 상대로도 걸린다**(리뷰). systemd 의 `timedatectl set-timezone` 은
+    /// `../usr/share/zoneinfo/<이름>` 으로 걸고, 절대로 거는 배포판도 있어 둘 다 산다. 상대인 것을
+    /// 그대로 잘라 내려 하면 어느 접두어와도 안 맞아, 그 기계에서는 화면이 UTC 로 서면서 매 명령에
+    /// "시스템이 제 시간대를 안 댄다" 가 붙는다 — 이 기능이 고치려던 바로 그 자리다.
+    #[test]
+    fn a_relative_localtime_link_still_names_its_zone() {
+        let dir = Path::new("/usr/share/zoneinfo");
+        assert_eq!(name_under(Path::new("/usr/share/zoneinfo/Asia/Seoul"), dir), Some("Asia/Seoul".into()));
+        assert_eq!(name_under(Path::new("../usr/share/zoneinfo/Asia/Seoul"), dir), Some("Asia/Seoul".into()));
+        assert_eq!(name_under(Path::new("../usr/share/zoneinfo/UTC"), dir), Some("UTC".into()));
+        // tzdb 밖을 가리키면 이름을 모른다 — 자료는 읽혀도 무엇이라 부를지를 모른다.
+        assert_eq!(name_under(Path::new("/etc/localtime"), dir), None);
+        assert_eq!(name_under(Path::new("../var/db/timezone/Asia/Seoul"), dir), None);
+        // 제 자리를 가리키는 링크는 이름이 아니다 — 빈 글자가 이름으로 서지 않는다.
+        assert_eq!(name_under(dir, dir), None);
+    }
+
+    /// **`TZ` 의 꼴 셋**(리뷰) — 빈 글은 UTC(POSIX), 경로는 링크와 같은 자로 풀고, 그 밖은 이름이다.
+    #[test]
+    fn the_tz_variable_takes_a_name_a_path_or_nothing() {
+        let zone = Path::new("/usr/share/zoneinfo");
+        assert_eq!(name_under(Path::new("/usr/share/zoneinfo/Asia/Tokyo"), zone), Some("Asia/Tokyo".into()));
+        // `TZ=:/etc/localtime` 은 tzdb 밖이라 이름이 아니다 — 다음 자리로 내려간다.
+        assert_eq!(name_under(Path::new("/etc/localtime"), zone), None);
+        // `..` 은 글자로만 접는다 — 없는 자리도 접힌다.
+        assert_eq!(flatten(Path::new("/etc/../usr/share/zoneinfo/UTC")), PathBuf::from("/usr/share/zoneinfo/UTC"));
+        assert_eq!(flatten(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+    }
+
     /// 손으로 지은 TZif 를 판 1·판 2 두 꼴로 읽는다. **판 2 면 뒤 자료를 읽는다** — 앞의 32비트
     /// 시각은 2038년에 끊기고, 그 자료를 읽으면 그 뒤의 전환이 통째로 사라진다.
     #[test]
@@ -412,6 +532,26 @@ mod tests {
             out.push(0);
         }
         out
+    }
+
+    /// **까닭은 화면이 실제로 선 시계의 것 하나다**(리뷰). 고른 이름이 서면 시스템을 못 푼 까닭은
+    /// 할 말이 아니다 — 화면은 그 이름으로 서는데 "시각은 UTC 로 선다" 가 나란히 붙으면 둘 중
+    /// 어느 쪽을 믿을지 사람이 정해야 한다. `/etc/localtime` 을 상대 링크로 거는 기계가 흔해
+    /// 실제로 겹치는 자리다.
+    #[test]
+    fn the_chosen_zone_answers_for_itself() {
+        // `UTC` 는 자료를 안 보므로 tzdb 없는 기계에서도 선다 — 그때도 할 말은 없다.
+        assert_eq!(chosen(Some("UTC")), (Zone::utc(), None));
+        // 못 푼 이름은 UTC 로 떨어지고 **그 이름의** 까닭을 댄다(자료가 아예 없으면 그 까닭이다).
+        let (z, why) = chosen(Some("Mars/Olympus"));
+        assert!(z.is_utc(), "못 푼 이름으로 시계가 섰다");
+        match why {
+            Some(Trouble::Unknown { name }) => assert_eq!(name, "Mars/Olympus"),
+            Some(Trouble::NoTzdb { .. }) => {}
+            other => panic!("못 푼 이름의 까닭이 아니다 — {other:?}"),
+        }
+        // 고른 적이 없으면 시스템이 답한다 — 까닭도 시스템의 것이다.
+        assert_eq!(chosen(None), Zone::system());
     }
 
     /// **이 기계가 무엇을 쓰든 답이 있다.** 시스템이 이름을 안 대면 UTC 와 까닭을 함께 낸다 —

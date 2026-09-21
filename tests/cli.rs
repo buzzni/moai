@@ -5980,11 +5980,18 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
         String::from_utf8(out.stdout).unwrap()
     };
 
-    // 시계는 `MOAI_NOW` 로 못박혀 있다 — 04:12 UTC 다.
+    // 시계는 `MOAI_NOW` 로 못박혀 있다 — 04:12 UTC 다. `UTC` 는 자료를 안 보므로
+    // (`tz::Zone::load`) 이 줄만은 tzdb 없는 기계에서도 선다.
     assert!(at("UTC").contains("2026-09-11 04:12"), "{}", at("UTC"));
-    assert!(at("Asia/Seoul").contains("2026-09-11 13:12"), "{}", at("Asia/Seoul"));
-    // 날짜를 넘는 쪽도 같은 자로 넘어간다.
-    assert!(at("America/New_York").contains("2026-09-11 00:12"), "{}", at("America/New_York"));
+    // **자료가 있는 기계에서만 잰다**(리뷰) — 옮겨 적는 자를 재는 `src/view.rs` 의 시험과 같은
+    // 조심이다. 릴리스가 정적 musl 판이라 zoneinfo 없는 기계도 받는 자리인데(moai-77ap), 거기서
+    // 시험이 붉어지면 "동작이 바뀐 것" 과 "기계에 자료가 없는 것" 을 못 가린다.
+    let tzdb = std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists();
+    if tzdb {
+        assert!(at("Asia/Seoul").contains("2026-09-11 13:12"), "{}", at("Asia/Seoul"));
+        // 날짜를 넘는 쪽도 같은 자로 넘어간다.
+        assert!(at("America/New_York").contains("2026-09-11 00:12"), "{}", at("America/New_York"));
+    }
 
     // **파일과 `--json` 은 그대로다.**
     assert!(issues(s.path()).contains(NOW), "스냅샷의 시각이 시간대를 탔다");
@@ -6001,7 +6008,12 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
         staged(&["show", &id]).current_dir(s.path()).env("TZ", "Mars/Olympus").output().expect("moai 를 못 돌렸다");
     assert!(out.status.success(), "못 푼 시간대가 명령을 막았다");
     let said = String::from_utf8(out.stderr).unwrap();
-    assert!(said.contains("Mars/Olympus") && said.lines().count() == 1, "{said:?}");
+    // **한 줄이라는 것이 이 줄의 뜻이다** — 자료가 없는 기계에서는 까닭이 "tzdb 가 없다" 로 바뀌고,
+    // 이름을 안 댄다. 막지 않는 것과 줄 수는 어느 기계에서나 같다.
+    assert_eq!(said.lines().count(), 1, "{said:?}");
+    if tzdb {
+        assert!(said.contains("Mars/Olympus"), "{said:?}");
+    }
     assert!(String::from_utf8(out.stdout).unwrap().contains("2026-09-11 04:12"), "UTC 로 안 떨어졌다");
 }
 
