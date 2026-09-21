@@ -45,10 +45,6 @@ pub struct Layer {
     pub places: Vec<Place>,
     /// 사용자 설정을 읽다 만난 것. 층에 선 동안 배너가 비춘다.
     pub problems: Vec<String>,
-    /// 그 탈의 갈래([`user_config::Trouble`], moai-9p7v). **[`App::relayer`] 는 이제 갈래를 안 가린다**
-    /// (moai-po6v) — 어느 탈이든 들고 있던 층을 두므로, 이 값을 보고 갈라서는 자리는 없다. 다시 읽을
-    /// 때를 정하는 자는 층이 아니라 [`App::config_tried`] 다. 여기 새 갈래를 매달지 않는다.
-    pub trouble: Option<user_config::Trouble>,
     /// 읽은 사용자 설정 파일. 그 파일이 바뀌면 걸음이 여기를 다시 읽는다(`App::follow_config`) — **시험은 제 임시 파일을 준다.**
     /// 환경을 다시 보면 돌리는 사람의 설정을 읽는다.
     pub config: Option<PathBuf>,
@@ -396,7 +392,10 @@ impl Layer {
             // (moai-dpbi) `reg.problems` 만 베끼면 층의 배너가 `lang` 오타를 잃는다. 탐색기의 말은
             // 말은 부른 쪽이 고른 것이다.
             problems: crate::view::settings_problems(reg, lang),
-            trouble: reg.trouble,
+            // **탈의 갈래는 층에 안 싣는다**(moai-n6tm) — 세운 다음 줄에서 한 번 읽히고 죽는
+            // 칸이었고, 층이 오래 설수록 낡은 답을 들고 있는데 그 값을 지키는 자가 없었다.
+            // 묻는 자리는 읽은 설정(`user_config::Registry::trouble`)과, 다시 읽을 때를 정하는
+            // [`App::config_tried`] 둘이다.
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),
             pending: None,
@@ -965,8 +964,12 @@ impl App {
     /// `None` 이면 제가 읽는다 — **층을 다시 세우는 길은 세우던 층의 파일(`Layer::config`)에서, 처음
     /// 세우는 길은 `App::user_config` 에서.** 둘은 같은 자리를 가리키도록 `cmd::tui` 가 한 번에 준다
     /// (`user_config::path`). `Some` 을 받으면 그 설정의 자리가 곧 새 층의 자리다(`Layer::of` 가
-    /// `Registry::path` 를 든다, moai-y61p) — 부르는 쪽이 같은 파일을 읽어 넘길 때만 맞는 말이라,
-    /// 다른 파일의 설정을 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 간다.
+    /// `Registry::path` 를 든다, moai-y61p).
+    ///
+    /// **넘겨받은 설정이 그 파일의 것이 아니면 안 쓴다**(moai-n6tm) — 제가 읽는 길로 떨어진다.
+    /// 여태 "같은 파일을 읽어 넘길 때만 맞는 말" 이라고 글로만 적어 두었는데, 어긋난 설정을
+    /// 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 가 되돌릴 길이 도구 밖에만 남는다.
+    /// 값은 이미 읽은 판에서 `Option<PathBuf>` 견주기 하나고, 어긋난 판에서만 한 번 더 읽는다.
     ///
     /// **층을 다시 세웠는지를 돌려준다**(moai-6ek1, [`Relayered`]). [`Relayered::Lost`] 면 들고 있던
     /// 층이 그대로고 `land` 도 함께 버려졌다 — 설정을 썼다는 것과 층이 그것을 들었다는 것은 다른
@@ -983,10 +986,16 @@ impl App {
                 // **말은 화면에서 온다**(moai-ra67) — 다시 세운 층은 설정에서 나므로 제 말을 모른다.
                 // 안 주면 설정 파일이 한 번 바뀔 때마다 못 연 프로젝트의 한 줄만 기본 말로 돌아간다.
                 let lang = self.site.lang;
-                let fresh = match reg {
-                    Some(reg) => Layer::of(reg, here.as_deref(), lang),
-                    None => Layer::read(self.user_config.as_deref(), here.as_deref(), lang),
+                let want = self.user_config.clone();
+                let mine;
+                let reg = match reg.filter(|r| r.path == want) {
+                    Some(reg) => reg,
+                    None => {
+                        mine = user_config::read(want.as_deref());
+                        &mine
+                    }
                 };
+                let fresh = Layer::of(reg, here.as_deref(), lang);
                 // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
                 // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
                 // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 댈 까닭이 없으면 `None` 이다 — 없는 파일이
@@ -994,7 +1003,7 @@ impl App {
                 //
                 // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
                 // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
-                if fresh.trouble.is_some() || !fresh.registered() {
+                if reg.trouble.is_some() || !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh, self.site.lang);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
@@ -1007,10 +1016,22 @@ impl App {
             Some(mut old) => {
                 // 말은 화면에서 온다 — 위와 같은 자리다(moai-ra67).
                 let lang = self.site.lang;
-                let mut fresh = match reg {
-                    Some(reg) => Layer::of(reg, old.launch.as_deref(), lang),
-                    None => Layer::read(old.config.as_deref(), old.launch.as_deref(), lang),
+                // **세우던 층의 파일에서 다시 든다** — 넘겨받은 설정이 그 파일의 것이 아니면 버린다
+                // (moai-n6tm). 한때 이 갈래는 넘어온 것을 그대로 써서, 층의 설정 자리가 부르는 쪽의
+                // 것으로 슬쩍 바뀌었다.
+                //
+                // **세우던 층이 제 파일을 모르면 앱의 것이 자리다** — 층은 자리 없는 설정
+                // (`user_config::read(None)`)으로도 서고, 그때는 어긋날 것이 없다.
+                let want = old.config.clone().or_else(|| self.user_config.clone());
+                let mine;
+                let reg = match reg.filter(|r| r.path == want) {
+                    Some(reg) => reg,
+                    None => {
+                        mine = user_config::read(want.as_deref());
+                        &mine
+                    }
                 };
+                let mut fresh = Layer::of(reg, old.launch.as_deref(), lang);
                 // **탈이 있으면 들고 있던 층을 두고 까닭을 단다**(moai-po6v, 사용자 결정 2026-09-19).
                 // 빈 층으로 갈아 끼우면 줄이 통째로 사라지는데, 손으로 누르던 비상구(`SPC r`)는
                 // 걷었다(moai-en4u) — 되돌릴 길이 도구 밖에만 남는다.
@@ -1020,9 +1041,12 @@ impl App {
                 // 통째로 사라졌다. 고칠 것을 비추는 데 필요한 것은 빈 층이 아니라 **까닭 한 줄**이고,
                 // 그것은 아래가 단다.
                 //
-                // **까닭은 새 읽기의 것으로 갈아 끼운다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면
-                // 지금 무엇이 어긋났는지를 덮는다.
-                if fresh.trouble.is_some() {
+                // **까닭은 새 읽기의 것이다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면 지금
+                // 무엇이 어긋났는지를 덮는다. 그 까닭은 읽은 설정(`Registry::trouble`)이 드는 것이지
+                // 층이 드는 것이 아니다(moai-n6tm) — 층에 베껴 두던 칸은 세운 다음 줄에서 한 번
+                // 읽히고 죽었고, 이름이 `App::trouble`(배너 글)과 부딪혀 둘 다 `Option` 이라
+                // 헷갈려도 컴파일됐다.
+                if reg.trouble.is_some() {
                     // **까닭은 `App::held` 로 낸다**(moai-23pm) — 층의 `problems` 는 **읽힌** 설정의
                     // 틀린 줄을 대는 자리라 배너가 `on_layer()` 로 막는다(등록 목록의 일이다). 파일을
                     // 통째로 못 읽은 것은 그 화면과 상관없이 대야 한다.
@@ -1038,7 +1062,6 @@ impl App {
                     if !old.registered() {
                         old.problems.clear();
                     }
-                    old.trouble = fresh.trouble;
                     self.layer = Some(old);
                     return Relayered::Lost;
                 }
@@ -1250,7 +1273,6 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
             })
             .collect(),
         problems: Vec::new(),
-        trouble: None,
         config: None,
         launch: None,
         pending: None,
@@ -3064,6 +3086,43 @@ mod tests {
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "시계가 돌았는데 빚진 읽기를 안 갚았다");
         assert_eq!(a.config_tried.trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **넘겨받은 설정이 층의 파일 것이 아니면 안 쓴다**(moai-n6tm) — [`App::relayer_with`] 의 `Some`
+    /// 갈래가 그것을 그대로 쓰면 층의 설정 자리가 부르는 쪽의 것으로 슬쩍 바뀐다. 그러면 줄은 한
+    /// 파일에서 서고 등록·해제(`SPC p a`·`SPC p d`)는 다른 파일에 가, 되돌릴 길이 도구 밖에만 남는다.
+    /// 여태 그 약속은 그 함수의 문서에 글로만 있었다.
+    #[test]
+    fn a_registry_from_another_file_does_not_become_the_layers_own() {
+        let s = Scratch::fenced("layer-config-swap");
+        let (one, two) = twins(&s);
+        // 층이 선 파일은 `one` 만, 남의 파일은 `two` 만 등록한다 — 갈아 끼우면 줄이 바뀐다.
+        let mine = s.register(&[&one]);
+        let other = s.join("other/config.toml");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, format!("[[project]]\npath = {:?}\n", two.to_str().unwrap())).unwrap();
+
+        let mut a = App::on_projects(Layer::read(Some(&mine), None, crate::i18n::Lang::Ko));
+        a.user_config = Some(mine.clone());
+        assert_eq!(names(&a), ["one"], "시험의 전제 — 층은 제 파일로 섰다");
+
+        let theirs = user_config::read(Some(&other));
+        assert_eq!(names_of(&theirs), ["two"], "시험의 전제 — 남의 파일은 다른 줄을 든다");
+        a.relayer_with(Some(&theirs), None);
+        assert_eq!(names(&a), ["one"], "남의 설정이 층의 줄을 갈아 끼웠다");
+        assert_eq!(
+            a.layer.as_ref().unwrap().config.as_deref(),
+            Some(mine.as_path()),
+            "층의 설정 자리가 남의 파일로 바뀌었다"
+        );
+    }
+
+    /// 설정 하나가 든 프로젝트 이름들 — 위 시험의 전제를 재는 자다.
+    fn names_of(reg: &user_config::Registry) -> Vec<String> {
+        reg.projects
+            .iter()
+            .map(|p| p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+            .collect()
     }
 
     /// **잠깐의 실패는 다음 걸음에 갚는다**(moai-po6v) — 시계를 안 기다린다. 갈래마다 벗어나는 길이
