@@ -673,14 +673,16 @@ fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::
 /// git 이 **찾는** 자리는 다르고, "없다" 는 말은 뒤의 것이라야 참이다. 못 물어봤으면 **있다고
 /// 친다** — 위의 셋과 반대로 기우는 자리다. 여기서 틀리는 값은 조르지 않는 쪽이라야 한다.
 ///
-/// **`GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM` 으로 옮긴 자리는 못 본다.** `crate::git::run` 은 그
-/// 둘을 걷고 git 을 부르므로(`git_leaks::REPO`), 그것으로 전역 설정을 딴 파일에 둔 사람의 줄은
-/// 여기 안 잡히고 옛 거짓말이 그대로 선다 — 잰 것이다. 걷는 쪽을 여기서 되돌리지 않는 까닭은
-/// 그 걷기가 "훅이 넘긴 환경이 어느 저장소를 여는지를 바꾸지 못하게" 하려고 선 결정이고,
-/// `tests/cli.rs` 의 격리도 그 위에 서 있어서다. 흔한 판(`git config --global`)은 `$HOME/.gitconfig`
-/// 이라 잡히고, 남는 것은 그 변수를 쓰는 판뿐이다.
+/// **`GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM` 으로 옮긴 자리도 본다**(moai-b5np). 앞 판은 그 둘을
+/// 걷고 물어(`git_leaks::REPO`), 그것으로 전역 설정을 딴 파일에 둔 사람에게 **실제로 도는**
+/// 드라이버를 "안 심었다" 고 했다 — dotfile 관리기·CI 이미지·컨테이너 래퍼가 밟는 자리다.
+///
+/// **넓히는 것은 이 물음 하나다**([`crate::git::run_reading_user_config`]). `GIT_DIR` 무리는 그대로
+/// 걷는다: 훅이 준 환경이 어느 저장소를 여는지를 바꾸지 못하게 하는 것이 걷기가 선 까닭이고,
+/// `tests/cli.rs` 의 격리는 그 셋을 `/dev/null` 로 채워 두어 그대로 선다.
 fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run(root, &["config", "--get", "--default", "", &driver_key()]).map_or(true, |v| !v.trim().is_empty())
+    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()])
+        .map_or(true, |v| !v.trim().is_empty())
 }
 
 /// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.

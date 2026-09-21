@@ -122,6 +122,9 @@ fn path_without_moai() -> std::ffi::OsString {
 // 물려받으면 git 이 바깥 저장소나 바깥 설정을 보게 되는 변수들 — 단위 시험(`git::command`)과 **한 파일**을
 // 읽는다. 따로 된 크레이트라 `use` 로는 못 가져가고, 두 벌로 두면 한쪽에만 더한 변수가 말없이 갈라진다.
 #[path = "../src/git_leaks.rs"]
+// 이 크레이트가 안 읽는 이름도 그 파일에 산다 — `CONFIG_FILES` 는 `git::run_reading_user_config`
+// 하나가 쓴다(moai-b5np). 목록을 두 벌로 가르지 않는 것이 먼저다.
+#[allow(dead_code)]
 mod git_leaks;
 
 // 임시 자리의 뿌리 — 단위 시험의 `Scratch` 와 **한 파일**을 읽는다(moai-boc6). 그 뿌리가 체크아웃 밖임을
@@ -13761,6 +13764,41 @@ fn status_names_a_clone_that_never_planted_the_driver() {
     std::fs::write(root.join(".gitattributes"), "# 이 저장소는 드라이버를 안 쓴다\n").unwrap();
     let said = ok(root, &["status"]);
     assert!(!said.contains("안 심었다"), "선언이 없는데 졸랐다\n{said}");
+}
+
+/// **옮겨 둔 전역 설정에 심은 줄도 본다**(moai-b5np).
+///
+/// `crate::git::run` 은 `GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM` 을 걷고 git 을 부른다 — 훅이 준
+/// 환경이 어느 저장소를 여는지를 바꾸지 못하게 하는 걷기다. 그 바람에 그 변수로 전역 설정을
+/// 딴 파일에 둔 사람은 **실제로 도는** 드라이버를 두고 "안 심었다" 를 영영 들었다. 넓히는 것은
+/// 이 물음 하나고, 넓힌 자리가 `GIT_DIR` 무리까지 번지지 않는 것을 함께 잰다.
+#[test]
+fn status_sees_a_driver_planted_in_a_relocated_global_config() {
+    let s = init("mergeglobal");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    add(root, &["하나"]);
+
+    // 사람의 전역 설정이 딴 파일에 있다 — 그 파일에 드라이버가 서 있다.
+    let global = root.join("남의자리.gitconfig");
+    std::fs::write(&global, "[merge \"moai\"]\n\tdriver = /어디서든/moai merge-driver %O %A %B %L %P\n").unwrap();
+    let said = |global: &Path| {
+        let mut cmd = isolated(BIN);
+        cmd.args(["status"]).current_dir(root).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW);
+        cmd.env("GIT_CONFIG_GLOBAL", global);
+        let o = cmd.output().expect("moai 를 실행하지 못했다");
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let out = said(&global);
+    assert!(!out.contains("안 심었다"), "이미 도는 드라이버를 안 심었다고 했다\n{out}");
+    // 그 줄은 **재지도 고치라고도 안 한다** — `--local` 에 심은 줄만 잰다.
+    assert!(!out.contains("머지 드라이버"), "넓은 자리의 줄을 재고 말았다\n{out}");
+
+    // 비어 있는 전역 설정이면 그대로 조른다 — 넓혀 본 자리가 답을 통째로 삼키지 않는다.
+    let empty = root.join("빈.gitconfig");
+    std::fs::write(&empty, "").unwrap();
+    assert!(said(&empty).contains("안 심었다"), "안 심은 클론을 안 댔다");
 }
 
 /// **심을 경로는 `--install` 이 고른다**(moai-bq6w, 2026-09-21 사용자 결정).
