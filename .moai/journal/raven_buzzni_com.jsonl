@@ -198,3 +198,27 @@
 {"ts":"2026-09-21T17:08:52Z","id":"moai-6ney","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mdu0 에서 펼쳤다 — 남의 저널 파일 하나가 못 읽히면 show 가 통째로 멈춘다"}
 {"ts":"2026-09-21T17:08:52Z","id":"moai-mdu0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-6ney 로 펼쳤다 (이슈 3건)"}
 {"ts":"2026-09-21T17:09:04Z","id":"moai-f0zk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:09:48Z","id":"moai-nb6w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:13:01Z","id":"moai-jy78","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"빌드 기다림을 걷은 규약과 2026-09-20 의 OOM 이 어긋난다"}
+{"ts":"2026-09-21T17:13:16Z","id":"moai-hela.2j9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 탐색기와 한눈 보기의 값과 모서리"}
+{"ts":"2026-09-21T17:15:28Z","id":"moai-hela.2j9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-snus","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-v8jl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-x7pa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-n6tm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-p4ec","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-ropk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:23Z","id":"moai-0jqh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-nb6w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-cucj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-hela 에 커밋까지 끝났다. 에픽 끝 리뷰(moai-hela.2j9, max)가 도는 중이고, 그 고침을 받은 뒤 develop 에 병합하고 닫는다."}
+{"ts":"2026-09-21T17:16:24Z","id":"moai-hela.2j9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드로 도는 중이다. 원문 노트와 닫는 한 줄을 남기며 닫고, 그 뒤 에픽을 develop 에 병합한다."}
+{"ts":"2026-09-21T17:20:43Z","id":"moai-vlld","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"글리프를 걷어 이 에픽이 낸 것이 화면에 없다(5850aa1). 다시 세우려면 줄머리 폭을 먼저 푼다 — 표식이 붙어도 두 칸으로 서는 길을 찾기 전에는 같은 자리로 돌아온다. moai-fgyg 의 노트가 그 자리를 댄다."}
+{"ts":"2026-09-21T17:21:34Z","id":"moai-u1xz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 진행 막대가 미룬 것을 분모에 센다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-hjly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 셈이 미룬 것을 어떻게 세는가"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-zxwj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 진행이 미룬 것을 분모에서 가른다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-hjly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-u1xz 에서 펼쳤다 — 마일스톤 진행 막대가 미룬 것을 분모에 센다"}
+{"ts":"2026-09-21T17:23:01Z","id":"moai-u1xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-hjly 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-21T17:25:57Z","id":"moai-pkvw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-21T17:25:57Z","id":"moai-h06a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-09-21T17:26:11Z","id":"moai-pkvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 노트의 마지막 줄을 뒤집는다 — 사용자가 done 으로 정했다(2026-09-21).\n\n- 이 일은 실제로 됐다. 글리프를 세웠고 배포까지 갔다. 뒤에 걷은 것은 moai-nb6w 라는\n  제 줄이 따로 있다\n- 칸은 그 줄이 어디 있는가지 그 요구가 아직 서 있는가가 아니다. 앞 노트에서 \"요구가\n  안 풀렸으니 todo\" 라 적은 것이 그 둘을 섞었다\n- 되돌린 까닭과 다시 세울 조건(줄머리 폭을 먼저 푼다)은 앞 노트에 그대로 선다"}
+{"ts":"2026-09-21T17:26:12Z","id":"moai-h06a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pkvw 와 같다 — 사용자가 done 으로 정했다(2026-09-21). 앞 노트의 칸 판단만 뒤집힌다."}
