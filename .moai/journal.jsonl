@@ -6878,3 +6878,15 @@
 {"ts":"2026-09-21T09:56:44Z","id":"moai-ch4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"멤버 둘로 닫는다 — priority(moai-51it)와 훑다 찾은 kind(moai-a4u9). 다음: 없다 — 줄을 내는 표면은 모두 cmd::Row 를 지나고 rm --json 만 일부러의 예외다. 늘 서는 키는 README·CHANGELOG·심긴 블록에 적혔다"}
 {"ts":"2026-09-21T10:05:37Z","id":"moai-ler5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T10:05:38Z","id":"moai-433r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:06:52Z","id":"moai-2k61","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 에픽의 자리다)"}
+{"ts":"2026-09-21T10:06:55Z","id":"moai-433r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 에픽의 자리다)"}
+{"ts":"2026-09-21T10:07:00Z","id":"moai-hs3g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:07:02Z","id":"moai-2k61","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"사용자 결정(2026-09-21): 실도 libc 도 안 들인다. 한도가 덮는 자리와 못 덮는 둘, 그리고 다시 여는 조건을 probe 문서에 적었다."}
+{"ts":"2026-09-21T10:07:09Z","id":"moai-433r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"사용자 결정(2026-09-21): 안 쓴다. 줄이는 부름은 조르기 직전 한 번뿐이고 그 갈래는 probe 를 안 띄우는데, --show-scope 는 git 바닥을 2.18 에서 2.26 으로 올린다. 까닭을 planted_anywhere 옆에 적었다."}
+{"ts":"2026-09-21T10:07:35Z","id":"moai-uzgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:10:48Z","id":"moai-2bv4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:12:28Z","id":"moai-na0d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기와 이슈 명령에 남은 한국어 예순일곱 줄"}
+{"ts":"2026-09-21T10:12:41Z","id":"moai-vwrf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:14:15Z","id":"moai-utya","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-21T10:15:00Z","id":"moai-h06a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"idea 줄에 ◇ 를 세운다 — 일과 생각이 같아 보인다"}
+{"ts":"2026-09-21T10:15:14Z","id":"moai-vlld","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-21 사용자 요구: idea 도 갈라 보이게 한다. 글리프는 ◇(U+25C7) — 빈 속이 \"아직 일이 아니다\" 와 맞고, 폭 분류가 ▸·○ 와 같은 반이라 새 위험이 안 는다. 멤버 moai-h06a 로 세웠다. 미룸 ‖ 와 함께 칸 글리프 곁에 서고, 미룬 idea 는 둘이 같이 선다."}
