@@ -154,6 +154,13 @@ no human-shaped output mixed in.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
   `stale` side by side, so a loser in a race reads `stale` and moves on.
+- **A value that cannot be absent is never absent.** `kind` and `priority` have
+  defaults, and the snapshot leaves a default out so that one file-wide diff does
+  not follow every release — but that silence is legible only to the writer, so
+  `--json` fills it back in (`"kind":"issue"`, `"priority":2`). What the file
+  leaves out and what the contract leaves out are two different things. Keys that
+  genuinely can be absent — `epic`, `milestone`, `deferred_at` — stay absent, and
+  the absence is the answer.
 - `moai show <id> --json` always carries `commits` and `work` as arrays. An empty
   `commits` means no commit named this issue; a `commits_error` object means git
   could not be read at all. The two are deliberately different answers.

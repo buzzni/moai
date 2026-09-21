@@ -4900,6 +4900,45 @@ fn reading_a_group_takes_what_is_drawn_under_it() {
     assert!(!read_sheet(&cfg, s.path()).contains(&format!("{by_field} =")), "거절해 놓고 적었다");
 }
 
+/// **기본값이라 줄에 안 적힌 종류와 우선순위도 `--json` 에는 선다**(moai-51it·moai-a4u9).
+/// 파일이 기본값을 안 적는 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의
+/// 뜻은 쓰는 쪽만 안다 — 읽는 쪽에서는 `jq -r .priority` 가 "p2" 와 "모른다" 를 한 `null` 로
+/// 받는다. 사람 화면은 같은 줄을 늘 `p2` 로 그려 왔다.
+///
+/// **줄을 내는 표면마다 잰다.** 세우는 자리가 `Row` 하나라 한 곳만 보면 될 듯하지만, 그 하나를
+/// 안 지나는 표면이 생기는 것이 이 시험이 잡는 것이다.
+#[test]
+fn every_surface_speaks_the_default_kind_and_priority() {
+    let s = Scratch::new("jsondefaults");
+    ok(s.path(), &["init", "argos", "--json"]);
+    let made = ok(s.path(), &["add", "기본값인 줄", "--json"]);
+    let id = field(&made, "id");
+    let plain = |out: &str, what: &str| {
+        assert!(out.contains(r#""kind":"issue""#), "{what}: 종류가 빠졌다\n{out}");
+        assert!(out.contains(r#""priority":2"#), "{what}: 우선순위가 빠졌다\n{out}");
+    };
+    plain(&made, "add");
+    for args in [
+        &["show", &id, "--json"][..],
+        &["show", "--json"],
+        &["show", "--tree", "--json"],
+        &["ready", "--json"],
+        // `note --json` 은 줄이 아니라 저널 한 칸을 낸다 — 여기서 잴 표면이 아니다.
+        &["edit", &id, "--tag", "bug", "--json"],
+        &["mv", &id, "in_progress", "--json"],
+        &["defer", &id, "--json"],
+    ] {
+        plain(&ok(s.path(), args), &args.join(" "));
+    }
+
+    // **줄이 든 값은 그대로 한 번만 선다.** 세우는 자리가 줄과 `Row` 둘이라, 줄이 들고 있을 때도
+    // 세우면 한 객체에 같은 키가 둘 서서 깐깐한 파서가 거절한다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-p", "1", "--json"]);
+    assert_eq!(epic.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{epic}");
+    assert_eq!(epic.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{epic}");
+    assert!(epic.contains(r#""kind":"epic""#) && epic.contains(r#""priority":1"#), "{epic}");
+}
+
 /// 새 명령에 `--json` 을 빠뜨리면 여기서 걸린다.
 #[test]
 fn every_command_still_speaks_json() {
