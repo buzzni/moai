@@ -11035,6 +11035,10 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     // **그 자리로 가려면 `init` 부터 든다**(2026-09-21 사용자 결정, moai-bt1f) — 대기만 하고
     // `init` 을 안 대던 판은 옮겨 쳐도 안 도는 줄을 내밀었다.
     assert!(why.contains(&format!("moai -C {np} init")), "트래커 없는 자리에 init 을 안 댔다\n{why}");
+    // **그 자리는 아직 없는 자리다**(리뷰) — 트래커가 없다고 적히는 길은 `route_one` 의 "아직 없는
+    // 자리" 하나뿐이라, 맨 `init` 만 대면 `moai -C <없는 자리>` 가 `set_current_dir` 에서 곧바로
+    // 진다. 안 도는 줄을 안 도는 줄로 바꾸던 자리다.
+    assert!(why.contains(&format!("mkdir -p {np} && moai -C {np} init")), "없는 자리에 mkdir 을 안 댔다\n{why}");
     // **이 트래커의 에픽·id 에는 그 `-C` 가 안 붙는다** — 붙으면 그 자리에 없는 id 를 댄 줄이 된다.
     assert!(why.contains("moai add '<title>' -e "), "에픽 줄이 맨 moai 로 안 선다\n{why}");
     assert!(!why.contains(&format!("moai -C {np} add '<title>' -e")), "남의 자리에 이 트래커의 에픽을 달았다\n{why}");

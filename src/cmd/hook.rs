@@ -601,14 +601,24 @@ fn route_one(
     // 보던 판은 `mkdir -p <남의 저장소>/새것 && moai -C <남의 저장소>/새것 add` 를 여기서 판정하고
     // 거절문에는 `-C <남의 저장소>/새것` 을 댔다 — 이 트래커의 에픽 id 를 단 채라, 옮겨 친 줄이 남의
     // 트래커에 끊긴 참조를 세웠다(리뷰 moai-51h9.k8j1).
-    let Some(found) = Repo::find_from(&dir).ok().flatten() else {
+    let (found, broken) = match Repo::find_from(&dir) {
+        Ok(found) => (found, false),
+        Err(_) => (None, true),
+    };
+    let Some(found) = found else {
         // **아직 트래커가 없는 새 자리는 그 자리를 댄다**(moai-j2vp) — 판정은 이 트래커가 맡되,
         // 옮겨 친 줄이 이 트래커에 서면 안 된다. 있는 자리인데 트래커가 없으면 그 `moai` 는 스스로
         // 실패하니 아무도 판정하지 않는다.
         if here_now {
             return Route::Nowhere;
         }
-        *aim = Some((dir, false));
+        // **읽다 넘어진 트래커는 "없는" 트래커가 아니다**(리뷰) — 위에 `.moai` 가 서 있는데 그
+        // 설정이 깨져 못 읽은 자리다. 없는 것으로 적으면 거절문이 `moai -C <그 밑> init` 을 대,
+        // 이미 트래커가 선 저장소 안에 둘째 `.moai` 를 심으라고 시킨다(moai-23ky 가 그은 경계를
+        // 훅이 스스로 넘으라고 하는 꼴이다). 모르는 자리는 안 겨눈다.
+        if !broken {
+            *aim = Some((dir, false));
+        }
         return Route::Here;
     };
     // **제 낱말로 `-C` 를 적어 딴 트래커를 가리킨 토막은 그 트래커가 본다**(moai-acf7, 2026-09-19
