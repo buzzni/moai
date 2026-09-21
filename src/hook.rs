@@ -341,12 +341,14 @@ fn closes(text: &str, at: usize, open: Option<u8>, shut: u8) -> Option<usize> {
 /// 둘 다 그 안의 쓰기가 규칙에 안 보여 빈손의 쓰기가 샜다. 셋 다 실제로 도는 줄이다(`bash -co errexit
 /// 'echo hi'` 가 `hi` 를 찍는다).
 fn shell_text(words: &[String]) -> Option<Handed> {
-    let cmd = command_of(words);
+    // **한 번 훑어 명령 자리와 그 머리를 읽은 답을 함께 받는다**(moai-906o) — `wrapped` 를 여기서
+    // 다시 부르던 판은 `command_of` 가 어느 낱말에서 멈췄나를 안 적힌 약속으로 이었다.
+    let Cmd { words: cmd, wrap } = command_at(words);
     let (head, rest) = cmd.split_first()?;
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
     // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
-    if let Some(Wrapped::Hands { at, glued, words: split }) = wrapped(basename(head), rest) {
+    if let Some(Wrapped::Hands { at, glued, words: split }) = wrap {
         let tail = &rest[at..];
         // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
         // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
@@ -1842,6 +1844,24 @@ const PREFIXES: &[&str] =
 /// 읽던 판은 자리를 옮긴 것으로·errexit 를 켠 것으로·껍데기를 끝낸 것으로 세, 세 자리에서
 /// 한꺼번에 샜다(리뷰 moai-p836.rv).
 fn command_of(words: &[String]) -> &[String] {
+    command_at(words).words
+}
+
+/// [`command_of`] 가 멈춘 자리 — 명령 자리의 낱말들과 **거기서 멈춘 까닭**이다.
+struct Cmd<'a> {
+    /// 명령 자리부터의 낱말들 — [`command_of`] 가 내는 그것이다.
+    words: &'a [String],
+    /// 그 머리 낱말을 [`wrapped`] 가 어떻게 읽었는가. 감싸는 명령이 아니면 `None` 이고,
+    /// 낱말이 다 떨어졌어도 `None` 이다.
+    ///
+    /// **한 번만 읽어 함께 낸다**(moai-906o) — [`shell_text`] 가 같은 물음을 다시 묻던 판은 둘을
+    /// 잇는 것이 "`command_of` 이 어느 낱말에서 멈췄나" 라는 **안 적힌 약속**뿐이었다. 멈추는
+    /// 까닭 둘([`PREFIXES`] 건너뛰기와 [`BUILTINS`] 지킴이)은 둘째 부름의 답과 안 맞아, 자르는
+    /// 자리를 손보면 `Wrapped::Hands` 가 조용히 안 서는데 컴파일은 됐다.
+    wrap: Option<Wrapped>,
+}
+
+fn command_at(words: &[String]) -> Cmd<'_> {
     let mut at = 0;
     loop {
         let rest = &words[at..];
@@ -1850,12 +1870,15 @@ fn command_of(words: &[String]) -> &[String] {
             .take_while(|w| PREFIXES.contains(&w.as_str()) || (w.contains('=') && !w.starts_with(['-', '='])))
             .count();
         at += lead;
-        let Some(head) = words.get(at).map(|w| basename(w)) else { return &words[at..] };
-        let Some(Wrapped::Runs(skip)) = wrapped(head, &words[at + 1..]) else { return &words[at..] };
+        let Some(head) = words.get(at).map(|w| basename(w)) else {
+            return Cmd { words: &words[at..], wrap: None };
+        };
+        let wrap = wrapped(head, &words[at + 1..]);
+        let Some(Wrapped::Runs(skip)) = wrap else { return Cmd { words: &words[at..], wrap } };
         let next = at + 1 + skip;
         // 감싸는 명령 뒤가 붙박이면 그 줄은 그냥 진다 — 넘지 않는다([`BUILTINS`]).
         if words.get(next).map(|w| basename(w)).is_some_and(|h| BUILTINS.contains(&h)) {
-            return &words[at..];
+            return Cmd { words: &words[at..], wrap };
         }
         at = next;
     }
@@ -6018,6 +6041,15 @@ mod tests {
             // **따옴표가 되살아난다** — 바깥 껍데기가 벗긴 것을 도로 감싸서 잇는다. 맨 빈칸으로만
             // 잇던 판은 제목 안의 `-e <에픽>` 이 진짜 플래그로 읽혀 단위 안에 세운 것이 됐다.
             "sudo -s moai add '제목 -e t-e'",
+            // **앞에 선 접두어를 지나서도 같은 답이다**(moai-906o) — [`PREFIXES`] 와 대입,
+            // 그리고 감싸는 명령을 넘은 뒤의 머리다. 명령 자리를 고르는 자와 글을 읽는 자가
+            // [`wrapped`] 를 따로 부르던 판은 이 자리들을 잇는 것이 안 적힌 약속뿐이었고,
+            // 자르는 자리를 손보면 글이 조용히 안 읽히는데 컴파일은 됐다.
+            "FOO=1 sudo -s moai add '딴 일'",
+            "nohup sudo -s moai add '딴 일'",
+            "time env -S \"moai add '딴 일'\"",
+            "timeout 5 env -S \"moai add '딴 일'\"",
+            "nice -n 5 sudo -s moai add '딴 일'",
         ] {
             assert!(
                 matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
