@@ -133,7 +133,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // "언제나 0" 이 실제로 서려면 그 길이 없어야 한다. 무슨 일이 있었는지는 stderr 한 줄로
     // 대고(그쪽은 사람이 읽는다) 판은 시작하는 말로 낸다. 6~7 세션이 한 `.moai` 를 같이 쓰는
     // 저장소에서 그 한 줄은 잠깐 깨졌다 낫는 것이고, 그동안 모든 세션이 실패로 열리면 안 된다.
-    let found = Repo::find().unwrap_or_else(|e| {
+    let found = Repo::find(|| lang).unwrap_or_else(|e| {
         eprintln!("moai: {e}");
         None
     });
@@ -171,5 +171,5 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         });
     }
 
-    Ok(view::prime(&p, &report::epic_labels(&load.issues), view::Screen::new(lang).at(ctx.zone()).over(&origin)))
+    Ok(view::prime(&p, &report::epic_labels(&load.issues, lang), view::Screen::new(lang).at(ctx.zone()).over(&origin)))
 }

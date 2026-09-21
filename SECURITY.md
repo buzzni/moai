@@ -29,9 +29,11 @@ moai reads and writes files in a repository you already control, so the
 interesting boundaries are the ones where content that is not yours becomes
 behaviour:
 
-- Content of `.moai/issues.jsonl` and `.moai/journal.jsonl` — these come in over
-  merges and pulls, so a line written by someone else must never become a
-  command, a path outside the repository, or a crash that loses other lines.
+- Content of `.moai/issues.jsonl`, `.moai/journal/*.jsonl` and the older
+  `.moai/journal.jsonl` — these come in over merges and pulls, so a line written
+  by someone else must never become a command, a path outside the repository, or
+  a crash that loses other lines. A journal file is named from the writer's
+  email, so that folding is a path-safety boundary too.
 - `moai merge-driver`, which git invokes with paths during a merge.
 - `moai hook`, which reads events on stdin and decides what to answer.
 - `install.sh` and the release artifacts: a downloaded archive that does not

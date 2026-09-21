@@ -22,7 +22,7 @@ impl super::Appendable for report::StatusReport {
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트를 한눈에. **안이면 아래 그대로다** — 등록 목록을
     // 읽지도 않는다(결정 3: `.moai` 안의 CLI 는 그 프로젝트만 본다).
-    let Some(repo) = Repo::find()? else {
+    let Some(repo) = Repo::find(|| ctx.lang())? else {
         return overview(ctx, worktree);
     };
     let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =

@@ -38,7 +38,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let at = model::now();
     // **누구인지는 락 밖에서 묻는다 — `mv` 와 한 자다.** `model::actor` 는 `git` 을 두
     // 번 띄운다. 펴는 자리는 아래, 칸 검사를 다 지난 뒤다.
-    let who = model::actor(ctx.user.as_deref(), &repo.root);
+    let who = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()));
 
     // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
     // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는

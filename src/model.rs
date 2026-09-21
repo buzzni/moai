@@ -159,6 +159,10 @@ impl Kind {
     }
 }
 
+/// **이 거절문은 영어 하나다**(moai-ivt9). clap 이 `--type` 의 값을 풀다 내는 줄이라, clap 이 제
+/// 손으로 짓는 나머지 줄(`error:`·`Usage:`·도움말)과 한 덩이로 선다 — 여기만 옮기면 한 화면이 두
+/// 말로 서고, 그 줄이 서는 자리는 사용자 설정을 열기도 전이다. CLI 표면은 영어로 통일한다
+/// (`guide::DIFFICULTY` 와 `.gitattributes` 가 심는 글이 영어인 것과 같은 까닭).
 impl std::str::FromStr for Kind {
     type Err = String;
     fn from_str(s: &str) -> Result<Kind, String> {
@@ -167,7 +171,7 @@ impl std::str::FromStr for Kind {
             "epic" => Ok(Kind::Epic),
             "milestone" => Ok(Kind::Milestone),
             "idea" => Ok(Kind::Idea),
-            _ => Err(format!("`{s}` 는 종류가 아니다. 종류: issue, epic, milestone, idea")),
+            _ => Err(format!("`{s}` is not a kind. The kinds are: issue, epic, milestone, idea")),
         }
     }
 }
@@ -906,7 +910,35 @@ pub fn someone(name: &str) -> Actor {
 /// **`root` 는 그 트래커의 `.moai` 뿌리다**(moai-d3sy). git 설정을 거기서 읽어야 이슈가 선 프로젝트와
 /// 사람이 같은 자에서 온다 — 뿌리 밑에 딴 저장소가 겹쳐 있을 때 부른 자리가 사람을 정하면, 그 저널에
 /// 남의 이름이 영구히 남는다. `--user`·`MOAI_ACTOR` 는 뿌리와 상관없이 그대로 이긴다.
-pub fn actor(flag: Option<&str>, root: &Path) -> R<Actor> {
+/// **말이 아니라 자료다**(moai-ivt9, `config::Trouble` 과 같은 까닭) — 사람을 푸는 길은 쓰기 경로
+/// 안이고(`with_write` 바로 앞), 탐색기는 이것을 함수 포인터로 들고 프레임 밖에서 부른다. 글은
+/// [`crate::view::no_actor`] 가 짓는다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoActor {
+    /// git 설정에 이름이나 메일이 없다.
+    Unknown,
+    /// git 설정이 `이름 (메일)` 로 쓸 수 없는 모양이다 — 합쳐 본 그 글.
+    ///
+    /// 고칠 곳이 argv 가 아니라 설정이라 [`NoActor::Unknown`] 과 **같은 코드**를 쓴다 — 받는
+    /// 쪽은 "사용자 정보를 손봐라" 하나로 두 경우를 같이 다룰 수 있어야 한다.
+    BadIdentity { label: String },
+    /// 사람이 준 값이 그 모양이 아니다 — 어느 손잡이가 줬는지와 쓰인 그대로.
+    /// `what` 은 손잡이 이름이라 **안 옮긴다**.
+    Malformed { what: &'static str, raw: String },
+}
+
+impl NoActor {
+    /// 이 거절의 `--json` 코드 — **낱말을 빠짐없이 적는다**(`store::Trouble::code` 와 같은 자).
+    pub fn code(&self) -> &'static str {
+        match self {
+            NoActor::Unknown | NoActor::BadIdentity { .. } => code::NO_ACTOR,
+            NoActor::Malformed { .. } => code::BAD_INPUT,
+        }
+    }
+}
+
+pub fn actor(flag: Option<&str>, root: &Path) -> Result<Actor, NoActor> {
+    let malformed = |what: &'static str, raw: &str| NoActor::Malformed { what, raw: raw.to_string() };
     // 플래그는 비어 있어도 **준 것이다.** `--user "$NAME"` 에서 변수가 비었을 때
     // 조용히 git 설정으로 넘어가면 엉뚱한 사람 이름으로 저널이 쌓인다 — 이
     // 기능이 막으려던 바로 그 실패다. 환경변수는 다르다: 빈 값은 관례상 없는 것이다.
@@ -925,35 +957,15 @@ pub fn actor(flag: Option<&str>, root: &Path) -> R<Actor> {
         // 저널에 영구히 쌓인다.
         (Some(name), Some(email)) => {
             let a = Actor { name, email };
-            if a.is_sane() { Ok(a) } else { Err(bad_git_identity(&a)) }
+            if a.is_sane() {
+                Ok(a)
+            } else {
+                let label = label(&a.name, Some(&a.email), crate::config::Naming::Full);
+                Err(NoActor::BadIdentity { label })
+            }
         }
-        _ => Err(Fail::coded(NO_ACTOR, code::NO_ACTOR)),
+        _ => Err(NoActor::Unknown),
     }
-}
-
-const NO_ACTOR: &str = "\
-누가 하는지 모른다 — git 사용자 정보가 없다.
-
-  git config user.name  \"이름\"
-  git config user.email \"메일\"
-
-이번만 손으로 준다면:  --user \"이름 (메일)\"";
-
-/// 고칠 곳이 argv 가 아니라 설정이라 `NO_ACTOR` 와 같은 코드를 쓴다 — 받는
-/// 쪽은 "사용자 정보를 손봐라" 하나로 두 경우를 같이 다룰 수 있어야 한다.
-fn bad_git_identity(a: &Actor) -> Fail {
-    Fail::coded(
-        format!(
-            "git 사용자 정보가 `이름 (메일)` 로 쓸 수 없는 모양이다 — {:?}\n\n  \
-             git config user.name  \"이름\"\n  git config user.email \"메일\"",
-            label(&a.name, Some(&a.email), crate::config::Naming::Full)
-        ),
-        code::NO_ACTOR,
-    )
-}
-
-fn malformed(what: &str, raw: &str) -> Fail {
-    Fail::coded(format!("{what} 가 `이름 (메일)` 모양이 아니다 — {raw:?}"), code::BAD_INPUT)
 }
 
 /// git 저장소 밖에서도 전역 설정을 읽는다 — moai 는 `.moai/` 만 찾지 git 을

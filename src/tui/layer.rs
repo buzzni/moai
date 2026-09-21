@@ -1910,7 +1910,9 @@ mod tests {
             assert_eq!((&a.mode, &a.notice), (&Mode::Browse, &None), "{m:?}-F7 가 뜻을 했다");
         }
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
-        assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
+        // **저널은 `.moai/journal/<메일>.jsonl` 이다**(moai-nzlo) — 옛 한 파일을 재면 아무도 안
+        // 짓는 자리를 재는 셈이라, 남의 프로젝트에 적어도 이 줄이 안 붉어진다(리뷰).
+        assert!(!one.join(".moai/journal").exists() && !two.join(".moai/journal").exists());
 
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
@@ -2686,7 +2688,8 @@ mod tests {
 
         assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
         assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
-        assert!(!one.join(".moai/journal.jsonl").exists());
+        // 저널만 새는 것을 잡는 줄이다 — 재는 자리는 `.moai/journal/` 이다(moai-nzlo, 리뷰).
+        assert!(!one.join(".moai/journal").exists());
         let n = a.notice.clone().unwrap_or_default();
         assert!(n.starts_with("✓ 담김 · two · argos-"), "알림이 프로젝트를 안 댄다 — {n:?}");
     }
@@ -2850,10 +2853,10 @@ mod tests {
     /// 담기면 그 프로젝트 파일에만 선다.
     #[test]
     fn the_question_and_its_retry_stay_on_the_fixed_project() {
-        fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn nobody(user: Option<&str>, root: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             match user {
                 Some(raw) => crate::model::actor(Some(raw), root),
-                None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
+                None => Err(crate::model::NoActor::Unknown),
             }
         }
         let s = Scratch::fenced("layer-jot-ask");

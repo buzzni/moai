@@ -746,7 +746,7 @@ pub struct App {
     /// 누가 쓰는가를 푸는 길. 진짜 길은 `model::actor` 다. **시험이 갈아 끼운다** —
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
-    identify: fn(Option<&str>, &std::path::Path) -> crate::fail::R<crate::model::Actor>,
+    identify: fn(Option<&str>, &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor>,
     /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
     /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
     /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
@@ -1404,7 +1404,11 @@ impl App {
             self.write_failed = true;
             return None;
         };
-        let by = (self.identify)(self.user.as_deref(), &repo.root);
+        // 탐색기는 화면 말을 이미 쥐고 있다 — 묻는 길이지만 여는 파일이 없다.
+        let lang = self.site.lang;
+        // **코드는 `Fail` 이 이미 든다** — `Fail::no_actor` 가 `NoActor::code()` 로 채운다.
+        // 곁들여 들고 다니면 늘 같아야 할 둘을 타입이 안 묶는다(리뷰).
+        let by = (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang));
         if let Err(e) = &by
             && e.code == crate::fail::code::NO_ACTOR
         {
@@ -1416,8 +1420,6 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        // 탐색기는 화면 말을 이미 쥐고 있다 — 묻는 길이지만 여는 파일이 없다.
-        let lang = self.site.lang;
         let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
             Ok(touched) => {
@@ -8240,12 +8242,12 @@ mod tests {
 
     /// 누군지 모르는 기계. **이 기계의 git 설정도 `MOAI_ACTOR` 도 안 본다** — 준 것만
     /// 푼다. 진짜 길(`model::actor`)을 쓰면 이 시험들이 돌리는 사람의 설정에 달린다.
-    fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+    fn nobody(user: Option<&str>, root: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
         match user {
             Some(raw) => crate::model::actor(Some(raw), root),
-            None => {
-                Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험\n\n  고칠 명령", crate::fail::code::NO_ACTOR))
-            }
+            // 진짜 갈래를 낸다 — 글은 `view::no_actor` 가 짓고, 여러 줄로 선다는 것이 여기 걸린
+            // 시험들이 재는 것이다(배너는 한 줄이라 그것을 잇는다).
+            None => Err(crate::model::NoActor::Unknown),
         }
     }
 
@@ -8352,7 +8354,7 @@ mod tests {
     /// 파일은 그대로고 폼은 까닭을 달고 제목 칸에 선다.
     #[test]
     fn an_empty_title_is_refused_in_place_and_nothing_is_asked() {
-        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             panic!("빈 제목인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("jot-empty");
@@ -8400,10 +8402,11 @@ mod tests {
     fn a_save_whose_journal_fails_closes_as_saved_and_says_so() {
         use std::os::unix::fs::PermissionsExt;
         let (scratch, mut a) = writable("jot-nojournal");
-        let journal = scratch.join(".moai/journal.jsonl");
-        std::fs::write(&journal, "").unwrap();
-        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
-        if std::fs::OpenOptions::new().append(true).open(&journal).is_ok() {
+        // 저널은 `.moai/journal/<메일>.jsonl` 이라 막을 자리가 디렉터리다(moai-nzlo).
+        let journal = scratch.join(".moai/journal");
+        std::fs::create_dir_all(&journal).unwrap();
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(journal.join("probe")).is_ok() {
             return; // root 는 권한을 안 본다
         }
         jotting(&mut a, "한 번만");
@@ -8495,9 +8498,16 @@ mod tests {
         a.key(key(KeyCode::Tab));
         type_in(&mut a, "본문");
 
+        // **까닭은 첫 줄만 든다** — 글은 `view::no_actor` 가 짓고 여러 줄로 서는데, 묻는 칸은
+        // 한 줄이다. 낱말을 여기 베껴 적으면 말묶음을 고칠 때 이 시험만 옛말로 남는다.
+        let head = crate::view::no_actor(a.site.lang, &crate::model::NoActor::Unknown)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string();
         a.key(ctrl('s'));
         assert!(
-            matches!(&a.mode, Mode::Ask(ask) if ask.why == "누가 하는지 모른다 — 시험"),
+            matches!(&a.mode, Mode::Ask(ask) if ask.why == head),
             "모르는데 안 물었거나 까닭을 옮기지 않았다 — {:?}",
             a.mode
         );
@@ -8571,7 +8581,7 @@ mod tests {
     /// 동안 물으면 설정 없는 기계에서 도구가 고장 난 것으로 보인다.
     #[test]
     fn reading_never_asks_who() {
-        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             panic!("읽기가 누군지 물었다")
         }
         let (_scratch, mut a) = writable("ask-read");
@@ -8634,7 +8644,7 @@ mod tests {
     /// 열고, 한 줄로 까닭을 댄다.
     #[test]
     fn a_failed_or_empty_edit_writes_nothing_and_says_so() {
-        fn refuse(_: Option<&str>, _: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             panic!("담지 않을 글인데 누군지 물었다")
         }
         let (scratch, mut a) = writable("editor-nothing");

@@ -189,7 +189,7 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 /// 적어 둔 "말은 거절할 때만 푼다" 가 막던 바로 그것이다 — 이 문 하나가 열한 명령을 한꺼번에
 /// 그쪽으로 끌고 간다. 닫힘 안이면 `.moai` 를 못 찾은 판에서만 푼다.
 pub fn open_repo(ctx: &Ctx) -> R<crate::store::Repo> {
-    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
+    crate::store::Repo::find(|| ctx.lang())?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
 }
 
 /// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
@@ -321,7 +321,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
 /// 치는가. 둘 다 여기서 준다.
 fn opening(ctx: &Ctx) -> R<Vec<String>> {
     use clap::CommandFactory;
-    let found = crate::store::Repo::find();
+    let found = crate::store::Repo::find(|| ctx.lang());
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
     // 그 길로 간다).
     //

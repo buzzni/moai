@@ -4,16 +4,24 @@ What to do when the tracker files, a merge, or a release ends up in a state you
 did not intend. Everything here is a file in your repository, so almost every
 answer is "look at it, then commit the version you want".
 
-## The two files
+## The files
 
 ```
-.moai/issues.jsonl    one line per issue, sorted by id. The snapshot is the truth.
-.moai/journal.jsonl   append-only history. Never read to compute state.
+.moai/issues.jsonl              one line per issue, sorted by id. The snapshot is the truth.
+.moai/journal/<email>.jsonl     append-only history, one file per writer. Never read to compute state.
+.moai/journal.jsonl             the old single file. Still read; nothing is written there any more.
 ```
 
-`issues.jsonl` is what every command reads. `journal.jsonl` records `create`,
+`issues.jsonl` is what every command reads. The journal records `create`,
 `status`, `note` and `rm`; field edits are not recorded. If the journal is lost,
 you lose history, not state.
+
+**Several journal files is the normal shape.** The name comes from the writer's
+email with `@` and `.` folded to `_` (`raven@buzzni.com` →
+`raven_buzzni_com.jsonl`), so people do not collide on merge. Reading gathers
+every `.jsonl` under `.moai/journal/` plus the old single file and orders them by
+timestamp — there is no migration, and a repository that still has only the old
+file works exactly as it did.
 
 Two habits make recovery cheap, and both are properties of the tool rather than
 advice:

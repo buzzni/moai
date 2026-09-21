@@ -78,7 +78,7 @@ pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape, lang: crate::
         return Err(bad(errors.join("\n      ")));
     }
     let src = read_source(from)?;
-    draft::fill_as(&src, &pairs, shape).map_err(bad)
+    draft::fill_as(&src, &pairs, shape, lang).map_err(bad)
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
@@ -184,7 +184,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         .require_known(status.as_str())
         .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
 
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
@@ -289,7 +289,7 @@ fn bulk(
     }
 
     let at = model::now();
-    let by = model::actor(ctx.user.as_deref(), &repo.root)?;
+    let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let who = assignee_of(assignee.as_deref(), &by);
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
         || ctx.lang(),
