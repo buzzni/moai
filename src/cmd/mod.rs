@@ -398,6 +398,21 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 pub struct Row<'a> {
     #[serde(flatten)]
     pub issue: std::borrow::Cow<'a, crate::model::Issue>,
+    /// 줄이 **기본값이라 안 적은** 종류와 우선순위(moai-51it·moai-a4u9). 파일이 기본값을 안 적는
+    /// 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의 뜻은 파일을 쓰는 쪽만
+    /// 안다 — 읽는 쪽에서는 `jq -r .priority` 가 `null` 을 받아 "p2" 와 "모른다" 가 한 값이 된다.
+    /// **파일에 안 적는 것과 `--json` 이 안 내는 것은 다른 일이다**(2026-09-21 사용자 결정).
+    /// 사람 화면은 같은 줄을 늘 `p2` 로 그려 왔다.
+    ///
+    /// **줄이 그 키를 제 몸에 들고 있으면 여기는 비운다** — 한 객체에 같은 키가 둘 서지 않는다.
+    /// 그래서 값이 적힌 줄의 출력은 한 글자도 안 바뀐다.
+    ///
+    /// 없을 수 *있는* 키(`epic`·`milestone`·`deferred_at`·`assignee`)는 여기 안 든다 — 그쪽은 키가
+    /// 없다는 것이 곧 뜻이다(moai-fqnr). 이 둘은 없을 수가 없다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
     /// 다른 워크트리에서 온 줄이면 그 브랜치 (`--worktree`). **키가 없다는 것이 곧
@@ -422,6 +437,11 @@ pub const OURS: &[&str] = &[
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
     "branch",
+    // 줄이 기본값이라 안 적었을 때 `Row` 가 세우는 것. 줄의 제 키라 모르는 필드로 들어올 일은
+    // 없지만, 걷는 목록은 **출력에 서는 우리 키 전부**다 — 여기서 빼면 `Row` 에 필드를 더하는
+    // 것을 잡는 시험이 이 둘만 못 잡는다.
+    "kind",
+    "priority",
     // `show <id> --json` 이 덧붙이는 것(`json_with`).
     "children",
     "journal",
@@ -458,7 +478,10 @@ impl<'a> Row<'a> {
             }
         };
         let derived = read.filter(|_| crate::report::is_group(&issue));
-        Row { issue, derived_status: derived, branch: None }
+        // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
+        let kind = issue.kind.is_default().then(|| issue.kind.as_str());
+        let priority = issue.priority.is_none().then(|| issue.priority());
+        Row { issue, kind, priority, derived_status: derived, branch: None }
     }
 
     /// 겹쳐 본 줄이면 그 출처를 곁들인다.
@@ -660,6 +683,35 @@ mod tests {
         i
     }
 
+    /// 종류도 우선순위도 **기본값이라 줄에 안 적히는** 줄. 파일에서 가장 흔한 꼴이다.
+    fn plain() -> Issue {
+        Issue::new("argos-0002".into(), "제목".into(), Kind::Issue, Status::new("todo"), "2026-09-11T04:12:03Z")
+    }
+
+    /// **기본값이라 줄에서 빠진 키도 `--json` 에는 선다**(moai-51it·moai-a4u9). 파일에 안 적는 것과
+    /// `--json` 이 안 내는 것은 다른 일이다 — 읽는 쪽에는 그 침묵의 뜻이 안 보여 `jq -r .priority` 가
+    /// 기본값인 줄과 모르는 값을 한 `null` 로 받는다.
+    #[test]
+    fn a_row_speaks_the_default_kind_and_priority() {
+        let i = plain();
+        assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
+        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
+        assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
+    }
+
+    /// **줄이 든 값은 그대로 한 번만 선다.** 세우는 자리가 줄과 `Row` 둘이라, 줄이 들고 있을 때도
+    /// 세우면 한 객체에 같은 키가 둘 서고 깐깐한 파서가 거절한다.
+    #[test]
+    fn a_row_that_carries_them_is_untouched() {
+        let mut i = row_with(&[]);
+        i.priority = Some(1);
+        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
+        assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
+        assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
+    }
+
     /// **덧붙인 키가 이긴다**(moai-kgu2) — `show` 가 덧붙이는 키 전부에 같은 자로 선다. 겹치지
     /// 않는 모르는 필드와 곁들인 `derived_status` 는 그대로 남는다.
     #[test]
@@ -713,8 +765,16 @@ mod tests {
     /// 안 걷혀 한 객체에 둘 선다. `Row` 에 필드를 더하면 여기서 붉어진다.
     #[test]
     fn every_key_a_row_adds_is_in_ours() {
-        let i = row_with(&[]);
-        let row = Row { issue: std::borrow::Cow::Borrowed(&i), derived_status: Some("todo"), branch: Some("feat/x") };
+        // **기본값인 줄로 잰다** — 종류와 우선순위는 줄이 안 적었을 때만 `Row` 가 세운다. 적힌
+        // 줄로 재면 그 둘이 곁들인 키로 안 잡혀, 목록에서 빠져도 여기가 안 붉어진다.
+        let i = plain();
+        let row = Row {
+            issue: std::borrow::Cow::Borrowed(&i),
+            kind: Some(Kind::Issue.as_str()),
+            priority: Some(crate::model::DEFAULT_PRIORITY),
+            derived_status: Some("todo"),
+            branch: Some("feat/x"),
+        };
         let added = keys_beyond(&i, &row);
         assert!(!added.is_empty(), "곁들인 키를 못 셌다");
         for k in &added {

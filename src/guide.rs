@@ -240,6 +240,11 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}
 again. That is enough to build a loop that runs without a person — one such loop, in
 bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
+**A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
+and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
+on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
+`milestone`, `deferred_at`) stay absent, and that absence is the answer.
+
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw
 still holds, so it never overwrites work someone else picked up first — the loser

@@ -813,6 +813,25 @@ struct Lexer<'a> {
     deep: usize,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// **이 갈래의 렉서가 닿은 가장 깊은 겹**([`Lexer::DEEP`]). 상한이 되돌이를 실제로 막는지는
+    /// 벽시계가 아니라 이 값이 답한다(moai-2bv4) — 시간으로 재던 판은 상한이 아니라 그때 기계에
+    /// 걸린 부하를 재, 세션 예닐곱이 같이 도는 자리에서 붉어졌다.
+    ///
+    /// **갈래마다 따로 센다**([`READS`] 와 같은 까닭, 리뷰 moai-6mk3.lgj). 판 하나를 모든 시험이
+    /// 나눠 쓰던 때는 나란히 도는 옆 시험이 상한까지 판 것만으로 `assert_eq!` 가 서서, 정작 이
+    /// 시험의 되돌이가 한 겹도 안 파도 초록이 된다 — 자국이 안 걸린 판을 잡으려고 `<=` 대신
+    /// `==` 로 잰 뜻이 거기서 통째로 사라진다.
+    static DEEPEST: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 지금까지 닿은 가장 깊은 겹([`DEEPEST`]) — 시험은 0 으로 되돌린 뒤 제 판만 본다.
+#[cfg(test)]
+fn deepest() -> usize {
+    DEEPEST.with(std::cell::Cell::get)
+}
+
 impl<'a> Lexer<'a> {
     fn new(cmd: &'a str) -> Self {
         Lexer::at(cmd, 0)
@@ -820,6 +839,8 @@ impl<'a> Lexer<'a> {
 
     /// 다시 읽기의 겹을 이어받는 렉서 — [`Lexer::relex`] 와 치환이 쓴다.
     fn at(cmd: &'a str, deep: usize) -> Self {
+        #[cfg(test)]
+        DEEPEST.with(|n| n.set(n.get().max(deep)));
         Lexer {
             chars: cmd.chars().peekable(),
             all: Vec::new(),
@@ -5388,9 +5409,19 @@ mod tests {
         );
         assert_eq!(guard_create(&all, &cfg(), &here(), &nest(Lexer::DEEP + 4)), Decision::Pass, "상한 없이 파고든다");
         // 상한이 실제로 되돌이를 막는다 — 막던 것이 없으면 여기서 스택이 넘쳐 훅이 통째로 죽는다.
-        let clock = std::time::Instant::now();
+        //
+        // **재는 것은 겹이지 시간이 아니다**(moai-2bv4). 벽시계 5초로 걸려 있던 판은 상한이 아니라
+        // 그때 기계에 걸린 부하를 재, 혼자 돌면 2.4초인 것이 부하 17~20 에서 6.2초로 붉어졌다 —
+        // 흔들리는 시험은 다음 사람이 "내 고침이 깼다" 로 읽어 시간을 태운다. [`DEEPEST`] 가
+        // 렉서가 실제로 닿은 겹을 들고, 상한이 없으면 그 값이 5,000 으로 선다.
+        //
+        // **닿은 자리가 상한과 같아야 한다.** `<=` 로만 재면 자국이 아예 안 걸린 판(0 겹)도
+        // 지나가, 시험이 아무것도 안 재면서 초록으로 선다. 그 셈은 갈래마다 따로 선다([`DEEPEST`]) —
+        // 한 판을 나눠 쓰면 옆 시험이 판 겹이 이 자를 대신 채운다(리뷰 moai-6mk3.lgj).
+        DEEPEST.with(|n| n.set(0));
         let _ = guard_create(&all, &cfg(), &here(), &nest(5000));
-        assert!(clock.elapsed() < std::time::Duration::from_secs(5), "겹을 안 막는다 — {:?}", clock.elapsed());
+        let deepest = deepest();
+        assert_eq!(deepest, Lexer::DEEP, "겹 상한이 안 섰다 — {deepest} 겹까지 팠다");
         // **그 글은 제 토막 자리에 심는다**(리뷰 moai-p836.rv) — 뒤에 몰아 쌓던 판은 줄 끝의 판을
         // 물려받아, 앞선 `&&` 집기를 잃고(잘못 막음) 뒤따르는 `cd` 로 제 쓰기를 지웠다(샜다).
         for cmd in [
