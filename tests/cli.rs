@@ -13677,6 +13677,35 @@ fn undeclaring_the_snapshot_silences_every_merge_driver_notice() {
     assert!(!ran.exists(), "선언이 없는데 probe 가 돌았다");
 }
 
+/// **선언은 트래커가 사는 곳에서 읽는다**(moai-8nkl).
+///
+/// `notice` 가 자를 섞던 판이다 — 심은 줄은 클론 전체(`--local`)에서 재면서 선언은 그 세션이 선
+/// 워크트리의 가지에서 쟀다. 루트가 `merge=moai` 를 걸고 워크트리의 가지가 그것을 안 들면
+/// 루트에서는 알림이 서고 워크트리 안에서는 같은 명령이 조용했는데, 이 저장소의 절차는 일을
+/// 모두 워크트리에서 하므로 세션이 실제로 보는 쪽이 늘 침묵이었다. 합쳐질 스냅샷은 루트의
+/// 것이고, 병합에서 실제로 걸리는 선언도 루트의 것이다.
+#[test]
+fn the_merge_driver_notice_reads_the_declaration_where_the_tracker_lives() {
+    let s = Scratch::new("mergewtdecl");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    add(&main, &["하나"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".claude/worktrees/feat");
+
+    // 워크트리의 가지에서만 선언을 걷는다 — 루트의 가지는 그대로 든다.
+    std::fs::write(inside.join(".gitattributes"), "# 이 가지는 드라이버를 안 쓴다\n").unwrap();
+    git(&inside, &["commit", "-qam", "이 가지에서 선언을 걷는다"]);
+
+    assert!(ok(&main, &["status"]).contains("안 심었다"), "루트에서 안 댔다 — 이 시험이 견줄 것이 없다");
+    let said = ok(&inside, &["status"]);
+    assert!(said.contains("안 심었다"), "워크트리 안에서 입을 다물었다\n{said}");
+}
+
 /// **넓은 자리에 심은 사람을 "안 심었다" 로 조르지 않는다**(리뷰 moai-vbmn.spv).
 ///
 /// 심는 자리는 `--local` 이지만 git 이 드라이버를 **찾는** 자리는 system·global 까지다.

@@ -36,6 +36,7 @@
 use super::{Ctx, Fail, R};
 use crate::cli::MergeDriverArgs;
 use crate::model::Issue;
+use crate::store::Repo;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -591,14 +592,25 @@ fn driver_key() -> String {
 /// 길은 `--uninstall` 이 없어 `.git/config` 를 손으로 여는 것뿐이다 — 걷을 길 없는 알림을
 /// 안 세우는 자리가 여기다. **선언을 걷는 것이 진짜 탈출구가 된다**(moai-47bt 가 찾던 것).
 /// 덤으로 안 쓰기로 한 저장소에서는 [`probe`] 가 프로세스를 아예 안 띄운다.
-pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
+///
+/// **[`Repo`] 를 통째로 받는다**(moai-8nkl). 자를 섞던 판은 여기 [`Repo::here`] 하나만 들어와,
+/// 선언은 **워크트리의 가지**에서 재고 심은 줄은 클론 전체(`--local`)에서 쟀다. 합쳐질 트래커가
+/// 사는 곳은 [`Repo::root`] 이므로 병합에서 실제로 걸리는 선언도 그쪽 것이다 — 루트가 `merge=moai`
+/// 를 걸고 딸린 워크트리의 가지가 그것을 안 들면, 루트에서는 알림이 서고 워크트리 안에서는 같은
+/// 명령이 아무 말도 안 했다. 이 저장소는 일을 모두 워크트리에서 하므로 세션이 보는 쪽이 늘 침묵이다.
+///
+/// 나머지 셋은 [`Repo::here`] 다. [`probe`] 는 git 이 드라이버를 **부르는** 자리에서 재야 하고,
+/// `--local` 은 어느 체크아웃에서 물어도 같은 파일(`$GIT_COMMON_DIR/config`)이며, 힌트의 자리
+/// ([`away_root`](crate::cmd::init::away_root))는 사람이 선 곳을 가리켜야 한다.
+pub fn notice(repo: &Repo, chdir: bool) -> Option<crate::report::Warning> {
     /// 키가 없을 때 git 이 돌려줄 글. **값이 될 수 없는 것이라야 한다** — 심는 줄은 껍데기 명령이고
     /// 제어문자 하나만 든 줄은 그 무엇도 아니다.
     const UNSET: &str = "\u{1}";
     // **먼저 묻는다.** 뒤로 미루면 안 쓰기로 한 저장소에서도 설정을 읽고 `probe` 가 뜬다.
-    if !declared(root) {
+    if !declared(&repo.root) {
         return None;
     }
+    let root = repo.here();
     let key = driver_key();
     let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
         Ok(v) => v,

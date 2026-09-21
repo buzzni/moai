@@ -108,7 +108,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
     // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
     // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
-    st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), ctx.chdir));
+    st.notices.extend(crate::cmd::merge_driver::notice(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
