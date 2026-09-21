@@ -150,6 +150,17 @@ milestone — an idea from outside waits for the next round unless it should sta
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
+**An idea from outside gets in only by being brought in.** An idea carries no milestone
+and `moai idea promote` has no flag for one, so the epic a worker unfolds stands outside
+the release until the milestone is attached to it. The worker hangs it on in brief 1 —
+`moai edit <epic> --milestone <milestone>` — and what it writes there is the `<milestone>` you fill in 3. So the
+call is yours, here, before you send: either this idea belongs in the release that is
+running and you send it with that milestone, or it does not and you do not send it this
+round. **Telling the worker not to attach a milestone is the same as handing out work
+from outside** — that is how a worker came to pick up a row outside the running release
+(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
+`<milestone>` is `none`.
+
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
 
@@ -301,9 +312,12 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
+`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
+when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+epic, which the tool refuses as an id it does not know.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -342,7 +356,12 @@ worker reads in its own window in 9-1.
        unfolding again puts up two epics. **Write a short new title** — a line in the plan
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
-       the history leads back to it
+       the history leads back to it.
+       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
+       milestone is inherited, so the epic alone carries it to every member and to the members
+       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
+       nothing to hang
+         moai edit <epic> --milestone <milestone>
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,
        and overwriting a row picked up beside you means two of you do the same work. A non-zero
