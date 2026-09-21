@@ -402,3 +402,5 @@
 {"ts":"2026-09-21T22:43:04Z","id":"moai-a1if","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-21T22:43:09Z","id":"moai-t0qd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 9b97252 로 워크트리 worktree-moai-hela2 에 섰다. 리뷰 moai-hela.twd(max)가 도는 중이고, 그 결과를 반영한 뒤 develop 에 병합하고 닫는다."}
 {"ts":"2026-09-21T22:44:22Z","id":"moai-s7we","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"v0.1.1 에 단다 — 감독이 브리프에 \"마일스톤을 달지 마라\" 고 적은 것이 잘못이었다(2026-09-21 사용자 지적). 도는 마일스톤이 있으면 집는 것은 그 안이거나 p0 핫픽스여야 한다. 마일스톤을 안 넓히려고 적은 줄이 규칙을 깼다. 일꾼의 잘못이 아니다."}
+{"ts":"2026-09-21T22:44:58Z","id":"moai-4097","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 도는 마일스톤을 건너뛰고 일을 맡긴다"}
+{"ts":"2026-09-21T22:44:58Z","id":"moai-6qgz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 절차에 마일스톤 문을 세운다"}
