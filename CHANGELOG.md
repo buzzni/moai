@@ -67,6 +67,27 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- A milestone carries a **start and a deadline**: `moai milestone add 'v0.1'
+  --start 2026-09-05 --due 2026-09-20`, and `moai edit <milestone> --due none`
+  clears one. They are calendar days (`YYYY-MM-DD`), not timestamps, so no
+  timezone can move them to another day, and they stand on a milestone row only —
+  anywhere else the write is refused rather than quietly kept where nothing reads
+  it. A day that does not exist (`2026-02-30`) and a start that falls after the
+  deadline are refused too.
+- The board says when a deadline has **passed**, and when one falls due within
+  three days (`status_due_days`). Each line carries the date and the days, and a
+  milestone that is finished or deferred says nothing. **Nothing is blocked and
+  the exit code never changes** — it is a warning, as every other one is.
+- The board shines one line when **two milestones are running at once**. It is a
+  notice, not a warning: `moai ready` counts both as inside, so nothing is held
+  back, and the line says that is the case rather than asking for a fix.
+- `moai show <milestone>` says **how long it took** — the wall clock over its
+  closed members, with the median, in `--json` as `spent`. Nothing is stored: it
+  is read from each member's start and finish right then, so closing a member
+  never writes another row. It always comes with the number it could measure
+  ("2 of 3 closed"), because a member with no `started_at` is *unknown*, neither
+  zero nor work not done. Wall clock is not effort — sessions running beside each
+  other overlap, and time waiting on a person is in there.
 - `moai tui` says whether a newer release is out. It asks GitHub once a day, and
   the version line in the header reads as one of four: a new release, the latest,
   ahead of the latest (a build from source), or not asked. It only asks where a
