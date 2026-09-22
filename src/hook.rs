@@ -396,6 +396,16 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         // `moai mv` 라 실패해 `&&` 가 끊기는데, 여섯 낱말로 갈라 읽은 판은 그것을 집기로 세어 뒤의
         // 빈손 쓰기를 풀어 줬다. 주석 하나(`env -S '#c' sed -i …`)에 글이 통째로 비던 것도 여기다 —
         // env 는 주석을 버리고 피연산자를 그대로 돌린다.
+        // **술어 안에 선 명령들**([`Text::Find`], moai-7kif) — 걷어 모아 `;` 로 잇는다.
+        //
+        // **그 안의 집기는 안 센다**(`appends`) — find 는 `-exec … +` 에서 찾은 이름을 argv 뒤에
+        // 이어 붙이고(xargs 와 같다), `;` 꼴에서도 **제 종료 코드가 그 명령의 것이 아니다**.
+        // `find . -exec moai mv <id> in_progress \; && <쓰기>` 의 `&&` 는 집기가 져도 닿는다 —
+        // 세어 주면 빈손의 쓰기를 풀어 준다. 쓰기 축은 그대로다.
+        if shape == Text::Find {
+            let text = exec_of(tail);
+            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: true });
+        }
         // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
         // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
         if shape == Text::Joined {
@@ -2359,6 +2369,45 @@ enum Text {
     /// 따옴표가 되살아났다면 `A B` 가 적혔을 자리다. 도로 감싸는 쪽으로 읽으면 `watch '집기;
     /// 쓰기'` 의 글이 낱말 하나로 굳어 그 쓰기를 아무 규칙도 못 본다.
     Joined,
+    /// **술어 안에 선 명령들**(`find … -exec … \;`, moai-7kif) — [`exec_of`] 가 걷어 모은다.
+    ///
+    /// 한 줄에 여럿이 설 수 있어 자리 하나로는 못 든다. 걷은 무리를 `;` 로 이어 한 글로 낸다.
+    /// **낱말마다 도로 감싼다** — find 는 셸을 안 거치고 곧장 exec 하니, 따옴표 안의 `>`·`&&`
+    /// 는 연산자가 아니라 글자다([`Text::Words`] 와 같은 까닭이고 [`Text::Joined`] 와 갈린다).
+    Find,
+}
+
+/// **`find` 의 술어 안에 선 명령들을 걷어 한 글로 잇는다**(moai-7kif) — `-exec`·`-execdir`·
+/// `-ok`·`-okdir` 이 넷이고, 저마다 `;` 나 `+` 로 끝난다.
+///
+/// `find . -name '*.rs' -exec sed -i s/a/b/ {} \;` 는 그 파일들을 정말 고치는데, 이 자리가
+/// 없던 판은 빈손으로 규칙 2 를 지나갔다. `find . -exec moai add x \;` 는 규칙 1 을 지나갔다.
+///
+/// **낱말마다 도로 감싼다** — find 는 셸을 안 거치고 곧장 exec 한다. 감싸지 않으면 인자 안의
+/// `>`·`;` 가 연산자로 읽혀, 아무것도 안 쓰는 줄을 쓰는 줄로 지어낸다.
+///
+/// **끝맺음이 없어도 걷는다** — 줄이 잘렸거나 사람이 빠뜨린 것이고, 그때도 그 앞까지는 정말
+/// 도는 명령이다.
+fn exec_of(words: &[String]) -> String {
+    const PREDS: &[&str] = &["-exec", "-execdir", "-ok", "-okdir"];
+    let mut out: Vec<String> = Vec::new();
+    let mut at = 0;
+    while at < words.len() {
+        if !PREDS.contains(&words[at].as_str()) {
+            at += 1;
+            continue;
+        }
+        at += 1;
+        let from = at;
+        while at < words.len() && words[at] != ";" && words[at] != "+" {
+            at += 1;
+        }
+        if from < at {
+            out.push(words[from..at].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" "));
+        }
+        at += 1;
+    }
+    out.join(" ; ")
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
@@ -2938,6 +2987,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             appends: false,
         },
     ];
+    // **find 의 명령은 옵션 뒤가 아니라 술어 안에 선다**(moai-7kif) — 위 표는 "옵션이 다 끝난
+    // 자리부터가 명령" 을 전제로 서는데 find 는 그 전제가 안 맞는다. `-exec`·`-execdir`·`-ok`·
+    // `-okdir` 넷이 같은 자리고, 저마다 `;` 나 `+` 로 끝나며 **한 줄에 여럿이 설 수 있다** —
+    // 자리 하나(`skip`)로는 못 든다.
+    //
+    // 그래서 글로 낸다([`Text::Find`]). 걷어 모으는 것은 [`handed_text`] 의 일이다 — 이 함수가
+    // 내는 것은 "그 뒤는 명령이 아니라 글이다" 하나뿐이고, 그 글을 짓는 자리는 다른 꼴들과
+    // 나란히 선다.
+    if head == "find" {
+        return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find });
+    }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
     let (takes, long, stops, chdir, hands) = (w.takes, w.long, w.stops, w.chdir, w.hands);
     // **[`astray`] 를 가리지 않는다**(리뷰) — 같은 이름의 함수가 이 파일에 있고, 둘 다 자리를
@@ -7844,6 +7904,61 @@ mod tests {
             "겹마다 같은 글을 다시 읽는다 — {:?}",
             clock.elapsed()
         );
+    }
+
+    /// **find 의 명령은 술어 안에 선다**(moai-7kif) — `find . -name '*.rs' -exec sed -i s/a/b/ {} \;`
+    /// 는 그 파일들을 정말 고치는데 훅이 빈손으로 넘겼고, `find . -exec moai add x \;` 는 규칙 1 을
+    /// 지나갔다. 감싸는 명령의 표는 "옵션이 다 끝난 자리부터가 명령" 을 전제로 서는데, find 는
+    /// 명령이 옵션 뒤가 아니라 술어 안에 서고 `;` 나 `+` 로 끝난다.
+    ///
+    /// **한 줄에 여럿이 선다** — 자리 하나로는 못 들어 걷어 모아 한 글로 잇는다([`exec_of`]).
+    ///
+    /// **그 안의 집기는 안 센다** — find 의 종료 코드는 그 명령의 것이 아니고(`-exec … +` 는
+    /// 찾은 이름을 argv 뒤에 이어 붙이기까지 한다), 세어 주면 빈손의 쓰기를 풀어 준다.
+    #[test]
+    fn a_command_inside_a_find_predicate_is_a_command() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "find . -exec moai add '딴 일' \\;",
+            "find . -name '*.rs' -exec moai add '딴 일' \\;",
+            "find . -execdir moai add '딴 일' \\;",
+            "find . -ok moai add '딴 일' \\;",
+            "find . -okdir moai add '딴 일' \\;",
+            "find . -exec moai add '딴 일' +",
+            // 끝맺음이 없어도 그 앞까지는 정말 돈다.
+            "find . -exec moai add '딴 일'",
+            // 한 줄에 여럿 — 뒤엣것도 읽는다.
+            "find . -exec echo x \\; -exec moai add '딴 일' \\;",
+        ] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "술어 안의 명령을 가렸다 — {cmd}");
+        }
+        for cmd in [
+            "find . -name '*.rs' -exec sed -i s/a/b/ src/x.rs \\;",
+            "find . -execdir tee src/x.rs \\;",
+            "find . -exec echo x \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            "find . -type f -exec sed -i s/a/b/ src/x.rs +",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "술어 안의 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **없는 쓰기를 지어내지 않는다** — find 는 셸을 안 거치고 곧장 exec 한다. 감싸지 않으면
+        // 인자 안의 `>`·`;` 가 연산자로 읽혀 아무것도 안 쓰는 줄을 막는다.
+        for cmd in [
+            "find . -name '*.rs' -print",
+            "find . -exec echo 'a > src/x.rs' \\;",
+            "find . -exec git commit -m 'a; tee src/x.rs' \\;",
+            // 자리표는 어디인지 모른다 — 괄호를 보고 이미 걸렀다.
+            "find . -name '*.rs' -exec sed -i s/a/b/ {} \\;",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "없는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — find 의 종료 코드는 그 명령의 것이 아니다.
+        let cmd = "find . -exec moai mv t-1 in_progress --from todo \\; && sed -i s/a/b/ src/store.rs";
+        let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
+        assert!(matches!(got, Decision::Deny(_)), "술어 안의 집기가 규칙 2 를 채웠다\n{got:?}");
     }
 
     /// **뒤가 명령이 아니라 글인 감싸는 명령 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c` 다.
