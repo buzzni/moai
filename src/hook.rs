@@ -4915,13 +4915,19 @@ fn prose(args: &[String]) -> Vec<String> {
 ///
 /// **노트와 `-m` 은 고쳐 적으라고 하지 않는다.** 둘은 저널에만 쌓여 고칠 수 없다 — `moai note` 로 다시 적으라던
 /// 판은 같은 글을 한 벌 더 영영 남기게 했다. 고칠 수 있는 제목·본문만 `moai edit` 를 대고, 나머지는 다음 글부터다.
+///
+/// **용어도 함께 묻는다**(moai-y9kv). 보존 목록이 세는 것은 *글자 그대로 옮겨 적을 것*(id·명령·경로·
+/// 숫자)이라 기술 명사가 빠졌고, 그 빈자리로 `layer` 가 "층" 이 된 글이 쌓였다. 윤문 플러그인은 글이 다
+/// 쓰인 뒤에 돌아 용어를 되살리지 않으니 여기서 묻는다 — 그래도 막지는 않는다(moai-mthy).
 pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
     let mut said = format!(
         "Did you polish the Korean text you just put into moai — `korean-skills:humanizer`, \
          `humanize-korean:humanize-korean` when it runs past 20 lines, and `korean-skills:grammar-checker` last? \
          Polish an unpolished title or body and write it back with `moai{at} edit`. A note and `-m` only pile up in \
          the journal and cannot be fixed, so do not write the same text again: polish from the next one on. \
-         Leave ids, commands, paths, numbers, code fragments and the fixed-form lines as they are."
+         Leave ids, commands, paths, numbers, code fragments and the fixed-form lines as they are, \
+         and keep the technical terms — a name that came from the code goes in as it is, never traded \
+         for an everyday word with the English dropped."
     );
     if !missing.is_empty() {
         said.push_str(&format!(
@@ -10101,6 +10107,18 @@ mod korean_tests {
         let Decision::Context(said) = korean_notice(" -C /repo", &[]) else { panic!("비추는 답이 아니다") };
         assert!(said.contains("`moai -C /repo edit`"), "{said}");
         assert!(!said.contains("`moai note`") && said.contains("only pile up in the journal"), "{said}");
+    }
+
+    /// **용어를 지켰는지도 같이 묻는다**(moai-y9kv). 보존 목록은 *글자 그대로 옮겨 적을 것*만 세어
+    /// 기술 명사가 빠졌고, 그 빈자리로 `layer` 가 "층" 이 되고 `latest::Seen::Unasked` 가 "못 물었다" 가
+    /// 된 글이 쌓였다. 윤문 플러그인은 글이 다 쓰인 뒤에 돌아 용어를 되살리지 않으니, 비추는 줄이
+    /// 그것을 묻는다 — 여전히 **막지 않는다**(moai-mthy).
+    #[test]
+    fn the_korean_notice_asks_to_keep_the_terms() {
+        let Decision::Context(said) = korean_notice("", &[]) else { panic!("비추는 답이 아니다") };
+        assert!(said.contains("keep the technical terms"), "용어를 지켰는지 안 묻는다\n{said}");
+        assert!(said.contains("came from the code"), "코드에서 온 이름을 안 가린다\n{said}");
+        assert!(matches!(korean_notice("", &[]), Decision::Context(_)), "막는 답이 됐다");
     }
 
     /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다 — 하위 디렉터리에 선
