@@ -103,7 +103,10 @@ fn parts(v: &str) -> Option<([u64; 3], Option<&str>)> {
     // 뗀다**: semver 의 꼴이 `<수>[-<앞판>][+<메타>]` 라 `-` 를 먼저 가르면 `0.2.0+ci-1234` 의
     // `1234` 가 앞판으로 읽혀, 같은 판이 "앞선 판" 이 된다. 뒤에 붙은 `+` 도 함께 떨어져
     // `0.2.0-rc1+b.7` 의 앞판이 `rc1+b.7` 이 되는 일도 없다 — 그 둘은 semver 에서 같은 판이다.
-    let v = v.split('+').next().unwrap_or(v);
+    let (v, build) = match v.split_once('+') {
+        Some((v, build)) => (v, Some(build)),
+        None => (v, None),
+    };
     let (core, pre) = match v.split_once('-') {
         Some((core, pre)) if !pre.is_empty() => (core, Some(pre)),
         Some(_) => return None,
@@ -125,12 +128,22 @@ fn parts(v: &str) -> Option<([u64; 3], Option<&str>)> {
     // 않는다. 안 재면 `v9.9.9-<ESC>[2J` 가 성한 판으로 읽혀 [`Seen::Newer`] 의 태그로 화면에
     // 그대로 서고([`Seen::Newer`] 의 글이 그렇게 약속한다) 하루 동안 [`FILE`] 에 남는다 —
     // 그물에서 온 글을 들어오는 자리에서 씻는 것은 `text::sanitize` 가 선 까닭과 같다.
-    if let Some(pre) = pre
-        && !pre.split('.').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
-    {
+    //
+    // **메타데이터도 같은 자로 잰다**(리뷰). 판을 가르지 않는다고 안 재던 자리인데, 안 재면
+    // `v9.9.9+` 나 `v9.9.9+아무 글` 이 성한 판으로 읽혀 위와 **똑같이** 화면에 서고 파일에
+    // 남는다 — 태그가 화면에 그대로 서는 것은 앞판이 붙었는지와 무관하기 때문이다. 앞판의
+    // 빈 마디(`0.2.0-`)를 거절하면서 메타데이터의 빈 마디(`0.2.0+`)를 받는 것도 한쪽만 선
+    // 자다.
+    if [pre, build].into_iter().flatten().any(|s| !dotted_ok(s)) {
         return None;
     }
     Some((n, pre))
+}
+
+/// semver 의 마디 열인가 — 점으로 가르고, 마디는 비지 않으며 `[0-9A-Za-z-]` 뿐이다.
+/// 앞판과 빌드 메타데이터가 같은 자를 쓴다(semver 9·10항).
+fn dotted_ok(s: &str) -> bool {
+    s.split('.').all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
 }
 
 /// 두 앞판을 semver 로 견준다 — 점으로 가른 마디마다, 수는 수로 수 아닌 것은 글자로, 수가
@@ -240,6 +253,18 @@ fn doc_at(dir: &Path) -> Option<toml_edit::DocumentMut> {
 /// (`moai-54k2`, `moai init` 이 심는 블록이 영어가 된 그 결정)과 같은 자리다.
 const HEADER: &str = "# moai writes this file. Delete it and it asks again.\n";
 
+/// 아직 없던 파일의 첫 문서 — [`HEADER`] 를 **문서의 꾸밈으로** 단다.
+///
+/// **`HEADER.parse()` 로 짓지 않는다**(리뷰). 키도 표도 없는 글에서 라이브러리는 그 주석을
+/// 통째로 *끝 글*(`trailing`)로 들고 맨 끝에 그린다 — 뿌리의 키는 그보다 먼저 서므로, 머리에
+/// 달려던 줄이 `asked_at`·`tag` **밑으로** 밀린다. 사용자 설정이 같은 함정을 만나 푼 자리가
+/// [`crate::user_config::Doc`] 의 `lift_head_comment` 다(moai-bx7g).
+fn new_doc() -> toml_edit::DocumentMut {
+    let mut doc = toml_edit::DocumentMut::new();
+    doc.decor_mut().set_prefix(HEADER);
+    doc
+}
+
 /// 답을 적는다. **스냅샷 먼저, 저널 나중** 과 같은 자리에 선다 — 이 파일은 잃어도 한 번 더 묻는
 /// 것이 전부라 **락을 안 잡는다.** 프로세스 둘이 같이 쓰면 늦은 쪽이 남고, 둘 다 같은 것을 적으므로
 /// 진 쪽도 잃는 것이 없다. (같은 프로세스의 실 둘이 함께 쓰는 것은 다른 이야기다 —
@@ -256,7 +281,7 @@ const HEADER: &str = "# moai writes this file. Delete it and it asks again.\n";
 /// 키를 옛 바이너리가 한 번 만져 지우면 안 된다.
 pub fn write(dir: &Path, held: &Held) -> R<()> {
     std::fs::create_dir_all(dir).map_err(|e| crate::fail::Fail::new(format!("{}: {e}", dir.display())))?;
-    let mut doc = doc_at(dir).unwrap_or_else(|| HEADER.parse().expect("고정 글"));
+    let mut doc = doc_at(dir).unwrap_or_else(new_doc);
     doc[ASKED_AT] = toml_edit::value(held.asked_at.as_str());
     match &held.tag {
         Some(tag) => doc[TAG] = toml_edit::value(tag.as_str()),
@@ -603,6 +628,33 @@ mod tests {
         assert_eq!(seen("0.1.0", Some("v9.9.9-rc 1")), Seen::Unasked);
         assert_eq!(seen("0.1.0", Some("v9.9.9-rc.")), Seen::Unasked);
         assert_eq!(seen("0.1.0", Some("v9.9.9-rc.1")), Seen::Newer { tag: "v9.9.9-rc.1".into() });
+    }
+
+    #[test]
+    fn build_metadata_is_measured_by_the_same_rule_as_the_prerelease() {
+        // 판을 안 가른다고 안 재던 자리다 — 그런데 태그는 **받은 그대로** 화면에 서고 하루 동안
+        // [`FILE`] 에 남으므로, 앞판 뒤에 붙든 `+` 뒤에 붙든 들어오는 글은 같은 자로 재야 한다.
+        assert_eq!(seen("0.1.0", Some("v9.9.9+")), Seen::Unasked, "빈 메타데이터를 받았다");
+        assert_eq!(seen("0.1.0", Some("v9.9.9+b..7")), Seen::Unasked, "빈 마디를 받았다");
+        assert_eq!(seen("0.1.0", Some("v9.9.9+새 판")), Seen::Unasked, "낱말이 아닌 메타데이터를 받았다");
+        // 성한 메타데이터는 그대로 지난다 — 판을 안 가르는 것은 전과 같다.
+        assert_eq!(compare("0.2.0+ci-1234", "0.2.0"), Some(Ordering::Equal));
+        assert_eq!(compare("0.2.0-rc1+b.7", "0.2.0-rc1"), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn a_file_it_makes_itself_starts_with_the_header() {
+        // 머리 줄이 `asked_at` 밑으로 밀리면 "이 파일은 지워도 된다" 는 말을 파일을 연 사람이
+        // 맨 끝에서야 본다 — 사용자 설정이 `lift_head_comment` 로 푼 그 자리와 같다.
+        let s = Scratch::new("latest-header");
+        write(s.path(), &Held { asked_at: "2026-09-21T00:00:00Z".into(), tag: Some("v0.1.0".into()) }).unwrap();
+        let src = std::fs::read_to_string(file_at(s.path())).unwrap();
+        assert!(src.starts_with(HEADER), "머리 줄이 머리에 없다\n{src}");
+        // 두 번째 쓰기도 머리를 흔들지 않고, 읽는 쪽은 그대로 읽는다.
+        write(s.path(), &Held { asked_at: "2026-09-22T00:00:00Z".into(), tag: None }).unwrap();
+        let again = std::fs::read_to_string(file_at(s.path())).unwrap();
+        assert!(again.starts_with(HEADER), "두 번째 쓰기가 머리를 흔들었다\n{again}");
+        assert_eq!(read(s.path()).unwrap().tag, None);
     }
 
     #[test]
