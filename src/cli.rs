@@ -147,7 +147,8 @@ pub enum Cmd {
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up")]
+    status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so")]
     Status(WorktreeArg),
 
     /// What you can pick up now
@@ -835,8 +836,11 @@ pub struct AddArgs {
     #[arg(long, value_name = "id")]
     pub parent: Option<String>,
 
+    // 기한 둘도 여기 든다(리뷰) — 계획은 마일스톤을 못 짓고(`refuse.plan_has_no_milestone`),
+    // `bulk` 는 이 둘을 아예 안 받는다. 목록에서 빼 두면 `moai add --from - --due …` 가 0 으로
+    // 끝나며 날짜를 말없이 버린다 — 바로 밑의 `--var`·`--dry-run` 거절이 막는 것과 같은 판이다.
     /// Epic and issues from markdown at once. `-` is stdin
-    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
+    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent", "start", "due"])]
     pub from: Option<String>,
 
     // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은

@@ -564,7 +564,7 @@ impl Issue {
         for (what, v) in [(Field::StartsOn, &self.starts_on), (Field::DueOn, &self.due_on)] {
             let Some(v) = v else { continue };
             if parse_date(v).is_none() {
-                return Err(Invalid::Date { field: what, value: format!("{v:?}") });
+                return Err(Invalid::Date { id: self.id.clone(), field: what, value: format!("{v:?}") });
             }
             if self.kind != Kind::Milestone {
                 return Err(Invalid::DateNotMilestone { id: self.id.clone(), field: what });
@@ -628,8 +628,14 @@ pub enum Invalid {
     MilestoneInMilestone {
         id: String,
     },
-    /// 기한이 `YYYY-MM-DD` 가 아니다 — 적힌 값(따옴표째).
+    /// 기한이 `YYYY-MM-DD` 가 아니다 — 적힌 값(따옴표째)과, 비우는 명령에 쓸 id.
+    ///
+    /// **id 를 함께 든다**(리뷰) — 이 검사는 이번 쓰기가 손댄 필드만 보는 것이 아니라 줄에 적힌
+    /// 두 날짜를 다 보므로, 손으로 푼 충돌이 남긴 `"due_on":"2026-9-20"` 한 줄이 그 줄의 제목
+    /// 고치기와 `defer` 까지 막는다. 그때 화면에 비우는 길이 없으면 되돌릴 방법이 도구 밖에만
+    /// 남는다(CLAUDE.md).
     Date {
+        id: String,
         field: Field,
         value: String,
     },
@@ -1143,9 +1149,15 @@ pub fn days_since(at: &str, now: &str) -> Option<i64> {
 /// 받아들여지는 까닭은 이미 파일에 적힌 시각을 읽는 쪽이 관대해야 해서다. 기한은 **사람이
 /// 이번에 치는 값**이고, `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
 /// 영영 "기한 없음" 으로 조용하다.
+///
+/// **자리마다 잰다.** `-` 를 아무 데나 받으면 `"-026"` 이 `i64::from_str` 에 닿아 해가 음수로
+/// 서고(리뷰), 그 줄은 `moai edit <id> --due=-026-09-20` 한 번으로 들어와 보드에 "749469일
+/// 지남" 으로 영영 선다. 꼴을 재는 자가 부호를 흘리면 뒤의 범위 검사는 해를 아예 안 본다.
 pub fn parse_date(s: &str) -> Option<i64> {
     let b = s.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !b.iter().all(|c| c.is_ascii_digit() || *c == b'-') {
+    if b.len() != 10
+        || !b.iter().enumerate().all(|(x, c)| if matches!(x, 4 | 7) { *c == b'-' } else { c.is_ascii_digit() })
+    {
         return None;
     }
     let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
@@ -1565,6 +1577,13 @@ mod tests {
             "오늘",
             "2026/09/20",
             "20260920",
+            // 부호는 자리를 안 가리고 샌다(리뷰) — `-` 를 아무 데나 받으면 `"-026"` 이
+            // `i64::from_str` 에 닿아 해가 음수로 서고, 그 줄이 보드에 "749469일 지남" 으로
+            // 영영 선다. `--due=-026-09-20` 한 줄이 들어오던 자리다.
+            "-026-09-20",
+            "-999-01-01",
+            "2026--9-20",
+            "+026-09-20",
         ] {
             assert_eq!(parse_date(bad), None, "{bad:?} 를 날짜로 받았다");
         }

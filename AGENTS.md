@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:54a062f3 -->
+<!-- moai:begin v:0.1.1 hash:71f3ee1a -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -179,8 +179,9 @@ the work under it drops out with it.
 **A milestone is the one row that carries dates.** `--start` and `--due` take a
 calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
 They stand on a milestone row only — on anything else the write is refused. A
-deadline that has passed, and one falling due within three days, is one warning
-line on the board; **nothing is blocked and the exit code never changes.**
+deadline that has passed, and one falling due within `status_due_days` (3 unless
+your config says otherwise), is one warning line on the board; **nothing is
+blocked and the exit code never changes.**
 
 **`moai show <milestone>` also says how long it took.** That is read from the
 closed members' start and finish right then — no field holds it. It comes with

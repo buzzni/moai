@@ -1130,11 +1130,10 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     if matches!(w.kind, "milestone_overdue" | "milestone_due_soon") {
         for id in w.ids.iter().take(SHOW) {
             let Some(i) = by_id.get(id.as_str()) else { continue };
-            // 지난 것은 `ages` 에 지난 날수(양수)가 들어 있다 — 낱말을 고르는 쪽은 부호로 가른다.
-            let left = match w.kind {
-                "milestone_overdue" => -w.ages.get(id).copied().unwrap_or(0),
-                _ => w.ages.get(id).copied().unwrap_or(0),
-            };
+            // `ages` 에 남은 날수가 **부호째** 들어 있다 — 지난 것이 음수고, 낱말도 색도 그 부호
+            // 하나로 갈린다. 없는 값을 0 으로 채우지 않는다: `due_tail(0)` 은 "오늘까지" 라, 지난
+            // 줄 밑에 안 지났다는 낱말이 선다.
+            let Some(&left) = w.ages.get(id) else { continue };
             out.push(format!(
                 "    {}  {}   {}  {}",
                 paint(style::ID, id),
@@ -1933,25 +1932,36 @@ pub fn spent(sp: &crate::report::Spent, lang: Lang) -> Option<String> {
     }
     let label = row_label(say(lang, "detail.spent"), lang);
     let closed = sp.closed.to_string();
-    if sp.measured == 0 {
+    // **잰 것이 있는가를 한 자리에서 가른다**(리뷰) — 중앙값이 없다는 것과 잰 멤버가 없다는 것은
+    // 같은 사실이라, 둘을 따로 물으면 한쪽이 `?` 로 조용히 줄을 통째로 지운다.
+    let Some(median) = sp.median else {
         let said = fill(say(lang, "detail.spent_none"), &[("closed", &closed)]);
         return Some(format!("  {label}   {}", paint(style::DIM, &said)));
-    }
+    };
     let of = fill(
         say(lang, "detail.spent_of"),
-        &[("closed", &closed), ("measured", &sp.measured.to_string()), ("median", &minutes(sp.median?, lang))],
+        &[("closed", &closed), ("measured", &sp.measured.to_string()), ("median", &minutes(median, lang))],
     );
     Some(format!("  {label}   {}  {}", minutes(sp.minutes, lang), paint(style::DIM, &of)))
 }
 
-/// 분을 낱말로 — 한 시간이 안 되면 분, 넘으면 시간이다.
+/// 분을 낱말로 — 한 시간이 안 되면 분, 넘으면 `1시간 59분` 처럼 시간과 분이다.
 ///
-/// **시간은 내림한다.** 반올림하면 `59분` 이 `1시간` 으로 서서 안 지난 시간을 지난 것으로
-/// 말한다 — 어림값이라도 실제보다 크게 내밀지 않는다.
+/// **나머지를 버리지 않는다**(리뷰 moai-pmhv.070 15번). 시간만 내림해 내면 119분이 `1시간` 으로
+/// 서서 화면과 `--json` 의 `minutes` 가 최대 쉰아홉 분 어긋난다 — 든 시간을 대는 것이 이 줄의
+/// 일인데, 그 줄이 실제의 절반을 말하면 안 대느니만 못하다. **반올림도 안 한다**: `59분` 이
+/// `1시간` 으로 서면 안 지난 시간을 지난 것으로 말한다. 나머지가 0 이면 `2시간` 하나다.
+///
+/// **날 단위는 안 쓴다.** `720시간` 이 길어 보여도 `30일` 로 바꾸면 그것이 벽시계 30일인지
+/// 일한 30일인지 읽는 쪽이 못 가른다 — 시간은 겹쳐 세어진 값이라 날로 접으면 그 사실이 숨는다.
 fn minutes(m: i64, lang: Lang) -> String {
-    match m < 60 {
-        true => fill(say(lang, "detail.spent_minutes"), &[("m", &m.to_string())]),
-        false => fill(say(lang, "detail.spent_hours"), &[("h", &(m / 60).to_string())]),
+    let (h, rest) = (m / 60, m % 60);
+    let hours = || fill(say(lang, "detail.spent_hours"), &[("h", &h.to_string())]);
+    let mins = |m: i64| fill(say(lang, "detail.spent_minutes"), &[("m", &m.to_string())]);
+    match (h, rest) {
+        (0, _) => mins(m),
+        (_, 0) => hours(),
+        _ => fill(say(lang, "detail.spent_span"), &[("hours", &hours()), ("minutes", &mins(rest))]),
     }
 }
 
@@ -2556,7 +2566,9 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
         Invalid::MilestoneInMilestone { id } => fill(say(lang, "invalid.milestone_in_milestone"), &[("id", id)]),
         // **고칠 손잡이를 낱말째 낸다** — 기한은 `--start`·`--due` 로 치는 값이라, 무엇이
         // 틀렸는지만 말하면 어느 옵션을 다시 쳐야 하는지가 화면에 없다.
-        Invalid::Date { field: f, value } => fill(say(lang, "invalid.date"), &[("field", field(f)), ("value", value)]),
+        Invalid::Date { id, field: f, value } => {
+            fill(say(lang, "invalid.date"), &[("id", id), ("field", field(f)), ("value", value)])
+        }
         Invalid::DateNotMilestone { id, field: f } => {
             fill(say(lang, "invalid.date_not_milestone"), &[("id", id), ("field", field(f))])
         }

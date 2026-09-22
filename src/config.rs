@@ -596,11 +596,15 @@ mod tests {
         assert_eq!(c.status, Thresholds::DEFAULT);
         assert_eq!((c.status.review_days, c.status.wip_days, c.status.blocked_days), (3, 2, 3));
         assert_eq!((c.status.wip_limit, c.status.no_epic_min, c.status.idea_pile), (3, 5, 5));
-        assert_eq!((c.status.no_epic_ratio, c.status.flow_days), (0.15, 7));
+        assert_eq!((c.status.no_epic_ratio, c.status.flow_days, c.status.due_days), (0.15, 7, 3));
     }
 
-    /// 적은 값이 그대로 선다 — 여덟 키를 한 번에 본다. 하나를 빼먹고 기본값으로
+    /// 적은 값이 그대로 선다 — 아홉 키를 한 번에 본다. 하나를 빼먹고 기본값으로
     /// 두면 그 키만 고쳐도 안 먹는데, 화면에는 아무 자취가 없다.
+    ///
+    /// **목록이 [`Thresholds::KEYS`] 와 같은 길이인지도 여기서 잰다**(리뷰) — 키를 더하면서
+    /// 이 시험을 안 고치면 그 키는 아무 데서도 안 읽히는 채로 초록이다. `status_due_days` 가
+    /// 실제로 그렇게 들어왔다.
     #[test]
     fn every_threshold_can_be_set() {
         let src = "prefix = \"argos\"
@@ -612,11 +616,14 @@ status_no_epic_ratio = 0.5
 status_no_epic_min   = 14
 status_flow_days     = 15
 status_idea_pile     = 16
+status_due_days      = 17
 ";
+        assert_eq!(src.lines().skip(1).count(), Thresholds::KEYS.len(), "아는 키 하나가 이 시험에 안 섰다");
         let t = Config::parse(src).unwrap().status;
         assert_eq!((t.review_days, t.wip_days, t.blocked_days, t.flow_days), (10, 11, 12, 15));
         assert_eq!((t.wip_limit, t.no_epic_min, t.idea_pile), (13, 14, 16));
         assert_eq!(t.no_epic_ratio, 0.5);
+        assert_eq!(t.due_days, 17, "status_due_days 가 안 먹는다");
     }
 
     /// 수는 따옴표 없이 적는다. 두르면 `toml` 크레이트로 갈아 끼우는 날 글이 되므로,

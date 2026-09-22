@@ -144,6 +144,7 @@ Options:
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
     status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so
 ```
 
 ## `moai ready`
