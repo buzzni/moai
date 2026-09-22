@@ -1142,6 +1142,103 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
     out
 }
 
+/// 묶음에 **든 시간** — 닫힌 멤버의 `started_at`·`done_at` 에서 지금 센다(moai-wfup).
+///
+/// **저장하지 않는다.** 마일스톤 줄에 총합을 적어 두면 멤버를 하나 닫을 때마다 남의 줄을 써야
+/// 하고, 그것이 곧 파생값을 저장하는 것이다 — beads 가 `is_blocked` 를 컬럼으로 들고 있다가
+/// `bd recompute-blocked` 를 만들어야 했던 자리다.
+///
+/// **`closed` 와 `measured` 를 따로 낸다.** `started_at` 이 없으면 **모르는 것**이고(moai-38mh),
+/// 0 분으로도 안 한 일로도 세지 않는다 — 어림값에 그 수를 함께 대야 빠진 멤버가 조용히 0 이
+/// 안 된다("닫힌 41 중 34 를 잰 값"). 한 수로 뭉치면 절반만 잰 마일스톤이 절반만 일한 것으로
+/// 읽힌다.
+///
+/// **묶음 멤버는 안 센다**(`is_work`). 에픽 줄의 두 값은 "누가 그 줄에 `mv` 를 쳤나" 일 뿐이고
+/// (`Issue::started_at`), 그 에픽의 이슈는 마일스톤 지도가 물려받아 이미 여기 들어 있다 — 함께
+/// 세면 같은 일이 두 번 더해진다.
+///
+/// **멤버의 자식은 시간을 두 번 안 싣는다**(리뷰). `is_work` 는 종류만 보는데 자식도
+/// `Kind::Issue` 라, 소속 지도가 부모를 타고 자식까지 이 묶음에 넣는다 — 그리고 이 저장소의
+/// 규약이 리뷰를 자식으로 세우므로(`AGENTS.md` 의 훅 규칙 3) 그 겹침은 드문 판이 아니라 흔한
+/// 판이다. 자식의 시작·끝은 부모의 구간 **안**에 들어 있어, 둘을 같이 더하면 한 시간 일한 것이
+/// 두 시간으로 선다.
+///
+/// **접는 것은 부모의 구간이 실제로 세졌을 때뿐이다.** 부모가 아직 안 닫혔거나 시작이 안 적혀
+/// 아무 구간도 못 냈으면 그 자식이 이 묶음에 있는 유일한 증거고, 그때까지 접으면 리뷰만 닫힌
+/// 마일스톤이 "잰 것이 없다" 로 선다. **`closed` 는 접지 않는다** — 자식도 닫힌 일이고, 그 수는
+/// 막대(`Roll::done`)와 같아야 한 화면이 두 수로 말하지 않는다.
+///
+/// **벽시계는 든 품이 아니다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
+/// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다. 내는 쪽이 그 말을 함께 적는다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Spent {
+    /// 닫힌 멤버 수 — `done` 에 선 일.
+    pub closed: usize,
+    /// 그중 시작과 끝이 **둘 다 적힌** 멤버 수. 분모가 아니라 "몇을 쟀나" 다.
+    pub measured: usize,
+    /// 잰 멤버의 소요를 더한 값(분).
+    pub minutes: i64,
+    /// 잰 멤버 소요의 중앙값(분). 잰 것이 없으면 없다.
+    ///
+    /// **평균이 아니다**(moai-wfup 의 실측) — 사분위 폭이 중앙값보다 넓어 한쪽으로 긴 꼬리가
+    /// 평균을 끌고 간다. 중앙값도 어림이라, 읽는 쪽에 잰 수를 함께 준다.
+    pub median: Option<i64>,
+}
+
+/// [`Spent`] 를 센다. 묶음이 아닌 줄에는 빈 값이다.
+// 바이너리는 멤버를 이미 쥔 [`spent_in`] 을 부른다 — 이 꼴은 시험의 짧은 길이다
+// ([`misplaced`]·`rollup_of` 와 같은 자리).
+#[cfg(test)]
+pub fn spent_on(all: &[Issue], group: &Issue) -> Spent {
+    spent_in(&group_members(all, group))
+}
+
+/// [`spent_on`] 과 같은 것. 멤버를 이미 쥔 쪽([`crate::cmd`] 의 `show`)이 소속 지도를 다시 짓지
+/// 않게 받는다 — `misplaced_in`·`rollup_of_in` 과 같은 꼴이다(moai-g0zx). `group_members` 는
+/// 저장소 전체로 `eclipsed` 와 소속 지도를 새로 짓는데, 상세 한 판은 그것을 이미 쥐고 있다.
+pub fn spent_in(members: &[&Issue]) -> Spent {
+    // **닫힌 멤버는 다 센다** — 자식도 닫힌 일이고, 막대(`Roll::done`)가 세는 것과 같아야 한다.
+    // 자식을 여기서도 빼면 상세가 `멤버 2/2` 옆에 "닫힌 1" 을 내, 한 화면이 두 수로 말한다(리뷰).
+    // 접는 것은 **시간**뿐이다.
+    //
+    // **조상이 먼저 서야 한다.** id 는 부모가 제 자식의 앞머리라(`<부모>.<자식>`) 오름차순이면
+    // 조상이 언제나 앞이고, 그래야 자식이 제 부모의 판정을 보고 정한다.
+    let mut done: Vec<&&Issue> = members.iter().filter(|m| is_work(m) && m.status.is_done()).collect();
+    done.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    let mut spans: Vec<i64> = Vec::new();
+    // 제 구간이 이미 세진 줄 — 그 밑은 그 구간 안이다.
+    let mut inside: BTreeSet<&str> = BTreeSet::new();
+    for m in &done {
+        // **부모의 구간이 실제로 세졌을 때만 접는다**(리뷰). 부모가 아직 안 닫혔거나 시작이
+        // 안 적혀 아무것도 못 냈으면, 그 자식의 구간이 이 묶음에 있는 **유일한 증거**다 —
+        // 무턱대고 접으면 리뷰만 닫힌 마일스톤이 "잰 것이 없다" 로 서고, 실제로 그랬다.
+        if crate::id::parent_of(&m.id).is_some_and(|p| inside.contains(p)) {
+            // 손자도 같은 구간 안이다 — 접힌 자식을 타고 이어진다.
+            inside.insert(m.id.as_str());
+            continue;
+        }
+        // **음수는 안 센다.** 손으로 푼 줄이나 되돌렸다 다시 닫은 줄에서 끝이 시작보다 앞설 수
+        // 있는데, 그런 줄을 0 으로 눌러 담으면 "0분에 했다" 가 잰 값으로 선다 — 모르는 것은
+        // 모른다고 한다.
+        let (Some(s), Some(d)) = (m.started_at.as_deref(), m.done_at.as_deref()) else { continue };
+        let (Some(s), Some(d)) = (crate::model::parse_rfc3339(s), crate::model::parse_rfc3339(d)) else { continue };
+        if d < s {
+            continue;
+        }
+        spans.push((d - s) / 60);
+        inside.insert(m.id.as_str());
+    }
+    let closed = done.len();
+    spans.sort_unstable();
+    // 짝수 개면 가운데 둘의 평균이다 — 내림으로 자른다(분 단위라 한 분 아래는 뜻이 없다).
+    let median = match spans.len() {
+        0 => None,
+        n if n % 2 == 1 => Some(spans[n / 2]),
+        n => Some((spans[n / 2 - 1] + spans[n / 2]) / 2),
+    };
+    Spent { closed, measured: spans.len(), minutes: spans.iter().sum(), median }
+}
+
 /// 묶음(에픽·마일스톤) id → **멤버에서 읽은 칸.**
 ///
 /// 묶음의 `status` 는 저장된 필드지만 뜻을 갖지 않는다. 멤버를 옮길 때 묶음
@@ -2827,10 +2924,15 @@ pub struct Warning {
     /// `kind` 를 같이 보지 않고서는 숫자를 읽을 수 없다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest: Option<i64>,
-    /// id → **판정에 쓴 나이(일)**. 날짜로 거는 경고(`stale_review`·`blocked_stale`·
+    /// id → **판정에 쓴 날수**. 날짜로 거는 경고(`stale_review`·`blocked_stale`·
     /// `stale_progress`)와, 나이가 제 뜻을 갖는 `blocked_by_deferred`(막는 쪽을 **미룬 지**
-    /// 며칠 — 지금 할 일이 지금 안 할 일을 기다린 날수, moai-hcx3)만 싣는다. 안 실린 경고의
-    /// 나이 열은 칸 나이다.
+    /// 며칠 — 지금 할 일이 지금 안 할 일을 기다린 날수, moai-hcx3)와, 기한으로 거는
+    /// `milestone_overdue`·`milestone_due_soon` 만 싣는다. 안 실린 경고의 나이 열은 칸 나이다.
+    ///
+    /// **앞의 넷은 지나간 날수(양수)이고 기한 둘은 남은 날수다**(moai-tfcp) — 지난 기한은
+    /// 음수다([`crate::model::days_until`] 과 같은 부호). 부호로 갈리므로 받는 쪽이 `kind` 를
+    /// 같이 안 봐도 그 수 하나로 앞뒤를 읽는다: 크기만 싣고 갈래로 뜻을 가르면 "2일 지남" 과
+    /// "2일 남음" 이 `--json` 에서 같은 값이 된다(리뷰).
     ///
     /// 보이는 쪽이 나이를 새로 재면 판정과 표시가 갈라진다 — `blocked_stale` 은 막음이 다시
     /// 선 때([`blocked_since`])로 재는데 목록이 제 칸 나이를 내면, 칸에 30일 선 줄이 "3일
@@ -3492,6 +3594,84 @@ pub fn status_in<'a>(
                     .notice()
                     .hint("moai ready"),
             );
+        }
+    }
+
+    // 6-5. **마일스톤이 겹쳐 돈다**(moai-nnal, 2026-09-22 사용자 결정). 알림이지 경고가
+    //      아니다 — 겹치는 것은 `ready` 가 이미 견디는 판이고(다 안으로 센다), 고칠 일이
+    //      있다는 말이 아니라 지금 겹쳐 돈다는 사실이다. 경고로 두면 겹친 동안 내내 Stop 훅이
+    //      세는 수가 하나 늘어 세션이 붙들린다.
+    //
+    //      **셋 이상도 이 한 줄이고, 그 줄이 수를 말한다**(리뷰) — 글에 "둘" 을 박아 두면 셋이
+    //      돌 때 보드가 제 밑에 세 줄을 늘어놓으면서 둘이라고 말한다. 어느 마일스톤인지는
+    //      `preview` 가 id 와 제목으로 낸다.
+    //
+    //      차례를 다시 매기지 않는다 — `running` 은 `stands`(id 로 키를 잡은 `BTreeMap`)에서
+    //      오므로 이미 id 차례다. 위 `milestone_focus` 가 같은 자리에서 같은 꼴로 담는다.
+    if running.len() >= 2 {
+        notices.push(
+            Warning::new("milestones_running", running.iter().map(|m| m.id.clone()).collect())
+                .notice()
+                .hint("moai ready"),
+        );
+    }
+
+    // 6-6. 마일스톤의 기한(moai-tfcp, 2026-09-22 사용자 결정). **막지 않는다** — 경고는 종료
+    //      코드를 안 바꾼다(CLAUDE.md). 지난 것과 다가온 것을 **두 갈래로** 낸다: 사람이 할
+    //      일이 다르다(늦은 까닭을 대는 것과 남은 것을 추리는 것). 한 낱말로 뭉치면 그중
+    //      한쪽이 반드시 거짓말이 된다 — `agents_stale` 을 가른 것과 같은 자다.
+    //
+    //      **끝난 마일스톤은 안 센다.** 다 닫힌 뒤의 지난 기한은 고칠 일이 아니라 지난 일이고,
+    //      세면 닫힌 마일스톤이 영영 경고로 선다. **미뤄 둔 것도 안 센다** — 계획에서 뺀 것이
+    //      잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다(`running_in` 과 같은 까닭).
+    //
+    //      **나이를 여기서 싣는다**([`Warning::ages`] 가 아니라 직접) — 저쪽은 RFC3339 시각을
+    //      받는 자라 날짜(`YYYY-MM-DD`)를 못 읽는다. 재는 자리가 싣고 보이는 쪽은 읽기만 한다.
+    //      **부호째 싣는다**(리뷰) — 지난 것은 음수다([`crate::model::days_until`] 과 같은 부호).
+    //      크기만 싣고 갈래로 뜻을 가르면 `ages` 한 자리에 정반대의 두 뜻이 앉아, `kind` 를 같이
+    //      안 보는 `--json` 쪽이 "2일 지남" 과 "2일 남음" 을 같은 값으로 읽는다.
+    {
+        let (mut overdue, mut soon): (Vec<(&Issue, i64)>, Vec<(&Issue, i64)>) = (Vec::new(), Vec::new());
+        for m in issues.iter().filter(|i| i.kind == Kind::Milestone) {
+            let id = m.id.as_str();
+            if out_of_plan.contains(id) || eclipsed(m) || states.get(id).is_some_and(|c| *c == crate::config::DONE) {
+                continue;
+            }
+            // 꼴이 틀린 값은 말없이 넘긴다 — 쓰기가 이미 거절하므로 여기 오는 것은 손으로 푼
+            // 줄뿐이고, 그것은 `unknown_field` 가 아니라 그 줄을 고칠 때 드러난다.
+            let Some(left) = m.due_on.as_deref().and_then(|d| crate::model::days_until(d, now)) else { continue };
+            match left {
+                d if d < 0 => overdue.push((m, d)),
+                d if d <= cfg.status.due_days => soon.push((m, d)),
+                _ => {}
+            }
+        }
+        // **급한 것이 앞이다.** `view::preview` 는 앞의 셋만 그리고 나머지를 "N건 더" 로 접으므로,
+        // 파일 차례(곧 id 차례)로 두면 90일 지난 줄이 접히고 2일 지난 줄이 화면에 선다. 둘 다
+        // 오름차순이면 된다 — 지난 쪽은 음수라 가장 많이 지난 것이 앞에 온다.
+        for rows in [&mut overdue, &mut soon] {
+            // id 로 동점을 푸는 것은 같은 날수가 여럿일 때 차례가 판마다 안 흔들리게 하려는
+            // 것이다. `sort_by_key` 로 적으면 그 id 를 견줄 때마다 베낀다 — `moai status` 마다
+            // 도는 자리라 빌려서 견준다.
+            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.id.cmp(&b.0.id)));
+        }
+        for (kind, rows, days) in [
+            // **문턱을 그대로 넘긴다** — `stale_review` 와 같은 까닭이다. 여기 수를 박아 두면
+            // `status_due_days` 를 고친 저장소에서 경고가 센 것과 화면이 말하는 폭이 갈린다.
+            ("milestone_overdue", &overdue, None),
+            ("milestone_due_soon", &soon, Some(cfg.status.due_days)),
+        ] {
+            if rows.is_empty() {
+                continue;
+            }
+            let mut w = Warning::new(kind, rows.iter().map(|(m, _)| m.id.clone()).collect());
+            for (m, d) in rows {
+                w.ages.insert(m.id.clone(), *d);
+            }
+            warnings.push(match days {
+                Some(d) => w.days(d),
+                None => w,
+            });
         }
     }
 
@@ -4625,6 +4805,93 @@ mod tests {
             make("argos-000y", Kind::Issue, "todo"), // 밖의 p2
             hot,                                     // 밖의 p0
         ]
+    }
+
+    /// 마일스톤에 **든 시간**은 닫힌 멤버에서 지금 센다(moai-wfup). 저장하지 않는다.
+    ///
+    /// 재는 자리가 지키는 것 넷이다 — 묶음 멤버(에픽)는 안 센다(그 밑의 이슈가 이미 들어
+    /// 있으므로 함께 세면 두 번 더해진다), **멤버의 자식도 같은 까닭으로 안 센다**(리뷰: 이
+    /// 저장소는 리뷰를 자식으로 세우고 그 구간은 부모 안에 든다), 시작이 안 적힌 줄은
+    /// **모르는 것**이라 `closed` 에는 들고 `measured` 에는 안 든다, 끝이 시작보다 앞선 줄은
+    /// 0 으로 안 누른다.
+    #[test]
+    fn a_milestone_counts_only_the_members_it_could_actually_measure() {
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.title = "v0.1".into();
+        let mut epic = make("argos-0001", Kind::Epic, "done");
+        epic.milestone = Some("argos-m001".into());
+        // 에픽 줄에도 두 값이 선다 — 손으로 친 `mv` 의 것이라 세면 안 된다.
+        epic.started_at = Some("2026-09-01T00:00:00Z".into());
+        epic.done_at = Some("2026-09-02T00:00:00Z".into());
+        let span = |id: &str, from: &str, to: &str| {
+            let mut i = member(id, "argos-0001", "done");
+            i.started_at = Some(from.into());
+            i.done_at = Some(to.into());
+            i
+        };
+        let mut unmeasured = member("argos-001c", "argos-0001", "done");
+        unmeasured.done_at = Some("2026-09-01T06:00:00Z".into()); // 옛 바이너리가 옮긴 줄
+        let mut backwards = member("argos-001d", "argos-0001", "done");
+        backwards.started_at = Some("2026-09-01T06:00:00Z".into());
+        backwards.done_at = Some("2026-09-01T05:00:00Z".into()); // 손으로 푼 줄
+        let all = vec![
+            stone.clone(),
+            epic,
+            span("argos-001a", "2026-09-01T00:00:00Z", "2026-09-01T01:00:00Z"), // 60분
+            span("argos-001b", "2026-09-01T00:00:00Z", "2026-09-01T03:00:00Z"), // 180분
+            unmeasured,
+            backwards,
+            member("argos-001e", "argos-0001", "todo"), // 아직 안 닫혔다
+        ];
+
+        let sp = spent_on(&all, &stone);
+        assert_eq!(sp.closed, 4, "닫힌 멤버를 잘못 셌다 — {sp:?}");
+        assert_eq!(sp.measured, 2, "모르는 것을 잰 것으로 셌다 — {sp:?}");
+        assert_eq!(sp.minutes, 240, "{sp:?}");
+        // 짝수 개의 중앙값은 가운데 둘의 평균이다.
+        assert_eq!(sp.median, Some(120), "{sp:?}");
+
+        // 홀수 개면 가운데 하나다.
+        let mut odd = all.clone();
+        odd.push(span("argos-001f", "2026-09-01T00:00:00Z", "2026-09-01T02:00:00Z"));
+        assert_eq!(spent_on(&odd, &odd[0]).median, Some(120), "{:?}", spent_on(&odd, &odd[0]));
+
+        // **잰 부모의 자식은 그 구간 안이다**(리뷰) — 이 저장소의 규약이 리뷰를 자식으로
+        // 세우므로(`AGENTS.md` 훅 규칙 3) 흔한 판이고, 같이 더하면 한 시간이 두 시간으로 선다.
+        // 시간만 접는다: 닫힌 수는 막대와 같아야 하므로 자식도 그대로 센다.
+        let mut kid = all.clone();
+        kid.push(span("argos-001a.r3q", "2026-09-01T00:10:00Z", "2026-09-01T00:40:00Z")); // 부모(001a) 구간 안
+        kid.push(span("argos-001a.r3q.9zz", "2026-09-01T00:15:00Z", "2026-09-01T00:20:00Z")); // 손자도 같다
+        let with_kid = spent_on(&kid, &stone);
+        assert_eq!((with_kid.measured, with_kid.minutes, with_kid.median), (2, 240, Some(120)), "{with_kid:?}");
+        assert_eq!(with_kid.closed, sp.closed + 2, "자식을 닫힌 수에서 뺐다 — 막대와 갈라진다 {with_kid:?}");
+
+        // **차례가 뒤집혀도 접힌다.** 멤버는 `display_order` 로 오는데 그것은 급한 것을 앞에
+        // 세우므로, `p0` 자식이 제 부모보다 앞에 설 수 있다 — 그때 들어온 차례대로 세면 부모를
+        // 보기 전에 자식을 세어 이중 셈이 그대로 돌아온다(리뷰).
+        let mut hasty = all.clone();
+        let mut first = span("argos-001a.aaa", "2026-09-01T00:10:00Z", "2026-09-01T00:40:00Z");
+        first.priority = Some(0);
+        hasty.push(first);
+        let jumped = spent_on(&hasty, &stone);
+        assert_eq!((jumped.measured, jumped.minutes), (2, 240), "급한 자식이 제 부모를 앞질러 따로 세졌다 {jumped:?}");
+
+        // **부모가 아무 구간도 못 냈으면 자식이 유일한 증거다.** `argos-001c` 는 닫혔지만 시작이
+        // 안 적혔고(옛 바이너리), `argos-001e` 는 아직 안 닫혔다 — 둘의 자식은 제 몫으로 선다.
+        let mut only = all.clone();
+        only.push(span("argos-001c.r3q", "2026-09-01T00:00:00Z", "2026-09-01T00:30:00Z"));
+        only.push(span("argos-001e.r3q", "2026-09-01T00:00:00Z", "2026-09-01T00:45:00Z"));
+        let evidence = spent_on(&only, &stone);
+        assert_eq!((evidence.closed, evidence.measured, evidence.minutes), (6, 4, 315), "{evidence:?}");
+
+        // 부모가 이 묶음에 아예 없어도 자식이 제 몫으로 선다.
+        let mut orphan = all.clone();
+        orphan.push(span("argos-009x.r3q", "2026-09-01T00:00:00Z", "2026-09-01T00:30:00Z"));
+        let alone = spent_on(&orphan, &stone);
+        assert_eq!((alone.closed, alone.measured, alone.minutes), (5, 3, 270), "{alone:?}");
+
+        // 묶음이 아닌 줄에는 빈 값이다.
+        assert_eq!(spent_on(&all, &all[2]), Spent::default());
     }
 
     /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-q04l, 2026-09-20 사용자 결정).

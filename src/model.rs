@@ -312,6 +312,27 @@ pub struct Issue {
     /// 멤버의 것으로 잰다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
+    /// **마일스톤의 종료 기한**(moai-tfcp) — `YYYY-MM-DD`. 사람이 정하는 달력 날짜라 시각이
+    /// 아니다(2026-09-22 사용자 결정). 시각으로 두면 `--due 2026-09-30` 한 줄을 `T23:59:59Z`
+    /// 같은 값으로 늘려 적어야 하고, 그 늘림이 시간대마다 다른 날을 가리킨다.
+    ///
+    /// **마일스톤 줄에만 선다**([`Issue::validate_fields`]). 다른 종류에 적힌 값은 아무 화면도
+    /// 안 읽으므로 조용히 받으면 적은 사람은 걸린 줄 안다 — `MilestoneInMilestone` 과 같은 자다.
+    ///
+    /// **파생값이 아니다.** 멤버를 닫아도 이 값은 안 바뀌고, 남은 날수·지났는가는 읽을 때 센다.
+    ///
+    /// **`starts_on` 보다 앞선 자리에 선다** — 이 필드를 모르는 옛 바이너리는 둘을 `rest` 에
+    /// 담아 `started_at` 뒤에 이름 차례로 되쓴다(`due_on` < `starts_on`). 같은 자리·같은
+    /// 차례로 두어야 새 바이너리와 옛 바이너리가 번갈아 쓰는 저장소에서 헛 diff 가 안 난다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_on: Option<String>,
+    /// **마일스톤의 시작 기한**(moai-tfcp) — `YYYY-MM-DD`. [`Issue::due_on`] 과 한 쌍이고
+    /// 같은 규칙이 선다. 시작이 종료보다 뒤면 쓰기가 거절한다.
+    ///
+    /// **`started_at` 과 다른 것이다.** 저쪽은 줄이 실제로 첫 칸을 떠난 때고 이쪽은 사람이
+    /// 잡은 계획이다 — 한 필드로 뭉치면 계획을 적는 순간 "이미 시작했다" 가 된다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_on: Option<String>,
 
     /// 모르는 필드를 **잃지 않고 되쓴다.**
     ///
@@ -357,6 +378,8 @@ impl Issue {
             status_since: at.to_string(),
             started_at: None,
             done_at: None,
+            due_on: None,
+            starts_on: None,
             body: None,
             rest: BTreeMap::new(),
         }
@@ -440,7 +463,9 @@ impl Issue {
         }
         // **빈 시각은 없는 시각이다**(moai-38mh) — 손으로 푼 줄의 `"started_at":""` 을 그대로 두면
         // "이미 적혔다" 로 읽혀 `move_to` 가 영영 안 적고, 상세는 빈 시작을 그린다.
-        for t in [&mut self.started_at, &mut self.done_at] {
+        // **빈 날짜도 없는 날짜다**(moai-tfcp) — 손으로 푼 충돌이 남긴 `"due_on":""` 을 그대로
+        // 두면 기한이 선 줄로 읽혀, 경고가 파싱 못 하는 값으로 영영 조용하다.
+        for t in [&mut self.started_at, &mut self.done_at, &mut self.due_on, &mut self.starts_on] {
             if t.as_deref().is_some_and(|s| s.trim().is_empty()) {
                 *t = None;
             }
@@ -534,6 +559,25 @@ impl Issue {
         if self.kind == Kind::Milestone && self.milestone.is_some() {
             return Err(Invalid::MilestoneInMilestone { id: self.id.clone() });
         }
+        // **기한은 마일스톤 줄에만 선다**(moai-tfcp). 꼴부터 잰다 — 종류가 틀린 줄에 꼴까지
+        // 틀린 값이 적히면 두 말을 다 해야 하는데, 사람이 먼저 고칠 것은 꼴이다.
+        for (what, v) in [(Field::StartsOn, &self.starts_on), (Field::DueOn, &self.due_on)] {
+            let Some(v) = v else { continue };
+            if parse_date(v).is_none() {
+                return Err(Invalid::Date { id: self.id.clone(), field: what, value: format!("{v:?}") });
+            }
+            if self.kind != Kind::Milestone {
+                return Err(Invalid::DateNotMilestone { id: self.id.clone(), field: what });
+            }
+        }
+        // **시작이 종료보다 뒤면 거절한다.** 둘 다 이번에 쓰는 줄의 값이고, 받아 두면 남은
+        // 날수가 음수로 서거나 "지났다" 와 "다가온다" 가 한 줄에 같이 선다. 날짜는 고정폭이라
+        // 문자열로 견준다 — `status_since` 를 견주는 자와 같은 꼴이다.
+        if let (Some(s), Some(d)) = (&self.starts_on, &self.due_on)
+            && s > d
+        {
+            return Err(Invalid::DateOrder { starts_on: s.clone(), due_on: d.clone() });
+        }
         for b in &self.blocked_by {
             if b == &self.id {
                 return Err(Invalid::SelfBlock);
@@ -584,6 +628,27 @@ pub enum Invalid {
     MilestoneInMilestone {
         id: String,
     },
+    /// 기한이 `YYYY-MM-DD` 가 아니다 — 적힌 값(따옴표째)과, 비우는 명령에 쓸 id.
+    ///
+    /// **id 를 함께 든다**(리뷰) — 이 검사는 이번 쓰기가 손댄 필드만 보는 것이 아니라 줄에 적힌
+    /// 두 날짜를 다 보므로, 손으로 푼 충돌이 남긴 `"due_on":"2026-9-20"` 한 줄이 그 줄의 제목
+    /// 고치기와 `defer` 까지 막는다. 그때 화면에 비우는 길이 없으면 되돌릴 방법이 도구 밖에만
+    /// 남는다(CLAUDE.md).
+    Date {
+        id: String,
+        field: Field,
+        value: String,
+    },
+    /// 기한을 마일스톤 아닌 줄에 적었다 — 비우는 명령에 쓸 id 를 든다.
+    DateNotMilestone {
+        id: String,
+        field: Field,
+    },
+    /// 시작 기한이 종료 기한보다 뒤다.
+    DateOrder {
+        starts_on: String,
+        due_on: String,
+    },
     SelfBlock,
     BlockedId {
         value: String,
@@ -599,6 +664,8 @@ pub enum Field {
     AssigneeEmail,
     Epic,
     Milestone,
+    StartsOn,
+    DueOn,
 }
 
 /// `.moai/journal.jsonl` 의 한 줄. **추가만 한다.**
@@ -1076,6 +1143,52 @@ pub fn days_since(at: &str, now: &str) -> Option<i64> {
     Some((parse_rfc3339(now)? - parse_rfc3339(at)?).div_euclid(86_400).max(0))
 }
 
+/// `2026-09-30` → epoch 일. 꼴이 아니거나 **없는 날이면** `None`(moai-tfcp).
+///
+/// **[`parse_rfc3339`] 보다 엄하다.** 저쪽은 `1..=31` 만 보고 `2026-02-30` 을 받는데, 그것이
+/// 받아들여지는 까닭은 이미 파일에 적힌 시각을 읽는 쪽이 관대해야 해서다. 기한은 **사람이
+/// 이번에 치는 값**이고, `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
+/// 영영 "기한 없음" 으로 조용하다.
+///
+/// **자리마다 잰다.** `-` 를 아무 데나 받으면 `"-026"` 이 `i64::from_str` 에 닿아 해가 음수로
+/// 서고(리뷰), 그 줄은 `moai edit <id> --due=-026-09-20` 한 번으로 들어와 보드에 "749469일
+/// 지남" 으로 영영 선다. 꼴을 재는 자가 부호를 흘리면 뒤의 범위 검사는 해를 아예 안 본다.
+pub fn parse_date(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() != 10
+        || !b.iter().enumerate().all(|(x, c)| if matches!(x, 4 | 7) { *c == b'-' } else { c.is_ascii_digit() })
+    {
+        return None;
+    }
+    let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let (y, mo, d) = (n(0, 4)?, n(5, 7)? as u32, n(8, 10)? as u32);
+    if !(1..=12).contains(&mo) || d < 1 || d > days_in_month(y, mo) {
+        return None;
+    }
+    Some(days_from_civil(y, mo, d))
+}
+
+/// 그 달의 날수 — 윤년은 그레고리력 그대로다.
+fn days_in_month(y: i64, mo: u32) -> u32 {
+    match mo {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        _ => match y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            true => 29,
+            false => 28,
+        },
+    }
+}
+
+/// `now` 부터 그 기한까지 **며칠 남았나**. 지났으면 음수다(moai-tfcp).
+///
+/// **[`days_since`] 와 달리 0 으로 안 누른다** — 저쪽이 누르는 까닭은 옆 기계의 시계가 몇 초
+/// 빠른 것을 `-1일` 로 내지 않으려는 것이고, 여기서 음수는 실제로 "지났다" 다. 둘 다 날 단위로
+/// 자르므로 기한 당일은 0 이고 아직 안 지난 것이다.
+pub fn days_until(due: &str, now: &str) -> Option<i64> {
+    Some(parse_date(due)? - parse_rfc3339(now)?.div_euclid(86_400))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1438,6 +1551,62 @@ mod tests {
         assert_eq!(i.priority, None);
         assert_eq!(i.body, None);
         assert_eq!(i.priority(), DEFAULT_PRIORITY);
+    }
+
+    /// **날짜 파서는 [`parse_rfc3339`] 보다 엄하다**(moai-tfcp) — 저쪽은 `1..=31` 만 보고
+    /// `2026-02-30` 을 받는데, 기한은 사람이 이번에 치는 값이라 그것이 오타다. 받으면 그
+    /// 마일스톤은 영영 "기한 없음" 으로 조용하다.
+    #[test]
+    fn a_date_is_a_day_that_actually_exists() {
+        assert_eq!(parse_date("1970-01-01"), Some(0));
+        assert_eq!(parse_date("1970-01-02"), Some(1));
+        // 윤년은 그레고리력 그대로다 — 2028 은 윤년, 2026 은 아니고, 2000 은 윤년, 1900 은 아니다.
+        assert!(parse_date("2028-02-29").is_some());
+        assert!(parse_date("2000-02-29").is_some());
+        assert_eq!(parse_date("2026-02-29"), None);
+        assert_eq!(parse_date("1900-02-29"), None);
+        for bad in [
+            "2026-02-30",
+            "2026-13-01",
+            "2026-00-01",
+            "2026-09-00",
+            "2026-9-01",
+            "2026-09-1",
+            "2026-09-20T00:00:00Z",
+            "",
+            "오늘",
+            "2026/09/20",
+            "20260920",
+            // 부호는 자리를 안 가리고 샌다(리뷰) — `-` 를 아무 데나 받으면 `"-026"` 이
+            // `i64::from_str` 에 닿아 해가 음수로 서고, 그 줄이 보드에 "749469일 지남" 으로
+            // 영영 선다. `--due=-026-09-20` 한 줄이 들어오던 자리다.
+            "-026-09-20",
+            "-999-01-01",
+            "2026--9-20",
+            "+026-09-20",
+        ] {
+            assert_eq!(parse_date(bad), None, "{bad:?} 를 날짜로 받았다");
+        }
+        // 기한 당일은 0 이고 아직 안 지났다. 지난 것만 음수다 — `days_since` 와 달리 안 누른다.
+        let now = "2026-09-11T04:12:03Z";
+        assert_eq!(days_until("2026-09-11", now), Some(0));
+        assert_eq!(days_until("2026-09-13", now), Some(2));
+        assert_eq!(days_until("2026-09-09", now), Some(-2));
+        assert_eq!(days_until("어제", now), None);
+    }
+
+    /// **새 필드가 옛 바이너리의 되쓰기와 같은 자리에 선다**(moai-tfcp). 이 필드를 모르는
+    /// 바이너리는 둘을 `rest` 에 담아 `started_at` 뒤에 이름 차례(`due_on` < `starts_on`)로
+    /// 되쓴다 — 선언 차례가 그것과 어긋나면 두 바이너리가 번갈아 쓰는 저장소에서 줄마다 헛
+    /// diff 가 난다. `done_at`·`started_at` 을 `body` 뒤에 둔 것과 같은 까닭이다.
+    #[test]
+    fn the_deadline_fields_sit_where_an_older_binary_rewrites_them() {
+        let line = r#"{"id":"argos-4aex","title":"v0.1","kind":"milestone","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z","body":"본문","done_at":"2026-09-11T04:12:03Z","started_at":"2026-09-11T04:12:03Z","due_on":"2026-09-20","starts_on":"2026-09-05"}"#;
+        let i: Issue = serde_json::from_str(line).unwrap();
+        assert_eq!(i.due_on.as_deref(), Some("2026-09-20"));
+        assert_eq!(i.starts_on.as_deref(), Some("2026-09-05"));
+        assert!(i.rest.is_empty(), "아는 필드가 모르는 필드로 들었다 — {:?}", i.rest);
+        assert_eq!(serde_json::to_string(&i).unwrap(), line, "읽고 그대로 쓴 바이트가 달라졌다");
     }
 
     #[test]

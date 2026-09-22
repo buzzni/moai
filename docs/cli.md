@@ -144,6 +144,7 @@ Options:
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
     status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so
 ```
 
 ## `moai ready`
@@ -239,6 +240,12 @@ Options:
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -448,6 +455,8 @@ Options:
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it
+      --start <date|none>    Start of a milestone. `none` clears it
+      --due <date|none>      Deadline of a milestone. `none` clears it
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -740,6 +749,12 @@ Options:
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
 
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
 
@@ -886,6 +901,12 @@ Options:
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
 
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
 
@@ -1031,6 +1052,12 @@ Options:
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1198,6 +1225,12 @@ Options:
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)

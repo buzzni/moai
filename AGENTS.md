@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:e30c1550 -->
+<!-- moai:begin v:0.1.1 hash:71f3ee1a -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -171,10 +171,23 @@ the work under it drops out with it.
 ### There are two kinds of group
 
     moai epic add '<storage layer>'                an epic
-    moai milestone add 'v0.1'                      a milestone
+    moai milestone add 'v0.1' --start 2026-09-05 --due 2026-09-20
     moai add '<title>' -e <epic> --milestone <milestone>
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
+
+**A milestone is the one row that carries dates.** `--start` and `--due` take a
+calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
+They stand on a milestone row only — on anything else the write is refused. A
+deadline that has passed, and one falling due within `status_due_days` (3 unless
+your config says otherwise), is one warning line on the board; **nothing is
+blocked and the exit code never changes.**
+
+**`moai show <milestone>` also says how long it took.** That is read from the
+closed members' start and finish right then — no field holds it. It comes with
+the number it could measure ("2 of 3 closed"), because a member with no
+`started_at` is *unknown*, not zero, and it is wall clock, not effort: sessions
+running beside each other overlap, and waiting on a person counts too.
 
 **Belonging is inherited.** A child inherits its parent's epic, an issue inherits
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.

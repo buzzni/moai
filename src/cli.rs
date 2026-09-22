@@ -147,7 +147,8 @@ pub enum Cmd {
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up")]
+    status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so")]
     Status(WorktreeArg),
 
     /// What you can pick up now
@@ -818,6 +819,14 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
+    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub due: Option<String>,
+
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
     /// What kind to create (issue when absent, epic under `epic add`)
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
@@ -827,8 +836,11 @@ pub struct AddArgs {
     #[arg(long, value_name = "id")]
     pub parent: Option<String>,
 
+    // 기한 둘도 여기 든다(리뷰) — 계획은 마일스톤을 못 짓고(`refuse.plan_has_no_milestone`),
+    // `bulk` 는 이 둘을 아예 안 받는다. 목록에서 빼 두면 `moai add --from - --due …` 가 0 으로
+    // 끝나며 날짜를 말없이 버린다 — 바로 밑의 `--var`·`--dry-run` 거절이 막는 것과 같은 판이다.
     /// Epic and issues from markdown at once. `-` is stdin
-    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
+    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent", "start", "due"])]
     pub from: Option<String>,
 
     // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
@@ -1018,6 +1030,14 @@ pub struct EditArgs {
     /// Give `name (email)`. `none` clears it
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
+
+    /// Start of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub due: Option<String>,
 }
 
 #[derive(Args, Debug)]

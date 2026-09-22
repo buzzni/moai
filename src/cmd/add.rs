@@ -218,6 +218,13 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             issue.milestone = args.milestone.clone();
             issue.tags = args.tag.iter().map(|t| model::normalize_tag(t)).collect();
             issue.priority = args.priority;
+            // 기한 둘(moai-tfcp) — 만들 때 바로 준다. 안 주면 `milestone add` 뒤에 `edit` 를
+            // 한 번 더 쳐야 하고, 그 사이의 줄은 기한 없는 마일스톤으로 한 번 커밋된다.
+            // `none` 은 여기서 뜻이 없다(새 줄에 비울 것이 없다) — 빈 값은 `normalize` 가
+            // 지우고, 꼴·종류·차례는 락 안에서 `Repo::write_locked` 가 거절한다
+            // (`store::admit` 은 검사를 안 한다, moai-yve0).
+            issue.starts_on = args.start.clone();
+            issue.due_on = args.due.clone();
             (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;

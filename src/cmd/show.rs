@@ -486,9 +486,15 @@ fn one(
         ];
         // **묶음일 때만 멤버를 고른다** — `group_members` 는 저장소 전체로 지도를 짓는다. 일 하나를
         // `--json` 으로 펼치는 흔한 길에서 그것을 짓고 버리던 자리다.
+        //
+        // **멤버를 한 번만 고른다**(리뷰, moai-g0zx 와 같은 까닭) — 아래 `spent` 가 같은 묶음의
+        // 멤버를 묻는데, 저마다 `group_members` 를 부르면 한 판이 소속 지도를 두 벌 짓는다.
+        let mut spent = None;
         if report::is_group(issue) {
-            let members: Vec<&str> = report::group_members(all, issue).iter().map(|m| m.id.as_str()).collect();
+            let rows = report::group_members(all, issue);
+            let members: Vec<&str> = rows.iter().map(|m| m.id.as_str()).collect();
             extra.push(("members", serde_json::to_string(&members).map_err(|e| Fail::new(e.to_string()))?));
+            spent = (issue.kind == Kind::Milestone).then(|| report::spent_in(&rows));
         }
         // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
         // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
@@ -542,6 +548,12 @@ fn one(
         // **키는 늘 선다**(2026-09-18 사용자 결정). 한 이슈에 여러 세션·모델이 줄을 남기니 배열이고,
         // 없으면 키를 안 다는 모양은 되쓰기에서 옛 키가 `rest` 에 남아 거짓을 싣는다(moai-2l8n).
         extra.push(("work", serde_json::to_string(&model::work_of(&journal)).map_err(|e| Fail::new(e.to_string()))?));
+        // 마일스톤에 **든 시간**(moai-wfup). 사람 화면과 같은 값을 같은 자리에서 읽는다 —
+        // 저장하지 않으므로 키는 마일스톤 줄에만 선다. 목록(`show [거르개] --json`)에는 안
+        // 싣는다: 줄마다 멤버 지도를 다시 짓는 셈이라 한 판이 저장소를 n 번 훑는다.
+        if let Some(sp) = spent {
+            extra.push(("spent", serde_json::to_string(&sp).map_err(|e| Fail::new(e.to_string()))?));
+        }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
@@ -561,7 +573,8 @@ fn one(
         // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다.
         // **`--json` 이 내는 것과 같은 것을 그린다** — 둘 다
         // `report::group_members` 로 고른다.
-        let mine: BTreeSet<&str> = report::group_members(all, issue).iter().map(|i| i.id.as_str()).collect();
+        let rows = report::group_members(all, issue);
+        let mine: BTreeSet<&str> = rows.iter().map(|i| i.id.as_str()).collect();
         // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
         // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
         // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).
@@ -592,6 +605,17 @@ fn one(
                 },
                 view::set_aside(r.deferred, ctx.lang()),
             ));
+        }
+        // **마일스톤에만 든 시간을 곁들인다**(moai-wfup, 2026-09-22 사용자 결정). 에픽의
+        // 기간은 아직 묻는 자리가 아니고, `report::spent_in` 은 어느 묶음의 멤버에나 서므로
+        // 그때 여는 것은 이 한 줄이다. 보드에는 안 낸다 — 마일스톤 표가 이미 좁다.
+        //
+        // 멤버는 위에서 한 번 고른 것을 그대로 쓴다 — 여기서 다시 물으면 소속 지도가 한 판에
+        // 두 벌 선다(리뷰).
+        if issue.kind == Kind::Milestone
+            && let Some(line) = view::spent(&report::spent_in(&rows), ctx.lang())
+        {
+            out.push(line);
         }
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
         // 멤버라며 저장소 전부를 낸다 — 없는 답보다 틀린 답이 비싸다.
