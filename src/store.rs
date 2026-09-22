@@ -1284,18 +1284,18 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
     Ok((entry, issue))
 }
 
-/// `<파일>` 을 쓸 때 쓸 임시 파일의 이름 — `<파일>.tmp.<pid>.<실 번호>` (moai-mpf4).
+/// `<파일>` 을 쓸 때 쓸 임시 파일의 이름 — `<파일>.tmp.<pid>.<스레드 번호>` (moai-mpf4).
 ///
-/// **pid 하나로는 모자란다.** [`crate::latest::spawn`] 이 이 저장소의 첫 "본 실 밖 쓰기" 라,
-/// 한 프로세스의 실 둘이 같은 파일을 쓰면 임시 경로가 **같은 이름 하나**로 겹쳤다 — 한쪽의
+/// **pid 하나로는 모자란다.** [`crate::latest::spawn`] 이 이 저장소의 첫 "본 스레드 밖 쓰기" 라,
+/// 한 프로세스의 스레드 둘이 같은 파일을 쓰면 임시 경로가 **같은 이름 하나**로 겹쳤다 — 한쪽의
 /// `rename` 이 다른 쪽이 아직 쓰는 중인 파일을 들고 가거나, 먼저 간 쪽의 파일을 뒤엣것이 덮어
 /// 반쪽짜리 글이 대상에 실릴 수 있었다.
 ///
-/// **번호는 실마다 한 번 매기고 그 실이 사는 동안 안 바뀐다.** 부를 때마다 세는 쪽이 더 쉽지만,
-/// 그러면 같은 실의 두 번째 쓰기가 다른 이름을 써 **이름을 미리 아는 길이 없어진다** — 임시
+/// **번호는 스레드마다 한 번 매기고 그 스레드가 사는 동안 안 바뀐다.** 부를 때마다 세는 쪽이 더
+/// 쉽지만, 그러면 같은 스레드의 두 번째 쓰기가 다른 이름을 써 **이름을 미리 아는 길이 없어진다** — 임시
 /// 자리를 막아 두고 그리로 갔는지 재는 시험(`cmd::init` 의
 /// `root_files_are_swapped_through_a_temp_file_in_dot_moai`)이 그 길로 선다. 또 쓰다 죽어 남는
-/// 찌꺼기가 쓴 횟수만큼이 아니라 **실 수만큼**으로 묶인다.
+/// 찌꺼기가 쓴 횟수만큼이 아니라 **스레드 수만큼**으로 묶인다.
 ///
 /// 번호를 매기는 자는 프로세스 안에서만 선다 — 프로세스가 다르면 pid 가 가른다.
 pub(crate) fn tmp_name(file: &str) -> String {
@@ -2682,22 +2682,22 @@ mod tests {
         assert!(Repo::open(&broken, || crate::i18n::Lang::Ko).is_err(), "깨진 설정을 init 전으로 접었다");
     }
 
-    /// **임시 이름은 실마다 다르고 한 실 안에서는 늘 같다**(moai-mpf4). pid 하나였을 때는 실
-    /// 둘이 같은 파일을 쓰면 임시 경로가 겹쳐, 한쪽이 아직 쓰는 중인 파일을 다른 쪽이 들고
-    /// 갔다. 이름이 실마다 갈리는 것과 한 실 안에서 안 바뀌는 것을 함께 잰다 — 뒤엣것이
+    /// **임시 이름은 스레드마다 다르고 한 스레드 안에서는 늘 같다**(moai-mpf4). pid 하나였을 때는
+    /// 스레드 둘이 같은 파일을 쓰면 임시 경로가 겹쳐, 한쪽이 아직 쓰는 중인 파일을 다른 쪽이 들고
+    /// 갔다. 이름이 스레드마다 갈리는 것과 한 스레드 안에서 안 바뀌는 것을 함께 잰다 — 뒤엣것이
     /// 깨지면 임시 자리를 미리 막아 두고 재는 시험
     /// (`cmd::init` 의 `root_files_are_swapped_through_a_temp_file_in_dot_moai`)이 선 바닥이
     /// 무너진다.
     #[test]
     fn the_temp_name_is_one_per_thread_and_never_shared() {
         let mine = tmp_name("issues.jsonl");
-        assert_eq!(mine, tmp_name("issues.jsonl"), "같은 실인데 이름이 바뀐다");
+        assert_eq!(mine, tmp_name("issues.jsonl"), "같은 스레드인데 이름이 바뀐다");
         assert_ne!(mine, tmp_name("다른파일"), "파일이 다른데 이름이 같다");
         let theirs = std::thread::spawn(|| tmp_name("issues.jsonl")).join().unwrap();
-        assert_ne!(mine, theirs, "실이 다른데 임시 이름이 같다");
+        assert_ne!(mine, theirs, "스레드가 다른데 임시 이름이 같다");
     }
 
-    /// **실 둘이 같은 파일을 함께 써도 반쪽 글이 남지 않는다**(moai-mpf4). 조용한 손실이 이
+    /// **스레드 둘이 같은 파일을 함께 써도 반쪽 글이 남지 않는다**(moai-mpf4). 조용한 손실이 이
     /// 도구가 못 견디는 하나뿐인 실패 모드라(CLAUDE.md), 늦은 쪽이 이기는 것만 약속하고
     /// **둘 중 하나가 통째로** 남는 것을 잰다. 겹치던 때는 한쪽의 `rename` 이 다른 쪽이 아직
     /// 쓰는 중인 임시 파일을 들고 가, 어느 쪽도 아닌 글이 대상에 실릴 수 있었다.
@@ -2718,7 +2718,7 @@ mod tests {
         });
         let got = std::fs::read_to_string(&path).unwrap();
         assert!(got == a || got == b, "어느 쪽도 아닌 글이 남았다: {}바이트", got.len());
-        // 찌꺼기도 안 남는다 — 실마다 이름이 갈려도 쓰고 나면 치운다.
+        // 찌꺼기도 안 남는다 — 스레드마다 이름이 갈려도 쓰고 나면 치운다.
         let left: Vec<_> = std::fs::read_dir(s.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, vec![std::ffi::OsString::from("held.toml")], "임시 파일이 남았다: {left:?}");
     }
