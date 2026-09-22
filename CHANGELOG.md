@@ -23,7 +23,8 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   and `check = false` under `[update]` there, or `MOAI_NO_UPDATE_CHECK=1`, turns
   it off. Nothing is blocked and the exit code never changes. The HTTPS client
   it needs is most of why the release binary grew this release — it now measures
-  8.0 MB against the 15 MB budget.
+  7.6 MB of the 15 MB budget, where both numbers count as `scripts/check-size.sh`
+  does (8,001,296 bytes of 15,728,640).
 - Times on screen are drawn in the reader's timezone. They stood in UTC alone,
   so a reader in Seoul saw every stamp nine hours out. What is stored and what
   `--json` carries are still UTC — only the letters a person reads move. The CLI
@@ -46,8 +47,6 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   that in git's own vocabulary (`-merge` on the snapshot path), and both `init`
   and the `moai status` notice read it as a decision instead of putting the line
   back.
-- A deferred row wears `‖` and an idea `◇`, in the lists and in the explorer, so
-  what is out of the plan and what is not work yet are told apart without colour.
 - The explorer's detail pane has a side: `SPC o d` cycles it through right,
   bottom, left and top, `Ctrl-w j` and `Ctrl-w k` move between the panes while it
   is split top and bottom, and the epic, milestone and blocked lines inside it
@@ -92,7 +91,12 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 - The explorer's detail pane opens and closes with `SPC v d`, not `SPC v p`, so
   that the key toggling it and the key placing it (`SPC o d`) read as one pair.
-- `SPC v` no longer draws a mark on `done`; the number alone counts.
+  **`SPC v d` used to show and hide the `done` column**, so that keystroke now
+  does something else.
+- `done` has no letter of its own under `SPC v` any more — `SPC v d` and the
+  column's number toggled the same setting, and the menu said it twice. The
+  number alone counts, and it reads the column's name out of the config instead
+  of carrying `done` in the code.
 - `moai` exits non-zero and names the file when a journal cannot be read. A skip
   drew a history that had quietly lost one person's lines and still looked whole.
 - `moai init` no longer creates an empty `.moai/journal.jsonl`. History lives in
