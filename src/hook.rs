@@ -2954,7 +2954,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "su",
             takes: &["-s", "-w", "-g", "-G"],
             long: &["--shell", "--whitelist-environment", "--group", "--supp-group"],
-            free: &["--preserve-environment", "--fast", "--pty"],
+            // **짧은 것도 함께 든다**(moai-ta6q) — 아래 뭉치 고리가 `letter` 로 같은 표를 읽어,
+            // 이 표가 **모르는** 글자를 넘긴 적이 있는지를 적는다. `su --help` 로 걷었다.
+            free: &["--preserve-environment", "--fast", "--pty", "-m", "-p", "-f", "-P"],
             attach: &[],
             args: 0,
             stops: &[],
@@ -2971,7 +2973,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "runuser",
             takes: &["-s", "-w", "-g", "-G", "-u"],
             long: &["--shell", "--whitelist-environment", "--group", "--supp-group", "--user"],
-            free: &["--preserve-environment", "--fast", "--pty"],
+            // **짧은 것도 함께 든다**(moai-ta6q) — 아래 뭉치 고리가 `letter` 로 같은 표를 읽어,
+            // 이 표가 **모르는** 글자를 넘긴 적이 있는지를 적는다. `su --help` 로 걷었다.
+            free: &["--preserve-environment", "--fast", "--pty", "-m", "-p", "-f", "-P"],
             attach: &[],
             args: 0,
             stops: &[],
@@ -3033,6 +3037,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 명령으로 읽어 잘못 막았고, `runuser -s/usr/bin/bash sed -i …` 는 뭉치에 붙은 **값**의 `u`
     // 한 글자에 같은 답을 냈다.
     let mut saw = false;
+    // **이 표가 모르는 짧은 글자를 넘겼는가**(moai-ta6q) — 넘긴 줄은 그 프로그램이 거절하니,
+    // 셸이 아닌 프로그램의 argv 를 다시 짓는 자리가 도는 줄을 지어내면 안 된다.
+    let mut weird = false;
     let flags = match w.runs {
         Runs::With(f) | Runs::Unless(f) => f,
         _ => &[][..],
@@ -3314,6 +3321,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 stop = true;
                 break;
             }
+            // **이 표가 모르는 글자를 넘겼다**(moai-ta6q) — 아래 `alien` 갈래가 이것을 본다.
+            // 넘기는 것 자체는 그대로다: 표에 짧은 글자를 다 적은 감싸는 명령이 아직 su·runuser
+            // 뿐이라, 모르면 멈추는 쪽으로 돌리면 나머지가 통째로 안 보인다(`env -i` 가 그 줄이다).
+            weird |= !letter(w.free, c);
             stop = false;
         }
         if stop {
@@ -3345,6 +3356,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 셸의 명령줄로 읽으면 아무도 안 돌리는 글을 규칙에 비춰 잘못 막는다. 2026-09-22 에 쟀다:
     // `su -s /bin/echo -c 'IGNORED' 남 A` 는 `-c IGNORED A` 를 찍는다.
     let alien = prog.as_deref().map(basename).is_some_and(|p| !is_shell(p));
+    // **모르는 짧은 글자를 넘긴 적이 있으면 그 argv 를 다시 짓지 않는다**(moai-ta6q, 리뷰
+    // moai-514e.x2u 11번) — 진짜 su 는 `invalid option -- 'x'` 로 아무것도 안 돌리는데, 뭉치 고리가
+    // 그 글자를 조용히 넘겨 `ops` 에 안 남기니, 셸이 아닌 프로그램의 argv 를 다시 짓는 자리가
+    // `/usr/bin/tee 'src/x.rs'` 라는 **도는 줄을 지어냈다**. 2026-09-22 에 쟀다:
+    // `su -s /usr/bin/tee nobody -x /tmp/probe` 는 그 파일을 안 만든다.
+    //
+    // **셸 갈래는 여기가 아니다** — 그쪽은 `-c` 의 글을 그대로 내고, 이 표가 짧은 글자를 다
+    // 아는 감싸는 명령이 su·runuser 뿐이라 잣대를 넓히면 모르는 자리가 통째로 안 보인다.
+    if alien && weird {
+        return Some(Wrapped::Stops);
+    }
     if handed && !alien {
         return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
     }
@@ -10716,6 +10738,52 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "셸이 아닌 `-c` 의 값을 명령줄로 읽었다 — {cmd}\n{got:?}");
         }
+        // **모르는 짧은 글자를 넘긴 줄은 다시 짓지 않는다**(moai-ta6q, 리뷰 moai-514e.x2u 11번) —
+        // 진짜 su 는 `invalid option -- 'x'` 로 아무것도 안 돌리는데, 뭉치 고리가 그것을 조용히
+        // 넘겨 `/usr/bin/tee 'src/x.rs'` 라는 **도는 줄을 지어냈다**. 2026-09-22 에 쟀다:
+        // 그 줄은 그 파일을 안 만든다. 옛 판은 글을 아예 안 내 이 자리가 새로 열렸다.
+        for cmd in ["su -s /usr/bin/tee nobody -x src/x.rs", "runuser -s /usr/bin/tee nobody -zx src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **그 표가 아는 짧은 글자는 그대로 지난다** — `su --help` 로 걷은 `-m`·`-p`·`-f`·`-P` 다.
+        // 안 적으면 `su -ms /bin/sed …` 처럼 정당한 줄까지 함께 멈춘다.
+        for cmd in [
+            "su -ms /usr/bin/tee nobody -- src/x.rs",
+            "su -pP -s /usr/bin/tee nobody -- src/x.rs",
+            "runuser -f -s /usr/bin/tee nobody -- src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+    }
+
+    /// **`eval` 이 [`BUILTINS`] 에 선 것이 `Plant::Eval` 의 방벽이다**(moai-ta6q, 리뷰
+    /// moai-514e.x2u 12번).
+    ///
+    /// `Plant::Eval` 은 [`Layer::Subst`] 를 지어 `elsewhere` 도 `appends` 도 안 싣는다. 지금은
+    /// 감싸는 명령이 `eval` 에 못 넘어가 그 자리가 안 닿는데, 그것을 막는 것은 **적히지 않은
+    /// 맞물림 하나**였다 — [`BUILTINS`] 에서 `eval` 을 빼는 날 조용히 열린다.
+    ///
+    /// 열리면 두 쪽으로 틀린다. `sudo -i eval '<글>'` 의 상대 경로를 **여기 것으로** 읽어 잘못
+    /// 막고(자리를 모르는 글인데 `elsewhere` 가 안 실린다), `xargs eval '<글>'` 의 집기를 세어
+    /// 뒤의 빈손 쓰기를 풀어 준다(`appends` 가 안 실린다).
+    ///
+    /// 그 자리를 여기서 못박는다 — 고치는 길이 둘(시험으로 못박기·`Layer::Subst` 에 두 표
+    /// 싣기)이었고, 닿지 않는 자리에 필드를 더하기보다 **닿게 되는 날 붉어지는** 쪽을 골랐다.
+    #[test]
+    fn eval_stays_a_builtin_so_no_wrapper_ever_reaches_it() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        assert!(BUILTINS.contains(&"eval"), "`eval` 이 붙박이가 아니면 `Plant::Eval` 이 두 표를 잃는다");
+        // 감싸는 명령은 그리로 못 넘어간다 — 그런 이름의 프로그램이 없어 그 줄은 그냥 진다.
+        for cmd in ["sudo -i eval 'sed -i s/a/b/ src/x.rs'", "env -C /남의/저장소 eval 'tee src/x.rs'"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "감싸는 명령이 eval 에 닿아 남의 자리의 쓰기를 여기 것으로 읽었다 — {cmd}");
+        }
+        let cmd = "echo --help | xargs eval 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/x.rs";
+        let got = guard_writes(&all, &cfg(), &here(), root, root, cmd);
+        assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 eval 에 닿아 덧붙는 argv 의 집기를 세었다\n{got:?}");
     }
 
     /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
