@@ -59,10 +59,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
     // 표식은 **읽기 전에** 잰다 — 뒤에 재면 읽고 첫 걸음 사이에 옆이 쓴 것을 놓친다(`App::config_stamp`).
     let config_stamp = config.as_deref().map(crate::store::stamp);
-    // 설정은 **한 번 읽어** 층과 보기와 새 판 묻기가 나눠 쓴다(moai-u8cs, moai-d74q).
+    // 설정은 **한 번 읽어** `tui::layer` 와 보기와 새 판 묻기가 나눠 쓴다(moai-u8cs, moai-d74q).
     let reg = crate::user_config::read(config.as_deref());
-    // **여기서 집어 둔다** — `reg` 의 필드는 아래에서 옮겨 간다(`reg.read`).
-    let update_check = reg.update_check;
     // **띄운 자리는 세션이 선 체크아웃이다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 트래커는 루트로
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
@@ -111,7 +109,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref(), update_check);
+    // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
+    // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
     screen(app)
 }
 
@@ -164,7 +164,6 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config_stamp = config.as_deref().map(crate::store::stamp);
     // 설정은 **한 번 읽어** `--json`·층·보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
-    let update_check = reg.update_check;
     // `--path` 는 한 프로젝트 안의 id 다. 어느 프로젝트인지 모르는 채로 받으면 id 가 겹치는
     // 두 프로젝트 중 하나를 말없이 고르게 된다.
     if args.path.is_some() {
@@ -229,7 +228,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref(), update_check);
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
     screen(app)
 }
 

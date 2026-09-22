@@ -888,7 +888,7 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest().clone());
+    let said = version_said(app.site.lang, app.latest());
     let user = app.told_user().to_string();
     [("User", user), ("Version", said)]
 }
@@ -903,11 +903,15 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 /// **묻는 일은 여기서 안 한다.** 이 함수는 키 하나, 깜빡임 한 번마다 도는 자리라 [`App`] 이
 /// 받아 둔 답([`App::latest`])을 읽기만 한다 — 바로 위 `told_of` 가 `model::actor` 를 여기서 안
 /// 부르는 것과 같은 까닭이고, 묻는 실은 `cmd::tui` 가 여는 걸음에 한 번 띄운다.
-fn version_said(lang: Lang, latest: crate::latest::Seen) -> String {
+///
+/// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
+/// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
+/// `kind` 뿐이라 통째로 버려지는 담기다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
     let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", &tag)]),
+        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
         Seen::Same => say(lang, "tui.version.same").to_string(),
         Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
         Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
@@ -919,7 +923,7 @@ fn version_said(lang: Lang, latest: crate::latest::Seen) -> String {
 ///
 /// **넷째 글을 갈래마다 갈랐다.** 넷이 다른 글이라는 결정(2026-09-21)은 그대로다 — 어느
 /// 갈래도 "최신" 이라 적지 않고, 모두 못 물었다고 먼저 적은 뒤 괄호로 까닭을 단다. 사람이
-/// 할 일이 갈래마다 다르기 때문이다: 판 수를 태운 것은 기다리면 풀리고, 인증서를 갈아
+/// 할 일이 갈래마다 다르기 때문이다: 부름 수를 태운 것은 기다리면 풀리고, 인증서를 갈아
 /// 끼우는 프록시 뒤에서는 영영 안 되며, 태그 꼴은 릴리스를 지은 쪽이 고친다.
 ///
 /// **낱말을 잇지 않고 글 전체를 고른다.** `"{unchecked} ({why})"` 로 이으면 말마다 괄호와
@@ -5504,7 +5508,7 @@ pub(super) mod tests {
         crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
     }
 
-    /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 판 수를 태운 것과 네트워크가 없는 것은
+    /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은
     /// 사람이 할 일이 다르므로, 같은 "못 물었다" 로 접으면 그 사람이 무엇을 고칠지 모른다.
     ///
     /// **그래도 어느 갈래도 아무것도 안 막는다** — 넷째 글이 갈렸을 뿐 판 줄은 여전히 줄
@@ -5512,10 +5516,10 @@ pub(super) mod tests {
     #[test]
     fn every_reason_for_not_asking_is_its_own_line() {
         let mine = env!("CARGO_PKG_VERSION");
-        let said = |kind| {
+        let said = |kind, width| {
             let mut a = app();
             a.set_latest(unasked_for(kind));
-            let lines = render(&mut a, 100, 24);
+            let lines = render(&mut a, width, 24);
             lines[..6].join("\n")
         };
         let all = [
@@ -5536,7 +5540,7 @@ pub(super) mod tests {
         };
         let mut lines = Vec::new();
         for kind in all {
-            let head = said(kind);
+            let head = said(kind, 100);
             assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
             lines.push((kind, cut(&head).unwrap_or_else(|| panic!("{kind:?}: 판 줄을 못 찾았다"))));
         }
@@ -5544,6 +5548,15 @@ pub(super) mod tests {
             for (kb, b) in &lines[i + 1..] {
                 assert_ne!(a, b, "{ka:?} 와 {kb:?} 가 같은 글로 선다");
             }
+        }
+        // **좁은 창에서도 까닭이 안 잘린다**(리뷰). 괄호 안의 까닭이 길어 로고가 빠지는 폭이
+        // 있는데(`header` 의 `with_logo`), 거기서 까닭까지 `…` 로 잘리면 이 갈래를 나눈 뜻이
+        // 없어진다 — 로고를 무르고 글을 지키는 것이 이 헤더의 자다. 80칸은 가장 흔한 폭이다.
+        for kind in all {
+            let head = said(kind, 80);
+            let line = cut(&head).unwrap_or_else(|| panic!("{kind:?}: 80칸에서 판 줄을 못 찾았다"));
+            assert!(!line.contains('…'), "{kind:?} 의 까닭이 80칸에서 잘렸다 — {line}");
+            assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
         }
     }
 

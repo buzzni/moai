@@ -383,7 +383,7 @@
   "tui.version.unchecked.offline": "latest not checked (no network)",
   "tui.version.unchecked.timeout": "latest not checked (timed out)",
   "tui.version.unchecked.rate_limited": "latest not checked (rate limited)",
-  "tui.version.unchecked.http": "latest not checked (the server refused)",
+  "tui.version.unchecked.http": "latest not checked (server error)",
   "tui.version.unchecked.tls": "latest not checked (TLS failed)",
   "tui.version.unchecked.garbled": "latest not checked (unreadable answer)",
   "tui.version.unchecked.odd_tag": "latest not checked (odd tag)",

@@ -32,7 +32,7 @@
 //! **실패는 모두 [`Seen::Unasked`] 로 내려앉되, 까닭을 들고 온다**([`Why`], 사용자 결정
 //! 2026-09-22, moai-580l). 처음에는 한 변형으로 접었는데 — 네트워크가 없든, 느려서
 //! [`TIMEOUT`] 을 넘든, 답이 깨진 JSON 이든, 태그가 `v1.2.3` 꼴이 아니든 — **사람이 할 일이
-//! 갈래마다 다르다**: 시간당 판 수를 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
+//! 갈래마다 다르다**: 시간당 부름 수를 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
 //! 네트워크는 이 기능을 영영 못 쓰며(moai-uwuw), 네트워크가 없는 것은 그 둘 중 어느 것도
 //! 아니다. 가르는 것은 `kind` 고 꼴은 `commits_error` 와 같다([`crate::git::Told`]).
 //!
@@ -93,7 +93,7 @@ pub enum Seen {
     /// 합치면 개발 중인 사람에게 평생 "낡았다" 고 말한다.
     Ahead,
     /// 못 물었다. **까닭을 함께 든다**([`Why`], moai-580l) — 사람이 할 일이 까닭마다 다르기
-    /// 때문이다. 시간당 판 수를 다 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
+    /// 때문이다. 시간당 부름 수를 다 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
     /// 네트워크는 이 기능을 못 쓴다는 뜻이며, 네트워크가 없는 것은 둘 중 어느 것도 아니다.
     Unasked(Why),
 }
@@ -127,10 +127,17 @@ pub enum Trouble {
     Offline,
     /// [`TIMEOUT`] 안에 못 끝냈다. 느린 네트워크와 안 붙는 네트워크는 다른 일이다.
     Timeout,
-    /// 시간당 판 수를 다 태웠다 — GitHub 은 이것을 403 으로도 429 로도 낸다. **기다리면
-    /// 풀리는 하나뿐인 갈래라** 따로 둔다: 에이전트가 도는 고리가 이 자리에 자주 선다.
+    /// 시간당 부름 수를 다 태웠다 — GitHub 은 이것을 403 으로도 429 로도 낸다. **기다리면
+    /// 풀리고 사람이 할 것이 없는 갈래라** 따로 둔다: 에이전트가 도는 고리가 이 자리에 자주 선다.
     RateLimited,
-    /// 서버가 그 밖의 상태 코드로 거절했다 — 404(저장소를 옮겼다)가 가장 흔하다.
+    /// 서버가 그 밖의 상태 코드를 냈다 — 4xx 도 5xx 도 여기 든다. 404(저장소를 옮겼다)가 가장
+    /// 흔하고, 그때는 사람이 고칠 자리가 있다.
+    ///
+    /// **5xx 는 고칠 자리가 없다**(리뷰). 그쪽은 [`RateLimited`](Trouble::RateLimited) 와
+    /// 마찬가지로 기다리는 것이 할 일의 전부라, 화면 글을 "거절" 이라 적던 판은 GitHub 한 번
+    /// 흔들린 것을 두고 저장소가 옮겨 갔는지 토큰이 틀렸는지 찾아다니게 했다. 그래도 갈래를 더
+    /// 쪼개지 않는 것은 그 둘을 가를 자가 상태 코드 하나뿐이고, 이 값을 내는 표면이 아직
+    /// 탐색기 한 줄이기 때문이다 — 글은 상태 코드를 안 고르는 쪽으로 적는다.
     Http,
     /// TLS 가 안 섰다. 사내 네트워크의 프록시가 인증서를 갈아 끼우는 기계가 여기 선다 —
     /// 그 기계는 이 기능을 **못 쓴다**(moai-uwuw 가 닫은 결정, 루트 저장소는 `webpki-roots`
@@ -154,7 +161,7 @@ impl Why {
 
     /// `ureq` 가 낸 실패를 갈래로. **`said` 는 그 크레이트가 지은 글 그대로다.**
     ///
-    /// **403 과 429 를 한 갈래로 접는다.** GitHub 은 시간당 판 수를 다 태운 부름에 둘 중
+    /// **403 과 429 를 한 갈래로 접는다.** GitHub 은 시간당 부름 수를 다 태운 부름에 둘 중
     /// 아무 쪽이나 내고(문서가 그렇게 적는다), 사람이 할 일은 둘 다 "기다린다" 다.
     /// `User-Agent` 를 안 단 부름도 403 인데, 그쪽은 [`ask_within`] 이 늘 달고 나가므로
     /// 이 자리에 안 선다.
@@ -163,7 +170,7 @@ impl Why {
             ureq::Error::StatusCode(403 | 429) => Trouble::RateLimited,
             ureq::Error::StatusCode(_) => Trouble::Http,
             ureq::Error::Timeout(_) => Trouble::Timeout,
-            // **TLS 의 실패는 `Io` 로 온다**(moai-t906 이 재어 알아낸 자리). 악수가 깨지면
+            // **TLS 의 실패는 `Io` 로 온다**(moai-t906 이 재어 알아낸 자리). 핸드셰이크가 깨지면
             // rustls 의 오류가 `io::Error` 에 싸여 오고, `ureq::Error::Rustls` 는 그 길에 안
             // 선다 — 갈래를 그 변형으로만 재던 판은 프록시가 인증서를 갈아 끼운 기계에
             // "네트워크가 없다" 고 말했다. rustls 는 그 오류를 `InvalidData` 로 싼다.
@@ -314,28 +321,60 @@ pub struct Held {
     ///
     /// 이것이 없던 때는 `MOAI_API_URL` 을 한 번 바꿔 부른 답이 하루 동안 **진짜 부름에 서고**,
     /// 거울을 쓰는 사람에게는 그 반대가 됐다 — 창이 자리를 안 봤기 때문이다.
+    ///
+    /// **사용자 정보는 떼고 든다**([`place_of`], 리뷰). 이 값은 파일에 적히는데, 그 파일의 첫
+    /// 쓰기는 umask 를 따라 남이 읽을 수 있다([`crate::store::write_atomic`] 은 **이미 있는**
+    /// 파일의 권한만 지킨다). `MOAI_API_URL` 에 토큰을 끼워 둔 사람의 그 토큰이 설정 디렉터리에
+    /// 평문으로 하루를 사는 길이었다 — 묻는 자리인가만 가리면 되므로 그 토막은 애초에 필요 없다.
     pub url: Option<String>,
 }
 
+/// 자리를 가릴 때 쓸 꼴 — **사용자 정보(`user:pass@`)를 뗀 `url`**(리뷰).
+///
+/// [`Held::url`] 이 적어 두는 값이자 [`Held::asked_here`] 가 견주는 값이다. 양쪽이 같은 자를
+/// 지나야 토큰만 다른 두 부름이 같은 자리로 선다 — 토큰은 자리가 아니다.
+///
+/// **꼴이 아닌 글은 그대로 둔다.** 이 값은 `MOAI_API_URL` 이 준 남의 글이고, 여기가 하는 일은
+/// 자리를 가리는 것 하나다 — 못 알아보는 글을 고쳐 쓰기 시작하면 그 글이 가리키던 자리가
+/// 바뀐다. 자르는 자는 [`is_loopback`] 이 권한을 떼는 자와 같다.
+pub fn place_of(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+    let cut = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(cut);
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    format!("{scheme}://{host}{tail}")
+}
+
 impl Held {
+    /// 이 답이 `url` 에 물은 것인가(moai-dael). **자리를 모르는 옛 줄은 아니라고 본다** —
+    /// 읽기는 관대하되(줄을 안 버린다) 이 물음에는 엄하다. 모르는 자리의 답을 이 자리의 답으로
+    /// 세우는 것이 이 이슈가 없앤 그 일이다.
+    ///
+    /// **치르는 값은 판올림 뒤 한 번 더 묻는 것에서 그치지 않는다**(리뷰). 그 한 번마저
+    /// 실패하면 [`refresh`] 가 태그 없는 줄을 적어, 자리를 모르던 옛 태그가 파일에서
+    /// **지워진다** — `refresh` 의 "못 들었다고 알던 것을 지우지는 않는다" 는 자리를 아는 줄에만
+    /// 선다. 모르는 자리의 태그를 이 자리의 답으로 안 세우기로 한 이상 그 태그는 들고 갈 데가
+    /// 없고, 남겨 두면 다음 판이 그것을 이 자리의 답으로 읽는다.
+    pub fn asked_here(&self, url: &str) -> bool {
+        self.url.as_deref() == Some(place_of(url).as_str())
+    }
+
     /// 이 답이 아직 창 안인가. 때가 꼴이 아니면 낡은 것으로 본다 — 못 읽는 도장 하나가 묻기를
     /// 영영 막으면, 그 파일을 지우는 것 말고 되돌릴 길이 없다.
     ///
     /// **조금 앞선 도장은 봐준다**([`crate::model::FUTURE_SLACK_SECS`], moai-21un). 설정
     /// 디렉터리를 나눠 쓰는 두 기계의 시계가 1초만 어긋나도 한쪽이 찍은 도장이 다른 쪽에는
     /// 미래로 보여, 그 기계는 부를 때마다 바깥을 두드렸다 — 에이전트가 도는 고리에서는
-    /// GitHub 의 시간당 60판을 태우는 길이다. 봐주는 자는 이 저장소가 이미 쓰던 것과 같다
+    /// GitHub 의 시간당 60번을 태우는 길이다. 봐주는 자는 이 저장소가 이미 쓰던 것과 같다
     /// (`report` 의 `far_ahead`, `model::days_since` 의 0 클램프).
     ///
     /// **크게 앞선 도장은 여전히 낡은 것이다.** 시계를 되돌린 기계나 손으로 적은 2099 가 창을
     /// 영영 열어 두지 못하게 한다.
-    /// 이 답이 `url` 에 물은 것인가(moai-dael). **자리를 모르는 옛 줄은 아니라고 본다** —
-    /// 읽기는 관대하되(줄을 안 버린다) 이 물음에는 엄하다. 모르는 자리의 답을 이 자리의 답으로
-    /// 세우는 것이 이 이슈가 없앤 그 일이고, 치르는 값은 판올림 뒤 한 번 더 묻는 것뿐이다.
-    pub fn asked_here(&self, url: &str) -> bool {
-        self.url.as_deref() == Some(url)
-    }
-
+    ///
+    /// **봐주는 폭이 창과 같다는 것은 재 볼 자리다**(리뷰). [`crate::model::FUTURE_SLACK_SECS`]
+    /// 도 [`WINDOW`] 도 하루라, 하루 앞선 도장을 든 기계는 이틀까지 안 묻는다 — 모듈 머리의
+    /// "하루 한 번 묻는다" 는 시계가 맞는 기계의 이야기다. 한자리에 둔 값을 그대로 쓰는 쪽을
+    /// 골랐으나, `report` 의 `far_ahead` 를 늘리는 날 이쪽 주기가 함께 늘어난다.
     pub fn fresh(&self, now: &str, window: i64) -> bool {
         let (Some(then), Some(now)) = (crate::model::parse_rfc3339(&self.asked_at), crate::model::parse_rfc3339(now))
         else {
@@ -383,9 +422,9 @@ fn new_doc() -> toml_edit::DocumentMut {
 
 /// 답을 적는다. **스냅샷 먼저, 저널 나중** 과 같은 자리에 선다 — 이 파일은 잃어도 한 번 더 묻는
 /// 것이 전부라 **락을 안 잡는다.** 프로세스 둘이 같이 쓰면 늦은 쪽이 남고, 둘 다 같은 것을 적으므로
-/// 진 쪽도 잃는 것이 없다. 같은 프로세스의 실 둘도 같다 — [`crate::store::tmp_name`] 이 임시
-/// 이름을 실마다 가르므로(moai-mpf4) 둘 중 한쪽의 글이 통째로 남는다. [`spawn`] 을 한 판에
-/// 하나만 띄우는 것은 여전히 부르는 쪽의 몫이지만, 그것은 실과 소켓을 아끼자는 것이지 파일이
+/// 진 쪽도 잃는 것이 없다. 같은 프로세스의 스레드 둘도 같다 — [`crate::store::tmp_name`] 이 임시
+/// 이름을 스레드마다 가르므로(moai-mpf4) 둘 중 한쪽의 글이 통째로 남는다. [`spawn`] 을 한 번에
+/// 하나만 띄우는 것은 여전히 부르는 쪽의 몫이지만, 그것은 스레드와 소켓을 아끼자는 것이지 파일이
 /// 깨지기 때문이 아니다.
 ///
 /// **`write_atomic` 은 fsync 를 두 번 한다** — 잃어도 그만인 이 파일에는 과한 durability 지만,
@@ -411,8 +450,12 @@ pub fn write(dir: &Path, held: &Held) -> R<()> {
     write_atomic(&file_at(dir), doc.to_string().as_bytes())
 }
 
-/// 왜 안 묻는지 — **글이 아니라 자료다**. 지금은 아무도 이것을 펴지 않는다: 안 물은 것과 못 물은
-/// 것이 사람에게는 한 글이고([`Seen::Unasked`]), 까닭이 궁금한 사람은 제가 끈 것을 안다.
+/// 왜 안 묻는지 — **글이 아니라 자료다**. 지금은 아무도 이것을 펴지 않는다: 끈 것은 제가 끈
+/// 사람이 알기 때문이다.
+///
+/// **못 물은 까닭이 갈린 뒤에도 이 셋은 안 갈렸다**(moai-580l, 리뷰). [`Seen::Unasked`] 는
+/// 이제 아홉 글로 서지만 이 셋은 모두 [`Trouble::NotAsked`] 한 글로 접힌다 — 갈래를 나눈
+/// 까닭이 "사람이 할 일이 갈래마다 다르다" 인데, 제가 끈 것에는 할 일이 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Off {
     /// [`OFF_VAR`] 가 섰다.
@@ -464,7 +507,15 @@ pub fn ask(url: &str) -> Result<String, Why> {
     ask_within(url, TIMEOUT)
 }
 
-/// 물을 때 쓰는 손님 하나 — **[`ask_within`] 에서 갈라 두었다**(moai-t906).
+/// 이 자리를 `https` 로 부르는가 — 되돌림이 평문으로 내려가는 것을 막을지 가른다([`agent_for`]).
+///
+/// **스킴은 대소문자를 안 가린다**(RFC 3986). `HTTPS://` 를 평문으로 읽으면 그 부름만 문이 안
+/// 서고, 그것은 조용히 약해지는 쪽이다.
+fn secure_scheme(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("https"))
+}
+
+/// 물을 때 쓰는 `ureq::Agent` 하나 — **[`ask_within`] 에서 갈라 두었다**(moai-t906).
 ///
 /// 시험의 부름은 모두 `http://127.0.0.1` 인데 생산의 부름은 모두 `https` 라, 붙여 두면 TLS 를
 /// 어떻게 세웠는지가 **한 번도 안 재인 채로** 산다 — 기능 조합이 바뀌어 인증서 검증이 꺼져도
@@ -478,7 +529,17 @@ fn agent_for(url: &str, timeout: Duration) -> ureq::Agent {
         // 되돌림은 **둘까지만** 따라간다(기본은 열이다). 저장소 이름이 바뀌면 릴리스 API 가 301
         // 로 보내므로 아예 안 따라가면 그날 이 기능이 죽는다. 그래도 열까지 갈 까닭은 없고,
         // 셋째부터는 `max_redirects_will_error` 가 오류로 세 "못 물었다" 가 된다.
-        .max_redirects(2);
+        .max_redirects(2)
+        // **되돌림이 평문으로 내려가지 못하게 막는다**(리뷰). ureq 의 기본은 `https_only: false`
+        // 고, 그 문은 되돌림 **한 걸음마다** 다시 선다(`run::call_run`) — 안 세우면 `https` 로
+        // 나간 부름이 `302 Location: http://…` 한 줄에 평문으로 내려가고, 거기서 받은 태그가
+        // 탐색기 판 줄에 서서 [`FILE`] 에 하루를 산다. SECURITY.md 가 "TLS 는 rustls 에
+        // webpki-roots, 검증 켬" 이라 적은 것은 그 첫 걸음만의 이야기였다.
+        //
+        // **처음부터 평문으로 부른 자리는 그대로 둔다.** `https_only` 는 전부 아니면 전무라,
+        // 늘 켜면 `MOAI_API_URL=http://거울…` 을 손으로 적은 사람이 그날로 못 쓴다 — 그것은
+        // 그 사람이 고른 것이고, 여기서 막을 것은 **고르지 않은 내려감**이다.
+        .https_only(secure_scheme(url));
     // **되돌이 자리는 프록시를 안 탄다.** ureq 의 기본은 `ALL_PROXY`·`HTTPS_PROXY`·`HTTP_PROXY`
     // 를 그대로 따르고 `NO_PROXY` 에 손으로 적은 이름만 비껴간다 — 되돌이를 기본으로 비껴가지
     // 않는다. 바깥으로 나가는 부름에는 그 편이 맞지만(회사 그물은 프록시로만 나간다), 제 서버를
@@ -505,10 +566,18 @@ pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
         // 끝없이 뱉을 때 그것을 다 받아 줄 까닭이 없다.
         .with_config()
         .limit(256 * 1024)
-        // 글자가 깨져도 읽는다 — 어차피 `tag_name` 하나만 집고, 못 집으면 "못 물었다" 다.
-        .lossy_utf8(true)
-        .read_to_string()
+        // **바이트로 받아 우리가 씻는다**(리뷰, moai-580l 이 연 자리). `read_to_string` 에
+        // `lossy_utf8(true)` 를 주던 판은 이 자리에서 아무 일도 안 했다 — ureq 는 그 설정을
+        // `Content-Type` 이 `text/` 로 시작할 때만 입히는데(`body::ResponseInfo::is_text`),
+        // GitHub 은 `application/json` 으로 답한다. 그러면 씻는 자가 안 서서 `read_to_string`
+        // 이 깨진 바이트에 `io::ErrorKind::InvalidData` 로 죽고, 그 오류가 [`Why::from_ureq`]
+        // 의 **TLS 갈래**로 떨어져 핸드셰이크가 멀쩡한 기계에 "TLS 실패" 가 섰다 — 그 글은 인증서를
+        // 갈아 끼우는 프록시 뒤라 영영 못 쓴다는 뜻이라(moai-uwuw), 고칠 것이 없는 사람을
+        // 고치러 보낸다.
+        .read_to_vec()
         .map_err(|e| Why::from_ureq(&e))?;
+    // 글자가 깨져도 읽는다 — 어차피 `tag_name` 하나만 집고, 못 집으면 "못 물었다" 다.
+    let body = String::from_utf8_lossy(&body);
     // **읽다 끊긴 것과 못 읽는 답은 다른 갈래다** — 위의 `map_err` 가 앞엣것을, 여기가 뒤엣것을
     // 든다. `said` 에 답을 싣지 않는 것은 그것이 256KB 까지 가는 남의 글이기 때문이다.
     tag_in(&body).ok_or_else(|| Why { kind: Trouble::Garbled, said: String::new() })
@@ -579,7 +648,7 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     let asked = ask(url);
     let why = asked.as_ref().err().cloned();
     let tag = asked.ok().or_else(|| held.and_then(|h| h.tag));
-    let _ = write(dir, &Held { asked_at: now.to_string(), tag: tag.clone(), url: Some(url.to_string()) });
+    let _ = write(dir, &Held { asked_at: now.to_string(), tag: tag.clone(), url: Some(place_of(url)) });
     match tag {
         Some(tag) => seen(mine(), Some(&tag)),
         // 못 들었고 알던 것도 없다 — 이 판의 까닭을 그대로 낸다(moai-580l).
@@ -639,10 +708,10 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
-    /// **서버가 거절한 까닭도 갈린다**(moai-580l). 시간당 판 수를 태운 것은 기다리면 풀리고,
+    /// **서버가 낸 상태 코드도 갈린다**(moai-580l). 시간당 부름 수를 태운 것은 기다리면 풀리고,
     /// 옮겨 간 저장소는 사람이 고칠 것이 다르다 — 한 글로 접으면 어느 쪽인지 모른다.
     ///
-    /// **403 과 429 는 한 갈래다.** GitHub 은 판 수를 태운 부름에 둘 중 아무 쪽이나 낸다.
+    /// **403 과 429 는 한 갈래다.** GitHub 은 부름 수를 태운 부름에 둘 중 아무 쪽이나 낸다.
     #[test]
     fn a_refusal_says_whether_waiting_will_fix_it() {
         for (status, kind) in [
@@ -658,14 +727,38 @@ mod tests {
         }
     }
 
+    /// **성치 않은 바이트가 든 답은 "TLS 실패" 가 아니다**(리뷰). `read_to_string` 에
+    /// `lossy_utf8(true)` 를 주던 판은 이 자리에서 아무 일도 안 했다 — ureq 는 그 설정을
+    /// `Content-Type` 이 `text/` 로 시작할 때만 입히는데 GitHub 은 `application/json` 으로
+    /// 답한다. 그래서 깨진 바이트 하나가 `io::ErrorKind::InvalidData` 로 죽고, 그 오류가
+    /// [`Why::from_ureq`] 의 TLS 갈래로 떨어져 핸드셰이크가 멀쩡한 기계에 "인증서를 갈아 끼우는
+    /// 프록시 뒤라 영영 못 쓴다" 는 뜻의 글이 섰다.
+    ///
+    /// **씻어 읽으므로 태그는 그대로 집힌다** — 깨진 바이트가 태그 밖에 있으면 성한 답이다.
+    #[test]
+    fn a_broken_byte_in_the_answer_is_not_a_tls_failure() {
+        // 태그는 성하고 딴 자리가 깨졌다 — 씻어 읽으니 그대로 집는다.
+        let (url, handle) = bytes_once("200 OK", b"{\"name\":\"\xff\xfe\",\"tag_name\":\"v9.9.9\"}");
+        assert_eq!(ask_within(&url, TIMEOUT).as_deref(), Ok("v9.9.9"), "깨진 바이트가 성한 태그를 막았다");
+        let _ = handle.join();
+        // 깨진 바이트가 태그 안에 들면 씻긴 자리가 남아 판으로 안 읽힌다 — **태그 꼴이 아닌
+        // 것**이지 TLS 가 안 선 것이 아니다.
+        let s = Scratch::new("latest-broken-byte");
+        let (url, handle) = bytes_once("200 OK", b"{\"tag_name\":\"v9.9.9\xff\"}");
+        let got = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW);
+        assert_eq!(why_of(&got), Some(Trouble::OddTag), "성치 않은 바이트를 TLS 실패로 읽었다 — {got:?}");
+        let _ = handle.join();
+    }
+
     /// **TLS 를 어떻게 세웠는지를 잰다**(moai-t906). 시험의 부름은 모두 `http://127.0.0.1` 이라
     /// rustls·webpki-roots 가 한 번도 안 돈다 — 기능 조합이 바뀌어 인증서 검증이 꺼져도 온
     /// 시험이 푸르고, 생산에서는 "못 물었다" 로 접혀 네트워크 없음과 구별이 안 간다.
     ///
-    /// **살아 있는 네트워크를 안 탄다.** 바깥에 붙는 시험은 느리고 흔들린다 — 대신 손님이
-    /// 들고 있는 설정을 글자로 읽고, TLS 가 실제로 도는지는 아래 시험이 따로 잰다.
+    /// **살아 있는 네트워크를 안 탄다.** 바깥에 붙는 시험은 느리고 흔들린다 — 대신
+    /// `ureq::Agent` 가 들고 있는 설정을 글자로 읽고, TLS 가 실제로 도는지는 아래 시험이 따로
+    /// 잰다.
     ///
-    /// 재는 넷은 저마다 다른 되돌림을 잡는다.
+    /// 재는 다섯은 저마다 다른 되돌림을 잡는다.
     ///
     /// - `provider` — `native-tls` 로 갈아타면 그 기계에 깔린 뿌리를 믿게 된다
     /// - `root_certs` — `PlatformVerifier` 로 바뀌면 프록시가 끼운 뿌리를 믿는다. 루트 저장소는
@@ -673,6 +766,8 @@ mod tests {
     /// - `disable_verification` — 켜지면 아무 인증서나 지난다
     /// - `use_sni` — 꺼지면 이름을 안 대고 붙어, 한 주소에 여러 이름이 선 자리에서 엉뚱한
     ///   인증서를 받는다
+    /// - `https_only` — 꺼지면 되돌림 한 줄이 이 부름을 평문으로 내린다(리뷰). ureq 의 기본이
+    ///   꺼짐이라 **안 적으면 꺼진다**
     #[test]
     fn the_tls_it_builds_is_rustls_over_mozillas_roots() {
         let agent = agent_for(API, TIMEOUT);
@@ -685,21 +780,38 @@ mod tests {
         );
         assert!(!tls.disable_verification(), "인증서 검증이 꺼져 있다");
         assert!(tls.use_sni(), "SNI 가 꺼져 있다");
+        assert!(agent.config().https_only(), "되돌림이 평문으로 내려갈 수 있다");
     }
 
-    /// **TLS 가 실제로 돈다**(moai-t906). 위의 시험은 설정을 읽을 뿐이라, 기능이 빠져 그 층이
-    /// 아예 안 서는 판은 못 잡는다 — 그때는 `https` 부름이 TLS 가 아니라 다른 까닭으로 죽는다.
+    /// **되돌림은 평문으로 못 내려간다**(리뷰). `https` 로 나간 부름이 `302 Location: http://…`
+    /// 한 줄에 평문이 되면, 거기서 받은 태그가 판 줄에 서고 [`FILE`] 에 하루를 산다 — 그 문은
+    /// 되돌림 걸음마다 다시 서야 하고(`run::call_run`), ureq 의 기본은 꺼짐이다.
     ///
-    /// **평문으로 답하는 제 서버에 `https` 로 붙는다.** 손님은 ClientHello 를 보내고 서버는
-    /// HTTP 로 답하므로 악수가 깨진다 — 그 깨짐이 [`Trouble::Tls`] 로 오면 TLS 층이 선 것이다.
-    /// 바깥에 안 붙으니 느리지도 흔들리지도 않는다. **인증서 검증 자체를 재지는 못한다**:
-    /// 악수가 그 앞에서 깨지므로 뿌리 저장소는 안 열린다 — 그 자리는 위의 시험이 설정으로 잰다.
+    /// **처음부터 평문인 자리는 그대로 둔다.** `MOAI_API_URL=http://거울…` 은 그 사람이 고른
+    /// 것이고, 여기서 막을 것은 고르지 않은 내려감이다 — 시험 서버가 모두 그 자리에 선다.
+    #[test]
+    fn a_plain_call_stays_plain_and_a_secure_one_cannot_be_downgraded() {
+        assert!(agent_for("https://api.github.com/x", TIMEOUT).config().https_only());
+        assert!(agent_for("HTTPS://api.github.com/x", TIMEOUT).config().https_only(), "스킴을 대소문자로 갈랐다");
+        assert!(!agent_for("http://127.0.0.1:8080/x", TIMEOUT).config().https_only(), "평문 거울을 막았다");
+        assert!(!secure_scheme("설명 없는 글"), "스킴이 없는 글을 https 로 읽었다");
+    }
+
+    /// **TLS 가 실제로 돈다**(moai-t906). 위의 시험은 설정을 읽을 뿐이라, 기능이 빠져 그
+    /// 레이어가 아예 안 서는 판은 못 잡는다 — 그때는 `https` 부름이 TLS 가 아니라 다른 까닭으로
+    /// 죽는다.
+    ///
+    /// **평문으로 답하는 제 서버에 `https` 로 붙는다.** 클라이언트는 ClientHello 를 보내고
+    /// 서버는 HTTP 로 답하므로 핸드셰이크(handshake)가 깨진다 — 그 깨짐이 [`Trouble::Tls`] 로
+    /// 오면 TLS 레이어가 선 것이다. 바깥에 안 붙으니 느리지도 흔들리지도 않는다.
+    /// **인증서 검증 자체를 재지는 못한다**: 핸드셰이크가 그 앞에서 깨지므로 루트 저장소는
+    /// 안 열린다 — 그 자리는 위의 시험이 설정으로 잰다.
     #[test]
     fn a_plain_answer_to_an_https_call_is_a_tls_failure() {
         let (url, handle) = server_once("{}");
         let https = url.replacen("http://", "https://", 1);
         let got = ask_within(&https, TIMEOUT).map_err(|w| w.kind);
-        assert_eq!(got, Err(Trouble::Tls), "TLS 층이 안 섰거나 그 실패를 다른 갈래로 읽었다");
+        assert_eq!(got, Err(Trouble::Tls), "TLS 레이어가 안 섰거나 그 실패를 다른 갈래로 읽었다");
         let _ = handle.join();
     }
 
@@ -721,9 +833,15 @@ mod tests {
         saying_once("200 OK", body)
     }
 
-    /// [`server_once`] 되 **상태 줄을 고른다**(moai-580l). 판 수를 태운 403 과 저장소를 옮긴
-    /// 404 는 사람이 할 일이 다르고, 그 갈림을 재려면 서버가 그 상태 코드를 내야 한다.
+    /// [`server_once`] 되 **상태 줄을 고른다**(moai-580l). 시간당 부름 수를 태운 403 과 저장소를
+    /// 옮긴 404 는 사람이 할 일이 다르고, 그 갈림을 재려면 서버가 그 상태 코드를 내야 한다.
     fn saying_once(status: &'static str, body: &'static str) -> (String, std::thread::JoinHandle<usize>) {
+        bytes_once(status, body.as_bytes())
+    }
+
+    /// [`saying_once`] 되 **몸을 바이트로 받는다**(리뷰). 성치 않은 UTF-8 을 보내려면 `&str` 로는
+    /// 못 짓는데, 그것이 `application/json` 답에서 실제로 오는 꼴이다.
+    fn bytes_once(status: &'static str, body: &'static [u8]) -> (String, std::thread::JoinHandle<usize>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
         let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
         let handle = std::thread::spawn(move || {
@@ -737,7 +855,7 @@ mod tests {
         (url, handle)
     }
 
-    fn answer(mut stream: TcpStream, status: &str, body: &str) {
+    fn answer(mut stream: TcpStream, status: &str, body: &[u8]) {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut line = String::new();
         // 머리를 다 읽어야 클라이언트가 답을 받는다.
@@ -749,10 +867,10 @@ mod tests {
         }
         let _ = write!(
             stream,
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+            body.len()
         );
+        let _ = stream.write_all(body);
         let _ = stream.flush();
     }
 
@@ -923,6 +1041,30 @@ mod tests {
         assert!(now.asked_here(&here));
     }
 
+    /// **토큰은 자리가 아니다**(리뷰). `MOAI_API_URL` 에 끼운 사용자 정보가 [`FILE`] 에 평문으로
+    /// 남던 자리다 — 그 파일의 첫 쓰기는 umask 를 따라 남이 읽는다. 떼고 적으니 토큰만 다른 두
+    /// 부름은 같은 자리로 서고, 창도 그대로 닫힌다.
+    #[test]
+    fn the_token_in_the_url_is_not_written_down() {
+        let s = Scratch::new("latest-userinfo");
+        let (url, handle) = server_once(r#"{"tag_name":"v9.9.9"}"#);
+        let with_token = url.replacen("http://", "http://ci-bot:ghp_secret@", 1);
+        assert_eq!(
+            refresh(s.path(), &with_token, "2026-09-21T00:00:00Z", WINDOW),
+            Seen::Newer { tag: "v9.9.9".into() }
+        );
+        let src = std::fs::read_to_string(file_at(s.path())).unwrap();
+        assert!(!src.contains("ghp_secret"), "토큰이 파일에 남았다\n{src}");
+        // 토막만 뗐지 자리는 그대로다 — 토큰을 낀 부름도, 안 낀 부름도 같은 자리로 선다.
+        let now = read(s.path()).expect("도장이 없다");
+        assert_eq!(now.url.as_deref(), Some(url.as_str()));
+        assert!(now.asked_here(&with_token) && now.asked_here(&url), "자리가 안 맞는다");
+        let _ = handle.join();
+        // 꼴이 아닌 글은 그대로 둔다 — 자리를 가리는 것이 이 자의 일 전부다.
+        assert_eq!(place_of("설명 없는 글"), "설명 없는 글");
+        assert_eq!(place_of("https://api.github.com/x"), "https://api.github.com/x");
+    }
+
     /// **자리를 모르는 옛 줄은 다시 묻는다**(moai-dael). 이 필드 전에 적힌 파일이고, 어디에
     /// 물은 답인지 알 길이 없다 — 치르는 값은 판올림 뒤 한 번 더 묻는 것뿐이다.
     #[test]
@@ -983,7 +1125,7 @@ mod tests {
         let s = Scratch::new("latest-nogrid");
         let url = nobody_there();
         // 거절당해도 답은 "못 물었다" 고, 종료 코드를 바꿀 `Err` 가 아니다. **까닭은
-        // "네트워크가 없다" 다**(moai-580l) — 태그가 이상한 것도, 판 수를 태운 것도 아니다.
+        // "네트워크가 없다" 다**(moai-580l) — 태그가 이상한 것도, 부름 수를 태운 것도 아니다.
         let got = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW);
         assert_eq!(why_of(&got), Some(Trouble::Offline), "{got:?}");
         // **못 들어도 도장은 찍힌다** — 그물 없는 기계가 부를 때마다 기다리지 않는다.

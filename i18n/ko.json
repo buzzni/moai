@@ -383,7 +383,7 @@
   "tui.version.unchecked.offline": "최신 확인 안 함 (네트워크 없음)",
   "tui.version.unchecked.timeout": "최신 확인 안 함 (타임아웃)",
   "tui.version.unchecked.rate_limited": "최신 확인 안 함 (요청 한도 초과)",
-  "tui.version.unchecked.http": "최신 확인 안 함 (서버가 거절)",
+  "tui.version.unchecked.http": "최신 확인 안 함 (서버 오류)",
   "tui.version.unchecked.tls": "최신 확인 안 함 (TLS 실패)",
   "tui.version.unchecked.garbled": "최신 확인 안 함 (응답을 못 읽음)",
   "tui.version.unchecked.odd_tag": "최신 확인 안 함 (태그 꼴이 아님)",

@@ -10,6 +10,32 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- The release check says *why* it could not ask. The version line still reads as
+  one of four, but the fourth now carries the reason in parentheses — no network,
+  timed out, rate limited, the server refused, TLS failed, unreadable answer, odd
+  tag, the call failed — because what a person can do about it differs per reason:
+  waiting fixes a rate limit, a proxy that swaps certificates never will. Nothing
+  is blocked and the exit code never changes.
+- `latest.toml` also records **where** the answer came from, and an answer is only
+  reused for the place it came from. Pointing `MOAI_API_URL` at a mirror once no
+  longer makes that mirror's tag stand as the real release for a day, and the
+  reverse. A file written before this key is read as before, and asked again once.
+- `check` under `[update]` is read in the same pass as the rest of your user
+  config, so a value that is not `true` or `false` now says so in the explorer's
+  notices instead of being ignored in silence. It still does not block anything,
+  and anything that is not `false` leaves the check on.
+- A stamp a little ahead of this machine's clock no longer forces a fresh ask.
+  Two machines sharing one config directory with clocks seconds apart made one of
+  them knock on GitHub every single run.
+
+### Fixed
+
+- The release check no longer follows a redirect down to plaintext `http`. A call
+  that starts on `https` is refused rather than downgraded, on every hop. A call
+  you pointed at a plaintext mirror yourself still works — that one is your choice.
+
 ## [0.1.1] - 2026-09-22
 
 ### Added

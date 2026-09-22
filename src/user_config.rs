@@ -1170,13 +1170,13 @@ impl Doc {
     }
 }
 
+// 새 판 묻기를 끄는 자리 — 이름은 `crate::latest` 한자리에 있다(moai-d74q). 두 벌로 적으면
+// 이름을 고치는 날 읽는 쪽만 따라간다.
+use crate::latest::{CHECK, UPDATE};
+
 /// 화면 언어가 사는 표(moai-slfv). **키 이름은 여기 하나다** — 그 탈을 펴는 쪽([`crate::view::problem`])
 /// 도 이것을 읽는다. 말묶음의 글에 박으면 번역마다 키 이름이 한 벌씩 서서, 키를 고치는 날 다섯
 /// 파일이 조용히 낡는다.
-/// 새 판 묻기를 끄는 자리 — 이름은 [`crate::latest`] 한자리에 있다(moai-d74q). 두 벌로 적으면
-/// 이름을 고치는 날 읽는 쪽만 따라간다.
-use crate::latest::{CHECK, UPDATE};
-
 pub const I18N: &str = "i18n";
 pub const LANG: &str = "lang";
 
