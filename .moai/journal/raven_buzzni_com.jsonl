@@ -597,3 +597,27 @@
 {"ts":"2026-09-22T05:20:02Z","id":"moai-b9jy.kl7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T05:40:43Z","id":"moai-4s7e","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈마다 에이전트가 느낀 난이도를 1~5 로 남긴다"}
 {"ts":"2026-09-22T05:40:44Z","id":"moai-wfup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-22 에 미리 재 봤다 — 지금 쌓인 것으로 이 이슈가 설 수 있다.\n\n- `model:` 줄이 있는 이슈 489개. 그중 343개는 `started_at`·`done_at` 이 다 있다\n- 등급별 걸린 시간(벽시계, 24시간 넘는 줄은 뺐다)\n\n      등급        줄    중앙값(분)      사분위      최대\n      low        17          40       3~90        245\n      medium     67          51      28~88        364\n      high      143          68      24~110       409\n      xhigh      24          77      25~119       359\n      max        92          76      51~103       396\n\n- 중앙값이 단조롭게 는다. 맡기기 전에 고른 등급이 실제 시간과 같은 방향을 가리킨다\n- **사분위 폭이 중앙값보다 넓다.** `high` 가 24~110분이고 최대 409분이다. 어림값을\n  낼 때 중앙값 하나로 내면 실제와 네 배 어긋난다 — 사분위를 함께 내거나 범위로 낸다\n- `max` 가 `xhigh` 보다 짧다. `max` 는 \"쓰기 경로를 건드렸다\" 는 뜻이지 \"더 어렵다\" 가\n  아니다. 등급으로 기간을 어림할 때 그 둘을 순서로 세우면 안 된다\n- **벽시계는 품이 아니다.** 창 셋이 같이 돌았고 사람 답을 기다린 시간과 리뷰가 돈\n  시간이 다 들어 있다. 낼 때 그 말을 함께 적는다\n- 이 표는 `moai show --all --json` 의 `work`·`started_at`·`done_at` 만으로 나온다.\n  새 필드가 없어도 선다"}
+{"ts":"2026-09-22T05:43:01Z","id":"moai-514e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 아직 못 보는 쓰기"}
+{"ts":"2026-09-22T05:43:01Z","id":"moai-lc0i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판 검사의 남은 결정"}
+{"ts":"2026-09-22T05:43:01Z","id":"moai-99yy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자리와 경로를 푸는 자의 남은 자리"}
+{"ts":"2026-09-22T05:43:01Z","id":"moai-9tlp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독과 리뷰 절차의 구멍"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-0dbr","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"io::Error 를 셋으로 가르는 자가 없다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-1w1n","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"view.rs 의 needless_update 하나가 clippy 를 계속 노랗게 둔다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-8ekb","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"cmd::show::one 이 인자 여덟이다 — clippy 가 잡는 셋째 자리"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-au2p","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"tests/cli.rs 의 Scratch::new 가 자리를 안 푼다 — 견주는 시험마다 손으로 푼다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-owvp","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"설정을 한 번만 읽는 것을 세는 시험"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-zvrh","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"전제를 세어 막는 대신 값이 바깥에 닿는가를 한 자로 잰다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-qacx","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"칸이 열 개 넘으면 done 을 숨길 길이 없다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-f73c","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"guard_tmux 가 한 판에 서너 번 도는데 답은 늘 Pass 다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-4y5w","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"올라가 잡았다는 알림이 가르치는 글에 없다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-cknq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"연습과 진짜가 크기 말고도 어긋난다 — 태그와 사람"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-3y1p","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 .gitattributes 의 같은 패턴을 갈지 않고 곁에 덧붙인다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-eyav","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Ctx::lang 이 MOAI_LANG 이 이겨도 설정 파일을 읽는다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-vp22","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":".moai 밖 거절이 --json 에서 여느 실패와 한 코드다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-81dd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"review 칸의 글리프를 » 로 바꾼다"}
+{"ts":"2026-09-22T05:43:47Z","id":"moai-1ue5","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"review 칸의 글자가 뜻과 어긋난다"}
+{"ts":"2026-09-22T05:43:54Z","id":"moai-0ysh","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 안팎의 자를 하나로 — gather 와 워크트리 없는 체크아웃"}
+{"ts":"2026-09-22T05:43:54Z","id":"moai-szek","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 자리를 재는 자를 하나로"}
+{"ts":"2026-09-22T05:43:54Z","id":"moai-c6z8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"defer 가 mv 의 묶음 뼈대를 베끼고 JSON 키가 갈라진다"}
+{"ts":"2026-09-22T05:43:54Z","id":"moai-ecvy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"본문의 굵게·기울임은 색을 끄면 흔적이 없다"}
+{"ts":"2026-09-22T05:43:54Z","id":"moai-uiyf","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"종류를 값 비교로 묻는 자리가 흩어져 컴파일러가 새 값을 안 잡는다"}
