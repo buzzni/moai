@@ -396,6 +396,12 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         // `moai mv` 라 실패해 `&&` 가 끊기는데, 여섯 낱말로 갈라 읽은 판은 그것을 집기로 세어 뒤의
         // 빈손 쓰기를 풀어 줬다. 주석 하나(`env -S '#c' sed -i …`)에 글이 통째로 비던 것도 여기다 —
         // env 는 주석을 버리고 피연산자를 그대로 돌린다.
+        // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
+        // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
+        if shape == Text::Joined {
+            let text = tail.join(" ");
+            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends });
+        }
         let split_out;
         let tail: &[String] = if shape == Text::Words {
             tail
@@ -2345,6 +2351,14 @@ enum Text {
     /// **버린 자리 인자는 글 안에서 `$1`·`$@` 로 닿는다**(moai-729n) — 낱말로 잇는 것이 틀렸을
     /// 뿐 닿을 수 없는 것이 아니다. 푸는 자가 없어 남겨 둔 자리고, `bash -c` 도 같다.
     Line,
+    /// **껍데기가 가른 낱말을 그대로 빈칸으로 잇는다**(`watch <명령…>`, moai-1b0d) — 도로
+    /// 감싸지 않는다. watch 는 argv 를 빈칸으로 이어 붙여 `sh -c` 에 넘기고 **따옴표를 안
+    /// 되살린다**([`Text::Words`] 와 갈리는 자리다). `eval` 의 글이 이 꼴이다.
+    ///
+    /// 2026-09-22 에 쟀다: `watch sh -c 'echo A B > /tmp/probe'` 는 probe 에 빈 줄을 남긴다 —
+    /// 따옴표가 되살아났다면 `A B` 가 적혔을 자리다. 도로 감싸는 쪽으로 읽으면 `watch '집기;
+    /// 쓰기'` 의 글이 낱말 하나로 굳어 그 쓰기를 아무 규칙도 못 본다.
+    Joined,
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
@@ -2461,6 +2475,14 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// **봤다는 것은 옵션을 읽는 그 자리에서 적는다**(`saw`) — 다 읽은 뒤 지나온 낱말을 다시
         /// 훑으면 스위치와 그 **값**이 안 갈린다(리뷰 moai-bujq.91c).
         With(&'static [&'static str]),
+        /// **이 스위치를 봤을 때만 명령이고, 아니면 셸에 넘기는 글이다** — `watch` 의 `-x` 다
+        /// (moai-1b0d). watch 는 `-x` 가 없으면 argv 를 빈칸으로 이어 붙여 `sh -c` 에 넘기고,
+        /// `-x` 가 서면 그 낱말들을 그대로 exec 한다. 2026-09-22 에 둘 다 쟀다.
+        ///
+        /// **[`With`](Runs::With) 와 뒤집힌 짝이다** — 저쪽은 안 보이면 명령이 아니고, 이쪽은
+        /// 안 보이면 글이다. 한 갈래로 묶으면 `su <사용자>` 의 뒤가 글이 되어, 사용자 이름이
+        /// 명령줄로 읽힌다.
+        Unless(&'static [&'static str]),
     }
     /// 표에 없어도 **값을 안 받는 깃발로 넘기는** 이름 — 감싸는 명령마다 적지 않는다.
     const COMMON: &[&str] = &["--debug", "--verbose"];
@@ -2658,6 +2680,90 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
+        },
+        // **뒤가 명령이 아니라 셸에 넘기는 글인 것 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c`
+        // 다. 표에 없어 `flock /tmp/l -c 'sed -i s/a/b/ src/x.rs'` 도 `watch -n 1 'sed -i …'` 도
+        // `script -c 'sed -i …' /dev/null` 도 빈손으로 규칙 2 를 지나갔다.
+        //
+        // **옵션 표는 2026-09-22 에 그 프로그램에게 물어 적었다**(`--help`). 값을 받는 옵션을
+        // 틀리게 적으면 그 값이 명령 자리로 읽혀 정당한 줄을 막는다.
+        //
+        // **flock 의 `-c` 는 자리 인자 뒤에서만 제 것이다** — 잠글 파일을 먼저 먹고, 그 뒤의
+        // `-c` 를 getopt 밖에서 제 손으로 본다. 쟀다: `flock -c 'echo hi' /tmp/lk` 는
+        // `invalid option -- 'c'` 로 거절한다(아래 `seen == w.args` 가 그 자리다).
+        Wrapper {
+            name: "flock",
+            takes: &["-w", "-E"],
+            long: &["--timeout", "--conflict-exit-code"],
+            free: &["--shared", "--exclusive", "--unlock", "--nonblock", "--close", "--no-fork", "--verbose"],
+            attach: &[],
+            // 잠글 파일(또는 파일 서술자 번호) 하나.
+            args: 1,
+            stops: &[],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &["-c", "--command"],
+            // `-c` 의 글은 셸의 명령줄 한 낱말이다 — `bash -c` 와 같다.
+            text: Text::Line,
+            runs: Runs::Always,
+            glued: true,
+            appends: false,
+        },
+        // `watch <명령…>` 은 **낱말을 그대로 이어** `sh -c` 에 넘긴다([`Text::Joined`]). 판 번호는
+        // 이 표에서 홀로 `-v` 다(`-V` 가 아니다) — [`PRINTS`] 에 없어 제 줄의 `stops` 로 든다.
+        Wrapper {
+            name: "watch",
+            takes: &["-n", "-q"],
+            long: &["--interval", "--equexit"],
+            free: &[
+                "--beep",
+                "--color",
+                "--no-color",
+                "--differences",
+                "--errexit",
+                "--chgexit",
+                "--precise",
+                "--no-rerun",
+                "--no-title",
+                "--no-wrap",
+                "--exec",
+            ],
+            // `-d[=<permanent>]` 는 값을 붙여서만 받는다.
+            attach: &["-d"],
+            args: 0,
+            stops: &["-v"],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Joined,
+            // `-x` 를 봤으면 그 낱말들을 그대로 exec 한다 — 셸을 안 지난다.
+            runs: Runs::Unless(&["-x", "--exec"]),
+            glued: false,
+            appends: true,
+        },
+        // `script [옵션] [파일]` — `-c` 가 없으면 사람이 쓸 셸을 띄울 뿐 아무 명령도 안 돌린다
+        // ([`Runs::Never`] 가 그 자리를 [`Wrapped::Stops`] 로 낸다).
+        Wrapper {
+            name: "script",
+            takes: &["-I", "-O", "-B", "-T", "-m", "-E", "-o"],
+            long: &["--log-in", "--log-out", "--log-io", "--log-timing", "--logging-format", "--echo", "--output-limit"],
+            free: &["--append", "--return", "--flush", "--force", "--quiet", "--timing"],
+            // `-t[<파일>]` 은 값을 붙여서만 받는다.
+            attach: &["-t"],
+            args: 0,
+            stops: &[],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &["-c", "--command"],
+            text: Text::Line,
+            // 뒤 낱말은 명령이 아니라 **기록 파일**이다. 쟀다: `script /dev/null -c 'echo hi'` 도
+            // `script -c 'echo hi' /dev/null` 도 같이 돈다 — 자리 인자를 지나서도 옵션을 읽는다.
+            runs: Runs::Never,
+            glued: true,
             appends: false,
         },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
@@ -2868,7 +2974,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 한 글자에 같은 답을 냈다.
     let mut saw = false;
     let flags = match w.runs {
-        Runs::With(f) => f,
+        Runs::With(f) | Runs::Unless(f) => f,
         _ => &[][..],
     };
     // **옵션과 피연산자를 섞어 읽는가** — `su`·`runuser` 는 getopt 를 `+` 없이 불러 GNU 가 argv 를
@@ -2984,6 +3090,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 .then_some(None)
                 .or_else(|| word.strip_prefix(f).filter(|r| r.starts_with('=')).map(|r| Some(r[1..].to_string())))
         }) {
+            // **제 자리 인자 앞에 선 글 스위치는 그 프로그램이 거절한다**(moai-1b0d) — flock 은
+            // 잠글 파일을 먼저 먹고 그 뒤의 `-c` 를 getopt 밖에서 제 손으로 본다. 2026-09-22 에
+            // 쟀다: `flock -c 'echo hi' /tmp/lk` 는 `invalid option -- 'c'` 다. 글로 읽던 판이라면
+            // 아무것도 안 도는 줄에서 쓰기를 지어내 막고, 집기를 지어내 뒤의 쓰기를 풀어 줬다.
+            // 자리 인자가 없는 감싸는 명령(`env`·`sudo`·`su`)에서는 늘 참이라 답이 안 바뀐다.
+            //
+            // **flock 이 제 손으로 보는 것은 글자째 그 낱말 하나다** — `--command=<글>` 처럼 값을
+            // 붙인 꼴은 그 견줌에 안 맞아 안 돈다. 멈추는 쪽이 그 답에 가깝다.
+            if seen < w.args || (w.args > 0 && glued.is_some()) {
+                return Some(Wrapped::Stops);
+            }
             if w.glued {
                 // **섞어 읽는 것은 곧장 안 낸다**(moai-729n) — 이 뒤에도 옵션과 피연산자가 선다.
                 if mixes {
@@ -3088,6 +3205,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // (`env -S`)은 남은 글자가 곧 글이라 옵션이 여기서 끝나고, 값 없는 깃발(`sudo -s`)은
             // 뭉치의 남은 글자도 스위치다 — `sudo -su 남 moai add x` 의 `u` 가 그렇다.
             if letter(hands, c) {
+                // 자리 인자 앞의 글 스위치는 위와 같이 멈춘다 — flock 은 그 줄을 거절한다.
+                // **뭉치로 선 것도 같다**: flock 이 제 손으로 보는 것은 글자째 `-c` 한 낱말뿐이라
+                // `flock /tmp/l -nc '<글>'` 도 안 돈다. 여기서 멈추는 쪽이 그 답에 가깝다.
+                if seen < w.args || (w.args > 0 && word.len() > 2) {
+                    return Some(Wrapped::Stops);
+                }
                 if w.glued {
                     let left = &word[at + c.len_utf8()..];
                     let glued = (!left.is_empty()).then(|| left.to_string());
@@ -3167,6 +3290,13 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     }
     if !alien && let Some(hands) = hands_at {
         return Some(hands);
+    }
+    // **`-x` 를 안 봤으면 옵션이 끝난 자리부터가 글이다**([`Runs::Unless`], moai-1b0d) — watch 는
+    // 그 낱말들을 빈칸으로 이어 `sh -c` 에 넘긴다. 봤으면 아래로 내려가 명령 자리로 선다.
+    // 뒤가 비면 watch 가 그 줄을 거절한다([`Wrapped::Stops`]).
+    if matches!(w.runs, Runs::Unless(_)) && !saw {
+        need!(rest.get(n));
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 그 낱말을 명령으로 읽지 않는다 —
     // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
@@ -7714,6 +7844,76 @@ mod tests {
             "겹마다 같은 글을 다시 읽는다 — {:?}",
             clock.elapsed()
         );
+    }
+
+    /// **뒤가 명령이 아니라 글인 감싸는 명령 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c` 다.
+    /// 표에 없어 `flock /tmp/l -c 'sed -i …'` 도 `watch -n 1 'sed -i …'` 도
+    /// `script -c 'sed -i …' /dev/null` 도 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **옵션 표와 차례는 2026-09-22 에 재서 적었다.** 세 줄이 저마다 다르다 — flock 은 잠글
+    /// 파일을 먼저 먹고 그 **뒤**의 `-c` 만 제 것으로 보고(앞에 서면 `invalid option -- 'c'`),
+    /// script 는 자리 인자를 지나서도 옵션을 읽으며, watch 는 `-x` 가 없으면 낱말을 **그대로 이어**
+    /// `sh -c` 에 넘긴다.
+    #[test]
+    fn three_more_wrappers_hand_a_string_to_a_shell() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "flock /tmp/l -c \"moai add '딴 일'\"",
+            "flock -n /tmp/l --command \"moai add '딴 일'\"",
+            "flock -w 5 /tmp/l -c \"moai add '딴 일'\"",
+            // 글이 아니라 argv 로 넘기는 꼴도 같은 줄이 본다.
+            "flock /tmp/l moai add '딴 일'",
+            "flock -n /tmp/l moai add '딴 일'",
+            "watch \"moai add '딴 일'\"",
+            "watch -n 1 \"moai add '딴 일'\"",
+            "watch -d -n 2 \"moai add '딴 일'\"",
+            // `-x` 는 셸을 안 지난다 — 그 낱말들이 곧 argv 다.
+            "watch -x moai add '딴 일'",
+            "script -c \"moai add '딴 일'\" /dev/null",
+            "script -q -c \"moai add '딴 일'\" /dev/null",
+            "script /dev/null -c \"moai add '딴 일'\"",
+            "script -a -T /tmp/t -c \"moai add '딴 일'\" /dev/null",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "넘긴 글을 아무도 안 읽었다 — {cmd}"
+            );
+        }
+        for cmd in [
+            "flock /tmp/l -c 'sed -i s/a/b/ src/x.rs'",
+            "flock /tmp/l sed -i s/a/b/ src/x.rs",
+            "watch -n 1 'sed -i s/a/b/ src/x.rs'",
+            "watch sed -i s/a/b/ src/x.rs",
+            "watch -x tee src/x.rs",
+            "script -c 'sed -i s/a/b/ src/x.rs' /dev/null",
+            "script -q -c 'tee src/x.rs' /dev/null",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "넘긴 글의 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **안 도는 줄에서 쓰기를 지어내지 않는다.**
+        for cmd in [
+            // flock 의 `-c` 는 잠글 파일 **뒤**에서만 제 것이다 — 앞에 서면 그 줄을 거절한다.
+            "flock -c 'sed -i s/a/b/ src/x.rs' /tmp/l",
+            "flock --command='sed -i s/a/b/ src/x.rs' /tmp/l",
+            // `-c` 가 없는 script 는 사람이 쓸 셸을 띄울 뿐이다.
+            "script /dev/null",
+            "script -q /dev/null",
+            // 판 번호는 이 표에서 홀로 `-v` 다.
+            "watch -v sed -i s/a/b/ src/x.rs",
+            // **watch 는 따옴표를 안 되살린다**(2026-09-22 에 쟀다) — 이어 붙인 글에서 `-c` 의
+            // 글은 `sed` 한 낱말이라 그 뒤는 자리 인자다. 도로 감싸는 쪽으로 읽으면 여기서
+            // 없는 쓰기를 지어내 막는다.
+            "watch sh -c 'sed -i s/a/b/ src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **그 글 안의 집기는 정말 집는다** — watch 는 그 글을 셸에 넘기니 `;` 뒤의 쓰기도 본다.
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let cmd = "watch 'moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs'";
+        assert_eq!(guard_writes(&held, &cfg(), &here(), root, root, cmd), Decision::Pass, "이어 붙인 글의 집기를 버렸다");
     }
 
     /// **셸을 여는 스위치가 넘긴 글도 명령이다**(moai-drli) — `env -S` 와 `sudo -s`.
