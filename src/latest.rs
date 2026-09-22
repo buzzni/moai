@@ -30,14 +30,6 @@
 //! **실패는 모두 같은 자리로 내려앉는다.** 네트워크가 없든, 느려서 [`TIMEOUT`] 을 넘든, 답이
 //! 깨진 JSON 이든, 태그가 `v1.2.3` 꼴이 아니든 [`Seen::Unasked`] 다 — 사람에게 보일 글은 "못
 //! 물었다" 하나고, 그 까닭을 넷으로 갈라 봤자 고칠 수 있는 것이 없다.
-// **이 파일의 값을 아직 아무도 안 그린다** — 판 줄에 얹는 일이 moai-3gia 고, 그 일이 쥔 파일
-// (`src/tui/draw.rs`)을 지금 옆 세션이 들고 있다. 그때 이 줄을 걷는다.
-//
-// 그래서 **지금 바이너리에는 `ureq` 가 안 들어 있다** — LTO 가 닿지 않는 이 모듈을 통째로
-// 걷는다(6,186,192바이트, 들이기 전과 같다). 판 줄이 이것을 부르는 날 드는 값을 재 두었다:
-// `main` 에서 한 번 부르게 하고 릴리스로 빌드하면 7,934,720바이트로, +1,748,528바이트다.
-// 15MB 예산의 53%다.
-#![allow(dead_code)]
 
 use crate::fail::R;
 use crate::store::write_atomic;
@@ -467,19 +459,32 @@ pub fn held(dir: &Path) -> Seen {
 /// 것은 "아무것도 막지 않는다" 이므로 [`std::thread::Builder`] 로 띄우고, 못 띄우면 보내는
 /// 쪽을 놓는다: 받는 쪽은 끊긴 것으로 읽고 [`held`] 가 준 값을 그대로 그린다.
 ///
-/// **부르는 쪽이 `JoinHandle` 을 들어야 한다.** 여기서는 안 돌려주지만, Rust 는 프로세스가 끝날
-/// 때 떼어 놓은 실을 안 기다린다 — [`refresh`] 는 도장을 **묻고 난 뒤에** 찍으므로, 사람이
-/// `moai tui` 를 열고 몇 초 만에 닫으면 그 판의 도장이 안 찍혀 [`WINDOW`] 가 영영 안 닫힌다.
-/// 탐색기의 다른 딴 실들이 `Option<(Receiver<…>, JoinHandle<()>)>` 를 함께 드는 까닭이 이것이고
-/// (`tui::mod` 의 `commits_job`·`pending`, `tui::layer` 의 `reading`), 한 판에 하나만 띄우는
-/// 것도 같은 자리에서 정해진다 — 프레임마다 띄우면 실과 소켓이 초당 서른씩 난다.
-pub fn spawn(dir: PathBuf, url: String, now: String, window: i64) -> std::sync::mpsc::Receiver<Seen> {
+/// **손잡이를 함께 돌려준다**(리뷰 7번). 탐색기의 다른 딴 실들이 `Option<(Receiver<…>,
+/// JoinHandle<()>)>` 를 함께 드는 것과 같은 꼴이다(`tui::mod` 의 `commits_job`·`pending`,
+/// `tui::layer` 의 `reading`) — 손잡이를 드는 쪽이 **한 판에 하나만** 띄우는 자리이기도 하다.
+/// 안 들면 프레임마다 띄워 실과 소켓이 초당 서른씩 난다.
+///
+/// **다만 끝에서 기다리지는 않는다.** 사람이 `moai tui` 를 열고 몇 초 만에 닫으면 그 판의
+/// 도장이 안 찍혀 창이 안 닫히는데([`refresh`] 는 도장을 묻고 난 뒤에 찍는다), 닫는 걸음을
+/// [`TIMEOUT`] 만큼 붙잡는 것이 더 나쁘다 — 잃는 것은 "한 번 더 묻는다" 뿐이다.
+///
+/// **못 띄우면 `None` 이다.** `std::thread::spawn` 은 OS 가 실을 못 내면 **부른 실에서**
+/// 패닉한다 — 그러면 이 기능 때문에 `moai tui` 가 뜨다 만다. 이 모듈이 내건 것은 "아무것도
+/// 막지 않는다" 이므로 [`std::thread::Builder`] 로 띄우고, 못 띄우면 부르는 쪽이 [`held`] 가
+/// 준 값을 그대로 그린다.
+pub fn spawn(dir: PathBuf, url: String, now: String, window: i64) -> Option<Job> {
     let (tx, rx) = std::sync::mpsc::channel();
-    let _ = std::thread::Builder::new().name("moai-latest".into()).spawn(move || {
-        let _ = tx.send(refresh(&dir, &url, &now, window));
-    });
-    rx
+    let handle = std::thread::Builder::new()
+        .name("moai-latest".into())
+        .spawn(move || {
+            let _ = tx.send(refresh(&dir, &url, &now, window));
+        })
+        .ok()?;
+    Some((rx, handle))
 }
+
+/// 도는 물음 하나 — 받는 쪽과 손잡이. 탐색기가 이 꼴 그대로 든다.
+pub type Job = (std::sync::mpsc::Receiver<Seen>, std::thread::JoinHandle<()>);
 
 #[cfg(test)]
 mod tests {
@@ -810,11 +815,13 @@ mod tests {
     fn the_thread_hands_the_answer_over() {
         let s = Scratch::new("latest-thread");
         let (url, handle) = server_once(r#"{"tag_name":"v9.9.9"}"#);
-        let rx = spawn(s.path().to_path_buf(), url, "2026-09-21T00:00:00Z".into(), WINDOW);
+        let (rx, job) =
+            spawn(s.path().to_path_buf(), url, "2026-09-21T00:00:00Z".into(), WINDOW).expect("실을 못 띄웠다");
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(20)).expect("답이 안 왔다"),
             Seen::Newer { tag: "v9.9.9".into() }
         );
+        let _ = job.join();
         let _ = handle.join();
     }
 

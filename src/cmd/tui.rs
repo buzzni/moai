@@ -108,7 +108,32 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
+}
+
+/// 새 판을 묻는 실을 띄운다 — **문을 지날 때만**(moai-3gia, 사용자 결정 2026-09-21).
+///
+/// 문은 넷이다([`crate::latest::gate`]) — 환경(`MOAI_NO_UPDATE_CHECK`), 설정(`[update] check`),
+/// `--json`, 그리고 사람이 보는 화면인가. 탐색기는 화면을 켜는 길이라 뒤의 둘은 거의 늘 참이지만,
+/// **묻는 쪽이 답을 내야** 한다는 계약은 여기서도 지킨다 — `gate` 가 인자를 갈라 받는 까닭이 그것이다.
+///
+/// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
+/// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
+/// 기능이 피하려던 바로 그 일이다.
+fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>) {
+    let Some(dir) = config.and_then(|p| p.parent()) else { return };
+    let off = crate::latest::gate(
+        |k| std::env::var_os(k),
+        crate::latest::config_says(config),
+        ctx.json,
+        crate::latest::on_screen(),
+    );
+    if off.is_some() {
+        return;
+    }
+    app.ask_latest(dir.to_path_buf(), crate::latest::url_from(|k| std::env::var_os(k)));
 }
 
 /// `.moai` 밖에서 부른 탐색기 — 등록한 프로젝트의 층.
@@ -190,6 +215,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
 }
 

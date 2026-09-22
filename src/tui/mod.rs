@@ -814,6 +814,12 @@ pub struct App {
     /// 스레드에서 짓고 있는 다시 읽기. 끝나면 [`App::follow`] 가 받아 들인다.
     /// 손잡이는 스레드가 죽었을 때 그 패닉을 루프로 되던지려고 든다.
     pending: Option<(std::sync::mpsc::Receiver<crate::fail::R<Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 지금 아는 판 소식(moai-3gia). 처음에는 **적어 둔 것**([`crate::latest::held`])이라 그물이
+    /// 없어도 곧바로 서고, 새로 물은 답이 오면 [`App::follow_latest`] 가 갈아 끼운다.
+    latest: crate::latest::Seen,
+    /// 새 판을 묻는 딴 실 — **한 판에 하나만 띄운다.** 손잡이를 드는 것이 그 하나를 세는 자다
+    /// ([`crate::latest::spawn`]). 끝에서 기다리지는 않는다.
+    latest_job: Option<crate::latest::Job>,
     /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
     /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
     chord: keys::Chord,
@@ -1305,6 +1311,8 @@ impl App {
             commits_job: None,
             commits_due: true,
             pending: None,
+            latest: crate::latest::Seen::Unasked,
+            latest_job: None,
             chord: keys::Chord::default(),
             discarded: Vec::new(),
             let_go: 0,
@@ -1841,6 +1849,7 @@ impl App {
         // 펼친 프로젝트의 줄도 스레드에서 온다(moai-12yx) — 요약과 따로 돈다.
         self.follow_site();
         self.follow_commits();
+        self.follow_latest();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1883,6 +1892,52 @@ impl App {
             });
             self.pending = Some((rx, handle));
         }
+    }
+
+    /// 새 판을 묻는 실을 띄운다(moai-3gia) — **부르는 쪽이 문을 지난 뒤에만 부른다**
+    /// ([`crate::latest::gate`]). 지금 부르는 자리는 `cmd::tui` 하나다.
+    ///
+    /// **여는 걸음에 한 번만 띄운다.** 그리는 걸음에서 부르면 프레임마다 실이 나고
+    /// (`version_said` 가 `model::actor` 를 안 부르는 것과 같은 까닭이다), 이미 도는 실이 있으면
+    /// 그것을 그대로 둔다. 창 안이면 실은 곧바로 적어 둔 답을 들고 돌아온다.
+    ///
+    /// **첫 값은 물어보기 전에 선다** — 적어 둔 답([`crate::latest::held`])이라 그물이 없어도
+    /// 판 줄이 곧바로 무언가를 말한다.
+    pub fn ask_latest(&mut self, dir: std::path::PathBuf, url: String) {
+        if self.latest_job.is_some() {
+            return;
+        }
+        self.latest = crate::latest::held(&dir);
+        let now = self.site.now.clone();
+        self.latest_job = crate::latest::spawn(dir, url, now, crate::latest::WINDOW);
+    }
+
+    /// 물으러 간 실이 답했으면 받는다. **못 받아도 아무 일도 안 난다** — 실이 죽었으면 끊긴
+    /// 것으로 읽고 이미 든 값(적어 둔 답)을 그대로 그린다. 커밋 표와 달리 패닉을 되던지지
+    /// 않는 것은, 이 실이 터미널을 건드리지 않고 화면 한 줄만 바꾸기 때문이다 — 되던지면
+    /// 그물 한 번 끊긴 것이 탐색기를 끝낸다.
+    fn follow_latest(&mut self) {
+        let Some((rx, _)) = &self.latest_job else { return };
+        match rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Ok(seen) => {
+                self.latest = seen;
+                self.latest_job = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.latest_job = None,
+        }
+    }
+
+    /// 지금 아는 판 소식. 그리는 쪽이 받아 쓴다.
+    pub fn latest(&self) -> &crate::latest::Seen {
+        &self.latest
+    }
+
+    /// 소식을 손으로 세운다 — **그림 시험이 넷을 재는 자리다.** 진짜 길은 [`App::ask_latest`] 가
+    /// 띄운 실이고, 그쪽은 그물을 타므로 그림 시험이 못 쓴다.
+    #[cfg(test)]
+    pub fn set_latest(&mut self, seen: crate::latest::Seen) {
+        self.latest = seen;
     }
 
     /// 새 커밋 표가 필요하면(`commits_due`) 짓는 스레드를 띄우고, 다 지었으면 받는다(moai-a4i0).
