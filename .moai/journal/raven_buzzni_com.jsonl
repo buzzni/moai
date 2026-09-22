@@ -680,3 +680,11 @@
 {"ts":"2026-09-22T05:50:03Z","id":"moai-ww2u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰가 도는 워크트리의 가지를 고치지 말라는 줄이 브리프에 없다 (moai-supervise 스킬)"}
 {"ts":"2026-09-22T05:50:03Z","id":"moai-ww2u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uvs9 에서 펼쳤다 — 리뷰가 도는 워크트리에서 가지를 고치면 --fix 가 고친 것이 날아간다"}
 {"ts":"2026-09-22T05:50:03Z","id":"moai-uvs9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9tlp 의 멤버 moai-ww2u 로 펼쳤다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-jkwe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이미 쓴 이슈의 용어를 용어표에 맞춘다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-rjn4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"치환 규칙과 미리 보기 도구를 만든다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-puea","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"뜻이 하나인 낱말을 고친다 — 그물·감싸는 명령·되돌이·겨룸·잰"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-xmmm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층·띄우다·심다 를 뜻에 맞게 고친다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-6tlw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판 을 뜻에 맞게 고친다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-lb9v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자리 를 뜻에 맞게 고친다"}
+{"ts":"2026-09-22T06:00:31Z","id":"moai-d89c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"용어표의 \"이미 쓴 글은 고치지 않는다\" 절을 다시 쓴다"}
+{"ts":"2026-09-22T06:01:17Z","id":"moai-rjn4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
