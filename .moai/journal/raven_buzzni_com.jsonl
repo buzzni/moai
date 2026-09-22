@@ -568,3 +568,9 @@
 {"ts":"2026-09-22T03:05:41Z","id":"moai-r9q8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.1.1 로 서고 CHANGELOG 의 [0.1.1] 절을 다시 썼다(7c89fe8, dd6b037). 태그와 푸시는 사용자 몫으로 남긴다."}
 {"ts":"2026-09-22T03:07:17Z","id":"moai-rapi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽을 닫을 때 그 에픽의 줄이 CHANGELOG 절에 섰는지 본다"}
 {"ts":"2026-09-22T04:49:29Z","id":"moai-v1hy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.2"}
+{"ts":"2026-09-22T04:58:35Z","id":"moai-b9jy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한국어 글의 기술 용어를 고정한다"}
+{"ts":"2026-09-22T04:58:35Z","id":"moai-gw5e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록의 한국어 절에 기술 용어 보존을 넣는다"}
+{"ts":"2026-09-22T04:58:35Z","id":"moai-iloh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이 저장소의 한국어 기술 용어표를 만든다"}
+{"ts":"2026-09-22T04:58:35Z","id":"moai-5nh9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 본문을 용어표에 맞게 다시 쓴다"}
+{"ts":"2026-09-22T04:58:35Z","id":"moai-y9kv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 한국어 알림에 용어 보존을 덧붙인다"}
+{"ts":"2026-09-22T04:59:00Z","id":"moai-iloh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
