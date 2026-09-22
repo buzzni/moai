@@ -754,3 +754,7 @@
 {"ts":"2026-09-22T06:40:29Z","id":"moai-kwnf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"다섯을 손으로 고쳤다. `\"이 감싸는 명령은 argv 를…\"` 둘과 `\"감싸는 명령이 아니다\"` 하나는\n`래퍼` 로, `\"열둘 중 아홉으로 잰 값\"` 둘은 `\"열둘 중 아홉을 측정한 값\"` 으로 갔다.\n`감싸는 명령`(받침 ㅇ)에서 `래퍼`(받침 없음)로 가며 조사도 함께 바꿨다 — `명령이` 는 `래퍼가` 다.\n\n**보호막은 넓히지 않았다.** 큰따옴표 안을 건드리지 않는 규칙이 `moai-b9jy`·`moai-puea` 가\n막은 낱말을 보기로 인용하는 것을 지켰다. 그 규칙이 지나쳤던 것은 이 다섯뿐이라 여기만 손으로\n골랐다. 규칙을 \"따옴표 안도 본다\" 로 바꿨으면 용어를 정하는 글 자신이 깨졌다.\n\n이제 `moai-b9jy`·`moai-jkwe` 의 멤버와 `moai-9xbq`(되부름) 말고는 옮긴 낱말이 한 자리도 없다."}
 {"ts":"2026-09-22T06:40:29Z","id":"moai-kwnf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 이슈 다섯의 한 구절씩)"}
 {"ts":"2026-09-22T06:40:29Z","id":"moai-kwnf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"큰따옴표 안 다섯 자리를 손으로 고쳤다. 보호막은 그대로 뒀다 — 그 규칙이 용어를 정하는 글 자신을 지킨다"}
+{"ts":"2026-09-22T06:46:09Z","id":"moai-t906","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T06:46:09Z","id":"moai-d74q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T06:46:09Z","id":"moai-dael","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T06:46:09Z","id":"moai-68b8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
