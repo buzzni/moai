@@ -574,3 +574,20 @@
 {"ts":"2026-09-22T04:58:35Z","id":"moai-5nh9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 본문을 용어표에 맞게 다시 쓴다"}
 {"ts":"2026-09-22T04:58:35Z","id":"moai-y9kv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 한국어 알림에 용어 보존을 덧붙인다"}
 {"ts":"2026-09-22T04:59:00Z","id":"moai-iloh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T05:01:36Z","id":"moai-6erh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`moai add --from` 이 `--milestone` 을 말없이 버린다"}
+{"ts":"2026-09-22T05:04:42Z","id":"moai-iloh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 용어표 초안은 스크래치패드의 _workspace/2026-09-22-001 에 있고 light 경로 윤문이 도는 중이다. 결과를 받아 docs/korean-terms.md 로 옮기고 커밋한다. CLAUDE.md 의 한국어 절과 README 의 Documentation 목록에는 이미 한 줄씩 넣었다. 워크트리는 .claude/worktrees/moai-iloh 다"}
+{"ts":"2026-09-22T05:09:13Z","id":"moai-iloh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 새 문서 하나와 한 줄짜리 링크 둘, 동작 변화 없음)"}
+{"ts":"2026-09-22T05:09:19Z","id":"moai-iloh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"docs/korean-terms.md 를 세 층으로 세웠다 — 옮기지 않는 이름, 표준 표기를 쓰는 용어, 이미 굳은 말. CLAUDE.md 의 한국어 절과 README 의 Documentation 목록이 이 표를 가리킨다"}
+{"ts":"2026-09-22T05:09:19Z","id":"moai-gw5e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T05:15:01Z","id":"moai-gw5e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — guide.rs 의 심는 글 하나, 딸린 스냅샷 셋이 함께 움직인다)"}
+{"ts":"2026-09-22T05:15:01Z","id":"moai-gw5e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"KOREAN 에 용어 보존 한 줄, KOREAN_DETAIL 에 첫 등장 병기 절차를 넣었다. AGENTS.md 와 .claude/moai-plugin 스냅샷을 함께 담았고 1824건 모두 통과했다"}
+{"ts":"2026-09-22T05:15:02Z","id":"moai-y9kv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T05:17:04Z","id":"moai-y9kv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (medium — 훅의 비추는 줄 하나와 그것을 매는 시험 하나)"}
+{"ts":"2026-09-22T05:17:04Z","id":"moai-y9kv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"알림 끝에 용어 보존 한 문장을 붙이고 the_korean_notice_asks_to_keep_the_terms 로 맸다. 막지 않는 것도 같은 시험이 맨다"}
+{"ts":"2026-09-22T05:17:05Z","id":"moai-5nh9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-pmhv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤이 언제까지인지, 얼마나 들었는지"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-tfcp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤에 시작과 종료 기한을 둔다"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-wfup","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫힌 멤버로 그 마일스톤에 든 시간을 잰다"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-nnal","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 둘이 겹쳐 도는 것을 비춘다"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-pmhv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-a0j9 에서 펼쳤다 — 마일스톤에 기한을 두고 든 시간을 멤버에서 잰다"}
+{"ts":"2026-09-22T05:18:39Z","id":"moai-a0j9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-pmhv 로 펼쳤다 (이슈 3건)"}
