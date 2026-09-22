@@ -429,6 +429,38 @@ fn handed_text(words: &[String]) -> Option<Handed> {
                 args: Vec::new(),
             });
         }
+        // **입력이 뒤에 붙는 꼴**([`Text::Feed`], moai-gxwh) — `parallel <명령…> ::: <입력…>` 이다.
+        // 낱말은 그대로 잇고(parallel 도 따옴표를 안 되살린다), `:::` 부터는 입력이라 끊는다.
+        //
+        // **그 안의 집기는 안 센다**(`appends`) — parallel 은 찾은 입력을 argv 뒤에 이어 붙인다.
+        // xargs 와 같은 자리고, 덧붙은 낱말 하나가 그 집기를 아무것도 안 옮기는 줄로 바꾼다.
+        if shape == Text::Feed {
+            // **`:::` 의 입력은 그 명령의 낱말이 된다** — `parallel sed -i s/a/b/ ::: src/x.rs` 는
+            // 정말 `sed -i s/a/b/ src/x.rs` 를 돌린다(2026-09-22 에 쟀다). 그래서 가름말만 걷고
+            // 그 뒤의 낱말은 잇는다 — 통째로 끊던 판은 정작 고쳐지는 파일을 잃었다.
+            //
+            // **`::::` 는 다르다** — 그 뒤는 입력이 아니라 입력이 **적힌 파일**이라, 이으면 아무도
+            // 안 고치는 파일을 고친다며 잘못 막는다. 그 안에 무엇이 적혔는지는 여기서 모른다.
+            let mut words: Vec<&str> = Vec::new();
+            let mut feeds = true;
+            for w in tail {
+                match w.as_str() {
+                    ":::" | ":::+" => feeds = true,
+                    "::::" | "::::+" => feeds = false,
+                    w if feeds => words.push(w),
+                    _ => {}
+                }
+            }
+            let text = words.join(" ");
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: true,
+                args: Vec::new(),
+            });
+        }
         // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
         // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
         if shape == Text::Joined {
@@ -2531,6 +2563,13 @@ enum Text {
     /// 따옴표가 되살아났다면 `A B` 가 적혔을 자리다. 도로 감싸는 쪽으로 읽으면 `watch '집기;
     /// 쓰기'` 의 글이 낱말 하나로 굳어 그 쓰기를 아무 규칙도 못 본다.
     Joined,
+    /// **입력이 뒤에 붙는 명령**(`parallel <명령…> ::: <입력…>`, moai-gxwh) — [`Text::Joined`] 와
+    /// 같이 낱말을 그대로 잇되, **`:::` 부터는 명령이 아니라 입력이라** 거기서 끊는다.
+    ///
+    /// 2026-09-22 에 쟀다: `parallel echo A B '>' /tmp/probe ::: x` 는 그 파일에 적고(따옴표가
+    /// 안 되살아난다), `parallel echo HI ::: A B` 는 `HI A`·`HI B` 를 찍는다(입력이 argv 뒤에
+    /// 붙는다). 안 끊으면 `:::` 이 경로로 읽혀 아무도 안 쓰는 파일을 쓴다며 잘못 막는다.
+    Feed,
     /// **술어 안에 선 명령들**(`find … -exec … \;`, moai-7kif) — [`exec_of`] 가 걷어 모은다.
     ///
     /// 한 줄에 여럿이 설 수 있어 자리 하나로는 못 든다. 걷은 무리를 `;` 로 이어 한 글로 낸다.
@@ -2693,6 +2732,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// **[`With`](Runs::With) 와 뒤집힌 짝이다** — 저쪽은 안 보이면 명령이 아니고, 이쪽은
         /// 안 보이면 글이다. 한 갈래로 묶으면 `su <사용자>` 의 뒤가 글이 되어, 사용자 이름이
         /// 명령줄로 읽힌다.
+        ///
+        /// **목록이 비면 늘 글이다**(moai-gxwh) — `parallel` 이 그 줄이다. 그 감싸는 명령에는
+        /// 뒤엣것을 셸 없이 돌리는 스위치가 아예 없다.
         Unless(&'static [&'static str]),
     }
     /// 표에 없어도 **값을 안 받는 깃발로 넘기는** 이름 — 감싸는 명령마다 적지 않는다.
@@ -2974,6 +3016,405 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // `script -c 'echo hi' /dev/null` 도 같이 돈다 — 자리 인자를 지나서도 옵션을 읽는다.
             runs: Runs::Never,
             glued: true,
+            appends: false,
+        },
+        // **`strace` 도 뒤의 명령을 돌린다**(moai-gxwh) — `strace -o /tmp/o sed -i s/a/b/ src/x.rs`
+        // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 옆의 `env`·`setsid` 와 같은 꼴이지만
+        // **값을 따로 받는 옵션이 열넷**이라 따로 재고 나서 적었다 — 하나만 틀리게 적어도 그 값이
+        // 명령 자리로 읽혀 정당한 줄을 막는다. 2026-09-22 에 `strace --help`(6.8) 로 걷었다.
+        //
+        // **`-p` 는 이미 도는 프로세스를 붙든다** — 그때는 뒤에 명령이 안 오니 멈춘다
+        // (`ionice -p` 와 같은 줄이다). 값을 받기도 하지만 멈추는 쪽이 먼저라 답이 같다.
+        //
+        // **값을 붙여서만 받는 긴 이름은 `free` 다**(`--daemonize[=…]`·`--quiet[=…]`처럼 대괄호가
+        // 붙은 것들) — 다음 낱말을 먹는 것으로 적으면 `strace --quiet sed -i …` 의 `sed` 를
+        // 값으로 삼켜 그 쓰기를 잃는다. 모르는 긴 이름은 그 줄이 안 도니 그대로 멈춘다.
+        Wrapper {
+            name: "strace",
+            takes: &["-a", "-b", "-e", "-o", "-s", "-E", "-P", "-I", "-S", "-U", "-X", "-O", "-u"],
+            long: &[
+                "--columns",
+                "--detach-on",
+                "--env",
+                "--user",
+                "--argv0",
+                "--interruptible",
+                "--trace",
+                "--signal",
+                "--status",
+                "--trace-fds",
+                "--trace-path",
+                "--abbrev",
+                "--verbose",
+                "--raw",
+                "--read",
+                "--write",
+                "--kvm",
+                "--output",
+                "--string-limit",
+                "--const-print-style",
+                "--summary-syscall-overhead",
+                "--summary-sort-by",
+                "--summary-columns",
+                "--stack-trace-frame-limit",
+                "--syscall-limit",
+                "--inject",
+                "--fault",
+            ],
+            free: &[
+                "--output-append-mode",
+                "--summary",
+                "--summary-only",
+                "--summary-wall-clock",
+                "--debug",
+                "--follow-forks",
+                "--output-separately",
+                "--instruction-pointer",
+                "--syscall-number",
+                "--no-abbrev",
+                "--successful-only",
+                "--failed-only",
+                "--seccomp-bpf",
+                "--kill-on-exit",
+                "--daemonize",
+                "--stack-trace",
+                "--relative-timestamps",
+                "--absolute-timestamps",
+                "--syscall-times",
+                "--strings-in-hex",
+                "--decode-fds",
+                "--decode-pids",
+                "--quiet",
+                "--tips",
+            ],
+            attach: &[],
+            args: 0,
+            stops: &["-p", "--attach"],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+            appends: false,
+        },
+        // **`parallel` 은 xargs 와 같은 자리다**(moai-gxwh) — `parallel sed -i s/a/b/ ::: src/x.rs`
+        // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 2026-09-22 에 GNU parallel 20231122 으로
+        // 재서 셋을 봤다.
+        //
+        // - **낱말을 그대로 이어 셸에 넘긴다** — `parallel echo A B '>' /tmp/probe ::: x` 가 그
+        //   파일에 적는다. 따옴표가 안 되살아나니 [`Text::Joined`] 와 같은 자고, 글 하나로 준
+        //   명령(`parallel 'echo … > f' ::: x`)도 같은 답이다
+        // - **입력을 argv 뒤에 붙인다** — `parallel echo HI ::: A B` 가 `HI A`·`HI B` 를 찍는다.
+        //   xargs 와 같아 집기 축을 끈다(`appends`)
+        // - **`:::` 부터는 명령이 아니라 입력이다** — 이어 붙이면 그 낱말이 경로로 읽혀, 아무도
+        //   안 쓰는 파일(`:::`)을 쓴다며 잘못 막는다([`Text::Feed`] 가 거기서 끊는다)
+        //
+        // **옵션 표는 그 스크립트에게 물어 적었다** — `/usr/bin/parallel` 의
+        // `options_completion_hash()` 가 GetOptions 에 그대로 넘기는 표고, `=s`·`=i`·`=f` 가 값을
+        // 따로 받는다는 뜻이다. 백 개가 넘어 손으로 고르면 틀리는 자리다. 모르는 긴 이름은 parallel
+        // 이 그 줄을 거절하니 그대로 멈춘다.
+        Wrapper {
+            name: "parallel",
+            takes: &[
+                "-B", "-C", "-D", "-E", "-H", "-I", "-J", "-L", "-N", "-P", "-U", "-W", "-a", "-d", "-j", "-n", "-s",
+            ],
+            long: &[
+                "--arg-file",
+                "--arg-file-sep",
+                "--arg-sep",
+                "--argfile",
+                "--argfilesep",
+                "--argsep",
+                "--basefile",
+                "--basenameextensionreplace",
+                "--basenamereplace",
+                "--bf",
+                "--bin",
+                "--block",
+                "--block-size",
+                "--block-timeout",
+                "--blocksize",
+                "--blocktimeout",
+                "--bner",
+                "--bnr",
+                "--bt",
+                "--col-sep",
+                "--colsep",
+                "--compressprogram",
+                "--ctag-string",
+                "--ctagstring",
+                "--debug",
+                "--decompressprogram",
+                "--delay",
+                "--delimiter",
+                "--dirnamereplace",
+                "--dnr",
+                "--env",
+                "--er",
+                "--extensionreplace",
+                "--filter",
+                "--group-by",
+                "--groupby",
+                "--header",
+                "--id",
+                "--jl",
+                "--joblog",
+                "--jobs",
+                "--linkinputsource",
+                "--load",
+                "--max-args",
+                "--max-chars",
+                "--max-procs",
+                "--max-replace-args",
+                "--maxargs",
+                "--maxchars",
+                "--maxprocs",
+                "--maxreplaceargs",
+                "--memfree",
+                "--memsuspend",
+                "--parens",
+                "--process-slot-var",
+                "--processslotvar",
+                "--profile",
+                "--recend",
+                "--recstart",
+                "--res",
+                "--result",
+                "--results",
+                "--retries",
+                "--return",
+                "--rsync-opts",
+                "--rsyncopts",
+                "--semaphore-name",
+                "--semaphore-timeout",
+                "--semaphorename",
+                "--semaphoretimeout",
+                "--seqreplace",
+                "--shard",
+                "--slf",
+                "--slotreplace",
+                "--sql",
+                "--sql-and-worker",
+                "--sql-master",
+                "--sql-worker",
+                "--sqlandworker",
+                "--sqlmaster",
+                "--sqlworker",
+                "--ssh",
+                "--ssh-delay",
+                "--sshdelay",
+                "--sshloginfile",
+                "--st",
+                "--tag-string",
+                "--tagstring",
+                "--tempdir",
+                "--template",
+                "--term-seq",
+                "--termseq",
+                "--tf",
+                "--timeout",
+                "--tmpdir",
+                "--tmpl",
+                "--total",
+                "--total-jobs",
+                "--totaljobs",
+                "--transfer-file",
+                "--transfer-files",
+                "--transferfile",
+                "--transferfiles",
+                "--trc",
+                "--usecompressprogram",
+                "--usedecompressprogram",
+                "--wd",
+                "--work-dir",
+                "--workdir",
+                "--xapplyinputsource",
+            ],
+            free: &[
+                "--bar",
+                "--bg",
+                "--cat",
+                "--cf",
+                "--cleanup",
+                "--color",
+                "--color-fail",
+                "--color-failed",
+                "--colorfail",
+                "--colorfailed",
+                "--colour",
+                "--colour-fail",
+                "--colour-failed",
+                "--colourfail",
+                "--colourfailed",
+                "--compress",
+                "--compress-program",
+                "--controlmaster",
+                "--csv",
+                "--ctag",
+                "--ctrl-c",
+                "--ctrlc",
+                "--decompress-program",
+                "--eta",
+                "--exit",
+                "--fg",
+                "--fifo",
+                "--files",
+                "--files0",
+                "--filter-host",
+                "--filter-hosts",
+                "--filterhosts",
+                "--gnu",
+                "--group",
+                "--hashbang",
+                "--help",
+                "--hgrp",
+                "--hostgroup",
+                "--hostgroups",
+                "--hostgrp",
+                "--interactive",
+                "--keep-order",
+                "--keeporder",
+                "--latest-line",
+                "--latestline",
+                "--lb",
+                "--line-buffer",
+                "--line-buffered",
+                "--linebuffer",
+                "--linebuffered",
+                "--link",
+                "--ll",
+                "--max-line-length-allowed",
+                "--maxlinelengthallowed",
+                "--nn",
+                "--no-ctrl-c",
+                "--no-ctrlc",
+                "--no-k",
+                "--no-keep-order",
+                "--no-notice",
+                "--no-run-if-empty",
+                "--noctrlc",
+                "--nok",
+                "--nokeeporder",
+                "--nonall",
+                "--nonotice",
+                "--norunifempty",
+                "--noswap",
+                "--null",
+                "--onall",
+                "--open-tty",
+                "--output-as-files",
+                "--output-as-files0",
+                "--outputasfiles",
+                "--outputasfiles0",
+                "--pipe",
+                "--pipe-part",
+                "--pipepart",
+                "--plus",
+                "--progress",
+                "--quote",
+                "--record-env",
+                "--recordenv",
+                "--regex",
+                "--regexp",
+                "--remove-rec-sep",
+                "--removerecsep",
+                "--resume",
+                "--resume-failed",
+                "--resumefailed",
+                "--retry-failed",
+                "--retryfailed",
+                "--round",
+                "--round-robin",
+                "--roundrobin",
+                "--rrs",
+                "--semaphore",
+                "--shebang",
+                "--shell-quote",
+                "--shell_quote",
+                "--shellquote",
+                "--show-limits",
+                "--showlimits",
+                "--shuf",
+                "--silent",
+                "--skip-first-line",
+                "--skipfirstline",
+                "--spreadstdin",
+                "--tag",
+                "--tee",
+                "--tmux",
+                "--tmux-pane",
+                "--tmuxpane",
+                "--tollef",
+                "--transfer",
+                "--tty",
+                "--ungroup",
+                "--use-compress-program",
+                "--use-cores-instead-of-threads",
+                "--use-cpus-instead-of-cores",
+                "--use-decompress-program",
+                "--use-sockets-instead-of-threads",
+                "--usecoresinsteadofthreads",
+                "--usecpusinsteadofcores",
+                "--usesocketsinsteadofthreads",
+                "--verbose",
+                "--version",
+                "--wait",
+                "--will-cite",
+                "--willcite",
+                "--xapply",
+                "--xargs",
+                "-0",
+                "-M",
+                "-T",
+                "-V",
+                "-X",
+                "-Y",
+                "-g",
+                "-h",
+                "-k",
+                "-m",
+                "-o",
+                "-p",
+                "-q",
+                "-r",
+                "-t",
+                "-u",
+                "-v",
+                "-x",
+            ],
+            attach: &[],
+            args: 0,
+            // **뒤의 명령을 아예 안 돌리는 스위치**(2026-09-22 에 쟀다) — 찍기만 하거나
+            // 돌릴 줄을 보여 주기만 한다. `--citation`·`--bibtex` 는 이 판이 모르는 이름이라
+            // 그 줄을 거절하고(같은 답이다), `--shell-completion` 은 값을 받아 완성 글을 찍는다.
+            stops: &[
+                "--bibtex",
+                "--citation",
+                "--dr",
+                "--dry-run",
+                "--dryrun",
+                "--embed",
+                "--number-of-cores",
+                "--number-of-cpus",
+                "--number-of-sockets",
+                "--number-of-threads",
+                "--numberofcores",
+                "--numberofcpus",
+                "--numberofsockets",
+                "--numberofthreads",
+                "--shell-completion",
+                "--shellcompletion",
+            ],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Feed,
+            // 명령으로 돌리는 스위치가 없다 — 뒤는 늘 글이다([`Runs::Unless`] 의 빈 목록).
+            runs: Runs::Unless(&[]),
+            glued: false,
             appends: false,
         },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
@@ -8108,6 +8549,73 @@ mod tests {
             "겹마다 같은 글을 다시 읽는다 — {:?}",
             clock.elapsed()
         );
+    }
+
+    /// **`parallel` 과 `strace` 도 뒤의 명령을 돌린다**(moai-gxwh) — 표에 없어
+    /// `parallel sed -i s/a/b/ ::: src/x.rs` 도 `strace -o /tmp/o sed -i s/a/b/ src/x.rs` 도
+    /// 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **둘 다 재고 나서 적었다**(2026-09-22, GNU parallel 20231122·strace 6.8) — 먼저 넣은 열넷
+    /// 가운데 이 둘만 남겨 둔 까닭이 옵션 표였다. strace 는 값을 따로 받는 짧은 옵션이 열넷이고,
+    /// parallel 은 옵션이 백 개가 넘어 손으로 고르면 틀린다. parallel 의 표는 그 스크립트의
+    /// `options_completion_hash()` 에서 읽었다 — GetOptions 가 그대로 쓰는 표다.
+    ///
+    /// **parallel 은 xargs 와 같은 자리다** — 낱말을 그대로 이어 셸에 넘기고(`parallel echo A B
+    /// '>' f ::: x` 가 그 파일에 적는다), 입력을 argv 뒤에 붙인다(`parallel echo HI ::: A B` 가
+    /// `HI A`·`HI B` 를 찍는다). 그래서 쓰기는 그대로 보고 집기는 안 센다.
+    #[test]
+    fn parallel_and_strace_are_measured_not_guessed() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let stands = |_: usize, _: &str| None;
+        for cmd in [
+            // `:::` 의 입력은 그 명령의 낱말이 된다 — 정작 고쳐지는 파일이 거기 선다.
+            "parallel sed -i s/a/b/ ::: src/x.rs",
+            "parallel -j 4 sed -i s/a/b/ ::: src/x.rs",
+            "parallel -j4 tee ::: src/x.rs",
+            "parallel --jobs 4 sed -i s/a/b/ ::: src/x.rs",
+            "parallel --keep-order sed -i s/a/b/ ::: src/x.rs",
+            // 글 하나로 준 명령도 같다 — parallel 이 셸에 넘긴다.
+            "parallel 'sed -i s/a/b/ src/x.rs' ::: x",
+            "parallel sed -i s/a/b/ {} ::: src/x.rs",
+            "strace sed -i s/a/b/ src/x.rs",
+            "strace -o /tmp/o sed -i s/a/b/ src/x.rs",
+            "strace -f -e trace=write tee src/x.rs",
+            "strace -s 200 -o /tmp/o tee src/x.rs",
+            "strace --output=/tmp/o sed -i s/a/b/ src/x.rs",
+            "strace --trace=write -c sed -i s/a/b/ src/x.rs",
+            // 값을 붙여서만 받는 긴 이름은 다음 낱말을 안 먹는다.
+            "strace --quiet sed -i s/a/b/ src/x.rs",
+            "strace --daemonize tee src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **안 도는 줄에서 쓰기를 지어내지 않는다.**
+        for cmd in [
+            // `-p` 는 이미 도는 프로세스를 붙든다 — 뒤에 명령이 안 온다.
+            "strace -p 1234 sed -i s/a/b/ src/x.rs",
+            // 돌릴 줄을 보여 주기만 하는 스위치와 찍기만 하는 스위치.
+            "parallel --dry-run sed -i s/a/b/ ::: src/x.rs",
+            "parallel --number-of-cores sed -i s/a/b/ ::: src/x.rs",
+            // `::::` 뒤는 입력이 아니라 입력이 **적힌 파일**이다 — 그 파일은 안 고쳐진다.
+            "parallel sed -i s/a/b/ {} :::: src/x.rs",
+            // 자리표는 어디인지 모른다.
+            "parallel echo {} ::: src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **parallel 의 집기는 안 센다** — 덧붙는 입력 하나가 그 줄을 아무것도 안 옮기는 줄로
+        // 바꾼다(xargs 와 같은 자리다). strace 는 argv 를 안 건드리니 그대로 센다.
+        for cmd in ["parallel moai mv t-1 in_progress --from todo ::: x", "parallel moai mv t-1 in_progress ::: x"] {
+            assert!(picked_ids(cmd, &cfg(), &|_| true, &stands).is_empty(), "덧붙는 입력으로 집기를 지어냈다 — {cmd}");
+        }
+        assert_eq!(picked_ids("strace -f moai mv t-1 in_progress --from todo", &cfg(), &|_| true, &stands), ["t-1"]);
+        // 규칙 1 은 둘 다 그대로 본다 — 그 줄은 정말 이슈를 세운다.
+        for cmd in ["parallel moai add '딴 일' ::: x", "strace -o /tmp/o moai add '딴 일'"] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "규칙 1 을 가렸다 — {cmd}");
+        }
     }
 
     /// **find 의 명령은 술어 안에 선다**(moai-7kif) — `find . -name '*.rs' -exec sed -i s/a/b/ {} \;`
