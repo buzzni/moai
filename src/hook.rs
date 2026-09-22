@@ -314,7 +314,9 @@ fn read_already(text: &str, eaten: &[String]) -> bool {
 fn handed_text(words: &[String]) -> Option<Handed> {
     // **한 번 훑어 명령 자리와 그 머리를 읽은 답을 함께 받는다**(moai-906o) — `wrapped` 를 여기서
     // 다시 부르던 판은 `command_of` 가 어느 낱말에서 멈췄나를 안 적힌 약속으로 이었다.
-    let Cmd { words: cmd, wrap } = command_at(words);
+    // **덧붙는 argv 는 여기서 안 본다**([`Cmd::appends`]) — 넘긴 글은 argv 의 **한 낱말**이라
+    // 뒤에 낱말이 더 붙어도 그 글 자체는 안 바뀐다. 그 낱말들은 대상 셸의 자리 인자로 갈 뿐이다.
+    let Cmd { words: cmd, wrap, .. } = command_at(words);
     let (head, rest) = cmd.split_first()?;
     // **감싸는 명령이 대상 셸에 그대로 넘긴 argv** — `su <사용자> -- -c '<글>'` 이다(moai-729n).
     // 글 하나가 아니라 셸의 명령줄이라 `bash …` 를 읽는 그 자가 읽는다.
@@ -2109,10 +2111,18 @@ struct Cmd<'a> {
     /// 까닭 둘([`PREFIXES`] 건너뛰기와 [`BUILTINS`] 지킴이)은 둘째 부름의 답과 안 맞아, 자르는
     /// 자리를 손보면 `Wrapped::Hands` 가 조용히 안 서는데 컴파일은 됐다.
     wrap: Option<Wrapped>,
+    /// **여기까지 오며 지난 감싸는 명령이 argv 뒤에 제 입력을 덧붙이는가**(moai-ctn2) —
+    /// `xargs` 다([`Wrapper::appends`]). 참이면 `words` 는 **실제로 도는 argv 가 아니다**: 뒤에
+    /// 파이프 저편의 낱말이 더 붙는다.
+    ///
+    /// **머리 낱말의 `wrap` 으로는 못 읽는다** — 덧붙이는 자는 지나온 바깥 감싸는 명령이고,
+    /// 여기 선 `wrap` 은 멈춘 그 자리의 것이다. 걷는 동안 적어야 안 흘린다.
+    appends: bool,
 }
 
 fn command_at(words: &[String]) -> Cmd<'_> {
     let mut at = 0;
+    let mut appends = false;
     loop {
         let rest = &words[at..];
         let lead = rest
@@ -2121,15 +2131,20 @@ fn command_at(words: &[String]) -> Cmd<'_> {
             .count();
         at += lead;
         let Some(head) = words.get(at).map(|w| basename(w)) else {
-            return Cmd { words: &words[at..], wrap: None };
+            return Cmd { words: &words[at..], wrap: None, appends };
         };
         let wrap = wrapped(head, &words[at + 1..]);
-        let Some(Wrapped::Runs(skip)) = wrap else { return Cmd { words: &words[at..], wrap } };
+        let Some(Wrapped::Runs { skip, appends: grows }) = wrap else {
+            return Cmd { words: &words[at..], wrap, appends };
+        };
         let next = at + 1 + skip;
         // 감싸는 명령 뒤가 붙박이면 그 줄은 그냥 진다 — 넘지 않는다([`BUILTINS`]).
         if words.get(next).map(|w| basename(w)).is_some_and(|h| BUILTINS.contains(&h)) {
-            return Cmd { words: &words[at..], wrap };
+            return Cmd { words: &words[at..], wrap, appends };
         }
+        // **넘어간 뒤에 적는다** — 넘은 그 감싸는 명령이 덧붙이는 자다. 붙박이에서 돌아설 때는
+        // 그 줄이 아예 안 도니 안 적는다.
+        appends |= grows;
         at = next;
     }
 }
@@ -2149,7 +2164,12 @@ const BUILTINS: &[&str] = &[
 /// [`wrapped`] 가 감싸는 명령 하나를 읽은 결과 — 명령 자리가 어디인가, 아니면 왜 못 가는가.
 enum Wrapped {
     /// 뒤 낱말 이만큼을 넘으면 **명령 자리**다.
-    Runs(usize),
+    Runs {
+        /// 넘을 낱말 수.
+        skip: usize,
+        /// 그 명령의 argv 뒤에 **제 입력이 더 붙는가**([`Wrapper::appends`], moai-ctn2).
+        appends: bool,
+    },
     /// 뒤에 오는 것이 명령이 아니라 **셸에 넘기는 글**이다(moai-drli) — `env -S`·`sudo -s`·`su -c`.
     Hands {
         /// 뒤 낱말 이만큼을 넘은 자리부터가 글이다.
@@ -2268,6 +2288,16 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
         /// `sudo -s -u 남 moai add x` 와 `sudo -su 남 moai add x` 의 글은 `moai add x` 지 `-u 남 …`
         /// 이 아니다(둘 다 규칙이 통째로 샜다).
         glued: bool,
+        /// **제 입력을 argv 뒤에 덧붙이는가**(moai-ctn2) — `xargs` 다. 보이는 argv 가 도는 argv 가
+        /// 아니고, 그 낱말은 파이프 저편에서 오니 여기서 모른다.
+        ///
+        /// **집기 축만 끈다**([`picks_up`]·[`picked_in`]). 쓰기 축은 그대로다 — 덧붙는 낱말은
+        /// 경로를 **늘릴** 뿐이라 보이는 쓰기는 정말 돈다. 집기는 거꾸로다: 덧붙은 낱말 하나가
+        /// 그 집기를 아무것도 안 옮기는 줄로 바꾸는데(`echo --help | xargs moai mv t-1 in_progress
+        /// --from todo` 는 실제로 `… --from todo --help` 라 도움말만 찍는다) 장부에는 t-1 이
+        /// 적힌다. 그 한 줄이 뒤의 빈손 쓰기를 풀어 주고, `Away::picked` 로 흘러 남이 쥔 줄을
+        /// 제 것으로 붙든다(리뷰 moai-r3l9.lmy).
+        appends: bool,
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
     ///
@@ -2311,6 +2341,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Split,
             runs: Runs::Always,
             glued: true,
+            appends: false,
         },
         Wrapper {
             name: "timeout",
@@ -2325,6 +2356,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         Wrapper {
             name: "nice",
@@ -2339,6 +2371,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         Wrapper {
             name: "stdbuf",
@@ -2353,6 +2386,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // **앞에 붙여 뒤의 명령을 돌리는 것이 더 있다**(moai-0fzj) — 옆의 `stdbuf`·`nice` 와 같은
         // 꼴인데 표에 없어 `setsid sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
@@ -2380,6 +2414,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         Wrapper {
             name: "ionice",
@@ -2395,6 +2430,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // `chrt [옵션] <우선순위> <명령…>` — 우선순위가 제 자리 인자 하나다(`timeout 5 …` 와 같다).
         Wrapper {
@@ -2420,6 +2456,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // `taskset [옵션] <마스크|cpu 목록> <명령…>` — 마스크가 제 자리 인자 하나다.
         Wrapper {
@@ -2435,6 +2472,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // expect 의 `unbuffer [-p] <명령…>` — 값을 받는 옵션이 아예 없다.
         Wrapper {
@@ -2450,6 +2488,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // `proxychains [-q] [-f <설정>] <명령…>`. **두 이름을 다 적는다** — proxychains-ng 가 까는
         // 실행 파일은 `proxychains4` 고 `proxychains` 는 그리로 가는 링크다. [`basename`] 이 내는
@@ -2468,6 +2507,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         Wrapper {
             name: "proxychains4",
@@ -2482,6 +2522,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
         // 표에 없어 `echo x | xargs sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
@@ -2523,6 +2564,8 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            // 표에서 **혼자 참인 줄이다**(moai-ctn2) — 읽은 낱말 뒤에 제 입력이 더 붙는다.
+            appends: true,
         },
         Wrapper {
             name: "sudo",
@@ -2570,6 +2613,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // `doas -C <설정>` 은 규칙을 시험해 보고 찍기만 한다 — 뒤의 명령을 안 돌린다.
         // **`-s` 도 같다**(2026-09-20 사용자 결정, 리뷰 moai-jlon.yeg 6번) — OpenBSD doas 는 `-s` 에
@@ -2589,6 +2633,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Words,
             runs: Runs::Always,
             glued: false,
+            appends: false,
         },
         // **`su -c '<글>'` 과 `runuser -c` 는 `bash -c` 와 같은 꼴이다**(moai-qqg2) — 표에 없어
         // 통째로 안 보이던 자리다. `su -c 'sed -i s/a/b/ src/x.rs'` 는 정말 그 파일을 고치는데
@@ -2621,6 +2666,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             text: Text::Line,
             runs: Runs::Never,
             glued: true,
+            appends: false,
         },
         Wrapper {
             name: "runuser",
@@ -2637,6 +2683,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             // sed -i …` 는 정말 그 파일을 고친다. 그 스위치가 없으면 뒤 낱말은 사용자다.
             runs: Runs::With(&["-u", "--user"]),
             glued: true,
+            appends: false,
         },
     ];
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
@@ -2928,7 +2975,7 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
     let at = ops.first().copied().unwrap_or(n);
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
     need!(rest.get(at));
-    Some(Wrapped::Runs(at))
+    Some(Wrapped::Runs { skip: at, appends: w.appends })
 }
 
 fn basename(word: &str) -> &str {
@@ -2950,8 +2997,19 @@ fn nowhere(d: &str) -> bool {
 /// `echo moai add hello` 를 생성으로 보아 막았고, 무엇보다 리뷰 글을 담은
 /// heredoc 을 막았다 — 규칙이 제가 시킨 일을 막는 자리가 또 나온 것이다.
 fn moai_args(seg: &[String]) -> Option<&[String]> {
-    let (head, rest) = command_of(seg).split_first()?;
-    (basename(head) == "moai").then_some(rest)
+    moai_call(seg).map(|(args, _)| args)
+}
+
+/// [`moai_args`] 와 같은 물음에, **그 argv 가 뒤로 자라는가**를 함께 낸다([`Cmd::appends`],
+/// moai-ctn2).
+///
+/// **집기를 세는 둘만 이것을 부른다**([`picks_up`]·[`picked_in`]). 다른 자리는 자라도 답이
+/// 안 바뀐다 — 규칙 1 은 `ls | xargs moai add x` 가 정말 이슈를 세우니 그대로 막고, 쓰기는
+/// 덧붙는 낱말이 경로를 늘릴 뿐이라 보이는 것이 정말 돈다.
+fn moai_call(seg: &[String]) -> Option<(&[String], bool)> {
+    let Cmd { words, appends, .. } = command_at(seg);
+    let (head, rest) = words.split_first()?;
+    (basename(head) == "moai").then_some((rest, appends))
 }
 
 /// 값을 받는 플래그 — 그 값은 자리 인자가 아니다. 전역 플래그(`-C 경로`·
@@ -3388,7 +3446,10 @@ pub fn picked_in(
         let Some(sure) = counted.get(k).copied().flatten() else {
             continue;
         };
-        let Some(args) = moai_args(seg) else { continue };
+        // **argv 가 뒤로 자라면 이 세션의 집기로 안 적는다**(moai-ctn2) — [`picks_up`] 과 같은
+        // 까닭이고 같은 답이어야 한다. 여기만 적으면 규칙 2 가 안 센 집기를 장부가 들고, 그것이
+        // `Away::picked` 로 흘러 남이 쥔 줄을 제 것으로 붙든다.
+        let Some((args, _)) = moai_call(seg).filter(|&(_, grows)| !grows) else { continue };
         let seen = flag_values(args, &["--from"]).pop();
         let verbs = positionals(args);
         let Some((_, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
@@ -5144,7 +5205,13 @@ pub fn spells_dir(line: &Line<'_>) -> Vec<bool> {
 /// 이 토막이 **하나를 집는가** — `moai mv <id>… <칸>` 의 칸이 벌여 놓는 칸이다.
 /// `report::wip` 와 같은 셈이다: 설정이 아는 칸 중 첫 칸도 끝난 칸도 아닌 것.
 fn picks_up(seg: &[String], cfg: &Config) -> bool {
-    let Some(args) = moai_args(seg) else { return false };
+    let Some((args, appends)) = moai_call(seg) else { return false };
+    // **argv 가 뒤로 자라면 집기로 안 센다**(moai-ctn2) — `xargs` 가 덧붙이는 낱말 하나가 이 줄을
+    // 아무것도 안 옮기는 줄로 바꿀 수 있는데, 그 낱말은 파이프 저편에 있어 여기서 못 본다.
+    // 지어낸 집기는 뒤의 빈손 쓰기를 풀어 준다.
+    if appends {
+        return false;
+    }
     // 도움말은 아무것도 안 옮기고 0 으로 끝난다 — `mv … --help && sed -i …` 는 빈손으로 쓴다.
     if asks_help(args) {
         return false;
@@ -6855,6 +6922,64 @@ mod tests {
         assert_eq!(command_of(&["env".to_string()]).first().map(String::as_str), Some("env"));
     }
 
+    /// **`xargs` 가 덧붙인 argv 로 집기를 지어내지 않는다**(moai-ctn2) — xargs 는 제 입력을 argv
+    /// **뒤에** 잇는다. 보이는 낱말이 도는 낱말의 전부가 아니라, `echo --help | xargs moai mv t-1
+    /// in_progress --from todo` 는 실제로 `… --from todo --help` 라 아무것도 안 옮기는데 장부에는
+    /// t-1 이 적혔다. 그 지어낸 집기가 뒤의 빈손 쓰기를 풀어 주고, `Away::picked` 로 흘러 남이 쥔
+    /// 줄을 제 것으로 붙든다(리뷰 moai-r3l9.lmy).
+    ///
+    /// **두 축이 반대로 선다.** 집기는 덧붙은 낱말 하나에 **없어질** 수 있어 안 세고, 쓰기는
+    /// 덧붙는 낱말이 경로를 **늘릴** 뿐이라 보이는 것이 정말 돈다. 규칙 1 도 그대로다 —
+    /// `ls | xargs moai add x` 는 정말 이슈를 세운다.
+    #[test]
+    fn xargs_does_not_invent_a_pick_from_argv_it_will_grow() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        let stands = |_: usize, _: &str| None;
+        // **장부에 안 적는다.**
+        for cmd in [
+            "echo --help | xargs moai mv t-1 in_progress --from todo",
+            "ls | xargs moai mv t-1 in_progress",
+            "cat ids | xargs -n 1 moai mv t-1 in_progress",
+            // 겹쳐 감싸도 덧붙임은 안쪽까지 따라간다.
+            "ls | sudo xargs env moai mv t-1 in_progress",
+        ] {
+            assert!(
+                picked_ids(cmd, &cfg(), &|_| true, &stands).is_empty(),
+                "덧붙는 argv 로 집기를 지어내 장부에 적었다 — {cmd}"
+            );
+        }
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — 두 축이 같은 답이어야 한다. **빈손으로
+        // 묻는다**(`&[]`): 쥔 것이 있으면 규칙 2 가 그것으로 지나가 이 단언이 헛으로 초록이 된다.
+        for cmd in [
+            "echo --help | xargs moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs",
+            "ls | xargs moai mv t-1 in_progress && tee src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "지어낸 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
+        }
+        // **xargs 를 안 지난 같은 줄은 그대로 집는다** — 끈 것이 덧붙임뿐임을 여기가 지킨다.
+        for cmd in ["moai mv t-1 in_progress --from todo", "env sudo moai mv t-1 in_progress"] {
+            assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "덧붙지도 않는 집기를 버렸다 — {cmd}");
+        }
+        assert_eq!(
+            guard_writes(&[], &cfg(), &here(), root, root, "moai mv t-1 in_progress && sed -i s/a/b/ src/x.rs"),
+            Decision::Pass,
+            "덧붙지도 않는 집기를 규칙 2 가 안 세었다",
+        );
+        // **쓰기 축은 그대로 본다** — 덧붙는 낱말은 경로를 늘릴 뿐이다.
+        for cmd in ["echo x | xargs sed -i s/a/b/ src/x.rs", "ls | xargs -n 1 tee src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "덧붙임이 쓰기 축까지 껐다 — {cmd}");
+        }
+        // **규칙 1 도 그대로다** — 덧붙어도 그 줄은 정말 이슈를 세운다.
+        for cmd in ["ls | xargs moai add '딴 일'", "ls | xargs -n 1 moai add '딴 일'"] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "덧붙임이 규칙 1 까지 껐다 — {cmd}"
+            );
+        }
+    }
 
     /// **셸에 넘긴 글은 명령이다**(moai-455j) — `bash -c '…'`·`eval '…'` 의 글을 렉서가 다시 읽는다.
     /// 안 읽던 판은 그 한 낱말 뒤에서 규칙 1~2 가 통째로 샜다. 끝없이 파고들지는 않는다.
