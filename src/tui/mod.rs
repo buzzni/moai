@@ -7921,7 +7921,7 @@ mod tests {
     /// 닫으면 맞출 때마다 메뉴를 다시 열어야 한다. 나가는 것은 `ESC` 나 연 키 `SPC` 다.
     ///
     /// **켜지도 끄지도 않는다** — 상세가 숨어 있으면 이 키는 아예 안 돈다(`Browse::enabled`).
-    /// 켜는 것은 `SPC v p` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
+    /// 켜는 것은 `SPC v d` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
     #[test]
     fn spc_o_d_turns_the_detail_pane_round_without_closing_the_menu() {
         use view::DetailAt;
@@ -8001,7 +8001,7 @@ mod tests {
         assert!(!super::menu::open(&a.chord), "SPC 가 메뉴를 안 닫았다");
 
         // **숨긴 상세의 자리는 안 돈다** — 눌러도 아무 일이 없는 키는 메뉴에도 안 선다.
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         assert!(!a.detail_open);
         let before = a.detail_at;
         a.hit("SPC o d Esc");
@@ -8083,9 +8083,9 @@ mod tests {
         a.hit("SPC s u Esc");
         a.hit("SPC c a Esc");
         a.hit("SPC c i Esc");
-        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v p`)과 **따로** 적힌다.
+        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v d`)과 **따로** 적힌다.
         a.hit("SPC o d Esc");
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
         assert!(text.contains("detail_at = \"bottom\""), "상세 칸의 자리가 설정에 안 적혔다 — {text}");

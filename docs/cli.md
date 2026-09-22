@@ -1394,7 +1394,7 @@ Options:
     SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
-    SPC v p  detail pane [shown/hidden]
+    SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
@@ -1409,7 +1409,7 @@ Options:
     SPC m a  everything unread   SPC m g  every member of this group
   Options — how this screen draws what stands, not which rows stand:
     SPC o d  detail pane goes right, bottom, left, top — press again to turn
-             it. Whether it stands at all is SPC v p
+             it. Whether it stands at all is SPC v d
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json

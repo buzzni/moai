@@ -350,9 +350,10 @@ mod tests {
         let columns: Vec<String> = ["todo", "in_progress", "done"].map(String::from).to_vec();
         let c = Ctx { columns: 3, hidden: 0b100, ..inside() };
         let items = entries(&[k(' '), k('v')], &c, &columns);
-        // **`d` 가 없다**(moai-h6z3) — done 은 제 글자를 안 갖고 번호가 센다. 한때 `d` 와 `3` 이
-        // 같은 설정을 켜고 꺼 이 목록에 `done [숨김]` 이 두 줄 섰다.
-        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "p", "w", "r"]);
+        // **`d` 는 done 이 아니다**(moai-h6z3·moai-mxvn) — done 은 제 글자를 안 갖고 번호가 세고,
+        // 비운 그 글자는 상세 칸이 받았다. 한때 `d` 와 `3` 이 같은 설정을 켜고 꺼 이 목록에
+        // `done [숨김]` 이 두 줄 섰다.
+        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "d", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
         assert_eq!(text[..5], ["미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
         let mut ch = Chord::default();
@@ -360,7 +361,8 @@ mod tests {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
         }
         let on_layer = entries(&[k(' '), k('v')], &layer(), &columns);
-        assert!(keys_of(&on_layer).iter().all(|k| !["d", "l", "a", "1"].contains(k)), "층에서 줄 보기가 섰다");
+        // `d` 는 여기 없다 — 층에도 서는 상세 칸이다(moai-mxvn). 줄 보기만 잰다.
+        assert!(keys_of(&on_layer).iter().all(|k| !["l", "a", "1"].contains(k)), "층에서 줄 보기가 섰다");
         assert!(keys_of(&entries(&[k(' ')], &layer(), &columns)).iter().all(|k| *k != "s"), "층에서 정렬이 섰다");
     }
 
@@ -454,7 +456,7 @@ mod tests {
             ("pd", Browse::Unregister, layer()),
             ("vw", Browse::Worktree, inside()),
             ("vr", Browse::Raw, inside()),
-            ("vp", Browse::Detail, inside()),
+            ("vd", Browse::Detail, inside()),
             // done 은 번호로 선다(moai-h6z3) — 설정의 셋째 칸이 `done` 이다.
             ("v3", Browse::Column(2), Ctx { columns: 3, ..inside() }),
             ("vl", Browse::Deferred, inside()),
@@ -520,7 +522,7 @@ mod tests {
         for p in ["", "p", "m"] {
             assert!(!waits(&path(p), &c), "SPC {p} 에 토글이 없는데 기다린다");
         }
-        // **켜진 것만 센다** — 층에서는 줄 보기·정렬·열이 다 꺼져, 상세 칸(`p`)이 남은 `SPC v` 만 기다린다.
+        // **켜진 것만 센다** — 층에서는 줄 보기·정렬·열이 다 꺼져, 상세 칸(`d`)이 남은 `SPC v` 만 기다린다.
         assert!(waits(&path("v"), &layer()), "층의 상세 칸 토글을 안 센다");
         for p in ["", "c", "s", "p", "m"] {
             assert!(!waits(&path(p), &layer()), "층에서 안 선 항목으로 SPC {p} 가 기다린다");
@@ -541,7 +543,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "p", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "d", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -571,9 +573,9 @@ mod tests {
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
-        // 층에서도 상세 칸은 있다 — 숨기기(`p`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
+        // 층에서도 상세 칸은 있다 — 숨기기(`d`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
         // 보기(`w`)는 빠진다.
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["p", "r"], "층에서 워크트리나 줄 보기가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["d", "r"], "층에서 워크트리나 줄 보기가 섰다");
 
         let mut ch = Chord::default();
         for x in [' ', 'v', 'w'] {
@@ -594,7 +596,7 @@ mod tests {
         let states = |c: Ctx| -> Vec<Option<&'static str>> {
             entries(&[k(' '), k('v')], &c, &[])
                 .iter()
-                .filter(|e| ["p", "w", "r"].contains(&e.key.as_str()))
+                .filter(|e| ["d", "w", "r"].contains(&e.key.as_str()))
                 .map(|e| e.state)
                 .collect()
         };
@@ -606,7 +608,7 @@ mod tests {
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["l", "a", "p", "w"]);
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["l", "a", "d", "w"]);
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

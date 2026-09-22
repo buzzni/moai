@@ -4068,7 +4068,7 @@ pub(super) mod tests {
         assert!(!row.contains(style::BRANCH_GLYPH), "닫힌 줄에 옛 가지 표시가 섰다 — {row:?}");
     }
 
-    /// **`SPC v p` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
+    /// **`SPC v d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
     /// 포커스가 상세에 남으면 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다.
     #[test]
     fn the_detail_pane_hides_and_the_list_takes_the_width() {
@@ -4078,9 +4078,9 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Detail);
 
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         let lines = render(&mut a, 100, 12);
-        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v p 가 상세를 안 숨겼다\n{}", lines.join("\n"));
+        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v d 가 상세를 안 숨겼다\n{}", lines.join("\n"));
         assert_eq!(a.focus, Pane::Explorer, "안 보이는 칸에 포커스가 남았다");
         let border = lines.iter().find(|l| l.contains('┓')).expect("목록 테두리가 없다");
         assert_eq!(crate::text::width(border), 100, "목록이 폭을 다 안 썼다 — {border:?}");
@@ -4088,7 +4088,7 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Explorer);
 
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
     }
 
@@ -6894,8 +6894,11 @@ pub(super) mod tests {
         );
         // **done 은 번호 줄로만 선다**(moai-h6z3) — 옛 `d : done` 과 `4 : done` 이 한 목록에 나란히
         // 서서 같은 설정을 켜고 껐다.
-        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
-        assert!(!screen.contains("d : done"), "걷은 `SPC v d` 가 메뉴에 남았다\n{screen}");
+        // 상세 칸은 `d` 다(moai-mxvn) — done 이 내놓은 글자라, `d : done` 과 겹치지 않는 것을
+        // 아래 줄이 함께 잰다.
+        assert!(screen.contains("d : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
+        assert!(!screen.contains("d : done"), "걷은 `SPC v d`(done) 가 메뉴에 남았다\n{screen}");
+        assert!(!screen.contains("p : "), "옛 `SPC v p` 가 메뉴에 남았다\n{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
 
         // **토글은 창을 안 걷는다** — 눌러 보며 맞추라고 열린 채로 남고, 상태 낱말이 그 자리에서
