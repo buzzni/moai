@@ -899,3 +899,9 @@
 {"ts":"2026-09-22T09:32:48Z","id":"moai-wszt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-22T09:32:56Z","id":"moai-tp98.5vj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=412919 (max — 도는 스레드의 답과 세대, 그리는 걸음의 값)"}
 {"ts":"2026-09-22T09:32:57Z","id":"moai-tp98.5vj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"15건 중 열셋을 반영했다. 리뷰가 고친 여덟(배너의 !, Tab 의 뜻, 읽는 중 답한 사람, 물은 값이 버려지던 자리, 들어가는 길의 캐시, 여는 읽기의 겹친 셈, 띄운 자리의 겹친 물음, 시험 둘)에 더해, 리뷰가 설계 결정이라 넘긴 둘을 내가 골라 고쳤다 — 굶김(11번: 뒤처진 답을 버리지 않고 들이고 곧바로 다시 읽는다)과 키를 기다리는 읽기의 물음(10번: reload 는 절대 안 묻는다). 넘긴 둘은 idea 로 담았다: git::run 에 마감이 없는 것 moai-9b2s(6번), 층과 안쪽의 겹쳐 보기가 갈리는 것 moai-35w3(9번). 시험의 JSON 훑기와 구조 정리는 이 diff 보다 넓어 그대로 둔다"}
+{"ts":"2026-09-22T09:33:15Z","id":"moai-nzyh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=250000 (high — 층이 내는 수와 그 값, 멤버 다섯을 한 세션이 했다)"}
+{"ts":"2026-09-22T09:33:15Z","id":"moai-x1hb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 도는 스레드의 답과 세대)"}
+{"ts":"2026-09-22T09:33:15Z","id":"moai-uitb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 그리는 걸음의 값)"}
+{"ts":"2026-09-22T09:33:16Z","id":"moai-zog5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 세 화면의 알림 수)"}
+{"ts":"2026-09-22T09:33:16Z","id":"moai-k6ff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 안쪽 배너의 짝)"}
+{"ts":"2026-09-22T09:33:16Z","id":"moai-nzyh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"잰 표(등록 다섯, 같은 자, moai tui 를 띄워 쓸기마다 git 부름을 셌다). 고치기 전 첫 쓸기 14판 · 둘째 24판 · 셋째 34판. 고친 뒤 14판 · 14판 · 14판. 한 판 값은 tui --json 57ms 가운데 32ms 가 이 물음이었다(check-attr·config 24ms, probe 8ms)"}
