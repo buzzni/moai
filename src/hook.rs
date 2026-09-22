@@ -356,26 +356,42 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             .map(crate::text::quoted)
             .collect::<Vec<_>>()
             .join(" ");
-        return (!line.is_empty()).then_some(Handed { text: line, fork: true, strict: false, elsewhere, appends });
+        return (!line.is_empty()).then_some(Handed {
+            text: line,
+            fork: true,
+            strict: false,
+            elsewhere,
+            appends,
+            args: Vec::new(),
+        });
     }
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
     // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
-    if let Some(Wrapped::Hands { at, glued, text: shape }) = wrap {
+    if let Some(Wrapped::Hands { at, glued, text: shape, args: spots }) = wrap {
         let tail = &rest[at..];
         // **`su -c '글'` 의 글은 `bash -c` 의 글이다**(moai-qqg2) — 셸의 명령줄 한 낱말이라 가르지도
         // 잇지도 않는다. 그 **뒤**는 사용자와 그 셸의 자리 인자지 글의 일부가 아니다: 이어 붙이던
         // 판이라면 `su -c 'sed -i s/a/b/ x' alice` 의 `alice` 가 sed 의 또 다른 파일이 되어, 아무도
         // 안 고치는 파일을 고친다며 잘못 막았을 자리다.
         //
-        // **다만 그 자리 인자는 글 안에서 닿는다**(moai-729n) — `$0`·`$1`·`$@` 다.
-        // `su -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 정말 그 파일을 고치는데 여기서는 `"$1"` 이
-        // 뭔지 모른다. **닿을 수 없어서 버리는 것이 아니라, 풀 자가 없어서 버린다** — 아는 자리로
-        // 남겨 둔다. 여기가 새는 것은 `bash -c '<글>' 남 src/x.rs` 도 똑같다.
+        // **다만 그 자리 인자는 글 안에서 닿는다**(moai-729n) — `$0`·`$1`·`$@` 다([`Handed::args`]).
+        // `su -c 'sed -i s/a/b/ "$0"' 남 src/x.rs` 는 정말 그 파일을 고친다 — su 가 사용자를 제 것으로
+        // 먹어 그 뒤 첫 낱말이 `$0` 이다(2026-09-22 에 쟀다). `bash -c '<글>' 남 src/x.rs` 는 그
+        // 이름이 `$0` 이라 같은 자리가 `$1` 이다.
         if shape == Text::Line {
             let text = glued.or_else(|| tail.first().cloned()).unwrap_or_default();
+            // 자리 인자를 걷는 것은 이 꼴뿐이다 — 나머지 꼴은 `spots` 가 늘 비어 있다.
+            let args: Vec<String> = spots.iter().map(|&i| rest[i].clone()).collect();
             // 덧붙는 낱말은 이 글 **뒤**의 자리 인자다 — 글 자체는 안 자란다.
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: false });
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: false,
+                args,
+            });
         }
         // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
         // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
@@ -396,6 +412,79 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         // `moai mv` 라 실패해 `&&` 가 끊기는데, 여섯 낱말로 갈라 읽은 판은 그것을 집기로 세어 뒤의
         // 빈손 쓰기를 풀어 줬다. 주석 하나(`env -S '#c' sed -i …`)에 글이 통째로 비던 것도 여기다 —
         // env 는 주석을 버리고 피연산자를 그대로 돌린다.
+        // **술어 안에 선 명령들**([`Text::Find`], moai-7kif) — 걷어 모아 `;` 로 잇는다.
+        //
+        // **그 안의 집기는 안 센다**(`appends`) — find 는 `-exec … +` 에서 찾은 이름을 argv 뒤에
+        // 이어 붙이고(xargs 와 같다), `;` 꼴에서도 **제 종료 코드가 그 명령의 것이 아니다**.
+        // `find . -exec moai mv <id> in_progress \; && <쓰기>` 의 `&&` 는 집기가 져도 닿는다 —
+        // 세어 주면 빈손의 쓰기를 풀어 준다. 쓰기 축은 그대로다.
+        if shape == Text::Find {
+            let text = exec_of(tail);
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: true,
+                args: Vec::new(),
+            });
+        }
+        // **입력이 뒤에 붙는 꼴**([`Text::Feed`], moai-gxwh) — `parallel <명령…> ::: <입력…>` 이다.
+        // 낱말은 그대로 잇고(parallel 도 따옴표를 안 되살린다), `:::` 부터는 입력이라 끊는다.
+        //
+        // **그 안의 집기는 안 센다**(`appends`) — parallel 은 찾은 입력을 argv 뒤에 이어 붙인다.
+        // xargs 와 같은 자리고, 덧붙은 낱말 하나가 그 집기를 아무것도 안 옮기는 줄로 바꾼다.
+        if shape == Text::Feed {
+            // **`:::` 의 입력은 그 명령의 낱말이 된다** — `parallel sed -i s/a/b/ ::: src/x.rs` 는
+            // 정말 `sed -i s/a/b/ src/x.rs` 를 돌린다(2026-09-22 에 쟀다). 그래서 가름말만 걷고
+            // 그 뒤의 낱말은 잇는다 — 통째로 끊던 판은 정작 고쳐지는 파일을 잃었다.
+            //
+            // **`::::` 는 다르다** — 그 뒤는 입력이 아니라 입력이 **적힌 파일**이라, 이으면 아무도
+            // 안 고치는 파일을 고친다며 잘못 막는다. 그 안에 무엇이 적혔는지는 여기서 모른다.
+            //
+            // **입력은 도로 감싸고 명령은 안 감싼다**(리뷰 moai-514e) — parallel 은 argv 에 이어
+            // 붙일 때 입력을 **따옴표로 감싼다**. 2026-09-22 에 쟀다: `parallel echo ::: 'x; touch f'`
+            // 는 그 글을 찍기만 하고 f 를 안 만들고, `parallel sed -i s/a/b/ ::: 'a b.rs'` 는
+            // 빈칸이 든 그 **한 파일**을 고친다. 날로 잇던 판은 두 쪽으로 틀렸다 — 입력 안의 `;`·`>`
+            // 가 연산자로 읽혀 **없는 쓰기를 지어냈고**, 빈칸이 든 이름 하나가 두 낱말로 갈렸다.
+            // `None` 은 명령 자리의 낱말, `Some(true)` 는 `:::` 의 입력, `Some(false)` 는 `::::` 가
+            // 가리키는 **파일**이다.
+            let mut feeds: Option<bool> = None;
+            let mut words: Vec<String> = Vec::new();
+            for w in tail {
+                match w.as_str() {
+                    ":::" | ":::+" => feeds = Some(true),
+                    "::::" | "::::+" => feeds = Some(false),
+                    w => match feeds {
+                        None => words.push(w.to_string()),
+                        Some(true) => words.push(crate::text::quoted(w)),
+                        Some(false) => {}
+                    },
+                }
+            }
+            let text = words.join(" ");
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: true,
+                args: Vec::new(),
+            });
+        }
+        // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
+        // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
+        if shape == Text::Joined {
+            let text = tail.join(" ");
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends,
+                args: Vec::new(),
+            });
+        }
         let split_out;
         let tail: &[String] = if shape == Text::Words {
             tail
@@ -411,7 +500,14 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         let text = tail.iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
         // `sudo -s` 혼자는 사람이 쓸 셸을 띄운다 — 넘긴 글이 없다.
         // **이 꼴의 글은 뒤로 자란다** — 덧붙는 argv 가 이 명령줄에 그대로 이어 붙는다.
-        return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends });
+        return (!text.is_empty()).then_some(Handed {
+            text,
+            fork: true,
+            strict: false,
+            elsewhere,
+            appends,
+            args: Vec::new(),
+        });
     }
     match basename(head) {
         sh if is_shell(sh) => {
@@ -427,7 +523,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             shell_argv(rest, wide_errexit(sh), elsewhere)
         }
         "eval" if !rest.is_empty() => {
-            Some(Handed { text: rest.join(" "), fork: false, strict: false, elsewhere, appends })
+            Some(Handed { text: rest.join(" "), fork: false, strict: false, elsewhere, appends, args: Vec::new() })
         }
         _ => None,
     }
@@ -489,7 +585,14 @@ fn shell_argv<'a>(argv: impl IntoIterator<Item = &'a String>, wide: bool, elsewh
     };
     match (hands, text) {
         // `-c` 의 글은 argv 의 한 낱말이다 — 덧붙는 낱말은 그 셸의 자리 인자로 간다.
-        (true, Some(t)) => Some(Handed { text: t.clone(), fork: true, strict, elsewhere, appends: false }),
+        //
+        // **그 자리 인자를 함께 낸다**([`Handed::args`], moai-5ycj) — `bash -c '<글>' NAME A B`
+        // 는 `$0`=NAME·`$1`=A 다(2026-09-22 에 쟀다). 걷지 않던 판은 `bash -c 'sed -i s/a/b/
+        // "$1"' 남 src/x.rs` 가 정말 고치는 파일을 `"$1"` 인 채로 버렸다.
+        (true, Some(t)) => {
+            let args = it.cloned().collect();
+            Some(Handed { text: t.clone(), fork: true, strict, elsewhere, appends: false, args })
+        }
         _ => None,
     }
 }
@@ -578,6 +681,17 @@ struct Handed {
     /// 도는 낱말의 전부가 아니다. `-c` 의 글은 거짓이다 — 덧붙는 낱말은 자리 인자로 간다.
     /// 겹으로 실려([`Layer::Shell`]) 그 글 안의 집기를 안 세게 한다.
     appends: bool,
+    /// **그 글의 자리 인자들 — `$0` 부터다**(moai-5ycj). `bash -c '<글>' <이름> <인자…>` 와
+    /// `su -c '<글>' <사용자> <인자…>` 가 넘기는 것이고, 글 안에서 `$1`·`$@` 로 닿는다.
+    ///
+    /// `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 정말 그 파일을 고치는데, 이 자리가 없던
+    /// 판은 `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다. **닿을 수 없어서 버린 것이 아니라 풀
+    /// 자가 없어서 버린 것**이라고 적어 두었던 자리다.
+    ///
+    /// **차례가 감싸는 명령마다 다르다**(2026-09-22 에 쟀다). `bash -c '<글>' NAME A B` 는
+    /// `$0`=NAME 이고, `su -c '<글>' <사용자> A B` 는 su 가 사용자를 제 것으로 먹어 `$0`=A 다.
+    /// `su <사용자> -c '<글>' A B` 도 같은 답이다.
+    args: Vec<String>,
 }
 
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
@@ -635,6 +749,13 @@ struct Seg {
     fed: Vec<String>,
     /// 이 토막이 연 heredoc 의 번호([`Lexer::docs`]) — 본문은 토막을 닫은 뒤에 읽혀, `run` 이 끝에서 `fed` 로 옮긴다.
     docs: Vec<usize>,
+    /// **방금 닫힌 묶음에 걸린 리다이렉션뿐인 토막인가**(moai-qlr8) — `( … ) >/dev/null` 의
+    /// `>/dev/null` 이다. 묶음 밖에 제 토막으로 서지만 **그 묶음을 나온 것이 아니다**: 그 값은
+    /// 묶음의 값이고, 뒤에 더 도는 명령도 없다.
+    ///
+    /// `;` 뒤의 리다이렉션(`( … ); >f`)과 갈리는 자리다 — 그쪽은 정말 도는 명령 하나라 값이 0 이고,
+    /// 걷는 쪽이 옳다. 렉서가 `)` 를 닫는 자리에서 이 둘을 가른다([`Lexer::hung`]).
+    hung: bool,
     /// 렉서가 이 토막에서 **읽어 낸 치환의 글**(moai-6qkc) — 제 토막을 낸 것만 든다.
     ///
     /// [`shell_text`] 가 이것과 글자째 맞춰 같은 글을 두 번 안 읽는다. **수로 두던 판은 샜다**
@@ -676,22 +797,6 @@ enum Layer {
     Shell {
         /// 그 글의 맨 윗자리 묶음 깊이([`Seg::level`]) — 새 셸은 제 `set -e` 를 여기서 센다.
         top: usize,
-        /// 그 글의 맨 윗자리 **하위 셸** 깊이([`Seg::depth`]) — 겹을 나올 때 끝내는 묶음을 푸는지를
-        /// 이것으로 가른다(moai-4arw). 그 묶음이 이보다 깊으면 `exit` 는 하위 셸만 끝내니, 자식
-        /// 셸의 값이 집기의 값이라고 말할 수 없다 — `집기 || ( …; exit 1 )` 이 그 꼴이다.
-        ///
-        /// **겹마다 한 번 재어 여기 둔다** — 겹에 들어선 토막에서 베껴 오던 판은 글이 `( … )` 로
-        /// 시작하면 그 깊이를 부풀려, 같은 집안을 두 갈래로 갈랐다(리뷰 moai-k8j1.209 의 6번).
-        ///
-        /// **글이 통째로 하위 셸 안이면 그 깊이까지 센다**(moai-vngm) — `bash -c '( 집기 ||
-        /// { exit 1; } )'` 의 괄호는 글의 전부라 bash 가 그 값을 그대로 낸다. [`Lexer::relex`] 가
-        /// "한 번도 안 나갔는가" 로 재어 여기 넣는다: 깊이만 보면 `( a ); ( b )` 처럼 나갔다 다시
-        /// 든 형제 괄호가 통째로 감싼 것으로 읽힌다.
-        ///
-        /// **글의 마지막 하위 셸까지는 아직 아니다** — `집기 || ( …; exit 1 )` 도 bash 는 그
-        /// 괄호의 값을 내지만, 그것을 알려면 묶음마다 "글의 마지막인가" 를 따로 들어야 한다.
-        /// 한 수로는 못 잰다(`( 집기 || exit 1 ); ( b )` 의 마지막 토막도 깊이가 1 이다).
-        deep: usize,
         /// **띄울 때 이미 errexit 가 켜졌는가**(moai-j9tx) — `bash -e -c '…'` 의 글은 첫 줄부터
         /// `set -e` 아래라, 그 겹을 열 때 `strict` 를 켠 채로 연다.
         strict: bool,
@@ -713,11 +818,11 @@ enum Layer {
 
 impl Layer {
     /// 바깥 렉서가 이 겹을 제 자리로 옮긴다 — 깊이는 [`Seg::level`] 과 같이 민다.
-    fn shift(self, by: usize, under: usize) -> Layer {
+    fn shift(self, by: usize) -> Layer {
         match self {
             Layer::Subst { at, nth } => Layer::Subst { at: at + by, nth },
-            Layer::Shell { top, deep, strict, apace, elsewhere, appends } => {
-                Layer::Shell { top: top + by, deep: deep + under, strict, apace, elsewhere, appends }
+            Layer::Shell { top, strict, apace, elsewhere, appends } => {
+                Layer::Shell { top: top + by, strict, apace, elsewhere, appends }
             }
         }
     }
@@ -1044,6 +1149,12 @@ struct Lexer<'a> {
     later: Vec<(usize, String)>,
     /// 다시 읽기를 몇 겹까지 왔나 — `bash -c "bash -c '…'"` 가 끝없이 파고들지 않게 막는다.
     deep: usize,
+    /// **방금 묶음을 닫았는가**(moai-qlr8) — 곧바로 오는 리다이렉션은 그 묶음에 걸린 것이라
+    /// 새 명령이 아니다([`Seg::hung`]). 이음사 하나나 낱말 하나가 이 표를 걷는다.
+    hung: bool,
+    /// **이 글의 자리 인자 — `$0` 부터다**([`Handed::args`], moai-5ycj). `$1`·`${1}`·`$@` 를 이것으로
+    /// 푼다([`Lexer::param`]). 맨 바깥 렉서와 치환의 렉서에서는 비어 있어 아무것도 안 바뀐다.
+    args: &'a [String],
 }
 
 #[cfg(test)]
@@ -1140,7 +1251,14 @@ impl<'a> Lexer<'a> {
             shut: None,
             later: Vec::new(),
             deep,
+            hung: false,
+            args: &[],
         }
+    }
+
+    /// 자리 인자를 든 렉서 — 셸에 넘긴 글을 다시 읽을 때만 선다([`Lexer::relex`], moai-5ycj).
+    fn at_args(cmd: &'a str, deep: usize, args: &'a [String]) -> Self {
+        Lexer { args, ..Lexer::at(cmd, deep) }
     }
 
     /// 다시 읽기의 상한 — 이보다 깊으면 글을 글로 둔다. 막는 것은 **되돌이가 스택을 넘는 것**이다:
@@ -1219,12 +1337,18 @@ impl<'a> Lexer<'a> {
     }
 
     /// 토막 하나를 쌓는다 — 앞 토막 뒤로 지나온 가장 얕은 자리를 적고 새로 잰다.
+    ///
+    /// **묶음에 걸린 리다이렉션은 그 자리를 다음 토막에 넘긴다**([`Seg::hung`], 리뷰 moai-514e) —
+    /// 그 토막은 묶음을 **나온 것이 아니라** 그 묶음에 붙은 것이라, 읽는 쪽이 그것을 건너뛴다.
+    /// 여기서 새로 재기 시작하면 뒤엣것이 "이 자리를 지나왔다" 를 통째로 잃어, `( 집기 ||
+    /// { exit 1; } ) >/dev/null; ( true )` 의 형제 괄호가 그 묶음 안에 선 것으로 읽혔다 — 앞
+    /// 괄호의 `exit` 가 뒤 괄호의 값을 제 것이라 우기고 빈손의 쓰기를 풀어 줬다(bash 로 쟀다:
+    /// 그 줄은 0 이다).
     fn push(&mut self, mut seg: Seg) {
         seg.low = self.low.min(seg.depth);
         seg.floor = self.floor.min(seg.level);
         seg.shut = seg.shut.into_iter().chain(self.shut.take()).min();
-        self.low = usize::MAX;
-        self.floor = usize::MAX;
+        (self.low, self.floor) = if seg.hung { (seg.low, seg.floor) } else { (usize::MAX, usize::MAX) };
         self.all.push(seg);
     }
 
@@ -1347,13 +1471,14 @@ impl<'a> Lexer<'a> {
         /// `Plant::Fork { strict }` 가 딴 형인 줄 몰랐다. 이 파일이 `deep` 을 두고 적어 둔 것과
         /// 같은 자리다(리뷰 moai-k8j1.udq).
         #[derive(Clone, Copy)]
-        enum Plant {
+        enum Plant<'a> {
             /// 따옴표 없는 heredoc 본문 — 바깥 명령의 **낱말**이다([`Layer::Subst`]).
             Doc,
             /// `bash -c '…'`·`sh -c` 의 글 — 새 셸이다. `strict` 는 띄울 때 켠 errexit(moai-j9tx),
             /// `astray` 는 그 글이 도는 자리를 모른다는 것(moai-2avz, `su -c '<글>' -l`),
             /// `grows` 는 그 글이 뒤로 자란다는 것(리뷰, `xargs sudo -s <명령…>`).
-            Fork { strict: bool, astray: bool, grows: bool },
+            /// `args` 는 그 글의 자리 인자다(moai-5ycj, `bash -c '<글>' <이름> <인자…>`).
+            Fork { strict: bool, astray: bool, grows: bool, args: &'a [String] },
             /// `eval '…'` 의 글 — 지금 셸에서 돈다. 겹이 없다: 제 `set -e` 도 `cd` 도 바깥에 남는다.
             Eval,
         }
@@ -1369,20 +1494,17 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             // 글마다 **무엇인가**([`Plant`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
-            let mut texts: Vec<(&str, Plant)> =
+            let mut texts: Vec<(&str, Plant<'_>)> =
                 docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
             let own = shell_text(&seg.words, &seg.eaten);
-            texts.extend(
-                own.iter().map(|h| {
-                    let how =
-                        if h.fork {
-                            Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends }
-                        } else {
-                            Plant::Eval
-                        };
-                    (h.text.as_str(), how)
-                }),
-            );
+            texts.extend(own.iter().map(|h| {
+                let how = if h.fork {
+                    Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends, args: &h.args }
+                } else {
+                    Plant::Eval
+                };
+                (h.text.as_str(), how)
+            }));
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
             // **글 앞에서 닫힌 묶음도 그렇다**(moai-axqs) — 글은 그것을 낸 토막보다 **먼저** 셈해지니,
@@ -1410,7 +1532,16 @@ impl<'a> Lexer<'a> {
                 // 의 `cd` 는 뒤로 안 이어지고 `집기 || eval 'exit 1' | cat` 의 `exit` 는 그 칸만 끝낸다.
                 // 지금 셸에서 돈다고만 세던 판은 그 둘을 바깥 셸의 것으로 읽어, 아무것도 안 집은 채
                 // 쓰는 줄이 샜다.
-                let (segs, left) = Lexer::at(text, deep + 1).run_over();
+                // **넘긴 글은 제 자리 인자를 들고 다시 읽힌다**(moai-5ycj) — 그 글 안의 `$1` 을
+                // 푸는 것은 렉서다([`Lexer::param`]).
+                // **`eval` 과 heredoc 본문은 **이** 셸의 자리 인자를 본다**(리뷰 moai-514e) —
+                // 겹을 안 열고 지금 셸에서 풀리니 `$1` 도 지금 셸의 것이다. 빈 것으로 두던 판은
+                // `bash -c 'eval "sed -i s/a/b/ \"$1\""' 남 src/x.rs` 의 쓰기를 통째로 잃었다.
+                let args: &[String] = match kind {
+                    Plant::Fork { args, .. } => args,
+                    _ => self.args,
+                };
+                let (segs, left) = Lexer::at_args(text, deep + 1, args).run_over();
                 // **뒤로 띄운 것으로 끝나는 글의 값은 0 이다** — `bash -c '집기 &'` 는 집기가 돌기도
                 // 전에 0 으로 끝난다. 그 값은 이 토막의 값이 아니니 치환으로 심는다: 나올 때 집기를
                 // 도로 세운다. 파이프의 마지막 칸은 아니다 — `cat f | 집기` 의 값은 집기의 값이다.
@@ -1418,41 +1549,29 @@ impl<'a> Lexer<'a> {
                 // 둔 표를 읽는다([`Seg::bg`]). `sub` 로 어림잡던 판은 `{ … } &` 로 끝나는 글을 못 보고
                 // (묶음 뒤의 `&` 는 빈 토막에 온다), 뒤로 띄운 파이프라인은 파이프라고만 읽었다.
                 let apace = segs.last().is_some_and(|s| s.bg);
-                // **글이 통째로 하위 셸 안에 있으면 그 하위 셸의 값이 곧 이 셸의 값이다**
-                // (moai-vngm) — `bash -c '( 집기 || { exit 1; } )'` 의 괄호는 글의 전부라, bash 는
-                // 그 값을 그대로 낸다. 집기가 지면 1 이니 바깥 `&&` 에 닿은 것은 집기가 이겼다는
-                // 뜻이다. 집안째 막던 판은 규약이 시키는 차례를 한 줄로 친 명령을 잘못 막았다.
+                // **글이 통째로 하위 셸 안에 있어도, 글의 마지막 하위 셸이어도 그 값은 이 셸의
+                // 값이다**(moai-vngm·moai-qlr8) — `bash -c '( 집기 || { exit 1; } )'` 도
+                // `bash -c '집기 || ( echo f; exit 1 )'` 도 bash 가 그 괄호의 값을 그대로 낸다.
+                // bash 로 쟀다: 둘 다 1 이고, 뒤에 `; echo d` 를 붙이면 둘 다 0 이다.
                 //
-                // **"안 나갔는가" 로 잰다** — 깊이만 보면 `( a ); ( b )` 처럼 나갔다 다시 든 형제
-                // 괄호가 통째로 감싼 것으로 읽혀, 앞 괄호의 `exit` 가 뒤 괄호의 값을 제 것이라
-                // 우긴다. 첫 토막은 제 깊이로, 나머지는 **지나온 가장 얕은 자리**([`Seg::low`])와
-                // 함께 본다. bash 로 쟀다 — `bash -c '( false || { echo f; exit 1; } )'` 는 1,
-                // `bash -c '( false || { echo f; exit 1; } ); echo d'` 는 0 이다.
-                //
-                // **글의 마지막 하위 셸까지는 못 푼다** — `집기 || ( echo f; exit 1 )` 도 bash 는
-                // 그 괄호의 값을 내지만, 그것을 알려면 "이 묶음이 글의 마지막인가" 를 묶음마다
-                // 따로 들어야 한다. 한 수로는 못 잰다: `( 집기 || exit 1 ); ( b )` 의 마지막 토막도
-                // 깊이가 1 이라, 앞 묶음이 뒤 묶음의 값을 제 것이라 우기게 된다.
-                let wrap = segs
-                    .iter()
-                    .enumerate()
-                    .map(|(m, s)| if m == 0 { s.depth } else { s.depth.min(s.low) })
-                    .min()
-                    .unwrap_or(0);
+                // **여기서 재던 깊이를 걷었다** — 그 자리를 읽던 [`Bailout::would`] 가 이제 깊이를
+                // 안 묻는다. 묻지 않아도 되는 것은 그 하위 셸을 **나오는 자리가 묶음을 걷기**
+                // 때문이다([`shell_scan`] 의 `seg.floor < b.floor`): 겹을 나올 때까지 서 있는
+                // 묶음은 곧 글이 그 하위 셸을 한 번도 안 나왔다는 뜻이다. 깊이 한 수로는 마지막
+                // 하위 셸을 못 쟀고(`( 집기 || exit 1 ); ( b )` 의 마지막 토막도 깊이가 1 이다),
+                // 걷는 자리는 그 둘을 이미 가르고 있었다.
                 // **겹은 여기서 한 번만 짓는다** — `apace` 를 알고 난 뒤다.
                 //
                 // 셸에 넘긴 글은 **겹을 그대로 두고 표만 단다**(moai-54pk) — 치환으로 바꿔 적던 판은
                 // 값을 안 흘리는 김에 그 셸의 errexit 까지 버렸다. `eval` 의 글은 겹이 없으니 그때만
                 // 치환으로 심는다: 값이 제 것이 아닌 것은 같고, 버릴 errexit 도 없다.
                 //
-                // `Layer::Shell` 의 `top` 은 여기서 늘 0 이고 `deep` 은 이 글 안에서 잰 `wrap` 이다 —
-                // 둘 다 바깥 렉서가 제 자리로 민다([`Layer::shift`] 가 `s.depth` 와 같은 값을 더한다). 이름을 `deep` 으로 두면 이 함수 머리의 **다시 읽기 겹**
-                // (`let deep = self.deep`)을 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을
-                // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
+                // `Layer::Shell` 의 `top` 은 여기서 늘 0 이고, 바깥 렉서가 그것을 제 자리로 민다
+                // ([`Layer::shift`]).
                 let layer = match kind {
                     Plant::Doc => Some(Layer::Subst { at: 0, nth }),
-                    Plant::Fork { strict, astray, grows } => {
-                        Some(Layer::Shell { top: 0, deep: wrap, strict, apace, elsewhere: astray, appends: grows })
+                    Plant::Fork { strict, astray, grows, .. } => {
+                        Some(Layer::Shell { top: 0, strict, apace, elsewhere: astray, appends: grows })
                     }
                     Plant::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
                 };
@@ -1492,10 +1611,10 @@ impl<'a> Lexer<'a> {
                     // 제자리에서 민다 — 새 목록을 지으면 토막마다 겹마다 힙을 한 번씩 잡아,
                     // `$( … )` 예순네 겹 202바이트 한 줄이 1,104번에서 3,184번으로 뛴다.
                     for l in &mut s.nested {
-                        *l = l.shift(level + 1, depth + sub);
+                        *l = l.shift(level + 1);
                     }
                     if let Some(l) = layer {
-                        s.nested.insert(0, l.shift(level + 1, depth + sub));
+                        s.nested.insert(0, l.shift(level + 1));
                     }
                     handed |= feeds;
                     all.push(s);
@@ -1545,6 +1664,9 @@ impl<'a> Lexer<'a> {
                 self.open(Ctx::Ansi);
             }
             '$' if next == Some('(') => self.dollar(),
+            // **자리 인자를 푼다**([`Lexer::param`], moai-5ycj) — 셸에 넘긴 글에서만 선다.
+            // 못 풀면 아래 갈래가 `$` 를 글자로 적는다(지금까지와 같다).
+            '$' if self.param(false) => {}
             '`' => {
                 self.cur.push(c);
                 self.had = true;
@@ -1642,6 +1764,13 @@ impl<'a> Lexer<'a> {
                 if closes {
                     self.join = Join { op: Op::default(), depth: self.level() };
                 }
+                // **이 뒤에 붙은 리다이렉션은 이 묶음의 것이다**([`Seg::hung`], moai-qlr8) —
+                // `( … ) >/dev/null` 이다. `end_by` 와 낱말 하나가 이 표를 걷는다.
+                //
+                // **`closes` 로 가르지 않는다** — 묶음이 `}`·`fi` 로 끝나면 그 낱말이 제 토막을 안
+                // 세워(`SHUTS`) 이 자리의 토막이 비고, 그러면 `( 집기 || { exit 1; } ) >/dev/null`
+                // 이 표를 못 받는다. 리다이렉션이 묶음에 걸렸는가는 `)` 하나로 정해진다.
+                self.hung = true;
                 self.group = self.group.saturating_sub(1);
                 self.sank();
             }
@@ -1749,6 +1878,112 @@ impl<'a> Lexer<'a> {
         self.stack.iter().any(|c| matches!(c, Ctx::Subst(_)))
     }
 
+    /// **`$1`·`${1}`·`$@` 를 그 자리 인자로 바꾼다**(moai-5ycj) — `$` 는 이미 읽었다. 푼 것이
+    /// 있으면(또는 읽은 글자를 제가 도로 적었으면) 참이고, 거짓이면 부르는 쪽이 `$` 를 글자로
+    /// 적는다.
+    ///
+    /// `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 정말 그 파일을 고치는데, 푸는 자가 없던 판은
+    /// `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다.
+    ///
+    /// **렉서가 치환을 읽는 이 자리에서 한다** — 글자로 바꿔치기하면 `'$1'`(안 풀린다)과
+    /// `"$1"`(풀린다)이 안 갈려, 안 풀릴 것을 풀어 **아무도 안 고치는 파일을 고친다며 잘못 막는다**.
+    ///
+    /// **모르면 지어내지 않는다** — 그 자리가 비었거나 `${1:-x}`·`${FOO}` 처럼 꼴이 다르면 글자째
+    /// 둔다. 그러면 지금처럼 [`unknowable`] 이 그 낱말을 버린다.
+    ///
+    /// **푼 값은 글자로 담는다 — 다시 렉서를 안 태운다.** 셸도 그렇다: 푼 값 안의 `;`·`>` 는
+    /// 연산자가 아니라 글자다. 태우면 `su -c 'echo "$1"' 남 'a; sed -i s/a/b/ src/x.rs'` 가 없는
+    /// 쓰기를 지어낸다. 빈칸으로 낱말을 가르는 것(IFS)도 안 한다 — 모르는 쪽으로 두면 그 낱말이
+    /// 통째로 [`unknowable`] 에 걸린다.
+    ///
+    /// **낱말이 갈리는 것은 `$@`·`$*` 뿐이다** — 인자마다 낱말 하나고, 따옴표 안의 `"$*"` 만 한
+    /// 낱말로 잇는다.
+    fn param(&mut self, quoted: bool) -> bool {
+        match self.chars.peek().copied() {
+            Some(d) if d.is_ascii_digit() => {
+                self.chars.next();
+                if !self.spread(d.to_digit(10).map(|n| n as usize), quoted) {
+                    self.cur.push('$');
+                    self.cur.push(d);
+                }
+                true
+            }
+            // `${1}`·`${10}` 만 푼다 — `${1:-x}`·`${FOO}` 는 읽은 글자를 도로 적고 글자째 둔다.
+            //
+            // **두 자리 넘게 읽는다**(리뷰 moai-514e) — 한 자리만 읽던 판은 `${10}` 을 글자째 둬
+            // `bash -c 'tee ${10}' 0 1 2 3 4 5 6 7 8 9 src/x.rs` 의 쓰기를 통째로 잃었다.
+            // 중괄호 없는 `$10` 은 셸도 `$1` 뒤의 `0` 으로 읽으니 위 갈래가 맞다.
+            Some('{') => {
+                self.chars.next();
+                let mut seen = String::new();
+                while let Some(d) = self.chars.next_if(char::is_ascii_digit) {
+                    seen.push(d);
+                }
+                let closed = !seen.is_empty() && self.chars.next_if_eq(&'}').is_some();
+                if closed && self.spread(seen.parse::<usize>().ok(), quoted) {
+                    return true;
+                }
+                self.cur.push('$');
+                self.cur.push('{');
+                self.cur.push_str(&seen);
+                if closed {
+                    self.cur.push('}');
+                }
+                true
+            }
+            Some(c @ ('@' | '*')) => {
+                // `$0` 은 안 든다 — `$@` 는 `$1` 부터다. 풀 것이 없으면 글자째 둔다.
+                let args = self.args;
+                let Some(vals) = args.get(1..).filter(|v| !v.is_empty()) else { return false };
+                self.chars.next();
+                self.had = true;
+                // **리다이렉션 자리에서는 안 가른다**(리뷰 moai-514e) — `> "$@"` 를 셋 이상으로
+                // 가르면 `flush` 가 `aim` 을 먹어(`Aim` 의 기본값이 낱말이다) 첫 값만 쓰기가 되고
+                // 나머지가 명령의 낱말로 샌다. 진짜 bash 는 그 줄을 `ambiguous redirect` 로
+                // 거절해 **아무것도 안 돌린다** — 한 낱말로 두면 그 자리가 `unknowable` 에 걸린다.
+                if (c == '*' && quoted) || !matches!(self.aim, Aim::Word) {
+                    self.cur.push_str(&vals.join(" "));
+                    return true;
+                }
+                for (i, v) in vals.iter().enumerate() {
+                    if i > 0 {
+                        self.flush();
+                    }
+                    self.cur.push_str(v);
+                    self.had = true;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 자리 인자 하나를 낱말에 담는다 — **못 담으면 거짓**이고, 읽은 글자를 도로 적는 것은 부르는
+    /// 쪽의 일이다([`Lexer::param`]).
+    ///
+    /// **따옴표 밖이면 빈칸으로 낱말이 갈린다**(IFS, 리뷰 moai-514e) — `bash -c 'sed -i s/a/b/ $1'
+    /// 남 '/tmp/a src/x.rs'` 는 정말 두 파일을 고치는데, 한 낱말로 두던 판은 그것을 절대 경로 하나로
+    /// 읽어 그 상대 경로의 쓰기를 통째로 지나갔다. `"$1"` 은 한 낱말 그대로다.
+    ///
+    /// **리다이렉션 자리에서는 안 가른다** — [`Lexer::param`] 의 `$@` 와 같은 까닭이다.
+    fn spread(&mut self, nth: Option<usize>, quoted: bool) -> bool {
+        let args = self.args;
+        let Some(v) = nth.and_then(|n| args.get(n)) else { return false };
+        if quoted || !matches!(self.aim, Aim::Word) {
+            self.cur.push_str(v);
+            self.had = true;
+            return true;
+        }
+        for (i, part) in v.split_ascii_whitespace().enumerate() {
+            if i > 0 {
+                self.flush();
+            }
+            self.cur.push_str(part);
+            self.had = true;
+        }
+        true
+    }
+
     fn single(&mut self, c: char) {
         if c == '\'' {
             self.close(c);
@@ -1777,6 +2012,9 @@ impl<'a> Lexer<'a> {
     fn double(&mut self, c: char) {
         if c == '$' && self.chars.peek() == Some(&'(') {
             self.dollar();
+        // **따옴표 안에서도 푼다**(moai-5ycj) — `"$1"` 은 풀리고 `'$1'` 은 안 풀린다. 그 갈림이
+        // 이 자리에 있어야 하는 까닭이다([`Lexer::param`]).
+        } else if c == '$' && !self.opaque() && self.param(true) {
         } else if c == '`' && !self.opaque() {
             self.cur.push(c);
             self.enter(Ctx::Tick);
@@ -2012,11 +2250,20 @@ impl<'a> Lexer<'a> {
         let word = std::mem::take(&mut self.cur);
         let quoted = std::mem::take(&mut self.had);
         match std::mem::take(&mut self.aim) {
-            Aim::Write => self.seg.writes.push(word),
+            // 방금 닫힌 묶음에 걸린 리다이렉션인가([`Seg::hung`], moai-qlr8) — 그 묶음 뒤에
+            // 낱말 하나 없이 곧바로 온 것만이다.
+            Aim::Write => {
+                self.seg.hung |= self.hung && self.seg.words.is_empty();
+                self.seg.writes.push(word);
+            }
             Aim::Read => {}
             Aim::Here => self.seg.fed.push(word),
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
-            Aim::Dup => self.seg.writes.push(word),
+            // `&>파일` 꼴도 묶음에 걸린 리다이렉션일 수 있다 — 위와 같이 적는다(리뷰 moai-514e).
+            Aim::Dup => {
+                self.seg.hung |= self.hung && self.seg.words.is_empty();
+                self.seg.writes.push(word);
+            }
             Aim::Word => {
                 // 명령 자리의 `{`·`if`… 만 묶음을 연다 — `echo {`·`echo if` 는 글자다.
                 //
@@ -2038,6 +2285,8 @@ impl<'a> Lexer<'a> {
                 } else if !quoted && word == "]]" {
                     self.test = false;
                 }
+                // 낱말이 하나라도 서면 그 토막은 제 명령이다([`Seg::hung`], moai-qlr8).
+                self.hung = false;
                 self.seg.words.push(word);
             }
         }
@@ -2052,6 +2301,9 @@ impl<'a> Lexer<'a> {
         self.flush();
         self.aim = Aim::Word;
         self.test = false;
+        // **이음사 하나가 묶음에 걸린 리다이렉션의 표를 걷는다**([`Seg::hung`], moai-qlr8) —
+        // `( … ); >f` 의 `>f` 는 정말 도는 명령 하나다. `)` 는 제 `end_by` **뒤에** 다시 세운다.
+        self.hung = false;
         // **치환은 제 토막보다 먼저 돈다** — 그 앞에, 한 겹 깊은 하위 셸로 쌓는다(moai-xe6e). 깊이를
         // 더해야 치환 안의 `cd`·`;` 가 바깥 토막의 자리와 집기를 안 흔든다. 첫 토막은 바깥 토막의
         // 이음사를 받는다 — `mv && echo "$(sed -i …)"` 의 치환도 집기가 이겨야 돈다.
@@ -2102,7 +2354,7 @@ impl<'a> Lexer<'a> {
                     Join { op: s.join.op, depth: s.join.depth + level + 1 }
                 };
                 for l in &mut s.nested {
-                    *l = l.shift(level + 1, group + 1);
+                    *l = l.shift(level + 1);
                 }
                 s.nested.insert(0, Layer::Subst { at: level + 1, nth });
                 self.push(s);
@@ -2283,6 +2535,13 @@ enum Wrapped {
         glued: Option<String>,
         /// 그 글을 **어떻게 읽는가**([`Text`]).
         text: Text,
+        /// **그 글의 자리 인자들이 선 자리**(moai-5ycj) — `su -c '<글>' <사용자> A B` 의 A·B 다
+        /// ([`Handed::args`]). 글 안에서 `$0`·`$1`·`$@` 로 닿는다.
+        ///
+        /// **사용자는 여기 없다** — su 가 제 것으로 먹는다. 2026-09-22 에 쟀다:
+        /// `su -c '<글>' 남 A B` 는 `$0`=A 이고, `su 남 -c '<글>' A B` 도 같은 답이다. 그래서
+        /// 걷어 둔 피연산자(`ops`)의 **맨 앞 하나를 빼고** 든다 — 차례가 어느 쪽이든 같은 자다.
+        args: Vec<usize>,
     },
     /// 뒤에 오는 낱말들이 **그것이 띄우는 셸의 argv** 다(moai-729n) — `su <사용자> <인자…>`.
     ///
@@ -2345,6 +2604,73 @@ enum Text {
     /// **버린 자리 인자는 글 안에서 `$1`·`$@` 로 닿는다**(moai-729n) — 낱말로 잇는 것이 틀렸을
     /// 뿐 닿을 수 없는 것이 아니다. 푸는 자가 없어 남겨 둔 자리고, `bash -c` 도 같다.
     Line,
+    /// **껍데기가 가른 낱말을 그대로 빈칸으로 잇는다**(`watch <명령…>`, moai-1b0d) — 도로
+    /// 감싸지 않는다. watch 는 argv 를 빈칸으로 이어 붙여 `sh -c` 에 넘기고 **따옴표를 안
+    /// 되살린다**([`Text::Words`] 와 갈리는 자리다). `eval` 의 글이 이 꼴이다.
+    ///
+    /// 2026-09-22 에 쟀다: `watch sh -c 'echo A B > /tmp/probe'` 는 probe 에 빈 줄을 남긴다 —
+    /// 따옴표가 되살아났다면 `A B` 가 적혔을 자리다. 도로 감싸는 쪽으로 읽으면 `watch '집기;
+    /// 쓰기'` 의 글이 낱말 하나로 굳어 그 쓰기를 아무 규칙도 못 본다.
+    Joined,
+    /// **입력이 뒤에 붙는 명령**(`parallel <명령…> ::: <입력…>`, moai-gxwh) — 명령 자리의 낱말은
+    /// [`Text::Joined`] 처럼 그대로 잇고, **`:::` 뒤의 입력은 낱말 하나로 도로 감싸** 잇는다.
+    /// 가름말(`:::`·`::::`) 자체는 버린다.
+    ///
+    /// 2026-09-22 에 쟀다: `parallel echo A B '>' /tmp/probe ::: x` 는 그 파일에 적고(명령 자리의
+    /// 따옴표가 안 되살아난다), `parallel echo HI ::: A B` 는 `HI A`·`HI B` 를 찍는다(입력이 argv
+    /// 뒤에 붙는다). 가름말을 안 버리면 `:::` 이 경로로 읽혀 아무도 안 쓰는 파일을 쓴다며 잘못 막는다.
+    ///
+    /// **입력만 감싸는 까닭**(리뷰 moai-514e) — parallel 은 이어 붙일 때 입력을 따옴표로 감싼다.
+    /// 쟀다: `parallel echo ::: 'x; touch f'` 는 그 글을 찍기만 하고 f 를 안 만들며,
+    /// `parallel sed -i s/a/b/ ::: 'a b.rs'` 는 빈칸이 든 그 **한 파일**을 고친다.
+    ///
+    /// **여러 `:::` 무리는 한 줄로 합쳐 읽는다** — 진짜 parallel 은 무리마다 하나씩 골라 곱집합을
+    /// 만드는데, 합쳐 읽으면 한 판의 argv 보다 **넓다**. 넓은 쪽은 없는 쓰기를 막을 뿐이라 남겨 둔다.
+    Feed,
+    /// **술어 안에 선 명령들**(`find … -exec … \;`, moai-7kif) — [`exec_of`] 가 걷어 모은다.
+    ///
+    /// 한 줄에 여럿이 설 수 있어 자리 하나로는 못 든다. 걷은 무리를 `;` 로 이어 한 글로 낸다.
+    /// **낱말마다 도로 감싼다** — find 는 셸을 안 거치고 곧장 exec 하니, 따옴표 안의 `>`·`&&`
+    /// 는 연산자가 아니라 글자다([`Text::Words`] 와 같은 까닭이고 [`Text::Joined`] 와 갈린다).
+    Find,
+}
+
+/// **`find` 의 술어 안에 선 명령들을 걷어 한 글로 잇는다**(moai-7kif) — `-exec`·`-execdir`·
+/// `-ok`·`-okdir` 이 넷이고, 저마다 `;` 나 `+` 로 끝난다.
+///
+/// `find . -exec sed -i s/a/b/ src/x.rs \;` 는 그 파일을 정말 고치는데, 이 자리가 없던 판은
+/// 빈손으로 규칙 2 를 지나갔다. `find . -exec moai add x \;` 는 규칙 1 을 지나갔다.
+///
+/// **자리표(`{}`)를 쓴 꼴은 여기서도 안 잡힌다**(리뷰 moai-514e) — `find . -name '*.rs' -exec
+/// sed -i s/a/b/ {} \;` 의 `{}` 는 어느 파일인지 모르는 자리라 [`unknowable`] 이 그 낱말을 버린다.
+/// 잡는 것은 **경로를 글자째 적은 꼴**이다. 자리표 쪽을 보려면 find 가 무엇을 찾을지를 알아야 하고,
+/// 그것은 이 도구가 할 수 있는 일이 아니다.
+///
+/// **낱말마다 도로 감싼다** — find 는 셸을 안 거치고 곧장 exec 한다. 감싸지 않으면 인자 안의
+/// `>`·`;` 가 연산자로 읽혀, 아무것도 안 쓰는 줄을 쓰는 줄로 지어낸다.
+///
+/// **끝맺음이 없어도 걷는다** — 줄이 잘렸거나 사람이 빠뜨린 것이고, 그때도 그 앞까지는 정말
+/// 도는 명령이다.
+fn exec_of(words: &[String]) -> String {
+    const PREDS: &[&str] = &["-exec", "-execdir", "-ok", "-okdir"];
+    let mut out: Vec<String> = Vec::new();
+    let mut at = 0;
+    while at < words.len() {
+        if !PREDS.contains(&words[at].as_str()) {
+            at += 1;
+            continue;
+        }
+        at += 1;
+        let from = at;
+        while at < words.len() && words[at] != ";" && words[at] != "+" {
+            at += 1;
+        }
+        if from < at {
+            out.push(words[from..at].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" "));
+        }
+        at += 1;
+    }
+    out.join(" ; ")
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
@@ -2461,8 +2787,38 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// **봤다는 것은 옵션을 읽는 그 자리에서 적는다**(`saw`) — 다 읽은 뒤 지나온 낱말을 다시
         /// 훑으면 스위치와 그 **값**이 안 갈린다(리뷰 moai-bujq.91c).
         With(&'static [&'static str]),
+        /// **이 스위치를 봤을 때만 명령이고, 아니면 셸에 넘기는 글이다** — `watch` 의 `-x` 다
+        /// (moai-1b0d). watch 는 `-x` 가 없으면 argv 를 빈칸으로 이어 붙여 `sh -c` 에 넘기고,
+        /// `-x` 가 서면 그 낱말들을 그대로 exec 한다. 2026-09-22 에 둘 다 쟀다.
+        ///
+        /// **[`With`](Runs::With) 와 뒤집힌 짝이다** — 저쪽은 안 보이면 명령이 아니고, 이쪽은
+        /// 안 보이면 글이다. 한 갈래로 묶으면 `su <사용자>` 의 뒤가 글이 되어, 사용자 이름이
+        /// 명령줄로 읽힌다.
+        ///
+        /// **목록이 비면 늘 글이다**(moai-gxwh) — `parallel` 이 그 줄이다. 그 감싸는 명령에는
+        /// 뒤엣것을 셸 없이 돌리는 스위치가 아예 없다.
+        Unless(&'static [&'static str]),
     }
-    const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
+    /// 표에 없어도 **값을 안 받는 깃발로 넘기는** 이름 — 감싸는 명령마다 적지 않는다.
+    const COMMON: &[&str] = &["--debug", "--verbose"];
+    /// **찍기만 하고 뒤의 명령을 안 돌리는 스위치**(moai-y0gv) — 판 번호와 도움말이다.
+    ///
+    /// `setsid --version moai mv <id> in_progress --from todo && <쓰기>` 가 빈손으로 지나갔다.
+    /// `setsid --version` 은 판 번호만 찍고 끝나 moai 를 아예 안 돌리는데, [`COMMON`] 에 함께
+    /// 서서 "값 안 받는 평범한 깃발" 로 넘어가 그 집기가 뒤의 쓰기를 풀어 줬다. 짧은
+    /// `-V`·`-h` 는 뭉치 고리의 "모르는 글자는 깃발" 기본값으로 같은 자리를 지나갔다.
+    ///
+    /// **이 표의 감싸는 명령에서는 두 답이 하나로 모인다** — 그 이름을 아는 것(util-linux 의
+    /// `-V`·`-h`, sudo 의 `-V`)은 찍고 끝나고, 모르는 것(coreutils 의 `env -h`)은 그 줄을
+    /// 거절해 아무것도 안 돌린다. 어느 쪽이든 뒤엣것은 안 도니 [`Wrapped::Stops`] 다.
+    ///
+    /// **제 표가 먼저다** — `sudo -h` 의 `-h` 는 도움말이 아니라 호스트를 붙여 받는
+    /// 스위치라([`Wrapper::attach`]) 그 자리에서 먼저 걸린다. 여기는 그 뒤에 선다.
+    /// (2026-09-22 에 쟀다: `sudo -h echo HELLO` 는 `echo` 를 호스트로 읽어 거절한다.)
+    ///
+    /// **잘못 막지 않는다** — 멈추는 쪽은 그 뒤를 아예 안 보는 것이라, 정당한 줄이 이 고침으로
+    /// 막히지 않는다.
+    const PRINTS: &[&str] = &["--version", "--help", "-V", "-h"];
     const WRAPPERS: &[Wrapper] = &[
         Wrapper {
             name: "env",
@@ -2600,16 +2956,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "chrt",
             takes: &["-T", "-P", "-D"],
             long: &["--sched-runtime", "--sched-period", "--sched-deadline"],
-            free: &[
-                "--batch",
-                "--deadline",
-                "--fifo",
-                "--idle",
-                "--other",
-                "--rr",
-                "--reset-on-fork",
-                "--all-tasks",
-            ],
+            free: &["--batch", "--deadline", "--fifo", "--idle", "--other", "--rr", "--reset-on-fork", "--all-tasks"],
             attach: &[],
             args: 1,
             // `-m` 은 쓸 수 있는 우선순위를 찍기만 한다 — 제 자리 인자도 명령도 안 받는다.
@@ -2640,6 +2987,540 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+        },
+        // **뒤가 명령이 아니라 셸에 넘기는 글인 것 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c`
+        // 다. 표에 없어 `flock /tmp/l -c 'sed -i s/a/b/ src/x.rs'` 도 `watch -n 1 'sed -i …'` 도
+        // `script -c 'sed -i …' /dev/null` 도 빈손으로 규칙 2 를 지나갔다.
+        //
+        // **옵션 표는 2026-09-22 에 그 프로그램에게 물어 적었다**(`--help`). 값을 받는 옵션을
+        // 틀리게 적으면 그 값이 명령 자리로 읽혀 정당한 줄을 막는다.
+        //
+        // **flock 의 `-c` 는 자리 인자 뒤에서만 제 것이다** — 잠글 파일을 먼저 먹고, 그 뒤의
+        // `-c` 를 getopt 밖에서 제 손으로 본다. 쟀다: `flock -c 'echo hi' /tmp/lk` 는
+        // `invalid option -- 'c'` 로 거절한다(아래 `seen == w.args` 가 그 자리다).
+        Wrapper {
+            name: "flock",
+            takes: &["-w", "-E"],
+            long: &["--timeout", "--conflict-exit-code"],
+            free: &["--shared", "--exclusive", "--unlock", "--nonblock", "--close", "--no-fork", "--verbose"],
+            attach: &[],
+            // 잠글 파일(또는 파일 서술자 번호) 하나.
+            args: 1,
+            stops: &[],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &["-c", "--command"],
+            // `-c` 의 글은 셸의 명령줄 한 낱말이다 — `bash -c` 와 같다.
+            text: Text::Line,
+            runs: Runs::Always,
+            glued: true,
+            appends: false,
+        },
+        // `watch <명령…>` 은 **낱말을 그대로 이어** `sh -c` 에 넘긴다([`Text::Joined`]). 판 번호는
+        // 이 표에서 홀로 `-v` 다(`-V` 가 아니다) — [`PRINTS`] 에 없어 제 줄의 `stops` 로 든다.
+        Wrapper {
+            name: "watch",
+            takes: &["-n", "-q"],
+            long: &["--interval", "--equexit"],
+            free: &[
+                "--beep",
+                "--color",
+                "--no-color",
+                "--differences",
+                "--errexit",
+                "--chgexit",
+                "--precise",
+                "--no-rerun",
+                "--no-title",
+                "--no-wrap",
+                "--exec",
+            ],
+            // `-d[=<permanent>]` 는 값을 붙여서만 받는다.
+            attach: &["-d"],
+            args: 0,
+            stops: &["-v"],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Joined,
+            // `-x` 를 봤으면 그 낱말들을 그대로 exec 한다 — 셸을 안 지난다.
+            runs: Runs::Unless(&["-x", "--exec"]),
+            glued: false,
+            // **watch 는 argv 뒤에 아무것도 안 붙인다**(리뷰 moai-514e) — `xargs`·`parallel` 과
+            // 다른 자리다. 참으로 적던 판은 `-x` 갈래에서만 그 표가 읽혀, `watch -x moai mv <id>
+            // in_progress` 의 집기를 버리고 `watch 'moai mv <id> in_progress'` 는 세어 — 같은
+            // 명령의 두 철자가 반대 답을 냈다.
+            appends: false,
+        },
+        // `script [옵션] [파일]` — `-c` 가 없으면 사람이 쓸 셸을 띄울 뿐 아무 명령도 안 돌린다
+        // ([`Runs::Never`] 가 그 자리를 [`Wrapped::Stops`] 로 낸다).
+        Wrapper {
+            name: "script",
+            takes: &["-I", "-O", "-B", "-T", "-m", "-E", "-o"],
+            long: &[
+                "--log-in",
+                "--log-out",
+                "--log-io",
+                "--log-timing",
+                "--logging-format",
+                "--echo",
+                "--output-limit",
+            ],
+            free: &["--append", "--return", "--flush", "--force", "--quiet", "--timing"],
+            // `-t[<파일>]` 은 값을 붙여서만 받는다.
+            attach: &["-t"],
+            args: 0,
+            stops: &[],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &["-c", "--command"],
+            text: Text::Line,
+            // 뒤 낱말은 명령이 아니라 **기록 파일**이다. 쟀다: `script /dev/null -c 'echo hi'` 도
+            // `script -c 'echo hi' /dev/null` 도 같이 돈다 — 자리 인자를 지나서도 옵션을 읽는다.
+            runs: Runs::Never,
+            glued: true,
+            appends: false,
+        },
+        // **`strace` 도 뒤의 명령을 돌린다**(moai-gxwh) — `strace -o /tmp/o sed -i s/a/b/ src/x.rs`
+        // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 옆의 `env`·`setsid` 와 같은 꼴이지만
+        // **값을 따로 받는 옵션이 열넷**이라 따로 재고 나서 적었다 — 하나만 틀리게 적어도 그 값이
+        // 명령 자리로 읽혀 정당한 줄을 막는다. 2026-09-22 에 `strace --help`(6.8) 로 걷었다.
+        //
+        // **`-p` 는 이미 도는 프로세스를 붙든다** — 그때는 뒤에 명령이 안 오니 멈춘다
+        // (`ionice -p` 와 같은 줄이다). 값을 받기도 하지만 멈추는 쪽이 먼저라 답이 같다.
+        //
+        // **값을 붙여서만 받는 긴 이름은 `free` 다**(`--daemonize[=…]`·`--quiet[=…]`처럼 대괄호가
+        // 붙은 것들) — 다음 낱말을 먹는 것으로 적으면 `strace --quiet sed -i …` 의 `sed` 를
+        // 값으로 삼켜 그 쓰기를 잃는다. 모르는 긴 이름은 그 줄이 안 도니 그대로 멈춘다.
+        Wrapper {
+            name: "strace",
+            takes: &["-a", "-b", "-e", "-o", "-s", "-E", "-P", "-I", "-S", "-U", "-X", "-O", "-u"],
+            long: &[
+                "--columns",
+                "--detach-on",
+                "--env",
+                "--user",
+                "--argv0",
+                "--interruptible",
+                "--trace",
+                "--signal",
+                "--status",
+                "--trace-fds",
+                "--trace-path",
+                "--abbrev",
+                "--verbose",
+                "--raw",
+                "--read",
+                "--write",
+                "--kvm",
+                "--output",
+                "--string-limit",
+                "--const-print-style",
+                "--summary-syscall-overhead",
+                "--summary-sort-by",
+                "--summary-columns",
+                "--stack-trace-frame-limit",
+                "--syscall-limit",
+                "--inject",
+                "--fault",
+                // **`--decode-pids` 는 값을 **따로** 받는다**(리뷰 moai-514e) — 대괄호가 없는
+                // `--decode-pids=pidns` 라 `required_argument` 고, 다음 낱말을 먹는다. 2026-09-22
+                // 에 쟀다: `strace --decode-pids comm sed -i s/a/b/ x` 는 그 파일을 정말 고치는데,
+                // `free` 에 서 있던 판은 `comm` 을 명령 머리로 읽어 그 쓰기를 통째로 잃었다.
+                // 옆의 `--quiet`·`--decode-fds`·`--daemonize` 들은 대괄호가 붙은 `[=…]` 라 다음
+                // 낱말을 안 먹는다(그 자리에서도 쟀다) — `free` 가 맞다.
+                "--decode-pids",
+            ],
+            free: &[
+                "--output-append-mode",
+                "--summary",
+                "--summary-only",
+                "--summary-wall-clock",
+                "--debug",
+                "--follow-forks",
+                "--output-separately",
+                "--instruction-pointer",
+                "--syscall-number",
+                "--no-abbrev",
+                "--successful-only",
+                "--failed-only",
+                "--seccomp-bpf",
+                "--kill-on-exit",
+                "--daemonize",
+                "--stack-trace",
+                "--relative-timestamps",
+                "--absolute-timestamps",
+                "--syscall-times",
+                "--strings-in-hex",
+                "--decode-fds",
+                "--quiet",
+                "--tips",
+            ],
+            attach: &[],
+            args: 0,
+            stops: &["-p", "--attach"],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+            appends: false,
+        },
+        // **`parallel` 은 xargs 와 같은 자리다**(moai-gxwh) — `parallel sed -i s/a/b/ ::: src/x.rs`
+        // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 2026-09-22 에 GNU parallel 20231122 으로
+        // 재서 셋을 봤다.
+        //
+        // - **낱말을 그대로 이어 셸에 넘긴다** — `parallel echo A B '>' /tmp/probe ::: x` 가 그
+        //   파일에 적는다. 따옴표가 안 되살아나니 [`Text::Joined`] 와 같은 자고, 글 하나로 준
+        //   명령(`parallel 'echo … > f' ::: x`)도 같은 답이다
+        // - **입력을 argv 뒤에 붙인다** — `parallel echo HI ::: A B` 가 `HI A`·`HI B` 를 찍는다.
+        //   xargs 와 같아 집기 축을 끈다(`appends`)
+        // - **`:::` 부터는 명령이 아니라 입력이다** — 이어 붙이면 그 낱말이 경로로 읽혀, 아무도
+        //   안 쓰는 파일(`:::`)을 쓴다며 잘못 막는다([`Text::Feed`] 가 거기서 끊는다)
+        //
+        // **옵션 표는 그 스크립트에게 물어 적었다** — `/usr/bin/parallel` 의
+        // `options_completion_hash()` 가 GetOptions 에 그대로 넘기는 표고, `=s`·`=i`·`=f` 가 값을
+        // 따로 받는다는 뜻이다. 백 개가 넘어 손으로 고르면 틀리는 자리다. 모르는 긴 이름은 parallel
+        // 이 그 줄을 거절하니 그대로 멈춘다.
+        Wrapper {
+            name: "parallel",
+            // **`-e`·`-i` 는 값이 **있어도 없어도** 되는데 다음 낱말을 먹는다**(리뷰 moai-514e) —
+            // 그 스크립트의 `eof|e:s`·`replace|i:s` 고, Getopt::Long 의 `:s` 는 옵션이 아닌 다음
+            // 낱말을 값으로 가져간다. 2026-09-22 에 쟀다: `parallel -e XX sed -i …` 도
+            // `parallel -e sed -i …` 도 그 다음 낱말을 먹는다.
+            //
+            // **`-l`(`max-lines|maxlines|l:f`)은 여기 없다** — `:f` 라 **숫자일 때만** 먹는다.
+            // 쟀다: `parallel -l 5 sed -i …` 은 5 를 먹고, `parallel -l sed -i …` 은 안 먹는다.
+            // 어느 쪽으로 적어도 다른 쪽 철자를 잃어, 먹는 것으로 적지 않고 남겨 둔다 — 지금은
+            // `parallel -l 5 <쓰기>` 의 쓰기가 안 보인다("숫자면 먹는다" 를 적을 자리가 없다).
+            takes: &[
+                "-B", "-C", "-D", "-E", "-H", "-I", "-J", "-L", "-N", "-P", "-U", "-W", "-a", "-d", "-e", "-i", "-j",
+                "-n", "-s",
+            ],
+            long: &[
+                "--arg-file",
+                "--arg-file-sep",
+                "--arg-sep",
+                "--argfile",
+                "--argfilesep",
+                "--argsep",
+                "--basefile",
+                "--basenameextensionreplace",
+                "--basenamereplace",
+                "--bf",
+                "--bin",
+                "--block",
+                "--block-size",
+                "--block-timeout",
+                "--blocksize",
+                "--blocktimeout",
+                "--bner",
+                "--bnr",
+                "--bt",
+                "--col-sep",
+                "--colsep",
+                // **네 이름은 한 줄의 네 철자다**(리뷰 moai-514e) — 그 스크립트가
+                // `use-compress-program|compress-program|usecompressprogram|compressprogram=s` 로
+                // 한 줄에 적어 넷 다 값을 받는데, 붙임표가 든 쪽만 `free` 에 서 있었다. 2026-09-22
+                // 에 쟀다: `parallel --compress-program pigz sed -i s/a/b/ ::: x` 는 그 파일을 정말
+                // 고치는데, 그 판은 `pigz` 를 명령 머리로 읽어 쓰기를 통째로 잃었다.
+                "--compress-program",
+                "--compressprogram",
+                "--ctag-string",
+                "--ctagstring",
+                "--debug",
+                "--decompress-program",
+                "--decompressprogram",
+                "--delay",
+                "--delimiter",
+                "--dirnamereplace",
+                "--dnr",
+                "--env",
+                // **`:s` 도 값을 받는다**(리뷰 moai-514e) — 먼저 적은 표는 `=s`·`=i`·`=f` 만
+                // 걷어 `eof|e:s` 와 `replace|i:s` 를 통째로 놓쳤다. 모르는 긴 이름은 멈추니
+                // `parallel --eof XX sed -i …` 의 쓰기가 아무에게도 안 보였다. 2026-09-22 에 쟀다.
+                "--eof",
+                "--er",
+                "--extensionreplace",
+                "--filter",
+                "--group-by",
+                "--groupby",
+                "--header",
+                "--id",
+                "--jl",
+                "--joblog",
+                "--jobs",
+                "--linkinputsource",
+                "--load",
+                "--max-args",
+                "--max-chars",
+                "--max-procs",
+                "--max-replace-args",
+                "--maxargs",
+                "--maxchars",
+                "--maxprocs",
+                "--maxreplaceargs",
+                "--memfree",
+                "--memsuspend",
+                "--parens",
+                "--process-slot-var",
+                "--processslotvar",
+                "--profile",
+                "--recend",
+                "--recstart",
+                // `replace|i:s` — 위의 `--eof` 와 같은 줄이다(리뷰 moai-514e).
+                "--replace",
+                "--res",
+                "--result",
+                "--results",
+                "--retries",
+                "--return",
+                "--rsync-opts",
+                "--rsyncopts",
+                "--semaphore-name",
+                "--semaphore-timeout",
+                "--semaphorename",
+                "--semaphoretimeout",
+                "--seqreplace",
+                "--shard",
+                "--slf",
+                "--slotreplace",
+                "--sql",
+                "--sql-and-worker",
+                "--sql-master",
+                "--sql-worker",
+                "--sqlandworker",
+                "--sqlmaster",
+                "--sqlworker",
+                "--ssh",
+                "--ssh-delay",
+                "--sshdelay",
+                "--sshloginfile",
+                "--st",
+                "--tag-string",
+                "--tagstring",
+                "--tempdir",
+                "--template",
+                "--term-seq",
+                "--termseq",
+                "--tf",
+                "--timeout",
+                "--tmpdir",
+                "--tmpl",
+                "--total",
+                "--total-jobs",
+                "--totaljobs",
+                "--transfer-file",
+                "--transfer-files",
+                "--transferfile",
+                "--transferfiles",
+                "--trc",
+                "--use-compress-program",
+                "--use-decompress-program",
+                "--usecompressprogram",
+                "--usedecompressprogram",
+                "--wd",
+                "--work-dir",
+                "--workdir",
+                "--xapplyinputsource",
+            ],
+            free: &[
+                "--bar",
+                "--bg",
+                "--cat",
+                "--cf",
+                "--cleanup",
+                "--color",
+                "--color-fail",
+                "--color-failed",
+                "--colorfail",
+                "--colorfailed",
+                "--colour",
+                "--colour-fail",
+                "--colour-failed",
+                "--colourfail",
+                "--colourfailed",
+                "--compress",
+                "--controlmaster",
+                "--csv",
+                "--ctag",
+                "--ctrl-c",
+                "--ctrlc",
+                "--eta",
+                "--exit",
+                "--fg",
+                "--fifo",
+                "--files",
+                "--files0",
+                "--filter-host",
+                "--filter-hosts",
+                "--filterhosts",
+                "--gnu",
+                "--group",
+                "--hashbang",
+                "--help",
+                "--hgrp",
+                "--hostgroup",
+                "--hostgroups",
+                "--hostgrp",
+                "--interactive",
+                "--keep-order",
+                "--keeporder",
+                "--latest-line",
+                "--latestline",
+                "--lb",
+                "--line-buffer",
+                "--line-buffered",
+                "--linebuffer",
+                "--linebuffered",
+                "--link",
+                "--ll",
+                "--max-line-length-allowed",
+                // **`max-lines|maxlines|l:f` 는 숫자일 때만 값을 먹는다**(리뷰 moai-514e).
+                // 2026-09-22 에 쟀다: `parallel --max-lines 5 sed -i …` 은 5 를 먹고,
+                // `parallel --max-lines sed -i …` 은 안 먹는다. "숫자면 먹는다" 를 적을 칸이 이
+                // 표에 없어, 짧은 `-l` 이 뭉치 고리의 기본값으로 서는 쪽(값 없는 깃발)에 맞춘다 —
+                // 모르는 긴 이름으로 두어 통째로 멈추던 판보다 한 철자를 더 본다.
+                // 남은 자리는 `parallel --max-lines 5 <쓰기>` 다 — 그 쓰기가 아직 안 보인다.
+                "--max-lines",
+                "--maxlines",
+                "--maxlinelengthallowed",
+                "--nn",
+                "--no-ctrl-c",
+                "--no-ctrlc",
+                "--no-k",
+                "--no-keep-order",
+                "--no-notice",
+                "--no-run-if-empty",
+                "--noctrlc",
+                "--nok",
+                "--nokeeporder",
+                "--nonall",
+                "--nonotice",
+                "--norunifempty",
+                "--noswap",
+                "--null",
+                "--onall",
+                "--open-tty",
+                "--output-as-files",
+                "--output-as-files0",
+                "--outputasfiles",
+                "--outputasfiles0",
+                "--pipe",
+                "--pipe-part",
+                "--pipepart",
+                "--plus",
+                "--progress",
+                "--quote",
+                "--record-env",
+                "--recordenv",
+                "--regex",
+                "--regexp",
+                "--remove-rec-sep",
+                "--removerecsep",
+                "--resume",
+                "--resume-failed",
+                "--resumefailed",
+                "--retry-failed",
+                "--retryfailed",
+                "--round",
+                "--round-robin",
+                "--roundrobin",
+                "--rrs",
+                "--semaphore",
+                "--shebang",
+                "--shell-quote",
+                "--shell_quote",
+                "--shellquote",
+                "--show-limits",
+                "--showlimits",
+                "--shuf",
+                "--silent",
+                "--skip-first-line",
+                "--skipfirstline",
+                "--spreadstdin",
+                "--tag",
+                "--tee",
+                "--tmux",
+                "--tmux-pane",
+                "--tmuxpane",
+                "--tollef",
+                "--transfer",
+                "--tty",
+                "--ungroup",
+                "--use-cores-instead-of-threads",
+                "--use-cpus-instead-of-cores",
+                "--use-sockets-instead-of-threads",
+                "--usecoresinsteadofthreads",
+                "--usecpusinsteadofcores",
+                "--usesocketsinsteadofthreads",
+                "--verbose",
+                "--version",
+                "--wait",
+                "--will-cite",
+                "--willcite",
+                "--xapply",
+                "--xargs",
+                "-0",
+                "-M",
+                "-T",
+                "-V",
+                "-X",
+                "-Y",
+                "-g",
+                "-h",
+                "-k",
+                "-m",
+                "-o",
+                "-p",
+                "-q",
+                "-r",
+                "-t",
+                "-u",
+                "-v",
+                "-x",
+            ],
+            attach: &[],
+            args: 0,
+            // **뒤의 명령을 아예 안 돌리는 스위치**(2026-09-22 에 쟀다) — 찍기만 하거나
+            // 돌릴 줄을 보여 주기만 한다. `--citation`·`--bibtex` 는 이 판이 모르는 이름이라
+            // 그 줄을 거절하고(같은 답이다), `--shell-completion` 은 값을 받아 완성 글을 찍는다.
+            stops: &[
+                "--bibtex",
+                "--citation",
+                "--dr",
+                "--dry-run",
+                "--dryrun",
+                "--embed",
+                "--number-of-cores",
+                "--number-of-cpus",
+                "--number-of-sockets",
+                "--number-of-threads",
+                "--numberofcores",
+                "--numberofcpus",
+                "--numberofsockets",
+                "--numberofthreads",
+                "--shell-completion",
+                "--shellcompletion",
+            ],
+            elsewhere: &[],
+            shell: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Feed,
+            // 명령으로 돌리는 스위치가 없다 — 뒤는 늘 글이다([`Runs::Unless`] 의 빈 목록).
+            runs: Runs::Unless(&[]),
+            glued: false,
+            // **`:::` 의 입력을 argv 뒤에 붙인다** — xargs 와 같은 줄이다. 이 줄은 [`Wrapped::Runs`]
+            // 로 안 나가 지금은 안 읽히지만(늘 글이다), 거짓으로 적어 두면 표가 제 프로그램에 대해
+            // 거짓말을 한다 — 나중에 이 줄이 명령 자리로 나가는 날 집기 축이 조용히 켜진다
+            // (리뷰 moai-514e). 실제로 끄는 자는 [`Text::Feed`] 가 든 `appends` 다.
+            appends: true,
         },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
         // 표에 없어 `echo x | xargs sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
@@ -2780,7 +3661,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "su",
             takes: &["-s", "-w", "-g", "-G"],
             long: &["--shell", "--whitelist-environment", "--group", "--supp-group"],
-            free: &["--preserve-environment", "--fast", "--pty"],
+            // **짧은 것도 함께 든다**(moai-ta6q) — 아래 뭉치 고리가 `letter` 로 같은 표를 읽어,
+            // 이 표가 **모르는** 글자를 넘긴 적이 있는지를 적는다. `su --help` 로 걷었다.
+            free: &["--preserve-environment", "--fast", "--pty", "-m", "-p", "-f", "-P"],
             attach: &[],
             args: 0,
             stops: &[],
@@ -2797,7 +3680,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "runuser",
             takes: &["-s", "-w", "-g", "-G", "-u"],
             long: &["--shell", "--whitelist-environment", "--group", "--supp-group", "--user"],
-            free: &["--preserve-environment", "--fast", "--pty"],
+            // **짧은 것도 함께 든다**(moai-ta6q) — 아래 뭉치 고리가 `letter` 로 같은 표를 읽어,
+            // 이 표가 **모르는** 글자를 넘긴 적이 있는지를 적는다. `su --help` 로 걷었다.
+            free: &["--preserve-environment", "--fast", "--pty", "-m", "-p", "-f", "-P"],
             attach: &[],
             args: 0,
             stops: &[],
@@ -2813,6 +3698,22 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             appends: false,
         },
     ];
+    // **find 의 명령은 옵션 뒤가 아니라 술어 안에 선다**(moai-7kif) — 위 표는 "옵션이 다 끝난
+    // 자리부터가 명령" 을 전제로 서는데 find 는 그 전제가 안 맞는다. `-exec`·`-execdir`·`-ok`·
+    // `-okdir` 넷이 같은 자리고, 저마다 `;` 나 `+` 로 끝나며 **한 줄에 여럿이 설 수 있다** —
+    // 자리 하나(`skip`)로는 못 든다.
+    //
+    // 그래서 글로 낸다([`Text::Find`]). 걷어 모으는 것은 [`handed_text`] 의 일이다 — 이 함수가
+    // 내는 것은 "그 뒤는 명령이 아니라 글이다" 하나뿐이고, 그 글을 짓는 자리는 다른 꼴들과
+    // 나란히 선다.
+    if head == "find" {
+        // **`-execdir`·`-okdir` 의 자리는 아직 안 적는다**(리뷰 moai-514e) — 그 둘은 찾은 파일의
+        // 디렉터리에서 돌아 [`Wrapper::elsewhere`] 와 같은 자리인데(`env -C DIR`·`su -l`),
+        // `*spot` 을 세우면 그 표가 `moai` 축을 통째로 닫아 `find . -execdir moai add x \;` 의
+        // 규칙 1 이 함께 꺼진다. 지금은 상대 경로 쪽으로 기울어 있다 — `find /tmp -execdir tee
+        // src/store.rs \;` 를 이 저장소의 쓰기라며 잘못 막는다. 어느 축을 닫을지는 사람이 정한다.
+        return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find, args: Vec::new() });
+    }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
     let (takes, long, stops, chdir, hands) = (w.takes, w.long, w.stops, w.chdir, w.hands);
     // **[`astray`] 를 가리지 않는다**(리뷰) — 같은 이름의 함수가 이 파일에 있고, 둘 다 자리를
@@ -2848,8 +3749,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 명령으로 읽어 잘못 막았고, `runuser -s/usr/bin/bash sed -i …` 는 뭉치에 붙은 **값**의 `u`
     // 한 글자에 같은 답을 냈다.
     let mut saw = false;
+    // **이 표가 모르는 짧은 글자를 넘겼는가**(moai-ta6q) — 넘긴 줄은 그 프로그램이 거절하니,
+    // 셸이 아닌 프로그램의 argv 를 다시 짓는 자리가 도는 줄을 지어내면 안 된다.
+    let mut weird = false;
     let flags = match w.runs {
-        Runs::With(f) => f,
+        Runs::With(f) | Runs::Unless(f) => f,
         _ => &[][..],
     };
     // **옵션과 피연산자를 섞어 읽는가** — `su`·`runuser` 는 getopt 를 `+` 없이 불러 GNU 가 argv 를
@@ -2878,6 +3782,16 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 need!(rest.get(n));
                 seen += 1;
                 n += 1;
+            }
+            // **getopt 밖에서 제 손으로 글 스위치를 보는 감싸는 명령은 `--` 뒤에서도 본다**
+            // (리뷰 moai-514e) — flock 이 그렇다. 잠글 파일을 먹고 **바로 다음** 낱말이 글자째
+            // `-c`·`--command` 인지를 제가 견준다. 2026-09-22 에 쟀다: `flock -- <파일> -c '<글>'`
+            // 은 그 글을 정말 돌리는데, 여기서 곧장 끊던 판은 `-c` 를 명령 머리로 읽어 그 글을
+            // 아무에게도 안 보였다. 자리 인자가 없는 줄(su·script·env)은 `--` 뒤가 피연산자라
+            // 여기 안 온다.
+            if w.args > 0 && rest.get(n).is_some_and(|x| hands.contains(&x.as_str())) {
+                need!(rest.get(n + 1));
+                return Some(Wrapped::Hands { at: n + 1, glued: None, text: w.text, args: Vec::new() });
             }
             // **`--` 뒤는 남김없이 피연산자다** — su·runuser 는 사용자 뒤의 그것을 대상 셸의 argv 로
             // 잇는다(moai-729n). 그냥 끊던 판은 `su 남 -- -c '<글>'` 의 글을 아무도 안 읽었다.
@@ -2965,6 +3879,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 .then_some(None)
                 .or_else(|| word.strip_prefix(f).filter(|r| r.starts_with('=')).map(|r| Some(r[1..].to_string())))
         }) {
+            // **제 자리 인자 앞에 선 글 스위치는 그 프로그램이 거절한다**(moai-1b0d) — flock 은
+            // 잠글 파일을 먼저 먹고 그 뒤의 `-c` 를 getopt 밖에서 제 손으로 본다. 2026-09-22 에
+            // 쟀다: `flock -c 'echo hi' /tmp/lk` 는 `invalid option -- 'c'` 다. 글로 읽던 판이라면
+            // 아무것도 안 도는 줄에서 쓰기를 지어내 막고, 집기를 지어내 뒤의 쓰기를 풀어 줬다.
+            // 자리 인자가 없는 감싸는 명령(`env`·`sudo`·`su`)에서는 늘 참이라 답이 안 바뀐다.
+            //
+            // **flock 이 제 손으로 보는 것은 글자째 그 낱말 하나다** — `--command=<글>` 처럼 값을
+            // 붙인 꼴은 그 견줌에 안 맞아 안 돈다. 멈추는 쪽이 그 답에 가깝다.
+            if seen < w.args || (w.args > 0 && glued.is_some()) {
+                return Some(Wrapped::Stops);
+            }
             if w.glued {
                 // **섞어 읽는 것은 곧장 안 낸다**(moai-729n) — 이 뒤에도 옵션과 피연산자가 선다.
                 if mixes {
@@ -2972,11 +3897,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                     if eats {
                         need!(rest.get(n + 1));
                     }
-                    hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                    hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                     n += 1 + usize::from(eats);
                     continue;
                 }
-                return Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
             }
             // 값 없는 깃발에 `=` 를 단 꼴(`sudo -s=x`)은 그 프로그램이 거절한다 — 붙은 것을 글로
             // 읽지 않는다. 표만 달고 옵션을 마저 읽는다.
@@ -3007,6 +3932,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             n += 1;
             continue;
         }
+        // **찍기만 하는 스위치에서 멈춘다**([`PRINTS`], moai-y0gv) — 판 번호와 도움말은 뒤의
+        // 명령을 아예 안 돌린다. 값을 따로 받는 철자는 위에서 이미 걸렸고, **값을 붙여서만 받는
+        // 철자는 제 표가 이긴다** — `sudo -h` 는 도움말이 아니라 호스트를 받는 스위치다.
+        if PRINTS.contains(&word.as_str()) && !w.attach.contains(&word.as_str()) {
+            return Some(Wrapped::Stops);
+        }
         // **모르는 긴 옵션에서는 멈춘다** — 값을 따로 받는 것이면 그 값을 명령으로 읽는다.
         // `nice --10` 처럼 숫자만 붙은 것은 값을 안 받는다.
         if let Some(name) = word.strip_prefix("--") {
@@ -3016,6 +3947,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             {
                 return Some(Wrapped::Stops);
             }
+            // **값 없는 긴 이름도 봤다고 적는다**(리뷰 moai-514e) — [`Runs`] 의 스위치가 값을 안
+            // 받으면 여기로 오는데, 적지 않던 판은 `watch --exec` 를 못 봐 `-x` 와 **반대 답**을
+            // 냈다. 짧은 `-x` 는 뭉치 고리에서 적히고 긴 `--exec` 는 `free` 에 서서 안 적혀,
+            // `watch --exec echo 'A > B'` 는 없는 쓰기를 지어내 막고 `watch -x` 는 그냥 지났다.
+            saw |= flags.contains(&word.as_str());
             n += 1;
             continue;
         }
@@ -3063,17 +3999,23 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // (`env -S`)은 남은 글자가 곧 글이라 옵션이 여기서 끝나고, 값 없는 깃발(`sudo -s`)은
             // 뭉치의 남은 글자도 스위치다 — `sudo -su 남 moai add x` 의 `u` 가 그렇다.
             if letter(hands, c) {
+                // 자리 인자 앞의 글 스위치는 위와 같이 멈춘다 — flock 은 그 줄을 거절한다.
+                // **뭉치로 선 것도 같다**: flock 이 제 손으로 보는 것은 글자째 `-c` 한 낱말뿐이라
+                // `flock /tmp/l -nc '<글>'` 도 안 돈다. 여기서 멈추는 쪽이 그 답에 가깝다.
+                if seen < w.args || (w.args > 0 && word.len() > 2) {
+                    return Some(Wrapped::Stops);
+                }
                 if w.glued {
                     let left = &word[at + c.len_utf8()..];
                     let glued = (!left.is_empty()).then(|| left.to_string());
                     // 섞어 읽는 것은 여기서도 적어 두고 마저 읽는다(moai-729n).
                     if mixes {
-                        hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                        hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                         eats = left.is_empty();
                         stop = false;
                         break;
                     }
-                    return Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                    return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                 }
                 handed = true;
                 stop = false;
@@ -3096,11 +4038,20 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 stop = false;
                 break;
             }
+            // **뭉치 안의 판 번호·도움말**([`PRINTS`], moai-y0gv) — `setsid -V <명령…>` 도
+            // `env -ih <명령…>` 도 그 명령을 안 돌린다. 값이 시작되기 전의 글자만 여기 온다.
+            if letter(PRINTS, c) {
+                return Some(Wrapped::Stops);
+            }
             // 값을 안 받는 글자만 묶였으면 넘긴다 — `nice -5` 도 여기다.
             if !(c.is_ascii_alphanumeric() || c == '.') {
                 stop = true;
                 break;
             }
+            // **이 표가 모르는 글자를 넘겼다**(moai-ta6q) — 아래 `alien` 갈래가 이것을 본다.
+            // 넘기는 것 자체는 그대로다: 표에 짧은 글자를 다 적은 감싸는 명령이 아직 su·runuser
+            // 뿐이라, 모르면 멈추는 쪽으로 돌리면 나머지가 통째로 안 보인다(`env -i` 가 그 줄이다).
+            weird |= !letter(w.free, c);
             stop = false;
         }
         if stop {
@@ -3124,7 +4075,13 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // **홀로 선 `-` 도 `-l` 과 같은 줄이다**(moai-2avz) — 멈추지 않고 자리만 모른다고 적는다.
     // 그 피연산자는 사용자 이름이 아니니 `ops` 에서 걷는다 — 안 걷으면 `su - 남 -c '<글>'` 의
     // 남이 대상 셸의 argv 로 읽혀, 아무도 안 넘긴 낱말이 명령이 된다.
-    if mixes && dashed > 0 && ops.first().is_some_and(|&i| rest[i] == "-") {
+    //
+    // **로그인 스위치가 있는 줄에서만이다**(`-l`, 리뷰 moai-514e) — `mixes` 는 "getopt 가 옵션과
+    // 피연산자를 섞어 읽는가" 라 [`Runs::Never`] 를 함께 문다. `script` 가 그 줄인데 거기서 `-` 는
+    // 로그인이 아니라 **기록 파일 이름**이다. 2026-09-22 에 쟀다: `script -q - -c '<글>'` 은 그 글을
+    // 정말 돌리고 `-` 라는 파일을 여기 만든다 — 자리를 모른다고 적던 판은 그 안의 상대 경로 쓰기를
+    // 통째로 버렸다.
+    if mixes && dashed > 0 && w.elsewhere.contains(&"-l") && ops.first().is_some_and(|&i| rest[i] == "-") {
         *spot = true;
         ops.remove(0);
     }
@@ -3132,11 +4089,38 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 셸의 명령줄로 읽으면 아무도 안 돌리는 글을 규칙에 비춰 잘못 막는다. 2026-09-22 에 쟀다:
     // `su -s /bin/echo -c 'IGNORED' 남 A` 는 `-c IGNORED A` 를 찍는다.
     let alien = prog.as_deref().map(basename).is_some_and(|p| !is_shell(p));
-    if handed && !alien {
-        return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
+    // **모르는 짧은 글자를 넘긴 적이 있으면 그 argv 를 다시 짓지 않는다**(moai-ta6q, 리뷰
+    // moai-514e.x2u 11번) — 진짜 su 는 `invalid option -- 'x'` 로 아무것도 안 돌리는데, 뭉치 고리가
+    // 그 글자를 조용히 넘겨 `ops` 에 안 남기니, 셸이 아닌 프로그램의 argv 를 다시 짓는 자리가
+    // `/usr/bin/tee 'src/x.rs'` 라는 **도는 줄을 지어냈다**. 2026-09-22 에 쟀다:
+    // `su -s /usr/bin/tee nobody -x /tmp/probe` 는 그 파일을 안 만든다.
+    //
+    // **셸 갈래는 여기가 아니다** — 그쪽은 `-c` 의 글을 그대로 내고, 이 표가 짧은 글자를 다
+    // 아는 감싸는 명령이 su·runuser 뿐이라 잣대를 넓히면 모르는 자리가 통째로 안 보인다.
+    if alien && weird {
+        return Some(Wrapped::Stops);
     }
-    if !alien && let Some(hands) = hands_at {
-        return Some(hands);
+    if handed && !alien {
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text, args: Vec::new() });
+    }
+    // **넘긴 글 뒤의 피연산자는 그 셸의 자리 인자다**(moai-5ycj) — 맨 앞 하나는 사용자라 뺀다
+    // ([`Wrapped::Hands::args`]). 걷어 두기만 하고 버리던 판은 `su -c 'sed -i s/a/b/ "$0"' 남
+    // src/x.rs` 가 정말 고치는 파일을 `"$0"` 인 채로 버렸다 — su 가 사용자를 먹어 그 뒤 첫 낱말이
+    // `$0` 이라, 같은 줄의 `"$1"` 은 사실 비어 있다(2026-09-22 에 쟀다).
+    //
+    // **`-u <사용자>` 로 사용자를 준 꼴은 아직 못 읽는다**(리뷰 moai-514e) — `runuser -u 남 -c
+    // '<글>' A B` 는 `-u` 가 사용자를 제 값으로 먹어 A 가 `$0` 인데, 그 스위치를 본 순간
+    // (`saw`) 아래 피연산자 고리가 곧장 끊겨 `ops` 가 빈 채로 온다. 빈 것은 안 푸는 쪽이라
+    // 새는 것이 아니라 못 보는 것이다.
+    if !alien && let Some(Wrapped::Hands { at, glued, text, .. }) = hands_at {
+        return Some(Wrapped::Hands { at, glued, text, args: ops.iter().skip(1).copied().collect() });
+    }
+    // **`-x` 를 안 봤으면 옵션이 끝난 자리부터가 글이다**([`Runs::Unless`], moai-1b0d) — watch 는
+    // 그 낱말들을 빈칸으로 이어 `sh -c` 에 넘긴다. 봤으면 아래로 내려가 명령 자리로 선다.
+    // 뒤가 비면 watch 가 그 줄을 거절한다([`Wrapped::Stops`]).
+    if matches!(w.runs, Runs::Unless(_)) && !saw {
+        need!(rest.get(n));
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text, args: Vec::new() });
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 그 낱말을 명령으로 읽지 않는다 —
     // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
@@ -3152,7 +4136,13 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             _ => None,
         });
         // 사용자만 있고 넘길 것도 없으면 사람이 쓸 셸을 띄울 뿐이다.
-        if args.is_empty() && text.is_none() && prog.is_none() {
+        //
+        // **대상 셸을 댈 수 있는 줄에서만 argv 를 다시 짓는다**(`shell`, 리뷰 moai-514e) —
+        // [`Wrapped::Shell`] 은 "그 셸과 그 셸의 argv" 라, 셸을 띄우지 않는 줄에는 그런 것이
+        // 없다. `script` 가 [`Runs::Never`] 라는 이유로 여기 들던 판은 2026-09-22 에 잰 것을
+        // 뒤집었다 — `script -q -- /dev/null -c '<글>'` 은 `unexpected number of arguments` 로
+        // 아무것도 안 돌리는데, 그 글을 도는 명령줄로 읽어 잘못 막았다.
+        if w.shell.is_empty() || (args.is_empty() && text.is_none() && prog.is_none()) {
             return Some(Wrapped::Stops);
         }
         return Some(Wrapped::Shell { prog, args, text });
@@ -4321,15 +5311,21 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     impl Bailout {
         /// **겹을 나오며 이 묶음을 풀 수 있는가** — 전제 다섯을 한 자리에 모은다. 가름자를 두 벌로
         /// 적던 판은 쓰기 규칙과 기록이 갈릴 자리를 열어 뒀다(moai-m5mg 가 닫은 그 갈림이다).
-        fn resolves(&self, top: usize, deep: usize, iffy: Option<usize>) -> bool {
-            self.would(top, deep) && iffy.is_none_or(|c| self.floor < c)
+        fn resolves(&self, top: usize, iffy: Option<usize>) -> bool {
+            self.would(top) && iffy.is_none_or(|c| self.floor < c)
         }
 
         /// **조건만 아니었으면 풀렸을 묶음인가**(moai-d5o9 12번) — 전제 넷 가운데 "이 셸이 정말
         /// 돌았는가"(`iffy`) 하나만 안 선 자리다. 그때 그 집기는 이겼다고는 못 해도 **돌았을 수는**
         /// 있어, 버리는 대신 표를 달아 적는다([`credit`]).
-        fn would(&self, top: usize, deep: usize) -> bool {
-            self.hard && self.floor >= top && self.depth <= deep
+        ///
+        /// **하위 셸의 깊이는 여기서 안 묻는다**(moai-qlr8) — 그 하위 셸을 나오는 자리가 이 묶음을
+        /// **걷기** 때문이다(아래 `seg.floor < b.floor`). 그래서 여기까지 서 있는 묶음은 곧 글이 그
+        /// 하위 셸을 한 번도 안 나왔다는 뜻이고, 그 `exit` 의 값이 그대로 자식 셸의 값이 된다.
+        /// bash 로 쟀다: `bash -c 'false || ( echo f; exit 1 )'` 는 1 이고,
+        /// `bash -c 'false || ( echo f; exit 1 ); echo d'` 는 0 이다(뒤엣것은 걷힌다).
+        fn would(&self, top: usize) -> bool {
+            self.hard && self.floor >= top
         }
     }
     /// **한 셸에 매인 판 한 벌** — 다시 읽은 겹([`Layer`])에 들어설 때 통째로 넣고 나오면 통째로
@@ -4384,6 +5380,22 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         /// 서지만 그 효과는 묶음 밖으로 이어진다 — `chancy`·`iffy` 와 갈리는 자리고, 그래서 깊이를
         /// `seg.floor` 가 아니라 [`Seg::low`] 로 잰다. 새 셸은 제 것을 따로 세고 나오면 되돌린다.
         bailed: Option<usize>,
+        /// **이 셸이 0 으로 일찍 끝날 수 있는 자리의 하위 셸 깊이**(moai-sq3q) — 집기가 지면
+        /// 끝내는 자리를 지나왔는데 그 `exit` 가 **0 아닌 값을 안 댄다**([`Bailout::hard`] 의
+        /// 반대편이다).
+        ///
+        /// `bash -c '집기 || exit 0' && 쓰기` 가 그 줄이다. 집기가 져도 자식이 0 으로 끝나 바깥
+        /// `&&` 가 도는데, 겹을 나오는 자리는 그 `&&` 에 닿은 것을 집기가 이긴 증거로 읽었다 —
+        /// 빈손의 쓰기가 샜다. 바로 옆의 묶음 철자(`|| { exit 0; }`)는 [`Bailout::hard`] 가 값을
+        /// 보아 제대로 막혔으니, 한 줄의 두 철자가 반대 판정을 받던 자리다.
+        ///
+        /// **겹 밖으로 나가는 자리만 막는다** — 같은 셸 안의 쓰기는 그대로 지나간다. 집기가 지면
+        /// 그 `exit` 가 정말 이 셸을 끝내니 뒤의 쓰기는 아예 안 돈다. 맨 바깥 셸에서 이 자가 아무
+        /// 일도 안 하는 것도 같은 까닭이다(나올 겹이 없다).
+        ///
+        /// **하위 셸을 나오면 걷힌다**([`Seg::low`], `bailed` 와 같은 자) — `( 집기 || exit 0 );
+        /// 집기2 || exit 1` 의 괄호 안 `exit` 는 그 괄호만 끝내고 이 셸은 그대로 산다.
+        soft: Option<usize>,
     }
     /// 다시 읽은 겹 하나([`Layer`])와 **그 겹에 들어설 때의 판** — 나오면 되돌린다.
     struct Frame {
@@ -4406,7 +5418,8 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     ///   집기를 함께 버린다([`prune`]). 그 짝인 번호를 같이 들어야 해서 꼴도 다르다
     /// - `enters` 는 표가 아니라 **깊이마다의 번호**라 제 스택으로 선다. 걷는 때도 다르다 —
     ///   `handed_from` 이 **자르기 전의** 값을 읽어야 해서 이 토막의 끝에서 자른다
-    /// - `moved`·[`Scope::bailed`] 는 묶음이 아니라 **하위 셸**을 나올 때 걷힌다([`Seg::low`])
+    /// - `moved`·[`Scope::bailed`]·[`Scope::soft`] 는 묶음이 아니라 **하위 셸**을 나올 때 걷힌다
+    ///   ([`Seg::low`])
     #[derive(Default, Clone, Copy)]
     struct Blocks {
         /// `! ( … )` 의 `!` 가 여는 묶음 — 그 안의 집기는 져야 뒤가 도니 아무것도 안 쥔다.
@@ -4534,6 +5547,21 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     fn prune(picked: &mut Vec<Pick>, from: usize, deeper_than: usize) {
         picked.retain(|p| p.at < from || p.level <= deeper_than);
     }
+    /// **이 `exit` 가 0 아닌 값으로 끝나는가** — 값이 겹 밖으로 흐르는 자리에서만 묻는다
+    /// ([`Bailout::hard`]·[`Scope::soft`]). 맨 낱말로 잰다: `exit "$n"` 은 글자만으로 모르니
+    /// 아닌 쪽으로 센다.
+    ///
+    /// **세는 자를 한 자리에 둔다**(moai-sq3q) — 묶음 철자(`|| { exit 0; }`)는 값을 보고 맨
+    /// `|| exit 0` 은 안 보던 판은 한 줄의 두 철자에 반대 판정을 냈다.
+    ///
+    /// **인자 없는 `exit` 는 앞 명령의 값이다**(`prior`) — `집기 || exit` 의 앞은 방금 진 집기라
+    /// 0 이 아니지만, 묶음 안의 `{ echo f; exit; }` 의 앞은 `echo` 라 모른다.
+    fn hard_exit(words: &[String], prior: bool) -> bool {
+        match words.get(1) {
+            None => prior,
+            Some(a) => a.parse::<i64>().is_ok_and(|n| n % 256 != 0),
+        }
+    }
     let over = line.over();
     for seg in line.segs() {
         // **몸통이 안 돌았을 수 있는 묶음을 나오면 그 안의 집기는 끝난다**(리뷰 moai-ju21.70g) —
@@ -4620,10 +5648,11 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 //   자식을 0 으로 끝내 집기가 져도 바깥 `&&` 에 닿는다
                 // - 그 묶음이 **정말 돌았을** 것 — 안 돈 몸통 안에서 열린 묶음은 위의 `shut`·
                 //   `orelse` 가 걷고, 몸통이 겹문인 `then` 가지는 `hard` 가 함께 걷는다
-                // - **하위 셸의 `exit`** 가 아닐 것(`b.depth <= deep`) — `bash -c '( 집기 ||
-                //   { exit 1; } ); echo d'` 의 괄호는 제 안만 끝내고 자식 셸은 0 이다. 재는 자는
-                //   **겹이 들고 있는** 깊이다([`Layer::Shell`] 의 `deep`) — 겹에 들어선 토막에서
-                //   베껴 오던 판은 글이 `( … )` 로 시작하면 그 깊이를 부풀렸다(리뷰 6번)
+                // - 그 하위 셸을 **안 나왔을** 것 — `bash -c '( 집기 || { exit 1; } ); echo d'`
+                //   의 괄호는 제 안만 끝내고 자식 셸은 0 이다. 재는 자가 따로 없다(moai-qlr8):
+                //   그 괄호를 **나오는 자리가 묶음을 걷어**, 여기까지 서 있는 묶음은 곧 글이 그
+                //   하위 셸을 한 번도 안 나왔다는 뜻이다. 깊이를 견주던 자(`b.depth <= deep`)는
+                //   글의 **마지막** 하위 셸을 못 재 `집기 || ( echo f; exit 1 )` 을 잘못 막았다
                 // - 글이 **뒤로 띄운 것으로 끝나지 않을** 것(`!apace`) — 그 글의 값은 늘 0 이라
                 //   자식이 0 으로 끝난 것이 아무 말도 안 한다(moai-99df 가 렉서에 그 표를 놓았다)
                 //
@@ -4635,11 +5664,15 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // `bash -e -c '집기; echo done &' && 쓰기` 는 집기가 지면 errexit 가 그 자리에서
                 // 자식을 1 로 끝내니, 바깥 `&&` 에 닿은 것 자체가 집기가 이겼다는 뜻이다. 들어설
                 // 때의 집기를 먼저 되세우던 판은 시킨 대로 친 그 줄을 막았다.
-                Layer::Shell { top, deep, apace, .. } => {
-                    let resolved = (!apace)
-                        .then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, deep, blocks.iffy)))
-                        .flatten();
-                    let won = scope.sure.max(scope.sure_e).is_some_and(|l| l >= top) || resolved.is_some();
+                Layer::Shell { top, apace, .. } => {
+                    let resolved =
+                        (!apace).then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, blocks.iffy))).flatten();
+                    // **0 으로 일찍 끝날 수 있는 글의 값은 집기의 값이 아니다**([`Scope::soft`],
+                    // moai-sq3q) — `bash -c '집기 || exit 0'` 은 집기가 져도 0 으로 끝나, 바깥
+                    // `&&` 에 닿은 것이 아무 말도 안 한다. 뒤로 띄운 것으로 끝나는 글(`apace`)과
+                    // 같은 자리에 선다: 안에서 이긴 것을 밖으로 못 내고, 들어설 때의 집기로 돌아간다.
+                    let soft = scope.soft.is_some();
+                    let won = !soft && (scope.sure.max(scope.sure_e).is_some_and(|l| l >= top) || resolved.is_some());
                     let home = top.saturating_sub(1);
                     if unrun.is_none_or(|c| top < c) && won {
                         credit(&mut picked, resolved, home, true);
@@ -4656,10 +5689,10 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                         // **안 돈 가지(`unrun`)는 여전히 안 적는다** — 그쪽은 안 돌았을 수 있는
                         // 것이 아니라 **안 돈** 것이다.
                         if unrun.is_none_or(|c| top < c) {
-                            let could = scope.bailout.as_ref().filter(|b| b.would(top, deep));
+                            let could = scope.bailout.as_ref().filter(|b| b.would(top));
                             credit(&mut picked, could, home, false);
                         }
-                        if apace { f.saved.pick } else { scope.pick }
+                        if apace || soft { f.saved.pick } else { scope.pick }
                     }
                 }
             };
@@ -4675,8 +5708,13 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         //
         // **하위 셸을 나온 것이면 안 세운다** — `집기 || ( …; exit 1 )` 의 `exit` 는 그 괄호만 끝내고
         // 바깥 셸은 살아 있다. 깊이를 안 보던 판은 그 줄의 뒤 쓰기를 집기 뒤로 읽어 샜다.
+        // **묶음에 걸린 리다이렉션은 그 묶음을 나온 것이 아니다**([`Seg::hung`], moai-qlr8) —
+        // `bash -c '( 집기 || { exit 1; } ) >/dev/null'` 의 값은 그 괄호의 값이고 뒤에 더 도는
+        // 명령도 없다. 걷던 판은 리다이렉션을 뗀 글자째 같은 줄은 풀면서 이쪽만 막았다.
+        // `( … ); >f` 는 여기 안 온다 — `;` 하나가 그 표를 걷는다.
         if let Some(b) = scope.bailout
             && seg.floor < b.floor
+            && !seg.hung
         {
             if b.ends && seg.depth >= b.depth {
                 // 여기 온 것은 집기가 이겼다는 뜻이다 — 이 묶음에서는 이제 이긴 채다(`sure`).
@@ -4686,6 +5724,11 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 let home = b.floor.saturating_sub(1);
                 scope.pick = b.held.or(Some(home));
                 open(&mut scope.sure, home);
+                // **그 `exit` 가 0 이면 겹 밖으로는 아무 말도 안 한다**([`Scope::soft`], moai-sq3q) —
+                // `bash -c '집기 || { exit 0; }; echo x' && 쓰기` 가 맨 `|| exit 0` 과 같은 줄이다.
+                if !b.hard {
+                    open(&mut scope.soft, b.depth);
+                }
                 // **기록도 함께 세운다**(moai-m5mg) — `if ! 집기; then exit 1; fi` 의 조건은 뒤집혀
                 // 있어 위에서 안 적혔지만, 여기 온 것은 그 집기가 이겼다는 뜻이다. 쓰기 규칙만 세우던
                 // 판은 같은 줄을 "쓰기에는 집은 채, 기록에는 빈손" 으로 갈라 놨다.
@@ -4700,8 +5743,19 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         }
         // **하위 셸을 나오면 그 안의 `exit` 은 끝났다** — `( … || exit 1 ); 집기` 의 괄호는 제 안만
         // 끝내고 바깥 셸은 그대로 돈다. 걷는 자는 `moved` 와 같다([`Seg::low`]).
-        if scope.bailed.is_some_and(|d| seg.low < d) {
-            scope.bailed = None;
+        // **0 으로 일찍 끝날 수 있다는 표도 같은 자로 걷는다**([`Scope::soft`], moai-sq3q) — 괄호
+        // 안의 `exit 0` 은 그 괄호만 0 으로 끝내고 이 셸의 값은 뒤엣것이 댄다.
+        //
+        // **묶음에 걸린 리다이렉션은 여기서도 나온 것이 아니다**([`Seg::hung`], 리뷰 moai-514e) —
+        // 위의 `bailout` 만 가리고 이쪽을 안 가리던 판은 `bash -c '( 집기 || exit 0 ) >/dev/null'`
+        // 의 표를 걷어, 리다이렉션을 뗀 글자째 같은 줄은 막으면서 이쪽만 샜다. bash 로 쟀다:
+        // 둘 다 0 으로 끝난다.
+        if !seg.hung {
+            for slot in [&mut scope.bailed, &mut scope.soft] {
+                if slot.is_some_and(|d| seg.low < d) {
+                    *slot = None;
+                }
+            }
         }
         left(seg.floor, &mut blocks, &mut scope);
         // 이 토막의 이음사는 **든 겹 바깥**의 것이다 — 첫 토막이 바깥 이음사를 받는다([`Lexer::relex`]).
@@ -4721,7 +5775,12 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // bash -c '쓰기'` 를 막았다(리뷰 moai-k8j1.034). 안쪽에서 선 것이 밖으로 새지 않는 것은
             // 위의 틀이 나올 때 되돌려 주기 때문이고, 이 겹보다 얕게 선 것은 아래 나올 때의
             // `l >= base` 가 가른다.
-            (scope.strict, scope.lone, scope.bailout) = (None, None, None);
+            // **`soft` 도 함께 비운다**(리뷰 moai-514e) — 그것은 "**이** 셸이 0 으로 일찍 끝날 수
+            // 있다" 는 말이라 새 셸에 물려줄 것이 아니다. 걷는 자가 하위 셸 깊이 하나뿐이라
+            // ([`Seg::low`]) 맨 바깥에서 선 것은 `seg.low < 0` 이 거짓이라 영영 안 걷혀, 비우지
+            // 않던 판은 `make x || exit 0; bash -c '집기' && 쓰기` 의 안쪽 집기를 통째로 버렸다.
+            // 나올 때는 틀이 통째로 되돌려 주니 바깥 것은 그대로 산다.
+            (scope.strict, scope.lone, scope.bailout, scope.soft) = (None, None, None, None);
             if let Layer::Shell { top, strict: on, .. } = *layer {
                 // 띄울 때 켠 errexit 는 그 글의 첫 줄부터 선다(moai-j9tx).
                 scope.strict = on.then_some(top);
@@ -4810,6 +5869,21 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         let bail = or && quits;
         if bail {
             j.op = Op::And;
+            // **0 으로 끝나는 `exit` 는 겹 밖에서 아무 말도 안 한다**([`Scope::soft`], moai-sq3q) —
+            // 이 셸 안에서는 그래도 끝내니 뒤의 쓰기는 안 돈다. 겹을 나오는 자리만 막는다.
+            //
+            // **함수 몸통 안의 `exit` 은 안 센다**(리뷰 moai-514e) — 정의는 안 돌고 그 `exit` 도
+            // 안 돈다. 바로 위의 `bailed` 와 같은 자리고(moai-unvx), 가리지 않던 판은
+            // `die() { log || exit 0; }` 한 줄이 그 뒤 모든 겹의 집기를 버려 잘못 막았다.
+            //
+            // **이미 이긴 집기 뒤에서는 안 센다**(리뷰 moai-514e) — 이 자는 "0 으로 **일찍** 끝나
+            // 집기가 아예 안 돌 수 있다" 를 적는 것이라, 집기가 이미 이긴 뒤(`sure`·`sure_e`)의
+            // `|| exit 0` 은 그 이김을 못 무른다. 가리지 않던 판은 `집기 || exit 1; grep … ||
+            // exit 0` 처럼 **뒤에** 선 한 줄이 앞의 이긴 집기를 버려 잘못 막았다. 앞에 선 것은
+            // 그대로 센다 — 그때는 정말 집기가 안 돈 채 겹이 끝날 수 있다.
+            if !hard_exit(words, true) && blocks.body.is_none() && scope.sure.max(scope.sure_e).is_none() {
+                open(&mut scope.soft, seg.depth);
+            }
         }
         // `set -e` 아래 홀로 선 명령 뒤의 `;` — 그 명령이 졌으면 여기 못 온다. 거기까지 집기 사슬이 이어
         // 왔으면 이제 이긴 채다 — 뒤의 파이프·목록이 사슬을 끊어도 집기는 그대로다. **맨 바깥에서만이다**:
@@ -5084,7 +6158,17 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             let branch = prefix.iter().any(|w| w == "then" || w == "else" || w == "elif");
             let ends = own && quits && runs;
             // 0 아닌 값을 대는 `exit` 인가 — 겹을 나올 때만 쓴다([`Bailout::hard`]).
-            let hard = ends && words.get(1).is_some_and(|a| a.parse::<i64>().is_ok_and(|n| n % 256 != 0));
+            //
+            // **묶음의 첫 줄에 선 인자 없는 `exit` 은 앞 명령의 값을 댄다**(리뷰 moai-514e) —
+            // `집기 || { exit; }` 의 `$?` 는 방금 진 집기라 0 이 아니다. 늘 거짓으로 적던 판은
+            // 그 줄을 0 으로 끝나는 것으로 읽어, 위의 [`Scope::soft`] 가 열리며
+            // `bash -c '집기 || { exit; }; echo done' && 쓰기` 를 잘못 막았다. bash 로 쟀다:
+            // 그 줄은 1 이고, `{ echo f; exit; }` 는 0 이다(`$?` 가 `echo` 의 것이다).
+            //
+            // **조건 가지는 아니다**(`branch`) — `if ! 집기; then exit; fi` 의 `$?` 는 뒤집힌
+            // 조건의 값이라 0 이다(쟀다: 그 줄은 0 이다).
+            let first = !branch && seg.join.depth < seg.level;
+            let hard = ends && hard_exit(words, first);
             b.ends = if branch { b.ends && ends } else { ends };
             b.hard = if branch { b.hard && hard } else { hard };
         }
@@ -7151,6 +8235,23 @@ mod tests {
             // 새 줄들도 모르는 긴 옵션에서 멈춘다 — 값을 따로 받는 것이면 그 값이 명령이 된다.
             "setsid --weird moai add '딴 일'",
             "chrt --weird moai add '딴 일'",
+            // **판 번호와 도움말도 뒤의 명령을 안 돌린다**([`PRINTS`], moai-y0gv) — 아는 것은
+            // 찍고 끝나고(util-linux 의 `-V`·`-h`), 모르는 것은 그 줄을 거절한다(`env -h` 는
+            // `invalid option`). 2026-09-22 에 열한 줄을 재서 하나도 안 도는 것을 봤다.
+            "setsid --version moai add '딴 일'",
+            "setsid -V moai add '딴 일'",
+            "setsid -h moai add '딴 일'",
+            "env --version moai add '딴 일'",
+            "env --help moai add '딴 일'",
+            "env -h moai add '딴 일'",
+            "env -ih moai add '딴 일'",
+            "sudo --help moai add '딴 일'",
+            "sudo -V moai add '딴 일'",
+            "timeout --version 5 moai add '딴 일'",
+            "nice --help moai add '딴 일'",
+            "xargs --help moai add '딴 일'",
+            "su --help 남 -c 'moai add 딴 일'",
+            "chrt -V 0 moai add '딴 일'",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "모르는 꼴을 명령으로 읽었다 — {cmd}");
         }
@@ -7267,7 +8368,11 @@ mod tests {
             "sudo -si moai add x",
             "env -C /남의/저장소 moai add x",
         ] {
-            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "남의 트래커에 세우는 줄을 막았다 — {cmd}");
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), cmd),
+                Decision::Pass,
+                "남의 트래커에 세우는 줄을 막았다 — {cmd}"
+            );
         }
         for cmd in [
             "su -c 'moai mv t-1 in_progress --from todo' -l",
@@ -7286,7 +8391,11 @@ mod tests {
             "doas -s bash -c 'tmux kill-server'",
             "doas -C /etc/doas.conf bash -c 'tmux kill-server'",
         ] {
-            assert_eq!(guard_shell(&[], &cfg(), &here(), root, root, cmd), Decision::Pass, "안 도는 줄을 막았다 — {cmd}");
+            assert_eq!(
+                guard_shell(&[], &cfg(), &here(), root, root, cmd),
+                Decision::Pass,
+                "안 도는 줄을 막았다 — {cmd}"
+            );
         }
         for cmd in ["sudo -l sed -i s/a/b/ /repo/src/x.rs", "doas -s tee /repo/src/x.rs"] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -7458,6 +8567,52 @@ mod tests {
         }
     }
 
+    /// **판 번호와 도움말은 뒤의 명령을 안 돌린다**(moai-y0gv) — `setsid --version moai mv t-1
+    /// in_progress --from todo && <쓰기>` 는 판 번호만 찍고 끝나는데, 그 둘이 `COMMON` 에 서서
+    /// "값 안 받는 평범한 깃발" 로 넘어가 지어낸 집기가 뒤의 빈손 쓰기를 풀어 줬다. 짧은
+    /// `-V`·`-h` 는 뭉치 고리의 "모르는 글자는 깃발" 기본값으로 같은 자리를 지나갔다.
+    ///
+    /// **아는 것과 모르는 것이 한 답으로 모인다** — util-linux 는 찍고 끝나고 coreutils 의
+    /// `env -h` 는 `invalid option` 으로 거절한다. 2026-09-22 에 열한 줄을 재서 하나도 안 도는
+    /// 것을 봤다.
+    #[test]
+    fn a_version_or_help_switch_runs_nothing_after_it() {
+        let root = Path::new("/repo");
+        let stands = |_: usize, _: &str| None;
+        // **장부에 안 적는다** — 안 도는 집기다.
+        for cmd in [
+            "setsid --version moai mv t-1 in_progress --from todo",
+            "setsid -V moai mv t-1 in_progress",
+            "setsid -h moai mv t-1 in_progress",
+            "env --version moai mv t-1 in_progress",
+            "env -h moai mv t-1 in_progress",
+            "env -ih moai mv t-1 in_progress",
+            "sudo -V moai mv t-1 in_progress",
+            "sudo --help moai mv t-1 in_progress",
+            "timeout --version 5 moai mv t-1 in_progress",
+            "xargs --help moai mv t-1 in_progress",
+        ] {
+            assert!(picked_ids(cmd, &cfg(), &|_| true, &stands).is_empty(), "안 도는 집기를 장부에 적었다 — {cmd}");
+        }
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — 두 축이 같은 답이어야 한다.
+        for cmd in [
+            "setsid --version moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs",
+            "env -h moai mv t-1 in_progress --from todo && tee src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "안 도는 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
+        }
+        // **쓰기도 안 돈다** — 멈추는 쪽은 그 뒤를 아예 안 보는 것이라 잘못 막지 않는다.
+        for cmd in ["setsid --version sed -i s/a/b/ src/x.rs", "env --help tee src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 쓰기를 막았다 — {cmd}\n{got:?}");
+        }
+        // **그 스위치가 없는 같은 줄은 그대로 집는다** — 끈 것이 이 둘뿐임을 여기가 지킨다.
+        for cmd in ["setsid moai mv t-1 in_progress --from todo", "env -i moai mv t-1 in_progress"] {
+            assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "멀쩡한 집기를 버렸다 — {cmd}");
+        }
+    }
+
     /// **셸에 넘긴 글은 명령이다**(moai-455j) — `bash -c '…'`·`eval '…'` 의 글을 렉서가 다시 읽는다.
     /// 안 읽던 판은 그 한 낱말 뒤에서 규칙 1~2 가 통째로 샜다. 끝없이 파고들지는 않는다.
     #[test]
@@ -7568,6 +8723,250 @@ mod tests {
             clock.elapsed() < std::time::Duration::from_secs(2),
             "겹마다 같은 글을 다시 읽는다 — {:?}",
             clock.elapsed()
+        );
+    }
+
+    /// **`parallel` 과 `strace` 도 뒤의 명령을 돌린다**(moai-gxwh) — 표에 없어
+    /// `parallel sed -i s/a/b/ ::: src/x.rs` 도 `strace -o /tmp/o sed -i s/a/b/ src/x.rs` 도
+    /// 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **둘 다 재고 나서 적었다**(2026-09-22, GNU parallel 20231122·strace 6.8) — 먼저 넣은 열넷
+    /// 가운데 이 둘만 남겨 둔 까닭이 옵션 표였다. strace 는 값을 따로 받는 짧은 옵션이 열넷이고,
+    /// parallel 은 옵션이 백 개가 넘어 손으로 고르면 틀린다. parallel 의 표는 그 스크립트의
+    /// `options_completion_hash()` 에서 읽었다 — GetOptions 가 그대로 쓰는 표다.
+    ///
+    /// **parallel 은 xargs 와 같은 자리다** — 낱말을 그대로 이어 셸에 넘기고(`parallel echo A B
+    /// '>' f ::: x` 가 그 파일에 적는다), 입력을 argv 뒤에 붙인다(`parallel echo HI ::: A B` 가
+    /// `HI A`·`HI B` 를 찍는다). 그래서 쓰기는 그대로 보고 집기는 안 센다.
+    #[test]
+    fn parallel_and_strace_are_measured_not_guessed() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let stands = |_: usize, _: &str| None;
+        for cmd in [
+            // `:::` 의 입력은 그 명령의 낱말이 된다 — 정작 고쳐지는 파일이 거기 선다.
+            "parallel sed -i s/a/b/ ::: src/x.rs",
+            "parallel -j 4 sed -i s/a/b/ ::: src/x.rs",
+            "parallel -j4 tee ::: src/x.rs",
+            "parallel --jobs 4 sed -i s/a/b/ ::: src/x.rs",
+            "parallel --keep-order sed -i s/a/b/ ::: src/x.rs",
+            // 글 하나로 준 명령도 같다 — parallel 이 셸에 넘긴다.
+            "parallel 'sed -i s/a/b/ src/x.rs' ::: x",
+            "parallel sed -i s/a/b/ {} ::: src/x.rs",
+            "strace sed -i s/a/b/ src/x.rs",
+            "strace -o /tmp/o sed -i s/a/b/ src/x.rs",
+            "strace -f -e trace=write tee src/x.rs",
+            "strace -s 200 -o /tmp/o tee src/x.rs",
+            "strace --output=/tmp/o sed -i s/a/b/ src/x.rs",
+            "strace --trace=write -c sed -i s/a/b/ src/x.rs",
+            // 값을 붙여서만 받는 긴 이름은 다음 낱말을 안 먹는다.
+            "strace --quiet sed -i s/a/b/ src/x.rs",
+            "strace --daemonize tee src/x.rs",
+            // **대괄호가 없는 긴 이름은 값을 따로 받는다**(리뷰 moai-514e) — `--decode-pids=pidns`
+            // 하나가 그렇다. `free` 에 서 있던 판은 그 값을 명령 머리로 읽어 쓰기를 잃었다.
+            "strace --decode-pids comm sed -i s/a/b/ src/x.rs",
+            // **`:s`·`:f` 도 값을 받는다**(리뷰 moai-514e) — 먼저 적은 표는 `=s`·`=i`·`=f` 만 걷어
+            // `eof|e:s`·`replace|i:s` 를 놓쳤고, 한 줄에 네 철자로 선 `…compress-program` 은
+            // 붙임표가 든 쪽만 `free` 에 섰다. 2026-09-22 에 넷 다 재서 다음 낱말을 먹는 것을 봤다.
+            "parallel --eof XX sed -i s/a/b/ ::: src/x.rs",
+            "parallel -e XX sed -i s/a/b/ ::: src/x.rs",
+            "parallel --replace RR sed -i s/a/b/ ::: src/x.rs",
+            "parallel -i RR sed -i s/a/b/ ::: src/x.rs",
+            "parallel --compress-program pigz sed -i s/a/b/ ::: src/x.rs",
+            "parallel --use-decompress-program pigz sed -i s/a/b/ ::: src/x.rs",
+            // `max-lines|maxlines|l:f` 는 숫자일 때만 먹는다 — 값 없는 깃발로 두어 이 철자를 본다.
+            "parallel --max-lines sed -i s/a/b/ ::: src/x.rs",
+            "parallel -l sed -i s/a/b/ ::: src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **안 도는 줄에서 쓰기를 지어내지 않는다.**
+        for cmd in [
+            // `-p` 는 이미 도는 프로세스를 붙든다 — 뒤에 명령이 안 온다.
+            "strace -p 1234 sed -i s/a/b/ src/x.rs",
+            // 돌릴 줄을 보여 주기만 하는 스위치와 찍기만 하는 스위치.
+            "parallel --dry-run sed -i s/a/b/ ::: src/x.rs",
+            "parallel --number-of-cores sed -i s/a/b/ ::: src/x.rs",
+            // `::::` 뒤는 입력이 아니라 입력이 **적힌 파일**이다 — 그 파일은 안 고쳐진다.
+            "parallel sed -i s/a/b/ {} :::: src/x.rs",
+            // 자리표는 어디인지 모른다.
+            "parallel echo {} ::: src/x.rs",
+            // **`:::` 의 입력은 낱말 하나로 감싸서 붙인다**(리뷰 moai-514e) — parallel 이 이어
+            // 붙일 때 따옴표로 감싸, 그 안의 `;`·`>` 는 연산자가 아니라 글자다. 2026-09-22 에 쟀다:
+            // `parallel echo ::: 'x; touch f'` 는 그 글을 찍기만 하고 f 를 안 만든다.
+            "parallel echo ::: 'x; sed -i s/a/b/ src/x.rs'",
+            "parallel echo ::: 'x > src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **parallel 의 집기는 안 센다** — 덧붙는 입력 하나가 그 줄을 아무것도 안 옮기는 줄로
+        // 바꾼다(xargs 와 같은 자리다). strace 는 argv 를 안 건드리니 그대로 센다.
+        for cmd in ["parallel moai mv t-1 in_progress --from todo ::: x", "parallel moai mv t-1 in_progress ::: x"] {
+            assert!(picked_ids(cmd, &cfg(), &|_| true, &stands).is_empty(), "덧붙는 입력으로 집기를 지어냈다 — {cmd}");
+        }
+        assert_eq!(picked_ids("strace -f moai mv t-1 in_progress --from todo", &cfg(), &|_| true, &stands), ["t-1"]);
+        // 규칙 1 은 둘 다 그대로 본다 — 그 줄은 정말 이슈를 세운다.
+        for cmd in ["parallel moai add '딴 일' ::: x", "strace -o /tmp/o moai add '딴 일'"] {
+            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "규칙 1 을 가렸다 — {cmd}");
+        }
+    }
+
+    /// **find 의 명령은 술어 안에 선다**(moai-7kif) — `find . -name '*.rs' -exec sed -i s/a/b/ {} \;`
+    /// 는 그 파일들을 정말 고치는데 훅이 빈손으로 넘겼고, `find . -exec moai add x \;` 는 규칙 1 을
+    /// 지나갔다. 감싸는 명령의 표는 "옵션이 다 끝난 자리부터가 명령" 을 전제로 서는데, find 는
+    /// 명령이 옵션 뒤가 아니라 술어 안에 서고 `;` 나 `+` 로 끝난다.
+    ///
+    /// **한 줄에 여럿이 선다** — 자리 하나로는 못 들어 걷어 모아 한 글로 잇는다([`exec_of`]).
+    ///
+    /// **그 안의 집기는 안 센다** — find 의 종료 코드는 그 명령의 것이 아니고(`-exec … +` 는
+    /// 찾은 이름을 argv 뒤에 이어 붙이기까지 한다), 세어 주면 빈손의 쓰기를 풀어 준다.
+    #[test]
+    fn a_command_inside_a_find_predicate_is_a_command() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "find . -exec moai add '딴 일' \\;",
+            "find . -name '*.rs' -exec moai add '딴 일' \\;",
+            "find . -execdir moai add '딴 일' \\;",
+            "find . -ok moai add '딴 일' \\;",
+            "find . -okdir moai add '딴 일' \\;",
+            "find . -exec moai add '딴 일' +",
+            // 끝맺음이 없어도 그 앞까지는 정말 돈다.
+            "find . -exec moai add '딴 일'",
+            // 한 줄에 여럿 — 뒤엣것도 읽는다.
+            "find . -exec echo x \\; -exec moai add '딴 일' \\;",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "술어 안의 명령을 가렸다 — {cmd}"
+            );
+        }
+        for cmd in [
+            "find . -name '*.rs' -exec sed -i s/a/b/ src/x.rs \\;",
+            "find . -execdir tee src/x.rs \\;",
+            "find . -exec echo x \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            "find . -type f -exec sed -i s/a/b/ src/x.rs +",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "술어 안의 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **없는 쓰기를 지어내지 않는다** — find 는 셸을 안 거치고 곧장 exec 한다. 감싸지 않으면
+        // 인자 안의 `>`·`;` 가 연산자로 읽혀 아무것도 안 쓰는 줄을 막는다.
+        for cmd in [
+            "find . -name '*.rs' -print",
+            "find . -exec echo 'a > src/x.rs' \\;",
+            "find . -exec git commit -m 'a; tee src/x.rs' \\;",
+            // 자리표는 어디인지 모른다 — 괄호를 보고 이미 걸렀다.
+            "find . -name '*.rs' -exec sed -i s/a/b/ {} \\;",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "없는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — find 의 종료 코드는 그 명령의 것이 아니다.
+        let cmd = "find . -exec moai mv t-1 in_progress --from todo \\; && sed -i s/a/b/ src/store.rs";
+        let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
+        assert!(matches!(got, Decision::Deny(_)), "술어 안의 집기가 규칙 2 를 채웠다\n{got:?}");
+    }
+
+    /// **뒤가 명령이 아니라 글인 감싸는 명령 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c` 다.
+    /// 표에 없어 `flock /tmp/l -c 'sed -i …'` 도 `watch -n 1 'sed -i …'` 도
+    /// `script -c 'sed -i …' /dev/null` 도 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **옵션 표와 차례는 2026-09-22 에 재서 적었다.** 세 줄이 저마다 다르다 — flock 은 잠글
+    /// 파일을 먼저 먹고 그 **뒤**의 `-c` 만 제 것으로 보고(앞에 서면 `invalid option -- 'c'`),
+    /// script 는 자리 인자를 지나서도 옵션을 읽으며, watch 는 `-x` 가 없으면 낱말을 **그대로 이어**
+    /// `sh -c` 에 넘긴다.
+    #[test]
+    fn three_more_wrappers_hand_a_string_to_a_shell() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = Path::new("/repo");
+        for cmd in [
+            "flock /tmp/l -c \"moai add '딴 일'\"",
+            "flock -n /tmp/l --command \"moai add '딴 일'\"",
+            "flock -w 5 /tmp/l -c \"moai add '딴 일'\"",
+            // 글이 아니라 argv 로 넘기는 꼴도 같은 줄이 본다.
+            "flock /tmp/l moai add '딴 일'",
+            "flock -n /tmp/l moai add '딴 일'",
+            "watch \"moai add '딴 일'\"",
+            "watch -n 1 \"moai add '딴 일'\"",
+            "watch -d -n 2 \"moai add '딴 일'\"",
+            // `-x` 는 셸을 안 지난다 — 그 낱말들이 곧 argv 다.
+            "watch -x moai add '딴 일'",
+            "script -c \"moai add '딴 일'\" /dev/null",
+            "script -q -c \"moai add '딴 일'\" /dev/null",
+            "script /dev/null -c \"moai add '딴 일'\"",
+            "script -a -T /tmp/t -c \"moai add '딴 일'\" /dev/null",
+            // **flock 은 `--` 뒤에서도 제 `-c` 를 본다**(리뷰 moai-514e) — getopt 밖에서 잠글 파일
+            // 바로 뒤의 낱말을 글자째 견준다. 2026-09-22 에 쟀다: 그 줄은 정말 돈다.
+            "flock -- /tmp/l -c \"moai add '딴 일'\"",
+            // **긴 철자의 `--exec` 도 짧은 `-x` 와 같은 답이다**(리뷰 moai-514e) — 값 없는 긴
+            // 이름이 `saw` 를 안 적던 판은 이 줄만 셸의 글로 읽어 반대 답을 냈다.
+            "watch --exec moai add '딴 일'",
+        ] {
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "넘긴 글을 아무도 안 읽었다 — {cmd}"
+            );
+        }
+        for cmd in [
+            "flock /tmp/l -c 'sed -i s/a/b/ src/x.rs'",
+            "flock /tmp/l sed -i s/a/b/ src/x.rs",
+            "watch -n 1 'sed -i s/a/b/ src/x.rs'",
+            "watch sed -i s/a/b/ src/x.rs",
+            "watch -x tee src/x.rs",
+            "script -c 'sed -i s/a/b/ src/x.rs' /dev/null",
+            "script -q -c 'tee src/x.rs' /dev/null",
+            // **script 의 홀로 선 `-` 는 로그인이 아니라 기록 파일 이름이다**(리뷰 moai-514e) —
+            // su 의 자로 읽어 "자리를 모른다" 고 적던 판은 그 글의 상대 경로 쓰기를 버렸다.
+            // 2026-09-22 에 쟀다: `script -q - -c '<글>'` 은 그 글을 여기서 돌린다.
+            "script - -c 'sed -i s/a/b/ src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "넘긴 글의 쓰기를 가렸다 — {cmd}\n{got:?}");
+        }
+        // **안 도는 줄에서 쓰기를 지어내지 않는다.**
+        for cmd in [
+            // flock 의 `-c` 는 잠글 파일 **뒤**에서만 제 것이다 — 앞에 서면 그 줄을 거절한다.
+            "flock -c 'sed -i s/a/b/ src/x.rs' /tmp/l",
+            "flock --command='sed -i s/a/b/ src/x.rs' /tmp/l",
+            // `-c` 가 없는 script 는 사람이 쓸 셸을 띄울 뿐이다.
+            "script /dev/null",
+            "script -q /dev/null",
+            // 판 번호는 이 표에서 홀로 `-v` 다.
+            "watch -v sed -i s/a/b/ src/x.rs",
+            // **watch 는 따옴표를 안 되살린다**(2026-09-22 에 쟀다) — 이어 붙인 글에서 `-c` 의
+            // 글은 `sed` 한 낱말이라 그 뒤는 자리 인자다. 도로 감싸는 쪽으로 읽으면 여기서
+            // 없는 쓰기를 지어내 막는다.
+            "watch sh -c 'sed -i s/a/b/ src/x.rs'",
+            // **`--exec` 는 셸을 안 지난다** — 그 낱말들이 곧 argv 라 따옴표 안의 `>` 는 글자다.
+            // 짧은 `-x` 와 한 답이어야 한다(리뷰 moai-514e).
+            "watch --exec git commit -m 'a > src/x.rs'",
+            // **`--` 뒤의 피연산자를 대상 셸의 argv 로 읽는 것은 su·runuser 뿐이다**(리뷰
+            // moai-514e) — script 가 [`Runs::Never`] 라는 이유로 그 자리에 들던 판은 2026-09-22 에
+            // 잰 것을 뒤집었다: `script -q -- /dev/null -c '<글>'` 은 `unexpected number of
+            // arguments` 로 아무것도 안 돌린다.
+            "script -- /dev/null -c 'sed -i s/a/b/ src/x.rs'",
+            "script -q -- /dev/null -c 'tee src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **`-x` 갈래의 집기도 센다**(리뷰 moai-514e) — watch 는 argv 뒤에 아무것도 안 붙인다.
+        // `appends` 를 참으로 적던 판은 이 철자에서만 집기를 버려, 글로 준 같은 명령과 갈렸다.
+        let stands = |_: usize, _: &str| None;
+        for cmd in ["watch -x moai mv t-1 in_progress --from todo", "watch --exec moai mv t-1 in_progress"] {
+            assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "멀쩡한 집기를 버렸다 — {cmd}");
+        }
+        // **그 글 안의 집기는 정말 집는다** — watch 는 그 글을 셸에 넘기니 `;` 뒤의 쓰기도 본다.
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let cmd = "watch 'moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs'";
+        assert_eq!(
+            guard_writes(&held, &cfg(), &here(), root, root, cmd),
+            Decision::Pass,
+            "이어 붙인 글의 집기를 버렸다"
         );
     }
 
@@ -10256,6 +11655,125 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "셸이 아닌 `-c` 의 값을 명령줄로 읽었다 — {cmd}\n{got:?}");
         }
+        // **모르는 짧은 글자를 넘긴 줄은 다시 짓지 않는다**(moai-ta6q, 리뷰 moai-514e.x2u 11번) —
+        // 진짜 su 는 `invalid option -- 'x'` 로 아무것도 안 돌리는데, 뭉치 고리가 그것을 조용히
+        // 넘겨 `/usr/bin/tee 'src/x.rs'` 라는 **도는 줄을 지어냈다**. 2026-09-22 에 쟀다:
+        // 그 줄은 그 파일을 안 만든다. 옛 판은 글을 아예 안 내 이 자리가 새로 열렸다.
+        for cmd in ["su -s /usr/bin/tee nobody -x src/x.rs", "runuser -s /usr/bin/tee nobody -zx src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **그 표가 아는 짧은 글자는 그대로 지난다** — `su --help` 로 걷은 `-m`·`-p`·`-f`·`-P` 다.
+        // 안 적으면 `su -ms /bin/sed …` 처럼 정당한 줄까지 함께 멈춘다.
+        for cmd in [
+            "su -ms /usr/bin/tee nobody -- src/x.rs",
+            "su -pP -s /usr/bin/tee nobody -- src/x.rs",
+            "runuser -f -s /usr/bin/tee nobody -- src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+    }
+
+    /// **넘긴 글의 자리 인자를 푼다**(moai-5ycj) — `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는
+    /// 정말 그 파일을 고치는데, 푸는 자가 없던 판은 `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다.
+    ///
+    /// **차례가 감싸는 명령마다 다르다**(2026-09-22 에 쟀다 — sudo 로 su 를 불러 찍어 봤다).
+    /// `bash -c '<글>' NAME A B` 는 `$0`=NAME·`$1`=A 이고, `su -c '<글>' <사용자> A B` 는 su 가
+    /// 사용자를 제 것으로 먹어 `$0`=A 다. `su <사용자> -c '<글>' A B` 도 같은 답이다. 그래서
+    /// 원래 idea 가 적은 `su -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 사실 `$1` 이 비어 있다.
+    ///
+    /// **따옴표를 가린다** — `'$1'` 은 안 풀리고 `"$1"` 은 풀린다. 글자로 바꿔치기하면 그 둘이
+    /// 안 갈려 안 풀릴 것을 풀고, 아무도 안 고치는 파일을 고친다며 **잘못 막는다**.
+    #[test]
+    fn a_handed_string_reaches_its_positional_arguments() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let stands = |_: usize, _: &str| None;
+        for cmd in [
+            "bash -c 'sed -i s/a/b/ \"$1\"' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ $1' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${1}' 남 src/x.rs",
+            "sh -c 'tee \"$0\"' src/x.rs",
+            "bash -c 'tee \"$@\"' 남 src/x.rs",
+            "bash -c 'tee \"$*\"' 남 src/x.rs",
+            "bash -c 'tee $@' 남 a src/x.rs",
+            // su 는 사용자를 제 것으로 먹는다 — 그 자리가 `$0` 이다.
+            "su -c 'sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            "su -c 'sed -i s/a/b/ \"$1\"' 남 A src/x.rs",
+            "su 남 -c 'sed -i s/a/b/ \"$0\"' src/x.rs",
+            "runuser -c 'sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            "su --command='sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            // `-s` 가 댄 셸에 그대로 넘어간 argv 도 같은 자가 읽는다.
+            "su -s /bin/bash 남 -- -c 'sed -i s/a/b/ \"$1\"' zero src/x.rs",
+            // **두 자리 넘는 `${10}` 도 푼다**(리뷰 moai-514e) — 한 자리만 읽던 판은 글자째 두어
+            // 그 쓰기를 잃었다. 중괄호 없는 `$10` 은 셸도 `$1` 뒤의 `0` 으로 읽는다.
+            "bash -c 'tee ${10}' 0 1 2 3 4 5 6 7 8 9 src/x.rs",
+            // **따옴표 밖은 빈칸으로 낱말이 갈린다**(IFS, 리뷰 moai-514e) — 한 낱말로 두던 판은
+            // 이것을 절대 경로 하나로 읽어 뒤의 상대 경로를 통째로 지나갔다.
+            "bash -c 'sed -i s/a/b/ $1' 남 '/tmp/a src/x.rs'",
+            // **`eval` 의 글도 이 셸의 자리 인자를 본다** — 겹을 안 열고 지금 셸에서 풀린다.
+            "bash -c 'eval \"sed -i s/a/b/ \\\"\\$1\\\"\"' 남 src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "자리 인자를 안 풀어 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+        // **모르면 지어내지 않는다** — 그 자리가 비었거나 꼴이 다르거나 따옴표에 싸였으면 그대로 둔다.
+        for cmd in [
+            // 작은따옴표 안은 안 풀린다 — 바깥을 겹따옴표로 싸 그 갈림을 재는 줄이다.
+            "bash -c \"sed -i s/a/b/ '\\$1'\" 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ \"$1\"' 남",
+            "bash -c 'sed -i s/a/b/ $2' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${1:-x}' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${FOO}' 남 src/x.rs",
+            // su 의 `$1` 은 사용자 뒤의 **둘째** 자리다 — 하나만 주면 비어 있다.
+            "su -c 'sed -i s/a/b/ \"$1\"' 남 src/x.rs",
+            // 푼 값 안의 `;` 는 연산자가 아니라 글자다 — 태우면 없는 쓰기를 지어낸다.
+            "bash -c 'echo \"$1\"' 남 'a; sed -i s/a/b/ src/x.rs'",
+            "bash -c 'echo \"$1\"' 남 'a > src/x.rs'",
+            // 따옴표 밖에서 갈라도 태우지는 않는다 — 갈린 낱말의 `;` 도 글자다(리뷰 moai-514e).
+            "bash -c 'echo $1' 남 'a; sed -i s/a/b/ src/x.rs'",
+            // **꼴이 안 맞으면 읽은 글자를 그대로 도로 적는다** — 닫는 `}` 까지다.
+            "bash -c 'sed -i s/a/b/ ${12}' 남 src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "모르는 자리를 지어내 잘못 막았다 — {cmd}\n{got:?}");
+        }
+        // 집기 축도 같은 자를 지난다 — 규칙 1 과 장부가 그 글을 본다.
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "bash -c 'moai add \"$1\"' 남 '딴 일'"), Decision::Deny(_)),
+            "자리 인자로 세운 이슈를 못 봤다"
+        );
+        let cmd = "bash -c 'moai mv \"$1\" in_progress --from todo' 남 t-1";
+        assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "자리 인자로 집은 것을 못 읽었다");
+    }
+
+    /// **`eval` 이 [`BUILTINS`] 에 선 것이 `Plant::Eval` 의 방벽이다**(moai-ta6q, 리뷰
+    /// moai-514e.x2u 12번).
+    ///
+    /// `Plant::Eval` 은 [`Layer::Subst`] 를 지어 `elsewhere` 도 `appends` 도 안 싣는다. 지금은
+    /// 감싸는 명령이 `eval` 에 못 넘어가 그 자리가 안 닿는데, 그것을 막는 것은 **적히지 않은
+    /// 맞물림 하나**였다 — [`BUILTINS`] 에서 `eval` 을 빼는 날 조용히 열린다.
+    ///
+    /// 열리면 두 쪽으로 틀린다. `sudo -i eval '<글>'` 의 상대 경로를 **여기 것으로** 읽어 잘못
+    /// 막고(자리를 모르는 글인데 `elsewhere` 가 안 실린다), `xargs eval '<글>'` 의 집기를 세어
+    /// 뒤의 빈손 쓰기를 풀어 준다(`appends` 가 안 실린다).
+    ///
+    /// 그 자리를 여기서 못박는다 — 고치는 길이 둘(시험으로 못박기·`Layer::Subst` 에 두 표
+    /// 싣기)이었고, 닿지 않는 자리에 필드를 더하기보다 **닿게 되는 날 붉어지는** 쪽을 골랐다.
+    #[test]
+    fn eval_stays_a_builtin_so_no_wrapper_ever_reaches_it() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        assert!(BUILTINS.contains(&"eval"), "`eval` 이 붙박이가 아니면 `Plant::Eval` 이 두 표를 잃는다");
+        // 감싸는 명령은 그리로 못 넘어간다 — 그런 이름의 프로그램이 없어 그 줄은 그냥 진다.
+        for cmd in ["sudo -i eval 'sed -i s/a/b/ src/x.rs'", "env -C /남의/저장소 eval 'tee src/x.rs'"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "감싸는 명령이 eval 에 닿아 남의 자리의 쓰기를 여기 것으로 읽었다 — {cmd}");
+        }
+        let cmd = "echo --help | xargs eval 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/x.rs";
+        let got = guard_writes(&all, &cfg(), &here(), root, root, cmd);
+        assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 eval 에 닿아 덧붙는 argv 의 집기를 세었다\n{got:?}");
     }
 
     /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
@@ -10372,6 +11890,29 @@ mod tests {
             "eval 'cd /tmp'; echo x > src/store.rs",
             // 글 안의 `|| exit` 는 그 셸을 끝낸다. 겹친 셸과 이어 부른 셸도 같다.
             "bash -c 'moai mv t-1 in_progress --from todo || exit 1; sed -i s/a/b/ src/store.rs'",
+            // **인자 없는 `exit` 는 앞 명령의 값이다**(moai-sq3q) — `집기 || exit` 의 앞은 방금 진
+            // 집기라 0 이 아니다. bash 로 쟀다: `bash -c 'false || exit'` 는 1 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || exit' && sed -i s/a/b/ src/store.rs",
+            // 0 으로 끝나는 `exit` 를 지나도 **그 셸 안의 쓰기는 그대로다** — 집기가 지면 거기서
+            // 끝나 이 줄이 아예 안 돈다. 막는 것은 겹 밖으로 나가는 자리뿐이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 0; sed -i s/a/b/ src/store.rs'",
+            // 괄호 안의 `exit 0` 은 그 괄호만 0 으로 끝낸다 — 이 셸의 값은 뒤엣것이 댄다.
+            "bash -c '( true || exit 0 ); moai mv t-1 in_progress --from todo || exit 1' && sed -i s/a/b/ src/store.rs",
+            // **이미 이긴 집기 **뒤**의 `|| exit 0` 은 그 이김을 못 무른다**(리뷰 moai-514e) —
+            // 앞에 선 것은 여전히 막는다(그때는 집기가 아예 안 돌 수 있다). bash 로 쟀다:
+            // `bash -c 'false || exit 1; grep -q zzz /etc/hostname || exit 0'` 는 1 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 1; grep -q x f || exit 0' && sed -i s/a/b/ src/store.rs",
+            // **함수 몸통 안의 `exit 0` 은 안 돈다** — 정의는 안 돌고 그 `exit` 도 안 돈다.
+            "bash -c 'die() { log || exit 0; }; moai mv t-1 in_progress --from todo || exit 1' && sed -i s/a/b/ src/store.rs",
+            // **묶음의 첫 줄에 선 인자 없는 `exit` 은 방금 진 집기의 값을 댄다**(리뷰 moai-514e) —
+            // bash 로 쟀다: `bash -c 'false || { exit; }; echo done'` 은 1 이고,
+            // `bash -c 'false || { echo f; exit; }; echo done'` 은 0 이다(막는 쪽 목록에 있다).
+            "bash -c 'moai mv t-1 in_progress --from todo || { exit; }' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || { exit; }; echo done' && sed -i s/a/b/ src/store.rs",
+            // **바깥 셸의 `|| exit 0` 은 새 셸에 안 물려진다**(리뷰 moai-514e) — 그 표는 "**이** 셸이
+            // 0 으로 일찍 끝날 수 있다" 는 말이다. 안 비우던 판은 맨 바깥에서 한 번 선 그것이
+            // 영영 안 걷혀(`seg.low < 0` 은 거짓이다) 뒤의 모든 겹의 집기를 버렸다.
+            "grep -q x f || exit 0; bash -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
             "bash -c \"bash -c 'moai mv t-1 in_progress --from todo'\" && sed -i s/a/b/ src/store.rs",
             "bash -c 'set -e; bash -c \"moai mv t-1 in_progress --from todo\"; sed -i s/a/b/ src/store.rs'",
             // **안 풀린 채 끝난 묶음은 그 셸이 무엇으로 끝났는가로 푼다**(moai-4arw) — 그 묶음의
@@ -10380,6 +11921,16 @@ mod tests {
             // 뒤로 안 띄운 글)이 다 서야 푼다 — 하나씩 어긋난 꼴은 막는 쪽 목록에 있다.
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && sed -i s/a/b/ src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi' && sed -i s/a/b/ src/store.rs",
+            // **글의 마지막 하위 셸도 그 글의 값을 댄다**(moai-qlr8) — 그 괄호를 나온 적이 없으면
+            // `exit` 의 값이 그대로 자식 셸의 값이다. bash 로 쟀다:
+            // `bash -c 'false || ( echo f; exit 1 )'` 는 1 이고, 뒤에 `; echo d` 를 붙이면 0 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo fail; exit 1 )' && sed -i s/a/b/ src/store.rs",
+            "sh -c 'moai mv t-1 in_progress --from todo || ( exit 1 )' && echo x > src/store.rs",
+            // **묶음에 건 리다이렉션은 그 묶음을 나온 것이 아니다**(moai-qlr8, 리뷰 moai-514e.x2u
+            // 7번) — 그 값은 괄호의 값이고 뒤에 더 도는 명령도 없다. 리다이렉션을 뗀 글자째 같은
+            // 줄은 풀리는데 이쪽만 막히던 자리고, 그 꼴이 이 모양에서 가장 흔한 철자다.
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || exit 1 ) 2>/dev/null' && sed -i s/a/b/ src/store.rs",
             "sh -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && echo x > src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then echo fail; exit 1; fi' && sed -i s/a/b/ src/store.rs",
             // **뒤로 띄운 것으로 끝나도 띄울 때 켠 errexit 는 그대로다**(moai-54pk) — 글의 값만 0 이지
@@ -10427,7 +11978,6 @@ mod tests {
             // **끝내는 묶음이 아니면 안 푼다**(moai-54pk) — 그 묶음이 돌고도 셸이 0 으로 끝나면
             // 집기가 졌어도 바깥의 `&&` 에 닿는다.
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; }' && sed -i s/a/b/ src/store.rs",
-            "bash -c 'moai mv t-1 in_progress --from todo || ( echo fail; exit 1 )' && sed -i s/a/b/ src/store.rs",
             // **전제 넷이 하나씩 어긋난 꼴**(moai-4arw) — 셋은 실제로 0 으로 끝나고(bash 로 쟀다),
             // 넷째는 하위 셸이 끝나도 뒤가 더 도는 글이다.
             // - 뒤로 띄운 묶음: `exit` 가 그 하위 셸만 끝내고 글은 곧바로 0 이다
@@ -10453,10 +12003,28 @@ mod tests {
             // 토막이라, 거기에 `bg` 를 안 달면 뒤로 띄운 글이 안 띄운 것으로 읽힌다.
             "bash -c '{ moai mv t-1 in_progress --from todo; } >/dev/null &' && sed -i s/a/b/ src/store.rs",
             "bash -c '( moai mv t-1 in_progress --from todo ) >/dev/null &' && sed -i s/a/b/ src/store.rs",
-            // - 하위 셸 안의 묶음: 괄호만 끝나고 그 뒤가 더 돈다. 겹의 깊이를 **겹에 들어선 토막**
-            //   에서 베껴 오던 판은 이 글이 `( … )` 로 시작한다는 이유로 그 자를 부풀려 놓쳤다
-            //   (리뷰 moai-k8j1.209 의 6번)
+            // - 하위 셸 안의 묶음: 괄호만 끝나고 그 뒤가 더 돈다. 그 괄호를 **나오는 자리가**
+            //   끝내는 묶음을 걷는다(moai-qlr8) — 깊이를 견주던 자를 그것으로 갈음했다
+            //   (리뷰 moai-k8j1.209 의 6번이 짚었던 자리다)
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); echo done' && sed -i s/a/b/ src/store.rs",
+            // **마지막 하위 셸이 아니면 그대로 막는다**(moai-qlr8) — 뒤에 한 줄만 더 있어도 그
+            // 글은 0 으로 끝난다. `;` 뒤의 리다이렉션은 정말 도는 명령 하나라 여기 든다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 ); echo d' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); >/tmp/f' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null; echo d' && sed -i s/a/b/ src/store.rs",
+            // **걸린 리다이렉션 뒤의 형제 괄호도 그 묶음 밖이다**(리뷰 moai-514e) — 그 토막은
+            // 묶음을 걷는 자리를 건너뛰는데, [`Lexer::push`] 가 지나온 자리를 다시 재기 시작하던
+            // 판은 뒤 괄호를 앞 괄호 **안**으로 읽어 그 `exit` 가 딴 괄호의 값을 제 것이라 우겼다.
+            // bash 로 쟀다: `bash -c '( false || { exit 1; } ) >/dev/null; ( true )'` 는 0 이다.
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null; ( true )' && sed -i s/a/b/ src/store.rs",
+            // **0 으로 끝나는 `exit` 의 표도 걸린 리다이렉션에 안 걷힌다**(리뷰 moai-514e) —
+            // 한쪽만 가리던 판은 리다이렉션을 뗀 글자째 같은 줄은 막으면서 이쪽만 샜다.
+            "bash -c '( moai mv t-1 in_progress --from todo || exit 0 ) >/dev/null' && sed -i s/a/b/ src/store.rs",
+            // 0 으로 끝나는 `exit` 는 하위 셸 안에서도 아무 말도 안 한다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 0 )' && sed -i s/a/b/ src/store.rs",
+            // 파이프의 칸이나 뒤로 띄운 괄호는 제 하위 셸만 끝낸다 — 글은 곧바로 0 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( exit 1 ) | cat' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || ( exit 1 ) &' && sed -i s/a/b/ src/store.rs",
             // 뒤로 띄운 것으로 끝나면 글의 값은 집기의 값이 아니다 — errexit 를 켜고 띄워도 같다.
             "bash -e -c 'moai mv t-1 in_progress --from todo &' && sed -i s/a/b/ src/store.rs",
             "eval 'moai mv t-1 in_progress --from todo; echo ok' && sed -i s/a/b/ src/store.rs",
@@ -10503,6 +12071,13 @@ mod tests {
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 0; }' && sed -i s/a/b/ src/store.rs",
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit; }' && sed -i s/a/b/ src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 0; fi' && sed -i s/a/b/ src/store.rs",
+            // **맨 `|| exit 0` 도 같은 자로 잰다**(moai-sq3q) — 값을 안 보던 판은 한 줄의 두 철자에
+            // 반대 판정을 냈다. `exit 256` 은 셸이 0 으로 접는다(bash 로 쟀다: 그 줄은 0 이다).
+            // 묶음을 나와 글이 더 이어지는 꼴도 같은 자리다 — 그 `exit 0` 도 자식을 0 으로 끝낸다.
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 0' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || exit 256' && sed -i s/a/b/ src/store.rs",
+            "sh -c 'moai mv t-1 in_progress --from todo || exit 0; echo done' && echo x > src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || { exit 0; }; echo done' && sed -i s/a/b/ src/store.rs",
             // **파이프의 칸이거나 `&` 로 띄운 `eval` 은 하위 셸이다** — 그 `exit` 는 그 칸만 끝낸다.
             // 묶음째 문 것도 같다(moai-4arw) — `|` 앞의 빈 토막에 거슬러 적는다.
             "moai mv t-1 in_progress --from todo || { echo fail; exit 1; } | cat; sed -i s/a/b/ src/store.rs",
@@ -10582,14 +12157,16 @@ mod tests {
             "bash -c 'moai mv t-1 in_progress --from todo || exit 1; echo x &' && sed -i s/a/b/ src/store.rs",
             "bash -c 'set -e; moai mv t-1 in_progress --from todo; echo x &' && sed -i s/a/b/ src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi; echo x &' && sed -i s/a/b/ src/store.rs",
-            // **글이 통째로 하위 셸 안이면 그 하위 셸의 값이 곧 이 셸의 값이다**(moai-vngm) —
-            // 집안째 막던 자리다([`Layer::Shell`] 의 `deep`). bash 로 쟀다:
-            // `bash -c '( false || { echo f; exit 1; } )'` 는 1 이고, 그것이 곧 집기가 이겨야만
-            // 바깥 `&&` 에 닿는다는 뜻이다.
+            // **글이 통째로 하위 셸 안이거나 마지막 하위 셸이면 그 값이 곧 이 셸의 값이다**
+            // (moai-vngm·moai-qlr8) — 집안째 막던 자리다. bash 로 쟀다:
+            // `bash -c '( false || { echo f; exit 1; } )'` 도 `bash -c 'false || ( echo f; exit 1 )'`
+            // 도 1 이고, 그것이 곧 집기가 이겨야만 바깥 `&&` 에 닿는다는 뜻이다.
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } )' && sed -i s/a/b/ src/store.rs",
             "bash -c \"bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } )'\" && sed -i s/a/b/ src/store.rs",
             "bash -c '( if ! moai mv t-1 in_progress --from todo; then exit 1; fi )' && sed -i s/a/b/ src/store.rs",
             "bash -c '( ( moai mv t-1 in_progress --from todo || exit 1 ) )' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 )' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null' && sed -i s/a/b/ src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -10617,9 +12194,6 @@ mod tests {
             // `bash -c '( false || exit 1 ); ( true )'` 는 0 이다.
             "bash -c '( moai mv t-1 in_progress --from todo || exit 1 ); ( true )' && sed -i s/a/b/ src/store.rs",
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); ( echo d )' && sed -i s/a/b/ src/store.rs",
-            // **글의 마지막 하위 셸까지는 아직 못 푼다** — 그것을 알려면 묶음마다 "글의 마지막인가"
-            // 를 따로 들어야 한다. 새는 쪽이 아니라 잘못 막는 쪽이라 급하지 않다.
-            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 )' && sed -i s/a/b/ src/store.rs",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
