@@ -269,6 +269,9 @@ struct Stood {
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
+    /// 칸 셈에서 미뤄 뺀 멤버 수(`report::Stand::deferred`) — 롤업의 막대 곁에 선다(moai-oz13).
+    /// **세는 자는 거기 하나다**: 여기 들이는 것은 옮겨 담을 뿐이라 탐색기가 따로 세지 않는다.
+    deferred: usize,
 }
 
 /// **파일 전체를 훑어야 아는 것을 소유한 꼴**(moai-fbdg). `report::Soil` 은 이슈를 빌리므로 `App` 이
@@ -313,6 +316,7 @@ impl Ground {
                     busy: s.busy,
                     waiting: s.waiting,
                     aside,
+                    deferred: s.deferred,
                 };
                 (id.to_string(), stood)
             })
@@ -520,7 +524,7 @@ fn placed(
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
     // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
     // 옛 수로 섰다(moai-al0x 가 고친 자리다).
-    let (lost, unread) = crate::worktree::stranded_at_in(repo.here(), &repo.config, issues, overlaid, now, dug);
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now, dug);
     let said = match overlaid {
         true => Vec::new(),
         false => unread
@@ -1066,6 +1070,20 @@ impl Site {
             .then(|| self.ground.stands.get(&i.id))
             .flatten()
             .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
+    }
+
+    /// 그 줄이 묶음이면 **칸 셈에서 미뤄 뺀 멤버 수**(`report::Stand::deferred`, moai-oz13). 묶음이
+    /// 아니거나 셀 것이 없으면 `None` 이라, 낱말을 짓는 자([`crate::view::set_aside_word`])가 그
+    /// 자리에서 아무 말도 안 한다 — 없는 것을 `미룬 0` 으로 말하면 모든 줄에 같은 꼬리가 붙는다.
+    ///
+    /// **보드와 같은 자다.** 여기서 다시 세면 한 저장소를 두 표면이 다른 수로 말한다.
+    ///
+    /// **첨자를 짚지 않고 묻는다**(리뷰) — 곁의 [`Site::column`]·[`Site::waits`] 는 짚는데, 그쪽에는
+    /// 한눈 보기의 남의 줄이 제 색인에서 푼 첨자를 들고 와 그 자리에서 죽은 이력이 적혀 있다
+    /// ([`Site::waits`]). 답이 이미 `Option` 이라 넘친 첨자에 `None` 을 내는 데 드는 것이 없다.
+    pub fn deferred(&self, at: usize) -> Option<usize> {
+        let i = self.issues.get(at)?;
+        crate::report::is_group(i).then(|| self.ground.stands.get(&i.id)).flatten().map(|s| s.deferred)
     }
 
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이 그저 제목 없는 줄인지

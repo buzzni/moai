@@ -486,15 +486,27 @@ pub fn bar(percent: Option<u8>) -> String {
 /// 막대 곁에 대는 **미룬 멤버 수**([`crate::report::Roll::deferred`], moai-zxwj). 셀 것이 없거나
 /// 0 이면 빈 글이다 — 없는 것을 `미룬 0` 으로 말하면 모든 줄에 같은 꼬리가 붙어 뜻이 사라진다.
 ///
-/// **한 자리에서 짓는다** — 보드(`status`)와 묶음 상세(`show <묶음>`)가 이것을 같이 쓴다. 둘이
-/// 따로 지으면 같은 수가 두 낱말로 나가고, 한쪽만 고치는 날 한 화면 안에서 말이 갈린다.
+/// **한 자리에서 짓는다** — 보드(`status`)와 묶음 상세(`show <묶음>`), 탐색기의 롤업
+/// (`tui::draw::rollup`, moai-oz13)이 이것을 같이 쓴다. 저마다 지으면 같은 수가 여러 낱말로
+/// 나가고, 한쪽만 고치는 날 한 화면 안에서 말이 갈린다.
 /// 앞의 빈칸까지 여기서 든다: 붙이는 쪽이 저마다 띄우면 자리 폭이 표마다 달라진다.
+/// 탐색기는 칠하는 법이 달라 낱말만 받아 간다([`set_aside_word`]).
 pub fn set_aside(deferred: Option<usize>, lang: crate::i18n::Lang) -> String {
+    match set_aside_word(deferred, lang) {
+        Some(word) => paint(style::DIM, &format!("   {word}")),
+        None => String::new(),
+    }
+}
+
+/// [`set_aside`] 의 **맨몸 낱말** — 칠도 앞 빈칸도 없다. 셀 것이 없거나 0 이면 `None` 이다.
+///
+/// 탐색기(`tui::draw::rollup`)가 이것을 쓴다(moai-oz13). 그쪽은 ANSI 가 아니라 ratatui 의
+/// `Span` 으로 칠하므로 위의 꼴을 그대로 못 받는데, 낱말까지 제 자리에서 지으면 같은 수가 두
+/// 낱말로 나간다 — 갈리는 것은 **칠하는 법**뿐이고 낱말은 여기 하나다.
+pub fn set_aside_word(deferred: Option<usize>, lang: crate::i18n::Lang) -> Option<String> {
     match deferred {
-        Some(n @ 1..) => {
-            paint(style::DIM, &format!("   {}", fill(say(lang, "status.deferred_members"), &[("n", &n.to_string())])))
-        }
-        _ => String::new(),
+        Some(n @ 1..) => Some(fill(say(lang, "status.deferred_members"), &[("n", &n.to_string())])),
+        _ => None,
     }
 }
 

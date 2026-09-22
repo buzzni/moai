@@ -40,6 +40,18 @@ pub struct Project {
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`worktree::Gathered::swept`) — 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 이미 섰다.
     pub swept: bool,
+    /// 여는 길이 **이미 판 것**([`crate::worktree::Gathered::sides`]·[`crate::worktree::Gathered::mine`],
+    /// moai-65ie). 자리 판정([`crate::worktree::stranded_at`])에 [`Project::dug`] 로 실어 보낸다.
+    ///
+    /// **한때 여기서 버렸다.** `State::at_with` 이 둘을 떨어뜨려, 한눈 보기(`cmd/status.rs`)와
+    /// 층(`tui/layer.rs`)이 `Dug::new()` 로 자리를 재 **프로젝트마다** 같은 main 스냅샷을 다시
+    /// 팠다 — 값이 등록 수만큼 곱해지는 자리였다(리뷰 moai-3bry.93r 11번). 겹쳐 보지 않는 층도
+    /// 이득을 본다: `mine` 은 겹쳐 보지 않아도 서는 값이다(moai-mafv).
+    /// **빌려 가는 자리가 하나 더 있다**: 여는 길과 자리 판정 사이에 `Project` 를 통째로 빌릴 수
+    /// 없는 자리(`tui::layer::look_one` — 상태를 꺼내 쓰면서 이 둘을 빌린다)가 있어 열어 둔다.
+    pub sides: Vec<crate::worktree::Side>,
+    /// 겹치기 전에 잰 제 바닥 — 위 `sides` 와 한 짝이다.
+    pub mine: crate::worktree::Floor,
 }
 
 pub enum State {
@@ -117,8 +129,19 @@ pub fn open_one(
     worktree: bool,
     lang: crate::i18n::Lang,
 ) -> Project {
-    let (state, origin, trouble, swept) = State::at_with(path, worktree, lang);
-    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept }
+    let Dig { state, origin, trouble, swept, sides, mine } = State::at_with(path, worktree, lang);
+    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept, sides, mine }
+}
+
+/// [`State::at_with`] 이 낸 것 — 상태와, 여는 길이 함께 판 것. **튜플로 내지 않는다**: 여섯이
+/// 되는 순간 받는 쪽이 차례로 받아 이름을 잃고, 같은 타입 둘이 뒤바뀌어도 컴파일된다.
+struct Dig {
+    state: State,
+    origin: crate::worktree::Origin,
+    trouble: Vec<crate::worktree::Trouble>,
+    swept: bool,
+    sides: Vec<crate::worktree::Side>,
+    mine: crate::worktree::Floor,
 }
 
 /// **여는 데까지만** 본다 — 스냅샷은 안 읽는다(moai-m59y). 줄을 곧 스레드가 읽을 자리가 쓴다
@@ -143,7 +166,7 @@ impl State {
     /// 한눈 보기·`project ls`·`project add` 가 같은 자로 잰다. 등록이 따로 들여다보면
     /// 설정이 깨진 저장소를 `add` 는 조용히 받고 `ls` 는 "못 읽는다" 로 말한다 (moai-9omq).
     fn at(dir: &Path, lang: crate::i18n::Lang) -> State {
-        State::at_with(dir, false, lang).0
+        State::at_with(dir, false, lang).state
     }
 
     /// 여는 것은 [`State::at`] 과 같고, 연 저장소는 `worktree` 면 옆을 겹쳐 읽는다.
@@ -151,12 +174,17 @@ impl State {
     ///
     /// **못 여는 갈래는 [`open_shallow`] 하나가 가른다** — 두 벌로 적으면 한쪽만 고쳐져, 설정이
     /// 깨진 저장소를 층의 줄과 `project ls` 가 달리 부른다(moai-9omq 가 고친 바로 그것이다).
-    fn at_with(
-        dir: &Path,
-        worktree: bool,
-        lang: crate::i18n::Lang,
-    ) -> (State, crate::worktree::Origin, Vec<crate::worktree::Trouble>, bool) {
-        let lone = |s: State| (s, crate::worktree::Origin::default(), Vec::new(), false);
+    fn at_with(dir: &Path, worktree: bool, lang: crate::i18n::Lang) -> Dig {
+        let lone = |state: State| Dig {
+            state,
+            origin: crate::worktree::Origin::default(),
+            trouble: Vec::new(),
+            swept: false,
+            sides: Vec::new(),
+            // 못 연 프로젝트에는 잰 바닥이 없다. **자리 없는 바닥**은 어떤 스냅샷 자리와도 안
+            // 같아(`Floor::loose`), 실려도 자리 셈이 안 집어 든다 — 건네받은 것이 없던 때와 같다.
+            mine: crate::worktree::Floor::loose(&[]),
+        };
         let repo = match open_shallow(dir, lang) {
             Ok(repo) => repo,
             Err(state) => return lone(state),
@@ -164,7 +192,15 @@ impl State {
         match crate::worktree::gather(&repo, worktree) {
             Ok(g) => {
                 let trouble = g.unfound.into_iter().chain(g.trouble).collect();
-                (State::Open { repo, load: g.load }, g.origin, trouble, g.swept)
+                // **판 것을 여기서 버리지 않는다**(moai-65ie) — 버리면 자리 판정이 그것을 다시 판다.
+                Dig {
+                    state: State::Open { repo, load: g.load },
+                    origin: g.origin,
+                    trouble,
+                    swept: g.swept,
+                    sides: g.sides,
+                    mine: g.mine,
+                }
             }
             Err(e) => lone(State::Unreadable(e.message)),
         }
@@ -176,6 +212,15 @@ impl Project {
     ///
     /// 받는 쪽이 넷을 매번 `match` 하지 않고 **연 것에 대해서만** 말하게 한다 —
     /// `--json` 과 사람 화면이 같은 [`Seen`] 을 받아 상태 낱말이 갈라지지 않는다.
+    /// 여는 길이 이미 판 것을 자리 셈이 찾을 모양으로(moai-65ie). 못 연 프로젝트면 빈 것이라,
+    /// 받는 쪽([`crate::worktree::stranded_at`])은 예전처럼 제 손으로 판다.
+    ///
+    /// **`stranded_at` 을 부르는 자리는 이것을 쓴다.** 안 쓰면 그 자리가 같은 스냅샷을 프로젝트마다
+    /// 다시 판다 — 답은 같고 값만 곱해지므로 화면으로는 안 드러난다.
+    pub fn dug(&self) -> crate::worktree::Dug<'_> {
+        crate::worktree::dug(&self.sides, &self.mine)
+    }
+
     pub fn seen<'a, T>(&'a self, f: impl FnOnce(&'a Repo, &'a Load) -> T) -> Seen<'a, T> {
         match &self.state {
             State::Open { repo, load } => Seen::Ok(f(repo, load)),
