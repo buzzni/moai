@@ -202,6 +202,7 @@ eventually needs.
 - `CONTRIBUTING.md` — building, testing, and what a commit here looks like
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
+- `docs/korean-terms.md` — the Korean terms this repository's issues and notes use
 - `CHANGELOG.md` — what changed, per release
 
 ## License
