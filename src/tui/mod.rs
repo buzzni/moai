@@ -379,11 +379,11 @@ pub struct Fresh {
     unfound: Option<String>,
     watched: Vec<(std::path::PathBuf, Stamp)>,
     now: String,
-    /// 설치가 어긋난 것까지 더한 **알림의 수**(moai-k6ff) — 배너가 이 수를 댄다. 층의 `+N` 과
-    /// 같은 자라([`layer::summarize`]), 들어간 화면이 층에서 본 그 수를 그대로 댄다.
+    /// 설치가 어긋난 것까지 더한 **알림의 수**(moai-k6ff) — 배너가 이 수를 댄다. 프로젝트 층의 `+N` 과
+    /// 같은 자라([`layer::summarize`]), 들어간 화면이 그 층에서 본 그 수를 그대로 댄다.
     notices: usize,
-    /// 그 가운데 설치가 어긋난 몫을 **이 판에서 물어서 셌으면** 그 수(moai-k6ff). 들고 있던 값을
-    /// 그대로 쓴 판은 `None` 이고, 받는 쪽([`App::apply_fresh`])이 그것으로 때를 찍을지를 가른다.
+    /// 그 가운데 설치가 어긋난 몫을 **이 번에 물어서 셌으면** 그 수(moai-k6ff). 들고 있던 값을
+    /// 그대로 쓴 때는 `None` 이고, 받는 쪽([`App::apply_fresh`])이 그것으로 때를 찍을지를 가른다.
     asked_install: Option<usize>,
     /// 그 뿌리에서 **내가 누구인가**(moai-uitb) — 푸는 자는 [`whoami_at`] 하나다.
     ///
@@ -435,7 +435,7 @@ fn commit_tables(roots: &[std::path::PathBuf], ids: &std::collections::BTreeSet<
 const DISCARDED_KEPT: usize = 8;
 
 /// 그 뿌리에서 나는 누구인가 — **[`App`] 없이도 푼다**(moai-uitb). 읽는 스레드가 이것을 불러
-/// [`Fresh::me`] 에 실어 온다. 한 번이 `git config` 프로세스 둘(33ms)이라, 그리는 걸음에서 부르면
+/// [`Fresh::me`] 에 실어 온다. 한 번이 `git config` 하위 프로세스 둘(33ms)이라, 그리는 걸음에서 부르면
 /// 그 값이 `term.draw` 와 `event::poll` 사이에 그대로 선다.
 ///
 /// **푸는 법은 한 자리다** — [`App::whoami`] 가 여기로 든다. 갈라 두면 헤더와 [NEW] 가 서로 다른
@@ -451,8 +451,8 @@ fn whoami_at(
 /// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
 ///
 /// `held` 는 **들고 있던 설치 알림의 수**다(moai-k6ff·moai-nzyh). 주면 그것을 그대로 세고 git 을
-/// 안 띄운다 — 그 물음 하나가 프로세스를 셋까지 띄우는데(`git check-attr`·`git config`, 심긴 줄의
-/// probe) 이 길은 쓰기마다 루프에서도 돈다([`App::reload`]). 다시 묻는 때를 정하는 자는 층과 같은
+/// 안 실행한다 — 그 물음 하나가 하위 프로세스를 셋까지 새로 실행하는데(`git check-attr`·`git config`, 심긴 줄의
+/// probe) 이 길은 쓰기마다 루프에서도 돈다([`App::reload`]). 다시 묻는 때를 정하는 자는 `tui::layer` 와 같은
 /// 하나다([`layer::ASK_INSTALL_EVERY`]).
 fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<usize>) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
@@ -484,7 +484,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let (index, ground) = measure_in(&issues, &repo.config, &soil);
     let (warnings, notices) = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
     // **알림은 `moai status` 와 같은 자로 센다**(moai-k6ff) — 순수한 셈이 낸 것에 설치가 어긋난
-    // 셋을 더한 것이 보드가 세우는 수고, 층의 `+N` 도 그것이다(`layer::summarize`). 들어간 화면이
+    // 셋을 더한 것이 보드가 세우는 수고, 프로젝트 층의 `+N` 도 그것이다(`layer::summarize`). 들어간 화면이
     // 다른 수를 대면 `+3` 을 보고 Enter 를 친 사람이 그 셋을 어디서도 못 본다.
     let asked_install = held.is_none().then(|| crate::cmd::status::install_notices(repo, false).len());
     let notices = notices + held.or(asked_install).unwrap_or(0);
@@ -591,8 +591,8 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 /// [`warnings_of`] 와 같은 것. 적재가 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9).
 ///
 /// **둘을 함께 낸다**(moai-k6ff) — 고칠 것의 수와, 순수한 셈이 낸 알림의 수(쌓인 idea·미룬 것·
-/// 도는 마일스톤)다. `status_in` 한 판이 둘을 다 내므로 따로 부르면 같은 걸음을 두 벌 걷는다.
-/// 설치가 어긋난 셋은 여기 안 든다 — 그쪽은 git 을 띄우는 물음이라 부르는 쪽이 때를 고른다
+/// 도는 마일스톤)다. `status_in` 한 벌이 둘을 다 내므로 따로 부르면 같은 걸음을 두 벌 걷는다.
+/// 설치가 어긋난 셋은 여기 안 든다 — 그쪽은 하위 프로세스를 새로 실행하는 물음이라 부르는 쪽이 때를 고른다
 /// ([`prepare`]).
 fn warnings_in<'a>(
     issues: &'a [Issue],
@@ -681,12 +681,15 @@ pub struct Site {
     /// 것이다(moai-k6ff, 2026-09-22 사용자 결정). **경고와 가른다**: 고칠 계획이 아니라 담아 둔
     /// 것과 설치가 어긋난 것이라 `!` 가 아니라 흐린 `+` 로 선다(`view::status` 와 같은 자).
     ///
-    /// 층의 `+N`([`layer::Summary::notices`])과 **같은 수**라, 그 줄에서 Enter 를 친 사람이
-    /// 들어간 화면에서 같은 수를 본다 — 한때 안쪽에 그 짝이 없어 `+3` 이 선 줄로 들어가면 아무
-    /// 말도 없는 화면이 섰다.
+    /// 프로젝트 층의 `+N`([`layer::Summary::notices`])과 **같은 자로 센다**. 그 줄에서 Enter 를 친
+    /// 사람이 들어간 화면에서 같은 수를 본다 — 한때 안쪽에 그 짝이 없어 `+3` 이 선 줄로 들어가면
+    /// 아무 말도 없는 화면이 섰다.
+    ///
+    /// **수가 딱 맞는 것은 옆 워크트리가 없을 때다**(리뷰) — 이쪽은 겹쳐 본 줄로 세고 그쪽은 제
+    /// 체크아웃의 줄로 센다. 까닭과 그대로 둔 값은 [`layer::summarize_with`] 에 적어 두었다.
     pub notices: usize,
-    /// 그 가운데 설치가 어긋난 몫을 **마지막으로 물어서 센 값과 그때**(moai-k6ff). 층의 줄이 드는
-    /// 것과 같은 자다([`layer::Told`]) — 그 물음은 프로세스를 셋까지 띄우므로
+    /// 그 가운데 설치가 어긋난 몫을 **마지막으로 물어서 센 값과 그때**(moai-k6ff). 프로젝트 층의 줄이 드는
+    /// 것과 같은 자다([`layer::Told`]) — 그 물음은 하위 프로세스를 셋까지 새로 실행하므로
     /// [`layer::ASK_INSTALL_EVERY`] 에 한 번만 묻고 그사이에는 이 값을 그대로 센다.
     install: Option<layer::Told>,
     /// 마지막으로 읽은 파일의 (고친 때, 길이).
@@ -1338,12 +1341,14 @@ impl App {
             elsewhere.extend(said);
             // **여는 읽기도 알림을 센다**(moai-k6ff) — 다시 읽기는 `prepare` 가 같은 자로 세어
             // [`Fresh::notices`] 에 실어 온다. 안 세면 띄운 화면의 배너에만 그 수가 없다가 60초
-            // 뒤에 슬며시 서고, 그 사이에 층에서 `+N` 을 보고 들어온 사람이 빈 배너를 본다.
-            let soil = crate::report::Soil::of(&self.site.issues);
-            let (_, pure) =
-                warnings_in(&self.site.issues, &self.site.unreadable, &self.site.cfg, &self.site.now, &soil);
+            // 뒤에 슬며시 서고, 그 사이에 프로젝트 층에서 `+N` 을 보고 들어온 사람이 빈 배너를 본다.
+            //
+            // **순수한 셈은 [`App::build`] 가 이미 냈다**(리뷰) — 여기서 [`warnings_in`] 을 다시
+            // 부르던 때는 `report::status_in` 한 벌과 `Soil::of` 한 벌을 통째로 더 걸었고, 그것은
+            // `build` 의 바로 그 주석이 막는 일이다. 더하는 것은 설치가 어긋난 몫뿐이고, 위의
+            // `warnings` 와 같이 **한 번만** 더한다 — 이 길은 여는 읽기 하나가 한 번 지난다.
             let install = crate::cmd::status::install_notices(repo, false).len();
-            self.site.notices = pure + install;
+            self.site.notices += install;
             self.site.install = Some(layer::Told::now(install));
         }
         self.site.origin = origin;
@@ -1426,7 +1431,15 @@ impl App {
         }
         // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
         // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
-        app.site.warnings = warnings_of(&app.site.issues, &app.site.unreadable, &app.site.cfg, &app.site.now);
+        //
+        // **알림도 이 한 번에서 든다**(리뷰) — [`warnings_in`] 이 고칠 것과 알림을 함께 내므로,
+        // 알림을 나중에 넣겠다고 [`App::overlaid`] 에서 다시 부르면 위의 문장이 그대로 깨진다.
+        // 설치가 어긋난 몫만 그쪽이 더한다.
+        let soil = crate::report::Soil::of(&app.site.issues);
+        let (warnings, notices) =
+            warnings_in(&app.site.issues, &app.site.unreadable, &app.site.cfg, &app.site.now, &soil);
+        app.site.warnings = warnings;
+        app.site.notices = notices;
         app.see();
         app
     }
@@ -1448,8 +1461,17 @@ impl App {
             self.discard(handle);
         }
         let Some(repo) = &self.site.repo else { return };
-        // 들고 있던 설치 알림은 그대로 센다(moai-k6ff) — 쓰기마다 프로세스를 셋까지 띄우지 않는다.
-        let held = layer::Told::held(self.site.install);
+        // **이 길은 설치 알림을 절대 안 묻는다**(moai-k6ff, 리뷰) — 시계가 지났어도 들고 있던
+        // 수를 그대로 센다. 여기는 사람이 누른 키가 **그 자리에서** 기다리는 읽기고(쓰기 뒤·
+        // `SPC v w`), 그 물음 하나가 하위 프로세스 셋이다 — 심긴 드라이버가 느린 마운트에 있으면
+        // probe 의 2초 예산까지 그 키에 실린다. 다섯 번에 한 번 키가 멎는 화면은 까닭을 짚을 수
+        // 없는 멈춤이라, 이 에픽이 걷어 낸 바로 그 값이 자리만 옮겨 돌아온다.
+        //
+        // 다시 묻는 것은 **스레드에서 도는 읽기**뿐이다([`App::follow`]) — 시계가 지나면 그쪽이
+        // 묻고, 그 답이 [`App::apply_fresh`] 로 들어와 이 수를 새것으로 갈아 준다. 한 번도 못
+        // 물었으면 0 이다: 여는 읽기([`App::overlaid`])가 늘 한 번 물어 두므로 그 자리는 띄운
+        // 뒤에만 잠깐 선다.
+        let held = Some(self.site.install.map_or(0, |t| t.count));
         let fresh = (self.read)(repo, self.worktree, self.site.lang, held);
         self.receive(fresh);
     }
@@ -1728,8 +1750,8 @@ impl App {
         self.site.read_at = Some(std::time::Instant::now());
         self.site.warnings = f.warnings;
         self.site.notices = f.notices;
-        // **물어서 센 판만 때를 찍는다**(moai-k6ff) — 들고 있던 값을 쓴 판에도 찍으면
-        // [`layer::ASK_INSTALL_EVERY`] 가 영영 안 지나 첫 판의 수가 세션 내내 선다.
+        // **물어서 센 때만 찍는다**(moai-k6ff) — 들고 있던 값을 그대로 쓴 때에도 찍으면
+        // [`layer::ASK_INSTALL_EVERY`] 가 영영 안 지나 첫 번에 센 수가 세션 내내 선다.
         if let Some(count) = f.asked_install {
             self.site.install = Some(layer::Told::now(count));
         }
@@ -3218,7 +3240,7 @@ impl App {
         let worktree = self.worktree;
         let lang = self.site.lang;
         let sent = repo.clone();
-        // **누군지도 이 스레드가 푼다**(moai-uitb) — 한 번이 `git config` 프로세스 둘(33ms)이고,
+        // **누군지도 이 스레드가 푼다**(moai-uitb) — 한 번이 `git config` 하위 프로세스 둘(33ms)이고,
         // 들이는 자리([`App::follow_site`])는 `term.draw` 와 `event::poll` 사이에서 돈다. 옆
         // 세션이 커밋할 때마다 그 줄이 다시 읽히므로(`Layer::adopt`), 펼쳐 둔 프로젝트마다 그
         // 값이 걸음에 붙었다. 푸는 자는 [`whoami_at`] 하나 그대로다.
@@ -3240,6 +3262,9 @@ impl App {
         let round = self.layer.as_ref().map_or(0, layer::Layer::round);
         if let Some(layer) = self.layer.as_mut() {
             layer.reading = Some((path, rx, handle, round));
+            // 새 읽기는 뒤처지지 않은 채로 뜬다 — 앞 읽기가 남긴 표를 물려받으면 이 답이 닿자마자
+            // 까닭 없이 한 번 더 읽는다.
+            layer.reading_behind = false;
         }
         // 연 저장소는 읽어 온 것을 들일 때 [`Site`] 에 얹는다.
         self.reading_repo = Some(repo);
@@ -3259,13 +3284,16 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => (path.clone(), None),
         };
         let (_, _, handle, round) = layer.reading.take().expect("바로 위에서 보았다");
+        // **이 읽기가 도는 사이에 그 프로젝트에 쓰기가 들어왔는가**(moai-x1hb) — 쓸기가 표식이
+        // 움직인 것을 보고 적어 둔다([`layer::Layer::reading_behind`]). 답은 그대로 들이고 그 줄을
+        // 곧바로 다시 읽으러 보낸다.
+        let behind = std::mem::take(&mut layer.reading_behind);
         let repo = self.reading_repo.take();
         // **이 읽기가 뜬 뒤에 손으로 세운 줄에는 안 들인다**(moai-x1hb) — 쓸기가 표식이 움직인 것을
         // 보았거나(`Layer::adopt`) 사람이 그 줄을 다시 열었다. 들이면 새 표식을 든 줄에 **쓰기 전의**
         // 스냅샷이 앉아, 그 뒤로는 아무도 다시 안 읽는다(`Layer::stale` 은 표식이 같다고 본다).
         // 버린 자리는 다시 읽으러 보낸다 — 버리기만 하면 그 줄이 영영 머리줄로 남는다.
         if self.layer.as_ref().is_some_and(|l| l.set_after(&path, round)) {
-            self.deep.remove(&path);
             if let Some(err) = got.and_then(std::result::Result::err) {
                 // 못 읽은 까닭은 버려도 한 줄은 댄다 — 그 줄은 다시 읽어도 같은 까닭으로 진다.
                 self.notice = Some(fill(say(self.site.lang, "tui.layer.unread_rows"), &[("why", &err.to_string())]));
@@ -3273,8 +3301,24 @@ impl App {
             if let Err(payload) = handle.join() {
                 std::panic::resume_unwind(payload);
             }
-            if let Some(layer) = self.layer.as_mut() {
-                layer.queue(path);
+            // **목록에서 빠진 경로는 안 세운다**(리뷰) — [`layer::Layer::set_after`] 는 그 갈래에도
+            // 참이라(들일 줄이 없다), 세우면 [`App::read_wanted`] 가 그 줄 하나를 꺼냈다가 자리를
+            // 못 찾고 돌아가 이 걸음의 읽기 하나를 버린다. 들일 데가 없으니 `Tab` 의 뜻도 함께 걷는다.
+            //
+            // **다시 읽을 줄에는 `Tab` 의 뜻을 남긴다**(리뷰) — 아래 갈래가 그 뜻을 걷는 까닭은
+            // 그 읽기가 **졌기** 때문이고(사람이 다시 눌러야 한다), 여기는 지지 않았다: 곧바로
+            // 다시 읽으러 보낸다. 걷으면 그 답이 닿을 때 `open_all` 이 안 불려, `Tab` 을 누른
+            // 사람이 한 층만 펴진 프로젝트를 보고 다시 누르면 그것이 접힌다(`unfold` 의 `was &&
+            // deep`) — 옆 세션이 커밋할 때마다 그렇게 된다.
+            match self.layer.as_ref().is_some_and(|l| l.position(&path).is_some()) {
+                true => {
+                    if let Some(layer) = self.layer.as_mut() {
+                        layer.queue(path);
+                    }
+                }
+                false => {
+                    self.deep.remove(&path);
+                }
             }
             self.read_wanted();
             return;
@@ -3295,18 +3339,31 @@ impl App {
                 site.repo = repo;
                 // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
                 // 뿌리에서, 읽을 때 한 번. [`super::layer::App::enter_project`] 가 들어가며 하는 것과
-                // 같은 자다(프로젝트마다 git 설정이 다를 수 있어 뿌리마다 푼다). 그 한 번이 프로세스
-                // 둘(33ms)이고 이 자리는 `term.draw` 와 `event::poll` 사이라, 여기서 부르던 판은 옆
-                // 세션의 커밋 하나에 펼쳐 둔 프로젝트마다 그만큼이 걸음에 붙었다.
-                site.me = fresh.me;
+                // 같은 자다(프로젝트마다 git 설정이 다를 수 있어 뿌리마다 푼다). 그 한 번이 하위
+                // 프로세스 둘(33ms)이고 이 자리는 `term.draw` 와 `event::poll` 사이라, 여기서
+                // 부르던 때는 옆 세션의 커밋 하나에 펼쳐 둔 프로젝트마다 그만큼이 걸음에 붙었다.
+                //
+                // **읽기가 뜬 뒤에 사람이 답했으면 그 답이 이긴다**(리뷰) — 스레드는 뜰 때의
+                // [`App::user`] 를 들고 갔는데, 그 뒤에 `App::answer` 가 사람을 받아도
+                // [`App::relearn_me_in_places`] 는 줄을 **든** 뒤에만 고친다(`p.site.is_some()`).
+                // 읽는 중이던 이 줄만 답 이전의 사람으로 앉고, [`App::want_site`] 는 든 줄을 다시
+                // 안 읽으므로 그 프로젝트의 [NEW] 가 세션 내내 안 선다 — 옮기기 전에는 여기서
+                // 그때의 `self.user` 로 풀어 그 답이 이 읽기에 바로 들었다. 여기서 다시 푸는 것은
+                // `--user` 와 받은 답이 선 때뿐이라([`crate::model::actor`] 가 그 값을 보고 곧바로
+                // 돌려준다) 이 걸음에 하위 프로세스가 안 선다.
+                let mut me = fresh.me;
+                if me.is_none() && self.user.is_some() {
+                    me = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root));
+                }
+                site.me = me;
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
                 site.warnings = fresh.warnings;
                 // **알림도 그 줄과 함께 든다**(moai-k6ff) — 이 줄로 들어가면 그 화면의 배너가
-                // 층에서 본 `+N` 을 그대로 댄다.
+                // 프로젝트 층에서 본 `+N` 을 그대로 댄다.
                 site.notices = fresh.notices;
                 // 물었으면 그 값으로, 아니면 그 줄이 들고 있던 것 그대로 — 들어가서 다시 읽을 때
-                // 이 값이 다시 묻는 때를 정한다. 물은 판은 그 **줄에도** 적는다: 다음 쓸기가 같은
+                // 이 값이 다시 묻는 때를 정한다. 물은 때는 그 **줄에도** 적는다: 다음 쓸기가 같은
                 // 것을 또 묻지 않는다.
                 let told = self.layer.as_ref().and_then(|l| l.told_install(&path));
                 site.install = fresh.asked_install.map(layer::Told::now).or(told);
@@ -3368,6 +3425,16 @@ impl App {
                 // `Tab` 으로 "다 펴 달라" 며 기다린 프로젝트면 이제 편다.
                 if deep && let Some(at) = landed {
                     self.open_all(Seat::Place(at));
+                }
+                // **읽는 사이에 쓰기가 들어왔으면 곧바로 다시 읽으러 보낸다**(moai-x1hb). 방금
+                // 들인 줄은 그 쓰기 **전**의 것이고, 표식은 이미 쓰기 뒤의 것이라 다른 자는 이
+                // 줄을 다시 안 고른다([`layer::Layer::stale`]·`adopt` 의 `again` 둘 다 표식으로
+                // 잰다). 여기서 안 세우면 머리줄의 셈과 그 밑의 줄이 세션 내내 다른 말을 한다.
+                if behind
+                    && landed.is_some()
+                    && let Some(layer) = self.layer.as_mut()
+                {
+                    layer.queue(path.clone());
                 }
             }
             // 못 읽었다 — 까닭을 한 줄로 대고 그 프로젝트는 머리줄만 선다. 다시 펴면 다시 간다.
@@ -7822,6 +7889,36 @@ mod tests {
         a.hit("Esc");
         a.hit("z");
         assert_eq!(a.notice, None, "뜻 없는 키가 알림을 안 걷었다");
+    }
+
+    /// **사람이 누른 키를 기다리는 읽기는 설치 알림을 안 묻는다**(moai-k6ff, 리뷰). 그 물음은
+    /// 하위 프로세스 셋이고(심긴 드라이버가 느리면 probe 의 2초 예산까지), 이 길은 쓰기와
+    /// `SPC v w` 가 **그 자리에서** 부른다 — 시계가 지날 때마다 키 하나가 멎으면 이 에픽이 걷어
+    /// 낸 값이 자리만 옮겨 돌아온다. 다시 묻는 것은 스레드에서 도는 읽기뿐이다.
+    ///
+    /// **묻는지를 인자로 잰다** — `held` 가 `Some` 이면 [`prepare`] 는 하위 프로세스를 안 띄운다.
+    #[test]
+    fn the_keystroke_reread_never_asks_about_the_install() {
+        static HELD: std::sync::Mutex<Vec<Option<usize>>> = std::sync::Mutex::new(Vec::new());
+        fn spy(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<usize>) -> crate::fail::R<Fresh> {
+            HELD.lock().expect("시험 혼자 쓴다").push(held);
+            prepare(repo, worktree, lang, held)
+        }
+        let (_scratch, mut a) = writable("reload-install");
+        a.read = spy;
+        // 시계가 한참 지난 값을 들고 있다 — 그래도 이 길은 안 묻는다.
+        let long_ago =
+            std::time::Instant::now().checked_sub(layer::ASK_INSTALL_EVERY * 2).expect("시계가 10분도 안 돌았다");
+        a.site.install = Some(layer::Told { count: 2, at: long_ago });
+        a.reload();
+        assert_eq!(HELD.lock().unwrap().as_slice(), [Some(2)], "키를 기다리는 읽기가 설치 알림을 다시 물었다");
+        assert_eq!(a.site.install.map(|t| t.at), Some(long_ago), "안 물어 놓고 물은 때를 다시 찍었다");
+
+        // 한 번도 못 물었으면 0 으로 센다 — 그래도 안 묻는다.
+        HELD.lock().unwrap().clear();
+        a.site.install = None;
+        a.reload();
+        assert_eq!(HELD.lock().unwrap().as_slice(), [Some(0)], "들고 있는 것이 없다고 그 자리에서 물었다");
     }
 
     fn prepare_found(

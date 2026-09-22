@@ -656,8 +656,12 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 서면 80칸에서 "드러난 것 N건" 에 밀려 잘리고, 그러면 담긴 것을 확인할 길이 없다.
     // 실패보다 앞서지 않는다 — 둘이 함께 서는 것은 담긴 뒤 다시 읽기가 실패했을 때고,
     // 그때 사람이 할 일은 실패 쪽에 있다. 알림만으로는 급하지 않다(`✓` 가 뜻을 진다).
+    // **급하지 않은 줄을 센다**(리뷰) — 아래의 `lead` 가 `!` 를 붙일지 가르는 자다. 쓰기의
+    // 알림과 담아 둔 것의 수가 그것이고, 둘만 선 배너는 고칠 것이 하나도 없다는 뜻이다.
+    let mut soft = 0usize;
     if let Some(n) = &app.notice {
         parts.push(n.clone());
+        soft += 1;
     }
     // 도는 채로 놓은 다시 읽기는 **붙박이다** — 그것이 터지면 화면이 걷히고 탐색기는
     // 모른다. 사람이 할 수 있는 것은 나갔다 다시 여는 것뿐이다(moai-j9on). 급하지만 알림
@@ -706,22 +710,27 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if app.site.warnings > 0 {
         parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &app.site.warnings.to_string())]));
     }
-    // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 층의 줄이 대는 `+N`
+    // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
     // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
     //
-    // **글은 층의 상세와 한 자리에서 온다**(`tui.place.notices`) — 같은 수를 두 화면이 다른
+    // **글은 프로젝트 층의 상세와 한 자리에서 온다**(`tui.place.notices`) — 같은 수를 두 화면이 다른
     // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
     // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
     // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
     if app.site.notices > 0 {
         parts.push(fill(say(lang, "tui.place.notices"), &[("n", &app.site.notices.to_string())]));
+        // **급한 줄로 안 센다**(리뷰) — 이 줄만 선 배너에 아래의 `!` 가 붙던 때는 `! + 알림 3건`
+        // 이 되어, 한 줄이 경고의 `!` 와 알림의 `+` 를 같이 이고 섰다. 같은 수를 `view::status` 는
+        // `✓ 드러난 문제 없다` 와 흐린 `+` 로 내고, 프로젝트 층의 상세도 `!` 없이 낸다 — 설치를
+        // 한 번도 안 맞춘 저장소에서 그 배너가 세션 내내 서므로, 멀쩡한 저장소가 깨진 것으로 읽혔다.
+        soft += 1;
     }
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
-    // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
-    // 잘못된 줄 안다.
-    let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
+    // 급하지 않은 것만 섰으면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
+    // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수).
+    let lead = if parts.len() == soft { "" } else { "! " };
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
 
@@ -4822,13 +4831,18 @@ pub(super) mod tests {
         assert!(urgent && text.find("다시 읽지").unwrap() < text.find("담김").unwrap(), "{text}");
     }
 
-    /// **층의 `+N` 은 들어가면 짝이 있다**(moai-k6ff, 2026-09-22 사용자 결정). 알림 수를 대는
+    /// **프로젝트 층의 `+N` 은 들어가면 짝이 있다**(moai-k6ff, 2026-09-22 사용자 결정). 알림 수를 대는
     /// 줄에서 Enter 를 치면 그 화면의 배너가 같은 수를 댄다 — 한때 안쪽에 그 짝이 없어 `+3` 이 선
     /// 줄로 들어가면 아무 말도 없는 화면이 섰다.
     ///
     /// **경고와 낱말로 갈린다** — 알림만 있는 것은 고칠 것이 없다는 뜻이라, 수만 같고 낱말이
     /// 같으면 담아 둔 것이 경고로 읽힌다. **80·100·120 을 다 본다**: 배너에 낱말이 하나 더 들어
     /// 좁은 창에서 먼저 잘리는 자리다.
+    ///
+    /// **머리의 `!` 도 잰다**(리뷰) — 낱말만 보던 때는 `! + 알림 3건` 이 이 줄을 그대로 지나갔다.
+    /// 그 `!` 는 경고의 글리프고, 같은 수를 `view::status` 는 `✓ 드러난 문제 없다` 와 흐린 `+` 로
+    /// 낸다 — 설치를 한 번도 안 맞춘 저장소에서 세션 내내 서므로 멀쩡한 저장소가 깨진 것으로
+    /// 읽혔다. 경고가 함께 서면 그때는 `!` 가 맞다.
     #[test]
     fn the_banner_names_the_notices_the_layer_counted() {
         let mut a = app();
@@ -4839,11 +4853,13 @@ pub(super) mod tests {
         assert!(text.contains("알림 3건"), "{text}");
         assert!(!text.contains("드러난 것"), "알림을 경고의 낱말로 댔다 — {text}");
         assert!(!urgent, "알림 하나에 급한 색이 섰다");
+        assert!(!text.contains('!'), "알림만 선 배너가 경고의 `!` 를 이고 섰다 — {text}");
 
-        // 경고와 함께 서면 경고가 앞이다 — 고칠 것이 먼저다.
+        // 경고와 함께 서면 경고가 앞이고, 그때는 `!` 가 머리에 선다 — 고칠 것이 먼저다.
         a.site.warnings = 4;
         let (text, _) = banner(&a).expect("배너가 안 섰다");
         assert!(text.find("드러난 것").unwrap() < text.find("알림 3건").unwrap(), "{text}");
+        assert!(text.starts_with(" ! "), "경고가 섰는데 `!` 가 빠졌다 — {text}");
 
         for w in [80, 100, 120] {
             let lines = render(&mut a, w, 12);
