@@ -70,7 +70,10 @@ pub struct Layer {
     /// **펼친 프로젝트의 줄**을 읽고 있는 스레드(moai-12yx) — 어느 프로젝트인지와 받을 곳. 요약을
     /// 읽는 [`Layer::pending`] 과 따로 두는 것은 값이 다르기 때문이다: 요약은 줄마다 작은 셈이고
     /// 이것은 그 프로젝트를 통째로 읽어 색인까지 짓는 일이라, 한 번에 **하나만** 돈다.
-    pub(super) reading: Option<(PathBuf, Receiver<crate::fail::R<super::Fresh>>, std::thread::JoinHandle<()>)>,
+    /// 넷째 값은 **그 읽기가 뜰 때의 세대**([`Layer::rounds`], moai-x1hb) — 요약 쓸기
+    /// ([`Layer::pending`])가 드는 것과 같은 자다. 들일 때 그 줄의 [`Place::set_at`] 과 견줘,
+    /// 뒤에 손으로 세운 줄에는 이 답을 안 들인다.
+    pub(super) reading: Option<(PathBuf, Receiver<crate::fail::R<super::Fresh>>, std::thread::JoinHandle<()>, u64)>,
     /// 펼쳐 놓고 아직 못 읽은 프로젝트 — 차례로 하나씩 읽는다. 사람이 여럿을 잇따라 펼쳐도
     /// 스레드가 그 수만큼 서지 않는다.
     pub(super) wanted: Vec<PathBuf>,
@@ -103,6 +106,19 @@ pub struct Place {
     /// 이 줄을 **손으로 세운** 세대(moai-ctcb) — [`Layer::rounds`] 의 그때 값이다. 한 번도 손대지
     /// 않았으면 `0` 이라 어느 쓸기의 답도 들어온다.
     set_at: u64,
+    /// 설치가 어긋난 것을 **마지막으로 물어서 센 값과 그때**(moai-nzyh). 없으면 아직 안 물었다.
+    install: Option<Told>,
+}
+
+/// 설치가 어긋난 것을 센 값과 **언제 물었나**(moai-nzyh).
+///
+/// 이 값을 따로 드는 까닭은 값이 다르기 때문이다 — 나머지 셈은 스냅샷 한 판을 읽는 일이고,
+/// 이것은 프로젝트마다 `git check-attr`·`git config` 와 심긴 줄의 [`crate::cmd::merge_driver`]
+/// probe 를 **프로세스로** 띄우는 일이다(등록 다섯에 32ms, `moai-nzyh` 의 표).
+#[derive(Debug, Clone, Copy)]
+struct Told {
+    count: usize,
+    at: std::time::Instant,
 }
 
 /// 한 줄을 다시 읽을 까닭이 되는 표식.
@@ -137,6 +153,18 @@ pub(super) const REREAD_EVERY: std::time::Duration = std::time::Duration::from_s
 pub(super) fn due(read_at: Option<std::time::Instant>) -> bool {
     read_at.is_some_and(|t| t.elapsed() >= REREAD_EVERY)
 }
+
+/// 설치가 어긋난 것은 이만큼에 한 번만 다시 묻는다(moai-nzyh). **나머지 셈과 자를 따로 두는 까닭은
+/// 값이 다르기 때문이다** — 쓸기 한 판의 나머지는 파일을 읽는 일이고 이 물음은 프로젝트마다
+/// 프로세스를 셋까지 띄운다(`git check-attr`·`git config`, 심겼으면 probe 하나). 등록 다섯에
+/// 57ms 가운데 32ms 가 그것이었다(`moai-nzyh` 의 표). [`REREAD_EVERY`] 로 같이 재면 탐색기가 선
+/// 동안 그 값을 1분마다 다시 치른다.
+///
+/// **이 값을 길게 두어도 되는 까닭**은 [`Summary::notices`] 가 고치고 1초 안에 사라져야 하는 수가
+/// 아니라서다([`Place::marks`] 에 `.gitattributes` 와 git 설정을 안 넣은 것과 같은 결정,
+/// moai-prdh). `moai merge-driver --install` 을 친 사람이 층에서 그 수가 내려가는 것을 보기까지
+/// 이만큼 걸리고, 그 사이에도 프로젝트로 들어가면 `moai status` 가 지금 값을 곧바로 댄다.
+pub(super) const ASK_INSTALL_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// 진 읽기를 **지금 갚을 때인가**(moai-po6v) — 표식이 그대로여도 다시 읽을 까닭이 되는 자다.
 /// 갈래가 정하고([`user_config::Again`]) 시계는 [`due`] 하나로 잰다.
@@ -257,6 +285,12 @@ struct Looked {
     path: PathBuf,
     marks: Marks,
     look: Look,
+    /// 설치가 어긋난 것을 **이 판에서 물어서 셌으면** 그 수(moai-nzyh). 들고 있던 값을 그대로 쓴
+    /// 판은 `None` 이다 — 들이는 쪽([`Layer::adopt`])이 그것으로 때를 찍을지를 가른다. 쓴 판마다
+    /// 때를 다시 찍으면 [`ASK_INSTALL_EVERY`] 가 영영 안 지나 첫 판의 수가 세션 내내 선다.
+    ///
+    /// **못 연 줄은 `None` 이다** — 물을 저장소가 없다. 그 줄이 열리는 날 첫 쓸기가 묻는다.
+    asked_install: Option<usize>,
 }
 
 fn marks_of(dir: &Path) -> Marks {
@@ -295,8 +329,29 @@ fn registry_of<'a>(
     }
 }
 
-/// 연 프로젝트 하나를 센다. **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
+/// 연 프로젝트 하나를 센다 — **설치가 어긋난 것은 여기서 물어서 센다.** 한 번 부르고 마는 자리
+/// (`cmd::tui` 의 `--json`)가 여기로 든다.
 pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate::worktree::Dug<'_>) -> Summary {
+    summarize_with(repo, load, now, dug, crate::cmd::status::install_notices(repo, false).len())
+}
+
+/// [`summarize`] 의 속 — `install` 은 **설치가 어긋난 것의 수**다(moai-nzyh). 부르는 쪽이 건네는
+/// 까닭은 층의 쓸기가 그 수를 [`ASK_INSTALL_EVERY`] 마다 한 번만 묻고 그사이에는 들고 있던 값을
+/// 그대로 세기 때문이다([`Layer::stale`]) — 줄마다 다시 물으면 프로젝트마다 프로세스가 셋까지
+/// 뜬다(등록 다섯에 32ms).
+///
+/// **세는 자는 그대로 하나다**([`crate::cmd::status::install_notices`]). 갈라 둔 것은 "언제 묻나"
+/// 뿐이고, 물을 때 세는 법은 한 자리 그대로다 — 층과 보드의 수가 갈리면 층에서 보고 들어간 사람이
+/// 다른 수를 본다.
+///
+/// **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
+pub fn summarize_with(
+    repo: &Repo,
+    load: &crate::store::Load,
+    now: &str,
+    dug: &crate::worktree::Dug<'_>,
+    install: usize,
+) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
@@ -328,7 +383,10 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate:
         //
         // **표식에는 안 든다**(`marks_of`) — AGENTS.md 나 git 설정을 고쳐도 이 수는 트래커가
         // 움직일 때 같이 다시 선다. 알림은 고치고 1초 안에 사라져야 하는 값이 아니다.
-        notices: st.notices.len() + crate::cmd::status::install_notices(repo, false).len(),
+        //
+        // **그 몫은 부르는 쪽이 건넨다**(moai-nzyh) — 층의 쓸기는 들고 있던 값을 그대로 주고,
+        // 다시 묻는 때는 [`ASK_INSTALL_EVERY`] 하나가 정한다([`Layer::stale`]).
+        notices: st.notices.len() + install,
         stranded,
         unread: unread.all.len(),
         blind: unread.blinding.len(),
@@ -378,15 +436,30 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
 /// 나란히 부르는 것은 한눈 보기와 같은 [`projects::each`] 다 — 한 줄의 패닉이 **그 까닭 그대로**
 /// 되던져지고(`scope` 에 맡기면 std 가 까닭을 지운다), 스레드를 못 띄우면 그 자리에서 읽는다.
 /// 보내기는 줄마다 제 스레드 안에서 하므로 닿는 대로 흐른다.
-fn look_into(paths: &[PathBuf], now: &str, lang: crate::i18n::Lang, tx: &std::sync::mpsc::Sender<Looked>) {
-    projects::each(paths, |path| {
-        let _ = tx.send(look_one(path, now, lang));
+fn look_into(paths: &[Want], now: &str, lang: crate::i18n::Lang, tx: &std::sync::mpsc::Sender<Looked>) {
+    projects::each(paths, |want| {
+        let _ = tx.send(look_one(&want.path, want.install, now, lang));
     });
+}
+
+/// 쓸기에 보내는 줄 하나 — 어느 경로를, **무엇을 들고**(moai-nzyh).
+///
+/// 설치 알림을 다시 물을 때가 아니면 들고 있던 수를 함께 보낸다([`Layer::stale`]). 경로만
+/// 보내던 때는 쓸기가 그 수를 알 길이 없어, 줄마다 git 을 다시 띄우는 것 말고는 셀 방법이 없었다.
+struct Want {
+    path: PathBuf,
+    install: Option<usize>,
+}
+
+/// 들고 있는 것 없이 묻는 줄 — 시험이 쓸기를 손으로 띄울 때의 꼴이다.
+#[cfg(test)]
+fn want(path: &Path) -> Want {
+    Want { path: path.to_path_buf(), install: None }
 }
 
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
-fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
+fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
@@ -397,11 +470,21 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let projects::Project { path, name, state, sides, mine, .. } =
         projects::open_one(path, String::new(), None, false, lang);
     let dug = crate::worktree::dug(&sides, &mine);
+    // **묻는 자리는 여기 하나다**(moai-nzyh) — 들고 있던 값이 있으면 그것을 세고 git 을 안 띄운다.
+    // 물었는지를 [`Looked`] 에 실어 보내는 까닭은 들이는 쪽이 때를 찍을 판을 가려야 해서다.
+    let mut asked_install = None;
     let look = match state {
-        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now, &dug) },
+        State::Open { repo, load } => {
+            let install = held.unwrap_or_else(|| {
+                let counted = crate::cmd::status::install_notices(&repo, false).len();
+                asked_install = Some(counted);
+                counted
+            });
+            Look::Open { sum: summarize_with(&repo, &load, now, &dug, install) }
+        }
         state => shut(&path, &name, state, lang),
     };
-    Looked { path, marks, look }
+    Looked { path, marks, look, asked_install }
 }
 
 impl Layer {
@@ -451,6 +534,7 @@ impl Layer {
                 read_at: None,
                 set_at: 0,
                 site: None,
+                install: None,
             })
             .collect();
         let at = match places.iter().find(|p| p.launched) {
@@ -493,7 +577,10 @@ impl Layer {
     /// 끊겼던 원격 디스크는 (고친 때, 길이)로 안 보여, 안 재면 "못 읽는다" 가 영영 선다(리뷰
     /// moai-3lul.kt0 다시 본 판). init 전과 사라진 디렉터리는 표식이 다 본다(디렉터리·설정 표식) — 그
     /// 줄의 말(`view::unopened`)에는 때도 안 들어 1분마다 다시 읽어도 같은 글이다.
-    fn stale(&self) -> Vec<PathBuf> {
+    /// **설치 알림은 들고 있던 값을 함께 보낸다**(moai-nzyh) — [`ASK_INSTALL_EVERY`] 가 지난 줄
+    /// 에만 `None` 을 보내 다시 묻게 한다. 그 자는 [`due`] 와 따로다: 이 줄이 다시 읽히는 까닭은
+    /// 표식이든 시계든 여럿이고, 그때마다 git 을 띄우면 다시 묻는 때가 사실상 쓸기마다가 된다.
+    fn stale(&self) -> Vec<Want> {
         self.places
             .iter()
             .filter(|p| {
@@ -503,8 +590,17 @@ impl Layer {
                     || (clocked && due(p.read_at))
                     || marks_of(&p.path) != p.marks
             })
-            .map(|p| p.path.clone())
+            .map(|p| Want {
+                path: p.path.clone(),
+                install: p.install.filter(|t| t.at.elapsed() < ASK_INSTALL_EVERY).map(|t| t.count),
+            })
             .collect()
+    }
+
+    /// [`Layer::stale`] 이 고른 경로만 — 시험이 "어느 줄을 다시 읽는가" 를 견주는 자리다.
+    #[cfg(test)]
+    fn stale_paths(&self) -> Vec<PathBuf> {
+        self.stale().into_iter().map(|w| w.path).collect()
     }
 
     /// 그 줄을 **곧바로 다시 읽을 줄로** 둔다 — 셈은 새것이 닿을 때까지 그대로 선다([`App::climb`]).
@@ -561,6 +657,13 @@ impl Layer {
         // 에서는 `✓` 로 올라가는데 줄은 세션 내내 `todo` 였다. 읽으러 가는 자는 [`App::want_site`]
         // 뿐인데 그쪽은 펼칠 때만 불리고, 든 줄이 있으면 아무것도 안 한다.
         let mut again: Vec<PathBuf> = Vec::new();
+        // **줄을 읽는 중에 표식이 움직인 자리**(moai-x1hb) — 그 읽기는 쓰기 전의 파일을 잰 것이라
+        // 낡았다. 위의 `again` 이 못 잡는 자리다: 그쪽은 줄을 **든** 뒤에만 서는데
+        // (`p.site.is_some()`), 첫 읽기가 도는 동안은 그 줄의 `site` 가 아직 `None` 이다. 그러고
+        // 나면 표식은 이미 새것이라 다시 읽으러 가는 자도 없어, 머리줄의 셈은 쓰기 뒤의 것이고
+        // 그 밑의 줄은 쓰기 전의 것인 채로 세션이 끝난다.
+        let mut outdated: Vec<PathBuf> = Vec::new();
+        let reading = self.reading.as_ref().map(|(p, ..)| p.clone());
         let mut landed = false;
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
@@ -568,20 +671,52 @@ impl Layer {
                     continue;
                 }
                 landed = true;
-                if p.marks != l.marks && p.site.is_some() {
+                let moved = p.marks != l.marks;
+                if moved && p.site.is_some() {
                     again.push(p.path.clone());
+                }
+                if moved && reading.as_deref() == Some(p.path.as_path()) {
+                    outdated.push(p.path.clone());
+                }
+                // **물어서 센 판만 때를 찍는다**(moai-nzyh) — 들고 있던 값을 그대로 쓴 답에도
+                // 찍으면 [`ASK_INSTALL_EVERY`] 가 영영 안 지나, 첫 판에 센 수가 세션 내내 선다.
+                if let Some(count) = l.asked_install {
+                    p.install = Some(Told { count, at: std::time::Instant::now() });
                 }
                 p.marks = l.marks;
                 p.read_at = Some(std::time::Instant::now());
                 p.look = l.look;
             }
         }
-        for path in again {
-            if !self.wanted.contains(&path) && self.reading.as_ref().is_none_or(|(p, ..)| *p != path) {
-                self.wanted.push(path);
+        // 세대를 올려 둔다 — 그 답이 닿을 때 [`App::follow_site`] 가 버리고 다시 읽으러 보낸다.
+        for path in outdated {
+            if let Some(at) = self.position(&path) {
+                self.set_by_hand(at);
             }
         }
+        for path in again {
+            self.queue(path);
+        }
         landed
+    }
+
+    /// 그 줄을 **읽을 차례에 세운다** — 이미 줄 섰거나 지금 읽는 중이면 아무 일도 안 한다.
+    /// 세우는 자리가 셋이라(표식이 움직인 줄·펼친 줄·버린 답을 다시 읽는 줄) 한 자리에 둔다.
+    pub(super) fn queue(&mut self, path: PathBuf) {
+        if !self.wanted.contains(&path) && self.reading.as_ref().is_none_or(|(p, ..)| *p != path) {
+            self.wanted.push(path);
+        }
+    }
+
+    /// 지금 세대([`Layer::rounds`]) — 뜨는 읽기가 이 값을 들고 간다(moai-x1hb).
+    pub(super) fn round(&self) -> u64 {
+        self.rounds
+    }
+
+    /// 그 줄을 `round` **뒤에** 손으로 세웠는가(moai-x1hb) — 읽기의 답을 들일지를 가른다.
+    /// 목록에서 빠진 경로는 들일 줄이 없으니 참이다.
+    pub(super) fn set_after(&self, path: &Path, round: u64) -> bool {
+        self.places.iter().find(|p| p.path == path).is_none_or(|p| p.set_at > round)
     }
 
     pub(super) fn position(&self, path: &Path) -> Option<usize> {
@@ -1239,6 +1374,10 @@ impl App {
                         // 넘겨받는데, 도장만 두고 가면 그 쓸기가 뜨기 전의 세대로 선 줄이 되어
                         // 방금 연 줄이 다시 옛 답에 덮인다.
                         p.set_at = o.set_at;
+                        // **물어 둔 설치 알림도 옮겨 든다**(moai-nzyh) — 두고 가면 사용자 설정이
+                        // 바뀔 때마다(`App::follow_config`) 그 줄이 다시 묻는 줄이 되어, 보기
+                        // 토글과 읽음이 그 파일을 쓸 때마다 프로젝트마다 git 이 뜬다.
+                        p.install = o.install;
                         // **읽어 든 줄도 옮겨 든다**(리뷰). 두고 가면 한눈 보기가 펼쳐 둔 프로젝트가
                         // 통째로 접힌 머리줄만 남는다 — 이 길은 사용자 설정이 바뀔 때마다 도는데
                         // (`App::follow_config`) 보기 토글과 읽음이 **그 파일을 스스로 쓴다.**
@@ -1450,6 +1589,7 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 read_at: Some(std::time::Instant::now()),
                 set_at: 0,
                 site: None,
+                install: None,
             })
             .collect(),
         problems: Vec::new(),
@@ -1726,7 +1866,7 @@ mod tests {
 
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(std::slice::from_ref(&two), &crate::model::now(), crate::i18n::Lang::Ko, &tx);
+        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
         std::fs::remove_dir_all(&two).unwrap();
@@ -1790,7 +1930,7 @@ mod tests {
     fn join_threads(a: &mut App) {
         let layer = a.layer.as_mut().expect("층이 선 시험이다");
         let pending = layer.pending.take().map(|(_, h, _)| h);
-        let reading = layer.reading.take().map(|(_, _, h)| h);
+        let reading = layer.reading.take().map(|(_, _, h, _)| h);
         for handle in [pending, reading].into_iter().flatten() {
             handle.join().expect("시험이 띄운 스레드가 터졌다");
         }
@@ -1810,7 +1950,7 @@ mod tests {
 
         // 쓸기가 두 줄을 다 열린 것으로 쟀다. 아직 안 닿았다.
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(&[one.clone(), two.clone()], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
+        look_into(&[want(&one), want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
 
@@ -1853,6 +1993,7 @@ mod tests {
             path: two.clone(),
             marks: Marks::default(),
             look: shut(&two, "two", State::Unreadable("느린 마운트".into()), crate::i18n::Lang::Ko),
+            asked_install: None,
         };
         tx.send(stale).unwrap();
         let round = a.layer.as_ref().unwrap().rounds;
@@ -1871,7 +2012,7 @@ mod tests {
         // **저절로 낫는 길도 함께 잰다** — 버린 답이 `read_at` 을 찍고 가면 `stale` 이 그 줄을 다시
         // 안 골라, 셈이 세션 내내 옛것으로 선다.
         assert!(
-            a.layer.as_ref().unwrap().stale().contains(&two),
+            a.layer.as_ref().unwrap().stale_paths().contains(&two),
             "버린 답이 읽은 때를 찍고 가, 그 줄을 다시 읽으러 가는 자가 없다"
         );
 
@@ -1883,14 +2024,14 @@ mod tests {
         // 기다리는 법은 [`settle`] 과 같다 — 맨 도는 `follow` 는 스레드가 아직 안 깨어난 사이에
         // 다 돌아, 부하가 걸린 기계에서 "못 들였다" 고 애먼 데를 가리킨다.
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while a.layer.as_ref().unwrap().stale().contains(&two) {
+        while a.layer.as_ref().unwrap().stale_paths().contains(&two) {
             assert!(std::time::Instant::now() < until, "다음 쓸기가 5초 안에 안 끝났다");
             std::thread::sleep(std::time::Duration::from_millis(2));
             a.follow();
         }
         // 들어왔다는 것은 **읽은 때가 다시 찍혔다**는 것이다 — 그래야 `stale` 이 그 줄을 놓는다.
         assert!(
-            !a.layer.as_ref().unwrap().stale().contains(&two),
+            !a.layer.as_ref().unwrap().stale_paths().contains(&two),
             "도장 찍힌 줄은 뒤에 뜬 쓸기의 답도 못 들여, 같은 디렉터리를 쉬지 않고 다시 읽는다"
         );
         assert!(matches!(look(&a, "two"), Look::Open { .. }), "다시 읽고도 줄이 안 섰다");
@@ -2102,7 +2243,7 @@ mod tests {
         assert!(!a.loading(), "아무것도 안 바뀌었는데 읽으러 갔다");
 
         write_lines(&two, &[("argos-0001", "two 의 집은 줄", "done")]);
-        assert_eq!(a.layer.as_ref().unwrap().stale(), std::slice::from_ref(&two));
+        assert_eq!(a.layer.as_ref().unwrap().stale_paths(), std::slice::from_ref(&two));
         a.follow();
         assert!(a.loading(), "바뀐 것을 보고도 안 읽었다");
         settle(&mut a);
@@ -2184,7 +2325,7 @@ mod tests {
 
         let long_ago = std::time::Instant::now().checked_sub(REREAD_EVERY).expect("시계가 1분도 안 돌았다");
         a.layer.as_mut().unwrap().places[1].read_at = Some(long_ago);
-        assert_eq!(a.layer.as_ref().unwrap().stale(), std::slice::from_ref(&two), "오래된 줄만 골라야 한다");
+        assert_eq!(a.layer.as_ref().unwrap().stale_paths(), std::slice::from_ref(&two), "오래된 줄만 골라야 한다");
         settle(&mut a);
         let read_at = a.layer.as_ref().unwrap().places[1].read_at.unwrap();
         assert!(read_at.elapsed() < REREAD_EVERY, "다시 읽고도 읽은 때를 안 올렸다");
@@ -2567,6 +2708,12 @@ mod tests {
     /// 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리 하나고([`crate::tui::Site::me`]), 세는
     /// 자는 푼 값을 읽기만 한다.
     ///
+    /// **그리는 걸음도 안 묻는다**(moai-uitb) — 읽어 온 줄을 **들이는** 자리
+    /// ([`crate::tui::App::follow_site`])가 풀던 판이 있었다. 그 한 번도 `term.draw` 와
+    /// `event::poll` 사이고, 옆 세션이 커밋할 때마다 그 줄이 다시 읽혀(`Layer::adopt`) 펼쳐 둔
+    /// 프로젝트마다 33ms 가 걸음에 붙었다. 이제는 **읽는 스레드가** 풀어 [`crate::tui::Fresh::me`]
+    /// 에 실어 온다 — 아래에서 읽기가 뜬 **뒤에** 묻는 자를 갈아 끼우는 것이 그 자리를 맨다.
+    ///
     /// **묻는 자를 패닉으로 세운다** — 값을 재는 시험은 기계마다 흔들려 되돌림을 못 잡는다. 이 자리가
     /// 다시 풀기 시작하면 여기서 터진다.
     #[test]
@@ -2577,6 +2724,11 @@ mod tests {
         let s = Scratch::fenced("layer-whoami-once");
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         a.want_site(0);
+        // 읽기가 스레드로 **뜬 뒤에** 묻는 자를 갈아 끼운다 — 스레드는 뜰 때의 자를 들고 갔으므로,
+        // 여기서부터 누구든 묻는 쪽은 그리는 걸음이다.
+        a.follow();
+        assert!(a.layer.as_ref().unwrap().reading.is_some(), "시험의 전제 — 읽기가 스레드에서 돈다");
+        a.identify = refuse;
         settle(&mut a);
         assert!(a.site_of_place(0).is_some_and(|s| s.me.is_some()), "시험의 전제 — 읽을 때 한 번 풀었다");
 
@@ -3824,7 +3976,7 @@ mod tests {
         for p in &mut layer.places {
             p.read_at = Some(long_ago);
         }
-        assert_eq!(layer.stale(), [one.clone(), two.clone()], "못 읽는 줄은 시계로 낡고, init 전 줄은 안 낡는다");
+        assert_eq!(layer.stale_paths(), [one.clone(), two.clone()], "못 읽는 줄은 시계로 낡고, init 전 줄은 안 낡는다");
         settle(&mut a);
         assert!(matches!(look(&a, "one"), Look::Open { .. }), "권한을 고쳤는데 층이 옛 까닭을 댄다");
     }
@@ -3978,5 +4130,80 @@ mod tests {
         settle(&mut a);
         assert_eq!(a.site.watched, launched, "띄울 때와 다시 읽을 때 지켜보는 목록이 갈렸다");
         assert!(!a.gathering_commits(), "아무것도 안 바뀌었는데 커밋 표를 다시 짓는다");
+    }
+
+    /// 설치가 어긋난 것은 [`ASK_INSTALL_EVERY`] 에 **한 번만 묻는다**(moai-nzyh) — 그사이에 그 줄을
+    /// 몇 번 다시 읽든 들고 있던 수를 그대로 센다. 되돌리면 층이 줄마다 프로세스를 셋까지 띄우고
+    /// (`check-attr`·`config`·심긴 줄의 probe), 그 값이 등록 수만큼 더해진다.
+    #[test]
+    fn the_layer_asks_about_the_install_once_and_carries_the_count_until_the_clock_turns() {
+        let s = Scratch::fenced("layer-install-clock");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        let told = |a: &App, at: usize| a.layer.as_ref().unwrap().places[at].install.expect("첫 쓸기가 물었다");
+        let first = told(&a, 1);
+
+        // 그 줄을 다시 읽을 까닭을 만든다 — **묻는 때는 아직 아니다.**
+        write_lines(&two, &[("argos-0001", "two 의 집은 줄", "done")]);
+        let want = a.layer.as_ref().unwrap().stale().into_iter().find(|w| w.path == two);
+        assert_eq!(
+            want.expect("표식이 움직인 줄을 다시 읽으러 간다").install,
+            Some(first.count),
+            "다시 읽으면서 설치 알림까지 다시 물었다"
+        );
+        settle(&mut a);
+        assert_eq!(told(&a, 1).at, first.at, "들고 있던 값을 그대로 쓴 판이 물은 때를 다시 찍었다");
+
+        // 시계가 돌면 다시 묻는다.
+        let long_ago = std::time::Instant::now().checked_sub(ASK_INSTALL_EVERY).expect("시계가 5분도 안 돌았다");
+        a.layer.as_mut().unwrap().places[1].install = Some(Told { count: first.count, at: long_ago });
+        write_lines(&two, &[("argos-0001", "two 의 집은 줄", "todo")]);
+        let want = a.layer.as_ref().unwrap().stale().into_iter().find(|w| w.path == two);
+        assert_eq!(want.expect("표식이 다시 움직였다").install, None, "시계가 돌았는데 다시 안 묻는다");
+        settle(&mut a);
+        assert!(told(&a, 1).at > long_ago, "다시 물은 판이 때를 안 찍었다");
+    }
+
+    /// 줄을 읽는 동안 그 프로젝트에 쓰기가 들어오면 **그 읽기는 낡은 것이다**(moai-x1hb). 들이면
+    /// 새 표식을 든 줄에 쓰기 전의 스냅샷이 앉고, 그 뒤로는 표식이 같아 아무도 다시 안 읽는다 —
+    /// 머리줄의 셈은 쓰기 뒤의 것이고 그 밑의 줄은 쓰기 전의 것인 채로 세션이 끝난다.
+    #[test]
+    fn a_write_while_the_row_is_being_read_does_not_freeze_it_on_the_old_snapshot() {
+        let s = Scratch::fenced("layer-read-generation");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        let at = a.layer.as_ref().unwrap().position(&two).expect("two 가 층에 있다");
+        assert!(a.site_of_place(at).is_none(), "시험의 전제 — 아직 줄을 안 들었다");
+
+        // 쓰기 **전에** 뜬 읽기 — 그 스냅샷을 들고 있다.
+        let repo = Repo::at(two.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
+        let before = super::super::prepare(&repo, false, crate::i18n::Lang::Ko).expect("두 줄을 읽는다");
+        let (rtx, rrx) = std::sync::mpsc::channel();
+        let round = a.layer.as_ref().unwrap().round();
+        a.layer.as_mut().unwrap().reading = Some((two.clone(), rrx, std::thread::spawn(|| {}), round));
+
+        // 그새 옆 세션이 그 프로젝트에 쓴다. 쓸기가 그것을 **먼저** 본다.
+        write_lines(&two, &[("argos-0002", "two 의 줄", "todo"), ("argos-0001", "two 의 집은 줄", "done")]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
+        a.follow();
+
+        // 읽기의 답이 이제 닿는다 — 쓰기 전의 것이다.
+        rtx.send(Ok(before)).expect("받는 쪽이 살아 있다");
+        a.follow();
+        assert!(a.site_of_place(at).is_none(), "쓰기 전의 줄이 새 표식을 든 줄에 앉았다");
+
+        // 버린 자리는 다시 읽으러 간다 — 버리기만 하면 그 줄은 영영 머리줄로 남는다.
+        // 꾸민 쓸기의 보내는 쪽을 놓는다 — 안 놓으면 그 벌이 안 끝난 것으로 서서 [`settle`] 이 기다린다.
+        drop(tx);
+        settle(&mut a);
+        let site = a.site_of_place(at).expect("버린 뒤에 다시 읽으러 가는 자가 없다");
+        let done = site.issues.iter().any(|i| i.id == "argos-0001" && i.status.as_str() == "done");
+        assert!(done, "다시 읽고도 쓰기 전의 줄이 섰다");
+        join_threads(&mut a);
     }
 }

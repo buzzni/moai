@@ -379,6 +379,13 @@ pub struct Fresh {
     unfound: Option<String>,
     watched: Vec<(std::path::PathBuf, Stamp)>,
     now: String,
+    /// 그 뿌리에서 **내가 누구인가**(moai-uitb) — 푸는 자는 [`whoami_at`] 하나다.
+    ///
+    /// **읽는 스레드가 채운다**([`App::read_wanted`]). [`prepare`] 는 `None` 으로 두고 그 자리를
+    /// 채우지 않는다 — 프로젝트 안의 다시 읽기는 이 값을 안 쓰고(들어갈 때 한 번 푼다,
+    /// [`super::layer::App::enter_project`]), 그 길은 쓰기·`SPC v w` 가 **루프에서** 부르므로
+    /// 여기에 `git config` 둘을 얹으면 쓸 때마다 화면이 그만큼 멈춘다.
+    me: Option<String>,
 }
 
 /// 뿌리(이 프로젝트, 줄을 보탠 옆 워크트리) → 그 가지의 id → 커밋 표(`git::table`, moai-a4i0).
@@ -420,6 +427,20 @@ fn commit_tables(roots: &[std::path::PathBuf], ids: &std::collections::BTreeSet<
 /// 손(SPC v w·쓰기)이 읽기가 도는 동안 닿을 때뿐이고, 한 읽기는 1만 개에서도 수백 ms
 /// 라 보통은 하나도 안 쌓인다. 이것이 차는 것은 읽기가 멈춘 때뿐이다.
 const DISCARDED_KEPT: usize = 8;
+
+/// 그 뿌리에서 나는 누구인가 — **[`App`] 없이도 푼다**(moai-uitb). 읽는 스레드가 이것을 불러
+/// [`Fresh::me`] 에 실어 온다. 한 번이 `git config` 프로세스 둘(33ms)이라, 그리는 걸음에서 부르면
+/// 그 값이 `term.draw` 와 `event::poll` 사이에 그대로 선다.
+///
+/// **푸는 법은 한 자리다** — [`App::whoami`] 가 여기로 든다. 갈라 두면 헤더와 [NEW] 가 서로 다른
+/// 사람으로 설 수 있다.
+fn whoami_at(
+    identify: fn(Option<&str>, &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor>,
+    user: Option<&str>,
+    root: &std::path::Path,
+) -> Option<String> {
+    identify(user, root).ok().map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
+}
 
 /// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
 fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang) -> crate::fail::R<Fresh> {
@@ -477,6 +498,9 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang) -> crate::fail:
         unfound: g.unfound.as_ref().map(|t| crate::view::trouble_line(lang, t)),
         watched,
         now,
+        // 누군지는 **읽는 쪽이 채운다**(moai-uitb) — 여기서 풀면 루프에서 부르는 다시 읽기가
+        // 쓰기마다 `git config` 둘을 치른다([`Fresh::me`]).
+        me: None,
     })
 }
 
@@ -2822,9 +2846,7 @@ impl App {
     /// 이 뿌리에서 나는 누구인가 — `이름 (메일)`(moai-j038.vna). 헤더([`App::told_user`])와 같은 자
     /// (`identify`·`user`)로 푼다. **묻지 않는다** — 못 풀면 `None` 이고 [NEW] 가 안 설 뿐이다.
     pub fn whoami(&self, root: &std::path::Path) -> Option<String> {
-        (self.identify)(self.user.as_deref(), root)
-            .ok()
-            .map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
+        whoami_at(self.identify, self.user.as_deref(), root)
     }
 
     /// 읽었다고 적는다(moai-z9pc) — `r`(이 줄)·`SPC m a`(안 읽은 것 전부)·`SPC m g`(이 묶음과 그 밑).
@@ -3118,11 +3140,8 @@ impl App {
             return;
         }
         let path = place.path.clone();
-        if let Some(layer) = self.layer.as_mut()
-            && !layer.wanted.contains(&path)
-            && layer.reading.as_ref().is_none_or(|(p, ..)| *p != path)
-        {
-            layer.wanted.push(path);
+        if let Some(layer) = self.layer.as_mut() {
+            layer.queue(path);
         }
     }
 
@@ -3143,11 +3162,25 @@ impl App {
         let worktree = self.worktree;
         let lang = self.site.lang;
         let sent = repo.clone();
+        // **누군지도 이 스레드가 푼다**(moai-uitb) — 한 번이 `git config` 프로세스 둘(33ms)이고,
+        // 들이는 자리([`App::follow_site`])는 `term.draw` 와 `event::poll` 사이에서 돈다. 옆
+        // 세션이 커밋할 때마다 그 줄이 다시 읽히므로(`Layer::adopt`), 펼쳐 둔 프로젝트마다 그
+        // 값이 걸음에 붙었다. 푸는 자는 [`whoami_at`] 하나 그대로다.
+        let identify = self.identify;
+        let user = self.user.clone();
         let handle = std::thread::spawn(move || {
-            let _ = tx.send(read(&sent, worktree, lang));
+            let got = read(&sent, worktree, lang).map(|mut fresh| {
+                fresh.me = whoami_at(identify, user.as_deref(), &sent.root);
+                fresh
+            });
+            let _ = tx.send(got);
         });
+        // **뜰 때의 세대를 함께 든다**(moai-x1hb) — 요약 쓸기와 같은 자([`layer::Layer::launch`]).
+        // 이 뒤에 그 줄을 손으로 세우면(사람이 열었거나, 쓸기가 표식이 움직인 것을 보았거나) 이
+        // 답은 그 손질 전의 파일을 잰 것이다.
+        let round = self.layer.as_ref().map_or(0, layer::Layer::round);
         if let Some(layer) = self.layer.as_mut() {
-            layer.reading = Some((path, rx, handle));
+            layer.reading = Some((path, rx, handle, round));
         }
         // 연 저장소는 읽어 온 것을 들일 때 [`Site`] 에 얹는다.
         self.reading_repo = Some(repo);
@@ -3157,7 +3190,7 @@ impl App {
     /// 들이는 자와 같다(`Layer::adopt`).
     pub(super) fn follow_site(&mut self) {
         let Some(layer) = self.layer.as_mut() else { return };
-        let Some((path, rx, _)) = layer.reading.as_ref() else {
+        let Some((path, rx, _, _)) = layer.reading.as_ref() else {
             self.read_wanted();
             return;
         };
@@ -3166,8 +3199,27 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => (path.clone(), None),
         };
-        let (_, _, handle) = layer.reading.take().expect("바로 위에서 보았다");
+        let (_, _, handle, round) = layer.reading.take().expect("바로 위에서 보았다");
         let repo = self.reading_repo.take();
+        // **이 읽기가 뜬 뒤에 손으로 세운 줄에는 안 들인다**(moai-x1hb) — 쓸기가 표식이 움직인 것을
+        // 보았거나(`Layer::adopt`) 사람이 그 줄을 다시 열었다. 들이면 새 표식을 든 줄에 **쓰기 전의**
+        // 스냅샷이 앉아, 그 뒤로는 아무도 다시 안 읽는다(`Layer::stale` 은 표식이 같다고 본다).
+        // 버린 자리는 다시 읽으러 보낸다 — 버리기만 하면 그 줄이 영영 머리줄로 남는다.
+        if self.layer.as_ref().is_some_and(|l| l.set_after(&path, round)) {
+            self.deep.remove(&path);
+            if let Some(err) = got.and_then(std::result::Result::err) {
+                // 못 읽은 까닭은 버려도 한 줄은 댄다 — 그 줄은 다시 읽어도 같은 까닭으로 진다.
+                self.notice = Some(fill(say(self.site.lang, "tui.layer.unread_rows"), &[("why", &err.to_string())]));
+            }
+            if let Err(payload) = handle.join() {
+                std::panic::resume_unwind(payload);
+            }
+            if let Some(layer) = self.layer.as_mut() {
+                layer.queue(path);
+            }
+            self.read_wanted();
+            return;
+        }
         // **`Tab` 의 뜻은 이 읽기 하나로 끝난다** — 못 읽었을 때 그 뜻을 남겨 두면, 다음에 `l` 로
         // 한 층만 펴려던 사람이 통째로 펼쳐진 프로젝트를 본다. `Depth::Lean` 이 "열리지만 스냅샷을
         // 못 읽는" 저장소를 이 갈래로 보내면서 그 자리가 실제로 닿는다(moai-m59y).
@@ -3182,11 +3234,12 @@ impl App {
                 // 바구니를 다른 말로 부른다.
                 site.lang = self.site.lang;
                 site.repo = repo;
-                // **누군지도 여기서 푼다**(moai-ropk) — 그 프로젝트의 뿌리에서, 읽을 때 한 번.
-                // [`super::layer::App::enter_project`] 가 들어가며 하는 것과 같은 자다. 프로젝트마다
-                // git 설정이 다를 수 있어 뿌리마다 풀어야 하고, 그 한 번이 프로세스 둘이라 [NEW] 를
-                // 세는 자리에서 걸음마다 부르면 화면이 그만큼 멈춘다.
-                site.me = site.repo.as_ref().map(|r| r.root.clone()).and_then(|root| self.whoami(&root));
+                // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
+                // 뿌리에서, 읽을 때 한 번. [`super::layer::App::enter_project`] 가 들어가며 하는 것과
+                // 같은 자다(프로젝트마다 git 설정이 다를 수 있어 뿌리마다 푼다). 그 한 번이 프로세스
+                // 둘(33ms)이고 이 자리는 `term.draw` 와 `event::poll` 사이라, 여기서 부르던 판은 옆
+                // 세션의 커밋 하나에 펼쳐 둔 프로젝트마다 그만큼이 걸음에 붙었다.
+                site.me = fresh.me;
                 site.now = fresh.now;
                 site.stamp = fresh.stamp;
                 site.warnings = fresh.warnings;
