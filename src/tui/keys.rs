@@ -331,7 +331,7 @@ pub enum Browse {
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
     Detail,
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
-    /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v p`)이고 이것은 보일 때 어디에 서는가다.
+    /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v d`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
     /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
     /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
@@ -553,7 +553,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
-        // 먼저, 화면의 꼴(p·w·r)이 뒤다.
+        // 먼저, 화면의 꼴(d·w·r)이 뒤다.
         //
         // **done 에는 제 글자가 없다 — 번호가 센다**(moai-h6z3, 2026-09-21 사용자 결정). 옛 `SPC v d`
         // 는 `SPC v <done 의 번호>` 와 **같은 설정**(`[tui] hidden` 에 `done` 이 드는가)을 켜고 꺼,
@@ -561,6 +561,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         // `done` 이라는 낱말을 코드에 박은 둘째 어휘라, 칸 이름을 바꾸면 `d` 만 옛 낱말로 남는다.
         // `l`(미룸)·`a`(전부)는 남는다 — 그 둘은 칸이 아니라 거름망이라 번호로 못 댄다.
         // 미룸은 `l`(later) — 옛 `z` 는 뜻을 읽을 길이 없었다(사용자 결정).
+        //
+        // **그렇게 빈 `d` 를 상세 칸이 받았다**(moai-mxvn, 2026-09-22 사용자 결정) — 아래 `Detail`
+        // 줄이다. done 이 글자를 내놓지 않았으면 못 오던 자리라, 두 결정은 한 줄에 매여 있다:
+        // `d` 를 다시 done 에 주면 상세 칸이 갈 곳이 없다.
         row!(Deferred, Some("SPC v l"), LEADER, Key::plain('v'), Key::plain('l')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
@@ -574,8 +578,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Column(6), None, LEADER, Key::plain('v'), Key::plain('7')),
         row!(Column(7), None, LEADER, Key::plain('v'), Key::plain('8')),
         row!(Column(8), None, LEADER, Key::plain('v'), Key::plain('9')),
-        // 상세 칸은 `p`(pane) — `d` 는 done 이 쥔다.
-        row!(Detail, Some("SPC v p"), LEADER, Key::plain('v'), Key::plain('p')),
+        // 상세 칸은 `d`(detail) — 자리 고르기 `SPC o d` 와 같은 글자다(moai-mxvn, 2026-09-22 사용자
+        // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
+        // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
+        row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
         // **정렬은 `SPC s`(sort)다**(moai-en4u) — 옛 `SPC o`(ranger 의 order)는 `s` 를 보기가 쥐고
@@ -605,7 +611,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // **`SPC o`(options)는 보는 사람의 자리다**(moai-2g7d·moai-3oz2, 2026-09-21). `SPC v` 와 가르는
         // 자는 **무엇이 서는가 대 어떻게 그려지는가**다 — `SPC v` 는 어느 줄·어느 열이 서는지를 고르고,
         // 여기는 선 것을 이 사람 화면에 어떻게 놓고 어떻게 읽어 주는지를 고른다. 그래서 상세 칸을
-        // **켜고 끄는 것**은 `SPC v p` 에 남고 **어디에 세우는가**만 여기로 온다.
+        // **켜고 끄는 것**은 `SPC v d` 에 남고 **어디에 세우는가**만 여기로 온다.
         //
         // 그 자로 뒤에 올 것이 정해진다: 시간대(`t`), 그리고 화면 말·이름 꼴·색처럼 **이미 선 값을
         // 이 사람에게 어떻게 보일까** 하는 것들이다. 어느 줄을 볼까는 여기 안 온다.
@@ -751,7 +757,7 @@ impl Browse {
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
             // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
             // **자리 고르기도 상세가 서 있을 때만이다**(moai-e7r3) — 숨긴 칸의 자리를 돌리면 아무
-            // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v p` 고, 그 줄은 여기 없다.
+            // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v d` 고, 그 줄은 여기 없다.
             FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
             // **이웃은 가른 축에만 있다**(리뷰, moai-x7pa) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
             // 이, 왼쪽이나 오른쪽에 서면 `Ctrl-w j`·`k` 가 제자리다(`Pane::step`, vim 그대로).
@@ -1555,7 +1561,7 @@ mod tests {
             (vec![sp, ch('p'), ch('d')], B::Unregister),
             (vec![sp, ch('v'), ch('w')], B::Worktree),
             (vec![sp, ch('v'), ch('r')], B::Raw),
-            (vec![sp, ch('v'), ch('p')], B::Detail),
+            (vec![sp, ch('v'), ch('d')], B::Detail),
             (vec![sp, ch('v'), ch('l')], B::Deferred),
             (vec![sp, ch('v'), ch('a')], B::ShowAll),
             (vec![sp, ch('v'), ch('1')], B::Column(0)),
@@ -1569,9 +1575,13 @@ mod tests {
         for (seq, act) in menu {
             assert_eq!(lookup(BROWSE, &seq), Lookup::Run(act), "메뉴 {seq:?}");
         }
-        // **`SPC v d` 는 걷었다**(moai-h6z3) — done 은 제 글자를 안 갖고 번호(`SPC v <n>`)가 센다.
-        // `v` 뒤에서 모르는 글자라 열이 통째로 버려진다.
-        assert_eq!(lookup(BROWSE, &[sp, ch('v'), ch('d')]), Lookup::Unknown, "걷은 `SPC v d` 가 아직 듣는다");
+        // **done 은 제 글자를 안 갖는다**(moai-h6z3) — 번호(`SPC v <n>`)가 센다. 빈 `d` 는 상세
+        // 칸이 받았으므로(moai-mxvn) 그 글자가 듣는다는 것이 done 이 돌아왔다는 뜻은 아니다 —
+        // 위 표가 `B::Detail` 로 재고, 메뉴에 `d : done` 이 안 서는 것은 `draw` 쪽 시험이 잰다.
+        //
+        // **옛 `SPC v p` 는 걷었다**(moai-mxvn) — 두 글자가 한 칸을 켜고 끄면 도움말이 어느 쪽을
+        // 보일지 갈린다. `v` 뒤에서 모르는 글자라 열이 통째로 버려진다.
+        assert_eq!(lookup(BROWSE, &[sp, ch('v'), ch('p')]), Lookup::Unknown, "걷은 `SPC v p` 가 아직 듣는다");
         let pick = [
             (press(C::Up), Lookup::Run(Pick::Step(Move::LineUp))),
             (press(C::PageDown), Lookup::Run(Pick::Step(Move::PageDown))),
@@ -2062,6 +2072,8 @@ mod tests {
             vec![sp, ch('s'), ch('1')],
             vec![sp, ch('c'), ch('g')],
             vec![sp, ch('m'), ch('r')],
+            // 상세 칸은 `SPC v d` 로 갔다(moai-mxvn) — 옛 `p` 는 별칭으로도 안 남는다.
+            vec![sp, ch('v'), ch('p')],
             // 옛 `SPC o` 밑의 정렬 글자들 — 글자는 `SPC s` 로 옮겨 갔고 여기서는 안 돈다.
             vec![sp, ch('o'), ch('p')],
             vec![sp, ch('o'), ch('c')],

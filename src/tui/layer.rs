@@ -1070,7 +1070,7 @@ impl App {
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
         // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
-        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v p` 로 상세를
+        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
         self.body = None;
         self.detail.rewind();
