@@ -381,7 +381,9 @@ pub struct Dug<'a> {
 }
 
 impl<'a> Dug<'a> {
-    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길(훅·시험·[`stranded_at`])이 쓴다.
+    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 훅([`held_elsewhere`])과 시험의 짧은
+    /// 길([`workplaces`]). [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
+    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다.
     pub fn new() -> Dug<'a> {
         Dug::default()
     }
@@ -1211,19 +1213,15 @@ pub struct Unread {
 /// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
 /// 셌고, 그래서 **죽은 세션을 찾으러 돌아온 사람이 보는 화면**(층과 밖 한눈 보기)에만 그 말이
 /// 없었다. 경로는 [`workplaces`] 가 이미 [`main_top`] 에서 잰 것이다 — `show` 와 같은 자다.
+///
+/// **부르는 쪽이 이미 판 것을 받는다**([`Dug`], moai-kos1·moai-65ie) — 겹치며 옆 스냅샷을 연
+/// 쪽(탐색기·`status --worktree`)도, 제 바닥을 잰 쪽(`projects::Project::dug`)도 바로 앞에서 그
+/// 파일들을 열어 풀었다. 건네받은 것이 없는 길(훅·시험)은 [`Dug::new`] 를 준다.
+///
+/// **제 손으로 파는 짧은 길을 따로 두지 않는다**(moai-65ie). 한때 그 꼴이 있었는데, 건네줄 것을
+/// 손에 쥔 자리(한눈 보기·층)가 인자 하나가 적다는 까닭으로 그것을 불러 같은 스냅샷을 프로젝트
+/// 수만큼 다시 팠다 — 답이 같아 화면으로는 안 드러나는 종류의 헛일이다.
 pub fn stranded_at(
-    root: &Path,
-    cfg: &crate::config::Config,
-    issues: &[Issue],
-    worktree: bool,
-    now: &str,
-) -> (Option<crate::report::Warning>, Unread) {
-    stranded_at_in(root, cfg, issues, worktree, now, &Dug::new())
-}
-
-/// [`stranded_at`] 과 같은 것. **겹치며 이미 판 옆 스냅샷을 받는다**([`Dug`], moai-kos1) — 탐색기와
-/// `moai status --worktree` 는 바로 앞에서 그 파일들을 열어 풀었다.
-pub fn stranded_at_in(
     root: &Path,
     cfg: &crate::config::Config,
     issues: &[Issue],
@@ -1575,6 +1573,30 @@ mod tests {
         // 자리가 갈리면(`MOAI_HERE=1`) 안 쓴다 — 디스크의 `late` 로 재어 만진 흔적이 없다.
         let elsewhere = Floor::of(side.join(".moai").join("issues.jsonl"), &[issue("m-0001", "todo", early)]);
         assert_eq!(dig(&elsewhere), BTreeSet::new(), "남의 파일에서 잰 바닥으로 main 을 쟀다");
+    }
+
+    /// **여는 길이 판 것을 자리 판정이 받는다**(moai-65ie). `projects::open_one` 이 `gather` 의
+    /// `sides`·`mine` 을 버리던 때는 한눈 보기와 층이 [`Dug::new`] 로 자리를 재, 같은 스냅샷을
+    /// **프로젝트마다** 다시 팠다 — 답이 같아 화면으로는 안 드러나는 헛일이다.
+    ///
+    /// **재는 자가 한 자리에 서 있다**: 여는 길이 낸 것으로 [`Dug::floor`] 에 물어, 자리 셈이
+    /// 그 파일을 다시 안 열고 답할 수 있는가를 본다. 버리면 이 줄이 먼저 붉어진다.
+    #[test]
+    fn opening_a_project_hands_on_the_floor_it_already_dug() {
+        let s = crate::scratch::Scratch::new("dug");
+        let root = s.path().join("repo");
+        std::fs::create_dir_all(root.join(".moai")).unwrap();
+        std::fs::write(root.join(".moai").join("config.toml"), "prefix = \"m\"\n").unwrap();
+        let at = root.join(".moai").join("issues.jsonl");
+        let line = serde_json::to_string(&issue("m-0001", "todo", "2026-09-12T00:00:00Z")).unwrap();
+        std::fs::write(&at, line + "\n").unwrap();
+
+        let p = crate::projects::open_one(&root, "repo".into(), None, false, crate::i18n::Lang::Ko);
+        assert!(matches!(p.state, crate::projects::State::Open { .. }), "시험의 전제 — 저장소가 열렸다");
+        assert!(
+            dug(&p.sides, &p.mine).floor(&at).is_some(),
+            "여는 길이 판 바닥을 버렸다 — 자리 셈이 그 파일을 다시 판다"
+        );
     }
 
     /// **자리 경로는 늘 상대 경로다**(moai-xpd7) — 밑이면 잘라서, 밖이면 `../` 로 올라가서, 같은

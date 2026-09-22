@@ -269,6 +269,9 @@ struct Stood {
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
+    /// 칸 셈에서 미뤄 뺀 멤버 수(`report::Stand::deferred`) — 롤업의 막대 곁에 선다(moai-oz13).
+    /// **세는 자는 거기 하나다**: 여기 들이는 것은 옮겨 담을 뿐이라 탐색기가 따로 세지 않는다.
+    deferred: usize,
 }
 
 /// **파일 전체를 훑어야 아는 것을 소유한 꼴**(moai-fbdg). `report::Soil` 은 이슈를 빌리므로 `App` 이
@@ -313,6 +316,7 @@ impl Ground {
                     busy: s.busy,
                     waiting: s.waiting,
                     aside,
+                    deferred: s.deferred,
                 };
                 (id.to_string(), stood)
             })
@@ -520,7 +524,7 @@ fn placed(
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
     // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
     // 옛 수로 섰다(moai-al0x 가 고친 자리다).
-    let (lost, unread) = crate::worktree::stranded_at_in(repo.here(), &repo.config, issues, overlaid, now, dug);
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now, dug);
     let said = match overlaid {
         true => Vec::new(),
         false => unread
@@ -1066,6 +1070,20 @@ impl Site {
             .then(|| self.ground.stands.get(&i.id))
             .flatten()
             .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
+    }
+
+    /// 그 줄이 묶음이면 **칸 셈에서 미뤄 뺀 멤버 수**(`report::Stand::deferred`, moai-oz13). 묶음이
+    /// 아니거나 셀 것이 없으면 `None` 이라, 낱말을 짓는 자([`crate::view::set_aside_word`])가 그
+    /// 자리에서 아무 말도 안 한다 — 없는 것을 `미룬 0` 으로 말하면 모든 줄에 같은 꼬리가 붙는다.
+    ///
+    /// **보드와 같은 자다.** 여기서 다시 세면 한 저장소를 두 표면이 다른 수로 말한다.
+    ///
+    /// **첨자를 짚지 않고 묻는다**(리뷰) — 곁의 [`Site::column`]·[`Site::waits`] 는 짚는데, 그쪽에는
+    /// 한눈 보기의 남의 줄이 제 색인에서 푼 첨자를 들고 와 그 자리에서 죽은 이력이 적혀 있다
+    /// ([`Site::waits`]). 답이 이미 `Option` 이라 넘친 첨자에 `None` 을 내는 데 드는 것이 없다.
+    pub fn deferred(&self, at: usize) -> Option<usize> {
+        let i = self.issues.get(at)?;
+        crate::report::is_group(i).then(|| self.ground.stands.get(&i.id)).flatten().map(|s| s.deferred)
     }
 
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이 그저 제목 없는 줄인지
@@ -7921,7 +7939,7 @@ mod tests {
     /// 닫으면 맞출 때마다 메뉴를 다시 열어야 한다. 나가는 것은 `ESC` 나 연 키 `SPC` 다.
     ///
     /// **켜지도 끄지도 않는다** — 상세가 숨어 있으면 이 키는 아예 안 돈다(`Browse::enabled`).
-    /// 켜는 것은 `SPC v p` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
+    /// 켜는 것은 `SPC v d` 고, 자리를 돌리다 상세가 켜지면 두 물음이 한 키에 얹힌다.
     #[test]
     fn spc_o_d_turns_the_detail_pane_round_without_closing_the_menu() {
         use view::DetailAt;
@@ -8001,7 +8019,7 @@ mod tests {
         assert!(!super::menu::open(&a.chord), "SPC 가 메뉴를 안 닫았다");
 
         // **숨긴 상세의 자리는 안 돈다** — 눌러도 아무 일이 없는 키는 메뉴에도 안 선다.
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         assert!(!a.detail_open);
         let before = a.detail_at;
         a.hit("SPC o d Esc");
@@ -8083,9 +8101,9 @@ mod tests {
         a.hit("SPC s u Esc");
         a.hit("SPC c a Esc");
         a.hit("SPC c i Esc");
-        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v p`)과 **따로** 적힌다.
+        // 상세 칸의 자리도 보기다(moai-2g7d) — 켬·끔(`SPC v d`)과 **따로** 적힌다.
         a.hit("SPC o d Esc");
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
         assert!(text.contains("[tui]") && text.contains("sort = \"updated\""), "{text}");
         assert!(text.contains("detail_at = \"bottom\""), "상세 칸의 자리가 설정에 안 적혔다 — {text}");

@@ -286,7 +286,7 @@ fn registry_of<'a>(
 }
 
 /// 연 프로젝트 하나를 센다. **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
-pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
+pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate::worktree::Dug<'_>) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
@@ -294,7 +294,10 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
     // 자리를 재는 뿌리는 **등록한 그 체크아웃**이다(`repo.here()`) — `moai status` 와 같은 자.
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
+    // **판 것은 연 길에서 받는다**(moai-65ie, `projects::Project::dug`) — 층은 겹쳐 보지 않지만
+    // 제 바닥(`Gathered::mine`)은 겹쳐 보지 않아도 서고(moai-mafv), 그것이 곧 자리 판정이 다시
+    // 파던 그 파일이다. 줄마다 그것을 다시 파면 값이 줄 수만큼 더해진다.
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now, dug);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -326,6 +329,8 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         origin: Default::default(),
         trouble: Vec::new(),
         swept: false,
+        sides: Vec::new(),
+        mine: crate::worktree::Floor::loose(&[]),
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang)).trim().to_string();
@@ -362,12 +367,18 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let p = projects::open_one(path, String::new(), None, false, lang);
-    let look = match p.state {
-        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
-        state => shut(&p.path, &p.name, state, lang),
+    // **한 자리에서 헤친다**(moai-65ie, 리뷰) — `p.dug()` 로 `Project` 를 통째로 빌리면 아래에서
+    // 상태를 꺼낼 수 없어 `worktree::dug` 를 여기서 다시 부르게 되는데, 그러면 "`Project` 에서
+    // `Dug` 를 짓는 법" 이 두 벌이 되어 [`projects::Project::dug`] 가 나중에 무엇을 배워도 이
+    // 줄만 옛 뜻으로 남는다. 헤쳐 놓으면 그 매임이 한 문장에 보인다.
+    let projects::Project { path, name, state, sides, mine, .. } =
+        projects::open_one(path, String::new(), None, false, lang);
+    let dug = crate::worktree::dug(&sides, &mine);
+    let look = match state {
+        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now, &dug) },
+        state => shut(&path, &name, state, lang),
     };
-    Looked { path: p.path, marks, look }
+    Looked { path, marks, look }
 }
 
 impl Layer {
@@ -1070,7 +1081,7 @@ impl App {
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
         // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
-        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v p` 로 상세를
+        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
         self.body = None;
         self.detail.rewind();

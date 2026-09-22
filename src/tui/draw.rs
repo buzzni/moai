@@ -1852,7 +1852,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
                             Line::from(Span::styled(site.index.label(&site.issues, &e, site.lang), bold())),
                             Line::from(""),
                         ];
-                        out.extend(rollup(app, site, &deeper(site, &e), inner.width as usize));
+                        out.extend(rollup(app, site, &e, inner.width as usize));
                         out
                     }
                 },
@@ -2258,7 +2258,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 디렉터리면 그 밑의 셈도 함께.
     if matches!(e, Entry::Dir { .. }) {
         out.push(Line::from(""));
-        out.extend(rollup(app, site, &deeper(site, e), w));
+        out.extend(rollup(app, site, e, w));
     }
 
     if let Some(body) = &i.body {
@@ -2379,8 +2379,11 @@ fn role_style(r: crate::markdown::Role) -> Style {
 /// 그 밑의 진척. **`nav` 가 자리를 정한 그대로 센다** — `report::rollup_of` 로
 /// 세면 자리 규칙과 세는 규칙이 달라 머리글과 줄 수가 어긋난다. 목록 줄의 셈(`n/n`)은 같은 값을 적재 때
 /// 미리 센 것([`crate::nav::Index::tally`])을 읽는다 — 둘이 같다는 것은 `nav` 의 시험이 지킨다.
-fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<Line<'a>> {
-    let progress = site.index.progress(&site.issues, path);
+///
+/// **자리가 아니라 줄을 받는다** — 자리는 안에서 [`deeper`] 로 편다. 막대 곁의 미룬 수(moai-oz13)는
+/// 그 줄이 **가리키는 묶음**의 것이라, 편 자리만으로는 어느 묶음에 물을지가 여기서 사라진다.
+fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
+    let progress = site.index.progress(&site.issues, &deeper(site, e));
     let Some(percent) = progress.percent() else {
         // **없는 것과 안 세는 것은 다르다.** 담아 둔 생각은 자리로는 여기
         // 걸리지만(왼쪽 목록이 그 줄을 낸다) 진행률로는 안 센다 — 세기
@@ -2394,16 +2397,38 @@ fn rollup<'a>(app: &App, site: &Site, path: &crate::nav::Path, w: usize) -> Vec<
     };
     let (work, done) = (&progress.work, progress.done);
 
-    // `clamp(10, 24)` 뒤에는 10 이상이라 뺄셈이 넘칠 수 없고 6 아래로도 안
-    // 간다 — 지키는 척하는 `.saturating_sub`·`.max` 는 지우고 뜻만 남긴다.
-    let cells = w.clamp(10, 24) - 4;
+    // **미룬 멤버 수를 막대 곁에 댄다**(moai-oz13) — 보드와 `moai show <묶음>` 이 이미 대는 말인데
+    // 탐색기만 안 댔다. 분모는 미룬 멤버를 그대로 세므로, 그 넷을 영영 안 해도 100% 가 안 된다:
+    // 화면이 말하지 않으면 읽는 쪽은 `102/110` 에서 여덟이 남은 줄 알고 셈이 깨졌다고 읽는다.
+    //
+    // **세는 자도 낱말 짓는 자도 하나다** — 수는 `report::Stand::deferred`([`Site::deferred`]),
+    // 낱말은 [`crate::view::set_aside_word`] 다. 바구니(`Entry::Dir { at: None }`)는 제 줄이 없어
+    // 묶음이 아니고, 그래서 댈 수도 없다.
+    let tail = crate::view::set_aside_word(e.at().and_then(|at| site.deferred(at)), site.lang)
+        .map(|word| format!("   {word}"));
+    let numbers = format!("  {done}/{}  {percent}%", work.len());
+
+    // **막대는 남은 칸만 먹는다**(리뷰, moai-oz13). 바라는 폭은 예전 그대로(`clamp(10,24) - 4`)
+    // 인데, 그 폭은 곁에 서는 글을 안 셌다 — 80칸 창의 상세 패널(안쪽 폭 30)에서 막대 20 + 숫자
+    // 10 이 딱 맞아 떨어져, 미룬 수를 달자 그 꼬리도 백분율도 함께 `…` 로 잘렸다. 대라고 넣은 말이
+    // 정작 흔한 창에서 안 보이는 것이다. 세 자리 셈(`102/110  92%`)은 꼬리가 없어도 같은 자리에서
+    // 넘쳤다 — 재는 자가 **실제로 그릴 글**을 세므로 그쪽도 같이 선다.
+    //
+    // **0 도 답이다.** 그만큼 좁으면 막대가 아니라 숫자가 남아야 한다 — `bar_fill` 은 어떤 폭에도
+    // `cells` 를 안 넘긴다.
+    let room = w.saturating_sub(crate::text::width(&numbers) + tail.as_deref().map_or(0, crate::text::width));
+    let cells = (w.clamp(10, 24) - 4).min(room);
     let filled = crate::text::bar_fill(Some(percent), cells);
-    let mut out = vec![Line::from(vec![
+    let mut bar = vec![
         // 16색 10번 — SPC 메뉴의 키와 같은 색(사용자 결정, moai-a46g).
         Span::styled("█".repeat(filled), Style::new().fg(Color::LightGreen)),
         Span::styled("░".repeat(cells - filled), dim()),
-        Span::raw(format!("  {done}/{}  {percent}%", work.len())),
-    ])];
+        Span::raw(numbers),
+    ];
+    if let Some(tail) = tail {
+        bar.push(Span::styled(tail, dim()));
+    }
+    let mut out = vec![Line::from(bar)];
 
     // 칸별 건수는 `config` 차례로. **0인 칸은 빼서** 좁은 패널에서 줄이 접히지
     // 않게 한다 — CLI 요약이 쓰는 규칙과 같다.
@@ -3359,6 +3384,55 @@ pub(super) mod tests {
         assert!(!screen.contains("자식 없음"), "펼쳐 든 에픽의 상세가 자식 없음이라 말한다\n{screen}");
     }
 
+    /// **탐색기의 롤업도 미룬 수를 막대 곁에 댄다**(moai-oz13). 보드와 `moai show <묶음>` 이 이미
+    /// 대던 말인데 이 표면만 빠져 있었다 — 분모는 미룬 멤버를 그대로 세므로, 화면이 말하지 않으면
+    /// 읽는 쪽은 남은 하나가 아직 집을 것이라고 읽는다.
+    ///
+    /// **낱말은 말묶음에서 받는다** — 글자를 여기 박으면 `view::set_aside_word` 를 안 거치고도
+    /// 푸른 시험이 되어, 두 표면이 같은 수를 다른 낱말로 말하는 날을 못 잡는다.
+    #[test]
+    fn the_rollup_says_how_many_members_are_deferred() {
+        let mut is = issues();
+        let mut put_off = Issue::new(
+            "argos-0005".into(),
+            "미룬 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        put_off.epic = Some("argos-0001".into());
+        put_off.deferred_at = Some("2026-09-10T00:00:00Z".into());
+        is.push(put_off);
+        let mut a = every(is);
+        // 에픽 줄에 커서를 두면 상세가 그 밑을 센다.
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(
+                |r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0001")),
+            )
+            .expect("에픽 줄이 없다");
+        let want = crate::i18n::fill(crate::i18n::say(a.site.lang, "status.deferred_members"), &[("n", "1")]);
+        // **좁은 창에서 먼저 본다**(리뷰). 넓은 창만 재던 판은 80칸에서 꼬리도 백분율도 `…` 로
+        // 잘리는 것을 못 봤다 — 상세 패널의 안쪽 폭이 30이라 막대 20 + 숫자 10 이 이미 딱 찼다.
+        for w in [80, 100, 120] {
+            let screen = render(&mut a, w, 24).join("\n");
+            assert!(screen.contains("1/3"), "{w}칸에서 셈이 사라졌다\n{screen}");
+            assert!(screen.contains("33%"), "{w}칸에서 백분율이 잘렸다\n{screen}");
+            assert!(screen.contains(&want), "{w}칸에서 미룬 수를 안 댄다 — {want:?}\n{screen}");
+        }
+
+        // 미룬 멤버가 없으면 꼬리도 없다 — 모든 줄에 붙으면 뜻이 사라진다.
+        let mut plain = every(issues());
+        plain.cursor = plain
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| plain.site.issues[at].id == "argos-0001")))
+            .expect("에픽 줄이 없다");
+        let screen = render(&mut plain, 120, 24).join("\n");
+        assert!(!screen.contains(&want), "안 미룬 묶음에 꼬리를 달았다\n{screen}");
+    }
+
     /// **가지는 `[NEW]` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지가 줄마다 같은 칸에
     /// 서야 눈이 그 선을 따라간다. 뒤에 두면 안 읽은 줄에서만 가지가 다섯 칸 밀려 선이 끊긴다.
     #[test]
@@ -4068,7 +4142,7 @@ pub(super) mod tests {
         assert!(!row.contains(style::BRANCH_GLYPH), "닫힌 줄에 옛 가지 표시가 섰다 — {row:?}");
     }
 
-    /// **`SPC v p` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
+    /// **`SPC v d` 가 상세 칸을 숨기고 목록이 폭을 다 쓴다**(moai-ymnu, 사용자 결정) — 숨긴 채
     /// 포커스가 상세에 남으면 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다.
     #[test]
     fn the_detail_pane_hides_and_the_list_takes_the_width() {
@@ -4078,9 +4152,9 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Detail);
 
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         let lines = render(&mut a, 100, 12);
-        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v p 가 상세를 안 숨겼다\n{}", lines.join("\n"));
+        assert!(!lines.iter().any(|l| l.contains("상세")), "SPC v d 가 상세를 안 숨겼다\n{}", lines.join("\n"));
         assert_eq!(a.focus, Pane::Explorer, "안 보이는 칸에 포커스가 남았다");
         let border = lines.iter().find(|l| l.contains('┓')).expect("목록 테두리가 없다");
         assert_eq!(crate::text::width(border), 100, "목록이 폭을 다 안 썼다 — {border:?}");
@@ -4088,7 +4162,7 @@ pub(super) mod tests {
         a.hit("Ctrl-w w");
         assert_eq!(a.focus, Pane::Explorer);
 
-        a.hit("SPC v p Esc");
+        a.hit("SPC v d Esc");
         assert!(render(&mut a, 100, 12).iter().any(|l| l.contains("상세")), "다시 눌러도 안 돌아왔다");
     }
 
@@ -6894,8 +6968,11 @@ pub(super) mod tests {
         );
         // **done 은 번호 줄로만 선다**(moai-h6z3) — 옛 `d : done` 과 `4 : done` 이 한 목록에 나란히
         // 서서 같은 설정을 켜고 껐다.
-        assert!(screen.contains("p : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
-        assert!(!screen.contains("d : done"), "걷은 `SPC v d` 가 메뉴에 남았다\n{screen}");
+        // 상세 칸은 `d` 다(moai-mxvn) — done 이 내놓은 글자라, `d : done` 과 겹치지 않는 것을
+        // 아래 줄이 함께 잰다.
+        assert!(screen.contains("d : 상세 칸 [보임]") && screen.contains("4 : done [보임]"), "{screen}");
+        assert!(!screen.contains("d : done"), "걷은 `SPC v d`(done) 가 메뉴에 남았다\n{screen}");
+        assert!(!screen.contains("p : "), "옛 `SPC v p` 가 메뉴에 남았다\n{screen}");
         assert!(!screen.contains("q : 끝내기"), "하위 층에 뿌리가 남았다\n{screen}");
 
         // **토글은 창을 안 걷는다** — 눌러 보며 맞추라고 열린 채로 남고, 상태 낱말이 그 자리에서
