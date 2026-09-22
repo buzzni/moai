@@ -122,6 +122,22 @@ jobs:
           key: cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-rel-${{ matrix.target }}-
 
+      # **musl 판은 C 컴파일러를 쓴다**(moai-omww). `ureq` 의 `rustls` 기능이 `ring` 을 끌고
+      # 오는데, 그 크레이트는 제 build.rs 에서 C 와 어셈블리를 짓는다 — 그때까지 이 저장소는
+      # 통째로 Rust 라 아무 C 도구도 필요 없었고, 그래서 이 스텝이 없었다.
+      #
+      # `cc` 는 `x86_64-unknown-linux-musl` 을 `x86_64-linux-musl-gcc`(없으면 `musl-gcc`)로
+      # 푼다. `ubuntu-latest` 에는 둘 다 없어서, 이 줄이 빠지면 태그를 밀고 나서야 그 칸이
+      # 죽는다 — `release:` 가 `needs: build` 라 그날 아무것도 안 나간다. **PR 은 못 잡는다**:
+      # ci.yml 도 smoke.yml 도 호스트 판만 지어 musl 을 아예 안 건드린다.
+      #
+      # macOS 칸에는 clang 이 이미 서 있어 이 스텝이 필요 없다.
+      - name: musl 의 C 도구를 받는다
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: build
         run: cargo build --release --locked --target ${{ matrix.target }}
 

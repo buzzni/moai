@@ -190,6 +190,22 @@ does not carry yet comes out in English — the two that are full right now are 
 **The system locale (`LANG`, `LC_ALL`) is not read**: it changes only through one of
 those two ways. How to add a translation is in the moai repository's `i18n/README.md`.
 
+## Checking for a new release
+
+The explorer asks GitHub once a day whether a newer release is out, and the version
+line in its header says which of four it is — a new release, the latest, ahead of the
+latest (a build from source), or not asked. **Nothing is blocked**: it is one line, and
+the exit code never changes.
+
+It only asks where a person is watching. `--json`, a pipe and anything that is not a
+terminal never ask, so a machine running agents does not knock on the outside every run.
+The answer, and when it was asked, are held next to your user config in `latest.toml`.
+
+    [update]
+    check = false        # in your user config: never ask on this machine
+
+    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run
+
 ## Unfolding a parked thought
 
     moai idea add '<what just came to mind>'       park it

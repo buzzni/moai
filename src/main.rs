@@ -15,6 +15,7 @@ mod guide;
 mod hook;
 mod i18n;
 mod id;
+mod latest;
 mod markdown;
 mod model;
 mod nav;

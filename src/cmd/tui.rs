@@ -108,7 +108,41 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
+}
+
+/// 새 판을 묻는 실을 띄운다 — **문을 지날 때만**(moai-3gia, 사용자 결정 2026-09-21).
+///
+/// 문은 넷이다([`crate::latest::gate`]) — 환경(`MOAI_NO_UPDATE_CHECK`), 설정(`[update] check`),
+/// `--json`, 그리고 사람이 보는 화면인가. 탐색기는 화면을 켜는 길이라 뒤의 둘은 거의 늘 참이지만,
+/// **묻는 쪽이 답을 내야** 한다는 계약은 여기서도 지킨다 — `gate` 가 인자를 갈라 받는 까닭이 그것이다.
+///
+/// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
+/// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
+/// 기능이 피하려던 바로 그 일이다.
+fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>) {
+    let Some(dir) = asking_from(config, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
+        return;
+    };
+    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k)));
+}
+
+/// 물을 것인가, 물으면 답을 어디에 둘 것인가 — **판단만 한다**(리뷰).
+///
+/// 문을 재는 자리를 실을 띄우는 자리에서 갈라 둔 것은 시험이 그것을 잴 수 있게 하려는 것이다.
+/// 붙여 두면 `is_some()` 을 `is_none()` 으로 뒤집어도 온 시험이 푸르게 서 있었다 — 문이 반대로
+/// 서면 `--json` 이 매번 바깥을 두드리는데, 그것이 이 기능이 피하려던 바로 그 일이다.
+fn asking_from(
+    config: Option<&std::path::Path>,
+    json: bool,
+    on_screen: bool,
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let dir = config.and_then(|p| p.parent())?;
+    let says = crate::latest::config_says(config);
+    crate::latest::gate(env, says, json, on_screen).is_none().then(|| dir.to_path_buf())
 }
 
 /// `.moai` 밖에서 부른 탐색기 — 등록한 프로젝트의 층.
@@ -190,6 +224,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
 }
 
@@ -765,6 +801,30 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
 
 #[cfg(test)]
 mod tests {
+    /// **문이 반대로 서면 `--json` 이 매번 바깥을 두드린다**(moai-3gia, 리뷰). `latest::gate` 는
+    /// 제자리에서 잘 재지만, 그 답을 **쓰는** 자리가 안 재이던 자리였다.
+    #[test]
+    fn the_explorer_asks_only_when_every_door_is_open() {
+        let s = crate::scratch::Scratch::new("tui-latest-gate");
+        let at = s.path().join("config.toml");
+        std::fs::write(&at, "").unwrap();
+        let none = |_: &str| None;
+        assert_eq!(super::asking_from(Some(&at), false, true, none).as_deref(), Some(s.path()));
+        // `--json` 은 화면이 터미널이어도 안 묻는다 — 에이전트가 치는 자리다.
+        assert_eq!(super::asking_from(Some(&at), true, true, none), None);
+        // 사람이 보는 화면이 아니면 안 묻는다(파이프).
+        assert_eq!(super::asking_from(Some(&at), false, false, none), None);
+        // 설정이 껐으면 안 묻는다.
+        std::fs::write(&at, "[update]\ncheck = false\n").unwrap();
+        assert_eq!(super::asking_from(Some(&at), false, true, none), None);
+        // 환경이 껐으면 안 묻는다.
+        std::fs::write(&at, "").unwrap();
+        let off = |k: &str| (k == crate::latest::OFF_VAR).then(|| std::ffi::OsString::from("1"));
+        assert_eq!(super::asking_from(Some(&at), false, true, off), None);
+        // 답을 둘 자리를 모르면 안 묻는다 — 창을 닫을 자리가 없어 부를 때마다 두드리게 된다.
+        assert_eq!(super::asking_from(None, false, true, none), None);
+    }
+
     use super::*;
     use std::time::Duration;
 

@@ -888,17 +888,31 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang);
+    let said = version_said(app.site.lang, app.latest().clone());
     let user = app.told_user().to_string();
     [("User", user), ("Version", said)]
 }
 
-/// 판 줄의 글. 서버의 최신판은 아직 없다 — 빈 자리를 두면 "고장" 으로 읽히므로 없다는 것을
-/// 낱말로 적는다. 한때 `concat!` 로 박아 둔 상수였다 — 프레임마다 새로 지을 까닭이 없다는
-/// 것이었는데, 뒷말이 말묶음에서 오면서(moai-9it4) 고른 말을 받아 짓는 자리가 됐다. 값은
-/// 표에서 한 번 집어 짧은 글 하나를 잇는 것뿐이라 그리는 걸음에 얹어도 된다.
-fn version_said(lang: Lang) -> String {
-    format!("{} · {}", env!("CARGO_PKG_VERSION"), say(lang, "tui.version.unchecked"))
+/// 판 줄의 글 — 내 판 뒤에 소식 한 낱말을 잇는다.
+///
+/// **넷이 다른 글이다**(사용자 결정 2026-09-21, moai-omww). 새 판이 있는 것, 이미 최신인 것,
+/// 내 판이 더 앞선 것(소스로 지어 쓰는 사람), 못 물은 것. 빈 자리를 두면 "고장" 으로 읽히므로
+/// 못 물은 것도 낱말로 적고, **그것을 "최신" 과 한 낱말로 접지 않는다** — 그물이 없어 모르는
+/// 것을 최신이라 적으면 그 글이 거짓이다.
+///
+/// **묻는 일은 여기서 안 한다.** 이 함수는 키 하나, 깜빡임 한 번마다 도는 자리라 [`App`] 이
+/// 받아 둔 답([`App::latest`])을 읽기만 한다 — 바로 위 `told_of` 가 `model::actor` 를 여기서 안
+/// 부르는 것과 같은 까닭이고, 묻는 실은 `cmd::tui` 가 여는 걸음에 한 번 띄운다.
+fn version_said(lang: Lang, latest: crate::latest::Seen) -> String {
+    use crate::latest::Seen;
+    let mine = env!("CARGO_PKG_VERSION");
+    let said = match latest {
+        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", &tag)]),
+        Seen::Same => say(lang, "tui.version.same").to_string(),
+        Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
+        Seen::Unasked => say(lang, "tui.version.unchecked").to_string(),
+    };
+    format!("{mine} · {said}")
 }
 
 /// 몸통을 목록과 상세로 가른다 — `(목록, 상세)`.
@@ -5402,6 +5416,50 @@ pub(super) mod tests {
         assert!(head.contains("User") && head.contains("레이븐 (raven@buzzni.com)"), "사람이 없다\n{head}");
         assert!(head.contains(&format!("Version : {}", env!("CARGO_PKG_VERSION"))), "판이 없다\n{head}");
         assert!(head.contains("최신 확인 안 함"), "서버 최신판 자리가 없다\n{head}");
+    }
+
+    /// **판 줄의 넷은 서로 다른 글이다**(moai-3gia, 사용자 결정 2026-09-21). 특히 못 물은 것과
+    /// 최신인 것을 한 낱말로 접으면, 그물이 없어 모르는 것을 "최신" 이라 적는 거짓말이 된다.
+    #[test]
+    fn the_version_line_says_which_of_the_four_it_is() {
+        use crate::latest::Seen;
+        let mine = env!("CARGO_PKG_VERSION");
+        let said = |seen| {
+            let mut a = app();
+            a.set_latest(seen);
+            let lines = render(&mut a, 100, 24);
+            lines[..6].join("\n")
+        };
+        let newer = said(Seen::Newer { tag: "v9.9.9".into() });
+        assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
+        let same = said(Seen::Same);
+        let ahead = said(Seen::Ahead);
+        let unasked = said(Seen::Unasked);
+        for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
+        {
+            assert!(head.contains(&format!("Version : {mine}")), "{what} 에서 내 판이 사라졌다\n{head}");
+        }
+        // 넷이 서로 다른 글이어야 한다 — 하나라도 겹치면 사람이 가릴 수 없다.
+        let cut = |head: &str| {
+            head.lines().find(|l| l.contains("Version")).map(|l| l.split("Version").nth(1).unwrap_or("").to_string())
+        };
+        let four: Vec<_> = [&newer, &same, &ahead, &unasked].iter().filter_map(|h| cut(h)).collect();
+        assert_eq!(four.len(), 4, "판 줄을 못 찾았다");
+        for (i, a) in four.iter().enumerate() {
+            for b in &four[i + 1..] {
+                assert_ne!(a.trim(), b.trim(), "두 소식이 같은 글로 선다");
+            }
+        }
+    }
+
+    /// **묻는 일은 그리는 걸음에 안 실린다**(moai-3gia) — 그리는 함수는 `App` 이 받아 둔 답을
+    /// 읽기만 한다. 실을 띄우는 자는 `cmd::tui` 하나고, 그리기는 그것을 안 만진다.
+    #[test]
+    fn drawing_never_asks_the_grid() {
+        let mut a = app();
+        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "여는 값이 못 물었다가 아니다");
+        let _ = render(&mut a, 100, 24);
+        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "그리는 걸음이 값을 바꿨다");
     }
 
     /// **누군지 몰라도 헤더는 서고 묻지 않는다**(moai-56jf). 읽기는 사람을 묻지 않는다 —

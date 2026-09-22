@@ -527,6 +527,23 @@ does not carry yet comes out in English — the two that are full right now are 
 **The system locale (`LANG`, `LC_ALL`) is not read**: it changes only through one of
 those two ways. How to add a translation is in the moai repository's `i18n/README.md`."#;
 
+/// 새 판을 묻는 일과 그것을 끄는 두 길(moai-5gka). **손잡이가 코드에만 있으면 끄는 법을 아무도
+/// 모른다** — 에이전트가 도는 기계에서 그것을 끄는 사람이 이 글을 읽는 사람이다. `MOAI_API_URL`
+/// 은 안 적는다: 거울과 시험이 쓰는 자리지 사람이 고를 손잡이가 아니다.
+const UPDATES: &str = r#"The explorer asks GitHub once a day whether a newer release is out, and the version
+line in its header says which of four it is — a new release, the latest, ahead of the
+latest (a build from source), or not asked. **Nothing is blocked**: it is one line, and
+the exit code never changes.
+
+It only asks where a person is watching. `--json`, a pipe and anything that is not a
+terminal never ask, so a machine running agents does not knock on the outside every run.
+The answer, and when it was asked, are held next to your user config in `latest.toml`.
+
+    [update]
+    check = false        # in your user config: never ask on this machine
+
+    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run"#;
+
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.
 ///
@@ -707,6 +724,10 @@ Start a session by running `moai status`. The board and the warnings come up on 
 ### The language on screen
 
 {LANGUAGE}
+
+### Checking for a new release
+
+{UPDATES}
 
 ### When a feature request comes in
 
@@ -951,6 +972,10 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 ## The language on screen
 
 {LANGUAGE}
+
+## Checking for a new release
+
+{UPDATES}
 
 ## Unfolding a parked thought
 
@@ -2131,7 +2156,7 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, LANGUAGE, COMMITS] {
+        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
