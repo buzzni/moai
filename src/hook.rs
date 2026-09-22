@@ -2462,7 +2462,26 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// 훑으면 스위치와 그 **값**이 안 갈린다(리뷰 moai-bujq.91c).
         With(&'static [&'static str]),
     }
-    const COMMON: &[&str] = &["--debug", "--verbose", "--version", "--help"];
+    /// 표에 없어도 **값을 안 받는 깃발로 넘기는** 이름 — 감싸는 명령마다 적지 않는다.
+    const COMMON: &[&str] = &["--debug", "--verbose"];
+    /// **찍기만 하고 뒤의 명령을 안 돌리는 스위치**(moai-y0gv) — 판 번호와 도움말이다.
+    ///
+    /// `setsid --version moai mv <id> in_progress --from todo && <쓰기>` 가 빈손으로 지나갔다.
+    /// `setsid --version` 은 판 번호만 찍고 끝나 moai 를 아예 안 돌리는데, [`COMMON`] 에 함께
+    /// 서서 "값 안 받는 평범한 깃발" 로 넘어가 그 집기가 뒤의 쓰기를 풀어 줬다. 짧은
+    /// `-V`·`-h` 는 뭉치 고리의 "모르는 글자는 깃발" 기본값으로 같은 자리를 지나갔다.
+    ///
+    /// **이 표의 감싸는 명령에서는 두 답이 하나로 모인다** — 그 이름을 아는 것(util-linux 의
+    /// `-V`·`-h`, sudo 의 `-V`)은 찍고 끝나고, 모르는 것(coreutils 의 `env -h`)은 그 줄을
+    /// 거절해 아무것도 안 돌린다. 어느 쪽이든 뒤엣것은 안 도니 [`Wrapped::Stops`] 다.
+    ///
+    /// **제 표가 먼저다** — `sudo -h` 의 `-h` 는 도움말이 아니라 호스트를 붙여 받는
+    /// 스위치라([`Wrapper::attach`]) 그 자리에서 먼저 걸린다. 여기는 그 뒤에 선다.
+    /// (2026-09-22 에 쟀다: `sudo -h echo HELLO` 는 `echo` 를 호스트로 읽어 거절한다.)
+    ///
+    /// **잘못 막지 않는다** — 멈추는 쪽은 그 뒤를 아예 안 보는 것이라, 정당한 줄이 이 고침으로
+    /// 막히지 않는다.
+    const PRINTS: &[&str] = &["--version", "--help", "-V", "-h"];
     const WRAPPERS: &[Wrapper] = &[
         Wrapper {
             name: "env",
@@ -3007,6 +3026,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             n += 1;
             continue;
         }
+        // **찍기만 하는 스위치에서 멈춘다**([`PRINTS`], moai-y0gv) — 판 번호와 도움말은 뒤의
+        // 명령을 아예 안 돌린다. 값을 따로 받는 철자는 위에서 이미 걸렸고, **값을 붙여서만 받는
+        // 철자는 제 표가 이긴다** — `sudo -h` 는 도움말이 아니라 호스트를 받는 스위치다.
+        if PRINTS.contains(&word.as_str()) && !w.attach.contains(&word.as_str()) {
+            return Some(Wrapped::Stops);
+        }
         // **모르는 긴 옵션에서는 멈춘다** — 값을 따로 받는 것이면 그 값을 명령으로 읽는다.
         // `nice --10` 처럼 숫자만 붙은 것은 값을 안 받는다.
         if let Some(name) = word.strip_prefix("--") {
@@ -3095,6 +3120,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             if letter(w.attach, c) {
                 stop = false;
                 break;
+            }
+            // **뭉치 안의 판 번호·도움말**([`PRINTS`], moai-y0gv) — `setsid -V <명령…>` 도
+            // `env -ih <명령…>` 도 그 명령을 안 돌린다. 값이 시작되기 전의 글자만 여기 온다.
+            if letter(PRINTS, c) {
+                return Some(Wrapped::Stops);
             }
             // 값을 안 받는 글자만 묶였으면 넘긴다 — `nice -5` 도 여기다.
             if !(c.is_ascii_alphanumeric() || c == '.') {
@@ -7203,6 +7233,23 @@ mod tests {
             // 새 줄들도 모르는 긴 옵션에서 멈춘다 — 값을 따로 받는 것이면 그 값이 명령이 된다.
             "setsid --weird moai add '딴 일'",
             "chrt --weird moai add '딴 일'",
+            // **판 번호와 도움말도 뒤의 명령을 안 돌린다**([`PRINTS`], moai-y0gv) — 아는 것은
+            // 찍고 끝나고(util-linux 의 `-V`·`-h`), 모르는 것은 그 줄을 거절한다(`env -h` 는
+            // `invalid option`). 2026-09-22 에 열한 줄을 재서 하나도 안 도는 것을 봤다.
+            "setsid --version moai add '딴 일'",
+            "setsid -V moai add '딴 일'",
+            "setsid -h moai add '딴 일'",
+            "env --version moai add '딴 일'",
+            "env --help moai add '딴 일'",
+            "env -h moai add '딴 일'",
+            "env -ih moai add '딴 일'",
+            "sudo --help moai add '딴 일'",
+            "sudo -V moai add '딴 일'",
+            "timeout --version 5 moai add '딴 일'",
+            "nice --help moai add '딴 일'",
+            "xargs --help moai add '딴 일'",
+            "su --help 남 -c 'moai add 딴 일'",
+            "chrt -V 0 moai add '딴 일'",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "모르는 꼴을 명령으로 읽었다 — {cmd}");
         }
@@ -7507,6 +7554,52 @@ mod tests {
         for cmd in ["echo x | xargs sudo -s sed -i s/a/b/ src/x.rs", "echo x | xargs env -S 'tee src/x.rs'"] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "덧붙임이 넘긴 글의 쓰기 축까지 껐다 — {cmd}\n{got:?}");
+        }
+    }
+
+    /// **판 번호와 도움말은 뒤의 명령을 안 돌린다**(moai-y0gv) — `setsid --version moai mv t-1
+    /// in_progress --from todo && <쓰기>` 는 판 번호만 찍고 끝나는데, 그 둘이 `COMMON` 에 서서
+    /// "값 안 받는 평범한 깃발" 로 넘어가 지어낸 집기가 뒤의 빈손 쓰기를 풀어 줬다. 짧은
+    /// `-V`·`-h` 는 뭉치 고리의 "모르는 글자는 깃발" 기본값으로 같은 자리를 지나갔다.
+    ///
+    /// **아는 것과 모르는 것이 한 답으로 모인다** — util-linux 는 찍고 끝나고 coreutils 의
+    /// `env -h` 는 `invalid option` 으로 거절한다. 2026-09-22 에 열한 줄을 재서 하나도 안 도는
+    /// 것을 봤다.
+    #[test]
+    fn a_version_or_help_switch_runs_nothing_after_it() {
+        let root = Path::new("/repo");
+        let stands = |_: usize, _: &str| None;
+        // **장부에 안 적는다** — 안 도는 집기다.
+        for cmd in [
+            "setsid --version moai mv t-1 in_progress --from todo",
+            "setsid -V moai mv t-1 in_progress",
+            "setsid -h moai mv t-1 in_progress",
+            "env --version moai mv t-1 in_progress",
+            "env -h moai mv t-1 in_progress",
+            "env -ih moai mv t-1 in_progress",
+            "sudo -V moai mv t-1 in_progress",
+            "sudo --help moai mv t-1 in_progress",
+            "timeout --version 5 moai mv t-1 in_progress",
+            "xargs --help moai mv t-1 in_progress",
+        ] {
+            assert!(picked_ids(cmd, &cfg(), &|_| true, &stands).is_empty(), "안 도는 집기를 장부에 적었다 — {cmd}");
+        }
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — 두 축이 같은 답이어야 한다.
+        for cmd in [
+            "setsid --version moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/x.rs",
+            "env -h moai mv t-1 in_progress --from todo && tee src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "안 도는 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
+        }
+        // **쓰기도 안 돈다** — 멈추는 쪽은 그 뒤를 아예 안 보는 것이라 잘못 막지 않는다.
+        for cmd in ["setsid --version sed -i s/a/b/ src/x.rs", "env --help tee src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 쓰기를 막았다 — {cmd}\n{got:?}");
+        }
+        // **그 스위치가 없는 같은 줄은 그대로 집는다** — 끈 것이 이 둘뿐임을 여기가 지킨다.
+        for cmd in ["setsid moai mv t-1 in_progress --from todo", "env -i moai mv t-1 in_progress"] {
+            assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "멀쩡한 집기를 버렸다 — {cmd}");
         }
     }
 
