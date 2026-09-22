@@ -639,6 +639,25 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
 
+    /// **서버가 거절한 까닭도 갈린다**(moai-580l). 시간당 판 수를 태운 것은 기다리면 풀리고,
+    /// 옮겨 간 저장소는 사람이 고칠 것이 다르다 — 한 글로 접으면 어느 쪽인지 모른다.
+    ///
+    /// **403 과 429 는 한 갈래다.** GitHub 은 판 수를 태운 부름에 둘 중 아무 쪽이나 낸다.
+    #[test]
+    fn a_refusal_says_whether_waiting_will_fix_it() {
+        for (status, kind) in [
+            ("403 Forbidden", Trouble::RateLimited),
+            ("429 Too Many Requests", Trouble::RateLimited),
+            ("404 Not Found", Trouble::Http),
+            ("500 Internal Server Error", Trouble::Http),
+        ] {
+            let (url, handle) = saying_once(status, "{}");
+            let got = ask_within(&url, TIMEOUT).map_err(|w| w.kind);
+            assert_eq!(got, Err(kind), "{status}");
+            let _ = handle.join();
+        }
+    }
+
     /// **TLS 를 어떻게 세웠는지를 잰다**(moai-t906). 시험의 부름은 모두 `http://127.0.0.1` 이라
     /// rustls·webpki-roots 가 한 번도 안 돈다 — 기능 조합이 바뀌어 인증서 검증이 꺼져도 온
     /// 시험이 푸르고, 생산에서는 "못 물었다" 로 접혀 네트워크 없음과 구별이 안 간다.
@@ -699,12 +718,18 @@ mod tests {
     /// 한 판만 답하는 서버. 답한 뒤 닫히므로, **두 번째 부름은 붙지 못한다** — 창이 정말로
     /// 묻기를 막았는지를 이 성질로 잰다.
     fn server_once(body: &'static str) -> (String, std::thread::JoinHandle<usize>) {
+        saying_once("200 OK", body)
+    }
+
+    /// [`server_once`] 되 **상태 줄을 고른다**(moai-580l). 판 수를 태운 403 과 저장소를 옮긴
+    /// 404 는 사람이 할 일이 다르고, 그 갈림을 재려면 서버가 그 상태 코드를 내야 한다.
+    fn saying_once(status: &'static str, body: &'static str) -> (String, std::thread::JoinHandle<usize>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
         let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
         let handle = std::thread::spawn(move || {
             let mut served = 0;
             if let Ok((stream, _)) = listener.accept() {
-                answer(stream, body);
+                answer(stream, status, body);
                 served += 1;
             }
             served
@@ -712,7 +737,7 @@ mod tests {
         (url, handle)
     }
 
-    fn answer(mut stream: TcpStream, body: &str) {
+    fn answer(mut stream: TcpStream, status: &str, body: &str) {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut line = String::new();
         // 머리를 다 읽어야 클라이언트가 답을 받는다.
@@ -724,7 +749,7 @@ mod tests {
         }
         let _ = write!(
             stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
             body.len(),
             body
         );
