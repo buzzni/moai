@@ -950,3 +950,4 @@
 {"ts":"2026-09-22T10:46:49Z","id":"moai-kh81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-22T10:46:49Z","id":"moai-1ia9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-22T10:46:49Z","id":"moai-333l.wj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·4번은 안으로 들였다 — 본을 빼기 전에 드는 moai-1ia9 로 고쳐 같이 머지했다. 7·8·9·10·11·12·13·14번은 리뷰가 직접 고쳐 27c2326 에 담겼다. 2번은 moai-au73, 5·6번은 moai-5thc, 15번은 moai-jk87 로 내보냈다 — 셋 다 v0.1.2 밖이다"}
+{"ts":"2026-09-22T10:47:18Z","id":"moai-333l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — 776ff67 로 develop 에 들어갔고 멤버 둘과 리뷰까지 닫혔다. 넘긴 것은 moai-au73(양방향 규칙)·moai-5thc(write_value)·moai-jk87(안 보이는 글자) 셋이고 v0.1.2 밖이다"}
