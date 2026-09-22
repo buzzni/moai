@@ -759,3 +759,20 @@
 {"ts":"2026-09-22T06:46:09Z","id":"moai-dael","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T06:46:09Z","id":"moai-68b8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T06:49:58Z","id":"moai-1f02","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.3"}
+{"ts":"2026-09-22T07:02:40Z","id":"moai-2avz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T07:06:57Z","id":"moai-tp98","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층이 내는 수와 그 값"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-nzyh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층이 줄마다 git 을 두 판씩 띄운다 — 등록 다섯에 130ms"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-nzyh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2zey 에서 펼쳤다 — 층이 줄마다 git 을 부른다 — 설치 알림의 값을 담을 자리"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-2zey","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-tp98 의 멤버 moai-nzyh 로 펼쳤다"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-zog5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".moai 밖의 한눈 보기와 층이 알림을 달리 센다"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-zog5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-jwzt 에서 펼쳤다 — .moai 밖의 두 화면이 알림을 달리 센다 — 한눈 보기도 세거나, 층이 멈추거나"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-jwzt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-tp98 의 멤버 moai-zog5 로 펼쳤다"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-x1hb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"줄 읽기에 세대가 없어 follow_site 가 옛 Site 를 굳힌다"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-x1hb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x83t 에서 펼쳤다 — 줄 읽기에는 세대가 없다 — follow_site 가 옛 Site 를 그대로 들인다"}
+{"ts":"2026-09-22T07:07:14Z","id":"moai-x83t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-tp98 의 멤버 moai-x1hb 로 펼쳤다"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-uitb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"follow_site 의 whoami 가 그리는 걸음에 실린다"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-uitb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-j2aa 에서 펼쳤다 — follow_site 의 whoami 를 읽는 스레드로 옮긴다"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-j2aa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-tp98 의 멤버 moai-uitb 로 펼쳤다"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-k6ff","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"층의 +N 이 들어가면 짝이 없다"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-k6ff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ovwd 에서 펼쳤다 — 층의 +N 은 들어가면 짝이 없다 — 안쪽 배너도 알림을 셀 것인가"}
+{"ts":"2026-09-22T07:07:15Z","id":"moai-ovwd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-tp98 의 멤버 moai-k6ff 로 펼쳤다"}
