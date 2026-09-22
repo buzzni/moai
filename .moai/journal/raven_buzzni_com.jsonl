@@ -503,3 +503,6 @@
 {"ts":"2026-09-22T00:37:53Z","id":"moai-65ie","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=1160000 (high — 층·한눈 보기를 가로지르는 자리 판정. 토큰은 셋을 함께 한 이 세션 전체다)"}
 {"ts":"2026-09-22T00:37:53Z","id":"moai-oz13","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 세션 토큰은 moai-65ie 에 한 줄로 적었다)"}
 {"ts":"2026-09-22T00:37:54Z","id":"moai-1tcm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 세션 토큰은 moai-65ie 에 한 줄로 적었다)"}
+{"ts":"2026-09-22T00:39:26Z","id":"moai-oz13","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T00:39:28Z","id":"moai-65ie","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T00:39:29Z","id":"moai-1tcm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
