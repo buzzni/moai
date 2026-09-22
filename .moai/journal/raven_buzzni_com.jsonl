@@ -735,3 +735,5 @@
 {"ts":"2026-09-22T06:18:10Z","id":"moai-68b8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SECURITY.md 가 네트워크에서 온 글을 안 센다"}
 {"ts":"2026-09-22T06:18:10Z","id":"moai-68b8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-igpv 에서 펼쳤다 — SECURITY.md 의 범위에 네트워크에서 온 글을 더한다"}
 {"ts":"2026-09-22T06:18:10Z","id":"moai-igpv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lc0i 의 멤버 moai-68b8 로 펼쳤다"}
+{"ts":"2026-09-22T06:19:05Z","id":"moai-d89c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 용어표 마지막 절 하나, 동작 변화 없음)"}
+{"ts":"2026-09-22T06:19:05Z","id":"moai-d89c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"마지막 절을 맞춘 것·못 맞춘 것·안 맞춘 것 셋으로 갈라 다시 썼다. 노트를 못 고친다는 것을 숨기지 않고 적었다 — 커밋 aecad4a"}
