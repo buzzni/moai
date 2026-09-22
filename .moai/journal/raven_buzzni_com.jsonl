@@ -906,3 +906,8 @@
 {"ts":"2026-09-22T09:33:16Z","id":"moai-k6ff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 안쪽 배너의 짝)"}
 {"ts":"2026-09-22T09:33:16Z","id":"moai-nzyh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"잰 표(등록 다섯, 같은 자, moai tui 를 띄워 쓸기마다 git 부름을 셌다). 고치기 전 첫 쓸기 14판 · 둘째 24판 · 셋째 34판. 고친 뒤 14판 · 14판 · 14판. 한 판 값은 tui --json 57ms 가운데 32ms 가 이 물음이었다(check-attr·config 24ms, probe 8ms)"}
 {"ts":"2026-09-22T09:34:48Z","id":"moai-9tlp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 에 d46ce08 로 들었고 멤버 일곱과 리뷰 moai-9tlp.67r 이 다 닫혔다. 이어서 볼 것은 하나뿐이다. 브리프 7-3 이 CHANGELOG 를 워크트리마다 쓰게 하니, 세션 여럿이 겹치면 [Unreleased] 에서 충돌이 난다 — 걸음 8 이 충돌을 워크트리로 돌려보내니 막히지는 않지만, 잦아지면 절을 나누는 것을 본다. 담은 idea 는 moai-e1rn 하나다."}
+{"ts":"2026-09-22T09:35:59Z","id":"moai-nzyh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T09:36:00Z","id":"moai-x1hb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T09:36:01Z","id":"moai-uitb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T09:36:01Z","id":"moai-zog5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T09:36:02Z","id":"moai-k6ff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
