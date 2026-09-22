@@ -672,6 +672,13 @@ struct Seg {
     fed: Vec<String>,
     /// 이 토막이 연 heredoc 의 번호([`Lexer::docs`]) — 본문은 토막을 닫은 뒤에 읽혀, `run` 이 끝에서 `fed` 로 옮긴다.
     docs: Vec<usize>,
+    /// **방금 닫힌 묶음에 걸린 리다이렉션뿐인 토막인가**(moai-qlr8) — `( … ) >/dev/null` 의
+    /// `>/dev/null` 이다. 묶음 밖에 제 토막으로 서지만 **그 묶음을 나온 것이 아니다**: 그 값은
+    /// 묶음의 값이고, 뒤에 더 도는 명령도 없다.
+    ///
+    /// `;` 뒤의 리다이렉션(`( … ); >f`)과 갈리는 자리다 — 그쪽은 정말 도는 명령 하나라 값이 0 이고,
+    /// 걷는 쪽이 옳다. 렉서가 `)` 를 닫는 자리에서 이 둘을 가른다([`Lexer::hung`]).
+    hung: bool,
     /// 렉서가 이 토막에서 **읽어 낸 치환의 글**(moai-6qkc) — 제 토막을 낸 것만 든다.
     ///
     /// [`shell_text`] 가 이것과 글자째 맞춰 같은 글을 두 번 안 읽는다. **수로 두던 판은 샜다**
@@ -713,22 +720,6 @@ enum Layer {
     Shell {
         /// 그 글의 맨 윗자리 묶음 깊이([`Seg::level`]) — 새 셸은 제 `set -e` 를 여기서 센다.
         top: usize,
-        /// 그 글의 맨 윗자리 **하위 셸** 깊이([`Seg::depth`]) — 겹을 나올 때 끝내는 묶음을 푸는지를
-        /// 이것으로 가른다(moai-4arw). 그 묶음이 이보다 깊으면 `exit` 는 하위 셸만 끝내니, 자식
-        /// 셸의 값이 집기의 값이라고 말할 수 없다 — `집기 || ( …; exit 1 )` 이 그 꼴이다.
-        ///
-        /// **겹마다 한 번 재어 여기 둔다** — 겹에 들어선 토막에서 베껴 오던 판은 글이 `( … )` 로
-        /// 시작하면 그 깊이를 부풀려, 같은 집안을 두 갈래로 갈랐다(리뷰 moai-k8j1.209 의 6번).
-        ///
-        /// **글이 통째로 하위 셸 안이면 그 깊이까지 센다**(moai-vngm) — `bash -c '( 집기 ||
-        /// { exit 1; } )'` 의 괄호는 글의 전부라 bash 가 그 값을 그대로 낸다. [`Lexer::relex`] 가
-        /// "한 번도 안 나갔는가" 로 재어 여기 넣는다: 깊이만 보면 `( a ); ( b )` 처럼 나갔다 다시
-        /// 든 형제 괄호가 통째로 감싼 것으로 읽힌다.
-        ///
-        /// **글의 마지막 하위 셸까지는 아직 아니다** — `집기 || ( …; exit 1 )` 도 bash 는 그
-        /// 괄호의 값을 내지만, 그것을 알려면 묶음마다 "글의 마지막인가" 를 따로 들어야 한다.
-        /// 한 수로는 못 잰다(`( 집기 || exit 1 ); ( b )` 의 마지막 토막도 깊이가 1 이다).
-        deep: usize,
         /// **띄울 때 이미 errexit 가 켜졌는가**(moai-j9tx) — `bash -e -c '…'` 의 글은 첫 줄부터
         /// `set -e` 아래라, 그 겹을 열 때 `strict` 를 켠 채로 연다.
         strict: bool,
@@ -750,11 +741,11 @@ enum Layer {
 
 impl Layer {
     /// 바깥 렉서가 이 겹을 제 자리로 옮긴다 — 깊이는 [`Seg::level`] 과 같이 민다.
-    fn shift(self, by: usize, under: usize) -> Layer {
+    fn shift(self, by: usize) -> Layer {
         match self {
             Layer::Subst { at, nth } => Layer::Subst { at: at + by, nth },
-            Layer::Shell { top, deep, strict, apace, elsewhere, appends } => {
-                Layer::Shell { top: top + by, deep: deep + under, strict, apace, elsewhere, appends }
+            Layer::Shell { top, strict, apace, elsewhere, appends } => {
+                Layer::Shell { top: top + by, strict, apace, elsewhere, appends }
             }
         }
     }
@@ -1081,6 +1072,9 @@ struct Lexer<'a> {
     later: Vec<(usize, String)>,
     /// 다시 읽기를 몇 겹까지 왔나 — `bash -c "bash -c '…'"` 가 끝없이 파고들지 않게 막는다.
     deep: usize,
+    /// **방금 묶음을 닫았는가**(moai-qlr8) — 곧바로 오는 리다이렉션은 그 묶음에 걸린 것이라
+    /// 새 명령이 아니다([`Seg::hung`]). 이음사 하나나 낱말 하나가 이 표를 걷는다.
+    hung: bool,
     /// **이 글의 자리 인자 — `$0` 부터다**([`Handed::args`], moai-5ycj). `$1`·`${1}`·`$@` 를 이것으로
     /// 푼다([`Lexer::param`]). 맨 바깥 렉서와 치환의 렉서에서는 비어 있어 아무것도 안 바뀐다.
     args: &'a [String],
@@ -1180,6 +1174,7 @@ impl<'a> Lexer<'a> {
             shut: None,
             later: Vec::new(),
             deep,
+            hung: false,
             args: &[],
         }
     }
@@ -1470,41 +1465,29 @@ impl<'a> Lexer<'a> {
                 // 둔 표를 읽는다([`Seg::bg`]). `sub` 로 어림잡던 판은 `{ … } &` 로 끝나는 글을 못 보고
                 // (묶음 뒤의 `&` 는 빈 토막에 온다), 뒤로 띄운 파이프라인은 파이프라고만 읽었다.
                 let apace = segs.last().is_some_and(|s| s.bg);
-                // **글이 통째로 하위 셸 안에 있으면 그 하위 셸의 값이 곧 이 셸의 값이다**
-                // (moai-vngm) — `bash -c '( 집기 || { exit 1; } )'` 의 괄호는 글의 전부라, bash 는
-                // 그 값을 그대로 낸다. 집기가 지면 1 이니 바깥 `&&` 에 닿은 것은 집기가 이겼다는
-                // 뜻이다. 집안째 막던 판은 규약이 시키는 차례를 한 줄로 친 명령을 잘못 막았다.
+                // **글이 통째로 하위 셸 안에 있어도, 글의 마지막 하위 셸이어도 그 값은 이 셸의
+                // 값이다**(moai-vngm·moai-qlr8) — `bash -c '( 집기 || { exit 1; } )'` 도
+                // `bash -c '집기 || ( echo f; exit 1 )'` 도 bash 가 그 괄호의 값을 그대로 낸다.
+                // bash 로 쟀다: 둘 다 1 이고, 뒤에 `; echo d` 를 붙이면 둘 다 0 이다.
                 //
-                // **"안 나갔는가" 로 잰다** — 깊이만 보면 `( a ); ( b )` 처럼 나갔다 다시 든 형제
-                // 괄호가 통째로 감싼 것으로 읽혀, 앞 괄호의 `exit` 가 뒤 괄호의 값을 제 것이라
-                // 우긴다. 첫 토막은 제 깊이로, 나머지는 **지나온 가장 얕은 자리**([`Seg::low`])와
-                // 함께 본다. bash 로 쟀다 — `bash -c '( false || { echo f; exit 1; } )'` 는 1,
-                // `bash -c '( false || { echo f; exit 1; } ); echo d'` 는 0 이다.
-                //
-                // **글의 마지막 하위 셸까지는 못 푼다** — `집기 || ( echo f; exit 1 )` 도 bash 는
-                // 그 괄호의 값을 내지만, 그것을 알려면 "이 묶음이 글의 마지막인가" 를 묶음마다
-                // 따로 들어야 한다. 한 수로는 못 잰다: `( 집기 || exit 1 ); ( b )` 의 마지막 토막도
-                // 깊이가 1 이라, 앞 묶음이 뒤 묶음의 값을 제 것이라 우기게 된다.
-                let wrap = segs
-                    .iter()
-                    .enumerate()
-                    .map(|(m, s)| if m == 0 { s.depth } else { s.depth.min(s.low) })
-                    .min()
-                    .unwrap_or(0);
+                // **여기서 재던 깊이를 걷었다** — 그 자리를 읽던 [`Bailout::would`] 가 이제 깊이를
+                // 안 묻는다. 묻지 않아도 되는 것은 그 하위 셸을 **나오는 자리가 묶음을 걷기**
+                // 때문이다([`shell_scan`] 의 `seg.floor < b.floor`): 겹을 나올 때까지 서 있는
+                // 묶음은 곧 글이 그 하위 셸을 한 번도 안 나왔다는 뜻이다. 깊이 한 수로는 마지막
+                // 하위 셸을 못 쟀고(`( 집기 || exit 1 ); ( b )` 의 마지막 토막도 깊이가 1 이다),
+                // 걷는 자리는 그 둘을 이미 가르고 있었다.
                 // **겹은 여기서 한 번만 짓는다** — `apace` 를 알고 난 뒤다.
                 //
                 // 셸에 넘긴 글은 **겹을 그대로 두고 표만 단다**(moai-54pk) — 치환으로 바꿔 적던 판은
                 // 값을 안 흘리는 김에 그 셸의 errexit 까지 버렸다. `eval` 의 글은 겹이 없으니 그때만
                 // 치환으로 심는다: 값이 제 것이 아닌 것은 같고, 버릴 errexit 도 없다.
                 //
-                // `Layer::Shell` 의 `top` 은 여기서 늘 0 이고 `deep` 은 이 글 안에서 잰 `wrap` 이다 —
-                // 둘 다 바깥 렉서가 제 자리로 민다([`Layer::shift`] 가 `s.depth` 와 같은 값을 더한다). 이름을 `deep` 으로 두면 이 함수 머리의 **다시 읽기 겹**
-                // (`let deep = self.deep`)을 가린다(리뷰 moai-k8j1.udq) — 둘 다 `usize` 라 한쪽을
-                // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
+                // `Layer::Shell` 의 `top` 은 여기서 늘 0 이고, 바깥 렉서가 그것을 제 자리로 민다
+                // ([`Layer::shift`]).
                 let layer = match kind {
                     Plant::Doc => Some(Layer::Subst { at: 0, nth }),
                     Plant::Fork { strict, astray, grows, .. } => {
-                        Some(Layer::Shell { top: 0, deep: wrap, strict, apace, elsewhere: astray, appends: grows })
+                        Some(Layer::Shell { top: 0, strict, apace, elsewhere: astray, appends: grows })
                     }
                     Plant::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
                 };
@@ -1544,10 +1527,10 @@ impl<'a> Lexer<'a> {
                     // 제자리에서 민다 — 새 목록을 지으면 토막마다 겹마다 힙을 한 번씩 잡아,
                     // `$( … )` 예순네 겹 202바이트 한 줄이 1,104번에서 3,184번으로 뛴다.
                     for l in &mut s.nested {
-                        *l = l.shift(level + 1, depth + sub);
+                        *l = l.shift(level + 1);
                     }
                     if let Some(l) = layer {
-                        s.nested.insert(0, l.shift(level + 1, depth + sub));
+                        s.nested.insert(0, l.shift(level + 1));
                     }
                     handed |= feeds;
                     all.push(s);
@@ -1697,6 +1680,13 @@ impl<'a> Lexer<'a> {
                 if closes {
                     self.join = Join { op: Op::default(), depth: self.level() };
                 }
+                // **이 뒤에 붙은 리다이렉션은 이 묶음의 것이다**([`Seg::hung`], moai-qlr8) —
+                // `( … ) >/dev/null` 이다. `end_by` 와 낱말 하나가 이 표를 걷는다.
+                //
+                // **`closes` 로 가르지 않는다** — 묶음이 `}`·`fi` 로 끝나면 그 낱말이 제 토막을 안
+                // 세워(`SHUTS`) 이 자리의 토막이 비고, 그러면 `( 집기 || { exit 1; } ) >/dev/null`
+                // 이 표를 못 받는다. 리다이렉션이 묶음에 걸렸는가는 `)` 하나로 정해진다.
+                self.hung = true;
                 self.group = self.group.saturating_sub(1);
                 self.sank();
             }
@@ -2151,7 +2141,12 @@ impl<'a> Lexer<'a> {
         let word = std::mem::take(&mut self.cur);
         let quoted = std::mem::take(&mut self.had);
         match std::mem::take(&mut self.aim) {
-            Aim::Write => self.seg.writes.push(word),
+            // 방금 닫힌 묶음에 걸린 리다이렉션인가([`Seg::hung`], moai-qlr8) — 그 묶음 뒤에
+            // 낱말 하나 없이 곧바로 온 것만이다.
+            Aim::Write => {
+                self.seg.hung |= self.hung && self.seg.words.is_empty();
+                self.seg.writes.push(word);
+            }
             Aim::Read => {}
             Aim::Here => self.seg.fed.push(word),
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
@@ -2177,6 +2172,8 @@ impl<'a> Lexer<'a> {
                 } else if !quoted && word == "]]" {
                     self.test = false;
                 }
+                // 낱말이 하나라도 서면 그 토막은 제 명령이다([`Seg::hung`], moai-qlr8).
+                self.hung = false;
                 self.seg.words.push(word);
             }
         }
@@ -2191,6 +2188,9 @@ impl<'a> Lexer<'a> {
         self.flush();
         self.aim = Aim::Word;
         self.test = false;
+        // **이음사 하나가 묶음에 걸린 리다이렉션의 표를 걷는다**([`Seg::hung`], moai-qlr8) —
+        // `( … ); >f` 의 `>f` 는 정말 도는 명령 하나다. `)` 는 제 `end_by` **뒤에** 다시 세운다.
+        self.hung = false;
         // **치환은 제 토막보다 먼저 돈다** — 그 앞에, 한 겹 깊은 하위 셸로 쌓는다(moai-xe6e). 깊이를
         // 더해야 치환 안의 `cd`·`;` 가 바깥 토막의 자리와 집기를 안 흔든다. 첫 토막은 바깥 토막의
         // 이음사를 받는다 — `mv && echo "$(sed -i …)"` 의 치환도 집기가 이겨야 돈다.
@@ -2241,7 +2241,7 @@ impl<'a> Lexer<'a> {
                     Join { op: s.join.op, depth: s.join.depth + level + 1 }
                 };
                 for l in &mut s.nested {
-                    *l = l.shift(level + 1, group + 1);
+                    *l = l.shift(level + 1);
                 }
                 s.nested.insert(0, Layer::Subst { at: level + 1, nth });
                 self.push(s);
@@ -4696,15 +4696,21 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     impl Bailout {
         /// **겹을 나오며 이 묶음을 풀 수 있는가** — 전제 다섯을 한 자리에 모은다. 가름자를 두 벌로
         /// 적던 판은 쓰기 규칙과 기록이 갈릴 자리를 열어 뒀다(moai-m5mg 가 닫은 그 갈림이다).
-        fn resolves(&self, top: usize, deep: usize, iffy: Option<usize>) -> bool {
-            self.would(top, deep) && iffy.is_none_or(|c| self.floor < c)
+        fn resolves(&self, top: usize, iffy: Option<usize>) -> bool {
+            self.would(top) && iffy.is_none_or(|c| self.floor < c)
         }
 
         /// **조건만 아니었으면 풀렸을 묶음인가**(moai-d5o9 12번) — 전제 넷 가운데 "이 셸이 정말
         /// 돌았는가"(`iffy`) 하나만 안 선 자리다. 그때 그 집기는 이겼다고는 못 해도 **돌았을 수는**
         /// 있어, 버리는 대신 표를 달아 적는다([`credit`]).
-        fn would(&self, top: usize, deep: usize) -> bool {
-            self.hard && self.floor >= top && self.depth <= deep
+        ///
+        /// **하위 셸의 깊이는 여기서 안 묻는다**(moai-qlr8) — 그 하위 셸을 나오는 자리가 이 묶음을
+        /// **걷기** 때문이다(아래 `seg.floor < b.floor`). 그래서 여기까지 서 있는 묶음은 곧 글이 그
+        /// 하위 셸을 한 번도 안 나왔다는 뜻이고, 그 `exit` 의 값이 그대로 자식 셸의 값이 된다.
+        /// bash 로 쟀다: `bash -c 'false || ( echo f; exit 1 )'` 는 1 이고,
+        /// `bash -c 'false || ( echo f; exit 1 ); echo d'` 는 0 이다(뒤엣것은 걷힌다).
+        fn would(&self, top: usize) -> bool {
+            self.hard && self.floor >= top
         }
     }
     /// **한 셸에 매인 판 한 벌** — 다시 읽은 겹([`Layer`])에 들어설 때 통째로 넣고 나오면 통째로
@@ -5026,10 +5032,11 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 //   자식을 0 으로 끝내 집기가 져도 바깥 `&&` 에 닿는다
                 // - 그 묶음이 **정말 돌았을** 것 — 안 돈 몸통 안에서 열린 묶음은 위의 `shut`·
                 //   `orelse` 가 걷고, 몸통이 겹문인 `then` 가지는 `hard` 가 함께 걷는다
-                // - **하위 셸의 `exit`** 가 아닐 것(`b.depth <= deep`) — `bash -c '( 집기 ||
-                //   { exit 1; } ); echo d'` 의 괄호는 제 안만 끝내고 자식 셸은 0 이다. 재는 자는
-                //   **겹이 들고 있는** 깊이다([`Layer::Shell`] 의 `deep`) — 겹에 들어선 토막에서
-                //   베껴 오던 판은 글이 `( … )` 로 시작하면 그 깊이를 부풀렸다(리뷰 6번)
+                // - 그 하위 셸을 **안 나왔을** 것 — `bash -c '( 집기 || { exit 1; } ); echo d'`
+                //   의 괄호는 제 안만 끝내고 자식 셸은 0 이다. 재는 자가 따로 없다(moai-qlr8):
+                //   그 괄호를 **나오는 자리가 묶음을 걷어**, 여기까지 서 있는 묶음은 곧 글이 그
+                //   하위 셸을 한 번도 안 나왔다는 뜻이다. 깊이를 견주던 자(`b.depth <= deep`)는
+                //   글의 **마지막** 하위 셸을 못 재 `집기 || ( echo f; exit 1 )` 을 잘못 막았다
                 // - 글이 **뒤로 띄운 것으로 끝나지 않을** 것(`!apace`) — 그 글의 값은 늘 0 이라
                 //   자식이 0 으로 끝난 것이 아무 말도 안 한다(moai-99df 가 렉서에 그 표를 놓았다)
                 //
@@ -5041,9 +5048,9 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // `bash -e -c '집기; echo done &' && 쓰기` 는 집기가 지면 errexit 가 그 자리에서
                 // 자식을 1 로 끝내니, 바깥 `&&` 에 닿은 것 자체가 집기가 이겼다는 뜻이다. 들어설
                 // 때의 집기를 먼저 되세우던 판은 시킨 대로 친 그 줄을 막았다.
-                Layer::Shell { top, deep, apace, .. } => {
+                Layer::Shell { top, apace, .. } => {
                     let resolved = (!apace)
-                        .then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, deep, blocks.iffy)))
+                        .then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, blocks.iffy)))
                         .flatten();
                     // **0 으로 일찍 끝날 수 있는 글의 값은 집기의 값이 아니다**([`Scope::soft`],
                     // moai-sq3q) — `bash -c '집기 || exit 0'` 은 집기가 져도 0 으로 끝나, 바깥
@@ -5068,7 +5075,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                         // **안 돈 가지(`unrun`)는 여전히 안 적는다** — 그쪽은 안 돌았을 수 있는
                         // 것이 아니라 **안 돈** 것이다.
                         if unrun.is_none_or(|c| top < c) {
-                            let could = scope.bailout.as_ref().filter(|b| b.would(top, deep));
+                            let could = scope.bailout.as_ref().filter(|b| b.would(top));
                             credit(&mut picked, could, home, false);
                         }
                         if apace || soft { f.saved.pick } else { scope.pick }
@@ -5087,8 +5094,13 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         //
         // **하위 셸을 나온 것이면 안 세운다** — `집기 || ( …; exit 1 )` 의 `exit` 는 그 괄호만 끝내고
         // 바깥 셸은 살아 있다. 깊이를 안 보던 판은 그 줄의 뒤 쓰기를 집기 뒤로 읽어 샜다.
+        // **묶음에 걸린 리다이렉션은 그 묶음을 나온 것이 아니다**([`Seg::hung`], moai-qlr8) —
+        // `bash -c '( 집기 || { exit 1; } ) >/dev/null'` 의 값은 그 괄호의 값이고 뒤에 더 도는
+        // 명령도 없다. 걷던 판은 리다이렉션을 뗀 글자째 같은 줄은 풀면서 이쪽만 막았다.
+        // `( … ); >f` 는 여기 안 온다 — `;` 하나가 그 표를 걷는다.
         if let Some(b) = scope.bailout
             && seg.floor < b.floor
+            && !seg.hung
         {
             if b.ends && seg.depth >= b.depth {
                 // 여기 온 것은 집기가 이겼다는 뜻이다 — 이 묶음에서는 이제 이긴 채다(`sure`).
@@ -11110,6 +11122,16 @@ mod tests {
             // 뒤로 안 띄운 글)이 다 서야 푼다 — 하나씩 어긋난 꼴은 막는 쪽 목록에 있다.
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && sed -i s/a/b/ src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi' && sed -i s/a/b/ src/store.rs",
+            // **글의 마지막 하위 셸도 그 글의 값을 댄다**(moai-qlr8) — 그 괄호를 나온 적이 없으면
+            // `exit` 의 값이 그대로 자식 셸의 값이다. bash 로 쟀다:
+            // `bash -c 'false || ( echo f; exit 1 )'` 는 1 이고, 뒤에 `; echo d` 를 붙이면 0 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo fail; exit 1 )' && sed -i s/a/b/ src/store.rs",
+            "sh -c 'moai mv t-1 in_progress --from todo || ( exit 1 )' && echo x > src/store.rs",
+            // **묶음에 건 리다이렉션은 그 묶음을 나온 것이 아니다**(moai-qlr8, 리뷰 moai-514e.x2u
+            // 7번) — 그 값은 괄호의 값이고 뒤에 더 도는 명령도 없다. 리다이렉션을 뗀 글자째 같은
+            // 줄은 풀리는데 이쪽만 막히던 자리고, 그 꼴이 이 모양에서 가장 흔한 철자다.
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || exit 1 ) 2>/dev/null' && sed -i s/a/b/ src/store.rs",
             "sh -c 'moai mv t-1 in_progress --from todo || { echo fail; exit 1; }' && echo x > src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then echo fail; exit 1; fi' && sed -i s/a/b/ src/store.rs",
             // **뒤로 띄운 것으로 끝나도 띄울 때 켠 errexit 는 그대로다**(moai-54pk) — 글의 값만 0 이지
@@ -11157,7 +11179,6 @@ mod tests {
             // **끝내는 묶음이 아니면 안 푼다**(moai-54pk) — 그 묶음이 돌고도 셸이 0 으로 끝나면
             // 집기가 졌어도 바깥의 `&&` 에 닿는다.
             "bash -c 'moai mv t-1 in_progress --from todo || { echo fail; }' && sed -i s/a/b/ src/store.rs",
-            "bash -c 'moai mv t-1 in_progress --from todo || ( echo fail; exit 1 )' && sed -i s/a/b/ src/store.rs",
             // **전제 넷이 하나씩 어긋난 꼴**(moai-4arw) — 셋은 실제로 0 으로 끝나고(bash 로 쟀다),
             // 넷째는 하위 셸이 끝나도 뒤가 더 도는 글이다.
             // - 뒤로 띄운 묶음: `exit` 가 그 하위 셸만 끝내고 글은 곧바로 0 이다
@@ -11183,10 +11204,20 @@ mod tests {
             // 토막이라, 거기에 `bg` 를 안 달면 뒤로 띄운 글이 안 띄운 것으로 읽힌다.
             "bash -c '{ moai mv t-1 in_progress --from todo; } >/dev/null &' && sed -i s/a/b/ src/store.rs",
             "bash -c '( moai mv t-1 in_progress --from todo ) >/dev/null &' && sed -i s/a/b/ src/store.rs",
-            // - 하위 셸 안의 묶음: 괄호만 끝나고 그 뒤가 더 돈다. 겹의 깊이를 **겹에 들어선 토막**
-            //   에서 베껴 오던 판은 이 글이 `( … )` 로 시작한다는 이유로 그 자를 부풀려 놓쳤다
-            //   (리뷰 moai-k8j1.209 의 6번)
+            // - 하위 셸 안의 묶음: 괄호만 끝나고 그 뒤가 더 돈다. 그 괄호를 **나오는 자리가**
+            //   끝내는 묶음을 걷는다(moai-qlr8) — 깊이를 견주던 자를 그것으로 갈음했다
+            //   (리뷰 moai-k8j1.209 의 6번이 짚었던 자리다)
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); echo done' && sed -i s/a/b/ src/store.rs",
+            // **마지막 하위 셸이 아니면 그대로 막는다**(moai-qlr8) — 뒤에 한 줄만 더 있어도 그
+            // 글은 0 으로 끝난다. `;` 뒤의 리다이렉션은 정말 도는 명령 하나라 여기 든다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 ); echo d' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); >/tmp/f' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null; echo d' && sed -i s/a/b/ src/store.rs",
+            // 0 으로 끝나는 `exit` 는 하위 셸 안에서도 아무 말도 안 한다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 0 )' && sed -i s/a/b/ src/store.rs",
+            // 파이프의 칸이나 뒤로 띄운 괄호는 제 하위 셸만 끝낸다 — 글은 곧바로 0 이다.
+            "bash -c 'moai mv t-1 in_progress --from todo || ( exit 1 ) | cat' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || ( exit 1 ) &' && sed -i s/a/b/ src/store.rs",
             // 뒤로 띄운 것으로 끝나면 글의 값은 집기의 값이 아니다 — errexit 를 켜고 띄워도 같다.
             "bash -e -c 'moai mv t-1 in_progress --from todo &' && sed -i s/a/b/ src/store.rs",
             "eval 'moai mv t-1 in_progress --from todo; echo ok' && sed -i s/a/b/ src/store.rs",
@@ -11319,14 +11350,16 @@ mod tests {
             "bash -c 'moai mv t-1 in_progress --from todo || exit 1; echo x &' && sed -i s/a/b/ src/store.rs",
             "bash -c 'set -e; moai mv t-1 in_progress --from todo; echo x &' && sed -i s/a/b/ src/store.rs",
             "bash -c 'if ! moai mv t-1 in_progress --from todo; then exit 1; fi; echo x &' && sed -i s/a/b/ src/store.rs",
-            // **글이 통째로 하위 셸 안이면 그 하위 셸의 값이 곧 이 셸의 값이다**(moai-vngm) —
-            // 집안째 막던 자리다([`Layer::Shell`] 의 `deep`). bash 로 쟀다:
-            // `bash -c '( false || { echo f; exit 1; } )'` 는 1 이고, 그것이 곧 집기가 이겨야만
-            // 바깥 `&&` 에 닿는다는 뜻이다.
+            // **글이 통째로 하위 셸 안이거나 마지막 하위 셸이면 그 값이 곧 이 셸의 값이다**
+            // (moai-vngm·moai-qlr8) — 집안째 막던 자리다. bash 로 쟀다:
+            // `bash -c '( false || { echo f; exit 1; } )'` 도 `bash -c 'false || ( echo f; exit 1 )'`
+            // 도 1 이고, 그것이 곧 집기가 이겨야만 바깥 `&&` 에 닿는다는 뜻이다.
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } )' && sed -i s/a/b/ src/store.rs",
             "bash -c \"bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } )'\" && sed -i s/a/b/ src/store.rs",
             "bash -c '( if ! moai mv t-1 in_progress --from todo; then exit 1; fi )' && sed -i s/a/b/ src/store.rs",
             "bash -c '( ( moai mv t-1 in_progress --from todo || exit 1 ) )' && sed -i s/a/b/ src/store.rs",
+            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 )' && sed -i s/a/b/ src/store.rs",
+            "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ) >/dev/null' && sed -i s/a/b/ src/store.rs",
         ] {
             assert_eq!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -11354,9 +11387,6 @@ mod tests {
             // `bash -c '( false || exit 1 ); ( true )'` 는 0 이다.
             "bash -c '( moai mv t-1 in_progress --from todo || exit 1 ); ( true )' && sed -i s/a/b/ src/store.rs",
             "bash -c '( moai mv t-1 in_progress --from todo || { exit 1; } ); ( echo d )' && sed -i s/a/b/ src/store.rs",
-            // **글의 마지막 하위 셸까지는 아직 못 푼다** — 그것을 알려면 묶음마다 "글의 마지막인가"
-            // 를 따로 들어야 한다. 새는 쪽이 아니라 잘못 막는 쪽이라 급하지 않다.
-            "bash -c 'moai mv t-1 in_progress --from todo || ( echo f; exit 1 )' && sed -i s/a/b/ src/store.rs",
         ] {
             assert!(matches!(guard_writes(&idle, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
