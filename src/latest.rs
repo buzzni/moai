@@ -163,6 +163,11 @@ impl Why {
             ureq::Error::StatusCode(403 | 429) => Trouble::RateLimited,
             ureq::Error::StatusCode(_) => Trouble::Http,
             ureq::Error::Timeout(_) => Trouble::Timeout,
+            // **TLS 의 실패는 `Io` 로 온다**(moai-t906 이 재어 알아낸 자리). 악수가 깨지면
+            // rustls 의 오류가 `io::Error` 에 싸여 오고, `ureq::Error::Rustls` 는 그 길에 안
+            // 선다 — 갈래를 그 변형으로만 재던 판은 프록시가 인증서를 갈아 끼운 기계에
+            // "네트워크가 없다" 고 말했다. rustls 는 그 오류를 `InvalidData` 로 싼다.
+            ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidData => Trouble::Tls,
             ureq::Error::Io(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => Trouble::Offline,
             ureq::Error::Tls(_) | ureq::Error::Rustls(_) | ureq::Error::Pem(_) => Trouble::Tls,
             _ => Trouble::Failed,
@@ -459,9 +464,13 @@ pub fn ask(url: &str) -> Result<String, Why> {
     ask_within(url, TIMEOUT)
 }
 
-/// [`ask`] 되 기다리는 상한을 받는다. **시험이 그 상한을 짧게 줘서 실제로 끊기는지 잰다** —
-/// 상한을 상수로만 두면 그것이 서는지를 5초씩 기다려야만 볼 수 있고, 그러면 아무도 안 잰다.
-pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
+/// 물을 때 쓰는 손님 하나 — **[`ask_within`] 에서 갈라 두었다**(moai-t906).
+///
+/// 시험의 부름은 모두 `http://127.0.0.1` 인데 생산의 부름은 모두 `https` 라, 붙여 두면 TLS 를
+/// 어떻게 세웠는지가 **한 번도 안 재인 채로** 산다 — 기능 조합이 바뀌어 인증서 검증이 꺼져도
+/// 온 시험이 푸르고, 생산에서는 "못 물었다" 로 접혀 네트워크 없음과 구별이 안 간다. 갈라 두면
+/// 시험이 이 자리의 설정을 그대로 읽는다(`the_tls_it_builds_is_rustls_over_mozillas_roots`).
+fn agent_for(url: &str, timeout: Duration) -> ureq::Agent {
     let built = ureq::Agent::config_builder()
         // **머리부터 몸까지 통째로 잰다.** 붙기만 재면 붙여 놓고 한 글자씩 흘리는 자리에
         // 영영 붙들린다.
@@ -476,7 +485,13 @@ pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
     // 띄워 붙는 이 모듈의 시험은 프록시가 선 기계에서 그리로 나가 버린다. 그러면 서버는 손님을
     // 못 만나 `accept` 에서 멈추고, `cargo test` 는 붉어지는 대신 **영영 매달린다**. curl 도
     // 7.86 부터 되돌이를 비껴간다.
-    let agent: ureq::Agent = if is_loopback(url) { built.proxy(None) } else { built }.build().into();
+    if is_loopback(url) { built.proxy(None) } else { built }.build().into()
+}
+
+/// [`ask`] 되 기다리는 상한을 받는다. **시험이 그 상한을 짧게 줘서 실제로 끊기는지 잰다** —
+/// 상한을 상수로만 두면 그것이 서는지를 5초씩 기다려야만 볼 수 있고, 그러면 아무도 안 잰다.
+pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
+    let agent = agent_for(url, timeout);
     let body = agent
         .get(url)
         .header("User-Agent", concat!("moai/", env!("CARGO_PKG_VERSION")))
@@ -623,6 +638,51 @@ pub type Job = (std::sync::mpsc::Receiver<Seen>, std::thread::JoinHandle<()>);
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+
+    /// **TLS 를 어떻게 세웠는지를 잰다**(moai-t906). 시험의 부름은 모두 `http://127.0.0.1` 이라
+    /// rustls·webpki-roots 가 한 번도 안 돈다 — 기능 조합이 바뀌어 인증서 검증이 꺼져도 온
+    /// 시험이 푸르고, 생산에서는 "못 물었다" 로 접혀 네트워크 없음과 구별이 안 간다.
+    ///
+    /// **살아 있는 네트워크를 안 탄다.** 바깥에 붙는 시험은 느리고 흔들린다 — 대신 손님이
+    /// 들고 있는 설정을 글자로 읽고, TLS 가 실제로 도는지는 아래 시험이 따로 잰다.
+    ///
+    /// 재는 넷은 저마다 다른 되돌림을 잡는다.
+    ///
+    /// - `provider` — `native-tls` 로 갈아타면 그 기계에 깔린 뿌리를 믿게 된다
+    /// - `root_certs` — `PlatformVerifier` 로 바뀌면 프록시가 끼운 뿌리를 믿는다. 루트 저장소는
+    ///   `webpki-roots` 하나로 간다는 것이 moai-uwuw 가 닫은 결정이다
+    /// - `disable_verification` — 켜지면 아무 인증서나 지난다
+    /// - `use_sni` — 꺼지면 이름을 안 대고 붙어, 한 주소에 여러 이름이 선 자리에서 엉뚱한
+    ///   인증서를 받는다
+    #[test]
+    fn the_tls_it_builds_is_rustls_over_mozillas_roots() {
+        let agent = agent_for(API, TIMEOUT);
+        let tls = agent.config().tls_config();
+        assert_eq!(tls.provider(), ureq::tls::TlsProvider::Rustls, "TLS 제공자가 rustls 가 아니다");
+        assert!(
+            matches!(tls.root_certs(), ureq::tls::RootCerts::WebPki),
+            "뿌리 인증서가 webpki-roots 가 아니다 — {:?}",
+            tls.root_certs()
+        );
+        assert!(!tls.disable_verification(), "인증서 검증이 꺼져 있다");
+        assert!(tls.use_sni(), "SNI 가 꺼져 있다");
+    }
+
+    /// **TLS 가 실제로 돈다**(moai-t906). 위의 시험은 설정을 읽을 뿐이라, 기능이 빠져 그 층이
+    /// 아예 안 서는 판은 못 잡는다 — 그때는 `https` 부름이 TLS 가 아니라 다른 까닭으로 죽는다.
+    ///
+    /// **평문으로 답하는 제 서버에 `https` 로 붙는다.** 손님은 ClientHello 를 보내고 서버는
+    /// HTTP 로 답하므로 악수가 깨진다 — 그 깨짐이 [`Trouble::Tls`] 로 오면 TLS 층이 선 것이다.
+    /// 바깥에 안 붙으니 느리지도 흔들리지도 않는다. **인증서 검증 자체를 재지는 못한다**:
+    /// 악수가 그 앞에서 깨지므로 뿌리 저장소는 안 열린다 — 그 자리는 위의 시험이 설정으로 잰다.
+    #[test]
+    fn a_plain_answer_to_an_https_call_is_a_tls_failure() {
+        let (url, handle) = server_once("{}");
+        let https = url.replacen("http://", "https://", 1);
+        let got = ask_within(&https, TIMEOUT).map_err(|w| w.kind);
+        assert_eq!(got, Err(Trouble::Tls), "TLS 층이 안 섰거나 그 실패를 다른 갈래로 읽었다");
+        let _ = handle.join();
+    }
 
     /// 못 물었으면 그 갈래, 아니면 `None`. **갈래까지 잰다**(moai-580l) — `Seen::Unasked` 인
     /// 것만 재면 403 이 "네트워크 없음" 으로 서도 시험이 파랗다. `said` 는 라이브러리가
