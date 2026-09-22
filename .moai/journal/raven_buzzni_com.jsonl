@@ -781,3 +781,11 @@
 {"ts":"2026-09-22T07:08:25Z","id":"moai-uitb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T07:10:44Z","id":"moai-lc0i.7hu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 판 검사의 남은 결정 일곱"}
 {"ts":"2026-09-22T07:11:12Z","id":"moai-lc0i.7hu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T07:11:55Z","id":"moai-mpf4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(eba0762·b3a8c80). 에픽 끝 리뷰 moai-lc0i.7hu 가 돌고 있어, 그 고침까지 받은 뒤 닫는다"}
+{"ts":"2026-09-22T07:11:55Z","id":"moai-21un","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(9345784). 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-580l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(49278d9·7e4fe23). TLS 갈래는 moai-t906 이 고쳤다(9fc7a0b). 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-d74q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(270d18c). 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-dael","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(761a1c7). 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-t906","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 코드는 끝났다(9fc7a0b). 인증서 검증 자체는 여전히 안 돈다 — 악수가 그 앞에서 깨져 뿌리 저장소가 안 열린다. 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-68b8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 글은 끝났다(99a9ed3). 리뷰 moai-lc0i.7hu 를 기다려 닫는다"}
+{"ts":"2026-09-22T07:11:56Z","id":"moai-lc0i.7hu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돌고 있다. 끝나면 원문을 노트로 남기고, 고침을 별도 fix 커밋으로 넣은 뒤 develop 에 머지한다"}
