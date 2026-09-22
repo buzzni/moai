@@ -532,3 +532,5 @@
 {"ts":"2026-09-22T01:48:35Z","id":"moai-omww","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-22T01:48:35Z","id":"moai-3gia","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-22T01:48:36Z","id":"moai-5gka","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T01:49:05Z","id":"moai-ae6q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"바이너리 값을 잰 때와 함께 적는다 — 절대 수는 커밋마다 낡는다"}
+{"ts":"2026-09-22T01:49:12Z","id":"moai-ae6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
