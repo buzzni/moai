@@ -528,6 +528,7 @@ pub const OURS: &[&str] = &[
     "commits_error",
     "journal_error",
     "work",
+    "spent",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",

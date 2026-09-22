@@ -167,6 +167,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if let Some(p) = args.priority {
                 i.priority = Some(p);
             }
+            // 기한 둘(moai-tfcp). **`none` 은 비우는 것이다** — 소속·담당과 같은 낱말을 쓴다.
+            // 꼴과 종류와 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다.
+            if let Some(d) = &args.start {
+                i.starts_on = super::clearable(d);
+            }
+            if let Some(d) = &args.due {
+                i.due_on = super::clearable(d);
+            }
             if let Some(a) = &args.assignee {
                 (i.assignee, i.assignee_email) = match super::clearable(a) {
                     Some(v) => model::split_assignee(&v),
@@ -382,7 +390,9 @@ fn fail_if_nothing(args: &EditArgs, ctx: &Ctx) -> R<()> {
         || args.epic.is_some()
         || args.milestone.is_some()
         || args.priority.is_some()
-        || args.assignee.is_some();
+        || args.assignee.is_some()
+        || args.start.is_some()
+        || args.due.is_some();
     touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.edit_nothing")))
 }
 

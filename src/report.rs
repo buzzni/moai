@@ -1142,6 +1142,67 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
     out
 }
 
+/// 묶음에 **든 시간** — 닫힌 멤버의 `started_at`·`done_at` 에서 지금 센다(moai-wfup).
+///
+/// **저장하지 않는다.** 마일스톤 줄에 총합을 적어 두면 멤버를 하나 닫을 때마다 남의 줄을 써야
+/// 하고, 그것이 곧 파생값을 저장하는 것이다 — beads 가 `is_blocked` 를 컬럼으로 들고 있다가
+/// `bd recompute-blocked` 를 만들어야 했던 자리다.
+///
+/// **`closed` 와 `measured` 를 따로 낸다.** `started_at` 이 없으면 **모르는 것**이고(moai-38mh),
+/// 0 분으로도 안 한 일로도 세지 않는다 — 어림값에 그 수를 함께 대야 빠진 멤버가 조용히 0 이
+/// 안 된다("닫힌 41 중 34 를 잰 값"). 한 수로 뭉치면 절반만 잰 마일스톤이 절반만 일한 것으로
+/// 읽힌다.
+///
+/// **묶음 멤버는 안 센다**(`is_work`). 에픽 줄의 두 값은 "누가 그 줄에 `mv` 를 쳤나" 일 뿐이고
+/// (`Issue::started_at`), 그 에픽의 이슈는 마일스톤 지도가 물려받아 이미 여기 들어 있다 — 함께
+/// 세면 같은 일이 두 번 더해진다.
+///
+/// **벽시계는 든 품이 아니다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
+/// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다. 내는 쪽이 그 말을 함께 적는다.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Spent {
+    /// 닫힌 멤버 수 — `done` 에 선 일.
+    pub closed: usize,
+    /// 그중 시작과 끝이 **둘 다 적힌** 멤버 수. 분모가 아니라 "몇을 쟀나" 다.
+    pub measured: usize,
+    /// 잰 멤버의 소요를 더한 값(분).
+    pub minutes: i64,
+    /// 잰 멤버 소요의 중앙값(분). 잰 것이 없으면 없다.
+    ///
+    /// **평균이 아니다**(moai-wfup 의 실측) — 사분위 폭이 중앙값보다 넓어 한쪽으로 긴 꼬리가
+    /// 평균을 끌고 간다. 중앙값도 어림이라, 읽는 쪽에 잰 수를 함께 준다.
+    pub median: Option<i64>,
+}
+
+/// [`Spent`] 를 센다. 묶음이 아닌 줄에는 빈 값이다.
+pub fn spent_on(all: &[Issue], group: &Issue) -> Spent {
+    let mut spans: Vec<i64> = Vec::new();
+    let mut closed = 0usize;
+    for m in group_members(all, group).into_iter().filter(|m| is_work(m)) {
+        if !m.status.is_done() {
+            continue;
+        }
+        closed += 1;
+        // **음수는 안 센다.** 손으로 푼 줄이나 되돌렸다 다시 닫은 줄에서 끝이 시작보다 앞설 수
+        // 있는데, 그런 줄을 0 으로 눌러 담으면 "0분에 했다" 가 잰 값으로 선다 — 모르는 것은
+        // 모른다고 한다.
+        let (Some(s), Some(d)) = (m.started_at.as_deref(), m.done_at.as_deref()) else { continue };
+        let (Some(s), Some(d)) = (crate::model::parse_rfc3339(s), crate::model::parse_rfc3339(d)) else { continue };
+        if d < s {
+            continue;
+        }
+        spans.push((d - s) / 60);
+    }
+    spans.sort_unstable();
+    // 짝수 개면 가운데 둘의 평균이다 — 내림으로 자른다(분 단위라 한 분 아래는 뜻이 없다).
+    let median = match spans.len() {
+        0 => None,
+        n if n % 2 == 1 => Some(spans[n / 2]),
+        n => Some((spans[n / 2 - 1] + spans[n / 2]) / 2),
+    };
+    Spent { closed, measured: spans.len(), minutes: spans.iter().sum(), median }
+}
+
 /// 묶음(에픽·마일스톤) id → **멤버에서 읽은 칸.**
 ///
 /// 묶음의 `status` 는 저장된 필드지만 뜻을 갖지 않는다. 멤버를 옮길 때 묶음
@@ -3495,6 +3556,62 @@ pub fn status_in<'a>(
         }
     }
 
+    // 6-2. **마일스톤 둘이 겹쳐 돈다**(moai-nnal, 2026-09-22 사용자 결정). 알림이지 경고가
+    //      아니다 — 겹치는 것은 `ready` 가 이미 견디는 판이고(둘 다 안으로 센다), 고칠 일이
+    //      있다는 말이 아니라 지금 둘이 돈다는 사실이다. 경고로 두면 겹친 동안 내내 Stop 훅이
+    //      세는 수가 하나 늘어 세션이 붙들린다.
+    //
+    //      **셋 이상도 이 한 줄이다.** 어느 마일스톤인지는 `preview` 가 id 와 제목으로 낸다.
+    if running.len() >= 2 {
+        let mut ids: Vec<String> = running.iter().map(|m| m.id.clone()).collect();
+        ids.sort();
+        notices.push(Warning::new("milestones_running", ids).notice().hint("moai ready"));
+    }
+
+    // 6-3. 마일스톤의 기한(moai-tfcp, 2026-09-22 사용자 결정). **막지 않는다** — 경고는 종료
+    //      코드를 안 바꾼다(CLAUDE.md). 지난 것과 다가온 것을 **두 갈래로** 낸다: 사람이 할
+    //      일이 다르다(늦은 까닭을 대는 것과 남은 것을 추리는 것). 한 낱말로 뭉치면 그중
+    //      한쪽이 반드시 거짓말이 된다 — `agents_stale` 을 가른 것과 같은 자다.
+    //
+    //      **끝난 마일스톤은 안 센다.** 다 닫힌 뒤의 지난 기한은 고칠 일이 아니라 지난 일이고,
+    //      세면 닫힌 마일스톤이 영영 경고로 선다. **미뤄 둔 것도 안 센다** — 계획에서 뺀 것이
+    //      잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다(`running_in` 과 같은 까닭).
+    //
+    //      **나이를 여기서 싣는다**([`Warning::ages`] 가 아니라 직접) — 저쪽은 RFC3339 시각을
+    //      받는 자라 날짜(`YYYY-MM-DD`)를 못 읽는다. 재는 자리가 싣고 보이는 쪽은 읽기만 한다.
+    {
+        let (mut overdue, mut soon): (Vec<(&Issue, i64)>, Vec<(&Issue, i64)>) = (Vec::new(), Vec::new());
+        for m in issues.iter().filter(|i| i.kind == Kind::Milestone) {
+            let id = m.id.as_str();
+            if out_of_plan.contains(id) || eclipsed(m) || states.get(id).is_some_and(|c| *c == crate::config::DONE) {
+                continue;
+            }
+            // 꼴이 틀린 값은 말없이 넘긴다 — 쓰기가 이미 거절하므로 여기 오는 것은 손으로 푼
+            // 줄뿐이고, 그것은 `unknown_field` 가 아니라 그 줄을 고칠 때 드러난다.
+            let Some(left) = m.due_on.as_deref().and_then(|d| crate::model::days_until(d, now)) else { continue };
+            match left {
+                d if d < 0 => overdue.push((m, -d)),
+                d if d <= cfg.status.due_days => soon.push((m, d)),
+                _ => {}
+            }
+        }
+        for (kind, rows) in [("milestone_overdue", &overdue), ("milestone_due_soon", &soon)] {
+            if rows.is_empty() {
+                continue;
+            }
+            let mut w = Warning::new(kind, rows.iter().map(|(m, _)| m.id.clone()).collect());
+            for (m, d) in rows {
+                w.ages.insert(m.id.clone(), *d);
+            }
+            // **문턱을 그대로 넘긴다** — `stale_review` 와 같은 까닭이다. 여기 수를 박아 두면
+            // `status_due_days` 를 고친 저장소에서 경고가 센 것과 화면이 말하는 폭이 갈린다.
+            warnings.push(match kind {
+                "milestone_due_soon" => w.days(cfg.status.due_days),
+                _ => w,
+            });
+        }
+    }
+
     // 7. 데이터가 깨진 것. **이것만 비영 종료한다.**
     //
     // **못 읽는 줄이 쓰는 id 도 같이 견준다.** 안 견주면 그 중복은 못 읽는 동안
@@ -4625,6 +4742,57 @@ mod tests {
             make("argos-000y", Kind::Issue, "todo"), // 밖의 p2
             hot,                                     // 밖의 p0
         ]
+    }
+
+    /// 마일스톤에 **든 시간**은 닫힌 멤버에서 지금 센다(moai-wfup). 저장하지 않는다.
+    ///
+    /// 재는 자리가 지키는 것 셋이다 — 묶음 멤버(에픽)는 안 센다(그 밑의 이슈가 이미 들어
+    /// 있으므로 함께 세면 두 번 더해진다), 시작이 안 적힌 줄은 **모르는 것**이라 `closed` 에는
+    /// 들고 `measured` 에는 안 든다, 끝이 시작보다 앞선 줄은 0 으로 안 누른다.
+    #[test]
+    fn a_milestone_counts_only_the_members_it_could_actually_measure() {
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.title = "v0.1".into();
+        let mut epic = make("argos-0001", Kind::Epic, "done");
+        epic.milestone = Some("argos-m001".into());
+        // 에픽 줄에도 두 값이 선다 — 손으로 친 `mv` 의 것이라 세면 안 된다.
+        epic.started_at = Some("2026-09-01T00:00:00Z".into());
+        epic.done_at = Some("2026-09-02T00:00:00Z".into());
+        let span = |id: &str, from: &str, to: &str| {
+            let mut i = member(id, "argos-0001", "done");
+            i.started_at = Some(from.into());
+            i.done_at = Some(to.into());
+            i
+        };
+        let mut unmeasured = member("argos-001c", "argos-0001", "done");
+        unmeasured.done_at = Some("2026-09-01T06:00:00Z".into()); // 옛 바이너리가 옮긴 줄
+        let mut backwards = member("argos-001d", "argos-0001", "done");
+        backwards.started_at = Some("2026-09-01T06:00:00Z".into());
+        backwards.done_at = Some("2026-09-01T05:00:00Z".into()); // 손으로 푼 줄
+        let all = vec![
+            stone.clone(),
+            epic,
+            span("argos-001a", "2026-09-01T00:00:00Z", "2026-09-01T01:00:00Z"), // 60분
+            span("argos-001b", "2026-09-01T00:00:00Z", "2026-09-01T03:00:00Z"), // 180분
+            unmeasured,
+            backwards,
+            member("argos-001e", "argos-0001", "todo"), // 아직 안 닫혔다
+        ];
+
+        let sp = spent_on(&all, &stone);
+        assert_eq!(sp.closed, 4, "닫힌 멤버를 잘못 셌다 — {sp:?}");
+        assert_eq!(sp.measured, 2, "모르는 것을 잰 것으로 셌다 — {sp:?}");
+        assert_eq!(sp.minutes, 240, "{sp:?}");
+        // 짝수 개의 중앙값은 가운데 둘의 평균이다.
+        assert_eq!(sp.median, Some(120), "{sp:?}");
+
+        // 홀수 개면 가운데 하나다.
+        let mut odd = all.clone();
+        odd.push(span("argos-001f", "2026-09-01T00:00:00Z", "2026-09-01T02:00:00Z"));
+        assert_eq!(spent_on(&odd, &odd[0]).median, Some(120), "{:?}", spent_on(&odd, &odd[0]));
+
+        // 묶음이 아닌 줄에는 빈 값이다.
+        assert_eq!(spent_on(&all, &all[2]), Spent::default());
     }
 
     /// **마일스톤이 도는 동안 그 안이 먼저다**(moai-q04l, 2026-09-20 사용자 결정).

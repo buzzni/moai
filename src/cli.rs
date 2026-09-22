@@ -818,6 +818,14 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
+    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub due: Option<String>,
+
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
     /// What kind to create (issue when absent, epic under `epic add`)
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
@@ -1018,6 +1026,14 @@ pub struct EditArgs {
     /// Give `name (email)`. `none` clears it
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
+
+    /// Start of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub due: Option<String>,
 }
 
 #[derive(Args, Debug)]

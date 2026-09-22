@@ -542,6 +542,15 @@ fn one(
         // **키는 늘 선다**(2026-09-18 사용자 결정). 한 이슈에 여러 세션·모델이 줄을 남기니 배열이고,
         // 없으면 키를 안 다는 모양은 되쓰기에서 옛 키가 `rest` 에 남아 거짓을 싣는다(moai-2l8n).
         extra.push(("work", serde_json::to_string(&model::work_of(&journal)).map_err(|e| Fail::new(e.to_string()))?));
+        // 마일스톤에 **든 시간**(moai-wfup). 사람 화면과 같은 값을 같은 자리에서 읽는다 —
+        // 저장하지 않으므로 키는 마일스톤 줄에만 선다. 목록(`show [거르개] --json`)에는 안
+        // 싣는다: 줄마다 멤버 지도를 다시 짓는 셈이라 한 판이 저장소를 n 번 훑는다.
+        if issue.kind == Kind::Milestone {
+            extra.push((
+                "spent",
+                serde_json::to_string(&report::spent_on(all, issue)).map_err(|e| Fail::new(e.to_string()))?,
+            ));
+        }
         return super::json_with(
             &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
             &extra,
@@ -592,6 +601,14 @@ fn one(
                 },
                 view::set_aside(r.deferred, ctx.lang()),
             ));
+        }
+        // **마일스톤에만 든 시간을 곁들인다**(moai-wfup, 2026-09-22 사용자 결정). 에픽의
+        // 기간은 아직 묻는 자리가 아니고, `report::spent_on` 은 어느 묶음에나 서므로 그때
+        // 여는 것은 이 한 줄이다. 보드에는 안 낸다 — 마일스톤 표가 이미 좁다.
+        if issue.kind == Kind::Milestone
+            && let Some(line) = view::spent(&report::spent_on(all, issue), ctx.lang())
+        {
+            out.push(line);
         }
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
         // 멤버라며 저장소 전부를 낸다 — 없는 답보다 틀린 답이 비싸다.

@@ -864,6 +864,15 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **알림이지 경고가 아니다**(moai-tvvb) — 지금 무엇이 먼저인지를 대는 줄이다. 어느
         // 마일스톤이 도는지는 `preview` 가 id 와 제목으로 낸다.
         "milestone_focus" => one(say(lang, "warn.milestone_focus")),
+        // **알림이지 경고가 아니다**(moai-nnal, 2026-09-22 사용자 결정) — `ready` 는 둘 다 안으로
+        // 세므로 막힌 것이 없다. 지금 둘이 돈다는 **사실**을 대는 줄이고, 어느 마일스톤인지는
+        // `preview` 가 id 와 제목으로 낸다.
+        "milestones_running" => one(say(lang, "warn.milestones_running")),
+        // **지난 것과 다가온 것을 가른다**(moai-tfcp) — 사람이 할 일이 다르다. 앞의 것은 늦은
+        // 까닭을 대고 남은 멤버를 추리는 자리고, 뒤의 것은 아직 손댈 수 있는 자리다. 날짜와
+        // 남은 날수는 `preview` 가 줄마다 낸다.
+        "milestone_overdue" => one(say(lang, "warn.milestone_overdue")),
+        "milestone_due_soon" => aged(say(lang, "warn.milestone_due_soon"), w.days.unwrap_or(0)),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
         // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
         "dangling_epic" => one(say(lang, "warn.dangling_epic")),
@@ -1115,8 +1124,41 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         }
         return out;
     }
+    // 기한 경고는 **그 날짜와 남은 날수를 함께** 낸다(moai-tfcp) — id 와 제목만 내면 언제까지인지가
+    // 화면에 없어 사람이 `moai show` 를 한 번 더 쳐야 한다. 날수는 **판정한 자리가 실은 것**을
+    // 읽는다(`Warning::ages`) — 여기서 새로 재면 판정과 표시가 갈라진다.
+    if matches!(w.kind, "milestone_overdue" | "milestone_due_soon") {
+        for id in w.ids.iter().take(SHOW) {
+            let Some(i) = by_id.get(id.as_str()) else { continue };
+            // 지난 것은 `ages` 에 지난 날수(양수)가 들어 있다 — 낱말을 고르는 쪽은 부호로 가른다.
+            let left = match w.kind {
+                "milestone_overdue" => -w.ages.get(id).copied().unwrap_or(0),
+                _ => w.ages.get(id).copied().unwrap_or(0),
+            };
+            out.push(format!(
+                "    {}  {}   {}  {}",
+                paint(style::ID, id),
+                marked(screen.branch(id), &i.title, TITLE_CAP, style::PLAIN).0,
+                paint(style::DIM, i.due_on.as_deref().unwrap_or("")),
+                paint(if left < 0 { style::WARN } else { style::DIM }, &due_tail(left, lang)),
+            ));
+        }
+        let rest = w.ids.len().saturating_sub(SHOW);
+        if rest > 0 {
+            out.push(format!("    {}", paint(style::DIM, &more_of(rest, lang))));
+        }
+        return out;
+    }
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
-    if matches!(w.kind, "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone" | "milestone_focus") {
+    if matches!(
+        w.kind,
+        "empty_epic"
+            | "unknown_field"
+            | "dangling_epic"
+            | "dangling_milestone"
+            | "milestone_focus"
+            | "milestones_running"
+    ) {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
             out.push(format!(
@@ -1738,6 +1780,12 @@ pub fn detail(
     // 말이 바뀌면 길이가 갈린다 — 폭을 여기서 재야 `시작` 줄의 시각이 `생성` 줄의 시각 밑에
     // 선다(아래 `gap` 이 그것을 잇는다).
     let z = seen.screen.zone();
+    // **기한은 시각 줄 위에 선다**(moai-tfcp) — 생성·수정·시작·끝은 도구가 적은 때고 이것은
+    // 사람이 잡은 계획이라, 섞어 세우면 넷 가운데 하나가 사람의 값인 것이 안 보인다.
+    // 시간대로 옮기지 않는다: 달력 날짜라 옮길 시각이 없다(`Issue::due_on`).
+    if let Some(span) = due_span(i, now, lang) {
+        out.push(format!("  {}   {span}", row_label(say(lang, "detail.due"), lang)));
+    }
     let (left, right) = stamp_labels(lang);
     out.push(format!(
         "  {}   {}      {}  {}{}",
@@ -1785,6 +1833,42 @@ pub fn detail(
     out
 }
 
+/// 기한 한 줄 — `2026-09-15 → 2026-09-30  (8일 남음)`. 둘 다 없으면 줄을 안 세운다(moai-tfcp).
+///
+/// **한쪽만 적힌 것도 그린다.** 시작만 잡고 끝을 안 정한 마일스톤이 흔하고, 그때 줄을 통째로
+/// 빼면 적어 둔 값이 어느 화면에도 안 서서 틀려도 아무도 모른다 — `started_at` 을 사람에게
+/// 보인 것과 같은 까닭이다. 빈 쪽은 `—` 로 자리를 지킨다.
+///
+/// 남은 날수는 **종료 기한에만** 붙는다. 시작 기한이 지났는가는 물어볼 일이 아니다.
+fn due_span(i: &Issue, now: &str, lang: Lang) -> Option<String> {
+    let (start, due) = (i.starts_on.as_deref(), i.due_on.as_deref());
+    if start.is_none() && due.is_none() {
+        return None;
+    }
+    let dash = "—";
+    // **색이 혼자 뜻을 지지 않는다**(CLAUDE.md) — 지난 것을 붉게 칠하되 `2일 지남` 이라는
+    // 낱말이 같이 선다. 색이 안 나가는 자리에서도 같은 말을 한다.
+    let left = due.and_then(|d| crate::model::days_until(d, now));
+    let tail = match left {
+        Some(d) => paint(if d < 0 { style::WARN } else { style::DIM }, &format!("  {}", due_tail(d, lang))),
+        None => String::new(),
+    };
+    Some(format!("{} → {}{tail}", paint(style::DIM, start.unwrap_or(dash)), paint(style::DIM, due.unwrap_or(dash))))
+}
+
+/// 종료 기한까지 남은 날수를 낱말로 — 지났으면 지난 날수다(`left` 가 음수).
+///
+/// **상세와 보드가 같은 키를 쓴다**(moai-7cyf 의 결) — 둘로 두면 번역이 갈라져 한 도구가 같은
+/// 것을 두 말로 말한다. 오늘이 기한인 날은 제 낱말이다: `0일 남음` 은 남았다는 말이면서 안
+/// 남았다는 말이라 어느 쪽으로도 읽힌다.
+fn due_tail(left: i64, lang: Lang) -> String {
+    match left {
+        0 => say(lang, "detail.due_today").to_string(),
+        d if d > 0 => fill(say(lang, "detail.due_left"), &[("d", &d.to_string())]),
+        d => fill(say(lang, "detail.due_past"), &[("d", &(-d).to_string())]),
+    }
+}
+
 /// 상세 왼쪽 이름 칸의 폭 — **그 말에서 가장 긴 이름 하나로 잰다.**
 ///
 /// **한국어는 이 자가 없어도 섰다.** `에픽`·`자식`·`자리`·`멤버`·`생성`·`시작`·`막힘` 이 모두
@@ -1805,6 +1889,8 @@ fn label_width(lang: Lang) -> usize {
         say(lang, "detail.child"),
         say(lang, "detail.place"),
         say(lang, "detail.members"),
+        say(lang, "detail.spent"),
+        say(lang, "detail.due"),
         say(lang, "detail.created"),
         say(lang, "detail.started"),
         say(lang, "block.held"),
@@ -1828,6 +1914,45 @@ pub(crate) fn row_label(what: &str, lang: Lang) -> String {
 /// 상세의 `멤버` 이름 칸 — `cmd::show` 가 굴림과 함께 세운다. 위의 이름들과 같은 폭이다.
 pub fn members_label(lang: Lang) -> String {
     row_label(say(lang, "detail.members"), lang)
+}
+
+/// 상세의 `든 시간` 한 줄(moai-wfup) — `cmd::show` 가 마일스톤을 펼칠 때 멤버 줄 밑에 세운다.
+///
+/// **닫힌 멤버가 없으면 줄을 안 세운다.** 아직 아무것도 안 끝난 마일스톤에 `0분` 을 그리면
+/// "0분에 했다" 로 읽히는데, 그것은 안 한 것이지 0 분이 아니다.
+///
+/// **잰 수를 늘 함께 낸다**([`crate::report::Spent`]) — `started_at` 이 없는 멤버는 모르는
+/// 것이고, 그 수를 안 대면 빠진 멤버가 조용히 0 이 된다. 하나도 못 쟀으면 합계 대신 그 말만
+/// 한다: 0 을 어림값으로 내밀면 읽는 쪽이 "공짜로 했다" 로 읽는다.
+///
+/// **벽시계라는 말을 붙인다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
+/// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다 — 품으로 읽히면 안 된다.
+pub fn spent(sp: &crate::report::Spent, lang: Lang) -> Option<String> {
+    if sp.closed == 0 {
+        return None;
+    }
+    let label = row_label(say(lang, "detail.spent"), lang);
+    let closed = sp.closed.to_string();
+    if sp.measured == 0 {
+        let said = fill(say(lang, "detail.spent_none"), &[("closed", &closed)]);
+        return Some(format!("  {label}   {}", paint(style::DIM, &said)));
+    }
+    let of = fill(
+        say(lang, "detail.spent_of"),
+        &[("closed", &closed), ("measured", &sp.measured.to_string()), ("median", &minutes(sp.median?, lang))],
+    );
+    Some(format!("  {label}   {}  {}", minutes(sp.minutes, lang), paint(style::DIM, &of)))
+}
+
+/// 분을 낱말로 — 한 시간이 안 되면 분, 넘으면 시간이다.
+///
+/// **시간은 내림한다.** 반올림하면 `59분` 이 `1시간` 으로 서서 안 지난 시간을 지난 것으로
+/// 말한다 — 어림값이라도 실제보다 크게 내밀지 않는다.
+fn minutes(m: i64, lang: Lang) -> String {
+    match m < 60 {
+        true => fill(say(lang, "detail.spent_minutes"), &[("m", &m.to_string())]),
+        false => fill(say(lang, "detail.spent_hours"), &[("h", &(m / 60).to_string())]),
+    }
 }
 
 /// 생성·수정 줄과 시작·끝 줄의 이름 칸을 **한 폭으로** 맞추는 두 자. 왼쪽 칸은
@@ -2411,6 +2536,8 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
         Field::AssigneeEmail => say(lang, "invalid.field_assignee_email"),
         Field::Epic => say(lang, "invalid.field_epic"),
         Field::Milestone => say(lang, "invalid.field_milestone"),
+        Field::StartsOn => say(lang, "invalid.field_starts_on"),
+        Field::DueOn => say(lang, "invalid.field_due_on"),
     };
     let said = match why {
         Invalid::Id { id } => return fill(say(lang, "invalid.id"), &[("id", id)]),
@@ -2427,6 +2554,15 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
             fill(say(lang, "invalid.group_id"), &[("field", field(f)), ("value", value)])
         }
         Invalid::MilestoneInMilestone { id } => fill(say(lang, "invalid.milestone_in_milestone"), &[("id", id)]),
+        // **고칠 손잡이를 낱말째 낸다** — 기한은 `--start`·`--due` 로 치는 값이라, 무엇이
+        // 틀렸는지만 말하면 어느 옵션을 다시 쳐야 하는지가 화면에 없다.
+        Invalid::Date { field: f, value } => fill(say(lang, "invalid.date"), &[("field", field(f)), ("value", value)]),
+        Invalid::DateNotMilestone { id, field: f } => {
+            fill(say(lang, "invalid.date_not_milestone"), &[("id", id), ("field", field(f))])
+        }
+        Invalid::DateOrder { starts_on, due_on } => {
+            fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])
+        }
         Invalid::SelfBlock => say(lang, "invalid.self_block").to_string(),
         Invalid::BlockedId { value } => fill(say(lang, "invalid.blocked_id"), &[("value", value)]),
         Invalid::NoSuchColumn(e) => no_such_column(lang, e),

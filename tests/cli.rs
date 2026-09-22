@@ -6083,6 +6083,185 @@ fn a_grouping_detail_does_not_label_its_own_members_as_loose() {
     assert!(mile.contains("0/2"), "에픽 줄이 집계를 잃었다\n{mile}");
 }
 
+// ── 마일스톤의 기한과 든 시간 (moai-pmhv) ────────────────────────────
+
+/// 마일스톤은 시작과 종료 기한을 든다. 지금까지 마일스톤에는 "언제까지" 가 아무 데도 없었다.
+///
+/// **시각이 아니라 달력 날짜다**(2026-09-22 사용자 결정) — 사람이 `--due 2026-09-20` 을 치면
+/// 그 글자가 그대로 스냅샷에 서고, 화면도 그대로 낸다. 시간대에 따라 다른 날을 가리킬 여지가 없다.
+#[test]
+fn a_milestone_carries_a_start_and_a_deadline() {
+    let s = init("due");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--start", "2026-09-05", "--due", "2026-09-20"]);
+
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""starts_on":"2026-09-05""#), "{json}");
+    assert!(json.contains(r#""due_on":"2026-09-20""#), "{json}");
+
+    // 상세는 남은 날수까지 낸다 — 오늘은 09-11 이므로 아흐레 남았다.
+    let text = ok(s.path(), &["show", &m]);
+    assert!(text.contains("기한   2026-09-05 → 2026-09-20  (9일 남음)"), "{text}");
+
+    // `edit` 로 고치고, `none` 으로 비운다 — 소속·담당과 같은 낱말이다.
+    ok(s.path(), &["edit", &m, "--due", "2026-09-11"]);
+    assert!(ok(s.path(), &["show", &m]).contains("(오늘까지)"), "기한 당일을 남은 날로 말했다");
+    ok(s.path(), &["edit", &m, "--due", "none", "--start", "none"]);
+    let bare = ok(s.path(), &["show", &m, "--json"]);
+    assert!(!bare.contains("due_on") && !bare.contains("starts_on"), "비운 기한이 남았다\n{bare}");
+    assert!(!ok(s.path(), &["show", &m]).contains("기한"), "빈 기한이 줄을 세웠다");
+}
+
+/// **기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
+/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다.
+#[test]
+fn a_deadline_stands_on_a_milestone_row_only() {
+    let s = init("duekind");
+    let made = moai(s.path(), &["add", "그냥 이슈", "--due", "2026-09-20"]);
+    assert!(!made.status.success(), "이슈에 기한을 받았다");
+    let said = String::from_utf8_lossy(&made.stderr).to_string();
+    assert!(said.contains("--due"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
+
+    // 이미 선 줄도 같다. 에픽도 마일스톤이 아니다.
+    let e = add(s.path(), &["에픽", "--type", "epic"]);
+    assert!(!moai(s.path(), &["edit", &e, "--start", "2026-09-05"]).status.success(), "에픽에 기한을 받았다");
+}
+
+/// **쓰기는 엄하다.** `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
+/// 영영 "기한 없음" 으로 조용하다. 시작이 종료보다 뒤인 것도 같은 자리에서 거절한다.
+#[test]
+fn a_deadline_refuses_what_is_not_a_day() {
+    let s = init("duebad");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    for bad in ["2026-02-30", "2026-9-1", "2026-13-01", "어제", "2026-09-20T00:00:00Z"] {
+        let out = moai(s.path(), &["edit", &m, "--due", bad]);
+        assert!(!out.status.success(), "{bad} 를 날짜로 받았다");
+    }
+    // 윤년은 그레고리력 그대로다 — 2028 은 윤년이고 2026 은 아니다.
+    assert!(moai(s.path(), &["edit", &m, "--due", "2028-02-29"]).status.success());
+    assert!(!moai(s.path(), &["edit", &m, "--due", "2026-02-29"]).status.success());
+
+    ok(s.path(), &["edit", &m, "--start", "none", "--due", "2026-09-20"]);
+    let out = moai(s.path(), &["edit", &m, "--start", "2026-09-25"]);
+    assert!(!out.status.success(), "시작이 종료보다 뒤인 것을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("2026-09-25") && said.contains("2026-09-20"), "{said}");
+}
+
+/// 보드는 지난 기한과 다가온 기한을 **두 갈래로** 낸다. 사람이 할 일이 다르다.
+///
+/// **그래도 아무것도 막지 않는다** — 경고로 비영 종료하는 순간 이건 린트고, 린트는 곧 게이트다.
+#[test]
+fn the_board_tells_a_passed_deadline_from_one_coming_up() {
+    let s = init("duewarn");
+    let late = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-09"]);
+    let soon = add(s.path(), &["v0.2", "--type", "milestone", "--due", "2026-09-13"]);
+    let far = add(s.path(), &["v0.3", "--type", "milestone", "--due", "2026-10-30"]);
+    for m in [&late, &soon, &far] {
+        ok(s.path(), &["add", "멤버", "--milestone", m, "-q"]);
+    }
+
+    let out = moai(s.path(), &["status"]);
+    assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(text.contains("기한이 지난 마일스톤 1건"), "{text}");
+    assert!(text.contains("기한이 3일 안으로 다가온 마일스톤 1건"), "{text}");
+    // 줄마다 그 날짜와 날수를 함께 낸다 — id 와 제목만 내면 사람이 한 번 더 쳐야 한다.
+    assert!(text.contains("2026-09-09  (2일 지남)"), "{text}");
+    assert!(text.contains("2026-09-13  (2일 남음)"), "{text}");
+    // 아직 먼 기한으로는 잔소리하지 않는다 — 그 날짜가 어느 경고 줄에도 안 선다. id 로 재면
+    // 위 마일스톤 표가 모든 마일스톤을 이미 내므로 늘 걸린다.
+    assert!(!text.contains("2026-10-30"), "아직 먼 기한으로 잔소리했다\n{text}");
+    assert!(text.contains(&far), "마일스톤 표가 그 줄을 잃었다\n{text}");
+
+    let json = ok(s.path(), &["status", "--json"]);
+    for k in ["milestone_overdue", "milestone_due_soon"] {
+        assert!(json.contains(&format!(r#""kind":"{k}""#)), "{k} 가 기계 출력에 없다\n{json}");
+    }
+}
+
+/// **끝난 마일스톤과 미뤄 둔 마일스톤은 기한으로 꾸짖지 않는다.** 다 닫힌 뒤의 지난 기한은
+/// 고칠 일이 아니라 지난 일이고, 미룬 것이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
+#[test]
+fn a_closed_or_deferred_milestone_keeps_quiet_about_its_deadline() {
+    let s = init("duequiet");
+    let done = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-09"]);
+    let member = add(s.path(), &["멤버", "--milestone", &done]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let shelved = add(s.path(), &["v0.2", "--type", "milestone", "--due", "2026-09-09"]);
+    ok(s.path(), &["add", "멤버 둘", "--milestone", &shelved, "-q"]);
+    ok(s.path(), &["defer", &shelved, "-m", "다음 분기"]);
+
+    let text = ok(s.path(), &["status"]);
+    assert!(!text.contains("기한이 지난"), "닫혔거나 미룬 마일스톤으로 꾸짖었다\n{text}");
+}
+
+/// 마일스톤 둘이 겹쳐 도는 것은 **알림**이다(2026-09-22 사용자 결정). `ready` 는 둘 다 안으로
+/// 세므로 막힌 것이 없다 — 경고로 두면 겹친 동안 내내 Stop 훅이 세는 수가 하나 는다.
+#[test]
+fn the_board_says_two_milestones_are_running_at_once() {
+    let s = init("tworun");
+    let one = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let two = add(s.path(), &["v0.2", "--type", "milestone"]);
+    for m in [&one, &two] {
+        let member = add(s.path(), &["멤버", "--milestone", m]);
+        ok(s.path(), &["mv", &member, "in_progress"]);
+    }
+
+    let json = ok(s.path(), &["status", "--json"]);
+    // **알림이지 경고가 아니다** — `notices` 쪽에 선다.
+    let (warnings, notices) = json.split_at(json.find(r#""notices""#).expect("notices 가 없다"));
+    assert!(!warnings.contains("milestones_running"), "알림이 경고로 섰다\n{json}");
+    assert!(notices.contains(r#""kind":"milestones_running""#), "{json}");
+
+    let text = ok(s.path(), &["status"]);
+    assert!(text.contains("마일스톤 둘이 겹쳐 도는 중이다"), "{text}");
+    assert!(text.contains(&one) && text.contains(&two), "어느 마일스톤인지를 안 댄다\n{text}");
+
+    // 하나만 돌면 말하지 않는다.
+    ok(s.path(), &["defer", &two, "-m", "나중에"]);
+    assert!(!ok(s.path(), &["status"]).contains("겹쳐 도는"), "하나만 도는데 겹쳤다고 했다");
+}
+
+/// 마일스톤에 **든 시간**은 닫힌 멤버의 시작·끝에서 지금 센다. 스냅샷에도 저널에도 새 필드가
+/// 없다 — 총합을 마일스톤 줄에 적으면 멤버를 닫을 때마다 남의 줄을 써야 한다.
+///
+/// **잰 수를 늘 함께 낸다.** `started_at` 이 없는 멤버는 **모르는 것**이고, 그 수를 안 대면
+/// 빠진 멤버가 조용히 0 이 된다.
+#[test]
+fn a_milestone_counts_the_time_its_closed_members_took() {
+    let s = init("spent");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    // 한 시간짜리 하나, 세 시간짜리 하나.
+    let spans = [("2026-09-11T05:00:00Z", "2026-09-11T06:00:00Z"), ("2026-09-11T05:00:00Z", "2026-09-11T08:00:00Z")];
+    for (start, end) in spans {
+        let id = add(s.path(), &["멤버", "--milestone", &m]);
+        assert!(at(s.path(), start, &["mv", &id, "in_progress"]).status.success());
+        assert!(at(s.path(), end, &["mv", &id, "done"]).status.success());
+    }
+    // 옛 바이너리가 옮긴 줄 — 닫혔지만 시작이 안 적혔다. 안 한 일로도 0분으로도 안 센다.
+    let old = add(s.path(), &["옛 줄", "--milestone", &m]);
+    let line = line_of(s.path(), &old).replace(r#""status":"todo""#, r#""status":"done""#);
+    let rest: String = issues(s.path()).lines().filter(|l| !l.contains(&old)).map(|l| format!("{l}\n")).collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{rest}{line}\n")).unwrap();
+
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""closed":3"#), "{json}");
+    assert!(json.contains(r#""measured":2"#), "{json}");
+    assert!(json.contains(r#""minutes":240"#), "{json}");
+    assert!(json.contains(r#""median":120"#), "{json}");
+
+    let text = ok(s.path(), &["show", &m]);
+    assert!(text.contains("소요   4시간  (닫힌 3 중 2 를 벽시계로 잰 값, 중앙값 2시간)"), "{text}");
+
+    // 아무것도 안 닫힌 마일스톤에는 줄을 안 세운다 — `0분` 은 안 한 것이지 0 분이 아니다.
+    let fresh = add(s.path(), &["v0.2", "--type", "milestone"]);
+    ok(s.path(), &["add", "멤버", "--milestone", &fresh, "-q"]);
+    assert!(!ok(s.path(), &["show", &fresh]).contains("소요"), "안 닫힌 마일스톤이 든 시간을 말했다");
+    // 에픽은 아직 이 줄을 안 낸다 — 묶음의 기간을 묻는 자리는 마일스톤 하나다.
+    let e = add(s.path(), &["에픽", "--type", "epic"]);
+    assert!(!ok(s.path(), &["show", &e]).contains("소요"), "에픽이 든 시간을 말했다");
+}
+
 // ── TUI ────────────────────────────────────────────────────────────
 
 /// TTY 가 아니면 화면을 켜지 않고 분명히 거절한다. 이게 없으면 파이프로 부른
