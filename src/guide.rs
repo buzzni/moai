@@ -2999,7 +2999,10 @@ from outside**",
         // 아래 낱말이 한참 뒤의 걸음에서 걸려, 자리를 못 잡는 시험이 초록으로 선다.
         let step = &brief[at..at + brief[at..].find("\n    7-1.").expect("7 뒤에 7-1 이 없다")];
         for (piece, why) in [
-            ("do not touch this worktree's branch or its working tree", "리뷰가 도는 동안 가지를 고치지 말라는 말이 없다"),
+            (
+                "do not touch this worktree's branch or its working tree",
+                "리뷰가 도는 동안 가지를 고치지 말라는 말이 없다",
+            ),
             ("`commit --amend`", "고침을 날리는 명령을 이름으로 안 댄다"),
             ("`TaskStop`", "리뷰가 남긴 서브에이전트를 멈추는 걸음이 없다"),
             ("covers a commit you already made", "남은 에이전트가 무엇을 덮는지 안 적었다"),
@@ -3021,7 +3024,10 @@ from outside**",
         let at = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
         let step = &brief[at..at + brief[at..].find("\n    7-1.").expect("7 뒤에 7-1 이 없다")];
         assert!(step.contains(&indent(REVIEW_ANGLE, "       ")), "브리프 7 의 다섯 자리가 REVIEW_ANGLE 에서 안 나온다");
-        assert!(REVIEW_ANGLE.contains("They do not stand in for the angle"), "다섯이 관점을 대신하지 않는다는 말이 없다");
+        assert!(
+            REVIEW_ANGLE.contains("They do not stand in for the angle"),
+            "다섯이 관점을 대신하지 않는다는 말이 없다"
+        );
         for n in 1..=5 {
             assert!(REVIEW_ANGLE.contains(&format!("\n{n}. ")), "{n} 번째 자리가 없다");
         }
