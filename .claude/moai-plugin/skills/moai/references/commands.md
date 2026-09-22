@@ -228,6 +228,26 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
 
+**If a milestone is running, hang it on the epic you unfolded.** `promote` has no
+flag for one and does not carry over the one the idea held, so without this the
+epic stands outside the release and every member under it is work picked up from
+outside it. A milestone is inherited, so the epic alone carries it to every
+member, the ones added later included.
+
+    moai edit <epic> --milestone <milestone>
+
+Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
+alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
+`dangling_milestone` warning.
+
+**And copy the idea's body onto the epic you unfolded.** `promote` does not carry
+it either, so the epic stands empty and `moai show <epic>` cannot say why these
+issues are one bundle. Not onto every issue — the original stays on the closed
+idea and the history leads back to it; the one place worth filling is the epic, so
+the window that picks a member up does not have to press every member to find out
+what this is. Unfolding into a single issue is the same: move the idea's body over
+as it is.
+
 ## Deferring
 
     moai defer <id> -m '<next quarter>'    take it out of the plan for a while

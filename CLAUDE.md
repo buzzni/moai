@@ -10,7 +10,8 @@
 시험에 `--release` 를 붙이지 않는다 — `[profile.release]` 의 `lto = true` 가 파일
 하나 고칠 때마다 LTO 링크를 다시 돌려, 고친 뒤 다시 빌드가 dev 의 7초에서 3~7분이
 된다. `-j 1` 과 `pgrep -c rustc` 기다림은 메모리 상한이 8GB 이던 때 OOM 을 피하던
-대처이고, 16GB 에서 빌드 하나의 피크는 2.3GB 다(`moai-ecut` 에 측정해 둔 표). LTO 는 릴리스
+대처이고, 16GB 에서 빌드 하나의 피크는 2.3GB 다(`moai-ecut` 에 측정해 둔 표 — 2026-09-22 에
+다시 재어 1.47GiB 였다. 아래 "예산" 절이 지금 서는 값이다). LTO 는 릴리스
 바이너리의 15MB 예산을 위해 그대로 둔다.
 
 명령 전체와 기능 요청을 받았을 때의 절차는 @AGENTS.md 에 있다 (`moai init` 이
@@ -88,6 +89,21 @@
 `moai-jubf`). 그때 `lto` 를 낮추거나 `codegen-units` 를 올리지 않는다. 바이너리 15MB
 예산이 먼저고, 넘긴 까닭이 기계지 코드가 아니기 때문이다. 부하 없는 기계에서 5분을
 넘기 시작하면 그때 잰다.
+
+**빌드가 겹칠 때의 메모리도 쟀다**(`moai-wszt`, 2026-09-22). 컨테이너 cgroup 상한은
+16GiB 다. 세션 일곱(claude·node 프로세스 열여섯)이 도는 동안 그쪽 RSS 합은 4.71GiB 였고,
+릴리스 LTO 빌드 둘을 210초 겹쳐 돌렸을 때 rustc·cargo·ld 의 RSS 합은 2.67GiB, cgroup 의
+`anon` 피크는 6.39GiB 였다. `memory.current` 는 내내 상한에 붙어 있었지만 그것은 페이지
+캐시가 채운 값이라 `oom_kill` 은 0 이었다 — 상한에 붙었다는 것만으로는 위험을 못 잰다.
+빌드 하나일 때의 피크는 1.47GiB 에 3분 26초고, 그때 나온 바이너리는 7.6MB 다. **위
+`moai-ecut` 의 2.3GB 를 다시 잰 값이 이 1.47GiB 다** — 빌드 하나의 피크를 두 값으로
+적어 두면 다음 사람이 어느 쪽으로 셈해야 하는지 모른다. 지금 서는 것은 이쪽이다.
+
+그래서 **기다림을 다시 넣지 않는다.** 세션이 4.7GiB 를 쓰는 동안 빌드 둘이 겹쳐도 상한까지
+8.6GiB 가 남는다 — 넘기려면 세션 쪽이 13GiB 를 넘어야 한다(상한 16 에서 빌드 둘의
+2.67 을 뺀 값이다). 2026-09-20 00:17:58 의 OOMKilled 는 이 셈으로 설명되지 않으니, 그날 달랐던 것은 빌드가 아니라 세션 쪽 크기다
+(맥락이 큰 세션 하나가 몇 GiB 를 든다). 다시 나면 그때의 `anon` 과 세션별 RSS 를 재지,
+`-j 1` 도 `lto` 도 건드리지 않는다.
 
 **구현 줄 수에는 상한을 두지 않는다.** 한때 4,500줄로 걸어 두었다가 걷어냈다.
 옛 moai 를 죽인 것은 줄 수가 아니라 **처음부터 어긋난 기획**이었고, 복잡해진
@@ -243,10 +259,21 @@ moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 �
 | 에픽 밖 이슈 하나 | `low` | text, comments, a one-line fix; behaviour unchanged |
 | | `medium` | a behaviour change inside one file, ringed by tests |
 | | `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo |
+| 에픽 둘에 걸친 묶음 | 두 칸 위 | **A worktree that carries members of two epics is measured as one epic and then raised one more step** |
 
 **잣대 칸이 영어인 것은 계약이다** — `moai init` 이 써 넣는 블록과 감독 스킬이 영어로 통일된
 2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
 `the_rubric_is_the_review_table` 이 이 표의 그 칸과 글자째 견준다. 한쪽만 고치면 붉어진다.
+
+**에픽 둘에 걸친 묶음은 한 에픽처럼 재고 거기서 한 칸 더 올린다**(2026-09-22 사용자 결정,
+`moai-h89f`). 옆 워크트리가 파일을 쥐어 서로 다른 에픽의 멤버가 한 가지에 실리는 판이
+2026-09-20 에만 두 번 섰는데(`moai-giz3` 을 `moai-3bry` 에 얹은 판, `moai-uc5v`·`moai-c4nk`
+에 `moai-8d49` 를 얹은 판), 표는 `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도
+안 쟀다 — 그날은 감독과 일꾼이 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은
+아니다. 리뷰가 두 에픽의 계약을 같이 봐야 하니 `표면을 가로지르면 한 칸 더` 와 같은 결이고,
+실제로 선 판 둘의 `max` 와도 맞는다. 잣대 칸은 `guide::BUNDLE` 과 한 글이다.
+올리는 칸의 천장은 `max` 다 — 쓰기 경로를 건드린 멤버가 든 묶음처럼 이미 `max` 인 자리에서는
+한 칸 더가 갈 곳이 없으니 그대로 `max` 다(리뷰 `moai-9tlp.67r` 13번).
 
 표면을 가로지르거나 설계 결정이 여럿 섞인 에픽은 한 칸 더 올린다. 망설여지면 한
 칸 올린다. 리뷰 모델은 그 등급을 따른다 — `medium` 이면 sonnet, `high` 부터 opus.
