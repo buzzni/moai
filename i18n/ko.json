@@ -14,6 +14,7 @@
   "overview.worktree_trouble_above": "옆 워크트리 문제 {n}건 — 위 줄",
   "overview.warnings": "경고 {n}건",
   "overview.warnings_fatal": "경고 {n}건 (데이터가 깨졌다 {f}건)",
+  "overview.notices": "알림 {n}건",
   "overview.next": "다음:  `moai ready` 로 프로젝트마다 집을 것을 본다",
   "overview.picks": "{n}건",
   "overview.unreadable": "읽을 수 없는 줄 {n}개 — 어느 줄인지는 `{go}` 가 낸다",
