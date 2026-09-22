@@ -1058,6 +1058,15 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     Some(days_from_civil(y, mo, d) * 86_400 + h * 3600 + mi * 60 + se)
 }
 
+/// 지금보다 이만큼(초) 넘게 뒤인 시각은 "먼 미래" 로 본다(moai-ugjp). 하루 — 겹쳐 보는 다른
+/// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
+///
+/// **넘는 것만 먼 미래다.** 딱 이만큼 앞선 것은 봐준다 — 재는 자리 둘이 이 자를 같이 쓴다
+/// ([`crate::report`] 의 `far_ahead`, [`crate::latest::Held::fresh`], moai-21un). 한자리에
+/// 둔 까닭은 둘이 따로 들면 한쪽을 고치는 날 "몇 초 어긋난 시계" 가 한 표면에서만 봐주는
+/// 것이 되기 때문이다.
+pub const FUTURE_SLACK_SECS: i64 = 86_400;
+
 /// `at` 이 `now` 로부터 며칠 전인가. 파싱이 안 되면 `None`.
 ///
 /// **`at` 이 `now` 보다 뒤면 0 이다**(moai-fix6). `div_euclid` 는 몇 초만 늦어도 -1 을 돌려,

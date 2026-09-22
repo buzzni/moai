@@ -39,6 +39,21 @@ behaviour:
 - `install.sh` and the release artifacts: a downloaded archive that does not
   match `SHA256SUMS` must never be installed, and there is deliberately no flag
   to skip that check.
+- The release check the explorer makes once a day. One field of a GitHub API
+  response (`tag_name`) becomes a line on screen and is kept for a day in
+  `latest.toml` next to your user config, so that field is measured where it
+  comes in: it is rejected unless it is one short line with no control
+  characters, and it only becomes "a new release is out" if it parses as a
+  version. The answer is capped, the call has a timeout and follows at most two
+  redirects, and TLS is rustls over Mozilla's roots with verification on. A call
+  that starts on `https` stays there: a redirect to `http` is refused rather than
+  followed, on every hop. The
+  check never blocks: it is one line, and the exit code never changes. It only
+  runs where a person is watching, and `[update] check = false` or
+  `MOAI_NO_UPDATE_CHECK=1` turns it off. Pointing `MOAI_API_URL` somewhere else
+  means trusting that place instead; an answer is only reused for the place it
+  came from, and the place written down is the URL with any `user:password@`
+  stripped — a token in that variable is never written to disk.
 
 Out of scope: anything that requires an attacker to already be able to run
 commands as you, and the contents of the repository you point the tool at.
