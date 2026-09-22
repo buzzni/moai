@@ -420,6 +420,7 @@
   "tui.place.picked": "집은 것 {n}건",
   "tui.place.nothing_surfaced": " 드러난 문제 없다",
   "tui.place.surfaced": " 드러난 것 {n}건 — 들어가서 `moai status`",
+  "tui.place.notices": "+ 알림 {n}건",
   "tui.place.stranded": "! 집었는데 일하는 워크트리가 없는 것 {n}건",
   "tui.place.blind_all": " — 자리를 다 못 셌다",
   "tui.place.blind_some": " — 그중 {n}곳이 자리를 가려 다 못 셌다",

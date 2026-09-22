@@ -218,6 +218,16 @@ pub struct Summary {
     /// 드러난 것의 수. 알림은 안 센다. **자리 없는 줄도 여기 든다** — 층의 `!` 와 "드러난 것
     /// N건" 이 `moai status` 와 같은 수를 말해야, 층에서 보고 들어간 사람이 다른 수를 안 본다.
     pub warnings: usize,
+    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
+    /// `notices`, moai-prdh). **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
+    /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
+    ///
+    /// **경고가 아니다** — 고칠 계획이 아니라 설치가 어긋난 것이라 `!` 를 안 세우고 위의
+    /// `warnings` 에도 안 든다(`view::status` 와 같은 자: 알림만 있는 것은 "문제 없다" 다).
+    ///
+    /// **사용자 설정의 말 문제는 안 든다** — 그것은 프로젝트의 것이 아니라 이 기계의 설정
+    /// 하나라, 층은 그것을 줄마다 세지 않고 제 `problems` 로 따로 낸다(`cmd::tui::outside`).
+    pub notices: usize,
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
@@ -306,6 +316,16 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate:
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
         warnings: st.warnings.len() + usize::from(lost.is_some()),
+        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 idea·미룬
+        // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
+        // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
+        //
+        // `chdir` 은 고칠 명령에 `-C` 를 얹을지를 가를 뿐이라 **수를 안 바꾼다** — 층은 글을 안
+        // 펴고 수만 대므로 아무 값이나 같지만, 층의 줄은 남의 저장소라 `true` 가 사실이다.
+        //
+        // **표식에는 안 든다**(`marks_of`) — AGENTS.md 나 git 설정을 고쳐도 이 수는 트래커가
+        // 움직일 때 같이 다시 선다. 알림은 고치고 1초 안에 사라져야 하는 값이 아니다.
+        notices: st.notices.len() + crate::cmd::status::install_notices(repo, true).len(),
         stranded,
         unread: unread.all.len(),
         blind: unread.blinding.len(),

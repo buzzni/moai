@@ -2573,6 +2573,13 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             if sum.warnings > 0 || sum.unreadable > 0 || sum.unread > 0 {
                 spans.push(Span::styled(" !", from_anstyle(style::WARN)));
             }
+            // **알림은 흐린 `+` 에 수를 붙여 선다**(moai-prdh) — 보드의 글리프와 같은 자다
+            // (`view::status`). `!` 를 달면 설치가 어긋난 것이 고칠 계획으로 읽히고, 글자 없이
+            // `+` 만 달면 하나인지 셋인지를 들어가 봐야 안다. 낱말은 안 붙인다 — 이 줄은 80칸에서
+            // 이미 이름·칸·경로로 차 있다.
+            if sum.notices > 0 {
+                spans.push(Span::styled(format!(" +{}", sum.notices), dim()));
+            }
         }
         Look::Shut { state, said } => spans.push(Span::styled(said.clone(), shut_style(*state))),
     }
@@ -2709,6 +2716,16 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                     Span::styled("!", from_anstyle(style::ERROR)),
                     Span::raw(fill(say(lang, "tui.place.unreadable"), &[("n", &sum.unreadable.to_string())])),
                 ]));
+            }
+            // **고칠 것 다음에 알림**(moai-prdh) — 보드와 같은 차례고, 같은 까닭으로 위의 `✓ 드러난
+            // 문제 없다` 를 안 지운다. 알림만 선 저장소는 정말 고칠 것이 없다(`view::status`).
+            // **수만 댄다** — 무엇인지는 들어가서 `moai status` 다(2026-09-22 사람의 결정).
+            //
+            // **감아 낸다**(위의 `stranded` 와 같은 자) — 80칸 창의 상세는 안쪽 폭이 30 뿐이라,
+            // 자르면 정작 몇 건인지가 잘려 나간다.
+            if sum.notices > 0 {
+                let said = fill(say(lang, "tui.place.notices"), &[("n", &sum.notices.to_string())]);
+                out.extend(wrapped(&said, w, dim()));
             }
             out.push(Line::from(""));
             let how = fill(say(lang, "tui.place.enter"), &[("key", &label(BROWSE, Browse::Enter))]);
@@ -5720,6 +5737,7 @@ pub(super) mod tests {
                     column: "in_progress".into(),
                 }],
                 warnings: 2,
+                notices: 0,
                 stranded: 0,
                 unread: 0,
                 blind: 0,
@@ -5961,6 +5979,49 @@ pub(super) mod tests {
         let screen = lines.join("\n");
         let pane = joined(&lines);
         assert!(pane.contains("워크트리 2곳 — 그중 1곳이 자리를 가려"), "가린 수를 안 댔다\n{screen}");
+    }
+
+    /// **층은 알림을 수로만 대고, 그것으로 "문제 있다" 고 하지 않는다**(moai-prdh, 2026-09-22
+    /// 사람의 결정). 설치가 어긋난 셋과 쌓인 것은 고칠 계획이 아니라 알림이라, 보드와 같은 자로
+    /// 흐린 `+` 에 수만 붙고(`view::status` 의 글리프) `✓ 드러난 문제 없다` 를 지우지 않는다.
+    /// 무엇인지는 들어가서 본다 — 층의 줄은 이름·칸·경로로 이미 차 있다.
+    ///
+    /// **좁은 창에서 그 수가 실제로 보이는지까지 잰다**(리뷰 moai-ug47.v4v 가 잡은 자리) — 80칸
+    /// 창의 상세는 안쪽 폭이 30 뿐이라, 감아 내지 않으면 정작 몇 건인지가 잘려 나간다.
+    #[test]
+    fn the_layer_counts_notices_and_still_calls_the_repo_clean() {
+        use super::super::layer::{At, Look};
+        let mut a = layered(At::Layer);
+        let set = |a: &mut App, notices: usize| {
+            let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else {
+                panic!("one 이 안 열렸다")
+            };
+            // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
+            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (0, 0, 0, 0, notices);
+        };
+        let joined = |lines: &[String]| -> String {
+            lines.iter().filter_map(|l| l.split('│').nth(1)).map(str::trim).collect::<Vec<_>>().join(" ")
+        };
+
+        set(&mut a, 3);
+        for w in [80, 100, 120] {
+            let lines = render(&mut a, w, 22);
+            let screen = lines.join("\n");
+            assert!(joined(&lines).contains("알림 3건"), "{w}칸에서 수가 잘렸다\n{screen}");
+            let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
+            assert!(row.contains("+3"), "{w}칸의 줄이 알림을 안 센다 — {row:?}");
+            assert!(!row.contains(" !"), "알림에 경고 글리프를 달았다 — {row:?}");
+            assert!(screen.contains("드러난 문제 없다"), "알림만 선 저장소를 문제 있다고 했다\n{screen}");
+        }
+
+        // **0 이면 아무 말도 안 한다** — 늘 `+0` 을 달면 줄이 한 칸 더 차고, 읽는 쪽은 그것을
+        // 무언가 있는 것으로 먼저 읽는다.
+        set(&mut a, 0);
+        let lines = render(&mut a, 80, 22);
+        let screen = lines.join("\n");
+        assert!(!screen.contains("알림"), "알림이 없는데 줄을 세웠다\n{screen}");
+        let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
+        assert!(!row.contains('+'), "알림이 없는데 줄에 표식이 섰다 — {row:?}");
     }
 
     /// **디렉터리 고르기 창도 색 없이 80칸에서 읽힌다** — 테두리가 지금 디렉터리를 대고(길면
@@ -7424,6 +7485,7 @@ pub(super) mod tests {
                     column: "in_progress".into(),
                 }],
                 warnings: 0,
+                notices: 0,
                 stranded: 0,
                 unread: 0,
                 blind: 0,

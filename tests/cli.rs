@@ -2497,6 +2497,57 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
     assert!(o.stderr.is_empty(), "설정 문제를 stderr 로도 냈다 — {}", String::from_utf8_lossy(&o.stderr));
 }
 
+/// **층의 알림 셈은 안쪽 보드의 것과 같은 자다**(moai-prdh) — 설치가 어긋난 것
+/// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 idea·미룬 것)을 함께 센다. 한때
+/// 층은 경고만 세, "드러난 문제 없다" 를 보고 들어간 사람이 안쪽 `moai status` 에서 알림을
+/// 처음 봤다.
+///
+/// **재는 자가 여기 선다.** 두 화면이 어떤 꼴로 세든 수가 같아야 한다 — 한쪽에만 알림을 더하거나
+/// 한쪽에서만 빼는 날 이 줄이 먼저 붉어진다. **없으면 키를 안 단다**(곁의 셋과 같은 까닭).
+#[test]
+fn the_project_layer_counts_the_same_notices_as_the_board() {
+    let s = Scratch::new("layernotices");
+    let (proj, out) = (dir_in(&s, "proj"), dir_in(&s, "out"));
+    ok(&proj, &["init", "argos"]);
+    let cfg = registry(&s, &[&proj]);
+
+    // **알림이 하나도 없는 자리부터 본다** — 키가 서면 빈 것과 0 을 못 가른다.
+    let clean = ok_with(&out, &cfg, &["tui", "--json"]);
+    assert!(!clean.contains("\"notices\""), "알림이 없는데 키가 섰다\n{clean}");
+
+    // 설치가 어긋난 것 둘 — 딸린 파일 규칙 하나를 지우고, AGENTS.md 블록을 손으로 고친다.
+    let ignore = proj.join(".gitignore");
+    let kept: String = std::fs::read_to_string(&ignore)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("worktrees"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&ignore, &kept).unwrap();
+    let md = proj.join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
+    // 순수한 셈이 내는 알림 하나 — 미룬 것. 설치만 세면 이 줄이 빠진 채로도 푸르다.
+    let id = add(&proj, &["미룬 일"]);
+    ok(&proj, &["defer", &id, "-m", "다음 판"]);
+
+    let inside = ok(&proj, &["status", "--json"]);
+    let want = inside.matches("\"notice\":true").count();
+    // **시험이 헛돌지 않게 셋이 실제로 섰는지 먼저 본다.**
+    for kind in ["agents_hand_edited", "gitignore_rules", "deferred"] {
+        assert!(inside.contains(kind), "{kind} 알림이 안 섰다\n{inside}");
+    }
+    assert!(want >= 3, "알림이 모자라다 ({want})\n{inside}");
+
+    let rows = ok_with(&out, &cfg, &["tui", "--json"]);
+    assert!(
+        rows.contains(&format!("\"notices\":{want}")),
+        "층과 보드가 알림을 달리 센다 (보드 {want})\n{rows}"
+    );
+}
+
 /// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께
 /// 말한다. **`status` 는 0 으로 끝난다**(moai-ynsb) — 세션의 시작점이 제 파일 아닌 것으로
 /// 실패해 보이면 안 된다. `ready` 는 여전히 멈춘다.
