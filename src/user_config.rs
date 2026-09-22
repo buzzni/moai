@@ -124,6 +124,13 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
+    /// 새 판 묻기를 설정이 껐는가 — `[update] check`(moai-d74q). 적힌 것이 없으면 `None` 이고
+    /// 그때는 켠 것이다([`crate::latest::gate`]).
+    pub update_check: Option<bool>,
+    /// 그 값을 읽다 만난 것 — **말이 아니라 자료다**([`UpdateTrouble`]). 대는 자리는
+    /// [`crate::view::look_problems`] 다: 이 설정이 서는 표면이 탐색기 하나라, 보기 설정의
+    /// 알림과 같은 자리에 선다.
+    pub update_problems: Vec<UpdateTrouble>,
     /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
     /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
     ///
@@ -164,6 +171,21 @@ pub enum LookTrouble {
     Want { key: String, want: Want, found: String },
     /// 낱말 배열의 원소 하나가 낱말이 아니다 — 키 이름과 그 값. 그 원소만 건너뛴다.
     NotAWord { key: String, value: String },
+}
+
+/// `[update] check` 를 읽다 만난 것([`Doc::update_check`], moai-d74q) — **말이 아니라 자료다**
+/// ([`LangTrouble`]·[`LookTrouble`] 과 같은 까닭).
+///
+/// **한때 아무 말도 안 했다.** 끄는 스위치 하나라 "안 먹은 것이 그 자리에서 보인다" 는 것이
+/// 그 까닭이었는데, 서는 자리가 탐색기 머리의 한 줄이라 실제로는 안 보인다 — 끄려고
+/// `check = "no"` 라 적은 사람은 그 줄이 왜 여전히 서는지 알 길이 없었다. 다른 설정 키와 같은
+/// 자로 맞춘다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateTrouble {
+    /// `[update]` 가 표가 아니다 — 그 자리에 선 것.
+    NotATable { found: String },
+    /// `update.check` 가 `true`·`false` 가 아니다 — 그 자리에 선 것.
+    NotABool { found: String },
 }
 
 /// [`LookTrouble::Want`] 가 바라는 꼴. **낱말이 아니라 갈래로 든다** — 글로 들면 말묶음이
@@ -420,6 +442,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (read, problems) = doc.read_marks();
             reg.read = read;
             reg.read_problems = problems;
+            let (check, problems) = doc.update_check();
+            reg.update_check = check;
+            reg.update_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
@@ -946,6 +971,29 @@ impl Doc {
         (Some(raw.to_string()), problems)
     }
 
+    /// 새 판 묻기를 껐는가 — `[update] check`(moai-d74q). 없으면 `None` 이고 그때는 켠 것이다.
+    ///
+    /// **틀린 값을 알린다.** 한때 이 키만 [`crate::latest`] 가 파일을 따로 파서 읽었고,
+    /// `check = "no"` 는 다른 설정 키와 달리 아무 말 없이 무시됐다. 여기로 들이면서 한 파싱에
+    /// 얹히고([`read`]), 까닭도 같은 자로 선다.
+    ///
+    /// **끈 값만 읽는 것은 그대로다** — `false` 가 아닌 성한 `true` 는 켠 것이라 까닭이 없다.
+    /// 막지도 않는다: [`UpdateTrouble`] 은 알림이지 게이트가 아니다.
+    pub fn update_check(&self) -> (Option<bool>, Vec<UpdateTrouble>) {
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(UPDATE) else { return (None, problems) };
+        let Some(t) = item.as_table_like() else {
+            problems.push(UpdateTrouble::NotATable { found: item.type_name().to_string() });
+            return (None, problems);
+        };
+        let Some(item) = t.get(CHECK) else { return (None, problems) };
+        let Some(on) = item.as_bool() else {
+            problems.push(UpdateTrouble::NotABool { found: item.type_name().to_string() });
+            return (None, problems);
+        };
+        (Some(on), problems)
+    }
+
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
     /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
     pub fn look(&self) -> (Look, Vec<LookTrouble>) {
@@ -1125,6 +1173,10 @@ impl Doc {
 /// 화면 언어가 사는 표(moai-slfv). **키 이름은 여기 하나다** — 그 탈을 펴는 쪽([`crate::view::problem`])
 /// 도 이것을 읽는다. 말묶음의 글에 박으면 번역마다 키 이름이 한 벌씩 서서, 키를 고치는 날 다섯
 /// 파일이 조용히 낡는다.
+/// 새 판 묻기를 끄는 자리 — 이름은 [`crate::latest`] 한자리에 있다(moai-d74q). 두 벌로 적으면
+/// 이름을 고치는 날 읽는 쪽만 따라간다.
+use crate::latest::{CHECK, UPDATE};
+
 pub const I18N: &str = "i18n";
 pub const LANG: &str = "lang";
 
@@ -2686,6 +2738,46 @@ mod tests {
         let both = crate::view::settings_problems(&bad, crate::i18n::Lang::Ko);
         assert!(both.contains(&said), "밖에서 대는 자리에 안 섰다: {both:?}");
         assert_eq!(bad.lang, None, "틀린 값을 들였다");
+    }
+
+    /// **새 판 묻기의 스위치도 이 파싱에 얹힌다**(moai-d74q). 한때 [`crate::latest`] 가 이 키
+    /// 하나를 읽으려고 설정 파일을 따로 팠고, `check = "no"` 는 다른 설정 키와 달리 아무 말
+    /// 없이 무시됐다 — 끄려고 적은 사람은 탐색기 판 줄이 왜 여전히 서는지 알 길이 없었다.
+    ///
+    /// **틀린 값이 끄지는 않는다.** 읽은 것이 없으면 켠 것이고([`crate::latest::gate`]), 까닭은
+    /// 알림 한 줄로 선다 — 게이트가 아니다.
+    #[test]
+    fn the_update_switch_is_read_in_the_same_parse() {
+        let check = |src: &str| Doc::parse(src).unwrap().update_check();
+        assert_eq!(check("[update]\ncheck = false\n"), (Some(false), vec![]));
+        assert_eq!(check("[update]\ncheck = true\n"), (Some(true), vec![]));
+        // 없는 표도, 표 밖의 같은 이름도 "안 적었다" 다 — 기본은 켬이다.
+        assert_eq!(check("[update]\n"), (None, vec![]));
+        assert_eq!(check("[i18n]\nlang = \"ko\"\n"), (None, vec![]));
+        assert_eq!(check("check = false\n"), (None, vec![]), "표 밖의 같은 이름을 읽었다");
+        // **틀린 값은 알린다.** 값은 안 들이므로 켠 채로 선다.
+        assert_eq!(
+            check("[update]\ncheck = \"no\"\n"),
+            (None, vec![UpdateTrouble::NotABool { found: "string".into() }])
+        );
+        assert_eq!(check("update = 3\n"), (None, vec![UpdateTrouble::NotATable { found: "integer".into() }]));
+
+        // **읽는 길 전체로도 잰다** — 깨진 파일과 없는 파일은 여기서도 막지 않는다.
+        let d = scratch("update-check");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "\u{feff}[update]\ncheck = false\n").unwrap();
+        assert_eq!(read(Some(&path)).update_check, Some(false), "BOM 이 붙은 설정을 못 읽었다");
+        std::fs::write(&path, "[update]\ncheck = [\n").unwrap();
+        assert_eq!(read(Some(&path)).update_check, None, "깨진 설정이 막지 않는다");
+        assert_eq!(read(Some(&d.join("없다.toml"))).update_check, None);
+        assert_eq!(read(None).update_check, None, "설정 파일이 어디인지 모르는 기계");
+
+        // **까닭은 탐색기 알림 자리에 선다** — 이 설정이 서는 표면이 그 하나다.
+        std::fs::write(&path, "[update]\ncheck = \"no\"\n").unwrap();
+        let bad = read(Some(&path));
+        assert_eq!(bad.update_problems, [UpdateTrouble::NotABool { found: "string".into() }]);
+        let said = crate::view::look_problems(&bad, crate::i18n::Lang::Ko);
+        assert_eq!(said, [format!("{}: `update.check` 는 true·false 여야 한다 — 지금은 string", path.display())]);
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.

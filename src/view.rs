@@ -2369,7 +2369,9 @@ pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<Stri
     };
     let looks = reg.look_problems.iter().map(|why| told(look_trouble(lang, why)));
     let reads = reg.read_problems.iter().map(|why| told(skipped(lang, why)));
-    looks.chain(reads).collect()
+    // 새 판 묻기의 틀린 값도 여기 선다(moai-d74q) — 그 설정이 서는 표면이 탐색기 하나다.
+    let updates = reg.update_problems.iter().map(|why| told(update_trouble(lang, why)));
+    looks.chain(reads).chain(updates).collect()
 }
 
 /// 쓰기가 거절한 까닭의 글([`crate::model::Invalid`], moai-yve0).
@@ -2463,6 +2465,23 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
         LookTrouble::NotAWord { key, value } => {
             fill(say(lang, "look.not_a_word"), &[("key", &format!("{TUI}.{key}")), ("value", value)])
         }
+    }
+}
+
+/// `[update] check` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q).
+///
+/// **보기 설정과 같은 글을 쓴다** — 물음이 같기 때문이다("이 자리에 저 모양이 서야 하는데 이것이
+/// 섰다"). 말묶음에 같은 뜻의 키를 한 벌 더 두면 옮기는 사람이 둘을 따로 옮기고, 그러다
+/// 한쪽만 고쳐진다.
+pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> String {
+    use crate::latest::{CHECK, UPDATE};
+    use crate::user_config::UpdateTrouble;
+    match why {
+        UpdateTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", UPDATE), ("found", found)]),
+        UpdateTrouble::NotABool { found } => fill(
+            say(lang, "look.want"),
+            &[("key", &format!("{UPDATE}.{CHECK}")), ("want", say(lang, "look.want_bool")), ("found", found)],
+        ),
     }
 }
 

@@ -69,7 +69,9 @@ pub const WINDOW: i64 = 24 * 60 * 60;
 /// 붙들고 있느니 "못 물었다" 가 낫다.
 pub const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// 설정에서 이것을 끄는 자리 — `[update] check = false`.
+/// 설정에서 이것을 끄는 자리 — `[update] check = false`. **읽는 자는 여기가 아니다**
+/// ([`crate::user_config::Doc::update_check`], moai-d74q): 설정 파일은 한 번만 판다. 이름만
+/// 여기 두는 것은 이 기능의 것이기 때문이고, 두 벌로 적으면 이름을 고치는 날 한쪽이 낡는다.
 pub const UPDATE: &str = "update";
 pub const CHECK: &str = "check";
 
@@ -429,27 +431,6 @@ pub fn gate(
 pub fn on_screen() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
-}
-
-/// 사람의 설정이 이것을 껐는가 — `[update] check = false`.
-///
-/// **[`crate::user_config::Doc`] 를 안 지난다.** 그쪽은 고쳐 쓰는 길이라 주석과 모르는 키를
-/// 지키는 것이 일인데, 이 키는 **도구가 한 번도 안 쓴다** — 사람이 손으로 적고 도구는 읽기만
-/// 한다. 키 이름을 두 벌로 두지 않으려고 이름은 [`UPDATE`]·[`CHECK`] 한 자리에 두었다.
-///
-/// **끄는 값만 읽는다.** `false` 가 아닌 것은 모두 켠 것이다. 색이나 화면 말과 달리 틀린 값을
-/// 알리지 않는 것은 이 설정이 **끄는 스위치 하나**라, 안 먹은 것이 그 자리에서 보이기 때문이다 —
-/// 끄려고 적었는데 판 줄이 여전히 서면 그때 안다. 틀린 색은 그럴듯한 색이 서서 모르지만 여기는
-/// 다르다.
-///
-/// **BOM 은 떼고 읽는다.** toml_edit 의 파서는 머리의 `\u{feff}` 에 걸려 통째로 실패하고,
-/// [`crate::user_config::Doc::parse`] 가 그것을 떼는 것도 같은 까닭이다 — 그쪽만 떼면 윈도에서
-/// 적은 설정이 `[i18n]` 은 먹는데 이 키만 말없이 안 먹는다. 틀린 값과 달리 이쪽은 **바로 적었는데**
-/// 안 먹는 것이라, "안 먹으면 그 자리에서 보인다" 는 위의 까닭이 안 선다.
-pub fn config_says(path: Option<&Path>) -> Option<bool> {
-    let src = std::fs::read_to_string(path?).ok()?;
-    let doc: toml_edit::DocumentMut = src.strip_prefix('\u{feff}').unwrap_or(&src).parse().ok()?;
-    doc.get(UPDATE)?.as_table_like()?.get(CHECK)?.as_bool()
 }
 
 /// 한 번 묻는다. 태그를 못 얻으면 **까닭을 든다**([`Why`], moai-580l).
@@ -1003,26 +984,6 @@ mod tests {
         assert_eq!(gate(none, None, true, true), Some(Off::NotAScreen));
         // 껐는데 화면도 아니면 먼저 만난 까닭을 든다 — 어느 쪽이든 안 묻는 것은 같다.
         assert_eq!(gate(none, Some(false), false, false), Some(Off::Config));
-    }
-
-    #[test]
-    fn the_setting_reads_only_the_switch_that_turns_it_off() {
-        let s = Scratch::new("latest-config");
-        let at = s.path().join("config.toml");
-        let read = |src: &str| {
-            std::fs::write(&at, src).unwrap();
-            config_says(Some(&at))
-        };
-        assert_eq!(read("[update]\ncheck = false\n"), Some(false));
-        assert_eq!(read("[update]\ncheck = true\n"), Some(true));
-        // 꼴이 아닌 값도, 없는 표도, 없는 파일도 모두 "안 적었다" 다 — 기본은 켬이다.
-        assert_eq!(read("[update]\ncheck = \"no\"\n"), None);
-        assert_eq!(read("[update]\n"), None);
-        assert_eq!(read("[i18n]\nlang = \"ko\"\n"), None);
-        assert_eq!(read("check = false\n"), None, "표 밖의 같은 이름을 읽었다");
-        assert_eq!(read("[update]\ncheck = [\n"), None, "깨진 설정이 막지 않는다");
-        assert_eq!(config_says(Some(&s.path().join("없다.toml"))), None);
-        assert_eq!(config_says(None), None, "설정 파일이 어디인지 모르는 기계");
     }
 
     #[test]

@@ -59,8 +59,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
     // 표식은 **읽기 전에** 잰다 — 뒤에 재면 읽고 첫 걸음 사이에 옆이 쓴 것을 놓친다(`App::config_stamp`).
     let config_stamp = config.as_deref().map(crate::store::stamp);
-    // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
+    // 설정은 **한 번 읽어** 층과 보기와 새 판 묻기가 나눠 쓴다(moai-u8cs, moai-d74q).
     let reg = crate::user_config::read(config.as_deref());
+    // **여기서 집어 둔다** — `reg` 의 필드는 아래에서 옮겨 간다(`reg.read`).
+    let update_check = reg.update_check;
     // **띄운 자리는 세션이 선 체크아웃이다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 트래커는 루트로
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
     // 들어오는 걸음에서 `Repo::open(<루트>)` 을 열어 `here()` 가 루트로 뒤집혔고, 그때부터 커밋 표가
@@ -109,7 +111,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref());
+    ask_latest(ctx, &mut app, config.as_deref(), update_check);
     screen(app)
 }
 
@@ -122,8 +124,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
 /// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
 /// 기능이 피하려던 바로 그 일이다.
-fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>) {
-    let Some(dir) = asking_from(config, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
+fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>, says: Option<bool>) {
+    let Some(dir) = asking_from(config, says, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
         return;
     };
     app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k)));
@@ -136,12 +138,12 @@ fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::P
 /// 서면 `--json` 이 매번 바깥을 두드리는데, 그것이 이 기능이 피하려던 바로 그 일이다.
 fn asking_from(
     config: Option<&std::path::Path>,
+    says: Option<bool>,
     json: bool,
     on_screen: bool,
     env: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> Option<std::path::PathBuf> {
     let dir = config.and_then(|p| p.parent())?;
-    let says = crate::latest::config_says(config);
     crate::latest::gate(env, says, json, on_screen).is_none().then(|| dir.to_path_buf())
 }
 
@@ -162,6 +164,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config_stamp = config.as_deref().map(crate::store::stamp);
     // 설정은 **한 번 읽어** `--json`·층·보기가 나눠 쓴다(moai-u8cs).
     let reg = crate::user_config::read(config.as_deref());
+    let update_check = reg.update_check;
     // `--path` 는 한 프로젝트 안의 id 다. 어느 프로젝트인지 모르는 채로 받으면 id 가 겹치는
     // 두 프로젝트 중 하나를 말없이 고르게 된다.
     if args.path.is_some() {
@@ -226,7 +229,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref());
+    ask_latest(ctx, &mut app, config.as_deref(), update_check);
     screen(app)
 }
 
@@ -816,20 +819,32 @@ mod tests {
         let at = s.path().join("config.toml");
         std::fs::write(&at, "").unwrap();
         let none = |_: &str| None;
-        assert_eq!(super::asking_from(Some(&at), false, true, none).as_deref(), Some(s.path()));
+        // **설정이 무엇이라 했는지는 이제 부르는 쪽이 들고 온다**(moai-d74q) — 설정을 읽는 것은
+        // `user_config::read` 한 번이고, 이 자리는 그 답으로 문만 잰다.
+        let says = |src: &str| crate::user_config::read(Some(&at_with(&at, src))).update_check;
+        assert_eq!(super::asking_from(Some(&at), None, false, true, none).as_deref(), Some(s.path()));
         // `--json` 은 화면이 터미널이어도 안 묻는다 — 에이전트가 치는 자리다.
-        assert_eq!(super::asking_from(Some(&at), true, true, none), None);
+        assert_eq!(super::asking_from(Some(&at), None, true, true, none), None);
         // 사람이 보는 화면이 아니면 안 묻는다(파이프).
-        assert_eq!(super::asking_from(Some(&at), false, false, none), None);
+        assert_eq!(super::asking_from(Some(&at), None, false, false, none), None);
         // 설정이 껐으면 안 묻는다.
-        std::fs::write(&at, "[update]\ncheck = false\n").unwrap();
-        assert_eq!(super::asking_from(Some(&at), false, true, none), None);
+        assert_eq!(super::asking_from(Some(&at), says("[update]\ncheck = false\n"), false, true, none), None);
+        // **틀린 값은 끄지 않는다** — 읽은 것이 없으니 켠 것이고, 까닭은 알림으로 선다.
+        assert_eq!(
+            super::asking_from(Some(&at), says("[update]\ncheck = \"no\"\n"), false, true, none).as_deref(),
+            Some(s.path())
+        );
         // 환경이 껐으면 안 묻는다.
-        std::fs::write(&at, "").unwrap();
         let off = |k: &str| (k == crate::latest::OFF_VAR).then(|| std::ffi::OsString::from("1"));
-        assert_eq!(super::asking_from(Some(&at), false, true, off), None);
+        assert_eq!(super::asking_from(Some(&at), None, false, true, off), None);
         // 답을 둘 자리를 모르면 안 묻는다 — 창을 닫을 자리가 없어 부를 때마다 두드리게 된다.
-        assert_eq!(super::asking_from(None, false, true, none), None);
+        assert_eq!(super::asking_from(None, None, false, true, none), None);
+    }
+
+    /// 설정 파일에 `src` 를 적고 그 자리를 돌려준다.
+    fn at_with(at: &std::path::Path, src: &str) -> std::path::PathBuf {
+        std::fs::write(at, src).unwrap();
+        at.to_path_buf()
     }
 
     use super::*;
