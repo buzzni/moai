@@ -32,6 +32,27 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 - A stamp a little ahead of this machine's clock no longer forces a fresh ask.
   Two machines sharing one config directory with clocks seconds apart made one of
   them knock on GitHub every single run.
+- Unfolding a parked thought teaches the two steps that used to come after it and
+  were written down nowhere: hang the running milestone on the epic `promote` made
+  (it has no flag for one and does not carry over the idea's), and copy the idea's
+  body onto that epic so `moai show <epic>` can say why those issues are one
+  bundle. The milestone line is the same one the supervisor's brief uses, so the
+  two texts cannot drift apart.
+- The worker brief holds a running review's worktree. While `/code-review --fix` is
+  going, its branch and working tree are left alone — the fixes sit there
+  uncommitted, and `reset --hard`, `rebase` or `commit --amend` throw them away —
+  and when it returns, whatever subagent it left running is stopped before anything
+  else touches the tree. Both are lines to read: nothing is blocked.
+- The brief carries the five places a review keeps finding — a doc block taken over
+  by an item inserted above it, a test that cannot go red on a revert, a value set
+  up in only one of the several paths that build it, comments that no longer say
+  what the code does, and a read path that newly opens something it never opened.
+  They go on top of the angle rather than in place of it.
+- Closing an epic looks at whether that epic's line stands in the CHANGELOG section
+  for the release being prepared. The window that closes an epic is the only one
+  that knows what was taken out as well as what went in. Nothing checks it.
+- The review grades gained the case they were missing: a worktree that carries
+  members of two epics is measured as one epic and then raised one more step.
 
 ### Fixed
 
