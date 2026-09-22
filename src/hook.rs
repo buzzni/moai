@@ -321,11 +321,30 @@ fn handed_text(words: &[String]) -> Option<Handed> {
     // **감싸는 명령이 대상 셸에 그대로 넘긴 argv** — `su <사용자> -- -c '<글>'` 이다(moai-729n).
     // 글 하나가 아니라 셸의 명령줄이라 `bash …` 를 읽는 그 자가 읽는다.
     //
-    // **넓은 errexit 철자는 안 읽는다**(`wide` 가 거짓) — 대상 셸이 무엇인지 모르기 때문이다.
-    // 넓히는 것은 errexit 를 **켜는** 쪽이고, 안 켜진 것을 켜졌다고 읽으면 집기가 더 멀리 이어져
-    // 쓰기가 지나간다. 모르는 자리는 안 켜진 것으로 둔다.
-    if let Some(Wrapped::Shell(at)) = &wrap {
-        return shell_argv(at.iter().map(|&i| &rest[i]), false, elsewhere);
+    // **넓은 errexit 철자는 `-s` 가 댄 셸일 때만 읽는다**(`wide`) — 아니면 대상 셸이 무엇인지
+    // 모른다. 넓히는 것은 errexit 를 **켜는** 쪽이고, 안 켜진 것을 켜졌다고 읽으면 집기가 더
+    // 멀리 이어져 쓰기가 지나간다. 모르는 자리는 안 켜진 것으로 둔다.
+    //
+    // **그 값이 셸이 아니면 뒤엣것은 명령줄이 아니라 그 프로그램의 argv 다**(moai-inu0) —
+    // `su -s /usr/bin/sed 남 -- -i s/a/b/ src/x.rs` 는 정말 그 파일을 고치는데, 셸로 읽던
+    // [`shell_argv`] 는 `-i` 를 깃발 뭉치로 `s/a/b/` 를 스크립트 이름으로 보아 아무것도 안 냈다.
+    // 낱말을 도로 감싸 이어 잇는다 — `sudo -s <명령…>` 과 같은 자다([`Text::Words`]): 감싸야
+    // 바깥 껍데기가 벗긴 따옴표가 되살아나고, 셸을 안 거치는 argv 의 `>`·`&&` 가 낱말로 남는다.
+    if let Some(Wrapped::Shell { prog, args, text }) = &wrap {
+        let named = prog.as_deref().map(basename);
+        if named.is_none_or(is_shell) {
+            return shell_argv(args.iter().map(|&i| &rest[i]), named.is_some_and(|p| matches!(p, "zsh" | "ksh")), elsewhere);
+        }
+        // `-c` 의 글마저 그 프로그램에는 argv 다 — 스위치와 값을 그 차례 그대로 앞에 세운다.
+        let handed: Vec<String> = text.iter().flat_map(|t| ["-c".to_string(), t.clone()]).collect();
+        let line = prog
+            .iter()
+            .chain(handed.iter())
+            .chain(args.iter().map(|&i| &rest[i]))
+            .map(|w| crate::text::quoted(w))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return (!line.is_empty()).then_some(Handed { text: line, fork: true, strict: false, elsewhere });
     }
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
@@ -381,7 +400,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere });
     }
     match basename(head) {
-        sh @ ("bash" | "sh" | "zsh" | "dash" | "ksh") => {
+        sh if is_shell(sh) => {
             // **zsh·ksh 는 errexit 를 넓게 적는다**(moai-7ek0) — zsh 는 옵션 이름의 대소문자와
             // 밑줄을 안 가리고(`-o err_exit`) 앞에 붙은 `no` 를 부정으로 읽으며, zsh·ksh93 은
             // `--errexit` 도 받는다.
@@ -2223,7 +2242,20 @@ enum Wrapped {
     /// **su 가 제 것으로 먹은 낱말은 여기 없다** — 걷어 낸 피연산자뿐이다. `--` 없이 쓴 줄
     /// (`su 남 sed -i …`)에서 그 argv 는 옵션으로 시작할 수 없고, su 가 셸에 넘긴 첫 낱말은
     /// 스크립트 이름이라 [`shell_argv`] 가 아무것도 안 낸다 — 실제로 도는 것도 그러하다.
-    Shell(Vec<usize>),
+    Shell {
+        /// **`-s`·`--shell` 이 댄 프로그램**(moai-inu0) — 없으면 대상 사용자의 로그인 셸이다.
+        ///
+        /// 그 값이 셸이 아니면 뒤엣것은 **셸의 명령줄이 아니라 그 프로그램의 argv** 다 —
+        /// `su -s /usr/bin/sed 남 -- -i s/a/b/ src/x.rs` 는 정말 그 파일을 고친다. 셸로만 읽던
+        /// 판은 [`shell_argv`] 가 `-i` 를 깃발 뭉치로, `s/a/b/` 를 스크립트 이름으로 보아
+        /// 아무것도 안 냈다. 2026-09-22 에 `su -s /bin/echo 남 -- -n hello` 로 쟀다.
+        prog: Option<String>,
+        /// 대상에게 그대로 넘어가는 피연산자들의 자리.
+        args: Vec<usize>,
+        /// `-c` 로 넘긴 글 — **셸이 아닌 프로그램에는 그것마저 argv 다.** 같은 날 쟀다:
+        /// `su -s /bin/echo -c 'IGNORED' 남 A` 가 `-c IGNORED A` 를 찍는다.
+        text: Option<String>,
+    },
     /// 여기서 멈춘다 — 아무것도 안 돌리거나(`sudo -l`) 딴 자리에서 돌린다(`env -C`), 아니면
     /// 값이 모자라 셸이 거절할 줄이다(`need!`).
     ///
@@ -2336,6 +2368,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// `sudo -s -u 남 moai add x` 와 `sudo -su 남 moai add x` 의 글은 `moai add x` 지 `-u 남 …`
         /// 이 아니다(둘 다 규칙이 통째로 샜다).
         glued: bool,
+        /// **값이 대상 프로그램을 대는 스위치**(moai-inu0) — `su`·`runuser` 의 `-s`·`--shell` 이다.
+        /// 그 값이 셸이 아니면 뒤엣것을 셸의 명령줄로 읽지 않는다([`Wrapped::Shell::prog`]).
+        shell: &'static [&'static str],
         /// **제 입력을 argv 뒤에 덧붙이는가**(moai-ctn2) — `xargs` 다. 보이는 argv 가 도는 argv 가
         /// 아니고, 그 낱말은 파이프 저편에서 오니 여기서 모른다.
         ///
@@ -2385,6 +2420,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &["-C", "--chdir"],
             hands: &["-S", "--split-string"],
             text: Text::Split,
@@ -2401,6 +2437,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 1,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2417,6 +2454,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2433,6 +2471,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2462,6 +2501,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2479,6 +2519,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // `-p`·`-P`·`-u` 는 이미 도는 프로세스의 등급을 바꾼다 — 뒤에 명령이 없다.
             stops: &["-p", "--pid", "-P", "--pgid", "-u", "--uid"],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2506,6 +2547,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // `-m` 은 쓸 수 있는 우선순위를 찍기만 한다 — 제 자리 인자도 명령도 안 받는다.
             stops: &["-p", "--pid", "-m", "--max"],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2523,6 +2565,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 1,
             stops: &["-p", "--pid"],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2540,6 +2583,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2560,6 +2604,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2576,6 +2621,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2619,6 +2665,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &["-I", "-i", "--replace"],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2668,6 +2715,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 돌거나 아예 실패하는 집기가 여기 규칙 2 를 채운다(`env -C`·`sudo -D` 와 같은 자리).
             stops: &["-e", "--edit", "-l", "--list", "-v", "--validate"],
             elsewhere: &["-i", "--login"],
+            shell: &[],
             chdir: &["-D", "--chdir"],
             // `sudo -s <명령>` 은 그 낱말들을 이어 붙여 셸에 `-c` 로 넘긴다 — 자리는 그대로다.
             hands: &["-s", "--shell"],
@@ -2690,6 +2738,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &["-s", "-L", "-C"],
             elsewhere: &[],
+            shell: &[],
             chdir: &[],
             hands: &[],
             text: Text::Words,
@@ -2724,6 +2773,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &["-l", "--login"],
+            shell: &["-s", "--shell"],
             chdir: &[],
             hands: &["-c", "--command", "--session-command"],
             text: Text::Line,
@@ -2740,6 +2790,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             args: 0,
             stops: &[],
             elsewhere: &["-l", "--login"],
+            shell: &["-s", "--shell"],
             chdir: &[],
             hands: &["-c", "--command", "--session-command"],
             text: Text::Line,
@@ -2753,6 +2804,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
     let (takes, long, stops, chdir, hands) = (w.takes, w.long, w.stops, w.chdir, w.hands);
     let astray = w.elsewhere;
+    // **`-s` 가 댄 프로그램**(moai-inu0) — [`Wrapper::shell`] 의 스위치가 받은 값이다.
+    // **`saw` 와 같은 자리에서 적는다** — 다 읽은 뒤 지나온 낱말을 다시 훑으면 스위치와 그
+    // 값이 안 갈린다(리뷰 moai-bujq.91c 가 `saw` 에서 겪은 그것이다).
+    // **마지막 것이 이긴다** — su 는 `-s` 를 볼 때마다 제 셸을 덮어쓴다.
+    let mut prog: Option<String> = None;
     // `-c` 같은 글자 하나를 `format!` 없이 견준다 — 훅은 Bash 한 번마다 돈다.
     let letter = |set: &[&str], c: char| c.is_ascii() && set.iter().any(|f| f.as_bytes() == [b'-', c as u8]);
     // 값이 모자라 셸이 거절할 줄 — 넘겨짚지 않는다([`command_of`] 가 여기서 멈춘다).
@@ -2918,18 +2974,27 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             saw |= flags.contains(&word.as_str());
             // 값이 없으면(`env -u`) 그 줄은 셸이 거절한다 — 넘겨짚지 않는다.
             need!(rest.get(n + 1));
+            if w.shell.contains(&word.as_str()) {
+                prog = rest.get(n + 1).cloned();
+            }
             n += 2;
             continue;
         }
         // `--이름=값` 은 값을 달고 있어 한 낱말이다 — 모르는 이름이어도 명령 자리를 안 흔든다.
         if word.starts_with("--") && word.contains('=') {
             saw |= flags.iter().any(|f| word.strip_prefix(f).is_some_and(|r| r.starts_with('=')));
+            if let Some(v) = w.shell.iter().find_map(|f| word.strip_prefix(*f).filter(|r| r.starts_with('='))) {
+                prog = Some(v[1..].to_string());
+            }
             n += 1;
             continue;
         }
         if long.contains(&word.as_str()) {
             saw |= flags.contains(&word.as_str());
             need!(rest.get(n + 1));
+            if w.shell.contains(&word.as_str()) {
+                prog = rest.get(n + 1).cloned();
+            }
             n += 2;
             continue;
         }
@@ -2997,6 +3062,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             if letter(takes, c) {
                 // 뒤에 붙은 것이 값이고, 없으면 다음 낱말이다.
                 eats = at + c.len_utf8() == bytes.len();
+                if letter(w.shell, c) {
+                    let left = &word[at + c.len_utf8()..];
+                    prog = if eats { rest.get(n + 1).cloned() } else { Some(left.to_string()) };
+                }
                 stop = false;
                 break;
             }
@@ -3037,10 +3106,14 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         *spot = true;
         ops.remove(0);
     }
-    if handed {
+    // **`-s` 가 댄 프로그램이 셸이 아니면 `-c` 의 글도 그 프로그램의 argv 다**(moai-inu0) —
+    // 셸의 명령줄로 읽으면 아무도 안 돌리는 글을 규칙에 비춰 잘못 막는다. 2026-09-22 에 쟀다:
+    // `su -s /bin/echo -c 'IGNORED' 남 A` 는 `-c IGNORED A` 를 찍는다.
+    let alien = prog.as_deref().map(basename).is_some_and(|p| !is_shell(p));
+    if handed && !alien {
         return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
     }
-    if let Some(hands) = hands_at {
+    if !alien && let Some(hands) = hands_at {
         return Some(hands);
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 그 낱말을 명령으로 읽지 않는다 —
@@ -3051,8 +3124,16 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 그것을 그대로 넘긴다([`Wrapped::Shell`]). 통째로 멈추던 판은 `su 남 -- -c '<글>'` 을 못 봤다.
     if !matches!(w.runs, Runs::Always) && !saw {
         let args: Vec<usize> = ops.iter().skip(1).copied().collect();
-        // 사용자만 있으면 사람이 쓸 셸을 띄울 뿐이다 — 넘긴 argv 가 없다.
-        return Some(if args.is_empty() { Wrapped::Stops } else { Wrapped::Shell(args) });
+        // **`-c` 의 글은 셸이 아닌 프로그램에만 여기로 온다** — 셸이면 위에서 이미 냈다.
+        let text = hands_at.and_then(|h| match h {
+            Wrapped::Hands { at, glued, .. } => glued.or_else(|| rest.get(at).cloned()),
+            _ => None,
+        });
+        // 사용자만 있고 넘길 것도 없으면 사람이 쓸 셸을 띄울 뿐이다.
+        if args.is_empty() && text.is_none() && prog.is_none() {
+            return Some(Wrapped::Stops);
+        }
+        return Some(Wrapped::Shell { prog, args, text });
     }
     // 명령은 **지나온 첫 피연산자**부터다 — 섞어 읽는 감싸는 명령에서 그 자리는 `n` 보다 앞이다
     // (`runuser <사용자> -u <남> <명령…>`). 안 지났으면 옵션이 끝난 이 자리다.
@@ -3060,6 +3141,14 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 뒤에 명령이 없으면 감싸는 것이 아니다(`env` 혼자는 환경을 찍는다).
     need!(rest.get(at));
     Some(Wrapped::Runs { skip: at, appends: w.appends })
+}
+
+/// **이 이름이 셸인가** — 넘긴 글을 명령줄로 읽는 것은 이 이름들뿐이다([`handed_text`]).
+///
+/// **한 자리에 둔다**(moai-inu0) — `su -s` 가 댄 프로그램을 가르는 자와 `bash -c` 를 읽는 자가
+/// 같은 목록을 봐야 한다. 둘로 두면 이름 하나를 한쪽에만 더하는 날 판정이 조용히 갈린다.
+fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "sh" | "zsh" | "dash" | "ksh")
 }
 
 fn basename(word: &str) -> &str {
@@ -9923,6 +10012,45 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "안 도는 쓰기를 지어냈다 — {cmd}\n{got:?}");
         }
+    }
+
+    /// **`-s` 가 댄 것이 셸이 아니면 뒤엣것은 명령줄이 아니라 그 프로그램의 argv 다**(moai-inu0).
+    ///
+    /// `su -s /usr/bin/sed 남 -- -i s/a/b/ src/x.rs` 는 정말 그 파일을 고치는데, 셸로만 읽던
+    /// [`shell_argv`] 는 `-i` 를 깃발 뭉치로 `s/a/b/` 를 스크립트 이름으로 보아 아무것도 안 냈다.
+    ///
+    /// **`-c` 의 글마저 그 프로그램에는 argv 다** — 2026-09-22 에 쟀다:
+    /// `su -s /bin/echo -c 'IGNORED' 남 A` 는 `-c IGNORED A` 를 찍는다. 셸의 명령줄로 읽던 판은
+    /// 아무도 안 돌리는 글을 규칙에 비춰 **잘못 막았다**.
+    #[test]
+    fn a_shell_switch_naming_something_else_hands_that_program_its_argv() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for cmd in [
+            "su -s /usr/bin/sed 남 -- -i s/a/b/ src/x.rs",
+            "su -s/usr/bin/sed 남 -- -i s/a/b/ src/x.rs",
+            "su --shell /usr/bin/sed 남 -- -i s/a/b/ src/x.rs",
+            "su --shell=/usr/bin/tee 남 -- src/x.rs",
+            "runuser -s /usr/bin/sed 남 -- -i s/a/b/ src/x.rs",
+            // 뭉친 스위치의 값도 같은 자리에서 읽는다 — `-ms /usr/bin/sed` 의 값은 다음 낱말이다.
+            "su -ms /usr/bin/sed 남 -- -i s/a/b/ src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "셸이 아닌 프로그램의 쓰기를 못 봤다 — {cmd}\n{got:?}");
+        }
+        // **셸을 댔으면 전과 같다** — 그 뒤는 셸의 명령줄이다.
+        let got = guard_writes(&[], &cfg(), &here(), root, root, "su -s /bin/bash 남 -- -c 'sed -i s/a/b/ src/x.rs'");
+        assert!(matches!(got, Decision::Deny(_)), "셸을 댄 줄의 글을 안 읽었다\n{got:?}");
+        // **셸이 아닌 프로그램에 넘긴 `-c` 의 글은 안 돈다** — sed 는 moai 를 안 돌린다.
+        for cmd in ["su -s /usr/bin/sed -c 'moai add x' 남 -i s/a/b/ b.rs", "su -s /bin/cat -c 'moai add x' 남"] {
+            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "안 도는 글을 규칙에 비췄다 — {cmd}");
+        }
+        // 그런데 그 argv 자체의 쓰기는 본다 — `tee -c x src/x.rs` 는 그 파일을 정말 쓴다.
+        // 스위치와 값의 차례도 쟀다: `su -s /bin/echo -c IGNORED 남 -- -n hi` 가 `-c IGNORED -n hi`
+        // 를 찍는다. **`--` 로 준다** — 없으면 `-i` 같은 낱말을 su 의 getopt 가 먼저 먹는다(모르는
+        // 옵션이라 그 줄은 실제로도 안 돈다).
+        let got = guard_writes(&[], &cfg(), &here(), root, root, "su -s /usr/bin/tee -c x 남 -- src/x.rs");
+        assert!(matches!(got, Decision::Deny(_)), "그 프로그램의 argv 에 선 쓰기를 못 봤다\n{got:?}");
     }
 
     /// **heredoc 본문의 치환은 치환이다** — 셸에 넘긴 글이 아니다(moai-wlwg). 그 값은 그것을 담은
