@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:f7afd951 -->
+<!-- moai:begin v:0.1.1 hash:b9c4f6c2 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -109,6 +109,10 @@ English goes in as it is.
   when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
 - Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
   (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- **Keep the technical term, and never drop the original.** An everyday word carries several
+  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
+  deleted, nobody can read the sentence back to the code — and
+  a name that came from the code goes in exactly as it is
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`
 
