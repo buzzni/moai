@@ -219,6 +219,10 @@ impl Why {
             ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::InvalidData => Trouble::Tls,
             ureq::Error::Io(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => Trouble::Offline,
             ureq::Error::Tls(_) | ureq::Error::Rustls(_) | ureq::Error::Pem(_) => Trouble::Tls,
+            // **우리가 건 상한에 걸린 것은 못 읽는 답이다**(리뷰가 적어 둔 자리). 답이
+            // 256KB 를 넘는 것은 그 자리가 릴리스 API 가 아니라는 뜻이라, 사람이 할 일은
+            // 깨진 JSON 을 받았을 때와 같다 — `MOAI_API_URL` 이 가리키는 자리를 본다.
+            ureq::Error::BodyExceedsLimit(_) => Trouble::Garbled,
             _ => Trouble::Failed,
         };
         Why { kind, said: e.to_string() }
