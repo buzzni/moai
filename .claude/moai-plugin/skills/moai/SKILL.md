@@ -107,6 +107,11 @@ English goes in as it is.
   when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
 - Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
   (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- **Keep the technical term, and never drop the original.** Do not swap `layer`,
+  `network` or `wrapper` for an everyday word and delete the English behind it — an
+  everyday word carries several meanings, so nobody can read the sentence back to the
+  code. A name that came from the code (`Seen::Unasked`) goes in exactly as it is;
+  gloss it in parentheses if the sentence needs it
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`
 

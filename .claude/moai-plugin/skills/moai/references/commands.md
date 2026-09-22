@@ -275,6 +275,9 @@ The always-visible rule is under "Korean text" in `SKILL.md`. This is the proced
 - Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
   make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
 - Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
+- On a term's first mention in a body, put the original in parentheses after the Korean
+  (`레이어(layer)`) and use the Korean alone from there. A repository that wants a fixed
+  list of its own terms keeps that list in its own docs — this rule stands without one
 - If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
 - If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
   That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing

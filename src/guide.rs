@@ -336,6 +336,13 @@ pub const KOREAN_PLUGINS: [(&str, &str); 2] =
 ///
 /// **맞춤법이 마지막이다**(사용자, 리뷰 11번). 윤문이 제일 크게 고치니, 그 뒤를 맞춤법이 다시 본다.
 /// `humanize-korean` 을 긴 글에만 쓰는 까닭은 값이다 — 한 번에 서브에이전트를 1~3번 넘게 부른다.
+///
+/// **용어 보존이 보존 목록과 따로 서는 까닭**(moai-gw5e): 위의 보존 목록은 *글자 그대로 옮겨
+/// 적을 것*(id·명령·경로·숫자)이라 기술 명사가 거기 안 든다. 그 빈자리로 `layer` 가 "층" 이 되고
+/// `latest::Seen::Unasked` 가 "못 물었다" 가 된 글이 이 저장소에 쌓였다 — 일반명사는 뜻이 여러
+/// 개라 원어를 지우면 읽는 쪽이 코드로 못 돌아간다. 윤문 플러그인은 이미 같은 것을 말하지만
+/// (`humanize-korean` 의 `ai-tell-taxonomy.md`), 그 스킬은 글이 다 쓰인 뒤에 돌고 하는 일이
+/// AI 티 제거라 용어를 되살리지 않는다. 그러니 쓰기 전에 읽히는 이 자리에 둔다.
 const KOREAN: &str = r#"**Polish Korean text before it goes into moai** — any title, body, note or `-m`
 that carries even one Hangul character, review text included. Text written only in
 English goes in as it is.
@@ -344,6 +351,11 @@ English goes in as it is.
   when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
 - Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
   (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- **Keep the technical term, and never drop the original.** Do not swap `layer`,
+  `network` or `wrapper` for an everyday word and delete the English behind it — an
+  everyday word carries several meanings, so nobody can read the sentence back to the
+  code. A name that came from the code (`Seen::Unasked`) goes in exactly as it is;
+  gloss it in parentheses if the sentence needs it
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`"#;
 
@@ -365,6 +377,9 @@ const KOREAN_DETAIL: &str = r#"The always-visible rule is under "Korean text" in
 - Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
   make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
 - Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
+- On a term's first mention in a body, put the original in parentheses after the Korean
+  (`레이어(layer)`) and use the Korean alone from there. A repository that wants a fixed
+  list of its own terms keeps that list in its own docs — this rule stands without one
 - If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
 - If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
   That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing"#;
