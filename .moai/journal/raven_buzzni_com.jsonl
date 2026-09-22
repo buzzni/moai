@@ -536,3 +536,5 @@
 {"ts":"2026-09-22T01:49:12Z","id":"moai-ae6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T01:51:31Z","id":"moai-ae6q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 주석 두 자리. 토큰은 세션이 안 끝나 모른다)"}
 {"ts":"2026-09-22T01:51:31Z","id":"moai-ae6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-22T01:54:01Z","id":"moai-6k1r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T01:54:01Z","id":"moai-prdh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
