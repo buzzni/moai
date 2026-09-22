@@ -14,10 +14,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 - The release check says *why* it could not ask. The version line still reads as
   one of four, but the fourth now carries the reason in parentheses — no network,
-  timed out, rate limited, the server refused, TLS failed, unreadable answer, odd
+  timed out, rate limited, a server error, TLS failed, unreadable answer, odd
   tag, the call failed — because what a person can do about it differs per reason:
   waiting fixes a rate limit, a proxy that swaps certificates never will. Nothing
   is blocked and the exit code never changes.
+- `latest.toml` also records **why** the last call could not answer, so the reason
+  stands for the whole day rather than only on the run that asked it. A run that
+  heard a tag clears it: the file holds one answer, and a tag is that answer.
 - `latest.toml` also records **where** the answer came from, and an answer is only
   reused for the place it came from. Pointing `MOAI_API_URL` at a mirror once no
   longer makes that mirror's tag stand as the real release for a day, and the
