@@ -170,12 +170,11 @@ fn decide(
         Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
             let now = model::now();
             let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
-            // `moai status` 와 같은 알림을 싣는다(`agents_notice`) — 낡은 AGENTS.md 를 모르고
-            // 시작하는 것이 바로 이 보드를 받는 새 세션이다. 세션의 셸 자리는 stdin 의 `cwd` 라
-            // 이미 여기로 옮겨 왔다(`-C` 가 아니다).
-            st.notices.extend(crate::cmd::init::agents_notice(repo.here(), false));
-            st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), false));
-            st.notices.extend(crate::cmd::merge_driver::notice(&repo, false));
+            // `moai status` 와 **같은 자**로 싣는다([`crate::cmd::status::install_notices`]) — 낡은
+            // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
+            // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
+            // `cwd` 라 이미 여기로 옮겨 왔으므로 `chdir` 은 `false` 다 (`-C` 가 아니다).
+            st.notices.extend(crate::cmd::status::install_notices(&repo, false));
             // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
             // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
             let source = crate::cmd::status::source_of(&repo);

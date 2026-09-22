@@ -191,10 +191,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 알림을 더하면 다른 쪽은 조용하고, 그것을 잡아 줄 것이 아무 데도 없다. 더하는 자리가 여기
 /// 하나면 더하는 것만으로 두 표면이 함께 움직인다.
 ///
-/// **아직 부르는 곳은 하나다** — 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`)는 그 셋을 제
-/// 줄로 들고 있다. 옆 세션이 그 파일을 쥐고 있어 이 판에서 안 바꿨고, 바꾸는 일은 moai-6k1r
-/// 이다. 그때까지 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices`
-/// 하나다 — 여기에만 알림을 더하면 그 시험이 먼저 붉어진다.
+/// **부르는 곳은 둘이다** — `moai status` 와 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`,
+/// moai-6k1r). 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices` 다 —
+/// 여기에 알림을 더하면 둘이 함께 움직이고, 한쪽만 떼면 그 시험이 먼저 붉어진다.
 ///
 /// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
 /// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
