@@ -5,7 +5,7 @@
 //! `view.rs` 에 있으면 표면이 늘 때마다 같은 것을 다시 짜야 한다.
 
 use crate::config::Config;
-use crate::model::{Issue, Kind, days_since};
+use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -2781,10 +2781,6 @@ fn blocked_since<'a>(
         .min()
         .map_or(i.status_since.as_str(), |b| b.max(i.status_since.as_str()))
 }
-/// 지금보다 이만큼(초) 넘게 뒤인 시각은 "먼 미래" 로 본다(moai-ugjp). 하루 — 겹쳐 보는 다른
-/// 기계의 몇 초~몇 분 앞선 시계나 시간대 실수는 안 걸리고, 손으로 고친 2099 는 걸린다.
-const FUTURE_SLACK_SECS: i64 = 86_400;
-
 /// 줄이 든 시각 일곱 가운데 하나라도 지금보다 [`FUTURE_SLACK_SECS`] 넘게 뒤인가.
 ///
 /// 도구는 제 시계로만 적으므로 그런 시각은 손으로 고친 줄이나 크게 틀린 시계에서 온다.

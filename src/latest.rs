@@ -220,14 +220,21 @@ pub struct Held {
 impl Held {
     /// 이 답이 아직 창 안인가. 때가 꼴이 아니면 낡은 것으로 본다 — 못 읽는 도장 하나가 묻기를
     /// 영영 막으면, 그 파일을 지우는 것 말고 되돌릴 길이 없다.
+    ///
+    /// **조금 앞선 도장은 봐준다**([`crate::model::FUTURE_SLACK_SECS`], moai-21un). 설정
+    /// 디렉터리를 나눠 쓰는 두 기계의 시계가 1초만 어긋나도 한쪽이 찍은 도장이 다른 쪽에는
+    /// 미래로 보여, 그 기계는 부를 때마다 바깥을 두드렸다 — 에이전트가 도는 고리에서는
+    /// GitHub 의 시간당 60판을 태우는 길이다. 봐주는 자는 이 저장소가 이미 쓰던 것과 같다
+    /// (`report` 의 `far_ahead`, `model::days_since` 의 0 클램프).
+    ///
+    /// **크게 앞선 도장은 여전히 낡은 것이다.** 시계를 되돌린 기계나 손으로 적은 2099 가 창을
+    /// 영영 열어 두지 못하게 한다.
     pub fn fresh(&self, now: &str, window: i64) -> bool {
         let (Some(then), Some(now)) = (crate::model::parse_rfc3339(&self.asked_at), crate::model::parse_rfc3339(now))
         else {
             return false;
         };
-        // **앞선 도장도 낡은 것이다.** 시계를 되돌린 기계나 손으로 적은 미래의 때가 창을 영영
-        // 열어 두지 못하게 한다.
-        (0..window).contains(&(now - then))
+        (-crate::model::FUTURE_SLACK_SECS..window).contains(&(now - then))
     }
 }
 
@@ -268,9 +275,10 @@ fn new_doc() -> toml_edit::DocumentMut {
 
 /// 답을 적는다. **스냅샷 먼저, 저널 나중** 과 같은 자리에 선다 — 이 파일은 잃어도 한 번 더 묻는
 /// 것이 전부라 **락을 안 잡는다.** 프로세스 둘이 같이 쓰면 늦은 쪽이 남고, 둘 다 같은 것을 적으므로
-/// 진 쪽도 잃는 것이 없다. (같은 프로세스의 실 둘이 함께 쓰는 것은 다른 이야기다 —
-/// [`crate::store::write_atomic`] 의 임시 이름이 pid 하나라 겹친다. [`spawn`] 을 한 판에 하나만
-/// 띄우는 것은 부르는 쪽의 몫이고, 겹쳐도 깨진 파일은 다음 부름이 없는 것으로 읽어 한 번 더 묻는다.)
+/// 진 쪽도 잃는 것이 없다. 같은 프로세스의 실 둘도 같다 — [`crate::store::tmp_name`] 이 임시
+/// 이름을 실마다 가르므로(moai-mpf4) 둘 중 한쪽의 글이 통째로 남는다. [`spawn`] 을 한 판에
+/// 하나만 띄우는 것은 여전히 부르는 쪽의 몫이지만, 그것은 실과 소켓을 아끼자는 것이지 파일이
+/// 깨지기 때문이 아니다.
 ///
 /// **`write_atomic` 은 fsync 를 두 번 한다** — 잃어도 그만인 이 파일에는 과한 durability 지만,
 /// 쓰기 길을 하나로 두는 것(`write_atomic_as` 를 되살리지 않는다는 moai-c1s3 결정)이 더 값지다.
@@ -698,12 +706,30 @@ mod tests {
         assert_eq!(held.tag.as_deref(), Some("v9.9.9"), "알던 것을 지웠다");
     }
 
+    /// **앞선 도장은 슬랙만큼만 봐준다**(moai-21un). 몇 초 어긋난 시계가 부를 때마다 바깥을
+    /// 두드리게 하지 않으면서, 손으로 적은 먼 미래는 그대로 낡은 것으로 잡는다. 경계는
+    /// [`crate::model::FUTURE_SLACK_SECS`] 고, `report::far_ahead` 와 **같은 쪽이 열린다** —
+    /// 딱 그만큼 앞선 것은 둘 다 봐준다.
     #[test]
     fn a_stamp_from_the_future_does_not_hold_the_window_open() {
-        let held = Held { asked_at: "2026-09-22T00:00:00Z".into(), tag: Some("v0.1.0".into()) };
-        assert!(!held.fresh("2026-09-21T00:00:00Z", WINDOW), "시계를 되돌린 기계가 영영 안 묻는다");
+        let slack = crate::model::FUTURE_SLACK_SECS;
+        let far = Held { asked_at: "2099-01-01T00:00:00Z".into(), tag: Some("v0.1.0".into()) };
+        assert!(!far.fresh("2026-09-21T00:00:00Z", WINDOW), "시계를 되돌린 기계가 영영 안 묻는다");
+        // 1초 어긋난 시계 — 이것까지 낡았다고 하면 그 기계는 부를 때마다 묻는다.
+        let ticking = Held { asked_at: "2026-09-21T00:00:01Z".into(), tag: Some("v0.1.0".into()) };
+        assert!(ticking.fresh("2026-09-21T00:00:00Z", WINDOW), "1초 앞선 도장에 다시 물었다");
+        // 경계를 재는 자리. `slack` 만큼 앞선 것은 봐주고, 1초 더 앞선 것은 안 봐준다.
+        let at = |ahead: i64| Held { asked_at: stamp(ahead), tag: None };
+        assert!(at(slack).fresh("2026-09-21T00:00:00Z", WINDOW), "딱 슬랙만큼 앞선 도장을 낡았다고 했다");
+        assert!(!at(slack + 1).fresh("2026-09-21T00:00:00Z", WINDOW), "슬랙을 넘은 도장이 창을 열어 뒀다");
         let broken = Held { asked_at: "어제".into(), tag: None };
         assert!(!broken.fresh("2026-09-21T00:00:00Z", WINDOW), "못 읽는 도장이 묻기를 막는다");
+    }
+
+    /// `2026-09-21T00:00:00Z` 에서 `ahead` 초 뒤인 때를 RFC3339 로. 시험이 경계를 초 단위로
+    /// 짚으려면 날짜를 손으로 세지 않는 자가 있어야 한다.
+    fn stamp(ahead: i64) -> String {
+        crate::model::format_rfc3339(crate::model::parse_rfc3339("2026-09-21T00:00:00Z").unwrap() + ahead)
     }
 
     #[test]
