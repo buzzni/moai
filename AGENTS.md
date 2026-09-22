@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:9ca93c04 -->
+<!-- moai:begin v:0.1.1 hash:e30c1550 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -145,8 +145,8 @@ member, the ones added later included.
 
     moai edit <epic> --milestone <milestone>
 
-Copy that id off the `moai ready` header. What is checked is the shape alone, so
-`moai-zzzz` goes in with exit 0 and surfaces only much later as a
+Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
+alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
 `dangling_milestone` warning.
 
 **And copy the idea's body onto the epic you unfolded.** `promote` does not carry

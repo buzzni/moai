@@ -143,10 +143,11 @@ yet. Do this count again for every further idea. An epic left open with only
 first-column members (what brief 7-1 left behind) shows as `in_progress` but is not
 picked up — there is no worktree and no picked-up member, so do not drop ideas over it.
 
-**If a milestone is running, what is inside it comes first.** The header of `moai ready`
-says what is running and how many it held back outside it, and the `moai status` notice
-shines on the same thing. Then what you send this round is work attached to that
-milestone — an idea from outside waits for the next round unless it should stand as `p0`.
+**If a milestone is running, what is inside it comes first.** The line `moai ready` prints
+under its list says what is running and how many it held back outside it, and the
+`moai status` notice shines on the same thing. Then what you send this round is work
+attached to that milestone — an idea from outside waits for the next round unless it
+should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
@@ -303,6 +304,7 @@ are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
 **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
 Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
 **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
+`max` is the top of the ladder: a step above it is still `max`.
 The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
@@ -320,8 +322,8 @@ reads its own place as the root.
 when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
-in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off the
-`moai ready` header; do not write it from memory.
+in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
+the line `moai ready` prints under its list for the running milestone; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -448,6 +450,7 @@ worker reads in its own window in 9-1.
        **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
        Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
        **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
+       `max` is the top of the ladder: a step above it is still `max`.
        The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
        If the window is not on that model, ask the person watching it for `/model <that model>`
        before you call — as in `/model opus` (a review agent inherits the window's model).
@@ -478,6 +481,10 @@ worker reads in its own window in 9-1.
        5. Does anything newly open on a path that never opened it — not "is a lock held while
           opening", which is half of it. A read path that never opened the config and now parses
           it stops on a config that is a FIFO, lock or no lock
+       **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
+       next person reads; the review command does not read the issue. Going through a subagent,
+       put these five in its prompt; going through the command, hold them against what came back
+       before you take the findings in
        **While the review is running, do not touch this worktree's branch or its working tree.**
        `--fix` leaves its fixes in the working tree uncommitted, so `reset --hard`, `rebase` and
        `commit --amend` throw them away — that has happened, told to do it by a supervisor saying
@@ -524,6 +531,22 @@ worker reads in its own window in 9-1.
        can a `Regression-of:` line be written (did something already merged break). Those two are
        inside; the rest is outside. A new axis is not made because it would become a fourth
        vocabulary beside the column, the kind and the defer
+    7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
+       for the release being prepared**, and write it if it does not. Write it **here, in the
+       worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
+       the root, which every session shares and where the only commits that belong are the
+       tracker's and the merge itself. Committed here it rides the merge commit instead
+         git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+       This window is the only one that knows what the epic did, and it is the only one that
+       knows what was taken out as well as what went in — a section filled in later from commit
+       subjects shows what was added and misses what was removed, because a removal stands under
+       a revert subject of its own. It is cheaper here than in the window that closes the
+       section: v0.1.1 stood with 327 commits behind it, four of which touched the CHANGELOG, and
+       three epics named in its section out of the twenty-four the release held; the rest were
+       written by the window that closed it, 91 lines in one go. The release workflow cuts that
+       section by version name and hands it to `--notes-file` as it is, so a missing section
+       reads to whoever receives it as the whole release. **Nothing checks this** — a check here
+       would be a gate, and an empty section must not stop a release
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
        session in the root again.
@@ -560,18 +583,6 @@ worker reads in its own window in 9-1.
        Quote free text with single quotes — inside double quotes the shell expands backticks and
        `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
          moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
-    9-2. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
-       for the release being prepared**, and write it if it does not. This window is the only one
-       that knows what the epic did, and it is the only one that knows what was taken out as well
-       as what went in — a section filled in later from commit subjects shows what was added and
-       misses what was removed, because a removal stands under a revert subject of its own. It is
-       cheaper here than in the window that closes the section: v0.1.1 stood with 327 commits
-       behind it, four of which touched the CHANGELOG, and three epics out of twenty-four named
-       in its section; the nine that were missing were written by the window that closed it, 131
-       lines in one go. The release workflow cuts that section by version name and hands it to
-       `--notes-file` as it is, so a missing section reads to whoever receives it as the whole
-       release. **Nothing checks this** — a check here would be a gate, and an empty section must
-       not stop a release
     10. Close them after that. **Run `moai mv <member> done` only once that merge has really
        landed** — a worker moved them before the merge and had to undo it. Do not close the
        members left in the first column by 7-1 and 4-3 — those members keep the epic open. While

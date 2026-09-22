@@ -47,10 +47,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   by an item inserted above it, a test that cannot go red on a revert, a value set
   up in only one of the several paths that build it, comments that no longer say
   what the code does, and a read path that newly opens something it never opened.
-  They go on top of the angle rather than in place of it.
-- Closing an epic looks at whether that epic's line stands in the CHANGELOG section
-  for the release being prepared. The window that closes an epic is the only one
-  that knows what was taken out as well as what went in. Nothing checks it.
+  They go on top of the angle rather than in place of it, and they have to reach the
+  review itself — the angle on the issue is what the next person reads.
+- An epic checks, in its worktree and before the merge, whether its line stands in
+  the CHANGELOG section for the release being prepared. That window is the only one
+  that knows what was taken out as well as what went in, and writing it there lets
+  the line ride the merge instead of landing in the shared root checkout. Nothing
+  checks it.
 - The review grades gained the case they were missing: a worktree that carries
   members of two epics is measured as one epic and then raised one more step.
 
