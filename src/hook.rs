@@ -4918,16 +4918,18 @@ fn prose(args: &[String]) -> Vec<String> {
 ///
 /// **용어도 함께 묻는다**(moai-y9kv). 보존 목록이 세는 것은 *글자 그대로 옮겨 적을 것*(id·명령·경로·
 /// 숫자)이라 기술 명사가 빠졌고, 그 빈자리로 `layer` 가 "층" 이 된 글이 쌓였다. 윤문 플러그인은 글이 다
-/// 쓰인 뒤에 돌아 용어를 되살리지 않으니 여기서 묻는다 — 그래도 막지는 않는다(moai-mthy).
+/// 쓰인 뒤에 돌아 용어를 되살리지 않으니 여기서 묻는다 — 그래도 막지는 않는다(moai-mthy). 그 한 줄은
+/// [`crate::guide::KEEP_TERMS`] 에서 온다 — 안내 글과 손으로 옮겨 적으면 한쪽만 고쳐도 안 붉어진다.
 pub fn korean_notice(at: &str, missing: &[&str]) -> Decision {
+    let keep = crate::guide::KEEP_TERMS;
     let mut said = format!(
         "Did you polish the Korean text you just put into moai — `korean-skills:humanizer`, \
          `humanize-korean:humanize-korean` when it runs past 20 lines, and `korean-skills:grammar-checker` last? \
          Polish an unpolished title or body and write it back with `moai{at} edit`. A note and `-m` only pile up in \
          the journal and cannot be fixed, so do not write the same text again: polish from the next one on. \
          Leave ids, commands, paths, numbers, code fragments and the fixed-form lines as they are, \
-         and keep the technical terms — a name that came from the code goes in as it is, never traded \
-         for an everyday word with the English dropped."
+         and keep the technical terms — {keep}, never traded for an everyday word with the English \
+         dropped."
     );
     if !missing.is_empty() {
         said.push_str(&format!(
@@ -10113,12 +10115,26 @@ mod korean_tests {
     /// 기술 명사가 빠졌고, 그 빈자리로 `layer` 가 "층" 이 되고 `latest::Seen::Unasked` 가 "못 물었다" 가
     /// 된 글이 쌓였다. 윤문 플러그인은 글이 다 쓰인 뒤에 돌아 용어를 되살리지 않으니, 비추는 줄이
     /// 그것을 묻는다 — 여전히 **막지 않는다**(moai-mthy).
+    ///
+    /// **막지 않는지는 `missing` 이 든 갈래로 잰다.** 빈 `missing` 을 두 번 불러 견주던 판은 앞의
+    /// `let ... else` 가 이미 증명한 것을 다시 물어 언제나 지나갔다 — 막는 답으로 바뀔 곳은 글을
+    /// 덧붙이는 그 갈래다.
+    ///
+    /// **비추는 줄은 영어다**(moai-54k2 리뷰, 이 파일의 `the_loaded_text_speaks_the_language_it_is_handed`
+    /// 곁의 결정). 그 시험은 말묶음을 받는 갈래만 돌아 이 줄을 안 보니, 남은 한글을 여기서 센다.
     #[test]
     fn the_korean_notice_asks_to_keep_the_terms() {
+        let keep = crate::guide::KEEP_TERMS;
         let Decision::Context(said) = korean_notice("", &[]) else { panic!("비추는 답이 아니다") };
         assert!(said.contains("keep the technical terms"), "용어를 지켰는지 안 묻는다\n{said}");
-        assert!(said.contains("came from the code"), "코드에서 온 이름을 안 가린다\n{said}");
-        assert!(matches!(korean_notice("", &[]), Decision::Context(_)), "막는 답이 됐다");
+        assert!(said.contains(keep), "용어 보존 줄이 안내 글과 갈라졌다 — {keep}\n{said}");
+        assert!(!hangul(&said), "비추는 줄에 한글이 섰다\n{said}");
+        // 글을 덧붙이는 갈래도 비출 뿐이다 — 여기가 막는 답으로 바뀌면 moai-mthy 가 뒤집힌다.
+        let Decision::Context(more) = korean_notice("", &["korean-skills@korean-skills"]) else {
+            panic!("막는 답이 됐다")
+        };
+        assert!(more.contains(keep), "플러그인이 빠진 갈래에서 용어 보존 줄이 사라졌다\n{more}");
+        assert!(!hangul(&more), "비추는 줄에 한글이 섰다\n{more}");
     }
 
     /// `humanize-korean` 이 cwd 에 만드는 `_workspace/` 는 규칙 2 가 세지 않는다 — 하위 디렉터리에 선

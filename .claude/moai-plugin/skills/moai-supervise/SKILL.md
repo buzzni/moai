@@ -424,9 +424,10 @@ worker reads in its own window in 9-1.
        `humanize-korean:humanize-korean` outside the repository (the scratchpad), delete that
        `_workspace/`, come back into the worktree (standing outside it the hook cannot find the
        tracker and no rule stands), and finish with `korean-skills:grammar-checker` for spelling.
-       Leave ids, commands, paths and numbers as they are, and do not polish the model line in
-       9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:` first line of a
-       shortened review text. **Give a review subagent these words too**
+       Leave ids, commands, paths and numbers as they are, and keep the technical terms —
+       a name that came from the code goes in exactly as it is, never traded for an everyday word with the English dropped. Do not polish the
+       model line in 9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:`
+       first line of a shortened review text. **Give a review subagent these words too**
     5. **Do not review member by member.** When one member is finished, run the tests, commit and
        move to the next — the review looks at the whole epic once, in 7, after every member is
        finished. One review is expensive; do not call it as many times as there are members. The
