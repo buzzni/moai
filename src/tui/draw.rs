@@ -706,6 +706,16 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if app.site.warnings > 0 {
         parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &app.site.warnings.to_string())]));
     }
+    // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 층의 줄이 대는 `+N`
+    // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
+    //
+    // **글은 층의 상세와 한 자리에서 온다**(`tui.place.notices`) — 같은 수를 두 화면이 다른
+    // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
+    // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
+    // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
+    if app.site.notices > 0 {
+        parts.push(fill(say(lang, "tui.place.notices"), &[("n", &app.site.notices.to_string())]));
+    }
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
@@ -4776,6 +4786,40 @@ pub(super) mod tests {
         a.trouble = Some("다시 읽지 못했다 — 락".into());
         let (text, urgent) = banner(&a).unwrap();
         assert!(urgent && text.find("다시 읽지").unwrap() < text.find("담김").unwrap(), "{text}");
+    }
+
+    /// **층의 `+N` 은 들어가면 짝이 있다**(moai-k6ff, 2026-09-22 사용자 결정). 알림 수를 대는
+    /// 줄에서 Enter 를 치면 그 화면의 배너가 같은 수를 댄다 — 한때 안쪽에 그 짝이 없어 `+3` 이 선
+    /// 줄로 들어가면 아무 말도 없는 화면이 섰다.
+    ///
+    /// **경고와 낱말로 갈린다** — 알림만 있는 것은 고칠 것이 없다는 뜻이라, 수만 같고 낱말이
+    /// 같으면 담아 둔 것이 경고로 읽힌다. **80·100·120 을 다 본다**: 배너에 낱말이 하나 더 들어
+    /// 좁은 창에서 먼저 잘리는 자리다.
+    #[test]
+    fn the_banner_names_the_notices_the_layer_counted() {
+        let mut a = app();
+        a.notice = None;
+        a.site.warnings = 0;
+        a.site.notices = 3;
+        let (text, urgent) = banner(&a).expect("알림만 있는데 배너가 아무 말도 안 한다");
+        assert!(text.contains("알림 3건"), "{text}");
+        assert!(!text.contains("드러난 것"), "알림을 경고의 낱말로 댔다 — {text}");
+        assert!(!urgent, "알림 하나에 급한 색이 섰다");
+
+        // 경고와 함께 서면 경고가 앞이다 — 고칠 것이 먼저다.
+        a.site.warnings = 4;
+        let (text, _) = banner(&a).expect("배너가 안 섰다");
+        assert!(text.find("드러난 것").unwrap() < text.find("알림 3건").unwrap(), "{text}");
+
+        for w in [80, 100, 120] {
+            let lines = render(&mut a, w, 12);
+            assert!(lines[1].contains("알림 3건"), "{w}칸에서 알림 수가 잘렸다 — {:?}", lines[1]);
+            assert!(lines.iter().all(|l| crate::text::width(l) <= w.into()), "{w}칸을 넘겼다");
+        }
+
+        a.site.notices = 0;
+        let (text, _) = banner(&a).expect("경고가 있는데 배너가 안 섰다");
+        assert!(!text.contains("알림"), "알림이 0인데 줄이 섰다 — {text}");
     }
 
     /// **층이 안 선 까닭은 80칸에서도 까닭째 선다**(moai-4t1l). 그 글은 까닭이 꼬리라,

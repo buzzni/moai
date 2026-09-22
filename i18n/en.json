@@ -14,6 +14,7 @@
   "overview.worktree_trouble_above": "Trouble in sibling worktrees {n} — the lines above",
   "overview.warnings": "Warnings {n}",
   "overview.warnings_fatal": "Warnings {n} (data is broken {f})",
+  "overview.notices": "Notices {n}",
   "overview.next": "Next:  `moai ready` shows what to pick in each project",
   "overview.picks": "{n}",
   "overview.unreadable": "Unreadable rows {n} — `{go}` names which",

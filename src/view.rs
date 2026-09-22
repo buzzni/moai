@@ -2145,7 +2145,8 @@ pub fn projects_status(
                 b.unread.len()
             }
         };
-        // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
+        // **알림은 경고에 안 든다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다. 아래에
+        // 제 줄로 선다(moai-zog5).
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
@@ -2180,6 +2181,20 @@ pub fn projects_status(
                 fill(say(lang, "overview.warnings_fatal"), &[("n", &n.to_string()), ("f", &f.to_string())])
             ),
         });
+        // **알림은 제 줄에 선다**(moai-zog5, 2026-09-22 사용자 결정). 글리프는 흐린 `+` 고 경고의
+        // `!` 와 가른다 — 안쪽 `moai status` 가 같은 것을 같은 글리프로 낸다([`status`]). 수만
+        // 대고 무엇인지는 `moai -C <경로> status` 가 낸다: 프로젝트마다 알림 셋을 다 펴면 등록이
+        // 다섯만 돼도 한 화면에 안 든다.
+        if !b.status.notices.is_empty() {
+            let said = fill(say(lang, "overview.notices"), &[("n", &b.status.notices.len().to_string())]);
+            // 가는 길은 **덩어리에 한 번만** 댄다 — 경고 줄이 이미 그것을 댔으면 같은 명령을 두
+            // 줄에 거듭 적어 80칸에서 두 줄을 다 밀어낸다.
+            let go = match n {
+                0 => format!("  {go}"),
+                _ => String::new(),
+            };
+            out.push(format!("  {} {said}{go}", paint(style::DIM, "+")));
+        }
     }
     problems(&mut out, reg, lang);
     out.push(String::new());

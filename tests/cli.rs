@@ -2568,6 +2568,18 @@ fn the_project_layer_counts_the_same_notices_as_the_board() {
 
     let rows = ok_with(&out, &cfg, &["tui", "--json"]);
     assert!(rows.contains(&format!("\"notices\":{want}")), "층과 보드가 알림을 달리 센다 (보드 {want})\n{rows}");
+
+    // **밖에서 본 한눈 보기도 같은 셋을 센다**(moai-zog5, 2026-09-22 사용자 결정). 한때 이 화면만
+    // `install_notices` 를 안 실어, 같은 디렉터리를 두고 보드는 1건, 층은 3건을 댔다 — 세션이
+    // 시작하는 화면이 밖에서 부른 이것인데, 그 하나만 설치가 어긋난 것을 조용히 넘겼다.
+    let overview = ok_with(&out, &cfg, &["status", "--json"]);
+    let tail =
+        overview.split("\"notices\":").nth(1).unwrap_or_else(|| panic!("한눈 보기에 notices 가 없다\n{overview}"));
+    let seen = tail.matches("\"notice\":true").count();
+    assert_eq!(seen, want, "한눈 보기와 보드가 알림을 달리 센다\n{overview}");
+    for kind in ["agents_hand_edited", "gitignore_rules", "merge_driver_absent", "deferred"] {
+        assert!(overview.contains(kind), "한눈 보기에 {kind} 알림이 안 섰다\n{overview}");
+    }
 }
 
 /// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께

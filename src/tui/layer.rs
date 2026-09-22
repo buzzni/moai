@@ -116,9 +116,21 @@ pub struct Place {
 /// 이것은 프로젝트마다 `git check-attr`·`git config` 와 심긴 줄의 [`crate::cmd::merge_driver`]
 /// probe 를 **프로세스로** 띄우는 일이다(등록 다섯에 32ms, `moai-nzyh` 의 표).
 #[derive(Debug, Clone, Copy)]
-struct Told {
-    count: usize,
-    at: std::time::Instant,
+pub(super) struct Told {
+    pub(super) count: usize,
+    pub(super) at: std::time::Instant,
+}
+
+impl Told {
+    /// 방금 물어서 센 값.
+    pub(super) fn now(count: usize) -> Told {
+        Told { count, at: std::time::Instant::now() }
+    }
+
+    /// 아직 다시 물을 때가 아니면 그 수 — 부르는 쪽은 그것을 그대로 세고 git 을 안 띄운다.
+    pub(super) fn held(told: Option<Told>) -> Option<usize> {
+        told.filter(|t| t.at.elapsed() < ASK_INSTALL_EVERY).map(|t| t.count)
+    }
 }
 
 /// 한 줄을 다시 읽을 까닭이 되는 표식.
@@ -590,10 +602,7 @@ impl Layer {
                     || (clocked && due(p.read_at))
                     || marks_of(&p.path) != p.marks
             })
-            .map(|p| Want {
-                path: p.path.clone(),
-                install: p.install.filter(|t| t.at.elapsed() < ASK_INSTALL_EVERY).map(|t| t.count),
-            })
+            .map(|p| Want { path: p.path.clone(), install: Told::held(p.install) })
             .collect()
     }
 
@@ -681,7 +690,7 @@ impl Layer {
                 // **물어서 센 판만 때를 찍는다**(moai-nzyh) — 들고 있던 값을 그대로 쓴 답에도
                 // 찍으면 [`ASK_INSTALL_EVERY`] 가 영영 안 지나, 첫 판에 센 수가 세션 내내 선다.
                 if let Some(count) = l.asked_install {
-                    p.install = Some(Told { count, at: std::time::Instant::now() });
+                    p.install = Some(Told::now(count));
                 }
                 p.marks = l.marks;
                 p.read_at = Some(std::time::Instant::now());
@@ -711,6 +720,19 @@ impl Layer {
     /// 지금 세대([`Layer::rounds`]) — 뜨는 읽기가 이 값을 들고 간다(moai-x1hb).
     pub(super) fn round(&self) -> u64 {
         self.rounds
+    }
+
+    /// 그 줄이 물어 둔 설치 알림 — 값과 물은 때다(moai-nzyh). 줄을 통째로 읽는 길
+    /// ([`super::App::read_wanted`])과 들어가는 길도 쓸기와 같은 자([`Told::held`])로 재서 쓴다.
+    pub(super) fn told_install(&self, path: &Path) -> Option<Told> {
+        self.places.iter().find(|p| p.path == path)?.install
+    }
+
+    /// 물어서 센 값을 그 줄에 적는다 — 줄을 읽는 길이 물었을 때다(moai-nzyh).
+    pub(super) fn stamp_install(&mut self, path: &Path, count: usize) {
+        if let Some(p) = self.places.iter_mut().find(|p| p.path == path) {
+            p.install = Some(Told::now(count));
+        }
     }
 
     /// 그 줄을 `round` **뒤에** 손으로 세웠는가(moai-x1hb) — 읽기의 답을 들일지를 가른다.
@@ -1063,7 +1085,10 @@ impl App {
         // 것과 App 에 남기는 것이 갈리면 목록은 겹친 줄인데 뱃지는 꺼진 화면이 난다. 세우는
         // 것은 **읽은 뒤**다 — 못 읽으면 선 자리도 깃발도 그대로여야 한다.
         let overlay = true;
-        match (self.read)(&repo, overlay, self.site.lang) {
+        // **들어가는 읽기도 들고 있던 설치 알림을 쓴다**(moai-k6ff) — 그 줄이 층에서 이미 물어 둔
+        // 값이다. 다시 물으면 들어가는 키 하나에 프로세스가 셋까지 뜨고, 수는 어차피 같다.
+        let held = Told::held(self.layer.as_ref().and_then(|l| l.told_install(&path)));
+        match (self.read)(&repo, overlay, self.site.lang, held) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
                 let leaving = match &self.layer.as_ref().map(|l| &l.at) {
@@ -4067,7 +4092,7 @@ mod tests {
         // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
         std::fs::write(main.join(".git/config"), "[core\n").unwrap();
         let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now());
-        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko).unwrap();
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, None).unwrap();
         assert!(f.unfound.is_some(), "전제: git 이 저장소를 거절하지 않았다");
         assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
 
@@ -4180,7 +4205,7 @@ mod tests {
 
         // 쓰기 **전에** 뜬 읽기 — 그 스냅샷을 들고 있다.
         let repo = Repo::at(two.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
-        let before = super::super::prepare(&repo, false, crate::i18n::Lang::Ko).expect("두 줄을 읽는다");
+        let before = super::super::prepare(&repo, false, crate::i18n::Lang::Ko, None).expect("두 줄을 읽는다");
         let (rtx, rrx) = std::sync::mpsc::channel();
         let round = a.layer.as_ref().unwrap().round();
         a.layer.as_mut().unwrap().reading = Some((two.clone(), rrx, std::thread::spawn(|| {}), round));
@@ -4204,6 +4229,25 @@ mod tests {
         let site = a.site_of_place(at).expect("버린 뒤에 다시 읽으러 가는 자가 없다");
         let done = site.issues.iter().any(|i| i.id == "argos-0001" && i.status.as_str() == "done");
         assert!(done, "다시 읽고도 쓰기 전의 줄이 섰다");
+        join_threads(&mut a);
+    }
+
+    /// **들어간 화면은 층이 댄 알림 수를 그대로 댄다**(moai-k6ff, 2026-09-22 사용자 결정). 층의
+    /// `+N` 을 보고 Enter 를 쳤는데 안쪽이 다른 수를 대면, 그 줄에서 본 셋을 어디서도 못 본다.
+    ///
+    /// **재는 자가 여기 선다** — 한쪽에만 알림을 더하거나 한쪽에서만 빼는 날 이 줄이 붉어진다.
+    #[test]
+    fn entering_a_row_carries_the_notice_count_the_layer_showed() {
+        let s = Scratch::fenced("layer-notices-inside");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        // 알림 하나를 세운다 — 미룬 것. 설치가 어긋난 셋과 달리 git 없이도 선다.
+        let Look::Open { sum } = look(&a, "one") else { panic!("첫 줄이 안 열렸다") };
+        let counted = sum.notices;
+        assert!(counted > 0, "시험의 전제 — 층이 셀 알림이 하나는 있다");
+
+        a.enter_project(0);
+        assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+        assert_eq!(a.site.notices, counted, "층이 댄 알림 수와 들어간 화면의 수가 갈렸다");
         join_threads(&mut a);
     }
 }

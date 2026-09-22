@@ -273,6 +273,15 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (lost, unread) =
                 crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
             status.warnings.extend(lost);
+            // **설치가 어긋난 것도 여기서 센다**(moai-zog5, 2026-09-22 사용자 결정) — 안쪽
+            // `moai status` 와 탐색기의 프로젝트 층이 이미 세는 그 셋이다([`install_notices`]).
+            // 한때 이 화면만 안 세어, 같은 디렉터리를 두고 밖에서 본 보드는 알림 1건, 층은 3건을
+            // 댔다. 세션이 시작하는 화면이 밖에서 부른 `moai status` 인데, 그 한 화면만 설치가
+            // 어긋난 것을 조용히 넘겼다.
+            //
+            // **`chdir` 은 `false` 다** — 층과 같은 자(`tui::layer::summarize`). 여기 서는 줄은
+            // 남의 저장소라 [`crate::cmd::init::away_root`] 가 잰 자리대로 `-C <경로>` 를 얻는다.
+            status.notices.extend(install_notices(repo, false));
             view::Board {
                 cfg: &repo.config,
                 status,
