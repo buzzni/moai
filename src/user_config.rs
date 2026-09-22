@@ -1447,6 +1447,8 @@ fn draws_line(item: &Item) -> bool {
 /// 배열의 꼬리(`Array::trailing`)에 통째로 있으므로 그것을 줄 끝으로 읽고, 들여쓰기는 거기 선 주석에서
 /// 든다. 진짜 한 줄 배열(`[]`·`["a"]`)은 옮길 줄 끝이 없어 `toml_edit` 의 기본 모양(`, "새것"`)이 곧
 /// 제 모양이다.
+///
+/// **따옴표도 끝 원소의 것을 따른다**([`worded`], moai-kh81).
 fn push_word(words: &mut toml_edit::Array, word: &str) {
     let last = words.len().checked_sub(1);
     let tail = last
@@ -1456,7 +1458,8 @@ fn push_word(words: &mut toml_edit::Array, word: &str) {
     let after = format!("{tail}{}", words.trailing().as_str().unwrap_or_default());
     let (line_end, rest) = first_line(&after);
     if line_end.is_empty() {
-        words.push(word);
+        let v = worded(words, word);
+        words.push_formatted(v);
         return;
     }
     let indent = (0..words.len())
@@ -1471,8 +1474,39 @@ fn push_word(words: &mut toml_edit::Array, word: &str) {
     if let Some(i) = last {
         words.get_mut(i).expect("차례 안이다").decor_mut().set_suffix("");
     }
-    words.push_formatted(toml_edit::Value::from(word).decorated(&head, ""));
+    let v = worded(words, word).decorated(&head, "");
+    words.push_formatted(v);
     words.set_trailing(trailing);
+}
+
+/// 더할 낱말의 값 — **끝 원소의 따옴표를 따른다**(`push_word`, moai-kh81). `Value::from` 은 늘 큰따옴표
+/// 문자열을 지어, 작은따옴표로 적은 배열(`hidden = ['todo', 'done']`)에 더하면 그 한 줄만 꼴이 어긋났다.
+/// 잃는 값도 더했다 뺀 왕복도 그대로지만, 사람이 적은 모양을 지키겠다는 [`push_word`] 의 약속이 거기서
+/// 조용히 깨진다(리뷰 `moai-4qbv.zea` 15번).
+///
+/// 본은 **원문에서 읽은 끝 문자열 원소**다 — 이 세션이 더한 원소는 읽어 온 꼴(`Repr`)이 없어 건너뛰고 그
+/// 앞을 본다. 작은따옴표 배열에 더한 낱말은 제가 지은 꼴을 들고 서니 다음 낱말도 그것을 따른다. 문자열이
+/// 아닌 원소(새 바이너리의 모양)와 본뜰 원소가 없는 빈 배열은 큰따옴표다 — 없는 본을 지어내지 않는다.
+///
+/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 지은 뒤 다시 읽어 같은 낱말인지
+/// 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지 않고
+/// 글자만 보면 `''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+fn worded(words: &toml_edit::Array, word: &str) -> toml_edit::Value {
+    let literal = (0..words.len()).rev().find_map(|i| match words.get(i).expect("차례 안이다") {
+        toml_edit::Value::String(f) => Some(f.as_repr()?.as_raw().as_str()?.starts_with('\'')),
+        _ => None,
+    });
+    if literal != Some(true) {
+        return toml_edit::Value::from(word);
+    }
+    match format!("'{word}'").parse::<toml_edit::Value>() {
+        Ok(mut v) if v.as_str() == Some(word) => {
+            // 지은 값의 꾸밈은 부르는 쪽이 정한다 — 비워 두면 `toml_edit` 의 기본 모양(`, `)이 선다.
+            v.decor_mut().clear();
+            v
+        }
+        _ => toml_edit::Value::from(word),
+    }
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -2558,6 +2592,57 @@ mod tests {
         assert_eq!(show(src, &[], &["todo"]), "[tui]\nhidden = [\n  \"todo\"\n  # 아직 없다\n]\n");
     }
 
+    /// **더한 낱말이 끝 원소의 따옴표를 따른다**(moai-kh81, [`push_word`]). 작은따옴표로 적은 배열
+    /// (`hidden = ['todo', 'done']`)에 큰따옴표 낱말이 끼면 그 한 줄만 모양이 어긋난다 — 잃는 값은 없어도
+    /// 손으로 적은 모양을 지키겠다는 약속이 거기서 깨진다. 본뜰 원소가 없거나 낱말을 작은따옴표 안에 그대로
+    /// 못 적으면(낱말에 작은따옴표가 들었다) 큰따옴표로 적는다.
+    #[test]
+    fn an_added_word_follows_the_quotes_of_the_last_one() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let (two, three) = (["todo", "done"], ["todo", "done", "review"]);
+        assert_eq!(
+            show("[tui]\nhidden = ['todo', 'done']\n", &two, &three),
+            "[tui]\nhidden = ['todo', 'done', 'review']\n"
+        );
+        // 여러 줄로 벌린 배열도 같다 — 모양을 지키는 자리가 둘이라 둘 다 본다.
+        assert_eq!(
+            show("[tui]\nhidden = [\n  'todo',\n  'done'\n]\n", &two, &three),
+            "[tui]\nhidden = [\n  'todo',\n  'done',\n  'review'\n]\n"
+        );
+        // 여럿을 한 번에 더해도 이어진다 — 방금 더한 낱말이 다음 낱말의 본이 된다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo']\n", &["todo"], &three),
+            "[tui]\nhidden = ['todo', 'done', 'review']\n"
+        );
+        // 꼴이 섞인 배열은 **끝 원소**를 따른다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\", 'done']\n", &two, &three),
+            "[tui]\nhidden = [\"todo\", 'done', 'review']\n"
+        );
+        assert_eq!(
+            show("[tui]\nhidden = ['todo', \"done\"]\n", &two, &three),
+            "[tui]\nhidden = ['todo', \"done\", \"review\"]\n"
+        );
+        // 여러 줄 작은따옴표 문자열도 작은따옴표다.
+        assert_eq!(
+            show("[tui]\nhidden = ['''todo''']\n", &["todo"], &["todo", "done"]),
+            "[tui]\nhidden = ['''todo''', 'done']\n"
+        );
+        // 본뜰 원소가 없으면(빈 배열) 큰따옴표다 — 지어낼 본이 없다.
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["todo"]), "[tui]\nhidden = [\"todo\"]\n");
+        // 작은따옴표가 든 낱말은 작은따옴표 안에 그대로 못 선다 — 그 낱말만 큰따옴표로 적는다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo']\n", &["todo"], &["todo", "it's"]),
+            "[tui]\nhidden = ['todo', \"it's\"]\n"
+        );
+    }
+
     /// **켰다 끄면 옛 바이트로 돌아온다**(moai-n3ku). 더할 때 모양이 뒤집히면 뺄 때 그 모양을 되돌리지
     /// 못해, 토글마다 설정 파일이 헛 diff 를 냈다.
     ///
@@ -2578,6 +2663,9 @@ mod tests {
             ("[tui]\nhidden = [\"todo\", \"done\"]\n", &["todo", "done"], &["todo", "done", "review"]),
             ("[tui]\nhidden = [\n]\n", &[], &["todo"]),
             ("[tui]\nhidden = [\n  # 아직 없다\n]\n", &[], &["todo"]),
+            // 작은따옴표로 적은 배열도 같다(moai-kh81) — 따옴표가 어긋나면 뺀 자리가 원문과 달라진다.
+            ("[tui]\nhidden = ['todo', 'done']\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  'todo',\n  'done'\n]\n", &["todo", "done"], &["todo", "done", "review"]),
         ] {
             let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
             let (base, more) =
