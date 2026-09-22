@@ -356,7 +356,14 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             .map(crate::text::quoted)
             .collect::<Vec<_>>()
             .join(" ");
-        return (!line.is_empty()).then_some(Handed { text: line, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
+        return (!line.is_empty()).then_some(Handed {
+            text: line,
+            fork: true,
+            strict: false,
+            elsewhere,
+            appends,
+            args: Vec::new(),
+        });
     }
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
@@ -377,8 +384,14 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         if shape == Text::Line {
             let text = glued.or_else(|| tail.first().cloned()).unwrap_or_default();
             // 덧붙는 낱말은 이 글 **뒤**의 자리 인자다 — 글 자체는 안 자란다.
-            return (!text.is_empty())
-                .then_some(Handed { text, fork: true, strict: false, elsewhere, appends: false, args });
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: false,
+                args,
+            });
         }
         // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
         // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
@@ -407,13 +420,27 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         // 세어 주면 빈손의 쓰기를 풀어 준다. 쓰기 축은 그대로다.
         if shape == Text::Find {
             let text = exec_of(tail);
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: true, args: Vec::new() });
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends: true,
+                args: Vec::new(),
+            });
         }
         // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
         // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
         if shape == Text::Joined {
             let text = tail.join(" ");
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
+            return (!text.is_empty()).then_some(Handed {
+                text,
+                fork: true,
+                strict: false,
+                elsewhere,
+                appends,
+                args: Vec::new(),
+            });
         }
         let split_out;
         let tail: &[String] = if shape == Text::Words {
@@ -430,7 +457,14 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         let text = tail.iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
         // `sudo -s` 혼자는 사람이 쓸 셸을 띄운다 — 넘긴 글이 없다.
         // **이 꼴의 글은 뒤로 자란다** — 덧붙는 argv 가 이 명령줄에 그대로 이어 붙는다.
-        return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
+        return (!text.is_empty()).then_some(Handed {
+            text,
+            fork: true,
+            strict: false,
+            elsewhere,
+            appends,
+            args: Vec::new(),
+        });
     }
     match basename(head) {
         sh if is_shell(sh) => {
@@ -1414,16 +1448,14 @@ impl<'a> Lexer<'a> {
             let mut texts: Vec<(&str, Plant<'_>)> =
                 docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
             let own = shell_text(&seg.words, &seg.eaten);
-            texts.extend(
-                own.iter().map(|h| {
-                    let how = if h.fork {
-                        Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends, args: &h.args }
-                    } else {
-                        Plant::Eval
-                    };
-                    (h.text.as_str(), how)
-                }),
-            );
+            texts.extend(own.iter().map(|h| {
+                let how = if h.fork {
+                    Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends, args: &h.args }
+                } else {
+                    Plant::Eval
+                };
+                (h.text.as_str(), how)
+            }));
             let (depth, level, join, apart) = (seg.depth, seg.level, seg.join, seg.sub);
             // 앞 토막 뒤로 지나온 자리는 처음 심는 토막이 든다. 글을 낸 토막은 그 글을 막 나온 자리다.
             // **글 앞에서 닫힌 묶음도 그렇다**(moai-axqs) — 글은 그것을 낸 토막보다 **먼저** 셈해지니,
@@ -2820,16 +2852,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "chrt",
             takes: &["-T", "-P", "-D"],
             long: &["--sched-runtime", "--sched-period", "--sched-deadline"],
-            free: &[
-                "--batch",
-                "--deadline",
-                "--fifo",
-                "--idle",
-                "--other",
-                "--rr",
-                "--reset-on-fork",
-                "--all-tasks",
-            ],
+            free: &["--batch", "--deadline", "--fifo", "--idle", "--other", "--rr", "--reset-on-fork", "--all-tasks"],
             attach: &[],
             args: 1,
             // `-m` 은 쓸 수 있는 우선순위를 찍기만 한다 — 제 자리 인자도 명령도 안 받는다.
@@ -2928,7 +2951,15 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         Wrapper {
             name: "script",
             takes: &["-I", "-O", "-B", "-T", "-m", "-E", "-o"],
-            long: &["--log-in", "--log-out", "--log-io", "--log-timing", "--logging-format", "--echo", "--output-limit"],
+            long: &[
+                "--log-in",
+                "--log-out",
+                "--log-io",
+                "--log-timing",
+                "--logging-format",
+                "--echo",
+                "--output-limit",
+            ],
             free: &["--append", "--return", "--flush", "--force", "--quiet", "--timing"],
             // `-t[<파일>]` 은 값을 붙여서만 받는다.
             attach: &["-t"],
@@ -5049,16 +5080,14 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
                 // 자식을 1 로 끝내니, 바깥 `&&` 에 닿은 것 자체가 집기가 이겼다는 뜻이다. 들어설
                 // 때의 집기를 먼저 되세우던 판은 시킨 대로 친 그 줄을 막았다.
                 Layer::Shell { top, apace, .. } => {
-                    let resolved = (!apace)
-                        .then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, blocks.iffy)))
-                        .flatten();
+                    let resolved =
+                        (!apace).then(|| scope.bailout.as_ref().filter(|b| b.resolves(top, blocks.iffy))).flatten();
                     // **0 으로 일찍 끝날 수 있는 글의 값은 집기의 값이 아니다**([`Scope::soft`],
                     // moai-sq3q) — `bash -c '집기 || exit 0'` 은 집기가 져도 0 으로 끝나, 바깥
                     // `&&` 에 닿은 것이 아무 말도 안 한다. 뒤로 띄운 것으로 끝나는 글(`apace`)과
                     // 같은 자리에 선다: 안에서 이긴 것을 밖으로 못 내고, 들어설 때의 집기로 돌아간다.
                     let soft = scope.soft.is_some();
-                    let won = !soft
-                        && (scope.sure.max(scope.sure_e).is_some_and(|l| l >= top) || resolved.is_some());
+                    let won = !soft && (scope.sure.max(scope.sure_e).is_some_and(|l| l >= top) || resolved.is_some());
                     let home = top.saturating_sub(1);
                     if unrun.is_none_or(|c| top < c) && won {
                         credit(&mut picked, resolved, home, true);
@@ -7723,7 +7752,11 @@ mod tests {
             "sudo -si moai add x",
             "env -C /남의/저장소 moai add x",
         ] {
-            assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "남의 트래커에 세우는 줄을 막았다 — {cmd}");
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), cmd),
+                Decision::Pass,
+                "남의 트래커에 세우는 줄을 막았다 — {cmd}"
+            );
         }
         for cmd in [
             "su -c 'moai mv t-1 in_progress --from todo' -l",
@@ -7742,7 +7775,11 @@ mod tests {
             "doas -s bash -c 'tmux kill-server'",
             "doas -C /etc/doas.conf bash -c 'tmux kill-server'",
         ] {
-            assert_eq!(guard_shell(&[], &cfg(), &here(), root, root, cmd), Decision::Pass, "안 도는 줄을 막았다 — {cmd}");
+            assert_eq!(
+                guard_shell(&[], &cfg(), &here(), root, root, cmd),
+                Decision::Pass,
+                "안 도는 줄을 막았다 — {cmd}"
+            );
         }
         for cmd in ["sudo -l sed -i s/a/b/ /repo/src/x.rs", "doas -s tee /repo/src/x.rs"] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -8099,7 +8136,10 @@ mod tests {
             // 한 줄에 여럿 — 뒤엣것도 읽는다.
             "find . -exec echo x \\; -exec moai add '딴 일' \\;",
         ] {
-            assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "술어 안의 명령을 가렸다 — {cmd}");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
+                "술어 안의 명령을 가렸다 — {cmd}"
+            );
         }
         for cmd in [
             "find . -name '*.rs' -exec sed -i s/a/b/ src/x.rs \\;",
@@ -8195,7 +8235,11 @@ mod tests {
         // **그 글 안의 집기는 정말 집는다** — watch 는 그 글을 셸에 넘기니 `;` 뒤의 쓰기도 본다.
         let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         let cmd = "watch 'moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs'";
-        assert_eq!(guard_writes(&held, &cfg(), &here(), root, root, cmd), Decision::Pass, "이어 붙인 글의 집기를 버렸다");
+        assert_eq!(
+            guard_writes(&held, &cfg(), &here(), root, root, cmd),
+            Decision::Pass,
+            "이어 붙인 글의 집기를 버렸다"
+        );
     }
 
     /// **셸을 여는 스위치가 넘긴 글도 명령이다**(moai-drli) — `env -S` 와 `sudo -s`.
