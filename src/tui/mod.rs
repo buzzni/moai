@@ -1311,7 +1311,7 @@ impl App {
             commits_job: None,
             commits_due: true,
             pending: None,
-            latest: crate::latest::Seen::Unasked,
+            latest: crate::latest::Seen::Unasked(crate::latest::Why::not_asked()),
             latest_job: None,
             chord: keys::Chord::default(),
             discarded: Vec::new(),

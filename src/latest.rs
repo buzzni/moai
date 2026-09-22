@@ -28,9 +28,16 @@
 //! 답을 읽기만 한다 — `tui::draw::version_said` 는 프레임마다 도는 자리라 거기서 `git config`
 //! 조차 안 부른다(그 주석이 적어 둔 까닭이 이것과 같다).
 //!
-//! **실패는 모두 같은 자리로 내려앉는다.** 네트워크가 없든, 느려서 [`TIMEOUT`] 을 넘든, 답이
-//! 깨진 JSON 이든, 태그가 `v1.2.3` 꼴이 아니든 [`Seen::Unasked`] 다 — 사람에게 보일 글은 "못
-//! 물었다" 하나고, 그 까닭을 넷으로 갈라 봤자 고칠 수 있는 것이 없다.
+//! **실패는 모두 [`Seen::Unasked`] 로 내려앉되, 까닭을 들고 온다**([`Why`], 사용자 결정
+//! 2026-09-22, moai-580l). 처음에는 한 변형으로 접었는데 — 네트워크가 없든, 느려서
+//! [`TIMEOUT`] 을 넘든, 답이 깨진 JSON 이든, 태그가 `v1.2.3` 꼴이 아니든 — **사람이 할 일이
+//! 갈래마다 다르다**: 시간당 판 수를 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
+//! 네트워크는 이 기능을 영영 못 쓰며(moai-uwuw), 네트워크가 없는 것은 그 둘 중 어느 것도
+//! 아니다. 가르는 것은 `kind` 고 꼴은 `commits_error` 와 같다([`crate::git::Told`]).
+//!
+//! **그래도 넷은 그대로 넷이다.** 위의 사용자 결정 4 가 가른 넷은 *화면 글*이고, 이것은 그
+//! 넷째 **안**을 가르는 일이다 — 못 물은 것은 여전히 못 물은 것이라 최신과 안 섞이고,
+//! 갈랐어도 아무것도 막지 않는다.
 
 use crate::fail::R;
 use crate::store::write_atomic;
@@ -79,9 +86,83 @@ pub enum Seen {
     /// 내 판이 더 앞섰다. 소스로 빌드해 쓰는 사람이 늘 보는 자리라 "새 판" 과 갈라 둔다 —
     /// 합치면 개발 중인 사람에게 평생 "낡았다" 고 말한다.
     Ahead,
-    /// 못 물었다. 안 물은 것(끈 것)과 물었는데 못 들은 것이 **같은 글**인 것은 뜻이 같아서다 —
-    /// 둘 다 "지금 최신판을 모른다" 고, 사람이 할 일도 같다.
-    Unasked,
+    /// 못 물었다. **까닭을 함께 든다**([`Why`], moai-580l) — 사람이 할 일이 까닭마다 다르기
+    /// 때문이다. 시간당 판 수를 다 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
+    /// 네트워크는 이 기능을 못 쓴다는 뜻이며, 네트워크가 없는 것은 둘 중 어느 것도 아니다.
+    Unasked(Why),
+}
+
+/// 못 물은 까닭 — **자료지 글이 아니다**. 꼴은 `show --json` 의 `commits_error`
+/// ([`crate::git::Told`])와 같다: 가르는 것은 `kind` 고, `said` 는 사람이 까닭을 볼 한 줄이다.
+///
+/// **`said` 는 라이브러리와 운영체제가 지은 글이라 안 옮긴다** — [`crate::git::Error::said`]
+/// 와 같은 자리다. 사람에게 댈 한 낱말은 화면이 [`Trouble`] 로 고른다.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Why {
+    pub kind: Trouble,
+    pub said: String,
+}
+
+/// 못 물은 까닭의 갈래. **낱말이 아니라 타입이다** — 화면이 이것으로 갈라 그리므로, 갈래를
+/// 더하는 날 컴파일러가 안 고친 자리를 이름으로 댄다.
+///
+/// **기계에 낼 낱말은 직렬화가 짓는다** — `not_asked`·`rate_limited` 처럼 `commits_error` 의
+/// `kind` 와 같은 꼴이다. 낱말을 손으로 적는 함수를 곁에 두지 않는 것은 그것이 갈래와 두 벌이
+/// 되기 때문이고, 그 낱말이 실제로 그렇게 서는지는 `the_kind_words_are_the_contract` 가 잰다.
+/// **아직 아무 표면도 이 값을 안 낸다** — 판 소식은 탐색기 한 줄뿐이다. `--json` 에 실릴 날
+/// 그 자리가 쓰는 낱말이 여기 미리 서 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Trouble {
+    /// 아직 안 물었다 — 적어 둔 답이 없거나, 물었지만 태그를 못 들은 채 하루가 안 지났다.
+    /// 끈 사람도 여기로 온다([`Off`]): 제가 끈 것은 제가 안다.
+    NotAsked,
+    /// 네트워크가 없다 — 이름을 못 풀거나, 붙지 못하거나, 소켓이 끊겼다.
+    Offline,
+    /// [`TIMEOUT`] 안에 못 끝냈다. 느린 네트워크와 안 붙는 네트워크는 다른 일이다.
+    Timeout,
+    /// 시간당 판 수를 다 태웠다 — GitHub 은 이것을 403 으로도 429 로도 낸다. **기다리면
+    /// 풀리는 하나뿐인 갈래라** 따로 둔다: 에이전트가 도는 고리가 이 자리에 자주 선다.
+    RateLimited,
+    /// 서버가 그 밖의 상태 코드로 거절했다 — 404(저장소를 옮겼다)가 가장 흔하다.
+    Http,
+    /// TLS 가 안 섰다. 사내 네트워크의 프록시가 인증서를 갈아 끼우는 기계가 여기 선다 —
+    /// 그 기계는 이 기능을 **못 쓴다**(moai-uwuw 가 닫은 결정, 루트 저장소는 `webpki-roots`
+    /// 하나로 간다). 다른 갈래와 섞으면 그 사람이 고칠 수 없는 것을 고치러 다닌다.
+    Tls,
+    /// 답이 왔는데 못 읽었다 — JSON 이 아니거나, `tag_name` 이 없거나, 태그가 성치 않다.
+    Garbled,
+    /// 태그는 받았는데 판으로 못 읽었다 — `v0.1` 처럼 수가 셋이 아니거나 semver 가 아니다.
+    /// [`Garbled`](Trouble::Garbled) 와 가르는 까닭은 고칠 자리가 다르기 때문이다: 이쪽은
+    /// **릴리스를 지은 쪽**이 태그를 그렇게 달았다.
+    OddTag,
+    /// 위의 어느 것도 아닌 실패. [`crate::git::Told`] 의 `failed` 와 같은 자리다.
+    Failed,
+}
+
+impl Why {
+    /// 아직 안 물었다 — `said` 는 빈 글이다. 적어 둘 까닭이 없다.
+    pub fn not_asked() -> Self {
+        Why { kind: Trouble::NotAsked, said: String::new() }
+    }
+
+    /// `ureq` 가 낸 실패를 갈래로. **`said` 는 그 크레이트가 지은 글 그대로다.**
+    ///
+    /// **403 과 429 를 한 갈래로 접는다.** GitHub 은 시간당 판 수를 다 태운 부름에 둘 중
+    /// 아무 쪽이나 내고(문서가 그렇게 적는다), 사람이 할 일은 둘 다 "기다린다" 다.
+    /// `User-Agent` 를 안 단 부름도 403 인데, 그쪽은 [`ask_within`] 이 늘 달고 나가므로
+    /// 이 자리에 안 선다.
+    fn from_ureq(e: &ureq::Error) -> Self {
+        let kind = match e {
+            ureq::Error::StatusCode(403 | 429) => Trouble::RateLimited,
+            ureq::Error::StatusCode(_) => Trouble::Http,
+            ureq::Error::Timeout(_) => Trouble::Timeout,
+            ureq::Error::Io(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => Trouble::Offline,
+            ureq::Error::Tls(_) | ureq::Error::Rustls(_) | ureq::Error::Pem(_) => Trouble::Tls,
+            _ => Trouble::Failed,
+        };
+        Why { kind, said: e.to_string() }
+    }
 }
 
 /// 이 바이너리의 판.
@@ -196,14 +277,17 @@ pub fn compare(mine: &str, theirs: &str) -> Option<Ordering> {
     })
 }
 
-/// 받은 태그를 내 판과 견줘 [`Seen`] 으로. 태그가 없거나 꼴이 아니면 못 물은 것이다.
+/// 받은 태그를 내 판과 견줘 [`Seen`] 으로. 태그가 없거나 꼴이 아니면 못 물은 것이고, 그
+/// **둘은 다른 갈래다**([`Trouble::NotAsked`]·[`Trouble::OddTag`], moai-580l).
 pub fn seen(mine: &str, tag: Option<&str>) -> Seen {
-    let Some(tag) = tag else { return Seen::Unasked };
+    let Some(tag) = tag else { return Seen::Unasked(Why::not_asked()) };
     match compare(mine, version_of(tag)) {
         Some(Ordering::Less) => Seen::Newer { tag: tag.to_string() },
         Some(Ordering::Equal) => Seen::Same,
         Some(Ordering::Greater) => Seen::Ahead,
-        None => Seen::Unasked,
+        // **받은 태그를 `said` 에 그대로 싣는다** — 무엇이 판으로 안 읽혔는지가 고칠 자리다.
+        // 들어오는 자리([`tag_in`])가 제어문자와 길이를 이미 물렸으므로 화면에 실어도 된다.
+        None => Seen::Unasked(Why { kind: Trouble::OddTag, said: tag.to_string() }),
     }
 }
 
@@ -368,16 +452,16 @@ pub fn config_says(path: Option<&Path>) -> Option<bool> {
     doc.get(UPDATE)?.as_table_like()?.get(CHECK)?.as_bool()
 }
 
-/// 한 번 묻는다. 태그를 못 얻으면 `None` 이고, **까닭은 안 든다**(모두 "못 물었다" 로 내려앉는다).
+/// 한 번 묻는다. 태그를 못 얻으면 **까닭을 든다**([`Why`], moai-580l).
 ///
 /// `User-Agent` 를 다는 것은 GitHub 가 없는 부름에 403 을 주기 때문이다.
-pub fn ask(url: &str) -> Option<String> {
+pub fn ask(url: &str) -> Result<String, Why> {
     ask_within(url, TIMEOUT)
 }
 
 /// [`ask`] 되 기다리는 상한을 받는다. **시험이 그 상한을 짧게 줘서 실제로 끊기는지 잰다** —
 /// 상한을 상수로만 두면 그것이 서는지를 5초씩 기다려야만 볼 수 있고, 그러면 아무도 안 잰다.
-pub fn ask_within(url: &str, timeout: Duration) -> Option<String> {
+pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
     let built = ureq::Agent::config_builder()
         // **머리부터 몸까지 통째로 잰다.** 붙기만 재면 붙여 놓고 한 글자씩 흘리는 자리에
         // 영영 붙들린다.
@@ -398,7 +482,7 @@ pub fn ask_within(url: &str, timeout: Duration) -> Option<String> {
         .header("User-Agent", concat!("moai/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .call()
-        .ok()?
+        .map_err(|e| Why::from_ureq(&e))?
         .body_mut()
         // **받는 만큼에 상한을 둔다.** `read_to_string` 하나만 부르면 10MB 에서 끊기지만
         // `with_config()` 로 들어가는 순간 상한이 `u64::MAX` 로 풀리므로, 이 줄은 조이는 것이
@@ -409,8 +493,10 @@ pub fn ask_within(url: &str, timeout: Duration) -> Option<String> {
         // 글자가 깨져도 읽는다 — 어차피 `tag_name` 하나만 집고, 못 집으면 "못 물었다" 다.
         .lossy_utf8(true)
         .read_to_string()
-        .ok()?;
-    tag_in(&body)
+        .map_err(|e| Why::from_ureq(&e))?;
+    // **읽다 끊긴 것과 못 읽는 답은 다른 갈래다** — 위의 `map_err` 가 앞엣것을, 여기가 뒤엣것을
+    // 든다. `said` 에 답을 싣지 않는 것은 그것이 256KB 까지 가는 남의 글이기 때문이다.
+    tag_in(&body).ok_or_else(|| Why { kind: Trouble::Garbled, said: String::new() })
 }
 
 /// 이 자리가 이 기계 자신인가 — `http://127.0.0.1:…`·`localhost`·`[::1]`.
@@ -472,15 +558,21 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     {
         return seen(mine(), h.tag.as_deref());
     }
-    let tag = ask(url).or_else(|| held.and_then(|h| h.tag));
+    let asked = ask(url);
+    let why = asked.as_ref().err().cloned();
+    let tag = asked.ok().or_else(|| held.and_then(|h| h.tag));
     let _ = write(dir, &Held { asked_at: now.to_string(), tag: tag.clone() });
-    seen(mine(), tag.as_deref())
+    match tag {
+        Some(tag) => seen(mine(), Some(&tag)),
+        // 못 들었고 알던 것도 없다 — 이 판의 까닭을 그대로 낸다(moai-580l).
+        None => Seen::Unasked(why.unwrap_or_else(Why::not_asked)),
+    }
 }
 
 /// 적어 둔 답만 읽는다 — **묻지 않는다.** 창이 지났어도 지난 답을 그대로 낸다: 그리는 쪽이
 /// 첫 프레임에 쓸 값이고, 새 답은 [`spawn`] 이 받아 뒤에 얹는다.
 pub fn held(dir: &Path) -> Seen {
-    read(dir).map_or(Seen::Unasked, |h| seen(mine(), h.tag.as_deref()))
+    read(dir).map_or_else(|| Seen::Unasked(Why::not_asked()), |h| seen(mine(), h.tag.as_deref()))
 }
 
 /// 딴 실에서 [`refresh`] 를 돌리고 답을 흘린다. **부르는 쪽은 기다리지 않는다** — 받는 쪽이
@@ -524,6 +616,16 @@ pub type Job = (std::sync::mpsc::Receiver<Seen>, std::thread::JoinHandle<()>);
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+
+    /// 못 물었으면 그 갈래, 아니면 `None`. **갈래까지 잰다**(moai-580l) — `Seen::Unasked` 인
+    /// 것만 재면 403 이 "네트워크 없음" 으로 서도 시험이 파랗다. `said` 는 라이브러리가
+    /// 지은 글이라 글자로 안 잰다.
+    fn why_of(seen: &Seen) -> Option<Trouble> {
+        match seen {
+            Seen::Unasked(why) => Some(why.kind),
+            _ => None,
+        }
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::{TcpListener, TcpStream};
 
@@ -578,11 +680,13 @@ mod tests {
         assert_eq!(seen("0.1.0", Some("v0.2.0")), Seen::Newer { tag: "v0.2.0".into() });
         assert_eq!(seen("0.1.0", Some("v0.1.0")), Seen::Same);
         assert_eq!(seen("0.2.0", Some("v0.1.0")), Seen::Ahead);
-        assert_eq!(seen("0.1.0", None), Seen::Unasked);
+        assert_eq!(why_of(&seen("0.1.0", None)), Some(Trouble::NotAsked));
         // 꼴이 아닌 태그는 "새 판" 이 아니라 "못 물었다" 다 — 모르는 것을 아는 척하지 않는다.
-        assert_eq!(seen("0.1.0", Some("latest")), Seen::Unasked);
-        assert_eq!(seen("0.1.0", Some("v0.1")), Seen::Unasked);
-        assert_eq!(seen("0.1.0", Some("v0.1.0.1")), Seen::Unasked);
+        // **그 안에서 또 갈린다**(moai-580l): 아예 안 물은 것과 태그를 못 읽은 것은 고칠 자리가
+        // 다르다.
+        for tag in ["latest", "v0.1", "v0.1.0.1"] {
+            assert_eq!(why_of(&seen("0.1.0", Some(tag))), Some(Trouble::OddTag), "{tag}");
+        }
     }
 
     #[test]
@@ -633,9 +737,9 @@ mod tests {
     fn a_tag_that_is_not_a_word_is_not_a_version() {
         // 앞판 자리는 semver 가 `[0-9A-Za-z-]` 로 좁혀 둔 자리다. 안 재면 그물에서 온
         // 제어문자가 성한 판으로 읽혀 [`Seen::Newer`] 의 태그로 화면에 그대로 선다.
-        assert_eq!(seen("0.1.0", Some("v9.9.9-\u{1b}[2J")), Seen::Unasked);
-        assert_eq!(seen("0.1.0", Some("v9.9.9-rc 1")), Seen::Unasked);
-        assert_eq!(seen("0.1.0", Some("v9.9.9-rc.")), Seen::Unasked);
+        for tag in ["v9.9.9-\u{1b}[2J", "v9.9.9-rc 1", "v9.9.9-rc."] {
+            assert_eq!(why_of(&seen("0.1.0", Some(tag))), Some(Trouble::OddTag), "{tag:?}");
+        }
         assert_eq!(seen("0.1.0", Some("v9.9.9-rc.1")), Seen::Newer { tag: "v9.9.9-rc.1".into() });
     }
 
@@ -643,9 +747,11 @@ mod tests {
     fn build_metadata_is_measured_by_the_same_rule_as_the_prerelease() {
         // 판을 안 가른다고 안 재던 자리다 — 그런데 태그는 **받은 그대로** 화면에 서고 하루 동안
         // [`FILE`] 에 남으므로, 앞판 뒤에 붙든 `+` 뒤에 붙든 들어오는 글은 같은 자로 재야 한다.
-        assert_eq!(seen("0.1.0", Some("v9.9.9+")), Seen::Unasked, "빈 메타데이터를 받았다");
-        assert_eq!(seen("0.1.0", Some("v9.9.9+b..7")), Seen::Unasked, "빈 마디를 받았다");
-        assert_eq!(seen("0.1.0", Some("v9.9.9+새 판")), Seen::Unasked, "낱말이 아닌 메타데이터를 받았다");
+        for (tag, why) in
+            [("v9.9.9+", "빈 메타데이터"), ("v9.9.9+b..7", "빈 마디"), ("v9.9.9+새 판", "낱말이 아닌 메타데이터")]
+        {
+            assert_eq!(why_of(&seen("0.1.0", Some(tag))), Some(Trouble::OddTag), "{why}를 받았다");
+        }
         // 성한 메타데이터는 그대로 지난다 — 판을 안 가르는 것은 전과 같다.
         assert_eq!(compare("0.2.0+ci-1234", "0.2.0"), Some(Ordering::Equal));
         assert_eq!(compare("0.2.0-rc1+b.7", "0.2.0-rc1"), Some(Ordering::Equal));
@@ -736,8 +842,10 @@ mod tests {
     fn a_grid_that_is_not_there_is_not_asked_and_not_a_failure() {
         let s = Scratch::new("latest-nogrid");
         let url = nobody_there();
-        // 거절당해도 답은 "못 물었다" 고, 종료 코드를 바꿀 `Err` 가 아니다.
-        assert_eq!(refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW), Seen::Unasked);
+        // 거절당해도 답은 "못 물었다" 고, 종료 코드를 바꿀 `Err` 가 아니다. **까닭은
+        // "네트워크가 없다" 다**(moai-580l) — 태그가 이상한 것도, 판 수를 태운 것도 아니다.
+        let got = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW);
+        assert_eq!(why_of(&got), Some(Trouble::Offline), "{got:?}");
         // **못 들어도 도장은 찍힌다** — 그물 없는 기계가 부를 때마다 기다리지 않는다.
         let held = read(s.path()).expect("도장이 없다");
         assert_eq!(held.asked_at, "2026-09-21T00:00:00Z");
@@ -761,7 +869,7 @@ mod tests {
         });
         let cut = Duration::from_millis(300);
         let began = std::time::Instant::now();
-        assert_eq!(ask_within(&url, cut), None);
+        assert_eq!(ask_within(&url, cut).map_err(|w| w.kind), Err(Trouble::Timeout));
         let took = began.elapsed();
         // **양쪽을 잰다.** 위만 재면 끊김으로 즉시 돌아온 판이 통과하고, 아래만 재면 영영
         // 기다리는 판이 통과한다. 위는 넉넉히 둔다 — 부하 20~27 에서도 붉어지지 않게.
@@ -771,20 +879,65 @@ mod tests {
         let _ = held.join();
     }
 
+    /// **기계가 가를 낱말은 갈래마다 다르고 안 바뀐다**(moai-580l). 아직 아무 표면도 이 값을
+    /// 안 내므로, 낱말이 어긋나는 것을 잡을 자리가 여기 말고 없다 — `commits_error` 의
+    /// `kind` 와 같은 꼴(`{kind, said}`)로 서는지를 글자로 잰다.
+    ///
+    /// **낱말을 손으로 적는 함수를 곁에 두지 않는다** — 그러면 갈래와 두 벌이 되어 한쪽만
+    /// 고치는 날이 온다. 짓는 자는 직렬화 하나고, 이 시험이 그 값을 못 박는다.
+    #[test]
+    fn the_kind_words_are_the_contract() {
+        let words = [
+            (Trouble::NotAsked, "not_asked"),
+            (Trouble::Offline, "offline"),
+            (Trouble::Timeout, "timeout"),
+            (Trouble::RateLimited, "rate_limited"),
+            (Trouble::Http, "http"),
+            (Trouble::Tls, "tls"),
+            (Trouble::Garbled, "garbled"),
+            (Trouble::OddTag, "odd_tag"),
+            (Trouble::Failed, "failed"),
+        ];
+        for (kind, word) in words {
+            let why = Why { kind, said: "그 까닭".into() };
+            let got = serde_json::to_string(&why).expect("못 적었다");
+            assert_eq!(got, format!(r#"{{"kind":"{word}","said":"그 까닭"}}"#), "{kind:?}");
+        }
+        let said: std::collections::BTreeSet<&str> = words.iter().map(|(_, w)| *w).collect();
+        assert_eq!(said.len(), words.len(), "같은 낱말을 두 갈래가 쓴다");
+        // **빠진 갈래가 없다.** 목록은 손으로 적는 것이라 갈래를 더하고 잊을 수 있어, 아래
+        // `match` 가 그 자리를 **컴파일에서** 댄다 — 시험이 붉어지는 것보다 이르다.
+        let _every = |kind: Trouble| match kind {
+            Trouble::NotAsked
+            | Trouble::Offline
+            | Trouble::Timeout
+            | Trouble::RateLimited
+            | Trouble::Http
+            | Trouble::Tls
+            | Trouble::Garbled
+            | Trouble::OddTag
+            | Trouble::Failed => (),
+        };
+    }
+
+    /// **거짓말은 갈래가 둘이다**(moai-580l). 답을 못 읽은 것([`Trouble::Garbled`])과 태그는
+    /// 받았는데 판으로 못 읽은 것([`Trouble::OddTag`])은 고칠 자리가 다르다 — 앞은 묻는 자리가
+    /// 이상한 것이고, 뒤는 릴리스를 지은 쪽이 태그를 그렇게 달았다는 뜻이다.
     #[test]
     fn an_answer_that_lies_falls_back_to_unasked() {
-        // 제어문자가 든 태그도 여기 든다 — 판 줄에 그대로 서는 글이라 들이지 않는다.
-        for body in [
-            r#"{"tag_name":"#,
-            r#"{"tag_name":42}"#,
-            r#"{"name":"v9.9.9"}"#,
-            r#"{"tag_name":"세판"}"#,
-            "{\"tag_name\":\"v9.9.9-\\u001b[2J\"}",
-            "",
+        // 제어문자가 든 태그도 `Garbled` 다 — 판 줄에 그대로 서는 글이라 들이는 자리에서 물린다.
+        for (body, kind) in [
+            (r#"{"tag_name":"#, Trouble::Garbled),
+            (r#"{"tag_name":42}"#, Trouble::Garbled),
+            (r#"{"name":"v9.9.9"}"#, Trouble::Garbled),
+            ("{\"tag_name\":\"v9.9.9-\\u001b[2J\"}", Trouble::Garbled),
+            ("", Trouble::Garbled),
+            (r#"{"tag_name":"세판"}"#, Trouble::OddTag),
         ] {
             let s = Scratch::new("latest-lies");
             let (url, handle) = server_once(body);
-            assert_eq!(refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW), Seen::Unasked, "{body}");
+            let got = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW);
+            assert_eq!(why_of(&got), Some(kind), "{body}");
             let _ = handle.join();
         }
     }
@@ -795,7 +948,9 @@ mod tests {
         // 한 번 적히면 다시 물을 때까지 하루를 그 바이트가 산다.
         let s = Scratch::new("latest-escape");
         let (url, handle) = server_once("{\"tag_name\":\"v9.9.9-\\u001b[2J\"}");
-        assert_eq!(refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW), Seen::Unasked);
+        // 들이는 자리가 물렸으니 **읽지 못한 답**이지, 태그가 이상한 것이 아니다.
+        let got = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW);
+        assert_eq!(why_of(&got), Some(Trouble::Garbled));
         assert_eq!(read(s.path()).and_then(|h| h.tag), None, "제어문자가 든 태그를 적어 두었다");
         let _ = handle.join();
     }
@@ -807,7 +962,7 @@ mod tests {
         assert!(read(s.path()).is_none());
         std::fs::write(file_at(s.path()), "asked_at = 3\n").unwrap();
         assert!(read(s.path()).is_none(), "때가 낱말이 아닌데 읽었다");
-        assert_eq!(held(s.path()), Seen::Unasked);
+        assert_eq!(why_of(&held(s.path())), Some(Trouble::NotAsked));
     }
 
     #[test]
