@@ -856,3 +856,4 @@
 {"ts":"2026-09-22T08:26:43Z","id":"moai-t906","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
 {"ts":"2026-09-22T08:26:43Z","id":"moai-68b8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 글 한 덩이)"}
 {"ts":"2026-09-22T08:26:43Z","id":"moai-68b8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
+{"ts":"2026-09-22T08:32:09Z","id":"moai-lc0i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 에픽은 다 닫혔고 이어받을 일이 없다. 넘긴 것은 idea 셋이다 — moai-jyce(답을 자리마다 한 줄로 들지), moai-qmji(임시 파일을 O_EXCL 로 열지), moai-tctc(UpdateTrouble 을 LookTrouble 에 접을지). 안 고치고 주석에만 적은 둘은 latest::Held::asked_here(자리를 한 칸으로 둔 값)와 fresh(슬랙이 창과 같아 최악 이틀)에 있다. moai-uwuw 는 닫힌 채 그대로고, 그 결정이 이번에 TLS 갈래를 따로 둔 까닭이다."}
