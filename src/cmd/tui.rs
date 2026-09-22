@@ -182,6 +182,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
+                        notices: sum.notices,
                         stranded: sum.stranded,
                         unreadable_worktrees: sum.blind,
                         broken_worktrees: sum.unread,
@@ -262,6 +263,12 @@ struct Counted {
     counts: std::collections::BTreeMap<String, usize>,
     picked: Vec<String>,
     warnings: usize,
+    /// 설치가 어긋난 것과 쌓인 것을 대는 알림의 수(moai-prdh) — 화면의 층이 `+N` 으로 대는 그
+    /// 수고, 안쪽 `moai status` 가 세우는 알림과 같은 자다(`layer::Summary::notices`).
+    /// **경고가 아니다** — 위의 `warnings` 와 겹치지 않고 종료 코드와도 상관없다.
+    /// 없으면 키를 안 단다 — 곁의 셋과 같은 까닭이다.
+    #[serde(skip_serializing_if = "is_zero")]
+    notices: usize,
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 화면의 층이 낱말로 대는 그 수다.
     /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
     #[serde(skip_serializing_if = "is_zero")]

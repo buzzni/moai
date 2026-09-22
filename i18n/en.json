@@ -420,6 +420,7 @@
   "tui.place.picked": "{n} picked up",
   "tui.place.nothing_surfaced": " nothing surfaced",
   "tui.place.surfaced": " {n} surfaced — go in and run `moai status`",
+  "tui.place.notices": "+ {n} notices",
   "tui.place.stranded": "! {n} picked up with no worktree working on them",
   "tui.place.blind_all": " — none of the places could be counted",
   "tui.place.blind_some": " — {n} of them hid places from the count",

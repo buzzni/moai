@@ -99,8 +99,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
     let trouble = trouble + if said_already { 0 } else { unread.all.len() };
-    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). 한눈 보기(`.moai` 밖)는 남의 저장소라
-    // 안 본다.
+    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)는 안 싣는다**
+    // — 그 화면이 알림을 아예 안 세기 때문이지(`view::projects_status`), 남의 저장소라서가 아니다.
+    // 탐색기의 프로젝트 층은 같은 남의 저장소를 두고도 센다(moai-prdh) — 그래서 `.moai` 밖에서 본
+    // 두 화면의 알림 수가 지금 갈린다. 맞추는 일은 한눈 보기가 알림을 세기 시작할 때다.
     st.notices.extend(install_notices(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
@@ -191,10 +193,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 알림을 더하면 다른 쪽은 조용하고, 그것을 잡아 줄 것이 아무 데도 없다. 더하는 자리가 여기
 /// 하나면 더하는 것만으로 두 표면이 함께 움직인다.
 ///
-/// **아직 부르는 곳은 하나다** — 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`)는 그 셋을 제
-/// 줄로 들고 있다. 옆 세션이 그 파일을 쥐고 있어 이 판에서 안 바꿨고, 바꾸는 일은 moai-6k1r
-/// 이다. 그때까지 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices`
-/// 하나다 — 여기에만 알림을 더하면 그 시험이 먼저 붉어진다.
+/// **부르는 곳은 셋이다** — `moai status`, 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`,
+/// moai-6k1r), 탐색기의 프로젝트 층(`tui::layer::summarize`, moai-prdh). 층은 수만 세고 글은
+/// 안 편다. 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices` 고, 층을
+/// 맨 것은 `the_project_layer_counts_the_same_notices_as_the_board` 다 — 여기에 알림을 더하면
+/// 셋이 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
 ///
 /// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
 /// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
