@@ -381,7 +381,9 @@ pub struct Dug<'a> {
 }
 
 impl<'a> Dug<'a> {
-    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길(훅·시험·[`stranded_at`])이 쓴다.
+    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 훅([`held_elsewhere`])과 시험의 짧은
+    /// 길([`workplaces`]). [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
+    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다.
     pub fn new() -> Dug<'a> {
         Dug::default()
     }

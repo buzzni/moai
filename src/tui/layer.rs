@@ -367,15 +367,18 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let p = projects::open_one(path, String::new(), None, false, lang);
-    // **판 것은 상태와 나란히 빌린다**(moai-65ie) — `p.dug()` 로 `Project` 를 통째로 빌리면
-    // 아래에서 상태를 꺼낼 수 없다. 빌리는 밭이 갈려 있으므로 둘은 서로를 막지 않는다.
-    let dug = crate::worktree::dug(&p.sides, &p.mine);
-    let look = match p.state {
+    // **한 자리에서 헤친다**(moai-65ie, 리뷰) — `p.dug()` 로 `Project` 를 통째로 빌리면 아래에서
+    // 상태를 꺼낼 수 없어 `worktree::dug` 를 여기서 다시 부르게 되는데, 그러면 "`Project` 에서
+    // `Dug` 를 짓는 법" 이 두 벌이 되어 [`projects::Project::dug`] 가 나중에 무엇을 배워도 이
+    // 줄만 옛 뜻으로 남는다. 헤쳐 놓으면 그 매임이 한 문장에 보인다.
+    let projects::Project { path, name, state, sides, mine, .. } =
+        projects::open_one(path, String::new(), None, false, lang);
+    let dug = crate::worktree::dug(&sides, &mine);
+    let look = match state {
         State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now, &dug) },
-        state => shut(&p.path, &p.name, state, lang),
+        state => shut(&path, &name, state, lang),
     };
-    Looked { path: p.path, marks, look }
+    Looked { path, marks, look }
 }
 
 impl Layer {

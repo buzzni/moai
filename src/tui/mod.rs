@@ -1077,8 +1077,12 @@ impl Site {
     /// 자리에서 아무 말도 안 한다 — 없는 것을 `미룬 0` 으로 말하면 모든 줄에 같은 꼬리가 붙는다.
     ///
     /// **보드와 같은 자다.** 여기서 다시 세면 한 저장소를 두 표면이 다른 수로 말한다.
+    ///
+    /// **첨자를 짚지 않고 묻는다**(리뷰) — 곁의 [`Site::column`]·[`Site::waits`] 는 짚는데, 그쪽에는
+    /// 한눈 보기의 남의 줄이 제 색인에서 푼 첨자를 들고 와 그 자리에서 죽은 이력이 적혀 있다
+    /// ([`Site::waits`]). 답이 이미 `Option` 이라 넘친 첨자에 `None` 을 내는 데 드는 것이 없다.
     pub fn deferred(&self, at: usize) -> Option<usize> {
-        let i = &self.issues[at];
+        let i = self.issues.get(at)?;
         crate::report::is_group(i).then(|| self.ground.stands.get(&i.id)).flatten().map(|s| s.deferred)
     }
 

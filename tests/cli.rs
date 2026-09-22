@@ -9313,12 +9313,18 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
 
     // 실린 글은 JSON 문자열 그대로라 줄바꿈이 두 글자(`\n`)다.
     let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-notices")));
-    let plus = |l: &str| l.trim().starts_with("+ ");
-    let here: Vec<String> = said.lines().filter(|l| plus(l)).map(|l| l.trim().to_string()).collect();
-    let there: Vec<String> = board.split("\\n").filter(|l| plus(l)).map(|l| l.trim().to_string()).collect();
-    assert!(here.len() >= 3, "알림 줄이 셋도 안 된다 — {said}");
+    // **설치 알림만 견준다**(리뷰). 알림 줄 전부를 견주면 `moai status` 에만 서는 알림(사용자
+    // 설정의 말 문제·쌓인 idea·미룬 것)이 생기는 날 이 시험이 붉어지고, 그 글은 "설치 알림이
+    // 갈렸다" 고 말한다 — 엉뚱한 곳을 고치게 만드는 시험이다.
+    let mine = |l: &str| {
+        let l = l.trim();
+        l.starts_with("+ ") && (l.contains("AGENTS.md") || l.contains(".gitignore") || l.contains("머지 드라이버"))
+    };
+    let here: Vec<String> = said.lines().filter(|l| mine(l)).map(|l| l.trim().to_string()).collect();
+    let there: Vec<String> = board.split("\\n").filter(|l| mine(l)).map(|l| l.trim().to_string()).collect();
+    assert_eq!(here.len(), 3, "설치 알림 셋이 다 서지 않았다 — {said}");
     // **양쪽으로 견준다.** 한쪽만 보면 그 화면에서 알림이 **빠지는** 되돌림이 푸르게 지나간다.
-    assert_eq!(here, there, "두 화면의 알림이 갈렸다\n--- status\n{said}\n--- 보드\n{board}");
+    assert_eq!(here, there, "두 화면의 설치 알림이 갈렸다\n--- status\n{said}\n--- 보드\n{board}");
 }
 
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.

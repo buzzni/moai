@@ -2397,16 +2397,6 @@ fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
     };
     let (work, done) = (&progress.work, progress.done);
 
-    // `clamp(10, 24)` 뒤에는 10 이상이라 뺄셈이 넘칠 수 없고 6 아래로도 안
-    // 간다 — 지키는 척하는 `.saturating_sub`·`.max` 는 지우고 뜻만 남긴다.
-    let cells = w.clamp(10, 24) - 4;
-    let filled = crate::text::bar_fill(Some(percent), cells);
-    let mut bar = vec![
-        // 16색 10번 — SPC 메뉴의 키와 같은 색(사용자 결정, moai-a46g).
-        Span::styled("█".repeat(filled), Style::new().fg(Color::LightGreen)),
-        Span::styled("░".repeat(cells - filled), dim()),
-        Span::raw(format!("  {done}/{}  {percent}%", work.len())),
-    ];
     // **미룬 멤버 수를 막대 곁에 댄다**(moai-oz13) — 보드와 `moai show <묶음>` 이 이미 대는 말인데
     // 탐색기만 안 댔다. 분모는 미룬 멤버를 그대로 세므로, 그 넷을 영영 안 해도 100% 가 안 된다:
     // 화면이 말하지 않으면 읽는 쪽은 `102/110` 에서 여덟이 남은 줄 알고 셈이 깨졌다고 읽는다.
@@ -2414,9 +2404,29 @@ fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // **세는 자도 낱말 짓는 자도 하나다** — 수는 `report::Stand::deferred`([`Site::deferred`]),
     // 낱말은 [`crate::view::set_aside_word`] 다. 바구니(`Entry::Dir { at: None }`)는 제 줄이 없어
     // 묶음이 아니고, 그래서 댈 수도 없다.
-    let aside = crate::view::set_aside_word(e.at().and_then(|at| site.deferred(at)), site.lang);
-    if let Some(word) = aside {
-        bar.push(Span::styled(format!("   {word}"), dim()));
+    let tail = crate::view::set_aside_word(e.at().and_then(|at| site.deferred(at)), site.lang)
+        .map(|word| format!("   {word}"));
+    let numbers = format!("  {done}/{}  {percent}%", work.len());
+
+    // **막대는 남은 칸만 먹는다**(리뷰, moai-oz13). 바라는 폭은 예전 그대로(`clamp(10,24) - 4`)
+    // 인데, 그 폭은 곁에 서는 글을 안 셌다 — 80칸 창의 상세 패널(안쪽 폭 30)에서 막대 20 + 숫자
+    // 10 이 딱 맞아 떨어져, 미룬 수를 달자 그 꼬리도 백분율도 함께 `…` 로 잘렸다. 대라고 넣은 말이
+    // 정작 흔한 창에서 안 보이는 것이다. 세 자리 셈(`102/110  92%`)은 꼬리가 없어도 같은 자리에서
+    // 넘쳤다 — 재는 자가 **실제로 그릴 글**을 세므로 그쪽도 같이 선다.
+    //
+    // **0 도 답이다.** 그만큼 좁으면 막대가 아니라 숫자가 남아야 한다 — `bar_fill` 은 어떤 폭에도
+    // `cells` 를 안 넘긴다.
+    let room = w.saturating_sub(crate::text::width(&numbers) + tail.as_deref().map_or(0, crate::text::width));
+    let cells = (w.clamp(10, 24) - 4).min(room);
+    let filled = crate::text::bar_fill(Some(percent), cells);
+    let mut bar = vec![
+        // 16색 10번 — SPC 메뉴의 키와 같은 색(사용자 결정, moai-a46g).
+        Span::styled("█".repeat(filled), Style::new().fg(Color::LightGreen)),
+        Span::styled("░".repeat(cells - filled), dim()),
+        Span::raw(numbers),
+    ];
+    if let Some(tail) = tail {
+        bar.push(Span::styled(tail, dim()));
     }
     let mut out = vec![Line::from(bar)];
 
@@ -3402,10 +3412,15 @@ pub(super) mod tests {
                 |r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0001")),
             )
             .expect("에픽 줄이 없다");
-        let screen = render(&mut a, 120, 24).join("\n");
         let want = crate::i18n::fill(crate::i18n::say(a.site.lang, "status.deferred_members"), &[("n", "1")]);
-        assert!(screen.contains("1/3"), "시험의 전제 — 미룬 멤버가 분모에 선다\n{screen}");
-        assert!(screen.contains(&want), "롤업이 미룬 수를 안 댄다 — {want:?}\n{screen}");
+        // **좁은 창에서 먼저 본다**(리뷰). 넓은 창만 재던 판은 80칸에서 꼬리도 백분율도 `…` 로
+        // 잘리는 것을 못 봤다 — 상세 패널의 안쪽 폭이 30이라 막대 20 + 숫자 10 이 이미 딱 찼다.
+        for w in [80, 100, 120] {
+            let screen = render(&mut a, w, 24).join("\n");
+            assert!(screen.contains("1/3"), "{w}칸에서 셈이 사라졌다\n{screen}");
+            assert!(screen.contains("33%"), "{w}칸에서 백분율이 잘렸다\n{screen}");
+            assert!(screen.contains(&want), "{w}칸에서 미룬 수를 안 댄다 — {want:?}\n{screen}");
+        }
 
         // 미룬 멤버가 없으면 꼬리도 없다 — 모든 줄에 붙으면 뜻이 사라진다.
         let mut plain = every(issues());
