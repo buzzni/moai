@@ -356,13 +356,15 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             .map(crate::text::quoted)
             .collect::<Vec<_>>()
             .join(" ");
-        return (!line.is_empty()).then_some(Handed { text: line, fork: true, strict: false, elsewhere, appends });
+        return (!line.is_empty()).then_some(Handed { text: line, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
     }
     // **셸을 여는 스위치가 넘긴 글도 여기서 읽는다**(moai-drli) — `env -S` 와 `sudo -s`.
     // `command_of` 는 그 앞에서 멈추고([`Wrapped::Hands`]) 그 뒤는 명령이 아니라 글이다. 멈추기만
     // 하고 아무도 안 읽던 판은 `env -S "moai add x"` 와 `sudo -s moai add x` 가 규칙을 통째로 지나갔다.
-    if let Some(Wrapped::Hands { at, glued, text: shape }) = wrap {
+    if let Some(Wrapped::Hands { at, glued, text: shape, args: spots }) = wrap {
         let tail = &rest[at..];
+        // **그 셸의 자리 인자**([`Handed::args`], moai-5ycj) — `$0` 부터다.
+        let args: Vec<String> = spots.iter().map(|&i| rest[i].clone()).collect();
         // **`su -c '글'` 의 글은 `bash -c` 의 글이다**(moai-qqg2) — 셸의 명령줄 한 낱말이라 가르지도
         // 잇지도 않는다. 그 **뒤**는 사용자와 그 셸의 자리 인자지 글의 일부가 아니다: 이어 붙이던
         // 판이라면 `su -c 'sed -i s/a/b/ x' alice` 의 `alice` 가 sed 의 또 다른 파일이 되어, 아무도
@@ -375,7 +377,8 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         if shape == Text::Line {
             let text = glued.or_else(|| tail.first().cloned()).unwrap_or_default();
             // 덧붙는 낱말은 이 글 **뒤**의 자리 인자다 — 글 자체는 안 자란다.
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: false });
+            return (!text.is_empty())
+                .then_some(Handed { text, fork: true, strict: false, elsewhere, appends: false, args });
         }
         // **이미 갈린 낱말은 도로 감싸서 잇는다** — `sudo -s <명령…>` 은 argv 를 통째로 escape 해
         // 셸에 `-c` 로 넘긴다(sudo 의 `parse_args.c`). 맨 빈칸으로만 잇던 판은 바깥 껍데기가 이미
@@ -404,13 +407,13 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         // 세어 주면 빈손의 쓰기를 풀어 준다. 쓰기 축은 그대로다.
         if shape == Text::Find {
             let text = exec_of(tail);
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: true });
+            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends: true, args: Vec::new() });
         }
         // **낱말을 그대로 잇는 꼴**([`Text::Joined`], moai-1b0d) — watch 가 하는 일이다. 도로
         // 감싸지 않는다: 그 프로그램이 따옴표를 안 되살린다(2026-09-22 에 쟀다).
         if shape == Text::Joined {
             let text = tail.join(" ");
-            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends });
+            return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
         }
         let split_out;
         let tail: &[String] = if shape == Text::Words {
@@ -427,7 +430,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
         let text = tail.iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
         // `sudo -s` 혼자는 사람이 쓸 셸을 띄운다 — 넘긴 글이 없다.
         // **이 꼴의 글은 뒤로 자란다** — 덧붙는 argv 가 이 명령줄에 그대로 이어 붙는다.
-        return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends });
+        return (!text.is_empty()).then_some(Handed { text, fork: true, strict: false, elsewhere, appends, args: Vec::new() });
     }
     match basename(head) {
         sh if is_shell(sh) => {
@@ -443,7 +446,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
             shell_argv(rest, wide_errexit(sh), elsewhere)
         }
         "eval" if !rest.is_empty() => {
-            Some(Handed { text: rest.join(" "), fork: false, strict: false, elsewhere, appends })
+            Some(Handed { text: rest.join(" "), fork: false, strict: false, elsewhere, appends, args: Vec::new() })
         }
         _ => None,
     }
@@ -505,7 +508,14 @@ fn shell_argv<'a>(argv: impl IntoIterator<Item = &'a String>, wide: bool, elsewh
     };
     match (hands, text) {
         // `-c` 의 글은 argv 의 한 낱말이다 — 덧붙는 낱말은 그 셸의 자리 인자로 간다.
-        (true, Some(t)) => Some(Handed { text: t.clone(), fork: true, strict, elsewhere, appends: false }),
+        //
+        // **그 자리 인자를 함께 낸다**([`Handed::args`], moai-5ycj) — `bash -c '<글>' NAME A B`
+        // 는 `$0`=NAME·`$1`=A 다(2026-09-22 에 쟀다). 걷지 않던 판은 `bash -c 'sed -i s/a/b/
+        // "$1"' 남 src/x.rs` 가 정말 고치는 파일을 `"$1"` 인 채로 버렸다.
+        (true, Some(t)) => {
+            let args = it.cloned().collect();
+            Some(Handed { text: t.clone(), fork: true, strict, elsewhere, appends: false, args })
+        }
         _ => None,
     }
 }
@@ -594,6 +604,17 @@ struct Handed {
     /// 도는 낱말의 전부가 아니다. `-c` 의 글은 거짓이다 — 덧붙는 낱말은 자리 인자로 간다.
     /// 겹으로 실려([`Layer::Shell`]) 그 글 안의 집기를 안 세게 한다.
     appends: bool,
+    /// **그 글의 자리 인자들 — `$0` 부터다**(moai-5ycj). `bash -c '<글>' <이름> <인자…>` 와
+    /// `su -c '<글>' <사용자> <인자…>` 가 넘기는 것이고, 글 안에서 `$1`·`$@` 로 닿는다.
+    ///
+    /// `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 정말 그 파일을 고치는데, 이 자리가 없던
+    /// 판은 `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다. **닿을 수 없어서 버린 것이 아니라 풀
+    /// 자가 없어서 버린 것**이라고 적어 두었던 자리다.
+    ///
+    /// **차례가 감싸는 명령마다 다르다**(2026-09-22 에 쟀다). `bash -c '<글>' NAME A B` 는
+    /// `$0`=NAME 이고, `su -c '<글>' <사용자> A B` 는 su 가 사용자를 제 것으로 먹어 `$0`=A 다.
+    /// `su <사용자> -c '<글>' A B` 도 같은 답이다.
+    args: Vec<String>,
 }
 
 /// 명령줄의 한 토막 — 낱말들과, 리다이렉션이 쓰는 자리.
@@ -1060,6 +1081,9 @@ struct Lexer<'a> {
     later: Vec<(usize, String)>,
     /// 다시 읽기를 몇 겹까지 왔나 — `bash -c "bash -c '…'"` 가 끝없이 파고들지 않게 막는다.
     deep: usize,
+    /// **이 글의 자리 인자 — `$0` 부터다**([`Handed::args`], moai-5ycj). `$1`·`${1}`·`$@` 를 이것으로
+    /// 푼다([`Lexer::param`]). 맨 바깥 렉서와 치환의 렉서에서는 비어 있어 아무것도 안 바뀐다.
+    args: &'a [String],
 }
 
 #[cfg(test)]
@@ -1156,7 +1180,13 @@ impl<'a> Lexer<'a> {
             shut: None,
             later: Vec::new(),
             deep,
+            args: &[],
         }
+    }
+
+    /// 자리 인자를 든 렉서 — 셸에 넘긴 글을 다시 읽을 때만 선다([`Lexer::relex`], moai-5ycj).
+    fn at_args(cmd: &'a str, deep: usize, args: &'a [String]) -> Self {
+        Lexer { args, ..Lexer::at(cmd, deep) }
     }
 
     /// 다시 읽기의 상한 — 이보다 깊으면 글을 글로 둔다. 막는 것은 **되돌이가 스택을 넘는 것**이다:
@@ -1363,13 +1393,14 @@ impl<'a> Lexer<'a> {
         /// `Plant::Fork { strict }` 가 딴 형인 줄 몰랐다. 이 파일이 `deep` 을 두고 적어 둔 것과
         /// 같은 자리다(리뷰 moai-k8j1.udq).
         #[derive(Clone, Copy)]
-        enum Plant {
+        enum Plant<'a> {
             /// 따옴표 없는 heredoc 본문 — 바깥 명령의 **낱말**이다([`Layer::Subst`]).
             Doc,
             /// `bash -c '…'`·`sh -c` 의 글 — 새 셸이다. `strict` 는 띄울 때 켠 errexit(moai-j9tx),
             /// `astray` 는 그 글이 도는 자리를 모른다는 것(moai-2avz, `su -c '<글>' -l`),
             /// `grows` 는 그 글이 뒤로 자란다는 것(리뷰, `xargs sudo -s <명령…>`).
-            Fork { strict: bool, astray: bool, grows: bool },
+            /// `args` 는 그 글의 자리 인자다(moai-5ycj, `bash -c '<글>' <이름> <인자…>`).
+            Fork { strict: bool, astray: bool, grows: bool, args: &'a [String] },
             /// `eval '…'` 의 글 — 지금 셸에서 돈다. 겹이 없다: 제 `set -e` 도 `cd` 도 바깥에 남는다.
             Eval,
         }
@@ -1385,17 +1416,16 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             // 글마다 **무엇인가**([`Plant`]) — 겹은 아래에서 `apace` 와 함께 한 번만 짓는다.
-            let mut texts: Vec<(&str, Plant)> =
+            let mut texts: Vec<(&str, Plant<'_>)> =
                 docs.iter().filter(|(n, _)| seg.docs.contains(n)).map(|(_, t)| (t.as_str(), Plant::Doc)).collect();
             let own = shell_text(&seg.words, &seg.eaten);
             texts.extend(
                 own.iter().map(|h| {
-                    let how =
-                        if h.fork {
-                            Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends }
-                        } else {
-                            Plant::Eval
-                        };
+                    let how = if h.fork {
+                        Plant::Fork { strict: h.strict, astray: h.elsewhere, grows: h.appends, args: &h.args }
+                    } else {
+                        Plant::Eval
+                    };
                     (h.text.as_str(), how)
                 }),
             );
@@ -1426,7 +1456,13 @@ impl<'a> Lexer<'a> {
                 // 의 `cd` 는 뒤로 안 이어지고 `집기 || eval 'exit 1' | cat` 의 `exit` 는 그 칸만 끝낸다.
                 // 지금 셸에서 돈다고만 세던 판은 그 둘을 바깥 셸의 것으로 읽어, 아무것도 안 집은 채
                 // 쓰는 줄이 샜다.
-                let (segs, left) = Lexer::at(text, deep + 1).run_over();
+                // **넘긴 글은 제 자리 인자를 들고 다시 읽힌다**(moai-5ycj) — 그 글 안의 `$1` 을
+                // 푸는 것은 렉서다([`Lexer::param`]).
+                let args: &[String] = match kind {
+                    Plant::Fork { args, .. } => args,
+                    _ => &[],
+                };
+                let (segs, left) = Lexer::at_args(text, deep + 1, args).run_over();
                 // **뒤로 띄운 것으로 끝나는 글의 값은 0 이다** — `bash -c '집기 &'` 는 집기가 돌기도
                 // 전에 0 으로 끝난다. 그 값은 이 토막의 값이 아니니 치환으로 심는다: 나올 때 집기를
                 // 도로 세운다. 파이프의 마지막 칸은 아니다 — `cat f | 집기` 의 값은 집기의 값이다.
@@ -1467,7 +1503,7 @@ impl<'a> Lexer<'a> {
                 // 다른 쪽으로 옮겨 적어도 컴파일이 되고, 그 겹은 훅이 스택을 안 넘게 막는 유일한 자다.
                 let layer = match kind {
                     Plant::Doc => Some(Layer::Subst { at: 0, nth }),
-                    Plant::Fork { strict, astray, grows } => {
+                    Plant::Fork { strict, astray, grows, .. } => {
                         Some(Layer::Shell { top: 0, deep: wrap, strict, apace, elsewhere: astray, appends: grows })
                     }
                     Plant::Eval => apace.then_some(Layer::Subst { at: 0, nth }),
@@ -1561,6 +1597,9 @@ impl<'a> Lexer<'a> {
                 self.open(Ctx::Ansi);
             }
             '$' if next == Some('(') => self.dollar(),
+            // **자리 인자를 푼다**([`Lexer::param`], moai-5ycj) — 셸에 넘긴 글에서만 선다.
+            // 못 풀면 아래 갈래가 `$` 를 글자로 적는다(지금까지와 같다).
+            '$' if self.param(false) => {}
             '`' => {
                 self.cur.push(c);
                 self.had = true;
@@ -1765,6 +1804,87 @@ impl<'a> Lexer<'a> {
         self.stack.iter().any(|c| matches!(c, Ctx::Subst(_)))
     }
 
+    /// **`$1`·`${1}`·`$@` 를 그 자리 인자로 바꾼다**(moai-5ycj) — `$` 는 이미 읽었다. 푼 것이
+    /// 있으면(또는 읽은 글자를 제가 도로 적었으면) 참이고, 거짓이면 부르는 쪽이 `$` 를 글자로
+    /// 적는다.
+    ///
+    /// `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 정말 그 파일을 고치는데, 푸는 자가 없던 판은
+    /// `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다.
+    ///
+    /// **렉서가 치환을 읽는 이 자리에서 한다** — 글자로 바꿔치기하면 `'$1'`(안 풀린다)과
+    /// `"$1"`(풀린다)이 안 갈려, 안 풀릴 것을 풀어 **아무도 안 고치는 파일을 고친다며 잘못 막는다**.
+    ///
+    /// **모르면 지어내지 않는다** — 그 자리가 비었거나 `${1:-x}`·`${FOO}` 처럼 꼴이 다르면 글자째
+    /// 둔다. 그러면 지금처럼 [`unknowable`] 이 그 낱말을 버린다.
+    ///
+    /// **푼 값은 글자로 담는다 — 다시 렉서를 안 태운다.** 셸도 그렇다: 푼 값 안의 `;`·`>` 는
+    /// 연산자가 아니라 글자다. 태우면 `su -c 'echo "$1"' 남 'a; sed -i s/a/b/ src/x.rs'` 가 없는
+    /// 쓰기를 지어낸다. 빈칸으로 낱말을 가르는 것(IFS)도 안 한다 — 모르는 쪽으로 두면 그 낱말이
+    /// 통째로 [`unknowable`] 에 걸린다.
+    ///
+    /// **낱말이 갈리는 것은 `$@`·`$*` 뿐이다** — 인자마다 낱말 하나고, 따옴표 안의 `"$*"` 만 한
+    /// 낱말로 잇는다.
+    fn param(&mut self, quoted: bool) -> bool {
+        match self.chars.peek().copied() {
+            Some(d) if d.is_ascii_digit() => {
+                self.chars.next();
+                self.spread(&[d], d.to_digit(10).unwrap_or(0) as usize);
+                true
+            }
+            // `${1}` 만 푼다 — `${1:-x}`·`${FOO}` 는 읽은 글자를 도로 적고 글자째 둔다.
+            Some('{') => {
+                self.chars.next();
+                let mut seen = vec!['{'];
+                let digit = self.chars.peek().copied().filter(char::is_ascii_digit);
+                if let Some(d) = digit {
+                    self.chars.next();
+                    seen.push(d);
+                    if self.chars.next_if_eq(&'}').is_some() {
+                        self.spread(&['{', d, '}'], d.to_digit(10).unwrap_or(0) as usize);
+                        return true;
+                    }
+                }
+                self.cur.push('$');
+                self.cur.extend(seen);
+                true
+            }
+            Some(c @ ('@' | '*')) => {
+                // `$0` 은 안 든다 — `$@` 는 `$1` 부터다. 풀 것이 없으면 글자째 둔다.
+                let Some(vals) = self.args.get(1..).filter(|v| !v.is_empty()) else { return false };
+                self.chars.next();
+                self.had = true;
+                if c == '*' && quoted {
+                    self.cur.push_str(&vals.join(" "));
+                    return true;
+                }
+                for (i, v) in vals.to_vec().iter().enumerate() {
+                    if i > 0 {
+                        self.flush();
+                    }
+                    self.cur.push_str(v);
+                    self.had = true;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 자리 인자 하나를 낱말에 담는다 — 없으면 읽은 글자를 도로 적는다([`Lexer::param`]).
+    fn spread(&mut self, seen: &[char], nth: usize) {
+        match self.args.get(nth) {
+            Some(v) => {
+                let v = v.clone();
+                self.cur.push_str(&v);
+                self.had = true;
+            }
+            None => {
+                self.cur.push('$');
+                self.cur.extend(seen);
+            }
+        }
+    }
+
     fn single(&mut self, c: char) {
         if c == '\'' {
             self.close(c);
@@ -1793,6 +1913,9 @@ impl<'a> Lexer<'a> {
     fn double(&mut self, c: char) {
         if c == '$' && self.chars.peek() == Some(&'(') {
             self.dollar();
+        // **따옴표 안에서도 푼다**(moai-5ycj) — `"$1"` 은 풀리고 `'$1'` 은 안 풀린다. 그 갈림이
+        // 이 자리에 있어야 하는 까닭이다([`Lexer::param`]).
+        } else if c == '$' && !self.opaque() && self.param(true) {
         } else if c == '`' && !self.opaque() {
             self.cur.push(c);
             self.enter(Ctx::Tick);
@@ -2299,6 +2422,13 @@ enum Wrapped {
         glued: Option<String>,
         /// 그 글을 **어떻게 읽는가**([`Text`]).
         text: Text,
+        /// **그 글의 자리 인자들이 선 자리**(moai-5ycj) — `su -c '<글>' <사용자> A B` 의 A·B 다
+        /// ([`Handed::args`]). 글 안에서 `$0`·`$1`·`$@` 로 닿는다.
+        ///
+        /// **사용자는 여기 없다** — su 가 제 것으로 먹는다. 2026-09-22 에 쟀다:
+        /// `su -c '<글>' 남 A B` 는 `$0`=A 이고, `su 남 -c '<글>' A B` 도 같은 답이다. 그래서
+        /// 걷어 둔 피연산자(`ops`)의 **맨 앞 하나를 빼고** 든다 — 차례가 어느 쪽이든 같은 자다.
+        args: Vec<usize>,
     },
     /// 뒤에 오는 낱말들이 **그것이 띄우는 셸의 argv** 다(moai-729n) — `su <사용자> <인자…>`.
     ///
@@ -3000,7 +3130,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 내는 것은 "그 뒤는 명령이 아니라 글이다" 하나뿐이고, 그 글을 짓는 자리는 다른 꼴들과
     // 나란히 선다.
     if head == "find" {
-        return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find });
+        return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find, args: Vec::new() });
     }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
     let (takes, long, stops, chdir, hands) = (w.takes, w.long, w.stops, w.chdir, w.hands);
@@ -3175,11 +3305,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                     if eats {
                         need!(rest.get(n + 1));
                     }
-                    hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                    hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                     n += 1 + usize::from(eats);
                     continue;
                 }
-                return Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
             }
             // 값 없는 깃발에 `=` 를 단 꼴(`sudo -s=x`)은 그 프로그램이 거절한다 — 붙은 것을 글로
             // 읽지 않는다. 표만 달고 옵션을 마저 읽는다.
@@ -3283,12 +3413,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                     let glued = (!left.is_empty()).then(|| left.to_string());
                     // 섞어 읽는 것은 여기서도 적어 두고 마저 읽는다(moai-729n).
                     if mixes {
-                        hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                        hands_at = Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                         eats = left.is_empty();
                         stop = false;
                         break;
                     }
-                    return Some(Wrapped::Hands { at: n + 1, glued, text: w.text });
+                    return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                 }
                 handed = true;
                 stop = false;
@@ -3368,17 +3498,20 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         return Some(Wrapped::Stops);
     }
     if handed && !alien {
-        return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text, args: Vec::new() });
     }
-    if !alien && let Some(hands) = hands_at {
-        return Some(hands);
+    // **넘긴 글 뒤의 피연산자는 그 셸의 자리 인자다**(moai-5ycj) — 맨 앞 하나는 사용자라 뺀다
+    // ([`Wrapped::Hands::args`]). 걷어 두기만 하고 버리던 판은 `su -c 'sed -i s/a/b/ "$1"' 남
+    // src/x.rs` 가 정말 고치는 파일을 `"$1"` 인 채로 버렸다.
+    if !alien && let Some(Wrapped::Hands { at, glued, text, .. }) = hands_at {
+        return Some(Wrapped::Hands { at, glued, text, args: ops.iter().skip(1).copied().collect() });
     }
     // **`-x` 를 안 봤으면 옵션이 끝난 자리부터가 글이다**([`Runs::Unless`], moai-1b0d) — watch 는
     // 그 낱말들을 빈칸으로 이어 `sh -c` 에 넘긴다. 봤으면 아래로 내려가 명령 자리로 선다.
     // 뒤가 비면 watch 가 그 줄을 거절한다([`Wrapped::Stops`]).
     if matches!(w.runs, Runs::Unless(_)) && !saw {
         need!(rest.get(n));
-        return Some(Wrapped::Hands { at: n, glued: None, text: w.text });
+        return Some(Wrapped::Hands { at: n, glued: None, text: w.text, args: Vec::new() });
     }
     // **뒤 낱말이 명령이 아닌 감싸는 명령**(`su <사용자>`)은 그 낱말을 명령으로 읽지 않는다 —
     // 읽으면 사용자 이름이 명령이 된다. `runuser` 는 `-u <사용자>` 를 봤을 때만 명령이 온다
@@ -10756,6 +10889,67 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
         }
+    }
+
+    /// **넘긴 글의 자리 인자를 푼다**(moai-5ycj) — `bash -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는
+    /// 정말 그 파일을 고치는데, 푸는 자가 없던 판은 `"$1"` 이 뭔지 몰라 [`unknowable`] 이 버렸다.
+    ///
+    /// **차례가 감싸는 명령마다 다르다**(2026-09-22 에 쟀다 — sudo 로 su 를 불러 찍어 봤다).
+    /// `bash -c '<글>' NAME A B` 는 `$0`=NAME·`$1`=A 이고, `su -c '<글>' <사용자> A B` 는 su 가
+    /// 사용자를 제 것으로 먹어 `$0`=A 다. `su <사용자> -c '<글>' A B` 도 같은 답이다. 그래서
+    /// 원래 idea 가 적은 `su -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 사실 `$1` 이 비어 있다.
+    ///
+    /// **따옴표를 가린다** — `'$1'` 은 안 풀리고 `"$1"` 은 풀린다. 글자로 바꿔치기하면 그 둘이
+    /// 안 갈려 안 풀릴 것을 풀고, 아무도 안 고치는 파일을 고친다며 **잘못 막는다**.
+    #[test]
+    fn a_handed_string_reaches_its_positional_arguments() {
+        let root = Path::new("/repo");
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let stands = |_: usize, _: &str| None;
+        for cmd in [
+            "bash -c 'sed -i s/a/b/ \"$1\"' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ $1' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${1}' 남 src/x.rs",
+            "sh -c 'tee \"$0\"' src/x.rs",
+            "bash -c 'tee \"$@\"' 남 src/x.rs",
+            "bash -c 'tee \"$*\"' 남 src/x.rs",
+            "bash -c 'tee $@' 남 a src/x.rs",
+            // su 는 사용자를 제 것으로 먹는다 — 그 자리가 `$0` 이다.
+            "su -c 'sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            "su -c 'sed -i s/a/b/ \"$1\"' 남 A src/x.rs",
+            "su 남 -c 'sed -i s/a/b/ \"$0\"' src/x.rs",
+            "runuser -c 'sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            "su --command='sed -i s/a/b/ \"$0\"' 남 src/x.rs",
+            // `-s` 가 댄 셸에 그대로 넘어간 argv 도 같은 자가 읽는다.
+            "su -s /bin/bash 남 -- -c 'sed -i s/a/b/ \"$1\"' zero src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "자리 인자를 안 풀어 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+        // **모르면 지어내지 않는다** — 그 자리가 비었거나 꼴이 다르거나 따옴표에 싸였으면 그대로 둔다.
+        for cmd in [
+            // 작은따옴표 안은 안 풀린다 — 바깥을 겹따옴표로 싸 그 갈림을 재는 줄이다.
+            "bash -c \"sed -i s/a/b/ '\\$1'\" 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ \"$1\"' 남",
+            "bash -c 'sed -i s/a/b/ $2' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${1:-x}' 남 src/x.rs",
+            "bash -c 'sed -i s/a/b/ ${FOO}' 남 src/x.rs",
+            // su 의 `$1` 은 사용자 뒤의 **둘째** 자리다 — 하나만 주면 비어 있다.
+            "su -c 'sed -i s/a/b/ \"$1\"' 남 src/x.rs",
+            // 푼 값 안의 `;` 는 연산자가 아니라 글자다 — 태우면 없는 쓰기를 지어낸다.
+            "bash -c 'echo \"$1\"' 남 'a; sed -i s/a/b/ src/x.rs'",
+            "bash -c 'echo \"$1\"' 남 'a > src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "모르는 자리를 지어내 잘못 막았다 — {cmd}\n{got:?}");
+        }
+        // 집기 축도 같은 자를 지난다 — 규칙 1 과 장부가 그 글을 본다.
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "bash -c 'moai add \"$1\"' 남 '딴 일'"), Decision::Deny(_)),
+            "자리 인자로 세운 이슈를 못 봤다"
+        );
+        let cmd = "bash -c 'moai mv \"$1\" in_progress --from todo' 남 t-1";
+        assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1"], "자리 인자로 집은 것을 못 읽었다");
     }
 
     /// **`eval` 이 [`BUILTINS`] 에 선 것이 `Plant::Eval` 의 방벽이다**(moai-ta6q, 리뷰
