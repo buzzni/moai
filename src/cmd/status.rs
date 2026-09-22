@@ -99,16 +99,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
     let trouble = trouble + if said_already { 0 } else { unread.all.len() };
-    // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
-    // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
-    // 남의 저장소라 안 본다.
-    st.notices.extend(crate::cmd::init::agents_notice(repo.here(), ctx.chdir));
-    // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
-    st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), ctx.chdir));
-    // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
-    // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
-    // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
-    st.notices.extend(crate::cmd::merge_driver::notice(&repo, ctx.chdir));
+    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). 한눈 보기(`.moai` 밖)는 남의 저장소라
+    // 안 본다.
+    st.notices.extend(install_notices(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
@@ -188,6 +181,27 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         trouble,
         view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin),
     ))
+}
+
+/// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙
+/// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu).
+///
+/// **한 자리다**(moai-1tcm). `moai status` 와 훅의 보드가 같은 셋을 싣는데, 셋을 표면마다 따로
+/// 적던 때는 그 사실이 "`moai status` 와 같은 알림을 싣는다" 는 주석으로만 서 있었다 — 한쪽에
+/// 알림을 더하면 다른 쪽은 조용하고, 그것을 잡아 줄 것이 아무 데도 없다. 더하는 자리가 여기
+/// 하나면 더하는 것만으로 두 표면이 함께 움직인다.
+///
+/// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
+/// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
+///
+/// `chdir` 은 **부르는 쪽이 그 저장소로 옮겨 와 있지 않은가** 다 — 대는 명령에 `-C` 를 얹을지를
+/// 가른다(`init::away_root`). 훅의 세션은 셸 자리가 이미 그 저장소라 `false` 다.
+pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::report::Warning> {
+    let mut out = Vec::new();
+    out.extend(crate::cmd::init::agents_notice(repo.here(), chdir));
+    out.extend(crate::cmd::init::dotfile_notice(repo.here(), chdir));
+    out.extend(crate::cmd::merge_driver::notice(repo, chdir));
+    out
 }
 
 /// 보드가 **정말 읽은 파일**을 머리에 댄다 — 딸린 워크트리 안에서는 그 자리의 `.moai` 가 아니라

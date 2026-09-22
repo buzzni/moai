@@ -9274,6 +9274,53 @@ fn the_hook_never_fails() {
     }
 }
 
+/// **설치 알림 셋을 두 표면이 같이 싣는다**(moai-1tcm) — 낡은 AGENTS.md 블록·빠진 딸린 파일
+/// 규칙·머지 드라이버의 상태. `moai status` 와 훅의 보드(`UserPromptSubmit`)가 그 셋을 저마다
+/// 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했고, 그 사실은 "같은 알림을 싣는다" 는 주석
+/// 으로만 서 있었다.
+///
+/// **재는 자가 여기 선다.** 어느 쪽이 어떤 꼴로 셋을 모으든, 두 화면의 알림 줄이 글자째 같아야
+/// 한다 — 한쪽에만 더하는 날 이 줄이 먼저 붉어진다.
+#[test]
+fn the_board_and_the_hook_carry_the_same_install_notices() {
+    let s = init("installnotices");
+    let root = s.path();
+    // 머지 드라이버는 **선언이 있는데 안 심긴** 자리라야 말한다 — `init` 이 `.gitattributes` 에
+    // 선언을 적고, 심는 것은 클론마다 사람이 한다.
+    git(root, &["init", "-q", "."]);
+    // 딸린 파일 규칙 하나를 지운다 — 사람이 손으로 지웠거나 못 써서 건너뛴 자리다.
+    let ignore = root.join(".gitignore");
+    let kept: String = std::fs::read_to_string(&ignore)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("worktrees"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&ignore, &kept).unwrap();
+    // AGENTS.md 블록을 손으로 고쳐 낡게 만든다.
+    let md = root.join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
+
+    let said = ok(root, &["status"]);
+    // **시험이 헛돌지 않게 셋이 실제로 섰는지 먼저 본다** — 하나도 안 서면 아래 훑기는 빈
+    // 목록을 견주며 푸르다.
+    assert!(said.contains("AGENTS.md"), "낡은 블록을 안 댄다\n{said}");
+    assert!(said.contains(".gitignore"), "빠진 딸린 파일 규칙을 안 댄다\n{said}");
+    assert!(said.contains("merge-driver"), "머지 드라이버를 안 댄다\n{said}");
+
+    // 실린 글은 JSON 문자열 그대로라 줄바꿈이 두 글자(`\n`)다.
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-notices")));
+    let plus = |l: &str| l.trim().starts_with("+ ");
+    let here: Vec<String> = said.lines().filter(|l| plus(l)).map(|l| l.trim().to_string()).collect();
+    let there: Vec<String> = board.split("\\n").filter(|l| plus(l)).map(|l| l.trim().to_string()).collect();
+    assert!(here.len() >= 3, "알림 줄이 셋도 안 된다 — {said}");
+    // **양쪽으로 견준다.** 한쪽만 보면 그 화면에서 알림이 **빠지는** 되돌림이 푸르게 지나간다.
+    assert_eq!(here, there, "두 화면의 알림이 갈렸다\n--- status\n{said}\n--- 보드\n{board}");
+}
+
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
 #[test]
 fn the_hook_works_where_stdin_says() {
