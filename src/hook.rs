@@ -2354,6 +2354,135 @@ fn wrapped(head: &str, rest: &[String]) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
         },
+        // **앞에 붙여 뒤의 명령을 돌리는 것이 더 있다**(moai-0fzj) — 옆의 `stdbuf`·`nice` 와 같은
+        // 꼴인데 표에 없어 `setsid sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
+        // 넘겼고, `ionice moai add x` 가 규칙 1 을 지나갔다. 2026-09-21 에 워크트리에서 재 보니
+        // 열넷이 다 샜다.
+        //
+        // **한 판에 다 넣지 않는다** — 옵션 표를 틀리게 적으면 없는 것보다 나쁘다. 값이 명령 자리로
+        // 읽혀 정당한 줄을 막는다. 여기 드는 것은 **표에 줄 하나면 되는 것**뿐이다: 값 받는 옵션이
+        // 적고 꼴이 `stdbuf` 와 같다. 나머지 셋은 새 꼴이 들어 따로 본다 — `find` 의 `-exec`(명령이
+        // 옵션 뒤가 아니라 술어 안에 선다), `flock -c`·`watch`·`script -c`(뒤가 명령이 아니라 글이다),
+        // `parallel`(옵션이 백 개가 넘고 `:::` 뒤는 입력이다)과 `strace`(값 받는 옵션이 스물이 넘는다).
+        //
+        // **이미 도는 프로세스를 겨누는 스위치는 멈춘다**(`ionice -p`·`chrt -p`·`taskset -p`) — 그때는
+        // 뒤에 명령이 안 오고 pid 가 온다. 넘겨 주면 그 숫자가 명령 자리로 읽힌다.
+        Wrapper {
+            name: "setsid",
+            takes: &[],
+            long: &[],
+            free: &["--ctty", "--fork", "--wait"],
+            attach: &[],
+            args: 0,
+            stops: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        Wrapper {
+            name: "ionice",
+            takes: &["-c", "-n"],
+            long: &["--class", "--classdata"],
+            free: &["--ignore"],
+            attach: &[],
+            args: 0,
+            // `-p`·`-P`·`-u` 는 이미 도는 프로세스의 등급을 바꾼다 — 뒤에 명령이 없다.
+            stops: &["-p", "--pid", "-P", "--pgid", "-u", "--uid"],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        // `chrt [옵션] <우선순위> <명령…>` — 우선순위가 제 자리 인자 하나다(`timeout 5 …` 와 같다).
+        Wrapper {
+            name: "chrt",
+            takes: &["-T", "-P", "-D"],
+            long: &["--sched-runtime", "--sched-period", "--sched-deadline"],
+            free: &[
+                "--batch",
+                "--deadline",
+                "--fifo",
+                "--idle",
+                "--other",
+                "--rr",
+                "--reset-on-fork",
+                "--all-tasks",
+            ],
+            attach: &[],
+            args: 1,
+            // `-m` 은 쓸 수 있는 우선순위를 찍기만 한다 — 제 자리 인자도 명령도 안 받는다.
+            stops: &["-p", "--pid", "-m", "--max"],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        // `taskset [옵션] <마스크|cpu 목록> <명령…>` — 마스크가 제 자리 인자 하나다.
+        Wrapper {
+            name: "taskset",
+            takes: &[],
+            long: &[],
+            free: &["--all-tasks", "--cpu-list"],
+            attach: &[],
+            args: 1,
+            stops: &["-p", "--pid"],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        // expect 의 `unbuffer [-p] <명령…>` — 값을 받는 옵션이 아예 없다.
+        Wrapper {
+            name: "unbuffer",
+            takes: &[],
+            long: &[],
+            free: &[],
+            attach: &[],
+            args: 0,
+            stops: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        // `proxychains [-q] [-f <설정>] <명령…>`. **두 이름을 다 적는다** — proxychains-ng 가 까는
+        // 실행 파일은 `proxychains4` 고 `proxychains` 는 그리로 가는 링크다. [`basename`] 이 내는
+        // 이름이 갈리니 한 줄로는 한쪽이 샌다. 옛 proxychains 는 옵션이 아예 없어, `-f` 를 값 받는
+        // 것으로 적는 것이 그쪽에서 막는 줄을 만들지 않는다.
+        Wrapper {
+            name: "proxychains",
+            takes: &["-f"],
+            long: &[],
+            free: &[],
+            attach: &[],
+            args: 0,
+            stops: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
+        Wrapper {
+            name: "proxychains4",
+            takes: &["-f"],
+            long: &[],
+            free: &[],
+            attach: &[],
+            args: 0,
+            stops: &[],
+            chdir: &[],
+            hands: &[],
+            text: Text::Words,
+            runs: Runs::Always,
+            glued: false,
+        },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
         // 표에 없어 `echo x | xargs sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
         // 넘겼고, `ls | xargs moai add x` 가 규칙 1 을 지나갔다. 파이프로 이어 쓰는 꼴이라 에이전트가
@@ -6540,6 +6669,29 @@ mod tests {
             "nice --10 moai add '딴 일'",
             "sudo --command-timeout 5 moai add '딴 일'",
             "sudo --bell moai add '딴 일'",
+            // **앞에 붙여 뒤의 명령을 돌리는 것 여섯**(moai-0fzj) — `stdbuf` 와 같은 꼴인데 표에
+            // 없어 빈손으로 지나가던 자리다. `chrt`·`taskset` 은 제 자리 인자 하나(우선순위·마스크)를
+            // 먼저 먹으니 `timeout 5 …` 와 같은 줄이다.
+            "setsid moai add '딴 일'",
+            "setsid -f moai add '딴 일'",
+            "setsid --ctty moai add '딴 일'",
+            "ionice moai add '딴 일'",
+            "ionice -c 3 moai add '딴 일'",
+            "ionice -c3 -n 7 moai add '딴 일'",
+            "ionice --class 2 --classdata 4 moai add '딴 일'",
+            "chrt 50 moai add '딴 일'",
+            "chrt -b 0 moai add '딴 일'",
+            "chrt -T 50000 -D 100000 0 moai add '딴 일'",
+            "chrt --batch 0 moai add '딴 일'",
+            "taskset 0x3 moai add '딴 일'",
+            "taskset -c 0 moai add '딴 일'",
+            "taskset -ac 0,3 moai add '딴 일'",
+            "unbuffer moai add '딴 일'",
+            "unbuffer -p moai add '딴 일'",
+            "proxychains moai add '딴 일'",
+            "proxychains4 -f /etc/pc.conf moai add '딴 일'",
+            // 겹쳐 써도 하나씩 벗는다 — 에이전트가 실제로 치는 꼴이다.
+            "setsid ionice -c 3 chrt -b 0 moai add '딴 일'",
         ] {
             assert!(
                 matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
@@ -6554,6 +6706,13 @@ mod tests {
             // 파이프로 이어 쓰는 꼴이 `xargs` 가 가장 흔히 서는 자리다(moai-ulaa).
             "echo x | xargs sed -i s/a/b/ src/x.rs",
             "ls | xargs -n 1 tee src/x.rs",
+            // 앞에 붙여 돌리는 것 여섯의 쓰기 축(moai-0fzj).
+            "setsid sed -i s/a/b/ src/x.rs",
+            "ionice -c 3 tee src/x.rs",
+            "chrt -b 0 sed -i s/a/b/ src/x.rs",
+            "taskset -c 0 sed -i s/a/b/ src/x.rs",
+            "unbuffer sed -i s/a/b/ src/x.rs",
+            "proxychains -f /etc/pc.conf sed -i s/a/b/ src/x.rs",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "감싸는 명령이 규칙 2 를 가렸다 — {cmd}\n{got:?}");
@@ -6623,6 +6782,20 @@ mod tests {
             // 자리라 env·sudo 가 거절하고 아무것도 안 돈다. 제자리로 읽던 판은 안 도는 집기를 셌다.
             "env -C=. moai add '딴 일'",
             "sudo -D=. moai add '딴 일'",
+            // **이미 도는 프로세스를 겨누는 스위치**(moai-0fzj) — 뒤에 오는 것이 명령이 아니라
+            // pid·uid 고, `chrt -m` 은 쓸 수 있는 우선순위를 찍기만 한다. 넘겨 주면 그 숫자가
+            // 명령 자리로 읽힌다.
+            "ionice -p 1234 moai add '딴 일'",
+            "ionice -u 1000 moai add '딴 일'",
+            "ionice -tp 1234 moai add '딴 일'",
+            "chrt -p 1234 moai add '딴 일'",
+            "chrt -m moai add '딴 일'",
+            "chrt --max moai add '딴 일'",
+            "taskset -p 1234 moai add '딴 일'",
+            "taskset -pc 0,3 700 moai add '딴 일'",
+            // 새 줄들도 모르는 긴 옵션에서 멈춘다 — 값을 따로 받는 것이면 그 값이 명령이 된다.
+            "setsid --weird moai add '딴 일'",
+            "chrt --weird moai add '딴 일'",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "모르는 꼴을 명령으로 읽었다 — {cmd}");
         }
@@ -6681,6 +6854,7 @@ mod tests {
         // 감싸는 명령 혼자는 그 자체로 명령이다(`env` 는 환경을 찍는다).
         assert_eq!(command_of(&["env".to_string()]).first().map(String::as_str), Some("env"));
     }
+
 
     /// **셸에 넘긴 글은 명령이다**(moai-455j) — `bash -c '…'`·`eval '…'` 의 글을 렉서가 다시 읽는다.
     /// 안 읽던 판은 그 한 낱말 뒤에서 규칙 1~2 가 통째로 샜다. 끝없이 파고들지는 않는다.
