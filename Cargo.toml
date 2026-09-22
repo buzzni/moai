@@ -30,6 +30,13 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 # 사용자 설정(`user_config`)을 고쳐 쓸 때 모르는 키·주석·줄 모양을 보존한다.
 # `serde` 기능은 끈다 — 표 배열 하나를 읽는 데 역직렬화가 필요 없다.
 toml_edit     = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
+# 새 판이 났는지 GitHub 에 묻는 길(moai-omww, 사용자 결정 2026-09-21). **새 축의 의존성이라
+# 먼저 상의한 자리다** — CLAUDE.md 가 개수와 무관하게 상의하라고 적은 그 자리고, 재서 대고 물었다.
+# 빈 크레이트 308,752바이트 기준 `ureq` 3 은 +1,880,088바이트, `minreq` 는 +1,137,240바이트,
+# `curl` 프로세스는 0바이트였다. 그런데도 크레이트를 고른 것은 curl 도 wget 도 없는 기계에서
+# 이 기능이 영영 "못 물었다" 로 서기 때문이다. `gzip` 은 끈다 — 답이 JSON 몇 KB 라 푸는 값이
+# 없고, `flate2` 를 안 끌면 그만큼 바이너리가 는다.
+ureq          = { version = "3", default-features = false, features = ["rustls"] }
 
 # CI 의 ci-gate 가 clippy 를 `-D warnings` 로 돌린다. 그러니 여기 적힌 세 줄은
 # "이건 경고가 아니다" 라는 선언이고, 줄마다 `#[allow]` 을 흩뿌리는 대신 까닭과
