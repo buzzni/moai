@@ -31,6 +31,11 @@
 //! 물었다" 하나고, 그 까닭을 넷으로 갈라 봤자 고칠 수 있는 것이 없다.
 // **이 파일의 값을 아직 아무도 안 그린다** — 판 줄에 얹는 일이 moai-3gia 고, 그 일이 쥔 파일
 // (`src/tui/draw.rs`)을 지금 옆 세션이 들고 있다. 그때 이 줄을 걷는다.
+//
+// 그래서 **지금 바이너리에는 `ureq` 가 안 들어 있다** — LTO 가 닿지 않는 이 모듈을 통째로
+// 걷는다(6,186,192바이트, 들이기 전과 같다). 판 줄이 이것을 부르는 날 드는 값을 재 두었다:
+// `main` 에서 한 번 부르게 하고 릴리스로 빌드하면 7,934,720바이트로, +1,748,528바이트다.
+// 15MB 예산의 53%다.
 #![allow(dead_code)]
 
 use crate::fail::R;
@@ -250,8 +255,16 @@ pub fn config_says(path: Option<&Path>) -> Option<bool> {
 ///
 /// `User-Agent` 를 다는 것은 GitHub 가 없는 부름에 403 을 주기 때문이다.
 pub fn ask(url: &str) -> Option<String> {
+    ask_within(url, TIMEOUT)
+}
+
+/// [`ask`] 되 기다리는 상한을 받는다. **시험이 그 상한을 짧게 줘서 실제로 끊기는지 잰다** —
+/// 상한을 상수로만 두면 그것이 서는지를 5초씩 기다려야만 볼 수 있고, 그러면 아무도 안 잰다.
+pub fn ask_within(url: &str, timeout: Duration) -> Option<String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(TIMEOUT))
+        // **머리부터 몸까지 통째로 잰다.** 붙기만 재면 붙여 놓고 한 글자씩 흘리는 자리에
+        // 영영 붙들린다.
+        .timeout_global(Some(timeout))
         // 되돌림을 따라가지 않는다 — 릴리스 API 는 곧바로 답하고, 따라가는 만큼 시간이 는다.
         .max_redirects(2)
         .build()
@@ -446,6 +459,23 @@ mod tests {
         assert_eq!(held.asked_at, "2026-09-21T00:00:00Z");
         assert_eq!(held.tag, None);
         assert!(held.fresh("2026-09-21T00:00:01Z", WINDOW));
+    }
+
+    #[test]
+    fn a_place_that_never_answers_is_cut_off() {
+        // 붙기는 하되 한 글자도 안 주는 자리 — 느린 그물의 최악이다.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+        let held = std::thread::spawn(move || {
+            let held = listener.accept().map(|(s, _)| s);
+            // 끊지 않고 들고 있는다. 시험이 끝나면 함께 떨어진다.
+            std::thread::sleep(Duration::from_secs(2));
+            drop(held);
+        });
+        let began = std::time::Instant::now();
+        assert_eq!(ask_within(&url, Duration::from_millis(300)), None);
+        assert!(began.elapsed() < Duration::from_secs(2), "상한을 넘겨 기다렸다 — {:?}", began.elapsed());
+        let _ = held.join();
     }
 
     #[test]
