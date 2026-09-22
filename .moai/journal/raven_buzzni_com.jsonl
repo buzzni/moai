@@ -925,3 +925,18 @@
 {"ts":"2026-09-22T09:51:57Z","id":"moai-333l.wj6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돈다. 끝나면 원문을 여기 노트로 남기고 반영은 별도 fix 커밋으로 담은 뒤 브리프 7-1 부터 이어 간다. 워크트리는 .claude/worktrees/moai-333l, 멤버 moai-kh81 은 커밋 1c95b21 까지 끝났다"}
 {"ts":"2026-09-22T10:36:04Z","id":"moai-514e.1l5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 훅이 아직 못 보는 쓰기 여덟"}
 {"ts":"2026-09-22T10:36:23Z","id":"moai-514e.1l5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T10:36:56Z","id":"moai-3l3t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감싸는 명령 자신이 쓰는 자리를 훅이 못 본다 — script 의 기록 파일과 find 의 -delete"}
+{"ts":"2026-09-22T10:37:43Z","id":"moai-1ia9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"따옴표 본을 원소를 빼기 전에 든다"}
+{"ts":"2026-09-22T10:37:47Z","id":"moai-1ia9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T10:39:40Z","id":"moai-pmhv.070","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 마일스톤 기한·겹쳐 돎·든 시간"}
+{"ts":"2026-09-22T10:39:45Z","id":"moai-pmhv.070","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T10:40:32Z","id":"moai-pmhv.070","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: max 리뷰가 배경에서 도는 중이다. 결과를 받아 고친 뒤 원문 노트와 닫는 줄을 남기고 develop 에 머지한다"}
+{"ts":"2026-09-22T10:40:45Z","id":"moai-1b0d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:45Z","id":"moai-7kif","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:46Z","id":"moai-sq3q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:46Z","id":"moai-y0gv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:46Z","id":"moai-5ycj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:47Z","id":"moai-qlr8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:47Z","id":"moai-ta6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:47Z","id":"moai-gxwh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-22T10:40:47Z","id":"moai-514e.1l5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 리뷰가 배경에서 도는 중이다. 끝나면 원문을 노트로 적고, 받아들인 것과 넘긴 것을 갈라 닫는다. 그 뒤 뿌리에서 머지하고 멤버 여덟을 done 으로 옮긴다."}
