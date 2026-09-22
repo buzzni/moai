@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:fa984223 -->
+<!-- moai:begin v:0.1.1 hash:e97d6fbc -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -136,6 +136,23 @@ PLAN
 that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
+
+**Then hang the milestone on the epic you unfolded.** `promote` has no flag for it and does
+not carry over the one the idea held, so the epic stands outside the release that is running
+and every member under it is work picked up from outside. A milestone is inherited, so the
+epic alone carries it to every member, the ones added later included.
+
+    moai edit <epic> --milestone <milestone>
+
+Copy that id off the `moai ready` header. What is checked is the shape alone, so `moai-zzzz`
+goes in with exit 0 and surfaces only much later as a `dangling_milestone` warning.
+
+**And copy the idea's body onto the epic you unfolded.** `promote` does not carry it either,
+so the epic stands empty and `moai show <epic>` cannot say why these issues are one bundle.
+Not onto every issue — the original stays on the closed idea and the history leads back to
+it; the one place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is. Unfolding into a single issue is the
+same: move the idea's body over as it is.
 
 ### When work already created is not for now
 

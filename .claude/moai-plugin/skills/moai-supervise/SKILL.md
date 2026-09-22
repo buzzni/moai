@@ -302,6 +302,7 @@ separately (brief 5 and 7 carry that to the worker).
 are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
 **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
 Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+**A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
 The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
@@ -446,6 +447,7 @@ worker reads in its own window in 9-1.
        are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
        **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
        Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+       **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
        The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
        If the window is not on that model, ask the person watching it for `/model <that model>`
        before you call — as in `/model opus` (a review agent inherits the window's model).
@@ -463,6 +465,30 @@ worker reads in its own window in 9-1.
        `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
        `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
        the way the refusal's own command says
+       **Five places the review keeps finding.** They do not stand in for the angle — what this
+       epic actually did is the angle, and these go on top of it
+       1. A struct or function inserted above another takes over the doc block of the item below
+          it, and that comment now sits on code it does not describe
+       2. Does a test actually go red on a revert — is what it measures in one place. A count
+          held per row whose inside is a `OnceCell` is 0 or 1 whatever happens, so the timing it
+          was meant to pin went back whole with nothing red
+       3. Is there only one place that sets it up — a value put in place once at start-up is put
+          back to its default by every other path that builds the same thing again
+       4. Do the comments and the docs say what the code actually does
+       5. Does anything newly open on a path that never opened it — not "is a lock held while
+          opening", which is half of it. A read path that never opened the config and now parses
+          it stops on a config that is a FIFO, lock or no lock
+       **While the review is running, do not touch this worktree's branch or its working tree.**
+       `--fix` leaves its fixes in the working tree uncommitted, so `reset --hard`, `rebase` and
+       `commit --amend` throw them away — that has happened, told to do it by a supervisor saying
+       "it is before the merge, so it can still be fixed". Nothing blocks it; this line is what
+       holds. Fixing a commit subject waits until the review has returned.
+       **When it returns, stop what it left running before you touch the tree.** Call `TaskStop`
+       on any subagent of that review and read the working tree's status. A sweep subagent still
+       alive writes its own version into this same worktree and covers a commit you already made
+       without a word, and a `cargo test` after that measures that agent's files rather than
+       yours — that has happened too, and it also burned an hour and a half in a worktree that
+       was gone.
     7-1. Before merging, go back over the ideas parked mid-epic
        (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
        review handed on — **can the epic deliver what it promised without them.** If not, it is
@@ -534,6 +560,18 @@ worker reads in its own window in 9-1.
        Quote free text with single quotes — inside double quotes the shell expands backticks and
        `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
          moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+    9-2. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
+       for the release being prepared**, and write it if it does not. This window is the only one
+       that knows what the epic did, and it is the only one that knows what was taken out as well
+       as what went in — a section filled in later from commit subjects shows what was added and
+       misses what was removed, because a removal stands under a revert subject of its own. It is
+       cheaper here than in the window that closes the section: v0.1.1 stood with 327 commits
+       behind it, four of which touched the CHANGELOG, and three epics out of twenty-four named
+       in its section; the nine that were missing were written by the window that closed it, 131
+       lines in one go. The release workflow cuts that section by version name and hands it to
+       `--notes-file` as it is, so a missing section reads to whoever receives it as the whole
+       release. **Nothing checks this** — a check here would be a gate, and an empty section must
+       not stop a release
     10. Close them after that. **Run `moai mv <member> done` only once that merge has really
        landed** — a worker moved them before the merge and had to undo it. Do not close the
        members left in the first column by 7-1 and 4-3 — those members keep the epic open. While

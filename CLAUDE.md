@@ -243,10 +243,19 @@ moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 �
 | 에픽 밖 이슈 하나 | `low` | text, comments, a one-line fix; behaviour unchanged |
 | | `medium` | a behaviour change inside one file, ringed by tests |
 | | `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo |
+| 에픽 둘에 걸친 묶음 | 두 칸 위 | **A worktree that carries members of two epics is measured as one epic and then raised one more step** |
 
 **잣대 칸이 영어인 것은 계약이다** — `moai init` 이 써 넣는 블록과 감독 스킬이 영어로 통일된
 2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
 `the_rubric_is_the_review_table` 이 이 표의 그 칸과 글자째 견준다. 한쪽만 고치면 붉어진다.
+
+**에픽 둘에 걸친 묶음은 한 에픽처럼 재고 거기서 한 칸 더 올린다**(2026-09-22 사용자 결정,
+`moai-h89f`). 옆 워크트리가 파일을 쥐어 서로 다른 에픽의 멤버가 한 가지에 실리는 판이
+2026-09-20 에만 두 번 섰는데(`moai-giz3` 을 `moai-3bry` 에 얹은 판, `moai-uc5v`·`moai-c4nk`
+에 `moai-8d49` 를 얹은 판), 표는 `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도
+안 쟀다 — 그날은 감독과 일꾼이 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은
+아니다. 리뷰가 두 에픽의 계약을 같이 봐야 하니 `표면을 가로지르면 한 칸 더` 와 같은 결이고,
+실제로 선 판 둘의 `max` 와도 맞는다. 잣대 칸은 `guide::BUNDLE` 과 한 글이다.
 
 표면을 가로지르거나 설계 결정이 여럿 섞인 에픽은 한 칸 더 올린다. 망설여지면 한
 칸 올린다. 리뷰 모델은 그 등급을 따른다 — `medium` 이면 sonnet, `high` 부터 opus.
