@@ -97,6 +97,12 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("BASH_ENV")
+        // 새 판을 묻는 두 이름도 걷는다(moai-omww). `MOAI_API_URL` 은 moai 가 지은 이름이
+        // 아니다 — `install.sh` 가 이미 쓰므로 거울에서 깐 사람의 셸에 서 있고, 그러면
+        // 판 줄이 붙는 날 시험이 그 자리에 묻는다. `MOAI_NO_UPDATE_CHECK` 가 선 기계에서는
+        // 꺼진 채로 푸르게 서, 시험이 재는 것이 사람마다 달라진다.
+        .env_remove("MOAI_API_URL")
+        .env_remove("MOAI_NO_UPDATE_CHECK")
         // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
         // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
         // 글자를 말묶음으로 옮길 때마다 시험이 "말이 바뀐 것" 인지 "동작이 바뀐 것" 인지를
