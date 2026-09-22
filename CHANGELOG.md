@@ -10,8 +10,47 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-22
+
 ### Added
 
+- `moai tui` says whether a newer release is out. It asks GitHub once a day, and
+  the version line in the header reads as one of four: a new release, the latest,
+  ahead of the latest (a build from source), or not asked. It only asks where a
+  person is watching — `--json`, a pipe and anything that is not a terminal never
+  ask, so a machine running agents does not knock on the outside every run. The
+  answer and when it was asked are held in `latest.toml` beside your user config,
+  and `check = false` under `[update]` there, or `MOAI_NO_UPDATE_CHECK=1`, turns
+  it off. Nothing is blocked and the exit code never changes. The HTTPS client
+  it needs is most of why the release binary grew this release — it now measures
+  7.6 MB of the 15 MB budget, where both numbers count as `scripts/check-size.sh`
+  does (8,001,296 bytes of 15,728,640).
+- Times on screen are drawn in the reader's timezone. They stood in UTC alone,
+  so a reader in Seoul saw every stamp nine hours out. What is stored and what
+  `--json` carries are still UTC — only the letters a person reads move. The CLI
+  follows the system (`TZ`, then `/etc/localtime`); the explorer takes a name
+  picked with `SPC o t` and writes it as `timezone` under `[tui]`. The release is
+  a static musl build, so a machine with no `/usr/share/zoneinfo` (Alpine,
+  scratch) falls back to UTC and says so in one line, blocking nothing.
+- The journal is one file per person, named from the email
+  (`.moai/journal/raven_buzzni_com.jsonl`). Several files is the normal shape —
+  the reader merges all of them, so an email that changes only adds one. The old
+  single `.moai/journal.jsonl` is read as one of those files and nothing is
+  migrated. Where the email is not known, nothing is written at all: a file whose
+  purpose is history is worse with unowned lines in it than with one question
+  asked.
+- `moai init` plants the merge driver itself. Until now it wrote the
+  `merge=moai` name into `.gitattributes` and left the command that name points
+  at to be installed by hand — half of something that does not work in halves.
+  `--no-driver` leaves `.git/config` alone, and `--check` answers in one word and
+  writes nothing. A repository that decides against per-issue merging records
+  that in git's own vocabulary (`-merge` on the snapshot path), and both `init`
+  and the `moai status` notice read it as a decision instead of putting the line
+  back.
+- The explorer's detail pane has a side: `SPC o d` cycles it through right,
+  bottom, left and top, `Ctrl-w j` and `Ctrl-w k` move between the panes while it
+  is split top and bottom, and the epic, milestone and blocked lines inside it
+  carry the same overlap marks the list rows do.
 - `show --json`, for one issue and for a list, carries `journal_error` beside a
   row whose history came up short — `kind` (`permission`, `failed`) to branch on
   and `said` naming the file to `chmod`, the same shape as `commits_error`. Until
@@ -27,6 +66,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   snapshot line leaves them out because they hold the default. What the file
   omits and what the contract omits are two different things — keys that can
   genuinely be absent (`epic`, `milestone`, `deferred_at`) stay absent.
+- Refusals carry data, so they translate. `MOAI_LANG=ko` reached the screens in
+  0.1.0 but not the messages that say no; the write path and its validation, the
+  config reader, the plan parser, git, resolving a person, the issue commands,
+  entering the explorer, and the `skill` and `merge-driver` notices now all speak
+  through `i18n`.
+- The supervisor skill treats a running milestone as the gate before it hands
+  work out. Work outside one is not assigned, and to assign it you attach the
+  milestone to its epic — which is the same ordering `moai ready` already used.
 - `rust-toolchain.toml` pins the toolchain that builds, formats and lints this
   repository, so `cargo fmt` on a contributor's machine gives what CI sees.
   `rust-version` in `Cargo.toml` is proven by the `msrv` job below rather than by
@@ -37,15 +84,63 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   bandwidth, so a faster runner does not pay it back.
 - An `msrv` job builds the crate with the `rust-version` read out of
   `Cargo.toml`, so bumping that one line moves what CI actually walks.
+- CI refuses a pull request into `main` that does not come from `develop`, so a
+  release is always cut from the branch it was integrated on.
+
+### Changed
+
+- The explorer's detail pane opens and closes with `SPC v d`, not `SPC v p`, so
+  that the key toggling it and the key placing it (`SPC o d`) read as one pair.
+  **`SPC v d` used to show and hide the `done` column**, so that keystroke now
+  does something else.
+- `done` has no letter of its own under `SPC v` any more — `SPC v d` and the
+  column's number toggled the same setting, and the menu said it twice. The
+  number alone counts, and it reads the column's name out of the config instead
+  of carrying `done` in the code.
+- `moai` exits non-zero and names the file when a journal cannot be read. A skip
+  drew a history that had quietly lost one person's lines and still looked whole.
+- `moai init` no longer creates an empty `.moai/journal.jsonl`. History lives in
+  `.moai/journal/` now, and the old path is only ever read.
 
 ### Fixed
 
+- The release workflow could not have built its musl target. `ureq` pulls in
+  `rustls`, which pulls in `ring`, which builds C and assembly, and that job had
+  no C toolchain — `cc` resolves `x86_64-unknown-linux-musl` to
+  `x86_64-linux-musl-gcc` or `musl-gcc` and `ubuntu-latest` carries neither. The
+  job would have died *after* the tag was pushed, and `release` needs `build`, so
+  nothing at all would have shipped. No pull request could have caught it:
+  `ci.yml` and `smoke.yml` build the host target only.
+- The pre-push tag check read the working tree's `Cargo.toml` instead of the
+  `Cargo.toml` of the commit being pushed, so on a branch already moved on to the
+  next version it refused to re-push an older tag whose version was correct.
+  Shallow clones and machines without git fall back to the working tree, and the
+  line it prints says which of the two it read.
 - `release.yml` restored its cache after `rustup target add` — the first rustup
   call in that job — so the toolchain was already downloaded by the time the
   cache arrived.
 - The install one-liner in `README.md` and `install.sh` points at `main`, the
   branch a release is cut from. It pointed at `develop`, so a receiver installed
   a release with a script that release does not carry.
+- A journal file that cannot be read no longer blocks the rest of the history.
+  The run steps over it, counts what it skipped, and names the file.
+- Read marks survive their own edges: a line that cannot be read no longer stops
+  the whole write, a stamp for a place that is gone is kept as pending instead of
+  dropped, stamps already seated are taken back out of the pending list, `path`
+  no longer swallows the comment above it, and a run that stops on a pending
+  place says which file it stopped on.
+- The explorer no longer lets a sweep that arrives late overwrite a row just
+  opened, and the read marks of an expanded project follow a table that changed
+  under them.
+- A checkout with no tracker in it is told to run `moai init` first, and `init`
+  no longer tells you to ignore the tracker file it is reading.
+- The hook that `moai skill install` plants reads more shells correctly: heredoc
+  bodies, `su -c` and `runuser -c` text, `runuser -u <user> -- <command>`,
+  commands behind `xargs`, the `errexit` spellings zsh and ksh use, nested `!`
+  where the outer one wins, a `-C` that points where you already are, and a
+  pick-up that wins inside text that ends in a background `&`. Its re-reading of
+  quoted text is bounded by a budget rather than by depth alone, and the same
+  fragment is no longer scanned twice in one run.
 
 ## [0.1.0] - 2026-09-21
 
