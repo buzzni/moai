@@ -44,8 +44,12 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has two jobs: one runs clippy and the tests on the dev profile, the
-other builds the release binary and checks it against the 15 MB budget.
+minutes. CI has four jobs: one runs clippy and the tests on the dev profile,
+one works out whether anything outside the docs changed, one builds the crate
+with the `rust-version` written in `Cargo.toml`, and the last builds the release
+binary and checks it against the 15 MB budget. Only the first is a required
+check, and the last two show as skipped - not failed - on a pull request that
+touched documentation alone.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -59,6 +63,16 @@ later.
 
 `cargo fmt --all --check` runs in CI, before clippy and the tests. The width is
 set in `rustfmt.toml`, which also records why that value and not the default.
+
+**The toolchain is pinned in `rust-toolchain.toml`**, so rustup builds this
+repository — and formats and lints it — with the version written there, and your
+`cargo fmt` gives what CI sees. Without the pin CI ran on whatever stable the
+runner shipped that week, and rustfmt moving a line it has never touched turned
+someone else's pull request red. Bumping the pin is its own commit: change the
+channel and carry the `cargo fmt --all` it causes in the same commit, never
+mixed with a change to the code. `rust-version` in `Cargo.toml` is a separate
+claim, and the `msrv` job proves it: that job reads the line and builds the
+crate with exactly that toolchain, so bumping the line moves what CI walks.
 
 The whole repository was formatted in one commit. `git blame` can step over it
 so that it points at the commit that actually wrote each line, but git only
@@ -117,15 +131,28 @@ commit, and a review point you decided not to act on gets a sentence saying why.
   issue in the pull request instead and a maintainer will file it.
 - New commands are caught by the tests that sweep every command for `--json`
   support, so add the command and let the test tell you what it wants.
+- **Open it against `develop`.** `main` takes no direct push and no pull request
+  from anywhere but `develop` — a ruleset holds the first, and a step in
+  `ci-gate` holds the second, because GitHub has no rule that pins the source
+  branch of a pull request. `main` carries one commit per release that way, and
+  its history reads as the distance between two releases.
 
 ## Releasing
 
 ```sh
 scripts/bump-version.sh 0.2.0                     # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
-git tag v0.2.0
-git push && git push origin v0.2.0
+git push origin develop
+gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
+git fetch origin && git tag v0.2.0 origin/main
+git push origin v0.2.0
 ```
+
+**The tag goes on the merge commit in `main`, not on the tip of `develop`.**
+`main` is what a release is cut from, and a tag on `develop` would build
+something that is not what `main` holds. **Merge that pull request, do not
+squash it** — `moai show <id>` finds an issue's commits by the id in their
+subject, and a squash folds 400 subjects into one body where nothing reads them.
 
 The tag is what the release workflow trusts, so the pre-push hook and the first
 job of the workflow both check the tag against `Cargo.toml` before anything is

@@ -22,7 +22,7 @@ impl super::Appendable for report::StatusReport {
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트를 한눈에. **안이면 아래 그대로다** — 등록 목록을
     // 읽지도 않는다(결정 3: `.moai` 안의 CLI 는 그 프로젝트만 본다).
-    let Some(repo) = Repo::find()? else {
+    let Some(repo) = Repo::find(|| ctx.lang())? else {
         return overview(ctx, worktree);
     };
     let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =
@@ -55,7 +55,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
     // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
     // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
-    let (lost, unread) = crate::worktree::stranded_at_in(
+    let (lost, unread) = crate::worktree::stranded_at(
         repo.here(),
         &repo.config,
         &load.issues,
@@ -99,16 +99,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
     let trouble = trouble + if said_already { 0 } else { unread.all.len() };
-    // **낡은 AGENTS.md 블록은 알림이다**(moai-mj45, 2026-09-14 사용자 결정). 언제 서고 무엇을
-    // 대는지는 `agents_notice` 가 정하고, 훅의 보드가 같은 것을 싣는다. 한눈 보기(`.moai` 밖)는
-    // 남의 저장소라 안 본다.
-    st.notices.extend(crate::cmd::init::agents_notice(repo.here(), ctx.chdir));
-    // 빠진 딸린 파일 규칙도 같은 자리다(moai-2f99) — `init` 이 한 번 말하고 마는 것을 여기가 잇는다.
-    st.notices.extend(crate::cmd::init::dotfile_notice(repo.here(), ctx.chdir));
-    // **머지 드라이버의 상태도 여기서 댄다**(moai-2ewr·moai-9khu). 언제 무엇이 서는지는
-    // `merge_driver::notice` 가 정하고, 훅의 보드가 같은 것을 싣는다 — 위의 `agents_notice` 와
-    // 같은 자리다. 그 사실이 이 화면 말고는 설 데가 없어서 여기 있다.
-    st.notices.extend(crate::cmd::merge_driver::notice(repo.here(), ctx.chdir));
+    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)는 안 싣는다**
+    // — 그 화면이 알림을 아예 안 세기 때문이지(`view::projects_status`), 남의 저장소라서가 아니다.
+    // 탐색기의 프로젝트 층은 같은 남의 저장소를 두고도 센다(moai-prdh) — 그래서 `.moai` 밖에서 본
+    // 두 화면의 알림 수가 지금 갈린다. 맞추는 일은 한눈 보기가 알림을 세기 시작할 때다.
+    st.notices.extend(install_notices(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
     // 까닭은 "오타가 조용히 영어가 되면 고친 설정이 왜 안 듣는지 알 길이 없다" 였는데
@@ -186,8 +181,35 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         &now,
         &source_of(&repo),
         trouble,
-        view::Screen::new(ctx.lang()).over(&origin),
+        view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin),
     ))
+}
+
+/// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙
+/// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu).
+///
+/// **한 자리다**(moai-1tcm). `moai status` 와 훅의 보드가 같은 셋을 싣는데, 셋을 표면마다 따로
+/// 적던 때는 그 사실이 "`moai status` 와 같은 알림을 싣는다" 는 주석으로만 서 있었다 — 한쪽에
+/// 알림을 더하면 다른 쪽은 조용하고, 그것을 잡아 줄 것이 아무 데도 없다. 더하는 자리가 여기
+/// 하나면 더하는 것만으로 두 표면이 함께 움직인다.
+///
+/// **부르는 곳은 셋이다** — `moai status`, 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`,
+/// moai-6k1r), 탐색기의 프로젝트 층(`tui::layer::summarize`, moai-prdh). 층은 수만 세고 글은
+/// 안 편다. 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices` 고, 층을
+/// 맨 것은 `the_project_layer_counts_the_same_notices_as_the_board` 다 — 여기에 알림을 더하면
+/// 셋이 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
+///
+/// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
+/// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
+///
+/// `chdir` 은 **부르는 쪽이 그 저장소로 옮겨 와 있지 않은가** 다 — 대는 명령에 `-C` 를 얹을지를
+/// 가른다(`init::away_root`). 훅의 세션은 셸 자리가 이미 그 저장소라 `false` 다.
+pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::report::Warning> {
+    let mut out = Vec::new();
+    out.extend(crate::cmd::init::agents_notice(repo.here(), chdir));
+    out.extend(crate::cmd::init::dotfile_notice(repo.here(), chdir));
+    out.extend(crate::cmd::merge_driver::notice(repo, chdir));
+    out
 }
 
 /// 보드가 **정말 읽은 파일**을 머리에 댄다 — 딸린 워크트리 안에서는 그 자리의 `.moai` 가 아니라
@@ -226,7 +248,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         }
         return Ok(super::nothing_registered(reg, ctx.lang()).message.lines().map(str::to_string).collect());
     }
-    let projects = crate::projects::open_with(reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree, ctx.lang());
     let now = model::now();
     // **셈은 프로젝트마다 나란히 한다**(moai-b7o3) — 자리 판정이 옆 스냅샷을 파면 그 값이 프로젝트
     // 마다 더해진다. 보드는 연 프로젝트를 빌리므로 그 스레드에서 곧바로 짓는다 — 연 것만 가르는 자는
@@ -246,7 +268,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
             let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
-            let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
+            // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
+            // 마다 같은 스냅샷을 다시 파, 값이 등록 수만큼 곱해진다. 안쪽 `run` 과 같은 자다.
+            let (lost, unread) =
+                crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
             status.warnings.extend(lost);
             view::Board {
                 cfg: &repo.config,
@@ -306,5 +331,5 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let all = Overview { projects: entries, problems: &problems, config: reg.path.as_deref() };
         return super::json_line(&all);
     }
-    Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang())))
+    Ok(view::projects_status(&projects, &seen, reg, view::Screen::new(ctx.lang()).at(ctx.zone())))
 }

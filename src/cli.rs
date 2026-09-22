@@ -376,7 +376,8 @@ IDEA
   G and End to the bottom, Ctrl-d and Ctrl-u half a page, Ctrl-f and Ctrl-b
   (PageDown and PageUp) a whole page.
   Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
-  other way, Ctrl-w h and Ctrl-w l pick the left and right pane), and every
+  other way; Ctrl-w h and Ctrl-w l pick the left and right pane, Ctrl-w k and
+  Ctrl-w j the top and bottom one when the detail is split that way), and every
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
@@ -396,9 +397,10 @@ IDEA
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   View — every toggle except the list columns (SPC c) is here:
-    SPC v d  done [shown/hidden] SPC v l  deferred           SPC v a  show all
+    SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
-    SPC v p  detail pane [shown/hidden]
+             done has no letter of its own: the column that holds it does
+    SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
@@ -411,6 +413,12 @@ IDEA
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
+  Options — how this screen draws what stands, not which rows stand:
+    SPC o d  detail pane goes right, bottom, left, top — press again to turn
+             it. Whether it stands at all is SPC v d
+    SPC o t  the timezone times are written in. It opens a window with the
+             names this machine knows. Type to narrow it down and pick one.
+             Stored times stay UTC, and so does --json
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -538,7 +546,13 @@ IDEA
   only, and the config is not committed. In a clone without it, merge=moai in
   `.gitattributes` is simply ignored and git's own merge runs - merging is
   exactly as it was without it. When that repository does set merge=moai,
-  `moai status` says in one line that it is not installed here.")]
+  `moai status` says in one line that it is not installed here.
+
+  **To say this repository does not want the driver, write that decision in
+  `.gitattributes`.** A line for the snapshot that settles merge itself -
+  `.moai/issues.jsonl   text eol=lf -merge` - is read as the decision: `init`
+  leaves that line alone and every merge-driver line goes quiet. Deleting the
+  line instead is read as a gap, and the next `moai init` writes it back.")]
     MergeDriver(MergeDriverArgs),
 
     /// Install the skills and hooks into Claude (safe to run again)
@@ -585,8 +599,22 @@ Examples:
   and with a single word the first 8 characters. A repository already
   installed with a longer prefix is read and written as it is.
 
+  **It installs the merge driver too.** The repository declares merge=moai in
+  `.gitattributes`, and the command that word names lives in .git/config,
+  which is not committed - so init writes both. It picks the `moai` on PATH
+  when that is the same build, else the binary running now, and says which.
+  Run it again and a path that has gone dead is replaced. A clone of a
+  repository that already has a .moai never runs init: there the one line
+  from `moai status` is what asks for `moai merge-driver --install`.
+
+  --no-driver leaves .git/config alone. A repository that wants no driver at
+  all says so in `.gitattributes` - a line for the snapshot that settles
+  merge itself (`.moai/issues.jsonl   text eol=lf -merge`) is read as the
+  decision and init leaves it alone.
+
   --check writes nothing and only answers whether the AGENTS.md block is
-  current, stale or missing. It is non-zero only when a file cannot be read.
+  current, stale or missing, and where the merge driver stands. It is
+  non-zero only when a file cannot be read.
 
   --print only prints that block. That is where to copy it from when the file
   the agent reads is not AGENTS.md - --print and init write the same text.")]
@@ -596,11 +624,14 @@ Examples:
         /// Leave AGENTS.md alone
         #[arg(long)]
         no_agents: bool,
+        /// Leave .git/config alone (plant no merge driver)
+        #[arg(long)]
+        no_driver: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "check"])]
         print: bool,
     },
 }

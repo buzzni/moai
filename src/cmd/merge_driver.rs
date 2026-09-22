@@ -35,7 +35,9 @@
 
 use super::{Ctx, Fail, R};
 use crate::cli::MergeDriverArgs;
+use crate::i18n::{fill, say};
 use crate::model::Issue;
+use crate::store::Repo;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -105,10 +107,9 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
         return install(ctx, args.as_command.as_deref());
     }
     let (Some(base), Some(ours), Some(theirs)) = (&args.base, &args.ours, &args.theirs) else {
-        return Err(Fail::coded(
-            "머지 드라이버는 `%O %A %B` 세 자리를 받는다. 심는 길은 `moai merge-driver --install`",
-            super::code::BAD_INPUT,
-        ));
+        // **여기까지가 사람이 친 길이다**(moai-uzgp) — 자리를 안 주고 부를 수 있는 것은 사람뿐이라,
+        // 이 거절문만 화면 말을 안다. 아래 git 이 부르는 길은 그대로 둔다.
+        return Err(Fail::coded(say(ctx.lang(), "refuse.driver_places"), super::code::BAD_INPUT));
     };
     // **셋 다 먼저, 바이트로 읽는다.** `ours` 는 답을 쓸 자리이기도 해서, 쓰기 시작한 뒤에
     // theirs 를 못 읽으면 지운 것도 안 쓴 것도 아닌 파일이 남는다.
@@ -166,6 +167,9 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
     }
 }
 
+/// **이 줄은 화면 말을 모른다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 병합마다 부르는 길이라
+/// 여기서 사용자 설정을 열면 병합마다 그 파일이 열리고, 저장 계층을 화면 말에서 떼어 둔 결정의
+/// 까닭이 바로 이 길이다. 명령줄로 친 길(`--install`·자리를 안 준 부름)만 제 말로 편다.
 fn clash_fail(clashes: &[String], what: &str) -> Fail {
     Fail::coded(format!("{what}: {}건은 사람이 푼다 — {}", clashes.len(), clashes.join(" ")), super::code::BROKEN)
 }
@@ -584,10 +588,46 @@ fn driver_key() -> String {
 /// 훑어, 사람이 한때 `git config --global merge.moai.driver` 를 적어 뒀으면 심은 적 없는 저장소마다
 /// — git 저장소가 아닌 `.moai` 자리까지 — 이 알림이 서고, 힌트를 따라 쳐도 그것은 `--local` 에
 /// 적으니 영영 안 걷힌다. `install` 이 적는 자리가 `--local` 이므로 재는 자리도 거기다.
-pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
+///
+/// **선언이 넷 전부의 막이다**(moai-0j7c). 앞 판은 [`declared`] 로 `absent` 하나만 막아,
+/// `.gitattributes` 에서 `merge=moai` 를 걷은 저장소에서도 rotten·alien·stale 이 그대로 섰다.
+/// 거기서 병합은 어차피 늘 기본 머지였으니 "병합이 기본 머지로 내려앉는다" 가 공허하고, 걷는
+/// 길은 `--uninstall` 이 없어 `.git/config` 를 손으로 여는 것뿐이다 — 걷을 길 없는 알림을
+/// 안 세우는 자리가 여기다. **선언을 걷는 것이 진짜 탈출구가 된다**(moai-47bt 가 찾던 것).
+/// 덤으로 안 쓰기로 한 저장소에서는 [`probe`] 가 프로세스를 아예 안 띄운다.
+///
+/// **[`Repo`] 를 통째로 받는다**(moai-8nkl). 자를 섞던 판은 여기 [`Repo::here`] 하나만 들어와,
+/// 선언은 **워크트리의 가지**에서 재고 심은 줄은 클론 전체(`--local`)에서 쟀다. 합쳐질 트래커가
+/// 사는 곳은 [`Repo::root`] 이므로 병합에서 실제로 걸리는 선언도 그쪽 것이다 — 루트가 `merge=moai`
+/// 를 걸고 딸린 워크트리의 가지가 그것을 안 들면, 루트에서는 알림이 서고 워크트리 안에서는 같은
+/// 명령이 아무 말도 안 했다. 이 저장소는 일을 모두 워크트리에서 하므로 세션이 보는 쪽이 늘 침묵이다.
+///
+/// 나머지 셋은 [`Repo::here`] 다. [`probe`] 는 git 이 드라이버를 **부르는** 자리에서 재야 하고,
+/// `--local` 은 어느 체크아웃에서 물어도 같은 파일(`$GIT_COMMON_DIR/config`)이며, 힌트의 자리
+/// ([`away_root`](crate::cmd::init::away_root))는 사람이 선 곳을 가리켜야 한다.
+pub fn notice(repo: &Repo, chdir: bool) -> Option<crate::report::Warning> {
+    notice_at(repo.here(), &repo.root, chdir)
+}
+
+/// [`notice`] 의 속 — 자를 둘로 받는다. 부르는 자리가 [`Repo`] 를 못 쥐는 `init --check` 만
+/// 여기로 들어온다([`state_at`]).
+fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::Warning> {
+    // **먼저 묻는다.** 뒤로 미루면 안 쓰기로 한 저장소에서도 설정을 읽고 `probe` 가 뜬다.
+    declared(tracker).then(|| told(here, chdir)).flatten()
+}
+
+/// [`notice_at`] 에서 **선언을 이미 확인한 뒤**의 몸통 — 심긴 줄을 재어 할 말을 고른다.
+///
+/// [`state_at`] 도 여기로 든다. 갈라 둔 까닭은 그쪽이 "선언이 없다"(`off`)와 "할 말이
+/// 없다"(`current`)를 **두 낱말로** 가려야 해서다 — [`notice_at`] 은 둘 다 `None` 이라 답만
+/// 보고는 못 가린다. 재는 자리를 이렇게 나누지 않고 그쪽에서 [`declared`] 를 한 번 더 부르던
+/// 판은 `moai init --check` 한 번에 `git check-attr` 를 두 번 띄웠고, "선언이 없다" 의 뜻이
+/// 두 자리에 따로 적혀 손으로 맞춰야 했다.
+fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
     /// 키가 없을 때 git 이 돌려줄 글. **값이 될 수 없는 것이라야 한다** — 심는 줄은 껍데기 명령이고
     /// 제어문자 하나만 든 줄은 그 무엇도 아니다.
     const UNSET: &str = "\u{1}";
+    let root = here;
     let key = driver_key();
     let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
         Ok(v) => v,
@@ -615,8 +655,7 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // **넓게 묻는 것은 조르기 직전뿐이다.** 위의 `--local` 은 그대로다 — 넓은 자리의 줄은
         // 재지도 고치라고 하지도 않는다(남이 적은 줄을 "썩었다" 고 안 부르는 moai-h6aq.cx8 의
         // 규칙이 그 자리다). 여기서 넓은 자리는 **입을 다물 까닭**으로만 쓴다.
-        return (declared(root) && !planted_anywhere(root))
-            .then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
+        return (!planted_anywhere(root)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
     }
     let word = planted_word(planted)?;
     match probe(root, &word) {
@@ -645,17 +684,25 @@ pub fn notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
 /// git 이 **찾는** 자리는 다르고, "없다" 는 말은 뒤의 것이라야 참이다. 못 물어봤으면 **있다고
 /// 친다** — 위의 셋과 반대로 기우는 자리다. 여기서 틀리는 값은 조르지 않는 쪽이라야 한다.
 ///
-/// **`GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM` 으로 옮긴 자리는 못 본다.** `crate::git::run` 은 그
-/// 둘을 걷고 git 을 부르므로(`git_leaks::REPO`), 그것으로 전역 설정을 딴 파일에 둔 사람의 줄은
-/// 여기 안 잡히고 옛 거짓말이 그대로 선다 — 잰 것이다. 걷는 쪽을 여기서 되돌리지 않는 까닭은
-/// 그 걷기가 "훅이 넘긴 환경이 어느 저장소를 여는지를 바꾸지 못하게" 하려고 선 결정이고,
-/// `tests/cli.rs` 의 격리도 그 위에 서 있어서다. 흔한 판(`git config --global`)은 `$HOME/.gitconfig`
-/// 이라 잡히고, 남는 것은 그 변수를 쓰는 판뿐이다.
+/// **`GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM` 으로 옮긴 자리도 본다**(moai-b5np). 앞 판은 그 둘을
+/// 걷고 물어(`git_leaks::REPO`), 그것으로 전역 설정을 딴 파일에 둔 사람에게 **실제로 도는**
+/// 드라이버를 "안 심었다" 고 했다 — dotfile 관리기·CI 이미지·컨테이너 래퍼가 밟는 자리다.
+///
+/// **넓히는 것은 이 물음 하나다**([`crate::git::run_reading_user_config`]). `GIT_DIR` 무리는 그대로
+/// 걷는다: 훅이 준 환경이 어느 저장소를 여는지를 바꾸지 못하게 하는 것이 걷기가 선 까닭이고,
+/// `tests/cli.rs` 의 격리는 그 셋을 `/dev/null` 로 채워 두어 그대로 선다.
+///
+/// **`--show-scope` 로 한 번에 받지 않는다**(moai-433r, 2026-09-21 사용자 결정). 그 옵션은 값과
+/// 자리를 한 번에 내어 이 부름을 [`notice`] 의 첫 물음에 합칠 수 있지만, git 2.26 부터라 지금
+/// 바닥(`--default`, 2.18)을 올린다. **줄이는 부름은 조르기 직전 한 번뿐이다** — 여기는
+/// `--local` 이 비었을 때만 돌고, 그 갈래는 어차피 [`probe`] 를 안 띄운다. 바닥을 올리거나
+/// 길을 하나 더 두는 값이 그보다 크다.
 fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run(root, &["config", "--get", "--default", "", &driver_key()]).map_or(true, |v| !v.trim().is_empty())
+    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()])
+        .map_or(true, |v| !v.trim().is_empty())
 }
 
-/// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가.
+/// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.
 ///
 /// **딸린 파일을 손으로 읽지 않는다.** 규칙은 `.gitattributes` 하나에만 있는 것이 아니다 —
 /// `.git/info/attributes` 와 위 디렉터리의 파일, 그리고 패턴끼리의 우선순위까지 git 의 규칙이다.
@@ -709,9 +756,10 @@ fn planted_word(planted: &str) -> Option<String> {
 /// **셋을 가른다.** 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르고, 뭉치면 그 중 하나는 반드시
 /// 거짓말이 된다(`agents_stale` 을 둘로 가른 것과 같은 까닭).
 enum Probe {
-    /// 이 명령을 알고 0 으로 끝났다.
+    /// 이 명령을 알고 0 으로 끝났다 — 도움말이 제 이름을 댄다([`Said`]).
     Runs,
-    /// 돌기는 도는데 `merge-driver` 를 모른다 — 그 이름의 **다른 도구**가 그 자리에 있다.
+    /// 돌기는 도는데 `merge-driver` 를 모른다 — 그 이름의 **다른 도구**가 그 자리에 있거나,
+    /// 모르는 인자를 흘려 듣고 0 을 내는 래퍼다(moai-wwbi).
     Alien,
     /// 띄우지도 못했다 — 자리가 비었거나, 권한이 없다.
     Dead,
@@ -748,11 +796,12 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// 부르는 것은 `--help` 다. **답을 안 바꾸는 부름이라야 한다** — 재자고 병합을 돌릴 수는 없고,
 /// 이 도구의 `--help` 는 어느 갈래에서도 파일을 안 건드린다.
 ///
-/// **재는 것은 "0 으로 끝났는가" 지 "이 명령을 아는가" 가 아니다**(리뷰 moai-vbmn.spv). 출력을
-/// 버리므로 모르는 인자를 흘려 듣고 0 으로 끝나는 래퍼·busybox 꼴 디스패처는 그대로 지나간다 —
-/// 표식을 세워 stdout 까지 맞추면 더 좁게 잴 수 있지만, 그것은 심는 줄의 규약을 하나 더 만드는
-/// 일이라 여기서 정하지 않는다. 겨눈 자리(옛 moai)는 clap 이 모르는 부명령을 2 로 거절하므로
-/// 지금 자로도 잡힌다.
+/// **끝난 꼴과 함께 stdout 도 본다**(moai-wwbi, 2026-09-21 사용자 결정). 앞 판이 잰 것은 "0 으로
+/// 끝났는가" 뿐이라, 모르는 인자를 흘려 듣고 0 을 내는 래퍼·busybox 꼴 디스패처가 그대로
+/// 지나갔다 — `#!/bin/sh` 와 `exit 0` 두 줄짜리를 `--as` 로 심으니 `moai status` 가 조용했고,
+/// 그 저장소의 매 병합은 말없이 내려앉는다. 도움말이 제 이름을 대는지까지 본다([`Said`]).
+/// 그만큼 심는 줄의 규약이 하나 늘고(`merge-driver --help` 에 그 낱말이 서야 한다), 매는 자는
+/// `the_planted_command_must_name_the_subcommand_in_its_help` 다.
 ///
 /// **값은 프로세스 하나**다 — `moai status` 한 번에 릴리스로 4ms 쯤, 워크트리의 dev 바이너리를
 /// 심었으면 9~11ms 다(2026-09-20 이 기계에서 잰 값). **어느 저장소냐로 비율이 갈린다**: 이슈와
@@ -763,7 +812,8 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// 것**이다.
 ///
 /// **표준 입력을 끊는다.** 물려주면 그 명령이 stdin 을 읽는 순간 `moai status` 가 사람의 터미널을
-/// 붙들고 영영 안 끝난다. 표준 출력과 오류도 버린다: 재는 부름이 사람의 화면에 글을 쓰면 안 된다.
+/// 붙들고 영영 안 끝난다. 표준 오류는 버리고, 표준 출력은 **파일로 받는다**([`Said`]) — 사람의
+/// 화면에는 안 나가되 도움말은 읽어야 하고, 파이프로 받으면 한도가 새기 때문이다.
 ///
 /// **그래도 시간을 잰다**([`PROBE_BUDGET`], 리뷰 moai-vbmn.spv). 입을 끊는 것은 막히는 길 하나를
 /// 막을 뿐이다 — `sleep`·락 대기·시작할 때 망을 한 번 타는 래퍼는 stdin 과 무관하게 잠든다.
@@ -778,12 +828,24 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// 자식까지다** — 껍데기 래퍼를 심었으면 그 안의 일은 한도를 넘어도 계속 돈다. 프로세스 그룹을
 /// 만들어 한꺼번에 죽이려면 `libc` 가 드는데, 이 저장소는 그 무게를 이 알림에 안 낸다.
 ///
+/// **그 둘은 열어 두기로 정했다**(moai-2k61, 2026-09-21 사용자 결정). 실을 하나 다는 값도,
+/// 이 저장소에 없던 의존을 알림 하나 때문에 들이는 값도 지금 막는 것보다 크다 — 머리 기사인
+/// 멈춤(`moai status` 가 영영 안 끝나던 것)은 [`PROBE_BUDGET`] 이 이미 막았고, 남은 둘은 죽은
+/// NFS 에 얹힌 파일과 래퍼의 손자다. **여는 조건은 그 둘이 실제로 사람을 붙드는 것이 보일
+/// 때다** — 다시 재는 사람이 여기서부터 읽는다.
+///
+/// **그 결정은 "한도가 아이를 잰다" 위에 선다**(리뷰). 도움말을 파이프로 받던 판은 아이를 거둔
+/// 뒤에 그 파이프를 읽어, 손자가 쓰기 끝을 쥐고 있으면 한도 **밖에서** 영영 멈췄다 — 위 문단이
+/// "이미 막았다" 고 적은 바로 그 멈춤이 손자 하나로 되살아난다. 그래서 도움말은 [`Said`] 로
+/// 받는다: 받는 자리를 파일로 두면 손자는 다시 "새는 프로세스" 일 뿐 멈춤이 아니다.
+///
 /// **가르는 것은 넷이다.** 못 띄운 까닭과 끝난 꼴을 둘 다 본다 — 뭉치면 그 중 하나는 반드시
 /// 거짓말이 된다.
 ///
 /// | 본 것 | 갈래 |
 /// |---|---|
-/// | 0 으로 끝났다 | `Runs` |
+/// | 0 으로 끝났고 도움말이 제 이름을 댄다 | `Runs` |
+/// | 0 으로 끝났는데 제 이름을 안 댄다 — 모르는 인자를 흘려 듣는 래퍼다 | `Alien` |
 /// | 자리가 없다·권한이 없다 | `Dead` |
 /// | 126·127 로 끝났다 — 껍데기와 로더가 "못 돌렸다" 고 낼 때 쓰는 값이다 | `Dead` |
 /// | 그 밖의 비영 | `Alien` |
@@ -817,11 +879,14 @@ fn probe(root: &Path, cmd: &str) -> Probe {
         use std::process::{Command, Stdio};
         let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
         let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
+        // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
+        // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
+        let Some((said, sink)) = Said::new() else { return Probe::Unknown };
         let spawned = Command::new(program)
             .args([SUB, "--help"])
             .current_dir(root)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::from(sink))
             .stderr(Stdio::null())
             .spawn();
         let mut child = match spawned {
@@ -833,7 +898,11 @@ fn probe(root: &Path, cmd: &str) -> Probe {
         };
         let Some(st) = reaped(&mut child) else { return Probe::Unknown };
         match st.code() {
-            Some(0) => Probe::Runs,
+            // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
+            // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
+            // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
+            Some(0) if said.read().contains(SUB) => Probe::Runs,
+            Some(0) => Probe::Alien,
             // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
             // 딴 도구가 아니라 그 자리가 못 도는 것이다.
             Some(126 | 127) => Probe::Dead,
@@ -841,6 +910,52 @@ fn probe(root: &Path, cmd: &str) -> Probe {
             // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
             None => Probe::Unknown,
         }
+    }
+}
+
+/// 재는 동안 아이가 쓴 stdout 을 받아 둘 자리 — **파이프가 아니라 파일이다**(리뷰).
+///
+/// 도움말이 제 이름을 대는지를 보려면([`probe`], moai-wwbi) 아이의 stdout 을 읽어야 하는데,
+/// 파이프로 받으면 [`PROBE_BUDGET`] 이 **더는 이 부름의 상한이 아니다**. 둘이 샌다.
+///
+/// - 아이가 파이프 한 통(리눅스 64KiB)을 채우면 쓰기에서 막힌다. [`reaped`] 는 그동안 아이만
+///   보고 있으니 한도를 다 쓰고 죽인 뒤 `Unknown` 을 내 — 멀쩡한 드라이버가 매 `moai status`
+///   마다 2초를 먹고 알림은 통째로 사라진다.
+/// - 더 나쁜 쪽: 아이가 쓰기 끝을 물려준 **손자**가 살아 있으면 아이를 거둔 뒤의 `read_to_end`
+///   가 영영 안 끝난다. 한도는 아이까지만 재므로(moai-2k61 이 열어 둔 그 구멍) 그 멈춤을
+///   아무것도 안 막는다 — 껍데기 shim 이 뒤에 일을 하나 띄우는 것은 흔한 모양이다.
+///
+/// 파일로 받으면 쓰는 쪽이 안 막히고, 읽는 쪽은 손자를 안 기다린다. 한도는 다시 [`reaped`]
+/// 하나가 쥔다. **값은 자리 하나 열고 지우는 것**이라 프로세스 하나 띄우는 값에 묻힌다.
+struct Said(std::path::PathBuf);
+
+impl Said {
+    /// 자리를 하나 열어 **읽을 쪽과 아이에게 물려줄 쪽**을 함께 낸다. 못 열면 `None`.
+    fn new() -> Option<(Said, std::fs::File)> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // 한 판에서 여러 번 잰다(`chosen_command` 가 `install` 과 `plant_for_init` 에서).
+        // pid 만으로는 그 둘이 같은 자리를 쓴다.
+        static NTH: AtomicU64 = AtomicU64::new(0);
+        let at = std::env::temp_dir().join(format!(
+            "moai-probe.{}.{}",
+            std::process::id(),
+            NTH.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = std::fs::File::create(&at).ok()?;
+        Some((Said(at), file))
+    }
+
+    /// 아이가 쓴 글 — **못 읽은 판은 안 본 것과 같다**(빈 글). 0 으로 끝났는데 제 이름을 못
+    /// 댄 명령이고, 그 자리의 낱말은 `Alien` 이다.
+    fn read(&self) -> String {
+        std::fs::read(&self.0).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+    }
+}
+
+impl Drop for Said {
+    /// **재고 나면 치운다.** 손자가 아직 그 fd 를 쥐고 있어도 유닉스에서는 지워진다.
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -874,6 +989,222 @@ fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
     }
 }
 
+/// 아무도 안 주면 심을 명령 — **`PATH` 의 `moai` 가 같은 판이면 그쪽, 아니면 지금 이
+/// 바이너리**(moai-bq6w, 2026-09-21 사용자 결정).
+///
+/// 심는 자리(`--local`)는 클론이 함께 쓰는 `$GIT_COMMON_DIR/config` 인데, 이 저장소의 절차는
+/// 일을 모두 워크트리에서 하므로 지금 도는 바이너리는 대개 `<워크트리>/target/release/moai` 다.
+/// 그 워크트리를 지우는 날 **모든 체크아웃**이 죽은 경로를 든다 — "한 번도 안 심었다" 가
+/// "전부 썩었다" 로 바뀌는 자리고, `merge_driver_absent` 의 힌트를 그대로 친 사람이 밟는다.
+///
+/// **고르는 자리가 하나다.** 힌트에 경고를 적는 길은 버렸다 — 에이전트는 명령만 읽고 친다.
+/// 거절하는 길도 버렸다: `--as` 로 제 경로를 주는 사람까지 막고 게이트가 하나 는다.
+///
+/// **"같은 판" 은 바이트가 같은 것이다**(리뷰 moai-t6z9.bd6 9번). `--version` 으로 재던 판은
+/// 헛돌았다 — 이 크레이트의 판은 온 이력에서 `0.1.0` 하나라, `~/.local/bin/moai` 에 깔린 **옛
+/// 빌드**가 같은 글을 내고 그대로 심겼다. 그러면 병합 알고리즘을 고친 사람이 `init` 을 친 뒤로
+/// 모든 병합이 **옛 알고리즘**으로 합쳐지는데 `status` 와 `init --check` 는 둘 다 "제대로 섰다"
+/// 고 말한다(이 컨테이너에서 두 번 재현했다). 판을 가릴 자가 글에 없으니 파일로 가른다: 크기가
+/// 다르면 거기서 끝이고, 같으면 바이트를 견준다. 심는 명령은 한 번 치는 것이라 그 값이 싸다.
+///
+/// **그래서 감싼 스크립트는 안 고른다.** `exec <진짜>` 하는 셸 래퍼는 바이트가 다르니 지금
+/// 바이너리가 심긴다 — 틀리는 값은 **덜 이르는 쪽**이라야 하고, 그쪽은 이 워크트리를 지울 때만
+/// 썩지만 앞쪽은 조용히 옛 알고리즘으로 합친다.
+///
+/// 바이트가 같아도 [`probe`] 가 `Runs` 라야 한다 — 그 자리가 실제로 돌아야 심는 뜻이 있다.
+fn chosen_command(here: &Path) -> Result<String, String> {
+    // **까닭은 자료로 낸다** — 부르는 두 자리(`install` 과 `plant_for_init`)가 저마다 제 말로
+    // 편다(moai-uzgp). 여기서 글을 지으면 이 함수가 화면 말을 알아야 한다.
+    let mine = std::env::current_exe().map_err(|e| e.to_string())?;
+    let Some(found) = on_path(DRIVER) else { return Ok(mine.display().to_string()) };
+    // 같은 파일이면 고를 것이 없다 — 이름으로 적으면 git 이 병합에서 쓸 `PATH` 에 기대는 것이
+    // 하나 늘 뿐이다.
+    //
+    // **철자가 아니라 자리로 견준다**(리뷰). `current_exe` 는 리눅스에서 `/proc/self/exe` 라
+    // 링크가 다 풀린 값인데 `PATH` 의 철자는 안 풀린 값이다 — `/usr/local/bin/moai` 가 같은
+    // 파일을 가리키는 심볼릭 링크면 둘이 갈려, 같은 바이너리를 두 번 띄워 재고도 "딴것" 으로
+    // 읽었다. 못 풀면 적힌 철자 그대로 견준다: 여기서 틀리는 값은 **덜 이르는 쪽**이다.
+    // 푸는 자는 [`crate::store::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
+    // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰).
+    if crate::store::real(&found) == crate::store::real(&mine) {
+        return Ok(mine.display().to_string());
+    }
+    let word = found.display().to_string();
+    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) {
+        Ok(word)
+    } else {
+        Ok(mine.display().to_string())
+    }
+}
+
+/// 두 파일이 **바이트째 같은가** — 못 읽으면 거짓이다(모르면 덜 이르는 쪽).
+///
+/// 크기를 먼저 본다: 다른 빌드는 거의 늘 크기가 다르고, 그때는 5MB 를 읽지 않는다.
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    let size = |p: &Path| std::fs::metadata(p).ok().map(|m| m.len());
+    match (size(a), size(b)) {
+        (Some(x), Some(y)) if x == y => std::fs::read(a).ok().zip(std::fs::read(b).ok()).is_some_and(|(x, y)| x == y),
+        _ => false,
+    }
+}
+
+// **`--version` 으로 재던 자는 없앴다**(리뷰 moai-t6z9.bd6 9번). 이 크레이트의 판은 온 이력에서
+// `0.1.0` 하나라 그 물음이 두 빌드를 못 갈랐고, 갈라야 할 바로 그 자리에서 옛 빌드를 "같은 판"
+// 으로 읽었다. 지금 가르는 자는 [`same_bytes`] 다 — 부름 하나와 그 한도도 함께 없어졌다.
+
+/// `PATH` 에서 그 이름의 **돌릴 수 있는 파일** 첫 자리. 껍데기가 찾는 차례를 그대로 따른다.
+///
+/// **디렉터리는 건너뛴다** — `moai` 라는 디렉터리가 앞자리에 있으면 껍데기도 그것을 안 쓴다.
+///
+/// **절대 경로인 자리만 본다**(리뷰). 여기서 고른 값은 `.git/config` 에 그대로 앉아 **병합
+/// 때** 풀리는데, 그 자리는 이 프로세스가 선 곳이 아니라 워크트리 꼭대기다. POSIX 는 `PATH` 의
+/// 빈 자리(`/usr/bin:` 의 끝, `:` 가 둘 붙은 가운데)를 "지금 자리" 로 읽으므로 그대로 이으면
+/// `Path::new("").join("moai")` 가 **맨 `moai`** 가 된다 — 이 저장소가 전역 설치를 안 해 맨
+/// 이름으로 심으면 안 된다고 적어 둔 바로 그 값이고(`--install` 의 도움말), 상대 자리(`.`·
+/// `bin`)는 병합에서 딴 파일로 풀린다. 껍데기가 그 자리를 쓰는 것과 **심어 둘 값으로 쓰는 것**은
+/// 다른 물음이다.
+///
+/// **돌릴 수 있는가는 [`super::runnable`] 하나가 답한다**(moai-p3kb, 리뷰). 여기 있던 셋째 벌은
+/// `skill`·`tui` 의 것과 글자째 같았는데 모으는 판에서 빠져, 이식성 고침 하나가 저 둘에만 들 뻔했다.
+/// 빈 자리를 거르는 **위의 한 줄이 이 자리만의 것**이고, 그것은 재는 자가 아니라 고르는 자에 붙는다.
+fn on_path(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join(name)).find(|p| super::runnable(p))
+}
+
+/// 설정의 세 줄을 적는다 — 심은 드라이버 줄을 낸다.
+///
+/// **속 병합에는 이 드라이버를 쓰지 않는다**(`merge.<이름>.recursive`). 갈래가 엇갈린
+/// 이력에서 git 은 공통 조상 여럿을 먼저 합쳐 가상 조상을 짓는데, 그 자리에 이 드라이버를
+/// 쓰면 충돌 표식이 `%O` 로 들어와 다음 판에서 못 읽는 줄이 된다 — 그러면 이슈마다 푼 것이
+/// 통째로 날아가고 사람이 파일 전체를 손으로 푼다. 세션 여럿이 `develop` 을 서로 받는
+/// 저장소에서 엇갈린 이력은 드문 일이 아니다. `binary` 는 표식을 안 남기고 이쪽 것을
+/// 그대로 두어 `%O` 가 계속 JSONL 로 읽힌다.
+///
+/// **저장소 지역 설정에 적는다.** 사람의 전역 설정에 남기면 이 저장소를 지운 뒤에도
+/// 없는 바이너리를 가리키는 줄이 남는다. 자리는 부르는 쪽이 준다 — git 이 제 규칙으로
+/// 저장소를 찾으니, 저장소 밖이면 git 이 제 말로 거절한다.
+///
+/// **드라이버를 맨 마지막에 적는다**(리뷰 moai-h6aq.cx8). 세 줄은 따로 적히고 되돌리는 길이
+/// 없으니, 드라이버를 먼저 적었다가 `recursive` 에서 실패하면 그 저장소는 **드라이버는 서 있고
+/// 속 병합 막이는 없는** 상태로 남는다 — 바로 위가 그것이 이슈마다 푼 것을 통째로 날린다고
+/// 적어 둔 자리다. 차례를 뒤집으면 실패한 판은 안 심은 것과 같아진다.
+fn plant_config(here: &Path, cmd: &str) -> Result<String, String> {
+    let driver = driver_command(cmd);
+    let name = format!("merge.{DRIVER}.name");
+    let recursive = format!("merge.{DRIVER}.recursive");
+    let key = driver_key();
+    for (k, v) in [
+        // **심는 값이라 영어 하나다**(moai-uzgp) — `.gitattributes` 의 블록과 같은 까닭이다.
+        // 설정에 앉아 저장소가 함께 쓰는 글이라 이 세션이 고른 말을 따라가면 안 된다.
+        (name.as_str(), "moai issues.jsonl — three-way per issue"),
+        (recursive.as_str(), "binary"),
+        (key.as_str(), driver.as_str()),
+    ] {
+        crate::git::run(here, &["config", "--local", k, v]).map_err(git_said)?;
+    }
+    Ok(driver)
+}
+
+/// git 이 댄 까닭만 — **moai 의 글은 안 섞는다**(리뷰).
+///
+/// 무엇을 못 했는지를 앞에 붙이는 것은 [`crate::view::git_trouble`] 이고 그것은 화면 말로 선다.
+/// 그 글을 여기서 들면 못 심은 까닭이 영어 화면의 `init.driver_trouble` 한가운데에 남의 말 한
+/// 문장으로 박히고, `--json` 의 `driver_trouble` 로도 그대로 나간다 — 저장 계층을 화면 말에서
+/// 떼어 둔 결정이 글 한 줄로 도로 새는 자리다. git 의 stderr 는 git 의 말이라 이쪽이 고를 것이
+/// 아니고, **가르는 자는 [`crate::git::Error::said`] 하나다**(리뷰) — `worktree::git` 도 같은 자다.
+fn git_said(e: crate::git::Error) -> String {
+    e.said()
+}
+
+/// `moai init` 이 심을 때 일어난 일(moai-08bo).
+pub(crate) enum Planting {
+    /// 이 저장소는 드라이버를 안 쓴다 — 선언이 없거나(`.gitattributes`), git 저장소가 아니다.
+    Off,
+    /// 이미 지금 판의 줄이 서 있다. 아무것도 안 썼다.
+    Already,
+    /// 심었다 — 적은 명령.
+    Planted(String),
+    /// 못 심었다 — git 이 댄 까닭.
+    Failed(String),
+}
+
+/// **`moai init` 이 머지 드라이버까지 심는다**(moai-08bo, 2026-09-21 사용자 결정).
+///
+/// 앞 판의 `init` 은 `.gitattributes` 에 `merge=moai` 라는 **이름**만 쓰고 그 이름이 가리키는
+/// **명령**(`.git/config` 의 `merge.moai.driver`)은 안 심었다 — 도구가 제 손으로 안 도는 절반을
+/// 만들어 두고 나머지를 사람에게 치라고 한 자리다. 기본으로 돌게 한다.
+///
+/// **클론은 이것으로 안 덮인다.** `.moai` 가 이미 있는 저장소를 클론한 사람은 `init` 을 안 친다
+/// — 그쪽은 [`notice`] 의 `merge_driver_absent` 가 맡는다. 만드는 사람 몫과 받는 사람 몫이다.
+///
+/// **다시 불러도 안전하다.** 죽은 경로가 적혀 있으면 지금 고른 것으로 고쳐 준다 — `init` 이
+/// 원래 그런 명령이고, 워크트리를 지워 죽은 줄을 되살리는 길이 이것으로 하나 는다.
+///
+/// **도는 줄은 안 건드린다**(리뷰). 고쳐 주는 것은 **죽은 자리**이지 남이 일부러 고른 자리가
+/// 아니다. 적힌 값이 지금 고를 것과 다르다는 이유만으로 덮던 판은 이랬다 — `--install --as
+/// /usr/local/bin/moai` 로 오래 사는 자리를 박아 둔 클론에서 누가 워크트리의 바이너리로
+/// `moai init` 을 한 번 치면, `PATH` 에 `moai` 가 없는 이 저장소에서는 [`chosen_command`] 가
+/// `<워크트리>/target/release/moai` 를 내어 그 줄을 덮는다. `--local` 은 클론이 함께 쓰는
+/// 자리라 그 한 번이 **모든 체크아웃**을 그 워크트리에 묶고, 워크트리를 지우는 날 전부
+/// `merge_driver_rotten` 이 된다 — `--as` 가 막으려던 바로 그것을 `init` 이 만든다. 남이 적은
+/// 줄을 "썩었다" 고 안 부르는 moai-h6aq.cx8 의 규칙과 한 자리다.
+///
+/// **줄의 모양만은 지금 판으로 맞춘다.** 도는 명령은 그대로 두고 앞뒤 마디만 다시 적는다 —
+/// [`notice`] 가 `merge_driver_stale` 로 대는 것이 그 모양이라, 안 고치면 `init` 을 쳐도 그
+/// 알림이 안 걷힌다.
+///
+/// **안 걸어 둔 저장소에는 안 심는다.** 선언을 읽는 자는 [`declared`] 하나고, 그래서 moai-47bt
+/// 의 탈출구(`.gitattributes` 에 `-merge` 를 적는 것)가 여기에도 그대로 선다.
+pub(crate) fn plant_for_init(root: &Path) -> Planting {
+    if !declared(root) {
+        return Planting::Off;
+    }
+    // **먼저 선 줄을 본다.** 여기서 물러나면 [`chosen_command`] 의 두 부름(`--version`·[`probe`])
+    // 도 안 띄운다 — 이미 도는 저장소에서 `init` 이 가장 흔하게 지나는 길이다.
+    let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).unwrap_or_default();
+    let planted = planted.trim();
+    if let Some(word) = planted_word(planted)
+        && matches!(probe(root, &word), Probe::Runs)
+    {
+        if planted == driver_command(&word) {
+            // 이미 지금 판의 줄이다 — `init` 은 한 일을 한 대로 말한다.
+            return Planting::Already;
+        }
+        return match plant_config(root, &word) {
+            Ok(_) => Planting::Planted(word),
+            Err(why) => Planting::Failed(why),
+        };
+    }
+    let cmd = match chosen_command(root) {
+        Ok(c) => c,
+        Err(why) => return Planting::Failed(why),
+    };
+    match plant_config(root, &cmd) {
+        Ok(_) => Planting::Planted(cmd),
+        Err(why) => Planting::Failed(why),
+    }
+}
+
+/// 이 저장소의 드라이버가 어떤 자리에 있는가 — `moai init --check` 가 쓰는 한 낱말(moai-08bo).
+///
+/// **아무것도 안 쓴다.** `--check` 는 재기만 하는 명령이고, 심는 것은 `init` 과
+/// `merge-driver --install` 둘뿐이다.
+///
+/// 낱말은 [`notice`] 의 갈래를 그대로 쓴다 — 두 화면이 같은 것을 다른 이름으로 부르면 받는
+/// 쪽이 표를 둘 든다. 선언이 없으면 `off`, 알림이 없으면 `current` 다.
+pub(crate) fn state_at(here: &Path, tracker: &Path, chdir: bool) -> &'static str {
+    if !declared(tracker) {
+        return "off";
+    }
+    // **[`told`] 로 든다** — [`notice_at`] 으로 들면 선언을 한 번 더 묻는다(같은 답이 나올
+    // 물음에 `git check-attr` 를 한 번 더 띄운다).
+    match told(here, chdir) {
+        Some(w) => w.kind.trim_start_matches("merge_driver_"),
+        None => "current",
+    }
+}
+
 /// `.git/config` 에 드라이버를 심는다.
 ///
 /// **저장소마다 한 번씩 쳐야 한다** — git 은 드라이버 명령을 설정에서만 읽고 설정은
@@ -881,42 +1212,16 @@ fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
 /// 무시되고 git 의 기본 텍스트 머지가 돈다 — **병합은 안 심었을 때와 똑같다.** 달라진 것은
 /// 화면뿐이다: 걸어 뒀는데 안 심은 클론을 [`notice`] 가 한 줄로 댄다(moai-9khu).
 fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
-    // 기본은 지금 도는 이 바이너리의 절대 경로다. 이 도구는 전역 설치를 안 하므로
-    // `moai` 라고만 적으면 PATH 에 없는 기계에서 조용히 안 돈다. PATH 에 둔 사람은
-    // `--as moai` 로 고른다.
+    let here = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+    // 사람이 준 것이 이긴다. 안 주면 [`chosen_command`] 가 고른다 — 이 도구는 전역 설치를
+    // 안 하므로 맨 `moai` 라고 적으면 PATH 에 없는 기계에서 조용히 안 돈다.
     let cmd = match as_command {
         Some(c) => c.to_string(),
-        None => std::env::current_exe()
-            .map_err(|e| Fail::new(format!("이 바이너리의 자리를 모른다: {e}")))?
-            .display()
-            .to_string(),
+        None => chosen_command(&here)
+            .map_err(|why| Fail::new(fill(say(ctx.lang(), "refuse.driver_no_own_path"), &[("why", &why)])))?,
     };
-    let driver = driver_command(&cmd);
-    let name = format!("merge.{DRIVER}.name");
     let key = driver_key();
-    // **속 병합에는 이 드라이버를 쓰지 않는다**(`merge.<이름>.recursive`). 갈래가 엇갈린
-    // 이력에서 git 은 공통 조상 여럿을 먼저 합쳐 가상 조상을 짓는데, 그 자리에 이 드라이버를
-    // 쓰면 충돌 표식이 `%O` 로 들어와 다음 판에서 못 읽는 줄이 된다 — 그러면 이슈마다 푼 것이
-    // 통째로 날아가고 사람이 파일 전체를 손으로 푼다. 세션 여럿이 `develop` 을 서로 받는
-    // 저장소에서 엇갈린 이력은 드문 일이 아니다. `binary` 는 표식을 안 남기고 이쪽 것을
-    // 그대로 두어 `%O` 가 계속 JSONL 로 읽힌다.
-    let recursive = format!("merge.{DRIVER}.recursive");
-    // **저장소 지역 설정에 적는다.** 사람의 전역 설정에 남기면 이 저장소를 지운 뒤에도
-    // 없는 바이너리를 가리키는 줄이 남는다. 자리는 지금 선 곳이 정한다 — git 이 제
-    // 규칙으로 저장소를 찾으니, 저장소 밖이면 git 이 제 말로 거절한다.
-    //
-    // **드라이버를 맨 마지막에 적는다**(리뷰 moai-h6aq.cx8). 세 줄은 따로 적히고 되돌리는 길이
-    // 없으니, 드라이버를 먼저 적었다가 `recursive` 에서 실패하면 그 저장소는 **드라이버는 서 있고
-    // 속 병합 막이는 없는** 상태로 남는다 — 바로 위가 그것이 이슈마다 푼 것을 통째로 날린다고
-    // 적어 둔 자리다. 차례를 뒤집으면 실패한 판은 안 심은 것과 같아진다.
-    let here = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-    for (k, v) in [
-        (name.as_str(), "moai issues.jsonl — 이슈마다 3-way"),
-        (recursive.as_str(), "binary"),
-        (key.as_str(), driver.as_str()),
-    ] {
-        crate::git::run(&here, &["config", "--local", k, v]).map_err(|e| Fail::new(e.to_string()))?;
-    }
+    let driver = plant_config(&here, &cmd).map_err(Fail::new)?;
     if ctx.json {
         #[derive(serde::Serialize)]
         struct Planted<'a> {
@@ -925,17 +1230,20 @@ fn install(ctx: &Ctx, as_command: Option<&str>) -> R<Vec<String>> {
         }
         return super::json_line(&Planted { driver: &driver, attribute: format!("{SNAPSHOT} merge={DRIVER}") });
     }
+    // **사람이 친 길만 화면 말을 안다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 `%O %A %B` 로
+    // 부르는 길은 사용자 설정을 안 연다 — 저장 계층을 화면 말에서 떼어 둔 결정과 같은 자리다.
+    let lang = ctx.lang();
     Ok(vec![
         format!("{key} = {driver}"),
-        format!("`.gitattributes` 의 `{SNAPSHOT} merge={DRIVER}` 가 이것을 부른다 — 없으면 `moai init` 이 넣는다"),
-        "클론마다 한 번씩 친다. 안 친 클론은 git 의 기본 머지가 돈다".into(),
+        fill(say(lang, "driver.installed_attribute"), &[("rule", &format!("{SNAPSHOT} merge={DRIVER}"))]),
+        say(lang, "driver.installed_per_clone").to_string(),
         // **적은 자리가 사라져도 조용히 잃지는 않는다** — 심는 줄이 `git merge-file` 로
         // 내려앉으므로(`driver_command`) 최악이 안 심은 클론과 같아진다. 그래도 자리는
         // 지키는 편이 낫다: 내려앉은 판은 이슈마다 푼 것을 못 쓰고 사람 손으로 간다.
         // 딸린 워크트리에서 쳐도 이 줄은 **클론이 함께 쓰는** `.git/config` 에 앉으므로
         // (`--local` 은 공용 자리다), 그 워크트리를 지우면 클론 전체가 그 상태가 된다.
-        "적은 자리가 사라지면 git 의 기본 머지로 내려앉는다 — 표식은 서지만 이슈마다 푸는 값은 잃는다".into(),
-        "워크트리의 `target/` 을 가리키면 그 워크트리를 지울 때 같이 죽는다. 그때는 다시 치거나 `--as <늘 있는 자리>` 로 심는다".into(),
+        say(lang, "driver.installed_falls_back").to_string(),
+        say(lang, "driver.installed_worktree").to_string(),
     ])
 }
 
@@ -1272,8 +1580,17 @@ mod tests {
         let at = |cmd: &std::path::Path| probe(dir, &cmd.display().to_string());
 
         // 이 명령을 아는 바이너리. `--help` 는 어느 갈래에서도 파일을 안 건드린다.
-        let ours = write("moai", "#!/bin/sh\n[ \"$1\" = merge-driver ] && exit 0\nexit 2\n");
+        // **제 이름을 댄다**(moai-wwbi) — 0 으로 끝나는 것만으로는 `Runs` 가 아니다.
+        let ours = write(
+            "moai",
+            "#!/bin/sh\n[ \"$1\" = merge-driver ] && { echo 'Usage: moai merge-driver'; exit 0; }\nexit 2\n",
+        );
         assert!(matches!(at(&ours), Probe::Runs));
+
+        // **모르는 인자를 흘려 듣고 0 을 내는 래퍼**(moai-wwbi). 끝난 꼴만 보던 판이 그냥
+        // 지나가던 자리다 — 그 명령은 이 부명령을 모르고 매 병합이 말없이 내려앉는다.
+        let mute = write("삼킨다", "#!/bin/sh\nexit 0\n");
+        assert!(matches!(at(&mute), Probe::Alien), "흘려 듣는 래퍼가 지나갔다");
 
         // **그 이름의 다른 도구.** 파일도 있고 돌기도 도는데 이 명령을 모른다 — 모드를 읽던
         // 판이 조용히 지나가던 자리다.
@@ -1296,7 +1613,7 @@ mod tests {
         let seen = dir.join("본것");
         // 자리를 감싼다 — `Scratch` 의 이름에는 `ThreadId(3)` 의 괄호가 든다.
         let quoted = crate::text::shell_word(&seen.display().to_string());
-        let reader = write("읽는다", &format!("#!/bin/sh\ncat > {quoted}\nexit 0\n"));
+        let reader = write("읽는다", &format!("#!/bin/sh\ncat > {quoted}\necho merge-driver\nexit 0\n"));
         assert!(matches!(at(&reader), Probe::Runs));
         assert_eq!(std::fs::read(&seen).unwrap(), Vec::<u8>::new(), "표준 입력을 물려줬다");
 
@@ -1321,6 +1638,24 @@ mod tests {
         let slow = write("느리다", "#!/bin/sh\nexec sleep 30\n");
         assert!(matches!(at(&slow), Probe::Unknown), "늦은 것을 재고 말았다");
         assert!(clock.elapsed() < PROBE_BUDGET * 3, "한도를 안 지켰다 — {:?}", clock.elapsed());
+
+        // **손자가 살아 있어도 제 시간에 돌아온다**(리뷰). 도움말을 파이프로 받던 판은 아이를
+        // 거둔 **뒤에** 그 파이프를 읽어, 아이가 물려준 쓰기 끝을 손자가 쥐고 있으면 거기서
+        // 영영 멈췄다 — [`PROBE_BUDGET`] 은 아이까지만 재므로 아무것도 안 막는 자리다. 뒤에
+        // 일을 하나 띄우는 껍데기 shim(mise·asdf·direnv 꼴)이 그 모양이고, 그 판에서
+        // `moai status` 는 글자 한 줄 없이 안 끝났다. 받는 자리를 파일로 두어 끊었다.
+        let clock = std::time::Instant::now();
+        let busy = write("손자를남긴다", "#!/bin/sh\necho 'Usage: moai merge-driver'\nsleep 30 &\nexit 0\n");
+        assert!(matches!(at(&busy), Probe::Runs), "손자를 남긴 래퍼를 못 읽었다");
+        assert!(clock.elapsed() < PROBE_BUDGET, "손자가 읽기를 붙들었다 — {:?}", clock.elapsed());
+
+        // **재고 나면 자리를 안 남긴다** — 알림 하나가 `moai status` 마다 찌꺼기를 쌓으면 안 된다.
+        let (said, sink) = Said::new().expect("받을 자리를 못 열었다");
+        let at_file = said.0.clone();
+        drop(sink);
+        assert!(at_file.exists());
+        drop(said);
+        assert!(!at_file.exists(), "잰 뒤 자리가 남았다 — {}", at_file.display());
     }
 
     /// **빈칸이 든 경로를 감싼다.** 안 감싸면 첫 낱말에서 끊겨 늘 내려앉는 길로만 가고,

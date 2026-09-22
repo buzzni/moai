@@ -1,6 +1,7 @@
 //! `.moai/` 를 심는다. `store` 말고 파일을 만드는 유일한 곳이다.
 
 use super::{Ctx, Fail, R};
+use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::i18n::{fill, say};
 use crate::store::Elsewhere;
@@ -329,8 +330,22 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
     // `moai project add|ls` 와 한눈 보기가 같은 자를 쓴다.
     let tracker_at = crate::store::init_belongs_at(&root);
+    // **드라이버가 어디 서 있는지도 여기서 답한다**(moai-08bo). `init` 이 그것까지 심게 된
+    // 뒤로 `--check` 의 물음은 "블록이 낡았나" 하나가 아니라 "`init` 이 맞추는 것이 다 맞아
+    // 있나" 다. **아무것도 안 쓴다** — 재고 말하는 것이 이 플래그의 전부다.
+    //
+    // 선언을 읽는 자리는 **트래커가 사는 곳**이다(moai-8nkl) — 딸린 워크트리의 가지는 그것을
+    // 안 들 수 있고, 병합에서 걸리는 것은 루트의 선언이다.
+    //
+    // **그 자리를 대는 자는 [`crate::store::Repo::opened_root`] 다**(리뷰) — `merge_driver::notice`
+    // 가 쓰는 `Repo::root` 와 **같은 자**라야 두 화면이 같은 선언을 읽는다. 위의 `tracker_at`
+    // ([`crate::store::init_belongs_at`])으로 대던 판은 그 자가 "여기 `.moai` 가 있으면 `None`"
+    // 이라, `.moai` 를 커밋하는 저장소(이 저장소가 그렇다)의 워크트리에서는 늘 **워크트리의**
+    // 선언을 읽었다 — moai-8nkl 이 없앤 갈림이 `--check` 에만 그대로 남는다. `tracker_at` 은
+    // "어디서 `init` 을 쳐야 하나" 에 답하는 자라 물음이 다르고, 아래 줄들이 그쪽을 그대로 쓴다.
+    let driver = crate::cmd::merge_driver::state_at(&root, &crate::store::Repo::opened_root(&root), ctx.chdir);
     if ctx.json {
-        let mut v = serde_json::json!({ "agents": state });
+        let mut v = serde_json::json!({ "agents": state, "driver": driver });
         // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
         //
         // **못 싣는 경로에서도 키만 빠진다**(리뷰). `serde_json::json!(<식>)` 은 속으로
@@ -372,17 +387,75 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
             &[("name", name), ("n", &missing.len().to_string()), ("rules", &missing.join(", "))],
         ));
     }
-    // **어디서 쳐야 하는지를 끝에 한 줄로 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
+    // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
+    // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
+    if !matches!(driver, "off" | "current") {
+        out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
+    }
+    // **어디서 쳐야 하는지를 끝에 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
     // 여기서 1 로 끝나므로, 그 자리를 안 대면 세 줄이 통째로 못 따를 말이 된다. 줄들을 고쳐 쓰지 않고
     // 한 줄을 더하는 까닭은 낡음을 말하는 것과 어디서 고치는가가 다른 물음이어서다 — 딸린 파일이 다
     // 맞은 워크트리에서도 이 줄은 서고, 그때 위는 `current` 다.
     if let Some(main) = &tracker_at {
-        // **`-C` 를 붙이는 규칙은 한 자리다**(`report::Warning::cli_hint`, 리뷰 moai-h6aq.cx8) —
-        // 알림들과 아래 거절문이 같은 글자를 내야 한다.
-        let go = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
-        out.push(fill(say(lang, "init.check_worktree"), &[("go", &go)]));
+        // **이 셸이 무엇을 읽고 있는지는 손잡이가 켜졌을 때만 묻는다** — 꺼진 셸에서는 둘째 줄이
+        // 아예 안 서므로 물어도 쓸 데가 없고, 이 물음은 조상을 훑는다.
+        let here = crate::store::here_wanted();
+        let reading = here.then(|| crate::store::tracker_in_use(&root)).flatten();
+        out.extend(check_worktree(lang, main, away_root(&root, ctx.chdir).as_deref(), here, reading.as_deref()));
     }
     Ok(out)
+}
+
+/// `--check` 의 끝줄 — **어디서 `init` 을 쳐야 하는가**, 그리고 **이 셸이 갈렸는가**.
+///
+/// **손잡이를 켠 셸에서는 줄이 둘이다**(moai-ha0f, 2026-09-21 사용자 결정). 첫 줄이 대는 자리는
+/// [`crate::store::init_belongs_at`] 이 내는 것이고 그 자는 `MOAI_HERE` 를 **안 본다**(moai-ko4y) —
+/// 나중의 다른 부름이 어디서 서느냐에 답하는 자라, 그 부름의 셸이 손잡이를 켤지는 여기서 알 수 없다.
+/// 그 결정을 그대로 두면 `MOAI_HERE=1` 인 셸에서 이 줄이 "여기 안 선다" 를 말하는데 **같은 셸의**
+/// `moai init` 은 여기 심고 0 으로 끝난다 — 한 명령의 답이 둘로 갈린다. 둘째 줄이 그 갈림을 메운다:
+/// 첫 줄은 손잡이 없는 셸에 대한 답으로 그대로 맞고, 둘째 줄이 이 셸에 대한 답을 댄다.
+///
+/// **대는 명령에 접두어를 박는다.** 손잡이는 **이 프로세스 하나**에 서므로, 접두어 없는 줄을 베껴
+/// 딴 셸에 붙여 넣으면 그 줄은 [`run`] 의 거절로 1 로 끝난다 — moai-ko4y 가 표면을 물려받게 두지
+/// 않은 까닭이 그것이고, 접두어를 박은 줄은 어느 셸에서도 같은 일을 한다.
+///
+/// **`-C` 를 붙이는 규칙은 한 자리다**([`crate::report::Warning::cli_hint`], 리뷰 moai-h6aq.cx8) —
+/// 알림들과 [`run`] 의 거절문이 같은 글자를 내야 한다. 여기 두 줄도 그 자를 거친다.
+///
+/// **심는 것이 이 셸이 읽던 트래커를 가리면 대는 말이 바뀐다**(리뷰 moai-uocc.45o 의 2번,
+/// 2026-09-21 사용자 결정). 딸린 워크트리의 **밑자리**(`<wt>/src/deep`)가 그 자리다 — 손잡이를 켠
+/// 셸은 `<wt>/.moai` 를 읽는데([`crate::store::tracker_in_use`]), 거기 대고 "여기 심는다" 를 그대로
+/// 내면 따라 친 사람이 `src/deep` 에 아무도 안 읽는 `.moai` 를 세운다. 그 뒤의 `add` 는 그리로 가고
+/// 먼저 쓴 줄들은 사라진 것처럼 보이며, 그 파일은 병합에서 겨룬다 — moai-pk4x 가 `init` 에서 막는
+/// 바로 그것을 안내가 권하게 된다.
+///
+/// **주 체크아웃을 가리는 것은 이 갈래가 아니다.** 손잡이를 켠 셸에서 워크트리 꼭대기에 심는 것도
+/// 위의 트래커를 가리지만, 그것이 moai-ko4y 가 열어 둔 길이고 [`run`] 의 거절문도 그 값을 함께
+/// 댄다(`refuse.init_worktree_here_note`). 가르는 자는 "읽고 있는 것이 첫 줄이 대는 자리와 같은가"
+/// 하나다.
+fn check_worktree(
+    lang: crate::i18n::Lang,
+    main: &Path,
+    away: Option<&str>,
+    here: bool,
+    reading: Option<&Path>,
+) -> Vec<String> {
+    let there = crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&main.display().to_string())), "init");
+    let mut out = vec![fill(say(lang, "init.check_worktree"), &[("go", &there)])];
+    if !here {
+        return out;
+    }
+    match reading.filter(|at| !crate::user_config::same_dir(at, main)) {
+        Some(at) => {
+            let at = at.join(".moai").display().to_string();
+            out.push(fill(say(lang, "init.check_worktree_shadow"), &[("at", &at)]));
+        }
+        None => {
+            let go = format!("MOAI_HERE=1 {}", crate::report::Warning::cli_hint(away, "init"));
+            out.push(fill(say(lang, "init.check_worktree_here"), &[("go", &go)]));
+        }
+    }
+    out
 }
 
 /// `moai init --print`. **아무것도 안 쓰고 블록만 찍는다.**
@@ -431,7 +504,11 @@ const GITATTRIBUTES: &str = "\
 .moai/issues.jsonl   text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
+# It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.
+# Several files is the normal shape, and the old single file is still read as
+# one of them, so both lines stand.
 .moai/journal.jsonl  text eol=lf merge=union
+.moai/journal/*.jsonl  text eol=lf merge=union
 ";
 
 // **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 `.claude/worktrees/` 에
@@ -658,6 +735,9 @@ fn covers(have: &str, want: &str) -> bool {
     if have.is_empty() || have.starts_with('#') || have.starts_with('!') || want.starts_with('#') {
         return false;
     }
+    if decided(have, want) {
+        return true;
+    }
     // 끝 `/` 는 "디렉터리만" 이라는 뜻이다. 같은 이름끼리 견줄 때 `have` 만 디렉터리 전용이면
     // (`.moai/lock/`) 파일 `.moai/lock` 을 막지 못하니 덮은 것으로 치지 않는다.
     let dir_only = have.ends_with('/') && !want.ends_with('/');
@@ -666,7 +746,54 @@ fn covers(have: &str, want: &str) -> bool {
     !have.is_empty() && ((have == want && !dir_only) || want.starts_with(&format!("{have}/")))
 }
 
-pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
+/// 같은 경로에 대해 사람이 **머지 속성을 스스로 정한** 줄인가(moai-47bt, 2026-09-21 사용자 결정).
+///
+/// 머지 드라이버를 안 쓰기로 한 저장소에 탈출구가 없던 자리다. 선언(`merge=moai`)을 지우면
+/// `merge_driver_absent` 는 걷히지만 이번엔 "규칙이 빠졌다"(`gitattributes_rules`)가 `moai init`
+/// 힌트와 함께 서고, 그 `init` 이 지운 줄을 다시 덧붙여 처음으로 돌아왔다. 어느 쪽을 따라도
+/// 영영 졸리는 고리다.
+///
+/// **끊는 자는 git 의 어휘다.** 설정에 끄는 키를 두면 어휘가 하나 늘고 그 키는 다른 알림에도
+/// 번진다. 대신 `.gitattributes` 에 사람이 같은 경로로 적어 둔 줄이 `merge` 를 **어떤 꼴로든**
+/// 정하고 있으면(`-merge`·`!merge`·`merge=<다른 것>`·`merge=moai`) 그것을 결정으로 읽는다 —
+/// 지우는 것이 아니라 **적는 것**이 탈출구라, 다음 사람이 그 줄에서 까닭을 읽는다.
+///
+/// **그 경로의 줄은 통째로 사람의 것이 된다** — `text eol=lf` 까지 그쪽이 정한다. 반만 물려받아
+/// 뒤에 우리 줄을 덧붙이면 git 은 뒤엣것을 쓰므로 결정이 조용히 뒤집힌다.
+///
+/// 줄이 통째로 **없어진** 판은 그대로 빠진 것이다(`init` 이 다시 쓴다). 실수로 지운 것과 일부러
+/// 정한 것을 가르는 자리가 여기고, 가르지 않으면 `.gitattributes` 를 잃은 저장소가 영영 조용해진다.
+///
+/// **스냅샷의 `merge=union` 은 결정으로 안 읽는다**(리뷰 moai-t6z9.bd6 4번). 그 한 값은 사람이
+/// 고를 수 있는 것이 아니라 이 저장소가 **없애려고 다시 만들어진** 바로 그 실패다 — union 은 같은
+/// id 를 가진 줄 둘을 조용히 남기고, 그것이 CLAUDE.md 가 이름 붙인 데이터 손상이다. 결정으로
+/// 읽으면 `init` 이 규칙을 안 쓰고 [`crate::cmd::merge_driver::declared`] 도 `moai` 가 아니라며
+/// 네 알림을 통째로 재우는데, 그 저장소는 그때부터 스냅샷을 union 으로 합친다. 탈출구는 그대로
+/// 선다: `-merge`·`!merge`·`merge=<union 아닌 것>` 은 여전히 결정이다.
+///
+/// **저널은 반대다.** 그 줄에 걸리는 값이 union 이고(`GITATTRIBUTES`), 거기서는 union 이 맞다 —
+/// 가르는 자는 낱말이 아니라 **그 경로에 무엇이 걸려야 하는가**다.
+fn decided(have: &str, want: &str) -> bool {
+    /// 이 줄이 `name` 속성을 정하고 있는가 — `name`·`-name`·`!name`·`name=<값>` 넷이다.
+    fn sets(line: &str, name: &str) -> bool {
+        line.split_whitespace().skip(1).any(|t| {
+            let t = t.trim_start_matches(['-', '!']);
+            t == name || t.strip_prefix(name).is_some_and(|rest| rest.starts_with('='))
+        })
+    }
+    // 앞 `/` 는 뿌리에 못박는 표시일 뿐 가리키는 파일은 같다 — 위의 [`covers`] 와 같은 자다.
+    fn path(l: &str) -> Option<&str> {
+        l.split_whitespace().next().map(|p| p.trim_start_matches('/'))
+    }
+    // 스냅샷에 union 을 건 줄 — 결정이 아니라 고쳐야 할 줄이다.
+    let union_on_snapshot = |l: &str| {
+        path(l) == Some(crate::cmd::merge_driver::SNAPSHOT) && l.split_whitespace().skip(1).any(|t| t == "merge=union")
+    };
+    // 속성이 없는 줄은 `.gitignore` 의 줄이다 — 그쪽은 위의 자로만 잰다.
+    path(have) == path(want) && sets(want, "merge") && sets(have, "merge") && !union_on_snapshot(have)
+}
+
+pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -693,12 +820,20 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // 그 셸 자리에 트래커가 하나 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
         // 재는 자는 [`away_root`] 하나다: 알림마다 따로 재면 한 화면의 두 줄이 다른 자리를 댄다.
         let at = away_root(&root, ctx.chdir).map(|r| format!(" -C {r}")).unwrap_or_default();
-        let same = match (prefix, no_agents) {
-            (Some(p), true) => format!(" {} --no-agents", crate::text::quoted(p)),
-            (Some(p), false) => format!(" {}", crate::text::quoted(p)),
-            (None, true) => " --no-agents".to_string(),
-            (None, false) => String::new(),
-        };
+        // **깃발마다 짝을 적지 않는다**(리뷰). 경우를 손으로 다 적던 판은 `--no-driver` 가 늘 때
+        // 그것만 빠졌고, 그 줄을 따라 친 사람은 안 심기로 한 드라이버를 심었다 — `--local` 은
+        // 클론이 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다. 깃발이 하나 늘면 줄도
+        // 하나만 는다.
+        let mut same = String::new();
+        if let Some(p) = prefix {
+            same.push(' ');
+            same.push_str(&crate::text::quoted(p));
+        }
+        for (on, flag) in [(no_agents, " --no-agents"), (no_driver, " --no-driver")] {
+            if on {
+                same.push_str(flag);
+            }
+        }
         // **빠져나가는 길의 값도 함께 댄다**(리뷰). `MOAI_HERE` 는 **이 프로세스 하나**에만 선다 —
         // 그것으로 세운 트래커는 그 뒤의 맨 `moai` 가 도로 루트의 것을 읽어 아무도 안 읽는다.
         // 대지 않으면 이 줄이 거절문이 막으려던 바로 그 자리로 사람을 데려간다.
@@ -733,7 +868,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
         // 바꾸면 그 줄들이 제 접두어를 잃는다.
         (Some(p), true) => {
-            let cur = crate::config::Config::load(&root).map_err(Fail::new)?.prefix;
+            let cur = crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix;
             if p != cur {
                 return Err(Fail::coded(
                     format!(
@@ -754,7 +891,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
         // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
         (Some(p), false) => {
-            crate::config::check_prefix(p).map_err(Fail::new)?;
+            crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
             if p.chars().count() > PREFIX_MAX {
                 return Err(Fail::coded(
                     format!(
@@ -770,7 +907,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             }
             p.to_string()
         }
-        (None, true) => crate::config::Config::load(&root).map_err(Fail::new)?.prefix,
+        (None, true) => {
+            crate::config::Config::load(&root)
+                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
+                .prefix
+        }
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {
@@ -792,7 +933,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
          # How a person is shown: full (`Name (email)`) · name · email\nnaming = \"full\"\n"
     );
     // 설정을 먼저 검사한다 — 접두어가 형식에 안 맞으면 파일을 만들기 전에 멈춘다.
-    crate::config::Config::parse(&config).map_err(Fail::new)?;
+    crate::config::Config::parse(&config).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
 
     // AGENTS.md 도 **아무것도 심기 전에** 읽는다. 못 읽는 파일(UTF-8 아님·권한)을 빈 글로 치면
     // 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다 — 멈추되, `.moai/` 를 만든 뒤에 멈추면
@@ -808,7 +949,10 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     if !again {
         std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", ""), ("journal.jsonl", "")] {
+        // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
+        // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
+        // 그 파일은 이제 읽기만 하는 옛 자리다. 빈 디렉터리는 git 이 안 담으므로 미리 만들지도 않는다.
+        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", "")] {
             let p = dir.join(name);
             std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
         }
@@ -816,6 +960,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
 
     let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES);
     let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE);
+    // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
+    // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
+    // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는
+    // 저장소와 git 저장소가 아닌 자리에는 안 심고, 이미 같은 줄이면 아무것도 안 쓴다.
+    let planting = if no_driver { None } else { Some(crate::cmd::merge_driver::plant_for_init(&root)) };
     // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
@@ -872,7 +1021,23 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
             "gitattributes": matches!(attrs, Added::Wrote { .. }),
             "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
+            // **늘 서는 키다**(moai-08bo). `--no-driver` 는 `off` 와 같은 낱말을 쓰지 않는다 —
+            // 안 쓰기로 한 저장소와 이번 한 번만 건너뛴 것은 다음에 칠 명령이 다르다.
+            "driver": match &planting {
+                None => "skipped",
+                Some(Planting::Off) => "off",
+                Some(Planting::Already) => "current",
+                Some(Planting::Planted(_)) => "planted",
+                Some(Planting::Failed(_)) => "failed",
+            },
         });
+        // 심은 명령과 못 심은 까닭은 **있을 때만** 싣는다 — 늘 `null` 을 두면 대부분의 줄이
+        // 헛 키를 든다(`shortened_from` 과 같은 자).
+        match &planting {
+            Some(Planting::Planted(cmd)) => v["driver_command"] = serde_json::json!(cmd),
+            Some(Planting::Failed(why)) => v["driver_trouble"] = serde_json::json!(why),
+            _ => {}
+        }
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
@@ -944,6 +1109,14 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
         Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
         _ => {}
     }
+    // **한 일만 말한다** — 이미 서 있던 줄과 안 쓰기로 한 저장소는 조용하다. 못 심은 것은
+    // 끊지 않고 말한다: `.git/config` 하나 때문에 트래커를 세운 말까지 삼키면 안 된다
+    // (읽기 전용 AGENTS.md 를 `?` 로 끊지 않는 moai-780n 과 같은 자다).
+    match &planting {
+        Some(Planting::Planted(cmd)) => out.push(fill(say(lang, "init.planted_driver"), &[("cmd", cmd)])),
+        Some(Planting::Failed(why)) => out.push(fill(say(lang, "init.driver_trouble"), &[("why", why)])),
+        _ => {}
+    }
     for (name, done, block) in &untouched {
         // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
         // 갈래를 빠짐없이 적는다: `_` 로 받던 때는 갈래가 하나 느는 날 그것이 말없이 "못 읽어"
@@ -977,7 +1150,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool) -> R<Vec<String>> {
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
     // **못 건드린 자리가 있으면 "다 맞아 있다" 가 아니다**(moai-780n) — 못 쓴 AGENTS.md 는 딸린
     // 파일이 둘 다 `Already` 여도 남은 일이다.
-    let did_nothing = attrs == Added::Already && ignore == Added::Already && !agents && untouched.is_empty();
+    let did_nothing = attrs == Added::Already
+        && ignore == Added::Already
+        && !agents
+        && untouched.is_empty()
+        && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {
         out.push(say(lang, "init.all_current").to_string());
     }
@@ -1021,6 +1198,51 @@ mod tests {
             rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
             "그 줄이 드라이버를 안 건다 — {rule}"
         );
+    }
+
+    /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에
+    /// 대한 답이라 그대로 서고, 둘째 줄이 **이 셸**의 답을 댄다 — 한 줄만 두던 판은 `MOAI_HERE=1`
+    /// 인 셸에서 "여기 안 선다, 주 체크아웃에서 쳐라" 를 냈는데 같은 셸의 `moai init` 은 여기 심고
+    /// 0 으로 끝났다.
+    ///
+    /// **둘째 줄에 접두어가 박혀 있는가를 함께 잰다.** 손잡이는 이 프로세스 하나에 서므로 접두어
+    /// 없는 줄은 베껴 딴 셸에 붙여 넣으면 1 로 끝난다 — 표면이 손잡이를 안 물려받는
+    /// (moai-ko4y) 값을 이 접두어가 갚는다.
+    ///
+    /// **환경을 안 만진다**(`store::tests` 의 같은 자리 글). 단위 시험은 한 프로세스의 스레드로
+    /// 나란히 돌아 `set_var` 로 켠 값을 옆 시험이 본다 — 갈림을 인자로 받는 까닭이 그것이고,
+    /// 손잡이를 실제로 읽는 자리([`crate::store::here_wanted`])는 부르는 쪽 한 줄이다.
+    #[test]
+    fn a_split_shell_gets_a_second_line() {
+        let main = Path::new("/main");
+        let plain = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), false, None);
+        assert_eq!(plain.len(), 1, "손잡이 없는 셸에 줄이 둘 섰다 — {plain:?}");
+        assert!(plain[0].contains("moai -C /main init"), "주 체크아웃을 안 댔다 — {}", plain[0]);
+
+        let split = check_worktree(crate::i18n::Lang::En, main, Some("/wt"), true, Some(main));
+        assert_eq!(split.len(), 2, "갈린 셸에 둘째 줄이 없다 — {split:?}");
+        assert_eq!(split[0], plain[0], "첫 줄이 손잡이를 물려받았다 — {}", split[0]);
+        assert!(split[1].contains("MOAI_HERE=1 moai -C /wt init"), "빠져나가는 길을 안 댔다 — {}", split[1]);
+
+        // `-C` 없이 부른 판은 그 자리도 없다 — 붙는 규칙은 `cli_hint` 하나가 쥔다.
+        let here = check_worktree(crate::i18n::Lang::En, main, None, true, None);
+        assert!(here[1].contains("MOAI_HERE=1 moai init"), "맨 명령을 안 댔다 — {}", here[1]);
+    }
+
+    /// **읽고 있는 트래커를 가리라고 대지 않는다**(리뷰 moai-uocc.45o 의 2번, 2026-09-21 사용자
+    /// 결정). 딸린 워크트리의 밑자리에서 손잡이를 켠 셸은 `<wt>/.moai` 를 읽는데, 거기 "여기
+    /// 심는다" 를 그대로 내면 따라 친 사람이 `src/deep` 에 아무도 안 읽는 `.moai` 를 세우고 먼저 쓴
+    /// 줄들은 사라진 것처럼 보인다 — `moai init` 이 막는 자리를 안내가 권하게 된다.
+    ///
+    /// **주 체크아웃을 가리는 것은 이 갈래가 아니다** — 위의 시험이 그쪽(`reading == main`)을 재고,
+    /// 그때는 빠져나가는 길을 그대로 댄다.
+    #[test]
+    fn a_shell_that_already_reads_one_is_not_told_to_shadow_it() {
+        let main = Path::new("/main");
+        let said = check_worktree(crate::i18n::Lang::En, main, None, true, Some(Path::new("/main/wt")));
+        assert_eq!(said.len(), 2, "밑자리에서 둘째 줄이 없다 — {said:?}");
+        assert!(said[1].contains("/main/wt/.moai"), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
+        assert!(!said[1].contains("MOAI_HERE=1 moai init"), "가릴 명령을 그대로 댔다 — {}", said[1]);
     }
 
     /// 두 번 넣어도 블록은 하나고, 사람이 쓴 산문은 바이트 단위로 그대로다.
@@ -1268,7 +1490,7 @@ mod tests {
             assert!(got.chars().count() <= PREFIX_MAX, "{full} → {got}");
             // 줄인 것도 설정이 받는 접두어다.
             crate::config::Config::parse(&format!("prefix = \"{got}\"\n"))
-                .unwrap_or_else(|e| panic!("{full} → {got}: {e}"));
+                .unwrap_or_else(|e| panic!("{full} → {got}: {e:?}"));
         }
     }
 

@@ -1,8 +1,12 @@
 # PR 과 develop 푸시에서 도는 검사. 태그는 릴리스 워크플로가 따로 본다.
 #
-# 잡을 둘로 가른 까닭은 시간이다. `[profile.release]` 의 `lto = true` 가 링크를
-# 분 단위로 만들어, 시험과 한 잡에 두면 clippy 가 30초에 낼 답을 릴리스 링크
+# 재는 일과 짓는 일을 가른 까닭은 시간이다. `[profile.release]` 의 `lto = true` 가
+# 링크를 분 단위로 만들어, 시험과 한 잡에 두면 clippy 가 30초에 낼 답을 릴리스 링크
 # 뒤에서 기다린다. 둘이 나란히 돌면 벽시계는 느린 쪽 하나다.
+#
+# 잡은 넷이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
+# `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `size-budget`(15MB 예산). required check 는
+# `ci-gate` 하나고, 뒤의 셋이 그 까닭을 제 머리글에 적는다.
 name: CI
 
 on:
@@ -36,7 +40,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # **`main` 은 `develop` 에서 온 PR 만 받는다.** 보호 규칙이 미치는 데는 "직접
+      # 푸시를 막는다" 와 "PR 을 요구한다" 까지고, GitHub 에는 PR 의 소스 가지를
+      # 가두는 규칙이 없다 — 그 한 칸을 이 스텝이 메운다. 판을 내는 길이 하나여야
+      # `main` 의 이력이 판과 판 사이로 읽힌다.
+      #
+      # **체크아웃 앞에 선다.** 받을 것도 지을 것도 없어 몇 초에 끝나는데, 뒤에 두면
+      # 잘못 겨눈 PR 이 clippy 와 시험을 다 돈 뒤에야 그 말을 듣는다.
+      #
+      # 가지 이름은 `${{ }}` 로 스크립트에 붙이지 않고 환경으로 준다 — 이름에 든
+      # 글자가 셸 명령이 되는 자리다 (릴리스 워크플로의 태그 이름과 같은 까닭).
+      - name: main 은 develop 에서 온 PR 만 받는다
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'develop'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          printf '::error::main 은 develop 에서 온 PR 만 받는다 — 지금 소스는 %s 다. 고칠 것은 develop 에 넣고, 판을 낼 때 develop → main PR 하나로 간다.\n' "$HEAD_REF"
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # 밑의 트래커 검사가 base 와 head 를 둘 다 짚는다.
           fetch-depth: 0
@@ -66,20 +88,63 @@ jobs:
           fi
           echo "트래커는 그대로다"
 
+      # **툴체인을 캐시에서 푼다.** 러너에 깔려 오는 stable 은 1.98.1 이고 이 저장소가
+      # 박은 것은 1.97.1 이라, 잡마다 129MB 를 받아 xz 로 푼다. 그 15초는 러너가
+      # 빨라도 안 줄어든다 — 드는 값이 받는 것이 아니라 한 갈래로 도는 CPU 라서다.
+      # 캐시로 받으면 4초다 (같은 판의 `cargo-dev` 캐시가 217MB 를 3.6초에 풀었다).
+      # 잰 표는 `moai show moai-b2ss` 의 본문에 있다.
+      #
+      # **rustup 프록시를 처음 부르기 전에 선다.** 밑의 `rustc --version` 을 앞에
+      # 두면 그 자리에서 받아 버려 캐시가 아무것도 안 벌어 준다 — `release.yml` 의
+      # `rustup target add` 가 그랬던 자리다.
+      - name: 박아 둔 판을 읽는다
+        id: toolchain
+        run: |
+          set -euo pipefail
+          # 열쇠는 파일의 해시로 매고 담는 자리는 판 이름으로 짚는다. 둘을 같은
+          # 파일에서 읽어, 판을 올린 커밋 하나가 열쇠와 자리를 함께 옮긴다.
+          # 따옴표는 둘 다 받고 빈칸도 탭도 지난다. TOML 이 허락하는 꼴을 여기서
+          # 더 좁힐 까닭이 없다.
+          channel=$(sed -n "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" rust-toolchain.toml || true)
+          # **못 읽으면 막지 않는다.** 여기서 지면 판 이름을 못 읽었다는 까닭으로
+          # 멀쩡한 PR 이 붉어진다 — 이 스텝이 하는 일은 캐시를 맞히는 것뿐이고,
+          # 못 맞히면 rustup 이 그대로 받으면 된다. 못 잰 판은 도는 쪽으로 선다.
+          if [ -z "$channel" ]; then
+            echo "::warning::rust-toolchain.toml 에서 channel 을 못 읽었다 — 툴체인을 캐시에서 안 푼다"
+          fi
+          printf 'channel=%s\n' "$channel" >>"$GITHUB_OUTPUT"
+
+      # **그 판 하나만 담는다.** `~/.rustup/toolchains` 를 통째로 담으면 러너에 이미
+      # 깔린 stable(푼 크기 1.8GB)까지 들어간다. `settings.toml` 은 안 담는다 —
+      # 자리에 놓인 판을 rustup 이 깔린 것으로 세는 것을 재 봤고(그 파일이 없어도
+      # 선다), 담으면 러너의 것을 덮어쓴다.
+      #
+      # **`restore-keys` 를 안 둔다.** 옛 열쇠로 푼 것은 옛 판의 자리라 이 판을 안
+      # 채운다 — rustup 은 그대로 받고 푸는 값만 헛돈다. 못 맞힌 판은 못 맞힌 채 둔다.
+      #
+      # 첫 판에서는 잡 둘이 같은 열쇠를 함께 올리려 해 한쪽이 거절당한다. 담는 것이
+      # 둘 다 똑같은 판이라 진 쪽이 잃는 것은 한 번의 올리기뿐이고, 다음 판부터는
+      # 둘 다 맞힌다.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.toolchain.outputs.channel != ''
+        with:
+          path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+
       - name: 도구 판을 적는다
         run: |
           rustc --version
           cargo --version
           cargo clippy --version
 
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-dev-${{ runner.os }}-
 
       # 폭은 `rustfmt.toml` 이 정하고 그 값을 고른 까닭도 거기 적혀 있다. 맞추는
@@ -102,26 +167,206 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      # **크레이트를 두 번 컴파일하는 것은 그대로 둔다**(moai-bn0y). clippy 는
+      # `clippy-driver` 로 짓고 시험은 `rustc` 로 지어 산출물을 못 나눠 쓴다
+      # (cargo#12369) — 판마다 35초다. 걷으려면 둘을 딴 잡으로 가르거나 clippy 를
+      # 빼야 하는데, 앞은 required check 를 늘리고 뒤는 새 경고가 PR 에서 안 잡힌다.
+      # 35초는 그 둘보다 싸다. 밑의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
+      # LTO 한 판(65~84초, 그 잡의 머리글에 잰 값이 있다)이다.
       - name: test
         run: cargo test --locked
 
-  # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
-  # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
-  size-budget:
-    name: release 바이너리 15MB 예산
+  # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `size-budget` 만 이 답을 쓴다
+  # (moai-bn0y). 문서 한 줄만 바뀐 판도 LTO 빌드를 통째로 돌았다.
+  #
+  # **걷는 것은 한 판 5분이 아니라 65~84초다** (리뷰 moai-6mk3.lgj 가 재 왔다 — 최근 여섯
+  # 판의 `size-budget` 이 65·68·70·72·79·84초다). 5분은 `Cargo.lock` 이나 툴체인이 움직여
+  # 캐시가 식은 판의 값이고, 문서만 바뀐 PR 은 바로 그 둘을 안 건드려 늘 더운 쪽이다.
+  # 이 잡이 더하는 것은 러너 하나와 전체 이력 체크아웃(10~13초)인데, 그것은 언제나
+  # `ci-gate` 와 나란히 돌아 벽시계에는 `ci-gate` 가 남는다 — 그래서 이 꼴로 둔다.
+  # 값이 뒤집히면(이 잡이 벽시계의 느린 쪽이 되면) 길은 하나다 — 이 갈래를 `size-budget`
+  # 안의 스텝으로 접고 스텝마다 `if:` 를 다는 것.
+  #
+  # **이 잡을 required check 로 삼지 않는다.** required 는 `ci-gate` 하나고, 그것은
+  # 무엇이 바뀌었든 언제나 돈다 — 여기서 갈라도 문서 PR 이 보고를 못 받아 영영
+  # 안 머지되는 일이 없는 까닭이다. 워크플로에 `paths-ignore` 를 거는 길이 한 줄로
+  # 짧지만, 그쪽은 `ci-gate` 까지 같이 세워 바로 그 덫을 놓는다.
+  #
+  # **못 재는 판은 도는 쪽으로 선다.** 갈라진 자리를 못 짚으면(첫 푸시·force·손으로
+  # 돌린 판) `true` 다 — 덜 재는 것보다 더 재는 것이 싸다. 짚었는데 바뀐 것이 하나도
+  # 없으면 그때는 잴 것이 없는 것이라 안 돈다.
+  changes:
+    name: 무엇이 바뀌었나
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.look.outputs.code }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 갈라진 자리를 짚으려면 이력이 있어야 한다.
+          fetch-depth: 0
 
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: 바뀐 경로를 본다
+        id: look
+        env:
+          # PR 은 base 와 head 를, `develop` 푸시는 앞 꼭대기와 지금을 준다.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          # **갈라진 자리에서 잰다.** 두 점으로 재면 PR 이 뜬 뒤 develop 에 쌓인 커밋까지
+          # "이 PR 이 고쳤다" 로 잡힌다 — 위의 포크 검사와 같은 자리다.
+          #
+          # **git 이 지는 것도 못 재는 판이다** (리뷰 moai-6mk3.lgj). `merge-base` 는 조상이
+          # 없는 두 점에서 0 아닌 코드로 끝나는데, 그것을 조건 밖에 두어 `set -e` 가 스텝을
+          # 죽이면 이 잡이 지고 밑의 `size-budget` 이 통째로 건너뛰어진다 — 위에 적은
+          # "덜 재는 것보다 더 재는 것이 싸다" 의 정반대다. 조건 안에 두면 `code` 가 `true` 로
+          # 남는다.
+          if [ -n "$BASE" ] && [ -n "$HEAD" ] &&
+            git cat-file -e "$BASE^{commit}" 2>/dev/null &&
+            fork=$(git merge-base "$BASE" "$HEAD") &&
+            touched=$(git diff --name-only "$fork" "$HEAD"); then
+            printf '%s\n' "$touched"
+            # 글만 바뀌었으면 바이너리는 그대로다. 그 밖의 무엇이든 하나라도 있으면 잰다 —
+            # 목록을 "안 재도 되는 것" 쪽으로 적어, 새로 생긴 경로는 저절로 재는 쪽에 선다.
+            #
+            # **한 판으로 훑는다** (리뷰 moai-6mk3.lgj). `grep -v '^$' | grep -q…` 로 잇던 판은
+            # 뒤의 `grep -q` 가 첫 줄에서 끝내며 앞의 grep 을 SIGPIPE 로 죽이고, `pipefail` 이
+            # 그 141 을 파이프라인의 답으로 삼았다 — 경로가 이천을 넘는 판에서 코드 변경이
+            # "글만 바뀌었다" 로 읽혔다(재 봤다). 빈 줄은 같은 정규식의 한 갈래로 접는다.
+            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$)' <<<"$touched"; then
+              code=false
+            fi
+          fi
+          printf '바이너리에 닿는 변경: %s\n' "$code" >>"$GITHUB_STEP_SUMMARY"
+          printf 'code=%s\n' "$code" >>"$GITHUB_OUTPUT"
+
+  # **`Cargo.toml` 의 `rust-version` 이 참인지 재는 잡이다.** 그 줄은 소스에서 짓는
+  # 사람에게 "1.88 이면 선다" 고 말하는데, `rust-toolchain.toml` 을 박은 뒤로 그 판을
+  # 밟는 잡이 하나도 없었다 (moai-16wi). 어긋나면 그 사람이 처음 받는 말은 cargo 의
+  # "1.88 이상이 필요하다" 가 아니라 컴파일 오류다 — `rust-version` 의 머리글이 그
+  # 자리를 적어 두었다.
+  #
+  # **required check 로 삼지 않는다.** required 는 `ci-gate` 하나라는 위의 약속을
+  # 지킨다. 여기가 붉어질 때 고칠 것이 코드인지 `rust-version` 한 줄인지는 사람이
+  # 가른다 — 자동으로 막을 일이 아니다.
+  #
+  # `size-budget` 과 같은 `if:` 를 쓴다. 글만 바뀐 판은 잴 것이 없고, 못 잰 판은
+  # 도는 쪽으로 선다.
+  msrv:
+    name: Cargo.toml 이 적은 MSRV 로 짓는다
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # **`rust-version` 을 그대로 읽는다.** 판을 여기 또 적으면 `Cargo.toml` 을 올린
+      # 날 이 잡이 옛 판을 계속 밟아, 재는 자가 둘로 갈린다.
+      - name: Cargo.toml 이 적은 판을 읽는다
+        id: msrv
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+          # **꼴을 본다.** 이 값은 밑에서 셸에 든다. 포크에서 온 PR 은 `Cargo.toml`
+          # 을 제 마음대로 적을 수 있어, 판 이름 자리에 셸이 들어오는 길을 여기서
+          # 닫는다 — 릴리스 워크플로가 태그 이름을 환경으로 넘기는 것과 같은 까닭이다.
+          case $version in
+          "" | *[!0-9.]* | *..* | .* | *.)
+            echo "::error::Cargo.toml 의 rust-version 이 판 이름 꼴이 아니다"
+            exit 1
+            ;;
+          esac
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      # 열쇠를 판 이름으로 맨다 — `Cargo.toml` 의 해시로 매면 상관없는 한 줄이 바뀐
+      # 판마다 이 툴체인을 다시 받는다. 여기서 바뀌는 것은 판 하나뿐이다.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains/${{ steps.msrv.outputs.version }}-*
+          key: rustup-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}
+
+      # **rustup 프록시를 안 부른다.** `rustup toolchain list` 한 줄만 이 자리에서
+      # 불러도 `rust-toolchain.toml` 이 걸려 박아 둔 1.97.1 을 통째로 받는다(재 봤다).
+      # `toolchain install <판>` 은 판을 대고 부르는 것이라 안 걸리고, 캐시가 맞은
+      # 판에서는 매니페스트만 보고 "unchanged" 로 끝난다 (0.7초).
+      - name: 그 판을 받는다
+        env:
+          MSRV: ${{ steps.msrv.outputs.version }}
+        run: rustup toolchain install "$MSRV" --profile minimal --no-self-update
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-
+
+      # **`check` 까지다.** 재는 것은 "그 판으로 컴파일이 서는가" 하나고, 시험이
+      # 무엇을 내는지는 `ci-gate` 가 박아 둔 판으로 이미 본다. 링크까지 가면 이 잡이
+      # 벽시계의 느린 쪽이 되고, 그러면 MSRV 를 재는 값이 재는 까닭보다 커진다.
+      #
+      # **`-D warnings` 를 안 붙인다.** 옛 판의 lint 는 새 판과 달라, 붙이면 코드가
+      # 아니라 판 차이로 붉어진다 — `const _: () = assert!(…)` 안에서만 쓰이는
+      # `src/tui/view.rs` 의 `widest_bit` 이 1.88 에서만 `dead_code` 로 걸린다(재 봤다).
+      # 그 경고를 지우려고 코드를 고치면 옛 판에 맞춰 새 판을 비트는 것이 된다.
+      - name: MSRV 로 짓는다
+        env:
+          MSRV: ${{ steps.msrv.outputs.version }}
+        run: cargo "+$MSRV" check --locked --all-targets
+
+  # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
+  # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
+  size-budget:
+    name: release 바이너리 15MB 예산
+    needs: changes
+    # **`false` 일 때만 건너뛴다** (리뷰 moai-6mk3.lgj). `== 'true'` 로 적으면 `changes` 가
+    # 지거나 제한 시간을 넘긴 판에서도 이 잡이 건너뛰어진다 — `if:` 에 상태 함수가 없으면
+    # GitHub 이 `success()` 를 덧붙이기 때문이고, 건너뛴 잡은 붉지도 않아 아무도 못 본다.
+    # 못 잰 판은 도는 쪽으로 세운다는 위의 약속을 잡 경계에서도 지킨다.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 툴체인을 캐시에서 푼다 — 까닭과 잰 값은 `ci-gate` 의 같은 자리에 있다.
+      # **`cargo` 를 처음 부르기 전에 선다.**
+      - name: 박아 둔 판을 읽는다
+        id: toolchain
+        run: |
+          set -euo pipefail
+          # 따옴표는 둘 다 받고 빈칸도 탭도 지난다. TOML 이 허락하는 꼴을 여기서
+          # 더 좁힐 까닭이 없다.
+          channel=$(sed -n "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" rust-toolchain.toml || true)
+          # **못 읽으면 막지 않는다.** 여기서 지면 판 이름을 못 읽었다는 까닭으로
+          # 멀쩡한 PR 이 붉어진다 — 이 스텝이 하는 일은 캐시를 맞히는 것뿐이고,
+          # 못 맞히면 rustup 이 그대로 받으면 된다. 못 잰 판은 도는 쪽으로 선다.
+          if [ -z "$channel" ]; then
+            echo "::warning::rust-toolchain.toml 에서 channel 을 못 읽었다 — 툴체인을 캐시에서 안 푼다"
+          fi
+          printf 'channel=%s\n' "$channel" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.toolchain.outputs.channel != ''
+        with:
+          path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-release-${{ runner.os }}-
 
       - name: build --release

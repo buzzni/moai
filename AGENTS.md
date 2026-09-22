@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.0 hash:cf13e1e5 -->
+<!-- moai:begin v:0.1.0 hash:f7afd951 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -26,6 +26,11 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}
 `held` is what is deferred or blocked behind an empty group, and where to pick it up
 again. That is enough to build a loop that runs without a person — one such loop, in
 bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+
+**A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
+and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
+on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
+`milestone`, `deferred_at`) stay absent, and that absence is the answer.
 
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw
@@ -200,6 +205,22 @@ wins over the config). The languages are en, ko, zh, ja and es, and text a langu
 does not carry yet comes out in English — the two that are full right now are en and ko.
 **The system locale (`LANG`, `LC_ALL`) is not read**: it changes only through one of
 those two ways. How to add a translation is in the moai repository's `i18n/README.md`.
+
+### Checking for a new release
+
+The explorer asks GitHub once a day whether a newer release is out, and the version
+line in its header says which of four it is — a new release, the latest, ahead of the
+latest (a build from source), or not asked. **Nothing is blocked**: it is one line, and
+the exit code never changes.
+
+It only asks where a person is watching. `--json`, a pipe and anything that is not a
+terminal never ask, so a machine running agents does not knock on the outside every run.
+The answer, and when it was asked, are held next to your user config in `latest.toml`.
+
+    [update]
+    check = false        # in your user config: never ask on this machine
+
+    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run
 
 ### When a feature request comes in
 

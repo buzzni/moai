@@ -25,15 +25,14 @@ pub enum Error {
     NotUtf8(std::string::FromUtf8Error),
 }
 
-/// 사람이 읽을 한 줄. **무엇을 못 했는지까지 적는다**: "git 이 없다" 와 "저장소가 아니다" 는
-/// 받는 쪽이 할 일이 다르다. 기계에는 이것을 그대로 내지 않는다 — [`Error::told`].
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Error {
+    /// 이 실패가 딸고 나온 io·git 의 말 — 운영체제와 git 이 지은 글이라 **안 옮긴다**.
+    /// 무엇을 못 했는지는 [`crate::view::git_trouble`] 이 앞에 붙인다.
+    pub fn said(&self) -> String {
         match self {
-            Error::Spawn(e) => write!(f, "git 을 부르지 못했다 — {e}"),
-            Error::Failed(why) => write!(f, "git 이 이력을 못 냈다 — {why}"),
-            Error::Stream(e) => write!(f, "git 이 내던 이력이 끊겼다 — {e}"),
-            Error::NotUtf8(e) => write!(f, "git 이 낸 글을 못 읽었다 — {e}"),
+            Error::Spawn(e) | Error::Stream(e) => e.to_string(),
+            Error::Failed(why) => why.clone(),
+            Error::NotUtf8(e) => e.to_string(),
         }
     }
 }
@@ -55,7 +54,11 @@ pub struct Told {
 impl Error {
     /// `root` 는 git 을 부른 자리다 — "저장소가 아니다" 를 git 의 말이 아니라 디스크로 가른다.
     /// git 의 말은 `LANG` 에 따라 옮겨져 나온다.
-    pub fn told(&self, root: &Path) -> Told {
+    ///
+    /// **`said` 는 사람이 읽는 줄이라 화면 말로 선다**(moai-ivt9) — 짓는 자는
+    /// [`crate::view::git_trouble`] 이고, 여기는 그것을 한 줄로 접어 경로만 자른다.
+    /// `kind` 는 그대로 기계의 것이다.
+    pub fn told(&self, root: &Path, lang: crate::i18n::Lang) -> Told {
         let kind = match self {
             Error::Spawn(e) if e.kind() == std::io::ErrorKind::NotFound => "no_git",
             Error::Spawn(_) => "failed",
@@ -66,7 +69,7 @@ impl Error {
         };
         // **한 줄로 접은 뒤에 자른다** — 자르기는 공백으로 낱말을 가르므로, 접기 전에 자르면 줄바꿈·탭
         // 바로 뒤의 경로가 앞 낱말에 붙어 통째로 나가고, 경로 뒤 줄의 첫 낱말은 경로와 함께 먹힌다.
-        Told { kind, said: cut_paths(&crate::text::one_line(&self.to_string())) }
+        Told { kind, said: cut_paths(&crate::text::one_line(&crate::view::git_trouble(lang, self))) }
     }
 }
 
@@ -181,6 +184,32 @@ fn invocation(root: &Path, args: &[&str]) -> std::process::Command {
 /// 경로를 읽는 자리(`worktree`)는 깨진 채 읽으면 없는 디렉터리를 가리킨다.
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
+}
+
+/// [`run`] 과 같되 **설정 파일의 자리를 돌리는 변수 셋은 물려준다**(moai-b5np,
+/// [`crate::git_leaks::CONFIG_FILES`]).
+///
+/// **부르는 자리는 하나다** — `merge_driver::planted_anywhere`. 그 물음은 "git 이 병합에서 이
+/// 드라이버를 찾는가" 고, 답은 **git 이 실제로 읽을 파일**에서 나와야 참이다. 걷은 채로 물으면
+/// `GIT_CONFIG_GLOBAL` 로 전역 설정을 딴 파일에 둔 사람(dotfile 관리기·CI 이미지·컨테이너 래퍼)
+/// 에게 "안 심었다 — 병합이 기본 머지로 내려앉는다" 고 하는데, 그 줄은 실제로 돈다.
+///
+/// **넓히는 것은 이 셋뿐이다.** `GIT_DIR` 무리는 그대로 걷는다 — 훅이 준 환경이 **어느 저장소를
+/// 여는가**를 바꾸지 못하게 하는 것이 걷기가 선 까닭이고(moai-g1a3), 그것은 이 물음과 무관하다.
+/// 시험의 격리도 그대로다: `tests/cli.rs` 의 `isolated` 와 `git::isolated` 가 이 셋을 `/dev/null`
+/// 로 **채워** 주므로, 물려받아도 사람의 진짜 `~/.gitconfig` 는 안 드러난다.
+pub fn run_reading_user_config(root: &Path, args: &[&str]) -> Result<String, Error> {
+    let mut cmd = invocation(root, args);
+    for var in crate::git_leaks::CONFIG_FILES {
+        if let Some(v) = std::env::var_os(var) {
+            cmd.env(var, v);
+        }
+    }
+    let out = cmd.output().map_err(Error::Spawn)?;
+    if !out.status.success() {
+        return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+    }
+    String::from_utf8(out.stdout).map_err(Error::NotUtf8)
 }
 
 /// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
@@ -515,7 +544,7 @@ pub(crate) mod tests {
     #[test]
     fn told_cuts_absolute_paths_and_keeps_the_rest() {
         let e = Error::Failed("fatal: not a git repository (or any of the parent directories): /home/me/x".into());
-        let told = e.told(Path::new("/"));
+        let told = e.told(Path::new("/"), crate::i18n::Lang::Ko);
         assert_eq!(told.kind, "not_a_repo");
         assert!(!told.said.contains("/home"), "{}", told.said);
         assert!(told.said.contains("fatal: not a git repository") && told.said.ends_with(": …"), "{}", told.said);
@@ -524,7 +553,7 @@ pub(crate) mod tests {
         assert_eq!(cut_paths("can't change to '/Users/John Smith/x': gone"), "can't change to '…': gone");
         // 여러 줄 — 줄바꿈·탭 바로 뒤의 경로도 잘리고, 경로 다음 줄의 낱말은 안 먹힌다.
         let e = Error::Failed("at '/home/me/x'\nTo add, call:\n\n\t/home/me/secret".into());
-        let said = e.told(Path::new("/")).said;
+        let said = e.told(Path::new("/"), crate::i18n::Lang::Ko).said;
         assert!(!said.contains("/home") && said.contains("To add"), "{said}");
     }
 
@@ -536,11 +565,11 @@ pub(crate) mod tests {
         let wt = s.path().join("wt");
         std::fs::create_dir_all(&wt).unwrap();
         std::fs::write(wt.join(".git"), "gitdir: /nowhere/.git/worktrees/wt\n").unwrap();
-        assert_eq!(Error::Failed("x".into()).told(&wt).kind, "not_a_repo");
+        assert_eq!(Error::Failed("x".into()).told(&wt, crate::i18n::Lang::Ko).kind, "not_a_repo");
         // 울타리는 빈 저장소라 그 밑의 속 빈 `.git` 을 지나쳐 울타리에서 선다.
         let hollow = s.path().join("hollow");
         std::fs::create_dir_all(hollow.join(".git")).unwrap();
-        assert_eq!(Error::Failed("x".into()).told(&hollow).kind, "failed");
+        assert_eq!(Error::Failed("x".into()).told(&hollow, crate::i18n::Lang::Ko).kind, "failed");
     }
 
     /// **`kind` 가 가른다** — git 이 없는 것, 저장소가 아닌 것, 읽다 끊긴 것, 글이 깨진 것.
@@ -550,13 +579,19 @@ pub(crate) mod tests {
         // **뿌리로 잡는다** — `not_a_repo` 를 재는 자리라 체크아웃 밖이어야 하고, 그것을
         // 보장하는 자는 `scratch::base` 다(moai-izeo). 맨 `temp_dir()` 은 그 보장 밖이다.
         let dir = crate::scratch::base();
-        assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir).kind, "no_git");
-        assert_eq!(Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir).kind, "failed");
-        assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir).kind, "stream");
+        assert_eq!(Error::Spawn(io(std::io::ErrorKind::NotFound)).told(&dir, crate::i18n::Lang::Ko).kind, "no_git");
+        assert_eq!(
+            Error::Spawn(io(std::io::ErrorKind::PermissionDenied)).told(&dir, crate::i18n::Lang::Ko).kind,
+            "failed"
+        );
+        assert_eq!(Error::Stream(io(std::io::ErrorKind::BrokenPipe)).told(&dir, crate::i18n::Lang::Ko).kind, "stream");
         let bad = String::from_utf8(vec![0xff]).unwrap_err();
-        assert_eq!(Error::NotUtf8(bad).told(&dir).kind, "encoding");
+        assert_eq!(Error::NotUtf8(bad).told(&dir, crate::i18n::Lang::Ko).kind, "encoding");
         // 저장소 안에서 git 이 죽은 것은 "저장소가 아니다" 가 아니다.
-        assert_eq!(Error::Failed("boom".into()).told(Path::new(env!("CARGO_MANIFEST_DIR"))).kind, "failed");
+        assert_eq!(
+            Error::Failed("boom".into()).told(Path::new(env!("CARGO_MANIFEST_DIR")), crate::i18n::Lang::Ko).kind,
+            "failed"
+        );
     }
 
     /// 시험이 쓰는 git. **바깥 저장소와 바깥 설정을 함께 끊는다** — `tests/cli.rs` 의

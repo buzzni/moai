@@ -45,17 +45,28 @@ pub struct Layer {
     pub places: Vec<Place>,
     /// 사용자 설정을 읽다 만난 것. 층에 선 동안 배너가 비춘다.
     pub problems: Vec<String>,
-    /// 그 탈의 갈래([`user_config::Trouble`], moai-9p7v). **[`App::relayer`] 는 이제 갈래를 안 가린다**
-    /// (moai-po6v) — 어느 탈이든 들고 있던 층을 두므로, 이 값을 보고 갈라서는 자리는 없다. 다시 읽을
-    /// 때를 정하는 자는 층이 아니라 [`App::config_tried`] 다. 여기 새 갈래를 매달지 않는다.
-    pub trouble: Option<user_config::Trouble>,
     /// 읽은 사용자 설정 파일. 그 파일이 바뀌면 걸음이 여기를 다시 읽는다(`App::follow_config`) — **시험은 제 임시 파일을 준다.**
     /// 환경을 다시 보면 돌리는 사람의 설정을 읽는다.
     pub config: Option<PathBuf>,
     /// `.moai` 안에서 띄웠으면 그 뿌리. 등록돼 있지 않아도 층에 선다.
     launch: Option<PathBuf>,
-    /// 스레드에서 읽고 있는 프로젝트들. 끝나면 [`App::follow`] 가 받는다.
-    pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>)>,
+    /// 스레드에서 읽고 있는 프로젝트들과 **그 쓸기가 뜬 세대**([`Layer::rounds`]). 끝나면
+    /// [`App::follow`] 가 받는다.
+    pending: Option<(Receiver<Looked>, std::thread::JoinHandle<()>, u64)>,
+    /// 손으로 세운 줄의 **세대**(moai-ctcb, 사용자 결정 2026-09-21). 층의 줄을 **지금의 디렉터리로**
+    /// 다시 세울 때마다([`Layer::set_by_hand`]) 하나 오르고, 그때 값이 그 줄의 [`Place::set_at`] 에
+    /// 찍힌다. 쓸기는 뜰 때의 값을 [`Layer::pending`] 에 함께 들고, [`Layer::adopt`] 는 제 값보다
+    /// **늦게** 찍힌 줄의 답을 버린다 — 그 답은 그 손질 전의 디렉터리를 잰 것이다.
+    ///
+    /// **사람이 누른 키만 올리는 것이 아니다**(리뷰) — 펼치기가 스레드로 보내는 길
+    /// (`App::read_wanted`)도 [`App::open_place`] 를 거치고, 그 큐는 [`Layer::adopt`] 가 표식이
+    /// 움직인 줄을 `wanted` 에 밀어 넣어 저절로 차기도 한다. 그러니 아무도 키를 안 눌러도 셈은
+    /// 오른다 — 그것을 "키를 눌렀을 때만" 으로 읽으면 답이 왜 버려졌는지를 엉뚱한 데서 찾는다.
+    ///
+    /// **줄마다 도장, 셈은 하나다.** 쓸기 한 벌을 통째로 버리면 프로젝트 하나를 **못** 연 것이
+    /// 나머지 줄의 답까지 버려 [`REREAD_EVERY`] 만큼 옛 셈이 서고, 답에 세대를 실어 오게 하면
+    /// [`look_into`]·[`Looked`] 의 계약이 그것을 지고 간다. 여기 두면 견주기는 줄을 들일 때 한 번이다.
+    rounds: u64,
     /// **펼친 프로젝트의 줄**을 읽고 있는 스레드(moai-12yx) — 어느 프로젝트인지와 받을 곳. 요약을
     /// 읽는 [`Layer::pending`] 과 따로 두는 것은 값이 다르기 때문이다: 요약은 줄마다 작은 셈이고
     /// 이것은 그 프로젝트를 통째로 읽어 색인까지 짓는 일이라, 한 번에 **하나만** 돈다.
@@ -89,6 +100,9 @@ pub struct Place {
     /// 잰다. `None` 이면 곧바로 다시 읽을 줄이다 — 아직 안 읽었거나, 방금 열어 본 줄(`App::open_place`)
     /// 이나 올라오며 떠난 줄([`App::climb`]).
     read_at: Option<std::time::Instant>,
+    /// 이 줄을 **손으로 세운** 세대(moai-ctcb) — [`Layer::rounds`] 의 그때 값이다. 한 번도 손대지
+    /// 않았으면 `0` 이라 어느 쓸기의 답도 들어온다.
+    set_at: u64,
 }
 
 /// 한 줄을 다시 읽을 까닭이 되는 표식.
@@ -204,6 +218,16 @@ pub struct Summary {
     /// 드러난 것의 수. 알림은 안 센다. **자리 없는 줄도 여기 든다** — 층의 `!` 와 "드러난 것
     /// N건" 이 `moai status` 와 같은 수를 말해야, 층에서 보고 들어간 사람이 다른 수를 안 본다.
     pub warnings: usize,
+    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
+    /// `notices`, moai-prdh). **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
+    /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
+    ///
+    /// **경고가 아니다** — 고칠 계획이 아니라 설치가 어긋난 것이라 `!` 를 안 세우고 위의
+    /// `warnings` 에도 안 든다(`view::status` 와 같은 자: 알림만 있는 것은 "문제 없다" 다).
+    ///
+    /// **사용자 설정의 말 문제는 안 든다** — 그것은 프로젝트의 것이 아니라 이 기계의 설정
+    /// 하나라, 층은 그것을 줄마다 세지 않고 제 `problems` 로 따로 낸다(`cmd::tui::outside`).
+    pub notices: usize,
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
@@ -255,8 +279,24 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     user_config::same_dir(a, b)
 }
 
+/// `want` 의 설정 — **넘겨받은 것이 그 파일의 것일 때만 쓴다**(moai-n6tm), 아니면 제가 읽는다.
+///
+/// [`App::relayer_with`] 의 두 갈래가 같은 몸을 저마다 적고 있었다(리뷰). 그러면 견주는 법을
+/// 고치는 날 — 철자만 다른 같은 파일(링크·`.`·끝의 `/`)을 같은 것으로 보려면 [`same_dir`] 로
+/// 가야 한다 — 한쪽만 고쳐지고, 못 고친 쪽에서 층은 한 파일에 서고 등록·해제는 다른 파일에 가
+/// 되돌릴 길이 도구 밖에만 남는다. 값은 맞는 판에서 견주기 하나고, 어긋난 판에서만 한 번 읽는다.
+fn registry_of<'a>(
+    reg: Option<&'a user_config::Registry>,
+    want: Option<&Path>,
+) -> std::borrow::Cow<'a, user_config::Registry> {
+    match reg.filter(|r| r.path.as_deref() == want) {
+        Some(reg) => std::borrow::Cow::Borrowed(reg),
+        None => std::borrow::Cow::Owned(user_config::read(want)),
+    }
+}
+
 /// 연 프로젝트 하나를 센다. **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
-pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
+pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate::worktree::Dug<'_>) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     let st = crate::report::status(&load.issues, &unreadable, cfg, now);
@@ -264,7 +304,10 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
     // 자리를 재는 뿌리는 **등록한 그 체크아웃**이다(`repo.here()`) — `moai status` 와 같은 자.
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
+    // **판 것은 연 길에서 받는다**(moai-65ie, `projects::Project::dug`) — 층은 겹쳐 보지 않지만
+    // 제 바닥(`Gathered::mine`)은 겹쳐 보지 않아도 서고(moai-mafv), 그것이 곧 자리 판정이 다시
+    // 파던 그 파일이다. 줄마다 그것을 다시 파면 값이 줄 수만큼 더해진다.
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now, dug);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -273,6 +316,19 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
         warnings: st.warnings.len() + usize::from(lost.is_some()),
+        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 idea·미룬
+        // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
+        // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
+        //
+        // `chdir` 은 고칠 명령에 `-C` 를 얹을지를 가를 뿐이라 **수를 안 바꾼다** — 층은 글을 안
+        // 펴고 수만 대므로 지금은 아무 값이나 같다. 그래도 `false` 다: 그 값은 "셸이 그 뿌리에
+        // 있지 않다" 를 **못박는** 자리고([`crate::cmd::init::away_root`]), 띄운 자리의 줄은 그 뿌리가
+        // 곧 셸의 자리다. `true` 로 못박으면 층이 글을 펴는 날 제자리에 선 저장소에까지 `-C <여기>`
+        // 가 붙는다. `false` 면 잰 자리가 정한다 — 남의 줄은 그대로 `-C` 를 얻는다.
+        //
+        // **표식에는 안 든다**(`marks_of`) — AGENTS.md 나 git 설정을 고쳐도 이 수는 트래커가
+        // 움직일 때 같이 다시 선다. 알림은 고치고 1초 안에 사라져야 하는 값이 아니다.
+        notices: st.notices.len() + crate::cmd::status::install_notices(repo, false).len(),
         stranded,
         unread: unread.all.len(),
         blind: unread.blinding.len(),
@@ -296,6 +352,8 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         origin: Default::default(),
         trouble: Vec::new(),
         swept: false,
+        sides: Vec::new(),
+        mine: crate::worktree::Floor::loose(&[]),
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang)).trim().to_string();
@@ -332,12 +390,18 @@ fn look_one(path: &Path, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    let p = projects::open_one(path, String::new(), None, false);
-    let look = match p.state {
-        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now) },
-        state => shut(&p.path, &p.name, state, lang),
+    // **한 자리에서 헤친다**(moai-65ie, 리뷰) — `p.dug()` 로 `Project` 를 통째로 빌리면 아래에서
+    // 상태를 꺼낼 수 없어 `worktree::dug` 를 여기서 다시 부르게 되는데, 그러면 "`Project` 에서
+    // `Dug` 를 짓는 법" 이 두 벌이 되어 [`projects::Project::dug`] 가 나중에 무엇을 배워도 이
+    // 줄만 옛 뜻으로 남는다. 헤쳐 놓으면 그 매임이 한 문장에 보인다.
+    let projects::Project { path, name, state, sides, mine, .. } =
+        projects::open_one(path, String::new(), None, false, lang);
+    let dug = crate::worktree::dug(&sides, &mine);
+    let look = match state {
+        State::Open { repo, load } => Look::Open { sum: summarize(&repo, &load, now, &dug) },
+        state => shut(&path, &name, state, lang),
     };
-    Looked { path: p.path, marks, look }
+    Looked { path, marks, look }
 }
 
 impl Layer {
@@ -347,6 +411,12 @@ impl Layer {
     /// 빼면 `0` 으로 층에 올라간 뒤 내려올 길이 없어, 디렉터리처럼 드나든다는 약속이 한
     /// 방향으로만 선다. 등록돼 있으면 그 줄에 표시만 붙는다. 이름은 띄운 자리까지 넣고
     /// 가른다 — 같은 화면에 같은 이름이 둘 서면 안 된다.
+    ///
+    /// **시험만 쓴다**(리뷰) — [`App::relayer_with`] 가 설정을 **넘겨받은 것과 대조해** 들면서
+    /// (moai-n6tm) 둘 다 `user_config::read` + [`Layer::of`] 로 갈라졌다. 남겨 두는 것은 시험이
+    /// 층 하나를 한 줄로 세우기 때문이고, `cfg(test)` 를 안 붙이면 바이너리 빌드에서 죽은 코드가
+    /// 되어 CI 의 `clippy -D warnings` 가 붉어진다.
+    #[cfg(test)]
     pub fn read(config: Option<&Path>, launch: Option<&Path>, lang: crate::i18n::Lang) -> Layer {
         Layer::of(&user_config::read(config), launch, lang)
     }
@@ -379,6 +449,7 @@ impl Layer {
                 look: Look::Unread,
                 marks: Marks::default(),
                 read_at: None,
+                set_at: 0,
                 site: None,
             })
             .collect();
@@ -396,10 +467,14 @@ impl Layer {
             // (moai-dpbi) `reg.problems` 만 베끼면 층의 배너가 `lang` 오타를 잃는다. 탐색기의 말은
             // 말은 부른 쪽이 고른 것이다.
             problems: crate::view::settings_problems(reg, lang),
-            trouble: reg.trouble,
+            // **탈의 갈래는 층에 안 싣는다**(moai-n6tm) — 세운 다음 줄에서 한 번 읽히고 죽는
+            // 칸이었고, 층이 오래 설수록 낡은 답을 들고 있는데 그 값을 지키는 자가 없었다.
+            // 묻는 자리는 읽은 설정(`user_config::Registry::trouble`)과, 다시 읽을 때를 정하는
+            // [`App::config_tried`] 둘이다.
             config: reg.path.clone(),
             launch: launch.map(Path::to_path_buf),
             pending: None,
+            rounds: 0,
             reading: None,
             wanted: Vec::new(),
         }
@@ -433,10 +508,32 @@ impl Layer {
     }
 
     /// 그 줄을 **곧바로 다시 읽을 줄로** 둔다 — 셈은 새것이 닿을 때까지 그대로 선다([`App::climb`]).
+    ///
+    /// **손으로 세운 것으로 적는다**(moai-ctcb) — 도는 쓸기는 이 줄을 떠나기 **전**에 잰 것이라,
+    /// 늦게 닿으면 방금 "다시 읽어라" 라고 적은 줄에 그 옛 답을 들이고 시계까지 다시 잰다.
     fn forget(&mut self, path: &Path) {
-        if let Some(p) = self.places.iter_mut().find(|p| p.path == path) {
+        if let Some(at) = self.position(path)
+            && let Some(p) = self.set_by_hand(at)
+        {
             p.read_at = None;
         }
+    }
+
+    /// 그 줄을 **제 손으로 세웠다**고 적고 그 줄을 돌려준다(moai-ctcb) — 세대를 올리고 그 줄에
+    /// 찍는다. 이 뒤에 닿는, 이보다 먼저 뜬 쓸기의 답은 [`Layer::adopt`] 가 버린다.
+    ///
+    /// 부르는 자리는 줄의 상태를 **지금의 디렉터리로** 다시 세우는 곳들이다 —
+    /// [`App::open_place`] 의 두 갈래(연 줄·못 연 줄)와 [`Layer::forget`]. 사람이 누른 키만은
+    /// 아니다: 펼치기가 스레드로 보내는 길(`App::read_wanted`)도 그 갈래로 온다.
+    ///
+    /// **줄을 돌려주는 까닭**은 도장과 그 뒤의 손질이 늘 같은 줄에 가야 해서다 — 부르는 쪽이
+    /// 첨자로 한 번 더 찾으면 그 사이에 목록이 움직였을 때 도장과 손질이 갈린다. **없는 첨자에는
+    /// 세대도 안 올린다**: 찍힌 데 없이 오른 셈은 [`Layer::launch`] 가 든 값과 아무 줄도 못 맞춘다.
+    fn set_by_hand(&mut self, at: usize) -> Option<&mut Place> {
+        let p = self.places.get_mut(at)?;
+        self.rounds += 1;
+        p.set_at = self.rounds;
+        Some(p)
     }
 
     /// 읽어 온 줄 하나를 경로로 맞춰 들인다. 그새 목록에서 빠진 경로는 버린다.
@@ -445,14 +542,32 @@ impl Layer {
     /// 넘게 걸리는 자리(느린 마운트)에서 들이는 순간 이미 낡아, 층이 같은 줄을 쉬지 않고 다시
     /// 읽는다(리뷰 moai-3lul.kt0). 표식은 반대로 읽기 **전**의 것이다 — 그 사이의 쓰기를 놓치면
     /// 영영 안 보인다.
-    fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>) {
+    /// **제 손으로 세운 줄은 옛 답으로 안 덮는다**(moai-ctcb) — `round` 는 이 답을 지어 온 쓸기가
+    /// 뜰 때의 [`Layer::rounds`] 다. 그 뒤에 손으로 세운 줄([`Place::set_at`])의 답은 버린다:
+    /// 느린 마운트를 훑던 쓸기가 `Look::Shut` 으로 잰 사이에 사람이 그 줄을 열면, 그 답이 방금 연
+    /// 줄의 머리를 "못 읽는다" 로 덮고 `read_at` 까지 다시 찍어 [`Layer::stale`] 이 그 줄을 다시
+    /// 안 고른다 — 살아 있는 이슈 줄 위에 못 읽는다는 머리가 세션 내내 선다. 버린 줄은 `read_at`
+    /// 이 빈 채 남아 다음 걸음의 쓸기가 다시 고른다.
+    ///
+    /// **버리는 것은 그 줄 하나다.** 같은 쓸기가 지어 온 다른 줄은 그대로 들인다 — 손대지 않은
+    /// 줄의 답은 여전히 지금의 것이다.
+    ///
+    /// **들인 것이 있으면 참이다** — 머리의 `↻` 는 그 값으로 선다([`App::follow_layer`]). 버린
+    /// 답에도 시계를 올리면 아무것도 안 바뀐 화면이 "방금 갱신했다" 고 말한다(`App::climb` 이
+    /// 올리지 않는 것과 같은 까닭).
+    fn adopt(&mut self, looked: impl IntoIterator<Item = Looked>, round: u64) -> bool {
         // **줄을 든 프로젝트는 표식이 움직이면 줄도 다시 읽는다**(리뷰). 요약만 새것으로 갈던
         // 때는 머리줄의 셈과 그 밑의 줄이 한 화면에서 다른 말을 했다 — 옆 세션이 닫은 일이 셈
         // 에서는 `✓` 로 올라가는데 줄은 세션 내내 `todo` 였다. 읽으러 가는 자는 [`App::want_site`]
         // 뿐인데 그쪽은 펼칠 때만 불리고, 든 줄이 있으면 아무것도 안 한다.
         let mut again: Vec<PathBuf> = Vec::new();
+        let mut landed = false;
         for l in looked {
             if let Some(p) = self.places.iter_mut().find(|p| p.path == l.path) {
+                if p.set_at > round {
+                    continue;
+                }
+                landed = true;
                 if p.marks != l.marks && p.site.is_some() {
                     again.push(p.path.clone());
                 }
@@ -466,6 +581,7 @@ impl Layer {
                 self.wanted.push(path);
             }
         }
+        landed
     }
 
     pub(super) fn position(&self, path: &Path) -> Option<usize> {
@@ -491,7 +607,9 @@ impl Layer {
         let now = crate::model::now();
         let lang = self.lang;
         let handle = std::thread::spawn(move || look_into(&stale, &now, lang, &tx));
-        self.pending = Some((rx, handle));
+        // **뜰 때의 세대를 함께 든다**(moai-ctcb) — 이 쓸기가 재는 것은 지금의 줄이고, 이 뒤에
+        // 손으로 세운 줄에는 이 답이 옛것이다([`Layer::adopt`]).
+        self.pending = Some((rx, handle, self.rounds));
     }
 
     /// 지금 선 자리의 **헤더 번호** — `0` 이 층(`<0> 전체`)이고 그다음이 등록 차례다. 목록에서
@@ -574,6 +692,22 @@ impl App {
         self
     }
 
+    /// 도는 층의 요약 쓸기를 놓는다 — 결과는 버리되 손잡이는 [`App::discard`] 가 든다.
+    ///
+    /// **까닭은 하나 남았다**(moai-ctcb) — [`App::enter_project`] 가, 프로젝트 안에서 루프가 남의
+    /// 읽기를 기다리며 빠른 걸음으로 깨는 것을 막으려고 버린다(moai-0jqh). 줄을 고쳐 세우는 자리
+    /// ([`App::open_place`] 의 못 연 갈래)가 여기를 부르던 까닭 — 늦게 닿은 요약이 그것을 덮는다
+    /// (moai-800o) — 은 이제 세대가 든다([`Layer::rounds`]): 그 줄의 답 하나만 버리면 되는 일에
+    /// 쓸기 한 벌을 통째로 버릴 까닭이 없다.
+    ///
+    /// 몸을 그대로 두는 것은 버리는 법이 [`App::discard`] 의 셈(`DISCARDED_KEPT`·`let_go`)에
+    /// 매여 있어서다 — 둘째 자리가 다시 생기는 날 그 셈을 두 벌로 적지 않는다.
+    fn drop_layer_sweep(&mut self) {
+        if let Some((_, handle, _)) = self.layer.as_mut().and_then(|l| l.pending.take()) {
+            self.discard(handle);
+        }
+    }
+
     /// 층의 줄을 **지금의 디렉터리로** 연다. 못 열면 그 줄을 고쳐 세우고 CLI 한눈 보기와 같은
     /// 말(`view::unopened`)을 알림으로 댄 뒤 `None` — 들어가기(Enter)와 담기(`n`)가 같은 길이라
     /// 같은 상태를 두 키가 달리 부르지 않는다.
@@ -583,14 +717,25 @@ impl App {
     /// 읽기가 제 까닭을 댄다("들어가지 못했다 — …"). 둘 다 안 들어가고 줄도 다시 읽히지만,
     /// **말은 다르다** — 여기서 두 벌로 적은 것이 아니라 읽는 자리가 둘이라 그렇다.
     ///
-    /// **도는 층 읽기는 버린다**(moai-800o). 그것은 이 줄을 재기 **전에** 띄운 것이라, 늦게 닿으면
-    /// 여기서 고쳐 세운 줄(`Look::Shut`)을 옛 디렉터리의 값으로 덮는다. 버린 줄은 층에 선 다음
-    /// 걸음에 [`Layer::stale`] 이 다시 고른다 — 못 들어갔거나 `n` 으로 층에 남았으면 곧바로,
-    /// 들어갔으면 올라올 때다.
+    /// **도는 층 읽기는 어느 갈래에서도 안 버린다**(moai-ctcb, 사용자 결정 2026-09-21). 두 갈래 다
+    /// 줄을 **지금의 디렉터리로** 다시 세우므로, 이 줄을 재기 **전에** 띄운 쓸기가 늦게 닿으면 방금
+    /// 쓴 것을 옛 값으로 덮는다 — moai-800o 가 적은 까닭이다. 막는 자는 이제 세대다:
+    /// [`Layer::set_by_hand`] 이 이 줄에 도장을 찍으면 [`Layer::adopt`] 가 **그 줄의 답 하나만**
+    /// 버린다. 버린 줄은 `read_at` 이 빈 채 남아 다음 걸음의 쓸기가 다시 고른다([`Layer::stale`]).
+    ///
+    /// **한때 여기서 쓸기를 통째로 버렸다.** 그러면 프로젝트 하나를 못 연 것이 같은 벌이 지어 오던
+    /// 다른 줄의 답까지 버려 [`REREAD_EVERY`] 만큼 옛 셈이 서고, 펼치기(`l`·`Tab` →
+    /// [`App::read_wanted`])가 세 줄 앞에서 띄운 층의 요약 쓸기를 키 하나마다 죽였다(moai-0jqh).
+    /// 느린 마운트에서 `l j l j l …` 이면 [`super::DISCARDED_KEPT`] 가 차고, 그때 [`App::discard`] 가
+    /// 아직 도는 것을 놓으며 세션 내내 남는 급한 배너를 세웠다 — 그 배너가 세는 것은 사람의 손이
+    /// 버린 것인데(`DISCARDED_KEPT` 의 문서) 아무도 안 시킨 버리기가 거기 섞였다.
+    ///
+    /// **무는 대가**: 도장을 찍은 줄은 도는 쓸기가 그 줄에 지어 온 **멀쩡한 답도** 잃는다. 펼치기로
+    /// 여기 오는 줄([`Depth::Lean`])이 그렇다 — 그 머리줄의 셈이 도는 쓸기 한 벌이 다 빠지고 다음
+    /// 벌이 그 줄에 닿을 때까지 `읽는 중` 으로 선다([`Layer::launch`] 는 도는 것이 있으면 새로 안
+    /// 띄운다). 줄이 사라지는 것도 잘못된 상태로 굳는 것도 아니라 머리 하나가 한 벌 늦는 것이고,
+    /// 살아 있는 이슈 줄 위에 "못 읽는다" 가 세션 내내 서는 쪽보다 싸다고 본다.
     pub(super) fn open_place(&mut self, at: usize, how: Depth) -> Option<Repo> {
-        if let Some((_, handle)) = self.layer.as_mut()?.pending.take() {
-            self.discard(handle);
-        }
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
         // **여는 길은 층의 줄과 같다**([`look_one`] 의 `projects::open_one`) — 스냅샷까지 읽어 본다.
@@ -601,11 +746,11 @@ impl App {
         //
         // **줄을 곧 스레드가 읽을 자리는 그 한 번도 안 읽는다**([`Depth::Lean`], moai-m59y).
         let opened = match how {
-            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false).state {
+            Depth::Whole => match projects::open_one(&place.path, String::new(), None, false, self.site.lang).state {
                 State::Open { repo, .. } => Ok(repo),
                 state => Err(state),
             },
-            Depth::Lean => projects::open_shallow(&place.path),
+            Depth::Lean => projects::open_shallow(&place.path, self.site.lang),
         };
         let state = match opened {
             // **열린 줄은 곧바로 다시 읽을 줄로 둔다**(리뷰 moai-3lul.kt0 다시 본 판) — 층의 셈이
@@ -613,11 +758,27 @@ impl App {
             // 들어갔으면 어느 길로 떠나든(올라오기·옆 번호) 올라온 뒤에 다시 읽는다. 셈은 새것이 닿을
             // 때까지 그대로 선다.
             Ok(repo) => {
-                place.read_at = None;
+                // **손으로 세운 것으로 적는다**(moai-ctcb) — 이 줄은 방금 이 자리에서 열어 본
+                // 것이고, 먼저 뜬 쓸기가 잰 것은 그 전의 디렉터리다. 도장을 안 찍으면 늦게 닿은
+                // `Look::Shut` 이 살아 있는 줄을 이고 선 머리를 "못 읽는다" 로 덮고 `read_at` 까지
+                // 다시 찍어, [`Layer::stale`] 이 그 줄을 다시 안 고른다.
+                //
+                // **연 저장소를 장부에 걸지 않는다** — `?` 로 묶으면 도장 한 줄을 못 적은 것이 이미
+                // 열린 것을 버리고 `None` 을 내는데, 부르는 쪽은 그것을 "못 열었다" 로 읽어
+                // ([`App::enter_project`]·`App::read_wanted`) 까닭 한 줄 없이 키가 죽는다. 못 연
+                // 갈래와 달리 여기에는 댈 말도 없다.
+                if let Some(p) = self.layer.as_mut().and_then(|l| l.set_by_hand(at)) {
+                    p.read_at = None;
+                }
                 return Some(repo);
             }
             Err(state) => state,
         };
+        // **쓸기는 안 버린다**(moai-ctcb) — 여기서 통째로 버리던 것은 바로 아래가 줄을 고쳐
+        // 세우는 자리이기 때문이었는데(moai-800o), 그러면 프로젝트 하나를 못 연 것이 그 쓸기가
+        // 지어 오던 **다른 줄의 답까지** 버려 [`REREAD_EVERY`] 만큼 옛 셈이 선다. 덮는 것을 막는
+        // 자는 이제 세대다: 이 줄에 도장을 찍으면 그 답만 [`Layer::adopt`] 가 버린다.
+        let place = self.layer.as_mut()?.set_by_hand(at)?;
         place.look = shut(&place.path, &place.name, state, self.site.lang);
         place.marks = marks;
         // 들인 때로 찍는다 — [`Layer::adopt`] 와 같은 자다.
@@ -775,6 +936,18 @@ impl App {
                     _ => None,
                 };
                 self.leave_project(leaving);
+                // **층의 요약 쓸기는 프로젝트 안까지 안 따라간다**(moai-800o) — 안 놓으면
+                // [`App::layer_loading`] 이 참이라 루프가 프로젝트 안에서도 빠른 걸음으로 깨어, 이
+                // 프로젝트와 상관없는 읽기를 기다린다. 버린 줄은 올라올 때 [`Layer::stale`] 이 다시
+                // 고른다.
+                //
+                // **버리는 자리가 여기다**(moai-0jqh) — 한때 [`App::open_place`] 가 열든 못 열든
+                // 버려서, 층에 그대로 선 채 펼치기만 한 키(`l`·`Tab`)까지 쓸기를 죽였다. 이제
+                // 버리는 자리는 **여기 하나다**(moai-ctcb): 줄을 고쳐 세우는 갈래가 늦게 닿은 답에
+                // 덮이는 것은 세대가 막으므로([`Layer::set_by_hand`]), 그 줄의 답 하나면 될 일에
+                // 쓸기 한 벌을 죽일 까닭이 없다. 여기서 버리는 까닭은 그것과 다르다 — 프로젝트
+                // 안에서 남의 읽기를 기다리며 루프가 빠른 걸음으로 깨는 것을 막는 일이다.
+                self.drop_layer_sweep();
                 if let Some(layer) = &mut self.layer {
                     layer.at = At::Project(path);
                 }
@@ -783,7 +956,7 @@ impl App {
                 // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
                 // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
                 // 들이기(`apply_fresh`)가 세므로 그 **앞**이다.
-                self.me = self.whoami(&repo.root);
+                self.site.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
                 // **그 줄이 이미 들고 있던 읽음을 베껴 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
@@ -894,6 +1067,11 @@ impl App {
         // `seg_label`) 다음에 들어간 프로젝트의 말도 몽땅 [`super::Site::lang`] 의 처음값으로
         // 섰다 — 고른 말은 `cmd/tui.rs` 가 띄울 때 한 번만 놓기 때문이다.
         blank.lang = self.site.lang;
+        // **누구인가도 안 매인다**(리뷰) — `--user` 와 묻는 칸이 준 사람은 한 화면의 것이고
+        // ([`App::whoami`] 가 `self.user` 를 먼저 본다), 층에 선 동안 지금 자리의 `me` 를 읽는 자가
+        // 생기면 여기서 비운 값이 "모름" 으로 읽혀 [NEW] 가 조용히 내려간다. 줄 하나가 든 것은
+        // 바로 아래 `parked` 가 그대로 가져간다.
+        blank.me = self.site.me.clone();
         let mut parked = std::mem::replace(&mut self.site, blank);
         parked.path.clear();
         parked.remembered.clear();
@@ -926,7 +1104,7 @@ impl App {
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
         // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
-        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v p` 로 상세를
+        // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
         self.body = None;
         self.detail.rewind();
@@ -965,8 +1143,12 @@ impl App {
     /// `None` 이면 제가 읽는다 — **층을 다시 세우는 길은 세우던 층의 파일(`Layer::config`)에서, 처음
     /// 세우는 길은 `App::user_config` 에서.** 둘은 같은 자리를 가리키도록 `cmd::tui` 가 한 번에 준다
     /// (`user_config::path`). `Some` 을 받으면 그 설정의 자리가 곧 새 층의 자리다(`Layer::of` 가
-    /// `Registry::path` 를 든다, moai-y61p) — 부르는 쪽이 같은 파일을 읽어 넘길 때만 맞는 말이라,
-    /// 다른 파일의 설정을 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 간다.
+    /// `Registry::path` 를 든다, moai-y61p).
+    ///
+    /// **넘겨받은 설정이 그 파일의 것이 아니면 안 쓴다**(moai-n6tm) — 제가 읽는 길로 떨어진다.
+    /// 여태 "같은 파일을 읽어 넘길 때만 맞는 말" 이라고 글로만 적어 두었는데, 어긋난 설정을
+    /// 넘기면 층은 한 파일에서 서고 등록·해제는 다른 파일에 가 되돌릴 길이 도구 밖에만 남는다.
+    /// 값은 이미 읽은 판에서 `Option<PathBuf>` 견주기 하나고, 어긋난 판에서만 한 번 더 읽는다.
     ///
     /// **층을 다시 세웠는지를 돌려준다**(moai-6ek1, [`Relayered`]). [`Relayered::Lost`] 면 들고 있던
     /// 층이 그대로고 `land` 도 함께 버려졌다 — 설정을 썼다는 것과 층이 그것을 들었다는 것은 다른
@@ -983,10 +1165,9 @@ impl App {
                 // **말은 화면에서 온다**(moai-ra67) — 다시 세운 층은 설정에서 나므로 제 말을 모른다.
                 // 안 주면 설정 파일이 한 번 바뀔 때마다 못 연 프로젝트의 한 줄만 기본 말로 돌아간다.
                 let lang = self.site.lang;
-                let fresh = match reg {
-                    Some(reg) => Layer::of(reg, here.as_deref(), lang),
-                    None => Layer::read(self.user_config.as_deref(), here.as_deref(), lang),
-                };
+                let want = self.user_config.clone();
+                let reg = registry_of(reg, want.as_deref());
+                let fresh = Layer::of(&reg, here.as_deref(), lang);
                 // 못 읽었으면 세우지 않는다 — 다만 **까닭은 댄다**(리뷰). 층이 없는 화면에서는 이 배너가
                 // 유일한 말이라, 조용히 돌아서면 쭉 못 읽는 설정이 아무 말 없이 빈 화면으로 선다. 다음
                 // 읽기가 되면 그때 걷힌다([`unlayered_of`] 는 댈 까닭이 없으면 `None` 이다 — 없는 파일이
@@ -994,7 +1175,7 @@ impl App {
                 //
                 // **갈래를 안 가린다**(moai-po6v) — 여기서 세울 것은 어차피 없다. 못 읽었으면 목록이
                 // 비고, 깨졌으면 파싱이 진 자리라 역시 비어, 빈 층을 세우는 일과 안 세우는 일이 같다.
-                if fresh.trouble.is_some() || !fresh.registered() {
+                if reg.trouble.is_some() || !fresh.registered() {
                     self.unlayered = unlayered_of(&fresh, self.site.lang);
                     // 층이 없으면 들고 있는 것도 없다 — 이 화면의 말은 위의 한 줄이다.
                     self.held = None;
@@ -1007,10 +1188,15 @@ impl App {
             Some(mut old) => {
                 // 말은 화면에서 온다 — 위와 같은 자리다(moai-ra67).
                 let lang = self.site.lang;
-                let mut fresh = match reg {
-                    Some(reg) => Layer::of(reg, old.launch.as_deref(), lang),
-                    None => Layer::read(old.config.as_deref(), old.launch.as_deref(), lang),
-                };
+                // **세우던 층의 파일에서 다시 든다** — 넘겨받은 설정이 그 파일의 것이 아니면 버린다
+                // (moai-n6tm). 한때 이 갈래는 넘어온 것을 그대로 써서, 층의 설정 자리가 부르는 쪽의
+                // 것으로 슬쩍 바뀌었다.
+                //
+                // **세우던 층이 제 파일을 모르면 앱의 것이 자리다** — 층은 자리 없는 설정
+                // (`user_config::read(None)`)으로도 서고, 그때는 어긋날 것이 없다.
+                let want = old.config.clone().or_else(|| self.user_config.clone());
+                let reg = registry_of(reg, want.as_deref());
+                let mut fresh = Layer::of(&reg, old.launch.as_deref(), lang);
                 // **탈이 있으면 들고 있던 층을 두고 까닭을 단다**(moai-po6v, 사용자 결정 2026-09-19).
                 // 빈 층으로 갈아 끼우면 줄이 통째로 사라지는데, 손으로 누르던 비상구(`SPC r`)는
                 // 걷었다(moai-en4u) — 되돌릴 길이 도구 밖에만 남는다.
@@ -1020,9 +1206,12 @@ impl App {
                 // 통째로 사라졌다. 고칠 것을 비추는 데 필요한 것은 빈 층이 아니라 **까닭 한 줄**이고,
                 // 그것은 아래가 단다.
                 //
-                // **까닭은 새 읽기의 것으로 갈아 끼운다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면
-                // 지금 무엇이 어긋났는지를 덮는다.
-                if fresh.trouble.is_some() {
+                // **까닭은 새 읽기의 것이다** — 들고 있던 층이 지난 읽기의 까닭을 이고 있으면 지금
+                // 무엇이 어긋났는지를 덮는다. 그 까닭은 읽은 설정(`Registry::trouble`)이 드는 것이지
+                // 층이 드는 것이 아니다(moai-n6tm) — 층에 베껴 두던 칸은 세운 다음 줄에서 한 번
+                // 읽히고 죽었고, 이름이 `App::trouble`(배너 글)과 부딪혀 둘 다 `Option` 이라
+                // 헷갈려도 컴파일됐다.
+                if reg.trouble.is_some() {
                     // **까닭은 `App::held` 로 낸다**(moai-23pm) — 층의 `problems` 는 **읽힌** 설정의
                     // 틀린 줄을 대는 자리라 배너가 `on_layer()` 로 막는다(등록 목록의 일이다). 파일을
                     // 통째로 못 읽은 것은 그 화면과 상관없이 대야 한다.
@@ -1038,7 +1227,6 @@ impl App {
                     if !old.registered() {
                         old.problems.clear();
                     }
-                    old.trouble = fresh.trouble;
                     self.layer = Some(old);
                     return Relayered::Lost;
                 }
@@ -1047,6 +1235,10 @@ impl App {
                         p.look = std::mem::replace(&mut o.look, Look::Unread);
                         p.marks = std::mem::take(&mut o.marks);
                         p.read_at = o.read_at;
+                        // **손으로 세운 세대도 옮겨 든다**(moai-ctcb) — 밑에서 도는 쓸기를 그대로
+                        // 넘겨받는데, 도장만 두고 가면 그 쓸기가 뜨기 전의 세대로 선 줄이 되어
+                        // 방금 연 줄이 다시 옛 답에 덮인다.
+                        p.set_at = o.set_at;
                         // **읽어 든 줄도 옮겨 든다**(리뷰). 두고 가면 한눈 보기가 펼쳐 둔 프로젝트가
                         // 통째로 접힌 머리줄만 남는다 — 이 길은 사용자 설정이 바뀔 때마다 도는데
                         // (`App::follow_config`) 보기 토글과 읽음이 **그 파일을 스스로 쓴다.**
@@ -1070,6 +1262,12 @@ impl App {
                 // 줄(`wanted`)도 넘긴다: 버리면 펼쳐 놓고 못 읽은 프로젝트가 영영 안 읽힌다.
                 // 읽혔으니 들고 선 까닭을 걷는다 — 다음 읽기가 되면 배너에서 사라져야 한다.
                 self.held = None;
+                // 세대는 **셈째** 넘긴다(moai-ctcb) — 줄마다 찍힌 도장([`Place::set_at`])은 위에서
+                // 그대로 옮겨 드는데 셈만 0 부터 다시 세면, 앞으로 뜨는 쓸기가 낮은 세대로 서서
+                // 도장 찍힌 줄의 답이 **영영** 버려진다. 그 줄은 `read_at` 이 빈 채 남아
+                // [`Layer::stale`] 이 걸음마다 다시 고르니, 같은 디렉터리를 쉬지 않고 읽으면서
+                // 셈은 끝내 안 선다. 도는 쓸기가 든 값은 그 쓸기가 뜰 때 박혀 여기서 안 바뀐다.
+                fresh.rounds = old.rounds;
                 fresh.pending = old.pending.take();
                 fresh.reading = old.reading.take();
                 fresh.wanted = std::mem::take(&mut old.wanted);
@@ -1096,11 +1294,15 @@ impl App {
     /// 읽을 까닭이 없고, 올라갈 때 낡은 줄을 읽으러 띄운다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
-        while let Some((rx, _)) = &layer.pending {
+        while let Some((rx, _, round)) = &layer.pending {
+            let round = *round;
             match rx.try_recv() {
                 Ok(looked) => {
-                    layer.adopt([looked]);
-                    if layer.at == At::Layer {
+                    // **들인 것이 있을 때만 시계를 올린다**(moai-ctcb) — 머리의 `↻` 가 그 값으로
+                    // "방금 갱신했다" 를 말하는데, 세대가 버린 답은 화면에 아무것도 안 남긴다.
+                    // 올리면 한 시간 틈·날로 재는 경고만 새 시각으로 다시 서고 그것이 매기는 셈은
+                    // 옛것이다. `App::climb` 이 안 올리는 것과 같은 까닭이다.
+                    if layer.adopt([looked], round) && layer.at == At::Layer {
                         self.site.now = crate::model::now();
                     }
                 }
@@ -1108,7 +1310,7 @@ impl App {
                 Err(TryRecvError::Empty) => break,
                 // 다 보냈거나 읽던 스레드가 죽었다 — 죽었으면 받은 읽기와 같게 되던진다(`App::follow`).
                 Err(TryRecvError::Disconnected) => {
-                    if let Some((_, handle)) = layer.pending.take()
+                    if let Some((_, handle, _)) = layer.pending.take()
                         && let Err(payload) = handle.join()
                     {
                         std::panic::resume_unwind(payload);
@@ -1246,14 +1448,15 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
                 look,
                 marks: Marks::default(),
                 read_at: Some(std::time::Instant::now()),
+                set_at: 0,
                 site: None,
             })
             .collect(),
         problems: Vec::new(),
-        trouble: None,
         config: None,
         launch: None,
         pending: None,
+        rounds: 0,
         reading: None,
         wanted: Vec::new(),
     }
@@ -1494,10 +1697,10 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
-        a.hit("SPC v d Esc");
+        a.hit("SPC v 4 Esc");
         a.hit("SPC s t Esc");
         let (view, order) = (a.view.clone(), a.order);
-        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v d 가 done 을 안 보였다");
+        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 보였다");
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -1524,7 +1727,8 @@ mod tests {
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
         look_into(std::slice::from_ref(&two), &crate::model::now(), crate::i18n::Lang::Ko, &tx);
-        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {})));
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
         std::fs::remove_dir_all(&two).unwrap();
 
         a.key(key(KeyCode::Down));
@@ -1538,6 +1742,161 @@ mod tests {
         );
     }
 
+    /// **층에 선 채 펼치기만 한 키는 층의 요약 쓸기를 안 죽인다**(moai-0jqh, 사용자 결정 2026-09-21).
+    /// [`App::open_place`] 가 열든 못 열든 버리던 판은 `l`·`Tab` 한 번이 세 줄 앞에서 띄운 쓸기를
+    /// 죽였다 — moai-800o 가 적은 까닭("늦게 닿은 요약이 방금 쓴 `Look::Shut` 을 덮는다")은 줄을
+    /// 고쳐 세우는 갈래에만 서는데, 펼치기의 성공 갈래는 `read_at` 만 비운다.
+    ///
+    /// 느린 마운트에서 `l j l j l …` 이면 [`super::DISCARDED_KEPT`] 가 차고, 그때 아직 도는 것을
+    /// 놓으며 세션 내내 남는 급한 배너가 섰다.
+    #[test]
+    fn unfolding_a_row_keeps_the_layer_sweep_running() {
+        let s = Scratch::fenced("layer-unfold-keeps");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        let (hold, wait) = std::sync::mpsc::channel::<()>();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((
+            rx,
+            std::thread::spawn(move || {
+                let _ = wait.recv();
+            }),
+            round,
+        ));
+
+        // `l` — 커서가 선 머리줄을 편다. 층에 그대로 선다.
+        a.key(key(KeyCode::Char('l')));
+        assert!(a.on_layer(), "시험의 전제 — 펼치기는 들어가지 않는다");
+        assert!(a.layer.as_ref().unwrap().pending.is_some(), "펼치기가 층의 요약 쓸기를 죽였다");
+        // **버린 것이 없는가를 바로 잰다**(리뷰) — `let_go` 로 재던 줄은 못 붉어졌다.
+        // [`App::discard`] 는 든 손잡이가 [`super::DISCARDED_KEPT`](8)를 채워야 그 수를 올리는데
+        // 이 시험은 `l` 한 번이라 버리는 판에서도 0이다. 급한 배너가 서는 것은 그 8이 찼을 때고,
+        // 여기서 잴 것은 그 앞 — **아무도 안 시킨 버리기가 한 번도 없었는가**다.
+        assert!(a.discarded.is_empty(), "아무도 안 시킨 버리기가 손잡이를 놓았다");
+        drop(hold);
+        join_threads(&mut a);
+    }
+
+    /// 시험이 띄운 스레드를 **끝까지 거두고** 간다(리뷰) — 펼치기(`l`)는 진짜 줄 읽기를
+    /// ([`App::read_wanted`]), 층 다시 세우기는 진짜 요약 쓸기를([`Layer::launch`]) 띄운다.
+    ///
+    /// 안 거두면 `App` 이 먼저 떨어지며 손잡이가 떨어져 나가고, 그 스레드가 [`Scratch`] 가
+    /// 지우는 디렉터리를 아직 걷는다. 오늘은 읽기가 파일 오류를 값으로 받아 조용하지만,
+    /// **떨어져 나간 손잡이는 [`App::discarded`] 를 안 지나** 그 스레드의 패닉을 되던질 데가
+    /// 없다 — 일꾼이 죽어도 시험은 푸르다.
+    fn join_threads(a: &mut App) {
+        let layer = a.layer.as_mut().expect("층이 선 시험이다");
+        let pending = layer.pending.take().map(|(_, h, _)| h);
+        let reading = layer.reading.take().map(|(_, _, h)| h);
+        for handle in [pending, reading].into_iter().flatten() {
+            handle.join().expect("시험이 띄운 스레드가 터졌다");
+        }
+    }
+
+    /// **못 연 줄은 쓸기를 죽이지 않고 그 답만 버린다**(moai-ctcb). 그 갈래는 줄을 `Look::Shut`
+    /// 으로 고쳐 세우는 자리라 늦게 닿은 요약이 방금 쓴 그것을 덮었는데(moai-800o), 쓸기를 통째로
+    /// 죽이면 같은 벌이 지어 오던 **다른 줄의 답까지** 버려 [`REREAD_EVERY`] 만큼 옛 셈이 선다.
+    ///
+    /// 그래서 둘을 함께 잰다 — 못 연 줄의 옛 답은 안 들어오고, 옆 줄의 답은 들어온다.
+    #[test]
+    fn a_row_that_will_not_open_drops_the_sweeps_answer_but_not_the_sweep() {
+        let s = Scratch::fenced("layer-shut-discards");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        // 쓸기가 두 줄을 다 열린 것으로 쟀다. 아직 안 닿았다.
+        let (tx, rx) = std::sync::mpsc::channel();
+        look_into(&[one.clone(), two.clone()], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
+
+        // **one 의 줄을 비워 둔다** — `layered` 가 읽어 둔 그대로 두면 쓸기의 답이 들어오든
+        // 버려지든 그 줄이 같아, 아래의 `Look::Open` 이 아무것도 안 잰다(리뷰).
+        let at_one = a.layer.as_ref().unwrap().position(&one).expect("첫 줄이 층에 있다");
+        a.layer.as_mut().unwrap().places[at_one].look = Look::Unread;
+
+        // 그새 two 가 사라지고, 사람이 그 줄을 연다 — 줄은 여기서 `Look::Shut` 으로 선다.
+        std::fs::remove_dir_all(&two).unwrap();
+        let at = a.layer.as_ref().unwrap().position(&two).expect("두 번째 줄이 층에 있다");
+        assert!(a.open_place(at, Depth::Whole).is_none(), "시험의 전제 — 사라진 줄은 안 열린다");
+        assert!(a.layer.as_ref().unwrap().pending.is_some(), "못 연 줄 하나가 쓸기 한 벌을 통째로 죽였다");
+
+        a.follow();
+        assert!(
+            matches!(look(&a, "two"), Look::Shut { state: Shut::Missing, .. }),
+            "들어가기 전에 띄운 쓸기가 방금 쓴 '없다' 를 열린 줄로 덮었다"
+        );
+        assert!(matches!(look(&a, "one"), Look::Open { .. }), "손대지 않은 줄의 답까지 버렸다");
+        join_threads(&mut a);
+    }
+
+    /// **방금 연 줄도 늦게 닿은 쓸기에 안 덮인다**(moai-ctcb). 느린 마운트를 훑던 쓸기가 프로젝트를
+    /// `Look::Shut` 으로 재고, 그것이 돌아오기 전에 사람이 그 줄을 펼치면(`l`) 연 갈래는
+    /// `read_at` 만 비우고 빠져나간다 — 옛 `Looked` 가 닿으면 [`Layer::adopt`] 가 그 값을 통째로
+    /// 들여, 살아 있는 이슈 줄 위에 "못 읽는다" 는 머리가 선다. `read_at` 이 방금 찍혀
+    /// [`Layer::stale`] 이 그 줄을 다시 안 고르니 저절로 낫지도 않는다.
+    #[test]
+    fn a_sweep_that_started_before_a_row_was_opened_does_not_shut_it() {
+        let s = Scratch::fenced("layer-late-sweep");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        assert!(matches!(look(&a, "two"), Look::Open { .. }), "시험의 전제 — 두 줄 다 열려 있다");
+
+        // 느린 마운트를 훑던 쓸기가 two 를 "못 읽는다" 로 쟀다. 아직 안 닿았다.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stale = Looked {
+            path: two.clone(),
+            marks: Marks::default(),
+            look: shut(&two, "two", State::Unreadable("느린 마운트".into()), crate::i18n::Lang::Ko),
+        };
+        tx.send(stale).unwrap();
+        let round = a.layer.as_ref().unwrap().rounds;
+        a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
+
+        // 그새 사람이 그 줄을 펼친다 — 여는 데까지 보고 층에 그대로 선다.
+        let at = a.layer.as_ref().unwrap().position(&two).expect("두 번째 줄이 층에 있다");
+        assert!(a.open_place(at, Depth::Lean).is_some(), "시험의 전제 — 그 줄은 열린다");
+
+        a.follow();
+        assert!(
+            matches!(look(&a, "two"), Look::Open { .. }),
+            "방금 연 줄을 늦게 닿은 쓸기가 '못 읽는다' 로 덮었다 — {:?}",
+            matches!(look(&a, "two"), Look::Shut { .. })
+        );
+        // **저절로 낫는 길도 함께 잰다** — 버린 답이 `read_at` 을 찍고 가면 `stale` 이 그 줄을 다시
+        // 안 골라, 셈이 세션 내내 옛것으로 선다.
+        assert!(
+            a.layer.as_ref().unwrap().stale().contains(&two),
+            "버린 답이 읽은 때를 찍고 가, 그 줄을 다시 읽으러 가는 자가 없다"
+        );
+
+        // **다음 벌이 실제로 들어오는 데까지 본다**(리뷰) — 도장 찍힌 줄이 뒤에 뜬 쓸기의 답도
+        // 버리면 그 줄은 영영 안 선다. 고른다는 것만 재면 [`Layer::launch`] 가 세대를 잘못 드는
+        // 되돌림(도장 뒤에 뜬 쓸기가 낮은 세대로 서는 것)을 못 잡는다. 보낸 쪽을 놓아
+        // `follow_layer` 가 끊김을 보고 새 벌을 띄우게 한다.
+        drop(tx);
+        // 기다리는 법은 [`settle`] 과 같다 — 맨 도는 `follow` 는 스레드가 아직 안 깨어난 사이에
+        // 다 돌아, 부하가 걸린 기계에서 "못 들였다" 고 애먼 데를 가리킨다.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.layer.as_ref().unwrap().stale().contains(&two) {
+            assert!(std::time::Instant::now() < until, "다음 쓸기가 5초 안에 안 끝났다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            a.follow();
+        }
+        // 들어왔다는 것은 **읽은 때가 다시 찍혔다**는 것이다 — 그래야 `stale` 이 그 줄을 놓는다.
+        assert!(
+            !a.layer.as_ref().unwrap().stale().contains(&two),
+            "도장 찍힌 줄은 뒤에 뜬 쓸기의 답도 못 들여, 같은 디렉터리를 쉬지 않고 다시 읽는다"
+        );
+        assert!(matches!(look(&a, "two"), Look::Open { .. }), "다시 읽고도 줄이 안 섰다");
+        join_threads(&mut a);
+    }
+
     /// **들어가면 층의 읽기를 놓는다**(moai-800o). 안 놓으면 프로젝트 안에서도 `App::loading`
     /// 이 참이라 루프가 빠른 걸음으로 깨어, 이 프로젝트와 상관없는 층 읽기를 기다린다.
     #[test]
@@ -1549,11 +1908,13 @@ mod tests {
 
         let (hold, wait) = std::sync::mpsc::channel::<()>();
         let (_tx, rx) = std::sync::mpsc::channel();
+        let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((
             rx,
             std::thread::spawn(move || {
                 let _ = wait.recv();
             }),
+            round,
         ));
 
         a.key(key(KeyCode::Enter));
@@ -1910,7 +2271,9 @@ mod tests {
             assert_eq!((&a.mode, &a.notice), (&Mode::Browse, &None), "{m:?}-F7 가 뜻을 했다");
         }
         assert_eq!(files(), was, "층에서 누른 키가 파일을 바꿨다");
-        assert!(!one.join(".moai/journal.jsonl").exists() && !two.join(".moai/journal.jsonl").exists());
+        // **저널은 `.moai/journal/<메일>.jsonl` 이다**(moai-nzlo) — 옛 한 파일을 재면 아무도 안
+        // 짓는 자리를 재는 셈이라, 남의 프로젝트에 적어도 이 줄이 안 붉어진다(리뷰).
+        assert!(!one.join(".moai/journal").exists() && !two.join(".moai/journal").exists());
 
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
@@ -1925,7 +2288,7 @@ mod tests {
 
     /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
     fn ideas_at(dir: &Path) -> Vec<String> {
-        let repo = match Repo::open(dir).unwrap() {
+        let repo = match Repo::open(dir, || crate::i18n::Lang::Ko).unwrap() {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };
@@ -1941,9 +2304,13 @@ mod tests {
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
             Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
-            Mode::Ask(_) | Mode::Browse | Mode::Grep(..) | Mode::Filter(_) | Mode::Pick(_) | Mode::Unregister(_) => {
-                None
-            }
+            Mode::Ask(_)
+            | Mode::Browse
+            | Mode::Grep(..)
+            | Mode::Filter(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_) => None,
         }
     }
 
@@ -2006,6 +2373,148 @@ mod tests {
         assert_eq!(a.site.lang, Lang::En, "화면이 층과 다른 말로 섰다");
     }
 
+    /// **옛 `[read]` 가 바뀌면 펼쳐 둔 프로젝트의 줄도 따라간다**(moai-7irq). 그 표는 프로젝트마다
+    /// 겹쳐 보는 값인데([`App::read_marks_of`]), 설정이 바뀐 걸음은 지금 선 프로젝트만 다시
+    /// 들었다 — 펼친 줄은 제 `Site` 를 따로 들고 [`App::relayer_with`] 가 그것을 그대로 옮겨
+    /// 오므로, 그 줄의 [NEW] 가 접었다 다시 펼칠 때까지 옛 표로 섰다.
+    #[test]
+    fn a_changed_legacy_read_reaches_an_open_project() {
+        let s = Scratch::fenced("layer-legacy-read");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // **[NEW] 까지 잰다**(리뷰 moai-kuib.g9c). 표만 재던 판은 이 길이 있는 까닭(그 줄의 [NEW] 를
+        // 다시 세는 것)을 안 재, `load_read_in` 의 셈 한 줄을 지워도 푸르렀다. 세려면 그 줄이 내게
+        // 와 있어야 한다 — 프로젝트의 줄에는 담당이 없다.
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
+
+        // 옛 바이너리나 사람 손이 설정의 옛 `[read]` 에 적는다 — 이 바이너리는 여기 안 적는다.
+        let mut src = std::fs::read_to_string(&cfg).unwrap();
+        src.push_str("\n[read]\n\"argos-0001\" = \"2026-09-14T00:00:00Z\"\n");
+        std::fs::write(&cfg, src).unwrap();
+        // 걸음이 바뀐 것을 보게 한다 — 띄울 때 잰 표식 자리다.
+        a.config_stamp = Some(None);
+        a.follow_config();
+        assert_eq!(seen(&a).as_deref(), Some("2026-09-14T00:00:00Z"), "펼쳐 둔 프로젝트가 바뀐 옛 표를 안 들었다");
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
+    }
+
+    /// **프로젝트 안에 있어도 그 길은 돈다**(리뷰). [`crate::tui::App::opened_seats`] 가 화면에 안 선
+    /// 줄을 빼면서(moai-p4ec) 옛 `[read]` 를 다시 드는 길까지 같이 막혔다 — 그쪽은 **한 번뿐인 길**
+    /// 이라 못 든 것을 다시 드는 자가 없다. 그 표는 사용자 설정에 살아 그 프로젝트의 읽음 파일
+    /// 표식을 안 건드리므로, 올라온 뒤의 걸음(`follow_read`)도 낡은 것을 못 본다 — 그 줄은 세션
+    /// 내내 옛 표로 [NEW] 를 센다.
+    #[test]
+    fn a_changed_legacy_read_reaches_an_open_project_from_inside_another() {
+        let s = Scratch::fenced("layer-legacy-read-inside");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 펼친 줄이 [NEW] 로 섰다");
+
+        // 옆 프로젝트로 들어간다 — 층의 줄은 그때 화면에 없다.
+        a.enter_project(1);
+        assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+        assert!(a.layer.as_ref().unwrap().places[0].site.is_some(), "시험의 전제 — 층에 그 줄이 남는다");
+
+        let mut src = std::fs::read_to_string(&cfg).unwrap();
+        src.push_str("\n[read]\n\"argos-0001\" = \"2026-09-14T00:00:00Z\"\n");
+        std::fs::write(&cfg, src).unwrap();
+        a.config_stamp = Some(None);
+        a.follow_config();
+
+        let seen = a.layer.as_ref().unwrap().places[0]
+            .site
+            .as_ref()
+            .expect("펼친 줄이 제 Site 를 든다")
+            .seen
+            .get("argos-0001")
+            .cloned();
+        assert_eq!(seen.as_deref(), Some("2026-09-14T00:00:00Z"), "프로젝트 안에서 바뀐 옛 표가 층의 줄에 안 닿았다");
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
+    }
+
+    /// 펼친 프로젝트의 줄을 **내게 온 것으로** 만들고 [NEW] 를 한 번 센다 — 세는 자
+    /// ([`App::recount_unread_in`])가 담당을 보므로, 담당 없는 줄에서는 [NEW] 가 한 줄도 안 서서
+    /// 그 셈을 재는 시험이 헛돈다.
+    fn mine(a: &mut App, at: usize) {
+        let seat = crate::tui::Seat::Place(at);
+        let Some(site) = a.site_mut(seat) else { panic!("펼친 줄이 제 Site 를 든다") };
+        for i in &mut site.issues {
+            i.assignee = Some("레이븐".into());
+            i.assignee_email = Some("raven@example.com".into());
+        }
+        a.recount_unread_in(seat);
+    }
+
+    /// 그 펼친 프로젝트의 [NEW] 집합.
+    fn unread(a: &App, at: usize) -> std::collections::BTreeSet<String> {
+        a.layer.as_ref().unwrap().places[at].site.as_ref().expect("펼친 줄이 제 Site 를 든다").unread.clone()
+    }
+
+    /// **펼쳐 둔 프로젝트의 읽음도 걸음이 잰다**(moai-c571). `Site::read_stamp` 은 프로젝트마다 서는데
+    /// 재는 자가 지금 선 것 하나였다 — 옆 터미널의 `moai -C <그 프로젝트> read --all` 은 저쪽
+    /// `issues.jsonl` 을 안 건드리니 스냅샷 표식에도 안 걸려, 그 줄은 [`REREAD_EVERY`](60초)가 지나야
+    /// 읽음을 보았다.
+    #[test]
+    fn a_read_beside_reaches_an_open_project_without_the_clock() {
+        let s = Scratch::fenced("layer-read-step");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg.clone());
+        a.user = Some("레이븐 (raven@example.com)".into());
+        a.want_site(0);
+        settle(&mut a);
+        let seen = |a: &App| {
+            a.layer.as_ref().unwrap().places[0]
+                .site
+                .as_ref()
+                .expect("펼친 줄이 제 Site 를 든다")
+                .seen
+                .get("argos-0001")
+                .cloned()
+        };
+        assert_eq!(seen(&a), None, "시험의 전제 — 아직 적힌 읽음이 없다");
+        // [NEW] 까지 잰다 — 이 길이 있는 까닭이 그 셈이다([`mine`]).
+        mine(&mut a, 0);
+        assert!(unread(&a, 0).contains("argos-0001"), "시험의 전제 — 그 줄이 [NEW] 로 섰다");
+
+        // 옆 터미널이 그 프로젝트에 `moai read` 를 돌렸다 — 이 화면의 스냅샷은 그대로다.
+        let mark: std::collections::BTreeMap<String, String> =
+            [("argos-0001".to_string(), "2026-09-14T00:00:00Z".to_string())].into_iter().collect();
+        crate::read_marks::update(&cfg, &one, || crate::i18n::Lang::Ko, |sh| sh.mark(&mark)).unwrap();
+
+        // **시계는 안 돌린다** — 걸음 하나로 닿아야 한다.
+        a.follow();
+        assert_eq!(
+            seen(&a).as_deref(),
+            Some("2026-09-14T00:00:00Z"),
+            "펼친 프로젝트의 읽음을 걸음이 안 쟀다 — 시계를 기다리는 자리로 돌아갔다"
+        );
+        assert!(!unread(&a, 0).contains("argos-0001"), "표는 들었는데 그 줄의 [NEW] 를 다시 안 셌다");
+    }
+
     /// **들어갈 때 그 줄이 들고 있던 읽음을 옮겨 든다**(moai-2gep). [`App::leave_project`] 가 `Site` 를
     /// 비우고 [`App::load_read`] 가 파일에서 다시 드는데, 그 파일을 못 읽으면(옛 `sudo moai read` 가
     /// 남긴 root 의 파일) 들일 것이 없어 **내게 온 줄이 모두** [NEW] 로 선다 — 그 화면의 `SPC m a`
@@ -2050,6 +2559,56 @@ mod tests {
             Some("2026-09-14T00:00:00Z"),
             "들어가며 들고 있던 읽음을 버렸다 — 이 프로젝트가 통째로 [NEW] 로 선다"
         );
+    }
+
+    /// **[NEW] 를 세는 걸음이 누군지 묻지 않는다**(moai-ropk). 한눈 보기의 줄에서
+    /// [`crate::tui::App::recount_unread_in`] 이 걸음마다 `whoami` 를 풀어 `git config` 프로세스 둘을
+    /// 띄웠고(띄우기 11ms + 푸는 데 22ms), 그것이 `term.draw` 와 `event::poll` 사이에서 돌아 그대로
+    /// 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리 하나고([`crate::tui::Site::me`]), 세는
+    /// 자는 푼 값을 읽기만 한다.
+    ///
+    /// **묻는 자를 패닉으로 세운다** — 값을 재는 시험은 기계마다 흔들려 되돌림을 못 잡는다. 이 자리가
+    /// 다시 풀기 시작하면 여기서 터진다.
+    #[test]
+    fn counting_new_rows_on_the_layer_does_not_ask_who_i_am() {
+        fn refuse(_: Option<&str>, _: &Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            panic!("[NEW] 를 세는 걸음이 누군지 물었다")
+        }
+        let s = Scratch::fenced("layer-whoami-once");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.site_of_place(0).is_some_and(|s| s.me.is_some()), "시험의 전제 — 읽을 때 한 번 풀었다");
+
+        a.identify = refuse;
+        for _ in 0..3 {
+            a.recount_unread_in(crate::tui::Seat::Place(0));
+            a.recount_unread_in(crate::tui::Seat::Here);
+        }
+    }
+
+    /// **프로젝트 안에서는 층의 줄을 안 잰다**(moai-p4ec). [`App::enter_project`] 는 그 줄의 `Site` 를
+    /// 가져가지 않고 **베껴** 가므로 층에 제 사본이 남는다 — 재는 자가 층의 줄을 함께 돌면 지금 선 그
+    /// 프로젝트의 읽음 파일을 `Seat::Here` 와 층의 사본으로 **두 번** 잰다. 층의 줄은 그때 화면에도
+    /// 없다(`App::rows` 가 `on_layer()` 로 가른다).
+    ///
+    /// **올라오면 바로 든다** — 접었다 편 줄과 같은 길이라 표식 차이를 그 걸음의 `follow_read` 가 본다.
+    #[test]
+    fn inside_a_project_the_layer_rows_are_not_measured() {
+        let s = Scratch::fenced("layer-read-twice");
+        let (_one, _two, mut a) = on_layer_with_twins(&s);
+        a.want_site(0);
+        settle(&mut a);
+        assert_eq!(a.opened_seats(), vec![crate::tui::Seat::Place(0)], "시험의 전제 — 펼친 줄을 잰다");
+
+        a.enter_project(0);
+        assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+        assert!(a.layer.as_ref().unwrap().places[0].site.is_some(), "시험의 전제 — 층에 사본이 남는다");
+        assert!(a.opened_seats().is_empty(), "들어간 프로젝트를 층의 사본까지 두 번 잰다");
+
+        a.climb();
+        assert!(a.on_layer(), "시험의 전제 — 올라왔다");
+        assert_eq!(a.opened_seats(), vec![crate::tui::Seat::Place(0)], "올라왔는데 다시 안 잰다");
     }
 
     /// **한눈 보기는 프로젝트마다 머리줄 하나와 그 밑의 줄을 한 목록으로 세운다**(moai-eyre, 사용자
@@ -2318,7 +2877,7 @@ mod tests {
         );
 
         // 보기가 바뀌면 든 것이 다 따라 선다.
-        a.hit("SPC v d");
+        a.hit("SPC v 4");
         assert!(
             a.site_of_place(0).is_some_and(|s| s.shown == [true, true]),
             "보기 토글이 옆 프로젝트를 안 다시 셌다 — {:?}",
@@ -2580,7 +3139,8 @@ mod tests {
 
         assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
         assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
-        assert!(!one.join(".moai/journal.jsonl").exists());
+        // 저널만 새는 것을 잡는 줄이다 — 재는 자리는 `.moai/journal/` 이다(moai-nzlo, 리뷰).
+        assert!(!one.join(".moai/journal").exists());
         let n = a.notice.clone().unwrap_or_default();
         assert!(n.starts_with("✓ 담김 · two · argos-"), "알림이 프로젝트를 안 댄다 — {n:?}");
     }
@@ -2740,14 +3300,56 @@ mod tests {
         assert_eq!(target(&a), Some(bare), "init 한 뒤에도 층의 옛 셈을 보고 안 열었다");
     }
 
+    /// **묻는 칸이 받은 사람은 이미 읽어 둔 층의 줄에도 닿는다**(리뷰).
+    ///
+    /// [`crate::tui::Site::me`] 가 그 프로젝트를 **읽을 때 한 번** 풀리는 값이 되면서(moai-ropk),
+    /// 셀 때마다 `whoami` 를 풀어 다음 걸음에 저절로 갚던 길이 닫혔다. 그 판은 누군지 모르던
+    /// 기계에서 먼저 펼쳐 둔 프로젝트가 세션 내내 [NEW] 를 한 줄도 안 세웠다 — 표를 든 줄은 다시
+    /// 안 읽히고([`App::want_site`] 가 `site.is_some()` 에서 돌아선다), 접었다 펴도 같다.
+    /// 헤더는 받은 사람을 대는데 안 읽음만 "모름" 에 머무는, moai-j038.vna 가 막으려던 화면이다.
+    #[test]
+    fn the_answer_to_the_question_reaches_the_rows_already_read_on_the_layer() {
+        fn nobody(user: Option<&str>, root: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            match user {
+                Some(raw) => crate::model::actor(Some(raw), root),
+                None => Err(crate::model::NoActor::Unknown),
+            }
+        }
+        let s = Scratch::fenced("layer-ask-relearn");
+        let (_one, two, mut a) = on_layer_with_twins(&s);
+        a.user = None;
+        a.identify = nobody;
+        // 첫 줄을 먼저 읽는다 — 그때는 누군지 모른다.
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.site_of_place(0).is_some_and(|s| s.me.is_none()), "시험의 전제 — 읽을 때 누군지 몰랐다");
+
+        // 둘째 줄에 생각을 담다 사람을 댄다 — 첫 줄이 펴져 제 줄을 이고 서므로 둘째 머리줄은 맨 아래다.
+        a.key(key(KeyCode::End));
+        a.hit("SPC n");
+        assert_eq!(target(&a), Some(two));
+        type_in(&mut a, "two 의 생각");
+        a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
+        type_in(&mut a, "레이븐 (raven@example.com)");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
+
+        assert_eq!(
+            a.site_of_place(0).and_then(|s| s.me.clone()).as_deref(),
+            Some("레이븐 (raven@example.com)"),
+            "먼저 펼쳐 둔 줄이 받은 사람을 못 들었다 — 그 프로젝트는 세션 내내 [NEW] 가 안 선다"
+        );
+    }
+
     /// **누군지 묻고 이어진 쓰기도 박은 프로젝트에 담는다.** 층에서 연 폼이 묻는 칸을 지나
     /// 담기면 그 프로젝트 파일에만 선다.
     #[test]
     fn the_question_and_its_retry_stay_on_the_fixed_project() {
-        fn nobody(user: Option<&str>, root: &std::path::Path) -> crate::fail::R<crate::model::Actor> {
+        fn nobody(user: Option<&str>, root: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
             match user {
                 Some(raw) => crate::model::actor(Some(raw), root),
-                None => Err(crate::fail::Fail::coded("누가 하는지 모른다 — 시험", crate::fail::code::NO_ACTOR)),
+                None => Err(crate::model::NoActor::Unknown),
             }
         }
         let s = Scratch::fenced("layer-jot-ask");
@@ -2955,6 +3557,45 @@ mod tests {
         settle(&mut a);
         assert_eq!(names(&a), ["one", "two"], "시계가 돌았는데 빚진 읽기를 안 갚았다");
         assert_eq!(a.config_tried.trouble, None, "읽혔는데 탈이 남았다");
+    }
+
+    /// **넘겨받은 설정이 층의 파일 것이 아니면 안 쓴다**(moai-n6tm) — [`App::relayer_with`] 의 `Some`
+    /// 갈래가 그것을 그대로 쓰면 층의 설정 자리가 부르는 쪽의 것으로 슬쩍 바뀐다. 그러면 줄은 한
+    /// 파일에서 서고 등록·해제(`SPC p a`·`SPC p d`)는 다른 파일에 가, 되돌릴 길이 도구 밖에만 남는다.
+    /// 여태 그 약속은 그 함수의 문서에 글로만 있었다.
+    #[test]
+    fn a_registry_from_another_file_does_not_become_the_layers_own() {
+        let s = Scratch::fenced("layer-config-swap");
+        let (one, two) = twins(&s);
+        // 층이 선 파일은 `one` 만, 남의 파일은 `two` 만 등록한다 — 갈아 끼우면 줄이 바뀐다.
+        let mine = s.register(&[&one]);
+        let other = s.join("other/config.toml");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, format!("[[project]]\npath = {:?}\n", two.to_str().unwrap())).unwrap();
+
+        let mut a = App::on_projects(Layer::read(Some(&mine), None, crate::i18n::Lang::Ko));
+        a.user_config = Some(mine.clone());
+        assert_eq!(names(&a), ["one"], "시험의 전제 — 층은 제 파일로 섰다");
+
+        let theirs = user_config::read(Some(&other));
+        assert_eq!(names_of(&theirs), ["two"], "시험의 전제 — 남의 파일은 다른 줄을 든다");
+        a.relayer_with(Some(&theirs), None);
+        assert_eq!(names(&a), ["one"], "남의 설정이 층의 줄을 갈아 끼웠다");
+        assert_eq!(
+            a.layer.as_ref().unwrap().config.as_deref(),
+            Some(mine.as_path()),
+            "층의 설정 자리가 남의 파일로 바뀌었다"
+        );
+        // 다시 세운 층이 요약 쓸기를 띄웠다 — 거두고 간다(`join_threads` 의 문서).
+        join_threads(&mut a);
+    }
+
+    /// 설정 하나가 든 프로젝트 이름들 — 위 시험의 전제를 재는 자다.
+    fn names_of(reg: &user_config::Registry) -> Vec<String> {
+        reg.projects
+            .iter()
+            .map(|p| p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+            .collect()
     }
 
     /// **잠깐의 실패는 다음 걸음에 갚는다**(moai-po6v) — 시계를 안 기다린다. 갈래마다 벗어나는 길이

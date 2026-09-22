@@ -1,8 +1,13 @@
 #!/bin/sh
 # moai 를 GitHub 릴리스에서 받아 깐다.
 #
-#   curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh
 #   sh install.sh --version v0.1.0 --dir ~/bin
+#
+# **받는 사람이 밟는 가지는 `main` 이다.** 릴리스를 자르는 가지가 `main` 이고,
+# `develop` 은 아직 안 나간 것이 섞이는 자리다 — 거기를 가리키면 받는 사람이
+# 릴리스에 없는 스크립트로 릴리스를 깐다. `CONTRIBUTING.md` 의 `develop` 은
+# 기여자 흐름이라 그대로다.
 #
 # **checksums 로 확인하지 못하면 깔지 않는다.** 확인을 건너뛰는 길은 없다 —
 # 건너뛸 수 있는 확인은 아무도 안 하는 확인이고, 이 스크립트는 파이프로 셸에
@@ -71,11 +76,30 @@ done
 
 # 내는 판이 둘뿐이라 짝이 안 맞으면 바로 말한다. 조용히 비슷한 것을 깔면 받는
 # 사람이 못 도는 바이너리를 쥔다.
-case "$(uname -s)-$(uname -m)" in
-Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
-Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
-*) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 지금 내는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이다. 소스에서 짓는 길은 README 에 있다" ;;
-esac
+#
+# **`MOAI_TARGET` 은 이 표를 건너뛴다**(moai-utya). 시험이 쓰는 자리다 — 설치 시험은
+# 가짜 릴리스 하나를 지어 **설치 길**을 재는데, 이름을 이 표에서 받으면 판을 안 내는
+# 기계(arm64 리눅스·인텔 맥)에서 그 표가 먼저 죽어 재려던 길에 닿지도 못한다. 그 기계에서도
+# 도구는 소스로 지어 잘 돈다.
+#
+# **가짜 릴리스를 가리킬 때만 듣는다** (리뷰 moai-6mk3.lgj). 받는 사람이 밟는 길에서도 듣던
+# 판은 셋을 열었다 — 어쩌다 내보내 둔 이름 하나가 이 표를 꺼 "이 기계에 맞는 판이 없다" 대신
+# 404 를 주고(`--print-target` 까지 그 이름을 되읊어 "이 기계의 타깃" 이 아니게 된다), 합계는
+# 제 파일 이름과 맞춰 보는 것이라 진짜 Darwin 산출물이 리눅스에 그대로 깔리며, 이름에 든
+# `/` 나 `..` 는 받는 자리를 `$work` 밖으로 옮겨 덫이 못 치운다. `MOAI_BASE_URL` 을 함께
+# 요구하면 시험은 그대로 돌고 표는 내는 길의 유일한 자로 남는다.
+if [ -n "${MOAI_TARGET:-}" ] && [ -n "${MOAI_BASE_URL:-}" ]; then
+  case $MOAI_TARGET in
+  */* | *..*) die "MOAI_TARGET 에 길 조각이 들었다 — $MOAI_TARGET" ;;
+  esac
+  target=$MOAI_TARGET
+else
+  case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
+  Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
+  *) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 지금 내는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이다. 소스에서 짓는 길은 README 에 있다" ;;
+  esac
+fi
 
 if [ "$print_target" = 1 ]; then
   printf '%s\n' "$target"

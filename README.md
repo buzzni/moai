@@ -25,12 +25,14 @@ should I work on next, and what did we already decide about it. A web tracker
 answers neither from inside the repository, and a Markdown TODO list answers
 neither after the third session.
 
-moai keeps the whole thing in two append-friendly files under `.moai/`:
+moai keeps the whole thing in append-friendly files under `.moai/`:
 
 - `issues.jsonl` — one line per issue, sorted by id. **The snapshot is the
   truth.** Nothing is folded, replayed or recomputed to answer a question.
-- `journal.jsonl` — who created, moved, noted or removed what. It is history
-  for humans, and it is never read to compute state.
+- `journal/<email>.jsonl` — who created, moved, noted or removed what, one file
+  per writer so two people never collide on a merge. It is history for humans,
+  and it is never read to compute state. The older single `journal.jsonl` is
+  still read where it exists; nothing is written there any more.
 
 Everything else follows from those two sentences. A question that can only be
 answered by folding the journal is a question whose answer should have been a
@@ -39,7 +41,7 @@ field on the snapshot.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh
 ```
 
 The installer downloads the release archive **and** `SHA256SUMS`, and refuses to
@@ -51,7 +53,7 @@ with `--version v0.1.0`. Through the pipe those flags belong to the script, not
 to your shell, so they need `-s --`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/buzzni/moai/develop/install.sh \
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0
 ```
 
@@ -154,6 +156,13 @@ no human-shaped output mixed in.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
   `stale` side by side, so a loser in a race reads `stale` and moves on.
+- **A value that cannot be absent is never absent.** `kind` and `priority` have
+  defaults, and the snapshot leaves a default out so that one file-wide diff does
+  not follow every release — but that silence is legible only to the writer, so
+  `--json` fills it back in (`"kind":"issue"`, `"priority":2`). What the file
+  leaves out and what the contract leaves out are two different things. Keys that
+  genuinely can be absent — `epic`, `milestone`, `deferred_at` — stay absent, and
+  the absence is the answer.
 - `moai show <id> --json` always carries `commits` and `work` as arrays. An empty
   `commits` means no commit named this issue; a `commits_error` object means git
   could not be read at all. The two are deliberately different answers.

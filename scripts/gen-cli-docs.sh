@@ -55,6 +55,11 @@ walk() {
 A test compares this file against the binary's own help, so a reference that
 drifts fails the build rather than misleading a reader.
 
+**A large diff here is normal.** Every command is re-rendered from the binary,
+so one changed word in one help text rewrites this whole file. The file is the
+binary's own text, not a copy anybody keeps by hand - read the code change, not
+this diff.
+
 The help text itself is English, one copy for everyone: clap builds it before
 the arguments are parsed, so it cannot follow `MOAI_LANG` (moai-l5uf). The rest
 of the screen does follow it - see `moai --help` for how to pick a language.

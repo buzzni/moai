@@ -43,11 +43,13 @@ pub struct Ctx {
     reg: OnceLock<crate::user_config::Registry>,
     /// 이 판의 화면 언어 — 설정에서 한 번 푼 값([`Ctx::lang`]).
     lang: OnceLock<crate::i18n::Lang>,
+    /// 이 판의 시간대 — 시스템에서 한 번 푼 값([`Ctx::zone`]).
+    zone: OnceLock<(crate::tz::Zone, Option<crate::tz::Trouble>)>,
 }
 
 impl Ctx {
     pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
-        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new() }
+        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: OnceLock::new() }
     }
 
     /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
@@ -78,6 +80,25 @@ impl Ctx {
     pub fn lang(&self) -> crate::i18n::Lang {
         *self.lang.get_or_init(|| lang_of(self.registry()))
     }
+
+    /// 이 판이 시각을 적을 시간대(moai-p5az). **CLI 는 시스템을 그대로 따른다** — `TZ` 가
+    /// 먼저고 그다음이 `/etc/localtime` 이다. 설정의 `[tui] timezone` 은 **안 읽는다**: 고르는
+    /// 자리가 탐색기 하나(`SPC o t`)라 그 키는 탐색기의 것이고, 고른 적 없으면 두 표면이 같은
+    /// 시계로 선다.
+    ///
+    /// **못 풀어도 막지 않는다** — UTC 로 떨어지고 까닭은 [`Ctx::zone_trouble`] 이 든다
+    /// (moai-77ap). 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
+    ///
+    /// **말과 같은 결로 늦게 읽는다** — 시각을 그리는 명령만 이 값을 든다.
+    pub fn zone(&self) -> &crate::tz::Zone {
+        &self.zone.get_or_init(crate::tz::Zone::system).0
+    }
+
+    /// 시간대를 풀다 만난 것. `None` 이면 아무 일 없다. **[`Ctx::zone`] 을 부른 뒤에 든다** —
+    /// 안 부른 판은 시각을 안 그리므로 할 말도 없다.
+    pub fn zone_trouble(&self) -> Option<&crate::tz::Trouble> {
+        self.zone.get().and_then(|(_, why)| why.as_ref())
+    }
 }
 
 /// 이미 읽어 든 설정에서 화면 말을 고른다 — [`Ctx::lang`] 과 **같은 자**다. 제 손으로
@@ -103,6 +124,44 @@ static PARTIAL: AtomicBool = AtomicBool::new(false);
 /// `model::split_assignee` 가 접는다.
 pub fn clearable(v: &str) -> Option<String> {
     (v != "none").then(|| v.to_string())
+}
+
+/// **있는 파일이고 실행 비트가 섰는가.** 재는 것은 딱 그것이다.
+///
+/// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 하고,
+/// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다.
+///
+/// **다만 "내가 돌릴 수 있는가" 는 아니다.** `mode & 0o111` 은 "아무나 돌릴 수 있는가" 고,
+/// 남의 소유 `0o700` 이나 `noexec` 에 얹힌 파일은 여기를 지나는데 껍데기는 126 을 낸다
+/// (`merge_driver::probe` 가 적어 둔 그대로다). 표준 라이브러리에 `access(X_OK)` 가 없어 실제로
+/// 재려면 불러 봐야 하고, 그것이 값어치 있는 자리(`.git/config` 에 심는 값)는
+/// [`merge_driver`](crate::cmd::merge_driver) 가 `--help` 를 불러 따로 잰다.
+///
+/// **세 벌이던 것을 모았다**(moai-p3kb, 리뷰가 셋째를 짚었다) — `skill` 의 `runnable`,
+/// `tui` 의 `executable`, `merge_driver` 의 `runnable`. 갈리면 이식성 고침 하나가 고친 사람이
+/// 기억하는 한 곳에만 든다. 유닉스가 아닌 데서는 실행 비트가 없어 있는 파일이면 그만이다 —
+/// 세 벌 다 그렇게 적혀 있었다.
+///
+/// **이름으로 PATH 를 묻는 세 자리는 여기 안 든다 — 셋이 저마다 딴 물음이다.**
+///
+/// - `skill` 은 껍데기의 `command -v` 로 묻는다. 훅이 실제로 치는 것이 그 명령이라 껍데기가 보는
+///   것(함수·별칭까지)과 같아야 한다
+/// - `tui` 는 기본 편집기 둘(`vi`·`nano`)을 고르려고 `PATH` 를 제 손으로 훑는다. 띄우는 것은
+///   여기도 `sh` 라([`crate::tui::jotfile::argv`]) 껍데기와 답이 같아야 하므로 **빈 자리를 안
+///   뺀다** — POSIX 가 그 자리를 "지금 자리" 로 읽고, 껍데기도 그렇게 찾는다. `$VISUAL`·`$EDITOR`
+///   가 둘 다 비었을 때 띄우며 한 번, 많아야 이름 둘이라 `sh` 를 띄우는 값이 아깝다
+/// - `merge_driver` 는 같은 훑기에 **빈 자리를 뺀다.** 거기서 고른 값은 `.git/config` 에 앉아
+///   **딴 자리에서** 풀리므로, 껍데기가 지금 그 자리를 쓰는 것과 심어 둘 값으로 쓰는 것이 다르다
+pub fn runnable(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 pub fn note_partial() {
@@ -145,7 +204,7 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
     if reg.projects.is_empty() {
         return Err(nothing_registered(reg, ctx.lang()));
     }
-    let projects = crate::projects::open_with(reg, worktree);
+    let projects = crate::projects::open_with(reg, worktree, ctx.lang());
     Ok((reg, projects))
 }
 
@@ -168,7 +227,7 @@ pub fn registered(ctx: &Ctx, worktree: bool) -> R<(&crate::user_config::Registry
 /// 적어 둔 "말은 거절할 때만 푼다" 가 막던 바로 그것이다 — 이 문 하나가 열한 명령을 한꺼번에
 /// 그쪽으로 끌고 간다. 닫힘 안이면 `.moai` 를 못 찾은 판에서만 푼다.
 pub fn open_repo(ctx: &Ctx) -> R<crate::store::Repo> {
-    crate::store::Repo::find()?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
+    crate::store::Repo::find(|| ctx.lang())?.ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.not_a_repo")))
 }
 
 /// `.moai` 밖인데 등록한 것도 없을 때의 말 — `ready` 는 이 말로 멈추고, `status` 는
@@ -225,53 +284,69 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     }
 }
 
-pub fn run(cli: Cli) -> R<Vec<String>> {
-    let ctx = Ctx::new(cli.json, cli.user, cli.dir.is_some());
+pub fn run(mut cli: Cli) -> R<Vec<String>> {
+    let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
+    let out = dispatch(&ctx, cli);
+    // **시간대를 못 풀었으면 한 줄로 알린다**(moai-77ap) — 막지 않는다. 종료 코드도 안 건드리고,
+    // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시각을 그린 명령만 이 자리에 닿는다:
+    // [`Ctx::zone`] 을 안 부른 판은 할 말이 없다([`Ctx::zone_trouble`]).
+    //
+    // **한 줄뿐이다.** 정적 musl 판을 zoneinfo 없는 기계에 받으면 이 일이 **매 명령**에 나므로,
+    // 고치는 법까지 늘어놓으면 그 기계에서는 모든 출력에 안내문이 한 뭉치씩 붙는다.
+    if let Some(why) = ctx.zone_trouble() {
+        eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
+    }
+    out
+}
+
+fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
     let Some(cmd) = cli.cmd else {
-        return opening(&ctx);
+        return opening(ctx);
     };
     match cmd {
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
-        Cmd::Init { check: true, .. } => init::check(&ctx),
+        Cmd::Init { check: true, .. } => init::check(ctx),
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
-        Cmd::Init { print: true, .. } => init::print(&ctx),
+        Cmd::Init { print: true, .. } => init::print(ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, check: false, print: false } => init::run(&ctx, prefix.as_deref(), no_agents),
-        Cmd::Hook { event } => hook::run(&ctx, event),
+        Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
+            init::run(ctx, prefix.as_deref(), no_agents, no_driver)
+        }
+        Cmd::Hook { event } => hook::run(ctx, event),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
-        Cmd::MergeDriver(a) => merge_driver::run(&ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(&ctx, scope.as_str(), dry_run),
-        Cmd::Skill(SkillCmd::Status) => skill::status(&ctx),
-        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(&ctx, dry_run),
+        Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
+        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(ctx, scope.as_str(), dry_run),
+        Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
+        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(ctx, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
-        Cmd::Project(ProjectCmd::Add { path }) => project::add(&ctx, &path),
-        Cmd::Project(ProjectCmd::Ls) => project::ls(&ctx),
-        Cmd::Project(ProjectCmd::Rm { path }) => project::rm(&ctx, &path),
-        Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(&ctx, &path, &hue),
-        Cmd::Add(a) => add::run(&ctx, a, None),
-        Cmd::Show(a) => show::run(&ctx, a, None),
-        Cmd::Mv(a) => mv::run(&ctx, a),
-        Cmd::Edit(a) => edit::run(&ctx, a),
-        Cmd::Rm(a) => rm::run(&ctx, a),
-        Cmd::Note(a) => note::run(&ctx, a),
-        Cmd::Link(a) => link::run(&ctx, a),
-        Cmd::Defer(a) => defer::run(&ctx, a),
-        Cmd::Read(a) => read::run(&ctx, a),
-        Cmd::Ready(w) => ready::run(&ctx, w.worktree),
-        Cmd::Prime(w) => prime::run(&ctx, w.worktree),
-        Cmd::Status(w) => status::run(&ctx, w.worktree),
-        Cmd::Tui(a) => tui::run(&ctx, a),
-        Cmd::Issue(t) => typed(&ctx, t, Kind::Issue),
-        Cmd::Epic(t) => typed(&ctx, t, Kind::Epic),
-        Cmd::Milestone(t) => typed(&ctx, t, Kind::Milestone),
+        Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
+        Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
+        Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
+        Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
+        Cmd::Add(a) => add::run(ctx, a, None),
+        Cmd::Show(a) => show::run(ctx, a, None),
+        Cmd::Mv(a) => mv::run(ctx, a),
+        Cmd::Edit(a) => edit::run(ctx, a),
+        Cmd::Rm(a) => rm::run(ctx, a),
+        Cmd::Note(a) => note::run(ctx, a),
+        Cmd::Link(a) => link::run(ctx, a),
+        Cmd::Defer(a) => defer::run(ctx, a),
+        Cmd::Read(a) => read::run(ctx, a),
+        Cmd::Ready(w) => ready::run(ctx, w.worktree),
+        Cmd::Prime(w) => prime::run(ctx, w.worktree),
+        Cmd::Status(w) => status::run(ctx, w.worktree),
+        Cmd::Tui(a) => tui::run(ctx, a),
+        Cmd::Issue(t) => typed(ctx, t, Kind::Issue),
+        Cmd::Epic(t) => typed(ctx, t, Kind::Epic),
+        Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(&ctx, t, Kind::Idea),
-        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(&ctx, a),
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, t, Kind::Idea),
+        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
     }
 }
 
@@ -284,7 +359,7 @@ pub fn run(cli: Cli) -> R<Vec<String>> {
 /// 치는가. 둘 다 여기서 준다.
 fn opening(ctx: &Ctx) -> R<Vec<String>> {
     use clap::CommandFactory;
-    let found = crate::store::Repo::find();
+    let found = crate::store::Repo::find(|| ctx.lang());
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
     // 그 길로 간다).
     //
@@ -348,7 +423,7 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 ///
 /// **띄어쓰기가 가른다.** 사람이 쓰는 제목은 낱말이 여럿이고, 오타 난
 /// 플래그는 한 낱말이다. 정말 그 제목을 쓰겠다면 `--` 로 넘긴다.
-pub fn refuse_if_flag_like(title: &str) -> R<()> {
+pub fn refuse_if_flag_like(title: &str, lang: crate::i18n::Lang) -> R<()> {
     // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
     //
     // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
@@ -360,7 +435,9 @@ pub fn refuse_if_flag_like(title: &str) -> R<()> {
     if title.starts_with("--") && !title.contains(char::is_whitespace) {
         return Err(Fail::coded(
             format!(
-                "`{title}` 은 제목이 아니라 플래그로 보인다.\n                       정말 제목이면 `--` 뒤에 둔다 — `moai add -- {title}`"
+                "{}\n                       {}",
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_looks_like_a_flag"), &[("title", title)]),
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_after_dashes"), &[("title", title)]),
             ),
             code::BAD_INPUT,
         ));
@@ -394,6 +471,21 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 pub struct Row<'a> {
     #[serde(flatten)]
     pub issue: std::borrow::Cow<'a, crate::model::Issue>,
+    /// 줄이 **기본값이라 안 적은** 종류와 우선순위(moai-51it·moai-a4u9). 파일이 기본값을 안 적는
+    /// 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의 뜻은 파일을 쓰는 쪽만
+    /// 안다 — 읽는 쪽에서는 `jq -r .priority` 가 `null` 을 받아 "p2" 와 "모른다" 가 한 값이 된다.
+    /// **파일에 안 적는 것과 `--json` 이 안 내는 것은 다른 일이다**(2026-09-21 사용자 결정).
+    /// 사람 화면은 같은 줄을 늘 `p2` 로 그려 왔다.
+    ///
+    /// **줄이 그 키를 제 몸에 들고 있으면 여기는 비운다** — 한 객체에 같은 키가 둘 서지 않는다.
+    /// 그래서 값이 적힌 줄의 출력은 한 글자도 안 바뀐다.
+    ///
+    /// 없을 수 *있는* 키(`epic`·`milestone`·`deferred_at`·`assignee`)는 여기 안 든다 — 그쪽은 키가
+    /// 없다는 것이 곧 뜻이다(moai-fqnr). 이 둘은 없을 수가 없다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
     /// 다른 워크트리에서 온 줄이면 그 브랜치 (`--worktree`). **키가 없다는 것이 곧
@@ -418,6 +510,11 @@ pub const OURS: &[&str] = &[
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
     "branch",
+    // 줄이 기본값이라 안 적었을 때 `Row` 가 세우는 것. 줄의 제 키라 모르는 필드로 들어올 일은
+    // 없지만, 걷는 목록은 **출력에 서는 우리 키 전부**다 — 여기서 빼면 `Row` 에 필드를 더하는
+    // 것을 잡는 시험이 이 둘만 못 잡는다.
+    "kind",
+    "priority",
     // `show <id> --json` 이 덧붙이는 것(`json_with`).
     "children",
     "journal",
@@ -429,11 +526,53 @@ pub const OURS: &[&str] = &[
     "place",
     "commits",
     "commits_error",
+    "journal_error",
     "work",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",
 ];
+
+/// 기계에 낼 **못 읽은 저널** — `show --json` 의 `journal_error` 한 자리(moai-f2lc).
+///
+/// `commits_error` 와 같은 꼴이고 같은 까닭이다(`git::Told`): `kind` 가 가르는 자이고 `said` 는
+/// 사람이 읽을 한 줄이다. **다른 것은 배열이라는 것뿐** — git 은 한 번 물어 한 번 지지만, 저널은
+/// 사람마다 갈린 N 개라 한 판에 여럿이 안 읽힐 수 있고, 그중 하나만 대면 나머지는 조용해진다.
+///
+/// **경로를 안 자른다.** `commits_error` 는 자르는데(같은 JSON 의 `workplaces` 가 자르므로) 여기는
+/// 그 자리가 곧 고치는 법이다 — `chmod` 를 어디에 하는지가 이 값의 쓸모다.
+#[derive(Debug, serde::Serialize)]
+pub struct JournalError {
+    /// `permission`·`failed`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
+    pub kind: &'static str,
+    /// 사람이 읽을 한 줄 — `main` 이 stderr 로 내는 줄과 **같은 글이다**. 두 자리에서 따로
+    /// 지으면 같은 실패를 화면과 `--json` 이 다른 말로 말한다.
+    pub said: String,
+}
+
+/// 못 읽은 저널을 기계 꼴로 접는다. `root` 를 주면 **그 저장소의 것만** 고른다 —
+/// `show --worktree` 는 겹쳐 온 줄의 이력을 그 워크트리의 저널에서 읽으므로(`show::home`),
+/// 한 판의 목록에 여러 체크아웃의 자리가 섞인다. 줄 곁에 다는 키는 **그 줄의 뿌리**의 것이라야
+/// "이 줄의 이력이 덜 왔다" 라는 말이 된다. `None` 이면 다 든다(`main` 의 stderr).
+///
+/// **순수하다** — 전역을 안 읽는다. 읽는 자는 부르는 쪽이다.
+pub fn journal_errors(
+    lang: crate::i18n::Lang,
+    unread: &[crate::store::Unread],
+    root: Option<&std::path::Path>,
+) -> Vec<JournalError> {
+    unread
+        .iter()
+        .filter(|u| root.is_none_or(|r| u.root == r))
+        .map(|u| JournalError {
+            kind: u.kind,
+            said: crate::i18n::fill(
+                crate::i18n::say(lang, "warn.unread_journal"),
+                &[("at", &u.at.display().to_string()), ("why", &u.said)],
+            ),
+        })
+        .collect()
+}
 
 impl<'a> Row<'a> {
     /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
@@ -454,7 +593,10 @@ impl<'a> Row<'a> {
             }
         };
         let derived = read.filter(|_| crate::report::is_group(&issue));
-        Row { issue, derived_status: derived, branch: None }
+        // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
+        let kind = issue.kind.is_default().then(|| issue.kind.as_str());
+        let priority = issue.priority.is_none().then(|| issue.priority());
+        Row { issue, kind, priority, derived_status: derived, branch: None }
     }
 
     /// 겹쳐 본 줄이면 그 출처를 곁들인다.
@@ -580,7 +722,7 @@ pub fn json_with<T: Appendable>(base: &T, extra: &[(&str, String)]) -> R<Vec<Str
     );
     let mut s = serde_json::to_string(base).map_err(|e| Fail::new(e.to_string()))?;
     if !s.ends_with('}') {
-        return Err(Fail::new("객체가 아니다"));
+        return Err(Fail::new("not an object"));
     }
     let empty = s == "{}";
     s.pop();
@@ -647,6 +789,25 @@ mod tests {
     use super::*;
     use crate::model::{Issue, Kind, Status};
 
+    /// **실행 비트가 답을 가른다.** `is_file` 만 보던 판은 권한이 빠진 파일을 "돈다" 고 했고,
+    /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.
+    ///
+    /// 재는 자가 한 자리에 선다 — `skill` 과 `tui` 가 저마다 적던 것을 여기로 모았다(moai-p3kb).
+    #[cfg(unix)]
+    #[test]
+    fn only_a_file_with_the_execute_bit_runs() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let s = crate::scratch::Scratch::new("cmd-runnable");
+        let exe = s.join("exe");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        assert!(!runnable(&exe), "실행 비트가 없는데 돈다고 한다");
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runnable(&exe), "실행 비트가 섰는데 안 돈다고 한다");
+        // 디렉터리는 실행 비트가 서 있어도 돌릴 것이 아니고, 없는 자리도 아니다.
+        assert!(!runnable(s.path()), "디렉터리를 돌린다고 한다");
+        assert!(!runnable(&s.join("없다")), "없는 자리를 돈다고 한다");
+    }
+
     fn row_with(rest: &[(&str, &str)]) -> Issue {
         let mut i =
             Issue::new("argos-0001".into(), "제목".into(), Kind::Epic, Status::new("todo"), "2026-09-11T04:12:03Z");
@@ -654,6 +815,35 @@ mod tests {
             i.rest.insert(k.to_string(), serde_json::Value::String(v.to_string()));
         }
         i
+    }
+
+    /// 종류도 우선순위도 **기본값이라 줄에 안 적히는** 줄. 파일에서 가장 흔한 꼴이다.
+    fn plain() -> Issue {
+        Issue::new("argos-0002".into(), "제목".into(), Kind::Issue, Status::new("todo"), "2026-09-11T04:12:03Z")
+    }
+
+    /// **기본값이라 줄에서 빠진 키도 `--json` 에는 선다**(moai-51it·moai-a4u9). 파일에 안 적는 것과
+    /// `--json` 이 안 내는 것은 다른 일이다 — 읽는 쪽에는 그 침묵의 뜻이 안 보여 `jq -r .priority` 가
+    /// 기본값인 줄과 모르는 값을 한 `null` 로 받는다.
+    #[test]
+    fn a_row_speaks_the_default_kind_and_priority() {
+        let i = plain();
+        assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
+        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
+        assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
+    }
+
+    /// **줄이 든 값은 그대로 한 번만 선다.** 세우는 자리가 줄과 `Row` 둘이라, 줄이 들고 있을 때도
+    /// 세우면 한 객체에 같은 키가 둘 서고 깐깐한 파서가 거절한다.
+    #[test]
+    fn a_row_that_carries_them_is_untouched() {
+        let mut i = row_with(&[]);
+        i.priority = Some(1);
+        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
+        assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
+        assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
     }
 
     /// **덧붙인 키가 이긴다**(moai-kgu2) — `show` 가 덧붙이는 키 전부에 같은 자로 선다. 겹치지
@@ -709,8 +899,16 @@ mod tests {
     /// 안 걷혀 한 객체에 둘 선다. `Row` 에 필드를 더하면 여기서 붉어진다.
     #[test]
     fn every_key_a_row_adds_is_in_ours() {
-        let i = row_with(&[]);
-        let row = Row { issue: std::borrow::Cow::Borrowed(&i), derived_status: Some("todo"), branch: Some("feat/x") };
+        // **기본값인 줄로 잰다** — 종류와 우선순위는 줄이 안 적었을 때만 `Row` 가 세운다. 적힌
+        // 줄로 재면 그 둘이 곁들인 키로 안 잡혀, 목록에서 빠져도 여기가 안 붉어진다.
+        let i = plain();
+        let row = Row {
+            issue: std::borrow::Cow::Borrowed(&i),
+            kind: Some(Kind::Issue.as_str()),
+            priority: Some(crate::model::DEFAULT_PRIORITY),
+            derived_status: Some("todo"),
+            branch: Some("feat/x"),
+        };
         let added = keys_beyond(&i, &row);
         assert!(!added.is_empty(), "곁들인 키를 못 셌다");
         for k in &added {
@@ -733,5 +931,51 @@ mod tests {
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
         assert!(matches!(Row::of(&i, None).issue, std::borrow::Cow::Borrowed(_)));
+    }
+
+    fn unread(root: &str, at: &str) -> crate::store::Unread {
+        crate::store::Unread {
+            root: std::path::PathBuf::from(root),
+            at: std::path::PathBuf::from(at),
+            kind: "permission",
+            said: "Permission denied".to_string(),
+        }
+    }
+
+    /// **줄 곁에 다는 것은 그 줄의 뿌리의 실패뿐이다**(moai-f2lc). `show --worktree` 는 겹쳐 온
+    /// 줄의 이력을 그 워크트리의 저널에서 읽으므로 한 판에 여러 체크아웃의 자리가 섞인다 —
+    /// 안 가르면 제 파일은 멀쩡한 줄이 남의 0600 파일 하나로 "이력이 덜 왔다" 를 달고 선다.
+    /// `main` 이 종료 코드를 제 뿌리로만 가르는 것(`any_mine`)과 같은 금이다.
+    #[test]
+    fn a_rows_journal_error_names_only_its_own_root() {
+        let all =
+            [unread("/w/mine", "/w/mine/.moai/journal/a.jsonl"), unread("/w/side", "/w/side/.moai/journal/b.jsonl")];
+        let lang = crate::i18n::Lang::En;
+
+        let mine = journal_errors(lang, &all, Some(std::path::Path::new("/w/mine")));
+        assert_eq!(mine.len(), 1, "{mine:?}");
+        assert!(mine[0].said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", mine[0].said);
+        assert!(!mine[0].said.contains("/w/side"), "옆 체크아웃의 자리를 이 줄에 달았다 — {}", mine[0].said);
+
+        // 뿌리를 안 주면 다 든다 — `main` 의 stderr 는 옆의 것도 말한다.
+        assert_eq!(journal_errors(lang, &all, None).len(), 2);
+        // 못 읽은 것이 하나도 없으면 한 줄도 없다 — 그 빔이 곧 "이력이 다 왔다" 이다.
+        assert!(journal_errors(lang, &[], None).is_empty());
+    }
+
+    /// **가르는 자는 `kind` 고 `said` 는 사람의 것이다**(moai-f2lc) — `commits_error` 와 같은
+    /// 약속이다. `said` 는 말묶음에서 오므로 말이 갈리면 글자도 갈리는데, `kind` 는 그대로다:
+    /// 받는 쪽이 `said` 로 갈라 읽으면 그 고리는 화면 말 설정 하나로 조용히 깨진다.
+    #[test]
+    fn the_kind_is_the_machines_and_the_said_is_the_persons() {
+        let one = [unread("/w/mine", "/w/mine/.moai/journal/a.jsonl")];
+        let en = journal_errors(crate::i18n::Lang::En, &one, None);
+        let ko = journal_errors(crate::i18n::Lang::Ko, &one, None);
+        assert_eq!(en[0].kind, ko[0].kind, "말이 갈렸다고 `kind` 까지 갈렸다");
+        assert_ne!(en[0].said, ko[0].said, "말이 안 갈린다 — 말묶음을 안 지났다");
+        for e in [&en[0], &ko[0]] {
+            assert!(e.said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", e.said);
+            assert!(e.said.contains("Permission denied"), "{}", e.said);
+        }
     }
 }

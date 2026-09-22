@@ -4,16 +4,44 @@ What to do when the tracker files, a merge, or a release ends up in a state you
 did not intend. Everything here is a file in your repository, so almost every
 answer is "look at it, then commit the version you want".
 
-## The two files
+## The files
 
 ```
-.moai/issues.jsonl    one line per issue, sorted by id. The snapshot is the truth.
-.moai/journal.jsonl   append-only history. Never read to compute state.
+.moai/issues.jsonl              one line per issue, sorted by id. The snapshot is the truth.
+.moai/journal/<email>.jsonl     append-only history, one file per writer. Never read to compute state.
+.moai/journal.jsonl             the old single file. Still read; nothing is written there any more.
 ```
 
-`issues.jsonl` is what every command reads. `journal.jsonl` records `create`,
+`issues.jsonl` is what every command reads. The journal records `create`,
 `status`, `note` and `rm`; field edits are not recorded. If the journal is lost,
 you lose history, not state.
+
+**Several journal files is the normal shape.** The name comes from the writer's
+email with `@` and `.` folded to `_` (`raven@buzzni.com` →
+`raven_buzzni_com.jsonl`), so people do not collide on merge. Reading gathers
+every `.jsonl` under `.moai/journal/` plus the old single file and orders them by
+timestamp — there is no migration, and a repository that still has only the old
+file works exactly as it did.
+
+**A journal file that cannot be read is skipped, not fatal.** Two accounts
+sharing one checkout is enough for someone else's `<email>.jsonl` to stand 0600,
+and history you can read should not go with it. moai reads the rest, names the
+place it could not read and the reason on stderr, and ends non-zero — so a
+shortened history never comes back as a successful "no history", and `chmod` is
+the fix. The exit code is the one every partial answer shares, so it says "this
+run was not whole", not which part; the stderr line is what names the file.
+A neighbouring worktree's journal (`show --worktree` reads history where the row
+came from) is named the same way but leaves the exit code alone — your own files
+are fine, and a neighbour's permissions are not your command failing.
+
+**`--json` says which row paid for it.** `show <id> --json` and the list carry a
+`journal_error` array beside the row whose history came up short, shaped like
+`commits_error`: `kind` (`permission` or `failed`) is what a machine branches on,
+`said` is the same line stderr prints, naming the file to `chmod`. A row carries
+only its own root's failures, so a neighbour's locked journal never lands on your
+rows. The key is absent when nothing was skipped — `journal` is always there, so
+an empty `journal` with no `journal_error` beside it is "no history", and the
+same empty array with the key beside it is "could not be read".
 
 Two habits make recovery cheap, and both are properties of the tool rather than
 advice:

@@ -91,14 +91,23 @@
 `SheetRefusal`) `view::sheet_trouble`·`sheet_refusal` 이 `sheet.*` 로 편다. `moai read` 의 stderr 와
 멈춘 까닭이 한 말로 서는 것을 `the_read_sheet_speaks_the_chosen_language` 가 잰다.
 
-**남은 자리 둘은 트래커가 든다** — 저장 계층에 남은 글 다섯(idea moai-uqxn, 넷이 쓰기 경로
-안이다), 검증 글 열넷(idea moai-gbk3). 그 둘이 남은 동안은 한 명령이 두 말로 서는 자리가 있다:
-못 읽는 프로젝트 한 줄(영어 테두리 안에 `store` 의 한국어 까닭), 그리고 `config.toml` 이 깨진
-저장소에서 `open_repo` 를 지나 나오는 검증 한 줄이다.
+**설정을 읽다 멈춘 줄도 말묶음에 왔다**(moai-ivt9) — `config::Trouble`·`Refused`·`Want` 는
+자료만 내고 `view::config_trouble`·`config_refused` 가 `config.*` 로 편다. 사람을 못 푼 줄
+(`model::NoActor` → `view::no_actor`)과 git 이 이력을 못 낸 줄(`git::Error::said` →
+`view::git_trouble`), 계획 파서의 거절(`draft.*`)도 같은 판에서 함께 왔다.
+
+**남은 자리는 트래커가 든다** — 저장 계층에 남은 글(idea moai-uqxn, 쓰기 경로 안이다),
+검증 글 열넷(idea moai-gbk3). 그것이 남은 동안은 한 명령이 두 말로 서는 자리가 있다:
+못 읽는 프로젝트 한 줄이 영어 테두리 안에 `store` 의 한국어 까닭을 든다.
 
 **같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기
-(`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어고, `ready`
-표의 에픽 칸에 서는 `(없는 에픽)` 은 `report::epic_labels` 가 짓는다. 그 밖의 화면
+(`view::projects_status`·`projects_ready`)는 머리 줄만 제 말이고 아래는 한국어다. `ready`
+표의 에픽 칸에 서는 `(없는 에픽)` 은 `report.epic_gone` 의 낱말이다 — 여기는 옮겼다
+(moai-ivt9). **괄호는 말묶음에 없다**(moai-snus) — `report::epic_labels` 는 찾았는가만
+값으로 내고(`report::EpicLabel`), 감싸는 표기는 그리는 쪽이 정한다. **그 "그리는 쪽" 도 한
+자리다**(리뷰) — `view::gone_epic` 이고, 네 표면(`list`·`ready`·`prime`·`detail`)이 그것을
+부른다. 한때 상세만 제 괄호를 단 딴 키(`detail.missing_epic`)를 들어, 같은 자료를 두고
+목록은 `(epic not there)` 라 하고 `show <id>` 는 `(no such epic)` 이라 했다. 그 밖의 화면
 (`show` 의 상세와 이력, `tui`)도 아직 한국어로 박혀 있다 — 한 낱말이 두 화면에 서면
 (`미룸`·`자식 없음`) 한쪽만 옮긴 동안은 같은 줄이 두 말로 보인다. 남은 자리는 트래커에 있다.
 

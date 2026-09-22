@@ -14,7 +14,7 @@ use std::io::IsTerminal;
 pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트의 층에서 시작한다(moai-ujpu). **설정이 깨진 저장소
     // 안(`Err`)은 층으로 새지 않는다** — 제 저장소의 깨진 설정이 남의 목록 뒤에 숨는다.
-    let Some(repo) = Repo::find()? else {
+    let Some(repo) = Repo::find(|| ctx.lang())? else {
         return outside(ctx, args);
     };
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가
@@ -51,7 +51,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return super::json_line(&rows);
     }
 
-    refuse_without_terminal()?;
+    refuse_without_terminal(ctx.lang())?;
 
     // 등록한 프로젝트가 있으면 층을 얹는다 — 헤더의 `0` 이 그리로 간다(moai-i784·moai-o133).
     // **남의 프로젝트는 여기서 안 읽는다**: 처음 올라갈 때 읽는다. 안에서 띄운 사람의 첫
@@ -88,7 +88,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
     let root = app.here().unwrap_or_else(|| ".".into());
-    app.me = app.whoami(&root);
+    app.site.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.config_stamp = config_stamp;
@@ -108,7 +108,41 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
+}
+
+/// 새 판을 묻는 실을 띄운다 — **문을 지날 때만**(moai-3gia, 사용자 결정 2026-09-21).
+///
+/// 문은 넷이다([`crate::latest::gate`]) — 환경(`MOAI_NO_UPDATE_CHECK`), 설정(`[update] check`),
+/// `--json`, 그리고 사람이 보는 화면인가. 탐색기는 화면을 켜는 길이라 뒤의 둘은 거의 늘 참이지만,
+/// **묻는 쪽이 답을 내야** 한다는 계약은 여기서도 지킨다 — `gate` 가 인자를 갈라 받는 까닭이 그것이다.
+///
+/// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
+/// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
+/// 기능이 피하려던 바로 그 일이다.
+fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>) {
+    let Some(dir) = asking_from(config, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
+        return;
+    };
+    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k)));
+}
+
+/// 물을 것인가, 물으면 답을 어디에 둘 것인가 — **판단만 한다**(리뷰).
+///
+/// 문을 재는 자리를 실을 띄우는 자리에서 갈라 둔 것은 시험이 그것을 잴 수 있게 하려는 것이다.
+/// 붙여 두면 `is_some()` 을 `is_none()` 으로 뒤집어도 온 시험이 푸르게 서 있었다 — 문이 반대로
+/// 서면 `--json` 이 매번 바깥을 두드리는데, 그것이 이 기능이 피하려던 바로 그 일이다.
+fn asking_from(
+    config: Option<&std::path::Path>,
+    json: bool,
+    on_screen: bool,
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let dir = config.and_then(|p| p.parent())?;
+    let says = crate::latest::config_says(config);
+    crate::latest::gate(env, says, json, on_screen).is_none().then(|| dir.to_path_buf())
 }
 
 /// `.moai` 밖에서 부른 탐색기 — 등록한 프로젝트의 층.
@@ -132,22 +166,23 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 두 프로젝트 중 하나를 말없이 고르게 된다.
     if args.path.is_some() {
         return Err(Fail::coded(
-            "`--path` 는 프로젝트 안의 id 다 — `moai -C <dir> tui --path <id>` 로 그 프로젝트에서 연다",
+            crate::i18n::say(super::lang_of(&reg), "refuse.tui_path_outside"),
             super::code::BAD_INPUT,
         ));
     }
     if ctx.json {
         let now = crate::model::now();
-        let projects = crate::projects::open(&reg);
+        let projects = crate::projects::open(&reg, super::lang_of(&reg));
         let rows: Vec<ProjectRow> = projects
             .iter()
             .map(|p| {
                 let seen = p.seen(|repo, load| {
-                    let sum = crate::tui::layer::summarize(repo, load, &now);
+                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug());
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         warnings: sum.warnings,
+                        notices: sum.notices,
                         stranded: sum.stranded,
                         unreadable_worktrees: sum.blind,
                         broken_worktrees: sum.unread,
@@ -170,7 +205,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         let problems = crate::view::settings_problems(&reg, super::lang_of(&reg));
         return super::json_line(&Layered { projects: rows, problems: &problems, config: reg.path.as_deref() });
     }
-    refuse_without_terminal()?;
+    refuse_without_terminal(ctx.lang())?;
     let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
     let mut app = App::on_projects(layer);
     app.site.lang = ctx.lang();
@@ -178,7 +213,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
     // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
     // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
-    app.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    app.site.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
     app.user_config = config;
     app.config_stamp = config_stamp;
     // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
@@ -190,6 +225,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    let config = app.user_config.clone();
+    ask_latest(ctx, &mut app, config.as_deref());
     screen(app)
 }
 
@@ -226,6 +263,12 @@ struct Counted {
     counts: std::collections::BTreeMap<String, usize>,
     picked: Vec<String>,
     warnings: usize,
+    /// 설치가 어긋난 것과 쌓인 것을 대는 알림의 수(moai-prdh) — 화면의 층이 `+N` 으로 대는 그
+    /// 수고, 안쪽 `moai status` 가 세우는 알림과 같은 자다(`layer::Summary::notices`).
+    /// **경고가 아니다** — 위의 `warnings` 와 겹치지 않고 종료 코드와도 상관없다.
+    /// 없으면 키를 안 단다 — 곁의 셋과 같은 까닭이다.
+    #[serde(skip_serializing_if = "is_zero")]
+    notices: usize,
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 화면의 층이 낱말로 대는 그 수다.
     /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
     #[serde(skip_serializing_if = "is_zero")]
@@ -250,13 +293,16 @@ fn is_zero(n: &usize) -> bool {
 
 /// **TTY 가 아니면 켜지 않는다.** 파이프에 대고 대체 화면을 켜면 그 자리에서
 /// 멈춰 서고, 부른 쪽은 왜 멈췄는지 알 길이 없다.
-fn refuse_without_terminal() -> R<()> {
+fn refuse_without_terminal(lang: crate::i18n::Lang) -> R<()> {
     if std::io::stdout().is_terminal() {
         return Ok(());
     }
     Err(Fail::coded(
-        "터미널이 아니라 탐색기를 띄우지 않는다.\n      \
-         목록만 필요하면 `moai tui --json` 이다",
+        format!(
+            "{}\n      {}",
+            crate::i18n::say(lang, "refuse.tui_needs_a_terminal"),
+            crate::i18n::say(lang, "refuse.tui_json_instead"),
+        ),
         super::code::BAD_INPUT,
     ))
 }
@@ -271,7 +317,10 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 부르고 그것은 `.expect()` 다 — 통제 터미널이 없거나 크기를 못 얻으면
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
-    let mut term = ratatui::try_init().map_err(|e| Fail::new(format!("터미널을 열지 못했다: {e}")))?;
+    let lang = app.site.lang;
+    let mut term = ratatui::try_init().map_err(|e| {
+        Fail::new(crate::i18n::fill(crate::i18n::say(lang, "tui.no_terminal"), &[("why", &e.to_string())]))
+    })?;
     // **붙여넣기를 글로 받는다**(moai-od9q). 안 켜면 붙인 글이 키 하나하나로 와서, 탭은 폼의
     // 칸을 옮기고 줄바꿈은 Enter 로 검색을 걸거나 제목을 떠나며, 탐색 중에 붙인 `q` 는 끝낸다.
     // 끄는 길은 둘이다 — 여기 아래의 정상 끝과 **패닉 훅.** ratatui 의 훅은 raw mode 와 대체
@@ -297,8 +346,8 @@ fn screen(mut app: App) -> R<Vec<String>> {
             .downcast_ref::<&str>()
             .copied()
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("알 수 없는 까닭");
-        eprintln!("moai: 탐색기가 패닉으로 멈췄다 — {why}");
+            .unwrap_or(crate::i18n::say(lang, "tui.panic_unknown_why"));
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "tui.panicked"), &[("why", why)]));
         std::panic::resume_unwind(payload)
     });
     out.map_err(|e| Fail::new(e.to_string()))?;
@@ -505,21 +554,14 @@ fn editor() -> Option<String> {
     crate::tui::jotfile::pick(var("VISUAL").as_deref(), var("EDITOR").as_deref(), on_path)
 }
 
-/// PATH 에 그 이름의 실행 파일이 있는가.
+/// PATH 에 그 이름의 실행 파일이 있는가. **실행할 수 있는가는 [`super::runnable`] 이 답한다** —
+/// `skill` 과 같은 자다(moai-p3kb).
+///
+/// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
+/// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&dirs).any(|d| std::fs::metadata(d.join(name)).is_ok_and(|m| m.is_file() && executable(&m)))
-}
-
-#[cfg(unix)]
-fn executable(m: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    m.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn executable(_: &std::fs::Metadata) -> bool {
-    true
+    std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -559,23 +601,28 @@ fn resume(term: &mut DefaultTerminal) -> std::io::Result<()> {
 /// 열린 채 남는다([`App::edited`]) — 파일에 둘 까닭이 없다. 편집기는 이 프로세스의 stdin·
 /// stdout 을 그대로 받는다. 기다리는 동안 Ctrl-C 가 신호로 오면(raw 로 돌지 않는 편집기)
 /// moai 도 같이 끝난다 — 터미널은 이미 내려 둔 채라 셸은 멀쩡하고, 파일 하나가 남는다.
-fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path) -> Result<String, String> {
+fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate::i18n::Lang) -> Result<String, String> {
+    use crate::i18n::{fill, say};
     use std::io::Write;
-    let (path, mut file) = scratch_file(dir).map_err(|e| format!("임시 파일을 못 만들었다 — {e}"))?;
+    // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests`)이 `say(…, "키")` 모양만 읽어,
+    // 키를 닫힘에 넘기면 그 눈에서 통째로 사라진다.
+    let (path, mut file) =
+        scratch_file(dir).map_err(|e| fill(say(lang, "tui.editor_no_temp_file"), &[("why", &e.to_string())]))?;
     let written = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
     drop(file);
     let got = written
-        .map_err(|e| format!("임시 파일에 못 적었다 — {e}"))
+        .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
             std::process::Command::new("sh")
                 .args(crate::tui::jotfile::argv(editor, &path))
                 .status()
-                .map_err(|e| format!("편집기를 못 띄웠다({editor}) — {e}"))
+                .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
         .and_then(|status| match status.code() {
-            Some(0) => std::fs::read_to_string(&path).map_err(|e| format!("편집기가 남긴 파일을 못 읽었다 — {e}")),
-            Some(code) => Err(format!("편집기가 {code} 로 끝났다({editor})")),
-            None => Err(format!("편집기가 신호로 끝났다({editor})")),
+            Some(0) => std::fs::read_to_string(&path)
+                .map_err(|e| fill(say(lang, "tui.editor_no_read"), &[("why", &e.to_string())])),
+            Some(code) => Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())])),
+            None => Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)])),
         });
     let _ = std::fs::remove_file(&path);
     got
@@ -605,7 +652,8 @@ fn private_file(dir: &std::path::Path, stem: &str) -> std::io::Result<(std::path
             Err(e) => return Err(e),
         }
     }
-    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "빈 이름을 못 찾았다"))
+    // io 의 오류 글이라 영어 하나다 — 부르는 쪽이 제 말로 감싼다(moai-na0d).
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
 
 /// 버릴 뻔한 글을 `dir` 의 새 파일에 **편집기 글과 같은 모양**으로 적고 그 경로를 돌려준다
@@ -634,11 +682,16 @@ fn keep_unsaved(app: &App) {
     let Some((title, body)) = app.unsaved() else { return };
     match rescue(&title, body.as_deref(), &std::env::temp_dir()) {
         Ok(path) => eprintln!(
-            "moai: 담지 못한 생각을 파일로 남겼다 — {}\n      첫 줄이 제목, 한 줄 띄우고 본문이다. 탐색기에서 SPC n 으로 다시 담는다",
-            path.display()
+            "moai: {}\n      {}",
+            crate::i18n::fill(
+                crate::i18n::say(app.site.lang, "tui.unsaved_kept"),
+                &[("at", &path.display().to_string())]
+            ),
+            crate::i18n::say(app.site.lang, "tui.unsaved_kept_how")
         ),
         Err(e) => eprintln!(
-            "moai: 담지 못한 생각을 파일로도 못 남겼다({e}) — 여기 그대로 낸다\n{title}\n\n{}",
+            "moai: {}\n{title}\n\n{}",
+            crate::i18n::fill(crate::i18n::say(app.site.lang, "tui.unsaved_lost"), &[("why", &e.to_string())]),
             body.unwrap_or_default()
         ),
     }
@@ -719,7 +772,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
             suspend();
-            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir());
+            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
             app.edited(edit.into, got);
@@ -755,6 +808,30 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
 
 #[cfg(test)]
 mod tests {
+    /// **문이 반대로 서면 `--json` 이 매번 바깥을 두드린다**(moai-3gia, 리뷰). `latest::gate` 는
+    /// 제자리에서 잘 재지만, 그 답을 **쓰는** 자리가 안 재이던 자리였다.
+    #[test]
+    fn the_explorer_asks_only_when_every_door_is_open() {
+        let s = crate::scratch::Scratch::new("tui-latest-gate");
+        let at = s.path().join("config.toml");
+        std::fs::write(&at, "").unwrap();
+        let none = |_: &str| None;
+        assert_eq!(super::asking_from(Some(&at), false, true, none).as_deref(), Some(s.path()));
+        // `--json` 은 화면이 터미널이어도 안 묻는다 — 에이전트가 치는 자리다.
+        assert_eq!(super::asking_from(Some(&at), true, true, none), None);
+        // 사람이 보는 화면이 아니면 안 묻는다(파이프).
+        assert_eq!(super::asking_from(Some(&at), false, false, none), None);
+        // 설정이 껐으면 안 묻는다.
+        std::fs::write(&at, "[update]\ncheck = false\n").unwrap();
+        assert_eq!(super::asking_from(Some(&at), false, true, none), None);
+        // 환경이 껐으면 안 묻는다.
+        std::fs::write(&at, "").unwrap();
+        let off = |k: &str| (k == crate::latest::OFF_VAR).then(|| std::ffi::OsString::from("1"));
+        assert_eq!(super::asking_from(Some(&at), false, true, off), None);
+        // 답을 둘 자리를 모르면 안 묻는다 — 창을 닫을 자리가 없어 부를 때마다 두드리게 된다.
+        assert_eq!(super::asking_from(None, false, true, none), None);
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -873,7 +950,7 @@ mod tests {
     fn the_editor_gets_the_template_and_its_edit_comes_back() {
         let d = Dir::new("ok");
         let editor = d.editor("f=\"$2\"; printf '제목\\n\\n본문\\n' >> \"$f\"");
-        let got = write_in_editor(&editor, "# 안내\n", &d.0).expect("편집기가 돌려주지 않았다");
+        let got = write_in_editor(&editor, "# 안내\n", &d.0, crate::i18n::Lang::Ko).expect("편집기가 돌려주지 않았다");
         assert_eq!(got, "# 안내\n제목\n\n본문\n");
         assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
         assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
@@ -890,11 +967,13 @@ mod tests {
     fn a_failing_editor_gives_a_reason_and_leaves_nothing() {
         let d = Dir::new("fail");
         let editor = d.editor("printf '담길 뻔한 것\\n' > \"$2\"; exit 3");
-        let why = write_in_editor(&editor, "", &d.0).expect_err("비영으로 끝났는데 글을 돌려줬다");
+        let why =
+            write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko).expect_err("비영으로 끝났는데 글을 돌려줬다");
         assert!(why.contains('3'), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
 
-        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0).expect_err("없는 편집기인데 글을 돌려줬다");
+        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0, crate::i18n::Lang::Ko)
+            .expect_err("없는 편집기인데 글을 돌려줬다");
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
     }

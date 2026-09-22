@@ -21,7 +21,7 @@ enum Target {
     All,
 }
 
-fn resolve(target: Option<&str>) -> R<Target> {
+fn resolve(target: Option<&str>, lang: crate::i18n::Lang) -> R<Target> {
     match target {
         None => Ok(Target::All),
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
@@ -32,8 +32,9 @@ fn resolve(target: Option<&str>) -> R<Target> {
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
             format!(
-                "`{t}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone, idea\n      \
-                 id 로 찾으려면 접두어까지 적는다"
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.show_target"), &[("target", t)]),
+                crate::i18n::say(lang, "refuse.show_target_how"),
             ),
             super::code::BAD_TARGET,
         )),
@@ -52,7 +53,7 @@ fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
         if let Sel::Is(v) = one
             && v == "me"
         {
-            let me = model::actor(ctx.user.as_deref(), root)?;
+            let me = model::actor(ctx.user.as_deref(), root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
             *one = Sel::Is(format!("{} ({})", me.name, me.email));
         }
     }
@@ -93,7 +94,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let target = match kind_filter {
         // `moai epic show <id>` 는 그 id 를 그대로 본다. 종류는 목록일 때만 거른다.
         Some(k) if args.target.is_none() => Target::OfKind(k),
-        _ => resolve(args.target.as_deref())?,
+        _ => resolve(args.target.as_deref(), ctx.lang())?,
     };
 
     if let Target::One(id) = &target {
@@ -102,8 +103,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if let Some(flag) = args.tree.then_some("--tree").or_else(|| first_given(&args.filter)) {
             return Err(Fail::coded(
                 format!(
-                    "`{id}` 하나를 펼치는 자리에는 `{flag}` 를 쓸 수 없다.\n      \
-                     거르려면 id 없이 `moai show {flag} …` 다"
+                    "{}\n      {}",
+                    crate::i18n::fill(
+                        crate::i18n::say(ctx.lang(), "refuse.show_filter_on_one"),
+                        &[("id", id), ("flag", flag)]
+                    ),
+                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.show_filter_how"), &[("flag", flag)]),
                 ),
                 "bad_filter",
             ));
@@ -125,9 +130,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 원문을 받았다고 믿는다 — 위의 필터와 같은 까닭이다.
     if args.raw {
         return Err(Fail::coded(
-            "`--raw` 는 본문이 나오는 자리에서만 뜻이 있다.\n      \
-             `moai show <id> --raw` 처럼 하나를 집어서 쓴다"
-                .to_string(),
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(ctx.lang(), "refuse.show_raw_on_list"),
+                crate::i18n::say(ctx.lang(), "refuse.show_raw_how"),
+            ),
             "bad_filter",
         ));
     }
@@ -135,9 +142,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 도로 안 들어가는 글이 된다.
     if args.as_plan {
         return Err(Fail::coded(
-            "`--as-plan` 은 에픽 하나를 되뽑는다.\n      \
-             `moai show <에픽> --as-plan` 처럼 하나를 집어서 쓴다"
-                .to_string(),
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_on_list"),
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_how"),
+            ),
             super::code::BAD_TARGET,
         ));
     }
@@ -189,7 +198,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     //
     // **숨긴 것도 센다.** 담아 둔 생각뿐인 저장소에서 `moai show` 가 그냥
     // "없다." 라고 하면, 방금 담은 사람은 파일이 비었다고 믿는다.
-    let asked_deferred = filter.deferred.is_some();
+    // **꼬리의 미룸 낱말은 물은 것을 따른다**(moai-pkvw) — 미룬 것만 물었으면 줄마다 같은 낱말이
+    // 붙어 봐야 자리만 먹는다. 결과의 내용으로 정하지 않는 까닭은 [`view::Asked`] 에 있다.
+    let asked = view::Asked { deferred: filter.deferred.is_some() };
     let wide = Filter { all: true, ideas: true, ..filter.clone() };
     // **소속 지도는 한 벌이다**(moai-g0zx) — 거름망과 트리의 색인·에픽 굴림이 저마다 지으면
     // `groups` 가 한 명령에 세 벌 돈다. 지도를 빌려 쓰는 둘을 먼저 짓고, 그것을 제 필드로 들고
@@ -224,11 +235,23 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
         // `show <id> --json` 을 500번 부르면 저널 전체를 500번 읽는다 — 여기서는 뿌리마다
         // 한 번 읽어 id 로 가른다.
-        let work = work_by_id(&repo, &origin, &shown)?;
+        let work = work_by_id(&repo, &origin, &shown);
+        // **못 읽은 저널은 저널을 읽은 **뒤**에 묻는다** — `work_by_id` 가 그 읽기다. 뿌리마다
+        // 한 번 접어 두고 줄마다 그 줄의 뿌리 것을 빌린다(`home`): 줄 수만큼 글을 다시 짓지 않고,
+        // 겹쳐 온 줄은 제 워크트리의 실패만 달고 선다.
+        let unread = crate::store::journal_unread();
+        let errors: std::collections::BTreeMap<&std::path::Path, Vec<super::JournalError>> = shown
+            .iter()
+            .map(|i| home(&repo, &origin, &i.id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|root| (root, super::journal_errors(ctx.lang(), &unread, Some(root))))
+            .collect();
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
                 row: super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin),
+                journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
                 // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
                 // 옛 `work` 가 그 자리에서 거짓을 싣는다.
@@ -241,7 +264,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
     // **화면은 한 번 짓는다** — 트리와 목록은 갈라져 서지만 같은 맥락으로 그리므로, 두 자리에서
     // 따로 지으면 한쪽만 고치는 날 같은 명령의 두 표면이 다른 말이나 다른 출처로 선다.
-    let screen = view::Screen::new(ctx.lang()).over(&origin);
+    let screen = view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin);
     if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
@@ -267,7 +290,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &repo.config,
         tally(&BTreeSet::new()),
         &report::epic_labels(&load.issues),
-        asked_deferred,
+        asked,
         &wh,
         screen,
     ))
@@ -286,6 +309,10 @@ struct Listed<'a> {
     #[serde(flatten)]
     row: super::Row<'a>,
     work: &'a [model::Work],
+    /// 이 줄의 이력이 **덜 왔다**(moai-f2lc). 그 줄의 뿌리에서 못 읽은 저널이 있을 때만 선다 —
+    /// 없는 것이 곧 "이 줄의 이력은 다 왔다" 라, `commits_error` 와 같은 약속이다.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    journal_error: &'a [super::JournalError],
 }
 
 /// 줄이 온 워크트리의 moai 뿌리 — **이력(저널)을 거기서 읽는다**(`Origin::root`). 스냅샷은
@@ -323,18 +350,18 @@ fn work_by_id(
     repo: &Repo,
     origin: &crate::worktree::Origin,
     shown: &[Issue],
-) -> R<std::collections::BTreeMap<String, Vec<model::Work>>> {
+) -> std::collections::BTreeMap<String, Vec<model::Work>> {
     let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
     for i in shown {
         by_root.entry(home(repo, origin, &i.id)).or_default().insert(i.id.as_str());
     }
     let mut out = std::collections::BTreeMap::new();
     for (root, ids) in by_root {
-        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work)? {
+        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work) {
             out.insert(id, model::work_of(&journal));
         }
     }
-    Ok(out)
+    out
 }
 
 /// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.
@@ -346,17 +373,17 @@ fn work_by_id(
 /// 차례는 목록 차례다. 스냅샷은 id 차례라 만든 차례가 남아 있지 않다.
 fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     if raw {
-        return Err(Fail::coded(
-            "`--as-plan` 과 `--raw` 는 같이 쓸 수 없다 — 되뽑은 계획에는 본문이 없다".to_string(),
-            super::code::BAD_FILTER,
-        ));
+        return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.as_plan_with_raw"), super::code::BAD_FILTER));
     }
     if epic.kind != Kind::Epic {
         return Err(Fail::coded(
             format!(
-                "`{}` 는 {} 다. `--as-plan` 은 에픽을 되뽑는다\n      에픽 목록은 `moai show epic`",
-                epic.id,
-                epic.kind.as_str()
+                "{}\n      {}",
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "refuse.as_plan_not_an_epic"),
+                    &[("id", &epic.id), ("is", epic.kind.as_str())]
+                ),
+                crate::i18n::say(ctx.lang(), "refuse.as_plan_epics"),
             ),
             super::code::BAD_TARGET,
         ));
@@ -371,7 +398,7 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
     for id in &lossy {
         // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
         // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
-        eprintln!("moai: {id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 — 넣기 전에 고친다");
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)]));
     }
     Ok(md.lines().map(str::to_string).collect())
 }
@@ -393,7 +420,8 @@ fn one(
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
-    let journal = at_home(repo, home(repo, origin, &issue.id)).journal_of(&issue.id)?;
+    let journal_root = home(repo, origin, &issue.id);
+    let journal = at_home(repo, journal_root).journal_of(&issue.id);
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
@@ -426,7 +454,7 @@ fn one(
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
-        screen: view::Screen::new(ctx.lang()).over(origin),
+        screen: view::Screen::new(ctx.lang()).at(ctx.zone()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
     };
@@ -443,7 +471,7 @@ fn one(
     let root = commit_home(repo, origin, &issue.id);
     let (commits, commits_error) = match crate::git::table(root, &[issue.id.as_str()]) {
         Ok(mut by_id) => (by_id.remove(&issue.id).unwrap_or_default(), None),
-        Err(e) => (Vec::new(), Some(e.told(root))),
+        Err(e) => (Vec::new(), Some(e.told(root, ctx.lang()))),
     };
 
     if ctx.json {
@@ -495,6 +523,20 @@ fn one(
         if let Some(why) = &commits_error {
             extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
+        // **이력이 덜 왔으면 그렇다고 말한다**(moai-f2lc). 여기까지 오면 저널은 이미 읽혔다 —
+        // 못 읽은 파일은 `journal` 에서 말없이 빠져 있고, 그 침묵을 가르는 자가 이 키다.
+        //
+        // **종료 코드만으로는 못 가른다.** `cmd::PARTIAL` 은 못 읽는 스냅샷 줄과 진 `mv` 겨룸까지
+        // 함께 쓰는 한 깃발이라(moai-6924 가 그것 하나로 버티던 자리다), 받는 쪽은 "이 판이 온전치
+        // 않다" 까지만 안다. 어느 이슈의 **이력이** 덜 왔는지는 이 키만 말한다.
+        //
+        // **키가 없으면 다 왔다.** `commits_error` 와 같은 약속이고, `commits` 와 달리 빈 배열을
+        // 안 내는 까닭은 `journal` 이 이미 늘 서기 때문이다 — 빈 `journal` 옆의 이 키가 있고 없고가
+        // 곧 "이력이 없다" 와 "못 읽었다" 의 가름이다.
+        let unread = super::journal_errors(ctx.lang(), &crate::store::journal_unread(), Some(journal_root));
+        if !unread.is_empty() {
+            extra.push(("journal_error", serde_json::to_string(&unread).map_err(|e| Fail::new(e.to_string()))?));
+        }
         // 이 일을 한 AI — 노트의 `model:` 줄을 읽은 값(moai-8f2g). 저장하지 않는다.
         //
         // **키는 늘 선다**(2026-09-18 사용자 결정). 한 이슈에 여러 세션·모델이 줄을 남기니 배열이고,
@@ -529,12 +571,17 @@ fn one(
             Kind::Milestone => &soil.milestone,
             _ => &soil.epic,
         };
+        // **미룬 수는 보드와 같은 자에서 온다**([`report::Stand::deferred`], moai-zxwj) — 분모는
+        // 미룬 멤버를 그대로 세므로, 그 수가 안 줄어드는 까닭을 여기서도 댄다. 따로 세면 같은
+        // 묶음을 보드와 상세가 다른 수로 말한다.
+        let deferred = soil.stands(all, &repo.config).get(issue.id.as_str()).map(|s| s.deferred);
         let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
             .into_iter()
-            .find(|r| r.id.as_deref() == Some(issue.id.as_str()));
+            .find(|r| r.id.as_deref() == Some(issue.id.as_str()))
+            .map(|r| report::Roll { deferred, ..r });
         if let Some(r) = &roll {
             out.push(format!(
-                "  {}   {}/{}  {}{}",
+                "  {}   {}/{}  {}{}{}",
                 view::members_label(ctx.lang()),
                 r.done,
                 r.total,
@@ -542,7 +589,8 @@ fn one(
                 match r.percent {
                     None => String::new(),
                     Some(p) => format!("  {p}%"),
-                }
+                },
+                view::set_aside(r.deferred, ctx.lang()),
             ));
         }
         // **자리를 못 찾으면 아무것도 내지 않는다.** 뿌리로 되돌리면 그 에픽의
@@ -572,7 +620,7 @@ fn one(
     // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
     // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
     out.extend(view::commits(&commits, ctx.lang()));
-    out.extend(view::history(&journal, &repo.config, ctx.lang()));
+    out.extend(view::history(&journal, &repo.config, seen.screen));
     Ok(out)
 }
 
@@ -592,7 +640,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let listed = Listed { row: super::super::Row::of(&i, None), work: &[] };
+        let listed = Listed { row: super::super::Row::of(&i, None), work: &[], journal_error: &[] };
         let added = super::super::keys_beyond(&i, &listed);
         assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
         for k in &added {

@@ -52,7 +52,7 @@ A comma means "or"; the same flag twice means "and".
 When agents each take a git worktree, this worktree's board knows nothing of what
 was picked up and moved beside it. Add `--worktree` to `status`, `ready` or `show`
 and the sibling worktrees' issues are overlaid. The explorer (`moai tui`) opens with
-them overlaid and `SPC t w` turns it off and on.
+them overlaid and `SPC v w` turns it off and on.
 
     moai ready --worktree             work picked up beside you drops out and stands under "held"
     moai status --worktree            the board header says "⎇ <worktrees> overlaid"
@@ -189,6 +189,22 @@ wins over the config). The languages are en, ko, zh, ja and es, and text a langu
 does not carry yet comes out in English — the two that are full right now are en and ko.
 **The system locale (`LANG`, `LC_ALL`) is not read**: it changes only through one of
 those two ways. How to add a translation is in the moai repository's `i18n/README.md`.
+
+## Checking for a new release
+
+The explorer asks GitHub once a day whether a newer release is out, and the version
+line in its header says which of four it is — a new release, the latest, ahead of the
+latest (a build from source), or not asked. **Nothing is blocked**: it is one line, and
+the exit code never changes.
+
+It only asks where a person is watching. `--json`, a pipe and anything that is not a
+terminal never ask, so a machine running agents does not knock on the outside every run.
+The answer, and when it was asked, are held next to your user config in `latest.toml`.
+
+    [update]
+    check = false        # in your user config: never ask on this machine
+
+    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run
 
 ## Unfolding a parked thought
 
@@ -369,9 +385,9 @@ It goes wrong quietly, so the one-liner above looks at the handed-back report fi
 
 **Do not simply take the last line.** One turn's blocks are written line by line with
 thinking and tool calls mixed in, so the last line is sometimes not text at all. Then
-an empty text is passed on and `moai note` stops with `메모가 비었다` — quoted as the binary
-prints it, which is Korean in every language, so matching a translation finds nothing. It stops
-loudly, so nothing is lost, but getting it right the first time is better.
+an empty text is passed on and `moai note` stops, saying the memo is empty. It stops loudly with a
+non-zero exit code, so nothing is lost — but do not match on the words: that line is screen text
+and comes out in whatever language the screen speaks. Getting it right the first time is better.
 
 **Do not keep the summary and throw the original away.** A summary is your own call;
 the original is what the reviewer said. A call can be made again; a discarded original
