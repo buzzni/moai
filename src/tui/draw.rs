@@ -898,7 +898,7 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest().clone());
+    let said = version_said(app.site.lang, app.latest());
     let user = app.told_user().to_string();
     [("User", user), ("Version", said)]
 }
@@ -913,16 +913,49 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 /// **묻는 일은 여기서 안 한다.** 이 함수는 키 하나, 깜빡임 한 번마다 도는 자리라 [`App`] 이
 /// 받아 둔 답([`App::latest`])을 읽기만 한다 — 바로 위 `told_of` 가 `model::actor` 를 여기서 안
 /// 부르는 것과 같은 까닭이고, 묻는 실은 `cmd::tui` 가 여는 걸음에 한 번 띄운다.
-fn version_said(lang: Lang, latest: crate::latest::Seen) -> String {
+///
+/// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
+/// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
+/// `kind` 뿐이라 통째로 버려지는 담기다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
     let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", &tag)]),
+        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
         Seen::Same => say(lang, "tui.version.same").to_string(),
         Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
-        Seen::Unasked => say(lang, "tui.version.unchecked").to_string(),
+        Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
     };
     format!("{mine} · {said}")
+}
+
+/// 못 물은 까닭마다 다른 글 — 키 하나(moai-580l).
+///
+/// **넷째 글을 갈래마다 갈랐다.** 넷이 다른 글이라는 결정(2026-09-21)은 그대로다 — 어느
+/// 갈래도 "최신" 이라 적지 않고, 모두 못 물었다고 먼저 적은 뒤 괄호로 까닭을 단다. 사람이
+/// 할 일이 갈래마다 다르기 때문이다: 부름 수를 태운 것은 기다리면 풀리고, 인증서를 갈아
+/// 끼우는 프록시 뒤에서는 영영 안 되며, 태그 꼴은 릴리스를 지은 쪽이 고친다.
+///
+/// **낱말을 잇지 않고 글 전체를 고른다.** `"{unchecked} ({why})"` 로 이으면 말마다 괄호와
+/// 차례를 못 바꾸고, 이 줄은 탐색기 머리의 좁은 자리라 말마다 줄이는 법이 다르다. 키를
+/// `say(…, "…")` 에 그대로 적는 것도 약속이다 — 도우미에 숨긴 키는
+/// `i18n::tests::english_has_every_key_the_source_asks_for` 가 못 본다.
+///
+/// **[`Trouble`] 을 통째로 받아 갈라 적는다.** `_` 로 접으면 갈래를 더하는 날 새 갈래가 말없이
+/// "안 물었다" 로 서고, 그것이 이 이슈가 없앤 바로 그 자리다.
+fn unchecked_said(lang: Lang, kind: crate::latest::Trouble) -> &'static str {
+    use crate::latest::Trouble;
+    match kind {
+        Trouble::NotAsked => say(lang, "tui.version.unchecked"),
+        Trouble::Offline => say(lang, "tui.version.unchecked.offline"),
+        Trouble::Timeout => say(lang, "tui.version.unchecked.timeout"),
+        Trouble::RateLimited => say(lang, "tui.version.unchecked.rate_limited"),
+        Trouble::Http => say(lang, "tui.version.unchecked.http"),
+        Trouble::Tls => say(lang, "tui.version.unchecked.tls"),
+        Trouble::Garbled => say(lang, "tui.version.unchecked.garbled"),
+        Trouble::OddTag => say(lang, "tui.version.unchecked.odd_tag"),
+        Trouble::Failed => say(lang, "tui.version.unchecked.failed"),
+    }
 }
 
 /// 몸통을 목록과 상세로 가른다 — `(목록, 상세)`.
@@ -3139,6 +3172,7 @@ fn priority(p: u8) -> Style {
 pub(super) mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::latest::Trouble;
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path;
     use ratatui::Terminal;
@@ -5495,7 +5529,7 @@ pub(super) mod tests {
         assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
         let same = said(Seen::Same);
         let ahead = said(Seen::Ahead);
-        let unasked = said(Seen::Unasked);
+        let unasked = said(unasked_for(Trouble::NotAsked));
         for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
         {
             assert!(head.contains(&format!("Version : {mine}")), "{what} 에서 내 판이 사라졌다\n{head}");
@@ -5513,14 +5547,71 @@ pub(super) mod tests {
         }
     }
 
+    /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
+    fn unasked_for(kind: Trouble) -> crate::latest::Seen {
+        crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
+    }
+
+    /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은
+    /// 사람이 할 일이 다르므로, 같은 "못 물었다" 로 접으면 그 사람이 무엇을 고칠지 모른다.
+    ///
+    /// **그래도 어느 갈래도 아무것도 안 막는다** — 넷째 글이 갈렸을 뿐 판 줄은 여전히 줄
+    /// 하나고, 갈래마다 내 판이 그 줄에 그대로 선다.
+    #[test]
+    fn every_reason_for_not_asking_is_its_own_line() {
+        let mine = env!("CARGO_PKG_VERSION");
+        let said = |kind, width| {
+            let mut a = app();
+            a.set_latest(unasked_for(kind));
+            let lines = render(&mut a, width, 24);
+            lines[..6].join("\n")
+        };
+        let all = [
+            Trouble::NotAsked,
+            Trouble::Offline,
+            Trouble::Timeout,
+            Trouble::RateLimited,
+            Trouble::Http,
+            Trouble::Tls,
+            Trouble::Garbled,
+            Trouble::OddTag,
+            Trouble::Failed,
+        ];
+        let cut = |head: &str| {
+            head.lines()
+                .find(|l| l.contains("Version"))
+                .map(|l| l.split("Version").nth(1).unwrap_or("").trim().to_string())
+        };
+        let mut lines = Vec::new();
+        for kind in all {
+            let head = said(kind, 100);
+            assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
+            lines.push((kind, cut(&head).unwrap_or_else(|| panic!("{kind:?}: 판 줄을 못 찾았다"))));
+        }
+        for (i, (ka, a)) in lines.iter().enumerate() {
+            for (kb, b) in &lines[i + 1..] {
+                assert_ne!(a, b, "{ka:?} 와 {kb:?} 가 같은 글로 선다");
+            }
+        }
+        // **좁은 창에서도 까닭이 안 잘린다**(리뷰). 괄호 안의 까닭이 길어 로고가 빠지는 폭이
+        // 있는데(`header` 의 `with_logo`), 거기서 까닭까지 `…` 로 잘리면 이 갈래를 나눈 뜻이
+        // 없어진다 — 로고를 무르고 글을 지키는 것이 이 헤더의 자다. 80칸은 가장 흔한 폭이다.
+        for kind in all {
+            let head = said(kind, 80);
+            let line = cut(&head).unwrap_or_else(|| panic!("{kind:?}: 80칸에서 판 줄을 못 찾았다"));
+            assert!(!line.contains('…'), "{kind:?} 의 까닭이 80칸에서 잘렸다 — {line}");
+            assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
+        }
+    }
+
     /// **묻는 일은 그리는 걸음에 안 실린다**(moai-3gia) — 그리는 함수는 `App` 이 받아 둔 답을
     /// 읽기만 한다. 실을 띄우는 자는 `cmd::tui` 하나고, 그리기는 그것을 안 만진다.
     #[test]
     fn drawing_never_asks_the_grid() {
         let mut a = app();
-        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "여는 값이 못 물었다가 아니다");
+        assert_eq!(*a.latest(), unasked_for(Trouble::NotAsked), "여는 값이 못 물었다가 아니다");
         let _ = render(&mut a, 100, 24);
-        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "그리는 걸음이 값을 바꿨다");
+        assert_eq!(*a.latest(), unasked_for(Trouble::NotAsked), "그리는 걸음이 값을 바꿨다");
     }
 
     /// **누군지 몰라도 헤더는 서고 묻지 않는다**(moai-56jf). 읽기는 사람을 묻지 않는다 —

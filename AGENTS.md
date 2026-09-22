@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:b9c4f6c2 -->
+<!-- moai:begin v:0.1.1 hash:fa984223 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -219,7 +219,8 @@ the exit code never changes.
 
 It only asks where a person is watching. `--json`, a pipe and anything that is not a
 terminal never ask, so a machine running agents does not knock on the outside every run.
-The answer, and when it was asked, are held next to your user config in `latest.toml`.
+The answer, when it was asked and where it was asked are held next to your user config
+in `latest.toml`. Ask somewhere else and the answer from the other place is not reused.
 
     [update]
     check = false        # in your user config: never ask on this machine
