@@ -321,11 +321,14 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate:
         // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
         //
         // `chdir` 은 고칠 명령에 `-C` 를 얹을지를 가를 뿐이라 **수를 안 바꾼다** — 층은 글을 안
-        // 펴고 수만 대므로 아무 값이나 같지만, 층의 줄은 남의 저장소라 `true` 가 사실이다.
+        // 펴고 수만 대므로 지금은 아무 값이나 같다. 그래도 `false` 다: 그 값은 "셸이 그 뿌리에
+        // 있지 않다" 를 **못박는** 자리고([`crate::cmd::init::away_root`]), 띄운 자리의 줄은 그 뿌리가
+        // 곧 셸의 자리다. `true` 로 못박으면 층이 글을 펴는 날 제자리에 선 저장소에까지 `-C <여기>`
+        // 가 붙는다. `false` 면 잰 자리가 정한다 — 남의 줄은 그대로 `-C` 를 얻는다.
         //
         // **표식에는 안 든다**(`marks_of`) — AGENTS.md 나 git 설정을 고쳐도 이 수는 트래커가
         // 움직일 때 같이 다시 선다. 알림은 고치고 1초 안에 사라져야 하는 값이 아니다.
-        notices: st.notices.len() + crate::cmd::status::install_notices(repo, true).len(),
+        notices: st.notices.len() + crate::cmd::status::install_notices(repo, false).len(),
         stranded,
         unread: unread.all.len(),
         blind: unread.blinding.len(),

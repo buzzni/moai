@@ -2497,6 +2497,29 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
     assert!(o.stderr.is_empty(), "설정 문제를 stderr 로도 냈다 — {}", String::from_utf8_lossy(&o.stderr));
 }
 
+/// 설치가 어긋난 자리를 손으로 만든다 — 빠진 딸린 파일 규칙 하나(`.gitignore`)와 손으로 고친
+/// AGENTS.md 블록.
+///
+/// **시험 둘이 같은 자리를 만든다** — 보드와 훅을 맨
+/// [`the_board_and_the_hook_carry_the_same_install_notices`] 와, 보드와 층을 맨
+/// [`the_project_layer_counts_the_same_notices_as_the_board`]. 베껴 두면 `init` 이 심는 글이
+/// 바뀌는 날 한쪽만 고쳐지고, 못 고친 쪽은 알림이 **하나도 안 선 채로** 푸르게 선다.
+fn break_the_install(root: &Path) {
+    let ignore = root.join(".gitignore");
+    let kept: String = std::fs::read_to_string(&ignore)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("worktrees"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&ignore, &kept).unwrap();
+    let md = root.join("AGENTS.md");
+    let fresh = std::fs::read_to_string(&md).unwrap();
+    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
+    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
+    std::fs::write(&md, edited).unwrap();
+}
+
 /// **층의 알림 셈은 안쪽 보드의 것과 같은 자다**(moai-prdh) — 설치가 어긋난 것
 /// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 idea·미룬 것)을 함께 센다. 한때
 /// 층은 경고만 세, "드러난 문제 없다" 를 보고 들어간 사람이 안쪽 `moai status` 에서 알림을
@@ -2504,6 +2527,10 @@ fn outside_a_repo_tui_json_lists_the_project_layer() {
 ///
 /// **재는 자가 여기 선다.** 두 화면이 어떤 꼴로 세든 수가 같아야 한다 — 한쪽에만 알림을 더하거나
 /// 한쪽에서만 빼는 날 이 줄이 먼저 붉어진다. **없으면 키를 안 단다**(곁의 셋과 같은 까닭).
+///
+/// **사용자 설정의 말 문제 하나는 여기 안 든다** — 그것은 프로젝트의 것이 아니라 이 기계의
+/// 설정이라 보드에만 서고 층은 제 `problems` 로 따로 낸다(`layer::Summary::notices`). 이 판의
+/// 설정에는 그 탈이 없어 두 수가 그대로 맞는다.
 #[test]
 fn the_project_layer_counts_the_same_notices_as_the_board() {
     let s = Scratch::new("layernotices");
@@ -2515,37 +2542,32 @@ fn the_project_layer_counts_the_same_notices_as_the_board() {
     let clean = ok_with(&out, &cfg, &["tui", "--json"]);
     assert!(!clean.contains("\"notices\""), "알림이 없는데 키가 섰다\n{clean}");
 
-    // 설치가 어긋난 것 둘 — 딸린 파일 규칙 하나를 지우고, AGENTS.md 블록을 손으로 고친다.
-    let ignore = proj.join(".gitignore");
-    let kept: String = std::fs::read_to_string(&ignore)
-        .unwrap()
-        .lines()
-        .filter(|l| !l.contains("worktrees"))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    std::fs::write(&ignore, &kept).unwrap();
-    let md = proj.join("AGENTS.md");
-    let fresh = std::fs::read_to_string(&md).unwrap();
-    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
-    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
-    std::fs::write(&md, edited).unwrap();
+    // 설치가 어긋난 것 셋 — 딸린 파일 규칙 하나를 지우고, AGENTS.md 블록을 손으로 고치고,
+    // **선언은 있는데 안 심긴** 머지 드라이버를 세운다(`init` 이 `.gitattributes` 에 선언만 적고,
+    // 심는 것은 클론마다 사람이 한다).
+    //
+    // **셋째가 이 시험에 드는 까닭**은 그것만 자식 프로세스를 띄워 재기 때문이다 — 층은 제
+    // 스레드에서 `install_notices` 를 부르므로, 빼 두면 셋 중 그 하나만 층에서 한 번도 안 돌아
+    // 본 채로 이 줄이 푸르다.
+    break_the_install(&proj);
+    git(&proj, &["init", "-q", "."]);
     // 순수한 셈이 내는 알림 하나 — 미룬 것. 설치만 세면 이 줄이 빠진 채로도 푸르다.
     let id = add(&proj, &["미룬 일"]);
     ok(&proj, &["defer", &id, "-m", "다음 판"]);
 
     let inside = ok(&proj, &["status", "--json"]);
-    let want = inside.matches("\"notice\":true").count();
-    // **시험이 헛돌지 않게 셋이 실제로 섰는지 먼저 본다.**
-    for kind in ["agents_hand_edited", "gitignore_rules", "deferred"] {
+    // **`notices` 배열 안에서만 센다** — `notice` 는 경고 줄에도 서는 필드라(거기서는 `false`),
+    // 날 글에서 세면 알림 표를 단 경고가 생기는 날 이 수가 조용히 늘어난다.
+    let tail = inside.split("\"notices\":").nth(1).unwrap_or_else(|| panic!("보드에 notices 가 없다\n{inside}"));
+    let want = tail.matches("\"notice\":true").count();
+    // **시험이 헛돌지 않게 넷이 실제로 섰는지 먼저 본다.**
+    for kind in ["agents_hand_edited", "gitignore_rules", "merge_driver_absent", "deferred"] {
         assert!(inside.contains(kind), "{kind} 알림이 안 섰다\n{inside}");
     }
-    assert!(want >= 3, "알림이 모자라다 ({want})\n{inside}");
+    assert!(want >= 4, "알림이 모자라다 ({want})\n{inside}");
 
     let rows = ok_with(&out, &cfg, &["tui", "--json"]);
-    assert!(
-        rows.contains(&format!("\"notices\":{want}")),
-        "층과 보드가 알림을 달리 센다 (보드 {want})\n{rows}"
-    );
+    assert!(rows.contains(&format!("\"notices\":{want}")), "층과 보드가 알림을 달리 센다 (보드 {want})\n{rows}");
 }
 
 /// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께
@@ -9345,21 +9367,9 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
     // 머지 드라이버는 **선언이 있는데 안 심긴** 자리라야 말한다 — `init` 이 `.gitattributes` 에
     // 선언을 적고, 심는 것은 클론마다 사람이 한다.
     git(root, &["init", "-q", "."]);
-    // 딸린 파일 규칙 하나를 지운다 — 사람이 손으로 지웠거나 못 써서 건너뛴 자리다.
-    let ignore = root.join(".gitignore");
-    let kept: String = std::fs::read_to_string(&ignore)
-        .unwrap()
-        .lines()
-        .filter(|l| !l.contains("worktrees"))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    std::fs::write(&ignore, &kept).unwrap();
-    // AGENTS.md 블록을 손으로 고쳐 낡게 만든다.
-    let md = root.join("AGENTS.md");
-    let fresh = std::fs::read_to_string(&md).unwrap();
-    let edited = fresh.replace("There is no approval gate", "There is an approval gate");
-    assert_ne!(edited, fresh, "시험이 블록을 못 고쳤다 — 안내 글에서 찾는 낱말이 사라졌다");
-    std::fs::write(&md, edited).unwrap();
+    // 딸린 파일 규칙 하나를 지우고 AGENTS.md 블록을 손으로 고쳐 낡게 만든다 — 층을 맨 줄과 같은
+    // 자리를 쓴다([`break_the_install`]).
+    break_the_install(root);
 
     let said = ok(root, &["status"]);
     // **시험이 헛돌지 않게 셋이 실제로 섰는지 먼저 본다** — 하나도 안 서면 아래 훑기는 빈

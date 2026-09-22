@@ -5922,6 +5922,16 @@ pub(super) mod tests {
         assert!(screen.contains("a : 등록") && !screen.contains("목록에서 빼기"), "{screen}");
     }
 
+    /// 상세 칸의 글을 한 줄로 이어 붙인다. **감아 낸 줄을 이어 본다** — 80칸 창의 상세는 안쪽
+    /// 폭이 30 뿐이라, 수가 글 끝에 서는 줄은 감기지 않으면 정작 몇 건인지가 잘려 나간다.
+    ///
+    /// 칸을 가르는 자는 [`detail_pane`] 하나다 — `│` 로만 가르던 판을 베껴 쓰면 포커스가 상세로
+    /// 옮겨간 화면(굵은 `┃`)과 가지 그림이 든 목록에서 엉뚱한 조각을 잡는다. 층의 상세를 재는
+    /// 시험 둘이 이것을 함께 쓴다.
+    fn about_text(lines: &[String]) -> String {
+        lines.iter().filter_map(|l| detail_pane(l)).map(str::trim).collect::<Vec<_>>().join(" ")
+    }
+
     /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 못 셌으면 "문제
     /// 없다" 를 안 세운다. 아래에 `!` 가 서는데 위에서 ✓ 를 대면 덩어리가 제 말을 뒤집고, 줄의
     /// `!` 가 조용하면 한눈 보기(`옆 워크트리 문제 N건`)와 같은 저장소를 달리 말한다.
@@ -5941,19 +5951,15 @@ pub(super) mod tests {
             (sum.warnings, sum.stranded, sum.unread, sum.blind) = (warnings, stranded, unread, blind);
         };
 
-        // 상세는 80칸에서 좁다 — 감아 낸 줄을 이어 붙여 **수까지** 보이는지 본다.
-        let joined = |lines: &[String]| -> String {
-            lines.iter().filter_map(|l| l.split('│').nth(1)).map(str::trim).collect::<Vec<_>>().join(" ")
-        };
         set(&mut a, 1, 1, 0, 0);
         let lines = render(&mut a, 80, 22);
-        let pane = joined(&lines);
+        let pane = about_text(&lines);
         assert!(pane.contains("워크트리가 없는 것 1건"), "80칸에서 수가 잘렸다\n{}", lines.join("\n"));
 
         set(&mut a, 0, 0, 1, 1);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
-        assert!(joined(&lines).contains("워크트리 1곳 — 자리를 다 못 셌다"), "80칸에서 수가 잘렸다\n{screen}");
+        assert!(about_text(&lines).contains("워크트리 1곳 — 자리를 다 못 셌다"), "80칸에서 수가 잘렸다\n{screen}");
         assert!(!screen.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{screen}");
         let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
         assert!(row.contains(" !"), "못 읽은 워크트리가 있는데 줄이 조용하다 — {row:?}");
@@ -5963,7 +5969,7 @@ pub(super) mod tests {
         set(&mut a, 0, 0, 1, 0);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
-        let pane = joined(&lines);
+        let pane = about_text(&lines);
         assert!(
             pane.contains("워크트리 1곳") && !pane.contains("다 못 셌다"),
             "안 가린 것에 꼬리말이 붙었다\n{screen}"
@@ -5977,7 +5983,7 @@ pub(super) mod tests {
         set(&mut a, 0, 0, 2, 1);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
-        let pane = joined(&lines);
+        let pane = about_text(&lines);
         assert!(pane.contains("워크트리 2곳 — 그중 1곳이 자리를 가려"), "가린 수를 안 댔다\n{screen}");
     }
 
@@ -5999,15 +6005,12 @@ pub(super) mod tests {
             // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
             (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (0, 0, 0, 0, notices);
         };
-        let joined = |lines: &[String]| -> String {
-            lines.iter().filter_map(|l| l.split('│').nth(1)).map(str::trim).collect::<Vec<_>>().join(" ")
-        };
 
         set(&mut a, 3);
         for w in [80, 100, 120] {
             let lines = render(&mut a, w, 22);
             let screen = lines.join("\n");
-            assert!(joined(&lines).contains("알림 3건"), "{w}칸에서 수가 잘렸다\n{screen}");
+            assert!(about_text(&lines).contains("알림 3건"), "{w}칸에서 수가 잘렸다\n{screen}");
             let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
             assert!(row.contains("+3"), "{w}칸의 줄이 알림을 안 센다 — {row:?}");
             assert!(!row.contains(" !"), "알림에 경고 글리프를 달았다 — {row:?}");

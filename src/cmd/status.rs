@@ -99,8 +99,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
     let trouble = trouble + if said_already { 0 } else { unread.all.len() };
-    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). 한눈 보기(`.moai` 밖)는 남의 저장소라
-    // 안 본다.
+    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)는 안 싣는다**
+    // — 그 화면이 알림을 아예 안 세기 때문이지(`view::projects_status`), 남의 저장소라서가 아니다.
+    // 탐색기의 프로젝트 층은 같은 남의 저장소를 두고도 센다(moai-prdh) — 그래서 `.moai` 밖에서 본
+    // 두 화면의 알림 수가 지금 갈린다. 맞추는 일은 한눈 보기가 알림을 세기 시작할 때다.
     st.notices.extend(install_notices(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
