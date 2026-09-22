@@ -960,3 +960,21 @@
 {"ts":"2026-09-22T11:33:45Z","id":"moai-hktu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이 에픽이 새로 연 잘못 막음 둘 — find 의 -execdir 자리와 flock 의 -c 자리"}
 {"ts":"2026-09-22T11:33:45Z","id":"moai-phhz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"su 의 모르는 짧은 글자가 셸 갈래에서 집기를 지어낸다"}
 {"ts":"2026-09-22T11:33:45Z","id":"moai-p0bs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰가 넘긴 나머지 넷 — parallel 의 -l, runuser 의 자리 인자, 표 읽는 값, 되풀이 걷기"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-1b0d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-7kif","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-sq3q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-y0gv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-5ycj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-qlr8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:00Z","id":"moai-ta6q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:01Z","id":"moai-gxwh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 훅과 셸 파서, 쓰기 판정)"}
+{"ts":"2026-09-22T23:43:01Z","id":"moai-514e.1l5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=467399 (max — 에픽 끝 리뷰, 열다섯 건)"}
+{"ts":"2026-09-22T23:43:01Z","id":"moai-1b0d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:01Z","id":"moai-7kif","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:01Z","id":"moai-sq3q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:02Z","id":"moai-y0gv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:02Z","id":"moai-5ycj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:02Z","id":"moai-qlr8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:03Z","id":"moai-ta6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:03Z","id":"moai-gxwh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-09-22T23:43:03Z","id":"moai-514e.1l5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯을 다 받아 고쳤다(별도 fix: 커밋). 넘긴 것은 갈랐다 — 이 에픽이 새로 연 잘못 막음 둘은 moai-hktu, 셸 갈래에 남은 지어낸 집기는 moai-phhz 로 멤버로 세웠고, 나머지 넷(parallel 의 -l, runuser 의 자리 인자, hard_exit 의 글자 아닌 값, 표 읽는 값과 되풀이 걷기)은 moai-p0bs 에 담았다."}
