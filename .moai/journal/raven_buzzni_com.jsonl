@@ -978,3 +978,4 @@
 {"ts":"2026-09-22T23:43:03Z","id":"moai-ta6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-22T23:43:03Z","id":"moai-gxwh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-22T23:43:03Z","id":"moai-514e.1l5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열다섯을 다 받아 고쳤다(별도 fix: 커밋). 넘긴 것은 갈랐다 — 이 에픽이 새로 연 잘못 막음 둘은 moai-hktu, 셸 갈래에 남은 지어낸 집기는 moai-phhz 로 멤버로 세웠고, 나머지 넷(parallel 의 -l, runuser 의 자리 인자, hard_exit 의 글자 아닌 값, 표 읽는 값과 되풀이 걷기)은 moai-p0bs 에 담았다."}
+{"ts":"2026-09-22T23:43:46Z","id":"moai-514e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 여덟과 에픽 끝 리뷰(max)는 닫혔고 develop 에 머지됐다(e852b8f). 남은 셋이 이 에픽을 열어 둔다 — moai-6k5v 는 제 본문의 \"언제 여는가\" 가 아직 안 섰고, moai-hktu·moai-phhz 는 리뷰가 넘긴 둘이라 감싸는 명령 표에 자리 하나를 더 두는 결정이 먼저다(그 둘은 한 몸이라 함께 본다)."}
