@@ -940,3 +940,6 @@
 {"ts":"2026-09-22T10:40:47Z","id":"moai-ta6q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-22T10:40:47Z","id":"moai-gxwh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-09-22T10:40:47Z","id":"moai-514e.1l5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 리뷰가 배경에서 도는 중이다. 끝나면 원문을 노트로 적고, 받아들인 것과 넘긴 것을 갈라 닫는다. 그 뒤 뿌리에서 머지하고 멤버 여덟을 done 으로 옮긴다."}
+{"ts":"2026-09-22T10:43:02Z","id":"moai-au73","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"따옴표 규칙이 한쪽으로만 민다"}
+{"ts":"2026-09-22T10:43:09Z","id":"moai-5thc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"write_value 가 낱값의 따옴표를 편다"}
+{"ts":"2026-09-22T10:43:17Z","id":"moai-jk87","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"작은따옴표 안에 안 보이는 글자가 날것으로 선다"}
