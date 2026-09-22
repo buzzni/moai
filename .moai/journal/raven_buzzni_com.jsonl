@@ -920,3 +920,8 @@
 {"ts":"2026-09-22T09:42:11Z","id":"moai-333l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-y0v8 에서 펼쳤다 — 배열에 더한 낱말이 옆 원소의 따옴표를 따른다"}
 {"ts":"2026-09-22T09:42:11Z","id":"moai-y0v8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-333l 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-22T09:42:17Z","id":"moai-kh81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T09:51:37Z","id":"moai-333l.wj6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 더한 낱말의 따옴표 (에픽 moai-333l)"}
+{"ts":"2026-09-22T09:51:42Z","id":"moai-333l.wj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T09:51:57Z","id":"moai-333l.wj6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돈다. 끝나면 원문을 여기 노트로 남기고 반영은 별도 fix 커밋으로 담은 뒤 브리프 7-1 부터 이어 간다. 워크트리는 .claude/worktrees/moai-333l, 멤버 moai-kh81 은 커밋 1c95b21 까지 끝났다"}
+{"ts":"2026-09-22T10:36:04Z","id":"moai-514e.1l5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 — 훅이 아직 못 보는 쓰기 여덟"}
+{"ts":"2026-09-22T10:36:23Z","id":"moai-514e.1l5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
