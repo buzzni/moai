@@ -859,9 +859,7 @@ mod tests {
         let nowhere = at.join("nowhere").display().to_string();
 
         for sh in shells {
-            for (exe, code) in
-                [(&dead, "126"), (&gone, "127"), (&clap, "2"), (&panic, "101"), (&killed, "137")]
-            {
+            for (exe, code) in [(&dead, "126"), (&gone, "127"), (&clap, "2"), (&panic, "101"), (&killed, "137")] {
                 let (got, said) = run(sh, "-c", exe);
                 assert_eq!(got, Some(0), "{sh}: 못 도는 판이 게이트가 됐다 — {said}");
                 let v: serde_json::Value =
