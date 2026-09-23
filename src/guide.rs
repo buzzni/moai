@@ -349,7 +349,12 @@ moai add --from - <<'PLAN'
 - [p1] first issue #enhancement
 - [p2] second issue
 PLAN
-```"#;
+```
+
+**If a milestone is running, give the plan that milestone** — `moai add --from -
+--milestone <id>`. It goes onto the epics the plan creates and the members inherit
+it; without it the whole plan stands outside the release, and of it `moai ready`
+then hands out only what is `p0`."#;
 
 /// 에이전트가 이슈에 적는 글의 모양(moai-j8aq). **권고다** — 어겨도 아무것도 막히지 않는다.
 /// 훅이 이것을 검사하지 않는 것은 결정이다(사용자, moai-mthy): 글 스타일 검사는 린트이고,
@@ -514,25 +519,41 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
 
-**If a milestone is running, hang it on the epic you unfolded.** `promote` has no
-flag for one and does not carry over the one the idea held, so without this the
+**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+both on the epic it unfolds — a milestone is inherited, so the epic alone carries
+it to every member, the ones added later included, and the body is what lets
+`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
+original stays on the closed idea and the history leads back to it, and the one
+place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is.
+
+**The milestone that comes over is the one `moai show --milestone` stands the idea
+under**, not whatever its own field says — an idea parked inside an epic comes over
+in that epic's release even with an empty field of its own, and a field of its own
+that loses to the epic it sits in never reaches the new epic. One reader answers
+where a row belongs, on every surface.
+
+**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
+already the owner — its members inherit its milestone, and writing the idea's over
+theirs would stand one bundle in two places.
+
+**If what came over is not the milestone that is running, hang the running one on
+the epic yourself** — or clear it with `--milestone none` when nothing is running.
+`promote` carries the release it stands in whatever state that release is in, so
+that covers an idea parked with no milestone, one parked under a release that has
+since shipped, and one parked under a milestone since deferred. Without this the
 epic stands outside the release and every member under it is work picked up from
-outside it. A milestone is inherited, so the epic alone carries it to every
-member, the ones added later included.
+outside it, of which `moai ready` hands out only what is `p0`; and under a
+deferred milestone the whole plan is out of the plan the moment it is created —
+not in `ready`, not in `held`, and no warning says so. **A dead release is said
+out loud**: unfolding into a deferred or closed milestone prints one line on
+stderr naming it, and nothing is blocked.
 
     {MILESTONE_ATTACH}
 
 Copy that id off {MILESTONE_FROM}. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
-`dangling_milestone` warning.
-
-**And copy the idea's body onto the epic you unfolded.** `promote` does not carry
-it either, so the epic stands empty and `moai show <epic>` cannot say why these
-issues are one bundle. Not onto every issue — the original stays on the closed
-idea and the history leads back to it; the one place worth filling is the epic, so
-the window that picks a member up does not have to press every member to find out
-what this is. Unfolding into a single issue is the same: move the idea's body over
-as it is."#
+`dangling_milestone` warning."#
     )
 }
 
@@ -1384,9 +1405,10 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
-for a milestone and does not carry over the one the idea itself holds, so the epic a worker
-unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
+the body and the release the idea stands in — the one `moai show --milestone` lists it
+under, not its own field — so an idea parked outside the release unfolds into an epic that
+stands outside it until it is attached. The worker hangs it on in brief 1 —
 `{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -2060,10 +2082,14 @@ fn brief() -> String {
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
        the history leads back to it.
-       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
-       milestone is inherited, so the epic alone carries it to every member and to the members
-       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
-       nothing to hang
+       Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
+       release the idea stood in, and a milestone is inherited, so the epic alone carries it to
+       every member and to the members added later in 4-3 and 7-1. Hanging the same one again
+       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
+       still the release that idea stood in, so read the line `promote` printed and clear a
+       release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
+       a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
+       not in `ready`, not in `held`, no warning
          {MILESTONE_ATTACH}
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,
@@ -3090,15 +3116,32 @@ from outside**",
     ///
     /// 본문 걸음은 어느 글에도 없었다. 2026-09-22 에 한 번에 펼친 에픽 셋이 모두 0자로 섰고,
     /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 냈다.
+    ///
+    /// **2026-09-23 부터 그 둘은 도구가 데려간다**(moai-07v1) — 손으로 치던 두 걸음이 빠졌으니
+    /// 이 글도 무엇이 저절로 서고 무엇이 손에 남는지를 말해야 한다. 그 줄은 여전히
+    /// [`MILESTONE_ATTACH`] 하나에서 나온다.
+    ///
+    /// **손에 남는 자리를 "마일스톤을 안 들었을 때" 로 적어 둔 것은 틀렸다**(리뷰). `promote` 는
+    /// 그 생각이 **선 자리**를 그것이 무엇이든 데려가므로, 이미 끝난 릴리스에 담아 둔 생각을
+    /// 펼치면 그 id 가 그대로 새 에픽에 서고 `ready` 가 그 에픽을 곧바로 감춘다 — 그런데 글은
+    /// "든 것이 있으니 할 일 없다" 로 읽혔다. 가르는 것은 **도는 것과 같은가** 다.
+    ///
+    /// **데려가는 값은 적힌 필드가 아니다**(2026-09-23 사용자 결정) — `moai show --milestone` 이
+    /// 그 생각을 내주는 자리고, 죽은 릴리스면 한 줄 알린다. 글이 "제 필드" 라고 말하면 에픽에
+    /// 담긴 생각을 펼친 쪽이 왜 릴리스가 따라왔는지를 못 읽는다.
     #[test]
     fn unfolding_alone_hangs_the_milestone_and_carries_the_body() {
         let ideas = ideas();
         for (piece, why) in [
-            (MILESTONE_ATTACH, "펼친 에픽에 마일스톤을 다는 줄이 없다"),
+            (MILESTONE_ATTACH, "마일스톤이 어긋난 idea 를 펼쳤을 때 다는 줄이 없다"),
             (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
             ("`dangling_milestone`", "틀린 id 가 언제 드러나는지 안 적었다"),
-            ("copy the idea's body onto the epic", "펼친 에픽에 본문을 옮기라는 말이 없다"),
+            ("milestone and body go onto the epic by themselves", "도구가 데려간다는 말이 없다"),
             ("Not onto every issue", "이슈마다 베끼는 것으로 읽힌다"),
+            ("`-e <epic>`) carries neither", "선 에픽에 펼칠 때는 안 데려간다는 말이 없다"),
+            ("not the milestone that is running", "든 것이 딴 릴리스일 때를 안 가른다"),
+            ("`moai show --milestone` stands the idea", "데려가는 값이 적힌 필드로 읽힌다"),
+            ("A dead release is said", "죽은 릴리스를 알린다는 말이 없다"),
         ] {
             assert!(ideas.contains(piece), "{why} — {piece}");
         }

@@ -795,7 +795,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "id")]
     pub epic: Option<String>,
 
-    /// Put it in this milestone
+    /// Put it in this milestone (with `--from`, on the epic it creates)
     #[arg(long, value_name = "id")]
     pub milestone: Option<String>,
 
@@ -839,8 +839,20 @@ pub struct AddArgs {
     // 기한 둘도 여기 든다(리뷰) — 계획은 마일스톤을 못 짓고(`refuse.plan_has_no_milestone`),
     // `bulk` 는 이 둘을 아예 안 받는다. 목록에서 빼 두면 `moai add --from - --due …` 가 0 으로
     // 끝나며 날짜를 말없이 버린다 — 바로 밑의 `--var`·`--dry-run` 거절이 막는 것과 같은 판이다.
+    //
+    // **`--body` 와 `--status` 도 같은 까닭으로 든다**(moai-fppn). `--body -` 는 계획과 stdin 을
+    // 다투고, `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다 — `bulk` 가 둘 다 안 읽어
+    // 0 으로 끝난 부름이 사람이 준 글과 칸을 말없이 삼켰다.
+    //
+    // **`--milestone` 은 여기 안 든다**(moai-xoyg) — 그것은 받아서 뿌리인 에픽에 달고 멤버가
+    // 물려받는다. 소속은 물려받는 것이 이 도구의 축이라, 세우는 자리에서 데려가는 편이 맞는다.
+    //
+    // **`--quiet` 도 든다**(리뷰). `bulk` 는 그것을 안 읽어 `id=$(moai add --from - -q)` 가
+    // 색까지 든 여러 줄을 id 로 받아 갔다 — 0 으로 끝나니 아무도 안 잡는다. 계획은 id 를
+    // 여럿 내므로 "id 하나만" 이라는 `-q` 의 뜻이 여기서는 안 선다. 기계로 받을 것은
+    // `--json` 이고, 그쪽은 `bulk` 가 이미 낸다.
     /// Epic and issues from markdown at once. `-` is stdin
-    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent", "start", "due"])]
+    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent", "start", "due", "body", "status", "quiet"])]
     pub from: Option<String>,
 
     // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은

@@ -45,6 +45,41 @@ fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
     Ok(())
 }
 
+/// 펼친 에픽이 설 마일스톤 — **적힌 필드가 아니라 뜬 값이다**(리뷰, 2026-09-23 사용자 결정).
+///
+/// [`crate::report::milestones`] 는 화면이 소속을 읽는 그 자다 — 에픽 안에 담긴 생각은 제
+/// 필드가 비어도 그 에픽의 마일스톤 밑에 서고, 에픽에 진 제 필드는 어느 화면에도 안 선다.
+/// 적힌 필드를 데려가면 그 둘 다 어긋나, `show --milestone` 이 내주던 생각이 릴리스 밖
+/// 에픽으로 펼쳐지거나 아무도 못 보던 값이 에픽에 적힌다. 소속을 읽는 자는 하나여야 한다
+/// (`milestones_in` 의 주석과 같은 줄).
+///
+/// **`-e <에픽>` 이면 `None`** — 뿌리가 없고, 멤버는 그 에픽에서 물려받는다.
+fn stone_of(issues: &[Issue], id: &str, into: Option<&str>) -> Option<String> {
+    if into.is_some() {
+        return None;
+    }
+    crate::report::milestones(issues).get(id).map(|m| (*m).to_string())
+}
+
+/// 데려갈 마일스톤이 **죽은 릴리스**면 stderr 에 한 줄. 막지는 않는다(같은 결정).
+///
+/// 미뤄진 마일스톤을 데려가면 펼친 계획이 미룸을 물려받아 `ready` 에도 보드에도 안 뜨는데
+/// (`moai show --deferred` 에는 뜬다), 화면에 나가는 것이 성공 한 줄뿐이면 그것이 뜻대로인지
+/// 사고인지를 아무도 못 가른다. `add -e <없는 에픽>` 이 알리고 넘어가는 그 자리와 같은 꼴이다.
+///
+/// **연습과 진짜가 같은 줄을 낸다** — 사람이 "좋다" 하는 자리가 연습이라, 거기서 안 나온 말이
+/// 진짜에서만 나오면 그 "좋다" 는 못 본 것을 승인한 것이 된다.
+fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str>, lang: crate::i18n::Lang) {
+    let Some(m) = stone else { return };
+    if let Some(src) = crate::report::deferred_roots(issues).get(m) {
+        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_deferred"), &[("id", m), ("src", src)]);
+        eprintln!("moai: {said}");
+    } else if crate::report::group_states_of(issues, cfg, &[m]).get(m).is_some_and(|col| *col == crate::config::DONE) {
+        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_closed"), &[("id", m)]);
+        eprintln!("moai: {said}");
+    }
+}
+
 /// idea 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 idea 를 닫는다.
 /// `-e <에픽>` 이면 새 에픽 없이 이미 선 에픽의 멤버로 펼친다(moai-f3ml).
 ///
@@ -93,19 +128,29 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
         // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
         //
-        // **순서도 진짜와 같다.** 맨 앞에 두던 판은 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
-        // 냈는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
+        // 펼친 에픽이 설 마일스톤도 **연습이 미리 낸다**(moai-07v1) — 진짜가 데려가는 값을
+        // 연습이 안 내면, 계획을 승인한 쪽이 그것을 만들어 보고서야 안다. `-e` 면 뿌리가 없어
+        // 아무것도 안 데려가니 여기서도 없다.
+        //
+        // **`check_plan` 앞에 선다** — 그 모양을 재는 것이 `check_plan` 이라서다(리뷰). 손으로
+        // 푼 머지가 남긴 모양 틀린 마일스톤을 든 생각이면 진짜가 거절하는데, 연습만 지나
+        // 보내면 사람이 "좋다" 한 뒤에 도구가 거절한다.
+        let stone = stone_of(&load.issues, &args.id, into);
+        say_if_dead(&load.issues, &repo.config, stone.as_deref(), ctx.lang());
+        // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
+        // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
-        crate::cmd::add::check_plan(&drafts)?;
+        crate::cmd::add::check_plan(&drafts, stone.as_deref(), ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
-            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into);
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref());
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.will_unfold"))];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+        out.extend(crate::cmd::add::milestone_line(stone.as_deref(), ctx.lang()));
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -154,9 +199,27 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 메일을 **이름 칸**에 넣고 메일을 버린다. 파일에는 갈라서, 화면에는
             // 합쳐서 — 여기는 파일 쪽이다.
             let heir = (thought.assignee.clone(), thought.assignee_email.clone());
+            // **소속과 글도 물려준다**(moai-07v1). 마일스톤을 끊으면 펼친 에픽이 도는 릴리스
+            // 밖에 서고, 본문을 끊으면 `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다 —
+            // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
+            //
+            // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
+            // 물려받는다 — 멤버마다 idea 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
+            // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
+            // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
+            //
+            // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
+            // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
+            let text = match into {
+                Some(_) => None,
+                None => thought.body.clone(),
+            };
+            let stone = stone_of(issues, &args.id, into);
+            say_if_dead(issues, cfg, stone.as_deref(), lang);
+            let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };
 
             let (mut entries, made) =
-                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, &heir, &by, &at)?;
+                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
 
             // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
             // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
@@ -236,6 +299,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+    // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
+    // 아무것도 안 서고, 그것이 그대로 답이다. 세는 자는 `add --from` 과 한 자리다(리뷰).
+    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), ctx.lang()));
     if let Some(e) = into {
         let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));
