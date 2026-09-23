@@ -1687,7 +1687,14 @@ pub fn detail(
     out.push(line);
 
     let lang = seen.screen.lang;
-    if let Some(e) = &i.epic {
+    // **적은 줄이 없어도 선 소속은 댄다**(리뷰). 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을
+    // 안 적으므로(moai-exh7), 필드만 보면 그 멤버의 상세에서 이 줄이 통째로 빠진다 — 목록도
+    // `ready` 도 `prime --json` 도 대는 것을 id 로 콕 집어 펼친 화면만 안 대는 판이었다.
+    //
+    // **푸는 것은 부르는 쪽이다**(`report::groups` 하나가 읽는다) — 여기서 다시 재면 `report`
+    // 밖에 소속을 읽는 자가 하나 더 선다. 적힌 것이 먼저다: 끊긴 참조를 `gone_epic` 으로 말할 수
+    // 있는 것은 그쪽뿐이라, 물려받은 값으로 덮으면 고칠 곳이 화면에서 사라진다.
+    if let Some(e) = i.epic.as_deref().or(epic.map(|found| found.id.as_str())) {
         // **끊긴 참조는 한 낱말로 댄다**(리뷰, moai-snus 의 결을 잇는다) — 여기만 `detail.missing_epic`
         // 이라는 딴 키를 들어, 같은 자료를 두고 `show` 의 목록은 `(epic not there)` 라 하고 `show <id>`
         // 는 `(no such epic)` 이라 했다. 게다가 그 낱말만 말묶음에서 제 괄호를 달고 와, 새로 적은
@@ -1747,10 +1754,13 @@ pub fn detail(
         out.push(block_line(b, seen.screen.branch(b.id), now, lang));
     }
     for c in children {
-        // **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로
-        // 담아 둔 생각과 미뤄 둔 것이 그대로 서는데, 표가 없으면 `ready` 도
-        // 보드도 안 세는 줄이 일과 똑같이 보인다 — 낱말은 머리글이 쓰는 그
-        // 자리(`deferred_for`)에서 같이 받는다.
+        // **자식 줄도 제 종류와 미룸을 말한다.** 담아 둔 생각과 미뤄 둔 것이 그대로
+        // 서는데, 표가 없으면 `ready` 도 보드도 안 세는 줄이 일과 똑같이 보인다 —
+        // 낱말은 머리글이 쓰는 그 자리(`deferred_for`)에서 같이 받는다.
+        //
+        // **이 목록은 부르는 쪽이 거른 것일 수 있다**(moai-vndz) — 묶음을 그리는 표면은
+        // 멤버를 제 칸에 그리므로 그 줄을 여기서 뺀다(`report::kin_of`). 뺀 줄은 그 칸이
+        // 반드시 그린다: 한 화면에서 사라지는 줄이 있으면 안 된다.
         let mut tail = String::new();
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));

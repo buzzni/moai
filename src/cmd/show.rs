@@ -413,8 +413,6 @@ fn one(
     worktree: bool,
     dug: &crate::worktree::Dug<'_>,
 ) -> R<Vec<String>> {
-    // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
-    let epic = issue.epic.as_ref().and_then(|e| all.iter().rfind(|i| &i.id == e));
     let twins = report::duplicate_lines(all, &issue.id);
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
@@ -439,6 +437,18 @@ fn one(
     // 팔지 고르는 문(`workplaces`), 그리고 판정(`places`)이 저마다 집은 줄을 고르고 소속 지도를
     // 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
     let footing = report::Footing::of(all, &repo.config);
+    // **적힌 소속이 없으면 물려받은 것을 댄다**(리뷰). 계획이 세우는 멤버는 소속을 id 에 지고
+    // `epic` 을 안 적으므로(moai-exh7), 필드만 보던 이 줄은 그 멤버의 `에픽` 줄을 통째로
+    // 빠뜨렸다 — `moai ready` 도 목록도 `prime --json` 도 물려받은 소속을 대는데 상세만 입을
+    // 다물었다. 읽는 자는 `report::groups` 하나고, 그 지도는 바로 아래 `placeable_in` 이
+    // 어차피 짓는 것이라 덤이 없다(`Footing`).
+    //
+    // **묶음 줄은 안 묻는다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니라 트리도 `-e` 도
+    // 그 줄을 에픽 밑에 안 두는데, 물려받은 값까지 대면 적은 적도 없는 소속이 상세에 선다.
+    let stood_in = (!report::is_group(issue)).then(|| footing.epic_of(&issue.id)).flatten();
+    // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
+    let named = issue.epic.as_deref().or(stood_in);
+    let epic = named.and_then(|e| all.iter().rfind(|i| i.id == e));
     let trees: Vec<report::Workplace> = if report::placeable_in(&footing, issue) {
         // **자리는 세션이 선 체크아웃에서 잰다**(리뷰 moai-71ht.jlh 사용자 결정) — 트래커는 루트로
         // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
@@ -560,8 +570,18 @@ fn one(
         );
     }
 
+    // **멤버로 그릴 줄은 자식 줄에서 뺀다**(moai-vndz, 2026-09-23 사용자 결정). 가르는 자는
+    // `report::kin_of` 다 — `moai edit <에픽>` 도 같은 상세를 그리므로 여기에 두면 두 명령이
+    // 같은 에픽을 다르게 낸다(리뷰). **`--json` 의 `children` 은 안 건드린다** — 그쪽은 id
+    // 계층 그대로가 답이고, 무엇이 멤버인지는 `members` 가 따로 말한다.
+    //
+    // 멤버는 **여기서 한 번만** 고른다 — 아래 멤버 칸이 이 목록을 그대로 쓴다(moai-g0zx 와 같은
+    // 까닭). 묶음이 아니면 `group_members` 는 지도도 안 짓고 곧바로 돌아선다.
+    let rows = report::group_members(all, issue);
+    let mine: BTreeSet<&str> = rows.iter().map(|i| i.id.as_str()).collect();
+    let kids = report::kin_of(&children, &rows);
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
-    let mut out = view::detail(issue, epic, &children, &seen, &repo.config, &model::now(), raw);
+    let mut out = view::detail(issue, epic, &kids, &seen, &repo.config, &model::now(), raw);
     // 머리 두 줄(제목·칸) 바로 밑이다 — 본문을 읽기 전에 이 줄이 하나뿐이 아님을 안다.
     if let Some(n) = twins {
         out.insert(2.min(out.len()), view::duplicate_note(n, ctx.lang()));
@@ -570,11 +590,11 @@ fn one(
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {
         // **베끼지 않는다.** 차례는 `view::members` 가 `nav` 에서 받아 정하므로
-        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다.
+        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이고, 그 목록(`rows`·`mine`)은
+        // 자식 줄을 거르면서 이미 골라 두었다.
         // **`--json` 이 내는 것과 같은 것을 그린다** — 둘 다
         // `report::group_members` 로 고른다.
-        let rows = report::group_members(all, issue);
-        let mine: BTreeSet<&str> = rows.iter().map(|i| i.id.as_str()).collect();
+        //
         // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
         // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
         // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).

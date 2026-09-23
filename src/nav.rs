@@ -290,6 +290,18 @@ impl Index {
         })
     }
 
+    /// 그 줄이 **선 에픽** — [`Index::milestone_of`] 와 같은 자, 같은 까닭.
+    ///
+    /// 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을 안 적으므로(moai-exh7), 적힌 값만 보는
+    /// 패널은 트리가 에픽 밑에 둔 줄을 두고 아무 말도 안 한다(리뷰). 자리를 정한 경로에서 읽으면
+    /// 트리와 한 답이다 — `(길 잃음)` 에 선 줄은 여기서도 없다.
+    pub fn epic_of(&self, at: usize) -> Option<&str> {
+        self.homes[at].iter().find_map(|seg| match seg {
+            Seg::Epic(e) => Some(e.as_str()),
+            _ => None,
+        })
+    }
+
     /// 그 줄을 계획에서 뺀 줄 — 제가 미뤘으면 저 자신, 물려받았으면 미룬 조상·묶음.
     pub fn deferred_root(&self, id: &str) -> Option<&str> {
         self.deferred_root.get(id).map(String::as_str)

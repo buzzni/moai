@@ -706,6 +706,18 @@ impl<'a, 'c> Footing<'a, 'c> {
         self.all
     }
 
+    /// 그 줄이 **든 에픽**([`groups`]) — 제 `epic` 을 적었으면 그것, 아니면 물려받은 것.
+    ///
+    /// 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을 안 적으므로(moai-exh7), 적힌 필드만 보는
+    /// 쪽은 그 줄을 에픽 없는 줄로 읽는다 — 상세의 `에픽` 줄이 통째로 빠진 자리가 거기다(리뷰).
+    /// **이미 지은 지도에서 읽는다**: 이 셈은 `picked` 를 지으며 한 번에 잰 것이라 덤이 없다.
+    ///
+    /// **묶음 줄에는 안 쓴다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니고, 트리도 `-e` 도
+    /// 그 줄을 에픽 밑에 안 둔다. 부르는 쪽이 가른다.
+    pub fn epic_of(&self, id: &str) -> Option<&'a str> {
+        self.laid().epics.get(id).copied()
+    }
+
     /// 어느 칸이 시작한 칸인가를 아는 설정 — **옆 워크트리의 스냅샷을 재는 쪽**
     /// (`worktree::holds`)이 제 줄이 아닌 목록에 같은 자를 대려고 받는다.
     pub fn cfg(&self) -> &'c Config {
@@ -1096,6 +1108,30 @@ pub fn children_of<'a>(issues: &'a [Issue], id: &str) -> Vec<&'a Issue> {
     let mut out: Vec<&Issue> = issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(id)).collect();
     out.sort_by(|a, b| crate::query::display_order(a, b));
     out
+}
+
+/// 상세가 **자식 줄로 그릴** 것 — [`children_of`] 에서 그 묶음의 멤버를 뺀 것.
+///
+/// 계획이 세우는 멤버가 에픽의 자식 id 를 받으면서(moai-s8go) 같은 줄이 머리의 `자식` 줄과
+/// 밑의 멤버 칸에 두 번 섰다 — 멤버 일곱짜리 에픽을 펼치면 같은 일곱 줄이 두 벌이다. 멤버
+/// 칸이 칸·우선순위·태그까지 말하니 자식 줄이 더 주는 것이 없고, 멤버가 아닌 자식(담아 둔
+/// 생각 등)은 그대로 선다(moai-vndz, 2026-09-23 사용자 결정).
+///
+/// **`&[Issue]` 에 대한 순수 함수로 여기 둔다** — `view::detail` 을 그리는 표면이 둘이라
+/// (`cmd::show`·`cmd::edit`) 한쪽에만 두면 같은 에픽을 두 명령이 다르게 낸다. 실제로 그랬다:
+/// `moai show <에픽>` 은 걸렀는데 `moai edit <에픽>` 은 안 걸렀다(리뷰).
+///
+/// 뺀 줄은 **부르는 쪽이 반드시 다른 자리에 그린다.** 한 화면에서 말없이 사라지는 줄이 있으면
+/// 이것은 고침이 아니라 가림이다.
+///
+/// **id 가 아니라 줄로 가른다**(리뷰). 같은 id 를 든 줄이 둘일 수 있고([`duplicate_lines`]),
+/// 그때 [`group_members`] 는 이긴 줄 하나만 멤버로 낸다 — id 로 거르면 그 판정이 진 줄에도
+/// 옮아붙어, 멤버도 자식도 아닌 채 상세에서 통째로 사라진다. 깨진 자료는 숨기지 않고
+/// `duplicate_id` 가 따로 드러낸다는 것이 이 도구의 약속이다(`nav` 가 가려진 앞줄을 잎으로
+/// 남기는 것과 같은 까닭). 두 목록 다 같은 `all` 을 훑어 얻은 참조라 줄 비교가 정확하다.
+pub fn kin_of<'a>(children: &[&'a Issue], members: &[&Issue]) -> Vec<&'a Issue> {
+    let mine: BTreeSet<*const Issue> = members.iter().map(|m| std::ptr::from_ref::<Issue>(m)).collect();
+    children.iter().copied().filter(|c| !mine.contains(&std::ptr::from_ref::<Issue>(c))).collect()
 }
 
 /// 그 묶음(에픽·마일스톤)의 멤버. **사람 화면과 `--json` 이 같은 것을 부른다.**
@@ -3870,6 +3906,32 @@ mod tests {
         let mut i = make(id, Kind::Issue, status);
         i.epic = Some(epic.into());
         i
+    }
+
+    /// [`kin_of`] 는 **줄로 가른다, id 로가 아니라**. 같은 id 를 든 줄이 둘이면 [`group_members`]
+    /// 는 이긴 줄 하나만 멤버로 내는데, id 로 거르면 그 판정이 진 줄에도 옮아붙어 멤버도 자식도
+    /// 아닌 채 상세에서 통째로 사라진다 — 깨진 자료는 숨기지 않고 `duplicate_id` 가 따로 드러낸다는
+    /// 약속을 그 자리에서 어긴다(리뷰).
+    #[test]
+    fn a_twin_that_is_not_the_member_still_stands_as_a_child() {
+        let mut twin = make("argos-aaaa.b1x", Kind::Idea, "todo");
+        twin.title = "가려진 앞줄".into();
+        let all = vec![make("argos-aaaa", Kind::Epic, "todo"), twin, make("argos-aaaa.b1x", Kind::Issue, "todo")];
+        let kids = children_of(&all, "argos-aaaa");
+        assert_eq!(kids.len(), 2, "같은 id 를 든 두 줄이 다 자식이다");
+        let mine = group_members(&all, &all[0]);
+        assert_eq!(mine.len(), 1, "멤버는 이긴 줄 하나다");
+        let drawn = kin_of(&kids, &mine);
+        assert_eq!(drawn.len(), 1, "진 줄까지 걷혔다");
+        assert_eq!(drawn[0].title, "가려진 앞줄", "걷힌 것이 이긴 줄이 아니라 진 줄이다");
+    }
+
+    /// 멤버가 하나도 없으면 자식은 그대로다 — 묶음이 아닌 줄을 펼치는 흔한 길이 여기다.
+    #[test]
+    fn kin_of_keeps_every_child_when_nothing_is_a_member() {
+        let all = vec![make("argos-aaaa", Kind::Issue, "todo"), make("argos-aaaa.b1x", Kind::Issue, "todo")];
+        let kids = children_of(&all, "argos-aaaa");
+        assert_eq!(kin_of(&kids, &[]).len(), kids.len());
     }
 
     /// 이름 후보는 **`worktree::names` 에게 묻는다** — 여기 베껴 두면 그쪽에 후보가 하나 늘어도

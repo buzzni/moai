@@ -31,7 +31,9 @@ bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
 on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
-`milestone`, `deferred_at`) stay absent, and that absence is the answer.
+`milestone`, `deferred_at`) stay absent, and that absence is the answer — except
+that a row whose id sits under an epic (`<epic>.<body>`) reads its epic from that
+id and writes no `epic` of its own. Ask the epic, or filter with `-e <epic>`.
 
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw

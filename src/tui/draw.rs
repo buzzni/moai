@@ -2223,7 +2223,12 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming),
         ));
     }
-    if let Some(id) = &i.epic {
+    // **적은 줄이 없어도 선 에픽은 댄다**(리뷰) — 바로 밑 마일스톤 줄과 같은 까닭(moai-9yrv).
+    // 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을 안 적으므로(moai-exh7), 적힌 값만 보면
+    // 트리는 그 줄을 에픽 밑에 그리는데 패널은 입을 다문다 — 한 화면의 두 쪽이 서로 다른 말을
+    // 한다. 적힌 것이 먼저다: 끊긴 참조를 `titled` 가 표로 대는 것은 그쪽뿐이고, 물려받은 값으로
+    // 덮으면 고칠 곳이 화면에서 사라진다.
+    if let Some(id) = i.epic.as_deref().or_else(|| site.index.epic_of(idx)) {
         let (mark, title) = titled(site, id);
         fields.push((say(site.lang, "tui.about.epic").into(), mark, title));
     }
