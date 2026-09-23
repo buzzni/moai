@@ -212,7 +212,7 @@ pub fn inside_checkout(dir: &Path) -> bool {
 /// [`crate::path::real`] 과 같은 자 — **여기만 제 몸으로 든다.**
 ///
 /// 이 파일은 `tests/cli.rs` 가 `#[path]` 로 함께 들어(dev-dependency 0개, CLAUDE.md "테스트"),
-/// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::store` 가 없다. 한 자로 모으는 결정(moai-8csx)이
+/// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::path` 가 없다. 한 자로 모으는 결정(moai-8csx)이
 /// 닿지 못하는 한 자리고, 갈리면 시험 자리가 링크를 달리 푼다 — 그래서 글로 맨다.
 fn real(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())

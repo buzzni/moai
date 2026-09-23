@@ -15,6 +15,9 @@
 //!   가리키는 자리의 **부모가 없으면 일부러 탈로 낸다** — 여기 셋은 못 풀면 받은 철자로
 //!   떨어진다. 묻는 것이 "이 자리가 어디인가" 가 아니라 "여기에 써도 되는가" 라 답이
 //!   갈리는 자리다. 모으려 들면 그 거절이 사라진다
+//!
+//! [`dir_of`] 는 넷째 푸는 자가 아니다 — 아무것도 안 풀고 철자를 한 조각 뗄 뿐이다. 여기 사는
+//! 것은 그 물음도 "경로 하나를 받아 경로 하나를 낸다" 라서고, 세는 자리에는 안 든다(리뷰).
 
 use std::path::{Path, PathBuf};
 
@@ -35,14 +38,9 @@ use std::path::{Path, PathBuf};
 /// 견주는 데 쓸 때는 [`crate::user_config::same_dir`] 이 이것의 짝이다 — 둘 다 못 풀면 받은 철자로
 /// 견준다.
 ///
-/// **자리를 푸는 자는 이 셋이다**(moai-i7b6). 통째로 푸는 이것, 글자로만 접는 [`lexical`], 그리고
-/// 아직 있는 윗자리까지만 푸는 [`real_prefix`]. 아직 없는 파일을 판정하는 자리는 셋째를 쓴다 —
-/// 이것은 거기서 실패해 준 철자를 그대로 돌려준다.
-///
-/// **넷째로 보이지만 아닌 것이 하나 있다**(리뷰가 넘긴 것). `user_config` 의 `resolve_config` 는
-/// 링크의 사슬을 제 손으로 따라가고, 가리키는 자리의 **부모가 없으면 일부러 탈로 낸다** — 여기
-/// 셋은 못 풀면 받은 철자로 떨어진다. 묻는 것이 "이 자리가 어디인가" 가 아니라 "여기에 써도
-/// 되는가" 라 답이 갈리는 자리다. 모으려 들면 그 거절이 사라진다.
+/// **아직 없는 파일을 판정하는 자리는 [`real_prefix`] 를 쓴다** — 이것은 거기서 실패해 준 철자를
+/// 그대로 돌려준다. 셋이 어떻게 갈리고 넷째로 보이는 것이 왜 아닌지는 [모듈 머리글](self) 에 한 번
+/// 적혀 있다. 여기 다시 적었더니 두 벌이 서로 다른 수를 대기 시작했다(리뷰).
 pub(crate) fn real(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
@@ -121,4 +119,67 @@ pub(crate) fn real_prefix(p: &Path) -> PathBuf {
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
 pub(crate) fn dir_of(path: &Path) -> &Path {
     path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
+}
+
+/// **재는 자는 재는 것 곁에 선다**(리뷰). 옮기던 날 이 셋을 재는 시험이 `store` 에 남아, `store`
+/// 에 남긴 다리 한 줄을 타고서야 이름이 풀렸다 — 그 줄을 걷는 날(moai-fnd0) 훅과 아무 상관 없는
+/// 시험 둘이 함께 붉어지고, 걷는 이는 그것을 "부름을 덜 옮겼다" 로 읽는다. 그 다리가 지금 재는
+/// 것은 `src/hook.rs`·`src/cmd/hook.rs` 의 부름 셋뿐이어야 한다.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scratch::Scratch;
+
+    /// **글자로만 접는다** — 파일 시스템을 안 본다. 셋이 저마다 적고 있던 것을 여기로 모았으니
+    /// (`hook::resolve`·`user_config::spellings`·`tz::name_under`), 재는 자도 여기 하나다.
+    ///
+    /// **재는 것은 뜻이지 고침이 아니다.** `/..` 이 `/` 로 서는 것은 `PathBuf::pop` 이 뿌리에서
+    /// 이미 아무것도 안 해서이지, 모으면서 더한 막음 덕이 아니다 — 그 줄을 걷어도 이 네 줄은
+    /// 그대로 푸르다. 그래도 세워 두는 까닭은 뜻이 바뀌면(std 가 아니라 이 함수가) 잡으라는 것이다.
+    #[test]
+    fn folding_dots_never_climbs_past_the_root() {
+        assert_eq!(lexical(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+        assert_eq!(lexical(Path::new("/..")), PathBuf::from("/"));
+        // **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라지므로
+        // (`a/../../b` 는 `../b` 가 아니라 `b`), 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다.
+        assert_eq!(lexical(Path::new("a/../../b")), PathBuf::from("b"));
+    }
+
+    /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는
+    /// 파일에서 실패해 준 철자가 그대로 나오고, 조상이 링크면 그 철자는 풀린 철자와 안 맞는다 —
+    /// 훅의 규칙 2 가 **만드는 쪽에서만** 꺼지던 자리다.
+    #[cfg(unix)]
+    #[test]
+    fn the_deepest_living_ancestor_is_the_one_that_resolves() {
+        let s = Scratch::new("path-real-prefix");
+        let real = s.join("real");
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        std::os::unix::fs::symlink(&real, s.join("link")).unwrap();
+        let here = std::fs::canonicalize(&real).unwrap();
+
+        assert_eq!(real_prefix(&s.join("link/src")), here.join("src"));
+        // 아직 없는 파일도 같은 자리다.
+        assert_eq!(real_prefix(&s.join("link/src/새파일.rs")), here.join("src/새파일.rs"));
+        // **통째로 풀린 자리에 가름선을 안 붙인다.** `real.join("")` 은 끝에 `/` 를 더하는데,
+        // `PathBuf` 의 견주기는 조각으로 돌아 그것을 **못 잡는다** — 그래서 글자로 잰다.
+        // [`crate::user_config::spellings`] 가 이 값을 목록에 실어 내보낸다.
+        assert_eq!(real_prefix(&s.join("link")).as_os_str(), here.as_os_str(), "끝에 가름선이 붙었다");
+        // 조상이 하나도 안 풀리면 받은 철자 그대로다 — 자리를 못 고르는 것보다 낫다(`real` 과
+        // 같은 쪽). 절대 경로에서는 뿌리가 늘 풀리므로 그 판은 상대 철자에서만 선다.
+        //
+        // **머리는 이 시험의 제 자리 이름에서 딴다.** 아무 이름이나 적으면 그 이름의 디렉터리가
+        // cwd 에 선 기계에서 조상이 풀려 답이 뒤집힌다 — 시험이 도는 자리는 아무도 안 정한다.
+        let missing = PathBuf::from(s.path().file_name().expect("자리에 이름이 있다")).join("x");
+        assert_eq!(real_prefix(&missing), missing);
+    }
+
+    /// **디렉터리 조각이 없으면 `.` 이지 빈 철자가 아니다.** 빈 철자를 내면 곁에 락을 거는 자리가
+    /// (`store::lock_beside`) 뿌리로 미끄러진다.
+    #[test]
+    fn a_file_with_no_directory_part_sits_in_the_here() {
+        assert_eq!(dir_of(Path::new("config.toml")), Path::new("."));
+        assert_eq!(dir_of(Path::new("a/config.toml")), Path::new("a"));
+        assert_eq!(dir_of(Path::new("/a/config.toml")), Path::new("/a"));
+    }
 }

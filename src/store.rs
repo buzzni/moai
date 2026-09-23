@@ -1538,9 +1538,14 @@ pub(crate) fn gone(e: &std::io::Error) -> bool {
 
 /// **[`crate::path`] 로 옮긴 셋을 여기서도 부르게 두는 한 줄**(moai-xvyz).
 ///
-/// 옮기던 날 `src/hook.rs` 와 `src/cmd/hook.rs` 를 옆 세션이 쥐고 있어 그 다섯 부름만
-/// 못 옮겼다. **설계가 아니라 일정이 남긴 줄이라** 그 둘이 `crate::path::` 를 바로 들면
-/// 이 줄은 걷는다 — 걷는 일의 임자는 moai-99yy 의 멤버다.
+/// 옮기던 날 `src/hook.rs` 와 `src/cmd/hook.rs` 를 옆 세션이 쥐고 있어 **부름 셋**을 못 옮겼다
+/// (`cmd/hook.rs` 의 `real`, `hook.rs` 의 `lexical`·`real_prefix`). 그 둘에 남은 자리는 글까지
+/// 세면 여덟이고, 이 줄을 타고 이름이 풀리는 것은 그 셋뿐이다 — **세는 자리를 둘로 적으면 걷는
+/// 이가 어느 쪽을 찾아야 하는지 모른다**(리뷰). **설계가 아니라 일정이 남긴 줄이라** 그 둘이
+/// `crate::path::` 를 바로 들면 이 줄은 걷는다 — 걷는 일의 임자는 moai-99yy 의 moai-fnd0 이다.
+///
+/// 이 줄을 걷을 때 `store` 의 시험은 안 붉어진다 — 옮긴 셋을 재는 시험은 [`crate::path`] 로
+/// 함께 옮겼다(리뷰).
 pub(crate) use crate::path::{lexical, real, real_prefix};
 
 /// 그 파일의 락 자리 — 곁의 `<이름>.lock`.
@@ -1626,50 +1631,6 @@ mod tests {
     use super::*;
     use crate::model::{Kind, Status};
     use crate::scratch::Scratch;
-
-    /// **글자로만 접는다** — 파일 시스템을 안 본다. 셋이 저마다 적고 있던 것을 여기로 모았으니
-    /// (`hook::resolve`·`user_config::spellings`·`tz::name_under`), 재는 자도 여기 하나다.
-    ///
-    /// **재는 것은 뜻이지 고침이 아니다.** `/..` 이 `/` 로 서는 것은 `PathBuf::pop` 이 뿌리에서
-    /// 이미 아무것도 안 해서이지, 모으면서 더한 막음 덕이 아니다 — 그 줄을 걷어도 이 네 줄은
-    /// 그대로 푸르다. 그래도 세워 두는 까닭은 뜻이 바뀌면(std 가 아니라 이 함수가) 잡으라는 것이다.
-    #[test]
-    fn folding_dots_never_climbs_past_the_root() {
-        assert_eq!(lexical(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
-        assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
-        assert_eq!(lexical(Path::new("/..")), PathBuf::from("/"));
-        // **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라지므로
-        // (`a/../../b` 는 `../b` 가 아니라 `b`), 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다.
-        assert_eq!(lexical(Path::new("a/../../b")), PathBuf::from("b"));
-    }
-
-    /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는
-    /// 파일에서 실패해 준 철자가 그대로 나오고, 조상이 링크면 그 철자는 풀린 철자와 안 맞는다 —
-    /// 훅의 규칙 2 가 **만드는 쪽에서만** 꺼지던 자리다.
-    #[cfg(unix)]
-    #[test]
-    fn the_deepest_living_ancestor_is_the_one_that_resolves() {
-        let s = Scratch::new("store-real-prefix");
-        let real = s.join("real");
-        std::fs::create_dir_all(real.join("src")).unwrap();
-        std::os::unix::fs::symlink(&real, s.join("link")).unwrap();
-        let here = std::fs::canonicalize(&real).unwrap();
-
-        assert_eq!(real_prefix(&s.join("link/src")), here.join("src"));
-        // 아직 없는 파일도 같은 자리다.
-        assert_eq!(real_prefix(&s.join("link/src/새파일.rs")), here.join("src/새파일.rs"));
-        // **통째로 풀린 자리에 가름선을 안 붙인다.** `real.join("")` 은 끝에 `/` 를 더하는데,
-        // `PathBuf` 의 견주기는 조각으로 돌아 그것을 **못 잡는다** — 그래서 글자로 잰다.
-        // [`crate::user_config::spellings`] 가 이 값을 목록에 실어 내보낸다.
-        assert_eq!(real_prefix(&s.join("link")).as_os_str(), here.as_os_str(), "끝에 가름선이 붙었다");
-        // 조상이 하나도 안 풀리면 받은 철자 그대로다 — 자리를 못 고르는 것보다 낫다(`real` 과
-        // 같은 쪽). 절대 경로에서는 뿌리가 늘 풀리므로 그 판은 상대 철자에서만 선다.
-        //
-        // **머리는 이 시험의 제 자리 이름에서 딴다.** 아무 이름이나 적으면 그 이름의 디렉터리가
-        // cwd 에 선 기계에서 조상이 풀려 답이 뒤집힌다 — 시험이 도는 자리는 아무도 안 정한다.
-        let missing = PathBuf::from(s.path().file_name().expect("자리에 이름이 있다")).join("x");
-        assert_eq!(real_prefix(&missing), missing);
-    }
 
     /// `<자리>/a/b/c` 를 만든다. 위로 찾기를 재는 시험들이 함께 쓴다.
     fn tree(name: &str) -> Scratch {

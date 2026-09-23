@@ -193,6 +193,18 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- A row one side broke by hand now stands **inside** the conflict markers on that
+  side. Pairing a row needed its JSON to parse, so a row edited until it stopped
+  being JSON left that side of the marker empty — which reads as "that side
+  deleted it", and it had not — while the broken bytes were written below the
+  markers with nothing tying them to the conflict just resolved. A row is now
+  paired by the `id` at the head of the line even when the JSON no longer parses,
+  and it travels through the merge byte for byte. Only the shape this tool writes
+  is read: `{"id":"…"` first, and the id has to be a well-formed one. A line whose
+  head is gone too, and a line that is two issues glued together by a missing
+  newline, stay outside the markers as before — pairing the glued line would bury
+  the second issue inside the first one's marker, where taking the other side
+  deletes an issue that exists nowhere else.
 - Two rows carrying the same id now hand that id to a person instead of being
   quietly mixed. A snapshot that holds a readable row and an unreadable one under
   one id — what a hand-resolved conflict leaves behind — used to have one of them
