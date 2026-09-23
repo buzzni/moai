@@ -115,7 +115,11 @@ pub fn fill(text: &str, vars: &[(&str, &str)]) -> String {
 }
 
 /// [`fill`] 에서 잡는 자를 뺀 것 — 안 채운 자리가 남는 것이 답인 자리만 부른다.
-fn fill_lax(text: &str, vars: &[(&str, &str)]) -> String {
+///
+/// **모듈 밖에서도 부를 수 있어야 한다**(리뷰) — [`fill`] 의 글이 이 길을 대는데 이 모듈 안에만
+/// 서면, 두 번에 나눠 채우는 자리가 생긴 날 그 사람이 고를 수 있는 것은 dev 빌드에서 터지는
+/// 길뿐이다. 대는 길과 갈 수 있는 길이 갈리면 글이 거짓말이 된다.
+pub(crate) fn fill_lax(text: &str, vars: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(text.len() + 16);
     scan(text, |piece| match piece {
         Piece::Plain(said) => out.push_str(said),
