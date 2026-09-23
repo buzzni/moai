@@ -79,14 +79,12 @@ on finding them.
   at all, read as before. On a `noexec` `TMPDIR` this now also means
   `moai skill status` will say the hook is not runnable rather than claiming it is
   installed.
-
 - The refusal for rule 2 hands back the path **you typed**, not the one moai
   resolved. Judging still follows symlinks — the two spellings are one place, as
   they have to be — but a machine whose `TMPDIR`, `/tmp` or project directory is a
   link no longer asks you to retype a path that is not in your file list. This
   holds for a write caught inside a shell command too, where the word you wrote is
   what comes back.
-
 - The release check says *why* it could not ask. The version line still reads as
   one of four, but the fourth now carries the reason in parentheses — no network,
   timed out, rate limited, a server error, TLS failed, unreadable answer, odd
@@ -158,7 +156,7 @@ on finding them.
   under `--json` it is the `{"code":"bad_input", …}` object every other refusal
   gives, so a loop that branches on `code` sees this one too. **The title, the
   epic, the tag, the priority, the parent and the two dates were refused before
-  too, but by the argument parser** — so for those six the exit code changes from
+  too, but by the argument parser** — so for those seven the exit code changes from
   2 to 1 and the message stops being plain text.
 - **A plan takes `--body`**, and puts it on the first epic it creates — the one
   place `moai show <epic>` reads why these issues are one bundle, and the same
@@ -229,7 +227,6 @@ on finding them.
 - `moai ready` no longer prints `moai defer  --undo` with no id in it. Where an id
   stands twice, the row that left the plan and the row the undo target was read
   back from could be different lines.
-
 - A row one side broke by hand now stands **inside** the conflict markers on that
   side. Pairing a row needed its JSON to parse, so a row edited until it stopped
   being JSON left that side of the marker empty — which reads as "that side
