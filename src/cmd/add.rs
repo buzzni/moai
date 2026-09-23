@@ -391,7 +391,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // (`report::column`), 여기서만 그것을 그리면 `moai add --type epic -s done` 이
     // 낸 `✓` 를 바로 다음 `moai show` 가 `· todo` 로 뒤집는다.
     let states: std::collections::BTreeMap<&str, &str> = read.columns().collect();
-    let col = crate::report::column(&made, &states);
+    // **쓰기 경로에는 쌍둥이가 없다**(`cmd::Row::from` 과 같은 까닭) — `store::with_write` 가 중복
+    // id 에 쓰기를 통째로 물리므로, 방금 쓴 이 줄이 가려져 있을 수가 없다.
+    let col = crate::report::column(&crate::report::Kinds::no_twins(), &made, &states);
     let st = style::status_style(col);
     let mut line = format!(
         "{}  {}  {}  {}",

@@ -4,20 +4,18 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
+use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
     self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt,
     label, labels,
 };
-use super::layer::{Look, Place, Shut, Summary};
+use super::layer::{Look, Place, Shut};
 use super::menu;
 use super::picker::{self, Picker};
 use super::scroll::Move;
 use super::scroll::Scroll;
 use super::{App, Input, Mode, Pane, Row, Seat, Site};
-// 그림 시험만 이 꼴을 손으로 세운다 — 그리는 쪽은 [`super::Surfaced::count`] 로만 만진다.
-#[cfg(test)]
-use super::Surfaced;
 use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
@@ -712,9 +710,13 @@ fn banner(app: &App) -> Option<(String, bool)> {
     }
     // **기한은 그릴 때 잰다**(moai-fgjj) — 든 셈은 시간대에 안 닿고, 읽는 사람의 달은 이 프레임의
     // 것이다. `SPC o t` 로 바꾼 시간대가 다음 프레임에 이 수로 선다.
-    let surfaced = app.site.warnings.count(&app.site.now, &app.zone);
-    if surfaced > 0 {
-        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &surfaced.to_string())]));
+    //
+    // **시계를 여기서 고르지 않는다**(moai-ynd6) — 층의 줄과 같은 자([`surfaced`])를 쓴다. 한때
+    // 이 지역 이름이 그 함수를 이 자리부터 가려, 같은 것을 재는 두 자리가 나란히 서 있는데도
+    // 서로를 못 불렀다.
+    let n = surfaced(app, &app.site.warnings);
+    if n > 0 {
+        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &n.to_string())]));
     }
     // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
     // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
@@ -2683,7 +2685,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             }
             // 못 읽은 워크트리도 `!` 를 세운다 — 한눈 보기가 그것을 `옆 워크트리 문제` 로 세는데
             // 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
-            if surfaced(app, sum) > 0 || sum.unreadable > 0 || sum.unread > 0 {
+            if surfaced(app, &sum.warnings) > 0 || sum.unreadable > 0 || sum.unread > 0 {
                 spans.push(Span::styled(" !", from_anstyle(style::WARN)));
             }
             // **알림은 흐린 `+` 에 수를 붙여 선다**(moai-prdh) — 보드의 글리프와 같은 자다
@@ -2724,11 +2726,18 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     fit(Line::from(spans), room)
 }
 
-/// 그 줄이 대는 **드러난 것의 수** — 든 셈에 이 프레임의 달로 잰 기한을 더한다(moai-fgjj).
-/// 층의 줄을 그리는 자리 둘([`place_line`]·[`place_about`])이 이 하나를 쓴다: 저마다 더하면 한
-/// 자리만 잊어도 `!` 는 서는데 수는 하나 적게 선다.
-fn surfaced(app: &App, sum: &Summary) -> usize {
-    sum.warnings.count(&app.site.now, &app.zone)
+/// **드러난 것의 수** — 든 셈에 이 프레임의 달로 잰 기한을 더한다(moai-fgjj).
+///
+/// **[`Surfaced`] 를 받는다**(moai-ynd6). 한때 `&Summary` 를 받아, 같은 것을 재는 배너가 이것을
+/// 못 쓰고 제 손으로 `(&app.site.now, &app.zone)` 짝을 또 골랐다 — 시계를 고르는 자리가 그리는
+/// 쪽에 셋이었다. `Surfaced::count` 의 문서가 내다본 다음 고침(`crate::model::now()` 로 바꿔
+/// 60초 틈을 없애는 것)을 하는 사람이 문서가 "한 자리" 라 부른 그 함수만 고치면, 자정을 넘긴
+/// 화면에서 배너는 낡은 `site.now` 로 "드러난 것 1건" 을 대고 층의 줄은 새 시계로 `!` 를 안
+/// 세운다(moai-fgjj 가 세워진 그 증상이다).
+///
+/// 서명이 `&Summary` 였던 까닭은 시험 전용 import 하나였다 — 그 `#[cfg(test)]` 를 걷었다.
+fn surfaced(app: &App, counted: &Surfaced) -> usize {
+    counted.count(&app.site.now, &app.zone)
 }
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
@@ -2791,7 +2800,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             out.push(Line::from(""));
             // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
-            let n = surfaced(app, sum);
+            let n = surfaced(app, &sum.warnings);
             if n == 0 && sum.unread == 0 {
                 out.push(Line::from(vec![
                     Span::styled("✓", status("done")),
