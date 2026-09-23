@@ -1194,3 +1194,15 @@
 {"ts":"2026-09-23T04:24:03Z","id":"moai-wjeq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Runs::skip 이 permute 된 래퍼 깃발을 명령 argv 로 넘긴다"}
 {"ts":"2026-09-23T04:24:17Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"todo"}
 {"ts":"2026-09-23T04:24:18Z","id":"moai-xk0q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"뿌리를 렉서까지 내리는 일이라 moai-99yy 로 옮긴다. 이 회차에서 잰 것은 src/hook.rs 의 find 갈래 주석에 있다 — 이 기계의 기록에서 find 400줄을 걷어 시작 자리가 저장소 밑 절대 경로인 것 37줄, -execdir·-okdir 이 든 줄 4줄, 둘이 함께 선 줄 0줄이었다."}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-s8dp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 값 붙인 깃발에서 멈추는 자리)"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-694g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 줄인 긴 이름을 되돌리는 자리)"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-j9i9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — Wrapper 에 clash 칸을 새로 둠)"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-2m3l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 명령 자리 뒤까지 옵션을 읽는 고리)"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-fg47","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — find 의 술어 자리를 가리는 exec_spots)"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-s8dp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-23T04:26:32Z","id":"moai-694g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-23T04:26:33Z","id":"moai-j9i9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-23T04:26:33Z","id":"moai-2m3l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-23T04:26:33Z","id":"moai-fg47","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-23T04:27:56Z","id":"moai-1pra","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T04:27:56Z","id":"moai-wuzi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
