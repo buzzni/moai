@@ -13461,9 +13461,10 @@ fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
 /// 알림 한 줄을 내고(moai-wnnb), 그 줄은 이제 경로까지 싣는다(moai-wza7). 그래도 **없는 갈래는
 /// 여기만 댄다** — 훅은 없을 때 조용히 0 으로 빠진다.
 ///
-/// **그 알림은 세션·이벤트마다 한 번뿐이다**(moai-f7up). 훅이 매 도구 호출에 다시 말하지 않으니,
-/// 첫 줄을 놓친 사람에게 남는 자리는 여기다 — `skill status` 가 대는 몫을 줄이지 않는 까닭이다
-/// (리뷰 moai-514e.hgz 가 "종료마다" 라고 적힌 이 줄을 짚었다).
+/// **그 알림은 세션·이벤트마다 한 번뿐이고**(moai-f7up) **stdout 이 비었을 때만이다**(moai-mnhq).
+/// 훅이 매 도구 호출에 다시 말하지 않고, 무언가 지껄이고 죽은 바이너리에는 아예 말하지 않으니
+/// — 둘째 객체를 붙이면 `claude` 가 판정째 버린다 — 남는 자리는 여기다. `skill status` 가 대는
+/// 몫을 줄이지 않는 까닭이다(리뷰 moai-514e.hgz 가 "종료마다" 라고 적힌 이 줄을 짚었다).
 #[test]
 fn skill_status_notices_a_vanished_hook_binary() {
     let s = init("skillgone");
