@@ -204,7 +204,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   head is gone too, and a line that is two issues glued together by a missing
   newline, stay outside the markers as before — pairing the glued line would bury
   the second issue inside the first one's marker, where taking the other side
-  deletes an issue that exists nowhere else.
+  deletes an issue that exists nowhere else. When both sides broke the **same**
+  row and only one of the two heads survived, pairing that one side alone would
+  leave the other panel empty again — the very lie this entry removes — so there
+  the pairing is given back: the id resolves as "neither side has a readable row
+  left", and both sides' broken bytes ride out below, where `moai status` counts
+  them. That stands down only where the empty panel would be false: a side that
+  really deleted the row, and brought in no unreadable line of its own, still gets
+  its marker.
 - Two rows carrying the same id now hand that id to a person instead of being
   quietly mixed. A snapshot that holds a readable row and an unreadable one under
   one id — what a hand-resolved conflict leaves behind — used to have one of them
@@ -214,6 +221,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the extra copy had it merged straight in, leaving a snapshot with a duplicated
   id. Both at exit 0. Such a snapshot is already fatal to `moai status`
   (`Ids standing twice`, `Unreadable rows`); only the merge was quiet about it.
+  Where all three sides carry those rows **identically**, though, the merge chose
+  nothing, and handing the id over would put the same two lines in both panels on
+  every merge from then on, with no `moai` command to clear it — so that one shape
+  goes through untouched. Everything either side touched still goes to a person.
+  `moai status` now names the id as well: the id at the head of a broken line is
+  read by the same one reader the snapshot uses, so a broken twin of a live row
+  raises `Ids standing twice` instead of `Unreadable rows` alone, and a new id is
+  never minted onto it.
 - A single row this binary cannot read no longer turns **every** merge into a
   whole-file conflict. The merge driver paired rows by id only when both sides
   carried the very same unreadable lines, in the very same order, so one row
