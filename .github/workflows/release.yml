@@ -69,58 +69,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # 툴체인을 캐시에서 푼다 — 까닭과 잰 값은 `ci.yml` 의 `ci-gate` 에 있다.
+      # **이 잡은 캐시를 안 쓴다** (사람이 정했다, 2026-09-23). GitHub 은 캐시를 판을
+      # 낸 ref 와 기본 가지에서만 읽는데, 이 워크플로는 태그와 손으로 돌린 판에서만
+      # 돈다 — `refs/tags/v0.1.0` 이 담은 것을 `refs/tags/v0.1.1` 이 못 읽는다. 담는
+      # 자리가 죽은 자리라, 태그마다 700MiB 를 싸서 올려 두고 아무도 안 푼다.
       #
-      # **밑의 `rustup target add` 보다 앞에 선다.** 그것이 이 잡에서 rustup 을
-      # 처음 부르는 자리라, 뒤에 두면 캐시를 풀기도 전에 박아 둔 판을 통째로
-      # 받는다 — 캐시가 아무것도 안 벌어 주던 자리다.
-      - name: 박아 둔 판을 읽는다
-        id: toolchain
-        run: |
-          set -euo pipefail
-          # 따옴표는 둘 다 받고 빈칸도 탭도 지난다. TOML 이 허락하는 꼴을 여기서
-          # 더 좁힐 까닭이 없다.
-          channel=$(sed -n "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*[\"']\(.*\)[\"'].*/\1/p" rust-toolchain.toml || true)
-          # **못 읽으면 막지 않는다.** 여기서 지면 판 이름을 못 읽었다는 까닭으로
-          # 멀쩡한 PR 이 붉어진다 — 이 스텝이 하는 일은 캐시를 맞히는 것뿐이고,
-          # 못 맞히면 rustup 이 그대로 받으면 된다. 못 잰 판은 도는 쪽으로 선다.
-          if [ -z "$channel" ]; then
-            echo "::warning::rust-toolchain.toml 에서 channel 을 못 읽었다 — 툴체인을 캐시에서 안 푼다"
-          fi
-          printf 'channel=%s\n' "$channel" >>"$GITHUB_OUTPUT"
-
-      # **열쇠에 타깃이 든다.** 밑에서 더한 타깃의 std 가 툴체인 자리 안으로
-      # 들어가, 칸마다 담기는 것이 다르다. `ci.yml` 과 열쇠를 나눠 쓰면 musl 을
-      # 더한 칸이 담은 것을 거기가 덮어쓰거나 그 반대가 된다.
+      # **걷어서 드는 값은 벽시계 3초다.** 태그 v0.1.1 판에서 쟀다 (run 35682406130,
+      # 전체 2m52s) — build 스텝은 musl 이 cold 92s·낡은 접두사 81s·exact 45s, darwin
+      # 이 cold 122s·낡은 접두사 109s·exact 118s 고, 캐시를 넣고 빼는 값은 musl 6s·
+      # darwin 10s 다. 벽시계에 남는 것은 darwin 인데(잡 2m18s, musl 은 2m03s) 거기서는
+      # LTO 링크가 캐시를 안 타 exact hit 이 cold 와 같다. `rustup-<타깃>` 쪽은 아예
+      # 빈다 — 그 열쇠는 태그 자리에만 있고 `develop` 에는 없다.
       #
-      # **태그 판은 이 열쇠를 대개 못 맞힌다.** GitHub 은 캐시를 판을 낸 ref 와
-      # 기본 가지에서만 읽는데, 이 워크플로는 태그와 손으로 돌린 판에서만 돈다 —
-      # `refs/tags/v0.1.0` 이 담은 것을 `refs/tags/v0.2.0` 이 못 읽는다. 누가
-      # `develop` 에서 한 번 돌려 두면 그때 담긴 것을 태그 판이 읽는다(기본 가지가
-      # `develop` 이다). 밑의 `cargo-rel-*` 도 처음부터 같은 자리라 고칠 것이 이
-      # 스텝 하나가 아니고, 그 판단은 idea `moai-uave` 에 담았다. **순서를 바로잡은
-      # 값은 그와 별개로 선다** — 맞히는 판에서 캐시가 rustup 앞에 서 있어야 값이
-      # 있고, 그 자리가 비어 있던 것이 리뷰 moai-ch4z.639 가 짚은 것이다.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.toolchain.outputs.channel != ''
-        with:
-          path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
-          key: rustup-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}
-
-      # 캐시가 맞은 판에서는 이미 자리에 있어 매니페스트만 보고 끝난다. 못 맞힌
-      # 판은 여기서 툴체인과 타깃을 함께 받는다.
+      # **develop 에서 이 행렬을 함께 도는 길은 안 간다.** 그러면 열쇠가 기본 가지에
+      # 서서 태그가 맞히지만, 사는 것이 벽시계 10~15초인데 develop 푸시마다(하루 9번)
+      # 러너 둘이 더 돌고 macOS 는 공개 저장소에서 동시 5칸이다. 저장소 캐시도 지금
+      # 4.17GB/10GB 라, LRU 가 PR 마다 쓰는 `cargo-dev`(410MiB)를 밀어낼 자리였다.
+      #
+      # `ci.yml` 과 `smoke.yml` 의 캐시는 그대로 둔다. 다만 **맞는 까닭이 서로 다르다** —
+      # `ci.yml` 은 PR 과 `develop` 푸시에서 돌아 열쇠가 기본 가지에 서고, `smoke.yml` 은
+      # PR 에서 아예 안 도는 대신 밤마다 `schedule` 로 도는데 그 판이 기본 가지에서 돌아
+      # 같은 자리에 담긴다. 그래서 `smoke.yml` 의 태그 판도 밤이 담아 둔 것을 읽는다.
+      # **그 밤 판을 걷으면 그쪽도 여기와 똑같이 죽은 자리가 된다** — 태그와
+      # `workflow_dispatch` 만 남아, 담기만 하고 아무도 안 푸는 캐시가 된다.
       - name: 타깃을 받는다
         run: rustup target add ${{ matrix.target }}
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-rel-${{ matrix.target }}-
 
       # **musl 판은 C 컴파일러를 쓴다**(moai-omww). `ureq` 의 `rustls` 기능이 `ring` 을 끌고
       # 오는데, 그 크레이트는 제 build.rs 에서 C 와 어셈블리를 짓는다 — 그때까지 이 저장소는
