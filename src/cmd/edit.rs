@@ -231,7 +231,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
-                let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+                let read = super::read_of(issues, cfg, &[before.id.as_str()], ctx.json);
                 let kept = kept(issues);
                 let kept_milestone = kept_milestone(issues);
                 return Ok((
@@ -282,7 +282,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 .map(|(id, root)| (id.to_string(), root.to_string()))
                 .collect();
             // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
-            let read = super::read_of(issues, cfg, &near);
+            let read = super::read_of(issues, cfg, &near, ctx.json);
             let kept = kept(issues);
             let kept_milestone = kept_milestone(issues);
             // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.

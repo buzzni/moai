@@ -145,7 +145,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
             // 안 읽히는 칸을 읽는다(`cmd::Row`).
             let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids);
+            let read = super::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (m, read)))
         },
     )?;

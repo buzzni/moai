@@ -279,7 +279,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = crate::cmd::read_of(issues, cfg, &ids);
+            let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (made, read)))
         },
     )?;

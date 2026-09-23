@@ -36,11 +36,6 @@ struct Moved {
     freed: super::Read,
 }
 
-/// 이 쓰기가 연 줄들을 기계 꼴로 — 소속만 곁들인다(`Moved::freed`).
-fn freed_rows<'a>(rows: &'a [Issue], freed: &'a super::Read) -> Vec<super::Row<'a>> {
-    rows.iter().map(|i| super::Row::of(i, None, freed.epic(&i.id))).collect()
-}
-
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     if args.args.len() < 2 {
@@ -200,7 +195,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
             let asked: Vec<&str> =
                 m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
-            m.read = super::read_of(issues, cfg, &asked);
+            m.read = super::read_of(issues, cfg, &asked, ctx.json);
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues
                 .iter()
@@ -218,7 +213,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 // 줄이 섞인다(`read_of` 와 같은 까닭).
                 let freed: Vec<&str> =
                     m.unblocked.iter().chain(&m.closable).chain(&m.next).map(|i| i.id.as_str()).collect();
-                m.freed = super::read_of(issues, cfg, &freed);
+                m.freed = super::read_of(issues, cfg, &freed, ctx.json);
             }
             Ok((entries, m))
         },
@@ -279,12 +274,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .filter(|(_, col)| *col != to.as_str())
                 .map(|(id, col)| Stands { id, derived_status: col })
                 .collect(),
-            // **칸은 여기서 안 곁들인다** — 이 셋에 `derived_status` 가 없던 것은 이번 일이
-            // 고칠 자리가 아니다(moai-wuzi 는 소속만 맞춘다). 지도는 이미 들고 있으니, 고치기로
-            // 하면 `Row::from` 으로 바꾸는 한 줄이다.
-            unblocked: freed_rows(&moved.unblocked, &moved.freed),
-            closable: freed_rows(&moved.closable, &moved.freed),
-            next: freed_rows(&moved.next, &moved.freed),
+            // **이 셋에 `derived_status` 는 안 선다 — 그래도 `Row::from` 으로 짓는다**(리뷰).
+            // 셋 다 일 줄뿐이라(`report::closable`·`unblocked_pick` 이 `is_work` 로 거른다)
+            // `Row::of` 가 묶음이 아닌 줄의 읽은 칸을 버리는 자리에서 값이 저절로 빈다. 줄을
+            // 짓는 자를 따로 두면 `Row` 에 키가 하나 더 설 때 이 셋만 빠진다.
+            unblocked: moved.unblocked.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
+            closable: moved.closable.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
+            next: moved.next.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
         });
     }
 

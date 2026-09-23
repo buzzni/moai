@@ -36,8 +36,10 @@ on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
 **Which epic a row is in, you read from `derived_epic`.** `epic` is what the file
 says, and a row whose id sits under an epic (`<epic>.<body>`) reads its epic from
 that id and writes no `epic` of its own — so on those rows `epic` is absent and
-`derived_epic` names the epic. It stands on every row every command prints, and its
-absence means the row is in no epic at all. On a group row it never stands.
+`derived_epic` names the epic. On a row that carries it, absence means the row is in
+no epic at all, and on a group row it never stands. Two surfaces carry neither key —
+`rm --json` hands the removed lines back exactly as the file held them, and `tui
+--json` prints the explorer's own shorter row — and there you read the epic off the id.
 
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw

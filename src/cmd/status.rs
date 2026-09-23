@@ -290,10 +290,17 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 남의 저장소라 [`crate::cmd::init::away_root`] 가 잰 자리대로 `-C <경로>` 를 얻는다.
             status.notices.extend(install_notices(repo, false));
             // **집은 줄의 소속은 여기서 푼다**(moai-wuzi) — `--json` 이 펴는 자리에는 이
-            // 프로젝트의 줄 목록이 안 따라간다.
+            // 프로젝트의 줄 목록이 안 따라간다. 다만 **기계 쪽만 짓는다**(리뷰): `Board::epics`
+            // 를 읽는 것은 `--json` 뿐이라, 늘 지으면 사람이 보는 보드가 프로젝트마다 저장소
+            // 전체의 소속을 한 벌씩 걷고 그대로 버린다.
             let picked = report::wip(&load.issues, &repo.config);
-            let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-            let epics = report::groups_of(&load.issues, &ids);
+            let epics = match ctx.json {
+                true => {
+                    let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
+                    report::groups_of(&load.issues, &ids)
+                }
+                false => Default::default(),
+            };
             view::Board {
                 cfg: &repo.config,
                 status,

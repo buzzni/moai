@@ -93,8 +93,16 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
                 let (picks, focus) = report::ready_in(&load.issues, &repo.config);
-                let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
-                let epics = report::groups_of(&load.issues, &ids);
+                // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
+                // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
+                // 소속을 한 벌씩 걷고 그대로 버린다.
+                let epics = match ctx.json {
+                    true => {
+                        let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+                        report::groups_of(&load.issues, &ids)
+                    }
+                    false => Default::default(),
+                };
                 view::Picks {
                     picks,
                     focus,

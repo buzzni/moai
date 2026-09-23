@@ -101,7 +101,9 @@ impl<'a> Brief<'a> {
             status: i.status.as_str(),
             priority: i.priority(),
             epic: i.epic.as_deref(),
-            derived_epic: epics.get(i.id.as_str()).copied(),
+            // **[`super::Row`] 와 한 자로 낸다**(`report::stands_in`) — 지도를 그대로 읽으면
+            // 이 표면만 제 차례를 갖는다.
+            derived_epic: crate::report::stands_in(i, epics.get(i.id.as_str()).copied()),
             tags: &i.tags,
             branch: origin.branch(&i.id),
         }

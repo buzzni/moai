@@ -228,7 +228,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
-            let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
+            let read = super::read_of(issues, cfg, &[issue.id.as_str()], ctx.json);
             Ok((vec![entry], (issue, read)))
         },
     )?;
@@ -306,7 +306,7 @@ fn bulk(
         |issues, cfg, reserved| {
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids);
+            let read = super::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (made, read)))
         },
     )?;

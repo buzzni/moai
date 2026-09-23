@@ -1776,12 +1776,12 @@ pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
     out
 }
 
-/// 조상이 id 자식에게 **넘기는 소속**을 한 판에서 id 마다 한 번만 푸는 쪽지
+/// 조상이 id 자식에게 **넘기는 소속**을 한 번 도는 동안 id 마다 한 번만 푸는 쪽지
 /// (moai-1pra). 계획이 세우는 멤버는 `epic` 을 안 적고 id 로 소속을 지므로
 /// ([`groups`]), 줄마다 조상을 걷는 값이 이 지도의 값이 되었다 — 멤버 서른이 같은
 /// 에픽을 물으면 그 답은 한 번만 풀면 된다.
 ///
-/// **쪽지는 한 판만 산다.** 파생값을 저장하지 않는다는 결정은 `issues.jsonl` 에
+/// **쪽지는 그 한 번만 산다.** 파생값을 저장하지 않는다는 결정은 `issues.jsonl` 에
 /// 대한 것이고, 여기는 `groups` 한 번이 끝나면 함께 사라진다.
 ///
 /// 앞자리(`last`)는 **줄이 id 순으로 온다는 데 기대지 않는 지름길**이다. 파일이
@@ -1848,17 +1848,41 @@ impl<'a> Handed<'a> {
 /// 표면(`add`·`mv`·`edit`)이 락 안에서 저장소 전체의 지도를 들고 나가지 않는다.
 ///
 /// **소속을 id 에 진 줄이 물은 것 가운데 하나도 없으면 지도를 안 짓는다.** `epic` 을 적은
-/// 줄의 답은 그 줄이 들고 있고([`crate::cmd::Row::of`] 가 그것을 먼저 읽는다), 묶음 줄은
-/// 소속을 안 받는다([`joins`]) — 남는 것은 id 부모에게서 받는 줄뿐이다.
+/// 줄의 답은 그 줄이 들고 있고([`stands_in`] 이 그것을 먼저 읽는다), 묶음 줄은
+/// 소속을 안 받는다([`joins`]) — 남는 것은 id 부모에게서 받는 줄뿐이다. 문의 조건은
+/// [`epic_through`] 가 지도를 묻는 줄의 **위집합**이라야 한다 — 좁히면 지도가 낼 답이 있는
+/// 줄에서 빈 지도가 돌아와, 같은 물음에 표면마다 다른 답이 선다(리뷰).
+///
+/// 물은 id 는 **집합으로 든다** — `ids` 를 줄마다 훑으면 아래 둘이 `줄 수 × 물은 수` 가 된다.
+/// `ready --json` 은 집을 줄 전부를 묻는 자리라 그 곱이 이 함수의 값 거의 전부였다(리뷰).
+///
+/// **이 지도만으로는 답이 아니다.** 문이 닫히면 빈 지도가 돌아오는데 그것은 "에픽이 없다" 가
+/// 아니라 "안 지었다" 다 — 답을 내는 자는 [`stands_in`] 이고, 그쪽이 줄의 `epic` 을 먼저
+/// 읽는다. 이 지도를 혼자 짚으면 제 `epic` 을 적은 옛 멤버가 에픽 없는 줄로 나온다.
 pub fn groups_of<'a>(all: &'a [Issue], ids: &[&str]) -> BTreeMap<&'a str, &'a str> {
-    let from_id =
-        |i: &Issue| joins(i) && i.epic.is_none() && crate::id::parent_of(&i.id).is_some_and(|p| !p.is_empty());
-    if !all.iter().any(|i| ids.contains(&i.id.as_str()) && from_id(i)) {
+    let want: BTreeSet<&str> = ids.iter().copied().collect();
+    if want.is_empty() {
+        return BTreeMap::new();
+    }
+    let from_id = |i: &Issue| joins(i) && i.epic.is_none() && crate::id::parent_of(&i.id).is_some();
+    if !all.iter().any(|i| from_id(i) && want.contains(i.id.as_str())) {
         return BTreeMap::new();
     }
     let mut out = groups(all);
-    out.retain(|id, _| ids.contains(id));
+    out.retain(|id, _| want.contains(id));
     out
+}
+
+/// 줄 하나가 **든 에픽** — `--json` 의 `derived_epic` 이 내는 그 값이다(moai-wuzi).
+/// 적힌 `epic` 이 먼저고([`epic_through`] 가 거기서 돌아서는 것과 같은 차례다), 없으면
+/// `placed` 가 답이다 — [`groups`]·[`groups_of`] 가 그 줄에 준 값이다. 묶음 줄에는 안
+/// 선다([`joins`], moai-fg0t).
+///
+/// **자는 하나다.** 이 키를 내는 표면이 둘인데([`crate::cmd::Row::of`] 와
+/// `cmd::prime::Brief`), 저마다 이 차례를 적으면 한 바이너리가 한 키에 두 답을 낸다 —
+/// moai-wuzi 가 없앤 자리가 바로 그것이다. 판단이 `report` 에 사는 것도 같은 까닭이다.
+pub fn stands_in<'a>(i: &'a Issue, placed: Option<&'a str>) -> Option<&'a str> {
+    joins(i).then(|| i.epic.as_deref().or(placed)).flatten()
 }
 
 /// 제 `epic` 필드 없이 id 부모에게서 오는 소속 — `(에픽, 부모 id)`. 제 `epic` 을
@@ -1984,6 +2008,10 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
     for t in thoughts {
         let folds = crate::id::parent_of(&t.id)
             .and_then(|p| by_id.get(p).copied())
+            // **이 거르개는 값을 나른다**(리뷰) — 걷어낸 `passed_down` 은 [`epic_through`] 를
+            // 거쳐 `joins` 로 한 번 더 걸렀는데 [`Handed::from`] 에는 그 걸음이 없다. 여기가
+            // 열리면 에픽 밑에 바로 담긴 생각이 `folds` 로 읽혀 `rooted` 에 안 들고, 그 밑이
+            // 통째로 에픽을 물려받는다.
             .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
             .is_some_and(|p| {
                 // 부모가 넘기는 것은 [`Handed::from`] 이 그대로 낸다 — 뿌리로 올라간 생각에서
@@ -6627,7 +6655,7 @@ mod tests {
     }
 
     /// **쪽지가 옆줄의 답을 물려주지 않는다**(moai-1pra). [`Handed`] 는 조상이 넘기는
-    /// 소속을 한 판에서 한 번만 풀고 앞자리를 따로 쥐는데, 그 둘이 id 를 안 보면 에픽
+    /// 소속을 한 번 도는 동안 한 번만 풀고 앞자리를 따로 쥐는데, 그 둘이 id 를 안 보면 에픽
     /// A 의 멤버가 에픽 B 의 답을 입는다 — 화면에도 `-e` 거름망에도 그대로 샌다.
     /// **줄을 일부러 섞어 넣는다** — id 순으로 오면 앞자리가 늘 맞아 빗나간 길을 안 지난다.
     #[test]
@@ -6650,6 +6678,33 @@ mod tests {
         assert_eq!(g.get("argos-0002.aaa.ccc"), Some(&"argos-0002"), "{g:?}");
         assert_eq!(g.get("argos-0002.ddd"), Some(&"argos-0003"), "제가 적은 에픽을 잃었다 — {g:?}");
         assert_eq!(g.get("argos-0002.ddd.eee"), Some(&"argos-0003"), "부모가 적은 에픽이 안 내려왔다 — {g:?}");
+    }
+
+    /// **차는 중인 `rooted` 를 문 쪽지가 거짓을 안 남긴다**(리뷰). [`rooted_thoughts`] 는
+    /// [`Handed`] 하나를 고리 내내 나눠 쓰는데, 그 답이 서는 것은 오름이 `t` 의 조상만 짚고
+    /// 조상의 id 가 반드시 더 짧아 **길이 순 고리에서 앞서 정해졌기** 때문이다. 생각이 한
+    /// 단뿐이면 그 자리가 안 열린다 — 두 단으로 겹쳐야 안쪽 생각이 바깥 생각의 답을 묻는다.
+    ///
+    /// 정렬이 무너지면 안쪽 생각이 먼저 돌아, 아직 안 끊긴 바깥 생각에서 에픽을 받아 쪽지에
+    /// 적는다. 그러면 안쪽이 `folds` 로 읽혀 `rooted` 에 안 들고, 그 밑이 통째로 에픽을
+    /// 물려받는다 — 마지막 줄이 그것을 잡는다.
+    #[test]
+    fn a_thought_folded_under_a_rooted_thought_hands_nothing_down() {
+        let epic = make("argos-0002", Kind::Epic, "todo");
+        // 에픽 바로 밑의 생각은 늘 뿌리로 올라간다 — 부모가 묶음이라 접힐 자리가 없다.
+        let outer = make("argos-0002.aaa", Kind::Idea, "todo");
+        // 그 밑의 생각이 제 `epic` 으로 같은 에픽을 적으면, 바깥 생각을 아직 안 끊긴 줄로 읽는
+        // 때에만 "부모가 넘긴 것과 같다" 가 되어 접힌다.
+        let mut inner = make("argos-0002.aaa.bbb", Kind::Idea, "todo");
+        inner.epic = Some("argos-0002".into());
+        let under = make("argos-0002.aaa.bbb.ccc", Kind::Issue, "todo");
+        let issues = vec![under, inner, epic, outer];
+
+        let g = groups(&issues);
+        // 생각 제 줄의 소속은 남는다 — 끊기는 것은 그 밑이다.
+        assert_eq!(g.get("argos-0002.aaa"), Some(&"argos-0002"), "{g:?}");
+        assert_eq!(g.get("argos-0002.aaa.bbb"), Some(&"argos-0002"), "제가 적은 에픽을 잃었다 — {g:?}");
+        assert_eq!(g.get("argos-0002.aaa.bbb.ccc"), None, "끊긴 생각 밑이 에픽을 물려받았다 — {g:?}");
     }
 
     /// **끊는 것은 뿌리로 올라간 생각뿐이다.** 이슈 밑에 접힌 생각은 그 이슈의

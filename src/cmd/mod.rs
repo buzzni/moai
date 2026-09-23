@@ -607,12 +607,10 @@ impl<'a> Row<'a> {
     /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::groups_of`) — 줄이 `epic` 을
     /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
     pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>, placed: Option<&'a str>) -> Row<'a> {
-        // **적힌 것이 먼저다.** 지도도 같은 답을 내지만(`report::epic_through` 가 제 `epic` 에서
-        // 돌아선다), 줄이 든 값을 그 줄에서 읽으면 지도를 안 받은 표면도 같은 답을 낸다.
-        let derived_epic = match crate::report::is_group(issue) {
-            true => None,
-            false => issue.epic.as_deref().or(placed),
-        };
+        // **차례를 여기서 다시 적지 않는다**(`report::stands_in`) — 적힌 것이 먼저라는 것도,
+        // 묶음 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가 정한다. 여기 한 벌 더 적으면
+        // `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가 어긋난다.
+        let derived_epic = crate::report::stands_in(issue, placed);
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
@@ -682,8 +680,9 @@ pub fn keys_beyond<T: serde::Serialize>(line: &crate::model::Issue, out: &T) -> 
 pub struct Read {
     /// 묶음 id → 멤버에서 읽은 칸(`report::group_states_of`).
     states: BTreeMap<String, String>,
-    /// 줄 id → 그 줄이 든 에픽(`report::groups_of`). `epic` 을 적은 줄은 안 든다 —
-    /// 그 답은 줄이 제 몸에 들고 있다([`Row::of`]).
+    /// 줄 id → 그 줄이 든 에픽(`report::groups_of`). **`epic` 을 적은 줄도 든다** — 지도를
+    /// 지었으면 그 줄에도 값이 선다. 다만 그 값은 안 읽힌다: 줄이 제 몸에 든 것이 먼저라
+    /// (`report::stands_in`), 지도를 아예 안 지은 때에도 답이 같다.
     epics: BTreeMap<String, String>,
 }
 
@@ -707,11 +706,20 @@ impl Read {
 /// 락 안에서 **낼 줄이 저장소 전체를 봐야 아는 값**을 챙겨 나온다 — 락을 놓은 뒤에 다시
 /// 세면 그 사이에 남이 쓴 멤버가 섞인다. 둘 다 게을러서, 묶음이 없으면 칸을
 /// (`group_states_of`), 소속을 id 에 진 줄이 없으면 에픽을(`groups_of`) 안 걷는다.
-pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
+///
+/// **소속은 `--json` 일 때만 걷는다**(`json`, 리뷰) — 그 지도를 읽는 자는 [`Row::from`]
+/// 하나고 그것을 부르는 자리는 기계 출력뿐이다. 늘 걷으면 사람이 부르는 `moai mv` 도
+/// 저장소 전체의 조상 오름을 락을 쥔 채 치르는데, 여기는 세션 예닐곱이 같은 `.moai` 를
+/// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
+/// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
+pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
     let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     Read {
         states: owned(crate::report::group_states_of(issues, cfg, ids)),
-        epics: owned(crate::report::groups_of(issues, ids)),
+        epics: match json {
+            true => owned(crate::report::groups_of(issues, ids)),
+            false => BTreeMap::new(),
+        },
     }
 }
 
@@ -746,13 +754,17 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
     crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
-/// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
+/// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.
 ///
-/// **[`Read`] 와는 다른 자다.** 이쪽은 `--from` 이 견줄 칸 하나만 담고 아무것도 안 낸다 —
-/// 타입을 나눠 둔 것은 `Read` 를 낼 줄의 계약([`Row::from`])으로 두기 위해서다. 한 이름을
-/// 둘이 쓰던 판에서는 소속을 안 챙긴 이 지도가 줄을 내는 자리에 흘러도 컴파일이 지났다.
+/// **[`Read`] 와는 다른 자다.** 이쪽은 `--from` 이 견줄 칸 하나만 담고 아무것도 안 낸다.
+/// 막는 것은 `Read` 가 구조체가 된 쪽이다 — 필드가 사유라 맨 지도는 [`Row::from`] 에
+/// 못 닿는다. 이 이름은 별명이라 그 자체로는 아무것도 안 막고, 갈라 둔 까닭을 적어 둘
+/// 뿐이다. 한 이름을 둘이 쓰던 때에는 소속을 안 챙긴 이 지도가 줄을 내는 자리에 흘러도
+/// 컴파일이 지났다.
 pub type Standing = BTreeMap<String, String>;
 
+/// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
+///
 /// [`read_of`] 와 갈리는 곳이 둘이다.
 ///
 /// - **묶음만이 아니라 물은 줄 전부**를 담는다. 묶음인지는 [`crate::report::column`] 이
