@@ -8303,6 +8303,47 @@ fn a_plans_members_hang_under_the_epic_by_id() {
 }
 
 
+/// **옛 줄의 id 는 안 바꾼다**(moai-sfza) — 옛 moai 는 머지가 낸 중복 id 를 relabel 하고 영구
+/// 별칭을 들다가 죽었다. 새로 펼치는 계획만 자식 id 를 받고, 이미 선 멤버는 그 자리 그대로다.
+///
+/// 그래서 한 에픽 밑에 **두 모양이 나란히 선다**(moai-vndz) — 평평한 옛 멤버와 자식인 새 멤버.
+/// 멤버 셈도 상세도 트리도 둘을 같이, 한 번씩만 낸다. 상세의 `자식` 줄과 멤버 칸이 겹쳐 같은
+/// 줄을 두 번 그리던 자리가 여기다.
+#[test]
+fn old_flat_members_keep_their_ids_beside_new_child_members() {
+    let s = init("mixedmembers");
+    let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
+    let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
+    let id = ok(s.path(), &["idea", "add", "되찾을 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 옛 줄은 id 도 소속도 그대로다 — 없으면 `line_of` 가 그 자리에서 패닉한다.
+    let was = line_of(s.path(), &flat);
+    assert!(was.contains(&format!(r#""epic":"{epic}""#)), "옛 멤버의 소속을 건드렸다 — {was}");
+    let file = issues(s.path());
+    let fresh = field(file.lines().find(|l| l.contains("새 멤버")).expect("새 멤버가 안 섰다"), "id");
+    assert_eq!(parent_in(&fresh), Some(epic.as_str()), "새 멤버가 자식이 아니다");
+
+    let mut want = vec![flat.clone(), fresh.clone()];
+    want.sort();
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    let mut members = list_in(&seen, "members").expect("members 가 없다");
+    members.sort();
+    assert_eq!(members, want, "두 모양이 같이 안 섰다 — {seen}");
+
+    // 상세는 같은 줄을 한 번만 그린다. 셈도 둘을 같이 센다.
+    let text = ok(s.path(), &["show", &epic]);
+    assert!(text.contains("0/2"), "멤버 셈이 둘을 같이 안 셌다 — {text}");
+    for m in &want {
+        assert_eq!(text.matches(m.as_str()).count(), 1, "{m} 이 상세에 두 번 섰다 — {text}");
+    }
+    // 트리도 한 번씩이다 — 자리를 정하는 자(`nav`)는 자식 멤버를 제 에픽 밑에 둔다.
+    let tree = ok(s.path(), &["show", "--tree"]);
+    for m in &want {
+        assert_eq!(tree.matches(m.as_str()).count(), 1, "{m} 이 트리에 두 번 섰다 — {tree}");
+    }
+}
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
 /// 조용히 버려지는데, 어느 쪽이든 사람이 적은 것과 다르다. 없는 것·에픽 아닌 것도
 /// 거절한다 — idea 가 닫히므로 틀린 자리에 펼친 것을 되돌릴 길이 도구 밖에만 남는다.

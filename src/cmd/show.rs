@@ -560,8 +560,20 @@ fn one(
         );
     }
 
+    // **멤버로 그릴 줄은 자식 줄에서 뺀다**(moai-vndz, 2026-09-23 사용자 결정). 계획이 세우는
+    // 멤버가 에픽의 자식 id 를 받으면서(moai-s8go) 같은 줄이 머리의 `자식` 줄과 밑의 멤버 칸에
+    // 두 번 섰다 — 멤버 일곱짜리 에픽을 펼치면 같은 일곱 줄이 두 벌이다. 멤버 칸이 칸·우선순위·
+    // 태그까지 말하니 자식 줄이 더 주는 것이 없고, 멤버가 아닌 자식(담아 둔 생각 등)은 그대로
+    // 선다. **`--json` 의 `children` 은 안 건드린다** — 그쪽은 id 계층 그대로가 답이고,
+    // 무엇이 멤버인지는 `members` 가 따로 말한다.
+    //
+    // 멤버는 **여기서 한 번만** 고른다 — 아래 멤버 칸이 이 목록을 그대로 쓴다(moai-g0zx 와 같은
+    // 까닭). 묶음이 아니면 `group_members` 는 지도도 안 짓고 곧바로 돌아선다.
+    let rows = report::group_members(all, issue);
+    let mine: BTreeSet<&str> = rows.iter().map(|i| i.id.as_str()).collect();
+    let kids: Vec<&Issue> = children.iter().copied().filter(|c| !mine.contains(c.id.as_str())).collect();
     // 이력은 언제나 맨 끝이다. 에픽이면 멤버를 그 **앞에** 끼운다.
-    let mut out = view::detail(issue, epic, &children, &seen, &repo.config, &model::now(), raw);
+    let mut out = view::detail(issue, epic, &kids, &seen, &repo.config, &model::now(), raw);
     // 머리 두 줄(제목·칸) 바로 밑이다 — 본문을 읽기 전에 이 줄이 하나뿐이 아님을 안다.
     if let Some(n) = twins {
         out.insert(2.min(out.len()), view::duplicate_note(n, ctx.lang()));
@@ -570,11 +582,11 @@ fn one(
     // 이유가 바로 그것이다. 마일스톤이면 에픽과 이슈가 같이 나온다.
     if report::is_group(issue) {
         // **베끼지 않는다.** 차례는 `view::members` 가 `nav` 에서 받아 정하므로
-        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이다.
+        // 여기서 필요한 것은 "누가 이 묶음의 멤버인가" 하나뿐이고, 그 목록(`rows`·`mine`)은
+        // 자식 줄을 거르면서 이미 골라 두었다.
         // **`--json` 이 내는 것과 같은 것을 그린다** — 둘 다
         // `report::group_members` 로 고른다.
-        let rows = report::group_members(all, issue);
-        let mine: BTreeSet<&str> = rows.iter().map(|i| i.id.as_str()).collect();
+        //
         // **소속 지도는 한 벌이다**(moai-g0zx) — 목록 쪽(`run`)과 같은 까닭이다. 이 밑에서
         // 머리글의 굴림·색인·멤버 굴림 셋이 저마다 지으면 `groups` 가 한 번 펼치는 데 세 벌
         // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).
