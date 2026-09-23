@@ -29,7 +29,11 @@
 //! 충돌로 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다 합치기 어려워지고, CLAUDE.md 가
 //! 막은 자리가 바로 그것이다("남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴 방법이 도구 밖에만
 //! 남는다").
-
+//!
+//! **짝을 짓고 나서 도로 푸는 자리가 하나 있다**([`unpair`], moai-58io). 두 쪽이 같은 줄을
+//! 저마다 다르게 깨뜨려 한쪽 머리만 긁히면, 짝지은 그 한쪽 때문에 표식의 저쪽 칸이 빈 채로
+//! 선다 — 저쪽이 지웠다는 뜻인데 사실이 아니다. 저쪽이 밑줄에 없던 못 읽는 줄을 새로 들었으면
+//! 그 열쇠를 거둔다.
 //!
 //! 통째로 넘기는 것은 **짝지을 수가 없을 때** 둘이다 — 한 파일에 **읽히는** 줄이 같은 id 로
 //! 둘 있을 때(그때는 id 로 짝짓는 것 자체가 거짓이다), 그리고 글자가 깨져 줄로도 못 나눌 때.
@@ -141,8 +145,8 @@ struct Keyed<'s> {
     /// 열쇠가 없어 이슈마다 풀 수가 없다 — [`unkeyed`] 가 줄마다 센 수로 3-way 를 돌린다.
     ///
     /// **여기 있는 줄은 열쇠를 못 얻은 줄이다** — [`row`] 가 id 를 못 읽었거나, 읽었어도
-    /// [`crate::id::scraped`] 가 받는 한 꼴이 아니었다. 그러니 "id 가 글자로 아예 없다" 는
-    /// 뜻이 아니다: `{ "id" : "x"`
+    /// [`crate::id::scraped`] 가 받는 한 꼴이 아니었거나, [`unpair`] 가 그 열쇠를 도로
+    /// 거뒀다(moai-58io). 그러니 "id 가 글자로 아예 없다" 는 뜻이 아니다: `{ "id" : "x"`
     /// 처럼 빈칸이 끼거나 `id` 가 첫 필드가 아닌 줄은 id 를 눈으로 볼 수 있어도 여기 선다.
     /// `Issue` 로만 안 읽히는 줄은 `by_id` 에 서고 [`Row::whole`] 이 거짓이다(moai-1a55.4oh).
     opaque: Vec<&'s str>,
@@ -249,10 +253,70 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
 /// 남은 [`whole`] 갈래는 **읽히는 줄이 같은 id 로 둘 있는** 판 하나다. 그때는 id 로 짝짓는
 /// 것 자체가 거짓이라 풀 자가 없다.
 fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
-    match (keyed(o), keyed(a), keyed(b)) {
-        (Some(o), Some(x), Some(y)) => by_issue(&o, &x, &y, marker, a.len()),
-        _ => whole(a, b, marker),
+    let (Some(k), Some(mut x), Some(mut y)) = (keyed(o), keyed(a), keyed(b)) else {
+        return whole(a, b, marker);
+    };
+    unpair(&k, &mut x, &mut y);
+    by_issue(&k, &x, &y, marker, a.len())
+}
+
+/// **이쪽 머리만 성한 판에서는 짝을 푼다**(moai-58io, 2026-09-23 사용자 결정).
+///
+/// 두 쪽이 같은 줄을 저마다 다르게 깨뜨려 한쪽 머리만 [`crate::id::scraped`] 에 걸리면, 그 id 는
+/// 한쪽에만 서고 [`settle`] 이 남은 셋을 `(Some, Some, None)` 으로 읽어 **빈 칸이 선 `Clash`** 를
+/// 짓는다 — 저쪽이 지웠다는 뜻인데 사실이 아니고, 저쪽 바이트는 표식 밖에 따로 앉는다. 이
+/// 에픽이 없애려던 바로 그 거짓말이다.
+///
+/// 긁기를 넓혀 저쪽도 짝짓는 길은 막혀 있다(2026-09-23 사용자 결정) — 헐거운 짐작은 남의 이슈를
+/// 사람에게 내민다. 그래서 **덜 짝짓는다**: 밑줄에 그 id 가 있고 한쪽에만 섰는데 그 줄이 깨진
+/// 줄이며, **없는 쪽이 밑줄에 없던 못 읽는 줄을 새로 들었으면** 그 깨진 줄의 열쇠를 거두어
+/// [`Keyed::opaque`] 로 돌린다. 그러면 그 id 는 "두 쪽이 다 깨뜨려 읽히는 줄이 남지 않았다" 로
+/// 풀리고, 두 쪽의 깨진 바이트는 [`unkeyed`] 가 파일 끝으로 실어 낸다 — 줄은 하나도 안 사라지고,
+/// 이 에픽 전과 같은 자리다. `moai status` 가 그 둘을 못 읽는 줄로 세어 사람에게 말한다.
+///
+/// **없는 쪽이 못 읽는 줄을 안 늘렸으면 그대로 둔다** — 그때 빈 칸은 참이다(저쪽이 정말 지웠다).
+/// 그 판의 표식은 서고, "표식이 서는 것이 받아들일 만한 최악" 이 그 자리에 남는다.
+///
+/// **두 쪽의 답을 먼저 다 재고 나서 옮긴다.** 이쪽을 먼저 옮기면 이쪽 `opaque` 가 그 옮김으로
+/// 늘어, 저쪽을 잴 때 "늘었는가" 가 이 함수가 만든 사실로 참이 된다.
+fn unpair<'s>(o: &Keyed<'s>, a: &mut Keyed<'s>, b: &mut Keyed<'s>) {
+    /// 열쇠를 거둘 id 들. 순수 함수다.
+    fn loosened(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>) -> Vec<String> {
+        let base: BTreeSet<&str> = o.opaque.iter().copied().collect();
+        // 저쪽이 밑줄에 없던 못 읽는 줄을 하나도 안 들었으면, 저쪽의 빈 칸은 참이다.
+        if !b.opaque.iter().any(|l| !base.contains(l)) {
+            return Vec::new();
+        }
+        a.by_id
+            .iter()
+            .filter(|(id, rs)| {
+                o.by_id.contains_key(*id)
+                    && !b.by_id.contains_key(*id)
+                    && rs.iter().any(|r| matches!(r.read, Read::Broken))
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
     }
+    fn demote(k: &mut Keyed<'_>, ids: &[String]) {
+        for id in ids {
+            let Some(slot) = k.by_id.get_mut(id) else { continue };
+            let mut moved = Vec::new();
+            slot.retain(|r| {
+                if matches!(r.read, Read::Broken) {
+                    moved.push(r.raw);
+                    return false;
+                }
+                true
+            });
+            if slot.is_empty() {
+                k.by_id.remove(id);
+            }
+            k.opaque.extend(moved);
+        }
+    }
+    let (ours, theirs) = (loosened(o, a, b), loosened(o, b, a));
+    demote(a, &ours);
+    demote(b, &theirs);
 }
 
 /// **이 줄은 화면 말을 모른다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 병합마다 부르는 길이라
@@ -1861,6 +1925,51 @@ mod tests {
         let o = format!("{intact}\n");
         let (text, clashes) = merge(&o, &o, &format!("{intact}\n{broken}\n"));
         assert_eq!(clashes, ["argos-0001"], "겹친 id 를 든 파일을 말없이 냈다\n{text}");
+    }
+
+    /// **두 쪽이 다르게 깨뜨린 줄에 빈 칸이 서지 않는다**(moai-58io, 2026-09-23 사용자 결정).
+    ///
+    /// 이쪽은 꼬리가 잘려 머리가 성하고(긁힌다) 저쪽은 id 안에서 잘렸다(안 긁힌다). 짝을
+    /// 그대로 두면 [`settle`] 이 남은 셋을 `(Some, Some, None)` 으로 읽어 `theirs` 칸이 빈
+    /// `Clash` 를 지었다 — **저쪽이 지웠다**는 뜻인데 사실이 아니고, 저쪽 바이트는 표식 밖에
+    /// 따로 앉았다. 이 에픽이 없애려던 바로 그 거짓말이다.
+    #[test]
+    fn two_sides_breaking_one_row_differently_draw_no_empty_panel() {
+        let (intact, ours) = beheaded("argos-0001");
+        let theirs = "{\"id\":\"argos-00";
+        assert_eq!(crate::id::scraped(theirs), None, "저쪽이 긁혔다 — 시험 줄이 낡았다");
+        let o = format!("{intact}\n{}\n", line("argos-0002", ""));
+        let a = format!("{ours}\n{}\n", line("argos-0002", ""));
+        let b = format!("{theirs}\n{}\n", line("argos-0002", ""));
+
+        let (text, clashes) = merge(&o, &a, &b);
+        assert!(clashes.is_empty(), "빈 칸이 선 표식을 지었다 — {clashes:?}\n{text}");
+        assert!(!text.contains("<<<<<<<"), "표식이 섰다\n{text}");
+        // **줄은 하나도 안 사라진다** — 두 쪽의 깨진 바이트가 파일 끝에 그대로 선다.
+        assert_eq!(text.lines().filter(|l| *l == ours).count(), 1, "이쪽 바이트가 사라졌다\n{text}");
+        assert_eq!(text.lines().filter(|l| *l == theirs).count(), 1, "저쪽 바이트가 사라졌다\n{text}");
+        assert!(text.contains("argos-0002"), "옆 이슈까지 잃었다\n{text}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
+
+        // **칸만 바꿔도 같다.**
+        let (text, clashes) = merge(&o, &b, &a);
+        assert!(clashes.is_empty(), "{clashes:?}\n{text}");
+        assert_eq!(text.lines().filter(|l| *l == ours).count(), 1, "{text}");
+        assert_eq!(text.lines().filter(|l| *l == theirs).count(), 1, "{text}");
+    }
+
+    /// **저쪽이 정말 지운 판에서는 표식이 그대로 선다**(moai-58io). 빈 칸이 참일 때는 걷지
+    /// 않는다 — 저쪽이 못 읽는 줄을 하나도 안 늘렸으면 그 칸은 거짓말이 아니다.
+    #[test]
+    fn a_side_that_really_deleted_it_still_gets_an_empty_panel() {
+        let (intact, ours) = beheaded("argos-0001");
+        let o = format!("{intact}\n{}\n", line("argos-0002", ""));
+        let a = format!("{ours}\n{}\n", line("argos-0002", ""));
+        let b = format!("{}\n", line("argos-0002", ""));
+
+        let (text, clashes) = merge(&o, &a, &b);
+        assert_eq!(clashes, ["argos-0001"], "지우기와 고침이 맞선 판을 말없이 풀었다\n{text}");
+        assert_eq!(ours_side(&text), format!("{ours}\n"), "{text}");
     }
 
     /// **꼬리의 `\r` 하나가 충돌을 짓지 않는다**(리뷰). `str::lines` 는 `\n` 을 뗄 때만 `\r` 을
