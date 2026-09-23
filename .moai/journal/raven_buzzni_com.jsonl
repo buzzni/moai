@@ -1228,3 +1228,4 @@
 {"ts":"2026-09-23T04:53:36Z","id":"moai-0k2e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"검사를 조립한 줄에만 걸고, 지나가는 줄은 표준형으로 맞춘다. 원문 바이트로 낸 첫 판은 리뷰 실측을 받아 사용자가 뒤집었다"}
 {"ts":"2026-09-23T04:53:36Z","id":"moai-h4jx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"실제 git merge 로 잰다. 리뷰가 짚은 자리 둘을 고쳤다 — 줄의 모든 닫는 괄호를 갈던 것과, 무엇을 심어도 초록이던 닫는 단언"}
 {"ts":"2026-09-23T04:53:37Z","id":"moai-85o3.p4w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"아홉을 반영하고 넷을 idea 로 넘겼다(moai-47qa, moai-x23h, moai-3zp0, moai-y2rc). 13번은 본문을 실제와 맞추고, 14번은 결정을 이력에 적어 출처를 되살렸다"}
+{"ts":"2026-09-23T04:54:11Z","id":"moai-85o3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 닫혔다. 넘긴 것은 idea 넷이고 v0.1.2 안에 셋(moai-47qa, moai-x23h, moai-3zp0), 밖에 하나(moai-y2rc)다"}
