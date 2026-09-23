@@ -15023,6 +15023,81 @@ fn the_merge_driver_hands_a_real_clash_to_a_person() {
     assert!(merged.contains("이쪽 제목") && merged.contains("저쪽 제목"), "두 쪽을 다 안 보여 준다\n{merged}");
 }
 
+/// **남의 낡은 줄 하나가 모든 머지를 막지 않는다**(moai-h4jx).
+///
+/// 오늘 규칙이 거절하는 값을 든 줄은 손으로 푼 충돌이 남기거나, 뒷날 기한을 넓힌 바이너리가
+/// 쓴다. 그런 줄 하나가 머지마다 충돌을 세우던 까닭과 무엇을 건너뛰기로 했는지는
+/// `cmd::merge_driver::settle` 의 주석에 있다. 여기서 재는 것은 단위 시험이 못 가는 자리다 —
+/// 단위 시험은 `plan` 까지만 지나고, 이 판이 실제로 아팠던 곳은 git 이 드라이버를 부르는 길이다.
+///
+/// 진짜 git 으로 그 판을 만든다. 보는 것은 넷이다 — 머지가 깨끗이 끝나는가, 두 고침이 다
+/// 남는가, **낡은 줄이 제 값을 그대로 들고 남는가**, 그리고 그 결과가 `store` 가 쓰는
+/// 표준형인가. 넷째를 재려고 심는 줄의 차례를 일부러 어긋뜨린다 — 표준형인 줄을 심으면
+/// 머지가 꼴을 맞추든 말든 답이 같아 그 assert 가 붉어질 수가 없다(리뷰 moai-85o3.p4w).
+#[test]
+fn a_row_neither_side_touched_does_not_block_the_merge() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
+    let one = add(root, &["이쪽이 고칠 줄"]);
+    let two = add(root, &["저쪽이 고칠 줄"]);
+    // **도구로는 못 적는 값이다** — `--due` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    //
+    // 닫는 괄호가 아니라 id 뒤에 끼운다. 끝에 붙이면 그 자리가 곧 `Issue` 의 표준 차례라
+    // 심은 줄이 표준형이 되고, [`line_of`] 는 `{"id":…` 로 찾으므로 머리는 그대로 둔다.
+    //
+    // **가지마다 되심는다.** `moai` 쓰기는 파일 전체를 표준형으로 되쓰므로, 한 번만 심으면
+    // 그 다음 `edit` 한 줄에 차례가 사라져 셋 다 표준형인 채로 머지에 들어간다.
+    let due = "\"due_on\":\"2026-09-20\"";
+    let plant = || {
+        let was = line_of(root, &old);
+        let head = format!("\"id\":\"{old}\",");
+        // 앞선 쓰기가 표준 자리로 옮겨 둔 것을 걷고 다시 머리 뒤에 끼운다.
+        let bare = was.replace(&format!(",{due}"), "");
+        let stale = bare.replacen(&head, &format!("{head}{due},"), 1);
+        assert_ne!(stale, bare, "낡은 값을 못 끼웠다 — 줄의 머리가 바뀌었다\n{bare}");
+        std::fs::write(root.join(".moai/issues.jsonl"), issues(root).replace(&was, &stale)).unwrap();
+        stale
+    };
+    let stale = plant();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    plant();
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    plant();
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "안 건드린 줄이 머지를 막았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 낡은 **값**은 그대로 남는다 — 건너뛰는 것은 검사뿐이다.
+    let carried = line_of(root, &old);
+    assert!(carried.contains(due), "낡은 값이 사라졌다\n{merged}");
+    // **꼴은 `store` 가 쓰는 표준형이다.** 심은 차례가 그대로 지나가면 그 줄은 다음 쓰기가
+    // 통째로 되써, 아무도 안 건드린 줄이 남의 커밋에 헛 diff 로 뜬다.
+    assert!(!merged.contains(&stale), "심은 차례가 그대로 지나갔다\n{merged}");
+    // 그 다음 쓰기가 정말 그 줄을 안 건드리는지까지 본다. **줄을 실제로 바꾸는 쓰기로
+    // 잰다** — `note` 는 스냅샷의 값을 안 바꿔 되쓰기 자체가 일어나지 않으므로(`store` 는
+    // 읽은 줄과 맞춘 줄을 견준다) 그것으로 재면 무엇을 심어도 초록이다.
+    ok(root, &["status"]);
+    ok(root, &["edit", &one, "--tag", "extra"]);
+    assert_eq!(
+        line_of(root, &old),
+        carried,
+        "다음 쓰기가 아무도 안 건드린 줄을 고쳤다 — 머지가 낸 꼴이 표준형이 아니다"
+    );
+}
+
 /// **안 심은 클론에서는 지금까지와 똑같다.** `.gitattributes` 의 `merge=moai` 는 드라이버가
 /// 설정에 없으면 그냥 무시되고 git 의 기본 머지가 돈다 — 이 낱말을 심는 것이 안전한 까닭이다.
 #[test]
