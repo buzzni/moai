@@ -2663,7 +2663,7 @@ const FIND_AWAY: &[&str] = &["-execdir", "-okdir"];
 /// 같은 표를 읽는다. 두 벌로 두면 술어를 하나 더하는 날 한쪽에만 들어, 걷어는 오는데 자리는
 /// 안 가리는 줄이 선다.
 fn exec_of(words: &[String]) -> String {
-    (exec_spots(words).iter())
+    (find_spots(words).execs.iter())
         .map(|s| words[s.from..s.to].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" "))
         .collect::<Vec<_>>()
         .join(" ; ")
@@ -2727,7 +2727,23 @@ const FIND_TAKES2: &[&str] = &["-fprintf"];
 /// 모르는 debug 이름을 경고만 하고 그대로 돈다).
 const FIND_EATS: &[&str] = &["-D"];
 
-/// **`-exec` 무리 하나** — [`exec_spots`] 가 걷는다(moai-fg47).
+/// **find 이 제 손으로 만드는 파일을 대는 술어들**(moai-ati3) — `-fprint`·`-fprint0`·`-fls` 는
+/// 낱말 하나를, `-fprintf` 는 첫 낱말을 그 파일로 받는다([`FIND_TAKES2`]).
+///
+/// **걷는 것이 명령이 아니라 과녁이다** — [`FIND_HERE`]·[`FIND_AWAY`] 와 갈리는 자리다. 저쪽은
+/// 돌 명령을 내고 그 글을 규칙들이 다시 읽지만, 이쪽은 읽을 명령이 없고 파일 하나가 곧 답이다.
+/// 그래서 [`Text::Find`] 의 글에 잇지 않고 쓰기 축에 곧장 낸다([`shell_scan`] 의 `sed`·`tee` 와
+/// 같은 자리다).
+///
+/// **2026-09-23 에 쟀다** — `find . -maxdepth 0 -fprint src/y.rs` 는 그 파일을 정말 만들고,
+/// 이미 있으면 비운다. 넷 다 [`FIND_TAKES`] 에 "건너뛸 낱말" 로만 서 있어, 빈손으로 규칙 2 를
+/// 지나갔다.
+///
+/// **부른 자리에서 만든다** — `-execdir` 과 달리 찾은 파일의 디렉터리를 안 탄다. 같은 날 쟀다:
+/// `find /tmp -execdir true \; -fprint y.rs` 의 `y.rs` 는 /tmp 가 아니라 여기 선다.
+const FIND_PRINTS: &[&str] = &["-fprint", "-fprint0", "-fls", "-fprintf"];
+
+/// **`-exec` 무리 하나** — [`find_spots`] 가 걷는다(moai-fg47).
 ///
 /// **이름으로 든다**([`Wrapper`] 와 같은 까닭이다) — `from`·`to` 가 둘 다 `usize` 라 자리를 바꿔
 /// 적어도 컴파일이 되고, 그러면 훅이 Bash 한 번마다 슬라이스에서 터진다.
@@ -2741,7 +2757,19 @@ struct ExecSpot {
     to: usize,
 }
 
-/// **술어 자리에 선 `-exec` 무리를 걷는다**(moai-fg47).
+/// **find 한 줄에서 걷은 것** — 술어 안에 선 명령들과, find 이 제 손으로 만드는 파일들이다.
+///
+/// **한 번에 걷는다**(moai-ati3) — 걸어야 술어 자리가 갈리고([`ExecSpot`] 의 문서), 두 벌로
+/// 걸으면 술어 표를 하나 더하는 날 한쪽만 밀려 같은 낱말이 자리마다 다른 답을 받는다.
+struct FindSpots {
+    /// 술어 안에 선 `-exec` 무리들.
+    execs: Vec<ExecSpot>,
+    /// find 이 만드는 파일을 든 낱말의 자리([`FIND_PRINTS`]).
+    prints: Vec<usize>,
+}
+
+/// **술어 자리에 선 것들을 한 번에 걷는다**(moai-fg47 가 `-exec` 무리를, moai-ati3 가
+/// [`FIND_PRINTS`] 를 연다).
 ///
 /// **낱말이 같다고 술어인 것이 아니다** — 값을 받는 술어 뒤의 낱말은 그 값이다.
 /// `find . -name -execdir -exec tee src/x.rs \;` 에서 `-execdir` 은 `-name` 의 본보기일 뿐이고 도는
@@ -2752,8 +2780,8 @@ struct ExecSpot {
 ///
 /// **걷는 자와 자리를 가리는 자가 한 표를 본다** — 두 벌로 두면 술어를 하나 더하는 날 한쪽에만
 /// 들어, 걷어는 오는데 자리는 안 가리는 줄이 선다.
-fn exec_spots(words: &[String]) -> Vec<ExecSpot> {
-    let mut out: Vec<ExecSpot> = Vec::new();
+fn find_spots(words: &[String]) -> FindSpots {
+    let mut out = FindSpots { execs: Vec::new(), prints: Vec::new() };
     let mut at = 0;
     while at < words.len() {
         let word = words[at].as_str();
@@ -2765,6 +2793,12 @@ fn exec_spots(words: &[String]) -> Vec<ExecSpot> {
             } else {
                 usize::from(FIND_TAKES.contains(&word) || FIND_EATS.contains(&word) || word.starts_with("-newer"))
             };
+            // **find 이 제 손으로 만드는 파일**([`FIND_PRINTS`], moai-ati3) — 값이 정말 있을 때만
+            // 적는다. 줄 끝에 이름만 선 `find . -fprint` 는 find 이 `missing argument` 로 거절한다
+            // (2026-09-23 에 쟀다).
+            if FIND_PRINTS.contains(&word) && at + 1 < words.len() {
+                out.prints.push(at + 1);
+            }
             at += 1 + eats;
             continue;
         }
@@ -2779,11 +2813,22 @@ fn exec_spots(words: &[String]) -> Vec<ExecSpot> {
             at += 1;
         }
         if from < at {
-            out.push(ExecSpot { away, from, to: at });
+            out.execs.push(ExecSpot { away, from, to: at });
         }
         at += 1;
     }
     out
+}
+
+/// **find 이 제 손으로 만드는 파일들**([`FIND_PRINTS`], moai-ati3) — 쓰기 축이 이것을 그대로 든다.
+///
+/// `find . -maxdepth 0 -fprint src/y.rs` 는 그 파일을 정말 만드는데, 훅은 `-exec` 무리만 쓰기로
+/// 보아 빈손으로 규칙 2 를 지나갔다(2026-09-23 에 쟀다).
+///
+/// **자리표(`{}`)를 쓴 꼴은 [`unknowable`] 이 버린다** — `-fprintf` 의 꼴 문자열과 달리 파일
+/// 이름에는 자리표가 안 퍼지지만, 잡는 잣대는 `-exec` 쪽과 같다.
+fn find_writes(words: &[String]) -> Vec<String> {
+    find_spots(words).prints.into_iter().map(|i| words[i].clone()).collect()
 }
 
 /// 감싸는 명령 하나를 읽는다 — 그 이름을 모르면 `None` 이고, 알면 [`Wrapped`] 로 답한다
@@ -2931,7 +2976,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// **`-ff` 처럼 같은 글자를 겹쳐 쓴 꼴은 여기 못 적는다** — strace 의
         /// `-c`/`-ff` 와 `-C`/`-ff` 가 그 줄이다. 뭉치 고리는 글자를 셀 뿐 몇 번 섰는지를 안 들어,
         /// `-ff` 와 `-f -f` 가 여기서 한 낱말로 모인다(진짜 strace 는 갈린다 — `-f -f` 는 정말
-        /// 돈다). 그 축은 idea 로 남긴다.
+        /// 돈다). 그 축은 idea moai-qqd7 로 남긴다.
         exclusive: &'static [(&'static [&'static str], &'static [&'static str])],
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
@@ -3367,7 +3412,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // **`-ff` 와의 짝 둘은 여기 못 적는다**([`Wrapper::exclusive`]) — 진짜 strace 는
             // `-c -ff` 와 `-C -ff` 도 같은 말로 막는데, 그것은 `-f` 가 **두 번** 섰다는 뜻이라
             // 글자만 세는 이 표로는 `-f -f`(정말 돈다)와 안 갈린다. 겹쳐 쓴 글자를 세는 축은
-            // 따로 연다.
+            // idea moai-qqd7 에 남겼다.
             exclusive: &[(&["-c", "--summary-only"], &["-C", "--summary"])],
         },
         // **`parallel` 은 xargs 와 같은 자리다**(moai-gxwh) — `parallel sed -i s/a/b/ ::: src/x.rs`
@@ -4000,9 +4045,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // **시작 자리를 안 대면 find 는 `.` 에서 찾는다** — 그때는 여기 밑이다. 빈 목록에
         // `all` 을 물으면 참이라, 비었는가를 먼저 묻는다.
         let starts = find_starts(rest);
-        // **술어 자리에 선 것만 센다**([`exec_spots`], moai-fg47) — 낱말만 견주던 판은 값으로 선
+        // **술어 자리에 선 것만 센다**([`find_spots`], moai-fg47) — 낱말만 견주던 판은 값으로 선
         // 술어 이름 하나(`-name -execdir`)로 자리 판정이 뒤집혔다(리뷰 moai-514e.doy 2번).
-        let spots = exec_spots(rest);
+        let spots = find_spots(rest).execs;
         *spot |= !spots.is_empty()
             && spots.iter().all(|s| s.away)
             && !starts.is_empty()
@@ -6613,6 +6658,19 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             Some("tee") => {
                 found.extend(words[1..].iter().filter(|w| !w.starts_with('-')).map(|w| (w.clone(), off_site)));
             }
+            // **find 이 제 손으로 만드는 파일**([`FIND_PRINTS`], moai-ati3) — `-fprint`·`-fprint0`·
+            // `-fls`·`-fprintf` 넷이다. 그 술어 안에 선 명령은 [`Text::Find`] 의 글로 나가 다시
+            // 읽히지만([`exec_of`]), 이 넷은 돌 명령이 없고 파일 하나가 곧 답이라 여기가 자리다.
+            // 2026-09-23 에 쟀다: `find . -maxdepth 0 -fprint src/y.rs` 는 그 파일을 정말 만든다.
+            //
+            // **`-execdir` 만 선 줄에서는 `off_site` 가 이것까지 버린다**(idea moai-ujfx) —
+            // find 은 이 파일을 **부른 자리**에 만들지 찾은 파일의 디렉터리에 만들지 않는다
+            // (2026-09-23 에 쟀다: `find /tmp -maxdepth 0 -execdir true \; -fprint src/w.rs` 는
+            // 여기에 만든다). 그런데 [`Cmd::elsewhere`] 는 줄 하나에 한 값이라, find 의 `*spot`
+            // 과 바깥 감싸는 명령의 것(`sudo -i find …`)이 여기서 이미 한 값으로 모여 있다 —
+            // 갈라 내려면 `Cmd` 에 값을 하나 더 두어야 하고, 그것은 이 줄의 범위가 아니다.
+            // 그때까지는 버리는 쪽에 선다: 새는 쪽이고, 잘못 막는 쪽보다 싸다.
+            Some("find") => found.extend(find_writes(&words[1..]).into_iter().map(|p| (p, off_site))),
             _ => {}
         }
         // `cd` 뒤는 과녁이 어느 쪽이든 자리를 모른다 — 리다이렉션도 옮긴 자리에서 열린다.
@@ -9603,6 +9661,62 @@ mod tests {
         }
         // **그 집기로 빈손의 쓰기가 풀리지 않는다** — find 의 종료 코드는 그 명령의 것이 아니다.
         let cmd = "find . -exec moai mv t-1 in_progress --from todo \\; && sed -i s/a/b/ src/store.rs";
+        let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
+        assert!(matches!(got, Decision::Deny(_)), "술어 안의 집기가 규칙 2 를 채웠다\n{got:?}");
+    }
+
+    /// **find 이 제 손으로 만드는 파일도 쓰기다**(moai-ati3, 리뷰 moai-514e.mvw 가 넘겼다) —
+    /// `-fprint`·`-fprint0`·`-fls`·`-fprintf` 넷이다. [`FIND_TAKES`] 는 그 값을 "건너뛸 낱말" 로만
+    /// 알아, 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **걷는 것이 명령이 아니라 과녁이라 [`Text::Find`] 와 다른 자리다** — 돌 명령이 없고 파일
+    /// 하나가 곧 답이라, 쓰기 축에 곧장 낸다([`shell_scan`] 의 `sed`·`tee` 와 같은 줄이다).
+    ///
+    /// **2026-09-23 에 findutils 4.9 로 쟀다** — 넷 다 그 파일을 만들고, 술어가 아무것도 안 골라도
+    /// (`-false`) 이미 있는 파일을 **0바이트로 비운다**. 값이 없으면 find 이
+    /// `missing argument` 로 거절한다.
+    #[test]
+    fn a_file_find_writes_by_itself_is_a_write() {
+        // `all` 은 집은 것이 있는 판, `held` 는 첫 칸에 선 판이다 — 이웃한 시험들과 같은 이름이다.
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let root = Path::new("/repo");
+        // **넷 다 보인다** — 집은 것이 없으니 규칙 2 가 막는다.
+        for cmd in [
+            "find . -maxdepth 0 -fprint src/y.rs",
+            "find . -maxdepth 0 -fprint0 src/y.rs",
+            "find . -maxdepth 0 -fls src/y.rs",
+            "find . -maxdepth 0 -fprintf src/y.rs '%p\\n'",
+            // **아무것도 안 골라도 비운다** — 술어의 참거짓은 이 파일과 무관하다.
+            "find . -false -fprint src/y.rs",
+            // **한 줄에 여럿이 선다.**
+            "find . -fprint src/y.rs -fls src/z.rs",
+            // **`-exec` 무리와 섞여도 저마다 제 자리다** — 저쪽은 글로 나가고 이쪽은 과녁이다.
+            "find . -exec true \\; -fprint src/y.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "find 이 만드는 파일을 못 봤다 — {cmd}\n{got:?}");
+        }
+        // **집은 것이 있으면 그대로 지난다** — 막는 것이 아니라 보는 것이 이 줄의 일이다.
+        let got = guard_writes(&all, &cfg(), &here(), root, root, "find . -fprint src/y.rs");
+        assert_eq!(got, Decision::Pass, "집은 것이 있는데 막았다\n{got:?}");
+        // **값으로 선 이름은 술어가 아니다**([`find_spots`] 의 잣대) — `-name -fprint` 의 `-fprint`
+        // 는 `-name` 의 본보기일 뿐이다. 2026-09-23 에 쟀다: `find . -name -fprint` 는 그런 이름의
+        // 파일을 찾을 뿐 아무것도 안 만든다.
+        for cmd in [
+            "find . -name -fprint",
+            "find . -name -fprint src/y.rs",
+            // **값이 없으면 find 이 거절한다** — 없는 쓰기를 지어내지 않는다.
+            "find . -maxdepth 0 -fprint",
+            // **자리표는 어느 파일인지 모르는 자리다**([`unknowable`]) — `-exec` 쪽과 같은 잣대다.
+            "find . -fprint '{}'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "없는 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **집기 축은 안 건드린다** — find 이 만드는 파일은 명령이 아니라 과녁이라, 규칙 2 를
+        // 채우는 집기가 여기서 날 수 없다. 그 줄의 집기는 `-exec` 쪽 것이고 그쪽 셈 그대로다.
+        let cmd = "find . -fprint src/y.rs -exec moai mv t-1 in_progress --from todo \\; && sed -i s/a/b/ src/store.rs";
         let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
         assert!(matches!(got, Decision::Deny(_)), "술어 안의 집기가 규칙 2 를 채웠다\n{got:?}");
     }
