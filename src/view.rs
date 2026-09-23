@@ -161,7 +161,8 @@ pub fn tag_parts(tags: &[String]) -> impl Iterator<Item = (&'static str, &str)> 
 /// **탐색기도 이 낱말을 쓴다.** 같은 사실을 두 표면이 다른 말로 하면, 나란히
 /// 놓고 보는 사람이 어느 쪽을 믿을지 정하게 된다.
 ///
-/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::deferred_roots`). **물려받은
+/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::Shelved::root` — **줄마다의 답**이라,
+/// 같은 id 의 앞줄이 뒷줄의 미룸을 입지 않는다). **물려받은
 /// 미룸도 여기서 말한다** — 미룬 에픽의 멤버를 펼쳤는데 표가 없으면, 이 낱말을
 /// 쓰는 두 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다. 제가 미룬 줄은
 /// 전처럼 제 시각으로 나이를 댄다.
@@ -3268,7 +3269,8 @@ mod tests {
     fn bare_seen(lang: Lang) -> Seen<'static> {
         Seen {
             screen: Screen::new(lang),
-            roots: crate::report::Shelved::default(),
+            // 읽은 것이 없는 화면이라 미룬 줄도 없다 — 곁의 `kinds` 와 같은 자리, 같은 꼴이다.
+            roots: crate::report::Shelved::no_twins(BTreeMap::new()),
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,

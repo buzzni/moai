@@ -325,8 +325,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     }
     let children: Vec<&Issue> = children.iter().collect();
     let seen = view::Seen {
-        // **쓰기 경로에는 쌍둥이가 없다**(바로 아래 `kinds` 와 같은 까닭) — `store::with_write`
-        // 가 중복 id 에 쓰기를 통째로 물린다. 그래서 id 로 접은 지도가 곧 줄마다의 답이다.
+        // 쌍둥이가 없으니(바로 아래 `kinds` 가 그 까닭을 댄다) id 로 접은 지도가 곧 줄마다의
+        // 답이다 — `moai show` 쪽만 줄로 되묻는 재료를 든다(moai-wre3).
         roots: crate::report::Shelved::no_twins(
             shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         ),

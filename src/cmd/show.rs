@@ -530,8 +530,11 @@ fn one(
         }
         // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
         // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
-        if let Some(root) = seen.roots.root(issue) {
-            extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
+        // 이름이 `root` 가 아닌 것은 서른 줄 위의 `commit_home` 값과 갈리기 때문이다 — 둘 다
+        // `serde_json::to_string` 이 받으므로, 섞이면 커밋을 읽을 자리에 미룬 에픽 id 가 들어도
+        // 컴파일이 안 잡는다.
+        if let Some(by) = seen.roots.root(issue) {
+            extra.push(("shelved_by", serde_json::to_string(by).map_err(|e| Fail::new(e.to_string()))?));
         }
         if let Some(n) = twins {
             extra.push(("duplicate_lines", n.to_string()));

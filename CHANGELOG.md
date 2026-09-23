@@ -220,9 +220,16 @@ on finding them.
   *in* the plan wore the later line's deferred epic — and running the
   `moai defer <that epic> --undo` that mark points at brings that row back not at
   all, because it was never deferred. `moai show --deferred` had been saying the
-  opposite about those same rows all along. `shelved_by` in `--json` and the mark
-  on the opened row itself answer the same as before: `moai show <id>` opens the
-  later line, so that line's answer is the one they already gave.
+  opposite about those same rows all along. Two lines that were **both** out of
+  the plan but held there by different rows read the same way: each now names the
+  row that actually holds it, and a line deferred on its own account beside a twin
+  under an epic keeps its own mark instead of losing it. `shelved_by` in `--json`
+  and the mark on the opened row itself answer the same as before: `moai show <id>`
+  opens the later line, so that line's answer is the one they already gave. **Epic and
+  milestone rows are read per line too**, and `moai show --deferred`, the board and
+  `moai ready` read them the same way: whether such a row is out of the plan used to
+  be folded by id on those surfaces, so an epic held out by a deferred release was
+  counted as in the plan whenever a later line sharing its id was.
 - A row that **wrote no `epic` of its own no longer wears the one its twin
   wrote**. Which epic a row is in is read from the row, but what it fell back on
   when the row wrote nothing was the id-keyed map — and that map holds the later

@@ -282,12 +282,14 @@ struct Stood {
 pub struct Ground {
     stands: States,
     epic: std::collections::BTreeMap<String, String>,
-    put_off: std::collections::BTreeSet<String>,
-    /// 줄이 선 마일스톤 — **미룸을 줄에 되묻는 재료다**(moai-u3ta). 읽는 자는 아래 `torn` 이
-    /// 빈 저장소에서는 없으므로, 거름망에 낼 때도 그때만 옮겨 담는다.
-    milestone: std::collections::BTreeMap<String, String>,
-    /// 계획에서 빠졌는가가 **줄마다 갈리는** id(`report::torn_ids`). 성한 저장소에서는 빈다.
-    torn: std::collections::BTreeSet<String>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄, **id 로 접은 것**(`report::deferred_roots`).
+    put_off: std::collections::BTreeMap<String, String>,
+    /// 뺀 줄이 **줄마다 갈리는** id(`report::split_roots`). 성한 저장소에서는 빈다.
+    split: std::collections::BTreeSet<String>,
+    /// `split` 이 든 id 의 줄 — **자리와 그 줄의 답**. 거름망은 줄을 바늘로 견주므로
+    /// (`report::Shelved`) 여기에 담는 것은 자리고, 줄은 `here` 가 그 자리로 집는다.
+    /// 성한 저장소에서는 비어 한 자리도 안 잡는다.
+    split_rows: Vec<(usize, Option<String>)>,
     kinds: std::collections::BTreeMap<String, crate::model::Kind>,
     folded: std::collections::BTreeSet<String>,
 }
@@ -328,22 +330,29 @@ impl Ground {
         // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
         // 때만 서므로, `kinds` 가 줄 수만큼 크면 id 가 다 다르고 `torn` 은 반드시 빈다 — 그
         // 문 하나로 줄마다 도는 걸음 둘과, 아래 마일스톤 지도의 `String` 두 벌씩을 아낀다.
-        let torn: std::collections::BTreeSet<String> = match soil.kinds.len() == issues.len() {
+        let split: std::collections::BTreeSet<String> = match soil.kinds.len() == issues.len() {
             true => std::collections::BTreeSet::new(),
-            false => crate::report::torn_ids(issues, &soil.shelved).iter().map(|k| k.to_string()).collect(),
+            false => crate::report::split_roots(issues, &soil.shelved).iter().map(|k| k.to_string()).collect(),
+        };
+        // **읽는 자가 없으면 안 옮겨 담는다** — 이 목록을 보는 길은 미룸을 줄에 되묻는 하나
+        // 뿐이라(`Where::deferred`), `split` 이 빈 저장소에서는 적재마다 줄마다 `String` 을
+        // 짓고 아무도 안 읽었다(리뷰 moai-jk2u.hr4).
+        let split_rows: Vec<(usize, Option<String>)> = match split.is_empty() {
+            true => Vec::new(),
+            false => issues
+                .iter()
+                .zip(&soil.shelved)
+                .enumerate()
+                .filter(|(_, (i, _))| split.contains(i.id.as_str()))
+                .map(|(at, (_, r))| (at, r.map(str::to_string)))
+                .collect(),
         };
         Ground {
             stands,
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
-            // **읽는 자가 없으면 안 옮겨 담는다** — 이 지도를 보는 길은 미룸을 줄에 되묻는 하나
-            // 뿐이라(`Where::deferred`), `torn` 이 빈 저장소에서는 적재마다 줄마다 `String` 둘을
-            // 짓고 아무도 안 읽었다(리뷰 moai-jk2u.hr4).
-            milestone: match torn.is_empty() {
-                true => std::collections::BTreeMap::new(),
-                false => soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            },
-            torn,
+            put_off: soil.roots.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            split,
+            split_rows,
             kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
         }
@@ -378,12 +387,13 @@ impl Ground {
             // (moai-jk2u.wvn). 나머지처럼 적재 때 재어 둘 수도 없다: `report::Lines` 는
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.
             lines: crate::report::Lines::of(issues),
-            put_off: self.put_off.iter().map(String::as_str).collect(),
-            // **`torn` 이 비면 이 지도도 비어 있다**(moai-u3ta) — 읽는 자는 미룸을 줄에 되묻는
-            // 길 하나뿐이고(`Where::deferred`), 성한 저장소에서는 그 길로 안 간다. 적재가 아예
-            // 안 담으므로([`Ground::in_soil`]) 여기서는 그대로 빌린다.
-            milestone: borrow(&self.milestone),
-            torn: self.torn.iter().map(String::as_str).collect(),
+            // **줄은 여기서 자리로 집는다** — 적재가 든 것은 자리뿐이고(`Ground` 는 제 줄을 안
+            // 든다), 바늘로 견주는 그릇은 지금 넘기는 이 목록의 줄을 들어야 한다.
+            shelved: crate::report::Shelved::kept(
+                borrow(&self.put_off),
+                self.split.iter().map(String::as_str).collect(),
+                self.split_rows.iter().map(|(at, r)| (&issues[*at], r.as_deref())),
+            ),
             states: self.columns(),
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
