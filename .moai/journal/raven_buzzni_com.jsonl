@@ -1130,3 +1130,10 @@
 {"ts":"2026-09-23T02:19:05Z","id":"moai-exh7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T02:19:05Z","id":"moai-vndz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T02:19:05Z","id":"moai-sfza","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T02:35:52Z","id":"moai-sx2d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판정 안 한 보고서를 내는 문을 꼴로 막는다"}
+{"ts":"2026-09-23T02:35:53Z","id":"moai-fwwr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Dues 의 기본값이 자리 0·문턱 0 으로 읽힌다"}
+{"ts":"2026-09-23T02:35:53Z","id":"moai-4xvr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험의 Surfaced::shown 이 판정을 견주는 쪽마다 다시 한다"}
+{"ts":"2026-09-23T02:35:54Z","id":"moai-p3pv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"draw::screen 이 한 프레임에 banner 를 두 번 부른다"}
+{"ts":"2026-09-23T02:35:54Z","id":"moai-i15e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Dues 가 due_on 을 문자열로 들어 프레임마다 다시 푼다"}
+{"ts":"2026-09-23T02:37:01Z","id":"moai-a678","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fgjj 가 **다른 길로** 없앴다. 이 idea 가 댄 길(`cmd/tui.rs` 에서 `tz::chosen` 을 풀어\n`App::open`·`App::build` 로 건네기)은 안 갔다 — `App::open` 부르는 자리 열두 곳은 그대로다.\n\n둘째 훑기가 선 까닭이 \"시간대가 `adopt_look` 에 가서야 정해진다\" 였고, 셈이 시간대에 안 닿게\n되면서 그 까닭 자체가 사라졌다(2026-09-23 사용자 결정). `adopt_look` 은 이제 다시 세지 않으므로\n여는 길은 `App::build` 의 `count_all` 한 벌만 돈다."}
+{"ts":"2026-09-23T02:37:01Z","id":"moai-a678","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-fgjj 가 셈을 시간대에서 떼어 둘째 훑기의 까닭을 없앴다 — 이 idea 가 댄 길은 안 갔다"}
