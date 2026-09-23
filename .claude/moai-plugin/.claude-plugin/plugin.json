@@ -5,7 +5,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use || c=$?; case \"$c\" in 126|127) printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s). The four moai rules are not standing - run moai skill status to see why.\"}' 'pre-tool-use' \"$c\";; esac; exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use || c=$?; case \"$c\" in 0|1) ;; *) s=\"${TMPDIR:-/tmp}/moai-hook-5682-${CLAUDE_CODE_SESSION_ID:-$PPID}.pre-tool-use.$c.said\"; [ -e \"$s\" ] || { true 2>/dev/null > \"$s\" || :; printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. The four moai rules are not standing - run moai skill status to see why.\"}' 'pre-tool-use' \"$c\" '/home/coder/workspace/moa-issue/target/release/moai'; };; esac; exit 0",
             "statusMessage": "checking the moai rules...",
             "timeout": 15,
             "type": "command"
@@ -18,7 +18,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start || c=$?; case \"$c\" in 126|127) printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s). The four moai rules are not standing - run moai skill status to see why.\"}' 'session-start' \"$c\";; esac; exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start || c=$?; case \"$c\" in 0|1) ;; *) s=\"${TMPDIR:-/tmp}/moai-hook-5682-${CLAUDE_CODE_SESSION_ID:-$PPID}.session-start.$c.said\"; [ -e \"$s\" ] || { true 2>/dev/null > \"$s\" || :; printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. The four moai rules are not standing - run moai skill status to see why.\"}' 'session-start' \"$c\" '/home/coder/workspace/moa-issue/target/release/moai'; };; esac; exit 0",
             "statusMessage": "counting moai warnings...",
             "timeout": 15,
             "type": "command"
@@ -30,7 +30,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop || c=$?; case \"$c\" in 126|127) printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s). The four moai rules are not standing - run moai skill status to see why.\"}' 'stop' \"$c\";; esac; exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop || c=$?; case \"$c\" in 0|1) ;; *) s=\"${TMPDIR:-/tmp}/moai-hook-5682-${CLAUDE_CODE_SESSION_ID:-$PPID}.stop.$c.said\"; [ -e \"$s\" ] || { true 2>/dev/null > \"$s\" || :; printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. The four moai rules are not standing - run moai skill status to see why.\"}' 'stop' \"$c\" '/home/coder/workspace/moa-issue/target/release/moai'; };; esac; exit 0",
             "statusMessage": "comparing the moai state...",
             "timeout": 15,
             "type": "command"
@@ -42,7 +42,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit || c=$?; case \"$c\" in 126|127) printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s). The four moai rules are not standing - run moai skill status to see why.\"}' 'user-prompt-submit' \"$c\";; esac; exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; c=0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit || c=$?; case \"$c\" in 0|1) ;; *) s=\"${TMPDIR:-/tmp}/moai-hook-5682-${CLAUDE_CODE_SESSION_ID:-$PPID}.user-prompt-submit.$c.said\"; [ -e \"$s\" ] || { true 2>/dev/null > \"$s\" || :; printf '{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. The four moai rules are not standing - run moai skill status to see why.\"}' 'user-prompt-submit' \"$c\" '/home/coder/workspace/moa-issue/target/release/moai'; };; esac; exit 0",
             "statusMessage": "reading the moai board...",
             "timeout": 15,
             "type": "command"
@@ -52,5 +52,5 @@
     ]
   },
   "name": "moai",
-  "version": "723.280.146"
+  "version": "969.83.805"
 }

@@ -13264,8 +13264,13 @@ fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
 /// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 **없을 때** 조용히 아무것도 안
 /// 하므로, 그 갈래는 여기 말고는 알 길이 없다.
 ///
-/// **있는데 못 도는 갈래는 훅도 말한다**(moai-j4ie) — `skill::command` 가 126·127 에 알림 한
-/// 줄을 낸다. 그래도 **어느 파일인지는 여기만 댄다**: 그 알림은 경로를 안 싣는다.
+/// **있는데 못 도는 갈래는 훅도 말한다**(moai-j4ie) — `skill::command` 가 0·1 아닌 종료에
+/// 알림 한 줄을 내고(moai-wnnb), 그 줄은 이제 경로까지 싣는다(moai-wza7). 그래도 **없는 갈래는
+/// 여기만 댄다** — 훅은 없을 때 조용히 0 으로 빠진다.
+///
+/// **그 알림은 세션·이벤트마다 한 번뿐이다**(moai-f7up). 훅이 매 도구 호출에 다시 말하지 않으니,
+/// 첫 줄을 놓친 사람에게 남는 자리는 여기다 — `skill status` 가 대는 몫을 줄이지 않는 까닭이다
+/// (리뷰 moai-514e.hgz 가 "종료마다" 라고 적힌 이 줄을 짚었다).
 #[test]
 fn skill_status_notices_a_vanished_hook_binary() {
     let s = init("skillgone");
@@ -13278,8 +13283,9 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
 
-    // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 내되(moai-j4ie) 어느
-    // 파일인지는 안 댄다 — 그 자리를 대는 것이 이 줄이다.
+    // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 낸다(moai-j4ie). 그 줄도
+    // 이제 경로를 대지만(moai-wza7), 세션·이벤트마다 한 번뿐이고(moai-f7up) 그 말을 읽는 사람이
+    // 없을 때도 있다 — 같은 자리를 언제든 다시 대는 것이 이 줄이다.
     let noexec = c.home.path().join("noexec-moai");
     std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
     let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());

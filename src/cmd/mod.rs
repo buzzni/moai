@@ -155,7 +155,11 @@ pub fn clearable(v: &str) -> Option<String> {
 /// 여기를 지나는데 껍데기는 126 을 냈다(`merge_driver::probe` 가 적어 둔 그대로다). 그 값이 제일
 /// 비싼 자리가 `skill` 이었다 — 훅은 그 126 을 `|| exit 0` 으로 삼켜 규칙 넷이 조용히 안 서는데
 /// `moai skill status` 는 "깔렸다" 고 말했다. 화면과 사실이 갈리던 자리다. **훅 쪽도 그 뒤에
-/// 말하게 됐다**(moai-j4ie) — `skill::command` 가 126·127 에 알림 한 줄을 낸다.
+/// 말하게 됐다**(moai-j4ie) — `skill::command` 가 0·1 이 아닌 종료에 알림 한 줄을 낸다
+/// (moai-wnnb 가 126·127 에서 넓혔다). **다만 세션·이벤트·종료 값마다 한 번뿐이라**(moai-f7up,
+/// 리뷰 moai-514e.hgz) 첫 줄을 놓친 사람에게 남는 자리는 여전히 여기다 — 이 함수가 대는 몫을
+/// 훅이 대신하지 않는다. `tests/cli.rs` 의 `skill_status_notices_a_vanished_hook_binary` 가
+/// 같은 계약을 적어 둔 짝이고, 한쪽만 고치면 둘이 갈린다.
 ///
 /// 그래서 `access(X_OK)` 를 부른다. 표준 라이브러리에 없어 `libc` 를 직접 의존으로 들였고, 든
 /// 값은 `Cargo.toml` 의 그 줄에 적어 두었다 — **크레이트는 0개가 늘었다.**
