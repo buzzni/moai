@@ -9198,6 +9198,33 @@ fn a_plan_refuses_a_kind_the_markdown_cannot_make() {
     );
 }
 
+/// **사람이 친 `--type` 은 네임스페이스의 기본값과 다른 것이다**(moai-g9a8).
+///
+/// `kind_override.or(args.kind)` 로 둘을 한 값에 뭉개던 판은 `moai issue add --from -` 이
+/// 지나야 해서 `Some(Issue)` 를 통과시켰고, 그 통과가 사람이 친 `--type issue` 까지 덮었다 —
+/// `moai add --from - --type issue` 가 에픽 트리를 만들고 0 으로 끝났다. `--type` 의 도움말은
+/// `What kind to create` 라 적혀 있는데 시킨 것과 다른 것이 서고, 되돌리려면 만들어진 줄을
+/// 손으로 지워야 했다.
+#[test]
+fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
+    let s = init("plantype");
+    // 마크다운은 `#` 을 에픽으로 `-` 를 이슈로 내므로 넷 가운데 지킬 수 있는 값이 없다.
+    for kind in ["issue", "epic", "idea", "milestone"] {
+        let out = from_stdin(s.path(), &["add", "--from", "-", "--type", kind], PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "--type {kind}: {err}");
+        assert_eq!(issues(s.path()), "", "--type {kind} 인데 썼다");
+    }
+    // 동사가 들고 온 기본값은 그대로 선다 — 그것은 이 부름에 친 요구가 아니다.
+    for verb in [["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        assert!(out.status.success(), "{verb:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    assert!(issues(s.path()).contains("저장 계층"), "계획이 안 섰다");
+}
+
 /// 못 읽는 줄 하나가 **성공한 쓰기를 실패로 보이게 하지 않는다.** `promote`
 /// 만 락 밖에서 읽고 부분 실패 깃발을 세웠다 — 그것을 실패로 읽은 쪽이 다시
 /// 부르면 같은 계획이 두 벌 생긴다.

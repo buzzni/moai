@@ -134,6 +134,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   flags you actually passed, exits 1, and under `--json` it is the
   `{"code":"bad_input", …}` object every other refusal gives, so a loop that
   branches on `code` sees this one too.
+- `--from` no longer swallows a typed `--type`. `moai add --from - --type issue`
+  used to build the whole epic tree and exit 0, because the namespace default
+  (`moai issue add --from -` routes through the same place) and a `--type` the
+  caller typed were folded into one value, and letting the default through let
+  the typed flag through with it. Undoing that meant deleting rows by hand. The
+  markdown decides what gets created — `#` is an epic, `-` is an issue — so a
+  typed `--type` is refused whatever its value, while the verb's own default
+  still stands.
 - **A plan called through the wrong verb is told that first.** `moai idea add
   --from - --body …` and `moai milestone add --from - --body …` used to answer
   with the flag conflict, so the caller dropped `--body`, ran it again, and only

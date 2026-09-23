@@ -114,6 +114,17 @@ fn flags_a_plan_cannot_keep(args: &AddArgs) -> Vec<&'static str> {
     if args.title.is_some() {
         given.push("[title]");
     }
+    // **종류도 마크다운이 정한다**(moai-g9a8) — `#` 이 에픽이고 `-` 가 이슈다. 한 계획이
+    // 둘을 같이 내므로 `--type issue` 도 `--type epic` 도 지킬 수가 없다. 네임스페이스가 준
+    // 기본값(`moai issue add --from -` 의 `kind_override`)은 여기 안 든다: 그것은 사람이
+    // 이 부름에 친 요구가 아니라 동사가 들고 온 기본값이라, 마크다운이 이기는 것이 맞다.
+    // **둘을 한 값으로 뭉개던 자리가 버그였다** — `kind_override.or(args.kind)` 를 통과
+    // 목록으로 재던 판은 `Some(Issue)` 를 통과시켜야 해서 사람이 친 `--type issue` 까지
+    // 같이 통과시켰고, 그 부름이 에픽 트리를 만들고 0 으로 끝났다. 되돌리려면 만들어진
+    // 줄을 손으로 지워야 한다.
+    if args.kind.is_some() {
+        given.push("--type");
+    }
     // 소속·태그·우선순위도 마크다운이 적는 자리다(`draft::parse`).
     for (on, flag) in [
         (args.epic.is_some(), "--epic"),
@@ -155,6 +166,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 목록으로 적는다**: `_ => {}` 로 닫으면 종류가 하나 더 붙는 날 그것이
         // 또 조용히 지나가지만, 남김없이 적으면 그날 컴파일러가 이 자리를
         // 이름으로 댄다.
+        //
+        // **여기 재는 것은 `--type` 을 지킬 수 있는가가 아니라 어느 말이 가장 도움이 되는가다**
+        // (moai-g9a8). `--type idea`·`--type milestone` 은 갈 곳을 대는 제 글이 있어 여기서
+        // 잡고, `--type issue`·`--type epic` 은 아래 [`flags_a_plan_cannot_keep`] 이 못 지키는
+        // 깃발로 잡는다 — 통과한다는 뜻이 아니다.
         match kind_override.or(args.kind) {
             None | Some(Kind::Issue) | Some(Kind::Epic) => {}
             Some(Kind::Idea) => {
