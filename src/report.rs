@@ -3208,9 +3208,11 @@ impl StatusReport {
     /// [`Dues`] 를 그대로 들었다가 그릴 때 [`Dues::judge`] 로 잰다.
     #[must_use]
     pub fn judged(mut self, now: &str, zone: &crate::tz::Zone) -> StatusReport {
-        let rows = std::mem::take(&mut self.dues).judge(now, zone);
-        let at = self.dues.at.min(self.warnings.len());
-        self.warnings.splice(at..at, rows);
+        // **자리를 먼저 든다**(리뷰) — `take` 뒤의 `self.dues` 는 `Dues::default()` 라 `at` 이 0 이고,
+        // 그러면 기한 줄이 적어 둔 자리가 아니라 목록 **머리**에 끼어 `no_epic` 보다 앞에 선다.
+        let dues = std::mem::take(&mut self.dues);
+        let at = dues.at.min(self.warnings.len());
+        self.warnings.splice(at..at, dues.judge(now, zone));
         self
     }
 }
@@ -3258,7 +3260,18 @@ impl Dues {
     /// `--json` 쪽이 "2일 지남" 과 "2일 남음" 을 같은 값으로 읽는다.
     #[must_use]
     pub fn judge(&self, now: &str, zone: &crate::tz::Zone) -> Vec<Warning> {
-        let (overdue, soon) = self.split(now, zone);
+        let (mut overdue, mut soon) = self.split(now, zone);
+        // **급한 것이 앞이다.** `view::preview` 는 앞의 셋만 그리고 나머지를 "N건 더" 로 접으므로,
+        // 파일 차례(곧 id 차례)로 두면 90일 지난 줄이 접히고 2일 지난 줄이 화면에 선다. 둘 다
+        // 오름차순이면 된다 — 지난 쪽은 음수라 가장 많이 지난 것이 앞에 온다.
+        //
+        // **세우는 자리는 여기다**(리뷰) — 가르는 자리([`Dues::split`])에 두면 갈래가 비었는지만 보는
+        // [`Dues::count`] 도 같이 정렬하는데, 그쪽은 그리는 걸음마다 돌아 버릴 차례를 프레임마다 짓는다.
+        for rows in [&mut overdue, &mut soon] {
+            // id 로 동점을 푸는 것은 같은 날수가 여럿일 때 차례가 판마다 안 흔들리게 하려는
+            // 것이다. `sort_by_key` 로 적으면 그 id 를 견줄 때마다 베낀다 — 빌려서 견준다.
+            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+        }
         let mut out = Vec::new();
         for (kind, rows, days) in [
             // **문턱을 그대로 넘긴다** — `stale_review` 와 같은 까닭이다. 여기 수를 박아 두면
@@ -3282,17 +3295,16 @@ impl Dues {
     }
 
     /// 판정이 낼 **경고의 수**(0·1·2) — 짓지 않고 센다. 캐시가 든 수에 이것을 더한 것이 화면이
-    /// 대는 "드러난 것 N건" 이다(`tui::Surfaced`). 그리는 걸음마다 부르므로 `Warning` 을 안 짓는다.
+    /// 대는 "드러난 것 N건" 이다(`tui::Surfaced`). 그리는 걸음마다 부르므로 `Warning` 도 차례도
+    /// 안 짓는다 — 차례를 세우는 자는 [`Dues::judge`] 다.
     pub fn count(&self, now: &str, zone: &crate::tz::Zone) -> usize {
         let (overdue, soon) = self.split(now, zone);
         usize::from(!overdue.is_empty()) + usize::from(!soon.is_empty())
     }
 
-    /// 지난 것과 다가온 것으로 가른다 — 둘 다 **급한 것이 앞이다.**
-    ///
-    /// `view::preview` 는 앞의 셋만 그리고 나머지를 "N건 더" 로 접으므로, 파일 차례(곧 id 차례)로
-    /// 두면 90일 지난 줄이 접히고 2일 지난 줄이 화면에 선다. 둘 다 오름차순이면 된다 — 지난 쪽은
-    /// 음수라 가장 많이 지난 것이 앞에 온다.
+    /// 지난 것과 다가온 것으로 가른다 — 차례는 **파일 차례 그대로**다(곧 id 차례). 급한 것을 앞으로
+    /// 올리는 것은 짓는 자리([`Dues::judge`])가 하고, 세는 자리([`Dues::count`])는 갈래가 비었는지만
+    /// 보므로 정렬을 지나지 않는다.
     fn split(&self, now: &str, zone: &crate::tz::Zone) -> (Vec<(&str, i64)>, Vec<(&str, i64)>) {
         // **읽는 사람의 달로 잰다**(moai-h2th). `zone.shift` 는 꼴을 안 바꾸므로 그대로
         // [`crate::model::days_until`] 에 든다. 고리 밖에서 한 번만 옮긴다 — 줄마다 옮기면
@@ -3309,12 +3321,6 @@ impl Dues {
                 d if d <= self.days => soon.push((id.as_str(), d)),
                 _ => {}
             }
-        }
-        for rows in [&mut overdue, &mut soon] {
-            // id 로 동점을 푸는 것은 같은 날수가 여럿일 때 차례가 판마다 안 흔들리게 하려는
-            // 것이다. `sort_by_key` 로 적으면 그 id 를 견줄 때마다 베낀다 — 그리는 걸음마다
-            // 도는 자리라 빌려서 견준다.
-            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
         }
         (overdue, soon)
     }
@@ -3365,9 +3371,6 @@ pub fn status(
 /// 판정 하나뿐이라(moai-h2th), 그 판정에 드는 줄만 [`StatusReport::dues`] 에 담아 내고 날 판정은
 /// 그리는 쪽에 맡긴다 — 그 까닭은 [`Dues`] 에 적었다. 판정까지 접어서 받으려면 [`status`] 나
 /// [`StatusReport::judged`] 다.
-///
-/// **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고 이미 쟀으므로, 경고
-/// 셈에서 다시 재면 같은 걸음을 두 벌 걷는다(moai-u5o9).
 ///
 /// **나이는 안 옮긴다.** `days_since` 가 재는 것은 흐른 시간이고 흐른 시간에는 시간대가 없다 —
 /// `now` 를 통째로 옮기면 모든 나이가 시간대 폭만큼 부풀어 하루씩 늘어난다. 그래서 이 문이 내는
@@ -6317,8 +6320,14 @@ mod tests {
         let whole = status(&issues, &[], &cfg(), now, &seoul);
         let kinds: Vec<&str> = folded.warnings.iter().map(|w| w.kind).collect();
         assert_eq!(kinds, whole.warnings.iter().map(|w| w.kind).collect::<Vec<_>>());
-        let at = |k: &str| kinds.iter().position(|x| *x == k);
+        // **없는 것은 통과가 아니라 실패다**(리뷰) — `position` 을 그대로 견주면 `Option` 끼리 견주게
+        // 되고 `None < Some(_)` 이라, 기한 줄이 통째로 빠진 판이 조용히 초록으로 선다.
+        let at =
+            |k: &str| kinds.iter().position(|x| *x == k).unwrap_or_else(|| panic!("{k} 가 목록에 없다 — {kinds:?}"));
         assert!(at("milestone_overdue") < at("duplicate_id"), "기한 줄이 치명적인 줄 밑으로 내려갔다 — {kinds:?}");
+        // **앞의 경고보다 밑이다** — 끼우는 자리는 `Dues::at` 이 적어 둔 그 자리이지 목록의 머리가
+        // 아니다. 머리에 끼우면 기한이 `no_epic`·`wip_overload` 를 제치고 보드의 첫 줄로 선다.
+        assert!(at("no_epic") < at("milestone_overdue"), "기한 줄이 앞의 경고를 제치고 머리에 섰다 — {kinds:?}");
         assert!(folded.dues.count(now, &seoul) == 0, "한 번 접은 것을 두 번 접을 수 있다");
     }
 

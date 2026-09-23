@@ -612,7 +612,8 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 #[derive(Debug, Clone, Default)]
 pub struct Surfaced {
     /// 시간대와 무관한 몫 — 순수한 셈이 낸 경고(`report::status_in` 의 `warnings`)에, 그 셈이 못
-    /// 내는 몫(자리 없는 집은 줄, [`Site::stranded`])까지 더한 값이다.
+    /// 내는 몫(자리 없는 집은 줄)까지 더한 값이다. 그 몫을 얹는 자는 [`Surfaced::add`] 하나고
+    /// (`prepare`·`App::overlaid` 가 부른다), 디스크를 읽어야 아는 값이라 `report` 가 못 낸다.
     free: usize,
     /// 아직 판정 안 한 기한. 마일스톤만 드는 값이라 줄이 몇 개다([`crate::report::Dues`]).
     dues: crate::report::Dues,
@@ -625,8 +626,13 @@ impl Surfaced {
 
     /// 화면이 댈 수 — 든 몫에 **읽는 사람의 달로 잰** 기한을 더한다.
     ///
-    /// `now` 는 화면이 선 지금이다. 셀 때의 `now` 를 함께 들지 않는 까닭은, 날 판정은 늦게 잰 쪽이
-    /// 늘 맞기 때문이다 — 셀 때의 날을 얼려 두면 자정을 넘긴 화면이 어제의 판정을 든다.
+    /// `now` 는 **부르는 쪽이 드는 시각**이다. 셀 때의 `now` 를 이 꼴에 함께 담지 않는 까닭은 날
+    /// 판정이 늦게 잰 쪽으로 맞기 때문이고, 그래서 늦은 시각을 줄 자리가 열려 있다.
+    ///
+    /// **지금 그리는 쪽이 주는 것은 `site.now`, 곧 마지막 읽기의 시각이다**(리뷰). 그래서 시간대는
+    /// 이 프레임의 것이지만 날은 그 읽기의 것이다 — 자정을 넘긴 화면은 다시 읽을 때까지
+    /// ([`layer::REREAD_EVERY`], 60초) 어제의 판정을 든다. 옛 꼴도 셈이 돈 때의 날로 얼어 있었으니
+    /// 그만큼은 그대로고, 이 자리를 `crate::model::now()` 로 바꾸면 그 틈까지 사라진다.
     pub fn count(&self, now: &str, zone: &crate::tz::Zone) -> usize {
         self.free + self.dues.count(now, zone)
     }
@@ -2420,8 +2426,9 @@ impl App {
         self.saved_zone = look.timezone.clone();
         // **경고를 다시 세지 않는다**(moai-fgjj, 2026-09-23 사용자 결정) — 든 셈에 기한 판정이 안
         // 접혀 있어([`Surfaced`]) 시간대가 늦게 정해져도 낡지 않는다. 시간대를 입히는 이 걸음이
-        // [`App::recount`] 를 부르던 때는 띄우는 길이 이슈 전체 훑기를 두 벌 돌았고(`App::build`
-        // 가 한 벌, 여기서 또 한 벌 — 1,883건에 ~9ms, 18,830건에 ~95ms 를 첫 프레임 앞에서),
+        // 셈을 다시 돌리던 때는(그때 이름은 `recount`, 지금 [`App::count_all`]) 띄우는 길이 이슈
+        // 전체 훑기를 두 벌 돌았고(`App::build` 가 한 벌, 여기서 또 한 벌 — 1,883건에 ~9ms,
+        // 18,830건에 ~95ms 를 첫 프레임 앞에서),
         // 그 다시 세기가 `App::overlaid` 가 더한 몫을 덮어 배너의 수를 지운 판도 거기서 났다
         // (리뷰 moai-pmhv.x3r 1번). 셈이 시간대에 안 닿으면 두 값이 다 사라진다.
         problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));

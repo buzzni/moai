@@ -2719,15 +2719,15 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     fit(Line::from(spans), room)
 }
 
-/// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
-/// 고칠 것이 아니라 흐리게, 사라진 것은 경고, 못 읽는 것은 오류. 뜻은 말이 진다.
 /// 그 줄이 대는 **드러난 것의 수** — 든 셈에 이 프레임의 달로 잰 기한을 더한다(moai-fgjj).
-/// 층의 줄을 그리는 자리 셋이 이 하나를 쓴다: 저마다 더하면 한 자리만 잊어도 `!` 는 서는데
-/// 수는 하나 적게 선다.
+/// 층의 줄을 그리는 자리 둘([`place_line`]·[`place_about`])이 이 하나를 쓴다: 저마다 더하면 한
+/// 자리만 잊어도 `!` 는 서는데 수는 하나 적게 선다.
 fn surfaced(app: &App, sum: &Summary) -> usize {
     sum.warnings.count(&app.site.now, &app.zone)
 }
 
+/// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
+/// 고칠 것이 아니라 흐리게, 사라진 것은 경고, 못 읽는 것은 오류. 뜻은 말이 진다.
 fn shut_style(s: Shut) -> Style {
     match s {
         Shut::Uninit => dim(),
@@ -6037,8 +6037,9 @@ pub(super) mod tests {
     ///
     /// 셈은 시간대 없이 한 번만 돌고(`warnings_in`), 기한 판정은 그리는 걸음이 그때의 시간대로 한다
     /// ([`super::Surfaced::count`]). 접어서 들던 때는 `SPC o t` 뒤로 배너는 다시 세어 고쳐졌지만
-    /// (`App::recount`) 프로젝트 층의 `+N` 은 쓸기가 다시 돌 때까지 최대 60초 옛 달로 섰고, 쓸기가
-    /// 도는 중이었으면 그 답이 옛 판정으로 덮으며 시계까지 다시 찍었다(리뷰 moai-pmhv.x3r 6·8번).
+    /// (그때의 `recount`, 지금 `App::count_all`) 프로젝트 층의 `+N` 은 쓸기가 다시 돌 때까지 최대
+    /// 60초 옛 달로 섰고, 쓸기가 도는 중이었으면 그 답이 옛 판정으로 덮으며 시계까지 다시
+    /// 찍었다(리뷰 moai-pmhv.x3r 6·8번).
     ///
     /// **문턱을 넘나드는 기한으로 잰다** — 시간대가 옮기는 것은 하루뿐이라, 지남·다가옴 사이가
     /// 아니라 `status_due_days`(3) 밖과 안 사이를 걸쳐야 **수**가 움직인다. 같은 줄이 UTC 에서는
