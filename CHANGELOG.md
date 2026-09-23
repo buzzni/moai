@@ -216,7 +216,8 @@ on finding them.
   when the row wrote nothing was the id-keyed map — and that map holds the later
   line's answer, the written `epic` included. So where the same id stood twice,
   the earlier row, whose epic is the epic its id sits under, was drawn, counted,
-  filtered and reported under the *other* row's epic: `derived_epic`,
+  filtered and reported under the *other* row's epic: `derived_epic` on every
+  machine surface (`show`, `ready`, `status`, `prime`, `add`, `mv`, `edit`),
   `moai show <that epic>`'s member list, `moai show -e <it>` and the tree all
   named it, while the epic its id actually sits under said `Members 0/0` and drew
   the row as a child. The fall-back now asks the id's parent, which both rows

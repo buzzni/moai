@@ -1477,12 +1477,22 @@ pub fn ready(
         for h in shelved {
             // **도로 집는 말은 미룬 곳을 댄다.** 막는 줄이 미룬 에픽 밑이면 그
             // 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
+            //
+            // **댈 곳이 없으면 말을 안 낸다**(리뷰 moai-jk2u.o78). `report` 쪽은 빈 걸음에
+            // 키를 안 세우는 것으로 id 없는 `moai defer  --undo` 를 막는데, 그리는 이 줄은
+            // 그 약속을 안 지켜 빈 배열을 그대로 폈다 — 없는 키와 빈 배열이 여기서 같은 글이
+            // 된다. 같은 id 가 두 줄일 때 실제로 그 꼴이 섰다: 에픽의 멤버로 세어진 앞줄이
+            // 미뤘는데 그 id 의 답을 정하는 뒷줄은 안 미뤄, 댈 미룸이 아예 없었다.
+            // 막는 줄은 그대로 대니 왜 못 집는지는 여전히 화면에 선다.
+            let undo = match h.undo.is_empty() {
+                true => String::new(),
+                false => format!("  {}", paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" ")))),
+            };
             out.push(format!(
-                "  {}  {}  {}  {}",
+                "  {}  {}  {}{undo}",
                 paint(style::ID, &h.issue.id),
                 marked(screen.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
                 paint(style::DIM, &format!("← {}", h.by.join(" · "))),
-                paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" "))),
             ));
         }
     }
@@ -2207,7 +2217,8 @@ pub struct Board<'a> {
     pub status: StatusReport,
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
-    /// 집은 줄이 든 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리, 같은 까닭이다.
+    /// 집은 줄의 id 가 **넘겨받는** 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리,
+    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
     /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
     pub kinds: crate::report::Kinds<'a>,
@@ -2241,9 +2252,13 @@ pub struct Picks<'a> {
     pub focus: crate::report::Focus<'a>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
-    /// 이 목록의 줄이 든 에픽(`report::handed_of`) — `--json` 의 `derived_epic` 이 읽는다.
+    /// 이 목록의 줄이 **넘겨받는** 에픽(`report::handed_of`) — `--json` 의 `derived_epic` 이 읽는다.
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
+    ///
+    /// **이 지도만으로는 답이 아니다**(리뷰 moai-jk2u.o78) — 제 `epic` 을 적은 줄은 아예 안 드니
+    /// (`report::hands_down`) 혼자 짚으면 그 줄이 에픽 없는 줄로 나온다. 값을 내는 자는
+    /// `report::stands_in` 이고 그쪽이 줄의 `epic` 을 먼저 읽는다 — `cmd::Row::of` 를 지난다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
     /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
     /// 같은 자리, 같은 까닭이다(moai-53s2).

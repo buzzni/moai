@@ -601,7 +601,7 @@ struct Ctx<'a> {
     has_milestones: bool,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     /// 그 이슈가 걸리는 단 하나의 자리.
     fn home(&self, at: usize) -> Path {
         let me = &self.issues[at];
@@ -649,8 +649,11 @@ impl Ctx<'_> {
     /// 둘이면 앞줄이 뒷줄의 에픽을 입어, 트리가 그리는 자리와 롤업이 세는 곳이 갈린다 —
     /// 머리글이 `0/1` 인 에픽 밑에 줄 둘이 섰다. 가려진 줄은 [`Ctx::home`] 이 이미
     /// `(길 잃음)` 으로 갈라 보냈으므로 여기서 다시 안 가른다.
-    fn epic_at<'i>(&'i self, i: &'i Issue) -> Option<&'i str> {
-        crate::report::joined_in(i, || self.epic_of.handed().get(i.id.as_str()).copied())
+    ///
+    /// **차례는 `report::Handing::at` 이 든다**(리뷰 moai-jk2u.o78) — 같은 글을 여기 또 적으면
+    /// 그 차례를 고치는 날 `report` 쪽만 옮겨져, 트리가 그리는 자리와 롤업이 세는 곳이 갈린다.
+    fn epic_at(&self, i: &'a Issue) -> Option<&'a str> {
+        self.epic_of.at(i)
     }
 
     /// **조상인 에픽**이 서는 자리 — id 로 짚는다. 그 답은 그 에픽 줄의 것이고, 지도가

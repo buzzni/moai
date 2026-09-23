@@ -130,12 +130,21 @@ enum Placing<'a> {
 }
 
 impl<'a> Placing<'a> {
-    /// 그 id 가 **넘겨받는** 에픽([`Handing`]) — 줄 제 `epic` 은 [`stands_in`] 이 얹는다.
-    fn handed(&self, id: &str) -> Option<&'a str> {
+    /// 든 지도 — 제 것이든 빌린 것이든 답하는 자는 하나다.
+    fn map(&self) -> &Handing<'a> {
         match self {
-            Placing::Own(h) => h.handed().get(id).copied(),
-            Placing::Kept(h) => h.handed().get(id).copied(),
+            Placing::Own(h) => h,
+            Placing::Kept(h) => h,
         }
+    }
+
+    /// 그 id 가 **넘겨받는** 에픽([`Handing`]) — 줄 제 `epic` 은 [`stands_in`] 이 얹는다.
+    ///
+    /// **갈래는 어느 지도인가만 가른다**(리뷰 moai-jk2u.o78) — 짚는 글을 갈래마다 적으면
+    /// 한쪽만 고치는 날 `epic_labels`(제 것)와 `epic_labels_over`(빌린 것)가 같은 줄에 다른
+    /// 에픽을 단다. 그 둘은 여덟 줄 사이라 읽어서는 안 걸린다.
+    fn handed(&self, id: &str) -> Option<&'a str> {
+        self.map().handed().get(id).copied()
     }
 }
 
@@ -454,12 +463,20 @@ pub fn deferred_sources_in<'a>(
         for r in shelf.every(i) {
             // **done 으로 읽은 묶음의 미룸도 댄다.** 그 묶음 줄만 계획 밖으로 안 셀 뿐, 그
             // 밑의 줄은 가까운 미룸을 풀면 그 묶음을 뿌리로 받아 여전히 빠진다 — 거르면
-            // 하나를 풀고서야 다음을 댄다(moai-phzi). 그 판은 한 줄에 미룸이 여럿 걸린
+            // 하나를 풀고서야 다음을 댄다(moai-phzi). 그 경우는 한 줄에 미룸이 여럿 걸린
             // 것이라 줄 하나를 걷는 이 꼴에서도 그대로 선다.
             if !every.contains(&r) {
                 every.push(r);
             }
         }
+        // **키가 빠지지 않는다는 것을 시험이 맨다**(리뷰 moai-jk2u.o78). `roots` ⊆ 이 지도는
+        // [`held`] 의 `undo` 와 `blocked_by_deferred` 의 나이가 기대는 계약인데(그쪽 주석의
+        // `계획 밖인 줄은 언제나 미룬 곳이 있다`), 그것을 받치는 것은 `roots` 를 접은 자와
+        // [`Lines::at`] 이 **같은 뒷줄**을 고른다는 사실뿐이라 서명에도 타입에도 안 적힌다.
+        // 둘이 갈리는 날 키가 말없이 사라지고, `moai defer <id> --undo` 는 아직 미뤄진 줄에
+        // "이미 계획에 있다" 고 답한다(moai-kluk 가 고친 그 자리다). 아래 문은 릴리스에서도
+        // 남아 그 판에 빈 배열을 안 내고, 이 줄은 시험에서 그 어긋남을 먼저 잡는다.
+        debug_assert!(!every.is_empty(), "{id}: roots 에 든 id 의 걸음이 비었다 — 접은 자와 Lines::at 이 갈렸다");
         if !every.is_empty() {
             out.insert(id, every);
         }
@@ -541,13 +558,15 @@ impl<'a, 'm> Shelf<'a, 'm> {
                 return;
             }
             // **위도 줄에 묻는다**(moai-5km5). 첫 걸음만 줄에 묻고 조상을 접은 지도로 짚던
-            // 때는, 조상 자리에 같은 id 의 줄이 둘이면 앞줄이 뒷줄의 에픽을 입었다 —
-            // [`Handing::at_id`] 가 고르는 줄이 그 지도가 고르던 뒷줄과 같으므로 답은 그대로고,
+            // 때는, 조상 자리에 같은 id 의 줄이 둘이면 앞줄이 뒷줄의 에픽을 입었다 — 여기서
+            // 고르는 줄(`by_id` 의 뒷줄)이 그 지도가 고르던 줄과 같으므로 답은 그대로고,
             // 자가 [`Handing::at`] 하나로 모인다.
-            let epic = match line {
-                Some(i) if at == start => self.epic_of.at(i),
-                _ => self.epic_of.at_id(at, self.lines),
-            };
+            //
+            // **위의 `line` 을 그대로 쓴다**(리뷰 moai-jk2u.o78) — id 로 줄을 다시 고르던 때는
+            // 바로 위 주석이 막으려던 그 꼴이 에픽 축에 그대로 남았다: 줄을 한 번 고르고 축이
+            // 또 고르면, 두 축이 딴 줄을 보게 되는 것이 컴파일에 안 걸린다. 걸음마다 `by_id`
+            // 를 한 번 더 짚던 값도 함께 빠진다.
+            let epic = line.and_then(|i| self.epic_of.at(i));
             if matches!(here, Some(Kind::Issue | Kind::Idea))
                 && let Some(r) = self.joined(epic, Kind::Epic)
                 && visit(r)
@@ -971,8 +990,11 @@ struct Laid<'a> {
     /// 줄마다 **선 에픽**을 답하는 자([`Handing`]) — 줄을 든 채 묻는 자리(굴림의 멤버 셈)가
     /// 받는다. 아래 `epics` 는 이것을 접은 것이라 둘은 한 벌에서 나온다(moai-5km5).
     handed: Handing<'a>,
-    /// 줄 → 그 줄이 든 에픽([`groups`]) — 조상 id 를 타고 오르느라 줄을 못 드는 자리
-    /// ([`claims`]·[`nearness`])가 받는다.
+    /// 줄 → 그 줄이 든 에픽([`groups`]) — **id 밖에 없는 자리**가 받는다: 조상 id 를 타고
+    /// 오르느라 줄을 못 드는 [`claims`]·[`nearness`], 그리고 id 로 묻는 [`Footing::epic_of`]
+    /// (`moai show <id>` 의 상세 — 그 창이 펼치는 줄이 `Load::get` 의 뒷줄이라 접은 답과
+    /// 같다). **읽는 자를 다 적는다**(리뷰 moai-jk2u.o78): 여기 안 적힌 읽는 자가 있으면
+    /// 다음에 이 두 지도를 가르는 사람이 그 자리를 못 보고 지나간다.
     epics: BTreeMap<&'a str, &'a str>,
     /// 줄 → 그 줄이 선 마일스톤([`milestones_in`]).
     stones: BTreeMap<&'a str, &'a str>,
@@ -1232,12 +1254,18 @@ fn rollups<'a>(
         if picked.contains_key(g.id.as_str()) {
             continue;
         }
+        // **집은 것인가는 줄로 묻는다**(리뷰 moai-jk2u.o78). 멤버는 이제 줄마다 갈리는데
+        // ([`Handing`]) `picked` 는 id 로 접은 지도라(같은 id 는 뒷줄 하나), id 로 견주면 같은
+        // id 를 든 줄 둘이 서로 다른 에픽에 설 때 **집은 줄이 없는 에픽**까지 키를 받는다 —
+        // 앞줄이 E1 의 멤버로 todo 에 섰는데 뒷줄이 E2 에서 집혔으면 E1 도 "그 워크트리에서
+        // 돌고 있다" 가 되고, 이어받는 세션이 `moai show E1` 에서 엉뚱한 자리를 읽는다.
+        // 바늘로 견주면 `picked` 가 고른 그 줄만 제 에픽에 셈을 얹는다([`off_rows`] 와 같은 자).
         let mine: Vec<&str> = members
             .get(&(g.kind, g.id.as_str()))
             .into_iter()
             .flatten()
+            .filter(|m| picked.get(m.id.as_str()).is_some_and(|p| std::ptr::eq(*p, **m)))
             .map(|m| m.id.as_str())
-            .filter(|id| picked.contains_key(id))
             .collect();
         if !mine.is_empty() {
             out.insert(g.id.as_str(), mine);
@@ -2167,8 +2195,19 @@ pub fn groups_over<'a>(all: &'a [Issue], lines: &Lines<'a>) -> BTreeMap<&'a str,
 #[derive(Default)]
 pub struct Handing<'a> {
     /// id → 그 id 의 부모가 넘기는 에픽. 제 `epic` 을 적었거나 묶음이거나 부모가 없는 줄은
-    /// 여기 안 든다 — 그 셋은 [`joined_in`] 이 지도를 짚기 전에 답한다.
+    /// 여기 안 든다([`hands_down`]) — 그 셋은 [`joined_in`] 이 지도를 짚기 전에 답한다.
     from_id: BTreeMap<&'a str, &'a str>,
+}
+
+/// 소속을 **id 부모에게서 받는** 줄 — [`Handing::over`] 가 지도에 담는 술어이자 [`handed_of`]
+/// 가 문으로 삼는 술어다. 셋을 다 봐야 한다: 묶음 줄은 소속을 안 받고([`joins`]), 제 `epic` 을
+/// 적은 줄은 [`joined_in`] 이 지도를 짚기 전에 답하며, 부모가 없으면 받아 올 데가 없다.
+///
+/// **자는 하나다**(리뷰 moai-jk2u.o78). 담는 술어와 문의 술어를 따로 적어 두면 한쪽만 고치는
+/// 날 문이 좁아져, 지도가 낼 답이 있는 줄에서 빈 지도가 돌아온다 — 그 빈 것은 "에픽이 없다"
+/// 가 아니라 "안 지었다" 인데 받는 쪽은 못 가르므로, 같은 물음에 표면마다 다른 답이 선다.
+fn hands_down(i: &Issue) -> bool {
+    joins(i) && i.epic.is_none() && crate::id::parent_of(&i.id).is_some()
 }
 
 impl<'a> Handing<'a> {
@@ -2186,7 +2225,7 @@ impl<'a> Handing<'a> {
         for i in all {
             // 지도를 짚는 줄만 든다 — [`joined_in`] 이 묶음 줄과 제 `epic` 을 적은 줄에서
             // 먼저 돌아서므로, 그 줄들의 값을 여기 담으면 아무도 안 읽는다.
-            if !joins(i) || i.epic.is_some() {
+            if !hands_down(i) {
                 continue;
             }
             let Some(p) = crate::id::parent_of(&i.id) else { continue };
@@ -2199,21 +2238,18 @@ impl<'a> Handing<'a> {
 
     /// 그 **줄**이 든 에픽 — 적힌 `epic` 이 먼저고, 없으면 id 부모가 넘기는 것이다
     /// ([`joined_in`]). 묶음 줄에는 안 선다.
+    ///
+    /// **짚는 차례는 여기 하나다**(리뷰 moai-jk2u.o78) — 아래 [`Handing::fold`] 도 이것을 부른다.
+    /// 같은 글을 자리마다 다시 적으면 그 차례를 고치는 날 한쪽만 옮겨, 그리는 쪽과 세는 쪽이
+    /// 갈린다.
     pub fn at(&self, i: &'a Issue) -> Option<&'a str> {
-        joined_in(i, || self.from_id.get(i.id.as_str()).copied())
-    }
-
-    /// **id 로 짚은 줄**이 든 에픽 — 조상을 타고 오르는 자리([`Shelf::walk`])가 쓴다. 그 줄을
-    /// 고르는 자는 `by_id`(뒷줄이 이긴다)라 [`groups`] 가 고르는 그 줄이다.
-    pub fn at_id(&self, id: &str, lines: &Lines<'a>) -> Option<&'a str> {
-        let i = lines.at(id)?;
         joined_in(i, || self.from_id.get(i.id.as_str()).copied())
     }
 
     /// 줄마다의 답을 **id 로 접은 지도**([`groups`]) — id 밖에 없는 표면이 받는다.
     /// `None` 이 앞줄의 답을 지우는 것까지 [`fold_by_id`] 와 같은 차례다.
     pub fn fold(&self, all: &'a [Issue]) -> BTreeMap<&'a str, &'a str> {
-        fold_by_id(all, all.iter().map(|i| joined_in(i, || self.from_id.get(i.id.as_str()).copied())))
+        fold_by_id(all, all.iter().map(|i| self.at(i)))
     }
 
     /// 담고 있는 **넘기는 값** 그대로 — 빌린 글을 제 것으로 옮겨 담는 자리(탐색기의 `tui::Ground`)가
@@ -2309,8 +2345,8 @@ impl<'a> Handed<'a> {
 /// 줄의 답은 그 줄이 들고 있고([`stands_in`] 이 그것을 먼저 읽는다), 묶음 줄은
 /// 소속을 안 받는다([`joins`]) — 남는 것은 id 부모에게서 받는 줄뿐이다. 문의 조건은
 /// [`epic_through`] 가 지도를 묻는 줄의 **위집합**이라야 한다 — 좁히면 지도가 낼 답이 있는
-/// 줄에서 빈 지도가 돌아와, 같은 물음에 표면마다 다른 답이 선다(리뷰). [`Handing::over`] 가
-/// 지도에 담는 줄이 그 조건과 **같은 술어**다.
+/// 줄에서 빈 지도가 돌아와, 같은 물음에 표면마다 다른 답이 선다(리뷰). 그래서 문과
+/// [`Handing::over`] 가 지도에 담는 줄은 술어 하나를 함께 쓴다([`hands_down`]).
 ///
 /// 물은 id 는 **집합으로 든다** — `ids` 를 줄마다 훑으면 아래 둘이 `줄 수 × 물은 수` 가 된다.
 /// `ready --json` 은 집을 줄 전부를 묻는 자리라 그 곱이 이 함수의 값 거의 전부였다(리뷰).
@@ -2323,8 +2359,7 @@ pub fn handed_of<'a>(all: &'a [Issue], ids: &[&str]) -> BTreeMap<&'a str, &'a st
     if want.is_empty() {
         return BTreeMap::new();
     }
-    let from_id = |i: &Issue| joins(i) && i.epic.is_none() && crate::id::parent_of(&i.id).is_some();
-    if !all.iter().any(|i| from_id(i) && want.contains(i.id.as_str())) {
+    if !all.iter().any(|i| hands_down(i) && want.contains(i.id.as_str())) {
         return BTreeMap::new();
     }
     let mut out = Handing::of(all).from_id;
@@ -4911,6 +4946,28 @@ mod tests {
         assert_eq!(branches("argos-0001"), Some(vec!["worktree-argos-0001"]), "에픽이 멤버의 자리를 못 냈다");
     }
 
+    /// **집은 줄이 없는 에픽은 자리를 안 받는다** (리뷰 moai-jk2u.o78).
+    ///
+    /// 멤버가 줄마다 갈리게 되면서([`Handing`]) 같은 id 의 두 줄이 서로 다른 에픽에 선다. 그런데
+    /// 집은 것인가를 `picked` 에 **id 로** 묻던 [`rollups`] 는 그 id 가 어디서든 집혔으면 통과시켜,
+    /// 집은 줄이 없는 에픽까지 굴림을 받았다 — 워크트리 이름이 에픽 id 라 이어받는 세션은
+    /// `moai show <에픽>` 의 자리부터 읽는데, 거기서 남의 에픽 자리를 읽는다.
+    #[test]
+    fn an_epic_with_no_picked_row_gets_no_place() {
+        // `argos-0002` 가 둘. 앞줄은 `epic` 을 안 적어 id 부모인 `argos-0001` 의 멤버고 아직 todo,
+        // 뒷줄은 `argos-0009` 를 적고 집혔다. 둘 다 이슈라 가려짐은 안 선다.
+        let issues = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            make("argos-0001.aaa", Kind::Issue, "todo"),
+            member("argos-0001.aaa", "argos-0009", "in_progress"),
+            make("argos-0009", Kind::Epic, "todo"),
+        ];
+        let trees = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0001.aaa"])];
+        let at = places(&issues, &cfg(), &trees, LATER);
+        assert!(at.contains_key("argos-0009"), "집은 줄을 둔 에픽이 자리를 잃었다 — {at:?}");
+        assert!(!at.contains_key("argos-0001"), "집은 줄이 없는 에픽이 자리를 받았다 — {at:?}");
+    }
+
     /// **굴려 올린 자리에 같은 워크트리가 두 번 서지 않는다.** 마일스톤은 멤버를 두 길로 받는다
     /// (이슈의 마일스톤, 그리고 그 이슈가 든 에픽의 마일스톤) — 같은 것이라 한 번만 걸어야 하고,
     /// 여러 자리에 선 멤버를 합칠 때 잇닿지 않은 중복까지 걷어내야 한다. 안 그러면 `moai show
@@ -6944,10 +7001,10 @@ mod tests {
         assert_eq!(deferred_roots(&rows)["argos-0002"], "argos-e002", "접은 지도는 뒷줄이 답한다");
         assert_eq!(deferred_sources(&rows)["argos-0002"], ["argos-e002"], "앞줄을 뺀 미룸까지 댔다");
 
-        // 거울 판 — 뒷줄이 E1 에 들면 대는 것도 그쪽이다.
+        // 거울 상 — 뒷줄이 E1 에 들면 대는 것도 그쪽이다.
         let flipped = vec![rows[0].clone(), rows[1].clone(), rows[3].clone(), rows[2].clone()];
         assert_eq!(deferred_roots(&flipped)["argos-0002"], "argos-e001");
-        assert_eq!(deferred_sources(&flipped)["argos-0002"], ["argos-e001"], "거울 판에서 갈렸다");
+        assert_eq!(deferred_sources(&flipped)["argos-0002"], ["argos-e001"], "거울 상에서 갈렸다");
 
         // **한 줄에 미룸이 여럿이면 그대로 다 댄다**(moai-phzi) — 줄어드는 것은 쌍둥이 쪽뿐이다.
         let deep = vec![off(make("argos-e001", Kind::Epic, "todo")), off(member("argos-0002", "argos-e001", "todo"))];
@@ -7922,7 +7979,7 @@ mod tests {
     /// 둘의 부모가 같으니 둘 다 제 답을 받는다.
     ///
     /// 재는 것은 표면 다섯이다 — `derived_epic`·멤버 목록·굴림·`-e` 거르개, 그리고 제 id
-    /// 부모인 에픽이 그 줄을 멤버로 세는가. **한 판이 아니라 두 판을 잰다**: 뒤집은 판
+    /// 부모인 에픽이 그 줄을 멤버로 세는가. **한 벌이 아니라 두 벌을 잰다**: 뒤집은 것
     /// (앞줄이 적고 뒷줄이 안 적은 것)은 옛 꼴에서도 맞던 자리라, 고침이 답을 통째로
     /// 뒤집지는 않았다는 증인이다.
     #[test]
