@@ -9,12 +9,15 @@ use super::keys::{
     self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt,
     label, labels,
 };
-use super::layer::{Look, Place, Shut};
+use super::layer::{Look, Place, Shut, Summary};
 use super::menu;
 use super::picker::{self, Picker};
 use super::scroll::Move;
 use super::scroll::Scroll;
 use super::{App, Input, Mode, Pane, Row, Seat, Site};
+// 그림 시험만 이 꼴을 손으로 세운다 — 그리는 쪽은 [`super::Surfaced::count`] 로만 만진다.
+#[cfg(test)]
+use super::Surfaced;
 use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
@@ -707,8 +710,11 @@ fn banner(app: &App) -> Option<(String, bool)> {
     {
         parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
     }
-    if app.site.warnings > 0 {
-        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &app.site.warnings.to_string())]));
+    // **기한은 그릴 때 잰다**(moai-fgjj) — 든 셈은 시간대에 안 닿고, 읽는 사람의 달은 이 프레임의
+    // 것이다. `SPC o t` 로 바꾼 시간대가 다음 프레임에 이 수로 선다.
+    let surfaced = app.site.warnings.count(&app.site.now, &app.zone);
+    if surfaced > 0 {
+        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &surfaced.to_string())]));
     }
     // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
     // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
@@ -2672,7 +2678,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             }
             // 못 읽은 워크트리도 `!` 를 세운다 — 한눈 보기가 그것을 `옆 워크트리 문제` 로 세는데
             // 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
-            if sum.warnings > 0 || sum.unreadable > 0 || sum.unread > 0 {
+            if surfaced(app, sum) > 0 || sum.unreadable > 0 || sum.unread > 0 {
                 spans.push(Span::styled(" !", from_anstyle(style::WARN)));
             }
             // **알림은 흐린 `+` 에 수를 붙여 선다**(moai-prdh) — 보드의 글리프와 같은 자다
@@ -2715,6 +2721,13 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
 /// 고칠 것이 아니라 흐리게, 사라진 것은 경고, 못 읽는 것은 오류. 뜻은 말이 진다.
+/// 그 줄이 대는 **드러난 것의 수** — 든 셈에 이 프레임의 달로 잰 기한을 더한다(moai-fgjj).
+/// 층의 줄을 그리는 자리 셋이 이 하나를 쓴다: 저마다 더하면 한 자리만 잊어도 `!` 는 서는데
+/// 수는 하나 적게 선다.
+fn surfaced(app: &App, sum: &Summary) -> usize {
+    sum.warnings.count(&app.site.now, &app.zone)
+}
+
 fn shut_style(s: Shut) -> Style {
     match s {
         Shut::Uninit => dim(),
@@ -2773,15 +2786,16 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             out.push(Line::from(""));
             // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
-            if sum.warnings == 0 && sum.unread == 0 {
+            let n = surfaced(app, sum);
+            if n == 0 && sum.unread == 0 {
                 out.push(Line::from(vec![
                     Span::styled("✓", status("done")),
                     Span::raw(say(lang, "tui.place.nothing_surfaced")),
                 ]));
-            } else if sum.warnings > 0 {
+            } else if n > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::WARN)),
-                    Span::raw(fill(say(lang, "tui.place.surfaced"), &[("n", &sum.warnings.to_string())])),
+                    Span::raw(fill(say(lang, "tui.place.surfaced"), &[("n", &n.to_string())])),
                 ]));
             }
             // **자리 없는 줄은 낱말로 따로 댄다**(moai-p3bs). 위의 수에 이미 들었지만, 죽은
@@ -4923,14 +4937,14 @@ pub(super) mod tests {
     #[test]
     fn a_write_notice_survives_eighty_columns_beside_the_standing_banner() {
         let mut a = app();
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.unreadable = vec![None; 2];
         a.notice = Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다".into());
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다"), "{}", lines.join("\n"));
         assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
 
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         a.site.unreadable.clear();
         assert_eq!(banner(&a), Some((" ✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다 ".into(), false)));
         // 다시 읽기가 실패했으면 실패가 앞에 선다.
@@ -4955,7 +4969,7 @@ pub(super) mod tests {
     fn the_banner_names_the_notices_the_layer_counted() {
         let mut a = app();
         a.notice = None;
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         a.site.notices = 3;
         let (text, urgent) = banner(&a).expect("알림만 있는데 배너가 아무 말도 안 한다");
         assert!(text.contains("알림 3건"), "{text}");
@@ -4964,7 +4978,7 @@ pub(super) mod tests {
         assert!(!text.contains('!'), "알림만 선 배너가 경고의 `!` 를 이고 섰다 — {text}");
 
         // 경고와 함께 서면 경고가 앞이고, 그때는 `!` 가 머리에 선다 — 고칠 것이 먼저다.
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         let (text, _) = banner(&a).expect("배너가 안 섰다");
         assert!(text.find("드러난 것").unwrap() < text.find("알림 3건").unwrap(), "{text}");
         assert!(text.starts_with(" ! "), "경고가 섰는데 `!` 가 빠졌다 — {text}");
@@ -4986,7 +5000,7 @@ pub(super) mod tests {
     #[test]
     fn the_reason_the_layer_is_missing_survives_eighty_columns() {
         let mut a = app();
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
         a.unlayered = Some("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — TOML 이 깨졌다".into());
         assert!(a.layer.is_none(), "시험의 전제 — 층이 없다");
@@ -5008,7 +5022,7 @@ pub(super) mod tests {
         use super::super::layer::At;
         let mut a = layered(At::Layer);
         a.notice = None;
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
         let said = "등록 줄 하나를 건너뛰었다 — /w/bent/.moai/config.toml 3번째 줄이 깨졌다";
         a.layer.as_mut().expect("층이 있다").problems = vec![said.into()];
@@ -5995,7 +6009,7 @@ pub(super) mod tests {
                     title: "집은 멤버".into(),
                     column: "in_progress".into(),
                 }],
-                warnings: 2,
+                warnings: Surfaced::flat(2),
                 notices: 0,
                 stranded: 0,
                 unread: 0,
@@ -6016,6 +6030,76 @@ pub(super) mod tests {
             at,
         ));
         a
+    }
+
+    /// **시간대를 바꾸면 배너와 층의 줄이 다음 프레임에 함께 따라온다**(moai-fgjj, 2026-09-23 사용자
+    /// 결정) — **다시 읽지 않는다.**
+    ///
+    /// 셈은 시간대 없이 한 번만 돌고(`warnings_in`), 기한 판정은 그리는 걸음이 그때의 시간대로 한다
+    /// ([`super::Surfaced::count`]). 접어서 들던 때는 `SPC o t` 뒤로 배너는 다시 세어 고쳐졌지만
+    /// (`App::recount`) 프로젝트 층의 `+N` 은 쓸기가 다시 돌 때까지 최대 60초 옛 달로 섰고, 쓸기가
+    /// 도는 중이었으면 그 답이 옛 판정으로 덮으며 시계까지 다시 찍었다(리뷰 moai-pmhv.x3r 6·8번).
+    ///
+    /// **문턱을 넘나드는 기한으로 잰다** — 시간대가 옮기는 것은 하루뿐이라, 지남·다가옴 사이가
+    /// 아니라 `status_due_days`(3) 밖과 안 사이를 걸쳐야 **수**가 움직인다. 같은 줄이 UTC 에서는
+    /// 나흘 남아 조용하고 서울에서는 사흘 남아 선다.
+    #[test]
+    fn a_zone_change_moves_the_counted_deadline_on_the_next_frame() {
+        use super::super::layer::{At, Look};
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").expect("설정이 안 선다");
+        let mut stone = crate::model::Issue::new(
+            "argos-0001".into(),
+            "마일스톤".into(),
+            crate::model::Kind::Milestone,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        stone.due_on = Some("2026-09-15".into());
+        let mut inside = crate::model::Issue::new(
+            "argos-0002".into(),
+            "멤버".into(),
+            crate::model::Kind::Issue,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        // 소속을 다 채운다 — `no_epic`·`no_milestone` 이 서면 기한 말고 다른 것이 수를 올려,
+        // 이 시험이 무엇을 재는지 알 수 없다.
+        inside.epic = Some("argos-0003".into());
+        let mut epic = crate::model::Issue::new(
+            "argos-0003".into(),
+            "에픽".into(),
+            crate::model::Kind::Epic,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        epic.milestone = Some("argos-0001".into());
+        let issues = vec![stone, inside, epic];
+        let counted = super::super::warnings_of(&issues, &[], &cfg, now);
+        assert_eq!(counted.count(now, crate::tz::Zone::stored()), 0, "전제: UTC 에서 벌써 선다");
+        assert_eq!(counted.count(now, &seoul), 1, "전제: 서울에서도 안 선다 — 이 시험이 헛돈다");
+
+        let mut a = layered(At::Layer);
+        a.site.now = now.to_string();
+        let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else { panic!("one 이 안 열렸다") };
+        sum.warnings = counted.clone();
+        a.site.warnings = counted;
+
+        // UTC 로 선 화면 — 아직 아무 말도 없다.
+        let quiet = render(&mut a, 80, 22);
+        let screen = quiet.join("\n");
+        assert!(!screen.contains("드러난 것"), "UTC 에서 기한이 벌써 섰다\n{screen}");
+        let row = |lines: &[String]| lines.iter().find(|l| l.contains("one/")).expect("one 의 줄이 없다").clone();
+        assert!(!row(&quiet).contains(" !"), "UTC 에서 층의 줄이 벌써 `!` 를 세웠다 — {:?}", row(&quiet));
+
+        // 시간대만 바꾼다. 다시 읽지 않고, 셈도 다시 돌지 않는다.
+        a.zone = seoul;
+        let moved = render(&mut a, 80, 22);
+        let screen = moved.join("\n");
+        assert!(screen.contains("드러난 것 1건"), "시간대를 바꿨는데 배너가 옛 달로 선다\n{screen}");
+        assert!(row(&moved).contains(" !"), "시간대를 바꿨는데 층의 줄이 옛 달로 선다 — {:?}", row(&moved));
     }
 
     /// **한눈 보기의 남의 줄도 제 프로젝트의 것으로 그린다**(moai-m59y) — id·제목·칸 글리프가
@@ -6129,7 +6213,7 @@ pub(super) mod tests {
         a.site.issues.clear();
         a.site.index = crate::nav::Index::of(&[]);
         a.site.keep.clear();
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
         assert!(lines[0].starts_with("모든 프로젝트"), "{:?}", lines[0]);
@@ -6207,7 +6291,7 @@ pub(super) mod tests {
             let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else {
                 panic!("one 이 안 열렸다")
             };
-            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (warnings, stranded, unread, blind);
+            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (Surfaced::flat(warnings), stranded, unread, blind);
         };
 
         set(&mut a, 1, 1, 0, 0);
@@ -6262,7 +6346,7 @@ pub(super) mod tests {
                 panic!("one 이 안 열렸다")
             };
             // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
-            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (0, 0, 0, 0, notices);
+            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, 0, notices);
         };
 
         set(&mut a, 3);
@@ -7746,7 +7830,7 @@ pub(super) mod tests {
                     title: "첫 줄\n둘째\t줄".into(),
                     column: "in_progress".into(),
                 }],
-                warnings: 0,
+                warnings: Surfaced::flat(0),
                 notices: 0,
                 stranded: 0,
                 unread: 0,
@@ -7772,7 +7856,7 @@ pub(super) mod tests {
         a.site.issues.clear();
         a.site.index = crate::nav::Index::of(&[]);
         a.site.keep.clear();
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         a.cursor = 0;
         assert!(a.rows().is_empty(), "빈 프로젝트 뿌리에 줄이 섰다 — `..` 은 디렉터리에만 선다");
         let lines = render(&mut a, 60, 10);

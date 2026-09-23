@@ -179,11 +179,14 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             .iter()
             .map(|p| {
                 let seen = p.seen(|repo, load| {
-                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug(), ctx.zone());
+                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug());
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
-                        warnings: sum.warnings,
+                        // **여기서 달을 입힌다**(moai-fgjj) — 셈은 시간대에 안 닿고, 이 길은 낼
+                        // 것을 그 자리에서 다 내는 표면이다. 어느 시계로 셀지는 그대로 `Ctx::zone`
+                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 idea moai-dux7 이 든 자리다).
+                        warnings: sum.warnings.count(&now, ctx.zone()),
                         notices: sum.notices,
                         stranded: sum.stranded,
                         unreadable_worktrees: sum.blind,
@@ -209,10 +212,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     }
     refuse_without_terminal(ctx.lang())?;
     let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
-    // **시간대도 여기서 준다**(리뷰) — 이 줄이 첫 쓸기를 띄우고(`App::on_projects_in` → `Layer::launch`),
-    // 그 스레드는 지금 선 시간대를 한 벌 베껴 간다. 아래 `adopt_look` 까지 기다리면 첫 화면의 `+N`
-    // 만 UTC 로 기한을 재고, 그 줄은 60초가 지나야 다시 읽힌다(moai-h2th). 고르는 자는 그쪽과 하나다.
-    let mut app = App::on_projects_in(layer, crate::tz::chosen(reg.look.timezone.as_deref()).0);
+    // **시간대는 여기서 안 준다**(moai-fgjj) — 이 줄이 첫 쓸기를 띄우지만(`App::on_projects` →
+    // `Layer::launch`) 그 쓸기가 세는 것에 기한 판정이 안 접혀 오므로, 아래 `adopt_look` 이 시간대를
+    // 정하고 나면 첫 화면의 `+N` 이 그 시간대로 선다. 한때 여기서 한 벌 베껴 넘겼다(리뷰 moai-pmhv.x3r 4번).
+    let mut app = App::on_projects(layer);
     app.site.lang = ctx.lang();
     app.user = ctx.user.clone();
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서
