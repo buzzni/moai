@@ -384,7 +384,7 @@ pub fn summarize_with(
 ) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status_in(&load.issues, &unreadable, cfg, now, &crate::report::Soil::of(&load.issues));
+    let st = crate::report::status_unjudged(&load.issues, &unreadable, cfg, now);
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.

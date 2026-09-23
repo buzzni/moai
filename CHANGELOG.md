@@ -54,11 +54,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the editor it picks off `PATH`, the merge driver candidate — it now asks whether
   **you** can run it, not whether anyone can. The old check read the execute bits,
   so a file owned by someone else at `0o700`, or one on a `noexec` mount, passed
-  here and then gave the shell a 126 that the hook line swallows in silence: the
-  screen said installed while none of the four rules stood. The answers that flip
+  here and then gave the shell a 126 that the hook line swallowed in silence: the
+  screen said installed while none of the four rules stood. (The hook line says
+  it out loud now too — see the entry under **Fixed**.) The answers that flip
   are exactly those two cases; a file you can run, and a file with no execute bit
-  at all, read as before. On a `noexec` `TMPDIR` this now also means `moai skill`
-  will say the hook is not runnable rather than claiming it is installed.
+  at all, read as before. On a `noexec` `TMPDIR` this now also means
+  `moai skill status` will say the hook is not runnable rather than claiming it is
+  installed.
 
 - The refusal for rule 2 hands back the path **you typed**, not the one moai
   resolved. Judging still follows symlinks — the two spellings are one place, as
@@ -128,15 +130,60 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   rehearsal (`--dry-run`) says which milestone it will be, on one line and as a
   `milestone` key under `--json`, and it refuses an id of the wrong shape there
   rather than after you have said yes.
-- `--from` refuses the flags a plan cannot honour — `--body`, `--status` and
-  `--quiet` join `--epic`, `--tag`, `--priority`, `--parent`, `--start` and
-  `--due`. They used to be accepted and thrown away, so a call that ended in 0
-  silently swallowed the text, the column, or the id a script was capturing.
-  **This is a break**: a call that passed one of the three now exits non-zero.
-  Machine output for a plan is `--json`, which `--from` has always given — but note
-  that these refusals come from the argument parser, so they are plain text on
-  stderr and exit 2 even under `--json`, not the `{"code": …}` object a refusal from
-  the command itself gives. A loop that branches on `code` sees neither.
+- `--from` refuses the flags a plan cannot honour — `--status`, `--quiet` and a
+  typed `--type` join a positional title, `--epic`, `--tag`, `--priority`,
+  `--parent`, `--start` and `--due`. They used to be accepted and thrown away, so
+  a call that ended in 0 silently swallowed the column or the id a script was
+  capturing. **This is a break**: a call that passed one of them now exits
+  non-zero. The refusal is the command's own, not the argument parser's: it names
+  only what you actually passed (the positional stands as `[title]`), exits 1, and
+  under `--json` it is the `{"code":"bad_input", …}` object every other refusal
+  gives, so a loop that branches on `code` sees this one too. **The title, the
+  epic, the tag, the priority, the parent and the two dates were refused before
+  too, but by the argument parser** — so for those six the exit code changes from
+  2 to 1 and the message stops being plain text.
+- **A plan takes `--body`**, and puts it on the first epic it creates — the one
+  place `moai show <epic>` reads why these issues are one bundle, and the same
+  place `moai idea promote` has been putting the thought's body. What is refused
+  is only the call where there is nothing to read it from: `--body -` together
+  with a plan that also reads stdin (`-`, and the other spellings of it such as
+  `/dev/stdin`), because there is one stdin. `moai add --from plan.md --body -`,
+  `moai add --from - --body '<text>'` and `moai add --from plan.md --body
+  '<text>'` all go through, and `--dry-run` measures that body against the same
+  64KB limit the write does — in the same order the write measures it, so a plan
+  where both a title and the body are too long gets one answer, not two.
+  The rehearsal also **says where the body will land**: one line naming the first
+  epic, and `body_on` under `--json` holding that draft's index, the same way
+  `--milestone` has its own line and key. The text itself is not echoed — a 64KB
+  body would bury the plan it is supposed to be shown beside.
+- `--from` no longer swallows a typed `--type`. `moai add --from - --type issue`
+  used to build the whole epic tree and exit 0, because the namespace default
+  (`moai issue add --from -` routes through the same place) and a `--type` the
+  caller typed were folded into one value, and letting the default through let
+  the typed flag through with it. Undoing that meant deleting rows by hand. The
+  markdown decides what gets created — `#` is an epic, `-` is an issue — so a
+  typed `--type` is refused whatever its value, while the verb's own default
+  still stands. `--type idea` and `--type milestone` keep pointing at where that
+  work does go (`moai idea promote`, `moai milestone add`) under every verb, not
+  only under a bare `moai add`.
+- When the body `moai idea promote` carries over is past the 64KB a single write
+  takes, the refusal names **the idea** and the way out of it — `moai edit <idea>
+  -b -` — instead of naming the epic the write was about to create. Such a body
+  can only get there through a merge resolved by hand, and the old message sent
+  you off to shorten the first line of the plan you had just typed, which changed
+  nothing. The rehearsal (`--dry-run`) measures it too, at the same point in the
+  run the write measures it, so the two say the same words even when the plan's
+  own title is over the limit as well or the milestone it carries has been
+  deferred. It is still a refusal, not a truncation: text a person wrote is not
+  shortened on their behalf. The way out is written in English like the rest of
+  that refusal, which carries the planted review guidance and has always been one
+  language.
+- **A plan called through the wrong verb is told that first.** `moai idea add
+  --from - --body …` and `moai milestone add --from - --body …` used to answer
+  with the flag conflict, so the caller dropped `--body`, ran it again, and only
+  then learned that markdown does not go in through `idea add` at all. The
+  namespace refusal now comes before the flag refusal, and both of them are the
+  command's own.
 - `prime --json`'s `epic` key is now what the file says, like `epic` everywhere
   else; the resolved answer moved to `derived_epic`. **This is a break**: it was
   the only surface that put the inherited epic under `epic`, so one binary gave
@@ -203,6 +250,29 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   merge writes is still put in the shape the tool itself writes, so a merge never
   leaves behind an unfolded tag, an empty timestamp or a duplicated JSON key for
   the next command to trip over.
+- A hook binary that is **there but cannot be run** now says one line instead of
+  passing in silence. The planted hook line ended in `|| exit 0`, which swallowed
+  the 126 the shell gives for a file without its execute bit or on a `noexec`
+  mount — the four rules did not stand and the session looked exactly as it does
+  when they pass. The line now separates the two: nothing there stays silent, as
+  it must (a `cargo clean` should not make every session noisy), and a binary that
+  cannot be run prints a notice naming the hook and the exit code, and the command
+  that says which file it was (`moai skill status`). It reads the same on either
+  shell a machine may put at `/bin/sh`: `command -v` answers "is it there" for a
+  path differently in dash and in bash — bash checks the execute bit as well — so
+  the line asks once more with `[ -e ]` before it gives up, or the one case named
+  first here would still be silent wherever `/bin/sh` is bash. **Nothing is
+  blocked and the exit code is still 0**, even under `set -e` — a hook that blocks
+  on its own missing permission stops every tool call in the session. A hook that
+  ran and then failed keeps its silence: it has already written its own answer to
+  stdout, and a second line appended there would throw that answer — a refusal
+  included — away.
+- `moai project ls` no longer reads the timezone database. It draws no time at all
+  — it shows each project's column counts — but it asked for the reader's timezone
+  anyway, so on a machine without zoneinfo (a static musl build on Alpine or
+  scratch) it added a line saying so to a command that had never said one. The
+  count is the same either way: the only sum a timezone reaches is the milestone
+  deadline judgement.
 
 ## [0.1.1] - 2026-09-22
 
