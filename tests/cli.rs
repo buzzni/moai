@@ -1524,6 +1524,27 @@ fn field(json: &str, key: &str) -> String {
     rest[..rest.find('"').unwrap()].to_string()
 }
 
+/// `argos-4aex.ae3` → `argos-4aex`. 시험은 의존성이 없어 [`crate::id::parent_of`] 를 못 부른다 —
+/// 모양은 `src/id.rs` 가 정하고 여기서는 그 모양대로 읽기만 한다.
+fn parent_in(id: &str) -> Option<&str> {
+    id.rsplit_once('.').map(|(head, _)| head)
+}
+
+/// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 id 만 든 것. 없으면 `None` 이고,
+/// **빈 배열과 없는 키는 다르다**(AGENTS.md).
+fn list_in(json: &str, key: &str) -> Option<Vec<String>> {
+    let at = json.find(&format!("\"{key}\":["))?;
+    let rest = &json[at + key.len() + 4..];
+    let inside = &rest[..rest.find(']').expect("닫히지 않은 배열")];
+    Some(inside.split(',').filter_map(|s| s.trim().strip_prefix('"')?.strip_suffix('"')).map(str::to_string).collect())
+}
+
+/// 그 글에 선 `"id":"…"` 전부. 목록 `--json` 은 배열 하나를 **한 줄**로 내므로 줄마다 하나씩
+/// 뽑는 [`field`] 로는 첫 줄만 읽힌다.
+fn ids_in(json: &str) -> Vec<String> {
+    json.match_indices(r#""id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+}
+
 /// 의존성 없이 하는 최소 검사 — 값 하나고, 한 줄이고, 이스케이프가 없다.
 fn one_json_value(s: &str) {
     let t = s.trim();
@@ -8218,7 +8239,13 @@ fn promote_can_pour_into_a_standing_epic() {
     let after = issues(s.path());
     assert_eq!(after.lines().filter(|l| l.contains(r#""kind":"epic""#)).count(), before, "새 에픽이 섰다");
     let member = after.lines().find(|l| l.contains("되찾은 일")).expect("멤버가 안 섰다");
-    assert!(member.contains(&format!(r#""epic":"{epic}""#)), "에픽에 안 들었다 — {member}");
+    // **소속은 id 하나에 선다**(moai-s8go·moai-exh7) — 멤버는 에픽의 자식 id 를 받고 `epic` 은
+    // 안 적는다. 물려주는 자는 `report::groups` 고, 그것을 읽는 자리가 아래의 `members` 다.
+    let mid = field(member, "id");
+    assert_eq!(parent_in(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
+    assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
     assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
     // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
     let from_here = format!("{id} 에서 펼쳤다");
@@ -8227,6 +8254,54 @@ fn promote_can_pour_into_a_standing_epic() {
     assert_eq!(noted.len(), 1, "{noted:?}");
     assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
 }
+
+/// **계획이 세우는 멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
+/// 리뷰든 한 주제이기 때문이다. `--parent <에픽>` 으로 세우는 리뷰 이슈는 처음부터 자식이었고,
+/// 계획을 세우는 길만 평평한 id 를 냈다.
+///
+/// **소속은 그 id 하나에 선다**(moai-exh7) — `epic` 필드는 안 적는다. 물려주는 자는
+/// `report::groups` 의 "부모가 에픽이면 그 에픽이 소속"(moai-9t3l)이고, 같은 사실을 두 자리에
+/// 적는 것이 파생값을 저장하는 일이다. 그래서 묶음의 멤버 셈도 `-e` 거르개도 id 에서 온다.
+#[test]
+fn a_plans_members_hang_under_the_epic_by_id() {
+    let s = init("planchild");
+    let stone = ok(s.path(), &["milestone", "add", "v9", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--milestone", &stone],
+        "# 새 에픽\n- [p1] 첫 일\n- 둘째 일\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let file = issues(s.path());
+    let line_with = |t: &str| file.lines().find(|l| l.contains(t)).unwrap_or_else(|| panic!("{t} 줄이 없다")).to_string();
+    let epic = field(&line_with("새 에픽"), "id");
+    // 뿌리는 최상위 id 고, 마일스톤은 거기에만 적힌다.
+    assert_eq!(parent_in(&epic), None, "에픽이 자식으로 섰다");
+    let mut want: Vec<String> = Vec::new();
+    for title in ["첫 일", "둘째 일"] {
+        let line = line_with(title);
+        let mid = field(&line, "id");
+        assert_eq!(parent_in(&mid), Some(epic.as_str()), "{title} 이 에픽의 자식이 아니다 — {line}");
+        assert!(!line.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {line}");
+        assert!(!line.contains(r#""milestone":"#), "멤버가 마일스톤을 제 몸에 적었다 — {line}");
+        want.push(mid);
+    }
+    want.sort();
+    // 묶음이 읽는 멤버도, `-e` 거르개가 고르는 줄도, 물려받은 릴리스도 그 id 하나에서 온다.
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    let mut members = list_in(&seen, "members").expect("members 가 없다");
+    members.sort();
+    assert_eq!(members, want, "{seen}");
+    let by_epic = ok(s.path(), &["show", "-e", &epic, "--json"]);
+    let mut chosen: Vec<String> = ids_in(&by_epic);
+    chosen.sort();
+    assert_eq!(chosen, want, "{by_epic}");
+    let by_stone = ok(s.path(), &["show", "--milestone", &stone, "--json"]);
+    for mid in &want {
+        assert!(by_stone.contains(&format!(r#""id":"{mid}""#)), "{mid} 이 릴리스에 안 섰다 — {by_stone}");
+    }
+}
+
 
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
 /// 조용히 버려지는데, 어느 쪽이든 사람이 적은 것과 다르다. 없는 것·에픽 아닌 것도

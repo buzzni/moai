@@ -230,8 +230,15 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             //
             // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
             // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
-            let grown: Vec<String> =
-                made.iter().filter(|i| into.is_some() || i.epic.is_none()).map(|i| i.id.clone()).collect();
+            //
+            // **뿌리는 최상위 id 다**(moai-exh7) — 멤버는 에픽의 자식 id 를 받고 제 `epic` 을
+            // 안 적으므로(`create_drafts`), 그 필드로 가르던 자는 멤버까지 머리로 읽어 같은
+            // 노트를 줄마다 붙이고 `이슈 0건` 이라 말한다. 고르는 자는 `add::stood_on` 과 같다.
+            let grown: Vec<String> = made
+                .iter()
+                .filter(|i| into.is_some() || crate::id::parent_of(&i.id).is_none())
+                .map(|i| i.id.clone())
+                .collect();
             // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
             // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
             // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
