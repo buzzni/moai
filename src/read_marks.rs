@@ -27,7 +27,8 @@
 //! [`crate::user_config::Doc`] 을 그대로 쓴다([`Sheet`]) — 바이트를 지키는 자를 둘로 두지 않는다.
 
 use crate::fail::{Fail, R};
-use crate::store::{Lock, dir_of, lock_beside, write_atomic};
+use crate::path::dir_of;
+use crate::store::{Lock, lock_beside, write_atomic};
 use crate::user_config::{Doc, write_value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

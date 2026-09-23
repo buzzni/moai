@@ -470,6 +470,10 @@ fn one(
     let seen = view::Seen {
         roots: report::deferred_roots(all),
         states: report::group_states_of(all, &repo.config, &near),
+        // **펼친 줄과 그 자식만의 지도**(`group_states_of` 와 같은 자리, 같은 까닭) — 칸 지도가
+        // 담는 줄이 그 둘이라, 그 칸을 누가 입는지를 가르는 데 저장소 전체의 종류 지도가 들 일이
+        // 없다. 펼친 줄 제 것은 늘 뒷줄이라(`Load::get`) 가려질 수 없지만, 자식은 그렇지 않다.
+        kinds: report::Kinds::of_ids(all, &near),
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
@@ -611,15 +615,11 @@ fn one(
         // 돈다(마일스톤이면 `milestones` 가 안에서 또 지어 네 벌이다).
         let soil = report::Soil::of(all);
         let eclipsed = soil.eclipsed();
-        let group = match issue.kind {
-            Kind::Milestone => &soil.milestone,
-            _ => &soil.epic,
-        };
         // **미룬 수는 보드와 같은 자에서 온다**([`report::Stand::deferred`], moai-zxwj) — 분모는
         // 미룬 멤버를 그대로 세므로, 그 수가 안 줄어드는 까닭을 여기서도 댄다. 따로 세면 같은
         // 묶음을 보드와 상세가 다른 수로 말한다.
         let deferred = soil.stands(all, &repo.config).get(issue.id.as_str()).map(|s| s.deferred);
-        let roll = report::rollup_of_in(issue.kind, all, &repo.config, group, &eclipsed)
+        let roll = report::rollup_of_in(all, &repo.config, &soil.placed(issue.kind), &eclipsed)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()))
             .map(|r| report::Roll { deferred, ..r });

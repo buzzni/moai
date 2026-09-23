@@ -19,7 +19,8 @@
 //! `&[Issue]` 만 받는다 — 그쪽은 이 기능이 있는 줄 모른다.
 
 use crate::model::Issue;
-use crate::store::{Load, Repo, real};
+use crate::path::real;
+use crate::store::{Load, Repo};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -473,8 +474,8 @@ impl<'a> Dug<'a> {
     /// **뿌리를 정규화해 맞춘다** — 겹치기는 git 에게 물어 목록을 얻고([`others_of`]) 자리 셈은 git 이
     /// 적어 둔 파일만 읽어([`on_disk`]), 같은 워크트리가 글자만 다른 경로로 올 수 있다. 못 맞추면 그
     /// 워크트리만 예전처럼 다시 판다 — 최악이 지금과 같다. **건네받은 것이 없으면 뿌리를 정규화하지도
-    /// 않는다** — `store::real` 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그 값을
-    /// 헛되이 치르면 안 된다.
+    /// 않는다** — [`crate::path::real`] 은 디스크를 묻는 자라, 안 겹쳐 보는 흔한 길이 워크트리마다 그
+    /// 값을 헛되이 치르면 안 된다.
     fn side(&self, root: &Path) -> Option<&'a SideFloor> {
         match self.sides.is_empty() {
             true => None,
@@ -1664,7 +1665,7 @@ mod tests {
         // 건네받은 바닥은 그 줄을 `early` 로 든다 — 디스크를 다시 팠으면 답이 갈린다.
         let handed = Floor::of(at, &[issue("m-0001", "todo", early)]);
         assert_eq!(dig(&handed), ["m-0001".to_string()].into(), "건네받은 바닥을 두고 그 파일을 다시 팠다");
-        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `store::real`) — 부르는 쪽이 든 자리는
+        // **철자가 달라도 같은 파일이면 쓴다**(`Dug::floor` 의 `path::real`) — 부르는 쪽이 든 자리는
         // `Repo` 가 찾아 오른 경로고 자리 셈의 것은 git 이 적어 둔 목록에서 지은 경로라, 같은 파일이
         // 글자만 다르게 올 수 있다. 정규화를 걷으면 이 줄이 먼저 붉어진다.
         let spelt = main.join(".moai").join("..").join(".moai").join("issues.jsonl");

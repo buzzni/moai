@@ -336,6 +336,12 @@ impl Ground {
         self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
     }
 
+    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — `tui --json` 의 줄이
+    /// 칸을 누가 입는지를 이것으로 가른다(moai-7iyc.5fz).
+    pub fn kinds(&self) -> crate::report::Kinds<'_> {
+        crate::report::Kinds::kept(&self.kinds)
+    }
+
     /// 거름망이 볼 꼴 — 든 지도를 빌리기만 하고 다시 재는 것은 없다. 빌린 지도를 짓는 값은 **이슈 수에
     /// 비례한다**: 소속 지도(`epic`·`milestone`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만
     /// 건에서 수십 ms)보다 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의
@@ -352,7 +358,7 @@ impl Ground {
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
-            kinds: crate::report::Kinds::kept(&self.kinds),
+            kinds: self.kinds(),
             folded: self.folded.iter().map(String::as_str).collect(),
         }
     }
@@ -1184,7 +1190,7 @@ impl Site {
         if self.index.deferred_root(&i.id).is_some() {
             return false;
         }
-        let busy = !crate::report::is_group(i) || self.ground.stands.get(&i.id).is_some_and(|s| s.busy);
+        let busy = !crate::report::is_group(i) || self.stand_of(i).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
         // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
@@ -1194,13 +1200,30 @@ impl Site {
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
-    /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것까지 같다.
+    /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것도, 가려진 줄은 안 입는
+    /// 것도(moai-7iyc.5fz) 같다.
+    ///
+    /// **판정을 여기 베끼지 않는다**(`report::stands_on`). 한 벌 더 적던 때는 가려진 마일스톤
+    /// 줄이 쌍둥이 에픽의 칸을 입는 것을 CLI 만 고치고 탐색기는 그대로 두는 길이 열려 있었다 —
+    /// 칸 지도는 빌려 든 것이라 꼴만 다르고 답은 같아야 한다.
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
-        crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id).map(|s| s.column.as_str()))
-            .flatten()
-            .unwrap_or(i.status.as_str())
+        self.read_of(i).unwrap_or(i.status.as_str())
+    }
+
+    /// 그 줄이 **입는** 읽은 칸의 셈([`crate::report::Stand`]) — 묶음이 아니거나 가려진 줄이면
+    /// `None` 이다.
+    ///
+    /// **문은 하나다**(리뷰, `report::stands_on`). 칸·도는가·기다림·미룬 수 넷이 같은 지도를
+    /// 짚는데 [`Site::column`] 만 가려짐을 거르던 때는, 가려진 마일스톤 줄이 제 칸을 그리면서
+    /// 쌍둥이 에픽의 `미룬 N` 과 그 에픽이 기다리는 까닭을 함께 달았다.
+    fn stand_of(&self, i: &Issue) -> Option<&Stood> {
+        crate::report::stands_on(&self.ground.kinds(), i, || self.ground.stands.get(&i.id))
+    }
+
+    /// [`Site::stand_of`] 의 읽은 칸만.
+    fn read_of(&self, i: &Issue) -> Option<&str> {
+        self.stand_of(i).map(|s| s.column.as_str())
     }
 
     /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
@@ -1212,10 +1235,7 @@ impl Site {
     /// 목록을 그 첨자로 짚어 그 자리에서 죽었다.
     pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
         let i = &self.issues[at];
-        crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id))
-            .flatten()
-            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
+        self.stand_of(i).map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
 
     /// 그 줄이 묶음이면 **칸 셈에서 미뤄 뺀 멤버 수**(`report::Stand::deferred`, moai-oz13). 묶음이
@@ -1229,7 +1249,7 @@ impl Site {
     /// ([`Site::waits`]). 답이 이미 `Option` 이라 넘친 첨자에 `None` 을 내는 데 드는 것이 없다.
     pub fn deferred(&self, at: usize) -> Option<usize> {
         let i = self.issues.get(at)?;
-        crate::report::is_group(i).then(|| self.ground.stands.get(&i.id)).flatten().map(|s| s.deferred)
+        self.stand_of(i).map(|s| s.deferred)
     }
 
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이 그저 제목 없는 줄인지
@@ -1507,7 +1527,10 @@ impl App {
         {
             app.site.lang = crate::i18n::Lang::Ko;
         }
-        // 까닭은 [`App::count_all`] 에 있다 — 여기 베껴 두면 한쪽만 고쳐져 둘이 갈린다.
+        // **여는 걸음이 부르는 한 자리다** — 까닭은 [`App::count_all`] 에 있다. 한때 부르는 자리가
+        // 둘이라 "여기 베껴 두면 한쪽만 고쳐져 둘이 갈린다" 고 적혀 있었는데, 그 둘째 자리는
+        // moai-fgjj 가 걷었다(moai-ynd6) — 읽는 쪽이 일부러 없앤 것인지 실수로 지워진 것인지
+        // 못 가렸다.
         app.count_all();
         app.see();
         app
@@ -6477,7 +6500,7 @@ mod tests {
 
         // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
         let slashed = s.path().join("proj/");
-        let old = crate::store::dir_of(&config)
+        let old = crate::path::dir_of(&config)
             .join("read")
             .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
         assert_ne!(old, crate::read_marks::place_of(&config, &slashed).at, "시험의 전제 — 옛 이름과 새 이름이 다르다");

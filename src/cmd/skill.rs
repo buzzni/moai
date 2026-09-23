@@ -533,7 +533,7 @@ fn which(name: &str) -> Option<PathBuf> {
         return None;
     }
     let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!found.is_empty()).then(|| crate::store::real(Path::new(&found)))
+    (!found.is_empty()).then(|| crate::path::real(Path::new(&found)))
 }
 
 /// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
