@@ -2184,6 +2184,8 @@ pub struct Board<'a> {
     pub status: StatusReport,
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
+    /// 집은 줄이 든 에픽(`report::groups_of`) — [`Picks::epics`] 와 같은 자리, 같은 까닭이다.
+    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
@@ -2214,6 +2216,10 @@ pub struct Picks<'a> {
     pub focus: crate::report::Focus<'a>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
+    /// 이 목록의 줄이 든 에픽(`report::groups_of`) — `--json` 의 `derived_epic` 이 읽는다.
+    /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
+    /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
+    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
     pub origin: &'a Origin,
     pub trouble: &'a [crate::worktree::Trouble],
 }

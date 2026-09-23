@@ -1843,6 +1843,24 @@ impl<'a> Handed<'a> {
     }
 }
 
+/// [`groups`] 를 **물은 줄에 대해서만** 낸다 — `--json` 의 `derived_epic` 이 읽는 지도다
+/// (moai-wuzi). [`group_states_of`] 와 같은 꼴이고 같은 까닭이다: 줄 하나를 쓰는
+/// 표면(`add`·`mv`·`edit`)이 락 안에서 저장소 전체의 지도를 들고 나가지 않는다.
+///
+/// **소속을 id 에 진 줄이 물은 것 가운데 하나도 없으면 지도를 안 짓는다.** `epic` 을 적은
+/// 줄의 답은 그 줄이 들고 있고([`crate::cmd::Row::of`] 가 그것을 먼저 읽는다), 묶음 줄은
+/// 소속을 안 받는다([`joins`]) — 남는 것은 id 부모에게서 받는 줄뿐이다.
+pub fn groups_of<'a>(all: &'a [Issue], ids: &[&str]) -> BTreeMap<&'a str, &'a str> {
+    let from_id =
+        |i: &Issue| joins(i) && i.epic.is_none() && crate::id::parent_of(&i.id).is_some_and(|p| !p.is_empty());
+    if !all.iter().any(|i| ids.contains(&i.id.as_str()) && from_id(i)) {
+        return BTreeMap::new();
+    }
+    let mut out = groups(all);
+    out.retain(|id, _| ids.contains(id));
+    out
+}
+
 /// 제 `epic` 필드 없이 id 부모에게서 오는 소속 — `(에픽, 부모 id)`. 제 `epic` 을
 /// 적었거나 소속이 없으면 `None` 이다.
 ///

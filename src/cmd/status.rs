@@ -289,10 +289,16 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // **`chdir` 은 `false` 다** — `tui::layer::summarize` 와 같은 자다. 여기 서는 줄은
             // 남의 저장소라 [`crate::cmd::init::away_root`] 가 잰 자리대로 `-C <경로>` 를 얻는다.
             status.notices.extend(install_notices(repo, false));
+            // **집은 줄의 소속은 여기서 푼다**(moai-wuzi) — `--json` 이 펴는 자리에는 이
+            // 프로젝트의 줄 목록이 안 따라간다.
+            let picked = report::wip(&load.issues, &repo.config);
+            let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
+            let epics = report::groups_of(&load.issues, &ids);
             view::Board {
                 cfg: &repo.config,
                 status,
-                picked: report::wip(&load.issues, &repo.config),
+                picked,
+                epics,
                 origin: &p.origin,
                 trouble: &p.trouble,
                 // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
@@ -335,7 +341,11 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 path: &p.path,
                 seen: s.map(|b| Said {
                     status: &b.status,
-                    picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
+                    picked: b
+                        .picked
+                        .iter()
+                        .map(|i| super::Row::of(i, None, b.epics.get(i.id.as_str()).copied()).on(&p.origin))
+                        .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
                     trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                     unreadable_worktrees: &b.blind,

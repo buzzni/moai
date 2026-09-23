@@ -326,7 +326,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let children: Vec<&Issue> = children.iter().collect();
     let seen = view::Seen {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
-        states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
+        states: read.columns().collect(),
         // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()),
         blocks: blocked.blocks(),
@@ -418,7 +418,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let read = super::super::Read::new();
+        let read = super::super::Read::default();
         let epic = Inherited { epic: "argos-0002".into(), parent: "argos-0003".into() };
         let milestone = InheritedMilestone {
             milestone: Some("argos-0004".into()),

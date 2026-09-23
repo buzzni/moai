@@ -250,7 +250,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
-                row: super::Row::of(i, wh.states.get(i.id.as_str()).copied()).on(&origin),
+                row: super::Row::of(i, wh.states.get(i.id.as_str()).copied(), wh.epic.get(i.id.as_str()).copied())
+                    .on(&origin),
                 journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
                 // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
@@ -565,7 +566,7 @@ fn one(
             extra.push(("spent", serde_json::to_string(&sp).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
-            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied()).on(origin),
+            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied(), stood_in).on(origin),
             &extra,
         );
     }
@@ -684,7 +685,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let listed = Listed { row: super::super::Row::of(&i, None), work: &[], journal_error: &[] };
+        let listed = Listed { row: super::super::Row::of(&i, None, None), work: &[], journal_error: &[] };
         let added = super::super::keys_beyond(&i, &listed);
         assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
         for k in &added {
