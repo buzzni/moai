@@ -1781,8 +1781,10 @@ pub fn detail(
     let z = seen.screen.zone();
     // **기한은 시각 줄 위에 선다**(moai-tfcp) — 생성·수정·시작·끝은 도구가 적은 때고 이것은
     // 사람이 잡은 계획이라, 섞어 세우면 넷 가운데 하나가 사람의 값인 것이 안 보인다.
-    // 시간대로 옮기지 않는다: 달력 날짜라 옮길 시각이 없다(`Issue::due_on`).
-    if let Some(span) = due_span(i, now, lang) {
+    // 적힌 값은 시간대로 옮기지 않는다: 달력 날짜라 옮길 시각이 없다(`Issue::due_on`). 옮기는
+    // 것은 **견주는 쪽**이다 — "며칠 남았나" 는 읽는 사람의 오늘에서 재야 이 줄과 바로 밑의
+    // 생성·시작 줄이 한 시계로 선다(moai-h2th).
+    if let Some(span) = due_span(i, now, z, lang) {
         out.push(format!("  {}   {span}", row_label(say(lang, "detail.due"), lang)));
     }
     let (left, right) = stamp_labels(lang);
@@ -1839,7 +1841,7 @@ pub fn detail(
 /// 보인 것과 같은 까닭이다. 빈 쪽은 `—` 로 자리를 지킨다.
 ///
 /// 남은 날수는 **종료 기한에만** 붙는다. 시작 기한이 지났는가는 물어볼 일이 아니다.
-fn due_span(i: &Issue, now: &str, lang: Lang) -> Option<String> {
+fn due_span(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<String> {
     let (start, due) = (i.starts_on.as_deref(), i.due_on.as_deref());
     if start.is_none() && due.is_none() {
         return None;
@@ -1847,7 +1849,9 @@ fn due_span(i: &Issue, now: &str, lang: Lang) -> Option<String> {
     let dash = "—";
     // **색이 혼자 뜻을 지지 않는다**(CLAUDE.md) — 지난 것을 붉게 칠하되 `2일 지남` 이라는
     // 낱말이 같이 선다. 색이 안 나가는 자리에서도 같은 말을 한다.
-    let left = due.and_then(|d| crate::model::days_until(d, now));
+    // **읽는 사람의 달로 잰다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
+    // (`report::status_in`). 둘이 갈리면 보드는 "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
+    let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
     let tail = match left {
         Some(d) => paint(if d < 0 { style::WARN } else { style::DIM }, &format!("  {}", due_tail(d, lang))),
         None => String::new(),
@@ -3268,7 +3272,7 @@ mod tests {
         let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         stuck.blocked_by = vec!["argos-0001".into()];
         let issues = vec![blocker, stuck];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, crate::tz::Zone::stored());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3287,7 +3291,7 @@ mod tests {
         let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         held.blocked_by = vec!["argos-0001".into()];
         let issues = vec![shelved, held];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, crate::tz::Zone::stored());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3673,6 +3677,26 @@ mod tests {
         }
     }
 
+    /// **기한 줄도 읽는 사람의 달로 센다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
+    /// (`report::status_in`). 둘이 갈리면 보드는 "지남" 으로 세고 바로 그 줄을 편 상세는
+    /// "오늘까지" 라 말한다.
+    ///
+    /// **적힌 날짜는 안 옮긴다** — 달력의 날이라 옮길 시각이 없다. 옮기는 것은 견주는 쪽이다.
+    #[test]
+    fn a_deadline_line_counts_from_the_reader_s_day() {
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let mut stone = issue("argos-0001", "v0.1", "todo");
+        stone.kind = Kind::Milestone;
+        stone.due_on = Some("2026-09-11".into());
+
+        let said = |z: &crate::tz::Zone| due_span(&stone, now, z, Lang::Ko).expect("기한 줄이 안 섰다");
+        assert!(said(&crate::tz::Zone::utc()).contains("(오늘까지)"), "{}", said(&crate::tz::Zone::utc()));
+        assert!(said(&seoul).contains("(1일 지남)"), "{}", said(&seoul));
+        assert!(said(&seoul).contains("2026-09-11"), "적힌 날짜를 옮겼다 — {}", said(&seoul));
+    }
+
     /// **명령 층이 화면에 시간대를 빠짐없이 얹는다**(moai-p5az). [`Screen::new`] 만으로 뜬 화면은
     /// 저장된 그대로(UTC)라 — 지어낸 답은 아니지만 사람의 시계도 아니다. 한 자리만 빠뜨리면 그
     /// 명령만 옛 시계로 서고, 다른 화면과 몇 시간 어긋난 시각이 나란히 선다.
@@ -3939,7 +3963,7 @@ mod tests {
     fn a_finished_grouping_is_not_nagged_but_a_folded_one_says_so() {
         let table = |all: &[Issue]| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", crate::tz::Zone::stored());
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(Lang::Ko)))
                 .join("\n")
         };
@@ -3970,7 +3994,7 @@ mod tests {
     fn the_bar_says_how_many_of_its_members_are_deferred() {
         let table = |all: &[Issue], lang| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", crate::tz::Zone::stored());
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(lang)))
                 .join("\n")
         };
@@ -4068,7 +4092,7 @@ mod tests {
         let issues = vec![issue("argos-0001", "첫 일", "todo")];
         let cfg = cfg();
         let now = "2026-09-11T04:12:03Z";
-        let st = crate::report::status(&issues, &[], &cfg, now);
+        let st = crate::report::status(&issues, &[], &cfg, now, crate::tz::Zone::stored());
         let draw =
             |lang| plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n");
         let (ko, en) = (draw(Lang::Ko), draw(Lang::En));
@@ -4111,7 +4135,7 @@ mod tests {
         let lang = Lang::Ko;
         let mine = vec![issue("argos-0001", "제 줄", "todo")];
         let draw = |issues: &[Issue], screen: Screen| {
-            let st = crate::report::status(issues, &[], &cfg, now);
+            let st = crate::report::status(issues, &[], &cfg, now, crate::tz::Zone::stored());
             plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen))
         };
         let bare = Origin::default();

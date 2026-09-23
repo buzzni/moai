@@ -73,6 +73,17 @@ impl Zone {
         &self.name
     }
 
+    /// 내내 같은 만큼 더하는 시간대 — **시험만 든다**(moai-h2th).
+    ///
+    /// [`Zone::load`] 는 기계의 tzdb 를 보므로, 시간대를 재는 시험이 그것으로 서면 zoneinfo 없는
+    /// 기계에서 조용히 아무것도 안 재게 된다(`if let Ok(seoul)` 로 통째로 건너뛴다). 재려는 것이
+    /// "옮긴 뒤의 답" 이지 "tzdb 를 읽는 법" 이 아닌 자리에서는 자료 없이 옮기는 자가 낫다.
+    /// 여름 시간이 없는 자리(`Asia/Seoul` 이 그렇다)는 이 꼴이 실제 자료와 같은 답을 낸다.
+    #[cfg(test)]
+    pub fn fixed(name: &str, secs: i32) -> Zone {
+        Zone { name: name.to_string(), shifts: Vec::new(), before: secs }
+    }
+
     /// UTC 인가 — 화면이 이것으로 "그대로 둔다" 를 가른다.
     pub fn is_utc(&self) -> bool {
         self.shifts.is_empty() && self.before == 0

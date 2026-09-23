@@ -179,7 +179,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             .iter()
             .map(|p| {
                 let seen = p.seen(|repo, load| {
-                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug());
+                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug(), ctx.zone());
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),

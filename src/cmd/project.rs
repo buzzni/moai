@@ -295,8 +295,10 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let reg = ctx.registry();
     let projects = projects::open(reg, ctx.lang());
     let now = model::now();
-    let rows: Vec<Row> =
-        projects.iter().map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) }).collect();
+    let rows: Vec<Row> = projects
+        .iter()
+        .map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now, ctx.zone()) })
+        .collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -346,12 +348,12 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 
 /// 연 프로젝트 하나를 `ls` 의 낱말로 옮긴다. 못 읽는 줄을 넘기는 자는 한눈 보기와 같다
 /// — 넘기지 않으면 그 줄이 쓰던 id 와의 중복이 셈에서 달라진다.
-fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
+fn state<'a>(p: &'a projects::Project, now: &str, zone: &crate::tz::Zone) -> State<'a> {
     match &p.state {
         projects::State::Open { repo, load } => {
             let unreadable = load.unreadable();
             State::Initialized {
-                counts: report::status(&load.issues, &unreadable, &repo.config, now).counts,
+                counts: report::status(&load.issues, &unreadable, &repo.config, now, zone).counts,
                 unreadable: load.errors.len(),
                 columns: &repo.config.statuses,
             }
