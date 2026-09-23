@@ -1049,3 +1049,6 @@
 {"ts":"2026-09-23T01:03:54Z","id":"moai-07v1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`idea promote` 가 idea 의 마일스톤과 본문을 에픽에 데려간다"}
 {"ts":"2026-09-23T01:03:54Z","id":"moai-07v1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-e1rn 에서 펼쳤다 — `moai idea promote` 가 idea 의 마일스톤과 본문을 안 데려간다"}
 {"ts":"2026-09-23T01:03:54Z","id":"moai-e1rn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-29p1 의 멤버 moai-07v1 로 펼쳤다"}
+{"ts":"2026-09-23T01:04:09Z","id":"moai-xoyg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T01:04:10Z","id":"moai-fppn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T01:04:10Z","id":"moai-07v1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
