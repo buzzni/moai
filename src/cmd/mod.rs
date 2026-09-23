@@ -649,7 +649,7 @@ impl<'a> Row<'a> {
     /// 파일에서 묶음과 id 가 같은 일 줄이 그 묶음의 칸을 입지 않게, `report::column`
     /// 과 같은 자로 묻는다.
     ///
-    /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::groups_of`) — 줄이 `epic` 을
+    /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::handed_of`) — 줄이 `epic` 을
     /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
     ///
     /// `kind_of` 는 **가려진 줄을 가르는 지도**다(`report::Kinds`, moai-53s2) — 위의 소속
@@ -745,9 +745,10 @@ pub fn keys_beyond<T: serde::Serialize>(line: &crate::model::Issue, out: &T) -> 
 pub struct Read {
     /// 묶음 id → 멤버에서 읽은 칸(`report::group_states_of`).
     states: BTreeMap<String, String>,
-    /// 줄 id → 그 줄이 든 에픽(`report::groups_of`). **`epic` 을 적은 줄도 든다** — 지도를
-    /// 지었으면 그 줄에도 값이 선다. 다만 그 값은 안 읽힌다: 줄이 제 몸에 든 것이 먼저라
-    /// (`report::stands_in`), 지도를 아예 안 지은 때에도 답이 같다.
+    /// 줄 id → 그 id 의 부모가 **넘기는** 에픽(`report::handed_of`). **`epic` 을 적은 줄은 안
+    /// 든다**(리뷰 moai-jk2u.o78) — 그 줄의 답은 그 줄이 들고 있어 지도가 낼 것이 없다.
+    /// 그래서 이 지도만으로는 답이 아니다: 값을 내는 자는 `report::stands_in` 이고, 그쪽이 줄의
+    /// `epic` 을 먼저 읽는다. 지도를 아예 안 지은 때에도 답이 같은 것은 그 때문이다.
     epics: BTreeMap<String, String>,
 }
 
@@ -770,7 +771,7 @@ impl Read {
 
 /// 락 안에서 **낼 줄이 저장소 전체를 봐야 아는 값**을 챙겨 나온다 — 락을 놓은 뒤에 다시
 /// 세면 그 사이에 남이 쓴 멤버가 섞인다. 둘 다 게을러서, 묶음이 없으면 칸을
-/// (`group_states_of`), 소속을 id 에 진 줄이 없으면 에픽을(`groups_of`) 안 걷는다.
+/// (`group_states_of`), 소속을 id 에 진 줄이 없으면 에픽을(`handed_of`) 안 걷는다.
 ///
 /// **소속은 `--json` 일 때만 걷는다**(`json`, 리뷰) — 그 지도를 읽는 자는 [`Row::from`]
 /// 하나고 그것을 부르는 자리는 기계 출력뿐이다. 늘 걷으면 사람이 부르는 `moai mv` 도
@@ -782,7 +783,7 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
     Read {
         states: owned(crate::report::group_states_of(issues, cfg, ids)),
         epics: match json {
-            true => owned(crate::report::groups_of(issues, ids)),
+            true => owned(crate::report::handed_of(issues, ids)),
             false => BTreeMap::new(),
         },
     }

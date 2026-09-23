@@ -9771,6 +9771,75 @@ fn the_hook_reads_belonging_from_the_row_not_the_id_map() {
     assert!(!stop.contains("argos-0008"), "가려진 리뷰를 집은 것에 매인 리뷰로 셌다 — {stop}");
 }
 
+/// **제 `epic` 을 안 적은 앞줄은 기계 표면 어디서도 쌍둥이의 에픽을 안 입는다**
+/// (리뷰 moai-jk2u.o78).
+///
+/// 위의 두 시험 사이에 틈이 있었다. [`every_machine_surface_names_the_epic_a_row_stands_in`] 은
+/// id 가 하나뿐인 멤버로 여섯 표면을 재고, [`same_kind_twins_answer_the_same_epic_on_every_surface`]
+/// 의 쌍둥이는 둘 다 제 `epic` 을 적어 지도를 아예 안 짚는다 — **지도를 짚는 줄이 쌍둥이와 함께
+/// 서는** 자리는 둘 다 안 쟀다. 그 틈으로 `prime --json` 하나가 접은 지도(`report::groups`)에
+/// 남아, `ready --json` 과 `show --json` 이 `argos-e001` 이라 하는 그 줄을 `argos-e002` 라 했다.
+#[test]
+fn a_row_that_wrote_no_epic_keeps_its_own_on_every_machine_surface() {
+    let s = init("handedepic");
+    let row = |id: &str, title: &str, kind: &str, epic: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-e001.aaa` 가 둘. 앞줄은 `epic` 을 안 적어 id 부모가 답하고,
+    // 뒷줄은 적어 그 값이 이긴다. 둘 다 이슈라 가려짐은 안 선다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            row("argos-e001", "에픽하나", "epic", ""),
+            row("argos-e002", "에픽둘", "epic", ""),
+            row("argos-e001.aaa", "안적은앞줄", "issue", ""),
+            row("argos-e001.aaa", "적은뒷줄", "issue", ",\"epic\":\"argos-e002\""),
+        ),
+    )
+    .unwrap();
+
+    let listed = ok(s.path(), &["show", "--json"]);
+    let ready = ok(s.path(), &["ready", "--json"]);
+    let prime = ok(s.path(), &["prime", "--json"]);
+    for (what, json) in [("show 목록", &listed), ("ready", &ready), ("prime", &prime)] {
+        let front = object_titled(json, "안적은앞줄");
+        assert!(front.contains(r#""derived_epic":"argos-e001""#), "{what} 가 앞줄에 쌍둥이의 에픽을 달았다 — {front}");
+        assert!(!front.contains(r#""epic":"argos"#), "{what} 가 적은 적 없는 소속을 `epic` 에 실었다 — {front}");
+        let back = object_titled(json, "적은뒷줄");
+        assert!(back.contains(r#""derived_epic":"argos-e002""#), "{what} 가 뒷줄의 적힌 에픽을 잃었다 — {back}");
+    }
+}
+
+/// **댈 미룸이 없으면 `moai ready` 가 id 없는 명령을 안 낸다**(리뷰 moai-jk2u.o78).
+///
+/// `report` 쪽은 걸음이 빈 id 에 키를 안 세우는 것으로 `moai defer  --undo` 를 막는데
+/// (`deferred_sources_in`), 그리는 쪽은 그 약속을 안 지켜 빈 배열을 그대로 폈다 — 없는 키와
+/// 빈 배열이 화면에서 같은 글이 된다. 멤버가 줄마다 갈리게 되면서 그 꼴이 실제로 섰다: 에픽의
+/// 멤버로 세어진 앞줄이 미뤘는데 그 id 의 답을 정하는 뒷줄은 안 미뤄, 댈 미룸이 아예 없었다.
+#[test]
+fn ready_names_no_undo_command_when_there_is_nothing_to_undo() {
+    let s = init("emptyundo");
+    // `argos-e001.aaa` 가 둘 — 앞줄은 `epic` 을 안 적어 `argos-e001` 의 멤버고 미뤘다.
+    // 뒷줄은 `argos-e002` 를 적고 살아 있어, 그 id 는 `deferred_roots` 에 안 든다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        "{\"id\":\"argos-0009\",\"title\":\"막힌일\",\"kind\":\"issue\",\"status\":\"todo\",\"blocked_by\":[\"argos-e001\"],\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001\",\"title\":\"에픽하나\",\"kind\":\"epic\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001.aaa\",\"title\":\"미룬앞줄\",\"kind\":\"issue\",\"status\":\"todo\",\"deferred_at\":\"2026-09-12T00:00:00Z\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001.aaa\",\"title\":\"산뒷줄\",\"kind\":\"issue\",\"status\":\"todo\",\"epic\":\"argos-e002\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e002\",\"title\":\"에픽둘\",\"kind\":\"epic\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+    )
+    .unwrap();
+
+    let out = ok(s.path(), &["ready"]);
+    assert!(!out.contains("moai defer  --undo"), "id 없는 명령을 냈다\n{out}");
+    // 막는 줄은 그대로 댄다 — 말을 못 대는 것과 까닭을 안 대는 것은 다르다.
+    assert!(out.contains("argos-0009") && out.contains("argos-e001.aaa"), "막힌 줄과 막는 줄이 빠졌다\n{out}");
+}
+
 /// **가려진 묶음 줄은 쌍둥이의 읽은 칸을 안 입는다**(moai-7iyc.5fz).
 ///
 /// 칸 지도도 id 로 짠 것이라 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 그 id 의 뜻을 정하는

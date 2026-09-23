@@ -74,7 +74,7 @@ struct Brief<'a> {
     /// 줄이 **제 몸에 적은** 에픽. 없으면 키를 안 단다 — [`super::Row`] 의 같은 키와 한 뜻이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     epic: Option<&'a str>,
-    /// 그 줄이 **든** 에픽(`report::groups`) — 적어 놓았든 id 로 졌든. [`super::Row::derived_epic`]
+    /// 그 줄이 **든** 에픽(`report::handed_of`) — 적어 놓았든 id 로 졌든. [`super::Row::derived_epic`]
     /// 과 한 키, 한 뜻이다(moai-wuzi, 2026-09-23 사용자 결정).
     ///
     /// **한때 이 값이 `epic` 에 실렸다.** 그때는 이 표면만 물려받은 소속을 풀고 줄을 내는 다른
@@ -170,7 +170,15 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 소속은 **물려받은 것까지 푼다** — 자식의 에픽은 부모에게서 오므로, 줄에 적힌
         // `epic` 만 실으면 자식 줄이 에픽 없는 것으로 나간다. 사람 쪽이 제목을 내는 자와
         // 같은 지도다(`epic_labels` 가 이것 위에 제목을 얹는다).
-        let epics = report::groups(&load.issues);
+        //
+        // **넘겨받는 값을 묻는다**(`report::handed_of`, 리뷰 moai-jk2u.o78) — 접은 지도
+        // (`report::groups`)는 같은 id 의 뒷줄이 **적은** `epic` 까지 들어, 제 `epic` 을 안 적은
+        // 앞줄이 그것을 입는다. 이 키를 내는 표면은 둘인데(`super::Row::of` 와 여기) 한쪽만
+        // 옮기면 한 바이너리가 `derived_epic` 에 두 답을 낸다 — `ready --json` 과 `show --json`
+        // 은 id 부모의 에픽을 내는데 여기만 쌍둥이의 에픽을 냈다. 물은 줄만 묻는 것은
+        // `ready --json` 과 같은 자리, 같은 까닭이다.
+        let ids: Vec<&str> = p.held.iter().chain(p.picks.iter()).map(|i| i.id.as_str()).collect();
+        let epics = report::handed_of(&load.issues, &ids);
         // **가려진 줄을 가르는 지도**(moai-53s2) — 소속 지도와 나란히 둔다. `wip` 은 가려진 줄을
         // 빼므로 오늘 여기에 그런 줄이 실릴 길은 없지만, 값을 내는 자(`report::stands_in`)가
         // 지도를 물으니 여기가 그것을 대는 자리다.

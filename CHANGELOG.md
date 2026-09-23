@@ -211,6 +211,22 @@ on finding them.
 
 ### Fixed
 
+- A row that **wrote no `epic` of its own no longer wears the one its twin
+  wrote**. Which epic a row is in is read from the row, but what it fell back on
+  when the row wrote nothing was the id-keyed map — and that map holds the later
+  line's answer, the written `epic` included. So where the same id stood twice,
+  the earlier row, whose epic is the epic its id sits under, was drawn, counted,
+  filtered and reported under the *other* row's epic: `derived_epic` on every
+  machine surface (`show`, `ready`, `status`, `prime`, `add`, `mv`, `edit`),
+  `moai show <that epic>`'s member list, `moai show -e <it>` and the tree all
+  named it, while the epic its id actually sits under said `Members 0/0` and drew
+  the row as a child. The fall-back now asks the id's parent, which both rows
+  share, so each gets its own answer and the row's own `epic` still wins.
+- `moai ready` no longer offers to undo a defer that **took the other row out of
+  the plan**. Where an id stands twice, `moai show <id>` draws one line and says
+  which defer took it out, but the undo command beside it was the union of every
+  line's walk, so it also named a release that pinned the line you are not
+  looking at — releasing that one changed nothing on screen.
 - **The hook reads which group a row is in from the row, not from the id map.**
   Where the same id stands twice, the row you picked up was judged by its twin's
   epic and release, and the hook is the one surface that refuses: `moai add -e
@@ -225,11 +241,6 @@ on finding them.
   twin of another kind stands in no group here either, as it already did on every
   read surface — the hook no longer pins a review to an epic that `moai show -e`
   will not list.
-  **A row that inherits its epic instead of writing one is not covered yet.** Where
-  the same id stands twice and neither line wrote `epic`, the answer still comes off
-  the id map, so it is still the twin's — the same refusal, for the shape a plan
-  mints. That is one layer down, in what resolves an inherited epic, and it moves
-  every surface at once, `derived_epic` included.
 - Where the same id stands twice, a row now **inherits the defer of the epic or
   the release it wrote on itself**. Which group a row is in is read from the row
   (`epic`, then the map), but the walk that carries a defer down still climbed by
