@@ -670,6 +670,7 @@
   "refuse.plan_flag_how": "제목·태그·우선순위는 마크다운이 들고 id 는 `--json` 이 낸다. 나머지는 만든 뒤 `moai edit <id>` 로 단다",
   "refuse.plan_body_stdin": "`--body -` 와 `--from -` 이 stdin 하나를 다툰다",
   "refuse.plan_body_stdin_how": "둘 가운데 하나는 파일로 주거나 본문을 글자로 적는다 — `moai add --from plan.md --body -`",
+  "refuse.promote_body_over": "줄인 뒤에 다시 펼친다 — `moai edit {id} -b -`",
   "refuse.dry_run_needs_from": "`--dry-run` 은 `--from` 과 함께 쓴다 — 하나짜리는 연습할 것이 없다",
   "refuse.dry_run_needs_from_how": "잘못 만들었으면 `moai rm <id>` 다",
   "refuse.add_no_title": "제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다",

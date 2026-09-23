@@ -151,6 +151,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   markdown decides what gets created — `#` is an epic, `-` is an issue — so a
   typed `--type` is refused whatever its value, while the verb's own default
   still stands.
+- When the body `moai idea promote` carries over is past the 64KB a single write
+  takes, the refusal names **the idea** and the way out of it — `moai edit <idea>
+  -b -` — instead of naming the epic the write was about to create. Such a body
+  can only get there through a merge resolved by hand, and the old message sent
+  you off to shorten the first line of the plan you had just typed, which changed
+  nothing. The rehearsal (`--dry-run`) measures it too, so it can no longer
+  approve what the write refuses. It is still a refusal, not a truncation: text a
+  person wrote is not shortened on their behalf.
 - **A plan called through the wrong verb is told that first.** `moai idea add
   --from - --body …` and `moai milestone add --from - --body …` used to answer
   with the flag conflict, so the caller dropped `--body`, ran it again, and only

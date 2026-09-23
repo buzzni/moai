@@ -94,6 +94,38 @@ fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str
 ///
 /// **3번을 필드로 만들지 않는다.** `idea.spawned = [에픽 id]` 를 들면 에픽을
 /// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
+/// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
+///
+/// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
+/// 있는 상한 넘는 본문을 든 idea 는 그래서 펼치기가 통째로 막혔는데, 거절문이 가리키는 것은
+/// 그 생각이 아니라 **이 쓰기가 짓는 에픽의 제목**이었다 — 받는 쪽은 제가 방금 친 계획의 첫
+/// 줄을 줄이러 가고, 줄여 봐야 같은 자리에서 또 막힌다.
+///
+/// **줄여서 데려가지 않는다.** [`crate::model::fit_bytes`] 는 도구가 짓는 글에 남의 글 한
+/// 토막을 **가리킴으로** 담을 때의 자다 — 원본이 제 줄에 그대로 남아 있을 때다. 여기 오는
+/// 것은 사본이고, 사람이 적은 글은 잘라 적지 않고 거절한다(2026-09-23 사용자 결정).
+///
+/// **재는 자는 진짜와 한 자리다**([`crate::model::check_text_size`]). 상한을 여기 한 벌 더
+/// 적으면 한쪽만 고치는 날 이 어긋남이 그대로 돌아온다 — 더하는 것은 빠져나갈 길 한 줄뿐이다.
+/// 펼치기가 에픽에 데려갈 본문 — **`-e <에픽>` 이면 없다**(moai-07v1).
+///
+/// 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을 물려받는다. **한 자리에서 고른다**: 연습과
+/// 진짜가 따로 고르면 한쪽만 재고 다른 쪽이 쓴다.
+fn carried_body<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
+    match into {
+        Some(_) => None,
+        None => thought.body.as_deref(),
+    }
+}
+
+fn check_carried_body(id: &str, body: Option<&str>, lang: crate::i18n::Lang) -> R<()> {
+    let Some(text) = body else { return Ok(()) };
+    crate::model::check_text_size(|| id.to_string(), "body", text).map_err(|e| {
+        let how = crate::i18n::fill(crate::i18n::say(lang, "refuse.promote_body_over"), &[("id", id)]);
+        Fail::coded(format!("{}\n      {how}", e.message), e.code)
+    })
+}
+
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
@@ -140,9 +172,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
         // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
-        // 데려가는 본문은 여기서 안 준다 — 그것은 이 생각이 이미 든 글이라 잴 자와 가리킬 줄이
-        // 계획의 것과 다르다(moai-oejf).
+        // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
+        // 것이 아니라 그 생각이다(moai-oejf). 바로 아래가 제 자로 잰다.
         crate::cmd::add::check_plan(&drafts, stone.as_deref(), None, ctx.lang())?;
+        // **연습도 데려갈 본문을 잰다.** 안 재면 상한 넘는 본문을 든 생각이 연습에서 0 으로
+        // 끝나고, 사람이 "좋다" 한 뒤에 진짜가 거절한다.
+        check_carried_body(&args.id, carried_body(thought, into), ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
@@ -212,10 +247,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             //
             // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
             // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
-            let text = match into {
-                Some(_) => None,
-                None => thought.body.clone(),
-            };
+            let text = carried_body(thought, into).map(str::to_string);
+            // **거절은 `create_drafts` 앞이다**(moai-oejf) — 뒤에 두면 `store` 가 이 쓰기가
+            // 짓는 에픽의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다.
+            check_carried_body(&args.id, text.as_deref(), lang)?;
             let stone = stone_of(issues, &args.id, into);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
             let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };

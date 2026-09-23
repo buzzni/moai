@@ -9284,6 +9284,47 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
     assert!(issues(s.path()).contains("저장 계층"), "계획이 안 섰다");
 }
 
+/// **데려갈 본문이 넘치면 그 생각을 가리키며 거절한다**(moai-oejf).
+///
+/// 데려가는 본문은 `store` 의 쓰기 검사를 다시 지나므로, 손으로 푼 머지가 남길 수 있는 상한
+/// 넘는 본문을 든 idea 는 펼치기가 통째로 막혔다. 그런데 거절문이 가리키는 것은 그 생각이
+/// 아니라 이 쓰기가 짓는 에픽의 제목이었다 — 받는 쪽은 제가 방금 친 계획의 첫 줄을 줄이러
+/// 가고, 줄여 봐야 같은 자리에서 또 막힌다. 줄여서 데려가지 않는 것은 사람이 적은 글이기
+/// 때문이다(2026-09-23 사용자 결정) — 대신 도구 안에 빠져나갈 길을 댄다.
+#[test]
+fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
+    let s = init("promotebig");
+    let id = ok(s.path(), &["idea", "add", "큰 생각", "-q"]).trim().to_string();
+    // 상한을 넘는 본문은 도구로는 못 쓴다 — 손으로 푼 머지가 남기는 줄을 그대로 짓는다.
+    let path = s.path().join(".moai/issues.jsonl");
+    let line = issues(s.path());
+    let line = line.trim_end();
+    let big = "가".repeat(30_000);
+    assert!(line.contains(r#""kind":"idea""#), "{line}");
+    let swollen = line.replace(r#""kind":"idea""#, &format!(r#""body":"{big}","kind":"idea""#));
+    std::fs::write(&path, format!("{swollen}\n")).unwrap();
+
+    let plan = "# 펼친 에픽\n- 첫 이슈\n";
+    let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], plan);
+    let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(real.status.code(), Some(1), "{was}");
+    assert_eq!(rehearsal.status.code(), Some(1), "연습만 좋다고 했다\n{said}");
+    assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+    // 가리키는 것은 이 쓰기가 짓는 에픽이 아니라 그 생각이고, 빠져나갈 길도 그 id 로 댄다.
+    assert!(said.contains(&id), "생각을 안 가리킨다\n{said}");
+    assert!(!said.contains("펼친 에픽"), "안 지은 에픽을 가리킨다\n{said}");
+    assert!(said.contains(&format!("moai edit {id} -b -")), "빠져나갈 길을 안 댄다\n{said}");
+    assert!(!issues(s.path()).contains("펼친 에픽"), "거절해 놓고 썼다");
+
+    // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
+    let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(issues(s.path()).contains("짧게 줄인 본문"), "본문이 에픽에 안 갔다");
+}
+
 /// 못 읽는 줄 하나가 **성공한 쓰기를 실패로 보이게 하지 않는다.** `promote`
 /// 만 락 밖에서 읽고 부분 실패 깃발을 세웠다 — 그것을 실패로 읽은 쪽이 다시
 /// 부르면 같은 계획이 두 벌 생긴다.
