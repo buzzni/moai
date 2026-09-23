@@ -143,6 +143,47 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Two rows carrying the same id now hand that id to a person instead of being
+  quietly mixed. A snapshot that holds a readable row and an unreadable one under
+  one id — what a hand-resolved conflict leaves behind — used to have one of them
+  pushed aside, and which one depended on what else that file held, so the three
+  sides of a merge disagreed about it. Two ways out of that: a branch that deleted
+  the stale copy got the deletion reverted with no marker, and a branch carrying
+  the extra copy had it merged straight in, leaving a snapshot with a duplicated
+  id. Both at exit 0. Such a snapshot is already fatal to `moai status`
+  (`Ids standing twice`, `Unreadable rows`); only the merge was quiet about it.
+- A single row this binary cannot read no longer turns **every** merge into a
+  whole-file conflict. The merge driver paired rows by id only when both sides
+  carried the very same unreadable lines, in the very same order, so one row
+  written by a newer binary — a `kind` this one does not know, say — put conflict
+  markers around the entire file from then on, and the per-issue resolution the
+  driver exists for was gone. There was no way out of it either: `moai status`
+  counts an unreadable row as fatal, so repairing that row on one branch is
+  precisely what makes the two sides differ. A row is now paired by id whenever
+  its JSON and its `id` can be read, whether or not the rest of it can, and it
+  travels through the merge byte for byte — one side's change comes through, and
+  only a row **both** sides changed is handed to a person, with the markers around
+  that row alone. Lines with no id to pair on are merged by counting them: what
+  one side added is added, what one side removed is removed, a removal both sides
+  made is made once, and a line standing several times keeps its count. **Counting
+  cannot tell an edit from a delete plus an add**, so a line with no id that both
+  branches rewrote comes through as both lines, on a merge that exits 0 — better
+  than picking one and losing the other, and `moai status` counts the pair. What
+  still hands the whole file over is a duplicated id among readable rows, and a
+  snapshot that is not text at all.
+- A deferral is no longer dropped without a word when a timestamp cannot be read.
+  When both branches had changed `planned_at`, the merge driver picked the later
+  of the two, and a timestamp it could not parse — a `+09:00` offset left by a
+  hand-resolved conflict, say — counted as "no time at all", so the other side
+  won and took its `deferred_at` with it. The branch that had actually deferred
+  the row last lost that decision with no marker, no warning and exit code 0.
+  Now the later side is picked only when both timestamps are canonical;
+  otherwise the row goes to a person. **A `planned_at` one side does not carry
+  at all now goes to a person too**, where before the side that had one won:
+  every other timestamp reads a missing value as "unknown" and takes the side
+  that has one, but a missing `planned_at` is not unknown — it is the decision
+  not to defer, and handing it to the other side takes that decision away along
+  with its `deferred_at`.
 - The release check no longer follows a redirect down to plaintext `http`. A call
   that starts on `https` is refused rather than downgraded, on every hop. A call
   you pointed at a plaintext mirror yourself still works — that one is your choice.

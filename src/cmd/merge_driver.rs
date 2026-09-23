@@ -22,16 +22,18 @@
 //!
 //! ## 못 읽는 줄은 들고 가고, 못 짝지을 때만 통째로 넘긴다
 //!
-//! 이슈로 안 읽히는 줄은 원문 그대로 뒤에 붙인다 — `store::render_issues` 가 두는 자리와
-//! 같다. 그 한 줄로 파일 전체를 충돌로 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다
-//! 합치기 어려워지고, CLAUDE.md 가 막은 자리가 바로 그것이다("남의 낡은 줄 하나가 모든
-//! 쓰기를 막으면 되돌릴 방법이 도구 밖에만 남는다").
+//! 이슈로 안 읽히는 줄도 **JSON 과 `id` 까지 읽히면 id 로 짝지어**(moai-1a55.4oh) 이슈마다
+//! 3-way 로 풀고, 그 답은 원문 그대로 파일 뒤에 붙인다 — `store::render_issues` 가 두는 자리와
+//! 같다. id 조차 못 읽는 줄은 [`unkeyed`] 가 줄마다 센 수로 푼다. 그 한 줄로 파일 전체를
+//! 충돌로 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다 합치기 어려워지고, CLAUDE.md 가
+//! 막은 자리가 바로 그것이다("남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴 방법이 도구 밖에만
+//! 남는다").
 //!
-//! 통째로 넘기는 것은 **짝지을 수가 없을 때** 셋이다 — 한 파일에 같은 id 가 두 번 있을 때,
-//! 못 읽은 줄이 두 쪽에서 다를 때(그 줄을 3-way 로 볼 자가 없다), 그리고 글자가 깨져
-//! 줄로도 못 나눌 때. 답을 못 짓는 갈래도 **표식을 쓰고 나서** 비영으로 끝낸다: 표식 없이
-//! 실패하면 git 은 `%A` 를 그대로 둔 채 "충돌" 이라고만 말하고, 사람은 그 파일을 열어 보고
-//! 이미 풀린 줄 알아 `git add` 한 번으로 저쪽을 통째로 버린다.
+//! 통째로 넘기는 것은 **짝지을 수가 없을 때** 둘이다 — 한 파일에 **읽히는** 줄이 같은 id 로
+//! 둘 있을 때(그때는 id 로 짝짓는 것 자체가 거짓이다), 그리고 글자가 깨져 줄로도 못 나눌 때.
+//! 답을 못 짓는 갈래도 **표식을 쓰고 나서** 비영으로 끝낸다: 표식 없이 실패하면 git 은 `%A` 를
+//! 그대로 둔 채 "충돌" 이라고만 말하고, 사람은 그 파일을 열어 보고 이미 풀린 줄 알아
+//! `git add` 한 번으로 저쪽을 통째로 버린다.
 
 use super::{Ctx, Fail, R};
 use crate::cli::MergeDriverArgs;
@@ -72,12 +74,24 @@ const SUB: &str = "merge-driver";
 struct Row<'s> {
     raw: &'s str,
     v: Value,
+    /// `Issue` 로 읽히는가. **거짓이어도 짝은 짓는다**(moai-1a55.4oh) — JSON 과 `id` 까지만
+    /// 읽히면 그 줄이 어느 이슈의 것인지는 알고, 그것이 3-way 에 필요한 전부다. 값을 못
+    /// 지으므로 [`settle`] 은 그 줄을 원문 그대로 실어 나른다([`Settled::Opaque`]).
+    read: bool,
 }
 
 /// 파일 하나를 id 로 짝지은 결과.
 struct Keyed<'s> {
-    by_id: BTreeMap<String, Row<'s>>,
-    /// 이슈로 안 읽히는 줄의 **원문 그대로**. `store::render_issues` 의 `opaque` 와 같은 자리다.
+    /// **id 하나에 줄 여럿**(moai-2m94). 여느 때는 하나지만, 손으로 푼 충돌이 같은 id 를 두 번
+    /// 남기면 둘이 선다. 밀어내지 않는 것은 어느 줄이 어느 칸에 서는지가 **그 파일에 무엇이 또
+    /// 있는가**에 달리는 순간 세 쪽이 서로 다르게 갈리고, 그러면 [`settle`] 과 [`unkeyed`] 가
+    /// 같은 줄을 서로 다른 자로 풀기 때문이다 — 한쪽이 지운 줄이 말없이 되살아나던 자리다.
+    by_id: BTreeMap<String, Vec<Row<'s>>>,
+    /// **id 조차 못 읽는 줄**의 원문 그대로. `store::render_issues` 의 `opaque` 와 같은 자리고,
+    /// 열쇠가 없어 이슈마다 풀 수가 없다 — [`unkeyed`] 가 줄마다 센 수로 3-way 를 돌린다.
+    ///
+    /// **여기 있는 줄에는 id 가 없다.** `Issue` 로만 안 읽히는 줄은 `by_id` 에 서고 [`Row::read`]
+    /// 가 거짓이다(moai-1a55.4oh).
     opaque: Vec<&'s str>,
 }
 
@@ -86,9 +100,16 @@ enum Settled {
     /// 이 줄로 쓴다. 지워진 것이면 `None`.
     ///
     /// **`Issue` 가 아니라 다 쓴 글로 든다.** 이 자리에서 쓸 것은 `store::render_issues` 와
-    /// 같은 한 줄뿐이라 값을 들고 다닐 까닭이 없고, `Issue` 를 담으면 갈래 둘의 크기가
+    /// 같은 한 줄뿐이라 값을 들고 다닐 까닭이 없고, `Issue` 를 담으면 갈래끼리 크기가
     /// 크게 벌어져(`clippy::large_enum_variant`) id 마다 그 큰 쪽만큼 옮긴다.
     Line(Option<String>),
+    /// 못 읽는 줄을 **원문 그대로** 들고 간다. `Issue` 로 못 읽으니 표준형으로 맞출 값도
+    /// 검사할 값도 없고, 남이 남긴 그 줄에 손대는 것은 `store::with_write` 도 안 하는 일이다.
+    ///
+    /// **[`Settled::Line`] 과 갈라 두는 것은 자리 때문이다.** `store::render_issues` 는 못
+    /// 읽는 줄을 파일 끝에 모아 쓰므로, 여기서 id 차례로 끼워 넣으면 병합 직후의 파일이 다음
+    /// 쓰기에서 통째로 헛 diff 를 낸다(멱등성).
+    Opaque(String),
     /// 사람이 푼다. 두 쪽의 줄을 **원문 그대로** 든다 — 고쳐 적으면 사람이 보는 글이
     /// 제가 친 것과 달라진다([`Row`]).
     Clash { ours: Option<String>, theirs: Option<String> },
@@ -157,12 +178,20 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
     Err(clash_fail(&clashes, what))
 }
 
-/// 셋 다 글자로 읽히는 판. **못 읽은 줄이 두 쪽에서 같을 때만 id 로 짝짓는다** — 다르면
-/// 그 줄을 3-way 로 볼 자가 없고, 읽은 것만 골라 쓰면 그 줄이 그 자리에서 사라진다.
+/// 셋 다 글자로 읽히는 판.
+///
+/// **못 읽는 줄로는 파일 전체를 넘기지 않는다**(moai-1a55.4oh). 두 쪽의 못 읽는 줄이 하나라도
+/// 다르면 여기서 [`whole`] 로 갔는데, 그 한 줄 때문에 나머지 천 줄이 이슈마다 풀리는 것을
+/// 잃었다. 새 바이너리가 쓴 `kind` 를 옛 바이너리가 못 읽는 판이 바로 그것이고, 그 줄을
+/// 한쪽에서 고치는 것이 곧 두 쪽을 다르게 만드는 일이라 스스로 빠져나올 수도 없었다 —
+/// `moai status` 는 못 읽는 줄을 치명으로 센다. [`keyed`] 가 id 까지 읽히는 줄을 짝지어
+/// [`settle`] 로 보내고, id 조차 못 읽는 줄은 [`unkeyed`] 가 센 수로 3-way 한다.
+///
+/// 남은 [`whole`] 갈래는 **읽히는 줄이 같은 id 로 둘 있는** 판 하나다. 그때는 id 로 짝짓는
+/// 것 자체가 거짓이라 풀 자가 없다.
 fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
     match (keyed(o), keyed(a), keyed(b)) {
-        (Some(o), Some(x), Some(y)) if x.opaque == y.opaque => by_issue(&o, &x, &y, marker, a.len()),
-        // 같은 id 가 두 번 있거나, 못 읽은 줄이 두 쪽에서 다르다 — 통째로 넘긴다.
+        (Some(o), Some(x), Some(y)) => by_issue(&o, &x, &y, marker, a.len()),
         _ => whole(a, b, marker),
     }
 }
@@ -174,18 +203,22 @@ fn clash_fail(clashes: &[String], what: &str) -> Fail {
     Fail::coded(format!("{what}: {}건은 사람이 푼다 — {}", clashes.len(), clashes.join(" ")), super::code::BROKEN)
 }
 
-/// 파일 하나를 id → 줄로. **같은 id 가 두 번 있으면 `None`** — 그때는 id 로 짝짓는 것
-/// 자체가 거짓이 된다.
+/// 파일 하나를 id → 줄로. **읽히는 줄이 같은 id 로 둘 있으면 `None`** — 그때는 id 로
+/// 짝짓는 것 자체가 거짓이 된다.
 ///
-/// **못 읽는 줄은 원문 그대로 들고 간다**(`Keyed::opaque`). 버리지 않는 것은 그 줄이
-/// 사라지면 조용한 손실이라서고, 파일 전체를 넘기지 않는 것은 CLAUDE.md 가 정한 자리라서다
-/// — *"그 엄함은 지금 쓰는 줄에 대한 것이지 파일 전체에 대한 것이 아니다. 남의 낡은 줄 하나가
-/// 모든 쓰기를 막으면 되돌릴 방법이 도구 밖에만 남는다."* `store::with_write` 가 못 읽는 줄을
-/// 들고 다시 쓰므로 그런 줄은 저장소에 오래 남는데, 그 한 줄로 모든 병합을 파일째 충돌로
-/// 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다 합치기 어려워진다.
+/// **못 읽는 줄도 id 까지 읽히면 짝짓는다**(moai-1a55.4oh). 짝지어야 한쪽만 건드린 판과 둘 다
+/// 건드린 판이 갈리고, 뒤엣것만 사람에게 간다. `Issue` 로 읽히는지는 [`Row::read`] 가 말하고
+/// 짝짓기를 막지 않는다.
+///
+/// 버리지 않는 것은 그 줄이 사라지면 조용한 손실이라서고, 파일 전체를 넘기지 않는 것은
+/// CLAUDE.md 가 정한 자리라서다 — *"그 엄함은 지금 쓰는 줄에 대한 것이지 파일 전체에 대한
+/// 것이 아니다. 남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴 방법이 도구 밖에만 남는다."*
+/// `store::with_write` 가 못 읽는 줄을 들고 다시 쓰므로 그런 줄은 저장소에 오래 남는데, 그 한
+/// 줄로 모든 병합을 파일째 충돌로 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다 합치기
+/// 어려워진다.
 fn keyed(src: &str) -> Option<Keyed<'_>> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-    let mut by_id = BTreeMap::new();
+    let mut by_id: BTreeMap<String, Vec<Row<'_>>> = BTreeMap::new();
     let mut opaque = Vec::new();
     for line in src.lines() {
         if line.trim().is_empty() {
@@ -195,24 +228,31 @@ fn keyed(src: &str) -> Option<Keyed<'_>> {
             opaque.push(line);
             continue;
         };
-        if by_id.insert(id, r).is_some() {
-            // 같은 id 가 두 번 있으면 id 로 짝짓는 것 자체가 거짓이다.
+        let slot = by_id.entry(id).or_default();
+        // 읽히는 줄이 같은 id 로 둘이다 — 여기서 하나를 고르면 다른 이슈가 통째로 사라진다.
+        if r.read && slot.iter().any(|x| x.read) {
             return None;
         }
+        // **못 읽는 줄이 낀 겹침은 밀어내지 않고 쌓는다**(moai-2m94). 한 줄을 `opaque` 로
+        // 밀어내면 그 줄이 어느 칸에 서는지가 그 파일의 다른 줄에 달려, 세 쪽이 서로 다르게
+        // 갈린다. [`settle`] 이 그 id 를 통째로 사람에게 넘긴다.
+        slot.push(r);
     }
     Some(Keyed { by_id, opaque })
 }
 
-/// 줄 하나를 id 와 값으로. **이슈로 안 읽히면 `None`** — 짝짓지 않고 원문으로 들고 간다.
-/// 여기서 안 읽히는 줄을 짝지어 쓰면 그 줄은 다음 `moai` 가 못 읽는 줄로 만난다.
+/// 줄 하나를 id 와 값으로. **JSON 과 `id` 까지 읽히면 짝짓는다** — `Issue` 로도 읽히는지는
+/// [`Row::read`] 에 적어 두고 짝짓기를 막지 않는다(moai-1a55.4oh).
+///
+/// `None` 은 열쇠가 없다는 뜻 하나다: 글자가 JSON 이 아니거나, 이슈가 아닌 줄(배열·수·id 없는
+/// 객체)이다. 그런 줄은 [`unkeyed`] 가 센 수로 푼다.
 fn row(line: &str) -> Option<(String, Row<'_>)> {
     let v: Value = serde_json::from_str(line).ok()?;
-    // 읽히기는 해도 이슈가 아닌 줄(배열·수·id 없는 객체)은 못 짝짓는다.
     let id = v.get("id")?.as_str()?.to_string();
     // **`&Value` 에서 바로 읽는다** — `from_value` 는 통째로 복사한 뒤 읽어, 줄마다 트리
-    // 하나를 더 짓는다. 값은 아래 `issue()` 가 다시 쓰므로 여기서는 읽히는지만 본다.
-    Issue::deserialize(&v).ok()?;
-    Some((id, Row { raw: line, v }))
+    // 하나를 더 짓는다. 값은 아래 [`shaped`] 가 다시 쓰므로 여기서는 읽히는지만 본다.
+    let read = Issue::deserialize(&v).is_ok();
+    Some((id, Row { raw: line, v, read }))
 }
 
 /// id 마다 3-way 로 풀고, 푼 것과 못 푼 것을 한 파일로 짓는다.
@@ -222,27 +262,92 @@ fn row(line: &str) -> Option<(String, Row<'_>)> {
 fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: usize) -> (String, Vec<String>) {
     let ids: BTreeSet<&String> = o.by_id.keys().chain(a.by_id.keys()).chain(b.by_id.keys()).collect();
     let mut out = String::with_capacity(hint);
+    let mut carried = Vec::new();
     let mut clashes = Vec::new();
     for id in ids {
-        match settle(o.by_id.get(id), a.by_id.get(id), b.by_id.get(id)) {
+        fn at<'r, 's>(k: &'r Keyed<'s>, id: &str) -> Option<&'r [Row<'s>]> {
+            k.by_id.get(id).map(Vec::as_slice)
+        }
+        match settle(at(o, id), at(a, id), at(b, id)) {
             Settled::Line(None) => {}
             Settled::Line(Some(line)) => {
                 out.push_str(&line);
                 out.push('\n');
             }
+            // 짝은 졌지만 `Issue` 로 못 읽는 줄이다 — 아래 못 읽는 줄 칸으로 미룬다.
+            Settled::Opaque(line) => carried.push(line),
             Settled::Clash { ours, theirs } => {
                 clashes.push(id.clone());
                 out.push_str(&marked(ours.as_deref(), theirs.as_deref(), marker));
             }
         }
     }
-    // **못 읽은 줄은 뒤에 원문 그대로 붙는다** — `store::render_issues` 가 두는 자리와 같다.
-    // 두 쪽이 같을 때만 여기 온다(`plan`).
-    for line in &a.opaque {
+    // **못 읽는 줄은 뒤에 원문 그대로 붙는다** — `store::render_issues` 가 두는 자리와 같다.
+    // 짝지은 것이 id 차례로 먼저 서고 열쇠 없는 것이 뒤따르는데, 그 다음 쓰기가 읽은 차례를
+    // 그대로 되쓰므로 이 차례가 곧 고정점이다(멱등성).
+    for line in carried {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    for line in unkeyed(&o.opaque, &a.opaque, &b.opaque) {
         out.push_str(line);
         out.push('\n');
     }
     (out, clashes)
+}
+
+/// **id 조차 못 읽는 줄**을 3-way 로 푼다. 열쇠가 없어 이슈마다 풀 수가 없으니, [`settle_field`]
+/// 가 `tags` 에 쓰는 것과 같은 셈을 **줄마다 센 수**로 돌린다 — 더한 것은 더하고 뺀 것은 뺀다.
+///
+/// 남길 수는 `o + 더한 벌 - 뺀 벌`이고, **더한 벌도 뺀 벌도 두 쪽 중 큰 쪽 하나만 센다.**
+/// 두 쪽이 똑같이 한 벌을 더했으면 그것은 한 결정이지 둘이 아니고, 똑같이 한 벌을 뺀 것도
+/// 마찬가지다 — `settle_field` 가 `tags` 를 집합으로 셀 때 저절로 서는 성질을 벌 수로 옮긴
+/// 것이다. **벌 수를 세는 것은 집합으로 세면 똑같은 줄 여러 벌 중 하나가 말없이 사라지기
+/// 때문이다** — 사라진 것이 못 읽는 줄이라 아무 표면에도 안 뜬다.
+///
+/// 처음 판은 `min(max(a, b), a + b - o)` 였는데(리뷰 moai-1a55.67v), 그 꼴은 더하기를 `max` 로
+/// 한 번만 세면서 빼기는 `a + b - o` 로 두 번 셌다. 두 벌 있던 줄을 두 쪽이 한 벌씩 지우면
+/// (`o=2, a=1, b=1`) 남는 수가 0 이 되어, 두 쪽이 다 남기려던 벌이 표식도 경고도 없이 사라졌다.
+///
+/// **여기에는 충돌이 없다.** 열쇠가 없는 줄에서 "고쳤다" 는 "지우고 새로 더했다" 와 구별되지
+/// 않아, 둘 다 고친 판을 가려낼 자가 없다. 그 판에서는 두 쪽이 다 남아 `moai status` 가 못
+/// 읽는 줄 둘로 세고 사람이 하나를 지운다 — 한쪽을 골라 버리는 것보다 낫고, 그것이 이 자리에서
+/// 열쇠 없이 지킬 수 있는 전부다. id 가 읽히는 줄은 [`keyed`] 가 짝지어 그 판을 [`settle`] 로
+/// 보내고, 거기서는 표식이 그 줄에만 선다.
+///
+/// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 이쪽이 더한 줄, 저쪽이
+/// 더한 줄이 뒤따른다. 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다.
+/// 잃는 것은 없고(줄은 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지
+/// 커밋에 한 번 뜬다.
+fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
+    fn tally<'s>(v: &[&'s str]) -> BTreeMap<&'s str, usize> {
+        let mut m = BTreeMap::new();
+        for l in v {
+            *m.entry(*l).or_insert(0) += 1;
+        }
+        m
+    }
+    let (co, ca, cb) = (tally(o), tally(a), tally(b));
+    let at = |m: &BTreeMap<&'s str, usize>, l: &'s str| m.get(l).copied().unwrap_or(0);
+    let mut want = BTreeMap::new();
+    // 두 쪽 다 없는 줄은 셀 것이 없다 — 둘이 함께 지웠거나 처음부터 없던 줄이다.
+    for l in ca.keys().chain(cb.keys().filter(|l| !ca.contains_key(*l))) {
+        let (n, x, y) = (at(&co, l), at(&ca, l), at(&cb, l));
+        // **더하기도 빼기도 큰 쪽 하나만 센다.** 둘이 똑같이 한 벌을 더한 것을 두 번 세면
+        // 같은 줄이 둘로 서고, 똑같이 한 벌을 뺀 것을 두 번 세면 두 쪽이 다 남기려던 벌이
+        // 사라진다 — 뒤엣것이 조용한 손실이다.
+        let added = x.saturating_sub(n).max(y.saturating_sub(n));
+        let gone = n.saturating_sub(x).max(n.saturating_sub(y));
+        want.insert(*l, (n + added).saturating_sub(gone));
+    }
+    let mut out = Vec::new();
+    for l in o.iter().chain(a).chain(b) {
+        if let Some(n) = want.get_mut(*l).filter(|n| **n > 0) {
+            *n -= 1;
+            out.push(*l);
+        }
+    }
+    out
 }
 
 /// 못 짝지을 때. **읽은 것만 골라 쓰지 않는다** — 못 읽은 줄이 그 자리에서 사라진다.
@@ -322,13 +427,29 @@ fn marked_bytes(ours: Option<&[u8]>, theirs: Option<&[u8]>, marker: usize) -> Ve
 /// 문턱이 다르다. 그리고 그렇게 지나간 값은 **다음 머지에서 새 충돌을 짓는다**:
 /// 표준형이 아닌 값은 `Value` 로도 다른 값이라 [`fields`] 까지 떨어지는데, `priority` 처럼
 /// [`settle_field`] 가 모르는 필드면 그 줄이 통째로 사람에게 간다.
-fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Settled {
-    // **원문을 그대로 든다**([`Row`]). 매개변수를 안 받는 것은 여덟 자리 중 한 곳에서
-    // 두 쪽을 뒤집어 넘기는 실수가 컴파일되지 않게 하려는 것이다.
-    let clash = || Settled::Clash { ours: a.map(|r| r.raw.to_string()), theirs: b.map(|r| r.raw.to_string()) };
+fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -> Settled {
+    // **원문을 그대로 든다**([`Row`]). 한 쪽이 그 id 로 줄을 여럿 들면 그 줄들이 다 선다.
+    // 매개변수를 안 받는 것은 여덟 자리 중 한 곳에서 두 쪽을 뒤집어 넘기는 실수가
+    // 컴파일되지 않게 하려는 것이다.
+    let side = |v: Option<&[Row<'_>]>| {
+        v.map(|rs| rs.iter().map(|r| r.raw).collect::<Vec<_>>().join("\n"))
+    };
+    let clash = || Settled::Clash { ours: side(a), theirs: side(b) };
+    // **한 쪽이라도 같은 id 로 둘을 들면 그 id 는 사람이 푼다**(moai-2m94). 읽히는 줄 둘은
+    // [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이 낀 판이고, 그 둘 중 무엇이 "그
+    // 이슈" 인지 고를 자가 없다 — 고르면 다른 하나가, 또는 한쪽의 지우기가 말없이 사라진다.
+    // 그런 파일은 이미 `moai status` 가 치명으로 센다(`Ids standing twice`·`Unreadable rows`).
+    if [o, a, b].iter().any(|v| v.is_some_and(|rs| rs.len() > 1)) {
+        return clash();
+    }
+    let (o, a, b) = (o.and_then(<[Row<'_>]>::first), a.and_then(<[Row<'_>]>::first), b.and_then(<[Row<'_>]>::first));
     let render = |i: &Issue| Settled::Line(Some(serde_json::to_string(i).expect("Issue 는 언제나 직렬화된다")));
     // **이미 선 줄은 검사만 건너뛴다**([`shaped`]). 꼴은 `store` 가 쓰는 것과 같은 표준형이다.
-    let take = |r: &Row<'_>| render(&shaped(&r.v).expect("`row` 가 이미 읽어 낸 줄이다"));
+    // **`Issue` 로 안 읽히는 줄은 원문 그대로 간다**(moai-1a55.4oh) — 지을 값이 없다.
+    let take = |r: &Row<'_>| match r.read {
+        true => render(&shaped(&r.v).expect("`Row::read` 가 참인 줄이다")),
+        false => Settled::Opaque(r.raw.to_string()),
+    };
     // **이 머지가 새로 지은 줄은 검사까지 지난다**([`issue`]).
     let built = |v: &Value| issue(v).map_or_else(clash, |i| render(&i));
     // 값으로 견준다 — 같은 뜻의 줄이 바이트로 다를 수 있다(키 차례·모르는 필드).
@@ -362,8 +483,8 @@ fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Sett
 /// 되쓰므로, 여기서 같은 자를 대야 병합 결과가 그 쓰기의 고정점이 된다 — 무엇이 무너지는지는
 /// [`settle`] 의 주석에 넷으로 적어 두었다.
 ///
-/// **못 읽는 줄은 여기 안 온다**([`keyed`] 가 `opaque` 로 들고 간다). 그래서 `None` 은
-/// [`settle`] 에서 일어나지 않고, `fields` 가 조립한 줄에서만 뜻이 선다.
+/// **못 읽는 줄은 여기 안 온다**([`settle`] 의 `take` 가 [`Row::read`] 를 먼저 본다). 그래서
+/// `None` 은 그 갈래에서 일어나지 않고, [`fields`] 가 조립한 줄에서만 뜻이 선다.
 fn shaped(v: &Value) -> Option<Issue> {
     let mut i = Issue::deserialize(v).ok()?;
     i.normalize();
@@ -438,6 +559,20 @@ fn fields(o: &Value, a: &Value, b: &Value) -> Option<Value> {
 /// 이끄는 필드가 셋 다 다를 때는 `status` 면 손을 안 댄다([`settle_field`] 가 그 줄을 사람에게
 /// 넘긴다). `planned_at` 은 **늦게 친 쪽**이 지금 상태라, 그 쪽을 골라 `deferred_at` 을 함께
 /// 데려온다 — 그래서 `settle_field` 에 `planned_at` 갈래가 따로 없다.
+///
+/// **둘 다 표준형이고 초가 갈릴 때만 늦은 쪽을 고른다**(moai-1a55.kh2). 한쪽이라도 [`time`] 이
+/// 못 읽으면 손을 떼고 `settle_field` 에 넘겨 그 줄이 사람에게 간다. 못 읽는 시각을 "모른다" 로 세어 다른
+/// 쪽을 고르면 그 쪽의 `planned_at` 과 `deferred_at` 이 통째로 이기고, **진 쪽의 미루기가 자취
+/// 없이 사라진다** — 손으로 푼 줄의 `+09:00` 하나면 `2026-09-19T23:00:00+09:00`(14:00Z)이
+/// `2026-09-19T04:00:00Z` 에 지고 종료 코드는 0 이었다. 조용한 손실이 이 도구가 못 견디는
+/// 유일한 실패 모드다.
+///
+/// **[`later`] 보다 한 칸 더 엄하다**(리뷰 moai-1a55.67v). 그쪽은 없는 시각을 "모른다" 로 읽어
+/// 있는 쪽을 고르고 못 읽는 시각만 사람에게 넘기는데, 여기서는 **없는 것도 함께 넘긴다.**
+/// `updated_at` 이 없는 것은 모르는 것이지만 `planned_at` 이 없는 것은 *미뤄 두지 않았다* 는
+/// 결정이라, 있는 쪽을 골라 주면 그 결정이 `deferred_at` 과 함께 자취 없이 사라진다. 두 필드의
+/// "없음" 이 서로 다른 뜻인 자리라 규칙도 갈린다 — 한 함수로 합칠 때 이 차이를 먼저 인자로
+/// 드러내야 한다.
 fn coupled<'m>(
     o: &Map<String, Value>,
     a: &'m Map<String, Value>,
@@ -456,8 +591,17 @@ fn coupled<'m>(
         } else if lead == "planned_at" {
             match (time(al), time(bl)) {
                 (Some(x), Some(y)) if y > x => b,
-                (Some(_), _) | (None, None) => a,
-                (None, Some(_)) => b,
+                (Some(x), Some(y)) if x > y => a,
+                // **한쪽이라도 못 읽으면 말없이 고르지 않는다.** 없는 시각도 못 읽는 시각도
+                // 여기서는 같다 — 둘 다 "견줄 수 없다" 이고, 여기 오는 것은 두 쪽이 **다 바꾼**
+                // 판뿐이라 한쪽을 고르면 다른 쪽 결정이 통째로 사라진다.
+                //
+                // **글자가 다른데 초가 같은 것도 여기로 온다**(리뷰 moai-1a55.67v).
+                // [`crate::model::parse_rfc3339`] 은 꼴만 재고 날짜의 뜻은 안 재서 `2026-02-30`
+                // 과 `2026-03-02` 가, `23:59:60` 과 다음 날 `00:00:00` 이 같은 초로 읽힌다 —
+                // 늦은 쪽이 없으니 고를 자도 없는데, 앞선 판은 그때 이쪽을 골라 저쪽의
+                // `deferred_at` 을 통째로 버렸다.
+                _ => continue,
             }
         } else {
             continue;
@@ -1444,22 +1588,121 @@ mod tests {
         assert_eq!(text.lines().last(), Some(junk), "{text}");
     }
 
-    /// **못 읽은 줄이 두 쪽에서 다르면 통째로 넘긴다** — 그 줄을 3-way 로 볼 자가 없다.
-    /// 같은 id 가 두 번 있는 것도 같다: 그때는 id 로 짝짓는 것 자체가 거짓이다.
+    /// **파일 전체를 넘기는 갈래는 하나만 남았다**(moai-1a55.4oh) — 읽히는 줄이 같은 id 로
+    /// 둘 있는 판이다. 그때는 id 로 짝짓는 것 자체가 거짓이라 풀 자가 없다.
     #[test]
     fn what_cannot_be_keyed_hands_the_whole_file_over() {
         let twice = format!("{}\n{}\n", line("argos-0001", ""), line("argos-0001", ""));
         assert!(keyed(&twice).is_none(), "같은 id 두 줄");
         let o = format!("{}\n", line("argos-0001", ""));
-        let a = format!("{o}{{이쪽이 못 읽는 줄\n");
-        let b = format!("{o}{{저쪽이 못 읽는 줄\n");
-        let (text, clashes) = plan(&o, &a, &b, 7);
+        let (text, clashes) = plan(&o, &twice, &o, 7);
         assert_eq!(clashes, ["(파일 전체)"], "{text}");
-        assert!(text.contains("이쪽이 못 읽는 줄") && text.contains("저쪽이 못 읽는 줄"), "{text}");
 
         let (text, clashes) = whole("a\n", "b\n", 7);
         assert_eq!(clashes, ["(파일 전체)"]);
         assert_eq!(text, "<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n", "{text}");
+    }
+
+    /// 새 바이너리가 쓴 `kind` 를 옛 바이너리는 못 읽는다. **그 한 줄이 파일 전체를 넘기지
+    /// 않는다**(moai-1a55.4oh) — 넘기면 그때부터 머지마다 천 줄이 통째로 충돌하고, `moai status`
+    /// 가 못 읽는 줄을 치명으로 세니 그 줄을 한쪽에서 고치는 것이 곧 두 쪽을 다르게 만드는
+    /// 일이라 스스로 빠져나올 수도 없다.
+    #[test]
+    fn a_row_only_one_side_added_that_does_not_read_is_merged_in() {
+        let spike = line("argos-0009", ",\"kind\":\"spike\"");
+        assert!(row(&spike).is_some_and(|(_, r)| !r.read), "`kind` 를 읽어 버렸다 — 시험 줄이 낡았다");
+        let o = format!("{}\n{}\n", line("argos-0001", ""), line("argos-0002", ""));
+        let a = format!("{}\n{}\n", line("argos-0001", ",\"priority\":1"), line("argos-0002", ""));
+        let b = format!("{o}{spike}\n");
+        let (text, clashes) = merge(&o, &a, &b);
+        assert!(clashes.is_empty(), "못 읽는 줄 하나로 파일째 넘겼다 — {clashes:?}\n{text}");
+        assert!(text.contains("\"priority\":1"), "이쪽 고침이 사라졌다\n{text}");
+        // 원문 그대로, 그리고 `store::render_issues` 처럼 **뒤에** 선다.
+        assert_eq!(text.lines().last(), Some(spike.as_str()), "{text}");
+    }
+
+    /// **못 읽는 줄도 둘 다 고쳤으면 그 줄에만 표식이 선다**(moai-1a55.4oh). id 로 짝지었으니
+    /// "한쪽만 건드렸다" 와 "둘 다 건드렸다" 가 갈리고, 옆 이슈는 그대로 이슈마다 풀린다.
+    #[test]
+    fn a_row_that_does_not_read_and_both_sides_changed_goes_to_a_person() {
+        let spike = |extra: &str| line("argos-0009", &format!(",\"kind\":\"spike\"{extra}"));
+        let o = format!("{}\n{}\n", line("argos-0001", ""), spike(""));
+        let a = format!("{}\n{}\n", line("argos-0001", ",\"priority\":1"), spike(",\"tags\":[\"a\"]"));
+        let b = format!("{}\n{}\n", line("argos-0001", ""), spike(",\"tags\":[\"b\"]"));
+        let (text, clashes) = merge(&o, &a, &b);
+        assert_eq!(clashes, ["argos-0009"], "못 읽는 줄의 두 고침 중 하나를 말없이 골랐다\n{text}");
+        assert!(text.contains("\"priority\":1"), "옆 이슈까지 사람에게 넘겼다\n{text}");
+        assert!(text.contains("\"a\"") && text.contains("\"b\""), "두 쪽을 다 안 보여 준다\n{text}");
+    }
+
+    /// **같은 id 를 든 줄이 둘이면 그 id 가 통째로 사람에게 간다**(moai-2m94, 리뷰
+    /// moai-1a55.67v 의 6·7·13번). 한 줄을 열쇠 없는 칸으로 밀어냈을 때는 그 줄이 어느 칸에
+    /// 서는지가 **그 파일에 무엇이 또 있는가**에 달려, 세 쪽이 서로 다르게 갈렸다. 그러면
+    /// [`settle`] 과 [`unkeyed`] 가 같은 줄을 서로 다른 자로 풀어, 한쪽이 지운 줄이 말없이
+    /// 되살아나거나 겹친 id 를 든 파일이 그대로 나왔다 — 둘 다 종료 코드 0 이었다.
+    #[test]
+    fn rows_sharing_one_id_go_to_a_person() {
+        let junk = line("argos-0001", ",\"kind\":\"spike\"");
+        let good = line("argos-0001", "");
+        // 혼자면 제 id 로 짝지어진다 — 열쇠 없는 칸에는 id 가 읽히는 줄이 안 선다.
+        let alone = format!("{junk}\n");
+        let solo = keyed(&alone).expect("겹친 id 가 없다");
+        assert!(!solo.by_id["argos-0001"][0].read, "`Issue` 로 읽어 버렸다 — 시험 줄이 낡았다");
+        assert!(solo.opaque.is_empty(), "id 가 읽히는데 열쇠 없는 줄로 갔다");
+        // 둘이 같은 id 를 들면 밀어내지 않고 쌓는다 — 파일 안의 차례가 달라도 셋이 같은 것을 본다.
+        for src in [format!("{junk}\n{good}\n"), format!("{good}\n{junk}\n")] {
+            let k = keyed(&src).expect("읽히는 줄은 하나뿐이다");
+            assert_eq!(k.by_id["argos-0001"].len(), 2, "{src}");
+            assert!(k.opaque.is_empty(), "겹친 줄 하나를 열쇠 없는 칸으로 밀어냈다\n{src}");
+        }
+        let both = format!("{good}\n{junk}\n");
+        // 잰 판 하나 — 이쪽이 `junk` 를, 저쪽이 `good` 을 지웠다. 골라 주면 한쪽 지우기가 사라진다.
+        let (text, clashes) = merge(&both, &format!("{good}\n"), &format!("{junk}\n"));
+        assert_eq!(clashes, ["argos-0001"], "겹친 id 에서 한쪽 지우기를 말없이 되물렀다\n{text}");
+        assert!(text.contains("\"title\":\"argos-0001 제목\""), "두 쪽을 다 안 보여 준다\n{text}");
+        // 잰 판 둘 — 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 있다.
+        let one = format!("{good}\n");
+        let (text, clashes) = merge(&one, &one, &both);
+        assert_eq!(clashes, ["argos-0001"], "겹친 id 를 든 파일을 말없이 냈다\n{text}");
+    }
+
+    /// **id 조차 못 읽는 줄은 센 수로 3-way 한다**(moai-1a55.4oh). 한쪽이 더한 것은 더하고 한쪽이
+    /// 지운 것은 뺀다 — `settle_field` 가 `tags` 에 쓰는 것과 같은 셈이다.
+    #[test]
+    fn lines_without_a_key_are_merged_by_their_count() {
+        let (x, y, z) = ("{깨진 하나", "{깨진 둘", "{깨진 셋");
+        // 이쪽은 `x` 를 지우고 `z` 를 더했다. 저쪽은 `y` 를 더했다.
+        assert_eq!(unkeyed(&[x, y], &[y, z], &[x, y, y]), [y, y, z], "더한 것과 뺀 것이 안 맞는다");
+        // 둘이 똑같은 줄을 각자 더했다 — 한 벌만 선다.
+        assert_eq!(unkeyed(&[], &[x], &[x]), [x]);
+        // 둘이 함께 지웠다.
+        assert_eq!(unkeyed(&[x], &[], &[]), [] as [&str; 0]);
+        // **여러 벌은 그 벌 수를 지킨다** — 집합으로 세면 그 중 하나가 말없이 사라진다.
+        assert_eq!(unkeyed(&[x, x], &[x, x], &[x, x]), [x, x]);
+        // **둘이 똑같이 한 벌씩 지운 것은 한 번 지운 것이다.** 두 번 빼면 두 쪽이 다 남기려던
+        // 벌까지 사라지는데, 사라진 것이 못 읽는 줄이라 아무 표면에도 안 뜬다 — 더하기를
+        // `max` 로 한 번만 세면서 빼기만 두 번 세면 그 비대칭이 곧 조용한 손실이다.
+        assert_eq!(unkeyed(&[x, x], &[x], &[x]), [x], "둘이 똑같이 지운 한 벌을 두 번 뺐다");
+        assert_eq!(unkeyed(&[x, x, x], &[x, x], &[x, x]), [x, x], "둘이 똑같이 지운 한 벌을 두 번 뺐다");
+    }
+
+    /// **그 셈이 실제로 [`by_issue`] 에 물려 있는지까지 본다**(리뷰 moai-1a55.67v). 위는
+    /// [`unkeyed`] 를 바로 부르므로 세 인자를 바꿔 끼워도 초록이고, 열쇠 없는 줄이 두 쪽에서
+    /// 다른 판을 `plan` 으로 지나 보는 시험이 하나도 없었다 — 파일 전체를 넘기던 갈래를 걷을 때
+    /// 그 판을 재던 시험이 같이 걷혔다.
+    #[test]
+    fn lines_without_a_key_ride_the_whole_plan() {
+        let (x, y, z) = ("{깨진 하나", "{깨진 둘", "{깨진 셋");
+        let row = line("argos-0001", "");
+        // 이쪽은 `x` 를 지우고 `z` 를 더했다. 저쪽은 `y` 를 더하고 이슈를 고쳤다.
+        let o = format!("{row}\n{x}\n");
+        let a = format!("{row}\n{z}\n");
+        let b = format!("{}\n{x}\n{y}\n", line("argos-0001", ",\"priority\":1"));
+        let (text, clashes) = merge(&o, &a, &b);
+        assert!(clashes.is_empty(), "열쇠 없는 줄로 사람을 불렀다 — {clashes:?}\n{text}");
+        assert!(text.contains("\"priority\":1"), "저쪽 고침이 사라졌다\n{text}");
+        // 지운 것은 빠지고 더한 것은 든다. **읽히는 줄 뒤에 선다** — `store::render_issues` 자리다.
+        assert_eq!(text.lines().skip(1).collect::<Vec<_>>(), [z, y], "{text}");
     }
 
     /// **충돌 표식에는 사람이 커밋한 그 줄이 그대로 선다.** 다시 지어 적으면 키가 이름
@@ -1514,6 +1757,41 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
         assert!(!text.contains("deferred_at"), "늦게 친 쪽은 도로 집었는데 미뤄 둔 채로 섰다\n{text}");
         assert!(text.contains(&format!("\"planned_at\":\"{T2}\"")), "{text}");
+    }
+
+    /// **못 읽는 계획 시각은 사람에게 간다**(moai-1a55.kh2). 못 읽는 쪽을 "모른다" 로 세어
+    /// 다른 쪽을 고르면 `deferred_at` 이 그 쪽에서 통째로 따라와, **진 쪽의 미루기가 자취
+    /// 없이 사라진다** — 표식도 경고도 없이 종료 코드 0 이었다.
+    #[test]
+    fn a_deferral_at_a_time_that_cannot_be_read_goes_to_a_person() {
+        let o = format!("{}\n", line("argos-0001", &format!(",\"planned_at\":\"{T0}\"")));
+        // 이쪽: 손으로 푼 줄이라 `+09:00` 이다. 14:00Z 로 저쪽보다 **늦은** 결정이다.
+        let late = "2026-09-19T23:00:00+09:00";
+        let a = format!("{}\n", line("argos-0001", &format!(",\"deferred_at\":\"{late}\",\"planned_at\":\"{late}\"")));
+        // 저쪽: 표준형이지만 이른 시각이고, 미뤄 두지 않았다.
+        let b = format!("{}\n", line("argos-0001", ",\"planned_at\":\"2026-09-19T04:00:00Z\""));
+        let (text, clashes) = merge(&o, &a, &b);
+        assert_eq!(clashes, ["argos-0001"], "못 읽는 시각에서 한쪽을 골랐다\n{text}");
+        assert!(text.contains(late), "이쪽 원문이 표식 안에 안 섰다\n{text}");
+    }
+
+    /// **없는 계획 시각도 사람에게 간다**(리뷰 moai-1a55.67v). [`later`] 는 없는 시각을 "모른다"
+    /// 로 읽어 있는 쪽을 고르지만, `planned_at` 이 없는 것은 *미뤄 두지 않았다* 는 결정이라 있는
+    /// 쪽을 골라 주면 그 결정이 `deferred_at` 과 함께 사라진다 — `defer --undo` 와 `defer` 가
+    /// 두 가지에서 맞서는 판이 이 저장소에서는 여느 일이다.
+    #[test]
+    fn a_row_with_no_planned_at_against_a_deferral_goes_to_a_person() {
+        let defer = |at: &str| line("argos-0001", &format!(",\"deferred_at\":\"{at}\",\"planned_at\":\"{at}\""));
+        let o = format!("{}\n", defer(T0));
+        // 이쪽: 두 필드를 걷었다. 저쪽: T2 에 다시 미뤘다.
+        let (a, b) = (format!("{}\n", stamped("argos-0001", "", T1)), format!("{}\n", defer(T2)));
+        let (text, clashes) = merge(&o, &a, &b);
+        assert_eq!(clashes, ["argos-0001"], "없는 시각을 '모른다' 로 세어 한쪽을 골랐다\n{text}");
+        // **[`coupled`] 의 `continue` 는 이 없음에 기대고 있다.** `settle_field` 에 갈래가 생기면
+        // 그 줄은 사람에게 안 가고 `deferred_at` 만 여느 규칙으로 갈려 나간다 — `coupled` 가
+        // 막으려는 바로 그 어긋남이다.
+        assert!(settle_field("planned_at", None, None, None).is_none(), "`settle_field` 에 planned_at 갈래가 생겼다");
+        assert!(settle_field("deferred_at", None, None, None).is_none(), "`settle_field` 에 deferred_at 갈래가 생겼다");
     }
 
     /// **표준형이 아닌 시각은 말없이 고르지 않는다.** 사전순이 곧 시간순인 것은 스무 자
