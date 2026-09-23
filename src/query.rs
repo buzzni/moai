@@ -666,12 +666,13 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
     // **걸음도 따로 두지 않는다**(moai-j038.vna) — 제가·조상이 내 것이거나 저나 조상의 에픽이 내 것인가는
     // 워크트리의 일을 가르는 [`crate::report::claims`] 와 같은 물음이라 그것을 부른다. 손으로 옮겨 둔
     // 걸음은 한쪽만 고쳐지는 날 훅이 세는 "그 일" 과 [NEW] 가 서는 "내게 온 것" 을 갈라놓는다.
-    // **마일스톤은 안 센다**(사용자 결정: 담당·조상·에픽) — 마일스톤 지도를 비워 넘긴다.
-    let epics = crate::report::groups(issues);
-    let stones = BTreeMap::new();
+    // **마일스톤은 안 센다**(사용자 결정: 담당·조상·에픽) — 에픽 축만 잰 재료로 든다
+    // (`Ties::epics_only`). 한때 빈 마일스톤 지도로 같은 뜻을 졌는데, 그 축의 답은 이제
+    // 지도가 아니라 줄에서 나오므로 빈 지도가 "안 센다" 를 못 뜻한다(moai-jk2u.ipf).
+    let ties = crate::report::Ties::epics_only(issues);
     issues
         .iter()
-        .filter(|i| crate::report::claims(&epics, &stones, &mine, i))
+        .filter(|i| crate::report::claims(&ties, &mine, i))
         .filter(|i| changed_since_seen(i, seen))
         .map(|i| i.id.as_str())
         .collect()
