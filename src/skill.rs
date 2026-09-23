@@ -118,11 +118,16 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 돌아(같은 날 측정값: 도구 호출 셋의 훅이 겹쳐 섰다) 그 도장이 살아 있는 이웃의 것과
 /// 안 갈린다 — **2026-09-23 사용자 결정으로 셸 한 줄만 넓혔다.** 다시 열 때는 그 겹침부터 잰다.
 ///
-/// **경로를 그 줄에 적는다**(moai-wza7, 2026-09-23 사용자 결정). 한때 뺐던 까닭은 [`quotable`]
-/// 이 줄바꿈을 안 걸러, 경로의 제어문자 하나가 JSON 문자열을 깨고 이 한 줄이 통째로 버려지는
-/// 것이었다. 그 자를 제어문자까지 넓혀 놓았으므로(같은 이슈) 이제 그 경로는 따옴표 안에서도
-/// JSON 안에서도 안전하고, 못 도는 바이너리가 **어느 파일인지**가 그 한 줄에 선다 — 알림이
-/// 대는 `moai skill status` 는 방금 exec 에 실패한 그 바이너리라 그 판에서는 같이 못 돈다.
+/// **경로를 그 줄에 적는다**(moai-wza7, 2026-09-23 사용자 결정). 한때 뺐던 까닭은 경로의
+/// 제어문자 하나가 JSON 문자열을 깨고 이 한 줄이 통째로 버려지는 것이었다. 그 자([`sayable`])를
+/// 따로 두었으므로 이제 실을 수 있는 경로는 실리고, 못 도는 바이너리가 **어느 파일인지**가 그
+/// 한 줄에 선다 — 알림이 대는 `moai skill status` 는 방금 exec 에 실패한 그 바이너리라 그
+/// 판에서는 같이 못 돈다.
+///
+/// **못 싣는 경로에서는 자리만 빠진다**(리뷰 moai-514e.hgz 5번). 그 자를 [`quotable`] 과 한
+/// 통에 두던 판은 셸에 멀쩡한 경로(탭이 든 디렉터리)까지 이름으로 바꿔 적어, 훅이 **딴
+/// 바이너리를 부르게** 했다 — 이 기계의 PATH 의 `moai` 는 옛 moai 의 것이다. 부르는 자와
+/// 말하는 자를 가른다: 경로는 그대로 불리고, 알림에서는 그 토막만 빠진다.
 ///
 /// **그래도 `moai skill status` 는 남긴다.** 126 의 까닭은 실행 비트만이 아니라 `noexec` 으로
 /// 얹힌 자리와 엉뚱한 아키텍처도 있어 `chmod +x` 를 단정하면 틀린 처방이 되고, PATH 에 도는
@@ -200,7 +205,12 @@ fn command(exe: &str, event: &str) -> String {
     let said = crate::text::single_quoted(event);
     // **경로도 인자 자리로 넘긴다** — 꼴에 박으면 경로의 `%` 가 변환 문자로 읽힌다(이벤트
     // 이름과 같은 까닭). `quotable` 을 지난 경로라 작은따옴표 안에서 셸이 아무것도 안 푼다.
-    let where_ = crate::text::single_quoted(exe);
+    //
+    // **실을 수 없는 경로면 자리를 통째로 뺀다**([`sayable`], 리뷰 moai-514e.hgz 5번) — 셸에는
+    // 멀쩡하지만 JSON 에는 못 싣는 경로(제어문자)가 그 자리다. 그런 경로도 훅은 그대로 부르니,
+    // 빠지는 것은 알림의 한 토막뿐이고 어느 파일인지는 `moai skill status` 가 댄다.
+    let (spot, where_) =
+        if sayable(exe) { (": %s", format!(" {}", crate::text::single_quoted(exe))) } else { ("", String::new()) };
     // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 부를 바이너리 자리를 섞는다. 같은 세션이
     // 저장소 둘을 오가면 둘 다 제 알림을 내야 하는데(제 바이너리가 저마다 못 돌 수 있다),
     // 이름만으로는 첫 저장소의 표식이 둘째의 입을 막는다. 셈은 셸이 못 하므로 **심을 때 박아
@@ -235,8 +245,8 @@ fn command(exe: &str, event: &str) -> String {
          case \"$c\" in 0|1) ;; *) \
          s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-${{CLAUDE_CODE_SESSION_ID:-$PPID}}.{event}.$c.said\"; \
          [ -e \"$s\" ] || {{ true 2>/dev/null > \"$s\" || :; \
-         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\" {where_}; }};; \
+         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
+         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_}; }};; \
          esac; exit 0"
     )
 }
@@ -381,15 +391,24 @@ pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
 
 /// 셸 한 줄의 따옴표 안에 그대로 적을 수 있는 경로인가.
 ///
-/// **제어문자도 거른다**(moai-wza7) — 넷은 셸이 따옴표를 깨는 글자고, 제어문자는 그 줄이
-/// 실어 나르는 **JSON 을** 깬다. 경로의 줄바꿈 하나가 `systemMessage` 문자열 안의 날 줄바꿈이
-/// 되면 `claude` 가 그 객체를 통째로 버려, 알리려던 말이 도리어 사라진다. `\t` 도 같다 —
-/// JSON 은 U+001F 까지를 문자열 안에 날것으로 못 둔다.
-///
-/// 거르면 [`exe_name`] 과 [`command`] 가 경로 대신 이름(`moai`)으로 적으므로, 그 뒤로는
-/// 알림에 실어도 안전하다.
+/// **제어문자는 여기서 안 거른다**(리뷰 moai-514e.hgz 5번). 한때 [`sayable`] 과 한 자였는데,
+/// 이 자는 **어느 바이너리를 부를지**를 가르는 자리다 — 탭이 든 디렉터리에 받은 체크아웃은
+/// 리눅스에서 멀쩡하고 `"…"` 안에서도 멀쩡한데, 거절하면 훅 넷이 PATH 의 `moai` 를 부른다.
+/// 이 저장소가 바로 그 반례라 CLAUDE.md 가 적어 두었다: PATH 의 `moai` 는 옛 moai 의
+/// 바이너리다. 조용히 남의 도구가 이 저장소의 규칙을 판정하거나, 없으면 `|| exit 0` 으로
+/// 규칙 넷이 다 꺼진다. 둘을 가른 뒤로 그 경로는 그대로 불리고, 알림에만 안 실린다.
 fn quotable(exe: &str) -> bool {
-    !exe.contains(['"', '\\', '$', '`']) && !exe.contains(char::is_control)
+    !exe.contains(['"', '\\', '$', '`'])
+}
+
+/// 알림의 JSON 문자열 안에 그대로 실을 수 있는 경로인가(moai-wza7).
+///
+/// 제어문자 하나면 `systemMessage` 안의 날 줄바꿈·탭이 되어 `claude` 가 그 객체를 통째로
+/// 버린다 — 알리려던 말이 도리어 사라진다. JSON 은 U+001F 까지를 문자열 안에 날것으로 못 둔다.
+/// 못 실을 경로면 [`command`] 가 **자리 없이** 말한다: 틀린 자리를 대느니 안 대는 편이 낫고,
+/// 그 자리는 알림이 함께 대는 `moai skill status` 가 댄다.
+fn sayable(exe: &str) -> bool {
+    quotable(exe) && !exe.contains(char::is_control)
 }
 
 /// `claude` 가 장부에 적어 둔 설치 한 건.
@@ -1033,13 +1052,20 @@ mod tests {
         assert_eq!(exe_name(Path::new("/tmp/we$ird/moai"), None), "moai");
         assert_eq!(exe_name(Path::new("/tmp/plain/moai"), None), "/tmp/plain/moai");
 
-        // **제어문자도 같은 자리에서 걸린다**(moai-wza7) — 셸은 그 경로를 그대로 삼키지만
-        // 알림의 JSON 은 날 줄바꿈 하나에 통째로 버려진다. 알림에 경로를 실으려면 이 자가
-        // 먼저 넓어져 있어야 한다.
+        // **제어문자가 든 경로는 그대로 부르되 알림에만 안 싣는다**(moai-wza7, 리뷰
+        // moai-514e.hgz 5번). 한 자로 두던 판은 셸에 멀쩡한 경로까지 이름으로 바꿔 적어 훅이
+        // PATH 의 딴 moai 를 불렀다 — 이 기계에서 그것은 옛 moai 의 바이너리다.
         for hostile in ["/tmp/두\n줄/moai", "/tmp/탭\t자리/moai", "/tmp/\u{7f}/moai"] {
-            assert_eq!(exe_name(Path::new(hostile), None), "moai", "제어문자가 든 경로를 그대로 적었다");
+            assert_eq!(exe_name(Path::new(hostile), None), hostile, "부를 자리를 이름으로 바꿔 적었다");
             let cmd = command(hostile, "stop");
-            assert!(!cmd.contains('\n') && !cmd.contains('\t'), "훅 한 줄에 날 제어문자가 들어갔다 — {cmd:?}");
+            assert!(cmd.contains(&format!("\"{hostile}\" hook stop")), "그 경로를 안 부른다 — {cmd:?}");
+            // 알림에는 그 경로가 안 든다 — JSON 문자열 안의 날 제어문자 하나면 `claude` 가
+            // 그 객체를 통째로 버려, 알리려던 말이 도리어 사라진다.
+            let (_, notice) = cmd.split_once("systemMessage").expect("알림이 없다");
+            assert!(
+                !notice.contains('\n') && !notice.contains('\t') && !notice.contains('\u{7f}'),
+                "알림에 날 제어문자가 들어갔다 — {notice:?}"
+            );
         }
     }
 
