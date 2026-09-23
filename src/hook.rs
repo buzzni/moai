@@ -3761,43 +3761,44 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 내는 것은 "그 뒤는 명령이 아니라 글이다" 하나뿐이고, 그 글을 짓는 자리는 다른 꼴들과
     // 나란히 선다.
     if head == "find" {
-        // **`-execdir`·`-okdir` 은 자리를 모른다**(moai-hktu, 2026-09-23 사용자 결정) — 그 둘은
-        // 찾은 파일이 **있는 디렉터리**에서 돌아 [`Wrapper::elsewhere`] 와 같은 자리다
-        // (`env -C DIR`·`su -l`). 2026-09-23 에 쟀다: `find a -name f -execdir pwd \;` 는 그 파일의
-        // 디렉터리를 찍고 `-exec` 는 부른 자리를 찍는다. 안 적던 판은 `find /tmp -execdir tee
-        // src/store.rs \;` 를 이 저장소의 쓰기라며 **잘못 막았다**.
+        // **`-execdir`·`-okdir` 은 찾은 파일이 있는 디렉터리에서 돈다**(moai-hktu) — [`FIND_AWAY`]
+        // 의 둘이고, `-exec`·`-ok`([`FIND_HERE`])은 find 를 부른 자리에서 돈다. 2026-09-23 에 쟀다:
+        // `find a -name f -execdir pwd \;` 는 그 파일의 디렉터리를 찍고 `-exec` 는 부른 자리를
+        // 찍는다. 안 가리던 판은 `find /tmp -execdir tee src/store.rs \;` 를 이 저장소의 쓰기라며
+        // **잘못 막았다**.
         //
-        // **두 축을 함께 닫는다** — `*spot` 은 쓰기 축의 상대 경로와 `moai` 축을 한 값으로 닫는다.
-        // 쓰기 축만 닫으려면 자리 어휘가 둘로 갈라져([`Cmd::elsewhere`] 와 [`Layer::Shell`] 이 함께)
-        // moai-2avz 가 하나로 모아 둔 것을 다시 가르는 일이 되고, 되돌리기 어렵다. 값은
-        // `find . -execdir moai add x \;` 가 규칙 1 을 지나가는 것 하나고, 그것은 아무도 안 쓰는
-        // 철자다 — 한 줄이라 다시 열 수 있다.
+        // **재는 것은 술어가 아니라 시작 자리다**(2026-09-23 사용자 결정, 리뷰 moai-514e.doy).
+        // `-execdir` 은 찾은 파일이 **있는** 디렉터리에서 도니, 찾기 시작한 자리에 바로 놓인
+        // 파일이 걸리면 그 자리가 곧 부른 자리다 — 같은 날 쟀다: `find . -maxdepth 1 -name
+        // Cargo.toml -execdir tee src/store.rs \;` 는 여기의 `src/store.rs` 를 정말 만든다.
+        // 술어만 보고 자리를 모른다고 적던 첫 판은 그래서 `find . -execdir sed -i s/a/b/ src/x.rs \;`
+        // 를 빈손으로 넘겼다 — 드문 철자가 아니라 흔한 쪽이다. 시작 자리가 여기 밑이면 그 안의
+        // 상대 경로는 어느 깊이에서 돌든 **이 저장소의 파일**이니 그대로 본다.
         //
-        // **줄에 그 둘이 섰을 때만이다** — find 줄 전체에 세우면 `find . -exec tee src/x.rs \;` 의
-        // 정말 도는 쓰기까지 함께 버린다.
+        // **딴 자리인 것이 확실할 때만 적는다** — 절대 경로(`/tmp`)와 올라가는 경로(`../x`)다.
+        // `$VAR` 처럼 모르는 것은 여기 밑으로 친다: 자리를 모른다고 적는 것은 그 줄의 쓰기를
+        // 통째로 버리는 일이라, 모르는 것에 적으면 새는 쪽으로 기운다.
         //
-        // **그리고 `-exec`·`-ok` 이 함께 선 줄에서는 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은
-        // 줄 하나에 한 값이고 [`exec_of`] 는 술어를 다 걷어 **한 글**로 이어, 두 자리가 한 줄에
-        // 서면 부른 자리에서 **정말 도는** 쓰기까지 함께 버린다:
-        // `find . -execdir true \; -exec sed -i s/a/b/ src/x.rs \;` 는 그 파일을 정말 고치는데
-        // 빈손으로 규칙 2 를 지나갔고, `-exec moai add x \;` 는 규칙 1 을 지나갔다. 그때는 안 적던
-        // 판으로 돌아간다 — `-execdir` 쪽을 여기 것으로 **잘못 막을** 뿐, 도는 쓰기를 잃지 않는다.
+        // **아직 못 가리는 자리** — 시작 자리가 이 저장소 밑의 **절대** 경로면(`find /repo/src
+        // -execdir tee x \;`) 딴 자리로 읽어 그 상대 경로를 버린다. 여기서 뿌리를 모르기
+        // 때문이고([`wrapped`] 는 낱말만 받는다), 절대 경로의 쓰기는 그와 무관하게 그대로 걸린다.
         //
-        // **이 한 줄이 낱말로 선 철자도 막는다** — `any` 는 술어 자리가 아닌 낱말도 봐서,
-        // `find . -exec tee src/store.rs \; -name -execdir` 은 `-execdir` 이 `-name` 의 본보기일
-        // 뿐인데 그 한 낱말로 쓰기 축과 `moai` 축이 통째로 꺼졌다. 어느 find 줄에나 붙이면 되는
-        // 샛길이었다. 이제 남는 줄은 `-exec`·`-ok` 이 하나도 없는 줄뿐이고, 거기서 도는 술어는
-        // `-execdir`·`-okdir` 아니면 없다.
+        // **`-exec`·`-ok` 이 함께 선 줄에서는 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은 줄
+        // 하나에 한 값이고 [`exec_of`] 는 술어를 다 걷어 **한 글**로 이어, 두 자리가 한 줄에 서면
+        // 부른 자리에서 **정말 도는** 쓰기까지 함께 버린다:
+        // `find /tmp -execdir true \; -exec sed -i s/a/b/ src/x.rs \;` 는 그 파일을 정말 고친다.
         //
-        // **그 둘도 첫 칸의 것에는 부른 자리에서 돈다**(리뷰 moai-514e.doy) — `-execdir` 은 찾은
-        // 파일이 **있는** 디렉터리에서 도니, 찾기 시작한 자리에 바로 놓인 파일이 걸리면 그 자리가
-        // 곧 부른 자리다. 2026-09-23 에 쟀다: `find . -maxdepth 1 -name Cargo.toml -execdir tee
-        // src/store.rs \;` 는 여기의 `src/store.rs` 를 정말 만든다. 그래서 이 값은 "저 자리의
-        // 상대 경로" 를 재는 것이 아니라 **시작 자리를 안 보고 술어만 보는 어림**이다 — 잘못
-        // 막는 쪽을 접고 새는 쪽을 받은 2026-09-23 결정(moai-hktu)이 선 자리고, 되돌린다면
-        // 술어가 아니라 **시작 자리**(첫 피연산자가 이 저장소 밑인가)로 재는 쪽이다.
+        // **그 한 줄이 낱말로 선 철자도 막는다** — `any` 는 술어 자리가 아닌 낱말도 봐서,
+        // `find /tmp -exec tee src/store.rs \; -name -execdir` 은 `-execdir` 이 `-name` 의 본보기일
+        // 뿐인데 그 한 낱말로 쓰기 축과 `moai` 축이 통째로 꺼졌다.
+        //
+        // **시작 자리를 안 대면 find 는 `.` 에서 찾는다** — 그때는 여기 밑이다. 빈 목록에
+        // `all` 을 물으면 참이라, 비었는가를 먼저 묻는다.
+        let starts = find_starts(rest);
         *spot |= rest.iter().any(|w| FIND_AWAY.contains(&w.as_str()))
-            && !rest.iter().any(|w| FIND_HERE.contains(&w.as_str()));
+            && !rest.iter().any(|w| FIND_HERE.contains(&w.as_str()))
+            && !starts.is_empty()
+            && starts.iter().all(|d| away_from_here(d));
         return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find, args: Vec::new() });
     }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
@@ -4391,6 +4392,39 @@ fn basename(word: &str) -> &str {
 /// 걸린다. 잘못 막는 쪽이라 새는 것보다 비싸다. `$PWD` 처럼 푸는 자리는 글자로 모르니 거짓이다.
 fn nowhere(d: &str) -> bool {
     d.starts_with('.') && d.split('/').all(|p| p.is_empty() || p == ".")
+}
+
+/// **`find` 의 시작 자리들**(moai-hktu) — 술어가 시작되기 전의 피연산자다.
+///
+/// find 의 꼴은 `find [-H|-L|-P] [-D …] [-O…] [시작 자리…] [식]` 이라, 앞 스위치 다섯을 먼저
+/// 지나고 나서 `-` 로 시작하지 않는 낱말을 걷는다. 식의 첫 낱말은 `-name` 처럼 `-` 로 서거나
+/// 괄호·`!`·`,` 다.
+///
+/// **빈 목록은 "안 댔다" 는 뜻이고, 그때 find 는 `.` 에서 찾는다** — 부르는 쪽이 그것을 가른다.
+fn find_starts(rest: &[String]) -> Vec<&str> {
+    let mut at = 0;
+    while let Some(w) = rest.get(at) {
+        let w = w.as_str();
+        if matches!(w, "-H" | "-L" | "-P") || w.starts_with("-D") || w.starts_with("-O") {
+            at += 1;
+        } else {
+            break;
+        }
+    }
+    (rest[at..].iter())
+        .take_while(|w| !w.starts_with('-') && !matches!(w.as_str(), "(" | ")" | "!" | ","))
+        .map(String::as_str)
+        .collect()
+}
+
+/// **이 경로가 여기 밑이 아닌 것이 확실한가**(moai-hktu) — 절대 경로와 홈(`~`), 그리고 올라가는
+/// 경로다.
+///
+/// **모르는 것은 여기 밑으로 친다** — `$VAR` 도 `"$(pwd)"` 도 참이 아니다. 이 물음이 참이면
+/// [`wrapped`] 의 find 갈래가 그 줄의 상대 경로를 통째로 버리니, 모르는 것에 참을 내면 새는
+/// 쪽으로 기운다.
+fn away_from_here(d: &str) -> bool {
+    d.starts_with('/') || d.starts_with('~') || d.split('/').any(|p| p == "..")
 }
 
 /// 이 토막이 `moai` 를 부른다면, 그 뒤의 인자들.
@@ -9024,42 +9058,60 @@ mod tests {
             "find . -type f -exec sed -i s/a/b/ src/x.rs +",
             // **두 자리가 한 줄에 서면 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은 줄 하나에 한
             // 값이라, `-execdir` 하나로 부른 자리에서 **정말 도는** `-exec` 의 쓰기까지 버렸다.
-            "find . -execdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
-            "find . -okdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            "find /tmp -execdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            "find /tmp -okdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
             // **술어 자리가 아닌 낱말은 자리를 안 옮긴다** — `-execdir` 이 `-name` 의 본보기일
             // 뿐인데 그 한 낱말로 규칙 둘이 꺼져, 어느 find 줄에나 붙이면 되는 샛길이었다.
             // (본보기가 술어 **앞**에 선 꼴은 [`exec_of`] 가 그것을 술어로 읽어 아직 못 본다 —
             // 이 줄이 닫은 것과 다른 자리고, 이 에픽이 연 것도 아니다.)
-            "find . -exec sed -i s/a/b/ src/x.rs \\; -name -execdir",
+            "find /tmp -exec sed -i s/a/b/ src/store.rs \\; -name -execdir",
+            // **시작 자리가 여기 밑이면 `-execdir` 도 여기 것이다**(2026-09-23 사용자 결정,
+            // 리뷰 moai-514e.doy) — 첫 칸에 놓인 파일이 걸리면 그 자리가 곧 부른 자리고, 더 깊이
+            // 가도 여기 밑이다. 2026-09-23 에 쟀다: `find . -maxdepth 1 -name Cargo.toml -execdir
+            // tee src/store.rs \;` 는 여기의 `src/store.rs` 를 정말 만든다.
+            "find . -execdir sed -i s/a/b/ src/x.rs \\;",
+            "find . -okdir tee src/x.rs \\;",
+            // 시작 자리를 안 대면 find 는 `.` 에서 찾는다.
+            "find -execdir tee src/x.rs \\;",
+            // 앞 스위치와 여러 시작 자리 — 하나라도 여기 밑이면 여기 것이다.
+            "find -L src -execdir tee src/x.rs \\;",
+            "find /tmp src -execdir tee src/x.rs \\;",
+            // 모르는 시작 자리(`$VAR`)는 여기 밑으로 친다 — 자리를 모른다고 적으면 그 줄의
+            // 쓰기를 통째로 버린다.
+            "find \"$WHERE\" -execdir tee src/x.rs \\;",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "술어 안의 쓰기를 가렸다 — {cmd}\n{got:?}");
         }
-        // **`-execdir`·`-okdir` 은 찾은 파일의 디렉터리에서 돈다**(moai-hktu, 2026-09-23 사용자
-        // 결정) — 그 자리의 상대 경로는 여기 것이 아니다. 2026-09-23 에 쟀다:
-        // `find a -name f -execdir pwd \;` 는 그 파일의 디렉터리를 찍는다. 안 적던 판은
-        // `find /tmp -execdir tee src/store.rs \;` 를 이 저장소의 쓰기라며 잘못 막았다.
+        // **시작 자리가 여기 밑이 아닌 것이 확실하면 그 상대 경로는 여기 것이 아니다**(moai-hktu,
+        // 2026-09-23 사용자 결정) — `-execdir`·`-okdir` 은 찾은 파일이 있는 디렉터리에서 돈다.
+        // 2026-09-23 에 쟀다: `find a -name f -execdir pwd \;` 는 그 파일의 디렉터리를 찍는다.
+        // 안 가리던 판은 `find /tmp -execdir tee src/store.rs \;` 를 이 저장소의 쓰기라며 막았다.
         for cmd in [
             "find /tmp -execdir tee src/store.rs \\;",
-            "find . -execdir sed -i s/a/b/ src/x.rs \\;",
-            "find . -okdir tee src/x.rs \\;",
+            "find /tmp -okdir tee src/x.rs \\;",
+            "find ../곁 -execdir tee src/x.rs \\;",
+            "find ~/곳 -execdir tee src/x.rs \\;",
+            "find /tmp /var -execdir tee src/x.rs \\;",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "딴 자리의 상대 경로를 여기 쓰기로 읽었다 — {cmd}\n{got:?}");
         }
         // **자리를 안 타는 쪽은 그대로 막는다** — 절대 경로는 어느 디렉터리에서 돌든 그 파일이다
         // (`su -l` 과 같은 줄이다).
-        let cmd = "find . -execdir tee /repo/src/x.rs \\;";
+        let cmd = "find /tmp -execdir tee /repo/src/x.rs \\;";
         let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
         assert!(matches!(got, Decision::Deny(_)), "딴 자리에서도 도는 절대 경로 쓰기를 놓쳤다\n{got:?}");
-        // **`moai` 축은 함께 닫힌다** — `*spot` 은 상대 경로와 `moai` 축을 한 값으로 닫는다. 쓰기
-        // 축만 닫으려면 자리 어휘를 둘로 갈라야 해 moai-2avz 가 하나로 모아 둔 것을 다시 가르는
-        // 일이 되고, 값은 아무도 안 쓰는 이 철자 하나뿐이다. 되돌리는 것은 저 한 줄이다.
-        for cmd in ["find . -execdir moai add '딴 일' \\;", "find . -okdir moai add '딴 일' \\;"] {
+        // **`moai` 축도 같은 값으로 갈린다** — `*spot` 은 상대 경로와 `moai` 축을 한 값으로 닫는다.
+        assert!(
+            matches!(guard_create(&all, &cfg(), &here(), "find . -execdir moai add '딴 일' \\;"), Decision::Deny(_)),
+            "여기 밑에서 도는 줄이 규칙 1 을 지나갔다"
+        );
+        for cmd in ["find /tmp -execdir moai add '딴 일' \\;", "find /tmp -okdir moai add '딴 일' \\;"] {
             assert_eq!(
                 guard_create(&all, &cfg(), &here(), cmd),
                 Decision::Pass,
-                "자리를 모르는 줄이 규칙 1 에 섰다 — {cmd}"
+                "딴 트래커의 줄이 규칙 1 에 섰다 — {cmd}"
             );
         }
         // **없는 쓰기를 지어내지 않는다** — find 는 셸을 안 거치고 곧장 exec 한다. 감싸지 않으면
