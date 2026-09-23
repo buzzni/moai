@@ -1238,3 +1238,35 @@
 {"ts":"2026-09-23T05:01:21Z","id":"moai-x23h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1a55 의 멤버 moai-1a55.kh2 로 펼쳤다"}
 {"ts":"2026-09-23T05:01:46Z","id":"moai-1a55.4oh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T05:01:46Z","id":"moai-1a55.kh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T05:14:49Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"todo"}
+{"ts":"2026-09-23T05:17:32Z","id":"moai-99yy.m75","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 자리와 경로를 푸는 자의 남은 자리"}
+{"ts":"2026-09-23T05:17:38Z","id":"moai-99yy.m75","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T05:17:58Z","id":"moai-fufl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 1만 줄이 넘으면 몇 초를 쓴다"}
+{"ts":"2026-09-23T05:18:08Z","id":"moai-99yy.m75","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 워크트리 worktree-moai-99yy 에서 도는 중이다. 끝나면 원문을 이 줄에 노트로 붙이고, 받은 것과 넘긴 것을 -m 에 적어 닫는다."}
+{"ts":"2026-09-23T05:18:08Z","id":"moai-99yy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 넷(moai-fr0a·moai-ln11·moai-jx70·moai-dhx9)을 워크트리 worktree-moai-99yy 에 커밋했고 develop 을 받아 시험이 다 돈다. 리뷰 moai-99yy.m75 가 도는 중이고, 그것이 끝나 develop 에 머지된 뒤에 그 넷을 닫는다. moai-xk0q 와 moai-xvyz 는 첫 칸에 그대로 선다."}
+{"ts":"2026-09-23T05:18:14Z","id":"moai-s8go.5ye","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 소속을 id 로 푸는 값과 기계 표면"}
+{"ts":"2026-09-23T05:18:18Z","id":"moai-fr0a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-99yy 에 커밋했다. 리뷰 moai-99yy.m75 가 끝나고 develop 에 머지된 뒤에 닫는다."}
+{"ts":"2026-09-23T05:18:20Z","id":"moai-s8go.5ye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T05:18:24Z","id":"moai-ln11","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-99yy 에 커밋했다. 리뷰 moai-99yy.m75 가 끝나고 develop 에 머지된 뒤에 닫는다."}
+{"ts":"2026-09-23T05:18:29Z","id":"moai-jx70","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-99yy 에 커밋했다. 리뷰 moai-99yy.m75 가 끝나고 develop 에 머지된 뒤에 닫는다."}
+{"ts":"2026-09-23T05:18:34Z","id":"moai-dhx9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-99yy 에 커밋했다. 리뷰 moai-99yy.m75 가 끝나고 develop 에 머지된 뒤에 닫는다."}
+{"ts":"2026-09-23T05:19:14Z","id":"moai-s8go.5ye","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 배경에서 돈다. 끝나면 원문을 노트로 남기고, 고친 것과 넘긴 것을 -m 으로 적어 닫는다. 그 뒤 워크트리 worktree-moai-s8go 을 develop 에 머지한다"}
+{"ts":"2026-09-23T05:19:21Z","id":"moai-1pra","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 워크트리 worktree-moai-s8go 의 65a64b2 에 있다. 리뷰(moai-s8go.5ye)가 끝나 머지가 develop 에 앉으면 닫는다"}
+{"ts":"2026-09-23T05:19:24Z","id":"moai-wuzi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 워크트리 worktree-moai-s8go 의 8940939 에 있다. 리뷰(moai-s8go.5ye)가 끝나 머지가 develop 에 앉으면 닫는다"}
+{"ts":"2026-09-23T05:25:57Z","id":"moai-1a55.4oh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-09-23 사용자 결정. 재 본 것을 함께 보인 뒤 물었다.\n\n**못 읽는 줄도 JSON 과 `id` 까지 읽히면 id 로 짝짓는다.** 선택지 셋을 냈다.\n\n- A — 못 읽는 줄 전체를 집합 3-way 로만 풀고 충돌은 두지 않는다\n- B — 거기에 좁은 충돌 조건을 더해 못 읽는 줄 묶음에만 표식을 세운다\n- C — id 가 읽히는 줄은 id 로 짝짓고, 열쇠 없는 줄만 집합 3-way 한다\n\n고른 것은 C 다. 가른 것은 못 읽는 줄의 출처가 둘로 갈린다는 실측이다. `Kind` 는\n갈래 넷짜리 enum 이고 `Status` 는 문자열이라, 새 바이너리가 쓴 `kind` 하나면 JSON\n도 id 도 멀쩡한 채 `Issue` 로만 안 읽힌다 — 이 이슈가 겨눈 판이 그것이다. 손으로\n푼 충돌이 남긴 깨진 JSON 은 id 조차 못 읽는다.\n\n앞엣것을 짝지어야 \"한쪽만 건드렸다\" 와 \"둘 다 건드렸다\" 가 갈린다. A 와 B 는 그\n둘을 못 가려, 둘 다 고친 판에서 두 쪽을 다 남기거나 옆 이슈까지 함께 사람에게\n넘긴다."}
+{"ts":"2026-09-23T05:26:47Z","id":"moai-1a55.8zc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 못 읽는 줄과 못 읽는 시각을 머지가 다루는 자리"}
+{"ts":"2026-09-23T05:26:53Z","id":"moai-1a55.8zc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T05:27:05Z","id":"moai-1a55","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 둘은 커밋까지 끝났다(ca4606a, 37bcd81). 리뷰 moai-1a55.8zc(max --fix)가 배경에서 돈다. 그 고침 뒤에 develop 머지와 닫기가 남았다"}
+{"ts":"2026-09-23T05:27:30Z","id":"moai-1a55.4oh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T05:27:31Z","id":"moai-1a55.kh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T05:27:32Z","id":"moai-1a55.4oh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 37bcd81 로 끝났다. 에픽 끝 리뷰 moai-1a55.8zc 를 기다린다"}
+{"ts":"2026-09-23T05:27:33Z","id":"moai-1a55.kh2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: ca4606a 로 끝났다. 에픽 끝 리뷰 moai-1a55.8zc 를 기다린다"}
+{"ts":"2026-09-23T05:27:34Z","id":"moai-1a55.8zc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 배경에서 돈다. 결과를 받아 고친 뒤 원문 노트와 닫는 줄을 남기고 develop 에 머지한다"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트가 서로 찾고 편지하는 자리 (벤더 중립)"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.p7o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".moai/agents 슬롯 파일과 lease — moai agents 가 찾는다"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.xb8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":".moai/mail 과 moai send·inbox --take"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.7s4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 슬롯을 lease 로 둔다 — 두 감독을 비추되 막지 않는다"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.pjy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"poke 를 임자가 밝히고 감독이 그대로 부른다"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.351","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 agents·inbox 를 한 줄로 비춘다"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.7xv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독·일꾼 스킬을 CLI 로 옮긴다 — SendMessage 없이 도는 길"}
+{"ts":"2026-09-23T05:41:46Z","id":"moai-bf0c.dx0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"codex 또는 gemini 일꾼으로 한 에픽을 끝까지 돌려 잰다"}
