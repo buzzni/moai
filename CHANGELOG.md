@@ -229,6 +229,26 @@ on finding them.
 - `moai ready` no longer prints `moai defer  --undo` with no id in it. Where an id
   stands twice, the row that left the plan and the row the undo target was read
   back from could be different lines.
+- **A defer no longer travels from one row to its twin.** The map of what is out
+  of the plan was keyed by id and written with `filter_map`, so it had no way to
+  say "this row is not deferred" — the defer a row inherited from a deferred epic
+  or release stayed on that id and reached the other row, which had written a live
+  epic of its own. `moai ready` then handed out neither row and listed neither
+  under `held`, `moai show --deferred` listed both, and `moai show <the live
+  release>` still counted the second row as a live member: one repository saying
+  four different things, on an id whose writes `duplicate_id` had already stopped.
+  The surfaces that offer, hide, count, draw and gate a row now read that row's own
+  answer: `ready`, the board and the lists, the `deferred` notice, the hook's "what
+  you hold", the `deferred` word on `moai show --tree`, the explorer's hide toggle,
+  its spinner and its detail badge, the member count a group reads its column from,
+  and the "you can close this now" line a closing write prints. Where only an id is
+  in hand — the blocker a row names in `blocked_by`, `shelved_by` on `moai show
+  <id>`, and the `moai defer <id> --undo` these lines print — the later row answers,
+  as it already does for the kind, the column and the title shown under that id.
+  A row whose id a group also stands on keeps its own answer too; only the group
+  row itself falls back to the id, because whether a group is out of the plan
+  depends on the column it reads from members counted by id.
+
 - A row one side broke by hand now stands **inside** the conflict markers on that
   side. Pairing a row needed its JSON to parse, so a row edited until it stopped
   being JSON left that side of the marker empty — which reads as "that side

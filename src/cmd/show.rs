@@ -214,9 +214,17 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
     // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.
     let mut hidden_rows: Vec<(usize, Hide)> = Vec::new();
+    // **고른 줄은 자리로도 든다**(리뷰 moai-jk2u.hr4) — 트리가 id 로 되짚던 때는 고르는 자가
+    // 줄마다 답하는데(`Where::deferred`) 되짚는 자가 id 라, 뽑힌 쌍둥이 하나가 제 짝까지
+    // 트리에 도로 들였다: 같은 거르개에 목록은 `미룸 1 숨김` 을 달고 트리는 그 줄을 그리며
+    // 아무 말도 안 했다.
+    let mut kept: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
     for (at, i) in load.issues.iter().enumerate().filter(|(_, i)| wide.matches(i, &now, &wh)) {
         match filter.hidden_by(i, &wh) {
-            None => shown.push(i.clone()),
+            None => {
+                kept.insert(at);
+                shown.push(i.clone());
+            }
             Some(why) => hidden_rows.push((at, why)),
         }
     }
@@ -275,10 +283,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
         // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
-        let shown_ids: std::collections::BTreeSet<&str> = shown.iter().map(|i| i.id.as_str()).collect();
         // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
         let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
-        let keep = |at: usize| shown_ids.contains(load.issues[at].id.as_str());
+        let keep = |at: usize| kept.contains(&at);
         let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, screen);
         // **트리도 안 낸 것을 말한다.** 롤업 머리글은 `is_work` 로 세므로
         // 미뤄 둔 멤버까지 세는데, 그 줄은 여기서 빠진다 — 말하지 않으면

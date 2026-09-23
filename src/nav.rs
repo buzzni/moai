@@ -133,9 +133,15 @@ pub struct Index {
     /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
     /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
     by_id: BTreeMap<String, usize>,
-    /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
-    /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
+    /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). **id 밖에 없는 자리**(막는 줄)가
+    /// 쓴다 — 프레임마다 조상을 다시 타지 않게.
     deferred_root: BTreeMap<String, String>,
+    /// 자리 → 그 줄을 계획에서 뺀 줄(`report::Soil::shelved`). **줄을 든 자리는 이것을
+    /// 짚는다**(리뷰 moai-jk2u.hr4) — 위의 지도는 id 로 접은 것이라 같은 id 의 앞줄이 뒷줄의
+    /// 답을 입는다. 곁의 [`Index::epic_of`]·[`Index::milestone_of`] 가 자리로 답하는 것과
+    /// 같은 자다(moai-2m9p): 내주는 문(`ready`)과 목록이 줄마다 답하는데 그리는 쪽만 id 로
+    /// 답하면, 트리와 탐색기가 `moai ready` 가 내주는 줄에 `미룸` 을 달았다.
+    shelved: Vec<Option<String>>,
     /// 자리 → 그 자리에 선 줄·그 밑에 걸린 줄·바로 밑의 바구니 마디([`Place`]). **미리 짓는다**
     /// (moai-teka) — 목록 한 층을 짓는 [`Index::entries_sorted`] 가 `homes` 전부를 훑고, 트리로
     /// 펼친 목록([`Index::entries_tree`])은 그것을 **열린 자리마다** 부른다. 그래서 한 프레임이
@@ -248,6 +254,7 @@ impl Index {
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
         let deferred_root = soil.roots.iter().map(|(id, root)| (id.to_string(), root.to_string())).collect();
+        let shelved = soil.shelved.iter().map(|r| r.map(str::to_string)).collect();
         // 자리마다 제 줄을 모은다(moai-teka). 줄마다 제 자리의 **모든 앞머리**에 제 첨자를 적고,
         // 제 자리에는 `here` 로도 적는다. 바구니 마디는 그 앞머리의 **다음 마디**라 여기서 함께
         // 본다. 깊이만큼만 돌므로 이슈 수에 비례하고, 차례는 첨자 차례 그대로다 — 훑어 모으던
@@ -273,7 +280,7 @@ impl Index {
             }
         }
 
-        Index { homes, has_kids, by_id, deferred_root, places }
+        Index { homes, has_kids, by_id, deferred_root, shelved, places }
     }
 
     /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
@@ -304,8 +311,17 @@ impl Index {
     }
 
     /// 그 줄을 계획에서 뺀 줄 — 제가 미뤘으면 저 자신, 물려받았으면 미룬 조상·묶음.
+    ///
+    /// **id 밖에 없는 자리에서만 부른다**(막는 줄, `blocked_by`). 줄을 든 자리는
+    /// [`Index::shelved_at`] 이다 — 이 지도는 id 로 접은 것이라 뒷줄이 이긴다.
     pub fn deferred_root(&self, id: &str) -> Option<&str> {
         self.deferred_root.get(id).map(String::as_str)
+    }
+
+    /// **그 자리의 줄**을 계획에서 뺀 줄. 넘친 첨자에는 `None` 이다 — 곁의 [`Index::epic_of`]
+    /// 와 같이, 한눈 보기에서 남의 색인으로 푼 첨자가 들어와도 죽지 않는다.
+    pub fn shelved_at(&self, at: usize) -> Option<&str> {
+        self.shelved.get(at)?.as_deref()
     }
 
     /// 그 줄이 경로에서 갖는 마디.
