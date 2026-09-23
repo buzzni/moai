@@ -674,6 +674,7 @@
   "add.will_make": "만들 것",
   "add.made": "만듦",
   "add.tally": "에픽 {epics} · 이슈 {issues}",
+  "add.on_milestone": "에픽은 마일스톤 {id} 에 선다",
   "idea.will_unfold": "펼칠 것",
   "idea.unfolded": "펼침",
   "idea.into_epic": "{id} 의 멤버로 든다",

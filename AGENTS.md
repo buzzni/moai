@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:71f3ee1a -->
+<!-- moai:begin v:0.1.1 hash:8316e75d -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -137,25 +137,27 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
 
-**If a milestone is running, hang it on the epic you unfolded.** `promote` has no
-flag for one and does not carry over the one the idea held, so without this the
-epic stands outside the release and every member under it is work picked up from
-outside it. A milestone is inherited, so the epic alone carries it to every
-member, the ones added later included.
+**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+both on the epic it unfolds — a milestone is inherited, so the epic alone carries
+it to every member, the ones added later included, and the body is what lets
+`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
+original stays on the closed idea and the history leads back to it, and the one
+place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is.
+
+**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
+already the owner — its members inherit its milestone, and writing the idea's over
+theirs would stand one bundle in two places.
+
+**If the idea held no milestone and one is running, hang it on the epic yourself.**
+Without this the epic stands outside the release and every member under it is work
+picked up from outside it.
 
     moai edit <epic> --milestone <milestone>
 
 Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
 `dangling_milestone` warning.
-
-**And copy the idea's body onto the epic you unfolded.** `promote` does not carry
-it either, so the epic stands empty and `moai show <epic>` cannot say why these
-issues are one bundle. Not onto every issue — the original stays on the closed
-idea and the history leads back to it; the one place worth filling is the epic, so
-the window that picks a member up does not have to press every member to find out
-what this is. Unfolding into a single issue is the same: move the idea's body over
-as it is.
 
 ### When work already created is not for now
 

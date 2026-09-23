@@ -139,7 +139,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
         }
-        return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone());
+        return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone(), args.milestone.as_deref());
     }
     // **`--var` 도 `--from` 이 있어야 뜻이 있다**(moai-cypw) — 아래 `--dry-run` 과 같은 까닭이다.
     // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
@@ -279,19 +279,23 @@ fn bulk(
     vars: &[String],
     dry_run: bool,
     assignee: Option<String>,
+    milestone: Option<&str>,
 ) -> R<Vec<String>> {
     let drafts = read_plan(from, vars, draft::Shape::Plan, ctx.lang())?;
+    // **마일스톤은 계획의 뿌리로 간다**(moai-xoyg) — 에픽에 서고 이슈는 물려받는다.
+    let rooted = Rooted { milestone, body: None };
 
     if dry_run {
         check_plan(&drafts)?;
         if ctx.json {
-            return json_rehearsal(&drafts, None, None);
+            return json_rehearsal(&drafts, None, None, milestone);
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "add.will_make"))];
         out.extend(drafts.iter().map(|d| line_of(d, None)));
         out.push(String::new());
         out.push(tally(&drafts, ctx.lang()));
+        out.extend(milestone_line(milestone, ctx.lang()));
         return Ok(out);
     }
 
@@ -301,7 +305,7 @@ fn bulk(
     let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
-            let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, &who, &by, &at)?;
+            let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = super::read_of(issues, cfg, &ids);
             Ok((entries, (made, read)))
@@ -316,7 +320,20 @@ fn bulk(
     out.extend(drafts.iter().zip(&made).map(|(d, i)| line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(tally(&drafts, ctx.lang()));
+    out.extend(milestone_line(milestone, ctx.lang()));
     Ok(out)
+}
+
+/// 계획의 **뿌리**(제 에픽이 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
+/// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다.
+///
+/// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `idea promote` 가 담아 둔 생각의
+/// 마일스톤과 본문을 준다(moai-07v1). **`-e <에픽>` 으로 선 에픽에 펼칠 때는 뿌리가 없어**
+/// 아무것도 안 서는데, 그것이 맞는 답이다 — 그 에픽이 이미 임자다.
+#[derive(Default, Clone, Copy)]
+pub struct Rooted<'a> {
+    pub milestone: Option<&'a str>,
+    pub body: Option<&'a str>,
 }
 
 /// 초안 묶음을 실제 이슈로 빚어 `issues` 에 밀어 넣는다. **쓰기 트랜잭션
@@ -335,6 +352,7 @@ pub fn create_drafts(
     reserved: &std::collections::BTreeSet<String>,
     drafts: &[Draft],
     into: Option<&str>,
+    rooted: Rooted<'_>,
     who: &(Option<String>, Option<String>),
     by: &Actor,
     at: &str,
@@ -357,6 +375,12 @@ pub fn create_drafts(
         // 줄에서 같은 이름이 두 가지를 뜻한다.
         // `into` 는 이미 선 에픽이다 — 초안에 제 에픽이 없을 때만 선다(`Shape::Members`).
         issue.epic = d.epic.map(|nth| ids[nth].clone()).or_else(|| into.map(str::to_string));
+        // **뿌리에만 적는다**(moai-xoyg·moai-07v1). 멤버는 이 뿌리에서 물려받으니 여기 적으면
+        // 같은 값이 줄마다 한 벌씩 서고, 에픽을 옮기는 날 그 줄들이 옛 자리에 남는다.
+        if issue.epic.is_none() {
+            issue.milestone = rooted.milestone.map(str::to_string);
+            issue.body = rooted.body.map(str::to_string);
+        }
         (issue.assignee, issue.assignee_email) = who.clone();
         let (entry, issue) = store::admit(issues, cfg, issue, by)?;
         entries.push(entry);
@@ -419,7 +443,12 @@ pub fn check_plan(drafts: &[Draft]) -> R<()> {
 ///
 /// `dry_run` 을 적어 두는 것은 **id 가 없는 까닭**이 거기서 나오기 때문이다.
 /// 진짜 출력은 만든 줄을 그대로 내므로, 이 깃발이 두 모양을 가른다.
-pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&str>) -> R<Vec<String>> {
+pub fn json_rehearsal(
+    drafts: &[Draft],
+    promoted: Option<&str>,
+    into: Option<&str>,
+    milestone: Option<&str>,
+) -> R<Vec<String>> {
     /// 기본 우선순위는 **여기서 풀어 낸다.** `null` 을 내면 받는 쪽이 기본값을
     /// 다시 알아야 하고, 그러면 그 값이 두 곳에 적힌다. 우선순위가 없는 종류
     /// (에픽·마일스톤)에는 아예 내지 않는다 — 없는 것에 기본값을 씌우면
@@ -446,6 +475,10 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&st
         /// 이슈가 들 이미 선 에픽 (`idea promote -e`). 초안의 `epic` 은 첨자라 거기에 못 적는다
         #[serde(skip_serializing_if = "Option::is_none")]
         into: Option<&'a str>,
+        /// 뿌리인 에픽이 설 마일스톤. **없으면 안 낸다** — 그 없음이 답이다(AGENTS.md).
+        /// 본문은 안 낸다: [`milestone_line`] 에 그 까닭이 있다
+        #[serde(skip_serializing_if = "Option::is_none")]
+        milestone: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<&'a str>,
     }
@@ -469,9 +502,22 @@ pub fn json_rehearsal(drafts: &[Draft], promoted: Option<&str>, into: Option<&st
             .collect(),
         promoted,
         into,
+        milestone,
         // 펼치면 그 생각이 닫힌다는 말은 진짜 출력과 **같은 낱말**로 한다.
         status: promoted.map(|_| crate::config::DONE),
     })
+}
+
+/// 만든(또는 만들) 에픽이 어느 마일스톤에 서는지 한 줄. **연습도 진짜도 같은 줄을 낸다** —
+/// 마일스톤은 도는 판에서 `ready` 가 무엇을 먼저 내주는지를 가르는 값이라, 조용히 서면
+/// 계획을 세운 쪽이 그것을 `moai show` 로 한 번 더 확인해야 한다.
+///
+/// **본문은 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
+/// (`moai show <idea>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
+pub fn milestone_line(milestone: Option<&str>, lang: crate::i18n::Lang) -> Option<String> {
+    let id = milestone?;
+    let said = crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]);
+    Some(paint(style::DIM, &said))
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

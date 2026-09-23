@@ -4581,6 +4581,89 @@ fn bulk_refuses_issues_with_no_epic() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("어느 에픽의"));
 }
 
+/// **계획도 마일스톤을 물려준다**(moai-xoyg). `--milestone` 은 뿌리인 에픽에만 서고 멤버는
+/// 거기서 물려받는다 — 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날
+/// 멤버가 안 따라온다.
+///
+/// 버리던 판은 거절도 알림도 없이 에픽만 만들고, 사람이 뒤에 `moai edit <에픽> --milestone`
+/// 을 한 번 더 쳤다 — 도는 마일스톤 밖에 선 에픽은 `ready` 가 뒤로 미룬다.
+#[test]
+fn a_plan_hangs_its_epics_on_the_milestone() {
+    let s = init("planstone");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 파일에 적힌 것은 에픽 둘뿐이다.
+    let made = issues(s.path());
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "뿌리 말고도 적었다\n{made}");
+    // 그런데 멤버 셋까지 그 마일스톤 아래 선다 — 물려받기가 하는 일이다.
+    let under = ok(s.path(), &["show", "--milestone", &stone]);
+    for want in ["저장 계층", "CLI 표면", "원자적으로 쓴다", "잘린 줄을 복구한다", "--json 이 tags 를 빠뜨린다"] {
+        assert!(under.contains(want), "{want} 가 마일스톤 밑에 안 섰다\n{under}");
+    }
+}
+
+/// **`--from` 과 뜻이 안 통하는 깃발은 거절한다**(moai-fppn). `--body -` 는 계획과 stdin 을
+/// 다투고, `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다 — 받고 버리면 0 으로 끝난
+/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag`·`--start`·`--due` 가 이미 선
+/// 자리와 한 줄이다.
+#[test]
+fn a_plan_refuses_the_flags_it_cannot_use() {
+    let s = init("planflags");
+    for extra in [["--body", "글"], ["--status", "in_progress"]] {
+        let mut argv = vec!["add", "--from", "-"];
+        argv.extend_from_slice(&extra);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        assert!(!out.status.success(), "{extra:?} 를 받았다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(extra[0]) && err.contains("--from"), "{extra:?}: {err}");
+        assert_eq!(issues(s.path()), "", "{extra:?} 인데 썼다");
+    }
+}
+
+/// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
+/// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
+/// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
+#[test]
+fn promote_carries_the_milestone_and_the_body() {
+    let s = init("promotecarry");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["idea", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+        .trim()
+        .to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // 에픽 하나에만 적힌다 — idea 줄이 들고 있던 것까지 두 줄이다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "{made}");
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽에 안 갔다\n{made}");
+    let under = ok(s.path(), &["show", "--milestone", &stone]);
+    assert!(under.contains("캐시 층") && under.contains("첫 이슈"), "{under}");
+}
+
+/// **이미 선 에픽에 펼칠 때는 둘 다 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
+/// 멤버마다 idea 의 마일스톤을 적으면 에픽의 것을 덮어 `show --milestone` 이 두 곳에 선다.
+#[test]
+fn promote_into_a_standing_epic_carries_nothing() {
+    let s = init("promoteinto");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["선 에픽", "--type", "epic", "--milestone", &m1]);
+    let idea = ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"])
+        .trim()
+        .to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // `m2` 는 idea 줄에만 남고, 만든 멤버는 에픽에서 `m1` 을 물려받는다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{m2}""#)).count(), 1, "선 에픽의 멤버에 적었다\n{made}");
+    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 1, "멤버에 본문을 베꼈다\n{made}");
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("멤버 하나"), "에픽에서 안 물려받았다");
+}
+
 /// **템플릿 파일은 `--var` 로 채워 편다**(moai-cypw). 연습도 채운 뒤의 계획을 보여 준다.
 #[test]
 fn a_template_file_is_filled_with_vars() {

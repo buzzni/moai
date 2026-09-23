@@ -151,9 +151,9 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
-for a milestone and does not carry over the one the idea itself holds, so the epic a worker
-unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
+the milestone the idea itself holds and nothing else, so an idea parked outside the release
+unfolds into an epic that stands outside it until it is attached. The worker hangs it on in brief 1 —
 `moai edit <epic> --milestone <milestone>` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -363,10 +363,10 @@ worker reads in its own window in 9-1.
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
        the history leads back to it.
-       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
-       milestone is inherited, so the epic alone carries it to every member and to the members
-       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
-       nothing to hang
+       Then hang the milestone on the epic you unfolded — `promote` brings over only the one the
+       idea itself held, and a milestone is inherited, so the epic alone carries it to every
+       member and to the members added later in 4-3 and 7-1. Hanging the same one again changes
+       nothing. If `<milestone>` is `none`, nothing is running and there is nothing to hang
          moai edit <epic> --milestone <milestone>
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,

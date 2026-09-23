@@ -97,15 +97,20 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 냈는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
         crate::cmd::add::check_plan(&drafts)?;
+        // 펼친 에픽이 설 마일스톤도 **연습이 미리 낸다**(moai-07v1) — 진짜가 데려가는 값을
+        // 연습이 안 내면, 계획을 승인한 쪽이 그것을 만들어 보고서야 안다. `-e` 면 뿌리가 없어
+        // 아무것도 안 데려가니 여기서도 없다.
+        let stone = into.is_none().then(|| thought.milestone.clone()).flatten();
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
-            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into);
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref());
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.will_unfold"))];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+        out.extend(crate::cmd::add::milestone_line(stone.as_deref(), ctx.lang()));
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -154,9 +159,25 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 메일을 **이름 칸**에 넣고 메일을 버린다. 파일에는 갈라서, 화면에는
             // 합쳐서 — 여기는 파일 쪽이다.
             let heir = (thought.assignee.clone(), thought.assignee_email.clone());
+            // **소속과 글도 물려준다**(moai-07v1). 마일스톤을 끊으면 펼친 에픽이 도는 릴리스
+            // 밖에 서고, 본문을 끊으면 `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다 —
+            // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
+            //
+            // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
+            // 물려받는다 — 멤버마다 idea 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
+            // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
+            // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
+            //
+            // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
+            // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
+            let (stone, text) = match into {
+                Some(_) => (None, None),
+                None => (thought.milestone.clone(), thought.body.clone()),
+            };
+            let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };
 
             let (mut entries, made) =
-                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, &heir, &by, &at)?;
+                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
 
             // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
             // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
@@ -236,6 +257,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+    // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
+    // 아무것도 안 서고, 그것이 그대로 답이다.
+    let stood = made.iter().find(|i| i.epic.is_none()).and_then(|i| i.milestone.as_deref());
+    out.extend(crate::cmd::add::milestone_line(stood, ctx.lang()));
     if let Some(e) = into {
         let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));

@@ -674,6 +674,7 @@
   "add.will_make": "To make",
   "add.made": "Made",
   "add.tally": "epics {epics} · issues {issues}",
+  "add.on_milestone": "the epic stands on milestone {id}",
   "idea.will_unfold": "To unfold",
   "idea.unfolded": "Unfolded",
   "idea.into_epic": "goes in as a member of {id}",

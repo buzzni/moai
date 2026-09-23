@@ -514,25 +514,27 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
 
-**If a milestone is running, hang it on the epic you unfolded.** `promote` has no
-flag for one and does not carry over the one the idea held, so without this the
-epic stands outside the release and every member under it is work picked up from
-outside it. A milestone is inherited, so the epic alone carries it to every
-member, the ones added later included.
+**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+both on the epic it unfolds — a milestone is inherited, so the epic alone carries
+it to every member, the ones added later included, and the body is what lets
+`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
+original stays on the closed idea and the history leads back to it, and the one
+place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is.
+
+**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
+already the owner — its members inherit its milestone, and writing the idea's over
+theirs would stand one bundle in two places.
+
+**If the idea held no milestone and one is running, hang it on the epic yourself.**
+Without this the epic stands outside the release and every member under it is work
+picked up from outside it.
 
     {MILESTONE_ATTACH}
 
 Copy that id off {MILESTONE_FROM}. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
-`dangling_milestone` warning.
-
-**And copy the idea's body onto the epic you unfolded.** `promote` does not carry
-it either, so the epic stands empty and `moai show <epic>` cannot say why these
-issues are one bundle. Not onto every issue — the original stays on the closed
-idea and the history leads back to it; the one place worth filling is the epic, so
-the window that picks a member up does not have to press every member to find out
-what this is. Unfolding into a single issue is the same: move the idea's body over
-as it is."#
+`dangling_milestone` warning."#
     )
 }
 
@@ -1384,9 +1386,9 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
-for a milestone and does not carry over the one the idea itself holds, so the epic a worker
-unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
+the milestone the idea itself holds and nothing else, so an idea parked outside the release
+unfolds into an epic that stands outside it until it is attached. The worker hangs it on in brief 1 —
 `{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -2060,10 +2062,10 @@ fn brief() -> String {
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
        the history leads back to it.
-       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
-       milestone is inherited, so the epic alone carries it to every member and to the members
-       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
-       nothing to hang
+       Then hang the milestone on the epic you unfolded — `promote` brings over only the one the
+       idea itself held, and a milestone is inherited, so the epic alone carries it to every
+       member and to the members added later in 4-3 and 7-1. Hanging the same one again changes
+       nothing. If `<milestone>` is `none`, nothing is running and there is nothing to hang
          {MILESTONE_ATTACH}
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,
@@ -3090,15 +3092,20 @@ from outside**",
     ///
     /// 본문 걸음은 어느 글에도 없었다. 2026-09-22 에 한 번에 펼친 에픽 셋이 모두 0자로 섰고,
     /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 냈다.
+    ///
+    /// **2026-09-23 부터 그 둘은 도구가 데려간다**(moai-07v1) — 손으로 치던 두 걸음이 빠졌으니
+    /// 이 글도 무엇이 저절로 서고 무엇이 손에 남는지를 말해야 한다. 손에 남는 것은 **idea 가
+    /// 마일스톤을 안 들었을 때**뿐이고, 그 줄은 여전히 [`MILESTONE_ATTACH`] 하나에서 나온다.
     #[test]
     fn unfolding_alone_hangs_the_milestone_and_carries_the_body() {
         let ideas = ideas();
         for (piece, why) in [
-            (MILESTONE_ATTACH, "펼친 에픽에 마일스톤을 다는 줄이 없다"),
+            (MILESTONE_ATTACH, "마일스톤을 안 든 idea 를 펼쳤을 때 다는 줄이 없다"),
             (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
             ("`dangling_milestone`", "틀린 id 가 언제 드러나는지 안 적었다"),
-            ("copy the idea's body onto the epic", "펼친 에픽에 본문을 옮기라는 말이 없다"),
+            ("milestone and body go onto the epic by themselves", "도구가 데려간다는 말이 없다"),
             ("Not onto every issue", "이슈마다 베끼는 것으로 읽힌다"),
+            ("`-e <epic>`) carries neither", "선 에픽에 펼칠 때는 안 데려간다는 말이 없다"),
         ] {
             assert!(ideas.contains(piece), "{why} — {piece}");
         }

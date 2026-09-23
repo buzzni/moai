@@ -224,7 +224,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -732,7 +732,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -884,7 +884,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -1036,7 +1036,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -1209,7 +1209,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
