@@ -1874,7 +1874,8 @@ pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<D
     }
     let dash = "—";
     // **읽는 사람의 달로 잰다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
-    // (`report::status_in`). 둘이 갈리면 보드는 "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
+    // (`report::Dues::split`, moai-fgjj 가 `status_in` 에서 그리로 옮겼다). 둘이 갈리면 보드는
+    // "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
     let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
     Some(Due {
         span: format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
@@ -3720,7 +3721,7 @@ mod tests {
     }
 
     /// **기한 줄도 읽는 사람의 달로 센다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
-    /// (`report::status_in`). 둘이 갈리면 보드는 "지남" 으로 세고 바로 그 줄을 편 상세는
+    /// (`report::Dues::split`). 둘이 갈리면 보드는 "지남" 으로 세고 바로 그 줄을 편 상세는
     /// "오늘까지" 라 말한다.
     ///
     /// **적힌 날짜는 안 옮긴다** — 달력의 날이라 옮길 시각이 없다. 옮기는 것은 견주는 쪽이다.

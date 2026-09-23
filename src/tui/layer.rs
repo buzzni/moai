@@ -268,7 +268,11 @@ pub struct Summary {
     pub picked: Vec<Picked>,
     /// 드러난 것의 수. 알림은 안 센다. **자리 없는 줄도 여기 든다** — 층의 `!` 와 "드러난 것
     /// N건" 이 `moai status` 와 같은 수를 말해야, 층에서 보고 들어간 사람이 다른 수를 안 본다.
-    pub warnings: usize,
+    ///
+    /// **기한 판정은 안 접혀 있다**([`super::Surfaced`], moai-fgjj) — 이 줄의 셈은 쓸기가 스레드에서
+    /// 지어 오고 층은 그 답을 [`REREAD_EVERY`] 만큼 들고 있으므로, 그 몫까지 접으면 `SPC o t` 로
+    /// 시간대를 바꾼 뒤 최대 그만큼 옛 달로 판정한 `+N` 이 선다. 그리는 쪽이 그때의 달로 센다.
+    pub warnings: super::Surfaced,
     /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
     /// `notices`, moai-prdh). **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
     /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
@@ -354,14 +358,8 @@ fn registry_of<'a>(
 
 /// 연 프로젝트 하나를 센다 — **설치가 어긋난 것은 여기서 물어서 센다.** 한 번 부르고 마는 자리
 /// (`cmd::tui` 의 `--json`)가 여기로 든다.
-pub fn summarize(
-    repo: &Repo,
-    load: &crate::store::Load,
-    now: &str,
-    dug: &crate::worktree::Dug<'_>,
-    zone: &crate::tz::Zone,
-) -> Summary {
-    summarize_with(repo, load, now, dug, crate::cmd::status::install_notices(repo, false).len(), zone)
+pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate::worktree::Dug<'_>) -> Summary {
+    summarize_with(repo, load, now, dug, crate::cmd::status::install_notices(repo, false).len())
 }
 
 /// [`summarize`] 의 속 — `install` 은 **설치가 어긋난 것의 수**다(moai-nzyh). 부르는 쪽이 건네는
@@ -374,17 +372,19 @@ pub fn summarize(
 /// 다른 수를 본다.
 ///
 /// **`&[Issue]` 에 대한 셈은 전부 `report` 가 한다.**
+///
+/// **시간대는 안 받는다**(moai-fgjj) — 기한 판정은 [`Summary::warnings`] 에 접지 않고 그리는 쪽에
+/// 맡긴다. 그래서 쓸기를 띄우는 스레드도 시간대를 안 들고 간다.
 pub fn summarize_with(
     repo: &Repo,
     load: &crate::store::Load,
     now: &str,
     dug: &crate::worktree::Dug<'_>,
     install: usize,
-    zone: &crate::tz::Zone,
 ) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status(&load.issues, &unreadable, cfg, now, zone);
+    let st = crate::report::status_in(&load.issues, &unreadable, cfg, now, &crate::report::Soil::of(&load.issues));
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
@@ -400,7 +400,7 @@ pub fn summarize_with(
             .into_iter()
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
-        warnings: st.warnings.len() + usize::from(lost.is_some()),
+        warnings: super::Surfaced::of(st.warnings.len() + usize::from(lost.is_some()), st.dues),
         // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 idea·미룬
         // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
         // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
@@ -479,15 +479,9 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
 /// 나란히 부르는 것은 한눈 보기와 같은 [`projects::each`] 다 — 한 줄의 패닉이 **그 까닭 그대로**
 /// 되던져지고(`scope` 에 맡기면 std 가 까닭을 지운다), 스레드를 못 띄우면 그 자리에서 읽는다.
 /// 보내기는 줄마다 제 스레드 안에서 하므로 닿는 대로 흐른다.
-fn look_into(
-    paths: &[Want],
-    now: &str,
-    lang: crate::i18n::Lang,
-    zone: &crate::tz::Zone,
-    tx: &std::sync::mpsc::Sender<Looked>,
-) {
+fn look_into(paths: &[Want], now: &str, lang: crate::i18n::Lang, tx: &std::sync::mpsc::Sender<Looked>) {
     projects::each(paths, |want| {
-        let _ = tx.send(look_one(&want.path, want.install, now, lang, zone));
+        let _ = tx.send(look_one(&want.path, want.install, now, lang));
     });
 }
 
@@ -508,7 +502,7 @@ fn want(path: &Path) -> Want {
 
 /// 한 경로를 연다. **표식을 먼저 잰다** — 읽고 나서 재면 그 사이의 쓰기가 "이미 본 것"
 /// 으로 적혀 영영 안 보인다(`App::open` 과 같은 까닭).
-fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang, zone: &crate::tz::Zone) -> Looked {
+fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang) -> Looked {
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
@@ -529,7 +523,7 @@ fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang
                 asked_install = Some(counted);
                 counted
             });
-            Look::Open { sum: summarize_with(&repo, &load, now, &dug, install, zone) }
+            Look::Open { sum: summarize_with(&repo, &load, now, &dug, install) }
         }
         state => shut(&path, &name, state, lang),
     };
@@ -794,7 +788,14 @@ impl Layer {
     /// 자리에서 읽었다 — 첫 화면에 수가 서야 한다는 것이었는데, 그 값이 프로젝트마다 더해져
     /// 워크트리가 많은 저장소 몇 개면 키 한 번에 화면이 수백 ms 멈췄다. 커서는 경로로 서므로
     /// 수가 늦게 와도 설 자리는 안 바뀐다.
-    fn launch(&mut self, zone: &crate::tz::Zone) {
+    ///
+    /// **시간대는 안 들고 간다**(moai-fgjj) — 이 쓸기가 줄마다 세는 것 가운데 시간대에 닿는 몫은
+    /// 안 접힌 채로 오고([`super::Surfaced`]), 날 판정은 그리는 쪽이 한다. 베껴 보내던 때는 이
+    /// 쓸기가 도는 사이에 시간대가 바뀌면 그 답이 옛 달로 판정한 `+N` 을 세우고, [`Place`] 에는
+    /// 어느 시간대로 센 값인지가 없어 [`Layer::stale`] 이 그 줄을 다시 안 골랐다 — 그것을
+    /// 바로잡는 길이 이 이슈의 갈림길이었고(캐시를 버리기·줄마다 시간대를 찍기), 사람이 **안
+    /// 접는** 쪽을 골라 세 길이 다 필요 없어졌다.
+    fn launch(&mut self) {
         if self.at != At::Layer || self.pending.is_some() {
             return;
         }
@@ -805,11 +806,7 @@ impl Layer {
         let (tx, rx) = std::sync::mpsc::channel();
         let now = crate::model::now();
         let lang = self.lang;
-        // **화면이 선 시간대를 그대로 들려 보낸다**(moai-h2th) — 이 쓸기가 세는 경고에 마일스톤
-        // 기한이 들어 있고, 그 판정은 읽는 사람의 달로 선다. 스레드가 제 손으로 다시 고르면 `SPC o t`
-        // 로 고른 시간대가 층의 수에만 안 닿아, 같은 화면의 두 수가 갈린다. 뜰 때 한 벌 베낀다.
-        let zone = zone.clone();
-        let handle = std::thread::spawn(move || look_into(&stale, &now, lang, &zone, &tx));
+        let handle = std::thread::spawn(move || look_into(&stale, &now, lang, &tx));
         // **뜰 때의 세대를 함께 든다**(moai-ctcb) — 이 쓸기가 재는 것은 지금의 줄이고, 이 뒤에
         // 손으로 세운 줄에는 이 답이 옛것이다([`Layer::adopt`]).
         self.pending = Some((rx, handle, self.rounds));
@@ -854,19 +851,14 @@ impl App {
     /// `.moai` 밖에서 띄운 탐색기 — 층에서 시작하고, **읽기는 스레드에 맡긴다**([`Layer::launch`]).
     /// 첫 화면은 줄마다 `읽는 중` 으로 서고 읽는 대로 수가 찬다 — 그 자리에서 다 읽으면 등록한
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
-    #[cfg(test)]
+    ///
+    /// **시간대를 안 받는다**(moai-fgjj) — 첫 쓸기가 세는 것에 시간대에 닿는 몫이 안 접혀 오므로
+    /// ([`super::Surfaced`]), 설정을 입히는 `adopt_look` 이 늦게 시간대를 정해도 첫 화면의 `+N`
+    /// 이 그 시간대로 선다. 한때 이 문이 시간대를 받아 넘겼고(리뷰 moai-pmhv.x3r 4번), 그 까닭이
+    /// "뜨는 스레드가 뜰 때의 시간대를 베껴 간다" 였다.
     pub fn on_projects(layer: Layer) -> App {
-        App::on_projects_in(layer, crate::tz::Zone::utc())
-    }
-
-    /// [`App::on_projects`] 와 같은 것. **화면이 설 시간대를 받는다**(리뷰) — 첫 쓸기가 프로젝트마다
-    /// 세는 경고에 마일스톤 기한이 들어 있고, 그 판정은 읽는 사람의 달로 선다(moai-h2th). 뜨는
-    /// 스레드는 이 자리의 시간대를 한 벌 베껴 가므로([`Layer::launch`]), 설정을 입히는 `adopt_look`
-    /// 을 기다리면 첫 화면의 `+N` 만 UTC 로 서고 그 줄은 60초가 지나야 다시 읽힌다.
-    pub fn on_projects_in(layer: Layer, zone: crate::tz::Zone) -> App {
         let mut app =
             App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
-        app.zone = zone;
         // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
         // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
         // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
@@ -874,7 +866,7 @@ impl App {
         // 화면에 놓는 것도 여기다 — [`App::with_layer`] 가 반대 방향으로 잇는 것과 짝이다.
         app.site.lang = layer.lang;
         let mut layer = Layer { at: At::Layer, ..layer };
-        layer.launch(&app.zone);
+        layer.launch();
         app.layer = Some(layer);
         app
     }
@@ -1153,7 +1145,7 @@ impl App {
         // 물어 둔 값이다. 다시 물으면 들어가는 키 하나에 하위 프로세스가 셋까지 서고, 수는 어차피 같다.
         let told = self.layer.as_ref().and_then(|l| l.told_install(&path));
         let held = Told::held(told);
-        match (self.read)(&repo, overlay, self.site.lang, held, &self.zone) {
+        match (self.read)(&repo, overlay, self.site.lang, held) {
             Ok(fresh) => {
                 // 떠난 프로젝트에 매인 것을 푼다 — 층에서 왔으면 이미 풀린 것을 한 번 더 풀 뿐이다.
                 let leaving = match &self.layer.as_ref().map(|l| &l.at) {
@@ -1258,7 +1250,7 @@ impl App {
         // 스레드로 가서 아직 안 왔다(리뷰 moai-3lul.kt0). 들일 때 [`App::follow_layer`] 가 올린다.
         let Some(layer) = &mut self.layer else { return };
         layer.forget(&from);
-        layer.launch(&self.zone);
+        layer.launch();
         let at = layer.position(&from).unwrap_or(0);
         self.stand_on_place(at);
     }
@@ -1521,7 +1513,7 @@ impl App {
             }
         }
         if let Some(layer) = &mut self.layer {
-            layer.launch(&self.zone);
+            layer.launch();
         }
         let rows = self.rows();
         let landed = land.filter(|_| self.on_layer()).and_then(|want| {
@@ -1564,7 +1556,7 @@ impl App {
                 }
             }
         }
-        layer.launch(&self.zone);
+        layer.launch();
     }
 
     /// 층을 읽는 스레드가 도는가.
@@ -1974,7 +1966,7 @@ mod tests {
 
         // 층이 two 를 읽어 둔 채 아직 들이지 않았다. 그새 two 가 사라진다.
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, crate::tz::Zone::stored(), &tx);
+        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
         std::fs::remove_dir_all(&two).unwrap();
@@ -2058,13 +2050,7 @@ mod tests {
 
         // 쓸기가 두 줄을 다 열린 것으로 쟀다. 아직 안 닿았다.
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(
-            &[want(&one), want(&two)],
-            &crate::model::now(),
-            crate::i18n::Lang::Ko,
-            crate::tz::Zone::stored(),
-            &tx,
-        );
+        look_into(&[want(&one), want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         let round = a.layer.as_ref().unwrap().rounds;
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
 
@@ -2402,10 +2388,10 @@ mod tests {
 
         // **들어가면 층과 같은 수다** — 안쪽 배너도 자리 없는 줄을 센다(사용자 결정 2026-09-18).
         let Look::Open { sum } = look(&a, "main") else { panic!() };
-        let on_layer = sum.warnings;
+        let on_layer = sum.warnings.shown();
         a.key(key(KeyCode::Enter));
         assert!(!a.on_layer());
-        assert_eq!(a.site.warnings, on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
+        assert_eq!(a.site.warnings.shown(), on_layer, "층과 안쪽 배너가 같은 저장소를 달리 센다");
 
         // **겹쳐 보기를 꺼도 워크트리가 사라지는 것을 본다**(리뷰 moai-3lul.kt0). 끄면 옆 스냅샷을
         // 아예 안 열어, 한때는 자리 판정이 보는 것이 지켜보는 표식에 하나도 안 들었다 — 치운 뒤
@@ -2413,17 +2399,17 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "w 가 겹쳐 보기를 안 껐다");
         settle(&mut a);
-        let was = a.site.warnings;
+        let was = a.site.warnings.shown();
         std::fs::remove_dir_all(s.join("argos-0002")).unwrap();
         settle(&mut a);
-        assert_eq!(a.site.warnings, was + 1, "겹쳐 보기를 끈 채로는 치운 워크트리를 못 본다");
+        assert_eq!(a.site.warnings.shown(), was + 1, "겹쳐 보기를 끈 채로는 치운 워크트리를 못 본다");
 
         // 올라오면 층도 같은 것을 센다.
         a.hit("0");
         settle(&mut a);
         assert_eq!(stranded(&a), 1, "워크트리를 치웠는데 층이 옛 수를 낸다");
         let Look::Open { sum } = look(&a, "main") else { panic!() };
-        assert_eq!(sum.warnings, was + 1, "층과 안쪽 배너가 갈렸다");
+        assert_eq!(sum.warnings.shown(), was + 1, "층과 안쪽 배너가 갈렸다");
     }
 
     /// **파일이 그대로여도 시계가 가면 다시 읽는다**(moai-al0x). 요약에는 시계로 재는 것(워크트리가
@@ -4180,10 +4166,14 @@ mod tests {
 
         // git 이 저장소를 거절한다 — 파일로 읽는 자리 판정(`worktree::on_disk`)은 그래도 옆을 찾는다.
         std::fs::write(main.join(".git/config"), "[core\n").unwrap();
-        let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now(), crate::tz::Zone::stored());
-        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, None, crate::tz::Zone::stored()).unwrap();
+        let plain = super::super::warnings_of(&own, &[], &repo.config, &crate::model::now());
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, None).unwrap();
         assert!(f.unfound.is_some(), "전제: git 이 저장소를 거절하지 않았다");
-        assert_eq!(f.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)");
+        assert_eq!(
+            f.warnings.shown(),
+            plain.shown(),
+            "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (다시 읽기)"
+        );
 
         let g = crate::worktree::gather(&repo, true).unwrap();
         let stamp = stamp_of(&repo);
@@ -4196,7 +4186,11 @@ mod tests {
             &g.sides,
             &g.mine,
         );
-        assert_eq!(a.site.warnings, plain, "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)");
+        assert_eq!(
+            a.site.warnings.shown(),
+            plain.shown(),
+            "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)"
+        );
     }
 
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한
@@ -4297,8 +4291,7 @@ mod tests {
 
         // 쓰기 **전에** 뜬 읽기 — 그 스냅샷을 들고 있다.
         let repo = Repo::at(two.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
-        let before = super::super::prepare(&repo, false, crate::i18n::Lang::Ko, None, crate::tz::Zone::stored())
-            .expect("두 줄을 읽는다");
+        let before = super::super::prepare(&repo, false, crate::i18n::Lang::Ko, None).expect("두 줄을 읽는다");
         let (rtx, rrx) = std::sync::mpsc::channel();
         let round = a.layer.as_ref().unwrap().round();
         a.layer.as_mut().unwrap().reading = Some((two.clone(), rrx, std::thread::spawn(|| {}), round));
@@ -4308,7 +4301,7 @@ mod tests {
         // 그새 옆 세션이 그 프로젝트에 쓴다. 쓸기가 그것을 **먼저** 본다.
         write_lines(&two, &[("argos-0002", "two 의 줄", "todo"), ("argos-0001", "two 의 집은 줄", "done")]);
         let (tx, rx) = std::sync::mpsc::channel();
-        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, crate::tz::Zone::stored(), &tx);
+        look_into(&[want(&two)], &crate::model::now(), crate::i18n::Lang::Ko, &tx);
         a.layer.as_mut().unwrap().pending = Some((rx, std::thread::spawn(|| {}), round));
         a.follow();
 

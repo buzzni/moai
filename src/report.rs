@@ -3188,12 +3188,141 @@ pub struct StatusReport {
     /// 알려 주는 것 — 쌓인 생각, 미뤄 둔 것. 고칠 것이 있다는 말이 아니다.
     pub notices: Vec<Warning>,
     pub flow: Flow,
+    /// 아직 판정 안 한 기한([`Dues`]) — `--json` 에는 안 실린다. [`StatusReport::judged`] 를 지난
+    /// 보고서에서는 비어 있다: 그 줄들은 위 `warnings` 에 경고 둘로 서 있다.
+    #[serde(skip)]
+    pub dues: Dues,
 }
 
 impl StatusReport {
     /// 깨진 데이터가 있는가. 종료 코드를 가르는 유일한 것.
     pub fn broken(&self) -> bool {
         self.warnings.iter().any(|w| w.fatal)
+    }
+
+    /// 기한을 **읽는 사람의 달로 재어** 경고 목록에 제자리로 끼운다(moai-fgjj). 한 번 지나면
+    /// [`StatusReport::dues`] 가 비어, 두 번 접히는 일이 없다.
+    ///
+    /// 부르는 쪽은 **낼 것을 그 자리에서 다 내는** 표면이다 — `moai status` 와 `--json`, 훅의 셈.
+    /// 셈을 들고 있다가 나중에 그리는 쪽(탐색기의 배너·프로젝트 층)은 이것을 안 부르고
+    /// [`Dues`] 를 그대로 들었다가 그릴 때 [`Dues::judge`] 로 잰다.
+    #[must_use]
+    pub fn judged(mut self, now: &str, zone: &crate::tz::Zone) -> StatusReport {
+        // **자리를 먼저 든다**(리뷰) — `take` 뒤의 `self.dues` 는 `Dues::default()` 라 `at` 이 0 이고,
+        // 그러면 기한 줄이 적어 둔 자리가 아니라 목록 **머리**에 끼어 `no_epic` 보다 앞에 선다.
+        let dues = std::mem::take(&mut self.dues);
+        let at = dues.at.min(self.warnings.len());
+        self.warnings.splice(at..at, dues.judge(now, zone));
+        self
+    }
+}
+
+/// 기한을 재야 하는 마일스톤 줄 — **판정은 안 접어 둔다**(moai-fgjj, 2026-09-23 사용자 결정).
+///
+/// 시간대가 닿는 셈은 이 하나다. 기한은 시각이 아니라 **달력의 날**(`2026-09-20`)이라 그것과
+/// 견주는 "오늘" 이 읽는 사람의 시간대로 정해지고(moai-h2th), 나머지 경고는 흐른 시간으로 재므로
+/// 시간대가 없다(`days_since`).
+///
+/// **그 판정을 `warnings` 에 미리 접어 넣지 않는다.** 그 수를 캐시로 드는 쪽이 있다 — 탐색기의
+/// 배너(`tui::Site`)와 프로젝트 층의 `+N`(`tui::layer::Summary`)은 이슈 수에 비례한 훑기를
+/// 프레임마다 못 하므로 읽을 때 한 번 세어 들고 있고, 그 셈은 스레드에서 돈다. 접어 넣으면 그
+/// 캐시가 시간대에 매여, `SPC o t` 로 시간대를 바꾼 뒤 옛 달로 판정한 수가 화면에 남는다. 그것을
+/// 바로잡는 길은 셋이었고(캐시를 버리기·줄마다 시간대를 찍기·안 접기) 사람이 안 접는 쪽을
+/// 골랐다 — **저장은 UTC 로 두고 보여줄 때만 시간대를 입힌다**는 이 저장소의 결이 셈에도 그대로
+/// 선다(`tz` 의 머리글). 그래서 캐시는 시간대에 안 닿고, 무효화도 도장도 필요 없다.
+///
+/// **값이 없다.** 기한을 드는 줄은 마일스톤뿐이고(`moai edit --due` 가 마일스톤 줄에만 쓴다) 이
+/// 저장소는 넷이다 — 그릴 때마다 재도 훑는 것이 이슈 전체가 아니라 그 넷이다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Dues {
+    /// (마일스톤 id, `due_on`) — 계획 안에 있고 안 닫힌 줄 가운데 기한을 든 것. 차례는 파일
+    /// 차례다: 급한 차례는 날수를 알아야 정해지므로 [`Dues::judge`] 가 세운다.
+    rows: Vec<(String, String)>,
+    /// `status_due_days` — 문턱을 함께 든다. [`Warning::days`] 에 그대로 실려, 센 것과 화면이
+    /// 말하는 폭이 안 갈린다(`stale_review` 와 같은 까닭).
+    days: i64,
+    /// 시간대를 안 접은 경고 목록에서 이 둘이 들어갈 자리([`StatusReport::judged`]).
+    at: usize,
+}
+
+impl Dues {
+    /// 읽는 사람의 달로 재어 경고 둘을 짓는다(moai-tfcp). **막지 않는다** — 경고는 종료 코드를
+    /// 안 바꾼다(CLAUDE.md).
+    ///
+    /// 지난 것과 다가온 것을 **두 갈래로** 낸다: 사람이 할 일이 다르다(늦은 까닭을 대는 것과 남은
+    /// 것을 추리는 것). 한 낱말로 뭉치면 그중 한쪽이 반드시 거짓말이 된다 — `agents_stale` 을
+    /// 가른 것과 같은 자다.
+    ///
+    /// **나이를 여기서 싣는다**([`Warning::ages`] 가 아니라 직접) — 저쪽은 RFC3339 시각을 받는
+    /// 자라 날짜(`YYYY-MM-DD`)를 못 읽는다. 재는 자리가 싣고 보이는 쪽은 읽기만 한다.
+    /// **부호째 싣는다** — 지난 것은 음수다([`crate::model::days_until`] 과 같은 부호). 크기만
+    /// 싣고 갈래로 뜻을 가르면 `ages` 한 자리에 정반대의 두 뜻이 앉아, `kind` 를 같이 안 보는
+    /// `--json` 쪽이 "2일 지남" 과 "2일 남음" 을 같은 값으로 읽는다.
+    #[must_use]
+    pub fn judge(&self, now: &str, zone: &crate::tz::Zone) -> Vec<Warning> {
+        let (mut overdue, mut soon) = self.split(now, zone);
+        // **급한 것이 앞이다.** `view::preview` 는 앞의 셋만 그리고 나머지를 "N건 더" 로 접으므로,
+        // 파일 차례(곧 id 차례)로 두면 90일 지난 줄이 접히고 2일 지난 줄이 화면에 선다. 둘 다
+        // 오름차순이면 된다 — 지난 쪽은 음수라 가장 많이 지난 것이 앞에 온다.
+        //
+        // **세우는 자리는 여기다**(리뷰) — 가르는 자리([`Dues::split`])에 두면 갈래가 비었는지만 보는
+        // [`Dues::count`] 도 같이 정렬하는데, 그쪽은 그리는 걸음마다 돌아 버릴 차례를 프레임마다 짓는다.
+        for rows in [&mut overdue, &mut soon] {
+            // id 로 동점을 푸는 것은 같은 날수가 여럿일 때 차례가 판마다 안 흔들리게 하려는
+            // 것이다. `sort_by_key` 로 적으면 그 id 를 견줄 때마다 베낀다 — 빌려서 견준다.
+            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+        }
+        let mut out = Vec::new();
+        for (kind, rows, days) in [
+            // **문턱을 그대로 넘긴다** — `stale_review` 와 같은 까닭이다. 여기 수를 박아 두면
+            // `status_due_days` 를 고친 저장소에서 경고가 센 것과 화면이 말하는 폭이 갈린다.
+            ("milestone_overdue", &overdue, None),
+            ("milestone_due_soon", &soon, Some(self.days)),
+        ] {
+            if rows.is_empty() {
+                continue;
+            }
+            let mut w = Warning::new(kind, rows.iter().map(|(id, _)| (*id).to_string()).collect());
+            for (id, d) in rows {
+                w.ages.insert((*id).to_string(), *d);
+            }
+            out.push(match days {
+                Some(d) => w.days(d),
+                None => w,
+            });
+        }
+        out
+    }
+
+    /// 판정이 낼 **경고의 수**(0·1·2) — 짓지 않고 센다. 캐시가 든 수에 이것을 더한 것이 화면이
+    /// 대는 "드러난 것 N건" 이다(`tui::Surfaced`). 그리는 걸음마다 부르므로 `Warning` 도 차례도
+    /// 안 짓는다 — 차례를 세우는 자는 [`Dues::judge`] 다.
+    pub fn count(&self, now: &str, zone: &crate::tz::Zone) -> usize {
+        let (overdue, soon) = self.split(now, zone);
+        usize::from(!overdue.is_empty()) + usize::from(!soon.is_empty())
+    }
+
+    /// 지난 것과 다가온 것으로 가른다 — 차례는 **파일 차례 그대로**다(곧 id 차례). 급한 것을 앞으로
+    /// 올리는 것은 짓는 자리([`Dues::judge`])가 하고, 세는 자리([`Dues::count`])는 갈래가 비었는지만
+    /// 보므로 정렬을 지나지 않는다.
+    fn split(&self, now: &str, zone: &crate::tz::Zone) -> (Vec<(&str, i64)>, Vec<(&str, i64)>) {
+        // **읽는 사람의 달로 잰다**(moai-h2th). `zone.shift` 는 꼴을 안 바꾸므로 그대로
+        // [`crate::model::days_until`] 에 든다. 고리 밖에서 한 번만 옮긴다 — 줄마다 옮기면
+        // 같은 값을 줄 수만큼 다시 짓는다.
+        let today = zone.shift(now);
+        let (mut overdue, mut soon): (Vec<(&str, i64)>, Vec<(&str, i64)>) = (Vec::new(), Vec::new());
+        for (id, due) in &self.rows {
+            // 꼴이 틀린 값은 말없이 넘긴다 — 담는 쪽이 까닭을 적었다.
+            let Some(left) = crate::model::days_until(due, &today) else {
+                continue;
+            };
+            match left {
+                d if d < 0 => overdue.push((id.as_str(), d)),
+                d if d <= self.days => soon.push((id.as_str(), d)),
+                _ => {}
+            }
+        }
+        (overdue, soon)
     }
 }
 
@@ -3219,7 +3348,10 @@ pub struct Unreadable<'a> {
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
 ///
-/// `zone` 은 **읽는 사람의 시간대**다([`status_in`] 이 까닭을 적는다).
+/// `zone` 은 **읽는 사람의 시간대**다 — 기한 판정 하나에만 든다([`Dues`]). 이 문은 **낼 것을 그
+/// 자리에서 다 내는** 표면의 것이라 판정까지 접어서 낸다([`StatusReport::judged`]): `moai status`·
+/// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_in`] 으로 시간대
+/// 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
 pub fn status(
     issues: &[Issue],
     unreadable: &[Unreadable],
@@ -3229,27 +3361,25 @@ pub fn status(
 ) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
-    status_in(issues, unreadable, cfg, now, zone, &Soil::of(issues))
+    status_in(issues, unreadable, cfg, now, &Soil::of(issues)).judged(now, zone)
 }
 
 /// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고
 /// 이미 쟀으므로, 경고 셈에서 다시 재면 같은 걸음을 두 벌 걷는다(moai-u5o9).
 ///
-/// **`zone` 은 자료로 받는다**(moai-h2th, 2026-09-22 사용자 결정). 기한은 달력의 날이라 "오늘" 이
-/// 어디냐를 알아야 판정이 서는데, 같은 화면의 `생성`·`시작` 은 이미 읽는 사람의 시간대로 그려진다
-/// (`view::stamp`) — 판정만 UTC 로 두면 `TZ=Asia/Seoul` 의 00시~09시 세션이 매일 하루씩 어긋난다.
-/// 전역에 "오늘" 을 하나 두는 길은 안 골랐다: CLI 는 `TZ`·`/etc/localtime` 을 보고 탐색기는
-/// `[tui] timezone` 을 보아 **두 표면의 시간대가 실제로 다르고**, 전역 하나는 그 갈림을 못 담는다.
-/// 받은 값만으로 답이 정해지므로 `&[Issue]` 에 대한 순수 함수라는 계약도 그대로다.
+/// **시간대를 안 받는다**(moai-fgjj, 2026-09-23 사용자 결정). 시간대에 닿는 셈은 마일스톤 기한
+/// 판정 하나뿐이라(moai-h2th), 그 판정에 드는 줄만 [`StatusReport::dues`] 에 담아 내고 날 판정은
+/// 그리는 쪽에 맡긴다 — 그 까닭은 [`Dues`] 에 적었다. 판정까지 접어서 받으려면 [`status`] 나
+/// [`StatusReport::judged`] 다.
 ///
 /// **나이는 안 옮긴다.** `days_since` 가 재는 것은 흐른 시간이고 흐른 시간에는 시간대가 없다 —
-/// `now` 를 통째로 옮기면 모든 나이가 시간대 폭만큼 부풀어 하루씩 늘어난다.
+/// `now` 를 통째로 옮기면 모든 나이가 시간대 폭만큼 부풀어 하루씩 늘어난다. 그래서 이 문이 내는
+/// 나머지 경고는 시간대와 무관하고, 캐시로 들어도 시간대가 바뀌어 낡지 않는다.
 pub fn status_in<'a>(
     issues: &'a [Issue],
     unreadable: &[Unreadable],
     cfg: &Config,
     now: &str,
-    zone: &crate::tz::Zone,
     soil: &Soil<'a>,
 ) -> StatusReport {
     let group = &soil.epic;
@@ -3635,70 +3765,33 @@ pub fn status_in<'a>(
         );
     }
 
-    // 6-6. 마일스톤의 기한(moai-tfcp, 2026-09-22 사용자 결정). **막지 않는다** — 경고는 종료
-    //      코드를 안 바꾼다(CLAUDE.md). 지난 것과 다가온 것을 **두 갈래로** 낸다: 사람이 할
-    //      일이 다르다(늦은 까닭을 대는 것과 남은 것을 추리는 것). 한 낱말로 뭉치면 그중
-    //      한쪽이 반드시 거짓말이 된다 — `agents_stale` 을 가른 것과 같은 자다.
+    // 6-6. 마일스톤의 기한(moai-tfcp, 2026-09-22 사용자 결정). **판정은 여기서 안 한다** —
+    //      기한을 든 줄과 문턱만 [`Dues`] 에 담고, 읽는 사람의 달로 재는 것은 그리는 쪽이 한다
+    //      (moai-fgjj, 2026-09-23 사용자 결정). 까닭은 [`Dues`] 에 적었다.
     //
-    //      **끝난 마일스톤은 안 센다.** 다 닫힌 뒤의 지난 기한은 고칠 일이 아니라 지난 일이고,
-    //      세면 닫힌 마일스톤이 영영 경고로 선다. **미뤄 둔 것도 안 센다** — 계획에서 뺀 것이
-    //      잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다(`running_in` 과 같은 까닭).
+    //      **끝난 마일스톤은 안 담는다.** 다 닫힌 뒤의 지난 기한은 고칠 일이 아니라 지난 일이고,
+    //      세면 닫힌 마일스톤이 영영 경고로 선다. **미뤄 둔 것도 안 담는다** — 계획에서 뺀 것이
+    //      잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다(`running_in` 과 같은 까닭). 이 거름은
+    //      시간대와 무관하므로 여기 남는다 — 옮겨 두면 그리는 쪽마다 같은 거름을 다시 적는다.
     //
-    //      **나이를 여기서 싣는다**([`Warning::ages`] 가 아니라 직접) — 저쪽은 RFC3339 시각을
-    //      받는 자라 날짜(`YYYY-MM-DD`)를 못 읽는다. 재는 자리가 싣고 보이는 쪽은 읽기만 한다.
-    //      **부호째 싣는다**(리뷰) — 지난 것은 음수다([`crate::model::days_until`] 과 같은 부호).
-    //      크기만 싣고 갈래로 뜻을 가르면 `ages` 한 자리에 정반대의 두 뜻이 앉아, `kind` 를 같이
-    //      안 보는 `--json` 쪽이 "2일 지남" 과 "2일 남음" 을 같은 값으로 읽는다.
-    {
-        // **읽는 사람의 달로 잰다**(moai-h2th). `zone.shift` 는 꼴을 안 바꾸므로 그대로
-        // [`crate::model::days_until`] 에 든다. 고리 밖에서 한 번만 옮긴다 — 마일스톤마다 옮기면
-        // 같은 값을 줄 수만큼 다시 짓는다.
-        let today = zone.shift(now);
-        let (mut overdue, mut soon): (Vec<(&Issue, i64)>, Vec<(&Issue, i64)>) = (Vec::new(), Vec::new());
-        for m in issues.iter().filter(|i| i.kind == Kind::Milestone) {
-            let id = m.id.as_str();
-            if out_of_plan.contains(id) || eclipsed(m) || states.get(id).is_some_and(|c| *c == crate::config::DONE) {
-                continue;
-            }
-            // 꼴이 틀린 값은 말없이 넘긴다 — 쓰기가 이미 거절하므로 여기 오는 것은 손으로 푼
-            // 줄뿐이고, 그것은 `unknown_field` 가 아니라 그 줄을 고칠 때 드러난다.
-            let Some(left) = m.due_on.as_deref().and_then(|d| crate::model::days_until(d, &today)) else {
-                continue;
-            };
-            match left {
-                d if d < 0 => overdue.push((m, d)),
-                d if d <= cfg.status.due_days => soon.push((m, d)),
-                _ => {}
-            }
-        }
-        // **급한 것이 앞이다.** `view::preview` 는 앞의 셋만 그리고 나머지를 "N건 더" 로 접으므로,
-        // 파일 차례(곧 id 차례)로 두면 90일 지난 줄이 접히고 2일 지난 줄이 화면에 선다. 둘 다
-        // 오름차순이면 된다 — 지난 쪽은 음수라 가장 많이 지난 것이 앞에 온다.
-        for rows in [&mut overdue, &mut soon] {
-            // id 로 동점을 푸는 것은 같은 날수가 여럿일 때 차례가 판마다 안 흔들리게 하려는
-            // 것이다. `sort_by_key` 로 적으면 그 id 를 견줄 때마다 베낀다 — `moai status` 마다
-            // 도는 자리라 빌려서 견준다.
-            rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.id.cmp(&b.0.id)));
-        }
-        for (kind, rows, days) in [
-            // **문턱을 그대로 넘긴다** — `stale_review` 와 같은 까닭이다. 여기 수를 박아 두면
-            // `status_due_days` 를 고친 저장소에서 경고가 센 것과 화면이 말하는 폭이 갈린다.
-            ("milestone_overdue", &overdue, None),
-            ("milestone_due_soon", &soon, Some(cfg.status.due_days)),
-        ] {
-            if rows.is_empty() {
-                continue;
-            }
-            let mut w = Warning::new(kind, rows.iter().map(|(m, _)| m.id.clone()).collect());
-            for (m, d) in rows {
-                w.ages.insert(m.id.clone(), *d);
-            }
-            warnings.push(match days {
-                Some(d) => w.days(d),
-                None => w,
-            });
-        }
-    }
+    //      꼴이 틀린 값은 그대로 담는다 — 판정하는 자가 말없이 넘긴다([`Dues::judge`]). 쓰기가 이미
+    //      거절하므로 여기 오는 것은 손으로 푼 줄뿐이고, 그것은 `unknown_field` 가 아니라 그 줄을
+    //      고칠 때 드러난다.
+    let dues = Dues {
+        rows: issues
+            .iter()
+            .filter(|i| i.kind == Kind::Milestone)
+            .filter(|m| {
+                let id = m.id.as_str();
+                !out_of_plan.contains(id) && !eclipsed(m) && !states.get(id).is_some_and(|c| *c == crate::config::DONE)
+            })
+            .filter_map(|m| m.due_on.as_deref().map(|d| (m.id.clone(), d.to_string())))
+            .collect(),
+        days: cfg.status.due_days,
+        // **기한 둘이 들어갈 자리를 적어 둔다** — 밑의 7 이 깨진 데이터를 뒤에 얹으므로, 판정을
+        // 그냥 뒤에 붙이면 보드에서 기한 줄이 치명적인 줄 **밑으로** 내려간다.
+        at: warnings.len(),
+    };
 
     // 7. 데이터가 깨진 것. **이것만 비영 종료한다.**
     //
@@ -3745,6 +3838,7 @@ pub fn status_in<'a>(
         warnings,
         notices,
         flow: Flow { days: cfg.status.flow_days, created, done: closed, net: created as i64 - closed as i64 },
+        dues,
     }
 }
 
@@ -6179,6 +6273,62 @@ mod tests {
         };
         assert_eq!(age_of(utc()), Some(10), "잴 나이가 없으면 아래 줄이 헛돈다");
         assert_eq!(age_of(&seoul), age_of(utc()), "시간대가 칸 나이까지 옮겼다");
+    }
+
+    /// **셈은 시간대에 안 닿고, 판정은 나중에 접는다**(moai-fgjj, 2026-09-23 사용자 결정).
+    ///
+    /// [`status_in`] 은 기한을 든 줄만 [`StatusReport::dues`] 에 담고 경고로는 안 세운다 — 그 수를
+    /// 캐시로 드는 쪽(탐색기의 배너·프로젝트 층)이 시간대에 매이지 않게 하려는 것이다. 접는 자는
+    /// [`StatusReport::judged`] 고, **깨진 데이터보다 앞에 끼운다**: 뒤에 붙이면 보드에서 기한 줄이
+    /// 치명적인 줄 밑으로 내려간다.
+    #[test]
+    fn a_deadline_is_counted_when_it_is_drawn_not_when_it_is_measured() {
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let mut stone = make("argos-0001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-09-11".into());
+        let mut inside = make("argos-0002", Kind::Issue, "todo");
+        inside.milestone = Some("argos-0001".into());
+        // 같은 id 를 두 줄로 둬 깨진 데이터 경고(`duplicate_id`)를 세운다 — 끼우는 자리를 이 줄로 잰다.
+        let issues = vec![stone, inside, make("argos-0002", Kind::Issue, "todo")];
+
+        let bare = status_in(&issues, &[], &cfg(), now, &Soil::of(&issues));
+        let kinds: Vec<&str> = bare.warnings.iter().map(|w| w.kind).collect();
+        assert!(
+            !kinds.iter().any(|k| k.starts_with("milestone_")),
+            "시간대 없이 센 셈에 기한 판정이 들었다 — {kinds:?}"
+        );
+        assert!(kinds.contains(&"duplicate_id"), "전제가 안 섰다 — {kinds:?}");
+
+        // 같은 줄이 시간대에 따라 다른 갈래로 선다. 다시 세지 않는다 — 판정만 다시 한다.
+        assert_eq!(bare.dues.count(now, utc()), 1, "UTC 에서는 오늘이 기한이다");
+        assert_eq!(bare.dues.count(now, &seoul), 1, "서울에서는 어제 지났다");
+        let kind_of = |zone: &crate::tz::Zone| -> Vec<&'static str> {
+            bare.dues.judge(now, zone).into_iter().map(|w| w.kind).collect()
+        };
+        assert_eq!(kind_of(utc()), ["milestone_due_soon"]);
+        assert_eq!(kind_of(&seoul), ["milestone_overdue"]);
+        assert_eq!(
+            bare.dues.judge(now, &seoul)[0].ages.get("argos-0001").copied(),
+            Some(-1),
+            "판정이 나이를 안 실었다"
+        );
+
+        // 접은 뒤에는 `status` 와 한 글자도 안 다르고, 기한 줄이 깨진 데이터 **앞**에 선다.
+        let folded = status_in(&issues, &[], &cfg(), now, &Soil::of(&issues)).judged(now, &seoul);
+        let whole = status(&issues, &[], &cfg(), now, &seoul);
+        let kinds: Vec<&str> = folded.warnings.iter().map(|w| w.kind).collect();
+        assert_eq!(kinds, whole.warnings.iter().map(|w| w.kind).collect::<Vec<_>>());
+        // **없는 것은 통과가 아니라 실패다**(리뷰) — `position` 을 그대로 견주면 `Option` 끼리 견주게
+        // 되고 `None < Some(_)` 이라, 기한 줄이 통째로 빠진 판이 조용히 초록으로 선다.
+        let at =
+            |k: &str| kinds.iter().position(|x| *x == k).unwrap_or_else(|| panic!("{k} 가 목록에 없다 — {kinds:?}"));
+        assert!(at("milestone_overdue") < at("duplicate_id"), "기한 줄이 치명적인 줄 밑으로 내려갔다 — {kinds:?}");
+        // **앞의 경고보다 밑이다** — 끼우는 자리는 `Dues::at` 이 적어 둔 그 자리이지 목록의 머리가
+        // 아니다. 머리에 끼우면 기한이 `no_epic`·`wip_overload` 를 제치고 보드의 첫 줄로 선다.
+        assert!(at("no_epic") < at("milestone_overdue"), "기한 줄이 앞의 경고를 제치고 머리에 섰다 — {kinds:?}");
+        assert!(folded.dues.count(now, &seoul) == 0, "한 번 접은 것을 두 번 접을 수 있다");
     }
 
     /// 미루는 길은 무엇이든 받는다. 드러내는 자리가 `is_work` 로 좁히면
