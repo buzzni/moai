@@ -9800,6 +9800,47 @@ fn same_id_rows_answer_the_same_milestone_on_every_surface() {
     assert!(!json.contains("no_milestone"), "릴리스가 센 줄을 경고가 `마일스톤 없음` 으로 또 셌다\n{json}");
 }
 
+/// **미룸도 줄마다 물려받는다**(moai-jk2u.olh, 리뷰 moai-7iyc.cmo 8번).
+///
+/// 소속이 줄마다 갈리게 된 뒤로도 `report::Shelf::walk` 는 id 하나로만 올라, 제 `epic` 을
+/// 적은 앞줄이 미룬 에픽의 멤버로 세어지면서 그 미룸은 안 물려받았다 — `show <에픽> --json`
+/// 의 `members` 는 그 줄을 드는데 `ready` 는 그대로 내주고 `show --deferred` 는 끝내 안 냈다.
+/// AGENTS.md 가 못박은 "묶음을 미루면 그 밑의 일이 함께 계획에서 빠진다" 가 거기서 거짓이 된다.
+#[test]
+fn a_line_inherits_the_defer_of_the_epic_it_wrote_on_itself() {
+    let s = init("twindefer");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 미룬 에픽 하나. `argos-0002` 가 둘 — 앞줄만 그 에픽을 적었고 열려 있으며, 뒷줄은
+    // 소속이 없고 닫혀 있다. 뒷줄이 닫혀 있어야 지도에서 그 id 가 지워져, 앞줄이 제가 적은
+    // 에픽의 미룸을 지도로는 못 받는 판이 선다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            line("argos-e001", "미룬 에픽", "epic", ",\"status\":\"todo\",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+            line("argos-0002", "앞줄", "issue", ",\"status\":\"todo\",\"epic\":\"argos-e001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"status\":\"done\""),
+        ),
+    )
+    .unwrap();
+
+    // 전제 — 에픽은 그 줄을 멤버로 센다. 여기가 무너지면 아래 둘은 잴 것이 없다.
+    let epic = String::from_utf8(moai(s.path(), &["show", "argos-e001", "--json"]).stdout).unwrap();
+    assert!(epic.contains(r#""members":["argos-0002"]"#), "전제가 안 섰다 — 에픽이 그 줄을 멤버로 안 센다\n{epic}");
+
+    // 1. 멤버로 세는 줄을 `ready` 가 내주지 않는다 — 계획에서 빠진 줄이다.
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(!ready.contains("argos-0002"), "미룬 에픽의 멤버를 집을 것으로 내줬다\n{ready}");
+
+    // 2. `show --deferred` 도 같은 줄을 낸다 — 세는 자와 내는 자가 갈리지 않는다.
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred", "--all"]).stdout).unwrap();
+    assert!(off.contains("앞줄"), "미룬 에픽의 멤버를 `--deferred` 가 안 냈다\n{off}");
+}
+
 /// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와
 /// id 지도(`report::groups`·`milestones`)가 모두 뒷줄을 고르는데 상세만 앞줄을 열면, 머리
 /// 제목·필드는 앞줄 것이고 멤버 셈은 뒷줄 것인 한 화면이 선다(moai-e0ro). 종류가 다른

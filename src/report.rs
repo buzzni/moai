@@ -205,7 +205,7 @@ pub fn deferred_roots_in<'a>(
     let mut roots: BTreeMap<&str, &str> = all
         .iter()
         .filter(|i| !closed_by_hand(i))
-        .filter_map(|i| shelf.nearest(i.id.as_str()).map(|r| (i.id.as_str(), r)))
+        .filter_map(|i| shelf.nearest(i).map(|r| (i.id.as_str(), r)))
         .collect();
     // 계획에서 빠진 묶음이 없으면 멤버를 셀 것도 없다.
     let shelved: Vec<&Issue> =
@@ -262,7 +262,7 @@ pub fn deferred_sources_in<'a>(
             // 걸음은 같은 묶음을 두 번 짚는다 — 자식과 부모가 같은 에픽에 들면 둘 다에서.
             // 거르지 않으면 `moai defer E E --undo` 를 댄다.
             let mut every: Vec<&str> = Vec::new();
-            for r in shelf.every(id) {
+            for r in shelf.every_id(id) {
                 // **done 으로 읽은 묶음의 미룸도 댄다.** 그 묶음 줄만 계획 밖으로 안 셀 뿐, 그
                 // 밑의 줄은 가까운 미룸을 풀면 그 묶음을 뿌리로 받아 여전히 빠진다 — 거르면
                 // 하나를 풀고서야 다음을 댄다(moai-phzi). 첫째가 늘 가까운 것이라 비지도 않는다.
@@ -296,6 +296,14 @@ impl<'a, 'm> Shelf<'a, 'm> {
         Shelf { by_id, rooted, epic_of, mile_of }
     }
 
+    /// 그 **줄** 제 미룸. 첫 걸음은 이것으로 묻는다 — 같은 id 를 든 줄 둘의 미룸이
+    /// 갈리면 `by_id` 는 뒷줄만 들어, 미룬 앞줄이 안 미룬 뒷줄의 답을 입는다.
+    fn own_line(&self, i: &'a Issue) -> Option<&'a str> {
+        is_put_off(i).then(|| i.id.as_str())
+    }
+
+    /// id 로 짚은 줄의 미룸 — **조상에게만 쓴다.** 조상의 답은 그 조상 줄의 것이고,
+    /// 그 줄을 고르는 자는 `by_id`(뒷줄이 이긴다)라 [`groups`] 와 같은 자다.
     fn own(&self, id: &'a str) -> Option<&'a str> {
         self.by_id.get(id).is_some_and(|x| is_put_off(x)).then_some(id)
     }
@@ -318,23 +326,39 @@ impl<'a, 'm> Shelf<'a, 'm> {
     /// 내려오지 않으므로(`groups`) 생각의 에픽이 미뤄졌다고 그 밑의 일을 빼면,
     /// 세지도 않는 에픽의 미룸을 받는 꼴이다. 그 위로는 더 오르지 않는다.
     /// 이슈 밑에 접힌 생각은 그대로 지나간다 — 그 밑의 일은 미룬 이슈 밑에 그려진다.
-    fn walk(&self, id: &'a str, mut visit: impl FnMut(&'a str) -> bool) {
-        let mut cur = Some(id);
+    ///
+    /// **첫 걸음은 줄이고 그 위는 id 다**(moai-jk2u.olh). 소속은 이제 줄마다 갈리는데
+    /// ([`joined_in`], 2026-09-23 사용자 결정) 이 걸음이 id 하나로만 올라, 제 `epic` 을
+    /// 적은 앞줄이 미룬 에픽의 멤버로 세어지면서 그 미룸은 안 물려받았다 — `show <에픽>
+    /// --json` 의 `members` 는 그 줄을 드는데 `ready` 는 그대로 내주고 `show --deferred`
+    /// 는 끝내 안 냈다. AGENTS.md 가 못박은 "묶음을 미루면 그 밑이 함께 빠진다" 가
+    /// 거기서 거짓이 된다. 조상은 그대로 id 로 오른다 — 조상의 소속은 그 조상 줄의
+    /// 것이고 `by_id` 로 고른 뒷줄이 [`groups`] 가 고른 그 줄이다.
+    fn walk(&self, from: &'a Issue, mut visit: impl FnMut(&'a str) -> bool) {
+        let start = from.id.as_str();
+        let mut cur = Some(start);
         while let Some(at) = cur {
-            if at != id && self.rooted.contains(at) {
+            if at != start && self.rooted.contains(at) {
                 if let Some(r) = self.own(at) {
                     visit(r);
                 }
                 return;
             }
-            let here = self.by_id.get(at).map(|x| x.kind);
-            if let Some(r) = self.own(at)
+            // 첫 걸음의 재료는 물은 줄 제 것이다. 그 위는 `by_id` 가 고른 줄이다.
+            let line = if at == start { Some(from) } else { self.by_id.get(at).copied() };
+            let here = line.map(|x| x.kind);
+            let own = if at == start { line.and_then(|i| self.own_line(i)) } else { self.own(at) };
+            if let Some(r) = own
                 && visit(r)
             {
                 return;
             }
+            let epic = match line {
+                Some(i) if at == start => joined_in(i, || self.epic_of.get(at).copied()),
+                _ => self.epic_of.get(at).copied(),
+            };
             if matches!(here, Some(Kind::Issue | Kind::Idea))
-                && let Some(r) = self.joined(self.epic_of.get(at), Kind::Epic)
+                && let Some(r) = self.joined(epic.as_ref(), Kind::Epic)
                 && visit(r)
             {
                 return;
@@ -350,9 +374,9 @@ impl<'a, 'm> Shelf<'a, 'm> {
     }
 
     /// 그 줄을 계획에서 뺀 가장 가까운 줄.
-    fn nearest(&self, id: &'a str) -> Option<&'a str> {
+    fn nearest(&self, from: &'a Issue) -> Option<&'a str> {
         let mut found = None;
-        self.walk(id, |r| {
+        self.walk(from, |r| {
             found = Some(r);
             true
         });
@@ -360,13 +384,19 @@ impl<'a, 'm> Shelf<'a, 'm> {
     }
 
     /// 그 줄을 계획에서 빼는 줄 전부.
-    fn every(&self, id: &'a str) -> Vec<&'a str> {
+    fn every(&self, from: &'a Issue) -> Vec<&'a str> {
         let mut out = Vec::new();
-        self.walk(id, |r| {
+        self.walk(from, |r| {
             out.push(r);
             false
         });
         out
+    }
+
+    /// id 로 부르는 자리 — 줄은 `by_id` 가 고른다(뒷줄이 이긴다). 물은 줄을 이미 든
+    /// 자리는 [`Shelf::every`] 를 곧바로 부른다.
+    fn every_id(&self, id: &str) -> Vec<&'a str> {
+        self.by_id.get(id).map(|i| self.every(i)).unwrap_or_default()
     }
 }
 
@@ -1613,10 +1643,10 @@ fn counted<'a>(
     let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
     let Some(shelf) = shelf else { return of.to_vec() };
     // 묶음을 계획에서 뺀 것들 — 제 미룸과 마일스톤·부모에게서 물려받은 것.
-    let mine = shelf.every(g.id.as_str());
+    let mine = shelf.every(g);
     of.iter()
         .copied()
-        .filter(|m| !roots.contains_key(m.id.as_str()) || shelf.every(m.id.as_str()).iter().all(|s| mine.contains(s)))
+        .filter(|m| !roots.contains_key(m.id.as_str()) || shelf.every(m).iter().all(|s| mine.contains(s)))
         .collect()
 }
 
