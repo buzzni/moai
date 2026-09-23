@@ -283,6 +283,11 @@ pub struct Ground {
     stands: States,
     epic: std::collections::BTreeMap<String, String>,
     put_off: std::collections::BTreeSet<String>,
+    /// 줄이 선 마일스톤 — **미룸을 줄에 되묻는 재료다**(moai-u3ta). 읽는 자는 아래 `torn` 이
+    /// 빈 저장소에서는 없으므로, 거름망에 낼 때도 그때만 옮겨 담는다.
+    milestone: std::collections::BTreeMap<String, String>,
+    /// 계획에서 빠졌는가가 **줄마다 갈리는** id(`report::torn_ids`). 성한 저장소에서는 빈다.
+    torn: std::collections::BTreeSet<String>,
     kinds: std::collections::BTreeMap<String, crate::model::Kind>,
     folded: std::collections::BTreeSet<String>,
 }
@@ -324,6 +329,8 @@ impl Ground {
             stands,
             epic: soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
+            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            torn: crate::report::torn_ids(issues, &soil.shelved).iter().map(|k| k.to_string()).collect(),
             kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
         }
@@ -359,6 +366,14 @@ impl Ground {
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.
             lines: crate::report::Lines::of(issues),
             put_off: self.put_off.iter().map(String::as_str).collect(),
+            // **`torn` 이 빌 때는 안 짓는다**(moai-u3ta) — 이 지도를 읽는 자는 미룸을 줄에
+            // 되묻는 길 하나뿐이고(`Where::deferred`), 성한 저장소에서는 그 길로 안 간다.
+            // 여기는 키마다 도는 자리라, 줄마다 한 칸인 지도를 걸음마다 지으면 그대로 값이다.
+            milestone: match self.torn.is_empty() {
+                true => std::collections::BTreeMap::new(),
+                false => borrow(&self.milestone),
+            },
+            torn: self.torn.iter().map(String::as_str).collect(),
             states: self.columns(),
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면

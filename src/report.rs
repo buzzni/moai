@@ -245,31 +245,139 @@ pub fn deferred_roots_over<'a>(
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<&'a str, &'a str> {
+    fold_roots(all, &shelved_over(all, lines, epic_of, mile_of))
+}
+
+/// 줄마다의 답을 **id 로 접는다 — 뒷줄이 이긴다**(2026-09-23 사용자 결정, moai-u3ta).
+/// [`folded_by_id`] 와 같은 차례고, `None` 이 앞줄의 답을 지우는 것도 같다 — 넣기만 하면
+/// 미룬 릴리스에 든 앞줄의 미룸이 산 릴리스에 든 뒷줄에 그대로 남는다.
+///
+/// **id 밖에 없는 표면의 답이 이것이다** — `moai show <id>` 의 `shelved_by`, `defer`·`mv`·
+/// `idea`·`edit` 이 대는 "여기를 푸세요" 말. `moai show <id>` 가 찍는 줄이 `by_id` 가 고르는
+/// 뒷줄이므로, 그 줄의 답이 아닌 것을 곁들이면 한 화면이 제 말을 뒤집는다.
+fn fold_roots<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeMap<&'a str, &'a str> {
+    debug_assert_eq!(all.len(), shelved.len(), "판정이 줄과 자리를 맞춰야 한다");
+    let mut out = BTreeMap::new();
+    for (i, r) in all.iter().zip(shelved) {
+        match r {
+            Some(r) => out.insert(i.id.as_str(), *r),
+            None => out.remove(i.id.as_str()),
+        };
+    }
+    out
+}
+
+/// **줄마다** — 그 줄을 계획에서 뺀 가장 가까운 줄, 없으면 계획 안이다. `all` 과 **자리가
+/// 같은** 배열이다([`under_lost`] 의 `lost` 와 같은 꼴).
+///
+/// 접은 지도([`deferred_roots_over`])는 id 로 짠 것이라 같은 id 의 줄 둘을 못 가른다. 담는
+/// 꼴이 `filter_map().collect()` 이던 동안은 "이 줄은 안 미뤄졌다" 를 적을 길조차 없어서, 한
+/// 쌍둥이가 받은 미룸이 다른 줄에 말없이 갔다 — 미룬 릴리스에 든 앞줄 때문에 산 릴리스에 든
+/// 뒷줄이 `ready` 에서도 `held` 에서도 사라졌다(moai-u3ta, 리뷰 moai-jk2u.m60 3번).
+///
+/// **새는 방향은 한쪽뿐이었다.** `filter_map` 은 `Some` 만 적으므로 샘은 늘 "미뤘다" 쪽으로
+/// 갔고, 계획 밖인 줄이 계획 안으로 읽힌 적은 없다.
+pub fn shelved_over<'a>(
+    all: &'a [Issue],
+    lines: &Lines<'a>,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> Vec<Option<&'a str>> {
     // 문은 여기에도 둔다 — [`Lines`] 를 이미 든 쪽이 부르므로 짓는 값은 안 아끼지만,
     // 미룬 줄 없는 저장소에서 목록을 한 번 더 걷는 것은 그대로 아낀다.
     if !all.iter().any(is_put_off) {
-        return BTreeMap::new();
+        return vec![None; all.len()];
     }
     let shelf = Shelf::new(lines, epic_of, mile_of);
-    let mut roots: BTreeMap<&str, &str> = all
-        .iter()
-        .filter(|i| !closed_by_hand(i))
-        .filter_map(|i| shelf.nearest(i).map(|r| (i.id.as_str(), r)))
-        .collect();
-    // 계획에서 빠진 묶음이 없으면 멤버를 셀 것도 없다.
-    let shelved: Vec<&Issue> = roots.keys().filter_map(|id| shelf.lines.at(id)).filter(|g| is_group(g)).collect();
-    if !shelved.is_empty() {
-        let members = members_in(all, epic_of, lines, &kinds(all));
-        let done: Vec<&str> = shelved
-            .into_iter()
-            .filter(|g| reads_done(&counted(g, &members, Some(&shelf), &roots)))
-            .map(|g| g.id.as_str())
-            .collect();
-        for id in done {
-            roots.remove(id);
+    let mut out: Vec<Option<&str>> =
+        all.iter().map(|i| (!closed_by_hand(i)).then(|| shelf.nearest(i)).flatten()).collect();
+    // **읽은 칸이 done 인 묶음은 제 줄이 빠진다.** 끝난 줄은 미룬 것이 아니다([`is_put_off`]).
+    // 묶음이 끝났는지는 멤버를 다 센 뒤에야 알므로 물려주는 셈(`closed_by_hand`)에서는 못
+    // 거르고 여기서 거른다 — 안 거르면 `moai status` 의 `미뤄 둔 것` 이 센 줄을 그 줄이
+    // 가리키는 `moai show --deferred` 가 done 으로 숨기고, `moai mv` 는 끝난 묶음에 도로
+    // 집으라고 한다. **그 밑의 줄이 물려받은 미룸은 그대로다** — 멤버 쪽 답은 이미 셌다.
+    for id in settled_groups(all, &out, lines, epic_of, &shelf) {
+        for (i, r) in all.iter().zip(out.iter_mut()) {
+            if is_group(i) && i.id == id {
+                *r = None;
+            }
         }
     }
-    roots
+    out
+}
+
+/// [`shelved_over`] 와 같은 것. 소속 지도만 든 쪽이 [`Lines`] 를 안 짓게 하는 짧은 길이다.
+pub fn shelved_in<'a>(
+    all: &'a [Issue],
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> Vec<Option<&'a str>> {
+    if !all.iter().any(is_put_off) {
+        return vec![None; all.len()];
+    }
+    shelved_over(all, &Lines::of(all), epic_of, mile_of)
+}
+
+/// [`shelved_over`] 와 같은 것. 아무것도 안 든 쪽의 짧은 길이다.
+pub fn shelved(all: &[Issue]) -> Vec<Option<&str>> {
+    if !all.iter().any(is_put_off) {
+        return vec![None; all.len()];
+    }
+    let (epic_of, mile_of) = ties(all);
+    shelved_in(all, &epic_of, &mile_of)
+}
+
+/// 읽은 칸이 `done` 이라 **제 줄은 계획 밖으로 안 세는** 묶음.
+fn settled_groups<'a>(
+    all: &'a [Issue],
+    shelved: &[Option<&'a str>],
+    lines: &Lines<'a>,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    shelf: &Shelf<'a, '_>,
+) -> BTreeSet<&'a str> {
+    // 계획에서 빠진 묶음이 없으면 멤버를 셀 것도 없다.
+    let off: Vec<&Issue> =
+        all.iter().zip(shelved).filter(|(i, r)| r.is_some() && is_group(i)).map(|(i, _)| i).collect();
+    if off.is_empty() {
+        return BTreeSet::new();
+    }
+    let members = members_in(all, epic_of, lines, &kinds(all));
+    off.into_iter().filter(|g| reads_done(&counted(g, &members, Some(shelf)))).map(|g| g.id.as_str()).collect()
+}
+
+/// 계획에서 빠졌는가가 **줄마다 갈리는** id. 성한 저장소에서는 빈다 — 그때는 접은 지도가 곧
+/// 줄마다의 답이라, 줄을 든 쪽도 지도를 짚어 답할 수 있다([`crate::query::Where::deferred`]).
+///
+/// **묶음이 선 id 는 안 든다.** 묶음이 계획 밖인가에는 읽은 칸이 걸리는데([`settled_groups`])
+/// 그 칸은 멤버를 id 로 세어 나온 값이라 줄로 되물을 수 없다 — 그쪽은 뒷줄의 답을 쓴다.
+pub fn torn_ids<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeSet<&'a str> {
+    debug_assert_eq!(all.len(), shelved.len(), "판정이 줄과 자리를 맞춰야 한다");
+    let mut seen: BTreeMap<&str, bool> = BTreeMap::new();
+    let mut torn = BTreeSet::new();
+    for (i, r) in all.iter().zip(shelved) {
+        let id = i.id.as_str();
+        if seen.insert(id, r.is_some()).is_some_and(|was| was != r.is_some()) {
+            torn.insert(id);
+        }
+    }
+    for i in all.iter().filter(|i| is_group(i)) {
+        torn.remove(i.id.as_str());
+    }
+    torn
+}
+
+/// **줄 하나**를 계획에서 뺀 가장 가까운 줄 — [`shelved_over`] 가 그 줄에 내리는 그 답이다.
+/// 지도가 든 답이 이 줄의 것이 아닐 때([`torn_ids`]) 줄을 든 쪽이 이것으로 되묻는다.
+///
+/// **묶음의 읽은 칸은 안 본다** — [`settled_groups`] 가 id 로 재는 값이라 여기서는 못 되묻는다.
+/// 그래서 [`torn_ids`] 가 묶음이 선 id 를 빼고, 이 자는 그 밖에서만 불린다.
+pub fn shelved_at_line<'a>(
+    i: &'a Issue,
+    lines: &Lines<'a>,
+    epic_of: &BTreeMap<&'a str, &'a str>,
+    mile_of: &BTreeMap<&'a str, &'a str>,
+) -> Option<&'a str> {
+    (!closed_by_hand(i)).then(|| Shelf::new(lines, epic_of, mile_of).nearest(i)).flatten()
 }
 
 /// 계획에서 빠진 줄 id → 그 줄을 **계획에 도로 넣으려면 풀어야 할 미룸 전부**, 가까운 것부터.
@@ -555,10 +663,10 @@ pub fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // 없으면 조상을 타는 셈(`put_off`)도 종류 지도(`eclipsed`)도 아예 안 돌린다.
     let held = in_started_columns(issues, cfg);
     if held.is_empty() {
-        return held;
+        return Vec::new();
     }
-    let out = put_off(issues);
-    held.into_iter().filter(|i| !out.contains(i.id.as_str())).collect()
+    let out = shelved(issues);
+    held.into_iter().filter(|(k, _)| out[*k].is_none()).map(|(_, i)| i).collect()
 }
 
 /// [`started`] 와 같은 것. **이미 잰 소속 지도를 받는다**([`Footing`]) — 미룬 줄을 빼는 걸음이
@@ -571,15 +679,19 @@ pub fn started_in<'a>(
 ) -> Vec<&'a Issue> {
     let held = in_started_columns(issues, cfg);
     if held.is_empty() {
-        return held;
+        return Vec::new();
     }
-    let out = put_off_in(issues, epic_of, mile_of);
-    held.into_iter().filter(|i| !out.contains(i.id.as_str())).collect()
+    let out = shelved_in(issues, epic_of, mile_of);
+    held.into_iter().filter(|(k, _)| out[*k].is_none()).map(|(_, i)| i).collect()
 }
 
 /// 시작한 칸에 선 일 줄 — **미룸은 아직 안 뺐다.** [`started`] 와 [`started_in`] 의 값싼 첫 걸음이다.
-fn in_started_columns<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
-    issues.iter().filter(|i| is_work(i) && cfg.is_started(i.status.as_str())).collect()
+///
+/// **자리를 함께 낸다**(moai-u3ta). 미룸을 빼는 자가 줄마다 답하는 배열이라([`shelved`]) 그
+/// 답을 짚으려면 자리가 있어야 한다 — id 로 짚으면 같은 id 의 앞줄이 뒷줄의 답을 입어, 산
+/// 에픽에 든 줄을 집고도 훅이 "아무것도 안 집었다" 고 말한다.
+fn in_started_columns<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<(usize, &'a Issue)> {
+    issues.iter().enumerate().filter(|(_, i)| is_work(i) && cfg.is_started(i.status.as_str())).collect()
 }
 
 /// 이 줄이 `names` 가 가리키는 일인가 — 그 줄 자신이나 조상이 들었거나, 그 에픽·마일스톤이
@@ -1633,12 +1745,14 @@ pub fn group_stands_in<'a, 'c>(
     roots: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<&'a str, Stand<'a, 'c>> {
     let members = members_in(all, epic_of, lines, kind_of);
-    // 미룬 줄이 없으면 뺄 멤버도 없다 — 조상을 타는 길을 아예 안 세운다.
-    let shelf = (!roots.is_empty()).then(|| Shelf::new(lines, epic_of, mile_of));
+    // 미룬 줄이 없으면 뺄 멤버도 없다 — 조상을 타는 길을 아예 안 세운다. **`roots` 로 묻지
+    // 않는다**(moai-u3ta) — 그 지도는 뒷줄의 답만 들어, 미룬 에픽에 든 앞줄 하나뿐인 저장소에서
+    // 비어 버린다. 그러면 여기가 길을 안 세우고 그 줄이 멤버 셈에 그대로 든다.
+    let shelf = all.iter().any(is_put_off).then(|| Shelf::new(lines, epic_of, mile_of));
     all.iter()
         .filter(|g| is_group(g))
         .map(|g| {
-            let counted = counted(g, &members, shelf.as_ref(), roots);
+            let counted = counted(g, &members, shelf.as_ref());
             let since = counted.iter().map(|m| m.status_since.as_str()).max().unwrap_or(g.created_at.as_str());
             // 칸 자리가 아니라 뜻으로 묻는다(moai-p415) — 두 칸짜리 설정에는 시작한 칸이 없어 거짓이다.
             // **설정이 아는 칸만 센다** — `column_of` 가 설정의 칸에서만 고르므로, 모르는 칸
@@ -1728,21 +1842,26 @@ fn work_under<'a>(
 /// 빠진 자식이 제 에픽을 미루는 순간 그 에픽의 미룸을 뿌리로 받아 도로 세어진다 —
 /// 미루기 하나로 에픽의 칸이 `done` 에서 `in_progress` 로 되돌아갔다.
 ///
-/// **끝난 멤버는 언제나 센다.** 끝난 일은 물려받아도 계획에서 안 빠지므로
-/// (`closed_by_hand`) 애초에 `roots` 에 없다.
+/// **끝난 멤버는 언제나 센다.** 끝난 일은 물려받아도 계획에서 안 빠진다(`closed_by_hand`).
+///
+/// **멤버가 계획 밖인가는 줄에 묻는다**(moai-u3ta). 접은 지도(`roots`)를 짚어 빠른 길을
+/// 삼던 때는 같은 id 의 앞줄이 뒷줄의 답을 입어, 미룬 에픽에 든 앞줄이 셈에 그대로 들거나
+/// 산 에픽에 든 뒷줄이 셈에서 빠졌다. `Shelf::every` 는 이미 줄로 묻는 자라 되묻는 것이 없다.
 fn counted<'a>(
     g: &'a Issue,
     members: &BTreeMap<(Kind, &'a str), Vec<&'a Issue>>,
     shelf: Option<&Shelf<'a, '_>>,
-    roots: &BTreeMap<&'a str, &'a str>,
 ) -> Vec<&'a Issue> {
     let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
     let Some(shelf) = shelf else { return of.to_vec() };
     // 묶음을 계획에서 뺀 것들 — 제 미룸과 마일스톤·부모에게서 물려받은 것.
     let mine = shelf.every(g);
+    // **계획 안인 줄은 걸음을 한 번만 걷는다** — `nearest` 는 첫 미룸에서 멈추고 아무것도 안
+    // 담으므로, 미룸 없는 흔한 멤버에 `every` 의 `Vec` 이 안 선다(옛 `roots.contains_key` 가
+    // 하던 값싼 문을 줄로 옮긴 자리다).
     of.iter()
         .copied()
-        .filter(|m| !roots.contains_key(m.id.as_str()) || shelf.every(m).iter().all(|s| mine.contains(s)))
+        .filter(|m| closed_by_hand(m) || shelf.nearest(m).is_none() || shelf.every(m).iter().all(|s| mine.contains(s)))
         .collect()
 }
 
@@ -1874,7 +1993,9 @@ pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<
     }
     let group = groups(all);
     let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
-    let (roots, states, waits, _) = blocking(all, cfg, &group, &by_id);
+    let (off, states, waits, _) = blocking(all, cfg, &group, &by_id);
+    // 막는 줄은 **id 로** 불린다 — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
+    let roots = fold_roots(all, &off);
     i.blocked_by
         .iter()
         .map(|b| {
@@ -2681,8 +2802,13 @@ pub struct Soil<'a> {
     pub epic: BTreeMap<&'a str, &'a str>,
     /// 줄 id → 그 줄이 선 마일스톤([`milestones`]).
     pub milestone: BTreeMap<&'a str, &'a str>,
-    /// 계획에서 빠진 줄 → 그것을 뺀 줄([`deferred_roots`]).
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄([`deferred_roots`]). **id 로 접은 것이라 뒷줄이
+    /// 이긴다** — id 밖에 없는 표면(막는 줄, `shelved_by`, 도로 집을 곳)의 답이다.
     pub roots: BTreeMap<&'a str, &'a str>,
+    /// 줄마다 — 그 줄을 계획에서 뺀 줄([`shelved_over`]). `all` 과 **자리가 같다**.
+    /// 줄을 든 쪽은 이것을 짚는다 — 위의 `roots` 는 같은 id 의 앞줄에 뒷줄의 답을 준다
+    /// (moai-u3ta).
+    pub shelved: Vec<Option<&'a str>>,
     /// id → 그 id 를 마지막으로 든 줄의 종류([`kinds`]).
     pub kinds: BTreeMap<&'a str, Kind>,
     /// 못 쓸 소속 참조를 든 줄([`misplaced`]).
@@ -2702,7 +2828,8 @@ impl<'a> Soil<'a> {
         let milestone = milestones_over(all, &epic, &lines);
         // 문은 [`deferred_roots_over`] 안에 이미 있다 — 여기서 한 번 더 세우면 미룬 줄이 있는
         // 저장소에서 목록을 한 벌 더 훑고, 없는 저장소에서 아끼는 것은 그쪽이 이미 아낀다.
-        let roots = deferred_roots_over(all, &lines, &epic, &milestone);
+        let shelved = shelved_over(all, &lines, &epic, &milestone);
+        let roots = fold_roots(all, &shelved);
         let kinds = kinds(all);
         // **판정은 줄마다 한 번이다**(moai-jk2u.pl6) — `lost` 는 그것을 id 로 접은 지도고
         // (뒷줄이 이긴다), `folded` 는 줄마다의 값을 그대로 쓴다. 둘을 따로 재던 때는 같은
@@ -2714,7 +2841,7 @@ impl<'a> Soil<'a> {
         // 자와 자리를 정하는 자는 그 줄의 것을 봐야 한다.
         let adrift: Vec<bool> = all.iter().zip(&verdict).map(|(i, m)| m.is_some() || is_eclipsed(&kinds, i)).collect();
         let folded = under_lost(all, &lines, &epic, &adrift);
-        Soil { epic, milestone, roots, kinds, lost, folded, lines }
+        Soil { epic, milestone, roots, shelved, kinds, lost, folded, lines }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가([`is_eclipsed`]).
@@ -3128,7 +3255,10 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
     // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
     // 늘어나는 셈은 없다. **도는 마일스톤도 같은 셈에서 읽는다** — 따로 재면 `ready` 가 빼는
     // 자와 `status` 가 비추는 자가 갈린다.
-    let roots = deferred_roots_over(issues, &lines, &group, &mile_of);
+    // **줄마다의 답을 먼저 잰다**(moai-u3ta) — 내주는 문은 줄에 묻고([`unblocked_pick`]), 도는
+    // 마일스톤을 고르는 자는 id 에 묻는다. 두 답이 한 번의 셈에서 나와야 갈리지 않는다.
+    let off = shelved_over(issues, &lines, &group, &mile_of);
+    let roots = fold_roots(issues, &off);
     let kind_of = kinds(issues);
     let stands = group_stands_in(issues, cfg, &lines, &group, &mile_of, &kind_of, &roots);
     let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
@@ -3143,8 +3273,10 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
     let eclipsed = |i: &Issue| is_eclipsed(&kind_of, i);
     let mut out: Vec<&Issue> = issues
         .iter()
+        .enumerate()
         // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|i| !is_blocked(i, by_id, &states, &waits) && unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed))
+        .filter(|(k, i)| !is_blocked(i, by_id, &states, &waits) && unblocked_pick(i, *k, issues, cfg, &off, &eclipsed))
+        .map(|(_, i)| i)
         .collect();
 
     // **도는 마일스톤 안인가.** 소속은 물려받은 것까지다(`milestones`) — 에픽의 마일스톤이
@@ -3320,24 +3452,27 @@ fn blocking<'a, 'c>(
     cfg: &'c Config,
     epic_of: &BTreeMap<&'a str, &'a str>,
     by_id: &BTreeMap<&'a str, &'a Issue>,
-) -> (BTreeMap<&'a str, &'a str>, BTreeMap<&'a str, &'c str>, Waits<'a>, BTreeMap<&'a str, &'a str>) {
+) -> (Vec<Option<&'a str>>, BTreeMap<&'a str, &'c str>, Waits<'a>, BTreeMap<&'a str, &'a str>) {
     let shelved = issues.iter().any(is_put_off);
     let by_group =
         issues.iter().any(|i| i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| is_group(x))));
     if !shelved && !by_group {
-        return (BTreeMap::new(), BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
+        return (vec![None; issues.len()], BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
     }
     // **받은 에픽 지도 위에 쌓는다** — `milestones` 를 그냥 부르면 그 안에서 `groups` 를 한 벌
     // 더 지어, 지도를 건네받은 보람이 없다([`milestones_in`]).
     let lines = Lines::of(issues);
     let mile_of = milestones_over(issues, epic_of, &lines);
-    let roots = deferred_roots_over(issues, &lines, epic_of, &mile_of);
+    // **줄마다 잰다**(moai-u3ta) — 내주는 문([`unblocked_pick`])은 줄에 묻고, 묶음 칸과 막는
+    // 줄을 대는 자는 id 에 묻는다. 접는 것은 한 번이라 걷는 걸음이 늘지 않는다.
+    let off = shelved_over(issues, &lines, epic_of, &mile_of);
     let (states, waits) = if by_group {
+        let roots = fold_roots(issues, &off);
         split_stands(group_stands_in(issues, cfg, &lines, epic_of, &mile_of, &kinds(issues), &roots))
     } else {
         (BTreeMap::new(), BTreeMap::new())
     };
-    (roots, states, waits, mile_of)
+    (off, states, waits, mile_of)
 }
 
 /// 막음만 빼면 집을 수 있는가. `ready` 와 `held` 가 **같은 자로** 고른다 —
@@ -3347,11 +3482,17 @@ fn blocking<'a, 'c>(
 /// `(길 잃음)` 에 서고 어느 묶음에도 안 드는데, `ready` 만 그것을 집으라고 내밀며
 /// 에픽 칸에 `에픽 없음` 을 달았다. 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀
 /// 집어도 `mv` 가 거절한다 — 자리 없는 줄을 내밀 까닭이 없다.
+///
+/// **계획 밖인가는 줄에 묻는다**(moai-u3ta) — `shelved` 는 `issues` 와 자리가 같은 배열이고
+/// `at` 은 물은 줄의 자리다. 접은 지도를 짚던 때는 같은 id 의 앞줄이 미룬 에픽에 들었다는
+/// 이유로 산 에픽에 든 뒷줄이 `ready` 에서 사라졌고, 그 줄은 `held` 에도 안 서서 도구 안에서는
+/// 왜 사라졌는지 볼 길이 없었다.
 fn unblocked_pick(
     i: &Issue,
+    at: usize,
     issues: &[Issue],
     cfg: &Config,
-    out_of_plan: &BTreeSet<&str>,
+    shelved: &[Option<&str>],
     eclipsed: &impl Fn(&Issue) -> bool,
 ) -> bool {
     // **끝난 에픽인지는 묻지 않는다.** 묶음의 칸은 멤버에서 읽으므로(`group_states`)
@@ -3361,12 +3502,15 @@ fn unblocked_pick(
     // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
     // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
     let has_open_child = || {
-        children_of(issues, &i.id)
-            .iter()
-            .any(|c| is_work(c) && !out_of_plan.contains(c.id.as_str()) && !c.status.is_done())
+        issues.iter().enumerate().any(|(k, c)| {
+            crate::id::parent_of(&c.id) == Some(i.id.as_str())
+                && is_work(c)
+                && shelved[k].is_none()
+                && !c.status.is_done()
+        })
     };
     is_work(i)                                   // 묶음도 생각도 집는 게 아니다
-        && !out_of_plan.contains(i.id.as_str())  // 미뤄 둔 것과 그 밑도
+        && shelved[at].is_none()                 // 미뤄 둔 것과 그 밑도
         && !eclipsed(i)                          // 쌍둥이에게 자리를 뺏긴 줄도
         && i.status.as_str() == cfg.first_status()
         && !has_open_child()
@@ -3399,7 +3543,9 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **마일스톤 지도도 `blocking` 에게서 받는다** — 밖에서 [`ties`] 로 미리 지으면 `blocking` 이
     // 제 안에서 같은 것을 한 벌 더 짓는다.
-    let (roots, states, waits, mile_of) = blocking(issues, cfg, &group, &by_id);
+    let (off, states, waits, mile_of) = blocking(issues, cfg, &group, &by_id);
+    // 막는 줄은 **id 로** 불린다(`blocked_by`) — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
+    let roots = fold_roots(issues, &off);
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     // **도로 집을 곳은 방금 잰 것으로 짓는다** — [`deferred_sources`] 를 그냥 부르면 소속 지도
     // 두 벌과 `blocking` 이 이미 낸 `roots` 를 통째로 다시 짓는다.
@@ -3409,12 +3555,13 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<Held<'a>> {
     // 한 번 걷는다 — 모든 줄에 먼저 부르면 `ready` 가 부를 때마다 제곱이다.
     let mut out: Vec<Held> = issues
         .iter()
-        .filter_map(|i| {
+        .enumerate()
+        .filter_map(|(k, i)| {
             let (by, empty) = holding(i, &by_id, &out_of_plan, &states, &waits);
-            (!by.is_empty() || !empty.is_empty()).then_some((i, by, empty))
+            (!by.is_empty() || !empty.is_empty()).then_some((k, i, by, empty))
         })
-        .filter(|(i, _, _)| unblocked_pick(i, issues, cfg, &out_of_plan, &eclipsed))
-        .map(|(i, by, empty)| {
+        .filter(|(k, i, _, _)| unblocked_pick(i, *k, issues, cfg, &off, &eclipsed))
+        .map(|(_, i, by, empty)| {
             // **풀어야 할 미룸을 다 댄다**(moai-g2a1). 가까운 하나만 대면 그것을 풀고도 여전히
             // 막힌 채 그제야 다음을 댄다(moai-phzi). 제가 미뤄진 묶음이 멤버도 다 미뤘으면
             // 묶음만 풀어서는 이번엔 그 멤버에 막히므로, 뺀 멤버의 미룸까지 댄다.
@@ -4069,7 +4216,12 @@ pub fn status_in<'a>(
     // 도는 마일스톤 — `ready` 가 밖의 일을 빼는 자와 **같은 자다**(moai-493a).
     let running = running_in(cfg, &by_id, &stands, &out_of_plan);
     let (states, waits) = split_stands(stands);
-    let work: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !out_of_plan.contains(i.id.as_str())).collect();
+    // **계획 밖인가는 줄에 묻는다**(moai-u3ta) — 위의 `out_of_plan` 은 id 로 접은 것이라 같은
+    // id 의 앞줄이 뒷줄의 답을 입는다. 보드 수·경고·흐름이 이 하나를 지나므로 여기서 갈리면
+    // 아래가 다 갈린다. **id 로 불리는 자리**(막는 줄, 빈 에픽, 마감)는 그대로 접은 것을 쓴다.
+    let off = &soil.shelved;
+    let work: Vec<&Issue> =
+        issues.iter().enumerate().filter(|(k, i)| is_work(i) && off[*k].is_none()).map(|(_, i)| i).collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -4359,11 +4511,17 @@ pub fn status_in<'a>(
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |i: &&Issue| is_idea(i) && !i.status.is_done() && !out_of_plan.contains(i.id.as_str());
-    let count = issues.iter().filter(piled).count();
+    let piled = |(k, i): &(usize, &Issue)| is_idea(i) && !i.status.is_done() && off[*k].is_none();
+    let count = issues.iter().enumerate().filter(piled).count();
     // 문턱 0 으로 `쌓인 idea 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
     if count > 0 && count >= cfg.status.idea_pile {
-        let oldest = issues.iter().filter(piled).filter_map(|i| days_since(&i.created_at, now)).max().unwrap_or(0);
+        let oldest = issues
+            .iter()
+            .enumerate()
+            .filter(piled)
+            .filter_map(|(_, i)| days_since(&i.created_at, now))
+            .max()
+            .unwrap_or(0);
         notices.push(Warning::new("idea_pile", Vec::new()).count(count).oldest(oldest).notice().hint("moai idea ls"));
     }
 
@@ -4379,13 +4537,17 @@ pub fn status_in<'a>(
     //      **물려받은 것도 센다.** 미룬 에픽 밑의 멤버도 보드에서 빠지므로
     //      여기서 안 세면 가리키는 `--deferred` 가 내는 수와 어긋난다. 나이는
     //      제 줄에 적힌 시각만 있으니 그것으로 잰다.
-    let shelved = |i: &&Issue| out_of_plan.contains(i.id.as_str());
-    let count = issues.iter().filter(shelved).count();
+    //
+    //      **줄마다 센다**(moai-u3ta) — 이 수가 가리키는 `moai show --deferred` 도 줄마다
+    //      고르므로, id 로 세면 미룬 쌍둥이 하나가 제 짝까지 이 수에 얹는다.
+    let shelved = |(k, _): &(usize, &Issue)| off[*k].is_some();
+    let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
         let oldest = issues
             .iter()
+            .enumerate()
             .filter(shelved)
-            .filter_map(|i| i.deferred_at.as_deref().and_then(|at| days_since(at, now)))
+            .filter_map(|(_, i)| i.deferred_at.as_deref().and_then(|at| days_since(at, now)))
             .max()
             .unwrap_or(0);
         notices.push(
@@ -6571,6 +6733,148 @@ mod tests {
         ];
         assert_eq!(read(&issues, 2), "in_progress", "묶음이 제 읽은 칸을 잃었다");
         assert_eq!(read(&issues, 0), "todo", "일이 묶음의 칸을 입었다");
+    }
+
+    /// **한 쌍둥이의 미룸이 다른 줄로 가지 않는다**(moai-u3ta).
+    ///
+    /// 담는 꼴이 `filter_map().collect()` 이던 동안은 "이 줄은 안 미뤄졌다" 를 적을 길이 없어,
+    /// 미룬 묶음에 든 앞줄의 답이 산 묶음에 든 뒷줄에 그대로 남았다. 새는 방향이 한쪽이라
+    /// 계획 밖인 줄이 계획 안으로 읽힌 적은 없고, 늘 산 줄이 사라졌다.
+    #[test]
+    fn a_twin_does_not_wear_the_others_deferral() {
+        let off = |mut i: Issue| {
+            i.deferred_at = Some("2026-09-01T00:00:00Z".into());
+            i
+        };
+        // 축마다 한 판 — 마일스톤, 에픽, 그리고 제 줄에 적은 미룸.
+        let stone = |id: &str, to: &str| {
+            let mut i = make(id, Kind::Issue, "todo");
+            i.milestone = Some(to.into());
+            i
+        };
+        let mut piles = vec![
+            (
+                "마일스톤",
+                vec![
+                    stone("argos-0002", "argos-m001"),
+                    stone("argos-0002", "argos-m002"),
+                    off(make("argos-m001", Kind::Milestone, "todo")),
+                    make("argos-m002", Kind::Milestone, "todo"),
+                ],
+            ),
+            (
+                "에픽",
+                vec![
+                    member("argos-0002", "argos-e001", "todo"),
+                    member("argos-0002", "argos-e002", "todo"),
+                    off(make("argos-e001", Kind::Epic, "todo")),
+                    make("argos-e002", Kind::Epic, "todo"),
+                ],
+            ),
+            ("제 줄", vec![off(make("argos-0002", Kind::Issue, "todo")), make("argos-0002", Kind::Issue, "todo")]),
+        ];
+        // 거울 판도 본다 — 뒷줄이 미룬 쪽이면 답이 뒤집힐 뿐 갈래는 같다.
+        for (what, pile) in piles.clone() {
+            let mut flipped = pile.clone();
+            flipped.swap(0, 1);
+            piles.push((what, flipped));
+        }
+
+        for (what, issues) in piles {
+            let want = issues[0].is_deferred()
+                || issues[0].epic.as_deref() == Some("argos-e001")
+                || issues[0].milestone.as_deref() == Some("argos-m001");
+            let out = shelved(&issues);
+            assert_eq!(out[0].is_some(), want, "{what}: 앞줄의 답이 틀렸다 — {out:?}");
+            assert_eq!(out[1].is_some(), !want, "{what}: 한 줄의 미룸이 다른 줄에 갔다 — {out:?}");
+
+            // 내주는 문도 줄에 묻는다 — 산 줄은 그대로 `ready` 에 선다.
+            let picked: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.title.as_str()).collect();
+            assert_eq!(picked.len(), 1, "{what}: 계획 안인 줄이 `ready` 에서 사라졌다 — {picked:?}");
+
+            // 목록도 줄에 묻는다.
+            let cfg = cfg();
+            let wh = crate::query::Where::of(&issues, &cfg);
+            assert_eq!(wh.deferred(&issues[0]), want, "{what}: 목록이 앞줄을 달리 봤다");
+            assert_eq!(wh.deferred(&issues[1]), !want, "{what}: 목록이 뒷줄을 달리 봤다");
+
+            // id 밖에 없는 표면은 **뒷줄이 답한다**(2026-09-23 사용자 결정).
+            let roots = deferred_roots(&issues);
+            assert_eq!(roots.contains_key("argos-0002"), !want, "{what}: 접은 지도가 앞줄의 답을 들었다");
+        }
+    }
+
+    /// **무작위 더미로 같은 대조를 돌린다.** 표로 적은 모양은 누가 떠올린 것뿐이다 —
+    /// `nav` 의 무작위 대조(`a_milestone_counts_what_it_draws_on_random_piles`)가 지난 회차에
+    /// 세고·그리는 쪽만 옮긴 것을 잡았고, 이번에 거르고·내주고·세는 쪽이 갈린 것도 표가 아니라
+    /// 이 대조가 지킬 몫이다. 씨앗을 고정해 늘 같은 더미를 만든다.
+    ///
+    /// 재는 것은 하나다 — **줄마다의 답([`shelved`])과 그 줄을 내주거나 숨기거나 세는 자가
+    /// 같은 말을 하는가.** 묶음이 선 id 는 뺀다: 묶음이 계획 밖인가에는 읽은 칸이 걸리고
+    /// ([`settled_groups`]) 그 칸은 멤버를 id 로 세어 나온 값이라 줄로 되물을 수 없다
+    /// ([`torn_ids`], 2026-09-23 사용자 결정).
+    #[test]
+    fn every_surface_reads_the_same_line_on_random_piles() {
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut roll = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let cfg = cfg();
+        for _ in 0..3000 {
+            let mut issues: Vec<Issue> = Vec::new();
+            for n in 0..(2 + roll(10)) {
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                // 중복 id 를 섞는다 — 이 갈래가 갈리는 것은 그 저장소에서뿐이다.
+                let id = match roll(4) {
+                    0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
+                    1 if !issues.is_empty() => issues[roll(issues.len())].id.clone(),
+                    _ => format!("argos-{n:04}"),
+                };
+                let status = ["todo", "in_progress", "done"][roll(3)];
+                let mut i = make(&id, kind, status);
+                let pick = |roll: &mut dyn FnMut(usize) -> usize| match roll(4) {
+                    0 | 1 => None,
+                    2 if !issues.is_empty() => Some(issues[roll(issues.len())].id.clone()),
+                    _ => Some("argos-zzzz".to_string()),
+                };
+                i.epic = pick(&mut roll);
+                i.milestone = pick(&mut roll);
+                // 미룸도 섞는다 — 물려받는 걸음이 서려면 미룬 줄이 하나는 있어야 한다.
+                if roll(3) == 0 {
+                    i.deferred_at = Some("2026-09-01T00:00:00Z".into());
+                }
+                issues.push(i);
+            }
+            let out = shelved(&issues);
+            let wh = crate::query::Where::of(&issues, &cfg);
+            // 묶음이 선 id — 그 id 의 답은 접은 지도의 것이다.
+            let grouped: BTreeSet<&str> = issues.iter().filter(|i| is_group(i)).map(|i| i.id.as_str()).collect();
+
+            // 1. 내주는 문 — 계획 밖인 줄은 내주지 않는다.
+            for r in ready(&issues, &cfg) {
+                let at = issues.iter().position(|i| std::ptr::eq(i, r)).expect("`ready` 가 남의 줄을 냈다");
+                assert!(out[at].is_none(), "계획 밖인 줄을 내줬다 — {} / {issues:#?}", r.id);
+            }
+            // 2. 목록·보드·탐색기가 숨기는 자 — 같은 줄에 같은 답이다.
+            for (at, i) in issues.iter().enumerate() {
+                if grouped.contains(i.id.as_str()) {
+                    continue;
+                }
+                assert_eq!(
+                    wh.deferred(i),
+                    i.is_deferred() || out[at].is_some(),
+                    "목록과 줄마다의 답이 갈렸다 — {} / {issues:#?}",
+                    i.id
+                );
+            }
+            // 3. `moai status` 가 비추는 수 — `show --deferred` 가 내는 줄 수와 같아야 한다.
+            let said = status(&issues, &[], &cfg, "2026-10-01T00:00:00Z", utc());
+            let count = said.notices.iter().find(|w| w.kind == "deferred").map_or(0, |w| w.count);
+            assert_eq!(count, out.iter().filter(|r| r.is_some()).count(), "비추는 수가 줄마다의 답과 갈렸다");
+        }
     }
 
     /// **도로 집는 말은 풀어야 할 미룸을 다 댄다**(moai-g2a1). 제 줄도 미뤘고 미룬 에픽에도
