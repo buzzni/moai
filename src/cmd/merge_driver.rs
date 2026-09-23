@@ -1281,9 +1281,9 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // 링크가 다 풀린 값인데 `PATH` 의 철자는 안 풀린 값이다 — `/usr/local/bin/moai` 가 같은
     // 파일을 가리키는 심볼릭 링크면 둘이 갈려, 같은 바이너리를 두 번 띄워 재고도 "딴것" 으로
     // 읽었다. 못 풀면 적힌 철자 그대로 견준다: 여기서 틀리는 값은 **덜 이르는 쪽**이다.
-    // 푸는 자는 [`crate::store::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
+    // 푸는 자는 [`crate::path::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
     // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰).
-    if crate::store::real(&found) == crate::store::real(&mine) {
+    if crate::path::real(&found) == crate::path::real(&mine) {
         return Ok(mine.display().to_string());
     }
     let word = found.display().to_string();

@@ -221,7 +221,7 @@ fn env_name() -> Option<String> {
 /// 그대로 잘라 내려 하면 어느 접두어와도 안 맞아 이름을 못 얻고, 그 기계에서는 화면이 UTC 로
 /// 서면서 매 명령에 "시스템이 제 시간대를 안 댄다" 가 붙는다 — 이 기능이 고치려던 바로 그 자리다.
 ///
-/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다([`crate::store::lexical`]). 물어야 하는
+/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다([`crate::path::lexical`]). 물어야 하는
 /// 자리(링크의 링크, 링크인 tzdb 디렉터리)는 부르는 쪽이 `canonicalize` 로 한 번 더 댄다.
 fn name_under(at: &Path, dir: &Path) -> Option<String> {
     // **절대도 접는다**(리뷰). 한쪽만 접던 판은 `TZ=/usr/share/zoneinfo/../zoneinfo/Asia/Seoul`
@@ -229,9 +229,9 @@ fn name_under(at: &Path, dir: &Path) -> Option<String> {
     // `safe_join` 이 `..` 을 막아 그 이름은 못 읽히고, 그 기계는 UTC 로 서면서 매 명령에 "이
     // 시간대를 모른다" 를 단다. 이 함수가 고치려던 바로 그 자리다.
     let full = match at.is_absolute() {
-        true => crate::store::lexical(at),
+        true => crate::path::lexical(at),
         // `/etc/localtime` 의 링크라 기준은 `/etc` 다.
-        false => crate::store::lexical(&Path::new("/etc").join(at)),
+        false => crate::path::lexical(&Path::new("/etc").join(at)),
     };
     let name = full.strip_prefix(dir).ok()?.to_str()?;
     (!name.is_empty()).then(|| name.to_string())

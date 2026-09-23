@@ -19,6 +19,7 @@ mod latest;
 mod markdown;
 mod model;
 mod nav;
+mod path;
 mod projects;
 mod query;
 mod read_marks;

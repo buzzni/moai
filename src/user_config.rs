@@ -23,7 +23,8 @@
 //! ```
 
 use crate::fail::{Fail, R, code};
-use crate::store::{Lock, dir_of, lock_beside};
+use crate::path::dir_of;
+use crate::store::{Lock, lock_beside};
 use crate::style::Hue;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -1816,11 +1817,11 @@ pub fn resolve_dir(input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<PathB
 /// 고 거절하고, 거절문이 시키는 `add` 가 같은 디렉터리의 둘째 줄을 만든다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
-    let lexical = crate::store::lexical(&joined);
+    let lexical = crate::path::lexical(&joined);
     let mut out = vec![lexical.clone()];
     // **없을 수 있는 것은 통째 풀기 하나다.** 셋 다 `Option` 이던 판의 모양을 그대로 두면 `Some(` 이
     // 둘 붙어, 다음에 철자를 더하는 이가 그것을 흉내 낸다.
-    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::store::real_prefix(&lexical), joined]);
+    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::path::real_prefix(&lexical), joined]);
     for one in more {
         if !out.contains(&one) {
             out.push(one);

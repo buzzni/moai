@@ -69,7 +69,7 @@ impl Scratch {
     pub fn real(name: &str) -> Scratch {
         let mut s = Scratch::new(name);
         // **여기만 터진다** — 방금 지은 디렉터리라 못 푸는 것은 시험 자리가 성치 않다는 뜻이고,
-        // 받은 철자로 떨어지면([`crate::store::real`]) 견주는 시험이 까닭 없이 붉어진다.
+        // 받은 철자로 떨어지면([`crate::path::real`]) 견주는 시험이 까닭 없이 붉어진다.
         s.0 = std::fs::canonicalize(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
         s
     }
@@ -209,7 +209,7 @@ pub fn inside_checkout(dir: &Path) -> bool {
     real(dir).ancestors().any(|d| d.join(".git").exists() || d.join(".moai").is_dir())
 }
 
-/// [`crate::store::real`] 과 같은 자 — **여기만 제 몸으로 든다.**
+/// [`crate::path::real`] 과 같은 자 — **여기만 제 몸으로 든다.**
 ///
 /// 이 파일은 `tests/cli.rs` 가 `#[path]` 로 함께 들어(dev-dependency 0개, CLAUDE.md "테스트"),
 /// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::store` 가 없다. 한 자로 모으는 결정(moai-8csx)이

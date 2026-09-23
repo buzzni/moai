@@ -19,7 +19,8 @@
 //! `&[Issue]` 만 받는다 — 그쪽은 이 기능이 있는 줄 모른다.
 
 use crate::model::Issue;
-use crate::store::{Load, Repo, real};
+use crate::path::real;
+use crate::store::{Load, Repo};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
