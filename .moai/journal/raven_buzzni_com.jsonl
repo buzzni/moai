@@ -1146,3 +1146,18 @@
 {"ts":"2026-09-23T02:43:50Z","id":"moai-fgjj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (high — 층의 든 값과 도는 읽기가 시간대를 따라오게 한다)"}
 {"ts":"2026-09-23T02:43:57Z","id":"moai-fgjj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"기한 판정을 셈에서 떼어 그릴 때 재게 했다 — 67a79d7 로 develop 에 들었다"}
 {"ts":"2026-09-23T02:44:20Z","id":"moai-pmhv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: moai-fgjj 가 `67a79d7` 로 develop 에 들었다. 셈이 시간대에 안 닿는다 —\n`report::status_in` 은 기한을 든 줄만 `Dues` 로 내고, 날 판정은 `StatusReport::judged`(CLI·\n`--json`·훅)나 그리는 쪽(`tui::Surfaced::count`)이 한다. 스레드가 시간대를 베껴 가던 자리 셋이\n사라졌다. 에픽은 남은 멤버 둘로 열려 있다.\n\n- moai-yz4j — `src/cmd/hook.rs` 를 moai-514e 가 놓은 뒤에 집는다. `report::status` 의 계약은\n  그대로 두었으니 그 이슈가 적은 대로 아직 선다\n- moai-ynd6 — 리뷰 moai-pmhv.8hw 의 덧붙임 셋. 4줄짜리라 리뷰 한 판을 새로 사지 않고 moai-yz4j\n  와 **같은 가지에서** 고쳐 그 회차의 리뷰가 함께 보게 한다\n\n내건 셋(기한·하나씩·든 시간)은 이미 다 서 있다. 이 둘은 리뷰가 넘긴 버그다."}
+{"ts":"2026-09-23T02:46:25Z","id":"moai-s8go.vh3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 계획이 세우는 멤버의 자식 id"}
+{"ts":"2026-09-23T02:46:31Z","id":"moai-s8go.vh3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T02:46:54Z","id":"moai-pmhv.8hw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: 줄의 tokens=352158 은 리뷰가 처음 돌려준 때의 값이다. 덧붙임을 주고받은 뒤 이 서브에이전트의 마지막 셈은 357807 이었다 — 그 수가 앞의 것을 포함하므로 model: 줄을 하나 더 세우지 않는다(세우면 합이 두 벌로 읽힌다)"}
+{"ts":"2026-09-23T02:47:16Z","id":"moai-c6n9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T02:47:17Z","id":"moai-exh7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T02:47:18Z","id":"moai-vndz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T02:47:19Z","id":"moai-sfza","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T02:47:26Z","id":"moai-s8go.vh3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 배경에서 돈다. 끝나면 원문을 노트로 남기고, 고친 것과 넘긴 것을 -m 으로 적어 닫는다. 그 뒤 develop 에 머지한다"}
+{"ts":"2026-09-23T03:07:27Z","id":"moai-85o3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"안 건드린 줄은 머지가 검사하지 않는다"}
+{"ts":"2026-09-23T03:07:27Z","id":"moai-0k2e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검사를 이 머지가 조립한 줄에만 건다"}
+{"ts":"2026-09-23T03:07:27Z","id":"moai-h4jx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"낡은 줄이 든 저장소도 그대로 머지된다"}
+{"ts":"2026-09-23T03:07:27Z","id":"moai-85o3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-vmpr 에서 펼쳤다 — 머지 드라이버가 양쪽이 안 건드린 줄까지 검사한다"}
+{"ts":"2026-09-23T03:07:27Z","id":"moai-vmpr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-85o3 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-09-23T03:07:43Z","id":"moai-0k2e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T03:07:43Z","id":"moai-h4jx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
