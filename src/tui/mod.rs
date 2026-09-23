@@ -1516,7 +1516,10 @@ impl App {
         {
             app.site.lang = crate::i18n::Lang::Ko;
         }
-        // 까닭은 [`App::count_all`] 에 있다 — 여기 베껴 두면 한쪽만 고쳐져 둘이 갈린다.
+        // **여는 걸음이 부르는 한 자리다** — 까닭은 [`App::count_all`] 에 있다. 한때 부르는 자리가
+        // 둘이라 "여기 베껴 두면 한쪽만 고쳐져 둘이 갈린다" 고 적혀 있었는데, 그 둘째 자리는
+        // moai-fgjj 가 걷었다(moai-ynd6) — 읽는 쪽이 일부러 없앤 것인지 실수로 지워진 것인지
+        // 못 가렸다.
         app.count_all();
         app.see();
         app

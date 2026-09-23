@@ -6735,8 +6735,14 @@ mod tests {
         stone.due_on = Some("2026-09-11".into());
         let mut inside = make("argos-0002", Kind::Issue, "todo");
         inside.milestone = Some("argos-0001".into());
+        // **문턱을 걸치는 줄을 함께 둔다**(moai-ynd6). 기한이 09-15 면 UTC 의 오늘(09-11)에서는
+        // 나흘 뒤라 `status_due_days`(3)를 넘어 안 세고, 서울의 오늘(09-12)에서는 사흘 뒤라 센다 —
+        // **`count` 가 시간대를 안 보면 여기서 붉어진다.** 이 줄이 없으면 두 견주기가 다 1 을
+        // 기다려, `Dues::split` 에서 `zone.shift(now)` 가 빠져도 `count` 가 1 을 박아도 초록이다.
+        let mut edge = make("argos-0003", Kind::Milestone, "todo");
+        edge.due_on = Some("2026-09-15".into());
         // 같은 id 를 두 줄로 둬 깨진 데이터 경고(`duplicate_id`)를 세운다 — 끼우는 자리를 이 줄로 잰다.
-        let issues = vec![stone, inside, make("argos-0002", Kind::Issue, "todo")];
+        let issues = vec![stone, inside, edge, make("argos-0002", Kind::Issue, "todo")];
 
         let bare = status_in(&issues, &[], &cfg(), now, &Soil::of(&issues));
         let kinds: Vec<&str> = bare.warnings.iter().map(|w| w.kind).collect();
@@ -6747,13 +6753,17 @@ mod tests {
         assert!(kinds.contains(&"duplicate_id"), "전제가 안 섰다 — {kinds:?}");
 
         // 같은 줄이 시간대에 따라 다른 갈래로 선다. 다시 세지 않는다 — 판정만 다시 한다.
-        assert_eq!(bare.dues.count(now, utc()), 1, "UTC 에서는 오늘이 기한이다");
-        assert_eq!(bare.dues.count(now, &seoul), 1, "서울에서는 어제 지났다");
+        //
+        // **세는 자도 시간대를 본다**(moai-ynd6) — 모든 탐색기 표면이 지나는 것은 [`Dues::count`]
+        // 고, 갈래를 가르는 위아래 견주기는 [`Dues::judge`] 를 지난다. 문턱을 걸치는 `argos-0003`
+        // 이 서울에서만 `다가온 것` 에 들어 수가 갈린다.
+        assert_eq!(bare.dues.count(now, utc()), 1, "UTC 에서는 오늘 기한 하나뿐이다");
+        assert_eq!(bare.dues.count(now, &seoul), 2, "서울에서는 지난 것과 다가온 것 둘이다");
         let kind_of = |zone: &crate::tz::Zone| -> Vec<&'static str> {
             bare.dues.judge(now, zone).into_iter().map(|w| w.kind).collect()
         };
         assert_eq!(kind_of(utc()), ["milestone_due_soon"]);
-        assert_eq!(kind_of(&seoul), ["milestone_overdue"]);
+        assert_eq!(kind_of(&seoul), ["milestone_overdue", "milestone_due_soon"]);
         assert_eq!(
             bare.dues.judge(now, &seoul)[0].ages.get("argos-0001").copied(),
             Some(-1),
