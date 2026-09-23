@@ -1,4 +1,4 @@
-//! 식별자 발급과 형식 검증.
+//! 식별자 발급과 형식 검증, 그리고 **줄 하나에서 id 를 읽는 한 자**([`id_of`]).
 //!
 //! 접두어는 그 저장소의 프로젝트명이다 (`.moai/config.toml` 의 `prefix`).
 //! `moai` 는 이 도구의 이름이지 접두어가 아니다.
@@ -90,6 +90,78 @@ pub fn is_valid(id: &str) -> bool {
     segment(root, ROOT_LEN) && parts.all(|p| segment(p, CHILD_LEN))
 }
 
+/// **줄 하나가 쓰고 있는 id.** 이슈로 안 읽히는 줄에서도 id 까지는 대개 읽힌다.
+///
+/// **이 저장소에서 줄의 id 를 읽는 자는 여기 하나다**(moai-ijfy). `store::parse_issues` 의
+/// `LoadError.id` 와 `cmd::merge_driver::row` 가 같은 자를 쓴다 — 갈려 있던 동안, 머지
+/// 드라이버가 짝지은 깨진 줄의 id 를 `Load::reserved_ids` 가 안 잡아 두어 `id::generate` 가
+/// 그 id 를 다시 지을 수 있었고, `report` 의 `duplicate_id` 도 그 id 를 못 대어
+/// `moai status` 가 `Unreadable rows` 만 말했다. 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일이
+/// 바로 그 판이고, 머지 드라이버는 그것을 보는데 쓰기 경로는 못 봤다.
+///
+/// 두 단이다 — `serde_json::Value` 로 한 단 아래에서 읽고, 그것도 지면 [`scraped`] 가
+/// 머리에서 긁는다. 앞엣것이 본체와 같은 파서라 어긋날 자리가 없고, 뒤엣것은 이 도구가 제 손으로
+/// 쓰는 한 꼴만 읽는다.
+pub fn id_of(line: &str) -> Option<String> {
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(v) => v.get("id")?.as_str().map(str::to_string),
+        Err(_) => scraped(line),
+    }
+}
+
+/// **JSON 이 깨진 줄의 머리에서 `id` 만 글자로 긁는다**(moai-47yo.q3o, 2026-09-23 사용자 결정).
+///
+/// 짝짓고 잡아 두는 데만 쓴다 — 여기서 돌려받은 id 로 줄을 고쳐 쓰는 일은 없다.
+///
+/// **이 도구가 제 손으로 쓰는 한 꼴만 읽는다.** `store::render_issues` 는 `Issue` 를 필드
+/// 차례로 직렬화하고 `id` 가 첫 필드라 줄이 언제나 `{"id":"…"` 로 선다. 넓히지 않는 것은
+/// 헐거운 짐작이 **틀린 짝**을 짓기 때문이다: 한 자리라도 어긋나면 남의 이슈를 사람에게
+/// 내민다. 머리가 이 꼴이 아닌 줄은 열쇠 없는 줄로 떨어진다.
+///
+/// **이 말을 지키는 자는 `cmd::merge_driver` 의 `the_head_scrape_matches_the_shape_store_writes`
+/// 다.** `id` 를 뒤로 옮기는 날 그 시험이 붉어진다 — `src/model.rs` 의 판 50개가 모두 `id` 를
+/// 첫 필드로 두었고 `#[serde(rename)]` 도 `skip_serializing_if` 도 붙은 적이 없다.
+///
+/// **처음 이 자리에 적혔던 수는 걷었다**(리뷰 moai-47yo.era 6번). "판 1,236개 1,161,083줄이
+/// 예외 없이 그랬다" 는 맞는 수였지만 **이 함수가 못 보는 줄을 센 것**이다 — 부르는 자는
+/// `serde_json` 이 진 줄에서만 여기 오는데, 그 1,161,083줄 가운데 진 줄이 하나도 없다. 겨눈
+/// 모집단에서 다시 재니(줄 400개를 바이트 자리마다 잘라 낸 236,989벌) 틀린 짝은 0이었고, 못
+/// 긁은 것이 6,652벌이다. 수를 안 남기는 것은 그 수가 트래커 커밋마다 늘어 다음 사람이 "더
+/// 쌓였다" 와 "규칙이 깨졌다" 를 못 가르기 때문이다.
+///
+/// `\` 가 든 id 는 안 받는다. 따옴표 이스케이프가 끼면 여기서 자른 자리가 진짜 id 의 끝이
+/// 아닌데, moai 가 짓는 id 에는 `\` 가 없어 걸러도 잃는 것이 없다.
+///
+/// **머리에 통째로 선 값이 있는 줄은 안 받는다**(리뷰 moai-47yo.era 1번). 줄바꿈 하나가 빠져
+/// 이슈 둘이 한 줄에 붙으면 그 줄도 JSON 이 아닌데, 짝지으면 **앞 이슈의 표식 안에 뒤 이슈가
+/// 통째로 실린다** — 뒤 이슈는 제 줄을 잃어 거기 말고는 어디에도 없으니, 사람이 저쪽을 골라 그
+/// 칸을 지우는 순간 아무 자취 없이 사라진다(조용한 손실). 짝을 안 지으면 그 줄은 표식 **밖**에
+/// 실려 나가 어느 쪽을 골라도 남는다. 꼬리가 잘린 줄은 머리에 통째로 선 값이 없어 여기 안 걸린다.
+///
+/// **`id` 가 한 줄에 두 번 적힌 줄에서는 [`id_of`] 의 윗단과 답이 갈린다**(리뷰
+/// moai-47yo.era 4번). 여기는 머리에서 첫 `id` 를 집고 `Value` 는 겹친 키를 마지막 것으로
+/// 접는다. 뒤엣것을 집으러 줄 전체를 훑는 것은 이 자가 "머리 한 꼴만 읽는다" 를 그만두는 일이라
+/// 안 한다 — 그런 줄은 `store::parse_issues` 도 못 읽는 줄로 세니 `moai status` 가 이미 치명으로
+/// 말한다.
+pub fn scraped(line: &str) -> Option<String> {
+    // **통째로 선 값이 머리에 있는가.** `from_str` 은 "뒤에 글자가 남았다" 와 "줄이 먼저 끝났다"
+    // 를 둘 다 탈로만 내어 못 가른다. 한 값만 읽어 보면 갈린다 — 읽히면 앞이 온전한 줄이다.
+    if serde_json::Deserializer::from_str(line).into_iter::<serde_json::Value>().next().is_some_and(|v| v.is_ok()) {
+        return None;
+    }
+    let rest = line.trim_start().strip_prefix(r#"{"id":""#)?;
+    let (id, _) = rest.split_once('"')?;
+    // **긁은 것이 id 꼴이 아니면 안 받는다.** 긁기는 짐작이고, 받아들일 짐작은 이 도구가 제 손으로
+    // 짓는 꼴 하나다 — `Issue::validate` 가 쓰는 길목에서 그 꼴을 이미 요구하므로([`is_valid`]),
+    // 여기서 같은 자를 쓰는 것이 곧 "쓰는 꼴만 되읽는다" 이다. 이 한 줄이 길이와 글자를 함께
+    // 막는다: 줄이 엉켜 따옴표가 한참 뒤에야 나오면 긁힌 값이 몇 킬로바이트짜리 "id" 가 되어
+    // 머지 드라이버의 거절문과 `--json` 의 `conflicts` 에 그대로 실리고, 제어문자도 같은 길로 샌다.
+    //
+    // `\` 는 따로 막는다 — 접두어는 [`is_valid`] 가 글자를 안 보는 자리라 `a\b-0001` 이 지나는데,
+    // 이스케이프된 따옴표에서 잘린 값이 바로 그 꼴이다.
+    (!id.contains('\\') && is_valid(id)).then(|| id.to_string())
+}
+
 /// `argos-4aex.ae3` → `argos-4aex`. 최상위면 `None`.
 ///
 /// **부모는 저장하지 않고 여기서 유도한다.** 필드로 두면 id 와 필드 중
@@ -145,6 +217,61 @@ mod tests {
         let id = generate("ai-argos", &taken(&[]), "s");
         assert!(is_valid(&id), "{id}");
         assert!(id.starts_with("ai-argos-"), "{id}");
+    }
+
+    /// 이 도구가 제 손으로 쓰는 줄의 꼴. `store::render_issues` 가 내는 것과 같은 차례다.
+    fn written(id: &str) -> String {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{id} 제목\",\"status\":\"todo\",\
+             \"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\
+             \"status_since\":\"2026-09-01T00:00:00Z\"}}"
+        )
+    }
+
+    /// [`scraped`] 는 **이 도구가 제 손으로 쓰는 한 꼴만** 읽는다. 넓히면 틀린 짝이 남의 이슈를
+    /// 사람에게 내민다.
+    ///
+    /// **`src/cmd/merge_driver.rs` 에서 여기로 옮겼다**(moai-ijfy). 긁는 자를 옮기면서 그 시험을
+    /// 두고 오면 옮긴 자리에 시험이 하나도 없고, 남은 시험은 옮긴 자를 안 잰다 — 리뷰
+    /// moai-47yo.era 8번이 `src/path.rs` 에서 잰 자리와 같은 값이다.
+    #[test]
+    fn the_head_scrape_reads_one_shape_only() {
+        assert_eq!(scraped("{\"id\":\"moai-0001\",\"title\":\"잘린").as_deref(), Some("moai-0001"));
+        assert_eq!(scraped("  {\"id\":\"moai-0001\",").as_deref(), Some("moai-0001"), "들여 쓴 줄");
+        assert_eq!(scraped("{ \"id\" : \"moai-0001\""), None, "빈칸이 낀 꼴은 이 도구가 안 쓴다");
+        assert_eq!(scraped("{\"title\":\"먼저\",\"id\":\"moai-0001\""), None, "id 가 첫 필드가 아니다");
+        assert_eq!(scraped("{\"id\":\"\","), None, "빈 id");
+        assert_eq!(scraped("{\"id\":\"a\\\"b\","), None, "이스케이프가 낀 id");
+        // **id 꼴이 아닌 것은 안 받는다.** 줄이 엉켜 따옴표가 한참 뒤에야 나오면 긁힌 값이 그대로
+        // 머지 드라이버의 거절문과 `--json` 의 `conflicts` 에 실린다 — 길이도 글자도 이 한 자가 막는다.
+        let tangled = format!("{{\"id\":\"{}\",", "가".repeat(400));
+        assert_eq!(scraped(&tangled), None, "id 꼴이 아닌 긴 값을 긁었다");
+        assert_eq!(scraped("{\"id\":\"moai\u{0}0001\","), None, "제어문자가 낀 id");
+        assert_eq!(scraped("{\"id\":\"제목이다\","), None, "id 꼴이 아니다");
+        // **머리에 통째로 선 값이 있으면 안 긁는다** — 줄바꿈 하나가 빠져 이슈 둘이 한 줄에 붙은
+        // 줄을 앞 이슈로 짝지으면, 뒤 이슈가 앞 이슈의 표식 안에 통째로 실려 말없이 사라진다.
+        let glued = format!("{}{}", written("moai-0001"), written("moai-0002"));
+        assert_eq!(scraped(&glued), None, "이슈 둘이 붙은 줄을 앞 이슈로 짝지었다");
+        assert_eq!(scraped(&written("moai-0001")), None, "안 깨진 줄은 여기 오지도 않는다");
+    }
+
+    /// **줄의 id 를 읽는 자는 하나다**(moai-ijfy). 윗단이 `Value` 고 아랫단이 [`scraped`] 라,
+    /// `store::parse_issues` 의 `LoadError.id` 와 머지 드라이버가 같은 것을 본다.
+    #[test]
+    fn one_reader_answers_what_id_a_line_carries() {
+        // 이슈로 읽히는 줄도, `Issue` 로만 안 읽히는 줄도 윗단이 답한다.
+        assert_eq!(id_of(&written("moai-0001")).as_deref(), Some("moai-0001"));
+        assert_eq!(id_of("{\"id\":\"moai-0001\",\"kind\":\"몰라\"}").as_deref(), Some("moai-0001"));
+        // 겹친 키는 `Value` 가 마지막 것으로 접는다 — [`scraped`] 와 갈리는 그 자리다.
+        assert_eq!(id_of("{\"id\":\"moai-0001\",\"id\":\"moai-0002\"}").as_deref(), Some("moai-0002"));
+        // JSON 이 깨지면 아랫단이 답한다. **머지 드라이버가 짝지은 것과 같은 id 다.**
+        let cut = written("moai-0001").strip_suffix('}').expect("쓴 줄은 `}` 로 끝난다").to_string();
+        assert_eq!(id_of(&cut).as_deref(), Some("moai-0001"));
+        assert_eq!(id_of(&cut), scraped(&cut), "두 단이 같은 줄에서 갈렸다");
+        // 둘 다 못 읽는 줄에서는 지어내지 않는다.
+        assert_eq!(id_of("{깨짐"), None);
+        assert_eq!(id_of("{\"id\":\"moai-00"), None, "따옴표가 안 닫힌 id");
+        assert_eq!(id_of("[1,2,3]"), None, "이슈가 아닌 값");
     }
 
     #[test]

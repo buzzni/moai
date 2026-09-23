@@ -1191,12 +1191,13 @@ pub fn parse_issues(src: &str) -> Load {
                 line: i + 1,
                 message: e.to_string(),
                 text: line.to_string(),
-                // **둘째 파서를 만들지 않는다.** 같은 `serde_json` 을 한 겹
-                // 아래로 부를 뿐이라 본체와 어긋날 자리가 없다 — 정규식으로
-                // 긁었으면 그 순간 파서가 둘이 되고, 둘은 언젠가 갈라진다.
-                id: serde_json::from_str::<serde_json::Value>(line)
-                    .ok()
-                    .and_then(|v| v.get("id")?.as_str().map(str::to_string)),
+                // **id 를 읽는 자는 하나다**(moai-ijfy). `crate::id::id_of` 가
+                // `serde_json` 을 한 겹 아래로 부르고, 그것도 진 줄은 머리에서
+                // 긁는다. 여기서 따로 읽던 동안 머지 드라이버만 그 머리를 보아,
+                // 산 줄의 깨진 쌍둥이가 든 id 를 [`Load::reserved_ids`] 가 안
+                // 잡아 두고 `report` 의 `duplicate_id` 도 못 댔다 — `moai status`
+                // 는 `Unreadable rows` 만 말했다.
+                id: crate::id::id_of(line),
             }),
         }
     }
@@ -2478,14 +2479,33 @@ mod tests {
     /// 못 읽는 줄도 **id 는 내놓는다.** 줄을 `Issue` 로 못 읽는 것과 그 안의
     /// `id` 를 못 읽는 것은 다른 일이다 — 한 단 낮게 읽으면 나온다.
     ///
-    /// **둘째 파서를 만들지 않는다.** `serde_json` 한 겹 아래로 내려갈 뿐이라
-    /// 본체와 어긋날 자리가 없다. 정규식으로 긁었으면 그 순간 파서가 둘이 된다.
+    /// **id 를 읽는 자는 하나다**(moai-ijfy). `crate::id::id_of` 가 `serde_json` 한 겹
+    /// 아래로 내려가고, 그것도 진 줄은 머리에서 긁는다 — 머지 드라이버가 짝짓는 자와
+    /// 같은 자라 둘이 갈릴 자리가 없다.
     #[test]
     fn an_unreadable_line_still_yields_its_id() {
         let load = parse_issues("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
         assert_eq!(load.errors.len(), 1);
         assert_eq!(load.errors[0].id.as_deref(), Some("argos-9999"));
         assert_eq!(load.reserved_ids().iter().next().map(String::as_str), Some("argos-9999"));
+    }
+
+    /// **꼬리가 잘려 JSON 이 진 줄도 id 는 내놓는다**(moai-ijfy). 머지 드라이버는 그 머리를
+    /// 긁어 짝짓는데 여기가 못 보던 동안, 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일에서
+    /// [`Load::reserved_ids`] 가 그 id 를 안 잡아 두고(`id::generate` 가 다시 지을 수 있었다)
+    /// `report` 의 `duplicate_id` 도 그 id 를 못 댔다 — `moai status` 는 `Unreadable rows` 만
+    /// 말했고, 사람은 어느 줄을 지워야 하는지 들을 데가 없었다.
+    #[test]
+    fn a_broken_twin_of_a_live_row_is_reserved_and_shows_up_as_a_duplicate() {
+        let live = serde_json::to_string(&issue("argos-0001")).unwrap();
+        let twin = live.strip_suffix('}').expect("쓴 줄은 `}` 로 끝난다");
+        let load = parse_issues(&format!("{live}\n{twin}\n"));
+        assert_eq!(load.issues.len(), 1);
+        assert_eq!(load.errors[0].id.as_deref(), Some("argos-0001"), "머지 드라이버가 짝지은 id 를 못 본다");
+        assert!(load.reserved_ids().contains("argos-0001"), "새 id 가 이 id 를 다시 지을 수 있다");
+        // `report` 의 `duplicate_id` 가 읽는 자리도 같은 id 를 든다 — 그쪽에서 산 줄과 견주는
+        // 것은 `an_unreadable_line_reusing_a_live_id_is_a_duplicate` 가 잰다.
+        assert_eq!(load.unreadable()[0].id, Some("argos-0001"), "겹쳤다고 말해 주는 자가 이 줄을 못 본다");
     }
 
     /// JSON 도 아닌 줄에는 내놓을 id 가 없다. 없는 것을 지어내지 않는다.

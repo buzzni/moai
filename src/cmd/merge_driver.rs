@@ -24,11 +24,12 @@
 //!
 //! 이슈로 안 읽히는 줄도 **id 까지 읽히면 id 로 짝지어**(moai-1a55.4oh, moai-47yo.q3o) 이슈마다
 //! 3-way 로 풀고, 그 답은 원문 그대로 파일 뒤에 붙인다 — `store::render_issues` 가 두는 자리와
-//! 같다. JSON 이 깨진 줄도 머리의 `{"id":"…"` 만 성하면 그 짝짓기에 든다([`scraped`]).
+//! 같다. JSON 이 깨진 줄도 머리의 `{"id":"…"` 만 성하면 그 짝짓기에 든다([`crate::id::scraped`]).
 //! id 조차 못 읽는 줄은 [`unkeyed`] 가 줄마다 센 수로 푼다. 그 한 줄로 파일 전체를
 //! 충돌로 넘기면 드라이버를 심은 저장소가 안 심은 저장소보다 합치기 어려워지고, CLAUDE.md 가
 //! 막은 자리가 바로 그것이다("남의 낡은 줄 하나가 모든 쓰기를 막으면 되돌릴 방법이 도구 밖에만
 //! 남는다").
+
 //!
 //! 통째로 넘기는 것은 **짝지을 수가 없을 때** 둘이다 — 한 파일에 **읽히는** 줄이 같은 id 로
 //! 둘 있을 때(그때는 id 로 짝짓는 것 자체가 거짓이다), 그리고 글자가 깨져 줄로도 못 나눌 때.
@@ -88,7 +89,7 @@ enum Read {
     /// [`settle`] 은 그 줄을 원문 그대로 실어 나른다([`Settled::Opaque`]).
     Json(Value),
     /// **JSON 조차 아니다**(moai-47yo.q3o). 줄 머리의 `{"id":"…"` 만 글자로 긁어 짝지었다
-    /// ([`scraped`]) — 짝지어야 "지웠다" 와 "깨뜨렸다" 가 갈린다. 짝을 못 지으면 이 갈래에
+    /// ([`crate::id::scraped`]) — 짝지어야 "지웠다" 와 "깨뜨렸다" 가 갈린다. 짝을 못 지으면 이 갈래에
     /// 서지도 못하고 [`Keyed::opaque`] 로 간다.
     Broken,
 }
@@ -131,12 +132,17 @@ struct Keyed<'s> {
     /// 남기면 둘이 선다. 밀어내지 않는 것은 어느 줄이 어느 칸에 서는지가 **그 파일에 무엇이 또
     /// 있는가**에 달리는 순간 세 쪽이 서로 다르게 갈리고, 그러면 [`settle`] 과 [`unkeyed`] 가
     /// 같은 줄을 서로 다른 자로 풀기 때문이다 — 한쪽이 지운 줄이 말없이 되살아나던 자리다.
+    ///
+    /// 그 겹침은 [`settle`] 이 사람에게 넘긴다. **세 쪽이 그 줄들을 똑같이 들었을 때만 그대로
+    /// 지나간다**(moai-ijfy) — 이번 머지가 고른 것이 없어 넘겨 봐야 표식의 두 칸이 같은 줄들이고,
+    /// 넘기면 그 파일은 영영 머지마다 충돌한다.
     by_id: BTreeMap<String, Vec<Row<'s>>>,
     /// **id 조차 못 읽는 줄**의 원문 그대로. `store::render_issues` 의 `opaque` 와 같은 자리고,
     /// 열쇠가 없어 이슈마다 풀 수가 없다 — [`unkeyed`] 가 줄마다 센 수로 3-way 를 돌린다.
     ///
-    /// **여기 있는 줄은 열쇠를 못 얻은 줄이다** — [`row`] 가 id 를 못 읽었거나, 읽었어도 [`scraped`]
-    /// 가 받는 한 꼴이 아니었다. 그러니 "id 가 글자로 아예 없다" 는 뜻이 아니다: `{ "id" : "x"`
+    /// **여기 있는 줄은 열쇠를 못 얻은 줄이다** — [`row`] 가 id 를 못 읽었거나, 읽었어도
+    /// [`crate::id::scraped`] 가 받는 한 꼴이 아니었다. 그러니 "id 가 글자로 아예 없다" 는
+    /// 뜻이 아니다: `{ "id" : "x"`
     /// 처럼 빈칸이 끼거나 `id` 가 첫 필드가 아닌 줄은 id 를 눈으로 볼 수 있어도 여기 선다.
     /// `Issue` 로만 안 읽히는 줄은 `by_id` 에 서고 [`Row::whole`] 이 거짓이다(moai-1a55.4oh).
     opaque: Vec<&'s str>,
@@ -157,6 +163,12 @@ enum Settled {
     /// 읽는 줄을 파일 끝에 모아 쓰므로, 여기서 id 차례로 끼워 넣으면 병합 직후의 파일이 다음
     /// 쓰기에서 통째로 헛 diff 를 낸다(멱등성).
     Opaque(String),
+    /// **세 쪽이 그 id 로 같은 줄들을 들었다**(moai-ijfy). 그 줄들을 저마다 푼 것이 여기 선다 —
+    /// 한 줄이 id 차례에 서고 다른 줄이 파일 끝으로 가는 판이라 갈래 하나로는 못 담는다.
+    ///
+    /// 여기 드는 것은 [`Settled::Line`] 과 [`Settled::Opaque`] 뿐이다. 겹친 id 는 아무도 안
+    /// 건드렸을 때만 이 갈래로 오고, 그때는 풀 것이 없어 충돌도 새 줄도 안 난다.
+    Each(Vec<Settled>),
     /// 사람이 푼다. 두 쪽의 줄을 **원문 그대로** 든다 — 고쳐 적으면 사람이 보는 글이
     /// 제가 친 것과 달라진다([`Row`]).
     Clash { ours: Option<String>, theirs: Option<String> },
@@ -292,12 +304,12 @@ fn keyed(src: &str) -> Option<Keyed<'_>> {
 /// 적어 두고 짝짓기를 막지 않는다(moai-1a55.4oh, moai-47yo.q3o).
 ///
 /// `None` 은 열쇠가 없다는 뜻 하나다: 이슈가 아닌 줄(배열·수·id 없는 객체)이거나, JSON 이
-/// 깨진 데다 [`scraped`] 도 머리에서 id 를 못 긁은 줄이다. 그런 줄은 [`unkeyed`] 가 센 수로 푼다.
+/// 깨진 데다 [`crate::id::scraped`] 도 머리에서 id 를 못 긁은 줄이다. 그런 줄은 [`unkeyed`] 가 센 수로 푼다.
 fn row(line: &str) -> Option<(String, Row<'_>)> {
     let Ok(v) = serde_json::from_str::<Value>(line) else {
         // **JSON 이 깨진 줄은 머리에서 id 만 긁어 짝짓는다**(moai-47yo.q3o). 짝지어야 그 줄이
         // 표식의 이쪽 칸에 서고, 안 지으면 [`settle`] 이 "이쪽이 지웠다" 로 거짓말한다.
-        return scraped(line).map(|id| (id, Row { raw: line, read: Read::Broken }));
+        return crate::id::scraped(line).map(|id| (id, Row { raw: line, read: Read::Broken }));
     };
     let id = v.get("id")?.as_str()?.to_string();
     // **`&Value` 에서 바로 읽는다** — `from_value` 는 통째로 복사한 뒤 읽어, 줄마다 트리
@@ -307,67 +319,6 @@ fn row(line: &str) -> Option<(String, Row<'_>)> {
         false => Read::Json(v),
     };
     Some((id, Row { raw: line, read }))
-}
-
-/// **JSON 이 깨진 줄의 머리에서 `id` 만 글자로 긁는다**(moai-47yo.q3o, 2026-09-23 사용자 결정).
-///
-/// 짝짓는 데만 쓴다 — 돌려받은 id 로 무엇을 쓰는 일은 없고, 그 줄은 언제나 원문 바이트
-/// 그대로 실려 나간다([`Settled::Opaque`]·[`Settled::Clash`]).
-///
-/// **이 도구가 제 손으로 쓰는 한 꼴만 읽는다.** `store::render_issues` 는 `Issue` 를 필드
-/// 차례로 직렬화하고 `id` 가 첫 필드라 줄이 언제나 `{"id":"…"` 로 선다. 넓히지 않는 것은
-/// 헐거운 짐작이 **틀린 짝**을 짓기 때문이다: 한 자리라도 어긋나면 남의 이슈를 사람에게
-/// 내민다. 머리가 이 꼴이 아닌 줄은 열쇠 없는 줄로 떨어져 [`unkeyed`] 가 푼다.
-///
-/// **이 말을 지키는 자는 `the_head_scrape_matches_the_shape_store_writes` 다.** `id` 를 뒤로
-/// 옮기는 날 그 시험이 붉어진다 — `src/model.rs` 의 판 50개가 모두 `id` 를 첫 필드로 두었고
-/// `#[serde(rename)]` 도 `skip_serializing_if` 도 붙은 적이 없다(리뷰가 다시 쟀다).
-///
-/// **처음 이 자리에 적혔던 수는 걷었다**(리뷰). "판 1,236개 1,161,083줄이 예외 없이 그랬다" 는
-/// 맞는 수였지만 **이 함수가 못 보는 줄을 센 것**이다 — [`row`] 는 `serde_json` 이 진 줄에서만
-/// 여기 오는데, 그 1,161,083줄 가운데 진 줄이 하나도 없다. 겨눈 모집단에서 다시 재니(줄 400개를
-/// 바이트 자리마다 잘라 낸 236,989벌) 틀린 짝은 0이었고, 못 긁은 것이 6,652벌이다. 수를 안 남기는
-/// 것은 그 수가 트래커 커밋마다 늘어(같은 날 HEAD 에서 벌써 1,238개·1,165,059줄이다) 다음 사람이
-/// "더 쌓였다" 와 "규칙이 깨졌다" 를 못 가르기 때문이다.
-///
-/// **한쪽만 긁히는 판은 남는다.** 두 쪽이 같은 줄을 저마다 다르게 깨뜨려 한쪽은 머리가 성하고
-/// 한쪽은 아니면, 성한 쪽만 짝지어져 표식의 저쪽 칸이 빈 채로 선다 — 이 이슈가 없애려던 바로
-/// 그 거짓말이 그 판에는 그대로 있다. 넓히면 틀린 짝이 서므로 여기서는 안 넓히고, 남은 자리를
-/// 글로 적어 둔다.
-///
-/// `\` 가 든 id 는 안 받는다. 따옴표 이스케이프가 끼면 여기서 자른 자리가 진짜 id 의 끝이
-/// 아닌데, moai 가 짓는 id 에는 `\` 가 없어 걸러도 잃는 것이 없다.
-///
-/// **머리에 통째로 선 값이 있는 줄은 안 받는다**(리뷰). 줄바꿈 하나가 빠져 이슈 둘이 한 줄에
-/// 붙으면 그 줄도 JSON 이 아닌데, 짝지으면 **앞 이슈의 표식 안에 뒤 이슈가 통째로 실린다** —
-/// 뒤 이슈는 제 줄을 잃어 거기 말고는 어디에도 없으니, 사람이 저쪽을 골라 그 칸을 지우는 순간
-/// 아무 자취 없이 사라진다(조용한 손실). 짝을 안 지으면 그 줄은 [`unkeyed`] 가 **표식 밖**으로
-/// 실어 내, 어느 쪽을 골라도 남는다 — 고침 전과 같은 자리다. 꼬리가 잘린 줄은 머리에 통째로 선
-/// 값이 없어 여기 안 걸린다.
-///
-/// **`id` 가 한 줄에 두 번 적힌 줄에서는 [`row`] 와 답이 갈린다**(리뷰). 여기는 머리에서 첫
-/// `id` 를 집고 `Value` 는 겹친 키를 마지막 것으로 접으므로, 그런 줄은 세 쪽에서 서로 다른
-/// 열쇠로 설 수 있다. 뒤엣것을 집으러 줄 전체를 훑는 것은 이 자가 "머리 한 꼴만 읽는다" 를
-/// 그만두는 일이라 안 한다 — 그런 줄은 `store::parse_issues` 도 못 읽는 줄로 세니
-/// `moai status` 가 이미 치명으로 말한다.
-fn scraped(line: &str) -> Option<String> {
-    // **통째로 선 값이 머리에 있는가.** `from_str` 은 "뒤에 글자가 남았다" 와 "줄이 먼저 끝났다"
-    // 를 둘 다 탈로만 내어 못 가른다. 한 값만 읽어 보면 갈린다 — 읽히면 앞이 온전한 줄이다.
-    if serde_json::Deserializer::from_str(line).into_iter::<Value>().next().is_some_and(|v| v.is_ok()) {
-        return None;
-    }
-    let rest = line.trim_start().strip_prefix(r#"{"id":""#)?;
-    let (id, _) = rest.split_once('"')?;
-    // **긁은 것이 id 꼴이 아니면 안 받는다**(리뷰). 긁기는 짐작이고, 받아들일 짐작은 이 도구가
-    // 제 손으로 짓는 꼴 하나다 — `Issue::validate` 가 쓰는 길목에서 그 꼴을 이미 요구하므로
-    // ([`crate::id::is_valid`]), 여기서 같은 자를 쓰는 것이 곧 "쓰는 꼴만 되읽는다" 이다.
-    // 이 한 줄이 길이와 글자를 함께 막는다: 줄이 엉켜 따옴표가 한참 뒤에야 나오면 긁힌 값이
-    // 몇 킬로바이트짜리 "id" 가 되어 [`clash_fail`] 의 거절문과 `--json` 의 `conflicts` 에
-    // 그대로 실리고, 제어문자도 같은 길로 샌다.
-    //
-    // `\` 는 따로 막는다 — 접두어는 [`crate::id::is_valid`] 가 글자를 안 보는 자리라 `a\b-0001`
-    // 이 지나는데, 이스케이프된 따옴표에서 잘린 값이 바로 그 꼴이다.
-    (!id.contains('\\') && crate::id::is_valid(id)).then(|| id.to_string())
 }
 
 /// id 마다 3-way 로 풀고, 푼 것과 못 푼 것을 한 파일로 짓는다.
@@ -383,19 +334,35 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
         fn at<'r, 's>(k: &'r Keyed<'s>, id: &str) -> Option<&'r [Row<'s>]> {
             k.by_id.get(id).map(Vec::as_slice)
         }
-        match settle(at(o, id), at(a, id), at(b, id)) {
-            Settled::Line(None) => {}
-            Settled::Line(Some(line)) => {
-                out.push_str(&line);
-                out.push('\n');
-            }
-            // 짝은 졌지만 `Issue` 로 못 읽는 줄이다 — 아래 못 읽는 줄 칸으로 미룬다.
-            Settled::Opaque(line) => carried.push(line),
-            Settled::Clash { ours, theirs } => {
-                clashes.push(id.clone());
-                out.push_str(&marked(ours.as_deref(), theirs.as_deref(), marker));
+        /// 푼 답을 제자리에 놓는다. [`Settled::Each`] 가 여럿을 들 수 있어 제 이름을 부른다.
+        fn place(
+            s: Settled,
+            id: &str,
+            marker: usize,
+            out: &mut String,
+            carried: &mut Vec<String>,
+            clashes: &mut Vec<String>,
+        ) {
+            match s {
+                Settled::Line(None) => {}
+                Settled::Line(Some(line)) => {
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+                // 짝은 졌지만 `Issue` 로 못 읽는 줄이다 — 아래 못 읽는 줄 칸으로 미룬다.
+                Settled::Opaque(line) => carried.push(line),
+                Settled::Each(all) => {
+                    for one in all {
+                        place(one, id, marker, out, carried, clashes);
+                    }
+                }
+                Settled::Clash { ours, theirs } => {
+                    clashes.push(id.to_string());
+                    out.push_str(&marked(ours.as_deref(), theirs.as_deref(), marker));
+                }
             }
         }
+        place(settle(at(o, id), at(a, id), at(b, id)), id, marker, &mut out, &mut carried, &mut clashes);
     }
     // **못 읽는 줄은 뒤에 원문 그대로 붙는다** — `store::render_issues` 가 두는 자리와 같다.
     // 짝지은 것이 id 차례로 먼저 서고 열쇠 없는 것이 뒤따르는데, 그 다음 쓰기가 읽은 차례를
@@ -548,14 +515,6 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
     // 컴파일되지 않게 하려는 것이다.
     let side = |v: Option<&[Row<'_>]>| v.map(|rs| rs.iter().map(|r| r.raw).collect::<Vec<_>>().join("\n"));
     let clash = || Settled::Clash { ours: side(a), theirs: side(b) };
-    // **한 쪽이라도 같은 id 로 둘을 들면 그 id 는 사람이 푼다**(moai-2m94). 읽히는 줄 둘은
-    // [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이 낀 판이고, 그 둘 중 무엇이 "그
-    // 이슈" 인지 고를 자가 없다 — 고르면 다른 하나가, 또는 한쪽의 지우기가 말없이 사라진다.
-    // 그런 파일은 이미 `moai status` 가 치명으로 센다(`Ids standing twice`·`Unreadable rows`).
-    if [o, a, b].iter().any(|v| v.is_some_and(|rs| rs.len() > 1)) {
-        return clash();
-    }
-    let (o, a, b) = (o.and_then(<[Row<'_>]>::first), a.and_then(<[Row<'_>]>::first), b.and_then(<[Row<'_>]>::first));
     let render = |i: &Issue| Settled::Line(Some(serde_json::to_string(i).expect("Issue 는 언제나 직렬화된다")));
     // **이미 선 줄은 검사만 건너뛴다**([`shaped`]). 꼴은 `store` 가 쓰는 것과 같은 표준형이다.
     // **`Issue` 로 안 읽히는 줄은 원문 그대로 간다**(moai-1a55.4oh) — 지을 값이 없다.
@@ -563,6 +522,29 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
         Read::Issue(v) => render(&shaped(v).expect("`Read::Issue` 인 줄이다")),
         Read::Json(_) | Read::Broken => Settled::Opaque(r.raw.to_string()),
     };
+    // **한 쪽이라도 같은 id 로 둘을 들면 그 id 는 사람이 푼다**(moai-2m94). 읽히는 줄 둘은
+    // [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이 낀 판이고, 그 둘 중 무엇이 "그
+    // 이슈" 인지 고를 자가 없다 — 고르면 다른 하나가, 또는 한쪽의 지우기가 말없이 사라진다.
+    // 그런 파일은 `moai status` 가 치명으로 센다(`Ids standing twice`·`Unreadable rows`).
+    if [o, a, b].iter().any(|v| v.is_some_and(|rs| rs.len() > 1)) {
+        // **세 쪽이 그 줄들을 똑같이 들었으면 이번 머지가 고른 것이 없다**(moai-ijfy,
+        // 2026-09-23 사용자 결정). 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일이 그 판인데, 세 쪽이
+        // 글자째 같아 표식의 두 칸도 같은 두 줄이라 사람이 고를 것이 없고 영영 되풀이됐다 — 그
+        // 쌍둥이를 지우는 `moai` 명령도 없다. moai-0k2e 가 검사에 이미 쓴 원칙("답이 한쪽 가지에
+        // 이미 서 있으면")을 이 가드에 그대로 옮긴 것이다. moai-2m94 가 잰 판 둘(한쪽이 `J` 를
+        // 한쪽이 `G` 를 지운 판, 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 선 판)은 세 쪽이 다르니
+        // 그대로 사람에게 간다. 겹쳤다는 사실은 `report` 의 `duplicate_id` 가 말한다(moai-ijfy 가
+        // `crate::id::id_of` 로 모은 자리다).
+        let rows_alike = |p: &[Row<'_>], q: &[Row<'_>]| p.len() == q.len() && p.iter().zip(q).all(|(x, y)| alike(x, y));
+        if let (Some(o), Some(x), Some(y)) = (o, a, b)
+            && rows_alike(o, x)
+            && rows_alike(o, y)
+        {
+            return Settled::Each(x.iter().map(&take).collect());
+        }
+        return clash();
+    }
+    let (o, a, b) = (o.and_then(<[Row<'_>]>::first), a.and_then(<[Row<'_>]>::first), b.and_then(<[Row<'_>]>::first));
     // **이 머지가 새로 지은 줄은 검사까지 지난다**([`issue`]).
     let built = |v: &Value| issue(v).map_or_else(clash, |i| render(&i));
     let same = |p: Option<&Row<'_>>, q: &Row<'_>| p.is_some_and(|p| alike(p, q));
@@ -1750,7 +1732,7 @@ mod tests {
         assert!(text.contains("\"a\"") && text.contains("\"b\""), "두 쪽을 다 안 보여 준다\n{text}");
     }
 
-    /// 사람이 손으로 고치다 꼬리를 자른 줄. 머리는 성하다 — [`scraped`] 가 읽는 자리다.
+    /// 사람이 손으로 고치다 꼬리를 자른 줄. 머리는 성하다 — [`crate::id::scraped`] 가 읽는 자리다.
     ///
     /// **끝 글자를 바이트로 안 썬다**(리뷰). `line` 의 꼬리가 ASCII 인 것은 지금 본새가 그럴 뿐이고,
     /// 여러 바이트짜리 글자로 끝나는 날 `whole[..len - 1]` 은 글자 가운데를 갈라 시험이 assert 가
@@ -1844,26 +1826,41 @@ mod tests {
         assert_eq!(text.lines().last(), Some(junk), "{text}");
     }
 
-    /// [`scraped`] 는 **이 도구가 제 손으로 쓰는 한 꼴만** 읽는다. 넓히면 틀린 짝이 남의 이슈를
-    /// 사람에게 내민다.
+    /// **아무도 안 건드린 겹친 id 는 머지마다 충돌하지 않는다**(moai-ijfy, 2026-09-23 사용자 결정).
+    ///
+    /// 산 줄과 그 줄의 깨진 쌍둥이가 한 파일에 서면 둘이 같은 `by_id` 칸에 쌓여, [`settle`] 의
+    /// `rs.len() > 1` 이 그 id 를 **매 머지마다** 사람에게 넘겼다. 세 쪽이 바이트로 같아도
+    /// 그랬고, 그러면 표식의 두 칸도 같은 두 줄이라 고를 것이 없다 — 손으로 그 줄을 지우기
+    /// 전에는 영영 되풀이됐다. 들어가는 흔한 길은 이 기능이 새로 짓는 표식을 사람이 두 칸 다
+    /// 남기고 푸는 것이다.
     #[test]
-    fn the_head_scrape_reads_one_shape_only() {
-        assert_eq!(scraped("{\"id\":\"moai-0001\",\"title\":\"잘린").as_deref(), Some("moai-0001"));
-        assert_eq!(scraped("  {\"id\":\"moai-0001\",").as_deref(), Some("moai-0001"), "들여 쓴 줄");
-        assert_eq!(scraped("{ \"id\" : \"moai-0001\""), None, "빈칸이 낀 꼴은 이 도구가 안 쓴다");
-        assert_eq!(scraped("{\"title\":\"먼저\",\"id\":\"moai-0001\""), None, "id 가 첫 필드가 아니다");
-        assert_eq!(scraped("{\"id\":\"\","), None, "빈 id");
-        assert_eq!(scraped("{\"id\":\"a\\\"b\","), None, "이스케이프가 낀 id");
-        // **id 꼴이 아닌 것은 안 받는다**(리뷰). 줄이 엉켜 따옴표가 한참 뒤에야 나오면 긁힌 값이
-        // 그대로 거절문과 `--json` 의 `conflicts` 에 실린다 — 길이도 글자도 이 한 자가 막는다.
-        let tangled = format!("{{\"id\":\"{}\",", "가".repeat(400));
-        assert_eq!(scraped(&tangled), None, "id 꼴이 아닌 긴 값을 긁었다");
-        assert_eq!(scraped("{\"id\":\"moai\u{0}0001\","), None, "제어문자가 낀 id");
-        assert_eq!(scraped("{\"id\":\"제목이다\","), None, "id 꼴이 아니다");
-        // **머리에 통째로 선 값이 있으면 안 긁는다** — 아래 시험이 그 값어치를 잰다.
-        let glued = format!("{}{}", line("moai-0001", ""), line("moai-0002", ""));
-        assert_eq!(scraped(&glued), None, "이슈 둘이 붙은 줄을 앞 이슈로 짝지었다");
-        assert_eq!(scraped(&line("moai-0001", "")), None, "안 깨진 줄은 여기 오지도 않는다");
+    fn a_twin_nobody_touched_does_not_clash_every_merge() {
+        let (intact, broken) = beheaded("argos-0001");
+        let same = format!("{intact}\n{}\n{broken}\n", line("argos-0002", ""));
+        let (text, clashes) = merge(&same, &same, &same);
+        assert!(clashes.is_empty(), "아무도 안 건드린 쌍둥이를 사람에게 넘겼다 — {clashes:?}\n{text}");
+        // 두 줄이 다 선다. 깨진 줄은 `store::render_issues` 처럼 뒤에 선다.
+        assert_eq!(text.lines().filter(|l| *l == intact).count(), 1, "{text}");
+        assert_eq!(text.lines().last(), Some(broken.as_str()), "{text}");
+        // **다음 머지의 고정점이다** — 이 답을 다시 세 쪽으로 넣어도 같은 글이 나온다.
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
+    }
+
+    /// **그래도 moai-2m94 가 잰 판 둘은 그대로 사람에게 간다.** 겹친 id 를 지나 보내는 것은
+    /// 세 쪽이 그 줄들을 똑같이 들었을 때뿐이라, 한쪽이라도 건드리면 고를 자가 없다는 계약이
+    /// 그대로 선다.
+    #[test]
+    fn a_twin_either_side_touched_still_goes_to_a_person() {
+        let (intact, broken) = beheaded("argos-0001");
+        // 밑줄에 산 줄과 깨진 줄이 함께 서고, 이쪽이 깨진 줄을, 저쪽이 산 줄을 지웠다.
+        let o = format!("{intact}\n{broken}\n");
+        let (text, clashes) = merge(&o, &format!("{intact}\n"), &format!("{broken}\n"));
+        assert_eq!(clashes, ["argos-0001"], "한쪽의 지우기를 말없이 되물렀다\n{text}");
+
+        // 저쪽에만 같은 id 의 깨진 줄이 하나 더 섰다 — 그대로 합치면 겹친 id 가 남는다.
+        let o = format!("{intact}\n");
+        let (text, clashes) = merge(&o, &o, &format!("{intact}\n{broken}\n"));
+        assert_eq!(clashes, ["argos-0001"], "겹친 id 를 든 파일을 말없이 냈다\n{text}");
     }
 
     /// **꼬리의 `\r` 하나가 충돌을 짓지 않는다**(리뷰). `str::lines` 는 `\n` 을 뗄 때만 `\r` 을
@@ -1884,10 +1881,10 @@ mod tests {
 
     /// **긁는 꼴이 쓰는 꼴과 한 글이다.** `store::render_issues` 는 `Issue` 를 필드 차례로
     /// 직렬화하고 `id` 가 첫 필드라 줄이 언제나 `{"id":"` 로 선다. `id` 를 뒤로 옮기는 날
-    /// [`scraped`] 는 아무것도 못 긁고 조용히 고침 전으로 돌아가므로, 그날 여기가 붉어진다.
+    /// [`crate::id::scraped`] 는 아무것도 못 긁고 조용히 고침 전으로 돌아가므로, 그날 여기가 붉어진다.
     ///
-    /// **쓴 줄을 잘라서 준다**(리뷰). 안 깨진 줄은 [`row`] 에서 [`scraped`] 까지 오지도 않으니
-    /// 그대로 넘기면 제품에 없는 길을 재게 되고, [`scraped`] 가 온전한 머리를 물리게 된 뒤로는
+    /// **쓴 줄을 잘라서 준다**(리뷰). 안 깨진 줄은 [`row`] 에서 [`crate::id::scraped`] 까지 오지도 않으니
+    /// 그대로 넘기면 제품에 없는 길을 재게 되고, [`crate::id::scraped`] 가 온전한 머리를 물리게 된 뒤로는
     /// 아예 답이 갈린다.
     #[test]
     fn the_head_scrape_matches_the_shape_store_writes() {
@@ -1895,7 +1892,7 @@ mod tests {
         let written = serde_json::to_string(&shaped(&v).expect("읽히는 줄")).expect("Issue 는 언제나 직렬화된다");
         let cut = written.strip_suffix('}').expect("쓴 줄은 `}` 로 끝난다");
         assert!(serde_json::from_str::<Value>(cut).is_err(), "자른 줄이 안 깨졌다 — 시험이 낡았다");
-        assert_eq!(scraped(cut).as_deref(), Some("moai-0001"), "쓰는 꼴이 갈렸다 — {written}");
+        assert_eq!(crate::id::scraped(cut).as_deref(), Some("moai-0001"), "쓰는 꼴이 갈렸다 — {written}");
     }
 
     /// **줄바꿈 하나가 빠져 이슈 둘이 한 줄에 붙으면 짝짓지 않는다**(리뷰).
