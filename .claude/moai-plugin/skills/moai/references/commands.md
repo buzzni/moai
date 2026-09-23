@@ -28,6 +28,13 @@ running beside each other overlap, and waiting on a person counts too.
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
 
+**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
+<epic>` always did for a review — one subject, one id. The member carries no
+`epic` field of its own, so `jq -r .epic` on it is `null`; `moai show <epic>`
+lists it under `members` and `moai show -e <epic>` picks it up. Rows created
+before keep the ids they have: nothing is ever relabelled.
+
 **A group's column is read from its members.** Do not `moai mv` an epic or a
 milestone — pick up one member and it stands `in_progress`, finish them all and it
 stands `done`, by itself. To give up on a group while members are left, `moai defer`
