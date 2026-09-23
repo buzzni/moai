@@ -119,6 +119,32 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// moai 가 있는 기계에서는 그 말이 그대로 답을 낸다. 그 말을 그대로 쳐서 답이 나와야 하므로
 /// 부명령까지 적는다 (맨 `moai skill` 은 clap 이 2 로 거절한다, 리뷰 moai-j4ie).
 ///
+/// **그 줄은 세션마다 한 번만 선다**(moai-f7up, 2026-09-23 사용자 결정). 문턱이 없던 판은 같은
+/// 줄을 `PreToolUse` 의 도구마다·프롬프트마다·`Stop` 마다 다시 냈다 — 이 저장소의 세션
+/// 216개를 세니 훅이 걸리는 도구 호출이 **한 세션 평균 140번, 가장 많은 세션은 1,257번**이다
+/// (2026-09-23). 훅이 매 호출에 떠들면 사람이 훅을 꺼 버리고, 꺼진 규칙은 없는 규칙이다.
+///
+/// 문턱은 `${TMPDIR:-/tmp}` 의 표식 파일 하나고, 키는 **세션과 저장소**다.
+/// `cmd::hook` 의 [`once_per_session`](crate::cmd::hook) 은 이 갈래에서 못 쓴다 — 거기서는
+/// `moai` 가 아예 안 돌았다. 세션 id 는 훅 입력의 stdin 에 있어 셸 한 줄이 읽으려면 파서가
+/// 드는데, **`claude` 가 그것을 환경에도 세운다**(2026-09-23 에 쟀다: 훅이 보는 환경에
+/// `CLAUDE_CODE_SESSION_ID` 가 stdin 의 `session_id` 와 같은 값으로 섰고, `$PPID` 는 그
+/// `claude` 프로세스였다). 그래서 stdin 을 안 건드린다 — 읽으면 `moai` 가 받을 입력이 사라진다.
+/// 그 변수가 없는 판을 위해 `$PPID` 로 물러선다: 창이 하나면 그 값도 세션마다 하나다.
+///
+/// **표식은 `:` 가 아니라 `true` 로 세운다.** `:` 는 **특수 내장**이라, 리다이렉션이 실패하면
+/// POSIX 껍데기가 그 자리에서 죽는다 — dash 로 재 보니(2026-09-23) 못 쓰는 `TMPDIR` 에서
+/// `: > "$s" 2>/dev/null || :` 가 `|| :` 에 닿지도 못하고 **종료 2** 로 나갔다. 위 표대로 2 는
+/// 세션이 듣는 유일한 값이고 **그것은 게이트다** — 쓸 수 없는 임시 디렉터리 하나가 모든 도구
+/// 호출을 막는 자리였다. `true` 는 평범한 내장이라 같은 판에서 그대로 이어 간다(bash 는 둘 다
+/// 이어 가므로 bash 로만 재면 안 보인다).
+///
+/// **정상 갈래에는 값이 안 붙는다** — 이 문은 `case` 안에서만 서고 포크를 안 늘린다
+/// (2026-09-23 에 dash 로 200번씩 재어 한 판 2.66ms → 2.74ms, 껍데기 하나 띄우는 값에 묻힌다).
+/// 표식이 못 서는 자리(`TMPDIR` 이 못 쓰는 자리, 세션 id 에 `/` 가 든 판)에서는 그대로 매번
+/// 말한다 — 문턱이 조용히 실패해 알림을 **잃는** 것보다 낫다. `$PPID` 로 물러선 판에서 pid 가
+/// 재사용되면 표식이 남아 한 번을 잃는데, 그 자리는 `TMPDIR` 을 비우는 손이 함께 지운다.
+///
 /// **이벤트 이름도 `printf` 의 꼴에 안 넣는다** — 꼴 안의 `%` 는 변환 문자로 읽힌다. 인자
 /// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 넷은 안전한 낱말이지만, 꼴에
 /// 박아 두면 이름이 바뀌는 날 이 줄이 깨지고 그 값은 세션의 모든 도구 호출이다.
@@ -152,11 +178,18 @@ fn command(exe: &str, event: &str) -> String {
     // **경로도 인자 자리로 넘긴다** — 꼴에 박으면 경로의 `%` 가 변환 문자로 읽힌다(이벤트
     // 이름과 같은 까닭). `quotable` 을 지난 경로라 작은따옴표 안에서 셸이 아무것도 안 푼다.
     let where_ = crate::text::single_quoted(exe);
+    // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 저장소를 섞는다. 같은 세션이 저장소 둘을
+    // 오가면 둘 다 제 알림을 내야 하는데(제 바이너리가 저마다 못 돌 수 있다), 이름만으로는
+    // 첫 저장소의 표식이 둘째의 입을 막는다. `cmd::hook` 의 `session_file` 이 저장소를 키에
+    // 넣은 것과 같은 까닭이고, 셈은 셸이 못 하므로 **심을 때 박아 둔다**.
+    let whose = stable(exe.as_bytes()) % 0x1_0000;
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; c=0; \"{exe}\" hook {event} || c=$?; \
          case \"$c\" in 0|1) ;; *) \
+         s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-${{CLAUDE_CODE_SESSION_ID:-$PPID}}.said\"; \
+         [ -e \"$s\" ] || {{ true > \"$s\" 2>/dev/null || :; \
          printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\" {where_};; \
+         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\" {where_}; }};; \
          esac; exit 0"
     )
 }
@@ -781,9 +814,17 @@ mod tests {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
             p.display().to_string()
         };
+        // **판마다 `TMPDIR` 을 새로 준다**(moai-f7up) — 알림의 문턱이 표식 파일 하나라, 한
+        // 자리에서 이어 돌리면 첫 판만 말하고 나머지 단언이 모두 빈 stdout 을 본다. 문턱 자체는
+        // 아래 `the_notice_stands_once_a_session` 이 같은 자리로 두 번 돌려 잰다.
+        let nth = std::cell::Cell::new(0);
         let run = |shell: &str, flags: &str, exe: &str| {
+            nth.set(nth.get() + 1);
+            let tmp = at.join(format!("tmp{}", nth.get()));
+            std::fs::create_dir_all(&tmp).unwrap();
             let out = std::process::Command::new(shell)
                 .args([flags, &command(exe, "pre-tool-use")])
+                .env("TMPDIR", &tmp)
                 .output()
                 .unwrap_or_else(|e| panic!("{shell}: {e}"));
             (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
@@ -962,6 +1003,85 @@ mod tests {
         let cmd = command("/tmp/100%/moai", "pre-tool-use");
         assert!(cmd.contains("'/tmp/100%/moai'"), "경로를 인자로 안 넘긴다 — {cmd}");
         assert!(!cmd.contains("(exit %s): /tmp/"), "경로를 printf 꼴에 박았다 — {cmd}");
+    }
+
+    /// **알림은 세션마다 한 번만 선다**(moai-f7up). 문턱이 없던 판은 도구 호출마다 같은 줄을
+    /// 냈고 — 이 저장소의 세션 하나가 훅 걸리는 호출을 평균 140번, 많게는 1,257번 낸다 —
+    /// 그렇게 떠드는 훅은 사람이 꺼 버린다.
+    ///
+    /// **같은 자리로 두 번, 새 자리로 한 번 돌려 잰다.** 표식이 서는 자리는 `TMPDIR` 이라,
+    /// 그 자리를 바꾸면 다른 세션과 같다. 종료 코드는 세 판 다 0 이어야 한다 — 문턱이
+    /// 게이트가 되면 바이너리 권한 하나로 세션이 멈춘다.
+    #[cfg(unix)]
+    #[test]
+    fn the_notice_stands_once_a_session() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let scratch = crate::scratch::Scratch::new("skill-hookonce");
+        let at = scratch.path();
+        // 실행 비트를 뺀 파일 — 껍데기가 126 을 낸다(`a_binary_that_cannot_run…` 과 같은 자).
+        let dead = at.join("dead");
+        std::fs::write(&dead, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&dead, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let line = command(&dead.display().to_string(), "pre-tool-use");
+        // **껍데기를 하나로 두지 않는다** — 아래 `true` 의 까닭(특수 내장의 리다이렉션 실패)은
+        // dash 에서만 드러나, `sh` 가 bash 인 기계에서 한 벌만 돌리면 푸르게 지나간다.
+        let shells: Vec<&str> = ["sh", "bash", "dash"]
+            .into_iter()
+            .filter(|s| std::process::Command::new(s).args(["-c", "exit 0"]).output().is_ok())
+            .collect();
+        assert!(!shells.is_empty(), "껍데기가 하나도 없다");
+        let run = |shell: &str, tmp: &std::path::Path| {
+            let out = std::process::Command::new(shell)
+                .args(["-c", &line])
+                .env("TMPDIR", tmp)
+                .output()
+                .unwrap_or_else(|e| panic!("{shell}: {e}"));
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
+        };
+
+        for (k, sh) in shells.iter().enumerate() {
+            let one = at.join(format!("session-one-{k}"));
+            std::fs::create_dir_all(&one).unwrap();
+            let (code, first) = run(sh, &one);
+            assert_eq!(code, Some(0), "{sh}: 첫 판이 게이트가 됐다");
+            // `noexec` 으로 얹힌 자리에서는 126 이 안 나와 잴 것이 없다 — 그때는 건너뛴다
+            // (`cmd::runnable` 의 시험과 같은 문지기다).
+            if first.is_empty() {
+                return;
+            }
+            assert!(first.contains("systemMessage"), "{sh}: 첫 판이 알림을 안 냈다 — {first}");
+
+            assert_eq!(run(sh, &one), (Some(0), String::new()), "{sh}: 같은 세션에서 알림이 다시 섰다");
+
+            // 자리가 바뀌면 다른 세션이다 — 그쪽은 아직 못 들었으니 다시 선다.
+            let two = at.join(format!("session-two-{k}"));
+            std::fs::create_dir_all(&two).unwrap();
+            let (code, again) = run(sh, &two);
+            assert_eq!((code, again), (Some(0), first.clone()), "{sh}: 새 세션이 알림을 못 받았다");
+
+            // **표식을 못 세우는 자리에서도 게이트가 되지 않는다.** `:` 는 특수 내장이라 dash 는
+            // 리다이렉션이 실패하면 그 자리에서 죽고, 그때 나가는 **2 가 곧 게이트**다 — 못 쓰는
+            // 임시 디렉터리 하나로 세션의 모든 도구 호출이 막혔다. `true` 로 세우는 까닭이다.
+            // 문턱은 못 서니 말은 그대로 나온다 — 알림을 잃는 것보다 낫다.
+            let (code, said) = run(sh, &at.join("없는-자리"));
+            assert_eq!(code, Some(0), "{sh}: 표식을 못 세우는 자리가 게이트가 됐다 — {said}");
+            assert_eq!(said, first, "{sh}: 표식을 못 세우는 자리에서 알림이 사라졌다");
+        }
+    }
+
+    /// **표식 이름에 저장소가 든다**(moai-f7up) — 한 세션이 저장소 둘을 오가는 것은 드물지
+    /// 않은데, 이름만 같으면 첫 저장소의 표식이 둘째의 입을 막는다. 저마다 제 바이너리가
+    /// 못 돌 수 있으니 둘 다 제 알림을 내야 한다.
+    #[test]
+    fn two_repos_do_not_share_the_notice_mark() {
+        let mark = |exe: &str| {
+            let cmd = command(exe, "stop");
+            let at = cmd.find("moai-hook-").expect("표식이 없다");
+            cmd[at..at + "moai-hook-0000".len()].to_string()
+        };
+        assert_ne!(mark("/repo/a/target/release/moai"), mark("/repo/b/target/release/moai"));
+        // 같은 자리는 같은 표식이다 — 아니면 같은 세션이 훅마다 다시 말한다.
+        assert_eq!(mark("/repo/a/target/release/moai"), mark("/repo/a/target/release/moai"));
     }
 
     /// **커밋된 플러그인 트리가 지금의 글과 같다.**
