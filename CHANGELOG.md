@@ -22,11 +22,12 @@ on finding them.
   `.derived_epic` and gets what it used to get.
 - **`moai add --from` refuses the flags a plan cannot honour.** `--status`,
   `--quiet` and a typed `--type` used to be accepted and thrown away by a call
-  that ended in 0; they now exit 1. The seven the argument parser already refused
-  — a positional title, `--epic`, `--tag`, `--priority`, `--parent`, `--start`
-  and `--due` — are still refused, but the exit code changes from 2 to 1 and the
-  message becomes the command's own rather than the parser's. `--body` goes the
-  other way: a plan takes it now.
+  that ended in 0; they now exit 1. The five the argument parser already refused
+  — a positional title, `--epic`, `--tag`, `--priority` and `--parent` — are
+  still refused, but the exit code changes from 2 to 1 and the message becomes the
+  command's own rather than the parser's. `--start` and `--due` are new in this
+  release, so no call ever passed them to a plan. `--body` goes the other way: a
+  plan takes it now.
 
 ### Added
 
@@ -155,9 +156,10 @@ on finding them.
   only what you actually passed (the positional stands as `[title]`), exits 1, and
   under `--json` it is the `{"code":"bad_input", …}` object every other refusal
   gives, so a loop that branches on `code` sees this one too. **The title, the
-  epic, the tag, the priority, the parent and the two dates were refused before
-  too, but by the argument parser** — so for those seven the exit code changes from
-  2 to 1 and the message stops being plain text.
+  epic, the tag, the priority and the parent were refused before too, but by the
+  argument parser** — so for those five the exit code changes from 2 to 1 and the
+  message stops being plain text. The two dates are new in this release, so a plan
+  has refused them from the start.
 - **A plan takes `--body`**, and puts it on the first epic it creates — the one
   place `moai show <epic>` reads why these issues are one bundle, and the same
   place `moai idea promote` has been putting the thought's body. What is refused
