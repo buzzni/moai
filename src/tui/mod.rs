@@ -340,10 +340,14 @@ impl Ground {
         crate::report::Kinds::kept(&self.kinds)
     }
 
-    /// 거름망이 볼 꼴 — 든 지도를 빌리기만 하고 다시 재는 것은 없다. 빌린 지도를 짓는 값은 **이슈 수에
-    /// 비례한다**: 소속 지도(`epic`·`milestone`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만
-    /// 건에서 수십 ms)보다 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의
-    /// 지도가 넷이라 차례로 넘기면 서로 바뀌어도 컴파일된다.
+    /// 거름망이 볼 꼴 — 든 지도는 빌리기만 한다. 빌린 지도를 짓는 값은 **이슈 수에 비례한다**:
+    /// 소속 지도(`epic`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만 건에서 수십 ms)보다
+    /// 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의 지도가 셋이라
+    /// 차례로 넘기면 서로 바뀌어도 컴파일된다.
+    ///
+    /// **`lines` 만은 여기서 다시 잰다**(moai-jk2u.wvn) — `report::Lines` 는 `&Issue` 를 들어
+    /// `Ground` 의 `String` 지도로는 못 담는다. 키마다 도는 자리라 값이 붙으니, 옮길 곳은
+    /// `Ground` 가 아니라 줄과 함께 사는 자리다(`Site`, 리뷰 moai-jk2u.m60 이 남긴 몫).
     fn here<'i>(&'i self, issues: &'i [Issue]) -> crate::query::Where<'i> {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
@@ -2327,6 +2331,7 @@ impl App {
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.site.now.clone();
         // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
+        // (`Ground::here` 의 `lines` 만은 아직 여기서 선다 — 그 doc 에 까닭과 옮길 자리가 있다.)
         let wh = self.site.ground.here(&self.site.issues);
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {

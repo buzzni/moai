@@ -96,7 +96,7 @@ impl<'a> Where<'a> {
         crate::report::stands_in(&self.kinds, i, self.epic.get(i.id.as_str()).copied())
     }
 
-    /// 그 줄이 **선 마일스톤** (`report::stood_under`) — 롤업과 `moai show <마일스톤>` 의
+    /// 그 줄이 **선 마일스톤** (`report::stood_at_line`) — 롤업과 `moai show <마일스톤>` 의
     /// 멤버가 세는 곳과 같은 답이다.
     ///
     /// **지도를 곧바로 안 짚는다**(리뷰). 마일스톤은 에픽을 타고 오는데([`crate::report::milestones_in`])
@@ -104,7 +104,7 @@ impl<'a> Where<'a> {
     /// 릴리스로 간다 — `moai show <마일스톤>` 이 멤버로 그린 줄을 `moai show --milestone <그것>`
     /// 은 안 내고 `--milestone none` 이 냈다.
     /// **가려짐은 여기서 가른다** — 에픽 쪽 [`Where::epic_of`] 가 `report::stands_in` 안에서
-    /// 그러는 것과 짝이다. `report::stood_under` 자신은 가려짐을 안 본다(세는 쪽은 `work_under`
+    /// 그러는 것과 짝이다. `report::stood_at_line` 자신은 가려짐을 안 본다(세는 쪽은 `work_under`
     /// 가 그 줄을 미리 걸러 넘긴다) — 문을 한 겹 위에 두는 것이 두 축에서 같은 꼴이다.
     pub fn milestone_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
         if self.eclipsed(i) {
@@ -417,7 +417,14 @@ impl Filter {
         // `derived_epic` 과 다른 답을 하던 자리다. **마일스톤도 같다**(리뷰): 에픽이 마일스톤을
         // 이기므로(`report::milestones_in`) 줄에 적힌 `milestone` 은 이미 졌지만, 이긴 그 에픽이
         // 줄마다 갈려 지도의 값도 앞줄의 것이 못 된다.
-        if !placed(&self.epic, wh.epic_of(i)) || !placed(&self.milestone, wh.milestone_of(i)) {
+        // **마일스톤은 물을 때만 잰다**(리뷰 moai-jk2u.m60) — `placed` 는 빈 거르개에 참을 내지만
+        // 인자는 그 앞에 셈해진다. 값이 지도 짚기이던 때는 공짜였는데, 줄마다 묻게 된 뒤로
+        // (`report::stood_at_line`) 에픽 없는 줄마다 조상을 타고 오르는 걸음이라 그렇지 않다 —
+        // 탐색기의 거름망은 키 하나에 줄마다 한 번 여기를 지난다.
+        if !placed(&self.epic, wh.epic_of(i)) {
+            return false;
+        }
+        if !self.milestone.is_empty() && !placed(&self.milestone, wh.milestone_of(i)) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {

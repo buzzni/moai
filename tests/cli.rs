@@ -9891,6 +9891,108 @@ fn a_line_inherits_the_defer_of_the_epic_it_wrote_on_itself() {
     assert!(off.contains("앞줄"), "미룬 에픽의 멤버를 `--deferred` 가 안 냈다\n{off}");
 }
 
+/// **마일스톤의 미룸도 줄마다 물려받는다**(리뷰 moai-jk2u.m60).
+///
+/// 위 시험이 못박은 것을 `Shelf::walk` 는 에픽 축에서만 했다 — 마일스톤 축은 `mile_of` 를
+/// 그대로 짚어, 제 `milestone` 에 미룬 릴리스를 적은 앞줄이 그 릴리스의 멤버로 세어지면서
+/// 미룸은 안 물려받았다. 거꾸로 아무것도 안 적은 앞줄이 뒷줄이 적은 미룬 릴리스를 입어,
+/// `show --milestone` 이 그 줄을 안 세는데 `ready` 는 안 내주는 판도 섰다.
+///
+/// **두 방향을 같은 시험에서 잰다** — 한쪽만 재면 값을 통째로 `없음` 으로 바꿔도 붉어지지 않는다.
+#[test]
+fn a_line_inherits_the_defer_of_the_release_it_wrote_on_itself() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let stone = line("argos-m001", "미룬 릴리스", "milestone", ",\"deferred_at\":\"2026-09-11T00:00:00Z\"");
+
+    // 1. 앞줄만 그 릴리스를 적었다. 뒷줄은 닫혀 있어 지도에서 그 id 가 지워지므로,
+    //    앞줄은 제가 적은 릴리스의 미룸을 지도로는 못 받는다.
+    let s = init("twinstone");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            stone,
+            line("argos-0002", "앞줄", "issue", ",\"milestone\":\"argos-m001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"status\":\"done\"").replace("\"status\":\"todo\",", ""),
+        ),
+    )
+    .unwrap();
+    let held = String::from_utf8(moai(s.path(), &["show", "argos-m001", "--json"]).stdout).unwrap();
+    assert!(held.contains(r#""members":["argos-0002"]"#), "전제가 안 섰다 — 릴리스가 그 줄을 멤버로 안 센다\n{held}");
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(!ready.contains("argos-0002"), "미룬 릴리스의 멤버를 집을 것으로 내줬다\n{ready}");
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred", "--all"]).stdout).unwrap();
+    assert!(off.contains("앞줄"), "미룬 릴리스의 멤버를 `--deferred` 가 안 냈다\n{off}");
+
+    // 2. 거꾸로 — 앞줄은 아무것도 안 적었고 뒷줄이 미룬 릴리스를 적었다. 지도는 뒷줄의
+    //    값을 드는데, 그 값은 앞줄의 것이 아니므로 앞줄은 그대로 집을 수 있어야 한다.
+    let s = init("twinstone2");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            stone,
+            line("argos-0002", "앞줄", "issue", ""),
+            line("argos-0002", "뒷줄", "issue", ",\"milestone\":\"argos-m001\"")
+                .replace("\"status\":\"todo\"", "\"status\":\"done\""),
+        ),
+    )
+    .unwrap();
+    let held = String::from_utf8(moai(s.path(), &["show", "--milestone", "argos-m001", "--all"]).stdout).unwrap();
+    assert!(held.contains("뒷줄") && !held.contains("앞줄"), "릴리스가 제 줄이 아닌 것을 셌다\n{held}");
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(ready.contains("앞줄"), "아무것도 안 적은 줄이 뒷줄의 미룸을 입어 사라졌다\n{ready}");
+}
+
+/// **무엇을 풀라고 할지도 그 줄에서 찾는다**(리뷰 moai-jk2u.m60).
+///
+/// `deferred_roots` 가 id 를 계획 밖으로 민 것은 **어느 한 줄의** 걸음인데, `deferred_sources`
+/// 는 그 id 를 `by_id` 로 되짚어 뒷줄을 걸었다 — 앞줄이 적은 에픽 때문에 빠진 id 를 뒷줄에서
+/// 다시 재니 걸음이 비어, `moai ready` 가 id 없는 `moai defer  --undo` 를 사람 앞에 냈고
+/// `--json` 의 `undo` 키는 아예 빠졌다. 쌍둥이 없는 같은 저장소와 글자째 같아야 한다.
+#[test]
+fn what_to_undo_is_read_from_the_line_that_left_the_plan() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let epic = line("argos-e001", "미룬 에픽", "epic", ",\"deferred_at\":\"2026-09-11T00:00:00Z\"");
+    let blocked = line("argos-0009", "막힌 줄", "issue", ",\"blocked_by\":[\"argos-0002\"]");
+
+    // 쌍둥이 — 앞줄만 그 에픽을 적었다. 막는 줄의 id 가 계획 밖으로 밀린 것은 그 앞줄 때문이다.
+    let s = init("twinundo");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-0002", "막는 줄 앞", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0002", "막는 줄 뒤", "issue", ""),
+            blocked,
+            epic,
+        ),
+    )
+    .unwrap();
+    let twin = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(twin.contains(r#""undo":["argos-e001"]"#), "무엇을 풀지를 못 댔다\n{twin}");
+    let said = String::from_utf8(moai(s.path(), &["ready"]).stdout).unwrap();
+    assert!(said.contains("moai defer argos-e001 --undo"), "id 없는 명령을 사람 앞에 냈다\n{said}");
+
+    // 쌍둥이 없는 같은 판 — 답이 같아야 한다.
+    let s = init("loneundo");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!("{}{}{}", line("argos-0002", "막는 줄", "issue", ",\"epic\":\"argos-e001\""), blocked, epic),
+    )
+    .unwrap();
+    let lone = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert_eq!(twin, lone, "쌍둥이가 있고 없고에 따라 `held` 가 달라졌다");
+}
+
 /// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와
 /// id 지도(`report::groups`·`milestones`)가 모두 뒷줄을 고르는데 상세만 앞줄을 열면, 머리
 /// 제목·필드는 앞줄 것이고 멤버 셈은 뒷줄 것인 한 화면이 선다(moai-e0ro). 종류가 다른

@@ -861,8 +861,11 @@ mod tests {
         let want: Vec<usize> = (0..issues.len()).collect();
         // **자리를 함께 낸다** — 첨자 하나가 빠졌다는 말만으로는 어느 줄이 닿는 길 없는
         // 바구니로 갔는지 모른다. 무작위 더미라 판을 손으로 다시 짓지도 못한다.
-        let seats: Vec<_> = (0..issues.len()).map(|a| (a, &issues[a].id, index.home_of(a))).collect();
-        assert_eq!(seen, want, "빠졌거나 겹쳤다 — {issues:#?}\n자리: {seats:#?}");
+        // **붉을 때만 짓는다** — 이 자는 무작위 대조 안에서 3천 번 돈다.
+        if seen != want {
+            let seats: Vec<_> = (0..issues.len()).map(|a| (a, &issues[a].id, index.home_of(a))).collect();
+            panic!("빠졌거나 겹쳤다 — {issues:#?}\n자리: {seats:#?}\n{seen:?} != {want:?}");
+        }
     }
 
     /// 병적인 자료를 전부 한 더미에 넣고 빠짐도 겹침도 없음을 못 박는다.
