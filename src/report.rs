@@ -1185,17 +1185,21 @@ pub fn group_members<'a>(all: &'a [Issue], group: &Issue) -> Vec<&'a Issue> {
     if !is_group(group) {
         return Vec::new();
     }
-    let eclipsed = eclipsed(all);
+    // **종류 지도는 한 벌이다** — 가려짐 판정과 [`Placed`] 가 같은 것을 본다.
+    let kind_of = kinds(all);
+    let eclipsed = |i: &Issue| is_eclipsed(&kind_of, i);
     // 종류가 다른 쌍둥이에게 id 가 가려진 묶음 줄도 멤버가 없다 — 그 id 를 가리키는
-    // 줄은 쌍둥이의 것이다([`eclipsed`]).
+    // 줄은 쌍둥이의 것이다([`is_eclipsed`]).
     if eclipsed(group) {
         return Vec::new();
     }
     // **소속은 [`Placed`] 에 묻는다**(moai-7iyc.rt6) — 지도를 곧바로 짚으면 같은 id 를 든
     // 앞줄이 뒷줄의 에픽을 입어, 머리글의 롤업(`0/1`)과 그 밑에 그려지는 줄 수가 갈린다.
+    //
+    // **마일스톤 지도는 그 축에서만 짓는다** — 에픽 굴림은 `mile_of` 를 안 보므로
+    // ([`Placed::at`]), 에픽 하나를 펼치는 흔한 길이 `milestones_in` 한 벌을 안 치른다.
     let epic_of = groups(all);
     let mile_of = (group.kind == Kind::Milestone).then(|| milestones_in(all, &epic_of)).unwrap_or_default();
-    let kind_of = kinds(all);
     let placed = match group.kind {
         Kind::Epic => Placed::epic(&epic_of),
         _ => Placed::milestone(&epic_of, &mile_of, &kind_of),
