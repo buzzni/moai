@@ -112,6 +112,21 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- A single row this binary cannot read no longer turns **every** merge into a
+  whole-file conflict. The merge driver paired rows by id only when both sides
+  carried exactly the same set of unreadable lines, so one row written by a newer
+  binary — a `kind` this one does not know, say — put conflict markers around the
+  entire file from then on, and the per-issue resolution the driver exists for was
+  gone. There was no way out of it either: `moai status` counts an unreadable row
+  as fatal, so repairing that row on one branch is precisely what makes the two
+  sides differ. A row is now paired by id whenever its JSON and its `id` can be
+  read, whether or not the rest of it can, and it travels through the merge byte
+  for byte — one side's change comes through, and only a row **both** sides
+  changed is handed to a person, with the markers around that row alone. Lines
+  where not even the id can be read are merged by counting them: what one side
+  added is added, what one side removed is removed, and a line standing several
+  times keeps its count. Only a duplicated id among readable rows still hands the
+  whole file over.
 - A deferral is no longer dropped without a word when a timestamp cannot be read.
   When both branches had changed `planned_at`, the merge driver picked the later
   of the two, and a timestamp it could not parse — a `+09:00` offset left by a

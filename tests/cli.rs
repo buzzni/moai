@@ -15032,6 +15032,52 @@ fn a_row_neither_side_touched_does_not_block_the_merge() {
     );
 }
 
+/// **새 바이너리가 쓴 줄 하나가 머지를 파일째 막지 않는다**(moai-1a55.4oh).
+///
+/// 뒷날 바이너리가 `kind` 에 새 값을 쓰면 오늘 바이너리는 그 줄을 못 읽는다. 그런 줄이 한쪽에만
+/// 서면 예전에는 **모든** 머지가 파일 전체를 충돌로 넘겼고, 이슈마다 푸는 것이 통째로
+/// 사라졌다. 빠져나올 길도 없었다 — `moai status` 가 못 읽는 줄을 치명으로 세니, 한쪽에서 그
+/// 줄을 고치는 것이 곧 두 쪽의 못 읽는 줄을 다르게 만드는 일이다.
+///
+/// 진짜 git 으로 그 판을 만든다. 보는 것은 셋이다 — 머지가 깨끗이 끝나는가, 두 쪽의 고침이 다
+/// 남는가, **못 읽는 줄이 원문 그대로 파일 끝에 남는가**. 단위 시험은 `plan` 까지만 지나고, 이
+/// 판이 실제로 아팠던 곳은 git 이 드라이버를 부르는 길이다.
+#[test]
+fn a_row_a_newer_binary_wrote_does_not_escalate_the_merge() {
+    let s = init("mergespike");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let one = add(root, &["이쪽이 고칠 줄"]);
+    let two = add(root, &["저쪽이 고칠 줄"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    // **이 바이너리가 못 읽는 줄이다** — `kind` 의 값이 넷 중에 없다. 저쪽에만 선다.
+    //
+    // 심고 나서는 이 가지에서 `moai` 를 안 부른다. 불렀다면 `store` 가 그 줄을 못 읽는 줄로
+    // 들고 파일 끝으로 옮기는데, 여기서 재려는 것은 머지가 그 줄을 어떻게 다루느냐다.
+    let spike = "{\"id\":\"argos-9zzz\",\"title\":\"새 종류\",\"kind\":\"spike\",\"status\":\"todo\",\
+                 \"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\
+                 \"status_since\":\"2026-09-01T00:00:00Z\"}";
+    std::fs::write(root.join(".moai/issues.jsonl"), format!("{}{spike}\n", issues(root))).unwrap();
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "못 읽는 줄 하나가 파일 전체를 넘겼다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 원문 그대로, 그리고 `store::render_issues` 처럼 **뒤에** 선다.
+    assert_eq!(merged.lines().last(), Some(spike), "못 읽는 줄이 사라졌거나 고쳐 적혔다\n{merged}");
+}
+
 /// **안 심은 클론에서는 지금까지와 똑같다.** `.gitattributes` 의 `merge=moai` 는 드라이버가
 /// 설정에 없으면 그냥 무시되고 git 의 기본 머지가 돈다 — 이 낱말을 심는 것이 안전한 까닭이다.
 #[test]
