@@ -2857,9 +2857,28 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         long: &'static [&'static str],
         /// 값을 **안** 받는 긴 옵션 — 모르는 것은 아래에서 멈춘다. 프로그램마다 따로 든다:
         /// 한 통에 모으면 `timeout --set-home` 처럼 그 프로그램에 없는 이름이 통과한다.
+        ///
+        /// **여기 선 이름에 `=값` 을 달면 그 줄은 안 돈다**(moai-y1ix) — 그 프로그램이 제 손으로
+        /// 거절한다. 값을 붙여서 받는 이름은 [`attach`](Wrapper::attach) 로 갈라 두었고, 갈라
+        /// 놓았기에 이 말이 이제 열일곱 줄 전부에서 선다.
         free: &'static [&'static str],
-        /// 값을 **붙여서만** 받는 짧은 옵션(`sudo -hHOST`) — 혼자 서면 값이 없다. 그 뒤의 글자는
-        /// 스위치가 아니라 값이라, 거기서 낱말이 끝난다.
+        /// 값을 **붙여서만** 받는 옵션 — 혼자 서도 서고, 값을 붙여도 선다.
+        ///
+        /// 짧은 꼴(`sudo -hHOST`)에서는 그 뒤의 글자가 스위치가 아니라 값이라 거기서 낱말이
+        /// 끝나고, 긴 꼴(`env --block-signal=INT`)에서는 `=` 뒤가 값이다.
+        ///
+        /// **긴 이름도 여기 든다**(moai-y1ix, 2026-09-23) — 한때 [`free`](Wrapper::free) 에 함께
+        /// 섰는데, 그 칸이 "값을 **안** 받는 이름" 과 "값을 **붙여서만** 받는 이름" 두 뜻을 한꺼번에
+        /// 들어 `--이름=값` 을 가를 수가 없었다. 그래서 `=` 를 단 꼴을 거절하는 자리가 표가 다 찬
+        /// 줄([`whole`](Wrapper::whole))에서만 서고, 나머지 열여섯 줄에서는 `env --null=1 <명령>`
+        /// 처럼 그 프로그램이 거절하는 줄이 도는 줄로 읽혔다.
+        ///
+        /// **어느 쪽에 적느냐가 어긋나는 방향을 가른다** — 값을 받는 이름을 [`free`](Wrapper::free)
+        /// 에 적으면 정당한 `--이름=값` 이 통째로 안 보이고(새는 쪽), 값을 안 받는 이름을 여기
+        /// 적으면 안 도는 줄을 도는 줄로 읽는다(잘못 막고 또 새는 쪽). 그래서 넘겨짚지 않고
+        /// 2026-09-23 에 열일곱 줄의 긴 이름을 **전부** 그 프로그램에 물어 갈랐다 —
+        /// `--이름=1` 이 `doesn't allow an argument`·`does not take an argument` 로 지면
+        /// [`free`](Wrapper::free), 그대로 돌면 여기다.
         attach: &'static [&'static str],
         /// 옵션 뒤에 오는 제 자리 인자 수(`timeout 5 …`).
         args: usize,
@@ -3033,19 +3052,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "env",
             takes: &["-u"],
             long: &["--unset"],
+            free: &["--ignore-environment", "--list-signal-handling"],
             // `--block-signal[=SIG]` 셋은 값을 **붙여서만** 받는다 — 다음 낱말을 먹는 것으로 적던
             // 판은 `env --block-signal moai add x` 의 `moai` 를 값으로 삼켜 규칙 1 을 놓쳤다.
-            free: &[
-                "--ignore-environment",
-                "--null",
-                "--block-signal",
-                "--default-signal",
-                "--ignore-signal",
-                "--list-signal-handling",
-            ],
-            attach: &[],
+            // 2026-09-23 에 다시 쟀다(moai-y1ix): 셋 다 `--이름=1` 을 그대로 받아 돈다.
+            attach: &["--block-signal", "--default-signal", "--ignore-signal"],
             args: 0,
-            stops: &[],
+            // **`-0`·`--null` 은 명령과 함께 못 선다**(moai-y1ix) — 2026-09-23 에 쟀다:
+            // `env --null /bin/echo RAN` 은 `cannot specify --null (-0) with command` 로 아무것도
+            // 안 돌리고, 짧은 `-0` 도 같다. `free` 에 서서 값 안 받는 깃발로 넘어가던 판은 그
+            // 줄의 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
+            stops: &["-0", "--null"],
             elsewhere: &[],
             shell: &[],
             chdir: &["-C", "--chdir"],
@@ -3254,7 +3271,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--beep",
                 "--color",
                 "--no-color",
-                "--differences",
                 "--errexit",
                 "--chgexit",
                 "--precise",
@@ -3263,8 +3279,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--no-wrap",
                 "--exec",
             ],
-            // `-d[=<permanent>]` 는 값을 붙여서만 받는다.
-            attach: &["-d"],
+            // `-d[=<permanent>]` 는 값을 붙여서만 받는다. 긴 이름 `--differences` 도 같은 줄이다
+            // (moai-y1ix, 2026-09-23 에 쟀다: `watch --differences=permanent <명령>` 이 돈다).
+            attach: &["-d", "--differences"],
             args: 0,
             stops: &["-v"],
             elsewhere: &[],
@@ -3297,9 +3314,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--echo",
                 "--output-limit",
             ],
-            free: &["--append", "--return", "--flush", "--force", "--quiet", "--timing"],
-            // `-t[<파일>]` 은 값을 붙여서만 받는다.
-            attach: &["-t"],
+            free: &["--append", "--return", "--flush", "--force", "--quiet"],
+            // `-t[<파일>]` 은 값을 붙여서만 받는다. 긴 이름 `--timing` 도 같은 줄이다
+            // (moai-y1ix, 2026-09-23 에 쟀다: `script --timing=1 -c '<글>' /dev/null` 이 돈다).
+            attach: &["-t", "--timing"],
             args: 0,
             stops: &[],
             elsewhere: &[],
@@ -3388,9 +3406,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--strings-in-hex",
                 "--decode-fds",
                 "--quiet",
-                "--tips",
             ],
-            attach: &[],
+            // `--tips[=<언제>]` 는 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
+            // `strace --tips=1 -o /dev/null <명령>` 이 돈다). 나머지 스물둘은 `=1` 을 거절한다.
+            attach: &["--tips"],
             args: 0,
             stops: &["-p", "--attach"],
             elsewhere: &[],
@@ -3606,7 +3625,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--filterhosts",
                 "--gnu",
                 "--group",
-                "--hashbang",
                 "--help",
                 "--hgrp",
                 "--hostgroup",
@@ -3625,14 +3643,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--link",
                 "--ll",
                 "--max-line-length-allowed",
-                // **`max-lines|maxlines|l:f` 는 숫자일 때만 값을 먹는다**(리뷰 moai-514e).
-                // 2026-09-22 에 쟀다: `parallel --max-lines 5 sed -i …` 은 5 를 먹고,
-                // `parallel --max-lines sed -i …` 은 안 먹는다. "숫자면 먹는다" 를 적을 칸이 이
-                // 표에 없어, 짧은 `-l` 이 뭉치 고리의 기본값으로 서는 쪽(값 없는 깃발)에 맞춘다 —
-                // 모르는 긴 이름으로 두어 통째로 멈추던 판보다 한 철자를 더 본다.
-                // 남은 자리는 `parallel --max-lines 5 <쓰기>` 다 — 그 쓰기가 아직 안 보인다.
-                "--max-lines",
-                "--maxlines",
                 "--maxlinelengthallowed",
                 "--nn",
                 "--no-ctrl-c",
@@ -3677,7 +3687,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--roundrobin",
                 "--rrs",
                 "--semaphore",
-                "--shebang",
                 "--shell-quote",
                 "--shell_quote",
                 "--shellquote",
@@ -3729,7 +3738,21 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "-v",
                 "-x",
             ],
-            attach: &[],
+            // **값을 붙여서만 받는 긴 이름 넷**(moai-y1ix, 2026-09-23 에 쟀다) — 넷 다
+            // `--이름=1` 을 그대로 받아 돈다. 나머지 아흔넷은 `Option <이름> does not take an
+            // argument` 로 진다.
+            //
+            // **`max-lines|maxlines|l:f` 는 숫자일 때만 **다음 낱말**을 먹는다**(리뷰 moai-514e).
+            // 2026-09-22 에 쟀다: `parallel --max-lines 5 sed -i …` 은 5 를 먹고,
+            // `parallel --max-lines sed -i …` 은 안 먹는다. "숫자면 먹는다" 를 적을 칸이 이 표에
+            // 없어 안 먹는 쪽에 맞춘다 — 남은 자리는 `parallel --max-lines 5 <쓰기>` 고, 그
+            // 쓰기가 아직 안 보인다. 이 칸으로 옮긴 것은 붙여 쓴 꼴(`=5`)을 위해서지 그 자리를
+            // 고친 것이 아니다.
+            // **`--shebang`·`--hashbang` 은 여기가 제자리가 아니다**(idea moai-sdq0) — 그 둘이
+            // 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 읽을 스크립트 파일로 보니
+            // [`Wrapper::stops`] 줄이다. 값 쪽 판정은 여기가 맞아 그대로 두고, 옮기는 것은 표
+            // 한 줄이라 따로 집는다. 지금 답은 옛 판과 같다.
+            attach: &["--max-lines", "--maxlines", "--shebang", "--hashbang"],
             args: 0,
             // **뒤의 명령을 아예 안 돌리는 스위치**(2026-09-22 에 쟀다) — 찍기만 하거나
             // 돌릴 줄을 보여 주기만 한다. `--citation`·`--bibtex` 는 이 판이 모르는 이름이라
@@ -3790,17 +3813,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             name: "xargs",
             takes: &["-a", "-d", "-E", "-L", "-n", "-P", "-s"],
             long: &["--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-procs", "--process-slot-var"],
-            free: &[
-                "--null",
-                "--interactive",
-                "--no-run-if-empty",
-                "--show-limits",
-                "--exit",
-                "--open-tty",
-                "--eof",
-                "--max-lines",
-            ],
-            attach: &["-e", "-l"],
+            free: &["--null", "--interactive", "--no-run-if-empty", "--show-limits", "--exit", "--open-tty"],
+            // 긴 이름 둘도 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
+            // `xargs --eof=1 <명령>` 도 `xargs --max-lines=1 <명령>` 도 돈다). 짧은 `-e`·`-l` 의
+            // 제 이름이다.
+            attach: &["-e", "-l", "--eof", "--max-lines"],
             args: 0,
             stops: &["-I", "-i", "--replace"],
             elsewhere: &[],
@@ -3836,7 +3853,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             ],
             free: &[
                 "--non-interactive",
-                "--preserve-env",
                 "--set-home",
                 "--stdin",
                 "--background",
@@ -3846,7 +3862,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--bell",
                 "--preserve-groups",
             ],
-            attach: &["-h"],
+            // `--preserve-env[=<목록>]` 은 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
+            // `sudo -n --preserve-env=HOME /bin/echo RAN` 이 돈다). 나머지 여덟은 `=1` 을 거절한다.
+            attach: &["-h", "--preserve-env"],
             args: 0,
             // `-l`·`-v` 는 뒤의 명령을 **안 돌린다**(될지만 본다) — 넘기면 안 도는 줄을 막는다.
             // **`-i`·`--login` 도 여기다**(2026-09-20 사용자 결정, 리뷰 moai-jlon.yeg 5번) — 로그인
@@ -4128,6 +4146,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     let longs = || {
         (w.long.iter())
             .chain(w.free)
+            // **값을 붙여서만 받는 긴 이름도 이 표의 것이다**(moai-y1ix) — 한때 [`Wrapper::free`]
+            // 에 함께 서서 거저 들던 자리다. 갈라 놓고 여기 안 들이면 `env --block-sig=INT` 를
+            // 되돌리는 자가 그 이름을 못 보아 모르는 이름으로 읽는다.
+            .chain(w.attach)
             .chain(w.stops)
             .chain(w.elsewhere)
             .chain(w.chdir)
@@ -4332,12 +4354,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // 마저 읽던 판은 `su --login=1 남 -c 'tmux kill-server'` 를 규칙 4 로 막고(아무것도 안 도는
         // 줄이다), 집기 쪽 쌍둥이는 안 도는 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
         //
-        // **[`free`](Wrapper::free) 는 표가 다 찬 줄에서만 함께 본다**([`Wrapper::whole`]) — 그 칸은
-        // 값을 **붙여서만** 받는 이름(`env --block-signal=INT`)도 함께 드는 자리라, 표를 덜 안 줄에서
-        // 여기 물리면 정당한 `--이름=값` 이 통째로 안 보인다. su·runuser 의 셋(`--preserve-environment`·
-        // `--fast`·`--pty`)은 값을 안 받는다: `su --fast=1 nobody -c 'echo RAN'` 은 `option '--fast'
-        // doesn't allow an argument` 다(2026-09-23 에 쟀다).
-        if (stops.iter().chain(elsewhere).chain(PRINTS).chain(if w.whole { w.free } else { &[] }))
+        // **[`free`](Wrapper::free) 도 함께 본다 — 이제 열일곱 줄 전부에서다**(moai-y1ix).
+        // 한때 이 칸은 표가 다 찬 줄([`Wrapper::whole`])에서만 물렸는데, `free` 가 값을
+        // **붙여서만** 받는 이름(`env --block-signal=INT`)까지 함께 드는 자리라 표를 덜 안 줄에서
+        // 물리면 정당한 `--이름=값` 이 통째로 안 보였기 때문이다. 그 둘을
+        // [`Wrapper::attach`] 로 갈라 놓아 이제 `free` 는 값을 안 받는 이름만 든다.
+        //
+        // **2026-09-23 에 열일곱 줄의 긴 이름을 전부 그 프로그램에 물어 갈랐다** —
+        // `env --null=1 <명령>` 도 `timeout --foreground=1 <명령>` 도 `parallel --tag=1 <명령>` 도
+        // `doesn't allow an argument`·`does not take an argument` 로 아무것도 안 돌린다. 여기
+        // 안 서던 판은 그 줄의 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
+        if (stops.iter().chain(elsewhere).chain(PRINTS).chain(w.free))
             .any(|f| f.starts_with("--") && word.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
         {
             return Some(Wrapped::Stops);
@@ -4500,7 +4527,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // option '--verbose'` 로 아무것도 안 돌리는데, 그 집기가 뒤의 빈손 쓰기를 풀어 줬다.
         if let Some(name) = word.strip_prefix("--") {
             let loose = !w.whole && (COMMON.contains(&word.as_str()) || name.chars().all(|c| c.is_ascii_digit()));
-            if !w.free.contains(&word.as_str()) && !loose {
+            // **값을 붙여서만 받는 이름은 혼자 서도 선다**([`Wrapper::attach`], moai-y1ix) —
+            // `env --block-signal <명령>` 은 정말 돈다(2026-09-23 에 쟀다). [`Wrapper::free`] 에서
+            // 갈라 오며 여기 안 들이면 그 줄이 통째로 멈춰, 정당한 쓰기가 안 보인다.
+            if !w.free.contains(&word.as_str()) && !w.attach.contains(&word.as_str()) && !loose {
                 return Some(Wrapped::Stops);
             }
             // **값 없는 긴 이름도 봤다고 적는다**(리뷰 moai-514e) — [`Runs`] 의 스위치가 값을 안
@@ -12841,6 +12871,82 @@ mod tests {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "su 가 모르는 이름의 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
         }
+    }
+
+    /// **값 안 받는 이름에 `=값` 을 달면 그 줄은 안 돈다 — 열일곱 줄 전부에서다**(moai-y1ix,
+    /// 리뷰 moai-514e.mvw 가 넘겼다).
+    ///
+    /// [`Wrapper::free`] 가 값을 **안** 받는 이름(`--null`)과 값을 **붙여서만** 받는
+    /// 이름(`env --block-signal=SIG`)을 함께 들어, `=` 를 단 꼴을 거절하는 자리가 표가 다 찬
+    /// 줄([`Wrapper::whole`])에서만 설 수 있었다. 나머지 열여섯 줄에서는
+    /// `env --null=1 moai mv <id> in_progress --from todo && <쓰기>` 의 안 도는 집기가 뒤의 빈손
+    /// 쓰기를 풀어 줬다.
+    ///
+    /// **[`Wrapper::attach`] 로 갈랐다** — 2026-09-23 에 열일곱 줄의 긴 이름을 **전부** 그
+    /// 프로그램에 물어, `--이름=1` 이 지면 `free`, 그대로 돌면 `attach` 로 적었다. 값을 붙여
+    /// 받는 것은 아홉뿐이었다(env 셋·sudo·strace·script 하나씩, parallel 둘, xargs 둘 —
+    /// parallel 의 `--shebang`·`--hashbang` 까지 넷).
+    ///
+    /// **`env --null` 은 그보다 앞이다** — 같은 날 쟀다: `env --null /bin/echo RAN` 은
+    /// `cannot specify --null (-0) with command` 로 아무것도 안 돌린다. 짧은 `-0` 도 같아
+    /// [`Wrapper::stops`] 로 옮겼다.
+    #[test]
+    fn a_valueless_long_name_with_a_glued_value_stops_every_line() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let root = Path::new("/repo");
+        // **안 도는 줄의 집기는 집기가 아니다** — 표가 덜 찬 줄에서도 그렇다.
+        for cmd in [
+            "env --null=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "env --null moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "env -0 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "timeout --foreground=1 5 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "sudo --stdin=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "parallel --tag=1 moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
+            "strace --quiet=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+        ] {
+            let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "안 도는 줄의 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
+        }
+        // **없는 쓰기도 지어내지 않는다.**
+        for cmd in [
+            "env --null=1 sed -i s/a/b/ src/x.rs",
+            "env --null sed -i s/a/b/ src/x.rs",
+            "env -0 tee src/x.rs",
+            "env --ignore-environment=1 sed -i s/a/b/ src/x.rs",
+            "timeout --preserve-status=1 5 tee src/x.rs",
+            "flock --nonblock=1 /tmp/l -c 'sed -i s/a/b/ src/x.rs'",
+            "sudo --bell=1 tee src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄의 쓰기를 잘못 막았다 — {cmd}\n{got:?}");
+        }
+        // **값을 붙여 받는 이름은 그대로 돈다** — 갈라 놓은 쪽이다. 여기가 무너지면 정당한 쓰기가
+        // 통째로 안 보인다.
+        for cmd in [
+            "env --block-signal=INT sed -i s/a/b/ src/x.rs",
+            "env --block-signal tee src/x.rs",
+            "env --default-signal=INT tee src/x.rs",
+            "env --ignore-signal=INT tee src/x.rs",
+            // **줄여 쓴 이름도 그 이름이다**([`expand`](expand)) — `longs` 가 [`Wrapper::attach`]
+            // 를 안 들이면 여기가 모르는 이름이 되어 붉어진다.
+            "env --block-sig=INT sed -i s/a/b/ src/x.rs",
+            "sudo --preserve-env=HOME sed -i s/a/b/ src/x.rs",
+            "sudo --preserve-env tee src/x.rs",
+            "strace --tips=1 -o /dev/null sed -i s/a/b/ src/x.rs",
+            "script --timing=1 -c 'sed -i s/a/b/ src/x.rs' /dev/null",
+            "xargs --eof=X sed -i s/a/b/ src/x.rs",
+            "xargs --max-lines=1 tee src/x.rs",
+            "parallel --max-lines=1 sed -i s/a/b/ ::: src/x.rs",
+            // **값을 안 받아도 명령은 돌리는 이름** — `env --list-signal-handling` 이 그 줄이다.
+            "env --list-signal-handling sed -i s/a/b/ src/x.rs",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "정당한 줄의 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+        // **집은 것이 있으면 그대로 지난다.**
+        let got = guard_writes(&all, &cfg(), &here(), root, root, "env --block-signal=INT sed -i s/a/b/ src/x.rs");
+        assert_eq!(got, Decision::Pass, "집은 것이 있는데 막았다\n{got:?}");
     }
 
     /// **자리 인자 뒤에서는 옵션 읽기가 끝난다**(moai-hktu) — 자리 인자를 받는 래퍼(wrapper) 넷
