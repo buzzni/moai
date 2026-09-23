@@ -375,41 +375,187 @@ fn settled_groups<'a>(
     groups.into_iter().filter(|(_, g)| reads_done(&counted(g, &members, Some(shelf), &off))).map(|(at, _)| at).collect()
 }
 
-/// 계획에서 빠졌는가가 **줄마다 갈리는** id. 성한 저장소에서는 빈다 — 그때는 접은 지도가 곧
-/// 줄마다의 답이라, 줄을 든 쪽도 지도를 짚어 답할 수 있다([`crate::query::Where::deferred`]).
+/// 같은 id 의 줄들이 **서로 다른 판정을 받은** id — [`fold_by_id`] 가 접는 그 판정에 대해
+/// **접은 답이 줄마다의 답이 아닌** id 를 낸다.
 ///
-/// **되묻지 못하는 것은 묶음 줄이지 묶음이 선 id 가 아니다**(리뷰 moai-jk2u.hr4). 묶음이 계획
-/// 밖인가에는 읽은 칸이 걸리고([`settled_groups`]) 그 칸은 멤버를 id 로 세어 나온 값이라 줄로
-/// 되물을 수 없다 — 그래서 [`crate::query::Where::deferred`] 가 **묶음 줄에서만** 접은 지도로
-/// 간다. 한때 여기서 id 를 통째로 뺐는데, 그러면 묶음과 id 를 나눠 쓴 **일 줄**까지 제 답을
-/// 잃었다: 미룬 에픽에 든 일 줄이 같은 id 의 에픽 줄 때문에 `moai show --deferred` 에서
-/// 사라지고, 그러면서 `moai status` 의 `미뤄 둔 것` 은 그 줄을 세고 `moai ready` 는 안 내줘
-/// 한 줄이 어느 목록에도 안 서는 채로 셈에만 남았다.
-pub fn torn_ids<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeSet<&'a str> {
-    assert_eq!(all.len(), shelved.len(), "판정이 줄과 자리를 맞춰야 한다");
-    let mut seen: BTreeMap<&str, bool> = BTreeMap::new();
-    let mut torn = BTreeSet::new();
-    for (i, r) in all.iter().zip(shelved) {
+/// **가르는 몸도 하나다**([`fold_by_id`] 와 같은 까닭). 한때 이 자리에 계획 밖인가(`bool`)만
+/// 견주는 `torn_ids` 가 섰는데, 그것을 **어느 줄 밑인가**를 내는 [`Shelved`] 의 문으로 쓰면
+/// 미룬 에픽 둘에 하나씩 든 쌍둥이가 "둘 다 계획 밖" 이라 안 갈린 것으로 읽혀, 줄을 든 쪽이
+/// 접은 지도로 되돌아갔다(리뷰 moai-jk2u.jaq). 견주는 값이 판정 그 자체여야 한다.
+fn split_ids<V: PartialEq + Copy>(all: &[Issue], verdict: impl IntoIterator<Item = V>) -> BTreeSet<&str> {
+    let mut seen: BTreeMap<&str, V> = BTreeMap::new();
+    let mut split = BTreeSet::new();
+    for (i, v) in all.iter().zip(verdict) {
         let id = i.id.as_str();
-        if seen.insert(id, r.is_some()).is_some_and(|was| was != r.is_some()) {
-            torn.insert(id);
+        if seen.insert(id, v).is_some_and(|was| was != v) {
+            split.insert(id);
         }
     }
-    torn
+    split
 }
 
-/// **줄 하나**를 계획에서 뺀 가장 가까운 줄 — [`shelved_over`] 가 그 줄에 내리는 그 답이다.
-/// 지도가 든 답이 이 줄의 것이 아닐 때([`torn_ids`]) 줄을 든 쪽이 이것으로 되묻는다.
+/// **뺀 줄이** 줄마다 갈리는 id — [`Shelved`] 를 이미 잰 조각으로 짓는 쪽([`Soil`] 을 든
+/// `query::Where`, 탐색기의 `tui::Ground`)이 그 문을 제 손으로 세운다.
+pub fn split_roots<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeSet<&'a str> {
+    assert_eq!(all.len(), shelved.len(), "판정이 줄과 자리를 맞춰야 한다");
+    split_ids(all, shelved.iter().copied())
+}
+
+/// 계획에서 빠진 줄을 묻는 **두 답을 한 자리에** 든 그릇 ([`Kinds`] 와 같은 까닭).
 ///
-/// **묶음 줄에는 안 쓴다** — 묶음이 계획 밖인가에는 [`settled_groups`] 가 id 로 재는 읽은 칸이
-/// 걸려 여기서는 못 되묻는다. 부르는 쪽([`crate::query::Where::deferred`])이 그 줄을 가른다.
-pub fn shelved_at_line<'a>(
-    i: &'a Issue,
-    lines: &Lines<'a>,
-    epic_of: &Handing<'a>,
-    mile_of: &BTreeMap<&'a str, &'a str>,
-) -> Option<&'a str> {
-    (!closed_by_hand(i)).then(|| Shelf::new(lines, epic_of, mile_of).nearest(i)).flatten()
+/// 접은 지도([`fold_roots`])는 **id 밖에 없는 표면**의 답이고(막는 줄, `defer --undo` 가 대는
+/// 말), 줄마다의 판정([`shelved_over`])은 **줄을 든 표면**의 답이다. 탐색기의 `nav::Index` 가
+/// `deferred_root` 와 `shelved` 를 나란히 든 것과 같은 자다(moai-jk2u.hr4) — CLI 상세만 지도
+/// 하나로 둘을 다 하다가, 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다: 미룬 에픽에 든
+/// 앞줄이 `미룸` 표를 잃거나(뒷줄이 계획 안일 때), 계획 안인 앞줄이 뒷줄의 미룬 에픽을 제
+/// 것으로 달았다(moai-wre3, 리뷰 moai-jk2u.35i 15번). 뒤엣것은 시킨 그대로 친
+/// `moai defer <그 에픽> --undo` 가 그 줄을 안 되돌린다 — 애초에 미룬 적이 없는 줄이다.
+///
+/// **줄을 든 쪽이 뒷줄이라도 [`Shelved::root`] 로 묻는다.** `moai show <id>` 가 펼치는 줄은
+/// `Load::get` 이 고르는 뒷줄이라 접은 지도의 답과 지금은 같지만, 같다는 것이 우연이면 그
+/// 우연이 깨지는 날 이 화면만 조용히 틀린다.
+///
+/// 줄마다 답이 갈리는 id 가 없으면 판정을 아예 안 든다 — 성한 저장소에서는 접은 지도가 곧
+/// 줄마다의 답이라([`crate::query::Where::deferred`] 가 깐 전제와 같다) 들고 다닐 까닭이 없다.
+///
+/// **가르는 것은 계획 밖인가가 아니라 뺀 줄의 이름이다**([`split_ids`], 리뷰 moai-jk2u.jaq).
+/// `Some` 인가만 견주면 두 줄이 **서로 다른** 미룸 밑에서 함께 빠진 id 를 안 드는데, 그러면
+/// 미룬 에픽 둘에 하나씩 든 쌍둥이가 둘 다 뒷줄의 에픽을 달고, 제 줄을 미룬 뒷줄 곁의 앞줄은
+/// 표를 통째로 잃는다.
+pub struct Shelved<'a> {
+    /// id 로 접은 답 — 뒷줄이 이긴다([`fold_roots`]).
+    by_id: BTreeMap<&'a str, &'a str>,
+    /// **뺀 줄이** 줄마다 갈리는 id ([`split_ids`]). 성한 저장소에서는 빈다.
+    split: BTreeSet<&'a str>,
+    /// `split` 이 든 id 의 줄과 그 줄의 답 ([`shelved_over`]) — 그 id 만 담으므로 성한
+    /// 저장소에서는 비어 한 자리도 안 잡는다.
+    by_row: BTreeMap<&'a str, Vec<(Mark<'a>, Option<&'a str>)>>,
+}
+
+/// 같은 id 의 줄 둘을 **내용으로** 가르는 자 — 미룸의 답을 바꾸는 필드 전부.
+///
+/// **바늘([`off_rows`] 의 꼴)로 가르지 않는다.** 목록은 **베낀 줄**을 묻는다 — `cmd::show` 가
+/// 고른 줄을 `shown` 에 복사해 정렬하고 `view::table` 이 그것을 `query::Where` 에 들이민다.
+/// 바늘을 들면 그 표면이 말없이 접은 지도로 돌아가, 미룬 에픽에 든 앞줄이 `--deferred` 에서
+/// 통째로 사라진다(리뷰 moai-jk2u.jaq 를 받다가 드러났다). 내용으로 가르면 베낀 줄도 제 답을
+/// 찾는다.
+///
+/// **이 다섯이면 된다.** [`Shelf::walk`] 의 **첫 걸음**만 물은 줄 제 것을 보고, 그 걸음이 보는
+/// 것이 [`is_put_off`](`deferred_at`·`kind`·`status`)와 `epic`·`milestone` 이다 — 그 위는
+/// [`Lines`] 가 고른 진짜 줄에서 온다. 묶음의 읽은 칸을 가르는 [`counted`] 도 `kind` 와 id 와
+/// 이 걸음만 쓴다. 값이 같은 두 줄은 답도 같으니 겹쳐도 해가 없다.
+struct Mark<'a> {
+    kind: Kind,
+    done: bool,
+    deferred_at: Option<&'a str>,
+    epic: Option<&'a str>,
+    milestone: Option<&'a str>,
+}
+
+impl<'a> Mark<'a> {
+    fn of(i: &'a Issue) -> Mark<'a> {
+        Mark {
+            kind: i.kind,
+            done: i.status.is_done(),
+            deferred_at: i.deferred_at.as_deref(),
+            epic: i.epic.as_deref(),
+            milestone: i.milestone.as_deref(),
+        }
+    }
+
+    /// **빌린 줄과도 견준다** — 베낀 줄은 수명이 다르므로 `PartialEq` 로는 못 묻는다.
+    fn same(&self, i: &Issue) -> bool {
+        self.kind == i.kind
+            && self.done == i.status.is_done()
+            && self.deferred_at == i.deferred_at.as_deref()
+            && self.epic == i.epic.as_deref()
+            && self.milestone == i.milestone.as_deref()
+    }
+}
+
+impl<'a> Default for Shelved<'a> {
+    /// 값은 [`Shelved::no_twins`] 의 빈 것과 **같다.** 이름을 둘 두는 것은 `query::Where` 가
+    /// `Default` 로 서기 때문이고(그림 시험이 그 꼴로 짓는다), 그릇을 **고르는** 자리
+    /// (`view::Seen` 을 짓는 `cmd::show`·`cmd::edit`)는 까닭을 적게 하는 [`Shelved::no_twins`]
+    /// 를 쓴다 — 짧아서 골랐다는 말은 남지 않아야 한다(리뷰 moai-jk2u.jaq).
+    fn default() -> Shelved<'a> {
+        Shelved::no_twins(BTreeMap::new())
+    }
+}
+
+impl<'a> Shelved<'a> {
+    /// 저장소 전체를 재서 든다.
+    pub fn of(all: &'a [Issue]) -> Shelved<'a> {
+        let at_line = shelved(all);
+        let by_id = fold_roots(all, &at_line);
+        // **계획 밖인 줄이 없으면 갈릴 것도 없다.** [`split_ids`] 는 줄 수만큼 지도를 지어야
+        // 빈 것을 아는데, 훅이 도구 호출마다 `moai show` 를 지나고 미룬 줄 하나 없는 저장소가
+        // 보통이다([`deferred_roots_in`] 이 깐 문과 같은 까닭). 자리 하나 안 잡는 걸음으로
+        // 가른다 — 옛 `deferred_roots` 가 이 자리에서 빈 지도로 곧장 돌아서던 값이다.
+        if at_line.iter().all(Option::is_none) {
+            return Shelved { by_id, split: BTreeSet::new(), by_row: BTreeMap::new() };
+        }
+        let split = split_ids(all, at_line.iter().copied());
+        // 줄마다 갈리는 id 가 없으면 판정을 버린다 — 버린 뒤에도 `by_id` 가 곧 줄마다의 답이라
+        // [`Shelved::root`] 의 답은 같다. 갈리는 id 가 있으면 **그 id 의 줄만** 담는다.
+        let rows: Vec<(&Issue, Option<&str>)> =
+            all.iter().zip(&at_line).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
+        Shelved::kept(by_id, split, rows)
+    }
+
+    /// **이미 잰 조각을 빌려 든다** — 접은 지도와 갈리는 id 를 손에 든 쪽([`Soil`], 탐색기의
+    /// `tui::Ground`)이 그것을 다시 짓지 않게 받는다. `rows` 는 `split` 이 든 id 의 줄과 그
+    /// 줄의 답뿐이라, 성한 저장소에서는 비어 한 자리도 안 잡는다.
+    ///
+    pub fn kept(
+        by_id: BTreeMap<&'a str, &'a str>,
+        split: BTreeSet<&'a str>,
+        rows: impl IntoIterator<Item = (&'a Issue, Option<&'a str>)>,
+    ) -> Shelved<'a> {
+        let mut by_row: BTreeMap<&'a str, Vec<(Mark<'a>, Option<&'a str>)>> = BTreeMap::new();
+        for (i, r) in rows {
+            by_row.entry(i.id.as_str()).or_default().push((Mark::of(i), r));
+        }
+        Shelved { by_id, split, by_row }
+    }
+
+    /// **쌍둥이가 설 수 없다고 아는 자리** ([`Kinds::no_twins`] 와 같은 약속). 부르는 쪽이
+    /// 그 까닭을 곁에 적는다 — 지금 서는 자리는 `store::with_write` 가 중복 id 에 쓰기를
+    /// 통째로 물리는 쓰기 경로와, 읽은 것이 없는 화면을 짓는 `view::tests::bare_seen` 이다.
+    ///
+    /// **`Default` 를 두지 않는다**(리뷰 moai-jk2u.jaq). 값이 이것과 같으니 짧은 쪽이 베껴지는데,
+    /// 그것을 고른 자리는 까닭을 안 적어 — 상세를 그리는 셋째 표면이 그 길로 들면 미룸 표가
+    /// 통째로 사라지고 컴파일도 시험도 안 붉어진다.
+    pub fn no_twins(by_id: BTreeMap<&'a str, &'a str>) -> Shelved<'a> {
+        Shelved { by_id, split: BTreeSet::new(), by_row: BTreeMap::new() }
+    }
+
+    /// 그 **줄**을 계획에서 뺀 줄 — 계획에 있으면 `None`.
+    ///
+    /// **묶음 줄도 줄로 답한다**(2026-09-23 사용자 결정, 리뷰 moai-jk2u.jaq). 묶음이 계획
+    /// 밖인가에는 읽은 칸이 걸리는데([`settled_groups`]), 그 칸을 가르는 [`counted`] 는 이미
+    /// `shelf.every(g)` 로 **그 줄**에서 올라가므로 [`shelved_over`] 가 낸 판정이 줄마다
+    /// 참이다 — 접은 지도로 돌리면 미룬 릴리스에 든 앞줄이 뒷줄의 답을 도로 입는다.
+    /// 거르는 쪽([`crate::query::Where::deferred`])도 이 그릇을 들어 같은 답을 낸다: 한때
+    /// 그쪽만 `!is_group` 문으로 접은 지도에 갔고, 그래서 상세가 `미룸` 을 다는 묶음 줄을
+    /// `moai show --deferred` 가 안 내는 어긋남이 섰다.
+    ///
+    /// **베낀 줄도 제 답을 찾는다**([`Mark`]) — 목록은 고른 줄을 복사해 정렬한 뒤에 묻는다.
+    pub fn root(&self, i: &Issue) -> Option<&'a str> {
+        if !self.split.contains(i.id.as_str()) {
+            return self.by_id.get(i.id.as_str()).copied();
+        }
+        match self.by_row.get(i.id.as_str()).and_then(|rows| rows.iter().find(|(m, _)| m.same(i))) {
+            Some((_, r)) => *r,
+            // 잰 적 없는 줄(쓰기 경로가 방금 지은 줄, 시험이 손으로 짓는 줄)이 오면 접은 지도로
+            // 돌아간다. **없는 답을 지어내지 않는다** — 그 자리의 답은 전과 같고, 여기서 줄을
+            // 못 찾았다는 것은 이 그릇이 그 줄을 안 쟀다는 뜻일 뿐이다.
+            None => {
+                debug_assert!(!self.by_row.contains_key(i.id.as_str()), "{}: 잰 id 에 못 보던 줄이 왔다", i.id);
+                self.by_id.get(i.id.as_str()).copied()
+            }
+        }
+    }
 }
 
 /// 계획에서 빠진 줄 id → 그 줄을 **계획에 도로 넣으려면 풀어야 할 미룸 전부**, 가까운 것부터.
@@ -7112,9 +7258,9 @@ mod tests {
     /// 이 대조가 지킬 몫이다. 씨앗을 고정해 늘 같은 더미를 만든다.
     ///
     /// 재는 것은 하나다 — **줄마다의 답([`shelved`])과 그 줄을 내주거나 숨기거나 세는 자가
-    /// 같은 말을 하는가.** 묶음이 선 id 는 뺀다: 묶음이 계획 밖인가에는 읽은 칸이 걸리고
-    /// ([`settled_groups`]) 그 칸은 멤버를 id 로 세어 나온 값이라 줄로 되물을 수 없다
-    /// ([`torn_ids`], 2026-09-23 사용자 결정).
+    /// 같은 말을 하는가.** 묶음 줄도 잰다(2026-09-23 사용자 결정, moai-wre3): 묶음이 계획
+    /// 밖인가에 걸리는 읽은 칸도 [`counted`] 가 `shelf.every(g)` 로 **그 줄**에서 올라가
+    /// 재므로, 줄마다의 답이 묶음에도 참이다.
     #[test]
     fn every_surface_reads_the_same_line_on_random_piles() {
         let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
@@ -7158,13 +7304,11 @@ mod tests {
                 let at = issues.iter().position(|i| std::ptr::eq(i, r)).expect("`ready` 가 남의 줄을 냈다");
                 assert!(out[at].is_none(), "계획 밖인 줄을 내줬다 — {} / {issues:#?}", r.id);
             }
-            // 2. 목록·보드·탐색기가 숨기는 자 — 같은 줄에 같은 답이다. **묶음 줄만 건너뛴다**
-            //    (리뷰 moai-jk2u.hr4) — 한때 묶음이 선 id 를 통째로 건너뛰었는데, 그러면 그 id
-            //    를 묶음과 나눠 쓴 일 줄이 접은 지도로 답하는 것을 이 대조가 못 봤다.
+            // 2. 목록·보드·탐색기가 숨기는 자 — 같은 줄에 같은 답이다. **묶음 줄도 잰다**
+            //    (2026-09-23 사용자 결정, moai-wre3). 한때 묶음이 선 id 를 통째로 건너뛰었고
+            //    (그러면 그 id 를 묶음과 나눠 쓴 일 줄이 접은 지도로 답하는 것을 못 봤다),
+            //    그다음에는 묶음 줄만 건너뛰었다 — 그쪽이 접은 지도로 가던 동안의 자리다.
             for (at, i) in issues.iter().enumerate() {
-                if is_group(i) {
-                    continue;
-                }
                 assert_eq!(
                     wh.deferred(i),
                     i.is_deferred() || out[at].is_some(),
@@ -7174,8 +7318,8 @@ mod tests {
             }
             // 3. `moai status` 가 비추는 수를 내는 자가 **줄마다의 답을 짚는가.** 접은 지도를
             //    짚으면 여기서 갈린다. 이 수가 가리키는 `moai show --deferred` 와 글자째
-            //    견주지는 못한다 — 그쪽은 끝난 줄의 제 미룸도 내고(`Where::deferred` 의 첫 줄)
-            //    묶음 줄은 접은 지도로 답한다. 일 줄끼리의 대조는 위 2 가 한다.
+            //    견주지는 못한다 — 그쪽은 끝난 줄의 제 미룸도 낸다(`Where::deferred` 의 첫
+            //    걸음). 줄끼리의 대조는 위 2 가 한다.
             let said = status(&issues, &[], &cfg, "2026-10-01T00:00:00Z", utc());
             let count = said.notices.iter().find(|w| w.kind == "deferred").map_or(0, |w| w.count);
             assert_eq!(count, out.iter().filter(|r| r.is_some()).count(), "비추는 수가 줄마다의 답과 갈렸다");

@@ -477,7 +477,10 @@ fn one(
     // 두면 "자리를 물을 수 있는가" 를 재는 자가 둘이 된다.
     let places = report::places_in(&footing, &trees, &model::now()).remove(&issue.id);
     let seen = view::Seen {
-        roots: report::deferred_roots(all),
+        // **줄로 묻는 그릇으로 든다**(moai-wre3) — 접은 지도를 그대로 들던 때는 같은 id 의
+        // 자식 둘이 한 화면에서 뒷줄의 답을 함께 받았다. 여기 자식 줄에는 쌍둥이가 설 수
+        // 있다(바로 아래 `kinds` 가 같은 까닭으로 지도를 짓는다).
+        roots: report::Shelved::of(all),
         states: report::group_states_of(all, &repo.config, &near),
         // **펼친 줄과 그 자식만의 지도**(`group_states_of` 와 같은 자리, 같은 까닭) — 칸 지도가
         // 담는 줄이 그 둘이라, 그 칸을 누가 입는지를 가르는 데 저장소 전체의 종류 지도가 들 일이
@@ -527,8 +530,11 @@ fn one(
         }
         // **기계 출력도 같은 것을 말한다.** `deferred_at` 은 제 줄에 적힌 것뿐이라,
         // 미룬 에픽의 멤버를 `--json` 으로 펼친 쪽은 그것이 계획 밖인 줄 모른다.
-        if let Some(root) = seen.roots.get(issue.id.as_str()) {
-            extra.push(("shelved_by", serde_json::to_string(root).map_err(|e| Fail::new(e.to_string()))?));
+        // 이름이 `root` 가 아닌 것은 서른 줄 위의 `commit_home` 값과 갈리기 때문이다 — 둘 다
+        // `serde_json::to_string` 이 받으므로, 섞이면 커밋을 읽을 자리에 미룬 에픽 id 가 들어도
+        // 컴파일이 안 잡는다.
+        if let Some(by) = seen.roots.root(issue) {
+            extra.push(("shelved_by", serde_json::to_string(by).map_err(|e| Fail::new(e.to_string()))?));
         }
         if let Some(n) = twins {
             extra.push(("duplicate_lines", n.to_string()));

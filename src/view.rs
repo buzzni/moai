@@ -161,7 +161,8 @@ pub fn tag_parts(tags: &[String]) -> impl Iterator<Item = (&'static str, &str)> 
 /// **탐색기도 이 낱말을 쓴다.** 같은 사실을 두 표면이 다른 말로 하면, 나란히
 /// 놓고 보는 사람이 어느 쪽을 믿을지 정하게 된다.
 ///
-/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::deferred_roots`). **물려받은
+/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::Shelved::root` — **줄마다의 답**이라,
+/// 같은 id 의 앞줄이 뒷줄의 미룸을 입지 않는다). **물려받은
 /// 미룸도 여기서 말한다** — 미룬 에픽의 멤버를 펼쳤는데 표가 없으면, 이 낱말을
 /// 쓰는 두 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다. 제가 미룬 줄은
 /// 전처럼 제 시각으로 나이를 댄다.
@@ -1533,8 +1534,9 @@ pub fn ready(
 /// 안 선다. 짓는 자리는 둘뿐이라 도우미를 두지 않았다: `cmd::edit` 과 `cmd::show` 가 칸마다
 /// 제 값을 채우고, 읽은 것이 없는 화면을 짓는 것은 시험의 `tests::bare_seen` 하나다.
 pub struct Seen<'a> {
-    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::deferred_roots`).
-    pub roots: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::Shelved`). **줄로 묻는다** — 지도를 그대로
+    /// 들던 때는 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다(moai-wre3).
+    pub roots: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
     pub states: BTreeMap<&'a str, &'a str>,
     /// 가려진 줄을 가르는 지도 (`report::Kinds`, moai-7iyc.5fz). 위의 칸 지도는 id 로 짠 것이라,
@@ -1688,7 +1690,7 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now, seen.screen.lang) {
+    if let Some(d) = deferred_for(i, seen.roots.root(i), now, seen.screen.lang) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
     if let Some(n) = unread_column(i, col, cfg, seen.screen.lang) {
@@ -1784,7 +1786,7 @@ pub fn detail(
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now, seen.screen.lang) {
+        if let Some(d) = deferred_for(c, seen.roots.root(c), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
         let ccol = crate::report::column(&seen.kinds, c, &seen.states);
@@ -3267,7 +3269,8 @@ mod tests {
     fn bare_seen(lang: Lang) -> Seen<'static> {
         Seen {
             screen: Screen::new(lang),
-            roots: BTreeMap::new(),
+            // 읽은 것이 없는 화면이라 미룬 줄도 없다 — 곁의 `kinds` 와 같은 자리, 같은 꼴이다.
+            roots: crate::report::Shelved::no_twins(BTreeMap::new()),
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
