@@ -14817,6 +14817,61 @@ fn the_merge_driver_hands_a_real_clash_to_a_person() {
     assert!(merged.contains("이쪽 제목") && merged.contains("저쪽 제목"), "두 쪽을 다 안 보여 준다\n{merged}");
 }
 
+/// **남의 낡은 줄 하나가 모든 머지를 막지 않는다**(moai-h4jx, 2026-09-23 사용자 결정).
+///
+/// 오늘 규칙이 거절하는 값을 든 줄은 손으로 푼 충돌이 남기거나, 뒷날 기한을 넓힌 바이너리가
+/// 쓴다. 그런 줄이 하나라도 있으면 양쪽이 그 줄을 안 건드려도 `.moai/issues.jsonl` 이
+/// **머지마다** 충돌했고, 표식 안의 두 쪽이 글자째 같아 사람이 고를 것도 없이 그 값을 손으로
+/// 지우기 전에는 영영 되풀이됐다. `store::with_write` 는 그 줄을 그대로 둔 채 다른 줄을 쓰는데
+/// 드라이버만 파일 전체에 엄했던 자리다 — CLAUDE.md 의 *"그 엄함은 지금 쓰는 줄에 대한
+/// 것이지 파일 전체에 대한 것이 아니다"*.
+///
+/// 진짜 git 으로 그 판을 만든다. 보는 것은 넷이다 — 머지가 깨끗이 끝나는가, 두 고침이 다
+/// 남는가, **낡은 줄이 제 값을 그대로 들고 남는가**, 그리고 그 결과를 moai 가 읽고 다시 써도
+/// 바이트가 같은가.
+#[test]
+fn a_row_neither_side_touched_does_not_block_the_merge() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
+    let one = add(root, &["이쪽이 고칠 줄"]);
+    let two = add(root, &["저쪽이 고칠 줄"]);
+    // **도구로는 못 적는 값이다** — `--due` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    let hand = line_of(root, &old).replace('}', ",\"due_on\":\"2026-09-20\"}");
+    let doctored = issues(root).replace(&line_of(root, &old), &hand);
+    std::fs::write(root.join(".moai/issues.jsonl"), &doctored).unwrap();
+    // 한 번 되써서 키 차례를 표준형으로 맞춘다 — 이 시험이 잴 것은 차례가 아니라 그 값이
+    // 머지를 막는가다. 이 쓰기 자체가 **낡은 줄을 지나 보낸다**는 것도 여기서 선다.
+    ok(root, &["note", &one, "자리 맞춤"]);
+    let stale = line_of(root, &old);
+    assert!(stale.contains("\"due_on\":\"2026-09-20\""), "되쓰기가 낡은 값을 지웠다\n{stale}");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "안 건드린 줄이 머지를 막았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 낡은 줄은 **제 바이트 그대로** 남는다 — 이 머지가 쓰는 줄이 아니다.
+    assert!(merged.contains(&stale), "안 건드린 줄이 고쳐졌다\n{merged}");
+    // 병합한 파일을 moai 가 그대로 읽는다 — 읽고 그대로 쓰면 바이트가 같아야 한다.
+    ok(root, &["status"]);
+    let before = merged.clone();
+    ok(root, &["note", &two, "한 번 더 쓴다"]);
+    assert_eq!(issues(root), before, "병합 결과가 표준형이 아니라 다음 쓰기가 헛 diff 를 냈다");
+}
+
 /// **안 심은 클론에서는 지금까지와 똑같다.** `.gitattributes` 의 `merge=moai` 는 드라이버가
 /// 설정에 없으면 그냥 무시되고 git 의 기본 머지가 돈다 — 이 낱말을 심는 것이 안전한 까닭이다.
 #[test]
