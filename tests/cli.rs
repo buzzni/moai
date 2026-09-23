@@ -13065,8 +13065,11 @@ fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
     assert!(said.contains("등록 안 됨") && said.contains("PATH 에 없다"), "{said}");
 }
 
-/// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 그때 조용히
-/// 아무것도 안 하므로, 여기 말고는 알 길이 없다.
+/// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 **없을 때** 조용히 아무것도 안
+/// 하므로, 그 갈래는 여기 말고는 알 길이 없다.
+///
+/// **있는데 못 도는 갈래는 훅도 말한다**(moai-j4ie) — `skill::command` 가 126·127 에 알림 한
+/// 줄을 낸다. 그래도 **어느 파일인지는 여기만 댄다**: 그 알림은 경로를 안 싣는다.
 #[test]
 fn skill_status_notices_a_vanished_hook_binary() {
     let s = init("skillgone");
@@ -13079,7 +13082,8 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
 
-    // **파일은 있어도 실행할 수 없으면** 훅은 권한 오류를 삼키고 아무것도 안 한다.
+    // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 내되(moai-j4ie) 어느
+    // 파일인지는 안 댄다 — 그 자리를 대는 것이 이 줄이다.
     let noexec = c.home.path().join("noexec-moai");
     std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
     let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
@@ -14137,14 +14141,22 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("등록한 프로젝트가 없다"));
 }
 
-/// **시각을 안 그리는 명령은 tzdb 를 안 만진다**(moai-yz4j). `project ls` 가 쓰는 것은 `counts`
-/// 하나고 시간대가 닿는 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던
-/// 줄 하나를 stderr 에 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
+/// **`project ls` 는 tzdb 를 안 만진다**(moai-yz4j). 쓰는 것은 `counts` 하나고 시간대가 닿는
+/// 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던 줄 하나를 stderr 에
+/// 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
+///
+/// **이름을 `project ls` 로 좁혀 둔다 — "시각을 안 그리는 명령" 전부가 아니다**(리뷰 moai-j4ie
+/// 가 쟀다). `ready`·`prime`·`show`(목록)·`idea ls` 는 시간대로 한 글자도 안 달라지는데 여전히
+/// 이 줄을 낸다. 그쪽은 `view::Screen` 을 지어 `.at(ctx.zone())` 을 얹기 때문이고, 화면의
+/// 시간대를 실제로 읽는 자리는 `view::detail`·`view::history` 둘(곧 `show <id>`·`edit`)뿐이다.
+/// 그래서 같은 길로 못 고친다 — `view::every_command_screen_carries_the_zone` 이 `src/cmd/**`
+/// 를 훑어 `.at` 없는 `Screen::new` 을 거절하므로, 저쪽을 고치는 일은 그 잣대를 함께 옮기는
+/// 결정이다(그 결정은 아직 없다). `project ls` 가 화면을 아예 안 지어 여기만 먼저 닫혔다.
 ///
 /// **대조를 함께 잰다** — 같은 환경의 `moai status` 는 기한을 그리므로 그 줄이 서야 한다.
 /// 없으면 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다.
 #[test]
-fn a_command_that_draws_no_time_never_reaches_for_the_timezone() {
+fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
     let home = Scratch::new("project-tz");
     let config = home.path().join("config.toml");
     let repo = init("project-tz-repo");

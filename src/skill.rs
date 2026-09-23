@@ -703,7 +703,9 @@ mod tests {
             for g in groups.as_array().unwrap() {
                 for h in g["hooks"].as_array().unwrap() {
                     let cmd = h["command"].as_str().unwrap();
-                    assert!(cmd.contains("exit 0"), "가드가 없다 — {cmd}");
+                    // **`|| exit 0` 으로 잰다 — 맨 `exit 0` 이 아니다**(리뷰 moai-j4ie). 줄 끝의
+                    // 무조건 `exit 0` 이 선 뒤로는 맨 낱말로 재면 가드를 통째로 지워도 푸르다.
+                    assert!(cmd.contains("|| exit 0"), "없을 때 조용히 빠지는 가드가 없다 — {cmd}");
                     // 경로가 따옴표에 싸이므로 `moai" hook ...` 모양이다.
                     assert!(cmd.contains("/nowhere/moai"), "엉뚱한 것을 부른다 — {cmd}");
                     assert!(cmd.contains("command -v"), "있는지부터 안 본다 — {cmd}");
