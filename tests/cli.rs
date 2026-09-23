@@ -1560,16 +1560,36 @@ fn ids_in(json: &str) -> Vec<String> {
     json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
 }
 
-/// 목록 `--json` 에서 **그 id 로 선 줄 한 조각** — 다음 줄이 열리기 전까지. 목록 전체에 대고
+/// `--json` 에서 **그 id 로 선 줄 한 조각** — 그 객체가 닫히는 곳까지. 목록 전체에 대고
 /// 키를 찾으면 옆줄의 값이 이 줄의 것으로 읽힌다.
+///
+/// **여는 괄호를 세어 끊는다.** "다음 줄이 열리기 전까지" 로 끊던 때는 마지막 줄이 글
+/// 끝까지 늘어나, 그 객체를 감싼 쪽이 곁들인 키까지 이 줄의 것으로 읽혔다 — `edit --json`
+/// 은 줄을 편 뒤 `inherited_epic` 을 다는데 그 안의 첫 키가 `epic` 이다(리뷰).
 fn row_in<'a>(json: &'a str, id: &str) -> &'a str {
     let open = format!("{{\"id\":\"{id}\"");
     let at = json.find(&open).unwrap_or_else(|| panic!("{id} 이 안 섰다 — {json}"));
-    let rest = &json[at + 1..];
-    match rest.find(r#"{"id":""#) {
-        Some(end) => &rest[..end],
-        None => rest,
+    let rest = &json[at..];
+    // 따옴표 안의 괄호는 안 센다 — 제목이나 본문에 `{`·`}` 가 들면 거기서 끊긴다.
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in rest.char_indices() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') => quoted = false,
+            (true, false, _) => {}
+            (false, _, '"') => quoted = true,
+            (false, _, '{') => depth += 1,
+            (false, _, '}') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[..=i];
+                }
+            }
+            (false, _, _) => {}
+        }
     }
+    panic!("{id} 의 줄이 안 닫혔다 — {json}");
 }
 
 /// `text` 안에 그 id 로 선 줄이 몇인가. **id 는 제 자식 id 의 앞부분이기도 하다** —
@@ -8432,6 +8452,16 @@ fn every_machine_surface_names_the_epic_a_row_stands_in() {
         assert!(row.contains(&stands), "{what} 가 계획 멤버의 소속을 안 냈다 — {row}");
         assert!(!row.contains(r#""epic":"#), "{what} 가 적은 적 없는 소속을 `epic` 에 실었다 — {row}");
     }
+
+    // 5. **`-e none` 의 신호는 그대로다.** `derived_epic` 이 선 뒤에도 `inherited_epic` 은
+    // 제 뜻("끊으라고 했는데 못 끊었다")으로 남아야 한다 — 두 키가 한 줄에 같이 선다.
+    // 위 고리의 `epic` 검사를 여기 그대로 대면 `inherited_epic` 안에 든 `epic` 에 걸린다.
+    let cut = ok(s.path(), &["edit", &member, "-e", "none", "--json"]);
+    assert!(cut.contains(&stands), "`-e none` 뒤에 소속이 사라졌다 — {cut}");
+    assert!(
+        cut.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{epic}""#)),
+        "못 끊었다는 말이 안 섰다 — {cut}"
+    );
 }
 
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
