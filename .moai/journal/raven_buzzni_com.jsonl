@@ -1074,3 +1074,10 @@
 {"ts":"2026-09-23T01:31:38Z","id":"moai-exh7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자식이 된 멤버의 소속을 한 자리에만 적는다"}
 {"ts":"2026-09-23T01:31:38Z","id":"moai-vndz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"상세·트리·보드가 자식 멤버와 옛 평평한 멤버를 나란히 낸다"}
 {"ts":"2026-09-23T01:31:38Z","id":"moai-sfza","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 줄의 id 는 안 바꾼다는 것을 시험으로 못박는다"}
+{"ts":"2026-09-23T01:33:41Z","id":"moai-s8dp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"값을 붙여 쓴 elsewhere·stops 스위치를 진짜 프로그램은 거절한다"}
+{"ts":"2026-09-23T01:33:42Z","id":"moai-694g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"줄여 쓴 긴 이름을 saw 와 prog 가 못 알아본다"}
+{"ts":"2026-09-23T01:33:44Z","id":"moai-j9i9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"runuser 의 -u 와 -c 는 함께 못 서는데 훅이 그 집기를 센다"}
+{"ts":"2026-09-23T01:33:45Z","id":"moai-2m3l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"su·runuser 는 명령 자리 뒤의 옵션도 읽는데 훅은 거기서 끊는다"}
+{"ts":"2026-09-23T01:33:46Z","id":"moai-fg47","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"exec_of 가 본보기로 선 술어 이름을 술어로 읽는다"}
+{"ts":"2026-09-23T01:33:47Z","id":"moai-xk0q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"find 의 시작 자리가 이 저장소 밑의 절대 경로면 자리를 잃는다"}
+{"ts":"2026-09-23T01:34:19Z","id":"moai-5vyj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Wrapper::whole 이 래퍼 이름에 걸려 있어 su 가 다른 기계에서는 틀린다"}
