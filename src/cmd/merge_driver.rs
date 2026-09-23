@@ -296,30 +296,41 @@ fn marked_bytes(ours: Option<&[u8]>, theirs: Option<&[u8]>, marker: usize) -> Ve
 /// 내용이 같을 때만 지나간다: 랜덤 id 가 부딪친 것이라면 두 이슈는 서로 다른 일이고,
 /// 하나를 골라 주면 나머지 하나가 통째로 사라진다.
 ///
-/// **답이 한쪽 가지에 이미 글자째 서 있으면 그 원문을 그대로 낸다**([`take`], moai-0k2e,
-/// 2026-09-23 사용자 결정). 양쪽이 안 건드린 줄, 한쪽만 건드린 줄, 둘이 똑같이 고친 줄이
-/// 그것이다 — 이번 머지가 짓는 줄이 아니라 이미 커밋된 줄이라, 검사도 표준형 맞추기도
-/// 여기서 할 일이 아니다. 검사가 붙는 곳은 [`fields`] 가 필드마다 골라 **새로 조립한**
-/// 줄 하나뿐이고([`issue`]), 그것이 `issue` 의 주석이 대는 유일한 까닭이다.
+/// **답이 한쪽 가지에 이미 서 있으면 검사를 건너뛴다**([`take`], moai-0k2e, 2026-09-23
+/// 사용자 결정 — 그 결정과 뒤에 뒤집힌 절반이 `moai show moai-0k2e` 의 이력에 있다). 양쪽이 안
+/// 건드린 줄, 한쪽만 건드린 줄, 둘이 똑같이 고친 줄이 그것이다 — 이번 머지가 고른 값이
+/// 아니라 이미 커밋된 값이라, `validate_fields` 가 잴 것이 없다. 검사가 붙는 곳은
+/// [`fields`] 가 필드마다 골라 **새로 조립한** 줄 하나뿐이고([`issue`]), 그것이 `issue` 의
+/// 주석이 대는 유일한 까닭이다.
 ///
 /// 이 갈래가 없던 동안, 오늘 규칙이 거절하는 값을 든 줄이 하나라도 있으면 양쪽이 그 줄을
 /// 안 건드려도 `.moai/issues.jsonl` 이 **머지마다** 충돌했다 — 표식 안의 두 쪽이 글자째
 /// 같아 사람이 고를 것도 없고, 그 값을 손으로 지우기 전에는 영영 되풀이됐다. CLAUDE.md 의
 /// *"그 엄함은 지금 쓰는 줄에 대한 것이지 파일 전체에 대한 것이 아니다"* 가 [`keyed`] 의
-/// 못 읽는 줄에만 서고 읽히는 줄에는 안 서 있던 자리다. `store::with_write` 가 남의 낡은
-/// 줄을 그대로 둔 채 다른 줄을 쓰는 것과 이제 같은 결이다.
+/// 못 읽는 줄에만 서고 읽히는 줄에는 안 서 있던 자리다.
+///
+/// **건너뛰는 것은 검사뿐이고 표준형 맞추기는 그대로다**([`shaped`], 리뷰 moai-85o3.p4w).
+/// 처음 고친 판은 원문 바이트를 그대로 냈는데, 그 절반은 `max` 리뷰의 실측을 받아 같은 날
+/// 사용자가 뒤집었다.
+/// `store::with_write` 가 서 있는 자리가 바로 거기다 — 그쪽은 읽은 줄을 **모두**
+/// `Issue::normalize` 하고 검사만 이번에 바뀐 줄에 건다. 꼴까지 건너뛴 판을 재 보니 넷이
+/// 무너졌다: 접히지 않은 `"#Bug"` 가 `moai show -t bug` 에서 빠지고, `"started_at":""` 이
+/// `move_to` 에 "이미 적혔다" 로 읽혀 다음 `mv` 가 시작을 영영 안 적고(moai-38mh),
+/// `"due_on":""` 이 기한 경고를 영영 조용하게 두고(moai-tfcp), 겹친 키를 든 줄이
+/// `store::parse_issues`(줄을 통째로 `Issue` 로 읽는다)에 못 읽는 줄로 가 `moai status` 가
+/// 비영으로 끝난다 — [`row`] 는 `Value` 를 거쳐 읽어 겹친 키를 마지막 것으로 접으므로 둘의
+/// 문턱이 다르다. 그리고 그렇게 지나간 값은 **다음 머지에서 새 충돌을 짓는다**:
+/// 표준형이 아닌 값은 `Value` 로도 다른 값이라 [`fields`] 까지 떨어지는데, `priority` 처럼
+/// [`settle_field`] 가 모르는 필드면 그 줄이 통째로 사람에게 간다.
 fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Settled {
     // **원문을 그대로 든다**([`Row`]). 매개변수를 안 받는 것은 여덟 자리 중 한 곳에서
     // 두 쪽을 뒤집어 넘기는 실수가 컴파일되지 않게 하려는 것이다.
     let clash = || Settled::Clash { ours: a.map(|r| r.raw.to_string()), theirs: b.map(|r| r.raw.to_string()) };
-    // **이미 선 줄은 그 바이트 그대로**. 다시 직렬화하면 모르는 필드의 차례까지 이 머지가
-    // 고쳐 쓴 것이 되고, 안 건드린 줄에 그럴 까닭이 없다.
-    let take = |r: &Row<'_>| Settled::Line(Some(r.raw.to_string()));
-    // **이 머지가 새로 지은 줄만 검사하고 표준형으로 맞춘다**([`issue`]).
-    let built = |v: &Value| {
-        issue(v)
-            .map_or_else(clash, |i| Settled::Line(Some(serde_json::to_string(&i).expect("Issue 는 언제나 직렬화된다"))))
-    };
+    let render = |i: &Issue| Settled::Line(Some(serde_json::to_string(i).expect("Issue 는 언제나 직렬화된다")));
+    // **이미 선 줄은 검사만 건너뛴다**([`shaped`]). 꼴은 `store` 가 쓰는 것과 같은 표준형이다.
+    let take = |r: &Row<'_>| render(&shaped(&r.v).expect("`row` 가 이미 읽어 낸 줄이다"));
+    // **이 머지가 새로 지은 줄은 검사까지 지난다**([`issue`]).
+    let built = |v: &Value| issue(v).map_or_else(clash, |i| render(&i));
     // 값으로 견준다 — 같은 뜻의 줄이 바이트로 다를 수 있다(키 차례·모르는 필드).
     let same = |p: Option<&Row<'_>>, q: &Row<'_>| p.is_some_and(|p| p.v == q.v);
     match (o, a, b) {
@@ -330,7 +341,7 @@ fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Sett
         // 지운 쪽과 고친 쪽이 맞선다.
         (Some(_), _, None) | (Some(_), None, _) => clash(),
         (o, Some(x), Some(y)) => {
-            // 둘이 같거나 저쪽이 안 건드렸으면 이쪽 원문이 답이다.
+            // 둘이 같거나 저쪽이 안 건드렸으면 이쪽 값이 답이다.
             if x.v == y.v || same(o, y) {
                 return take(x);
             }
@@ -344,14 +355,26 @@ fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Sett
     }
 }
 
+/// 이슈로 읽고 **표준형으로 맞추기만 한다** — 검사는 [`issue`] 가 얹는다.
+///
+/// 이 갈래를 [`settle`] 의 모든 답이 지난다. 맞추지 않으면 병합 직후의 파일이 다음 쓰기에서
+/// 통째로 헛 diff 를 낸다(멱등성). `store::with_write` 도 읽은 줄을 모두 `normalize` 한 뒤
+/// 되쓰므로, 여기서 같은 자를 대야 병합 결과가 그 쓰기의 고정점이 된다 — 무엇이 무너지는지는
+/// [`settle`] 의 주석에 넷으로 적어 두었다.
+///
+/// **못 읽는 줄은 여기 안 온다**([`keyed`] 가 `opaque` 로 들고 간다). 그래서 `None` 은
+/// [`settle`] 에서 일어나지 않고, `fields` 가 조립한 줄에서만 뜻이 선다.
+fn shaped(v: &Value) -> Option<Issue> {
+    let mut i = Issue::deserialize(v).ok()?;
+    i.normalize();
+    Some(i)
+}
+
 /// **[`fields`] 가 새로 조립한 줄에만 부른다**([`settle`]). 한쪽 가지에 이미 선 줄은
-/// 이 머지가 쓰는 줄이 아니라 거기를 안 지난다 — 그 갈래가 이 함수의 범위다.
+/// 이 머지가 고른 값이 아니라 [`shaped`] 까지만 지난다 — 그 갈래가 이 함수의 범위다.
 ///
 /// 쓰기 전에 이슈로 한 번 읽는다 — **읽기는 관대하고 쓰기는 엄하다.** 여기서 안 읽히는
 /// 줄을 내보내면 그 줄은 다음 `moai` 가 못 읽는 줄로 만나고, 병합이 그것을 만든 것이 된다.
-///
-/// 표준형으로 맞춘 뒤 돌려준다. 맞추지 않으면 병합 직후의 파일이 다음 쓰기에서 통째로
-/// 헛 diff 를 낸다(멱등성). 이 줄은 어느 쪽 파일에도 없던 줄이라 맞출 사람이 여기뿐이다.
 ///
 /// **검사도 `store::with_write` 와 같은 것을 건다**(`Issue::validate_fields`). 필드마다
 /// 따로 고른 값들이 줄 하나로 서면서 도구가 절대 안 쓰는 짝이 될 수 있다 — 한쪽이
@@ -365,8 +388,7 @@ fn settle(o: Option<&Row<'_>>, a: Option<&Row<'_>>, b: Option<&Row<'_>>) -> Sett
 /// 안 지난다(`cmd/mod.rs`). 설정으로 칸을 고친 저장소의 옛 줄을 병합이 막지 않는 쪽이
 /// 맞기도 하다 — CLAUDE.md 의 "엄함은 지금 쓰는 줄에 대한 것" 과 같은 자리다.
 fn issue(v: &Value) -> Option<Issue> {
-    let mut i = Issue::deserialize(v).ok()?;
-    i.normalize();
+    let i = shaped(v)?;
     i.validate_fields().ok()?;
     Some(i)
 }
@@ -1532,7 +1554,8 @@ mod tests {
 
     /// 오늘 규칙이 거절하는 값을 든 줄. **기한은 마일스톤 줄에만 선다**(`validate_fields`)
     /// — 손으로 푼 충돌이 남겼거나, 뒷날 기한을 넓힌 바이너리가 쓴 줄이 이 꼴로 온다.
-    /// 키 차례도 일부러 표준형이 아니다.
+    /// 키 차례도 일부러 표준형이 아니다 — 지나간 줄을 [`shaped`] 가 맞추는지까지 재려면
+    /// 들어가는 줄이 표준형과 갈려 있어야 한다.
     fn stale(id: &str) -> String {
         format!(
             "{{\"title\":\"{id} 제목\",\"id\":\"{id}\",\"status\":\"todo\",\"due_on\":\"2026-09-20\",\
@@ -1540,10 +1563,9 @@ mod tests {
         )
     }
 
-    /// **양쪽이 안 건드린 줄은 이 머지가 쓰는 줄이 아니다**(moai-0k2e, 2026-09-23 사용자
-    /// 결정). 재던 동안에는 그런 줄 하나가 `.moai/issues.jsonl` 을 **머지마다** 충돌로
-    /// 만들었고, 표식 안의 두 쪽이 글자째 같아 사람이 고를 것도 없이 그 값을 손으로
-    /// 지우기 전에는 영영 되풀이됐다.
+    /// **양쪽이 안 건드린 줄은 검사하지 않는다**([`settle`], moai-0k2e). 앞 판은 어느
+    /// 갈래에서나 `validate_fields` 를 걸어, 그런 줄 하나가 `.moai/issues.jsonl` 을
+    /// **머지마다** 충돌로 만들었다.
     #[test]
     fn a_row_neither_side_touched_is_left_alone() {
         let old = stale("argos-0001");
@@ -1552,24 +1574,56 @@ mod tests {
         let b = format!("{old}\n{}\n", line("argos-0002", ""));
         let (text, clashes) = merge(&o, &a, &b);
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
-        // **바이트 그대로다** — 다시 직렬화하면 키 차례까지 이 머지가 고쳐 쓴 것이 된다.
-        assert!(text.contains(&old), "안 건드린 줄이 제 바이트로 안 섰다\n{text}");
+        // 낡은 **값**은 그대로 지나간다 — 건너뛰는 것은 검사뿐이다.
+        assert!(text.contains("\"due_on\":\"2026-09-20\""), "낡은 값이 사라졌다\n{text}");
         assert!(text.contains("\"priority\":1"), "이쪽 고침이 사라졌다\n{text}");
     }
 
-    /// 한쪽만 건드린 줄도 **그 쪽 원문 그대로**다. 오늘 규칙에 없는 값을 든 줄을 옛
+    /// 한쪽만 건드린 줄도 **그 쪽 값 그대로**다. 오늘 규칙에 없는 값을 든 줄을 옛
     /// 바이너리가 그대로 옮겨 적을 수 있고, 그 줄을 고른 것은 이 머지가 아니라 그 가지다.
+    ///
+    /// **두 방향이 한 답을 낸다**(리뷰 moai-85o3.p4w). 원문을 그대로 내던 판은 `x.v == y.v`
+    /// 이면서 바이트가 다를 때 늘 이쪽 것을 골라, `git merge side` 와 `git merge main` 이
+    /// 아무도 안 건드린 줄에서 바이트가 다른 파일을 냈다.
     #[test]
-    fn a_row_only_one_side_touched_keeps_its_own_bytes() {
+    fn a_row_only_one_side_touched_keeps_that_sides_value() {
         let o = format!("{}\n", stale("argos-0001"));
         let a = o.replace("\"status\":\"todo\"", "\"status\":\"in_progress\"");
+        let (ours, clashes) = merge(&o, &a, &o);
+        assert!(clashes.is_empty(), "{clashes:?}\n{ours}");
+        let (theirs, clashes) = merge(&o, &o, &a);
+        assert!(clashes.is_empty(), "{clashes:?}\n{theirs}");
+        assert_eq!(ours, theirs, "머지 방향이 답을 가른다");
+        assert!(ours.contains("\"status\":\"in_progress\""), "고친 쪽 값이 안 섰다\n{ours}");
+        assert!(ours.contains("\"due_on\":\"2026-09-20\""), "낡은 값이 사라졌다\n{ours}");
+    }
+
+    /// **지나 보내는 줄도 표준형으로 맞춘다**([`shaped`], 리뷰 moai-85o3.p4w). 건너뛰는 것은
+    /// 검사뿐이고, 그 자리가 `store::with_write` 가 선 자리다 — 그쪽은 읽은 줄을 모두
+    /// `normalize` 하고 검사만 이번에 바뀐 줄에 건다.
+    ///
+    /// 꼴까지 건너뛴 판에서 넷이 무너졌다. 접히지 않은 `"#Bug"` 는 `moai show -t bug` 에서
+    /// 빠지고(`query` 는 찾는 쪽만 접는다), `"started_at":""` 은 `move_to` 에 "이미 적혔다"
+    /// 로 읽혀 다음 `mv` 가 시작을 영영 안 적고(moai-38mh), `"priority":2` 는 다음 쓰기가
+    /// 걷어 아무도 안 건드린 줄에 헛 diff 를 내며, 겹친 키를 든 줄은 `store::parse_issues`
+    /// 에 못 읽는 줄로 가 `moai status` 를 비영으로 끝낸다 — [`row`] 는 `Value` 를 거쳐
+    /// 읽어 겹친 키를 마지막 것으로 접으므로 둘의 문턱이 다르다.
+    #[test]
+    fn a_row_that_passes_through_is_still_shaped() {
+        let junk = format!(
+            "{{\"id\":\"argos-0001\",\"title\":\"첫 제목\",\"title\":\"나중 제목\",\"status\":\"todo\",\
+             \"tags\":[\"#Bug\",\"Bug\"],\"priority\":2,\"started_at\":\"\",\
+             \"created_at\":\"{T0}\",\"updated_at\":\"{T0}\",\"status_since\":\"{T0}\"}}"
+        );
+        let o = format!("{junk}\n{}\n", line("argos-0002", ""));
+        let a = format!("{junk}\n{}\n", line("argos-0002", ",\"priority\":1"));
         let (text, clashes) = merge(&o, &a, &o);
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
-        assert_eq!(text, a, "고친 쪽 원문이 안 섰다");
-        // 저쪽이 고쳤을 때도 같다.
-        let (text, clashes) = merge(&o, &o, &a);
-        assert!(clashes.is_empty(), "{clashes:?}\n{text}");
-        assert_eq!(text, a, "저쪽 원문이 안 섰다");
+        let row = text.lines().next().expect("줄이 없다");
+        assert_eq!(row.matches("\"title\":").count(), 1, "겹친 키가 그대로 섰다\n{row}");
+        assert!(row.contains("\"tags\":[\"bug\"]"), "태그를 안 접었다\n{row}");
+        assert!(!row.contains("\"priority\""), "기본값을 안 걷었다\n{row}");
+        assert!(!row.contains("\"started_at\""), "빈 시각을 안 걷었다\n{row}");
     }
 
     /// **경계는 여기다** — 둘이 이 줄을 서로 다른 필드로 고치면 그 줄은 어느 가지에도

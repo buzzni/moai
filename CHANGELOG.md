@@ -120,11 +120,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   a value today's rules reject — left by a hand-resolved conflict, or written by a
   binary of another version — put conflict markers around itself on every merge
   from then on, with the two sides inside them byte-identical and nothing for a
-  person to choose. A row that already stands on one branch now comes through as
-  its own bytes; what the merge itself composes field by field is still judged, so
-  a line the tool would refuse is still handed to a person. This is the same rule
-  the rest of the tool keeps: strictness is about the row being written now, not
-  about the whole file.
+  person to choose. A row whose value already stands on one branch now comes
+  through unjudged; what the merge itself composes field by field is still judged,
+  so a line the tool would refuse is still handed to a person. This is the same
+  rule the rest of the tool keeps: strictness is about the row being written now,
+  not about the whole file. What is skipped is the check alone — every row the
+  merge writes is still put in the shape the tool itself writes, so a merge never
+  leaves behind an unfolded tag, an empty timestamp or a duplicated JSON key for
+  the next command to trip over.
 
 ## [0.1.1] - 2026-09-22
 
