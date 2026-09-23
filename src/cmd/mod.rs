@@ -136,11 +136,22 @@ pub fn clearable(v: &str) -> Option<String> {
 /// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 하고,
 /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다.
 ///
-/// **다만 "내가 돌릴 수 있는가" 는 아니다.** `mode & 0o111` 은 "아무나 돌릴 수 있는가" 고,
-/// 남의 소유 `0o700` 이나 `noexec` 에 얹힌 파일은 여기를 지나는데 껍데기는 126 을 낸다
-/// (`merge_driver::probe` 가 적어 둔 그대로다). 표준 라이브러리에 `access(X_OK)` 가 없어 실제로
-/// 재려면 불러 봐야 하고, 그것이 값어치 있는 자리(`.git/config` 에 심는 값)는
-/// [`merge_driver`](crate::cmd::merge_driver) 가 `--help` 를 불러 따로 잰다.
+/// **"내가 돌릴 수 있는가" 로 잰다**(moai-dhx9, 2026-09-23 사용자 결정). 한때 `mode & 0o111` 만
+/// 보았는데 그것은 "아무나 돌릴 수 있는가" 라, 남의 소유 `0o700` 이나 `noexec` 에 얹힌 파일이
+/// 여기를 지나는데 껍데기는 126 을 냈다(`merge_driver::probe` 가 적어 둔 그대로다). 그 값이 제일
+/// 비싼 자리가 `skill` 이다 — 훅은 그 126 을 `|| exit 0` 으로 삼켜 규칙 넷이 조용히 안 서는데,
+/// `moai skill` 은 "깔렸다" 고 말한다. 화면과 사실이 갈리는 자리다.
+///
+/// 그래서 `access(X_OK)` 를 부른다. 표준 라이브러리에 없어 `libc` 를 직접 의존으로 들였고, 든
+/// 값은 `Cargo.toml` 의 그 줄에 적어 두었다 — **크레이트는 0개가 늘었다.**
+///
+/// **`access` 는 실제 uid·gid 로 잰다** — 유효 uid 가 다른 setuid 프로그램이면 답이 갈린다.
+/// moai 는 setuid 로 안 돌고, 그렇게 도는 날에는 여기가 아니라 그 결정이 먼저 틀린 것이다.
+///
+/// **디렉터리는 위의 `is_file` 이 뺀다** — `access(X_OK)` 는 들어갈 수 있는 디렉터리에도 0 을
+/// 내므로, 그 문을 걷으면 `PATH` 앞자리의 `moai` 라는 디렉터리를 셋이 다 골라 든다.
+///
+/// **못 재는 자리는 "안 돈다" 로 답한다** — 경로에 NUL 이 든 것은 파일 이름이 될 수 없다.
 ///
 /// **세 벌이던 것을 모았다**(moai-p3kb, 리뷰가 셋째를 짚었다) — `skill` 의 `runnable`,
 /// `tui` 의 `executable`, `merge_driver` 의 `runnable`. 갈리면 이식성 고침 하나가 고친 사람이
@@ -156,12 +167,22 @@ pub fn clearable(v: &str) -> Option<String> {
 ///   뺀다** — POSIX 가 그 자리를 "지금 자리" 로 읽고, 껍데기도 그렇게 찾는다. `$VISUAL`·`$EDITOR`
 ///   가 둘 다 비었을 때 띄우며 한 번, 많아야 이름 둘이라 `sh` 를 띄우는 값이 아깝다
 /// - `merge_driver` 는 같은 훑기에 **빈 자리를 뺀다.** 거기서 고른 값은 `.git/config` 에 앉아
-///   **딴 자리에서** 풀리므로, 껍데기가 지금 그 자리를 쓰는 것과 심어 둘 값으로 쓰는 것이 다르다
+///   **딴 자리에서** 풀리므로, 껍데기가 지금 그 자리를 쓰는 것과 심어 둘 값으로 쓰는 것이 다르다.
+///   그 위에 `--help` 를 실제로 불러 한 겹 더 잰다(`probe`) — 심는 값은 딴 때에 풀리니, 지금
+///   돌릴 수 있는가만으로는 모자란다
 pub fn runnable(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        use std::os::unix::ffi::OsStrExt as _;
+        if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+            return false;
+        }
+        let Ok(spelt) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `spelt` 는 이 줄이 끝날 때까지 살아 있는 널로 끝나는 버퍼고, `access` 는 그것을
+        // 읽기만 한다.
+        unsafe { libc::access(spelt.as_ptr(), libc::X_OK) == 0 }
     }
     #[cfg(not(unix))]
     {
@@ -818,6 +839,27 @@ mod tests {
         // 디렉터리는 실행 비트가 서 있어도 돌릴 것이 아니고, 없는 자리도 아니다.
         assert!(!runnable(s.path()), "디렉터리를 돌린다고 한다");
         assert!(!runnable(&s.join("없다")), "없는 자리를 돈다고 한다");
+    }
+
+    /// **"아무나 돌릴 수 있는가" 와 "내가 돌릴 수 있는가" 는 다르다**(moai-dhx9). 임자만 실행 비트가
+    /// 빠진 파일(`0o011`)은 `mode & 0o111` 로는 돈다고 읽히는데, 임자가 부르면 껍데기가 126 을 낸다 —
+    /// 남의 소유 `0o700`·`noexec` 마운트와 같은 갈래고, 사람 하나로 지을 수 있는 꼴이 이것이다.
+    ///
+    /// **root 로 돌 때는 안 잰다** — `access(X_OK)` 는 root 에게 실행 비트가 하나라도 서 있으면 0 을
+    /// 내므로 그 자리에는 이 가름이 아예 없다. 재지 못하는 것을 실패로 세지 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_others_may_run_but_i_may_not_does_not_run() {
+        use std::os::unix::fs::PermissionsExt as _;
+        // SAFETY: `geteuid` 는 인자가 없고 아무것도 안 바꾼다.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let s = crate::scratch::Scratch::new("cmd-runnable-mine");
+        let exe = s.join("exe");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o011)).unwrap();
+        assert!(!runnable(&exe), "임자가 못 돌리는 파일을 돈다고 한다");
     }
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {
