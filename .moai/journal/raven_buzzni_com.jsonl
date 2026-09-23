@@ -1318,3 +1318,7 @@
 {"ts":"2026-09-23T06:15:34Z","id":"moai-2m94","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"같은 id 를 든 줄 둘은 그 id 를 통째로 사람에게 넘긴다. 리뷰 6·7·13번의 뿌리다"}
 {"ts":"2026-09-23T06:15:36Z","id":"moai-1a55.8zc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열둘을 반영하고 6·7·13번은 새 멤버 moai-2m94 로 고쳤다. 넘긴 것은 moai-19gq(안, v0.1.2)와 moai-y1vb(밖)이다"}
 {"ts":"2026-09-23T06:15:51Z","id":"moai-1a55","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 닫혔다. develop 머지는 1eb16a2 이고, 리뷰가 낸 6·7·13번은 새 멤버 moai-2m94 로 같이 고쳤다. 넘긴 것은 idea 둘 — moai-19gq(에픽 안, v0.1.2)와 moai-y1vb(밖)"}
+{"ts":"2026-09-23T06:22:05Z","id":"moai-yhb1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:22:05Z","id":"moai-g9a8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:22:06Z","id":"moai-kqid","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:22:06Z","id":"moai-oejf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
