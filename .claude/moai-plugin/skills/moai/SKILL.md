@@ -83,6 +83,11 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
+**If a milestone is running, give the plan that milestone** — `moai add --from -
+--milestone <id>`. It goes onto the epics the plan creates and the members inherit
+it; without it the whole plan stands outside the release, and of it `moai ready`
+then hands out only what is `p0`.
+
 ## What to write in an issue
 
 **Pass the title and the body separately.** The title is an argument; the body is

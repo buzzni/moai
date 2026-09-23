@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:8316e75d -->
+<!-- moai:begin v:0.1.1 hash:3f6b1ad4 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -85,6 +85,11 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
+**If a milestone is running, give the plan that milestone** — `moai add --from -
+--milestone <id>`. It goes onto the epics the plan creates and the members inherit
+it; without it the whole plan stands outside the release, and of it `moai ready`
+then hands out only what is `p0`.
+
 ### What to write in an issue
 
 **Pass the title and the body separately.** The title is an argument; the body is
@@ -145,13 +150,27 @@ original stays on the closed idea and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
 have to press every member to find out what this is.
 
+**The milestone that comes over is the one `moai show --milestone` stands the idea
+under**, not whatever its own field says — an idea parked inside an epic comes over
+in that epic's release even with an empty field of its own, and a field of its own
+that loses to the epic it sits in never reaches the new epic. One reader answers
+where a row belongs, on every surface.
+
 **Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
 already the owner — its members inherit its milestone, and writing the idea's over
 theirs would stand one bundle in two places.
 
-**If the idea held no milestone and one is running, hang it on the epic yourself.**
-Without this the epic stands outside the release and every member under it is work
-picked up from outside it.
+**If what came over is not the milestone that is running, hang the running one on
+the epic yourself** — or clear it with `--milestone none` when nothing is running.
+`promote` carries the release it stands in whatever state that release is in, so
+that covers an idea parked with no milestone, one parked under a release that has
+since shipped, and one parked under a milestone since deferred. Without this the
+epic stands outside the release and every member under it is work picked up from
+outside it, of which `moai ready` hands out only what is `p0`; and under a
+deferred milestone the whole plan is out of the plan the moment it is created —
+not in `ready`, not in `held`, and no warning says so. **A dead release is said
+out loud**: unfolding into a deferred or closed milestone prints one line on
+stderr naming it, and nothing is blocked.
 
     moai edit <epic> --milestone <milestone>
 

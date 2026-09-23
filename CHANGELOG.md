@@ -59,12 +59,23 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 - A stamp a little ahead of this machine's clock no longer forces a fresh ask.
   Two machines sharing one config directory with clocks seconds apart made one of
   them knock on GitHub every single run.
-- Unfolding a parked thought teaches the two steps that used to come after it and
-  were written down nowhere: hang the running milestone on the epic `promote` made
-  (it has no flag for one and does not carry over the idea's), and copy the idea's
-  body onto that epic so `moai show <epic>` can say why those issues are one
-  bundle. The milestone line is the same one the supervisor's brief uses, so the
-  two texts cannot drift apart.
+- Unfolding a parked thought no longer drops what the thought was standing on.
+  `moai idea promote` puts the idea's milestone and its body onto the epic it
+  unfolds, so `moai ready` hands the members out with the release they belong to
+  and `moai show <epic>` can say why those issues are one bundle. The body goes
+  onto the first epic of the plan only — it is not a value members inherit, and
+  copying it onto every epic would leave one thought with several copies that
+  drift. Unfolding into a standing epic (`-e <epic>`) carries neither: that epic
+  is already the owner. What comes over is the release `moai show --milestone`
+  stands that thought under, not whatever its own field says — a thought parked
+  inside an epic comes over in that epic's release with an empty field of its own,
+  and a field that loses to that epic never reaches the new one. If what came over
+  is not the milestone that is running, hang the running one on the epic yourself —
+  the line is the same one the supervisor's brief uses, so the two texts cannot
+  drift apart. A release that is **deferred or already closed** is named on one
+  stderr line as it comes over, in the rehearsal as well as the real run: nothing
+  is blocked, but a plan that is out of the plan the moment it is created no
+  longer says only that it succeeded.
 - The worker brief holds a running review's worktree. While `/code-review --fix` is
   going, its branch and working tree are left alone — the fixes sit there
   uncommitted, and `reset --hard`, `rebase` or `commit --amend` throw them away —
@@ -83,6 +94,21 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   checks it.
 - The review grades gained the case they were missing: a worktree that carries
   members of two epics is measured as one epic and then raised one more step.
+- `moai add --from <plan> --milestone <id>` hangs the milestone on the epics the
+  plan creates instead of dropping it in silence. A milestone is inherited, so the
+  epic alone carries it to every member, including the ones added later. The
+  rehearsal (`--dry-run`) says which milestone it will be, on one line and as a
+  `milestone` key under `--json`, and it refuses an id of the wrong shape there
+  rather than after you have said yes.
+- `--from` refuses the flags a plan cannot honour — `--body`, `--status` and
+  `--quiet` join `--epic`, `--tag`, `--priority`, `--parent`, `--start` and
+  `--due`. They used to be accepted and thrown away, so a call that ended in 0
+  silently swallowed the text, the column, or the id a script was capturing.
+  **This is a break**: a call that passed one of the three now exits non-zero.
+  Machine output for a plan is `--json`, which `--from` has always given — but note
+  that these refusals come from the argument parser, so they are plain text on
+  stderr and exit 2 even under `--json`, not the `{"code": …}` object a refusal from
+  the command itself gives. A loop that branches on `code` sees neither.
 
 ### Fixed
 

@@ -4599,7 +4599,8 @@ fn a_plan_hangs_its_epics_on_the_milestone() {
     assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "뿌리 말고도 적었다\n{made}");
     // 그런데 멤버 셋까지 그 마일스톤 아래 선다 — 물려받기가 하는 일이다.
     let under = ok(s.path(), &["show", "--milestone", &stone]);
-    for want in ["저장 계층", "CLI 표면", "원자적으로 쓴다", "잘린 줄을 복구한다", "--json 이 tags 를 빠뜨린다"] {
+    for want in ["저장 계층", "CLI 표면", "원자적으로 쓴다", "잘린 줄을 복구한다", "--json 이 tags 를 빠뜨린다"]
+    {
         assert!(under.contains(want), "{want} 가 마일스톤 밑에 안 섰다\n{under}");
     }
 }
@@ -4611,15 +4612,39 @@ fn a_plan_hangs_its_epics_on_the_milestone() {
 #[test]
 fn a_plan_refuses_the_flags_it_cannot_use() {
     let s = init("planflags");
-    for extra in [["--body", "글"], ["--status", "in_progress"]] {
+    // `--quiet` 도 든다(리뷰) — `bulk` 가 안 읽어 `id=$(moai add --from - -q)` 가 색까지 든
+    // 여러 줄을 id 로 받아 갔다. 계획은 id 를 여럿 내므로 "id 하나만" 이 여기서는 안 선다.
+    for extra in [["--body", "글"].as_slice(), ["--status", "in_progress"].as_slice(), ["--quiet"].as_slice()] {
         let mut argv = vec!["add", "--from", "-"];
-        argv.extend_from_slice(&extra);
+        argv.extend_from_slice(extra);
         let out = from_stdin(s.path(), &argv, PLAN);
         assert!(!out.status.success(), "{extra:?} 를 받았다");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains(extra[0]) && err.contains("--from"), "{extra:?}: {err}");
         assert_eq!(issues(s.path()), "", "{extra:?} 인데 썼다");
     }
+}
+
+/// **연습도 마일스톤의 모양을 잰다**(리뷰). 연습은 사람이 "좋다" 하는 자리라(AGENTS.md
+/// 갈림길 3), 쓰기가 거절할 값을 그대로 지나 보내면 그 승인이 뒤늦은 말이 된다 —
+/// `moai edit --milestone none` 이 필드를 비우므로 `none` 은 사람이 실제로 치는 값이다.
+#[test]
+fn a_rehearsal_measures_the_milestone_it_reports() {
+    let s = init("planstoneshape");
+    for bad in ["none", "그냥 이름"] {
+        let rehearsal = from_stdin(s.path(), &["add", "--from", "-", "--milestone", bad, "--dry-run"], PLAN);
+        let real = from_stdin(s.path(), &["add", "--from", "-", "--milestone", bad], PLAN);
+        assert!(!real.status.success(), "{bad}: 진짜가 받았다");
+        assert!(!rehearsal.status.success(), "{bad}: 연습만 좋다고 했다");
+        // 가리키는 줄도 말도 한 자리에서 나온다 — 연습과 진짜가 같은 글로 선다.
+        let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+        assert_eq!(said, was, "{bad}: 연습과 진짜가 다른 말을 한다");
+        assert!(said.contains("저장 계층"), "{bad}: 안 지은 줄을 제목으로 안 가리킨다\n{said}");
+        assert_eq!(issues(s.path()), "", "{bad}: 거절해 놓고 썼다");
+    }
+    // 모양이 맞으면 헛 id 라도 연습도 진짜도 지난다 — 그것은 `dangling_milestone` 이 낼 말이다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--milestone", "moai-zzzz", "--dry-run"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
 /// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
@@ -4639,8 +4664,41 @@ fn promote_carries_the_milestone_and_the_body() {
     // 에픽 하나에만 적힌다 — idea 줄이 들고 있던 것까지 두 줄이다.
     assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "{made}");
     assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽에 안 갔다\n{made}");
+    // **어느 줄이 들었는지까지 본다**(리뷰). 수만 세던 판정은 본문이 멤버에 가고 에픽이 빈 채로
+    // 선 꼴에서도 그대로 지났다 — 계획에 에픽 하나와 이슈 하나뿐이라 수로는 둘을 못 가른다.
+    let pick = |mark: &str| made.lines().find(|l| l.contains(mark)).unwrap_or_else(|| panic!("{mark}\n{made}"));
+    let (epic, member) = (pick(r#""kind":"epic""#), pick(r#""title":"첫 이슈""#));
+    assert!(epic.contains(r#""body":"왜 한 묶음인가""#), "에픽이 본문을 안 받았다\n{epic}");
+    assert!(epic.contains(&format!(r#""milestone":"{stone}""#)), "에픽이 마일스톤을 안 받았다\n{epic}");
+    // 멤버는 에픽에서 물려받으므로 제 줄에는 둘 다 없다 — 적으면 그것이 파생값을 저장하는 것이다.
+    assert!(!member.contains(r#""body""#), "멤버에 본문을 베꼈다\n{member}");
+    assert!(!member.contains(r#""milestone""#), "멤버에 마일스톤을 적었다\n{member}");
     let under = ok(s.path(), &["show", "--milestone", &stone]);
     assert!(under.contains("캐시 층") && under.contains("첫 이슈"), "{under}");
+}
+
+/// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
+/// 값이라 뿌리마다 서야 하지만 본문은 물려받는 값이 아니다 — 뿌리마다 적으면 64KB 짜리
+/// 글이 에픽 수만큼 베껴지고(재 봤다: 에픽 200개 계획이 스냅샷을 13MB 로 불렸다), 한쪽을
+/// 고친 날 나머지가 옛 글로 남아 어느 것을 믿을지 모른다.
+#[test]
+fn a_multi_epic_unfold_copies_the_body_once() {
+    let s = init("promotemany");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["idea", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+        .trim()
+        .to_string();
+    let plan = "# 앞 에픽\n- [p1] 첫 일\n# 뒤 에픽\n- [p2] 둘째 일\n";
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], plan);
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // 마일스톤은 뿌리 둘 다 — idea 줄까지 세 줄이다. 소속은 멤버가 물려받으므로 뿌리마다 선다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 3, "뿌리 하나에만 달았다\n{made}");
+    // 본문은 첫 뿌리 하나 — idea 줄까지 두 줄이다.
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽마다 베껴졌다\n{made}");
+    let front = made.lines().find(|l| l.contains(r#""title":"앞 에픽""#)).expect(&made);
+    assert!(front.contains(r#""body":"왜 한 묶음인가""#), "첫 뿌리가 본문을 안 받았다\n{front}");
 }
 
 /// **이미 선 에픽에 펼칠 때는 둘 다 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
@@ -4651,9 +4709,8 @@ fn promote_into_a_standing_epic_carries_nothing() {
     let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
     let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
     let epic = add(s.path(), &["선 에픽", "--type", "epic", "--milestone", &m1]);
-    let idea = ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"])
-        .trim()
-        .to_string();
+    let idea =
+        ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"]).trim().to_string();
     let grown = from_stdin(s.path(), &["idea", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
@@ -4662,6 +4719,69 @@ fn promote_into_a_standing_epic_carries_nothing() {
     assert_eq!(made.matches(&format!(r#""milestone":"{m2}""#)).count(), 1, "선 에픽의 멤버에 적었다\n{made}");
     assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 1, "멤버에 본문을 베꼈다\n{made}");
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("멤버 하나"), "에픽에서 안 물려받았다");
+}
+
+/// **데려가는 마일스톤은 적힌 필드가 아니라 뜬 값이다**(리뷰, 2026-09-23 사용자 결정).
+/// `moai show --milestone <id>` 가 그 생각을 내주는 자리와 펼친 에픽이 서는 자리가 같아야 한다 —
+/// 적힌 필드를 데려가던 판은 둘이 반대로 갈렸다. 에픽에 담긴 생각은 제 필드가 비어 릴리스 밖으로
+/// 펼쳐지고, 에픽에 진 제 필드는 아무 화면에도 없던 값 그대로 에픽에 적혔다.
+#[test]
+fn promote_carries_the_milestone_the_tool_shows_it_under() {
+    let s = init("promoteresolved");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["담는 에픽", "--type", "epic", "--milestone", &m1]);
+
+    // 제 필드는 비었고 에픽이 `m1` 에 선 생각. 화면은 이것을 `m1` 밑에 낸다.
+    let bare = ok(s.path(), &["idea", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
+    // idea 는 목록에서 접히므로 `--type idea` 로 펴서 본다 — 접혔을 뿐 `m1` 밑이다.
+    let ideas_under = ok(s.path(), &["show", "--milestone", &m1, "--type", "idea"]);
+    assert!(ideas_under.contains("필드 없는 생각"), "화면이 m1 밑에 안 냈다\n{ideas_under}");
+    let grown = from_stdin(s.path(), &["idea", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 하나"), "릴리스 밖으로 펼쳤다");
+
+    // 제 필드가 `m2` 인데 에픽의 `m1` 이 이기는 생각. 이긴 쪽을 데려간다.
+    let lost = ok(s.path(), &["idea", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    let under2 = ok(s.path(), &["show", "--milestone", &m2]);
+    assert!(!under2.contains("펼친 둘"), "아무 화면에도 없던 값을 데려갔다\n{under2}");
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 둘"), "이긴 마일스톤을 안 데려갔다");
+}
+
+/// **죽은 릴리스로 데려갈 때는 한 줄 알린다. 막지는 않는다**(같은 결정).
+///
+/// 미뤄진 마일스톤을 말없이 데려가면 방금 승인한 계획이 미룸을 물려받아 `ready` 에도 보드에도
+/// 안 뜨는데, 화면에 나가는 것은 성공 한 줄뿐이었다 — 뜻대로인지 사고인지를 못 가른다.
+/// 연습도 같은 줄을 낸다: 사람이 "좋다" 하는 자리가 연습이다.
+#[test]
+fn promote_says_when_the_milestone_it_carries_is_dead() {
+    let s = init("promotedead");
+    let put_off = ok(s.path(), &["milestone", "add", "미룬 v", "-q"]).trim().to_string();
+    ok(s.path(), &["defer", &put_off, "-m", "다음 분기"]);
+    let idea = ok(s.path(), &["idea", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
+
+    for dry in [true, false] {
+        let mut argv = vec!["idea", "promote", &idea, "--from", "-"];
+        if dry {
+            argv.push("--dry-run");
+        }
+        let out = from_stdin(s.path(), &argv, "# 펼친 것\n- 한 일\n");
+        assert!(out.status.success(), "막았다 — {}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(&put_off) && err.contains("--undo"), "dry={dry}: 미뤄진 것을 안 알렸다\n{err}");
+    }
+
+    // 닫힌 마일스톤은 그 릴리스가 다시 열린다고 댄다.
+    let shut = ok(s.path(), &["milestone", "add", "닫힌 v", "-q"]).trim().to_string();
+    let done = add(s.path(), &["끝난 멤버", "--milestone", &shut]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let late = ok(s.path(), &["idea", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&shut), "닫힌 것을 안 알렸다");
+    assert!(ok(s.path(), &["show", "--milestone", &shut]).contains("늦은 것"), "데려가지 않았다");
 }
 
 /// **템플릿 파일은 `--var` 로 채워 편다**(moai-cypw). 연습도 채운 뒤의 계획을 보여 준다.

@@ -286,7 +286,7 @@ fn bulk(
     let rooted = Rooted { milestone, body: None };
 
     if dry_run {
-        check_plan(&drafts)?;
+        check_plan(&drafts, milestone, ctx.lang())?;
         if ctx.json {
             return json_rehearsal(&drafts, None, None, milestone);
         }
@@ -320,8 +320,18 @@ fn bulk(
     out.extend(drafts.iter().zip(&made).map(|(d, i)| line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(tally(&drafts, ctx.lang()));
-    out.extend(milestone_line(milestone, ctx.lang()));
+    // **만든 줄에서 읽는다** — `idea promote` 와 한 자리다(리뷰). 적은 값을 그대로 찍으면
+    // 같은 한 줄을 한쪽은 argv 로, 한쪽은 파일로 셈해, 쓰기에 정규화가 붙는 날 둘이 갈린다.
+    out.extend(milestone_line(stood_on(&made), ctx.lang()));
     Ok(out)
+}
+
+/// 만든 줄에서 **뿌리가 선 마일스톤**을 읽는다 — 적은 값이 아니라 써진 값이다.
+///
+/// `add --from` 과 `idea promote` 가 이 한 자리를 쓴다(리뷰). 뿌리가 없으면(`-e <에픽>`)
+/// `None` 이고, 그것이 그대로 답이다 — 그 에픽이 이미 임자다.
+pub fn stood_on(made: &[Issue]) -> Option<&str> {
+    made.iter().find(|i| i.epic.is_none()).and_then(|i| i.milestone.as_deref())
 }
 
 /// 계획의 **뿌리**(제 에픽이 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
@@ -330,7 +340,15 @@ fn bulk(
 /// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `idea promote` 가 담아 둔 생각의
 /// 마일스톤과 본문을 준다(moai-07v1). **`-e <에픽>` 으로 선 에픽에 펼칠 때는 뿌리가 없어**
 /// 아무것도 안 서는데, 그것이 맞는 답이다 — 그 에픽이 이미 임자다.
-#[derive(Default, Clone, Copy)]
+///
+/// **둘이 뿌리를 세는 법이 다르다**(리뷰). 계획은 `#` 줄을 여럿 받으므로 뿌리도 여럿일 수
+/// 있는데, 마일스톤은 멤버가 물려받는 값이라 뿌리마다 서야 하고 본문은 물려받는 값이
+/// 아니라 **첫 뿌리 하나**만 든다 — 뿌리마다 적으면 64KB 짜리 글이 에픽 수만큼 베껴진다.
+///
+/// **`Default` 를 안 단다.** 아무것도 안 적는다는 뜻의 `Rooted::default()` 가 있으면 필드가
+/// 하나 붙는 날 `..Default::default()` 가 그것을 말없이 삼킨다 — 지금은 둘 다 통째로 적는
+/// 자리라 필드가 붙으면 컴파일러가 그 둘을 이름으로 댄다.
+#[derive(Clone, Copy)]
 pub struct Rooted<'a> {
     pub milestone: Option<&'a str>,
     pub body: Option<&'a str>,
@@ -361,6 +379,8 @@ pub fn create_drafts(
     let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
     let mut entries = Vec::new();
     let mut made = Vec::new();
+    // **본문은 첫 뿌리가 가져간다** — 아래에서 `take` 하므로 둘째 뿌리부터는 빈손이다.
+    let mut body = rooted.body;
 
     for (n, d) in drafts.iter().enumerate() {
         let id = crate::id::generate(&cfg.prefix, &taken, &crate::id::seed(&format!("{n}{}", d.title)));
@@ -379,7 +399,18 @@ pub fn create_drafts(
         // 같은 값이 줄마다 한 벌씩 서고, 에픽을 옮기는 날 그 줄들이 옛 자리에 남는다.
         if issue.epic.is_none() {
             issue.milestone = rooted.milestone.map(str::to_string);
-            issue.body = rooted.body.map(str::to_string);
+            // **본문은 첫 뿌리에만 간다**(리뷰). 마일스톤은 멤버가 물려받으니 뿌리마다 서야
+            // 하지만 본문은 물려받는 값이 아니다 — 계획은 `#` 줄을 여럿 받으므로
+            // (`draft::Shape::Plan`) 뿌리마다 적으면 같은 글이 에픽 수만큼 베껴진다. 재 봤다:
+            // 64KB 짜리 생각을 에픽 200개 계획으로 펼치면 스냅샷이 13MB 가 됐고, 매 쓰기가
+            // 전체 재작성이라 그 뒤의 모든 명령이 그것을 다시 찍는다. 베낀 글은 한쪽을 고친 날
+            // 나머지가 옛 글로 남아, 왜 한 묶음인지를 묻는 쪽이 어느 것을 믿을지 모른다.
+            //
+            // **덮어쓰지 않고 채운다** — 초안이 언젠가 제 본문을 들면, `= None` 은 그것을
+            // 말없이 지운다.
+            if let Some(text) = body.take() {
+                issue.body = Some(text.to_string());
+            }
         }
         (issue.assignee, issue.assignee_email) = who.clone();
         let (entry, issue) = store::admit(issues, cfg, issue, by)?;
@@ -423,12 +454,29 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
 /// `Issue::validate` 도 지나고 사람 이름도 푼다 — 쉼표가 든 태그(`#bug,perf`)나 git 사용자 정보가
 /// 없는 기계는 아직 연습을 지나 진짜에서 거절당한다. 그 자리를 닫는 길은 검사를 하나씩 옮겨
 /// 적는 것이 아니라 초안을 **id 를 뽑기 전에** 이슈로 빚어 한 번에 재는 것이다.
-pub fn check_plan(drafts: &[Draft]) -> R<()> {
+///
+/// **마일스톤의 모양도 여기서 잰다**(리뷰). `--milestone` 이 계획에 닿은 날(moai-xoyg) 이
+/// 어긋남이 다시 열렸다 — `moai add --from - --milestone none --dry-run` 이 0 으로 끝나며
+/// `에픽은 마일스톤 none 에 선다` 를 찍는데, 같은 부름을 진짜로 하면 `Issue::validate_fields`
+/// 가 1 로 거절한다. 가리키는 줄도 말도 진짜와 한 자리에서 나온다 —
+/// `store::write_locked` 가 같은 `Invalid::GroupId` 를 같은 `At::Unwritten` 으로 낸다.
+pub fn check_plan(drafts: &[Draft], milestone: Option<&str>, lang: crate::i18n::Lang) -> R<()> {
     for d in drafts {
         // 가리키는 낱말도 진짜와 한 자리다 — `store::with_write` 가 같은 자리에서 `"title"` 을 준다.
         // 한글로 두던 판은 영어로 옮긴 거절문 안에 낱말 하나만 한국어로 남아, 연습과 진짜가 같은
         // 칸을 다른 이름으로 불렀다(리뷰).
         crate::model::check_text_size(|| crate::model::unwritten(&d.title), "title", &d.title)?;
+    }
+    // 진짜가 거절하는 줄은 **이 마일스톤을 받을 첫 뿌리**다(`create_drafts` 가 밀어 넣는 차례).
+    // 뿌리가 없는 꼴(`Shape::Members`)에는 마일스톤도 안 오지만, 그래도 가리킬 줄은 댄다.
+    if let Some(m) = milestone
+        && !crate::id::is_valid(m)
+    {
+        let at = drafts.iter().find(|d| d.epic.is_none()).or_else(|| drafts.first());
+        let at = store::At::Unwritten(crate::model::fit_title(at.map_or("", |d| d.title.as_str())));
+        let why = model::Invalid::GroupId { field: model::Field::Milestone, value: format!("{m:?}") };
+        // 코드도 진짜와 같다 — `store::Trouble::Invalid` 가 `code::ERROR` 로 나간다.
+        return Err(Fail::new(crate::view::invalid(lang, &at, &why)));
     }
     Ok(())
 }
