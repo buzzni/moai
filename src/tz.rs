@@ -93,14 +93,6 @@ impl Zone {
         self.shifts.is_empty() && self.before == 0
     }
 
-    /// 둘이 **같은 답을 내는가** — 이름이 아니라 옮기는 값으로 잰다([`Zone::shift`] 가 보는 것이
-    /// 그것이다). `PartialEq` 는 이름까지 보므로 `/etc/localtime` 이 `Etc/UTC` 를 가리키는 기계
-    /// (컨테이너가 흔히 그렇다)에서 `Zone::utc()` 와 안 같다고 나오고, 시간대가 바뀌었는지로
-    /// 다시 셀지를 가르는 쪽(`tui::App::adopt_look`)이 답이 같은 줄 알면서도 훑기를 한 벌 더 돈다.
-    pub fn same_clock(&self, other: &Zone) -> bool {
-        self.shifts == other.shifts && self.before == other.before
-    }
-
     /// 이름으로 연다. `UTC` 는 자료를 안 본다 — tzdb 가 없는 기계에서도 서야 한다.
     pub fn load(name: &str) -> Result<Zone, Trouble> {
         if name == "UTC" {
