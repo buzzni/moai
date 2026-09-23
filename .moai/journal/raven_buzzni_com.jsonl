@@ -1210,3 +1210,8 @@
 {"ts":"2026-09-23T04:28:02Z","id":"moai-514e.mvw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 tokens=420840 (max — 에픽 끝, 쓰기 경로와 훅)"}
 {"ts":"2026-09-23T04:28:02Z","id":"moai-514e.mvw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열한 자리를 다 받아 e8dc088 로 커밋했다(머지 67f9379). 넘긴 일곱 중 셋을 에픽 멤버로 세웠다 — moai-bscj(clash 를 짝 어휘로 넓힌다, 1·6번), moai-ati3(-fprint 무리가 만드는 파일, 2번), moai-y1ix(free 칸이 두 뜻을 든다, 4번). 둘은 idea 로 담았다 — moai-fyqf(술어 무리마다 자리를 잰다, 3번), moai-wjeq(Runs::skip 과 permute, 5번). 7번의 규약 둘 중 moai-xk0q 는 moai-99yy 로 옮겨 적었고, 한 커밋이 이슈 여섯을 든 것은 다음 회차부터 갈라 적는다."}
 {"ts":"2026-09-23T04:28:17Z","id":"moai-514e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 셋째 회차가 develop 에 들었다(머지 67f9379). 멤버 다섯과 에픽 끝 리뷰 moai-514e.mvw(max)는 닫혔고, 리뷰가 넘긴 셋이 첫 칸에 섰다 — moai-bscj·moai-ati3·moai-y1ix. moai-6k5v 는 제 조건이 아직 안 서 그대로 두고, moai-xk0q 는 moai-99yy 로 옮겼다. 다음에 집을 때 moai-bscj 가 먼저다 — sudo 의 -i -s 를 잘못 막는 자리고, su 표의 -u 도 그것과 한 몸이다."}
+{"ts":"2026-09-23T04:35:02Z","id":"moai-fr0a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T04:35:02Z","id":"moai-ln11","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T04:35:02Z","id":"moai-jx70","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T04:35:03Z","id":"moai-dhx9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T04:35:03Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
