@@ -627,7 +627,7 @@
   "skill.install_copy_gone": "  — the installed copy ({at}) is gone. The hooks are not loaded{advice}",
   "skill.install_stale": "  — the version to plant is {want}. Plant it again{advice}",
   "skill.companion_gone": " — not there (`moai skill install`)",
-  "skill.hook_unrunnable": "— missing or not runnable. The hooks quietly do nothing",
+  "skill.hook_unrunnable": "— missing or not runnable. The four rules do not stand",
   "skill.hook_is_another_moai": "    the moai called here ({exe}) is not the one the hooks call — planting here makes the hooks call this one",
   "skill.claude_on_path": "on PATH",
   "skill.claude_off_path": "not on PATH — nothing can be planted or removed",

@@ -537,11 +537,15 @@ fn which(name: &str) -> Option<PathBuf> {
 }
 
 /// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
-/// 실행할 수 있을 때만 그 자리다 — 훅 명령의 `command -v … && "<exe>"` 와 같은 셈.
+/// 실행할 수 있을 때만 그 자리다.
 ///
 /// 실행할 수 있는가는 [`super::runnable`] 하나가 답한다 — `is_file` 만 보던 판은 실행 권한이
 /// 빠진 파일을 "있다" 고 했다. 이름으로 적힌 훅은
 /// 찾은 자리를 **함께 보인다** — PATH 의 `moai` 가 남의 moai 여도 훅은 돈다.
+///
+/// **훅 줄의 앞문과 같은 셈은 아니다**(리뷰 moai-j4ie). 그쪽은 `command -v` 로 묻는데 그 답이
+/// 껍데기마다 다르다 — dash 는 있는지만, bash 는 `access(X_OK)` 까지 본다. 여기는 늘 뒤엣것으로
+/// 재고, 훅 줄은 그 갈림을 `[ -e ]` 로 메워 두 껍데기에서 같은 자리로 온다(`skill::command`).
 fn runs(exe: &str, on_path: Option<&Path>) -> Option<PathBuf> {
     if exe.contains('/') {
         let path = Path::new(exe);
