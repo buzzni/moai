@@ -366,17 +366,53 @@ impl Floor {
     /// 옆의 이 줄이 **여기보다 늦게 만져졌는가.** 여기에 없는 줄은 그 워크트리에서 세운 것이라
     /// 든다 — 그것도 만진 흔적이다.
     ///
-    /// **줄이 아니라 잰 값으로 묻는다**(moai-jx70) — 옆을 [`SideFloor`] 로만 들고 다니게 된 뒤로
+    /// **줄이 아니라 측정값으로 묻는다**(moai-jx70) — 옆을 [`SideFloor`] 로만 들고 다니게 된 뒤로
     /// 여기 오는 쪽에는 `Issue` 가 없다. 재는 자는 여전히 하나다.
-    fn later(&self, id: &str, planned: &str, updated: &str) -> bool {
-        self.rows.get(id).is_none_or(|(p, u)| (planned, updated) > (p.as_str(), u.as_str()))
+    ///
+    /// **짝을 통째로 받는다.** `planned` 와 `updated_at` 을 낱낱의 `&str` 둘로 받던 판은 부르는
+    /// 쪽이 둘을 바꿔 적어도 컴파일이 되고, 그러면 견주기가 조용히 뒤집힌다 — 양쪽 다 이 짝을
+    /// 맵의 값으로 들고 있으니 쪼갤 까닭이 없다.
+    fn later(&self, id: &str, at: &(String, String)) -> bool {
+        self.rows.get(id).is_none_or(|here| at > here)
     }
 }
 
-/// 줄마다 (`planned`, `updated_at`) — [`Floor`] 와 [`SideFloor`] 가 같은 자로 뜬다.
+/// 그 줄의 견줄 값 — [`Floor`] 와 [`SideFloor`] 가 같은 자로 뜬다.
+fn at_of(i: &Issue) -> (String, String) {
+    (i.planned().to_string(), i.updated_at.clone())
+}
+
+/// 줄마다 (`planned`, `updated_at`) — **견줄 바닥**([`Floor`])이 이 자로 뜬다.
 /// 같은 id 가 둘이면 **뒷줄이 선다** — `Load::get` 과 같은 자다.
 fn rows_of(issues: &[Issue]) -> BTreeMap<String, (String, String)> {
-    issues.iter().map(|i| (i.id.clone(), (i.planned().to_string(), i.updated_at.clone()))).collect()
+    issues.iter().map(|i| (i.id.clone(), at_of(i))).collect()
+}
+
+/// 줄마다 (`planned`, `updated_at`) — **옆에서 온 줄**([`SideFloor`])이 이 자로 뜬다.
+/// 같은 id 가 둘이면 [`rows_of`] 와 달리 **늦은 쪽이 선다.**
+///
+/// **가려진 쌍둥이도 만진 흔적이다**(moai-es40, 사용자 결정). 바닥은 `Load::get` 처럼 뒷줄이 서면
+/// 되지만 이쪽이 답하는 물음은 "그 워크트리가 이 줄을 만졌는가" 라, 머지가 남긴 id 충돌 하나로
+/// 앞줄이 가려지면 그 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다 — [`SideFloor::open`] 이
+/// `report::started` 로 가려진 줄을 드는 것과 **같은 까닭**이고, 줄을 통째로 훑던 옛 `later`
+/// (`side.iter().filter(..)`)도 "어느 줄이든 늦으면 든다" 였다. 뒷줄만 보던 사이 그 둘이 한
+/// 튜플 안에서 서로 다른 말을 했다.
+///
+/// 늦은 쪽 하나만 남겨도 답이 같은 것은 `planned`·`updated_at` 이 둘 다 RFC3339 이라, 가장 늦은
+/// 짝이 바닥보다 늦은 것과 **어느 짝이든** 바닥보다 늦은 것이 같은 물음이기 때문이다.
+fn touched_rows_of(issues: &[Issue]) -> BTreeMap<String, (String, String)> {
+    let mut rows: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for i in issues {
+        let at = at_of(i);
+        match rows.get_mut(i.id.as_str()) {
+            Some(held) if *held >= at => {}
+            Some(held) => *held = at,
+            None => {
+                rows.insert(i.id.clone(), at);
+            }
+        }
+    }
+    rows
 }
 
 /// 옆 워크트리 하나의 스냅샷에서 **자리 셈이 쓸 만큼만** 뜬 것(moai-jx70).
@@ -387,24 +423,30 @@ fn rows_of(issues: &[Issue]) -> BTreeMap<String, (String, String)> {
 /// 셋이었다. 벌여 놓인 줄을 읽는 쪽은 여기 남은 값을 그대로 쓴다.
 ///
 /// **벌여 놓인 줄은 뜰 때 미리 잰다.** [`crate::report::started`] 는 미룸이 조상과 소속을 타
-/// 그 스냅샷의 **줄 전부**를 봐야 하므로, 줄을 버린 뒤에는 못 잰다. 재는 자(`Config::is_started`)는
-/// 그 저장소의 설정 하나고 자리 셈이 쓰는 설정도 같은 것이라 답이 안 갈린다 — 갈리는 설정을
-/// 들이는 날 먼저 어긋나는 값이 이것이다.
+/// 그 스냅샷의 **줄 전부**를 봐야 하므로, 줄을 버린 뒤에는 못 잰다.
+///
+/// **그래서 설정이 여기 얼어붙는다**(리뷰 moai-99yy.m75 9번). [`holds`] 의 두 갈래가 그 값을
+/// 다른 데서 든다 — 건네받은 갈래는 여기 언 `open` 을 그대로 내고, 제 손으로 파는 갈래는 그
+/// 자리의 `cfg` 로 새로 잰다. 세우는 자리가 둘뿐이고([`gather`] 의 `repo.config`, [`holds`] 의
+/// `footing.cfg()`) 둘 다 그 저장소의 설정 하나라 답이 안 갈리지만, **그것은 타입이 지키는 것이
+/// 아니라 부르는 자리가 지키는 것**이다. 그래서 밖에서는 못 세운다(`pub(crate)`) — 저장소마다
+/// 설정이 갈리는 길(여러 프로젝트)은 프로젝트마다 [`gather`] 를 따로 지나므로 여기 안 닿는다.
 pub struct SideFloor {
     /// 그 워크트리의 moai 뿌리 — [`Dug`] 의 열쇠고, [`dug`] 가 정규화해 맞춘다.
     root: PathBuf,
     /// 그 스냅샷에서 벌여 놓인 일 줄의 id([`crate::report::started`]).
     open: BTreeSet<String>,
-    /// id → (`planned`, `updated_at`) — [`Floor::later`] 가 견줄 값이다.
+    /// id → (`planned`, `updated_at`) — [`Floor::later`] 가 견줄 값이다. 같은 id 가 둘이면 늦은
+    /// 쪽이 선다([`touched_rows_of`]) — 위의 `open` 과 **한 튜플 안에서 같은 쌍둥이 규칙**을 쓴다.
     rows: BTreeMap<String, (String, String)>,
 }
 
 impl SideFloor {
     /// 그 스냅샷에서 읽은 줄로 — **뿌리와 함께 든다.** 뿌리를 안 쓰는 쪽(제 손으로 파는
     /// [`holds`])은 빈 자리를 준다: 거기서는 이미 그 워크트리를 손에 쥐고 있다.
-    pub fn of(root: PathBuf, side: &[Issue], cfg: &crate::config::Config) -> SideFloor {
+    pub(crate) fn of(root: PathBuf, side: &[Issue], cfg: &crate::config::Config) -> SideFloor {
         let open = crate::report::started(side, cfg).into_iter().map(|i| i.id.clone()).collect();
-        SideFloor { root, open, rows: rows_of(side) }
+        SideFloor { root, open, rows: touched_rows_of(side) }
     }
 }
 
@@ -534,7 +576,18 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let swept = unfound.is_none();
     // **겹친 뒤에는 옆의 줄을 버린다**(moai-jx70) — 여기부터 그것을 읽는 자는 자리 셈 하나고,
     // 그것이 묻는 것은 [`holds_of`] 의 두 답뿐이다([`SideFloor`]).
-    let sides = others.iter().map(|s| SideFloor::of(s.root.clone(), &s.issues, &repo.config)).collect();
+    //
+    // **옆을 먹으면서 버린다**(`into_iter`). 빌려서 뜨면 옆 하나를 뜬 뒤에도 그 `Vec<Issue>` 가
+    // 이 함수가 끝날 때까지 살아 있어, 줄을 버렸다는 말이 `Gathered` 에만 참이고 이 함수의
+    // 꼭대기에는 거짓이 된다 — 새 벌이 옆 수만큼 더 서는 동안 옛 벌도 그대로 서 있다. 먹으면
+    // 옆 하나가 뜨는 대로 그 줄이 풀리고, `root` 도 한 벌 더 안 뜬다.
+    let sides = others
+        .into_iter()
+        .map(|s| {
+            let Side { root, issues, .. } = s;
+            SideFloor::of(root, &issues, &repo.config)
+        })
+        .collect();
     Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides, mine })
 }
 
@@ -819,13 +872,10 @@ fn holds_of(side: &SideFloor, mine: &Floor) -> (BTreeSet<String>, BTreeSet<Strin
     // (moai-es40, 사용자 결정). `report::wip` 은 그 줄을 빼므로, 그것으로 재면 머지가 남긴 id 충돌
     // 하나로 이 워크트리에서 도는 줄이 `places` 에서 자리를 잃는다. 훅의 짐작(`hook::unsure`)은
     // 제 초점(`wip`)과 겹치는 id 만 쓰므로 더 든 id 로 답이 안 바뀐다. **그 셈은 [`SideFloor`] 가
-    // 뜰 때 이미 돌았다**(moai-jx70) — 줄을 버린 뒤에는 못 재는 값이라 거기서 잰다.
-    let later = side
-        .rows
-        .iter()
-        .filter(|(id, (p, u))| mine.later(id, p, u))
-        .map(|(id, _)| id.clone())
-        .collect();
+    // 뜰 때 이미 돌았다**(moai-jx70) — 줄을 버린 뒤에는 못 재는 값이라 거기서 잰다. **아래 `later`
+    // 도 같은 쌍둥이 규칙으로 뜬 줄을 본다**([`touched_rows_of`]) — 한 튜플의 두 짝이 가려진 줄을
+    // 두고 다른 말을 하면 안 된다.
+    let later = side.rows.iter().filter(|(id, at)| mine.later(id, at)).map(|(id, _)| id.clone()).collect();
     (side.open.clone(), later)
 }
 
@@ -1563,8 +1613,8 @@ mod tests {
         let at = "2026-09-12T00:00:00Z";
         let later = "2026-09-13T00:00:00Z";
         let floor = Floor::of(PathBuf::new(), &[issue("m-0001", "todo", at), issue("m-0002", "todo", at)]);
-        // 옆의 줄은 [`SideFloor`] 를 지나 잰 값으로 오므로(moai-jx70), 시험도 그 자로 묻는다.
-        let touched = |i: &Issue| floor.later(i.id.as_str(), i.planned(), i.updated_at.as_str());
+        // 옆의 줄은 [`SideFloor`] 를 지나 측정값으로 오므로(moai-jx70), 시험도 그 자로 묻는다.
+        let touched = |i: &Issue| floor.later(i.id.as_str(), &at_of(i));
         assert!(!touched(&issue("m-0001", "todo", at)), "그대로인 줄이 만진 흔적이 됐다");
         assert!(touched(&issue("m-0001", "in_progress", later)), "옆에서 늦게 만진 줄을 안 세웠다");
         assert!(touched(&issue("m-0003", "todo", at)), "옆에서 세운 줄을 안 세웠다");
@@ -1663,6 +1713,22 @@ mod tests {
         assert_eq!(trees.len(), 1, "딸린 워크트리 하나를 못 찾았다");
         assert_eq!(trees[0].holds, ["m-0001".to_string()].into(), "건네받은 옆의 벌여 놓인 줄을 잃었다");
         assert_eq!(trees[0].touched, ["m-0002".to_string()].into(), "건네받은 옆이 늦게 만진 줄을 잃었다");
+
+        // **가려진 쌍둥이도 만진 흔적이다**(moai-es40). 머지가 남긴 id 충돌로 `m-0002` 가 둘이고
+        // 늦게 만진 쪽이 **앞줄**이면, 뒷줄만 보는 자는 그 워크트리가 쥔 줄을 통째로 잃는다 —
+        // `open` 이 `report::started` 로 가려진 줄을 드는 것과 한 자여야 한다([`touched_rows_of`]).
+        let twins = vec![
+            issue("m-0001", "in_progress", early),
+            issue("m-0002", "todo", late),
+            issue("m-0002", "todo", early),
+        ];
+        let sides = [SideFloor::of(side, &twins, &cfg)];
+        let trees = workplaces_in(&main, false, &crate::report::Footing::of(&asked, &cfg), &dug(&sides, &floor));
+        assert_eq!(
+            trees[0].touched,
+            ["m-0002".to_string()].into(),
+            "가려진 쌍둥이 뒤에서 옆이 만진 줄을 잃었다 — 산 일이 `stranded` 로 선다"
+        );
     }
 
     /// **여는 길이 판 것을 자리 판정이 받는다**(moai-65ie). `projects::open_one` 이 `gather` 의

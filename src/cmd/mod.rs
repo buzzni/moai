@@ -131,7 +131,7 @@ pub fn clearable(v: &str) -> Option<String> {
     (v != "none").then(|| v.to_string())
 }
 
-/// **있는 파일이고 실행 비트가 섰는가.** 재는 것은 딱 그것이다.
+/// **있는 파일이고 내가 그것을 돌릴 수 있는가.** 재는 것은 딱 그것이다.
 ///
 /// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 하고,
 /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다.
@@ -174,7 +174,10 @@ pub fn runnable(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt as _;
-        if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        // 아래 `#[cfg(not(unix))]` 갈래와 **같은 낱말로 적는다** — `Path::is_file` 이 곧
+        // `metadata(..).map(|m| m.is_file()).unwrap_or(false)` 라, 두 갈래를 견주는 사람이
+        // 같은지 증명하지 않고 그냥 보면 된다.
+        if !path.is_file() {
             return false;
         }
         let Ok(spelt) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
@@ -826,11 +829,24 @@ mod tests {
     /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.
     ///
     /// 재는 자가 한 자리에 선다 — `skill` 과 `tui` 가 저마다 적던 것을 여기로 모았다(moai-p3kb).
+    ///
+    /// **`noexec` 로 얹힌 자리에서는 안 잰다**(moai-dhx9). `access(X_OK)` 는 마운트 플래그까지
+    /// 보므로(Linux 의 `do_faccessat` 이 `path_noexec` 을 본다 — 이 기계에서 `noexec` 마운트의
+    /// `0o755` 파일에 `test -x` 가 아니라고 답하는 것으로 쟀다), `TMPDIR` 이 그런 기계에서는
+    /// 실행 비트를 세워도 여기가 아니라고 한다. `mode & 0o111` 을 보던 때는 마운트와 무관했으니
+    /// 이 문은 이 바뀜이 새로 만든 자리다. **재지 못하는 것을 실패로 세지 않는다** — 아래 시험의
+    /// root 문지기와 같은 자다.
     #[cfg(unix)]
     #[test]
     fn only_a_file_with_the_execute_bit_runs() {
         use std::os::unix::fs::PermissionsExt as _;
         let s = crate::scratch::Scratch::new("cmd-runnable");
+        let probe = s.join("probe");
+        std::fs::write(&probe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !runnable(&probe) {
+            return; // `noexec` 로 얹힌 자리 — 여기서는 실행을 못 잰다.
+        }
         let exe = s.join("exe");
         std::fs::write(&exe, "#!/bin/sh\n").unwrap();
         assert!(!runnable(&exe), "실행 비트가 없는데 돈다고 한다");
@@ -847,12 +863,17 @@ mod tests {
     ///
     /// **root 로 돌 때는 안 잰다** — `access(X_OK)` 는 root 에게 실행 비트가 하나라도 서 있으면 0 을
     /// 내므로 그 자리에는 이 가름이 아예 없다. 재지 못하는 것을 실패로 세지 않는다.
+    ///
+    /// **문지기는 `getuid` 다, `geteuid` 가 아니다** — `access` 가 보는 것이 실제 uid 라고 위
+    /// [`runnable`] 의 글이 적어 두었는데, 문지기만 유효 uid 를 보던 판은 둘이 갈리는 자리에서
+    /// 거꾸로 답했다. 실제 uid 가 0 이고 유효 uid 가 아닌 판에서는 안 건너뛰면서 `access` 는 root
+    /// 로 재어 이 줄이 까닭 없이 붉어지고, 그 반대 판에서는 잴 수 있는 것을 건너뛴다.
     #[cfg(unix)]
     #[test]
     fn a_file_others_may_run_but_i_may_not_does_not_run() {
         use std::os::unix::fs::PermissionsExt as _;
-        // SAFETY: `geteuid` 는 인자가 없고 아무것도 안 바꾼다.
-        if unsafe { libc::geteuid() } == 0 {
+        // SAFETY: `getuid` 는 인자가 없고 아무것도 안 바꾼다.
+        if unsafe { libc::getuid() } == 0 {
             return;
         }
         let s = crate::scratch::Scratch::new("cmd-runnable-mine");

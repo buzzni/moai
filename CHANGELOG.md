@@ -39,6 +39,23 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Where moai asks "is this runnable" — the hook binary `moai skill` reports on,
+  the editor it picks off `PATH`, the merge driver candidate — it now asks whether
+  **you** can run it, not whether anyone can. The old check read the execute bits,
+  so a file owned by someone else at `0o700`, or one on a `noexec` mount, passed
+  here and then gave the shell a 126 that the hook line swallows in silence: the
+  screen said installed while none of the four rules stood. The answers that flip
+  are exactly those two cases; a file you can run, and a file with no execute bit
+  at all, read as before. On a `noexec` `TMPDIR` this now also means `moai skill`
+  will say the hook is not runnable rather than claiming it is installed.
+
+- The refusal for rule 2 hands back the path **you typed**, not the one moai
+  resolved. Judging still follows symlinks — the two spellings are one place, as
+  they have to be — but a machine whose `TMPDIR`, `/tmp` or project directory is a
+  link no longer asks you to retype a path that is not in your file list. This
+  holds for a write caught inside a shell command too, where the word you wrote is
+  what comes back.
+
 - The release check says *why* it could not ask. The version line still reads as
   one of four, but the fourth now carries the reason in parentheses — no network,
   timed out, rate limited, a server error, TLS failed, unreadable answer, odd
