@@ -13791,6 +13791,43 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("등록한 프로젝트가 없다"));
 }
 
+/// **시각을 안 그리는 명령은 tzdb 를 안 만진다**(moai-yz4j). `project ls` 가 쓰는 것은 `counts`
+/// 하나고 시간대가 닿는 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던
+/// 줄 하나를 stderr 에 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
+///
+/// **대조를 함께 잰다** — 같은 환경의 `moai status` 는 기한을 그리므로 그 줄이 서야 한다.
+/// 없으면 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다.
+#[test]
+fn a_command_that_draws_no_time_never_reaches_for_the_timezone() {
+    let home = Scratch::new("project-tz");
+    let config = home.path().join("config.toml");
+    let repo = init("project-tz-repo");
+    project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
+    // 없는 자리를 가리켜 tzdb 를 깨뜨린다. `TZ` 를 UTC 가 아닌 이름으로 두어야 자료를 읽는다 —
+    // `Zone::load("UTC")` 는 자료 없이 서므로 UTC 로는 이 판이 아예 안 난다.
+    let nowhere = home.path().join("no-zoneinfo");
+    let run = |dir: &Path, args: &[&str]| {
+        isolated(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &config)
+            .env("NO_COLOR", "1")
+            .env("TZDIR", &nowhere)
+            .env("TZ", "Asia/Seoul")
+            .output()
+            .expect("moai 를 실행하지 못했다")
+    };
+
+    let ls = run(home.path(), &["project", "ls"]);
+    assert!(ls.status.success(), "{}", text(&ls));
+    assert_eq!(String::from_utf8_lossy(&ls.stderr), "", "시각을 안 그리는데 tzdb 를 만졌다");
+
+    let st = run(repo.path(), &["status"]);
+    assert!(st.status.success(), "{}", text(&st));
+    let said = String::from_utf8_lossy(&st.stderr);
+    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
+}
+
 /// 두 번 더해도 한 줄이고 파일은 한 글자도 안 바뀐다. 이미 있는 것은 실패가 아니다.
 #[test]
 fn project_add_is_idempotent() {

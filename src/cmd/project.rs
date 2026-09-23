@@ -295,10 +295,8 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let reg = ctx.registry();
     let projects = projects::open(reg, ctx.lang());
     let now = model::now();
-    let rows: Vec<Row> = projects
-        .iter()
-        .map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now, ctx.zone()) })
-        .collect();
+    let rows: Vec<Row> =
+        projects.iter().map(|p| Row { name: &p.name, path: &p.path, hue: p.hue, state: state(p, &now) }).collect();
 
     if ctx.json {
         #[derive(serde::Serialize)]
@@ -348,12 +346,25 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 
 /// 연 프로젝트 하나를 `ls` 의 낱말로 옮긴다. 못 읽는 줄을 넘기는 자는 한눈 보기와 같다
 /// — 넘기지 않으면 그 줄이 쓰던 id 와의 중복이 셈에서 달라진다.
-fn state<'a>(p: &'a projects::Project, now: &str, zone: &crate::tz::Zone) -> State<'a> {
+///
+/// **시간대를 안 든다**(moai-yz4j). 여기서 쓰는 것은 `counts` 하나고 시간대가 닿는 셈은 기한
+/// 판정뿐이라([`report::Dues`]) 그 값은 [`report::status_in`] 과 [`report::status`] 에서 한
+/// 글자도 다르지 않다. 들던 판은 시각을 한 줄도 안 그리는 이 명령이 tzdb 를 만져,
+/// zoneinfo 없는 기계(정적 musl 판, moai-77ap)에서 없던 [`Ctx::zone_trouble`] 줄 하나를
+/// stderr 에 냈다.
+fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
     match &p.state {
         projects::State::Open { repo, load } => {
             let unreadable = load.unreadable();
             State::Initialized {
-                counts: report::status(&load.issues, &unreadable, &repo.config, now, zone).counts,
+                counts: report::status_in(
+                    &load.issues,
+                    &unreadable,
+                    &repo.config,
+                    now,
+                    &report::Soil::of(&load.issues),
+                )
+                .counts,
                 unreadable: load.errors.len(),
                 columns: &repo.config.statuses,
             }

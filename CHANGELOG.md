@@ -211,6 +211,12 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   permission stops every tool call in the session. A hook that ran and then failed
   keeps its silence: it has already written its own answer to stdout, and a second
   line appended there would throw that answer — a refusal included — away.
+- `moai project ls` no longer reads the timezone database. It draws no time at all
+  — it shows each project's column counts — but it asked for the reader's timezone
+  anyway, so on a machine without zoneinfo (a static musl build on Alpine or
+  scratch) it added a line saying so to a command that had never said one. The
+  count is the same either way: the only sum a timezone reaches is the milestone
+  deadline judgement.
 
 ## [0.1.1] - 2026-09-22
 

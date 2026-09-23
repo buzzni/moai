@@ -92,9 +92,23 @@ impl Ctx {
     /// **말과 같은 결로 늦게 읽는다** — 이 값을 드는 명령만 tzdb 를 만진다.
     ///
     /// **시각을 그리는 명령만이 아니다**(moai-h2th). 기한 판정이 읽는 사람의 달로 서면서
-    /// `report::status` 를 부르는 쪽이 모두 이 값을 든다 — `hook`·`project ls` 처럼 시각을 한 줄도
-    /// 안 그리는 명령이 거기 든다. 그 대가로 zoneinfo 없는 기계에서는 그 명령들도 [`Ctx::zone_trouble`]
-    /// 한 줄을 stderr 에 낸다. 막지 않고 종료 코드도 그대로지만 없던 줄이라, 지울지는 따로 잰다.
+    /// `report::status` 를 부르는 쪽이 모두 이 값을 든다 — `hook` 처럼 시각을 한 줄도 안 그리는
+    /// 명령이 거기 든다. 그 대가로 zoneinfo 없는 기계에서는 그 명령들도 [`Ctx::zone_trouble`]
+    /// 한 줄을 stderr 에 낸다. 막지 않고 종료 코드도 그대로다.
+    ///
+    /// **그 줄을 지울지 재 보고 그대로 두었다**(moai-yz4j). 둘을 갈라 봤다.
+    ///
+    /// - **훅은 이 값을 옳게 든다.** 보드(`UserPromptSubmit`)는 기한 경고를 **그리고**,
+    ///   `SessionStart`·`Stop` 의 기준선은 그 경고까지 **센 수**로 세션을 붙든다
+    ///   ([`crate::report::StatusReport::judged`] 가 `warnings` 에 접어 넣는 그것이다). 시간대를
+    ///   빼면 자정을 넘긴 기한이 경고에서 빠져, 붙들 판을 안 붙든다
+    /// - **훅의 stderr 는 아무도 안 읽는다**(2026-09-23 측정, moai-j4ie 가 [`crate::skill::command`]
+    ///   에 표로 적어 둔 그 측정이다) — 종료 0 이든 1 이든 `claude` 의 스트림에 안 서고 `--debug`
+    ///   로도 안 선다. 그러니 이 줄이 훅에서 내는 값은 `hook_response` 에 적히는 몇 바이트고,
+    ///   그것을 접으려고 "이 판이 훅인가" 를 읽는 자를 `main` 밖에 하나 더 두지 않는다
+    ///
+    /// **`project ls` 는 아예 안 든다** — 그쪽은 `counts` 만 쓰고 시간대가 닿는 셈은 기한 판정
+    /// 하나뿐이라, [`crate::report::status_in`] 으로 세면 답이 같다(`cmd::project::state`).
     pub fn zone(&self) -> &crate::tz::Zone {
         &self.zone.get_or_init(crate::tz::Zone::system).0
     }
