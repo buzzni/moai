@@ -1161,3 +1161,12 @@
 {"ts":"2026-09-23T03:07:27Z","id":"moai-vmpr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-85o3 로 펼쳤다 (이슈 2건)"}
 {"ts":"2026-09-23T03:07:43Z","id":"moai-0k2e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T03:07:43Z","id":"moai-h4jx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T03:20:09Z","id":"moai-85o3.p4w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 머지 드라이버가 검사하는 줄의 범위"}
+{"ts":"2026-09-23T03:20:15Z","id":"moai-85o3.p4w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T03:20:34Z","id":"moai-85o3.p4w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: max 리뷰가 배경에서 돈다. 결과를 받아 고친 뒤 원문 노트와 닫는 줄을 남기고 develop 에 머지한다"}
+{"ts":"2026-09-23T03:20:35Z","id":"moai-85o3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 둘은 커밋까지 끝났다(df6738b, 5b23b0e). 리뷰 moai-85o3.p4w 를 기다리는 중이고, 그 고침 뒤에 develop 머지와 닫기가 남았다"}
+{"ts":"2026-09-23T03:20:47Z","id":"moai-0k2e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T03:20:49Z","id":"moai-h4jx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-23T04:15:52Z","id":"moai-3w54","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 묶음 펼치기·접기에 메뉴로 닿는 키를 둔다"}
+{"ts":"2026-09-23T04:16:04Z","id":"moai-mkd0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴에서 j·k·h·l 은 메뉴를 닫고 그 키의 일을 한다"}
+{"ts":"2026-09-23T04:16:18Z","id":"moai-mepu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"태그로 어느 파트의 일인지 알 수 있게 한다"}
