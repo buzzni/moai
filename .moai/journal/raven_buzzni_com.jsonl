@@ -1485,3 +1485,9 @@
 {"ts":"2026-09-23T10:51:10Z","id":"moai-wnnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T10:51:10Z","id":"moai-f7up","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T10:51:11Z","id":"moai-wza7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T11:25:10Z","id":"moai-514e.hgz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 훅의 침묵과 알림 문턱, sudo 의 안 도는 여섯 이름"}
+{"ts":"2026-09-23T11:25:50Z","id":"moai-514e.hgz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T11:26:28Z","id":"moai-514e.hgz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 넷의 고침이 워크트리 687e3b9 에 섰고, 에픽 끝 리뷰(max, --fix)가 도는 중이다. 리뷰가 돌아오면 원문 노트를 붙이고 develop 에 머지한 뒤 넷을 닫는다."}
+{"ts":"2026-09-23T11:33:08Z","id":"moai-yuvu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄을 지우는 명령이 없다"}
+{"ts":"2026-09-23T11:33:09Z","id":"moai-2s59","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"줄 가운데 BOM 이 머리 긁기를 막는다"}
+{"ts":"2026-09-23T11:33:10Z","id":"moai-t4vq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Settled::Each 가 구조로는 Clash 를 들 수 있다"}
