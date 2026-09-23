@@ -8991,6 +8991,20 @@ mod tests {
             "env --default-signal moai add '딴 일'",
             "env --ignore-signal moai add '딴 일'",
             "env --block-signal=INT moai add '딴 일'",
+            // **짧은 꼴에 값을 붙인 것도 여기다**(리뷰 moai-514e.hgz) — `sudo -hHOST` 가 위
+            // 목록에서 빠지며 [`Wrapper::attach`] 의 짧은 갈래(뭉치 고리의 `letter(w.attach, c)`)
+            // 를 **값이 붙은 채로** 지나는 줄이 하나도 안 남았다. 남은 짧은 attach 글자는
+            // `watch -d`·`script -t`·`xargs -e`·`-l` 인데, 그 줄들의 시험은 값을 안 붙여
+            // 재어 그 갈래가 남은 글자를 다시 스위치로 읽어도 푸르게 지나간다. 2026-09-23 에
+            // 쟀다: `printf 'a\nb\n' | xargs -l1 echo` 도 `printf 'a\n' | xargs -e/ echo` 도 돈다.
+            //
+            // **가르는 것은 `-e/` 다** — 붙은 값이 글자와 숫자뿐이면(`-l1`) 그 갈래가 `break` 를
+            // 안 해도 고리가 그냥 지나가 답이 같다. 값에 `/` 가 들면 아래 "값을 안 받는 글자만
+            // 묶였으면" 갈래가 그것을 스위치 아닌 것으로 보고 `Stops` 를 내므로, 그때 이 줄이
+            // 먼저 붉어진다.
+            "xargs -l1 moai add '딴 일'",
+            "xargs -e/ moai add '딴 일'",
+            "xargs --max-lines=1 moai add '딴 일'",
             // **`--` 는 옵션만 끝낸다** — 제 자리 인자는 그 뒤에 온다.
             "timeout -- 5 moai add '딴 일'",
             // **값을 따로 받는 짧은 옵션을 빠뜨리면 그 값이 명령으로 읽힌다.**
@@ -9314,6 +9328,10 @@ mod tests {
             "sudo -l bash -c 'tmux kill-server'",
             "doas -s bash -c 'tmux kill-server'",
             "doas -C /etc/doas.conf bash -c 'tmux kill-server'",
+            // 규칙 4 의 쌍둥이도 같이 맨다(리뷰 moai-514e.hgz) — 안 도는 줄은 사람의 tmux 를
+            // 못 죽이므로 막을 것이 없다.
+            "sudo -h localhost bash -c 'tmux kill-server'",
+            "sudo -U root bash -c 'tmux kill-server'",
         ] {
             assert_eq!(
                 guard_shell(&[], &cfg(), &here(), root, root, cmd),
@@ -9321,7 +9339,20 @@ mod tests {
                 "안 도는 줄을 막았다 — {cmd}"
             );
         }
-        for cmd in ["sudo -l sed -i s/a/b/ /repo/src/x.rs", "doas -s tee /repo/src/x.rs"] {
+        for cmd in [
+            "sudo -l sed -i s/a/b/ /repo/src/x.rs",
+            "doas -s tee /repo/src/x.rs",
+            // **moai-m4ze 가 옮긴 여섯 이름의 쓰기 축 쌍둥이**(리뷰 moai-514e.hgz). 그쪽이
+            // 고친 것은 두 축인데 — 안 도는 집기가 뒤의 빈손 쓰기를 풀어 준 쪽과, **안 도는
+            // 쓰기를 잘못 막은** 쪽 — 시험은 집기 축(규칙 1)에만 섰다. 이 줄들이 둘째를 맨다:
+            // 어느 이름이든 `takes`·`long`·`attach`·`free` 로 되돌아가면 여기가 먼저 붉어진다.
+            "sudo -h localhost sed -i s/a/b/ /repo/src/x.rs",
+            "sudo --host=localhost sed -i s/a/b/ /repo/src/x.rs",
+            "sudo -K tee /repo/src/x.rs",
+            "sudo --remove-timestamp tee /repo/src/x.rs",
+            "sudo -U root sed -i s/a/b/ /repo/src/x.rs",
+            "sudo --other-user root sed -i s/a/b/ /repo/src/x.rs",
+        ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "일어날 수 없는 쓰기를 막았다 — {cmd}\n{got:?}");
         }
