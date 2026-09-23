@@ -88,11 +88,25 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 는 게이트 없이 들리는 유일한 길이라 그것을 쓴다. `SessionStart` 에서만 notice 가 안 서고
 /// `hook_response` 에 남는다(재 본 값) — 그 한 줄을 이벤트마다 달리 적지는 않는다.
 ///
-/// **126·127 만 말한다.** 1 로 진 판은 그대로 삼킨다(같은 결정) — `moai` 가 돌기는 했으므로
-/// stdout 에 판정 JSON 이 이미 섰을 수 있고([`crate::cmd::had_partial`] 이 값을 내는 길),
-/// 그 뒤에 둘째 객체를 붙이면 그 판정 — `deny` 까지 — 이 파싱에서 통째로 버려진다. 막아야 할
-/// 쓰기가 통과하는 쪽으로 지는 것이다. 못 돈 판은 `moai` 가 한 바이트도 안 냈으니 stdout 이
-/// 우리 것이다. 126·127 을 "못 돌렸다" 로 읽는 어휘는 `merge_driver::Probe::Dead` 와 같다.
+/// **0 과 1 말고는 다 말한다**(moai-wnnb). 1 로 진 판은 그대로 삼킨다(같은 결정) — `moai` 가
+/// 돌기는 했으므로 stdout 에 판정 JSON 이 이미 섰을 수 있고([`crate::cmd::had_partial`] 이 값을
+/// 내는 길), 그 뒤에 둘째 객체를 붙이면 그 판정 — `deny` 까지 — 이 파싱에서 통째로 버려진다.
+/// 막아야 할 쓰기가 통과하는 쪽으로 지는 것이다.
+///
+/// **그 밖의 값은 `moai` 가 제 손으로 낼 수 없는 값이다.** `main` 이 내는 것은
+/// `ExitCode::SUCCESS` 와 `ExitCode::FAILURE` 둘뿐이라, 0·1 이 아닌 값은 판정을 못 낸
+/// 판이다 — 126·127(껍데기가 exec 을 거절했다), clap 이 모르는 부명령에 내는 2(`claude` 는
+/// 제 캐시의 `plugin.json` 으로 훅을 부르므로 옛 바이너리가 거절하는 이벤트 이름이 실제로
+/// 설 수 있다), 패닉의 101, 시그널의 128+N 이다. 한때 126·127 만 말하던 판은 나머지를
+/// 옛날 그대로 조용히 두었고, 그 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다.
+/// 126·127 을 "못 돌렸다" 로 읽는 어휘는 `merge_driver::Probe::Dead` 와 같다.
+///
+/// **이 줄이 못 잡는 판이 하나 있다 — 매니페스트 `timeout` 15초에 끊긴 판이다.** 2026-09-23 에
+/// 쟀다: `claude` 는 그 시각에 훅을 **프로세스 그룹째** 죽이고(자식으로 띄운 `sleep` 이 남지
+/// 않았다) 세션에는 아무 말도 안 간다(`stream-json` 에 줄이 없다). 껍데기가 함께 죽으니 `case`
+/// 뒤가 아예 안 돈다. 잡으려면 도장을 남기고 다음 판이 줍는 새 장치가 드는데, 훅은 병렬로
+/// 돌아(같은 날 잰 값: 도구 호출 셋의 훅이 겹쳐 섰다) 그 도장이 살아 있는 이웃 판의 것과
+/// 안 갈린다 — **2026-09-23 사용자 결정으로 셸 한 줄만 넓혔다.** 다시 열 때는 그 겹침부터 잰다.
 ///
 /// **경로를 그 줄에 적는다**(moai-wza7, 2026-09-23 사용자 결정). 한때 뺐던 까닭은 [`quotable`]
 /// 이 줄바꿈을 안 걸러, 경로의 제어문자 하나가 JSON 문자열을 깨고 이 한 줄이 통째로 버려지는
@@ -140,7 +154,7 @@ fn command(exe: &str, event: &str) -> String {
     let where_ = crate::text::single_quoted(exe);
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; c=0; \"{exe}\" hook {event} || c=$?; \
-         case \"$c\" in 126|127) \
+         case \"$c\" in 0|1) ;; *) \
          printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. \
          The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\" {where_};; \
          esac; exit 0"
@@ -792,13 +806,21 @@ mod tests {
         // 못 도는 판 둘 — 실행 비트가 빠진 파일(껍데기가 126)과 없는 해석기(로더가 127).
         let dead = plant("dead", "#!/bin/sh\nexit 0\n", 0o644);
         let gone = plant("gone", "#!/nowhere/interp\nexit 0\n", 0o755);
+        // **판정을 못 낸 나머지 값들**(moai-wnnb) — clap 이 모르는 부명령에 내는 2, 패닉의 101,
+        // 시그널의 128+N 이다. `moai` 의 `main` 은 0·1 밖에 못 내므로 그 밖의 값은 모두 여기다.
+        // 세 글 다 stdout 에 한 글자도 안 쓴다 — 쓴 판이면 1 과 같이 삼켜야 한다.
+        let clap = plant("clap", "#!/bin/sh\nexit 2\n", 0o755);
+        let panic = plant("panic", "#!/bin/sh\nexit 101\n", 0o755);
+        let killed = plant("killed", "#!/bin/sh\nkill -9 $$\n", 0o755);
         // 돌고 진 판은 제 stdout 이 우리 것이 아니다 — 판정 JSON 뒤에 둘째 객체를 붙이면
         // 그 판정(`deny` 까지)이 파싱에서 통째로 버려진다.
         let lost = plant("lost", "#!/bin/sh\necho '{\"hookSpecificOutput\":{}}'\nexit 1\n", 0o755);
         let nowhere = at.join("nowhere").display().to_string();
 
         for sh in shells {
-            for (exe, code) in [(&dead, "126"), (&gone, "127")] {
+            for (exe, code) in
+                [(&dead, "126"), (&gone, "127"), (&clap, "2"), (&panic, "101"), (&killed, "137")]
+            {
                 let (got, said) = run(sh, "-c", exe);
                 assert_eq!(got, Some(0), "{sh}: 못 도는 판이 게이트가 됐다 — {said}");
                 let v: serde_json::Value =
