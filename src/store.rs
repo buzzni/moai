@@ -1540,18 +1540,6 @@ pub(crate) fn gone(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
 }
 
-/// **[`crate::path`] 로 옮긴 셋을 여기서도 부르게 두는 한 줄**(moai-xvyz).
-///
-/// 옮기던 날 `src/hook.rs` 와 `src/cmd/hook.rs` 를 옆 세션이 쥐고 있어 **부름 셋**을 못 옮겼다
-/// (`cmd/hook.rs` 의 `real`, `hook.rs` 의 `lexical`·`real_prefix`). 그 둘에 남은 자리는 글까지
-/// 세면 여덟이고, 이 줄을 타고 이름이 풀리는 것은 그 셋뿐이다 — **세는 자리를 둘로 적으면 걷는
-/// 이가 어느 쪽을 찾아야 하는지 모른다**(리뷰). **설계가 아니라 일정이 남긴 줄이라** 그 둘이
-/// `crate::path::` 를 바로 들면 이 줄은 걷는다 — 걷는 일의 임자는 moai-99yy 의 moai-fnd0 이다.
-///
-/// 이 줄을 걷을 때 `store` 의 시험은 안 붉어진다 — 옮긴 셋을 재는 시험은 [`crate::path`] 로
-/// 함께 옮겼다(리뷰).
-pub(crate) use crate::path::{lexical, real, real_prefix};
-
 /// 그 파일의 락 자리 — 곁의 `<이름>.lock`.
 ///
 /// **락 자리를 세는 자를 하나로 둔다**(리뷰) — 같은 디렉터리에 사는 두 파일이 저마다 락 이름을 세면,
