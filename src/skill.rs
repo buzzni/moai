@@ -94,10 +94,16 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 쓰기가 통과하는 쪽으로 지는 것이다. 못 돈 판은 `moai` 가 한 바이트도 안 냈으니 stdout 이
 /// 우리 것이다. 126·127 을 "못 돌렸다" 로 읽는 어휘는 `merge_driver::Probe::Dead` 와 같다.
 ///
-/// **경로는 그 줄에 안 적는다.** [`quotable`] 이 `"`·`\` 를 걸러도 줄바꿈은 안 거르는데,
-/// JSON 문자열 안의 날 줄바꿈 하나면 이 한 줄이 파싱에서 버려진다. 어느 자리인지는
-/// `moai skill status` 가 댄다 — 그 말을 그대로 쳐서 답이 나와야 하므로 부명령까지 적는다
-/// (맨 `moai skill` 은 clap 이 2 로 거절한다, 리뷰 moai-j4ie).
+/// **경로를 그 줄에 적는다**(moai-wza7, 2026-09-23 사용자 결정). 한때 뺐던 까닭은 [`quotable`]
+/// 이 줄바꿈을 안 걸러, 경로의 제어문자 하나가 JSON 문자열을 깨고 이 한 줄이 통째로 버려지는
+/// 것이었다. 그 자를 제어문자까지 넓혀 놓았으므로(같은 이슈) 이제 그 경로는 따옴표 안에서도
+/// JSON 안에서도 안전하고, 못 도는 바이너리가 **어느 파일인지**가 그 한 줄에 선다 — 알림이
+/// 대는 `moai skill status` 는 방금 exec 에 실패한 그 바이너리라 그 판에서는 같이 못 돈다.
+///
+/// **그래도 `moai skill status` 는 남긴다.** 126 의 까닭은 실행 비트만이 아니라 `noexec` 으로
+/// 얹힌 자리와 엉뚱한 아키텍처도 있어 `chmod +x` 를 단정하면 틀린 처방이 되고, PATH 에 도는
+/// moai 가 있는 기계에서는 그 말이 그대로 답을 낸다. 그 말을 그대로 쳐서 답이 나와야 하므로
+/// 부명령까지 적는다 (맨 `moai skill` 은 clap 이 2 로 거절한다, 리뷰 moai-j4ie).
 ///
 /// **이벤트 이름도 `printf` 의 꼴에 안 넣는다** — 꼴 안의 `%` 는 변환 문자로 읽힌다. 인자
 /// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 넷은 안전한 낱말이지만, 꼴에
@@ -129,11 +135,14 @@ fn command(exe: &str, event: &str) -> String {
     // 없을 때 빠지는 자리를 `&&` 뒤가 아니라 **앞줄**로 세운 까닭은 뒤의 종료 값을
     // 재야 하기 때문이다 — 한 줄에 매달면 `|| exit 0` 이 둘을 같이 삼킨다.
     let said = crate::text::single_quoted(event);
+    // **경로도 인자 자리로 넘긴다** — 꼴에 박으면 경로의 `%` 가 변환 문자로 읽힌다(이벤트
+    // 이름과 같은 까닭). `quotable` 을 지난 경로라 작은따옴표 안에서 셸이 아무것도 안 푼다.
+    let where_ = crate::text::single_quoted(exe);
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; c=0; \"{exe}\" hook {event} || c=$?; \
          case \"$c\" in 126|127) \
-         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s). \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\";; \
+         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s): %s. \
+         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\" {where_};; \
          esac; exit 0"
     )
 }
@@ -277,8 +286,16 @@ pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
 }
 
 /// 셸 한 줄의 따옴표 안에 그대로 적을 수 있는 경로인가.
+///
+/// **제어문자도 거른다**(moai-wza7) — 넷은 셸이 따옴표를 깨는 글자고, 제어문자는 그 줄이
+/// 실어 나르는 **JSON 을** 깬다. 경로의 줄바꿈 하나가 `systemMessage` 문자열 안의 날 줄바꿈이
+/// 되면 `claude` 가 그 객체를 통째로 버려, 알리려던 말이 도리어 사라진다. `\t` 도 같다 —
+/// JSON 은 U+001F 까지를 문자열 안에 날것으로 못 둔다.
+///
+/// 거르면 [`exe_name`] 과 [`command`] 가 경로 대신 이름(`moai`)으로 적으므로, 그 뒤로는
+/// 알림에 실어도 안전하다.
 fn quotable(exe: &str) -> bool {
-    !exe.contains(['"', '\\', '$', '`'])
+    !exe.contains(['"', '\\', '$', '`']) && !exe.contains(char::is_control)
 }
 
 /// `claude` 가 장부에 적어 둔 설치 한 건.
@@ -789,6 +806,9 @@ mod tests {
                 let notice = v["systemMessage"].as_str().unwrap_or_default();
                 assert!(notice.contains("pre-tool-use"), "{sh}: 어느 훅인지 안 댄다 — {notice}");
                 assert!(notice.contains(code), "{sh}: 종료 값을 안 댄다 — {notice}");
+                // **어느 파일인지도 댄다**(moai-wza7) — 그 말이 대는 `moai skill status` 가
+                // 그 판에서는 같이 못 돌 수 있다.
+                assert!(notice.contains(exe.as_str()), "{sh}: 어느 파일인지 안 댄다 — {notice}");
                 // 그 말을 그대로 쳐서 답이 나와야 한다 — 맨 `moai skill` 은 clap 이 거절한다.
                 assert!(notice.contains("moai skill status"), "{sh}: 못 치는 명령을 댄다 — {notice}");
             }
@@ -898,6 +918,28 @@ mod tests {
         // 출력과 `status` 는 절대 경로를, 훅은 PATH 의 moai 를 가리킨다.
         assert_eq!(exe_name(Path::new("/tmp/we$ird/moai"), None), "moai");
         assert_eq!(exe_name(Path::new("/tmp/plain/moai"), None), "/tmp/plain/moai");
+
+        // **제어문자도 같은 자리에서 걸린다**(moai-wza7) — 셸은 그 경로를 그대로 삼키지만
+        // 알림의 JSON 은 날 줄바꿈 하나에 통째로 버려진다. 알림에 경로를 실으려면 이 자가
+        // 먼저 넓어져 있어야 한다.
+        for hostile in ["/tmp/두\n줄/moai", "/tmp/탭\t자리/moai", "/tmp/\u{7f}/moai"] {
+            assert_eq!(exe_name(Path::new(hostile), None), "moai", "제어문자가 든 경로를 그대로 적었다");
+            let cmd = command(hostile, "stop");
+            assert!(!cmd.contains('\n') && !cmd.contains('\t'), "훅 한 줄에 날 제어문자가 들어갔다 — {cmd:?}");
+        }
+    }
+
+    /// **알림이 어느 파일을 못 돌렸는지 댄다**(moai-wza7). 그 말이 대는 `moai skill status` 는
+    /// 방금 exec 에 실패한 바로 그 바이너리라 그 판에서는 같이 못 돌 수 있다 — 경로가 있으면
+    /// 사람이 그 자리를 바로 본다.
+    ///
+    /// 꼴에 박지 않고 인자로 넘기는 것까지 잰다 — 경로의 `%` 가 변환 문자로 읽히면 그 줄이
+    /// 엉뚱한 글을 낸다.
+    #[test]
+    fn the_notice_names_the_binary_it_could_not_run() {
+        let cmd = command("/tmp/100%/moai", "pre-tool-use");
+        assert!(cmd.contains("'/tmp/100%/moai'"), "경로를 인자로 안 넘긴다 — {cmd}");
+        assert!(!cmd.contains("(exit %s): /tmp/"), "경로를 printf 꼴에 박았다 — {cmd}");
     }
 
     /// **커밋된 플러그인 트리가 지금의 글과 같다.**
