@@ -1717,11 +1717,8 @@ mod tests {
         // **가려진 쌍둥이도 만진 흔적이다**(moai-es40). 머지가 남긴 id 충돌로 `m-0002` 가 둘이고
         // 늦게 만진 쪽이 **앞줄**이면, 뒷줄만 보는 자는 그 워크트리가 쥔 줄을 통째로 잃는다 —
         // `open` 이 `report::started` 로 가려진 줄을 드는 것과 한 자여야 한다([`touched_rows_of`]).
-        let twins = vec![
-            issue("m-0001", "in_progress", early),
-            issue("m-0002", "todo", late),
-            issue("m-0002", "todo", early),
-        ];
+        let twins =
+            vec![issue("m-0001", "in_progress", early), issue("m-0002", "todo", late), issue("m-0002", "todo", early)];
         let sides = [SideFloor::of(side, &twins, &cfg)];
         let trees = workplaces_in(&main, false, &crate::report::Footing::of(&asked, &cfg), &dug(&sides, &floor));
         assert_eq!(
