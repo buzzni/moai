@@ -92,22 +92,76 @@ pub fn pick(env: Option<&str>, setting: Option<&str>) -> Lang {
 /// 앞서 채운 값 **안의** `{이름}` 을 뒤의 짝이 또 채운다: 제목이 `{n}` 인 이슈 하나가 제
 /// 자리에 셈을 받아 들이고 진짜 셈 자리는 사라진다. 그러면 `vars` 의 차례가 결과를 바꾸는
 /// 셈이라, 이름으로 둔 뜻이 거기서 도로 무너진다.
+///
+/// **부르는 쪽이 자리 이름을 어긋나게 적으면 dev 빌드에서 터진다**(moai-gw8r). 표의 `{is}` 를
+/// `{was}` 로 고치거나 여기 넘기는 이름만 갈면 화면에 `{is}` 가 글자 그대로 서는데, 표를 재는
+/// 시험 둘(`english_has_every_key_the_source_asks_for`·
+/// `every_translation_keeps_the_places_english_marks`)은 **부르는 쪽을 안 봐서** 그 자리를 못
+/// 잡는다. 키마다 화면 시험을 다는 것보다 여기 하나에 잡는 자를 두는 쪽이 싸다.
+///
+/// **`debug_assert` 다**(2026-09-23 사용자 결정) — `cargo test` 와 `tests/cli.rs` 가 돌리는
+/// 바이너리에서만 터지고 release 에는 코드가 안 남는다. 사람이 쓰는 판의 행동은 위 그대로다:
+/// 안 채운 자리는 화면에 남고, 아무것도 막지 않으며 종료 코드도 안 바뀐다. 잡는 자가 게이트가
+/// 되면 글자 하나 때문에 도구가 안 도는 셈이 되는데, 그것은 이 모듈이 깨진 JSON 을 빈 표로
+/// 받는 까닭과 같은 자리에서 어긋난다.
+/// 안 채우는 것이 **답인** 자리는 [`fill_lax`] 를 부른다.
 pub fn fill(text: &str, vars: &[(&str, &str)]) -> String {
+    debug_assert!(
+        unfilled(text, vars).is_empty(),
+        "안 채운 자리 {:?} — 부르는 쪽의 이름이 글과 어긋났다: {text:?}",
+        unfilled(text, vars)
+    );
+    fill_lax(text, vars)
+}
+
+/// [`fill`] 에서 잡는 자를 뺀 것 — 안 채운 자리가 남는 것이 답인 자리만 부른다.
+fn fill_lax(text: &str, vars: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(text.len() + 16);
+    scan(text, |piece| match piece {
+        Piece::Plain(said) => out.push_str(said),
+        Piece::Slot { name, raw } => match vars.iter().find(|(n, _)| *n == name) {
+            Some((_, value)) => out.push_str(value),
+            None => out.push_str(raw),
+        },
+    });
+    out
+}
+
+/// 글에는 섰는데 `vars` 에 짝이 없는 자리 이름들. 비어 있으면 그 글은 다 채워진다.
+fn unfilled<'a>(text: &'a str, vars: &[(&str, &str)]) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    scan(text, |piece| {
+        if let Piece::Slot { name, .. } = piece
+            && !vars.iter().any(|(n, _)| *n == name)
+        {
+            out.push(name);
+        }
+    });
+    out
+}
+
+/// [`scan`] 이 내는 토막 — 자리 아닌 글과, 자리 하나(`name` 은 중괄호 안, `raw` 는 통째).
+enum Piece<'a> {
+    Plain(&'a str),
+    Slot { name: &'a str, raw: &'a str },
+}
+
+/// 글을 앞에서부터 한 번 훑어 토막을 차례로 낸다.
+///
+/// **채우는 쪽과 잡는 쪽이 같은 눈으로 읽게 하는 자리다.** 둘이 따로 훑으면 잡는 자가 재는
+/// 것과 화면에 실제로 서는 것이 말없이 갈라진다 — 닫히지 않은 `{` 하나가 한쪽에서는 글자고
+/// 다른 쪽에서는 자리가 되는 식이다.
+fn scan<'a>(text: &'a str, mut take: impl FnMut(Piece<'a>)) {
     let mut rest = text;
     while let Some(at) = rest.find('{') {
-        out.push_str(&rest[..at]);
+        take(Piece::Plain(&rest[..at]));
         rest = &rest[at..];
         // 닫히지 않은 `{` 는 글자다 — 남은 것을 그대로 넘긴다.
         let Some(close) = rest.find('}') else { break };
-        match vars.iter().find(|(name, _)| *name == &rest[1..close]) {
-            Some((_, value)) => out.push_str(value),
-            None => out.push_str(&rest[..=close]),
-        }
+        take(Piece::Slot { name: &rest[1..close], raw: &rest[..=close] });
         rest = &rest[close + 1..];
     }
-    out.push_str(rest);
-    out
+    take(Piece::Plain(rest));
 }
 
 /// 그 언어의 표. 한 번만 읽어 들고 있는다 — 매 줄 JSON 을 다시 푸는 자리가 아니다.
@@ -200,11 +254,42 @@ mod tests {
     fn a_filled_value_is_not_filled_again_and_the_order_does_not_matter() {
         assert_eq!(fill("{title} — {n}건", &[("title", "{n} 를 고친다"), ("n", "3")]), "{n} 를 고친다 — 3건");
         assert_eq!(fill("{title} — {n}건", &[("n", "3"), ("title", "{n} 를 고친다")]), "{n} 를 고친다 — 3건");
-        // 모르는 이름은 그대로 남는다 — 무엇이 안 채워졌는지 그 자리에서 읽힌다.
-        assert_eq!(fill("{a}{b}", &[("a", "1")]), "1{b}");
+        // 모르는 이름은 그대로 남는다 — 화면에서 그 자리를 읽는 사람이 무엇이 안 채워졌는지
+        // 안다. **`fill_lax` 로 잰다**: `fill` 은 이제 dev 빌드에서 이 자리를 터뜨린다.
+        assert_eq!(fill_lax("{a}{b}", &[("a", "1")]), "1{b}");
         // 닫히지 않은 `{` 도 글자다. 자리가 없는 글은 그대로 지난다.
         assert_eq!(fill("{ 열린 채", &[("n", "1")]), "{ 열린 채");
         assert_eq!(fill("자리 없음", &[("n", "1")]), "자리 없음");
+    }
+
+    /// **잡는 자는 채우는 쪽과 같은 눈으로 읽는다**(moai-gw8r) — [`scan`] 하나를 같이 쓴다.
+    ///
+    /// 여기서 재는 것은 그 눈이다: 자리로 세는 것, 글자로 지나는 것, 그리고 채운 값 **안의**
+    /// 중괄호를 다시 안 보는 것. 이것이 어긋나면 잡는 자가 화면에 실제로 서는 것과 다른 것을
+    /// 재게 되고, 그러면 안 터져야 할 자리에서 터져 dev 빌드가 멈춘다.
+    #[test]
+    fn the_catcher_counts_the_same_places_the_filler_does() {
+        assert_eq!(unfilled("{a}{b}", &[("a", "1")]), ["b"], "안 채운 자리를 못 봤다");
+        assert!(unfilled("{a}{b}", &[("b", "2"), ("a", "1")]).is_empty(), "차례가 결과를 바꿨다");
+        // 닫히지 않은 `{` 는 글자다 — 자리로 세면 안 터져야 할 자리에서 터진다.
+        assert!(unfilled("{ 열린 채", &[]).is_empty());
+        assert!(unfilled("자리 없음", &[("n", "1")]).is_empty(), "안 쓴 이름은 안 채운 자리가 아니다");
+        // **채운 값은 다시 안 본다** — 제목이 `{n}` 인 이슈가 제 값으로 드는 자리다.
+        assert!(unfilled("{title}", &[("title", "{n} 를 고친다")]).is_empty());
+        assert_eq!(unfilled("{a}{a}", &[]), ["a", "a"], "같은 자리가 둘이면 둘 다 안 채워진다");
+    }
+
+    /// **어긋난 이름은 dev 빌드에서 터진다**(moai-gw8r, 2026-09-23 사용자 결정).
+    ///
+    /// 표의 `{is}` 를 두고 부르는 쪽이 `("was", …)` 로 채우면 화면에 `{is}` 가 글자 그대로
+    /// 서는데, 표를 재는 시험 둘은 부르는 쪽을 안 봐 그것을 못 잡는다. release 에는 이 자가
+    /// 안 남으므로(`debug_assertions`), 이 시험도 dev 빌드에서만 선다 — 사람이 쓰는 판에서는
+    /// 자리가 그대로 남고 아무것도 안 막는다.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "안 채운 자리")]
+    fn a_name_that_does_not_match_the_text_blows_up_in_a_dev_build() {
+        fill("{is} 가 섰다", &[("was", "1")]);
     }
 
     /// **없는 키는 영어로 떨어지고, 영어에도 없으면 키 그대로 난다.** 빈 줄은 무엇이
