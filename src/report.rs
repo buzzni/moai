@@ -3218,19 +3218,38 @@ pub struct Unreadable<'a> {
 }
 
 /// `unreadable` 은 읽다 만난 못 읽는 줄이다 — 저장소가 아니라 부르는 쪽이 준다.
-pub fn status(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
+///
+/// `zone` 은 **읽는 사람의 시간대**다([`status_in`] 이 까닭을 적는다).
+pub fn status(
+    issues: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
-    status_in(issues, unreadable, cfg, now, &Soil::of(issues))
+    status_in(issues, unreadable, cfg, now, zone, &Soil::of(issues))
 }
 
 /// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고
 /// 이미 쟀으므로, 경고 셈에서 다시 재면 같은 걸음을 두 벌 걷는다(moai-u5o9).
+///
+/// **`zone` 은 자료로 받는다**(moai-h2th, 2026-09-22 사용자 결정). 기한은 달력의 날이라 "오늘" 이
+/// 어디냐를 알아야 판정이 서는데, 같은 화면의 `생성`·`시작` 은 이미 읽는 사람의 시간대로 그려진다
+/// (`view::stamp`) — 판정만 UTC 로 두면 `TZ=Asia/Seoul` 의 00시~09시 세션이 매일 하루씩 어긋난다.
+/// 전역에 "오늘" 을 하나 두는 길은 안 골랐다: CLI 는 `TZ`·`/etc/localtime` 을 보고 탐색기는
+/// `[tui] timezone` 을 보아 **두 표면의 시간대가 실제로 다르고**, 전역 하나는 그 갈림을 못 담는다.
+/// 받은 값만으로 답이 정해지므로 `&[Issue]` 에 대한 순수 함수라는 계약도 그대로다.
+///
+/// **나이는 안 옮긴다.** `days_since` 가 재는 것은 흐른 시간이고 흐른 시간에는 시간대가 없다 —
+/// `now` 를 통째로 옮기면 모든 나이가 시간대 폭만큼 부풀어 하루씩 늘어난다.
 pub fn status_in<'a>(
     issues: &'a [Issue],
     unreadable: &[Unreadable],
     cfg: &Config,
     now: &str,
+    zone: &crate::tz::Zone,
     soil: &Soil<'a>,
 ) -> StatusReport {
     let group = &soil.epic;
@@ -3631,6 +3650,10 @@ pub fn status_in<'a>(
     //      크기만 싣고 갈래로 뜻을 가르면 `ages` 한 자리에 정반대의 두 뜻이 앉아, `kind` 를 같이
     //      안 보는 `--json` 쪽이 "2일 지남" 과 "2일 남음" 을 같은 값으로 읽는다.
     {
+        // **읽는 사람의 달로 잰다**(moai-h2th). `zone.shift` 는 꼴을 안 바꾸므로 그대로
+        // [`crate::model::days_until`] 에 든다. 고리 밖에서 한 번만 옮긴다 — 마일스톤마다 옮기면
+        // 같은 값을 줄 수만큼 다시 짓는다.
+        let today = zone.shift(now);
         let (mut overdue, mut soon): (Vec<(&Issue, i64)>, Vec<(&Issue, i64)>) = (Vec::new(), Vec::new());
         for m in issues.iter().filter(|i| i.kind == Kind::Milestone) {
             let id = m.id.as_str();
@@ -3639,7 +3662,9 @@ pub fn status_in<'a>(
             }
             // 꼴이 틀린 값은 말없이 넘긴다 — 쓰기가 이미 거절하므로 여기 오는 것은 손으로 푼
             // 줄뿐이고, 그것은 `unknown_field` 가 아니라 그 줄을 고칠 때 드러난다.
-            let Some(left) = m.due_on.as_deref().and_then(|d| crate::model::days_until(d, now)) else { continue };
+            let Some(left) = m.due_on.as_deref().and_then(|d| crate::model::days_until(d, &today)) else {
+                continue;
+            };
             match left {
                 d if d < 0 => overdue.push((m, d)),
                 d if d <= cfg.status.due_days => soon.push((m, d)),
@@ -3730,6 +3755,13 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 시험의 바탕 시간대 — 저장된 그대로다. 여기 쓰는 `now` 가 모두 UTC 로 적혀 있어, 옮기는
+    /// 시간대를 들면 기한 말고도 이 파일의 모든 시각이 함께 움직인다. 옮겨서 갈리는 것은
+    /// [`a_deadline_is_read_in_the_reader_s_day`] 가 따로 잰다.
+    fn utc() -> &'static crate::tz::Zone {
+        crate::tz::Zone::stored()
     }
 
     /// 아무것도 안 적은 저장소가 받는 문턱. **기본값을 여기 다시 적지 않는다** —
@@ -4191,7 +4223,7 @@ mod tests {
         // 여기 들어가는 순간 남의 세션이 워크트리를 치우는 것만으로 제 세션이 붙들린다 — 경고가
         // 게이트가 되는 자리다(CLAUDE.md). 옮겨 놓아도 모든 시험이 푸른 채로 지나가던 자리라
         // 여기서 못박는다.
-        let st = status(&issues, &[], &cfg(), now);
+        let st = status(&issues, &[], &cfg(), now, utc());
         assert!(!st.warnings.iter().chain(&st.notices).any(|w| w.kind == "stranded"), "{:?}", st.warnings);
     }
 
@@ -4201,7 +4233,7 @@ mod tests {
     fn a_row_folded_under_a_lost_thought_is_not_loose() {
         let now = "2026-09-11T00:00:00Z";
         let loose = |issues: &[Issue]| -> Vec<String> {
-            status(issues, &[], &cfg(), now)
+            status(issues, &[], &cfg(), now, utc())
                 .warnings
                 .iter()
                 .find(|w| w.kind == "no_epic")
@@ -4285,7 +4317,7 @@ mod tests {
         assert_eq!(bad.get("argos-0005"), Some(&Misplace::Milestone), "{bad:?}");
         assert!(!bad.contains_key("argos-0002"), "멀쩡한 줄을 걸었다 — {bad:?}");
 
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(kinds.contains(&"dangling_epic"), "{kinds:?}");
         assert!(kinds.contains(&"dangling_milestone"), "{kinds:?}");
@@ -4303,7 +4335,7 @@ mod tests {
         issue_with_bad_milestone.milestone = Some("argos-gone".into());
         let issues = vec![epic, issue_with_bad_milestone];
 
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let ids: Vec<&String> =
             st.warnings.iter().filter(|w| w.kind.starts_with("dangling")).flat_map(|w| w.ids.iter()).collect();
         assert!(ids.iter().any(|id| *id == "argos-e001"), "에픽의 망가진 epic 을 안 말한다 — {ids:?}");
@@ -4321,7 +4353,7 @@ mod tests {
             i.priority = Some(p);
             rows.push(i);
         }
-        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "dangling_epic").expect("경고가 없다");
         assert_eq!(w.ids.first().map(String::as_str), Some("argos-zzz9"), "{:?}", w.ids);
     }
@@ -4333,7 +4365,7 @@ mod tests {
         let mut bad = make("argos-0005", Kind::Issue, "todo");
         bad.milestone = Some("argos-0002".into()); // 에픽이다
         let issues = vec![make("argos-0001", Kind::Milestone, "todo"), make("argos-0002", Kind::Epic, "todo"), bad];
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let no_mile = st.warnings.iter().find(|w| w.kind == "no_milestone");
         assert!(
             no_mile.is_some_and(|w| w.ids.contains(&"argos-0005".to_string())),
@@ -4473,7 +4505,7 @@ mod tests {
         stuck.blocked_by = vec!["argos-0001".into()];
         stuck.status_since = "2026-09-01T00:00:00Z".to_string(); // 열흘
         let issues = vec![make("argos-0001", Kind::Issue, "todo"), stuck];
-        let st = status(&issues, &[], &cfg(), now);
+        let st = status(&issues, &[], &cfg(), now, utc());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("경고가 없다");
         assert_eq!(w.ids, ["argos-0002"]);
 
@@ -4482,7 +4514,7 @@ mod tests {
         fresh.blocked_by = vec!["argos-0001".into()];
         fresh.status_since = now.to_string();
         let issues = vec![make("argos-0001", Kind::Issue, "todo"), fresh];
-        let st = status(&issues, &[], &cfg(), now);
+        let st = status(&issues, &[], &cfg(), now, utc());
         assert!(st.warnings.iter().all(|w| w.kind != "blocked_stale"));
     }
 
@@ -4498,8 +4530,9 @@ mod tests {
             x.blocked_by = vec![by.into()];
             x
         };
-        let stale =
-            |issues: &[Issue]| status(issues, &[], &cfg(), now).warnings.iter().any(|w| w.kind == "blocked_stale");
+        let stale = |issues: &[Issue]| {
+            status(issues, &[], &cfg(), now, utc()).warnings.iter().any(|w| w.kind == "blocked_stale")
+        };
         let epic = || make("argos-0001", Kind::Epic, "todo");
         let finished = || member("argos-0002", "argos-0001", "done");
 
@@ -4567,7 +4600,7 @@ mod tests {
         blocker.status_since = "2026-09-26T00:00:00Z".into();
         let mut stuck = make("argos-0002", Kind::Issue, "todo");
         stuck.blocked_by = vec!["argos-0001".into()];
-        let st = status(&[blocker, stuck], &[], &cfg(), now);
+        let st = status(&[blocker, stuck], &[], &cfg(), now, utc());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
         assert_eq!(w.ages.get("argos-0002"), Some(&5), "칸 나이를 댔다 — {w:?}");
         assert_eq!(w.ages.len(), w.ids.len());
@@ -4575,7 +4608,7 @@ mod tests {
         // 칸 나이로 거는 경고는 칸 나이를 싣는다.
         let mut picked = make("argos-0003", Kind::Issue, "in_progress");
         picked.status_since = "2026-09-11T00:00:00Z".into();
-        let st = status(&[picked], &[], &cfg(), now);
+        let st = status(&[picked], &[], &cfg(), now, utc());
         let w = st.warnings.iter().find(|w| w.kind == "stale_progress").expect("잊은 것 경고가 없다");
         assert_eq!(w.ages.get("argos-0003"), Some(&20));
 
@@ -4584,14 +4617,14 @@ mod tests {
         front.status_since = "2026-09-21T00:00:00Z".into(); // 10일
         let mut back = make("argos-0005", Kind::Issue, "review");
         back.status_since = "2026-09-27T00:00:00Z".into(); // 4일
-        let st = status(&[front, back], &[], &cfg(), now);
+        let st = status(&[front, back], &[], &cfg(), now, utc());
         let w = st.warnings.iter().find(|w| w.kind == "stale_review").expect("썩는 review 경고가 없다");
         assert_eq!(w.ages.get("argos-0005"), Some(&4), "앞줄 나이를 뒷줄 옆에 댔다");
 
         // 날짜로 안 거는 경고는 안 싣는다 — JSON 에서 키가 사라진다.
         let mut blocked = make("argos-0004", Kind::Issue, "todo");
         blocked.blocked_by = vec!["argos-9999".into()];
-        let st = status(&[blocked], &[], &cfg(), now);
+        let st = status(&[blocked], &[], &cfg(), now, utc());
         let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("끊긴 막음 경고가 없다");
         assert!(w.ages.is_empty());
         assert!(!serde_json::to_string(w).unwrap().contains("\"ages\""));
@@ -4609,7 +4642,7 @@ mod tests {
             x
         };
         let aged = |issues: &[Issue], id: &str| {
-            let st = status(issues, &[], &cfg(), now);
+            let st = status(issues, &[], &cfg(), now, utc());
             let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
             w.ages.get(id).copied()
         };
@@ -4672,7 +4705,7 @@ mod tests {
     fn status_warns_about_a_dangling_blocker() {
         let mut i = make("argos-0001", Kind::Issue, "todo");
         i.blocked_by = vec!["argos-9999".into()];
-        let st = status(&[i], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&[i], &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "dangling_blocked_by").expect("경고가 없다");
         assert_eq!(w.ids, ["argos-0001"]);
     }
@@ -5009,7 +5042,7 @@ mod tests {
     #[test]
     fn the_board_says_a_milestone_is_running_and_counts_what_waits_outside() {
         let issues = with_milestone(true);
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.notices.iter().find(|w| w.kind == "milestone_focus").expect("알림이 없다");
         assert!(w.notice && !w.fatal, "{w:?}");
         assert_eq!(w.ids, ["argos-m001"], "{w:?}");
@@ -5019,7 +5052,7 @@ mod tests {
             "알림이 경고로 섰다 — 세션을 붙드는 자리가 된다"
         );
         // 안 도는 저장소에는 줄이 없다.
-        let quiet = status(&with_milestone(false), &[], &cfg(), "2026-09-11T00:00:00Z");
+        let quiet = status(&with_milestone(false), &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(!quiet.notices.iter().any(|w| w.kind == "milestone_focus"), "{:?}", quiet.notices);
         // **밖에 남은 것이 없으면 도는 중이어도 말하지 않는다**(리뷰 6) — `밖에 남은 일 0건`
         // 은 아무것도 안 말하면서 자리만 차지한다. 도는 것은 마일스톤 표가 이미 낸다.
@@ -5028,7 +5061,7 @@ mod tests {
             i.retain(|x| !x.id.starts_with("argos-000")); // 밖의 줄을 치운다
             i
         };
-        let bare = status(&only, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let bare = status(&only, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(!bare.notices.iter().any(|w| w.kind == "milestone_focus"), "0 건을 말했다 — {:?}", bare.notices);
     }
 
@@ -5109,7 +5142,7 @@ mod tests {
     #[test]
     fn a_clean_repo_warns_about_nothing() {
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert!(st.warnings.is_empty(), "{:?}", kinds(&st));
         assert!(!st.broken());
     }
@@ -5118,14 +5151,14 @@ mod tests {
     #[test]
     fn loose_issues_are_the_headline() {
         let issues: Vec<Issue> = (0..5).map(|n| make(&format!("argos-000{n}"), Kind::Issue, "todo")).collect();
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert_eq!(kinds(&st), ["no_epic"]);
         assert_eq!(st.warnings[0].count, 5);
         assert_eq!(st.warnings[0].hint.as_deref(), Some("moai show -e none"));
 
         // 끝난 것은 세지 않는다 — 이미 지나간 일이다
         let done: Vec<Issue> = (0..5).map(|n| make(&format!("argos-000{n}"), Kind::Issue, "done")).collect();
-        assert!(status(&done, &[], &cfg(), "2026-09-01T00:00:00Z").warnings.is_empty());
+        assert!(status(&done, &[], &cfg(), "2026-09-01T00:00:00Z", utc()).warnings.is_empty());
     }
 
     /// 게이트를 없앤 대가는 review 가 썩는 것이다. 날짜로 잰다.
@@ -5133,9 +5166,9 @@ mod tests {
     fn review_rot_is_measured_in_days() {
         let i = at(make("argos-0001", Kind::Issue, "review"), "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z");
         let issues = vec![i];
-        let early = status(&issues, &[], &cfg(), "2026-09-03T00:00:00Z");
+        let early = status(&issues, &[], &cfg(), "2026-09-03T00:00:00Z", utc());
         assert!(!kinds(&early).contains(&"stale_review"));
-        let st = status(&issues, &[], &cfg(), "2026-09-06T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-06T00:00:00Z", utc());
         assert!(kinds(&st).contains(&"stale_review"), "{:?}", kinds(&st));
         assert_eq!(st.warnings.iter().find(|w| w.kind == "stale_review").unwrap().days, Some(3));
     }
@@ -5143,11 +5176,11 @@ mod tests {
     #[test]
     fn too_much_at_once_is_named() {
         let issues: Vec<Issue> = (0..4).map(|n| make(&format!("argos-000{n}"), Kind::Issue, "in_progress")).collect();
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "wip_overload").unwrap();
         assert_eq!((w.count, w.limit), (4, Some(3)));
         // 셋까지는 말하지 않는다
-        let three = status(&issues[..3], &[], &cfg(), "2026-09-01T00:00:00Z");
+        let three = status(&issues[..3], &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert!(!kinds(&three).contains(&"wip_overload"));
     }
 
@@ -5158,7 +5191,7 @@ mod tests {
             make("argos-0002", Kind::Epic, "in_progress"), // 다 끝났고 적힌 칸은 안 닫힘
             member("argos-0003", "argos-0002", "done"),
         ];
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         let k = kinds(&st);
         // 다 끝난 묶음은 읽은 칸이 곧 done 이라 꾸짖을 것이 없다(moai-j3b3).
         assert_eq!(k, ["empty_epic"], "{k:?}");
@@ -5170,14 +5203,14 @@ mod tests {
         let mut dangling = make("argos-0001", Kind::Issue, "todo");
         dangling.epic = Some("argos-9999".into());
         let issues = vec![dangling, make("argos-0002.aaa", Kind::Issue, "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         let k = kinds(&st);
         assert!(k.contains(&"dangling_epic") && k.contains(&"orphan_child"), "{k:?}");
         assert!(!st.broken(), "드러낼 것을 깨진 것으로 셌다");
 
         let dup = vec![make("argos-0001", Kind::Issue, "todo"), make("argos-0001", Kind::Issue, "todo")];
-        assert!(status(&dup, &[], &cfg(), "2026-09-01T00:00:00Z").broken());
-        assert!(status(&[], &[Unreadable { id: None }], &cfg(), "2026-09-01T00:00:00Z").broken());
+        assert!(status(&dup, &[], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
+        assert!(status(&[], &[Unreadable { id: None }], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
     }
 
     /// 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
@@ -5190,7 +5223,7 @@ mod tests {
             // 창 밖 — 안 센다
             at(make("argos-0004", Kind::Issue, "todo"), "2026-08-01T00:00:00Z", "2026-08-01T00:00:00Z"),
         ];
-        let st = status(&issues, &[], &cfg(), "2026-09-10T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-10T00:00:00Z", utc());
         assert_eq!(st.flow, Flow { days: 7, created: 3, done: 1, net: 2 });
     }
 
@@ -5198,7 +5231,7 @@ mod tests {
     #[test]
     fn the_board_counts_work_not_epics() {
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
     }
@@ -5363,7 +5396,7 @@ mod tests {
             make("argos-0001", Kind::Epic, "todo"),
             member("argos-0002", "argos-0001", "todo"),
         ];
-        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
         assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
@@ -5373,13 +5406,13 @@ mod tests {
     #[test]
     fn milestones_stay_quiet_until_used() {
         let plain = vec![make("argos-0001", Kind::Issue, "todo")];
-        let st = status(&plain, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&plain, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert!(st.milestones.is_empty());
         assert!(!kinds(&st).contains(&"no_milestone"), "{:?}", kinds(&st));
 
         let mut used = plain.clone();
         used.push(make("argos-m001", Kind::Milestone, "todo"));
-        let st = status(&used, &[], &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&used, &[], &cfg(), "2026-09-01T00:00:00Z", utc());
         assert_eq!(st.milestones.len(), 1);
         assert!(kinds(&st).contains(&"no_milestone"));
     }
@@ -5446,7 +5479,7 @@ mod tests {
         // 못 쓸 참조로 드러난다 — 가리키는 에픽은 멀쩡해도 그 필드는 아무 자리도 안 정한다.
         assert_eq!(broken(&issues).get("argos-0001"), Some(&Misplace::Epic));
         assert!(
-            !status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z")
+            !status(&issues, &[], &cfg(), "2026-09-01T00:00:00Z", utc())
                 .warnings
                 .iter()
                 .any(|w| w.kind == "no_epic" && w.ids.iter().any(|i| i.starts_with("argos-0001.")))
@@ -5946,7 +5979,7 @@ mod tests {
     #[test]
     fn an_idea_is_not_counted_on_the_board() {
         let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert_eq!(st.total, 1, "idea 를 이슈로 셌다");
         assert_eq!(st.counts.get("todo"), Some(&1), "{:?}", st.counts);
     }
@@ -5967,7 +6000,7 @@ mod tests {
     #[test]
     fn an_idea_without_an_epic_is_not_a_warning() {
         let issues: Vec<Issue> = (0..9).map(|n| idea(&format!("argos-000{n}"))).collect();
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"no_epic"), "{kinds:?}");
     }
@@ -5979,7 +6012,7 @@ mod tests {
         let mut old = idea("argos-0001");
         old.status = Status::new("review");
         let issues = vec![old];
-        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"stale_review"), "{kinds:?}");
         assert!(!kinds.contains(&"stale_progress"), "{kinds:?}");
@@ -5991,7 +6024,7 @@ mod tests {
     #[test]
     fn the_flow_line_counts_work_only() {
         let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z", utc());
         assert_eq!(st.flow.created, 1, "{:?}", st.flow);
     }
     /// **쌓이는 것 자체는 문제가 아니고, 쌓인 줄 모르는 것이 문제다.** 담는
@@ -5999,7 +6032,7 @@ mod tests {
     #[test]
     fn a_pile_of_ideas_shows_up_in_status() {
         let quiet: Vec<Issue> = (0..IDEA_PILE - 1).map(|n| idea(&format!("argos-000{n}"))).collect();
-        let st = status(&quiet, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&quiet, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(
             !st.notices.iter().any(|w| w.kind == "idea_pile"),
             "몇 개 안 되는데 벌써 말한다 — 담을 때마다 잔소리가 는다"
@@ -6007,7 +6040,7 @@ mod tests {
 
         let mut piled = quiet;
         piled.push(idea("argos-0009"));
-        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.notices.iter().find(|w| w.kind == "idea_pile").expect("쌓였는데 아무 말도 안 한다");
         assert_eq!(w.count, IDEA_PILE);
         assert_eq!(w.oldest, Some(10), "가장 오래된 것의 나이를 안 말한다 — {w:?}");
@@ -6025,7 +6058,7 @@ mod tests {
     fn a_promoted_idea_leaves_the_pile() {
         let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
         piled[0].status = Status::new("done");
-        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(!st.notices.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.notices);
     }
     /// **알림은 경고 수에 안 든다.** 배너가 "드러난 것 N건" 이라 말하는데
@@ -6033,7 +6066,7 @@ mod tests {
     #[test]
     fn a_notice_is_not_counted_among_the_warnings() {
         let piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
-        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(st.warnings.is_empty(), "알림이 고칠 것 자리에 섰다 — {:?}", st.warnings);
         assert_eq!(st.notices.len(), 1, "{:?}", st.notices);
         assert!(!st.broken(), "알림으로 비영 종료한다");
@@ -6056,7 +6089,7 @@ mod tests {
     #[test]
     fn a_deferred_issue_is_not_counted_on_the_board() {
         let issues = vec![deferred("argos-0001", "todo"), make("argos-0009", Kind::Issue, "todo")];
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert_eq!(st.total, 1, "미룬 것을 보드가 셌다");
         assert_eq!(st.counts.get("todo"), Some(&1), "{:?}", st.counts);
     }
@@ -6068,7 +6101,7 @@ mod tests {
         let issues: Vec<Issue> = (0..9)
             .map(|n| deferred(&format!("argos-000{n}"), if n % 2 == 0 { "in_progress" } else { "review" }))
             .collect();
-        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         for quiet in ["wip_overload", "stale_progress", "stale_review", "no_epic"] {
             assert!(!kinds.contains(&quiet), "{quiet} 가 미룬 것을 셌다 — {kinds:?}");
@@ -6082,7 +6115,7 @@ mod tests {
         let mut blocked = deferred("argos-0009", "todo");
         blocked.blocked_by = vec!["argos-0001".into()];
         let issues = vec![make("argos-0001", Kind::Issue, "todo"), blocked];
-        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"blocked_stale"), "{kinds:?}");
     }
@@ -6105,10 +6138,47 @@ mod tests {
     fn a_deferred_thought_leaves_the_pile_for_its_own_line() {
         let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
         piled[0].deferred_at = Some("2026-09-01T00:00:00Z".into());
-        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"idea_pile"), "숨길 것을 세었다 — {kinds:?}");
         assert!(kinds.contains(&"deferred"), "제 이름으로도 안 말한다 — {kinds:?}");
+    }
+
+    /// **기한은 읽는 사람의 달로 판정한다**(moai-h2th). 같은 화면의 `생성`·`시작` 이 이미
+    /// 그 사람의 시간대로 그려지므로(`view::stamp`), 판정만 UTC 로 두면 한 줄 안에서 시계 둘이
+    /// 돈다 — 서울의 00시~09시 세션이 매일 하루씩 어긋난다.
+    ///
+    /// **나이는 안 옮긴다**(이 시험이 함께 잰다). `days_since` 가 재는 것은 흐른 시간이고
+    /// 흐른 시간에는 시간대가 없다 — `now` 를 통째로 옮기면 여기 모든 나이가 같이 부푼다.
+    #[test]
+    fn a_deadline_is_read_in_the_reader_s_day() {
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let mut stone = make("argos-0001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-09-11".into());
+        // 멤버가 있어야 마일스톤이 끝난 것으로 안 읽힌다.
+        // 멤버를 벌여 둔 채로 둔다 — 아래에서 칸 나이(`stale_progress`)가 안 옮겨졌는지를 이 줄로 잰다.
+        let mut inside = make("argos-0002", Kind::Issue, "in_progress");
+        inside.milestone = Some("argos-0001".into());
+        let issues = vec![stone, inside];
+
+        let ages = |zone: &crate::tz::Zone, kind: &str| -> Option<i64> {
+            let st = status(&issues, &[], &cfg(), now, zone);
+            st.warnings.iter().find(|w| w.kind == kind).and_then(|w| w.ages.get("argos-0001").copied())
+        };
+        assert_eq!(ages(utc(), "milestone_due_soon"), Some(0), "UTC 에서는 오늘이 기한이다");
+        assert_eq!(ages(utc(), "milestone_overdue"), None);
+        assert_eq!(ages(&seoul, "milestone_overdue"), Some(-1), "서울에서는 어제 지났다");
+        assert_eq!(ages(&seoul, "milestone_due_soon"), None);
+
+        // 같은 셈의 나이는 시간대를 안 탄다 — 옮긴 것은 기한 판정뿐이다.
+        let age_of = |zone: &crate::tz::Zone| -> Option<i64> {
+            let st = status(&issues, &[], &cfg(), now, zone);
+            st.warnings.iter().find(|w| w.kind == "stale_progress").and_then(|w| w.ages.get("argos-0002").copied())
+        };
+        assert_eq!(age_of(utc()), Some(10), "잴 나이가 없으면 아래 줄이 헛돈다");
+        assert_eq!(age_of(&seoul), age_of(utc()), "시간대가 칸 나이까지 옮겼다");
     }
 
     /// 미루는 길은 무엇이든 받는다. 드러내는 자리가 `is_work` 로 좁히면
@@ -6118,7 +6188,7 @@ mod tests {
     fn a_deferred_grouping_is_still_named() {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
-        let st = status(&[epic], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&[epic], &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.notices.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
         assert_eq!(w.count, 1);
         assert!(w.notice);
@@ -6132,7 +6202,7 @@ mod tests {
         let mut shelved = member("argos-0002", "argos-0001", "done");
         shelved.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), shelved, member("argos-0003", "argos-0001", "done")];
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let rolls = rollup(&issues, &cfg());
         let r = roll_of(&rolls, Some("argos-0001"));
         assert_eq!(st.counts.get("done"), Some(&2), "미뤘다 끝낸 줄을 보드가 잃었다 — {:?}", st.counts);
@@ -6151,12 +6221,12 @@ mod tests {
     #[test]
     fn deferring_does_not_rewrite_what_already_happened() {
         let issues: Vec<Issue> = (0..5).map(|n| make(&format!("argos-000{n}"), Kind::Issue, "todo")).collect();
-        let before = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z").flow;
+        let before = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z", utc()).flow;
         let mut after = issues;
         for i in after.iter_mut().take(3) {
             i.deferred_at = Some("2026-09-02T00:00:00Z".into());
         }
-        let after = status(&after, &[], &cfg(), "2026-09-02T00:00:00Z").flow;
+        let after = status(&after, &[], &cfg(), "2026-09-02T00:00:00Z", utc()).flow;
         assert_eq!(before.created, 5, "{before:?}");
         assert_eq!(after.created, before.created, "미루자 만든 사실이 사라졌다 — {after:?}");
         assert_eq!(after.net, before.net, "{after:?}");
@@ -6184,7 +6254,7 @@ mod tests {
         assert_eq!(picks(&issues), ["argos-0009"], "미룬 에픽의 멤버가 집을 일로 올라왔다");
         assert!(wip(&issues, &cfg()).is_empty(), "미룬 에픽의 멤버를 벌여 놓은 것으로 셌다");
 
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert_eq!(st.total, 1, "미룬 에픽의 멤버를 보드가 셌다 — {:?}", st.counts);
         let w = st.notices.iter().find(|w| w.kind == "deferred").expect("미룬 것을 안 말한다");
         assert_eq!(w.count, 3, "물려받은 것을 안 세면 `--deferred` 가 내는 수와 어긋난다");
@@ -6222,7 +6292,7 @@ mod tests {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let issues = vec![epic, member("argos-0002", "argos-0001", "done")];
-        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert_eq!(st.counts.get("done"), Some(&1), "{:?}", st.counts);
     }
 
@@ -6311,13 +6381,13 @@ mod tests {
     fn an_unreadable_line_reusing_a_live_id_is_a_duplicate() {
         let issues = vec![make("argos-0001", Kind::Issue, "todo")];
         let clash = [Unreadable { id: Some("argos-0001") }];
-        let st = status(&issues, &clash, &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &clash, &cfg(), "2026-09-01T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "duplicate_id").expect("중복을 못 봤다");
         assert_eq!(w.ids, ["argos-0001"]);
         assert!(w.fatal);
 
         let apart = [Unreadable { id: Some("argos-0002") }, Unreadable { id: None }];
-        let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z");
+        let st = status(&issues, &apart, &cfg(), "2026-09-01T00:00:00Z", utc());
         assert!(!st.warnings.iter().any(|w| w.kind == "duplicate_id"), "{:?}", st.warnings);
     }
 
@@ -6348,7 +6418,8 @@ mod tests {
         late_start.started_at = Some("2099-01-01T00:00:00Z".into());
         let mut late_finish = at("argos-0007", "");
         late_finish.done_at = Some("2099-01-01T00:00:00Z".into());
-        let st = status(&[typo, skewed, plain, late_deferral, late_plan, late_start, late_finish], &[], &cfg(), now);
+        let st =
+            status(&[typo, skewed, plain, late_deferral, late_plan, late_start, late_finish], &[], &cfg(), now, utc());
 
         let w = st.warnings.iter().find(|w| w.kind == "future_timestamp").expect("먼 미래 시각을 안 말한다");
         assert_eq!(w.ids, ["argos-0001", "argos-0004", "argos-0005", "argos-0006", "argos-0007"], "{w:?}");
@@ -6357,7 +6428,7 @@ mod tests {
         assert_eq!(st.flow.created, 2, "{:?}", st.flow);
 
         // 문턱 안이면 말하지 않는다.
-        let ok = status(&[at("argos-0002", "2026-09-11T23:59:00Z")], &[], &cfg(), now);
+        let ok = status(&[at("argos-0002", "2026-09-11T23:59:00Z")], &[], &cfg(), now, utc());
         assert!(!ok.warnings.iter().any(|w| w.kind == "future_timestamp"), "{:?}", ok.warnings);
     }
 
@@ -6371,14 +6442,14 @@ mod tests {
         thought.milestone = Some("argos-zzzz".into());
         let mut stone = make("argos-0000", Kind::Milestone, "todo");
         stone.milestone = Some("argos-zzzz".into());
-        let st = status(&[thought, stone], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&[thought, stone], &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "dangling_milestone").expect("경고가 없다");
         assert_eq!((w.ids.as_slice(), w.count), (&["argos-0000".to_string()][..], 1), "{w:?}");
 
         let mut orphan = make("argos-0009.aaa", Kind::Issue, "todo");
         orphan.blocked_by = vec!["argos-gone".into()];
         let thrice = vec![orphan.clone(), orphan.clone(), orphan];
-        let st = status(&thrice, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&thrice, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         for kind in ["orphan_child", "dangling_blocked_by", "duplicate_id"] {
             let w = st.warnings.iter().find(|w| w.kind == kind).unwrap_or_else(|| panic!("{kind} 가 없다"));
             assert_eq!((w.ids.as_slice(), w.count), (&["argos-0009.aaa".to_string()][..], 1), "{w:?}");
@@ -6390,7 +6461,7 @@ mod tests {
             .iter()
             .map(|id| make(id, Kind::Issue, "in_progress"))
             .collect();
-        let st = status(&held, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&held, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(!st.warnings.iter().any(|w| w.kind == "wip_overload"), "{:?}", st.warnings);
         let loose: Vec<Issue> = ["argos-0201", "argos-0202", "argos-0203", "argos-0204", "argos-0204"]
             .iter()
@@ -6398,7 +6469,7 @@ mod tests {
             .chain((0..30).map(|n| member(&format!("argos-1{n:03}"), "argos-e001", "todo")))
             .chain([make("argos-e001", Kind::Epic, "todo")])
             .collect();
-        let st = status(&loose, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&loose, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(!st.warnings.iter().any(|w| w.kind == "no_epic"), "{:?}", st.warnings);
     }
 
@@ -6429,7 +6500,7 @@ mod tests {
         shadowed.epic = Some("argos-e002".into());
         let loose_thought = make("argos-0003", Kind::Idea, "todo");
         let rows = vec![stone, placed, member, shadowed, loose_thought];
-        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         for kind in ["no_epic", "no_milestone"] {
             let named =
                 st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
@@ -6489,7 +6560,7 @@ mod tests {
             .map(|id| make(id, Kind::Issue, "in_progress"))
             .collect();
         rows.push(make("argos-0004", Kind::Epic, "todo"));
-        let st = status(&rows, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&rows, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         assert!(
             !st.warnings.iter().any(|w| w.kind == "wip_overload"),
             "가려진 줄을 벌인 일로 셌다 — {:?}",
@@ -6525,7 +6596,7 @@ mod tests {
         let mut blocked = make("argos-0002", Kind::Issue, "todo");
         blocked.blocked_by = vec!["argos-0001".into()];
         let issues = vec![deferred("argos-0001", "todo"), blocked];
-        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"blocked_stale"), "{kinds:?}");
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("{kinds:?}");
@@ -6575,7 +6646,7 @@ mod tests {
                 ("argos-0005", &["argos-0003"][..], &["argos-0003"][..])
             ]
         );
-        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z");
+        let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막혔다고 안 한다");
         assert_eq!(w.ids, ["argos-0004", "argos-0005"]);
 
@@ -6661,7 +6732,7 @@ mod tests {
         stone.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.milestone = Some("argos-0001".into());
-        let st = status(&[stone, epic], &[], &cfg(), "2026-09-11T00:00:00Z");
+        let st = status(&[stone, epic], &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"empty_epic"), "{kinds:?}");
     }
@@ -6706,7 +6777,7 @@ mod tests {
         let mut issues = vec![make("argos-0001", Kind::Epic, "todo"), make("argos-0099", Kind::Issue, "todo")];
         issues.extend((2..=10).map(|n| member(&format!("argos-{n:04}"), "argos-0001", "todo")));
         let no_epic = |issues: &[Issue]| {
-            status(issues, &[], &cfg(), "2026-09-11T00:00:00Z").warnings.iter().any(|w| w.kind == "no_epic")
+            status(issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc()).warnings.iter().any(|w| w.kind == "no_epic")
         };
         assert!(!no_epic(&issues), "미루기 전부터 경고가 섰다 — 시험이 헛돈다");
         issues[0].deferred_at = Some("2026-09-01T00:00:00Z".into());

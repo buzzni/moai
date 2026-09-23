@@ -179,7 +179,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             .iter()
             .map(|p| {
                 let seen = p.seen(|repo, load| {
-                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug());
+                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug(), ctx.zone());
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
@@ -209,7 +209,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     }
     refuse_without_terminal(ctx.lang())?;
     let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
-    let mut app = App::on_projects(layer);
+    // **시간대도 여기서 준다**(리뷰) — 이 줄이 첫 쓸기를 띄우고(`App::on_projects_in` → `Layer::launch`),
+    // 그 스레드는 지금 선 시간대를 한 벌 베껴 간다. 아래 `adopt_look` 까지 기다리면 첫 화면의 `+N`
+    // 만 UTC 로 기한을 재고, 그 줄은 60초가 지나야 다시 읽힌다(moai-h2th). 고르는 자는 그쪽과 하나다.
+    let mut app = App::on_projects_in(layer, crate::tz::chosen(reg.look.timezone.as_deref()).0);
     app.site.lang = ctx.lang();
     app.user = ctx.user.clone();
     // 밖에서 띄워도 누군지는 같은 자로 푼다(moai-z9pc.9av). 층에는 저장소가 없으니 지금 디렉터리에서

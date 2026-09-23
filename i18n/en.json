@@ -416,6 +416,8 @@
   "tui.about.own_milestone": "its own milestone {own} — {why}",
   "tui.about.follows_place": "it follows the milestone of the place it stands in",
   "tui.about.outside_milestone": "this row stands outside any milestone",
+  "tui.about.due": "due",
+  "tui.about.spent": "spent",
   "tui.about.started": "started",
   "tui.about.ended": "ended",
   "tui.about.commits": "commits",

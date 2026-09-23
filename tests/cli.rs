@@ -6208,6 +6208,48 @@ fn the_board_tells_a_passed_deadline_from_one_coming_up() {
     }
 }
 
+/// **기한 판정은 읽는 사람의 시간대를 본다**(moai-h2th). 같은 화면의 `생성`·`시작` 이 이미 그
+/// 사람의 시계로 그려지므로(moai-p5az), 판정만 UTC 로 두면 한 줄 안에서 시계 둘이 돈다 — 서울의
+/// 00시~09시 세션이 매일 하루씩 어긋났다.
+///
+/// **보드와 상세가 한 자로 센다** — 갈리면 보드는 "지남" 이라 세고 그 줄을 편 상세는 "오늘까지"
+/// 라 말한다.
+#[test]
+fn a_deadline_is_measured_in_the_readers_timezone() {
+    let s = init("duetz");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-11"]);
+    ok(s.path(), &["add", "멤버", "--milestone", &m, "-q"]);
+
+    // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+    let at = |tz: &str, args: &[&str]| -> String {
+        let out = staged(args)
+            .current_dir(s.path())
+            .env("TZ", tz)
+            .env("MOAI_NOW", "2026-09-11T20:00:00Z")
+            .output()
+            .expect("moai 를 못 돌렸다");
+        assert!(out.status.success(), "기한 경고가 종료 코드를 바꿨다 — {tz}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    let utc = at("UTC", &["status"]);
+    assert!(utc.contains("다가온 마일스톤"), "UTC 에서는 오늘이 기한이다\n{utc}");
+    assert!(at("UTC", &["show", &m]).contains("(오늘까지)"), "{}", at("UTC", &["show", &m]));
+
+    // **자료가 있는 기계에서만 잰다**(리뷰) — 릴리스가 정적 musl 판이라 zoneinfo 없는 기계도
+    // 받는 자리다(moai-77ap). 거기서는 UTC 로 떨어지므로 위의 두 줄이 답이고, 아래를 재면
+    // "동작이 바뀐 것" 과 "기계에 자료가 없는 것" 을 못 가린다.
+    if std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+        let seoul = at("Asia/Seoul", &["status"]);
+        assert!(seoul.contains("기한이 지난 마일스톤"), "서울에서는 어제 지났다\n{seoul}");
+        assert!(seoul.contains("2026-09-11  (1일 지남)"), "{seoul}");
+        // 상세도 같은 자로 센다 — 적힌 날짜 자체는 안 옮긴다.
+        let detail = at("Asia/Seoul", &["show", &m]);
+        assert!(detail.contains("(1일 지남)"), "{detail}");
+        assert!(detail.contains("2026-09-11"), "적힌 날짜를 옮겼다\n{detail}");
+    }
+}
+
 /// **끝난 마일스톤과 미뤄 둔 마일스톤은 기한으로 꾸짖지 않는다.** 다 닫힌 뒤의 지난 기한은
 /// 고칠 일이 아니라 지난 일이고, 미룬 것이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
 #[test]

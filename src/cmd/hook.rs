@@ -146,7 +146,7 @@ fn decide(
             // **없을 때만 적는다.** 여는 훅이 안 돌았던 세션(도중에 심었거나 임시
             // 디렉터리가 비워졌다)은 여기서 적지 않으면 `Stop` 이 끝까지 견줄 것이 없다.
             if baseline(input, &repo).is_none() {
-                write_baseline(input, &repo, &load.issues, &unreadable);
+                write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
             }
             if let Some(path) = session_file(input, &repo, "board") {
                 let _ = std::fs::remove_file(path);
@@ -164,12 +164,12 @@ fn decide(
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
         Event::SessionStart => {
-            write_baseline(input, &repo, &load.issues, &unreadable);
+            write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
             Decision::Pass
         }
         Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
             let now = model::now();
-            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
             // `moai status` 와 **같은 자**로 싣는다([`crate::cmd::status::install_notices`]) — 낡은
             // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
             // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
@@ -346,7 +346,7 @@ fn decide(
         Event::Stop if input.stop_hook_active => Decision::Pass,
         Event::Stop => once_per_session(input, &repo, "stop", || {
             let now = model::now();
-            let st = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
             // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
             // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
             // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
@@ -768,12 +768,18 @@ fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() 
 ///
 /// 훅이 여는 세션마다 덮어쓴다. 재개도 새 세션이고, 재개 시점의 경고가
 /// 그 세션이 물려받은 빚이다.
-fn write_baseline(input: &Input, repo: &Repo, issues: &[crate::model::Issue], unreadable: &[report::Unreadable]) {
+fn write_baseline(
+    input: &Input,
+    repo: &Repo,
+    issues: &[crate::model::Issue],
+    unreadable: &[report::Unreadable],
+    zone: &crate::tz::Zone,
+) {
     let Some(path) = session_file(input, repo, "warn") else {
         return;
     };
     let now = model::now();
-    let st = report::status(issues, unreadable, &repo.config, &now);
+    let st = report::status(issues, unreadable, &repo.config, &now, zone);
     // `Stop` 과 같은 자 — 알림은 안 센다.
     let n: usize = st.warnings.iter().map(|w| w.count).sum();
     let _ = std::fs::write(path, n.to_string());

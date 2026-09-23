@@ -372,6 +372,8 @@ pub struct Fresh {
     index: Index,
     ground: Ground,
     warnings: usize,
+    /// 그 가운데 **자리 없는 집은 줄**의 몫([`Site::stranded`]) — 받는 쪽이 다시 셀 때 도로 얹는다.
+    stranded: usize,
     unreadable: Vec<Option<String>>,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
@@ -454,7 +456,13 @@ fn whoami_at(
 /// 안 실행한다 — 그 물음 하나가 하위 프로세스를 셋까지 새로 실행하는데(`git check-attr`·`git config`, 심긴 줄의
 /// probe) 이 길은 쓰기마다 루프에서도 돈다([`App::reload`]). 다시 묻는 때를 정하는 자는 `tui::layer` 와 같은
 /// 하나다([`layer::ASK_INSTALL_EVERY`]).
-fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<usize>) -> crate::fail::R<Fresh> {
+fn prepare(
+    repo: &Repo,
+    worktree: bool,
+    lang: crate::i18n::Lang,
+    held: Option<usize>,
+    zone: &crate::tz::Zone,
+) -> crate::fail::R<Fresh> {
     // 읽기 **전에** 잰다. 뒤에 재면 읽고 재는 사이의 쓰기를 놓치고, 놓친
     // 것은 영영 안 돌아온다. 먼저 재면 최악이 헛 갱신 하나다.
     let stamp = stamp_of(repo);
@@ -482,7 +490,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let now = crate::model::now();
     let soil = crate::report::Soil::of(&issues);
     let (index, ground) = measure_in(&issues, &repo.config, &soil);
-    let (warnings, notices) = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
+    let (warnings, notices) = warnings_in(&issues, &unreadable, &repo.config, &now, zone, &soil);
     // **알림은 `moai status` 와 같은 자로 센다**(moai-k6ff) — 순수한 셈이 낸 것에 설치가 어긋난
     // 셋을 더한 것이 보드가 세우는 수고, 프로젝트 층의 `+N` 도 그것이다(`layer::summarize`). 들어간 화면이
     // 다른 수를 대면 `+3` 을 보고 Enter 를 친 사람이 그 셋을 어디서도 못 본다.
@@ -506,6 +514,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
         index,
         ground,
         warnings: warnings + lost,
+        stranded: lost,
         issues,
         unreadable,
         origin: g.origin,
@@ -584,8 +593,14 @@ fn placed(
 /// 생각이 쌓였다는 알림을 거기 더하면 생각을 담을수록 화면이 고쳐야 할
 /// 것이 늘었다고 말한다 — 그러면 안 담게 된다. 무엇이 알림인지는
 /// `report` 가 `notices` 로 따로 내므로 여기서 다시 판단하지 않는다.
-fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, now: &str) -> usize {
-    warnings_in(issues, unreadable, cfg, now, &crate::report::Soil::of(issues)).0
+fn warnings_of(
+    issues: &[Issue],
+    unreadable: &[Option<String>],
+    cfg: &Config,
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> usize {
+    warnings_in(issues, unreadable, cfg, now, zone, &crate::report::Soil::of(issues)).0
 }
 
 /// [`warnings_of`] 와 같은 것. 적재가 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9).
@@ -599,6 +614,7 @@ fn warnings_in<'a>(
     unreadable: &[Option<String>],
     cfg: &Config,
     now: &str,
+    zone: &crate::tz::Zone,
     soil: &crate::report::Soil<'a>,
 ) -> (usize, usize) {
     // 못 읽는 줄의 id 까지 넘긴다 — 산 줄과의 중복을 `moai status` 와 같은
@@ -606,7 +622,7 @@ fn warnings_in<'a>(
     let lines: Vec<crate::report::Unreadable> =
         unreadable.iter().map(|id| crate::report::Unreadable { id: id.as_deref() }).collect();
     // 알림은 `notices` 에 따로 있다 — `warnings` 가 곧 고칠 것이다.
-    let st = crate::report::status_in(issues, &lines, cfg, now, soil);
+    let st = crate::report::status_in(issues, &lines, cfg, now, zone, soil);
     (st.warnings.len(), st.notices.len())
 }
 
@@ -688,6 +704,11 @@ pub struct Site {
     /// **수가 딱 맞는 것은 옆 워크트리가 없을 때다**(리뷰) — 이쪽은 겹쳐 본 줄로 세고 그쪽은 제
     /// 체크아웃의 줄로 센다. 까닭과 그대로 둔 값은 [`layer::summarize_with`] 에 적어 두었다.
     pub notices: usize,
+    /// 위 [`Site::warnings`] 가운데 **자리 없는 집은 줄**의 몫(0 이나 1, `tui::placed`). 순수한 셈
+    /// (`report::status_in`)이 못 내는 값이라 읽을 때 한 번 재어 더하는데(리뷰), 그 합을 다시 셀 일이
+    /// 생기면([`App::recount`]) 더한 몫을 알아야 도로 얹을 수 있다 — 안 들고 있던 때는 다시 세기
+    /// 한 번에 그 줄이 배너에서 사라졌다. 알림 쪽의 같은 몫은 [`Site::install`] 이 이미 든다.
+    stranded: usize,
     /// 그 가운데 설치가 어긋난 몫을 **마지막으로 물어서 센 값과 그때**(moai-k6ff). 프로젝트 층의 줄이 드는
     /// 것과 같은 자다([`layer::Told`]) — 그 물음은 하위 프로세스를 셋까지 새로 실행하므로
     /// [`layer::ASK_INSTALL_EVERY`] 에 한 번만 묻고 그사이에는 이 값을 그대로 센다.
@@ -899,7 +920,7 @@ pub struct App {
     let_go: usize,
     /// 다시 읽는 길. 진짜 길은 [`prepare`] 다. **시험이 갈아 끼운다** — 스레드에서
     /// 짓는 읽기가 패닉하는 때는 진짜 파일로는 못 만든다.
-    read: fn(&Repo, bool, crate::i18n::Lang, Option<usize>) -> crate::fail::R<Fresh>,
+    read: fn(&Repo, bool, crate::i18n::Lang, Option<usize>, &crate::tz::Zone) -> crate::fail::R<Fresh>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
     /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
@@ -1054,6 +1075,7 @@ impl Site {
             unreadable,
             warnings: 0,
             notices: 0,
+            stranded: 0,
             install: None,
             stamp: None,
             seen: Default::default(),
@@ -1328,7 +1350,8 @@ impl App {
         // `build` 가 이미 한 번 셌다. 못 읽는 줄의 자가 안 바뀌었으면 같은 훑기를 다시 하지 않는다.
         if unreadable != self.site.unreadable {
             self.site.unreadable = unreadable;
-            self.site.warnings = warnings_of(&self.site.issues, &self.site.unreadable, &self.site.cfg, &self.site.now);
+            self.site.warnings =
+                warnings_of(&self.site.issues, &self.site.unreadable, &self.site.cfg, &self.site.now, &self.zone);
         }
         // 자리 판정은 저장소가 있어야 잰다 — `build` 는 줄만 받아 못 쟀다. 다시 읽기는
         // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
@@ -1338,6 +1361,10 @@ impl App {
             let (lost, said) =
                 placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug, self.site.lang);
             self.site.warnings += lost;
+            // **더한 몫을 들고 있는다**(리뷰) — 다시 셀 일이 생기면([`App::recount`]) 순수한 셈이
+            // 못 내는 이 값을 도로 얹어야 한다. 안 들던 때는 시간대를 입히는 한 걸음이 이 줄을
+            // 배너에서 통째로 지웠다.
+            self.site.stranded = lost;
             elsewhere.extend(said);
             // **여는 읽기도 알림을 센다**(moai-k6ff) — 다시 읽기는 `prepare` 가 같은 자로 세어
             // [`Fresh::notices`] 에 실어 온다. 안 세면 띄운 화면의 배너에만 그 수가 없다가 60초
@@ -1429,19 +1456,35 @@ impl App {
         {
             app.site.lang = crate::i18n::Lang::Ko;
         }
-        // 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄
-        // 수를 나중에 넣겠다고 두 번 부르면 그 절반이 버려진다.
-        //
-        // **알림도 이 한 번에서 든다**(리뷰) — [`warnings_in`] 이 고칠 것과 알림을 함께 내므로,
-        // 알림을 나중에 넣겠다고 [`App::overlaid`] 에서 다시 부르면 위의 문장이 그대로 깨진다.
-        // 설치가 어긋난 몫만 그쪽이 더한다.
-        let soil = crate::report::Soil::of(&app.site.issues);
-        let (warnings, notices) =
-            warnings_in(&app.site.issues, &app.site.unreadable, &app.site.cfg, &app.site.now, &soil);
-        app.site.warnings = warnings;
-        app.site.notices = notices;
+        // 까닭은 [`App::recount`] 에 있다 — 여기 베껴 두면 한쪽만 고쳐져 둘이 갈린다.
+        app.recount();
         app.see();
         app
+    }
+
+    /// 경고와 알림을 다시 센다 — [`App::build`]·[`App::adopt_look`]·시간대 고르기가 나눠 쓰는 한
+    /// 자리다.
+    ///
+    /// 한 번만 센다. `report::status` 는 이슈 수에 비례한 훑기라, 못 읽는 줄 수를 나중에 넣겠다고
+    /// 두 번 부르면 그 절반이 버려진다. **알림도 이 한 번에서 든다**(리뷰) — [`warnings_in`] 이
+    /// 고칠 것과 알림을 함께 내므로, 알림을 나중에 넣겠다고 [`App::overlaid`] 에서 다시 부르면
+    /// 위의 문장이 그대로 깨진다.
+    ///
+    /// **두 번 세는 까닭은 시간대다**(moai-h2th). 기한 경고는 읽는 사람의 달로 판정하는데
+    /// (`report::status_in`), 그 시간대는 사용자 설정을 입히는 `adopt_look` 에 가서야 정해진다 —
+    /// 처음 셈은 UTC 로 서므로 자정 언저리의 하루가 어긋난 채 첫 화면에 선다. 셈을 나중으로
+    /// 미루지 않는 것은 설정 없이 띄운 자리(시험·`App::new` 만 부르는 길)도 수를 들어야 해서다.
+    ///
+    /// **순수한 셈 밖에서 더한 몫을 도로 얹는다**(리뷰) — 자리 없는 집은 줄([`Site::stranded`])과
+    /// 설치가 어긋난 셋([`Site::install`])은 디스크를 읽어야 아는 값이라 `report` 가 못 낸다.
+    /// 덮어쓰던 때는 [`App::overlaid`] 바로 뒤에 선 `adopt_look` 이 그 둘을 통째로 지워, 띄운
+    /// 화면의 배너에만 수가 없다가 60초 뒤에 슬며시 섰다 — moai-k6ff 가 걷어 낸 그 실패다.
+    fn recount(&mut self) {
+        let soil = crate::report::Soil::of(&self.site.issues);
+        let (warnings, notices) =
+            warnings_in(&self.site.issues, &self.site.unreadable, &self.site.cfg, &self.site.now, &self.zone, &soil);
+        self.site.warnings = warnings + self.site.stranded;
+        self.site.notices = notices + self.site.install.map_or(0, |t| t.count);
     }
 
     /// 다시 읽는다. **거름망과 있던 자리는 지키려 애쓴다** — 갱신 한 번에
@@ -1472,7 +1515,7 @@ impl App {
         // 물었으면 0 이다: 여는 읽기([`App::overlaid`])가 늘 한 번 물어 두므로 그 자리는 띄운
         // 뒤에만 잠깐 선다.
         let held = Some(self.site.install.map_or(0, |t| t.count));
-        let fresh = (self.read)(repo, self.worktree, self.site.lang, held);
+        let fresh = (self.read)(repo, self.worktree, self.site.lang, held, &self.zone);
         self.receive(fresh);
     }
 
@@ -1749,6 +1792,7 @@ impl App {
         self.site.watched = f.watched;
         self.site.read_at = Some(std::time::Instant::now());
         self.site.warnings = f.warnings;
+        self.site.stranded = f.stranded;
         self.site.notices = f.notices;
         // **물어서 센 때만 찍는다**(moai-k6ff) — 들고 있던 값을 그대로 쓴 때에도 찍으면
         // [`layer::ASK_INSTALL_EVERY`] 가 영영 안 지나 첫 번에 센 수가 세션 내내 선다.
@@ -1768,7 +1812,7 @@ impl App {
     pub fn adopt(&mut self, issues: Vec<Issue>) {
         let (index, ground) = measure(&issues, &self.site.cfg);
         let now = crate::model::now();
-        self.site.warnings = warnings_of(&issues, &self.site.unreadable, &self.site.cfg, &now);
+        self.site.warnings = warnings_of(&issues, &self.site.unreadable, &self.site.cfg, &now, &self.zone);
         self.take(issues, index, ground, now);
     }
 
@@ -1987,10 +2031,13 @@ impl App {
             let worktree = self.worktree;
             let read = self.read;
             let lang = self.site.lang;
+            // **화면이 선 시간대를 들려 보낸다**(moai-h2th) — 이 읽기가 배너의 수를 다시 세고, 그
+            // 수에 기한 경고가 들어 있다. 스레드가 제 손으로 고르면 `SPC o t` 로 고른 것이 안 닿는다.
+            let zone = self.zone.clone();
             // 받는 쪽이 사라졌으면(사람이 누른 갱신이 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let held = layer::Told::held(self.site.install);
             let handle = std::thread::spawn(move || {
-                let _ = tx.send(read(&repo, worktree, lang, held));
+                let _ = tx.send(read(&repo, worktree, lang, held, &zone));
             });
             self.pending = Some((rx, handle));
         }
@@ -2331,8 +2378,18 @@ impl App {
         // **고르는 것도 할 말을 고르는 것도 `tz` 한 자다**(`tz::chosen`, 리뷰) — 까닭은 화면이
         // 실제로 선 시계의 것 하나여야 한다.
         let (zone, why) = crate::tz::chosen(look.timezone.as_deref());
+        // **이름이 아니라 시계로 견준다**(리뷰, [`crate::tz::Zone::same_clock`]) — `/etc/localtime`
+        // 이 `Etc/UTC` 를 가리키는 기계는 이름으로 보면 `UTC` 와 안 같아, 답이 같은 줄 알면서도
+        // 이슈 수에 비례한 훑기를 한 벌 더 돈다.
+        let moved = !self.zone.same_clock(&zone);
         self.zone = zone;
         self.saved_zone = look.timezone.clone();
+        // **시간대가 정해지면 경고를 다시 센다**(moai-h2th, [`App::recount`]) — 기한 판정이 읽는
+        // 사람의 달을 보므로, UTC 로 센 첫 수는 자정 언저리에서 하루가 어긋나 있다. 안 움직였으면
+        // 같은 답이 나올 셈이라 다시 안 돈다.
+        if moved {
+            self.recount();
+        }
         problems.extend(why.map(|w| crate::view::zone_trouble(self.site.lang, &w)));
         self.apply_look(look, &mut problems);
         self.saved = self.look_now();
@@ -3246,11 +3303,13 @@ impl App {
         // 값이 걸음에 붙었다. 푸는 자는 [`whoami_at`] 하나 그대로다.
         let identify = self.identify;
         let user = self.user.clone();
+        // 시간대도 함께 간다 — 위와 같은 자리다(moai-h2th).
+        let zone = self.zone.clone();
         // 그 줄이 이미 물어 둔 설치 알림은 그대로 센다(moai-k6ff·moai-nzyh) — 쓸기와 같은 자다.
         let told = self.layer.as_ref().and_then(|l| l.told_install(&path));
         let held = layer::Told::held(told);
         let handle = std::thread::spawn(move || {
-            let got = read(&sent, worktree, lang, held).map(|mut fresh| {
+            let got = read(&sent, worktree, lang, held, &zone).map(|mut fresh| {
                 fresh.me = whoami_at(identify, user.as_deref(), &sent.root);
                 fresh
             });
@@ -7548,6 +7607,39 @@ mod tests {
         assert!(a.trouble.is_none());
     }
 
+    /// **시간대를 입히는 걸음이 여는 읽기가 더한 몫을 안 지운다**(리뷰). [`App::overlaid`] 는 순수한
+    /// 셈 위에 자리 없는 집은 줄(moai-p3bs)과 설치가 어긋난 셋(moai-k6ff)을 더하는데, 그 뒤에 서는
+    /// [`App::adopt_look`] 이 시간대가 움직였다고 다시 세며 둘을 통째로 덮었다 — 띄운 화면의 배너에만
+    /// 그 수가 없다가 60초 뒤에 슬며시 서는, moai-k6ff 가 바로 그 까닭으로 걷어 낸 실패다.
+    ///
+    /// 시간대는 **시계로** 견주므로(`tz::Zone::same_clock`) 여기서 다른 시계를 세워 다시 세기를 부른다 —
+    /// 이름만 다른 `Etc/UTC` 로는 안 걸리고, 그 자리가 이 시험이 도는 컨테이너다.
+    #[test]
+    fn adopting_a_timezone_keeps_what_the_opening_read_added() {
+        let s = scratch("recount-keeps");
+        let dir = s.path().to_path_buf();
+        let repo = Repo::at(dir.clone(), cfg());
+        let install = crate::cmd::status::install_notices(&repo, false).len();
+        assert!(install > 0, "전제: 이 저장소에 설치가 어긋난 것이 하나도 없다");
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        let stamp = stamp_of(&repo);
+        let (index, ground) = measure(&g.load.issues, &repo.config);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(
+            g.origin,
+            Vec::new(),
+            g.watched,
+            g.swept,
+            &g.sides,
+            &g.mine,
+        );
+        let (warnings, notices) = (a.site.warnings, a.site.notices);
+        assert_eq!(notices, install, "여는 읽기가 설치 알림을 안 더했다 — 아래 줄이 헛돈다");
+
+        a.zone = crate::tz::Zone::fixed("T", 9 * 3600);
+        a.adopt_look(&crate::user_config::Look::default(), Vec::new());
+        assert_eq!((a.site.warnings, a.site.notices), (warnings, notices), "다시 세며 여는 읽기가 더한 몫을 지웠다");
+    }
+
     /// **연 뒤 커밋 표를 스레드에서 짓고, 커밋이 새로 서면 다시 읽은 뒤 새 표를 짓는다**
     /// (moai-a4i0). 연 순간에는 표가 없다 — 여는 읽기가 git 을 기다리지 않는다. 표를 짓는 것은
     /// 파일을 다시 읽는 일이 아니라 `loading` 이 아니다. 루프에서 도는 다시 읽기(쓰기·SPC v w)도
@@ -7761,14 +7853,14 @@ mod tests {
         let (theirs, _) = writable("receive-theirs");
         touch_outside(&theirs);
         let other = Repo::at(theirs.path().to_path_buf(), cfg());
-        a.receive(prepare(&other, false, a.site.lang, None));
+        a.receive(prepare(&other, false, a.site.lang, None, &a.zone));
         assert_eq!(shown(&a), ["argos-0001"], "남의 프로젝트에서 지은 줄을 들였다");
         assert!(a.trouble.is_none());
 
         // 제 것은 들인다 — 막은 것이 뿌리 견주기이지 받기 자체가 아니다.
         let mine = a.site.repo.clone().unwrap();
         touch_outside(&mine_dir);
-        a.receive(prepare(&mine, false, a.site.lang, None));
+        a.receive(prepare(&mine, false, a.site.lang, None, &a.zone));
         assert_eq!(a.site.issues.len(), 2);
     }
 
@@ -7790,8 +7882,14 @@ mod tests {
     }
 
     /// 옆 워크트리를 **못 찾는** 읽기 — git 밖 프로젝트를 흉내 낸다. 시험 기계의 git 에 기대지 않는다.
-    fn lost(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<usize>) -> crate::fail::R<Fresh> {
-        let mut f = prepare(repo, worktree, lang, held)?;
+    fn lost(
+        repo: &Repo,
+        worktree: bool,
+        lang: crate::i18n::Lang,
+        held: Option<usize>,
+        zone: &crate::tz::Zone,
+    ) -> crate::fail::R<Fresh> {
+        let mut f = prepare(repo, worktree, lang, held, zone)?;
         // **진짜 꼴로 흉내 낸다**(리뷰) — [`prepare`] 가 싣는 것은 이미 편 문장이다
         // ([`crate::view::trouble_line`]). 맨 까닭을 실으면 알림이 제 문장을 한 번 더 달아도
         // 시험이 그것을 못 잡는다 — 실제로 그렇게 서 있었다.
@@ -7900,9 +7998,15 @@ mod tests {
     #[test]
     fn the_keystroke_reread_never_asks_about_the_install() {
         static HELD: std::sync::Mutex<Vec<Option<usize>>> = std::sync::Mutex::new(Vec::new());
-        fn spy(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<usize>) -> crate::fail::R<Fresh> {
+        fn spy(
+            repo: &Repo,
+            worktree: bool,
+            lang: crate::i18n::Lang,
+            held: Option<usize>,
+            zone: &crate::tz::Zone,
+        ) -> crate::fail::R<Fresh> {
             HELD.lock().expect("시험 혼자 쓴다").push(held);
-            prepare(repo, worktree, lang, held)
+            prepare(repo, worktree, lang, held, zone)
         }
         let (_scratch, mut a) = writable("reload-install");
         a.read = spy;
@@ -7926,13 +8030,14 @@ mod tests {
         worktree: bool,
         lang: crate::i18n::Lang,
         held: Option<usize>,
+        zone: &crate::tz::Zone,
     ) -> crate::fail::R<Fresh> {
-        let mut f = prepare(repo, worktree, lang, held)?;
+        let mut f = prepare(repo, worktree, lang, held, zone)?;
         f.unfound = None;
         Ok(f)
     }
 
-    fn boom(_: &Repo, _: bool, _: crate::i18n::Lang, _: Option<usize>) -> crate::fail::R<Fresh> {
+    fn boom(_: &Repo, _: bool, _: crate::i18n::Lang, _: Option<usize>, _: &crate::tz::Zone) -> crate::fail::R<Fresh> {
         panic!("버린 읽기가 터졌다")
     }
 

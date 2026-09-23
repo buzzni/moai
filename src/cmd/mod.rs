@@ -89,7 +89,12 @@ impl Ctx {
     /// **못 풀어도 막지 않는다** — UTC 로 떨어지고 까닭은 [`Ctx::zone_trouble`] 이 든다
     /// (moai-77ap). 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
     ///
-    /// **말과 같은 결로 늦게 읽는다** — 시각을 그리는 명령만 이 값을 든다.
+    /// **말과 같은 결로 늦게 읽는다** — 이 값을 드는 명령만 tzdb 를 만진다.
+    ///
+    /// **시각을 그리는 명령만이 아니다**(moai-h2th). 기한 판정이 읽는 사람의 달로 서면서
+    /// `report::status` 를 부르는 쪽이 모두 이 값을 든다 — `hook`·`project ls` 처럼 시각을 한 줄도
+    /// 안 그리는 명령이 거기 든다. 그 대가로 zoneinfo 없는 기계에서는 그 명령들도 [`Ctx::zone_trouble`]
+    /// 한 줄을 stderr 에 낸다. 막지 않고 종료 코드도 그대로지만 없던 줄이라, 지울지는 따로 잰다.
     pub fn zone(&self) -> &crate::tz::Zone {
         &self.zone.get_or_init(crate::tz::Zone::system).0
     }

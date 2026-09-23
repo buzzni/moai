@@ -73,9 +73,32 @@ impl Zone {
         &self.name
     }
 
+    /// 내내 같은 만큼 더하는 시간대 — **시험만 든다**(moai-h2th).
+    ///
+    /// [`Zone::load`] 는 기계의 tzdb 를 보므로, 시간대를 재는 시험이 그것으로 서면 zoneinfo 없는
+    /// 기계에서 조용히 아무것도 안 재게 된다(`if let Ok(seoul)` 로 통째로 건너뛴다). 재려는 것이
+    /// "옮긴 뒤의 답" 이지 "tzdb 를 읽는 법" 이 아닌 자리에서는 자료 없이 옮기는 자가 낫다.
+    /// 여름 시간이 없는 자리(`Asia/Seoul` 이 그렇다)는 이 꼴이 실제 자료와 같은 답을 낸다.
+    /// **0 은 안 받는다**(리뷰) — [`Zone::is_utc`] 가 `shifts` 와 `before` 만 보므로 `fixed(.., 0)`
+    /// 은 이름이 무엇이든 UTC 고, [`Zone::shift`] 가 그 자리에서 되돌아간다. 시간대를 재려고 쓴
+    /// 시험이 그런 시간대를 들면 아무것도 안 재면서 푸르게 지나간다.
+    #[cfg(test)]
+    pub fn fixed(name: &str, secs: i32) -> Zone {
+        assert_ne!(secs, 0, "옮기지 않는 시간대로는 옮긴 답을 못 잰다 — UTC 는 Zone::utc 다");
+        Zone { name: name.to_string(), shifts: Vec::new(), before: secs }
+    }
+
     /// UTC 인가 — 화면이 이것으로 "그대로 둔다" 를 가른다.
     pub fn is_utc(&self) -> bool {
         self.shifts.is_empty() && self.before == 0
+    }
+
+    /// 둘이 **같은 답을 내는가** — 이름이 아니라 옮기는 값으로 잰다([`Zone::shift`] 가 보는 것이
+    /// 그것이다). `PartialEq` 는 이름까지 보므로 `/etc/localtime` 이 `Etc/UTC` 를 가리키는 기계
+    /// (컨테이너가 흔히 그렇다)에서 `Zone::utc()` 와 안 같다고 나오고, 시간대가 바뀌었는지로
+    /// 다시 셀지를 가르는 쪽(`tui::App::adopt_look`)이 답이 같은 줄 알면서도 훑기를 한 벌 더 돈다.
+    pub fn same_clock(&self, other: &Zone) -> bool {
+        self.shifts == other.shifts && self.before == other.before
     }
 
     /// 이름으로 연다. `UTC` 는 자료를 안 본다 — tzdb 가 없는 기계에서도 서야 한다.

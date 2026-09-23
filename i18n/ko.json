@@ -416,6 +416,8 @@
   "tui.about.own_milestone": "제 마일스톤 {own} — {why}",
   "tui.about.follows_place": "선 자리의 마일스톤을 따른다",
   "tui.about.outside_milestone": "이 줄은 마일스톤 밖에 선다",
+  "tui.about.due": "기한",
+  "tui.about.spent": "소요",
   "tui.about.started": "시작",
   "tui.about.ended": "끝",
   "tui.about.commits": "커밋",
