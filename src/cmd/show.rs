@@ -460,7 +460,7 @@ fn one(
     //
     // **묶음 줄은 안 묻는다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니라 트리도 `-e` 도
     // 그 줄을 에픽 밑에 안 두는데, 물려받은 값까지 대면 적은 적도 없는 소속이 상세에 선다.
-    let stood_in = (!report::is_group(issue)).then(|| footing.epic_of(&issue.id)).flatten();
+    let stood_in = (!report::is_group(issue)).then(|| footing.epic_of(issue)).flatten();
     // **에픽도 뒷줄로 푼다** — 펼친 줄을 고른 자(`Load::get`)와 같다(moai-e0ro).
     let named = issue.epic.as_deref().or(stood_in);
     let epic = named.and_then(|e| all.iter().rfind(|i| i.id == e));

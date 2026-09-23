@@ -721,20 +721,98 @@ fn in_started_columns<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<(usize, &'a 
 /// 들었다. 워크트리 이름(`worktree::names`)으로 **그 워크트리의 일**을 가르는 자 하나다 — 훅의
 /// 초점(`hook::held`)과 집은 줄의 자리([`places`])가 같은 자로 재야, 초점에서 뺀 줄을 자리 없다고
 /// 하거나 그 반대가 되지 않는다.
-pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(&Issue) -> bool + 'a {
-    let (epics, stones) = if names.is_empty() { Default::default() } else { ties(issues) };
-    move |i: &Issue| claims(&epics, &stones, names, i)
+pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(&'a Issue) -> bool + 'a {
+    let ties = if names.is_empty() { Ties::default() } else { Ties::of(issues) };
+    move |i: &'a Issue| claims(&ties, names, i)
 }
 
-/// 이름이 줄을 가리키는지 재는 **소속 지도 한 벌** — 줄 → 에픽([`groups`]), 줄 → 마일스톤([`milestones_in`]).
-/// 에픽 지도는 한 번만 짓는다 — [`milestones`] 는 제 안에서 `groups` 를 다시 짓는다. 이름 여럿을 같은
-/// 줄들에 잴 때(훅의 옆 이름과 모르는 줄, `hook::theirs`) 이 한 벌로 잰다.
+/// 소속을 묻는 데 드는 **재료 한 벌** — 줄([`Lines`]), 줄 → 에픽([`groups`]), 줄 → 마일스톤
+/// ([`milestones_in`]). 에픽 지도는 한 번만 짓는다 — [`milestones`] 는 제 안에서 `groups` 를 다시
+/// 짓는다. 이름 여럿을 같은 줄들에 잴 때(훅의 옆 이름과 모르는 줄, `hook::theirs`) 이 한 벌로 잰다.
+///
+/// **줄을 든 쪽은 [`Ties::epic_of`]·[`Ties::stone_of`] 로 묻는다.** 지도는 id 로 짠 것이라 같은 id 를
+/// 든 줄이 둘이면 앞줄이 뒷줄의 값을 입는데(2026-09-23 사용자 결정 `적힌 것이 먼저다`,
+/// moai-7iyc.rt6), 그 답을 쓰는 자리가 훅이면 정당한 `moai add -e <에픽>` 이 거절당하고 거절문이
+/// 그 줄이 적지도 않은 에픽을 댄다 — 되돌릴 길이 도구 밖에만 남는다(moai-jk2u.ipf).
+///
+/// **줄이 손에 없는 자리만 지도를 짚는다**([`Ties::epic_at`]·[`Ties::stone_at`]) — 조상을 타고
+/// 오르는 걸음이다. 조상의 소속은 그 조상 줄의 것이고, `by_id` 가 고르는 뒷줄이 지도가 고르는
+/// 그 줄이다([`Shelf::walk`] 가 깐 전제와 같다).
+pub(crate) struct Ties<'a> {
+    lines: Lines<'a>,
+    epics: BTreeMap<&'a str, &'a str>,
+    stones: BTreeMap<&'a str, &'a str>,
+    /// 마일스톤 축을 세는가([`Ties::epics_only`]). 한때 **빈 지도**가 이 뜻을 졌는데,
+    /// [`Ties::stone_of`] 는 지도를 안 짚고 줄에서 다시 세므로 빈 지도가 더는 "안 센다" 를
+    /// 못 뜻한다 — 안 세기로 한 것은 이름을 지고 있어야 한다.
+    counts_stones: bool,
+}
+
+impl<'a> Default for Ties<'a> {
+    /// 아무것도 안 잰 것 — 이름이 비어 잴 일이 없는 자리([`claimed`])가 든다.
+    fn default() -> Ties<'a> {
+        Ties { lines: Lines::default(), epics: BTreeMap::new(), stones: BTreeMap::new(), counts_stones: true }
+    }
+}
+
+impl<'a> Ties<'a> {
+    /// 두 축을 다 잰다.
+    pub(crate) fn of(all: &'a [Issue]) -> Ties<'a> {
+        // **[`Lines`] 도 한 벌이다**(moai-jk2u.pl6) — 따로 부르면 둘이 저마다 짓는다.
+        let lines = Lines::of(all);
+        let epics = groups_over(all, &lines);
+        let stones = milestones_over(all, &epics, &lines);
+        Ties { lines, epics, stones, counts_stones: true }
+    }
+
+    /// 에픽 축만 잰다 — 마일스톤은 안 센다(사용자 결정: 담당·조상·에픽). 안 읽은 줄의
+    /// "내게 온 것"(`query::unread`)이 이 꼴로 든다.
+    pub(crate) fn epics_only(all: &'a [Issue]) -> Ties<'a> {
+        let lines = Lines::of(all);
+        let epics = groups_over(all, &lines);
+        Ties { lines, epics, stones: BTreeMap::new(), counts_stones: false }
+    }
+
+    /// 그 **줄**이 든 에픽 — 적힌 `epic` 이 먼저고, 없으면 지도가 답이다([`joined_in`]).
+    /// [`Placed::Epic`] 이 내는 값과 한 몸이다.
+    pub(crate) fn epic_of(&self, i: &'a Issue) -> Option<&'a str> {
+        Placed::epic(&self.epics).at(i)
+    }
+
+    /// 그 **줄**이 선 마일스톤([`stood_at_line`]) — 마일스톤 축을 안 세면 `None` 이다.
+    /// [`Placed::Milestone`] 이 내는 값과 한 몸이다.
+    pub(crate) fn stone_of(&self, i: &'a Issue) -> Option<&'a str> {
+        if !self.counts_stones {
+            return None;
+        }
+        Placed::milestone(&self.epics, &self.lines).at(i)
+    }
+
+    /// 그 **id** 가 든 에픽 — 줄이 손에 없는 자리(조상 오름)만 쓴다.
+    pub(crate) fn epic_at(&self, id: &str) -> Option<&'a str> {
+        self.epics.get(id).copied()
+    }
+
+    /// 그 **id** 가 선 마일스톤 — 줄이 손에 없는 자리(조상 오름)만 쓴다.
+    pub(crate) fn stone_at(&self, id: &str) -> Option<&'a str> {
+        self.stones.get(id).copied()
+    }
+
+    /// 에픽 지도 그대로 — 지도째 받는 자([`started_in`])가 든다.
+    pub(crate) fn epics(&self) -> &BTreeMap<&'a str, &'a str> {
+        &self.epics
+    }
+
+    /// 마일스톤 지도 그대로. 안 세는 꼴에서는 비어 있다.
+    pub(crate) fn stones(&self) -> &BTreeMap<&'a str, &'a str> {
+        &self.stones
+    }
+}
+
+/// [`Ties`] 를 지도 둘로 받던 자리 — 줄을 안 들고 지도만 쓰는 쪽([`put_off_in`])이 든다.
 pub(crate) fn ties(issues: &[Issue]) -> (BTreeMap<&str, &str>, BTreeMap<&str, &str>) {
-    // **[`Lines`] 도 한 벌이다**(moai-jk2u.pl6) — 따로 부르면 둘이 저마다 짓는다.
-    let lines = Lines::of(issues);
-    let epics = groups_over(issues, &lines);
-    let stones = milestones_over(issues, &epics, &lines);
-    (epics, stones)
+    let t = Ties::of(issues);
+    (t.epics, t.stones)
 }
 
 /// [`claimed`] 의 몸통 — **이미 푼 소속 지도**로 잰다. 워크트리가 여럿이면 지도는 하나고 이름만
@@ -742,13 +820,8 @@ pub(crate) fn ties(issues: &[Issue]) -> (BTreeMap<&str, &str>, BTreeMap<&str, &s
 /// 같은 걸음을 워크트리 수만큼 걷는다 — [`status`] 가 "한 번만 잰다" 고 적어 둔 것과 같은 까닭이다.
 ///
 /// 안 읽은 줄의 "내게 온 것"(`query::unread`)도 이 걸음을 쓴다 — 마일스톤 지도를 비워 넘겨서(moai-j038.vna).
-pub(crate) fn claims(
-    epics: &BTreeMap<&str, &str>,
-    stones: &BTreeMap<&str, &str>,
-    names: &BTreeSet<String>,
-    i: &Issue,
-) -> bool {
-    nearness(epics, stones, names, i).is_some()
+pub(crate) fn claims<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Issue) -> bool {
+    nearness(ties, names, i).is_some()
 }
 
 /// `names` 가 이 줄을 **얼마나 가까이** 가리키는가 — 작을수록 구체적이다. 못 가리키면 `None`.
@@ -757,12 +830,12 @@ pub(crate) fn claims(
 /// 여러 워크트리의 이름이 가리키면 **가장 가까운 이름이 이긴다** — 머지하고 안 치운 `worktree-<에픽>`
 /// 이 뒤이어 집은 멤버를, 그 멤버를 제 이름으로 띄운 워크트리보다 먼저 쥐던 판은 그 워크트리의
 /// 세션을 규칙 2 로 막았다. 겨루는 곳이 둘이다 — 훅의 초점([`crate::hook::Away`])과 줄의 자리([`places`]).
-pub(crate) fn nearness(
-    epics: &BTreeMap<&str, &str>,
-    stones: &BTreeMap<&str, &str>,
-    names: &BTreeSet<String>,
-    i: &Issue,
-) -> Option<usize> {
+///
+/// **첫 걸음은 줄에 묻는다**(moai-jk2u.ipf) — 그 자리에는 줄이 손에 있고, 지도는 id 로 짠 것이라
+/// 같은 id 를 든 앞줄이 뒷줄의 에픽·릴리스를 입는다([`Ties`]). 이 값을 읽는 자에 훅의 막는 쪽이
+/// 있어(`hook::theirs`), 앞줄이 옆 워크트리의 이름 밑에 있다는 이유로 쓰기가 거절당하는 동안
+/// `status`·`show` 는 딴 말을 했다. 조상은 줄이 없으니 지도가 답이고, 그 답은 조상 줄의 것이다.
+pub(crate) fn nearness<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Issue) -> Option<usize> {
     // 조상은 깊어 봐야 몇 칸이다 — 에픽·마일스톤은 그 뒤에 선다.
     const EPIC: usize = 1 << 16;
     const STONE: usize = 1 << 17;
@@ -773,14 +846,20 @@ pub(crate) fn nearness(
         .enumerate()
         .filter_map(|(depth, id)| {
             if names.contains(id) {
-                Some(depth)
-            } else if epics.get(id).is_some_and(|e| names.contains(*e)) {
-                Some(EPIC)
-            } else if stones.get(id).is_some_and(|m| names.contains(*m)) {
-                Some(STONE)
-            } else {
-                None
+                return Some(depth);
             }
+            let epic = if depth == 0 { ties.epic_of(i) } else { ties.epic_at(id) };
+            if epic.is_some_and(|e| names.contains(e)) {
+                return Some(EPIC);
+            }
+            // **마일스톤은 에픽이 빗나간 뒤에 잰다.** 첫 걸음의 값은 줄에서 다시 세는 것이라
+            // (`stood_at_line`), 미리 재면 에픽에서 끝나는 흔한 갈래가 그 걸음을 치르고 버린다 —
+            // 리뷰 moai-jk2u.m60 6번이 `Filter::matches` 에서 잡은 그 꼴이다.
+            let stone = if depth == 0 { ties.stone_of(i) } else { ties.stone_at(id) };
+            if stone.is_some_and(|m| names.contains(m)) {
+                return Some(STONE);
+            }
+            None
         })
         .min()
 }
@@ -791,16 +870,10 @@ pub(crate) fn nearness(
 ///
 /// [`claims`] 처럼 **이미 푼 소속 지도**([`ties`])로 잰다 — 훅(`hook::theirs`)은 같은 지도로 모르는 줄까지
 /// 잰다. 둘이 제 지도를 따로 짓던 판은 한 번 판정에 두 벌을 지었다(리뷰 moai-3k2d.1df).
-pub(crate) fn claims_over(
-    epics: &BTreeMap<&str, &str>,
-    stones: &BTreeMap<&str, &str>,
-    away: &BTreeSet<String>,
-    own: &BTreeSet<String>,
-    i: &Issue,
-) -> bool {
-    match nearness(epics, stones, away, i) {
+pub(crate) fn claims_over<'a>(ties: &Ties<'a>, away: &BTreeSet<String>, own: &BTreeSet<String>, i: &'a Issue) -> bool {
+    match nearness(ties, away, i) {
         None => false,
-        Some(there) => nearness(epics, stones, own, i).is_none_or(|here| there < here),
+        Some(there) => nearness(ties, own, i).is_none_or(|here| there < here),
     }
 }
 
@@ -951,10 +1024,8 @@ struct Laid<'a> {
     /// 집은 줄 — **같은 id 는 한 번만, 뒷줄이 선다**(`Load::get` 과 같은 자). 줄마다 세면 한
     /// 워크트리가 한 id 에 두 번 서서 받는 쪽이 "두 곳에서 돌고 있다" 로 읽는다(moai-ddtg).
     picked: BTreeMap<&'a str, &'a Issue>,
-    /// 줄 → 그 줄이 든 에픽([`groups`]).
-    epics: BTreeMap<&'a str, &'a str>,
-    /// 줄 → 그 줄이 선 마일스톤([`milestones_in`]).
-    stones: BTreeMap<&'a str, &'a str>,
+    /// 소속을 묻는 재료 한 벌([`Ties`]) — 줄, 줄 → 에픽, 줄 → 마일스톤.
+    ties: Ties<'a>,
 }
 
 impl<'a, 'c> Footing<'a, 'c> {
@@ -965,12 +1036,14 @@ impl<'a, 'c> Footing<'a, 'c> {
 
     fn laid(&self) -> &Laid<'a> {
         self.laid.get_or_init(|| {
-            let (epics, stones) = ties(self.all);
+            let ties = Ties::of(self.all);
             // 지도를 **먼저** 짓고 그것으로 집은 줄을 고른다 — [`started`] 를 그냥 부르면 미룸을
             // 빼는 걸음이 제 안에서 같은 지도를 한 벌 더 짓는다([`started_in`]).
-            let picked =
-                started_in(self.all, self.cfg, &epics, &stones).into_iter().map(|i| (i.id.as_str(), i)).collect();
-            Laid { picked, epics, stones }
+            let picked = started_in(self.all, self.cfg, ties.epics(), ties.stones())
+                .into_iter()
+                .map(|i| (i.id.as_str(), i))
+                .collect();
+            Laid { picked, ties }
         })
     }
 
@@ -992,8 +1065,11 @@ impl<'a, 'c> Footing<'a, 'c> {
     ///
     /// **묶음 줄에는 안 쓴다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니고, 트리도 `-e` 도
     /// 그 줄을 에픽 밑에 안 둔다. 부르는 쪽이 가른다.
-    pub fn epic_of(&self, id: &str) -> Option<&'a str> {
-        self.laid().epics.get(id).copied()
+    ///
+    /// **id 가 아니라 줄로 묻는다**(moai-jk2u.ipf) — 지도는 id 로 짠 것이라 같은 id 를 든 앞줄이
+    /// 뒷줄의 에픽을 입었고, 상세의 `에픽` 줄이 그 줄이 적지도 않은 에픽을 댔다([`Ties`]).
+    pub fn epic_of(&self, i: &'a Issue) -> Option<&'a str> {
+        self.laid().ties.epic_of(i)
     }
 
     /// 어느 칸이 시작한 칸인가를 아는 설정 — **옆 워크트리의 스냅샷을 재는 쪽**
@@ -1004,9 +1080,8 @@ impl<'a, 'c> Footing<'a, 'c> {
 
     /// 이 줄이 `names` 가 가리키는 일인가([`claims`]) — 워크트리마다 바뀌는 것은 이름뿐이라
     /// 지도는 한 벌이다.
-    pub fn claims(&self, names: &BTreeSet<String>, i: &Issue) -> bool {
-        let laid = self.laid();
-        claims(&laid.epics, &laid.stones, names, i)
+    pub fn claims(&self, names: &BTreeSet<String>, i: &'a Issue) -> bool {
+        claims(&self.laid().ties, names, i)
     }
 }
 
@@ -1045,7 +1120,7 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     if trees.is_empty() {
         return settle(&BTreeMap::new(), BTreeMap::new(), trees, now, &BTreeMap::new(), &BTreeMap::new(), false);
     }
-    let Laid { picked, epics, stones } = footing.laid();
+    let Laid { picked, ties } = footing.laid();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
     if picked.is_empty() {
         return settle(picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new(), false);
@@ -1053,12 +1128,12 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     // **굴릴 곳은 어느 워크트리가 있느냐와 무관하다**(moai-oepz) — 집은 멤버를 둔 묶음은 그
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
-    let rolls = rollups(footing.all(), picked, epics);
+    let rolls = rollups(footing.all(), picked, ties.epics());
     // 못 읽은 워크트리가 판정을 가리는가 — [`blinding`] 과 같은 자(`nameless`)로 워크트리마다 잰다.
     let mut blind = false;
     for t in trees {
-        let named = |i: &Issue| claims(epics, stones, &t.names, i);
-        let nameless = nameless(epics, stones, picked.values().copied(), t);
+        let named = |i: &Issue| claims(ties, &t.names, i);
+        let nameless = nameless(ties, picked.values().copied(), t);
         blind |= t.unknown && nameless;
         let born = t.born.as_deref().and_then(crate::model::parse_rfc3339);
         // 이름 없는 워크트리가 쥔 일은 **뜨기 한 시간 전부터 그 뒤로 움직인 줄**이다(사용자 결정,
@@ -1097,7 +1172,7 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     // 워크트리가 같이 서면 일하는 곳은 뒤의 것이다. 훅의 초점([`claims_over`])과 같은 자다.
     for (&id, &i) in picked {
         let near: Vec<(&Workplace, usize)> =
-            trees.iter().filter_map(|t| nearness(epics, stones, &t.names, i).map(|n| (t, n))).collect();
+            trees.iter().filter_map(|t| nearness(ties, &t.names, i).map(|n| (t, n))).collect();
         let best = near.iter().map(|(_, n)| *n).min();
         let mut by_name: Vec<&Workplace> = near.iter().filter(|(_, n)| Some(*n) == best).map(|(t, _)| *t).collect();
         if by_name.is_empty() {
@@ -1136,13 +1211,8 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
 ///
 /// "이 이름을 쓰는 줄이 있는가" 로 묻지 않는다 — 끝난 일의 이름으로 뜬 워크트리가 그 자리에서
 /// 다른 일을 하고 있어도 이름 있는 것으로 세어져 스냅샷으로 가르는 길이 통째로 닫힌다.
-fn nameless<'i>(
-    epics: &BTreeMap<&str, &str>,
-    stones: &BTreeMap<&str, &str>,
-    mut picked: impl Iterator<Item = &'i Issue>,
-    t: &Workplace,
-) -> bool {
-    !picked.any(|i| claims(epics, stones, &t.names, i))
+fn nameless<'a>(ties: &Ties<'a>, mut picked: impl Iterator<Item = &'a Issue>, t: &Workplace) -> bool {
+    !picked.any(|i| claims(ties, &t.names, i))
 }
 
 /// **자리 판정을 가리는 못 읽은 워크트리들** — 못 읽었고([`Workplace::unknown`]) 이름이 집은 줄을
@@ -1173,14 +1243,14 @@ pub fn blinding_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace]) -> Vec
     // 집은 줄이 없으면 가릴 판정도 없다 — [`places`] 의 빠른 길(`blind = false`)과 같은 답이다.
     // 안 거르면 `nameless` 가 빈 목록에 참을 내, 못 읽은 워크트리를 다 "가린다" 로 센다.
     //
-    // **같은 id 의 줄을 접어 세도 답이 같다** — [`claims`] 는 줄에서 `id` 만 보고 소속은
-    // `epics`·`stones` 지도에서 읽는데, 그 지도는 이미 뒷줄이 이긴다(`groups`). `claims` 가 줄의
-    // 필드를 직접 보게 되면 접은 것과 안 접은 것이 갈리니 그때 다시 본다.
-    let Laid { picked, epics, stones } = footing.laid();
+    // **같은 id 의 줄을 접어 세도 답이 같다** — [`claims`] 는 이제 줄에 묻지만(moai-jk2u.ipf)
+    // `picked` 가 남긴 그 한 줄이 지도가 고르는 줄과 같은 뒷줄이라, 접은 것과 안 접은 것의
+    // 답이 여전히 하나다. `picked` 가 앞줄을 남기게 되면 그때 다시 본다.
+    let Laid { picked, ties } = footing.laid();
     if picked.is_empty() {
         return Vec::new();
     }
-    trees.iter().filter(|t| t.unknown && nameless(epics, stones, picked.values().copied(), t)).collect()
+    trees.iter().filter(|t| t.unknown && nameless(ties, picked.values().copied(), t)).collect()
 }
 
 /// 묶음 id → **그 묶음으로 자리를 굴려 올릴 집은 멤버들**([`settle`]).
@@ -4923,9 +4993,8 @@ mod tests {
         // 훅의 자도 같다 — 옆 이름이 더 가까울 때만 옆의 것이다. 같은 거리면 제 것이다.
         let set = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<BTreeSet<String>>();
         let (epic, own, none) = (set(&["argos-0001"]), set(&["argos-0002"]), set(&[]));
-        let (epics, stones) = ties(&issues);
-        let over =
-            |away: &BTreeSet<String>, own: &BTreeSet<String>, i: &Issue| claims_over(&epics, &stones, away, own, i);
+        let ties = Ties::of(&issues);
+        let over = |away: &BTreeSet<String>, own: &BTreeSet<String>, i: &Issue| claims_over(&ties, away, own, i);
         assert!(!over(&epic, &own, &issues[1]), "제 이름 워크트리의 줄을 에픽 워크트리에 넘겼다");
         assert!(over(&epic, &own, &issues[2]), "제 이름이 안 가리키는 멤버를 제 것으로 셌다");
         assert!(over(&epic, &none, &issues[1]));

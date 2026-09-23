@@ -9683,6 +9683,58 @@ fn same_kind_twins_answer_the_same_epic_on_every_surface() {
     assert!(object("앞줄").contains(r#""epic":"argos-e001""#), "{json}");
 }
 
+/// **훅도 소속을 줄에 묻는다**(moai-jk2u.ipf, 리뷰 moai-jk2u.m60 12번).
+///
+/// 훅은 막는 자리라 틀린 답의 값이 다르다. 집은 줄이 제 쌍둥이의 에픽으로 판정되면 규칙 1 이
+/// 정당한 `moai add -e <에픽>` 을 거절하고, 거절문은 그 줄이 적지도 않은 에픽을 대며 그대로
+/// 쳐도 안 되는 명령을 내준다 — 되돌릴 길이 도구 밖에만 남는다.
+///
+/// **두 축을 다 잰다.** 한 함수 안에서 한 축만 옮긴 것이 리뷰 moai-jk2u.m60 1번이 잡은 자리다.
+/// **대조군이 같은 파일에 선다** — id 가 하나뿐인 줄의 답이 바뀌면 여기서 붉어진다.
+#[test]
+fn the_hook_reads_belonging_from_the_row_not_the_id_map() {
+    let s = init("hooktwin");
+    let row = |id: &str, title: &str, kind: &str, status: &str, at: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{at},\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일. 집은 것은 앞줄이고(뒷줄은 닫혔다), 앞줄과 뒷줄이 저마다 다른 에픽과
+    // 다른 릴리스를 적었다 — 지도는 뒷줄의 값 하나만 든다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}{}{}{}{}",
+            row("argos-e001", "에픽 하나", "epic", "todo", ""),
+            row("argos-e002", "에픽 둘", "epic", "todo", ""),
+            row("argos-m001", "릴리스 하나", "milestone", "todo", ""),
+            row("argos-m002", "릴리스 둘", "milestone", "todo", ""),
+            row("argos-0002", "집은 앞줄", "issue", "in_progress", ",\"epic\":\"argos-e001\""),
+            row("argos-0002", "닫힌 뒷줄", "issue", "done", ",\"epic\":\"argos-e002\""),
+            row("argos-0004", "릴리스를 적은 앞줄", "issue", "in_progress", ",\"milestone\":\"argos-m001\""),
+            row("argos-0004", "닫힌 뒷줄", "issue", "done", ",\"milestone\":\"argos-m002\""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 에픽 축 — 집은 줄이 제 `epic` 에 적은 에픽 안에 세우는 것은 지나간다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 -e argos-e001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 에픽에 세우는 것을 막았다 — {inside}");
+    // 뒷줄의 에픽은 이 줄의 것이 아니다 — 반대쪽도 잰다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 남의일 -e argos-e002\"}", "s1"));
+    assert!(!why.is_empty());
+
+    // 2. 마일스톤 축 — 같은 함수 안의 옆 걸음이다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 --milestone argos-m001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 릴리스에 세우는 것을 막았다 — {inside}");
+
+    // 3. 거절문이 대는 에픽. 아무 데도 안 붙인 생성을 막을 때, 그 글은 **집은 줄이 적은** 에픽을
+    //    대야 한다 — 쌍둥이의 것을 대면 시킨 그대로 쳐도 다시 막힌다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 딴일\"}", "s1"));
+    assert!(why.contains("-e argos-e001"), "거절문이 집은 줄의 에픽을 안 댔다 — {why}");
+    assert!(!why.contains("-e argos-e002"), "거절문이 쌍둥이의 에픽을 댔다 — {why}");
+}
+
 /// **가려진 묶음 줄은 쌍둥이의 읽은 칸을 안 입는다**(moai-7iyc.5fz).
 ///
 /// 칸 지도도 id 로 짠 것이라 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 그 id 의 뜻을 정하는
