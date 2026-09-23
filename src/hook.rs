@@ -3927,7 +3927,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // **재 보고 지금은 안 고치기로 했다**(2026-09-23 사용자 결정) — 이 기계의 기록에서 `find`
         // 400줄을 걷어 보니 시작 자리가 이 저장소 밑 절대 경로인 것이 37줄(9%), 아무 절대 경로나
         // 127줄인데, `-execdir`·`-okdir` 이 든 줄은 4줄이고 **그 둘이 함께 선 줄은 0줄**이었다.
-        // 뿌리를 렉서까지 내리는 일은 `rel_to`·`counted` 가 선 자리를 함께 건드리니 에픽
+        // 뿌리를 렉서까지 내리는 일은 [`shown`]·[`counted`] 가 선 자리를 함께 건드리니 에픽
         // moai-99yy 에서 한 번에 한다.
         //
         // **`-exec`·`-ok` 이 함께 선 줄에서는 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은 줄
@@ -5508,7 +5508,26 @@ fn is_review(i: &Issue, out_of_plan: &BTreeSet<&str>) -> bool {
 /// `src/` 의 한 줄이 같은 값으로 막히고, 그래서 세션당 한 번으로 풀어야 했다 —
 /// 느슨해진 규칙은 정작 막아야 할 것을 놓친다.
 pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, target: &str) -> Decision {
-    if !counted(target, root) || !held(issues, cfg, away).is_empty() {
+    // **경로 없는 부름은 여기서 끝난다**(리뷰 moai-99yy.m75 15번) — 풀면 뿌리가 나와 [`counted`]
+    // 가 어차피 떨어뜨리지만, 그 답을 얻는 데 `canonicalize` 한 번이 든다.
+    if target.is_empty() {
+        return Decision::Pass;
+    }
+    // **한 판에 경로를 한 번만 푼다**(moai-ln11) — 세는 자([`counted`])와 내미는 자([`shown`])가
+    // 같은 값을 빌려 쓴다. 둘이 저마다 풀던 판은 막는 길마다 [`resolve`] 와 `canonicalize` 를
+    // 두 벌씩 돌았다.
+    guard_edit_at(issues, cfg, away, root, &resolve(target, root), target)
+}
+
+/// [`guard_edit`] 과 같은 것 — **푼 자리와 사람이 친 철자를 따로 받는다.**
+///
+/// 가른 까닭은 껍데기에서 캔 쓰기다. [`guard_writes_in`] 은 `cwd.join(<친 낱말>)` 을 지어 넘기는데,
+/// 한 인자로 받던 판은 그것을 글자로 풀어 다시 `PathBuf` 로 되돌리면서 **사람이 친 낱말을 잃었다** —
+/// [`shown`] 이 뿌리를 못 떼는 자리(세션의 `cwd` 가 링크인 기계)에서 되돌려 줄 철자가 moai 가 지은
+/// 절대 경로여서, 사람이 친 적 없는 자리를 옮겨 치라고 내밀었다. `moai-fr0a` 가 `Edit`·`Write`
+/// 쪽에서 닫은 구멍이 껍데기 쪽에 그대로 남아 있던 자리다.
+fn guard_edit_at(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, at: &Path, typed: &str) -> Decision {
+    if !counted(at, root) || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
     // **본 칸을 함께 준다**(`--from`). 이 줄은 여럿이 같은 트래커를 쓰는 저장소에서 지어지므로, 짓고
@@ -5554,7 +5573,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
          If it was not in the plan, create it and pick that id up.\n\
          \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
-            rel_to(target, root)
+            shown(at, root, typed)
         ),
     )
 }
@@ -5593,8 +5612,10 @@ fn guard_writes_in(
         return Decision::Pass;
     }
     for path in writes.iter() {
-        let at = cwd.join(path);
-        if let deny @ Decision::Deny(_) = guard_edit(issues, scan.cfg(), away, root, &at.to_string_lossy()) {
+        // **친 낱말을 그대로 넘긴다**([`guard_edit_at`]) — 글자로 풀어 넘기면 [`shown`] 이 되돌려
+        // 줄 철자가 moai 가 지은 절대 경로가 되고, 푸는 일도 한 벌 더 돈다.
+        let at = resolve_path(&cwd.join(path), root);
+        if let deny @ Decision::Deny(_) = guard_edit_at(issues, scan.cfg(), away, root, &at, path) {
             return deny;
         }
     }
@@ -7579,15 +7600,23 @@ const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
 /// 이 저장소 `.gitignore` 의 `_workspace/` 도 어느 깊이에서든 걸린다.
 const SCRATCH: &str = "_workspace";
 
-/// 이 파일을 고치는 것이 일에 매여야 하는가.
-fn counted(path: &str, root: &Path) -> bool {
-    if path.is_empty() {
-        return false;
-    }
+/// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
+///
+/// 푸는 자리를 [`guard_edit`] 으로 올린 것은 거절 한 판이 같은 경로를 **두 번** 풀고 있었기
+/// 때문이다: 세는 데 한 번, 거절문에 실을 철자를 내는 데 한 번([`shown`] 이 서기 전의 `rel_to`).
+/// 둘이 저마다 [`resolve`] 와 `canonicalize` 를 다시 돌았는데, 그 둘은 늘 같은 경로를 받는다 —
+/// 막는 판은 세는 데서 참이 나와야 닿는 자리라 언제나 짝으로 돈다.
+///
+/// **빈 경로는 [`guard_edit`] 이 앞에서 막는다**(리뷰 moai-99yy.m75 15번). 여기까지 오면
+/// [`resolve`] 가 그것을 뿌리로 풀어 아래에서 그대로 떨어지므로 **답은 같지만**, `real_path` 의
+/// `canonicalize` 가 한 번 돈 뒤다 — 훅은 툴 부름마다 지나는 길이고 경로 키가 둘 다 빠진 `Edit`
+/// 짐은 실제로 `""` 로 여기 온다(`Call::read` 의 `unwrap_or_default`). 값을 안 치르고 같은 답을
+/// 내는 자리라 앞문을 되돌렸다.
+fn counted(at: &Path, root: &Path) -> bool {
     // **푼 값을 붙들고 빌려 쓴다.** 한 줄로 이으면 임시값이 그 줄 끝에서 죽어 `to_path_buf` 로
     // 한 벌을 더 떠야 하는데, 아래는 조각을 훑기만 한다 — Edit·Write 마다, 셸에서 캔 경로마다 도는
     // 자리라 그 한 벌이 값 없이 쌓인다.
-    let real = real_path(path, root);
+    let real = real_path(at);
     let Ok(rel) = real.strip_prefix(root) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
@@ -7599,7 +7628,12 @@ fn counted(path: &str, root: &Path) -> bool {
 /// **상대 경로는 저장소의 자리로 푼다.** 훅 프로세스가 어디서 도는지는 아무도
 /// 약속하지 않았다 — `src/main.rs` 가 저장소 밖으로 보여 규칙이 통째로 샜다.
 fn resolve(path: &str, root: &Path) -> PathBuf {
-    let p = Path::new(path);
+    resolve_path(Path::new(path), root)
+}
+
+/// [`resolve`] 를 `Path` 로 — 껍데기에서 캔 쓰기([`guard_writes_in`])는 그 낱말을 이미 `Path` 로
+/// 들고 있어, 글자로 풀었다 되돌리는 한 겹이 없다.
+fn resolve_path(p: &Path, root: &Path) -> PathBuf {
     let joined = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
     // **`..` 를 접는다.** 접지 않으면 판정이 양쪽으로 다 틀린다 —
     // `.moai/../src/store.rs` 는 첫 조각이 `.moai` 라 안 세는 자리로 보이고,
@@ -7632,13 +7666,27 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
 /// 철자를 그대로 돌려주므로, 여기에 그것을 끼우면 **아직 없는 파일**에서 안 풀린 철자가 나와
 /// `strip_prefix(root)` 가 빗나간다 — 2026-09-19 에 닫은 바로 그 구멍이다. 이 자리가 쓰는 것은
 /// [`crate::store::real_prefix`] 다.
-fn real_path(path: &str, root: &Path) -> PathBuf {
+fn real_path(at: &Path) -> PathBuf {
     // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::store::real_prefix`] 는 접힌 것을 받는다.
-    crate::store::real_prefix(&resolve(path, root))
+    crate::store::real_prefix(at)
 }
 
-fn rel_to(path: &str, root: &Path) -> String {
-    real_path(path, root).strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| path.to_string())
+/// 거절문이 내밀 철자 — **사람이 친 그대로다**(moai-fr0a).
+///
+/// [`real_path`] 의 글이 이미 못박은 자리인데 정작 거절문이 그것을 어겼다. 앞서 선 `rel_to` 는
+/// **푼** 자리에서 뿌리를 떼어, 사람이 친 적 없는 철자를 옮겨 치라고 내밀었다 — `TMPDIR` 이
+/// 링크인 기계, macOS 의 `/tmp`·`/var`, 링크로 건 프로젝트가 다 그 자리다. 판정은 두 철자를 한
+/// 자리로 봐야 하고, 내미는 글은 사람이 친 철자를 지켜야 한다.
+///
+/// 그래서 **글자로만 푼 자리**([`resolve`])에서 뿌리를 뗀다. 상대 경로로 친 것은 그대로 짧게
+/// 서고, 링크 철자로 부른 것은 뿌리 밑으로 안 떨어져 친 것을 그대로 낸다 — 길어도 그 사람의
+/// 파일 목록에 실제로 있는 철자다.
+///
+/// **`display()` 로 찍지 않는다**([`aim_flag`] 와 같은 까닭) — 이름이 UTF-8 이 아니면 그 바이트를
+/// U+FFFD 로 바꿔, 내민 줄이 있지도 않은 자리를 겨눈다. 못 찍는 이름은 뿌리를 떼는 대신 `typed`
+/// 를 그대로 낸다: 그것은 `&str` 로 들어온 값이라 언제나 옮겨 칠 수 있다.
+fn shown(at: &Path, root: &Path, typed: &str) -> String {
+    at.strip_prefix(root).ok().and_then(|r| r.to_str()).map_or_else(|| typed.to_string(), str::to_owned)
 }
 
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
@@ -10864,6 +10912,35 @@ mod tests {
         assert_eq!(judge(s.path().join("elsewhere/x.rs")), Decision::Pass);
     }
 
+    /// **거절문은 사람이 친 철자를 되돌려 준다**(moai-fr0a). 판정은 위처럼 링크를 풀어 두 철자를
+    /// 한 자리로 보지만, 내미는 글까지 그 값을 쓰면 사람이 친 적 없는 자리를 옮겨 치라고 내민다 —
+    /// `real_path` 의 글이 이미 못박아 둔 가름이고, 정작 거절문이 그것을 어기고 있었다.
+    #[test]
+    #[cfg(unix)]
+    fn the_refusal_hands_back_the_spelling_that_was_typed() {
+        let s = crate::scratch::Scratch::real("hookspelt");
+        let root = s.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/store.rs"), "").unwrap();
+        let link = s.path().join("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let spelt = link.join("src/store.rs").to_string_lossy().into_owned();
+        let why = denied(&guard_edit(&all, &cfg(), &here(), &root, &spelt)).to_string();
+        assert!(why.contains(&spelt), "친 철자 대신 푼 철자를 내민다\n{why}");
+
+        // 뿌리 밑으로 친 것은 그대로 짧게 선다 — 푼 철자와 친 철자가 같은 흔한 자리다.
+        let short = denied(&guard_edit(&all, &cfg(), &here(), &root, "src/store.rs")).to_string();
+        assert!(short.contains("Changing src/store.rs while"), "뿌리를 안 뗀다\n{short}");
+
+        // **껍데기에서 캔 쓰기도 같다**([`guard_edit_at`]). `guard_writes_in` 은 `cwd.join(<낱말>)`
+        // 을 지어 넘기므로, 세션의 `cwd` 가 링크면 뿌리가 안 떨어진다 — 그때 되돌려 줄 철자는
+        // moai 가 지은 절대 경로가 아니라 **사람이 친 낱말**이어야 한다.
+        let shell = denied(&guard_writes(&all, &cfg(), &here(), &root, &link, "echo x > src/store.rs")).to_string();
+        assert!(shell.contains("Changing src/store.rs while"), "껍데기 쪽이 지은 절대 경로를 내민다\n{shell}");
+    }
+
     /// 닫을 때의 셈법이 규칙 3 과 같아야 한다. 거절문이 시킨 대로 `--parent`
     /// 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는 아무도 안 챙기면, 한
     /// 규칙의 두 짝이 서로 다른 말을 한다.
@@ -13432,9 +13509,12 @@ mod korean_tests {
     /// 세션이 만든 것도.
     #[test]
     fn the_humanizer_workspace_is_not_counted() {
-        assert!(!counted("_workspace/2026-09-18-001/final.md", Path::new("/repo")));
-        assert!(!counted("/repo/sub/_workspace/2026-09-18-001/01_input.txt", Path::new("/repo")));
-        assert!(counted("src/main.rs", Path::new("/repo")));
-        assert!(counted("src/_workspace_notes.rs", Path::new("/repo")));
+        let root = Path::new("/repo");
+        // **푼 자리로 묻는다**(moai-ln11) — 세는 자는 [`super::guard_edit`] 이 이미 푼 값을 받는다.
+        let counted = |p: &str| super::counted(&resolve(p, root), root);
+        assert!(!counted("_workspace/2026-09-18-001/final.md"));
+        assert!(!counted("/repo/sub/_workspace/2026-09-18-001/01_input.txt"));
+        assert!(counted("src/main.rs"));
+        assert!(counted("src/_workspace_notes.rs"));
     }
 }
