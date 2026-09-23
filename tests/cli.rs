@@ -10048,6 +10048,93 @@ fn a_line_inherits_the_defer_of_the_epic_it_wrote_on_itself() {
     assert!(off.contains("앞줄"), "미룬 에픽의 멤버를 `--deferred` 가 안 냈다\n{off}");
 }
 
+/// **미룸의 뿌리도 줄에 묻는다**(moai-wre3, 리뷰 moai-jk2u.35i 15번).
+///
+/// `report::deferred_roots` 는 id 로 접은 지도라 같은 id 의 줄 둘 가운데 뒷줄의 답만 든다.
+/// 상세를 그리는 셋(`--json` 의 `shelved_by`, 상세 머리의 `미룸` 줄, 자식 줄)이 줄을 손에
+/// 들고도 그 지도를 id 로 짚어, 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다 — 미룬
+/// 에픽에 든 앞줄이 표를 잃거나(뒷줄이 계획 안일 때), 계획 안인 앞줄이 뒷줄의 미룬 에픽을
+/// 제 것으로 달았다. 뒤엣것은 시킨 그대로 친 `moai defer argos-e001 --undo` 가 그 줄을 안
+/// 되돌린다 — 애초에 미룬 적이 없는 줄이다.
+///
+/// **두 방향과 대조군을 한 시험에서 잰다.** 한 방향만 재면 답을 통째로 `없음` 이나 `있음`
+/// 으로 바꿔도 안 붉어지고, 쌍둥이만 재면 id 가 하나뿐인 줄의 답이 바뀌어도 안 붉어진다.
+/// `show --deferred` 를 함께 보는 것은 잣대가 **한 화면이 제 말을 뒤집지 않는가**이기
+/// 때문이다 — 그리는 쪽만 맞고 거르는 쪽이 어긋나면 고친 것이 아니다.
+///
+/// **`shelved_by` 는 그대로 뒷줄이다.** `moai show <id>` 가 펼치는 줄이 `Load::get` 의 뒷줄
+/// 이라 그것이 곧 그 줄의 답이다 — id 밖에 없는 표면은 접은 지도로 간다는 결정(2026-09-23)은
+/// 여기서 안 건드린다.
+#[test]
+fn the_detail_asks_the_row_for_the_defer_root() {
+    let s = init("defertwin");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\",\"status\":\"todo\"{extra},\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 미룬 에픽 하나와 산 에픽 하나. 부모 둘 밑에 쌍둥이 자식이 한 쌍씩 서는데, 한 쌍은
+    // **앞줄**이 미룬 에픽에 들고 다른 한 쌍은 **뒷줄**이 든다 — 접은 지도는 뒷줄만 들므로
+    // 두 쌍의 답이 갈려야 한다. 홑줄 둘은 대조군이다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            line("argos-0001", "부모 하나", "issue", ""),
+            line("argos-0001.aaa", "앞줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0001.aaa", "뒷줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0001.ccc", "홑줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0001.ddd", "홑줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0002", "부모 둘", "issue", ""),
+            line("argos-0002.bbb", "앞줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0002.bbb", "뒷줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-e001", "미룬 에픽", "epic", ",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+            line("argos-e002", "산 에픽", "epic", ""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    // 같은 id 가 둘인 파일이라 `duplicate_id` 로 종료 코드가 0 이 아니다 — 글만 읽는다.
+    let detail = |id: &str| String::from_utf8(moai(s.path(), &["show", id]).stdout).unwrap();
+    let mark = "미룸 — argos-e001 밑";
+    let row = |out: &str, title: &str| {
+        out.lines()
+            .find(|l| l.contains(title))
+            .unwrap_or_else(|| panic!("`{title}` 줄이 상세에 없다\n{out}"))
+            .to_string()
+    };
+
+    // 1. 앞줄이 미룬 쌍 — 표는 앞줄에만 선다.
+    let one = detail("argos-0001");
+    assert!(row(&one, "앞줄 밖").contains(mark), "미룬 에픽에 든 앞줄이 표를 잃었다\n{one}");
+    assert!(!row(&one, "뒷줄 안").contains("미룸"), "계획 안인 뒷줄이 표를 달았다\n{one}");
+
+    // 2. 뒷줄이 미룬 쌍 — 표는 뒷줄에만 선다. **접은 지도를 짚으면 여기서 둘 다 붉어진다.**
+    let two = detail("argos-0002");
+    assert!(row(&two, "뒷줄 밖").contains(mark), "미룬 에픽에 든 뒷줄이 표를 잃었다\n{two}");
+    assert!(!row(&two, "앞줄 안").contains("미룸"), "계획 안인 앞줄이 쌍둥이의 미룸을 달았다\n{two}");
+
+    // 3. 대조군 — id 가 하나뿐인 줄의 답은 그대로다. 줄로 묻는 길이 접은 지도와 갈리면 여기가 잡는다.
+    assert!(row(&one, "홑줄 밖").contains(mark), "홑줄이 물려받은 미룸을 잃었다\n{one}");
+    assert!(!row(&one, "홑줄 안").contains("미룸"), "계획 안인 홑줄이 표를 달았다\n{one}");
+
+    // 4. 거르는 쪽과 그리는 쪽이 같은 말을 한다 — 이 넷이 계획 밖이고 나머지는 아니다.
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred", "--all"]).stdout).unwrap();
+    for title in ["앞줄 밖", "뒷줄 밖", "홑줄 밖", "미룬 에픽"] {
+        assert!(off.contains(title), "`{title}` 을 `--deferred` 가 안 냈다\n{off}");
+    }
+    for title in ["뒷줄 안", "앞줄 안", "홑줄 안"] {
+        assert!(!off.contains(title), "계획 안인 `{title}` 을 `--deferred` 가 냈다\n{off}");
+    }
+
+    // 5. `shelved_by` 는 펼친 줄(뒷줄)의 답이다 — id 밖에 없는 표면의 결정은 그대로다.
+    let json = |id: &str| String::from_utf8(moai(s.path(), &["show", id, "--json"]).stdout).unwrap();
+    let front_off = json("argos-0001.aaa");
+    assert!(!front_off.contains("shelved_by"), "뒷줄이 계획 안인데 `shelved_by` 가 섰다\n{front_off}");
+    let back_off = json("argos-0002.bbb");
+    assert!(back_off.contains(r#""shelved_by":"argos-e001""#), "뒷줄의 미룸을 `shelved_by` 가 안 냈다\n{back_off}");
+}
+
 /// **마일스톤의 미룸도 줄마다 물려받는다**(리뷰 moai-jk2u.m60).
 ///
 /// 위 시험이 못박은 것을 `Shelf::walk` 는 에픽 축에서만 했다 — 마일스톤 축은 `mile_of` 를

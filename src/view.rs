@@ -1533,8 +1533,9 @@ pub fn ready(
 /// 안 선다. 짓는 자리는 둘뿐이라 도우미를 두지 않았다: `cmd::edit` 과 `cmd::show` 가 칸마다
 /// 제 값을 채우고, 읽은 것이 없는 화면을 짓는 것은 시험의 `tests::bare_seen` 하나다.
 pub struct Seen<'a> {
-    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::deferred_roots`).
-    pub roots: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::Shelved`). **줄로 묻는다** — 지도를 그대로
+    /// 들던 때는 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다(moai-wre3).
+    pub roots: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
     pub states: BTreeMap<&'a str, &'a str>,
     /// 가려진 줄을 가르는 지도 (`report::Kinds`, moai-7iyc.5fz). 위의 칸 지도는 id 로 짠 것이라,
@@ -1688,7 +1689,7 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now, seen.screen.lang) {
+    if let Some(d) = deferred_for(i, seen.roots.root(i), now, seen.screen.lang) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
     if let Some(n) = unread_column(i, col, cfg, seen.screen.lang) {
@@ -1784,7 +1785,7 @@ pub fn detail(
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now, seen.screen.lang) {
+        if let Some(d) = deferred_for(c, seen.roots.root(c), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
         let ccol = crate::report::column(&seen.kinds, c, &seen.states);
@@ -3267,7 +3268,7 @@ mod tests {
     fn bare_seen(lang: Lang) -> Seen<'static> {
         Seen {
             screen: Screen::new(lang),
-            roots: BTreeMap::new(),
+            roots: crate::report::Shelved::default(),
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,

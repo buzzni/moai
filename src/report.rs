@@ -398,6 +398,77 @@ pub fn torn_ids<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeSet<&
     torn
 }
 
+/// 계획에서 빠진 줄을 묻는 **두 답을 한 자리에** 든 그릇 ([`Kinds`] 와 같은 까닭).
+///
+/// 접은 지도([`fold_roots`])는 **id 밖에 없는 표면**의 답이고(막는 줄, `defer --undo` 가 대는
+/// 말), 줄마다의 판정([`shelved_over`])은 **줄을 든 표면**의 답이다. 탐색기의 `nav::Index` 가
+/// `deferred_root` 와 `shelved` 를 나란히 든 것과 같은 자다(moai-jk2u.hr4) — CLI 상세만 지도
+/// 하나로 둘을 다 하다가, 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다: 미룬 에픽에 든
+/// 앞줄이 `미룸` 표를 잃거나(뒷줄이 계획 안일 때), 계획 안인 앞줄이 뒷줄의 미룬 에픽을 제
+/// 것으로 달았다(moai-wre3, 리뷰 moai-jk2u.35i 15번). 뒤엣것은 시킨 그대로 친
+/// `moai defer <그 에픽> --undo` 가 그 줄을 안 되돌린다 — 애초에 미룬 적이 없는 줄이다.
+///
+/// **줄을 든 쪽이 뒷줄이라도 [`Shelved::root`] 로 묻는다.** `moai show <id>` 가 펼치는 줄은
+/// `Load::get` 이 고르는 뒷줄이라 접은 지도의 답과 지금은 같지만, 같다는 것이 우연이면 그
+/// 우연이 깨지는 날 이 화면만 조용히 틀린다.
+///
+/// 줄마다 갈리는 id 가 없으면([`torn_ids`]) 판정을 아예 안 든다 — 성한 저장소에서는 접은
+/// 지도가 곧 줄마다의 답이라([`crate::query::Where::deferred`] 가 깐 전제와 같다) 들고 다닐
+/// 까닭이 없다.
+#[derive(Default)]
+pub struct Shelved<'a> {
+    /// id 로 접은 답 — 뒷줄이 이긴다([`fold_roots`]).
+    by_id: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠졌는가가 줄마다 갈리는 id ([`torn_ids`]). 성한 저장소에서는 빈다.
+    torn: BTreeSet<&'a str>,
+    /// 판정을 잰 줄 — [`Shelved::root`] 가 받은 줄의 **자리**를 여기서 찾는다. `torn` 이 비면
+    /// 함께 비운다.
+    rows: &'a [Issue],
+    /// `rows` 와 자리가 같은 줄마다의 답 ([`shelved_over`]).
+    at_line: Vec<Option<&'a str>>,
+}
+
+impl<'a> Shelved<'a> {
+    /// 저장소 전체를 재서 든다.
+    pub fn of(all: &'a [Issue]) -> Shelved<'a> {
+        Shelved::over(all, shelved(all))
+    }
+
+    /// [`Shelved::of`] 와 같은 것. 줄마다의 판정을 **이미 잰 쪽**이 그것을 넘긴다.
+    pub fn over(all: &'a [Issue], at_line: Vec<Option<&'a str>>) -> Shelved<'a> {
+        let by_id = fold_roots(all, &at_line);
+        let torn = torn_ids(all, &at_line);
+        // 줄마다 갈리는 id 가 없으면 판정을 버린다 — 이슈 1만 건짜리 저장소에서 그 배열은
+        // 통째로 헛짐이다. 버린 뒤에도 `by_id` 가 곧 줄마다의 답이라 [`Shelved::root`] 의
+        // 답은 같다.
+        match torn.is_empty() {
+            true => Shelved { by_id, torn, rows: &[], at_line: Vec::new() },
+            false => Shelved { by_id, torn, rows: all, at_line },
+        }
+    }
+
+    /// **쌍둥이가 설 수 없다고 아는 자리** ([`Kinds::no_twins`] 와 같은 약속). 부르는 쪽이
+    /// 그 까닭을 곁에 적는다 — 지금 서는 자리는 `store::with_write` 가 중복 id 에 쓰기를
+    /// 통째로 물리는 쓰기 경로 하나다.
+    pub fn no_twins(by_id: BTreeMap<&'a str, &'a str>) -> Shelved<'a> {
+        Shelved { by_id, torn: BTreeSet::new(), rows: &[], at_line: Vec::new() }
+    }
+
+    /// 그 **줄**을 계획에서 뺀 줄 — 계획에 있으면 `None`.
+    pub fn root(&self, i: &Issue) -> Option<&'a str> {
+        if !self.torn.contains(i.id.as_str()) {
+            return self.by_id.get(i.id.as_str()).copied();
+        }
+        // 잰 적 없는 줄(쓰기 경로가 방금 지은 줄, 시험이 손으로 짓는 줄)이 오면 접은 지도로
+        // 돌아간다. **없는 답을 지어내지 않는다** — 그 자리의 답은 전과 같고, 여기서 줄을
+        // 못 찾았다는 것은 이 그릇이 그 줄을 안 쟀다는 뜻일 뿐이다.
+        match self.rows.iter().position(|x| std::ptr::eq(x, i)) {
+            Some(at) => self.at_line[at],
+            None => self.by_id.get(i.id.as_str()).copied(),
+        }
+    }
+}
+
 /// **줄 하나**를 계획에서 뺀 가장 가까운 줄 — [`shelved_over`] 가 그 줄에 내리는 그 답이다.
 /// 지도가 든 답이 이 줄의 것이 아닐 때([`torn_ids`]) 줄을 든 쪽이 이것으로 되묻는다.
 ///

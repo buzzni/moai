@@ -211,6 +211,18 @@ on finding them.
 
 ### Fixed
 
+- **The detail reads a row's defer from the row, not from the id map.** Which
+  defer took a row out of the plan is folded by id and the later line wins there,
+  which is right where only an id is in hand — but `moai show` holds the row. So
+  where the same id stood twice under one parent, both child lines were given the
+  later line's answer: an earlier line deferred under an epic lost its `deferred`
+  mark whenever the later line stood in the plan, and an earlier line that stood
+  *in* the plan wore the later line's deferred epic — and running the
+  `moai defer <that epic> --undo` that mark points at brings that row back not at
+  all, because it was never deferred. `moai show --deferred` had been saying the
+  opposite about those same rows all along. `shelved_by` in `--json` and the mark
+  on the opened row itself answer the same as before: `moai show <id>` opens the
+  later line, so that line's answer is the one they already gave.
 - A row that **wrote no `epic` of its own no longer wears the one its twin
   wrote**. Which epic a row is in is read from the row, but what it fell back on
   when the row wrote nothing was the id-keyed map — and that map holds the later
