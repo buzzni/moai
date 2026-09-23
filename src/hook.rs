@@ -5554,7 +5554,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
          If it was not in the plan, create it and pick that id up.\n\
          \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
-            rel_to(target, root)
+            shown(&resolve(target, root), root, target)
         ),
     )
 }
@@ -7637,8 +7637,18 @@ fn real_path(path: &str, root: &Path) -> PathBuf {
     crate::store::real_prefix(&resolve(path, root))
 }
 
-fn rel_to(path: &str, root: &Path) -> String {
-    real_path(path, root).strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| path.to_string())
+/// 거절문이 내밀 철자 — **사람이 친 그대로다**(moai-fr0a).
+///
+/// [`real_path`] 의 글이 이미 못박은 자리인데 정작 거절문이 그것을 어겼다. 앞서 선 `rel_to` 는
+/// **푼** 자리에서 뿌리를 떼어, 사람이 친 적 없는 철자를 옮겨 치라고 내밀었다 — `TMPDIR` 이
+/// 링크인 기계, macOS 의 `/tmp`·`/var`, 링크로 건 프로젝트가 다 그 자리다. 판정은 두 철자를 한
+/// 자리로 봐야 하고, 내미는 글은 사람이 친 철자를 지켜야 한다.
+///
+/// 그래서 **글자로만 푼 자리**([`resolve`])에서 뿌리를 뗀다. 상대 경로로 친 것은 그대로 짧게
+/// 서고, 링크 철자로 부른 것은 뿌리 밑으로 안 떨어져 친 것을 그대로 낸다 — 길어도 그 사람의
+/// 파일 목록에 실제로 있는 철자다.
+fn shown(at: &Path, root: &Path, typed: &str) -> String {
+    at.strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| typed.to_string())
 }
 
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
@@ -10862,6 +10872,29 @@ mod tests {
         // 안 세는 자리와 저장소 밖은 링크를 풀어도 그대로다.
         assert_eq!(judge(link.join(".moai/issues.jsonl")), Decision::Pass);
         assert_eq!(judge(s.path().join("elsewhere/x.rs")), Decision::Pass);
+    }
+
+    /// **거절문은 사람이 친 철자를 되돌려 준다**(moai-fr0a). 판정은 위처럼 링크를 풀어 두 철자를
+    /// 한 자리로 보지만, 내미는 글까지 그 값을 쓰면 사람이 친 적 없는 자리를 옮겨 치라고 내민다 —
+    /// `real_path` 의 글이 이미 못박아 둔 가름이고, 정작 거절문이 그것을 어기고 있었다.
+    #[test]
+    #[cfg(unix)]
+    fn the_refusal_hands_back_the_spelling_that_was_typed() {
+        let s = crate::scratch::Scratch::real("hookspelt");
+        let root = s.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/store.rs"), "").unwrap();
+        let link = s.path().join("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+
+        let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        let spelt = link.join("src/store.rs").to_string_lossy().into_owned();
+        let why = denied(&guard_edit(&all, &cfg(), &here(), &root, &spelt)).to_string();
+        assert!(why.contains(&spelt), "친 철자 대신 푼 철자를 내민다\n{why}");
+
+        // 뿌리 밑으로 친 것은 그대로 짧게 선다 — 푼 철자와 친 철자가 같은 흔한 자리다.
+        let short = denied(&guard_edit(&all, &cfg(), &here(), &root, "src/store.rs")).to_string();
+        assert!(short.contains("Changing src/store.rs while"), "뿌리를 안 뗀다\n{short}");
     }
 
     /// 닫을 때의 셈법이 규칙 3 과 같아야 한다. 거절문이 시킨 대로 `--parent`
