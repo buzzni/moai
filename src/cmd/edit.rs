@@ -327,6 +327,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let seen = view::Seen {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
         states: read.columns().collect(),
+        // **쓰기 경로에는 쌍둥이가 없다**(`cmd::Row::from` 과 같은 까닭) — `store::with_write` 가
+        // 중복 id 에 쓰기를 통째로 물린다.
+        kinds: crate::report::Kinds::no_twins(),
         // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()),
         blocks: blocked.blocks(),

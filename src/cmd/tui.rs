@@ -43,10 +43,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
+        let kinds = ground.kinds();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
-            .map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang()))
+            .map(|e| Row::of(&index, &load.issues, &states, &kinds, e, ctx.lang()))
             .collect();
         return super::json_line(&rows);
     }
@@ -425,6 +426,7 @@ impl Row {
         index: &Index,
         issues: &[Issue],
         states: &std::collections::BTreeMap<&str, &str>,
+        kinds: &crate::report::Kinds<'_>,
         e: &Entry,
         lang: crate::i18n::Lang,
     ) -> Row {
@@ -438,10 +440,12 @@ impl Row {
                 dir,
                 path: issues[at].id.clone(),
                 status: Some(issues[at].status.as_str().to_string()),
-                // 묶음만 읽은 칸을 받는다 — `report::column` 과 같은 자다.
-                derived_status: crate::report::is_group(&issues[at])
-                    .then(|| states.get(issues[at].id.as_str()).map(|s| s.to_string()))
-                    .flatten(),
+                // 묶음만 읽은 칸을 받고 가려진 줄은 안 입는다 — `report::stands_on` 과 같은
+                // 자다(moai-7iyc.5fz). 판정을 여기 베끼면 `show --json` 의 같은 키와 갈린다.
+                derived_status: crate::report::stands_on(kinds, &issues[at], || {
+                    states.get(issues[at].id.as_str()).copied()
+                })
+                .map(str::to_string),
                 priority: Some(issues[at].priority()),
             },
             None => Row {

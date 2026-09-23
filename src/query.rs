@@ -80,7 +80,29 @@ impl<'a> Where<'a> {
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::column(i, &self.states)
+        crate::report::column(&self.kinds, i, &self.states)
+    }
+
+    /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
+    pub fn epic_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
+        crate::report::stands_in(&self.kinds, i, self.epic.get(i.id.as_str()).copied())
+    }
+
+    /// 그 줄이 **선 마일스톤** (`report::stood_under`) — 롤업과 `moai show <마일스톤>` 의
+    /// 멤버가 세는 곳과 같은 답이다.
+    ///
+    /// **지도를 곧바로 안 짚는다**(리뷰). 마일스톤은 에픽을 타고 오는데([`crate::report::milestones_in`])
+    /// 그 에픽이 줄마다 갈리므로, 지도를 짚으면 같은 id 를 든 앞줄이 뒷줄의 에픽을 타고 남의
+    /// 릴리스로 간다 — `moai show <마일스톤>` 이 멤버로 그린 줄을 `moai show --milestone <그것>`
+    /// 은 안 내고 `--milestone none` 이 냈다.
+    /// **가려짐은 여기서 가른다** — 에픽 쪽 [`Where::epic_of`] 가 `report::stands_in` 안에서
+    /// 그러는 것과 짝이다. `report::stood_under` 자신은 가려짐을 안 본다(세는 쪽은 `work_under`
+    /// 가 그 줄을 미리 걸러 넘긴다) — 문을 한 겹 위에 두는 것이 두 축에서 같은 꼴이다.
+    pub fn milestone_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
+        if self.eclipsed(i) {
+            return None;
+        }
+        crate::report::stood_under(i.id.as_str(), self.epic_of(i), &self.milestone, |e| self.kinds.is(e, Kind::Epic))
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
@@ -89,9 +111,10 @@ impl<'a> Where<'a> {
     /// 데서도 안 읽히는 칸의 시각이라, 그것으로 재면 오늘 진행 중이 된 에픽이
     /// `-s in_progress --stale 10` 에 걸린다 — 고르는 자와 재는 자가 어긋난다.
     pub fn since<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::is_group(i)
-            .then(|| self.since.get(i.id.as_str()).copied())
-            .flatten()
+        // **고르는 자와 재는 자가 한 문을 지난다**(리뷰, `report::stands_on`). 위의 `column` 만
+        // 가려진 줄을 거르면, `-s` 가 제 칸으로 고른 그 줄의 나이는 쌍둥이 묶음의 셈에서 와
+        // `--stale` 이 265일 된 줄을 하루짜리로 잰다.
+        crate::report::stands_on(&self.kinds, i, || self.since.get(i.id.as_str()).copied())
             .unwrap_or(i.status_since.as_str())
     }
 
@@ -374,15 +397,19 @@ impl Filter {
         // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.
         // 이름으로 고르는 `-e X` 는 그대로다.
         let folded = wh.folded.contains(i.id.as_str());
-        let placed = |sel: &[Sel], map: &BTreeMap<&str, &str>| {
-            let value = map.get(i.id.as_str()).copied();
+        let placed = |sel: &[Sel], value: Option<&str>| {
             sel.is_empty()
                 || (!eclipsed
                     && sel
                         .iter()
                         .any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
         };
-        if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
+        // **두 축 다 지도를 곧바로 안 짚는다**(moai-7iyc.rt6, 2026-09-23 사용자 결정). 지도는 id 로
+        // 짠 것이라 같은 id 를 든 줄이 둘이면 앞줄이 뒷줄의 값을 입는다 — `-e <에픽>` 이
+        // `derived_epic` 과 다른 답을 하던 자리다. **마일스톤도 같다**(리뷰): 에픽이 마일스톤을
+        // 이기므로(`report::milestones_in`) 줄에 적힌 `milestone` 은 이미 졌지만, 이긴 그 에픽이
+        // 줄마다 갈려 지도의 값도 앞줄의 것이 못 된다.
+        if !placed(&self.epic, wh.epic_of(i)) || !placed(&self.milestone, wh.milestone_of(i)) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
