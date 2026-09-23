@@ -514,15 +514,27 @@ pub struct Row<'a> {
     ///
     /// **`epic` 은 그 약속이 반쪽이다**(moai-exh7 뒤). 계획이 세우는 멤버는 소속을 id 에 지고
     /// `epic` 을 안 적으므로, 이 줄에서 키가 없다는 것은 "에픽이 없다" 가 아니라 "여기에는 안
-    /// 적혔다" 다 — 답은 `report::groups` 가 안다. `prime --json` 은 그것을 풀어 내고
-    /// (`cmd::prime::Brief`) 이쪽은 아직 안 낸다. 둘을 맞추려면 `derived_status` 처럼 여기에
-    /// 곁들이는 것이 길이다.
+    /// 적혔다" 다 — 답은 `report::groups` 가 안다. 그 답은 [`Row::derived_epic`] 이 낸다
+    /// (moai-wuzi, 2026-09-23 사용자 결정): `epic` 은 **파일에 적힌 그대로** 두고, 푼 값은
+    /// `derived_status` 처럼 제 키로 곁들인다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
+    /// 그 줄이 **든 에픽** — 적어 놓았든 id 로 졌든(`report::groups`). 소속을 묻는 기계는
+    /// 이 키 하나만 본다(moai-wuzi).
+    ///
+    /// **없다는 것은 "어느 에픽에도 안 든다" 는 뜻이다** — `epic` 키의 침묵과 다르다. 그쪽은
+    /// "여기에는 안 적혔다" 이고, 계획이 세우는 멤버는 늘 그쪽이 빈다. 한때 `show --json` 은
+    /// 그 멤버를 에픽 없는 줄로 내고 `prime --json` 은 물려받은 소속을 내, 한 바이너리의 두
+    /// 기계 표면이 "이 줄은 어느 에픽인가" 에 다른 답을 했다.
+    ///
+    /// **묶음 줄에는 안 선다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니다. 트리도
+    /// `-e` 도 그 줄을 에픽 밑에 두지 않으므로, 여기에 대면 적은 적 없는 소속이 선다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived_epic: Option<&'a str>,
     /// 다른 워크트리에서 온 줄이면 그 브랜치 (`--worktree`). **키가 없다는 것이 곧
     /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -544,6 +556,7 @@ pub struct Row<'a> {
 pub const OURS: &[&str] = &[
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
+    "derived_epic",
     "branch",
     // 줄이 기본값이라 안 적었을 때 `Row` 가 세우는 것. 줄의 제 키라 모르는 필드로 들어올 일은
     // 없지만, 걷는 목록은 **출력에 서는 우리 키 전부**다 — 여기서 빼면 `Row` 에 필드를 더하는
@@ -614,7 +627,14 @@ impl<'a> Row<'a> {
     /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
     /// 파일에서 묶음과 id 가 같은 일 줄이 그 묶음의 칸을 입지 않게, `report::column`
     /// 과 같은 자로 묻는다.
-    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>) -> Row<'a> {
+    ///
+    /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::groups_of`) — 줄이 `epic` 을
+    /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
+    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>, placed: Option<&'a str>) -> Row<'a> {
+        // **차례를 여기서 다시 적지 않는다**(`report::stands_in`) — 적힌 것이 먼저라는 것도,
+        // 묶음 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가 정한다. 여기 한 벌 더 적으면
+        // `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가 어긋난다.
+        let derived_epic = crate::report::stands_in(issue, placed);
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
@@ -632,7 +652,7 @@ impl<'a> Row<'a> {
         // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
         let kind = issue.kind.is_default().then(|| issue.kind.as_str());
         let priority = issue.priority.is_none().then(|| issue.priority());
-        Row { issue, kind, priority, derived_status: derived, branch: None }
+        Row { issue, kind, priority, derived_status: derived, derived_epic, branch: None }
     }
 
     /// 겹쳐 본 줄이면 그 출처를 곁들인다.
@@ -643,7 +663,7 @@ impl<'a> Row<'a> {
 
     /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.
     pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
-        Row::of(issue, read.get(&issue.id).map(String::as_str))
+        Row::of(issue, read.column(&issue.id), read.epic(&issue.id))
     }
 }
 
@@ -673,16 +693,58 @@ pub fn keys_beyond<T: serde::Serialize>(line: &crate::model::Issue, out: &T) -> 
     keys(serde_json::to_value(out).unwrap()).into_iter().filter(|k| !bare.contains(k)).collect()
 }
 
-/// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
-pub type Read = BTreeMap<String, String>;
+/// 락 안에서 챙겨 나온, **줄 하나를 기계 꼴로 낼 때 저장소 전체를 봐야 아는 값** —
+/// 묶음이 읽은 칸과, 소속을 id 에 진 줄이 든 에픽. 락 밖으로 들고 나가는 모양이라 제
+/// 문자열을 쥔다.
+///
+/// **둘을 한 자리에 묶는다**(moai-wuzi) — 쓰는 명령마다 지도를 따로 세우면 새 표면이
+/// 하나를 빠뜨리고, 그러면 `--json` 이 명령마다 다른 말을 한다. 그 어긋남을 고치는 것이
+/// 이 필드가 선 까닭이다.
+#[derive(Default)]
+pub struct Read {
+    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states_of`).
+    states: BTreeMap<String, String>,
+    /// 줄 id → 그 줄이 든 에픽(`report::groups_of`). **`epic` 을 적은 줄도 든다** — 지도를
+    /// 지었으면 그 줄에도 값이 선다. 다만 그 값은 안 읽힌다: 줄이 제 몸에 든 것이 먼저라
+    /// (`report::stands_in`), 지도를 아예 안 지은 때에도 답이 같다.
+    epics: BTreeMap<String, String>,
+}
 
-/// 락 안에서 **낼 줄 가운데 묶음의 읽은 칸**을 챙겨 나온다 — 락을 놓은 뒤에 다시 세면
-/// 그 사이에 남이 쓴 멤버가 섞인다. 묶음이 없으면 걷지 않는다(`group_states_of`).
-pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
-    crate::report::group_states_of(issues, cfg, ids)
-        .into_iter()
-        .map(|(id, col)| (id.to_string(), col.to_string()))
-        .collect()
+impl Read {
+    /// 묶음이 읽은 칸. 묶음이 아니거나 안 챙겼으면 없다.
+    pub fn column(&self, id: &str) -> Option<&str> {
+        self.states.get(id).map(String::as_str)
+    }
+
+    /// 소속을 id 에 진 줄이 든 에픽.
+    pub fn epic(&self, id: &str) -> Option<&str> {
+        self.epics.get(id).map(String::as_str)
+    }
+
+    /// 챙겨 온 묶음과 그 칸 전부 — 읽은 칸으로 **그리는** 쪽이 받아 간다.
+    pub fn columns(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.states.iter().map(|(id, col)| (id.as_str(), col.as_str()))
+    }
+}
+
+/// 락 안에서 **낼 줄이 저장소 전체를 봐야 아는 값**을 챙겨 나온다 — 락을 놓은 뒤에 다시
+/// 세면 그 사이에 남이 쓴 멤버가 섞인다. 둘 다 게을러서, 묶음이 없으면 칸을
+/// (`group_states_of`), 소속을 id 에 진 줄이 없으면 에픽을(`groups_of`) 안 걷는다.
+///
+/// **소속은 `--json` 일 때만 걷는다**(`json`, 리뷰) — 그 지도를 읽는 자는 [`Row::from`]
+/// 하나고 그것을 부르는 자리는 기계 출력뿐이다. 늘 걷으면 사람이 부르는 `moai mv` 도
+/// 저장소 전체의 조상 오름을 락을 쥔 채 치르는데, 여기는 세션 예닐곱이 같은 `.moai` 를
+/// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
+/// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
+pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
+    let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    Read {
+        states: owned(crate::report::group_states_of(issues, cfg, ids)),
+        epics: match json {
+            true => owned(crate::report::groups_of(issues, ids)),
+            false => BTreeMap::new(),
+        },
+    }
 }
 
 /// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
@@ -716,6 +778,15 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
     crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
+/// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.
+///
+/// **[`Read`] 와는 다른 자다.** 이쪽은 `--from` 이 견줄 칸 하나만 담고 아무것도 안 낸다.
+/// 막는 것은 `Read` 가 구조체가 된 쪽이다 — 필드가 사유라 맨 지도는 [`Row::from`] 에
+/// 못 닿는다. 이 이름은 별명이라 그 자체로는 아무것도 안 막고, 갈라 둔 까닭을 적어 둘
+/// 뿐이다. 한 이름을 둘이 쓰던 때에는 소속을 안 챙긴 이 지도가 줄을 내는 자리에 흘러도
+/// 컴파일이 지났다.
+pub type Standing = BTreeMap<String, String>;
+
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
 ///
 /// [`read_of`] 와 갈리는 곳이 둘이다.
@@ -729,7 +800,7 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
 ///   두 번 적은 한 명령이 **제가 방금 쓴 값**과 겨룬다 — 옮겨 놓고도 "이미 …다" 로
 ///   지고, `moved` 와 `stale` 에 같은 줄이 함께 서며, 종료 코드가 0 이 아니다.
 ///   `--from` 이 재는 것은 *부르는 쪽이 본* 칸이지 이 명령이 만든 칸이 아니다.
-pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
+pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Standing {
     let states = crate::report::group_states_of(issues, cfg, ids);
     issues
         .iter()
@@ -904,7 +975,7 @@ mod tests {
     fn a_row_speaks_the_default_kind_and_priority() {
         let i = plain();
         assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
         assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
         assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
     }
@@ -915,7 +986,7 @@ mod tests {
     fn a_row_that_carries_them_is_untouched() {
         let mut i = row_with(&[]);
         i.priority = Some(1);
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
         assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
         assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
         assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
@@ -931,7 +1002,7 @@ mod tests {
             ("duplicate_lines", "가짜"),
             ("due", "2026-10-01"),
         ]);
-        let row = Row::of(&i, Some("in_progress"));
+        let row = Row::of(&i, Some("in_progress"), None);
         let extra = [
             ("members", "[]".to_string()),
             ("shelved_by", "\"argos-0002\"".to_string()),
@@ -952,7 +1023,7 @@ mod tests {
     #[test]
     fn a_conditional_key_left_out_this_time_is_stripped_too() {
         let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
-        let row = Row::of(&i, None);
+        let row = Row::of(&i, None, None);
         let out = json_with(&row, &[("commits", "[]".to_string())]).unwrap().join("");
         assert!(!out.contains("commits_error"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
@@ -965,7 +1036,7 @@ mod tests {
         let mut rest: Vec<(&str, &str)> = OURS.iter().map(|k| (*k, "가짜")).collect();
         rest.push(("due", "2026-10-01"));
         let i = row_with(&rest);
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "{out}");
     }
@@ -982,6 +1053,7 @@ mod tests {
             kind: Some(Kind::Issue.as_str()),
             priority: Some(crate::model::DEFAULT_PRIORITY),
             derived_status: Some("todo"),
+            derived_epic: Some("moai-0001"),
             branch: Some("feat/x"),
         };
         let added = keys_beyond(&i, &row);
@@ -998,14 +1070,14 @@ mod tests {
     #[should_panic(expected = "APPENDED")]
     fn an_appended_key_missing_from_the_list_is_caught() {
         let i = row_with(&[]);
-        let _ = json_with(&Row::of(&i, None), &[("새_키", "[]".to_string())]);
+        let _ = json_with(&Row::of(&i, None, None), &[("새_키", "[]".to_string())]);
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
     #[test]
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
-        assert!(matches!(Row::of(&i, None).issue, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(Row::of(&i, None, None).issue, std::borrow::Cow::Borrowed(_)));
     }
 
     fn unread(root: &str, at: &str) -> crate::store::Unread {

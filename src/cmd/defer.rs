@@ -82,7 +82,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             let by = who?;
             let mut m = Moved::default();
             let mut entries = Vec::new();
-            let seen: super::Read =
+            let seen: super::Standing =
                 if from.is_some() { super::standing_of(issues, cfg, &asked) } else { Default::default() };
             for id in &args.ids {
                 // #a-partial: 하나가 없다고 나머지를 안 미루지 않는다.
@@ -145,7 +145,7 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
             // 안 읽히는 칸을 읽는다(`cmd::Row`).
             let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids);
+            let read = super::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (m, read)))
         },
     )?;
