@@ -35,7 +35,16 @@ pub struct Where<'a> {
     /// 이것이다.
     pub(crate) lines: crate::report::Lines<'a>,
     /// 물려받은 것까지 친 미룸. 미룸도 소속처럼 묶음을 타고 내려온다.
+    ///
+    /// **id 로 접은 것이라 뒷줄이 이긴다**(`report::fold_roots`, 2026-09-23 사용자 결정). 줄을
+    /// 든 쪽은 아래 `torn` 이 그 id 를 들 때만 줄에 되묻는다 — 성한 저장소에서는 이 지도가 곧
+    /// 줄마다의 답이라, 모든 줄에 조상을 타고 오르면 `moai show` 가 치르는 값만 는다.
     pub put_off: BTreeSet<&'a str>,
+    /// 줄이 선 마일스톤 지도 (`report::milestones`). **미룸을 줄에 되묻는 재료다** — 조상의
+    /// 미룸은 그 조상 줄의 것이고, 그것을 짚는 자가 이 지도다.
+    pub(crate) milestone: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠졌는가가 **줄마다 갈리는** id (`report::torn_ids`). 성한 저장소에서는 빈다.
+    pub(crate) torn: BTreeSet<&'a str>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
     pub states: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
@@ -76,9 +85,16 @@ impl<'a> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        let crate::report::Soil { epic, roots, kinds, folded, lines, .. } = soil;
+        let crate::report::Soil { epic, milestone, roots, shelved, kinds, folded, lines, .. } = soil;
+        // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
+        // 때만 서는데, `kinds` 는 id 마다 한 칸이라 그 수가 줄 수와 같으면 id 가 다 다르다 —
+        // 성한 저장소에서 거름망을 짓는 걸음마다 목록을 두 번 더 걷던 자리다.
+        let torn = match kinds.len() == all.len() {
+            true => BTreeSet::new(),
+            false => crate::report::torn_ids(all, &shelved),
+        };
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, lines, put_off: roots.into_keys().collect(), states, since, kinds, folded }
+        Where { epic, lines, milestone, put_off: roots.into_keys().collect(), torn, states, since, kinds, folded }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
@@ -131,8 +147,27 @@ impl<'a> Where<'a> {
     /// 끝난 줄의 제 미룸도 여기 든다 — 그 줄은 done 규칙이 따로 숨기고,
     /// `--all` 은 그것을 `미룸` 표와 함께 연다. 물려받은 것만 보면 닫고 미룬
     /// 줄이 `--all` 에서 표를 잃는다.
+    ///
+    /// **물려받은 것은 줄마다 묻는다**(moai-u3ta). 지도는 id 로 접은 것이라 미룬 릴리스에 든
+    /// 앞줄의 미룸이 산 릴리스에 든 뒷줄에 그대로 갔다 — `show --deferred` 가 두 줄을 다 내고
+    /// `ready` 는 둘 다 안 내주면서, `show <산 릴리스>` 는 그 줄을 산 멤버로 셌다. **되묻는
+    /// 것은 `torn` 이 든 id 뿐이다** — 성한 저장소에서 모든 줄이 조상을 타고 오르면 `moai show`
+    /// 한 판이 지도 한 번 짚기에서 걸음 n 번이 된다(리뷰 moai-jk2u.m60 6번이 잰 자리와 같다).
+    ///
+    /// **묶음 줄만 접은 지도로 간다**(리뷰 moai-jk2u.hr4). 묶음이 계획 밖인가에는 멤버를 id 로
+    /// 세어 읽은 칸이 걸려(`report::settled_groups`) 줄로 못 되묻는다. 한때
+    /// [`crate::report::torn_ids`] 가 묶음이 선 **id 를 통째로** 뺐는데, 그러면 그 id 를 묶음과
+    /// 나눠 쓴 일 줄까지 제 답을 잃어 — 미룬 에픽에 든 일 줄이 이 목록에서 사라지면서
+    /// `moai status` 의 `미뤄 둔 것` 은 그 줄을 세고 `ready` 는 안 내줘, 어느 목록에도 안 서는
+    /// 줄이 셈에만 남았다.
     pub fn deferred(&self, i: &Issue) -> bool {
-        i.is_deferred() || self.put_off.contains(i.id.as_str())
+        if i.is_deferred() {
+            return true;
+        }
+        match self.torn.contains(i.id.as_str()) && !crate::report::is_group(i) {
+            false => self.put_off.contains(i.id.as_str()),
+            true => crate::report::shelved_at_line(i, &self.lines, &self.epic, &self.milestone).is_some(),
+        }
     }
 }
 

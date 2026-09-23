@@ -734,12 +734,12 @@ fn place(
             walk(out, drawn, cx, &deeper, 1);
         }
         Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
-            row(out, cx, &cx.all[*at], depth.max(1));
+            row(out, cx, *at, depth.max(1));
             walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, &cx.all[*at], depth.max(1)),
-        Entry::Leaf { at } => row(out, cx, &cx.all[*at], depth.max(1)),
+        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, *at, depth.max(1)),
+        Entry::Leaf { at } => row(out, cx, *at, depth.max(1)),
     }
 }
 
@@ -794,7 +794,8 @@ fn head(roll: &Roll, title: &str, shown: usize, branch: Option<&str>, lang: Lang
 /// 낱말, 같은 자(제 미룸이나 물려받은 미룸)다. 트리는 걸린 자손의 조상도 그리므로,
 /// 에픽의 미룸을 받은 생각이 제 자식 때문에 조상으로 서면 표 없이는 일과 똑같이
 /// 보이고 꼬리는 그 줄을 숨긴 수에서 뺀다.
-fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
+fn row(out: &mut Vec<String>, cx: &Ctx, at: usize, depth: usize) {
+    let i = &cx.all[at];
     // **여기 오는 것은 일과 생각뿐이다** — 묶음은 `nav` 가 언제나 디렉터리로 세우고
     // (`Index::is_dir`), `place` 가 머리글로 받는다. 그래서 읽은 칸을 물을 것이 없다.
     // 예외는 같은 id 의 쌍둥이에게 폴더를 내준 **가려진 묶음 줄** 하나다 — 깨진
@@ -811,7 +812,10 @@ fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
     if !i.tags.is_empty() {
         line.push_str(&format!("   {}", paint(style::TAG, &tags_of(i))));
     }
-    if i.is_deferred() || cx.index.deferred_root(&i.id).is_some() {
+    // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 접은 지도를 짚던 때는 같은 id 의 뒷줄이 산
+    // 에픽에 들었다는 이유로 미룬 에픽에 든 이 줄의 낱말이 사라졌고, 거꾸로 `moai ready` 가
+    // 내주는 줄에 `미룸` 이 붙었다. 곁의 평평한 목록(`list`)은 이미 줄마다 묻는 자다.
+    if i.is_deferred() || cx.index.shelved_at(at).is_some() {
         line.push_str(&format!("   {}", paint(style::DIM, say(cx.screen.lang, "status.put_off"))));
     }
     out.push(line);
