@@ -15680,14 +15680,15 @@ fn one_stale_line_does_not_escalate_the_whole_file() {
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "base"]);
 
+    // **되심지 않는다.** `store` 는 못 읽는 줄을 원문 그대로 들고 다시 쓰므로 `edit` 한 번에
+    // 사라지지 않고, 여기서 한 번 더 붙이면 같은 id 가 두 벌 서서 이 시험이 재려는 것이
+    // 아니라 겹친 id 를 재게 된다(moai-2m94).
     git(root, &["checkout", "-qb", "side"]);
     ok(root, &["edit", &two, "--tag", "parser"]);
-    append_raw(root, junk);
     git(root, &["commit", "-qam", "side"]);
 
     git(root, &["checkout", "-q", "main"]);
     ok(root, &["edit", &one, "--tag", "bug"]);
-    append_raw(root, junk);
     git(root, &["commit", "-qam", "main"]);
 
     git(root, &["merge", "--no-edit", "side"]);
@@ -15695,8 +15696,8 @@ fn one_stale_line_does_not_escalate_the_whole_file() {
     assert!(!merged.contains("<<<<<<<"), "낡은 줄 하나로 파일째 넘겼다\n{merged}");
     assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
     assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
-    // 못 읽는 줄도 그대로 남는다 — 버리면 그것이 조용한 손실이다.
-    assert!(merged.contains("mergestale-0000"), "낡은 줄을 버렸다\n{merged}");
+    // 못 읽는 줄도 그대로, **한 벌만** 남는다 — 버리면 조용한 손실이고, 늘면 겹친 id 가 된다.
+    assert_eq!(merged.matches("mergestale-0000").count(), 1, "낡은 줄을 버렸거나 늘렸다\n{merged}");
 }
 
 /// **충돌일 때도 `--json` 이 어느 id 인지 말한다.**

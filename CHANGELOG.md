@@ -112,6 +112,15 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Two rows carrying the same id now hand that id to a person instead of being
+  quietly mixed. A snapshot that holds a readable row and an unreadable one under
+  one id — what a hand-resolved conflict leaves behind — used to have one of them
+  pushed aside, and which one depended on what else that file held, so the three
+  sides of a merge disagreed about it. Two ways out of that: a branch that deleted
+  the stale copy got the deletion reverted with no marker, and a branch carrying
+  the extra copy had it merged straight in, leaving a snapshot with a duplicated
+  id. Both at exit 0. Such a snapshot is already fatal to `moai status`
+  (`Ids standing twice`, `Unreadable rows`); only the merge was quiet about it.
 - A single row this binary cannot read no longer turns **every** merge into a
   whole-file conflict. The merge driver paired rows by id only when both sides
   carried the very same unreadable lines, in the very same order, so one row
