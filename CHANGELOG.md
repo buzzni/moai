@@ -112,6 +112,15 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- A deferral is no longer dropped without a word when a timestamp cannot be read.
+  When both branches had changed `planned_at`, the merge driver picked the later
+  of the two, and a timestamp it could not parse — a `+09:00` offset left by a
+  hand-resolved conflict, say — counted as "no time at all", so the other side
+  won and took its `deferred_at` with it. The branch that had actually deferred
+  the row last lost that decision with no marker, no warning and exit code 0.
+  Now the later side is picked only when both timestamps are canonical;
+  otherwise the row goes to a person, which is what every other timestamp field
+  already did.
 - The release check no longer follows a redirect down to plaintext `http`. A call
   that starts on `https` is refused rather than downgraded, on every hop. A call
   you pointed at a plaintext mirror yourself still works — that one is your choice.

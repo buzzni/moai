@@ -438,6 +438,13 @@ fn fields(o: &Value, a: &Value, b: &Value) -> Option<Value> {
 /// 이끄는 필드가 셋 다 다를 때는 `status` 면 손을 안 댄다([`settle_field`] 가 그 줄을 사람에게
 /// 넘긴다). `planned_at` 은 **늦게 친 쪽**이 지금 상태라, 그 쪽을 골라 `deferred_at` 을 함께
 /// 데려온다 — 그래서 `settle_field` 에 `planned_at` 갈래가 따로 없다.
+///
+/// **둘 다 표준형일 때만 늦은 쪽을 고른다**(moai-1a55.kh2). 한쪽이라도 [`time`] 이 못 읽으면
+/// 손을 떼고 `settle_field` 에 넘겨 그 줄이 사람에게 간다 — [`later`] 가 `updated_at` 에서
+/// 서 있는 자리와 같다. 못 읽는 시각을 "모른다" 로 세어 다른 쪽을 고르면 그 쪽의 `planned_at`
+/// 과 `deferred_at` 이 통째로 이기고, **진 쪽의 미루기가 자취 없이 사라진다** — 손으로 푼 줄의
+/// `+09:00` 하나면 `2026-09-19T23:00:00+09:00`(14:00Z)이 `2026-09-19T04:00:00Z` 에 지고
+/// 종료 코드는 0 이었다. 조용한 손실이 이 도구가 못 견디는 유일한 실패 모드다.
 fn coupled<'m>(
     o: &Map<String, Value>,
     a: &'m Map<String, Value>,
@@ -456,8 +463,11 @@ fn coupled<'m>(
         } else if lead == "planned_at" {
             match (time(al), time(bl)) {
                 (Some(x), Some(y)) if y > x => b,
-                (Some(_), _) | (None, None) => a,
-                (None, Some(_)) => b,
+                (Some(_), Some(_)) => a,
+                // **한쪽이라도 못 읽으면 말없이 고르지 않는다.** 없는 시각도 못 읽는 시각도
+                // 여기서는 같다 — 둘 다 "견줄 수 없다" 이고, 여기 오는 것은 두 쪽이 **다 바꾼**
+                // 판뿐이라 한쪽을 고르면 다른 쪽 결정이 통째로 사라진다.
+                _ => continue,
             }
         } else {
             continue;
@@ -1509,6 +1519,22 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
         assert!(!text.contains("deferred_at"), "늦게 친 쪽은 도로 집었는데 미뤄 둔 채로 섰다\n{text}");
         assert!(text.contains(&format!("\"planned_at\":\"{T2}\"")), "{text}");
+    }
+
+    /// **못 읽는 계획 시각은 사람에게 간다**(moai-1a55.kh2). 못 읽는 쪽을 "모른다" 로 세어
+    /// 다른 쪽을 고르면 `deferred_at` 이 그 쪽에서 통째로 따라와, **진 쪽의 미루기가 자취
+    /// 없이 사라진다** — 표식도 경고도 없이 종료 코드 0 이었다.
+    #[test]
+    fn a_deferral_at_a_time_that_cannot_be_read_goes_to_a_person() {
+        let o = format!("{}\n", line("argos-0001", &format!(",\"planned_at\":\"{T0}\"")));
+        // 이쪽: 손으로 푼 줄이라 `+09:00` 이다. 14:00Z 로 저쪽보다 **늦은** 결정이다.
+        let late = "2026-09-19T23:00:00+09:00";
+        let a = format!("{}\n", line("argos-0001", &format!(",\"deferred_at\":\"{late}\",\"planned_at\":\"{late}\"")));
+        // 저쪽: 표준형이지만 이른 시각이고, 미뤄 두지 않았다.
+        let b = format!("{}\n", line("argos-0001", ",\"planned_at\":\"2026-09-19T04:00:00Z\""));
+        let (text, clashes) = merge(&o, &a, &b);
+        assert_eq!(clashes, ["argos-0001"], "못 읽는 시각에서 한쪽을 골랐다\n{text}");
+        assert!(text.contains(late), "이쪽 원문이 표식 안에 안 섰다\n{text}");
     }
 
     /// **표준형이 아닌 시각은 말없이 고르지 않는다.** 사전순이 곧 시간순인 것은 스무 자
