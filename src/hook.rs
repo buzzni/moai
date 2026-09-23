@@ -2796,7 +2796,12 @@ fn find_spots(words: &[String]) -> FindSpots {
             // **find 이 제 손으로 만드는 파일**([`FIND_PRINTS`], moai-ati3) — 값이 정말 있을 때만
             // 적는다. 줄 끝에 이름만 선 `find . -fprint` 는 find 이 `missing argument` 로 거절한다
             // (2026-09-23 에 쟀다).
-            if FIND_PRINTS.contains(&word) && at + 1 < words.len() {
+            //
+            // **값을 다 받았는가는 `eats` 가 안다** — `at + 1` 로 재던 판은 `-fprintf` 가 낱말
+            // **둘**을 받는다는 것을 잊어, 꼴 문자열이 빠진 `find . -fprintf src/y.rs` 를 쓰기로
+            // 읽었다. 진짜 find 은 그 줄을 `invalid argument`(findutils 4.9)·`error`(bfs 4.1) 로
+            // 거절해 그 파일을 만들지 않으니, 없는 쓰기를 지어내 **잘못 막던** 자리다.
+            if FIND_PRINTS.contains(&word) && at + eats < words.len() {
                 out.prints.push(at + 1);
             }
             at += 1 + eats;
@@ -2860,7 +2865,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         ///
         /// **여기 선 이름에 `=값` 을 달면 그 줄은 안 돈다**(moai-y1ix) — 그 프로그램이 제 손으로
         /// 거절한다. 값을 붙여서 받는 이름은 [`attach`](Wrapper::attach) 로 갈라 두었고, 갈라
-        /// 놓았기에 이 말이 이제 열일곱 줄 전부에서 선다.
+        /// 놓았기에 이 말이 이제 열여덟 줄 전부에서 선다.
         free: &'static [&'static str],
         /// 값을 **붙여서만** 받는 옵션 — 혼자 서도 서고, 값을 붙여도 선다.
         ///
@@ -2876,9 +2881,15 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// **어느 쪽에 적느냐가 어긋나는 방향을 가른다** — 값을 받는 이름을 [`free`](Wrapper::free)
         /// 에 적으면 정당한 `--이름=값` 이 통째로 안 보이고(새는 쪽), 값을 안 받는 이름을 여기
         /// 적으면 안 도는 줄을 도는 줄로 읽는다(잘못 막고 또 새는 쪽). 그래서 넘겨짚지 않고
-        /// 2026-09-23 에 열일곱 줄의 긴 이름을 **전부** 그 프로그램에 물어 갈랐다 —
-        /// `--이름=1` 이 `doesn't allow an argument`·`does not take an argument` 로 지면
-        /// [`free`](Wrapper::free), 그대로 돌면 여기다.
+        /// 2026-09-23 에 열여덟 줄의 긴 이름을 **전부** 그 프로그램에 물어 갈랐다.
+        ///
+        /// **가르는 것은 그 프로그램이 낸 말이지 종료 코드가 아니다**(리뷰) —
+        /// `doesn't allow an argument`·`does not take an argument`·`Option <이름> does not take
+        /// an argument` 만 [`free`](Wrapper::free) 고, 그 밖의 거절은 **값**이 틀렸다는 말이라
+        /// 여기다. `--이름=1` 이 졌는가만 보던 첫 셈은 strace 의 여덟을 `free` 에 적었는데,
+        /// 그것들은 `invalid quiet '1'` 처럼 값을 물린 것이었고 `--quiet=attach` 로는 정말 돈다 —
+        /// 그동안 `strace --quiet=attach <쓰기>` 가 멈춘 줄로 읽혀 쓰기가 통째로 안 보였다.
+        /// 다시 잴 때는 `1` 이 아니라 **그 이름이 받는 값**으로 묻는다.
         attach: &'static [&'static str],
         /// 옵션 뒤에 오는 제 자리 인자 수(`timeout 5 …`).
         args: usize,
@@ -2992,10 +3003,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// 서 있는 셋은 2026-09-23 에 그 프로그램을 띄워 걷었다(sudo·strace·runuser). 값 안 받는
         /// 짧은 스위치를 둘씩 세워 열여섯 줄을 전수로 쟀고, 짝이 선 것은 그 셋뿐이다.
         ///
-        /// **`-ff` 처럼 같은 글자를 겹쳐 쓴 꼴은 여기 못 적는다** — strace 의
-        /// `-c`/`-ff` 와 `-C`/`-ff` 가 그 줄이다. 뭉치 고리는 글자를 셀 뿐 몇 번 섰는지를 안 들어,
-        /// `-ff` 와 `-f -f` 가 여기서 한 낱말로 모인다(진짜 strace 는 갈린다 — `-f -f` 는 정말
-        /// 돈다). 그 축은 idea moai-qqd7 로 남긴다.
+        /// **낱말째 쓴 꼴은 여기 들고, 글자가 몇 번 섰는가는 못 든다** — strace 의 `-c`/`-ff` 가
+        /// 그 줄이다. 맨 위의 `clash_by!` 가 뭉치를 풀기 **전에** 낱말을 통째로 견주니 `-ff` 한
+        /// 낱말은 이 표에 그대로 적을 수 있다. 못 드는 것은 같은 뜻을 두 낱말로 쓴 `-f -f` 와
+        /// 뭉쳐 쓴 `-cff` 다 — 진짜 strace 는 그 둘도 `-ff` 와 한 뜻으로 막는데, 뭉치 고리는
+        /// 글자를 셀 뿐 **몇 번** 섰는지를 안 든다. 그 축은 idea moai-qqd7 로 남긴다.
         exclusive: &'static [(&'static [&'static str], &'static [&'static str])],
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
@@ -3341,9 +3353,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // **`-p` 는 이미 도는 프로세스를 붙든다** — 그때는 뒤에 명령이 안 오니 멈춘다
         // (`ionice -p` 와 같은 줄이다). 값을 받기도 하지만 멈추는 쪽이 먼저라 답이 같다.
         //
-        // **값을 붙여서만 받는 긴 이름은 `free` 다**(`--daemonize[=…]`·`--quiet[=…]`처럼 대괄호가
-        // 붙은 것들) — 다음 낱말을 먹는 것으로 적으면 `strace --quiet sed -i …` 의 `sed` 를
-        // 값으로 삼켜 그 쓰기를 잃는다. 모르는 긴 이름은 그 줄이 안 도니 그대로 멈춘다.
+        // **값을 붙여서만 받는 긴 이름은 [`Wrapper::attach`] 다**(`--daemonize[=…]`·`--quiet[=…]`
+        // 처럼 대괄호가 붙은 것들) — 다음 낱말을 먹는 것으로 적으면 `strace --quiet sed -i …` 의
+        // `sed` 를 값으로 삼켜 그 쓰기를 잃고, [`Wrapper::free`] 에 적으면 값 붙은 꼴
+        // (`--quiet=attach`)을 거절하는 자리가 정말 도는 줄을 멈춰 그 쓰기를 통째로 잃는다.
+        // 모르는 긴 이름은 그 줄이 안 도니 그대로 멈춘다.
         Wrapper {
             name: "strace",
             takes: &["-a", "-b", "-e", "-o", "-s", "-E", "-P", "-I", "-S", "-U", "-X", "-O", "-u"],
@@ -3380,7 +3394,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 // 에 쟀다: `strace --decode-pids comm sed -i s/a/b/ x` 는 그 파일을 정말 고치는데,
                 // `free` 에 서 있던 판은 `comm` 을 명령 머리로 읽어 그 쓰기를 통째로 잃었다.
                 // 옆의 `--quiet`·`--decode-fds`·`--daemonize` 들은 대괄호가 붙은 `[=…]` 라 다음
-                // 낱말을 안 먹는다(그 자리에서도 쟀다) — `free` 가 맞다.
+                // 낱말을 안 먹는다(그 자리에서도 쟀다) — 여기가 아니라 [`Wrapper::attach`] 다.
                 "--decode-pids",
             ],
             free: &[
@@ -3398,6 +3412,28 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--failed-only",
                 "--seccomp-bpf",
                 "--kill-on-exit",
+            ],
+            // `--tips[=<언제>]` 는 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
+            // `strace --tips=1 -o /dev/null <명령>` 이 돈다).
+            //
+            // **여덟이 더 있다 — `=1` 이 진 것과 "값을 안 받는다" 는 다른 말이다**(리뷰) —
+            // strace 는 제 손으로 값을 검사해, `[=…]` 를 받는 이름도 `--quiet=1` 에는
+            // `invalid quiet '1'` 로 진다. 그 메시지를 "안 받는다" 로 읽어 [`free`](Wrapper::free)
+            // 에 두었더니, 값 붙은 꼴을 거절하는 자리(아래 `stops`·`elsewhere`·[`PRINTS`]·`free`
+            // 줄)가 그 줄을 통째로 멈춰 **정말 도는 쓰기가 안 보였다** —
+            // `strace --quiet=attach -o /dev/null sed -i s/a/b/ src/x.rs` 가 그 줄이다.
+            // 2026-09-23 에 strace 6.8 로 스물둘을 전수로 다시 쟀다: 열넷만
+            // `doesn't allow an argument` 로 지고, 여기 선 여덟은 제 값으로 정말 돈다
+            // (`--quiet=attach`·`--decode-fds=path`·`--daemonize=grandchild`·
+            // `--stack-trace=symbol`·`--relative-timestamps=us`·
+            // `--absolute-timestamps=format:time`·`--syscall-times=us`·
+            // `--strings-in-hex=non-ascii`).
+            //
+            // **가르는 것은 메시지지 종료 코드가 아니다** — `doesn't allow an argument`·
+            // `does not take an argument` 만 [`free`](Wrapper::free) 고, 그 밖의 거절은 값이
+            // 틀렸다는 말이라 여기다. `=1` 처럼 아무 값이나 대면 둘이 안 갈린다.
+            attach: &[
+                "--tips",
                 "--daemonize",
                 "--stack-trace",
                 "--relative-timestamps",
@@ -3407,9 +3443,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--decode-fds",
                 "--quiet",
             ],
-            // `--tips[=<언제>]` 는 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
-            // `strace --tips=1 -o /dev/null <명령>` 이 돈다). 나머지 스물둘은 `=1` 을 거절한다.
-            attach: &["--tips"],
             args: 0,
             stops: &["-p", "--attach"],
             elsewhere: &[],
@@ -3428,11 +3461,21 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // `strace -c -C moai mv <id> in_progress --from todo && <쓰기>` 의 안 도는 집기를 세어
             // 뒤의 빈손 쓰기를 **풀어 줬다**.
             //
-            // **`-ff` 와의 짝 둘은 여기 못 적는다**([`Wrapper::exclusive`]) — 진짜 strace 는
-            // `-c -ff` 와 `-C -ff` 도 같은 말로 막는데, 그것은 `-f` 가 **두 번** 섰다는 뜻이라
-            // 글자만 세는 이 표로는 `-f -f`(정말 돈다)와 안 갈린다. 겹쳐 쓴 글자를 세는 축은
-            // idea moai-qqd7 에 남겼다.
-            exclusive: &[(&["-c", "--summary-only"], &["-C", "--summary"])],
+            // **`-ff` 와의 짝도 여기 선다**(리뷰) — 진짜 strace 는 `-c -ff` 도 같은 말로 막는다.
+            // 2026-09-23 에 쟀다: `strace -c -ff /bin/echo RAN` 도 `strace -c --output-separately …`
+            // 도 `(-c/--summary-only or -C/--summary) and -ff/--output-separately are mutually
+            // exclusive` 로 진다. **낱말째 적으면 이 표로 든다** — 맨 위의 `clash_by!` 는 뭉치를
+            // 풀기 **전에** 낱말을 통째로 견주니 `-ff` 한 낱말이 그대로 걸리고, 두 낱말로 쓴
+            // `-f -f` 는 글자마다 `-f` 로만 견줘져 여기 안 걸린다.
+            //
+            // **남는 것은 두 낱말로 쓴 꼴이다**(idea moai-qqd7) — `strace -c -f -f` 와
+            // `strace -cff` 도 진짜 strace 는 막는다(같은 날 쟀다 — `-f` 가 두 번 선 것이라
+            // `-ff` 와 한 뜻이다). 한때 이 자리에 `-f -f` 는 정말 돈다고 적었는데 틀린 말이었다.
+            // 그 둘을 들려면 글자가 **몇 번** 섰는지를 세야 하고, 그것이 그 idea 의 축이다.
+            exclusive: &[
+                (&["-c", "--summary-only"], &["-C", "--summary"]),
+                (&["-c", "--summary-only", "-C", "--summary"], &["-ff", "--output-separately"]),
+            ],
         },
         // **`parallel` 은 xargs 와 같은 자리다**(moai-gxwh) — `parallel sed -i s/a/b/ ::: src/x.rs`
         // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 2026-09-22 에 GNU parallel 20231122 으로
@@ -3748,11 +3791,15 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 없어 안 먹는 쪽에 맞춘다 — 남은 자리는 `parallel --max-lines 5 <쓰기>` 고, 그
             // 쓰기가 아직 안 보인다. 이 칸으로 옮긴 것은 붙여 쓴 꼴(`=5`)을 위해서지 그 자리를
             // 고친 것이 아니다.
-            // **`--shebang`·`--hashbang` 은 여기가 제자리가 아니다**(idea moai-sdq0) — 그 둘이
-            // 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 읽을 스크립트 파일로 보니
-            // [`Wrapper::stops`] 줄이다. 값 쪽 판정은 여기가 맞아 그대로 두고, 옮기는 것은 표
-            // 한 줄이라 따로 집는다. 지금 답은 옛 판과 같다.
-            attach: &["--max-lines", "--maxlines", "--shebang", "--hashbang"],
+            // **`--shebang`·`--hashbang` 은 여기가 아니라 [`Wrapper::stops`] 다**(idea moai-sdq0,
+            // 리뷰가 옮겼다) — 그 둘이 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 **읽을
+            // 입력 파일**로 본다. 여기 두던 판은 "답이 옛 판과 같다" 고 적었는데 그렇지 않았다:
+            // `free` 는 값 붙은 꼴을 거절하는 자리에 서고 여기는 안 서서, `parallel --shebang=1
+            // sed -i s/a/b/ ::: src/x.rs` 가 옛 판의 `Stops` 에서 **도는 줄**로 바뀌어 아무것도
+            // 안 고치는 줄의 쓰기를 잘못 막았다. 2026-09-23 에 GNU parallel 20231122 으로 쟀다:
+            // 맨 꼴도 붙여 쓴 꼴도 `Cannot open input file 'RAN'` 로 지고 명령은 안 돈다 —
+            // 두 꼴이 같은 답을 받는 칸이 `stops` 다.
+            attach: &["--max-lines", "--maxlines"],
             args: 0,
             // **뒤의 명령을 아예 안 돌리는 스위치**(2026-09-22 에 쟀다) — 찍기만 하거나
             // 돌릴 줄을 보여 주기만 한다. `--citation`·`--bibtex` 는 이 판이 모르는 이름이라
@@ -3772,6 +3819,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--numberofcpus",
                 "--numberofsockets",
                 "--numberofthreads",
+                // **`--shebang`·`--hashbang` 도 여기다**(idea moai-sdq0, 리뷰가 옮겼다) — 그 둘이
+                // 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 읽을 **입력 파일**로 본다.
+                // 2026-09-23 에 GNU parallel 20231122 으로 쟀다: `parallel --shebang /bin/echo RAN
+                // ::: x` 도 `--shebang=1` 도 `Cannot open input file 'x'` 로 지고 명령은 안 돈다.
+                "--shebang",
+                "--hashbang",
                 "--shell-completion",
                 "--shellcompletion",
             ],
@@ -4013,6 +4066,21 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             )],
         },
     ];
+    // **짝 표는 서른둘까지 선다**([`Wrapper::exclusive`]) — 아래 `lefts`·`rights` 가 `u32` 라,
+    // 넘기면 `<< bit` 이 릴리스에서 조용히 `bit % 32` 로 접혀 서른셋째 줄이 첫째 줄의 자리에
+    // 겹친다(안 선 짝이 서고, 선 짝이 안 선다).
+    //
+    // **빌드에서 잰다 — 돌 때가 아니다**(리뷰) — 표가 `const` 라 값이 빌드에 다 있다.
+    // `debug_assert!` 로 두던 판은 (1) 릴리스에서 통째로 빠지고 (2) dev 에서도 그 줄을 정말
+    // 지나는 시험이 있는 줄만 쟀다 — 시험이 안 건드리는 줄에 서른셋째 짝을 더하면 `cargo test`
+    // 가 푸른 채로 릴리스만 어긋난다.
+    const _: () = {
+        let mut at = 0;
+        while at < WRAPPERS.len() {
+            assert!(WRAPPERS[at].exclusive.len() <= 32, "짝 표가 u32 를 넘었다 — lefts·rights 를 넓힌다");
+            at += 1;
+        }
+    };
     // **find 의 명령은 옵션 뒤가 아니라 술어 안에 선다**(moai-7kif) — 위 표는 "옵션이 다 끝난
     // 자리부터가 명령" 을 전제로 서는데 find 는 그 전제가 안 맞는다. `-exec`·`-execdir`·`-ok`·
     // `-okdir` 넷이 같은 자리고, 저마다 `;` 나 `+` 로 끝나며 **한 줄에 여럿이 설 수 있다** —
@@ -4115,17 +4183,47 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // 안 돈다. `saw` 와 같은 자리에서 적는다 — 다 읽은 뒤 지나온 낱말을 다시 훑으면 스위치와 그
     // 값이 안 갈린다(리뷰 moai-bujq.91c).
     //
-    // **비트 한 쌍으로 든다** — 훅은 Bash 한 번마다 돌아, 표의 줄 수만큼 `Vec` 을 잡으면 그 값을
-    // 호출마다 치른다. 줄은 지금 최대 둘(sudo)이고 서른둘까지 선다 — 넘기면 `<< n` 이 조용히
-    // 넘쳐 짝이 안 서니, 시험이 도는 dev 에서 여기가 먼저 터지게 둔다.
-    debug_assert!(w.exclusive.len() <= 32, "{} 의 짝 표가 u32 를 넘었다 — lefts·rights 를 넓힌다", w.name);
+    // **비트 한 쌍으로 든다** — 훅은 Bash 한 번마다 돌아, 표의 줄 수만큼 `Vec` 을 잡으면 그
+    // 비용을 호출마다 치른다. 줄은 지금 최대 둘(sudo)이고 서른둘까지 선다 — 그 상한은 위 표
+    // 바로 밑의 `const _` 가 빌드에서 잰다.
     let (mut lefts, mut rights) = (0u32, 0u32);
     // 낱말 하나를 짝 표에 비춰 적는다 — 왼쪽·오른쪽을 한자리에서 본다.
+    //
+    // **고리 변수를 `bit` 라 부른다**(리뷰) — 이 매크로는 낱말 고리(`while let Some(raw) =
+    // rest.get(n)`) **안**에서 펴지고, macro_rules 는 제가 만든 이름을 바깥과 안 섞지만 읽는
+    // 쪽은 그것을 모른다. `n` 이라 적어 두면 여기 한 줄을 더하는 날 낱말 자리를 옮기려다
+    // 짝 표의 번호를 옮긴다([`ExecSpot`] 이 `from`·`to` 를 이름으로 든 것과 같은 까닭이다).
+    //
+    // **글자 하나는 `letter` 가 잰다** — 짧은 스위치를 가리는 잣대가 이 파일에 하나여야 한다.
+    // 베껴 적던 판은 `saw` 와 짝 표가 **다른 글자 무리를 훑을** 자리를 다시 열었다(바로 그것을
+    // 막으려고 둘을 한자리에 세운 것이다, 리뷰 moai-514e.x2u 13번).
     macro_rules! clash_by {
         ($hit:expr) => {
-            for (n, (left, right)) in w.exclusive.iter().enumerate() {
-                lefts |= u32::from(left.iter().any($hit)) << n;
-                rights |= u32::from(right.iter().any($hit)) << n;
+            for (bit, (left, right)) in w.exclusive.iter().enumerate() {
+                lefts |= u32::from(left.iter().any($hit)) << bit;
+                rights |= u32::from(right.iter().any($hit)) << bit;
+            }
+        };
+        (letter $c:expr) => {
+            for (bit, (left, right)) in w.exclusive.iter().enumerate() {
+                lefts |= u32::from(letter(left, $c)) << bit;
+                rights |= u32::from(letter(right, $c)) << bit;
+            }
+        };
+    }
+    /// **한 줄의 왼쪽과 오른쪽이 함께 섰으면 여기서 끝난다** — 그 프로그램이 제 손으로 막는다.
+    ///
+    /// **고리를 나가는 자리마다 문다**(리뷰) — 이 문을 고리 **뒤**에 한 번만 두던 판은, 고리
+    /// 안에서 글을 내고 일찍 나가는 세 자리([`Wrapped::Hands`])가 그것을 통째로 건너뛰었다.
+    /// 오늘은 그 셋을 타는 줄(env·flock·script·watch)이 모두 짝 표가 비어 답이 같지만, 그 줄에
+    /// 짝을 하나 재어 적는 날 표는 맞게 선 채로 문만 조용히 안 선다.
+    ///
+    /// **여기까지 본 것으로 잰다** — 일찍 나가는 것은 그 뒤를 안 읽겠다는 뜻이고, 이미 본 둘로
+    /// 이미 진 줄이다. 뒤에 무엇이 더 서든 그 답은 안 바뀐다.
+    macro_rules! clashed_out {
+        () => {
+            if lefts & rights != 0 {
+                return Some(Wrapped::Stops);
             }
         };
     }
@@ -4143,6 +4241,12 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     //
     // **`loose` 와 같은 잣대로 든다** — 표가 다 찬 줄에서는 `loose` 가 [`COMMON`] 을 안 받으니
     // ([`Wrapper::whole`]) 여기서도 안 든다. 한쪽만 들면 `su --verbose` 가 다시 갈린다.
+    // **이 줄의 표가 그 이름에 값을 주는가** — [`COMMON`] 이 설 자리인지를 가른다. `--debug`·
+    // `--verbose` 는 "표에 **없어도** 넘겨 주는" 이름이라, 제 칸에 적힌 줄에서는 제 칸이 이긴다:
+    // `strace --verbose <수준>` 도 `parallel --debug <무엇>` 도 값을 받는다(2026-09-23 에 쟀다).
+    let valued = |nm: &str| {
+        (w.long.iter().chain(w.takes).chain(w.attach).chain(w.chdir).chain(w.hands).chain(w.shell)).any(|f| *f == nm)
+    };
     let longs = || {
         (w.long.iter())
             .chain(w.free)
@@ -4227,8 +4331,17 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // **함께 못 서는 스위치는 어느 갈래로 가든 여기서 센다**([`Wrapper::exclusive`],
         // moai-j9i9) — `-c` 는 글 갈래로, `-l` 은 딴 자리 갈래로, `-s` 는 값 갈래로 흩어져,
         // 갈래마다 적으면 하나를 빠뜨리는 날 조용히 어긋난다. 값으로 먹힌 낱말은 여기 안 온다.
+        //
+        // **값을 붙여 받는 이름은 붙여 쓴 꼴이 딴 스위치다**([`Wrapper::attach`]) — `=` 를 단 꼴을
+        // 이름째 같은 것으로 세던 판은 `sudo -i --preserve-env=HOME <쓰기>` 를 멈춘 줄로 읽어 그
+        // 쓰기를 통째로 잃었다. 2026-09-23 에 sudo 1.9.15p5 로 쟀다:
+        // `sudo -n -i --preserve-env=HOME /bin/echo RAN` 은 정말 돌고(`-E` 와 달리 목록을 준 꼴은
+        // `-i` 와 함께 선다), `sudo -n -i -E …` 와 맨 `--preserve-env` 만 `you may not specify both
+        // the -i and -E options` 로 진다. 그래서 맨 이름은 그대로 세고 붙여 쓴 꼴만 뺀다.
         clash_by!(|f: &&str| *f == word.as_str()
-            || (f.starts_with("--") && word.strip_prefix(*f).is_some_and(|r| r.starts_with('='))));
+            || (f.starts_with("--")
+                && !w.attach.contains(f)
+                && word.strip_prefix(*f).is_some_and(|r| r.starts_with('='))));
         // **자리 인자를 다 먹었으면 옵션 읽기가 거기서 끝난다**(moai-hktu) — 자리 인자를 받는
         // 래퍼(wrapper) 넷은 getopt 를 `+` 로 불러 첫 피연산자에서 멈춘다. 그 뒤의 `-` 로 시작하는
         // 낱말은 옵션이 아니라 **명령 이름**이고, 그런 이름은 없으니 아무것도 안 돈다. 2026-09-23 에
@@ -4260,6 +4373,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         if !mixes && w.args > 0 && seen == w.args {
             if hands.contains(&raw.as_str()) {
                 need!(rest.get(n + 1));
+                clashed_out!();
                 return Some(Wrapped::Hands { at: n + 1, glued: None, text: w.text, args: Vec::new() });
             }
             if raw.starts_with('-') {
@@ -4354,18 +4468,36 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         // 마저 읽던 판은 `su --login=1 남 -c 'tmux kill-server'` 를 규칙 4 로 막고(아무것도 안 도는
         // 줄이다), 집기 쪽 쌍둥이는 안 도는 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
         //
-        // **[`free`](Wrapper::free) 도 함께 본다 — 이제 열일곱 줄 전부에서다**(moai-y1ix).
+        // **[`free`](Wrapper::free) 도 함께 본다 — 이제 열여덟 줄 전부에서다**(moai-y1ix).
         // 한때 이 칸은 표가 다 찬 줄([`Wrapper::whole`])에서만 물렸는데, `free` 가 값을
         // **붙여서만** 받는 이름(`env --block-signal=INT`)까지 함께 드는 자리라 표를 덜 안 줄에서
         // 물리면 정당한 `--이름=값` 이 통째로 안 보였기 때문이다. 그 둘을
         // [`Wrapper::attach`] 로 갈라 놓아 이제 `free` 는 값을 안 받는 이름만 든다.
         //
-        // **2026-09-23 에 열일곱 줄의 긴 이름을 전부 그 프로그램에 물어 갈랐다** —
+        // **2026-09-23 에 열여덟 줄의 긴 이름을 전부 그 프로그램에 물어 갈랐다** —
         // `env --null=1 <명령>` 도 `timeout --foreground=1 <명령>` 도 `parallel --tag=1 <명령>` 도
         // `doesn't allow an argument`·`does not take an argument` 로 아무것도 안 돌린다. 여기
         // 안 서던 판은 그 줄의 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
-        if (stops.iter().chain(elsewhere).chain(PRINTS).chain(w.free))
-            .any(|f| f.starts_with("--") && word.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
+        //
+        // **[`COMMON`] 도 같은 칸이다**(리뷰) — 표에 안 적어도 "값 안 받는 깃발" 로 넘겨 주는
+        // 이름이라, `=` 를 단 꼴에서는 `free` 와 한 답이어야 한다. 안 들이던 판은 그 둘이
+        // 아래 `--이름=값` 갈래로 흘러 **아는 이름**으로 읽혔다: 2026-09-23 에 쟀다,
+        // `timeout --verbose=1 …` 은 `option '--verbose' doesn't allow an argument`,
+        // `strace --debug=1 …` 도 같은 말, `nice --verbose=1 …` 은 `unrecognized option` 으로
+        // 아무것도 안 돌리는데, 그 줄의 집기를 세어 뒤의 빈손 쓰기를 풀어 줬다.
+        // **문은 `longs()` 와 한 짝이다** — 표가 다 찬 줄에서는 `loose` 가 [`COMMON`] 을 안 받으니
+        // ([`Wrapper::whole`]) 여기서도 안 든다. 한쪽만 들면 같은 이름의 두 철자가 갈린다.
+        //
+        // **다만 제 표가 그 이름을 알면 제 표가 이긴다**([`valued`](valued)) — [`COMMON`] 은
+        // "표에 **없어도** 값 안 받는 깃발로 넘겨 주는" 자리라, 그 이름을 제 칸에 적어 둔 줄에는
+        // 설 자리가 없다. 가리지 않던 판은 값을 정말 받는 두 이름을 함께 걷어
+        // `strace --verbose=all <쓰기>` 와 `parallel --debug=1 <쓰기>` 를 멈춘 줄로 읽었다
+        // (2026-09-23 에 쟀다 — 둘 다 정말 돌아 그 파일을 고친다).
+        let common_glued =
+            !w.whole && (word.split_once('=')).is_some_and(|(nm, _)| COMMON.contains(&nm) && !valued(nm));
+        if common_glued
+            || (stops.iter().chain(elsewhere).chain(PRINTS).chain(w.free))
+                .any(|f| f.starts_with("--") && word.strip_prefix(f).is_some_and(|r| r.starts_with('=')))
         {
             return Some(Wrapped::Stops);
         }
@@ -4446,6 +4578,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                     n += 1 + usize::from(eats);
                     continue;
                 }
+                clashed_out!();
                 return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
             }
             // **값 없는 깃발에 `=` 를 단 꼴은 그 프로그램이 거절한다** — 아무것도 안 돈다
@@ -4557,7 +4690,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 그 밑에 두던 판은 한 글자가 그 표와 [`Runs::With`] 의 목록에 함께 드는 날 그
             // 스위치를 못 봐 `saw` 와 짝 표가 **다른 글자 무리를 훑었다**. 지금은 그런 줄이
             // 없지만, 그 날 짝의 문이 조용히 안 선다.
-            clash_by!(|f: &&str| c.is_ascii() && f.as_bytes() == [b'-', c as u8]);
+            clash_by!(letter c);
             saw |= letter(flags, c);
             if letter(stops, c) {
                 return Some(Wrapped::Stops);
@@ -4608,6 +4741,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                         stop = false;
                         break;
                     }
+                    clashed_out!();
                     return Some(Wrapped::Hands { at: n + 1, glued, text: w.text, args: Vec::new() });
                 }
                 handed = true;
@@ -4680,7 +4814,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // **잘못 막았다**.
     if mixes && dashed > 0 && w.elsewhere.contains(&"-l") && ops.first().is_some_and(|&i| rest[i] == "-") {
         *spot = true;
-        clash_by!(|f: &&str| *f == "-l");
+        clash_by!(letter 'l');
         ops.remove(0);
     }
     // **`-s` 가 댄 프로그램이 셸이 아니면 `-c` 의 글도 그 프로그램의 argv 다**(moai-inu0) —
@@ -4716,9 +4850,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     //
     // **줄마다 왼쪽과 오른쪽이 함께 서야 한다** — 한 줄 안에서 `&` 로 만나고 줄끼리는 `|` 다.
     // 왼쪽·오른쪽을 한 통에 모아 "이 표에서 둘" 로 재던 꼴은 `su -c '<글>' -l` 을 잘못 막는다.
-    if lefts & rights != 0 {
-        return Some(Wrapped::Stops);
-    }
+    //
+    // **여기가 유일한 문이 아니다**([`clashed_out`]) — 고리 안에서 일찍 나가는 세 자리도 같은
+    // 문을 문다. 문이 하나일 때 그 셋이 통째로 건너뛰었다.
+    clashed_out!();
     if handed && !alien {
         return Some(Wrapped::Hands { at: n, glued: None, text: w.text, args: Vec::new() });
     }
@@ -4732,7 +4867,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // [`Wrapped::Stops`] 를 냈다([`Wrapper::exclusive`]). **`skip(1)` 은 그래서 아직 맞다** — 여기
     // 닿는 줄은 `saw` 가 거짓이라 `ops` 의 맨 앞이 사용자다. `saw` 인 줄에서 맨 앞은 사용자가
     // 아니라 **명령**이니(moai-2m3l 가 피연산자 고리를 명령 자리 뒤까지 열었다), 둘째
-    // [`Runs::With`] 감싸는 명령이 서거나 runuser 의 짝 줄이 좁아지는 날 이 한 줄을 함께 본다.
+    // [`Runs::With`] 래퍼(wrapper)가 서거나 runuser 의 짝 줄이 좁아지는 날 이 한 줄을 함께 본다.
     //
     // **짝 표가 [`Runs::With`] 에서 풀린 것은 이 줄을 안 건드린다**(moai-bscj) — 넓어진 것은
     // `Runs::Always` 인 줄(sudo·strace)이고, 그쪽은 `ops` 를 안 쓴다.
@@ -6697,7 +6832,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // find 은 이 파일을 **부른 자리**에 만들지 찾은 파일의 디렉터리에 만들지 않는다
             // (2026-09-23 에 쟀다: `find /tmp -maxdepth 0 -execdir true \; -fprint src/w.rs` 는
             // 여기에 만든다). 그런데 [`Cmd::elsewhere`] 는 줄 하나에 한 값이라, find 의 `*spot`
-            // 과 바깥 감싸는 명령의 것(`sudo -i find …`)이 여기서 이미 한 값으로 모여 있다 —
+            // 과 바깥 래퍼(wrapper)의 것(`sudo -i find …`)이 여기서 이미 한 값으로 모여 있다 —
             // 갈라 내려면 `Cmd` 에 값을 하나 더 두어야 하고, 그것은 이 줄의 범위가 아니다.
             // 그때까지는 버리는 쪽에 선다: 새는 쪽이고, 잘못 막는 쪽보다 싸다.
             Some("find") => found.extend(find_writes(&words[1..]).into_iter().map(|p| (p, off_site))),
@@ -9072,6 +9207,12 @@ mod tests {
             "env -C /tmp -S 'tmux kill-server'",
             "env --chdir=/tmp -S 'tmux kill-server'",
             "sudo -D /tmp -s bash -c 'tmux kill-server'",
+            // **값을 붙여 받는 이름 하나가 규칙 4 를 통째로 껐다**(리뷰) — [`Wrapper::free`] 에
+            // 선 이름은 `=` 를 단 꼴에서 [`Wrapped::Stops`] 라 넘긴 글을 아무도 안 읽는다.
+            // `strace --quiet` 은 값을 받는 이름이라 [`Wrapper::attach`] 가 제자리고, `free` 에
+            // 서 있던 동안 이 줄이 규칙 4 를 지나갔다(2026-09-23 에 strace 6.8 로 쟀다:
+            // `strace --quiet=attach -o /dev/null /bin/echo RAN` 은 정말 돈다).
+            "strace --quiet=attach -o /dev/null bash -c 'tmux kill-server'",
         ] {
             let got = guard_shell(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "딴 자리에서 도는 줄이 규칙 4 를 지나갔다 — {cmd}\n{got:?}");
@@ -9102,7 +9243,10 @@ mod tests {
             "su -c 'moai add x' -",
             "su -c 'moai add x' -l",
             "sudo -i moai add x",
-            "sudo -si moai add x",
+            // **뭉친 철자도 같다** — `sudo -si` 로 적던 자리다. 진짜 sudo 가 `-i` 와 `-s` 를
+            // 함께 안 받아([`Wrapper::exclusive`]) 그 줄은 이제 짝 표에서 먼저 멈춰, 뭉친 `-i` 를
+            // 보는 갈래를 안 지난다. `-n` 은 그 짝에 안 들어 재려던 것을 그대로 잰다(리뷰).
+            "sudo -ni moai add x",
             "env -C /남의/저장소 moai add x",
         ] {
             assert_eq!(
@@ -9738,6 +9882,11 @@ mod tests {
             "find . -name -fprint src/y.rs",
             // **값이 없으면 find 이 거절한다** — 없는 쓰기를 지어내지 않는다.
             "find . -maxdepth 0 -fprint",
+            // **`-fprintf` 는 낱말 **둘**이라 꼴 문자열까지 있어야 한다**(리뷰) — 2026-09-23 에
+            // 쟀다: findutils 4.9 는 `invalid argument 'src/y.rs' to '-fprintf'`, bfs 4.1 은
+            // `error` 로 지고 그 파일을 **안 만든다**. 한 낱말만 세던 판은 없는 쓰기를 지어내
+            // 아무것도 안 하는 줄을 잘못 막았다.
+            "find . -maxdepth 0 -fprintf src/y.rs",
             // **자리표는 어느 파일인지 모르는 자리다**([`unknowable`]) — `-exec` 쪽과 같은 잣대다.
             "find . -fprint '{}'",
         ] {
@@ -10043,9 +10192,13 @@ mod tests {
             matches!(guard_create(&all, &cfg(), &here(), "sudo -sn moai add '딴 일'"), Decision::Deny(_)),
             "뭉친 스위치의 남은 글자를 글의 첫 낱말로 읽었다"
         );
-        // **뭉치 안의 멈추는 글자는 뭉쳐도 멈춘다** — `sudo -si` 는 로그인 셸이라 딴 자리에서 돈다.
+        // **뭉치 안의 딴 자리 글자는 뭉쳐도 딴 자리다** — `sudo -ni` 의 `-i` 는 로그인 셸이라
+        // 딴 자리에서 돈다. 한때 `sudo -si` 로 적혀 있었는데, 진짜 sudo 가 `-i` 와 `-s` 를 함께
+        // 안 받아([`Wrapper::exclusive`]) 그 철자는 이제 짝 표에서 먼저 멈춘다 — 뭉친 `-i` 를
+        // 보는 갈래(`letter(elsewhere, c)`)가 아니라 그 앞에서 답이 나니, 재려던 것을 안 재는
+        // 줄이었다(같은 까닭으로 규칙 4 쪽 `sudo -si` 도 `sudo -ni` 로 바꿨다, 리뷰).
         assert_eq!(
-            guard_create(&all, &cfg(), &here(), "sudo -si moai add '딴 일'"),
+            guard_create(&all, &cfg(), &here(), "sudo -ni moai add '딴 일'"),
             Decision::Pass,
             "뭉친 `-i` 를 못 보고 딴 자리의 줄을 여기 것으로 읽었다"
         );
@@ -12822,6 +12975,11 @@ mod tests {
             "sudo --askpass --stdin moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "strace -c -C moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "strace --summary-only --summary moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            // **`-ff` 와의 짝도 낱말째 선다**(리뷰) — 2026-09-23 에 쟀다: `strace -c -ff …` 도
+            // `strace -C --output-separately …` 도 `(-c/--summary-only or -C/--summary) and
+            // -ff/--output-separately are mutually exclusive` 로 아무것도 안 돌린다.
+            "strace -c -ff moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "strace -C --output-separately moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             // **뭉치 안의 글자도 같은 자리에서 센다** — `sudo -is` 도 진짜 sudo 가 거절한다.
             "sudo -is moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
         ] {
@@ -12838,19 +12996,28 @@ mod tests {
             "strace -c -C sed -i s/a/b/ src/x.rs",
             "strace --summary-only --summary tee /repo/src/x.rs",
             "sudo -is tee /repo/src/x.rs",
+            "strace -c -ff sed -i s/a/b/ src/x.rs",
+            "strace -C --output-separately tee /repo/src/x.rs",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "안 도는 줄의 쓰기를 잘못 막았다 — {cmd}\n{got:?}");
         }
         // **줄마다 왼쪽과 오른쪽이 함께 서야 한다** — 한 통에 모아 "이 표에서 둘" 로 재면 여기가
-        // 붉어진다. 2026-09-23 에 쟀다: 아래 넷은 진짜로 돌아 그 파일을 고친다.
+        // 붉어진다. 2026-09-23 에 쟀다: 아래 다섯은 진짜로 돌아 그 파일을 고친다.
         for cmd in [
+            // **`--preserve-env=<목록>` 은 `-E` 가 아니다**(리뷰) — 같은 날 쟀다:
+            // `sudo -n -i --preserve-env=HOME /bin/echo RAN` 은 정말 돌고, 맨 `--preserve-env` 와
+            // `-E` 만 `you may not specify both the -i and -E options` 로 진다. 붙여 쓴 꼴을
+            // 이름째 같은 것으로 세던 판은 이 줄을 멈춘 줄로 읽어 쓰기를 통째로 잃었다.
+            "sudo -i --preserve-env=HOME sed -i s/a/b/ /repo/src/x.rs",
             // sudo 의 `-s` 와 `-E` 는 서로는 함께 선다 — `-i` 하고만 못 선다.
             "sudo -E -s sed -i s/a/b/ /repo/src/x.rs",
             "sudo --preserve-env --shell tee /repo/src/x.rs",
             // su 의 `-c` 와 `-l` 은 runuser 쪽 오른쪽 이름 둘인데 su 에서는 정말 돈다.
             "su -c 'sed -i s/a/b/ /repo/src/x.rs' 남 -l",
-            // strace 의 `-f -f` 는 두 낱말이라 `-ff` 와 다르다 — 정말 돈다.
+            // **`-c` 없는 `-f -f` 는 정말 돈다** — `-ff` 와 한 뜻이지만 막는 짝이 안 섰다.
+            // (`-c` 가 함께 선 꼴은 진짜 strace 도 막는데, 두 낱말로 쓴 것은 이 표가 못 든다 —
+            // idea moai-qqd7.)
             "strace -f -f sed -i s/a/b/ /repo/src/x.rs",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -12873,7 +13040,7 @@ mod tests {
         }
     }
 
-    /// **값 안 받는 이름에 `=값` 을 달면 그 줄은 안 돈다 — 열일곱 줄 전부에서다**(moai-y1ix,
+    /// **값 안 받는 이름에 `=값` 을 달면 그 줄은 안 돈다 — 열여덟 줄 전부에서다**(moai-y1ix,
     /// 리뷰 moai-514e.mvw 가 넘겼다).
     ///
     /// [`Wrapper::free`] 가 값을 **안** 받는 이름(`--null`)과 값을 **붙여서만** 받는
@@ -12882,14 +13049,25 @@ mod tests {
     /// `env --null=1 moai mv <id> in_progress --from todo && <쓰기>` 의 안 도는 집기가 뒤의 빈손
     /// 쓰기를 풀어 줬다.
     ///
-    /// **[`Wrapper::attach`] 로 갈랐다** — 2026-09-23 에 열일곱 줄의 긴 이름을 **전부** 그
-    /// 프로그램에 물어, `--이름=1` 이 지면 `free`, 그대로 돌면 `attach` 로 적었다. 값을 붙여
-    /// 받는 것은 아홉뿐이었다(env 셋·sudo·strace·script 하나씩, parallel 둘, xargs 둘 —
-    /// parallel 의 `--shebang`·`--hashbang` 까지 넷).
+    /// **[`Wrapper::attach`] 로 갈랐다** — 2026-09-23 에 열여덟 줄의 긴 이름을 **전부** 그
+    /// 프로그램에 물어, `=` 를 단 꼴이 **어떤 말로** 지는지를 보고 적었다.
+    ///
+    /// **가르는 것은 메시지지 종료 코드가 아니다**(리뷰) — `doesn't allow an argument`·
+    /// `does not take an argument` 만 [`Wrapper::free`] 고, 그 밖의 거절은 "값이 틀렸다" 라
+    /// [`Wrapper::attach`] 다. `--이름=1` 이 졌는가만 보던 첫 셈은 strace 의 여덟을
+    /// (`--quiet`·`--decode-fds`·`--daemonize`·`--stack-trace`·`--relative-timestamps`·
+    /// `--absolute-timestamps`·`--syscall-times`·`--strings-in-hex`) `free` 에 적었는데, 그것들은
+    /// `invalid quiet '1'` 처럼 **값**을 물린 것이었다. 그 여덟이 `free` 에 선 동안
+    /// `strace --quiet=attach <쓰기>` 가 통째로 멈춘 줄로 읽혀 정말 도는 쓰기가 안 보였다.
+    /// 다시 세면 값을 붙여 받는 것은 열셋이다 — env 셋, watch·script·sudo 하나씩, strace 아홉
+    /// 가운데 여덟과 `--tips`, parallel 둘, xargs 둘.
     ///
     /// **`env --null` 은 그보다 앞이다** — 같은 날 쟀다: `env --null /bin/echo RAN` 은
     /// `cannot specify --null (-0) with command` 로 아무것도 안 돌린다. 짧은 `-0` 도 같아
     /// [`Wrapper::stops`] 로 옮겼다.
+    ///
+    /// **`parallel --shebang` 은 [`Wrapper::stops`] 다**(idea moai-sdq0, 리뷰가 옮겼다) —
+    /// 맨 꼴도 붙여 쓴 꼴도 뒤 낱말을 **입력 파일**로 읽어 아무 명령도 안 돌린다.
     #[test]
     fn a_valueless_long_name_with_a_glued_value_stops_every_line() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -12901,9 +13079,25 @@ mod tests {
             "env --null moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "env -0 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "timeout --foreground=1 5 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "timeout --verbose=1 5 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "strace --debug=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "sudo --stdin=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "parallel --tag=1 moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
-            "strace --quiet=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            // **strace 의 값 안 받는 이름으로 잰다**(리뷰) — 한때 `--quiet=1` 로 적혀 있었는데,
+            // 그 줄이 지는 까닭은 이름이 값을 안 받아서가 아니라 `1` 이 **틀린 값**이어서다
+            // (`invalid quiet '1'`). 훅은 값의 옳고 그름을 못 재고 재서도 안 되니, 그 이름은
+            // 이제 [`Wrapper::attach`] 고 `--quiet=attach` 는 정말 도는 줄이다(아래 무리).
+            // `--follow-forks` 는 `doesn't allow an argument` 로 지는 진짜 값 없는 이름이다.
+            "strace --follow-forks=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            // **[`COMMON`] 도 같은 칸이다**(리뷰) — 표에 안 적어도 넘겨 주는 이름이라 `=` 를 단
+            // 꼴에서는 `free` 와 한 답이어야 한다. 2026-09-23 에 쟀다: `nice --verbose=1 …` 은
+            // `unrecognized option` 으로 아무것도 안 돌린다.
+            "nice --verbose=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            "setsid --debug=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
+            // **`--shebang` 은 뒤 낱말을 입력 파일로 읽는다** — 맨 꼴도 붙여 쓴 꼴도 명령을
+            // 안 돌린다(idea moai-sdq0, 2026-09-23 에 GNU parallel 20231122 으로 쟀다).
+            "parallel --shebang=1 moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
+            "parallel --hashbang moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
         ] {
             let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "안 도는 줄의 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
@@ -12917,6 +13111,9 @@ mod tests {
             "timeout --preserve-status=1 5 tee src/x.rs",
             "flock --nonblock=1 /tmp/l -c 'sed -i s/a/b/ src/x.rs'",
             "sudo --bell=1 tee src/x.rs",
+            "timeout --verbose=1 5 tee src/x.rs",
+            "parallel --shebang=1 sed -i s/a/b/ ::: src/x.rs",
+            "parallel --hashbang tee src/x.rs ::: x",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "안 도는 줄의 쓰기를 잘못 막았다 — {cmd}\n{got:?}");
@@ -12934,6 +13131,24 @@ mod tests {
             "sudo --preserve-env=HOME sed -i s/a/b/ src/x.rs",
             "sudo --preserve-env tee src/x.rs",
             "strace --tips=1 -o /dev/null sed -i s/a/b/ src/x.rs",
+            // **strace 의 `[=…]` 여덟도 여기다**(리뷰) — `free` 에 서 있던 동안 이 줄들이 통째로
+            // 멈춘 줄로 읽혀 정말 도는 쓰기가 안 보였다. 2026-09-23 에 strace 6.8 로 쟀다:
+            // 여덟 다 제 값으로 명령을 돌린다.
+            "strace --quiet=attach -o /dev/null sed -i s/a/b/ src/x.rs",
+            "strace --daemonize=grandchild -o /dev/null tee src/x.rs",
+            "strace --decode-fds=path -o /dev/null tee src/x.rs",
+            "strace --syscall-times=us -o /dev/null tee src/x.rs",
+            "strace --stack-trace=symbol -o /dev/null tee src/x.rs",
+            "strace --strings-in-hex=non-ascii -o /dev/null tee src/x.rs",
+            "strace --relative-timestamps=us -o /dev/null tee src/x.rs",
+            "strace --absolute-timestamps=format:time -o /dev/null tee src/x.rs",
+            // **watch 의 `--differences` 도 같은 칸이다** — 셈에서 빠져 시험도 없던 줄이다(리뷰).
+            "watch --differences=permanent sed -i s/a/b/ src/x.rs",
+            // **[`COMMON`] 의 이름도 제 칸에 적힌 줄에서는 값을 받는다**(리뷰) — 2026-09-23 에
+            // 쟀다: `strace --verbose=all …` 도 `parallel --debug=1 …` 도 정말 돈다. [`COMMON`] 을
+            // 가리지 않고 걷던 판은 이 둘을 멈춘 줄로 읽어 쓰기를 통째로 잃었다.
+            "strace --verbose=all -o /dev/null sed -i s/a/b/ src/x.rs",
+            "parallel --debug=1 sed -i s/a/b/ ::: src/x.rs",
             "script --timing=1 -c 'sed -i s/a/b/ src/x.rs' /dev/null",
             "xargs --eof=X sed -i s/a/b/ src/x.rs",
             "xargs --max-lines=1 tee src/x.rs",
