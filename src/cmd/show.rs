@@ -250,8 +250,13 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
-                row: super::Row::of(i, wh.states.get(i.id.as_str()).copied(), wh.epic.get(i.id.as_str()).copied())
-                    .on(&origin),
+                row: super::Row::of(
+                    i,
+                    wh.states.get(i.id.as_str()).copied(),
+                    wh.epic.get(i.id.as_str()).copied(),
+                    &wh.kinds,
+                )
+                .on(&origin),
                 journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
                 // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
@@ -566,7 +571,12 @@ fn one(
             extra.push(("spent", serde_json::to_string(&sp).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
-            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied(), stood_in).on(origin),
+            // **펼친 줄에는 쌍둥이가 없다**(리뷰, moai-53s2). `Load::get` 은 그 id 를 **마지막으로**
+            // 든 줄을 열고(`rfind`), 가려짐은 그 마지막 줄의 종류로 재는 것이라 여기 선 줄은
+            // 가려질 수가 없다 — 지도를 지어도 답이 안 바뀌는데 그 셈은 상세를 펼 때마다
+            // 저장소를 한 번 더 훑는다.
+            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied(), stood_in, &report::Kinds::no_twins())
+                .on(origin),
             &extra,
         );
     }
@@ -685,7 +695,11 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let listed = Listed { row: super::super::Row::of(&i, None, None), work: &[], journal_error: &[] };
+        let listed = Listed {
+            row: super::super::Row::of(&i, None, None, &report::Kinds::no_twins()),
+            work: &[],
+            journal_error: &[],
+        };
         let added = super::super::keys_beyond(&i, &listed);
         assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
         for k in &added {

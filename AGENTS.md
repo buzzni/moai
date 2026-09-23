@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:0088b8ea -->
+<!-- moai:begin v:0.1.1 hash:a4f07956 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -36,7 +36,11 @@ on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
 says, and a row whose id sits under an epic (`<epic>.<body>`) reads its epic from
 that id and writes no `epic` of its own — so on those rows `epic` is absent and
 `derived_epic` names the epic. On a row that carries it, absence means the row is in
-no epic at all, and on a group row it never stands. Two surfaces carry neither key —
+no epic at all, and on a group row it never stands. One row reads the two keys against
+each other: where the same id stands twice and the other line is a different `kind`,
+this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
+picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
+`duplicate_id` on the board names that id. Two surfaces carry neither key —
 `rm --json` hands the removed lines back exactly as the file held them, and `tui
 --json` prints the explorer's own shorter row — and there you read the epic off the id.
 
