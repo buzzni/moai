@@ -86,8 +86,12 @@ jobs:
       # 러너 둘이 더 돌고 macOS 는 공개 저장소에서 동시 5칸이다. 저장소 캐시도 지금
       # 4.17GB/10GB 라, LRU 가 PR 마다 쓰는 `cargo-dev`(410MiB)를 밀어낼 자리였다.
       #
-      # `ci.yml` 과 `smoke.yml` 의 캐시는 그대로 둔다. 그쪽은 PR 과 `develop` 에서
-      # 돌아 열쇠가 맞는다.
+      # `ci.yml` 과 `smoke.yml` 의 캐시는 그대로 둔다. 다만 **맞는 까닭이 서로 다르다** —
+      # `ci.yml` 은 PR 과 `develop` 푸시에서 돌아 열쇠가 기본 가지에 서고, `smoke.yml` 은
+      # PR 에서 아예 안 도는 대신 밤마다 `schedule` 로 도는데 그 판이 기본 가지에서 돌아
+      # 같은 자리에 담긴다. 그래서 `smoke.yml` 의 태그 판도 밤이 담아 둔 것을 읽는다.
+      # **그 밤 판을 걷으면 그쪽도 여기와 똑같이 죽은 자리가 된다** — 태그와
+      # `workflow_dispatch` 만 남아, 담기만 하고 아무도 안 푸는 캐시가 된다.
       - name: 타깃을 받는다
         run: rustup target add ${{ matrix.target }}
 
