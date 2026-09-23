@@ -121,10 +121,11 @@ pub(crate) fn dir_of(path: &Path) -> &Path {
     path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
 }
 
-/// **재는 자는 재는 것 곁에 선다**(리뷰). 옮기던 날 이 셋을 재는 시험이 `store` 에 남아, `store`
-/// 에 남긴 다리 한 줄을 타고서야 이름이 풀렸다 — 그 줄을 걷는 날(moai-fnd0) 훅과 아무 상관 없는
-/// 시험 둘이 함께 붉어지고, 걷는 이는 그것을 "부름을 덜 옮겼다" 로 읽는다. 그 다리가 지금 재는
-/// 것은 `src/hook.rs`·`src/cmd/hook.rs` 의 부름 셋뿐이어야 한다.
+/// **재는 자는 재는 것 곁에 선다**(리뷰). 옮기던 날 이 셋을 재는 시험을 `store` 에 두고 왔다면,
+/// `store` 에 남긴 다리 한 줄을 걷는 날(moai-fnd0) 훅과 아무 상관 없는 시험 둘이 함께 붉어지고,
+/// 걷는 이는 그것을 "부름을 덜 옮겼다" 로 읽었을 것이다. 시험이 처음부터 여기 있어 그 다리가 진
+/// 것은 `src/hook.rs`·`src/cmd/hook.rs` 의 부름 셋뿐이었고, 그 셋이 `crate::path::` 를 바로 들자
+/// 걷는 일은 `store.rs` 의 그 한 줄을 지우는 것으로 끝났다.
 #[cfg(test)]
 mod tests {
     use super::*;

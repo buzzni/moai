@@ -7972,11 +7972,11 @@ fn resolve_path(p: &Path, root: &Path) -> PathBuf {
     // `../elsewhere/x.rs` 는 `strip_prefix` 가 그대로 붙어 저장소 안으로 보인다.
     // 파일이 아직 없을 수도 있으므로 디스크를 짚지 않고 글자로만 접는다 — 링크를 푸는 것은
     // 규칙 2 의 판정([`real_path`])만 따로 한다.
-    crate::store::lexical(&joined)
+    crate::path::lexical(&joined)
 }
 
 /// **규칙 2 가 견주는 자리.** [`resolve`] 위에 링크 철자를 푸는 한 겹을 얹는다
-/// ([`crate::store::real_prefix`], 2026-09-19 사용자 결정).
+/// ([`crate::path::real_prefix`], 2026-09-19 사용자 결정).
 ///
 /// 같은 자리를 두 철자로 부르면 `strip_prefix` 가 어긋나 저장소 안의 파일이 밖으로 보이고,
 /// 규칙 2 가 통째로 샌다 — 훅의 `root` 는 `current_dir()` 에서 와 늘 풀린 철자인데(`getcwd` 가
@@ -7994,13 +7994,13 @@ fn resolve_path(p: &Path, root: &Path) -> PathBuf {
 /// 파일에서만 규칙이 꺼진다. (까닭을 대는 것은 가르는 자가 아니다 — `settle` 도 **없는 자리에는
 /// 아무 말도 안 한다**(`Fallen(None)`); 말을 얹는 것은 ELOOP 처럼 딴 탈일 때뿐이다.)
 ///
-/// **[`crate::store::real`] 과도 한 낱말 차이다.** 그쪽은 통째로 `canonicalize` 하고 실패하면 준
+/// **[`crate::path::real`] 과도 한 낱말 차이다.** 그쪽은 통째로 `canonicalize` 하고 실패하면 준
 /// 철자를 그대로 돌려주므로, 여기에 그것을 끼우면 **아직 없는 파일**에서 안 풀린 철자가 나와
 /// `strip_prefix(root)` 가 빗나간다 — 2026-09-19 에 닫은 바로 그 구멍이다. 이 자리가 쓰는 것은
-/// [`crate::store::real_prefix`] 다.
+/// [`crate::path::real_prefix`] 다.
 fn real_path(at: &Path) -> PathBuf {
-    // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::store::real_prefix`] 는 접힌 것을 받는다.
-    crate::store::real_prefix(at)
+    // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::path::real_prefix`] 는 접힌 것을 받는다.
+    crate::path::real_prefix(at)
 }
 
 /// 거절문이 내밀 철자 — **사람이 친 그대로다**(moai-fr0a).
@@ -11335,7 +11335,7 @@ mod tests {
         // 저장소 밖이다 — 붙여 놓은 글자만 보면 안으로 보인다.
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "../elsewhere/x.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &here(), root, "/repo/../elsewhere/x.rs"), Decision::Pass);
-        // **뿌리 위로는 못 올라간다** — `/..` 은 `/` 다([`crate::store::lexical`]). 모으기 전에도
+        // **뿌리 위로는 못 올라간다** — `/..` 은 `/` 다([`crate::path::lexical`]). 모으기 전에도
         // 같은 답이었으니(`PathBuf::pop` 이 뿌리에서 아무것도 안 한다) 이 줄은 고침을 재는 것이
         // 아니라 경계를 못박는 것이다.
         assert!(matches!(guard_edit(&all, &cfg(), &here(), root, "/../repo/src/store.rs"), Decision::Deny(_)));
