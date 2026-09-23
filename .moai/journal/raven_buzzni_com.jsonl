@@ -1322,3 +1322,10 @@
 {"ts":"2026-09-23T06:22:05Z","id":"moai-g9a8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T06:22:06Z","id":"moai-kqid","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T06:22:06Z","id":"moai-oejf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:33:12Z","id":"moai-x04r.746","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 표면이 제 것 아닌 값을 내던 자리"}
+{"ts":"2026-09-23T06:33:18Z","id":"moai-x04r.746","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:33:45Z","id":"moai-x04r.746","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돈다. 끝나면 원문을 이 이슈에 노트로 남기고, 받은 것과 넘긴 것을 -m 으로 닫는다. 그 전에는 워크트리 트리를 건드리지 않는다"}
+{"ts":"2026-09-23T06:33:53Z","id":"moai-53s2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 워크트리 worktree-moai-x04r 에 커밋됐다(867081e). 리뷰 moai-x04r.746 이 끝나고 develop 에 머지되면 닫는다"}
+{"ts":"2026-09-23T06:33:53Z","id":"moai-x04r.fn4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 워크트리 worktree-moai-x04r 에 커밋됐다(e31b220). 리뷰 moai-x04r.746 이 끝나고 develop 에 머지되면 닫는다"}
+{"ts":"2026-09-23T06:43:16Z","id":"moai-j4ie","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T06:43:16Z","id":"moai-yz4j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
