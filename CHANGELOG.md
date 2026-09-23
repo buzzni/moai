@@ -193,6 +193,25 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Where the same id stands twice, a row now **inherits the defer of the epic or
+  the release it wrote on itself**. Which group a row is in is read from the row
+  (`epic`, then the map), but the walk that carries a defer down still climbed by
+  id alone, so a row counted as a member of a deferred epic was handed out by
+  `moai ready` and never listed by `moai show --deferred` — and a row that wrote
+  nothing was pulled out of the plan by its twin's deferred release. AGENTS.md
+  says deferring a group takes the work under it out of the plan; on those rows it
+  did not.
+- A row with no epic now **stands in the release it wrote on itself**. The
+  milestone axis fell back to the id-keyed map for such a row, so two rows sharing
+  an id and carrying different releases both counted under the later one:
+  `moai show <the first release>` said `Members 0/0` while `moai show <the other>`
+  listed both, and the first row's `milestone` was readable on no surface at all.
+  The filter (`--milestone`), the tree and the `(lost)` verdict answer from the row
+  too, so all four read the same line.
+- `moai ready` no longer prints `moai defer  --undo` with no id in it. Where an id
+  stands twice, the row that left the plan and the row the undo target was read
+  back from could be different lines.
+
 - A row one side broke by hand now stands **inside** the conflict markers on that
   side. Pairing a row needed its JSON to parse, so a row edited until it stopped
   being JSON left that side of the marker empty — which reads as "that side

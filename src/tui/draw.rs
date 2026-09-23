@@ -8192,7 +8192,7 @@ mod bench {
         // 거름망 한 번 — 키마다 도는 자리다. 옛 길(`Where::of`)과 견준다.
         let t = std::time::Instant::now();
         for _ in 0..10 {
-            let _ = ground.here();
+            let _ = ground.here(&issues);
         }
         println!("Ground::here 한 번 {:?}", t.elapsed() / 10);
         let t = std::time::Instant::now();
