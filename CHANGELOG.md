@@ -126,23 +126,31 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   `milestone` key under `--json`, and it refuses an id of the wrong shape there
   rather than after you have said yes.
 - `--from` refuses the flags a plan cannot honour — `--status`, `--quiet` and a
-  typed `--type` join `--epic`, `--tag`, `--priority`, `--parent`, `--start` and
-  `--due`. They used to be accepted and thrown away, so a call that ended in 0
-  silently swallowed the column or the id a script was capturing.
-  **This is a break**: a call that passed one of them now exits non-zero.
-  The refusal is the command's own, not the argument parser's: it names only the
-  flags you actually passed, exits 1, and under `--json` it is the
-  `{"code":"bad_input", …}` object every other refusal gives, so a loop that
-  branches on `code` sees this one too.
+  typed `--type` join a positional title, `--epic`, `--tag`, `--priority`,
+  `--parent`, `--start` and `--due`. They used to be accepted and thrown away, so
+  a call that ended in 0 silently swallowed the column or the id a script was
+  capturing. **This is a break**: a call that passed one of them now exits
+  non-zero. The refusal is the command's own, not the argument parser's: it names
+  only what you actually passed (the positional stands as `[title]`), exits 1, and
+  under `--json` it is the `{"code":"bad_input", …}` object every other refusal
+  gives, so a loop that branches on `code` sees this one too. **The title, the
+  epic, the tag, the priority, the parent and the two dates were refused before
+  too, but by the argument parser** — so for those six the exit code changes from
+  2 to 1 and the message stops being plain text.
 - **A plan takes `--body`**, and puts it on the first epic it creates — the one
   place `moai show <epic>` reads why these issues are one bundle, and the same
   place `moai idea promote` has been putting the thought's body. What is refused
   is only the call where there is nothing to read it from: `--body -` together
-  with `--from -`, because there is one stdin. `moai add --from plan.md --body
-  -`, `moai add --from - --body '<text>'` and `moai add --from plan.md --body
+  with a plan that also reads stdin (`-`, and the other spellings of it such as
+  `/dev/stdin`), because there is one stdin. `moai add --from plan.md --body -`,
+  `moai add --from - --body '<text>'` and `moai add --from plan.md --body
   '<text>'` all go through, and `--dry-run` measures that body against the same
-  64KB limit the write does, so the rehearsal cannot approve what the write
-  refuses.
+  64KB limit the write does — in the same order the write measures it, so a plan
+  where both a title and the body are too long gets one answer, not two.
+  The rehearsal also **says where the body will land**: one line naming the first
+  epic, and `body_on` under `--json` holding that draft's index, the same way
+  `--milestone` has its own line and key. The text itself is not echoed — a 64KB
+  body would bury the plan it is supposed to be shown beside.
 - `--from` no longer swallows a typed `--type`. `moai add --from - --type issue`
   used to build the whole epic tree and exit 0, because the namespace default
   (`moai issue add --from -` routes through the same place) and a `--type` the
@@ -150,15 +158,21 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the typed flag through with it. Undoing that meant deleting rows by hand. The
   markdown decides what gets created — `#` is an epic, `-` is an issue — so a
   typed `--type` is refused whatever its value, while the verb's own default
-  still stands.
+  still stands. `--type idea` and `--type milestone` keep pointing at where that
+  work does go (`moai idea promote`, `moai milestone add`) under every verb, not
+  only under a bare `moai add`.
 - When the body `moai idea promote` carries over is past the 64KB a single write
   takes, the refusal names **the idea** and the way out of it — `moai edit <idea>
   -b -` — instead of naming the epic the write was about to create. Such a body
   can only get there through a merge resolved by hand, and the old message sent
   you off to shorten the first line of the plan you had just typed, which changed
-  nothing. The rehearsal (`--dry-run`) measures it too, so it can no longer
-  approve what the write refuses. It is still a refusal, not a truncation: text a
-  person wrote is not shortened on their behalf.
+  nothing. The rehearsal (`--dry-run`) measures it too, at the same point in the
+  run the write measures it, so the two say the same words even when the plan's
+  own title is over the limit as well or the milestone it carries has been
+  deferred. It is still a refusal, not a truncation: text a person wrote is not
+  shortened on their behalf. The way out is written in English like the rest of
+  that refusal, which carries the planted review guidance and has always been one
+  language.
 - **A plan called through the wrong verb is told that first.** `moai idea add
   --from - --body …` and `moai milestone add --from - --body …` used to answer
   with the flag conflict, so the caller dropped `--body`, ran it again, and only

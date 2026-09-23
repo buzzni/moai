@@ -853,9 +853,11 @@ pub struct AddArgs {
     #[arg(long, value_name = "file|-")]
     pub from: Option<String>,
 
-    // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
-    // 제목이 없을 때만 걸린다 — `from` 이 제목과 `conflicts` 라서, 제목이
-    // 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
+    // 거절은 `clap` 이 아니라 `add::run` 이 한다 — 까닭은 바로 위 `from` 의 주석과 같다
+    // (moai-yhb1). **한때 적어 둔 까닭은 이제 틀린 글이다**(리뷰): "`requires = \"from\"` 은
+    // `from` 이 제목과 `conflicts` 라 조용히 건너뛴다" 였는데, 그 `conflicts_with_all` 을 이
+    // 에픽이 걷었으므로 지금은 `requires` 가 실제로 걸린다. 걸려도 안 쓰는 것은 그 거절이
+    // 평문 stderr 에 exit 2 라, `--json` 으로 받는 쪽이 `code` 를 못 보기 때문이다.
     //
     // 아래 `///` 둘째 문단부터는 `--help` 가 옵션 밑에 펴는 긴 글이다. 줄을 70칸
     // 안에서 손으로 끊고 `verbatim_doc_comment` 로 그 끊음을 지킨다 — clap 은

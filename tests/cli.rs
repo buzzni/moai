@@ -4692,13 +4692,30 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
     //
     // **`--body` 는 여기서 빠졌다**(moai-kqid) — 계획은 본문을 받아 첫 뿌리에 단다. 못 서는
     // 판은 stdin 을 정말 다투는 판뿐이고, 그것은 아래 [`a_plan_takes_a_body_unless_stdin_is_contested`] 가 잰다.
-    for extra in [["--status", "in_progress"].as_slice(), ["--quiet"].as_slice(), ["--type", "issue"].as_slice()] {
+    //
+    // **열 가지를 남김없이 돈다**(리뷰). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
+    // 손으로 옮겨 적었는데 시험은 셋만 돌아, 그 목록에서 한 줄이 빠지는 날 아무것도 안 붉어졌다 —
+    // 빠진 깃발은 받아서 버려지고 그 부름이 0 으로 끝난다(`--type` 이 실제로 그랬다, moai-g9a8).
+    for extra in [
+        ["제목"].as_slice(),
+        ["--epic", "moai-aaaa"].as_slice(),
+        ["--tag", "parser"].as_slice(),
+        ["--priority", "1"].as_slice(),
+        ["--parent", "moai-aaaa"].as_slice(),
+        ["--start", "2026-09-01"].as_slice(),
+        ["--due", "2026-09-30"].as_slice(),
+        ["--status", "in_progress"].as_slice(),
+        ["--quiet"].as_slice(),
+        ["--type", "issue"].as_slice(),
+    ] {
         let mut argv = vec!["add", "--from", "-"];
         argv.extend_from_slice(extra);
         let out = from_stdin(s.path(), &argv, PLAN);
         assert!(!out.status.success(), "{extra:?} 를 받았다");
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains(extra[0]) && err.contains("--from"), "{extra:?}: {err}");
+        // 제목은 자리 인자라 `[title]` 이라는 이름으로 선다 — 친 글자가 아니라 그 자리를 댄다.
+        let named = if extra[0] == "제목" { "[title]" } else { extra[0] };
+        assert!(err.contains(named) && err.contains("--from"), "{extra:?}: {err}");
         assert_eq!(issues(s.path()), "", "{extra:?} 인데 썼다");
     }
 }
@@ -4728,13 +4745,45 @@ fn a_plan_takes_a_body_unless_stdin_is_contested() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(issues(s.path()).matches("글자 본문").count(), 1, "본문이 첫 뿌리 하나에 안 섰다");
 
-    // 둘 다 `-` 일 때만 막고, 막은 뒤에는 아무것도 안 남는다.
-    let before = issues(s.path());
-    let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "-"], PLAN);
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(1), "{err}");
-    assert!(err.contains("--body") && err.contains("--from"), "{err}");
-    assert_eq!(issues(s.path()), before, "거절해 놓고 썼다");
+    // stdin 을 정말 다툴 때만 막고, 막은 뒤에는 아무것도 안 남는다.
+    //
+    // **`/dev/stdin` 도 같은 구멍이다**(리뷰). `-` 라는 글자만 견주던 판은 이것을 지나 보냈고,
+    // 그러면 본문이 stdin 을 다 마신 뒤 계획이 빈 것을 읽어 **계획이 비었다** 고 거절했다 —
+    // 받는 쪽은 제가 제대로 준 계획을 고치러 갔다.
+    for plan_arg in ["-", "/dev/stdin"] {
+        let before = issues(s.path());
+        let out = from_stdin(s.path(), &["add", "--from", plan_arg, "--body", "-"], PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{plan_arg}: {err}");
+        assert!(err.contains("--body") && err.contains("--from"), "{plan_arg}: {err}");
+        assert_eq!(issues(s.path()), before, "{plan_arg}: 거절해 놓고 썼다");
+    }
+}
+
+/// **연습이 본문이 설 자리를 댄다**(리뷰). `--milestone` 이 줄 하나를 얻은 그 까닭이다
+/// (moai-07v1) — 진짜가 데려가는 값을 연습이 안 내면, 계획을 승인한 쪽이 그것을 만들어 보고서야
+/// 안다. `--body` 를 준 부름과 안 준 부름이 글자 하나 안 달랐고, 에픽이 여럿인 계획에서는 둘
+/// 가운데 어느 쪽이 받는지도 안 나왔다.
+///
+/// **글자는 안 찍는다**(같은 moai-07v1 결정) — 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이
+/// 그 글에 묻힌다. 내는 것은 "선다" 와 "어느 줄에" 둘뿐이다.
+#[test]
+fn a_rehearsal_says_where_the_body_lands() {
+    let s = init("planbodyline");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+
+    let said = ok(s.path(), &["add", "--from", &file, "--body", "왜 한 묶음인가", "--dry-run"]);
+    assert!(said.contains("첫 에픽"), "본문이 설 줄을 안 댄다\n{said}");
+    assert!(!said.contains("왜 한 묶음인가"), "본문 글자를 찍었다\n{said}");
+    // 기계도 같은 어휘로 받는다 — 아직 id 가 없으니 자리로 말한다(`DraftOut::epic` 과 같다).
+    let json = ok(s.path(), &["add", "--from", &file, "--body", "왜 한 묶음인가", "--dry-run", "--json"]);
+    assert!(json.contains(r#""body_on":0"#), "{json}");
+    // **없으면 안 낸다** — 그 없음이 답이다(AGENTS.md).
+    let bare = ok(s.path(), &["add", "--from", &file, "--dry-run", "--json"]);
+    assert!(!bare.contains("body_on"), "본문이 없는데 자리를 냈다\n{bare}");
+    assert_eq!(issues(s.path()), "", "연습이 썼다");
 }
 
 /// **연습이 본문도 같은 자로 잰다**(moai-kqid). 연습은 사람이 "좋다" 하는 자리라
@@ -4755,6 +4804,18 @@ fn a_rehearsal_measures_the_body_it_would_write() {
     assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
     // 가리키는 줄도 진짜와 같다 — 본문은 첫 뿌리에 서므로 그 줄의 제목을 댄다.
     assert!(said.contains("저장 계층"), "안 지은 줄을 제목으로 안 가리킨다\n{said}");
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+
+    // **넘치는 것이 둘일 때도 같은 것을 댄다**(리뷰). `store::write_locked` 는 줄 차례대로 돌며
+    // 한 줄에서 제목 → 본문을 잇달아 재는데, 제목을 전부 먼저 재던 연습은 **뒷줄 제목**을 댔다 —
+    // 받는 쪽은 연습이 댄 제목을 줄이고 다시 불러서야 진짜가 첫 줄의 본문을 본다는 것을 알았다.
+    let late = s.path().join("late.md");
+    std::fs::write(&late, format!("# 짧은 에픽\n- {}\n", "나".repeat(30_000))).unwrap();
+    let late = late.to_string_lossy().into_owned();
+    let rehearsal = moai(s.path(), &["add", "--from", &late, "--body", &big, "--dry-run"]);
+    let real = moai(s.path(), &["add", "--from", &late, "--body", &big]);
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(said, was, "넘치는 것이 둘일 때 연습과 진짜가 다른 말을 한다");
     assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
 }
 
@@ -9225,8 +9286,9 @@ fn ready_names_the_deferred_blocker_it_is_waiting_on() {
 
 /// **연습이라 적힌 명령이 쓰면 안 된다.** `--from` 없이 부른 `--dry-run` 은
 /// 한 줄을 찍은 다음 그것을 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는
-/// 것보다 나쁜 것은 없다. `clap` 의 `requires` 로는 못 막는다: `--from` 이
-/// 제목과 conflicts 라, 제목이 있으면 못 채울 요구로 보고 건너뛴다.
+/// 것보다 나쁜 것은 없다. `clap` 의 `requires` 에 안 맡긴다: 그 거절은 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 본다(moai-yhb1). 한때는 `--from` 이 제목과 conflicts 라
+/// 건너뛴다는 것이 까닭이었는데, 그 conflicts 를 moai-yhb1 이 걷었다.
 #[test]
 fn a_rehearsal_without_a_plan_is_refused_not_written() {
     let s = init("dryrunalone");
@@ -9274,6 +9336,18 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
         assert_eq!(out.status.code(), Some(1), "--type {kind}: {err}");
         assert_eq!(issues(s.path()), "", "--type {kind} 인데 썼다");
     }
+    // **갈 곳을 대는 말은 동사를 안 가린다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은
+    // 동사가 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봐, `moai issue add --from - --type
+    // idea` 가 `moai idea promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
+    // 어느 동사로 들어왔느냐로 다른 말을 듣고, 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다.
+    for verb in [["add"].as_slice(), ["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-", "--type", "idea"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("moai idea promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
+        assert_eq!(issues(s.path()), "", "{verb:?}: 거절해 놓고 썼다");
+    }
     // 동사가 들고 온 기본값은 그대로 선다 — 그것은 이 부름에 친 요구가 아니다.
     for verb in [["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
         let mut argv = verb.to_vec();
@@ -9316,6 +9390,23 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     assert!(!said.contains("펼친 에픽"), "안 지은 에픽을 가리킨다\n{said}");
     assert!(said.contains(&format!("moai edit {id} -b -")), "빠져나갈 길을 안 댄다\n{said}");
     assert!(!issues(s.path()).contains("펼친 에픽"), "거절해 놓고 썼다");
+
+    // **넘치는 것이 둘이어도, 죽은 릴리스에 걸려 있어도 같은 말이다**(리뷰). 연습만 `check_plan`
+    // 을 먼저 돌던 판은 제목을 댔고(진짜는 본문을 댄다), 연습만 `say_if_dead` 를 먼저 돌던 판은
+    // 진짜가 안 내는 알림 한 줄을 더 찍었다 — `say_if_dead` 의 약속("연습과 진짜가 같은 줄을
+    // 낸다")이 바로 그 자리다. 차례를 진짜와 맞춰야 둘 다 선다.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    ok(s.path(), &["edit", &id, "--milestone", &stone]);
+    ok(s.path(), &["defer", &stone, "-m", "접는다"]);
+    let big_title = format!("# {}\n- 첫 이슈\n", "나".repeat(30_000));
+    for text in [plan, big_title.as_str()] {
+        let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], text);
+        let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], text);
+        let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+        assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+        assert_eq!(real.status.code(), Some(1), "{was}");
+    }
+    ok(s.path(), &["defer", &stone, "--undo"]);
 
     // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
     let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");

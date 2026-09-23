@@ -1123,7 +1123,13 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-`--dry-run` keeps a heredoc typo from creating six of the wrong things.
+`--dry-run` keeps a heredoc typo from creating six of the wrong things. It also says
+which epic a `--body` would land on, and refuses a body the write would refuse.
+
+`--body` says why these issues are one bundle. It goes onto the first epic the plan
+creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
+`--from` can read stdin, so give the other one a file or write the body as text —
+`moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{{{name}}}}` with `--var name=value` (the
 name takes letters, digits, `_` and `-`, no spaces). By convention it lives in the
