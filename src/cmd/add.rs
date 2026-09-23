@@ -96,6 +96,47 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     }
 }
 
+/// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
+///
+/// 여기 사는 까닭은 [`crate::cli::AddArgs::from`] 위에 적어 두었다(moai-yhb1) — 짧게는, clap 의
+/// `conflicts_with_all` 에 맡기면 그 거절이 [`run`] 보다 먼저 터져 네임스페이스가 지은 거절문
+/// (`moai idea add --from -` 은 동사가 틀렸다고 말한다)을 가리고, 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 본다.
+///
+/// **목록이 아니라 준 것만 댄다.** 무엇이 못 서는지를 통째로 읊으면 받는 쪽이 제가 친 것을
+/// 그 안에서 찾아야 한다.
+///
+/// `--milestone` 은 여기 안 든다(moai-xoyg) — 그것은 받아서 뿌리인 에픽에 달고 멤버가
+/// 물려받는다. `--var`·`--dry-run` 도 계획에서만 뜻이 있는 짝이라 안 든다.
+fn flags_a_plan_cannot_keep(args: &AddArgs) -> Vec<&'static str> {
+    let mut given: Vec<&'static str> = Vec::new();
+    // 제목은 계획이 들고 온다 — `#` 줄과 `-` 줄이 그것이다.
+    if args.title.is_some() {
+        given.push("[title]");
+    }
+    // 소속·태그·우선순위도 마크다운이 적는 자리다(`draft::parse`).
+    for (on, flag) in [
+        (args.epic.is_some(), "--epic"),
+        (!args.tag.is_empty(), "--tag"),
+        (args.priority.is_some(), "--priority"),
+        (args.parent.is_some(), "--parent"),
+        // 계획은 마일스톤을 못 짓는다(`refuse.plan_has_no_milestone`) — 날짜가 설 줄이 없다.
+        (args.start.is_some(), "--start"),
+        (args.due.is_some(), "--due"),
+        // `--body -` 는 계획과 stdin 하나를 다투고(moai-fppn),
+        (args.body.is_some(), "--body"),
+        // `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다.
+        (args.status.is_some(), "--status"),
+        // `-q` 는 "id 하나" 라는 뜻인데 계획은 id 를 여럿 낸다 — 기계가 받을 것은 `--json` 이다.
+        (args.quiet, "--quiet"),
+    ] {
+        if on {
+            given.push(flag);
+        }
+    }
+    given
+}
+
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     if let Some(from) = &args.from {
@@ -138,6 +179,22 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                     super::code::BAD_INPUT,
                 ));
             }
+        }
+        // **네임스페이스가 먼저다**(moai-yhb1) — `moai idea add --from - -b '글'` 이 `--body` 얘기를
+        // 듣고, 그것을 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알던 차례다. 위의 갈래가 지은 글은
+        // 어디로 가야 하는지를 대고, 아래 글은 이 부름에서 깃발 하나만 빼라고 한다 — 둘이 겹치면
+        // 덜 아는 쪽이 이기면 안 된다.
+        let cannot = flags_a_plan_cannot_keep(&args);
+        if !cannot.is_empty() {
+            let lang = ctx.lang();
+            return Err(Fail::coded(
+                format!(
+                    "{}\n      {}",
+                    crate::i18n::fill(crate::i18n::say(lang, "refuse.plan_flag"), &[("flags", &cannot.join(", "))]),
+                    crate::i18n::say(lang, "refuse.plan_flag_how"),
+                ),
+                super::code::BAD_INPUT,
+            ));
         }
         return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone(), args.milestone.as_deref());
     }

@@ -4700,6 +4700,45 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
     }
 }
 
+/// **그 거절은 moai 의 것이지 clap 의 것이 아니다**(moai-yhb1).
+///
+/// `conflicts_with_all` 에 맡기던 판은 둘을 깼다. 하나, `add::run` 이 닿기 전에 터져
+/// 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를 빼라"
+/// 를 듣고, 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 둘, 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 봤다 — 같은 명령의 형제 거절(`--milestone <모양 틀림>`)은
+/// `{"code": …}` 에 exit 1 이다. 한 기능에 거절 계약이 둘이면 그것은 계약이 아니다.
+#[test]
+fn a_plan_refusal_is_moais_own_not_claps() {
+    let s = init("planrefusal");
+    // 네임스페이스가 먼저다 — 깃발 얘기는 한마디도 안 나온다.
+    for verb in [["idea", "add"].as_slice(), ["milestone", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-", "-b", "글"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{verb:?}: {err}");
+        assert!(
+            !err.contains("--body"),
+            "{verb:?}: 깃발 거절이 동사 거절을 가렸다
+{err}"
+        );
+    }
+    // 동사가 맞으면 깃발을 댄다 — 그리고 그 거절도 `--json` 으로 갈라진다.
+    for (argv, want) in [
+        (["idea", "add", "--from", "-", "-b", "글"].as_slice(), "moai idea promote"),
+        (["add", "--from", "-", "-b", "글"].as_slice(), "--body"),
+    ] {
+        let mut json = argv.to_vec();
+        json.push("--json");
+        let out = from_stdin(s.path(), &json, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {err}");
+        assert!(err.contains(r#""code":"bad_input""#), "{argv:?}: {err}");
+        assert!(err.contains(want), "{argv:?}: {err}");
+    }
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+}
+
 /// **연습도 마일스톤의 모양을 잰다**(리뷰). 연습은 사람이 "좋다" 하는 자리라(AGENTS.md
 /// 갈림길 3), 쓰기가 거절할 값을 그대로 지나 보내면 그 승인이 뒤늦은 말이 된다 —
 /// `moai edit --milestone none` 이 필드를 비우므로 `none` 은 사람이 실제로 치는 값이다.

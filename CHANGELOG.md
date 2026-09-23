@@ -130,10 +130,16 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   `--due`. They used to be accepted and thrown away, so a call that ended in 0
   silently swallowed the text, the column, or the id a script was capturing.
   **This is a break**: a call that passed one of the three now exits non-zero.
-  Machine output for a plan is `--json`, which `--from` has always given — but note
-  that these refusals come from the argument parser, so they are plain text on
-  stderr and exit 2 even under `--json`, not the `{"code": …}` object a refusal from
-  the command itself gives. A loop that branches on `code` sees neither.
+  The refusal is the command's own, not the argument parser's: it names only the
+  flags you actually passed, exits 1, and under `--json` it is the
+  `{"code":"bad_input", …}` object every other refusal gives, so a loop that
+  branches on `code` sees this one too.
+- **A plan called through the wrong verb is told that first.** `moai idea add
+  --from - --body …` and `moai milestone add --from - --body …` used to answer
+  with the flag conflict, so the caller dropped `--body`, ran it again, and only
+  then learned that markdown does not go in through `idea add` at all. The
+  namespace refusal now comes before the flag refusal, and both of them are the
+  command's own.
 - `prime --json`'s `epic` key is now what the file says, like `epic` everywhere
   else; the resolved answer moved to `derived_epic`. **This is a break**: it was
   the only surface that put the inherited epic under `epic`, so one binary gave

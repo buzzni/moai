@@ -666,6 +666,8 @@
   "refuse.plan_is_not_an_idea_how": "마크다운으로 에픽과 이슈를 펼치는 것은 `moai idea promote <id> --from -` 다",
   "refuse.plan_has_no_milestone": "마크다운은 에픽과 이슈만 낸다 — 마일스톤은 `moai milestone add 'v0.1'` 로 만든다",
   "refuse.plan_has_no_milestone_how": "만든 뒤 `moai add --from - --milestone <id>` 로 계획을 세운다",
+  "refuse.plan_flag": "`--from` 은 {flags} 를 못 받는다 — 만들 것은 계획이 적은 그대로다",
+  "refuse.plan_flag_how": "제목·태그·우선순위는 마크다운이 들고 id 는 `--json` 이 낸다. 나머지는 만든 뒤 `moai edit <id>` 로 단다",
   "refuse.dry_run_needs_from": "`--dry-run` 은 `--from` 과 함께 쓴다 — 하나짜리는 연습할 것이 없다",
   "refuse.dry_run_needs_from_how": "잘못 만들었으면 `moai rm <id>` 다",
   "refuse.add_no_title": "제목이 없다. `moai add '제목'` 또는 `moai add --from -` 이다",
