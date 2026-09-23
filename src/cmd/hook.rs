@@ -504,7 +504,7 @@ fn picks_dir(repo: &Repo) -> std::path::PathBuf {
             crate::text::fnv1a64_from(crate::text::fnv1a64(common.as_os_str().as_encoded_bytes()), &[0]),
             rel.as_os_str().as_encoded_bytes(),
         ),
-        None => crate::text::fnv1a64(crate::store::real(&repo.root).as_os_str().as_encoded_bytes()),
+        None => crate::text::fnv1a64(crate::path::real(&repo.root).as_os_str().as_encoded_bytes()),
     };
     std::env::temp_dir().join(format!("moai-picks-{key:016x}"))
 }
