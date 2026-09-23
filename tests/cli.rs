@@ -9683,6 +9683,94 @@ fn same_kind_twins_answer_the_same_epic_on_every_surface() {
     assert!(object("앞줄").contains(r#""epic":"argos-e001""#), "{json}");
 }
 
+/// **훅도 소속을 줄에 묻는다**(moai-jk2u.ipf, 리뷰 moai-jk2u.m60 12번).
+///
+/// 훅은 막는 자리라 틀린 답의 값이 다르다. 집은 줄이 제 쌍둥이의 에픽으로 판정되면 규칙 1 이
+/// 정당한 `moai add -e <에픽>` 을 거절하고, 거절문은 그 줄이 적지도 않은 에픽을 대며 그대로
+/// 쳐도 안 되는 명령을 내준다 — 되돌릴 길이 도구 밖에만 남는다.
+///
+/// **두 축을 다 잰다. 두 축 다 양쪽으로 잰다**(리뷰 moai-jk2u.35i) — 줄에 묻고 **지도도 함께**
+/// 보는 자는 "제 것은 지나간다" 만으로는 안 걸린다. 한 함수 안에서 한 축만 옮긴 것이 리뷰
+/// moai-jk2u.m60 1번이 잡은 자리다.
+///
+/// **대조군이 같은 파일에 선다** — id 가 하나뿐인 줄(`argos-0006`)의 답이 바뀌면 여기서 붉어진다.
+///
+/// **가려진 줄은 어느 묶음에도 안 선다**(moai-53s2 사용자 결정) — 종류가 다른 쌍둥이에게 가려진
+/// 줄(`argos-0008`)은 제 `epic` 을 적었어도 규칙 1 의 단위에 안 든다. 안 그러면 `derived_epic`·
+/// 트리·`-e` 는 "어느 에픽도 아니다" 라는데 훅만 그 에픽을 대, 한 바이너리가 두 답을 한다.
+#[test]
+fn the_hook_reads_belonging_from_the_row_not_the_id_map() {
+    let s = init("hooktwin");
+    let row = |id: &str, title: &str, kind: &str, status: &str, at: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{at},\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일. 집은 것은 앞줄이고(뒷줄은 닫혔다), 앞줄과 뒷줄이 저마다 다른 에픽과
+    // 다른 릴리스를 적었다 — 지도는 뒷줄의 값 하나만 든다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}{}{}{}{}{}{}{}{}",
+            row("argos-e001", "에픽 하나", "epic", "todo", ""),
+            row("argos-e002", "에픽 둘", "epic", "todo", ""),
+            row("argos-e003", "에픽 셋", "epic", "todo", ""),
+            row("argos-m001", "릴리스 하나", "milestone", "todo", ""),
+            row("argos-m002", "릴리스 둘", "milestone", "todo", ""),
+            row("argos-0002", "집은 앞줄", "issue", "in_progress", ",\"epic\":\"argos-e001\""),
+            row("argos-0002", "닫힌 뒷줄", "issue", "done", ",\"epic\":\"argos-e002\""),
+            row("argos-0004", "릴리스를 적은 앞줄", "issue", "in_progress", ",\"milestone\":\"argos-m001\""),
+            row("argos-0004", "닫힌 뒷줄", "issue", "done", ",\"milestone\":\"argos-m002\""),
+            // 대조군 — id 가 하나뿐인 집은 줄. 이 고침이 성한 줄의 답을 건드리면 여기서 붉어진다.
+            row("argos-0006", "성한 줄", "issue", "in_progress", ",\"epic\":\"argos-e003\""),
+            // 가려진 줄 — 같은 id 를 마일스톤 줄이 뒤에서 덮는다(`argos-0008`). 리뷰 줄로 두어
+            // 규칙 3 과 `closing` 이 그것을 "집은 것에 매인 리뷰" 로 세는지까지 잰다.
+            row(
+                "argos-0008",
+                "가려진 리뷰 앞줄",
+                "issue",
+                "in_progress",
+                ",\"epic\":\"argos-e001\",\"tags\":[\"review\"]",
+            ),
+            row("argos-0008", "덮는 뒷줄", "milestone", "todo", ""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 에픽 축 — 집은 줄이 제 `epic` 에 적은 에픽 안에 세우는 것은 지나간다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 -e argos-e001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 에픽에 세우는 것을 막았다 — {inside}");
+    // 뒷줄의 에픽은 이 줄의 것이 아니다 — 반대쪽도 잰다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 남의일 -e argos-e002\"}", "s1"));
+    assert!(!why.is_empty());
+    // 대조군 — id 가 하나뿐인 집은 줄의 에픽은 그대로 단위 안이다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 성한일 -e argos-e003\"}", "s1");
+    assert!(inside.trim().is_empty(), "id 가 하나뿐인 줄의 에픽까지 막았다 — {inside}");
+
+    // 2. 마일스톤 축 — 같은 함수 안의 옆 걸음이다. **양쪽으로 잰다**: 제 것은 지나가고 쌍둥이의
+    //    것은 막혀야, 줄에 묻고 지도도 함께 보는 자가 여기서 걸린다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 --milestone argos-m001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 릴리스에 세우는 것을 막았다 — {inside}");
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 남의일 --milestone argos-m002\"}", "s1"));
+    assert!(!why.is_empty(), "쌍둥이가 적은 릴리스에 세우는 것을 지나갔다 — {why}");
+
+    // 3. 거절문이 대는 에픽. 아무 데도 안 붙인 생성을 막을 때, 그 글은 **집은 줄이 적은** 에픽을
+    //    대야 한다 — 쌍둥이의 것을 대면 시킨 그대로 쳐도 다시 막힌다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 딴일\"}", "s1"));
+    assert!(why.contains("-e argos-e001"), "거절문이 집은 줄의 에픽을 안 댔다 — {why}");
+    assert!(!why.contains("-e argos-e002"), "거절문이 쌍둥이의 에픽을 댔다 — {why}");
+
+    // 4. 가려진 줄은 어느 묶음에도 안 선다 — 화면이 하는 말과 훅이 하는 말이 같아야 한다.
+    //    `show` 는 그 줄에 에픽을 안 대는데 훅만 대면, 한 바이너리가 한 물음에 두 답을 한다.
+    let json = ok(s.path(), &["show", "--json"]);
+    assert!(!object_titled(&json, "가려진 리뷰 앞줄").contains("derived_epic"), "{json}");
+    assert!(!ok(s.path(), &["show", "-e", "argos-e001"]).contains("가려진 리뷰 앞줄"));
+    // 세션을 닫을 때 그 리뷰를 "집은 것에 매인 리뷰" 로 세면, 집은 적도 없는 줄을 닫으라고 붙든다 —
+    // 그런데 그 id 는 `duplicate_id` 로 쓰기가 막혀 시킨 대로 할 수도 없다.
+    let stop = hook_out(&s, "stop", &event(&s, "s1"));
+    assert!(!stop.contains("argos-0008"), "가려진 리뷰를 집은 것에 매인 리뷰로 셌다 — {stop}");
+}
+
 /// **가려진 묶음 줄은 쌍둥이의 읽은 칸을 안 입는다**(moai-7iyc.5fz).
 ///
 /// 칸 지도도 id 로 짠 것이라 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 그 id 의 뜻을 정하는

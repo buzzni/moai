@@ -211,6 +211,25 @@ on finding them.
 
 ### Fixed
 
+- **The hook reads which group a row is in from the row, not from the id map.**
+  Where the same id stands twice, the row you picked up was judged by its twin's
+  epic and release, and the hook is the one surface that refuses: `moai add -e
+  <the epic that row wrote>` was blocked as work created outside the focus, and
+  the refusal named the twin's epic instead — run the command it hands you and it
+  is refused again, so the way out was outside the tool. Every place that asked by
+  id now asks the row, on both axes: rule 1's unit and the epic its refusal names,
+  rule 3's "is this review tied to what you hold", the close-of-session notice,
+  the check for a defer that would close an epic, the distance that decides which
+  worktree holds a row (so rule 2 no longer hands your work to the worktree named
+  after your twin's epic), and the `[NEW]` mark on unread rows. A row eclipsed by a
+  twin of another kind stands in no group here either, as it already did on every
+  read surface — the hook no longer pins a review to an epic that `moai show -e`
+  will not list.
+  **A row that inherits its epic instead of writing one is not covered yet.** Where
+  the same id stands twice and neither line wrote `epic`, the answer still comes off
+  the id map, so it is still the twin's — the same refusal, for the shape a plan
+  mints. That is one layer down, in what resolves an inherited epic, and it moves
+  every surface at once, `derived_epic` included.
 - Where the same id stands twice, a row now **inherits the defer of the epic or
   the release it wrote on itself**. Which group a row is in is read from the row
   (`epic`, then the map), but the walk that carries a defer down still climbed by

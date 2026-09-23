@@ -27,7 +27,7 @@ use crate::i18n::{Lang, fill, say};
 use crate::model::Issue;
 use crate::report;
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// 훅이 걸리는 자리.
@@ -5201,31 +5201,31 @@ fn promotes_into(seg: &Seg) -> bool {
 /// 그랬고, 이 규칙을 만든 세션이 제 리뷰 결과를 이슈로 적지 못했다.
 /// `report::groups` 와 `report::milestones` 가 이미 그 상속을 푼다.
 ///
-/// **두 지도를 [`report::ties`] 한 벌로 받는다**(moai-c4nk) — `milestones` 는 제 안에서
+/// **두 축을 [`report::Ties`] 한 벌로 받는다**(moai-c4nk) — `milestones` 는 제 안에서
 /// `groups` 를 다시 지어, 나란히 부르면 소속 지도가 두 벌 선다. 훅은 도구 호출마다 이 길을
 /// 지난다. `report` 쪽의 같은 자리는 moai-3prn 이 이미 걷었다.
 ///
-/// **지도를 이미 가진 쪽은 [`unit_of_in`] 으로 온다**(리뷰 moai-c4nk.ssb) — 안에서 한 벌만 짓게
+/// **재료를 이미 가진 쪽은 [`unit_of_in`] 으로 온다**(리뷰 moai-c4nk.ssb) — 안에서 한 벌만 짓게
 /// 해 놓고 부르는 쪽이 곁에서 `groups` 를 또 짓던 판은, 한 벌을 걷고 한 벌을 그대로 뒀다.
 pub fn unit_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> BTreeSet<&'a str> {
-    let (epics, stones) = report::ties(issues);
-    unit_of_in(focus, &epics, &stones)
+    unit_of_in(focus, &report::Ties::of(issues))
 }
 
-/// [`unit_of`] 의 몸통 — **이미 푼 소속 지도**로 잰다. `report` 의 `_in` 들과 같은 꼴이다
+/// [`unit_of`] 의 몸통 — **이미 푼 소속 재료**로 잰다. `report` 의 `_in` 들과 같은 꼴이다
 /// ([`report::milestones_in`]).
-fn unit_of_in<'a>(
-    focus: &[&'a Issue],
-    epics: &BTreeMap<&'a str, &'a str>,
-    stones: &BTreeMap<&'a str, &'a str>,
-) -> BTreeSet<&'a str> {
+///
+/// **소속은 줄에 묻는다**([`report::Ties`], moai-jk2u.ipf) — 지도를 id 로 짚으면 같은 id 를 든
+/// 앞줄이 뒷줄의 에픽·릴리스를 입고, 그 값이 곧 "이 쓰기가 무엇에 붙어도 되는가" 가 된다.
+/// 제 `epic` 에 A 를 적은 줄을 집은 세션이 `moai add -e A` 로 거절당하고, 거절문은 그 줄이
+/// 적지도 않은 B 를 대며 그대로 쳐도 안 되는 명령을 냈다.
+fn unit_of_in<'a>(focus: &[&'a Issue], ties: &report::Ties<'a>) -> BTreeSet<&'a str> {
     let mut out = BTreeSet::new();
     for i in focus {
         out.insert(i.id.as_str());
-        if let Some(e) = epics.get(i.id.as_str()) {
+        if let Some(e) = ties.epic_of(i) {
             out.insert(e);
         }
-        if let Some(m) = stones.get(i.id.as_str()) {
+        if let Some(m) = ties.stone_of(i) {
             out.insert(m);
         }
         if let Some(p) = crate::id::parent_of(&i.id) {
@@ -5233,6 +5233,18 @@ fn unit_of_in<'a>(
         }
     }
     out
+}
+
+/// 이 줄이 [`unit_of_in`] 이 지은 **그 단위 안**인가 — 저 줄 자신이거나, 그 에픽이거나, id 부모다.
+///
+/// **읽는 자를 하나로 둔다**(리뷰 moai-jk2u.35i). 규칙 3 의 두 짝([`close_in`]·[`guard_review`])과
+/// 세션을 닫는 비춤([`closing`])이 같은 셈법이어야 한다고 셋이 저마다 적어 두고는, 그 셈을 글자
+/// 그대로 세 벌 베껴 두었다 — 한 벌만 고쳐지는 날 규칙 3 이 세운 리뷰를 `closing` 이 안 챙긴다.
+/// 마일스톤 축은 여기 없다: 단위에는 들어가되(`unit_of_in`) 되짚을 때는 안 본다.
+fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> bool {
+    unit.contains(i.id.as_str())
+        || ties.epic_of(i).is_some_and(|e| unit.contains(e))
+        || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p))
 }
 
 /// 이 자리에서 **누구의 것인지** 가르는 이름들 — [`held`] 가 초점에서 뺄 것을 잰다.
@@ -5286,13 +5298,13 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
 ///
-/// 소속 지도는 **한 벌만** 짓는다([`report::ties`]) — 옆 이름과 모르는 줄을 같은 지도로 잰다. 둘이 제
+/// 소속 재료는 **한 벌만** 짓는다([`report::Ties`]) — 옆 이름과 모르는 줄을 같은 재료로 잰다. 둘이 제
 /// 지도를 따로 짓던 판은 좁힌 판정마다 두 벌을 지었다.
-fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&Issue) -> bool + 'a {
-    let (epics, stones) = if away.is_empty() { Default::default() } else { report::ties(issues) };
-    move |i: &Issue| {
-        report::claims_over(&epics, &stones, &away.names, &away.own, i)
-            || (report::claims(&epics, &stones, &away.unsure, i) && !away.picked.contains(&i.id))
+fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool + 'a {
+    let ties = if away.is_empty() { report::Ties::default() } else { report::Ties::of(issues) };
+    move |i: &'a Issue| {
+        report::claims_over(&ties, &away.names, &away.own, i)
+            || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
     }
 }
 
@@ -5603,8 +5615,8 @@ fn create_in<'a>(
     if focus.is_empty() {
         return Decision::Pass;
     }
-    // **초점의 단위는 물을 때 짓는다**(리뷰 moai-c4nk.ssb) — [`unit_of`] 는 소속 지도 두 벌을
-    // 짓는데([`report::ties`]), 그것을 묻는 것은 아래 `find` 의 **마지막** `&&` 뿐이고 그 앞의
+    // **초점의 단위는 물을 때 짓는다**(리뷰 moai-c4nk.ssb) — [`unit_of`] 는 소속 재료 한 벌을
+    // 짓는데([`report::Ties::of`]), 그것을 묻는 것은 아래 `find` 의 **마지막** `&&` 뿐이고 그 앞의
     // `creates(seg)` 가 대부분을 거른다. 미리 짓던 판은 `moai mv …`·`cargo test && moai status`
     // 처럼 아무것도 안 세우는 줄마다 두 벌을 지어 버렸다 — "싼 것부터 잰다"(moai-xppm) 가
     // [`guard_writes_in`] 에만 서 있던 자리다.
@@ -5780,19 +5792,13 @@ fn close_in(
         // 그래서 뺀다 — `closing`·[`guard_review`] 가 안 세는 줄이다(리뷰 moai-dw63.nzw).
         // 소속 지도는 **한 벌만** 짓는다([`unit_of_in`]) — `unit_of` 에 맡기고 곁에서 `groups` 를
         // 또 부르던 판은 같은 지도를 두 벌 지었다.
-        let (epics, stones) = report::ties(issues);
-        let unit = unit_of_in(&held(issues, cfg, away), &epics, &stones);
+        let ties = report::Ties::of(issues);
+        let unit = unit_of_in(&held(issues, cfg, away), &ties);
         let out = report::put_off(issues);
         let theirs = theirs(issues, away);
         let open_review = ids.iter().find_map(|id| {
             issues.iter().find(|i| {
-                i.id == *id
-                    && is_review(i, &out)
-                    && !i.status.is_done()
-                    && !theirs(i)
-                    && (unit.contains(i.id.as_str())
-                        || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
-                        || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p)))
+                i.id == *id && is_review(i, &out) && !i.status.is_done() && !theirs(i) && in_unit(&unit, &ties, i)
             })
         });
         if let Some(r) = open_review {
@@ -7130,20 +7136,31 @@ pub fn guard_moai(
 /// **[`create_in`] 의 거절문과 [`aside_in`] 의 비춤이 함께 쓴다** — 따로 세던 판은 거절문만 에픽
 /// 아닌 줄을 `-e` 로 댔다(리뷰 moai-ju21.70g).
 fn epics_of<'a>(issues: &'a [Issue], focus: &[&'a Issue]) -> (Vec<&'a str>, Vec<&'a str>) {
-    let groups = report::groups(issues);
+    // **소속은 줄에 묻는다**([`report::Ties`], moai-jk2u.ipf) — 거절문이 대는 에픽은 집은 줄이
+    // 적은 것이어야 한다. 지도를 짚던 판은 같은 id 의 뒷줄이 적은 에픽을 대, 막힌 사람이 시킨
+    // 그대로 `moai add … -e <그것>` 을 쳐도 규칙 1 에 다시 막혔다. 마일스톤은 안 쓴다.
+    let ties = report::Ties::epics_only(issues);
+    // **에픽 줄의 id 는 한 번에 걷는다**(리뷰 moai-jk2u.35i) — 초점마다 목록을 다시 훑던 판은
+    // `초점 × 줄 수` 였다. [`report::Ties`] 의 `by_id` 로는 못 묻는다: 그쪽은 같은 id 의 뒷줄만
+    // 들어, 에픽 줄이 앞줄인 파일에서 답이 갈린다.
+    let epic_ids = live_epics(issues);
     let (mut epics, mut loose): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for i in focus {
-        match groups
-            .get(i.id.as_str())
-            .copied()
-            .filter(|e| issues.iter().any(|g| g.id == *e && g.kind == crate::model::Kind::Epic))
-        {
+        match ties.epic_of(i).filter(|e| epic_ids.contains(*e)) {
             Some(e) if !epics.contains(&e) => epics.push(e),
             Some(_) => {}
             None => loose.push(i.id.as_str()),
         }
     }
     (epics, loose)
+}
+
+/// **에픽 줄이 실제로 선 id 들** — [`epics_of`] 와 [`shelving_closes`] 가 "이 에픽이 닫힐 수 있는가"
+/// 를 그것으로 묻는다. 끊긴 참조나 에픽 아닌 줄을 가리키는 `epic` 은 여기 없다.
+///
+/// 줄마다 목록을 다시 훑던 판은 한 판정이 `초점 × 줄 수` 였다 — 훅은 도구 호출마다 이 길을 지난다.
+fn live_epics(all: &[Issue]) -> BTreeSet<&str> {
+    all.iter().filter(|g| g.kind == crate::model::Kind::Epic).map(|g| g.id.as_str()).collect()
 }
 
 /// 이 토막이 **생각을 담는가** — [`adds_idea`] 의 두 철자. 도움말은 아무것도 안 담는다.
@@ -7596,17 +7613,10 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         );
     }
 
-    // 소속 지도 한 벌로 잰다 — [`close_in`] 과 같은 자리다.
-    let (epics, stones) = report::ties(issues);
-    let unit = unit_of_in(&focus, &epics, &stones);
-    let anchored: Vec<&&Issue> = open
-        .iter()
-        .filter(|i| {
-            unit.contains(i.id.as_str())
-                || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
-                || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p))
-        })
-        .collect();
+    // 소속 재료 한 벌로 잰다 — [`close_in`] 과 같은 자리다.
+    let ties = report::Ties::of(issues);
+    let unit = unit_of_in(&focus, &ties);
+    let anchored: Vec<&&Issue> = open.iter().filter(|i| in_unit(&unit, &ties, i)).collect();
     // **관점이 적힌 리뷰만 리뷰로 친다.** 제목뿐인 리뷰 줄은 무엇을 왜 보는지를
     // 남기지 않아, 다음 사람이 그 리뷰가 무엇을 훑었는지 영영 모른다 — 리뷰가
     // 낸 글 중 값이 큰 쪽이 통째로 사라지는 자리다.
@@ -7633,7 +7643,7 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
             "There are open review rows, but none is tied to what you are looking at: {}\n",
             open.iter()
                 .take(3)
-                .map(|i| format!("{}({})", i.id, epics.get(i.id.as_str()).copied().unwrap_or("no epic")))
+                .map(|i| format!("{}({})", i.id, ties.epic_of(i).unwrap_or("no epic")))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -7779,7 +7789,7 @@ pub fn closing(
     let mut lines = Vec::new();
     // 한 벌로 짓고 아래 `unit_of_in` 에 그대로 준다 — 곁에서 `unit_of` 를 부르던 판은 같은 지도를
     // 두 벌 지었다(리뷰 moai-c4nk.ssb).
-    let (epics, stones) = report::ties(issues);
+    let ties = report::Ties::of(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
     if !wip.is_empty() {
@@ -7846,7 +7856,7 @@ pub fn closing(
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
     // 리뷰 줄까지 세면 매 세션 같은 줄이 나오고, 그러면 아무도 안 읽는다.
-    let unit = unit_of_in(&wip, &epics, &stones);
+    let unit = unit_of_in(&wip, &ties);
     // **옆 워크트리의 리뷰는 안 센다** — 규칙 3([`guard_review`]·[`close_in`])과 같은 자다(리뷰
     // moai-dw63.nzw). 세면 옆 일꾼이 같은 에픽에서 돌리는 리뷰를 이 세션에 "낸 글을 붙이고
     // 닫으라" 고 붙든다. **겹친 줄에서 이미 닫았거나 미룬 리뷰도 안 센다** — 위에서 집은 줄을
@@ -7862,9 +7872,7 @@ pub fn closing(
         // **규칙 3 과 같은 셈법이어야 한다.** 여기서 부모를 빼면, 거절문이
         // 시킨 대로 `--parent` 로 세운 리뷰가 규칙 3 은 지나가면서 닫을 때는
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
-        let mine = unit.contains(i.id.as_str())
-            || epics.get(i.id.as_str()).is_some_and(|e| unit.contains(e))
-            || crate::id::parent_of(&i.id).is_some_and(|p| unit.contains(p));
+        let mine = in_unit(&unit, &ties, i);
         if mine && !wip.iter().any(|w| w.id == i.id) {
             lines.push(format!(
                 "{}\n{}",
@@ -7898,18 +7906,25 @@ fn grown(warnings: usize, before: Option<usize>, lang: Lang) -> Option<String> {
 fn shelving_closes<'a>(
     latest: &'a [Issue],
     cfg: &Config,
-    wip: &[&Issue],
+    wip: &[&'a Issue],
 ) -> std::collections::BTreeMap<&'a str, &'a str> {
     let held: BTreeSet<&str> = wip.iter().map(|i| i.id.as_str()).collect();
     if held.is_empty() {
         return Default::default();
     }
-    let epics = report::groups(latest);
-    let aims: std::collections::BTreeMap<&str, &str> = latest
+    // **소속은 줄에 묻는다**([`report::Ties`], moai-jk2u.ipf) — 지도를 짚으면 같은 id 의 앞줄이
+    // 뒷줄의 에픽으로 세어져, 닫힐 에픽을 엉뚱하게 대거나 대지 못한다.
+    //
+    // **묻는 줄은 집은 그 줄이다**(리뷰 moai-jk2u.35i). `latest` 를 id 로 훑어 담던 판은 같은 id 의
+    // 줄을 **둘 다** 받아 뒷줄이 지도를 이겼다 — 뒷줄이 `done` 이 아니기만 하면 되므로, 닫힌 쌍둥이만
+    // 거르던 문으로는 안 막혔다. 그러면 줄에 물어 놓고 그 답을 id 로 접는 자리가 되어, 이 고침이
+    // 없애려던 그것이 같은 함수 안에서 되살아난다. 닫히는지는 여전히 `latest` 에서 잰다.
+    let ties = report::Ties::epics_only(latest);
+    let epic_ids = live_epics(latest);
+    let aims: std::collections::BTreeMap<&str, &str> = wip
         .iter()
-        .filter(|i| held.contains(i.id.as_str()) && !i.status.is_done())
-        .filter_map(|i| Some((i.id.as_str(), *epics.get(i.id.as_str())?)))
-        .filter(|(_, e)| latest.iter().any(|g| g.id == *e && g.kind == crate::model::Kind::Epic))
+        .filter_map(|i| Some((i.id.as_str(), ties.epic_of(i)?)))
+        .filter(|(_, e)| epic_ids.contains(*e))
         .collect();
     if aims.is_empty() {
         return aims;
