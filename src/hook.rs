@@ -2635,6 +2635,13 @@ enum Text {
     Find,
 }
 
+/// **find 의 술어 — 부른 자리에서 도는 둘.** `-exec`·`-ok` 는 find 를 부른 디렉터리에서 돈다
+/// (2026-09-23 에 쟀다: `find a -name f -exec pwd \;` 는 부른 자리를 찍는다).
+const FIND_HERE: &[&str] = &["-exec", "-ok"];
+/// **find 의 술어 — 찾은 파일이 있는 디렉터리에서 도는 둘**(moai-hktu). `-execdir`·`-okdir` 이고,
+/// 그 자리의 상대 경로는 여기 것이 아니다([`Wrapper::elsewhere`] 와 같은 줄이다).
+const FIND_AWAY: &[&str] = &["-execdir", "-okdir"];
+
 /// **`find` 의 술어 안에 선 명령들을 걷어 한 글로 잇는다**(moai-7kif) — `-exec`·`-execdir`·
 /// `-ok`·`-okdir` 이 넷이고, 저마다 `;` 나 `+` 로 끝난다.
 ///
@@ -2651,12 +2658,15 @@ enum Text {
 ///
 /// **끝맺음이 없어도 걷는다** — 줄이 잘렸거나 사람이 빠뜨린 것이고, 그때도 그 앞까지는 정말
 /// 도는 명령이다.
+///
+/// 술어 이름은 [`FIND_HERE`]·[`FIND_AWAY`] 가 든다 — [`wrapped`] 의 find 갈래가 자리를 가릴 때
+/// 같은 표를 읽는다. 두 벌로 두면 술어를 하나 더하는 날 한쪽에만 들어, 걷어는 오는데 자리는
+/// 안 가리는 줄이 선다.
 fn exec_of(words: &[String]) -> String {
-    const PREDS: &[&str] = &["-exec", "-execdir", "-ok", "-okdir"];
     let mut out: Vec<String> = Vec::new();
     let mut at = 0;
     while at < words.len() {
-        if !PREDS.contains(&words[at].as_str()) {
+        if !FIND_HERE.contains(&words[at].as_str()) && !FIND_AWAY.contains(&words[at].as_str()) {
             at += 1;
             continue;
         }
@@ -2784,6 +2794,13 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// `su -x 남 -c 'moai mv <id> in_progress --from todo' && <쓰기>` 는 진짜 su 가
         /// `invalid option -- 'x'` 로 아무것도 안 돌리는데(2026-09-23 에 쟀다) 훅은 그 집기를 세어
         /// 뒤의 빈손 쓰기를 풀어 줬다.
+        ///
+        /// **여기서 틀리면 규칙 4 까지 잃는다**(리뷰 moai-514e.doy) — [`Wrapped::Stops`] 는 `-c` 의
+        /// 글을 아무에게도 안 내, 자리를 안 묻는다던 규칙 4 도 그 글을 못 본다. 위 표는 util-linux
+        /// 2.39 의 `su` 이고 이 칸은 **이름**으로 걸리니, BSD·busybox 처럼 글자가 다른 su 가 선
+        /// 기계에서는 정말 도는 `tmux kill-server` 가 통째로 안 보인다. 짧은 글자를 더 걷을 때
+        /// 이 값을 함께 본다 — `an_unknown_short_letter_ends_the_line_in_the_shell_branch_too` 의
+        /// 규칙 4 짝이 그것을 지킨다.
         whole: bool,
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
@@ -3758,7 +3775,29 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         //
         // **줄에 그 둘이 섰을 때만이다** — find 줄 전체에 세우면 `find . -exec tee src/x.rs \;` 의
         // 정말 도는 쓰기까지 함께 버린다.
-        *spot |= rest.iter().any(|w| w == "-execdir" || w == "-okdir");
+        //
+        // **그리고 `-exec`·`-ok` 이 함께 선 줄에서는 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은
+        // 줄 하나에 한 값이고 [`exec_of`] 는 술어를 다 걷어 **한 글**로 이어, 두 자리가 한 줄에
+        // 서면 부른 자리에서 **정말 도는** 쓰기까지 함께 버린다:
+        // `find . -execdir true \; -exec sed -i s/a/b/ src/x.rs \;` 는 그 파일을 정말 고치는데
+        // 빈손으로 규칙 2 를 지나갔고, `-exec moai add x \;` 는 규칙 1 을 지나갔다. 그때는 안 적던
+        // 판으로 돌아간다 — `-execdir` 쪽을 여기 것으로 **잘못 막을** 뿐, 도는 쓰기를 잃지 않는다.
+        //
+        // **이 한 줄이 낱말로 선 철자도 막는다** — `any` 는 술어 자리가 아닌 낱말도 봐서,
+        // `find . -exec tee src/store.rs \; -name -execdir` 은 `-execdir` 이 `-name` 의 본보기일
+        // 뿐인데 그 한 낱말로 쓰기 축과 `moai` 축이 통째로 꺼졌다. 어느 find 줄에나 붙이면 되는
+        // 샛길이었다. 이제 남는 줄은 `-exec`·`-ok` 이 하나도 없는 줄뿐이고, 거기서 도는 술어는
+        // `-execdir`·`-okdir` 아니면 없다.
+        //
+        // **그 둘도 첫 칸의 것에는 부른 자리에서 돈다**(리뷰 moai-514e.doy) — `-execdir` 은 찾은
+        // 파일이 **있는** 디렉터리에서 도니, 찾기 시작한 자리에 바로 놓인 파일이 걸리면 그 자리가
+        // 곧 부른 자리다. 2026-09-23 에 쟀다: `find . -maxdepth 1 -name Cargo.toml -execdir tee
+        // src/store.rs \;` 는 여기의 `src/store.rs` 를 정말 만든다. 그래서 이 값은 "저 자리의
+        // 상대 경로" 를 재는 것이 아니라 **시작 자리를 안 보고 술어만 보는 어림**이다 — 잘못
+        // 막는 쪽을 접고 새는 쪽을 받은 2026-09-23 결정(moai-hktu)이 선 자리고, 되돌린다면
+        // 술어가 아니라 **시작 자리**(첫 피연산자가 이 저장소 밑인가)로 재는 쪽이다.
+        *spot |= rest.iter().any(|w| FIND_AWAY.contains(&w.as_str()))
+            && !rest.iter().any(|w| FIND_HERE.contains(&w.as_str()));
         return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find, args: Vec::new() });
     }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
@@ -3822,7 +3861,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     let mut dashed = usize::MAX;
     while let Some(word) = rest.get(n) {
         // **자리 인자를 다 먹었으면 옵션 읽기가 거기서 끝난다**(moai-hktu) — 자리 인자를 받는
-        // 감싸는 명령 넷은 getopt 를 `+` 로 불러 첫 피연산자에서 멈춘다. 그 뒤의 `-` 로 시작하는
+        // 래퍼(wrapper) 넷은 getopt 를 `+` 로 불러 첫 피연산자에서 멈춘다. 그 뒤의 `-` 로 시작하는
         // 낱말은 옵션이 아니라 **명령 이름**이고, 그런 이름은 없으니 아무것도 안 돈다. 2026-09-23 에
         // 넷을 다 쟀다: `flock <파일> -n -c '<글>'` 은 `failed to execute -n`, `timeout 5 -v echo`·
         // `taskset 1 -v echo`·`chrt -o 0 -v echo` 도 같은 말로 진다.
@@ -3838,7 +3877,13 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         //
         // 자리 인자가 없는 줄(env·sudo·su·watch…)은 `w.args` 가 0 이라 여기 안 온다 — 그쪽은
         // 첫 피연산자가 곧 명령 자리다.
-        if w.args > 0 && seen == w.args {
+        //
+        // **`+` 로 부르는 줄에서만이다**(`mixes`, 리뷰 moai-514e.doy) — 이 갈래가 서는 까닭은
+        // 자리 인자가 있다는 것이 아니라 **첫 피연산자에서 옵션 읽기가 끝난다**는 것이고, 그것을
+        // 재는 자는 이미 [`mixes`] 다. 지금은 자리 인자를 받는 넷이 다 [`Runs::Always`] 라 두 값이
+        // 같지만, 섞어 읽는 줄에 자리 인자가 생기는 날 `w.args > 0` 만 보면 그 줄의 뒤 옵션을
+        // 통째로 못 읽는다 — 진짜 getopt 는 그것을 permute 해서 읽는다.
+        if !mixes && w.args > 0 && seen == w.args {
             if hands.contains(&word.as_str()) {
                 need!(rest.get(n + 1));
                 return Some(Wrapped::Hands { at: n + 1, glued: None, text: w.text, args: Vec::new() });
@@ -3863,7 +3908,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 아무에게도 안 보였다. 그 견줌을 여기 따로 적던 판은 `--` 가 **자리 인자 뒤에** 선
             // 꼴(`flock <파일> -- -c '<글>'`)에서도 같은 글을 읽어, 이번엔 안 도는 글을 막았다 —
             // 고리 머리 한 자리에서만 보면 두 꼴이 갈린다.
-            if w.args > 0 {
+            //
+            // **여기도 `mixes` 를 함께 묻는다** — 안 물으면 섞어 읽는 줄에 자리 인자가 생기는 날
+            // 아래 `dashed`·`ops` 걷기를 건너뛰어, `--` 뒤의 피연산자를 아무도 안 읽는다.
+            if !mixes && w.args > 0 {
                 continue;
             }
             // **`--` 뒤는 남김없이 피연산자다** — su·runuser 는 사용자 뒤의 그것을 대상 셸의 argv 로
@@ -3960,6 +4008,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             //
             // **flock 이 제 손으로 보는 것은 글자째 그 낱말 하나다** — `--command=<글>` 처럼 값을
             // 붙인 꼴은 그 견줌에 안 맞아 안 돈다. 멈추는 쪽이 그 답에 가깝다.
+            //
+            // **다만 그 꼴을 지금 답하는 자는 고리 머리다**(moai-hktu 의 `!mixes && w.args > 0 &&
+            // seen == w.args`, 리뷰 moai-514e.doy) — 자리 인자를 다 먹은 자리의 `-` 낱말은 거기서
+            // 끊긴다. 그러니 여기 오는 `w.args > 0` 은 늘 `seen < w.args` 고, 뒤 갈래는 섞어 읽는
+            // 줄에 자리 인자가 생기는 날을 위해 선다.
             if seen < w.args || (w.args > 0 && glued.is_some()) {
                 return Some(Wrapped::Stops);
             }
@@ -3997,11 +4050,50 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             continue;
         }
         // `--이름=값` 은 값을 달고 있어 한 낱말이다 — 모르는 이름이어도 명령 자리를 안 흔든다.
+        //
+        // **다만 그 이름을 모른다고 적는다**(`weird`, 리뷰 moai-514e.doy) — 자리를 안 흔드는 것과
+        // 그 줄이 도는 것은 다른 말이다. 바로 아래 맨 `--이름` 갈래는 모르는 이름에서 멈추는데
+        // 여기는 그냥 넘겨, **같은 옵션의 두 철자가 반대 답**을 냈다. 2026-09-23 에 쟀다:
+        // `su --zzz=1 남 -c '<글>'` 은 `unrecognized option '--zzz=1'` 로 아무것도 안 돌리는데,
+        // 훅은 그 `-c` 의 글을 읽어 `su --zzz=1 남 -c 'moai mv <id> in_progress --from todo' &&
+        // <쓰기>` 의 집기를 세고 뒤의 빈손 쓰기를 풀어 줬다. 표가 덜 찬 줄에서는 여기서도 그냥
+        // 넘어가니([`Wrapper::whole`]) 답이 안 바뀐다.
+        //
+        // **줄여 쓴 이름도 제 것이다** — getopt_long 은 **모호하지 않은 앞머리**를 그 이름으로 받는다.
+        // 2026-09-23 에 쟀다: `su --sh=/bin/bash 남 -c '<글>'` 도 `su --gro=root …` 도
+        // `runuser --us=남 …` 도 정말 돈다(암호를 묻는 데까지 간다). 글자째 같은 이름만 세던 판은
+        // 그것을 모르는 이름으로 읽어 `Stops` 를 냈고, `whole` 인 줄에서 그것은 **막는 쪽이 아니라
+        // 새는 쪽**이다 — `-c` 의 글을 아무에게도 안 내 정말 도는 쓰기가 통째로 안 보였다.
+        //
+        // **모호한 앞머리는 거꾸로 선다** — `su --s=/bin/bash` 는 `--session-command`·`--shell`·
+        // `--supp-group` 셋에 걸려 `is ambiguous` 로 아무것도 안 돈다(같은 날 쟀다). 그래서 딱 하나에
+        // 걸릴 때만 아는 이름이고, 글자째 맞은 것이 있으면 그것이 이긴다.
+        //
+        // **이 줄의 긴 이름을 다 훑는다** — 값을 따로 받는 `long` 만 보던 판은 값을 **붙여서만** 받는
+        // `free` 의 이름(`env --block-signal=INT`)을 모르는 이름으로 읽었다. 지금은 `whole` 이 거짓인
+        // 줄이라 안 읽히지만, 그 줄에 `whole` 을 세우는 날 정당한 `--이름=값` 이 통째로 안 보인다.
         if word.starts_with("--") && word.contains('=') {
             saw |= flags.iter().any(|f| word.strip_prefix(f).is_some_and(|r| r.starts_with('=')));
             if let Some(v) = w.shell.iter().find_map(|f| word.strip_prefix(*f).filter(|r| r.starts_with('='))) {
                 prog = Some(v[1..].to_string());
             }
+            let name = word.split('=').next().unwrap_or(word);
+            let longs = || {
+                (w.long.iter())
+                    .chain(w.free)
+                    .chain(w.stops)
+                    .chain(w.elsewhere)
+                    .chain(w.chdir)
+                    .chain(w.hands)
+                    .chain(w.shell)
+                    .chain(PRINTS)
+                    .filter(|f| f.starts_with("--"))
+            };
+            // **세는 것은 이름이지 칸이 아니다** — `--shell` 은 `long` 과 `shell` 두 칸에 함께 서서,
+            // 걸린 **수**를 세던 판은 `su --sh=/bin/bash` 를 모호한 앞머리로 읽어 도로 막았다.
+            let mut hits = longs().filter(|f| f.starts_with(name));
+            let one = hits.next().is_some_and(|a| hits.all(|b| b == a));
+            weird |= !one && !longs().any(|f| *f == name);
             n += 1;
             continue;
         }
@@ -4013,11 +4105,14 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         }
         // **모르는 긴 옵션에서는 멈춘다** — 값을 따로 받는 것이면 그 값을 명령으로 읽는다.
         // `nice --10` 처럼 숫자만 붙은 것은 값을 안 받는다.
+        //
+        // **표가 다 찬 줄에서는 이 두 너그러움을 걷는다**([`Wrapper::whole`], 리뷰 moai-514e.doy) —
+        // [`COMMON`] 과 숫자 꼴은 "표에 안 적어도 넘겨 주는" 자리라, 표가 다 찼다고 적은 줄에서는
+        // 앞뒤가 안 맞는다. 2026-09-23 에 쟀다: `su --verbose 남 -c '<글>'` 은 `unrecognized
+        // option '--verbose'` 로 아무것도 안 돌리는데, 그 집기가 뒤의 빈손 쓰기를 풀어 줬다.
         if let Some(name) = word.strip_prefix("--") {
-            if !w.free.contains(&word.as_str())
-                && !COMMON.contains(&word.as_str())
-                && !name.chars().all(|c| c.is_ascii_digit())
-            {
+            let loose = !w.whole && (COMMON.contains(&word.as_str()) || name.chars().all(|c| c.is_ascii_digit()));
+            if !w.free.contains(&word.as_str()) && !loose {
                 return Some(Wrapped::Stops);
             }
             // **값 없는 긴 이름도 봤다고 적는다**(리뷰 moai-514e) — [`Runs`] 의 스위치가 값을 안
@@ -4075,6 +4170,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 // 자리 인자 앞의 글 스위치는 위와 같이 멈춘다 — flock 은 그 줄을 거절한다.
                 // **뭉치로 선 것도 같다**: flock 이 제 손으로 보는 것은 글자째 `-c` 한 낱말뿐이라
                 // `flock /tmp/l -nc '<글>'` 도 안 돈다. 여기서 멈추는 쪽이 그 답에 가깝다.
+                // (그 꼴을 지금 답하는 자도 고리 머리다 — 위 `glued` 줄과 같은 자리다.)
                 if seen < w.args || (w.args > 0 && word.len() > 2) {
                     return Some(Wrapped::Stops);
                 }
@@ -4174,7 +4270,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // (2026-09-23 에 쟀다).
     //
     // **표가 다 찬 줄에서만이다**([`Wrapper::whole`]) — 잣대를 표 전체로 넓히면 짧은 글자를 덜 적은
-    // 감싸는 명령(`env -i` 가 그 줄이다)에서 정당한 쓰기가 통째로 안 보인다. [`alien`] 쪽은 그
+    // 래퍼(`env -i` 가 그 줄이다)에서 정당한 쓰기가 통째로 안 보인다. [`alien`] 쪽은 그
     // 잣대 없이 그대로다: 그쪽이 닫는 것은 "argv 를 다시 짓는 자리" 하나라, 표를 덜 안 줄에서도
     // 지어내지 않는 쪽이 맞다.
     if weird && (alien || w.whole) {
@@ -8926,6 +9022,15 @@ mod tests {
             "find . -name '*.rs' -exec sed -i s/a/b/ src/x.rs \\;",
             "find . -exec echo x \\; -exec sed -i s/a/b/ src/x.rs \\;",
             "find . -type f -exec sed -i s/a/b/ src/x.rs +",
+            // **두 자리가 한 줄에 서면 안 적는다**(리뷰 moai-514e.doy) — `*spot` 은 줄 하나에 한
+            // 값이라, `-execdir` 하나로 부른 자리에서 **정말 도는** `-exec` 의 쓰기까지 버렸다.
+            "find . -execdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            "find . -okdir true \\; -exec sed -i s/a/b/ src/x.rs \\;",
+            // **술어 자리가 아닌 낱말은 자리를 안 옮긴다** — `-execdir` 이 `-name` 의 본보기일
+            // 뿐인데 그 한 낱말로 규칙 둘이 꺼져, 어느 find 줄에나 붙이면 되는 샛길이었다.
+            // (본보기가 술어 **앞**에 선 꼴은 [`exec_of`] 가 그것을 술어로 읽어 아직 못 본다 —
+            // 이 줄이 닫은 것과 다른 자리고, 이 에픽이 연 것도 아니다.)
+            "find . -exec sed -i s/a/b/ src/x.rs \\; -name -execdir",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "술어 안의 쓰기를 가렸다 — {cmd}\n{got:?}");
@@ -11788,7 +11893,7 @@ mod tests {
     /// `invalid option` 으로 진다. `runuser --help` 에 `-n` 이 없다.
     ///
     /// **잣대는 [`Wrapper::whole`] 이다** — 짧은 글자 표가 다 찬 줄에서만 이렇게 읽는다. 표
-    /// 전체로 넓히면 짧은 글자를 덜 적은 감싸는 명령에서 정당한 쓰기가 통째로 안 보인다.
+    /// 전체로 넓히면 짧은 글자를 덜 적은 래퍼(wrapper)에서 정당한 쓰기가 통째로 안 보인다.
     #[test]
     fn an_unknown_short_letter_ends_the_line_in_the_shell_branch_too() {
         let root = Path::new("/repo");
@@ -11797,6 +11902,15 @@ mod tests {
         for cmd in [
             "su -x 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
             "runuser -nu 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            // **긴 이름도 같다**(리뷰 moai-514e.doy) — 값을 붙인 꼴은 그냥 넘어가고 [`COMMON`] 은
+            // 표에 없어도 넘어가, 같은 옵션의 두 철자가 반대 답을 냈다. 2026-09-23 에 쟀다:
+            // `su --zzz=1 …` 도 `su --verbose …` 도 `unrecognized option` 으로 진다.
+            "su --zzz=1 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            "su --verbose 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            "runuser --zzz=1 -u 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            // **모호한 앞머리도 안 돈다** — 2026-09-23 에 쟀다: `su --s=/bin/bash` 는
+            // `--session-command`·`--shell`·`--supp-group` 셋에 걸려 `is ambiguous` 로 진다.
+            "su --s=/bin/bash 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
         ] {
             let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "안 도는 줄의 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
@@ -11805,22 +11919,61 @@ mod tests {
         for cmd in [
             "su -x 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
             "runuser -nu 남 -c 'tee /repo/src/x.rs'",
-            "su -zx 남 -c 'tmux kill-server'",
+            "su --zzz=1 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            "su --verbose 남 -c 'tee /repo/src/x.rs'",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
         }
+        // **규칙 4 도 그 글을 안 본다** — 안 도는 줄이라 맞지만, 재는 자리가 [`guard_writes`] 면
+        // 그 줄에 쓰기가 없어 무엇을 지우든 늘 통과한다(리뷰 moai-514e.doy). 자리를 안 묻는
+        // 규칙까지 끄는 것이 [`Wrapped::Stops`] 라, 짝을 함께 세워 표가 무너지면 붉어지게 둔다.
+        assert_eq!(
+            guard_shell(&[], &cfg(), &here(), root, root, "su -zx 남 -c 'tmux kill-server'"),
+            Decision::Pass,
+            "안 도는 줄이 규칙 4 에 걸렸다"
+        );
+        let got = guard_shell(&[], &cfg(), &here(), root, root, "su -m 남 -c 'tmux kill-server'");
+        assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 규칙 4 를 잃었다\n{got:?}");
         // **아는 글자는 그대로 지난다** — `su --help`·`runuser --help` 로 걷은 표다. 여기가
         // 무너지면 정당한 줄이 통째로 안 보인다.
         for cmd in [
             "su -m 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
             "su -pf 남 -c 'tee /repo/src/x.rs'",
+            // **이 줄은 글자만 맞다**(리뷰 moai-514e.doy) — 진짜 runuser 는 `-u` 와 `-c` 를 함께
+            // 못 쓴다. 2026-09-23 에 쟀다: `runuser -u nobody -c 'echo RAN'` 은 `options
+            // --{shell,fast,command,session-command,login} and --user are mutually exclusive` 로
+            // 아무것도 안 돌린다(root 인지 묻기 **전에** 걸린다). 이 표에는 "함께 못 서는 스위치"
+            // 어휘가 없어 [`Wrapper::whole`] 이 글자로 잴 수 있는 만큼만 잰다 — `runuser -u 남 -c
+            // 'moai mv <id> …' && <쓰기>` 는 아직 안 도는 집기를 세어 뒤의 빈손 쓰기를 풀어 준다.
             "runuser -u 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            // **값을 받는 긴 이름은 `=` 를 달고도 제 것이다**(`long`) — 여기가 무너지면 `-s` 가
+            // 댄 프로그램을 못 읽어 정당한 줄이 통째로 안 보인다.
+            "su --shell=/bin/bash 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            "su --whitelist-environment=FOO 남 -c 'tee /repo/src/x.rs'",
+            "runuser --user=남 -- sed -i s/a/b/ /repo/src/x.rs",
+            // **줄여 쓴 긴 이름도 그대로 지난다**(리뷰 moai-514e.doy) — getopt_long 은 모호하지
+            // 않은 앞머리를 그 이름으로 받는다. 2026-09-23 에 쟀다: 아래 셋 다 암호를 묻는 데까지
+            // 간다. 글자째 같은 이름만 세던 판은 여기서 `Stops` 를 내 도는 쓰기를 통째로 잃었다.
+            "su --sh=/bin/bash 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            "su --whit=FOO 남 -c 'tee /repo/src/x.rs'",
+            "runuser --whit=FOO 남 -c 'tee /repo/src/x.rs'",
+            // (`runuser --us=남 -- <쓰기>` 는 아직 못 본다 — 줄인 이름을 `saw` 와 `prog` 가
+            // 글자째 견줘 `-u` 를 못 알아본다. 이 줄이 연 자리가 아니라 그 둘의 자리다.)
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
         }
-        // **표가 덜 찬 감싸는 명령은 그대로 넘긴다**([`Wrapper::whole`] 이 거짓인 줄) — `env -i` 는
+        // **열두 글자를 하나씩 몬다**(리뷰 moai-514e.doy) — [`Wrapper::whole`] 이 서는 근거는
+        // "이 표가 su 의 짧은 글자를 다 안다" 하나이고, 그것을 지키던 것은 주석뿐이었다. 글자 하나가
+        // 표에서 빠지면 그 줄은 **막히는 것이 아니라 안 보이게** 된다 — `Stops` 가 `-c` 의 글을
+        // 아무에게도 안 낸다. `-c` 는 글 자체라 빼고, 값을 받는 넷은 제 값을 달아 몬다.
+        for flag in ["-m", "-p", "-f", "-P", "-l", "-s /bin/bash", "-w FOO", "-g root", "-G wheel"] {
+            let cmd = format!("su {flag} 남 -c 'tee /repo/src/x.rs'");
+            let got = guard_writes(&[], &cfg(), &here(), root, root, &cmd);
+            assert!(matches!(got, Decision::Deny(_)), "표에 선 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+        // **표가 덜 찬 래퍼는 그대로 넘긴다**([`Wrapper::whole`] 이 거짓인 줄) — `env -i` 는
         // 이 표에 없는 글자인데 정말 돈다.
         for cmd in ["env -i sed -i s/a/b/ /repo/src/x.rs", "env -iu HOME tee /repo/src/x.rs"] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -11828,7 +11981,7 @@ mod tests {
         }
     }
 
-    /// **자리 인자 뒤에서는 옵션 읽기가 끝난다**(moai-hktu) — 자리 인자를 받는 감싸는 명령 넷
+    /// **자리 인자 뒤에서는 옵션 읽기가 끝난다**(moai-hktu) — 자리 인자를 받는 래퍼(wrapper) 넷
     /// (`timeout`·`chrt`·`taskset`·`flock`)은 getopt 를 `+` 로 불러 첫 피연산자에서 멈춘다. 그 뒤의
     /// `-` 로 시작하는 낱말은 옵션이 아니라 **명령 이름**이고, 그런 이름은 없으니 아무것도 안 돈다.
     ///
