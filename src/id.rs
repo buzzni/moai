@@ -99,14 +99,28 @@ pub fn is_valid(id: &str) -> bool {
 /// `moai status` 가 `Unreadable rows` 만 말했다. 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일이
 /// 바로 그 판이고, 머지 드라이버는 그것을 보는데 쓰기 경로는 못 봤다.
 ///
-/// 두 단이다 — `serde_json::Value` 로 한 단 아래에서 읽고, 그것도 지면 [`scraped`] 가
-/// 머리에서 긁는다. 앞엣것이 본체와 같은 파서라 어긋날 자리가 없고, 뒤엣것은 이 도구가 제 손으로
-/// 쓰는 한 꼴만 읽는다.
+/// 두 단이다 — `serde_json::Value` 로 한 단 아래에서 읽고([`in_value`]), 그것도 지면 [`scraped`]
+/// 가 머리에서 긁는다. 앞엣것이 본체와 같은 파서라 어긋날 자리가 없고, 뒤엣것은 이 도구가 제
+/// 손으로 쓰는 한 꼴만 읽는다.
+///
+/// **두 단을 다 이름 붙여 둔 것은 부르는 쪽이 갈라서 쓰기 때문이다**(리뷰 moai-47yo.76c).
+/// `cmd::merge_driver::row` 는 `Value` 를 제가 이미 들고 있어(읽은 값을 [`crate::model::Issue`]
+/// 로 한 번 더 재 본다) 이 문을 통째로 못 부르는데, 윗단을 손으로 베껴 적으면 그 베낌이 곧
+/// 둘째 파서다 — moai-ijfy 가 없앤 그 갈림이 이름만 바꿔 돌아온다.
 pub fn id_of(line: &str) -> Option<String> {
     match serde_json::from_str::<serde_json::Value>(line) {
-        Ok(v) => v.get("id")?.as_str().map(str::to_string),
+        Ok(v) => in_value(&v).map(str::to_string),
         Err(_) => scraped(line),
     }
+}
+
+/// [`id_of`] 의 **윗단** — 이미 읽은 `Value` 가 쓰고 있는 id.
+///
+/// `Value` 를 손에 쥔 자리가 이것을 부른다(`cmd::merge_driver::row`). 한 줄짜리지만 자리마다
+/// 손으로 적으면 언젠가 한 곳이 갈리고, 갈린 그날 머지 드라이버가 짝지은 id 와 `moai status` 가
+/// 대는 id 가 달라진다.
+pub fn in_value(v: &serde_json::Value) -> Option<&str> {
+    v.get("id")?.as_str()
 }
 
 /// **JSON 이 깨진 줄의 머리에서 `id` 만 글자로 긁는다**(moai-47yo.q3o, 2026-09-23 사용자 결정).
@@ -144,22 +158,34 @@ pub fn id_of(line: &str) -> Option<String> {
 /// 안 한다 — 그런 줄은 `store::parse_issues` 도 못 읽는 줄로 세니 `moai status` 가 이미 치명으로
 /// 말한다.
 pub fn scraped(line: &str) -> Option<String> {
+    // **싼 자부터 잰다**(리뷰 moai-47yo.76c). 아래 넷은 모두 `그리고` 로 묶이니 차례를 바꿔도
+    // 답이 안 바뀌는데, 맨 아래 것만 줄 전체를 한 번 훑는다 — 머리가 이 꼴이 아닌 줄(엉킨 줄,
+    // `id` 가 첫 필드가 아닌 줄, 이슈가 아닌 줄)은 그 훑기에 닿기 전에 여기서 떨어진다.
+    let rest = line.trim_start().strip_prefix(r#"{"id":""#)?;
+    let (id, _) = rest.split_once('"')?;
+    // **긁은 것이 id 꼴이 아니면 안 받는다.** 긁기는 짐작이고, 받아들일 짐작은 이 도구가 제 손으로
+    // 짓는 꼴 하나다 — `Issue::validate` 가 쓰는 길목에서 그 꼴을 이미 요구하므로([`is_valid`]),
+    // 여기서 같은 자를 쓰는 것이 곧 "쓰는 꼴만 되읽는다" 이다. 줄이 엉켜 따옴표가 한참 뒤에야
+    // 나오면 긁힌 값이 몇 킬로바이트짜리 "id" 가 되는데, 본체를 재는 이 자가 그것을 막는다.
+    //
+    // **다만 [`is_valid`] 는 접두어를 안 본다**(리뷰 moai-47yo.76c) — 길이도 글자도 안 재어
+    // `"A"×300 + ESC + "zz-0001"` 같은 값이 지난다. 그 값은 이제 `LoadError::id` 를 지나
+    // `report` 의 `duplicate_id` 로, 곧 보드와 `status --json` 으로 나가므로 여기서 제어문자를
+    // 따로 막는다. 접두어가 제어문자를 담는 일은 이 도구가 짓는 꼴에 없어, 막아도 잃는 것이 없다.
+    // 남은 길이는 이 자리의 것이 아니다 — `Value` 로 읽히는 줄도 같은 길로 나가므로, 자른다면
+    // 내보내는 쪽에서 자른다.
+    //
+    // `\` 는 따로 막는다 — 접두어는 [`is_valid`] 가 글자를 안 보는 자리라 `a\b-0001` 이 지나는데,
+    // 이스케이프된 따옴표에서 잘린 값이 바로 그 꼴이다.
+    if id.contains('\\') || id.chars().any(char::is_control) || !is_valid(id) {
+        return None;
+    }
     // **통째로 선 값이 머리에 있는가.** `from_str` 은 "뒤에 글자가 남았다" 와 "줄이 먼저 끝났다"
     // 를 둘 다 탈로만 내어 못 가른다. 한 값만 읽어 보면 갈린다 — 읽히면 앞이 온전한 줄이다.
     if serde_json::Deserializer::from_str(line).into_iter::<serde_json::Value>().next().is_some_and(|v| v.is_ok()) {
         return None;
     }
-    let rest = line.trim_start().strip_prefix(r#"{"id":""#)?;
-    let (id, _) = rest.split_once('"')?;
-    // **긁은 것이 id 꼴이 아니면 안 받는다.** 긁기는 짐작이고, 받아들일 짐작은 이 도구가 제 손으로
-    // 짓는 꼴 하나다 — `Issue::validate` 가 쓰는 길목에서 그 꼴을 이미 요구하므로([`is_valid`]),
-    // 여기서 같은 자를 쓰는 것이 곧 "쓰는 꼴만 되읽는다" 이다. 이 한 줄이 길이와 글자를 함께
-    // 막는다: 줄이 엉켜 따옴표가 한참 뒤에야 나오면 긁힌 값이 몇 킬로바이트짜리 "id" 가 되어
-    // 머지 드라이버의 거절문과 `--json` 의 `conflicts` 에 그대로 실리고, 제어문자도 같은 길로 샌다.
-    //
-    // `\` 는 따로 막는다 — 접두어는 [`is_valid`] 가 글자를 안 보는 자리라 `a\b-0001` 이 지나는데,
-    // 이스케이프된 따옴표에서 잘린 값이 바로 그 꼴이다.
-    (!id.contains('\\') && is_valid(id)).then(|| id.to_string())
+    Some(id.to_string())
 }
 
 /// `argos-4aex.ae3` → `argos-4aex`. 최상위면 `None`.

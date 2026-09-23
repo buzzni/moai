@@ -192,7 +192,10 @@ pub struct LoadError {
     pub text: String,
     /// 그 줄이 쓰고 있는 id. **줄을 `Issue` 로 못 읽는 것과 그 안의 `id` 를
     /// 못 읽는 것은 다른 일이다** — 한 단 낮게(`serde_json::Value`) 읽으면
-    /// 대개 나온다. JSON 도 아닌 줄에서는 `None` 이고, 그때는 지어내지 않는다.
+    /// 대개 나오고, JSON 조차 아닌 줄도 **머리가 성하면 나온다**(moai-ijfy).
+    /// 읽는 자는 [`crate::id::id_of`] 하나고, 그 둘째 단이 머지 드라이버가
+    /// 짝짓는 자와 같은 자라 둘이 갈릴 자리가 없다. 둘 다 못 읽는 줄에서만
+    /// `None` 이고, 그때는 지어내지 않는다.
     pub id: Option<String>,
 }
 
