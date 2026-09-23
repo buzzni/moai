@@ -263,8 +263,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             {
                 eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
             }
-            let children: Vec<Issue> =
-                issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
+            // **자식을 고르는 자는 하나다**([`crate::report::children_of`]) — 그쪽이 차례까지
+            // 정한다(상세의 자식 줄은 목록 차례다). 여기서 따로 걸러 담던 때는 그 차례가 빠져
+            // 같은 에픽의 자식 줄이 `moai show` 와 `moai edit` 에서 다른 순서로 섰다(리뷰).
+            //
+            // **멤버는 여기서 안 뺀다.** `show` 는 뺀 줄을 멤버 칸이 받아 그리지만(`kin_of`)
+            // 이 화면에는 그 칸이 없어, 빼면 그 줄이 어느 자리에도 안 선다 — 가리는 것은
+            // 고침이 아니다. 둘을 맞추려면 이 화면에도 멤버 칸이 서야 한다.
+            let children: Vec<Issue> = crate::report::children_of(issues, &out.id).into_iter().cloned().collect();
             // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
             let near: Vec<&str> =
                 std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();

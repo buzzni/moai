@@ -334,10 +334,20 @@ fn bulk(
 /// **뿌리는 최상위 id 다**(moai-exh7). 멤버는 에픽의 자식 id 를 받고 제 `epic` 을 안 적으므로
 /// (`create_drafts`), 그 필드로 뿌리를 가르던 자는 멤버를 전부 뿌리로 읽는다.
 pub fn stood_on(made: &[Issue]) -> Option<&str> {
-    made.iter().find(|i| crate::id::parent_of(&i.id).is_none()).and_then(|i| i.milestone.as_deref())
+    made.iter().find(|i| is_root(i)).and_then(|i| i.milestone.as_deref())
 }
 
-/// 계획의 **뿌리**(제 에픽이 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
+/// 계획이 만든 줄 가운데 **뿌리인가** — id 밑에 부모가 없는 줄.
+///
+/// **한 자리에서 잰다**(리뷰). [`stood_on`] 이 마일스톤 줄을 고르는 자고 `idea::promote` 의
+/// `grown` 이 출처 노트를 붙일 줄을 고르는 자인데, 둘이 갈라지면 한쪽은 엉뚱한 릴리스를 찍고
+/// 한쪽은 같은 노트를 멤버마다 붙여 `이슈 0건` 이라 말한다 — 실제로 그랬고, 고치는 데 두 파일을
+/// 같이 손대야 했다. 컴파일러가 둘을 이름으로 매어 두는 것이 주석 한 줄보다 싸다.
+pub fn is_root(i: &Issue) -> bool {
+    crate::id::parent_of(&i.id).is_none()
+}
+
+/// 계획의 **뿌리**(id 부모가 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
 /// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다.
 ///
 /// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `idea promote` 가 담아 둔 생각의
@@ -378,6 +388,15 @@ pub fn create_drafts(
     by: &Actor,
     at: &str,
 ) -> R<(Vec<JournalEntry>, Vec<Issue>)> {
+    // **`into` 가 서면 계획에 `#` 줄이 없다**([`draft::Shape::Members`]). 어긴 채로 오면 그 `#` 줄이
+    // `into` 의 자식 id 를 받아 에픽이 에픽 밑에 서고, 뿌리가 아니게 되어 마일스톤과 본문을 잃는다 —
+    // 예전에는 `epic` 필드가 틀리는 데서 그쳐 `moai edit -e` 로 되돌렸지만, 이제는 id 에 박히고
+    // id 는 안 고친다(moai-sfza). 지키는 자가 다른 파일 한 줄(`cmd::idea` 의 `Shape` 고르기)뿐이라
+    // 여기에 못을 박는다.
+    debug_assert!(
+        into.is_none() || drafts.iter().all(|d| d.kind != Kind::Epic),
+        "선 에픽에 펼치는 계획에 `#` 줄이 섰다 — Shape::Members 가 막았어야 한다"
+    );
     let mut taken = taken_ids(issues, reserved);
     let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
     let mut entries = Vec::new();
@@ -389,13 +408,16 @@ pub fn create_drafts(
         // 이 초안이 들 에픽 — 초안이 가리킨 `#` 줄(차례 번호를 방금 만든 id 로 바꾼다)이거나,
         // 이미 선 에픽(`into`, `Shape::Members`)이다. 닫힌 이름을 `at` 으로 두면 시각을 담은
         // 인자 `at` 을 가려, 같은 줄에서 같은 이름이 두 가지를 뜻한다.
-        let under: Option<String> = d.epic.map(|nth| ids[nth].clone()).or_else(|| into.map(str::to_string));
+        let under: Option<&str> = d.epic.map(|nth| ids[nth].as_str()).or(into);
+        // **판정은 빌린 자리에서 낸다** — `under` 는 `ids` 를 빌리고 그 빌림은 아래 `ids.push`
+        // 에서 끝나므로, 뿌리인가를 여기서 내어 들고 간다. 베끼지 않는 까닭이기도 하다.
+        let root = under.is_none();
         let seed = crate::id::seed(&format!("{n}{}", d.title));
         // **멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
         // 리뷰든 한 주제이기 때문이다. 만드는 자는 이미 있었고(`id::generate_child`), 계획을
         // 세우는 이 길만 그것을 안 불렀다 — `--parent <에픽>` 으로 세우는 리뷰 이슈는 처음부터
         // 자식이었다. **옛 줄의 id 는 안 건드린다**: 새로 펼치는 계획만 이 모양을 받는다.
-        let id = match under.as_deref() {
+        let id = match under {
             Some(p) => crate::id::generate_child(p, &taken, &seed),
             None => crate::id::generate(&cfg.prefix, &taken, &seed),
         };
@@ -412,7 +434,7 @@ pub fn create_drafts(
         //
         // **뿌리는 `under` 가 없는 줄이다** — 만든 줄의 `epic` 으로 재던 때는 이 필드를 비우는
         // 순간 멤버가 전부 뿌리로 읽혀, 마일스톤과 본문이 줄마다 한 벌씩 섰다.
-        if under.is_none() {
+        if root {
             // **뿌리에만 적는다**(moai-xoyg·moai-07v1). 멤버는 이 뿌리에서 물려받으니 여기
             // 적으면 같은 값이 줄마다 한 벌씩 서고, 에픽을 옮기는 날 그 줄들이 옛 자리에 남는다.
             issue.milestone = rooted.milestone.map(str::to_string);

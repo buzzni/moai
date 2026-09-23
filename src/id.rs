@@ -10,7 +10,10 @@
 //! | 최상위 | `argos-4aex` |
 //! | 자식 | `argos-4aex.ae3`, `argos-4aex.ae3.b3e` (몇 단이든) |
 //!
-//! **점은 부모-자식 파생 관계만 뜻한다.** 에픽·마일스톤 소속은 필드다.
+//! **점은 부모-자식 관계다.** 그 위에 소속이 얹힌다 — 부모가 에픽이면 그 에픽이 자식의
+//! 소속이고(moai-9t3l), 계획이 세우는 멤버는 그래서 `epic` 을 안 적는다(moai-exh7,
+//! `cmd::add::create_drafts`). 읽는 자는 `report::groups` 하나고, 제 `epic` 을 적은 줄은
+//! 그것이 이긴다 — 옛 평평한 멤버가 그 모양이다. 마일스톤 소속은 여전히 필드다.
 
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};

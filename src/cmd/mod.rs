@@ -487,6 +487,12 @@ pub struct Row<'a> {
     ///
     /// 없을 수 *있는* 키(`epic`·`milestone`·`deferred_at`·`assignee`)는 여기 안 든다 — 그쪽은 키가
     /// 없다는 것이 곧 뜻이다(moai-fqnr). 이 둘은 없을 수가 없다.
+    ///
+    /// **`epic` 은 그 약속이 반쪽이다**(moai-exh7 뒤). 계획이 세우는 멤버는 소속을 id 에 지고
+    /// `epic` 을 안 적으므로, 이 줄에서 키가 없다는 것은 "에픽이 없다" 가 아니라 "여기에는 안
+    /// 적혔다" 다 — 답은 `report::groups` 가 안다. `prime --json` 은 그것을 풀어 내고
+    /// (`cmd::prime::Brief`) 이쪽은 아직 안 낸다. 둘을 맞추려면 `derived_status` 처럼 여기에
+    /// 곁들이는 것이 길이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]

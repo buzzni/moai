@@ -631,6 +631,11 @@ promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
 lists it under `members` and `moai show -e <epic>` picks it up. Rows created
 before keep the ids they have: nothing is ever relabelled.
 
+**An id cannot move, so such a member cannot leave its epic.** `moai edit
+<member> -e none` says so and changes nothing; `-e <another epic>` does move it,
+and the id it keeps still reads `<first epic>.<body>`. Aim a plan before you
+unfold it — for a member that has to stand somewhere else, create it there.
+
 **A group's column is read from its members.** Do not `moai mv` an epic or a
 milestone — pick up one member and it stands `in_progress`, finish them all and it
 stands `done`, by itself. To give up on a group while members are left, `moai defer`

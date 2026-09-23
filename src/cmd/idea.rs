@@ -224,7 +224,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
             // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
             //
-            // 뿌리로 선 것(제 에픽이 없는 것)이 펼친 계획의 머리다. **한 번만
+            // 뿌리로 선 것(id 부모가 없는 것)이 펼친 계획의 머리다. **한 번만
             // 고른다** — 두 번 고르면 규칙이 둘이 되고, 갈라진 날 저널의 두 줄이
             // 서로 다른 것을 가리킨다.
             //
@@ -233,12 +233,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             //
             // **뿌리는 최상위 id 다**(moai-exh7) — 멤버는 에픽의 자식 id 를 받고 제 `epic` 을
             // 안 적으므로(`create_drafts`), 그 필드로 가르던 자는 멤버까지 머리로 읽어 같은
-            // 노트를 줄마다 붙이고 `이슈 0건` 이라 말한다. 고르는 자는 `add::stood_on` 과 같다.
-            let grown: Vec<String> = made
-                .iter()
-                .filter(|i| into.is_some() || crate::id::parent_of(&i.id).is_none())
-                .map(|i| i.id.clone())
-                .collect();
+            // 노트를 줄마다 붙이고 `이슈 0건` 이라 말한다. 재는 자는 `add::stood_on` 과
+            // **한 함수**다([`crate::cmd::add::is_root`]) — 말로만 같다고 적어 두면 갈라진다.
+            let grown: Vec<String> =
+                made.iter().filter(|i| into.is_some() || crate::cmd::add::is_root(i)).map(|i| i.id.clone()).collect();
             // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
             // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
             // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴

@@ -146,6 +146,13 @@ mod git_leaks;
 #[allow(dead_code)]
 mod scratch;
 
+// id 의 모양 — 계획이 세우는 멤버가 에픽의 자식 id 를 받는지 재는 시험이 부모를 물어야 하는데,
+// 그 규칙을 여기 베끼면 `id::parent_of` 가 바뀌는 날 시험만 옛 모양에 대고 푸르게 선다. `git_leaks`
+// ·`scratch` 와 같은 까닭이고, 이 파일은 std 밖을 안 보므로 `#[path]` 하나로 선다.
+#[path = "../src/id.rs"]
+#[allow(dead_code)]
+mod id;
+
 /// 시험이 부르는 moai 한 벌. **사람·시계·색을 한 자리에서 준다**(moai-uu47).
 ///
 /// 이 세 줄이 여덟 군데에 베껴져 있었다. 베낀 자리는 조용히 갈라진다 — `hook_in` 은 사람과
@@ -1524,25 +1531,40 @@ fn field(json: &str, key: &str) -> String {
     rest[..rest.find('"').unwrap()].to_string()
 }
 
-/// `argos-4aex.ae3` → `argos-4aex`. 시험은 의존성이 없어 [`crate::id::parent_of`] 를 못 부른다 —
-/// 모양은 `src/id.rs` 가 정하고 여기서는 그 모양대로 읽기만 한다.
-fn parent_in(id: &str) -> Option<&str> {
-    id.rsplit_once('.').map(|(head, _)| head)
-}
-
-/// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 id 만 든 것. 없으면 `None` 이고,
+/// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 **id 만 든** 것. 없으면 `None` 이고,
 /// **빈 배열과 없는 키는 다르다**(AGENTS.md).
+///
+/// 객체가 든 배열(`journal`·`commits`)에는 못 쓴다 — 첫 `]` 에서 끊고 따옴표로 안 싸인 조각을
+/// 만나면 **소리 내어 죽는다**. 말없이 버리면 못 읽은 배열이 빈 배열로 둔갑해, `commits` 와
+/// `commits_error` 를 가른 것과 같은 것을 시험이 못 가른다(리뷰).
 fn list_in(json: &str, key: &str) -> Option<Vec<String>> {
     let at = json.find(&format!("\"{key}\":["))?;
     let rest = &json[at + key.len() + 4..];
     let inside = &rest[..rest.find(']').expect("닫히지 않은 배열")];
-    Some(inside.split(',').filter_map(|s| s.trim().strip_prefix('"')?.strip_suffix('"')).map(str::to_string).collect())
+    let read = |s: &str| {
+        let t = s.trim();
+        t.strip_prefix('"')
+            .and_then(|t| t.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("{key} 는 id 만 든 배열이 아니다 — {t}"))
+            .to_string()
+    };
+    Some(inside.split(',').filter(|s| !s.trim().is_empty()).map(read).collect())
 }
 
-/// 그 글에 선 `"id":"…"` 전부. 목록 `--json` 은 배열 하나를 **한 줄**로 내므로 줄마다 하나씩
-/// 뽑는 [`field`] 로는 첫 줄만 읽힌다.
+/// 그 글에 선 줄머리 `{"id":"…"` 전부. 목록 `--json` 은 배열 하나를 **한 줄**로 내므로 줄마다
+/// 하나씩 뽑는 [`field`] 로는 첫 줄만 읽힌다.
+///
+/// **줄이 여는 자리에서만 센다** — 보존된 모르는 필드(`Issue::rest`)가 제 안에 `"id"` 를 들 수
+/// 있어, 아무 데서나 세면 아무도 안 만든 id 가 목록에 낀다(리뷰).
 fn ids_in(json: &str) -> Vec<String> {
-    json.match_indices(r#""id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+    json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+}
+
+/// `text` 안에 그 id 로 선 줄이 몇인가. **id 는 제 자식 id 의 앞부분이기도 하다** —
+/// `argos-x` 는 `argos-x.aa1` 안에도 들어 있어, 그냥 세면 자식 하나가 부모를 두 번 선 것으로
+/// 만든다. 뒤에 점이 안 붙은 것만 그 줄로 센다.
+fn drawn(text: &str, id: &str) -> usize {
+    text.match_indices(id).filter(|(at, _)| !text[at + id.len()..].starts_with('.')).count()
 }
 
 /// 의존성 없이 하는 최소 검사 — 값 하나고, 한 줄이고, 이스케이프가 없다.
@@ -6251,11 +6273,8 @@ fn the_tree_shows_every_issue_exactly_once() {
     ok(s.path(), &["edit", &wrong, "-e", &member]);
 
     let tree = ok(s.path(), &["show", "--tree", "--all"]);
-    // **id 가 자식 id 의 앞부분이기도 하다** — `argos-x` 는 `argos-x.aa1` 안에도
-    // 들어 있다. 뒤에 점이 붙지 않은 것만 그 줄로 센다.
-    let times = |id: &str| tree.match_indices(id).filter(|(at, _)| !tree[at + id.len()..].starts_with('.')).count();
     for id in [&ga, &na, &member, &child, &inherits, &loose, &dangling, &wrong] {
-        let n = times(id);
+        let n = drawn(&tree, id);
         assert_eq!(n, 1, "{id} 가 트리에 {n}번 나온다\n{tree}");
     }
 }
@@ -8242,7 +8261,7 @@ fn promote_can_pour_into_a_standing_epic() {
     // **소속은 id 하나에 선다**(moai-s8go·moai-exh7) — 멤버는 에픽의 자식 id 를 받고 `epic` 은
     // 안 적는다. 물려주는 자는 `report::groups` 고, 그것을 읽는 자리가 아래의 `members` 다.
     let mid = field(member, "id");
-    assert_eq!(parent_in(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
+    assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
     assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
     let seen = ok(s.path(), &["show", &epic, "--json"]);
     assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
@@ -8266,22 +8285,20 @@ fn promote_can_pour_into_a_standing_epic() {
 fn a_plans_members_hang_under_the_epic_by_id() {
     let s = init("planchild");
     let stone = ok(s.path(), &["milestone", "add", "v9", "-q"]).trim().to_string();
-    let out = from_stdin(
-        s.path(),
-        &["add", "--from", "-", "--milestone", &stone],
-        "# 새 에픽\n- [p1] 첫 일\n- 둘째 일\n",
-    );
+    let out =
+        from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], "# 새 에픽\n- [p1] 첫 일\n- 둘째 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let file = issues(s.path());
-    let line_with = |t: &str| file.lines().find(|l| l.contains(t)).unwrap_or_else(|| panic!("{t} 줄이 없다")).to_string();
+    let line_with =
+        |t: &str| file.lines().find(|l| l.contains(t)).unwrap_or_else(|| panic!("{t} 줄이 없다")).to_string();
     let epic = field(&line_with("새 에픽"), "id");
     // 뿌리는 최상위 id 고, 마일스톤은 거기에만 적힌다.
-    assert_eq!(parent_in(&epic), None, "에픽이 자식으로 섰다");
+    assert_eq!(id::parent_of(&epic), None, "에픽이 자식으로 섰다");
     let mut want: Vec<String> = Vec::new();
     for title in ["첫 일", "둘째 일"] {
         let line = line_with(title);
         let mid = field(&line, "id");
-        assert_eq!(parent_in(&mid), Some(epic.as_str()), "{title} 이 에픽의 자식이 아니다 — {line}");
+        assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "{title} 이 에픽의 자식이 아니다 — {line}");
         assert!(!line.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {line}");
         assert!(!line.contains(r#""milestone":"#), "멤버가 마일스톤을 제 몸에 적었다 — {line}");
         want.push(mid);
@@ -8300,8 +8317,15 @@ fn a_plans_members_hang_under_the_epic_by_id() {
     for mid in &want {
         assert!(by_stone.contains(&format!(r#""id":"{mid}""#)), "{mid} 이 릴리스에 안 섰다 — {by_stone}");
     }
+    // **상세도 그 소속을 댄다**(리뷰). 적힌 필드만 보던 때는 이 줄이 통째로 빠져, `moai ready` 와
+    // 목록은 에픽을 대는데 id 로 콕 집어 펼친 화면만 입을 다물었다 — 규약이 "왜 그렇게 정했나" 를
+    // 물으라고 보내는 자리가 거기다.
+    // **에픽 id 는 제 멤버 id 의 앞부분이기도 하다** — 그냥 `contains` 로 재면 멤버가 제 id 를
+    // 찍는 것만으로 푸르게 선다. 뒤에 점이 안 붙은 자리(`drawn`)와 에픽 제목으로 잰다.
+    let detail = ok(s.path(), &["show", &want[0]]);
+    assert_eq!(drawn(&detail, &epic), 1, "멤버 상세가 제 에픽을 안 댄다 — {detail}");
+    assert!(detail.contains("새 에픽"), "에픽 제목이 안 섰다 — {detail}");
 }
-
 
 /// **옛 줄의 id 는 안 바꾼다**(moai-sfza) — 옛 moai 는 머지가 낸 중복 id 를 relabel 하고 영구
 /// 별칭을 들다가 죽었다. 새로 펼치는 계획만 자식 id 를 받고, 이미 선 멤버는 그 자리 그대로다.
@@ -8323,7 +8347,7 @@ fn old_flat_members_keep_their_ids_beside_new_child_members() {
     assert!(was.contains(&format!(r#""epic":"{epic}""#)), "옛 멤버의 소속을 건드렸다 — {was}");
     let file = issues(s.path());
     let fresh = field(file.lines().find(|l| l.contains("새 멤버")).expect("새 멤버가 안 섰다"), "id");
-    assert_eq!(parent_in(&fresh), Some(epic.as_str()), "새 멤버가 자식이 아니다");
+    assert_eq!(id::parent_of(&fresh), Some(epic.as_str()), "새 멤버가 자식이 아니다");
 
     let mut want = vec![flat.clone(), fresh.clone()];
     want.sort();
@@ -8336,12 +8360,12 @@ fn old_flat_members_keep_their_ids_beside_new_child_members() {
     let text = ok(s.path(), &["show", &epic]);
     assert!(text.contains("0/2"), "멤버 셈이 둘을 같이 안 셌다 — {text}");
     for m in &want {
-        assert_eq!(text.matches(m.as_str()).count(), 1, "{m} 이 상세에 두 번 섰다 — {text}");
+        assert_eq!(drawn(&text, m), 1, "{m} 이 상세에 두 번 섰다 — {text}");
     }
     // 트리도 한 번씩이다 — 자리를 정하는 자(`nav`)는 자식 멤버를 제 에픽 밑에 둔다.
     let tree = ok(s.path(), &["show", "--tree"]);
     for m in &want {
-        assert_eq!(tree.matches(m.as_str()).count(), 1, "{m} 이 트리에 두 번 섰다 — {tree}");
+        assert_eq!(drawn(&tree, m), 1, "{m} 이 트리에 두 번 섰다 — {tree}");
     }
 }
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
