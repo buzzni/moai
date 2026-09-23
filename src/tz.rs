@@ -73,6 +73,21 @@ impl Zone {
         &self.name
     }
 
+    /// 내내 같은 만큼 더하는 시간대 — **시험만 든다**(moai-h2th).
+    ///
+    /// [`Zone::load`] 는 기계의 tzdb 를 보므로, 시간대를 재는 시험이 그것으로 서면 zoneinfo 없는
+    /// 기계에서 조용히 아무것도 안 재게 된다(`if let Ok(seoul)` 로 통째로 건너뛴다). 재려는 것이
+    /// "옮긴 뒤의 답" 이지 "tzdb 를 읽는 법" 이 아닌 자리에서는 자료 없이 옮기는 자가 낫다.
+    /// 여름 시간이 없는 자리(`Asia/Seoul` 이 그렇다)는 이 꼴이 실제 자료와 같은 답을 낸다.
+    /// **0 은 안 받는다**(리뷰) — [`Zone::is_utc`] 가 `shifts` 와 `before` 만 보므로 `fixed(.., 0)`
+    /// 은 이름이 무엇이든 UTC 고, [`Zone::shift`] 가 그 자리에서 되돌아간다. 시간대를 재려고 쓴
+    /// 시험이 그런 시간대를 들면 아무것도 안 재면서 푸르게 지나간다.
+    #[cfg(test)]
+    pub fn fixed(name: &str, secs: i32) -> Zone {
+        assert_ne!(secs, 0, "옮기지 않는 시간대로는 옮긴 답을 못 잰다 — UTC 는 Zone::utc 다");
+        Zone { name: name.to_string(), shifts: Vec::new(), before: secs }
+    }
+
     /// UTC 인가 — 화면이 이것으로 "그대로 둔다" 를 가른다.
     pub fn is_utc(&self) -> bool {
         self.shifts.is_empty() && self.before == 0
@@ -206,7 +221,7 @@ fn env_name() -> Option<String> {
 /// 그대로 잘라 내려 하면 어느 접두어와도 안 맞아 이름을 못 얻고, 그 기계에서는 화면이 UTC 로
 /// 서면서 매 명령에 "시스템이 제 시간대를 안 댄다" 가 붙는다 — 이 기능이 고치려던 바로 그 자리다.
 ///
-/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다([`crate::store::lexical`]). 물어야 하는
+/// **접는 것은 글자로만 한다** — 파일 시스템에 안 묻는다([`crate::path::lexical`]). 물어야 하는
 /// 자리(링크의 링크, 링크인 tzdb 디렉터리)는 부르는 쪽이 `canonicalize` 로 한 번 더 댄다.
 fn name_under(at: &Path, dir: &Path) -> Option<String> {
     // **절대도 접는다**(리뷰). 한쪽만 접던 판은 `TZ=/usr/share/zoneinfo/../zoneinfo/Asia/Seoul`
@@ -214,9 +229,9 @@ fn name_under(at: &Path, dir: &Path) -> Option<String> {
     // `safe_join` 이 `..` 을 막아 그 이름은 못 읽히고, 그 기계는 UTC 로 서면서 매 명령에 "이
     // 시간대를 모른다" 를 단다. 이 함수가 고치려던 바로 그 자리다.
     let full = match at.is_absolute() {
-        true => crate::store::lexical(at),
+        true => crate::path::lexical(at),
         // `/etc/localtime` 의 링크라 기준은 `/etc` 다.
-        false => crate::store::lexical(&Path::new("/etc").join(at)),
+        false => crate::path::lexical(&Path::new("/etc").join(at)),
     };
     let name = full.strip_prefix(dir).ok()?.to_str()?;
     (!name.is_empty()).then(|| name.to_string())

@@ -705,7 +705,7 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
 
 /// 뿌리 파일을 갈아 끼울 임시 파일의 자리 — **`.moai/`** 다(moai-3akx, 2026-09-18 사용자 결정).
 ///
-/// 옆자리에 두면 쓰다 죽은 `init` 이 `AGENTS.md.tmp.<pid>` 를 저장소 뿌리에 남기고, 심는
+/// 옆자리에 두면 쓰다 죽은 `init` 이 `AGENTS.md.tmp.…` 를 저장소 뿌리에 남기고, 심는
 /// `.gitignore` 블록은 `.moai/*.tmp.*` 만 덮는다. 규칙을 더하는 길은 버렸다 — 이미 심긴
 /// 저장소마다 "규칙이 빠졌다" 알림이 새로 선다. `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다.
 ///
@@ -1495,7 +1495,7 @@ mod tests {
     }
 
     /// **뿌리 파일의 임시 파일은 `.moai/` 에 선다**(moai-3akx). 옆자리에 서면 쓰다 죽은 `init` 이
-    /// `AGENTS.md.tmp.<pid>` 를 뿌리에 남기고 심는 `.gitignore` 는 그것을 안 덮는다. 그 자리에서 실제로
+    /// `AGENTS.md.tmp.…` 를 뿌리에 남기고 심는 `.gitignore` 는 그것을 안 덮는다. 그 자리에서 실제로
     /// 써 보고, 쓴 뒤 `.moai/` 에도 뿌리에도 찌꺼기가 없는지 본다.
     #[test]
     fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
@@ -1506,7 +1506,7 @@ mod tests {
         assert_eq!(tmp_dir(&agents), s.join(".moai"));
         // **정말 `.moai/` 를 거치는지** 옆자리를 막아 두고 본다 — 옆에 쓰는 `plant` 도 성공하면 둘 다
         // 찌꺼기를 안 남겨 아래의 단언만으로는 못 가른다. 막은 자리는 디렉터리라 파일을 못 만든다.
-        let beside = s.join(format!("AGENTS.md.tmp.{}", std::process::id()));
+        let beside = s.join(crate::store::tmp_name("AGENTS.md"));
         std::fs::create_dir(&beside).unwrap();
         let wrote = plant(&agents, "글\n");
         std::fs::remove_dir(&beside).unwrap();

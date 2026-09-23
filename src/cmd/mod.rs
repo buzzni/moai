@@ -89,7 +89,26 @@ impl Ctx {
     /// **못 풀어도 막지 않는다** — UTC 로 떨어지고 까닭은 [`Ctx::zone_trouble`] 이 든다
     /// (moai-77ap). 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
     ///
-    /// **말과 같은 결로 늦게 읽는다** — 시각을 그리는 명령만 이 값을 든다.
+    /// **말과 같은 결로 늦게 읽는다** — 이 값을 드는 명령만 tzdb 를 만진다.
+    ///
+    /// **시각을 그리는 명령만이 아니다**(moai-h2th). 기한 판정이 읽는 사람의 달로 서면서
+    /// `report::status` 를 부르는 쪽이 모두 이 값을 든다 — `hook` 처럼 시각을 한 줄도 안 그리는
+    /// 명령이 거기 든다. 그 대가로 zoneinfo 없는 기계에서는 그 명령들도 [`Ctx::zone_trouble`]
+    /// 한 줄을 stderr 에 낸다. 막지 않고 종료 코드도 그대로다.
+    ///
+    /// **그 줄을 지울지 재 보고 그대로 두었다**(moai-yz4j). 둘을 갈라 봤다.
+    ///
+    /// - **훅은 이 값을 옳게 든다.** 보드(`UserPromptSubmit`)는 기한 경고를 **그리고**,
+    ///   `SessionStart`·`Stop` 의 기준선은 그 경고까지 **센 수**로 세션을 붙든다
+    ///   ([`crate::report::StatusReport::judged`] 가 `warnings` 에 접어 넣는 그것이다). 시간대를
+    ///   빼면 자정을 넘긴 기한이 경고에서 빠져, 붙들 판을 안 붙든다
+    /// - **훅의 stderr 는 아무도 안 읽는다**(2026-09-23 측정, moai-j4ie 가 `skill::command` 에
+    ///   표로 적어 둔 그 측정이다) — 종료 0 이든 1 이든 `claude` 의 스트림에 안 서고 `--debug`
+    ///   로도 안 선다. 그러니 이 줄이 훅에서 내는 값은 `hook_response` 에 적히는 몇 바이트고,
+    ///   그것을 접으려고 "이 판이 훅인가" 를 읽는 자를 `main` 밖에 하나 더 두지 않는다
+    ///
+    /// **`project ls` 는 아예 안 든다** — 그쪽은 `counts` 만 쓰고 시간대가 닿는 셈은 기한 판정
+    /// 하나뿐이라, [`crate::report::status_unjudged`] 로 세면 답이 같다(`cmd::project::state`).
     pub fn zone(&self) -> &crate::tz::Zone {
         &self.zone.get_or_init(crate::tz::Zone::system).0
     }
@@ -126,16 +145,34 @@ pub fn clearable(v: &str) -> Option<String> {
     (v != "none").then(|| v.to_string())
 }
 
-/// **있는 파일이고 실행 비트가 섰는가.** 재는 것은 딱 그것이다.
+/// **있는 파일이고 내가 그것을 돌릴 수 있는가.** 재는 것은 딱 그것이다.
 ///
-/// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 하고,
-/// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 한다.
+/// **`is_file` 만 보던 판은 거짓말을 한다**(`skill`): 실행 권한이 빠진 파일을 "있다" 고 했고,
+/// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.
 ///
-/// **다만 "내가 돌릴 수 있는가" 는 아니다.** `mode & 0o111` 은 "아무나 돌릴 수 있는가" 고,
-/// 남의 소유 `0o700` 이나 `noexec` 에 얹힌 파일은 여기를 지나는데 껍데기는 126 을 낸다
-/// (`merge_driver::probe` 가 적어 둔 그대로다). 표준 라이브러리에 `access(X_OK)` 가 없어 실제로
-/// 재려면 불러 봐야 하고, 그것이 값어치 있는 자리(`.git/config` 에 심는 값)는
-/// [`merge_driver`](crate::cmd::merge_driver) 가 `--help` 를 불러 따로 잰다.
+/// **"내가 돌릴 수 있는가" 로 잰다**(moai-dhx9, 2026-09-23 사용자 결정). 한때 `mode & 0o111` 만
+/// 보았는데 그것은 "아무나 돌릴 수 있는가" 라, 남의 소유 `0o700` 이나 `noexec` 에 얹힌 파일이
+/// 여기를 지나는데 껍데기는 126 을 냈다(`merge_driver::probe` 가 적어 둔 그대로다). 그 값이 제일
+/// 비싼 자리가 `skill` 이었다 — 훅은 그 126 을 `|| exit 0` 으로 삼켜 규칙 넷이 조용히 안 서는데
+/// `moai skill status` 는 "깔렸다" 고 말했다. 화면과 사실이 갈리던 자리다. **훅 쪽도 그 뒤에
+/// 말하게 됐다**(moai-j4ie) — `skill::command` 가 0·1 이 아닌 종료에 알림 한 줄을 낸다
+/// (moai-wnnb 가 126·127 에서 넓혔다). **다만 세션·이벤트·종료 값마다 한 번뿐이고**(moai-f7up,
+/// 리뷰 moai-514e.hgz) **그 바이너리가 stdout 에 한 바이트도 안 썼을 때뿐이다**(moai-mnhq) —
+/// 썼으면 둘째 객체가 판정을 버리게 하므로 셸 한 줄이 입을 다문다. 첫 줄을 놓친 사람과 무언가
+/// 지껄이고 죽은 바이너리에 남는 자리는 여전히 여기다 — 이 함수가 대는 몫을 훅이 대신하지
+/// 않는다. `tests/cli.rs` 의 `skill_status_notices_a_vanished_hook_binary` 가 같은 계약을 적어 둔
+/// 짝이고, 한쪽만 고치면 둘이 갈린다.
+///
+/// 그래서 `access(X_OK)` 를 부른다. 표준 라이브러리에 없어 `libc` 를 직접 의존으로 들였고, 든
+/// 값은 `Cargo.toml` 의 그 줄에 적어 두었다 — **크레이트는 0개가 늘었다.**
+///
+/// **`access` 는 실제 uid·gid 로 잰다** — 유효 uid 가 다른 setuid 프로그램이면 답이 갈린다.
+/// moai 는 setuid 로 안 돌고, 그렇게 도는 날에는 여기가 아니라 그 결정이 먼저 틀린 것이다.
+///
+/// **디렉터리는 위의 `is_file` 이 뺀다** — `access(X_OK)` 는 들어갈 수 있는 디렉터리에도 0 을
+/// 내므로, 그 문을 걷으면 `PATH` 앞자리의 `moai` 라는 디렉터리를 셋이 다 골라 든다.
+///
+/// **못 재는 자리는 "안 돈다" 로 답한다** — 경로에 NUL 이 든 것은 파일 이름이 될 수 없다.
 ///
 /// **세 벌이던 것을 모았다**(moai-p3kb, 리뷰가 셋째를 짚었다) — `skill` 의 `runnable`,
 /// `tui` 의 `executable`, `merge_driver` 의 `runnable`. 갈리면 이식성 고침 하나가 고친 사람이
@@ -151,12 +188,25 @@ pub fn clearable(v: &str) -> Option<String> {
 ///   뺀다** — POSIX 가 그 자리를 "지금 자리" 로 읽고, 껍데기도 그렇게 찾는다. `$VISUAL`·`$EDITOR`
 ///   가 둘 다 비었을 때 띄우며 한 번, 많아야 이름 둘이라 `sh` 를 띄우는 값이 아깝다
 /// - `merge_driver` 는 같은 훑기에 **빈 자리를 뺀다.** 거기서 고른 값은 `.git/config` 에 앉아
-///   **딴 자리에서** 풀리므로, 껍데기가 지금 그 자리를 쓰는 것과 심어 둘 값으로 쓰는 것이 다르다
+///   **딴 자리에서** 풀리므로, 껍데기가 지금 그 자리를 쓰는 것과 심어 둘 값으로 쓰는 것이 다르다.
+///   그 위에 `--help` 를 실제로 불러 한 겹 더 잰다(`probe`) — 심는 값은 딴 때에 풀리니, 지금
+///   돌릴 수 있는가만으로는 모자란다
 pub fn runnable(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        use std::os::unix::ffi::OsStrExt as _;
+        // 아래 `#[cfg(not(unix))]` 갈래와 **같은 낱말로 적는다** — `Path::is_file` 이 곧
+        // `metadata(..).map(|m| m.is_file()).unwrap_or(false)` 라, 두 갈래를 견주는 사람이
+        // 같은지 증명하지 않고 그냥 보면 된다.
+        if !path.is_file() {
+            return false;
+        }
+        let Ok(spelt) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `spelt` 는 이 줄이 끝날 때까지 살아 있는 널로 끝나는 버퍼고, `access` 는 그것을
+        // 읽기만 한다.
+        unsafe { libc::access(spelt.as_ptr(), libc::X_OK) == 0 }
     }
     #[cfg(not(unix))]
     {
@@ -482,12 +532,30 @@ pub struct Row<'a> {
     ///
     /// 없을 수 *있는* 키(`epic`·`milestone`·`deferred_at`·`assignee`)는 여기 안 든다 — 그쪽은 키가
     /// 없다는 것이 곧 뜻이다(moai-fqnr). 이 둘은 없을 수가 없다.
+    ///
+    /// **`epic` 은 그 약속이 반쪽이다**(moai-exh7 뒤). 계획이 세우는 멤버는 소속을 id 에 지고
+    /// `epic` 을 안 적으므로, 이 줄에서 키가 없다는 것은 "에픽이 없다" 가 아니라 "여기에는 안
+    /// 적혔다" 다 — 답은 `report::groups` 가 안다. 그 답은 [`Row::derived_epic`] 이 낸다
+    /// (moai-wuzi, 2026-09-23 사용자 결정): `epic` 은 **파일에 적힌 그대로** 두고, 푼 값은
+    /// `derived_status` 처럼 제 키로 곁들인다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub derived_status: Option<&'a str>,
+    /// 그 줄이 **든 에픽** — 적어 놓았든 id 로 졌든(`report::groups`). 소속을 묻는 기계는
+    /// 이 키 하나만 본다(moai-wuzi).
+    ///
+    /// **없다는 것은 "어느 에픽에도 안 든다" 는 뜻이다** — `epic` 키의 침묵과 다르다. 그쪽은
+    /// "여기에는 안 적혔다" 이고, 계획이 세우는 멤버는 늘 그쪽이 빈다. 한때 `show --json` 은
+    /// 그 멤버를 에픽 없는 줄로 내고 `prime --json` 은 물려받은 소속을 내, 한 바이너리의 두
+    /// 기계 표면이 "이 줄은 어느 에픽인가" 에 다른 답을 했다.
+    ///
+    /// **묶음 줄에는 안 선다**(moai-fg0t) — 에픽 줄이 든 `epic` 은 소속이 아니다. 트리도
+    /// `-e` 도 그 줄을 에픽 밑에 두지 않으므로, 여기에 대면 적은 적 없는 소속이 선다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived_epic: Option<&'a str>,
     /// 다른 워크트리에서 온 줄이면 그 브랜치 (`--worktree`). **키가 없다는 것이 곧
     /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -509,6 +577,7 @@ pub struct Row<'a> {
 pub const OURS: &[&str] = &[
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
+    "derived_epic",
     "branch",
     // 줄이 기본값이라 안 적었을 때 `Row` 가 세우는 것. 줄의 제 키라 모르는 필드로 들어올 일은
     // 없지만, 걷는 목록은 **출력에 서는 우리 키 전부**다 — 여기서 빼면 `Row` 에 필드를 더하는
@@ -528,6 +597,7 @@ pub const OURS: &[&str] = &[
     "commits_error",
     "journal_error",
     "work",
+    "spent",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",
@@ -578,7 +648,26 @@ impl<'a> Row<'a> {
     /// `read` 는 그 줄의 읽은 칸이다. **묶음이 아니면 버린다** — 머지를 잘못 푼
     /// 파일에서 묶음과 id 가 같은 일 줄이 그 묶음의 칸을 입지 않게, `report::column`
     /// 과 같은 자로 묻는다.
-    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>) -> Row<'a> {
+    ///
+    /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::handed_of`) — 줄이 `epic` 을
+    /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
+    ///
+    /// `kind_of` 는 **가려진 줄을 가르는 지도**다(`report::Kinds`, moai-53s2) — 위의 소속
+    /// 지도가 id 로 짠 것이라, 종류가 다른 쌍둥이에게 가려진 줄은 그 지도에서 쌍둥이의 값을
+    /// 받는다. 지도를 안 대려면 `Kinds::no_twins()` 라는 **낱말**을 적어야 하고, 그 자리는
+    /// 왜 쌍둥이가 못 서는지를 함께 댄다 — 빈 지도를 그냥 넘기던 꼴은 새 표면이 그대로
+    /// 베껴, 시험 전부가 푸른 채로 이 구멍을 다시 연다(리뷰).
+    pub fn of(
+        issue: &'a crate::model::Issue,
+        read: Option<&'a str>,
+        placed: Option<&'a str>,
+        kind_of: &crate::report::Kinds<'_>,
+    ) -> Row<'a> {
+        // **차례를 여기서 다시 적지 않는다**(`report::stands_in`) — 적힌 것이 먼저라는 것도,
+        // 묶음 줄에는 안 선다는 것도, 가려진 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가
+        // 정한다. 여기 한 벌 더 적으면 `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가
+        // 어긋난다.
+        let derived_epic = crate::report::stands_in(kind_of, issue, placed);
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
@@ -592,11 +681,14 @@ impl<'a> Row<'a> {
                 std::borrow::Cow::Owned(own)
             }
         };
-        let derived = read.filter(|_| crate::report::is_group(&issue));
+        // **여기서도 차례를 다시 적지 않는다**(`report::stands_on`) — 묶음만 입는 것도, 가려진
+        // 줄에는 안 서는 것도(moai-7iyc.5fz) `report` 가 정한다. `-s` 로 고르는 자와 이 키를 내는
+        // 자가 같은 자리에서 갈려야 한 화면이 같은 줄을 두 칸으로 말하지 않는다.
+        let derived = crate::report::stands_on(kind_of, &issue, || read);
         // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
         let kind = issue.kind.is_default().then(|| issue.kind.as_str());
         let priority = issue.priority.is_none().then(|| issue.priority());
-        Row { issue, kind, priority, derived_status: derived, branch: None }
+        Row { issue, kind, priority, derived_status: derived, derived_epic, branch: None }
     }
 
     /// 겹쳐 본 줄이면 그 출처를 곁들인다.
@@ -606,8 +698,13 @@ impl<'a> Row<'a> {
     }
 
     /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.
+    ///
+    /// **쓰기 경로에는 쌍둥이가 없다**(리뷰, moai-53s2). `store::with_write` 는 id 가 두 번
+    /// 선 파일에 쓰기를 통째로 물리므로(`Trouble::DuplicateId`), 이 줄이 나왔다는 것은 그
+    /// 파일에 중복 id 가 없었다는 말이다 — 가려진 줄은 중복 id 로만 생긴다. 그래서 여기서
+    /// 종류 지도를 짓지 않는다: 지어도 답을 못 바꾸는데, 그 셈은 **락을 쥔 채** 치른다.
     pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
-        Row::of(issue, read.get(&issue.id).map(String::as_str))
+        Row::of(issue, read.column(&issue.id), read.epic(&issue.id), &crate::report::Kinds::no_twins())
     }
 }
 
@@ -637,16 +734,59 @@ pub fn keys_beyond<T: serde::Serialize>(line: &crate::model::Issue, out: &T) -> 
     keys(serde_json::to_value(out).unwrap()).into_iter().filter(|k| !bare.contains(k)).collect()
 }
 
-/// 묶음 id → 멤버에서 읽은 칸. 락 밖으로 들고 나가는 모양이라 제 문자열을 쥔다.
-pub type Read = BTreeMap<String, String>;
+/// 락 안에서 챙겨 나온, **줄 하나를 기계 꼴로 낼 때 저장소 전체를 봐야 아는 값** —
+/// 묶음이 읽은 칸과, 소속을 id 에 진 줄이 든 에픽. 락 밖으로 들고 나가는 모양이라 제
+/// 문자열을 쥔다.
+///
+/// **둘을 한 자리에 묶는다**(moai-wuzi) — 쓰는 명령마다 지도를 따로 세우면 새 표면이
+/// 하나를 빠뜨리고, 그러면 `--json` 이 명령마다 다른 말을 한다. 그 어긋남을 고치는 것이
+/// 이 필드가 선 까닭이다.
+#[derive(Default)]
+pub struct Read {
+    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states_of`).
+    states: BTreeMap<String, String>,
+    /// 줄 id → 그 id 의 부모가 **넘기는** 에픽(`report::handed_of`). **`epic` 을 적은 줄은 안
+    /// 든다**(리뷰 moai-jk2u.o78) — 그 줄의 답은 그 줄이 들고 있어 지도가 낼 것이 없다.
+    /// 그래서 이 지도만으로는 답이 아니다: 값을 내는 자는 `report::stands_in` 이고, 그쪽이 줄의
+    /// `epic` 을 먼저 읽는다. 지도를 아예 안 지은 때에도 답이 같은 것은 그 때문이다.
+    epics: BTreeMap<String, String>,
+}
 
-/// 락 안에서 **낼 줄 가운데 묶음의 읽은 칸**을 챙겨 나온다 — 락을 놓은 뒤에 다시 세면
-/// 그 사이에 남이 쓴 멤버가 섞인다. 묶음이 없으면 걷지 않는다(`group_states_of`).
-pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
-    crate::report::group_states_of(issues, cfg, ids)
-        .into_iter()
-        .map(|(id, col)| (id.to_string(), col.to_string()))
-        .collect()
+impl Read {
+    /// 묶음이 읽은 칸. 묶음이 아니거나 안 챙겼으면 없다.
+    pub fn column(&self, id: &str) -> Option<&str> {
+        self.states.get(id).map(String::as_str)
+    }
+
+    /// 소속을 id 에 진 줄이 든 에픽.
+    pub fn epic(&self, id: &str) -> Option<&str> {
+        self.epics.get(id).map(String::as_str)
+    }
+
+    /// 챙겨 온 묶음과 그 칸 전부 — 읽은 칸으로 **그리는** 쪽이 받아 간다.
+    pub fn columns(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.states.iter().map(|(id, col)| (id.as_str(), col.as_str()))
+    }
+}
+
+/// 락 안에서 **낼 줄이 저장소 전체를 봐야 아는 값**을 챙겨 나온다 — 락을 놓은 뒤에 다시
+/// 세면 그 사이에 남이 쓴 멤버가 섞인다. 둘 다 게을러서, 묶음이 없으면 칸을
+/// (`group_states_of`), 소속을 id 에 진 줄이 없으면 에픽을(`handed_of`) 안 걷는다.
+///
+/// **소속은 `--json` 일 때만 걷는다**(`json`, 리뷰) — 그 지도를 읽는 자는 [`Row::from`]
+/// 하나고 그것을 부르는 자리는 기계 출력뿐이다. 늘 걷으면 사람이 부르는 `moai mv` 도
+/// 저장소 전체의 조상 오름을 락을 쥔 채 치르는데, 여기는 세션 예닐곱이 같은 `.moai` 를
+/// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
+/// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
+pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
+    let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    Read {
+        states: owned(crate::report::group_states_of(issues, cfg, ids)),
+        epics: match json {
+            true => owned(crate::report::handed_of(issues, ids)),
+            false => BTreeMap::new(),
+        },
+    }
 }
 
 /// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
@@ -680,6 +820,15 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
     crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
+/// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.
+///
+/// **[`Read`] 와는 다른 자다.** 이쪽은 `--from` 이 견줄 칸 하나만 담고 아무것도 안 낸다.
+/// 막는 것은 `Read` 가 구조체가 된 쪽이다 — 필드가 사유라 맨 지도는 [`Row::from`] 에
+/// 못 닿는다. 이 이름은 별명이라 그 자체로는 아무것도 안 막고, 갈라 둔 까닭을 적어 둘
+/// 뿐이다. 한 이름을 둘이 쓰던 때에는 소속을 안 챙긴 이 지도가 줄을 내는 자리에 흘러도
+/// 컴파일이 지났다.
+pub type Standing = BTreeMap<String, String>;
+
 /// `--from` 이 견줄 **서 있는 칸** — 물은 줄마다 하나씩, 락 안에서 **한 번** 뜬다.
 ///
 /// [`read_of`] 와 갈리는 곳이 둘이다.
@@ -693,12 +842,18 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
 ///   두 번 적은 한 명령이 **제가 방금 쓴 값**과 겨룬다 — 옮겨 놓고도 "이미 …다" 로
 ///   지고, `moved` 와 `stale` 에 같은 줄이 함께 서며, 종료 코드가 0 이 아니다.
 ///   `--from` 이 재는 것은 *부르는 쪽이 본* 칸이지 이 명령이 만든 칸이 아니다.
-pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Read {
+pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str]) -> Standing {
     let states = crate::report::group_states_of(issues, cfg, ids);
     issues
         .iter()
         .filter(|i| ids.contains(&i.id.as_str()))
-        .map(|i| (i.id.clone(), crate::report::column(i, &states).to_string()))
+        // **쌍둥이가 있어도 이 답은 파일에 안 닿는다**(리뷰). `Row::from` 과 달리 여기는 `with_write`
+        // 의 **닫힘 안**이라, 중복 id 를 물리는 `first_duplicate` 가 아직 안 돌았다 — 이 줄은 가려진
+        // 줄을 볼 수 있다. 그래도 지도를 안 대는 까닭은 그 파일에 대고 쓴 것은 닫힘이 돌아간 뒤
+        // `Trouble::DuplicateId` 로 통째로 물리기 때문이다: 여기서 센 `--from` 이 무엇이든 파일은
+        // 안 바뀐다. 게다가 묶음에는 `--from` 을 못 쓰므로(`cmd::mv`·`cmd::defer` 가 앞에서 거른다)
+        // 여기 남는 것은 일 줄뿐이고, 일 줄은 가려지든 아니든 읽은 칸을 안 입는다(`stands_on`).
+        .map(|i| (i.id.clone(), crate::report::column(&crate::report::Kinds::no_twins(), i, &states).to_string()))
         .collect()
 }
 
@@ -793,11 +948,24 @@ mod tests {
     /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.
     ///
     /// 재는 자가 한 자리에 선다 — `skill` 과 `tui` 가 저마다 적던 것을 여기로 모았다(moai-p3kb).
+    ///
+    /// **`noexec` 로 얹힌 자리에서는 안 잰다**(moai-dhx9). `access(X_OK)` 는 마운트 플래그까지
+    /// 보므로(Linux 의 `do_faccessat` 이 `path_noexec` 을 본다 — 이 기계에서 `noexec` 마운트의
+    /// `0o755` 파일에 `test -x` 가 아니라고 답하는 것으로 쟀다), `TMPDIR` 이 그런 기계에서는
+    /// 실행 비트를 세워도 여기가 아니라고 한다. `mode & 0o111` 을 보던 때는 마운트와 무관했으니
+    /// 이 문은 이 바뀜이 새로 만든 자리다. **재지 못하는 것을 실패로 세지 않는다** — 아래 시험의
+    /// root 문지기와 같은 자다.
     #[cfg(unix)]
     #[test]
     fn only_a_file_with_the_execute_bit_runs() {
         use std::os::unix::fs::PermissionsExt as _;
         let s = crate::scratch::Scratch::new("cmd-runnable");
+        let probe = s.join("probe");
+        std::fs::write(&probe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !runnable(&probe) {
+            return; // `noexec` 로 얹힌 자리 — 여기서는 실행을 못 잰다.
+        }
         let exe = s.join("exe");
         std::fs::write(&exe, "#!/bin/sh\n").unwrap();
         assert!(!runnable(&exe), "실행 비트가 없는데 돈다고 한다");
@@ -806,6 +974,32 @@ mod tests {
         // 디렉터리는 실행 비트가 서 있어도 돌릴 것이 아니고, 없는 자리도 아니다.
         assert!(!runnable(s.path()), "디렉터리를 돌린다고 한다");
         assert!(!runnable(&s.join("없다")), "없는 자리를 돈다고 한다");
+    }
+
+    /// **"아무나 돌릴 수 있는가" 와 "내가 돌릴 수 있는가" 는 다르다**(moai-dhx9). 임자만 실행 비트가
+    /// 빠진 파일(`0o011`)은 `mode & 0o111` 로는 돈다고 읽히는데, 임자가 부르면 껍데기가 126 을 낸다 —
+    /// 남의 소유 `0o700`·`noexec` 마운트와 같은 갈래고, 사람 하나로 지을 수 있는 꼴이 이것이다.
+    ///
+    /// **root 로 돌 때는 안 잰다** — `access(X_OK)` 는 root 에게 실행 비트가 하나라도 서 있으면 0 을
+    /// 내므로 그 자리에는 이 가름이 아예 없다. 재지 못하는 것을 실패로 세지 않는다.
+    ///
+    /// **문지기는 `getuid` 다, `geteuid` 가 아니다** — `access` 가 보는 것이 실제 uid 라고 위
+    /// [`runnable`] 의 글이 적어 두었는데, 문지기만 유효 uid 를 보던 판은 둘이 갈리는 자리에서
+    /// 거꾸로 답했다. 실제 uid 가 0 이고 유효 uid 가 아닌 판에서는 안 건너뛰면서 `access` 는 root
+    /// 로 재어 이 줄이 까닭 없이 붉어지고, 그 반대 판에서는 잴 수 있는 것을 건너뛴다.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_others_may_run_but_i_may_not_does_not_run() {
+        use std::os::unix::fs::PermissionsExt as _;
+        // SAFETY: `getuid` 는 인자가 없고 아무것도 안 바꾼다.
+        if unsafe { libc::getuid() } == 0 {
+            return;
+        }
+        let s = crate::scratch::Scratch::new("cmd-runnable-mine");
+        let exe = s.join("exe");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o011)).unwrap();
+        assert!(!runnable(&exe), "임자가 못 돌리는 파일을 돈다고 한다");
     }
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {
@@ -829,7 +1023,7 @@ mod tests {
     fn a_row_speaks_the_default_kind_and_priority() {
         let i = plain();
         assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
         assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
     }
@@ -840,7 +1034,7 @@ mod tests {
     fn a_row_that_carries_them_is_untouched() {
         let mut i = row_with(&[]);
         i.priority = Some(1);
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
         assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
         assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
@@ -856,7 +1050,7 @@ mod tests {
             ("duplicate_lines", "가짜"),
             ("due", "2026-10-01"),
         ]);
-        let row = Row::of(&i, Some("in_progress"));
+        let row = Row::of(&i, Some("in_progress"), None, &crate::report::Kinds::no_twins());
         let extra = [
             ("members", "[]".to_string()),
             ("shelved_by", "\"argos-0002\"".to_string()),
@@ -877,7 +1071,7 @@ mod tests {
     #[test]
     fn a_conditional_key_left_out_this_time_is_stripped_too() {
         let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
-        let row = Row::of(&i, None);
+        let row = Row::of(&i, None, None, &crate::report::Kinds::no_twins());
         let out = json_with(&row, &[("commits", "[]".to_string())]).unwrap().join("");
         assert!(!out.contains("commits_error"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
@@ -890,7 +1084,7 @@ mod tests {
         let mut rest: Vec<(&str, &str)> = OURS.iter().map(|k| (*k, "가짜")).collect();
         rest.push(("due", "2026-10-01"));
         let i = row_with(&rest);
-        let out = json_line(&Row::of(&i, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "{out}");
     }
@@ -907,6 +1101,7 @@ mod tests {
             kind: Some(Kind::Issue.as_str()),
             priority: Some(crate::model::DEFAULT_PRIORITY),
             derived_status: Some("todo"),
+            derived_epic: Some("moai-0001"),
             branch: Some("feat/x"),
         };
         let added = keys_beyond(&i, &row);
@@ -923,14 +1118,17 @@ mod tests {
     #[should_panic(expected = "APPENDED")]
     fn an_appended_key_missing_from_the_list_is_caught() {
         let i = row_with(&[]);
-        let _ = json_with(&Row::of(&i, None), &[("새_키", "[]".to_string())]);
+        let _ = json_with(&Row::of(&i, None, None, &crate::report::Kinds::no_twins()), &[("새_키", "[]".to_string())]);
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
     #[test]
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
-        assert!(matches!(Row::of(&i, None).issue, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            Row::of(&i, None, None, &crate::report::Kinds::no_twins()).issue,
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     fn unread(root: &str, at: &str) -> crate::store::Unread {

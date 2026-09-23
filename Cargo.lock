@@ -543,12 +543,13 @@ dependencies = [
 
 [[package]]
 name = "moai"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anstream",
  "anstyle",
  "clap",
  "fs2",
+ "libc",
  "pulldown-cmark",
  "ratatui",
  "serde",

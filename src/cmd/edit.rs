@@ -167,6 +167,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if let Some(p) = args.priority {
                 i.priority = Some(p);
             }
+            // 기한 둘(moai-tfcp). **`none` 은 비우는 것이다** — 소속·담당과 같은 낱말을 쓴다.
+            // 꼴과 종류와 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다.
+            if let Some(d) = &args.start {
+                i.starts_on = super::clearable(d);
+            }
+            if let Some(d) = &args.due {
+                i.due_on = super::clearable(d);
+            }
             if let Some(a) = &args.assignee {
                 (i.assignee, i.assignee_email) = match super::clearable(a) {
                     Some(v) => model::split_assignee(&v),
@@ -223,7 +231,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
-                let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+                let read = super::read_of(issues, cfg, &[before.id.as_str()], ctx.json);
                 let kept = kept(issues);
                 let kept_milestone = kept_milestone(issues);
                 return Ok((
@@ -255,8 +263,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             {
                 eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
             }
-            let children: Vec<Issue> =
-                issues.iter().filter(|c| crate::id::parent_of(&c.id) == Some(out.id.as_str())).cloned().collect();
+            // **자식을 고르는 자는 하나다**([`crate::report::children_of`]) — 그쪽이 차례까지
+            // 정한다(상세의 자식 줄은 목록 차례다). 여기서 따로 걸러 담던 때는 그 차례가 빠져
+            // 같은 에픽의 자식 줄이 `moai show` 와 `moai edit` 에서 다른 순서로 섰다(리뷰).
+            //
+            // **멤버는 여기서 안 뺀다.** `show` 는 뺀 줄을 멤버 칸이 받아 그리지만(`kin_of`)
+            // 이 화면에는 그 칸이 없어, 빼면 그 줄이 어느 자리에도 안 선다 — 가리는 것은
+            // 고침이 아니다. 둘을 맞추려면 이 화면에도 멤버 칸이 서야 한다.
+            let children: Vec<Issue> = crate::report::children_of(issues, &out.id).into_iter().cloned().collect();
             // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
             let near: Vec<&str> =
                 std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
@@ -268,7 +282,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 .map(|(id, root)| (id.to_string(), root.to_string()))
                 .collect();
             // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
-            let read = super::read_of(issues, cfg, &near);
+            let read = super::read_of(issues, cfg, &near, ctx.json);
             let kept = kept(issues);
             let kept_milestone = kept_milestone(issues);
             // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
@@ -311,8 +325,15 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     }
     let children: Vec<&Issue> = children.iter().collect();
     let seen = view::Seen {
-        roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
-        states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
+        // 쌍둥이가 없으니(바로 아래 `kinds` 가 그 까닭을 댄다) id 로 접은 지도가 곧 줄마다의
+        // 답이다 — `moai show` 쪽만 줄로 되묻는 재료를 든다(moai-wre3).
+        roots: crate::report::Shelved::no_twins(
+            shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
+        ),
+        states: read.columns().collect(),
+        // **쓰기 경로에는 쌍둥이가 없다**(`cmd::Row::from` 과 같은 까닭) — `store::with_write` 가
+        // 중복 id 에 쓰기를 통째로 물린다.
+        kinds: crate::report::Kinds::no_twins(),
         // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()),
         blocks: blocked.blocks(),
@@ -382,7 +403,9 @@ fn fail_if_nothing(args: &EditArgs, ctx: &Ctx) -> R<()> {
         || args.epic.is_some()
         || args.milestone.is_some()
         || args.priority.is_some()
-        || args.assignee.is_some();
+        || args.assignee.is_some()
+        || args.start.is_some()
+        || args.due.is_some();
     touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.edit_nothing")))
 }
 
@@ -402,7 +425,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let read = super::super::Read::new();
+        let read = super::super::Read::default();
         let epic = Inherited { epic: "argos-0002".into(), parent: "argos-0003".into() };
         let milestone = InheritedMilestone {
             milestone: Some("argos-0004".into()),

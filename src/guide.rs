@@ -124,6 +124,50 @@ const DIFFICULTY: [(&str, &str, &str); 3] = [
 /// `DIFFICULTY` 가 한 번 겪은 그 샘이다). `the_rubric_is_the_review_table` 이 둘을 견준다.
 const EPIC_MAX: &str = "any member touched the write path, concurrency, the storage format or hooks";
 
+/// 에픽 둘에 걸친 묶음의 등급(moai-h89f, 2026-09-22 사용자 결정). 옆 워크트리가 파일을 쥐어
+/// 서로 다른 에픽의 멤버가 한 가지에 실리는 판이 2026-09-20 에만 두 번 섰는데, 리뷰 표는
+/// `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도 안 잰다 — 그날은 감독과 일꾼이
+/// 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은 아니다.
+///
+/// **한 에픽처럼 재고 한 칸 더 올린다.** 후보 셋(한 덩이로 재기·에픽마다 재서 높은 쪽·무조건
+/// 한 칸 더) 가운데 첫째와 셋째를 합친 것이다 — 리뷰가 두 에픽의 계약을 같이 보아야 하니
+/// `표면을 가로지르면 한 칸 더` 와 같은 결이고, 실제로 선 판 둘의 `max` 와도 맞는다.
+/// 이 저장소 CLAUDE.md 의 리뷰 표와 `the_rubric_is_the_review_table` 이 이 글을 견준다.
+const BUNDLE: &str =
+    "A worktree that carries members of two epics is measured as one epic and then raised one more step";
+
+/// 리뷰가 되풀이해 잡는 다섯 자리(moai-jza6). 2026-09-20~21 에 리뷰가 잡았지만 브리프에는
+/// 없던 것들이고, 다섯 다 한 번이 아니라 여러 판에서 되풀이됐다 — 그때까지는 감독이 브리프마다
+/// 손으로 실었고, 실으면 잡히고 안 실으면 리뷰가 그때그때 운으로 잡았다.
+///
+/// **어제의 버그 목록이 되지 않게 되풀이된 것만 싣는다**(idea `moai-53wq` 가 며칠 묵힌 까닭이
+/// 그것이다). 한 번 잡힌 것을 여기 박으면 브리프가 그날의 고침 목록으로 자란다.
+///
+/// **관점을 대신하지 않는다.** 이 에픽이 실제로 한 일이 관점의 본체고, 이 다섯은 그 위에
+/// 얹는다 — 이것만 적은 `-b` 는 어느 에픽에나 같은 글이라 다음 사람이 읽을 것이 없다.
+///
+/// **`-b` 에만 적으면 리뷰에 안 닿는다.** 이슈의 관점은 다음 사람이 읽는 글이고 리뷰 명령은
+/// 이슈를 안 읽는다 — 그래서 마지막 문단이 다섯을 리뷰 쪽으로 보내는 길을 댄다. 그 문단에
+/// 리뷰 명령의 이름을 적지 않는 것은 `the_supervisor_picks_a_model_by_difficulty` 가 브리프의
+/// `/code-review` 를 하나로 매기 때문이다.
+const REVIEW_ANGLE: &str = r#"**Five places the review keeps finding.** They do not stand in for the angle — what this
+epic actually did is the angle, and these go on top of it
+1. A struct or function inserted above another takes over the doc block of the item below
+   it, and that comment now sits on code it does not describe
+2. Does a test actually go red on a revert — is what it measures in one place. A count
+   held per row whose inside is a `OnceCell` is 0 or 1 whatever happens, so the timing it
+   was meant to pin went back whole with nothing red
+3. Is there only one place that sets it up — a value put in place once at start-up is put
+   back to its default by every other path that builds the same thing again
+4. Do the comments and the docs say what the code actually does
+5. Does anything newly open on a path that never opened it — not "is a lock held while
+   opening", which is half of it. A read path that never opened the config and now parses
+   it stops on a config that is a FIFO, lock or no lock
+**They have to reach the review itself, not only `-b`.** The angle on the issue is what the
+next person reads; the review command does not read the issue. Going through a subagent,
+put these five in its prompt; going through the command, hold them against what came back
+before you take the findings in"#;
+
 /// 감독이 읽는 표 — 머리까지 여기서 낸다. 머리는 표면에, 칸의 차례는 여기에 두던 판은
 /// 칸을 바꿔 끼워도 머리가 엉뚱한 칸을 이름 짓는 채로 아무도 안 붉어졌다.
 ///
@@ -166,6 +210,8 @@ fn epic_review_rule() -> String {
          are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.\n\
          **If {EPIC_MAX}**, it is `max`.\n\
          Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.\n\
+         **{BUNDLE}** — the review has to read both epics' contracts at once.\n\
+         `max` is the top of the ladder: a step above it is still `max`.\n\
          The model follows that grade — `medium` means `{mid}`, `high` and up means `{top}`."
     )
 }
@@ -215,6 +261,13 @@ the wrong HEAD leaves no reference at all once `branch -d` runs"#;
 /// 일이 밖에 선 채로 돌거나, 일꾼이 무엇을 달지 모른다. `promote` 에는 이 플래그가 없다.
 const MILESTONE_ATTACH: &str = "moai edit <epic> --milestone <milestone>";
 
+/// 그 마일스톤 id 를 **어디서 베끼는가**(리뷰 moai-9tlp.67r 3번·11번). 혼자 펼치는 세션의 글과
+/// 감독의 3 이 같은 자리를 대는데, 두 벌로 적힌 첫 판은 둘 다 `moai ready` 의 **머리**라고 적어
+/// 있지도 않은 자리를 가리켰다 — 도는 마일스톤은 목록 **아래** 한 줄에 선다(AGENTS 블록의
+/// "The language on screen" 위 절이 같은 말을 한다). 한 자리에서 나오게 해 두면 다음에 화면이
+/// 바뀌어도 고칠 곳이 하나다.
+const MILESTONE_FROM: &str = "the line `moai ready` prints under its list for the running milestone";
+
 /// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
 const SUBDIR: &str = r#"cd "$(git -C <root> rev-parse --show-prefix)""#;
@@ -249,6 +302,18 @@ bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
 on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
 `milestone`, `deferred_at`) stay absent, and that absence is the answer.
+
+**Which epic a row is in, you read from `derived_epic`.** `epic` is what the file
+says, and a row whose id sits under an epic (`<epic>.<body>`) reads its epic from
+that id and writes no `epic` of its own — so on those rows `epic` is absent and
+`derived_epic` names the epic. On a row that carries it, absence means the row is in
+no epic at all, and on a group row it never stands. One row reads the two keys against
+each other: where the same id stands twice and the other line is a different `kind`,
+this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
+picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
+`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`rm --json` hands the removed lines back exactly as the file held them, and `tui
+--json` prints the explorer's own shorter row — and there you read the epic off the id.
 
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw
@@ -296,7 +361,16 @@ moai add --from - <<'PLAN'
 - [p1] first issue #enhancement
 - [p2] second issue
 PLAN
-```"#;
+```
+
+**If a milestone is running, give the plan that milestone** — `moai add --from -
+--milestone <id>`. It goes onto the epics the plan creates and the members inherit
+it; without it the whole plan stands outside the release, and of it `moai ready`
+then hands out only what is `p0`.
+
+**`--body` says why these issues are one bundle.** It goes onto the first epic the
+plan creates, which is where `moai show <epic>` reads it from. `--body -` and
+`--from -` cannot both read stdin, so give one of them a file."#;
 
 /// 에이전트가 이슈에 적는 글의 모양(moai-j8aq). **권고다** — 어겨도 아무것도 막히지 않는다.
 /// 훅이 이것을 검사하지 않는 것은 결정이다(사용자, moai-mthy): 글 스타일 검사는 린트이고,
@@ -335,7 +409,18 @@ pub const KOREAN_PLUGINS: [(&str, &str); 2] =
 /// 적는 말이 아니다 — 영어 화면에서 한국어 이슈를 적는 사람도 있다.
 ///
 /// **맞춤법이 마지막이다**(사용자, 리뷰 11번). 윤문이 제일 크게 고치니, 그 뒤를 맞춤법이 다시 본다.
-/// `humanize-korean` 을 긴 글에만 쓰는 까닭은 값이다 — 한 번에 서브에이전트를 1~3번 넘게 부른다.
+/// `humanize-korean` 을 긴 글에만 쓰는 까닭은 비용이다 — 한 번에 서브에이전트를 1~3번 넘게 부른다.
+///
+/// **용어 보존이 보존 목록과 따로 서는 까닭**(moai-gw5e): 위의 보존 목록은 *글자 그대로 옮겨
+/// 적을 것*(id·명령·경로·숫자)이라 기술 명사가 거기 안 든다. 그 빈자리로 `layer` 가 "층" 이 되고
+/// `latest::Seen::Unasked` 가 "못 물었다" 가 된 글이 이 저장소에 쌓였다 — 일반명사는 뜻이 여러
+/// 개라 원어를 지우면 읽는 쪽이 코드로 못 돌아간다. 윤문 플러그인은 이미 같은 것을 말하지만
+/// (`humanize-korean` 의 `ai-tell-taxonomy.md`), 그 스킬은 글이 다 쓰인 뒤에 돌고 하는 일이
+/// AI 티 제거라 용어를 되살리지 않는다. 그러니 쓰기 전에 읽히는 여기에 둔다.
+///
+/// **예시에 이 저장소의 이름을 박지 않는다**([`WRITING_EXAMPLE`] 과 같은 까닭, moai-nnda). 첫 판은
+/// `Seen::Unasked` 를 그대로 적었는데, 이 글은 모든 저장소에 심겨 남의 저장소에서는 아무것도 안
+/// 가리킨다 — 규칙만 적고 이름은 읽는 쪽의 코드에서 나오게 둔다.
 const KOREAN: &str = r#"**Polish Korean text before it goes into moai** — any title, body, note or `-m`
 that carries even one Hangul character, review text included. Text written only in
 English goes in as it is.
@@ -344,8 +429,18 @@ English goes in as it is.
   when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
 - Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
   (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- **Keep the technical term, and never drop the original.** An everyday word carries several
+  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
+  deleted, nobody can read the sentence back to the code — and
+  a name that came from the code goes in exactly as it is
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`"#;
+
+/// 용어 보존 한 줄 — [`KOREAN`] 의 글과 [`crate::hook::korean_notice`], 일꾼 브리프 4-4 가 함께
+/// 쓴다. [`PLEDGE`] 와 같은 까닭이다(moai-nxw8): 손으로 옮겨 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다.
+/// 규칙 3 의 64KB 가 네 표면 가운데 셋에만 들었던 판(리뷰 moai-4u6b.5hl)을 이 규칙이 그대로 밟아,
+/// 브리프만 옛 보존 목록에 남아 있었다.
+pub const KEEP_TERMS: &str = "a name that came from the code goes in exactly as it is";
 
 /// 한국어 글의 자세한 절차 — 참고 문서에만 둔다. 부를 때만 읽힌다.
 ///
@@ -365,6 +460,12 @@ const KOREAN_DETAIL: &str = r#"The always-visible rule is under "Korean text" in
 - Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
   make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
 - Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
+- On an ordinary technical term's first mention in a body, put the original in parentheses after
+  the translation and use the translation alone from there. **That rule is not for code names** —
+  a name that came from the code goes in exactly as it is, every time, and a gloss goes in
+  parentheses after it. Take it the other way round and "the translation alone from there" drops
+  the name, which is the swap this rule exists to stop. A repository that wants a fixed list of
+  its own terms keeps that list in its own docs — this rule stands without one
 - If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
 - If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
   That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing"#;
@@ -406,7 +507,16 @@ Three common ways it goes wrong.
   Split the call, the evidence and the next step into lines and one `moai show` is enough
 - **Emoji mark what is urgent** — urgency goes in the priority (`-p 1`). That is the one `ready` reads"#;
 
-const IDEAS: &str = r#"    moai idea add '<what just came to mind>'       park it
+/// 담아 둔 생각을 펼치는 절. **펼치기 뒤의 두 걸음이 여기 함께 선다**(moai-fww7).
+///
+/// 마일스톤 걸음은 감독 길에만 있었다(moai-6qgz) — 감독 없이 혼자 펼치는 세션이 읽는 글에는
+/// 없어, 도는 마일스톤 밖에 에픽이 그대로 섰다. 다는 줄은 [`MILESTONE_ATTACH`] 하나에서 나온다.
+///
+/// 본문 걸음은 어느 글에도 없었다. `promote` 는 본문을 안 데려가, 2026-09-22 에 한 번에 펼친
+/// 에픽 셋이 모두 0자로 섰고 사람이 손으로 채웠다.
+fn ideas() -> String {
+    format!(
+        r#"    moai idea add '<what just came to mind>'       park it
     moai idea add '<a longer thought>' -b -        the body comes from stdin
     moai idea ls                                   see what has piled up
     moai show -g <keyword>                         find out whether it is written down already
@@ -423,7 +533,45 @@ PLAN
 **A line in the plan becomes the issue title verbatim.** Copy over an idea title
 that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
-and the history line about being unfolded from it leads back there."#;
+and the history line about being unfolded from it leads back there.
+
+**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+both on the epic it unfolds — a milestone is inherited, so the epic alone carries
+it to every member, the ones added later included, and the body is what lets
+`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
+original stays on the closed idea and the history leads back to it, and the one
+place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is.
+
+**The milestone that comes over is the one `moai show --milestone` stands the idea
+under**, not whatever its own field says — an idea parked inside an epic comes over
+in that epic's release even with an empty field of its own, and a field of its own
+that loses to the epic it sits in never reaches the new epic. One reader answers
+where a row belongs, on every surface.
+
+**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
+already the owner — its members inherit its milestone, and writing the idea's over
+theirs would stand one bundle in two places.
+
+**If what came over is not the milestone that is running, hang the running one on
+the epic yourself** — or clear it with `--milestone none` when nothing is running.
+`promote` carries the release it stands in whatever state that release is in, so
+that covers an idea parked with no milestone, one parked under a release that has
+since shipped, and one parked under a milestone since deferred. Without this the
+epic stands outside the release and every member under it is work picked up from
+outside it, of which `moai ready` hands out only what is `p0`; and under a
+deferred milestone the whole plan is out of the plan the moment it is created —
+not in `ready`, not in `held`, and no warning says so. **A dead release is said
+out loud**: unfolding into a deferred or closed milestone prints one line on
+stderr naming it, and nothing is blocked.
+
+    {MILESTONE_ATTACH}
+
+Copy that id off {MILESTONE_FROM}. What is checked is the shape
+alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
+`dangling_milestone` warning."#
+    )
+}
 
 /// 머지 드라이버는 **클론마다 한 번** 심는다(moai-x129). 심는 법이 `moai merge-driver --help`
 /// 에만 있어, 그 명령을 아는 사람만 심을 수 있었다 — 안 심은 클론은 이슈 줄이 이웃이라는
@@ -468,14 +616,40 @@ What is deferred drops out of `moai ready`, the board and the warnings, and
 the work under it drops out with it."#;
 
 const GROUPS: &str = r#"    moai epic add '<storage layer>'                an epic
-    moai milestone add 'v0.1'                      a milestone
+    moai milestone add 'v0.1' --start 2026-09-05 --due 2026-09-20
     moai add '<title>' -e <epic> --milestone <milestone>
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
+**A milestone is the one row that carries dates.** `--start` and `--due` take a
+calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
+They stand on a milestone row only — on anything else the write is refused. A
+deadline that has passed, and one falling due within `status_due_days` (3 unless
+your config says otherwise), is one warning line on the board; **nothing is
+blocked and the exit code never changes.**
+
+**`moai show <milestone>` also says how long it took.** That is read from the
+closed members' start and finish right then — no field holds it. It comes with
+the number it could measure ("2 of 3 closed"), because a member with no
+`started_at` is *unknown*, not zero, and it is wall clock, not effort: sessions
+running beside each other overlap, and waiting on a person counts too.
+
 **Belonging is inherited.** A child inherits its parent's epic, an issue inherits
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
+
+**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
+<epic>` always did for a review — one subject, one id. The member carries no
+`epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
+.derived_epic` names the epic; `moai show <epic>` lists it under `members` and
+`moai show -e <epic>` picks it up. Rows created before keep the ids they have:
+nothing is ever relabelled.
+
+**An id cannot move, so such a member cannot leave its epic.** `moai edit
+<member> -e none` says so and changes nothing; `-e <another epic>` does move it,
+and the id it keeps still reads `<first epic>.<body>`. Aim a plan before you
+unfold it — for a member that has to stand somewhere else, create it there.
 
 **A group's column is read from its members.** Do not `moai mv` an epic or a
 milestone — pick up one member and it stands `in_progress`, finish them all and it
@@ -537,7 +711,8 @@ the exit code never changes.
 
 It only asks where a person is watching. `--json`, a pipe and anything that is not a
 terminal never ask, so a machine running agents does not knock on the outside every run.
-The answer, and when it was asked, are held next to your user config in `latest.toml`.
+The answer, when it was asked and where it was asked are held next to your user config
+in `latest.toml`. Ask somewhere else and the answer from the other place is not reused.
 
     [update]
     check = false        # in your user config: never ask on this machine
@@ -681,6 +856,7 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 /// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
 /// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
 pub fn agents() -> String {
+    let ideas = ideas();
     format!(
         r#"## Issue tracker — moai
 
@@ -707,7 +883,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 ### Park what is out of scope
 
-{IDEAS}
+{ideas}
 
 ### When work already created is not for now
 
@@ -830,6 +1006,7 @@ Every command and the `--from` syntax are in `references/commands.md`.
 
 /// 스킬의 참고 문서. 부를 때만 읽힌다.
 pub fn reference() -> String {
+    let ideas = ideas();
     format!(
         r#"# Every command
 
@@ -950,7 +1127,13 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-`--dry-run` keeps a heredoc typo from creating six of the wrong things.
+`--dry-run` keeps a heredoc typo from creating six of the wrong things. It also says
+which epic a `--body` would land on, and refuses a body the write would refuse.
+
+`--body` says why these issues are one bundle. It goes onto the first epic the plan
+creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
+`--from` can read stdin, so give the other one a file or write the body as text —
+`moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{{{name}}}}` with `--var name=value` (the
 name takes letters, digits, `_` and `-`, no spaces). By convention it lives in the
@@ -979,7 +1162,7 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 
 ## Unfolding a parked thought
 
-{IDEAS}
+{ideas}
 
 ## Deferring
 
@@ -1249,16 +1432,18 @@ yet. Do this count again for every further idea. An epic left open with only
 first-column members (what brief 7-1 left behind) shows as `in_progress` but is not
 picked up — there is no worktree and no picked-up member, so do not drop ideas over it.
 
-**If a milestone is running, what is inside it comes first.** The header of `moai ready`
-says what is running and how many it held back outside it, and the `moai status` notice
-shines on the same thing. Then what you send this round is work attached to that
-milestone — an idea from outside waits for the next round unless it should stand as `p0`.
+**If a milestone is running, what is inside it comes first.** The line `moai ready` prints
+under its list says what is running and how many it held back outside it, and the
+`moai status` notice shines on the same thing. Then what you send this round is work
+attached to that milestone — an idea from outside waits for the next round unless it
+should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` has no flag
-for a milestone and does not carry over the one the idea itself holds, so the epic a worker
-unfolds stands outside the release until it is attached. The worker hangs it on in brief 1 —
+**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
+the body and the release the idea stands in — the one `moai show --milestone` lists it
+under, not its own field — so an idea parked outside the release unfolds into an epic that
+stands outside it until it is attached. The worker hangs it on in brief 1 —
 `{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
 call is yours, here, before you send: either this idea belongs in the release that is
 running and you send it with that milestone, or it does not and you do not send it this
@@ -1417,8 +1602,8 @@ reads its own place as the root.
 when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
-in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off the
-`moai ready` header; do not write it from memory.
+in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
+{MILESTONE_FROM}; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -1910,7 +2095,10 @@ fn brief() -> String {
     let rubric = indent(&difficulty_rubric(), "       ");
     let top = top_model();
     let epic_rule = indent(&epic_review_rule(), "       ");
+    let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
+    // 용어 보존은 안내 글과 한 출처다 — 규칙 3 의 64KB 가 그랬듯, 손으로 옮겨 적으면 이 표면만 낡는다.
+    let keep = KEEP_TERMS;
     format!(
         r#"    Supervisor session (<my name>) is handing you idea <id> — <title>.
     Read first: moai show <id>
@@ -1929,10 +2117,14 @@ fn brief() -> String {
        becomes the issue title verbatim, so copying over an idea title that grew long while it
        was parked spreads that length into the issues. The original text stays on that idea and
        the history leads back to it.
-       Then hang the milestone on the epic you unfolded — `promote` has no flag for it, and a
-       milestone is inherited, so the epic alone carries it to every member and to the members
-       added later in 4-3 and 7-1. If `<milestone>` is `none`, nothing is running and there is
-       nothing to hang
+       Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
+       release the idea stood in, and a milestone is inherited, so the epic alone carries it to
+       every member and to the members added later in 4-3 and 7-1. Hanging the same one again
+       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
+       still the release that idea stood in, so read the line `promote` printed and clear a
+       release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
+       a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
+       not in `ready`, not in `held`, no warning
          {MILESTONE_ATTACH}
     2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
        **Pass the column you saw** — this is a place where several sessions share one `.moai`,
@@ -1993,9 +2185,10 @@ fn brief() -> String {
        `humanize-korean:humanize-korean` outside the repository (the scratchpad), delete that
        `_workspace/`, come back into the worktree (standing outside it the hook cannot find the
        tracker and no rule stands), and finish with `korean-skills:grammar-checker` for spelling.
-       Leave ids, commands, paths and numbers as they are, and do not polish the model line in
-       9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:` first line of a
-       shortened review text. **Give a review subagent these words too**
+       Leave ids, commands, paths and numbers as they are, and keep the technical terms —
+       {keep}, never traded for an everyday word with the English dropped. Do not polish the
+       model line in 9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:`
+       first line of a shortened review text. **Give a review subagent these words too**
     5. **Do not review member by member.** When one member is finished, run the tests, commit and
        move to the next — the review looks at the whole epic once, in 7, after every member is
        finished. One review is expensive; do not call it as many times as there are members. The
@@ -2025,6 +2218,18 @@ fn brief() -> String {
        `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
        `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
        the way the refusal's own command says
+{angle}
+       **While the review is running, do not touch this worktree's branch or its working tree.**
+       `--fix` leaves its fixes in the working tree uncommitted, so `reset --hard`, `rebase` and
+       `commit --amend` throw them away — that has happened, told to do it by a supervisor saying
+       "it is before the merge, so it can still be fixed". Nothing blocks it; this line is what
+       holds. Fixing a commit subject waits until the review has returned.
+       **When it returns, stop what it left running before you touch the tree.** Call `TaskStop`
+       on any subagent of that review and read the working tree's status. A sweep subagent still
+       alive writes its own version into this same worktree and covers a commit you already made
+       without a word, and a `cargo test` after that measures that agent's files rather than
+       yours — that has happened too, and it also burned an hour and a half in a worktree that
+       was gone.
     7-1. Before merging, go back over the ideas parked mid-epic
        (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
        review handed on — **can the epic deliver what it promised without them.** If not, it is
@@ -2060,6 +2265,22 @@ fn brief() -> String {
        can a `Regression-of:` line be written (did something already merged break). Those two are
        inside; the rest is outside. A new axis is not made because it would become a fourth
        vocabulary beside the column, the kind and the defer
+    7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
+       for the release being prepared**, and write it if it does not. Write it **here, in the
+       worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
+       the root, which every session shares and where the only commits that belong are the
+       tracker's and the merge itself. Committed here it rides the merge commit instead
+         git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+       This window is the only one that knows what the epic did, and it is the only one that
+       knows what was taken out as well as what went in — a section filled in later from commit
+       subjects shows what was added and misses what was removed, because a removal stands under
+       a revert subject of its own. It is cheaper here than in the window that closes the
+       section: v0.1.1 stood with 327 commits behind it, four of which touched the CHANGELOG, and
+       three epics named in its section out of the twenty-four the release held; the rest were
+       written by the window that closed it, 91 lines in one go. The release workflow cuts that
+       section by version name and hands it to `--notes-file` as it is, so a missing section
+       reads to whoever receives it as the whole release. **Nothing checks this** — a check here
+       would be a gate, and an empty section must not stop a release
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
        session in the root again.
@@ -2156,7 +2377,8 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        for piece in [GROUPS, IDEAS, DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS] {
+        let ideas = ideas();
+        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
@@ -2175,6 +2397,39 @@ mod tests {
             let (plugin, _) = id.split_once('@').unwrap();
             assert!(KOREAN.contains(&format!("`{plugin}:")), "안내가 {plugin} 의 스킬을 안 댄다");
             assert!(brief.contains(&format!("`{plugin}:")), "브리프가 {plugin} 의 스킬을 안 댄다");
+        }
+    }
+
+    /// **용어 보존은 네 표면이 한 글로 말한다**([`KEEP_TERMS`], moai-gw5e·moai-y9kv). 규칙 3 의 64KB 가
+    /// 네 표면 가운데 셋에만 들었던 판(리뷰 moai-4u6b.5hl)을 이 규칙이 그대로 밟아, 일꾼 브리프 4-4 만
+    /// 옛 보존 목록(`ids, commands, paths and numbers`)에 남았다 — 감독이 일을 넘기는 글이 바로 그것이라,
+    /// 이 규칙이 겨눈 세션이 규칙을 못 받았다. 훅의 비추는 줄도 같은 출처에서 온다.
+    #[test]
+    fn the_four_surfaces_keep_the_terms_in_one_wording() {
+        for (surface, text) in
+            [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
+        {
+            assert!(text.contains(KEEP_TERMS), "{surface} 이 용어 보존 줄을 안 쓴다 — {KEEP_TERMS}");
+        }
+        assert!(KOREAN.contains(KEEP_TERMS), "늘 읽히는 안내가 용어 보존 줄과 갈라졌다");
+        assert!(brief().contains(KEEP_TERMS), "일꾼 브리프 4-4 가 용어 보존 줄과 갈라졌다");
+        let crate::hook::Decision::Context(said) = crate::hook::korean_notice("", &[]) else {
+            panic!("비추는 답이 아니다")
+        };
+        assert!(said.contains(KEEP_TERMS), "훅의 비추는 줄이 안내 글과 갈라졌다");
+    }
+
+    /// **`docs/korean-terms.md` 를 가리키는 두 줄이 가리킬 것을 가진다.** CLAUDE.md 는 그 파일이 용어를
+    /// 정한다고 적고 README 는 그것을 문서 목록에 싣는데, 둘 다 손으로 적은 경로라 파일을 옮기면 조용히
+    /// 빈 곳을 가리킨다 — `the_cli_reference_matches_the_help` 가 `docs/cli.md` 에 대고 막는 그 실패다.
+    #[test]
+    fn the_term_table_the_guides_point_at_is_there() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = "docs/korean-terms.md";
+        assert!(root.join(path).is_file(), "{path} 가 없다 — CLAUDE.md 와 README 가 빈 곳을 가리킨다");
+        for name in ["CLAUDE.md", "README.md"] {
+            let text = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(text.contains(path), "{name} 이 {path} 를 안 가리킨다");
         }
     }
 
@@ -2789,8 +3044,146 @@ from outside**",
         }
         // 에픽 끝을 `max` 로 올리는 멤버도 두 자리가 같은 글이다 — 멤버를 따로 안 보니
         // 여기서 `동시성` 이 빠지면 그 멤버는 한 번도 비싼 눈을 안 받는다.
+        let brief = brief();
         assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 max 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
-        assert!(brief().contains(EPIC_MAX), "브리프 7 이 에픽 끝 max 줄을 안 쓴다 — {EPIC_MAX}");
+        assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 max 줄을 안 쓴다 — {EPIC_MAX}");
+        // 에픽 둘에 걸친 묶음도 같은 꼴로 두 자리에 선다(moai-h89f) — 표에만 적으면 일꾼이
+        // 받는 것은 브리프뿐이라 그 판을 재는 잣대가 리뷰를 부르는 창에 한 번도 안 닿는다.
+        assert!(claude.contains(BUNDLE), "CLAUDE.md 의 리뷰 표에 에픽 둘에 걸친 묶음이 없다 — {BUNDLE}");
+        assert!(brief.contains(BUNDLE), "브리프 7 이 묶음의 등급을 안 쓴다 — {BUNDLE}");
+    }
+
+    /// **리뷰가 도는 워크트리는 그 리뷰의 것이다**(moai-ww2u·moai-bu9i). 값을 실제로 잃은 두
+    /// 판이고, 둘 다 브리프에 줄이 없어서 났다.
+    ///
+    /// 앞은 2026-09-21 — `--fix` 가 도는 워크트리에서 커밋 제목을 고치려고 친 한 줄이 리뷰가
+    /// 이미 고쳐 둔 커밋 안 된 변경을 지웠다. 시킨 것은 감독이었으니 일꾼의 판단 실수가 아니라
+    /// 브리프가 낸 사고다. 뒤는 2026-09-20 — 리뷰가 끝나 판단까지 적은 뒤에 그 리뷰가 세운
+    /// 마지막 서브에이전트가 같은 워크트리의 파일을 제 판으로 다시 써, 커밋해 둔 되돌림을
+    /// 덮었다. 그 뒤 돌린 시험의 초록은 그 에이전트의 파일을 잰 초록이었다.
+    ///
+    /// **훅으로 막지 않는다**(idea `moai-uvs9` 의 두 길 가운데 글 쪽). 게이트를 하나 더 세우는
+    /// 것은 "막지 않는다" 와 겨루고 그쪽이 더 무겁다 — 그래서 지키는 것은 읽는 사람이고, 이
+    /// 시험이 그 줄이 서 있는지만 본다.
+    #[test]
+    fn a_running_review_owns_the_worktree() {
+        let brief = brief();
+        let at = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
+        // **끝을 못 찾으면 붉어진다.** 여기서 브리프 끝으로 물러서면 7-1 의 이름이 바뀐 판에도
+        // 아래 낱말이 한참 뒤의 걸음에서 걸려, 자리를 못 잡는 시험이 초록으로 선다.
+        let step = &brief[at..at + brief[at..].find("\n    7-1.").expect("7 뒤에 7-1 이 없다")];
+        for (piece, why) in [
+            (
+                "do not touch this worktree's branch or its working tree",
+                "리뷰가 도는 동안 가지를 고치지 말라는 말이 없다",
+            ),
+            ("`commit --amend`", "고침을 날리는 명령을 이름으로 안 댄다"),
+            ("`TaskStop`", "리뷰가 남긴 서브에이전트를 멈추는 걸음이 없다"),
+            ("covers a commit you already made", "남은 에이전트가 무엇을 덮는지 안 적었다"),
+        ] {
+            assert!(step.contains(piece), "{why} — {piece}");
+        }
+    }
+
+    /// **리뷰가 되풀이해 잡는 다섯 자리를 브리프가 싣는다**(moai-jza6). 그 전에는 감독이
+    /// 브리프마다 손으로 실어, 실으면 잡히고 안 실으면 리뷰가 그때그때 운으로 잡았다.
+    ///
+    /// **다섯이 관점을 대신하지 않는다.** 이것만 적은 `-b` 는 어느 에픽에나 같은 글이라, 다음
+    /// 사람이 "왜 이 등급이었나" 를 거기서 읽을 수 없다 — 그 말이 함께 서는지 본다.
+    #[test]
+    fn the_brief_carries_the_five_places_the_review_keeps_finding() {
+        let brief = brief();
+        // **7 안에 서는지까지 본다.** 브리프 아무 걸음이나 들여쓰기가 같아, 통째로 찾으면
+        // 리뷰를 안 부르는 걸음에 실려도 초록이었다.
+        let at = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
+        let step = &brief[at..at + brief[at..].find("\n    7-1.").expect("7 뒤에 7-1 이 없다")];
+        assert!(step.contains(&indent(REVIEW_ANGLE, "       ")), "브리프 7 의 다섯 자리가 REVIEW_ANGLE 에서 안 나온다");
+        assert!(
+            REVIEW_ANGLE.contains("They do not stand in for the angle"),
+            "다섯이 관점을 대신하지 않는다는 말이 없다"
+        );
+        for n in 1..=5 {
+            assert!(REVIEW_ANGLE.contains(&format!("\n{n}. ")), "{n} 번째 자리가 없다");
+        }
+        // **`-b` 에만 적으면 리뷰에 안 닿는다** — 리뷰 명령은 이슈를 안 읽는다.
+        assert!(
+            REVIEW_ANGLE.contains("They have to reach the review itself"),
+            "다섯을 리뷰 쪽으로 보내는 길이 없다 — `-b` 에만 적히고 끝난다"
+        );
+    }
+
+    /// **에픽을 닫는 창이 CHANGELOG 줄을 본다**(moai-umu2). v0.1.1 은 커밋 327개 뒤에 섰는데
+    /// 절이 말하던 에픽은 스물넷 가운데 셋뿐이었고, 빠진 아홉을 절을 닫는 창이 131줄로 다시
+    /// 썼다. 그 절은 릴리스 워크플로가 판 이름으로 잘라 그대로 배포 글로 쓴다.
+    ///
+    /// **막지 않는다.** 검사로 두면 게이트고, 빈 절로 배포가 멈추면 안 된다 — `moai status` 가
+    /// 경고로 비영 종료하지 않는 것과 같은 자리다.
+    ///
+    /// **머지보다 앞에 선다.** 8 뒤에는 워크트리가 없고 남는 것은 세션 예닐곱이 함께 쓰는
+    /// 루트뿐이라, 거기서 `CHANGELOG.md` 를 고치는 것은 "집은 일은 모두 워크트리에서" 와
+    /// "루트는 트래커 커밋과 머지만" 을 한꺼번에 어긴다 — 게다가 그 뒤에 남은 커밋 줄은
+    /// `.moai/` 만 담아, 고친 글이 루트에 커밋 없이 남거나 남의 커밋에 쓸려 든다.
+    #[test]
+    fn closing_an_epic_looks_at_the_changelog() {
+        let brief = brief();
+        let at = brief.find("\n    7-3.").expect("머지 전에 CHANGELOG 를 보는 걸음이 없다");
+        let end = at + brief[at..].find("\n    8.").expect("7-3 뒤에 8 이 없다");
+        let step = &brief[at..end];
+        for (piece, why) in [
+            ("CHANGELOG", "무엇을 보는지 안 적었다"),
+            ("**Nothing checks this**", "게이트가 아니라는 말이 없다"),
+            ("misses what was removed", "커밋 제목만 읽으면 걷은 판이 안 보인다는 말이 없다"),
+            ("worktree, before the merge", "워크트리에서 머지 전에 쓰라는 말이 없다"),
+            ("-- CHANGELOG.md", "고친 글을 담을 커밋 줄이 없다"),
+        ] {
+            assert!(step.contains(piece), "{why} — {piece}");
+        }
+        // **닫기보다도 앞이다** — 멤버가 닫히면 그 창은 규칙 2 로 저장소를 못 고친다.
+        assert!(end < brief.find("\n    10.").expect("닫는 걸음이 없다"), "CHANGELOG 를 닫은 뒤에 본다");
+    }
+
+    /// **혼자 펼치는 세션도 마일스톤을 달고 본문을 옮긴다**(moai-fww7).
+    ///
+    /// 마일스톤 걸음은 감독 길에만 있었다(moai-6qgz) — 감독 없이 혼자 펼치는 세션이 읽는 글에는
+    /// 없어, 도는 마일스톤 밖에 에픽이 그대로 서고 그 멤버를 집는 순간 "안의 것이 먼저다" 가
+    /// 깨진다. 다는 줄은 일꾼 브리프 1 과 같은 [`MILESTONE_ATTACH`] 에서 나오므로, 한쪽만
+    /// 고치면 여기서 붉어진다.
+    ///
+    /// 본문 걸음은 어느 글에도 없었다. 2026-09-22 에 한 번에 펼친 에픽 셋이 모두 0자로 섰고,
+    /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 냈다.
+    ///
+    /// **2026-09-23 부터 그 둘은 도구가 데려간다**(moai-07v1) — 손으로 치던 두 걸음이 빠졌으니
+    /// 이 글도 무엇이 저절로 서고 무엇이 손에 남는지를 말해야 한다. 그 줄은 여전히
+    /// [`MILESTONE_ATTACH`] 하나에서 나온다.
+    ///
+    /// **손에 남는 자리를 "마일스톤을 안 들었을 때" 로 적어 둔 것은 틀렸다**(리뷰). `promote` 는
+    /// 그 생각이 **선 자리**를 그것이 무엇이든 데려가므로, 이미 끝난 릴리스에 담아 둔 생각을
+    /// 펼치면 그 id 가 그대로 새 에픽에 서고 `ready` 가 그 에픽을 곧바로 감춘다 — 그런데 글은
+    /// "든 것이 있으니 할 일 없다" 로 읽혔다. 가르는 것은 **도는 것과 같은가** 다.
+    ///
+    /// **데려가는 값은 적힌 필드가 아니다**(2026-09-23 사용자 결정) — `moai show --milestone` 이
+    /// 그 생각을 내주는 자리고, 죽은 릴리스면 한 줄 알린다. 글이 "제 필드" 라고 말하면 에픽에
+    /// 담긴 생각을 펼친 쪽이 왜 릴리스가 따라왔는지를 못 읽는다.
+    #[test]
+    fn unfolding_alone_hangs_the_milestone_and_carries_the_body() {
+        let ideas = ideas();
+        for (piece, why) in [
+            (MILESTONE_ATTACH, "마일스톤이 어긋난 idea 를 펼쳤을 때 다는 줄이 없다"),
+            (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
+            ("`dangling_milestone`", "틀린 id 가 언제 드러나는지 안 적었다"),
+            ("milestone and body go onto the epic by themselves", "도구가 데려간다는 말이 없다"),
+            ("Not onto every issue", "이슈마다 베끼는 것으로 읽힌다"),
+            ("`-e <epic>`) carries neither", "선 에픽에 펼칠 때는 안 데려간다는 말이 없다"),
+            ("not the milestone that is running", "든 것이 딴 릴리스일 때를 안 가른다"),
+            ("`moai show --milestone` stands the idea", "데려가는 값이 적힌 필드로 읽힌다"),
+            ("A dead release is said", "죽은 릴리스를 알린다는 말이 없다"),
+        ] {
+            assert!(ideas.contains(piece), "{why} — {piece}");
+        }
+        // **심는 두 표면이 같은 글을 받는다** — 한쪽만 고치면 그 글을 읽은 세션만 걸음을 안다.
+        let (agents, reference) = (agents(), reference());
+        assert!(agents.contains(&ideas), "AGENTS 블록의 idea 절이 갈라졌다");
+        assert!(reference.contains(&ideas), "참고 문서의 idea 절이 갈라졌다");
     }
 
     /// **일꾼이 창을 비워도 되는 때를 알린다**(moai-gu5g, 2026-09-15 사용자 결정).

@@ -23,7 +23,8 @@
 //! ```
 
 use crate::fail::{Fail, R, code};
-use crate::store::{Lock, dir_of, lock_beside};
+use crate::path::dir_of;
+use crate::store::{Lock, lock_beside};
 use crate::style::Hue;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -124,6 +125,13 @@ pub struct Registry {
     /// 트래커가 아니라 내 설정에 드는 까닭: 읽음은 사람마다 다른 값이라 `.moai/issues.jsonl` 에
     /// 적으면 읽기만 해도 남과 부딪히고, 남의 읽음이 내 diff 에 섞인다(사용자 결정 2026-09-15).
     pub read: BTreeMap<String, String>,
+    /// 새 판 묻기를 설정이 껐는가 — `[update] check`(moai-d74q). 적힌 것이 없으면 `None` 이고
+    /// 그때는 켠 것이다([`crate::latest::gate`]).
+    pub update_check: Option<bool>,
+    /// 그 값을 읽다 만난 것 — **말이 아니라 자료다**([`UpdateTrouble`]). 대는 자리는
+    /// [`crate::view::look_problems`] 다: 이 설정이 서는 표면이 탐색기 하나라, 보기 설정의
+    /// 알림과 같은 자리에 선다.
+    pub update_problems: Vec<UpdateTrouble>,
     /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
     /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
     ///
@@ -164,6 +172,21 @@ pub enum LookTrouble {
     Want { key: String, want: Want, found: String },
     /// 낱말 배열의 원소 하나가 낱말이 아니다 — 키 이름과 그 값. 그 원소만 건너뛴다.
     NotAWord { key: String, value: String },
+}
+
+/// `[update] check` 를 읽다 만난 것([`Doc::update_check`], moai-d74q) — **말이 아니라 자료다**
+/// ([`LangTrouble`]·[`LookTrouble`] 과 같은 까닭).
+///
+/// **한때 아무 말도 안 했다.** 끄는 스위치 하나라 "안 먹은 것이 그 자리에서 보인다" 는 것이
+/// 그 까닭이었는데, 서는 자리가 탐색기 머리의 한 줄이라 실제로는 안 보인다 — 끄려고
+/// `check = "no"` 라 적은 사람은 그 줄이 왜 여전히 서는지 알 길이 없었다. 다른 설정 키와 같은
+/// 자로 맞춘다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateTrouble {
+    /// `[update]` 가 표가 아니다 — 그 자리에 선 것.
+    NotATable { found: String },
+    /// `update.check` 가 `true`·`false` 가 아니다 — 그 자리에 선 것.
+    NotABool { found: String },
 }
 
 /// [`LookTrouble::Want`] 가 바라는 꼴. **낱말이 아니라 갈래로 든다** — 글로 들면 말묶음이
@@ -420,6 +443,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (read, problems) = doc.read_marks();
             reg.read = read;
             reg.read_problems = problems;
+            let (check, problems) = doc.update_check();
+            reg.update_check = check;
+            reg.update_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
@@ -946,6 +972,29 @@ impl Doc {
         (Some(raw.to_string()), problems)
     }
 
+    /// 새 판 묻기를 껐는가 — `[update] check`(moai-d74q). 없으면 `None` 이고 그때는 켠 것이다.
+    ///
+    /// **틀린 값을 알린다.** 한때 이 키만 [`crate::latest`] 가 파일을 따로 파서 읽었고,
+    /// `check = "no"` 는 다른 설정 키와 달리 아무 말 없이 무시됐다. 여기로 들이면서 한 파싱에
+    /// 얹히고([`read`]), 까닭도 같은 자로 선다.
+    ///
+    /// **끈 값만 읽는 것은 그대로다** — `false` 가 아닌 성한 `true` 는 켠 것이라 까닭이 없다.
+    /// 막지도 않는다: [`UpdateTrouble`] 은 알림이지 게이트가 아니다.
+    pub fn update_check(&self) -> (Option<bool>, Vec<UpdateTrouble>) {
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(UPDATE) else { return (None, problems) };
+        let Some(t) = item.as_table_like() else {
+            problems.push(UpdateTrouble::NotATable { found: item.type_name().to_string() });
+            return (None, problems);
+        };
+        let Some(item) = t.get(CHECK) else { return (None, problems) };
+        let Some(on) = item.as_bool() else {
+            problems.push(UpdateTrouble::NotABool { found: item.type_name().to_string() });
+            return (None, problems);
+        };
+        (Some(on), problems)
+    }
+
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
     /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
     pub fn look(&self) -> (Look, Vec<LookTrouble>) {
@@ -1122,6 +1171,10 @@ impl Doc {
     }
 }
 
+// 새 판 묻기를 끄는 자리 — 이름은 `crate::latest` 한자리에 있다(moai-d74q). 두 벌로 적으면
+// 이름을 고치는 날 읽는 쪽만 따라간다.
+use crate::latest::{CHECK, UPDATE};
+
 /// 화면 언어가 사는 표(moai-slfv). **키 이름은 여기 하나다** — 그 탈을 펴는 쪽([`crate::view::problem`])
 /// 도 이것을 읽는다. 말묶음의 글에 박으면 번역마다 키 이름이 한 벌씩 서서, 키를 고치는 날 다섯
 /// 파일이 조용히 낡는다.
@@ -1269,6 +1322,8 @@ fn merge_words(
     }
     let base = base.unwrap_or_default();
     let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
+    // **본은 빼기 전에 든다**(moai-1ia9) — 이 병합이 원소를 다 빼면 뒤에서는 볼 것이 안 남는다.
+    let shape = shape_of(words);
     let mut changed = drop_elements(words, |v| {
         v.as_str().is_some_and(|w| base.iter().any(|b| b == w) && !new.iter().any(|n| n == w))
     }) > 0;
@@ -1276,7 +1331,7 @@ fn merge_words(
         if base.contains(w) || words.iter().any(|v| v.as_str() == Some(w.as_str())) {
             continue;
         }
-        push_word(words, w);
+        push_word(words, w, &shape);
         changed = true;
     }
     changed
@@ -1393,9 +1448,12 @@ fn draws_line(item: &Item) -> bool {
 /// **빈 배열도 여러 줄일 수 있다**(리뷰) — 마지막 낱말을 뺀 자리가 `[\n]` 이라, 원소가 없다고 한 줄로
 /// 보면 `SPC v` 를 껐다 켜는 것만으로 `[` 줄에 원소가 붙는다(`["done"\n]`). 원소가 없을 때 `]` 앞 글은
 /// 배열의 꼬리(`Array::trailing`)에 통째로 있으므로 그것을 줄 끝으로 읽고, 들여쓰기는 거기 선 주석에서
-/// 든다. 진짜 한 줄 배열(`[]`·`["a"]`)은 옮길 줄 끝이 없어 `toml_edit` 의 기본 모양(`, "새것"`)이 곧
-/// 제 모양이다.
-fn push_word(words: &mut toml_edit::Array, word: &str) {
+/// 든다. 진짜 한 줄 배열(`[]`·`["a"]`)은 옮길 줄 끝이 없어 쉼표와 그 뒤 한 칸이 `toml_edit` 의 기본값
+/// 그대로(`, 새것`)고, 그것이 곧 제 모양이다.
+///
+/// **따옴표는 본뜰 원소의 것을 따른다**([`worded`], moai-kh81). 사이 띄움은 안 따른다 — 붙여 적은
+/// 배열(`['a','b']`)에 더해도 새 원소는 `, 'c'` 로 선다.
+fn push_word(words: &mut toml_edit::Array, word: &str, shape: &Shape) {
     let last = words.len().checked_sub(1);
     let tail = last
         .and_then(|i| words.get(i).expect("차례 안이다").decor().suffix())
@@ -1404,7 +1462,8 @@ fn push_word(words: &mut toml_edit::Array, word: &str) {
     let after = format!("{tail}{}", words.trailing().as_str().unwrap_or_default());
     let (line_end, rest) = first_line(&after);
     if line_end.is_empty() {
-        words.push(word);
+        let v = worded(shape, word);
+        words.push_formatted(v);
         return;
     }
     let indent = (0..words.len())
@@ -1413,14 +1472,74 @@ fn push_word(words: &mut toml_edit::Array, word: &str) {
             let p = prefix_of(words.get(i).expect("차례 안이다").decor());
             p.rfind('\n').map(|at| p[at + 1..].to_string())
         })
-        // 본뜰 원소가 없다 — 빈 여러 줄 배열이면 `]` 앞 글의 들여쓰기가 그 배열의 것이다.
+        // 남은 원소가 없다 — 이 병합이 뺀 원소의 것을 쓰고(moai-1ia9), 그것도 없으면 빈 여러 줄
+        // 배열이라 `]` 앞 글의 들여쓰기가 그 배열의 것이다.
+        .or_else(|| shape.indent.clone())
         .unwrap_or_else(|| rest.chars().take_while(|c| *c == ' ' || *c == '\t').collect());
     let (head, trailing) = (format!("{line_end}{indent}"), format!("\n{rest}"));
     if let Some(i) = last {
         words.get_mut(i).expect("차례 안이다").decor_mut().set_suffix("");
     }
-    words.push_formatted(toml_edit::Value::from(word).decorated(&head, ""));
+    let v = worded(shape, word).decorated(&head, "");
+    words.push_formatted(v);
     words.set_trailing(trailing);
+}
+
+/// 더할 낱말이 본뜰 모양(`merge_words`·[`push_word`]·[`worded`], moai-1ia9). **배열에서 원소를 빼기 전에**
+/// 든다 — `merge_words` 는 뺀 뒤에 더해, 한 번의 병합이 원소를 다 빼고 새 낱말을 더하면(`SPC v a` 로 다
+/// 지운 뒤 칸 하나를 숨기는 길) 뒤에서는 본뜰 것이 안 남는다. 그 자리에서 사람이 적은 따옴표와 들여쓰기가
+/// 함께 사라졌고, 섞어 적은 배열은 왕복 바이트까지 깨졌다(리뷰 moai-333l.wj6 의 1·3·4번).
+struct Shape {
+    /// 끝 문자열 원소가 작은따옴표인가([`worded`]). 본뜰 문자열이 없으면 `None`.
+    literal: Option<bool>,
+    /// 줄을 연 마지막 원소의 들여쓰기([`push_word`]). 제 줄을 연 원소가 없으면 `None`.
+    indent: Option<String>,
+}
+
+/// 배열이 지금 든 모양을 잰다([`Shape`], moai-1ia9). 두 값 모두 **뒤에서부터** 훑는다 — 끝 원소가 본이다.
+///
+/// 건너뛰는 원소가 둘 있다. `Repr`(파일에서 읽어 온 글자 그대로의 꼴)이 없는 원소는 사람이 적은 것이 아니라
+/// 이 판이 지은 것이고, 문자열이 아닌 원소(새 바이너리의 모양)는 따옴표를 모른다. 들여쓰기는 제 줄을 연
+/// 원소, 곧 머리에 줄바꿈이 든 원소의 것이다 — 한 줄에 여럿이 선 배열의 끝 원소는 제 줄을 안 열어 모른다.
+fn shape_of(words: &toml_edit::Array) -> Shape {
+    let literal = (0..words.len()).rev().find_map(|i| match words.get(i)? {
+        toml_edit::Value::String(f) => Some(f.as_repr()?.as_raw().as_str()?.starts_with('\'')),
+        _ => None,
+    });
+    let indent = (0..words.len()).rev().find_map(|i| {
+        let p = prefix_of(words.get(i)?.decor());
+        p.rfind('\n').map(|at| p[at + 1..].to_string())
+    });
+    Shape { literal, indent }
+}
+
+/// 더할 낱말의 값 — **본뜰 원소의 따옴표를 따른다**(`push_word`, moai-kh81). `Value::from` 은 여느 낱말을
+/// 큰따옴표 문자열로 지어, 작은따옴표로 적은 배열(`hidden = ['todo', 'done']`)에 더하면 그 한 줄만 꼴이
+/// 어긋났다. 잃는 값도 더했다 뺀 왕복도 그대로지만, 사람이 적은 모양을 지키겠다는 [`push_word`] 의 약속이
+/// 거기서 조용히 깨진다(리뷰 `moai-4qbv.zea` 15번).
+///
+/// 본은 [`Shape`] 가 **병합이 손대기 전의 배열에서** 든 끝 문자열 원소다. 본뜰 문자열이 없었으면 큰따옴표다
+/// — 없는 본을 지어내지 않는다. 한 병합에서 여럿을 더해도 그 하나를 같이 보므로 답은 안 바뀐다.
+///
+/// **한쪽으로만 민다.** 본이 작은따옴표일 때 작은따옴표로 적을 뿐, 본이 큰따옴표라고 큰따옴표를 강제하지
+/// 않는다. `Value::from` 이 늘 큰따옴표인 것도 아니다 — 낱말에 `"` 가 들고 `'` 가 없으면 `toml_writer` 가
+/// 작은따옴표를 고른다(`'say "hi"'`). 칸 이름은 `statuses` 에서 오는 자유로운 글이라, 그런 낱말 하나가
+/// 큰따옴표 배열에 서면 다음 실행부터 그것이 본이 되어 배열 전체가 넘어간다. `it's` 는 거꾸로다.
+///
+/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 지은 뒤 다시 읽어 같은 낱말인지
+/// 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지 않고
+/// 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+fn worded(shape: &Shape, word: &str) -> toml_edit::Value {
+    if shape.literal != Some(true) {
+        return toml_edit::Value::from(word);
+    }
+    match format!("'{word}'").parse::<toml_edit::Value>() {
+        // 지은 값의 꾸밈은 부르는 쪽이 정한다 — `Value::from_str` 이 제가 비우고 오므로(`toml_edit` 의
+        // `value.rs`, "Only take the repr and not decor") 여기서 다시 비우지 않는다. 비어 있어야
+        // `toml_edit` 의 기본 모양(`, `)이 선다.
+        Ok(v) if v.as_str() == Some(word) => v,
+        _ => toml_edit::Value::from(word),
+    }
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -1698,11 +1817,11 @@ pub fn resolve_dir(input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<PathB
 /// 고 거절하고, 거절문이 시키는 `add` 가 같은 디렉터리의 둘째 줄을 만든다.
 pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let joined = cwd.join(input);
-    let lexical = crate::store::lexical(&joined);
+    let lexical = crate::path::lexical(&joined);
     let mut out = vec![lexical.clone()];
     // **없을 수 있는 것은 통째 풀기 하나다.** 셋 다 `Option` 이던 판의 모양을 그대로 두면 `Some(` 이
     // 둘 붙어, 다음에 철자를 더하는 이가 그것을 흉내 낸다.
-    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::store::real_prefix(&lexical), joined]);
+    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::path::real_prefix(&lexical), joined]);
     for one in more {
         if !out.contains(&one) {
             out.push(one);
@@ -2506,6 +2625,96 @@ mod tests {
         assert_eq!(show(src, &[], &["todo"]), "[tui]\nhidden = [\n  \"todo\"\n  # 아직 없다\n]\n");
     }
 
+    /// **더한 낱말이 끝 원소의 따옴표를 따른다**(moai-kh81, [`push_word`]). 작은따옴표로 적은 배열
+    /// (`hidden = ['todo', 'done']`)에 큰따옴표 낱말이 끼면 그 한 줄만 모양이 어긋난다 — 잃는 값은 없어도
+    /// 손으로 적은 모양을 지키겠다는 약속이 거기서 깨진다. 본뜰 원소가 없거나 낱말을 작은따옴표 안에 그대로
+    /// 못 적으면(낱말에 작은따옴표가 들었다) 큰따옴표로 적는다.
+    #[test]
+    fn an_added_word_follows_the_quotes_of_the_last_one() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let (two, three) = (["todo", "done"], ["todo", "done", "review"]);
+        assert_eq!(
+            show("[tui]\nhidden = ['todo', 'done']\n", &two, &three),
+            "[tui]\nhidden = ['todo', 'done', 'review']\n"
+        );
+        // 여러 줄로 벌린 배열도 같다 — 모양을 지키는 자리가 둘이라 둘 다 본다.
+        assert_eq!(
+            show("[tui]\nhidden = [\n  'todo',\n  'done'\n]\n", &two, &three),
+            "[tui]\nhidden = [\n  'todo',\n  'done',\n  'review'\n]\n"
+        );
+        // 여럿을 한 번에 더해도 한 꼴로 이어진다 — 더한 낱말은 답을 못 바꿔, `'todo'` 가 끝까지 본이다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo']\n", &["todo"], &three),
+            "[tui]\nhidden = ['todo', 'done', 'review']\n"
+        );
+        // 꼴이 섞인 배열은 **끝 원소**를 따른다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\", 'done']\n", &two, &three),
+            "[tui]\nhidden = [\"todo\", 'done', 'review']\n"
+        );
+        assert_eq!(
+            show("[tui]\nhidden = ['todo', \"done\"]\n", &two, &three),
+            "[tui]\nhidden = ['todo', \"done\", \"review\"]\n"
+        );
+        // 여러 줄 작은따옴표 문자열도 작은따옴표다.
+        assert_eq!(
+            show("[tui]\nhidden = ['''todo''']\n", &["todo"], &["todo", "done"]),
+            "[tui]\nhidden = ['''todo''', 'done']\n"
+        );
+        // 본뜰 원소가 없으면(빈 배열) 큰따옴표다 — 지어낼 본이 없다.
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["todo"]), "[tui]\nhidden = [\"todo\"]\n");
+        // 작은따옴표가 든 낱말은 작은따옴표 안에 그대로 못 선다 — 그 낱말만 큰따옴표로 적는다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo']\n", &["todo"], &["todo", "it's"]),
+            "[tui]\nhidden = ['todo', \"it's\"]\n"
+        );
+        // **그 낱말은 본이 되지 않는다** — `Value::from` 으로 지어 `Repr` 이 없으니 건너뛰고 그 앞을 본다.
+        // 이 줄이 없으면 뒤로 훑는 고리를 끝 원소 하나로 줄여도 시험이 푸르다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo']\n", &["todo"], &["todo", "it's", "done"]),
+            "[tui]\nhidden = ['todo', \"it's\", 'done']\n"
+        );
+        // 문자열이 아닌 원소도 본이 아니다 — 건너뛰고 그 앞의 문자열을 본다.
+        assert_eq!(
+            show("[tui]\nhidden = ['todo', 42]\n", &["todo"], &["todo", "done"]),
+            "[tui]\nhidden = ['todo', 42, 'done']\n"
+        );
+    }
+
+    /// **본은 원소를 빼기 전에 든다**(moai-1ia9, [`shape_of`]). `merge_words` 는 뺀 **뒤에** 더해, 한 번의
+    /// 병합이 원소를 모두 빼고 새 낱말을 더하면 볼 것이 안 남는다 — `SPC v a` 로 다 지운 뒤 칸 하나를
+    /// 숨기는 두 번의 키가 그 길이고, 그 자리에서 사람이 적은 따옴표와 들여쓰기가 함께 사라졌다.
+    /// 섞어 적은 배열은 왕복 바이트까지 깨졌다(리뷰 moai-333l.wj6 의 1·3·4번).
+    #[test]
+    fn the_shape_is_read_before_the_words_are_dropped() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        // 한 번에 다 빼고 더해도 따옴표가 남는다.
+        assert_eq!(show("[tui]\nhidden = ['todo']\n", &["todo"], &["done"]), "[tui]\nhidden = ['done']\n");
+        // 여러 줄이면 들여쓰기도 같은 자리에서 든다 — 본뜰 원소가 안 남아 `[` 줄에 붙었었다.
+        assert_eq!(
+            show("[tui]\nhidden = [\n  'todo',\n  'done'\n]\n", &["todo", "done"], &["review"]),
+            "[tui]\nhidden = [\n  'review'\n]\n"
+        );
+        // 섞어 적은 배열은 **파일에 있던 끝 원소**를 따른다 — 빼고 나서 보면 그 앞 원소로 뒤집힌다.
+        let mixed = "[tui]\nhidden = ['a', \"b\"]\n";
+        assert_eq!(show(mixed, &["a", "b"], &["a", "c"]), "[tui]\nhidden = ['a', \"c\"]\n");
+        // 그래서 되돌리면 옛 바이트다.
+        let back = show(&show(mixed, &["a", "b"], &["a", "c"]), &["a", "c"], &["a", "b"]);
+        assert_eq!(back, mixed);
+    }
+
     /// **켰다 끄면 옛 바이트로 돌아온다**(moai-n3ku). 더할 때 모양이 뒤집히면 뺄 때 그 모양을 되돌리지
     /// 못해, 토글마다 설정 파일이 헛 diff 를 냈다.
     ///
@@ -2526,6 +2735,11 @@ mod tests {
             ("[tui]\nhidden = [\"todo\", \"done\"]\n", &["todo", "done"], &["todo", "done", "review"]),
             ("[tui]\nhidden = [\n]\n", &[], &["todo"]),
             ("[tui]\nhidden = [\n  # 아직 없다\n]\n", &[], &["todo"]),
+            // 작은따옴표로 적은 배열도 같다(moai-kh81) — 빼는 쪽은 `as_str()` 로 재니 꼴이 달라도 같은
+            // 낱말로 잡힌다. 더할 때 따옴표가 뒤집히는 것은 이 왕복이 잡지 못한다(뒤집힌 채로 더했다
+            // 빼도 옛 바이트로 돌아온다) — 그쪽은 `an_added_word_follows_the_quotes_of_the_last_one` 다.
+            ("[tui]\nhidden = ['todo', 'done']\n", &["todo", "done"], &["todo", "done", "review"]),
+            ("[tui]\nhidden = [\n  'todo',\n  'done'\n]\n", &["todo", "done"], &["todo", "done", "review"]),
         ] {
             let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
             let (base, more) =
@@ -2686,6 +2900,46 @@ mod tests {
         let both = crate::view::settings_problems(&bad, crate::i18n::Lang::Ko);
         assert!(both.contains(&said), "밖에서 대는 자리에 안 섰다: {both:?}");
         assert_eq!(bad.lang, None, "틀린 값을 들였다");
+    }
+
+    /// **새 판 묻기의 스위치도 이 파싱에 얹힌다**(moai-d74q). 한때 [`crate::latest`] 가 이 키
+    /// 하나를 읽으려고 설정 파일을 따로 팠고, `check = "no"` 는 다른 설정 키와 달리 아무 말
+    /// 없이 무시됐다 — 끄려고 적은 사람은 탐색기 판 줄이 왜 여전히 서는지 알 길이 없었다.
+    ///
+    /// **틀린 값이 끄지는 않는다.** 읽은 것이 없으면 켠 것이고([`crate::latest::gate`]), 까닭은
+    /// 알림 한 줄로 선다 — 게이트가 아니다.
+    #[test]
+    fn the_update_switch_is_read_in_the_same_parse() {
+        let check = |src: &str| Doc::parse(src).unwrap().update_check();
+        assert_eq!(check("[update]\ncheck = false\n"), (Some(false), vec![]));
+        assert_eq!(check("[update]\ncheck = true\n"), (Some(true), vec![]));
+        // 없는 표도, 표 밖의 같은 이름도 "안 적었다" 다 — 기본은 켬이다.
+        assert_eq!(check("[update]\n"), (None, vec![]));
+        assert_eq!(check("[i18n]\nlang = \"ko\"\n"), (None, vec![]));
+        assert_eq!(check("check = false\n"), (None, vec![]), "표 밖의 같은 이름을 읽었다");
+        // **틀린 값은 알린다.** 값은 안 들이므로 켠 채로 선다.
+        assert_eq!(
+            check("[update]\ncheck = \"no\"\n"),
+            (None, vec![UpdateTrouble::NotABool { found: "string".into() }])
+        );
+        assert_eq!(check("update = 3\n"), (None, vec![UpdateTrouble::NotATable { found: "integer".into() }]));
+
+        // **읽는 길 전체로도 잰다** — 깨진 파일과 없는 파일은 여기서도 막지 않는다.
+        let d = scratch("update-check");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "\u{feff}[update]\ncheck = false\n").unwrap();
+        assert_eq!(read(Some(&path)).update_check, Some(false), "BOM 이 붙은 설정을 못 읽었다");
+        std::fs::write(&path, "[update]\ncheck = [\n").unwrap();
+        assert_eq!(read(Some(&path)).update_check, None, "깨진 설정이 막지 않는다");
+        assert_eq!(read(Some(&d.join("없다.toml"))).update_check, None);
+        assert_eq!(read(None).update_check, None, "설정 파일이 어디인지 모르는 기계");
+
+        // **까닭은 탐색기 알림 자리에 선다** — 이 설정이 서는 표면이 그 하나다.
+        std::fs::write(&path, "[update]\ncheck = \"no\"\n").unwrap();
+        let bad = read(Some(&path));
+        assert_eq!(bad.update_problems, [UpdateTrouble::NotABool { found: "string".into() }]);
+        let said = crate::view::look_problems(&bad, crate::i18n::Lang::Ko);
+        assert_eq!(said, [format!("{}: `update.check` 는 true·false 여야 한다 — 지금은 string", path.display())]);
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.

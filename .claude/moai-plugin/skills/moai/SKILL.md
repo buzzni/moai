@@ -33,6 +33,18 @@ and the file leaves a default out, but `--json` fills it back in — `jq -r .pri
 on a row gives `2`, never `null`. Keys that genuinely can be absent (`epic`,
 `milestone`, `deferred_at`) stay absent, and that absence is the answer.
 
+**Which epic a row is in, you read from `derived_epic`.** `epic` is what the file
+says, and a row whose id sits under an epic (`<epic>.<body>`) reads its epic from
+that id and writes no `epic` of its own — so on those rows `epic` is absent and
+`derived_epic` names the epic. On a row that carries it, absence means the row is in
+no epic at all, and on a group row it never stands. One row reads the two keys against
+each other: where the same id stands twice and the other line is a different `kind`,
+this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
+picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
+`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`rm --json` hands the removed lines back exactly as the file held them, and `tui
+--json` prints the explorer's own shorter row — and there you read the epic off the id.
+
 **When several sessions share one repository, pick up with
 `moai mv <id> in_progress --from todo`.** It moves only while the column you saw
 still holds, so it never overwrites work someone else picked up first — the loser
@@ -83,6 +95,15 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
+**If a milestone is running, give the plan that milestone** — `moai add --from -
+--milestone <id>`. It goes onto the epics the plan creates and the members inherit
+it; without it the whole plan stands outside the release, and of it `moai ready`
+then hands out only what is `p0`.
+
+**`--body` says why these issues are one bundle.** It goes onto the first epic the
+plan creates, which is where `moai show <epic>` reads it from. `--body -` and
+`--from -` cannot both read stdin, so give one of them a file.
+
 ## What to write in an issue
 
 **Pass the title and the body separately.** The title is an argument; the body is
@@ -107,6 +128,10 @@ English goes in as it is.
   when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
 - Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
   (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
+- **Keep the technical term, and never drop the original.** An everyday word carries several
+  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
+  deleted, nobody can read the sentence back to the code — and
+  a name that came from the code goes in exactly as it is
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`
 

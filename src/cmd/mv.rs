@@ -30,6 +30,10 @@ struct Moved {
     closable: Vec<Issue>,
     /// 닫은 줄과 **같은 에픽에서 다음에 집을 것**(moai-j4xs, `report::Freed::next`).
     next: Vec<Issue>,
+    /// 이 쓰기가 연 셋(`unblocked`·`closable`·`next`)이 든 에픽 — `--json` 의 `derived_epic`
+    /// 이 읽는다(moai-wuzi). **`read` 와 따로 든다**: 그쪽은 *옮기려 한* 줄의 지도라, 연 줄을
+    /// 거기에 섞으면 그 줄들이 `stands` 안내에도 서서 옮긴 적 없는 묶음의 칸을 말한다.
+    freed: super::Read,
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -116,7 +120,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 막음을 풀지 않고, 락을 쥔 채 목록을 한 벌 더 복사하는 값은 그때만 치른다.
             // 거절이 다 끝난 자리에서 뜬다 — 위에서 물러날 판에 한 벌 베끼지 않는다.
             let before = to.is_done().then(|| issues.clone());
-            let seen: super::Read =
+            let seen: super::Standing =
                 if from.is_some() { super::standing_of(issues, cfg, &asked_all) } else { Default::default() };
             for id in ids {
                 // #a-partial: 하나가 없다고 나머지를 안 옮기지 않는다.
@@ -191,11 +195,11 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
             let asked: Vec<&str> =
                 m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
-            m.read = super::read_of(issues, cfg, &asked);
+            m.read = super::read_of(issues, cfg, &asked, ctx.json);
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues
                 .iter()
-                .filter(|g| m.read.contains_key(&g.id) && crate::report::has_finished_member(issues, g))
+                .filter(|g| m.read.column(&g.id).is_some() && crate::report::has_finished_member(issues, g))
                 .map(|g| g.id.clone())
                 .collect();
             // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
@@ -205,6 +209,11 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 m.unblocked = opened.unblocked.into_iter().cloned().collect();
                 m.closable = opened.closable.into_iter().cloned().collect();
                 m.next = opened.next.into_iter().cloned().collect();
+                // 연 줄의 소속도 **락 안에서** 챙긴다 — 밖에서 다시 세면 그 사이 남이 쓴
+                // 줄이 섞인다(`read_of` 와 같은 까닭).
+                let freed: Vec<&str> =
+                    m.unblocked.iter().chain(&m.closable).chain(&m.next).map(|i| i.id.as_str()).collect();
+                m.freed = super::read_of(issues, cfg, &freed, ctx.json);
             }
             Ok((entries, m))
         },
@@ -261,13 +270,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             shelved: super::shelved(&moved.shelved),
             stands: moved
                 .read
-                .iter()
-                .filter(|(_, col)| col.as_str() != to.as_str())
+                .columns()
+                .filter(|(_, col)| *col != to.as_str())
                 .map(|(id, col)| Stands { id, derived_status: col })
                 .collect(),
-            unblocked: moved.unblocked.iter().map(|i| super::Row::of(i, None)).collect(),
-            closable: moved.closable.iter().map(|i| super::Row::of(i, None)).collect(),
-            next: moved.next.iter().map(|i| super::Row::of(i, None)).collect(),
+            // **이 셋에 `derived_status` 는 안 선다 — 그래도 `Row::from` 으로 짓는다**(리뷰).
+            // 셋 다 일 줄뿐이라(`report::closable`·`unblocked_pick` 이 `is_work` 로 거른다)
+            // `Row::of` 가 묶음이 아닌 줄의 읽은 칸을 버리는 자리에서 값이 저절로 빈다. 줄을
+            // 짓는 자를 따로 두면 `Row` 에 키가 하나 더 설 때 이 셋만 빠진다.
+            unblocked: moved.unblocked.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
+            closable: moved.closable.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
+            next: moved.next.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
         });
     }
 
@@ -293,7 +306,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
-    for (id, col) in moved.read.iter().filter(|(_, col)| col.as_str() != to.as_str()) {
+    for (id, col) in moved.read.columns().filter(|(_, col)| *col != to.as_str()) {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),

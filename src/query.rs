@@ -20,25 +20,39 @@ pub enum Sel {
     Is(String),
 }
 
-/// 줄 하나에 대한 판정 (`Where::eclipsed`).
-pub type RowTest<'a> = Box<dyn Fn(&Issue) -> bool + 'a>;
-
 /// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
 #[derive(Default)]
 pub struct Where<'a> {
-    pub epic: BTreeMap<&'a str, &'a str>,
-    pub milestone: BTreeMap<&'a str, &'a str>,
-    /// 물려받은 것까지 친 미룸. 미룸도 소속처럼 묶음을 타고 내려온다.
-    pub put_off: BTreeSet<&'a str>,
+    pub epic: crate::report::Handing<'a>,
+    /// 줄을 id 로 찾는 지도와 뿌리로 올라간 생각 (`report::Lines`). 마일스톤을 **줄마다**
+    /// 묻는 재료다 — 위의 `milestone` 지도는 id 로 짠 것이라 같은 id 의 앞줄이 뒷줄의
+    /// 릴리스를 입는다(moai-jk2u.wvn).
+    ///
+    /// **빈 것은 빈 저장소를 뜻한다**(`Where::default`, 그림 시험이 쓴다) — 조상이 하나도
+    /// 없으니 에픽 없는 줄은 제 `milestone` 에 선다. 옛 빈 지도가 `없음` 을 답하던 것과
+    /// 다른데, 그쪽이 사실이 아니었다: 줄 하나짜리 저장소에서 `milestones_in` 이 내는 답이
+    /// 이것이다.
+    pub(crate) lines: crate::report::Lines<'a>,
+    /// 물려받은 것까지 친 미룸 (`report::Shelved`). 미룸도 소속처럼 묶음을 타고 내려온다.
+    ///
+    /// **줄로 묻는다** — 상세가 그 답을 그리는 자와 한 그릇이라, 한 화면이 제 말을 뒤집지
+    /// 않는다(moai-wre3). 한때 여기만 접은 지도를 짚고 상세만 줄로 물어, 상세가 `미룸` 을
+    /// 다는 묶음 줄을 `--deferred` 가 안 냈다.
+    pub shelved: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
     pub states: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
     pub since: BTreeMap<&'a str, &'a str>,
-    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄인가 (`report::is_eclipsed`). 위의 소속
-    /// 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이 나온다.
-    /// 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
-    pub(crate) eclipsed: Option<RowTest<'a>>,
+    /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
+    /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
+    /// 나온다. 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
+    ///
+    /// **판정이 아니라 지도를 든다**(moai-53s2). 한때 판정 하나를 상자에 담아 들었는데,
+    /// 줄을 내는 쪽(`cmd::Row::of` → `report::stands_in`)도 같은 지도가 있어야 가려진 줄에
+    /// 쌍둥이의 에픽을 안 단다 — 닫힌 상자에서는 그 지도를 못 꺼낸다. **든 꼴 그대로**
+    /// 나르므로(`report::Kinds`) 꼴이 다른 쪽이 걸음마다 지도를 새로 짓지 않는다(리뷰).
+    pub(crate) kinds: crate::report::Kinds<'a>,
     /// 길 잃은 줄 **밑에 접힌** 줄 (`report::under_lost`). 트리가 `(길 잃음)` 안에 그리고
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
@@ -66,14 +80,52 @@ impl<'a> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
-        let eclipsed: RowTest<'a> = Box::new(move |i: &Issue| crate::report::is_eclipsed(&kinds, i));
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed: Some(eclipsed), folded }
+        let crate::report::Soil { epic, roots, shelved, kinds, folded, lines, .. } = soil;
+        // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
+        // 때만 서는데, `kinds` 는 id 마다 한 칸이라 그 수가 줄 수와 같으면 id 가 다 다르다 —
+        // 성한 저장소에서 거름망을 짓는 걸음마다 목록을 두 번 더 걷던 자리다.
+        let split = match kinds.len() == all.len() {
+            true => BTreeSet::new(),
+            false => crate::report::split_roots(all, &shelved),
+        };
+        // 갈리는 id 의 줄만 넘긴다 — 성한 저장소에서는 빈 목록이라 걷는 값도 드는 자리도 없다.
+        let rows: Vec<(&Issue, Option<&str>)> =
+            all.iter().zip(&shelved).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
+        let shelved = crate::report::Shelved::kept(roots, split, rows);
+        let kinds = crate::report::Kinds::Own(kinds);
+        Where { epic, lines, shelved, states, since, kinds, folded }
+    }
+
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
+    pub fn eclipsed(&self, i: &Issue) -> bool {
+        self.kinds.eclipses(i)
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::column(i, &self.states)
+        crate::report::column(&self.kinds, i, &self.states)
+    }
+
+    /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
+    pub fn epic_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
+        crate::report::stands_in(&self.kinds, i, self.epic.handed().get(i.id.as_str()).copied())
+    }
+
+    /// 그 줄이 **선 마일스톤** (`report::stood_at_line`) — 롤업과 `moai show <마일스톤>` 의
+    /// 멤버가 세는 곳과 같은 답이다.
+    ///
+    /// **지도를 곧바로 안 짚는다**(리뷰). 마일스톤은 에픽을 타고 오는데([`crate::report::milestones_in`])
+    /// 그 에픽이 줄마다 갈리므로, 지도를 짚으면 같은 id 를 든 앞줄이 뒷줄의 에픽을 타고 남의
+    /// 릴리스로 간다 — `moai show <마일스톤>` 이 멤버로 그린 줄을 `moai show --milestone <그것>`
+    /// 은 안 내고 `--milestone none` 이 냈다.
+    /// **가려짐은 여기서 가른다** — 에픽 쪽 [`Where::epic_of`] 가 `report::stands_in` 안에서
+    /// 그러는 것과 짝이다. `report::stood_at_line` 자신은 가려짐을 안 본다(세는 쪽은 `work_under`
+    /// 가 그 줄을 미리 걸러 넘긴다) — 문을 한 겹 위에 두는 것이 두 축에서 같은 꼴이다.
+    pub fn milestone_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
+        if self.eclipsed(i) {
+            return None;
+        }
+        crate::report::stood_at_line(i, self.epic_of(i), &self.lines)
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
@@ -82,9 +134,10 @@ impl<'a> Where<'a> {
     /// 데서도 안 읽히는 칸의 시각이라, 그것으로 재면 오늘 진행 중이 된 에픽이
     /// `-s in_progress --stale 10` 에 걸린다 — 고르는 자와 재는 자가 어긋난다.
     pub fn since<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::is_group(i)
-            .then(|| self.since.get(i.id.as_str()).copied())
-            .flatten()
+        // **고르는 자와 재는 자가 한 문을 지난다**(리뷰, `report::stands_on`). 위의 `column` 만
+        // 가려진 줄을 거르면, `-s` 가 제 칸으로 고른 그 줄의 나이는 쌍둥이 묶음의 셈에서 와
+        // `--stale` 이 265일 된 줄을 하루짜리로 잰다.
+        crate::report::stands_on(&self.kinds, i, || self.since.get(i.id.as_str()).copied())
             .unwrap_or(i.status_since.as_str())
     }
 
@@ -93,8 +146,18 @@ impl<'a> Where<'a> {
     /// 끝난 줄의 제 미룸도 여기 든다 — 그 줄은 done 규칙이 따로 숨기고,
     /// `--all` 은 그것을 `미룸` 표와 함께 연다. 물려받은 것만 보면 닫고 미룬
     /// 줄이 `--all` 에서 표를 잃는다.
+    ///
+    /// **물려받은 것은 줄마다 묻는다**(moai-u3ta). 접은 지도는 미룬 릴리스에 든 앞줄의 미룸을
+    /// 산 릴리스에 든 뒷줄에 그대로 주었다 — `show --deferred` 가 두 줄을 다 내고 `ready` 는
+    /// 둘 다 안 내주면서, `show <산 릴리스>` 는 그 줄을 산 멤버로 셌다. 되묻는 것은 답이
+    /// 줄마다 갈리는 id 뿐이고(`report::Shelved`), 성한 저장소에서는 접은 지도 한 번 짚기다.
+    ///
+    /// **묶음 줄도 같은 자로 묻는다**(2026-09-23 사용자 결정, moai-wre3). 한때 여기만
+    /// `!is_group` 문으로 접은 지도에 갔는데, 그리는 쪽이 줄로 답하게 된 뒤로는 그 문이 곧
+    /// 상세와 이 목록이 갈리는 자리였다 — 묶음의 읽은 칸을 가르는 `report::counted` 도 이미
+    /// 그 줄에서 올라가므로(`shelf.every(g)`), 줄마다의 판정이 묶음에도 참이다.
     pub fn deferred(&self, i: &Issue) -> bool {
-        i.is_deferred() || self.put_off.contains(i.id.as_str())
+        i.is_deferred() || self.shelved.root(i).is_some()
     }
 }
 
@@ -361,21 +424,32 @@ impl Filter {
         // 다른 쌍둥이의 것이고, 트리는 그 줄을 `(길 잃음)` 에 두며 롤업은 어느 묶음에도
         // 안 센다(moai-2m9p). 여기서 지도를 그대로 읽으면 `moai show <에픽>` 이 `0/0` 이라
         // 말하는 에픽을 `moai show -e <에픽>` 은 그 줄로 채운다.
-        let eclipsed = wh.eclipsed.as_ref().is_some_and(|f| f(i));
+        let eclipsed = wh.eclipsed(i);
         // **길 잃은 줄 밑에 접힌 줄은 `none` 으로 안 고른다**(moai-phw9, 사용자와 정함). 소속
         // 지도에 없다는 사실만 보면 트리가 `(길 잃음)` 안에 그리고 status 가 안 세는 줄을
         // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.
         // 이름으로 고르는 `-e X` 는 그대로다.
         let folded = wh.folded.contains(i.id.as_str());
-        let placed = |sel: &[Sel], map: &BTreeMap<&str, &str>| {
-            let value = map.get(i.id.as_str()).copied();
+        let placed = |sel: &[Sel], value: Option<&str>| {
             sel.is_empty()
                 || (!eclipsed
                     && sel
                         .iter()
                         .any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
         };
-        if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
+        // **두 축 다 지도를 곧바로 안 짚는다**(moai-7iyc.rt6, 2026-09-23 사용자 결정). 지도는 id 로
+        // 짠 것이라 같은 id 를 든 줄이 둘이면 앞줄이 뒷줄의 값을 입는다 — `-e <에픽>` 이
+        // `derived_epic` 과 다른 답을 하던 자리다. **마일스톤도 같다**(리뷰): 에픽이 마일스톤을
+        // 이기므로(`report::milestones_in`) 줄에 적힌 `milestone` 은 이미 졌지만, 이긴 그 에픽이
+        // 줄마다 갈려 지도의 값도 앞줄의 것이 못 된다.
+        // **마일스톤은 물을 때만 잰다**(리뷰 moai-jk2u.m60) — `placed` 는 빈 거르개에 참을 내지만
+        // 인자는 그 앞에 셈해진다. 값이 지도 짚기이던 때는 공짜였는데, 줄마다 묻게 된 뒤로
+        // (`report::stood_at_line`) 에픽 없는 줄마다 조상을 타고 오르는 걸음이라 그렇지 않다 —
+        // 탐색기의 거름망은 키 하나에 줄마다 한 번 여기를 지난다.
+        if !placed(&self.epic, wh.epic_of(i)) {
+            return false;
+        }
+        if !self.milestone.is_empty() && !placed(&self.milestone, wh.milestone_of(i)) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
@@ -582,12 +656,13 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
     // **걸음도 따로 두지 않는다**(moai-j038.vna) — 제가·조상이 내 것이거나 저나 조상의 에픽이 내 것인가는
     // 워크트리의 일을 가르는 [`crate::report::claims`] 와 같은 물음이라 그것을 부른다. 손으로 옮겨 둔
     // 걸음은 한쪽만 고쳐지는 날 훅이 세는 "그 일" 과 [NEW] 가 서는 "내게 온 것" 을 갈라놓는다.
-    // **마일스톤은 안 센다**(사용자 결정: 담당·조상·에픽) — 마일스톤 지도를 비워 넘긴다.
-    let epics = crate::report::groups(issues);
-    let stones = BTreeMap::new();
+    // **마일스톤은 안 센다**(사용자 결정: 담당·조상·에픽) — 에픽 축만 잰 재료로 든다
+    // (`Ties::epics_only`). 한때 빈 마일스톤 지도로 같은 뜻을 졌는데, 그 축의 답은 이제
+    // 지도가 아니라 줄에서 나오므로 빈 지도가 "안 센다" 를 못 뜻한다(moai-jk2u.ipf).
+    let ties = crate::report::Ties::epics_only(issues);
     issues
         .iter()
-        .filter(|i| crate::report::claims(&epics, &stones, &mine, i))
+        .filter(|i| crate::report::claims(&ties, &mine, i))
         .filter(|i| changed_since_seen(i, seen))
         .map(|i| i.id.as_str())
         .collect()

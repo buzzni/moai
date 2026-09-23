@@ -198,8 +198,10 @@ fn say_why(whys: &[crate::read_marks::SheetTrouble], ctx: &Ctx, said: &mut BTree
 /// 손실이 되고, 그 자리가 셋이다.
 ///
 /// - **못 읽은 줄이 쥔 id.** [`crate::store::Load::reserved_ids`] 가 안다 — 더해서 지킨다
-/// - **JSON 조차 아닌 줄.** 그 줄은 제 id 도 못 내놓아(`LoadError::id` 가 `None`) 무엇을 지킬지 모른다.
-///   모르는 채로 걷으면 줄을 고친 뒤 [NEW] 가 되살아나므로 아예 안 걷는다
+/// - **id 조차 못 내놓는 줄.** 그 줄은 무엇을 지킬지 모른다 — 모르는 채로 걷으면 줄을 고친 뒤
+///   [NEW] 가 되살아나므로 아예 안 걷는다. **JSON 이 깨진 줄이 다 여기 드는 것은 아니다**
+///   (moai-ijfy) — 머리가 성하면 [`crate::id::id_of`] 가 id 를 긁어 내고, 그런 줄에서는 걷기가
+///   돈다(긁힌 id 는 아래 `reserved_ids` 로 지켜진다). `LoadError::id` 가 `None` 인 줄만 막는다
 /// - **옆 워크트리에만 있는 줄.** 탐색기는 겹쳐 보기를 켠 채 그 줄에 도장을 찍는데
 ///   (`worktree::gather`), 같은 파일을 걷는 이쪽이 루트의 줄만 세면 그 도장이 `moai read` 한 번에
 ///   걷힌다 — 두 표면이 한 파일을 쓰니 세는 자도 같아야 한다. 옆을 못 읽었으면(`trouble`) 역시 안 걷고,

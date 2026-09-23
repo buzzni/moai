@@ -43,10 +43,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
+        let kinds = ground.kinds();
         let rows: Vec<Row> = index
             .entries(&load.issues, &path)
             .iter()
-            .map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang()))
+            .map(|e| Row::of(&index, &load.issues, &states, &kinds, e, ctx.lang()))
             .collect();
         return super::json_line(&rows);
     }
@@ -59,7 +60,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = crate::user_config::path();
     // 표식은 **읽기 전에** 잰다 — 뒤에 재면 읽고 첫 걸음 사이에 옆이 쓴 것을 놓친다(`App::config_stamp`).
     let config_stamp = config.as_deref().map(crate::store::stamp);
-    // 설정은 **한 번 읽어** 층과 보기가 나눠 쓴다(moai-u8cs).
+    // 설정은 **한 번 읽어** `tui::layer` 와 보기와 새 판 묻기가 나눠 쓴다(moai-u8cs, moai-d74q).
     let reg = crate::user_config::read(config.as_deref());
     // **띄운 자리는 세션이 선 체크아웃이다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 트래커는 루트로
     // 옮겨 가지만 띄운 곳은 이 워크트리다. 트래커의 자리로 적던 판은 층으로 올라갔다 그 줄로 다시
@@ -109,7 +110,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref());
+    // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
+    // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
     screen(app)
 }
 
@@ -122,8 +125,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
 /// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
 /// 기능이 피하려던 바로 그 일이다.
-fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>) {
-    let Some(dir) = asking_from(config, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
+fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>, says: Option<bool>) {
+    let Some(dir) = asking_from(config, says, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
         return;
     };
     app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k)));
@@ -136,12 +139,12 @@ fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::P
 /// 서면 `--json` 이 매번 바깥을 두드리는데, 그것이 이 기능이 피하려던 바로 그 일이다.
 fn asking_from(
     config: Option<&std::path::Path>,
+    says: Option<bool>,
     json: bool,
     on_screen: bool,
     env: impl Fn(&str) -> Option<std::ffi::OsString>,
 ) -> Option<std::path::PathBuf> {
     let dir = config.and_then(|p| p.parent())?;
-    let says = crate::latest::config_says(config);
     crate::latest::gate(env, says, json, on_screen).is_none().then(|| dir.to_path_buf())
 }
 
@@ -181,7 +184,10 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
-                        warnings: sum.warnings,
+                        // **여기서 달을 입힌다**(moai-fgjj) — 셈은 시간대에 안 닿고, 이 길은 낼
+                        // 것을 그 자리에서 다 내는 표면이다. 어느 시계로 셀지는 그대로 `Ctx::zone`
+                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 idea moai-dux7 이 든 자리다).
+                        warnings: sum.warnings.count(&now, ctx.zone()),
                         notices: sum.notices,
                         stranded: sum.stranded,
                         unreadable_worktrees: sum.blind,
@@ -207,6 +213,9 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     }
     refuse_without_terminal(ctx.lang())?;
     let layer = crate::tui::layer::Layer::of(&reg, None, ctx.lang());
+    // **시간대는 여기서 안 준다**(moai-fgjj) — 이 줄이 첫 쓸기를 띄우지만(`App::on_projects` →
+    // `Layer::launch`) 그 쓸기가 세는 것에 기한 판정이 안 접혀 오므로, 아래 `adopt_look` 이 시간대를
+    // 정하고 나면 첫 화면의 `+N` 이 그 시간대로 선다. 한때 여기서 한 벌 베껴 넘겼다(리뷰 moai-pmhv.x3r 4번).
     let mut app = App::on_projects(layer);
     app.site.lang = ctx.lang();
     app.user = ctx.user.clone();
@@ -226,7 +235,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref());
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
     screen(app)
 }
 
@@ -417,6 +426,7 @@ impl Row {
         index: &Index,
         issues: &[Issue],
         states: &std::collections::BTreeMap<&str, &str>,
+        kinds: &crate::report::Kinds<'_>,
         e: &Entry,
         lang: crate::i18n::Lang,
     ) -> Row {
@@ -430,10 +440,12 @@ impl Row {
                 dir,
                 path: issues[at].id.clone(),
                 status: Some(issues[at].status.as_str().to_string()),
-                // 묶음만 읽은 칸을 받는다 — `report::column` 과 같은 자다.
-                derived_status: crate::report::is_group(&issues[at])
-                    .then(|| states.get(issues[at].id.as_str()).map(|s| s.to_string()))
-                    .flatten(),
+                // 묶음만 읽은 칸을 받고 가려진 줄은 안 입는다 — `report::stands_on` 과 같은
+                // 자다(moai-7iyc.5fz). 판정을 여기 베끼면 `show --json` 의 같은 키와 갈린다.
+                derived_status: crate::report::stands_on(kinds, &issues[at], || {
+                    states.get(issues[at].id.as_str()).copied()
+                })
+                .map(str::to_string),
                 priority: Some(issues[at].priority()),
             },
             None => Row {
@@ -816,20 +828,32 @@ mod tests {
         let at = s.path().join("config.toml");
         std::fs::write(&at, "").unwrap();
         let none = |_: &str| None;
-        assert_eq!(super::asking_from(Some(&at), false, true, none).as_deref(), Some(s.path()));
+        // **설정이 무엇이라 했는지는 이제 부르는 쪽이 들고 온다**(moai-d74q) — 설정을 읽는 것은
+        // `user_config::read` 한 번이고, 이 자리는 그 답으로 문만 잰다.
+        let says = |src: &str| crate::user_config::read(Some(&at_with(&at, src))).update_check;
+        assert_eq!(super::asking_from(Some(&at), None, false, true, none).as_deref(), Some(s.path()));
         // `--json` 은 화면이 터미널이어도 안 묻는다 — 에이전트가 치는 자리다.
-        assert_eq!(super::asking_from(Some(&at), true, true, none), None);
+        assert_eq!(super::asking_from(Some(&at), None, true, true, none), None);
         // 사람이 보는 화면이 아니면 안 묻는다(파이프).
-        assert_eq!(super::asking_from(Some(&at), false, false, none), None);
+        assert_eq!(super::asking_from(Some(&at), None, false, false, none), None);
         // 설정이 껐으면 안 묻는다.
-        std::fs::write(&at, "[update]\ncheck = false\n").unwrap();
-        assert_eq!(super::asking_from(Some(&at), false, true, none), None);
+        assert_eq!(super::asking_from(Some(&at), says("[update]\ncheck = false\n"), false, true, none), None);
+        // **틀린 값은 끄지 않는다** — 읽은 것이 없으니 켠 것이고, 까닭은 알림으로 선다.
+        assert_eq!(
+            super::asking_from(Some(&at), says("[update]\ncheck = \"no\"\n"), false, true, none).as_deref(),
+            Some(s.path())
+        );
         // 환경이 껐으면 안 묻는다.
-        std::fs::write(&at, "").unwrap();
         let off = |k: &str| (k == crate::latest::OFF_VAR).then(|| std::ffi::OsString::from("1"));
-        assert_eq!(super::asking_from(Some(&at), false, true, off), None);
+        assert_eq!(super::asking_from(Some(&at), None, false, true, off), None);
         // 답을 둘 자리를 모르면 안 묻는다 — 창을 닫을 자리가 없어 부를 때마다 두드리게 된다.
-        assert_eq!(super::asking_from(None, false, true, none), None);
+        assert_eq!(super::asking_from(None, None, false, true, none), None);
+    }
+
+    /// 설정 파일에 `src` 를 적고 그 자리를 돌려준다.
+    fn at_with(at: &std::path::Path, src: &str) -> std::path::PathBuf {
+        std::fs::write(at, src).unwrap();
+        at.to_path_buf()
     }
 
     use super::*;

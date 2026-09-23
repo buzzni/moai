@@ -38,7 +38,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .map(|id| report::Unreadable { id })
         .collect();
     let now = model::now();
-    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now);
+    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
@@ -99,10 +99,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
     let trouble = trouble + if said_already { 0 } else { unread.all.len() };
-    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)는 안 싣는다**
-    // — 그 화면이 알림을 아예 안 세기 때문이지(`view::projects_status`), 남의 저장소라서가 아니다.
-    // 탐색기의 프로젝트 층은 같은 남의 저장소를 두고도 센다(moai-prdh) — 그래서 `.moai` 밖에서 본
-    // 두 화면의 알림 수가 지금 갈린다. 맞추는 일은 한눈 보기가 알림을 세기 시작할 때다.
+    // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)도 이제
+    // 싣는다**(moai-zog5, 2026-09-22 사용자 결정) — [`overview`] 가 같은 자로 더한다. 한때 그
+    // 화면만 안 세어, 같은 디렉터리를 두고 보드는 알림 1건, 탐색기의 프로젝트 층은 3건을 댔다.
     st.notices.extend(install_notices(&repo, ctx.chdir));
 
     // **설정에 적은 말이 틀렸으면 여기서 댄다**(리뷰 moai-80qw). `Doc::lang` 이 그 줄을 짓는
@@ -193,11 +192,19 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 알림을 더하면 다른 쪽은 조용하고, 그것을 잡아 줄 것이 아무 데도 없다. 더하는 자리가 여기
 /// 하나면 더하는 것만으로 두 표면이 함께 움직인다.
 ///
-/// **부르는 곳은 셋이다** — `moai status`, 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`,
-/// moai-6k1r), 탐색기의 프로젝트 층(`tui::layer::summarize`, moai-prdh). 층은 수만 세고 글은
-/// 안 편다. 두 표면을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices` 고, 층을
-/// 맨 것은 `the_project_layer_counts_the_same_notices_as_the_board` 다 — 여기에 알림을 더하면
-/// 셋이 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
+/// **부르는 곳은 여섯이다** — 저장소 안의 `moai status`, 밖에서 본 한눈 보기([`overview`],
+/// moai-zog5), 훅의 보드(`cmd::hook.rs` 의 `UserPromptSubmit`, moai-6k1r), `moai tui --json`
+/// (`tui::layer::summarize`), 탐색기의 프로젝트 층(`tui::layer::look_one`, moai-prdh·moai-nzyh),
+/// 탐색기가 든 프로젝트(`tui::prepare` 와 `tui::App::overlaid`, moai-k6ff). 뒤의 셋은 수만 세고
+/// 글은 안 편다.
+///
+/// 앞의 둘과 훅을 맨 것은 `the_board_and_the_hook_carry_the_same_install_notices` 와
+/// `the_project_layer_counts_the_same_notices_as_the_board` 다 — 여기에 알림을 더하면 여섯이
+/// 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
+///
+/// **탐색기의 둘은 때를 가린다**(`tui::layer::ASK_INSTALL_EVERY`) — 세는 법은 여기 하나 그대로고,
+/// 갈라 둔 것은 "언제 묻나" 뿐이다. 이 부름은 하위 프로세스를 셋까지 새로 실행하는데
+/// (`git check-attr`·`git config`, 심긴 줄의 probe), 그쪽 두 길은 걸음마다 돈다.
 ///
 /// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
 /// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
@@ -266,17 +273,40 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
             // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따르되, 재는
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
-            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now);
+            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
             // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
             // 마다 같은 스냅샷을 다시 파, 값이 등록 수만큼 곱해진다. 안쪽 `run` 과 같은 자다.
             let (lost, unread) =
                 crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
             status.warnings.extend(lost);
+            // **설치가 어긋난 것도 여기서 센다**(moai-zog5, 2026-09-22 사용자 결정) — 안쪽
+            // `moai status` 와 탐색기의 프로젝트 층이 이미 세는 그 셋이다([`install_notices`]).
+            // 한때 이 화면만 안 세어, 같은 디렉터리를 두고 밖에서 본 보드는 알림 1건, 프로젝트
+            // 층은 3건을 댔다. 세션이 시작하는 화면이 밖에서 부른 `moai status` 인데, 그 한
+            // 화면만 설치가 어긋난 것을 조용히 넘겼다.
+            //
+            // **`chdir` 은 `false` 다** — `tui::layer::summarize` 와 같은 자다. 여기 서는 줄은
+            // 남의 저장소라 [`crate::cmd::init::away_root`] 가 잰 자리대로 `-C <경로>` 를 얻는다.
+            status.notices.extend(install_notices(repo, false));
+            // **집은 줄의 소속은 여기서 푼다**(moai-wuzi) — `--json` 이 펴는 자리에는 이
+            // 프로젝트의 줄 목록이 안 따라간다. 다만 **기계 쪽만 짓는다**(리뷰): `Board::epics`
+            // 를 읽는 것은 `--json` 뿐이라, 늘 지으면 사람이 보는 보드가 프로젝트마다 저장소
+            // 전체의 소속을 한 벌씩 걷고 그대로 버린다.
+            let picked = report::wip(&load.issues, &repo.config);
+            let (epics, kinds) = match ctx.json {
+                true => {
+                    let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
+                    (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
+                }
+                false => Default::default(),
+            };
             view::Board {
                 cfg: &repo.config,
                 status,
-                picked: report::wip(&load.issues, &repo.config),
+                picked,
+                epics,
+                kinds,
                 origin: &p.origin,
                 trouble: &p.trouble,
                 // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
@@ -319,7 +349,11 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 path: &p.path,
                 seen: s.map(|b| Said {
                     status: &b.status,
-                    picked: b.picked.iter().map(|i| super::Row::of(i, None).on(&p.origin)).collect(),
+                    picked: b
+                        .picked
+                        .iter()
+                        .map(|i| super::Row::of(i, None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin))
+                        .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
                     trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
                     unreadable_worktrees: &b.blind,

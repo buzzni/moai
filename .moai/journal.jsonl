@@ -7089,3 +7089,10 @@
 {"ts":"2026-09-21T13:59:28Z","id":"moai-1vkb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"옛 한 파일과 journal/ 의 파일을 이름 차례로 모아 ts 로 세운다. 차례가 계약인 까닭은 안정 정렬이 같은 ts 의 줄을 읽은 차례로 두기 때문이고, read_dir 의 차례는 정해져 있지 않다. 리뷰가 read_dir 실패를 삼키던 자리를 잡았다 — 못 읽는 자리와 \"아직 저널이 없다\" 가 같아 보였다."}
 {"ts":"2026-09-21T13:59:28Z","id":"moai-a6ob","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (max — 저장 형식이 바뀐다)"}
 {"ts":"2026-09-21T13:59:28Z","id":"moai-a6ob","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":".gitattributes 에 두 줄이 나란히 선다 — 옛 한 파일을 든 저장소가 아직 있고 그 파일도 union 이라야 한다. 시험 하나가 이름 짓기·두 파일 섞임·두 규칙을 한자리에서 잰다: 셋은 한 결정의 세 면이라 갈라 두면 한쪽만 되돌아가도 안 붉어진다. 리뷰가 심는 글의 예시에서 관리자의 실제 메일을 걷어 you@example.com 으로 바꿨다."}
+{"ts":"2026-09-22T08:35:22Z","id":"moai-bu9i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:22Z","id":"moai-ww2u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:22Z","id":"moai-fww7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:22Z","id":"moai-h89f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:23Z","id":"moai-jza6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:23Z","id":"moai-umu2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-22T08:35:23Z","id":"moai-wszt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}

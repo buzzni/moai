@@ -133,9 +133,15 @@ pub struct Index {
     /// id → 첨자. 화면은 에픽·마일스톤·막는 것을 제목으로 풀어 내는데, 그때마다
     /// 전체를 훑으면 프레임 하나에 이슈 수에 비례한 훑기가 여러 번 돈다.
     by_id: BTreeMap<String, usize>,
-    /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). 상세가 물려받은
-    /// 미룸을 말하는 데 쓴다 — 프레임마다 조상을 다시 타지 않게.
+    /// id → 그 줄을 계획에서 뺀 줄(`report::deferred_roots`). **id 밖에 없는 자리**(막는 줄)가
+    /// 쓴다 — 프레임마다 조상을 다시 타지 않게.
     deferred_root: BTreeMap<String, String>,
+    /// 자리 → 그 줄을 계획에서 뺀 줄(`report::Soil::shelved`). **줄을 든 자리는 이것을
+    /// 짚는다**(리뷰 moai-jk2u.hr4) — 위의 지도는 id 로 접은 것이라 같은 id 의 앞줄이 뒷줄의
+    /// 답을 입는다. 곁의 [`Index::epic_of`]·[`Index::milestone_of`] 가 자리로 답하는 것과
+    /// 같은 자다(moai-2m9p): 내주는 문(`ready`)과 목록이 줄마다 답하는데 그리는 쪽만 id 로
+    /// 답하면, 트리와 탐색기가 `moai ready` 가 내주는 줄에 `미룸` 을 달았다.
+    shelved: Vec<Option<String>>,
     /// 자리 → 그 자리에 선 줄·그 밑에 걸린 줄·바로 밑의 바구니 마디([`Place`]). **미리 짓는다**
     /// (moai-teka) — 목록 한 층을 짓는 [`Index::entries_sorted`] 가 `homes` 전부를 훑고, 트리로
     /// 펼친 목록([`Index::entries_tree`])은 그것을 **열린 자리마다** 부른다. 그래서 한 프레임이
@@ -225,8 +231,9 @@ impl Index {
             issues,
             epic_of: &soil.epic,
             milestone_of: &soil.milestone,
+            lines: &soil.lines,
             by_id: &by_id,
-            misplaced: &soil.lost,
+            kinds: &soil.kinds,
             eclipsed: &eclipsed,
             has_milestones,
         };
@@ -247,6 +254,7 @@ impl Index {
         }
         let by_id = by_id.into_iter().map(|(id, at)| (id.to_string(), at)).collect();
         let deferred_root = soil.roots.iter().map(|(id, root)| (id.to_string(), root.to_string())).collect();
+        let shelved = soil.shelved.iter().map(|r| r.map(str::to_string)).collect();
         // 자리마다 제 줄을 모은다(moai-teka). 줄마다 제 자리의 **모든 앞머리**에 제 첨자를 적고,
         // 제 자리에는 `here` 로도 적는다. 바구니 마디는 그 앞머리의 **다음 마디**라 여기서 함께
         // 본다. 깊이만큼만 돌므로 이슈 수에 비례하고, 차례는 첨자 차례 그대로다 — 훑어 모으던
@@ -272,7 +280,7 @@ impl Index {
             }
         }
 
-        Index { homes, has_kids, by_id, deferred_root, places }
+        Index { homes, has_kids, by_id, deferred_root, shelved, places }
     }
 
     /// 그 줄이 **실제로 선** 마일스톤. 제 줄의 `milestone` 이 아니다 — 에픽이
@@ -290,9 +298,30 @@ impl Index {
         })
     }
 
+    /// 그 줄이 **선 에픽** — [`Index::milestone_of`] 와 같은 자, 같은 까닭.
+    ///
+    /// 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을 안 적으므로(moai-exh7), 적힌 값만 보는
+    /// 패널은 트리가 에픽 밑에 둔 줄을 두고 아무 말도 안 한다(리뷰). 자리를 정한 경로에서 읽으면
+    /// 트리와 한 답이다 — `(길 잃음)` 에 선 줄은 여기서도 없다.
+    pub fn epic_of(&self, at: usize) -> Option<&str> {
+        self.homes[at].iter().find_map(|seg| match seg {
+            Seg::Epic(e) => Some(e.as_str()),
+            _ => None,
+        })
+    }
+
     /// 그 줄을 계획에서 뺀 줄 — 제가 미뤘으면 저 자신, 물려받았으면 미룬 조상·묶음.
+    ///
+    /// **id 밖에 없는 자리에서만 부른다**(막는 줄, `blocked_by`). 줄을 든 자리는
+    /// [`Index::shelved_at`] 이다 — 이 지도는 id 로 접은 것이라 뒷줄이 이긴다.
     pub fn deferred_root(&self, id: &str) -> Option<&str> {
         self.deferred_root.get(id).map(String::as_str)
+    }
+
+    /// **그 자리의 줄**을 계획에서 뺀 줄. 넘친 첨자에는 `None` 이다 — 곁의 [`Index::epic_of`]
+    /// 와 같이, 한눈 보기에서 남의 색인으로 푼 첨자가 들어와도 죽지 않는다.
+    pub fn shelved_at(&self, at: usize) -> Option<&str> {
+        self.shelved.get(at)?.as_deref()
     }
 
     /// 그 줄이 경로에서 갖는 마디.
@@ -559,46 +588,98 @@ impl Index {
 /// `Index::in_soil` 안에서만 쓰는 계산판. 빌린 지도를 들고 다니므로 밖으로 나가지 않는다.
 struct Ctx<'a> {
     issues: &'a [Issue],
-    epic_of: &'a BTreeMap<&'a str, &'a str>,
+    epic_of: &'a crate::report::Handing<'a>,
     milestone_of: &'a BTreeMap<&'a str, &'a str>,
+    /// 줄마다의 길 잃음 판정(`report::misplace_of`)이 마일스톤 쪽을 이것으로 묻는다 —
+    /// 위의 `milestone_of` 는 id 로 짠 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
+    lines: &'a crate::report::Lines<'a>,
     by_id: &'a BTreeMap<&'a str, usize>,
-    misplaced: &'a BTreeMap<&'a str, crate::report::Misplace>,
+    /// id → 그 id 를 마지막으로 든 줄의 종류(`report::kinds`) — 줄마다의 길 잃음 판정
+    /// ([`Ctx::adrift`])이 참조의 종류를 여기서 본다.
+    kinds: &'a BTreeMap<&'a str, crate::model::Kind>,
     eclipsed: &'a dyn Fn(&Issue) -> bool,
     has_milestones: bool,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     /// 그 이슈가 걸리는 단 하나의 자리.
     fn home(&self, at: usize) -> Path {
         let me = &self.issues[at];
         // 자리를 못 정하는 줄은 여기서 갈라져 나간다. **한 자로 잰다.** 종류가 다른
         // 쌍둥이에게 id 가 가려진 줄도 그렇다 — 지도의 값은 쌍둥이의 종류로 셈한 것이라
         // 이 줄의 자리가 못 된다(`report::eclipsed`).
-        if self.lost(&me.id) || (self.eclipsed)(me) {
+        if self.adrift(me) || (self.eclipsed)(me) {
             return vec![Seg::Lost];
         }
         match me.kind {
             // 마일스톤은 뿌리에 선다.
             Kind::Milestone => Vec::new(),
             // 에픽은 제 마일스톤 밑에. 마일스톤을 안 쓰는 저장소면 뿌리에.
-            Kind::Epic => self.under_milestone(&me.id),
+            Kind::Epic => self.under_milestone_of(me),
             // idea 는 대개 에픽 없이 산다 — 에픽 없는 일과 같은 자리다.
             Kind::Issue | Kind::Idea => self.home_of_work(at),
         }
     }
 
-    /// 그 줄의 참조가 못 쓸 것인가. **`report` 가 정한 그대로 묻는다** —
+    /// 그 id 의 줄이 `(길 잃음)` 에 서는가. **`report` 가 정한 그대로 묻는다** —
     /// 여기서 다시 판정하면 `moai status` 가 드러내는 집합과 `(길 잃음)`
     /// 바구니가 갈라진다.
+    ///
+    /// **그 id 의 줄을 찾아 [`Ctx::adrift`] 에 묻는다**(리뷰). id 로 짠 지도를 짚던 때는 같은
+    /// id 를 든 앞줄이 뒷줄의 판정을 입어, 에픽 줄 제 자리는 `(길 잃음)` 인데 그 멤버는
+    /// `under_milestone(e)` 밑에 그려졌다 — 위 주석이 막으려던 "뿌리에서 닿는 길이 없는 자리" 다.
+    /// 찾는 자는 [`Ctx::home`] 이 쓰는 `by_id` 와 같아서 답은 늘 그 id 의 뒷줄 것이다.
     fn lost(&self, id: &str) -> bool {
-        self.misplaced.contains_key(id)
+        self.by_id.get(id).is_some_and(|&at| self.adrift(&self.issues[at]))
     }
 
+    /// 그 **줄**의 참조가 못 쓸 것인가 — [`crate::report::misplace_of`] 가 내리는 그 판정이다.
+    ///
+    /// [`Ctx::lost`] 는 id 로 짠 지도를 짚어 **뒷줄의 판정**을 낸다. 소속은 그 줄에 적힌 `epic`
+    /// 이 먼저라(moai-7iyc.rt6) 같은 id 를 든 줄 둘이 서로 다른 참조를 들면 판정도 갈리므로,
+    /// 제 자리를 묻는 줄에는 줄마다 물어야 한다 — 그러지 않으면 못 쓸 에픽을 든 앞줄이 없는
+    /// 에픽 바구니로 가 어느 자리에도 안 그려진다.
+    fn adrift(&self, i: &Issue) -> bool {
+        crate::report::misplace_of(i, self.kinds, self.epic_of, self.lines).is_some()
+    }
+
+    /// 그 **줄**이 든 에픽 — `report::stands_in` 과 같은 차례(적힌 `epic` 이 먼저, 없으면 지도).
+    ///
+    /// **지도를 곧바로 안 짚는다**(moai-7iyc.rt6). 지도는 id 로 짠 것이라 같은 id 를 든 줄이
+    /// 둘이면 앞줄이 뒷줄의 에픽을 입어, 트리가 그리는 자리와 롤업이 세는 곳이 갈린다 —
+    /// 머리글이 `0/1` 인 에픽 밑에 줄 둘이 섰다. 가려진 줄은 [`Ctx::home`] 이 이미
+    /// `(길 잃음)` 으로 갈라 보냈으므로 여기서 다시 안 가른다.
+    ///
+    /// **차례는 `report::Handing::at` 이 든다**(리뷰 moai-jk2u.o78) — 같은 글을 여기 또 적으면
+    /// 그 차례를 고치는 날 `report` 쪽만 옮겨져, 트리가 그리는 자리와 롤업이 세는 곳이 갈린다.
+    fn epic_at(&self, i: &'a Issue) -> Option<&'a str> {
+        self.epic_of.at(i)
+    }
+
+    /// **조상인 에픽**이 서는 자리 — id 로 짚는다. 그 답은 그 에픽 줄의 것이고, 지도가
+    /// 고르는 뒷줄이 `report::stood_at_line` 이 고르는 그 줄이라 둘이 안 갈린다.
     fn under_milestone(&self, id: &str) -> Path {
         if !self.has_milestones {
             return Vec::new();
         }
         match self.milestone_of.get(id) {
+            Some(m) => vec![Seg::Milestone(Some(m.to_string()))],
+            None => vec![Seg::Milestone(None)],
+        }
+    }
+
+    /// **그 에픽 줄 제 자리** — 에픽은 제 `milestone` 에만 선다(`report::milestone_stood`).
+    /// 지도로 짚으면 같은 id 의 앞줄이 뒷줄의 릴리스 밑에 그려지는데, 세는 쪽이 줄마다
+    /// 답하게 된 뒤로(moai-jk2u.wvn) 그리는 자와 세는 자가 거기서 갈렸다 — 머리글이
+    /// `0/1` 인 마일스톤 밑에 에픽 줄 둘이 섰다.
+    fn under_milestone_of(&self, me: &Issue) -> Path {
+        if !self.has_milestones {
+            return Vec::new();
+        }
+        // **세는 쪽과 한 자다**(`report::stood_at_line`) — 에픽 줄은 제 `milestone`,
+        // 에픽 없는 일은 조상을 타고 오른 값이다. 여기서 차례를 다시 적으면 그 둘은
+        // 언젠가 어긋나고, 어긋나는 자리가 머리글과 그 밑의 목록이다(moai-lhbh).
+        match crate::report::stood_at_line(me, None, self.lines) {
             Some(m) => vec![Seg::Milestone(Some(m.to_string()))],
             None => vec![Seg::Milestone(None)],
         }
@@ -629,8 +710,8 @@ impl Ctx<'_> {
             let mut path = self.home(pat);
             let rooted_thought =
                 crate::report::is_idea(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
-            let passed = if rooted_thought { None } else { self.epic_of.get(p) };
-            if self.epic_of.get(me.id.as_str()) == passed {
+            let passed = if rooted_thought { None } else { self.epic_at(&self.issues[pat]) };
+            if self.epic_at(me) == passed {
                 path.push(Seg::Issue(p.to_string()));
                 return path;
             }
@@ -649,7 +730,7 @@ impl Ctx<'_> {
         if crate::report::is_idea(me) {
             return if self.has_milestones { vec![Seg::Milestone(None)] } else { Vec::new() };
         }
-        match self.epic_of.get(me.id.as_str()) {
+        match self.epic_at(me) {
             Some(e) => {
                 // **에픽이 사는 자리 밑으로 간다.** 여기서 마일스톤을 다시
                 // 셈하면, 에픽이 제 참조 때문에 `(길 잃음)` 으로 갈라진 날
@@ -660,8 +741,11 @@ impl Ctx<'_> {
                 path.push(Seg::Epic(e.to_string()));
                 path
             }
-            // 에픽이 없으면 제 마일스톤(또는 뿌리)에 파일처럼 놓인다.
-            None => self.under_milestone(&me.id),
+            // 에픽이 없으면 제 마일스톤(또는 뿌리)에 파일처럼 놓인다. **줄마다 묻는다**
+            // (moai-jk2u.wvn) — 지도로 짚으면 마일스톤을 안 적은 앞줄이 같은 id 를 든
+            // 뒷줄의 릴리스 바구니로 떨어지는데, 그 바구니는 뿌리에서 닿는 길이 없을 수
+            // 있어 그 줄이 트리에서도 탐색기에서도 사라진다(무작위 대조가 낸 판).
+            None => self.under_milestone_of(me),
         }
     }
 }
@@ -794,7 +878,13 @@ mod tests {
         let index = Index::of(issues);
         let seen = walk(&index, issues);
         let want: Vec<usize> = (0..issues.len()).collect();
-        assert_eq!(seen, want, "빠졌거나 겹쳤다");
+        // **자리를 함께 낸다** — 첨자 하나가 빠졌다는 말만으로는 어느 줄이 닿는 길 없는
+        // 바구니로 갔는지 모른다. 무작위 더미라 판을 손으로 다시 짓지도 못한다.
+        // **붉을 때만 짓는다** — 이 자는 무작위 대조 안에서 3천 번 돈다.
+        if seen != want {
+            let seats: Vec<_> = (0..issues.len()).map(|a| (a, &issues[a].id, index.home_of(a))).collect();
+            panic!("빠졌거나 겹쳤다 — {issues:#?}\n자리: {seats:#?}\n{seen:?} != {want:?}");
+        }
     }
 
     /// 병적인 자료를 전부 한 더미에 넣고 빠짐도 겹침도 없음을 못 박는다.
@@ -1210,14 +1300,43 @@ mod tests {
         assert!(crate::report::group_members(&issues, &issues[0]).is_empty());
         assert_exactly_once(&issues);
 
-        // 같은 종류도 같다(moai-9p36.kqi) — 앞줄이 적은 에픽이 에픽 없는 뒷줄에 남아
-        // 둘 다 그 에픽 밑에 그려지고 세어지는데, 뒷줄은 에픽이 없다고 말했다.
+        // 같은 종류는 **줄마다 제 것을 든다**(moai-7iyc.rt6, 2026-09-23 사용자 결정). 지도는
+        // id 로 짠 것이라 에픽 없는 뒷줄이 앞줄의 값을 지우는데(moai-9p36.kqi), 그때 앞줄까지
+        // 제가 적은 에픽을 잃어 어느 에픽에도 안 섰다 — `show --json` 의 `derived_epic` 만
+        // 그 줄에 `argos-0001` 을 내, 한 바이너리가 표면마다 다른 답을 했다. 지금은 적힌 줄이
+        // 그 에픽 밑에, 안 적은 줄이 뿌리에 선다.
         let issues =
             vec![make("argos-0001", Kind::Epic), epic_of("argos-0002", "argos-0001"), make("argos-0002", Kind::Issue)];
-        assert!(!crate::report::groups(&issues).contains_key("argos-0002"));
+        assert!(!crate::report::groups(&issues).contains_key("argos-0002"), "지도는 뒷줄의 빈 값을 든다");
         let index = Index::of(&issues);
-        assert_eq!((index.home_of(1), index.home_of(2)), (&Vec::new(), &Vec::new()));
-        assert!(crate::report::group_members(&issues, &issues[0]).is_empty());
+        assert_eq!(index.home_of(1), &vec![Seg::Epic("argos-0001".into())], "적힌 에픽을 잃었다");
+        assert_eq!(index.home_of(2), &Vec::<Seg>::new(), "에픽 없는 뒷줄이 앞줄의 에픽을 입었다");
+        let members = crate::report::group_members(&issues, &issues[0]);
+        assert_eq!(members.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0002"], "{members:?}");
+        assert_counts_what_it_draws(&issues);
+        assert_exactly_once(&issues);
+    }
+
+    /// **소속을 id 에 진 앞줄은 뒷줄이 적은 에픽 밑에 안 그려진다**(moai-5km5).
+    ///
+    /// `epic` 을 안 적고 id 부모에게서 소속을 받는 줄이다. 접은 지도는 그 id 에 뒷줄이 적은
+    /// 에픽을 들고 있어, 트리가 앞줄을 `argos-e002` 밑에 그리면서 정작 그 줄의 id 부모인
+    /// `argos-e001` 은 `멤버 0/0` 이라 말했다 — 머리글과 그 밑의 줄이 갈리는 꼴이다.
+    #[test]
+    fn a_member_that_wrote_no_epic_is_drawn_under_its_id_parent() {
+        let issues = vec![
+            make("argos-e001", Kind::Epic),
+            make("argos-e002", Kind::Epic),
+            make("argos-e001.aaa", Kind::Issue),     // 안 적었다 — id 부모가 답이다
+            epic_of("argos-e001.aaa", "argos-e002"), // 적었다 — 그 값이 이긴다
+        ];
+        let index = Index::of(&issues);
+        assert_eq!(index.home_of(2), &vec![Seg::Epic("argos-e001".into())], "앞줄이 뒷줄의 에픽 밑에 그려졌다");
+        assert_eq!(index.home_of(3), &vec![Seg::Epic("argos-e002".into())], "적힌 에픽을 잃었다");
+        for (g, want) in [(0usize, "argos-e001.aaa"), (1, "argos-e001.aaa")] {
+            let members = crate::report::group_members(&issues, &issues[g]);
+            assert_eq!(members.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), [want], "{members:?}");
+        }
         assert_counts_what_it_draws(&issues);
         assert_exactly_once(&issues);
     }

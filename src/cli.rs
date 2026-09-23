@@ -147,7 +147,8 @@ pub enum Cmd {
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up")]
+    status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so")]
     Status(WorktreeArg),
 
     /// What you can pick up now
@@ -539,8 +540,11 @@ IDEA
 
   **When the same field was changed differently, a person resolves it.**
   Picking one side silently makes the other side's edit vanish without a
-  trace. With an unreadable line or a duplicated id the whole file is handed
-  over inside conflict markers - keeping only what parsed would lose the rest.
+  trace. A line this binary cannot read travels through byte for byte - paired
+  by its id when it has one, so only a row both sides changed is handed over,
+  and counted line by line when it has none. What still hands the whole file
+  over inside conflict markers is a duplicated id among readable rows, and a
+  file that is not text - keeping only what parsed would lose the rest.
 
   Installing is once per clone. Git reads the driver command from the config
   only, and the config is not committed. In a clone without it, merge=moai in
@@ -794,7 +798,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "id")]
     pub epic: Option<String>,
 
-    /// Put it in this milestone
+    /// Put it in this milestone (with `--from`, on the epic it creates)
     #[arg(long, value_name = "id")]
     pub milestone: Option<String>,
 
@@ -810,13 +814,21 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "status")]
     pub status: Option<String>,
 
-    /// Body. `-` reads it from stdin
+    /// Body. `-` reads it from stdin (with `--from`, on the first epic)
     #[arg(short, long, value_name = "text")]
     pub body: Option<String>,
 
     /// Assignee. The creator when absent; `none` clears it
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
+
+    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+    #[arg(long, value_name = "date")]
+    pub due: Option<String>,
 
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
     /// What kind to create (issue when absent, epic under `epic add`)
@@ -827,13 +839,25 @@ pub struct AddArgs {
     #[arg(long, value_name = "id")]
     pub parent: Option<String>,
 
+    // **못 지키는 깃발의 거절은 `clap` 이 아니라 [`crate::cmd::add::run`] 이 낸다**(moai-yhb1).
+    // 여기 `conflicts_with_all` 로 달아 두던 자리다. 그것은 `add::run` 이 닿기도 전에 터져
+    // 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를
+    // 빼라" 를 듣고, 그것을 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 게다가 clap 의 글은
+    // 평문 stderr 에 exit 2 라, 같은 명령의 형제 거절(`--milestone <모양 틀림>` 은 `code::ERROR`
+    // 에 exit 1)과 계약이 갈렸다 — `--json` 으로 받는 쪽이 이 갈래만 아무 `code` 도 못 봤다.
+    //
+    // **`AddArgs` 는 네임스페이스 다섯이 같이 쓴다**(`add`·`issue add`·`epic add`·
+    // `milestone add`·`idea add`). 한 구조체에 달린 목록은 그 다섯에 똑같이 서므로, clap 에
+    // 두는 한 어느 거절이 먼저인지를 네임스페이스마다 고를 길이 없다.
     /// Epic and issues from markdown at once. `-` is stdin
-    #[arg(long, value_name = "file|-", conflicts_with_all = ["title", "epic", "tag", "priority", "parent"])]
+    #[arg(long, value_name = "file|-")]
     pub from: Option<String>,
 
-    // 거절은 `clap` 이 아니라 `add::run` 이 한다. `requires = "from"` 은
-    // 제목이 없을 때만 걸린다 — `from` 이 제목과 `conflicts` 라서, 제목이
-    // 있으면 못 채울 요구로 보고 조용히 건너뛴다. **바로 그 자리가 구멍이다.**
+    // 거절은 `clap` 이 아니라 `add::run` 이 한다 — 까닭은 바로 위 `from` 의 주석과 같다
+    // (moai-yhb1). **한때 적어 둔 까닭은 이제 틀린 글이다**(리뷰): "`requires = \"from\"` 은
+    // `from` 이 제목과 `conflicts` 라 조용히 건너뛴다" 였는데, 그 `conflicts_with_all` 을 이
+    // 에픽이 걷었으므로 지금은 `requires` 가 실제로 걸린다. 걸려도 안 쓰는 것은 그 거절이
+    // 평문 stderr 에 exit 2 라, `--json` 으로 받는 쪽이 `code` 를 못 보기 때문이다.
     //
     // 아래 `///` 둘째 문단부터는 `--help` 가 옵션 밑에 펴는 긴 글이다. 줄을 70칸
     // 안에서 손으로 끊고 `verbatim_doc_comment` 로 그 끊음을 지킨다 — clap 은
@@ -1018,6 +1042,14 @@ pub struct EditArgs {
     /// Give `name (email)`. `none` clears it
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
+
+    /// Start of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub start: Option<String>,
+
+    /// Deadline of a milestone. `none` clears it
+    #[arg(long, value_name = "date|none")]
+    pub due: Option<String>,
 }
 
 #[derive(Args, Debug)]

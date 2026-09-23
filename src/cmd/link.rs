@@ -109,7 +109,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는
             // 칸을 읽는다(`cmd::Row`).
             let ids: Vec<&str> = out.iter().map(|(i, _)| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids);
+            let read = super::read_of(issues, cfg, &ids, ctx.json);
             Ok((vec![], (out, read)))
         },
     )?;

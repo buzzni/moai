@@ -161,7 +161,8 @@ pub fn tag_parts(tags: &[String]) -> impl Iterator<Item = (&'static str, &str)> 
 /// **탐색기도 이 낱말을 쓴다.** 같은 사실을 두 표면이 다른 말로 하면, 나란히
 /// 놓고 보는 사람이 어느 쪽을 믿을지 정하게 된다.
 ///
-/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::deferred_roots`). **물려받은
+/// `root` 는 그 줄을 계획에서 뺀 줄이다(`report::Shelved::root` — **줄마다의 답**이라,
+/// 같은 id 의 앞줄이 뒷줄의 미룸을 입지 않는다). **물려받은
 /// 미룸도 여기서 말한다** — 미룬 에픽의 멤버를 펼쳤는데 표가 없으면, 이 낱말을
 /// 쓰는 두 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다. 제가 미룬 줄은
 /// 전처럼 제 시각으로 나이를 댄다.
@@ -366,7 +367,7 @@ pub fn list(
     }
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
-    let show_epic = issues.iter().any(|i| epics.contains_key(&(i.id.as_str(), i.kind)));
+    let show_epic = issues.iter().any(|i| epics.at(i).is_some());
     // 미룸 표를 달지 말지는 **부르는 쪽의 물음**에서 온다. 한때 결과의 내용
     // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
@@ -383,7 +384,7 @@ pub fn list(
         // [`gone_epic`] 이 괄호에 넣는다. 제목 칸과 한 열에 서므로 맨몸이면 에픽 제목으로 읽힌다.
         // **자르는 것은 두 갈래가 같다**(리뷰) — 한때 끊긴 쪽만 `clip` 을 안 지나, 이 열만
         // `EPIC_CAP` 을 넘길 수 있었다(긴 번역이 표를 밀어낸다).
-        .map(|i| match epics.get(&(i.id.as_str(), i.kind)) {
+        .map(|i| match epics.at(i) {
             None => "—".into(),
             Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
             Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
@@ -734,12 +735,12 @@ fn place(
             walk(out, drawn, cx, &deeper, 1);
         }
         Entry::Dir { seg: Seg::Issue(_), at: Some(at) } => {
-            row(out, cx, &cx.all[*at], depth.max(1));
+            row(out, cx, *at, depth.max(1));
             walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, &cx.all[*at], depth.max(1)),
-        Entry::Leaf { at } => row(out, cx, &cx.all[*at], depth.max(1)),
+        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, *at, depth.max(1)),
+        Entry::Leaf { at } => row(out, cx, *at, depth.max(1)),
     }
 }
 
@@ -794,7 +795,8 @@ fn head(roll: &Roll, title: &str, shown: usize, branch: Option<&str>, lang: Lang
 /// 낱말, 같은 자(제 미룸이나 물려받은 미룸)다. 트리는 걸린 자손의 조상도 그리므로,
 /// 에픽의 미룸을 받은 생각이 제 자식 때문에 조상으로 서면 표 없이는 일과 똑같이
 /// 보이고 꼬리는 그 줄을 숨긴 수에서 뺀다.
-fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
+fn row(out: &mut Vec<String>, cx: &Ctx, at: usize, depth: usize) {
+    let i = &cx.all[at];
     // **여기 오는 것은 일과 생각뿐이다** — 묶음은 `nav` 가 언제나 디렉터리로 세우고
     // (`Index::is_dir`), `place` 가 머리글로 받는다. 그래서 읽은 칸을 물을 것이 없다.
     // 예외는 같은 id 의 쌍둥이에게 폴더를 내준 **가려진 묶음 줄** 하나다 — 깨진
@@ -811,7 +813,10 @@ fn row(out: &mut Vec<String>, cx: &Ctx, i: &Issue, depth: usize) {
     if !i.tags.is_empty() {
         line.push_str(&format!("   {}", paint(style::TAG, &tags_of(i))));
     }
-    if i.is_deferred() || cx.index.deferred_root(&i.id).is_some() {
+    // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 접은 지도를 짚던 때는 같은 id 의 뒷줄이 산
+    // 에픽에 들었다는 이유로 미룬 에픽에 든 이 줄의 낱말이 사라졌고, 거꾸로 `moai ready` 가
+    // 내주는 줄에 `미룸` 이 붙었다. 곁의 평평한 목록(`list`)은 이미 줄마다 묻는 자다.
+    if i.is_deferred() || cx.index.shelved_at(at).is_some() {
         line.push_str(&format!("   {}", paint(style::DIM, say(cx.screen.lang, "status.put_off"))));
     }
     out.push(line);
@@ -864,6 +869,15 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **알림이지 경고가 아니다**(moai-tvvb) — 지금 무엇이 먼저인지를 대는 줄이다. 어느
         // 마일스톤이 도는지는 `preview` 가 id 와 제목으로 낸다.
         "milestone_focus" => one(say(lang, "warn.milestone_focus")),
+        // **알림이지 경고가 아니다**(moai-nnal, 2026-09-22 사용자 결정) — `ready` 는 둘 다 안으로
+        // 세므로 막힌 것이 없다. 지금 둘이 돈다는 **사실**을 대는 줄이고, 어느 마일스톤인지는
+        // `preview` 가 id 와 제목으로 낸다.
+        "milestones_running" => one(say(lang, "warn.milestones_running")),
+        // **지난 것과 다가온 것을 가른다**(moai-tfcp) — 사람이 할 일이 다르다. 앞의 것은 늦은
+        // 까닭을 대고 남은 멤버를 추리는 자리고, 뒤의 것은 아직 손댈 수 있는 자리다. 날짜와
+        // 남은 날수는 `preview` 가 줄마다 낸다.
+        "milestone_overdue" => one(say(lang, "warn.milestone_overdue")),
+        "milestone_due_soon" => aged(say(lang, "warn.milestone_due_soon"), w.days.unwrap_or(0)),
         // **끊긴 것과 종류가 틀린 것을 한 낱말로 말한다** — 둘을 가려 말하면
         // 고치는 손이 달라지는 것도 아닌데 경고가 둘로 늘어난다.
         "dangling_epic" => one(say(lang, "warn.dangling_epic")),
@@ -1115,8 +1129,40 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         }
         return out;
     }
+    // 기한 경고는 **그 날짜와 남은 날수를 함께** 낸다(moai-tfcp) — id 와 제목만 내면 언제까지인지가
+    // 화면에 없어 사람이 `moai show` 를 한 번 더 쳐야 한다. 날수는 **판정한 자리가 실은 것**을
+    // 읽는다(`Warning::ages`) — 여기서 새로 재면 판정과 표시가 갈라진다.
+    if matches!(w.kind, "milestone_overdue" | "milestone_due_soon") {
+        for id in w.ids.iter().take(SHOW) {
+            let Some(i) = by_id.get(id.as_str()) else { continue };
+            // `ages` 에 남은 날수가 **부호째** 들어 있다 — 지난 것이 음수고, 낱말도 색도 그 부호
+            // 하나로 갈린다. 없는 값을 0 으로 채우지 않는다: `due_tail(0)` 은 "오늘까지" 라, 지난
+            // 줄 밑에 안 지났다는 낱말이 선다.
+            let Some(&left) = w.ages.get(id) else { continue };
+            out.push(format!(
+                "    {}  {}   {}  {}",
+                paint(style::ID, id),
+                marked(screen.branch(id), &i.title, TITLE_CAP, style::PLAIN).0,
+                paint(style::DIM, i.due_on.as_deref().unwrap_or("")),
+                paint(if left < 0 { style::WARN } else { style::DIM }, &due_tail(left, lang)),
+            ));
+        }
+        let rest = w.ids.len().saturating_sub(SHOW);
+        if rest > 0 {
+            out.push(format!("    {}", paint(style::DIM, &more_of(rest, lang))));
+        }
+        return out;
+    }
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
-    if matches!(w.kind, "empty_epic" | "unknown_field" | "dangling_epic" | "dangling_milestone" | "milestone_focus") {
+    if matches!(
+        w.kind,
+        "empty_epic"
+            | "unknown_field"
+            | "dangling_epic"
+            | "dangling_milestone"
+            | "milestone_focus"
+            | "milestones_running"
+    ) {
         for id in w.ids.iter().take(SHOW) {
             let title = by_id.get(id.as_str()).map(|i| i.title.as_str()).unwrap_or("");
             out.push(format!(
@@ -1206,7 +1252,7 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
         // **괄호는 여기서 한 겹만 단다**(moai-snus) — 끊긴 참조도 제 괄호를 안 달고 오므로
         // (`report::EpicLabel::Gone`) 두 갈래가 같은 모양으로 선다. 한때 그 낱말이 `(없는 에픽)`
         // 이라 이 줄이 `((없는 에픽))` 을 냈다.
-        let epic = match epics.get(&(i.id.as_str(), i.kind)) {
+        let epic = match epics.at(i) {
             None => String::new(),
             Some(crate::report::EpicLabel::Named(t)) => format!(" ({})", one_line(t)),
             // **끊긴 쪽도 [`one_line`] 을 지난다**(리뷰) — 위의 "모든 칸이" 에 이 칸도 든다.
@@ -1349,7 +1395,7 @@ pub fn ready(
         for ((i, (title, w_this)), tag) in picks.iter().zip(&heads).zip(&tags) {
             // 없는 것(`ready.no_epic`)과 끊긴 것(`report.epic_gone`)은 다른 답이다 — 표기는
             // [`list`] 와 같은 자리에서 정한다.
-            let epic = match epics.get(&(i.id.as_str(), i.kind)) {
+            let epic = match epics.at(i) {
                 None => say(lang, "ready.no_epic").to_string(),
                 Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
                 Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
@@ -1432,12 +1478,22 @@ pub fn ready(
         for h in shelved {
             // **도로 집는 말은 미룬 곳을 댄다.** 막는 줄이 미룬 에픽 밑이면 그
             // 줄에 `--undo` 를 쳐 봐야 "이미 그렇다" 로 끝난다.
+            //
+            // **댈 곳이 없으면 말을 안 낸다**(리뷰 moai-jk2u.o78). `report` 쪽은 빈 걸음에
+            // 키를 안 세우는 것으로 id 없는 `moai defer  --undo` 를 막는데, 그리는 이 줄은
+            // 그 약속을 안 지켜 빈 배열을 그대로 폈다 — 없는 키와 빈 배열이 여기서 같은 글이
+            // 된다. 같은 id 가 두 줄일 때 실제로 그 꼴이 섰다: 에픽의 멤버로 세어진 앞줄이
+            // 미뤘는데 그 id 의 답을 정하는 뒷줄은 안 미뤄, 댈 미룸이 아예 없었다.
+            // 막는 줄은 그대로 대니 왜 못 집는지는 여전히 화면에 선다.
+            let undo = match h.undo.is_empty() {
+                true => String::new(),
+                false => format!("  {}", paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" ")))),
+            };
             out.push(format!(
-                "  {}  {}  {}  {}",
+                "  {}  {}  {}{undo}",
                 paint(style::ID, &h.issue.id),
                 marked(screen.branch(&h.issue.id), &h.issue.title, TITLE_CAP, style::DIM).0,
                 paint(style::DIM, &format!("← {}", h.by.join(" · "))),
-                paint(style::DIM, &format!("moai defer {} --undo", h.undo.join(" "))),
             ));
         }
     }
@@ -1478,10 +1534,16 @@ pub fn ready(
 /// 안 선다. 짓는 자리는 둘뿐이라 도우미를 두지 않았다: `cmd::edit` 과 `cmd::show` 가 칸마다
 /// 제 값을 채우고, 읽은 것이 없는 화면을 짓는 것은 시험의 `tests::bare_seen` 하나다.
 pub struct Seen<'a> {
-    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::deferred_roots`).
-    pub roots: BTreeMap<&'a str, &'a str>,
+    /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::Shelved`). **줄로 묻는다** — 지도를 그대로
+    /// 들던 때는 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다(moai-wre3).
+    pub roots: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
     pub states: BTreeMap<&'a str, &'a str>,
+    /// 가려진 줄을 가르는 지도 (`report::Kinds`, moai-7iyc.5fz). 위의 칸 지도는 id 로 짠 것이라,
+    /// 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 가려진 쪽이 이긴 쪽의 칸을 입는다 — 같은
+    /// 창의 트리는 그 줄을 `(길 잃음)` 에 제 칸으로 그리는데 이 줄만 다른 칸을 말한다.
+    /// 쌍둥이가 못 서는 자리는 `Kinds::no_twins()` 라는 낱말을 적고 그 까닭을 함께 댄다.
+    pub kinds: crate::report::Kinds<'a>,
     /// 어느 말로 그리고 어느 워크트리의 줄이 겹쳐 있는가 ([`Screen`]). 겹침을 묻는 길이
     /// [`Screen::branch`] 하나가 되어, 상세가 제 손으로 [`Origin`] 을 뒤지지 않는다.
     pub screen: Screen<'a>,
@@ -1612,7 +1674,7 @@ pub fn detail(
         marked(seen.screen.branch(&i.id), &i.title, usize::MAX, title_style(i)).0
     )];
 
-    let col = crate::report::column(i, &seen.states);
+    let col = crate::report::column(&seen.kinds, i, &seen.states);
     let st = style::status_style(col);
     let mut line = format!(
         "  {} {} · {}",
@@ -1628,7 +1690,7 @@ pub fn detail(
     }
     // **미룬 것은 상세에서 반드시 말한다.** 목록에서는 아예 안 보이므로,
     // id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안 나오나" 에 답하는 자리다.
-    if let Some(d) = deferred_for(i, seen.roots.get(i.id.as_str()).copied(), now, seen.screen.lang) {
+    if let Some(d) = deferred_for(i, seen.roots.root(i), now, seen.screen.lang) {
         line.push_str(&format!(" · {}", paint(style::WARN, &d)));
     }
     if let Some(n) = unread_column(i, col, cfg, seen.screen.lang) {
@@ -1646,7 +1708,14 @@ pub fn detail(
     out.push(line);
 
     let lang = seen.screen.lang;
-    if let Some(e) = &i.epic {
+    // **적은 줄이 없어도 선 소속은 댄다**(리뷰). 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을
+    // 안 적으므로(moai-exh7), 필드만 보면 그 멤버의 상세에서 이 줄이 통째로 빠진다 — 목록도
+    // `ready` 도 `prime --json` 도 대는 것을 id 로 콕 집어 펼친 화면만 안 대는 판이었다.
+    //
+    // **푸는 것은 부르는 쪽이다**(`report::groups` 하나가 읽는다) — 여기서 다시 재면 `report`
+    // 밖에 소속을 읽는 자가 하나 더 선다. 적힌 것이 먼저다: 끊긴 참조를 `gone_epic` 으로 말할 수
+    // 있는 것은 그쪽뿐이라, 물려받은 값으로 덮으면 고칠 곳이 화면에서 사라진다.
+    if let Some(e) = i.epic.as_deref().or(epic.map(|found| found.id.as_str())) {
         // **끊긴 참조는 한 낱말로 댄다**(리뷰, moai-snus 의 결을 잇는다) — 여기만 `detail.missing_epic`
         // 이라는 딴 키를 들어, 같은 자료를 두고 `show` 의 목록은 `(epic not there)` 라 하고 `show <id>`
         // 는 `(no such epic)` 이라 했다. 게다가 그 낱말만 말묶음에서 제 괄호를 달고 와, 새로 적은
@@ -1706,18 +1775,21 @@ pub fn detail(
         out.push(block_line(b, seen.screen.branch(b.id), now, lang));
     }
     for c in children {
-        // **자식 줄도 제 종류와 미룸을 말한다.** 이 목록은 걸러지지 않으므로
-        // 담아 둔 생각과 미뤄 둔 것이 그대로 서는데, 표가 없으면 `ready` 도
-        // 보드도 안 세는 줄이 일과 똑같이 보인다 — 낱말은 머리글이 쓰는 그
-        // 자리(`deferred_for`)에서 같이 받는다.
+        // **자식 줄도 제 종류와 미룸을 말한다.** 담아 둔 생각과 미뤄 둔 것이 그대로
+        // 서는데, 표가 없으면 `ready` 도 보드도 안 세는 줄이 일과 똑같이 보인다 —
+        // 낱말은 머리글이 쓰는 그 자리(`deferred_for`)에서 같이 받는다.
+        //
+        // **이 목록은 부르는 쪽이 거른 것일 수 있다**(moai-vndz) — 묶음을 그리는 표면은
+        // 멤버를 제 칸에 그리므로 그 줄을 여기서 뺀다(`report::kin_of`). 뺀 줄은 그 칸이
+        // 반드시 그린다: 한 화면에서 사라지는 줄이 있으면 안 된다.
         let mut tail = String::new();
         if c.kind != Kind::Issue {
             tail.push_str(&format!(" · {}", paint(style::DIM, c.kind.as_str())));
         }
-        if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now, seen.screen.lang) {
+        if let Some(d) = deferred_for(c, seen.roots.root(c), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
-        let ccol = crate::report::column(c, &seen.states);
+        let ccol = crate::report::column(&seen.kinds, c, &seen.states);
         out.push(format!(
             "  {}   {}  {}  ({} {}){tail}",
             row_label(say(lang, "detail.child"), lang),
@@ -1738,6 +1810,14 @@ pub fn detail(
     // 말이 바뀌면 길이가 갈린다 — 폭을 여기서 재야 `시작` 줄의 시각이 `생성` 줄의 시각 밑에
     // 선다(아래 `gap` 이 그것을 잇는다).
     let z = seen.screen.zone();
+    // **기한은 시각 줄 위에 선다**(moai-tfcp) — 생성·수정·시작·끝은 도구가 적은 때고 이것은
+    // 사람이 잡은 계획이라, 섞어 세우면 넷 가운데 하나가 사람의 값인 것이 안 보인다.
+    // 적힌 값은 시간대로 옮기지 않는다: 달력 날짜라 옮길 시각이 없다(`Issue::due_on`). 옮기는
+    // 것은 **견주는 쪽**이다 — "며칠 남았나" 는 읽는 사람의 오늘에서 재야 이 줄과 바로 밑의
+    // 생성·시작 줄이 한 시계로 선다(moai-h2th).
+    if let Some(span) = due_span(i, now, z, lang) {
+        out.push(format!("  {}   {span}", row_label(say(lang, "detail.due"), lang)));
+    }
     let (left, right) = stamp_labels(lang);
     out.push(format!(
         "  {}   {}      {}  {}{}",
@@ -1785,6 +1865,83 @@ pub fn detail(
     out
 }
 
+/// 기한 한 줄 — `2026-09-15 → 2026-09-30  (8일 남음)`. 둘 다 없으면 줄을 안 세운다(moai-tfcp).
+///
+/// **한쪽만 적힌 것도 그린다.** 시작만 잡고 끝을 안 정한 마일스톤이 흔하고, 그때 줄을 통째로
+/// 빼면 적어 둔 값이 어느 화면에도 안 서서 틀려도 아무도 모른다 — `started_at` 을 사람에게
+/// 보인 것과 같은 까닭이다. 빈 쪽은 `—` 로 자리를 지킨다.
+///
+/// 남은 날수는 **종료 기한에만** 붙는다. 시작 기한이 지났는가는 물어볼 일이 아니다.
+fn due_span(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<String> {
+    let d = due_of(i, now, z, lang)?;
+    // **색이 혼자 뜻을 지지 않는다**(CLAUDE.md) — 지난 것을 붉게 칠하되 `2일 지남` 이라는
+    // 낱말이 같이 선다. 색이 안 나가는 자리에서도 같은 말을 한다.
+    let tail = d
+        .left
+        .map(|word| paint(if d.past { style::WARN } else { style::DIM }, &format!("  {word}")))
+        .unwrap_or_default();
+    Some(format!("{}{tail}", paint(style::DIM, &d.span)))
+}
+
+/// 기한 한 줄의 **조각**(moai-tlpv) — 적힌 두 날과, 남은 날수 낱말.
+///
+/// **글을 짓는 자는 하나고 칠은 부르는 쪽이 한다.** CLI 는 ANSI 로, 탐색기는 제 조각(`Span`)으로
+/// 칠하므로 칠까지 여기서 하면 탐색기가 이 글을 못 쓰고 제 말을 새로 짓는다 — 그러면 같은 값을
+/// 두 화면이 다른 말로 말한다(`view::span_of`·`view::deferred_for` 와 같은 결).
+pub struct Due {
+    /// `2026-09-15 → 2026-09-30` — **적힌 그대로다.** 달력의 날이라 시간대로 옮길 시각이 없다.
+    pub span: String,
+    /// `(8일 남음)` — 종료 기한이 없거나 꼴이 틀리면 없다.
+    pub left: Option<String>,
+    /// 기한이 지났는가. 칠을 가르는 자리가 이것만 보면 된다.
+    pub past: bool,
+}
+
+/// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
+pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
+    // **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 따르는 것은 **쓰기가 정한 규칙**이다 —
+    // `Issue::check` 의 `Field::DueOn`·`Field::StartsOn` 이 다른 종류의 줄에 이 두 필드를
+    // 거절한다. 그러니 여기 서는 값은 손으로 푼 충돌이나 머지 드라이버가 안 건드리고 넘긴
+    // 낡은 줄(`a_row_neither_side_touched_does_not_block_the_merge`)뿐인데, 종류를 안 보고
+    // 그리면 이슈에 적힌 날이 `3일 지남` 으로 서고 보드(`report::Dues`)는 마일스톤만 세어
+    // 아무 말도 안 한다.
+    //
+    // **보드가 세는 것과 같아지려는 줄이 아니다**(리뷰). `Dues` 는 넷으로 거른다 — 종류,
+    // 계획 밖, 가려짐, 닫힌 칸. 여기서 보는 것은 첫째 하나고 나머지 셋은 **일부러** 안 본다:
+    // 닫히거나 미뤄 둔 마일스톤의 날은 사람이 적어 둔 이력이라, 보드가 조용한 것과 맞추려고
+    // 지우면 그 값이 어느 화면에도 안 서게 된다. 그러므로 뒤의 셋을 여기 옮겨 오지 않는다.
+    if i.kind != Kind::Milestone {
+        return None;
+    }
+    let (start, due) = (i.starts_on.as_deref(), i.due_on.as_deref());
+    if start.is_none() && due.is_none() {
+        return None;
+    }
+    let dash = "—";
+    // **읽는 사람의 달로 잰다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
+    // (`report::Dues::split`, moai-fgjj 가 `status_in` 에서 그리로 옮겼다). 둘이 갈리면 보드는
+    // "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
+    let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
+    Some(Due {
+        span: format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
+        left: left.map(|d| due_tail(d, lang)),
+        past: left.is_some_and(|d| d < 0),
+    })
+}
+
+/// 종료 기한까지 남은 날수를 낱말로 — 지났으면 지난 날수다(`left` 가 음수).
+///
+/// **상세와 보드가 같은 키를 쓴다**(moai-7cyf 의 결) — 둘로 두면 번역이 갈라져 한 도구가 같은
+/// 것을 두 말로 말한다. 오늘이 기한인 날은 제 낱말이다: `0일 남음` 은 남았다는 말이면서 안
+/// 남았다는 말이라 어느 쪽으로도 읽힌다.
+fn due_tail(left: i64, lang: Lang) -> String {
+    match left {
+        0 => say(lang, "detail.due_today").to_string(),
+        d if d > 0 => fill(say(lang, "detail.due_left"), &[("d", &d.to_string())]),
+        d => fill(say(lang, "detail.due_past"), &[("d", &(-d).to_string())]),
+    }
+}
+
 /// 상세 왼쪽 이름 칸의 폭 — **그 말에서 가장 긴 이름 하나로 잰다.**
 ///
 /// **한국어는 이 자가 없어도 섰다.** `에픽`·`자식`·`자리`·`멤버`·`생성`·`시작`·`막힘` 이 모두
@@ -1805,6 +1962,8 @@ fn label_width(lang: Lang) -> usize {
         say(lang, "detail.child"),
         say(lang, "detail.place"),
         say(lang, "detail.members"),
+        say(lang, "detail.spent"),
+        say(lang, "detail.due"),
         say(lang, "detail.created"),
         say(lang, "detail.started"),
         say(lang, "block.held"),
@@ -1828,6 +1987,74 @@ pub(crate) fn row_label(what: &str, lang: Lang) -> String {
 /// 상세의 `멤버` 이름 칸 — `cmd::show` 가 굴림과 함께 세운다. 위의 이름들과 같은 폭이다.
 pub fn members_label(lang: Lang) -> String {
     row_label(say(lang, "detail.members"), lang)
+}
+
+/// 상세의 `든 시간` 한 줄(moai-wfup) — `cmd::show` 가 마일스톤을 펼칠 때 멤버 줄 밑에 세운다.
+///
+/// **닫힌 멤버가 없으면 줄을 안 세운다.** 아직 아무것도 안 끝난 마일스톤에 `0분` 을 그리면
+/// "0분에 했다" 로 읽히는데, 그것은 안 한 것이지 0 분이 아니다.
+///
+/// **잰 수를 늘 함께 낸다**([`crate::report::Spent`]) — `started_at` 이 없는 멤버는 모르는
+/// 것이고, 그 수를 안 대면 빠진 멤버가 조용히 0 이 된다. 하나도 못 쟀으면 합계 대신 그 말만
+/// 한다: 0 을 어림값으로 내밀면 읽는 쪽이 "공짜로 했다" 로 읽는다.
+///
+/// **벽시계라는 말을 붙인다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
+/// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다 — 품으로 읽히면 안 된다.
+pub fn spent(sp: &crate::report::Spent, lang: Lang) -> Option<String> {
+    // **이름 칸은 세울 줄이 있을 때만 짓는다** — `?` 앞에 두면 닫힌 멤버가 없는 흔한 줄마다
+    // 버릴 글을 한 벌 짓는다.
+    let said = spend_of(sp, lang)?;
+    let label = row_label(say(lang, "detail.spent"), lang);
+    Some(match said {
+        Spend::Unmeasured(said) => format!("  {label}   {}", paint(style::DIM, &said)),
+        Spend::Measured { total, of } => format!("  {label}   {total}  {}", paint(style::DIM, &of)),
+    })
+}
+
+/// 든 시간 한 줄의 **조각**(moai-tlpv) — [`Due`] 와 같은 까닭으로 칠을 안 한다.
+pub enum Spend {
+    /// 닫힌 멤버는 있는데 **하나도 못 쟀다** — 합계 자리에 그 말만 선다.
+    Unmeasured(String),
+    /// 잰 합계와, 몇을 쟀는지.
+    Measured { total: String, of: String },
+}
+
+/// [`Spend`] 를 짓는다. 닫힌 멤버가 없으면 없다 — 세울 줄이 없다.
+pub fn spend_of(sp: &crate::report::Spent, lang: Lang) -> Option<Spend> {
+    if sp.closed == 0 {
+        return None;
+    }
+    let closed = sp.closed.to_string();
+    // **잰 것이 있는가를 한 자리에서 가른다**(리뷰) — 중앙값이 없다는 것과 잰 멤버가 없다는 것은
+    // 같은 사실이라, 둘을 따로 물으면 한쪽이 `?` 로 조용히 줄을 통째로 지운다.
+    let Some(median) = sp.median else {
+        return Some(Spend::Unmeasured(fill(say(lang, "detail.spent_none"), &[("closed", &closed)])));
+    };
+    let of = fill(
+        say(lang, "detail.spent_of"),
+        &[("closed", &closed), ("measured", &sp.measured.to_string()), ("median", &minutes(median, lang))],
+    );
+    Some(Spend::Measured { total: minutes(sp.minutes, lang), of })
+}
+
+/// 분을 낱말로 — 한 시간이 안 되면 분, 넘으면 `1시간 59분` 처럼 시간과 분이다.
+///
+/// **나머지를 버리지 않는다**(리뷰 moai-pmhv.070 15번). 시간만 내림해 내면 119분이 `1시간` 으로
+/// 서서 화면과 `--json` 의 `minutes` 가 최대 쉰아홉 분 어긋난다 — 든 시간을 대는 것이 이 줄의
+/// 일인데, 그 줄이 실제의 절반을 말하면 안 대느니만 못하다. **반올림도 안 한다**: `59분` 이
+/// `1시간` 으로 서면 안 지난 시간을 지난 것으로 말한다. 나머지가 0 이면 `2시간` 하나다.
+///
+/// **날 단위는 안 쓴다.** `720시간` 이 길어 보여도 `30일` 로 바꾸면 그것이 벽시계 30일인지
+/// 일한 30일인지 읽는 쪽이 못 가른다 — 시간은 겹쳐 세어진 값이라 날로 접으면 그 사실이 숨는다.
+fn minutes(m: i64, lang: Lang) -> String {
+    let (h, rest) = (m / 60, m % 60);
+    let hours = || fill(say(lang, "detail.spent_hours"), &[("h", &h.to_string())]);
+    let mins = |m: i64| fill(say(lang, "detail.spent_minutes"), &[("m", &m.to_string())]);
+    match (h, rest) {
+        (0, _) => mins(m),
+        (_, 0) => hours(),
+        _ => fill(say(lang, "detail.spent_span"), &[("hours", &hours()), ("minutes", &mins(rest))]),
+    }
 }
 
 /// 생성·수정 줄과 시작·끝 줄의 이름 칸을 **한 폭으로** 맞추는 두 자. 왼쪽 칸은
@@ -1992,6 +2219,11 @@ pub struct Board<'a> {
     pub status: StatusReport,
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
+    /// 집은 줄의 id 가 **넘겨받는** 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리,
+    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다.
+    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
+    pub kinds: crate::report::Kinds<'a>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
@@ -2022,6 +2254,17 @@ pub struct Picks<'a> {
     pub focus: crate::report::Focus<'a>,
     /// 못 읽는 줄의 수. 그 줄에 있던 일은 목록에서 빠져 있다.
     pub unreadable: usize,
+    /// 이 목록의 줄이 **넘겨받는** 에픽(`report::handed_of`) — `--json` 의 `derived_epic` 이 읽는다.
+    /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
+    /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
+    ///
+    /// **이 지도만으로는 답이 아니다**(리뷰 moai-jk2u.o78) — 제 `epic` 을 적은 줄은 아예 안 드니
+    /// (`report::hands_down`) 혼자 짚으면 그 줄이 에픽 없는 줄로 나온다. 값을 내는 자는
+    /// `report::stands_in` 이고 그쪽이 줄의 `epic` 을 먼저 읽는다 — `cmd::Row::of` 를 지난다.
+    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
+    /// 같은 자리, 같은 까닭이다(moai-53s2).
+    pub kinds: crate::report::Kinds<'a>,
     pub origin: &'a Origin,
     pub trouble: &'a [crate::worktree::Trouble],
 }
@@ -2145,7 +2388,8 @@ pub fn projects_status(
                 b.unread.len()
             }
         };
-        // **알림은 세지 않는다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다.
+        // **알림은 경고에 안 든다** — `moai status` 의 "드러난 문제 없다" 와 같은 자다. 아래에
+        // 제 줄로 선다(moai-zog5).
         let n = b.status.warnings.len();
         let fatal = b.status.warnings.iter().filter(|w| w.fatal).count();
         let go = paint(style::DIM, &format!("→ `moai -C {} status`", shell_arg(&p.path)));
@@ -2180,6 +2424,20 @@ pub fn projects_status(
                 fill(say(lang, "overview.warnings_fatal"), &[("n", &n.to_string()), ("f", &f.to_string())])
             ),
         });
+        // **알림은 제 줄에 선다**(moai-zog5, 2026-09-22 사용자 결정). 글리프는 흐린 `+` 고 경고의
+        // `!` 와 가른다 — 안쪽 `moai status` 가 같은 것을 같은 글리프로 낸다([`status`]). 수만
+        // 대고 무엇인지는 `moai -C <경로> status` 가 낸다: 프로젝트마다 알림 셋을 다 펴면 등록이
+        // 다섯만 돼도 한 화면에 안 든다.
+        if !b.status.notices.is_empty() {
+            let said = fill(say(lang, "overview.notices"), &[("n", &b.status.notices.len().to_string())]);
+            // 가는 길은 **덩어리에 한 번만** 댄다 — 경고 줄이 이미 그것을 댔으면 같은 명령을 두
+            // 줄에 거듭 적어 80칸에서 두 줄을 다 밀어낸다.
+            let go = match n {
+                0 => format!("  {go}"),
+                _ => String::new(),
+            };
+            out.push(format!("  {} {said}{go}", paint(style::DIM, "+")));
+        }
     }
     problems(&mut out, reg, lang);
     out.push(String::new());
@@ -2369,7 +2627,9 @@ pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<Stri
     };
     let looks = reg.look_problems.iter().map(|why| told(look_trouble(lang, why)));
     let reads = reg.read_problems.iter().map(|why| told(skipped(lang, why)));
-    looks.chain(reads).collect()
+    // 새 판 묻기의 틀린 값도 여기 선다(moai-d74q) — 그 설정이 서는 표면이 탐색기 하나다.
+    let updates = reg.update_problems.iter().map(|why| told(update_trouble(lang, why)));
+    looks.chain(reads).chain(updates).collect()
 }
 
 /// 쓰기가 거절한 까닭의 글([`crate::model::Invalid`], moai-yve0).
@@ -2394,6 +2654,8 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
         Field::AssigneeEmail => say(lang, "invalid.field_assignee_email"),
         Field::Epic => say(lang, "invalid.field_epic"),
         Field::Milestone => say(lang, "invalid.field_milestone"),
+        Field::StartsOn => say(lang, "invalid.field_starts_on"),
+        Field::DueOn => say(lang, "invalid.field_due_on"),
     };
     let said = match why {
         Invalid::Id { id } => return fill(say(lang, "invalid.id"), &[("id", id)]),
@@ -2410,6 +2672,17 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
             fill(say(lang, "invalid.group_id"), &[("field", field(f)), ("value", value)])
         }
         Invalid::MilestoneInMilestone { id } => fill(say(lang, "invalid.milestone_in_milestone"), &[("id", id)]),
+        // **고칠 손잡이를 낱말째 낸다** — 기한은 `--start`·`--due` 로 치는 값이라, 무엇이
+        // 틀렸는지만 말하면 어느 옵션을 다시 쳐야 하는지가 화면에 없다.
+        Invalid::Date { id, field: f, value } => {
+            fill(say(lang, "invalid.date"), &[("id", id), ("field", field(f)), ("value", value)])
+        }
+        Invalid::DateNotMilestone { id, field: f } => {
+            fill(say(lang, "invalid.date_not_milestone"), &[("id", id), ("field", field(f))])
+        }
+        Invalid::DateOrder { starts_on, due_on } => {
+            fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])
+        }
         Invalid::SelfBlock => say(lang, "invalid.self_block").to_string(),
         Invalid::BlockedId { value } => fill(say(lang, "invalid.blocked_id"), &[("value", value)]),
         Invalid::NoSuchColumn(e) => no_such_column(lang, e),
@@ -2463,6 +2736,23 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
         LookTrouble::NotAWord { key, value } => {
             fill(say(lang, "look.not_a_word"), &[("key", &format!("{TUI}.{key}")), ("value", value)])
         }
+    }
+}
+
+/// `[update] check` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q).
+///
+/// **보기 설정과 같은 글을 쓴다** — 물음이 같기 때문이다("이 자리에 저 모양이 서야 하는데 이것이
+/// 섰다"). 말묶음에 같은 뜻의 키를 한 벌 더 두면 옮기는 사람이 둘을 따로 옮기고, 그러다
+/// 한쪽만 고쳐진다.
+pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> String {
+    use crate::latest::{CHECK, UPDATE};
+    use crate::user_config::UpdateTrouble;
+    match why {
+        UpdateTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", UPDATE), ("found", found)]),
+        UpdateTrouble::NotABool { found } => fill(
+            say(lang, "look.want"),
+            &[("key", &format!("{UPDATE}.{CHECK}")), ("want", say(lang, "look.want_bool")), ("found", found)],
+        ),
     }
 }
 
@@ -2979,15 +3269,17 @@ mod tests {
     fn bare_seen(lang: Lang) -> Seen<'static> {
         Seen {
             screen: Screen::new(lang),
-            roots: BTreeMap::new(),
+            // 읽은 것이 없는 화면이라 미룬 줄도 없다 — 곁의 `kinds` 와 같은 자리, 같은 꼴이다.
+            roots: crate::report::Shelved::no_twins(BTreeMap::new()),
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
+            kinds: crate::report::Kinds::no_twins(),
         }
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
-        BTreeMap::new()
+        crate::report::EpicLabels::titled(BTreeMap::new())
     }
 
     /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가
@@ -3009,7 +3301,8 @@ mod tests {
 
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-e001".into());
-        let labels = crate::report::EpicLabels::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
+        // `argos-e001` 이 없는 표 — 줄이 제 `epic` 으로 답을 내고 그 id 를 못 찾아 `Gone` 이다.
+        let labels = crate::report::EpicLabels::titled(BTreeMap::new());
 
         let p =
             crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
@@ -3086,7 +3379,7 @@ mod tests {
         let mut stuck = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         stuck.blocked_by = vec!["argos-0001".into()];
         let issues = vec![blocker, stuck];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, crate::tz::Zone::stored());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_stale").expect("막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3105,7 +3398,7 @@ mod tests {
         let mut held = issue("argos-0002", "막힌 일", "todo"); // `issue` 은 09-11 — 칸에 30일
         held.blocked_by = vec!["argos-0001".into()];
         let issues = vec![shelved, held];
-        let st = crate::report::status(&issues, &[], &cfg(), now);
+        let st = crate::report::status(&issues, &[], &cfg(), now, crate::tz::Zone::stored());
         let w = st.warnings.iter().find(|w| w.kind == "blocked_by_deferred").expect("미룬 것에 막힘 경고가 없다");
         let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
         let out = plain(&preview(w, &by_id, now, Screen::new(Lang::Ko)));
@@ -3237,11 +3530,16 @@ mod tests {
     /// 품은 채로 줄을 맞춘다. 지금 브랜치의 줄에는 아무것도 안 붙는다.
     #[test]
     fn a_line_from_another_branch_carries_its_mark_before_the_title() {
-        let mine = vec![issue("argos-0001", "여기 일", "todo")];
-        let theirs = vec![issue("argos-0002", "옆 일", "in_progress")];
+        // 에픽 열이 서야 그 열이 밀렸는지를 잰다 — 두 줄 다 같은 에픽을 적는다.
+        let holds = |id: &str, title: &str, col: &str| {
+            let mut i = issue(id, title, col);
+            i.epic = Some("argos-e001".into());
+            i
+        };
+        let mine = vec![holds("argos-0001", "여기 일", "todo")];
+        let theirs = vec![holds("argos-0002", "옆 일", "in_progress")];
         let (all, origin) = crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/wt", theirs)]);
-        let tagged: crate::report::EpicLabels =
-            all.iter().map(|i| ((i.id.as_str(), i.kind), crate::report::EpicLabel::Named("에픽".into()))).collect();
+        let tagged = crate::report::EpicLabels::titled(BTreeMap::from([("argos-e001", "에픽")]));
         let out = plain(&list(
             &all,
             &cfg(),
@@ -3411,8 +3709,7 @@ mod tests {
     fn the_epic_column_shows_a_title() {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
-        let labels =
-            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
+        let labels = crate::report::EpicLabels::titled(BTreeMap::from([("argos-0001", "저장 계층")]));
         let out = plain(&list(
             &[i.clone()],
             &cfg(),
@@ -3426,7 +3723,7 @@ mod tests {
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다. **괄호는 이 표가 단다**(moai-snus) —
         // 값은 `Gone` 하나고, 낱말도 괄호도 그리는 쪽에서 온다.
-        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
+        let dangling = crate::report::EpicLabels::titled(BTreeMap::new());
         let out = plain(&list(
             &[i],
             &cfg(),
@@ -3488,6 +3785,57 @@ mod tests {
         }
         for odd in ["", "언제", "2026-09-21"] {
             assert_eq!(stamp(odd, &utc), odd, "못 읽은 글을 건드렸다");
+        }
+    }
+
+    /// **기한 줄도 읽는 사람의 달로 센다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
+    /// (`report::Dues::split`). 둘이 갈리면 보드는 "지남" 으로 세고 바로 그 줄을 편 상세는
+    /// "오늘까지" 라 말한다.
+    ///
+    /// **적힌 날짜는 안 옮긴다** — 달력의 날이라 옮길 시각이 없다. 옮기는 것은 견주는 쪽이다.
+    #[test]
+    fn a_deadline_line_counts_from_the_reader_s_day() {
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let mut stone = issue("argos-0001", "v0.1", "todo");
+        stone.kind = Kind::Milestone;
+        stone.due_on = Some("2026-09-11".into());
+
+        let said = |z: &crate::tz::Zone| due_span(&stone, now, z, Lang::Ko).expect("기한 줄이 안 섰다");
+        assert!(said(&crate::tz::Zone::utc()).contains("(오늘까지)"), "{}", said(&crate::tz::Zone::utc()));
+        assert!(said(&seoul).contains("(1일 지남)"), "{}", said(&seoul));
+        assert!(said(&seoul).contains("2026-09-11"), "적힌 날짜를 옮겼다 — {}", said(&seoul));
+
+        // **뒤로 옮기는 쪽도 잰다**(리뷰). 앞으로만 재면 `model::format_rfc3339` 가 날을 **되감는**
+        // 갈래(`div_euclid`·`rem_euclid`)를 아무도 안 밟는다 — 어긋남이 산다면 그쪽이다.
+        // UTC 로 09-11 04시면 로스앤젤레스는 아직 09-10 이라 기한이 하루 남았다.
+        let la = crate::tz::Zone::fixed("America/Los_Angeles", -8 * 3600);
+        let back = due_span(&stone, "2026-09-11T04:00:00Z", &la, Lang::Ko).expect("기한 줄이 안 섰다");
+        assert!(back.contains("(1일 남음)"), "{back}");
+    }
+
+    /// **기한은 마일스톤 줄에만 선다**(moai-x04r.fn4). 쓰기는 다른 종류의 줄에 `due_on` 을
+    /// 거절하지만 손으로 푼 충돌과 머지 드라이버가 넘긴 낡은 줄은 그것을 남길 수 있고, 그때
+    /// 상세가 `3일 지남` 이라 말하는 동안 보드는 아무 말도 안 했다 — 한 줄이 두 표면에서
+    /// 다르게 읽혔다. 따르는 것은 쓰기의 규칙(`Issue::check`)이지 보드의 거르개가 아니다 —
+    /// 닫히거나 미뤄 둔 마일스톤의 날은 그대로 선다([`due_of`] 의 주석).
+    #[test]
+    fn a_deadline_is_drawn_on_a_milestone_row_only() {
+        let now = "2026-09-23T00:00:00Z";
+        let z = crate::tz::Zone::utc();
+        let mut stone = issue("argos-0001", "v0.1", "todo");
+        stone.kind = Kind::Milestone;
+        stone.due_on = Some("2026-09-20".into());
+        assert!(due_of(&stone, now, &z, Lang::Ko).is_some(), "마일스톤의 기한이 빠졌다");
+
+        // 같은 값을 든 이슈·에픽·생각 — 어느 쪽도 기한 줄을 안 세운다.
+        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+            let mut row = issue("argos-0002", "손으로 푼 충돌이 남긴 줄", "todo");
+            row.kind = kind;
+            row.due_on = Some("2026-09-20".into());
+            row.starts_on = Some("2026-09-05".into());
+            assert!(due_of(&row, now, &z, Lang::Ko).is_none(), "{kind:?} 줄에 기한이 섰다");
         }
     }
 
@@ -3757,7 +4105,7 @@ mod tests {
     fn a_finished_grouping_is_not_nagged_but_a_folded_one_says_so() {
         let table = |all: &[Issue]| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", crate::tz::Zone::stored());
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(Lang::Ko)))
                 .join("\n")
         };
@@ -3788,7 +4136,7 @@ mod tests {
     fn the_bar_says_how_many_of_its_members_are_deferred() {
         let table = |all: &[Issue], lang| {
             let cfg = cfg();
-            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z");
+            let st = crate::report::status(all, &[], &cfg, "2026-09-11T04:12:03Z", crate::tz::Zone::stored());
             plain(&status(&st, all, &cfg, "2026-09-11T04:12:03Z", ".moai/issues.jsonl", 0, Screen::new(lang)))
                 .join("\n")
         };
@@ -3848,8 +4196,7 @@ mod tests {
         a.epic = Some("argos-0001".into());
         let b = issue("argos-0003", "떠 있는 것", "todo");
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
-        let labels =
-            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
+        let labels = crate::report::EpicLabels::titled(BTreeMap::from([("argos-0001", "저장 계층")]));
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();
@@ -3886,7 +4233,7 @@ mod tests {
         let issues = vec![issue("argos-0001", "첫 일", "todo")];
         let cfg = cfg();
         let now = "2026-09-11T04:12:03Z";
-        let st = crate::report::status(&issues, &[], &cfg, now);
+        let st = crate::report::status(&issues, &[], &cfg, now, crate::tz::Zone::stored());
         let draw =
             |lang| plain(&status(&st, &issues, &cfg, now, ".moai/issues.jsonl", 0, Screen::new(lang))).join("\n");
         let (ko, en) = (draw(Lang::Ko), draw(Lang::En));
@@ -3929,7 +4276,7 @@ mod tests {
         let lang = Lang::Ko;
         let mine = vec![issue("argos-0001", "제 줄", "todo")];
         let draw = |issues: &[Issue], screen: Screen| {
-            let st = crate::report::status(issues, &[], &cfg, now);
+            let st = crate::report::status(issues, &[], &cfg, now, crate::tz::Zone::stored());
             plain(&status(&st, issues, &cfg, now, ".moai/issues.jsonl", 0, screen))
         };
         let bare = Origin::default();

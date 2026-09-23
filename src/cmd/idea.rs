@@ -45,6 +45,77 @@ fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
     Ok(())
 }
 
+/// 펼친 에픽이 설 마일스톤 — **적힌 필드가 아니라 뜬 값이다**(리뷰, 2026-09-23 사용자 결정).
+///
+/// [`crate::report::milestones`] 는 화면이 소속을 읽는 그 자다 — 에픽 안에 담긴 생각은 제
+/// 필드가 비어도 그 에픽의 마일스톤 밑에 서고, 에픽에 진 제 필드는 어느 화면에도 안 선다.
+/// 적힌 필드를 데려가면 그 둘 다 어긋나, `show --milestone` 이 내주던 생각이 릴리스 밖
+/// 에픽으로 펼쳐지거나 아무도 못 보던 값이 에픽에 적힌다. 소속을 읽는 자는 하나여야 한다
+/// (`milestones_in` 의 주석과 같은 줄).
+///
+/// **`-e <에픽>` 이면 `None`** — 뿌리가 없고, 멤버는 그 에픽에서 물려받는다.
+fn stone_of(issues: &[Issue], id: &str, into: Option<&str>) -> Option<String> {
+    if into.is_some() {
+        return None;
+    }
+    crate::report::milestones(issues).get(id).map(|m| (*m).to_string())
+}
+
+/// 데려갈 마일스톤이 **죽은 릴리스**면 stderr 에 한 줄. 막지는 않는다(같은 결정).
+///
+/// 미뤄진 마일스톤을 데려가면 펼친 계획이 미룸을 물려받아 `ready` 에도 보드에도 안 뜨는데
+/// (`moai show --deferred` 에는 뜬다), 화면에 나가는 것이 성공 한 줄뿐이면 그것이 뜻대로인지
+/// 사고인지를 아무도 못 가른다. `add -e <없는 에픽>` 이 알리고 넘어가는 그 자리와 같은 꼴이다.
+///
+/// **연습과 진짜가 같은 줄을 낸다** — 사람이 "좋다" 하는 자리가 연습이라, 거기서 안 나온 말이
+/// 진짜에서만 나오면 그 "좋다" 는 못 본 것을 승인한 것이 된다.
+fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str>, lang: crate::i18n::Lang) {
+    let Some(m) = stone else { return };
+    if let Some(src) = crate::report::deferred_roots(issues).get(m) {
+        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_deferred"), &[("id", m), ("src", src)]);
+        eprintln!("moai: {said}");
+    } else if crate::report::group_states_of(issues, cfg, &[m]).get(m).is_some_and(|col| *col == crate::config::DONE) {
+        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_closed"), &[("id", m)]);
+        eprintln!("moai: {said}");
+    }
+}
+
+/// 펼치기가 에픽에 데려갈 본문 — **`-e <에픽>` 이면 없다**(moai-07v1).
+///
+/// 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을 물려받는다. **한 자리에서 고른다**: 연습과
+/// 진짜가 따로 고르면 한쪽만 재고 다른 쪽이 쓴다.
+fn carried_body<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
+    match into {
+        Some(_) => None,
+        None => thought.body.as_deref(),
+    }
+}
+
+/// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
+///
+/// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
+/// 있는 상한 넘는 본문을 든 idea 는 그래서 펼치기가 통째로 막혔는데, 거절문이 가리키는 것은
+/// 그 생각이 아니라 **이 쓰기가 짓는 에픽의 제목**이었다 — 받는 쪽은 제가 방금 친 계획의 첫
+/// 줄을 줄이러 가고, 줄여 봐야 같은 자리에서 또 막힌다.
+///
+/// **줄여서 데려가지 않는다.** [`crate::model::fit_bytes`] 는 도구가 짓는 글에 남의 글 한
+/// 토막을 **가리킴으로** 담을 때의 자다 — 원본이 제 줄에 그대로 남아 있을 때다. 여기 오는
+/// 것은 사본이고, 사람이 적은 글은 잘라 적지 않고 거절한다(2026-09-23 사용자 결정).
+///
+/// **재는 자는 진짜와 한 자리다**([`crate::model::check_text_size`]). 상한을 여기 한 벌 더
+/// 적으면 한쪽만 고치는 날 이 어긋남이 그대로 돌아온다 — 더하는 것은 빠져나갈 길 한 줄뿐이다.
+///
+/// **빠져나갈 길도 영어로 적는다**(moai-yve0·moai-9vwy, [`crate::model::unwritten`] 의 주석).
+/// 이 줄이 붙는 [`crate::model::check_text_size`] 의 거절문은 심는 안내
+/// ([`crate::guide::REVIEW_OVER_LIMIT`])를 안고 있어 통째로 영어다 — 한 줄만 화면 말로 두면
+/// `MOAI_LANG=ko` 에서 영어 넉 줄 뒤에 한국어 한 줄이 서서, 한 거절문 안에서 말이 갈린다.
+fn check_carried_body(id: &str, body: Option<&str>) -> R<()> {
+    let Some(text) = body else { return Ok(()) };
+    crate::model::check_text_size(|| id.to_string(), "body", text).map_err(|e| {
+        Fail::coded(format!("{}\n      Shorten it and unfold again — `moai edit {id} -b -`", e.message), e.code)
+    })
+}
+
 /// idea 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 idea 를 닫는다.
 /// `-e <에픽>` 이면 새 에픽 없이 이미 선 에픽의 멤버로 펼친다(moai-f3ml).
 ///
@@ -93,19 +164,43 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
         // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
         //
-        // **순서도 진짜와 같다.** 맨 앞에 두던 판은 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
-        // 냈는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
+        // 펼친 에픽이 설 마일스톤도 **연습이 미리 낸다**(moai-07v1) — 진짜가 데려가는 값을
+        // 연습이 안 내면, 계획을 승인한 쪽이 그것을 만들어 보고서야 안다. `-e` 면 뿌리가 없어
+        // 아무것도 안 데려가니 여기서도 없다.
+        //
+        // **`check_plan` 앞에 선다** — 그 모양을 재는 것이 `check_plan` 이라서다(리뷰). 손으로
+        // 푼 머지가 남긴 모양 틀린 마일스톤을 든 생각이면 진짜가 거절하는데, 연습만 지나
+        // 보내면 사람이 "좋다" 한 뒤에 도구가 거절한다.
+        // **연습도 데려갈 본문을 잰다.** 안 재면 상한 넘는 본문을 든 생각이 연습에서 0 으로
+        // 끝나고, 사람이 "좋다" 한 뒤에 진짜가 거절한다.
+        //
+        // **차례가 진짜와 같아야 한다**(리뷰). 진짜는 락 안에서 `check_carried_body` →
+        // `say_if_dead` → `create_drafts`(제목·마일스톤을 재는 자리) 순으로 간다. 이것을 뒤에
+        // 두던 판은 둘을 깼다 — 제목도 본문도 넘치는 판에서 연습은 제목을, 진짜는 본문을 댔고,
+        // 죽은 릴리스에 걸린 생각이면 연습만 그 알림 한 줄을 더 찍었다. 둘 다 `say_if_dead` 의
+        // 약속("연습과 진짜가 같은 줄을 낸다")과 어긋난다.
+        check_carried_body(&args.id, carried_body(thought, into))?;
+        let stone = stone_of(&load.issues, &args.id, into);
+        say_if_dead(&load.issues, &repo.config, stone.as_deref(), ctx.lang());
+        // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
+        // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
-        crate::cmd::add::check_plan(&drafts)?;
+        // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
+        // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
+        let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: None };
+        crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {
-            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into);
+            // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
+            // `moai show <idea>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref(), None);
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.will_unfold"))];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+        out.extend(crate::cmd::add::milestone_line(stone.as_deref(), ctx.lang()));
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -154,21 +249,44 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 메일을 **이름 칸**에 넣고 메일을 버린다. 파일에는 갈라서, 화면에는
             // 합쳐서 — 여기는 파일 쪽이다.
             let heir = (thought.assignee.clone(), thought.assignee_email.clone());
+            // **소속과 글도 물려준다**(moai-07v1). 마일스톤을 끊으면 펼친 에픽이 도는 릴리스
+            // 밖에 서고, 본문을 끊으면 `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다 —
+            // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
+            //
+            // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
+            // 물려받는다 — 멤버마다 idea 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
+            // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
+            // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
+            //
+            // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
+            // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
+            let text = carried_body(thought, into).map(str::to_string);
+            // **거절은 `create_drafts` 앞이다**(moai-oejf) — 뒤에 두면 `store` 가 이 쓰기가
+            // 짓는 에픽의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다.
+            check_carried_body(&args.id, text.as_deref())?;
+            let stone = stone_of(issues, &args.id, into);
+            say_if_dead(issues, cfg, stone.as_deref(), lang);
+            let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };
 
             let (mut entries, made) =
-                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, &heir, &by, &at)?;
+                crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
 
             // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
             // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.
             //
-            // 뿌리로 선 것(제 에픽이 없는 것)이 펼친 계획의 머리다. **한 번만
+            // 뿌리로 선 것(id 부모가 없는 것)이 펼친 계획의 머리다. **한 번만
             // 고른다** — 두 번 고르면 규칙이 둘이 되고, 갈라진 날 저널의 두 줄이
             // 서로 다른 것을 가리킨다.
             //
             // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
             // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
+            //
+            // **뿌리는 최상위 id 다**(moai-exh7) — 멤버는 에픽의 자식 id 를 받고 제 `epic` 을
+            // 안 적으므로(`create_drafts`), 그 필드로 가르던 자는 멤버까지 머리로 읽어 같은
+            // 노트를 줄마다 붙이고 `이슈 0건` 이라 말한다. 재는 자는 `add::stood_on` 과
+            // **한 함수**다([`crate::cmd::add::is_root`]) — 말로만 같다고 적어 두면 갈라진다.
             let grown: Vec<String> =
-                made.iter().filter(|i| into.is_some() || i.epic.is_none()).map(|i| i.id.clone()).collect();
+                made.iter().filter(|i| into.is_some() || crate::cmd::add::is_root(i)).map(|i| i.id.clone()).collect();
             // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
             // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
             // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
@@ -211,7 +329,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = crate::cmd::read_of(issues, cfg, &ids);
+            let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (made, read)))
         },
     )?;
@@ -236,6 +354,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
+    // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
+    // 아무것도 안 서고, 그것이 그대로 답이다. 세는 자는 `add --from` 과 한 자리다(리뷰).
+    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), ctx.lang()));
     if let Some(e) = into {
         let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));

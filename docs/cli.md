@@ -144,6 +144,7 @@ Options:
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
     status_idea_pile     = 5      when this many thoughts have piled up
+    status_due_days      = 3      days before a milestone deadline to say so
 ```
 
 ## `moai ready`
@@ -223,7 +224,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -235,10 +236,16 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -448,6 +455,8 @@ Options:
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it
+      --start <date|none>    Start of a milestone. `none` clears it
+      --due <date|none>      Deadline of a milestone. `none` clears it
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -723,7 +732,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -735,10 +744,16 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -869,7 +884,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -881,10 +896,16 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1015,7 +1036,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -1027,10 +1048,16 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1182,7 +1209,7 @@ Options:
           Put it in this epic
 
       --milestone <id>
-          Put it in this milestone
+          Put it in this milestone (with `--from`, on the epic it creates)
 
   -t, --tag <tag>
           Join with commas or give it several times
@@ -1194,10 +1221,16 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
+
+      --start <date>
+          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+
+      --due <date>
+          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --type <issue|epic|milestone|idea>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1567,8 +1600,11 @@ Options:
 
   **When the same field was changed differently, a person resolves it.**
   Picking one side silently makes the other side's edit vanish without a
-  trace. With an unreadable line or a duplicated id the whole file is handed
-  over inside conflict markers - keeping only what parsed would lose the rest.
+  trace. A line this binary cannot read travels through byte for byte - paired
+  by its id when it has one, so only a row both sides changed is handed over,
+  and counted line by line when it has none. What still hands the whole file
+  over inside conflict markers is a duplicated id among readable rows, and a
+  file that is not text - keeping only what parsed would lose the rest.
 
   Installing is once per clone. Git reads the driver command from the config
   only, and the config is not committed. In a clone without it, merge=moai in

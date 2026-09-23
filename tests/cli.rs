@@ -146,6 +146,13 @@ mod git_leaks;
 #[allow(dead_code)]
 mod scratch;
 
+// id 의 모양 — 계획이 세우는 멤버가 에픽의 자식 id 를 받는지 재는 시험이 부모를 물어야 하는데,
+// 그 규칙을 여기 베끼면 `id::parent_of` 가 바뀌는 날 시험만 옛 모양에 대고 푸르게 선다. `git_leaks`
+// ·`scratch` 와 같은 까닭이고, 이 파일은 std 밖을 안 보므로 `#[path]` 하나로 선다.
+#[path = "../src/id.rs"]
+#[allow(dead_code)]
+mod id;
+
 /// 시험이 부르는 moai 한 벌. **사람·시계·색을 한 자리에서 준다**(moai-uu47).
 ///
 /// 이 세 줄이 여덟 군데에 베껴져 있었다. 베낀 자리는 조용히 갈라진다 — `hook_in` 은 사람과
@@ -1524,6 +1531,93 @@ fn field(json: &str, key: &str) -> String {
     rest[..rest.find('"').unwrap()].to_string()
 }
 
+/// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 **id 만 든** 것. 없으면 `None` 이고,
+/// **빈 배열과 없는 키는 다르다**(AGENTS.md).
+///
+/// 객체가 든 배열(`journal`·`commits`)에는 못 쓴다 — 첫 `]` 에서 끊고 따옴표로 안 싸인 조각을
+/// 만나면 **소리 내어 죽는다**. 말없이 버리면 못 읽은 배열이 빈 배열로 둔갑해, `commits` 와
+/// `commits_error` 를 가른 것과 같은 것을 시험이 못 가른다(리뷰).
+fn list_in(json: &str, key: &str) -> Option<Vec<String>> {
+    let at = json.find(&format!("\"{key}\":["))?;
+    let rest = &json[at + key.len() + 4..];
+    let inside = &rest[..rest.find(']').expect("닫히지 않은 배열")];
+    let read = |s: &str| {
+        let t = s.trim();
+        t.strip_prefix('"')
+            .and_then(|t| t.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("{key} 는 id 만 든 배열이 아니다 — {t}"))
+            .to_string()
+    };
+    Some(inside.split(',').filter(|s| !s.trim().is_empty()).map(read).collect())
+}
+
+/// 그 글에 선 줄머리 `{"id":"…"` 전부. 목록 `--json` 은 배열 하나를 **한 줄**로 내므로 줄마다
+/// 하나씩 뽑는 [`field`] 로는 첫 줄만 읽힌다.
+///
+/// **줄이 여는 자리에서만 센다** — 보존된 모르는 필드(`Issue::rest`)가 제 안에 `"id"` 를 들 수
+/// 있어, 아무 데서나 세면 아무도 안 만든 id 가 목록에 낀다(리뷰).
+fn ids_in(json: &str) -> Vec<String> {
+    json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+}
+
+/// `--json` 에서 **그 id 로 선 줄 한 조각** — 그 객체가 닫히는 곳까지. 목록 전체에 대고
+/// 키를 찾으면 옆줄의 값이 이 줄의 것으로 읽힌다.
+///
+/// **여는 괄호를 세어 끊는다.** "다음 줄이 열리기 전까지" 로 끊던 때는 마지막 줄이 글
+/// 끝까지 늘어나, 그 객체를 감싼 쪽이 곁들인 키까지 이 줄의 것으로 읽혔다 — `edit --json`
+/// 은 줄을 편 뒤 `inherited_epic` 을 다는데 그 안의 첫 키가 `epic` 이다(리뷰).
+fn row_in<'a>(json: &'a str, id: &str) -> &'a str {
+    let open = format!("{{\"id\":\"{id}\"");
+    let at = json.find(&open).unwrap_or_else(|| panic!("{id} 이 안 섰다 — {json}"));
+    object_at(json, at, id)
+}
+
+/// `--json` 에서 **그 제목으로 선 줄 한 조각** — 같은 id 를 든 줄 둘을 갈라 읽는 시험이 쓴다
+/// ([`row_in`] 은 id 로 찾아 늘 앞줄을 문다).
+///
+/// **[`row_in`] 과 같은 자로 끊는다**(리뷰). 제목에서 앞으로 `{` 하나를 되짚고 다음 `}` 에서
+/// 끊던 꼴이 시험마다 손으로 서 있었는데, 줄이 품은 객체(`work` 의 한 칸, 모르는 필드)가
+/// 하나만 서도 그 앞에서 잘린다 — 그러면 `키가 없다` 를 재는 견주기가 조용히 지나간다.
+fn object_titled<'a>(json: &'a str, title: &str) -> &'a str {
+    let at = json.find(&format!("\"title\":\"{title}\"")).unwrap_or_else(|| panic!("{title} 이 목록에 없다\n{json}"));
+    // **줄 머리에 닻을 내린다**(리뷰) — 그냥 `{` 를 되짚으면 `title` 앞에 객체를 든 필드가 하나만
+    // 서도 그 안에 닻이 걸려 토막이 짧아지고, `키가 없다` 를 재는 견주기가 조용히 지나간다.
+    let head = json[..at].rfind(r#"{"id":""#).unwrap_or_else(|| panic!("{title} 의 줄이 안 열렸다\n{json}"));
+    object_at(json, head, title)
+}
+
+/// `json[at..]` 이 여는 객체가 **닫히는 곳까지**. 따옴표 안의 괄호는 안 센다 — 제목이나
+/// 본문에 `{`·`}` 가 들면 거기서 끊긴다.
+fn object_at<'a>(json: &'a str, at: usize, what: &str) -> &'a str {
+    let rest = &json[at..];
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in rest.char_indices() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') => quoted = false,
+            (true, false, _) => {}
+            (false, _, '"') => quoted = true,
+            (false, _, '{') => depth += 1,
+            (false, _, '}') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[..=i];
+                }
+            }
+            (false, _, _) => {}
+        }
+    }
+    panic!("{what} 의 줄이 안 닫혔다 — {json}");
+}
+
+/// `text` 안에 그 id 로 선 줄이 몇인가. **id 는 제 자식 id 의 앞부분이기도 하다** —
+/// `argos-x` 는 `argos-x.aa1` 안에도 들어 있어, 그냥 세면 자식 하나가 부모를 두 번 선 것으로
+/// 만든다. 뒤에 점이 안 붙은 것만 그 줄로 센다.
+fn drawn(text: &str, id: &str) -> usize {
+    text.match_indices(id).filter(|(at, _)| !text[at + id.len()..].starts_with('.')).count()
+}
+
 /// 의존성 없이 하는 최소 검사 — 값 하나고, 한 줄이고, 이스케이프가 없다.
 fn one_json_value(s: &str) {
     let t = s.trim();
@@ -2568,6 +2662,18 @@ fn the_project_layer_counts_the_same_notices_as_the_board() {
 
     let rows = ok_with(&out, &cfg, &["tui", "--json"]);
     assert!(rows.contains(&format!("\"notices\":{want}")), "층과 보드가 알림을 달리 센다 (보드 {want})\n{rows}");
+
+    // **밖에서 본 한눈 보기도 같은 셋을 센다**(moai-zog5, 2026-09-22 사용자 결정). 한때 이 화면만
+    // `install_notices` 를 안 실어, 같은 디렉터리를 두고 보드는 1건, 층은 3건을 댔다 — 세션이
+    // 시작하는 화면이 밖에서 부른 이것인데, 그 하나만 설치가 어긋난 것을 조용히 넘겼다.
+    let overview = ok_with(&out, &cfg, &["status", "--json"]);
+    let tail =
+        overview.split("\"notices\":").nth(1).unwrap_or_else(|| panic!("한눈 보기에 notices 가 없다\n{overview}"));
+    let seen = tail.matches("\"notice\":true").count();
+    assert_eq!(seen, want, "한눈 보기와 보드가 알림을 달리 센다\n{overview}");
+    for kind in ["agents_hand_edited", "gitignore_rules", "merge_driver_absent", "deferred"] {
+        assert!(overview.contains(kind), "한눈 보기에 {kind} 알림이 안 섰다\n{overview}");
+    }
 }
 
 /// 등록한 것이 없으면 등록하는 길을 댄다. 설정 파일이 깨져 목록이 빈 것이면 그 까닭도 함께
@@ -4569,6 +4675,368 @@ fn bulk_refuses_issues_with_no_epic() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("어느 에픽의"));
 }
 
+/// **계획도 마일스톤을 물려준다**(moai-xoyg). `--milestone` 은 뿌리인 에픽에만 서고 멤버는
+/// 거기서 물려받는다 — 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날
+/// 멤버가 안 따라온다.
+///
+/// 버리던 판은 거절도 알림도 없이 에픽만 만들고, 사람이 뒤에 `moai edit <에픽> --milestone`
+/// 을 한 번 더 쳤다 — 도는 마일스톤 밖에 선 에픽은 `ready` 가 뒤로 미룬다.
+#[test]
+fn a_plan_hangs_its_epics_on_the_milestone() {
+    let s = init("planstone");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 파일에 적힌 것은 에픽 둘뿐이다.
+    let made = issues(s.path());
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "뿌리 말고도 적었다\n{made}");
+    // 그런데 멤버 셋까지 그 마일스톤 아래 선다 — 물려받기가 하는 일이다.
+    let under = ok(s.path(), &["show", "--milestone", &stone]);
+    for want in ["저장 계층", "CLI 표면", "원자적으로 쓴다", "잘린 줄을 복구한다", "--json 이 tags 를 빠뜨린다"]
+    {
+        assert!(under.contains(want), "{want} 가 마일스톤 밑에 안 섰다\n{under}");
+    }
+}
+
+/// **`--from` 과 뜻이 안 통하는 깃발은 거절한다**(moai-fppn). `--body -` 는 계획과 stdin 을
+/// 다투고, `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다 — 받고 버리면 0 으로 끝난
+/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag`·`--start`·`--due` 가 이미 선
+/// 자리와 한 줄이다.
+#[test]
+fn a_plan_refuses_the_flags_it_cannot_use() {
+    let s = init("planflags");
+    // `--quiet` 도 든다(리뷰) — `bulk` 가 안 읽어 `id=$(moai add --from - -q)` 가 색까지 든
+    // 여러 줄을 id 로 받아 갔다. 계획은 id 를 여럿 내므로 "id 하나만" 이 여기서는 안 선다.
+    //
+    // **`--body` 는 여기서 빠졌다**(moai-kqid) — 계획은 본문을 받아 첫 뿌리에 단다. 못 서는
+    // 판은 stdin 을 정말 다투는 판뿐이고, 그것은 아래 [`a_plan_takes_a_body_unless_stdin_is_contested`] 가 잰다.
+    //
+    // **열 가지를 남김없이 돈다**(리뷰). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
+    // 손으로 옮겨 적었는데 시험은 셋만 돌아, 그 목록에서 한 줄이 빠지는 날 아무것도 안 붉어졌다 —
+    // 빠진 깃발은 받아서 버려지고 그 부름이 0 으로 끝난다(`--type` 이 실제로 그랬다, moai-g9a8).
+    for extra in [
+        ["제목"].as_slice(),
+        ["--epic", "moai-aaaa"].as_slice(),
+        ["--tag", "parser"].as_slice(),
+        ["--priority", "1"].as_slice(),
+        ["--parent", "moai-aaaa"].as_slice(),
+        ["--start", "2026-09-01"].as_slice(),
+        ["--due", "2026-09-30"].as_slice(),
+        ["--status", "in_progress"].as_slice(),
+        ["--quiet"].as_slice(),
+        ["--type", "issue"].as_slice(),
+    ] {
+        let mut argv = vec!["add", "--from", "-"];
+        argv.extend_from_slice(extra);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        assert!(!out.status.success(), "{extra:?} 를 받았다");
+        let err = String::from_utf8_lossy(&out.stderr);
+        // 제목은 자리 인자라 `[title]` 이라는 이름으로 선다 — 친 글자가 아니라 그 자리를 댄다.
+        let named = if extra[0] == "제목" { "[title]" } else { extra[0] };
+        assert!(err.contains(named) && err.contains("--from"), "{extra:?}: {err}");
+        assert_eq!(issues(s.path()), "", "{extra:?} 인데 썼다");
+    }
+}
+
+/// **계획은 본문을 받는다 — stdin 을 정말 다투는 판만 막는다**(moai-kqid).
+///
+/// 막은 까닭은 `--body -` 와 `--from -` 이 stdin 하나를 다툰다는 것이었는데(moai-fppn),
+/// 통째로 막은 판은 다툴 것이 없는 부름까지 같이 막았다. `Rooted.body` 는 이미 서 있고
+/// `idea promote` 가 그 길로 본문을 채우니, 도구 안에는 길이 있는데 사람만 못 쓰던 자리였다.
+/// 본문이 서는 자리는 **첫 뿌리 하나**다 — 뿌리마다 적으면 같은 글이 에픽 수만큼 베껴진다.
+#[test]
+fn a_plan_takes_a_body_unless_stdin_is_contested() {
+    let s = init("planbody");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+
+    // 계획이 파일이면 stdin 은 본문의 것이다.
+    let out = from_stdin(s.path(), &["add", "--from", &file, "--body", "-"], "왜 한 묶음인가");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = ok(s.path(), &["show", "--json"]);
+    assert_eq!(rows.matches("왜 한 묶음인가").count(), 1, "본문이 첫 뿌리 하나에 안 섰다\n{rows}");
+    assert!(rows.contains(r#""title":"첫 에픽","kind":"epic","status":"todo""#) || rows.contains("첫 에픽"), "{rows}");
+
+    // 본문이 글자로 왔으면 계획이 stdin 을 다 쓴다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "글자 본문"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()).matches("글자 본문").count(), 1, "본문이 첫 뿌리 하나에 안 섰다");
+
+    // stdin 을 정말 다툴 때만 막고, 막은 뒤에는 아무것도 안 남는다.
+    //
+    // **`/dev/stdin` 도 같은 구멍이다**(리뷰). `-` 라는 글자만 견주던 판은 이것을 지나 보냈고,
+    // 그러면 본문이 stdin 을 다 마신 뒤 계획이 빈 것을 읽어 **계획이 비었다** 고 거절했다 —
+    // 받는 쪽은 제가 제대로 준 계획을 고치러 갔다.
+    for plan_arg in ["-", "/dev/stdin"] {
+        let before = issues(s.path());
+        let out = from_stdin(s.path(), &["add", "--from", plan_arg, "--body", "-"], PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{plan_arg}: {err}");
+        assert!(err.contains("--body") && err.contains("--from"), "{plan_arg}: {err}");
+        assert_eq!(issues(s.path()), before, "{plan_arg}: 거절해 놓고 썼다");
+    }
+}
+
+/// **연습이 본문이 설 자리를 댄다**(리뷰). `--milestone` 이 줄 하나를 얻은 그 까닭이다
+/// (moai-07v1) — 진짜가 데려가는 값을 연습이 안 내면, 계획을 승인한 쪽이 그것을 만들어 보고서야
+/// 안다. `--body` 를 준 부름과 안 준 부름이 글자 하나 안 달랐고, 에픽이 여럿인 계획에서는 둘
+/// 가운데 어느 쪽이 받는지도 안 나왔다.
+///
+/// **글자는 안 찍는다**(같은 moai-07v1 결정) — 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이
+/// 그 글에 묻힌다. 내는 것은 "선다" 와 "어느 줄에" 둘뿐이다.
+#[test]
+fn a_rehearsal_says_where_the_body_lands() {
+    let s = init("planbodyline");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+
+    let said = ok(s.path(), &["add", "--from", &file, "--body", "왜 한 묶음인가", "--dry-run"]);
+    assert!(said.contains("첫 에픽"), "본문이 설 줄을 안 댄다\n{said}");
+    assert!(!said.contains("왜 한 묶음인가"), "본문 글자를 찍었다\n{said}");
+    // 기계도 같은 어휘로 받는다 — 아직 id 가 없으니 자리로 말한다(`DraftOut::epic` 과 같다).
+    let json = ok(s.path(), &["add", "--from", &file, "--body", "왜 한 묶음인가", "--dry-run", "--json"]);
+    assert!(json.contains(r#""body_on":0"#), "{json}");
+    // **없으면 안 낸다** — 그 없음이 답이다(AGENTS.md).
+    let bare = ok(s.path(), &["add", "--from", &file, "--dry-run", "--json"]);
+    assert!(!bare.contains("body_on"), "본문이 없는데 자리를 냈다\n{bare}");
+    assert_eq!(issues(s.path()), "", "연습이 썼다");
+}
+
+/// **연습이 본문도 같은 자로 잰다**(moai-kqid). 연습은 사람이 "좋다" 하는 자리라
+/// (AGENTS.md 갈림길 3), 쓰기가 거절할 글을 그대로 지나 보내면 그 승인이 뒤늦은 말이 된다.
+#[test]
+fn a_rehearsal_measures_the_body_it_would_write() {
+    let s = init("planbodysize");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 저장 계층\n- 하나\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+    let big = "가".repeat(30_000);
+
+    let rehearsal = moai(s.path(), &["add", "--from", &file, "--body", &big, "--dry-run"]);
+    let real = moai(s.path(), &["add", "--from", &file, "--body", &big]);
+    assert!(!real.status.success(), "진짜가 받았다");
+    assert!(!rehearsal.status.success(), "연습만 좋다고 했다");
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+    // 가리키는 줄도 진짜와 같다 — 본문은 첫 뿌리에 서므로 그 줄의 제목을 댄다.
+    assert!(said.contains("저장 계층"), "안 지은 줄을 제목으로 안 가리킨다\n{said}");
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+
+    // **넘치는 것이 둘일 때도 같은 것을 댄다**(리뷰). `store::write_locked` 는 줄 차례대로 돌며
+    // 한 줄에서 제목 → 본문을 잇달아 재는데, 제목을 전부 먼저 재던 연습은 **뒷줄 제목**을 댔다 —
+    // 받는 쪽은 연습이 댄 제목을 줄이고 다시 불러서야 진짜가 첫 줄의 본문을 본다는 것을 알았다.
+    let late = s.path().join("late.md");
+    std::fs::write(&late, format!("# 짧은 에픽\n- {}\n", "나".repeat(30_000))).unwrap();
+    let late = late.to_string_lossy().into_owned();
+    let rehearsal = moai(s.path(), &["add", "--from", &late, "--body", &big, "--dry-run"]);
+    let real = moai(s.path(), &["add", "--from", &late, "--body", &big]);
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(said, was, "넘치는 것이 둘일 때 연습과 진짜가 다른 말을 한다");
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+}
+
+/// **그 거절은 moai 의 것이지 clap 의 것이 아니다**(moai-yhb1).
+///
+/// `conflicts_with_all` 에 맡기던 판은 둘을 깼다. 하나, `add::run` 이 닿기 전에 터져
+/// 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를 빼라"
+/// 를 듣고, 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 둘, 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 봤다 — 같은 명령의 형제 거절(`--milestone <모양 틀림>`)은
+/// `{"code": …}` 에 exit 1 이다. 한 기능에 거절 계약이 둘이면 그것은 계약이 아니다.
+#[test]
+fn a_plan_refusal_is_moais_own_not_claps() {
+    let s = init("planrefusal");
+    // 네임스페이스가 먼저다 — 깃발 얘기는 한마디도 안 나온다.
+    for verb in [["idea", "add"].as_slice(), ["milestone", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-", "-b", "글"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{verb:?}: {err}");
+        assert!(
+            !err.contains("--body"),
+            "{verb:?}: 깃발 거절이 동사 거절을 가렸다
+{err}"
+        );
+    }
+    // 동사가 맞으면 깃발을 댄다 — 그리고 그 거절도 `--json` 으로 갈라진다.
+    for (argv, want) in [
+        (["idea", "add", "--from", "-", "-b", "글"].as_slice(), "moai idea promote"),
+        (["add", "--from", "-", "--status", "in_progress"].as_slice(), "--status"),
+        (["add", "--from", "-", "-b", "-"].as_slice(), "--body"),
+    ] {
+        let mut json = argv.to_vec();
+        json.push("--json");
+        let out = from_stdin(s.path(), &json, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {err}");
+        assert!(err.contains(r#""code":"bad_input""#), "{argv:?}: {err}");
+        assert!(err.contains(want), "{argv:?}: {err}");
+    }
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
+}
+
+/// **연습도 마일스톤의 모양을 잰다**(리뷰). 연습은 사람이 "좋다" 하는 자리라(AGENTS.md
+/// 갈림길 3), 쓰기가 거절할 값을 그대로 지나 보내면 그 승인이 뒤늦은 말이 된다 —
+/// `moai edit --milestone none` 이 필드를 비우므로 `none` 은 사람이 실제로 치는 값이다.
+#[test]
+fn a_rehearsal_measures_the_milestone_it_reports() {
+    let s = init("planstoneshape");
+    for bad in ["none", "그냥 이름"] {
+        let rehearsal = from_stdin(s.path(), &["add", "--from", "-", "--milestone", bad, "--dry-run"], PLAN);
+        let real = from_stdin(s.path(), &["add", "--from", "-", "--milestone", bad], PLAN);
+        assert!(!real.status.success(), "{bad}: 진짜가 받았다");
+        assert!(!rehearsal.status.success(), "{bad}: 연습만 좋다고 했다");
+        // 가리키는 줄도 말도 한 자리에서 나온다 — 연습과 진짜가 같은 글로 선다.
+        let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+        assert_eq!(said, was, "{bad}: 연습과 진짜가 다른 말을 한다");
+        assert!(said.contains("저장 계층"), "{bad}: 안 지은 줄을 제목으로 안 가리킨다\n{said}");
+        assert_eq!(issues(s.path()), "", "{bad}: 거절해 놓고 썼다");
+    }
+    // 모양이 맞으면 헛 id 라도 연습도 진짜도 지난다 — 그것은 `dangling_milestone` 이 낼 말이다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--milestone", "moai-zzzz", "--dry-run"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
+/// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
+/// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
+#[test]
+fn promote_carries_the_milestone_and_the_body() {
+    let s = init("promotecarry");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["idea", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+        .trim()
+        .to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // 에픽 하나에만 적힌다 — idea 줄이 들고 있던 것까지 두 줄이다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "{made}");
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽에 안 갔다\n{made}");
+    // **어느 줄이 들었는지까지 본다**(리뷰). 수만 세던 판정은 본문이 멤버에 가고 에픽이 빈 채로
+    // 선 꼴에서도 그대로 지났다 — 계획에 에픽 하나와 이슈 하나뿐이라 수로는 둘을 못 가른다.
+    let pick = |mark: &str| made.lines().find(|l| l.contains(mark)).unwrap_or_else(|| panic!("{mark}\n{made}"));
+    let (epic, member) = (pick(r#""kind":"epic""#), pick(r#""title":"첫 이슈""#));
+    assert!(epic.contains(r#""body":"왜 한 묶음인가""#), "에픽이 본문을 안 받았다\n{epic}");
+    assert!(epic.contains(&format!(r#""milestone":"{stone}""#)), "에픽이 마일스톤을 안 받았다\n{epic}");
+    // 멤버는 에픽에서 물려받으므로 제 줄에는 둘 다 없다 — 적으면 그것이 파생값을 저장하는 것이다.
+    assert!(!member.contains(r#""body""#), "멤버에 본문을 베꼈다\n{member}");
+    assert!(!member.contains(r#""milestone""#), "멤버에 마일스톤을 적었다\n{member}");
+    let under = ok(s.path(), &["show", "--milestone", &stone]);
+    assert!(under.contains("캐시 층") && under.contains("첫 이슈"), "{under}");
+}
+
+/// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
+/// 값이라 뿌리마다 서야 하지만 본문은 물려받는 값이 아니다 — 뿌리마다 적으면 64KB 짜리
+/// 글이 에픽 수만큼 베껴지고(재 봤다: 에픽 200개 계획이 스냅샷을 13MB 로 불렸다), 한쪽을
+/// 고친 날 나머지가 옛 글로 남아 어느 것을 믿을지 모른다.
+#[test]
+fn a_multi_epic_unfold_copies_the_body_once() {
+    let s = init("promotemany");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["idea", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+        .trim()
+        .to_string();
+    let plan = "# 앞 에픽\n- [p1] 첫 일\n# 뒤 에픽\n- [p2] 둘째 일\n";
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], plan);
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // 마일스톤은 뿌리 둘 다 — idea 줄까지 세 줄이다. 소속은 멤버가 물려받으므로 뿌리마다 선다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 3, "뿌리 하나에만 달았다\n{made}");
+    // 본문은 첫 뿌리 하나 — idea 줄까지 두 줄이다.
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽마다 베껴졌다\n{made}");
+    let front = made.lines().find(|l| l.contains(r#""title":"앞 에픽""#)).expect(&made);
+    assert!(front.contains(r#""body":"왜 한 묶음인가""#), "첫 뿌리가 본문을 안 받았다\n{front}");
+}
+
+/// **이미 선 에픽에 펼칠 때는 둘 다 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
+/// 멤버마다 idea 의 마일스톤을 적으면 에픽의 것을 덮어 `show --milestone` 이 두 곳에 선다.
+#[test]
+fn promote_into_a_standing_epic_carries_nothing() {
+    let s = init("promoteinto");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["선 에픽", "--type", "epic", "--milestone", &m1]);
+    let idea =
+        ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"]).trim().to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+
+    let made = issues(s.path());
+    // `m2` 는 idea 줄에만 남고, 만든 멤버는 에픽에서 `m1` 을 물려받는다.
+    assert_eq!(made.matches(&format!(r#""milestone":"{m2}""#)).count(), 1, "선 에픽의 멤버에 적었다\n{made}");
+    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 1, "멤버에 본문을 베꼈다\n{made}");
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("멤버 하나"), "에픽에서 안 물려받았다");
+}
+
+/// **데려가는 마일스톤은 적힌 필드가 아니라 뜬 값이다**(리뷰, 2026-09-23 사용자 결정).
+/// `moai show --milestone <id>` 가 그 생각을 내주는 자리와 펼친 에픽이 서는 자리가 같아야 한다 —
+/// 적힌 필드를 데려가던 판은 둘이 반대로 갈렸다. 에픽에 담긴 생각은 제 필드가 비어 릴리스 밖으로
+/// 펼쳐지고, 에픽에 진 제 필드는 아무 화면에도 없던 값 그대로 에픽에 적혔다.
+#[test]
+fn promote_carries_the_milestone_the_tool_shows_it_under() {
+    let s = init("promoteresolved");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["담는 에픽", "--type", "epic", "--milestone", &m1]);
+
+    // 제 필드는 비었고 에픽이 `m1` 에 선 생각. 화면은 이것을 `m1` 밑에 낸다.
+    let bare = ok(s.path(), &["idea", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
+    // idea 는 목록에서 접히므로 `--type idea` 로 펴서 본다 — 접혔을 뿐 `m1` 밑이다.
+    let ideas_under = ok(s.path(), &["show", "--milestone", &m1, "--type", "idea"]);
+    assert!(ideas_under.contains("필드 없는 생각"), "화면이 m1 밑에 안 냈다\n{ideas_under}");
+    let grown = from_stdin(s.path(), &["idea", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 하나"), "릴리스 밖으로 펼쳤다");
+
+    // 제 필드가 `m2` 인데 에픽의 `m1` 이 이기는 생각. 이긴 쪽을 데려간다.
+    let lost = ok(s.path(), &["idea", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
+    let grown = from_stdin(s.path(), &["idea", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
+    assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    let under2 = ok(s.path(), &["show", "--milestone", &m2]);
+    assert!(!under2.contains("펼친 둘"), "아무 화면에도 없던 값을 데려갔다\n{under2}");
+    assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 둘"), "이긴 마일스톤을 안 데려갔다");
+}
+
+/// **죽은 릴리스로 데려갈 때는 한 줄 알린다. 막지는 않는다**(같은 결정).
+///
+/// 미뤄진 마일스톤을 말없이 데려가면 방금 승인한 계획이 미룸을 물려받아 `ready` 에도 보드에도
+/// 안 뜨는데, 화면에 나가는 것은 성공 한 줄뿐이었다 — 뜻대로인지 사고인지를 못 가른다.
+/// 연습도 같은 줄을 낸다: 사람이 "좋다" 하는 자리가 연습이다.
+#[test]
+fn promote_says_when_the_milestone_it_carries_is_dead() {
+    let s = init("promotedead");
+    let put_off = ok(s.path(), &["milestone", "add", "미룬 v", "-q"]).trim().to_string();
+    ok(s.path(), &["defer", &put_off, "-m", "다음 분기"]);
+    let idea = ok(s.path(), &["idea", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
+
+    for dry in [true, false] {
+        let mut argv = vec!["idea", "promote", &idea, "--from", "-"];
+        if dry {
+            argv.push("--dry-run");
+        }
+        let out = from_stdin(s.path(), &argv, "# 펼친 것\n- 한 일\n");
+        assert!(out.status.success(), "막았다 — {}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(&put_off) && err.contains("--undo"), "dry={dry}: 미뤄진 것을 안 알렸다\n{err}");
+    }
+
+    // 닫힌 마일스톤은 그 릴리스가 다시 열린다고 댄다.
+    let shut = ok(s.path(), &["milestone", "add", "닫힌 v", "-q"]).trim().to_string();
+    let done = add(s.path(), &["끝난 멤버", "--milestone", &shut]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let late = ok(s.path(), &["idea", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&shut), "닫힌 것을 안 알렸다");
+    assert!(ok(s.path(), &["show", "--milestone", &shut]).contains("늦은 것"), "데려가지 않았다");
+}
+
 /// **템플릿 파일은 `--var` 로 채워 편다**(moai-cypw). 연습도 채운 뒤의 계획을 보여 준다.
 #[test]
 fn a_template_file_is_filled_with_vars() {
@@ -6015,11 +6483,8 @@ fn the_tree_shows_every_issue_exactly_once() {
     ok(s.path(), &["edit", &wrong, "-e", &member]);
 
     let tree = ok(s.path(), &["show", "--tree", "--all"]);
-    // **id 가 자식 id 의 앞부분이기도 하다** — `argos-x` 는 `argos-x.aa1` 안에도
-    // 들어 있다. 뒤에 점이 붙지 않은 것만 그 줄로 센다.
-    let times = |id: &str| tree.match_indices(id).filter(|(at, _)| !tree[at + id.len()..].starts_with('.')).count();
     for id in [&ga, &na, &member, &child, &inherits, &loose, &dangling, &wrong] {
-        let n = times(id);
+        let n = drawn(&tree, id);
         assert_eq!(n, 1, "{id} 가 트리에 {n}번 나온다\n{tree}");
     }
 }
@@ -6069,6 +6534,370 @@ fn a_grouping_detail_does_not_label_its_own_members_as_loose() {
     // 처럼 나와 같은 에픽이 `--tree` 와 다르게 읽힌다.
     let mile = ok(s.path(), &["show", &m]);
     assert!(mile.contains("0/2"), "에픽 줄이 집계를 잃었다\n{mile}");
+}
+
+// ── 마일스톤의 기한과 든 시간 (moai-pmhv) ────────────────────────────
+
+/// 마일스톤은 시작과 종료 기한을 든다. 지금까지 마일스톤에는 "언제까지" 가 아무 데도 없었다.
+///
+/// **시각이 아니라 달력 날짜다**(2026-09-22 사용자 결정) — 사람이 `--due 2026-09-20` 을 치면
+/// 그 글자가 그대로 스냅샷에 서고, 화면도 그대로 낸다. 시간대에 따라 다른 날을 가리킬 여지가 없다.
+#[test]
+fn a_milestone_carries_a_start_and_a_deadline() {
+    let s = init("due");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--start", "2026-09-05", "--due", "2026-09-20"]);
+
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""starts_on":"2026-09-05""#), "{json}");
+    assert!(json.contains(r#""due_on":"2026-09-20""#), "{json}");
+
+    // 상세는 남은 날수까지 낸다 — 오늘은 09-11 이므로 아흐레 남았다.
+    let text = ok(s.path(), &["show", &m]);
+    assert!(text.contains("기한   2026-09-05 → 2026-09-20  (9일 남음)"), "{text}");
+
+    // `edit` 로 고치고, `none` 으로 비운다 — 소속·담당과 같은 낱말이다.
+    ok(s.path(), &["edit", &m, "--due", "2026-09-11"]);
+    assert!(ok(s.path(), &["show", &m]).contains("(오늘까지)"), "기한 당일을 남은 날로 말했다");
+    ok(s.path(), &["edit", &m, "--due", "none", "--start", "none"]);
+    let bare = ok(s.path(), &["show", &m, "--json"]);
+    assert!(!bare.contains("due_on") && !bare.contains("starts_on"), "비운 기한이 남았다\n{bare}");
+    assert!(!ok(s.path(), &["show", &m]).contains("기한"), "빈 기한이 줄을 세웠다");
+}
+
+/// **기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
+/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다.
+#[test]
+fn a_deadline_stands_on_a_milestone_row_only() {
+    let s = init("duekind");
+    let made = moai(s.path(), &["add", "그냥 이슈", "--due", "2026-09-20"]);
+    assert!(!made.status.success(), "이슈에 기한을 받았다");
+    let said = String::from_utf8_lossy(&made.stderr).to_string();
+    assert!(said.contains("--due"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
+    // **만들다 걸린 줄에는 고칠 id 가 없다**(moai-1rkl, 리뷰) — 거절이 쓰기를 통째로 물리므로
+    // 방금 뽑은 id 는 어디에도 안 남는다. 그 id 를 그대로 내밀면 따라 친 쪽이 "없는 이슈" 를 본다.
+    assert!(said.contains("빼고"), "만들 때 무엇을 해야 하는지를 안 댄다 — {said}");
+    assert_eq!(issues(s.path()).trim(), "", "거절한 줄이 파일에 남았다");
+
+    // 이미 선 줄도 같다. 에픽도 마일스톤이 아니다.
+    let e = add(s.path(), &["에픽", "--type", "epic"]);
+    assert!(!moai(s.path(), &["edit", &e, "--start", "2026-09-05"]).status.success(), "에픽에 기한을 받았다");
+}
+
+/// **손으로 푼 줄 하나가 그 줄을 도구 밖으로 내몰지 않는다.** 꼴이 틀린 기한은 이번 쓰기가
+/// 안 건드린 필드여도 걸리므로, 그 줄은 제목 고치기와 `defer` 까지 막힌다 — 그때 화면이
+/// 비우는 길을 대야 되돌릴 방법이 도구 안에 남는다(CLAUDE.md).
+#[test]
+fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
+    let s = init("duestuck");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let line = line_of(s.path(), &m).replace(r#""title":"v0.1""#, r#""due_on":"2026-9-20","title":"v0.1""#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{line}\n")).unwrap();
+
+    let out = moai(s.path(), &["edit", &m, "--title", "v0.1.1"]);
+    assert!(!out.status.success(), "꼴이 틀린 기한을 그대로 되썼다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&m) && said.contains("--due none"), "비우는 길을 안 댄다 — {said}");
+
+    // 낸 명령을 그대로 치면 풀린다 — 거절문이 대는 길은 실제로 걸어지는 길이다.
+    ok(s.path(), &["edit", &m, "--due", "none"]);
+    ok(s.path(), &["edit", &m, "--title", "v0.1.1"]);
+}
+
+/// **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 `due_on` 을
+/// 거절하므로 그 값이 서는 길은 손으로 푼 충돌과 머지 드라이버가 안 건드리고 넘긴 낡은 줄
+/// (`a_row_neither_side_touched_does_not_block_the_merge`)뿐인데, 상세는 종류를 안 보고 그려
+/// `3일 지남` 이라 말하고 보드는 마일스톤만 세어 아무 말도 안 했다 — 한 줄이 두 표면에서
+/// 다르게 읽혔다. 따르는 것은 쓰기의 규칙(`Issue::check`)이다: 그리는 쪽을 따르면 이슈에
+/// 적힌 날이 기한 경고로 서서 없는 마일스톤이 보드를 채운다.
+#[test]
+fn a_deadline_on_a_row_that_is_not_a_milestone_is_drawn_nowhere() {
+    let s = init("duekind");
+    let i = add(s.path(), &["손으로 푼 충돌이 남긴 줄"]);
+    let line =
+        line_of(s.path(), &i).replace(r#""status":"#, r#""due_on":"2026-09-20","starts_on":"2026-09-05","status":"#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{line}\n")).unwrap();
+
+    let shown = ok(s.path(), &["show", &i]);
+    assert!(!shown.contains("2026-09-20"), "마일스톤 아닌 줄의 상세에 기한이 섰다\n{shown}");
+    assert!(!shown.contains("2026-09-05"), "마일스톤 아닌 줄의 상세에 시작 기한이 섰다\n{shown}");
+
+    // **적힌 값은 지우지 않는다** — 읽기는 관대하고, `--json` 은 파일에 있는 그대로 낸다.
+    let json = ok(s.path(), &["show", &i, "--json"]);
+    assert!(json.contains(r#""due_on":"2026-09-20""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
+
+    // 보드는 처음부터 조용했다. 이제 상세도 같은 말을 한다.
+    let board = ok(s.path(), &["status"]);
+    assert!(!board.contains("2026-09-20"), "보드가 기한 경고를 세웠다\n{board}");
+}
+
+/// **쓰기는 엄하다.** `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
+/// 영영 "기한 없음" 으로 조용하다. 시작이 종료보다 뒤인 것도 같은 자리에서 거절한다.
+#[test]
+fn a_deadline_refuses_what_is_not_a_day() {
+    let s = init("duebad");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    for bad in ["2026-02-30", "2026-9-1", "2026-13-01", "어제", "2026-09-20T00:00:00Z"] {
+        let out = moai(s.path(), &["edit", &m, "--due", bad]);
+        assert!(!out.status.success(), "{bad} 를 날짜로 받았다");
+    }
+    // **부호는 자리를 안 가리고 샌다**(리뷰) — `-` 를 아무 데나 받으면 해가 음수로 서고, 그 줄이
+    // 보드에 "749469일 지남" 으로 영영 선다. `=` 꼴이 clap 의 붙임표 검사를 지나므로 실제로 온다.
+    let out = moai(s.path(), &["edit", &m, "--due=-026-09-20"]);
+    assert!(!out.status.success(), "음수 해를 날짜로 받았다");
+    assert!(!issues(s.path()).contains("-026"), "거절한 값이 파일에 남았다");
+    // 윤년은 그레고리력 그대로다 — 2028 은 윤년이고 2026 은 아니다.
+    assert!(moai(s.path(), &["edit", &m, "--due", "2028-02-29"]).status.success());
+    assert!(!moai(s.path(), &["edit", &m, "--due", "2026-02-29"]).status.success());
+
+    ok(s.path(), &["edit", &m, "--start", "none", "--due", "2026-09-20"]);
+    let out = moai(s.path(), &["edit", &m, "--start", "2026-09-25"]);
+    assert!(!out.status.success(), "시작이 종료보다 뒤인 것을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("2026-09-25") && said.contains("2026-09-20"), "{said}");
+}
+
+/// 보드는 지난 기한과 다가온 기한을 **두 갈래로** 낸다. 사람이 할 일이 다르다.
+///
+/// **그래도 아무것도 막지 않는다** — 경고로 비영 종료하는 순간 이건 린트고, 린트는 곧 게이트다.
+#[test]
+fn the_board_tells_a_passed_deadline_from_one_coming_up() {
+    let s = init("duewarn");
+    let late = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-09"]);
+    let soon = add(s.path(), &["v0.2", "--type", "milestone", "--due", "2026-09-13"]);
+    let far = add(s.path(), &["v0.3", "--type", "milestone", "--due", "2026-10-30"]);
+    for m in [&late, &soon, &far] {
+        ok(s.path(), &["add", "멤버", "--milestone", m, "-q"]);
+    }
+
+    let out = moai(s.path(), &["status"]);
+    assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(text.contains("기한이 지난 마일스톤 1건"), "{text}");
+    assert!(text.contains("기한이 3일 안으로 다가온 마일스톤 1건"), "{text}");
+    // 줄마다 그 날짜와 날수를 함께 낸다 — id 와 제목만 내면 사람이 한 번 더 쳐야 한다.
+    assert!(text.contains("2026-09-09  (2일 지남)"), "{text}");
+    assert!(text.contains("2026-09-13  (2일 남음)"), "{text}");
+    // 아직 먼 기한으로는 잔소리하지 않는다 — 그 날짜가 어느 경고 줄에도 안 선다. id 로 재면
+    // 위 마일스톤 표가 모든 마일스톤을 이미 내므로 늘 걸린다.
+    assert!(!text.contains("2026-10-30"), "아직 먼 기한으로 잔소리했다\n{text}");
+    assert!(text.contains(&far), "마일스톤 표가 그 줄을 잃었다\n{text}");
+
+    let json = ok(s.path(), &["status", "--json"]);
+    for k in ["milestone_overdue", "milestone_due_soon"] {
+        assert!(json.contains(&format!(r#""kind":"{k}""#)), "{k} 가 기계 출력에 없다\n{json}");
+    }
+}
+
+/// **기한 판정은 읽는 사람의 시간대를 본다**(moai-h2th). 같은 화면의 `생성`·`시작` 이 이미 그
+/// 사람의 시계로 그려지므로(moai-p5az), 판정만 UTC 로 두면 한 줄 안에서 시계 둘이 돈다 — 서울의
+/// 00시~09시 세션이 매일 하루씩 어긋났다.
+///
+/// **보드와 상세가 한 자로 센다** — 갈리면 보드는 "지남" 이라 세고 그 줄을 편 상세는 "오늘까지"
+/// 라 말한다.
+#[test]
+fn a_deadline_is_measured_in_the_readers_timezone() {
+    let s = init("duetz");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-11"]);
+    ok(s.path(), &["add", "멤버", "--milestone", &m, "-q"]);
+
+    // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+    let at = |tz: &str, args: &[&str]| -> String {
+        let out = staged(args)
+            .current_dir(s.path())
+            .env("TZ", tz)
+            .env("MOAI_NOW", "2026-09-11T20:00:00Z")
+            .output()
+            .expect("moai 를 못 돌렸다");
+        assert!(out.status.success(), "기한 경고가 종료 코드를 바꿨다 — {tz}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    let utc = at("UTC", &["status"]);
+    assert!(utc.contains("다가온 마일스톤"), "UTC 에서는 오늘이 기한이다\n{utc}");
+    assert!(at("UTC", &["show", &m]).contains("(오늘까지)"), "{}", at("UTC", &["show", &m]));
+
+    // **자료가 있는 기계에서만 잰다**(리뷰) — 릴리스가 정적 musl 판이라 zoneinfo 없는 기계도
+    // 받는 자리다(moai-77ap). 거기서는 UTC 로 떨어지므로 위의 두 줄이 답이고, 아래를 재면
+    // "동작이 바뀐 것" 과 "기계에 자료가 없는 것" 을 못 가린다.
+    if std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+        let seoul = at("Asia/Seoul", &["status"]);
+        assert!(seoul.contains("기한이 지난 마일스톤"), "서울에서는 어제 지났다\n{seoul}");
+        assert!(seoul.contains("2026-09-11  (1일 지남)"), "{seoul}");
+        // 상세도 같은 자로 센다 — 적힌 날짜 자체는 안 옮긴다.
+        let detail = at("Asia/Seoul", &["show", &m]);
+        assert!(detail.contains("(1일 지남)"), "{detail}");
+        assert!(detail.contains("2026-09-11"), "적힌 날짜를 옮겼다\n{detail}");
+    }
+}
+
+/// **끝난 마일스톤과 미뤄 둔 마일스톤은 기한으로 꾸짖지 않는다.** 다 닫힌 뒤의 지난 기한은
+/// 고칠 일이 아니라 지난 일이고, 미룬 것이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
+#[test]
+fn a_closed_or_deferred_milestone_keeps_quiet_about_its_deadline() {
+    let s = init("duequiet");
+    let done = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-09"]);
+    let member = add(s.path(), &["멤버", "--milestone", &done]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let shelved = add(s.path(), &["v0.2", "--type", "milestone", "--due", "2026-09-09"]);
+    ok(s.path(), &["add", "멤버 둘", "--milestone", &shelved, "-q"]);
+    ok(s.path(), &["defer", &shelved, "-m", "다음 분기"]);
+
+    let text = ok(s.path(), &["status"]);
+    assert!(!text.contains("기한이 지난"), "닫혔거나 미룬 마일스톤으로 꾸짖었다\n{text}");
+}
+
+/// **급한 것이 앞에 선다.** 보드는 앞의 셋만 그리고 나머지를 접으므로, 파일 차례(곧 id 차례)로
+/// 두면 석 달 지난 줄이 접히고 이틀 지난 줄이 화면에 선다 — 접힌 쪽이 정작 봐야 할 줄이다.
+#[test]
+fn the_worst_deadline_stands_where_the_board_can_only_show_three() {
+    let s = init("dueorder");
+    // 제목에 지난 날수를 적어 두고, 어느 줄이 섰는지를 그것으로 읽는다.
+    for (title, due) in [("2일", "2026-09-09"), ("4일", "2026-09-07"), ("102일", "2026-06-01"), ("253일", "2026-01-01")]
+    {
+        let m = add(s.path(), &[title, "--type", "milestone", "--due", due]);
+        ok(s.path(), &["add", "멤버", "--milestone", &m, "-q"]);
+    }
+
+    let text = ok(s.path(), &["status"]);
+    assert!(text.contains("253일 지남"), "가장 많이 지난 줄이 접혔다\n{text}");
+    assert!(text.contains("102일 지남"), "{text}");
+    assert!(!text.contains("(2일 지남)"), "덜 급한 줄이 급한 줄을 밀어냈다\n{text}");
+
+    // 기계 쪽은 **부호째** 받는다 — 지난 것이 음수라, `kind` 를 같이 안 봐도 앞뒤가 읽힌다.
+    // 값 자리를 앞의 쌍점으로 못 박는다 — 맨 수로 찾으면 id 에 그 글자가 들면 저절로 파래진다.
+    let json = ok(s.path(), &["status", "--json"]);
+    assert!(json.contains(":-253"), "지난 날수를 음수로 안 실었다\n{json}");
+}
+
+/// 마일스톤이 겹쳐 도는 것은 **알림**이다(2026-09-22 사용자 결정). `ready` 는 다 안으로
+/// 세므로 막힌 것이 없다 — 경고로 두면 겹친 동안 내내 Stop 훅이 세는 수가 하나 는다.
+///
+/// **낱말이 수를 말한다.** 셋 이상도 이 한 줄인데 글에 "둘" 을 박아 두면, 셋이 돌 때 보드가
+/// 제 밑에 세 줄을 늘어놓으면서 둘이라고 말한다(리뷰).
+#[test]
+fn the_board_says_how_many_milestones_are_running_at_once() {
+    let s = init("tworun");
+    let one = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let two = add(s.path(), &["v0.2", "--type", "milestone"]);
+    let three = add(s.path(), &["v0.3", "--type", "milestone"]);
+    for m in [&one, &two] {
+        let member = add(s.path(), &["멤버", "--milestone", m]);
+        ok(s.path(), &["mv", &member, "in_progress"]);
+    }
+
+    let json = ok(s.path(), &["status", "--json"]);
+    // **알림이지 경고가 아니다** — `notices` 쪽에 선다.
+    let (warnings, notices) = json.split_at(json.find(r#""notices""#).expect("notices 가 없다"));
+    assert!(!warnings.contains("milestones_running"), "알림이 경고로 섰다\n{json}");
+    assert!(notices.contains(r#""kind":"milestones_running""#), "{json}");
+
+    let text = ok(s.path(), &["status"]);
+    assert!(text.contains("마일스톤 2건이 겹쳐 도는 중이다"), "{text}");
+    assert!(text.contains(&one) && text.contains(&two), "어느 마일스톤인지를 안 댄다\n{text}");
+
+    // 셋이 돌아도 이 한 줄이고, 그 줄이 세 건이라고 말한다.
+    let third = add(s.path(), &["멤버", "--milestone", &three]);
+    ok(s.path(), &["mv", &third, "in_progress"]);
+    let text = ok(s.path(), &["status"]);
+    assert!(text.contains("마일스톤 3건이 겹쳐 도는 중이다"), "셋이 도는데 둘이라고 했다\n{text}");
+
+    // 하나만 돌면 말하지 않는다.
+    for m in [&two, &three] {
+        ok(s.path(), &["defer", m, "-m", "나중에"]);
+    }
+    assert!(!ok(s.path(), &["status"]).contains("겹쳐 도는"), "하나만 도는데 겹쳤다고 했다");
+}
+
+/// 마일스톤에 **든 시간**은 닫힌 멤버의 시작·끝에서 지금 센다. 스냅샷에도 저널에도 새 필드가
+/// 없다 — 총합을 마일스톤 줄에 적으면 멤버를 닫을 때마다 남의 줄을 써야 한다.
+///
+/// **잰 수를 늘 함께 낸다.** `started_at` 이 없는 멤버는 **모르는 것**이고, 그 수를 안 대면
+/// 빠진 멤버가 조용히 0 이 된다.
+#[test]
+fn a_milestone_counts_the_time_its_closed_members_took() {
+    let s = init("spent");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    // 한 시간짜리 하나, 세 시간짜리 하나.
+    let spans = [("2026-09-11T05:00:00Z", "2026-09-11T06:00:00Z"), ("2026-09-11T05:00:00Z", "2026-09-11T08:00:00Z")];
+    let mut measured = Vec::new();
+    for (start, end) in spans {
+        let id = add(s.path(), &["멤버", "--milestone", &m]);
+        assert!(at(s.path(), start, &["mv", &id, "in_progress"]).status.success());
+        assert!(at(s.path(), end, &["mv", &id, "done"]).status.success());
+        measured.push(id);
+    }
+    // 옛 바이너리가 옮긴 줄 — 닫혔지만 시작이 안 적혔다. 안 한 일로도 0분으로도 안 센다.
+    let old = add(s.path(), &["옛 줄", "--milestone", &m]);
+    let line = line_of(s.path(), &old).replace(r#""status":"todo""#, r#""status":"done""#);
+    let rest: String = issues(s.path()).lines().filter(|l| !l.contains(&old)).map(|l| format!("{l}\n")).collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{rest}{line}\n")).unwrap();
+
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""closed":3"#), "{json}");
+    assert!(json.contains(r#""measured":2"#), "{json}");
+    assert!(json.contains(r#""minutes":240"#), "{json}");
+    assert!(json.contains(r#""median":120"#), "{json}");
+
+    let text = ok(s.path(), &["show", &m]);
+    assert!(text.contains("소요   4시간  (닫힌 3 중 2 를 벽시계로 잰 값, 중앙값 2시간)"), "{text}");
+
+    // **나머지를 안 버린다**(리뷰 moai-pmhv.070 15번). 시간만 내림해 내면 화면이 `--json` 의
+    // `minutes` 와 쉰아홉 분까지 어긋난다 — 든 시간을 대는 줄이 실제의 절반을 말한다.
+    let odd = add(s.path(), &["v0.3", "--type", "milestone"]);
+    let one = add(s.path(), &["멤버", "--milestone", &odd]);
+    assert!(at(s.path(), "2026-09-11T05:00:00Z", &["mv", &one, "in_progress"]).status.success());
+    assert!(at(s.path(), "2026-09-11T06:59:00Z", &["mv", &one, "done"]).status.success());
+    let text = ok(s.path(), &["show", &odd]);
+    assert!(ok(s.path(), &["show", &odd, "--json"]).contains(r#""minutes":119"#), "{text}");
+    assert!(text.contains("소요   1시간 59분"), "{text}");
+
+    // 아무것도 안 닫힌 마일스톤에는 줄을 안 세운다 — `0분` 은 안 한 것이지 0 분이 아니다.
+    let fresh = add(s.path(), &["v0.2", "--type", "milestone"]);
+    ok(s.path(), &["add", "멤버", "--milestone", &fresh, "-q"]);
+    assert!(!ok(s.path(), &["show", &fresh]).contains("소요"), "안 닫힌 마일스톤이 든 시간을 말했다");
+    // 에픽은 아직 이 줄을 안 낸다 — 묶음의 기간을 묻는 자리는 마일스톤 하나다.
+    let e = add(s.path(), &["에픽", "--type", "epic"]);
+    assert!(!ok(s.path(), &["show", &e]).contains("소요"), "에픽이 든 시간을 말했다");
+
+    // **잰 부모의 자식은 그 구간 안이다**(리뷰) — 이 저장소는 리뷰를 자식으로 세우고(훅 규칙 3),
+    // 그 구간은 부모 안에 든다. 시간을 같이 더하면 한 시간 일한 것이 두 시간으로 선다.
+    // **닫힌 수는 그대로 센다** — 막대가 세는 것과 갈리면 한 화면이 두 수로 말한다.
+    let kid = add(s.path(), &["리뷰 — 잰 일", "-t", "review", "--parent", &measured[0]]);
+    assert!(at(s.path(), "2026-09-11T05:10:00Z", &["mv", &kid, "in_progress"]).status.success());
+    assert!(at(s.path(), "2026-09-11T05:40:00Z", &["mv", &kid, "done"]).status.success());
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""minutes":240"#), "자식의 시간을 부모 위에 또 더했다\n{json}");
+    assert!(json.contains(r#""closed":4"#), "자식을 닫힌 멤버에서 뺐다 — 막대와 갈라진다\n{json}");
+
+    // **부모가 아무 구간도 못 냈으면 자식이 유일한 증거다.** `old` 는 닫혔지만 시작이 안 적혀
+    // 아무것도 못 낸다 — 그 밑의 리뷰까지 접으면 잰 일이 화면에서 통째로 사라진다.
+    let lone = add(s.path(), &["리뷰 — 옛 줄", "-t", "review", "--parent", &old]);
+    assert!(at(s.path(), "2026-09-11T05:00:00Z", &["mv", &lone, "in_progress"]).status.success());
+    assert!(at(s.path(), "2026-09-11T06:00:00Z", &["mv", &lone, "done"]).status.success());
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""minutes":300"#), "구간 없는 부모가 자식의 시간을 삼켰다\n{json}");
+    assert!(json.contains(r#""measured":3"#), "{json}");
+}
+
+/// **잰 멤버가 하나도 없으면 합계 대신 그 말을 한다.** 0 을 어림값으로 내밀면 읽는 쪽이
+/// "공짜로 했다" 로 읽는다 — 그 갈래를 밟는 시험이 없으면 이 줄은 조용히 사라져도 파랗다(리뷰).
+#[test]
+fn a_milestone_with_nothing_measurable_says_so_instead_of_zero() {
+    let s = init("spentnone");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    // 옛 바이너리가 옮긴 줄 하나뿐 — 닫혔지만 시작이 안 적혔다.
+    let old = add(s.path(), &["옛 줄", "--milestone", &m]);
+    let line = line_of(s.path(), &old).replace(r#""status":"todo""#, r#""status":"done""#);
+    let rest: String = issues(s.path()).lines().filter(|l| !l.contains(&old)).map(|l| format!("{l}\n")).collect();
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{rest}{line}\n")).unwrap();
+
+    let text = ok(s.path(), &["show", &m]);
+    assert!(text.contains("소요   잰 멤버가 없다 — 닫힌 1 에 시작과 끝이 안 적혔다"), "{text}");
+    assert!(!text.contains("0분"), "못 잰 것을 0 분으로 내밀었다\n{text}");
+
+    let json = ok(s.path(), &["show", &m, "--json"]);
+    assert!(json.contains(r#""closed":1"#) && json.contains(r#""measured":0"#), "{json}");
+    assert!(json.contains(r#""median":null"#), "{json}");
 }
 
 // ── TUI ────────────────────────────────────────────────────────────
@@ -7666,7 +8495,13 @@ fn promote_can_pour_into_a_standing_epic() {
     let after = issues(s.path());
     assert_eq!(after.lines().filter(|l| l.contains(r#""kind":"epic""#)).count(), before, "새 에픽이 섰다");
     let member = after.lines().find(|l| l.contains("되찾은 일")).expect("멤버가 안 섰다");
-    assert!(member.contains(&format!(r#""epic":"{epic}""#)), "에픽에 안 들었다 — {member}");
+    // **소속은 id 하나에 선다**(moai-s8go·moai-exh7) — 멤버는 에픽의 자식 id 를 받고 `epic` 은
+    // 안 적는다. 물려주는 자는 `report::groups` 고, 그것을 읽는 자리가 아래의 `members` 다.
+    let mid = field(member, "id");
+    assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
+    assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
     assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
     // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
     let from_here = format!("{id} 에서 펼쳤다");
@@ -7674,6 +8509,164 @@ fn promote_can_pour_into_a_standing_epic() {
     let noted: Vec<&str> = log.lines().filter(|l| l.contains(&from_here)).collect();
     assert_eq!(noted.len(), 1, "{noted:?}");
     assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
+}
+
+/// **계획이 세우는 멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
+/// 리뷰든 한 주제이기 때문이다. `--parent <에픽>` 으로 세우는 리뷰 이슈는 처음부터 자식이었고,
+/// 계획을 세우는 길만 평평한 id 를 냈다.
+///
+/// **소속은 그 id 하나에 선다**(moai-exh7) — `epic` 필드는 안 적는다. 물려주는 자는
+/// `report::groups` 의 "부모가 에픽이면 그 에픽이 소속"(moai-9t3l)이고, 같은 사실을 두 자리에
+/// 적는 것이 파생값을 저장하는 일이다. 그래서 묶음의 멤버 셈도 `-e` 거르개도 id 에서 온다.
+#[test]
+fn a_plans_members_hang_under_the_epic_by_id() {
+    let s = init("planchild");
+    let stone = ok(s.path(), &["milestone", "add", "v9", "-q"]).trim().to_string();
+    let out =
+        from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], "# 새 에픽\n- [p1] 첫 일\n- 둘째 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let file = issues(s.path());
+    let line_with =
+        |t: &str| file.lines().find(|l| l.contains(t)).unwrap_or_else(|| panic!("{t} 줄이 없다")).to_string();
+    let epic = field(&line_with("새 에픽"), "id");
+    // 뿌리는 최상위 id 고, 마일스톤은 거기에만 적힌다.
+    assert_eq!(id::parent_of(&epic), None, "에픽이 자식으로 섰다");
+    let mut want: Vec<String> = Vec::new();
+    for title in ["첫 일", "둘째 일"] {
+        let line = line_with(title);
+        let mid = field(&line, "id");
+        assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "{title} 이 에픽의 자식이 아니다 — {line}");
+        assert!(!line.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {line}");
+        assert!(!line.contains(r#""milestone":"#), "멤버가 마일스톤을 제 몸에 적었다 — {line}");
+        want.push(mid);
+    }
+    want.sort();
+    // 묶음이 읽는 멤버도, `-e` 거르개가 고르는 줄도, 물려받은 릴리스도 그 id 하나에서 온다.
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    let mut members = list_in(&seen, "members").expect("members 가 없다");
+    members.sort();
+    assert_eq!(members, want, "{seen}");
+    let by_epic = ok(s.path(), &["show", "-e", &epic, "--json"]);
+    let mut chosen: Vec<String> = ids_in(&by_epic);
+    chosen.sort();
+    assert_eq!(chosen, want, "{by_epic}");
+    let by_stone = ok(s.path(), &["show", "--milestone", &stone, "--json"]);
+    for mid in &want {
+        assert!(by_stone.contains(&format!(r#""id":"{mid}""#)), "{mid} 이 릴리스에 안 섰다 — {by_stone}");
+    }
+    // **상세도 그 소속을 댄다**(리뷰). 적힌 필드만 보던 때는 이 줄이 통째로 빠져, `moai ready` 와
+    // 목록은 에픽을 대는데 id 로 콕 집어 펼친 화면만 입을 다물었다 — 규약이 "왜 그렇게 정했나" 를
+    // 물으라고 보내는 자리가 거기다.
+    // **에픽 id 는 제 멤버 id 의 앞부분이기도 하다** — 그냥 `contains` 로 재면 멤버가 제 id 를
+    // 찍는 것만으로 푸르게 선다. 뒤에 점이 안 붙은 자리(`drawn`)와 에픽 제목으로 잰다.
+    let detail = ok(s.path(), &["show", &want[0]]);
+    assert_eq!(drawn(&detail, &epic), 1, "멤버 상세가 제 에픽을 안 댄다 — {detail}");
+    assert!(detail.contains("새 에픽"), "에픽 제목이 안 섰다 — {detail}");
+}
+
+/// **옛 줄의 id 는 안 바꾼다**(moai-sfza) — 옛 moai 는 머지가 낸 중복 id 를 relabel 하고 영구
+/// 별칭을 들다가 죽었다. 새로 펼치는 계획만 자식 id 를 받고, 이미 선 멤버는 그 자리 그대로다.
+///
+/// 그래서 한 에픽 밑에 **두 모양이 나란히 선다**(moai-vndz) — 평평한 옛 멤버와 자식인 새 멤버.
+/// 멤버 셈도 상세도 트리도 둘을 같이, 한 번씩만 낸다. 상세의 `자식` 줄과 멤버 칸이 겹쳐 같은
+/// 줄을 두 번 그리던 자리가 여기다.
+#[test]
+fn old_flat_members_keep_their_ids_beside_new_child_members() {
+    let s = init("mixedmembers");
+    let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
+    let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
+    let id = ok(s.path(), &["idea", "add", "되찾을 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 옛 줄은 id 도 소속도 그대로다 — 없으면 `line_of` 가 그 자리에서 패닉한다.
+    let was = line_of(s.path(), &flat);
+    assert!(was.contains(&format!(r#""epic":"{epic}""#)), "옛 멤버의 소속을 건드렸다 — {was}");
+    let file = issues(s.path());
+    let fresh = field(file.lines().find(|l| l.contains("새 멤버")).expect("새 멤버가 안 섰다"), "id");
+    assert_eq!(id::parent_of(&fresh), Some(epic.as_str()), "새 멤버가 자식이 아니다");
+
+    let mut want = vec![flat.clone(), fresh.clone()];
+    want.sort();
+    let seen = ok(s.path(), &["show", &epic, "--json"]);
+    let mut members = list_in(&seen, "members").expect("members 가 없다");
+    members.sort();
+    assert_eq!(members, want, "두 모양이 같이 안 섰다 — {seen}");
+
+    // 상세는 같은 줄을 한 번만 그린다. 셈도 둘을 같이 센다.
+    let text = ok(s.path(), &["show", &epic]);
+    assert!(text.contains("0/2"), "멤버 셈이 둘을 같이 안 셌다 — {text}");
+    for m in &want {
+        assert_eq!(drawn(&text, m), 1, "{m} 이 상세에 두 번 섰다 — {text}");
+    }
+    // 트리도 한 번씩이다 — 자리를 정하는 자(`nav`)는 자식 멤버를 제 에픽 밑에 둔다.
+    let tree = ok(s.path(), &["show", "--tree"]);
+    for m in &want {
+        assert_eq!(drawn(&tree, m), 1, "{m} 이 트리에 두 번 섰다 — {tree}");
+    }
+}
+/// **소속을 묻는 기계는 키 하나만 본다**(moai-wuzi, 2026-09-23 사용자 결정). `epic` 은 파일에
+/// 적힌 그대로고, 그 줄이 **든** 에픽은 `derived_epic` 이 낸다 — 줄을 내는 표면 전부에서.
+///
+/// 한때 `show --json` 은 계획 멤버를 에픽 없는 줄로 내고 `prime --json` 은 물려받은 소속을
+/// `epic` 에 실어, 한 바이너리의 두 기계 표면이 "이 줄은 어느 에픽인가" 에 다른 답을 했다.
+/// **표면을 하나만 재면 그 어긋남을 못 본다** — 그래서 여섯을 한 판에서 잰다.
+#[test]
+fn every_machine_surface_names_the_epic_a_row_stands_in() {
+    let s = init("derivedepic");
+    let made = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 묶음\n- [p1] 계획 멤버\n");
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let made = String::from_utf8(made.stdout).unwrap();
+    let file = issues(s.path());
+    let id_of = |title: &str| field(file.lines().find(|l| l.contains(title)).expect(title), "id");
+    let (epic, member) = (id_of("묶음"), id_of("계획 멤버"));
+    assert_eq!(id::parent_of(&member), Some(epic.as_str()), "계획 멤버가 자식이 아니다");
+    // 같은 에픽의 **옛 모양** — 소속을 제 몸에 적은 줄. 두 모양이 같은 답을 내야 한다.
+    let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
+    let alone = add(s.path(), &["홀로"]);
+
+    let stands = format!(r#""derived_epic":"{epic}""#);
+    // 1. 하나 펼치기 — 계획 멤버는 `epic` 이 없고, 옛 멤버는 둘 다 있다.
+    let one = ok(s.path(), &["show", &member, "--json"]);
+    assert!(!one.contains(r#""epic":"#), "적은 적 없는 소속이 섰다 — {one}");
+    assert!(one.contains(&stands), "{one}");
+    let was = ok(s.path(), &["show", &flat, "--json"]);
+    assert!(was.contains(&format!(r#""epic":"{epic}""#)) && was.contains(&stands), "{was}");
+    // 2. 어디에도 안 든 줄은 **키가 없다** — 그 침묵이 곧 답이다.
+    let out = ok(s.path(), &["show", &alone, "--json"]);
+    assert!(!out.contains("derived_epic"), "에픽 없는 줄에 소속이 섰다 — {out}");
+    // 3. 묶음 줄에는 안 선다 — 에픽은 에픽에 안 든다(moai-fg0t).
+    let group = ok(s.path(), &["show", &epic, "--json"]);
+    assert!(!row_in(&group, &epic).contains("derived_epic"), "에픽 줄이 소속을 입었다 — {group}");
+
+    // 4. 줄을 내는 표면마다 같은 답. `add --from --json` 은 위에서 이미 받았다.
+    let listed = ok(s.path(), &["show", "--json"]);
+    let ready = ok(s.path(), &["ready", "--json"]);
+    let prime = ok(s.path(), &["prime", "--json"]);
+    let moved = ok(s.path(), &["mv", &member, "in_progress", "--json"]);
+    let edited = ok(s.path(), &["edit", &member, "--tag", "parser", "--json"]);
+    for (what, json) in [
+        ("add", &made),
+        ("show 목록", &listed),
+        ("ready", &ready),
+        ("prime", &prime),
+        ("mv", &moved),
+        ("edit", &edited),
+    ] {
+        let row = row_in(json, &member);
+        assert!(row.contains(&stands), "{what} 가 계획 멤버의 소속을 안 냈다 — {row}");
+        assert!(!row.contains(r#""epic":"#), "{what} 가 적은 적 없는 소속을 `epic` 에 실었다 — {row}");
+    }
+
+    // 5. **`-e none` 의 신호는 그대로다.** `derived_epic` 이 선 뒤에도 `inherited_epic` 은
+    // 제 뜻("끊으라고 했는데 못 끊었다")으로 남아야 한다 — 두 키가 한 줄에 같이 선다.
+    // 위 고리의 `epic` 검사를 여기 그대로 대면 `inherited_epic` 안에 든 `epic` 에 걸린다.
+    let cut = ok(s.path(), &["edit", &member, "-e", "none", "--json"]);
+    assert!(cut.contains(&stands), "`-e none` 뒤에 소속이 사라졌다 — {cut}");
+    assert!(
+        cut.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{epic}""#)),
+        "못 끊었다는 말이 안 섰다 — {cut}"
+    );
 }
 
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
@@ -8339,8 +9332,9 @@ fn ready_names_the_deferred_blocker_it_is_waiting_on() {
 
 /// **연습이라 적힌 명령이 쓰면 안 된다.** `--from` 없이 부른 `--dry-run` 은
 /// 한 줄을 찍은 다음 그것을 실제로 만들었다 — 막는 줄 알고 부른 명령이 쓰는
-/// 것보다 나쁜 것은 없다. `clap` 의 `requires` 로는 못 막는다: `--from` 이
-/// 제목과 conflicts 라, 제목이 있으면 못 채울 요구로 보고 건너뛴다.
+/// 것보다 나쁜 것은 없다. `clap` 의 `requires` 에 안 맡긴다: 그 거절은 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 본다(moai-yhb1). 한때는 `--from` 이 제목과 conflicts 라
+/// 건너뛴다는 것이 까닭이었는데, 그 conflicts 를 moai-yhb1 이 걷었다.
 #[test]
 fn a_rehearsal_without_a_plan_is_refused_not_written() {
     let s = init("dryrunalone");
@@ -8369,6 +9363,103 @@ fn a_plan_refuses_a_kind_the_markdown_cannot_make() {
         "어디로 가야 하는지 안 말한다 — {}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// **사람이 친 `--type` 은 네임스페이스의 기본값과 다른 것이다**(moai-g9a8).
+///
+/// `kind_override.or(args.kind)` 로 둘을 한 값에 뭉개던 판은 `moai issue add --from -` 이
+/// 지나야 해서 `Some(Issue)` 를 통과시켰고, 그 통과가 사람이 친 `--type issue` 까지 덮었다 —
+/// `moai add --from - --type issue` 가 에픽 트리를 만들고 0 으로 끝났다. `--type` 의 도움말은
+/// `What kind to create` 라 적혀 있는데 시킨 것과 다른 것이 서고, 되돌리려면 만들어진 줄을
+/// 손으로 지워야 했다.
+#[test]
+fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
+    let s = init("plantype");
+    // 마크다운은 `#` 을 에픽으로 `-` 를 이슈로 내므로 넷 가운데 지킬 수 있는 값이 없다.
+    for kind in ["issue", "epic", "idea", "milestone"] {
+        let out = from_stdin(s.path(), &["add", "--from", "-", "--type", kind], PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "--type {kind}: {err}");
+        assert_eq!(issues(s.path()), "", "--type {kind} 인데 썼다");
+    }
+    // **갈 곳을 대는 말은 동사를 안 가린다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은
+    // 동사가 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봐, `moai issue add --from - --type
+    // idea` 가 `moai idea promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
+    // 어느 동사로 들어왔느냐로 다른 말을 듣고, 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다.
+    for verb in [["add"].as_slice(), ["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-", "--type", "idea"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("moai idea promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
+        assert_eq!(issues(s.path()), "", "{verb:?}: 거절해 놓고 썼다");
+    }
+    // 동사가 들고 온 기본값은 그대로 선다 — 그것은 이 부름에 친 요구가 아니다.
+    for verb in [["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
+        let mut argv = verb.to_vec();
+        argv.extend_from_slice(&["--from", "-"]);
+        let out = from_stdin(s.path(), &argv, PLAN);
+        assert!(out.status.success(), "{verb:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    assert!(issues(s.path()).contains("저장 계층"), "계획이 안 섰다");
+}
+
+/// **데려갈 본문이 넘치면 그 생각을 가리키며 거절한다**(moai-oejf).
+///
+/// 데려가는 본문은 `store` 의 쓰기 검사를 다시 지나므로, 손으로 푼 머지가 남길 수 있는 상한
+/// 넘는 본문을 든 idea 는 펼치기가 통째로 막혔다. 그런데 거절문이 가리키는 것은 그 생각이
+/// 아니라 이 쓰기가 짓는 에픽의 제목이었다 — 받는 쪽은 제가 방금 친 계획의 첫 줄을 줄이러
+/// 가고, 줄여 봐야 같은 자리에서 또 막힌다. 줄여서 데려가지 않는 것은 사람이 적은 글이기
+/// 때문이다(2026-09-23 사용자 결정) — 대신 도구 안에 빠져나갈 길을 댄다.
+#[test]
+fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
+    let s = init("promotebig");
+    let id = ok(s.path(), &["idea", "add", "큰 생각", "-q"]).trim().to_string();
+    // 상한을 넘는 본문은 도구로는 못 쓴다 — 손으로 푼 머지가 남기는 줄을 그대로 짓는다.
+    let path = s.path().join(".moai/issues.jsonl");
+    let line = issues(s.path());
+    let line = line.trim_end();
+    let big = "가".repeat(30_000);
+    assert!(line.contains(r#""kind":"idea""#), "{line}");
+    let swollen = line.replace(r#""kind":"idea""#, &format!(r#""body":"{big}","kind":"idea""#));
+    std::fs::write(&path, format!("{swollen}\n")).unwrap();
+
+    let plan = "# 펼친 에픽\n- 첫 이슈\n";
+    let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], plan);
+    let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(real.status.code(), Some(1), "{was}");
+    assert_eq!(rehearsal.status.code(), Some(1), "연습만 좋다고 했다\n{said}");
+    assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+    // 가리키는 것은 이 쓰기가 짓는 에픽이 아니라 그 생각이고, 빠져나갈 길도 그 id 로 댄다.
+    assert!(said.contains(&id), "생각을 안 가리킨다\n{said}");
+    assert!(!said.contains("펼친 에픽"), "안 지은 에픽을 가리킨다\n{said}");
+    assert!(said.contains(&format!("moai edit {id} -b -")), "빠져나갈 길을 안 댄다\n{said}");
+    assert!(!issues(s.path()).contains("펼친 에픽"), "거절해 놓고 썼다");
+
+    // **넘치는 것이 둘이어도, 죽은 릴리스에 걸려 있어도 같은 말이다**(리뷰). 연습만 `check_plan`
+    // 을 먼저 돌던 판은 제목을 댔고(진짜는 본문을 댄다), 연습만 `say_if_dead` 를 먼저 돌던 판은
+    // 진짜가 안 내는 알림 한 줄을 더 찍었다 — `say_if_dead` 의 약속("연습과 진짜가 같은 줄을
+    // 낸다")이 바로 그 자리다. 차례를 진짜와 맞춰야 둘 다 선다.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    ok(s.path(), &["edit", &id, "--milestone", &stone]);
+    ok(s.path(), &["defer", &stone, "-m", "접는다"]);
+    let big_title = format!("# {}\n- 첫 이슈\n", "나".repeat(30_000));
+    for text in [plan, big_title.as_str()] {
+        let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], text);
+        let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], text);
+        let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+        assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+        assert_eq!(real.status.code(), Some(1), "{was}");
+    }
+    ok(s.path(), &["defer", &stone, "--undo"]);
+
+    // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
+    let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(issues(s.path()).contains("짧게 줄인 본문"), "본문이 에픽에 안 갔다");
 }
 
 /// 못 읽는 줄 하나가 **성공한 쓰기를 실패로 보이게 하지 않는다.** `promote`
@@ -8468,6 +9559,910 @@ fn status_names_an_unreadable_line_that_reuses_a_live_id() {
     // 드러내기만 한다 — 다른 줄을 쓰는 것은 막지 않는다.
     let other = moai(s.path(), &["add", "새 줄"]);
     assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
+}
+
+/// **가려진 줄의 소속은 표면 어디서도 같은 답이다**(moai-53s2). 소속 지도는 id 로 짠 것이라
+/// 종류가 다른 쌍둥이에게 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을 `(길 잃음)` 에 두고
+/// `show <에픽>` 은 `0/0` 이라 말하며 `-e <에픽>` 은 안 고른다 — `show --json` 목록만 그 줄에
+/// `derived_epic` 을 달아, 한 바이너리가 한 물음에 표면마다 다른 답을 했다.
+#[test]
+fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
+    let s = init("eclipsedepic");
+    let row = |id: &str, title: &str, kind: &str, epic: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘이다. 앞줄과 뒷줄이 같은 에픽을 적었는데 뒷줄이
+    // 생각이라 앞줄이 가려진다.
+    //
+    // **가려진 줄에도 `epic` 을 적어 둔다**(리뷰) — 제 값을 적은 가려진 줄도 `derived_epic` 을
+    // 안 내는 것이 이 고침의 절반인데(`report` 의 `an_eclipsed_row_is_given_no_derived_epic`
+    // 가 `wrote` 로 재는 자리), 앞줄을 빈 채로 두면 그 절반이 CLI 어디에서도 안 재진다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            row("argos-0001", "에픽", "epic", ""),
+            row("argos-0002", "가려진 이슈", "issue", ",\"epic\":\"argos-0001\""),
+            row("argos-0002", "가리는 생각", "idea", ",\"epic\":\"argos-0001\""),
+        ) + &row("argos-0001.aa1", "성한 멤버", "issue", ""),
+    )
+    .unwrap();
+
+    // 목록이 내는 `derived_epic` — 가려진 줄에는 안 서고, 소속을 id 에 진 성한 멤버에는 선다.
+    // **그 멤버가 대조군이다**: 키가 통째로 빠져도 이 시험이 조용히 지나가지 않는다.
+    let json = ok(s.path(), &["show", "--json"]);
+    let object = |title: &str| object_titled(&json, title);
+    assert!(!object("가려진 이슈").contains("derived_epic"), "가려진 줄이 쌍둥이의 에픽을 달았다\n{json}");
+    assert!(object("성한 멤버").contains(r#""derived_epic":"argos-0001""#), "성한 멤버의 소속까지 지웠다\n{json}");
+
+    // 나머지 표면은 처음부터 그렇게 말했다. 넷이 한 답이다.
+    let picked = ok(s.path(), &["show", "-e", "argos-0001", "--json"]);
+    assert!(!picked.contains("가려진 이슈"), "-e 가 가려진 줄을 골랐다\n{picked}");
+    assert!(picked.contains("성한 멤버"), "-e 가 성한 멤버를 빠뜨렸다\n{picked}");
+    assert!(ok(s.path(), &["show", "argos-0001"]).contains("0/1"), "에픽이 가려진 줄을 멤버로 셌다");
+
+    // **트리는 어디에 세우는지까지 잰다**(리뷰) — 제목만 찾으면 그 줄이 에픽 밑으로 돌아가도
+    // 이 시험이 푸르다. 가려진 줄이 어느 묶음에도 안 선다는 말이 곧 `(길 잃음)` 칸이다.
+    let tree = ok(s.path(), &["show", "--tree"]);
+    assert!(tree.contains("가려진 이슈"), "가려진 줄이 트리에서 사라졌다\n{tree}");
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(!tree[..lost_at].contains("가려진 이슈"), "가려진 줄이 에픽 밑에 섰다\n{tree}");
+
+    // **적힌 값은 그대로 남는다** — 지우는 것이 아니라 푼 값을 안 내는 것이다. 묻는 자리는
+    // 목록이다: `show <id>` 는 뒷줄을 여므로(moai-e0ro) 거기서 읽히는 것은 가리는 줄 것이다.
+    assert!(object("가려진 이슈").contains(r#""epic":"argos-0001""#), "가려진 줄의 적힌 소속이 사라졌다\n{json}");
+    // 가리는 줄은 처음부터 성하다 — 가려진 쪽을 재느라 이쪽의 답까지 지우지 않았다.
+    let holds = ok(s.path(), &["show", "argos-0002", "--json"]);
+    assert!(holds.contains(r#""derived_epic":"argos-0001""#), "가리는 줄이 제 소속을 잃었다\n{holds}");
+}
+
+/// **같은 종류의 쌍둥이도 표면 어디서나 같은 에픽을 답한다**(moai-7iyc.rt6, 2026-09-23 사용자 결정).
+///
+/// 소속 지도는 id 로 짠 것이라 같은 id 를 든 줄이 둘이면 뒷줄의 값 하나만 든다. 종류가 같으면
+/// `is_eclipsed` 에 안 걸려 moai-53s2 의 문도 안 서므로, 앞줄이 **제가 적은 에픽**을 두고도
+/// 뒷줄의 에픽으로 골라지고 그려지고 세어졌다 — `derived_epic` 하나만 제 값을 내, 한 바이너리가
+/// 여섯 표면에 두 답을 했다.
+///
+/// 정해진 것은 **적힌 것이 먼저다**(`report::joined_in`). 지도를 짚던 자리가 모두 그 자를 쓴다.
+/// **id 가 하나뿐인 줄은 답이 안 바뀐다** — 지도의 값이 애초에 그 줄의 `epic` 이다
+/// (`report::epic_through`). 그래서 대조군을 같은 파일에 세운다.
+#[test]
+fn same_kind_twins_answer_the_same_epic_on_every_surface() {
+    let s = init("twinepic");
+    let row = |id: &str, title: &str, kind: &str, epic: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘, 둘 다 이슈고 저마다 다른 에픽을 적었다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}{}",
+            row("argos-e001", "에픽 하나", "epic", ""),
+            row("argos-e002", "에픽 둘", "epic", ""),
+            row("argos-0002", "앞줄", "issue", ",\"epic\":\"argos-e001\""),
+            row("argos-0002", "뒷줄", "issue", ",\"epic\":\"argos-e002\""),
+            // 대조군 — id 가 하나뿐인 줄. 이 고침이 그 줄의 답을 건드리면 여기서 붉어진다.
+            row("argos-0003", "성한 멤버", "issue", ",\"epic\":\"argos-e001\""),
+        ),
+    )
+    .unwrap();
+
+    let json = ok(s.path(), &["show", "--json"]);
+    let object = |title: &str| object_titled(&json, title);
+    // 1. `--json` 의 `derived_epic` — 처음부터 제 값을 내던 쪽이다.
+    assert!(object("앞줄").contains(r#""derived_epic":"argos-e001""#), "{json}");
+    assert!(object("뒷줄").contains(r#""derived_epic":"argos-e002""#), "{json}");
+
+    // 2. `-e` 거르개. 3. 목록의 에픽 칸 — 제목으로 선다.
+    let one = ok(s.path(), &["show", "-e", "argos-e001"]);
+    assert!(one.contains("앞줄") && !one.contains("뒷줄"), "-e 가 줄마다의 에픽을 안 봤다\n{one}");
+    assert!(one.contains("성한 멤버"), "대조군을 빠뜨렸다\n{one}");
+    assert!(!one.contains("에픽 둘"), "에픽 칸이 쌍둥이의 제목을 달았다\n{one}");
+    let two = ok(s.path(), &["show", "-e", "argos-e002"]);
+    assert!(two.contains("뒷줄") && !two.contains("앞줄"), "-e 가 줄마다의 에픽을 안 봤다\n{two}");
+
+    // 4. 묶음의 롤업. 5. `show <에픽>` 이 그리는 멤버 — 머리글의 수와 줄 수가 같아야 한다.
+    let head = ok(s.path(), &["show", "argos-e001"]);
+    assert!(head.contains("0/2"), "에픽이 제 멤버를 못 셌다\n{head}");
+    assert!(head.contains("앞줄") && head.contains("성한 멤버") && !head.contains("뒷줄"), "{head}");
+    let other = ok(s.path(), &["show", "argos-e002"]);
+    assert!(other.contains("0/1") && other.contains("뒷줄") && !other.contains("앞줄"), "{other}");
+
+    // 6. 트리 — 어느 에픽 밑에 그리는지까지 잰다.
+    let tree = ok(s.path(), &["show", "--tree"]);
+    let at_two = tree.find("에픽 둘").unwrap_or_else(|| panic!("에픽 둘이 트리에 없다\n{tree}"));
+    assert!(tree[..at_two].contains("앞줄"), "앞줄이 제 에픽 밑에 안 섰다\n{tree}");
+    assert!(!tree[..at_two].contains("뒷줄"), "뒷줄이 남의 에픽 밑에 섰다\n{tree}");
+    assert!(tree[at_two..].contains("뒷줄"), "뒷줄이 제 에픽 밑에 안 섰다\n{tree}");
+
+    // 적힌 값은 그대로다 — 푼 값을 맞춘 것이지 파일을 고친 것이 아니다.
+    assert!(object("앞줄").contains(r#""epic":"argos-e001""#), "{json}");
+}
+
+/// **훅도 소속을 줄에 묻는다**(moai-jk2u.ipf, 리뷰 moai-jk2u.m60 12번).
+///
+/// 훅은 막는 자리라 틀린 답의 값이 다르다. 집은 줄이 제 쌍둥이의 에픽으로 판정되면 규칙 1 이
+/// 정당한 `moai add -e <에픽>` 을 거절하고, 거절문은 그 줄이 적지도 않은 에픽을 대며 그대로
+/// 쳐도 안 되는 명령을 내준다 — 되돌릴 길이 도구 밖에만 남는다.
+///
+/// **두 축을 다 잰다. 두 축 다 양쪽으로 잰다**(리뷰 moai-jk2u.35i) — 줄에 묻고 **지도도 함께**
+/// 보는 자는 "제 것은 지나간다" 만으로는 안 걸린다. 한 함수 안에서 한 축만 옮긴 것이 리뷰
+/// moai-jk2u.m60 1번이 잡은 자리다.
+///
+/// **대조군이 같은 파일에 선다** — id 가 하나뿐인 줄(`argos-0006`)의 답이 바뀌면 여기서 붉어진다.
+///
+/// **가려진 줄은 어느 묶음에도 안 선다**(moai-53s2 사용자 결정) — 종류가 다른 쌍둥이에게 가려진
+/// 줄(`argos-0008`)은 제 `epic` 을 적었어도 규칙 1 의 단위에 안 든다. 안 그러면 `derived_epic`·
+/// 트리·`-e` 는 "어느 에픽도 아니다" 라는데 훅만 그 에픽을 대, 한 바이너리가 두 답을 한다.
+#[test]
+fn the_hook_reads_belonging_from_the_row_not_the_id_map() {
+    let s = init("hooktwin");
+    let row = |id: &str, title: &str, kind: &str, status: &str, at: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{at},\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일. 집은 것은 앞줄이고(뒷줄은 닫혔다), 앞줄과 뒷줄이 저마다 다른 에픽과
+    // 다른 릴리스를 적었다 — 지도는 뒷줄의 값 하나만 든다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}{}{}{}{}{}{}{}{}",
+            row("argos-e001", "에픽 하나", "epic", "todo", ""),
+            row("argos-e002", "에픽 둘", "epic", "todo", ""),
+            row("argos-e003", "에픽 셋", "epic", "todo", ""),
+            row("argos-m001", "릴리스 하나", "milestone", "todo", ""),
+            row("argos-m002", "릴리스 둘", "milestone", "todo", ""),
+            row("argos-0002", "집은 앞줄", "issue", "in_progress", ",\"epic\":\"argos-e001\""),
+            row("argos-0002", "닫힌 뒷줄", "issue", "done", ",\"epic\":\"argos-e002\""),
+            row("argos-0004", "릴리스를 적은 앞줄", "issue", "in_progress", ",\"milestone\":\"argos-m001\""),
+            row("argos-0004", "닫힌 뒷줄", "issue", "done", ",\"milestone\":\"argos-m002\""),
+            // 대조군 — id 가 하나뿐인 집은 줄. 이 고침이 성한 줄의 답을 건드리면 여기서 붉어진다.
+            row("argos-0006", "성한 줄", "issue", "in_progress", ",\"epic\":\"argos-e003\""),
+            // 가려진 줄 — 같은 id 를 마일스톤 줄이 뒤에서 덮는다(`argos-0008`). 리뷰 줄로 두어
+            // 규칙 3 과 `closing` 이 그것을 "집은 것에 매인 리뷰" 로 세는지까지 잰다.
+            row(
+                "argos-0008",
+                "가려진 리뷰 앞줄",
+                "issue",
+                "in_progress",
+                ",\"epic\":\"argos-e001\",\"tags\":[\"review\"]",
+            ),
+            row("argos-0008", "덮는 뒷줄", "milestone", "todo", ""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 에픽 축 — 집은 줄이 제 `epic` 에 적은 에픽 안에 세우는 것은 지나간다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 -e argos-e001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 에픽에 세우는 것을 막았다 — {inside}");
+    // 뒷줄의 에픽은 이 줄의 것이 아니다 — 반대쪽도 잰다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 남의일 -e argos-e002\"}", "s1"));
+    assert!(!why.is_empty());
+    // 대조군 — id 가 하나뿐인 집은 줄의 에픽은 그대로 단위 안이다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 성한일 -e argos-e003\"}", "s1");
+    assert!(inside.trim().is_empty(), "id 가 하나뿐인 줄의 에픽까지 막았다 — {inside}");
+
+    // 2. 마일스톤 축 — 같은 함수 안의 옆 걸음이다. **양쪽으로 잰다**: 제 것은 지나가고 쌍둥이의
+    //    것은 막혀야, 줄에 묻고 지도도 함께 보는 자가 여기서 걸린다.
+    let inside = call(&s, "Bash", "{\"command\":\"moai add 안의일 --milestone argos-m001\"}", "s1");
+    assert!(inside.trim().is_empty(), "집은 줄이 제가 적은 릴리스에 세우는 것을 막았다 — {inside}");
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 남의일 --milestone argos-m002\"}", "s1"));
+    assert!(!why.is_empty(), "쌍둥이가 적은 릴리스에 세우는 것을 지나갔다 — {why}");
+
+    // 3. 거절문이 대는 에픽. 아무 데도 안 붙인 생성을 막을 때, 그 글은 **집은 줄이 적은** 에픽을
+    //    대야 한다 — 쌍둥이의 것을 대면 시킨 그대로 쳐도 다시 막힌다.
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add 딴일\"}", "s1"));
+    assert!(why.contains("-e argos-e001"), "거절문이 집은 줄의 에픽을 안 댔다 — {why}");
+    assert!(!why.contains("-e argos-e002"), "거절문이 쌍둥이의 에픽을 댔다 — {why}");
+
+    // 4. 가려진 줄은 어느 묶음에도 안 선다 — 화면이 하는 말과 훅이 하는 말이 같아야 한다.
+    //    `show` 는 그 줄에 에픽을 안 대는데 훅만 대면, 한 바이너리가 한 물음에 두 답을 한다.
+    let json = ok(s.path(), &["show", "--json"]);
+    assert!(!object_titled(&json, "가려진 리뷰 앞줄").contains("derived_epic"), "{json}");
+    assert!(!ok(s.path(), &["show", "-e", "argos-e001"]).contains("가려진 리뷰 앞줄"));
+    // 세션을 닫을 때 그 리뷰를 "집은 것에 매인 리뷰" 로 세면, 집은 적도 없는 줄을 닫으라고 붙든다 —
+    // 그런데 그 id 는 `duplicate_id` 로 쓰기가 막혀 시킨 대로 할 수도 없다.
+    let stop = hook_out(&s, "stop", &event(&s, "s1"));
+    assert!(!stop.contains("argos-0008"), "가려진 리뷰를 집은 것에 매인 리뷰로 셌다 — {stop}");
+}
+
+/// **제 `epic` 을 안 적은 앞줄은 기계 표면 어디서도 쌍둥이의 에픽을 안 입는다**
+/// (리뷰 moai-jk2u.o78).
+///
+/// 위의 두 시험 사이에 틈이 있었다. [`every_machine_surface_names_the_epic_a_row_stands_in`] 은
+/// id 가 하나뿐인 멤버로 여섯 표면을 재고, [`same_kind_twins_answer_the_same_epic_on_every_surface`]
+/// 의 쌍둥이는 둘 다 제 `epic` 을 적어 지도를 아예 안 짚는다 — **지도를 짚는 줄이 쌍둥이와 함께
+/// 서는** 자리는 둘 다 안 쟀다. 그 틈으로 `prime --json` 하나가 접은 지도(`report::groups`)에
+/// 남아, `ready --json` 과 `show --json` 이 `argos-e001` 이라 하는 그 줄을 `argos-e002` 라 했다.
+#[test]
+fn a_row_that_wrote_no_epic_keeps_its_own_on_every_machine_surface() {
+    let s = init("handedepic");
+    let row = |id: &str, title: &str, kind: &str, epic: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-e001.aaa` 가 둘. 앞줄은 `epic` 을 안 적어 id 부모가 답하고,
+    // 뒷줄은 적어 그 값이 이긴다. 둘 다 이슈라 가려짐은 안 선다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            row("argos-e001", "에픽하나", "epic", ""),
+            row("argos-e002", "에픽둘", "epic", ""),
+            row("argos-e001.aaa", "안적은앞줄", "issue", ""),
+            row("argos-e001.aaa", "적은뒷줄", "issue", ",\"epic\":\"argos-e002\""),
+        ),
+    )
+    .unwrap();
+
+    let listed = ok(s.path(), &["show", "--json"]);
+    let ready = ok(s.path(), &["ready", "--json"]);
+    let prime = ok(s.path(), &["prime", "--json"]);
+    for (what, json) in [("show 목록", &listed), ("ready", &ready), ("prime", &prime)] {
+        let front = object_titled(json, "안적은앞줄");
+        assert!(front.contains(r#""derived_epic":"argos-e001""#), "{what} 가 앞줄에 쌍둥이의 에픽을 달았다 — {front}");
+        assert!(!front.contains(r#""epic":"argos"#), "{what} 가 적은 적 없는 소속을 `epic` 에 실었다 — {front}");
+        let back = object_titled(json, "적은뒷줄");
+        assert!(back.contains(r#""derived_epic":"argos-e002""#), "{what} 가 뒷줄의 적힌 에픽을 잃었다 — {back}");
+    }
+}
+
+/// **댈 미룸이 없으면 `moai ready` 가 id 없는 명령을 안 낸다**(리뷰 moai-jk2u.o78).
+///
+/// `report` 쪽은 걸음이 빈 id 에 키를 안 세우는 것으로 `moai defer  --undo` 를 막는데
+/// (`deferred_sources_in`), 그리는 쪽은 그 약속을 안 지켜 빈 배열을 그대로 폈다 — 없는 키와
+/// 빈 배열이 화면에서 같은 글이 된다. 멤버가 줄마다 갈리게 되면서 그 꼴이 실제로 섰다: 에픽의
+/// 멤버로 세어진 앞줄이 미뤘는데 그 id 의 답을 정하는 뒷줄은 안 미뤄, 댈 미룸이 아예 없었다.
+#[test]
+fn ready_names_no_undo_command_when_there_is_nothing_to_undo() {
+    let s = init("emptyundo");
+    // `argos-e001.aaa` 가 둘 — 앞줄은 `epic` 을 안 적어 `argos-e001` 의 멤버고 미뤘다.
+    // 뒷줄은 `argos-e002` 를 적고 살아 있어, 그 id 는 `deferred_roots` 에 안 든다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        "{\"id\":\"argos-0009\",\"title\":\"막힌일\",\"kind\":\"issue\",\"status\":\"todo\",\"blocked_by\":[\"argos-e001\"],\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001\",\"title\":\"에픽하나\",\"kind\":\"epic\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001.aaa\",\"title\":\"미룬앞줄\",\"kind\":\"issue\",\"status\":\"todo\",\"deferred_at\":\"2026-09-12T00:00:00Z\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e001.aaa\",\"title\":\"산뒷줄\",\"kind\":\"issue\",\"status\":\"todo\",\"epic\":\"argos-e002\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n\
+         {\"id\":\"argos-e002\",\"title\":\"에픽둘\",\"kind\":\"epic\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}\n",
+    )
+    .unwrap();
+
+    let out = ok(s.path(), &["ready"]);
+    assert!(!out.contains("moai defer  --undo"), "id 없는 명령을 냈다\n{out}");
+    // 막는 줄은 그대로 댄다 — 말을 못 대는 것과 까닭을 안 대는 것은 다르다.
+    assert!(out.contains("argos-0009") && out.contains("argos-e001.aaa"), "막힌 줄과 막는 줄이 빠졌다\n{out}");
+}
+
+/// **가려진 묶음 줄은 쌍둥이의 읽은 칸을 안 입는다**(moai-7iyc.5fz).
+///
+/// 칸 지도도 id 로 짠 것이라 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 그 id 의 뜻을 정하는
+/// 뒷줄의 칸 하나만 든다. 앞줄에도 입히던 때는 `show --json` 이 가려진 마일스톤 줄에
+/// `derived_status: in_progress` 를 달고 `show -s in_progress` 가 그 줄을 골랐는데, 같은 창의
+/// 트리는 그 줄을 `(길 잃음)` 에 제 `todo` 로 그렸다 — 한 화면이 같은 줄을 두 칸으로 말했다.
+#[test]
+fn an_eclipsed_group_row_wears_its_own_column_on_every_surface() {
+    let s = init("eclipsedcol");
+    let row = |id: &str, title: &str, kind: &str, status: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\",\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // `argos-e001` 이 마일스톤으로 한 번, 에픽으로 한 번. 뒷줄(에픽)이 그 id 의 뜻을 정한다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            row("argos-e001", "가려진 마일스톤", "milestone", "todo"),
+            row("argos-e001", "가리는 에픽", "epic", "todo"),
+            row("argos-e001.aa1", "멤버", "issue", "in_progress"),
+        ),
+    )
+    .unwrap();
+
+    let json = ok(s.path(), &["show", "--all", "--json"]);
+    let object = |title: &str| object_titled(&json, title);
+    assert!(!object("가려진 마일스톤").contains("derived_status"), "가려진 줄이 쌍둥이의 칸을 입었다\n{json}");
+    // **가리는 줄이 대조군이다** — 가려진 쪽을 재느라 묶음의 읽은 칸을 통째로 끄지 않았다.
+    assert!(object("가리는 에픽").contains(r#""derived_status":"in_progress""#), "{json}");
+
+    // 고르는 자(`-s`)와 칸을 내는 자가 같은 자리에서 갈린다.
+    let busy = ok(s.path(), &["show", "-s", "in_progress", "--all"]);
+    assert!(!busy.contains("가려진 마일스톤"), "-s 가 가려진 줄을 쌍둥이의 칸으로 골랐다\n{busy}");
+    assert!(busy.contains("가리는 에픽"), "묶음이 제 읽은 칸을 잃었다\n{busy}");
+    let idle = ok(s.path(), &["show", "-s", "todo", "--all"]);
+    assert!(idle.contains("가려진 마일스톤"), "가려진 줄이 제 적힌 칸으로도 안 골라졌다\n{idle}");
+
+    // 트리가 처음부터 대던 답이다 — `(길 잃음)` 에 제 칸으로 선다.
+    let tree = ok(s.path(), &["show", "--tree", "--all"]);
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(tree[lost_at..].contains("가려진 마일스톤"), "가려진 줄이 길 잃음에 없다\n{tree}");
+}
+
+/// **마일스톤 축도 표면 어디서나 같은 답을 한다**(리뷰).
+///
+/// 마일스톤은 에픽을 타고 온다(`report::milestones_in`). 에픽이 줄마다 갈리므로 마일스톤도
+/// 줄마다 갈리는데, 세는 쪽(`work_under`·굴림·`show <마일스톤>`)만 [`report::Placed`] 로 옮기고
+/// 거르는 쪽(`--milestone`)·`ready` 의 문·`status` 의 경고를 지도에 남겨 두던 판은, 한 화면이
+/// `argos-m001 0/1` 을 그려 놓고 그 줄을 `밖에 남았다`·`마일스톤에 안 붙었다` 로 셌다.
+/// `moai show <마일스톤>` 이 머리글로 세는 줄을 목록이 못 내던 moai-lhbh 의 꼴이다.
+#[test]
+fn same_id_rows_answer_the_same_milestone_on_every_surface() {
+    let s = init("twinstone");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘, 저마다 다른 에픽을 적었고 그 에픽은 다른 릴리스에 선다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}{}{}",
+            line("argos-e001", "에픽 하나", "epic", ",\"milestone\":\"argos-m001\""),
+            line("argos-e002", "에픽 둘", "epic", ",\"milestone\":\"argos-m002\""),
+            line("argos-m001", "릴리스 하나", "milestone", ""),
+            line("argos-m002", "릴리스 둘", "milestone", ""),
+            line("argos-0002", "앞줄", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"epic\":\"argos-e002\""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 묶음의 롤업과 그 밑에 그리는 멤버 — 머리글의 수와 줄 수가 같아야 한다.
+    let head = ok(s.path(), &["show", "argos-m001"]);
+    assert!(head.contains("0/1"), "마일스톤이 제 멤버를 못 셌다\n{head}");
+    assert!(head.contains("앞줄") && !head.contains("뒷줄"), "{head}");
+
+    // 2. `--milestone` 거르개 — 세는 자와 고르는 자가 같은 답을 해야 한다.
+    let one = ok(s.path(), &["show", "--milestone", "argos-m001", "--all"]);
+    assert!(one.contains("앞줄"), "--milestone 이 머리글이 센 줄을 안 냈다\n{one}");
+    assert!(!one.contains("뒷줄"), "--milestone 이 남의 릴리스의 줄을 냈다\n{one}");
+    let two = ok(s.path(), &["show", "--milestone", "argos-m002", "--all"]);
+    assert!(two.contains("뒷줄") && !two.contains("앞줄"), "{two}");
+    // `none` 도 같은 자로 고른다 — 어느 릴리스에도 안 선 줄만이다.
+    let none = ok(s.path(), &["show", "--milestone", "none", "--all"]);
+    assert!(!none.contains("앞줄") && !none.contains("뒷줄"), "릴리스에 선 줄이 `none` 에도 섰다\n{none}");
+
+    // 3. `status` 의 경고 — 묶음 표가 센 그 줄을 `안 붙었다` 로 또 세지 않는다.
+    //
+    //    **뒷줄이 소속을 안 적은 판으로 잰다**(리뷰). 둘 다 적으면 지도에 그 id 가 남아, 지도를
+    //    짚던 옛 견주기(`contains_key`)도 그 줄을 안 세므로 이 셋이 고쳐도 안 고쳐도 푸르다.
+    //    뒷줄이 비면 지도가 그 id 를 통째로 지워, 앞줄이 제가 적은 에픽을 두고도 `에픽 없음`·
+    //    `마일스톤 없음` 으로 세어지던 그 판이 선다. 뒷줄은 닫아 둔다 — 두 경고는 열린 줄만 센다.
+    let board = init("twinstone2");
+    std::fs::write(
+        board.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-e001", "에픽 하나", "epic", ",\"milestone\":\"argos-m001\""),
+            line("argos-m001", "릴리스 하나", "milestone", ""),
+            line("argos-0002", "앞줄", "issue", ",\"epic\":\"argos-e001\""),
+            // 뒷줄은 소속이 없고 닫혀 있다 — 지도에서 그 id 를 지우는 것이 이 줄의 몫이다.
+            line("argos-0002", "뒷줄", "issue", "").replace("\"status\":\"todo\"", "\"status\":\"done\""),
+        ),
+    )
+    .unwrap();
+    // 같은 id 가 둘인 파일이라 `duplicate_id` 로 종료 코드가 0 이 아니다 — 글만 읽는다.
+    let json = String::from_utf8(moai(board.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(json.contains(r#""id":"argos-m001""#), "전제가 안 섰다 — 마일스톤 표가 없다\n{json}");
+    assert!(json.contains(r#""id":"argos-e001""#), "전제가 안 섰다 — 에픽 표가 없다\n{json}");
+    assert!(!json.contains("no_epic"), "에픽이 멤버로 센 줄을 경고가 `에픽 없음` 으로 또 셌다\n{json}");
+    assert!(!json.contains("no_milestone"), "릴리스가 센 줄을 경고가 `마일스톤 없음` 으로 또 셌다\n{json}");
+}
+
+/// **에픽 없는 쌍둥이도 제 릴리스에 선다**(moai-jk2u.wvn, 리뷰 moai-7iyc.cmo 9번).
+///
+/// 에픽을 든 줄은 그 에픽을 타고 가 줄마다 갈렸는데(moai-7iyc), 에픽이 없는 줄은
+/// `mile_of.get(id)` 로 돌아가 거기서 뒷줄의 값을 입었다 — `show <앞줄의 릴리스>` 는
+/// `멤버 0/0`, `show <뒷줄의 릴리스>` 는 `0/2` 로 둘을 다 냈고, 앞줄이 제 줄에 적은
+/// `milestone` 은 어느 표면에서도 안 읽혔다.
+#[test]
+fn an_epicless_twin_stands_in_the_release_it_wrote_on_itself() {
+    let s = init("twinmile");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘, **둘 다 에픽이 없고** 저마다 다른 릴리스를 적었다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-m001", "릴리스 하나", "milestone", ""),
+            line("argos-m002", "릴리스 둘", "milestone", ""),
+            line("argos-0002", "앞줄", "issue", ",\"milestone\":\"argos-m001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"milestone\":\"argos-m002\""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 머리글의 롤업과 그 밑에 그리는 멤버 — 줄마다 제 릴리스 하나씩이다.
+    let one = String::from_utf8(moai(s.path(), &["show", "argos-m001"]).stdout).unwrap();
+    assert!(one.contains("0/1"), "앞줄이 적은 릴리스가 그 줄을 못 셌다\n{one}");
+    assert!(one.contains("앞줄") && !one.contains("뒷줄"), "{one}");
+    let two = String::from_utf8(moai(s.path(), &["show", "argos-m002"]).stdout).unwrap();
+    assert!(two.contains("0/1"), "뒷줄의 릴리스가 둘을 셌다\n{two}");
+    assert!(two.contains("뒷줄") && !two.contains("앞줄"), "{two}");
+
+    // 2. `--milestone` 거르개 — 세는 자와 고르는 자가 같은 답을 한다.
+    let pick = |m: &str| String::from_utf8(moai(s.path(), &["show", "--milestone", m, "--all"]).stdout).unwrap();
+    let got = pick("argos-m001");
+    assert!(got.contains("앞줄") && !got.contains("뒷줄"), "--milestone 이 머리글과 다른 답을 했다\n{got}");
+    let got = pick("argos-m002");
+    assert!(got.contains("뒷줄") && !got.contains("앞줄"), "{got}");
+
+    // 3. 트리 — 그리는 자도 같다. 두 릴리스 밑에 한 줄씩이다.
+    let tree = String::from_utf8(moai(s.path(), &["show", "--tree", "--all"]).stdout).unwrap();
+    let at = |m: &str| tree.find(m).unwrap_or_else(|| panic!("{m} 이 트리에 없다\n{tree}"));
+    let (m1, m2) = (at("릴리스 하나"), at("릴리스 둘"));
+    assert!(tree[m1..m2].contains("앞줄"), "앞줄이 제 릴리스 밑에 없다\n{tree}");
+    assert!(tree[m2..].contains("뒷줄"), "뒷줄이 제 릴리스 밑에 없다\n{tree}");
+}
+
+/// **미룸도 줄마다 물려받는다**(moai-jk2u.olh, 리뷰 moai-7iyc.cmo 8번).
+///
+/// 소속이 줄마다 갈리게 된 뒤로도 `report::Shelf::walk` 는 id 하나로만 올라, 제 `epic` 을
+/// 적은 앞줄이 미룬 에픽의 멤버로 세어지면서 그 미룸은 안 물려받았다 — `show <에픽> --json`
+/// 의 `members` 는 그 줄을 드는데 `ready` 는 그대로 내주고 `show --deferred` 는 끝내 안 냈다.
+/// AGENTS.md 가 못박은 "묶음을 미루면 그 밑의 일이 함께 계획에서 빠진다" 가 거기서 거짓이 된다.
+#[test]
+fn a_line_inherits_the_defer_of_the_epic_it_wrote_on_itself() {
+    let s = init("twindefer");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 미룬 에픽 하나. `argos-0002` 가 둘 — 앞줄만 그 에픽을 적었고 열려 있으며, 뒷줄은
+    // 소속이 없고 닫혀 있다. 뒷줄이 닫혀 있어야 지도에서 그 id 가 지워져, 앞줄이 제가 적은
+    // 에픽의 미룸을 지도로는 못 받는 판이 선다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            line("argos-e001", "미룬 에픽", "epic", ",\"status\":\"todo\",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+            line("argos-0002", "앞줄", "issue", ",\"status\":\"todo\",\"epic\":\"argos-e001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"status\":\"done\""),
+        ),
+    )
+    .unwrap();
+
+    // 전제 — 에픽은 그 줄을 멤버로 센다. 여기가 무너지면 아래 둘은 잴 것이 없다.
+    let epic = String::from_utf8(moai(s.path(), &["show", "argos-e001", "--json"]).stdout).unwrap();
+    assert!(epic.contains(r#""members":["argos-0002"]"#), "전제가 안 섰다 — 에픽이 그 줄을 멤버로 안 센다\n{epic}");
+
+    // 1. 멤버로 세는 줄을 `ready` 가 내주지 않는다 — 계획에서 빠진 줄이다.
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(!ready.contains("argos-0002"), "미룬 에픽의 멤버를 집을 것으로 내줬다\n{ready}");
+
+    // 2. `show --deferred` 도 같은 줄을 낸다 — 세는 자와 내는 자가 갈리지 않는다.
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred", "--all"]).stdout).unwrap();
+    assert!(off.contains("앞줄"), "미룬 에픽의 멤버를 `--deferred` 가 안 냈다\n{off}");
+}
+
+/// **미룸의 뿌리도 줄에 묻는다**(moai-wre3, 리뷰 moai-jk2u.35i 15번).
+///
+/// `report::deferred_roots` 는 id 로 접은 지도라 같은 id 의 줄 둘 가운데 뒷줄의 답만 든다.
+/// 상세를 그리는 셋(`--json` 의 `shelved_by`, 상세 머리의 `미룸` 줄, 자식 줄)이 줄을 손에
+/// 들고도 그 지도를 id 로 짚어, 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다 — 미룬
+/// 에픽에 든 앞줄이 표를 잃거나(뒷줄이 계획 안일 때), 계획 안인 앞줄이 뒷줄의 미룬 에픽을
+/// 제 것으로 달았다. 뒤엣것은 시킨 그대로 친 `moai defer argos-e001 --undo` 가 그 줄을 안
+/// 되돌린다 — 애초에 미룬 적이 없는 줄이다.
+///
+/// **두 방향과 대조군을 한 시험에서 잰다.** 한 방향만 재면 답을 통째로 `없음` 이나 `있음`
+/// 으로 바꿔도 안 붉어지고, 쌍둥이만 재면 id 가 하나뿐인 줄의 답이 바뀌어도 안 붉어진다.
+/// `show --deferred` 를 함께 보는 것은 잣대가 **한 화면이 제 말을 뒤집지 않는가**이기
+/// 때문이다 — 그리는 쪽만 맞고 거르는 쪽이 어긋나면 고친 것이 아니다.
+///
+/// **`shelved_by` 는 그대로 뒷줄이다.** `moai show <id>` 가 펼치는 줄이 `Load::get` 의 뒷줄
+/// 이라 그것이 곧 그 줄의 답이다 — id 밖에 없는 표면은 접은 지도로 간다는 결정(2026-09-23)은
+/// 여기서 안 건드린다.
+#[test]
+fn the_detail_asks_the_row_for_the_defer_root() {
+    let s = init("defertwin");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\",\"status\":\"todo\"{extra},\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 미룬 에픽 하나와 산 에픽 하나. 부모 둘 밑에 쌍둥이 자식이 한 쌍씩 서는데, 한 쌍은
+    // **앞줄**이 미룬 에픽에 들고 다른 한 쌍은 **뒷줄**이 든다 — 접은 지도는 뒷줄만 들므로
+    // 두 쌍의 답이 갈려야 한다. 홑줄 둘은 대조군이다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            line("argos-0001", "부모 하나", "issue", ""),
+            line("argos-0001.aaa", "앞줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0001.aaa", "뒷줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0001.ccc", "홑줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0001.ddd", "홑줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0002", "부모 둘", "issue", ""),
+            line("argos-0002.bbb", "앞줄 안", "issue", ",\"epic\":\"argos-e002\""),
+            line("argos-0002.bbb", "뒷줄 밖", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-e001", "미룬 에픽", "epic", ",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+            line("argos-e002", "산 에픽", "epic", ""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    // **종료 코드도 함께 본다**(`ok`). 같은 id 가 둘인 파일이라도 `duplicate_id` 로 0 아닌
+    // 코드를 내는 것은 `status` 뿐이고 `show` 는 아무것도 안 막는다 — 재 보고 적는다. 글만
+    // 읽던 때는 이 줄들이 멎어도(assert 가 부르는 패닉은 101 이다) 빈 stdout 에서 "줄이 상세에
+    // 없다" 로 번져, 무엇이 멎었는지를 안 댔다.
+    let detail = |id: &str| ok(s.path(), &["show", id]);
+    let mark = "미룸 — argos-e001 밑";
+    let row = |out: &str, title: &str| {
+        out.lines()
+            .find(|l| l.contains(title))
+            .unwrap_or_else(|| panic!("`{title}` 줄이 상세에 없다\n{out}"))
+            .to_string()
+    };
+
+    // 1. 앞줄이 미룬 쌍 — 표는 앞줄에만 선다.
+    let one = detail("argos-0001");
+    assert!(row(&one, "앞줄 밖").contains(mark), "미룬 에픽에 든 앞줄이 표를 잃었다\n{one}");
+    assert!(!row(&one, "뒷줄 안").contains("미룸"), "계획 안인 뒷줄이 표를 달았다\n{one}");
+
+    // 2. 뒷줄이 미룬 쌍 — 표는 뒷줄에만 선다. **접은 지도를 짚으면 여기서 둘째 줄만 붉어진다**
+    // (접은 답이 곧 뒷줄의 답이라 첫째는 그대로 선다). 1 에서도 붉어지는 것은 첫째뿐이다 —
+    // 두 쌍을 다 두는 까닭이 그것이다: 한 쌍만 재면 한쪽 방향이 안 잡힌다.
+    let two = detail("argos-0002");
+    assert!(row(&two, "뒷줄 밖").contains(mark), "미룬 에픽에 든 뒷줄이 표를 잃었다\n{two}");
+    assert!(!row(&two, "앞줄 안").contains("미룸"), "계획 안인 앞줄이 쌍둥이의 미룸을 달았다\n{two}");
+
+    // 3. 대조군 — id 가 하나뿐인 줄의 답은 그대로다. 줄로 묻는 길이 접은 지도와 갈리면 여기가 잡는다.
+    assert!(row(&one, "홑줄 밖").contains(mark), "홑줄이 물려받은 미룸을 잃었다\n{one}");
+    assert!(!row(&one, "홑줄 안").contains("미룸"), "계획 안인 홑줄이 표를 달았다\n{one}");
+
+    // 4. 거르는 쪽과 그리는 쪽이 같은 말을 한다 — 이 넷이 계획 밖이고 나머지는 아니다.
+    let off = ok(s.path(), &["show", "--deferred", "--all"]);
+    for title in ["앞줄 밖", "뒷줄 밖", "홑줄 밖", "미룬 에픽"] {
+        assert!(off.contains(title), "`{title}` 을 `--deferred` 가 안 냈다\n{off}");
+    }
+    for title in ["뒷줄 안", "앞줄 안", "홑줄 안"] {
+        assert!(!off.contains(title), "계획 안인 `{title}` 을 `--deferred` 가 냈다\n{off}");
+    }
+
+    // 5. `shelved_by` 는 펼친 줄(뒷줄)의 답이다 — id 밖에 없는 표면의 결정은 그대로다.
+    let json = |id: &str| ok(s.path(), &["show", id, "--json"]);
+    let front_off = json("argos-0001.aaa");
+    assert!(!front_off.contains("shelved_by"), "뒷줄이 계획 안인데 `shelved_by` 가 섰다\n{front_off}");
+    let back_off = json("argos-0002.bbb");
+    assert!(back_off.contains(r#""shelved_by":"argos-e001""#), "뒷줄의 미룸을 `shelved_by` 가 안 냈다\n{back_off}");
+}
+
+/// **가르는 것은 계획 밖인가가 아니라 어느 줄 밑인가다**(리뷰 moai-jk2u.jaq).
+///
+/// 위 시험이 잰 것은 쌍둥이 **한쪽만** 계획 밖인 판이다. 그 판은 `report::torn_ids` 가
+/// 잡아내는데, 그쪽은 `Option` 이 `Some` 인가만 견주므로 **둘 다 계획 밖이되 뺀 줄이 다른**
+/// 판은 안 잡는다 — 그러면 줄을 든 상세가 접은 지도로 되돌아가, 고쳤다는 그 어긋남이 그대로
+/// 선다. 그 판이 셋이고 셋 다 쓰는 사람이 볼 수 있는 자리에서 갈린다.
+///
+/// 1. **미룬 에픽 둘에 하나씩 든 쌍둥이** — 앞줄이 뒷줄의 에픽을 달고, 시킨 그대로 친
+///    `moai defer <뒷줄의 에픽> --undo` 는 그 줄을 안 되돌린다(미룬 적이 없는 줄이다)
+/// 2. **제 줄을 미룬 뒷줄 곁의 앞줄** — 접은 답이 뒷줄의 제 id 라, `view::deferred_for` 가
+///    "제가 미룬 줄" 로 읽고 앞줄의 없는 `deferred_at` 을 찾다 표를 **통째로** 잃는다.
+///    그러면서 `show --deferred` 는 그 줄을 낸다
+/// 3. **묶음 줄도 같다**(2026-09-23 사용자 결정) — 한때 `query::Where::deferred` 만
+///    `!is_group` 문으로 접은 지도에 가서, 상세가 `미룸` 을 다는 묶음 줄을 `--deferred` 가
+///    안 냈다. 묶음의 읽은 칸을 가르는 `report::counted` 도 `shelf.every(g)` 로 그 줄에서
+///    올라가므로 줄마다의 답이 묶음에도 참이고, 이제 두 표면이 그 답을 같이 든다
+///
+/// 셋 다 잣대는 위 시험과 같다 — **한 화면이 제 말을 뒤집지 않는가.**
+#[test]
+fn the_defer_root_is_asked_per_row_even_when_both_twins_are_out_of_the_plan() {
+    let s = init("defersplit");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\",\"status\":\"todo\"{extra},\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let off_at = ",\"deferred_at\":\"2026-09-11T00:00:00Z\"";
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            // 1. 미룬 에픽 둘에 하나씩.
+            line("argos-0001", "부모 하나", "issue", ""),
+            line("argos-0001.aaa", "앞줄 e001", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0001.aaa", "뒷줄 e003", "issue", ",\"epic\":\"argos-e003\""),
+            // 2. 앞줄은 미룬 에픽 밑, 뒷줄은 제 줄을 미뤘다.
+            line("argos-0002", "부모 둘", "issue", ""),
+            line("argos-0002.bbb", "앞줄 에픽밑", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0002.bbb", "뒷줄 제미룸", "issue", off_at),
+            // 3. 앞줄은 미룬 릴리스에 든 에픽, 뒷줄은 계획 안인 일. 접은 답은 뒷줄이 지운다.
+            line("argos-0003", "부모 셋", "issue", ""),
+            line("argos-0003.ccc", "앞줄 에픽 m1", "epic", ",\"milestone\":\"argos-m001\""),
+            line("argos-0003.ccc", "뒷줄 일 안", "issue", ""),
+            line("argos-e001", "미룬 에픽 하나", "epic", off_at),
+            line("argos-e003", "미룬 에픽 셋", "epic", off_at),
+            line("argos-m001", "미룬 릴리스", "milestone", off_at),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let detail = |id: &str| ok(s.path(), &["show", id]);
+    let row = |out: &str, title: &str| {
+        out.lines()
+            .find(|l| l.contains(title))
+            .unwrap_or_else(|| panic!("`{title}` 줄이 상세에 없다\n{out}"))
+            .to_string()
+    };
+
+    // 1. 저마다 제 에픽을 단다. 접은 지도로 가면 둘 다 `argos-e003` 을 단다.
+    let one = detail("argos-0001");
+    assert!(row(&one, "앞줄 e001").contains("미룸 — argos-e001 밑"), "앞줄이 뒷줄의 에픽을 달았다\n{one}");
+    assert!(row(&one, "뒷줄 e003").contains("미룸 — argos-e003 밑"), "뒷줄이 제 에픽을 잃었다\n{one}");
+
+    // 2. 앞줄은 에픽 밑, 뒷줄은 제 미룸의 나이. 접은 지도로 가면 앞줄의 표가 통째로 사라진다.
+    let two = detail("argos-0002");
+    assert!(row(&two, "앞줄 에픽밑").contains("미룸 — argos-e001 밑"), "미룬 에픽에 든 앞줄이 표를 잃었다\n{two}");
+    assert!(row(&two, "뒷줄 제미룸").contains("미룸"), "제 줄을 미룬 뒷줄이 표를 잃었다\n{two}");
+    assert!(!row(&two, "뒷줄 제미룸").contains("밑"), "제가 미룬 줄에 `밑` 이 섰다\n{two}");
+
+    // 3. 묶음 줄도 제 답을 단다 — 접은 지도로 가면 뒷줄(계획 안)의 답이 앞줄까지 덮는다.
+    let three = detail("argos-0003");
+    assert!(
+        row(&three, "앞줄 에픽 m1").contains("미룸 — argos-m001 밑"),
+        "미룬 릴리스에 든 묶음 줄이 표를 잃었다\n{three}"
+    );
+    assert!(!row(&three, "뒷줄 일 안").contains("미룸"), "계획 안인 뒷줄이 표를 달았다\n{three}");
+
+    // 3-2. **머리 줄도 잰다.** `view::detail` 이 묻는 자리는 자식 줄과 머리 둘인데, 쌍둥이 id 로
+    // 콕 집어 펼치는 길이 없으면 머리 쪽은 홑줄로만 돌아 그 걸음이 안 밟힌다. 펼치는 줄은
+    // `Load::get` 의 뒷줄이라 답은 뒷줄의 것이다.
+    let head = detail("argos-0001.aaa");
+    assert!(head.contains("미룸 — argos-e003 밑"), "쌍둥이를 콕 집어 편 머리가 뒷줄의 답을 안 냈다\n{head}");
+    assert!(!head.contains("argos-e001"), "머리가 앞줄의 미룸까지 댔다\n{head}");
+
+    // 4. 거르는 쪽과 그리는 쪽이 같은 말을 한다.
+    let off = ok(s.path(), &["show", "--deferred", "--all"]);
+    for title in ["앞줄 e001", "뒷줄 e003", "앞줄 에픽밑", "뒷줄 제미룸", "앞줄 에픽 m1"] {
+        assert!(off.contains(title), "`{title}` 을 `--deferred` 가 안 냈다\n{off}");
+    }
+    assert!(!off.contains("뒷줄 일 안"), "계획 안인 뒷줄을 `--deferred` 가 냈다\n{off}");
+}
+
+/// **마일스톤의 미룸도 줄마다 물려받는다**(리뷰 moai-jk2u.m60).
+///
+/// 위 시험이 못박은 것을 `Shelf::walk` 는 에픽 축에서만 했다 — 마일스톤 축은 `mile_of` 를
+/// 그대로 짚어, 제 `milestone` 에 미룬 릴리스를 적은 앞줄이 그 릴리스의 멤버로 세어지면서
+/// 미룸은 안 물려받았다. 거꾸로 아무것도 안 적은 앞줄이 뒷줄이 적은 미룬 릴리스를 입어,
+/// `show --milestone` 이 그 줄을 안 세는데 `ready` 는 안 내주는 판도 섰다.
+///
+/// **두 방향을 같은 시험에서 잰다** — 한쪽만 재면 값을 통째로 `없음` 으로 바꿔도 붉어지지 않는다.
+#[test]
+fn a_line_inherits_the_defer_of_the_release_it_wrote_on_itself() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let stone = line("argos-m001", "미룬 릴리스", "milestone", ",\"deferred_at\":\"2026-09-11T00:00:00Z\"");
+
+    // 1. 앞줄만 그 릴리스를 적었다. 뒷줄은 닫혀 있어 지도에서 그 id 가 지워지므로,
+    //    앞줄은 제가 적은 릴리스의 미룸을 지도로는 못 받는다.
+    let s = init("twinstone");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            stone,
+            line("argos-0002", "앞줄", "issue", ",\"milestone\":\"argos-m001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"status\":\"done\"").replace("\"status\":\"todo\",", ""),
+        ),
+    )
+    .unwrap();
+    let held = String::from_utf8(moai(s.path(), &["show", "argos-m001", "--json"]).stdout).unwrap();
+    assert!(held.contains(r#""members":["argos-0002"]"#), "전제가 안 섰다 — 릴리스가 그 줄을 멤버로 안 센다\n{held}");
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(!ready.contains("argos-0002"), "미룬 릴리스의 멤버를 집을 것으로 내줬다\n{ready}");
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred", "--all"]).stdout).unwrap();
+    assert!(off.contains("앞줄"), "미룬 릴리스의 멤버를 `--deferred` 가 안 냈다\n{off}");
+
+    // 2. 거꾸로 — 앞줄은 아무것도 안 적었고 뒷줄이 미룬 릴리스를 적었다. 지도는 뒷줄의
+    //    값을 드는데, 그 값은 앞줄의 것이 아니므로 앞줄은 그대로 집을 수 있어야 한다.
+    let s = init("twinstone2");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            stone,
+            line("argos-0002", "앞줄", "issue", ""),
+            line("argos-0002", "뒷줄", "issue", ",\"milestone\":\"argos-m001\"")
+                .replace("\"status\":\"todo\"", "\"status\":\"done\""),
+        ),
+    )
+    .unwrap();
+    let held = String::from_utf8(moai(s.path(), &["show", "--milestone", "argos-m001", "--all"]).stdout).unwrap();
+    assert!(held.contains("뒷줄") && !held.contains("앞줄"), "릴리스가 제 줄이 아닌 것을 셌다\n{held}");
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(ready.contains("앞줄"), "아무것도 안 적은 줄이 뒷줄의 미룸을 입어 사라졌다\n{ready}");
+}
+
+/// **표면 넷이 같은 줄을 말한다**(moai-u3ta).
+///
+/// 미룬 곳 지도가 id 를 키로 두고 담는 꼴이 `filter_map().collect()` 이던 동안, 미룬 릴리스에
+/// 든 앞줄의 미룸이 산 릴리스에 든 뒷줄에 그대로 갔다. `show <산 릴리스>` 는 그 줄을 산
+/// 멤버로 세는데 `ready` 는 안 내주고 `show --deferred` 는 두 줄을 다 냈다 — 한 저장소가
+/// 제 말을 뒤집었다.
+///
+/// **고칠 길이 없는 것은 아니다**(리뷰 moai-jk2u.hr4). `duplicate_id` 는 파일째 쓰기를 막지만
+/// `moai rm <id>` 는 그 판에서도 듣는다 — 앞줄을 걷어 내면 쓰기가 곧바로 풀린다. 고치는 동안
+/// 읽는 표면들이 한 말을 해야 한다는 것이 이 시험이 지키는 몫이지, 갇혀서가 아니다.
+#[test]
+fn a_twins_deferral_does_not_reach_the_other_line() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("twinleak");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-0002", "앞줄", "issue", ",\"milestone\":\"argos-m001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"milestone\":\"argos-m002\""),
+            line("argos-m001", "미룬 릴리스", "milestone", ",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+            line("argos-m002", "산 릴리스", "milestone", ""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 내주는 문 — 산 릴리스에 든 뒷줄은 그대로 선다.
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(ready.contains("뒷줄"), "산 릴리스에 든 줄이 앞줄의 미룸을 입어 사라졌다\n{ready}");
+    assert!(!ready.contains("앞줄"), "미룬 릴리스에 든 줄을 내줬다\n{ready}");
+
+    // 2. 목록 — 미룬 줄만 낸다.
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred"]).stdout).unwrap();
+    assert!(off.contains("앞줄") && !off.contains("뒷줄"), "미룬 것을 묻는 목록이 산 줄까지 냈다\n{off}");
+
+    // 3. 보드의 알림 — 그 목록이 내는 줄 수와 같다(앞줄과 릴리스 제 줄, 둘).
+    let said = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(said.contains(r#""kind":"deferred","count":2"#), "비추는 수가 목록과 갈렸다\n{said}");
+
+    // 4. id 밖에 없는 표면 — **뒷줄이 답한다**(2026-09-23 사용자 결정). `show <id>` 가 찍는
+    //    줄이 그 뒷줄이므로, 그 줄이 계획 안이면 도로 집을 곳도 안 곁들인다.
+    let one = String::from_utf8(moai(s.path(), &["show", "argos-0002", "--json"]).stdout).unwrap();
+    assert!(one.contains(r#""title":"뒷줄""#), "전제가 안 섰다 — `show` 가 뒷줄을 안 찍는다\n{one}");
+    assert!(!one.contains("shelved_by"), "계획 안인 줄에 도로 집을 곳을 곁들였다\n{one}");
+}
+
+/// **묶음과 id 를 나눠 쓴 일 줄도 제 답을 갖는다**(리뷰 moai-jk2u.hr4).
+///
+/// 줄마다 되묻는 자(`report::torn_ids`)가 한때 **묶음이 선 id 를 통째로** 뺐다. 묶음이 계획
+/// 밖인가에는 멤버를 id 로 세어 읽은 칸이 걸려 줄로 못 되묻는 것은 맞지만, 그 id 를 묶음과
+/// 나눠 쓴 일 줄까지 제 답을 잃었다 — 미룬 에픽에 든 일 줄이 `moai show --deferred` 에서
+/// 사라지고, `moai status` 의 `미뤄 둔 것` 은 그 줄을 세고 `moai ready` 는 안 내줘, 어느
+/// 목록에도 안 서는 줄이 셈에만 남았다.
+///
+/// **그리는 쪽도 같은 줄을 말한다**(`nav::Index::shelved_at`). 트리의 `미룸` 낱말이 접은 지도
+/// 를 짚던 때는 평평한 목록과 트리가 같은 줄에 다른 표를 달았다.
+#[test]
+fn a_group_sharing_an_id_does_not_take_the_work_rows_answer() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("grouptwin");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            line("argos-0002", "미룬 에픽에 든 일", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0002", "같은 id 의 에픽", "epic", ""),
+            line("argos-e001", "미룬 에픽", "epic", ",\"deferred_at\":\"2026-09-11T00:00:00Z\""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 비추는 수와 그 수가 가리키는 목록이 같은 줄을 말한다 — 일 줄과 미룬 에픽, 둘이다.
+    let said = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(said.contains(r#""kind":"deferred","count":2"#), "비추는 수가 달라졌다\n{said}");
+    let off = String::from_utf8(moai(s.path(), &["show", "--deferred"]).stdout).unwrap();
+    assert!(off.contains("미룬 에픽에 든 일"), "센 줄을 그 목록이 안 냈다\n{off}");
+
+    // 2. 내주는 문도 같은 답이다 — 계획 밖인 줄은 안 내준다.
+    let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(!ready.contains("미룬 에픽에 든 일"), "계획 밖인 줄을 내줬다\n{ready}");
+
+    // 3. 트리도 같은 줄에 같은 표를 단다 — 평평한 목록이 다는 그 낱말이다. `--all` 로 묻는
+    //    것은 `--deferred` 로 물으면 목록이 꼬리 낱말을 아예 안 달기 때문이다(물은 것을 다시
+    //    말하지 않는다) — 표가 갈리는지 보려면 둘 다 다는 자리에서 봐야 한다.
+    let tree = String::from_utf8(moai(s.path(), &["show", "--all", "--tree"]).stdout).unwrap();
+    assert!(tree.contains("미룬 에픽에 든 일"), "트리가 그 줄을 안 그렸다\n{tree}");
+    let flat = String::from_utf8(moai(s.path(), &["show", "--all"]).stdout).unwrap();
+    // 낱말은 화면 말에서 온다(`status.put_off`) — 시험은 한국어로 돈다([`isolated`]).
+    let word = |text: &str| text.lines().find(|l| l.contains("미룬 에픽에 든 일")).unwrap_or("").to_string();
+    let (a, b) = (word(&tree), word(&flat));
+    assert_eq!(
+        a.contains("미룸"),
+        b.contains("미룸"),
+        "트리와 목록이 같은 줄에 다른 표를 달았다\n트리: {a}\n목록: {b}"
+    );
+    assert!(a.contains("미룸"), "미룬 에픽에 든 줄에 표가 없다\n{tree}");
+}
+
+/// **막는 줄은 id 로 불리므로 뒷줄이 답한다**(moai-u3ta, 2026-09-23 사용자 결정).
+///
+/// `blocked_by` 는 id 하나를 적는다 — 그 id 를 든 줄이 둘이면 `by_id`·`kinds`·`Lines::at` 이
+/// 온 도구에서 고르는 그 뒷줄이 답한다. 그 답을 대는 말(`moai defer <id> --undo`)도 같은
+/// 줄에서 나와야, 사람이 `moai show <id>` 로 보는 줄과 도구가 재는 줄이 하나다.
+///
+/// 앞줄이 미룬 에픽을 적었어도 뒷줄이 계획 안이면 **막지 않는다.** 한때는 앞줄의 미룸이 id
+/// 를 계획 밖으로 밀고 그 id 를 `by_id` 로 되짚어, `moai ready` 가 id 없는
+/// `moai defer  --undo` 를 사람 앞에 냈다(리뷰 moai-jk2u.m60 2번) — 이제 계획 밖으로 미는
+/// 것도 뒷줄이라 그 자리가 빌 수 없다. 쌍둥이 없는 같은 저장소와 글자째 같아야 한다.
+#[test]
+fn what_to_undo_is_read_from_the_line_that_left_the_plan() {
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let epic = line("argos-e001", "미룬 에픽", "epic", ",\"deferred_at\":\"2026-09-11T00:00:00Z\"");
+    let blocked = line("argos-0009", "막힌 줄", "issue", ",\"blocked_by\":[\"argos-0002\"]");
+
+    // 쌍둥이 — 뒷줄이 그 에픽을 적었다. 막는 id 를 계획 밖으로 미는 것도 도로 집을 곳을 대는
+    // 것도 그 줄이다. 앞줄은 닫혀 있어 어느 목록에도 안 선다.
+    let s = init("twinundo");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-0002", "막는 줄 앞", "issue", "").replace("\"status\":\"todo\"", "\"status\":\"done\""),
+            line("argos-0002", "막는 줄 뒤", "issue", ",\"epic\":\"argos-e001\""),
+            blocked,
+            epic,
+        ),
+    )
+    .unwrap();
+    let twin = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(twin.contains(r#""undo":["argos-e001"]"#), "무엇을 풀지를 못 댔다\n{twin}");
+    let said = String::from_utf8(moai(s.path(), &["ready"]).stdout).unwrap();
+    assert!(said.contains("moai defer argos-e001 --undo"), "id 없는 명령을 사람 앞에 냈다\n{said}");
+
+    // 쌍둥이 없는 같은 판 — 답이 같아야 한다.
+    let s = init("loneundo");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!("{}{}{}", line("argos-0002", "막는 줄", "issue", ",\"epic\":\"argos-e001\""), blocked, epic),
+    )
+    .unwrap();
+    let lone = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert_eq!(twin, lone, "쌍둥이가 있고 없고에 따라 `held` 가 달라졌다");
+
+    // 거꾸로 — 앞줄이 미룬 에픽을 적고 뒷줄은 아무 데도 안 들었다. 그 id 는 계획 안이라
+    // 뒷줄이 그대로 `ready` 에 서고, 막힌 줄은 **안 끝난 것에** 막힐 뿐이라 `held` 에 안 선다
+    // (`held` 는 미룬 것에 막힌 줄만 댄다). 한때는 앞줄의 미룸이 뒷줄에 그대로 가, 뒷줄이
+    // `ready` 에서 사라지고 막힌 줄이 도로 집을 곳까지 물었다(moai-u3ta).
+    let s = init("frontundo");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-0002", "막는 줄 앞", "issue", ",\"epic\":\"argos-e001\""),
+            line("argos-0002", "막는 줄 뒤", "issue", ""),
+            blocked,
+            epic,
+        ),
+    )
+    .unwrap();
+    let front = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
+    assert!(front.contains("막는 줄 뒤"), "계획 안인 뒷줄이 앞줄의 미룸을 입어 사라졌다\n{front}");
+    assert!(front.ends_with("\"held\":[]}\n"), "미룬 것에 막히지도 않은 줄을 `held` 에 세웠다\n{front}");
 }
 
 /// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와
@@ -11931,8 +13926,17 @@ fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
     assert!(said.contains("등록 안 됨") && said.contains("PATH 에 없다"), "{said}");
 }
 
-/// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 그때 조용히
-/// 아무것도 안 하므로, 여기 말고는 알 길이 없다.
+/// 설치본이 부르는 바이너리가 사라지면 그것을 짚는다. 훅은 **없을 때** 조용히 아무것도 안
+/// 하므로, 그 갈래는 여기 말고는 알 길이 없다.
+///
+/// **있는데 못 도는 갈래는 훅도 말한다**(moai-j4ie) — `skill::command` 가 0·1 아닌 종료에
+/// 알림 한 줄을 내고(moai-wnnb), 그 줄은 이제 경로까지 싣는다(moai-wza7). 그래도 **없는 갈래는
+/// 여기만 댄다** — 훅은 없을 때 조용히 0 으로 빠진다.
+///
+/// **그 알림은 세션·이벤트마다 한 번뿐이고**(moai-f7up) **stdout 이 비었을 때만이다**(moai-mnhq).
+/// 훅이 매 도구 호출에 다시 말하지 않고, 무언가 지껄이고 죽은 바이너리에는 아예 말하지 않으니
+/// — 둘째 객체를 붙이면 `claude` 가 판정째 버린다 — 남는 자리는 여기다. `skill status` 가 대는
+/// 몫을 줄이지 않는 까닭이다(리뷰 moai-514e.hgz 가 "종료마다" 라고 적힌 이 줄을 짚었다).
 #[test]
 fn skill_status_notices_a_vanished_hook_binary() {
     let s = init("skillgone");
@@ -11945,7 +13949,9 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
 
-    // **파일은 있어도 실행할 수 없으면** 훅은 권한 오류를 삼키고 아무것도 안 한다.
+    // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 낸다(moai-j4ie). 그 줄도
+    // 이제 경로를 대지만(moai-wza7), 세션·이벤트마다 한 번뿐이고(moai-f7up) 그 말을 읽는 사람이
+    // 없을 때도 있다 — 같은 자리를 언제든 다시 대는 것이 이 줄이다.
     let noexec = c.home.path().join("noexec-moai");
     std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
     let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
@@ -13001,6 +15007,58 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     let empty = project_ok(home.path(), &config, &["project", "ls", "--json"]);
     assert!(empty.contains("\"projects\":[]"), "{empty}");
     assert!(project_ok(home.path(), &config, &["project", "ls"]).contains("등록한 프로젝트가 없다"));
+}
+
+/// **`project ls` 는 tzdb 를 안 만진다**(moai-yz4j). 쓰는 것은 `counts` 하나고 시간대가 닿는
+/// 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던 줄 하나를 stderr 에
+/// 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
+///
+/// **이름을 `project ls` 로 좁혀 둔다 — "시각을 안 그리는 명령" 전부가 아니다**(리뷰 moai-j4ie
+/// 가 쟀다). `ready`·`prime`·`show`(목록)·`idea ls` 는 시간대로 한 글자도 안 달라지는데 여전히
+/// 이 줄을 낸다. 그쪽은 `view::Screen` 을 지어 `.at(ctx.zone())` 을 얹기 때문이고, 화면의
+/// 시간대를 실제로 읽는 자리는 `view::detail`·`view::history` 둘(곧 `show <id>`·`edit`)뿐이다.
+/// 그래서 같은 길로 못 고친다 — `view::every_command_screen_carries_the_zone` 이 `src/cmd/**`
+/// 를 훑어 `.at` 없는 `Screen::new` 을 거절하므로, 저쪽을 고치는 일은 그 잣대를 함께 옮기는
+/// 결정이다(그 결정은 아직 없다). `project ls` 가 화면을 아예 안 지어 여기만 먼저 닫혔다.
+///
+/// **대조를 함께 잰다** — 같은 환경의 `moai status` 는 기한을 그리므로 그 줄이 서야 한다.
+/// 없으면 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다.
+#[test]
+fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
+    let home = Scratch::new("project-tz");
+    let config = home.path().join("config.toml");
+    let repo = init("project-tz-repo");
+    project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
+    // 없는 자리를 가리켜 tzdb 를 깨뜨린다. `TZ` 를 UTC 가 아닌 이름으로 두어야 자료를 읽는다 —
+    // `Zone::load("UTC")` 는 자료 없이 서므로 UTC 로는 이 판이 아예 안 난다.
+    let nowhere = home.path().join("no-zoneinfo");
+    let run = |dir: &Path, args: &[&str]| {
+        isolated(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &config)
+            .env("NO_COLOR", "1")
+            .env("TZDIR", &nowhere)
+            .env("TZ", "Asia/Seoul")
+            .output()
+            .expect("moai 를 실행하지 못했다")
+    };
+
+    let ls = run(home.path(), &["project", "ls"]);
+    assert!(ls.status.success(), "{}", text(&ls));
+    // **연 줄이 실제로 섰는지부터 본다**(리뷰 moai-j4ie) — 셈을 내는 갈래(`State::Open`)를 안
+    // 지나면 시간대에 닿을 자리가 애초에 없어, 빈 목록도 아래를 지나간다.
+    assert!(String::from_utf8_lossy(&ls.stdout).contains("todo"), "칸별 셈이 안 섰다 — {}", text(&ls));
+    let said = String::from_utf8_lossy(&ls.stderr);
+    assert!(!said.contains("시간대 자료가 없다"), "시각을 안 그리는데 tzdb 를 만졌다 — {said}");
+    // **딱 비어 있는 것까지 잰다** — 이 명령은 stderr 에 낼 말이 없다. 낼 말이 생기는 날에는
+    // 위의 한 줄만 남기고 이 줄을 걷는다. 무엇을 재는 시험인지는 위가 말한다.
+    assert_eq!(said, "", "없던 줄이 섰다");
+
+    let st = run(repo.path(), &["status"]);
+    assert!(st.status.success(), "{}", text(&st));
+    let said = String::from_utf8_lossy(&st.stderr);
+    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
 }
 
 /// 두 번 더해도 한 줄이고 파일은 한 글자도 안 바뀐다. 이미 있는 것은 실패가 아니다.
@@ -14265,6 +16323,127 @@ fn the_merge_driver_hands_a_real_clash_to_a_person() {
     assert!(merged.contains("이쪽 제목") && merged.contains("저쪽 제목"), "두 쪽을 다 안 보여 준다\n{merged}");
 }
 
+/// **남의 낡은 줄 하나가 모든 머지를 막지 않는다**(moai-h4jx).
+///
+/// 오늘 규칙이 거절하는 값을 든 줄은 손으로 푼 충돌이 남기거나, 뒷날 기한을 넓힌 바이너리가
+/// 쓴다. 그런 줄 하나가 머지마다 충돌을 세우던 까닭과 무엇을 건너뛰기로 했는지는
+/// `cmd::merge_driver::settle` 의 주석에 있다. 여기서 재는 것은 단위 시험이 못 가는 자리다 —
+/// 단위 시험은 `plan` 까지만 지나고, 이 판이 실제로 아팠던 곳은 git 이 드라이버를 부르는 길이다.
+///
+/// 진짜 git 으로 그 판을 만든다. 보는 것은 넷이다 — 머지가 깨끗이 끝나는가, 두 고침이 다
+/// 남는가, **낡은 줄이 제 값을 그대로 들고 남는가**, 그리고 그 결과가 `store` 가 쓰는
+/// 표준형인가. 넷째를 재려고 심는 줄의 차례를 일부러 어긋뜨린다 — 표준형인 줄을 심으면
+/// 머지가 꼴을 맞추든 말든 답이 같아 그 assert 가 붉어질 수가 없다(리뷰 moai-85o3.p4w).
+#[test]
+fn a_row_neither_side_touched_does_not_block_the_merge() {
+    let s = init("mergestale");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
+    let one = add(root, &["이쪽이 고칠 줄"]);
+    let two = add(root, &["저쪽이 고칠 줄"]);
+    // **도구로는 못 적는 값이다** — `--due` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    //
+    // 닫는 괄호가 아니라 id 뒤에 끼운다. 끝에 붙이면 그 자리가 곧 `Issue` 의 표준 차례라
+    // 심은 줄이 표준형이 되고, [`line_of`] 는 `{"id":…` 로 찾으므로 머리는 그대로 둔다.
+    //
+    // **가지마다 되심는다.** `moai` 쓰기는 파일 전체를 표준형으로 되쓰므로, 한 번만 심으면
+    // 그 다음 `edit` 한 줄에 차례가 사라져 셋 다 표준형인 채로 머지에 들어간다.
+    let due = "\"due_on\":\"2026-09-20\"";
+    let plant = || {
+        let was = line_of(root, &old);
+        let head = format!("\"id\":\"{old}\",");
+        // 앞선 쓰기가 표준 자리로 옮겨 둔 것을 걷고 다시 머리 뒤에 끼운다.
+        let bare = was.replace(&format!(",{due}"), "");
+        let stale = bare.replacen(&head, &format!("{head}{due},"), 1);
+        assert_ne!(stale, bare, "낡은 값을 못 끼웠다 — 줄의 머리가 바뀌었다\n{bare}");
+        std::fs::write(root.join(".moai/issues.jsonl"), issues(root).replace(&was, &stale)).unwrap();
+        stale
+    };
+    let stale = plant();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    plant();
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    plant();
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "안 건드린 줄이 머지를 막았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 낡은 **값**은 그대로 남는다 — 건너뛰는 것은 검사뿐이다.
+    let carried = line_of(root, &old);
+    assert!(carried.contains(due), "낡은 값이 사라졌다\n{merged}");
+    // **꼴은 `store` 가 쓰는 표준형이다.** 심은 차례가 그대로 지나가면 그 줄은 다음 쓰기가
+    // 통째로 되써, 아무도 안 건드린 줄이 남의 커밋에 헛 diff 로 뜬다.
+    assert!(!merged.contains(&stale), "심은 차례가 그대로 지나갔다\n{merged}");
+    // 그 다음 쓰기가 정말 그 줄을 안 건드리는지까지 본다. **줄을 실제로 바꾸는 쓰기로
+    // 잰다** — `note` 는 스냅샷의 값을 안 바꿔 되쓰기 자체가 일어나지 않으므로(`store` 는
+    // 읽은 줄과 맞춘 줄을 견준다) 그것으로 재면 무엇을 심어도 초록이다.
+    ok(root, &["status"]);
+    ok(root, &["edit", &one, "--tag", "extra"]);
+    assert_eq!(
+        line_of(root, &old),
+        carried,
+        "다음 쓰기가 아무도 안 건드린 줄을 고쳤다 — 머지가 낸 꼴이 표준형이 아니다"
+    );
+}
+
+/// **새 바이너리가 쓴 줄 하나가 머지를 파일째 막지 않는다**(moai-1a55.4oh).
+///
+/// 뒷날 바이너리가 `kind` 에 새 값을 쓰면 오늘 바이너리는 그 줄을 못 읽는다. 그런 줄이 한쪽에만
+/// 서면 예전에는 **모든** 머지가 파일 전체를 충돌로 넘겼고, 이슈마다 푸는 것이 통째로
+/// 사라졌다. 빠져나올 길도 없었다 — `moai status` 가 못 읽는 줄을 치명으로 세니, 한쪽에서 그
+/// 줄을 고치는 것이 곧 두 쪽의 못 읽는 줄을 다르게 만드는 일이다.
+///
+/// 진짜 git 으로 그 판을 만든다. 보는 것은 셋이다 — 머지가 깨끗이 끝나는가, 두 쪽의 고침이 다
+/// 남는가, **못 읽는 줄이 원문 그대로 파일 끝에 남는가**. 단위 시험은 `plan` 까지만 지나고, 이
+/// 판이 실제로 아팠던 곳은 git 이 드라이버를 부르는 길이다.
+#[test]
+fn a_row_a_newer_binary_wrote_does_not_escalate_the_merge() {
+    let s = init("mergespike");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    let one = add(root, &["이쪽이 고칠 줄"]);
+    let two = add(root, &["저쪽이 고칠 줄"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    // **이 바이너리가 못 읽는 줄이다** — `kind` 의 값이 넷 중에 없다. 저쪽에만 선다.
+    //
+    // 심고 나서는 이 가지에서 `moai` 를 안 부른다. 불렀다면 `store` 가 그 줄을 못 읽는 줄로
+    // 들고 파일 끝으로 옮기는데, 여기서 재려는 것은 머지가 그 줄을 어떻게 다루느냐다.
+    let spike = "{\"id\":\"argos-9zzz\",\"title\":\"새 종류\",\"kind\":\"spike\",\"status\":\"todo\",\
+                 \"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\
+                 \"status_since\":\"2026-09-01T00:00:00Z\"}";
+    append_raw(root, format!("{spike}\n").as_bytes());
+    git(root, &["commit", "-qam", "side"]);
+
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = issues(root);
+    assert!(!merged.contains("<<<<<<<"), "못 읽는 줄 하나가 파일 전체를 넘겼다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
+    assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
+    // 원문 그대로, 그리고 `store::render_issues` 처럼 **뒤에** 선다.
+    assert_eq!(merged.lines().last(), Some(spike), "못 읽는 줄이 사라졌거나 고쳐 적혔다\n{merged}");
+}
+
 /// **안 심은 클론에서는 지금까지와 똑같다.** `.gitattributes` 의 `merge=moai` 는 드라이버가
 /// 설정에 없으면 그냥 무시되고 git 의 기본 머지가 돈다 — 이 낱말을 심는 것이 안전한 까닭이다.
 #[test]
@@ -14867,14 +17046,15 @@ fn one_stale_line_does_not_escalate_the_whole_file() {
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "base"]);
 
+    // **되심지 않는다.** `store` 는 못 읽는 줄을 원문 그대로 들고 다시 쓰므로 `edit` 한 번에
+    // 사라지지 않고, 여기서 한 번 더 붙이면 같은 id 가 두 벌 서서 이 시험이 재려는 것이
+    // 아니라 겹친 id 를 재게 된다(moai-2m94).
     git(root, &["checkout", "-qb", "side"]);
     ok(root, &["edit", &two, "--tag", "parser"]);
-    append_raw(root, junk);
     git(root, &["commit", "-qam", "side"]);
 
     git(root, &["checkout", "-q", "main"]);
     ok(root, &["edit", &one, "--tag", "bug"]);
-    append_raw(root, junk);
     git(root, &["commit", "-qam", "main"]);
 
     git(root, &["merge", "--no-edit", "side"]);
@@ -14882,8 +17062,8 @@ fn one_stale_line_does_not_escalate_the_whole_file() {
     assert!(!merged.contains("<<<<<<<"), "낡은 줄 하나로 파일째 넘겼다\n{merged}");
     assert!(line_of(root, &one).contains("\"bug\""), "이쪽 고침이 사라졌다\n{merged}");
     assert!(line_of(root, &two).contains("\"parser\""), "저쪽 고침이 사라졌다\n{merged}");
-    // 못 읽는 줄도 그대로 남는다 — 버리면 그것이 조용한 손실이다.
-    assert!(merged.contains("mergestale-0000"), "낡은 줄을 버렸다\n{merged}");
+    // 못 읽는 줄도 그대로, **한 벌만** 남는다 — 버리면 조용한 손실이고, 늘면 겹친 id 가 된다.
+    assert_eq!(merged.matches("mergestale-0000").count(), 1, "낡은 줄을 버렸거나 늘렸다\n{merged}");
 }
 
 /// **충돌일 때도 `--json` 이 어느 id 인지 말한다.**

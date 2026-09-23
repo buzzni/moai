@@ -6,14 +6,40 @@ them, so where they differ the help wins.
 ## There are two kinds of group
 
     moai epic add '<storage layer>'                an epic
-    moai milestone add 'v0.1'                      a milestone
+    moai milestone add 'v0.1' --start 2026-09-05 --due 2026-09-20
     moai add '<title>' -e <epic> --milestone <milestone>
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
+**A milestone is the one row that carries dates.** `--start` and `--due` take a
+calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
+They stand on a milestone row only — on anything else the write is refused. A
+deadline that has passed, and one falling due within `status_due_days` (3 unless
+your config says otherwise), is one warning line on the board; **nothing is
+blocked and the exit code never changes.**
+
+**`moai show <milestone>` also says how long it took.** That is read from the
+closed members' start and finish right then — no field holds it. It comes with
+the number it could measure ("2 of 3 closed"), because a member with no
+`started_at` is *unknown*, not zero, and it is wall clock, not effort: sessions
+running beside each other overlap, and waiting on a person counts too.
+
 **Belonging is inherited.** A child inherits its parent's epic, an issue inherits
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
+
+**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
+<epic>` always did for a review — one subject, one id. The member carries no
+`epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
+.derived_epic` names the epic; `moai show <epic>` lists it under `members` and
+`moai show -e <epic>` picks it up. Rows created before keep the ids they have:
+nothing is ever relabelled.
+
+**An id cannot move, so such a member cannot leave its epic.** `moai edit
+<member> -e none` says so and changes nothing; `-e <another epic>` does move it,
+and the id it keeps still reads `<first epic>.<body>`. Aim a plan before you
+unfold it — for a member that has to stand somewhere else, create it there.
 
 **A group's column is read from its members.** Do not `moai mv` an epic or a
 milestone — pick up one member and it stands `in_progress`, finish them all and it
@@ -146,7 +172,13 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-`--dry-run` keeps a heredoc typo from creating six of the wrong things.
+`--dry-run` keeps a heredoc typo from creating six of the wrong things. It also says
+which epic a `--body` would land on, and refuses a body the write would refuse.
+
+`--body` says why these issues are one bundle. It goes onto the first epic the plan
+creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
+`--from` can read stdin, so give the other one a file or write the body as text —
+`moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{name}}` with `--var name=value` (the
 name takes letters, digits, `_` and `-`, no spaces). By convention it lives in the
@@ -199,7 +231,8 @@ the exit code never changes.
 
 It only asks where a person is watching. `--json`, a pipe and anything that is not a
 terminal never ask, so a machine running agents does not knock on the outside every run.
-The answer, and when it was asked, are held next to your user config in `latest.toml`.
+The answer, when it was asked and where it was asked are held next to your user config
+in `latest.toml`. Ask somewhere else and the answer from the other place is not reused.
 
     [update]
     check = false        # in your user config: never ask on this machine
@@ -226,6 +259,42 @@ PLAN
 that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that idea,
 and the history line about being unfolded from it leads back there.
+
+**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+both on the epic it unfolds — a milestone is inherited, so the epic alone carries
+it to every member, the ones added later included, and the body is what lets
+`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
+original stays on the closed idea and the history leads back to it, and the one
+place worth filling is the epic, so the window that picks a member up does not
+have to press every member to find out what this is.
+
+**The milestone that comes over is the one `moai show --milestone` stands the idea
+under**, not whatever its own field says — an idea parked inside an epic comes over
+in that epic's release even with an empty field of its own, and a field of its own
+that loses to the epic it sits in never reaches the new epic. One reader answers
+where a row belongs, on every surface.
+
+**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
+already the owner — its members inherit its milestone, and writing the idea's over
+theirs would stand one bundle in two places.
+
+**If what came over is not the milestone that is running, hang the running one on
+the epic yourself** — or clear it with `--milestone none` when nothing is running.
+`promote` carries the release it stands in whatever state that release is in, so
+that covers an idea parked with no milestone, one parked under a release that has
+since shipped, and one parked under a milestone since deferred. Without this the
+epic stands outside the release and every member under it is work picked up from
+outside it, of which `moai ready` hands out only what is `p0`; and under a
+deferred milestone the whole plan is out of the plan the moment it is created —
+not in `ready`, not in `held`, and no warning says so. **A dead release is said
+out loud**: unfolding into a deferred or closed milestone prints one line on
+stderr naming it, and nothing is blocked.
+
+    moai edit <epic> --milestone <milestone>
+
+Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
+alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
+`dangling_milestone` warning.
 
 ## Deferring
 
@@ -275,6 +344,12 @@ The always-visible rule is under "Korean text" in `SKILL.md`. This is the proced
 - Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
   make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
 - Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
+- On an ordinary technical term's first mention in a body, put the original in parentheses after
+  the translation and use the translation alone from there. **That rule is not for code names** —
+  a name that came from the code goes in exactly as it is, every time, and a gloss goes in
+  parentheses after it. Take it the other way round and "the translation alone from there" drops
+  the name, which is the swap this rule exists to stop. A repository that wants a fixed list of
+  its own terms keeps that list in its own docs — this rule stands without one
 - If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
 - If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
   That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing

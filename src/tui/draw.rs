@@ -4,6 +4,7 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
+use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
     self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt,
@@ -656,8 +657,12 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 서면 80칸에서 "드러난 것 N건" 에 밀려 잘리고, 그러면 담긴 것을 확인할 길이 없다.
     // 실패보다 앞서지 않는다 — 둘이 함께 서는 것은 담긴 뒤 다시 읽기가 실패했을 때고,
     // 그때 사람이 할 일은 실패 쪽에 있다. 알림만으로는 급하지 않다(`✓` 가 뜻을 진다).
+    // **급하지 않은 줄을 센다**(리뷰) — 아래의 `lead` 가 `!` 를 붙일지 가르는 자다. 쓰기의
+    // 알림과 담아 둔 것의 수가 그것이고, 둘만 선 배너는 고칠 것이 하나도 없다는 뜻이다.
+    let mut soft = 0usize;
     if let Some(n) = &app.notice {
         parts.push(n.clone());
+        soft += 1;
     }
     // 도는 채로 놓은 다시 읽기는 **붙박이다** — 그것이 터지면 화면이 걷히고 탐색기는
     // 모른다. 사람이 할 수 있는 것은 나갔다 다시 여는 것뿐이다(moai-j9on). 급하지만 알림
@@ -703,15 +708,37 @@ fn banner(app: &App) -> Option<(String, bool)> {
     {
         parts.extend(l.problems.iter().map(|p| crate::text::one_line(p)));
     }
-    if app.site.warnings > 0 {
-        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &app.site.warnings.to_string())]));
+    // **기한은 그릴 때 잰다**(moai-fgjj) — 든 셈은 시간대에 안 닿고, 읽는 사람의 달은 이 프레임의
+    // 것이다. `SPC o t` 로 바꾼 시간대가 다음 프레임에 이 수로 선다.
+    //
+    // **시계를 여기서 고르지 않는다**(moai-ynd6) — 층의 줄과 같은 자([`surfaced`])를 쓴다. 한때
+    // 이 지역 이름이 그 함수를 이 자리부터 가려, 같은 것을 재는 두 자리가 나란히 서 있는데도
+    // 서로를 못 불렀다.
+    let n = surfaced(app, &app.site.warnings);
+    if n > 0 {
+        parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &n.to_string())]));
+    }
+    // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
+    // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
+    //
+    // **글은 프로젝트 층의 상세와 한 자리에서 온다**(`tui.place.notices`) — 같은 수를 두 화면이 다른
+    // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
+    // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
+    // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
+    if app.site.notices > 0 {
+        parts.push(fill(say(lang, "tui.place.notices"), &[("n", &app.site.notices.to_string())]));
+        // **급한 줄로 안 센다**(리뷰) — 이 줄만 선 배너에 아래의 `!` 가 붙던 때는 `! + 알림 3건`
+        // 이 되어, 한 줄이 경고의 `!` 와 알림의 `+` 를 같이 이고 섰다. 같은 수를 `view::status` 는
+        // `✓ 드러난 문제 없다` 와 흐린 `+` 로 내고, 프로젝트 층의 상세도 `!` 없이 낸다 — 설치를
+        // 한 번도 안 맞춘 저장소에서 그 배너가 세션 내내 서므로, 멀쩡한 저장소가 깨진 것으로 읽혔다.
+        soft += 1;
     }
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
-    // 알림 하나뿐이면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
-    // 잘못된 줄 안다.
-    let lead = if parts.len() == 1 && app.notice.is_some() { "" } else { "! " };
+    // 급하지 않은 것만 섰으면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
+    // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수).
+    let lead = if parts.len() == soft { "" } else { "! " };
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
 
@@ -888,7 +915,7 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest().clone());
+    let said = version_said(app.site.lang, app.latest());
     let user = app.told_user().to_string();
     [("User", user), ("Version", said)]
 }
@@ -903,16 +930,49 @@ fn told_of(app: &mut App) -> [(&'static str, String); 2] {
 /// **묻는 일은 여기서 안 한다.** 이 함수는 키 하나, 깜빡임 한 번마다 도는 자리라 [`App`] 이
 /// 받아 둔 답([`App::latest`])을 읽기만 한다 — 바로 위 `told_of` 가 `model::actor` 를 여기서 안
 /// 부르는 것과 같은 까닭이고, 묻는 실은 `cmd::tui` 가 여는 걸음에 한 번 띄운다.
-fn version_said(lang: Lang, latest: crate::latest::Seen) -> String {
+///
+/// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
+/// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
+/// `kind` 뿐이라 통째로 버려지는 담기다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
     let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", &tag)]),
+        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
         Seen::Same => say(lang, "tui.version.same").to_string(),
         Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
-        Seen::Unasked => say(lang, "tui.version.unchecked").to_string(),
+        Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
     };
     format!("{mine} · {said}")
+}
+
+/// 못 물은 까닭마다 다른 글 — 키 하나(moai-580l).
+///
+/// **넷째 글을 갈래마다 갈랐다.** 넷이 다른 글이라는 결정(2026-09-21)은 그대로다 — 어느
+/// 갈래도 "최신" 이라 적지 않고, 모두 못 물었다고 먼저 적은 뒤 괄호로 까닭을 단다. 사람이
+/// 할 일이 갈래마다 다르기 때문이다: 부름 수를 태운 것은 기다리면 풀리고, 인증서를 갈아
+/// 끼우는 프록시 뒤에서는 영영 안 되며, 태그 꼴은 릴리스를 지은 쪽이 고친다.
+///
+/// **낱말을 잇지 않고 글 전체를 고른다.** `"{unchecked} ({why})"` 로 이으면 말마다 괄호와
+/// 차례를 못 바꾸고, 이 줄은 탐색기 머리의 좁은 자리라 말마다 줄이는 법이 다르다. 키를
+/// `say(…, "…")` 에 그대로 적는 것도 약속이다 — 도우미에 숨긴 키는
+/// `i18n::tests::english_has_every_key_the_source_asks_for` 가 못 본다.
+///
+/// **[`Trouble`] 을 통째로 받아 갈라 적는다.** `_` 로 접으면 갈래를 더하는 날 새 갈래가 말없이
+/// "안 물었다" 로 서고, 그것이 이 이슈가 없앤 바로 그 자리다.
+fn unchecked_said(lang: Lang, kind: crate::latest::Trouble) -> &'static str {
+    use crate::latest::Trouble;
+    match kind {
+        Trouble::NotAsked => say(lang, "tui.version.unchecked"),
+        Trouble::Offline => say(lang, "tui.version.unchecked.offline"),
+        Trouble::Timeout => say(lang, "tui.version.unchecked.timeout"),
+        Trouble::RateLimited => say(lang, "tui.version.unchecked.rate_limited"),
+        Trouble::Http => say(lang, "tui.version.unchecked.http"),
+        Trouble::Tls => say(lang, "tui.version.unchecked.tls"),
+        Trouble::Garbled => say(lang, "tui.version.unchecked.garbled"),
+        Trouble::OddTag => say(lang, "tui.version.unchecked.odd_tag"),
+        Trouble::Failed => say(lang, "tui.version.unchecked.failed"),
+    }
 }
 
 /// 몸통을 목록과 상세로 가른다 — `(목록, 상세)`.
@@ -2132,7 +2192,9 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 안 나오는 까닭은 이 패널 말고는 어디에도 안 적힌다 — 낱말은 CLI 상세와
     // 같은 자리(`view::deferred_for`)에서 받는다. **물려받은 미룸도** 같이 받는다 —
     // 미룬 에픽의 멤버에 표가 없으면 그 까닭이 여기서도 빈다.
-    if let Some(d) = crate::view::deferred_for(i, site.index.deferred_root(&i.id), &site.now, site.lang) {
+    // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 이 패널이 `ready` 에 안 나오는 까닭을 대는 유일한
+    // 자리라, 접은 지도를 짚어 같은 id 의 뒷줄 답을 대면 안 일어난 일을 설명한다.
+    if let Some(d) = crate::view::deferred_for(i, site.index.shelved_at(idx), &site.now, site.lang) {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
     }
@@ -2165,7 +2227,12 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming),
         ));
     }
-    if let Some(id) = &i.epic {
+    // **적은 줄이 없어도 선 에픽은 댄다**(리뷰) — 바로 밑 마일스톤 줄과 같은 까닭(moai-9yrv).
+    // 계획이 세우는 멤버는 소속을 id 에 지고 `epic` 을 안 적으므로(moai-exh7), 적힌 값만 보면
+    // 트리는 그 줄을 에픽 밑에 그리는데 패널은 입을 다문다 — 한 화면의 두 쪽이 서로 다른 말을
+    // 한다. 적힌 것이 먼저다: 끊긴 참조를 `titled` 가 표로 대는 것은 그쪽뿐이고, 물려받은 값으로
+    // 덮으면 고칠 곳이 화면에서 사라진다.
+    if let Some(id) = i.epic.as_deref().or_else(|| site.index.epic_of(idx)) {
         let (mark, title) = titled(site, id);
         fields.push((say(site.lang, "tui.about.epic").into(), mark, title));
     }
@@ -2255,6 +2322,28 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             }
         };
         fields.push((label.into(), mark, text));
+    }
+    // **기한도 CLI 상세와 같은 자다**(moai-tlpv) — 글을 짓는 것은 `view::due_of` 하나고 여기는
+    // 조각을 잇기만 한다. 한때 이 패널에는 `due_on`·`starts_on` 이 어디에도 없어, `--due` 를 친
+    // 사람이 그 줄을 탐색기로 펼치면 아무것도 안 섰다. **적힌 날짜는 시간대로 안 옮긴다** — 달력의
+    // 날이라 옮길 시각이 없고, 옮기는 것은 "며칠 남았나" 를 재는 쪽이다(moai-h2th).
+    //
+    // **시각 줄 위에 선다** — CLI 상세와 같은 차례다(`view::detail`). 생성·수정·시작·끝은 도구가
+    // 적은 때고 이것은 사람이 잡은 계획이라, 섞어 세우면 넷 가운데 하나가 사람의 값인 것이 안 보인다.
+    //
+    // **색으로 가르지 않는다.** 지난 것은 `(2일 지남)` 이라는 낱말이 말하고, 이 패널의 값 칸은
+    // 어느 줄도 제 색을 안 입는다(`field`) — 여기만 칠하면 칠을 받는 자를 하나 더 열게 된다.
+    //
+    // **그래서 낱말이 날짜 앞에 선다**(리뷰) — CLI 상세는 뒤에 다는데, 그쪽은 잘릴 일이 없고 여기는
+    // [`field`] 가 값을 **오른쪽부터** 자른다. 80칸 창의 상세 패널(안쪽 폭 30)에서 `2026-09-05 →
+    // 2026-09-20  (2일 지남)` 은 넘쳐, 뒤에 달면 지났다는 것을 말하는 **유일한** 말이 통째로 사라진다
+    // — 칠이 없으니 남는 단서도 없다. 미룬 막음 줄이 같은 까닭으로 같은 자리를 고른다(moai-2sea.tns).
+    if let Some(due) = crate::view::due_of(i, &site.now, zone, site.lang) {
+        let text = match due.left {
+            Some(word) => format!("{word}  {}", due.span),
+            None => due.span,
+        };
+        fields.push((say(site.lang, "tui.about.due").into(), None, text));
     }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
@@ -2458,6 +2547,34 @@ fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
         })
         .collect();
     out.push(Line::from(counts));
+
+    // **마일스톤에만 든 시간을 곁들인다**(moai-tlpv) — `moai show <마일스톤>` 이 멤버 줄 밑에
+    // 세우는 그 줄이고(moai-wfup), 세는 자도 글을 짓는 자도 그쪽과 하나다(`report::spent_in`·
+    // `view::spend_of`). 에픽의 기간은 아직 묻는 자리가 아니다.
+    //
+    // **멤버는 위에서 이미 고른 것을 쓴다** — 여기서 다시 물으면 한 프레임에 소속 지도가 두 벌
+    // 선다. `progress.work` 는 `is_work` 로 거른 것이고 `spent_in` 이 세는 것도 그 줄들이다.
+    // 닫힌 멤버가 없으면 줄을 안 세운다: 아직 아무것도 안 끝난 마일스톤의 `0분` 은 "0분에 했다"
+    // 로 읽히는데, 그것은 안 한 것이지 0 분이 아니다.
+    //
+    // **닫힌 멤버가 없으면 세지도 않는다**(리뷰) — `spend_of` 는 `closed == 0` 에서 바로 `None` 인데,
+    // 그때까지 `spent_in` 이 멤버를 베끼고 id 로 정렬하고 집합을 짓는다. 그 값은 위에서 이미 손에
+    // 있다(`progress.done` 은 `spent_in` 의 `closed` 와 **같은 줄을 같은 잣대로** 센다) — 프레임마다
+    // 도는 자리라 공짜로 있는 문을 안 쓸 까닭이 없다.
+    let stone = e.at().is_some_and(|at| site.issues.get(at).is_some_and(|i| i.kind == crate::model::Kind::Milestone));
+    if stone && done > 0 {
+        let members: Vec<&crate::model::Issue> = work.iter().map(|&at| &site.issues[at]).collect();
+        if let Some(said) = crate::view::spend_of(&crate::report::spent_in(&members), site.lang) {
+            let label = Span::styled(format!("{}  ", say(site.lang, "tui.about.spent")), dim());
+            out.push(Line::from(match said {
+                // 잰 것이 없다는 말은 **한 벌로** 흐리게 선다 — 합계 자리에 설 수가 없다.
+                crate::view::Spend::Unmeasured(text) => vec![label, Span::styled(text, dim())],
+                crate::view::Spend::Measured { total, of } => {
+                    vec![label, Span::raw(total), Span::styled(format!("  {of}"), dim())]
+                }
+            }));
+        }
+    }
     out
 }
 
@@ -2570,7 +2687,7 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             }
             // 못 읽은 워크트리도 `!` 를 세운다 — 한눈 보기가 그것을 `옆 워크트리 문제` 로 세는데
             // 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
-            if sum.warnings > 0 || sum.unreadable > 0 || sum.unread > 0 {
+            if surfaced(app, &sum.warnings) > 0 || sum.unreadable > 0 || sum.unread > 0 {
                 spans.push(Span::styled(" !", from_anstyle(style::WARN)));
             }
             // **알림은 흐린 `+` 에 수를 붙여 선다**(moai-prdh) — 보드의 글리프와 같은 자다
@@ -2609,6 +2726,20 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
     }
     spans.push(Span::styled(format!("  {}", crate::text::one_line(&p.path.display().to_string())), dim()));
     fit(Line::from(spans), room)
+}
+
+/// **드러난 것의 수** — 든 셈에 이 프레임의 달로 잰 기한을 더한다(moai-fgjj).
+///
+/// **[`Surfaced`] 를 받는다**(moai-ynd6). 한때 `&Summary` 를 받아, 같은 것을 재는 배너가 이것을
+/// 못 쓰고 제 손으로 `(&app.site.now, &app.zone)` 짝을 또 골랐다 — 시계를 고르는 자리가 그리는
+/// 쪽에 셋이었다. `Surfaced::count` 의 문서가 내다본 다음 고침(`crate::model::now()` 로 바꿔
+/// 60초 틈을 없애는 것)을 하는 사람이 문서가 "한 자리" 라 부른 그 함수만 고치면, 자정을 넘긴
+/// 화면에서 배너는 낡은 `site.now` 로 "드러난 것 1건" 을 대고 층의 줄은 새 시계로 `!` 를 안
+/// 세운다(moai-fgjj 가 세워진 그 증상이다).
+///
+/// 서명이 `&Summary` 였던 까닭은 시험 전용 import 하나였다 — 그 `#[cfg(test)]` 를 걷었다.
+fn surfaced(app: &App, counted: &Surfaced) -> usize {
+    counted.count(&app.site.now, &app.zone)
 }
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
@@ -2671,15 +2802,16 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             out.push(Line::from(""));
             // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
-            if sum.warnings == 0 && sum.unread == 0 {
+            let n = surfaced(app, &sum.warnings);
+            if n == 0 && sum.unread == 0 {
                 out.push(Line::from(vec![
                     Span::styled("✓", status("done")),
                     Span::raw(say(lang, "tui.place.nothing_surfaced")),
                 ]));
-            } else if sum.warnings > 0 {
+            } else if n > 0 {
                 out.push(Line::from(vec![
                     Span::styled("!", from_anstyle(style::WARN)),
-                    Span::raw(fill(say(lang, "tui.place.surfaced"), &[("n", &sum.warnings.to_string())])),
+                    Span::raw(fill(say(lang, "tui.place.surfaced"), &[("n", &n.to_string())])),
                 ]));
             }
             // **자리 없는 줄은 낱말로 따로 댄다**(moai-p3bs). 위의 수에 이미 들었지만, 죽은
@@ -3129,6 +3261,7 @@ fn priority(p: u8) -> Style {
 pub(super) mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::latest::Trouble;
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path;
     use ratatui::Terminal;
@@ -4685,6 +4818,69 @@ pub(super) mod tests {
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
     }
 
+    /// **상세가 기한과 든 시간을 낸다**(moai-tlpv) — CLI 상세와 **같은 자**로 짓는다
+    /// (`view::due_of`·`view::spend_of`). 한때 이 패널에는 `due_on`·`starts_on`·`spent` 가
+    /// 어디에도 없어, `moai edit <마일스톤> --due` 를 친 사람이 그 줄을 탐색기로 펼치면 아무것도
+    /// 안 섰다 — 적히기만 하고 어느 화면에도 안 서는 값은 틀려도 아무도 모른다(moai-38mh).
+    ///
+    /// **든 시간은 마일스톤에만 선다.** 에픽의 기간은 아직 묻는 자리가 아니다(moai-wfup).
+    #[test]
+    fn detail_draws_the_deadline_and_what_the_milestone_spent() {
+        let mut stone = Issue::new(
+            "argos-0001".into(),
+            "v0.1".into(),
+            Kind::Milestone,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        stone.starts_on = Some("2026-09-05".into());
+        stone.due_on = Some("2026-09-20".into());
+        let mut closed = Issue::new(
+            "argos-0002".into(),
+            "닫힌 멤버".into(),
+            Kind::Issue,
+            Status::new("done"),
+            "2026-09-01T00:00:00Z",
+        );
+        closed.milestone = Some("argos-0001".into());
+        closed.started_at = Some("2026-09-05T00:00:00Z".into());
+        closed.done_at = Some("2026-09-05T02:30:00Z".into());
+        let mut open =
+            Issue::new("argos-0003".into(), "선 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        open.milestone = Some("argos-0001".into());
+
+        let mut a = every(vec![stone, closed, open]);
+        // **시계를 못박는다** — 안 박으면 `(N일 남음)` 이 돌리는 날마다 달라진다.
+        a.site.now = "2026-09-11T00:00:00Z".into();
+        a.see();
+        let pane = about_text(&render(&mut a, 160, 24));
+        assert!(pane.contains("2026-09-05 → 2026-09-20"), "적힌 두 날이 없다\n{pane}");
+        assert!(pane.contains("(9일 남음)"), "남은 날수가 없다\n{pane}");
+        // 든 시간은 닫힌 멤버 하나에서 온다 — 2시간 30분.
+        assert!(pane.contains("2시간 30분"), "든 시간이 없다\n{pane}");
+        assert!(pane.contains("중앙값"), "몇을 쟀는지를 안 댄다\n{pane}");
+
+        // **좁은 창에서도 남은 날수가 남는다**(리뷰) — 값은 오른쪽부터 잘리고(`field`) 이 줄은 색을
+        // 안 입으므로, 낱말이 뒤에 서면 80칸에서 지났다는 것을 말하는 유일한 단서가 통째로 사라진다.
+        let narrow = about_text(&render(&mut a, 80, 24));
+        assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
+
+        // **에픽에는 든 시간도 기한도 안 낸다**(moai-x04r.fn4). 쓰기는 마일스톤 아닌 줄에
+        // `due_on` 을 거절하므로(`Issue::check`) 여기 서는 값은 손으로 푼 충돌이나 머지가
+        // 안 건드리고 넘긴 낡은 줄뿐인데, 그리면 보드와 이 패널이 한 줄을 다르게 읽는다.
+        let mut epic = issues();
+        epic[0].due_on = Some("2026-09-20".into());
+        let mut a = every(epic);
+        a.site.now = "2026-09-11T00:00:00Z".into();
+        a.see();
+        let pane = about_text(&render(&mut a, 160, 24));
+        // **없다는 것만 재지 않는다**(리뷰) — 밑의 둘은 아니라는 말뿐이라, 이 패널이 아예 안
+        // 그려졌거나 커서가 딴 줄에 섰어도 둘 다 지난다. 그 에픽을 그렸다는 것부터 박는다.
+        assert!(pane.contains("argos-0001"), "에픽의 상세가 안 그려졌다\n{pane}");
+        assert!(!pane.contains("2026-09-20"), "마일스톤 아닌 줄에 기한이 섰다\n{pane}");
+        assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
+    }
+
     /// **상세가 그 줄에 닿은 커밋을 그린다**(moai-a4i0) — CLI 상세와 같은 자로: 트래커 커밋은
     /// 빼고, 해시는 일곱 자, 제목의 제어문자는 걷는다. 표가 없는 줄은 칸도 없다.
     #[test]
@@ -4762,14 +4958,14 @@ pub(super) mod tests {
     #[test]
     fn a_write_notice_survives_eighty_columns_beside_the_standing_banner() {
         let mut a = app();
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.unreadable = vec![None; 2];
         a.notice = Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다".into());
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다"), "{}", lines.join("\n"));
         assert!(lines.iter().all(|l| crate::text::width(l) <= 80));
 
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         a.site.unreadable.clear();
         assert_eq!(banner(&a), Some((" ✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다 ".into(), false)));
         // 다시 읽기가 실패했으면 실패가 앞에 선다.
@@ -4778,13 +4974,54 @@ pub(super) mod tests {
         assert!(urgent && text.find("다시 읽지").unwrap() < text.find("담김").unwrap(), "{text}");
     }
 
+    /// **프로젝트 층의 `+N` 은 들어가면 짝이 있다**(moai-k6ff, 2026-09-22 사용자 결정). 알림 수를 대는
+    /// 줄에서 Enter 를 치면 그 화면의 배너가 같은 수를 댄다 — 한때 안쪽에 그 짝이 없어 `+3` 이 선
+    /// 줄로 들어가면 아무 말도 없는 화면이 섰다.
+    ///
+    /// **경고와 낱말로 갈린다** — 알림만 있는 것은 고칠 것이 없다는 뜻이라, 수만 같고 낱말이
+    /// 같으면 담아 둔 것이 경고로 읽힌다. **80·100·120 을 다 본다**: 배너에 낱말이 하나 더 들어
+    /// 좁은 창에서 먼저 잘리는 자리다.
+    ///
+    /// **머리의 `!` 도 잰다**(리뷰) — 낱말만 보던 때는 `! + 알림 3건` 이 이 줄을 그대로 지나갔다.
+    /// 그 `!` 는 경고의 글리프고, 같은 수를 `view::status` 는 `✓ 드러난 문제 없다` 와 흐린 `+` 로
+    /// 낸다 — 설치를 한 번도 안 맞춘 저장소에서 세션 내내 서므로 멀쩡한 저장소가 깨진 것으로
+    /// 읽혔다. 경고가 함께 서면 그때는 `!` 가 맞다.
+    #[test]
+    fn the_banner_names_the_notices_the_layer_counted() {
+        let mut a = app();
+        a.notice = None;
+        a.site.warnings = Surfaced::flat(0);
+        a.site.notices = 3;
+        let (text, urgent) = banner(&a).expect("알림만 있는데 배너가 아무 말도 안 한다");
+        assert!(text.contains("알림 3건"), "{text}");
+        assert!(!text.contains("드러난 것"), "알림을 경고의 낱말로 댔다 — {text}");
+        assert!(!urgent, "알림 하나에 급한 색이 섰다");
+        assert!(!text.contains('!'), "알림만 선 배너가 경고의 `!` 를 이고 섰다 — {text}");
+
+        // 경고와 함께 서면 경고가 앞이고, 그때는 `!` 가 머리에 선다 — 고칠 것이 먼저다.
+        a.site.warnings = Surfaced::flat(4);
+        let (text, _) = banner(&a).expect("배너가 안 섰다");
+        assert!(text.find("드러난 것").unwrap() < text.find("알림 3건").unwrap(), "{text}");
+        assert!(text.starts_with(" ! "), "경고가 섰는데 `!` 가 빠졌다 — {text}");
+
+        for w in [80, 100, 120] {
+            let lines = render(&mut a, w, 12);
+            assert!(lines[1].contains("알림 3건"), "{w}칸에서 알림 수가 잘렸다 — {:?}", lines[1]);
+            assert!(lines.iter().all(|l| crate::text::width(l) <= w.into()), "{w}칸을 넘겼다");
+        }
+
+        a.site.notices = 0;
+        let (text, _) = banner(&a).expect("경고가 있는데 배너가 안 섰다");
+        assert!(!text.contains("알림"), "알림이 0인데 줄이 섰다 — {text}");
+    }
+
     /// **층이 안 선 까닭은 80칸에서도 까닭째 선다**(moai-4t1l). 그 글은 까닭이 꼬리라,
     /// 경고 한 줄 뒤에 세우면 잘려 "층을 안 세웠다" 만 남고 무엇을 고칠지가 사라진다 —
     /// 고칠 것을 아는 자리가 이 한 줄뿐이다.
     #[test]
     fn the_reason_the_layer_is_missing_survives_eighty_columns() {
         let mut a = app();
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
         a.unlayered = Some("사용자 설정을 못 읽어 프로젝트 층을 안 세웠다 — TOML 이 깨졌다".into());
         assert!(a.layer.is_none(), "시험의 전제 — 층이 없다");
@@ -4806,7 +5043,7 @@ pub(super) mod tests {
         use super::super::layer::At;
         let mut a = layered(At::Layer);
         a.notice = None;
-        a.site.warnings = 4;
+        a.site.warnings = Surfaced::flat(4);
         a.site.elsewhere = vec!["옆 워크트리 하나를 못 읽었다 — 스냅샷이 없다".into()];
         let said = "등록 줄 하나를 건너뛰었다 — /w/bent/.moai/config.toml 3번째 줄이 깨졌다";
         a.layer.as_mut().expect("층이 있다").problems = vec![said.into()];
@@ -5451,7 +5688,7 @@ pub(super) mod tests {
         assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
         let same = said(Seen::Same);
         let ahead = said(Seen::Ahead);
-        let unasked = said(Seen::Unasked);
+        let unasked = said(unasked_for(Trouble::NotAsked));
         for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
         {
             assert!(head.contains(&format!("Version : {mine}")), "{what} 에서 내 판이 사라졌다\n{head}");
@@ -5469,14 +5706,71 @@ pub(super) mod tests {
         }
     }
 
+    /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
+    fn unasked_for(kind: Trouble) -> crate::latest::Seen {
+        crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
+    }
+
+    /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은
+    /// 사람이 할 일이 다르므로, 같은 "못 물었다" 로 접으면 그 사람이 무엇을 고칠지 모른다.
+    ///
+    /// **그래도 어느 갈래도 아무것도 안 막는다** — 넷째 글이 갈렸을 뿐 판 줄은 여전히 줄
+    /// 하나고, 갈래마다 내 판이 그 줄에 그대로 선다.
+    #[test]
+    fn every_reason_for_not_asking_is_its_own_line() {
+        let mine = env!("CARGO_PKG_VERSION");
+        let said = |kind, width| {
+            let mut a = app();
+            a.set_latest(unasked_for(kind));
+            let lines = render(&mut a, width, 24);
+            lines[..6].join("\n")
+        };
+        let all = [
+            Trouble::NotAsked,
+            Trouble::Offline,
+            Trouble::Timeout,
+            Trouble::RateLimited,
+            Trouble::Http,
+            Trouble::Tls,
+            Trouble::Garbled,
+            Trouble::OddTag,
+            Trouble::Failed,
+        ];
+        let cut = |head: &str| {
+            head.lines()
+                .find(|l| l.contains("Version"))
+                .map(|l| l.split("Version").nth(1).unwrap_or("").trim().to_string())
+        };
+        let mut lines = Vec::new();
+        for kind in all {
+            let head = said(kind, 100);
+            assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
+            lines.push((kind, cut(&head).unwrap_or_else(|| panic!("{kind:?}: 판 줄을 못 찾았다"))));
+        }
+        for (i, (ka, a)) in lines.iter().enumerate() {
+            for (kb, b) in &lines[i + 1..] {
+                assert_ne!(a, b, "{ka:?} 와 {kb:?} 가 같은 글로 선다");
+            }
+        }
+        // **좁은 창에서도 까닭이 안 잘린다**(리뷰). 괄호 안의 까닭이 길어 로고가 빠지는 폭이
+        // 있는데(`header` 의 `with_logo`), 거기서 까닭까지 `…` 로 잘리면 이 갈래를 나눈 뜻이
+        // 없어진다 — 로고를 무르고 글을 지키는 것이 이 헤더의 자다. 80칸은 가장 흔한 폭이다.
+        for kind in all {
+            let head = said(kind, 80);
+            let line = cut(&head).unwrap_or_else(|| panic!("{kind:?}: 80칸에서 판 줄을 못 찾았다"));
+            assert!(!line.contains('…'), "{kind:?} 의 까닭이 80칸에서 잘렸다 — {line}");
+            assert!(head.contains(&format!("Version : {mine}")), "{kind:?} 에서 내 판이 사라졌다\n{head}");
+        }
+    }
+
     /// **묻는 일은 그리는 걸음에 안 실린다**(moai-3gia) — 그리는 함수는 `App` 이 받아 둔 답을
     /// 읽기만 한다. 실을 띄우는 자는 `cmd::tui` 하나고, 그리기는 그것을 안 만진다.
     #[test]
     fn drawing_never_asks_the_grid() {
         let mut a = app();
-        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "여는 값이 못 물었다가 아니다");
+        assert_eq!(*a.latest(), unasked_for(Trouble::NotAsked), "여는 값이 못 물었다가 아니다");
         let _ = render(&mut a, 100, 24);
-        assert_eq!(*a.latest(), crate::latest::Seen::Unasked, "그리는 걸음이 값을 바꿨다");
+        assert_eq!(*a.latest(), unasked_for(Trouble::NotAsked), "그리는 걸음이 값을 바꿨다");
     }
 
     /// **누군지 몰라도 헤더는 서고 묻지 않는다**(moai-56jf). 읽기는 사람을 묻지 않는다 —
@@ -5736,7 +6030,7 @@ pub(super) mod tests {
                     title: "집은 멤버".into(),
                     column: "in_progress".into(),
                 }],
-                warnings: 2,
+                warnings: Surfaced::flat(2),
                 notices: 0,
                 stranded: 0,
                 unread: 0,
@@ -5757,6 +6051,77 @@ pub(super) mod tests {
             at,
         ));
         a
+    }
+
+    /// **시간대를 바꾸면 배너와 층의 줄이 다음 프레임에 함께 따라온다**(moai-fgjj, 2026-09-23 사용자
+    /// 결정) — **다시 읽지 않는다.**
+    ///
+    /// 셈은 시간대 없이 한 번만 돌고(`warnings_in`), 기한 판정은 그리는 걸음이 그때의 시간대로 한다
+    /// ([`super::Surfaced::count`]). 접어서 들던 때는 `SPC o t` 뒤로 배너는 다시 세어 고쳐졌지만
+    /// (그때의 `recount`, 지금 `App::count_all`) 프로젝트 층의 `+N` 은 쓸기가 다시 돌 때까지 최대
+    /// 60초 옛 달로 섰고, 쓸기가 도는 중이었으면 그 답이 옛 판정으로 덮으며 시계까지 다시
+    /// 찍었다(리뷰 moai-pmhv.x3r 6·8번).
+    ///
+    /// **문턱을 넘나드는 기한으로 잰다** — 시간대가 옮기는 것은 하루뿐이라, 지남·다가옴 사이가
+    /// 아니라 `status_due_days`(3) 밖과 안 사이를 걸쳐야 **수**가 움직인다. 같은 줄이 UTC 에서는
+    /// 나흘 남아 조용하고 서울에서는 사흘 남아 선다.
+    #[test]
+    fn a_zone_change_moves_the_counted_deadline_on_the_next_frame() {
+        use super::super::layer::{At, Look};
+        // 서울에서는 09-12 05:00 이고 UTC 로는 아직 09-11 이다.
+        let now = "2026-09-11T20:00:00Z";
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").expect("설정이 안 선다");
+        let mut stone = crate::model::Issue::new(
+            "argos-0001".into(),
+            "마일스톤".into(),
+            crate::model::Kind::Milestone,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        stone.due_on = Some("2026-09-15".into());
+        let mut inside = crate::model::Issue::new(
+            "argos-0002".into(),
+            "멤버".into(),
+            crate::model::Kind::Issue,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        // 소속을 다 채운다 — `no_epic`·`no_milestone` 이 서면 기한 말고 다른 것이 수를 올려,
+        // 이 시험이 무엇을 재는지 알 수 없다.
+        inside.epic = Some("argos-0003".into());
+        let mut epic = crate::model::Issue::new(
+            "argos-0003".into(),
+            "에픽".into(),
+            crate::model::Kind::Epic,
+            crate::model::Status::new("todo"),
+            now,
+        );
+        epic.milestone = Some("argos-0001".into());
+        let issues = vec![stone, inside, epic];
+        let counted = super::super::warnings_of(&issues, &[], &cfg, now);
+        assert_eq!(counted.count(now, crate::tz::Zone::stored()), 0, "전제: UTC 에서 벌써 선다");
+        assert_eq!(counted.count(now, &seoul), 1, "전제: 서울에서도 안 선다 — 이 시험이 헛돈다");
+
+        let mut a = layered(At::Layer);
+        a.site.now = now.to_string();
+        let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else { panic!("one 이 안 열렸다") };
+        sum.warnings = counted.clone();
+        a.site.warnings = counted;
+
+        // UTC 로 선 화면 — 아직 아무 말도 없다.
+        let quiet = render(&mut a, 80, 22);
+        let screen = quiet.join("\n");
+        assert!(!screen.contains("드러난 것"), "UTC 에서 기한이 벌써 섰다\n{screen}");
+        let row = |lines: &[String]| lines.iter().find(|l| l.contains("one/")).expect("one 의 줄이 없다").clone();
+        assert!(!row(&quiet).contains(" !"), "UTC 에서 층의 줄이 벌써 `!` 를 세웠다 — {:?}", row(&quiet));
+
+        // 시간대만 바꾼다. 다시 읽지 않고, 셈도 다시 돌지 않는다.
+        a.zone = seoul;
+        let moved = render(&mut a, 80, 22);
+        let screen = moved.join("\n");
+        assert!(screen.contains("드러난 것 1건"), "시간대를 바꿨는데 배너가 옛 달로 선다\n{screen}");
+        assert!(row(&moved).contains(" !"), "시간대를 바꿨는데 층의 줄이 옛 달로 선다 — {:?}", row(&moved));
     }
 
     /// **한눈 보기의 남의 줄도 제 프로젝트의 것으로 그린다**(moai-m59y) — id·제목·칸 글리프가
@@ -5870,7 +6235,7 @@ pub(super) mod tests {
         a.site.issues.clear();
         a.site.index = crate::nav::Index::of(&[]);
         a.site.keep.clear();
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
         assert!(lines[0].starts_with("모든 프로젝트"), "{:?}", lines[0]);
@@ -5948,7 +6313,7 @@ pub(super) mod tests {
             let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else {
                 panic!("one 이 안 열렸다")
             };
-            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (warnings, stranded, unread, blind);
+            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (Surfaced::flat(warnings), stranded, unread, blind);
         };
 
         set(&mut a, 1, 1, 0, 0);
@@ -6003,7 +6368,7 @@ pub(super) mod tests {
                 panic!("one 이 안 열렸다")
             };
             // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
-            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (0, 0, 0, 0, notices);
+            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, 0, notices);
         };
 
         set(&mut a, 3);
@@ -7487,7 +7852,7 @@ pub(super) mod tests {
                     title: "첫 줄\n둘째\t줄".into(),
                     column: "in_progress".into(),
                 }],
-                warnings: 0,
+                warnings: Surfaced::flat(0),
                 notices: 0,
                 stranded: 0,
                 unread: 0,
@@ -7513,7 +7878,7 @@ pub(super) mod tests {
         a.site.issues.clear();
         a.site.index = crate::nav::Index::of(&[]);
         a.site.keep.clear();
-        a.site.warnings = 0;
+        a.site.warnings = Surfaced::flat(0);
         a.cursor = 0;
         assert!(a.rows().is_empty(), "빈 프로젝트 뿌리에 줄이 섰다 — `..` 은 디렉터리에만 선다");
         let lines = render(&mut a, 60, 10);
@@ -7829,7 +8194,7 @@ mod bench {
         // 거름망 한 번 — 키마다 도는 자리다. 옛 길(`Where::of`)과 견준다.
         let t = std::time::Instant::now();
         for _ in 0..10 {
-            let _ = ground.here();
+            let _ = ground.here(&issues);
         }
         println!("Ground::here 한 번 {:?}", t.elapsed() / 10);
         let t = std::time::Instant::now();
