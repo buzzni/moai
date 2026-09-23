@@ -998,3 +998,7 @@
 {"ts":"2026-09-23T00:02:43Z","id":"moai-0s1h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uave 에서 펼쳤다 — 릴리스 캐시가 태그 빌드에서 안 맞는다 — 캐시는 릴리스를 낸 ref 와 기본 가지에서만 읽힌다"}
 {"ts":"2026-09-23T00:02:43Z","id":"moai-uave","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-0s1h 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-23T00:03:09Z","id":"moai-ik77","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T00:09:35Z","id":"moai-0s1h.1v7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 릴리스 캐시를 걷은 판"}
+{"ts":"2026-09-23T00:09:40Z","id":"moai-0s1h.1v7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T00:09:57Z","id":"moai-0s1h.1v7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review high --fix 가 뒤에서 돌고 있다. 끝나면 원문을 노트로 남기고, 고친 것과 넘긴 것을 적어 닫는다"}
+{"ts":"2026-09-23T00:10:00Z","id":"moai-ik77","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-0s1h 의 b72c867 에 고침이 서 있다. 리뷰 moai-0s1h.1v7 이 끝나면 develop 에 머지하고 닫는다"}
