@@ -334,7 +334,19 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   on its own missing permission stops every tool call in the session. A hook that
   ran and then failed keeps its silence: it has already written its own answer to
   stdout, and a second line appended there would throw that answer — a refusal
-  included — away.
+  included — away. The notice now covers **every exit that is not 0 or 1**, not
+  just the two the shell gives: the 2 an older binary answers an event name it
+  does not know with, the 101 of a panic, the 128+N of a signal. Two of those can
+  arrive *after* the answer is already on its way, so the line no longer decides
+  by the exit code alone — it holds what the binary wrote and speaks only when
+  that was empty, passing the answer through untouched otherwise. Measured against
+  the real client: two JSON objects on one hook's stdout are **both** discarded, so
+  a refusal printed just before a panic used to let through the very write it
+  refused. moai helps from its own side by putting its output last, after the
+  lines it writes to stderr, which leaves a panic no room to land between the two.
+  The notice stands **once per session** for each binary, event and exit code, so a
+  hook that cannot run says so once rather than on all of a session's tool calls
+  (140 on average in this repository, 1,257 at the most).
 - `moai project ls` no longer reads the timezone database. It draws no time at all
   — it shows each project's column counts — but it asked for the reader's timezone
   anyway, so on a machine without zoneinfo (a static musl build on Alpine or
