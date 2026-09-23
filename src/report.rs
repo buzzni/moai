@@ -78,8 +78,10 @@ pub struct EpicLabels<'a> {
     /// 못 쓸 참조([`Misplace::Epic`])지 없는 참조가 아니라, 그때도 가리킨 줄의 제목을 댄다.
     /// [`EpicLabel::Gone`] 은 **그 id 의 줄이 이 파일에 없을 때**다.
     named: BTreeMap<&'a str, &'a str>,
-    /// 소속을 id 에 진 줄의 답([`groups`]).
-    placed: BTreeMap<&'a str, &'a str>,
+    /// 소속을 id 에 진 줄의 답([`groups`]). **든 꼴 그대로 나른다**([`Kinds`] 와 같은 결) —
+    /// 이 지도를 이미 든 쪽(`query::Where`)이 제목만 얹으려고 `groups` 를 한 벌 더 짓지
+    /// 않게 한다(moai-jk2u.pl6).
+    placed: Placing<'a>,
     /// 가려진 줄을 가르는 지도([`Kinds`]).
     kinds: Kinds<'a>,
 }
@@ -89,7 +91,7 @@ impl<'a> EpicLabels<'a> {
     ///
     /// 묶음 줄도, 가려진 줄도 여기서 `None` 이다 — 판정은 [`stands_in`] 하나가 한다.
     pub fn at<'s>(&'s self, i: &'s Issue) -> Option<EpicLabel<'s>> {
-        let epic = stands_in(&self.kinds, i, self.placed.get(i.id.as_str()).copied())?;
+        let epic = stands_in(&self.kinds, i, self.placed.at(i.id.as_str()))?;
         Some(self.named.get(epic).map_or(EpicLabel::Gone, |t| EpicLabel::Named(t)))
     }
 
@@ -97,16 +99,43 @@ impl<'a> EpicLabels<'a> {
     /// 답을 내고, 그 id 가 여기 없으면 [`EpicLabel::Gone`] 이다.
     #[cfg(test)]
     pub fn titled(named: BTreeMap<&'a str, &'a str>) -> EpicLabels<'a> {
-        EpicLabels { named, placed: BTreeMap::new(), kinds: Kinds::no_twins() }
+        EpicLabels { named, placed: Placing::Own(BTreeMap::new()), kinds: Kinds::no_twins() }
     }
 }
 
 /// [`EpicLabels`] 를 짓는다.
 pub fn epic_labels(all: &[Issue]) -> EpicLabels<'_> {
-    EpicLabels {
-        named: all.iter().map(|i| (i.id.as_str(), i.title.as_str())).collect(),
-        placed: groups(all),
-        kinds: Kinds::of(all),
+    EpicLabels { named: titles(all), placed: Placing::Own(groups(all)), kinds: Kinds::of(all) }
+}
+
+/// [`epic_labels`] 와 같은 것. 소속 지도와 종류 지도를 **빌려서** 짓는다 — `moai show` 와
+/// `moai ready` 는 바로 옆에서 거름망이 그 둘을 들고 있는데, 제목을 얹으려고 `groups` 와
+/// [`Kinds`] 를 한 벌씩 더 지었다(moai-jk2u.pl6).
+pub fn epic_labels_over<'a>(
+    all: &'a [Issue],
+    placed: &'a BTreeMap<&'a str, &'a str>,
+    kinds: Kinds<'a>,
+) -> EpicLabels<'a> {
+    EpicLabels { named: titles(all), placed: Placing::Kept(placed), kinds }
+}
+
+fn titles(all: &[Issue]) -> BTreeMap<&str, &str> {
+    all.iter().map(|i| (i.id.as_str(), i.title.as_str())).collect()
+}
+
+/// 소속 지도를 **든 꼴 그대로** — [`Kinds`] 와 같은 결이고 같은 까닭이다. 옮겨 담으면
+/// 줄마다 한 칸인 지도를 표면마다 한 벌씩 짓는다.
+enum Placing<'a> {
+    Own(BTreeMap<&'a str, &'a str>),
+    Kept(&'a BTreeMap<&'a str, &'a str>),
+}
+
+impl<'a> Placing<'a> {
+    fn at(&self, id: &str) -> Option<&'a str> {
+        match self {
+            Placing::Own(m) => m.get(id).copied(),
+            Placing::Kept(m) => m.get(id).copied(),
+        }
     }
 }
 
@@ -212,6 +241,11 @@ pub fn deferred_roots_over<'a>(
     epic_of: &BTreeMap<&'a str, &'a str>,
     mile_of: &BTreeMap<&'a str, &'a str>,
 ) -> BTreeMap<&'a str, &'a str> {
+    // 문은 여기에도 둔다 — [`Lines`] 를 이미 든 쪽이 부르므로 짓는 값은 안 아끼지만,
+    // 미룬 줄 없는 저장소에서 목록을 한 번 더 걷는 것은 그대로 아낀다.
+    if !all.iter().any(is_put_off) {
+        return BTreeMap::new();
+    }
     let shelf = Shelf::new(lines, epic_of, mile_of);
     let mut roots: BTreeMap<&str, &str> = all
         .iter()
@@ -219,8 +253,7 @@ pub fn deferred_roots_over<'a>(
         .filter_map(|i| shelf.nearest(i).map(|r| (i.id.as_str(), r)))
         .collect();
     // 계획에서 빠진 묶음이 없으면 멤버를 셀 것도 없다.
-    let shelved: Vec<&Issue> =
-        roots.keys().filter_map(|id| shelf.lines.at(id)).filter(|g| is_group(g)).collect();
+    let shelved: Vec<&Issue> = roots.keys().filter_map(|id| shelf.lines.at(id)).filter(|g| is_group(g)).collect();
     if !shelved.is_empty() {
         let members = members_in(all, epic_of, lines, &kinds(all));
         let done: Vec<&str> = shelved
@@ -310,7 +343,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
     /// 그 **줄** 제 미룸. 첫 걸음은 이것으로 묻는다 — 같은 id 를 든 줄 둘의 미룸이
     /// 갈리면 `by_id` 는 뒷줄만 들어, 미룬 앞줄이 안 미룬 뒷줄의 답을 입는다.
     fn own_line(&self, i: &'a Issue) -> Option<&'a str> {
-        is_put_off(i).then(|| i.id.as_str())
+        is_put_off(i).then_some(i.id.as_str())
     }
 
     /// id 로 짚은 줄의 미룸 — **조상에게만 쓴다.** 조상의 답은 그 조상 줄의 것이고,
@@ -421,14 +454,23 @@ impl<'a, 'm> Shelf<'a, 'm> {
 #[derive(Default)]
 pub struct Lines<'a> {
     by_id: BTreeMap<&'a str, &'a Issue>,
+    /// id → 그 id 를 **마지막으로 든 줄의 자리**. 줄마다 미리 잰 값을 조상에게서 도로
+    /// 찾는 자리가 쓴다([`under_lost`]) — 줄을 다시 재면 같은 판정을 두 번 친다.
+    seat: BTreeMap<&'a str, usize>,
     rooted: BTreeSet<&'a str>,
 }
 
 impl<'a> Lines<'a> {
     pub fn of(all: &'a [Issue]) -> Lines<'a> {
         let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+        let seat = all.iter().enumerate().map(|(k, i)| (i.id.as_str(), k)).collect();
         let rooted = rooted_thoughts(&by_id);
-        Lines { by_id, rooted }
+        Lines { by_id, seat, rooted }
+    }
+
+    /// 그 id 를 마지막으로 든 줄의 **자리**([`Lines::at`] 가 내는 그 줄이다).
+    fn seat(&self, id: &str) -> Option<usize> {
+        self.seat.get(id).copied()
     }
 
     /// 그 id 를 **마지막으로 든 줄** — 같은 id 가 둘이면 뒷줄이다. 조상을 짚는 자리가
@@ -544,8 +586,10 @@ pub fn claimed<'a>(issues: &'a [Issue], names: &'a BTreeSet<String>) -> impl Fn(
 /// 에픽 지도는 한 번만 짓는다 — [`milestones`] 는 제 안에서 `groups` 를 다시 짓는다. 이름 여럿을 같은
 /// 줄들에 잴 때(훅의 옆 이름과 모르는 줄, `hook::theirs`) 이 한 벌로 잰다.
 pub(crate) fn ties(issues: &[Issue]) -> (BTreeMap<&str, &str>, BTreeMap<&str, &str>) {
-    let epics = groups(issues);
-    let stones = milestones_in(issues, &epics);
+    // **[`Lines`] 도 한 벌이다**(moai-jk2u.pl6) — 따로 부르면 둘이 저마다 짓는다.
+    let lines = Lines::of(issues);
+    let epics = groups_over(issues, &lines);
+    let stones = milestones_over(issues, &epics, &lines);
     (epics, stones)
 }
 
@@ -1408,9 +1452,9 @@ pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a s
 /// 따로 안 든 쪽이 부른다 — 든 쪽(탐색기의 적재)은 [`Soil::stands`] 다.
 pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
     let lines = Lines::of(all);
-    let epic_of = groups(all);
+    let epic_of = groups_over(all, &lines);
     let mile_of = milestones_over(all, &epic_of, &lines);
-    let roots = deferred_roots_in(all, &epic_of, &mile_of);
+    let roots = deferred_roots_over(all, &lines, &epic_of, &mile_of);
     group_stands_in(all, cfg, &lines, &epic_of, &mile_of, &kinds(all), &roots)
 }
 
@@ -1867,8 +1911,9 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
         }
     }
     let kind_of: BTreeMap<&str, Kind> = issues.iter().map(|i| (i.id.as_str(), i.kind)).collect();
-    let epic_of = groups(issues);
-    for (&(kind, g), of) in &members_in(issues, &epic_of, &Lines::of(issues), &kind_of) {
+    let lines = Lines::of(issues);
+    let epic_of = groups_over(issues, &lines);
+    for (&(kind, g), of) in &members_in(issues, &epic_of, &lines, &kind_of) {
         if kind_of.get(g) == Some(&kind) {
             for m in of {
                 forward.entry(m.id.as_str()).or_default().push(g);
@@ -1903,15 +1948,20 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
 /// 차례는 물려받는 소속과 같다: 제 `epic` → 가까운 조상의 `epic` → 에픽인 조상.
 /// 받는 줄은 [`joins`] 뿐이다.
 pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    let rooted = rooted_thoughts(&by_id);
+    groups_over(all, &Lines::of(all))
+}
+
+/// [`groups`] 와 같은 것. [`Lines`] 를 이미 든 쪽이 그것을 두 번 짓지 않게 받는다
+/// (moai-jk2u.pl6, `지도는 한 벌이다` moai-g0zx).
+pub fn groups_over<'a>(all: &'a [Issue], lines: &Lines<'a>) -> BTreeMap<&'a str, &'a str> {
+    let (by_id, rooted) = (&lines.by_id, &lines.rooted);
     // **못 받은 줄도 지도를 쓴다** — `milestones` 와 같은 까닭이다. 받은 줄만 적으면
     // 같은 id 의 앞줄이 받은 에픽이 뒷줄에 흘러, 에픽 없는 뒷줄이 남의 에픽에
     // 그려지고 세어진다(moai-2m9p).
     let mut out = BTreeMap::new();
     let mut handed = Handed::new();
     for i in all {
-        match epic_through(i, &by_id, &rooted, &mut handed) {
+        match epic_through(i, by_id, rooted, &mut handed) {
             Some(e) => out.insert(i.id.as_str(), e),
             None => out.remove(i.id.as_str()),
         };
@@ -2623,19 +2673,30 @@ pub struct Soil<'a> {
 impl<'a> Soil<'a> {
     pub fn of(all: &'a [Issue]) -> Soil<'a> {
         let lines = Lines::of(all);
-        let epic = groups(all);
+        let epic = groups_over(all, &lines);
         let milestone = milestones_over(all, &epic, &lines);
         let roots = match all.iter().any(is_put_off) {
             true => deferred_roots_over(all, &lines, &epic, &milestone),
             false => BTreeMap::new(),
         };
         let kinds = kinds(all);
-        let lost = misplaced_in(all, &kinds, &epic, &lines);
+        // **판정은 줄마다 한 번이다**(moai-jk2u.pl6) — `lost` 는 그것을 id 로 접은 지도고
+        // (뒷줄이 이긴다), `folded` 는 줄마다의 값을 그대로 쓴다. 둘을 따로 재던 때는 같은
+        // 판정을 줄마다 두세 번 쳤다.
+        let verdict: Vec<Option<Misplace>> = all.iter().map(|i| misplace_of(i, &kinds, &epic, &lines)).collect();
+        let mut lost = BTreeMap::new();
+        for (i, m) in all.iter().zip(&verdict) {
+            // 같은 id 의 뒷줄이 이긴다 — [`misplaced_in`] 과 같은 차례다.
+            match m {
+                Some(m) => lost.insert(i.id.as_str(), *m),
+                None => lost.remove(i.id.as_str()),
+            };
+        }
         // 길 잃음은 `nav::Ctx::home` 과 같다 — 못 쓸 참조를 든 줄과 가려진 쌍둥이. **줄마다
-        // 묻는다**([`misplace_of`]) — `lost` 는 id 로 짠 지도라 같은 id 의 앞줄이 뒷줄의 판정을
-        // 입는데, 접는 자와 자리를 정하는 자는 그 줄의 것을 봐야 한다.
-        let folded =
-            under_lost(all, &epic, |i| misplace_of(i, &kinds, &epic, &lines).is_some() || is_eclipsed(&kinds, i));
+        // 묻는다** — `lost` 는 id 로 짠 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는데, 접는
+        // 자와 자리를 정하는 자는 그 줄의 것을 봐야 한다.
+        let adrift: Vec<bool> = all.iter().zip(&verdict).map(|(i, m)| m.is_some() || is_eclipsed(&kinds, i)).collect();
+        let folded = under_lost(all, &lines, &epic, &adrift);
         Soil { epic, milestone, roots, kinds, lost, folded, lines }
     }
 
@@ -2690,6 +2751,7 @@ pub fn misplaced(all: &[Issue]) -> BTreeMap<&str, Misplace> {
 }
 
 /// [`misplaced`] 와 같은 것. 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
+#[cfg(test)]
 pub fn misplaced_in<'a>(
     all: &'a [Issue],
     kind_of: &BTreeMap<&'a str, Kind>,
@@ -2761,35 +2823,41 @@ pub(crate) fn misplace_of<'a>(
 /// 부모가 넘기는 것과 같다. 생각인 부모는 뿌리로 올라갔거나 제가 길을 잃었으면(그려진
 /// 자리가 이슈 밑이 아니면) 아무것도 안 넘긴다. 자를 따로 두면 트리와 status 가 또 갈린다.
 /// 길 잃음은 부르는 쪽이 준다 — `nav::Ctx::home` 처럼 가려진 쌍둥이도 거기 든다.
+/// **판정은 미리 잰 값으로 받는다**(moai-jk2u.pl6). 술어로 받던 때는 `.any()` 한 번과 고리에서
+/// 한 번, 그리고 조상마다 또 한 번 쳐서 1만 줄에서 `misplace_of` 가 1만 번에서 2~3만 번이
+/// 됐다. `lost` 는 `all` 과 **자리가 같은** 배열이고, 조상은 [`Lines::seat`] 로 제 자리를 찾는다.
 pub fn under_lost<'a>(
     all: &'a [Issue],
+    lines: &Lines<'a>,
     epic_of: &BTreeMap<&'a str, &'a str>,
-    lost: impl Fn(&Issue) -> bool,
+    lost: &[bool],
 ) -> BTreeSet<&'a str> {
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-    // 길 잃은 줄이 없으면 그 밑에 접힐 줄도 없다 — 흔한 저장소에서 생각 지도를 안 세운다.
-    if !by_id.values().any(|i| lost(i)) {
+    debug_assert_eq!(all.len(), lost.len(), "판정이 줄과 자리를 맞춰야 한다");
+    // 길 잃은 줄이 없으면 그 밑에 접힐 줄도 없다.
+    if !lost.contains(&true) {
         return BTreeSet::new();
     }
-    let rooted = rooted_thoughts(&by_id);
+    // 조상의 판정 — `by_id` 가 고르는 뒷줄의 것이다. 자리를 못 찾으면 길을 안 잃은 것으로 친다
+    // (`by_id` 에 없는 id 는 아래 걸음이 이미 걸렀다).
+    let lost_at = |i: &Issue| lines.seat(i.id.as_str()).is_some_and(|k| lost[k]);
     let mut out = BTreeSet::new();
-    for i in all.iter().filter(|i| !lost(i)) {
+    for i in all.iter().enumerate().filter(|(k, _)| !lost[*k]).map(|(_, i)| i) {
         let mut cur = i;
         while let Some(p) = crate::id::parent_of(&cur.id)
-            .and_then(|p| by_id.get(p).copied())
+            .and_then(|p| lines.at(p))
             .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
         {
             // **소속은 줄마다 묻는다**(리뷰, [`joined_in`]) — `nav::Ctx::home_of_work` 가 같은
             // 물음을 `Ctx::epic_at` 으로 옮긴 자리다. 여기만 지도를 짚으면 접는 자와 그리는 자가
             // 갈려, 트리가 `(길 잃음)` 안에 그린 줄을 `no_epic` 이 밖에서 또 센다.
-            let passed = match is_idea(p) && (rooted.contains(p.id.as_str()) || lost(p)) {
+            let passed = match is_idea(p) && (lines.rooted.contains(p.id.as_str()) || lost_at(p)) {
                 true => None,
                 false => joined_in(p, || epic_of.get(p.id.as_str()).copied()),
             };
             if joined_in(cur, || epic_of.get(cur.id.as_str()).copied()) != passed {
                 break;
             }
-            if lost(p) {
+            if lost_at(p) {
                 out.insert(i.id.as_str());
                 break;
             }
@@ -2852,7 +2920,7 @@ pub fn rollup_in(issues: &[Issue], cfg: &Config, soil: &Soil<'_>) -> Vec<Roll> {
 #[cfg(test)]
 pub fn rollup_of(kind: Kind, issues: &[Issue], cfg: &Config) -> Vec<Roll> {
     let lines = Lines::of(issues);
-    let epic_of = groups(issues);
+    let epic_of = groups_over(issues, &lines);
     let kind_of = kinds(issues);
     // 종류 지도는 한 벌이다 — `eclipsed(issues)` 는 제 안에서 또 하나 짓는다.
     rollup_of_in(issues, cfg, &Placed::of(kind, &epic_of, &lines), &|i: &Issue| is_eclipsed(&kind_of, i))
@@ -3034,14 +3102,14 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
     // **소속 지도는 한 벌이다**([`ties`]) — 에픽 지도와 마일스톤 지도를 따로 부르면 뒤의 것이
     // 앞의 것을 제 안에서 다시 짓는다.
     let lines = Lines::of(issues);
-    let group = groups(issues);
+    let group = groups_over(issues, &lines);
     let mile_of = milestones_over(issues, &group, &lines);
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **막음과 차례가 한 번의 셈을 쓴다.** 끝나가는지를 롤업으로 따로 재면 미룬 멤버를 세는
     // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
     // 늘어나는 셈은 없다. **도는 마일스톤도 같은 셈에서 읽는다** — 따로 재면 `ready` 가 빼는
     // 자와 `status` 가 비추는 자가 갈린다.
-    let roots = deferred_roots_in(issues, &group, &mile_of);
+    let roots = deferred_roots_over(issues, &lines, &group, &mile_of);
     let kind_of = kinds(issues);
     let stands = group_stands_in(issues, cfg, &lines, &group, &mile_of, &kind_of, &roots);
     let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
@@ -3244,7 +3312,7 @@ fn blocking<'a, 'c>(
     // 더 지어, 지도를 건네받은 보람이 없다([`milestones_in`]).
     let lines = Lines::of(issues);
     let mile_of = milestones_over(issues, epic_of, &lines);
-    let roots = deferred_roots_in(issues, epic_of, &mile_of);
+    let roots = deferred_roots_over(issues, &lines, epic_of, &mile_of);
     let (states, waits) = if by_group {
         split_stands(group_stands_in(issues, cfg, &lines, epic_of, &mile_of, &kinds(issues), &roots))
     } else {
@@ -4970,7 +5038,11 @@ mod tests {
             make("argos-0001.aaa.bbb", Kind::Issue, "todo"),
         ];
         assert!(loose(&lost).is_empty(), "길 잃은 생각 밑에 접힌 줄을 에픽 없음으로 센다: {:?}", loose(&lost));
-        let folded = under_lost(&lost, &groups(&lost), |i| misplaced(&lost).contains_key(i.id.as_str()));
+        let adrift = |all: &[Issue]| {
+            let seen = misplaced(all);
+            all.iter().map(|i| seen.contains_key(i.id.as_str())).collect::<Vec<bool>>()
+        };
+        let folded = under_lost(&lost, &Lines::of(&lost), &groups(&lost), &adrift(&lost));
         assert_eq!(folded.into_iter().collect::<Vec<_>>(), ["argos-0001.aaa", "argos-0001.aaa.bbb"]);
 
         // 멀쩡한 생각 밑 — 그대로 에픽 없는 이슈다.
@@ -4983,7 +5055,7 @@ mod tests {
             make("argos-0004", Kind::Epic, "todo"),
             member("argos-0003.aaa", "argos-0004", "todo"),
         ];
-        assert!(under_lost(&own, &groups(&own), |i| misplaced(&own).contains_key(i.id.as_str())).is_empty());
+        assert!(under_lost(&own, &Lines::of(&own), &groups(&own), &adrift(&own)).is_empty());
     }
 
     fn roll_of<'a>(rolls: &'a [Roll], id: Option<&str>) -> &'a Roll {

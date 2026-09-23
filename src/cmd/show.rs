@@ -295,7 +295,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
-        &report::epic_labels(&load.issues),
+        // **소속 지도는 거름망이 든 것을 빌린다**(moai-jk2u.pl6) — 제목만 얹으려고
+        // `groups` 를 한 벌 더 지으면 이 명령 하나가 같은 걸음을 두 번 걷는다.
+        &report::epic_labels_over(&load.issues, &wh.epic, report::Kinds::of(&load.issues)),
         asked,
         &wh,
         screen,
