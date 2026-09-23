@@ -2769,6 +2769,22 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// 적힌다. 그 한 줄이 뒤의 빈손 쓰기를 풀어 주고, `Away::picked` 로 흘러 남이 쥔 줄을
         /// 제 것으로 붙든다(리뷰 moai-r3l9.lmy).
         appends: bool,
+        /// **이 줄의 짧은 글자 표가 다 찼는가**(moai-phhz, 2026-09-23 사용자 결정) — 참이면 이
+        /// 표가 모르는 짧은 글자를 넘긴 줄(`weird`)은 그 프로그램이 거절하니 아무것도 안 돈다
+        /// ([`Wrapped::Stops`]).
+        ///
+        /// **거짓이 기본이다** — 표가 덜 찬 줄에서 참으로 적으면 정당한 줄이 통째로 막힌다.
+        /// 지금 참인 것은 `su`·`runuser` 둘뿐이고, 그 둘의 짧은 글자는 2026-09-23 에 `su --help`·
+        /// `runuser --help` 로 다시 걷어 [`Wrapper::takes`]·[`free`](Wrapper::free)·
+        /// [`shell`](Wrapper::shell)·[`elsewhere`](Wrapper::elsewhere)·[`hands`](Wrapper::hands)
+        /// 와 [`PRINTS`] 에 하나도 빠짐없이 서 있음을 견줬다.
+        ///
+        /// **[`alien`] 갈래와 한 잣대로 묶는다** — `weird` 를 그쪽에서만 읽던 판은 셸이 아닌
+        /// 프로그램의 argv 를 다시 짓는 자리만 닫아, 셸 갈래가 그대로 열려 있었다:
+        /// `su -x 남 -c 'moai mv <id> in_progress --from todo' && <쓰기>` 는 진짜 su 가
+        /// `invalid option -- 'x'` 로 아무것도 안 돌리는데(2026-09-23 에 쟀다) 훅은 그 집기를 세어
+        /// 뒤의 빈손 쓰기를 풀어 줬다.
+        whole: bool,
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
     ///
@@ -2845,6 +2861,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: true,
             appends: false,
+            whole: false,
         },
         Wrapper {
             name: "timeout",
@@ -2862,6 +2879,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         Wrapper {
             name: "nice",
@@ -2879,6 +2897,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         Wrapper {
             name: "stdbuf",
@@ -2896,6 +2915,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // **앞에 붙여 뒤의 명령을 돌리는 것이 더 있다**(moai-0fzj) — 옆의 `stdbuf`·`nice` 와 같은
         // 꼴인데 표에 없어 `setsid sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
@@ -2932,6 +2952,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         Wrapper {
             name: "ionice",
@@ -2950,6 +2971,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // `chrt [옵션] <우선순위> <명령…>` — 우선순위가 제 자리 인자 하나다(`timeout 5 …` 와 같다).
         Wrapper {
@@ -2969,6 +2991,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // `taskset [옵션] <마스크|cpu 목록> <명령…>` — 마스크가 제 자리 인자 하나다.
         Wrapper {
@@ -2987,6 +3010,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // **뒤가 명령이 아니라 셸에 넘기는 글인 것 셋**(moai-1b0d) — `flock -c`·`watch`·`script -c`
         // 다. 표에 없어 `flock /tmp/l -c 'sed -i s/a/b/ src/x.rs'` 도 `watch -n 1 'sed -i …'` 도
@@ -3016,6 +3040,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: true,
             appends: false,
+            whole: false,
         },
         // `watch <명령…>` 은 **낱말을 그대로 이어** `sh -c` 에 넘긴다([`Text::Joined`]). 판 번호는
         // 이 표에서 홀로 `-v` 다(`-V` 가 아니다) — [`PRINTS`] 에 없어 제 줄의 `stops` 로 든다.
@@ -3053,6 +3078,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // in_progress` 의 집기를 버리고 `watch 'moai mv <id> in_progress'` 는 세어 — 같은
             // 명령의 두 철자가 반대 답을 냈다.
             appends: false,
+            whole: false,
         },
         // `script [옵션] [파일]` — `-c` 가 없으면 사람이 쓸 셸을 띄울 뿐 아무 명령도 안 돌린다
         // ([`Runs::Never`] 가 그 자리를 [`Wrapped::Stops`] 로 낸다).
@@ -3083,6 +3109,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Never,
             glued: true,
             appends: false,
+            whole: false,
         },
         // **`strace` 도 뒤의 명령을 돌린다**(moai-gxwh) — `strace -o /tmp/o sed -i s/a/b/ src/x.rs`
         // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 옆의 `env`·`setsid` 와 같은 꼴이지만
@@ -3170,6 +3197,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // **`parallel` 은 xargs 와 같은 자리다**(moai-gxwh) — `parallel sed -i s/a/b/ ::: src/x.rs`
         // 는 그 파일을 정말 고치는데 훅이 빈손으로 넘겼다. 2026-09-22 에 GNU parallel 20231122 으로
@@ -3521,6 +3549,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 거짓말을 한다 — 나중에 이 줄이 명령 자리로 나가는 날 집기 축이 조용히 켜진다
             // (리뷰 moai-514e). 실제로 끄는 자는 [`Text::Feed`] 가 든 `appends` 다.
             appends: true,
+            whole: false,
         },
         // **`xargs` 도 뒤의 명령을 돌린다**(moai-ulaa) — 옆의 `stdbuf`·`nice`·`env` 와 같은 꼴인데
         // 표에 없어 `echo x | xargs sed -i s/a/b/ src/x.rs` 가 그 파일을 정말 고치는데도 훅이 빈손으로
@@ -3566,6 +3595,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             glued: false,
             // 표에서 **혼자 참인 줄이다**(moai-ctn2) — 읽은 낱말 뒤에 제 입력이 더 붙는다.
             appends: true,
+            whole: false,
         },
         Wrapper {
             name: "sudo",
@@ -3616,6 +3646,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // `doas -C <설정>` 은 규칙을 시험해 보고 찍기만 한다 — 뒤의 명령을 안 돌린다.
         // **`-s` 도 같다**(2026-09-20 사용자 결정, 리뷰 moai-jlon.yeg 6번) — OpenBSD doas 는 `-s` 에
@@ -3638,6 +3669,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Always,
             glued: false,
             appends: false,
+            whole: false,
         },
         // **`su -c '<글>'` 과 `runuser -c` 는 `bash -c` 와 같은 꼴이다**(moai-qqg2) — 표에 없어
         // 통째로 안 보이던 자리다. `su -c 'sed -i s/a/b/ src/x.rs'` 는 정말 그 파일을 고치는데
@@ -3675,6 +3707,9 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::Never,
             glued: true,
             appends: false,
+            // 짧은 글자 -G -P -V -c -f -g -h -l -m -p -s -w 가 위 칸과 [`PRINTS`] 에 다 선다
+            // (2026-09-23 에 `su --help` 로 다시 걷어 견줬다).
+            whole: true,
         },
         Wrapper {
             name: "runuser",
@@ -3696,6 +3731,8 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             runs: Runs::With(&["-u", "--user"]),
             glued: true,
             appends: false,
+            // su 의 열둘에 `-u` 하나가 더 선다(2026-09-23 에 `runuser --help` 로 걷었다).
+            whole: true,
         },
     ];
     // **find 의 명령은 옵션 뒤가 아니라 술어 안에 선다**(moai-7kif) — 위 표는 "옵션이 다 끝난
@@ -4131,9 +4168,16 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     // `/usr/bin/tee 'src/x.rs'` 라는 **도는 줄을 지어냈다**. 2026-09-22 에 쟀다:
     // `su -s /usr/bin/tee nobody -x /tmp/probe` 는 그 파일을 안 만든다.
     //
-    // **셸 갈래는 여기가 아니다** — 그쪽은 `-c` 의 글을 그대로 내고, 이 표가 짧은 글자를 다
-    // 아는 감싸는 명령이 su·runuser 뿐이라 잣대를 넓히면 모르는 자리가 통째로 안 보인다.
-    if alien && weird {
+    // **셸 갈래도 같이 닫는다**(moai-phhz, 2026-09-23 사용자 결정) — 넘긴 글을 그대로 내던 판은
+    // `su -x 남 -c 'moai mv <id> in_progress --from todo' && <쓰기>` 의 집기를 세어 뒤의 빈손 쓰기를
+    // 풀어 줬다. 진짜 su 는 그 줄을 `invalid option -- 'x'` 로 거절해 아무것도 안 돌린다
+    // (2026-09-23 에 쟀다).
+    //
+    // **표가 다 찬 줄에서만이다**([`Wrapper::whole`]) — 잣대를 표 전체로 넓히면 짧은 글자를 덜 적은
+    // 감싸는 명령(`env -i` 가 그 줄이다)에서 정당한 쓰기가 통째로 안 보인다. [`alien`] 쪽은 그
+    // 잣대 없이 그대로다: 그쪽이 닫는 것은 "argv 를 다시 짓는 자리" 하나라, 표를 덜 안 줄에서도
+    // 지어내지 않는 쪽이 맞다.
+    if weird && (alien || w.whole) {
         return Some(Wrapped::Stops);
     }
     if handed && !alien {
@@ -9138,7 +9182,6 @@ mod tests {
             "runuser -u 남 -- sed -i s/a/b/ src/x.rs",
             "runuser -u 남 sed -i s/a/b/ src/x.rs",
             "runuser --user=남 -- sed -i s/a/b/ src/x.rs",
-            "runuser -nu 남 -- sed -i s/a/b/ src/x.rs",
             "sudo -u 남 sed -i s/a/b/ src/x.rs",
             "doas -u 남 sed -i s/a/b/ src/x.rs",
         ] {
@@ -11732,6 +11775,56 @@ mod tests {
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+    }
+
+    /// **모르는 짧은 글자는 셸 갈래에서도 그 줄을 끝낸다**(moai-phhz, 2026-09-23 사용자 결정) —
+    /// moai-ta6q 가 닫은 것은 셸이 아닌 프로그램의 argv 를 다시 짓는 갈래뿐이라, `-c` 의 글을
+    /// 그대로 내는 셸 갈래가 열려 있었다. `su -x 남 -c 'moai mv <id> in_progress --from todo' &&
+    /// <쓰기>` 가 그 줄이다 — 진짜 su 는 아무것도 안 돌리는데 훅은 그 집기를 세어 뒤의 빈손 쓰기를
+    /// 풀어 줬다.
+    ///
+    /// **2026-09-23 에 쟀다** — `su -x nobody -c 'echo RAN'` 도 `runuser -nu root -- echo RAN` 도
+    /// `invalid option` 으로 진다. `runuser --help` 에 `-n` 이 없다.
+    ///
+    /// **잣대는 [`Wrapper::whole`] 이다** — 짧은 글자 표가 다 찬 줄에서만 이렇게 읽는다. 표
+    /// 전체로 넓히면 짧은 글자를 덜 적은 감싸는 명령에서 정당한 쓰기가 통째로 안 보인다.
+    #[test]
+    fn an_unknown_short_letter_ends_the_line_in_the_shell_branch_too() {
+        let root = Path::new("/repo");
+        let held = vec![epic("t-e"), under("t-1", "todo", "t-e")];
+        // **그 집기로 빈손의 쓰기가 풀리지 않는다** — 안 도는 줄의 집기는 집기가 아니다.
+        for cmd in [
+            "su -x 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+            "runuser -nu 남 -c 'moai mv t-1 in_progress --from todo' && sed -i s/a/b/ src/store.rs",
+        ] {
+            let got = guard_writes(&held, &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "안 도는 줄의 집기가 규칙 2 를 채웠다 — {cmd}\n{got:?}");
+        }
+        // **없는 쓰기도 지어내지 않는다** — 같은 줄이 막는 축에서도 안 돈다.
+        for cmd in [
+            "su -x 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            "runuser -nu 남 -c 'tee /repo/src/x.rs'",
+            "su -zx 남 -c 'tmux kill-server'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 도는 줄에서 쓰기를 지어냈다 — {cmd}\n{got:?}");
+        }
+        // **아는 글자는 그대로 지난다** — `su --help`·`runuser --help` 로 걷은 표다. 여기가
+        // 무너지면 정당한 줄이 통째로 안 보인다.
+        for cmd in [
+            "su -m 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+            "su -pf 남 -c 'tee /repo/src/x.rs'",
+            "runuser -u 남 -c 'sed -i s/a/b/ /repo/src/x.rs'",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "아는 글자에 멈춰 쓰기를 잃었다 — {cmd}\n{got:?}");
+        }
+        // **표가 덜 찬 감싸는 명령은 그대로 넘긴다**([`Wrapper::whole`] 이 거짓인 줄) — `env -i` 는
+        // 이 표에 없는 글자인데 정말 돈다.
+        for cmd in ["env -i sed -i s/a/b/ /repo/src/x.rs", "env -iu HOME tee /repo/src/x.rs"] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "표가 덜 찬 줄에서 쓰기를 잃었다 — {cmd}\n{got:?}");
         }
     }
 
