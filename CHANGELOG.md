@@ -221,7 +221,15 @@ on finding them.
   rule 3's "is this review tied to what you hold", the close-of-session notice,
   the check for a defer that would close an epic, the distance that decides which
   worktree holds a row (so rule 2 no longer hands your work to the worktree named
-  after your twin's epic), and the `[NEW]` mark on unread rows.
+  after your twin's epic), and the `[NEW]` mark on unread rows. A row eclipsed by a
+  twin of another kind stands in no group here either, as it already did on every
+  read surface — the hook no longer pins a review to an epic that `moai show -e`
+  will not list.
+  **A row that inherits its epic instead of writing one is not covered yet.** Where
+  the same id stands twice and neither line wrote `epic`, the answer still comes off
+  the id map, so it is still the twin's — the same refusal, for the shape a plan
+  mints. That is one layer down, in what resolves an inherited epic, and it moves
+  every surface at once, `derived_epic` included.
 - Where the same id stands twice, a row now **inherits the defer of the epic or
   the release it wrote on itself**. Which group a row is in is read from the row
   (`epic`, then the map), but the walk that carries a defer down still climbed by

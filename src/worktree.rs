@@ -1017,8 +1017,10 @@ pub fn workplaces_in(
     // 쪽이다)를 바로 쓴다.
     // 집은 줄도 `places` 가 되짚는 그 집합([`crate::report::started`])이다 — `wip` 은 가려진 쌍둥이
     // 줄을 빼므로(moai-es40), 그것으로 재면 그 줄 하나 때문에 열어야 할 문이 닫혀 스냅샷으로만 찾을
-    // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — 쌍둥이(뒷줄)가 그 id 의 에픽을
-    // `groups` 에서 지워, 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못 가리킨다.
+    // 수 있는 그 줄이 `stranded` 로 선다. 이름으로는 거의 못 찾는다 — **가려진 줄은 어느 묶음에도
+    // 안 서므로**(`report::stands_in`, moai-53s2) 규약대로 에픽 이름으로 뜬 워크트리도 그 줄을 못
+    // 가리킨다. 그 문이 [`crate::report::Ties`] 에 있다는 것이 이 문단의 전제다(리뷰 moai-jk2u.35i) —
+    // 소속을 줄에 묻는 자가 가려짐을 안 보면 여기가 조용히 닫혀, 파야 할 스냅샷을 안 판다.
     let all_names = names(linked.iter().copied());
     if footing.picked().values().all(|i| footing.claims(&all_names, i)) {
         // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, idea moai-7p48) — 이 문이 닫히면
