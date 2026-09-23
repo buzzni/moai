@@ -93,7 +93,7 @@ impl<'a> Brief<'a> {
     fn of(
         i: &'a crate::model::Issue,
         epics: &std::collections::BTreeMap<&'a str, &'a str>,
-        kinds: &std::collections::BTreeMap<&str, crate::model::Kind>,
+        kinds: &crate::report::Kinds<'_>,
         origin: &'a crate::worktree::Origin,
     ) -> Brief<'a> {
         Brief {
@@ -172,9 +172,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 같은 지도다(`epic_labels` 가 이것 위에 제목을 얹는다).
         let epics = report::groups(&load.issues);
         // **가려진 줄을 가르는 지도**(moai-53s2) — 소속 지도와 나란히 둔다. `wip` 은 가려진 줄을
-        // 빼므로 오늘 이 판에 그런 줄이 실릴 길은 없지만, 값을 내는 자(`report::stands_in`)가
+        // 빼므로 오늘 여기에 그런 줄이 실릴 길은 없지만, 값을 내는 자(`report::stands_in`)가
         // 지도를 물으니 여기가 그것을 대는 자리다.
-        let kinds = report::kinds(&load.issues);
+        let kinds = report::Kinds::of(&load.issues);
         return super::json_line(&Said {
             picked: p.held.iter().map(|i| Brief::of(i, &epics, &kinds, &origin)).collect(),
             ready: p.picks.iter().map(|i| Brief::of(i, &epics, &kinds, &origin)).collect(),

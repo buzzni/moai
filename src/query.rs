@@ -38,8 +38,9 @@ pub struct Where<'a> {
     ///
     /// **판정이 아니라 지도를 든다**(moai-53s2). 한때 판정 하나를 상자에 담아 들었는데,
     /// 줄을 내는 쪽(`cmd::Row::of` → `report::stands_in`)도 같은 지도가 있어야 가려진 줄에
-    /// 쌍둥이의 에픽을 안 단다 — 닫힌 상자에서는 그 지도를 못 꺼낸다.
-    pub(crate) kinds: BTreeMap<&'a str, crate::model::Kind>,
+    /// 쌍둥이의 에픽을 안 단다 — 닫힌 상자에서는 그 지도를 못 꺼낸다. **든 꼴 그대로**
+    /// 나르므로(`report::Kinds`) 꼴이 다른 쪽이 걸음마다 지도를 새로 짓지 않는다(리뷰).
+    pub(crate) kinds: crate::report::Kinds<'a>,
     /// 길 잃은 줄 **밑에 접힌** 줄 (`report::under_lost`). 트리가 `(길 잃음)` 안에 그리고
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
@@ -68,12 +69,13 @@ impl<'a> Where<'a> {
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
         let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
+        let kinds = crate::report::Kinds::Own(kinds);
         Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, kinds, folded }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
     pub fn eclipsed(&self, i: &Issue) -> bool {
-        crate::report::is_eclipsed(&self.kinds, i)
+        self.kinds.eclipses(i)
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).

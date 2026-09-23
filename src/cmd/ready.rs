@@ -30,7 +30,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
         let epics = report::groups_of(&load.issues, &ids);
         // 가려진 줄을 가르는 지도(moai-53s2) — 소속 지도와 같은 id 만 묻는다.
-        let kinds = report::kinds_of(&load.issues, &ids);
+        let kinds = report::Kinds::of_ids(&load.issues, &ids);
         // **객체로 감싼다**(moai-w6n2, 사람이 정한 출력 계약). 맨 배열이던 때는 막혀 못 집는
         // 일을 실을 자리가 없어, 에이전트는 `[]` 를 "할 일이 없다" 로 읽었다. `.moai` 밖
         // 한눈 보기가 프로젝트마다 `ready` 키를 쓰는 것과 같은 이름이다.
@@ -101,7 +101,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 let (epics, kinds) = match ctx.json {
                     true => {
                         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
-                        (report::groups_of(&load.issues, &ids), report::kinds_of(&load.issues, &ids))
+                        (report::groups_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                     }
                     false => Default::default(),
                 };

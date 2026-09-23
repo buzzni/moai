@@ -571,15 +571,12 @@ fn one(
             extra.push(("spent", serde_json::to_string(&sp).map_err(|e| Fail::new(e.to_string()))?));
         }
         return super::json_with(
-            // **펼친 줄 하나만 묻는다**(moai-53s2) — `Load::get` 이 뒷줄을 고르므로 여기 선 줄이
-            // 가려진 일은 없지만, 값을 내는 자가 지도를 물으니 대는 것은 이 자리다.
-            &super::Row::of(
-                issue,
-                seen.states.get(issue.id.as_str()).copied(),
-                stood_in,
-                &report::kinds_of(all, &[issue.id.as_str()]),
-            )
-            .on(origin),
+            // **펼친 줄에는 쌍둥이가 없다**(리뷰, moai-53s2). `Load::get` 은 그 id 를 **마지막으로**
+            // 든 줄을 열고(`rfind`), 가려짐은 그 마지막 줄의 종류로 재는 것이라 여기 선 줄은
+            // 가려질 수가 없다 — 지도를 지어도 답이 안 바뀌는데 그 셈은 상세를 펼 때마다
+            // 저장소를 한 번 더 훑는다.
+            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied(), stood_in, &report::Kinds::no_twins())
+                .on(origin),
             &extra,
         );
     }
@@ -699,7 +696,7 @@ mod tests {
             "2026-09-11T04:12:03Z",
         );
         let listed = Listed {
-            row: super::super::Row::of(&i, None, None, &std::collections::BTreeMap::new()),
+            row: super::super::Row::of(&i, None, None, &report::Kinds::no_twins()),
             work: &[],
             journal_error: &[],
         };

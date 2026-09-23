@@ -297,7 +297,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (epics, kinds) = match ctx.json {
                 true => {
                     let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-                    (report::groups_of(&load.issues, &ids), report::kinds_of(&load.issues, &ids))
+                    (report::groups_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                 }
                 false => Default::default(),
             };

@@ -6426,10 +6426,11 @@ fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
 }
 
 /// **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 `due_on` 을
-/// 거절하므로 그 값이 서는 길은 손으로 푼 충돌 하나뿐인데, 상세는 종류를 안 보고 그려
+/// 거절하므로 그 값이 서는 길은 손으로 푼 충돌과 머지 드라이버가 안 건드리고 넘긴 낡은 줄
+/// (`a_row_neither_side_touched_does_not_block_the_merge`)뿐인데, 상세는 종류를 안 보고 그려
 /// `3일 지남` 이라 말하고 보드는 마일스톤만 세어 아무 말도 안 했다 — 한 줄이 두 표면에서
-/// 다르게 읽혔다. 세는 자를 따른다: 그리는 쪽을 따르면 이슈에 적힌 날이 기한 경고로 서서
-/// 없는 마일스톤이 보드를 채운다.
+/// 다르게 읽혔다. 따르는 것은 쓰기의 규칙(`Issue::check`)이다: 그리는 쪽을 따르면 이슈에
+/// 적힌 날이 기한 경고로 서서 없는 마일스톤이 보드를 채운다.
 #[test]
 fn a_deadline_on_a_row_that_is_not_a_milestone_is_drawn_nowhere() {
     let s = init("duekind");
@@ -9296,21 +9297,25 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
             "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
         )
     };
-    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘이다. 앞줄은 `epic` 없는 이슈, 뒷줄은 그
-    // 에픽에 든 생각이라 앞줄이 가려진다.
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘이다. 앞줄과 뒷줄이 같은 에픽을 적었는데 뒷줄이
+    // 생각이라 앞줄이 가려진다.
+    //
+    // **가려진 줄에도 `epic` 을 적어 둔다**(리뷰) — 제 값을 적은 가려진 줄도 `derived_epic` 을
+    // 안 내는 것이 이 고침의 절반인데(`report` 의 `an_eclipsed_row_is_given_no_derived_epic`
+    // 가 `wrote` 로 재는 자리), 앞줄을 빈 채로 두면 그 절반이 CLI 어디에서도 안 재진다.
     std::fs::write(
         s.path().join(".moai/issues.jsonl"),
         format!(
             "{}{}{}",
             row("argos-0001", "에픽", "epic", ""),
-            row("argos-0002", "가려진 이슈", "issue", ""),
+            row("argos-0002", "가려진 이슈", "issue", ",\"epic\":\"argos-0001\""),
             row("argos-0002", "가리는 생각", "idea", ",\"epic\":\"argos-0001\""),
         ) + &row("argos-0001.aa1", "성한 멤버", "issue", ""),
     )
     .unwrap();
 
     // 목록이 내는 `derived_epic` — 가려진 줄에는 안 서고, 소속을 id 에 진 성한 멤버에는 선다.
-    // **그 멤버가 대조군이다**: 키가 통째로 빠진 판이 이 시험을 조용히 지나가지 않는다.
+    // **그 멤버가 대조군이다**: 키가 통째로 빠져도 이 시험이 조용히 지나가지 않는다.
     let json = ok(s.path(), &["show", "--json"]);
     let object = |title: &str| {
         let at =
@@ -9326,12 +9331,20 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
     assert!(!picked.contains("가려진 이슈"), "-e 가 가려진 줄을 골랐다\n{picked}");
     assert!(picked.contains("성한 멤버"), "-e 가 성한 멤버를 빠뜨렸다\n{picked}");
     assert!(ok(s.path(), &["show", "argos-0001"]).contains("0/1"), "에픽이 가려진 줄을 멤버로 셌다");
+
+    // **트리는 어디에 세우는지까지 잰다**(리뷰) — 제목만 찾으면 그 줄이 에픽 밑으로 돌아가도
+    // 이 시험이 푸르다. 가려진 줄이 어느 묶음에도 안 선다는 말이 곧 `(길 잃음)` 칸이다.
     let tree = ok(s.path(), &["show", "--tree"]);
     assert!(tree.contains("가려진 이슈"), "가려진 줄이 트리에서 사라졌다\n{tree}");
+    let lost_at = tree.find("(길 잃음)").unwrap_or_else(|| panic!("길 잃음 바구니가 없다\n{tree}"));
+    assert!(!tree[..lost_at].contains("가려진 이슈"), "가려진 줄이 에픽 밑에 섰다\n{tree}");
 
-    // **적힌 값은 그대로 남는다** — 지우는 것이 아니라 푼 값을 안 내는 것이다.
+    // **적힌 값은 그대로 남는다** — 지우는 것이 아니라 푼 값을 안 내는 것이다. 묻는 자리는
+    // 목록이다: `show <id>` 는 뒷줄을 여므로(moai-e0ro) 거기서 읽히는 것은 가리는 줄 것이다.
+    assert!(object("가려진 이슈").contains(r#""epic":"argos-0001""#), "가려진 줄의 적힌 소속이 사라졌다\n{json}");
+    // 가리는 줄은 처음부터 성하다 — 가려진 쪽을 재느라 이쪽의 답까지 지우지 않았다.
     let holds = ok(s.path(), &["show", "argos-0002", "--json"]);
-    assert!(holds.contains(r#""epic":"argos-0001""#), "적힌 소속이 사라졌다\n{holds}");
+    assert!(holds.contains(r#""derived_epic":"argos-0001""#), "가리는 줄이 제 소속을 잃었다\n{holds}");
 }
 
 /// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와

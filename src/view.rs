@@ -1878,11 +1878,17 @@ pub struct Due {
 
 /// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
 pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
-    // **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 이 두 필드를
-    // 거절하므로(`Issue::check` 의 `Field::DueOn`·`Field::StartsOn`) 여기 서는 값은 손으로 푼
-    // 충돌이 남긴 줄뿐인데, 종류를 안 보고 그리면 `report::status_in` 이 마일스톤만 세는 것과
-    // 갈려 한 줄이 상세에서는 `3일 지남` 이고 보드에서는 아무 말도 없다. 세는 자를 따른다 —
-    // 그리는 쪽을 따르면 이슈에 적힌 날이 기한 경고로 서서, 없는 마일스톤이 보드를 채운다.
+    // **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 따르는 것은 **쓰기가 정한 규칙**이다 —
+    // `Issue::check` 의 `Field::DueOn`·`Field::StartsOn` 이 다른 종류의 줄에 이 두 필드를
+    // 거절한다. 그러니 여기 서는 값은 손으로 푼 충돌이나 머지 드라이버가 안 건드리고 넘긴
+    // 낡은 줄(`a_row_neither_side_touched_does_not_block_the_merge`)뿐인데, 종류를 안 보고
+    // 그리면 이슈에 적힌 날이 `3일 지남` 으로 서고 보드(`report::Dues`)는 마일스톤만 세어
+    // 아무 말도 안 한다.
+    //
+    // **보드가 세는 것과 같아지려는 줄이 아니다**(리뷰). `Dues` 는 넷으로 거른다 — 종류,
+    // 계획 밖, 가려짐, 닫힌 칸. 여기서 보는 것은 첫째 하나고 나머지 셋은 **일부러** 안 본다:
+    // 닫히거나 미뤄 둔 마일스톤의 날은 사람이 적어 둔 이력이라, 보드가 조용한 것과 맞추려고
+    // 지우면 그 값이 어느 화면에도 안 서게 된다. 그러므로 뒤의 셋을 여기 옮겨 오지 않는다.
     if i.kind != Kind::Milestone {
         return None;
     }
@@ -2194,8 +2200,8 @@ pub struct Board<'a> {
     pub picked: Vec<&'a Issue>,
     /// 집은 줄이 든 에픽(`report::groups_of`) — [`Picks::epics`] 와 같은 자리, 같은 까닭이다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
-    /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::kinds_of`) — [`Picks::kinds`] 와 같다.
-    pub kinds: std::collections::BTreeMap<&'a str, crate::model::Kind>,
+    /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
+    pub kinds: crate::report::Kinds<'a>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
@@ -2230,9 +2236,9 @@ pub struct Picks<'a> {
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
-    /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::kinds_of`) — [`Picks::epics`] 와
+    /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
     /// 같은 자리, 같은 까닭이다(moai-53s2).
-    pub kinds: std::collections::BTreeMap<&'a str, crate::model::Kind>,
+    pub kinds: crate::report::Kinds<'a>,
     pub origin: &'a Origin,
     pub trouble: &'a [crate::worktree::Trouble],
 }
@@ -3777,11 +3783,12 @@ mod tests {
     }
 
     /// **기한은 마일스톤 줄에만 선다**(moai-x04r.fn4). 쓰기는 다른 종류의 줄에 `due_on` 을
-    /// 거절하지만 손으로 푼 충돌은 그것을 남길 수 있고, 그때 상세가 `3일 지남` 이라 말하는
-    /// 동안 보드는 아무 말도 안 했다 — 한 줄이 두 표면에서 다르게 읽혔다. 세는 자
-    /// (`report::status_in` 은 마일스톤만 센다)를 따른다.
+    /// 거절하지만 손으로 푼 충돌과 머지 드라이버가 넘긴 낡은 줄은 그것을 남길 수 있고, 그때
+    /// 상세가 `3일 지남` 이라 말하는 동안 보드는 아무 말도 안 했다 — 한 줄이 두 표면에서
+    /// 다르게 읽혔다. 따르는 것은 쓰기의 규칙(`Issue::check`)이지 보드의 거르개가 아니다 —
+    /// 닫히거나 미뤄 둔 마일스톤의 날은 그대로 선다([`due_of`] 의 주석).
     #[test]
-    fn a_deadline_stands_on_a_milestone_row_only() {
+    fn a_deadline_is_drawn_on_a_milestone_row_only() {
         let now = "2026-09-23T00:00:00Z";
         let z = crate::tz::Zone::utc();
         let mut stone = issue("argos-0001", "v0.1", "todo");
