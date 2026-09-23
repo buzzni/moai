@@ -1481,3 +1481,7 @@
 {"ts":"2026-09-23T10:47:54Z","id":"moai-47yo.76c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 배경에서 돈다(에이전트 code-review). 끝나면 원문을 이 이슈에 노트로 옮기고, 받은 것과 넘긴 것을 -m 으로 적어 닫는다"}
 {"ts":"2026-09-23T10:48:19Z","id":"moai-ijfy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-47yo 에 고침이 섰다(a262576). 에픽 끝 리뷰 moai-47yo.76c 가 배경에서 돌고, 그것이 끝나 develop 에 머지된 뒤에 닫는다"}
 {"ts":"2026-09-23T10:48:26Z","id":"moai-58io","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 worktree-moai-47yo 에 고침이 섰다(daedb87). 에픽 끝 리뷰 moai-47yo.76c 가 배경에서 돌고, 그것이 끝나 develop 에 머지된 뒤에 닫는다"}
+{"ts":"2026-09-23T10:51:10Z","id":"moai-m4ze","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T10:51:10Z","id":"moai-wnnb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T10:51:10Z","id":"moai-f7up","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T10:51:11Z","id":"moai-wza7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
