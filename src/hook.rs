@@ -2869,8 +2869,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         free: &'static [&'static str],
         /// 값을 **붙여서만** 받는 옵션 — 혼자 서도 서고, 값을 붙여도 선다.
         ///
-        /// 짧은 꼴(`sudo -hHOST`)에서는 그 뒤의 글자가 스위치가 아니라 값이라 거기서 낱말이
+        /// 짧은 꼴(`xargs -l1 <명령>`)에서는 그 뒤의 글자가 스위치가 아니라 값이라 거기서 낱말이
         /// 끝나고, 긴 꼴(`env --block-signal=INT`)에서는 `=` 뒤가 값이다.
+        /// (2026-09-23 에 쟀다: `printf 'a\nb\n' | xargs -l1 echo` 는 줄마다 한 번 돈다. 한때
+        /// 여기 섰던 `sudo -h` 는 붙인 값도 안 도는 줄이라 [`stops`](Wrapper::stops) 로 옮겼다,
+        /// moai-m4ze.)
         ///
         /// **긴 이름도 여기 든다**(moai-y1ix, 2026-09-23) — 한때 [`free`](Wrapper::free) 에 함께
         /// 섰는데, 그 칸이 "값을 **안** 받는 이름" 과 "값을 **붙여서만** 받는 이름" 두 뜻을 한꺼번에
@@ -3052,9 +3055,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
     /// `-V`·`-h`, sudo 의 `-V`)은 찍고 끝나고, 모르는 것(coreutils 의 `env -h`)은 그 줄을
     /// 거절해 아무것도 안 돌린다. 어느 쪽이든 뒤엣것은 안 도니 [`Wrapped::Stops`] 다.
     ///
-    /// **제 표가 먼저다** — `sudo -h` 의 `-h` 는 도움말이 아니라 호스트를 붙여 받는
-    /// 스위치라([`Wrapper::attach`]) 그 자리에서 먼저 걸린다. 여기는 그 뒤에 선다.
-    /// (2026-09-22 에 쟀다: `sudo -h echo HELLO` 는 `echo` 를 호스트로 읽어 거절한다.)
+    /// **제 표가 먼저다** — 같은 글자를 [`Wrapper::attach`] 에 적어 둔 줄은 그 자리에서 먼저
+    /// 걸리고 여기는 그 뒤에 선다. **지금 그런 줄은 없다**(moai-m4ze): `sudo -h` 가 그 자리였는데,
+    /// 어느 철자로 쓰든 뒤의 명령이 안 도는 것을 재어 [`Wrapper::stops`] 로 옮겼다. 문을 그대로
+    /// 두는 것은 짧은 뭉치 고리가 [`Wrapper::attach`] 를 [`PRINTS`] 보다 먼저 보기 때문이다 —
+    /// 한쪽만 걷으면 같은 스위치의 두 철자가 갈린다.
     ///
     /// **잘못 막지 않는다** — 멈추는 쪽은 그 뒤를 아예 안 보는 것이라, 정당한 줄이 이 고침으로
     /// 막히지 않는다.
@@ -3887,15 +3892,11 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         },
         Wrapper {
             name: "sudo",
-            // `-h` 는 `-hHOST` 로 붙여서만 값을 받고 혼자 서면 도움말이다 — 값을 먹는 것으로 적던
-            // 판은 `sudo -h moai add x` 를 `add` 라는 명령으로 읽었다.
-            takes: &["-u", "-g", "-p", "-C", "-U", "-r", "-t", "-T", "-R", "-a", "-c"],
+            takes: &["-u", "-g", "-p", "-C", "-r", "-t", "-T", "-R", "-a", "-c"],
             long: &[
                 "--user",
                 "--group",
                 "--prompt",
-                "--host",
-                "--other-user",
                 "--role",
                 "--type",
                 "--command-timeout",
@@ -3909,7 +3910,6 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--set-home",
                 "--stdin",
                 "--background",
-                "--remove-timestamp",
                 "--reset-timestamp",
                 "--askpass",
                 "--bell",
@@ -3917,7 +3917,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             ],
             // `--preserve-env[=<목록>]` 은 값을 붙여서만 받는다(moai-y1ix, 2026-09-23 에 쟀다:
             // `sudo -n --preserve-env=HOME /bin/echo RAN` 이 돈다). 나머지 여덟은 `=1` 을 거절한다.
-            attach: &["-h", "--preserve-env"],
+            attach: &["--preserve-env"],
             args: 0,
             // `-l`·`-v` 는 뒤의 명령을 **안 돌린다**(될지만 본다) — 넘기면 안 도는 줄을 막는다.
             // **`-i`·`--login` 도 여기다**(2026-09-20 사용자 결정, 리뷰 moai-jlon.yeg 5번) — 로그인
@@ -3925,7 +3925,32 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // `-s` 와 한 줄로 묶었는데, 같은 결정이 "딴 자리에서 돌리는 것은 멈춘다" 도 함께
             // 세웠다 — 목록과 잣대가 어긋났고 잣대를 따랐다. 넘겨 주면 ~root 의 딴 트래커에서
             // 돌거나 아예 실패하는 집기가 여기 규칙 2 를 채운다(`env -C`·`sudo -D` 와 같은 자리).
-            stops: &["-e", "--edit", "-l", "--list", "-v", "--validate"],
+            //
+            // **`-h`·`-K`·`-U` 여섯 이름도 여기다**(moai-m4ze, 리뷰 moai-514e.dc8 이 넘겼다) —
+            // 2026-09-23 에 sudo 1.9.15p5 로 쟀다. `sudo -h localhost <명령>` 은 `a remote host may
+            // only be specified when listing privileges`, `sudo --remove-timestamp <명령>` 은 usage
+            // 만 찍고, `sudo -U root <명령>` 은 `the -U option may only be used with the -l option`
+            // 이다. 셋 다 어느 철자로 쓰든 뒤의 명령이 안 돈다 — `-U` 를 `-l` 과 함께 준 줄은 그
+            // `-l` 이 이미 여기 서므로, "함께 서야 도는" 어휘 없이 `stops` 하나로 선다.
+            //
+            // `-h` 는 값을 붙여서만 받던 이름이라([`Wrapper::attach`]) 그 칸에서 옮겨 왔다.
+            // 붙인 값(`-hlocalhost`)도 뭉치 고리가 글자로 먼저 보아 여기서 걸리고, `--host=localhost`
+            // 는 `=` 갈래가 같은 답을 낸다. [`PRINTS`] 의 `-h` 를 제 표로 이기던 자리도 이제
+            // 여기로 모인다 — 두 길의 답이 `Stops` 로 같다.
+            stops: &[
+                "-e",
+                "--edit",
+                "-l",
+                "--list",
+                "-v",
+                "--validate",
+                "-h",
+                "--host",
+                "-K",
+                "--remove-timestamp",
+                "-U",
+                "--other-user",
+            ],
             elsewhere: &["-i", "--login"],
             shell: &[],
             chdir: &["-D", "--chdir"],
@@ -4647,7 +4672,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         }
         // **찍기만 하는 스위치에서 멈춘다**([`PRINTS`], moai-y0gv) — 판 번호와 도움말은 뒤의
         // 명령을 아예 안 돌린다. 값을 따로 받는 철자는 위에서 이미 걸렸고, **값을 붙여서만 받는
-        // 철자는 제 표가 이긴다** — `sudo -h` 는 도움말이 아니라 호스트를 받는 스위치다.
+        // 철자는 제 표가 이긴다** — 그 문이 지금 비어 있는 까닭은 [`PRINTS`] 에 적어 두었다.
         if PRINTS.contains(&word.as_str()) && !w.attach.contains(&word.as_str()) {
             return Some(Wrapped::Stops);
         }
@@ -4758,7 +4783,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 stop = false;
                 break;
             }
-            // 붙여서만 값을 받는 글자 — 남은 글자는 스위치가 아니라 그 값이다(`sudo -hHOST`).
+            // 붙여서만 값을 받는 글자 — 남은 글자는 스위치가 아니라 그 값이다(`xargs -l1`).
             if letter(w.attach, c) {
                 stop = false;
                 break;
@@ -5155,8 +5180,9 @@ fn adds_idea(args: &[String], verbs: &[&str]) -> bool {
 /// 도움말을 부르는가. 도움말은 아무것도 안 만들고 안 옮기고 0 으로 끝난다.
 ///
 /// **`moai` 의 인자만 준다.** 토막 전부를 주던 자리는 감싸는 명령의 `-h` 까지 세, `sudo -h moai
-/// add x` 를 도움말로 읽고 규칙 1 을 통째로 넘겼다(리뷰 moai-p836.rv) — `sudo -h` 는 sudo 의
-/// 호스트 스위치고, 그 뒤의 `moai add` 는 그대로 만든다.
+/// add x` 를 도움말로 읽고 규칙 1 을 통째로 넘겼다(리뷰 moai-p836.rv) — `-h` 는 sudo 의 것이지
+/// moai 의 도움말이 아니다. 그 줄 자체는 이제 [`Wrapper::stops`] 에서 멈추지만(moai-m4ze),
+/// 인자를 갈라 읽는 이 잣대는 감싸는 명령 열여덟 줄 전부에 그대로 선다.
 fn asks_help(words: &[String]) -> bool {
     words.iter().any(|t| t == "-h" || t == "--help")
 }
@@ -5600,7 +5626,8 @@ fn create_in<'a>(
         // `moai add "--from 을 나중에"` 가 규칙을 통째로 지나간다 — 동사를
         // 자리로 읽기로 한 것과 같은 까닭이다.
         // **플래그는 `moai` 의 인자에서만 읽는다** — 토막 전부를 훑던 판은 감싸는 명령의 것까지
-        // 세, `sudo -h moai add x` 를 도움말로 읽었다(리뷰 moai-p836.rv).
+        // 세, `sudo -h moai add x` 를 도움말로 읽었다(리뷰 moai-p836.rv — 그 줄은 이제
+        // [`Wrapper::stops`] 에서 멈춘다, moai-m4ze).
         let Some(args) = moai_args(seg) else { return false };
         creates(seg)
             && (promotes_into(seg) || !args.iter().any(|t| t == "--from" || t.starts_with("--from=")))
@@ -8957,14 +8984,13 @@ mod tests {
             "sudo -u 남 -- moai add '딴 일'",
             "env timeout 5 sudo moai add '딴 일'",
             // **값을 붙여서만 받는 옵션은 다음 낱말을 안 먹는다**(리뷰 moai-p836.rv) —
-            // `env --block-signal[=SIG]` 셋과 `sudo -h[HOST]` 다. 먹던 판은 `moai` 를 값으로 삼켜
-            // `add` 를 명령으로 읽었다.
+            // `env --block-signal[=SIG]` 셋이다. 먹던 판은 `moai` 를 값으로 삼켜 `add` 를 명령으로
+            // 읽었다. (`sudo -h[HOST]` 도 여기 섰는데, 붙인 값으로도 안 도는 줄이라 아래
+            // 멈추는 목록으로 옮겼다 — moai-m4ze.)
             "env --block-signal moai add '딴 일'",
             "env --default-signal moai add '딴 일'",
             "env --ignore-signal moai add '딴 일'",
             "env --block-signal=INT moai add '딴 일'",
-            "sudo -h moai add '딴 일'",
-            "sudo -hHOST moai add '딴 일'",
             // **`--` 는 옵션만 끝낸다** — 제 자리 인자는 그 뒤에 온다.
             "timeout -- 5 moai add '딴 일'",
             // **값을 따로 받는 짧은 옵션을 빠뜨리면 그 값이 명령으로 읽힌다.**
@@ -9064,6 +9090,23 @@ mod tests {
             "xargs -ri moai add '딴 일'",
             "sudo -l moai add '딴 일'",
             "sudo -v moai add '딴 일'",
+            // **sudo 의 `-h`·`-K`·`-U` 여섯 이름**(moai-m4ze) — 2026-09-23 에 sudo 1.9.15p5 로
+            // 쟀다. `-h` 는 `a remote host may only be specified when listing privileges`,
+            // `-K` 는 usage 만, `-U` 는 `the -U option may only be used with the -l option` 이다.
+            // 도는 줄로 읽던 판은 안 도는 집기를 세어 뒤의 빈손 쓰기를 풀어 주고, 안 도는 쓰기를
+            // 잘못 막았다.
+            "sudo -h localhost moai add '딴 일'",
+            "sudo -hlocalhost moai add '딴 일'",
+            "sudo -h moai add '딴 일'",
+            "sudo --host=localhost moai add '딴 일'",
+            "sudo --host localhost moai add '딴 일'",
+            "sudo -nh localhost moai add '딴 일'",
+            "sudo -K moai add '딴 일'",
+            "sudo --remove-timestamp moai add '딴 일'",
+            "sudo -U root moai add '딴 일'",
+            "sudo --other-user=root moai add '딴 일'",
+            "sudo --other-user root moai add '딴 일'",
+            "sudo -lU root moai add '딴 일'",
             "doas -C /etc/doas.conf moai add '딴 일'",
             "env -C /남의/저장소 moai add '딴 일'",
             "env --chdir=/남의/저장소 moai add '딴 일'",
