@@ -115,6 +115,16 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 - The release check no longer follows a redirect down to plaintext `http`. A call
   that starts on `https` is refused rather than downgraded, on every hop. A call
   you pointed at a plaintext mirror yourself still works — that one is your choice.
+- One stale row no longer makes `.moai/issues.jsonl` conflict on **every** merge.
+  The merge driver judged rows neither side had touched, so a single row carrying
+  a value today's rules reject — left by a hand-resolved conflict, or written by a
+  binary of another version — put conflict markers around itself on every merge
+  from then on, with the two sides inside them byte-identical and nothing for a
+  person to choose. A row that already stands on one branch now comes through as
+  its own bytes; what the merge itself composes field by field is still judged, so
+  a line the tool would refuse is still handed to a person. This is the same rule
+  the rest of the tool keeps: strictness is about the row being written now, not
+  about the whole file.
 
 ## [0.1.1] - 2026-09-22
 
