@@ -5508,7 +5508,11 @@ fn is_review(i: &Issue, out_of_plan: &BTreeSet<&str>) -> bool {
 /// `src/` 의 한 줄이 같은 값으로 막히고, 그래서 세션당 한 번으로 풀어야 했다 —
 /// 느슨해진 규칙은 정작 막아야 할 것을 놓친다.
 pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, target: &str) -> Decision {
-    if !counted(target, root) || !held(issues, cfg, away).is_empty() {
+    // **한 판에 경로를 한 번만 푼다**(moai-ln11) — 세는 자([`counted`])와 내미는 자([`shown`])가
+    // 같은 값을 빌려 쓴다. 둘이 저마다 풀던 판은 막는 길마다 [`resolve`] 와 `canonicalize` 를
+    // 두 벌씩 돌았다.
+    let at = resolve(target, root);
+    if !counted(&at, root) || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
     // **본 칸을 함께 준다**(`--from`). 이 줄은 여럿이 같은 트래커를 쓰는 저장소에서 지어지므로, 짓고
@@ -5554,7 +5558,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
          If it was not in the plan, create it and pick that id up.\n\
          \x20 moai add '<title>'\n\
          \x20 moai mv <id> in_progress",
-            shown(&resolve(target, root), root, target)
+            shown(&at, root, target)
         ),
     )
 }
@@ -7579,15 +7583,20 @@ const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
 /// 이 저장소 `.gitignore` 의 `_workspace/` 도 어느 깊이에서든 걸린다.
 const SCRATCH: &str = "_workspace";
 
-/// 이 파일을 고치는 것이 일에 매여야 하는가.
-fn counted(path: &str, root: &Path) -> bool {
-    if path.is_empty() {
-        return false;
-    }
+/// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
+///
+/// 푸는 자리를 [`guard_edit`] 으로 올린 것은 거절 한 판이 같은 경로를 **두 번** 풀고 있었기
+/// 때문이다: 세는 데 한 번, 거절문에 실을 철자를 내는 데 한 번([`shown`] 이 서기 전의 `rel_to`).
+/// 둘이 저마다 [`resolve`] 와 `canonicalize` 를 다시 돌았는데, 그 둘은 늘 같은 경로를 받는다 —
+/// 막는 판은 세는 데서 참이 나와야 닿는 자리라 언제나 짝으로 돈다.
+///
+/// **빈 경로에 앞문을 안 둔다.** 여기 오기 전 [`resolve`] 가 그것을 뿌리로 풀고, 뿌리는 조각이
+/// 없어 아래에서 그대로 떨어진다 — 앞문이 있던 때와 같은 답이다.
+fn counted(at: &Path, root: &Path) -> bool {
     // **푼 값을 붙들고 빌려 쓴다.** 한 줄로 이으면 임시값이 그 줄 끝에서 죽어 `to_path_buf` 로
     // 한 벌을 더 떠야 하는데, 아래는 조각을 훑기만 한다 — Edit·Write 마다, 셸에서 캔 경로마다 도는
     // 자리라 그 한 벌이 값 없이 쌓인다.
-    let real = real_path(path, root);
+    let real = real_path(at);
     let Ok(rel) = real.strip_prefix(root) else {
         return false; // 저장소 밖 — 스크래치패드·임시 파일·남의 저장소
     };
@@ -7632,9 +7641,9 @@ fn resolve(path: &str, root: &Path) -> PathBuf {
 /// 철자를 그대로 돌려주므로, 여기에 그것을 끼우면 **아직 없는 파일**에서 안 풀린 철자가 나와
 /// `strip_prefix(root)` 가 빗나간다 — 2026-09-19 에 닫은 바로 그 구멍이다. 이 자리가 쓰는 것은
 /// [`crate::store::real_prefix`] 다.
-fn real_path(path: &str, root: &Path) -> PathBuf {
+fn real_path(at: &Path) -> PathBuf {
     // **`..` 는 [`resolve`] 가 이미 접었다** — [`crate::store::real_prefix`] 는 접힌 것을 받는다.
-    crate::store::real_prefix(&resolve(path, root))
+    crate::store::real_prefix(at)
 }
 
 /// 거절문이 내밀 철자 — **사람이 친 그대로다**(moai-fr0a).
@@ -13465,9 +13474,12 @@ mod korean_tests {
     /// 세션이 만든 것도.
     #[test]
     fn the_humanizer_workspace_is_not_counted() {
-        assert!(!counted("_workspace/2026-09-18-001/final.md", Path::new("/repo")));
-        assert!(!counted("/repo/sub/_workspace/2026-09-18-001/01_input.txt", Path::new("/repo")));
-        assert!(counted("src/main.rs", Path::new("/repo")));
-        assert!(counted("src/_workspace_notes.rs", Path::new("/repo")));
+        let root = Path::new("/repo");
+        // **푼 자리로 묻는다**(moai-ln11) — 세는 자는 [`super::guard_edit`] 이 이미 푼 값을 받는다.
+        let counted = |p: &str| super::counted(&resolve(p, root), root);
+        assert!(!counted("_workspace/2026-09-18-001/final.md"));
+        assert!(!counted("/repo/sub/_workspace/2026-09-18-001/01_input.txt"));
+        assert!(counted("src/main.rs"));
+        assert!(counted("src/_workspace_notes.rs"));
     }
 }
