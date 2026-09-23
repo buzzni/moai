@@ -2192,7 +2192,9 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 안 나오는 까닭은 이 패널 말고는 어디에도 안 적힌다 — 낱말은 CLI 상세와
     // 같은 자리(`view::deferred_for`)에서 받는다. **물려받은 미룸도** 같이 받는다 —
     // 미룬 에픽의 멤버에 표가 없으면 그 까닭이 여기서도 빈다.
-    if let Some(d) = crate::view::deferred_for(i, site.index.deferred_root(&i.id), &site.now, site.lang) {
+    // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 이 패널이 `ready` 에 안 나오는 까닭을 대는 유일한
+    // 자리라, 접은 지도를 짚어 같은 id 의 뒷줄 답을 대면 안 일어난 일을 설명한다.
+    if let Some(d) = crate::view::deferred_for(i, site.index.shelved_at(idx), &site.now, site.lang) {
         head.push(Span::raw("  ·  "));
         head.push(Span::styled(d, Style::new().fg(Color::Yellow)));
     }

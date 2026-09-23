@@ -325,12 +325,25 @@ impl Ground {
                 (id.to_string(), stood)
             })
             .collect();
+        // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
+        // 때만 서므로, `kinds` 가 줄 수만큼 크면 id 가 다 다르고 `torn` 은 반드시 빈다 — 그
+        // 문 하나로 줄마다 도는 걸음 둘과, 아래 마일스톤 지도의 `String` 두 벌씩을 아낀다.
+        let torn: std::collections::BTreeSet<String> = match soil.kinds.len() == issues.len() {
+            true => std::collections::BTreeSet::new(),
+            false => crate::report::torn_ids(issues, &soil.shelved).iter().map(|k| k.to_string()).collect(),
+        };
         Ground {
             stands,
             epic: soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
-            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            torn: crate::report::torn_ids(issues, &soil.shelved).iter().map(|k| k.to_string()).collect(),
+            // **읽는 자가 없으면 안 옮겨 담는다** — 이 지도를 보는 길은 미룸을 줄에 되묻는 하나
+            // 뿐이라(`Where::deferred`), `torn` 이 빈 저장소에서는 적재마다 줄마다 `String` 둘을
+            // 짓고 아무도 안 읽었다(리뷰 moai-jk2u.hr4).
+            milestone: match torn.is_empty() {
+                true => std::collections::BTreeMap::new(),
+                false => soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            },
+            torn,
             kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
         }
@@ -366,13 +379,10 @@ impl Ground {
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.
             lines: crate::report::Lines::of(issues),
             put_off: self.put_off.iter().map(String::as_str).collect(),
-            // **`torn` 이 빌 때는 안 짓는다**(moai-u3ta) — 이 지도를 읽는 자는 미룸을 줄에
-            // 되묻는 길 하나뿐이고(`Where::deferred`), 성한 저장소에서는 그 길로 안 간다.
-            // 여기는 키마다 도는 자리라, 줄마다 한 칸인 지도를 걸음마다 지으면 그대로 값이다.
-            milestone: match self.torn.is_empty() {
-                true => std::collections::BTreeMap::new(),
-                false => borrow(&self.milestone),
-            },
+            // **`torn` 이 비면 이 지도도 비어 있다**(moai-u3ta) — 읽는 자는 미룸을 줄에 되묻는
+            // 길 하나뿐이고(`Where::deferred`), 성한 저장소에서는 그 길로 안 간다. 적재가 아예
+            // 안 담으므로([`Ground::in_soil`]) 여기서는 그대로 빌린다.
+            milestone: borrow(&self.milestone),
             torn: self.torn.iter().map(String::as_str).collect(),
             states: self.columns(),
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
@@ -1207,7 +1217,9 @@ impl Site {
     /// 있다.**
     pub fn spins(&self, at: usize) -> bool {
         let i = &self.issues[at];
-        if self.index.deferred_root(&i.id).is_some() {
+        // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 짝인 `report::wip` 가 자리로 세므로, 여기만
+        // 접은 지도를 짚으면 보드가 집었다고 세는 줄의 물레가 멈추고 그 거꾸로도 선다.
+        if self.index.shelved_at(at).is_some() {
             return false;
         }
         let busy = !crate::report::is_group(i) || self.stand_of(i).is_some_and(|s| s.busy);
@@ -2421,9 +2433,7 @@ impl App {
             return;
         }
         site.shown = (0..site.issues.len())
-            .map(|at| {
-                view.shows(site.column(at), site.index.deferred_root(&site.issues[at].id).is_some(), &site.cfg.statuses)
-            })
+            .map(|at| view.shows(site.column(at), site.index.shelved_at(at).is_some(), &site.cfg.statuses))
             .collect();
         let mut lit = std::collections::HashSet::new();
         for (at, _) in site.shown.iter().enumerate().filter(|(_, on)| **on) {
