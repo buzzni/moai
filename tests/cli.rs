@@ -15062,7 +15062,7 @@ fn a_row_a_newer_binary_wrote_does_not_escalate_the_merge() {
     let spike = "{\"id\":\"argos-9zzz\",\"title\":\"새 종류\",\"kind\":\"spike\",\"status\":\"todo\",\
                  \"created_at\":\"2026-09-01T00:00:00Z\",\"updated_at\":\"2026-09-01T00:00:00Z\",\
                  \"status_since\":\"2026-09-01T00:00:00Z\"}";
-    std::fs::write(root.join(".moai/issues.jsonl"), format!("{}{spike}\n", issues(root))).unwrap();
+    append_raw(root, format!("{spike}\n").as_bytes());
     git(root, &["commit", "-qam", "side"]);
 
     git(root, &["checkout", "-q", "main"]);

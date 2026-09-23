@@ -1600,8 +1600,11 @@ Options:
 
   **When the same field was changed differently, a person resolves it.**
   Picking one side silently makes the other side's edit vanish without a
-  trace. With an unreadable line or a duplicated id the whole file is handed
-  over inside conflict markers - keeping only what parsed would lose the rest.
+  trace. A line this binary cannot read travels through byte for byte - paired
+  by its id when it has one, so only a row both sides changed is handed over,
+  and counted line by line when it has none. What still hands the whole file
+  over inside conflict markers is a duplicated id among readable rows, and a
+  file that is not text - keeping only what parsed would lose the rest.
 
   Installing is once per clone. Git reads the driver command from the config
   only, and the config is not committed. In a clone without it, merge=moai in
