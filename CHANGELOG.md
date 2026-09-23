@@ -10,6 +10,25 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-23
+
+**Two things in this release break a caller.** Both are written up where they
+belong below; they are gathered here so that reading the release does not depend
+on finding them.
+
+- **`prime --json`'s `epic` changed meaning.** It is now what the file says, like
+  `epic` everywhere else, and the resolved answer moved to `derived_epic`. A loop
+  reading `.picked[].epic` or `.ready[].epic` changes that one word to
+  `.derived_epic` and gets what it used to get.
+- **`moai add --from` refuses the flags a plan cannot honour.** `--status`,
+  `--quiet` and a typed `--type` used to be accepted and thrown away by a call
+  that ended in 0; they now exit 1. The five the argument parser already refused
+  — a positional title, `--epic`, `--tag`, `--priority` and `--parent` — are
+  still refused, but the exit code changes from 2 to 1 and the message becomes the
+  command's own rather than the parser's. `--start` and `--due` are new in this
+  release, so no call ever passed them to a plan. `--body` goes the other way: a
+  plan takes it now.
+
 ### Added
 
 - A milestone carries a **start and a deadline**: `moai milestone add 'v0.1'
@@ -61,14 +80,12 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   at all, read as before. On a `noexec` `TMPDIR` this now also means
   `moai skill status` will say the hook is not runnable rather than claiming it is
   installed.
-
 - The refusal for rule 2 hands back the path **you typed**, not the one moai
   resolved. Judging still follows symlinks — the two spellings are one place, as
   they have to be — but a machine whose `TMPDIR`, `/tmp` or project directory is a
   link no longer asks you to retype a path that is not in your file list. This
   holds for a write caught inside a shell command too, where the word you wrote is
   what comes back.
-
 - The release check says *why* it could not ask. The version line still reads as
   one of four, but the fourth now carries the reason in parentheses — no network,
   timed out, rate limited, a server error, TLS failed, unreadable answer, odd
@@ -139,9 +156,10 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   only what you actually passed (the positional stands as `[title]`), exits 1, and
   under `--json` it is the `{"code":"bad_input", …}` object every other refusal
   gives, so a loop that branches on `code` sees this one too. **The title, the
-  epic, the tag, the priority, the parent and the two dates were refused before
-  too, but by the argument parser** — so for those six the exit code changes from
-  2 to 1 and the message stops being plain text.
+  epic, the tag, the priority and the parent were refused before too, but by the
+  argument parser** — so for those five the exit code changes from 2 to 1 and the
+  message stops being plain text. The two dates are new in this release, so a plan
+  has refused them from the start.
 - **A plan takes `--body`**, and puts it on the first epic it creates — the one
   place `moai show <epic>` reads why these issues are one bundle, and the same
   place `moai idea promote` has been putting the thought's body. What is refused
@@ -211,7 +229,6 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 - `moai ready` no longer prints `moai defer  --undo` with no id in it. Where an id
   stands twice, the row that left the plan and the row the undo target was read
   back from could be different lines.
-
 - A row one side broke by hand now stands **inside** the conflict markers on that
   side. Pairing a row needed its JSON to parse, so a row edited until it stopped
   being JSON left that side of the marker empty — which reads as "that side
