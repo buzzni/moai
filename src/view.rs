@@ -1842,21 +1842,45 @@ pub fn detail(
 ///
 /// 남은 날수는 **종료 기한에만** 붙는다. 시작 기한이 지났는가는 물어볼 일이 아니다.
 fn due_span(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<String> {
+    let d = due_of(i, now, z, lang)?;
+    // **색이 혼자 뜻을 지지 않는다**(CLAUDE.md) — 지난 것을 붉게 칠하되 `2일 지남` 이라는
+    // 낱말이 같이 선다. 색이 안 나가는 자리에서도 같은 말을 한다.
+    let tail = d
+        .left
+        .map(|word| paint(if d.past { style::WARN } else { style::DIM }, &format!("  {word}")))
+        .unwrap_or_default();
+    Some(format!("{}{tail}", paint(style::DIM, &d.span)))
+}
+
+/// 기한 한 줄의 **조각**(moai-tlpv) — 적힌 두 날과, 남은 날수 낱말.
+///
+/// **글을 짓는 자는 하나고 칠은 부르는 쪽이 한다.** CLI 는 ANSI 로, 탐색기는 제 조각(`Span`)으로
+/// 칠하므로 칠까지 여기서 하면 탐색기가 이 글을 못 쓰고 제 말을 새로 짓는다 — 그러면 같은 값을
+/// 두 화면이 다른 말로 말한다(`view::span_of`·`view::deferred_for` 와 같은 결).
+pub struct Due {
+    /// `2026-09-15 → 2026-09-30` — **적힌 그대로다.** 달력의 날이라 시간대로 옮길 시각이 없다.
+    pub span: String,
+    /// `(8일 남음)` — 종료 기한이 없거나 꼴이 틀리면 없다.
+    pub left: Option<String>,
+    /// 기한이 지났는가. 칠을 가르는 자리가 이것만 보면 된다.
+    pub past: bool,
+}
+
+/// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
+pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
     let (start, due) = (i.starts_on.as_deref(), i.due_on.as_deref());
     if start.is_none() && due.is_none() {
         return None;
     }
     let dash = "—";
-    // **색이 혼자 뜻을 지지 않는다**(CLAUDE.md) — 지난 것을 붉게 칠하되 `2일 지남` 이라는
-    // 낱말이 같이 선다. 색이 안 나가는 자리에서도 같은 말을 한다.
     // **읽는 사람의 달로 잰다**(moai-h2th) — 보드의 기한 경고가 쓰는 자와 같은 자다
     // (`report::status_in`). 둘이 갈리면 보드는 "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
     let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
-    let tail = match left {
-        Some(d) => paint(if d < 0 { style::WARN } else { style::DIM }, &format!("  {}", due_tail(d, lang))),
-        None => String::new(),
-    };
-    Some(format!("{} → {}{tail}", paint(style::DIM, start.unwrap_or(dash)), paint(style::DIM, due.unwrap_or(dash))))
+    Some(Due {
+        span: format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
+        left: left.map(|d| due_tail(d, lang)),
+        past: left.is_some_and(|d| d < 0),
+    })
 }
 
 /// 종료 기한까지 남은 날수를 낱말로 — 지났으면 지난 날수다(`left` 가 음수).
@@ -1931,22 +1955,37 @@ pub fn members_label(lang: Lang) -> String {
 /// **벽시계라는 말을 붙인다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
 /// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다 — 품으로 읽히면 안 된다.
 pub fn spent(sp: &crate::report::Spent, lang: Lang) -> Option<String> {
+    let label = row_label(say(lang, "detail.spent"), lang);
+    Some(match spend_of(sp, lang)? {
+        Spend::Unmeasured(said) => format!("  {label}   {}", paint(style::DIM, &said)),
+        Spend::Measured { total, of } => format!("  {label}   {total}  {}", paint(style::DIM, &of)),
+    })
+}
+
+/// 든 시간 한 줄의 **조각**(moai-tlpv) — [`Due`] 와 같은 까닭으로 칠을 안 한다.
+pub enum Spend {
+    /// 닫힌 멤버는 있는데 **하나도 못 쟀다** — 합계 자리에 그 말만 선다.
+    Unmeasured(String),
+    /// 잰 합계와, 몇을 쟀는지.
+    Measured { total: String, of: String },
+}
+
+/// [`Spend`] 를 짓는다. 닫힌 멤버가 없으면 없다 — 세울 줄이 없다.
+pub fn spend_of(sp: &crate::report::Spent, lang: Lang) -> Option<Spend> {
     if sp.closed == 0 {
         return None;
     }
-    let label = row_label(say(lang, "detail.spent"), lang);
     let closed = sp.closed.to_string();
     // **잰 것이 있는가를 한 자리에서 가른다**(리뷰) — 중앙값이 없다는 것과 잰 멤버가 없다는 것은
     // 같은 사실이라, 둘을 따로 물으면 한쪽이 `?` 로 조용히 줄을 통째로 지운다.
     let Some(median) = sp.median else {
-        let said = fill(say(lang, "detail.spent_none"), &[("closed", &closed)]);
-        return Some(format!("  {label}   {}", paint(style::DIM, &said)));
+        return Some(Spend::Unmeasured(fill(say(lang, "detail.spent_none"), &[("closed", &closed)])));
     };
     let of = fill(
         say(lang, "detail.spent_of"),
         &[("closed", &closed), ("measured", &sp.measured.to_string()), ("median", &minutes(median, lang))],
     );
-    Some(format!("  {label}   {}  {}", minutes(sp.minutes, lang), paint(style::DIM, &of)))
+    Some(Spend::Measured { total: minutes(sp.minutes, lang), of })
 }
 
 /// 분을 낱말로 — 한 시간이 안 되면 분, 넘으면 `1시간 59분` 처럼 시간과 분이다.

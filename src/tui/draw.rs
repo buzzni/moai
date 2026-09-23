@@ -2308,6 +2308,23 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         };
         fields.push((label.into(), mark, text));
     }
+    // **기한도 CLI 상세와 같은 자다**(moai-tlpv) — 글을 짓는 것은 `view::due_of` 하나고 여기는
+    // 조각을 잇기만 한다. 한때 이 패널에는 `due_on`·`starts_on` 이 어디에도 없어, `--due` 를 친
+    // 사람이 그 줄을 탐색기로 펼치면 아무것도 안 섰다. **적힌 날짜는 시간대로 안 옮긴다** — 달력의
+    // 날이라 옮길 시각이 없고, 옮기는 것은 "며칠 남았나" 를 재는 쪽이다(moai-h2th).
+    //
+    // **시각 줄 위에 선다** — CLI 상세와 같은 차례다(`view::detail`). 생성·수정·시작·끝은 도구가
+    // 적은 때고 이것은 사람이 잡은 계획이라, 섞어 세우면 넷 가운데 하나가 사람의 값인 것이 안 보인다.
+    //
+    // **색으로 가르지 않는다.** 지난 것은 `(2일 지남)` 이라는 낱말이 말하고, 이 패널의 값 칸은
+    // 어느 줄도 제 색을 안 입는다(`field`) — 여기만 칠하면 칠을 받는 자를 하나 더 열게 된다.
+    if let Some(due) = crate::view::due_of(i, &site.now, zone, site.lang) {
+        let text = match &due.left {
+            Some(word) => format!("{}  {word}", due.span),
+            None => due.span.clone(),
+        };
+        fields.push((say(site.lang, "tui.about.due").into(), None, text));
+    }
     // CLI 상세와 **같은 자**를 쓴다. 두 표면이 같은 값을 다르게 적으면 보는
     // 쪽이 어느 쪽을 믿을지 정해야 한다.
     fields.push((say(site.lang, "tui.field.created").into(), None, crate::view::stamp(&i.created_at, zone)));
@@ -2510,6 +2527,29 @@ fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
         })
         .collect();
     out.push(Line::from(counts));
+
+    // **마일스톤에만 든 시간을 곁들인다**(moai-tlpv) — `moai show <마일스톤>` 이 멤버 줄 밑에
+    // 세우는 그 줄이고(moai-wfup), 세는 자도 글을 짓는 자도 그쪽과 하나다(`report::spent_in`·
+    // `view::spend_of`). 에픽의 기간은 아직 묻는 자리가 아니다.
+    //
+    // **멤버는 위에서 이미 고른 것을 쓴다** — 여기서 다시 물으면 한 프레임에 소속 지도가 두 벌
+    // 선다. `progress.work` 는 `is_work` 로 거른 것이고 `spent_in` 이 세는 것도 그 줄들이다.
+    // 닫힌 멤버가 없으면 줄을 안 세운다: 아직 아무것도 안 끝난 마일스톤의 `0분` 은 "0분에 했다"
+    // 로 읽히는데, 그것은 안 한 것이지 0 분이 아니다.
+    let stone = e.at().is_some_and(|at| site.issues[at].kind == crate::model::Kind::Milestone);
+    if stone {
+        let members: Vec<&crate::model::Issue> = work.iter().map(|&at| &site.issues[at]).collect();
+        if let Some(said) = crate::view::spend_of(&crate::report::spent_in(&members), site.lang) {
+            let label = Span::styled(format!("{}  ", say(site.lang, "tui.about.spent")), dim());
+            out.push(Line::from(match said {
+                // 잰 것이 없다는 말은 **한 벌로** 흐리게 선다 — 합계 자리에 설 수가 없다.
+                crate::view::Spend::Unmeasured(text) => vec![label, Span::styled(text, dim())],
+                crate::view::Spend::Measured { total, of } => {
+                    vec![label, Span::raw(total), Span::styled(format!("  {of}"), dim())]
+                }
+            }));
+        }
+    }
     out
 }
 
@@ -4736,6 +4776,59 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 20).join("\n");
         assert!(lines.contains("막힘"), "{lines}");
         assert!(lines.contains("아주 긴"), "막는 것의 제목이 없다\n{lines}");
+    }
+
+    /// **상세가 기한과 든 시간을 낸다**(moai-tlpv) — CLI 상세와 **같은 자**로 짓는다
+    /// (`view::due_of`·`view::spend_of`). 한때 이 패널에는 `due_on`·`starts_on`·`spent` 가
+    /// 어디에도 없어, `moai edit <마일스톤> --due` 를 친 사람이 그 줄을 탐색기로 펼치면 아무것도
+    /// 안 섰다 — 적히기만 하고 어느 화면에도 안 서는 값은 틀려도 아무도 모른다(moai-38mh).
+    ///
+    /// **든 시간은 마일스톤에만 선다.** 에픽의 기간은 아직 묻는 자리가 아니다(moai-wfup).
+    #[test]
+    fn detail_draws_the_deadline_and_what_the_milestone_spent() {
+        let mut stone = Issue::new(
+            "argos-0001".into(),
+            "v0.1".into(),
+            Kind::Milestone,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        stone.starts_on = Some("2026-09-05".into());
+        stone.due_on = Some("2026-09-20".into());
+        let mut closed = Issue::new(
+            "argos-0002".into(),
+            "닫힌 멤버".into(),
+            Kind::Issue,
+            Status::new("done"),
+            "2026-09-01T00:00:00Z",
+        );
+        closed.milestone = Some("argos-0001".into());
+        closed.started_at = Some("2026-09-05T00:00:00Z".into());
+        closed.done_at = Some("2026-09-05T02:30:00Z".into());
+        let mut open =
+            Issue::new("argos-0003".into(), "선 멤버".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        open.milestone = Some("argos-0001".into());
+
+        let mut a = every(vec![stone, closed, open]);
+        // **시계를 못박는다** — 안 박으면 `(N일 남음)` 이 돌리는 날마다 달라진다.
+        a.site.now = "2026-09-11T00:00:00Z".into();
+        a.see();
+        let pane = about_text(&render(&mut a, 160, 24));
+        assert!(pane.contains("2026-09-05 → 2026-09-20"), "적힌 두 날이 없다\n{pane}");
+        assert!(pane.contains("(9일 남음)"), "남은 날수가 없다\n{pane}");
+        // 든 시간은 닫힌 멤버 하나에서 온다 — 2시간 30분.
+        assert!(pane.contains("2시간 30분"), "든 시간이 없다\n{pane}");
+        assert!(pane.contains("중앙값"), "몇을 쟀는지를 안 댄다\n{pane}");
+
+        // **에픽에는 든 시간을 안 낸다.** 기한은 어느 줄에나 적힐 수 있으니 그대로 선다.
+        let mut epic = issues();
+        epic[0].due_on = Some("2026-09-20".into());
+        let mut a = every(epic);
+        a.site.now = "2026-09-11T00:00:00Z".into();
+        a.see();
+        let pane = about_text(&render(&mut a, 160, 24));
+        assert!(pane.contains("2026-09-20"), "에픽의 기한이 안 섰다\n{pane}");
+        assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
     }
 
     /// **상세가 그 줄에 닿은 커밋을 그린다**(moai-a4i0) — CLI 상세와 같은 자로: 트래커 커밋은
