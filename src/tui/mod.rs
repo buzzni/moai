@@ -358,7 +358,7 @@ impl Ground {
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
-            kinds: crate::report::Kinds::kept(&self.kinds),
+            kinds: self.kinds(),
             folded: self.folded.iter().map(String::as_str).collect(),
         }
     }
@@ -1190,7 +1190,7 @@ impl Site {
         if self.index.deferred_root(&i.id).is_some() {
             return false;
         }
-        let busy = !crate::report::is_group(i) || self.ground.stands.get(&i.id).is_some_and(|s| s.busy);
+        let busy = !crate::report::is_group(i) || self.stand_of(i).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
         // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
@@ -1208,8 +1208,22 @@ impl Site {
     /// 칸 지도는 빌려 든 것이라 꼴만 다르고 답은 같아야 한다.
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
-        let read = self.ground.stands.get(&i.id).map(|s| s.column.as_str());
-        crate::report::stands_on(&crate::report::Kinds::kept(&self.ground.kinds), i, read).unwrap_or(i.status.as_str())
+        self.read_of(i).unwrap_or(i.status.as_str())
+    }
+
+    /// 그 줄이 **입는** 읽은 칸의 셈([`crate::report::Stand`]) — 묶음이 아니거나 가려진 줄이면
+    /// `None` 이다.
+    ///
+    /// **문은 하나다**(리뷰, `report::stands_on`). 칸·도는가·기다림·미룬 수 넷이 같은 지도를
+    /// 짚는데 [`Site::column`] 만 가려짐을 거르던 때는, 가려진 마일스톤 줄이 제 칸을 그리면서
+    /// 쌍둥이 에픽의 `미룬 N` 과 그 에픽이 기다리는 까닭을 함께 달았다.
+    fn stand_of(&self, i: &Issue) -> Option<&Stood> {
+        crate::report::stands_on(&self.ground.kinds(), i, || self.ground.stands.get(&i.id))
+    }
+
+    /// [`Site::stand_of`] 의 읽은 칸만.
+    fn read_of(&self, i: &Issue) -> Option<&str> {
+        self.stand_of(i).map(|s| s.column.as_str())
     }
 
     /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·
@@ -1221,10 +1235,7 @@ impl Site {
     /// 목록을 그 첨자로 짚어 그 자리에서 죽었다.
     pub fn waits(&self, at: usize) -> (crate::report::Waiting, &[String]) {
         let i = &self.issues[at];
-        crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id))
-            .flatten()
-            .map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
+        self.stand_of(i).map_or((crate::report::Waiting::Live, &[][..]), |s| (s.waiting, s.aside.as_slice()))
     }
 
     /// 그 줄이 묶음이면 **칸 셈에서 미뤄 뺀 멤버 수**(`report::Stand::deferred`, moai-oz13). 묶음이
@@ -1238,7 +1249,7 @@ impl Site {
     /// ([`Site::waits`]). 답이 이미 `Option` 이라 넘친 첨자에 `None` 을 내는 데 드는 것이 없다.
     pub fn deferred(&self, at: usize) -> Option<usize> {
         let i = self.issues.get(at)?;
-        crate::report::is_group(i).then(|| self.ground.stands.get(&i.id)).flatten().map(|s| s.deferred)
+        self.stand_of(i).map(|s| s.deferred)
     }
 
     /// id 를 제목으로 푼다. 없으면 **끊겼다고 적는다** — id 만 내면 그것이 그저 제목 없는 줄인지

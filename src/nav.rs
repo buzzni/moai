@@ -226,7 +226,6 @@ impl Index {
             epic_of: &soil.epic,
             milestone_of: &soil.milestone,
             by_id: &by_id,
-            misplaced: &soil.lost,
             kinds: &soil.kinds,
             eclipsed: &eclipsed,
             has_milestones,
@@ -575,7 +574,6 @@ struct Ctx<'a> {
     epic_of: &'a BTreeMap<&'a str, &'a str>,
     milestone_of: &'a BTreeMap<&'a str, &'a str>,
     by_id: &'a BTreeMap<&'a str, usize>,
-    misplaced: &'a BTreeMap<&'a str, crate::report::Misplace>,
     /// id → 그 id 를 마지막으로 든 줄의 종류(`report::kinds`) — 줄마다의 길 잃음 판정
     /// ([`Ctx::adrift`])이 참조의 종류를 여기서 본다.
     kinds: &'a BTreeMap<&'a str, crate::model::Kind>,
@@ -603,11 +601,16 @@ impl Ctx<'_> {
         }
     }
 
-    /// 그 줄의 참조가 못 쓸 것인가. **`report` 가 정한 그대로 묻는다** —
+    /// 그 id 의 줄이 `(길 잃음)` 에 서는가. **`report` 가 정한 그대로 묻는다** —
     /// 여기서 다시 판정하면 `moai status` 가 드러내는 집합과 `(길 잃음)`
     /// 바구니가 갈라진다.
+    ///
+    /// **그 id 의 줄을 찾아 [`Ctx::adrift`] 에 묻는다**(리뷰). id 로 짠 지도를 짚던 때는 같은
+    /// id 를 든 앞줄이 뒷줄의 판정을 입어, 에픽 줄 제 자리는 `(길 잃음)` 인데 그 멤버는
+    /// `under_milestone(e)` 밑에 그려졌다 — 위 주석이 막으려던 "뿌리에서 닿는 길이 없는 자리" 다.
+    /// 찾는 자는 [`Ctx::home`] 이 쓰는 `by_id` 와 같아서 답은 늘 그 id 의 뒷줄 것이다.
     fn lost(&self, id: &str) -> bool {
-        self.misplaced.contains_key(id)
+        self.by_id.get(id).is_some_and(|&at| self.adrift(&self.issues[at]))
     }
 
     /// 그 **줄**의 참조가 못 쓸 것인가 — [`crate::report::misplace_of`] 가 내리는 그 판정이다.
@@ -627,7 +630,7 @@ impl Ctx<'_> {
     /// 머리글이 `0/1` 인 에픽 밑에 줄 둘이 섰다. 가려진 줄은 [`Ctx::home`] 이 이미
     /// `(길 잃음)` 으로 갈라 보냈으므로 여기서 다시 안 가른다.
     fn epic_at<'i>(&'i self, i: &'i Issue) -> Option<&'i str> {
-        crate::report::joined_in(i, self.epic_of.get(i.id.as_str()).copied())
+        crate::report::joined_in(i, || self.epic_of.get(i.id.as_str()).copied())
     }
 
     fn under_milestone(&self, id: &str) -> Path {

@@ -442,11 +442,9 @@ impl Row {
                 status: Some(issues[at].status.as_str().to_string()),
                 // 묶음만 읽은 칸을 받고 가려진 줄은 안 입는다 — `report::stands_on` 과 같은
                 // 자다(moai-7iyc.5fz). 판정을 여기 베끼면 `show --json` 의 같은 키와 갈린다.
-                derived_status: crate::report::stands_on(
-                    kinds,
-                    &issues[at],
-                    states.get(issues[at].id.as_str()).copied(),
-                )
+                derived_status: crate::report::stands_on(kinds, &issues[at], || {
+                    states.get(issues[at].id.as_str()).copied()
+                })
                 .map(str::to_string),
                 priority: Some(issues[at].priority()),
             },

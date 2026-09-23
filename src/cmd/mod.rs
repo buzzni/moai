@@ -678,7 +678,7 @@ impl<'a> Row<'a> {
         // **여기서도 차례를 다시 적지 않는다**(`report::stands_on`) — 묶음만 입는 것도, 가려진
         // 줄에는 안 서는 것도(moai-7iyc.5fz) `report` 가 정한다. `-s` 로 고르는 자와 이 키를 내는
         // 자가 같은 자리에서 갈려야 한 화면이 같은 줄을 두 칸으로 말하지 않는다.
-        let derived = crate::report::stands_on(kind_of, &issue, read);
+        let derived = crate::report::stands_on(kind_of, &issue, || read);
         // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
         let kind = issue.kind.is_default().then(|| issue.kind.as_str());
         let priority = issue.priority.is_none().then(|| issue.priority());
@@ -840,8 +840,12 @@ pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, 
     issues
         .iter()
         .filter(|i| ids.contains(&i.id.as_str()))
-        // **쓰기 경로에는 쌍둥이가 없다**(`Row::from` 과 같은 까닭) — `store::with_write` 가 중복
-        // id 에 쓰기를 통째로 물리므로(`Trouble::DuplicateId`), 여기 온 파일에는 가려진 줄이 없다.
+        // **쌍둥이가 있어도 이 답은 파일에 안 닿는다**(리뷰). `Row::from` 과 달리 여기는 `with_write`
+        // 의 **닫힘 안**이라, 중복 id 를 물리는 `first_duplicate` 가 아직 안 돌았다 — 이 줄은 가려진
+        // 줄을 볼 수 있다. 그래도 지도를 안 대는 까닭은 그 파일에 대고 쓴 것은 닫힘이 돌아간 뒤
+        // `Trouble::DuplicateId` 로 통째로 물리기 때문이다: 여기서 센 `--from` 이 무엇이든 파일은
+        // 안 바뀐다. 게다가 묶음에는 `--from` 을 못 쓰므로(`cmd::mv`·`cmd::defer` 가 앞에서 거른다)
+        // 여기 남는 것은 일 줄뿐이고, 일 줄은 가려지든 아니든 읽은 칸을 안 입는다(`stands_on`).
         .map(|i| (i.id.clone(), crate::report::column(&crate::report::Kinds::no_twins(), i, &states).to_string()))
         .collect()
 }
