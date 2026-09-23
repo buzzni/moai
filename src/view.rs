@@ -366,7 +366,7 @@ pub fn list(
     }
 
     let show_tags = issues.iter().any(|i| !i.tags.is_empty());
-    let show_epic = issues.iter().any(|i| epics.contains_key(&(i.id.as_str(), i.kind)));
+    let show_epic = issues.iter().any(|i| epics.at(i).is_some());
     // 미룸 표를 달지 말지는 **부르는 쪽의 물음**에서 온다. 한때 결과의 내용
     // 으로 정했는데(`any(|i| !i.is_deferred())`), 그러면 `--all` 이 마침 전부
     // 미룬 것만 냈을 때 표가 통째로 사라져 계획 밖의 줄이 일과 똑같이 보인다 —
@@ -383,7 +383,7 @@ pub fn list(
         // [`gone_epic`] 이 괄호에 넣는다. 제목 칸과 한 열에 서므로 맨몸이면 에픽 제목으로 읽힌다.
         // **자르는 것은 두 갈래가 같다**(리뷰) — 한때 끊긴 쪽만 `clip` 을 안 지나, 이 열만
         // `EPIC_CAP` 을 넘길 수 있었다(긴 번역이 표를 밀어낸다).
-        .map(|i| match epics.get(&(i.id.as_str(), i.kind)) {
+        .map(|i| match epics.at(i) {
             None => "—".into(),
             Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
             Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
@@ -1247,7 +1247,7 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
         // **괄호는 여기서 한 겹만 단다**(moai-snus) — 끊긴 참조도 제 괄호를 안 달고 오므로
         // (`report::EpicLabel::Gone`) 두 갈래가 같은 모양으로 선다. 한때 그 낱말이 `(없는 에픽)`
         // 이라 이 줄이 `((없는 에픽))` 을 냈다.
-        let epic = match epics.get(&(i.id.as_str(), i.kind)) {
+        let epic = match epics.at(i) {
             None => String::new(),
             Some(crate::report::EpicLabel::Named(t)) => format!(" ({})", one_line(t)),
             // **끊긴 쪽도 [`one_line`] 을 지난다**(리뷰) — 위의 "모든 칸이" 에 이 칸도 든다.
@@ -1390,7 +1390,7 @@ pub fn ready(
         for ((i, (title, w_this)), tag) in picks.iter().zip(&heads).zip(&tags) {
             // 없는 것(`ready.no_epic`)과 끊긴 것(`report.epic_gone`)은 다른 답이다 — 표기는
             // [`list`] 와 같은 자리에서 정한다.
-            let epic = match epics.get(&(i.id.as_str(), i.kind)) {
+            let epic = match epics.at(i) {
                 None => say(lang, "ready.no_epic").to_string(),
                 Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
                 Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
@@ -1523,6 +1523,11 @@ pub struct Seen<'a> {
     pub roots: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
     pub states: BTreeMap<&'a str, &'a str>,
+    /// 가려진 줄을 가르는 지도 (`report::Kinds`, moai-7iyc.5fz). 위의 칸 지도는 id 로 짠 것이라,
+    /// 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 가려진 쪽이 이긴 쪽의 칸을 입는다 — 같은
+    /// 창의 트리는 그 줄을 `(길 잃음)` 에 제 칸으로 그리는데 이 줄만 다른 칸을 말한다.
+    /// 쌍둥이가 못 서는 자리는 `Kinds::no_twins()` 라는 낱말을 적고 그 까닭을 함께 댄다.
+    pub kinds: crate::report::Kinds<'a>,
     /// 어느 말로 그리고 어느 워크트리의 줄이 겹쳐 있는가 ([`Screen`]). 겹침을 묻는 길이
     /// [`Screen::branch`] 하나가 되어, 상세가 제 손으로 [`Origin`] 을 뒤지지 않는다.
     pub screen: Screen<'a>,
@@ -1653,7 +1658,7 @@ pub fn detail(
         marked(seen.screen.branch(&i.id), &i.title, usize::MAX, title_style(i)).0
     )];
 
-    let col = crate::report::column(i, &seen.states);
+    let col = crate::report::column(&seen.kinds, i, &seen.states);
     let st = style::status_style(col);
     let mut line = format!(
         "  {} {} · {}",
@@ -1768,7 +1773,7 @@ pub fn detail(
         if let Some(d) = deferred_for(c, seen.roots.get(c.id.as_str()).copied(), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
-        let ccol = crate::report::column(c, &seen.states);
+        let ccol = crate::report::column(&seen.kinds, c, &seen.states);
         out.push(format!(
             "  {}   {}  {}  ({} {}){tail}",
             row_label(say(lang, "detail.child"), lang),
@@ -3247,11 +3252,12 @@ mod tests {
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
+            kinds: crate::report::Kinds::no_twins(),
         }
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
-        BTreeMap::new()
+        crate::report::EpicLabels::titled(BTreeMap::new())
     }
 
     /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가
@@ -3273,7 +3279,8 @@ mod tests {
 
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-e001".into());
-        let labels = crate::report::EpicLabels::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
+        // `argos-e001` 이 없는 표 — 줄이 제 `epic` 으로 답을 내고 그 id 를 못 찾아 `Gone` 이다.
+        let labels = crate::report::EpicLabels::titled(BTreeMap::new());
 
         let p =
             crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
@@ -3501,11 +3508,16 @@ mod tests {
     /// 품은 채로 줄을 맞춘다. 지금 브랜치의 줄에는 아무것도 안 붙는다.
     #[test]
     fn a_line_from_another_branch_carries_its_mark_before_the_title() {
-        let mine = vec![issue("argos-0001", "여기 일", "todo")];
-        let theirs = vec![issue("argos-0002", "옆 일", "in_progress")];
+        // 에픽 열이 서야 그 열이 밀렸는지를 잰다 — 두 줄 다 같은 에픽을 적는다.
+        let holds = |id: &str, title: &str, col: &str| {
+            let mut i = issue(id, title, col);
+            i.epic = Some("argos-e001".into());
+            i
+        };
+        let mine = vec![holds("argos-0001", "여기 일", "todo")];
+        let theirs = vec![holds("argos-0002", "옆 일", "in_progress")];
         let (all, origin) = crate::worktree::overlay(mine, &[crate::worktree::Side::new("feat/x", "/wt", theirs)]);
-        let tagged: crate::report::EpicLabels =
-            all.iter().map(|i| ((i.id.as_str(), i.kind), crate::report::EpicLabel::Named("에픽".into()))).collect();
+        let tagged = crate::report::EpicLabels::titled(BTreeMap::from([("argos-e001", "에픽")]));
         let out = plain(&list(
             &all,
             &cfg(),
@@ -3675,8 +3687,7 @@ mod tests {
     fn the_epic_column_shows_a_title() {
         let mut i = issue("argos-0002", "멤버", "todo");
         i.epic = Some("argos-0001".into());
-        let labels =
-            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
+        let labels = crate::report::EpicLabels::titled(BTreeMap::from([("argos-0001", "저장 계층")]));
         let out = plain(&list(
             &[i.clone()],
             &cfg(),
@@ -3690,7 +3701,7 @@ mod tests {
 
         // 없는 에픽을 가리켜도 죽지 않고 그렇다고 말한다. **괄호는 이 표가 단다**(moai-snus) —
         // 값은 `Gone` 하나고, 낱말도 괄호도 그리는 쪽에서 온다.
-        let dangling = BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Gone)]);
+        let dangling = crate::report::EpicLabels::titled(BTreeMap::new());
         let out = plain(&list(
             &[i],
             &cfg(),
@@ -4163,8 +4174,7 @@ mod tests {
         a.epic = Some("argos-0001".into());
         let b = issue("argos-0003", "떠 있는 것", "todo");
         let wip = issue("argos-0004", "잡고 있는 것", "in_progress");
-        let labels =
-            BTreeMap::from([(("argos-0002", Kind::Issue), crate::report::EpicLabel::Named("저장 계층".into()))]);
+        let labels = crate::report::EpicLabels::titled(BTreeMap::from([("argos-0001", "저장 계층")]));
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();

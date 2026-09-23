@@ -660,7 +660,10 @@ impl<'a> Row<'a> {
                 std::borrow::Cow::Owned(own)
             }
         };
-        let derived = read.filter(|_| crate::report::is_group(&issue));
+        // **여기서도 차례를 다시 적지 않는다**(`report::stands_on`) — 묶음만 입는 것도, 가려진
+        // 줄에는 안 서는 것도(moai-7iyc.5fz) `report` 가 정한다. `-s` 로 고르는 자와 이 키를 내는
+        // 자가 같은 자리에서 갈려야 한 화면이 같은 줄을 두 칸으로 말하지 않는다.
+        let derived = crate::report::stands_on(kind_of, &issue, read);
         // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
         let kind = issue.kind.is_default().then(|| issue.kind.as_str());
         let priority = issue.priority.is_none().then(|| issue.priority());
@@ -822,7 +825,9 @@ pub fn standing_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, 
     issues
         .iter()
         .filter(|i| ids.contains(&i.id.as_str()))
-        .map(|i| (i.id.clone(), crate::report::column(i, &states).to_string()))
+        // **쓰기 경로에는 쌍둥이가 없다**(`Row::from` 과 같은 까닭) — `store::with_write` 가 중복
+        // id 에 쓰기를 통째로 물리므로(`Trouble::DuplicateId`), 여기 온 파일에는 가려진 줄이 없다.
+        .map(|i| (i.id.clone(), crate::report::column(&crate::report::Kinds::no_twins(), i, &states).to_string()))
         .collect()
 }
 

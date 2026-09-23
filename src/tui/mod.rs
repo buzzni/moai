@@ -336,6 +336,12 @@ impl Ground {
         self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
     }
 
+    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — `tui --json` 의 줄이
+    /// 칸을 누가 입는지를 이것으로 가른다(moai-7iyc.5fz).
+    pub fn kinds(&self) -> crate::report::Kinds<'_> {
+        crate::report::Kinds::kept(&self.kinds)
+    }
+
     /// 거름망이 볼 꼴 — 든 지도를 빌리기만 하고 다시 재는 것은 없다. 빌린 지도를 짓는 값은 **이슈 수에
     /// 비례한다**: 소속 지도(`epic`·`milestone`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만
     /// 건에서 수십 ms)보다 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의
@@ -1194,13 +1200,16 @@ impl Site {
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
-    /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것까지 같다.
+    /// 묻는 `report::column` 과 같은 답이다 — 묶음만 읽은 칸을 받는 것도, 가려진 줄은 안 입는
+    /// 것도(moai-7iyc.5fz) 같다.
+    ///
+    /// **판정을 여기 베끼지 않는다**(`report::stands_on`). 한 벌 더 적던 때는 가려진 마일스톤
+    /// 줄이 쌍둥이 에픽의 칸을 입는 것을 CLI 만 고치고 탐색기는 그대로 두는 길이 열려 있었다 —
+    /// 칸 지도는 빌려 든 것이라 꼴만 다르고 답은 같아야 한다.
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
-        crate::report::is_group(i)
-            .then(|| self.ground.stands.get(&i.id).map(|s| s.column.as_str()))
-            .flatten()
-            .unwrap_or(i.status.as_str())
+        let read = self.ground.stands.get(&i.id).map(|s| s.column.as_str());
+        crate::report::stands_on(&crate::report::Kinds::kept(&self.ground.kinds), i, read).unwrap_or(i.status.as_str())
     }
 
     /// 그 줄이 묶음이면 막을 때 무엇을 기다리는가와 미뤄 뺀 멤버(`report::Stand::waiting`·

@@ -80,7 +80,12 @@ impl<'a> Where<'a> {
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::column(i, &self.states)
+        crate::report::column(&self.kinds, i, &self.states)
+    }
+
+    /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
+    pub fn epic_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
+        crate::report::stands_in(&self.kinds, i, self.epic.get(i.id.as_str()).copied())
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
@@ -374,15 +379,18 @@ impl Filter {
         // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.
         // 이름으로 고르는 `-e X` 는 그대로다.
         let folded = wh.folded.contains(i.id.as_str());
-        let placed = |sel: &[Sel], map: &BTreeMap<&str, &str>| {
-            let value = map.get(i.id.as_str()).copied();
+        let placed = |sel: &[Sel], value: Option<&str>| {
             sel.is_empty()
                 || (!eclipsed
                     && sel
                         .iter()
                         .any(|s| !(folded && matches!(s, Sel::Unset)) && matches_sel(std::slice::from_ref(s), value)))
         };
-        if !placed(&self.epic, &wh.epic) || !placed(&self.milestone, &wh.milestone) {
+        // **에픽은 지도를 곧바로 안 짚는다**(moai-7iyc.rt6, 2026-09-23 사용자 결정). 지도는 id 로
+        // 짠 것이라 같은 id 를 든 줄이 둘이면 앞줄이 뒷줄의 에픽을 입는다 — `-e <에픽>` 이
+        // `derived_epic` 과 다른 답을 하던 자리다. 마일스톤은 그대로 지도가 답이다: 에픽이
+        // 마일스톤을 이기므로(`report::milestones_in`) 줄에 적힌 `milestone` 은 이미 졌다.
+        if !placed(&self.epic, wh.epic_of(i)) || !placed(&self.milestone, wh.milestone.get(i.id.as_str()).copied()) {
             return false;
         }
         if !matches_sel(&self.parent, crate::id::parent_of(&i.id)) {
