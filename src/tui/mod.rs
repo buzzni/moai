@@ -6477,7 +6477,7 @@ mod tests {
 
         // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
         let slashed = s.path().join("proj/");
-        let old = crate::store::dir_of(&config)
+        let old = crate::path::dir_of(&config)
             .join("read")
             .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
         assert_ne!(old, crate::read_marks::place_of(&config, &slashed).at, "시험의 전제 — 옛 이름과 새 이름이 다르다");
