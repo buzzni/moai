@@ -49,7 +49,7 @@ pub struct Project {
     /// 이득을 본다: `mine` 은 겹쳐 보지 않아도 서는 값이다(moai-mafv).
     /// **빌려 가는 자리가 하나 더 있다**: 여는 길과 자리 판정 사이에 `Project` 를 통째로 빌릴 수
     /// 없는 자리(`tui::layer::look_one` — 상태를 꺼내 쓰면서 이 둘을 빌린다)가 있어 열어 둔다.
-    pub sides: Vec<crate::worktree::Side>,
+    pub sides: Vec<crate::worktree::SideFloor>,
     /// 겹치기 전에 잰 제 바닥 — 위 `sides` 와 한 짝이다.
     pub mine: crate::worktree::Floor,
 }
@@ -140,7 +140,7 @@ struct Dig {
     origin: crate::worktree::Origin,
     trouble: Vec<crate::worktree::Trouble>,
     swept: bool,
-    sides: Vec<crate::worktree::Side>,
+    sides: Vec<crate::worktree::SideFloor>,
     mine: crate::worktree::Floor,
 }
 

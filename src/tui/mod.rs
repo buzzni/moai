@@ -1390,7 +1390,7 @@ impl App {
         swept: bool,
         // 겹치며 이미 판 옆 스냅샷([`crate::worktree::Gathered::sides`]) — 자리 판정이 같은
         // 파일을 다시 열어 파지 않게 넘긴다(moai-kos1). 첫 화면이 바로 이 값을 물었다.
-        sides: &[crate::worktree::Side],
+        sides: &[crate::worktree::SideFloor],
         // 겹치기 전에 잰 제 스냅샷([`crate::worktree::Gathered::mine`], moai-mafv) — 같은 까닭이다.
         mine: &crate::worktree::Floor,
     ) -> App {
