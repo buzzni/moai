@@ -1648,3 +1648,5 @@
 {"ts":"2026-09-23T16:51:42Z","id":"moai-wre3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T17:12:43Z","id":"moai-jk2u.jaq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 미룸의 뿌리를 줄에 묻는 자리"}
 {"ts":"2026-09-23T17:12:53Z","id":"moai-jk2u.jaq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T17:13:45Z","id":"moai-jk2u.jaq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: `/code-review max --fix` 가 뒤에서 돌고 있다. 끝나면 리뷰 원문을 노트로 적고, 받아들인 것과 넘긴 것을 마침 글에 적어 닫는다. 범위는 워크트리 가지 worktree-moai-wre3 의 커밋 하나(ac9f029)다."}
+{"ts":"2026-09-23T17:13:45Z","id":"moai-wre3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 고침은 워크트리 worktree-moai-wre3 에 ac9f029 로 서 있다. 시험 1444+543 초록, fmt·clippy 깨끗. 리뷰 moai-jk2u.jaq 가 끝나 고침을 받은 뒤 develop 에 머지하고 닫는다."}
