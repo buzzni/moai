@@ -1563,3 +1563,9 @@
 {"ts":"2026-09-23T13:57:56Z","id":"moai-rmz6.ue3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T13:57:56Z","id":"moai-rmz6.d7l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T13:57:56Z","id":"moai-rmz6.a48","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T14:04:00Z","id":"moai-u3ta.0so","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 미룸을 줄마다 묻게 옮긴 자리"}
+{"ts":"2026-09-23T14:04:14Z","id":"moai-u3ta.0so","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T14:09:48Z","id":"moai-rmz6.qa0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — v0.1.2 를 낼 채비"}
+{"ts":"2026-09-23T14:11:14Z","id":"moai-rmz6.qa0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T14:11:36Z","id":"moai-514e.0er","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 훅이 판정을 덮지 않게 stdout 을 받는 판"}
+{"ts":"2026-09-23T14:11:42Z","id":"moai-514e.0er","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
