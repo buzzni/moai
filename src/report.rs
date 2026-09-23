@@ -433,25 +433,35 @@ pub fn deferred_sources_in<'a>(
     }
     let lines = Lines::of(all);
     let shelf = Shelf::new(&lines, epic_of, mile_of);
-    // **id 를 든 줄을 다 걷는다**(리뷰 moai-jk2u.m60) — [`deferred_roots_in`] 이 id 를 그
-    // 지도에 올린 것은 **어느 한 줄의** 걸음이라, 여기서 `by_id` 로 줄 하나를 되찾으면 그 줄이
-    // 아닐 수 있다. 미룬 에픽을 제 `epic` 에 적은 앞줄이 id 를 올렸는데 뒷줄에는 소속이 없던
-    // 판에서, 되찾은 뒷줄의 걸음이 비어 `moai ready` 가 `moai defer  --undo` 를 냈다 — id 가
-    // 빠진 채로 사람 앞에 선 명령이고, `--json` 의 `undo` 키는 아예 없었다.
-    let mut out: BTreeMap<&str, Vec<&str>> = roots.keys().map(|&id| (id, Vec::new())).collect();
-    // 거르개는 [`deferred_roots_in`] 과 같다 — 거기가 안 센 줄이 여기서 미룸을 대면, 그 id 를
-    // 계획 밖으로 민 것이 아닌 줄을 풀라고 말한다.
-    for i in all.iter().filter(|i| !closed_by_hand(i)) {
-        let Some(every) = out.get_mut(i.id.as_str()) else { continue };
+    // **`roots` 에 답을 올린 그 줄의 걸음이다**(moai-kg6g). id 를 든 줄을 다 걸어 합치던 때는
+    // (리뷰 moai-jk2u.m60), 앞줄을 뺀 미룸까지 도로 집을 곳으로 대어 `moai show <id>` 가 찍는
+    // 줄과 `moai ready` 가 대는 말이 갈렸다 — 앞줄이 미룬 릴리스 E1 에, 뒷줄이 E2 에 들면
+    // `shelved_by` 는 E2 라 하면서 `moai defer E1 E2 --undo` 를 냈고, E1 을 풀어도 화면의 그
+    // 줄에는 아무 일도 안 일어났다.
+    //
+    // **합집합이 하던 일은 구조가 대신한다**(2026-09-23 사용자 결정, moai-u3ta). 그때 고친 것은
+    // 빈 명령(`moai defer   --undo`)이었는데, [`fold_roots`] 가 줄마다의 답을 뒷줄로 접는 지금
+    // `roots` 에 든 id 는 언제나 [`Lines::at`] 이 고르는 그 뒷줄이 미룬 것이라 그 자리가 구조로
+    // 안 난다 — `closed_by_hand` 인 줄과 읽은 칸이 done 인 묶음은 [`shelved_over`] 가 이미
+    // `None` 으로 지워 그 id 를 `roots` 에서 뺀다. 그래도 걸음이 비면 **키를 안 세운다**: 빈
+    // 배열은 부르는 쪽에서 id 없는 `moai defer  --undo` 가 되어, 없는 것보다 나쁘다.
+    let mut out: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for &id in roots.keys() {
+        let Some(i) = lines.at(id) else { continue };
+        let mut every: Vec<&str> = Vec::new();
         // 걸음은 같은 묶음을 두 번 짚는다 — 자식과 부모가 같은 에픽에 들면 둘 다에서.
         // 거르지 않으면 `moai defer E E --undo` 를 댄다.
         for r in shelf.every(i) {
             // **done 으로 읽은 묶음의 미룸도 댄다.** 그 묶음 줄만 계획 밖으로 안 셀 뿐, 그
             // 밑의 줄은 가까운 미룸을 풀면 그 묶음을 뿌리로 받아 여전히 빠진다 — 거르면
-            // 하나를 풀고서야 다음을 댄다(moai-phzi). 첫째가 늘 가까운 것이라 비지도 않는다.
+            // 하나를 풀고서야 다음을 댄다(moai-phzi). 그 판은 한 줄에 미룸이 여럿 걸린
+            // 것이라 줄 하나를 걷는 이 꼴에서도 그대로 선다.
             if !every.contains(&r) {
                 every.push(r);
             }
+        }
+        if !every.is_empty() {
+            out.insert(id, every);
         }
     }
     out
@@ -6909,6 +6919,43 @@ mod tests {
             let roots = deferred_roots(&issues);
             assert_eq!(roots.contains_key("argos-0002"), !want, "{what}: 접은 지도가 앞줄의 답을 들었다");
         }
+    }
+
+    /// **도로 집을 곳도 `moai show <id>` 가 찍는 그 줄이 댄다**(moai-kg6g).
+    ///
+    /// 그 id 를 든 줄을 다 걸어 합치던 때는(리뷰 moai-jk2u.m60), 앞줄을 뺀 미룸까지 도로 집을
+    /// 곳으로 대어 한 화면이 제 말을 뒤집었다 — `shelved_by` 는 뒷줄이 든 E2 라 하면서
+    /// `moai defer E1 E2 --undo` 를 냈고, E1 을 풀어도 그 줄에는 아무 일도 안 일어났다.
+    /// 접는 자가 뒷줄로 접는 지금([`fold_roots`], 2026-09-23 사용자 결정), 합집합은 더 댈 일이
+    /// 없고 계약만 어긋난다.
+    #[test]
+    fn where_to_undo_comes_from_the_row_the_map_answered_with() {
+        let off = |mut i: Issue| {
+            i.deferred_at = Some("2026-09-01T00:00:00Z".into());
+            i
+        };
+        // 둘 다 산 줄이고, 앞줄은 미룬 릴리스 E1 에 뒷줄은 미룬 E2 에 든다.
+        let rows = vec![
+            off(make("argos-e001", Kind::Epic, "todo")),
+            off(make("argos-e002", Kind::Epic, "todo")),
+            member("argos-0002", "argos-e001", "todo"),
+            member("argos-0002", "argos-e002", "todo"),
+        ];
+        assert_eq!(deferred_roots(&rows)["argos-0002"], "argos-e002", "접은 지도는 뒷줄이 답한다");
+        assert_eq!(deferred_sources(&rows)["argos-0002"], ["argos-e002"], "앞줄을 뺀 미룸까지 댔다");
+
+        // 거울 판 — 뒷줄이 E1 에 들면 대는 것도 그쪽이다.
+        let flipped = vec![rows[0].clone(), rows[1].clone(), rows[3].clone(), rows[2].clone()];
+        assert_eq!(deferred_roots(&flipped)["argos-0002"], "argos-e001");
+        assert_eq!(deferred_sources(&flipped)["argos-0002"], ["argos-e001"], "거울 판에서 갈렸다");
+
+        // **한 줄에 미룸이 여럿이면 그대로 다 댄다**(moai-phzi) — 줄어드는 것은 쌍둥이 쪽뿐이다.
+        let deep = vec![off(make("argos-e001", Kind::Epic, "todo")), off(member("argos-0002", "argos-e001", "todo"))];
+        assert_eq!(
+            deferred_sources(&deep)["argos-0002"],
+            ["argos-0002", "argos-e001"],
+            "하나를 풀고도 빠진 채 그제야 다음을 대는 자리가 다시 열렸다"
+        );
     }
 
     /// **무작위 더미로 같은 대조를 돌린다.** 표로 적은 모양은 누가 떠올린 것뿐이다 —

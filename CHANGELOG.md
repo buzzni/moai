@@ -221,6 +221,11 @@ on finding them.
   named it, while the epic its id actually sits under said `Members 0/0` and drew
   the row as a child. The fall-back now asks the id's parent, which both rows
   share, so each gets its own answer and the row's own `epic` still wins.
+- `moai ready` no longer offers to undo a defer that **took the other row out of
+  the plan**. Where an id stands twice, `moai show <id>` draws one line and says
+  which defer took it out, but the undo command beside it was the union of every
+  line's walk, so it also named a release that pinned the line you are not
+  looking at — releasing that one changed nothing on screen.
 - Where the same id stands twice, a row now **inherits the defer of the epic or
   the release it wrote on itself**. Which group a row is in is read from the row
   (`epic`, then the map), but the walk that carries a defer down still climbed by
