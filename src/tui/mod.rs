@@ -344,14 +344,15 @@ impl Ground {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
-        let kinds = &self.kinds;
         crate::query::Where {
             epic: borrow(&self.epic),
             milestone: borrow(&self.milestone),
             put_off: self.put_off.iter().map(String::as_str).collect(),
             states: self.columns(),
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
-            eclipsed: Some(Box::new(move |i: &Issue| crate::report::is_eclipsed(kinds, i))),
+            // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
+            // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
+            kinds: crate::report::Kinds::kept(&self.kinds),
             folded: self.folded.iter().map(String::as_str).collect(),
         }
     }

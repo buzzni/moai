@@ -645,11 +645,23 @@ impl<'a> Row<'a> {
     ///
     /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::groups_of`) — 줄이 `epic` 을
     /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
-    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>, placed: Option<&'a str>) -> Row<'a> {
+    ///
+    /// `kind_of` 는 **가려진 줄을 가르는 지도**다(`report::Kinds`, moai-53s2) — 위의 소속
+    /// 지도가 id 로 짠 것이라, 종류가 다른 쌍둥이에게 가려진 줄은 그 지도에서 쌍둥이의 값을
+    /// 받는다. 지도를 안 대려면 `Kinds::no_twins()` 라는 **낱말**을 적어야 하고, 그 자리는
+    /// 왜 쌍둥이가 못 서는지를 함께 댄다 — 빈 지도를 그냥 넘기던 꼴은 새 표면이 그대로
+    /// 베껴, 시험 전부가 푸른 채로 이 구멍을 다시 연다(리뷰).
+    pub fn of(
+        issue: &'a crate::model::Issue,
+        read: Option<&'a str>,
+        placed: Option<&'a str>,
+        kind_of: &crate::report::Kinds<'_>,
+    ) -> Row<'a> {
         // **차례를 여기서 다시 적지 않는다**(`report::stands_in`) — 적힌 것이 먼저라는 것도,
-        // 묶음 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가 정한다. 여기 한 벌 더 적으면
-        // `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가 어긋난다.
-        let derived_epic = crate::report::stands_in(issue, placed);
+        // 묶음 줄에는 안 선다는 것도, 가려진 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가
+        // 정한다. 여기 한 벌 더 적으면 `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가
+        // 어긋난다.
+        let derived_epic = crate::report::stands_in(kind_of, issue, placed);
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
@@ -677,8 +689,13 @@ impl<'a> Row<'a> {
     }
 
     /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.
+    ///
+    /// **쓰기 경로에는 쌍둥이가 없다**(리뷰, moai-53s2). `store::with_write` 는 id 가 두 번
+    /// 선 파일에 쓰기를 통째로 물리므로(`Trouble::DuplicateId`), 이 줄이 나왔다는 것은 그
+    /// 파일에 중복 id 가 없었다는 말이다 — 가려진 줄은 중복 id 로만 생긴다. 그래서 여기서
+    /// 종류 지도를 짓지 않는다: 지어도 답을 못 바꾸는데, 그 셈은 **락을 쥔 채** 치른다.
     pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
-        Row::of(issue, read.column(&issue.id), read.epic(&issue.id))
+        Row::of(issue, read.column(&issue.id), read.epic(&issue.id), &crate::report::Kinds::no_twins())
     }
 }
 
@@ -990,7 +1007,7 @@ mod tests {
     fn a_row_speaks_the_default_kind_and_priority() {
         let i = plain();
         assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
         assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
     }
@@ -1001,7 +1018,7 @@ mod tests {
     fn a_row_that_carries_them_is_untouched() {
         let mut i = row_with(&[]);
         i.priority = Some(1);
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
         assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
         assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
@@ -1017,7 +1034,7 @@ mod tests {
             ("duplicate_lines", "가짜"),
             ("due", "2026-10-01"),
         ]);
-        let row = Row::of(&i, Some("in_progress"), None);
+        let row = Row::of(&i, Some("in_progress"), None, &crate::report::Kinds::no_twins());
         let extra = [
             ("members", "[]".to_string()),
             ("shelved_by", "\"argos-0002\"".to_string()),
@@ -1038,7 +1055,7 @@ mod tests {
     #[test]
     fn a_conditional_key_left_out_this_time_is_stripped_too() {
         let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
-        let row = Row::of(&i, None, None);
+        let row = Row::of(&i, None, None, &crate::report::Kinds::no_twins());
         let out = json_with(&row, &[("commits", "[]".to_string())]).unwrap().join("");
         assert!(!out.contains("commits_error"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
@@ -1051,7 +1068,7 @@ mod tests {
         let mut rest: Vec<(&str, &str)> = OURS.iter().map(|k| (*k, "가짜")).collect();
         rest.push(("due", "2026-10-01"));
         let i = row_with(&rest);
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &crate::report::Kinds::no_twins())).unwrap().join("");
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "{out}");
     }
@@ -1085,14 +1102,17 @@ mod tests {
     #[should_panic(expected = "APPENDED")]
     fn an_appended_key_missing_from_the_list_is_caught() {
         let i = row_with(&[]);
-        let _ = json_with(&Row::of(&i, None, None), &[("새_키", "[]".to_string())]);
+        let _ = json_with(&Row::of(&i, None, None, &crate::report::Kinds::no_twins()), &[("새_키", "[]".to_string())]);
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
     #[test]
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
-        assert!(matches!(Row::of(&i, None, None).issue, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            Row::of(&i, None, None, &crate::report::Kinds::no_twins()).issue,
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     fn unread(root: &str, at: &str) -> crate::store::Unread {

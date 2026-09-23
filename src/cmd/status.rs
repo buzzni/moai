@@ -294,10 +294,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 를 읽는 것은 `--json` 뿐이라, 늘 지으면 사람이 보는 보드가 프로젝트마다 저장소
             // 전체의 소속을 한 벌씩 걷고 그대로 버린다.
             let picked = report::wip(&load.issues, &repo.config);
-            let epics = match ctx.json {
+            let (epics, kinds) = match ctx.json {
                 true => {
                     let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-                    report::groups_of(&load.issues, &ids)
+                    (report::groups_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                 }
                 false => Default::default(),
             };
@@ -306,6 +306,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 status,
                 picked,
                 epics,
+                kinds,
                 origin: &p.origin,
                 trouble: &p.trouble,
                 // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
@@ -351,7 +352,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     picked: b
                         .picked
                         .iter()
-                        .map(|i| super::Row::of(i, None, b.epics.get(i.id.as_str()).copied()).on(&p.origin))
+                        .map(|i| super::Row::of(i, None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin))
                         .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
                     trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),

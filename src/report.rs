@@ -1881,7 +1881,24 @@ pub fn groups_of<'a>(all: &'a [Issue], ids: &[&str]) -> BTreeMap<&'a str, &'a st
 /// **자는 하나다.** 이 키를 내는 표면이 둘인데([`crate::cmd::Row::of`] 와
 /// `cmd::prime::Brief`), 저마다 이 차례를 적으면 한 바이너리가 한 키에 두 답을 낸다 —
 /// moai-wuzi 가 없앤 자리가 바로 그것이다. 판단이 `report` 에 사는 것도 같은 까닭이다.
-pub fn stands_in<'a>(i: &'a Issue, placed: Option<&'a str>) -> Option<&'a str> {
+///
+/// **가려진 줄은 어느 묶음에도 안 선다**(moai-53s2, 2026-09-23 사용자 결정). 소속 지도는
+/// id 로 짠 것이라 종류가 다른 쌍둥이에게 가려진 줄([`is_eclipsed`])에 쌍둥이의 값을
+/// 주는데, 트리는 그 줄을 `(길 잃음)` 에 두고 `query` 는 `-e` 로도 `-e none` 으로도 안
+/// 고르며 롤업은 어느 묶음에도 안 센다 — `show --json` 목록만 그 줄에 쌍둥이의 에픽을
+/// 달아, 한 바이너리가 "이 줄은 어느 에픽인가" 에 표면마다 다른 답을 했다.
+/// **문을 여기 둔다**: `show` 목록 하나를 고치면 가려진 줄을 싣는 다음 표면이 같은
+/// 구멍을 다시 연다. `kind_of` 는 [`Kinds`] 다 — 지도를 안 대는 자리는 [`Kinds::no_twins`]
+/// 라는 이름을 적어야 하고, 그 이름을 적는 자리는 왜 쌍둥이가 못 서는지를 함께 댄다.
+///
+/// 적힌 `epic` 을 든 가려진 줄도 값을 안 낸다. `query` 가 그 줄을 제 `epic` 으로도 안
+/// 고르므로([`is_eclipsed`] 를 거르개보다 먼저 보는 자리) 여기서 내면 둘이 또 갈린다.
+/// 파일에 적힌 값 자체는 `--json` 의 `epic` 키에 그대로 남아, 고칠 곳이 화면에서
+/// 사라지지는 않는다.
+pub fn stands_in<'a>(kind_of: &Kinds<'_>, i: &'a Issue, placed: Option<&'a str>) -> Option<&'a str> {
+    if kind_of.eclipses(i) {
+        return None;
+    }
     joins(i).then(|| i.epic.as_deref().or(placed)).flatten()
 }
 
@@ -2244,6 +2261,77 @@ pub fn eclipsed(all: &[Issue]) -> impl Fn(&Issue) -> bool + '_ {
 /// id → 그 id 를 **마지막으로 든 줄**의 종류. 가려짐 판정([`is_eclipsed`])이 보는 지도다.
 pub fn kinds(all: &[Issue]) -> BTreeMap<&str, Kind> {
     all.iter().map(|i| (i.id.as_str(), i.kind)).collect()
+}
+
+/// 가려짐을 가르는 지도를 **든 꼴 그대로** 나르는 그릇 (moai-53s2, 리뷰).
+///
+/// 두 가지를 같이 푼다.
+///
+/// - **빌린 것을 안 옮겨 담는다.** 탐색기는 `BTreeMap<String, Kind>` 를 들고 있고 `Soil` 은
+///   `BTreeMap<&str, Kind>` 를 낸다. 한 꼴로 좁히면 든 꼴이 다른 쪽이 꼴을 맞추느라 지도를
+///   새로 짓는데, 탐색기의 거름망은 **키마다** 그것을 부른다(`tui::Ground::here`) — 이슈
+///   1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
+/// - **"쌍둥이가 없다" 를 낱말로 적게 한다.** 빈 지도를 그냥 넘기면 그것이 새 표면이 베끼는
+///   꼴이 되어, 지도를 안 댄 표면이 시험 전부가 푸른 채로 이 구멍을 다시 연다. 여기서는
+///   [`Kinds::no_twins`] 라는 이름을 적어야 하고, 그 이름을 적는 자리는 **왜 없는지**를
+///   함께 댄다.
+#[derive(Default)]
+pub enum Kinds<'a> {
+    /// 쌍둥이가 설 수 없는 자리 — 부르는 쪽이 그 까닭을 댄다([`Kinds::no_twins`]).
+    #[default]
+    NoTwins,
+    /// 이 자리에서 지은 지도 ([`kinds`]·[`kinds_of`]).
+    Own(BTreeMap<&'a str, Kind>),
+    /// 남이 들고 있는 지도를 **빌린 것** — 옮겨 담지 않는다.
+    Kept(&'a BTreeMap<String, Kind>),
+}
+
+impl<'a> Kinds<'a> {
+    /// 저장소 전체의 지도 ([`kinds`]).
+    pub fn of(all: &'a [Issue]) -> Kinds<'a> {
+        Kinds::Own(kinds(all))
+    }
+
+    /// 물은 줄만의 지도 ([`kinds_of`]).
+    pub fn of_ids(all: &'a [Issue], ids: &[&str]) -> Kinds<'a> {
+        Kinds::Own(kinds_of(all, ids))
+    }
+
+    /// 남이 든 지도를 빌린다.
+    pub fn kept(map: &'a BTreeMap<String, Kind>) -> Kinds<'a> {
+        Kinds::Kept(map)
+    }
+
+    /// **쌍둥이가 설 수 없다고 아는 자리.** 부르는 쪽은 그 까닭을 곁에 적는다 — 지금 서는
+    /// 자리 둘은 `store::with_write` 가 중복 id 에 쓰기를 통째로 물리는 쓰기 경로와,
+    /// `Load::get` 이 늘 뒷줄을 여는 `show <id>` 다. 까닭을 못 대면 지도를 지어야 한다.
+    pub const fn no_twins() -> Kinds<'a> {
+        Kinds::NoTwins
+    }
+
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 ([`is_eclipsed`]).
+    pub fn eclipses(&self, i: &Issue) -> bool {
+        match self {
+            Kinds::NoTwins => false,
+            Kinds::Own(m) => is_eclipsed(m, i),
+            Kinds::Kept(m) => is_eclipsed(*m, i),
+        }
+    }
+}
+
+/// [`kinds`] 를 **물은 줄에 대해서만** 낸다 — [`groups_of`] 와 같은 꼴이고 같은 까닭이다
+/// (moai-53s2). [`stands_in`] 이 가려짐을 보려면 지도가 있어야 하는데, `ready --json` 은
+/// 제가 낼 줄 몇 개만 물으므로 저장소 전체의 종류 지도를 지을 까닭이 없다.
+///
+/// **좁혀도 답이 같다.** [`is_eclipsed`] 는 그 줄의 id 하나만 짚고, 여기 담기는 값은
+/// [`kinds`] 와 똑같이 **그 id 를 마지막으로 든 줄**의 종류다 — 물은 id 가 아닌 줄이
+/// 빠져도 물은 줄의 답은 안 바뀐다.
+pub fn kinds_of<'a>(all: &'a [Issue], ids: &[&str]) -> BTreeMap<&'a str, Kind> {
+    let want: BTreeSet<&str> = ids.iter().copied().collect();
+    if want.is_empty() {
+        return BTreeMap::new();
+    }
+    all.iter().filter(|i| want.contains(i.id.as_str())).map(|i| (i.id.as_str(), i.kind)).collect()
 }
 
 /// [`eclipsed`] 의 판정 — `kind_of` 는 [`kinds`] 의 지도다(빌린 id 든 소유한 id 든). **판정은 여기
@@ -6903,6 +6991,46 @@ mod tests {
                 st.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.iter()).any(|id| id == "argos-0003");
             assert!(!named, "{kind} 가 가려진 줄을 쌍둥이 값으로 셌다 — {:?}", st.warnings);
         }
+    }
+
+    /// **가려진 줄은 `derived_epic` 도 안 단다** (moai-53s2, 2026-09-23 사용자 결정).
+    /// 소속 지도는 id 로 짠 것이라 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을
+    /// `(길 잃음)` 에 두고 `-e` 도 `-e none` 도 안 고르며 롤업은 어느 묶음에도 안 센다 —
+    /// `show --json` 목록만 그 줄에 쌍둥이의 에픽을 달아, 한 바이너리가 한 물음에 표면마다
+    /// 다른 답을 했다. 문은 [`stands_in`] 하나다: 표면을 하나씩 고치면 가려진 줄을 싣는
+    /// 다음 표면이 같은 구멍을 다시 연다.
+    #[test]
+    fn an_eclipsed_row_is_given_no_derived_epic() {
+        let epic = make("argos-e001", Kind::Epic, "todo");
+        let bare = make("argos-0001", Kind::Issue, "todo");
+        let mut held = make("argos-0001", Kind::Idea, "todo");
+        held.epic = Some("argos-e001".into());
+        // 제 `epic` 을 적은 가려진 줄 — `query` 가 그 값으로도 안 고르므로 여기서도 안 낸다.
+        let mut wrote = make("argos-0002", Kind::Issue, "todo");
+        wrote.epic = Some("argos-e001".into());
+        let plain = make("argos-0002", Kind::Idea, "todo");
+        let rows = [epic, bare, held, wrote, plain];
+        let kind_of = Kinds::of(&rows);
+        let placed = groups(&rows);
+        let of = |i: &Issue| stands_in(&kind_of, i, placed.get(i.id.as_str()).copied()).map(str::to_string);
+
+        assert_eq!(of(&rows[1]), None, "가려진 줄이 쌍둥이의 에픽을 달았다");
+        assert_eq!(of(&rows[2]), Some("argos-e001".into()), "가리는 줄의 소속까지 지웠다");
+        assert_eq!(of(&rows[3]), None, "제 epic 을 적은 가려진 줄이 값을 냈다");
+        assert_eq!(of(&rows[4]), None, "생각이 뿌리로 올라간 자리가 달라졌다");
+
+        // **좁힌 지도도 같은 답이다**([`Kinds::of_ids`]) — `ready --json` 과 `status --json` 이 쓴다.
+        let narrow = Kinds::of_ids(&rows, &["argos-0001"]);
+        assert!(narrow.eclipses(&rows[1]), "좁힌 지도가 가려짐을 놓쳤다");
+        assert_eq!(stands_in(&narrow, &rows[1], placed.get("argos-0001").copied()), None);
+
+        // **빌린 지도도 같은 답이다**([`Kinds::kept`]) — 탐색기가 든 꼴이다.
+        let owned: BTreeMap<String, Kind> = rows.iter().map(|i| (i.id.clone(), i.kind)).collect();
+        assert!(Kinds::kept(&owned).eclipses(&rows[1]), "빌린 지도가 가려짐을 놓쳤다");
+
+        // [`Kinds::no_twins`] 는 "쌍둥이가 못 선다" 는 **주장**이다 — 쓰기 경로와 `show <id>`
+        // 가 그 까닭을 제자리에 적는다. 주장이 틀린 자리에서는 이렇게 문이 열린 채로 선다.
+        assert_eq!(stands_in(&Kinds::no_twins(), &rows[1], Some("argos-e001")), Some("argos-e001"));
     }
 
     /// **가려진 줄은 집을 일이 아니다** (moai-lg2t). 트리에서 `(길 잃음)` 에 서는 줄을

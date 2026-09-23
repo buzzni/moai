@@ -43,7 +43,10 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   stays what the file says; the resolved answer comes beside it under its own key,
   the way `derived_status` already does. It never stands on a group row — an epic's
   own `epic` field is not a belonging — and its absence means the row is in no
-  epic at all.
+  epic at all. Where the same id stands twice and the other line is a different
+  `kind`, this line is counted into no group anywhere, so `derived_epic` is absent
+  there even when `epic` is written: the one row where the two keys read against
+  each other, and `duplicate_id` on the board names it.
 
 ### Changed
 

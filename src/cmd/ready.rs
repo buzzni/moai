@@ -29,6 +29,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 적힌 필드만 실으면 이 목록이 그 줄을 에픽 없는 줄로 낸다. `derived_epic` 이 읽는다.
         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
         let epics = report::groups_of(&load.issues, &ids);
+        // 가려진 줄을 가르는 지도(moai-53s2) — 소속 지도와 같은 id 만 묻는다.
+        let kinds = report::Kinds::of_ids(&load.issues, &ids);
         // **객체로 감싼다**(moai-w6n2, 사람이 정한 출력 계약). 맨 배열이던 때는 막혀 못 집는
         // 일을 실을 자리가 없어, 에이전트는 `[]` 를 "할 일이 없다" 로 읽었다. `.moai` 밖
         // 한눈 보기가 프로젝트마다 `ready` 키를 쓰는 것과 같은 이름이다.
@@ -58,7 +60,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         return super::json_line(&Said {
             ready: picks
                 .iter()
-                .map(|i| super::Row::of(i, None, epics.get(i.id.as_str()).copied()).on(&origin))
+                .map(|i| super::Row::of(i, None, epics.get(i.id.as_str()).copied(), &kinds).on(&origin))
                 .collect(),
             // **왜 짧은지를 기계에도 댄다**(moai-q04l). 사람 화면이 한 줄로 대는 것을 여기서
             // 빼면, `ready --json` 으로 도는 고리는 도는 마일스톤이 목록을 줄인 것을 "할 일이
@@ -96,10 +98,10 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
-                let epics = match ctx.json {
+                let (epics, kinds) = match ctx.json {
                     true => {
                         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
-                        report::groups_of(&load.issues, &ids)
+                        (report::groups_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                     }
                     false => Default::default(),
                 };
@@ -108,6 +110,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     focus,
                     unreadable: load.errors.len(),
                     epics,
+                    kinds,
                     origin: &p.origin,
                     trouble: &p.trouble,
                 }
@@ -138,7 +141,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     ready: k
                         .picks
                         .iter()
-                        .map(|i| super::Row::of(i, None, k.epics.get(i.id.as_str()).copied()).on(&p.origin))
+                        .map(|i| super::Row::of(i, None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin))
                         .collect(),
                     milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),
                     outside: k.focus.outside.iter().map(|i| i.id.as_str()).collect(),

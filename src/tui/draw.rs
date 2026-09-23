@@ -4854,14 +4854,19 @@ pub(super) mod tests {
         let narrow = about_text(&render(&mut a, 80, 24));
         assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
 
-        // **에픽에는 든 시간을 안 낸다.** 기한은 어느 줄에나 적힐 수 있으니 그대로 선다.
+        // **에픽에는 든 시간도 기한도 안 낸다**(moai-x04r.fn4). 쓰기는 마일스톤 아닌 줄에
+        // `due_on` 을 거절하므로(`Issue::check`) 여기 서는 값은 손으로 푼 충돌이나 머지가
+        // 안 건드리고 넘긴 낡은 줄뿐인데, 그리면 보드와 이 패널이 한 줄을 다르게 읽는다.
         let mut epic = issues();
         epic[0].due_on = Some("2026-09-20".into());
         let mut a = every(epic);
         a.site.now = "2026-09-11T00:00:00Z".into();
         a.see();
         let pane = about_text(&render(&mut a, 160, 24));
-        assert!(pane.contains("2026-09-20"), "에픽의 기한이 안 섰다\n{pane}");
+        // **없다는 것만 재지 않는다**(리뷰) — 밑의 둘은 아니라는 말뿐이라, 이 패널이 아예 안
+        // 그려졌거나 커서가 딴 줄에 섰어도 둘 다 지난다. 그 에픽을 그렸다는 것부터 박는다.
+        assert!(pane.contains("argos-0001"), "에픽의 상세가 안 그려졌다\n{pane}");
+        assert!(!pane.contains("2026-09-20"), "마일스톤 아닌 줄에 기한이 섰다\n{pane}");
         assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
     }
 
