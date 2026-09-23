@@ -1060,3 +1060,4 @@
 {"ts":"2026-09-23T01:06:05Z","id":"moai-tlpv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-23T01:06:06Z","id":"moai-pmhv.x3r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"고침 다섯을 받고 넷(moai-fgjj·moai-yz4j·moai-dux7·moai-intw·moai-a678)을 넘겼다. 안 받은 둘은 까닭을 노트에 적었다"}
 {"ts":"2026-09-23T01:06:15Z","id":"moai-pmhv.x3r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"앞 노트와 닫는 줄의 \"넷\" 은 다섯이다 — 멤버 둘(moai-fgjj·moai-yz4j)에 idea 셋(moai-dux7·moai-intw·moai-a678)이다. 목록 쪽이 맞다"}
+{"ts":"2026-09-23T01:06:29Z","id":"moai-pmhv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 내건 셋(기한·겹쳐 돎·든 시간)은 다 섰고 3e75d0e 로 develop 에 들어갔다. 에픽은 리뷰가 넘긴 버그 둘(moai-fgjj, moai-yz4j)로 열려 있다 — moai-yz4j 는 src/cmd/hook.rs 를 moai-514e 가 놓은 뒤에 집는다"}
