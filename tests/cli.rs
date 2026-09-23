@@ -13820,7 +13820,14 @@ fn a_command_that_draws_no_time_never_reaches_for_the_timezone() {
 
     let ls = run(home.path(), &["project", "ls"]);
     assert!(ls.status.success(), "{}", text(&ls));
-    assert_eq!(String::from_utf8_lossy(&ls.stderr), "", "시각을 안 그리는데 tzdb 를 만졌다");
+    // **연 줄이 실제로 섰는지부터 본다**(리뷰 moai-j4ie) — 셈을 내는 갈래(`State::Open`)를 안
+    // 지나면 시간대에 닿을 자리가 애초에 없어, 빈 목록도 아래를 지나간다.
+    assert!(String::from_utf8_lossy(&ls.stdout).contains("todo"), "칸별 셈이 안 섰다 — {}", text(&ls));
+    let said = String::from_utf8_lossy(&ls.stderr);
+    assert!(!said.contains("시간대 자료가 없다"), "시각을 안 그리는데 tzdb 를 만졌다 — {said}");
+    // **딱 비어 있는 것까지 잰다** — 이 명령은 stderr 에 낼 말이 없다. 낼 말이 생기는 날에는
+    // 위의 한 줄만 남기고 이 줄을 걷는다. 무엇을 재는 시험인지는 위가 말한다.
+    assert_eq!(said, "", "없던 줄이 섰다");
 
     let st = run(repo.path(), &["status"]);
     assert!(st.status.success(), "{}", text(&st));

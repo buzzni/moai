@@ -3514,9 +3514,22 @@ pub fn status(
     now: &str,
     zone: &crate::tz::Zone,
 ) -> StatusReport {
+    status_unjudged(issues, unreadable, cfg, now).judged(now, zone)
+}
+
+/// [`status`] 에서 **기한 판정만 뺀 것.** 시간대를 안 받으므로 tzdb 를 안 만진다.
+///
+/// 시간대를 안 드는 표면이 셋이다 — 셈만 쓰고 시각을 한 줄도 안 그리는 `moai project ls`,
+/// [`Dues`] 를 들었다가 그릴 때 재는 탐색기의 층, 그리고 위의 [`status`] 자신. 그 셋이 저마다
+/// `status_in(.., &Soil::of(..))` 를 손으로 이어 적던 것을 여기 한 이름에 모은다(리뷰 moai-j4ie).
+/// 손으로 이으면 [`Soil`] 이 아닌 조각에서 지은 지도를 넘겨도 컴파일되고, 그때 수가 조용히
+/// 어긋난다 — 이 문은 `issues` 하나만 받아 그 짝을 못 어긋나게 한다.
+///
+/// **이미 [`Soil`] 을 들고 있는 쪽은 [`status_in`] 이다.** 탐색기의 적재가 그쪽이다(moai-u5o9).
+pub fn status_unjudged(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
-    status_in(issues, unreadable, cfg, now, &Soil::of(issues)).judged(now, zone)
+    status_in(issues, unreadable, cfg, now, &Soil::of(issues))
 }
 
 /// [`status`] 와 같은 것. **이미 잰 [`Soil`] 을 받는다** — 탐색기는 적재 때 색인·묶음 칸을 지으려고

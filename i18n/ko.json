@@ -627,7 +627,7 @@
   "skill.install_copy_gone": "  — 설치본({at})이 없다. 훅이 안 실린다{advice}",
   "skill.install_stale": "  — 심을 판은 {want}. 다시 심는다{advice}",
   "skill.companion_gone": " — 없다 (`moai skill install`)",
-  "skill.hook_unrunnable": "— 없거나 실행할 수 없다. 훅은 조용히 아무것도 안 한다",
+  "skill.hook_unrunnable": "— 없거나 실행할 수 없다. 규칙 넷이 안 선다",
   "skill.hook_is_another_moai": "    지금 부른 moai({exe}) 는 훅이 부르는 것과 다르다 — 여기서 심으면 훅이 그것을 부르게 바뀐다",
   "skill.claude_on_path": "PATH 에 있다",
   "skill.claude_off_path": "PATH 에 없다 — 심을 수도 걷을 수도 없다",

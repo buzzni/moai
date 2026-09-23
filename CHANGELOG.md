@@ -51,11 +51,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the editor it picks off `PATH`, the merge driver candidate — it now asks whether
   **you** can run it, not whether anyone can. The old check read the execute bits,
   so a file owned by someone else at `0o700`, or one on a `noexec` mount, passed
-  here and then gave the shell a 126 that the hook line swallows in silence: the
-  screen said installed while none of the four rules stood. The answers that flip
+  here and then gave the shell a 126 that the hook line swallowed in silence: the
+  screen said installed while none of the four rules stood. (The hook line says
+  it out loud now too — see the entry under **Fixed**.) The answers that flip
   are exactly those two cases; a file you can run, and a file with no execute bit
-  at all, read as before. On a `noexec` `TMPDIR` this now also means `moai skill`
-  will say the hook is not runnable rather than claiming it is installed.
+  at all, read as before. On a `noexec` `TMPDIR` this now also means
+  `moai skill status` will say the hook is not runnable rather than claiming it is
+  installed.
 
 - The refusal for rule 2 hands back the path **you typed**, not the one moai
   resolved. Judging still follows symlinks — the two spellings are one place, as
@@ -206,11 +208,17 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   mount — the four rules did not stand and the session looked exactly as it does
   when they pass. The line now separates the two: nothing there stays silent, as
   it must (a `cargo clean` should not make every session noisy), and a binary that
-  cannot be run prints a notice naming the hook and the exit code. **Nothing is
-  blocked and the exit code is still 0** — a hook that blocks on its own missing
-  permission stops every tool call in the session. A hook that ran and then failed
-  keeps its silence: it has already written its own answer to stdout, and a second
-  line appended there would throw that answer — a refusal included — away.
+  cannot be run prints a notice naming the hook and the exit code, and the command
+  that says which file it was (`moai skill status`). It reads the same on either
+  shell a machine may put at `/bin/sh`: `command -v` answers "is it there" for a
+  path differently in dash and in bash — bash checks the execute bit as well — so
+  the line asks once more with `[ -e ]` before it gives up, or the one case named
+  first here would still be silent wherever `/bin/sh` is bash. **Nothing is
+  blocked and the exit code is still 0**, even under `set -e` — a hook that blocks
+  on its own missing permission stops every tool call in the session. A hook that
+  ran and then failed keeps its silence: it has already written its own answer to
+  stdout, and a second line appended there would throw that answer — a refusal
+  included — away.
 - `moai project ls` no longer reads the timezone database. It draws no time at all
   — it shows each project's column counts — but it asked for the reader's timezone
   anyway, so on a machine without zoneinfo (a static musl build on Alpine or

@@ -233,8 +233,9 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
 enum State<'a> {
     /// 설정과 스냅샷까지 읽었다.
     Initialized {
-        /// 칸별 이슈 수 — 한눈 보기와 같은 자(`report::status(..).counts`)로 센다.
+        /// 칸별 이슈 수 — 한눈 보기와 같은 자(`report::status_unjudged(..).counts`)로 센다.
         /// 에픽·마일스톤과 미룬 것은 안 센다. 자를 따로 두면 두 화면의 수가 어긋난다.
+        /// 한눈 보기가 부르는 `report::status` 는 그 위에 기한 판정만 얹은 것이라 이 수는 같다.
         counts: BTreeMap<String, usize>,
         /// 못 읽는 줄의 수. 그 줄의 이슈는 `counts` 에서 빠져 있다.
         unreadable: usize,
@@ -348,8 +349,8 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 /// — 넘기지 않으면 그 줄이 쓰던 id 와의 중복이 셈에서 달라진다.
 ///
 /// **시간대를 안 든다**(moai-yz4j). 여기서 쓰는 것은 `counts` 하나고 시간대가 닿는 셈은 기한
-/// 판정뿐이라([`report::Dues`]) 그 값은 [`report::status_in`] 과 [`report::status`] 에서 한
-/// 글자도 다르지 않다. 들던 판은 시각을 한 줄도 안 그리는 이 명령이 tzdb 를 만져,
+/// 판정뿐이라([`report::Dues`]) 그 값은 [`report::status_unjudged`] 와 [`report::status`] 에서
+/// 한 글자도 다르지 않다. 들던 판은 시각을 한 줄도 안 그리는 이 명령이 tzdb 를 만져,
 /// zoneinfo 없는 기계(정적 musl 판, moai-77ap)에서 없던 [`Ctx::zone_trouble`] 줄 하나를
 /// stderr 에 냈다.
 fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
@@ -357,14 +358,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
         projects::State::Open { repo, load } => {
             let unreadable = load.unreadable();
             State::Initialized {
-                counts: report::status_in(
-                    &load.issues,
-                    &unreadable,
-                    &repo.config,
-                    now,
-                    &report::Soil::of(&load.issues),
-                )
-                .counts,
+                counts: report::status_unjudged(&load.issues, &unreadable, &repo.config, now).counts,
                 unreadable: load.errors.len(),
                 columns: &repo.config.statuses,
             }
