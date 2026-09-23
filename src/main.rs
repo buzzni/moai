@@ -117,11 +117,22 @@ fn main() -> ExitCode {
     let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
     match cmd::run(cli) {
         Ok(lines) => {
-            print(&lines);
+            // **stdout 은 맨 뒤다**(moai-mnhq, 2026-09-23 사용자 결정). 넷은 stderr 에만 쓰므로
+            // 자리를 바꿔도 stdout 의 차례는 안 바뀌고, 바뀌는 것은 **종료 값의 뜻**이다 —
+            // 판정을 흘려보낸 뒤에 패닉이 올 자리가 이 넷뿐이었다. 뒤로 미뤄 두면 101 은
+            // "stdout 이 비었다" 가 되고, 훅이 심는 셸 한 줄(`skill::command`)이 그 위에 선다:
+            // 그 줄은 판정을 못 낸 종료마다 `systemMessage` 를 하나 내는데, `moai` 가 이미
+            // 판정을 쓴 뒤라면 객체가 둘이 되어 `claude` 가 **둘 다 버린다**. 버려지는 것이
+            // `deny` 면 막아야 할 쓰기가 통과한다.
+            //
+            // **치르는 값은 넷 가운데 하나가 패닉하면 이 명령의 출력을 잃는 것이다.** 넷 다
+            // 비었는지 먼저 보고 빠지는 줄이고(위 `carried` 의 주석), 패닉한 판의 출력은 어차피
+            // 믿을 것이 못 된다 — 그 애매함을 없애는 것이 이 자리의 목적이다.
             carried();
             unjournaled();
             unread_journals();
             redirected(!quiet);
+            print(&lines);
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         // **넘어진 길에서도 어느 트래커를 봤는지는 댄다**(moai-a2kn) — 올라가 잡은 자리는

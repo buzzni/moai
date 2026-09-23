@@ -101,15 +101,30 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 옛날 그대로 조용히 두었고, 그 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다.
 /// 126·127 을 "못 돌렸다" 로 읽는 어휘는 `merge_driver::Probe::Dead` 와 같다.
 ///
-/// **그 넷 가운데 101 과 128+N 은 아직 성근 자리다**(리뷰 moai-514e.hgz 가 짚었다, 안 고쳤다).
-/// 126·127·2 는 `moai` 가 stdout 에 한 바이트도 못 쓴 자리가 맞지만, 패닉과 시그널은 `main` 이
-/// `print(&lines)` 로 판정을 이미 흘려보낸 **뒤**에도 온다 — `src/main.rs` 는 그 줄 다음에
-/// `carried`·`unjournaled`·`unread_journals`·`redirected` 를 돌리고, Rust 의 stdout 은 줄마다
-/// 흘려보낸다. 그 자리에서 둘째 객체를 붙이면 위 문단이 1 에 대해 적어 둔 손실이 그대로 난다.
-/// 메우려면 길이 둘인데 **둘 다 이 문단의 결정을 되돌린다** — stdout 을 `o=$(…)` 로 받아
-/// 비었을 때만 말하면 정상 갈래에 프로세스가 하나 는다(아래 "정상 갈래" 문단이 안 는다고
-/// 적어 둔 자리다), 목록을 126·127·2 로 좁히면 moai-wnnb 가 연 자리가 닫힌다. 사람이 고를
-/// 갈림길이라 여기서는 적어만 둔다. 치르는 비용은 **규칙이 정말 막은 쓰기 하나**라 드물다.
+/// **판정을 쓴 뒤에 오는 값은 stdout 을 받아서 가른다**(moai-mnhq, 2026-09-23 사용자 결정).
+/// 126·127·2 는 `moai` 가 stdout 에 한 바이트도 못 쓴 자리가 맞지만, 패닉의 101 과 시그널의
+/// 128+N 은 `main` 이 판정을 이미 흘려보낸 **뒤**에도 온다. 그 자리에서 둘째 객체를 붙이면 위
+/// 문단이 1 에 대해 적어 둔 손실이 그대로 난다 — 짐작이 아니라 **진짜 `claude` 로 쟀다**
+/// (2026-09-23, haiku): `deny` 하나만 내면 도구가 안 돌고 거절문이 그대로 서는데, 그 뒤에
+/// `systemMessage` 를 하나 붙이면 **두 객체가 다 없어지고 도구가 돈다**(`is_error` 가 거짓이고
+/// 스트림 어디에도 두 글이 없다). 그래서 이 줄은 `o=$(…)` 로 stdout 을 받아 두고 알림은 그것이
+/// **비었을 때만** 낸다. 받은 것은 `printf '%s\n'` 으로 그대로 흘려보낸다.
+///
+/// **그 가름에 드는 값은 fork 하나다** — dash 에서 +0.30ms, bash 에서 +0.48ms 다(2026-09-23,
+/// `/bin/true` 로 2,000번씩 두 번). 이 저장소의 훅 한 번은 `moai` 자신이 28ms 를 쓰므로
+/// (`pre-tool-use` 30회 평균) 그 1.2~1.7% 고, 아래 "정상 갈래" 문단이 프로세스를 안 늘린다고
+/// 적어 두었던 자리를 이 문단이 되돌린다.
+///
+/// **꼬리의 줄바꿈은 골라진다.** 명령 치환이 끝의 줄바꿈을 걷고 이 줄이 하나를 다시 단다.
+/// `moai` 의 출력은 늘 줄바꿈 하나로 끝나 바이트가 안 달라지고(2026-09-23 에 쟀다: 보드를
+/// 싣는 `user-prompt-submit` 이 받기 전후 17,371B 로 같다), 줄바꿈 없이 끝나는 출력만 하나를
+/// 얻는다 — JSON 줄에는 뜻이 안 달라진다.
+///
+/// **`moai` 쪽도 한 자리를 옮겼다**(같은 결정). `src/main.rs` 는 이제
+/// `carried`·`unjournaled`·`unread_journals`·`redirected` 를 먼저 돌리고 `print(&lines)` 를 맨
+/// 뒤에 둔다 — 넷 다 stderr 에만 쓰므로 stdout 의 차례는 안 바뀌고, 판정을 흘려보낸 뒤에 101 이
+/// 올 자리가 그 넷뿐이었으니 이제 **101 은 stdout 이 비었다는 뜻**이다. 셸 한 줄의 가정이 아니라
+/// `moai` 의 성질로 선다. 시그널은 그래도 아무 때나 오므로 그쪽은 위의 받아 두는 갈래가 맡는다.
 ///
 /// **이 줄이 못 잡는 판이 하나 있다 — 매니페스트 `timeout` 15초에 끊긴 판이다.** 2026-09-23 에
 /// 쟀다: `claude` 는 그 시각에 훅을 **프로세스 그룹째** 죽이고(하위 프로세스로 돌린 `sleep` 이
@@ -166,9 +181,9 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// `true 2>/dev/null > "$s"` 는 셋 다 조용했다. 표식이 못 서는 자리에서는 그 줄이 도구 호출마다
 /// 서니, 조용히 넘어가려던 자리가 도리어 가장 시끄러운 자리가 된다.
 ///
-/// **정상 갈래에는 비용이 안 붙는다** — 이 문은 `case` 안에서만 서고 프로세스를 안 늘린다
+/// **정상 갈래에 드는 것은 위의 fork 하나뿐이다** — 표식과 `printf` 는 `case` 안에서만 서고
 /// (2026-09-23 에 dash 로 200번씩 재어 한 번 2.66ms → 2.74ms, 껍데기 하나를 새로 실행하는
-/// 비용에 묻힌다).
+/// 비용에 묻힌다), 거기에 stdout 을 받는 값이 얹힌다(위 문단의 +0.30~0.48ms).
 /// 표식이 못 서는 자리(`TMPDIR` 이 못 쓰는 자리, 세션 id 에 `/` 가 든 판)에서는 그대로 매번
 /// 말한다 — 문턱이 조용히 실패해 알림을 **잃는** 것보다 낫다. `$PPID` 로 물러선 판에서 pid 가
 /// 재사용되면 표식이 남아 한 번을 잃는데, 그 자리는 `TMPDIR` 을 비우는 손이 함께 지운다.
@@ -241,12 +256,13 @@ fn command(exe: &str, event: &str) -> String {
     // 이벤트가 그렇게 죽을 수 있다). 값을 함께 키로 두면 값이 달라질 때만 다시 말하니, 상황이
     // 정말 바뀐 자리에서만 한 줄이 는다. `$c` 는 `$?` 가 낸 0~255 이라 파일 이름에 안전하다.
     format!(
-        "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; c=0; \"{exe}\" hook {event} || c=$?; \
-         case \"$c\" in 0|1) ;; *) \
+        "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; c=0; o=$(\"{exe}\" hook {event}) || c=$?; \
+         [ -z \"$o\" ] || printf '%s\\n' \"$o\"; \
+         case \"$c\" in 0|1) ;; *) [ -n \"$o\" ] || {{ \
          s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-${{CLAUDE_CODE_SESSION_ID:-$PPID}}.{event}.$c.said\"; \
          [ -e \"$s\" ] || {{ true 2>/dev/null > \"$s\" || :; \
          printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_}; }};; \
+         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_}; }}; }};; \
          esac; exit 0"
     )
 }
@@ -849,8 +865,9 @@ mod tests {
 
     /// 훅 줄을 **실제 껍데기로 돌려** 갈래마다 무엇이 나가는지 잰다(moai-j4ie).
     ///
-    /// 넷을 가른다 — 없는 것(조용히 0), 못 도는 것(알림 한 줄), 돌고 진 것(1: 그대로 삼킨다),
-    /// 도는 것(stdout 이 한 글자도 안 달라진다). 꼴만 견주는 시험은 `&&` 와 `;` 를 못 가리는데,
+    /// 다섯을 가른다 — 없는 것(조용히 0), 못 도는 것(알림 한 줄), 돌고 진 것(1: 그대로 삼킨다),
+    /// **판정을 쓴 뒤에 죽은 것**(알림을 안 덧붙인다, moai-mnhq), 도는 것(stdout 이 한 글자도
+    /// 안 달라진다). 꼴만 견주는 시험은 `&&` 와 `;` 를 못 가리는데,
     /// 옛 줄이 126 을 삼킨 까닭이 바로 그 한 글자였다. **종료 코드는 어느 갈래에서도 0 이다** —
     /// 여기가 게이트가 되는 순간 훅 바이너리 권한 하나로 세션의 모든 도구 호출이 멈춘다.
     ///
@@ -897,9 +914,17 @@ mod tests {
         };
 
         // 도는 판의 stdout 은 한 글자도 안 달라진다 — 계약 JSON 이 그대로 나가야 한다.
+        // **`moai` 가 내는 꼴로 짓는다**(moai-mnhq) — 줄바꿈 하나로 끝나는 출력이다. 이 줄은
+        // 이제 `o=$(…)` 를 지나는데, 명령 치환이 꼬리의 줄바꿈을 걷고 한 줄이 하나를 다시 다니
+        // 그 꼴에서만 바이트가 같다. 줄바꿈 없이 끝나는 출력은 아래 `bare` 가 따로 잰다.
+        //
         // 이 줄이 **문지기이기도 하다**: `TMPDIR` 이 `noexec` 으로 얹힌 자리에서는 여기서
         // 실행을 못 재므로 아래를 실패로 세지 않는다(`cmd::runnable` 의 시험과 같은 자다).
-        let live = plant("live", "#!/bin/sh\nprintf '%s' '{\"ok\":true}'\n", 0o755);
+        let live = plant("live", "#!/bin/sh\nprintf '%s\\n' '{\"ok\":true}'\n", 0o755);
+        // 줄바꿈 없이 끝나는 출력과 여러 줄짜리 출력. 앞은 줄바꿈 하나를 얻고(JSON 줄에는 뜻이
+        // 안 달라진다), 뒤는 가운데 줄바꿈이 그대로 산다 — 걷히는 것은 **꼬리**뿐이다.
+        let bare = plant("bare", "#!/bin/sh\nprintf '%s' '{\"ok\":true}'\n", 0o755);
+        let pair = plant("pair", "#!/bin/sh\nprintf '%s\\n%s\\n' '{\"a\":1}' '{\"b\":2}'\n", 0o755);
         if !crate::cmd::runnable(std::path::Path::new(&live)) {
             return;
         }
@@ -918,13 +943,18 @@ mod tests {
         let gone = plant("gone", "#!/nowhere/interp\nexit 0\n", 0o755);
         // **판정을 못 낸 나머지 값들**(moai-wnnb) — clap 이 모르는 부명령에 내는 2, 패닉의 101,
         // 시그널의 128+N 이다. `moai` 의 `main` 은 0·1 밖에 못 내므로 그 밖의 값은 모두 여기다.
-        // 세 글 다 stdout 에 한 글자도 안 쓴다 — 쓴 판이면 1 과 같이 삼켜야 한다.
+        // 세 글 다 stdout 에 한 글자도 안 쓴다 — 쓴 판은 아래 `spoke`·`felled` 가 따로 잰다.
         let clap = plant("clap", "#!/bin/sh\nexit 2\n", 0o755);
         let panic = plant("panic", "#!/bin/sh\nexit 101\n", 0o755);
         let killed = plant("killed", "#!/bin/sh\nkill -9 $$\n", 0o755);
         // 돌고 진 판은 제 stdout 이 우리 것이 아니다 — 판정 JSON 뒤에 둘째 객체를 붙이면
         // 그 판정(`deny` 까지)이 파싱에서 통째로 버려진다.
         let lost = plant("lost", "#!/bin/sh\necho '{\"hookSpecificOutput\":{}}'\nexit 1\n", 0o755);
+        // **판정을 쓴 **뒤**에 죽는 판**(moai-mnhq) — 위의 `panic`·`killed` 와 종료 값은 같은데
+        // stdout 에 이미 `deny` 가 섰다. 여기에 알림을 덧붙이면 막아야 할 쓰기가 통과한다.
+        let deny = "{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\"}}";
+        let spoke = plant("spoke", &format!("#!/bin/sh\necho '{deny}'\nexit 101\n"), 0o755);
+        let felled = plant("felled", &format!("#!/bin/sh\necho '{deny}'\nkill -9 $$\n"), 0o755);
         let nowhere = at.join("nowhere").display().to_string();
 
         for sh in shells {
@@ -950,11 +980,23 @@ mod tests {
             assert_eq!(got, Some(0), "{sh}: 진 판이 게이트가 됐다");
             assert_eq!(said, "{\"hookSpecificOutput\":{}}\n", "{sh}: 1 로 진 판에 한 줄을 덧붙였다 — {said}");
 
+            // **판정을 쓴 뒤에 죽은 판에도 안 덧붙인다**(moai-mnhq). 종료 값만 보던 줄은 여기에
+            // 둘째 객체를 얹었고, 그러면 `claude` 가 두 객체를 보고 **둘 다 버려** 막아야 할
+            // 쓰기가 통과했다(2026-09-23 에 진짜 `claude` 로 쟀다). stdout 이 비었을 때만 말한다.
+            for (exe, why) in [(&spoke, "101"), (&felled, "시그널")] {
+                let (got, said) = run(sh, "-c", exe);
+                assert_eq!(got, Some(0), "{sh}: {why} 판이 게이트가 됐다 — {said}");
+                assert_eq!(said, format!("{deny}\n"), "{sh}: {why} 로 죽은 판이 판정에 한 줄을 덧붙였다 — {said}");
+            }
+
             // 없는 것은 여전히 조용하다.
             let (got, said) = run(sh, "-c", &nowhere);
             assert_eq!((got, said.as_str()), (Some(0), ""), "{sh}: 없는 바이너리가 말을 했다");
 
-            assert_eq!(run(sh, "-c", &live), (Some(0), "{\"ok\":true}".to_string()), "{sh}");
+            assert_eq!(run(sh, "-c", &live), (Some(0), "{\"ok\":true}\n".to_string()), "{sh}");
+            // 꼬리의 줄바꿈만 골라지고 가운데 줄바꿈은 그대로 산다.
+            assert_eq!(run(sh, "-c", &bare), (Some(0), "{\"ok\":true}\n".to_string()), "{sh}: 꼬리가 안 섰다");
+            assert_eq!(run(sh, "-c", &pair), (Some(0), "{\"a\":1}\n{\"b\":2}\n".to_string()), "{sh}: 줄이 뭉쳤다");
 
             // **`set -e` 가 선 껍데기에서도 0 이다.** 맨 명령으로 두던 판은 여기서 그대로
             // 죽어, 1 로 진 판은 stdout 의 판정까지 함께 버려졌다.
