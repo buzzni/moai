@@ -12,6 +12,22 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [0.1.2] - 2026-09-23
 
+**Two things in this release break a caller.** Both are written up where they
+belong below; they are gathered here so that reading the release does not depend
+on finding them.
+
+- **`prime --json`'s `epic` changed meaning.** It is now what the file says, like
+  `epic` everywhere else, and the resolved answer moved to `derived_epic`. A loop
+  reading `.picked[].epic` or `.ready[].epic` changes that one word to
+  `.derived_epic` and gets what it used to get.
+- **`moai add --from` refuses the flags a plan cannot honour.** `--status`,
+  `--quiet` and a typed `--type` used to be accepted and thrown away by a call
+  that ended in 0; they now exit 1. The seven the argument parser already refused
+  — a positional title, `--epic`, `--tag`, `--priority`, `--parent`, `--start`
+  and `--due` — are still refused, but the exit code changes from 2 to 1 and the
+  message becomes the command's own rather than the parser's. `--body` goes the
+  other way: a plan takes it now.
+
 ### Added
 
 - A milestone carries a **start and a deadline**: `moai milestone add 'v0.1'
