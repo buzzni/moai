@@ -5,7 +5,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use || exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || exit 0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use; c=$?; { [ \"$c\" = 126 ] || [ \"$c\" = 127 ]; } && printf '{\"systemMessage\":\"moai: the pre-tool-use hook could not run (exit %s). The four moai rules are not standing - run moai skill to see why.\"}' \"$c\"; exit 0",
             "statusMessage": "checking the moai rules...",
             "timeout": 15,
             "type": "command"
@@ -18,7 +18,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start || exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || exit 0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook session-start; c=$?; { [ \"$c\" = 126 ] || [ \"$c\" = 127 ]; } && printf '{\"systemMessage\":\"moai: the session-start hook could not run (exit %s). The four moai rules are not standing - run moai skill to see why.\"}' \"$c\"; exit 0",
             "statusMessage": "counting moai warnings...",
             "timeout": 15,
             "type": "command"
@@ -30,7 +30,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop || exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || exit 0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop; c=$?; { [ \"$c\" = 126 ] || [ \"$c\" = 127 ]; } && printf '{\"systemMessage\":\"moai: the stop hook could not run (exit %s). The four moai rules are not standing - run moai skill to see why.\"}' \"$c\"; exit 0",
             "statusMessage": "comparing the moai state...",
             "timeout": 15,
             "type": "command"
@@ -42,7 +42,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 && \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit || exit 0",
+            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || exit 0; \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit; c=$?; { [ \"$c\" = 126 ] || [ \"$c\" = 127 ]; } && printf '{\"systemMessage\":\"moai: the user-prompt-submit hook could not run (exit %s). The four moai rules are not standing - run moai skill to see why.\"}' \"$c\"; exit 0",
             "statusMessage": "reading the moai board...",
             "timeout": 15,
             "type": "command"
@@ -52,5 +52,5 @@
     ]
   },
   "name": "moai",
-  "version": "788.821.369"
+  "version": "22.260.369"
 }

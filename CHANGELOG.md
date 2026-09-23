@@ -200,6 +200,17 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   merge writes is still put in the shape the tool itself writes, so a merge never
   leaves behind an unfolded tag, an empty timestamp or a duplicated JSON key for
   the next command to trip over.
+- A hook binary that is **there but cannot be run** now says one line instead of
+  passing in silence. The planted hook line ended in `|| exit 0`, which swallowed
+  the 126 the shell gives for a file without its execute bit or on a `noexec`
+  mount — the four rules did not stand and the session looked exactly as it does
+  when they pass. The line now separates the two: nothing there stays silent, as
+  it must (a `cargo clean` should not make every session noisy), and a binary that
+  cannot be run prints a notice naming the hook and the exit code. **Nothing is
+  blocked and the exit code is still 0** — a hook that blocks on its own missing
+  permission stops every tool call in the session. A hook that ran and then failed
+  keeps its silence: it has already written its own answer to stdout, and a second
+  line appended there would throw that answer — a refusal included — away.
 
 ## [0.1.1] - 2026-09-22
 

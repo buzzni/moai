@@ -66,6 +66,37 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 그때 훅이 "command not found" 를 매 세션 뱉으면 사람이 훅을 꺼 버린다 —
 /// 꺼진 규칙은 없는 규칙이다. 한 번은 이 가드가 없어 세션 하나가 통째로
 /// 잠겼다: 도구 호출마다 훅이 실패해 `Bash` 도 `Write` 도 안 돌았다.
+///
+/// **있는데 못 도는 판은 한 줄을 낸다**(moai-j4ie, 2026-09-23 사용자 결정). 옛 한 줄은
+/// `… && "<exe>" hook <event> || exit 0` 이라 **126(못 돌린다)까지 삼켰다** — 실행 비트가
+/// 빠졌거나 `noexec` 에 얹힌 판에서 규칙 넷이 조용히 안 서는데, 그 모습은 "규칙이 통과했다"
+/// 와 한 글자도 다르지 않았다. `moai skill` 은 그 판을 이제 "안 돈다" 고 말하지만
+/// (`cmd::runnable`, moai-dhx9) 그 말을 읽는 사람이 없는 판은 여전히 조용하다.
+///
+/// **말하는 길은 `systemMessage` 뿐이다 — 재서 골랐다.** 훅 하나에 네 갈래를 심어
+/// `claude -p --output-format stream-json` 으로 재니(2026-09-23, haiku, Bash 한 번):
+///
+/// | 훅의 종료 | stderr | 세션이 듣는 것 | 도구 |
+/// |---|---|---|---|
+/// | 0 | 있음 | **아무것도** — 스트림에 없다 | 돈다 |
+/// | 1 | 있음 | **아무것도** — 0 과 같다 (`--debug` 로도 없다) | 돈다 |
+/// | 2 | 있음 | `tool_result` 에 그 줄 그대로 | **안 돈다** |
+/// | 0 + stdout `{"systemMessage":…}` | — | `system/informational` notice 한 줄 | 돈다 |
+///
+/// 그래서 **비영 종료로는 아무도 못 듣는다** — 들리는 비영 값은 2 하나고 그것은 게이트다
+/// (CLAUDE.md: 경고로 비영 종료하지 않는다, 훅은 정당한 쓰기를 막지 않는다). `systemMessage`
+/// 는 게이트 없이 들리는 유일한 길이라 그것을 쓴다. `SessionStart` 에서만 notice 가 안 서고
+/// `hook_response` 에 남는다(재 본 값) — 그 한 줄을 이벤트마다 달리 적지는 않는다.
+///
+/// **126·127 만 말한다.** 1 로 진 판은 그대로 삼킨다(같은 결정) — `moai` 가 돌기는 했으므로
+/// stdout 에 판정 JSON 이 이미 섰을 수 있고([`crate::cmd::had_partial`] 이 값을 내는 길),
+/// 그 뒤에 둘째 객체를 붙이면 그 판정 — `deny` 까지 — 이 파싱에서 통째로 버려진다. 막아야 할
+/// 쓰기가 통과하는 쪽으로 지는 것이다. 못 돈 판은 `moai` 가 한 바이트도 안 냈으니 stdout 이
+/// 우리 것이다. 126·127 을 "못 돌렸다" 로 읽는 어휘는 `merge_driver::Probe::Dead` 와 같다.
+///
+/// **경로는 그 줄에 안 적는다.** [`quotable`] 이 `"`·`\` 를 걸러도 줄바꿈은 안 거르는데,
+/// JSON 문자열 안의 날 줄바꿈 하나면 이 한 줄이 파싱에서 버려진다 — `printf` 의 꼴에도 안
+/// 넣는다(경로의 `%` 가 꼴 문자로 읽힌다). 어느 자리인지는 `moai skill` 이 댄다.
 fn command(exe: &str, event: &str) -> String {
     // 따옴표를 깨는 경로는 아예 안 쓴다. 셸 한 줄이 깨지면 그 세션의 모든
     // 도구 호출이 막힌다.
@@ -75,7 +106,15 @@ fn command(exe: &str, event: &str) -> String {
     // 조용히 `exit 0` 으로 빠지고, 그 모습은 "규칙이 통과했다" 와 똑같다.
     // 이 저장소에서 그 검사가 참으로 보였던 것도 하필 `moai` 라는 **디렉터리**가
     // 있어서였다. `command -v` 는 절대 경로도 이름도 옳게 가린다.
-    format!("command -v -- \"{exe}\" >/dev/null 2>&1 && \"{exe}\" hook {event} || exit 0")
+    //
+    // 없을 때 빠지는 자리를 `&&` 뒤가 아니라 **앞줄**로 세운 까닭은 뒤의 종료 값을
+    // 재야 하기 때문이다 — 한 줄에 매달면 `|| exit 0` 이 둘을 같이 삼킨다.
+    format!(
+        "command -v -- \"{exe}\" >/dev/null 2>&1 || exit 0; \"{exe}\" hook {event}; c=$?; \
+         {{ [ \"$c\" = 126 ] || [ \"$c\" = 127 ]; }} && \
+         printf '{{\"systemMessage\":\"moai: the {event} hook could not run (exit %s). \
+         The four moai rules are not standing - run moai skill to see why.\"}}' \"$c\"; exit 0"
+    )
 }
 
 /// 심을 파일들. 경로는 `DIR` 부터의 상대다.
@@ -653,6 +692,56 @@ mod tests {
             }
         }
         assert_eq!(seen, HOOKS.len(), "훅 수가 안 맞는다");
+    }
+
+    /// 훅 줄을 **실제 껍데기로 돌려** 갈래마다 무엇이 나가는지 잰다(moai-j4ie).
+    ///
+    /// 셋을 가른다 — 없는 것(조용히 0), 못 도는 것(126·127: 알림 한 줄), 돌고 진 것
+    /// (1: 그대로 삼킨다). 꼴만 견주는 시험은 `&&` 와 `;` 를 못 가리는데, 옛 줄이 126 을
+    /// 삼킨 까닭이 바로 그 한 글자였다. **종료 코드는 어느 갈래에서도 0 이다** — 여기가
+    /// 게이트가 되는 순간 훅 바이너리 권한 하나로 세션의 모든 도구 호출이 멈춘다.
+    #[test]
+    fn a_binary_that_cannot_run_says_so_without_blocking() {
+        let scratch = crate::scratch::Scratch::new("skill-hookline");
+        let at = scratch.path();
+        // 갈래마다 제 값을 내는 껍데기 글. 126 은 껍데기와 로더가 "못 돌렸다" 로 쓰는 값이다.
+        let plant = |name: &str, body: &str| {
+            let p = at.join(name);
+            std::fs::write(&p, body).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            p.display().to_string()
+        };
+        let run = |exe: &str| {
+            let out = std::process::Command::new("sh").args(["-c", &command(exe, "pre-tool-use")]).output().unwrap();
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
+        };
+
+        let dead = plant("dead", "#!/bin/sh\nexit 126\n");
+        let (code, said) = run(&dead);
+        assert_eq!(code, Some(0), "못 도는 판이 게이트가 됐다 — {said}");
+        let v: serde_json::Value = serde_json::from_str(said.trim()).unwrap_or_else(|e| panic!("{e} — {said:?}"));
+        let notice = v["systemMessage"].as_str().unwrap_or_default();
+        assert!(notice.contains("pre-tool-use"), "어느 훅인지 안 댄다 — {notice}");
+        assert!(notice.contains("126"), "종료 값을 안 댄다 — {notice}");
+
+        // 돌고 진 판은 제 stdout 이 우리 것이 아니다 — 판정 JSON 뒤에 둘째 객체를 붙이면
+        // 그 판정(`deny` 까지)이 파싱에서 통째로 버려진다.
+        let lost = plant("lost", "#!/bin/sh\necho '{\"hookSpecificOutput\":{}}'\nexit 1\n");
+        let (code, said) = run(&lost);
+        assert_eq!(code, Some(0), "진 판이 게이트가 됐다");
+        assert_eq!(said, "{\"hookSpecificOutput\":{}}\n", "1 로 진 판에 한 줄을 덧붙였다 — {said}");
+
+        // 없는 것은 여전히 조용하다.
+        let (code, said) = run(&at.join("nowhere").display().to_string());
+        assert_eq!((code, said.as_str()), (Some(0), ""), "없는 바이너리가 말을 했다");
+
+        // 도는 판의 stdout 은 한 글자도 안 달라진다 — 계약 JSON 이 그대로 나가야 한다.
+        let live = plant("live", "#!/bin/sh\nprintf '%s' '{\"ok\":true}'\n");
+        assert_eq!(run(&live), (Some(0), "{\"ok\":true}".to_string()));
     }
 
     /// 규칙이 뜻을 두는 도구만 본다. 전부 받으면 읽기만 하는 호출까지
