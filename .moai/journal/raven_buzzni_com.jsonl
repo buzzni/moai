@@ -1229,3 +1229,12 @@
 {"ts":"2026-09-23T04:53:36Z","id":"moai-h4jx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"실제 git merge 로 잰다. 리뷰가 짚은 자리 둘을 고쳤다 — 줄의 모든 닫는 괄호를 갈던 것과, 무엇을 심어도 초록이던 닫는 단언"}
 {"ts":"2026-09-23T04:53:37Z","id":"moai-85o3.p4w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"아홉을 반영하고 넷을 idea 로 넘겼다(moai-47qa, moai-x23h, moai-3zp0, moai-y2rc). 13번은 본문을 실제와 맞추고, 14번은 결정을 이력에 적어 출처를 되살렸다"}
 {"ts":"2026-09-23T04:54:11Z","id":"moai-85o3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 닫혔다. 넘긴 것은 idea 넷이고 v0.1.2 안에 셋(moai-47qa, moai-x23h, moai-3zp0), 밖에 하나(moai-y2rc)다"}
+{"ts":"2026-09-23T05:01:16Z","id":"moai-1a55","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄과 못 읽는 시각이 머지에서 하는 일"}
+{"ts":"2026-09-23T05:01:16Z","id":"moai-1a55.4oh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄을 집합 3-way 로 푼다"}
+{"ts":"2026-09-23T05:01:16Z","id":"moai-1a55","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-47qa 에서 펼쳤다 — `plan` 이 못 읽는 줄 하나로 파일 전체를 충돌로 넘긴다"}
+{"ts":"2026-09-23T05:01:16Z","id":"moai-47qa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1a55 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-23T05:01:21Z","id":"moai-1a55.kh2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 시각에서 미루기를 말없이 버리지 않는다"}
+{"ts":"2026-09-23T05:01:21Z","id":"moai-1a55.kh2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x23h 에서 펼쳤다 — `coupled` 이 못 읽는 시각에서 한쪽 미루기를 조용히 버린다"}
+{"ts":"2026-09-23T05:01:21Z","id":"moai-x23h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1a55 의 멤버 moai-1a55.kh2 로 펼쳤다"}
+{"ts":"2026-09-23T05:01:46Z","id":"moai-1a55.4oh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T05:01:46Z","id":"moai-1a55.kh2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
