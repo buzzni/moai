@@ -431,9 +431,7 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
     // **원문을 그대로 든다**([`Row`]). 한 쪽이 그 id 로 줄을 여럿 들면 그 줄들이 다 선다.
     // 매개변수를 안 받는 것은 여덟 자리 중 한 곳에서 두 쪽을 뒤집어 넘기는 실수가
     // 컴파일되지 않게 하려는 것이다.
-    let side = |v: Option<&[Row<'_>]>| {
-        v.map(|rs| rs.iter().map(|r| r.raw).collect::<Vec<_>>().join("\n"))
-    };
+    let side = |v: Option<&[Row<'_>]>| v.map(|rs| rs.iter().map(|r| r.raw).collect::<Vec<_>>().join("\n"));
     let clash = || Settled::Clash { ours: side(a), theirs: side(b) };
     // **한 쪽이라도 같은 id 로 둘을 들면 그 id 는 사람이 푼다**(moai-2m94). 읽히는 줄 둘은
     // [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이 낀 판이고, 그 둘 중 무엇이 "그

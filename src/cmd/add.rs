@@ -81,6 +81,15 @@ pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape, lang: crate::
     draft::fill_as(&src, &pairs, shape, lang).map_err(bad)
 }
 
+/// 이 인자가 **stdin 을 읽는가.** `-` 가 그 뜻이지만, 같은 구멍을 가리키는 철자가 더 있다.
+///
+/// 잰 뒤에 쓰는 자리는 [`run`] 의 다툼 검사 하나다 — [`read_body`] 와 [`read_source`] 는 여전히
+/// `-` 만 stdin 으로 연다. 그 둘을 넓히면 `/dev/stdin` 이 없는 기계에서 뜻이 갈리지만, **다툰다고
+/// 말하는 것**은 그 파일이 실제로 stdin 이든 아니든 맞다: 둘 다 열리면 먼저 읽는 쪽이 다 마신다.
+fn reads_stdin(arg: &str) -> bool {
+    matches!(arg, "-" | "/dev/stdin" | "/dev/fd/0" | "/proc/self/fd/0")
+}
+
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
@@ -94,6 +103,78 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
         }
         Some(b) => Ok((!b.is_empty()).then(|| b.to_string())),
     }
+}
+
+/// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
+///
+/// 여기 사는 까닭은 [`crate::cli::AddArgs::from`] 위에 적어 두었다(moai-yhb1) — 짧게는, clap 의
+/// `conflicts_with_all` 에 맡기면 그 거절이 [`run`] 보다 먼저 터져 네임스페이스가 지은 거절문
+/// (`moai idea add --from -` 은 동사가 틀렸다고 말한다)을 가리고, 평문 stderr 에 exit 2 라
+/// `--json` 으로 받는 쪽이 `code` 를 못 본다.
+///
+/// **목록이 아니라 준 것만 댄다.** 무엇이 못 서는지를 통째로 읊으면 받는 쪽이 제가 친 것을
+/// 그 안에서 찾아야 한다.
+///
+/// `--milestone` 은 여기 안 든다(moai-xoyg) — 그것은 받아서 뿌리인 에픽에 달고 멤버가
+/// 물려받는다. `--var`·`--dry-run` 도 계획에서만 뜻이 있는 짝이라 안 든다.
+///
+/// **`--body` 도 여기 안 든다**(moai-kqid). 계획은 본문을 받아 첫 뿌리에 단다 — 못 서는 판은
+/// `--body -` 와 `--from -` 이 stdin 하나를 다투는 판뿐이고, 그것은 이 목록과 까닭이 달라
+/// [`run`] 이 제 글로 낸다.
+///
+/// **필드를 남김없이 풀어 받는다**(`..` 를 안 쓴다, 리뷰). 이 목록이 바로 "깃발 하나가 조용히
+/// 지나가 0 으로 끝났다" 로 무너진 자리인데(`--body`·`--status`·`--quiet` 가 moai-fppn 까지,
+/// `--type` 이 moai-g9a8 까지 그랬다), 필드를 하나씩 집어 읽으면 다음에 `AddArgs` 에 붙는 깃발도
+/// 똑같이 조용히 지나간다. 바로 아래 [`run`] 의 `Kind` 갈래가 `_ => {}` 를 안 쓰는 것과 같은
+/// 까닭이고, 그쪽 주석이 적어 둔 대로 **그날 컴파일러가 이 자리를 이름으로 댄다.**
+fn flags_a_plan_cannot_keep(args: &AddArgs) -> Vec<&'static str> {
+    let AddArgs {
+        title,
+        kind,
+        epic,
+        tag,
+        priority,
+        parent,
+        start,
+        due,
+        status,
+        quiet,
+        // 계획이 받아서 지키는 것들 — 여기 들면 안 된다.
+        milestone: _,
+        body: _,
+        assignee: _,
+        from: _,
+        var: _,
+        dry_run: _,
+    } = args;
+    // **종류도 마크다운이 정한다**(moai-g9a8) — `#` 이 에픽이고 `-` 가 이슈다. 한 계획이
+    // 둘을 같이 내므로 `--type issue` 도 `--type epic` 도 지킬 수가 없다. 네임스페이스가 준
+    // 기본값(`moai issue add --from -` 의 `kind_override`)은 여기 안 든다: 그것은 사람이
+    // 이 부름에 친 요구가 아니라 동사가 들고 온 기본값이라, 마크다운이 이기는 것이 맞다.
+    // **둘을 한 값으로 뭉개던 자리가 버그였다** — `kind_override.or(args.kind)` 를 통과
+    // 목록으로 재던 판은 `Some(Issue)` 를 통과시켜야 해서 사람이 친 `--type issue` 까지
+    // 같이 통과시켰고, 그 부름이 에픽 트리를 만들고 0 으로 끝났다. 되돌리려면 만들어진
+    // 줄을 손으로 지워야 한다.
+    [
+        // 제목은 계획이 들고 온다 — `#` 줄과 `-` 줄이 그것이다.
+        (title.is_some(), "[title]"),
+        (kind.is_some(), "--type"),
+        // 소속·태그·우선순위도 마크다운이 적는 자리다(`draft::parse`).
+        (epic.is_some(), "--epic"),
+        (!tag.is_empty(), "--tag"),
+        (priority.is_some(), "--priority"),
+        (parent.is_some(), "--parent"),
+        // 계획은 마일스톤을 못 짓는다(`refuse.plan_has_no_milestone`) — 날짜가 설 줄이 없다.
+        (start.is_some(), "--start"),
+        (due.is_some(), "--due"),
+        // `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다.
+        (status.is_some(), "--status"),
+        // `-q` 는 "id 하나" 라는 뜻인데 계획은 id 를 여럿 낸다 — 기계가 받을 것은 `--json` 이다.
+        (*quiet, "--quiet"),
+    ]
+    .into_iter()
+    .filter_map(|(on, flag)| on.then_some(flag))
+    .collect()
 }
 
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
@@ -114,7 +195,23 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 목록으로 적는다**: `_ => {}` 로 닫으면 종류가 하나 더 붙는 날 그것이
         // 또 조용히 지나가지만, 남김없이 적으면 그날 컴파일러가 이 자리를
         // 이름으로 댄다.
-        match kind_override.or(args.kind) {
+        //
+        // **여기 재는 것은 `--type` 을 지킬 수 있는가가 아니라 어느 말이 가장 도움이 되는가다**
+        // (moai-g9a8). `--type idea`·`--type milestone` 은 갈 곳을 대는 제 글이 있어 여기서
+        // 잡고, `--type issue`·`--type epic` 은 아래 [`flags_a_plan_cannot_keep`] 이 못 지키는
+        // 깃발로 잡는다 — 통과한다는 뜻이 아니다.
+        //
+        // **고를 때도 둘을 안 뭉갠다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은 동사가
+        // 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봤다 — `moai issue add --from - --type
+        // idea` 와 `moai epic add --from - --type idea` 가 `moai idea promote` 를 못 듣고 깃발
+        // 얘기만 들었다. 같은 `--type idea` 를 친 둘이 어느 동사로 들어왔느냐로 다른 말을 듣고,
+        // 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다. 동사가 아예 못 받는 것이면(`idea
+        // add`·`milestone add`) 동사를 대고, 아니면 사람이 친 것을 댄다.
+        let asked = match kind_override {
+            Some(k @ (Kind::Idea | Kind::Milestone)) => Some(k),
+            _ => args.kind,
+        };
+        match asked {
             None | Some(Kind::Issue) | Some(Kind::Epic) => {}
             Some(Kind::Idea) => {
                 let lang = ctx.lang();
@@ -139,7 +236,56 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
         }
-        return bulk(ctx, &repo, from, &args.var, args.dry_run, args.assignee.clone(), args.milestone.as_deref());
+        // **네임스페이스가 먼저다**(moai-yhb1) — `moai idea add --from - -b '글'` 이 `--body` 얘기를
+        // 듣고, 그것을 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알던 차례다. 위의 갈래가 지은 글은
+        // 어디로 가야 하는지를 대고, 아래 글은 이 부름에서 깃발 하나만 빼라고 한다 — 둘이 겹치면
+        // 덜 아는 쪽이 이기면 안 된다.
+        let cannot = flags_a_plan_cannot_keep(&args);
+        if !cannot.is_empty() {
+            let lang = ctx.lang();
+            return Err(Fail::coded(
+                format!(
+                    "{}\n      {}",
+                    crate::i18n::fill(crate::i18n::say(lang, "refuse.plan_flag"), &[("flags", &cannot.join(", "))]),
+                    crate::i18n::say(lang, "refuse.plan_flag_how"),
+                ),
+                super::code::BAD_INPUT,
+            ));
+        }
+        // **stdin 은 하나다**(moai-fppn·moai-kqid). 막을 것은 `--body` 자체가 아니라 그 둘이
+        // 같은 입력을 읽으려 드는 판이다 — 계획이 파일이거나 본문이 argv 에 적힌 글이면 둘은
+        // 서로 다른 데서 오고, 그때 본문은 첫 뿌리에 선다. 통째로 막던 판은 다툴 것이 없는
+        // 부름까지 같이 막아, `Rooted.body` 가 서 있고 `idea promote` 가 그 길로 본문을 채우는
+        // 동안 사람만 그 길을 못 썼다.
+        //
+        // **`-` 라는 철자가 아니라 stdin 인가를 잰다**(리뷰). 글자만 견주던 판은
+        // `moai add --from /dev/stdin --body -` 를 그대로 지나 보냈고, 그러면 `read_body` 가
+        // stdin 을 다 마신 뒤 `read_source` 가 빈 것을 읽어 **계획이 비었다** 고 거절했다 —
+        // 받는 쪽은 제가 제대로 준 계획을 고치러 갔다.
+        if reads_stdin(from) && args.body.as_deref().is_some_and(reads_stdin) {
+            let lang = ctx.lang();
+            return Err(Fail::coded(
+                format!(
+                    "{}\n      {}",
+                    crate::i18n::say(lang, "refuse.plan_body_stdin"),
+                    crate::i18n::say(lang, "refuse.plan_body_stdin_how"),
+                ),
+                super::code::BAD_INPUT,
+            ));
+        }
+        // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
+        // stdin 을 읽는 쪽은 많아야 하나다.
+        let body = read_body(args.body.clone())?;
+        return bulk(
+            ctx,
+            &repo,
+            from,
+            &args.var,
+            args.dry_run,
+            args.assignee.clone(),
+            args.milestone.as_deref(),
+            body.as_deref(),
+        );
     }
     // **`--var` 도 `--from` 이 있어야 뜻이 있다**(moai-cypw) — 아래 `--dry-run` 과 같은 까닭이다.
     // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
@@ -158,8 +304,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // **연습이라 적힌 명령이 쓰면 안 된다.** 여기 닿았다는 것은 `--from` 이
     // 없다는 뜻이고, 하나짜리에는 연습 길이 없어 `--dry-run` 이 그대로 만들고
     // 있었다 — 막는 줄 알고 부른 명령이 쓰는 것보다 나쁜 것은 없다.
-    // `clap` 에 맡길 수 없다: `requires = "from"` 은 제목이 있으면(=`from` 과
-    // conflicts) 못 채울 요구로 보고 조용히 건너뛴다.
+    // `clap` 에 안 맡긴다: `requires = "from"` 은 이제 걸리지만(그 `conflicts_with_all` 을
+    // moai-yhb1 이 걷었다), 그 거절이 평문 stderr 에 exit 2 라 `--json` 으로 받는 쪽이 `code` 를
+    // 못 본다 — 한 명령에 거절 계약이 둘이면 그것은 계약이 아니다.
     if args.dry_run {
         let lang = ctx.lang();
         return Err(Fail::coded(
@@ -279,15 +426,19 @@ fn bulk(
     dry_run: bool,
     assignee: Option<String>,
     milestone: Option<&str>,
+    body: Option<&str>,
 ) -> R<Vec<String>> {
     let drafts = read_plan(from, vars, draft::Shape::Plan, ctx.lang())?;
     // **마일스톤은 계획의 뿌리로 간다**(moai-xoyg) — 에픽에 서고 이슈는 물려받는다.
-    let rooted = Rooted { milestone, body: None };
+    // 본문은 **첫 뿌리 하나**다(moai-kqid) — 물려받는 값이 아니라, 뿌리마다 적으면 같은 글이
+    // 에픽 수만큼 베껴진다. 고르는 자는 `create_drafts` 하나고 `idea promote` 가 데려가는
+    // 본문도 그 자리를 지난다.
+    let rooted = Rooted { milestone, body };
 
     if dry_run {
-        check_plan(&drafts, milestone, ctx.lang())?;
+        check_plan(&drafts, rooted, ctx.lang())?;
         if ctx.json {
-            return json_rehearsal(&drafts, None, None, milestone);
+            return json_rehearsal(&drafts, None, None, milestone, body_lands_on(&drafts, body));
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "add.will_make"))];
@@ -295,6 +446,7 @@ fn bulk(
         out.push(String::new());
         out.push(tally(&drafts, ctx.lang()));
         out.extend(milestone_line(milestone, ctx.lang()));
+        out.extend(body_line(&drafts, body, ctx.lang()));
         return Ok(out);
     }
 
@@ -395,6 +547,15 @@ pub fn create_drafts(
     debug_assert!(
         into.is_none() || drafts.iter().all(|d| d.kind != Kind::Epic),
         "선 에픽에 펼치는 계획에 `#` 줄이 섰다 — Shape::Members 가 막았어야 한다"
+    );
+    // **설 자리 없는 본문을 말없이 버리지 않는다**(리뷰). 본문은 뿌리 하나가 가져가는데, 뿌리가
+    // 없는 꼴(`into` 가 선 `Shape::Members`)에 본문을 주면 아래 `body.take()` 가 한 번도 안 돌아
+    // 사람이 적은 글이 0 으로 끝나며 사라진다. 지금 그렇게 주는 부름은 없고(`carried_body` 가
+    // `-e` 에 `None` 을 낸다) `check_plan` 도 같은 규칙으로 잰다 — 그 둘이 다른 파일이라 여기에
+    // 못을 박는다.
+    debug_assert!(
+        rooted.body.is_none() || drafts.iter().any(|d| d.epic.is_none() && into.is_none()),
+        "설 뿌리가 없는 계획에 본문을 줬다 — 그 글은 어디에도 안 선다"
     );
     let mut taken = taken_ids(issues, reserved);
     let mut ids: Vec<String> = Vec::with_capacity(drafts.len());
@@ -498,23 +659,44 @@ pub fn line_of(d: &Draft, id: Option<&str>) -> String {
 /// `에픽은 마일스톤 none 에 선다` 를 찍는데, 같은 부름을 진짜로 하면 `Issue::validate_fields`
 /// 가 1 로 거절한다. 가리키는 줄도 말도 진짜와 한 자리에서 나온다 —
 /// `store::write_locked` 가 같은 `Invalid::GroupId` 를 같은 `At::Unwritten` 으로 낸다.
-pub fn check_plan(drafts: &[Draft], milestone: Option<&str>, lang: crate::i18n::Lang) -> R<()> {
+/// **뿌리가 받아 갈 것은 [`Rooted`] 하나로 받는다**(리뷰). 같은 꼴의 `Option<&str>` 둘을 나란히
+/// 놓으면 어느 부름에서든 말없이 뒤집혀, 마일스톤이 64KB 예산에 재이고 본문은 안 재인 채 지난다 —
+/// `merge_driver::settle` 의 `side` 가 매개변수를 안 받는 것과 같은 까닭이다. 게다가 `bulk` 은
+/// 진짜로 쓸 그 값을 이미 지어 두었다.
+pub fn check_plan(drafts: &[Draft], rooted: Rooted<'_>, lang: crate::i18n::Lang) -> R<()> {
+    // **차례도 진짜와 같다**(리뷰). `store::write_locked` 는 줄 차례대로 돌며 한 줄에서 제목 →
+    // 본문 → 필드 검사를 잇달아 한다. 제목을 전부 먼저 재던 판은 뒷줄 제목과 첫 뿌리의 본문이
+    // 함께 넘칠 때 연습이 제목을, 진짜가 본문을 대어 둘이 다른 줄을 가리켰다 — 받는 쪽은 연습이
+    // 댄 제목을 줄이고 다시 불러서야 진짜가 딴것을 본다는 것을 알았다.
+    //
+    // **뿌리를 고르는 자도 `create_drafts` 와 한 몸이다.** 본문은 `body.take()` 로 첫 뿌리 하나가,
+    // 마일스톤은 뿌리마다 가져간다 — 저쪽과 같은 낱말, 같은 차례다. 뿌리가 없는 꼴
+    // (`Shape::Members`)은 둘 다 안 받으므로 여기서도 안 잰다: 진짜가 안 쓰는 값을 연습이 거절하면
+    // 그것도 어긋남이다.
+    let mut body = rooted.body;
     for d in drafts {
         // 가리키는 낱말도 진짜와 한 자리다 — `store::with_write` 가 같은 자리에서 `"title"` 을 준다.
         // 한글로 두던 판은 영어로 옮긴 거절문 안에 낱말 하나만 한국어로 남아, 연습과 진짜가 같은
         // 칸을 다른 이름으로 불렀다(리뷰).
         crate::model::check_text_size(|| crate::model::unwritten(&d.title), "title", &d.title)?;
-    }
-    // 진짜가 거절하는 줄은 **이 마일스톤을 받을 첫 뿌리**다(`create_drafts` 가 밀어 넣는 차례).
-    // 뿌리가 없는 꼴(`Shape::Members`)에는 마일스톤도 안 오지만, 그래도 가리킬 줄은 댄다.
-    if let Some(m) = milestone
-        && !crate::id::is_valid(m)
-    {
-        let at = drafts.iter().find(|d| d.epic.is_none()).or_else(|| drafts.first());
-        let at = store::At::Unwritten(crate::model::fit_title(at.map_or("", |d| d.title.as_str())));
-        let why = model::Invalid::GroupId { field: model::Field::Milestone, value: format!("{m:?}") };
-        // 코드도 진짜와 같다 — `store::Trouble::Invalid` 가 `code::ERROR` 로 나간다.
-        return Err(Fail::new(crate::view::invalid(lang, &at, &why)));
+        if d.epic.is_some() {
+            continue;
+        }
+        // **본문도 여기서 잰다**(moai-kqid) — `--from plan.md --body <66KB>` 가 연습에서 0 으로
+        // 끝나고 진짜에서만 거절하면, 사람이 "좋다" 한 뒤에 도구가 거절하는 꼴이 다시 선다.
+        // 낱말도 `store::with_write` 가 주는 `"body"` 그대로다.
+        if let Some(text) = body.take() {
+            crate::model::check_text_size(|| crate::model::unwritten(&d.title), "body", text)?;
+        }
+        // 진짜가 거절하는 줄은 **이 마일스톤을 받을 첫 뿌리**다(`create_drafts` 가 밀어 넣는 차례).
+        if let Some(m) = rooted.milestone
+            && !crate::id::is_valid(m)
+        {
+            let at = store::At::Unwritten(crate::model::fit_title(&d.title));
+            let why = model::Invalid::GroupId { field: model::Field::Milestone, value: format!("{m:?}") };
+            // 코드도 진짜와 같다 — `store::Trouble::Invalid` 가 `code::ERROR` 로 나간다.
+            return Err(Fail::new(crate::view::invalid(lang, &at, &why)));
+        }
     }
     Ok(())
 }
@@ -534,6 +716,7 @@ pub fn json_rehearsal(
     promoted: Option<&str>,
     into: Option<&str>,
     milestone: Option<&str>,
+    body_on: Option<usize>,
 ) -> R<Vec<String>> {
     /// 기본 우선순위는 **여기서 풀어 낸다.** `null` 을 내면 받는 쪽이 기본값을
     /// 다시 알아야 하고, 그러면 그 값이 두 곳에 적힌다. 우선순위가 없는 종류
@@ -562,9 +745,13 @@ pub fn json_rehearsal(
         #[serde(skip_serializing_if = "Option::is_none")]
         into: Option<&'a str>,
         /// 뿌리인 에픽이 설 마일스톤. **없으면 안 낸다** — 그 없음이 답이다(AGENTS.md).
-        /// 본문은 안 낸다: [`milestone_line`] 에 그 까닭이 있다
         #[serde(skip_serializing_if = "Option::is_none")]
         milestone: Option<&'a str>,
+        /// 본문이 설 초안의 **차례 번호**. 글자는 안 낸다([`milestone_line`] 에 그 까닭이 있다) —
+        /// 내는 것은 "선다" 와 "어느 줄에" 둘뿐이고, 자리로 말하는 어휘는 `DraftOut::epic` 과 같다.
+        /// **없으면 안 낸다**: 본문이 없거나 설 뿌리가 없다는 뜻이고, 그 없음이 답이다
+        #[serde(skip_serializing_if = "Option::is_none")]
+        body_on: Option<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<&'a str>,
     }
@@ -589,17 +776,44 @@ pub fn json_rehearsal(
         promoted,
         into,
         milestone,
+        body_on,
         // 펼치면 그 생각이 닫힌다는 말은 진짜 출력과 **같은 낱말**로 한다.
         status: promoted.map(|_| crate::config::DONE),
     })
+}
+
+/// 계획이 데려간 본문이 **어느 줄에 서는지** — `create_drafts` 가 `body.take()` 로 고르는 그
+/// 첫 뿌리다. 없으면 아무 줄도 안 낸다.
+///
+/// **글자는 안 찍는다**([`milestone_line`] 의 moai-07v1 결정을 그대로 지킨다) — 64KB 짜리
+/// 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다. 대신 **선다는 사실과 설 줄**을 댄다:
+/// `--milestone` 이 줄 하나를 얻은 까닭이 그대로 여기 선다(리뷰). 연습은 사람이 "좋다" 하는
+/// 자리인데(AGENTS.md 갈림길 3) `--body` 를 준 부름과 안 준 부름이 글자 하나 안 달랐고,
+/// 에픽이 여럿인 계획에서는 둘 가운데 어느 쪽이 받는지도 만들어 보고서야 알았다.
+pub fn body_line(drafts: &[Draft], body: Option<&str>, lang: crate::i18n::Lang) -> Option<String> {
+    let at = body_lands_on(drafts, body)?;
+    let said = crate::i18n::fill(crate::i18n::say(lang, "add.body_on"), &[("title", &drafts[at].title)]);
+    Some(paint(style::DIM, &said))
+}
+
+/// 본문이 설 초안의 **차례 번호** — 없으면 `None`. `DraftOut::epic` 과 같은 어휘다
+/// (아직 id 가 없으니 자리로 말한다).
+///
+/// **고르는 규칙은 [`create_drafts`] 와 한 글이다** — 첫 뿌리 하나고, 뿌리가 없는 꼴
+/// (`Shape::Members`)에는 설 자리가 없어 아무 줄도 안 댄다. 저쪽이 말없이 버리는 판을 연습이
+/// "선다" 고 내면, 그것이 바로 연습이 진짜를 앞질러 거짓말하는 자리다.
+fn body_lands_on(drafts: &[Draft], body: Option<&str>) -> Option<usize> {
+    body?;
+    drafts.iter().position(|d| d.epic.is_none())
 }
 
 /// 만든(또는 만들) 에픽이 어느 마일스톤에 서는지 한 줄. **연습도 진짜도 같은 줄을 낸다** —
 /// 마일스톤은 도는 판에서 `ready` 가 무엇을 먼저 내주는지를 가르는 값이라, 조용히 서면
 /// 계획을 세운 쪽이 그것을 `moai show` 로 한 번 더 확인해야 한다.
 ///
-/// **본문은 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
+/// **본문 글자는 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
 /// (`moai show <idea>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
+/// 선다는 **사실**은 [`body_line`] 이 낸다 — 글자를 안 찍는다는 이 결정과 어긋나지 않는다.
 pub fn milestone_line(milestone: Option<&str>, lang: crate::i18n::Lang) -> Option<String> {
     let id = milestone?;
     let said = crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]);
