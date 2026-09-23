@@ -668,6 +668,8 @@
   "refuse.plan_has_no_milestone_how": "then make the plan on it with `moai add --from - --milestone <id>`",
   "refuse.plan_flag": "`--from` does not take {flags} — the plan is what gets created",
   "refuse.plan_flag_how": "The markdown carries the titles, the tags and the priorities, `--json` gives the ids back, and the rest goes on afterwards with `moai edit <id>`",
+  "refuse.plan_body_stdin": "`--body -` and `--from -` both read stdin, and there is only one",
+  "refuse.plan_body_stdin_how": "give one of them a file, or pass the body as text — `moai add --from plan.md --body -`",
   "refuse.dry_run_needs_from": "`--dry-run` goes with `--from` — there is nothing to rehearse for a single one",
   "refuse.dry_run_needs_from_how": "if you made it wrong, `moai rm <id>`",
   "refuse.add_no_title": "No title. `moai add '<title>'`, or `moai add --from -`",

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:de1c4ddf -->
+<!-- moai:begin v:0.1.1 hash:0088b8ea -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -97,6 +97,10 @@ PLAN
 --milestone <id>`. It goes onto the epics the plan creates and the members inherit
 it; without it the whole plan stands outside the release, and of it `moai ready`
 then hands out only what is `p0`.
+
+**`--body` says why these issues are one bundle.** It goes onto the first epic the
+plan creates, which is where `moai show <epic>` reads it from. `--body -` and
+`--from -` cannot both read stdin, so give one of them a file.
 
 ### What to write in an issue
 

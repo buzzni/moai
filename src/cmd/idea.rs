@@ -140,7 +140,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
         // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
-        crate::cmd::add::check_plan(&drafts, stone.as_deref(), ctx.lang())?;
+        // 데려가는 본문은 여기서 안 준다 — 그것은 이 생각이 이미 든 글이라 잴 자와 가리킬 줄이
+        // 계획의 것과 다르다(moai-oejf).
+        crate::cmd::add::check_plan(&drafts, stone.as_deref(), None, ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         if ctx.json {

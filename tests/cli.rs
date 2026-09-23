@@ -4689,7 +4689,10 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
     let s = init("planflags");
     // `--quiet` 도 든다(리뷰) — `bulk` 가 안 읽어 `id=$(moai add --from - -q)` 가 색까지 든
     // 여러 줄을 id 로 받아 갔다. 계획은 id 를 여럿 내므로 "id 하나만" 이 여기서는 안 선다.
-    for extra in [["--body", "글"].as_slice(), ["--status", "in_progress"].as_slice(), ["--quiet"].as_slice()] {
+    //
+    // **`--body` 는 여기서 빠졌다**(moai-kqid) — 계획은 본문을 받아 첫 뿌리에 단다. 못 서는
+    // 판은 stdin 을 정말 다투는 판뿐이고, 그것은 아래 [`a_plan_takes_a_body_unless_stdin_is_contested`] 가 잰다.
+    for extra in [["--status", "in_progress"].as_slice(), ["--quiet"].as_slice(), ["--type", "issue"].as_slice()] {
         let mut argv = vec!["add", "--from", "-"];
         argv.extend_from_slice(extra);
         let out = from_stdin(s.path(), &argv, PLAN);
@@ -4698,6 +4701,61 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
         assert!(err.contains(extra[0]) && err.contains("--from"), "{extra:?}: {err}");
         assert_eq!(issues(s.path()), "", "{extra:?} 인데 썼다");
     }
+}
+
+/// **계획은 본문을 받는다 — stdin 을 정말 다투는 판만 막는다**(moai-kqid).
+///
+/// 막은 까닭은 `--body -` 와 `--from -` 이 stdin 하나를 다툰다는 것이었는데(moai-fppn),
+/// 통째로 막은 판은 다툴 것이 없는 부름까지 같이 막았다. `Rooted.body` 는 이미 서 있고
+/// `idea promote` 가 그 길로 본문을 채우니, 도구 안에는 길이 있는데 사람만 못 쓰던 자리였다.
+/// 본문이 서는 자리는 **첫 뿌리 하나**다 — 뿌리마다 적으면 같은 글이 에픽 수만큼 베껴진다.
+#[test]
+fn a_plan_takes_a_body_unless_stdin_is_contested() {
+    let s = init("planbody");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+
+    // 계획이 파일이면 stdin 은 본문의 것이다.
+    let out = from_stdin(s.path(), &["add", "--from", &file, "--body", "-"], "왜 한 묶음인가");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = ok(s.path(), &["show", "--json"]);
+    assert_eq!(rows.matches("왜 한 묶음인가").count(), 1, "본문이 첫 뿌리 하나에 안 섰다\n{rows}");
+    assert!(rows.contains(r#""title":"첫 에픽","kind":"epic","status":"todo""#) || rows.contains("첫 에픽"), "{rows}");
+
+    // 본문이 글자로 왔으면 계획이 stdin 을 다 쓴다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "글자 본문"], PLAN);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()).matches("글자 본문").count(), 1, "본문이 첫 뿌리 하나에 안 섰다");
+
+    // 둘 다 `-` 일 때만 막고, 막은 뒤에는 아무것도 안 남는다.
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "-"], PLAN);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(err.contains("--body") && err.contains("--from"), "{err}");
+    assert_eq!(issues(s.path()), before, "거절해 놓고 썼다");
+}
+
+/// **연습이 본문도 같은 자로 잰다**(moai-kqid). 연습은 사람이 "좋다" 하는 자리라
+/// (AGENTS.md 갈림길 3), 쓰기가 거절할 글을 그대로 지나 보내면 그 승인이 뒤늦은 말이 된다.
+#[test]
+fn a_rehearsal_measures_the_body_it_would_write() {
+    let s = init("planbodysize");
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 저장 계층\n- 하나\n").unwrap();
+    let file = plan.to_string_lossy().into_owned();
+    let big = "가".repeat(30_000);
+
+    let rehearsal = moai(s.path(), &["add", "--from", &file, "--body", &big, "--dry-run"]);
+    let real = moai(s.path(), &["add", "--from", &file, "--body", &big]);
+    assert!(!real.status.success(), "진짜가 받았다");
+    assert!(!rehearsal.status.success(), "연습만 좋다고 했다");
+    let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
+    assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
+    // 가리키는 줄도 진짜와 같다 — 본문은 첫 뿌리에 서므로 그 줄의 제목을 댄다.
+    assert!(said.contains("저장 계층"), "안 지은 줄을 제목으로 안 가리킨다\n{said}");
+    assert_eq!(issues(s.path()), "", "거절해 놓고 썼다");
 }
 
 /// **그 거절은 moai 의 것이지 clap 의 것이 아니다**(moai-yhb1).
@@ -4726,7 +4784,8 @@ fn a_plan_refusal_is_moais_own_not_claps() {
     // 동사가 맞으면 깃발을 댄다 — 그리고 그 거절도 `--json` 으로 갈라진다.
     for (argv, want) in [
         (["idea", "add", "--from", "-", "-b", "글"].as_slice(), "moai idea promote"),
-        (["add", "--from", "-", "-b", "글"].as_slice(), "--body"),
+        (["add", "--from", "-", "--status", "in_progress"].as_slice(), "--status"),
+        (["add", "--from", "-", "-b", "-"].as_slice(), "--body"),
     ] {
         let mut json = argv.to_vec();
         json.push("--json");

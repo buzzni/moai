@@ -814,7 +814,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "status")]
     pub status: Option<String>,
 
-    /// Body. `-` reads it from stdin
+    /// Body. `-` reads it from stdin (with `--from`, on the first epic)
     #[arg(short, long, value_name = "text")]
     pub body: Option<String>,
 

@@ -236,7 +236,7 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -744,7 +744,7 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -896,7 +896,7 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1048,7 +1048,7 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1221,7 +1221,7 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin
+          Body. `-` reads it from stdin (with `--from`, on the first epic)
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it

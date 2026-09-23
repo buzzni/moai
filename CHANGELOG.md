@@ -125,15 +125,24 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   rehearsal (`--dry-run`) says which milestone it will be, on one line and as a
   `milestone` key under `--json`, and it refuses an id of the wrong shape there
   rather than after you have said yes.
-- `--from` refuses the flags a plan cannot honour — `--body`, `--status` and
-  `--quiet` join `--epic`, `--tag`, `--priority`, `--parent`, `--start` and
+- `--from` refuses the flags a plan cannot honour — `--status`, `--quiet` and a
+  typed `--type` join `--epic`, `--tag`, `--priority`, `--parent`, `--start` and
   `--due`. They used to be accepted and thrown away, so a call that ended in 0
-  silently swallowed the text, the column, or the id a script was capturing.
-  **This is a break**: a call that passed one of the three now exits non-zero.
+  silently swallowed the column or the id a script was capturing.
+  **This is a break**: a call that passed one of them now exits non-zero.
   The refusal is the command's own, not the argument parser's: it names only the
   flags you actually passed, exits 1, and under `--json` it is the
   `{"code":"bad_input", …}` object every other refusal gives, so a loop that
   branches on `code` sees this one too.
+- **A plan takes `--body`**, and puts it on the first epic it creates — the one
+  place `moai show <epic>` reads why these issues are one bundle, and the same
+  place `moai idea promote` has been putting the thought's body. What is refused
+  is only the call where there is nothing to read it from: `--body -` together
+  with `--from -`, because there is one stdin. `moai add --from plan.md --body
+  -`, `moai add --from - --body '<text>'` and `moai add --from plan.md --body
+  '<text>'` all go through, and `--dry-run` measures that body against the same
+  64KB limit the write does, so the rehearsal cannot approve what the write
+  refuses.
 - `--from` no longer swallows a typed `--type`. `moai add --from - --type issue`
   used to build the whole epic tree and exit 0, because the namespace default
   (`moai issue add --from -` routes through the same place) and a `--type` the
