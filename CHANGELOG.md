@@ -10,6 +10,8 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-23
+
 ### Added
 
 - A milestone carries a **start and a deadline**: `moai milestone add 'v0.1'
