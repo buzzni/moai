@@ -854,9 +854,19 @@ impl App {
     /// `.moai` 밖에서 띄운 탐색기 — 층에서 시작하고, **읽기는 스레드에 맡긴다**([`Layer::launch`]).
     /// 첫 화면은 줄마다 `읽는 중` 으로 서고 읽는 대로 수가 찬다 — 그 자리에서 다 읽으면 등록한
     /// 프로젝트의 값을 다 더한 만큼 첫 화면이 안 선다(moai-ezwu).
+    #[cfg(test)]
     pub fn on_projects(layer: Layer) -> App {
+        App::on_projects_in(layer, crate::tz::Zone::utc())
+    }
+
+    /// [`App::on_projects`] 와 같은 것. **화면이 설 시간대를 받는다**(리뷰) — 첫 쓸기가 프로젝트마다
+    /// 세는 경고에 마일스톤 기한이 들어 있고, 그 판정은 읽는 사람의 달로 선다(moai-h2th). 뜨는
+    /// 스레드는 이 자리의 시간대를 한 벌 베껴 가므로([`Layer::launch`]), 설정을 입히는 `adopt_look`
+    /// 을 기다리면 첫 화면의 `+N` 만 UTC 로 서고 그 줄은 60초가 지나야 다시 읽힌다.
+    pub fn on_projects_in(layer: Layer, zone: crate::tz::Zone) -> App {
         let mut app =
             App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
+        app.zone = zone;
         // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
         // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
         // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,

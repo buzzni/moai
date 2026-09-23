@@ -172,6 +172,11 @@ impl App {
                 self.notice = Some(crate::view::zone_trouble(self.site.lang, &why));
             }
         }
+        // **고르자마자 경고를 다시 센다**(리뷰, [`super::App::recount`]) — 기한 판정이 읽는 사람의
+        // 달을 보므로(moai-h2th), 상세의 `(1일 지남)` 은 다음 프레임에 바로 바뀌는데 배너의 수만
+        // 옛 시계로 서면 한 화면에 시계 둘이 돈다. `adopt_look` 이 띄울 때 하는 일과 같은 자다 —
+        // 시간대를 바꾸는 길이 둘이니 다시 세는 자리도 둘이다.
+        self.recount();
         // 적는 것은 **고른 이름**이지 떨어진 UTC 가 아니다.
         self.saved_zone = Some(name.to_string());
         self.save_look();

@@ -2318,10 +2318,15 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     //
     // **색으로 가르지 않는다.** 지난 것은 `(2일 지남)` 이라는 낱말이 말하고, 이 패널의 값 칸은
     // 어느 줄도 제 색을 안 입는다(`field`) — 여기만 칠하면 칠을 받는 자를 하나 더 열게 된다.
+    //
+    // **그래서 낱말이 날짜 앞에 선다**(리뷰) — CLI 상세는 뒤에 다는데, 그쪽은 잘릴 일이 없고 여기는
+    // [`field`] 가 값을 **오른쪽부터** 자른다. 80칸 창의 상세 패널(안쪽 폭 30)에서 `2026-09-05 →
+    // 2026-09-20  (2일 지남)` 은 넘쳐, 뒤에 달면 지났다는 것을 말하는 **유일한** 말이 통째로 사라진다
+    // — 칠이 없으니 남는 단서도 없다. 미룬 막음 줄이 같은 까닭으로 같은 자리를 고른다(moai-2sea.tns).
     if let Some(due) = crate::view::due_of(i, &site.now, zone, site.lang) {
-        let text = match &due.left {
-            Some(word) => format!("{}  {word}", due.span),
-            None => due.span.clone(),
+        let text = match due.left {
+            Some(word) => format!("{word}  {}", due.span),
+            None => due.span,
         };
         fields.push((say(site.lang, "tui.about.due").into(), None, text));
     }
@@ -2536,8 +2541,13 @@ fn rollup<'a>(app: &App, site: &Site, e: &Entry, w: usize) -> Vec<Line<'a>> {
     // 선다. `progress.work` 는 `is_work` 로 거른 것이고 `spent_in` 이 세는 것도 그 줄들이다.
     // 닫힌 멤버가 없으면 줄을 안 세운다: 아직 아무것도 안 끝난 마일스톤의 `0분` 은 "0분에 했다"
     // 로 읽히는데, 그것은 안 한 것이지 0 분이 아니다.
-    let stone = e.at().is_some_and(|at| site.issues[at].kind == crate::model::Kind::Milestone);
-    if stone {
+    //
+    // **닫힌 멤버가 없으면 세지도 않는다**(리뷰) — `spend_of` 는 `closed == 0` 에서 바로 `None` 인데,
+    // 그때까지 `spent_in` 이 멤버를 베끼고 id 로 정렬하고 집합을 짓는다. 그 값은 위에서 이미 손에
+    // 있다(`progress.done` 은 `spent_in` 의 `closed` 와 **같은 줄을 같은 잣대로** 센다) — 프레임마다
+    // 도는 자리라 공짜로 있는 문을 안 쓸 까닭이 없다.
+    let stone = e.at().is_some_and(|at| site.issues.get(at).is_some_and(|i| i.kind == crate::model::Kind::Milestone));
+    if stone && done > 0 {
         let members: Vec<&crate::model::Issue> = work.iter().map(|&at| &site.issues[at]).collect();
         if let Some(said) = crate::view::spend_of(&crate::report::spent_in(&members), site.lang) {
             let label = Span::styled(format!("{}  ", say(site.lang, "tui.about.spent")), dim());
@@ -4819,6 +4829,11 @@ pub(super) mod tests {
         // 든 시간은 닫힌 멤버 하나에서 온다 — 2시간 30분.
         assert!(pane.contains("2시간 30분"), "든 시간이 없다\n{pane}");
         assert!(pane.contains("중앙값"), "몇을 쟀는지를 안 댄다\n{pane}");
+
+        // **좁은 창에서도 남은 날수가 남는다**(리뷰) — 값은 오른쪽부터 잘리고(`field`) 이 줄은 색을
+        // 안 입으므로, 낱말이 뒤에 서면 80칸에서 지났다는 것을 말하는 유일한 단서가 통째로 사라진다.
+        let narrow = about_text(&render(&mut a, 80, 24));
+        assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
 
         // **에픽에는 든 시간을 안 낸다.** 기한은 어느 줄에나 적힐 수 있으니 그대로 선다.
         let mut epic = issues();

@@ -1955,8 +1955,11 @@ pub fn members_label(lang: Lang) -> String {
 /// **벽시계라는 말을 붙인다.** 세션 여럿이 같이 도는 저장소라 겹친 시간이 이중으로 세지고,
 /// 사람 답을 기다린 시간과 리뷰가 돈 시간이 다 들어 있다 — 품으로 읽히면 안 된다.
 pub fn spent(sp: &crate::report::Spent, lang: Lang) -> Option<String> {
+    // **이름 칸은 세울 줄이 있을 때만 짓는다** — `?` 앞에 두면 닫힌 멤버가 없는 흔한 줄마다
+    // 버릴 글을 한 벌 짓는다.
+    let said = spend_of(sp, lang)?;
     let label = row_label(say(lang, "detail.spent"), lang);
-    Some(match spend_of(sp, lang)? {
+    Some(match said {
         Spend::Unmeasured(said) => format!("  {label}   {}", paint(style::DIM, &said)),
         Spend::Measured { total, of } => format!("  {label}   {total}  {}", paint(style::DIM, &of)),
     })
@@ -3734,6 +3737,13 @@ mod tests {
         assert!(said(&crate::tz::Zone::utc()).contains("(오늘까지)"), "{}", said(&crate::tz::Zone::utc()));
         assert!(said(&seoul).contains("(1일 지남)"), "{}", said(&seoul));
         assert!(said(&seoul).contains("2026-09-11"), "적힌 날짜를 옮겼다 — {}", said(&seoul));
+
+        // **뒤로 옮기는 쪽도 잰다**(리뷰). 앞으로만 재면 `model::format_rfc3339` 가 날을 **되감는**
+        // 갈래(`div_euclid`·`rem_euclid`)를 아무도 안 밟는다 — 어긋남이 산다면 그쪽이다.
+        // UTC 로 09-11 04시면 로스앤젤레스는 아직 09-10 이라 기한이 하루 남았다.
+        let la = crate::tz::Zone::fixed("America/Los_Angeles", -8 * 3600);
+        let back = due_span(&stone, "2026-09-11T04:00:00Z", &la, Lang::Ko).expect("기한 줄이 안 섰다");
+        assert!(back.contains("(1일 남음)"), "{back}");
     }
 
     /// **명령 층이 화면에 시간대를 빠짐없이 얹는다**(moai-p5az). [`Screen::new`] 만으로 뜬 화면은

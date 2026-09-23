@@ -6148,7 +6148,7 @@ mod tests {
     /// 그 사람의 시간대로 그려지므로(`view::stamp`), 판정만 UTC 로 두면 한 줄 안에서 시계 둘이
     /// 돈다 — 서울의 00시~09시 세션이 매일 하루씩 어긋난다.
     ///
-    /// **나이는 안 옮긴다**(같은 판에서 함께 잰다). `days_since` 가 재는 것은 흐른 시간이고
+    /// **나이는 안 옮긴다**(이 시험이 함께 잰다). `days_since` 가 재는 것은 흐른 시간이고
     /// 흐른 시간에는 시간대가 없다 — `now` 를 통째로 옮기면 여기 모든 나이가 같이 부푼다.
     #[test]
     fn a_deadline_is_read_in_the_reader_s_day() {
@@ -6172,7 +6172,7 @@ mod tests {
         assert_eq!(ages(&seoul, "milestone_overdue"), Some(-1), "서울에서는 어제 지났다");
         assert_eq!(ages(&seoul, "milestone_due_soon"), None);
 
-        // 같은 판의 나이는 시간대를 안 탄다 — 옮긴 것은 기한 판정뿐이다.
+        // 같은 셈의 나이는 시간대를 안 탄다 — 옮긴 것은 기한 판정뿐이다.
         let age_of = |zone: &crate::tz::Zone| -> Option<i64> {
             let st = status(&issues, &[], &cfg(), now, zone);
             st.warnings.iter().find(|w| w.kind == "stale_progress").and_then(|w| w.ages.get("argos-0002").copied())
