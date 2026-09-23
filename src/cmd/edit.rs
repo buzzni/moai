@@ -231,7 +231,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
-                let read = super::read_of(issues, cfg, &[before.id.as_str()]);
+                let read = super::read_of(issues, cfg, &[before.id.as_str()], ctx.json);
                 let kept = kept(issues);
                 let kept_milestone = kept_milestone(issues);
                 return Ok((
@@ -282,7 +282,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 .map(|(id, root)| (id.to_string(), root.to_string()))
                 .collect();
             // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
-            let read = super::read_of(issues, cfg, &near);
+            let read = super::read_of(issues, cfg, &near, ctx.json);
             let kept = kept(issues);
             let kept_milestone = kept_milestone(issues);
             // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
@@ -326,7 +326,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let children: Vec<&Issue> = children.iter().collect();
     let seen = view::Seen {
         roots: shelved.iter().map(|(id, root)| (id.as_str(), root.as_str())).collect(),
-        states: read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect(),
+        states: read.columns().collect(),
         // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()),
         blocks: blocked.blocks(),
@@ -418,7 +418,7 @@ mod tests {
             model::Status::new("todo"),
             "2026-09-11T04:12:03Z",
         );
-        let read = super::super::Read::new();
+        let read = super::super::Read::default();
         let epic = Inherited { epic: "argos-0002".into(), parent: "argos-0003".into() };
         let milestone = InheritedMilestone {
             milestone: Some("argos-0004".into()),

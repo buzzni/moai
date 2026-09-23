@@ -228,7 +228,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
-            let read = super::read_of(issues, cfg, &[issue.id.as_str()]);
+            let read = super::read_of(issues, cfg, &[issue.id.as_str()], ctx.json);
             Ok((vec![entry], (issue, read)))
         },
     )?;
@@ -243,8 +243,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // **만든 줄도 서 있는 칸으로 그린다.** 묶음의 적힌 칸은 어디서도 안 읽히므로
     // (`report::column`), 여기서만 그것을 그리면 `moai add --type epic -s done` 이
     // 낸 `✓` 를 바로 다음 `moai show` 가 `· todo` 로 뒤집는다.
-    let states: std::collections::BTreeMap<&str, &str> =
-        read.iter().map(|(id, col)| (id.as_str(), col.as_str())).collect();
+    let states: std::collections::BTreeMap<&str, &str> = read.columns().collect();
     let col = crate::report::column(&made, &states);
     let st = style::status_style(col);
     let mut line = format!(
@@ -307,7 +306,7 @@ fn bulk(
         |issues, cfg, reserved| {
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids);
+            let read = super::read_of(issues, cfg, &ids, ctx.json);
             Ok((entries, (made, read)))
         },
     )?;

@@ -31,9 +31,10 @@ Do not write it again on every issue — move the epic and the members come alon
 **A plan gives its members the epic's own id.** `moai add --from` and `moai idea
 promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
 <epic>` always did for a review — one subject, one id. The member carries no
-`epic` field of its own, so `jq -r .epic` on it is `null`; `moai show <epic>`
-lists it under `members` and `moai show -e <epic>` picks it up. Rows created
-before keep the ids they have: nothing is ever relabelled.
+`epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
+.derived_epic` names the epic; `moai show <epic>` lists it under `members` and
+`moai show -e <epic>` picks it up. Rows created before keep the ids they have:
+nothing is ever relabelled.
 
 **An id cannot move, so such a member cannot leave its epic.** `moai edit
 <member> -e none` says so and changes nothing; `-e <another epic>` does move it,

@@ -71,9 +71,17 @@ struct Brief<'a> {
     title: &'a str,
     status: &'a str,
     priority: u8,
-    /// 물려받은 것까지 푼 에픽 id (`report::groups`). 없으면 키를 안 단다.
+    /// 줄이 **제 몸에 적은** 에픽. 없으면 키를 안 단다 — [`super::Row`] 의 같은 키와 한 뜻이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     epic: Option<&'a str>,
+    /// 그 줄이 **든** 에픽(`report::groups`) — 적어 놓았든 id 로 졌든. [`super::Row::derived_epic`]
+    /// 과 한 키, 한 뜻이다(moai-wuzi, 2026-09-23 사용자 결정).
+    ///
+    /// **한때 이 값이 `epic` 에 실렸다.** 그때는 이 표면만 물려받은 소속을 풀고 줄을 내는 다른
+    /// 표면은 적힌 필드만 실어, 한 바이너리가 "이 줄은 어느 에픽인가" 에 키마다 다른 답을 했다.
+    /// 이제 `epic` 은 어디서나 파일에 적힌 그대로고, 푼 값은 어디서나 이 키다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    derived_epic: Option<&'a str>,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     tags: &'a [String],
     /// 다른 워크트리에서 온 줄이면 그 브랜치 — [`super::Row`] 와 같은 약속이다.
@@ -92,7 +100,10 @@ impl<'a> Brief<'a> {
             title: &i.title,
             status: i.status.as_str(),
             priority: i.priority(),
-            epic: epics.get(i.id.as_str()).copied(),
+            epic: i.epic.as_deref(),
+            // **[`super::Row`] 와 한 자로 낸다**(`report::stands_in`) — 지도를 그대로 읽으면
+            // 이 표면만 제 차례를 갖는다.
+            derived_epic: crate::report::stands_in(i, epics.get(i.id.as_str()).copied()),
             tags: &i.tags,
             branch: origin.branch(&i.id),
         }

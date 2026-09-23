@@ -1560,6 +1560,38 @@ fn ids_in(json: &str) -> Vec<String> {
     json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
 }
 
+/// `--json` 에서 **그 id 로 선 줄 한 조각** — 그 객체가 닫히는 곳까지. 목록 전체에 대고
+/// 키를 찾으면 옆줄의 값이 이 줄의 것으로 읽힌다.
+///
+/// **여는 괄호를 세어 끊는다.** "다음 줄이 열리기 전까지" 로 끊던 때는 마지막 줄이 글
+/// 끝까지 늘어나, 그 객체를 감싼 쪽이 곁들인 키까지 이 줄의 것으로 읽혔다 — `edit --json`
+/// 은 줄을 편 뒤 `inherited_epic` 을 다는데 그 안의 첫 키가 `epic` 이다(리뷰).
+fn row_in<'a>(json: &'a str, id: &str) -> &'a str {
+    let open = format!("{{\"id\":\"{id}\"");
+    let at = json.find(&open).unwrap_or_else(|| panic!("{id} 이 안 섰다 — {json}"));
+    let rest = &json[at..];
+    // 따옴표 안의 괄호는 안 센다 — 제목이나 본문에 `{`·`}` 가 들면 거기서 끊긴다.
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in rest.char_indices() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') => quoted = false,
+            (true, false, _) => {}
+            (false, _, '"') => quoted = true,
+            (false, _, '{') => depth += 1,
+            (false, _, '}') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[..=i];
+                }
+            }
+            (false, _, _) => {}
+        }
+    }
+    panic!("{id} 의 줄이 안 닫혔다 — {json}");
+}
+
 /// `text` 안에 그 id 로 선 줄이 몇인가. **id 는 제 자식 id 의 앞부분이기도 하다** —
 /// `argos-x` 는 `argos-x.aa1` 안에도 들어 있어, 그냥 세면 자식 하나가 부모를 두 번 선 것으로
 /// 만든다. 뒤에 점이 안 붙은 것만 그 줄로 센다.
@@ -8368,6 +8400,70 @@ fn old_flat_members_keep_their_ids_beside_new_child_members() {
         assert_eq!(drawn(&tree, m), 1, "{m} 이 트리에 두 번 섰다 — {tree}");
     }
 }
+/// **소속을 묻는 기계는 키 하나만 본다**(moai-wuzi, 2026-09-23 사용자 결정). `epic` 은 파일에
+/// 적힌 그대로고, 그 줄이 **든** 에픽은 `derived_epic` 이 낸다 — 줄을 내는 표면 전부에서.
+///
+/// 한때 `show --json` 은 계획 멤버를 에픽 없는 줄로 내고 `prime --json` 은 물려받은 소속을
+/// `epic` 에 실어, 한 바이너리의 두 기계 표면이 "이 줄은 어느 에픽인가" 에 다른 답을 했다.
+/// **표면을 하나만 재면 그 어긋남을 못 본다** — 그래서 여섯을 한 판에서 잰다.
+#[test]
+fn every_machine_surface_names_the_epic_a_row_stands_in() {
+    let s = init("derivedepic");
+    let made = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 묶음\n- [p1] 계획 멤버\n");
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let made = String::from_utf8(made.stdout).unwrap();
+    let file = issues(s.path());
+    let id_of = |title: &str| field(file.lines().find(|l| l.contains(title)).expect(title), "id");
+    let (epic, member) = (id_of("묶음"), id_of("계획 멤버"));
+    assert_eq!(id::parent_of(&member), Some(epic.as_str()), "계획 멤버가 자식이 아니다");
+    // 같은 에픽의 **옛 모양** — 소속을 제 몸에 적은 줄. 두 모양이 같은 답을 내야 한다.
+    let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
+    let alone = add(s.path(), &["홀로"]);
+
+    let stands = format!(r#""derived_epic":"{epic}""#);
+    // 1. 하나 펼치기 — 계획 멤버는 `epic` 이 없고, 옛 멤버는 둘 다 있다.
+    let one = ok(s.path(), &["show", &member, "--json"]);
+    assert!(!one.contains(r#""epic":"#), "적은 적 없는 소속이 섰다 — {one}");
+    assert!(one.contains(&stands), "{one}");
+    let was = ok(s.path(), &["show", &flat, "--json"]);
+    assert!(was.contains(&format!(r#""epic":"{epic}""#)) && was.contains(&stands), "{was}");
+    // 2. 어디에도 안 든 줄은 **키가 없다** — 그 침묵이 곧 답이다.
+    let out = ok(s.path(), &["show", &alone, "--json"]);
+    assert!(!out.contains("derived_epic"), "에픽 없는 줄에 소속이 섰다 — {out}");
+    // 3. 묶음 줄에는 안 선다 — 에픽은 에픽에 안 든다(moai-fg0t).
+    let group = ok(s.path(), &["show", &epic, "--json"]);
+    assert!(!row_in(&group, &epic).contains("derived_epic"), "에픽 줄이 소속을 입었다 — {group}");
+
+    // 4. 줄을 내는 표면마다 같은 답. `add --from --json` 은 위에서 이미 받았다.
+    let listed = ok(s.path(), &["show", "--json"]);
+    let ready = ok(s.path(), &["ready", "--json"]);
+    let prime = ok(s.path(), &["prime", "--json"]);
+    let moved = ok(s.path(), &["mv", &member, "in_progress", "--json"]);
+    let edited = ok(s.path(), &["edit", &member, "--tag", "parser", "--json"]);
+    for (what, json) in [
+        ("add", &made),
+        ("show 목록", &listed),
+        ("ready", &ready),
+        ("prime", &prime),
+        ("mv", &moved),
+        ("edit", &edited),
+    ] {
+        let row = row_in(json, &member);
+        assert!(row.contains(&stands), "{what} 가 계획 멤버의 소속을 안 냈다 — {row}");
+        assert!(!row.contains(r#""epic":"#), "{what} 가 적은 적 없는 소속을 `epic` 에 실었다 — {row}");
+    }
+
+    // 5. **`-e none` 의 신호는 그대로다.** `derived_epic` 이 선 뒤에도 `inherited_epic` 은
+    // 제 뜻("끊으라고 했는데 못 끊었다")으로 남아야 한다 — 두 키가 한 줄에 같이 선다.
+    // 위 고리의 `epic` 검사를 여기 그대로 대면 `inherited_epic` 안에 든 `epic` 에 걸린다.
+    let cut = ok(s.path(), &["edit", &member, "-e", "none", "--json"]);
+    assert!(cut.contains(&stands), "`-e none` 뒤에 소속이 사라졌다 — {cut}");
+    assert!(
+        cut.contains(&format!(r#""inherited_epic":{{"epic":"{epic}","parent":"{epic}""#)),
+        "못 끊었다는 말이 안 섰다 — {cut}"
+    );
+}
+
 /// 선 에픽에 펼치는 계획에 `#` 줄은 설 자리가 없다. 받아 주면 에픽이 하나 더 서거나
 /// 조용히 버려지는데, 어느 쪽이든 사람이 적은 것과 다르다. 없는 것·에픽 아닌 것도
 /// 거절한다 — idea 가 닫히므로 틀린 자리에 펼친 것을 되돌릴 길이 도구 밖에만 남는다.

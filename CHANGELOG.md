@@ -36,6 +36,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   zero nor work not done. Wall clock is not effort — sessions running beside each
   other overlap, and time waiting on a person is in there. A child of a member is
   not counted twice: its span sits inside its parent's.
+- **`derived_epic`** — the epic a row stands in, on every row `add`, `show`,
+  `ready`, `prime`, `mv`, `edit`, `defer`, `link` and `idea promote` print under
+  `--json`. A plan member carries its epic in its id and writes no `epic` field of
+  its own, so asking `epic` alone read those rows as belonging to no epic. `epic`
+  stays what the file says; the resolved answer comes beside it under its own key,
+  the way `derived_status` already does. It never stands on a group row — an epic's
+  own `epic` field is not a belonging — and its absence means the row is in no
+  epic at all.
 
 ### Changed
 
@@ -109,6 +117,12 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   that these refusals come from the argument parser, so they are plain text on
   stderr and exit 2 even under `--json`, not the `{"code": …}` object a refusal from
   the command itself gives. A loop that branches on `code` sees neither.
+- `prime --json`'s `epic` key is now what the file says, like `epic` everywhere
+  else; the resolved answer moved to `derived_epic`. **This is a break**: it was
+  the only surface that put the inherited epic under `epic`, so one binary gave
+  two answers to "which epic is this row in" depending on which command you asked.
+  A loop reading `.picked[].epic` or `.ready[].epic` changes that one word to
+  `.derived_epic` and gets what it used to get.
 
 ### Fixed
 
