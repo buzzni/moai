@@ -1878,6 +1878,14 @@ pub struct Due {
 
 /// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
 pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
+    // **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 이 두 필드를
+    // 거절하므로(`Issue::check` 의 `Field::DueOn`·`Field::StartsOn`) 여기 서는 값은 손으로 푼
+    // 충돌이 남긴 줄뿐인데, 종류를 안 보고 그리면 `report::status_in` 이 마일스톤만 세는 것과
+    // 갈려 한 줄이 상세에서는 `3일 지남` 이고 보드에서는 아무 말도 없다. 세는 자를 따른다 —
+    // 그리는 쪽을 따르면 이슈에 적힌 날이 기한 경고로 서서, 없는 마일스톤이 보드를 채운다.
+    if i.kind != Kind::Milestone {
+        return None;
+    }
     let (start, due) = (i.starts_on.as_deref(), i.due_on.as_deref());
     if start.is_none() && due.is_none() {
         return None;
@@ -3761,6 +3769,29 @@ mod tests {
         let la = crate::tz::Zone::fixed("America/Los_Angeles", -8 * 3600);
         let back = due_span(&stone, "2026-09-11T04:00:00Z", &la, Lang::Ko).expect("기한 줄이 안 섰다");
         assert!(back.contains("(1일 남음)"), "{back}");
+    }
+
+    /// **기한은 마일스톤 줄에만 선다**(moai-x04r.fn4). 쓰기는 다른 종류의 줄에 `due_on` 을
+    /// 거절하지만 손으로 푼 충돌은 그것을 남길 수 있고, 그때 상세가 `3일 지남` 이라 말하는
+    /// 동안 보드는 아무 말도 안 했다 — 한 줄이 두 표면에서 다르게 읽혔다. 세는 자
+    /// (`report::status_in` 은 마일스톤만 센다)를 따른다.
+    #[test]
+    fn a_deadline_stands_on_a_milestone_row_only() {
+        let now = "2026-09-23T00:00:00Z";
+        let z = crate::tz::Zone::utc();
+        let mut stone = issue("argos-0001", "v0.1", "todo");
+        stone.kind = Kind::Milestone;
+        stone.due_on = Some("2026-09-20".into());
+        assert!(due_of(&stone, now, &z, Lang::Ko).is_some(), "마일스톤의 기한이 빠졌다");
+
+        // 같은 값을 든 이슈·에픽·생각 — 어느 쪽도 기한 줄을 안 세운다.
+        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+            let mut row = issue("argos-0002", "손으로 푼 충돌이 남긴 줄", "todo");
+            row.kind = kind;
+            row.due_on = Some("2026-09-20".into());
+            row.starts_on = Some("2026-09-05".into());
+            assert!(due_of(&row, now, &z, Lang::Ko).is_none(), "{kind:?} 줄에 기한이 섰다");
+        }
     }
 
     /// **명령 층이 화면에 시간대를 빠짐없이 얹는다**(moai-p5az). [`Screen::new`] 만으로 뜬 화면은

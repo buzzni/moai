@@ -6425,6 +6425,32 @@ fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
     ok(s.path(), &["edit", &m, "--title", "v0.1.1"]);
 }
 
+/// **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 `due_on` 을
+/// 거절하므로 그 값이 서는 길은 손으로 푼 충돌 하나뿐인데, 상세는 종류를 안 보고 그려
+/// `3일 지남` 이라 말하고 보드는 마일스톤만 세어 아무 말도 안 했다 — 한 줄이 두 표면에서
+/// 다르게 읽혔다. 세는 자를 따른다: 그리는 쪽을 따르면 이슈에 적힌 날이 기한 경고로 서서
+/// 없는 마일스톤이 보드를 채운다.
+#[test]
+fn a_deadline_on_a_row_that_is_not_a_milestone_is_drawn_nowhere() {
+    let s = init("duekind");
+    let i = add(s.path(), &["손으로 푼 충돌이 남긴 줄"]);
+    let line =
+        line_of(s.path(), &i).replace(r#""status":"#, r#""due_on":"2026-09-20","starts_on":"2026-09-05","status":"#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{line}\n")).unwrap();
+
+    let shown = ok(s.path(), &["show", &i]);
+    assert!(!shown.contains("2026-09-20"), "마일스톤 아닌 줄의 상세에 기한이 섰다\n{shown}");
+    assert!(!shown.contains("2026-09-05"), "마일스톤 아닌 줄의 상세에 시작 기한이 섰다\n{shown}");
+
+    // **적힌 값은 지우지 않는다** — 읽기는 관대하고, `--json` 은 파일에 있는 그대로 낸다.
+    let json = ok(s.path(), &["show", &i, "--json"]);
+    assert!(json.contains(r#""due_on":"2026-09-20""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
+
+    // 보드는 처음부터 조용했다. 이제 상세도 같은 말을 한다.
+    let board = ok(s.path(), &["status"]);
+    assert!(!board.contains("2026-09-20"), "보드가 기한 경고를 세웠다\n{board}");
+}
+
 /// **쓰기는 엄하다.** `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
 /// 영영 "기한 없음" 으로 조용하다. 시작이 종료보다 뒤인 것도 같은 자리에서 거절한다.
 #[test]
