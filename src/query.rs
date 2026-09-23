@@ -25,7 +25,15 @@ pub enum Sel {
 #[derive(Default)]
 pub struct Where<'a> {
     pub epic: BTreeMap<&'a str, &'a str>,
-    pub milestone: BTreeMap<&'a str, &'a str>,
+    /// 줄을 id 로 찾는 지도와 뿌리로 올라간 생각 (`report::Lines`). 마일스톤을 **줄마다**
+    /// 묻는 재료다 — 위의 `milestone` 지도는 id 로 짠 것이라 같은 id 의 앞줄이 뒷줄의
+    /// 릴리스를 입는다(moai-jk2u.wvn).
+    ///
+    /// **빈 것은 빈 저장소를 뜻한다**(`Where::default`, 그림 시험이 쓴다) — 조상이 하나도
+    /// 없으니 에픽 없는 줄은 제 `milestone` 에 선다. 옛 빈 지도가 `없음` 을 답하던 것과
+    /// 다른데, 그쪽이 사실이 아니었다: 줄 하나짜리 저장소에서 `milestones_in` 이 내는 답이
+    /// 이것이다.
+    pub(crate) lines: crate::report::Lines<'a>,
     /// 물려받은 것까지 친 미룸. 미룸도 소속처럼 묶음을 타고 내려온다.
     pub put_off: BTreeSet<&'a str>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
@@ -68,9 +76,9 @@ impl<'a> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
-        let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
+        let crate::report::Soil { epic, roots, kinds, folded, lines, .. } = soil;
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, kinds, folded }
+        Where { epic, lines, put_off: roots.into_keys().collect(), states, since, kinds, folded }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
@@ -102,7 +110,7 @@ impl<'a> Where<'a> {
         if self.eclipsed(i) {
             return None;
         }
-        crate::report::stood_under(i.id.as_str(), self.epic_of(i), &self.milestone, |e| self.kinds.is(e, Kind::Epic))
+        crate::report::stood_at_line(i, self.epic_of(i), &self.lines)
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.

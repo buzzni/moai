@@ -9800,6 +9800,56 @@ fn same_id_rows_answer_the_same_milestone_on_every_surface() {
     assert!(!json.contains("no_milestone"), "릴리스가 센 줄을 경고가 `마일스톤 없음` 으로 또 셌다\n{json}");
 }
 
+/// **에픽 없는 쌍둥이도 제 릴리스에 선다**(moai-jk2u.wvn, 리뷰 moai-7iyc.cmo 9번).
+///
+/// 에픽을 든 줄은 그 에픽을 타고 가 줄마다 갈렸는데(moai-7iyc), 에픽이 없는 줄은
+/// `mile_of.get(id)` 로 돌아가 거기서 뒷줄의 값을 입었다 — `show <앞줄의 릴리스>` 는
+/// `멤버 0/0`, `show <뒷줄의 릴리스>` 는 `0/2` 로 둘을 다 냈고, 앞줄이 제 줄에 적은
+/// `milestone` 은 어느 표면에서도 안 읽혔다.
+#[test]
+fn an_epicless_twin_stands_in_the_release_it_wrote_on_itself() {
+    let s = init("twinmile");
+    let line = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘, **둘 다 에픽이 없고** 저마다 다른 릴리스를 적었다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}{}",
+            line("argos-m001", "릴리스 하나", "milestone", ""),
+            line("argos-m002", "릴리스 둘", "milestone", ""),
+            line("argos-0002", "앞줄", "issue", ",\"milestone\":\"argos-m001\""),
+            line("argos-0002", "뒷줄", "issue", ",\"milestone\":\"argos-m002\""),
+        ),
+    )
+    .unwrap();
+
+    // 1. 머리글의 롤업과 그 밑에 그리는 멤버 — 줄마다 제 릴리스 하나씩이다.
+    let one = String::from_utf8(moai(s.path(), &["show", "argos-m001"]).stdout).unwrap();
+    assert!(one.contains("0/1"), "앞줄이 적은 릴리스가 그 줄을 못 셌다\n{one}");
+    assert!(one.contains("앞줄") && !one.contains("뒷줄"), "{one}");
+    let two = String::from_utf8(moai(s.path(), &["show", "argos-m002"]).stdout).unwrap();
+    assert!(two.contains("0/1"), "뒷줄의 릴리스가 둘을 셌다\n{two}");
+    assert!(two.contains("뒷줄") && !two.contains("앞줄"), "{two}");
+
+    // 2. `--milestone` 거르개 — 세는 자와 고르는 자가 같은 답을 한다.
+    let pick = |m: &str| String::from_utf8(moai(s.path(), &["show", "--milestone", m, "--all"]).stdout).unwrap();
+    let got = pick("argos-m001");
+    assert!(got.contains("앞줄") && !got.contains("뒷줄"), "--milestone 이 머리글과 다른 답을 했다\n{got}");
+    let got = pick("argos-m002");
+    assert!(got.contains("뒷줄") && !got.contains("앞줄"), "{got}");
+
+    // 3. 트리 — 그리는 자도 같다. 두 릴리스 밑에 한 줄씩이다.
+    let tree = String::from_utf8(moai(s.path(), &["show", "--tree", "--all"]).stdout).unwrap();
+    let at = |m: &str| tree.find(m).unwrap_or_else(|| panic!("{m} 이 트리에 없다\n{tree}"));
+    let (m1, m2) = (at("릴리스 하나"), at("릴리스 둘"));
+    assert!(tree[m1..m2].contains("앞줄"), "앞줄이 제 릴리스 밑에 없다\n{tree}");
+    assert!(tree[m2..].contains("뒷줄"), "뒷줄이 제 릴리스 밑에 없다\n{tree}");
+}
+
 /// **미룸도 줄마다 물려받는다**(moai-jk2u.olh, 리뷰 moai-7iyc.cmo 8번).
 ///
 /// 소속이 줄마다 갈리게 된 뒤로도 `report::Shelf::walk` 는 id 하나로만 올라, 제 `epic` 을

@@ -225,6 +225,7 @@ impl Index {
             issues,
             epic_of: &soil.epic,
             milestone_of: &soil.milestone,
+            lines: &soil.lines,
             by_id: &by_id,
             kinds: &soil.kinds,
             eclipsed: &eclipsed,
@@ -573,6 +574,9 @@ struct Ctx<'a> {
     issues: &'a [Issue],
     epic_of: &'a BTreeMap<&'a str, &'a str>,
     milestone_of: &'a BTreeMap<&'a str, &'a str>,
+    /// 줄마다의 길 잃음 판정(`report::misplace_of`)이 마일스톤 쪽을 이것으로 묻는다 —
+    /// 위의 `milestone_of` 는 id 로 짠 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
+    lines: &'a crate::report::Lines<'a>,
     by_id: &'a BTreeMap<&'a str, usize>,
     /// id → 그 id 를 마지막으로 든 줄의 종류(`report::kinds`) — 줄마다의 길 잃음 판정
     /// ([`Ctx::adrift`])이 참조의 종류를 여기서 본다.
@@ -595,7 +599,7 @@ impl Ctx<'_> {
             // 마일스톤은 뿌리에 선다.
             Kind::Milestone => Vec::new(),
             // 에픽은 제 마일스톤 밑에. 마일스톤을 안 쓰는 저장소면 뿌리에.
-            Kind::Epic => self.under_milestone(&me.id),
+            Kind::Epic => self.under_milestone_of(me),
             // idea 는 대개 에픽 없이 산다 — 에픽 없는 일과 같은 자리다.
             Kind::Issue | Kind::Idea => self.home_of_work(at),
         }
@@ -620,7 +624,7 @@ impl Ctx<'_> {
     /// 제 자리를 묻는 줄에는 줄마다 물어야 한다 — 그러지 않으면 못 쓸 에픽을 든 앞줄이 없는
     /// 에픽 바구니로 가 어느 자리에도 안 그려진다.
     fn adrift(&self, i: &Issue) -> bool {
-        crate::report::misplace_of(i, self.kinds, self.epic_of, self.milestone_of).is_some()
+        crate::report::misplace_of(i, self.kinds, self.epic_of, self.lines).is_some()
     }
 
     /// 그 **줄**이 든 에픽 — `report::stands_in` 과 같은 차례(적힌 `epic` 이 먼저, 없으면 지도).
@@ -633,11 +637,30 @@ impl Ctx<'_> {
         crate::report::joined_in(i, || self.epic_of.get(i.id.as_str()).copied())
     }
 
+    /// **조상인 에픽**이 서는 자리 — id 로 짚는다. 그 답은 그 에픽 줄의 것이고, 지도가
+    /// 고르는 뒷줄이 `report::stood_at_line` 이 고르는 그 줄이라 둘이 안 갈린다.
     fn under_milestone(&self, id: &str) -> Path {
         if !self.has_milestones {
             return Vec::new();
         }
         match self.milestone_of.get(id) {
+            Some(m) => vec![Seg::Milestone(Some(m.to_string()))],
+            None => vec![Seg::Milestone(None)],
+        }
+    }
+
+    /// **그 에픽 줄 제 자리** — 에픽은 제 `milestone` 에만 선다(`report::milestone_stood`).
+    /// 지도로 짚으면 같은 id 의 앞줄이 뒷줄의 릴리스 밑에 그려지는데, 세는 쪽이 줄마다
+    /// 답하게 된 뒤로(moai-jk2u.wvn) 그리는 자와 세는 자가 거기서 갈렸다 — 머리글이
+    /// `0/1` 인 마일스톤 밑에 에픽 줄 둘이 섰다.
+    fn under_milestone_of(&self, me: &Issue) -> Path {
+        if !self.has_milestones {
+            return Vec::new();
+        }
+        // **세는 쪽과 한 자다**(`report::stood_at_line`) — 에픽 줄은 제 `milestone`,
+        // 에픽 없는 일은 조상을 타고 오른 값이다. 여기서 차례를 다시 적으면 그 둘은
+        // 언젠가 어긋나고, 어긋나는 자리가 머리글과 그 밑의 목록이다(moai-lhbh).
+        match crate::report::stood_at_line(me, None, self.lines) {
             Some(m) => vec![Seg::Milestone(Some(m.to_string()))],
             None => vec![Seg::Milestone(None)],
         }
@@ -699,8 +722,11 @@ impl Ctx<'_> {
                 path.push(Seg::Epic(e.to_string()));
                 path
             }
-            // 에픽이 없으면 제 마일스톤(또는 뿌리)에 파일처럼 놓인다.
-            None => self.under_milestone(&me.id),
+            // 에픽이 없으면 제 마일스톤(또는 뿌리)에 파일처럼 놓인다. **줄마다 묻는다**
+            // (moai-jk2u.wvn) — 지도로 짚으면 마일스톤을 안 적은 앞줄이 같은 id 를 든
+            // 뒷줄의 릴리스 바구니로 떨어지는데, 그 바구니는 뿌리에서 닿는 길이 없을 수
+            // 있어 그 줄이 트리에서도 탐색기에서도 사라진다(무작위 대조가 낸 판).
+            None => self.under_milestone_of(me),
         }
     }
 }
@@ -833,7 +859,10 @@ mod tests {
         let index = Index::of(issues);
         let seen = walk(&index, issues);
         let want: Vec<usize> = (0..issues.len()).collect();
-        assert_eq!(seen, want, "빠졌거나 겹쳤다");
+        // **자리를 함께 낸다** — 첨자 하나가 빠졌다는 말만으로는 어느 줄이 닿는 길 없는
+        // 바구니로 갔는지 모른다. 무작위 더미라 판을 손으로 다시 짓지도 못한다.
+        let seats: Vec<_> = (0..issues.len()).map(|a| (a, &issues[a].id, index.home_of(a))).collect();
+        assert_eq!(seen, want, "빠졌거나 겹쳤다 — {issues:#?}\n자리: {seats:#?}");
     }
 
     /// 병적인 자료를 전부 한 더미에 넣고 빠짐도 겹침도 없음을 못 박는다.
