@@ -1457,3 +1457,11 @@
 {"ts":"2026-09-23T10:32:03Z","id":"moai-jk2u.olh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T10:32:03Z","id":"moai-jk2u.wvn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-23T10:32:03Z","id":"moai-jk2u.pl6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T10:36:03Z","id":"moai-jk2u.olh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 측정을 마쳤다. moai-pth7 의 깊은 길은 이 멤버의 일을 줄이지 않는다 — `Shelf::walk` 가 `&Issue` 를 받게 하는 고침은 어느 쪽을 골라도 같다. 사람의 결정을 기다린다: 얕게 셋만 고칠지, `Handed` 를 따로 내는 읽는 자를 함께 세울지."}
+{"ts":"2026-09-23T10:36:03Z","id":"moai-jk2u.wvn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 측정을 마쳤다. 깊은 길이 이 멤버를 덮지 않는다 — 이 답은 묻는 줄 제 `milestone` 필드에서 오므로 부모 쪽지로는 못 나른다. 사람의 결정을 기다린다."}
+{"ts":"2026-09-23T10:36:03Z","id":"moai-jk2u.pl6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 측정을 마쳤다. 깊은 길과 직교한다. 사람의 결정을 기다린다."}
+{"ts":"2026-09-23T10:37:21Z","id":"moai-5km5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"제 epic 을 안 적은 앞줄이 뒷줄이 적은 에픽을 입는다"}
+{"ts":"2026-09-23T10:38:03Z","id":"moai-m4ze","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"sudo 의 -h·-K·-U 는 뒤의 명령을 안 돌리는데 훅이 도는 줄로 읽는다"}
+{"ts":"2026-09-23T10:38:03Z","id":"moai-j76s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"strace 의 -w 는 -c·-C 를 요구하는데 표에 그 말이 없다"}
+{"ts":"2026-09-23T10:38:03Z","id":"moai-kdgk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"find 의 술어 표가 두 벌로 적히고 한 줄을 세 번 걷는다"}
+{"ts":"2026-09-23T10:38:26Z","id":"moai-sdq0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"리뷰 moai-514e.dc8 이 그대로 고쳤다. `--shebang`·`--hashbang` 을 `stops` 로 옮겨 안 도는 줄이 되었다."}
