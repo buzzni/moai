@@ -211,6 +211,16 @@ on finding them.
 
 ### Fixed
 
+- A row that **wrote no `epic` of its own no longer wears the one its twin
+  wrote**. Which epic a row is in is read from the row, but what it fell back on
+  when the row wrote nothing was the id-keyed map — and that map holds the later
+  line's answer, the written `epic` included. So where the same id stood twice,
+  the earlier row, whose epic is the epic its id sits under, was drawn, counted,
+  filtered and reported under the *other* row's epic: `derived_epic`,
+  `moai show <that epic>`'s member list, `moai show -e <it>` and the tree all
+  named it, while the epic its id actually sits under said `Members 0/0` and drew
+  the row as a child. The fall-back now asks the id's parent, which both rows
+  share, so each gets its own answer and the row's own `epic` still wins.
 - Where the same id stands twice, a row now **inherits the defer of the epic or
   the release it wrote on itself**. Which group a row is in is read from the row
   (`epic`, then the map), but the walk that carries a defer down still climbed by

@@ -334,7 +334,7 @@ impl Ground {
         };
         Ground {
             stands,
-            epic: soil.epic.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             put_off: soil.roots.keys().map(|k| k.to_string()).collect(),
             // **읽는 자가 없으면 안 옮겨 담는다** — 이 지도를 보는 길은 미룸을 줄에 되묻는 하나
             // 뿐이라(`Where::deferred`), `torn` 이 빈 저장소에서는 적재마다 줄마다 `String` 둘을
@@ -373,7 +373,7 @@ impl Ground {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
         crate::query::Where {
-            epic: borrow(&self.epic),
+            epic: crate::report::Handing::of_handed(borrow(&self.epic)),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
             // (moai-jk2u.wvn). 나머지처럼 적재 때 재어 둘 수도 없다: `report::Lines` 는
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.

@@ -28,7 +28,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // **집은 줄의 소속을 푼다**(moai-wuzi) — 계획이 세우는 멤버는 `epic` 을 안 적으므로
         // 적힌 필드만 실으면 이 목록이 그 줄을 에픽 없는 줄로 낸다. `derived_epic` 이 읽는다.
         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
-        let epics = report::groups_of(&load.issues, &ids);
+        let epics = report::handed_of(&load.issues, &ids);
         // 가려진 줄을 가르는 지도(moai-53s2) — 소속 지도와 같은 id 만 묻는다.
         let kinds = report::Kinds::of_ids(&load.issues, &ids);
         // **객체로 감싼다**(moai-w6n2, 사람이 정한 출력 계약). 맨 배열이던 때는 막혀 못 집는
@@ -101,7 +101,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 let (epics, kinds) = match ctx.json {
                     true => {
                         let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
-                        (report::groups_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
+                        (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                     }
                     false => Default::default(),
                 };

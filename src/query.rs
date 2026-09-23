@@ -24,7 +24,7 @@ pub enum Sel {
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
 #[derive(Default)]
 pub struct Where<'a> {
-    pub epic: BTreeMap<&'a str, &'a str>,
+    pub epic: crate::report::Handing<'a>,
     /// 줄을 id 로 찾는 지도와 뿌리로 올라간 생각 (`report::Lines`). 마일스톤을 **줄마다**
     /// 묻는 재료다 — 위의 `milestone` 지도는 id 로 짠 것이라 같은 id 의 앞줄이 뒷줄의
     /// 릴리스를 입는다(moai-jk2u.wvn).
@@ -109,7 +109,7 @@ impl<'a> Where<'a> {
 
     /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
     pub fn epic_of<'x>(&'x self, i: &'x Issue) -> Option<&'x str> {
-        crate::report::stands_in(&self.kinds, i, self.epic.get(i.id.as_str()).copied())
+        crate::report::stands_in(&self.kinds, i, self.epic.handed().get(i.id.as_str()).copied())
     }
 
     /// 그 줄이 **선 마일스톤** (`report::stood_at_line`) — 롤업과 `moai show <마일스톤>` 의

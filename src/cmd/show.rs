@@ -261,7 +261,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                 row: super::Row::of(
                     i,
                     wh.states.get(i.id.as_str()).copied(),
-                    wh.epic.get(i.id.as_str()).copied(),
+                    wh.epic.handed().get(i.id.as_str()).copied(),
                     &wh.kinds,
                 )
                 .on(&origin),

@@ -588,7 +588,7 @@ impl Index {
 /// `Index::in_soil` 안에서만 쓰는 계산판. 빌린 지도를 들고 다니므로 밖으로 나가지 않는다.
 struct Ctx<'a> {
     issues: &'a [Issue],
-    epic_of: &'a BTreeMap<&'a str, &'a str>,
+    epic_of: &'a crate::report::Handing<'a>,
     milestone_of: &'a BTreeMap<&'a str, &'a str>,
     /// 줄마다의 길 잃음 판정(`report::misplace_of`)이 마일스톤 쪽을 이것으로 묻는다 —
     /// 위의 `milestone_of` 는 id 로 짠 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
@@ -650,7 +650,7 @@ impl Ctx<'_> {
     /// 머리글이 `0/1` 인 에픽 밑에 줄 둘이 섰다. 가려진 줄은 [`Ctx::home`] 이 이미
     /// `(길 잃음)` 으로 갈라 보냈으므로 여기서 다시 안 가른다.
     fn epic_at<'i>(&'i self, i: &'i Issue) -> Option<&'i str> {
-        crate::report::joined_in(i, || self.epic_of.get(i.id.as_str()).copied())
+        crate::report::joined_in(i, || self.epic_of.handed().get(i.id.as_str()).copied())
     }
 
     /// **조상인 에픽**이 서는 자리 — id 로 짚는다. 그 답은 그 에픽 줄의 것이고, 지도가
@@ -1310,6 +1310,30 @@ mod tests {
         assert_eq!(index.home_of(2), &Vec::<Seg>::new(), "에픽 없는 뒷줄이 앞줄의 에픽을 입었다");
         let members = crate::report::group_members(&issues, &issues[0]);
         assert_eq!(members.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-0002"], "{members:?}");
+        assert_counts_what_it_draws(&issues);
+        assert_exactly_once(&issues);
+    }
+
+    /// **소속을 id 에 진 앞줄은 뒷줄이 적은 에픽 밑에 안 그려진다**(moai-5km5).
+    ///
+    /// `epic` 을 안 적고 id 부모에게서 소속을 받는 줄이다. 접은 지도는 그 id 에 뒷줄이 적은
+    /// 에픽을 들고 있어, 트리가 앞줄을 `argos-e002` 밑에 그리면서 정작 그 줄의 id 부모인
+    /// `argos-e001` 은 `멤버 0/0` 이라 말했다 — 머리글과 그 밑의 줄이 갈리는 꼴이다.
+    #[test]
+    fn a_member_that_wrote_no_epic_is_drawn_under_its_id_parent() {
+        let issues = vec![
+            make("argos-e001", Kind::Epic),
+            make("argos-e002", Kind::Epic),
+            make("argos-e001.aaa", Kind::Issue),     // 안 적었다 — id 부모가 답이다
+            epic_of("argos-e001.aaa", "argos-e002"), // 적었다 — 그 값이 이긴다
+        ];
+        let index = Index::of(&issues);
+        assert_eq!(index.home_of(2), &vec![Seg::Epic("argos-e001".into())], "앞줄이 뒷줄의 에픽 밑에 그려졌다");
+        assert_eq!(index.home_of(3), &vec![Seg::Epic("argos-e002".into())], "적힌 에픽을 잃었다");
+        for (g, want) in [(0usize, "argos-e001.aaa"), (1, "argos-e001.aaa")] {
+            let members = crate::report::group_members(&issues, &issues[g]);
+            assert_eq!(members.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), [want], "{members:?}");
+        }
         assert_counts_what_it_draws(&issues);
         assert_exactly_once(&issues);
     }
