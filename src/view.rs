@@ -2194,6 +2194,8 @@ pub struct Board<'a> {
     pub picked: Vec<&'a Issue>,
     /// 집은 줄이 든 에픽(`report::groups_of`) — [`Picks::epics`] 와 같은 자리, 같은 까닭이다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::kinds_of`) — [`Picks::kinds`] 와 같다.
+    pub kinds: std::collections::BTreeMap<&'a str, crate::model::Kind>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
@@ -2228,6 +2230,9 @@ pub struct Picks<'a> {
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
     pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::kinds_of`) — [`Picks::epics`] 와
+    /// 같은 자리, 같은 까닭이다(moai-53s2).
+    pub kinds: std::collections::BTreeMap<&'a str, crate::model::Kind>,
     pub origin: &'a Origin,
     pub trouble: &'a [crate::worktree::Trouble],
 }

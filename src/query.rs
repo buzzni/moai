@@ -20,9 +20,6 @@ pub enum Sel {
     Is(String),
 }
 
-/// 줄 하나에 대한 판정 (`Where::eclipsed`).
-pub type RowTest<'a> = Box<dyn Fn(&Issue) -> bool + 'a>;
-
 /// 소속은 **묶음 전체를 봐야** 알 수 있다 — 자식은 조상에게서 물려받고,
 /// 마일스톤은 에픽을 거쳐 온다. 그래서 이슈 하나만 보고는 못 고른다.
 #[derive(Default)]
@@ -35,10 +32,14 @@ pub struct Where<'a> {
     pub states: BTreeMap<&'a str, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
     pub since: BTreeMap<&'a str, &'a str>,
-    /// 종류가 다른 쌍둥이에게 id 가 가려진 줄인가 (`report::is_eclipsed`). 위의 소속
-    /// 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이 나온다.
-    /// 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
-    pub(crate) eclipsed: Option<RowTest<'a>>,
+    /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
+    /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
+    /// 나온다. 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
+    ///
+    /// **판정이 아니라 지도를 든다**(moai-53s2). 한때 판정 하나를 상자에 담아 들었는데,
+    /// 줄을 내는 쪽(`cmd::Row::of` → `report::stands_in`)도 같은 지도가 있어야 가려진 줄에
+    /// 쌍둥이의 에픽을 안 단다 — 닫힌 상자에서는 그 지도를 못 꺼낸다.
+    pub(crate) kinds: BTreeMap<&'a str, crate::model::Kind>,
     /// 길 잃은 줄 **밑에 접힌** 줄 (`report::under_lost`). 트리가 `(길 잃음)` 안에 그리고
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
@@ -67,8 +68,12 @@ impl<'a> Where<'a> {
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
         let crate::report::Soil { epic, milestone, roots, kinds, folded, .. } = soil;
-        let eclipsed: RowTest<'a> = Box::new(move |i: &Issue| crate::report::is_eclipsed(&kinds, i));
-        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, eclipsed: Some(eclipsed), folded }
+        Where { epic, milestone, put_off: roots.into_keys().collect(), states, since, kinds, folded }
+    }
+
+    /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
+    pub fn eclipsed(&self, i: &Issue) -> bool {
+        crate::report::is_eclipsed(&self.kinds, i)
     }
 
     /// 그 줄이 서 있는 칸 (`report::column`).
@@ -361,7 +366,7 @@ impl Filter {
         // 다른 쌍둥이의 것이고, 트리는 그 줄을 `(길 잃음)` 에 두며 롤업은 어느 묶음에도
         // 안 센다(moai-2m9p). 여기서 지도를 그대로 읽으면 `moai show <에픽>` 이 `0/0` 이라
         // 말하는 에픽을 `moai show -e <에픽>` 은 그 줄로 채운다.
-        let eclipsed = wh.eclipsed.as_ref().is_some_and(|f| f(i));
+        let eclipsed = wh.eclipsed(i);
         // **길 잃은 줄 밑에 접힌 줄은 `none` 으로 안 고른다**(moai-phw9, 사용자와 정함). 소속
         // 지도에 없다는 사실만 보면 트리가 `(길 잃음)` 안에 그리고 status 가 안 세는 줄을
         // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.

@@ -9284,6 +9284,56 @@ fn status_names_an_unreadable_line_that_reuses_a_live_id() {
     assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
 }
 
+/// **가려진 줄의 소속은 표면 어디서도 같은 답이다**(moai-53s2). 소속 지도는 id 로 짠 것이라
+/// 종류가 다른 쌍둥이에게 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을 `(길 잃음)` 에 두고
+/// `show <에픽>` 은 `0/0` 이라 말하며 `-e <에픽>` 은 안 고른다 — `show --json` 목록만 그 줄에
+/// `derived_epic` 을 달아, 한 바이너리가 한 물음에 표면마다 다른 답을 했다.
+#[test]
+fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
+    let s = init("eclipsedepic");
+    let row = |id: &str, title: &str, kind: &str, epic: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{epic},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    // 머지를 잘못 푼 파일 — `argos-0002` 가 둘이다. 앞줄은 `epic` 없는 이슈, 뒷줄은 그
+    // 에픽에 든 생각이라 앞줄이 가려진다.
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        format!(
+            "{}{}{}",
+            row("argos-0001", "에픽", "epic", ""),
+            row("argos-0002", "가려진 이슈", "issue", ""),
+            row("argos-0002", "가리는 생각", "idea", ",\"epic\":\"argos-0001\""),
+        ) + &row("argos-0001.aa1", "성한 멤버", "issue", ""),
+    )
+    .unwrap();
+
+    // 목록이 내는 `derived_epic` — 가려진 줄에는 안 서고, 소속을 id 에 진 성한 멤버에는 선다.
+    // **그 멤버가 대조군이다**: 키가 통째로 빠진 판이 이 시험을 조용히 지나가지 않는다.
+    let json = ok(s.path(), &["show", "--json"]);
+    let object = |title: &str| {
+        let at =
+            json.find(&format!("\"title\":\"{title}\"")).unwrap_or_else(|| panic!("{title} 이 목록에 없다\n{json}"));
+        let head = json[..at].rfind('{').unwrap();
+        json[head..][..json[head..].find('}').unwrap()].to_string()
+    };
+    assert!(!object("가려진 이슈").contains("derived_epic"), "가려진 줄이 쌍둥이의 에픽을 달았다\n{json}");
+    assert!(object("성한 멤버").contains(r#""derived_epic":"argos-0001""#), "성한 멤버의 소속까지 지웠다\n{json}");
+
+    // 나머지 표면은 처음부터 그렇게 말했다. 넷이 한 답이다.
+    let picked = ok(s.path(), &["show", "-e", "argos-0001", "--json"]);
+    assert!(!picked.contains("가려진 이슈"), "-e 가 가려진 줄을 골랐다\n{picked}");
+    assert!(picked.contains("성한 멤버"), "-e 가 성한 멤버를 빠뜨렸다\n{picked}");
+    assert!(ok(s.path(), &["show", "argos-0001"]).contains("0/1"), "에픽이 가려진 줄을 멤버로 셌다");
+    let tree = ok(s.path(), &["show", "--tree"]);
+    assert!(tree.contains("가려진 이슈"), "가려진 줄이 트리에서 사라졌다\n{tree}");
+
+    // **적힌 값은 그대로 남는다** — 지우는 것이 아니라 푼 값을 안 내는 것이다.
+    let holds = ok(s.path(), &["show", "argos-0002", "--json"]);
+    assert!(holds.contains(r#""epic":"argos-0001""#), "적힌 소속이 사라졌다\n{holds}");
+}
+
 /// **같은 id 의 줄이 둘이면 `show <id>` 도 뒷줄을 연다** — 트리·탐색기(`nav::Index::find`)와
 /// id 지도(`report::groups`·`milestones`)가 모두 뒷줄을 고르는데 상세만 앞줄을 열면, 머리
 /// 제목·필드는 앞줄 것이고 멤버 셈은 뒷줄 것인 한 화면이 선다(moai-e0ro). 종류가 다른

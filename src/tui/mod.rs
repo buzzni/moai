@@ -344,14 +344,13 @@ impl Ground {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
-        let kinds = &self.kinds;
         crate::query::Where {
             epic: borrow(&self.epic),
             milestone: borrow(&self.milestone),
             put_off: self.put_off.iter().map(String::as_str).collect(),
             states: self.columns(),
             since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
-            eclipsed: Some(Box::new(move |i: &Issue| crate::report::is_eclipsed(kinds, i))),
+            kinds: self.kinds.iter().map(|(id, k)| (id.as_str(), *k)).collect(),
             folded: self.folded.iter().map(String::as_str).collect(),
         }
     }

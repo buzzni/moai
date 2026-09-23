@@ -606,11 +606,21 @@ impl<'a> Row<'a> {
     ///
     /// `placed` 는 **소속을 id 에 진 줄**의 답이다(`report::groups_of`) — 줄이 `epic` 을
     /// 적었으면 그 값이 이기므로 부르는 쪽은 지도를 안 지어도 된다([`Row::derived_epic`]).
-    pub fn of(issue: &'a crate::model::Issue, read: Option<&'a str>, placed: Option<&'a str>) -> Row<'a> {
+    ///
+    /// `kind_of` 는 **가려진 줄을 가르는 지도**다(`report::kinds_of`, moai-53s2) — 위의 소속
+    /// 지도가 id 로 짠 것이라, 종류가 다른 쌍둥이에게 가려진 줄은 그 지도에서 쌍둥이의 값을
+    /// 받는다. 비운 지도는 "가려진 줄이 없다" 는 말이다.
+    pub fn of(
+        issue: &'a crate::model::Issue,
+        read: Option<&'a str>,
+        placed: Option<&'a str>,
+        kind_of: &BTreeMap<&str, crate::model::Kind>,
+    ) -> Row<'a> {
         // **차례를 여기서 다시 적지 않는다**(`report::stands_in`) — 적힌 것이 먼저라는 것도,
-        // 묶음 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가 정한다. 여기 한 벌 더 적으면
-        // `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가 어긋난다.
-        let derived_epic = crate::report::stands_in(issue, placed);
+        // 묶음 줄에는 안 선다는 것도, 가려진 줄에는 안 선다는 것도 이슈의 뜻이라 `report` 가
+        // 정한다. 여기 한 벌 더 적으면 `prime` 의 같은 키와 자가 둘이 되고, 그 둘은 언젠가
+        // 어긋난다.
+        let derived_epic = crate::report::stands_in(kind_of, issue, placed);
         // **이 키들은 우리 것이다**([`OURS`]). `--json` 을 파일에 되써 넣어 그 이름을 모르는
         // 필드로 든 줄이면 화면에서 걷어낸다 — 그대로 두면 한 객체에 같은 키가 둘 서서 깐깐한
         // 파서가 거절하고, 이번에 안 실은 조건부 키는 그 조건이 아닌 지금 옛 값을 말한다.
@@ -639,7 +649,7 @@ impl<'a> Row<'a> {
 
     /// 락 안에서 챙겨 온 지도(`read_of`)로 짓는다.
     pub fn from(issue: &'a crate::model::Issue, read: &'a Read) -> Row<'a> {
-        Row::of(issue, read.column(&issue.id), read.epic(&issue.id))
+        Row::of(issue, read.column(&issue.id), read.epic(&issue.id), &read.kinds())
     }
 }
 
@@ -684,6 +694,10 @@ pub struct Read {
     /// 지었으면 그 줄에도 값이 선다. 다만 그 값은 안 읽힌다: 줄이 제 몸에 든 것이 먼저라
     /// (`report::stands_in`), 지도를 아예 안 지은 때에도 답이 같다.
     epics: BTreeMap<String, String>,
+    /// 줄 id → 그 id 를 마지막으로 든 줄의 종류(`report::kinds_of`). 가려진 줄에 쌍둥이의
+    /// 에픽을 안 달게 하는 지도다(moai-53s2). 소속과 **같은 문으로** 걷는다 — 소속을 안
+    /// 걷는 판에는 읽을 지도가 없으니 이것도 지을 까닭이 없다.
+    kinds: BTreeMap<String, crate::model::Kind>,
 }
 
 impl Read {
@@ -695,6 +709,11 @@ impl Read {
     /// 소속을 id 에 진 줄이 든 에픽.
     pub fn epic(&self, id: &str) -> Option<&str> {
         self.epics.get(id).map(String::as_str)
+    }
+
+    /// 가려짐을 가르는 지도 — `report::is_eclipsed` 가 보는 꼴로 빌려 낸다.
+    pub fn kinds(&self) -> BTreeMap<&str, crate::model::Kind> {
+        self.kinds.iter().map(|(id, k)| (id.as_str(), *k)).collect()
     }
 
     /// 챙겨 온 묶음과 그 칸 전부 — 읽은 칸으로 **그리는** 쪽이 받아 간다.
@@ -718,6 +737,10 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
         states: owned(crate::report::group_states_of(issues, cfg, ids)),
         epics: match json {
             true => owned(crate::report::groups_of(issues, ids)),
+            false => BTreeMap::new(),
+        },
+        kinds: match json {
+            true => crate::report::kinds_of(issues, ids).into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
             false => BTreeMap::new(),
         },
     }
@@ -912,7 +935,7 @@ mod tests {
     fn a_row_speaks_the_default_kind_and_priority() {
         let i = plain();
         assert!(i.kind.is_default() && i.priority.is_none(), "기본값인 줄이 아니다");
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &BTreeMap::new())).unwrap().join("");
         assert!(out.contains(r#""kind":"issue""#), "종류가 빠졌다\n{out}");
         assert!(out.contains(&format!(r#""priority":{}"#, crate::model::DEFAULT_PRIORITY)), "우선순위가 빠졌다\n{out}");
     }
@@ -923,7 +946,7 @@ mod tests {
     fn a_row_that_carries_them_is_untouched() {
         let mut i = row_with(&[]);
         i.priority = Some(1);
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &BTreeMap::new())).unwrap().join("");
         assert_eq!(out.matches(r#""kind":"#).count(), 1, "종류가 둘 섰다\n{out}");
         assert_eq!(out.matches(r#""priority":"#).count(), 1, "우선순위가 둘 섰다\n{out}");
         assert!(out.contains(r#""kind":"epic""#) && out.contains(r#""priority":1"#), "{out}");
@@ -939,7 +962,7 @@ mod tests {
             ("duplicate_lines", "가짜"),
             ("due", "2026-10-01"),
         ]);
-        let row = Row::of(&i, Some("in_progress"), None);
+        let row = Row::of(&i, Some("in_progress"), None, &BTreeMap::new());
         let extra = [
             ("members", "[]".to_string()),
             ("shelved_by", "\"argos-0002\"".to_string()),
@@ -960,7 +983,7 @@ mod tests {
     #[test]
     fn a_conditional_key_left_out_this_time_is_stripped_too() {
         let i = row_with(&[("commits_error", "가짜"), ("due", "2026-10-01")]);
-        let row = Row::of(&i, None, None);
+        let row = Row::of(&i, None, None, &BTreeMap::new());
         let out = json_with(&row, &[("commits", "[]".to_string())]).unwrap().join("");
         assert!(!out.contains("commits_error"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\"") && out.contains("\"commits\":[]"), "{out}");
@@ -973,7 +996,7 @@ mod tests {
         let mut rest: Vec<(&str, &str)> = OURS.iter().map(|k| (*k, "가짜")).collect();
         rest.push(("due", "2026-10-01"));
         let i = row_with(&rest);
-        let out = json_line(&Row::of(&i, None, None)).unwrap().join("");
+        let out = json_line(&Row::of(&i, None, None, &BTreeMap::new())).unwrap().join("");
         assert!(!out.contains("가짜"), "{out}");
         assert!(out.contains("\"due\":\"2026-10-01\""), "{out}");
     }
@@ -1007,14 +1030,14 @@ mod tests {
     #[should_panic(expected = "APPENDED")]
     fn an_appended_key_missing_from_the_list_is_caught() {
         let i = row_with(&[]);
-        let _ = json_with(&Row::of(&i, None, None), &[("새_키", "[]".to_string())]);
+        let _ = json_with(&Row::of(&i, None, None, &BTreeMap::new()), &[("새_키", "[]".to_string())]);
     }
 
     /// 겹치는 것이 없으면 걷은 모습을 짓지 않는다 — 흔한 길에서 줄을 복제하지 않는다.
     #[test]
     fn nothing_to_strip_means_no_copy() {
         let i = row_with(&[("due", "2026-10-01")]);
-        assert!(matches!(Row::of(&i, None, None).issue, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(Row::of(&i, None, None, &BTreeMap::new()).issue, std::borrow::Cow::Borrowed(_)));
     }
 
     fn unread(root: &str, at: &str) -> crate::store::Unread {
