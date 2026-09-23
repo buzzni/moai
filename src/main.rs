@@ -117,11 +117,38 @@ fn main() -> ExitCode {
     let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
     match cmd::run(cli) {
         Ok(lines) => {
-            print(&lines);
+            // **stdout 은 맨 뒤다**(moai-mnhq, 2026-09-23 사용자 결정). 넷은 stderr 에만 쓰므로
+            // 자리를 바꿔도 stdout 의 차례는 안 바뀌고, 바뀌는 것은 **종료 값의 뜻**이다 —
+            // 판정을 흘려보낸 뒤에 패닉이 올 자리가 이 넷뿐이었다. 뒤로 미뤄 두면 101 은
+            // "stdout 이 비었다" 가 되고, 훅이 심는 셸 한 줄(`skill::command`)이 그 위에 선다:
+            // 그 줄은 판정을 못 낸 종료마다 `systemMessage` 를 하나 내는데, `moai` 가 이미
+            // 판정을 쓴 뒤라면 객체가 둘이 되어 `claude` 가 **둘 다 버린다**. 버려지는 것이
+            // `deny` 면 막아야 할 쓰기가 통과한다.
+            //
+            // **치르는 비용은 넷 가운데 하나가 패닉하면 이 명령의 출력을 잃는 것이다.** 넷 다
+            // 비었는지 먼저 보고 빠지는 줄이고(위 `carried` 의 주석), 패닉한 때의 출력은 어차피
+            // 믿을 것이 못 된다 — 그 애매함을 없애는 것이 이 자리의 목적이다.
+            //
+            // **다만 잃는 것이 이 한 번이 아닐 수 있다**(리뷰 moai-514e.0er). `cmd::hook` 의
+            // `once_per_session` 은 표식을 `cmd::run` **안에서** 이미 세운다 — 보드와 `stop` 줄이
+            // 그것으로 한 번만 선다. 여기서 죽으면 표식만 남고 글은 안 나가, 그 세션은 보드를
+            // 영영 못 받는다. `deny` 는 다음 도구 호출이 다시 셈하지만 이쪽은 아니다.
+            //
+            // **화면에서는 차례가 바뀐다**(리뷰 moai-514e.0er). 위의 "stdout 의 차례는 안 바뀐다"
+            // 는 stdout 하나만 두고 하는 말이고, 터미널에서는 두 흐름이 한 화면에 섞인다 — 넷의
+            // 경고가 이제 이 명령의 출력 **위**에 선다. 워크트리에서 부를 때마다 서는 `redirected`
+            // 의 한 줄(AGENTS.md 가 약속한 "어디에 썼는지")이 긴 보드에서는 위로 밀려난다.
+            // 이것은 시험이 아니라 손으로 돌려 본 것이다 — `Command::output()` 은 두 흐름을
+            // 따로 받아 나간 차례를 못 본다.
+            //
+            // **`print` 가 맨 뒤라는 것과 넷이 stderr 에만 쓴다는 것을 시험이 못박는다** —
+            // [`tests::the_notices_never_reach_stdout_and_print_stands_last`]. 둘 중 하나라도
+            // 무너지면 훅의 판정 앞에 남의 줄이 서고, 그러면 `claude` 가 판정째 버린다.
             carried();
             unjournaled();
             unread_journals();
             redirected(!quiet);
+            print(&lines);
             if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         // **넘어진 길에서도 어느 트래커를 봤는지는 댄다**(moai-a2kn) — 올라가 잡은 자리는
@@ -371,6 +398,34 @@ mod tests {
 
     fn one(at: &str, why: &str) -> Vec<store::Unread> {
         vec![self::at("/tmp/moai-6924", at, why)]
+    }
+
+    /// **훅의 계약이 이 두 가지에 얹혀 있다**(moai-mnhq, 리뷰 moai-514e.0er 가 못박았다).
+    ///
+    /// `skill::command` 의 셸 한 줄은 stdout 이 비었을 때만 `systemMessage` 를 내고, 그 "비었다"
+    /// 가 `moai` 쪽에서 서려면 둘이 참이어야 한다 — **넷은 stderr 에만 쓴다**, **`print(&lines)`
+    /// 는 맨 뒤에 선다**. 하나라도 무너지면 판정 앞에 남의 줄이 서고, 객체가 둘이 된 stdout 을
+    /// `claude` 는 **통째로 버린다**(2026-09-23 에 진짜 `claude` 로 쟀다) — 버려지는 것이 `deny`
+    /// 면 막아야 할 쓰기가 통과한다.
+    ///
+    /// **행동으로는 못 잡는다.** `tests/cli.rs` 의 `text()` 를 비롯해 모든 시험이
+    /// `Command::output()` 으로 두 흐름을 따로 받으므로 **나간 차례가 구조적으로 안 보인다.**
+    /// 그래서 소스를 글자로 훑는다 — `git::tests::git_is_spawned_only_through_command` 와 같은 자다.
+    #[test]
+    fn the_notices_never_reach_stdout_and_print_stands_last() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs")).unwrap();
+        // 넷과 그 도우미(`tell_unread`·`unread_lines`)는 `carried` 와 `print` 사이에 모여 산다.
+        let from = src.find(concat!("fn ", "carried()")).expect("`carried` 가 없다");
+        let to = src.find(concat!("fn ", "print(")).expect("`print` 가 없다");
+        assert!(from < to, "`print` 가 넷보다 앞에 정의됐다 — 아래 훑기가 제 자리를 못 잡는다");
+        let notices = &src[from..to];
+        for bad in ["outln!", concat!("print", "ln!("), concat!("anstream::", "stdout"), "io::stdout"] {
+            assert!(!notices.contains(bad), "경고 넷 가운데 하나가 stdout 에 쓴다 — {bad}");
+        }
+        // 차례. 둘 다 `fn main` 의 `Ok` 갈래가 첫 자리라 처음 나온 곳끼리 견준다.
+        let printed = src.find(concat!("print", "(&lines);")).expect("`print(&lines);` 가 없다");
+        let last = src.find(concat!("redirected", "(!quiet);")).expect("`redirected(!quiet);` 가 없다");
+        assert!(last < printed, "`print(&lines)` 가 경고 넷보다 앞에 섰다 — 훅의 판정 앞에 남의 줄이 선다");
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
