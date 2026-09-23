@@ -993,3 +993,8 @@
 {"ts":"2026-09-22T23:52:55Z","id":"moai-phhz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T23:53:25Z","id":"moai-h2th","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-22T23:53:25Z","id":"moai-tlpv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-23T00:02:43Z","id":"moai-0s1h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"태그 판은 캐시를 안 쓴다"}
+{"ts":"2026-09-23T00:02:43Z","id":"moai-ik77","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"release.yml 의 build 잡에서 캐시 스텝을 걷는다"}
+{"ts":"2026-09-23T00:02:43Z","id":"moai-0s1h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uave 에서 펼쳤다 — 릴리스 캐시가 태그 빌드에서 안 맞는다 — 캐시는 릴리스를 낸 ref 와 기본 가지에서만 읽힌다"}
+{"ts":"2026-09-23T00:02:43Z","id":"moai-uave","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-0s1h 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-23T00:03:09Z","id":"moai-ik77","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
