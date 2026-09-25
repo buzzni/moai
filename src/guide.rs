@@ -363,10 +363,12 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-**If a milestone is running, give the plan that milestone** — `moai add --from -
---milestone <id>`. It goes onto the epics the plan creates and the members inherit
-it; without it the whole plan stands outside the release, and of it `moai ready`
-then hands out only what is `p0`.
+**A running milestone is the person's to fill.** When one is running, ask in the same
+breath as the plan whether this bundle belongs in it, and attach it only on a yes —
+`moai add --from - --milestone <id>`. It goes onto the epics the plan creates and the
+members inherit it; without it the whole plan stands outside the release, and of it
+`moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
+because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body -` and
@@ -665,8 +667,16 @@ column, it is running. There is no command that opens it and no new field.
   running, and how many it held back, is one line under the list; on the board it is a `moai status` notice
 - **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
   slot. In the ordering `p0` comes first and the milestone second
+- **Work is never pulled into a running milestone.** What ships was decided before it
+  started, and two doors put work in afterwards — neither is yours. The person attaches
+  it (`moai edit <id> --milestone <milestone>`), or it came out of a member you are working on
+  and is created inside that member's epic (`-e <that epic>`), where the release is
+  inherited. Writing `--milestone <the running one>` on a row that stood outside, or
+  moving such a row under an epic that is in it, is you deciding what the release
+  contains: say it to the person instead and leave the row where it is
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
-  through. What is already picked up is simply finished — the same ground as never taking work back late
+  through, and so does a `--milestone` that carries a row in — the rule above is a rule
+  for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
@@ -1440,17 +1450,21 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
-the body and the release the idea stands in — the one `moai show --milestone` lists it
-under, not its own field — so an idea parked outside the release unfolds into an epic that
-stands outside it until it is attached. The worker hangs it on in brief 1 —
-`{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
-call is yours, here, before you send: either this idea belongs in the release that is
-running and you send it with that milestone, or it does not and you do not send it this
-round. **Telling the worker not to attach a milestone is the same as handing out work
-from outside** — that is how a worker came to pick up a row outside the running release
-(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
-`<milestone>` is `none`.
+**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.** `moai idea promote` carries over the body and the release the idea
+stands in — the one `moai show --milestone` lists it under, not its own field — so an
+idea parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; an idea from
+outside waits for the next round, unless it should stand as `p0` or the person attaches
+the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+under, never one you picked for it**: the line the worker runs in brief 1 —
+`{MILESTONE_ATTACH}` — re-affirms what `promote` carried and is not a door you open. With
+nothing running, and for an idea that stands under no release, it is `none`.
+The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
+the running release, and the person, not the tool, is what caught it. The answer is to
+stop sending outside work while a release runs, not to hang the release on it — hanging it
+on would make the release grow after it started, and that is the person's call alone.
+**The tool refuses none of this**, so this paragraph is the only thing holding it.
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
@@ -1598,8 +1612,9 @@ receives, so everything the worker has to keep is inside it.
 Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
-`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
-when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+`<milestone>` is the release that idea already stands under, read in 1 — `none` when it
+stands under none, and `none` when nothing is running. It is never a release you picked
+for it: work is not pulled into a running milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
 in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
@@ -2120,7 +2135,10 @@ fn brief() -> String {
        Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
        release the idea stood in, and a milestone is inherited, so the epic alone carries it to
        every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
+       changes nothing. **Hang only the `<milestone>` in the header, and nothing else**: work is
+       never pulled into a running release, so a release you noticed running is not yours to
+       attach — not to this epic, not to a member you create later. Inside this epic the release
+       is inherited, which is the one door that stays open. If `<milestone>` is `none`, nothing is running — but what came over is
        still the release that idea stood in, so read the line `promote` printed and clear a
        release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
        a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
@@ -2886,6 +2904,12 @@ mod tests {
                 "**Nothing is blocked.** A `moai mv` that picks up work from outside goes straight\n  through",
                 "막지 않는다는 것을 안 적었다",
             ),
+            ("**Work is never pulled into a running milestone.**", "밖의 일을 안으로 끌어오지 않는다는 줄이 없다"),
+            ("The person attaches", "누가 들이는지를 안 적었다"),
+            (
+                "**A running milestone is the person's to fill.**",
+                "계획에 도는 릴리스를 제 손으로 달지 말라는 줄이 없다",
+            ),
         ] {
             assert!(agents.contains(piece), "{why} — {piece}");
         }
@@ -2912,21 +2936,37 @@ mod tests {
     /// idea 일 때 그것을 안으로 들이는 길은 아무 데도 없었고, 그래서 감독이 브리프에 "마일스톤은
     /// 달지 마라" 고 적어 일꾼이 도는 판 밖의 일을 집었다. 도구는 그것을 그대로 지나 보낸다.
     ///
-    /// **두 글이 한 줄에 매인다.** 감독의 1 은 들일지를 정하고 일꾼의 1 이 실제로 단다 —
-    /// `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
+    /// **2026-09-25 에 뜻이 뒤집혔다.** 그때까지 이 자리는 "밖의 idea 는 마일스톤을 달아야
+    /// 들어온다" 였고, 감독이 들일지를 정했다. 사용자가 도는 마일스톤에 에이전트가 제 판단으로
+    /// 밖의 줄을 달고 일한 판을 보고, 들이는 것은 사람만 하기로 정했다 — 감독은 밖의 일을
+    /// **안 보내는** 것으로 답한다. 2026-09-21 의 사고(일꾼이 도는 판 밖의 일을 집었다)는
+    /// 그대로 글에 남고, 답만 "달아 준다" 에서 "안 보낸다" 로 바뀐다.
+    ///
+    /// **두 글이 한 줄에 매인다.** 감독의 1 이 무엇을 보낼지 정하고 일꾼의 1 이 헤더에 실린
+    /// 릴리스만 단다 — `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
     #[test]
-    fn an_idea_from_outside_comes_in_on_a_milestone() {
+    fn an_outside_idea_is_not_pulled_into_a_running_release() {
         let (supervise, brief) = (supervise(), brief());
         let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
 
         for (piece, why) in [
-            (MILESTONE_ATTACH, "감독이 들이는 길을 안 가리킨다"),
-            ("**An idea from outside gets in only by being brought in.**", "밖의 idea 를 들이는 걸음이 없다"),
+            (MILESTONE_ATTACH, "감독이 일꾼이 다는 줄을 안 가리킨다"),
             (
-                "**Telling the worker not to attach a milestone is the same as handing out work
-from outside**",
-                "마일스톤을 빼라고 적는 것이 밖의 일을 맡기는 것과 같다는 말이 없다",
+                "**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.**",
+                "밖의 idea 를 안 들인다는 줄이 없다",
             ),
+            (
+                "an idea from
+outside waits for the next round",
+                "밖의 idea 가 다음 회차로 미뤄진다는 말이 없다",
+            ),
+            (
+                "The answer is to
+stop sending outside work while a release runs",
+                "2026-09-21 의 답이 무엇으로 바뀌었는지 안 적었다",
+            ),
+            ("**The tool refuses none of this**", "감독이 도구가 막아 줄 것으로 읽는다"),
             (
                 "**Leave it unfilled** and the worker hangs the placeholder itself",
                 "안 채운 자리가 무엇이 되는지 안 적었다",
@@ -2947,6 +2987,10 @@ from outside**",
         for (piece, why) in [
             (MILESTONE_ATTACH, "일꾼이 마일스톤을 다는 줄이 1 에 없다"),
             ("If `<milestone>` is `none`", "아무것도 안 도는 판을 안 적었다"),
+            (
+                "**Hang only the `<milestone>` in the header, and nothing else**",
+                "일꾼이 제 손으로 도는 릴리스를 달지 말라는 줄이 1 에 없다",
+            ),
         ] {
             assert!(brief[one..two].contains(piece), "{why} — {piece}");
         }

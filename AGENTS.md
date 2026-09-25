@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:a4f07956 -->
+<!-- moai:begin v:0.1.2 hash:e68cb594 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -97,10 +97,12 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-**If a milestone is running, give the plan that milestone** — `moai add --from -
---milestone <id>`. It goes onto the epics the plan creates and the members inherit
-it; without it the whole plan stands outside the release, and of it `moai ready`
-then hands out only what is `p0`.
+**A running milestone is the person's to fill.** When one is running, ask in the same
+breath as the plan whether this bundle belongs in it, and attach it only on a yes —
+`moai add --from - --milestone <id>`. It goes onto the epics the plan creates and the
+members inherit it; without it the whole plan stands outside the release, and of it
+`moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
+because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body -` and
@@ -257,8 +259,16 @@ column, it is running. There is no command that opens it and no new field.
   running, and how many it held back, is one line under the list; on the board it is a `moai status` notice
 - **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
   slot. In the ordering `p0` comes first and the milestone second
+- **Work is never pulled into a running milestone.** What ships was decided before it
+  started, and two doors put work in afterwards — neither is yours. The person attaches
+  it (`moai edit <id> --milestone <milestone>`), or it came out of a member you are working on
+  and is created inside that member's epic (`-e <that epic>`), where the release is
+  inherited. Writing `--milestone <the running one>` on a row that stood outside, or
+  moving such a row under an epic that is in it, is you deciding what the release
+  contains: say it to the person instead and leave the row where it is
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
-  through. What is already picked up is simply finished — the same ground as never taking work back late
+  through, and so does a `--milestone` that carries a row in — the rule above is a rule
+  for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
