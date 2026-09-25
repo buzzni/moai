@@ -1668,3 +1668,12 @@
 {"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.dx0","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"codex 또는 gemini 일꾼으로 한 에픽을 끝까지 돌려 잰다"}
 {"ts":"2026-09-25T21:57:42Z","id":"moai-1f02","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.3"}
 {"ts":"2026-09-25T21:59:36Z","id":"moai-e7fv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.3"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-1w5z","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"크레이트 첫 unsafe 를 Cargo.toml 에 기록으로 남길까"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-2s59","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"줄 가운데 BOM 이 머리 긁기를 막는다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-j76s","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"strace 의 -w 는 -c·-C 를 요구하는데 표에 그 말이 없다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-qqd7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"뭉치 안의 같은 글자를 두 번 세지 않아 strace 의 -ff 짝을 못 적는다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-kdgk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"find 의 술어 표가 두 벌로 적히고 한 줄을 세 번 걷는다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-5vyj","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Wrapper::whole 이 래퍼 이름에 걸려 있어 su 가 다른 기계에서는 틀린다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-v65c","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 규칙 2 가 윈도 철자와 링크에서 새는 자리 둘"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-4xvr","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"시험의 Surfaced::shown 이 판정을 견주는 쪽마다 다시 한다"}
+{"ts":"2026-09-25T22:07:25Z","id":"moai-aezm","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"표식 키가 저장소가 아니라 바이너리 자리다"}
