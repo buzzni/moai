@@ -10,6 +10,19 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Work is never pulled into a running milestone.** The three teachings — the
+  `AGENTS.md` block, the supervisor skill and the worker brief — now say who may put
+  work into a release that has started: the person attaches it, or it came out of a
+  member being worked on and is created inside that member's epic, where the release
+  is inherited. An agent no longer writes `--milestone <the running one>` on a row
+  that stood outside, and the supervisor answers an outside idea by not sending it
+  rather than by hanging the release on it (the 2026-09-21 round, where a worker
+  picked up a row outside the running release, is still written down; only the answer
+  changed). **Nothing is blocked** — `moai edit --milestone` and `moai mv` behave
+  exactly as before, because a refusal here would be a gate.
+
 ## [0.1.2] - 2026-09-23
 
 **Two things in this release break a caller.** Both are written up where they

@@ -151,17 +151,21 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
-the body and the release the idea stands in — the one `moai show --milestone` lists it
-under, not its own field — so an idea parked outside the release unfolds into an epic that
-stands outside it until it is attached. The worker hangs it on in brief 1 —
-`moai edit <epic> --milestone <milestone>` — and what it writes there is the `<milestone>` you fill in 3. So the
-call is yours, here, before you send: either this idea belongs in the release that is
-running and you send it with that milestone, or it does not and you do not send it this
-round. **Telling the worker not to attach a milestone is the same as handing out work
-from outside** — that is how a worker came to pick up a row outside the running release
-(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
-`<milestone>` is `none`.
+**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.** `moai idea promote` carries over the body and the release the idea
+stands in — the one `moai show --milestone` lists it under, not its own field — so an
+idea parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; an idea from
+outside waits for the next round, unless it should stand as `p0` or the person attaches
+the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+under, never one you picked for it**: the line the worker runs in brief 1 —
+`moai edit <epic> --milestone <milestone>` — re-affirms what `promote` carried and is not a door you open. With
+nothing running, and for an idea that stands under no release, it is `none`.
+The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
+the running release, and the person, not the tool, is what caught it. The answer is to
+stop sending outside work while a release runs, not to hang the release on it — hanging it
+on would make the release grow after it started, and that is the person's call alone.
+**The tool refuses none of this**, so this paragraph is the only thing holding it.
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
@@ -319,12 +323,16 @@ receives, so everything the worker has to keep is inside it.
 Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
-`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
-when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+`<milestone>` is the release that idea already stands under **and that is still alive**,
+read in 1 — `none` when it stands under none, `none` when the one it stands under has
+shipped or been deferred (the worker would otherwise re-open a release that is already
+out, which is what `promote` itself declines to carry), and `none` when nothing is
+running. It is never a release you picked for it: work is not pulled into a running
+milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
 in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
-the line `moai ready` prints under its list for the running milestone; do not write it from memory.
+the release `moai show --milestone` stands that idea under; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -367,8 +375,13 @@ worker reads in its own window in 9-1.
        Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
        release the idea stood in, and a milestone is inherited, so the epic alone carries it to
        every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
-       still the release that idea stood in, so read the line `promote` printed and clear a
+       changes nothing. **Hang only the `<milestone>` in the header, and nothing else**: work is
+       never pulled into a running release, so a release you noticed running is not yours to
+       attach — not to this epic, not to a member you create later. Inside this epic the release
+       is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+       stands outside every release — that is nothing running, or an idea that stood under none,
+       or one whose release is already dead, and you cannot tell which from the word alone. What
+       came over is still the release that idea stood in, so read the line `promote` printed and clear a
        release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
        a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
        not in `ready`, not in `held`, no warning
