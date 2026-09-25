@@ -1658,3 +1658,12 @@
 {"ts":"2026-09-23T18:34:45Z","id":"moai-jk2u.jaq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"열하나를 받고 둘을 넘겼다. 묶음 축은 사용자가 리뷰와 반대로 정했다 — 자세한 것은 노트 둘에 있다."}
 {"ts":"2026-09-23T18:34:45Z","id":"moai-wre3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"미룸의 뿌리를 줄에 묻는다. 묶음 줄까지 줄마다 답하고, 거르는 쪽과 그리는 쪽이 한 자를 쓴다."}
 {"ts":"2026-09-23T18:34:45Z","id":"moai-jk2u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: moai-wre3 과 리뷰 moai-jk2u.jaq 이 develop 에 들어갔다. 미룸의 뿌리는 이제 줄마다\n답하고, 묶음 줄도 그렇다(2026-09-23 사용자 결정) — 거르는 쪽(`query::Where`)과 그리는 쪽\n(`view::Seen`)이 `report::Shelved` 한 그릇을 쓴다. 가르는 열쇠는 바늘이 아니라 내용이다:\n목록은 베낀 줄을 묻기 때문이다. 에픽에 열린 것은 없다. idea 셋(moai-w610·moai-a512·\nmoai-5v5c)은 이 에픽이 내건 것 밖이라 닫는 것을 안 막는다. 성능 나머지는 에픽 밖\nmoai-6mnm 이고 리뷰가 둘을 더 댔다. 이 갈래가 다섯 회차 잇달아 제 손으로 p1 을 냈다 —\nmoai-pth7 에 적을 값이 또 하나 늘었다."}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트가 서로 찾고 편지하는 자리 (벤더 중립)"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.p7o","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":".moai/agents 슬롯 파일과 lease — moai agents 가 찾는다"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.xb8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":".moai/mail 과 moai send·inbox --take"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.351","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"status 가 agents·inbox 를 한 줄로 비춘다"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.7s4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 슬롯을 lease 로 둔다 — 두 감독을 비추되 막지 않는다"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.7xv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"감독·일꾼 스킬을 CLI 로 옮긴다 — SendMessage 없이 도는 길"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.pjy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"poke 를 임자가 밝히고 감독이 그대로 부른다"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-bf0c.dx0","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"codex 또는 gemini 일꾼으로 한 에픽을 끝까지 돌려 잰다"}
+{"ts":"2026-09-25T21:57:42Z","id":"moai-1f02","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.3"}
