@@ -1691,3 +1691,5 @@
 {"ts":"2026-09-25T22:12:42Z","id":"moai-y9fl","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"기한이 마일스톤 줄의 것이라는 판정이 세 층에 따로 적혀 있다"}
 {"ts":"2026-09-25T22:12:43Z","id":"moai-c4zd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"show 한 판이 소속 지도를 여러 벌 짓는다"}
 {"ts":"2026-09-25T22:12:44Z","id":"moai-w610","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"부모 id 에 쌍둥이가 서면 자식의 에픽이 파일 차례로 뒤집힌다"}
+{"ts":"2026-09-25T22:28:13Z","id":"moai-pdlp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤이 도는 동안 밖의 일을 안으로 끌어오지 않는다고 스킬 글에 못박는다"}
+{"ts":"2026-09-25T22:28:20Z","id":"moai-pdlp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
