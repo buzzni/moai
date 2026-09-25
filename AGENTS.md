@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.2 hash:e68cb594 -->
+<!-- moai:begin v:0.1.2 hash:67ba9215 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -178,21 +178,26 @@ where a row belongs, on every surface.
 already the owner — its members inherit its milestone, and writing the idea's over
 theirs would stand one bundle in two places.
 
-**If what came over is not the milestone that is running, hang the running one on
-the epic yourself** — or clear it with `--milestone none` when nothing is running.
-`promote` carries the release it stands in whatever state that release is in, so
-that covers an idea parked with no milestone, one parked under a release that has
-since shipped, and one parked under a milestone since deferred. Without this the
-epic stands outside the release and every member under it is work picked up from
-outside it, of which `moai ready` hands out only what is `p0`; and under a
-deferred milestone the whole plan is out of the plan the moment it is created —
-not in `ready`, not in `held`, and no warning says so. **A dead release is said
-out loud**: unfolding into a deferred or closed milestone prints one line on
-stderr naming it, and nothing is blocked.
+**If what came over is not the release that is running, leave it where it stands.**
+Work is never pulled into a running release, so the epic stays outside it and what
+you do is say so — the person attaches it, with this line, if it belongs in the
+release:
 
     moai edit <epic> --milestone <milestone>
 
-Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
+`promote` carries the release the idea stands in whatever state that release is in,
+so an idea parked with no milestone, one parked under a release that has since
+shipped, and one parked under a milestone since deferred all come over exactly as
+they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
+the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
+been deferred. What standing outside costs meanwhile: every member under that epic
+is work picked up from outside the running release, of which `moai ready` hands out
+only what is `p0`; and under a deferred milestone the whole plan is out of the plan
+the moment it is created — not in `ready`, not in `held`, and no warning says so.
+**A dead release is said out loud**: unfolding into a deferred or closed milestone
+prints one line on stderr naming it, and nothing is blocked.
+
+The id in that line is the release `moai show --milestone` stands that idea under. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
 `dangling_milestone` warning.
 
@@ -260,12 +265,14 @@ column, it is running. There is no command that opens it and no new field.
 - **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
   slot. In the ordering `p0` comes first and the milestone second
 - **Work is never pulled into a running milestone.** What ships was decided before it
-  started, and two doors put work in afterwards — neither is yours. The person attaches
-  it (`moai edit <id> --milestone <milestone>`), or it came out of a member you are working on
-  and is created inside that member's epic (`-e <that epic>`), where the release is
-  inherited. Writing `--milestone <the running one>` on a row that stood outside, or
-  moving such a row under an epic that is in it, is you deciding what the release
-  contains: say it to the person instead and leave the row where it is
+  started, and three doors put work in afterwards — the person opens two of them. They
+  attach it (`moai edit <id> --milestone <milestone>`); or they say yes to a plan you
+  showed them and you attach it in that same breath (fork 3); or it came out of a member
+  you are working on and is created inside that member's epic (`-e <that epic>`), where
+  the release is inherited. Writing `--milestone <the running one>` on a row that stood
+  outside, or moving such a row under an epic that is in it, is none of those three: it is
+  you deciding what the release contains, so say it to the person and leave the row where
+  it is
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
   through, and so does a `--milestone` that carries a row in — the rule above is a rule
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
