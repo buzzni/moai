@@ -1907,3 +1907,4 @@
 {"ts":"2026-09-29T04:46:23Z","id":"moai-xk0q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — hook write-guard path)"}
 {"ts":"2026-09-29T04:46:23Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T04:47:00Z","id":"moai-xk0q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left here. Merged 50711176, closed with the review; remaining old leaks (ancestor start, cd or wrapper before find) are idea moai-tp4u."}
+{"ts":"2026-09-29T04:48:23Z","id":"moai-6mnm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"감독의 자리(2026-09-29): 이 줄은 moai-mibi 가 develop 에 머지된 뒤에 보낸다. 같은 파일(report.rs·view.rs·tui/*)을 그 에픽이 통째로 들어내는 중이라 지금 보내면 둘이 머지에서 서로 기다린다. 사람이 그렇게 정했고, 받을 일꾼은 moa-issue-9a 로 비워 두었다."}
