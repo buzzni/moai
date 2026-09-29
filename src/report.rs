@@ -2424,17 +2424,18 @@ pub fn creates_cycle(issues: &[Issue], blocker: &str, blocked: &str) -> bool {
 /// 리뷰를 세울 때마다 났다. 적힌 필드는 안 바꾼다. 소속은 파생값이라 읽을 때 정한다.
 /// 차례는 물려받는 소속과 같다: 제 `epic` → 가까운 조상의 `epic` → 에픽인 조상.
 /// 받는 줄은 [`joins`] 뿐이다.
+///
+/// **바이너리는 이 지도를 안 짓는다**(moai-mibi.pv6). 줄마다의 답을 id 로 접은 것이라 같은
+/// id 를 든 줄이 둘이면 담을 칸이 하나고, 그 칸을 짚은 자리마다 앞줄이 뒷줄의 소속을 입었다
+/// (moai-7iyc·moai-5km5 가 자리마다 줄에 되묻게 해서 덮은 꼴). 이제 소속을 묻는 자는 줄을 들고
+/// [`Handing::at`] 에 묻는다 — 이 꼴은 시험이 "id 하나에 줄 하나" 인 판을 짧게 적는 길이다.
+#[cfg(test)]
 pub fn groups(all: &[Issue]) -> BTreeMap<&str, &str> {
-    groups_over(all, &Lines::of(all))
-}
-
-/// [`groups`] 와 같은 것. [`Lines`] 를 이미 든 쪽이 그것을 두 번 짓지 않게 받는다
-/// (moai-jk2u.pl6, `지도는 한 벌이다` moai-g0zx).
-pub fn groups_over<'a>(all: &'a [Issue], lines: &Lines<'a>) -> BTreeMap<&'a str, &'a str> {
     // **못 받은 줄도 지도를 쓴다** — `milestones` 와 같은 까닭이다. 받은 줄만 적으면
     // 같은 id 의 앞줄이 받은 에픽이 뒷줄에 흘러, 에픽 없는 뒷줄이 남의 에픽에
     // 그려지고 세어진다(moai-2m9p).
-    Handing::over(all, lines).fold(all)
+    let handing = Handing::of(all);
+    fold_by_id(all, all.iter().map(|i| handing.at(i)))
 }
 
 /// 줄마다 **선 에픽**을 답하는 자 — 소속 지도를 id 로 짚던 자리가 이것을 든다(moai-5km5).
@@ -2528,17 +2529,14 @@ impl<'a> Handing<'a> {
     /// 그 **줄**이 든 에픽 — 적힌 `epic` 이 먼저고, 없으면 id 부모가 넘기는 것이다
     /// ([`joined_in`]). 묶음 줄에는 안 선다.
     ///
-    /// **짚는 차례는 여기 하나다**(리뷰 moai-jk2u.o78) — 아래 [`Handing::fold`] 도 이것을 부른다.
-    /// 같은 글을 자리마다 다시 적으면 그 차례를 고치는 날 한쪽만 옮겨, 그리는 쪽과 세는 쪽이
-    /// 갈린다.
+    /// **짚는 차례는 여기 하나다**(리뷰 moai-jk2u.o78). 같은 글을 자리마다 다시 적으면 그 차례를
+    /// 고치는 날 한쪽만 옮겨, 그리는 쪽과 세는 쪽이 갈린다.
+    ///
+    /// **id 로 접은 지도는 없다**(moai-mibi.pv6). 한때 `fold` 가 줄마다의 이 답을 id 로 접어
+    /// [`groups`] 를 냈는데, 그것을 짚는 자리마다 같은 id 의 앞줄이 뒷줄의 소속을 입었다. id 밖에
+    /// 없는 자리는 그 id 의 줄을 먼저 찾고([`Lines`]) 여기 묻는다.
     pub fn at(&self, i: &'a Issue) -> Option<&'a str> {
         joined_in(i, || self.from_id.get(i.id.as_str()).copied())
-    }
-
-    /// 줄마다의 답을 **id 로 접은 지도**([`groups`]) — id 밖에 없는 표면이 받는다.
-    /// `None` 이 앞줄의 답을 지우는 것까지 [`fold_by_id`] 와 같은 차례다.
-    pub fn fold(&self, all: &'a [Issue]) -> BTreeMap<&'a str, &'a str> {
-        fold_by_id(all, all.iter().map(|i| self.at(i)))
     }
 
     /// 담고 있는 **넘기는 값** 그대로 — 빌린 글을 제 것으로 옮겨 담는 자리(탐색기의 `tui::Ground`)가
@@ -2860,14 +2858,15 @@ pub(crate) fn stood_at_line<'a>(i: &'a Issue, epic: Option<&'a str>, lines: &Lin
 ///
 /// `edit -e none` 이 필드를 비워도 이 소속은 남는다(moai-w5gz) — id 는 옮기지 못하니
 /// 부모 밑에 선 줄의 소속은 필드가 아니라 자리에서 온다. 조용하면 사람은 뺀 줄 안다.
-/// 답은 [`groups`] 에서 읽는다 — 소속을 따로 재면 둘은 언젠가 어긋난다. 같은 id 가
-/// 둘이면 `groups` 처럼 뒷줄이 선다.
+/// 답은 그 줄을 들고 [`Handing::at`] 에 묻는다 — 소속을 따로 재면 둘은 언젠가 어긋난다. 같은
+/// id 가 둘이면 뒷줄을 묻는다(쓰기 경로라 실제로는 서지 않는다 — `store::with_write` 가 중복
+/// id 에 쓰기를 물린다). 부모 쌍둥이 밑에서 길 잃은 줄은 넘겨받는 에픽이 없다(moai-mibi.wpj).
 pub fn epic_from_parent<'a>(all: &'a [Issue], id: &str) -> Option<(&'a str, &'a str)> {
     let line = all.iter().rev().find(|i| i.id == id)?;
     if line.epic.is_some() {
         return None;
     }
-    let epic = *groups(all).get(id)?;
+    let epic = Handing::of(all).at(line)?;
     Some((epic, crate::id::parent_of(&line.id)?))
 }
 
