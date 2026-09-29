@@ -792,9 +792,8 @@ fn both_kept<'r, 's>(o: &'r [Row<'s>], x: &'r [Row<'s>], y: &'r [Row<'s>]) -> Ve
                 if at[k] != usize::MAX {
                     continue;
                 }
-                let hit = (0..side.len()).find(|i| {
-                    !taken[*i] && if exact { side[*i].raw == was.raw } else { alike(was, &side[*i]) }
-                });
+                let hit = (0..side.len())
+                    .find(|i| !taken[*i] && if exact { side[*i].raw == was.raw } else { alike(was, &side[*i]) });
                 if let Some(i) = hit {
                     taken[i] = true;
                     at[k] = i;
