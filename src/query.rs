@@ -125,7 +125,7 @@ impl<'a> Where<'a> {
         if self.eclipsed(i) {
             return None;
         }
-        self.epic.stood(i, self.epic_of(i), &self.lines)
+        self.epic.stood(i, &self.lines)
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
@@ -1289,7 +1289,9 @@ mod tests {
 
     /// **쌍둥이 부모 밑에서 소속을 못 정한 줄도 어느 소속으로도 안 고른다**(moai-mibi.wpj) —
     /// `-e none`·`--milestone none` 도. 에픽이 없는 것이 아니라 못 정한 것이고, 트리는 그 줄을
-    /// `(길 잃음)` 에 둔다. 한때 뒷줄의 에픽으로 골렸다.
+    /// `(길 잃음)` 에 둔다. 한때 뒷줄의 에픽으로 골렸다. **두 차례를 다 잰다**(리뷰 moai-mibi.ndh) — 한
+    /// 차례만 재면 뒷줄이 마일스톤 없는 에픽을 넘기는 판이라, `-e argos-0001`·`--milestone argos-0009`
+    /// 가 옛 바이너리에서도 푸르게 선다.
     #[test]
     fn a_child_under_disagreeing_twin_parents_is_picked_by_no_membership() {
         let group = |id: &str, kind: Kind| {
@@ -1302,29 +1304,34 @@ mod tests {
             i.epic = Some(to.into());
             i
         };
-        let mut e1 = group("argos-0001", Kind::Epic);
-        e1.milestone = Some("argos-0009".into());
-        let all = vec![
-            e1,
-            group("argos-0002", Kind::Epic),
-            group("argos-0009", Kind::Milestone),
-            parent("argos-0001"),
-            parent("argos-0002"),
-            issue("argos-0010.aa1", "todo", &[]),
-        ];
-        let cfg = cfg();
-        let wh = Where::of(&all, &cfg);
-        let picked = |raw: Raw| -> bool {
-            let f = Filter::build(raw).unwrap();
-            f.matches(&all[5], NOW, &wh)
-        };
-        for sel in ["argos-0001", "argos-0002", "none"] {
-            assert!(!picked(Raw { epic: s(&[sel]), ..Raw::default() }), "-e {sel} 가 골랐다");
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let mut e1 = group("argos-0001", Kind::Epic);
+            e1.milestone = Some("argos-0009".into());
+            let all = vec![
+                e1,
+                group("argos-0002", Kind::Epic),
+                group("argos-0009", Kind::Milestone),
+                parent(a),
+                parent(b),
+                issue("argos-0010.aa1", "todo", &[]),
+            ];
+            let cfg = cfg();
+            let wh = Where::of(&all, &cfg);
+            let picked = |raw: Raw| -> bool {
+                let f = Filter::build(raw).unwrap();
+                f.matches(&all[5], NOW, &wh)
+            };
+            for sel in ["argos-0001", "argos-0002", "none"] {
+                assert!(!picked(Raw { epic: s(&[sel]), ..Raw::default() }), "{b} 가 뒤: -e {sel} 가 골랐다");
+            }
+            for sel in ["argos-0009", "none"] {
+                assert!(
+                    !picked(Raw { milestone: s(&[sel]), ..Raw::default() }),
+                    "{b} 가 뒤: --milestone {sel} 가 골랐다"
+                );
+            }
+            assert!(picked(Raw::default()), "{b} 가 뒤: 거르개 없이도 안 나온다");
         }
-        for sel in ["argos-0009", "none"] {
-            assert!(!picked(Raw { milestone: s(&[sel]), ..Raw::default() }), "--milestone {sel} 가 골랐다");
-        }
-        assert!(picked(Raw::default()), "거르개 없이도 안 나온다");
     }
 
     /// **`--milestone` 은 마일스톤 줄을 다른 마일스톤의 것으로 안 고른다**(moai-8tav). 마일스톤 줄이

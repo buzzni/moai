@@ -370,9 +370,10 @@ impl Ground {
         self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.column.as_str())).collect()
     }
 
-    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — `tui --json` 의 줄이
-    /// 칸을 누가 입는지를 이것으로 가른다(moai-7iyc.5fz).
-    pub fn kinds(&self) -> crate::report::Kinds<'_> {
+    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — 거름망([`Ground::here`])이
+    /// 소속을 묻는 문(`report::stands_in`)에 댄다(moai-53s2). 칸을 누가 입는지는 이것이 아니라 칸 지도의
+    /// 열쇠가 가른다(`report::GroupKey`, moai-mibi.rfn).
+    fn kinds(&self) -> crate::report::Kinds<'_> {
         crate::report::Kinds::kept(&self.kinds)
     }
 

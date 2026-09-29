@@ -260,7 +260,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             .map(|i| Listed {
                 row: super::Row::of(
                     i,
-                    wh.states.get(&(i.kind, i.id.as_str())).copied(),
+                    |k| wh.states.get(&k).copied(),
                     wh.epic.handed().get(i.id.as_str()).copied(),
                     &wh.kinds,
                 )
@@ -591,13 +591,7 @@ fn one(
             // 든 줄을 열고(`rfind`), 가려짐은 그 마지막 줄의 종류로 재는 것이라 여기 선 줄은
             // 가려질 수가 없다 — 지도를 지어도 답이 안 바뀌는데 그 셈은 상세를 펼 때마다
             // 저장소를 한 번 더 훑는다.
-            &super::Row::of(
-                issue,
-                seen.states.get(&(issue.kind, issue.id.as_str())).copied(),
-                stood_in,
-                &report::Kinds::no_twins(),
-            )
-            .on(origin),
+            &super::Row::of(issue, |k| seen.states.get(&k).copied(), stood_in, &report::Kinds::no_twins()).on(origin),
             &extra,
         );
     }
@@ -713,7 +707,7 @@ mod tests {
             "2026-09-11T04:12:03Z",
         );
         let listed = Listed {
-            row: super::super::Row::of(&i, None, None, &report::Kinds::no_twins()),
+            row: super::super::Row::of(&i, |_| None, None, &report::Kinds::no_twins()),
             work: &[],
             journal_error: &[],
         };

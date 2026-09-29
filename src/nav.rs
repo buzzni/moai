@@ -1499,6 +1499,29 @@ mod tests {
         }
     }
 
+    /// **제 `epic` 을 적은 생각이 쌍둥이 부모의 어느 줄을 고르느냐로 접히기도 하고 뿌리로 오르기도 하면,
+    /// 그 밑의 줄은 `(길 잃음)` 에 선다**(리뷰 moai-mibi.ndh). 한때 트리는 그 생각을 부모의 뒷줄 밑에 접어
+    /// 그리면서 자식은 그 생각에서 떼어 뿌리의 `에픽 없음` 에 그렸다 — 소속을 정하는 자가 그 생각을
+    /// 뿌리로 올렸기 때문이다. 두 차례를 다 잰다.
+    #[test]
+    fn a_child_under_an_idea_torn_between_twin_parents_goes_to_the_lost_bucket() {
+        let mut thought = make("argos-0010.t01", Kind::Idea);
+        thought.epic = Some("argos-0002".into());
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let issues = vec![
+                make("argos-0001", Kind::Epic),
+                make("argos-0002", Kind::Epic),
+                epic_of("argos-0010", a),
+                epic_of("argos-0010", b),
+                thought.clone(),
+                make("argos-0010.t01.c01", Kind::Issue),
+            ];
+            let index = Index::of(&issues);
+            assert_eq!(index.home_of(5), &vec![Seg::Lost], "{a} 가 앞");
+            assert_exactly_once(&issues);
+        }
+    }
+
     /// **멤버 없는 에픽도 디렉터리다.** 비었다고 잎이 되면 `--path` 가 그
     /// 에픽 대신 부모를 열고, 훑는 쪽은 제자리를 돈다.
     #[test]
