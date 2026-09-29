@@ -817,6 +817,36 @@ impl<'a> Lines<'a> {
     fn at(&self, id: &str) -> Option<&'a Issue> {
         self.by_id.get(id).copied()
     }
+
+    /// 에픽 없는 줄이 **조상을 타고 받는 마일스톤**([`fold_top`] → [`climb`]) — 조상 줄은
+    /// `pick` 이 고른다. [`stood_at_line`] 은 뒷줄을 고르고([`Lines::at`]), [`Lines::stone_twin`]
+    /// 은 쌍둥이의 다른 줄을 끼워 답이 갈리는지 잰다. 걸음을 한 몸으로 두는 까닭은 둘이 다른
+    /// 길을 타면 "갈린다" 는 판정이 걸음의 차이를 재기 때문이다.
+    fn climbed(&self, i: &'a Issue, pick: &impl Fn(&str) -> Option<&'a Issue>) -> Option<&'a str> {
+        fold_top(i, pick, &self.rooted).and_then(|top| climb(top, pick, &self.rooted))
+    }
+
+    /// 에픽 없는 줄의 마일스톤이 **조상 쌍둥이의 어느 줄을 고르느냐로 갈리는가**(moai-snsy).
+    ///
+    /// [`Handed::from`] 은 에픽 축만 잰다 — 부모 쌍둥이가 둘 다 에픽을 안 적었으면 거기서는 같은
+    /// 답(없음)이라 막지 않는데, 둘이 서로 다른 `milestone` 을 들면 자식은 여전히 뒷줄의 릴리스를
+    /// 조용히 입어 파일 차례로 뒤집혔다. 조상 id 가운데 쌍둥이인 것마다 다른 줄을 끼워 다시 오르고,
+    /// 뒷줄로 오른 답과 하나라도 다르면 참이다. 한 번에 한 id 만 바꾼다 — 갈림을 찾는 데는 그것으로
+    /// 넉넉하고, 쌍둥이는 드물어 걸음이 늘지 않는다(성한 저장소에서는 곧바로 돌아선다).
+    fn stone_twin(&self, i: &'a Issue) -> bool {
+        if self.twins.is_empty() {
+            return false;
+        }
+        let base = self.climbed(i, &|p| self.at(p));
+        std::iter::successors(crate::id::parent_of(&i.id), |p| crate::id::parent_of(p))
+            .filter_map(|id| self.twins.get(id).map(|rows| (id, rows)))
+            .any(|(id, rows)| {
+                rows.iter().any(|alt| {
+                    let pick = |p: &str| if p == id { Some(*alt) } else { self.at(p) };
+                    self.climbed(i, &pick) != base
+                })
+            })
+    }
 }
 
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
@@ -2490,7 +2520,8 @@ pub struct Handing<'a> {
     /// 부모 쪽 걸음이 **답이 갈리는 쌍둥이 id** 를 지난 줄의 id(moai-mibi.wpj, 2026-09-29 사용자
     /// 결정). 자식 id 는 `<부모>.<꼬리>` 뿐이라 부모 줄이 둘이면 어느 줄에 속하는지 id 만으로는
     /// 못 가른다 — 뒷줄을 조용히 입던 자리다. 그 줄은 어느 묶음에도 안 서고 `(길 잃음)` 에
-    /// 서며([`misplace_of`] 의 [`Misplace::Twin`]), `twin_parent` 가 그 id 를 댄다.
+    /// 서며([`misplace_of`] 의 [`Misplace::Twin`]), `twin_parent` 가 그 id 를 댄다. 에픽 축에서
+    /// 같은 답이어도 에픽 없는 줄이 조상을 타고 받는 **마일스톤이 갈리면** 여기 든다([`Lines::stone_twin`]).
     twin: BTreeSet<&'a str>,
 }
 
@@ -2528,6 +2559,11 @@ impl<'a> Handing<'a> {
             match handed.from(p, by_id, rooted) {
                 Hand::Given(Some(e)) => {
                     from_id.insert(i.id.as_str(), e);
+                }
+                // 에픽이 없으면 마일스톤은 조상을 타고 온다 — 거기서 쌍둥이가 갈려도 못 정한 것이다
+                // (moai-snsy). 에픽을 받은 줄은 그 에픽의 마일스톤을 따르므로 이 걸음이 없다.
+                Hand::Given(None) if lines.stone_twin(i) => {
+                    twin.insert(i.id.as_str());
                 }
                 Hand::Given(None) => {}
                 Hand::Twin => {
@@ -2876,7 +2912,7 @@ pub(crate) fn stood_at_line<'a>(i: &'a Issue, epic: Option<&'a str>, lines: &Lin
             Some(e) => lines.at(e).filter(|e| e.kind == Kind::Epic).and_then(milestone_stood),
             // 에픽이 없으면 **접힌 맨 위 줄에서부터** 센다. 제 줄에서 시작하면
             // 부모 밑에 그려진 자식이 제 마일스톤으로 세어진다(moai-uqoe).
-            None => fold_top(i, &lines.by_id, &lines.rooted).and_then(|top| climb(top, &lines.by_id, &lines.rooted)),
+            None => lines.climbed(i, &|p| lines.at(p)),
         },
     }
 }
@@ -2956,7 +2992,8 @@ pub fn milestone_from_above<'a>(
         let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
         return Some((milestone, if usable { Above::Epic(e) } else { Above::Lost(e) }));
     }
-    let Some(top) = fold_top(line, by_id, rooted) else {
+    let pick = |p: &str| by_id.get(p).copied();
+    let Some(top) = fold_top(line, &pick, rooted) else {
         // 뿌리로 올라간 생각 밑에 접혔다 — 그 밑은 `(마일스톤 없음)` 에 서고(`fold_top`), 어느
         // 필드를 고쳐도 안 옮겨진다. 조용하면 `show --milestone X` 가 그 줄을 말없이 못 낸다.
         let thought = std::iter::successors(crate::id::parent_of(&line.id), |p| crate::id::parent_of(p))
@@ -2966,7 +3003,7 @@ pub fn milestone_from_above<'a>(
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
     // 아무도 값을 안 들었으면 정한 것은 접힌 맨 위 줄이다 — 제 필드는 거기서 안 읽힌다.
-    match stood_at(top, by_id, rooted) {
+    match stood_at(top, &pick, rooted) {
         Some(source) if source.id == line.id => None,
         // id 가 마일스톤 밑이다. 비우는 것은 못 끊는다. 다른 마일스톤은 접힌 맨 위 줄이 제 줄이
         // 아니면 그 줄에 적어 옮긴다 — `stood_at` 이 마일스톤 조상보다 그 줄의 필드를 먼저 읽는다.
@@ -3144,8 +3181,8 @@ pub(crate) fn milestone_stood(epic: &Issue) -> Option<&str> {
 /// 그렇다. 에픽 줄은 [`milestones`]·[`milestone_from_above`] 가 먼저 제 필드로 돌아간다.
 /// 한때 받는 줄인지를 인자로 넘겼는데 늘 참이라 걷었다(moai-dejq) — 거짓일 수 없는 가드는
 /// "마일스톤 줄도 여기 온다" 는 없는 길을 읽는 사람에게 말한다.
-fn climb<'a>(top: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &BTreeSet<&str>) -> Option<&'a str> {
-    let at = stood_at(top, by_id, rooted)?;
+fn climb<'a>(top: &'a Issue, pick: &impl Fn(&str) -> Option<&'a Issue>, rooted: &BTreeSet<&str>) -> Option<&'a str> {
+    let at = stood_at(top, pick, rooted)?;
     match at.kind {
         Kind::Epic => milestone_stood(at),
         Kind::Milestone => Some(at.id.as_str()),
@@ -3155,7 +3192,11 @@ fn climb<'a>(top: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &BTre
 
 /// [`climb`] 이 마일스톤을 읽는 **그 줄** — 에픽 줄, 마일스톤인 조상, 또는 제
 /// `milestone` 을 든 줄. [`milestone_from_above`] 가 넘긴 자리를 댈 때도 이것을 쓴다.
-fn stood_at<'a>(top: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &BTreeSet<&str>) -> Option<&'a Issue> {
+fn stood_at<'a>(
+    top: &'a Issue,
+    pick: &impl Fn(&str) -> Option<&'a Issue>,
+    rooted: &BTreeSet<&str>,
+) -> Option<&'a Issue> {
     let mut cur = top;
     loop {
         if cur.kind == Kind::Epic {
@@ -3170,9 +3211,7 @@ fn stood_at<'a>(top: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &B
             return Some(cur);
         }
         // 부모가 뿌리로 올라간 생각이면 거기서 멈춘다 — `groups` 와 같은 자다.
-        cur = crate::id::parent_of(&cur.id)
-            .and_then(|p| by_id.get(p).copied())
-            .filter(|p| !rooted.contains(p.id.as_str()))?;
+        cur = crate::id::parent_of(&cur.id).and_then(pick).filter(|p| !rooted.contains(p.id.as_str()))?;
     }
 }
 
@@ -3193,12 +3232,11 @@ fn stood_at<'a>(top: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &B
 /// **뿌리로 올라간 생각 밑에 접히면 `None` 이다.** 그 생각은 `(마일스톤 없음)`
 /// 에 서므로 그 밑의 줄도 거기 그려진다 — 생각이 에픽을 타고 세는 마일스톤을
 /// 물려주면 moai-14dm 이 마일스톤에서 되살아난다.
-fn fold_top<'a>(i: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &BTreeSet<&str>) -> Option<&'a Issue> {
+fn fold_top<'a>(i: &'a Issue, pick: &impl Fn(&str) -> Option<&'a Issue>, rooted: &BTreeSet<&str>) -> Option<&'a Issue> {
     let mut cur = i;
     // id 가 줄어들며 올라가므로 고리가 없다.
-    while let Some(p) = crate::id::parent_of(&cur.id)
-        .and_then(|p| by_id.get(p).copied())
-        .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+    while let Some(p) =
+        crate::id::parent_of(&cur.id).and_then(pick).filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
     {
         if rooted.contains(p.id.as_str()) {
             return None;
@@ -8577,6 +8615,45 @@ mod tests {
         let handing = Handing::of(&rows);
         assert!(!handing.lost(&rows[4]));
         assert_eq!(handing.at(&rows[4]), Some("argos-e008"));
+    }
+
+    /// **부모 쌍둥이가 에픽 축에서 같아도 마일스톤이 갈리면 자식은 길을 잃는다** (moai-snsy).
+    /// 둘 다 에픽을 안 적어 [`Handed::from`] 은 같은 답(없음)을 보는데, 서로 다른 `milestone` 을
+    /// 들면 자식은 조상을 타고 오르며 뒷줄의 릴리스를 조용히 입어 파일 차례로 뒤집혔다. 두 차례를
+    /// 다 재고, 같은 `milestone` 을 든 쌍둥이는 막지 않는 것도 잰다.
+    #[test]
+    fn a_child_under_twin_parents_with_different_milestones_is_lost() {
+        let parent = |m: &str| {
+            let mut i = make("argos-p001", Kind::Issue, "todo");
+            i.milestone = Some(m.into());
+            i
+        };
+        for (a, b) in [("argos-m001", "argos-m002"), ("argos-m002", "argos-m001")] {
+            let rows = vec![
+                make("argos-m001", Kind::Milestone, "todo"),
+                make("argos-m002", Kind::Milestone, "todo"),
+                parent(a),
+                parent(b),
+                make("argos-p001.aaa", Kind::Issue, "todo"),
+            ];
+            let child = &rows[4];
+            let soil = Soil::of(&rows);
+            assert!(soil.epic.lost(child), "{b} 가 뒤: 자식이 뒷줄의 릴리스를 입었다");
+            assert_eq!(soil.placed(Kind::Milestone).at(child), None, "{b} 가 뒤");
+            assert_eq!(soil.adrift(child), Some(Misplace::Twin));
+            let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
+            let w = st.warnings.iter().find(|w| w.kind == "twin_parent").expect("twin_parent 가 없다");
+            assert_eq!(w.ids, ["argos-p001.aaa"]);
+        }
+        let rows = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            parent("argos-m001"),
+            parent("argos-m001"),
+            make("argos-p001.aaa", Kind::Issue, "todo"),
+        ];
+        let soil = Soil::of(&rows);
+        assert!(!soil.epic.lost(&rows[3]), "같은 릴리스를 든 쌍둥이에 막혔다");
+        assert_eq!(soil.placed(Kind::Milestone).at(&rows[3]), Some("argos-m001"));
     }
 
     /// **칸 지도의 열쇠는 (종류, id) 다** (moai-mibi.rfn). 마일스톤으로 한 번 에픽으로 한 번 선
