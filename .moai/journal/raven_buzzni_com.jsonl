@@ -1973,3 +1973,4 @@
 {"ts":"2026-09-29T08:04:20Z","id":"moai-ydm7.7wq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T08:04:21Z","id":"moai-ydm7.976","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T08:04:27Z","id":"moai-ydm7.cs1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 15건 중 12건(임시 이름 nonce, 되돌리면 붉어지는 freed 시험 셋, Picking 이 줄과 Ties 를 드는 것, 문서·CHANGELOG 고침). 넘긴 것: 4번 링크를 바꿔 끼우는 버그는 moai-4oab(에픽 멤버, 첫 칸), 5번 has_open_child 이차 훑기는 idea moai-oaaq, 9번 락 안의 셈은 idea moai-dq4l. 커밋 본문의 낱말은 역사를 다시 써야 해 두었다"}
+{"ts":"2026-09-29T08:07:08Z","id":"moai-ydm7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: moai-4oab 를 집는다. 쓰기가 링크를 따라갈지 거절할지 먼저 정하고, 닫을 때 에픽 끝 리뷰를 다시 부른다"}
