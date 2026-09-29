@@ -11216,6 +11216,45 @@ fn the_board_rides_the_first_prompt_only() {
     assert!(!other.trim().is_empty(), "새 세션이 보드를 못 받았다");
 }
 
+/// **셸이 쪽지 자리를 주면 표식은 셸이 세운다**(moai-45hf.wqg). `moai` 는 표식 이름을 쪽지에 적기만
+/// 하고, 심은 줄이 판정을 건넨 뒤에 그 이름으로 세운다 — 그 사이에 셸이 죽으면 표식이 안 서서 다음
+/// 프롬프트가 보드를 다시 싣는다. 옛 판은 여기서 먼저 세워 그 세션이 보드를 영영 못 받았다.
+///
+/// 쪽지 자리를 안 주는 셸(이 판 전에 심은 줄)은 옛 길 그대로다 — 위 `the_board_rides_the_first_prompt_only`.
+#[test]
+fn the_board_mark_waits_for_the_shell() {
+    let s = init("hookhandoff");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let slip = s.path().join("slip");
+    let with_slip = |session: &str| {
+        hook_at_home(
+            &s,
+            s.path(),
+            None,
+            &[("MOAI_HOOK_HANDOFF", slip.to_str().unwrap())],
+            "user-prompt-submit",
+            &event(&s, session),
+        )
+    };
+
+    let first = carried_text(&String::from_utf8(with_slip("s1").stdout).unwrap());
+    assert!(first.contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+    let named = std::fs::read_to_string(&slip).expect("쪽지를 안 적었다");
+    let mark = Path::new(named.strip_suffix('\n').expect("쪽지가 줄바꿈으로 안 끝난다"));
+    assert!(!mark.exists(), "셸이 건네기 전에 표식을 세웠다 — {}", mark.display());
+
+    // 셸이 못 세운 판 — 다음 프롬프트가 다시 싣는다. **옛 쪽지는 걷고 새로 쓴다**.
+    let again = carried_text(&String::from_utf8(with_slip("s1").stdout).unwrap());
+    assert!(again.contains("락을 잡는다"), "못 건넌 보드를 다시 안 실었다\n{again}");
+    assert_eq!(std::fs::read_to_string(&slip).unwrap(), named, "쪽지가 다른 이름을 적었다");
+
+    // 셸이 세운 뒤에는 조용하다 — 한 번은 그대로 한 번이다.
+    std::fs::write(mark, "").unwrap();
+    let quiet = String::from_utf8(with_slip("s1").stdout).unwrap();
+    assert!(quiet.trim().is_empty(), "세운 표식을 안 봤다\n{quiet}");
+    assert!(!slip.exists(), "보드를 안 지은 판이 옛 쪽지를 남겼다 — 셸이 그것을 이번 판의 것으로 읽는다");
+}
+
 /// 실리는 글에 색이 섞이면 안 된다. 계약 JSON 안의 이스케이프는 아무도
 /// 걷어내지 않아 받는 쪽 화면에 그 글자가 그대로 뜬다.
 #[test]

@@ -111,6 +111,15 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 스트림 어디에도 두 글이 없다). 그래서 이 줄은 `o=$(…)` 로 stdout 을 받아 두고 알림은 그것이
 /// **비었을 때만** 낸다. 받은 것은 `printf '%s\n'` 으로 그대로 흘려보낸다.
 ///
+/// **0·1 밖에서는 "비었는가" 가 아니라 "판정의 꼴인가" 를 본다**(moai-45hf.3do, 2026-09-29 사용자
+/// 결정). 비었는지는 "판정을 냈다" 의 대리값일 뿐이고, 둘이 갈리는 자리가 셋 있었다(리뷰
+/// moai-514e.0er 6·7번, 2026-09-23 에 쟀다). PIPE_BUF 를 넘는 줄을 쓰다 SIGKILL 을 맞으면 `$o` 가
+/// `{"hookSpecificOutp` 로 남고, [`exe_name`] 이 이름으로 물러선 줄에서 PATH 의 `moai`(이 기계에서는
+/// 옛 프로젝트의 것)는 사용법을 찍고 64 로 지며, 빈칸 하나만 낸 판도 있다. 셋 다 비지 않았으니 토막이
+/// 그대로 건너가고 알림이 접혀, `claude` 는 못 읽고 쓰기는 돌았다 — **알림도 표식도 없이 영영
+/// 조용했다.** 이제 `{` 로 시작해 `}` 로 끝나지 않는 글은 버리고 알림을 낸다. 둘째 객체가 붙는 일이
+/// 없으니 위의 손실은 안 난다. 0·1 은 `moai` 가 스스로 끝낸 값이라 그대로 흘려보낸다.
+///
 /// **그 가름에 드는 비용은 파이프 하나다 — 프로세스는 안 는다**(리뷰 moai-514e.0er 가 고쳤다).
 /// `o=$(단순 명령)` 은 옛 줄이 이미 띄우던 그 자식 하나에서 그대로 exec 한다. `strace -f -c` 로
 /// 세니(2026-09-23) dash 는 앞뒤 다 자식 하나(`vfork`)에 `pipe2` 만 0 → 1 이고, bash 는
@@ -160,6 +169,15 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 옮겨 그 틈이 마이크로초라는 것이 지금 서는 근거고, **그 틈은 0 이 아니다** — 여기서 지는
 /// 쪽은 막아야 할 쓰기가 통과하는 쪽이다. 도장을 다시 볼 때 이것도 함께 잰다.
 ///
+/// **그 틈에서 표식까지 잃지는 않는다**(moai-45hf.wqg, 2026-09-29 사용자 결정). 보드와 `Stop` 의
+/// 표식을 `moai` 안에서 세우던 판은, 판정이 셸에 묶인 채 죽으면 표식만 남아 그 세션이 보드를
+/// **영영** 못 받았다(판정은 다음 도구 호출이 다시 셈하지만 보드는 아니다). 이제 이 줄이 쪽지
+/// 자리 `h` 를 [`crate::cmd::hook::HANDOFF`] 로 넘기고, `moai` 는 표식 이름을 거기에 적기만 하며,
+/// 이 줄이 `printf` 에 **이긴 뒤에** 그 이름으로 표식을 세운다. 쪽지 이름에 이 셸의 `$$` 가 들어
+/// 겹쳐 도는 훅이 안 섞이고, 제 것(`-O`)이 아니거나 링크(`-h`)인 쪽지는 안 읽는다 — 남이 먼저
+/// 둔 쪽지를 읽으면 그 이름의 파일을 `true >` 로 세우게 된다. 세우기는 `set -C` 라 이미 있는
+/// 파일을 비우지 않는다. 드는 것은 내장뿐이라 정상 갈래의 프로세스는 그대로다.
+///
 /// **`printf` 가 SIGPIPE 에 맞아도 0 으로 나간다**(리뷰 moai-514e.0er). 옛 줄에서는 fd 1 을
 /// `moai` 가 쥐었고 `src/main.rs` 의 `outln!` 이 `BrokenPipe` 를 삼켜 0 으로 끝났다. 이 줄은
 /// **껍데기가** 그 fd 에 쓰므로 받는 쪽이 먼저 닫으면 껍데기가 시그널에 죽어 **141** 로 나간다
@@ -170,8 +188,8 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 ///
 /// **시그널이 안 오는 쓰기 실패는 `|| :` 가 맡는다**(리뷰 moai-514e.0er). `trap` 이 잡는 것은
 /// SIGPIPE 뿐이고, 닫힌 fd(`>&-`)·읽기 전용 fd·`ENOSPC` 는 `printf` 를 그냥 비영으로 끝낸다.
-/// 그 `printf` 는 `[ -z "$o" ] || printf …` 의 **마지막 자리**라 `set -e` 가 면제해 주지 않는
-/// 딱 한 자리고, 거기서 죽으면 `exit 0` 에 못 닿는다 — 2026-09-23 에 sh·bash·dash 셋 다 1 로
+/// 그 `printf` 는 (그때의) `[ -z "$o" ] || printf …` 의 **마지막 자리**라 `set -e` 가 면제해 주지
+/// 않는 딱 한 자리고, 거기서 죽으면 `exit 0` 에 못 닿는다 — 2026-09-23 에 sh·bash·dash 셋 다 1 로
 /// 나갔고 **옛 줄은 같은 자리에서 0 이었다**(옛 줄에는 치환 뒤에 질 수 있는 맨 명령이 없었다).
 /// 알림의 `printf` 에도 같이 단다. 그쪽은 옛 줄에도 있던 자리지만, 위 표대로 훅의 비영 종료는
 /// 2 하나만 재어 본 채라 값을 흘리지 않는 편이 싸다.
@@ -223,6 +241,16 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 세션이 듣는 유일한 값이고 **그것은 게이트다** — 쓸 수 없는 임시 디렉터리 하나가 모든 도구
 /// 호출을 막는 자리였다. `true` 는 평범한 내장이라 같은 판에서 그대로 이어 간다(bash 는 둘 다
 /// 이어 가므로 bash 로만 재면 안 보인다).
+///
+/// **표식은 `set -C` 로 한 번에 세우고, 못 세우면 그 자리가 제 것인지 본다**(moai-45hf.6z2,
+/// 2026-09-29 사용자 결정, 리뷰 moai-514e.hgz 13·14번). `[ -e ]` 로 보고 세우던 판은 원자적이지
+/// 않아, 겹쳐 도는 훅(2026-09-23 에 쟀다)이 저마다 "없다" 를 보고 저마다 말했다. 그리고 이름의
+/// 네 글자는 `plugin.json` 에 커밋돼 있고 `$PPID` 로 물러선 판의 나머지는 작은 정수라, 같은 기계의
+/// 남이 그 자리에 파일 하나를 먼저 두면 그 세션의 알림이 **통째로** 막혔다. 이제 `set -C`(곧
+/// `O_EXCL`)가 이긴 하나만 말하고, 진 쪽은 그 자리가 제 것(`-O`)이고 링크(`-h`)가 아닐 때만
+/// 조용하다. 남이 잡은 자리와 못 쓰는 자리에서는 매번 말한다 — 조용히 막히는 쪽이 아니라
+/// 시끄러워지는 쪽으로 진다. 자리를 사용자 설정 옆으로 옮기는 길도 있었지만, 셸이 `MOAI_CONFIG`·
+/// XDG·`HOME` 풀이를 흉내 내야 하고 `mkdir -p`(프로세스 하나)가 들며 표식이 영영 쌓인다.
 ///
 /// **`2>/dev/null` 은 `>` 보다 앞에 선다**(리뷰 moai-514e.hgz). 리다이렉션은 왼쪽부터 걸리므로
 /// `true > "$s" 2>/dev/null` 은 stderr 를 돌리기 **전에** 껍데기가 제 진단을 원래 stderr 로
@@ -304,16 +332,25 @@ fn command(exe: &str, event: &str) -> String {
     // 세우면 **뒤에 정말 온 126·127 이 그 세션 내내 조용하다**, 이벤트를 갈라도 그렇다(같은
     // 이벤트가 그렇게 죽을 수 있다). 값을 함께 키로 두면 값이 달라질 때만 다시 말하니, 상황이
     // 정말 바뀐 자리에서만 한 줄이 는다. `$c` 는 `$?` 가 낸 0~255 이라 파일 이름에 안전하다.
+    //
+    // **쪽지 자리 `h` 는 이 셸의 pid 로 짓는다**(moai-45hf.wqg) — 겹쳐 도는 훅(2026-09-23 에 쟀다)이
+    // 저마다 제 자리를 갖는다. `moai` 가 보드·`Stop` 의 표식 이름을 거기 적고, 이 줄이 `printf` 에
+    // 이긴 뒤에 그 이름으로 표식을 세운다([`crate::cmd::hook::HANDOFF`]).
+    let handoff = crate::cmd::hook::HANDOFF;
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; trap 'exit 0' PIPE; \
-         c=0; o=$(\"{exe}\" hook {event}) || c=$?; \
-         [ -z \"$o\" ] || printf '%s\\n' \"$o\" || :; \
-         case \"$c\" in 0|1) ;; *) [ -n \"$o\" ] || {{ \
+         h=\"${{TMPDIR:-/tmp}}/moai-hook-${{CLAUDE_CODE_SESSION_ID:-$PPID}}-$$.handoff\"; \
+         c=0; o=$({handoff}=\"$h\" \"{exe}\" hook {event}) || c=$?; \
+         case \"$c\" in 0|1) ;; *) case \"$o\" in '{{'*'}}') ;; *) o=;; esac;; esac; \
+         set -C; \
+         if [ -n \"$o\" ]; then printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] \
+         && read -r m 2>/dev/null < \"$h\" && true 2>/dev/null > \"$m\" || :; \
+         else case \"$c\" in 0|1) ;; *) \
          s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-${{CLAUDE_CODE_SESSION_ID:-$PPID}}.{event}.$c.said\"; \
-         [ -e \"$s\" ] || {{ true 2>/dev/null > \"$s\" || :; \
+         {{ true 2>/dev/null > \"$s\" || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
          printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :; }}; }};; \
-         esac; exit 0"
+         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :;; \
+         esac; fi; exit 0"
     )
 }
 
@@ -1077,9 +1114,25 @@ mod tests {
         let spoke = plant("spoke", &format!("#!/bin/sh\necho '{deny}'\nexit 101\n"), 0o755);
         let felled = plant("felled", &format!("#!/bin/sh\necho '{deny}'\nkill -9 $$\n"), 0o755);
         let nowhere = at.join("nowhere").display().to_string();
+        // **꼴이 판정이 아닌 글은 판정이 아니다**(moai-45hf.3do, 2026-09-29 사용자 결정). 비었는지만
+        // 보던 줄은 셋을 판정으로 읽어 그대로 흘려보내고 알림을 접었다 — PIPE_BUF 를 넘는 줄을 쓰다
+        // SIGKILL 을 맞은 토막, PATH 의 남의 `moai` 가 찍은 사용법 글, 빈칸 하나다. `claude` 는
+        // 셋 다 못 읽고 쓰기는 돈다. 이제 셋 다 버리고 알림을 낸다.
+        let torn = plant("torn", "#!/bin/sh\nprintf '%s' '{\"hookSpecificOutp'\nkill -9 $$\n", 0o755);
+        let foreign = plant("foreign", "#!/bin/sh\necho 'usage: moai <command>'\nexit 64\n", 0o755);
+        let space = plant("space", "#!/bin/sh\nprintf ' '\nexit 2\n", 0o755);
 
         for sh in shells {
-            for (exe, code) in [(&dead, "126"), (&gone, "127"), (&clap, "2"), (&panic, "101"), (&killed, "137")] {
+            for (exe, code) in [
+                (&dead, "126"),
+                (&gone, "127"),
+                (&clap, "2"),
+                (&panic, "101"),
+                (&killed, "137"),
+                (&torn, "137"),
+                (&foreign, "64"),
+                (&space, "2"),
+            ] {
                 let (got, said) = run(sh, "-c", exe);
                 assert_eq!(got, Some(0), "{sh}: 못 도는 판이 게이트가 됐다 — {said}");
                 let v: serde_json::Value =
@@ -1378,8 +1431,10 @@ mod tests {
             let cmd = command(exe, event);
             // `s="…"` 가 적은 값을 통째로 뗀다. 경로가 아니라 그 자리에서 찾는 까닭은 경로에
             // `moai-hook-` 이 들면 `find` 가 그쪽을 먼저 집기 때문이고, 끝은 그 대입을 닫는
-            // 따옴표다 — 너비도 접두어도 안 박는다.
-            let at = cmd.find("/moai-hook-").expect("표식이 없다") + 1;
+            // 따옴표다 — 너비도 접두어도 안 박는다. **대입 `s=` 부터 찾는다** — 그 앞에 쪽지 자리
+            // `h=` 가 같은 접두어로 선다(moai-45hf.wqg).
+            let assign = cmd.find(" s=\"").expect("표식 대입이 없다");
+            let at = assign + cmd[assign..].find("/moai-hook-").expect("표식이 없다") + 1;
             let rest = &cmd[at..];
             let end = rest.find('"').expect("표식이 안 닫힌다");
             let name = rest[..end].to_string();
@@ -1395,6 +1450,170 @@ mod tests {
         // `the_notice_stands_once_a_session` 이 껍데기로 실제로 두 번 돌려 잰다.
         // 이벤트도 종료 값도 이름에 선다 — `$c` 는 껍데기가 풀 자리라 글자 그대로 남는다.
         assert!(mark(a, "stop").ends_with(".stop.$c.said"), "이벤트·종료 값이 표식에 안 선다 — {}", mark(a, "stop"));
+    }
+
+    /// 시험이 쓸 껍데기 — `sh` 는 기계마다 dash 일 수도 bash 일 수도 있어 셋 다 잰다.
+    fn shells() -> Vec<&'static str> {
+        let found: Vec<&str> = ["sh", "bash", "dash"]
+            .into_iter()
+            .filter(|s| std::process::Command::new(s).args(["-c", "exit 0"]).output().is_ok())
+            .collect();
+        assert!(!found.is_empty(), "껍데기가 하나도 없다");
+        found
+    }
+
+    /// 모드를 세운 파일을 심는다. **복사로 심는다** — 까닭은 `a_binary_that_cannot_run…` 의 `plant` 에 있다.
+    fn planted(at: &Path, name: &str, body: &str, mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let src = at.join(format!("{name}.src"));
+        let p = at.join(name);
+        std::fs::write(&src, body).unwrap();
+        let out = std::process::Command::new("cp").arg(&src).arg(&p).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        p
+    }
+
+    /// **보드·`Stop` 의 표식은 판정이 건너간 뒤에 선다**(moai-45hf.wqg). `moai` 가 쪽지에 표식 이름을
+    /// 적고, 이 줄이 `printf` 에 이긴 뒤에 그 이름으로 세운다. `printf` 가 지면 표식이 안 서서
+    /// 다음 프롬프트가 보드를 다시 싣는다 — 옛 판은 `moai` 안에서 먼저 세워, 셸이 그 뒤에 죽으면
+    /// 그 세션이 보드를 영영 못 받았다.
+    ///
+    /// **바이너리는 `moai` 가 쪽지에 하는 일을 흉내 낸다** — 환경의 [`crate::cmd::hook::HANDOFF`]
+    /// 자리에 이름 한 줄을 쓴다. `moai` 쪽이 정말 그렇게 쓰는지는 `tests/cli.rs` 가 잰다.
+    #[cfg(unix)]
+    #[test]
+    fn the_mark_stands_only_after_the_answer_crosses() {
+        let scratch = crate::scratch::Scratch::new("skill-handoff");
+        let at = scratch.path();
+        let slip = crate::cmd::hook::HANDOFF;
+        let board = planted(
+            at,
+            "board",
+            &format!("#!/bin/sh\nprintf '%s\\n' \"$TMPDIR/mark\" > \"${slip}\"\necho '{{\"ok\":true}}'\n"),
+            0o755,
+        );
+        // 쪽지 자리에 **링크**를 둔다 — 남이 먼저 잡은 자리와 같다. 셸은 제 것이 아닌 쪽지를 안 읽는다.
+        let linked = planted(
+            at,
+            "linked",
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$TMPDIR/mark\" > \"$TMPDIR/bait\"\nln -s \"$TMPDIR/bait\" \"${slip}\"\n\
+                 echo '{{\"ok\":true}}'\n"
+            ),
+            0o755,
+        );
+        if !crate::cmd::runnable(&board) {
+            return;
+        }
+        let nth = std::cell::Cell::new(0);
+        let fresh = || {
+            nth.set(nth.get() + 1);
+            let tmp = at.join(format!("tmp{}", nth.get()));
+            std::fs::create_dir_all(&tmp).unwrap();
+            tmp
+        };
+        for sh in shells() {
+            let tmp = fresh();
+            let out = std::process::Command::new(sh)
+                .args(["-c", &command(&board.display().to_string(), "user-prompt-submit")])
+                .env("TMPDIR", &tmp)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(0), "{sh}: 게이트가 됐다");
+            assert_eq!(String::from_utf8_lossy(&out.stdout), "{\"ok\":true}\n", "{sh}: 판정이 달라졌다");
+            assert!(tmp.join("mark").exists(), "{sh}: 건너간 판에 표식이 안 섰다");
+
+            // **받는 쪽이 못 받으면 표식이 안 선다** — `-ec` 에서도 0 이다.
+            for flags in ["-c", "-ec"] {
+                let tmp = fresh();
+                let status = std::process::Command::new(sh)
+                    .args([flags, &command(&board.display().to_string(), "user-prompt-submit")])
+                    .env("TMPDIR", &tmp)
+                    .stdout(std::process::Stdio::from(std::fs::File::open(&board).unwrap()))
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .unwrap();
+                assert_eq!(status.code(), Some(0), "{sh} {flags}: 쓰기가 진 때에 값을 흘렸다");
+                assert!(!tmp.join("mark").exists(), "{sh} {flags}: 못 건넌 판에 표식이 섰다 — 보드를 영영 잃는다");
+            }
+
+            let tmp = fresh();
+            let out = std::process::Command::new(sh)
+                .args(["-c", &command(&linked.display().to_string(), "user-prompt-submit")])
+                .env("TMPDIR", &tmp)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(0), "{sh}: 링크 쪽지가 게이트가 됐다");
+            assert!(!tmp.join("mark").exists(), "{sh}: 링크로 선 쪽지를 읽었다");
+        }
+    }
+
+    /// **알림 표식은 한 번에 선다**(moai-45hf.6z2, 2026-09-29 사용자 결정). `[ -e ]` 로 보고 세우던
+    /// 판은 겹쳐 도는 훅(2026-09-23 에 쟀다)이 셋 다 "없다" 를 보고 셋 다 말했다. `set -C` 의
+    /// `O_EXCL` 로 세우면 하나만 이긴다.
+    ///
+    /// **남이 먼저 잡은 자리는 시끄러워진다, 조용해지지 않는다.** 표식 이름은 `plugin.json` 에
+    /// 커밋돼 있고 `$PPID` 로 물러선 판의 나머지는 작은 정수라, 같은 기계의 남이 그 자리에 파일을
+    /// 두면 그 세션의 알림이 통째로 막혔다. 이제 제 것이 아니거나(`-O`) 링크(`-h`)면 매번 말한다 —
+    /// 링크가 가리키는 제 파일도 안 건드린다. 남의 소유는 root 없이 못 세우므로 링크로 잰다.
+    #[cfg(unix)]
+    #[test]
+    fn the_notice_mark_is_taken_once_and_never_squatted() {
+        let scratch = crate::scratch::Scratch::new("skill-hookrace");
+        let at = scratch.path();
+        let dead = planted(at, "dead", "#!/bin/sh\nexit 0\n", 0o644);
+        let live = planted(at, "live", "#!/bin/sh\nexit 0\n", 0o755);
+        if !crate::cmd::runnable(&live) {
+            return;
+        }
+        let line = command(&dead.display().to_string(), "pre-tool-use");
+        // `s="…"` 의 값을 이 판의 값으로 푼다 — 이름을 다시 지어내지 않는다.
+        let assign = line.find(" s=\"").expect("표식 대입이 없다") + " s=\"".len();
+        let pattern = &line[assign..assign + line[assign..].find('"').unwrap()];
+        for (k, sh) in shells().into_iter().enumerate() {
+            let race = at.join(format!("race-{k}"));
+            std::fs::create_dir_all(&race).unwrap();
+            let kids: Vec<_> = (0..8)
+                .map(|_| {
+                    std::process::Command::new(sh)
+                        .args(["-c", &line])
+                        .env("TMPDIR", &race)
+                        .env("CLAUDE_CODE_SESSION_ID", "race")
+                        .stdout(std::process::Stdio::piped())
+                        .spawn()
+                        .unwrap()
+                })
+                .collect();
+            let said = kids
+                .into_iter()
+                .map(|k| String::from_utf8_lossy(&k.wait_with_output().unwrap().stdout).to_string())
+                .filter(|out| out.contains("systemMessage"))
+                .count();
+            assert_eq!(said, 1, "{sh}: 겹쳐 돈 훅 여덟이 알림을 {said}번 냈다");
+
+            let squat = at.join(format!("squat-{k}"));
+            std::fs::create_dir_all(&squat).unwrap();
+            let mark = pattern
+                .replace("${TMPDIR:-/tmp}", &squat.display().to_string())
+                .replace("${CLAUDE_CODE_SESSION_ID:-$PPID}", "squat")
+                .replace("$c", "126");
+            let mine = squat.join("mine");
+            std::fs::write(&mine, "keep").unwrap();
+            std::os::unix::fs::symlink(&mine, &mark).unwrap();
+            for _ in 0..2 {
+                let out = std::process::Command::new(sh)
+                    .args(["-c", &line])
+                    .env("TMPDIR", &squat)
+                    .env("CLAUDE_CODE_SESSION_ID", "squat")
+                    .output()
+                    .unwrap();
+                assert_eq!(out.status.code(), Some(0), "{sh}: 잡힌 자리가 게이트가 됐다");
+                let said = String::from_utf8_lossy(&out.stdout);
+                assert!(said.contains("systemMessage"), "{sh}: 링크로 잡힌 자리가 알림을 막았다 — {said:?}");
+            }
+            assert_eq!(std::fs::read_to_string(&mine).unwrap(), "keep", "{sh}: 링크 너머의 파일을 건드렸다");
+        }
     }
 
     /// **커밋된 플러그인 트리가 지금의 글과 같다.**

@@ -62,6 +62,13 @@ pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
     // 이스케이프가 한 바이트라도 섞이면 계약 JSON 이 통째로 버려진다.
     anstream::ColorChoice::Never.write_global();
 
+    // **넘길 자리의 옛 쪽지는 맨 먼저 걷는다**(moai-45hf.wqg). 그 이름은 셸의 pid 로 지어져, pid 가
+    // 돌아오면 먼저 죽은 셸이 못 올린 쪽지가 이번 판의 것처럼 읽힌다 — 보드를 안 지은 판이 남의
+    // 표식을 세운다. 이번 판이 쓸 것은 [`once_per_session`] 이 새로 쓴다.
+    if let Some(slip) = handoff() {
+        let _ = std::fs::remove_file(slip);
+    }
+
     let mut raw = String::new();
     if std::io::stdin().read_to_string(&mut raw).is_err() {
         return Ok(Vec::new());
@@ -748,6 +755,18 @@ fn baseline(input: &Input, repo: &Repo) -> Option<usize> {
 ///
 /// 표를 남기는 자리는 시스템 임시 디렉터리다. `.moai/` 에 두면 세션 부스러기가
 /// 저장소에 쌓이고, 그것을 `.gitignore` 로 막는 일이 또 생긴다.
+///
+/// **표식은 글이 건너간 뒤에 선다**(moai-45hf.wqg, 2026-09-29 사용자 결정). 심은 셸 줄은 `moai` 의
+/// stdout 을 `$o` 로 받아 두었다가 `moai` 가 끝난 **뒤에** 흘려보낸다(`skill::command`). 여기서 표식을
+/// 세우면 그 사이에 셸이 죽거나(매니페스트 `timeout` 이 프로세스 그룹째 죽인다) `printf` 가 지면 표식만
+/// 남고, 그 세션은 보드를 영영 못 받는다 — 판정은 다음 도구 호출이 다시 셈하지만 보드는 아니다.
+/// 그래서 셸이 [`HANDOFF`] 로 쪽지 자리를 주면 표식 이름을 거기에 적어 넘기고, 셸이 `printf` 에
+/// 이긴 뒤에 그 이름으로 표식을 세운다.
+///
+/// **쪽지를 못 쓰면 옛 길로 간다** — 표식을 여기서 바로 세운다. 쪽지 자리를 안 주는 셸은 이 판 전에
+/// 심은 줄이고(다시 심을 때까지 그 복사가 돈다), 그 줄에서 표식을 안 세우면 보드가 매 프롬프트에
+/// 실린다. 쪽지 자리를 남이 먼저 잡은 판도 같다: 셸은 제 것이 아닌 쪽지를 안 읽으므로 여기서
+/// 안 세우면 아무도 안 세운다.
 fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() -> Decision) -> Decision {
     let Some(path) = session_file(input, repo, what) else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
@@ -758,10 +777,39 @@ fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() 
         return Decision::Pass;
     }
     let decision = make();
-    if decision != Decision::Pass {
+    if decision != Decision::Pass && !hand_off(&path) {
         let _ = std::fs::write(&path, "");
     }
     decision
+}
+
+/// 심은 셸 줄이 쪽지 자리를 넘기는 환경 변수. 셸 줄(`skill::command`)이 이 이름을 그대로 적는다.
+pub const HANDOFF: &str = "MOAI_HOOK_HANDOFF";
+
+/// 셸이 준 쪽지 자리. 빈 값은 없는 것이다.
+fn handoff() -> Option<PathBuf> {
+    std::env::var_os(HANDOFF).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// 표식 이름을 쪽지에 적는다. 적었으면 참이다.
+///
+/// **새로 만들 때만 적는다**(`create_new`, 곧 `O_CREAT|O_EXCL`) — 그 자리에 이미 무엇이 있으면(남의
+/// 파일, 링크) 거기에 안 쓴다. `run` 이 맨 앞에서 제 옛 쪽지를 걷었으니 남은 것은 못 걷은 것이다.
+///
+/// **줄바꿈이 든 이름은 안 넘긴다** — 셸은 `read -r` 로 첫 줄만 읽으니, 그 이름은 딴 파일을 세운다.
+/// 덜 쓴 쪽지도 같은 까닭으로 걷는다: 잘린 이름이 셸에게는 멀쩡한 이름이다.
+fn hand_off(mark: &Path) -> bool {
+    use std::io::Write as _;
+    let Some(slip) = handoff() else { return false };
+    let Some(name) = mark.to_str().filter(|n| !n.contains('\n')) else { return false };
+    let Ok(mut file) = std::fs::OpenOptions::new().write(true).create_new(true).open(&slip) else {
+        return false;
+    };
+    let wrote = writeln!(file, "{name}").is_ok();
+    if !wrote {
+        let _ = std::fs::remove_file(&slip);
+    }
+    wrote
 }
 
 /// `Stop` 이 견줄 기준선 — 세션이 열릴 때의 경고 수.
