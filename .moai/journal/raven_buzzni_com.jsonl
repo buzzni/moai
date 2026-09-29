@@ -2103,3 +2103,4 @@
 {"ts":"2026-09-29T13:30:26Z","id":"moai-yke5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T13:30:28Z","id":"moai-th3b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T13:30:29Z","id":"moai-ydm7.6ht","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1, 2, 3, 4, 5, 8, 11, 12, 13, 15 and the wording of 7 (3e5bf66c). Handed on: 6 as idea moai-jegn; 7, 9, 10 as idea moai-oicd; 14 and the space half of 4 as idea moai-z7kj. All predate the diff or are rare layouts, outside v0.1.4."}
+{"ts":"2026-09-29T13:30:44Z","id":"moai-ydm7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: all members done; last merge d8046650 (moai-yke5, moai-th3b, review moai-ydm7.6ht). Nothing left in the first column. Follow-ups parked as ideas outside v0.1.4: moai-jegn, moai-oicd, moai-z7kj."}
