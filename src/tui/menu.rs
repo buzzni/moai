@@ -23,7 +23,7 @@
 //! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다. 격자를 어떻게
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
-use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, lookup, name_of_key};
+use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, Off, lookup, name_of_key};
 use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
@@ -84,7 +84,12 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
         // 읽음)처럼 그 층이 이미 세운 글자는 항목이 이긴다. 메뉴 창에 적힌 키가 다른 일을 하는
         // 판이 없다. 토글 층(`SPC v`·`c`·`s`)도 닫는다: 맞춘 뒤 곧 목록으로 가는 것이 바라는 흐름이다.
         // 열을 비우고 **탐색의 표로 다시 먹인다** — `g` 는 거기서 둘째 `g` 를 기다린다.
-        _ if moves(k) => {
+        //
+        // **이 층의 줄이 든 글자는 꺼져 안 섰어도 이동으로 안 샌다**(리뷰 moai-y8v2.366 3번). 한눈
+        // 보기에서 미룸이 꺼진 `SPC v l` 을 손버릇으로 치면 프로젝트가 펼쳐졌다 — 안 선 항목은
+        // 여태처럼 모르는 키다. **조용히 꺼진 이동도 메뉴를 안 닫는다**(4번) — 잎 줄의 `l` 이
+        // 메뉴만 지우고 아무 일도 안 하면 먹통으로 보인다. 까닭을 대는 것(`Off::Why`)은 닫고 알린다.
+        Lookup::Unknown if moves(k, c) => {
             chord.clear();
             chord.feed(BROWSE, k)
         }
@@ -96,9 +101,9 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 /// 펼침·접기). 접두어는 **그 밑이 모두 이동일 때만** 센다: `g`(`gg`)는 들고 `Ctrl-w`(포커스)는
 /// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
 /// 더하면 여기도 따라온다.
-fn moves(k: KeyEvent) -> bool {
+fn moves(k: KeyEvent, c: &Ctx) -> bool {
     match lookup(BROWSE, &[k]) {
-        Lookup::Run(act) => act.moves(),
+        Lookup::Run(act) => act.moves() && act.enabled(c) != Err(Off::Quiet),
         Lookup::Pending => BROWSE.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
     }
@@ -589,7 +594,8 @@ mod tests {
     #[test]
     fn a_move_key_closes_the_menu_and_moves() {
         use super::super::scroll::Move;
-        let c = inside();
+        // 커서가 묶음 줄에 선다 — `l`·→ 이 켜진 자리다. 꺼진 이동은 `a_key_the_layer_holds_or_a_dead_move_leaves_the_menu_open`.
+        let c = Ctx { group: true, ..inside() };
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
         let ctrl = |ch| KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL);
         let cases = [
@@ -666,6 +672,35 @@ mod tests {
         feed(&mut ch, &c, k('s'));
         assert_eq!(feed(&mut ch, &c, k('G')), Some(Browse::Step(Move::Bottom)));
         assert!(!open(&ch));
+    }
+
+    /// **이동으로 안 새는 두 자리**(리뷰 moai-y8v2.366 3·4번) — 둘 다 메뉴가 열린 채 아무 일도 없다.
+    /// 그 층의 줄이 쥔 글자는 항목이 꺼져 안 섰어도 모르는 키고(한눈 보기의 `SPC v l`, 미룸이 꺼졌다),
+    /// 조용히 꺼진 이동(잎 줄의 `l`)은 메뉴를 지우기만 하면 먹통으로 보이니 안 닫는다.
+    #[test]
+    fn a_key_the_layer_holds_or_a_dead_move_leaves_the_menu_open() {
+        // 묶음 줄이라 `l` 자체는 켜졌다 — 막는 것은 그 층의 줄이 쥔 글자라는 것 하나다.
+        let over = Ctx { group: true, ..layer() };
+        assert_eq!(Browse::Expand.enabled(&over), Ok(()), "시험의 전제 — 이 줄에서 펼침이 켜졌다");
+        let mut ch = Chord::default();
+        feed(&mut ch, &over, k(' '));
+        feed(&mut ch, &over, k('v'));
+        assert_eq!(title(ch.held()), "SPC v", "시험의 전제 — 층에서도 SPC v 가 열린다");
+        assert!(!keys_of(&entries(ch.held(), &over, &[])).contains(&"l"), "시험의 전제 — 층에서 미룸이 꺼졌다");
+        assert_eq!(feed(&mut ch, &over, k('l')), None, "꺼진 SPC v l 이 이동으로 샜다");
+        assert_eq!(title(ch.held()), "SPC v", "꺼진 SPC v l 이 메뉴를 닫았다");
+
+        let leaf = Ctx { group: false, ..inside() };
+        assert_eq!(Browse::Expand.enabled(&leaf), Err(Off::Quiet), "시험의 전제 — 잎에서 펼침이 조용히 꺼졌다");
+        let mut ch = Chord::default();
+        feed(&mut ch, &leaf, k(' '));
+        assert_eq!(feed(&mut ch, &leaf, k('l')), None);
+        assert!(open(&ch), "조용히 꺼진 l 이 메뉴만 닫았다");
+        assert_eq!(
+            feed(&mut ch, &leaf, k('j')),
+            Some(Browse::Step(super::super::scroll::Move::LineDown)),
+            "켜진 j 는 여전히 닫고 옮긴다"
+        );
     }
 
     /// **켜진 것만 선다** — 층에서는 거름망·워크트리가 빠지고, 해제는 층의 목록 포커스에서만.
