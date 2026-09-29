@@ -5,18 +5,21 @@
 //! `store`(스냅샷을 읽고 쓴다)·`hook`(툴 부름을 판정한다)·`user_config`·`tz` 가 다 같이
 //! 부를 수 있고, 어느 쪽에 얹어도 나머지가 그 모듈에 딸리게 되는 자리였다(moai-xvyz).
 //!
-//! **자리를 푸는 자는 셋이다**(moai-i7b6) — 통째로 푸는 [`real`], 글자로만 접는 [`lexical`],
-//! 아직 있는 윗자리까지만 푸는 [`real_prefix`]. 넷째로 보이지만 아닌 것이 둘 있고, 둘 다
+//! **자리를 푸는 자는 넷이다**(moai-i7b6, moai-4oab) — 통째로 푸는 [`real`], 글자로만 접는
+//! [`lexical`], 아직 있는 윗자리까지만 푸는 [`real_prefix`], 그리고 **끝 조각의 링크 사슬만**
+//! 따라가는 [`follow_links`]. 앞의 셋은 못 풀면 받은 철자로 떨어진다. 넷째는 쓰는 쪽의 자라 고리를
+//! `Err` 로 낸다 — 못 푼 링크를 받은 철자로 돌려주면 부르는 쪽이 그 자리에 `rename` 해 링크를 보통
+//! 파일로 갈아끼운다([`crate::store::write_atomic`]). 다섯째로 보이지만 아닌 것이 둘 있고, 둘 다
 //! **일부러 제 몸으로 든다.**
 //!
 //! - `crate::scratch`(시험에만 선다) 의 `real` 은 [`real`] 과 같은 글인데, 그 파일을 `tests/cli.rs` 가
 //!   `#[path]` 로 함께 들어 그쪽에서는 `crate` 가 시험 크레이트라 이 모듈이 없다
-//! - [`crate::user_config`] 의 `resolve_config` 는 링크의 사슬을 제 손으로 따라가고,
-//!   가리키는 자리의 **부모가 없으면 일부러 탈로 낸다** — 여기 셋은 못 풀면 받은 철자로
-//!   떨어진다. 묻는 것이 "이 자리가 어디인가" 가 아니라 "여기에 써도 되는가" 라 답이
-//!   갈리는 자리다. 모으려 들면 그 거절이 사라진다
+//! - [`crate::user_config`] 의 `resolve_config` 는 사슬을 [`follow_links`] 로 따라간 뒤, 가리키는
+//!   자리의 **부모가 없으면 일부러 탈로 낸다** — 여기 넷은 그것을 묻지 않는다. 묻는 것이 "이 자리가
+//!   어디인가" 가 아니라 "여기에 써도 되는가" 라 답이 갈리는 자리다. 따라가는 것만 이리로 모았다 —
+//!   거절까지 모으려 들면 그 거절이 사라진다
 //!
-//! [`dir_of`] 는 넷째 푸는 자가 아니다 — 아무것도 안 풀고 철자를 한 조각 뗄 뿐이다. 여기 사는
+//! [`dir_of`] 는 다섯째 푸는 자가 아니다 — 아무것도 안 풀고 철자를 한 조각 뗄 뿐이다. 여기 사는
 //! 것은 그 물음도 "경로 하나를 받아 경로 하나를 낸다" 라서고, 세는 자리에는 안 든다(리뷰).
 
 use std::path::{Path, PathBuf};
@@ -39,8 +42,9 @@ use std::path::{Path, PathBuf};
 /// 견준다.
 ///
 /// **아직 없는 파일을 판정하는 자리는 [`real_prefix`] 를 쓴다** — 이것은 거기서 실패해 준 철자를
-/// 그대로 돌려준다. 셋이 어떻게 갈리고 넷째로 보이는 것이 왜 아닌지는 [모듈 머리글](self) 에 한 번
-/// 적혀 있다. 여기 다시 적었더니 두 벌이 서로 다른 수를 대기 시작했다(리뷰).
+/// 그대로 돌려준다. 푸는 자들이 어떻게 갈리고 그렇게 보이지만 아닌 것이 왜 아닌지는
+/// [모듈 머리글](self) 에 한 번 적혀 있다. 여기 다시 적었더니 두 벌이 서로 다른 수를 대기
+/// 시작했다(리뷰) — 그래서 여기에는 수를 안 적는다. 푸는 자가 늘던 날(moai-4oab) 머리글만 고치면 된다.
 pub(crate) fn real(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
@@ -123,17 +127,17 @@ pub(crate) fn real_prefix(p: &Path) -> PathBuf {
 /// 디렉터리 링크까지 풀어 쓸 자리의 철자를 바꾼다. 여기서 푸는 것은 끝 조각의 링크뿐이다.
 ///
 /// 따라가도 링크가 남으면(고리거나 너무 깊다) `Err` 다. 그 링크를 대상으로 삼아 `rename` 하면
-/// 링크가 보통 파일로 갈아끼워진다 — 이 함수가 막으려는 바로 그 손실이다.
+/// 링크가 보통 파일로 갈아끼워진다 — 이 함수가 막으려는 바로 그 손실이다. 깊이의 끝은 마흔 번이다 —
+/// 리눅스가 경로 하나를 풀며 따라가는 링크 수(`MAXSYMLINKS`)와 같아, 커널이 푸는 사슬은 여기서도 풀린다.
 pub(crate) fn follow_links(path: &Path) -> std::io::Result<PathBuf> {
     let mut at = path.to_path_buf();
-    for _ in 0..40 {
+    // 마흔 번 따라간 자리가 아직도 링크면(마흔한 번째 읽기가 되면) 사슬이 너무 길다 — 묻는 것은
+    // 끝까지 `read_link` 하나다.
+    for _ in 0..=40 {
         let Ok(to) = std::fs::read_link(&at) else { return Ok(at) };
         at = dir_of(&at).join(to);
     }
-    match std::fs::symlink_metadata(&at) {
-        Ok(m) if m.file_type().is_symlink() => Err(std::io::Error::other("too many levels of symbolic links")),
-        _ => Ok(at),
-    }
+    Err(std::io::Error::other("too many levels of symbolic links"))
 }
 
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
@@ -200,6 +204,42 @@ mod tests {
         // cwd 에 선 기계에서 조상이 풀려 답이 뒤집힌다 — 시험이 도는 자리는 아무도 안 정한다.
         let missing = PathBuf::from(s.path().file_name().expect("자리에 이름이 있다")).join("x");
         assert_eq!(real_prefix(&missing), missing);
+    }
+
+    /// **끝 조각의 링크 사슬을 끝까지 따라가고, 거기서 멈춘다**(moai-4oab). 상대 대상은 링크가 든
+    /// 자리를 기준으로 풀고 절대 대상은 그대로 서며, 끝의 파일은 없어도 된다. 링크 마흔 개짜리
+    /// 사슬까지는 따라가고, 그보다 긴 사슬과 고리는 `Err` 다 — 받은 철자로 떨어지면 부르는 쪽
+    /// (`store::write_atomic`)이 그 링크에 `rename` 해 보통 파일로 갈아끼운다. **그 경계는 여기서만
+    /// 시험한다** — 쓰는 쪽의 시험은 링크 두 개짜리 사슬만 써서, 끝을 `0..2` 로 줄여도 푸르다(리뷰).
+    #[cfg(unix)]
+    #[test]
+    fn links_are_followed_to_the_end_of_the_chain_and_no_further() {
+        use std::os::unix::fs::symlink;
+        let s = Scratch::new("path-follow-links");
+        std::fs::write(s.join("end"), "").unwrap();
+        assert_eq!(follow_links(&s.join("end")).unwrap(), s.join("end"), "링크가 아닌 자리의 철자를 바꿨다");
+        std::fs::create_dir(s.join("sub")).unwrap();
+        symlink("../end", s.join("sub/up")).unwrap();
+        assert_eq!(
+            follow_links(&s.join("sub/up")).unwrap(),
+            s.join("sub/../end"),
+            "상대 대상을 링크 자리 기준으로 안 풀었다"
+        );
+        symlink(s.join("end"), s.join("abs")).unwrap();
+        assert_eq!(follow_links(&s.join("abs")).unwrap(), s.join("end"));
+        symlink("later", s.join("dangling")).unwrap();
+        assert_eq!(follow_links(&s.join("dangling")).unwrap(), s.join("later"), "없는 끝을 못 가리켰다");
+
+        // `l0 -> l1 -> … -> l40 -> end` — 지나는 링크가 `l1` 에서는 마흔 개, `l0` 에서는 마흔한 개다.
+        for n in 0..=40 {
+            let to = if n == 40 { "end".to_string() } else { format!("l{}", n + 1) };
+            symlink(to, s.join(format!("l{n}"))).unwrap();
+        }
+        assert_eq!(follow_links(&s.join("l1")).unwrap(), s.join("end"), "링크 마흔 개짜리 사슬을 끝까지 못 갔다");
+        assert!(follow_links(&s.join("l0")).is_err(), "링크 마흔한 개짜리 사슬을 받았다");
+        symlink("b", s.join("a")).unwrap();
+        symlink("a", s.join("b")).unwrap();
+        assert!(follow_links(&s.join("a")).is_err(), "고리를 받았다");
     }
 
     /// **디렉터리 조각이 없으면 `.` 이지 빈 철자가 아니다.** 빈 철자를 내면 곁에 락을 거는 자리가

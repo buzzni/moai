@@ -1133,6 +1133,10 @@ fn init_can_be_run_again_to_refresh() {
 /// 링크 자체를 갈아끼우던 때는 `AGENTS.md -> CLAUDE.md` 인 저장소의 `init` 이 `AGENTS.md` 를 따로 선
 /// 파일로 만들었고(`CLAUDE.md` 에는 블록이 안 들었다), 링크인 `issues.jsonl` 은 다음 `add` 에 보통
 /// 파일이 되어 가리키던 쪽이 옛 글에 멈췄다.
+///
+/// **두 이름이 한 파일이면 `@AGENTS.md` 를 넣으라고 하지 않는다**(리뷰) — 그 말을 따르면 `CLAUDE.md` 가 저를
+/// 부른다. 링크를 거꾸로 건 `CLAUDE.md -> AGENTS.md` 도 같다. **링크 너머의 자리에는 그 자리의 락이 선다** —
+/// 그 파일을 함께 쓰는 다른 트래커와 서로를 막는 락이다(`store::Repo::far_lock`).
 #[cfg(unix)]
 #[test]
 fn symlinked_agents_md_and_issue_file_stay_links() {
@@ -1142,11 +1146,12 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     std::fs::write(root.join("CLAUDE.md"), "# 사람의 글\n").unwrap();
     std::os::unix::fs::symlink("CLAUDE.md", root.join("AGENTS.md")).unwrap();
 
-    ok(root, &["init", "argos"]);
+    let said = ok(root, &["init", "argos"]);
     assert!(is_link(&root.join("AGENTS.md")), "init 이 AGENTS.md 링크를 보통 파일로 갈아끼웠다");
     let claude = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
     assert!(claude.starts_with("# 사람의 글\n"), "사람의 글을 잃었다\n{claude}");
     assert!(claude.contains("moai status"), "가리키는 파일에 블록이 안 들었다\n{claude}");
+    assert!(!said.contains("@AGENTS.md"), "한 파일인 CLAUDE.md 에 저를 부르라고 했다\n{said}");
 
     // 트래커를 다른 디렉터리의 파일로 건다 — 상대 링크라 링크가 든 자리에서 잰다.
     std::fs::create_dir(root.join("shared")).unwrap();
@@ -1154,9 +1159,31 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
     let id = add(root, &["링크 너머에 선다"]);
     assert!(is_link(&root.join(".moai/issues.jsonl")), "add 가 issues.jsonl 링크를 보통 파일로 갈아끼웠다");
-    assert!(std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap().contains(&id), "가리키는 파일에 안 썼다");
-    let left: Vec<_> = std::fs::read_dir(root.join("shared")).unwrap().map(|e| e.unwrap().file_name()).collect();
-    assert_eq!(left, vec![std::ffi::OsString::from("issues.jsonl")], "임시 파일이 남았다: {left:?}");
+    assert!(
+        std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap().contains(&id),
+        "가리키는 파일에 안 썼다"
+    );
+    let listed = |d: &str| {
+        let mut v: Vec<String> =
+            std::fs::read_dir(root.join(d)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(listed("shared"), ["issues.jsonl", "lock"], "임시 파일이 남았거나 너머의 락이 없다");
+    assert!(listed(".moai").iter().all(|n| !n.contains(".tmp.")), "임시 파일이 남았다: {:?}", listed(".moai"));
+
+    // 거꾸로 건 링크도 한 파일이다.
+    let back = Scratch::new("init-link-back");
+    std::fs::write(back.path().join("AGENTS.md"), "# 사람의 글\n").unwrap();
+    std::os::unix::fs::symlink("AGENTS.md", back.path().join("CLAUDE.md")).unwrap();
+    let said = ok(back.path(), &["init", "argos"]);
+    assert!(!said.contains("@AGENTS.md"), "CLAUDE.md -> AGENTS.md 에 저를 부르라고 했다\n{said}");
+    assert!(is_link(&back.path().join("CLAUDE.md")), "init 이 CLAUDE.md 링크를 갈아끼웠다");
+    // 두 파일이 따로 서면 안내는 그대로 선다 — 위의 둘이 푸른 것이 안내를 아예 끈 덕이 아니다.
+    let apart = Scratch::new("init-link-apart");
+    std::fs::write(apart.path().join("CLAUDE.md"), "# 사람의 글\n").unwrap();
+    let said = ok(apart.path(), &["init", "argos"]);
+    assert!(said.contains("@AGENTS.md"), "따로 선 CLAUDE.md 에 안내가 안 섰다\n{said}");
 }
 
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.

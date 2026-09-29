@@ -41,6 +41,20 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   21.6ms to 35ms, in a place where half a dozen sessions share one `.moai`. It now builds
   the ground once per snapshot and asks it twice: in a debug build on this repository,
   that part of a close went from 194ms to 101ms.
+- **A write no longer replaces a symlink with a plain file.** Every file moai rewrites goes
+  through a temporary file and a `rename`, and `rename` swaps the link itself, not the file
+  it points to. So in a repository with `AGENTS.md -> CLAUDE.md`, `moai init` turned
+  `AGENTS.md` into a separate file and never put the block into `CLAUDE.md`, and a
+  `.moai/issues.jsonl` linked to another place became a plain file on the next write, leaving
+  the file it pointed to behind. Writes now follow the link and keep it. The temporary file is
+  still made next to the name that was given — inside `.moai/` for the tracker, where it is
+  ignored — and next to the file the link points to only when the two are on different
+  filesystems. A link loop, a link into a directory that is not there, and a link to something
+  that is not a regular file (a device, a socket, a FIFO) are refused with the link named and
+  nothing written. Two trackers whose `issues.jsonl` point at one file also take the lock of
+  the directory that file lives in, so their writes no longer silently undo each other, and
+  `moai init` no longer asks for an `@AGENTS.md` line in a `CLAUDE.md` that is the same file
+  as `AGENTS.md`.
 
 ## [0.1.3] - 2026-09-29
 

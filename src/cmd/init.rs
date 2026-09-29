@@ -1009,9 +1009,16 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         untouched.into_iter().chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, ""))).collect();
     // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
+    //
+    // **두 이름이 한 파일이면 가리킬 것이 없다**(moai-4oab 리뷰). `AGENTS.md -> CLAUDE.md` 면 블록은 이제
+    // 링크 너머의 `CLAUDE.md` 에 들고, 거꾸로 건 `CLAUDE.md -> AGENTS.md` 도 한 파일이다 — 거기에
+    // `@AGENTS.md` 를 넣으라는 말은 그 파일이 저를 부르게 하고, 블록에는 `AGENTS.md` 라는 글이 없어
+    // `init` 마다 다시 선다. 이름이 아니라 푼 자리로 견준다.
+    let claude = root.join("CLAUDE.md");
     let claude_needs_pointer = agents_now.is_some()
-        && root.join("CLAUDE.md").exists()
-        && !std::fs::read_to_string(root.join("CLAUDE.md")).unwrap_or_default().contains("AGENTS.md");
+        && claude.exists()
+        && crate::path::real(&agents_path) != crate::path::real(&claude)
+        && !std::fs::read_to_string(&claude).unwrap_or_default().contains("AGENTS.md");
 
     if ctx.json {
         let mut v = serde_json::json!({
