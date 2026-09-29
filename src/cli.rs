@@ -267,6 +267,15 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
 printf '\\none more line\\n'; } | moai edit <id> -b -")]
     Edit(EditArgs),
     /// Remove
+    #[command(after_help = "  An unreadable line - one `moai show` and `moai status` name but cannot
+  read as an issue - is not reachable by id. Remove it by its line number:
+
+  moai rm --line 812          shows the line, removes nothing
+  moai rm --line 812 --yes    removes it
+
+  Only an unreadable line is removed; a line that reads as an issue is refused
+  (remove that by id). Removing cannot be undone - the raw line goes into the
+  journal's `rm` entry and `--json` hands it back, to be put back by hand.")]
     Rm(RmArgs),
     /// Leave a note on an issue (journal only)
     #[command(after_help = "  moai note moai-4aex 'the parser dies on a BOM'
@@ -1112,8 +1121,17 @@ pub struct ReadArgs {
 
 #[derive(Args, Debug)]
 pub struct RmArgs {
-    #[arg(required = true, value_name = "id")]
+    #[arg(required_unless_present = "line", conflicts_with = "line", value_name = "id")]
     pub ids: Vec<String>,
+    /// Remove the unreadable line at number <n>
+    #[arg(long, value_name = "n")]
+    pub line: Option<usize>,
+    // `requires = "line"` 을 안 거는 까닭은 `add --dry-run` 과 같다(moai-yhb1) — `ids` 가 `line` 과
+    // `conflicts` 라 clap 이 그 `requires` 를 조용히 건너뛰어, `moai rm <id> --yes` 가 말없이 지웠다
+    // (재 봤다). 거절은 `rm::run` 이 제 코드로 한다.
+    /// With --line: remove it. Without, it is only shown
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// git 이 주는 자리 셋과, 사람이 치는 `--install`.

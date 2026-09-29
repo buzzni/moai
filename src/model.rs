@@ -726,6 +726,19 @@ impl JournalEntry {
     pub fn removed(id: &str, title: &str, at: &str, by: &Actor) -> JournalEntry {
         JournalEntry { title: Some(title.to_string()), ..Self::base("rm", id, at, by) }
     }
+    /// **못 읽는 줄을 지웠다**(`moai rm --line`, moai-mo9v.3yp). 적는 갈래는 여전히 `rm` 하나다 —
+    /// 저널에 적는 것은 넷뿐이라는 결정을 이 줄 때문에 넓히지 않는다.
+    ///
+    /// 그 줄의 원문을 `note` 에 싣는다. 되돌릴 수 없는 지우기라, 저널이 그 바이트를 도구 밖에서라도
+    /// 되살릴 마지막 자리다. 상한을 넘는 줄은 [`fit_bytes`] 로 줄여 싣는다 — 도구가 짓는 글이라
+    /// 거절할 사람이 없고, 거절하면 그 큰 줄은 도구 안에서 영영 못 치운다. 온전한 원문은 `--json`
+    /// 과 git 이력에 있다. id 를 못 읽은 줄은 `id` 가 빈 글이다 — 어느 이력에도 안 걸리지만 파일에는 남는다.
+    pub fn removed_line(id: Option<&str>, raw: &str, at: &str, by: &Actor) -> JournalEntry {
+        JournalEntry {
+            note: Some(fit_bytes(raw, MAX_TEXT_BYTES).into_owned()),
+            ..Self::base("rm", id.unwrap_or(""), at, by)
+        }
+    }
 }
 
 // ── 일한 것 ────────────────────────────────────────────────────────────

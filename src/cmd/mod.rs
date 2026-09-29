@@ -342,6 +342,8 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     if errors.len() > 5 {
         eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(errors.len() - 5).to_string())]));
     }
+    // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp).
+    eprintln!("{}", say(lang, "warn.unreadable_rm"));
 }
 
 pub fn run(mut cli: Cli) -> R<Vec<String>> {

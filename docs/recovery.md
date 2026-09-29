@@ -81,6 +81,19 @@ from the last commit where it was whole:
 git checkout <commit> -- .moai/issues.jsonl
 ```
 
+When the line is not worth keeping — most often the broken twin of an issue
+that also stands whole, left by a hand-resolved merge — remove it inside the
+tool. `moai show` names it by line number:
+
+```sh
+moai rm --line 812          # shows the line, removes nothing
+moai rm --line 812 --yes    # removes it
+```
+
+Only an unreadable line is removed that way; a line that reads as an issue is
+refused and named, so remove that one by id. The raw line goes into the
+journal's `rm` entry and `--json` hands it back.
+
 Reading a broken file still works for the lines that parse, so `moai show` and
 `moai ready` keep answering while you fix it.
 

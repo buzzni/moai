@@ -9811,6 +9811,77 @@ fn status_names_an_unreadable_line_that_reuses_a_live_id() {
     assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
 }
 
+/// **산 줄의 깨진 쌍둥이를 도구 안에서 치운다**(moai-mo9v.3yp, 2026-09-29 사용자 결정).
+/// `--yes` 가 없으면 보여 주기만 하고, 있으면 그 줄만 지우고 산 줄은 남긴다. 지운 원문은 저널의
+/// `rm` 줄과 `--json` 에 남는다 — 되돌릴 수 없는 지우기의 마지막 자리다.
+#[test]
+fn rm_line_removes_only_the_broken_twin() {
+    let s = init("rmline");
+    let id = add(s.path(), &["산 줄"]);
+    let twin = format!("{{\"id\":\"{id}\",\"title\":\"잘");
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}{twin}\n", issues(s.path()))).unwrap();
+    let before = issues(s.path());
+    let n = before.lines().position(|l| l == twin).unwrap() + 1;
+
+    // 묻기만 한다 — 파일도 저널도 그대로다.
+    let asked = ok(s.path(), &["rm", "--line", &n.to_string(), "--json"]);
+    assert!(asked.contains("\"removed\":false") && asked.contains(&format!("\"id\":\"{id}\"")), "{asked}");
+    assert_eq!(issues(s.path()), before, "--yes 없이 지웠다");
+    let shown = ok(s.path(), &["rm", "--line", &n.to_string()]);
+    assert!(shown.contains(&twin) && shown.contains("--yes"), "원문과 다음 걸음을 안 보였다\n{shown}");
+
+    let done = ok(s.path(), &["rm", "--line", &n.to_string(), "--yes", "--json"]);
+    assert!(done.contains("\"removed\":true"), "{done}");
+    let after = issues(s.path());
+    assert!(!after.contains(&twin), "쌍둥이가 남았다\n{after}");
+    assert!(after.contains("\"title\":\"산 줄\""), "산 줄까지 지웠다\n{after}");
+    // 산 줄만 남았으니 `status` 는 이제 0 으로 끝난다 — 치명으로 세던 두 경고가 함께 걷혔다.
+    assert!(moai(s.path(), &["status"]).status.success(), "치운 뒤에도 깨진 데이터로 섰다");
+    let j = journal(s.path());
+    assert!(j.lines().any(|l| l.contains("\"kind\":\"rm\"") && l.contains("잘")), "저널에 원문을 안 실었다\n{j}");
+    // 산 줄은 여전히 제 id 로 읽힌다.
+    ok(s.path(), &["show", &id]);
+}
+
+/// **읽히는 줄은 번호로 안 지운다.** 보여 준 뒤 옆 세션의 쓰기로 줄이 밀리면 번호가 산 이슈를
+/// 가리킬 수 있다 — 거절하고 그 줄을 지울 id 를 댄다. 없는 번호도 거절한다.
+#[test]
+fn rm_line_refuses_a_readable_or_missing_line() {
+    let s = init("rmlinelive");
+    let id = add(s.path(), &["산 줄"]);
+    let before = issues(s.path());
+
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes"]);
+    assert!(!out.status.success(), "읽히는 줄을 번호로 지웠다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("moai rm {id}")), "지울 길을 안 댔다\n{err}");
+    let out = moai(s.path(), &["rm", "--line", "99"]);
+    assert!(!out.status.success(), "없는 줄을 보였다");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+
+    // id 와 `--line` 은 함께 못 준다. `--yes` 는 `--line` 에만 붙는다.
+    assert!(!moai(s.path(), &["rm", &id, "--line", "1"]).status.success());
+    assert!(!moai(s.path(), &["rm", &id, "--yes"]).status.success());
+    assert_eq!(issues(s.path()), before);
+}
+
+/// **id 조차 못 읽는 줄도 지운다** — 그런 줄은 어떤 id 로도 못 부른다. 저널의 `id` 는 빈 글이다.
+#[test]
+fn rm_line_removes_a_line_with_no_id() {
+    let s = init("rmlinenoid");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("이건 JSON 도 아니다\n{}", issues(s.path()))).unwrap();
+    let hint = moai(s.path(), &["show"]);
+    assert!(String::from_utf8_lossy(&hint.stderr).contains("moai rm --line"), "지우는 길을 안 댔다");
+
+    let done = ok(s.path(), &["rm", "--line", "1", "--yes", "--json"]);
+    assert!(done.contains("\"id\":null"), "없는 id 를 지어냈다\n{done}");
+    assert!(!issues(s.path()).contains("JSON 도 아니다"));
+    assert!(moai(s.path(), &["status"]).status.success());
+}
+
 /// **가려진 줄의 소속은 표면 어디서도 같은 답이다**(moai-53s2). 소속 지도는 id 로 짠 것이라
 /// 종류가 다른 쌍둥이에게 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을 `(길 잃음)` 에 두고
 /// `show <에픽>` 은 `0/0` 이라 말하며 `-e <에픽>` 은 안 고른다 — `show --json` 목록만 그 줄에

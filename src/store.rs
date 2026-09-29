@@ -644,6 +644,19 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
+        self.with_write_lines(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved))
+    }
+
+    /// [`Repo::with_write`] 와 같은 길인데 **못 읽는 줄도 닫는 함수에 넘긴다**(moai-mo9v.3yp).
+    ///
+    /// 못 읽는 줄을 지우는 길이 `moai rm --line` 하나라 이 문을 따로 연다. 둘째 쓰기 경로를 두지
+    /// 않으려고 몸통은 하나다 — 락 안에서 다시 읽은 그 줄들이 넘어가고, 닫는 함수가 남긴 것만
+    /// 파일 끝에 원문 그대로 되쓴다. 여느 명령이 그 줄들을 만질 까닭은 없으니 `with_write` 는
+    /// 그것을 안 보인다: 보이면 못 읽는 줄을 들고 다시 쓴다는 약속을 명령마다 지켜야 한다.
+    pub fn with_write_lines<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+    {
         let (out, note) = match self.write_locked(&lang, f) {
             Ok(v) => v,
             Err(Stop::Failed(e)) => return Err(e),
@@ -663,7 +676,7 @@ impl Repo {
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
     fn write_locked<T, F>(&self, lang: &impl Fn() -> crate::i18n::Lang, f: F) -> Result<(T, Option<Trouble>), Stop>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
         // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
         // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
@@ -683,9 +696,12 @@ impl Repo {
         // 줄*에 대한 것이지 파일 전체에 대한 것이 아니다.
         //
         // 잃지도 않고 막지도 않는 대신 **시끄럽다**: `moai status` 가
-        // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다.
-        let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
-        let before = render_issues(&load.issues, &opaque);
+        // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다. 사람이 그 줄을 치우는 길은
+        // `moai rm --line` 하나고, 그 명령만 [`Repo::with_write_lines`] 로 이 줄들을 받는다.
+        let before = {
+            let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
+            render_issues(&load.issues, &opaque)
+        };
 
         // 정규화한 원본을 들고 있다가 **바뀐 줄만** 검사한다.
         //
@@ -700,7 +716,9 @@ impl Repo {
 
         let reserved = load.reserved_ids();
         let mut issues = load.issues;
-        let (entries, out) = f(&mut issues, &self.config, &reserved)?;
+        let mut unread = load.errors;
+        let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
+        let opaque: Vec<&str> = unread.iter().map(|e| e.text.as_str()).collect();
 
         // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
         // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
