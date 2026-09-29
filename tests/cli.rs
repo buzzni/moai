@@ -1219,7 +1219,15 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     // **링크인 딸린 파일은 git 이 안 읽는다**(moai-yke5) — 손으로 더할 줄을 대면 사람이 그 줄을 링크 너머
     // (`~/.bashrc`)에 적는다. 링크라고 말하고 보통 파일로 바꾸라고만 한다. 알림도 `moai init` 이 못 걷는
     // "빠진 줄" 이 아니라 링크라는 알림이다.
-    assert!(said.contains("심볼릭 링크") && !said.contains(".moai/*.tmp.*"), "링크라고 안 했거나 링크에 적을 줄을 댔다\n{said}");
+    assert!(
+        said.contains("심볼릭 링크") && !said.contains(".moai/*.tmp.*"),
+        "링크라고 안 했거나 링크에 적을 줄을 댔다\n{said}"
+    );
+    // **밖을 가리키는 링크에는 옮겨 담으라고 안 한다**(리뷰) — 그 말을 따르면 `~/.bashrc` 가 커밋에 실린다.
+    assert!(
+        said.contains("체크아웃 밖") && !said.contains("가리키는 내용을 담은"),
+        "밖의 파일을 옮겨 담으라고 했다\n{said}"
+    );
     let status = ok(root, &["status", "--json"]);
     assert!(status.contains("dotfile_linked") && !status.contains("gitignore_rules"), "{status}");
     let check = ok(root, &["init", "--check", "--json"]);
