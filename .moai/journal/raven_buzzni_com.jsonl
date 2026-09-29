@@ -1888,3 +1888,4 @@
 {"ts":"2026-09-29T04:12:57Z","id":"moai-5thc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Merged 3768bad1: scalars keep their quote style, a double-quoted model pushes double quotes, invisible characters are escaped under double quotes."}
 {"ts":"2026-09-29T04:13:17Z","id":"moai-5thc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing — merged in 3768bad1 and closed with its review moai-5thc.ql2; no follow-up handed on"}
 {"ts":"2026-09-29T04:15:15Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T04:15:47Z","id":"moai-rgp9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
