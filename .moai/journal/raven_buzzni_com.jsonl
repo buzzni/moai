@@ -1952,3 +1952,17 @@
 {"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.t8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.2mo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.665","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:40:58Z","id":"moai-ydm7.7wq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 릴리스 빌드로 mv … done 시간을 재고, develop 을 받은 뒤 에픽 끝 리뷰(max)를 돌린다"}
+{"ts":"2026-09-29T06:46:11Z","id":"moai-ydm7.7wq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"측정(dev 프로필, 이 저장소 2,042줄, 30회 평균): 새 freed 101ms, 따로 부르던 길(unblocked+closable+next_of) 194ms, Picking 한 벌 40ms. 릴리스 mv … done 의 벽시계는 139ms 대 138ms 로, 잡음에 묻혀 안 갈렸다"}
+{"ts":"2026-09-29T06:46:35Z","id":"moai-ydm7.cs1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 쓰기 경로의 락과 임시 파일 에픽 끝"}
+{"ts":"2026-09-29T06:46:40Z","id":"moai-ydm7.cs1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:50:25Z","id":"moai-8rmw.665","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"새 판 알림 자리는 배너로 정했다(2026-09-29 사용자 결정). 판 줄에는 자리가 없고 탐색기에는 `?` 도움말 창이 없다. 급하지 않은 줄(`!` 없음)로 배너 맨 끝에 선다. `moai tui --help` 에는 명령 줄을 싣지 않았다 — 도움말 낱말에서 키를 뽑는 시험이 `\\` 와 `|` 도 키로 읽는다"}
+{"ts":"2026-09-29T06:50:26Z","id":"moai-8rmw.9cj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — install.sh 판 올리기와 새 판 배너"}
+{"ts":"2026-09-29T06:50:30Z","id":"moai-8rmw.9cj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:50:44Z","id":"moai-8rmw.lj5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T06:50:44Z","id":"moai-8rmw.t8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T06:50:45Z","id":"moai-8rmw.2mo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T06:50:45Z","id":"moai-8rmw.665","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T08:02:56Z","id":"moai-4oab","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"write_atomic 이 심볼릭 링크인 대상을 일반 파일로 바꿔 끼운다"}
+{"ts":"2026-09-29T08:03:09Z","id":"moai-oaaq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"has_open_child 가 락 안에서 후보마다 목록 전체를 훑는다"}
+{"ts":"2026-09-29T08:03:11Z","id":"moai-dq4l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv 가 freed 와 read_of 를 락 안에서 센다"}
