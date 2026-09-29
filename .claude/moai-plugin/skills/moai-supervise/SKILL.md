@@ -101,20 +101,21 @@ the script in 2 does not print as a `worktree` row.
       Work running alongside: <other work> — do not touch those files (4-3)
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
       Before you commit or merge in the root, **only check** that the root still stands on that
-      branch — come out with ExitWorktree(keep) first and run `git symbolic-ref -q HEAD` **in the root**.
-      If it is not `refs/heads/<base branch>` (detached, or someone switched the branch), do not run the
-      merge: tell the supervisor and stop. A merge that lands on the wrong HEAD leaves no reference at all
-      once `branch -d` runs.
-          **Do not ask this from inside the worktree.** A `git -C <root> …` call is refused there —
-          see the git shapes below
+      branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+      (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+      stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+          **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+          it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+          refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+          left in that worktree go back in with EnterWorktree(path)
       **Git in a worktree session: one plain command per call.** The harness reads each Bash call
       and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
       intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
       refusals in all.
       - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
         compound commands (`&&`, `;`, `||`)
-      - Commit messages go in a file: write it with Write, then `git commit -F <that file>`. A heredoc
-        is a refusal shape (205 cases)
+      - `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+        When the message runs past one line, write it with Write and use `git commit -F <that file>`
       - Several git steps in a row: put them in a script file and call it as a bare
         `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
         refused had `&&`, a pipe or `$PWD` after them
@@ -135,8 +136,10 @@ the script in 2 does not print as a `worktree` row.
       - **If the root is not the top of the repository** (a subdirectory project in a
         monorepo), go into the worktree and then move to the same subdirectory inside it and
         work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-        hook does not count edits under `.claude/`
-          cd "$(git -C <root> rev-parse --show-prefix)"
+        hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+        by the supervisor; with no `<subdir>` in the header, the root is the top and this step
+        does not exist
+          cd <subdir>
       - The member's column is already picked up — do not pick it up again
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
@@ -342,7 +345,7 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
 `<milestone>` is the release that idea already stands under **and that is still alive**,
@@ -380,20 +383,21 @@ worker reads in its own window in 9-1.
     Work running alongside: <other work> — do not touch those files (4-3)
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
     Before you commit or merge in the root, **only check** that the root still stands on that
-    branch — come out with ExitWorktree(keep) first and run `git symbolic-ref -q HEAD` **in the root**.
-    If it is not `refs/heads/<base branch>` (detached, or someone switched the branch), do not run the
-    merge: tell the supervisor and stop. A merge that lands on the wrong HEAD leaves no reference at all
-    once `branch -d` runs.
-        **Do not ask this from inside the worktree.** A `git -C <root> …` call is refused there —
-        see the git shapes below
+    branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+    (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+    stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+        **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+        it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+        refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+        left in that worktree go back in with EnterWorktree(path)
     **Git in a worktree session: one plain command per call.** The harness reads each Bash call
     and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
     intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
     refusals in all.
     - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
       compound commands (`&&`, `;`, `||`)
-    - Commit messages go in a file: write it with Write, then `git commit -F <that file>`. A heredoc
-      is a refusal shape (205 cases)
+    - `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+      When the message runs past one line, write it with Write and use `git commit -F <that file>`
     - Several git steps in a row: put them in a script file and call it as a bare
       `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
       refused had `&&`, a pipe or `$PWD` after them
@@ -445,8 +449,10 @@ worker reads in its own window in 9-1.
        **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
        worktree stands for the whole repository, so once inside, move to the same subdirectory in
        it and work there — standing at the worktree top, `moai` walks up and finds the root's
-       `.moai` to write, and the hook does not count edits under `.claude/`
-         cd "$(git -C <root> rev-parse --show-prefix)"
+       `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+       relative path, filled in by the supervisor; if the header carries no `<subdir>`, the root
+       **is** the top and this step does not exist
+         cd <subdir>
     4. Do not guess a design decision that is not in the notes — ask with AskUserQuestion; a
        person is watching the worker's window
     4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
