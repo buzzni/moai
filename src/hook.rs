@@ -431,7 +431,7 @@ fn handed_text(words: &[String]) -> Option<Handed> {
                 args: Vec::new(),
                 // **`-execdir` 의 시작 자리가 모두 절대 경로면 그 자리들을 싣는다**(moai-xk0q) —
                 // [`wrapped`] 가 그 줄에 자리를 잃었다고 안 적은 까닭이 이것이다([`find_under`]).
-                under: find_under(tail),
+                under: find_under(tail).unwrap_or_default(),
             });
         }
         // **입력이 뒤에 붙는 꼴**([`Text::Feed`], moai-gxwh) — `parallel <명령…> ::: <입력…>` 이다.
@@ -706,8 +706,9 @@ struct Handed {
     /// `$0`=NAME 이고, `su -c '<글>' <사용자> A B` 는 su 가 사용자를 제 것으로 먹어 `$0`=A 다.
     /// `su <사용자> -c '<글>' A B` 도 같은 답이다.
     args: Vec<String>,
-    /// **그 글이 도는 절대 자리들**(moai-xk0q) — `find /a /b -execdir <명령> \;` 의 `/a`·`/b` 다
-    /// ([`find_under`]). 그 글의 토막마다 [`Seg::under`] 로 실린다. 다른 꼴에서는 늘 비었다.
+    /// **그 글이 도는 절대 자리들**(moai-xk0q) — `find /a/b -execdir <명령> \;` 의 `/a/b` 와, 깊이
+    /// 0 에서 시작 자리 자신이 걸릴 때 도는 그 윗자리 `/a` 다([`find_under`]). 그 글의 토막마다
+    /// [`Seg::under`] 로 실린다. 다른 꼴에서는 늘 비었다.
     under: Vec<String>,
 }
 
@@ -2806,6 +2807,10 @@ struct FindSpots {
     execs: Vec<ExecSpot>,
     /// find 이 만드는 파일을 든 낱말의 자리([`FIND_PRINTS`]).
     prints: Vec<usize>,
+    /// 술어 자리에 선 `-mindepth`·`-maxdepth` 의 값 — 수로 못 읽으면 안 댄 것으로 둔다
+    /// ([`find_under`] 가 시작 자리 자신이 걸리는가를 이것으로 잰다).
+    min_depth: Option<u32>,
+    max_depth: Option<u32>,
 }
 
 /// **술어 자리에 선 것들을 한 번에 걷는다**(moai-fg47 가 `-exec` 무리를, moai-ati3 가
@@ -2821,7 +2826,7 @@ struct FindSpots {
 /// **걷는 자와 자리를 가리는 자가 한 표를 본다** — 두 벌로 두면 술어를 하나 더하는 날 한쪽에만
 /// 들어, 걷어는 오는데 자리는 안 가리는 줄이 선다.
 fn find_spots(words: &[String]) -> FindSpots {
-    let mut out = FindSpots { execs: Vec::new(), prints: Vec::new() };
+    let mut out = FindSpots { execs: Vec::new(), prints: Vec::new(), min_depth: None, max_depth: None };
     let mut at = 0;
     while at < words.len() {
         let word = words[at].as_str();
@@ -2843,6 +2848,12 @@ fn find_spots(words: &[String]) -> FindSpots {
             // 거절해 그 파일을 만들지 않으니, 없는 쓰기를 지어내 **잘못 막던** 자리다.
             if FIND_PRINTS.contains(&word) && at + eats < words.len() {
                 out.prints.push(at + 1);
+            }
+            let depth = || words.get(at + 1).and_then(|v| v.parse().ok());
+            match word {
+                "-mindepth" => out.min_depth = depth(),
+                "-maxdepth" => out.max_depth = depth(),
+                _ => {}
             }
             at += 1 + eats;
             continue;
@@ -4202,7 +4213,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         //
         // **시작 자리를 안 대면 find 는 `.` 에서 찾는다** — 그때는 여기 밑이다. 빈 목록에
         // `all` 을 물으면 참이라, 비었는가를 먼저 묻는다.
-        *spot |= find_away(rest).is_some() && find_under(rest).is_empty();
+        *spot |= find_under(rest).is_some_and(|u| u.is_empty());
         return Some(Wrapped::Hands { at: 0, glued: None, text: Text::Find, args: Vec::new() });
     }
     let w = WRAPPERS.iter().find(|w| w.name == head)?;
@@ -5088,33 +5099,48 @@ fn away_from_here(d: &str) -> bool {
     d.starts_with('/') || d.starts_with('~') || d.split('/').any(|p| p == "..")
 }
 
-/// **find 의 술어가 모두 딴 자리에서 도는데 그 시작 자리도 모두 여기 밑이 아닌가** — 그렇다면 그
-/// 시작 자리들을 낸다([`wrapped`] 의 find 갈래가 쓰는 물음이다).
+/// **find 의 술어가 모두 딴 자리에서 도는데 그 시작 자리도 모두 여기 밑이 아닌가** — 아니면
+/// `None` 이다. 그렇다면 그 글의 상대 경로가 설 절대 자리들을 낸다(moai-xk0q). 시작 자리가
+/// 하나라도 `~`·`..` 이면 빈 목록이고, 그때 [`wrapped`] 가 자리를 잃었다고 적는다.
 ///
 /// **술어 자리에 선 것만 센다**([`find_spots`], moai-fg47) — 낱말만 견주던 판은 값으로 선 술어
 /// 이름 하나(`-name -execdir`)로 자리 판정이 뒤집혔다(리뷰 moai-514e.doy 2번).
 ///
 /// **시작 자리를 안 대면 find 는 `.` 에서 찾는다** — 그때는 여기 밑이다. 빈 목록에 `all` 을
 /// 물으면 참이라, 비었는가를 먼저 묻는다.
-fn find_away(rest: &[String]) -> Option<Vec<&str>> {
-    let spots = find_spots(rest).execs;
-    if spots.is_empty() || !spots.iter().all(|s| s.away) {
+///
+/// **시작 자리 자신이 걸리면 그 명령은 시작 자리의 윗자리에서 돈다** — `-execdir` 은 찾은 것이
+/// **든** 디렉터리에서 돌고, 시작 자리는 깊이 0 에서 제 자신이 걸린다. 2026-09-29 에 쟀다:
+/// `find /x/r/target -execdir pwd \;` 는 `/x/r` 를 찍는다. 시작 자리만 싣던 판은
+/// `find /repo/target -execdir tee src/x.rs \;` 가 여기의 `src/x.rs` 를 쓰는데 `target` 밑으로
+/// 읽어 넘겼고, `find /repo -maxdepth 0 -execdir tee x \;` 는 저장소 밖에 쓰는데 막았다.
+/// 그래서 `-mindepth` 가 0 이면 윗자리를, `-maxdepth` 가 0 이 아니면 시작 자리를 싣는다.
+///
+/// **두 자가 한 물음을 본다** — [`wrapped`] 는 빈 목록으로 자리를 잃었다고 적고, [`handed_text`]
+/// 는 이것을 글에 싣는다. 한쪽만 고치면 상대 경로를 버리지도 바꾸지도 않는 줄이 선다.
+fn find_under(rest: &[String]) -> Option<Vec<String>> {
+    let spots = find_spots(rest);
+    if spots.execs.is_empty() || !spots.execs.iter().all(|s| s.away) {
         return None;
     }
     let starts = find_starts(rest);
-    (!starts.is_empty() && starts.iter().all(|d| away_from_here(d))).then_some(starts)
-}
-
-/// **그 글의 상대 경로가 설 절대 자리들**(moai-xk0q) — [`find_away`] 의 시작 자리가 **모두** 절대
-/// 경로일 때만 낸다. 하나라도 `~`·`..` 이면 비어 있고, 그때 [`wrapped`] 가 자리를 잃었다고 적는다.
-///
-/// **두 자가 한 물음을 본다** — [`wrapped`] 는 비었는가로 자리를 잃었다고 적고, [`handed_text`]
-/// 는 이것을 글에 싣는다. 한쪽만 고치면 상대 경로를 버리지도 바꾸지도 않는 줄이 선다.
-fn find_under(rest: &[String]) -> Vec<String> {
-    match find_away(rest) {
-        Some(starts) if starts.iter().all(|d| d.starts_with('/')) => starts.into_iter().map(str::to_owned).collect(),
-        _ => Vec::new(),
+    if starts.is_empty() || !starts.iter().all(|d| away_from_here(d)) {
+        return None;
     }
+    if !starts.iter().all(|d| d.starts_with('/')) {
+        return Some(Vec::new());
+    }
+    let (above, own) = (spots.min_depth.unwrap_or(0) == 0, spots.max_depth != Some(0));
+    let mut dirs: Vec<String> = Vec::new();
+    for d in starts.iter().map(Path::new) {
+        for at in [above.then(|| d.parent().unwrap_or(d)), own.then_some(d)].into_iter().flatten() {
+            let at = at.to_string_lossy().into_owned();
+            if !dirs.contains(&at) {
+                dirs.push(at);
+            }
+        }
+    }
+    Some(dirs)
 }
 
 /// 이 토막이 `moai` 를 부른다면, 그 뒤의 인자들.
@@ -6972,8 +6998,18 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             //
             // **시작 자리마다 하나씩 낸다** — 어느 쪽에서 파일이 걸릴지 모르니 하나라도 여기 밑이면
             // 막는다.
+            //
+            // **이은 경로도 [`unknowable`] 을 지난다** — 시작 자리의 `$VAR`·글롭은 위의 물음이 상대
+            // 경로만 보아 못 걸렀다. 모르는 자리는 지어내지 않는다(`tee /repo/$X/y` 와 같은 자다).
+            //
+            // **시작 자리가 저장소의 윗자리면 여기서 못 잰다** — `find / -execdir tee x \;` 는 저장소
+            // 안에도 쓰는데 `/x` 로 읽힌다. 옛 판도 버리던 자리라 새로 난 구멍은 아니다.
             if relative && !seg.under.is_empty() {
-                out.extend(seg.under.iter().map(|d| Path::new(d).join(&path).to_string_lossy().into_owned()));
+                out.extend(
+                    (seg.under.iter())
+                        .map(|d| Path::new(d).join(&path).to_string_lossy().into_owned())
+                        .filter(|p| !unknowable(p)),
+                );
                 continue;
             }
             out.push(path);
@@ -10014,16 +10050,28 @@ mod tests {
             // 적으니, 옛 판이 함께 버리던 그 파일도 여기 것으로 본다.
             "find /repo/src -execdir true \\; -fprint src/w.rs",
             "find /tmp -execdir true \\; -fprint src/w.rs",
+            // **시작 자리 자신은 그 윗자리에서 돈다**([`find_under`]) — `target` 은 안 세지만 깊이 0 의
+            // `tee` 는 `/repo` 에서 돌아 여기의 `src/x.rs` 를 쓴다.
+            "find /repo/target -execdir tee src/x.rs \\;",
+            "find /repo/target -maxdepth 0 -execdir tee x \\;",
+            // 안쪽 셸 글에 선 find 도 제 자리를 잰다 — 안쪽 것이 이 저장소 밑이다.
+            "find /tmp -execdir sh -c 'find /repo/src -execdir tee x \\;' \\;",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
             assert!(matches!(got, Decision::Deny(_)), "이 저장소 밑 절대 자리의 쓰기를 버렸다 — {cmd}\n{got:?}");
         }
         for cmd in [
             // 이 저장소 밑이라도 세지 않는 자리는 세지 않는다 — 재는 것은 뿌리를 아는 자다.
-            "find /repo/target -execdir tee x \\;",
+            // 깊이 0 을 걸러야 시작 자리의 윗자리(`/repo`)에서 안 돈다([`find_under`]).
+            "find /repo/target -mindepth 1 -execdir tee x \\;",
+            // `-maxdepth 0` 이면 시작 자리 자신만 걸려 그 윗자리에서만 돈다 — 저장소 밖이다.
+            "find /repo -maxdepth 0 -execdir tee x \\;",
+            // 시작 자리의 `$VAR`·글롭은 모르는 자리다([`unknowable`]).
+            "find /repo/$D -mindepth 1 -execdir tee x \\;",
             "find /tmp -execdir sh -c 'echo a > src/x.rs' \\;",
             // **가장 안쪽 find 이 이긴다** — 안쪽 `tee` 는 /tmp 밑에서 돈다.
             "find /repo/src -execdir find /tmp -execdir tee x \\; \\;",
+            "find /repo/src -execdir sh -c 'find /tmp -execdir tee x \\;' \\;",
             // 찾은 이름(`{}`)은 여전히 모른다.
             "find /repo/src -execdir tee {} \\;",
         ] {
