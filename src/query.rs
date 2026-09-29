@@ -33,7 +33,11 @@ pub struct Where<'a> {
     /// 없으니 에픽 없는 줄은 제 `milestone` 에 선다. 옛 빈 지도가 `없음` 을 답하던 것과
     /// 다른데, 그쪽이 사실이 아니었다: 줄 하나짜리 저장소에서 `milestones_in` 이 내는 답이
     /// 이것이다.
-    pub(crate) lines: crate::report::Lines<'a>,
+    ///
+    /// **읽는 자는 [`Where::milestone_of`] 하나다** — 거르개에 `--milestone` 이 없으면 아무도 안
+    /// 읽는다. 그래서 줄만 든 쪽(탐색기의 `tui::Ground`)은 미리 안 짓고 처음 물을 때 짓는다
+    /// ([`Lined::Later`], moai-6mnm).
+    pub(crate) lines: Lined<'a>,
     /// 물려받은 것까지 친 미룸 (`report::Shelved`). 미룸도 소속처럼 묶음을 타고 내려온다.
     ///
     /// **줄로 묻는다** — 상세가 그 답을 그리는 자와 한 그릇이라, 한 화면이 제 말을 뒤집지
@@ -57,6 +61,38 @@ pub struct Where<'a> {
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
     pub(crate) folded: BTreeSet<&'a str>,
+}
+
+/// [`Where::lines`] 의 그릇 — 지은 것이거나, 처음 물을 때 지을 줄이다.
+///
+/// **탐색기의 거르개가 키마다 [`crate::report::Lines`] 를 짓던 자리다**(moai-6mnm, 리뷰
+/// moai-jk2u.m60 4번). 1만 줄에서 opt-level 3 으로 3.8ms, dev 로 50ms 쯤이다. 그 지도는
+/// `&Issue` 를 들어 줄과 함께 사는 `tui::Site` 에 담으면 제 필드를 빌리는 구조체가 된다.
+/// 읽는 자가 `--milestone` 거르개 하나이니, 담지 않고 **안 물으면 안 짓는다.** 물으면
+/// 그 거르개 한 판에 한 번 짓는다 — 예전과 같은 값이다.
+pub(crate) enum Lined<'a> {
+    Ready(crate::report::Lines<'a>),
+    Later(&'a [Issue], std::cell::OnceCell<crate::report::Lines<'a>>),
+}
+
+impl Default for Lined<'_> {
+    fn default() -> Self {
+        Lined::Ready(crate::report::Lines::default())
+    }
+}
+
+impl<'a> Lined<'a> {
+    /// 그 줄로 **처음 물을 때** 짓는다.
+    pub(crate) fn later(all: &'a [Issue]) -> Lined<'a> {
+        Lined::Later(all, std::cell::OnceCell::new())
+    }
+
+    fn get(&self) -> &crate::report::Lines<'a> {
+        match self {
+            Lined::Ready(lines) => lines,
+            Lined::Later(all, built) => built.get_or_init(|| crate::report::Lines::of(all)),
+        }
+    }
 }
 
 impl<'a> Where<'a> {
@@ -93,7 +129,7 @@ impl<'a> Where<'a> {
             all.iter().zip(&shelved).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
         let shelved = crate::report::Shelved::kept(roots, split, rows);
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, lines, shelved, states, since, kinds, folded }
+        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
@@ -125,7 +161,7 @@ impl<'a> Where<'a> {
         if self.eclipsed(i) {
             return None;
         }
-        self.epic.stood(i, &self.lines)
+        self.epic.stood(i, self.lines.get())
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
