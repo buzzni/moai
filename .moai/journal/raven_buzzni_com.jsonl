@@ -2003,3 +2003,6 @@
 {"ts":"2026-09-29T08:50:38Z","id":"moai-8rmw.665","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-29T08:50:39Z","id":"moai-8rmw.9cj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 15건 중 13건은 리뷰가 고친 그대로 받았다. 배너 잘림(7번)은 사용자 결정으로 올리는 줄을 탐색기를 나갈 때 찍게 바꿨고, `.crates.toml` 은 보통 파일일 때만 읽게 덧댔다. 에픽 본문은 body.md 로 되살렸다. 넘긴 것: 거절문 줄이 MOAI_BASE_URL/MOAI_API_URL 을 안 싣는 것은 문서에 없는 손잡이라, 감싸는 스크립트를 이 moai 로 읽는 것은 답하는 꼴로 가르는 설계라 그대로 둔다. ce27e0a0 의 \"판\" 은 이력을 다시 써야 해서 두었다"}
 {"ts":"2026-09-29T08:50:59Z","id":"moai-8rmw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 멤버 넷과 리뷰가 닫혔고 de7a20f4 로 develop 에 들어갔다. 감독에게 보고했다"}
+{"ts":"2026-09-29T08:51:33Z","id":"moai-y8v2.hi0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T08:51:33Z","id":"moai-y8v2.94p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T08:51:37Z","id":"moai-x3wi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS.md 의 \"give one of them a file\" 이 --body 에 파일 경로를 주라는 말로 읽힌다"}
