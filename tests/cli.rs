@@ -18049,7 +18049,8 @@ fn the_files_the_release_packs_are_all_there() {
 #[cfg(unix)]
 #[test]
 fn what_the_receiver_curls_is_main() {
-    for name in ["README.md", "install.sh"] {
+    // `src/latest.rs` 는 탐색기가 새 판을 알릴 때 대는 한 줄을 든다(moai-8rmw.665).
+    for name in ["README.md", "install.sh", "src/latest.rs"] {
         let text = std::fs::read_to_string(at_root(name)).unwrap();
         for (n, line) in text.lines().enumerate() {
             let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };

@@ -47,15 +47,34 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh
 The installer downloads the release archive **and** `SHA256SUMS`, and refuses to
 install anything it cannot verify. There is no flag to skip the check.
 
-It installs to `~/.local/bin` and will not overwrite an existing `moai` unless
-you pass `--force`. Pick another directory with `--dir`, or a specific release
-with `--version v0.1.0`. Through the pipe those flags belong to the script, not
-to your shell, so they need `-s --`:
+It installs to `~/.local/bin`. Pick another directory with `--dir`, or a
+specific release with `--version v0.1.0`. Through the pipe those flags belong to
+the script, not to your shell, so they need `-s --`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0
 ```
+
+### Upgrade
+
+The same line upgrades. When the `moai` already in that directory is this moai,
+the installer replaces it without `--force` and says which version it went from
+and to. When it is already the version it would install, it downloads nothing
+and exits 0. Asking for an older release with `--version` replaces it too, and
+says it is going down.
+
+`--force` is only for a binary the installer does not recognise as this moai —
+another tool that happens to be called `moai`. It refuses before downloading
+anything, and prints the line to run again with `--force` added, in both the
+pipe form and the file form:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s -- --force
+```
+
+When a newer release is out, `moai tui` says so in its header and puts the
+upgrade line on the banner.
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
 `aarch64-apple-darwin`. On anything else, build from source:

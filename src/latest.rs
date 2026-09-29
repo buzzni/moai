@@ -70,6 +70,10 @@ const MAX_TAG: usize = 128;
 /// 자리를 돌린다. 시험이 제 서버를 띄워 붙는 자리이기도 하다.
 pub const API: &str = "https://api.github.com/repos/buzzni/moai/releases/latest";
 
+/// 판을 올리는 한 줄 — 처음 까는 줄과 같다(moai-8rmw). `install.sh` 는 깔 자리에 선 것이
+/// 이 moai 면 `--force` 없이 덮는다. 받는 사람이 밟는 가지는 `main` 이다(moai-vqmx).
+pub const UPGRADE: &str = "curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh";
+
 /// 한 번 물으면 이만큼은 안 묻는다.
 pub const WINDOW: i64 = 24 * 60 * 60;
 

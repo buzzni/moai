@@ -425,6 +425,10 @@ IDEA
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
 
+  The version line in the header says whether a newer release is out. When
+  one is, the banner carries the line that upgrades — the same install.sh
+  one-liner that installs, and over a moai it recognises it needs no --force.
+
   Of what came to me (assigned to me or under it), rows changed since the
   last look carry a [NEW] mark in front of the title. Read marks live in my own
   config and the tracker does not change — on the CLI that is `moai read`.

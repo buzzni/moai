@@ -732,6 +732,15 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
+    // **새 판이 나왔으면 올리는 한 줄을 댄다**(moai-8rmw.665, 2026-09-29 사용자 결정). 머리의 판
+    // 줄은 나왔다는 것까지만 말할 자리라, 올리는 법을 몰라 그 줄을 본 사람이 README 를 찾으러
+    // 나갔다. 같은 한 줄이 판을 올리므로(`install.sh`) 명령은 늘 같다. **급하지 않다** — 고칠
+    // 것이 아니라 받을 것이 있다는 말이다. 맨 끝에 서는 것도 그래서다: 좁은 창에서 잘려도 판
+    // 줄이 여전히 새 판을 말한다.
+    if let crate::latest::Seen::Newer { tag } = app.latest() {
+        parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag), ("command", crate::latest::UPGRADE)]));
+        soft += 1;
+    }
     // 급하지 않은 것만 섰으면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수).
     let lead = if parts.len() == soft { "" } else { "! " };
@@ -5699,6 +5708,28 @@ pub(super) mod tests {
             for b in &four[i + 1..] {
                 assert_ne!(a.trim(), b.trim(), "두 소식이 같은 글로 선다");
             }
+        }
+    }
+
+    /// **새 판이 나왔을 때만 배너가 올리는 한 줄을 댄다**(moai-8rmw.665). 판 줄은 나왔다는
+    /// 것까지만 말할 자리다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다 — 셋째
+    /// 판(같은 판·앞선 판·못 물었다)에는 서지 않는다.
+    #[test]
+    fn a_newer_release_puts_the_upgrade_line_on_the_banner() {
+        use crate::latest::Seen;
+        let banner_of = |seen| {
+            let mut a = app();
+            // 바탕 자리의 경고가 `!` 를 달면 이 줄이 급한지 못 가른다 — 이 줄만 세운다.
+            a.site.warnings = crate::tui::Surfaced::default();
+            a.set_latest(seen);
+            tests_banner(&mut a)
+        };
+        let newer = banner_of(Seen::Newer { tag: "v9.9.9".into() });
+        assert!(newer.contains("v9.9.9") && newer.contains(crate::latest::UPGRADE), "올리는 줄이 없다\n{newer}");
+        assert!(!newer.contains('!'), "받을 것을 급한 것처럼 말한다\n{newer}");
+        for seen in [Seen::Same, Seen::Ahead, unasked_for(Trouble::NotAsked)] {
+            let said = banner_of(seen);
+            assert!(!said.contains(crate::latest::UPGRADE), "새 판이 없는데 올리라고 한다\n{said}");
         }
     }
 
