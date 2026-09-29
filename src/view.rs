@@ -1127,6 +1127,11 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
         }
+        // 이 갈래도 칠 줄을 싣는다(`duplicate_id`, moai-pp9i.gtc) — 여기서 일찍 나가면 그 줄이 `--json`
+        // 에만 서고 보드에서는 사라진다.
+        if let Some(h) = &w.hint {
+            out.push(format!("    {}", paint(style::DIM, &format!("→ `{h}`"))));
+        }
         return out;
     }
     // 기한 경고는 **그 날짜와 남은 날수를 함께** 낸다(moai-tfcp) — id 와 제목만 내면 언제까지인지가

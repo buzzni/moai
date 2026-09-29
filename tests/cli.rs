@@ -10357,6 +10357,27 @@ fn a_line_inherits_the_defer_of_the_release_it_wrote_on_itself() {
     assert!(ready.contains("앞줄"), "아무것도 안 적은 줄이 뒷줄의 미룸을 입어 사라졌다\n{ready}");
 }
 
+/// `duplicate_id` 는 무엇을 칠지 댄다(moai-pp9i.gtc) — 지우는 `rm` 이 아니라 보는 `show` 를 대고,
+/// `rm` 이 어느 줄을 지우는지는 경고 글이 말한다. 따라 친 `rm` 이 남기려던 앞줄을 지우는 판을 막는다.
+#[test]
+fn a_duplicate_id_names_what_to_type() {
+    let line = |title: &str| {
+        format!(
+            "{{\"id\":\"argos-0002\",\"title\":\"{title}\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("twinhint");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("앞줄"), line("뒷줄"))).unwrap();
+
+    let board = text(&moai(s.path(), &["status"]));
+    assert!(board.contains("→ `moai show argos-0002`"), "보드가 칠 줄을 안 댔다\n{board}");
+    assert!(board.contains("moai rm <id>") && board.contains("앞줄을 지운다"), "rm 이 무엇을 지우는지 안 말했다\n{board}");
+    assert!(!board.contains("→ `moai rm"), "지우는 명령을 따라 칠 줄로 댔다\n{board}");
+
+    let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(json.contains(r#""hint":"moai show argos-0002""#), "{json}");
+}
+
 /// **표면 넷이 같은 줄을 말한다**(moai-u3ta).
 ///
 /// 미룬 곳 지도가 id 를 키로 두고 담는 꼴이 `filter_map().collect()` 이던 동안, 미룬 릴리스에

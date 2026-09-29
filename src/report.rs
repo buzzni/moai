@@ -5043,7 +5043,15 @@ pub fn status_in<'a>(
         .map(str::to_string)
         .collect();
     if !dups.is_empty() {
-        warnings.push(Warning::new("duplicate_id", dups).fatal());
+        // **지우는 명령이 아니라 보는 명령을 댄다**(moai-pp9i.gtc, 2026-09-29 사람이 정했다). `moai rm
+        // <id>` 가 듣기는 하지만 지우는 것은 앞줄이라, 그것을 그대로 대면 남기고 싶은 줄이 앞줄인
+        // 사람이 따라 쳐서 그 줄을 잃는다. 두 줄을 나란히 보고 고르게 하고, `rm` 이 무엇을 지우는지는
+        // 경고 글(`warn.duplicate_id`)이 말한다. id 가 하나면 그 id 를 그대로 댄다 — 따라 칠 줄이다.
+        let hint = match dups.as_slice() {
+            [one] => format!("moai show {one}"),
+            _ => "moai show <id>".to_string(),
+        };
+        warnings.push(Warning::new("duplicate_id", dups).hint(&hint).fatal());
     }
     if !unreadable.is_empty() {
         // **어느 줄인지는 여기가 아니라 저기서 난다.** 배너는 수만 말할 수
