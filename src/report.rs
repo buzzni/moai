@@ -4659,8 +4659,8 @@ impl Warning {
     /// `ids` 에는 **빠진 규칙 줄**이 그대로 든다. 이 알림은 이슈를 안 가리키므로 id 지도에 없고,
     /// 화면은 못 찾은 id 를 그대로 한 줄씩 내는 길을 이미 갖고 있다(`view::preview`) — 이 알림만을
     /// 위한 갈래를 거기 두지 않는 까닭이고, 그래야 고칠 명령(`hint`)도 같은 길로 따라 나온다.
-    pub fn dotfile_rules(kind: &'static str, missing: &[&str], root: Option<&str>) -> Warning {
-        Warning::new(kind, missing.iter().map(|l| (*l).to_string()).collect()).notice().hint(&Warning::init_hint(root))
+    pub fn dotfile_rules(kind: &'static str, missing: Vec<String>, root: Option<&str>) -> Warning {
+        Warning::new(kind, missing).notice().hint(&Warning::init_hint(root))
     }
 
     /// 심은 머지 드라이버가 **못 도는** 상태의 알림(moai-2ewr). 재는 쪽은

@@ -16774,6 +16774,49 @@ fn the_merge_driver_settles_edits_to_different_issues() {
     assert_eq!(issues(root), before, "병합 결과가 표준형이 아니라 다음 쓰기가 헛 diff 를 냈다");
 }
 
+/// **링크인 트래커도 드라이버로 합쳐진다**(moai-7myd). git 은 링크를 링크 글로 담고 줄이 사는 파일은
+/// 가리켜진 경로로 따로 합치는데, 선언이 링크 경로에만 걸려 그 파일이 기본 글 병합을 받았다 — 이웃한
+/// 두 줄의 고침이 충돌 표식을 든 JSONL 이 됐고, 그래도 `init --check` 는 빠진 것이 없다고 했다.
+/// 이제 그 파일에 거는 줄이 빠진 규칙으로 서고 `init` 이 그것을 심는다.
+#[cfg(unix)]
+#[test]
+fn the_merge_driver_covers_the_file_a_linked_tracker_points_at() {
+    let s = init("mergelinked");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["merge-driver", "--install", "--as", BIN]);
+    std::fs::create_dir(root.join("shared")).unwrap();
+    std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+
+    let rule = "/shared/issues.jsonl   text eol=lf merge=moai";
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(check.contains(rule), "링크가 가리키는 파일에 선언이 빠진 것을 안 댔다\n{check}");
+    ok(root, &["init", "argos"]);
+    let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+    assert!(attrs.lines().any(|l| l == rule), "init 이 그 파일에 선언을 안 걸었다\n{attrs}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("\"missing\""), "심은 뒤에도 빠졌다고 한다\n{check}");
+    ok(root, &["init", "argos"]);
+    assert_eq!(std::fs::read_to_string(root.join(".gitattributes")).unwrap(), attrs, "다시 부르자 줄을 또 붙였다");
+
+    let one = add(root, &["첫째"]);
+    let two = add(root, &["둘째"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["checkout", "-qb", "side"]);
+    ok(root, &["edit", &two, "--tag", "parser"]);
+    git(root, &["commit", "-qam", "side"]);
+    git(root, &["checkout", "-q", "main"]);
+    ok(root, &["edit", &one, "--tag", "bug"]);
+    git(root, &["commit", "-qam", "main"]);
+
+    git(root, &["merge", "--no-edit", "side"]);
+    let merged = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
+    assert!(!merged.contains("<<<<<<<"), "링크가 가리키는 파일에 충돌 표식이 남았다\n{merged}");
+    assert!(line_of(root, &one).contains("\"bug\"") && line_of(root, &two).contains("\"parser\""), "{merged}");
+}
+
 /// **같은 이슈의 같은 필드를 둘이 다르게 고친 것은 사람에게 온다.** 한쪽을 말없이
 /// 고르면 다른 쪽의 고침이 아무 자취 없이 사라진다 — 조용한 손실이 이 도구가 못 견디는
 /// 유일한 실패 모드다.

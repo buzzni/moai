@@ -237,8 +237,56 @@ pub fn agents_state(root: &Path) -> Result<BlockState, String> {
 /// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
 /// 빠졌을 때의 결과가 파일마다 달라 화면의 낱말이 갈리고(`view::says`), 기계도 `kind` 로 그것을
 /// 가른다. `agents_stale`·`agents_hand_edited` 가 이미 그 자리다.
-const DOTFILES: [(&str, &str, &str); 2] =
-    [(".gitattributes", GITATTRIBUTES, "gitattributes_rules"), (".gitignore", GITIGNORE, "gitignore_rules")];
+///
+/// `.gitattributes` 의 블록은 저장소마다 한 줄이 더 설 수 있다([`attributes_for`]) — 그래서 표에는 이름과
+/// 갈래만 두고 블록은 [`block_for`] 가 댄다.
+const DOTFILES: [(&str, &str); 2] = [(".gitattributes", "gitattributes_rules"), (".gitignore", "gitignore_rules")];
+
+/// 이 뿌리의 딸린 파일 `name` 에 심을 블록 — 쓰는 길([`run`])과 비추는 길([`dotfile_gaps`])이 같이 부른다.
+fn block_for(root: &Path, name: &str) -> std::borrow::Cow<'static, str> {
+    match name {
+        ".gitattributes" => attributes_for(root),
+        _ => GITIGNORE.into(),
+    }
+}
+
+/// `.gitattributes` 에 심을 블록 — **트래커가 체크아웃 안의 파일을 가리키는 링크면 그 파일에도
+/// `merge=moai` 를 건다**(moai-7myd).
+///
+/// git 은 링크를 링크 글로 담고, 줄이 사는 파일은 가리켜진 경로로 따로 담는다. 병합에서 실제로
+/// 합쳐지는 것은 그 파일인데 선언은 링크 경로에만 걸려, 그 파일이 git 의 기본 글 병합을 받아
+/// 충돌 표식을 든 JSONL 이 됐다 — 그런데 `init --check` 는 드라이버가 `current` 라고 했다.
+/// 선언을 재는 [`crate::cmd::merge_driver`] 의 `declared` 는 그대로 링크 경로를 묻는다. 빠진 것은
+/// 이 한 줄이고, 그것은 [`dotfile_gaps`] 가 `gitattributes_rules` 로 비춘다.
+///
+/// **뿌리에 못박는다**(`/<경로>`). `/` 없는 한 조각 패턴은 어느 깊이의 같은 이름에도 걸린다.
+/// 쓸 수 없는 경로는 줄을 안 세운다 — 뿌리 밖(위 디렉터리·체크아웃 밖, 쓰기가 거절하는 자리다)이거나
+/// 패턴 글자·빈칸이 든 이름이다. 그 트래커는 `moai status` 의 링크 알림이 비춘다(moai-jo3h).
+fn attributes_for(root: &Path) -> std::borrow::Cow<'static, str> {
+    match linked_snapshot(root) {
+        Some(rel) => format!("{GITATTRIBUTES}{LINKED_COMMENT}/{rel}   text eol=lf merge=moai\n").into(),
+        None => GITATTRIBUTES.into(),
+    }
+}
+
+/// [`attributes_for`] 가 더하는 줄 위의 주석. **글을 고치지 않는다** — 줄 단위로 견주어 덧붙이므로
+/// 고친 글은 이미 심은 저장소에 한 벌 더 붙는다(`GITATTRIBUTES` 위의 글과 같은 까닭이다).
+const LINKED_COMMENT: &str = "\
+# .moai/issues.jsonl is a link. git merges the file it points at, so that file
+# carries the same attributes.
+";
+
+/// 트래커가 링크면 **이 뿌리 안에서** 그것이 가리키는 파일의 경로(`shared/issues.jsonl`). 링크가 아니거나
+/// [`attributes_for`] 가 줄로 못 거는 자리면 `None` 이다.
+pub(crate) fn linked_snapshot(root: &Path) -> Option<String> {
+    let link = root.join(crate::cmd::merge_driver::SNAPSHOT);
+    let real = crate::path::follow_links(&link).ok().filter(|r| *r != link)?;
+    let dir = std::fs::canonicalize(crate::path::dir_of(&real)).ok()?;
+    let rel = dir.strip_prefix(crate::path::real(root)).ok()?.join(real.file_name()?);
+    let rel = rel.to_str()?;
+    let plain = |c: char| !c.is_whitespace() && !"*?[]\\\"#!".contains(c);
+    (!rel.is_empty() && rel.chars().all(plain)).then(|| rel.to_string())
+}
 
 /// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 알림의 갈래, 빠진 줄들)`, 빠진 것이
 /// 있는 파일만.
@@ -250,16 +298,17 @@ const DOTFILES: [(&str, &str, &str); 2] =
 /// **없는 파일은 통째로 빠진 것이다.** `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰 자리라
 /// (moai-mxtb) 입을 다물면 안 된다. 갈림은 **오류의 갈래로** 짓는다 — `exists()` 로 물으면 못 읽는
 /// 파일과 없는 파일이 정확히 거꾸로 선다.
-pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'static str>)> {
+pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>)> {
     DOTFILES
         .into_iter()
-        .filter_map(|(name, block, kind)| {
+        .filter_map(|(name, kind)| {
             let text = match std::fs::read_to_string(root.join(name)) {
                 Ok(t) => t,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
                 Err(_) => return None,
             };
-            let missing = missing_rules(&text, block);
+            let block = block_for(root, name);
+            let missing: Vec<String> = missing_rules(&text, &block).into_iter().map(str::to_string).collect();
             (!missing.is_empty()).then_some((name, kind, missing))
         })
         .collect()
@@ -293,7 +342,7 @@ pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
     }
     let away = away_root(root, chdir);
     gaps.into_iter()
-        .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, &missing, away.as_deref()))
+        .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, missing, away.as_deref()))
         .collect()
 }
 
@@ -961,7 +1010,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
     }
 
-    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES, &root);
+    let attributes = block_for(&root, ".gitattributes");
+    let attrs = ensure_lines(&root.join(".gitattributes"), &attributes, &root);
     let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE, &root);
     // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
     // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
@@ -972,7 +1022,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
     let untouched: Vec<(&str, &Added, &str)> =
-        [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+        [(".gitattributes", &attrs, &*attributes), (".gitignore", &ignore, GITIGNORE)]
             .into_iter()
             .filter(|(_, done, _)| done.trouble().is_some())
             .collect();
