@@ -2122,3 +2122,9 @@
 {"ts":"2026-09-29T14:19:23Z","id":"moai-fl7e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-29): 겹친 id 의 줄 묶음을 3-way 로 푼다. 한쪽만 base 에서 바뀌었으면 바뀐 쪽을, 두 쪽이 같게 바뀌었으면 그것을 받는다. 두 쪽이 다르게 바뀐 경우만 사람에게 넘기므로, moai-2m94 가 막은 조용한 되물림(한쪽은 G, 한쪽은 J 를 지움)은 그대로 충돌로 선다"}
 {"ts":"2026-09-29T14:19:52Z","id":"moai-6nha","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T14:19:52Z","id":"moai-fl7e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T14:35:17Z","id":"moai-mo9v.w12","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — rm --line --match 와 겹친 id 묶음 3-way"}
+{"ts":"2026-09-29T14:35:21Z","id":"moai-mo9v.w12","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T14:35:54Z","id":"moai-mo9v.w12","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돈다. 돌아오면 고침을 fix 커밋으로 담고, 원문과 판단을 노트 둘로 남긴 뒤 닫는다"}
+{"ts":"2026-09-29T14:35:55Z","id":"moai-6nha","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 구현은 워크트리 가지 worktree-moai-mo9v 에 커밋했다. 에픽 끝 리뷰 moai-mo9v.w12 가 끝나면 develop 에 머지하고 닫는다"}
+{"ts":"2026-09-29T14:35:56Z","id":"moai-fl7e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 구현은 워크트리 가지 worktree-moai-mo9v 에 커밋했다. 에픽 끝 리뷰 moai-mo9v.w12 가 끝나면 develop 에 머지하고 닫는다"}
+{"ts":"2026-09-29T15:56:40Z","id":"moai-z4wk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쌍둥이 지우기와 산 줄 고침이 겹치면 여전히 충돌한다"}
