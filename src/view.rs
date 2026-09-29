@@ -2212,25 +2212,35 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
 /// **칸 이름과 모르는 갈래는 그대로 낸다** — 칸은 설정에서 오는 낱말이고, 모르는 갈래는 새
 /// 바이너리나 옛 줄이 적은 자료다. 옮기는 것은 이쪽이 아는 갈래의 낱말뿐이다. `note:` 도
 /// 그대로다 — 저널에 적힌 갈래 이름이라, 옮기면 화면의 낱말과 파일의 낱말이 갈린다.
+///
+/// **그대로 내되 제어문자는 걷는다**(`text::sanitize`, 리뷰 moai-mo9v.1ln). 저널은 손으로 고칠 수 있는
+/// 파일이고, `moai rm --line` 은 아무도 치지 않은 못 읽는 줄의 원문을 메모로 싣는다 — ESC 가 든 그
+/// 줄이 `moai show` 마다 화면을 다시 칠한다. 저널은 덧붙이기만 하므로 걷을 자리는 그리는 여기 하나다.
+/// 줄바꿈은 남긴다: 여러 줄 메모는 [`history`] 가 줄마다 가른다.
 fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
+    let clean = crate::text::sanitize;
     let what = match e.kind.as_str() {
         "create" => say(lang, "journal.create").to_string(),
+        // **제목 없는 `rm` 은 못 읽는 줄을 지운 것이다**([`JournalEntry::removed_line`]). 그 id 의 이슈는
+        // 멀쩡히 설 수 있다 — 산 줄의 깨진 쌍둥이를 지운 경우다. 이슈를 지운 `rm` 은 늘 제목을 든다
+        // ([`JournalEntry::removed`]). 둘을 한 낱말로 그리면 산 이슈의 이력이 "삭제" 로 끝난다.
+        "rm" if e.title.is_none() => say(lang, "journal.remove_line").to_string(),
         "rm" => say(lang, "journal.remove").to_string(),
         "status" => format!(
             "{} → {}",
-            e.from.as_deref().unwrap_or("?"),
-            paint(style::status_style(e.to.as_deref().unwrap_or("")), e.to.as_deref().unwrap_or("?"))
+            clean(e.from.as_deref().unwrap_or("?")),
+            paint(style::status_style(e.to.as_deref().unwrap_or("")), &clean(e.to.as_deref().unwrap_or("?")))
         ),
-        "note" => format!("note: {}", e.text.as_deref().unwrap_or("")),
-        other => other.to_string(),
+        "note" => format!("note: {}", clean(e.text.as_deref().unwrap_or(""))),
+        other => clean(other),
     };
-    let note = e.note.as_deref().map(|n| format!("  — {n}")).unwrap_or_default();
+    let note = e.note.as_deref().map(|n| format!("  — {}", clean(n))).unwrap_or_default();
     // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
     // 꼬리 공백 두 칸이 남는다.
     format!(
         "{what}{}  {}",
         paint(style::DIM, &note),
-        paint(style::DIM, &crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming))
+        paint(style::DIM, &clean(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
     )
     .trim_end()
     .to_string()

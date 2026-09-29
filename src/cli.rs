@@ -267,6 +267,21 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
 printf '\\none more line\\n'; } | moai edit <id> -b -")]
     Edit(EditArgs),
     /// Remove
+    #[command(after_help = "  An unreadable line - a row that cannot be read as an issue, which
+  `moai status` counts and `moai show` names by line number - is not
+  reachable by id. When it is not worth keeping (a broken twin, junk),
+  remove it by its line number; a row a newer moai wrote reads again after
+  upgrading, so keep that one:
+
+  moai rm --line 812          shows the line, removes nothing
+  moai rm --line 812 --yes    removes it
+
+  Only an unreadable line is removed; any other line is refused, and the
+  refusal lists the unreadable lines as they stand now. Numbers move when a
+  row comes or goes - an earlier removal included - so look again before
+  each --yes. Removing cannot be undone: the raw line is printed, goes into
+  the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
+  be put back by hand.")]
     Rm(RmArgs),
     /// Leave a note on an issue (journal only)
     #[command(after_help = "  moai note moai-4aex 'the parser dies on a BOM'
@@ -1112,8 +1127,18 @@ pub struct ReadArgs {
 
 #[derive(Args, Debug)]
 pub struct RmArgs {
-    #[arg(required = true, value_name = "id")]
+    #[arg(required_unless_present = "line", conflicts_with = "line", value_name = "id")]
     pub ids: Vec<String>,
+    /// Remove the unreadable line at number <n>
+    #[arg(long, value_name = "n")]
+    pub line: Option<usize>,
+    // `requires = "line"` 을 안 건다 — clap 은 `requires` 가 지목한 인자(`line`)가 이미 준 인자(`ids`)와
+    // `conflicts` 면 그 `requires` 를 조용히 건너뛰어, `moai rm <id> --yes` 가 clap 을 지나 말없이
+    // 지웠다(재 봤다). 거절은 `rm::run` 이 `BAD_INPUT` 으로 해서 `--json` 도 `code` 를 받는다 —
+    // `add --dry-run` 이 제 거절을 `add::run` 에 두는 것과 같은 까닭이다(moai-yhb1).
+    /// With --line: remove it. Without, it is only shown
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// git 이 주는 자리 셋과, 사람이 치는 `--install`.

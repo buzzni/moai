@@ -337,11 +337,23 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     let at = path.display().to_string();
     eprintln!("{}", fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
     for e in errors.iter().take(5) {
-        eprintln!("{}", fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("why", &e.message)]));
+        // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
+        // 모르고, 보드의 `duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서 온 글이라
+        // 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
+        let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
+        let why = crate::text::one_line(&e.message);
+        eprintln!(
+            "{}",
+            fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
+        );
     }
     if errors.len() > 5 {
         eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(errors.len() - 5).to_string())]));
     }
+    // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
+    // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
+    // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다.
+    eprintln!("{}", say(lang, "warn.unreadable_rm"));
 }
 
 pub fn run(mut cli: Cli) -> R<Vec<String>> {

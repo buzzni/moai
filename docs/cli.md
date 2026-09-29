@@ -481,18 +481,36 @@ printf '\none more line\n'; } | moai edit <id> -b -
 ```
 Remove
 
-Usage: moai rm [OPTIONS] <id>...
+Usage: moai rm [OPTIONS] [id]...
 
 Arguments:
-  <id>...  
+  [id]...  
 
 Options:
+      --line <n>             Remove the unreadable line at number <n>
+      --yes                  With --line: remove it. Without, it is only shown
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
   -C, --dir <path>           Run in this directory (same as `git -C`)
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
+
+  An unreadable line - a row that cannot be read as an issue, which
+  `moai status` counts and `moai show` names by line number - is not
+  reachable by id. When it is not worth keeping (a broken twin, junk),
+  remove it by its line number; a row a newer moai wrote reads again after
+  upgrading, so keep that one:
+
+  moai rm --line 812          shows the line, removes nothing
+  moai rm --line 812 --yes    removes it
+
+  Only an unreadable line is removed; any other line is refused, and the
+  refusal lists the unreadable lines as they stand now. Numbers move when a
+  row comes or goes - an earlier removal included - so look again before
+  each --yes. Removing cannot be undone: the raw line is printed, goes into
+  the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
+  be put back by hand.
 ```
 
 ## `moai note`

@@ -24,6 +24,15 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   line that does not upgrade the binary you are running is worse than none. It is not
   marked urgent: there is something to receive, not something to fix.
 
+- **`moai rm --line <n>` removes an unreadable line from inside the tool.** A line
+  that does not read as an issue — most often the broken twin of an issue that also
+  stands whole, left by a hand-resolved merge — could only be removed by opening
+  `.moai/issues.jsonl` in an editor. The number is the one `moai show` names. Without
+  `--yes` the line is only shown; with it, that line alone goes, and a number that
+  points at a readable line is refused. The removed text is printed, handed back
+  under `--json` (`dry_run` tells the preview from the removal) and kept in the
+  journal's `rm` entry.
+
 ### Changed
 
 - **A move key in the `moai tui` SPC menu closes the menu and makes the move.** The
@@ -54,6 +63,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   before the download too.
 
 ### Fixed
+
+- **The merge driver writes the same bytes whichever way you merge.** Two sides
+  holding the same unreadable line with different bytes — key order, a trailing
+  blank, a trailing `\r` — used to keep this side's bytes, so merging A into B and B
+  into A left different files. The side that changed the bytes now wins, and when
+  both did, the smaller bytes win; the line is still carried as written, not rebuilt.
+  Unreadable lines both sides added no longer follow the merge direction either.
 
 - **The hook's record of which session picked what no longer lives in the shared temp
   directory.** It sat at a guessable `/tmp/moai-picks-<key>`, where a directory or record

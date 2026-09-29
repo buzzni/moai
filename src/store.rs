@@ -79,7 +79,7 @@ pub enum At {
 enum Stop {
     /// io·락이 낸 것 — 이미 글이다.
     Failed(Fail),
-    /// 손으로 고칠 때까지 안 쓴다 — 글은 [`Repo::with_write`] 가 락을 놓은 뒤에 편다.
+    /// 손으로 고칠 때까지 안 쓴다 — 글은 [`Repo::with_write_lines`] 가 락을 놓은 뒤에 편다.
     Refused(Trouble),
 }
 
@@ -639,10 +639,24 @@ impl Repo {
     /// 말을 모른 채 둔다는 2026-09-20 결정 아래 있고, 그래서 `lang` 은 값이 아니라 **묻는 길**이다:
     /// 아무것도 거절하지 않는 판(= 거의 모든 판)은 사용자 설정을 아예 안 연다. 락 안에서 물으면
     /// 그 설정이 FIFO 일 때 락을 쥔 채 영영 멈춘다 — 몸통([`Repo::write_locked`])이 멈춘 까닭을
-    /// 자료로 들고 나오고 여기서 편다.
+    /// 자료로 들고 나오고 [`Repo::with_write_lines`] 가 편다. 이 함수는 그 문에서 못 읽는 줄 인자만
+    /// 뺀 것이다.
     pub fn with_write<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
     where
         F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+    {
+        self.with_write_lines(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved))
+    }
+
+    /// [`Repo::with_write`] 와 같은 길인데 **못 읽는 줄도 닫는 함수에 넘긴다**(moai-mo9v.3yp).
+    ///
+    /// 못 읽는 줄을 지우는 길이 `moai rm --line` 하나라 이 문을 따로 연다. 둘째 쓰기 경로를 두지
+    /// 않으려고 몸통은 하나다 — 락 안에서 다시 읽은 그 줄들이 넘어가고, 닫는 함수가 남긴 것만
+    /// 파일 끝에 원문 그대로 되쓴다. 여느 명령이 그 줄들을 만질 까닭은 없으니 `with_write` 는
+    /// 그것을 안 보인다: 보이면 못 읽는 줄을 들고 다시 쓴다는 약속을 명령마다 지켜야 한다.
+    pub fn with_write_lines<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
         let (out, note) = match self.write_locked(&lang, f) {
             Ok(v) => v,
@@ -659,11 +673,12 @@ impl Repo {
         Ok(out)
     }
 
-    /// [`Repo::with_write`] 의 몸통 — 락을 잡고, 읽고, 고치고, 쓴다. **돌아올 때 락을 놓는다.**
+    /// [`Repo::with_write_lines`] 의 몸통([`Repo::with_write`] 도 이것을 지난다) — 락을 잡고, 읽고,
+    /// 고치고, 쓴다. **돌아올 때 락을 놓는다.**
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
     fn write_locked<T, F>(&self, lang: &impl Fn() -> crate::i18n::Lang, f: F) -> Result<(T, Option<Trouble>), Stop>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
         // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
         // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
@@ -683,9 +698,12 @@ impl Repo {
         // 줄*에 대한 것이지 파일 전체에 대한 것이 아니다.
         //
         // 잃지도 않고 막지도 않는 대신 **시끄럽다**: `moai status` 가
-        // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다.
-        let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
-        let before = render_issues(&load.issues, &opaque);
+        // `unreadable_line` 을 치명으로 내고 거기서만 비영 종료한다. 사람이 그 줄을 치우는 길은
+        // `moai rm --line` 하나고, 그 명령만 [`Repo::with_write_lines`] 로 이 줄들을 받는다.
+        let before = {
+            let opaque: Vec<&str> = load.errors.iter().map(|e| e.text.as_str()).collect();
+            render_issues(&load.issues, &opaque)
+        };
 
         // 정규화한 원본을 들고 있다가 **바뀐 줄만** 검사한다.
         //
@@ -700,7 +718,9 @@ impl Repo {
 
         let reserved = load.reserved_ids();
         let mut issues = load.issues;
-        let (entries, out) = f(&mut issues, &self.config, &reserved)?;
+        let mut unread = load.errors;
+        let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
+        let opaque: Vec<&str> = unread.iter().map(|e| e.text.as_str()).collect();
 
         // **글의 크기는 한 자리에서 잰다**(moai-m9a8). 노트·`mv -m`·`defer -m`·제목·본문이 모두
         // 여기를 지나므로 명령마다 따로 걸면 한 곳은 반드시 잊는다. 저널에 적힐 글은 여기서, 제목과
@@ -776,7 +796,7 @@ impl Repo {
                 // 두 번 돌리면 그때마다 다른 id 가 나왔다.
                 // **가리키는 말은 여기서 고른다**(moai-yve0) — 이번 쓰기가 짓는 줄은 거절 뒤에
                 // 그 id 가 어디에도 안 남으므로(moai-1rkl) 제목 한 토막으로 가리킨다. 글은 락을
-                // 놓은 뒤 [`Repo::with_write`] 가 편다.
+                // 놓은 뒤 [`Repo::with_write_lines`] 가 편다.
                 i.validate_keeping(&self.config, kept).map_err(|why| {
                     let at = match was {
                         Some(_) => At::Id(i.id.clone()),
@@ -790,7 +810,7 @@ impl Repo {
         }
         issues.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(dup) = first_duplicate(&issues) {
-            // 락을 쥔 자리라 **글이 아니라 자료로** 물러난다 — 펴는 자는 [`Repo::with_write`] 다.
+            // 락을 쥔 자리라 **글이 아니라 자료로** 물러난다 — 펴는 자는 [`Repo::with_write_lines`] 다.
             return Err(Stop::Refused(Trouble::DuplicateId { id: dup.to_string() }));
         }
 
@@ -839,9 +859,16 @@ impl Repo {
             // 말이었는지 대어 `moai note` 로 다시 적게 한다.
             //
             // **여기서도 글을 안 짓는다**(moai-iq7j) — 락을 쥔 자리라 자료로 들고 나가고,
-            // [`Repo::with_write`] 가 락을 놓은 뒤에 펴서 [`MISSED`] 에 민다.
-            let mut worded: Vec<String> =
-                entries.iter().filter(|j| j.text.is_some() || j.note.is_some()).map(|j| j.id.clone()).collect();
+            // [`Repo::with_write_lines`] 가 락을 놓은 뒤에 펴서 [`MISSED`] 에 민다.
+            //
+            // **`rm` 줄의 메모는 적어 온 말이 아니다**(리뷰 moai-mo9v.1ln). `rm --line` 이 싣는 것은 지운
+            // 줄의 원문이라 `moai note` 로 다시 적을 말이 아니고, 부른 쪽이 이미 화면과 `--json` 으로
+            // 받았다. 셈에 넣으면 id 를 못 읽은 줄에서 빈 id 를 대며 `moai note` 를 권했다.
+            let mut worded: Vec<String> = entries
+                .iter()
+                .filter(|j| j.kind != "rm" && (j.text.is_some() || j.note.is_some()))
+                .map(|j| j.id.clone())
+                .collect();
             worded.dedup();
             note = Some(Trouble::JournalLost { said: e.message, ids: worded });
         }
