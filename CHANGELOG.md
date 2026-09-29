@@ -44,6 +44,26 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 - `--body -` that reads nothing from stdin says so on stderr (`add`, `add --from`,
   `edit`) instead of ending in 0 with no body. Nothing is blocked.
 
+### Fixed
+
+- **The planted hook line no longer loses the board, forwards a torn answer, or
+  lets a stranger silence its notice.** The board and `Stop` marks are now set by
+  the shell line after it has handed the answer over — `moai hook` writes the mark's
+  name to a slip the line passes in `MOAI_HOOK_HANDOFF` — so a hook killed between
+  the two no longer leaves a session without its board for good. The mark is taken
+  only when `moai` finished on its own (exit 0 or 1), and only for absolute paths;
+  anything else falls back to `moai` setting the mark itself or to the board riding
+  once more. Slips older than ten minutes are swept whenever a new one is written.
+  Outside exits 0 and 1, only output shaped like a JSON object counts as an answer: a
+  verdict torn by SIGKILL, another binary's usage text or a lone space is dropped and
+  the "could not run" notice speaks instead. That notice's once-a-session mark is
+  created with `set -C` (one winner among hooks running side by side), and a mark
+  that is not the user's own regular file — a stranger's file, a symlink, a named
+  pipe — makes the notice speak every time rather than never. The line never opens a
+  mark that already exists, so a named pipe planted there cannot stall the hook until
+  its timeout. Takes effect after `moai skill install` re-plants the hook; an old
+  planted line keeps working as before.
+
 ## [0.1.2] - 2026-09-23
 
 **Two things in this release break a caller.** Both are written up where they

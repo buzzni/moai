@@ -11396,6 +11396,127 @@ fn the_board_rides_the_first_prompt_only() {
     assert!(!other.trim().is_empty(), "새 세션이 보드를 못 받았다");
 }
 
+/// **셸이 쪽지 자리를 주면 표식은 셸이 세운다**(moai-45hf.wqg). `moai` 는 표식 이름을 쪽지에 적기만
+/// 하고, 심은 줄이 판정을 건넨 뒤에 그 이름으로 세운다 — 그 사이에 셸이 죽으면 표식이 안 서서 다음
+/// 프롬프트가 보드를 다시 싣는다. 옛 판은 여기서 먼저 세워 그 세션이 보드를 영영 못 받았다.
+///
+/// 쪽지 자리를 안 주는 셸(이 판 전에 심은 줄)은 옛 길 그대로다 — 위 `the_board_rides_the_first_prompt_only`.
+#[test]
+fn the_board_mark_waits_for_the_shell() {
+    let s = init("hookhandoff");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let slip = s.path().join("slip");
+    let with_slip = |session: &str| {
+        hook_at_home(
+            &s,
+            s.path(),
+            None,
+            &[("MOAI_HOOK_HANDOFF", slip.to_str().unwrap())],
+            "user-prompt-submit",
+            &event(&s, session),
+        )
+    };
+
+    let first = carried_text(&String::from_utf8(with_slip("s1").stdout).unwrap());
+    assert!(first.contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+    let named = std::fs::read_to_string(&slip).expect("쪽지를 안 적었다");
+    let mark = Path::new(named.strip_suffix('\n').expect("쪽지가 줄바꿈으로 안 끝난다"));
+    assert!(!mark.exists(), "셸이 건네기 전에 표식을 세웠다 — {}", mark.display());
+
+    // 셸이 못 세운 때 — 다음 프롬프트가 다시 싣는다. **옛 쪽지는 걷고 새로 쓴다**.
+    let again = carried_text(&String::from_utf8(with_slip("s1").stdout).unwrap());
+    assert!(again.contains("락을 잡는다"), "못 건넌 보드를 다시 안 실었다\n{again}");
+    assert_eq!(std::fs::read_to_string(&slip).unwrap(), named, "쪽지가 다른 이름을 적었다");
+
+    // 셸이 세운 뒤에는 조용하다 — 한 번은 그대로 한 번이다.
+    std::fs::write(mark, "").unwrap();
+    let quiet = String::from_utf8(with_slip("s1").stdout).unwrap();
+    assert!(quiet.trim().is_empty(), "세운 표식을 안 봤다\n{quiet}");
+    assert!(!slip.exists(), "보드를 안 지은 호출이 옛 쪽지를 남겼다 — 셸이 그것을 이번 호출의 것으로 읽는다");
+}
+
+/// **상대 경로는 넘기지 않는다**(리뷰 moai-45hf.nab). 셸은 쪽지 자리와 표식 이름을 제 자리에서 푸는데
+/// `moai` 는 stdin 의 `cwd` 로 옮긴 뒤에 쪽지를 쓰고 표식을 찾는다 — 둘이 갈리면 셸은 쪽지를 못 찾거나 표식을
+/// 엉뚱한 자리에 세워, 보드가 매 프롬프트에 실렸다. 그런 경우는 옛 길로 간다: `moai` 가 표식을 바로 세운다.
+///
+/// 둘을 잰다 — 상대 `TMPDIR` 에서 오는 상대 쪽지 자리와, 빈 `TMPDIR` 이 낳는 상대 표식 이름이다(Rust 의
+/// `std::env::temp_dir` 은 빈 값을 그대로 돌려주고, 셸의 `${TMPDIR:-/tmp}` 는 `/tmp` 로 읽는다). 훅
+/// 프로세스는 stdin 의 `cwd` 와 다른 자리에서 실행한다 — 그 자리는 아무도 약속하지 않았다.
+#[test]
+fn a_relative_slip_or_mark_takes_the_old_path() {
+    use std::io::Write as _;
+    let s = init("hookslipcwd");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let shell_at = s.path().join("shell");
+    std::fs::create_dir_all(&shell_at).unwrap();
+    let tmp = s.path().join("hooktmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let prompt = |session: &str, tmpdir: &Path, slip: &Path| {
+        let mut child = staged(&["hook", "user-prompt-submit"])
+            .current_dir(&shell_at)
+            .env("TMPDIR", tmpdir)
+            .env("MOAI_HOOK_HANDOFF", slip)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let _ = child.stdin.take().unwrap().write_all(event(&s, session).as_bytes());
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    let first = prompt("rel", &tmp, Path::new("slip"));
+    assert!(carried_text(&first).contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+    assert!(!shell_at.join("slip").exists() && !s.path().join("slip").exists(), "상대 쪽지 자리에 적었다");
+    let again = prompt("rel", &tmp, Path::new("slip"));
+    assert!(again.trim().is_empty(), "상대 쪽지 자리에서 표식이 안 섰다 — 보드가 매 프롬프트에 실린다\n{again}");
+
+    let absolute = tmp.join("slip");
+    let first = prompt("empty", Path::new(""), &absolute);
+    assert!(carried_text(&first).contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+    assert!(!absolute.exists(), "상대 표식 이름을 넘겼다 — 셸은 그것을 제 자리에 세운다");
+    let again = prompt("empty", Path::new(""), &absolute);
+    assert!(again.trim().is_empty(), "빈 TMPDIR 에서 표식이 안 섰다 — 보드가 매 프롬프트에 실린다\n{again}");
+}
+
+/// **다 쓴 쪽지는 다음 쪽지를 쓸 때 걷는다**(리뷰 moai-45hf.nab). 셸은 내장만 써서 읽은 쪽지를 못 지우고
+/// `moai` 는 제 셸의 이름 하나만 걷어, 보드와 `Stop` 을 넘길 때마다 하나씩 영영 쌓였다. 오래된 쪽지만
+/// 걷는다 — 막 쓴 옆 호출의 쪽지는 그 셸이 아직 읽는 중일 수 있고, 쪽지가 아닌 표식은 세션 내내 산다.
+#[test]
+fn old_slips_are_swept_when_the_next_one_is_written() {
+    let s = init("hookslipsweep");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let tmp = s.path().join("hooktmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let old = tmp.join("moai-hook-gone-111.handoff");
+    let fresh = tmp.join("moai-hook-live-222.handoff");
+    let mark = tmp.join("moai-hook-gone-111.board");
+    for p in [&old, &fresh, &mark] {
+        std::fs::write(p, "x\n").unwrap();
+    }
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 60);
+    for p in [&old, &mark] {
+        std::fs::File::options().write(true).open(p).unwrap().set_modified(long_ago).unwrap();
+    }
+    let slip = tmp.join("moai-hook-s1-333.handoff");
+    let out = hook_at_home(
+        &s,
+        s.path(),
+        None,
+        &[("MOAI_HOOK_HANDOFF", slip.to_str().unwrap())],
+        "user-prompt-submit",
+        &event(&s, "s1"),
+    );
+    let board = carried_text(&String::from_utf8(out.stdout).unwrap());
+    assert!(board.contains("락을 잡는다"), "보드가 안 실렸다\n{board}");
+    assert!(slip.exists(), "이번 쪽지를 안 적었다");
+    assert!(!old.exists(), "오래된 쪽지를 안 걷었다 — 넘길 때마다 하나씩 쌓인다");
+    assert!(fresh.exists(), "막 쓴 쪽지를 걷었다 — 옆 셸이 아직 읽는 중일 수 있다");
+    assert!(mark.exists(), "쪽지가 아닌 표식까지 걷었다");
+}
+
 /// 실리는 글에 색이 섞이면 안 된다. 계약 JSON 안의 이스케이프는 아무도
 /// 걷어내지 않아 받는 쪽 화면에 그 글자가 그대로 뜬다.
 #[test]
@@ -14113,10 +14234,11 @@ fn skill_status_on_a_bare_machine_is_quiet_and_fine() {
 /// 알림 한 줄을 내고(moai-wnnb), 그 줄은 이제 경로까지 싣는다(moai-wza7). 그래도 **없는 갈래는
 /// 여기만 댄다** — 훅은 없을 때 조용히 0 으로 빠진다.
 ///
-/// **그 알림은 세션·이벤트마다 한 번뿐이고**(moai-f7up) **stdout 이 비었을 때만이다**(moai-mnhq).
-/// 훅이 매 도구 호출에 다시 말하지 않고, 무언가 지껄이고 죽은 바이너리에는 아예 말하지 않으니
-/// — 둘째 객체를 붙이면 `claude` 가 판정째 버린다 — 남는 자리는 여기다. `skill status` 가 대는
-/// 몫을 줄이지 않는 까닭이다(리뷰 moai-514e.hgz 가 "종료마다" 라고 적힌 이 줄을 짚었다).
+/// **그 알림은 세션·이벤트마다 한 번뿐이고**(moai-f7up) **stdout 이 판정의 꼴(`{…}`)이 아닐 때만이다**
+/// (moai-mnhq 가 "비었을 때" 로 좁혔고 moai-45hf.3do 가 꼴로 고쳤다). 훅이 매 도구 호출에 다시 말하지
+/// 않고, 판정 꼴을 내고 죽은 바이너리에는 아예 말하지 않으니 — 둘째 객체를 붙이면 `claude` 가 판정째
+/// 버린다 — 남는 자리는 여기다. `skill status` 가 대는 몫을 줄이지 않는 까닭이다(리뷰 moai-514e.hgz 가
+/// "종료마다" 라고 적힌 이 줄을 짚었다).
 #[test]
 fn skill_status_notices_a_vanished_hook_binary() {
     let s = init("skillgone");
