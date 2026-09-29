@@ -654,7 +654,8 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 실패보다 앞서지 않는다 — 둘이 함께 서는 것은 담긴 뒤 다시 읽기가 실패했을 때고,
     // 그때 사람이 할 일은 실패 쪽에 있다. 알림만으로는 급하지 않다(`✓` 가 뜻을 진다).
     // **급하지 않은 줄을 센다**(리뷰) — 아래의 `lead` 가 `!` 를 붙일지 가르는 자다. 쓰기의
-    // 알림과 담아 둔 것의 수가 그것이고, 둘만 선 배너는 고칠 것이 하나도 없다는 뜻이다.
+    // 알림, 담아 둔 것의 수, 새 판으로 올리는 줄이 그것이고, 그런 줄만 선 배너는 고칠 것이
+    // 하나도 없다는 뜻이다.
     let mut soft = 0usize;
     if let Some(n) = &app.notice {
         parts.push(n.clone());
@@ -732,8 +733,25 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 옆 워크트리의 문제는 **급하지 않다** — 제 파일은 멀쩡하고, 그 줄만 빠진 채로
     // 겹쳐 보고 있다.
     parts.extend(app.site.elsewhere.iter().cloned());
+    // **새 판이 나왔으면 올리는 한 줄을 댄다**(moai-8rmw.665, 2026-09-29 사용자 결정). 머리의 판
+    // 줄은 나왔다는 것까지만 말할 자리라, 올리는 법을 몰라 그 줄을 본 사람이 README 를 찾으러
+    // 나갔다. **줄은 도는 이 바이너리를 올리는 것이다**(`latest::upgrade_line`, 리뷰) — 고정된
+    // 한 줄은 `~/.local/bin` 만 올려, 다른 자리에 선 moai 는 그 줄을 치고도 옛 판을 돌렸다.
+    // 그 줄로 못 올리는 바이너리(소스에서 지은 판 따위)에는 안 댄다. **급하지 않다** — 고칠 것이
+    // 아니라 받을 것이 있다는 말이다. 맨 끝에 서는 것도 그래서다: 좁은 창에서 잘려도 판 줄이
+    // 여전히 새 판을 말한다.
+    //
+    // **명령 줄 자체는 나갈 때 찍는다**(리뷰, 2026-09-29 사용자 결정). 그 줄은 104칸이라 80칸
+    // 창의 배너에서 늘 잘렸고, 앞에 경고가 서면 162칸이 들었다. 배너는 새 판과 나갈 때 줄이
+    // 선다는 것만 말하고, 줄은 터미널을 걷은 뒤 셸에 남는다([`App::upgrade_note`]) — 거기서는
+    // 잘리지 않고 그대로 복사된다.
+    if let (crate::latest::Seen::Newer { tag }, Some(_)) = (app.latest(), app.upgrade()) {
+        parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
+        soft += 1;
+    }
     // 급하지 않은 것만 섰으면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
-    // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수).
+    // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수·새 판으로
+    // 올리는 줄).
     let lead = if parts.len() == soft { "" } else { "! " };
     (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
 }
@@ -5700,6 +5718,39 @@ pub(super) mod tests {
                 assert_ne!(a.trim(), b.trim(), "두 소식이 같은 글로 선다");
             }
         }
+    }
+
+    /// **새 판이 나왔을 때만 배너가 그것을 말하고, 올리는 줄은 나갈 때 낸다**(moai-8rmw.665,
+    /// 2026-09-29 사용자 결정). 판 줄은 나왔다는 것까지만 말할 자리고, 104칸짜리 명령 줄은 80칸
+    /// 배너에서 늘 잘렸다 — 그래서 배너에는 명령이 **없어야** 하고, 줄은 `App::upgrade_note` 가
+    /// 통째로 든다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다. 나머지 세 경우
+    /// (`Seen::Same`·`Seen::Ahead`·`Seen::Unasked`)와, 도는 바이너리를 그 줄로 못 올리는 경우
+    /// (`App::upgrade` 가 `None`)에는 둘 다 서지 않는다.
+    #[test]
+    fn a_newer_release_says_so_on_the_banner_and_leaves_the_line_for_the_quit() {
+        use crate::latest::Seen;
+        let line = format!("{} -s -- --dir /home/u/bin", crate::latest::UPGRADE);
+        // (배너, 나갈 때 글)
+        let both = |seen: Seen, upgrade: Option<&str>| {
+            let mut a = app();
+            // `site.warnings` 가 `!` 를 달면 이 줄이 급한지 못 가른다 — 이 줄만 세운다.
+            a.site.warnings = crate::tui::Surfaced::default();
+            a.set_latest(seen);
+            a.set_upgrade(upgrade.map(String::from));
+            (tests_banner(&mut a), a.upgrade_note())
+        };
+        let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, Some(&line));
+        assert!(banner.contains("v9.9.9"), "배너가 새 판을 안 말한다\n{banner}");
+        assert!(!banner.contains("curl"), "80칸에 잘리는 명령을 배너에 실었다\n{banner}");
+        assert!(!banner.contains('!'), "받을 것을 급한 것처럼 말한다\n{banner}");
+        let note = note.expect("나갈 때 낼 글이 없다");
+        assert!(note.contains("v9.9.9") && note.contains(&line), "도는 바이너리를 올리는 줄이 없다\n{note}");
+        for seen in [Seen::Same, Seen::Ahead, unasked_for(Trouble::NotAsked)] {
+            let (banner, note) = both(seen, Some(&line));
+            assert!(banner.is_empty() && note.is_none(), "새 판이 없는데 올리라고 한다\n{banner}\n{note:?}");
+        }
+        let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, None);
+        assert!(banner.is_empty() && note.is_none(), "그 줄로 못 올리는 바이너리에 올리라고 한다\n{banner}");
     }
 
     /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.

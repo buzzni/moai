@@ -10,6 +10,40 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui` prints the line that upgrades it when you quit, if a newer release is
+  out.** The version line in the header only had room to say that a release is out,
+  so whoever saw it went to the README to find out how. The banner now says the line
+  will be printed, and quitting leaves
+  `curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh`
+  in the shell — whole, where the banner cut it at 80 columns — with
+  `-s -- --dir <dir>` added when the running `moai` lives under your home but not
+  in `~/.local/bin`. A build from source (a cargo `target/` or `cargo install`), a
+  `moai` outside your home and a machine the releases do not cover get no line — a
+  line that does not upgrade the binary you are running is worse than none. It is not
+  marked urgent: there is something to receive, not something to fix.
+
+### Changed
+
+- **The install one-liner upgrades.** When the `moai` already in the install
+  directory is this moai — `install.sh` runs it, and it answers `--version` with
+  `moai <version>` and `merge-driver --help` with this tool's first line, as every
+  release from 0.1.0 on does — it is replaced without `--force`, and the installer
+  says which version it went from and to. The same version downloads nothing and
+  exits 0. A `moai` newer than the latest release is left alone unless you ask for an
+  older release with `--version`, which replaces it and says it is going down.
+  `--force` is for what the installer will not replace on its own — another tool
+  called `moai`, or a symlink — and for fetching the same version again. The README
+  used to promise that an existing `moai` is never overwritten without `--force`;
+  over this moai it now is.
+- **What the installer will not replace is refused before anything is downloaded**,
+  and the refusal prints the line to run again with `--force` added — in both the
+  pipe form and the file form, carrying the directory and version you gave, and
+  `MOAI_REPO` when it is not the default. A directory at `<dir>/moai` is refused even
+  with `--force`, and an install directory that cannot be made or written stops
+  before the download too.
+
 ### Fixed
 
 - **Commands that draw no time stay quiet on a machine without zoneinfo.** `moai ready`

@@ -61,6 +61,17 @@ commands as you, and the contents of the repository you point the tool at.
 ## What the installer guarantees
 
 `install.sh` downloads the archive and `SHA256SUMS` from the GitHub release,
-compares them, and stops if it cannot. It also refuses to overwrite an existing
-`moai` unless you pass `--force`. Signed artifacts and an SBOM are planned; they
-are not there yet, so today the trust root is the GitHub release itself.
+compares them, and stops if it cannot. Signed artifacts and an SBOM are planned;
+they are not there yet, so today the trust root is the GitHub release itself.
+
+It replaces an existing `moai` without `--force` only when that file answers as
+this moai, and to find out it **runs the file** before downloading anything:
+`--version`, then `merge-driver --help`, each with stdin from `/dev/null` and,
+where a working `timeout` exists, ten seconds (stock macOS has none, so there it
+waits for as long as the file takes). The file runs with the installer's
+privileges — under `sudo`, as root — so install as root only into a directory
+that only root can write to. Those answers tell this moai apart from another
+tool of the same name; they are not a proof, since any program can give them.
+A symlink or a directory at that path is never taken for this moai. Anything it
+does not recognise is refused unless you pass `--force`, which replaces it
+without running it; a directory is refused even then.

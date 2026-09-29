@@ -1013,6 +1013,11 @@ pub struct App {
     /// 새 판을 묻는 딴 실 — **한 판에 하나만 띄운다.** 손잡이를 드는 것이 그 하나를 세는 자다
     /// ([`crate::latest::spawn`]). 끝에서 기다리지는 않는다.
     latest_job: Option<crate::latest::Job>,
+    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_line`], 리뷰). 새 판이 나왔을 때
+    /// 배너가 댄다. `None` 이면 그 줄로는 이 바이너리를 못 올린다 — 소스에서 지었거나, 판을 안
+    /// 내는 기계거나, 누가 채웠는지 모르는 자리다. 파일 시스템을 보므로 [`App::ask_latest`] 가
+    /// 여는 걸음에 한 번 채운다.
+    upgrade: Option<String>,
     /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
     /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
     chord: keys::Chord,
@@ -1538,6 +1543,7 @@ impl App {
             pending: None,
             latest: crate::latest::Seen::Unasked(crate::latest::Why::not_asked()),
             latest_job: None,
+            upgrade: None,
             chord: keys::Chord::default(),
             discarded: Vec::new(),
             let_go: 0,
@@ -2176,6 +2182,7 @@ impl App {
             return;
         }
         self.latest = crate::latest::held(&dir, &url);
+        self.upgrade = crate::latest::upgrade_here();
         let now = self.site.now.clone();
         self.latest_job = crate::latest::spawn(dir, url, now, crate::latest::WINDOW);
     }
@@ -2206,6 +2213,30 @@ impl App {
     #[cfg(test)]
     pub fn set_latest(&mut self, seen: crate::latest::Seen) {
         self.latest = seen;
+    }
+
+    /// 도는 이 바이너리를 올리는 한 줄. 새 판이 나왔으면 배너가 그것이 있다고 말하고, 줄 자체는
+    /// 나갈 때 [`App::upgrade_note`] 가 낸다.
+    pub fn upgrade(&self) -> Option<&str> {
+        self.upgrade.as_deref()
+    }
+
+    /// 탐색기를 끝낸 뒤 셸에 남길 글 — 새 판이 나왔고 이 바이너리를 올릴 줄이 있을 때만 선다
+    /// (moai-8rmw.665, 2026-09-29 사용자 결정). **배너에 두지 않는 까닭**: 그 줄은 104칸이라 80칸
+    /// 창에서 늘 잘렸다. 터미널을 걷은 뒤의 셸에서는 잘리지 않고 그대로 복사된다.
+    pub fn upgrade_note(&self) -> Option<String> {
+        let (crate::latest::Seen::Newer { tag }, Some(line)) = (&self.latest, self.upgrade.as_deref()) else {
+            return None;
+        };
+        // 말묶음은 한 줄이라 명령은 여기서 제 줄에 세운다 — 들여 쓴 줄이라 골라 복사하기 쉽다.
+        let said = crate::i18n::fill(crate::i18n::say(self.site.lang, "tui.quit.upgrade"), &[("tag", tag)]);
+        Some(format!("{said}\n\n  {line}\n"))
+    }
+
+    /// 올리는 줄을 손으로 세운다 — 진짜 길은 [`App::ask_latest`] 가 도는 바이너리의 자리로 고른다.
+    #[cfg(test)]
+    pub fn set_upgrade(&mut self, line: Option<String>) {
+        self.upgrade = line;
     }
 
     /// 새 커밋 표가 필요하면(`commits_due`) 짓는 스레드를 띄우고, 다 지었으면 받는다(moai-a4i0).

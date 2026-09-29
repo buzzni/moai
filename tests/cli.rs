@@ -18100,7 +18100,8 @@ fn the_files_the_release_packs_are_all_there() {
 #[cfg(unix)]
 #[test]
 fn what_the_receiver_curls_is_main() {
-    for name in ["README.md", "install.sh"] {
+    // `src/latest.rs` 는 탐색기가 새 판을 알릴 때 대는 한 줄을 든다(moai-8rmw.665).
+    for name in ["README.md", "install.sh", "src/latest.rs"] {
         let text = std::fs::read_to_string(at_root(name)).unwrap();
         for (n, line) in text.lines().enumerate() {
             let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };
@@ -18212,6 +18213,14 @@ fn printing_the_target_runs_the_platform_table() {
 /// 네트워크를 타지 않는다.
 #[cfg(unix)]
 fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
+    install_cmd(base, dir, more)
+        .output()
+        .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
+}
+
+/// [`install`] 이 부를 명령. 환경을 더 얹을 시험이 쓴다.
+#[cfg(unix)]
+fn install_cmd(base: &Path, dir: &Path, more: &[&str]) -> Command {
     let mut cmd = isolated("sh");
     cmd.arg(at_root("install.sh"))
         .args(more)
@@ -18219,9 +18228,41 @@ fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
         .env("MOAI_VERSION", "v9.9.9")
         .env("MOAI_INSTALL_DIR", dir)
         .env("MOAI_TARGET", FAKE_TARGET)
-        .output()
-        .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
+        // **최신 판을 묻는 자리도 받을 것이 없는 곳이다**(리뷰). 판을 걷는 시험이 이것까지 안 걷으면
+        // `install.sh` 가 GitHub 에 묻는다 — 거절이 물음보다 뒤로 밀리는 날 시험이 조용히 바깥을
+        // 두드리고, 그물이 없는 기계에서만 붉어진다. 최신 판을 재는 시험은 이것을 덮는다.
+        .env("MOAI_API_URL", format!("file://{NOWHERE}/latest.json"))
+        // 거울에서 깐 사람의 셸에 서 있을 수 있다 — 새면 거절문이 싣는 주소가 사람마다 달라진다.
+        .env_remove("MOAI_REPO");
+    cmd
 }
+
+/// 깔 자리에 먼저 선 `moai` 를 흉내 낸다. `ours` 면 이 moai 만 하는 대답
+/// (`merge-driver --help` 의 첫 줄)까지 한다 — `install.sh` 가 가르는 자가 그것이다.
+/// 아니면 `--version` 꼴만 같은 남의 바이너리다(옛 moai 프로젝트가 그렇다). 진짜
+/// 바이너리가 같은 대답을 하는지는 [`the_real_binary_is_recognised_as_this_moai`] 가 잰다.
+///
+/// **[`write_exe`] 로 놓는다**(리뷰) — `install.sh` 가 이 파일을 돌리므로, 이 프로세스가 쓰면
+/// 옆 시험의 fork 가 쓰기 fd 를 물고 있다가 ETXTBSY 로 돌기를 막는다. 그러면 이 moai 가
+/// 남의 것으로 읽혀 거절되는데, 그것이 바로 이 시험들이 재는 답이라 가끔만 붉어진다.
+#[cfg(unix)]
+fn placed_moai(dir: &Path, version: &str, ours: bool) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let answer = if ours {
+        "echo 'Called by git. Merges issues.jsonl per issue, three-way'"
+    } else {
+        "echo \"error: unrecognized subcommand 'merge-driver'\" >&2; exit 2"
+    };
+    let body = format!(
+        "#!/bin/sh\ncase $1 in\n--version) echo 'moai {version}' ;;\nmerge-driver) {answer} ;;\n*) exit 2 ;;\nesac\n"
+    );
+    write_exe(&dir.join("moai"), &body);
+    body
+}
+
+/// 받을 것이 없는 자리. 여기를 가리키고도 0 으로 끝난 경우는 **안 받고** 끝났다는 증거다.
+#[cfg(unix)]
+const NOWHERE: &str = "/moai-nowhere";
 
 /// 설치 시험이 지어 두는 가짜 릴리스의 타깃 이름. **이 기계에 맞는 판이 있든 없든
 /// 같다**(moai-utya) — 재는 것은 설치 길이지 어느 플랫폼에 내는가가 아니다. 이름을
@@ -18331,6 +18372,374 @@ fn an_existing_moai_is_not_overwritten_without_being_told_to() {
     let forced = install(&base, &dir, &["--force"]);
     assert!(forced.status.success(), "--force 로도 못 덮었다\n{}", text(&forced));
     assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), "남의 moai", "--force 인데 안 덮었다");
+}
+
+/// **깔린 것이 이 moai 면 `--force` 없이 판을 올린다**(moai-8rmw.lj5). 같은 한 줄이 처음
+/// 깔기와 올리기를 함께 한다 — 올릴 때마다 `--force` 를 요구하면 사람은 그것을 늘 붙이게
+/// 되고, 그러면 남의 바이너리를 덮는 날에도 아무 말 없이 지나간다.
+#[cfg(unix)]
+#[test]
+fn an_older_moai_of_ours_is_upgraded_without_force() {
+    let s = Scratch::new("install-upgrade");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    let old = placed_moai(&dir, "0.1.2", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "이 moai 의 옛 판을 못 올렸다\n{}", text(&out));
+    assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), old, "올렸다면서 안 덮었다");
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("0.1.2 에서 9.9.9 로 올린다"), "판이 어떻게 바뀌는지 안 말한다\n{said}");
+}
+
+/// **같은 판이면 받지 않는다.** 받을 것이 없는 자리를 가리켜도 0 으로 끝나야 한다 — 그래야
+/// 받기 전에 끝났다는 것이 선다. `--force` 는 같은 판도 다시 받는다.
+#[cfg(unix)]
+#[test]
+fn the_same_version_is_not_downloaded_again() {
+    let s = Scratch::new("install-same");
+    let dir = s.path().join("bin");
+    let same = placed_moai(&dir, "9.9.9", true);
+
+    let out = install(Path::new(NOWHERE), &dir, &[]);
+    assert!(out.status.success(), "같은 판에서 멈췄다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("이미 9.9.9"), "같은 판이라고 안 말한다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), same, "같은 판인데 건드렸다");
+
+    let (base, _) = fake_release(&s);
+    let forced = install(&base, &dir, &["--force"]);
+    assert!(forced.status.success(), "--force 로 다시 못 받았다\n{}", text(&forced));
+    assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), same, "--force 인데 다시 안 받았다");
+}
+
+/// **판을 내리는 것도 덮되, 내린다고 말한다.** `--version` 으로 옛 판을 고른 사람은 그것을
+/// 원한 것이지만, 모르고 내린 사람에게는 그 한 줄이 유일한 단서다. 여기서 판을 준 것은
+/// [`install_cmd`] 의 `MOAI_VERSION` 이다 — 판을 안 준 한 줄은 안 내린다
+/// ([`a_newer_moai_of_ours_is_left_alone_when_no_version_is_given`]).
+#[cfg(unix)]
+#[test]
+fn a_newer_moai_of_ours_is_downgraded_and_says_so() {
+    let s = Scratch::new("install-downgrade");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "10.0.0", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "판을 못 내렸다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("10.0.0 에서 9.9.9 로 내린다"), "내린다고 안 말한다\n{said}");
+}
+
+/// **`--version` 꼴만 같은 남의 바이너리는 받기 전에 거절한다**(moai-8rmw.lj5·2mo·t8y).
+/// 옛 moai 프로젝트의 바이너리가 같은 이름과 같은 `moai <판>` 을 쓴다 — `--version` 하나로
+/// 가르면 그쪽을 덮어 그 저장소의 훅이 깨진다. 거절은 받기 전에 온다(받을 것이 없는 자리를
+/// 가리켜도 받기 실패가 아니라 거절이 먼저 선다). 거절문은 다시 칠 줄을 두 꼴로 준다.
+#[cfg(unix)]
+#[test]
+fn a_foreign_moai_is_refused_before_downloading_with_a_line_to_run() {
+    let s = Scratch::new("install-foreign");
+    let dir = s.path().join("bin");
+    let theirs = placed_moai(&dir, "0.1.2", false);
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("MOAI_REPO", "someone/fork").output().unwrap();
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), theirs, "말없이 덮었다");
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!said.contains("못 받았다"), "거절보다 받기가 먼저 왔다\n{said}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).is_empty(),
+        "받기 전에 거절해야 하는데 무언가 시작했다\n{}",
+        text(&out)
+    );
+    // 받는 사람이 준 값(여기서는 환경으로 준 자리와 판)과 저장소가 그대로 실린다.
+    let again = format!(" --force --dir {} --version v9.9.9", dir.display());
+    assert!(
+        said.contains(&format!(
+            "curl -fsSL https://raw.githubusercontent.com/someone/fork/main/install.sh | MOAI_REPO=someone/fork sh -s --{again}"
+        )),
+        "파이프로 칠 줄이 없다\n{said}"
+    );
+    assert!(said.contains(&format!("MOAI_REPO=someone/fork sh install.sh{again}")), "파일로 칠 줄이 없다\n{said}");
+}
+
+/// 거절문의 줄에 실리는 값은 셸이 그대로 읽는 꼴로 싸인다 — 빈칸이 든 자리를 싸지 않으면
+/// 옮겨 친 줄이 다른 자리를 가리킨다. 기본 저장소면 `MOAI_REPO` 를 싣지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_refusal_line_quotes_what_the_shell_would_split() {
+    let s = Scratch::new("install-quote");
+    let dir = s.path().join("my bin");
+    placed_moai(&dir, "0.1.2", false);
+
+    // 판도 자리도 **준 것만** 싣는지 보려고 `install_cmd` 가 환경으로 주는 둘을 걷는다 — 나머지
+    // 격리(`MOAI_REPO`·최신 판을 묻는 자리)는 그 함수 하나에서 온다.
+    let given = dir.display().to_string();
+    let out = install_cmd(Path::new(NOWHERE), &dir, &["--dir", &given])
+        .env_remove("MOAI_VERSION")
+        .env_remove("MOAI_INSTALL_DIR")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        said.contains(&format!("install.sh | sh -s -- --force --dir '{}'\n", dir.display())),
+        "빈칸이 든 자리를 안 쌌거나 주지 않은 값을 실었다\n{said}"
+    );
+    assert!(!said.contains("MOAI_REPO"), "기본 저장소인데 MOAI_REPO 를 실었다\n{said}");
+}
+
+/// **만들 수 없는 자리면 받기 전에 끝낸다**(moai-8rmw.2mo).
+#[cfg(unix)]
+#[test]
+fn an_unmakeable_dir_stops_before_downloading() {
+    let s = Scratch::new("install-nodir");
+    let file = s.path().join("a-file");
+    std::fs::write(&file, "").unwrap();
+    let out = install(Path::new(NOWHERE), &file.join("bin"), &[]);
+    assert!(!out.status.success(), "못 만드는 자리에 깔았다고 한다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("못 만들었다") && !said.contains("못 받았다"), "받기가 먼저 왔다\n{said}");
+}
+
+/// **깔린 진짜 바이너리가 이 moai 로 읽힌다**(리뷰). `install.sh` 는 `merge-driver --help` 의 첫
+/// 줄(`src/cli.rs` 의 `MergeDriver` 설명)로 이 moai 를 가르는데, 다른 시험은 그 글을 베낀 가짜
+/// ([`placed_moai`])만 돌린다 — 그 설명을 고쳐도 모두 푸르게 선 채, 새 글을 단 판부터 올리기가
+/// 모두 거절된다. 여기서 진짜 바이너리로 잰다. `--version` 의 꼴도 함께 선다.
+#[cfg(unix)]
+#[test]
+fn the_real_binary_is_recognised_as_this_moai() {
+    let s = Scratch::new("install-real");
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    place_exe(Path::new(BIN), &dir.join("moai"));
+    let ver = env!("CARGO_PKG_VERSION");
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("MOAI_VERSION", format!("v{ver}")).output().unwrap();
+    assert!(out.status.success(), "진짜 moai 를 남의 것으로 읽었다\n{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains(&format!("이미 {ver} 이다")),
+        "같은 판이라고 안 말한다\n{}",
+        text(&out)
+    );
+}
+
+/// **판을 안 준 한 줄은 앞선 판을 안 내린다**(리뷰, moai-8rmw.lj5). 판을 내리는 것은 `--version`
+/// 으로 옛 판을 고른 때다 — 최신 판을 물어 채운 한 줄이 소스에서 지은 판이나 먼저 골라 깐
+/// 앞판을 되돌리면, 새 판 알림을 따라 친 사람이 제 판을 잃는다.
+#[cfg(unix)]
+#[test]
+fn a_newer_moai_of_ours_is_left_alone_when_no_version_is_given() {
+    let s = Scratch::new("install-ahead");
+    let dir = s.path().join("bin");
+    let ahead = placed_moai(&dir, "10.0.0", true);
+    let latest = s.path().join("latest.json");
+    std::fs::write(&latest, r#"{"tag_name": "v9.9.9"}"#).unwrap();
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[])
+        .env_remove("MOAI_VERSION")
+        .env("MOAI_API_URL", format!("file://{}", latest.display()))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "앞선 판 앞에서 멈췄다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("앞선 10.0.0 이다"), "앞섰다고 안 말한다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), ahead, "판을 안 줬는데 내렸다");
+}
+
+/// **오르는지 내리는지 모르면 안 가른다**(리뷰). 수가 같고 글만 다른 두 판(`9.9.9-rc1` 과
+/// `9.9.9`)을 `order` 는 `ne` 로 내는데, 그것을 "올린다" 로 말하던 판은 `9.9.9` 에서
+/// `9.9.9-rc1` 로 가는 내림까지 올린다고 했다.
+#[cfg(unix)]
+#[test]
+fn a_moai_that_differs_only_after_the_numbers_is_changed_not_upgraded() {
+    let s = Scratch::new("install-ne");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "9.9.9-rc1", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("9.9.9-rc1 에서 9.9.9 로 바꾼다"), "방향을 모르는데 말했다\n{said}");
+    assert!(!said.contains("로 올린다") && !said.contains("로 내린다"), "방향을 모르는데 말했다\n{said}");
+}
+
+/// **링크는 `--force` 없이 안 덮는다**(리뷰). 링크 너머가 이 moai 여도 `mv` 는 링크 자체를 보통
+/// 파일로 바꾸고, 가리키던 바이너리(소스에서 지은 판 따위)는 옛 판 그대로 남는다.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_moai_is_not_replaced_without_force() {
+    let s = Scratch::new("install-link");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = s.path().join("src");
+    let body = placed_moai(&real, "0.1.2", true);
+    std::os::unix::fs::symlink(real.join("moai"), dir.join("moai")).unwrap();
+
+    let out = install(&base, &dir, &[]);
+    assert!(!out.status.success(), "링크를 말없이 덮었다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("링크"), "왜 멈췄는지 안 말한다\n{}", text(&out));
+    assert!(dir.join("moai").is_symlink(), "링크가 사라졌다");
+
+    let forced = install(&base, &dir, &["--force"]);
+    assert!(forced.status.success(), "--force 로도 못 덮었다\n{}", text(&forced));
+    assert!(!dir.join("moai").is_symlink(), "--force 인데 링크가 그대로다");
+    assert_eq!(std::fs::read_to_string(real.join("moai")).unwrap(), body, "링크 너머를 건드렸다");
+
+    // 가리키는 것이 사라진 링크도 링크다(`cargo clean` 뒤의 개발 판) — `-e` 만 보면 링크를 따라가
+    // 거짓이 되어, 묻지도 거절하지도 않고 갈아 끼웠다.
+    let gone = s.path().join("gone");
+    std::fs::create_dir_all(&gone).unwrap();
+    std::os::unix::fs::symlink(s.path().join("cleaned").join("moai"), gone.join("moai")).unwrap();
+    let dangling = install(&base, &gone, &[]);
+    assert!(!dangling.status.success(), "가리키는 것이 사라진 링크를 말없이 갈았다\n{}", text(&dangling));
+    assert!(gone.join("moai").is_symlink(), "링크가 사라졌다");
+}
+
+/// **디렉터리는 `--force` 로도 안 덮는다**(리뷰). `mv` 가 받은 것을 그 **안으로** 옮기고 깔았다고
+/// 말해, 그 자리에는 돌릴 것이 하나도 안 남았다 — 거절문의 `--force` 줄이 사람을 그 길로 보냈다.
+#[cfg(unix)]
+#[test]
+fn a_directory_named_moai_is_never_installed_into() {
+    let s = Scratch::new("install-dirmoai");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(dir.join("moai")).unwrap();
+
+    for more in [&[][..], &["--force"][..]] {
+        let out = install(&base, &dir, more);
+        assert!(!out.status.success(), "{more:?}: 디렉터리 안에 깔았다고 한다\n{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(said.contains("디렉터리"), "{more:?}: 왜 멈췄는지 안 말한다\n{said}");
+    }
+    assert_eq!(std::fs::read_dir(dir.join("moai")).unwrap().count(), 0, "디렉터리 안에 무언가 놓였다");
+}
+
+/// **쓸 수 없는 자리는 받기 전에 끝낸다**(리뷰). 안 보면 올린다·받는다·checksums 가 맞다까지
+/// 다 말한 뒤 `cp` 의 날 오류로 죽었다. 같은 판이면 쓸 일이 없으니 그대로 0 이다.
+#[cfg(unix)]
+#[test]
+fn an_unwritable_dir_stops_before_downloading() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("install-readonly");
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "0.1.2", true);
+    let lock = |mode| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    lock(0o555);
+    // root 는 권한 비트를 안 탄다 — 그 기계에서는 잴 것이 없다.
+    if std::fs::write(dir.join("probe"), "").is_ok() {
+        lock(0o755);
+        return;
+    }
+    let out = install(Path::new(NOWHERE), &dir, &[]);
+    lock(0o755);
+    assert!(!out.status.success(), "쓸 수 없는 자리에 깔았다고 한다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("쓸 수 없다") && !said.contains("못 받았다"), "받기가 먼저 왔다\n{}", text(&out));
+
+    placed_moai(&dir, "9.9.9", true);
+    lock(0o555);
+    let same = install(Path::new(NOWHERE), &dir, &[]);
+    lock(0o755);
+    assert!(same.status.success(), "같은 판인데 쓸 자리를 따졌다\n{}", text(&same));
+}
+
+/// **같은 판이어도 PATH 에서 먼저 서는 옛 moai 를 댄다**(리뷰). 새 판 알림을 보고 친 사람이
+/// "이미 … 이다" 만 듣고 끝나면, PATH 가 먼저 고르는 옛 판을 계속 돌리며 같은 알림을 다시
+/// 본다 — 받아서 깐 경우만 그 말을 했다.
+#[cfg(unix)]
+#[test]
+fn the_same_version_still_names_an_older_moai_first_on_path() {
+    let s = Scratch::new("install-shadow");
+    let shadow = s.path().join("shadow");
+    placed_moai(&shadow, "0.1.2", true);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "9.9.9", true);
+    let path = format!("{}:{}", shadow.display(), std::env::var("PATH").unwrap_or_default());
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", path).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        said.contains(&format!("PATH 에는 {} 가 먼저 선다", shadow.join("moai").display())),
+        "PATH 에서 먼저 서는 옛 moai 를 안 댄다\n{}",
+        text(&out)
+    );
+
+    // **같은 파일은 철자가 달라도 같은 moai 다**(`-ef`, 리뷰). PATH 에 선 자리 끝에 `/` 가
+    // 붙었다고(dash 의 `command -v` 는 `…//moai` 로 댄다) 딴 moai 가 먼저 선다고 말하지 않는다.
+    let slashed = format!("{}/:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+    let same = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", slashed).output().unwrap();
+    assert!(same.status.success(), "{}", text(&same));
+    assert!(
+        !String::from_utf8_lossy(&same.stderr).contains("먼저 선다"),
+        "같은 파일을 두고 딴 moai 가 먼저 선다고 한다\n{}",
+        text(&same)
+    );
+}
+
+/// **물은 바이너리가 남긴 하위 프로세스가 설치를 붙들지 않는다**(리뷰). 답을 파이프로 받던 판은
+/// 표준 출력을 쥔 하위 프로세스가 살아 있는 동안 — 데몬이면 영영 — 멈춰 섰다. `timeout` 은 물은
+/// 것이 이미 끝났으니 할 일이 없어 이것을 못 끊는다. 가짜가 남기는 하위 프로세스는 멈춤 표지가
+/// 서거나 제 자리가 사라지면 끝난다 — 고치기 전의 스크립트가 시험을 영영 붙들지 않게.
+#[cfg(unix)]
+#[test]
+fn a_child_left_holding_the_answer_does_not_hang_the_install() {
+    let s = Scratch::new("install-held");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stop = s.path().join("stop");
+    write_exe(
+        &dir.join("moai"),
+        &format!(
+            "#!/bin/sh\ncase $1 in\n--version)\n  (n=0; while [ -d '{d}' ] && [ ! -e '{stop}' ] && [ $n -lt 600 ]; do sleep 0.1; n=$((n + 1)); done) &\n  echo 'moai 0.1.2' ;;\nmerge-driver) echo 'Called by git. Merges issues.jsonl per issue, three-way' ;;\n*) exit 2 ;;\nesac\n",
+            d = dir.display(),
+            stop = stop.display()
+        ),
+    );
+
+    let mut child = install_cmd(&base, &dir, &[]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let mut done = None;
+    for _ in 0..200 {
+        if let Some(status) = child.try_wait().unwrap() {
+            done = Some(status);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // 멈춤 표지를 세워 붙들린 경우를 놓는다 — 그다음에 끝났다면 표지가 풀어 준 것이다.
+    std::fs::write(&stop, "").unwrap();
+    let status = match done {
+        Some(status) => status,
+        None => child.wait().unwrap(),
+    };
+    assert!(done.is_some(), "물은 바이너리의 하위 프로세스가 설치를 붙들었다");
+    assert!(status.success(), "하위 프로세스를 남긴 이 moai 를 못 올렸다");
+}
+
+/// **`timeout` 이 그 꼴로 돌지 않으면 마감 없이 묻는다**(리뷰). BusyBox 1.30 전의 `timeout` 은
+/// `-t 초` 를 받아 `10` 을 프로그램으로 돌렸고, 그대로 쓰던 판은 물음이 늘 실패해 이 moai 까지
+/// 남의 것으로 읽었다. 그 꼴로 도는 가짜 `timeout` 을 PATH 앞에 세운다.
+#[cfg(unix)]
+#[test]
+fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
+    let s = Scratch::new("install-oldtimeout");
+    let (base, _) = fake_release(&s);
+    let shim = s.path().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    // BusyBox 1.29 의 꼴: `timeout [-t SECS] [-s SIG] PROG ARGS` — 옵션 뒤 첫 낱말이 프로그램이다.
+    write_exe(
+        &shim.join("timeout"),
+        "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in -t | -s) shift 2 ;; *) break ;; esac\ndone\nexec \"$@\"\n",
+    );
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "0.1.2", true);
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+
+    let out = install_cmd(&base, &dir, &[]).env("PATH", path).output().unwrap();
+    assert!(out.status.success(), "이 moai 를 남의 것으로 읽었다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("0.1.2 에서 9.9.9 로 올린다"), "{}", text(&out));
 }
 
 /// `scripts/bump-version.sh` 는 두 파일을 **함께** 움직인다(moai-jy55). 하나만
