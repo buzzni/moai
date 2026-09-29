@@ -252,9 +252,44 @@ const BESIDE: &str = "Work running alongside: <other work> — do not touch thos
 /// 받는다 — 거둔 일은 4-1 부터만 이어 받아, 머리에 없으면 8 의 병합 말고는 트래커 커밋이 대조
 /// 없이 엉뚱한 HEAD 에 선다.
 const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on that
-branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-the wrong HEAD leaves no reference at all once `branch -d` runs"#;
+branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+(detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+    **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+    it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+    refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+    left in that worktree go back in with EnterWorktree(path)"#;
+
+/// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
+/// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
+/// 판정은 "위험하다" 가 아니라 **"확인 불가"** 다.
+///
+/// 2026-09-29 에 이 저장소의 전사 246개(561MB)를 훑어 **714건**을 셌다. 복합 명령이 든 것이
+/// 608건(85%)이고, 꾸밈 하나 없는 단일 명령 28건은 전부 `git -C <루트>` 처럼 **과녁이 밖**인
+/// 것이었다. 그 28건 안에 옛 [`BRANCH_CHECK`] 가 이르던 `git -C <root> symbolic-ref -q HEAD`
+/// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
+///
+/// **일꾼과 거둔 일이 같은 글을 받는다** — 한쪽만 고치면 그 글을 안 읽는 쪽이 회차마다 다시
+/// 걸린다.
+const GIT_SHAPES: &str = r#"**Git in a worktree session: one plain command per call.** The harness reads each Bash call
+and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+refusals in all.
+- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+  compound commands (`&&`, `;`, `||`)
+- `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+  When the message runs past one line, write it with Write and use `git commit -F <that file>`
+- Several git steps in a row: put them in a script file and call it as a bare
+  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+  refused had `&&`, a pipe or `$PWD` after them
+- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+  `computed at runtime` (119 cases)
+- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+  session has not committed yet"#;
 
 /// 밖의 idea 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -262,15 +297,24 @@ the wrong HEAD leaves no reference at all once `branch -d` runs"#;
 const MILESTONE_ATTACH: &str = "moai edit <epic> --milestone <milestone>";
 
 /// 그 마일스톤 id 를 **어디서 베끼는가**(리뷰 moai-9tlp.67r 3번·11번). 혼자 펼치는 세션의 글과
-/// 감독의 3 이 같은 자리를 대는데, 두 벌로 적힌 첫 판은 둘 다 `moai ready` 의 **머리**라고 적어
-/// 있지도 않은 자리를 가리켰다 — 도는 마일스톤은 목록 **아래** 한 줄에 선다(AGENTS 블록의
-/// "The language on screen" 위 절이 같은 말을 한다). 한 자리에서 나오게 해 두면 다음에 화면이
-/// 바뀌어도 고칠 곳이 하나다.
-const MILESTONE_FROM: &str = "the line `moai ready` prints under its list for the running milestone";
+/// 감독의 3 이 같은 자리를 대므로 한 자리에서 나오게 둔다 — 다음에 화면이 바뀌어도 고칠 곳이 하나다.
+///
+/// **2026-09-25 에 가리키는 자리가 바뀌었다**(리뷰 moai-pdlp.4ox 2번). 도는 마일스톤을 제 손으로
+/// 달지 않기로 한 뒤에는 `moai ready` 가 대는 **도는** 릴리스가 베낄 값이 아니다 — 베낄 것은 그
+/// 생각이 이미 선 릴리스이고, 그것을 내주는 자는 `moai show --milestone` 하나다(그 절이 같은 말을
+/// 한다). 옛 자리를 그대로 두면 글이 시키는 대로 베낀 값이 곧 규칙이 막는 값이 된다.
+const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that idea under";
 
 /// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
-const SUBDIR: &str = r#"cd "$(git -C <root> rev-parse --show-prefix)""#;
+///
+/// **자리를 감독이 채운다**(리뷰 moai-rgp9.sdj 1번). 옛 줄은
+/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 [`GIT_SHAPES`] 가 거절된다고
+/// 적어 둔 두 꼴을 동시에 든다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다.
+/// 게다가 이 걸음은 **워크트리 안으로** 드는 것이라 `ExitWorktree` 로 피할 수도 없었다. 감독은
+/// 2 의 스크립트에서 이미 그 상대 경로를 `subdir` 줄로 읽으므로, 값을 채워 보내면 일꾼은 `cd` 만
+/// 한다. 꼭대기 프로젝트에는 그 줄이 안 서고 이 걸음도 없다.
+const SUBDIR: &str = "cd <subdir>";
 
 /// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
 /// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
@@ -311,7 +355,9 @@ no epic at all, and on a group row it never stands. One row reads the two keys a
 each other: where the same id stands twice and the other line is a different `kind`,
 this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
 picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
-`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`duplicate_id` on the board names that id. A row below an id that stands twice, where
+the lines hand down different answers, is counted into no group either — which line
+it hangs from cannot be told — and `twin_parent` names it. Two surfaces carry neither key —
 `rm --json` hands the removed lines back exactly as the file held them, and `tui
 --json` prints the explorer's own shorter row — and there you read the epic off the id.
 
@@ -363,10 +409,12 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-**If a milestone is running, give the plan that milestone** — `moai add --from -
---milestone <id>`. It goes onto the epics the plan creates and the members inherit
-it; without it the whole plan stands outside the release, and of it `moai ready`
-then hands out only what is `p0`.
+**A running milestone is the person's to fill.** When one is running, ask in the same
+breath as the plan whether this bundle belongs in it, and attach it only on a yes —
+`moai add --from - --milestone <id>`. It goes onto the epics the plan creates and the
+members inherit it; without it the whole plan stands outside the release, and of it
+`moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
+because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body -` and
@@ -553,21 +601,26 @@ where a row belongs, on every surface.
 already the owner — its members inherit its milestone, and writing the idea's over
 theirs would stand one bundle in two places.
 
-**If what came over is not the milestone that is running, hang the running one on
-the epic yourself** — or clear it with `--milestone none` when nothing is running.
-`promote` carries the release it stands in whatever state that release is in, so
-that covers an idea parked with no milestone, one parked under a release that has
-since shipped, and one parked under a milestone since deferred. Without this the
-epic stands outside the release and every member under it is work picked up from
-outside it, of which `moai ready` hands out only what is `p0`; and under a
-deferred milestone the whole plan is out of the plan the moment it is created —
-not in `ready`, not in `held`, and no warning says so. **A dead release is said
-out loud**: unfolding into a deferred or closed milestone prints one line on
-stderr naming it, and nothing is blocked.
+**If what came over is not the release that is running, leave it where it stands.**
+Work is never pulled into a running release, so the epic stays outside it and what
+you do is say so — the person attaches it, with this line, if it belongs in the
+release:
 
     {MILESTONE_ATTACH}
 
-Copy that id off {MILESTONE_FROM}. What is checked is the shape
+`promote` carries the release the idea stands in whatever state that release is in,
+so an idea parked with no milestone, one parked under a release that has since
+shipped, and one parked under a milestone since deferred all come over exactly as
+they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
+the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
+been deferred. What standing outside costs meanwhile: every member under that epic
+is work picked up from outside the running release, of which `moai ready` hands out
+only what is `p0`; and under a deferred milestone the whole plan is out of the plan
+the moment it is created — not in `ready`, not in `held`, and no warning says so.
+**A dead release is said out loud**: unfolding into a deferred or closed milestone
+prints one line on stderr naming it, and nothing is blocked.
+
+The id in that line is {MILESTONE_FROM}. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
 `dangling_milestone` warning."#
     )
@@ -665,8 +718,18 @@ column, it is running. There is no command that opens it and no new field.
   running, and how many it held back, is one line under the list; on the board it is a `moai status` notice
 - **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
   slot. In the ordering `p0` comes first and the milestone second
+- **Work is never pulled into a running milestone.** What ships was decided before it
+  started, and three doors put work in afterwards — the person opens two of them. They
+  attach it (`moai edit <id> --milestone <milestone>`); or they say yes to a plan you
+  showed them and you attach it in that same breath (fork 3); or it came out of a member
+  you are working on and is created inside that member's epic (`-e <that epic>`), where
+  the release is inherited. Writing `--milestone <the running one>` on a row that stood
+  outside, or moving such a row under an epic that is in it, is none of those three: it is
+  you deciding what the release contains, so say it to the person and leave the row where
+  it is
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
-  through. What is already picked up is simply finished — the same ground as never taking work back late
+  through, and so does a `--milestone` that carries a row in — the rule above is a rule
+  for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
@@ -1294,6 +1357,7 @@ pub fn supervise() -> String {
     let epic_rule = epic_review_rule();
     let reclaim_model = indent(&model_line(), "      ");
     let reclaim_check = indent(BRANCH_CHECK, "      ");
+    let reclaim_shapes = indent(GIT_SHAPES, "      ");
     format!(
         r#"---
 name: moai-supervise
@@ -1393,6 +1457,7 @@ the script in 2 does not print as a `worktree` row.
       {BESIDE}
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
 {reclaim_check}
+{reclaim_shapes}
       Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
@@ -1402,7 +1467,9 @@ the script in 2 does not print as a `worktree` row.
       - **If the root is not the top of the repository** (a subdirectory project in a
         monorepo), go into the worktree and then move to the same subdirectory inside it and
         work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-        hook does not count edits under `.claude/`
+        hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+        by the supervisor; with no `<subdir>` in the header, the root is the top and this step
+        does not exist
           {SUBDIR}
       - The member's column is already picked up — do not pick it up again
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
@@ -1440,17 +1507,21 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
-the body and the release the idea stands in — the one `moai show --milestone` lists it
-under, not its own field — so an idea parked outside the release unfolds into an epic that
-stands outside it until it is attached. The worker hangs it on in brief 1 —
-`{MILESTONE_ATTACH}` — and what it writes there is the `<milestone>` you fill in 3. So the
-call is yours, here, before you send: either this idea belongs in the release that is
-running and you send it with that milestone, or it does not and you do not send it this
-round. **Telling the worker not to attach a milestone is the same as handing out work
-from outside** — that is how a worker came to pick up a row outside the running release
-(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
-`<milestone>` is `none`.
+**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.** `moai idea promote` carries over the body and the release the idea
+stands in — the one `moai show --milestone` lists it under, not its own field — so an
+idea parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; an idea from
+outside waits for the next round, unless it should stand as `p0` or the person attaches
+the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+under, never one you picked for it**: the line the worker runs in brief 1 —
+`{MILESTONE_ATTACH}` — re-affirms what `promote` carried and is not a door you open. With
+nothing running, and for an idea that stands under no release, it is `none`.
+The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
+the running release, and the person, not the tool, is what caught it. The answer is to
+stop sending outside work while a release runs, not to hang the release on it — hanging it
+on would make the release grow after it started, and that is the person's call alone.
+**The tool refuses none of this**, so this paragraph is the only thing holding it.
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
@@ -1595,11 +1666,15 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
-`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
-when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+`<milestone>` is the release that idea already stands under **and that is still alive**,
+read in 1 — `none` when it stands under none, `none` when the one it stands under has
+shipped or been deferred (the worker would otherwise re-open a release that is already
+out, which is what `promote` itself declines to carry), and `none` when nothing is
+running. It is never a release you picked for it: work is not pulled into a running
+milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
 in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
@@ -2097,6 +2172,7 @@ fn brief() -> String {
     let epic_rule = indent(&epic_review_rule(), "       ");
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
+    let shapes = indent(GIT_SHAPES, "    ");
     // 용어 보존은 안내 글과 한 출처다 — 규칙 3 의 64KB 가 그랬듯, 손으로 옮겨 적으면 이 표면만 낡는다.
     let keep = KEEP_TERMS;
     format!(
@@ -2106,6 +2182,7 @@ fn brief() -> String {
     {BESIDE}
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
 {branch_check}
+{shapes}
     1. Unfold it in the root — the one way to turn an idea into work is
        `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
        issue. Look at `--dry-run` first — that is for this window to see, not to show a person
@@ -2120,8 +2197,13 @@ fn brief() -> String {
        Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
        release the idea stood in, and a milestone is inherited, so the epic alone carries it to
        every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
-       still the release that idea stood in, so read the line `promote` printed and clear a
+       changes nothing. **Hang only the `<milestone>` in the header, and nothing else**: work is
+       never pulled into a running release, so a release you noticed running is not yours to
+       attach — not to this epic, not to a member you create later. Inside this epic the release
+       is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+       stands outside every release — that is nothing running, or an idea that stood under none,
+       or one whose release is already dead, and you cannot tell which from the word alone. What
+       came over is still the release that idea stood in, so read the line `promote` printed and clear a
        release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
        a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
        not in `ready`, not in `held`, no warning
@@ -2141,7 +2223,9 @@ fn brief() -> String {
        **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
        worktree stands for the whole repository, so once inside, move to the same subdirectory in
        it and work there — standing at the worktree top, `moai` walks up and finds the root's
-       `.moai` to write, and the hook does not count edits under `.claude/`
+       `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+       relative path, filled in by the supervisor; if the header carries no `<subdir>`, the root
+       **is** the top and this step does not exist
          {SUBDIR}
     4. Do not guess a design decision that is not in the notes — ask with AskUserQuestion; a
        person is watching the worker's window
@@ -2844,7 +2928,9 @@ mod tests {
             ("only sessions on this\n  machine", "원격 세션에 루트를 묻는다"),
             ("whose sent idea has not had its report checked", "맡긴 일을 하던 세션에 또 맡긴다"),
             ("moai show <epic>", "idea 로 확인하면 멤버가 안 보인다"),
-            ("and `<root>`.", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
+            // 목록의 끝은 `<subdir>` 이 붙어 바뀌었다(리뷰 moai-rgp9.sdj 1번) — 자리 이름만 맨다.
+            ("`<root>`", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
+            ("`<subdir>`", "모노레포 하위 자리를 감독이 안 채워 일꾼이 거절되는 꼴로 구한다"),
             // 거둔 일을 맡기는 글은 brief 의 일부만 잇는다 — 그 범위가 4-1 위에서 끊기면
             // 이어받은 일꾼만 워크트리의 `.moai` 를 고친다. **끝은 번호로 적지 않는다**:
             // `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를 못 받았다.
@@ -2886,6 +2972,13 @@ mod tests {
                 "**Nothing is blocked.** A `moai mv` that picks up work from outside goes straight\n  through",
                 "막지 않는다는 것을 안 적었다",
             ),
+            ("**Work is never pulled into a running milestone.**", "밖의 일을 안으로 끌어오지 않는다는 줄이 없다"),
+            ("three doors put work in afterwards — the person opens two of them", "누가 들이는지를 안 적었다"),
+            ("they say yes to a plan you", "사람이 예 한 계획이 드는 문으로 안 서 있다"),
+            (
+                "**A running milestone is the person's to fill.**",
+                "계획에 도는 릴리스를 제 손으로 달지 말라는 줄이 없다",
+            ),
         ] {
             assert!(agents.contains(piece), "{why} — {piece}");
         }
@@ -2912,21 +3005,37 @@ mod tests {
     /// idea 일 때 그것을 안으로 들이는 길은 아무 데도 없었고, 그래서 감독이 브리프에 "마일스톤은
     /// 달지 마라" 고 적어 일꾼이 도는 판 밖의 일을 집었다. 도구는 그것을 그대로 지나 보낸다.
     ///
-    /// **두 글이 한 줄에 매인다.** 감독의 1 은 들일지를 정하고 일꾼의 1 이 실제로 단다 —
-    /// `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
+    /// **2026-09-25 에 뜻이 뒤집혔다.** 그때까지 이 자리는 "밖의 idea 는 마일스톤을 달아야
+    /// 들어온다" 였고, 감독이 들일지를 정했다. 사용자가 도는 마일스톤에 에이전트가 제 판단으로
+    /// 밖의 줄을 달고 일한 판을 보고, 들이는 것은 사람만 하기로 정했다 — 감독은 밖의 일을
+    /// **안 보내는** 것으로 답한다. 2026-09-21 의 사고(일꾼이 도는 판 밖의 일을 집었다)는
+    /// 그대로 글에 남고, 답만 "달아 준다" 에서 "안 보낸다" 로 바뀐다.
+    ///
+    /// **두 글이 한 줄에 매인다.** 감독의 1 이 무엇을 보낼지 정하고 일꾼의 1 이 헤더에 실린
+    /// 릴리스만 단다 — `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
     #[test]
-    fn an_idea_from_outside_comes_in_on_a_milestone() {
+    fn an_outside_idea_is_not_pulled_into_a_running_release() {
         let (supervise, brief) = (supervise(), brief());
         let head = &supervise[..supervise.find(&brief).expect("감독이 싣는 글이 brief 가 아니다")];
 
         for (piece, why) in [
-            (MILESTONE_ATTACH, "감독이 들이는 길을 안 가리킨다"),
-            ("**An idea from outside gets in only by being brought in.**", "밖의 idea 를 들이는 걸음이 없다"),
+            (MILESTONE_ATTACH, "감독이 일꾼이 다는 줄을 안 가리킨다"),
             (
-                "**Telling the worker not to attach a milestone is the same as handing out work
-from outside**",
-                "마일스톤을 빼라고 적는 것이 밖의 일을 맡기는 것과 같다는 말이 없다",
+                "**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.**",
+                "밖의 idea 를 안 들인다는 줄이 없다",
             ),
+            (
+                "an idea from
+outside waits for the next round",
+                "밖의 idea 가 다음 회차로 미뤄진다는 말이 없다",
+            ),
+            (
+                "The answer is to
+stop sending outside work while a release runs",
+                "2026-09-21 의 답이 무엇으로 바뀌었는지 안 적었다",
+            ),
+            ("**The tool refuses none of this**", "감독이 도구가 막아 줄 것으로 읽는다"),
             (
                 "**Leave it unfilled** and the worker hangs the placeholder itself",
                 "안 채운 자리가 무엇이 되는지 안 적었다",
@@ -2947,6 +3056,10 @@ from outside**",
         for (piece, why) in [
             (MILESTONE_ATTACH, "일꾼이 마일스톤을 다는 줄이 1 에 없다"),
             ("If `<milestone>` is `none`", "아무것도 안 도는 판을 안 적었다"),
+            (
+                "**Hang only the `<milestone>` in the header, and nothing else**",
+                "일꾼이 제 손으로 도는 릴리스를 달지 말라는 줄이 1 에 없다",
+            ),
         ] {
             assert!(brief[one..two].contains(piece), "{why} — {piece}");
         }
@@ -3164,17 +3277,27 @@ from outside**",
     /// **데려가는 값은 적힌 필드가 아니다**(2026-09-23 사용자 결정) — `moai show --milestone` 이
     /// 그 생각을 내주는 자리고, 죽은 릴리스면 한 줄 알린다. 글이 "제 필드" 라고 말하면 에픽에
     /// 담긴 생각을 펼친 쪽이 왜 릴리스가 따라왔는지를 못 읽는다.
+    ///
+    /// **2026-09-25 에 손에 남는 일이 뒤집혔다**(moai-pdlp, 리뷰 moai-pdlp.4ox 1번). 도는 릴리스를
+    /// 제 손으로 다는 것이 그때까지 이 절의 답이었는데, 사용자가 들이는 것을 사람만 하기로 정했다.
+    /// 그래서 남는 일은 둘로 갈린다 — **딴 릴리스면 그대로 두고 말하고**, 죽은 릴리스는 스스로
+    /// 걷는다(아무도 여기서 고른 값이 아니고, 그대로 두면 새 에픽을 감춘다). 이 절이 안 바뀌면
+    /// AGENTS 블록 한 파일 안에서 앞 절이 뒤 절을 뒤집고, 읽는 차례상 앞 절이 이긴다.
     #[test]
-    fn unfolding_alone_hangs_the_milestone_and_carries_the_body() {
+    fn unfolding_alone_carries_the_body_and_the_release_it_stood_in() {
         let ideas = ideas();
         for (piece, why) in [
-            (MILESTONE_ATTACH, "마일스톤이 어긋난 idea 를 펼쳤을 때 다는 줄이 없다"),
+            (MILESTONE_ATTACH, "사람이 들일 때 치는 줄이 없다"),
             (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
             ("`dangling_milestone`", "틀린 id 가 언제 드러나는지 안 적었다"),
             ("milestone and body go onto the epic by themselves", "도구가 데려간다는 말이 없다"),
             ("Not onto every issue", "이슈마다 베끼는 것으로 읽힌다"),
             ("`-e <epic>`) carries neither", "선 에픽에 펼칠 때는 안 데려간다는 말이 없다"),
-            ("not the milestone that is running", "든 것이 딴 릴리스일 때를 안 가른다"),
+            (
+                "not the release that is running, leave it where it stands",
+                "든 것이 딴 릴리스일 때 그대로 두라는 말이 없다",
+            ),
+            ("**A dead one you do clear yourself**", "죽은 릴리스를 스스로 걷는다는 말이 없다"),
             ("`moai show --milestone` stands the idea", "데려가는 값이 적힌 필드로 읽힌다"),
             ("A dead release is said", "죽은 릴리스를 알린다는 말이 없다"),
         ] {
@@ -3742,6 +3865,34 @@ sys.exit(1 if bad else 0)
             head.contains(&indent(BRANCH_CHECK, "      ")),
             "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다"
         );
+        // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
+        // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
+        assert!(!brief.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
+        // **심은 글이 거절되는 꼴을 아무 걸음에서도 시키지 않는다**(리뷰 moai-rgp9.sdj 1번) —
+        // `SUBDIR` 이 `$(git -C <root> …)` 이던 자리가 그것이었고, 그 걸음은 워크트리 **안으로**
+        // 드는 것이라 ExitWorktree 로 피할 수도 없었다.
+        // 꼴을 **이르는** 자리만 잰다 — `GIT_SHAPES` 는 거절되는 꼴의 이름을 대야 하므로 그 글자가
+        // 그 안에 서는 것은 맞다.
+        for shape in ["$(git -C", "git -C <root> rev-parse"] {
+            assert!(!brief.contains(shape), "브리프가 거절되는 꼴을 시킨다 — {shape}");
+            assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
+        }
+        assert!(brief.contains("run `git symbolic-ref -q HEAD` **in the root**"), "대조를 어디서 하는지 안 적었다");
+        // **git 꼴 여섯은 두 글에 다 선다**(moai-rgp9) — 한쪽만 고치면 그 글을 안 읽는 쪽이
+        // 회차마다 다시 걸린다.
+        assert!(brief.contains(&indent(GIT_SHAPES, "    ")), "새 일의 머리에 git 꼴이 없다");
+        assert!(head.contains(&indent(GIT_SHAPES, "      ")), "거둔 일의 머리에 git 꼴이 없다");
+        for (piece, why) in [
+            ("One command per call", "한 호출에 한 명령이라는 줄이 없다"),
+            ("`git commit -F <that file>`", "긴 커밋 글을 파일로 주라는 줄이 없다"),
+            ("`-m \"…\"` on one plain command is fine", "-m 이 되는 것을 안 적어 브리프의 걸음과 어긋난다"),
+            ("`bash /abs/path/script.sh`", "여러 걸음을 스크립트로 빼라는 줄이 없다"),
+            ("computed at runtime", "치환으로 만든 명령이 거절되는 것을 안 적었다"),
+            ("Do not aim git at the root from inside the worktree", "루트를 겨누지 말라는 줄이 없다"),
+            ("`git status -- .moai/`", "남의 트래커 줄을 쓸어 가는 자리를 안 적었다"),
+        ] {
+            assert!(GIT_SHAPES.contains(piece), "{why} — {piece}");
+        }
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도

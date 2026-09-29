@@ -260,11 +260,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         // 거르는 칸이 늘 서 있다 — 이름이 천 개 넘어 글자로 좁히지 못하면 고를 길이 없다.
         Mode::Zone(z) => {
             let lang = app.site.lang;
-            let help = fill(
-                say(lang, "tui.prompt.hang"),
-                &[("apply", &label(PROMPT, Prompt::Apply)), ("cancel", &label(PROMPT, Prompt::Cancel))],
-            );
-            let help = prompt_help(&help, lang);
+            let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
         Mode::Unregister(u) => {

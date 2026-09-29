@@ -101,9 +101,32 @@ the script in 2 does not print as a `worktree` row.
       Work running alongside: <other work> — do not touch those files (4-3)
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
       Before you commit or merge in the root, **only check** that the root still stands on that
-      branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-      someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-      the wrong HEAD leaves no reference at all once `branch -d` runs
+      branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+      (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+      stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+          **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+          it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+          refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+          left in that worktree go back in with EnterWorktree(path)
+      **Git in a worktree session: one plain command per call.** The harness reads each Bash call
+      and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+      intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+      refusals in all.
+      - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+        compound commands (`&&`, `;`, `||`)
+      - `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+        When the message runs past one line, write it with Write and use `git commit -F <that file>`
+      - Several git steps in a row: put them in a script file and call it as a bare
+        `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+        refused had `&&`, a pipe or `$PWD` after them
+      - Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+        `computed at runtime` (119 cases)
+      - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+        `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+        ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+      - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+        commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+        session has not committed yet
       Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
@@ -113,8 +136,10 @@ the script in 2 does not print as a `worktree` row.
       - **If the root is not the top of the repository** (a subdirectory project in a
         monorepo), go into the worktree and then move to the same subdirectory inside it and
         work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-        hook does not count edits under `.claude/`
-          cd "$(git -C <root> rev-parse --show-prefix)"
+        hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+        by the supervisor; with no `<subdir>` in the header, the root is the top and this step
+        does not exist
+          cd <subdir>
       - The member's column is already picked up — do not pick it up again
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
@@ -151,17 +176,21 @@ should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
-**An idea from outside gets in only by being brought in.** `moai idea promote` carries over
-the body and the release the idea stands in — the one `moai show --milestone` lists it
-under, not its own field — so an idea parked outside the release unfolds into an epic that
-stands outside it until it is attached. The worker hangs it on in brief 1 —
-`moai edit <epic> --milestone <milestone>` — and what it writes there is the `<milestone>` you fill in 3. So the
-call is yours, here, before you send: either this idea belongs in the release that is
-running and you send it with that milestone, or it does not and you do not send it this
-round. **Telling the worker not to attach a milestone is the same as handing out work
-from outside** — that is how a worker came to pick up a row outside the running release
-(2026-09-21), and the person, not the tool, is what caught it. With nothing running,
-`<milestone>` is `none`.
+**Work is never pulled into a running milestone — the supervisor does not bring an
+outside idea in.** `moai idea promote` carries over the body and the release the idea
+stands in — the one `moai show --milestone` lists it under, not its own field — so an
+idea parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; an idea from
+outside waits for the next round, unless it should stand as `p0` or the person attaches
+the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+under, never one you picked for it**: the line the worker runs in brief 1 —
+`moai edit <epic> --milestone <milestone>` — re-affirms what `promote` carried and is not a door you open. With
+nothing running, and for an idea that stands under no release, it is `none`.
+The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
+the running release, and the person, not the tool, is what caught it. The answer is to
+stop sending outside work while a release runs, not to hang the release on it — hanging it
+on would make the release grow after it started, and that is the person's call alone.
+**The tool refuses none of this**, so this paragraph is the only thing holding it.
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
@@ -316,15 +345,19 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
-`<milestone>` is the milestone you decided on in 1 — the one that is running, or `none`
-when none is. **Leave it unfilled** and the worker hangs the placeholder itself on the
+`<milestone>` is the release that idea already stands under **and that is still alive**,
+read in 1 — `none` when it stands under none, `none` when the one it stands under has
+shipped or been deferred (the worker would otherwise re-open a release that is already
+out, which is what `promote` itself declines to carry), and `none` when nothing is
+running. It is never a release you picked for it: work is not pulled into a running
+milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
 in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
-the line `moai ready` prints under its list for the running milestone; do not write it from memory.
+the release `moai show --milestone` stands that idea under; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -350,9 +383,32 @@ worker reads in its own window in 9-1.
     Work running alongside: <other work> — do not touch those files (4-3)
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
     Before you commit or merge in the root, **only check** that the root still stands on that
-    branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-    someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-    the wrong HEAD leaves no reference at all once `branch -d` runs
+    branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+    (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+    stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+        **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+        it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+        refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+        left in that worktree go back in with EnterWorktree(path)
+    **Git in a worktree session: one plain command per call.** The harness reads each Bash call
+    and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+    intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+    refusals in all.
+    - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+      compound commands (`&&`, `;`, `||`)
+    - `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+      When the message runs past one line, write it with Write and use `git commit -F <that file>`
+    - Several git steps in a row: put them in a script file and call it as a bare
+      `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+      refused had `&&`, a pipe or `$PWD` after them
+    - Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+      `computed at runtime` (119 cases)
+    - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+      `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+      ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+    - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+      commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+      session has not committed yet
     1. Unfold it in the root — the one way to turn an idea into work is
        `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
        issue. Look at `--dry-run` first — that is for this window to see, not to show a person
@@ -367,8 +423,13 @@ worker reads in its own window in 9-1.
        Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
        release the idea stood in, and a milestone is inherited, so the epic alone carries it to
        every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-       changes nothing. If `<milestone>` is `none`, nothing is running — but what came over is
-       still the release that idea stood in, so read the line `promote` printed and clear a
+       changes nothing. **Hang only the `<milestone>` in the header, and nothing else**: work is
+       never pulled into a running release, so a release you noticed running is not yours to
+       attach — not to this epic, not to a member you create later. Inside this epic the release
+       is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+       stands outside every release — that is nothing running, or an idea that stood under none,
+       or one whose release is already dead, and you cannot tell which from the word alone. What
+       came over is still the release that idea stood in, so read the line `promote` printed and clear a
        release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
        a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
        not in `ready`, not in `held`, no warning
@@ -388,8 +449,10 @@ worker reads in its own window in 9-1.
        **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
        worktree stands for the whole repository, so once inside, move to the same subdirectory in
        it and work there — standing at the worktree top, `moai` walks up and finds the root's
-       `.moai` to write, and the hook does not count edits under `.claude/`
-         cd "$(git -C <root> rev-parse --show-prefix)"
+       `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+       relative path, filled in by the supervisor; if the header carries no `<subdir>`, the root
+       **is** the top and this step does not exist
+         cd <subdir>
     4. Do not guess a design decision that is not in the notes — ask with AskUserQuestion; a
        person is watching the worker's window
     4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,

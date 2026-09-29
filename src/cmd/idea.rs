@@ -74,7 +74,10 @@ fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str
     if let Some(src) = crate::report::deferred_roots(issues).get(m) {
         let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_deferred"), &[("id", m), ("src", src)]);
         eprintln!("moai: {said}");
-    } else if crate::report::group_states_of(issues, cfg, &[m]).get(m).is_some_and(|col| *col == crate::config::DONE) {
+    } else if crate::report::group_states_of(issues, cfg, &[m])
+        .get(&(crate::model::Kind::Milestone, m))
+        .is_some_and(|col| *col == crate::config::DONE)
+    {
         let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_closed"), &[("id", m)]);
         eprintln!("moai: {said}");
     }
@@ -191,7 +194,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
+        let known = crate::cmd::add::is_milestone(&load.issues, stone.as_deref());
         if ctx.json {
+            crate::cmd::add::say_no_such_milestone(stone.as_deref(), known, ctx.lang());
             // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
             // `moai show <idea>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref(), None);
@@ -200,7 +205,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
-        out.extend(crate::cmd::add::milestone_line(stone.as_deref(), ctx.lang()));
+        out.extend(crate::cmd::add::milestone_line(
+            stone.as_deref(),
+            known,
+            drafts.iter().filter(|d| d.epic.is_none()).count(),
+            ctx.lang(),
+        ));
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -215,7 +225,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
     let lang = ctx.lang();
-    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
@@ -330,11 +340,13 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
-            Ok((entries, (made, read)))
+            let known = crate::cmd::add::is_milestone(issues, crate::cmd::add::stood_on(&made));
+            Ok((entries, (made, read, known)))
         },
     )?;
 
     if ctx.json {
+        crate::cmd::add::say_no_such_milestone(crate::cmd::add::stood_on(&made), known, ctx.lang());
         // **닫힌 생각까지 낸다.** 사람 출력에는 `→ done` 이 있는데 기계
         // 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다 —
         // `mv --json` 이 옮긴 것 말고도 다 내는 것과 같은 까닭이다.
@@ -356,7 +368,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
     // 아무것도 안 서고, 그것이 그대로 답이다. 세는 자는 `add --from` 과 한 자리다(리뷰).
-    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), ctx.lang()));
+    let roots = made.iter().filter(|i| crate::cmd::add::is_root(i)).count();
+    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), known, roots, ctx.lang()));
     if let Some(e) = into {
         let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));

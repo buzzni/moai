@@ -264,6 +264,9 @@ type States = std::collections::BTreeMap<String, Stood>;
 /// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
 /// (`report::Stand::aside`).
 struct Stood {
+    /// 이 칸을 센 묶음 줄의 종류 — 칸 지도의 열쇠 반쪽이다(`report::GroupKey`, moai-mibi.rfn). 지도는
+    /// id 로 들되(가려진 묶음 줄은 안 세므로 한 id 에 칸 하나다) 짚는 자는 줄의 종류와 견준다.
+    kind: crate::model::Kind,
     column: String,
     since: String,
     busy: bool,
@@ -282,6 +285,8 @@ struct Stood {
 pub struct Ground {
     stands: States,
     epic: std::collections::BTreeMap<String, String>,
+    /// 쌍둥이 부모 밑에서 소속을 못 정한 줄(`report::Handing::twin`) — `epic` 과 함께 옮긴다.
+    twin: std::collections::BTreeSet<String>,
     /// 계획에서 빠진 줄 → 그것을 뺀 줄, **id 로 접은 것**(`report::deferred_roots`).
     put_off: std::collections::BTreeMap<String, String>,
     /// 뺀 줄이 **줄마다 갈리는** id(`report::split_roots`). 성한 저장소에서는 빈다.
@@ -314,9 +319,10 @@ impl Ground {
         let stands = soil
             .stands(issues, cfg)
             .into_iter()
-            .map(|(id, s)| {
+            .map(|((kind, id), s)| {
                 let aside = s.aside.iter().map(|m| m.to_string()).collect();
                 let stood = Stood {
+                    kind,
                     column: s.column.to_string(),
                     since: s.since.to_string(),
                     busy: s.busy,
@@ -350,6 +356,7 @@ impl Ground {
         Ground {
             stands,
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            twin: soil.epic.twin().iter().map(|k| k.to_string()).collect(),
             put_off: soil.roots.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             split,
             split_rows,
@@ -358,14 +365,15 @@ impl Ground {
         }
     }
 
-    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
-    pub fn columns(&self) -> std::collections::BTreeMap<&str, &str> {
-        self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
+    /// (종류, 묶음 id) → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
+    pub fn columns(&self) -> std::collections::BTreeMap<crate::report::GroupKey<'_>, &str> {
+        self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.column.as_str())).collect()
     }
 
-    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — `tui --json` 의 줄이
-    /// 칸을 누가 입는지를 이것으로 가른다(moai-7iyc.5fz).
-    pub fn kinds(&self) -> crate::report::Kinds<'_> {
+    /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — 거름망([`Ground::here`])이
+    /// 소속을 묻는 문(`report::stands_in`)에 댄다(moai-53s2). 칸을 누가 입는지는 이것이 아니라 칸 지도의
+    /// 열쇠가 가른다(`report::GroupKey`, moai-mibi.rfn).
+    fn kinds(&self) -> crate::report::Kinds<'_> {
         crate::report::Kinds::kept(&self.kinds)
     }
 
@@ -374,19 +382,20 @@ impl Ground {
     /// 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의 지도가 셋이라
     /// 차례로 넘기면 서로 바뀌어도 컴파일된다.
     ///
-    /// **`lines` 만은 여기서 다시 잰다**(moai-jk2u.wvn) — `report::Lines` 는 `&Issue` 를 들어
-    /// `Ground` 의 `String` 지도로는 못 담는다. 키마다 도는 자리라 값이 붙으니, 옮길 곳은
-    /// `Ground` 가 아니라 줄과 함께 사는 자리다(`Site`, 리뷰 moai-jk2u.m60 이 남긴 몫).
+    /// **`lines` 만은 빌릴 것이 없다**(moai-jk2u.wvn) — `report::Lines` 는 `&Issue` 를 들어
+    /// `Ground` 의 `String` 지도로는 못 담고, 줄과 함께 사는 `Site` 에 담으면 제 필드를 빌리는
+    /// 구조체가 된다. 그래서 줄만 건네고 **읽는 거르개(`--milestone`)가 물을 때** 짓는다
+    /// (`query::Lined`, moai-6mnm). 한때 키마다 지어 1만 줄에서 이 자리 값의 여섯 분의 다섯이었다.
     fn here<'i>(&'i self, issues: &'i [Issue]) -> crate::query::Where<'i> {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
         crate::query::Where {
-            epic: crate::report::Handing::of_handed(borrow(&self.epic)),
+            epic: crate::report::Handing::of_handed(borrow(&self.epic), self.twin.iter().map(String::as_str).collect()),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
-            // (moai-jk2u.wvn). 나머지처럼 적재 때 재어 둘 수도 없다: `report::Lines` 는
-            // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.
-            lines: crate::report::Lines::of(issues),
+            // (moai-jk2u.wvn). 그래서 짓지 않고 줄만 건넨다 — `--milestone` 을 묻는 거르개만
+            // 그 판에 한 번 짓는다(`query::Lined`, moai-6mnm).
+            lines: crate::query::Lined::later(issues),
             // **줄은 여기서 자리로 집는다** — 적재가 든 것은 자리뿐이고(`Ground` 는 제 줄을 안
             // 든다), 바늘로 견주는 그릇은 지금 넘기는 이 목록의 줄을 들어야 한다.
             shelved: crate::report::Shelved::kept(
@@ -395,7 +404,7 @@ impl Ground {
                 self.split_rows.iter().map(|(at, r)| (&issues[*at], r.as_deref())),
             ),
             states: self.columns(),
-            since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
+            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
@@ -1260,7 +1269,7 @@ impl Site {
     /// 짚는데 [`Site::column`] 만 가려짐을 거르던 때는, 가려진 마일스톤 줄이 제 칸을 그리면서
     /// 쌍둥이 에픽의 `미룬 N` 과 그 에픽이 기다리는 까닭을 함께 달았다.
     fn stand_of(&self, i: &Issue) -> Option<&Stood> {
-        crate::report::stands_on(&self.ground.kinds(), i, || self.ground.stands.get(&i.id))
+        crate::report::stands_on(i, |(kind, id)| self.ground.stands.get(id).filter(|s| s.kind == kind))
     }
 
     /// [`Site::stand_of`] 의 읽은 칸만.
@@ -2368,7 +2377,7 @@ impl App {
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.site.now.clone();
         // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
-        // (`Ground::here` 의 `lines` 만은 아직 여기서 선다 — 그 doc 에 까닭과 옮길 자리가 있다.)
+        // (`Ground::here` 의 `lines` 는 `--milestone` 을 묻는 거르개만 짓는다 — 그 doc 에 까닭이 있다.)
         let wh = self.site.ground.here(&self.site.issues);
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
@@ -7654,6 +7663,29 @@ mod tests {
         assert_eq!(a.site.path.last(), was.last(), "서 있던 에픽을 놓쳤다");
         assert_eq!(a.site.path.len(), 2, "{:?}", a.site.path);
         assert_eq!(a.site.remembered.len(), a.site.path.len());
+    }
+
+    /// 거름망은 `Lines` 를 안 들고 줄만 건네받는다(moai-6mnm) — 그래도 `--milestone` 이 묻는
+    /// 답은 다 재는 길(`Where::of`)과 같아야 한다. 에픽 없는 자식이 조상을 타고 받는 마일스톤이
+    /// 그 지도가 있어야 나오는 답이다.
+    #[test]
+    fn the_filter_climbs_to_the_milestone_without_holding_lines() {
+        let mut top = make("argos-0200", Kind::Issue);
+        top.milestone = Some("argos-0100".into());
+        let issues = vec![
+            make("argos-0100", Kind::Milestone),
+            top,
+            make("argos-0200.x1y", Kind::Issue),
+            make("argos-0300", Kind::Issue),
+        ];
+        let cfg = cfg();
+        let (_, ground) = measure(&issues, &cfg);
+        let here = ground.here(&issues);
+        let full = crate::query::Where::of(&issues, &cfg);
+        assert_eq!(here.milestone_of(&issues[2]), Some("argos-0100"), "시험의 전제 — 자식이 조상을 타고 올랐다");
+        for i in &issues {
+            assert_eq!(here.milestone_of(i), full.milestone_of(i), "{}", i.id);
+        }
     }
 
     /// 갱신해도 걸어 둔 거름망은 살아 있다. 갱신 한 번에 하던 일이 흩어지면

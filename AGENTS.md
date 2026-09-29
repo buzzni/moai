@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.1 hash:a4f07956 -->
+<!-- moai:begin v:0.1.2 hash:0d0a56f5 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -40,7 +40,9 @@ no epic at all, and on a group row it never stands. One row reads the two keys a
 each other: where the same id stands twice and the other line is a different `kind`,
 this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
 picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
-`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`duplicate_id` on the board names that id. A row below an id that stands twice, where
+the lines hand down different answers, is counted into no group either — which line
+it hangs from cannot be told — and `twin_parent` names it. Two surfaces carry neither key —
 `rm --json` hands the removed lines back exactly as the file held them, and `tui
 --json` prints the explorer's own shorter row — and there you read the epic off the id.
 
@@ -97,10 +99,12 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-**If a milestone is running, give the plan that milestone** — `moai add --from -
---milestone <id>`. It goes onto the epics the plan creates and the members inherit
-it; without it the whole plan stands outside the release, and of it `moai ready`
-then hands out only what is `p0`.
+**A running milestone is the person's to fill.** When one is running, ask in the same
+breath as the plan whether this bundle belongs in it, and attach it only on a yes —
+`moai add --from - --milestone <id>`. It goes onto the epics the plan creates and the
+members inherit it; without it the whole plan stands outside the release, and of it
+`moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
+because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body -` and
@@ -176,21 +180,26 @@ where a row belongs, on every surface.
 already the owner — its members inherit its milestone, and writing the idea's over
 theirs would stand one bundle in two places.
 
-**If what came over is not the milestone that is running, hang the running one on
-the epic yourself** — or clear it with `--milestone none` when nothing is running.
-`promote` carries the release it stands in whatever state that release is in, so
-that covers an idea parked with no milestone, one parked under a release that has
-since shipped, and one parked under a milestone since deferred. Without this the
-epic stands outside the release and every member under it is work picked up from
-outside it, of which `moai ready` hands out only what is `p0`; and under a
-deferred milestone the whole plan is out of the plan the moment it is created —
-not in `ready`, not in `held`, and no warning says so. **A dead release is said
-out loud**: unfolding into a deferred or closed milestone prints one line on
-stderr naming it, and nothing is blocked.
+**If what came over is not the release that is running, leave it where it stands.**
+Work is never pulled into a running release, so the epic stays outside it and what
+you do is say so — the person attaches it, with this line, if it belongs in the
+release:
 
     moai edit <epic> --milestone <milestone>
 
-Copy that id off the line `moai ready` prints under its list for the running milestone. What is checked is the shape
+`promote` carries the release the idea stands in whatever state that release is in,
+so an idea parked with no milestone, one parked under a release that has since
+shipped, and one parked under a milestone since deferred all come over exactly as
+they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
+the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
+been deferred. What standing outside costs meanwhile: every member under that epic
+is work picked up from outside the running release, of which `moai ready` hands out
+only what is `p0`; and under a deferred milestone the whole plan is out of the plan
+the moment it is created — not in `ready`, not in `held`, and no warning says so.
+**A dead release is said out loud**: unfolding into a deferred or closed milestone
+prints one line on stderr naming it, and nothing is blocked.
+
+The id in that line is the release `moai show --milestone` stands that idea under. What is checked is the shape
 alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
 `dangling_milestone` warning.
 
@@ -257,8 +266,18 @@ column, it is running. There is no command that opens it and no new field.
   running, and how many it held back, is one line under the list; on the board it is a `moai status` notice
 - **`p0` gets picked up whether or not it is in the milestone** — that is the hotfix
   slot. In the ordering `p0` comes first and the milestone second
+- **Work is never pulled into a running milestone.** What ships was decided before it
+  started, and three doors put work in afterwards — the person opens two of them. They
+  attach it (`moai edit <id> --milestone <milestone>`); or they say yes to a plan you
+  showed them and you attach it in that same breath (fork 3); or it came out of a member
+  you are working on and is created inside that member's epic (`-e <that epic>`), where
+  the release is inherited. Writing `--milestone <the running one>` on a row that stood
+  outside, or moving such a row under an epic that is in it, is none of those three: it is
+  you deciding what the release contains, so say it to the person and leave the row where
+  it is
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
-  through. What is already picked up is simply finished — the same ground as never taking work back late
+  through, and so does a `--milestone` that carries a row in — the rule above is a rule
+  for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that

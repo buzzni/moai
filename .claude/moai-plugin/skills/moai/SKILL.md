@@ -41,7 +41,9 @@ no epic at all, and on a group row it never stands. One row reads the two keys a
 each other: where the same id stands twice and the other line is a different `kind`,
 this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
 picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
-`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`duplicate_id` on the board names that id. A row below an id that stands twice, where
+the lines hand down different answers, is counted into no group either — which line
+it hangs from cannot be told — and `twin_parent` names it. Two surfaces carry neither key —
 `rm --json` hands the removed lines back exactly as the file held them, and `tui
 --json` prints the explorer's own shorter row — and there you read the epic off the id.
 
@@ -95,10 +97,12 @@ moai add --from - <<'PLAN'
 PLAN
 ```
 
-**If a milestone is running, give the plan that milestone** — `moai add --from -
---milestone <id>`. It goes onto the epics the plan creates and the members inherit
-it; without it the whole plan stands outside the release, and of it `moai ready`
-then hands out only what is `p0`.
+**A running milestone is the person's to fill.** When one is running, ask in the same
+breath as the plan whether this bundle belongs in it, and attach it only on a yes —
+`moai add --from - --milestone <id>`. It goes onto the epics the plan creates and the
+members inherit it; without it the whole plan stands outside the release, and of it
+`moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
+because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body -` and

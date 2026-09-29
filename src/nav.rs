@@ -711,7 +711,10 @@ impl<'a> Ctx<'a> {
             let rooted_thought =
                 crate::report::is_idea(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
             let passed = if rooted_thought { None } else { self.epic_at(&self.issues[pat]) };
-            if self.epic_at(me) == passed {
+            // **뿌리로 올라간 생각은 안 접는다**(리뷰 moai-mibi.ndh 9번) — `report` 가 정한 그대로 묻는다.
+            // 제 에픽을 적은 생각이 갈린 부모 쌍둥이 밑에 서면 뒷줄 하나로 견준 이 자리만 파일 차례로
+            // 접었다 말았다 했다. 쌍둥이가 없는 판에서는 위 견줌과 늘 같은 답이다.
+            if self.epic_at(me) == passed && !self.lines.rooted(me) {
                 path.push(Seg::Issue(p.to_string()));
                 return path;
             }
@@ -1474,6 +1477,53 @@ mod tests {
         let dirs = index.entries(&issues, &Vec::new()).into_iter().filter(|e| matches!(e, Entry::Dir { .. })).count();
         assert_eq!(dirs, 1, "같은 id 의 줄 둘이 나란히 디렉터리가 됐다");
         assert_exactly_once(&issues);
+    }
+
+    /// **부모 id 의 쌍둥이가 서로 다른 에픽을 넘기면 자식은 `(길 잃음)` 에 선다**(moai-mibi.wpj).
+    /// 두 차례를 다 잰다 — 한때 뒷줄의 에픽 밑에 그려져 파일 차례로 자리가 뒤집혔다.
+    #[test]
+    fn a_child_under_disagreeing_twin_parents_goes_to_the_lost_bucket() {
+        let parent = |to: &str| {
+            let mut i = make("argos-0010", Kind::Issue);
+            i.epic = Some(to.into());
+            i
+        };
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let issues = vec![
+                make("argos-0001", Kind::Epic),
+                make("argos-0002", Kind::Epic),
+                parent(a),
+                parent(b),
+                make("argos-0010.aa1", Kind::Issue),
+            ];
+            let index = Index::of(&issues);
+            assert_eq!(index.home_of(4), &vec![Seg::Lost], "{a} 가 앞");
+            assert_exactly_once(&issues);
+        }
+    }
+
+    /// **제 `epic` 을 적은 생각이 쌍둥이 부모의 어느 줄을 고르느냐로 접히기도 하고 뿌리로 오르기도 하면,
+    /// 그 생각은 안 접히고 뿌리에 선다**(리뷰 moai-mibi.ndh 9번, 2026-09-29 사용자 결정). 한때 트리는
+    /// 그 생각을 부모의 뒷줄 밑에 접었다 말았다 해 파일 차례로 자리가 뒤집혔다. 그 자식은 뿌리에 선
+    /// 생각 밑에 접힌다. 두 차례를 다 잰다.
+    #[test]
+    fn an_idea_torn_between_twin_parents_stands_at_the_root() {
+        let mut thought = make("argos-0010.t01", Kind::Idea);
+        thought.epic = Some("argos-0002".into());
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let issues = vec![
+                make("argos-0001", Kind::Epic),
+                make("argos-0002", Kind::Epic),
+                epic_of("argos-0010", a),
+                epic_of("argos-0010", b),
+                thought.clone(),
+                make("argos-0010.t01.c01", Kind::Issue),
+            ];
+            let index = Index::of(&issues);
+            assert_eq!(index.home_of(4), &Vec::<Seg>::new(), "{a} 가 앞: 생각이 부모 밑에 접혔다");
+            assert_eq!(index.home_of(5), &vec![Seg::Issue("argos-0010.t01".into())], "{a} 가 앞");
+            assert_exactly_once(&issues);
+        }
     }
 
     /// **멤버 없는 에픽도 디렉터리다.** 비었다고 잎이 되면 `--path` 가 그

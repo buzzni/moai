@@ -60,7 +60,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         return super::json_line(&Said {
             ready: picks
                 .iter()
-                .map(|i| super::Row::of(i, None, epics.get(i.id.as_str()).copied(), &kinds).on(&origin))
+                .map(|i| super::Row::of(i, |_| None, epics.get(i.id.as_str()).copied(), &kinds).on(&origin))
                 .collect(),
             // **왜 짧은지를 기계에도 댄다**(moai-q04l). 사람 화면이 한 줄로 대는 것을 여기서
             // 빼면, `ready --json` 으로 도는 고리는 도는 마일스톤이 목록을 줄인 것을 "할 일이
@@ -141,7 +141,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     ready: k
                         .picks
                         .iter()
-                        .map(|i| super::Row::of(i, None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin))
+                        .map(|i| {
+                            super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin)
+                        })
                         .collect(),
                     milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),
                     outside: k.focus.outside.iter().map(|i| i.id.as_str()).collect(),

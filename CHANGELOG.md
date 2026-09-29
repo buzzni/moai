@@ -10,6 +10,105 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-29
+
+### Changed
+
+- **The planted worker brief no longer teaches a git command the harness refuses.** In a
+  session isolated to a git worktree, Claude Code reads each Bash call and refuses what it
+  cannot prove stays inside that worktree; the brief's own pre-merge check
+  (`git -C <root> symbolic-ref -q HEAD`) and its monorepo step (`cd "$(git -C <root>
+  rev-parse --show-prefix)"`) were both such shapes, so a worker doing as told was blocked
+  with no way through. The check now happens in the root, the monorepo step takes a
+  `<subdir>` the supervisor fills in, and a new block in both the brief and the
+  reclaimed-work text names the shapes that pass: one plain command per call, a heredoc
+  message in a file (`-m "…"` is fine), several steps in a `bash /abs/script.sh`, no path
+  built with `$(…)`, no git aimed at the root from inside the worktree, and a look at
+  `git status -- .moai/` before a tracker commit in the shared root. Measured over one
+  repository's transcripts: 714 refusals, 608 of them compound commands.
+- **Work is never pulled into a running milestone.** The three teachings — the
+  `AGENTS.md` block, the supervisor skill and the worker brief — now say who may put
+  work into a release that has started: the person attaches it, or it came out of a
+  member being worked on and is created inside that member's epic, where the release
+  is inherited. An agent no longer writes `--milestone <the running one>` on a row
+  that stood outside, and the supervisor answers an outside idea by not sending it
+  rather than by hanging the release on it (the 2026-09-21 round, where a worker
+  picked up a row outside the running release, is still written down; only the answer
+  changed). **Nothing is blocked** — `moai edit --milestone` and `moai mv` behave
+  exactly as before, because a refusal here would be a gate.
+- **A one-word title or note that opens with a single `-` is refused as a flag.**
+  This breaks a caller: `moai add -x`, `moai add -bWHY`, `moai note <id> -x` and
+  `moai edit <id> --title -x` used to write that token as the title or note and
+  exit 0; they now exit 1 (`bad_input`) and name the way through —
+  `moai <verb> -- -x` for `add` and `note`, `moai edit <id> --title=-x` for `edit`,
+  whose `--title` has no positional after it for `--` to guard. A title of several
+  words, a lone `-`, and a note given with `-b` go in as before.
+- **`moai add --json` carries `inherited_milestone`** when the `--milestone` it wrote
+  lost to the row's epic or ancestor, the same key `moai edit --json` carries; the
+  text output says it on stderr in `edit`'s words.
+- **`duplicate_id` names what to type** — `moai show <id>` as its hint, and the
+  warning says which row `moai rm <id>` removes.
+- **New warning `twin_parent`.** A row below an id that stands twice, where the
+  rows hand down different epics (or, when neither has an epic, different
+  milestones), now stands in `(lost)` and in no group, and `twin_parent` names the
+  row's id. Before, it silently wore the last row's epic or milestone, so swapping
+  the two rows moved it, and only the ancestor's `duplicate_id` stood. Rows are
+  compared by what they finally hand down, so twins that hand down the same answer —
+  an epic row duplicated by a merge, or a member that wrote the epic it already
+  inherited — still hand it down. An idea is judged under each of its parent's
+  rows: when it folds under one and not the other and that changes what it hands
+  down, the rows below it stand in `(lost)` too. `derived_epic` is absent on such a
+  row, `-e none` and `--milestone none` do not pick it, and `no_epic`·`no_milestone`
+  do not count it. It inherits no deferral and no worktree claim through that id, and
+  it stays in `moai ready` labelled `(lost)`. An idea that wrote its own epic is not
+  folded under such a parent; it stands at the root. The warning is not fatal;
+  resolving the `duplicate_id` brings the row back.
+
+### Fixed
+
+- **The user config keeps the quotes you wrote.** Changing a value such as
+  `sort = 'title'` or `color = 'red'` from the explorer, or a read mark, used to
+  write it back double-quoted; it now keeps `'…'`, `'''…'''` or
+  `"""…"""` as it stood, with the comment after it. A word added to a double-quoted
+  array stays double-quoted even when it holds a `"` — one such column name used to
+  flip the whole array to single quotes on the next write. A word holding a tab, a
+  zero-width space or another invisible character is written double-quoted with an
+  escape (`"a\tb"`, `"a​b"`) instead of standing raw inside single quotes.
+- `moai add --from … --milestone <id>` and `moai idea promote` no longer say the
+  epics stand on a milestone that is not there; they say on stderr that there is no
+  such milestone (with `--json` too) and still write it, as `--epic <missing>` does.
+  With several `#` roots the line counts them.
+- `--body -` that reads nothing from stdin says so on stderr (`add`, `add --from`,
+  `edit`) instead of ending in 0 with no body. Nothing is blocked.
+- **The hook sees a `find -execdir` write under an absolute start inside the
+  repository.** `find /repo/src -execdir tee x \;` used to read every start that
+  opens with `/` as somewhere else and drop its relative writes, so rule 2 let it
+  through. A relative path in such a line is now read as sitting under each start
+  (`/repo/src/x`) — and under the start's parent, where `-execdir` runs for the
+  start itself at depth 0 — and counted like any absolute path; `find /tmp -execdir …`
+  still goes through. A `-fprint` file on such a line is now seen too. `moai` run through
+  `-execdir` is still not counted against this tracker.
+
+### Fixed
+
+- **The planted hook line no longer loses the board, forwards a torn answer, or
+  lets a stranger silence its notice.** The board and `Stop` marks are now set by
+  the shell line after it has handed the answer over — `moai hook` writes the mark's
+  name to a slip the line passes in `MOAI_HOOK_HANDOFF` — so a hook killed between
+  the two no longer leaves a session without its board for good. The mark is taken
+  only when `moai` finished on its own (exit 0 or 1), and only for absolute paths;
+  anything else falls back to `moai` setting the mark itself or to the board riding
+  once more. Slips older than ten minutes are swept whenever a new one is written.
+  Outside exits 0 and 1, only output shaped like a JSON object counts as an answer: a
+  verdict torn by SIGKILL, another binary's usage text or a lone space is dropped and
+  the "could not run" notice speaks instead. That notice's once-a-session mark is
+  created with `set -C` (one winner among hooks running side by side), and a mark
+  that is not the user's own regular file — a stranger's file, a symlink, a named
+  pipe — makes the notice speak every time rather than never. The line never opens a
+  mark that already exists, so a named pipe planted there cannot stall the hook until
+  its timeout. Takes effect after `moai skill install` re-plants the hook; an old
+  planted line keeps working as before.
+
 ## [0.1.2] - 2026-09-23
 
 **Two things in this release break a caller.** Both are written up where they
