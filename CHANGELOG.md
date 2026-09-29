@@ -10,6 +10,8 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-29
+
 ### Added
 
 - **`moai tui` prints the line that upgrades it when you quit, if a newer release is
