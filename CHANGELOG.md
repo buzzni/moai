@@ -34,6 +34,15 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   text output says it on stderr in `edit`'s words.
 - **`duplicate_id` names what to type** — `moai show <id>` as its hint, and the
   warning says which row `moai rm <id>` removes.
+- **New warning `twin_parent`.** A child whose parent id stands twice, with the two
+  rows handing down different epics (or, when neither has an epic, different
+  milestones), now stands in `(lost)` and in no group, and `twin_parent` names the
+  child's id. Before, the child silently wore the last row's epic or milestone, so
+  swapping the two parent rows moved it, and only the parent's `duplicate_id` stood.
+  Twins that hand down the same answer — an epic row duplicated by a merge — still
+  hand it down. `derived_epic` is absent on such a child, `-e none` and
+  `--milestone none` do not pick it, and `no_epic`·`no_milestone` do not count it.
+  The warning is not fatal; resolving the parent's `duplicate_id` brings the child back.
 
 ### Fixed
 
