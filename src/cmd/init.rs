@@ -1506,10 +1506,15 @@ mod tests {
         assert_eq!(tmp_dir(&agents), s.join(".moai"));
         // **정말 `.moai/` 를 거치는지** 옆자리를 막아 두고 본다 — 옆에 쓰는 `plant` 도 성공하면 둘 다
         // 찌꺼기를 안 남겨 아래의 단언만으로는 못 가른다. 막은 자리는 디렉터리라 파일을 못 만든다.
-        let beside = s.join(crate::store::tmp_name("AGENTS.md"));
-        std::fs::create_dir(&beside).unwrap();
+        // 첫 이름이 막히면 다음 이름으로 가므로(moai-ydm7.976) **이름을 다** 막는다.
+        let beside: Vec<_> = crate::store::tmp_names("AGENTS.md").map(|n| s.join(n)).collect();
+        for b in &beside {
+            std::fs::create_dir(b).unwrap();
+        }
         let wrote = plant(&agents, "글\n");
-        std::fs::remove_dir(&beside).unwrap();
+        for b in &beside {
+            std::fs::remove_dir(b).unwrap();
+        }
         wrote.expect("`.moai/` 를 안 거치고 옆자리에 썼다");
         assert_eq!(std::fs::read_to_string(&agents).unwrap(), "글\n");
         let left = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>();

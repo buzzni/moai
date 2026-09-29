@@ -10,6 +10,28 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A write no longer truncates a temporary file that someone else is still writing.**
+  A write that replaces a file goes through a temporary file and a `rename`; that file
+  was opened with a plain create, which silently empties whatever already sits at that
+  name. Two processes with the same pid in different pid namespaces — two containers
+  sharing one mount — could pick the same name. The tracker, the user config and read marks
+  are written under a lock that already kept such processes apart on one machine, but a file
+  written without it (`latest.toml`, the `AGENTS.md` that `moai init` plants) could end up
+  with text that was neither side's. The temporary file is now created exclusively
+  (`O_EXCL`): a name that is taken is left alone and the next one is tried, and when every
+  name is taken the write fails with the target untouched. The names after the first belong
+  to this process alone, so the files a killed write leaves behind — no longer reused by the
+  next write with the same pid — can never use them all up.
+- **Closing work holds the tracker lock for less time.** `moai mv <id> done` works out
+  what the close just freed while it still holds the exclusive lock, and it used to build
+  the whole ready list up to three times over to do it, with four more copies of the
+  membership maps on top — on this repository that took the lock-held time of a close from
+  21.6ms to 35ms, in a place where half a dozen sessions share one `.moai`. It now builds
+  the ground once per snapshot and asks it twice: in a debug build on this repository,
+  that part of a close went from 194ms to 101ms.
+
 ## [0.1.3] - 2026-09-29
 
 ### Changed

@@ -1299,10 +1299,16 @@ pub fn admit(issues: &mut Vec<Issue>, cfg: &Config, mut issue: Issue, by: &Actor
 /// **번호는 스레드마다 한 번 매기고 그 스레드가 사는 동안 안 바뀐다.** 부를 때마다 세는 쪽이 더
 /// 쉽지만, 그러면 같은 스레드의 두 번째 쓰기가 다른 이름을 써 **이름을 미리 아는 길이 없어진다** — 임시
 /// 자리를 막아 두고 그리로 갔는지 재는 시험(`cmd::init` 의
-/// `root_files_are_swapped_through_a_temp_file_in_dot_moai`)이 그 길로 선다. 또 쓰다 죽어 남는
-/// 찌꺼기가 쓴 횟수만큼이 아니라 **스레드 수만큼**으로 묶인다.
+/// `root_files_are_swapped_through_a_temp_file_in_dot_moai`)이 그 길로 선다. 쓰다 죽어 남은
+/// 찌꺼기는 다음 쓰기가 이어 쓰지 않는다([`open_tmp`]) — 죽은 쓰기마다 하나씩 남는다.
 ///
-/// 번호를 매기는 자는 프로세스 안에서만 선다 — 프로세스가 다르면 pid 가 가른다.
+/// 번호를 매기는 자는 프로세스 안에서만 선다 — 프로세스가 다르면 pid 가 가른다. **pid 가 못 가르는
+/// 자리는 pid 네임스페이스가 다른 두 프로세스다**(같은 마운트를 쓰는 컨테이너 둘). 그래도 `flock` 을
+/// 쥐고 쓰는 파일(`issues.jsonl`·사용자 설정·읽음 표시)은 한 커널 안에서 이미 차례를 서므로, 겹침이
+/// 실제로 서는 곳은 락 없이 쓰는 파일(`latest.toml`, `init` 이 심는 `AGENTS.md`)과 `flock` 이 건너가지
+/// 못하는 공유 파일시스템이다. 그 겹침은 이름이 아니라 여는 자가 막는다([`open_tmp`] 의 `create_new`).
+/// **돌아온 pid 는 겹침이 아니다** — pid 는 앞 주인이 거둬진 뒤에야 돌아오므로, 그 이름에 남은 파일은
+/// 죽은 쓰기의 찌꺼기다.
 pub(crate) fn tmp_name(file: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -1310,6 +1316,42 @@ pub(crate) fn tmp_name(file: &str) -> String {
         static MARK: u64 = NEXT.fetch_add(1, Ordering::Relaxed);
     }
     MARK.with(|mark| format!("{file}.tmp.{}.{mark}", std::process::id()))
+}
+
+/// [`open_tmp`] 가 차례로 여는 임시 이름 — 첫째는 [`tmp_name`] 그대로고, 그 이름에 **남의
+/// 파일이 이미 있으면** 뒤에 `.<이 프로세스의 수>.1`·`.2`… 를 붙여 다음으로 간다(moai-ydm7.976).
+///
+/// **첫째를 [`tmp_name`] 으로 둔다** — 겹침이 없는 보통 경우에 이름이 예전과 같아야, 쓰다 죽어
+/// 남는 찌꺼기의 꼴도 이름을 미리 아는 시험도 그대로 선다. 수를 [`TMP_TRIES`] 로 묶는 것은
+/// 막힌 디렉터리에서 끝없이 돌지 않기 위해서다.
+///
+/// **둘째부터는 이 프로세스만의 수([`process_nonce`])를 넣는다.** 첫 이름에 남은 찌꺼기는 아무도
+/// 안 지우는데([`open_tmp`]), pid 가 늘 같은 자리(컨테이너의 PID 1)에서는 쓰다 죽을 때마다 같은
+/// 이름이 하나씩 막힌다. 뒤의 이름까지 pid·번호만으로 지으면 그런 찌꺼기 여덟 개가 그 pid 의
+/// 쓰기를 영영 막고, 되돌릴 길은 사람이 손으로 지우는 것뿐이다 — [`Lock`] 이 `O_EXCL` 락 파일을
+/// 안 쓰는 그 까닭이다.
+pub(crate) fn tmp_names(file: &str) -> impl Iterator<Item = String> + use<> {
+    let first = tmp_name(file);
+    let nonce = process_nonce();
+    (0..TMP_TRIES).map(move |n| match n {
+        0 => first.clone(),
+        n => format!("{first}.{nonce:016x}.{n}"),
+    })
+}
+
+/// [`tmp_names`] 가 내는 이름 수. 다 막혔으면 쓰기는 실패하고 대상은 안 바뀐다 — 첫 이름 말고는
+/// 이 프로세스만의 이름이라, 다 막혔다면 겹침도 찌꺼기도 아닌 다른 무엇이 어긋난 것이다.
+pub(crate) const TMP_TRIES: usize = 8;
+
+/// 이 프로세스만의 수 — 처음 부를 때 한 번 뽑고 프로세스가 사는 동안 그대로다([`tmp_names`]).
+///
+/// 뽑는 자는 표준 라이브러리의 `RandomState` 다 — 프로세스마다 운영체제의 난수로 시작하므로,
+/// pid 가 같은 두 프로세스도 다른 수를 받는다. 한 프로세스 안에서는 늘 같아야 임시 이름을 미리
+/// 아는 시험이 선다.
+fn process_nonce() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    static NONCE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *NONCE.get_or_init(|| std::collections::hash_map::RandomState::new().build_hasher().finish())
 }
 
 /// temp 에 쓰고 `rename` 으로 갈아끼운다. 독자는 옛 파일 아니면 새 파일만 본다.
@@ -1343,21 +1385,22 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
-    let tmp = tmp_dir.join(tmp_name(path.file_name().and_then(|s| s.to_str()).unwrap_or("out")));
+    let (tmp, mut f) = open_tmp(path, tmp_dir)?;
     // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
-    // 쓰기가 죽지 않고도 `<파일>.tmp.…` 를 남겼다 — moai-3akx 가 막으려던 찌꺼기다.
+    // 쓰기가 죽지 않고도 `<파일>.tmp.…` 를 남겼다 — moai-3akx 가 막으려던 찌꺼기다. 치우는 것은
+    // **이 쓰기가 만든 파일뿐이다** — [`open_tmp`] 가 연 뒤에만 이 자리에 온다.
     let fail = |at: &Path, e: std::io::Error| {
         let _ = std::fs::remove_file(&tmp);
         Fail::new(format!("{}: {e}", at.display()))
     };
     let filled = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
         if let Some(p) = perms {
             f.set_permissions(p)?;
         }
         f.write_all(bytes)?;
         f.sync_all()
     })();
+    drop(f);
     filled.map_err(|e| fail(&tmp, e))?;
     std::fs::rename(&tmp, path).map_err(|e| fail(path, e))?;
     // rename 자체는 원자적이지만 디렉터리 엔트리는 아직 디스크에 없을 수 있다. 임시 자리가 다른
@@ -1369,6 +1412,34 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()
         }
     }
     Ok(())
+}
+
+/// 임시 파일을 **새로 만들어서만** 연다(`O_CREAT|O_EXCL`, moai-ydm7.976) — 그 이름에 이미 무엇이
+/// 있으면 [`tmp_names`] 의 다음 이름으로 간다.
+///
+/// **`File::create` 는 있는 파일을 말없이 비운다.** pid 가 같은 두 프로세스(pid 네임스페이스가
+/// 다른 컨테이너 둘이 같은 마운트를 쓸 때)가 락 없이 한 파일을 쓰면, 늦은 쪽이 앞쪽이 아직 쓰는
+/// 파일을 잘라 제 글을 쓰고 앞쪽의 `rename` 이 그것을 들고 간다 — 어느 쪽도 아닌 글이 대상에
+/// 실린다. 조용한 손실이 이 도구가 못 견디는 하나뿐인 실패 모드다(CLAUDE.md). 새로 만들어서만
+/// 열면 남의 파일을 안 건드리고, 마지막 이름 자리에 걸린 링크도 따라가지 않는다.
+///
+/// **남의 파일은 지우지 않는다** — 살아 있는 쓰기의 것인지 죽은 쓰기의 찌꺼기인지 여기서는 못
+/// 가른다. 찌꺼기는 그 자리에 남는다: `.moai/` 의 것은 `.moai/*.tmp.*` 로 무시되지만, 사용자 설정
+/// 디렉터리나 `init` 이 물러선 뿌리 등 다른 자리의 것은 무시되지 않는다. 그 찌꺼기가 쓰기를 막지는
+/// 못한다 — 둘째 이름부터는 이 프로세스만의 것이다([`tmp_names`]).
+fn open_tmp(path: &Path, tmp_dir: &Path) -> R<(PathBuf, std::fs::File)> {
+    let file = path.file_name().and_then(|s| s.to_str()).unwrap_or("out");
+    let mut last = None;
+    for name in tmp_names(file) {
+        let tmp = tmp_dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => return Ok((tmp, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some((tmp, e)),
+            Err(e) => return Err(Fail::new(format!("{}: {e}", tmp.display()))),
+        }
+    }
+    let (tmp, e) = last.expect("TMP_TRIES 는 0 이 아니다");
+    Err(Fail::new(format!("{}: {e}", tmp.display())))
 }
 
 /// 이 자리에 트래커를 세우면 무엇이 어긋나는가(moai-pjrr·moai-mz0e) — 없으면 `None`.
@@ -2570,6 +2641,75 @@ mod tests {
         assert_ne!(mine, tmp_name("다른파일"), "파일이 다른데 이름이 같다");
         let theirs = std::thread::spawn(|| tmp_name("issues.jsonl")).join().unwrap();
         assert_ne!(mine, theirs, "스레드가 다른데 임시 이름이 같다");
+    }
+
+    /// **임시 이름에 남의 파일이 있으면 그것을 안 건드리고 다음 이름으로 간다**(moai-ydm7.976).
+    /// pid 가 같은 두 프로세스(같은 마운트의 컨테이너 둘)가 한 이름을 쓰는 경우를 그 이름에 파일을
+    /// 먼저 두어 세운다. `File::create` 로 열던 때는 그 파일을 비우고 제 글을 써 들고 갔다 —
+    /// 앞쪽이 아직 쓰는 중이었다면 어느 쪽도 아닌 글이 대상에 실린다.
+    #[test]
+    fn a_temp_name_already_taken_is_left_alone() {
+        let s = crate::scratch::Scratch::new("tmp-excl");
+        let target = s.join("issues.jsonl");
+        std::fs::write(&target, "옛\n").unwrap();
+        let theirs = s.join(tmp_name("issues.jsonl"));
+        std::fs::write(&theirs, "남이 쓰는 중\n").unwrap();
+
+        write_atomic(&target, "새\n".as_bytes()).expect("첫 이름이 막혔다고 쓰기가 실패했다");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "새\n");
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "남이 쓰는 중\n", "남의 임시 파일을 건드렸다");
+        let mut left: Vec<_> = std::fs::read_dir(s.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        left.sort();
+        assert_eq!(left.len(), 2, "제 임시 파일을 남겼다: {left:?}");
+    }
+
+    /// **이름이 다 막히면 쓰기는 실패하고 아무것도 안 바뀐다** — 대상도, 남의 파일도. 막힌 이름을
+    /// 지우고 쓰면 살아 있는 남의 쓰기를 부순다.
+    #[test]
+    fn every_temp_name_taken_fails_without_touching_anything() {
+        let s = crate::scratch::Scratch::new("tmp-excl-full");
+        let target = s.join("issues.jsonl");
+        std::fs::write(&target, "옛\n").unwrap();
+        let names: Vec<String> = tmp_names("issues.jsonl").collect();
+        assert_eq!(names.len(), TMP_TRIES);
+        assert_eq!(names[0], tmp_name("issues.jsonl"), "첫 이름이 예전 이름과 갈렸다");
+        for n in &names {
+            std::fs::write(s.join(n), "남\n").unwrap();
+        }
+
+        assert!(write_atomic(&target, "새\n".as_bytes()).is_err(), "막힌 이름을 덮고 썼다");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "옛\n");
+        for n in &names {
+            assert_eq!(std::fs::read_to_string(s.join(n)).unwrap(), "남\n", "{n} 을 건드렸다");
+        }
+    }
+
+    /// **pid 가 같은 죽은 쓰기의 찌꺼기는 쓰기를 막지 못한다.** 컨테이너의 PID 1 처럼 pid 가 늘
+    /// 같은 자리에서는 쓰다 죽을 때마다 pid·번호로 지은 이름이 하나씩 남고, 아무도 안 지운다
+    /// ([`open_tmp`]). 둘째 이름부터 pid·번호만으로 짓던 때는 그런 찌꺼기 여덟 개(`<첫 이름>`,
+    /// `<첫 이름>.1`…`.7`)가 그 pid 의 쓰기를 `File exists` 로 영영 막았다 — 사람이 손으로
+    /// 지워야만 풀렸다. 둘째 이름부터는 이 프로세스만의 것이라 그 찌꺼기와 겹치지 않는다.
+    #[test]
+    fn leftovers_of_a_dead_writer_with_the_same_pid_never_block_a_write() {
+        let s = crate::scratch::Scratch::new("tmp-excl-stale");
+        let target = s.join("issues.jsonl");
+        std::fs::write(&target, "옛\n").unwrap();
+        let first = tmp_name("issues.jsonl");
+        let stale: Vec<String> =
+            std::iter::once(first.clone()).chain((1..TMP_TRIES).map(|n| format!("{first}.{n}"))).collect();
+        for n in &stale {
+            std::fs::write(s.join(n), "죽은 쓰기\n").unwrap();
+        }
+
+        write_atomic(&target, "새\n".as_bytes()).expect("죽은 쓰기의 찌꺼기에 막혔다");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "새\n");
+        for n in &stale {
+            assert_eq!(std::fs::read_to_string(s.join(n)).unwrap(), "죽은 쓰기\n", "{n} 을 건드렸다");
+        }
+        // 둘째 이름부터는 이 프로세스만의 수가 든다 — 같은 프로세스 안에서는 늘 같다.
+        let names: Vec<String> = tmp_names("issues.jsonl").collect();
+        assert_eq!(names, tmp_names("issues.jsonl").collect::<Vec<_>>(), "한 프로세스 안에서 이름이 바뀐다");
+        assert!(names[1..].iter().all(|n| !stale.contains(n)), "둘째 이름이 pid·번호만으로 지어졌다: {names:?}");
     }
 
     /// **스레드 둘이 같은 파일을 함께 써도 반쪽 글이 남지 않는다**(moai-mpf4). 조용한 손실이 이
