@@ -43,13 +43,13 @@ pub struct Ctx {
     reg: OnceLock<crate::user_config::Registry>,
     /// 이 판의 화면 언어 — 설정에서 한 번 푼 값([`Ctx::lang`]).
     lang: OnceLock<crate::i18n::Lang>,
-    /// 이 판의 시간대 — 시스템에서 한 번 푼 값([`Ctx::zone`]).
-    zone: OnceLock<(crate::tz::Zone, Option<crate::tz::Trouble>)>,
+    /// 이 판의 시간대 — 처음 읽을 때 시스템에서 한 번 푼다([`Ctx::zone`]·[`Ctx::clock`]).
+    zone: crate::tz::System,
 }
 
 impl Ctx {
     pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
-        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: OnceLock::new() }
+        Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: crate::tz::System::default() }
     }
 
     /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
@@ -89,7 +89,8 @@ impl Ctx {
     /// **못 풀어도 막지 않는다** — UTC 로 떨어지고 까닭은 [`Ctx::zone_trouble`] 이 든다
     /// (moai-77ap). 정적 musl 판을 zoneinfo 없는 기계에 받은 자리가 그것이다.
     ///
-    /// **말과 같은 결로 늦게 읽는다** — 이 값을 드는 명령만 tzdb 를 만진다.
+    /// **말과 같은 결로 늦게 읽는다** — 이 값을 드는 명령과, 화면이 [`Ctx::clock`] 으로 시각을
+    /// 실제로 그린 명령만 tzdb 를 만진다.
     ///
     /// **시각을 그리는 명령만이 아니다**(moai-h2th). 기한 판정이 읽는 사람의 달로 서면서
     /// `report::status` 를 부르는 쪽이 모두 이 값을 든다 — `hook` 처럼 시각을 한 줄도 안 그리는
@@ -110,13 +111,22 @@ impl Ctx {
     /// **`project ls` 는 아예 안 든다** — 그쪽은 `counts` 만 쓰고 시간대가 닿는 셈은 기한 판정
     /// 하나뿐이라, [`crate::report::status_unjudged`] 로 세면 답이 같다(`cmd::project::state`).
     pub fn zone(&self) -> &crate::tz::Zone {
-        &self.zone.get_or_init(crate::tz::Zone::system).0
+        self.zone.zone()
     }
 
-    /// 시간대를 풀다 만난 것. `None` 이면 아무 일 없다. **[`Ctx::zone`] 을 부른 뒤에 든다** —
-    /// 안 부른 판은 시각을 안 그리므로 할 말도 없다.
+    /// 화면에 얹을 시간대 — **아직 안 푼 채로** 준다(moai-s3i7). `view::Screen` 이 시각을 실제로
+    /// 그릴 때에만 풀리므로, 화면을 짓기만 하고 시각을 안 그리는 `ready`·`prime`·`show`(목록)·
+    /// `idea ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
+    /// 자리(`report::status` 의 기한 판정)는 여전히 [`Ctx::zone`] 으로 바로 푼다.
+    pub fn clock(&self) -> &crate::tz::System {
+        &self.zone
+    }
+
+    /// 시간대를 풀다 만난 것. `None` 이면 아무 일 없다. **시간대를 실제로 읽은 판에서만 든다** —
+    /// [`Ctx::zone`] 을 불렀거나 화면이 [`Ctx::clock`] 으로 시각을 그린 판이다. 안 읽은 판은
+    /// 할 말도 없다.
     pub fn zone_trouble(&self) -> Option<&crate::tz::Trouble> {
-        self.zone.get().and_then(|(_, why)| why.as_ref())
+        self.zone.trouble()
     }
 }
 
@@ -338,8 +348,8 @@ pub fn run(mut cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
     let out = dispatch(&ctx, cli);
     // **시간대를 못 풀었으면 한 줄로 알린다**(moai-77ap) — 막지 않는다. 종료 코드도 안 건드리고,
-    // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시각을 그린 명령만 이 자리에 닿는다:
-    // [`Ctx::zone`] 을 안 부른 판은 할 말이 없다([`Ctx::zone_trouble`]).
+    // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시간대를 실제로 읽은 명령만 이 자리에 닿는다:
+    // 화면을 지었어도 시각을 안 그린 판은 할 말이 없다([`Ctx::zone_trouble`]).
     //
     // **한 줄뿐이다.** 정적 musl 판을 zoneinfo 없는 기계에 받으면 이 일이 **매 명령**에 나므로,
     // 고치는 법까지 늘어놓으면 그 기계에서는 모든 출력에 안내문이 한 뭉치씩 붙는다.
