@@ -15373,7 +15373,8 @@ fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
 ///
 /// **대조를 함께 잰다** — 같은 환경의 `show <id>` 는 시각을 그리므로 그 줄이 서야 한다. 없으면
 /// 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다. 옛 자리(화면을 지을
-/// 때 푼 판)로 되돌리면 위의 넷이 붉어진다.
+/// 때 푼 판)로 되돌리면 아래 자리가 모두 붉어진다. 트리(`show --tree`)는 목록과 같은 화면을
+/// 나눠 쓰므로 함께 잰다.
 #[test]
 fn screens_that_draw_no_time_never_reach_for_the_timezone() {
     let home = Scratch::new("screen-tz");
@@ -15397,10 +15398,11 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
             .expect("moai 를 실행하지 못했다")
     };
 
-    let quiet: [(&Path, &[&str], &str); 5] = [
+    let quiet: [(&Path, &[&str], &str); 6] = [
         (repo.path(), &["ready"], id),
         (repo.path(), &["prime"], id),
         (repo.path(), &["show"], id),
+        (repo.path(), &["show", "--tree"], id),
         (repo.path(), &["idea", "ls"], "나중 생각"),
         (home.path(), &["ready"], id),
     ];

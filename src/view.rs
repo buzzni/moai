@@ -2182,9 +2182,11 @@ pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
 /// `screen` 에서 말과 시간대를 함께 받는다 — 상세와 같은 자로 시각을 적어야 한 화면의 두
 /// 덩어리가 다른 시계로 서지 않는다.
 pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
-    let (lang, z) = (screen.lang, screen.zone());
+    let lang = screen.lang;
     let mut out = Vec::new();
     if !journal.is_empty() {
+        // **시각을 그릴 때 푼다**(moai-s3i7) — 빈 이력은 시각을 한 줄도 안 그리므로 tzdb 를 안 만진다.
+        let z = screen.zone();
         out.push(String::new());
         out.push(paint(style::HEAD, say(lang, "detail.history")));
         for e in journal {
@@ -3886,7 +3888,9 @@ mod tests {
                         continue;
                     }
                     seen += 1;
-                    if !code.contains(".at(") {
+                    // **`Ctx` 의 것을 얹는다** — `.at(&tz::System::default())` 도 컴파일되지만, 그 값은
+                    // 제 자리에서 따로 풀려 `Ctx::zone_trouble` 이 못 보고 알림 줄이 조용히 사라진다.
+                    if !code.contains(".at(ctx.clock())") {
                         bare.push(format!("{name}:{}", n + 1));
                     }
                 }
