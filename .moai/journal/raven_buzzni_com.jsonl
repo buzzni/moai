@@ -1923,3 +1923,4 @@
 {"ts":"2026-09-29T05:25:03Z","id":"moai-snsy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"Merged e4fa3326: milestone-axis twin parents send the child to (lost) too"}
 {"ts":"2026-09-29T05:25:03Z","id":"moai-mibi.ndh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 12 fixes and 3 person decisions (0cc21267); handed on moai-86qo, moai-jxog, moai-bkb9"}
 {"ts":"2026-09-29T05:25:04Z","id":"moai-mibi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: epic delivered and merged (e4fa3326). Open ends are ideas moai-86qo (epic twin with different milestones), moai-jxog (stone_twin double-twin remnant), moai-bkb9 (rm on a twin reports dangling children)."}
+{"ts":"2026-09-29T05:26:07Z","id":"moai-6mnm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
