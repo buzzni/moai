@@ -940,6 +940,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         "merge_driver_absent" => one(say(lang, "warn.merge_driver_absent")),
         // **링크인 트래커**(moai-jo3h). 가리키는 파일은 `preview` 가 한 줄로 낸다 — 막지 않고 비추기만 한다.
         "tracker_linked" => one(say(lang, "warn.tracker_linked")),
+        // **링크인 딸린 파일**(moai-yke5). 어느 파일인지는 `preview` 가 한 줄로 낸다 — 칠 줄이 없다.
+        "dotfile_linked" => one(say(lang, "warn.dotfile_linked")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는

@@ -1216,7 +1216,22 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success(), "덧붙이지 못한 것 하나로 init 이 멈췄다\n{said}");
     assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 .gitignore 에 덧붙였다");
-    assert!(said.contains("outside") && said.contains(".moai/*.tmp.*"), "왜 안 썼는지와 손으로 더할 줄이 없다\n{said}");
+    // **링크인 딸린 파일은 git 이 안 읽는다**(moai-yke5) — 손으로 더할 줄을 대면 사람이 그 줄을 링크 너머
+    // (`~/.bashrc`)에 적는다. 링크라고 말하고 보통 파일로 바꾸라고만 한다. 알림도 `moai init` 이 못 걷는
+    // "빠진 줄" 이 아니라 링크라는 알림이다.
+    assert!(
+        said.contains("심볼릭 링크") && !said.contains(".moai/*.tmp.*"),
+        "링크라고 안 했거나 링크에 적을 줄을 댔다\n{said}"
+    );
+    // **밖을 가리키는 링크에는 옮겨 담으라고 안 한다**(리뷰) — 그 말을 따르면 `~/.bashrc` 가 커밋에 실린다.
+    assert!(
+        said.contains("체크아웃 밖") && !said.contains("가리키는 내용을 담은"),
+        "밖의 파일을 옮겨 담으라고 했다\n{said}"
+    );
+    let status = ok(root, &["status", "--json"]);
+    assert!(status.contains("dotfile_linked") && !status.contains("gitignore_rules"), "{status}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(check.contains(r#""linked":[".gitignore"]"#), "{check}");
     add(root, &["저널을 지을 첫 줄"]);
     let journals: Vec<_> = std::fs::read_dir(root.join(".moai/journal")).unwrap().map(|e| e.unwrap().path()).collect();
     assert_eq!(journals.len(), 1, "{journals:?}");

@@ -4663,6 +4663,21 @@ impl Warning {
         Warning::new(kind, missing).notice().hint(&Warning::init_hint(root))
     }
 
+    /// 딸린 파일(`.gitattributes`·`.gitignore`)이 **링크라는 알림**(moai-yke5). 재는 쪽은
+    /// `cmd::init::linked_dotfiles` 고, `ids` 에 링크인 파일의 이름을 **모두** 든다.
+    ///
+    /// **[`Warning::dotfile_rules`] 와 가른다.** git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을 안 읽어
+    /// 규칙이 하나도 안 서는데, 빠진 줄로 말하면 `moai init` 을 대게 되고 그 `init` 은 링크에 안 쓰므로
+    /// 알림이 영영 안 걷힌다. 고칠 길은 보통 파일로 바꾸는 것 하나라 **칠 줄(`hint`)을 안 단다** — 링크를
+    /// 어떻게 풀지는 그 링크를 건 사람이 안다.
+    ///
+    /// **파일마다 세우지 않는다**(리뷰). `dotfile_rules` 는 파일마다 결과가 달라 갈래가 갈리지만 여기는
+    /// 고칠 길이 하나라 한 갈래다 — 파일마다 세우면 둘 다 링크인 저장소의 보드에 같은 머리가 두 번 서고,
+    /// 갈래로 알림을 찾는 쪽은 하나를 잃는다.
+    pub fn dotfile_linked(names: &[&str]) -> Warning {
+        Warning::new("dotfile_linked", names.iter().map(|n| n.to_string()).collect()).notice()
+    }
+
     /// 트래커 파일(`.moai/issues.jsonl`)이 **링크라는 알림**(moai-jo3h, 2026-09-29 사용자 결정). 재는 쪽은
     /// `cmd::status::install_notices` 고, `ids` 에 링크가 가리키는 파일을 든다.
     ///
