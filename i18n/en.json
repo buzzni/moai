@@ -679,6 +679,8 @@
   "add.made": "Made",
   "add.tally": "epics {epics} · issues {issues}",
   "add.on_milestone": "the epic stands on milestone {id}",
+  "add.on_milestone_many": "the {n} epics stand on milestone {id}",
+  "add.no_such_milestone": "there is no milestone {id}. Putting it in as it is — `moai status` counts it as dangling_milestone",
   "add.body_on": "the body stands on the first epic, {title}",
   "add.body_stdin_empty": "`--body -` read stdin and nothing came — no body was written",
   "idea.will_unfold": "To unfold",

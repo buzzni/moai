@@ -471,7 +471,13 @@ fn bulk(
         out.extend(drafts.iter().map(|d| line_of(d, None)));
         out.push(String::new());
         out.push(tally(&drafts, ctx.lang()));
-        out.extend(milestone_line(milestone, ctx.lang()));
+        // 연습은 락을 안 쥐고 읽는다 — 진짜는 락 안에서 다시 잰다. 마일스톤이 없으면 읽지도 않는다.
+        let known = match milestone {
+            Some(_) => is_milestone(&repo.read()?.issues, milestone),
+            None => false,
+        };
+        let roots = drafts.iter().filter(|d| d.epic.is_none()).count();
+        out.extend(milestone_line(milestone, known, roots, ctx.lang()));
         out.extend(body_line(&drafts, body, ctx.lang()));
         return Ok(out);
     }
@@ -479,13 +485,14 @@ fn bulk(
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let who = assignee_of(assignee.as_deref(), &by);
-    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = super::read_of(issues, cfg, &ids, ctx.json);
-            Ok((entries, (made, read)))
+            let known = is_milestone(issues, stood_on(&made));
+            Ok((entries, (made, read, known)))
         },
     )?;
 
@@ -499,7 +506,7 @@ fn bulk(
     out.push(tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — `idea promote` 와 한 자리다(리뷰). 적은 값을 그대로 찍으면
     // 같은 한 줄을 한쪽은 argv 로, 한쪽은 파일로 셈해, 쓰기에 정규화가 붙는 날 둘이 갈린다.
-    out.extend(milestone_line(stood_on(&made), ctx.lang()));
+    out.extend(milestone_line(stood_on(&made), known, made.iter().filter(|i| is_root(i)).count(), ctx.lang()));
     Ok(out)
 }
 
@@ -840,10 +847,31 @@ fn body_lands_on(drafts: &[Draft], body: Option<&str>) -> Option<usize> {
 /// **본문 글자는 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
 /// (`moai show <idea>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
 /// 선다는 **사실**은 [`body_line`] 이 낸다 — 글자를 안 찍는다는 이 결정과 어긋나지 않는다.
-pub fn milestone_line(milestone: Option<&str>, lang: crate::i18n::Lang) -> Option<String> {
+///
+/// **없는 마일스톤에는 "선다" 고 말하지 않는다**(moai-pp9i.gxf). `--milestone <없는 id>` 가 0 으로
+/// 끝나며 선다고 찍었는데, 같은 저장소의 `moai status` 는 그 에픽을 `dangling_milestone` 으로
+/// 셌다. 그때는 이 줄을 안 내고 stderr 에 한 줄 알린다 — 곁의 `--epic <없는 것>`
+/// (`add.no_such_epic_yet`)과 같은 꼴로, 막지는 않는다. 재는 자는 [`is_milestone`] 이다.
+///
+/// **뿌리가 둘이면 둘로 센다** — 계획은 `#` 줄을 여럿 받고 마일스톤은 뿌리마다 선다
+/// ([`create_drafts`]). 단수로 말하면 받는 쪽이 첫 에픽 하나만 그 릴리스에 든 줄 안다.
+pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: crate::i18n::Lang) -> Option<String> {
     let id = milestone?;
-    let said = crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]);
+    if !known {
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+        return None;
+    }
+    let said = match roots {
+        0 | 1 => crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]),
+        n => crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone_many"), &[("id", id), ("n", &n.to_string())]),
+    };
     Some(paint(style::DIM, &said))
+}
+
+/// `id` 가 이 저장소의 **마일스톤 줄**인가 — `moai status` 의 `dangling_milestone` 과 같은 자다
+/// (`report::misplace_of` 가 가리킨 id 의 종류가 마일스톤인지를 본다). `None` 이면 `false` 다.
+pub fn is_milestone(issues: &[Issue], id: Option<&str>) -> bool {
+    id.is_some_and(|m| issues.iter().any(|i| i.id == m && i.kind == Kind::Milestone))
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

@@ -200,7 +200,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
-        out.extend(crate::cmd::add::milestone_line(stone.as_deref(), ctx.lang()));
+        out.extend(crate::cmd::add::milestone_line(
+            stone.as_deref(),
+            crate::cmd::add::is_milestone(&load.issues, stone.as_deref()),
+            drafts.iter().filter(|d| d.epic.is_none()).count(),
+            ctx.lang(),
+        ));
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -215,7 +220,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
     let lang = ctx.lang();
-    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
@@ -330,7 +335,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
-            Ok((entries, (made, read)))
+            let known = crate::cmd::add::is_milestone(issues, crate::cmd::add::stood_on(&made));
+            Ok((entries, (made, read, known)))
         },
     )?;
 
@@ -356,7 +362,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
     // 아무것도 안 서고, 그것이 그대로 답이다. 세는 자는 `add --from` 과 한 자리다(리뷰).
-    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), ctx.lang()));
+    let roots = made.iter().filter(|i| crate::cmd::add::is_root(i)).count();
+    out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), known, roots, ctx.lang()));
     if let Some(e) = into {
         let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));

@@ -4900,6 +4900,40 @@ fn a_rehearsal_measures_the_milestone_it_reports() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// **없는 마일스톤에 "선다" 고 말하지 않고, 뿌리 둘은 둘로 센다**(moai-pp9i.gxf). 헛 id 를 받은
+/// 계획이 0 으로 끝나며 "선다" 고 찍었는데 같은 저장소의 `moai status` 는 그 에픽을
+/// `dangling_milestone` 으로 셌다. 막지는 않는다 — 곁의 `--epic <없는 것>` 처럼 알리고 넣는다.
+#[test]
+fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
+    let s = init("planstonemissing");
+    let two = "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n";
+    for dry in [true, false] {
+        let mut args = vec!["add", "--from", "-", "--milestone", "argos-zzzz"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = from_stdin(s.path(), &args, two);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let (said, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!said.contains("에 선다"), "dry={dry}: 없는 마일스톤에 선다고 했다\n{said}");
+        assert!(err.contains("argos-zzzz") && err.contains("마일스톤이 없다"), "dry={dry}: 말없이 지나갔다\n{err}");
+    }
+
+    // 있는 마일스톤이면 뿌리 수대로 말한다 — 연습도 진짜도.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    for dry in [true, false] {
+        let mut args = vec!["add", "--from", "-", "--milestone", stone.as_str()];
+        if dry {
+            args.push("--dry-run");
+        }
+        let said = String::from_utf8(from_stdin(s.path(), &args, two).stdout).unwrap();
+        assert!(said.contains(&format!("에픽 2개가 마일스톤 {stone} 에 선다")), "dry={dry}: 둘을 하나로 셌다\n{said}");
+    }
+    let one = "# 한 에픽\n- 하나\n";
+    let said = String::from_utf8(from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], one).stdout).unwrap();
+    assert!(said.contains(&format!("에픽은 마일스톤 {stone} 에 선다")), "{said}");
+}
+
 /// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
 /// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
 /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
