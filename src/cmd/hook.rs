@@ -507,15 +507,33 @@ fn releasing(input: &Input, repo: &Repo, issues: &[model::Issue]) -> (crate::hoo
 /// **std 의 해셔를 안 쓴다**(moai-2vrw, `text::fnv1a64`) — 세션마다 따로 뜨는 훅이 같은 자리를 찾아야
 /// 하는데, `DefaultHasher` 는 러스트 판마다 값이 달라져도 된다고 문서가 밝혀 다시 빌드한 바이너리가 옛
 /// 기록을 못 찾는다.
-fn picks_dir(repo: &Repo) -> std::path::PathBuf {
-    let key = match crate::worktree::tracker_place(&repo.root) {
+///
+/// **자리는 사용자 설정 곁이다 — 누구나 쓰는 temp 가 아니다**(moai-59k3.yo6, 2026-09-29 사용자 결정).
+/// temp 의 이름은 넘겨짚을 수 있어, 남이 미리 만든 디렉터리나 심어 둔 기록 하나가 규칙 1·2 를 조용히
+/// 껐다 — 기록이 없거나 남는 것은 일부러 조용히 지나가게 둔 자리라 아무 말도 안 났다. 설정의 자리를
+/// 모르거나 상대경로면 적지도 읽지도 않는다 — 상대경로는 훅이 선 자리마다 딴 디렉터리가 되고, 빠진
+/// 기록은 전과 같은 판정이다.
+fn picks_dir(repo: &Repo) -> Option<PathBuf> {
+    let config = crate::user_config::path().filter(|p| p.is_absolute())?;
+    Some(config.parent()?.join("picks").join(format!("{:016x}", picks_key(&repo.root))))
+}
+
+/// [`picks_dir`] 의 이름 — 트래커의 자리를 센 값이다.
+///
+/// **`MOAI_HERE` 로 루트에 안 옮긴 딸린 워크트리는 제 뿌리로 센다**(moai-59k3.yo6). 그 워크트리와
+/// 루트는 `tracker_place` 가 같은 값(공용 디렉터리, 꼭대기에서 뿌리까지)을 내는데 보는 스냅샷은
+/// 다르다 — 한 자리에 적던 판은 루트의 남의 집기 하나가 워크트리의 `held()` 를 비지 않게 만들어
+/// 규칙 2 를 껐다. 옮길 루트가 있는데([`crate::worktree::tracker_root`]) 이 뿌리가 거기 없다는 것이
+/// 곧 갈라 놓은 트래커다. 맨몸 저장소의 워크트리는 옮길 루트가 없어 전처럼 한 자리를 함께 쓴다.
+fn picks_key(root: &Path) -> u64 {
+    let apart = crate::worktree::tracker_root(root).is_some();
+    match crate::worktree::tracker_place(root).filter(|_| !apart) {
         Some((common, rel)) => crate::text::fnv1a64_from(
             crate::text::fnv1a64_from(crate::text::fnv1a64(common.as_os_str().as_encoded_bytes()), &[0]),
             rel.as_os_str().as_encoded_bytes(),
         ),
-        None => crate::text::fnv1a64(crate::path::real(&repo.root).as_os_str().as_encoded_bytes()),
-    };
-    std::env::temp_dir().join(format!("moai-picks-{key:016x}"))
+        None => crate::text::fnv1a64(crate::path::real(root).as_os_str().as_encoded_bytes()),
+    }
 }
 
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 전과 같은 판정이다.
@@ -525,7 +543,7 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
         return;
     }
     let Some(sid) = safe_sid(input) else { return };
-    let dir = picks_dir(repo);
+    let Some(dir) = picks_dir(repo) else { return };
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
@@ -568,8 +586,8 @@ fn prune_picks(dir: &Path, sid: &str) {
 /// 기록이 끝났는지는 `issues` 의 칸 시각으로 잰다.
 fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hook::Picks {
     let Some(me) = safe_sid(input) else { return Default::default() };
-    let Ok(dir) = std::fs::read_dir(picks_dir(repo)) else { return Default::default() };
-    // **보통 파일만 읽는다** — 임시 디렉터리라 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의
+    let Some(Ok(dir)) = picks_dir(repo).map(std::fs::read_dir) else { return Default::default() };
+    // **보통 파일만 읽는다** — 한때 임시 디렉터리였고 지금도 손으로 놓을 수 있는 자리라 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의
     // 파일을 읽힌다(리뷰 moai-3k2d.1df). 적는 쪽은 보통 파일만 만든다.
     let files =
         dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {

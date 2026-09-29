@@ -11314,6 +11314,9 @@ fn hook_at_home(
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
+    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 시험마다 제 자리를 준다. 모든 시험이 함께
+    // 쓰는 `isolated` 의 자리로 두면 남의 시험이 적은 기록이 한 디렉터리에 쌓인다. 시험이 준 값이 이긴다.
+    cmd.env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"));
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -12343,6 +12346,67 @@ fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
     assert!(lost.trim().is_empty(), "진 집기를 겨눈 트래커의 줄로 붙든다\n{lost}");
 }
 
+/// 훅이 집기를 적은 디렉터리들 — [`hook_at_home`] 이 준 설정 곁의 `picks/` 아래다.
+fn pick_dirs(s: &Scratch) -> Vec<PathBuf> {
+    let Ok(dir) = std::fs::read_dir(s.path().join("hookcfg").join("picks")) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = dir.filter_map(Result::ok).map(|e| e.path()).collect();
+    out.sort();
+    out
+}
+
+/// **집기 기록은 누구나 쓰는 temp 에 안 놓인다**(moai-59k3.yo6, 2026-09-29 사용자 결정). 이름을 넘겨짚을 수
+/// 있는 `/tmp/moai-picks-<key>` 에 남이 먼저 만든 디렉터리나 심어 둔 기록 하나가 규칙 1·2 를 조용히
+/// 껐다. 이제 사용자 설정 곁(`<설정 디렉터리>/picks/<key>`)이다.
+///
+/// **`MOAI_HERE` 로 갈라 놓은 워크트리는 루트와 딴 자리에 적는다** — 두 쪽은 `tracker_place` 가 같은
+/// 값을 내지만 보는 스냅샷이 달라, 한 자리에 적던 판은 루트의 집기가 워크트리의 `held()` 를 채워
+/// 규칙 2 를 껐다. 옮겨 가는 워크트리(맨 `moai`)는 루트와 같은 자리다 — 집기는 루트에서 치고 일은
+/// 워크트리에서 한다.
+#[test]
+fn pick_records_sit_beside_the_user_config_one_per_tracker() {
+    let s = Scratch::new("hookpickhome");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
+    let inside = main.join(".claude/worktrees/w");
+    let input = |cwd: &Path| {
+        format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&cwd.display().to_string()),
+            json_str(&format!("moai mv {id} in_progress"))
+        )
+    };
+
+    assert!(hook_in(&s, &main, "pre-tool-use", &input(&main)).stdout.is_empty());
+    let root = pick_dirs(&s);
+    assert_eq!(root.len(), 1, "루트의 집기를 설정 곁에 안 적었다 — {root:?}");
+    assert!(root[0].join("s1").is_file(), "세션의 기록이 없다 — {root:?}");
+    let temp: Vec<_> = std::fs::read_dir(s.path().join("hooktmp"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("moai-picks-"))
+        .collect();
+    assert!(temp.is_empty(), "temp 에 아직 적는다 — {temp:?}");
+
+    // 옮겨 가는 워크트리는 루트와 한 자리다.
+    assert!(hook_in(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    assert_eq!(pick_dirs(&s), root, "옮겨 가는 워크트리가 루트와 딴 자리에 적는다");
+
+    // 갈라 놓은 워크트리는 제 자리다.
+    assert!(hook_here(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    let both = pick_dirs(&s);
+    assert_eq!(both.len(), 2, "MOAI_HERE 워크트리가 루트의 기록 자리를 함께 쓴다 — {both:?}");
+
+    // 설정 자리가 상대경로면 적지 않는다 — 훅이 선 자리마다 딴 디렉터리가 된다.
+    hook_at_home(&s, &main, None, &[("MOAI_CONFIG", "rel/config.toml")], "pre-tool-use", &input(&main));
+    assert!(!main.join("rel").exists(), "상대 설정 자리 곁에 적었다");
+}
+
 /// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 훅은 판정마다 기록 디렉터리를 통째로
 /// 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 적을 때 두 주
 /// 넘게 안 적힌 남의 파일을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다.
@@ -12363,12 +12427,7 @@ fn old_pick_records_are_pruned_when_a_new_pick_is_written() {
         String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
     };
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
-    let dir = std::fs::read_dir(s.path().join("hooktmp"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("moai-picks-")))
-        .expect("집기를 안 적었다");
+    let dir = pick_dirs(&s).pop().expect("집기를 안 적었다");
     let old = dir.join("gone");
     std::fs::write(&old, format!("1\t{id}\n")).unwrap();
     let weeks = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 24 * 60 * 60);
