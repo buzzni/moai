@@ -49,7 +49,10 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the file it pointed to behind. Writes now follow the link and keep it. The temporary file is
   still made next to the name that was given — inside `.moai/` for the tracker, where it is
   ignored — and next to the file the link points to only when the two are on different
-  filesystems. A link loop, a link into a directory that is not there, and a link to something
+  filesystems. A file the repository holds (`.moai/issues.jsonl`, `AGENTS.md`) follows a link only
+  when it points inside the checkout — a cloned repository could otherwise commit a link to
+  `~/.bashrc` and have `moai init` or `moai add` rewrite it — while your own config, read marks
+  and update check follow links anywhere, as dotfiles need. A link loop, a link into a directory that is not there, and a link to something
   that is not a regular file (a device, a socket, a FIFO) are refused with the link named and
   nothing written. Two trackers whose `issues.jsonl` point at one file also take the lock of
   the directory that file lives in, so their writes no longer silently undo each other, and

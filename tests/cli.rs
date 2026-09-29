@@ -1184,6 +1184,19 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     std::fs::write(apart.path().join("CLAUDE.md"), "# 사람의 글\n").unwrap();
     let said = ok(apart.path(), &["init", "argos"]);
     assert!(said.contains("@AGENTS.md"), "따로 선 CLAUDE.md 에 안내가 안 섰다\n{said}");
+
+    // **체크아웃 밖을 가리키는 링크는 안 따라간다**(moai-4oab, 사용자 결정 둘째 판) — 받은 저장소가
+    // `AGENTS.md -> ~/.bashrc` 를 커밋해 두면 `init` 이 그 파일에 블록을 붙이던 자리다.
+    let away = Scratch::new("init-link-away");
+    let rc = away.path().join("rc");
+    std::fs::write(&rc, "# 사람의 rc\n").unwrap();
+    let cloned = Scratch::new("init-link-cloned");
+    std::os::unix::fs::symlink(&rc, cloned.path().join("AGENTS.md")).unwrap();
+    let out = moai(cloned.path(), &["init", "argos"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 고쳐 썼다");
+    assert!(is_link(&cloned.path().join("AGENTS.md")), "링크를 갈아끼웠다");
+    assert!(said.contains("outside"), "왜 안 썼는지를 안 댔다\n{said}");
 }
 
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.

@@ -693,11 +693,14 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
         std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
     }
     let first = tmp_dir(path);
-    match crate::store::write_atomic_in(path, text.as_bytes(), &first) {
+    // 링크는 저장소 안을 가리킬 때만 따라간다(moai-4oab) — 받은 저장소가 커밋한 `AGENTS.md` 링크가
+    // 체크아웃 밖을 가리키면 `init` 이 그 파일을 고쳐 쓴다. 뿌리는 이 파일이 든 자리다.
+    let checkout = crate::path::dir_of(path);
+    match crate::store::write_atomic_in(path, text.as_bytes(), &first, checkout) {
         // `.moai/` 에서 못 갈아 끼웠으면 옆자리로 한 번 더 — 까닭은 [`tmp_dir`] 에 적었다. 실패한
         // 쪽은 임시 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다.
         Err(_) if path.parent() != Some(first.as_path()) => {
-            crate::store::write_atomic(path, text.as_bytes()).map_err(|e| e.message)
+            crate::store::write_atomic_inside(path, text.as_bytes(), checkout).map_err(|e| e.message)
         }
         done => done.map_err(|e| e.message),
     }
