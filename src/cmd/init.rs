@@ -244,9 +244,72 @@ pub fn agents_state(root: &Path) -> Result<BlockState, String> {
 const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
     [(".gitattributes", attributes_for, "gitattributes_rules"), (".gitignore", gitignore_for, "gitignore_rules")];
 
-/// `.gitignore` 에 심을 블록 — 어느 뿌리에서나 같다. 뿌리를 받는 것은 [`DOTFILES`] 의 칸 꼴이다.
-fn gitignore_for(_: &Path) -> std::borrow::Cow<'static, str> {
-    GITIGNORE.into()
+/// `.gitignore` 에 심을 블록 — **트래커가 링크 너머에 살면 그 자리의 락과 임시 파일도 막는다**(moai-th3b).
+///
+/// 블록의 `.moai/lock`·`.moai/*.tmp.*` 는 링크 경로를 가리키는데, git 은 링크를 따라가지 않는다. 막을 자리는
+/// 둘이고 막는 넓이가 다르다.
+///
+/// - **`.moai` 가 링크면**(`.moai -> tracker`) 락과 임시 파일이 모두 그 자리(`tracker/`)에 선다. `init` 이 갈아
+///   끼우는 `AGENTS.md` 의 임시 파일도 거기 선다([`tmp_dir`]) — 그 자리는 moai 의 디렉터리라 블록의 `.moai/`
+///   줄을 통째로 옮긴다
+/// - **트래커 파일만 링크면**(`.moai/issues.jsonl -> ../shared/issues.jsonl`) 그 파일이 든 자리에는
+///   `store::Repo::far_lock` 의 `lock` 과, `.moai/` 에서 못 갈아끼울 때 물러선 **그 파일 이름의** 임시 파일만
+///   선다. 그 자리는 사람의 디렉터리라 `*.tmp.*` 를 그대로 옮기면 남의 파일(`shared/release.tmp.md`)까지
+///   가려 `git add -A` 가 말없이 빠뜨린다(리뷰) — 그래서 `*` 를 그 파일 이름으로 좁힌다. 가리키는 파일이
+///   뿌리에 있으면 그 자리는 뿌리다(`/lock`)
+///
+/// 줄을 손으로 적지 않고 블록의 `.moai/` 줄을 그 자리로 옮겨 적는다([`mirrored`]) — 블록이 바뀌는 날 옮긴
+/// 줄도 같이 바뀐다. 줄로 못 거는 자리([`inside`] 가 거절하는 곳)는 뺀다 — 그 트래커는 `moai status` 의 링크
+/// 알림이 비춘다.
+fn gitignore_for(root: &Path) -> std::borrow::Cow<'static, str> {
+    let own = moai_moved(root);
+    let mut lines = own.as_deref().map(|dir| mirrored(GITIGNORE, "", dir, None)).unwrap_or_default();
+    if let Some(rel) = linked_snapshot(root) {
+        let (dir, name) = rel.rsplit_once('/').unwrap_or(("", rel.as_str()));
+        // 제자리(`.moai`)의 줄은 블록이 이미 막고, `.moai` 가 푼 자리의 줄은 바로 위에서 통째로 옮겼다.
+        if dir != ".moai" && own.as_deref() != Some(dir) {
+            lines.push_str(&mirrored(GITIGNORE, "", dir, Some(name)));
+        }
+    }
+    if lines.is_empty() {
+        return GITIGNORE.into();
+    }
+    format!("{GITIGNORE}{LINKED_IGNORE_COMMENT}{lines}").into()
+}
+
+/// [`gitignore_for`] 가 더하는 줄 위의 주석. **글을 고치지 않는다** — 까닭은 [`LINKED_COMMENT`] 와 같다.
+const LINKED_IGNORE_COMMENT: &str = "\
+# The tracker lives behind a link. Its lock and temporary files sit where the
+# link points, so they are ignored there too.
+";
+
+/// 블록의 `.moai/<under>` 로 시작하는 줄을 **뿌리에 못박은 `/<dir>/` 로 옮겨 적는다** — `dir` 이 빈 글이면
+/// 뿌리 바로 밑이다(`/lock`). 앞 `/` 는 [`attributes_for`] 의 줄과 같은 까닭이다 — 없으면 어느 깊이의 같은
+/// 이름에도 걸린다. `name` 을 받으면 파일 이름 자리의 `*` 를 그 이름으로 좁힌다(`*.tmp.*` →
+/// `issues.jsonl.tmp.*`) — 그 까닭은 [`gitignore_for`] 에 있다.
+fn mirrored(block: &str, under: &str, dir: &str, name: Option<&str>) -> String {
+    block
+        .lines()
+        .filter_map(|l| l.strip_prefix(".moai/"))
+        .filter(|rest| rest.starts_with(under))
+        .map(|rest| {
+            let rest = match name.zip(rest.strip_prefix('*')) {
+                Some((name, tail)) => format!("{name}{tail}"),
+                None => rest.to_string(),
+            };
+            match dir {
+                "" => format!("/{rest}\n"),
+                dir => format!("/{dir}/{rest}\n"),
+            }
+        })
+        .collect()
+}
+
+/// `.moai` 가 **딴 자리로 풀렸으면** 그 자리 — 뿌리 안의 경로로(뿌리 자체면 빈 글). 제자리거나 없거나 줄로
+/// 못 거는 자리면 `None` 이다. 락과 임시 파일과 저널이 받은 철자(`.moai/…`)로 가는 곳이 여기다 —
+/// [`gitignore_for`] 와 [`attributes_for`] 가 이 하나로 잰다.
+fn moai_moved(root: &Path) -> Option<String> {
+    inside(root, &std::fs::canonicalize(root.join(".moai")).ok()?).filter(|dir| dir != ".moai")
 }
 
 /// `.gitattributes` 에 심을 블록 — **트래커가 체크아웃 안의 파일을 가리키는 링크면 그 파일에도
@@ -265,15 +328,26 @@ fn gitignore_for(_: &Path) -> std::borrow::Cow<'static, str> {
 /// **거는 속성은 스냅샷 줄의 것을 그대로 옮긴다**(리뷰) — 손으로 다시 적으면 그 줄이 바뀌는 날 병합이
 /// 실제로 도는 이 파일만 옛 속성에 남는다. 스냅샷 줄이 드라이버를 거는지는
 /// `the_declared_path_is_the_one_init_writes` 가 맨다.
+///
+/// **`.moai` 가 링크면 저널 줄도 그 자리로 옮긴다**(moai-th3b). 저널은 `.moai` 안에 살아 `.moai -> tracker`
+/// 면 `tracker/journal/*.jsonl` 로 합쳐지는데, 블록의 `.moai/journal…` 줄은 거기 안 걸려 union 대신
+/// 기본 병합을 받는다. 끝 조각만 링크인 경우에는 저널이 제자리라 옮길 것이 없다.
 fn attributes_for(root: &Path) -> std::borrow::Cow<'static, str> {
-    let Some(rel) = linked_snapshot(root) else { return GITATTRIBUTES.into() };
-    let snapshot = crate::cmd::merge_driver::SNAPSHOT;
-    let attrs = GITATTRIBUTES
-        .lines()
-        .rev()
-        .find_map(|l| l.strip_prefix(snapshot).filter(|rest| rest.starts_with(char::is_whitespace)))
-        .unwrap_or_default();
-    format!("{GITATTRIBUTES}{LINKED_COMMENT}/{rel}{attrs}\n").into()
+    let mut out = String::new();
+    if let Some(rel) = linked_snapshot(root) {
+        let snapshot = crate::cmd::merge_driver::SNAPSHOT;
+        let attrs = GITATTRIBUTES
+            .lines()
+            .rev()
+            .find_map(|l| l.strip_prefix(snapshot).filter(|rest| rest.starts_with(char::is_whitespace)))
+            .unwrap_or_default();
+        out.push_str(&format!("{LINKED_COMMENT}/{rel}{attrs}\n"));
+    }
+    if let Some(dir) = moai_moved(root) {
+        out.push_str(LINKED_JOURNAL_COMMENT);
+        out.push_str(&mirrored(GITATTRIBUTES, "journal", &dir, None));
+    }
+    if out.is_empty() { GITATTRIBUTES.into() } else { format!("{GITATTRIBUTES}{out}").into() }
 }
 
 /// [`attributes_for`] 가 더하는 줄 위의 주석. **글을 고치지 않는다** — 줄 단위로 견주어 덧붙이므로
@@ -281,6 +355,12 @@ fn attributes_for(root: &Path) -> std::borrow::Cow<'static, str> {
 const LINKED_COMMENT: &str = "\
 # .moai/issues.jsonl is a link. git merges the file it points at, so that file
 # carries the same attributes.
+";
+
+/// [`attributes_for`] 가 `.moai` 가 링크일 때 저널 줄 위에 더하는 주석. **글을 고치지 않는다.**
+const LINKED_JOURNAL_COMMENT: &str = "\
+# .moai is a link. The journal lives where it points, so it merges there with
+# the same rule.
 ";
 
 /// 이 뿌리의 트래커 줄이 **실제로 사는 파일** — 끝 조각의 링크 사슬을 따라가고([`crate::path::follow_links`])
@@ -300,16 +380,25 @@ pub(crate) fn tracker_file(root: &Path) -> Option<std::path::PathBuf> {
 
 /// 트래커가 링크면 **이 뿌리 안에서** 그것이 가리키는 파일의 경로(`shared/issues.jsonl`). 링크가 아니거나
 /// [`attributes_for`] 가 줄로 못 거는 자리면 `None` 이다 — 푼 자리가 제자리(`.moai/issues.jsonl`)면 링크가
-/// 아니다.
+/// 아니다. 줄로 못 거는 이름은 [`inside`] 가 가른다.
+fn linked_snapshot(root: &Path) -> Option<String> {
+    inside(root, &tracker_file(root)?).filter(|rel| rel != crate::cmd::merge_driver::SNAPSHOT)
+}
+
+/// 푼 경로 `path` 를 **규칙 줄에 실을 수 있는** 뿌리 안의 경로로 — 뿌리 자체는 빈 글이다. 뿌리 밖이거나
+/// 빈칸·패턴 글자·제어 문자가 든 이름이면 `None` 이다. 규칙 줄을 짓는 자리([`linked_snapshot`]·
+/// [`moai_moved`])가 모두 이 하나로 잰다.
 ///
 /// **제어 문자가 든 이름도 줄로 안 건다**(리뷰). 받은 저장소가 링크와 그 이름의 디렉터리를 커밋하면 그
 /// 글자가 `init --check` 와 `init` 이 찍는 규칙 줄에 그대로 실려 터미널을 다시 칠한다.
-fn linked_snapshot(root: &Path) -> Option<String> {
-    let snapshot = crate::cmd::merge_driver::SNAPSHOT;
-    let end = tracker_file(root)?;
-    let rel = end.strip_prefix(crate::path::real(root)).ok()?.to_str()?;
+///
+/// **뿌리 자체는 받는다**(리뷰). 파일은 뿌리일 수 없어 빈 글이 안 나오지만 디렉터리는 뿌리일 수 있다 —
+/// `.moai/issues.jsonl -> ../issues.jsonl` 이면 `store::Repo::far_lock` 이 뿌리에 `lock` 을 세운다. 빈 글을
+/// 거절하던 때는 그 락에 줄이 안 서서 `git add -A` 가 그것을 담았고, `init --check` 는 빠진 것이 없다고 했다.
+fn inside(root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(crate::path::real(root)).ok()?.to_str()?;
     let plain = |c: char| !c.is_whitespace() && !c.is_control() && !"*?[]\\\"#!".contains(c);
-    (rel != snapshot && !rel.is_empty() && rel.chars().all(plain)).then(|| rel.to_string())
+    rel.chars().all(plain).then(|| rel.to_string())
 }
 
 /// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 알림의 갈래, 빠진 줄들)`, 빠진 것이
@@ -322,9 +411,15 @@ fn linked_snapshot(root: &Path) -> Option<String> {
 /// **없는 파일은 통째로 빠진 것이다.** `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰 자리라
 /// (moai-mxtb) 입을 다물면 안 된다. 갈림은 **오류의 갈래로** 짓는다 — `exists()` 로 물으면 못 읽는
 /// 파일과 없는 파일이 정확히 거꾸로 선다.
+///
+/// **링크인 파일도 여기서 말하지 않는다**(moai-yke5) — git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을
+/// 안 읽어 무엇이 들었든 규칙이 하나도 안 선다. 빠진 줄을 대면 `init` 이 못 걷는 알림이 영영 서므로 그
+/// 파일은 [`linked_dotfiles`] 가 제 낱말로 말한다. 그보다 옛 git 은 그 링크를 읽지만 `init` 은 거기에도 안
+/// 쓴다 — git 을 올리는 날 말없이 꺼지는 규칙이라, 보통 파일로 바꾸라는 말은 어느 버전에서나 맞다.
 pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>)> {
     DOTFILES
         .into_iter()
+        .filter(|(name, ..)| !root.join(name).is_symlink())
         .filter_map(|(name, block, kind)| {
             let text = match std::fs::read_to_string(root.join(name)) {
                 Ok(t) => t,
@@ -336,6 +431,16 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>
             (!missing.is_empty()).then_some((name, kind, missing))
         })
         .collect()
+}
+
+/// **링크인** 딸린 파일의 이름(moai-yke5). git 은 2.32 부터 체크아웃 안의 `.gitattributes`·`.gitignore` 가
+/// 링크면 따라가지 않는다 — 가리키는 파일이 체크아웃 안이든 밖이든 그 규칙은 안 선다. `init` 은 그 파일에
+/// 안 쓰고([`ensure_lines`]), 고치는 길은 보통 파일로 바꾸는 것 하나라 알림도 `moai init` 을 대지 않는다.
+///
+/// 링크인지는 **따라가지 않고** 잰다(`Path::is_symlink`) — 못 재면 링크가 아니고, 그 파일은 읽는 길이 제
+/// 말로 댄다.
+pub fn linked_dotfiles(root: &Path) -> Vec<&'static str> {
+    DOTFILES.into_iter().map(|(name, ..)| name).filter(|name| root.join(name).is_symlink()).collect()
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
@@ -359,14 +464,15 @@ pub(crate) fn away_root(root: &Path, chdir: bool) -> Option<String> {
 /// `init` 은 한 번 말하고 만다 — 못 써서 건너뛴 저장소는 `/.claude/worktrees/` 없이 얼마든지 오래
 /// 가고, 그 사이 `git add -A` 한 번이 옆 워크트리를 통째로 담는다(moai-mxtb). 조용히 이어지는
 /// 위험이라 세션이 시작하는 화면에 선다 — 낡은 블록을 거기 둔 것과 같은 까닭이다.
+///
+/// **링크인 파일은 따로 선다**([`linked_dotfiles`]) — 고칠 길이 `moai init` 이 아니다. 둘 다 링크여도
+/// **알림은 하나다**(리뷰) — 파일마다 세우면 같은 머리가 두 번 서고, 갈래로 알림을 찾는 쪽은 하나를 잃는다.
 pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
-    let gaps = dotfile_gaps(root);
-    if gaps.is_empty() {
-        return Vec::new();
-    }
-    let away = away_root(root, chdir);
+    let (gaps, linked) = (dotfile_gaps(root), linked_dotfiles(root));
+    let away = if gaps.is_empty() { None } else { away_root(root, chdir) };
     gaps.into_iter()
         .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, missing, away.as_deref()))
+        .chain((!linked.is_empty()).then(|| crate::report::Warning::dotfile_linked(&linked)))
         .collect()
 }
 
@@ -398,6 +504,7 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
     let gaps = dotfile_gaps(&root);
+    let linked = linked_dotfiles(&root);
     // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
     // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
@@ -430,6 +537,10 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
         {
             v["tracker_at"] = at;
         }
+        // 링크인 딸린 파일(moai-yke5) — `missing` 과 같은 자로, 있을 때만 키가 선다.
+        if !linked.is_empty() {
+            v["linked"] = serde_json::json!(linked);
+        }
         if !gaps.is_empty() {
             v["missing"] = serde_json::json!(
                 gaps.iter().map(|(name, _, missing)| (*name, missing)).collect::<std::collections::BTreeMap<_, _>>()
@@ -459,6 +570,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
             say(lang, "init.rules_missing"),
             &[("name", name), ("n", &missing.len().to_string()), ("rules", &missing.join(", "))],
         ));
+    }
+    for name in &linked {
+        out.push(fill(say(lang, "init.check_linked"), &[("name", name)]));
     }
     // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
     // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
@@ -652,6 +766,15 @@ enum Added {
     Already,
     /// 못 읽어서 안 건드렸다. 안에 든 것은 그 까닭이다.
     Unreadable(String),
+    /// 링크라 안 건드렸다(moai-yke5). git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을 안 읽으므로,
+    /// 덧붙이면 가리키는 파일만 바뀌고 규칙은 하나도 안 선다. 체크아웃 밖을 가리키면 덧붙이는 것 자체가
+    /// 남의 파일(`~/.bashrc`)을 고치는 일이다. **손으로 더할 줄도 안 댄다** — 그 줄을 따라 적는 곳이 바로
+    /// 그 링크다. 할 일은 보통 파일로 바꾸는 것 하나다.
+    ///
+    /// `to` 는 **한 줄로 걸러 둔** 링크 글이다 — 받은 저장소가 커밋한 글이라 ESC 나 줄바꿈이 들 수 있다.
+    /// `outside` 는 그 링크를 끝까지 푼 자리가 체크아웃 밖인가(못 풀면 밖으로 친다) — 고칠 말이 갈린다
+    /// ([`run`]): 안이면 그 내용을 옮겨 담고, 밖이면 옮겨 담는 순간 남의 파일이 커밋에 실린다.
+    Linked { to: String, outside: bool },
     /// 읽기는 됐는데 못 썼다(읽기 전용 파일·체크아웃).
     ///
     /// **읽기 실패와 가르는 것은 말뿐이 아니다**(리뷰 moai-humk). 사람이 할 일이 다르고
@@ -671,6 +794,7 @@ impl Added {
             Added::Wrote { .. } | Added::Already => None,
             Added::Unreadable(why) => Some(("unreadable", why)),
             Added::Unwritable { why, .. } => Some(("unwritable", why)),
+            Added::Linked { to, .. } => Some(("linked", to)),
         }
     }
 
@@ -681,6 +805,7 @@ impl Added {
         match self {
             Added::Unwritable { missing, .. } => missing.iter().map(String::as_str).filter(rule).collect(),
             Added::Wrote { .. } | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
+            Added::Linked { .. } => Vec::new(),
         }
     }
 }
@@ -706,10 +831,31 @@ impl Added {
 /// `O_APPEND` 는 못 쓰면 한 글자도 안 바뀌고, 쓰다 끊겨도 남의 줄은 그대로다 — 이 함수가 내건
 /// "남의 내용을 지우지 않는다" 를 실제로 지키는 것은 이쪽이다.
 ///
-/// **링크는 체크아웃 안에서만 따라간다**(moai-wd44) — 받은 저장소가 커밋한 `.gitignore -> ~/.bashrc` 에
-/// `init` 이 줄을 덧붙이던 자리다. 거절은 못 쓴 것과 같은 길로 간다: 손으로 더할 줄을 대고 이어 간다.
-/// 뿌리는 이 파일이 든 자리다 — [`plant`] 와 같은 자로 잰다.
+/// **링크인 파일에는 아예 안 쓴다**(moai-yke5). 받은 저장소가 커밋한 `.gitignore -> ~/.bashrc` 에 `init` 이
+/// 줄을 덧붙이던 자리를 moai-wd44 가 "체크아웃 안에서만 따라간다" 로 좁혔는데, 딸린 파일은 git 이 읽어야
+/// 뜻이 선다 — git 은 2.32 부터 링크인 딸린 파일을 안 읽어, 안을 가리키는 링크에 덧붙여도 규칙이 하나도
+/// 안 선다. 앞 판은 그 자리를 "썼다" 고 했고 `--check` 도 빠진 것이 없다고 했다. 그래서 링크면 읽지도
+/// 쓰지도 않고 [`Added::Linked`] 로 돌아간다. 아래 `append_inside` 에 넘기는 뿌리(이 파일이 든 자리,
+/// [`plant`] 와 같은 자)는 이제 재고 난 뒤 링크로 바뀐 틈만 막는다.
+///
+/// **링크인지는 따라가지 않고 잰다**(`Path::is_symlink`) — `read_link` 가 되는지로 가르면 그것이 실패한
+/// 링크(I/O 오류, 윈도의 다른 reparse point)가 아래로 떨어져 링크를 따라 덧붙인다(리뷰).
 fn ensure_lines(path: &Path, block: &str) -> Added {
+    if path.is_symlink() {
+        // **링크 글은 한 줄로 걸러 싣는다**(리뷰) — `init` 의 한 줄로 그대로 터미널에 나가는데, 받은 저장소가
+        // 커밋한 글이라 ESC 는 화면을 다시 칠하고 줄바꿈은 없는 줄을 지어낸다. `store::target_of` 가 거절문에
+        // 싣는 링크 끝을 거르는 것과 같은 자다.
+        let to = std::fs::read_link(path).map(|t| crate::text::one_line(&t.display().to_string())).unwrap_or_default();
+        // **밖인지는 링크 글이 아니라 끝까지 푼 자리로 잰다**(리뷰) — 가운데 디렉터리가 링크면 안처럼 보이는
+        // 글(`config/shared/.bashrc`)도 밖에 닿는다. 못 풀면(고리, 없는 디렉터리) 밖으로 친다: 그쪽 말은
+        // "옮겨 담지 말고 링크를 걷어라" 라 틀려도 잃는 것이 없다.
+        let checkout = crate::path::real(crate::path::dir_of(path));
+        let outside = !crate::path::follow_links(path)
+            .ok()
+            .and_then(|end| std::fs::canonicalize(crate::path::dir_of(&end)).ok())
+            .is_some_and(|dir| dir.starts_with(&checkout));
+        return Added::Linked { to, outside };
+    }
     let existing = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -875,11 +1021,34 @@ fn decided(have: &str, want: &str) -> bool {
     // 탈출구가 링크 하나로 닫혔다. 드라이버를 거는 줄은 결정이 아니라 우리 줄이다.
     let decided_on_snapshot =
         || drives(want) && path(have) == Some(crate::cmd::merge_driver::SNAPSHOT) && !drives(have);
+    // **옮겨 적은 줄도 그 원래 줄에 적은 결정을 받는다**(리뷰) — 바로 위 스냅샷과 같은 까닭이다. `.moai` 가
+    // 링크면 저널 줄이 그 자리로 옮겨 서는데([`mirrored`]), `.moai/journal…` 에 `-merge` 로 union 을 안 쓰기로
+    // 한 저장소에 옮긴 줄을 요구하면 알림이 영영 서고 그 `init` 이 union 을 도로 건다. 원래 줄은 **이 블록이
+    // 거는 `.moai/` 규칙 줄**뿐이다 — 사람이 적은 넓은 패턴(`.moai/*.jsonl`)은 git 에서도 저널에 안 걸린다.
+    // 결정은 거는 값이 우리 줄과 다를 때다: 우리 줄을 그대로 적은 저장소는 옮긴 줄도 여전히 요구받는다.
+    let decided_on_mirror = || {
+        let (Some(from), Some(to)) = (path(have), path(want)) else { return false };
+        let ours = GITATTRIBUTES.lines().filter(|l| !l.starts_with('#')).filter_map(path).any(|p| p == from);
+        ours && from.strip_prefix(".moai/").is_some_and(|rest| to.ends_with(&format!("/{rest}")))
+            && merges(have) != merges(want)
+    };
     // 속성이 없는 줄은 `.gitignore` 의 줄이다 — 그쪽은 위의 자로만 잰다.
-    (path(have) == path(want) || decided_on_snapshot())
+    (path(have) == path(want) || decided_on_snapshot() || decided_on_mirror())
         && sets(want, "merge")
         && sets(have, "merge")
         && !union_on_snapshot(have)
+}
+
+/// 이 `.gitattributes` 줄이 `merge` 를 정하는 낱말들 — `merge`·`-merge`·`!merge`·`merge=<값>`. 사람의 줄이
+/// 우리 줄과 같은 값을 거는지 견줄 때 쓴다([`decided`]).
+fn merges(line: &str) -> Vec<&str> {
+    line.split_whitespace()
+        .skip(1)
+        .filter(|t| {
+            let t = t.trim_start_matches(['-', '!']);
+            t == "merge" || t.starts_with("merge=")
+        })
+        .collect()
 }
 
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
@@ -1059,7 +1228,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     let planting = if no_driver { None } else { Some(crate::cmd::merge_driver::plant_for_init(&root)) };
     // 못 건드린 자리 — 이름과 까닭과 **손으로 더할 줄**을 함께 든다(moai-gq1c, moai-0dwc). 줄을 안
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
-    // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
+    // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다. 링크는 줄 대신 고칠 말을 댄다
+    // ([`Added::Linked`]).
     let untouched: Vec<(&str, &Added, &str)> =
         [(".gitattributes", &attrs, &*attributes), (".gitignore", &ignore, &*ignored)]
             .into_iter()
@@ -1223,6 +1393,17 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         let head = match done {
             Added::Unwritable { why, .. } => fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)]),
             Added::Unreadable(why) => fill(say(lang, "init.unreadable"), &[("name", name), ("why", why)]),
+            // 링크는 **손으로 더할 줄을 안 댄다**([`Added::Linked`]) — 따라 적는 곳이 그 링크다. 고칠 말은
+            // 가리키는 곳에 따라 갈린다(리뷰): 체크아웃 안이면 그 내용을 보통 파일로 옮기고, 밖이면
+            // (`~/.bashrc`) 옮겨 담는 순간 그 파일이 이 저장소의 커밋에 실리므로 링크만 걷는다.
+            Added::Linked { to, outside } => {
+                out.push(fill(say(lang, "init.linked"), &[("name", name), ("to", to)]));
+                out.push(match outside {
+                    true => say(lang, "init.linked_fix_outside").to_string(),
+                    false => say(lang, "init.linked_fix").to_string(),
+                });
+                continue;
+            }
             Added::Wrote { .. } | Added::Already => continue,
         };
         out.push(head);
@@ -1318,6 +1499,27 @@ mod tests {
         assert!(missing_rules(".moai/journal/*.jsonl merge=union\n", journal).is_empty());
     }
 
+    /// **옮겨 적은 저널 줄도 원래 줄에 적은 결정을 받는다**(리뷰). `.moai -> tracker` 면 저널 줄이
+    /// `/tracker/journal…` 로 옮겨 서는데, `.moai/journal…` 에 `-merge` 를 적은 저장소에 옮긴 줄을 요구하면
+    /// 알림이 영영 서고 그 `init` 이 union 을 도로 건다 — 스냅샷에서 막은 고리가 저널로 다시 열린다.
+    /// 우리 줄을 그대로 적은 저장소와, 블록이 거는 줄이 아닌 넓은 패턴은 결정이 아니다.
+    #[test]
+    fn a_decision_on_a_journal_line_carries_to_where_it_moved() {
+        let file = "/tracker/journal.jsonl  text eol=lf merge=union";
+        let split = "/tracker/journal/*.jsonl  text eol=lf merge=union";
+        assert!(
+            missing_rules(".moai/journal.jsonl  text eol=lf -merge\n", file).is_empty(),
+            "옛 한 파일의 결정을 덮었다"
+        );
+        assert!(missing_rules(".moai/journal/*.jsonl  text eol=lf -merge\n", split).is_empty(), "저널의 결정을 덮었다");
+        // 결정은 그 줄의 것만 옮긴다 — 한 파일에 적은 결정이 사람마다 갈린 저널까지 덮지 않는다.
+        assert_eq!(missing_rules(".moai/journal.jsonl  text eol=lf -merge\n", split), [split]);
+        let ours = ".moai/journal/*.jsonl  text eol=lf merge=union\n";
+        assert_eq!(missing_rules(ours, split), [split], "우리 줄로 옮긴 줄까지 덮었다고 읽었다");
+        let wide = ".moai/journal/*.jsonl  text eol=lf merge=union";
+        assert_eq!(missing_rules(".moai/*.jsonl -merge\n", wide), [wide], "블록 밖의 넓은 패턴을 결정으로 읽었다");
+    }
+
     /// **트래커가 링크인지는 푼 자리로 잰다**(리뷰) — 끝 조각이 링크인 판도, `.moai` 가 링크인 판도 줄은
     /// 딴 파일에 살고 git 은 그 파일을 그 경로로 합친다. 끝 조각만 보던 판은 뒤의 것을 링크가 아니라고
     /// 읽어 병합 줄을 안 세웠다. 뿌리 밖과, 규칙 줄에 못 싣는 이름(빈칸·패턴 글자·제어 문자)은 안 건다.
@@ -1365,6 +1567,127 @@ mod tests {
         std::fs::create_dir_all(out.join(".moai")).unwrap();
         symlink(away.join("issues.jsonl"), out.join(".moai/issues.jsonl")).unwrap();
         assert_eq!(linked_snapshot(&out), None, "뿌리 밖을 가리키는 링크에 줄을 걸었다");
+    }
+
+    /// **링크인 트래커는 락·임시 파일·저널의 규칙도 그 자리로 옮긴다**(moai-th3b). git 은 링크를 안 따라가
+    /// `.moai/lock` 은 `tracker/lock` 에 안 걸린다. `.moai` 가 링크면 넷 다 옮기고, 끝 조각만 링크면
+    /// `far_lock` 과 물러선 임시 파일이 서는 그 파일의 디렉터리에 **그 둘만** 옮긴다 — 저널은 제자리고, 그
+    /// 자리의 남의 `*.tmp.*` 는 안 가린다(리뷰). 가리키는 파일이 뿌리에 있으면 줄도 뿌리에 선다(리뷰).
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_tracker_moves_its_lock_tmp_and_journal_rules_to_where_it_lives() {
+        use std::os::unix::fs::symlink;
+        let s = crate::scratch::Scratch::new("init-linked-dirs");
+        let has = |block: &str, line: &str| block.lines().any(|l| l == line);
+
+        let plain = s.join("plain");
+        std::fs::create_dir_all(plain.join(".moai")).unwrap();
+        assert_eq!(gitignore_for(&plain), GITIGNORE, "제자리 트래커에 줄을 더했다");
+
+        let dir = s.join("dir");
+        std::fs::create_dir_all(dir.join("tracker")).unwrap();
+        std::fs::write(dir.join("tracker/issues.jsonl"), "").unwrap();
+        symlink("tracker", dir.join(".moai")).unwrap();
+        let (ignore, attrs) = (gitignore_for(&dir), attributes_for(&dir));
+        assert!(has(&ignore, "/tracker/lock") && has(&ignore, "/tracker/*.tmp.*"), "{ignore}");
+        assert!(has(&attrs, "/tracker/journal.jsonl  text eol=lf merge=union"), "{attrs}");
+        assert!(has(&attrs, "/tracker/journal/*.jsonl  text eol=lf merge=union"), "{attrs}");
+        assert!(has(&attrs, "/tracker/issues.jsonl   text eol=lf merge=moai"), "{attrs}");
+
+        let file = s.join("file");
+        std::fs::create_dir_all(file.join(".moai")).unwrap();
+        std::fs::create_dir_all(file.join("shared")).unwrap();
+        symlink("../shared/issues.jsonl", file.join(".moai/issues.jsonl")).unwrap();
+        let (ignore, attrs) = (gitignore_for(&file), attributes_for(&file));
+        assert!(has(&ignore, "/shared/lock") && has(&ignore, "/shared/issues.jsonl.tmp.*"), "{ignore}");
+        assert!(!ignore.contains("/shared/*.tmp.*"), "사람의 디렉터리의 임시 파일을 통째로 가렸다: {ignore}");
+        assert!(!attrs.contains("/shared/journal"), "제자리 저널을 옮겼다: {attrs}");
+        assert!(!ignore.contains("/.moai/"), "제자리를 한 벌 더 적었다: {ignore}");
+
+        let top = s.join("top");
+        std::fs::create_dir_all(top.join(".moai")).unwrap();
+        symlink("../issues.jsonl", top.join(".moai/issues.jsonl")).unwrap();
+        let (ignore, attrs) = (gitignore_for(&top), attributes_for(&top));
+        assert!(has(&ignore, "/lock") && has(&ignore, "/issues.jsonl.tmp.*"), "뿌리에 선 락을 안 막았다: {ignore}");
+        assert!(has(&attrs, "/issues.jsonl   text eol=lf merge=moai"), "{attrs}");
+
+        // 옮긴 줄을 실제로 git 이 읽는지 — 줄의 꼴이 아니라 결과로 잰다. git 은 `git::isolated` 로만 띄운다
+        // (리뷰) — 돌리는 사람의 전역 설정·기본 무시 파일(`~/.config/git/ignore`)·틀 디렉터리가 새면 옮긴
+        // 줄이 없어도 푸르거나 까닭 없이 붉다. `check-ignore` 는 걸린 것이 없으면 1 로 끝나 끝 코드는 안 본다.
+        for at in [&dir, &file, &top] {
+            crate::git::tests::run_git(at, None, &["init", "-q", "--template="]);
+            std::fs::write(at.join(".gitignore"), &*gitignore_for(at)).unwrap();
+            std::fs::write(at.join(".gitattributes"), &*attributes_for(at)).unwrap();
+        }
+        let git = |at: &Path, args: &[&str]| {
+            let o = crate::git::isolated(at)
+                .args(["-c", "core.excludesFile=/dev/null", "-c", "core.attributesFile=/dev/null"])
+                .args(args)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stdout).into_owned()
+        };
+        let ignored = |at: &Path, paths: &[&str]| {
+            let mut args = vec!["check-ignore"];
+            args.extend_from_slice(paths);
+            git(at, &args).lines().count()
+        };
+        assert_eq!(ignored(&dir, &["tracker/lock", "tracker/issues.jsonl.tmp.1.0"]), 2);
+        assert!(git(&dir, &["check-attr", "merge", "tracker/journal/a_b.jsonl"]).contains("merge: union"));
+        assert_eq!(ignored(&file, &["shared/lock", "shared/issues.jsonl.tmp.1.0.00ab.1"]), 2);
+        assert_eq!(ignored(&file, &["shared/release.tmp.md"]), 0, "사람의 파일을 가렸다");
+        assert_eq!(ignored(&top, &["lock", "issues.jsonl.tmp.1.0"]), 2);
+        assert_eq!(ignored(&top, &["notes.tmp.md"]), 0, "뿌리의 남의 임시 파일을 가렸다");
+    }
+
+    /// **링크인 딸린 파일에는 안 쓰고, 빠진 줄 대신 링크라고 말한다**(moai-yke5). git 은 2.32 부터 체크아웃
+    /// 안의 링크인 `.gitignore`·`.gitattributes` 를 안 읽는다 — 안을 가리키는 링크에 덧붙이던 판은 규칙이
+    /// 하나도 안 선 채 "썼다" 고 했고, 밖을 가리키는 링크는 `init` 이 못 걷는 알림을 영영 세웠다.
+    ///
+    /// **밖을 가리키는지는 푼 자리로 잰다**(리뷰) — 고칠 말이 갈린다: 밖(`~/.bashrc`)을 옮겨 담으라고 하면
+    /// 그 파일이 커밋에 실린다. **링크 글은 한 줄로 걸러 싣는다**(리뷰) — 그 글이 터미널로 그대로 나간다.
+    /// 둘 다 링크여도 알림은 하나다(리뷰).
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_dotfile_is_never_written_and_is_named_as_a_link() {
+        use std::os::unix::fs::symlink;
+        let s = crate::scratch::Scratch::new("init-linked-dotfile");
+        let root = s.join("repo");
+        std::fs::create_dir_all(root.join("conf")).unwrap();
+        std::fs::write(root.join("conf/ignore"), "target/\n").unwrap();
+        symlink("conf/ignore", root.join(".gitignore")).unwrap();
+        std::fs::write(root.join(".gitattributes"), GITATTRIBUTES).unwrap();
+
+        let linked = |to: &str, outside: bool| Added::Linked { to: to.to_string(), outside };
+        assert_eq!(ensure_lines(&root.join(".gitignore"), GITIGNORE), linked("conf/ignore", false));
+        assert_eq!(std::fs::read_to_string(root.join("conf/ignore")).unwrap(), "target/\n", "링크 너머에 썼다");
+        assert_eq!(linked_dotfiles(&root), vec![".gitignore"]);
+        assert!(dotfile_gaps(&root).is_empty(), "링크를 빠진 줄로 말했다: {:?}", dotfile_gaps(&root));
+        let notes = dotfile_notice(&root, false);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].kind, "dotfile_linked");
+        assert!(linked("", false).hand(GITIGNORE).is_empty(), "링크에 적을 줄을 댔다");
+
+        // 체크아웃 밖 — 가운데 디렉터리가 링크라 글만으로는 안처럼 보이는 것도 밖이다.
+        let home = s.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("rc"), "export TOKEN=x\n").unwrap();
+        symlink(&home, root.join("conf/shared")).unwrap();
+        std::fs::remove_file(root.join(".gitattributes")).unwrap();
+        symlink("conf/shared/rc", root.join(".gitattributes")).unwrap();
+        assert_eq!(ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES), linked("conf/shared/rc", true));
+        assert_eq!(std::fs::read_to_string(home.join("rc")).unwrap(), "export TOKEN=x\n", "체크아웃 밖에 썼다");
+        let notes = dotfile_notice(&root, false);
+        assert_eq!(notes.len(), 1, "링크 둘에 알림이 둘 섰다: {notes:?}");
+        assert_eq!(notes[0].ids, [".gitattributes", ".gitignore"]);
+
+        // 링크 글에 든 ESC 와 줄바꿈은 걷는다 — 화면을 다시 칠하거나 없는 줄을 지어내면 안 된다.
+        std::fs::remove_file(root.join(".gitignore")).unwrap();
+        symlink("conf/\u{1b}[2Jx\n  everything is already in line", root.join(".gitignore")).unwrap();
+        let Added::Linked { to, .. } = ensure_lines(&root.join(".gitignore"), GITIGNORE) else {
+            panic!("링크를 링크로 안 읽었다")
+        };
+        assert!(!to.chars().any(char::is_control), "링크 글의 제어 문자를 그대로 실었다: {to:?}");
     }
 
     /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에

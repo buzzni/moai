@@ -140,11 +140,19 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   and `init --check` name that line when it is missing. `--worktree` views lost the base
   that tells a row removed here from one created beside, so a row `moai rm`'d on the main
   checkout came back from a sibling worktree; the base is now read where the rows live.
-  Appends — the journal, and the lines `init` adds to `.gitignore` and `.gitattributes` —
-  follow a link only inside the checkout, the same rule rewrites follow, a directory link
-  on the way included, and nothing the repository holds follows a link into `.git/`.
-  `moai status` shows one notice naming the file a linked tracker points at; it blocks
-  nothing.
+  Journal appends follow a link only inside the checkout, the same rule rewrites follow, a
+  directory link on the way included, and nothing the repository holds follows a link into
+  `.git/`. When the tracker lives behind a link, `moai init` also names its lock, its
+  temporary files and its journal where they really sit — `tracker/lock` for `.moai -> tracker`,
+  `shared/lock` and `shared/issues.jsonl.tmp.*` for a linked `issues.jsonl` — since git never
+  follows the link to match the `.moai/` lines. `moai status` shows one notice naming the file
+  a linked tracker points at; it blocks nothing.
+- **`moai init` no longer writes into a `.gitignore` or `.gitattributes` that is a symbolic
+  link.** git 2.32 and later never read one inside the checkout, so the lines `init` appended
+  through it applied nowhere while `init` said it wrote them. It now leaves the link alone and
+  says so — `moai status` shows a `dotfile_linked` notice, `moai init --check --json` gains a
+  `linked` key — and asks for a regular file instead: one holding what the link pointed at when
+  that file is in the checkout, a fresh one when the link leads outside it.
 
 ## [0.1.3] - 2026-09-29
 
