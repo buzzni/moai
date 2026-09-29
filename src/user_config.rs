@@ -1585,7 +1585,15 @@ fn quote_of(f: &toml_edit::Formatted<String>) -> Option<Quote> {
 /// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 어느 꼴이든 지은 뒤 다시 읽어 같은
 /// 낱말인지 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지
 /// 않고 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+///
+/// **안 보이는 글자가 든 낱말은 작은따옴표를 안 고른다**(리뷰 moai-333l.wj6 의 15번). 작은따옴표 안에서는 탭·
+/// 제로폭 공백·줄 구분자가 날것으로 서서, 다시 읽으면 같은 낱말이어도 사람 눈에는 안 보이고, 줄 끝 공백을
+/// 지우는 편집기가 설정 값을 조용히 바꿀 수 있다. 큰따옴표 안에서는 [`escaped`] 가 그것을 `\t`·`​` 로
+/// 적어 보이게 둔다. 본이 없을 때도 같다 — `Value::from` 도 `"` 가 든 낱말에는 작은따옴표를 고른다.
 fn quoted(quote: Option<Quote>, word: &str) -> toml_edit::Value {
+    if word.chars().any(unseen) && quote != Some(Quote::MlBasic) {
+        return basic(word);
+    }
     let text = match quote {
         None => return toml_edit::Value::from(word),
         Some(Quote::Basic) => return basic(word),
@@ -1610,7 +1618,17 @@ fn basic(word: &str) -> toml_edit::Value {
     }
 }
 
-/// 큰따옴표 문자열 안에 설 글([`quoted`]). `\`·`"` 와 제어 문자를 이스케이프로 적는다.
+/// 눈에 안 보이거나 여느 띄어쓰기로 보이는 글자인가([`quoted`]·[`escaped`]) — 제어 문자, 스페이스 밖의 공백
+/// (탭·줄 구분자·NBSP 들), 그리고 폭 없는 서식 글자(제로폭 공백·조이너·방향 표시·BOM·소프트 하이픈).
+fn unseen(c: char) -> bool {
+    c.is_control()
+        || (c.is_whitespace() && c != ' ')
+        || matches!(c,
+            '\u{AD}' | '\u{34F}' | '\u{61C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}')
+}
+
+/// 큰따옴표 문자열 안에 설 글([`quoted`]). `\`·`"` 와 안 보이는 글자([`unseen`])를 이스케이프로 적는다.
 fn escaped(word: &str) -> String {
     let mut out = String::with_capacity(word.len());
     for c in word.chars() {
@@ -1622,7 +1640,7 @@ fn escaped(word: &str) -> String {
             '\r' => out.push_str(r"\r"),
             '\u{8}' => out.push_str(r"\b"),
             '\u{c}' => out.push_str(r"\f"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c if unseen(c) => out.push_str(&format!("\\u{:04X}", c as u32)),
             c => out.push(c),
         }
     }
@@ -2804,6 +2822,37 @@ mod tests {
         let mut doc = Doc::parse("[[project]]\npath = \"/a\"\ncolor = 'red'  # 눈에 띄게\n").unwrap();
         doc.set_hue(&["/a".into()], Hue::named("green")).unwrap();
         assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\ncolor = 'green'  # 눈에 띄게\n");
+    }
+
+    /// **안 보이는 글자가 든 낱말은 작은따옴표로 안 적는다**(moai-5thc, 리뷰 moai-333l.wj6 의 15번, [`quoted`]).
+    /// 작은따옴표 안에서는 탭·제로폭 공백이 날것으로 서 눈에 안 보였다 — 큰따옴표의 이스케이프로 보이게 둔다.
+    #[test]
+    fn an_unseen_character_is_never_left_raw_in_single_quotes() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let src = "[tui]\nhidden = ['todo']\n";
+        assert_eq!(show(src, &["todo"], &["todo", "a\tb"]), "[tui]\nhidden = ['todo', \"a\\tb\"]\n");
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{200B}b"]), "[tui]\nhidden = ['todo', \"a\\u200Bb\"]\n");
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{2028}b"]), "[tui]\nhidden = ['todo', \"a\\u2028b\"]\n");
+        // 본뜰 것이 없어도 같다 — `"` 가 든 낱말이라 `Value::from` 이면 작은따옴표였다.
+        assert_eq!(
+            show("[tui]\nhidden = []\n", &[], &["\"x\"\u{200B}"]),
+            "[tui]\nhidden = [\"\\\"x\\\"\\u200B\"]\n"
+        );
+        // 다시 읽으면 같은 낱말이다.
+        let doc = Doc::parse(&show(src, &["todo"], &["todo", "a\t\u{FEFF}b"])).unwrap();
+        assert_eq!(doc.look().0.hidden, Some(vec!["todo".to_string(), "a\t\u{FEFF}b".to_string()]));
+        // 낱값도 같다 — 사람이 작은따옴표로 적었어도 그 값만 큰따옴표다. 여느 스페이스는 안 보이는 글자가 아니다.
+        let mut doc = Doc::parse("[tui]\nsort = 'title'\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { sort: Some("a\u{200B}b".into()), ..Look::default() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\nsort = \"a\\u200Bb\"\n");
+        assert_eq!(show(src, &["todo"], &["todo", " lead"]), "[tui]\nhidden = ['todo', ' lead']\n");
     }
 
     /// **본이 큰따옴표면 큰따옴표로 민다**(moai-5thc, 리뷰 moai-333l.wj6 의 2번, [`quoted`]). `Value::from` 은
