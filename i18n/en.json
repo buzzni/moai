@@ -680,6 +680,7 @@
   "add.tally": "epics {epics} · issues {issues}",
   "add.on_milestone": "the epic stands on milestone {id}",
   "add.body_on": "the body stands on the first epic, {title}",
+  "add.body_stdin_empty": "`--body -` read stdin and nothing came — no body was written",
   "idea.will_unfold": "To unfold",
   "idea.unfolded": "Unfolded",
   "idea.into_epic": "goes in as a member of {id}",

@@ -680,6 +680,7 @@
   "add.tally": "에픽 {epics} · 이슈 {issues}",
   "add.on_milestone": "에픽은 마일스톤 {id} 에 선다",
   "add.body_on": "본문은 첫 에픽 {title} 에 선다",
+  "add.body_stdin_empty": "`--body -` 가 stdin 을 읽었는데 아무것도 안 왔다 — 본문은 적지 않았다",
   "idea.will_unfold": "펼칠 것",
   "idea.unfolded": "펼침",
   "idea.into_epic": "{id} 의 멤버로 든다",

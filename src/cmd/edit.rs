@@ -124,7 +124,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         super::refuse_if_flag_like(t.trim(), super::FlagLike::EditTitle(&args.id), ctx.lang())?;
     }
     let repo = super::open_repo(ctx)?;
-    let body = super::add::read_body(args.body.clone())?;
+    let body = super::add::read_body_said(args.body.clone(), ctx)?;
     let at = model::now();
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.

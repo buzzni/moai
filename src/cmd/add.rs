@@ -105,6 +105,25 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     }
 }
 
+/// [`read_body`] 에 **"준다고 하고 아무것도 안 왔다" 를 한 줄로 말하기**를 더한 것 — `add`·`edit` 이
+/// 쓴다(moai-pp9i.kj2, 2026-09-29 사람이 정했다: 막지 않고 stderr 한 줄, exit 0).
+///
+/// 빈 stdin 은 빈 본문을 뜻하지 않는다 — `""` 로 쓰는 것이 답이 아닌 까닭은 `read_body` 가 빈 글을
+/// `None` 으로 접는 그대로다. 다만 `moai add --from plan.md --body - </dev/null` 이 계획을 다 세우고
+/// 0 으로 끝나면, 파일을 잘못 짚은 사람은 본문이 없다는 것을 `moai show` 로 열어 보고서야 안다.
+/// `note` 는 여기를 안 지난다 — 그쪽은 빈 글을 이미 거절한다(`refuse.note_empty`).
+///
+/// **argv 에 적힌 빈 글(`-b ''`)은 말하지 않는다.** 그것은 사람이 비워 준 것이지 오다가 사라진 것이
+/// 아니다.
+pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
+    let from_stdin = arg.as_deref() == Some("-");
+    let body = read_body(arg)?;
+    if from_stdin && body.is_none() {
+        eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
+    }
+    Ok(body)
+}
+
 /// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
 ///
 /// 여기 사는 까닭은 [`crate::cli::AddArgs::from`] 위에 적어 두었다(moai-yhb1) — 짧게는, clap 의
@@ -281,7 +300,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         }
         // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
         // stdin 을 읽는 쪽은 많아야 하나다.
-        let body = read_body(args.body.clone())?;
+        let body = read_body_said(args.body.clone(), ctx)?;
         return bulk(
             ctx,
             &repo,
@@ -327,7 +346,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
         return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.add_no_title")));
     };
-    let body = read_body(args.body)?;
+    let body = read_body_said(args.body, ctx)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
     let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가

@@ -6200,6 +6200,34 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
 }
 
+/// 본문을 stdin 으로 준다고 하고 아무것도 안 온 판은 한 줄로 말한다(moai-pp9i.kj2). 막지는 않는다 —
+/// 2026-09-29 사람이 정했다. `add`·`add --from`·`edit` 셋이 같은 말을 한다.
+#[test]
+fn an_empty_stdin_body_is_said_out_loud() {
+    let s = init("emptybody");
+    let said = "아무것도 안 왔다";
+
+    let out = from_stdin(s.path(), &["add", "제목 하나", "-b", "-"], "");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "add 가 말없이 지나갔다");
+
+    std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
+    let out = from_stdin(s.path(), &["add", "--from", "p.md", "--body", "-"], "\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "add --from 이 말없이 지나갔다");
+
+    let id = add(s.path(), &["고칠 것"]);
+    let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "edit 이 말없이 지나갔다");
+
+    // 글이 오면 아무 말도 없고, argv 로 비워 준 것은 사람이 비운 것이라 말하지 않는다.
+    let out = from_stdin(s.path(), &["add", "본문 있음", "-b", "-"], "글");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
+    let out = moai(s.path(), &["add", "argv 로 비움", "-b", ""]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
+}
+
 /// clap 의 `2 values required by '<id> <id>...'` 는 무엇을 빠뜨렸는지
 /// 말해 주지 않는다.
 #[test]
