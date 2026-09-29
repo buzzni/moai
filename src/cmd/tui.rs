@@ -359,6 +359,10 @@ fn screen(mut app: App) -> R<Vec<String>> {
         std::panic::resume_unwind(payload)
     });
     out.map_err(|e| Fail::new(e.to_string()))?;
+    // 새 판을 올리는 줄은 터미널을 걷은 **뒤에** 낸다 — 배너에서는 80칸에 잘렸다(moai-8rmw.665).
+    if let Some(note) = app.upgrade_note() {
+        eprintln!("moai: {note}");
+    }
     Ok(Vec::new())
 }
 

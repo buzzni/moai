@@ -72,7 +72,73 @@ pub const API: &str = "https://api.github.com/repos/buzzni/moai/releases/latest"
 
 /// 판을 올리는 한 줄 — 처음 까는 줄과 같다(moai-8rmw). `install.sh` 는 깔 자리에 선 것이
 /// 이 moai 면 `--force` 없이 덮는다. 받는 사람이 밟는 가지는 `main` 이다(moai-vqmx).
+///
+/// **이 줄이 올리는 것은 `~/.local/bin` 의 moai 다.** 탐색기가 댈 줄은 [`upgrade_line`] 이 도는
+/// 바이너리의 자리를 보고 고른다.
 pub const UPGRADE: &str = "curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh";
+
+/// `install.sh` 가 판을 내는 기계인가 — 그 스크립트의 플랫폼 표, `release.yml` 의 빌드 행렬과
+/// 같은 둘이다. 다른 기계에서 [`UPGRADE`] 는 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
+///
+/// **행렬에 칸이 늘면 여기도 는다.** 안 늘리면 그 기계의 탐색기가 올리는 줄을 안 댈 뿐이다 —
+/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다.
+pub const SERVED: bool =
+    cfg!(any(all(target_os = "linux", target_arch = "x86_64"), all(target_os = "macos", target_arch = "aarch64")));
+
+/// **도는 이 바이너리를 올리는 한 줄**(리뷰). 못 올리는 줄은 안 낸다 — 그때는 `None` 이다.
+///
+/// [`UPGRADE`] 는 `~/.local/bin` 에 까는 줄이다. 다른 자리에 선 moai 에게 그대로 대면 그 줄을
+/// 친 사람은 새 판을 `~/.local/bin` 에 하나 더 깔거나 "이미 … 이다" 를 듣고, 도는 것은 옛 판
+/// 그대로라 배너가 다음에도 선다. 그래서 자리를 본다.
+///
+/// - `served` 가 거짓이면(`install.sh` 가 판을 안 내는 기계) `None`
+/// - 이름이 `moai` 가 아니거나 cargo 가 지은 자리면 `None` — `target/<프로필>`(곁에
+///   `.fingerprint` 가 있다)과, `cargo install` 이 moai 를 깐 뿌리(위의 `.crates.toml`·
+///   `.crates2.json` 이 `"moai"` 를 적었다)는 소스로 다시 짓는 쪽이 올린다. **그 파일이 있다는
+///   것만으로는 안 가른다**(리뷰) — `cargo install` 의 뿌리를 `~/.local` 로 둔 사람은 딴 도구를
+///   한 번만 깔아도 `~/.local/.crates.toml` 이 생기고, 그러면 `install.sh` 로 깐 moai 가 줄을 잃는다
+/// - `home` 밑의 `.local/bin` 이면 [`UPGRADE`] 그대로, `home` 밑의 다른 자리면
+///   `-s -- --dir <자리>` 를 붙인다 — `install.sh` 의 `--dir` 로 깐 자리다
+/// - `home` 밖(`/usr/local/bin` 따위)이면 `None` — 그 자리를 누가 채웠는지(root, 패키지 관리자)
+///   이 바이너리는 모르고, 모르는 자리를 덮으라고 권하지 않는다. **`home` 이 뿌리(`/`)면 집을
+///   모르는 것이다**(리뷰) — passwd 에 없는 UID 로 띄운 컨테이너가 그렇게 서고, 그대로 두면 모든
+///   자리가 "집 밑" 이 된다
+///
+/// **`exe` 와 `home` 은 푼 경로를 받는다**([`upgrade_here`]). 링크로 선 철자끼리 견주면 같은
+/// 자리가 다른 자리로 읽힌다.
+pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool) -> Option<String> {
+    if !served || exe.file_name()? != std::ffi::OsStr::new("moai") {
+        return None;
+    }
+    let dir = exe.parent()?;
+    let cargo_put_moai_under = |root: &Path| {
+        [".crates.toml", ".crates2.json"]
+            .iter()
+            // 보통 파일만 연다 — 탐색기가 여는 걸음이라, 그 이름의 FIFO 하나가 화면을 세운다.
+            .any(|name| {
+                let at = root.join(name);
+                at.is_file() && std::fs::read_to_string(at).is_ok_and(|said| said.contains("\"moai\""))
+            })
+    };
+    let built = dir.join(".fingerprint").is_dir() || dir.parent().is_some_and(cargo_put_moai_under);
+    let home = home.filter(|h| h.parent().is_some())?;
+    if built || !dir.starts_with(home) {
+        return None;
+    }
+    if dir == home.join(".local").join("bin") {
+        return Some(UPGRADE.to_string());
+    }
+    Some(format!("{UPGRADE} -s -- --dir {}", crate::text::shell_word(dir.to_str()?)))
+}
+
+/// [`upgrade_line`] 을 이 프로세스에 — 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
+/// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
+/// 프레임마다 디스크를 두드린다.
+pub fn upgrade_here() -> Option<String> {
+    let exe = crate::path::real(&std::env::current_exe().ok()?);
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
+    upgrade_line(&exe, home.as_deref(), SERVED)
+}
 
 /// 한 번 물으면 이만큼은 안 묻는다.
 pub const WINDOW: i64 = 24 * 60 * 60;
@@ -1496,5 +1562,55 @@ mod tests {
         // 견주는 꼴이고, 어떤 고침도 그 줄을 못 붉힌다. 재는 것은 견주는 길 전체다.
         assert_eq!(seen(mine(), Some(&format!("v{}", mine()))), Seen::Same);
         assert_eq!(seen(mine(), Some(mine())), Seen::Same, "`v` 없는 태그");
+    }
+
+    /// **올리는 줄은 도는 바이너리의 자리를 올린다**(리뷰). 고정된 한 줄은 `~/.local/bin` 만
+    /// 올려서, README 가 보인 `--dir ~/bin` 으로 깐 사람은 그 줄을 치고도 옛 판을 돌렸다.
+    /// 못 올리는 자리에는 줄을 안 낸다 — 틀린 줄보다 없는 줄이 낫다.
+    #[test]
+    fn the_upgrade_line_upgrades_the_binary_that_is_running() {
+        let s = Scratch::new("latest-upgrade");
+        let home = s.path().join("home");
+        let local = home.join(".local").join("bin");
+        let given = home.join("my bin");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&given).unwrap();
+
+        assert_eq!(upgrade_line(&local.join("moai"), Some(&home), true).as_deref(), Some(UPGRADE), "기본 자리");
+        assert_eq!(
+            upgrade_line(&given.join("moai"), Some(&home), true),
+            Some(format!("{UPGRADE} -s -- --dir {}", crate::text::shell_word(given.to_str().unwrap()))),
+            "`--dir` 로 깐 자리는 그 자리를 싣고, 셸이 가르는 글자는 싼다"
+        );
+
+        assert_eq!(upgrade_line(&local.join("moai"), Some(&home), false), None, "판을 안 내는 기계");
+        assert_eq!(upgrade_line(&local.join("moai-dev"), Some(&home), true), None, "install.sh 가 깐 이름이 아니다");
+        assert_eq!(upgrade_line(Path::new("/usr/local/bin/moai"), Some(&home), true), None, "집 밖");
+        assert_eq!(upgrade_line(&local.join("moai"), None, true), None, "집을 모른다");
+        assert_eq!(
+            upgrade_line(Path::new("/usr/local/bin/moai"), Some(Path::new("/")), true),
+            None,
+            "뿌리는 집이 아니다"
+        );
+
+        // cargo 가 지은 자리 — `target/<프로필>` 과 `cargo install` 이 moai 를 깐 뿌리.
+        let profile = home.join("src").join("moai").join("target").join("release");
+        std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
+        assert_eq!(upgrade_line(&profile.join("moai"), Some(&home), true), None, "소스에서 지은 판");
+        let cargo = home.join(".cargo");
+        std::fs::create_dir_all(cargo.join("bin")).unwrap();
+        std::fs::write(cargo.join(".crates.toml"), "[v1]\n\"moai 0.1.3 (path+file:///src/moai)\" = [\"moai\"]\n")
+            .unwrap();
+        assert_eq!(upgrade_line(&cargo.join("bin").join("moai"), Some(&home), true), None, "cargo install");
+
+        // **cargo 가 딴 도구만 깐 뿌리는 cargo 의 moai 자리가 아니다** — `install.root` 를
+        // `~/.local` 로 둔 사람의 `install.sh` moai 가 줄을 잃지 않는다.
+        std::fs::write(home.join(".local").join(".crates.toml"), "[v1]\n\"ripgrep 14.1.0 (registry+x)\" = [\"rg\"]\n")
+            .unwrap();
+        assert_eq!(
+            upgrade_line(&local.join("moai"), Some(&home), true).as_deref(),
+            Some(UPGRADE),
+            "딴 도구의 cargo 뿌리"
+        );
     }
 }

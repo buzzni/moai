@@ -60,21 +60,28 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
 
 The same line upgrades. When the `moai` already in that directory is this moai,
 the installer replaces it without `--force` and says which version it went from
-and to. When it is already the version it would install, it downloads nothing
-and exits 0. Asking for an older release with `--version` replaces it too, and
-says it is going down.
+and to — to tell, it runs that `moai` (`--version`, then `merge-driver --help`)
+before downloading anything. When it is already the version it would install,
+it downloads nothing and exits 0. When it is newer than the latest release (a
+build from source, or a pre-release you picked), the plain line leaves it alone;
+asking for an older release with `--version` replaces it, and says it is going
+down.
 
-`--force` is only for a binary the installer does not recognise as this moai —
-another tool that happens to be called `moai`. It refuses before downloading
-anything, and prints the line to run again with `--force` added, in both the
-pipe form and the file form:
+`--force` is for what the installer will not replace on its own — a binary it
+does not recognise as this moai (another tool that happens to be called
+`moai`) or a symlink — and for downloading the version you already have again.
+Over either of the first two it refuses before downloading anything, and prints
+the line to run again with `--force` added, in both the pipe form and the file
+form:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s -- --force
 ```
 
-When a newer release is out, `moai tui` says so in its header and puts the
-upgrade line on the banner.
+When a newer release is out, `moai tui` says so in its header and banner, and
+when you quit it prints the line that upgrades the `moai` you are running — with
+`--dir` when it lives under your home but not in `~/.local/bin`. A build from source, a `moai`
+outside your home and a machine the releases do not cover get no line.
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
 `aarch64-apple-darwin`. On anything else, build from source:
