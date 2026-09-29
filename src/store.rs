@@ -667,7 +667,10 @@ impl Repo {
     {
         // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
         // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
-        let _lock = Lock::acquire(&self.dir().join("lock"), lang)?;
+        let lock = Lock::acquire(&self.dir().join("lock"), lang)?;
+        // 링크 너머의 트래커 자리에도 그 자리의 락을 잡는다 — 까닭은 [`Repo::far_lock`] 에 있다. 차례는
+        // 늘 제 락 → 너머의 락이다.
+        let _far = self.far_lock(&lock, lang)?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
@@ -808,7 +811,7 @@ impl Repo {
         let wrote = after != before;
         if wrote {
             // 사람이 정한 권한은 `write_atomic` 이 지킨다. 저널은 제자리에 덧붙이므로 원래 안 풀린다.
-            write_atomic(&self.issues_path(), after.as_bytes())?;
+            write_atomic_inside(&self.issues_path(), after.as_bytes(), &self.root)?;
             self.note_held(&original, &issues);
         }
         let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
@@ -857,6 +860,38 @@ impl Repo {
             }
         }
         Ok((out, note))
+    }
+
+    /// `issues.jsonl` 이 **다른 디렉터리의 파일을 가리키는 링크면** 그 디렉터리의 락(`<그 자리>/lock`)도
+    /// 잡는다(moai-4oab 리뷰). 링크가 아니거나 이미 쥔 락이면 `None` 이다 — 흔한 경우는 `read_link` 한 번이다.
+    ///
+    /// 쓰기는 링크를 따라가 가리키는 파일에 든다([`write_atomic_inside`]). 링크는 체크아웃 안에서만
+    /// 따라가지만, 한 트래커가 다른 트래커를 품으면(하위 디렉터리의 트래커) 둘이 한 파일을 가리킬 수 있다.
+    /// 그 둘은 저마다 제 `.moai/lock` 을 잡으므로, 이쪽 락만
+    /// 쥐면 둘이 서로를 안 막아 나중에 `rename` 한 쪽이 앞의 줄을 조용히 지운다 — 돌려 보니 동시 `add`
+    /// 스물넷에 일곱에서 열이 사라졌고, `mv --from` 의 집기 경합은 양쪽이 다 이겼다. 사용자 설정이 같은
+    /// 까닭으로 둘째 락을 잡는다([`crate::user_config::update`]).
+    ///
+    /// **이름은 그 자리의 `lock` 이다**([`lock_beside`] 가 아니다) — 가리켜진 파일이 진짜 트래커의
+    /// `issues.jsonl` 이면 그쪽 사람이 잡는 락이 바로 그것이라, 곁 이름(`issues.jsonl.lock`)을 잡으면 그쪽과
+    /// 서로를 안 막는다. 대가는 그 자리가 `.moai` 가 아닐 때(`shared/`) 락 파일 하나가 서는 것인데, 잃는
+    /// 것보다 싸다 — 사용자 설정이 dotfiles 저장소에 락을 세우는 것과 같은 비용이다.
+    ///
+    /// **이미 쥔 락인지는 철자가 아니라 파일로 견준다**([`Lock::holds`]) — 같은 `.moai` 안의 링크나 위
+    /// 디렉터리가 링크라 철자만 다른 자리를 다시 잡으면, 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다.
+    /// 쓸 자리가 못 쓰는 자리면([`target_of`] 의 거절 — 고리, 없는 디렉터리) 여기서 그 말로 멈춘다.
+    fn far_lock(&self, held: &Lock, lang: &impl Fn() -> crate::i18n::Lang) -> R<Option<Lock>> {
+        let here = self.issues_path();
+        let real = target_of(&here, Some(&self.root))?;
+        if real == here {
+            return Ok(None);
+        }
+        let dir = crate::path::dir_of(&real);
+        let at = dir.join("lock");
+        if held.holds(&at).unwrap_or_else(|| crate::user_config::same_dir(dir, &self.dir())) {
+            return Ok(None);
+        }
+        Lock::acquire(&at, lang).map(Some)
     }
 
     /// 적을 줄을 **파일마다 나눠 담는다**(moai-nzlo). 한 판의 줄이 한 사람의 것이 아닐 수 있어
@@ -1371,9 +1406,96 @@ fn process_nonce() -> u64 {
 /// 자리가 아니라 부르는 쪽의 실수이고(뿌리 `/` 나 빈 경로), 이 함수는 머지 드라이버도 부른다 —
 /// 화면 말을 물려주면 git 이 부르는 길이 사용자 설정을 연다. io 가 내는 줄과 같은 결로 영어 한
 /// 줄을 둔다.
+///
+/// **링크면 링크가 가리키는 파일을 갈아끼우고 링크는 그대로 둔다**(moai-4oab, 2026-09-29 사용자
+/// 결정). 쓸 자리를 푸는 것은 [`target_of`] 가 한다.
+///
+/// **임시 파일은 받은 철자 곁에 먼저 짓고, 거기서 못 갈아끼우면 가리키는 파일 곁으로 한 번 더
+/// 간다**(moai-4oab 리뷰). 가리키는 파일 곁에 곧장 지으면 링크인 `.moai/issues.jsonl` 의 쓰다 죽은
+/// 찌꺼기가 `../shared/` 처럼 `init` 이 무시하지 않는 자리에 남아 `git add -A` 에 딸려 온다 —
+/// moai-3akx 가 뿌리 파일에서 막은 바로 그 찌꺼기다. 물러서는 까닭은 `rename` 이 파일시스템을 못
+/// 건너서다 — 대상이 다른 파일시스템이면 받은 철자 곁에서는 `EXDEV` 로 멈춘다. 실패한 쪽은 임시
+/// 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다(`cmd::init::plant` 와 같은 물러섬이다).
+/// 링크가 아니면 두 자리가 같아 한 번뿐이다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
-    write_atomic_in(path, bytes, dir)
+    atomic(path, bytes, None)
+}
+
+/// [`write_atomic`] 이되 **링크는 `checkout` 안을 가리킬 때만 따라간다**(moai-4oab, 2026-09-29 사용자
+/// 결정 둘째 판). 저장소가 든 파일(`.moai/issues.jsonl`, `AGENTS.md`)은 남이 커밋한 링크일 수 있다 —
+/// 받은 저장소의 `AGENTS.md -> ~/.bashrc` 를 그대로 따라가면 흔한 `moai init`·`moai add` 가 체크아웃
+/// 밖의 파일을 고쳐 쓴다. 사용자 설정·읽음 표시·`latest.toml` 은 사람이 제 손으로 건 링크(dotfiles)라
+/// [`write_atomic`] 으로 어디든 따라간다.
+pub(crate) fn write_atomic_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
+    atomic(path, bytes, Some(checkout))
+}
+
+/// [`write_atomic`]·[`write_atomic_inside`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한 벌이다.
+fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>) -> R<()> {
+    let real = target_of(path, within)?;
+    let (near, far) = (parent_of(path, path)?, parent_of(&real, path)?);
+    match replace(&real, bytes, near) {
+        Err(_) if near != far => replace(&real, bytes, far),
+        done => done,
+    }
+}
+
+/// 파일이 든 디렉터리 — 없으면(뿌리 `/` 나 빈 경로) `named` 를 대는 거절이다(moai-iq7j).
+fn parent_of<'a>(path: &'a Path, named: &Path) -> R<&'a Path> {
+    path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", named.display())))
+}
+
+/// 쓸 자리 — 링크를 끝까지 푼 자리([`crate::path::follow_links`])이고, **갈아끼워도 되는 자리일 때만**
+/// 낸다. 못 풀거나(고리) 안 되는 자리는 받은 철자를 대는 거절이고, 대상은 한 글자도 안 바뀐다.
+///
+/// - **가리키는 자리의 디렉터리가 없으면 그 말로 멈춘다**(moai-4oab 리뷰). 그냥 두면 거절문이 지은 적도
+///   없는 임시 파일(`<대상>.tmp.<pid>.0`)을 대고 링크는 말하지 않아, `init` 을 부른 사람은 권한을 고치러
+///   가고 `init --check` 는 블록이 없다고 해 같은 자리를 돈다. 디렉터리를 짓지는 않는다 — 사용자 설정의
+///   `LinkDangling` 과 같은 까닭이다(아직 안 받은 저장소 자리일 수 있다)
+/// - **보통 파일이 아니면**(장치·소켓·FIFO·디렉터리) 갈아끼우지 않는다(moai-4oab 리뷰). 링크를 따라가면서
+///   `latest.toml -> /dev/null` 같은 링크의 끝도 쓸 자리가 됐는데, `rename` 은 그 자리를 보통 파일로
+///   바꾼다 — root 로 도는 컨테이너에서는 `/dev/null` 이 그렇게 사라진다. 없는 파일은 새로 짓는다
+///
+/// **`within` 을 받으면 링크의 끝이 그 안에 있어야 한다**([`write_atomic_inside`]). 견주는 것은 끝의
+/// 디렉터리를 푼 자리다 — 링크 글의 `..` 이나 가운데 디렉터리 링크로 밖에 닿는 것도 거기서 드러난다.
+/// 그 디렉터리가 없으면 여기서 못 재고, 아래의 "디렉터리가 없다" 거절이 멈춘다. 링크가 아니면 재지
+/// 않는다 — 받은 철자 그대로 쓰는 것은 링크를 따라가기 전과 같은 자리다.
+fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
+    let real = crate::path::follow_links(path).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+    let linked = real != path;
+    if let Some(root) = within.filter(|_| linked) {
+        let root = crate::path::real(root);
+        if let Ok(dir) = std::fs::canonicalize(crate::path::dir_of(&real))
+            && !dir.starts_with(&root)
+        {
+            return Err(Fail::new(format!(
+                "{} points at {}, outside {} — nothing is written, so the link is not replaced. A file the \
+                 repository holds follows a link only inside its own checkout",
+                path.display(),
+                real.display(),
+                root.display()
+            )));
+        }
+    }
+    match std::fs::metadata(&real) {
+        Ok(m) if !m.is_file() => Err(Fail::new(match linked {
+            true => format!(
+                "{} points at {}, which is not a regular file — nothing is written, so the link is not replaced",
+                path.display(),
+                real.display()
+            ),
+            false => format!("{}: not a regular file — nothing is written", path.display()),
+        })),
+        Err(e) if linked && gone(&e) && std::fs::metadata(crate::path::dir_of(&real)).is_err_and(|e| gone(&e)) => {
+            Err(Fail::new(format!(
+                "{} points at {}, and that directory is not there — nothing is written, so the link is not \
+                 replaced. Make that place, or fix the link",
+                path.display(),
+                real.display()
+            )))
+        }
+        _ => Ok(real),
+    }
 }
 
 /// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
@@ -1382,9 +1504,28 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 이 다른 파일시스템이면 `Err` 다 — 그때 옆자리로
 /// 물러서는 것은 고르는 쪽이 한다(`cmd::init::plant`). 실패하면 **임시 파일을 남기지 않고** 대상은
 /// 한 글자도 안 바뀐다.
-pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
+///
+/// **대상이 심볼릭 링크면 링크를 따라가 가리키는 파일을 바꾼다**(moai-4oab). `rename` 은 링크를
+/// 안 따라가고 링크 자체를 갈아끼운다 — `AGENTS.md -> CLAUDE.md` 인 저장소의 `init` 이
+/// `AGENTS.md` 를 따로 선 파일로 만들고 `CLAUDE.md` 에는 블록을 안 넣었고, 링크인
+/// `issues.jsonl` 은 다음 쓰기에 보통 파일이 되어 가리키던 쪽이 옛 글에 멈췄다. 사용자 설정
+/// ([`crate::user_config::update`])은 그 전부터 이렇게 했다. 여기서 푸는 까닭은 부르는 자리가
+/// 여럿이라서다 — 부르는 쪽마다 풀게 두면 푼 곳과 잊은 곳이 갈린다. **락은 여기서 못 고른다** —
+/// 락은 읽기보다 먼저 잡아야 하는데, 이 함수는 읽은 뒤에 불린다. 링크 너머의 파일을 함께 쓰는 쪽과
+/// 서로를 막는 것은 부르는 쪽의 일이다([`Repo::write_locked`] 의 `far_lock`, 사용자 설정의 둘째 락).
+///
+/// **부르는 쪽은 저장소 뿌리의 파일(`init` 의 `AGENTS.md`)뿐이라 링크는 `checkout` 안에서만
+/// 따른다**([`write_atomic_inside`] 와 같은 까닭이다).
+pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkout: &Path) -> R<()> {
+    replace(&target_of(path, Some(checkout))?, bytes, tmp_dir)
+}
+
+/// [`write_atomic`]·[`write_atomic_in`] 의 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
+/// 파일로 갈아끼운다. 푸는 것을 여기 두지 않는 까닭은 한 번만 풀기 위해서다(리뷰) — 두 번 풀면 그 사이에
+/// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
+fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
-    let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
+    let dir = parent_of(path, path)?;
     let (tmp, mut f) = open_tmp(path, tmp_dir)?;
     // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
     // 쓰기가 죽지 않고도 `<파일>.tmp.…` 를 남겼다 — moai-3akx 가 막으려던 찌꺼기다. 치우는 것은
@@ -2736,5 +2877,207 @@ mod tests {
         // 찌꺼기도 안 남는다 — 스레드마다 이름이 갈려도 쓰고 나면 치운다.
         let left: Vec<_> = std::fs::read_dir(s.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, vec![std::ffi::OsString::from("held.toml")], "임시 파일이 남았다: {left:?}");
+    }
+
+    /// 그 자리가 심볼릭 링크인가 — 없으면 거짓이다. 링크를 시험하는 것들이 함께 쓴다(리뷰: 시험마다 같은
+    /// 클로저(closure)를 따로 적고 있었다).
+    #[cfg(unix)]
+    fn is_link(p: &Path) -> bool {
+        std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
+    }
+
+    /// 디렉터리에 선 이름들, 이름 차례로 — 찌꺼기를 세는 시험들이 함께 쓴다.
+    #[cfg(unix)]
+    fn names(d: &Path) -> Vec<String> {
+        let mut v: Vec<String> =
+            std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        v.sort();
+        v
+    }
+
+    /// **링크를 따라가 가리키는 파일을 바꾸고 링크는 그대로 둔다**(moai-4oab). 사슬(링크의 링크)도,
+    /// 임시 자리를 따로 주는 [`write_atomic_in`] 도 같다. 가리키는 파일의 권한도 지킨다 — 링크 곁에서
+    /// 권한을 읽으면 링크가 아니라 대상의 것을 읽어야 한다.
+    ///
+    /// **임시 파일은 받은 철자 곁에서 먼저 난다**(리뷰). 찌꺼기만 세면 어디서 났는지 못 가른다 — 같은
+    /// 파일시스템에서는 어느 쪽에서 나도 `rename` 이 치워 간다. 그래서 한쪽의 임시 이름을 다 막아 두고
+    /// 쓴다: 가리키는 파일 곁을 막아도 써져야 받은 철자 곁에서 난 것이고, 받은 철자 곁을 막아도 써져야
+    /// 가리키는 파일 곁으로 물러선 것이다 — `EXDEV` 의 물러섬을 한 파일시스템 안에서 시험하는 길이다.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_symlink_changes_the_target_and_keeps_the_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("store-atomic-link");
+        std::fs::create_dir(s.join("dots")).unwrap();
+        let real = s.join("dots/real");
+        std::fs::write(&real, "옛\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mid = s.join("mid");
+        std::os::unix::fs::symlink("dots/real", &mid).unwrap();
+        let link = s.join("link");
+        std::os::unix::fs::symlink(&mid, &link).unwrap();
+
+        // 막은 것은 디렉터리라 그 이름으로는 파일을 못 짓는다. 이름은 가리키는 파일의 것이다.
+        let blocked = |dir: &Path, text: &str| {
+            let taken: Vec<_> = tmp_names("real").map(|n| dir.join(n)).collect();
+            for t in &taken {
+                std::fs::create_dir(t).unwrap();
+            }
+            let wrote = write_atomic(&link, text.as_bytes());
+            for t in &taken {
+                std::fs::remove_dir(t).unwrap();
+            }
+            wrote
+        };
+        blocked(&s.join("dots"), "새\n").expect("받은 철자 곁이 아니라 가리키는 파일 곁에서 임시 파일을 지으려 했다");
+        assert!(is_link(&link) && is_link(&mid), "링크를 보통 파일로 갈아끼웠다");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "새\n");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600, "대상의 권한이 풀렸다");
+        blocked(s.path(), "둘째\n").expect("받은 철자 곁에서 못 쓰자 가리키는 파일 곁으로 물러서지 않았다");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "둘째\n");
+        assert!(is_link(&link) && is_link(&mid), "물러선 쓰기가 링크를 갈아끼웠다");
+        assert_eq!(names(&s.join("dots")), ["real"], "가리키는 파일 곁에 찌꺼기가 남았다");
+        assert_eq!(names(s.path()), ["dots", "link", "mid"], "링크 곁에 찌꺼기가 남았다");
+
+        std::fs::create_dir(s.join("tmp")).unwrap();
+        write_atomic_in(&link, "셋째\n".as_bytes(), &s.join("tmp"), s.path()).unwrap();
+        assert!(is_link(&link), "임시 자리를 따로 준 쓰기가 링크를 갈아끼웠다");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "셋째\n");
+    }
+
+    /// **가리키는 파일이 아직 없으면 거기에 만든다** — dotfiles 는 링크를 먼저 걸기도 한다. 가리키는
+    /// 디렉터리마저 없으면 쓰기는 **링크와 그 자리를 대며** 실패하고 링크는 그대로다 — 지은 적도 없는
+    /// 임시 파일을 대던 거절문은 사람을 권한 고치기로 보냈다(리뷰). **고리인 링크는 거절한다** — 따라가다
+    /// 멈춘 링크에 `rename` 하면 그것을 보통 파일로 갈아끼운다.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_or_looping_symlink_never_becomes_a_plain_file() {
+        let s = Scratch::new("store-atomic-dangling");
+        let link = s.join("link");
+        std::os::unix::fs::symlink("later", &link).unwrap();
+        write_atomic(&link, "처음\n".as_bytes()).unwrap();
+        assert!(is_link(&link));
+        assert_eq!(std::fs::read_to_string(s.join("later")).unwrap(), "처음\n");
+
+        let gone = s.join("gone");
+        std::os::unix::fs::symlink("nowhere/file", &gone).unwrap();
+        let e = write_atomic(&gone, "x\n".as_bytes()).expect_err("없는 디렉터리를 가리키는 링크에 썼다");
+        assert!(is_link(&gone), "실패한 쓰기가 링크를 갈아끼웠다");
+        assert!(
+            e.message.contains("nowhere/file") && e.message.contains("not there") && !e.message.contains(".tmp."),
+            "링크가 가리키는 자리 대신 다른 것을 댔다: {}",
+            e.message
+        );
+
+        let (a, b) = (s.join("a"), s.join("b"));
+        std::os::unix::fs::symlink("b", &a).unwrap();
+        std::os::unix::fs::symlink("a", &b).unwrap();
+        assert!(write_atomic(&a, "x\n".as_bytes()).is_err(), "고리인 링크에 썼다");
+        assert!(is_link(&a) && is_link(&b), "고리인 링크를 갈아끼웠다");
+        assert_eq!(names(s.path()), ["a", "b", "gone", "later", "link"], "찌꺼기가 남았다");
+    }
+
+    /// **보통 파일이 아닌 자리는 갈아끼우지 않는다**(moai-4oab 리뷰). 링크를 따라가면서 링크의 끝이 장치·
+    /// 소켓·FIFO 여도 쓸 자리가 됐는데, `rename` 은 그 자리를 보통 파일로 바꾼다 — `latest.toml ->
+    /// /dev/null` 이 root 로 도는 컨테이너에서 `/dev/null` 을 없앤다. root 없이 지을 수 있는 FIFO 로
+    /// 시험한다 — `mkfifo` 가 없는 기계면 그 갈래는 건너뛴다(`skill` 의 시험과 같은 길이다).
+    #[cfg(unix)]
+    #[test]
+    fn a_write_never_replaces_what_is_not_a_regular_file() {
+        use std::os::unix::fs::FileTypeExt;
+        let s = Scratch::new("store-atomic-fifo");
+        std::fs::create_dir(s.join("dir")).unwrap();
+        let e = write_atomic(&s.join("dir"), b"x\n").expect_err("디렉터리를 갈아끼우려 했다");
+        assert!(e.message.contains("not a regular file"), "{}", e.message);
+        let fifo = s.join("fifo");
+        if std::process::Command::new("mkfifo").arg(&fifo).status().is_ok_and(|st| st.success()) {
+            let link = s.join("latest.toml");
+            std::os::unix::fs::symlink("fifo", &link).unwrap();
+            let e = write_atomic(&link, b"x = 1\n").expect_err("FIFO 를 보통 파일로 갈아끼웠다");
+            assert!(e.message.contains("not a regular file"), "{}", e.message);
+            assert!(std::fs::symlink_metadata(&fifo).unwrap().file_type().is_fifo(), "FIFO 가 사라졌다");
+            assert!(is_link(&link), "링크를 갈아끼웠다");
+        }
+        assert!(names(s.path()).iter().all(|n| !n.contains(".tmp.")), "찌꺼기가 남았다: {:?}", names(s.path()));
+    }
+
+    /// **링크로 한 `issues.jsonl` 을 함께 쓰는 두 트래커도 서로를 막는다**(moai-4oab 리뷰). 쓰기가 링크를
+    /// 따라가면서 둘째 체크아웃이 첫째의 파일을 가리키는 꼴이 오래 서게 됐는데, 각자 제 `.moai/lock` 만
+    /// 잡으면 나중에 `rename` 한 쪽이 앞의 줄을 조용히 지운다 — 사용자 설정의
+    /// `two_spellings_of_one_config_still_lock_each_other` 가 측정한 것과 같은 손실이다. `flock` 은 열린 파일마다라
+    /// 한 프로세스의 스레드끼리도 서로 막는다.
+    #[cfg(unix)]
+    #[test]
+    fn two_trackers_sharing_one_issue_file_through_a_link_still_lock_each_other() {
+        // 링크는 체크아웃 안에서만 따라가므로(moai-4oab) 둘이 한 파일을 나누는 꼴은 한 트래커가 다른
+        // 트래커를 품을 때 선다 — 바깥 `a` 와 그 안의 `b` 가 `b` 안의 `data/issues.jsonl` 을 함께 가리킨다.
+        let (a, da) = repo("far-lock-a");
+        let inner = da.join("inner");
+        std::fs::create_dir_all(inner.join(".moai")).unwrap();
+        std::fs::create_dir(inner.join("data")).unwrap();
+        std::fs::write(inner.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        std::fs::write(inner.join("data/issues.jsonl"), "").unwrap();
+        std::fs::remove_file(a.issues_path()).unwrap();
+        std::os::unix::fs::symlink("../inner/data/issues.jsonl", a.issues_path()).unwrap();
+        std::os::unix::fs::symlink("../data/issues.jsonl", inner.join(".moai/issues.jsonl")).unwrap();
+        let b = Repo::at(inner.clone(), Config::load(&inner).unwrap());
+        let (threads, each) = (8, 5);
+        std::thread::scope(|scope| {
+            for t in 0..threads {
+                // 짝수 갈래는 가리켜진 트래커로, 홀수 갈래는 링크를 든 트래커로 — 같은 파일이다.
+                let r = if t % 2 == 0 { &a } else { &b };
+                scope.spawn(move || {
+                    for n in 0..each {
+                        r.with_write(
+                            || crate::i18n::Lang::Ko,
+                            |issues, cfg, reserved| {
+                                let title = format!("갈래 {t} 의 {n}");
+                                let id = new_id(issues, cfg, reserved, None, &title);
+                                issues.push(Issue::new(id, title, Kind::Issue, Status::new("todo"), T));
+                                Ok((vec![], ()))
+                            },
+                        )
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(a.read().unwrap().issues.len(), threads * each, "링크로 함께 쓰는 두 트래커가 서로를 지웠다");
+        assert!(is_link(&a.issues_path()) && is_link(&b.issues_path()), "링크를 보통 파일로 갈아끼웠다");
+    }
+
+    /// **저장소가 든 파일은 체크아웃 밖을 가리키는 링크를 안 따라간다**(moai-4oab, 2026-09-29 사용자 결정
+    /// 둘째 판). 받은 저장소가 `.moai/issues.jsonl -> ~/.bashrc` 를 커밋해 두면 흔한 `moai add` 가 그 파일을
+    /// 고쳐 쓰던 자리다. 링크 글의 `..` 으로 나가는 것도, 안의 디렉터리 링크를 거쳐 나가는 것도 같다.
+    /// 거절은 링크와 그 끝을 대고 아무것도 안 바꾼다. 사람이 건 링크를 따르는 [`write_atomic`] 은 그대로다.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_file_never_follows_a_link_out_of_its_checkout() {
+        let s = Scratch::new("store-atomic-outside");
+        let (repo_dir, away) = (s.join("repo"), s.join("away"));
+        std::fs::create_dir_all(repo_dir.join("inside")).unwrap();
+        std::fs::create_dir(&away).unwrap();
+        std::fs::write(away.join("rc"), "옛\n").unwrap();
+        std::os::unix::fs::symlink("../away/rc", repo_dir.join("dotdot")).unwrap();
+        std::os::unix::fs::symlink(&away, repo_dir.join("inside/door")).unwrap();
+        std::os::unix::fs::symlink("inside/door/rc", repo_dir.join("through")).unwrap();
+        for name in ["dotdot", "through"] {
+            let link = repo_dir.join(name);
+            let e = write_atomic_inside(&link, b"x\n", &repo_dir).expect_err("체크아웃 밖을 고쳐 썼다");
+            assert!(e.message.contains("outside"), "{}", e.message);
+            let e = write_atomic_in(&link, b"x\n", &repo_dir, &repo_dir).expect_err("체크아웃 밖을 고쳐 썼다");
+            assert!(e.message.contains("outside"), "{}", e.message);
+            assert!(is_link(&link), "{name}: 링크를 갈아끼웠다");
+        }
+        assert_eq!(std::fs::read_to_string(away.join("rc")).unwrap(), "옛\n");
+        assert_eq!(names(&repo_dir), ["dotdot", "inside", "through"], "찌꺼기가 남았다");
+
+        // 안을 가리키는 링크는 따라가고, 사람의 파일을 쓰는 쪽은 밖이라도 따라간다.
+        std::fs::write(repo_dir.join("inside/real"), "").unwrap();
+        std::os::unix::fs::symlink("inside/real", repo_dir.join("near")).unwrap();
+        write_atomic_inside(&repo_dir.join("near"), b"in\n", &repo_dir).unwrap();
+        assert_eq!(std::fs::read_to_string(repo_dir.join("inside/real")).unwrap(), "in\n");
+        write_atomic(&repo_dir.join("dotdot"), b"dotfiles\n").unwrap();
+        assert_eq!(std::fs::read_to_string(away.join("rc")).unwrap(), "dotfiles\n");
     }
 }

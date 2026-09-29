@@ -261,7 +261,8 @@ impl EntryTrouble {
 pub enum WriteTrouble {
     /// TOML 이 깨졌다 — 파서가 낸 글. 고치기 전까지 안 쓴다.
     Unparsable { said: String },
-    /// 링크를 따라갔더니 그 디렉터리가 없다 — 링크를 보통 파일로 갈아끼우지 않으려고 멈춘다.
+    /// 링크를 따라갔더니 그 디렉터리가 없다 — 없는 자리에 디렉터리를 짓지 않으려고 멈춘다. 손으로 고칠
+    /// 자리라는 말(`broken`)은 여기서 선다 — `store::write_atomic` 도 그 자리에서 멈추지만 코드 없는 거절이다.
     LinkDangling { from: PathBuf, to: PathBuf },
     /// `project` 가 `[[project]]` 표 배열이 아니다 — 그 자리에 선 것.
     NotTables { found: String },
@@ -478,10 +479,11 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
     let lock = Lock::acquire(&lock_beside(path), || lang)?;
 
     // 설정 파일이 심볼릭 링크면(dotfiles 저장소가 흔히 그렇게 건다) **링크가 가리키는
-    // 파일을** 고친다. 링크 자리에 `rename` 하면 링크가 보통 파일로 갈아끼워져
-    // dotfiles 쪽은 옛 내용에 멈추고, 사람은 그것을 모른다. 푸는 것은 락 **안에서**
-    // 한다: 밖에서 풀면 그 사이에 파일이 링크로 갈아끼워질 수 있다. 가리키는 파일이 아직
-    // 없어도 링크를 따라간다([`resolve_config`]).
+    // 파일을** 고친다. 링크를 보통 파일로 갈아끼우지 않는 것은 이제 `store::write_atomic` 이
+    // 누구에게나 지킨다(moai-4oab) — 여기서 따로 푸는 까닭은 **락**과 **거절**이다: 가리키는
+    // 철자로 쓰는 쪽과 서로를 막으려면 푼 자리에 락을 하나 더 잡아야 하고(아래), 가리키는
+    // 디렉터리가 없으면 손으로 고칠 자리라는 말로 멈춘다([`resolve_config`]). 푸는 것은 락
+    // **안에서** 한다: 밖에서 풀면 그 사이에 파일이 링크로 갈아끼워질 수 있다.
     let resolved = resolve_config(path).map_err(|e| fail(lang, None, &e))?;
     let real = resolved.as_deref().unwrap_or(path);
 
@@ -553,25 +555,23 @@ pub(crate) fn fail(lang: crate::i18n::Lang, at: Option<&Path>, why: &WriteTroubl
 
 /// 설정 파일이 실제로 선 자리(`update`). 있으면 링크를 다 푼 경로다. **없는데 링크면 링크를 따라간 자리**다 — dotfiles 는
 /// 링크를 먼저 걸고 파일은 첫 쓰기에 생기기도 하는데, `canonicalize` 는 없는 파일에서 실패해 그대로 두면 준 철자로
-/// 떨어진다. 그러면 첫 쓰기가 링크 자리에 `rename` 해 링크를 보통 파일로 갈아끼우고(dotfiles 쪽 파일은 영영 안
-/// 생긴다), 가리키는 철자로 쓰는 쪽과는 서로 다른 락을 잡는다. 링크가 아닌 없는 파일이면 `None` 이다 — 준 철자에
-/// 새로 만든다.
+/// 떨어진다. 그러면 가리키는 철자로 쓰는 쪽과 서로 다른 락을 잡는다. 링크를 보통 파일로 갈아끼우지 않는 것은
+/// `store::write_atomic` 이 따로 지키지만(moai-4oab), 락은 거기서 못 고른다 — 읽기보다 먼저 잡아야 해서다. 링크가
+/// 아닌 없는 파일이면 `None` 이다 — 준 철자에 새로 만든다.
 ///
 /// 링크가 가리키는 자리의 디렉터리가 없으면 **쓰지 않는다**(`broken`). 아직 안 받은 dotfiles 저장소 자리에 디렉터리를
-/// 지으면 뒤의 `git clone` 이 거기서 멈추고, 링크를 갈아끼우면 위의 손실이다 — 사람이 그 자리를 세울 때까지 멈춘다.
+/// 지으면 뒤의 `git clone` 이 거기서 멈춘다 — 사람이 그 자리를 세울 때까지 멈춘다.
 fn resolve_config(path: &Path) -> Result<Option<PathBuf>, WriteTrouble> {
     match std::fs::canonicalize(path) {
         Ok(real) => return Ok(Some(real)),
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => {}
     }
-    // 링크의 사슬을 끝까지 따라간다. 상대 대상은 그 링크가 든 디렉터리에서 잰다. 고리는 `canonicalize` 가 이미
-    // `NotFound` 가 아닌 것으로 댔다 — 여기의 횟수 제한은 그래도 끝나게 하는 울타리다.
-    let mut at = path.to_path_buf();
-    for _ in 0..40 {
-        let Ok(to) = std::fs::read_link(&at) else { break };
-        at = dir_of(&at).join(to);
-    }
+    // 링크의 사슬을 끝까지 따라간다 — `store::write_atomic` 과 같은 자다([`crate::path::follow_links`]).
+    // 못 따라가는 사슬(고리, 링크 마흔 개보다 긴 사슬)은 `canonicalize` 가 이미 `NotFound` 가 아닌 것으로
+    // 댔으니, `else` 에 오는 것은 그 사이에 링크가 바뀐 경우뿐이다. 그때 `None` 이어도 되는 것은
+    // `store::write_atomic` 이 다시 따라가다 같은 자리에서 멈추기 때문이다.
+    let Ok(at) = crate::path::follow_links(path) else { return Ok(None) };
     if at == path {
         return Ok(None);
     }
