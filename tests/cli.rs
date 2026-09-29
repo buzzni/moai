@@ -15253,6 +15253,12 @@ fn worktree_does_not_revive_a_line_removed_here() {
     assert!(!ready.contains(&t.tied), "지운 일을 집으라고 낸다\n{ready}");
     let status = ok(&main, &["status", "--worktree", "--json"]);
     assert!(!status.contains(&t.tied), "{status}");
+
+    // **링크가 아닌 트래커의 바탕은 `show` 하나로 읽는다**(리뷰) — 모드를 묻는 `ls-tree` 를 늘 먼저 띄우던
+    // 판은 pathspec 을 받는 그 명령이 `GIT_ICASE_PATHSPECS` 아래에서 죽어, 흔한 트래커의 바탕까지 잃었다.
+    let out = staged(&["show", "--worktree"]).current_dir(&main).env("GIT_ICASE_PATHSPECS", "1").output().unwrap();
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && !shown.contains(&t.tied), "pathspec 환경에서 바탕을 잃었다\n{shown}");
 }
 
 /// **링크로 커밋된 트래커도 지운 줄의 바탕을 잃지 않는다**(moai-iral). `git show <갈린 자리>:.moai/issues.jsonl`
@@ -15281,6 +15287,29 @@ fn worktree_keeps_the_removal_base_of_a_linked_tracker() {
     assert!(!shown.contains(&gone), "여기서 지운 줄이 링크인 트래커의 옆 줄로 되살았다\n{shown}");
     let ready = ok(&main, &["ready", "--worktree", "--json"]);
     assert!(!ready.contains(&gone), "지운 일을 집으라고 낸다\n{ready}");
+
+    // **링크 알림은 사람이 선 자리에서 잰 경로를 댄다**(리뷰) — 딸린 워크트리의 셸에서 뿌리에서 잰
+    // `shared/issues.jsonl` 을 열면 그 워크트리가 갈라질 때의 사본이 열린다. 머리(`source_of`)와 같은 자다.
+    let board = ok(&s.path().join("feat"), &["status", "--json"]);
+    assert!(board.contains("\"../main/shared/issues.jsonl\""), "옆 워크트리의 사본을 가리켰다\n{board}");
+
+    // **`.moai` 가 링크인 판도 같다**(리뷰) — 커밋 안의 링크를 한 칸씩 따라가는 길은 가운데 디렉터리
+    // 링크를 못 건너 바탕을 잃었다. 줄이 지금 사는 자리를 먼저 묻는다.
+    let d = Scratch::new("wtrmdirlink");
+    let main = d.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "moai 이전"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::rename(main.join(".moai"), main.join("tracker")).unwrap();
+    std::os::unix::fs::symlink("tracker", main.join(".moai")).unwrap();
+    let gone = add(&main, &["여기서 지울 일"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+    ok(&main, &["rm", &gone]);
+    let shown = ok(&main, &["show", "--worktree"]);
+    assert!(!shown.contains(&gone), "`.moai` 가 링크인 트래커에서 지운 줄이 되살았다\n{shown}");
 }
 
 /// 옆에서 **늦게 미루거나 도로 집은 것**은 여기서 먼저 옮긴 칸에 가려지지 않는다(moai-l11z).
@@ -16787,43 +16816,59 @@ fn the_merge_driver_settles_edits_to_different_issues() {
 /// 가리켜진 경로로 따로 합치는데, 선언이 링크 경로에만 걸려 그 파일이 기본 글 병합을 받았다 — 이웃한
 /// 두 줄의 고침이 충돌 표식을 든 JSONL 이 됐고, 그래도 `init --check` 는 빠진 것이 없다고 했다.
 /// 이제 그 파일에 거는 줄이 빠진 규칙으로 서고 `init` 이 그것을 심는다.
+///
+/// **`.moai` 가 링크인 판도 같다**(리뷰) — 그 판도 git 은 줄이 사는 `shared/issues.jsonl` 을 그 경로로
+/// 합친다. 끝 조각만 보던 판은 거기서 링크를 못 봐 줄도 알림도 없이 충돌 표식을 냈다.
 #[cfg(unix)]
 #[test]
 fn the_merge_driver_covers_the_file_a_linked_tracker_points_at() {
-    let s = init("mergelinked");
-    let root = s.path();
-    git(root, &["init", "-q", "."]);
-    ok(root, &["merge-driver", "--install", "--as", BIN]);
-    std::fs::create_dir(root.join("shared")).unwrap();
-    std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
-    std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    let file_link = |root: &Path| {
+        std::fs::create_dir(root.join("shared")).unwrap();
+        std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+        std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    };
+    let dir_link = |root: &Path| {
+        std::fs::rename(root.join(".moai"), root.join("shared")).unwrap();
+        std::os::unix::fs::symlink("shared", root.join(".moai")).unwrap();
+    };
+    for (name, link) in [("file", &file_link as &dyn Fn(&Path)), ("dir", &dir_link)] {
+        let s = init(&format!("mergelinked-{name}"));
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        ok(root, &["merge-driver", "--install", "--as", BIN]);
+        link(root);
 
-    let rule = "/shared/issues.jsonl   text eol=lf merge=moai";
-    let check = ok(root, &["init", "--check", "--json"]);
-    assert!(check.contains(rule), "링크가 가리키는 파일에 선언이 빠진 것을 안 댔다\n{check}");
-    ok(root, &["init", "argos"]);
-    let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
-    assert!(attrs.lines().any(|l| l == rule), "init 이 그 파일에 선언을 안 걸었다\n{attrs}");
-    let check = ok(root, &["init", "--check", "--json"]);
-    assert!(!check.contains("\"missing\""), "심은 뒤에도 빠졌다고 한다\n{check}");
-    ok(root, &["init", "argos"]);
-    assert_eq!(std::fs::read_to_string(root.join(".gitattributes")).unwrap(), attrs, "다시 부르자 줄을 또 붙였다");
+        let rule = "/shared/issues.jsonl   text eol=lf merge=moai";
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert!(check.contains(rule), "{name}: 링크가 가리키는 파일에 선언이 빠진 것을 안 댔다\n{check}");
+        ok(root, &["init", "argos"]);
+        let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+        assert!(attrs.lines().any(|l| l == rule), "{name}: init 이 그 파일에 선언을 안 걸었다\n{attrs}");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert!(!check.contains("\"missing\""), "{name}: 심은 뒤에도 빠졌다고 한다\n{check}");
+        ok(root, &["init", "argos"]);
+        let again = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+        assert_eq!(again, attrs, "{name}: 다시 부르자 줄을 또 붙였다");
+        let board = ok(root, &["status", "--json"]);
+        assert!(board.contains("\"tracker_linked\"") && board.contains("\"shared/issues.jsonl\""), "{name}\n{board}");
 
-    let one = add(root, &["첫째"]);
-    let two = add(root, &["둘째"]);
-    git(root, &["add", "-A"]);
-    git(root, &["commit", "-qm", "base"]);
-    git(root, &["checkout", "-qb", "side"]);
-    ok(root, &["edit", &two, "--tag", "parser"]);
-    git(root, &["commit", "-qam", "side"]);
-    git(root, &["checkout", "-q", "main"]);
-    ok(root, &["edit", &one, "--tag", "bug"]);
-    git(root, &["commit", "-qam", "main"]);
+        let one = add(root, &["첫째"]);
+        let two = add(root, &["둘째"]);
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["checkout", "-qb", "side"]);
+        ok(root, &["edit", &two, "--tag", "parser"]);
+        git(root, &["commit", "-qam", "side"]);
+        git(root, &["checkout", "-q", "main"]);
+        ok(root, &["edit", &one, "--tag", "bug"]);
+        git(root, &["commit", "-qam", "main"]);
 
-    git(root, &["merge", "--no-edit", "side"]);
-    let merged = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
-    assert!(!merged.contains("<<<<<<<"), "링크가 가리키는 파일에 충돌 표식이 남았다\n{merged}");
-    assert!(line_of(root, &one).contains("\"bug\"") && line_of(root, &two).contains("\"parser\""), "{merged}");
+        git(root, &["merge", "--no-edit", "side"]);
+        let merged = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
+        assert!(!merged.contains("<<<<<<<"), "{name}: 링크가 가리키는 파일에 충돌 표식이 남았다\n{merged}");
+        let (a, b) = (line_of(root, &one), line_of(root, &two));
+        assert!(a.contains("\"bug\"") && b.contains("\"parser\""), "{name}\n{merged}");
+    }
 }
 
 /// **같은 이슈의 같은 필드를 둘이 다르게 고친 것은 사람에게 온다.** 한쪽을 말없이

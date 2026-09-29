@@ -46,7 +46,7 @@
   "warn.agents_stale": "The AGENTS.md block differs — another binary wrote it, so this one may be the older (build again and look)",
   "warn.agents_hand_edited": "The AGENTS.md block was edited by hand — planting it again drops those edits",
   "warn.gitignore_rules": ".gitignore is missing {n} lines moai uses — sibling worktrees ride along with `git add -A`",
-  "warn.gitattributes_rules": ".gitattributes is missing {n} lines moai uses — the journal conflicts on merge and line ends drift",
+  "warn.gitattributes_rules": ".gitattributes is missing {n} lines moai uses — those files lose their merge rule (the tracker or the journal conflicts on merge) and line ends drift",
   "warn.merge_driver_rotten": "The planted merge driver does not run — merges fall back to the default one",
   "warn.merge_driver_stale": "The planted merge driver is an old one — if the recorded place goes, it drops their side with no markers",
   "warn.merge_driver_alien": "The planted merge driver is another tool of that name — it does not know this command, so merges fall back to the default one",

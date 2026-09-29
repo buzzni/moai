@@ -1453,23 +1453,52 @@ fn parent_of<'a>(path: &'a Path, named: &Path) -> R<&'a Path> {
 ///
 /// **`within` 을 받으면 링크의 끝이 그 안에 있어야 한다**([`write_atomic_inside`]). 견주는 것은 끝의
 /// 디렉터리를 푼 자리다 — 링크 글의 `..` 이나 가운데 디렉터리 링크로 밖에 닿는 것도 거기서 드러난다.
-/// 그 디렉터리가 없으면 여기서 못 재고, 아래의 "디렉터리가 없다" 거절이 멈춘다. 링크가 아니면 재지
-/// 않는다 — 받은 철자 그대로 쓰는 것은 링크를 따라가기 전과 같은 자리다.
+/// 그 디렉터리가 없으면 여기서 못 재고, 아래의 "디렉터리가 없다" 거절이 멈춘다.
+///
+/// **끝 조각이 링크가 아니어도 잰다**(moai-wd44 리뷰). 끝만 재던 판은 커밋된 `.moai/journal -> /밖` 을
+/// 지나 `moai add` 가 체크아웃 밖에 `<사람>.jsonl` 을 지었다 — 막으려던 것과 같은 길이 디렉터리
+/// 링크 하나로 열려 있었다. 그래서 `.moai` 자체가 체크아웃 밖을 가리키는 저장소도 여기서 거절된다.
+/// 저장소 파일은 체크아웃 안에서만 링크를 따른다는 2026-09-29 사용자 결정을 디렉터리에도 그대로 편다.
+///
+/// **거절문에 싣는 링크의 끝은 제어 문자를 걷는다**(리뷰). 그 글은 받은 저장소가 커밋한 링크 글이고,
+/// 거절문은 `init` 의 "못 썼다" 줄과 저널을 못 적었다는 줄을 거쳐 그대로 터미널로 나간다 — ESC 가
+/// 든 링크 하나가 그 화면을 다시 칠한다(`text::sanitize` 가 선 까닭과 같다).
+///
+/// **체크아웃 안이라도 git 의 자리(`.git/`)는 아니다**(리뷰). 받은 저장소가
+/// `.moai/journal/<사람>.jsonl -> ../../.git/config` 를 커밋해 두면 흔한 `moai add` 가 git 설정에 JSON 한
+/// 줄을 덧붙여, 그 클론의 git 이 `bad config line` 으로 통째로 섰다. 저장소가 든 파일이 git 의 자리를
+/// 가리킬 까닭은 없다.
 fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
     let real = crate::path::follow_links(path).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
     let linked = real != path;
-    if let Some(root) = within.filter(|_| linked) {
+    let end = || crate::text::one_line(&real.display().to_string());
+    if let Some(root) = within {
         let root = crate::path::real(root);
-        if let Ok(dir) = std::fs::canonicalize(crate::path::dir_of(&real))
-            && !dir.starts_with(&root)
-        {
-            return Err(Fail::new(format!(
-                "{} points at {}, outside {} — nothing is written, so the link is not replaced. A file the \
-                 repository holds follows a link only inside its own checkout",
-                path.display(),
-                real.display(),
-                root.display()
-            )));
+        if let Ok(dir) = std::fs::canonicalize(crate::path::dir_of(&real)) {
+            if !dir.starts_with(&root) {
+                // 끝 조각이 링크가 아니면 가운데 디렉터리가 링크다 — 그때 댈 것은 푼 디렉터리다.
+                let landed = real.file_name().map_or_else(|| dir.clone(), |name| dir.join(name));
+                return Err(Fail::new(format!(
+                    "{} points at {}, outside {} — nothing is written, so the link is not replaced. A file the \
+                     repository holds follows a link only inside its own checkout",
+                    path.display(),
+                    crate::text::one_line(&landed.display().to_string()),
+                    root.display()
+                )));
+            }
+            // 끝 이름도 센다 — 딸린 워크트리의 `.git` 은 디렉터리가 아니라 `gitdir:` 한 줄짜리 파일이다.
+            let git = |p: &std::ffi::OsStr| p == ".git";
+            if dir
+                .strip_prefix(&root)
+                .is_ok_and(|rest| rest.components().any(|c| git(c.as_os_str())) || real.file_name().is_some_and(git))
+            {
+                return Err(Fail::new(format!(
+                    "{} points at {}, inside git's own directory — nothing is written, so the link is not \
+                     replaced. A file the repository holds never follows a link into .git",
+                    path.display(),
+                    end()
+                )));
+            }
         }
     }
     match std::fs::metadata(&real) {
@@ -1477,7 +1506,7 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
             true => format!(
                 "{} points at {}, which is not a regular file — nothing is written, so the link is not replaced",
                 path.display(),
-                real.display()
+                end()
             ),
             false => format!("{}: not a regular file — nothing is written", path.display()),
         })),
@@ -1486,7 +1515,7 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
                 "{} points at {}, and that directory is not there — nothing is written, so the link is not \
                  replaced. Make that place, or fix the link",
                 path.display(),
-                real.display()
+                end()
             )))
         }
         _ => Ok(real),
@@ -3098,5 +3127,31 @@ mod tests {
         assert!(is_link(&repo_dir.join("near")), "덧붙이다 링크를 갈아끼웠다");
         write_atomic(&repo_dir.join("dotdot"), b"dotfiles\n").unwrap();
         assert_eq!(std::fs::read_to_string(away.join("rc")).unwrap(), "dotfiles\n");
+
+        // **끝 조각이 아니라 가운데 디렉터리가 링크여도 같다**(리뷰) — 커밋된 `.moai/journal -> /밖` 에
+        // `moai add` 가 새 저널 파일을 짓던 자리다.
+        std::os::unix::fs::symlink(&away, repo_dir.join("journal")).unwrap();
+        let e = append_inside(&repo_dir.join("journal/who.jsonl"), b"{}\n", &repo_dir).expect_err("밖에 지었다");
+        assert!(e.message.contains("outside"), "{}", e.message);
+        write_atomic_inside(&repo_dir.join("journal/who.jsonl"), b"{}\n", &repo_dir).expect_err("밖에 지었다");
+        assert!(!away.join("who.jsonl").exists(), "디렉터리 링크를 지나 체크아웃 밖에 파일을 지었다");
+
+        // **체크아웃 안이라도 `.git/` 은 아니다**(리뷰) — 저널 링크 하나로 git 설정에 JSON 이 붙어 그 클론의
+        // git 이 섰다. 덧붙이는 쪽도 갈아끼우는 쪽도 같다.
+        std::fs::create_dir(repo_dir.join(".git")).unwrap();
+        std::fs::write(repo_dir.join(".git/config"), "[core]\n").unwrap();
+        std::os::unix::fs::symlink(".git/config", repo_dir.join("gitdir")).unwrap();
+        let e = append_inside(&repo_dir.join("gitdir"), b"{}\n", &repo_dir).expect_err(".git 에 덧붙였다");
+        assert!(e.message.contains(".git"), "{}", e.message);
+        write_atomic_inside(&repo_dir.join("gitdir"), b"{}\n", &repo_dir).expect_err(".git 을 고쳐 썼다");
+        assert_eq!(std::fs::read_to_string(repo_dir.join(".git/config")).unwrap(), "[core]\n");
+        assert!(is_link(&repo_dir.join("gitdir")), "링크를 갈아끼웠다");
+        // 딸린 워크트리의 `.git` 은 파일이다 — 끝 이름이 `.git` 인 것도 같다.
+        let tree = s.join("tree");
+        std::fs::create_dir(&tree).unwrap();
+        std::fs::write(tree.join(".git"), "gitdir: /x\n").unwrap();
+        std::os::unix::fs::symlink(".git", tree.join("gitfile")).unwrap();
+        append_inside(&tree.join("gitfile"), b"{}\n", &tree).expect_err("워크트리의 .git 파일에 덧붙였다");
+        assert_eq!(std::fs::read_to_string(tree.join(".git")).unwrap(), "gitdir: /x\n");
     }
 }

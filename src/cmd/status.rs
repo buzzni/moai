@@ -185,7 +185,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 }
 
 /// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙
-/// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu).
+/// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu). **넷째로 링크인 트래커를 비추는 알림이
+/// 함께 선다**(moai-jo3h) — 어긋난 것이 아니라 살아 있는 길이고 칠 명령(`hint`)도 없지만, 링크를 푸는
+/// 자리들이 갈릴 때 사람이 볼 곳을 대는 것이라 같은 자리에서 센다. 아래 "셋" 은 설치 알림을 말한다.
 ///
 /// **한 자리다**(moai-1tcm). `moai status` 와 훅의 보드가 같은 셋을 싣는데, 셋을 표면마다 따로
 /// 적던 때는 그 사실이 "`moai status` 와 같은 알림을 싣는다" 는 주석으로만 서 있었다 — 한쪽에
@@ -220,21 +222,31 @@ pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::rep
     out
 }
 
-/// 트래커 파일이 링크면 그 알림(moai-jo3h) — 가리키는 파일을 **뿌리에서 잰 경로**로 대고, 뿌리 밖이면
-/// 절대 경로로 댄다. 재는 파일은 보드가 정말 읽은 루트의 트래커다([`source_of`] 와 같은 자리).
+/// 트래커 파일이 링크면 그 알림(moai-jo3h). 재는 파일은 보드가 정말 읽은 루트의 트래커다
+/// ([`source_of`] 와 같은 자리). 푸는 자는 병합 줄을 거는 쪽과 하나다([`crate::cmd::init::tracker_file`]) —
+/// **`.moai` 가 링크인 판도 링크다**(리뷰): 끝 조각만 보던 판은 거기서 입을 다물었는데, 그 판도 줄은
+/// 딴 파일에 살고 git 은 그 파일을 합친다.
+///
+/// **가리키는 파일은 사람이 선 자리에서 잰다**([`source_of`] 와 같은 자, 리뷰). 뿌리에서 재던 판은 딸린
+/// 워크트리에서 `shared/issues.jsonl` 을 댔는데, 그 셸에서 그 경로를 열면 그 워크트리가 갈라질 때의
+/// 사본이 열린다(moai-y7go 가 머리에서 없앤 바로 그 어긋남이다). 늘 상대 경로라 기계의 홈 경로도
+/// `--json` 으로 안 나간다(`worktree::told_from`).
 ///
 /// 링크를 못 풀면(고리) 푼 자리 대신 받은 철자를 댄다 — 그 트래커는 쓰기가 이미 그 말로 멈춘다.
 fn tracker_linked(repo: &crate::store::Repo) -> Option<crate::report::Warning> {
     let link = repo.issues_path();
-    std::fs::symlink_metadata(&link).ok().filter(|m| m.file_type().is_symlink())?;
-    let real = crate::path::follow_links(&link).unwrap_or_else(|_| link.clone());
-    // 링크 글의 `..` 과 가운데 디렉터리 링크를 걷는다 — 끝 파일은 없어도 된다.
-    let real = match (std::fs::canonicalize(crate::path::dir_of(&real)), real.file_name()) {
-        (Ok(dir), Some(name)) => dir.join(name),
-        _ => real,
+    let end = match crate::cmd::init::tracker_file(&repo.root) {
+        // 푼 자리가 제자리면 링크가 아니다.
+        Some(end) if end == crate::path::real(&repo.root).join(crate::cmd::merge_driver::SNAPSHOT) => return None,
+        Some(end) => end,
+        // 못 푸는 것이 링크 때문일 때만 댄다 — 링크가 아닌데 못 푼 자리를 링크라 부르지 않는다. 가리키는
+        // 디렉터리가 없으면 링크 글이 댄 자리를, 고리면 받은 철자를 댄다.
+        None if std::fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink()) => {
+            crate::path::follow_links(&link).unwrap_or(link)
+        }
+        None => return None,
     };
-    let shown = real.strip_prefix(crate::path::real(&repo.root)).unwrap_or(&real);
-    Some(crate::report::Warning::tracker_linked(shown.display().to_string()))
+    Some(crate::report::Warning::tracker_linked(crate::worktree::told_from(repo.here(), &end)))
 }
 
 /// 보드가 **정말 읽은 파일**을 머리에 댄다 — 딸린 워크트리 안에서는 그 자리의 `.moai` 가 아니라
