@@ -2023,3 +2023,5 @@
 {"ts":"2026-09-29T10:35:12Z","id":"moai-y8v2.94p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-29T10:35:18Z","id":"moai-y8v2.366","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·2·7(리뷰의 고침), 3·4·9(직접 고침, d413fc93). 넘긴 것: 5는 idea moai-re3s(원래 규칙, v0.1.4 밖), 6은 사용자 결정대로 둔다. 8은 3을 고치자 다시 맞게 됐다"}
 {"ts":"2026-09-29T10:35:36Z","id":"moai-y8v2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 남은 일 없음. 27865a3d 로 develop 에 병합했고 감독(moa-issue-b6)에게 보고했다. 넘긴 것은 idea moai-re3s 하나다"}
+{"ts":"2026-09-29T10:36:18Z","id":"moai-59k3.u09","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T10:36:19Z","id":"moai-59k3.yo6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
