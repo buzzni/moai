@@ -26,6 +26,15 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **A move key in the `moai tui` SPC menu closes the menu and makes the move.** The
+  menu used to ignore every key it did not list, so moving the cursor meant Esc first
+  and then the move — two presses for one. Now j·k·h·l, the arrows, gg·G,
+  Ctrl-d/u/f/b, Home·End·PgUp·PgDn close the menu and act on the focused pane in the
+  same press, toggle levels (`SPC v`, `SPC c`, `SPC s`) included. A letter the open
+  level holds itself stays that level's item — `SPC c h`, `SPC v l`, `SPC m g` — even
+  where the item is switched off, and a move that would do nothing where the cursor
+  stands leaves the menu open rather than just making it vanish.
+
 - **The install one-liner upgrades.** When the `moai` already in the install
   directory is this moai — `install.sh` runs it, and it answers `--version` with
   `moai <version>` and `merge-driver --help` with this tool's first line, as every
