@@ -260,7 +260,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
             .map(|i| Listed {
                 row: super::Row::of(
                     i,
-                    wh.states.get(i.id.as_str()).copied(),
+                    wh.states.get(&(i.kind, i.id.as_str())).copied(),
                     wh.epic.handed().get(i.id.as_str()).copied(),
                     &wh.kinds,
                 )
@@ -478,14 +478,11 @@ fn one(
     let places = report::places_in(&footing, &trees, &model::now()).remove(&issue.id);
     let seen = view::Seen {
         // **줄로 묻는 그릇으로 든다**(moai-wre3) — 접은 지도를 그대로 들던 때는 같은 id 의
-        // 자식 둘이 한 화면에서 뒷줄의 답을 함께 받았다. 여기 자식 줄에는 쌍둥이가 설 수
-        // 있다(바로 아래 `kinds` 가 같은 까닭으로 지도를 짓는다).
+        // 자식 둘이 한 화면에서 뒷줄의 답을 함께 받았다. 여기 자식 줄에는 쌍둥이가 설 수 있다.
         roots: report::Shelved::of(all),
+        // 칸 지도의 열쇠가 (종류, id) 라 가려진 자식은 제 종류로 센 칸이 없다(`report::GroupKey`,
+        // moai-mibi.rfn) — 한때 곁에 펼친 줄과 그 자식만의 종류 지도를 따로 지었다.
         states: report::group_states_of(all, &repo.config, &near),
-        // **펼친 줄과 그 자식만의 지도**(`group_states_of` 와 같은 자리, 같은 까닭) — 칸 지도가
-        // 담는 줄이 그 둘이라, 그 칸을 누가 입는지를 가르는 데 저장소 전체의 종류 지도가 들 일이
-        // 없다. 펼친 줄 제 것은 늘 뒷줄이라(`Load::get`) 가려질 수 없지만, 자식은 그렇지 않다.
-        kinds: report::Kinds::of_ids(all, &near),
         screen: view::Screen::new(ctx.lang()).at(ctx.zone()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
@@ -594,8 +591,13 @@ fn one(
             // 든 줄을 열고(`rfind`), 가려짐은 그 마지막 줄의 종류로 재는 것이라 여기 선 줄은
             // 가려질 수가 없다 — 지도를 지어도 답이 안 바뀌는데 그 셈은 상세를 펼 때마다
             // 저장소를 한 번 더 훑는다.
-            &super::Row::of(issue, seen.states.get(issue.id.as_str()).copied(), stood_in, &report::Kinds::no_twins())
-                .on(origin),
+            &super::Row::of(
+                issue,
+                seen.states.get(&(issue.kind, issue.id.as_str())).copied(),
+                stood_in,
+                &report::Kinds::no_twins(),
+            )
+            .on(origin),
             &extra,
         );
     }
@@ -633,7 +635,7 @@ fn one(
         // **미룬 수는 보드와 같은 자에서 온다**([`report::Stand::deferred`], moai-zxwj) — 분모는
         // 미룬 멤버를 그대로 세므로, 그 수가 안 줄어드는 까닭을 여기서도 댄다. 따로 세면 같은
         // 묶음을 보드와 상세가 다른 수로 말한다.
-        let deferred = soil.stands(all, &repo.config).get(issue.id.as_str()).map(|s| s.deferred);
+        let deferred = soil.stands(all, &repo.config).get(&(issue.kind, issue.id.as_str())).map(|s| s.deferred);
         let roll = report::rollup_of_in(all, &repo.config, &soil.placed(issue.kind), &eclipsed)
             .into_iter()
             .find(|r| r.id.as_deref() == Some(issue.id.as_str()))

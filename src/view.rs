@@ -1547,13 +1547,11 @@ pub struct Seen<'a> {
     /// 계획에서 빠진 줄 → 그것을 뺀 줄 (`report::Shelved`). **줄로 묻는다** — 지도를 그대로
     /// 들던 때는 같은 id 의 자식 둘이 한 화면에서 같은 답을 받았다(moai-wre3).
     pub roots: crate::report::Shelved<'a>,
-    /// 묶음 → 멤버에서 읽은 칸 (`report::group_states`).
-    pub states: BTreeMap<&'a str, &'a str>,
-    /// 가려진 줄을 가르는 지도 (`report::Kinds`, moai-7iyc.5fz). 위의 칸 지도는 id 로 짠 것이라,
-    /// 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 가려진 쪽이 이긴 쪽의 칸을 입는다 — 같은
-    /// 창의 트리는 그 줄을 `(길 잃음)` 에 제 칸으로 그리는데 이 줄만 다른 칸을 말한다.
-    /// 쌍둥이가 못 서는 자리는 `Kinds::no_twins()` 라는 낱말을 적고 그 까닭을 함께 댄다.
-    pub kinds: crate::report::Kinds<'a>,
+    /// (종류, 묶음 id) → 멤버에서 읽은 칸 (`report::group_states`). 열쇠에 종류가 들어, 마일스톤으로
+    /// 한 번 에픽으로 한 번 선 id 에서도 가려진 쪽이 이긴 쪽의 칸을 안 입는다(`report::GroupKey`,
+    /// moai-mibi.rfn). 한때 곁에 종류 지도(`kinds`)를 따로 들었고, 쌍둥이가 못 서는 자리는
+    /// `Kinds::no_twins()` 증인을 적어야 했다.
+    pub states: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// 어느 말로 그리고 어느 워크트리의 줄이 겹쳐 있는가 ([`Screen`]). 겹침을 묻는 길이
     /// [`Screen::branch`] 하나가 되어, 상세가 제 손으로 [`Origin`] 을 뒤지지 않는다.
     pub screen: Screen<'a>,
@@ -1684,7 +1682,7 @@ pub fn detail(
         marked(seen.screen.branch(&i.id), &i.title, usize::MAX, title_style(i)).0
     )];
 
-    let col = crate::report::column(&seen.kinds, i, &seen.states);
+    let col = crate::report::column(i, &seen.states);
     let st = style::status_style(col);
     let mut line = format!(
         "  {} {} · {}",
@@ -1799,7 +1797,7 @@ pub fn detail(
         if let Some(d) = deferred_for(c, seen.roots.root(c), now, seen.screen.lang) {
             tail.push_str(&format!(" · {}", paint(style::WARN, &d)));
         }
-        let ccol = crate::report::column(&seen.kinds, c, &seen.states);
+        let ccol = crate::report::column(c, &seen.states);
         out.push(format!(
             "  {}   {}  {}  ({} {}){tail}",
             row_label(say(lang, "detail.child"), lang),
@@ -3279,12 +3277,11 @@ mod tests {
     fn bare_seen(lang: Lang) -> Seen<'static> {
         Seen {
             screen: Screen::new(lang),
-            // 읽은 것이 없는 화면이라 미룬 줄도 없다 — 곁의 `kinds` 와 같은 자리, 같은 꼴이다.
+            // 읽은 것이 없는 화면이라 미룬 줄도 없고, 그래서 쌍둥이도 없다.
             roots: crate::report::Shelved::no_twins(BTreeMap::new()),
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
-            kinds: crate::report::Kinds::no_twins(),
         }
     }
 

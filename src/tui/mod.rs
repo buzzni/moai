@@ -264,6 +264,9 @@ type States = std::collections::BTreeMap<String, Stood>;
 /// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
 /// (`report::Stand::aside`).
 struct Stood {
+    /// 이 칸을 센 묶음 줄의 종류 — 칸 지도의 열쇠 반쪽이다(`report::GroupKey`, moai-mibi.rfn). 지도는
+    /// id 로 들되(가려진 묶음 줄은 안 세므로 한 id 에 칸 하나다) 짚는 자는 줄의 종류와 견준다.
+    kind: crate::model::Kind,
     column: String,
     since: String,
     busy: bool,
@@ -316,9 +319,10 @@ impl Ground {
         let stands = soil
             .stands(issues, cfg)
             .into_iter()
-            .map(|(id, s)| {
+            .map(|((kind, id), s)| {
                 let aside = s.aside.iter().map(|m| m.to_string()).collect();
                 let stood = Stood {
+                    kind,
                     column: s.column.to_string(),
                     since: s.since.to_string(),
                     busy: s.busy,
@@ -361,9 +365,9 @@ impl Ground {
         }
     }
 
-    /// 묶음 id → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
-    pub fn columns(&self) -> std::collections::BTreeMap<&str, &str> {
-        self.stands.iter().map(|(id, s)| (id.as_str(), s.column.as_str())).collect()
+    /// (종류, 묶음 id) → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
+    pub fn columns(&self) -> std::collections::BTreeMap<crate::report::GroupKey<'_>, &str> {
+        self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.column.as_str())).collect()
     }
 
     /// 가려진 줄을 가르는 지도를 **빌린 꼴로** 낸다(`report::Kinds::kept`) — `tui --json` 의 줄이
@@ -385,10 +389,7 @@ impl Ground {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
         crate::query::Where {
-            epic: crate::report::Handing::of_handed(
-                borrow(&self.epic),
-                self.twin.iter().map(String::as_str).collect(),
-            ),
+            epic: crate::report::Handing::of_handed(borrow(&self.epic), self.twin.iter().map(String::as_str).collect()),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
             // (moai-jk2u.wvn). 나머지처럼 적재 때 재어 둘 수도 없다: `report::Lines` 는
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.
@@ -401,7 +402,7 @@ impl Ground {
                 self.split_rows.iter().map(|(at, r)| (&issues[*at], r.as_deref())),
             ),
             states: self.columns(),
-            since: self.stands.iter().map(|(id, s)| (id.as_str(), s.since.as_str())).collect(),
+            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.since.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
@@ -1266,7 +1267,7 @@ impl Site {
     /// 짚는데 [`Site::column`] 만 가려짐을 거르던 때는, 가려진 마일스톤 줄이 제 칸을 그리면서
     /// 쌍둥이 에픽의 `미룬 N` 과 그 에픽이 기다리는 까닭을 함께 달았다.
     fn stand_of(&self, i: &Issue) -> Option<&Stood> {
-        crate::report::stands_on(&self.ground.kinds(), i, || self.ground.stands.get(&i.id))
+        crate::report::stands_on(i, |(kind, id)| self.ground.stands.get(id).filter(|s| s.kind == kind))
     }
 
     /// [`Site::stand_of`] 의 읽은 칸만.

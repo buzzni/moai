@@ -41,9 +41,9 @@ pub struct Where<'a> {
     /// 다는 묶음 줄을 `--deferred` 가 안 냈다.
     pub shelved: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
-    pub states: BTreeMap<&'a str, &'a str>,
+    pub states: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
-    pub since: BTreeMap<&'a str, &'a str>,
+    pub since: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
     /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
     /// 나온다. 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
@@ -103,7 +103,7 @@ impl<'a> Where<'a> {
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::column(&self.kinds, i, &self.states)
+        crate::report::column(i, &self.states)
     }
 
     /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
@@ -137,8 +137,7 @@ impl<'a> Where<'a> {
         // **고르는 자와 재는 자가 한 문을 지난다**(리뷰, `report::stands_on`). 위의 `column` 만
         // 가려진 줄을 거르면, `-s` 가 제 칸으로 고른 그 줄의 나이는 쌍둥이 묶음의 셈에서 와
         // `--stale` 이 265일 된 줄을 하루짜리로 잰다.
-        crate::report::stands_on(&self.kinds, i, || self.since.get(i.id.as_str()).copied())
-            .unwrap_or(i.status_since.as_str())
+        crate::report::stands_on(i, |k| self.since.get(&k).copied()).unwrap_or(i.status_since.as_str())
     }
 
     /// 목록에서 미룬 것으로 치는가. **제 줄의 미룸이나 물려받은 미룸.**

@@ -199,7 +199,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues
                 .iter()
-                .filter(|g| m.read.column(&g.id).is_some() && crate::report::has_finished_member(issues, g))
+                .filter(|g| m.read.column(g).is_some() && crate::report::has_finished_member(issues, g))
                 .map(|g| g.id.clone())
                 .collect();
             // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
@@ -272,7 +272,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .read
                 .columns()
                 .filter(|(_, col)| *col != to.as_str())
-                .map(|(id, col)| Stands { id, derived_status: col })
+                .map(|((_, id), col)| Stands { id, derived_status: col })
                 .collect(),
             // **이 셋에 `derived_status` 는 안 선다 — 그래도 `Row::from` 으로 짓는다**(리뷰).
             // 셋 다 일 줄뿐이라(`report::closable`·`unblocked_pick` 이 `is_work` 로 거른다)
@@ -306,7 +306,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.
-    for (id, col) in moved.read.columns().filter(|(_, col)| *col != to.as_str()) {
+    for ((_, id), col) in moved.read.columns().filter(|(_, col)| *col != to.as_str()) {
         out.push(format!(
             "{}  {}",
             paint(style::ID, id),

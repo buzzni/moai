@@ -1903,13 +1903,24 @@ pub fn spent_in(members: &[&Issue]) -> Spent {
 ///   덜 간 일만큼 가 있다. 시작한 멤버가 없으면(끝난 것과 첫 칸뿐) 설정의 첫 시작 칸
 ///   (`Config::started_status`)이다. 칸 자리로만 고르면 칸이 더 있는 설정
 ///   (`todo,blocked,in_progress,review,done`)에서 멤버가 in_progress 인 에픽이 `blocked` 로 읽혔다
-pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, &'c str> {
-    group_stands(all, cfg).into_iter().map(|(id, s)| (id, s.column)).collect()
+pub fn group_states<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<GroupKey<'a>, &'c str> {
+    group_stands(all, cfg).into_iter().map(|(k, s)| (k, s.column)).collect()
 }
+
+/// 묶음 칸 지도의 열쇠 — **(종류, id)** (moai-mibi.rfn).
+///
+/// 한때 id 하나로 짜서, 마일스톤으로 한 번 에픽으로 한 번 선 id 에서는 칸 하나를 두 줄이
+/// 나눠 입었다. 그것을 막으려고 읽는 자리마다 종류 지도([`Kinds`])를 곁에 들고 다녔다
+/// (moai-7iyc.5fz) — `column`·`stands_on` 의 서명과, 쌍둥이가 없는 자리가 그 까닭을 적는
+/// `Kinds::no_twins()` 증인들이다. 열쇠에 종류가 들면 가려진 줄은 **제 종류로 센 칸이 없어**
+/// 제 칸에 선다 — 지도를 짓는 자([`group_stands_in`])가 가려진 묶음 줄을 안 세기 때문이다.
+/// 그래서 한 id 에는 여전히 칸 하나뿐이고, id 로 줄을 찾는 자리(막음·도는 마일스톤)는 그
+/// id 의 뒷줄 종류로 짚으면 된다.
+pub type GroupKey<'a> = (Kind, &'a str);
 
 /// [`group_states`] 와 같은 셈에서 **칸과 곁들이([`Stand`])를 함께** 낸다. 소속 지도를
 /// 따로 안 든 쪽이 부른다 — 든 쪽(탐색기의 적재)은 [`Soil::stands`] 다.
-pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<GroupKey<'a>, Stand<'a, 'c>> {
     let lines = Lines::of(all);
     let epic_of = Handing::over(all, &lines);
     let mile_of = milestones_over(all, &epic_of, &lines);
@@ -1922,12 +1933,12 @@ pub fn group_stands<'a, 'c>(all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a s
 /// 하나를 펼치거나 쓰는 표면(`show <id>`·`add`·`edit`·`mv`)은 대개 일 하나를 보는데,
 /// 그때 묶음 지도와 미룸 걷기는 통째로 헛일이다 — 10k 줄에서 `moai show <이슈>` 가
 /// 그것만으로 갑절이 됐다.
-pub fn group_states_of<'a, 'c>(all: &'a [Issue], cfg: &'c Config, ids: &[&str]) -> BTreeMap<&'a str, &'c str> {
+pub fn group_states_of<'a, 'c>(all: &'a [Issue], cfg: &'c Config, ids: &[&str]) -> BTreeMap<GroupKey<'a>, &'c str> {
     if !all.iter().any(|i| is_group(i) && ids.contains(&i.id.as_str())) {
         return BTreeMap::new();
     }
     let mut states = group_states(all, cfg);
-    states.retain(|id, _| ids.contains(id));
+    states.retain(|(_, id), _| ids.contains(id));
     states
 }
 
@@ -1939,8 +1950,11 @@ pub fn group_states_of<'a, 'c>(all: &'a [Issue], cfg: &'c Config, ids: &[&str]) 
 /// **읽은 칸은 묶음만 받는다.** id 로만 짚으면 머지를 잘못 푼 파일에서 묶음과 id 가
 /// 같은 일 줄이 그 묶음의 칸을 입는다 — 그리는 쪽은 `▸` 로 내는데 `ready` 는 그 줄의
 /// 적힌 칸으로 골라, 한 화면이 같은 줄을 두 칸으로 말한다.
-pub fn column<'x>(kind_of: &Kinds<'_>, i: &'x Issue, states: &BTreeMap<&str, &'x str>) -> &'x str {
-    stands_on(kind_of, i, || states.get(i.id.as_str()).copied()).unwrap_or(i.status.as_str())
+///
+/// **가려진 줄도 따로 안 가른다**(moai-mibi.rfn) — 열쇠가 (종류, id) 라 그 줄의 종류로 센 칸이
+/// 없다([`GroupKey`]).
+pub fn column<'x>(i: &'x Issue, states: &BTreeMap<GroupKey<'_>, &'x str>) -> &'x str {
+    stands_on(i, |k| states.get(&k).copied()).unwrap_or(i.status.as_str())
 }
 
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
@@ -1958,6 +1972,11 @@ pub fn column<'x>(kind_of: &Kinds<'_>, i: &'x Issue, states: &BTreeMap<&str, &'x
 /// **문이 [`crate::cmd::Row::of`] 가 아니라 여기 선다**: 고르는 자(`-s`)와 칸을 내는 자가 같은
 /// 자리에서 갈려야 둘이 안 어긋난다.
 ///
+/// **그 문은 열쇠다**(moai-mibi.rfn). 한때 종류 지도([`Kinds`])를 곁에 받아 가려진 줄을 여기서
+/// 걸렀는데, 이제 칸 지도의 열쇠가 (종류, id) 라([`GroupKey`]) 가려진 줄은 제 종류로 센 칸이
+/// 없다. `read` 는 **그 열쇠를 받는다** — id 만 쥔 읽는 자를 받으면 부르는 쪽이 종류를 빠뜨려도
+/// 컴파일되어, 이 문이 도로 열린다.
+///
 /// **든 것이 무엇이든 같은 문을 지난다**(리뷰) — 탐색기는 칸 하나가 아니라 그 칸의 셈
 /// ([`Stand`])을 통째로 짚으므로, `&str` 로 못박아 두면 `도는가`·`기다림`·`미룬 수` 셋이 이 문을
 /// 못 지나 저마다 `is_group` 을 다시 적는다. 실제로 그 셋만 가려진 줄에 쌍둥이의 값을 냈다.
@@ -1965,8 +1984,8 @@ pub fn column<'x>(kind_of: &Kinds<'_>, i: &'x Issue, states: &BTreeMap<&str, &'x
 /// **지도는 안 짚고 받는다**(리뷰) — 묶음이 아닌 줄에서 곧바로 물러나는 자라, 값으로 받으면 그
 /// 흔한 갈래에서도 짚기가 먼저 돈다. 고친 [`joined_in`] 과 같은 꼴이고, 이 고침 앞의
 /// `is_group(i).then(|| states.get(…))` 이 원래 그랬다.
-pub fn stands_on<T>(kind_of: &Kinds<'_>, i: &Issue, read: impl FnOnce() -> Option<T>) -> Option<T> {
-    (is_group(i) && !kind_of.eclipses(i)).then(read).flatten()
+pub fn stands_on<'i, T>(i: &'i Issue, read: impl FnOnce(GroupKey<'i>) -> Option<T>) -> Option<T> {
+    is_group(i).then(|| read((i.kind, i.id.as_str()))).flatten()
 }
 
 /// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 칸의 셈이 마지막으로 움직인 때.
@@ -2081,7 +2100,7 @@ pub fn group_stands_in<'a, 'c>(
     mile_of: &BTreeMap<&'a str, &'a str>,
     kind_of: &BTreeMap<&'a str, Kind>,
     shelved: &[Option<&'a str>],
-) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+) -> BTreeMap<GroupKey<'a>, Stand<'a, 'c>> {
     let members = members_in(all, epic_of, lines, kind_of);
     // 미룬 줄이 없으면 뺄 멤버도 없다 — 조상을 타는 길을 아예 안 세운다. **줄마다의 답으로
     // 묻는다**(moai-u3ta) — 접은 지도로 묻던 때는 그 지도가 뒷줄의 답만 들어, 미룬 에픽에 든
@@ -2090,7 +2109,9 @@ pub fn group_stands_in<'a, 'c>(
     let off = off_rows(all, shelved);
     let shelf = (!off.is_empty()).then(|| Shelf::new(lines, epic_of, mile_of));
     all.iter()
-        .filter(|g| is_group(g))
+        // **가려진 묶음 줄은 안 센다**(moai-mibi.rfn) — 그 id 의 뜻은 뒷줄이 정하고, 이 줄은 제 종류로
+        // 센 칸이 없어 제 칸에 선다([`GroupKey`]). 그래서 한 id 에 칸은 여전히 하나다.
+        .filter(|g| is_group(g) && !is_eclipsed(kind_of, g))
         .map(|g| {
             let counted = counted(g, &members, shelf.as_ref(), &off);
             let since = counted.iter().map(|m| m.status_since.as_str()).max().unwrap_or(g.created_at.as_str());
@@ -2122,20 +2143,23 @@ pub fn group_stands_in<'a, 'c>(
                 true => 0,
                 false => of.len() - counted.len(),
             };
-            (g.id.as_str(), Stand { column, since, busy, waiting, aside, progress, deferred })
+            ((g.kind, g.id.as_str()), Stand { column, since, busy, waiting, aside, progress, deferred })
         })
         .collect()
 }
 
 /// 막음을 가르는 데 드는 묶음 쪽 재료 — 읽은 칸과, 제 칸대로가 아닌 묶음이 기다리는
 /// 것([`Waits`]). 한 번의 셈에서 둘로 가른다.
-fn split_stands<'a, 'c>(stands: BTreeMap<&'a str, Stand<'a, 'c>>) -> (BTreeMap<&'a str, &'c str>, Waits<'a>) {
+///
+/// **기다림은 id 로 든다** — 막음은 id 로만 줄을 찾고(`blocked_by`), 칸 지도는 가려진 묶음 줄을
+/// 안 세므로 한 id 에 묶음 하나뿐이다([`GroupKey`]).
+fn split_stands<'a, 'c>(stands: BTreeMap<GroupKey<'a>, Stand<'a, 'c>>) -> (BTreeMap<GroupKey<'a>, &'c str>, Waits<'a>) {
     let mut states = BTreeMap::new();
     let mut waits = BTreeMap::new();
-    for (id, s) in stands {
-        states.insert(id, s.column);
+    for (key, s) in stands {
+        states.insert(key, s.column);
         if s.waiting != Waiting::Live {
-            waits.insert(id, (s.waiting, s.aside));
+            waits.insert(key.1, (s.waiting, s.aside));
         }
     }
     (states, waits)
@@ -2251,7 +2275,12 @@ pub fn has_finished_member(all: &[Issue], group: &Issue) -> bool {
 ///
 /// `waits` 는 제 칸대로가 아닌 묶음이다([`Waits`]) — 칸이 `done` 이어도 미룬 멤버를
 /// 기다리면 아직 막는다.
-pub fn is_blocked(i: &Issue, by_id: &BTreeMap<&str, &Issue>, states: &BTreeMap<&str, &str>, waits: &Waits) -> bool {
+pub fn is_blocked(
+    i: &Issue,
+    by_id: &BTreeMap<&str, &Issue>,
+    states: &BTreeMap<GroupKey<'_>, &str>,
+    waits: &Waits,
+) -> bool {
     // 미룸은 막는가를 바꾸지 않는다 — 미룬 막음도 막는다([`Blocker::blocks`]).
     i.blocked_by.iter().any(|b| blocker(standing(b, by_id, states), false, waiting_of(b, waits)).blocks())
 }
@@ -2349,24 +2378,23 @@ pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<
             let issue = by_id.get(b.as_str()).copied();
             let root = roots.get(b.as_str()).copied();
             let (waiting, aside) = waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
-            let blocker = blocker(issue.map(|x| column_by_id(x, &states)), root.is_some(), waiting);
+            let blocker = blocker(issue.map(|x| column(x, &states)), root.is_some(), waiting);
             Block { id: b.as_str(), issue, blocker, root, aside }
         })
         .collect()
 }
 
 /// id 로 막는 줄을 찾아 그 서 있는 칸을 댄다. 없으면 `None`.
-fn standing<'x>(id: &str, by_id: &BTreeMap<&str, &'x Issue>, states: &BTreeMap<&str, &'x str>) -> Option<&'x str> {
-    by_id.get(id).map(|x| column_by_id(x, states))
-}
-
-/// [`column()`] 을 **`by_id` 로 찾아 온 줄**에 댄다.
 ///
-/// **여기에는 쌍둥이가 없다**([`Kinds::no_twins`]) — `by_id` 가 고르는 줄은 늘 그 id 의 뒷줄,
-/// 곧 그 id 의 뜻을 정하는 줄이라 제 지도에 가려질 수가 없다([`is_eclipsed`]). 막음은 id 로만
-/// 줄을 찾으므로(`blocked_by` 에 적히는 것이 id 다) 막음을 가르는 자리는 모두 이쪽이다.
-fn column_by_id<'x>(i: &'x Issue, states: &BTreeMap<&str, &'x str>) -> &'x str {
-    column(&Kinds::no_twins(), i, states)
+/// `by_id` 가 고르는 줄은 늘 그 id 의 뒷줄 — 칸 지도가 센 바로 그 줄이다([`GroupKey`]). 한때
+/// 여기 `column_by_id` 가 서서 "쌍둥이가 없다" 는 증인을 적었는데(`Kinds::no_twins`), 열쇠가
+/// (종류, id) 가 된 뒤로는 적을 까닭이 없다(moai-mibi.rfn).
+fn standing<'x>(
+    id: &str,
+    by_id: &BTreeMap<&str, &'x Issue>,
+    states: &BTreeMap<GroupKey<'_>, &'x str>,
+) -> Option<&'x str> {
+    by_id.get(id).map(|x| column(x, states))
 }
 
 /// `blocker` 가 `blocked` 를 막으면 고리가 생기는가. **쓰기 전에** 막는다 —
@@ -3216,6 +3244,12 @@ pub fn kinds(all: &[Issue]) -> BTreeMap<&str, Kind> {
 ///   꼴이 되어, 지도를 안 댄 표면이 시험 전부가 푸른 채로 이 구멍을 다시 연다. 여기서는
 ///   [`Kinds::no_twins`] 라는 이름을 적어야 하고, 그 이름을 적는 자리는 **왜 없는지**를
 ///   함께 댄다.
+///
+/// **이제 소속([`stands_in`])만 이것을 받는다**(moai-mibi.rfn). 칸([`column()`]·[`stands_on`])은
+/// 지도의 열쇠가 (종류, id) 라([`GroupKey`]) 가려진 줄이 제 종류로 센 칸을 못 찾아 따로 가를 것이
+/// 없다. 소속은 그렇게 못 푼다 — 제 `epic` 을 적은 가려진 줄은 어느 지도도 안 짚고 답이 서므로,
+/// "가려진 줄은 어느 묶음에도 안 선다"(moai-53s2) 를 지키려면 줄마다 가려짐을 아는 자가 있어야
+/// 한다(2026-09-29 사용자 결정 — 53s2 를 뒤집어 이것까지 걷는 길은 접었다).
 #[derive(Default)]
 pub enum Kinds<'a> {
     /// 쌍둥이가 설 수 없는 자리 — 부르는 쪽이 그 까닭을 댄다([`Kinds::no_twins`]).
@@ -3259,8 +3293,9 @@ impl<'a> Kinds<'a> {
     }
 
     /// **쌍둥이가 설 수 없다고 아는 자리.** 부르는 쪽은 그 까닭을 곁에 적는다 — 지금 서는
-    /// 자리 둘은 `store::with_write` 가 중복 id 에 쓰기를 통째로 물리는 쓰기 경로와,
-    /// `Load::get` 이 늘 뒷줄을 여는 `show <id>` 다. 까닭을 못 대면 지도를 지어야 한다.
+    /// 자리 둘은 `store::with_write` 가 중복 id 에 쓰기를 통째로 물리는 쓰기 경로(`cmd::Row::from`)와,
+    /// `Load::get` 이 늘 뒷줄을 여는 `show <id>` 다. 까닭을 못 대면 지도를 지어야 한다. 칸을 묻는
+    /// 자리의 증인은 걷었다(moai-mibi.rfn, [`GroupKey`]).
     pub const fn no_twins() -> Kinds<'a> {
         Kinds::NoTwins
     }
@@ -3372,7 +3407,7 @@ impl<'a> Soil<'a> {
     }
 
     /// 묶음이 **선 칸과 곁들이**([`group_stands`]) — 여기서만 설정을 본다.
-    pub fn stands<'c>(&self, all: &'a [Issue], cfg: &'c Config) -> BTreeMap<&'a str, Stand<'a, 'c>> {
+    pub fn stands<'c>(&self, all: &'a [Issue], cfg: &'c Config) -> BTreeMap<GroupKey<'a>, Stand<'a, 'c>> {
         group_stands_in(all, cfg, &self.lines, &self.epic, &self.milestone, &self.kinds, &self.shelved)
     }
 }
@@ -3681,13 +3716,13 @@ pub struct Focus<'a> {
 fn running_in<'a>(
     cfg: &Config,
     by_id: &BTreeMap<&'a str, &'a Issue>,
-    stands: &BTreeMap<&'a str, Stand<'a, '_>>,
+    stands: &BTreeMap<GroupKey<'a>, Stand<'a, '_>>,
     out_of_plan: &BTreeSet<&str>,
 ) -> Vec<&'a Issue> {
     stands
         .iter()
-        .filter(|(id, s)| cfg.is_started(s.column) && !out_of_plan.contains(*id))
-        .filter_map(|(id, _)| by_id.get(id).copied())
+        .filter(|((_, id), s)| cfg.is_started(s.column) && !out_of_plan.contains(*id))
+        .filter_map(|((_, id), _)| by_id.get(id).copied())
         .filter(|m| m.kind == Kind::Milestone)
         .collect()
 }
@@ -3766,7 +3801,7 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
     let roots = fold_roots(issues, &off);
     let kind_of = kinds(issues);
     let stands = group_stands_in(issues, cfg, &lines, &group, &mile_of, &kind_of, &off);
-    let progress: BTreeMap<&str, u8> = stands.iter().map(|(id, s)| (*id, s.progress.unwrap_or(0))).collect();
+    let progress: BTreeMap<&str, u8> = stands.iter().map(|((_, id), s)| (*id, s.progress.unwrap_or(0))).collect();
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     let running = match focused {
         true => running_in(cfg, by_id, &stands, &out_of_plan),
@@ -3951,7 +3986,7 @@ fn blocking<'a, 'c>(
     cfg: &'c Config,
     epic_of: &Handing<'a>,
     by_id: &BTreeMap<&'a str, &'a Issue>,
-) -> (Vec<Option<&'a str>>, BTreeMap<&'a str, &'c str>, Waits<'a>, BTreeMap<&'a str, &'a str>) {
+) -> (Vec<Option<&'a str>>, BTreeMap<GroupKey<'a>, &'c str>, Waits<'a>, BTreeMap<&'a str, &'a str>) {
     let shelved = issues.iter().any(is_put_off);
     let by_group =
         issues.iter().any(|i| i.blocked_by.iter().any(|b| by_id.get(b.as_str()).is_some_and(|x| is_group(x))));
@@ -4099,7 +4134,7 @@ fn holding<'a>(
     i: &Issue,
     by_id: &BTreeMap<&str, &'a Issue>,
     out_of_plan: &BTreeSet<&str>,
-    states: &BTreeMap<&str, &str>,
+    states: &BTreeMap<GroupKey<'_>, &str>,
     waits: &Waits<'a>,
 ) -> (Vec<&'a str>, Vec<&'a str>) {
     let (mut by, mut empty): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
@@ -4107,7 +4142,7 @@ fn holding<'a>(
         let id = x.id.as_str();
         let wait = waits.get(id);
         let waiting = wait.map_or(Waiting::Live, |w| w.0);
-        match blocker(Some(column_by_id(x, states)), out_of_plan.contains(id), waiting) {
+        match blocker(Some(column(x, states)), out_of_plan.contains(id), waiting) {
             Blocker::Deferred => {
                 // 묶음을 제가 미뤘으면 그 묶음을 댄다([`blocker`] 와 같은 순서).
                 let named = match wait {
@@ -4173,14 +4208,14 @@ fn holding<'a>(
 fn blocked_since<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&str, &'a Issue>,
-    states: &BTreeMap<&str, &str>,
+    states: &BTreeMap<GroupKey<'_>, &str>,
     waits: &Waits,
     group_since: &BTreeMap<&str, &'a str>,
 ) -> &'a str {
     i.blocked_by
         .iter()
         .filter_map(|b| by_id.get(b.as_str()).copied())
-        .filter(|x| blocker(Some(column_by_id(x, states)), false, waiting_of(&x.id, waits)).blocks())
+        .filter(|x| blocker(Some(column(x, states)), false, waiting_of(&x.id, waits)).blocks())
         .map(|x| match is_group(x) {
             true => group_since.get(x.id.as_str()).copied().unwrap_or(x.created_at.as_str()),
             false => x.status_since.as_str(),
@@ -4714,9 +4749,9 @@ pub fn status_in<'a>(
     let roots = &soil.roots;
     let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
-    let group_since: BTreeMap<&str, &str> = stands.iter().map(|(id, s)| (*id, s.since)).collect();
+    let group_since: BTreeMap<&str, &str> = stands.iter().map(|((_, id), s)| (*id, s.since)).collect();
     // 막대 곁에 댈 미룬 수도 같은 셈에서 받는다([`Stand::deferred`], moai-zxwj).
-    let put_aside: BTreeMap<&str, usize> = stands.iter().map(|(id, s)| (*id, s.deferred)).collect();
+    let put_aside: BTreeMap<&str, usize> = stands.iter().map(|((_, id), s)| (*id, s.deferred)).collect();
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
     // 도는 마일스톤 — `ready` 가 밖의 일을 빼는 자와 **같은 자다**(moai-493a).
     let running = running_in(cfg, &by_id, &stands, &out_of_plan);
@@ -4749,15 +4784,22 @@ pub fn status_in<'a>(
     // **미룬 수도 같은 자리에서 곁들인다**(moai-zxwj) — 막대의 분모는 미룬 멤버를 그대로 세므로
     // (2026-09-21 사용자 결정), 그 수가 안 줄어드는 까닭이 화면에 없으면 읽는 쪽은 `102/110` 에서
     // 여덟이 남은 줄 안다. 칸과 **한 자리에서** 곁들이는 까닭은 둘 다 [`Stand`] 가 세기 때문이다.
-    let stood = |r: Roll| {
-        let column = r.id.as_deref().and_then(|id| states.get(id)).map(|c| c.to_string());
-        let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
-        Roll { column, deferred, ..r }
+    // 굴림 줄은 id 만 든다 — 칸은 **그 굴림의 종류로** 짚는다([`GroupKey`], moai-mibi.rfn).
+    let stood = |kind: Kind| {
+        let (states, put_aside) = (&states, &put_aside);
+        move |r: Roll| {
+            let column = r.id.as_deref().and_then(|id| states.get(&(kind, id))).map(|c| c.to_string());
+            let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
+            Roll { column, deferred, ..r }
+        }
     };
-    let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood).collect();
+    let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(stood(Kind::Epic)).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
-    let stones: Vec<Roll> =
-        rollup_of_in(issues, cfg, &in_stone, &eclipsed).into_iter().filter(|r| r.id.is_some()).map(stood).collect();
+    let stones: Vec<Roll> = rollup_of_in(issues, cfg, &in_stone, &eclipsed)
+        .into_iter()
+        .filter(|r| r.id.is_some())
+        .map(stood(Kind::Milestone))
+        .collect();
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
@@ -5149,7 +5191,9 @@ pub fn status_in<'a>(
             .filter(|i| i.kind == Kind::Milestone)
             .filter(|m| {
                 let id = m.id.as_str();
-                !out_of_plan.contains(id) && !eclipsed(m) && !states.get(id).is_some_and(|c| *c == crate::config::DONE)
+                !out_of_plan.contains(id)
+                    && !eclipsed(m)
+                    && !states.get(&(m.kind, id)).is_some_and(|c| *c == crate::config::DONE)
             })
             .filter_map(|m| m.due_on.as_deref().map(|d| (m.id.clone(), d.to_string())))
             .collect(),
@@ -5223,6 +5267,12 @@ pub fn status_in<'a>(
 mod tests {
     use super::*;
     use crate::model::Status;
+
+    /// 칸 지도를 id 로 편다 — 가려진 묶음 줄은 안 세므로 한 id 에 칸은 하나다([`GroupKey`]).
+    /// 종류를 재는 시험은 이것을 안 쓴다.
+    fn by_id<'a, V>(m: BTreeMap<GroupKey<'a>, V>) -> BTreeMap<&'a str, V> {
+        m.into_iter().map(|((_, id), v)| (id, v)).collect()
+    }
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
@@ -6649,7 +6699,7 @@ mod tests {
         ];
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(got, ["argos-0002.aaa"]);
-        assert_eq!(group_states(&issues, &cfg()).get("argos-0001"), Some(&"in_progress"));
+        assert_eq!(by_id(group_states(&issues, &cfg())).get("argos-0001"), Some(&"in_progress"));
     }
 
     fn kinds(st: &StatusReport) -> Vec<&str> {
@@ -7053,7 +7103,7 @@ mod tests {
     }
 
     fn state_of(issues: &[Issue], id: &str) -> String {
-        group_states(issues, &cfg()).get(id).expect("묶음이 칸을 못 받았다").to_string()
+        by_id(group_states(issues, &cfg())).get(id).expect("묶음이 칸을 못 받았다").to_string()
     }
 
     /// 멤버 칸의 조합마다 한 줄. **손으로 둔 칸은 답에 안 든다** — 에픽 줄을
@@ -7177,7 +7227,7 @@ mod tests {
         ];
         assert_eq!(state_of(&issues, "argos-0009"), "in_progress");
         assert_eq!(state_of(&issues, "argos-0001"), "in_progress", "물려받은 자식을 안 셌다");
-        assert!(!group_states(&issues, &cfg()).contains_key("argos-0002"), "일이 묶음 칸을 받았다");
+        assert!(!by_id(group_states(&issues, &cfg())).contains_key("argos-0002"), "일이 묶음 칸을 받았다");
     }
 
     /// 시작한 칸은 설정에서 온다. 두 칸짜리면 시작했어도 첫 칸이다.
@@ -7189,7 +7239,7 @@ mod tests {
             member("argos-0002", "argos-0001", "done"),
             member("argos-0003", "argos-0001", "open"),
         ];
-        assert_eq!(group_states(&issues, &two).get("argos-0001"), Some(&"open"));
+        assert_eq!(by_id(group_states(&issues, &two)).get("argos-0001"), Some(&"open"));
     }
 
     /// **묶음을 미뤄도 그 밑의 다른 미룸은 그대로다.** 멤버를 빼는 까닭을 가까운
@@ -7265,7 +7315,7 @@ mod tests {
         let cfg = cfg();
         let read = |issues: &[Issue], at: usize| {
             let states = group_states(issues, &cfg);
-            column(&Kinds::of(issues), &issues[at], &states).to_string()
+            column(&issues[at], &states).to_string()
         };
 
         // 뒷줄이 일이다 — 에픽 줄이 가려진다.
@@ -7536,7 +7586,7 @@ mod tests {
         let mut shelved = member("argos-0003", "argos-0001", "todo");
         shelved.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "done"), shelved];
-        let stands = group_stands(&issues, &cfg);
+        let stands = by_id(group_stands(&issues, &cfg));
         assert_eq!(stands["argos-0001"].deferred, 1, "미뤄 뺀 멤버를 안 셌다");
         // 막대는 그 멤버를 분모에 그대로 둔다 — 둘이 갈리는 것이 이 수가 서는 까닭이다.
         let rolls = rollup(&issues, &cfg);
@@ -7546,13 +7596,13 @@ mod tests {
 
         // 미룬 멤버가 없으면 0 이다 — 꼬리가 모든 줄에 붙으면 뜻이 사라진다.
         let plain = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "done")];
-        assert_eq!(group_stands(&plain, &cfg)["argos-0001"].deferred, 0);
+        assert_eq!(by_id(group_stands(&plain, &cfg))["argos-0001"].deferred, 0);
 
         // 묶음 제가 미뤄 멤버가 물려받은 것은 안 센다 — 그 줄은 `put_off` 가 말한다.
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let inherited = vec![epic.clone(), member("argos-0002", "argos-0001", "todo")];
-        assert_eq!(group_stands(&inherited, &cfg)["argos-0001"].deferred, 0, "제 미룸을 멤버의 것인 양 셌다");
+        assert_eq!(by_id(group_stands(&inherited, &cfg))["argos-0001"].deferred, 0, "제 미룸을 멤버의 것인 양 셌다");
 
         // **제 줄도 미뤘는데 멤버 하나가 따로 또 미뤄진 판**(리뷰). `counted` 는 묶음 제 미룸으로
         // 빠진 멤버만 도로 세므로 그 차가 1 인데, 둘 다 계획 밖이다 — 그대로 내면 화면이
@@ -7561,7 +7611,7 @@ mod tests {
         twice.deferred_at = Some("2026-09-02T00:00:00Z".into());
         let both = vec![epic, member("argos-0002", "argos-0001", "todo"), twice];
         assert_eq!(
-            group_stands(&both, &cfg)["argos-0001"].deferred,
+            by_id(group_stands(&both, &cfg))["argos-0001"].deferred,
             0,
             "통째로 계획 밖인 묶음이 멤버 하나만 미뤘다고 말한다"
         );
@@ -7609,7 +7659,8 @@ mod tests {
         let (e, m) = (Handing::of(&issues), milestones(&issues));
         let shelved = shelved_in(&issues, &e, &m);
         let cfg = cfg();
-        let stands = group_stands_in(&issues, &cfg, &Lines::of(&issues), &e, &m, &super::kinds(&issues), &shelved);
+        let stands =
+            by_id(group_stands_in(&issues, &cfg, &Lines::of(&issues), &e, &m, &super::kinds(&issues), &shelved));
         assert_eq!(stands["argos-0001"].since, "2026-09-11T00:00:00Z");
         // 셀 멤버가 없으면 묶음이 생긴 때다 — 안 읽히는 칸의 시각은 안 쓴다.
         assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
@@ -7629,7 +7680,7 @@ mod tests {
             }
             issues
         };
-        let read = |cols: &[&str]| group_states(&rows(cols), &cfg)["argos-0001"].to_string();
+        let read = |cols: &[&str]| by_id(group_states(&rows(cols), &cfg))["argos-0001"].to_string();
         assert_eq!(read(&["in_progress", "todo"]), "in_progress", "시작한 칸을 자리로 골랐다");
         assert_eq!(read(&["review", "done"]), "review");
         assert_eq!(read(&["blocked", "in_progress"]), "blocked");
@@ -7639,13 +7690,13 @@ mod tests {
         assert_eq!(read(&["done", "done"]), "done");
 
         let working = rows(&["in_progress", "todo"]);
-        assert!(group_stands(&working, &cfg)["argos-0001"].busy, "in_progress 멤버가 있는데 안 바쁘다");
+        assert!(by_id(group_stands(&working, &cfg))["argos-0001"].busy, "in_progress 멤버가 있는데 안 바쁘다");
         let resting = rows(&["done", "todo"]);
-        assert!(!group_stands(&resting, &cfg)["argos-0001"].busy, "아무도 손대지 않았는데 바쁘다");
+        assert!(!by_id(group_stands(&resting, &cfg))["argos-0001"].busy, "아무도 손대지 않았는데 바쁘다");
         // 설정에 없는 칸의 멤버는 칸 셈이 못 고르니 바쁨으로도 안 센다 — 세면 묶음이 대신 선
         // 시작 칸에서 도는데 그 밑에 도는 줄이 없다.
         let unknown = rows(&["qa", "todo"]);
-        let stand = &group_stands(&unknown, &cfg)["argos-0001"];
+        let stand = &by_id(group_stands(&unknown, &cfg))["argos-0001"];
         assert_eq!((stand.column, stand.busy), ("blocked", false), "모르는 칸 멤버로 바쁘다고 했다");
     }
 
@@ -7667,7 +7718,7 @@ mod tests {
             member("argos-0007", "argos-0006", "in_progress"),
         ];
         let cfg = cfg();
-        let stands = group_stands(&issues, &cfg);
+        let stands = by_id(group_stands(&issues, &cfg));
         let read = |id: &str| (stands[id].column, stands[id].busy);
         assert_eq!(read("argos-0001"), ("in_progress", false), "반쯤 끝난 에픽을 바쁘다고 한다");
         assert_eq!(read("argos-0004"), ("review", true), "review 멤버의 칸·시작을 잘못 읽었다");
@@ -7676,7 +7727,7 @@ mod tests {
 
         let two = Config::parse("prefix = \"argos\"\nstatuses = \"todo, done\"\n").unwrap();
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "todo")];
-        assert!(!group_stands(&issues, &two)["argos-0001"].busy, "첫 칸 멤버를 집은 것으로 셌다");
+        assert!(!by_id(group_stands(&issues, &two))["argos-0001"].busy, "첫 칸 멤버를 집은 것으로 셌다");
     }
 
     // ── idea 는 일이 아니다 ──────────────────────────────────────────
@@ -8528,6 +8579,28 @@ mod tests {
         assert_eq!(handing.at(&rows[4]), Some("argos-e008"));
     }
 
+    /// **칸 지도의 열쇠는 (종류, id) 다** (moai-mibi.rfn). 마일스톤으로 한 번 에픽으로 한 번 선
+    /// id 에서 가려진 마일스톤 줄은 제 종류로 센 칸이 없어 제 적힌 칸에 서고, 이긴 에픽 줄은 멤버의
+    /// 칸을 입는다 — 종류 지도(`Kinds`)를 곁에 안 대고도. 두 차례를 다 잰다: 이기는 쪽은 뒷줄이다.
+    #[test]
+    fn the_column_map_is_keyed_by_kind_and_id() {
+        let mut member = make("argos-e001.aa1", Kind::Issue, "in_progress");
+        member.epic = Some("argos-e001".into());
+        let cfg = cfg();
+        for (first, second) in [(Kind::Milestone, Kind::Epic), (Kind::Epic, Kind::Milestone)] {
+            let rows = vec![make("argos-e001", first, "todo"), make("argos-e001", second, "todo"), member.clone()];
+            let states = group_states(&rows, &cfg);
+            assert_eq!(states.keys().collect::<Vec<_>>(), [&(second, "argos-e001")], "가려진 줄의 칸을 셌다");
+            let (loser, winner) = (&rows[0], &rows[1]);
+            assert_eq!(column(loser, &states), "todo", "{first:?} 앞줄이 쌍둥이의 칸을 입었다");
+            assert_eq!(stands_on(loser, |k| states.get(&k).copied()), None);
+            let want = if second == Kind::Epic { "in_progress" } else { "todo" };
+            assert_eq!(column(winner, &states), want, "{second:?} 뒷줄이 제 칸을 잃었다");
+            // 일 줄은 묶음 칸을 안 입는다 — 같은 id 가 아니어도 열쇠의 종류가 막는다.
+            assert_eq!(column(&rows[2], &states), "in_progress");
+        }
+    }
+
     /// **가려진 줄은 `derived_epic` 도 안 단다** (moai-53s2, 2026-09-23 사용자 결정).
     /// 소속 지도는 id 로 짠 것이라 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을
     /// `(길 잃음)` 에 두고 `-e` 도 `-e none` 도 안 고르며 롤업은 어느 묶음에도 안 센다 —
@@ -8693,7 +8766,7 @@ mod tests {
         let mut direct = make("argos-0005", Kind::Issue, "todo");
         direct.blocked_by = vec!["argos-0003".into()];
         let issues = vec![epic, member("argos-0002", "argos-0001", "done"), rest, through, direct];
-        assert_eq!(group_states(&issues, &cfg()).get("argos-0001"), Some(&"done"), "칸 셈은 그대로다");
+        assert_eq!(by_id(group_states(&issues, &cfg())).get("argos-0001"), Some(&"done"), "칸 셈은 그대로다");
         assert!(picks(&issues).is_empty(), "미룬 멤버 너머로 막힌 줄을 집으라고 내민다 — {:?}", picks(&issues));
 
         let held = held(&issues, &cfg());
