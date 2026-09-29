@@ -396,8 +396,10 @@ fn unpair<'s>(o: &mut Keyed<'s>, a: &mut Keyed<'s>, b: &mut Keyed<'s>) {
     let (ours, theirs) = (loosened(&base, o, a, b), loosened(&base, o, b, a));
     demote(a, &ours);
     demote(b, &theirs);
-    demote(o, &ours);
-    demote(o, &theirs);
+    // **바탕은 두 쪽의 것을 한 번에 id 차례로 거둔다**(moai-mo9v.qgj). 이쪽 것을 먼저 거두면 바탕의
+    // 못 읽는 줄 차례가 머지 방향을 따라 갈리고, [`unkeyed`] 가 그 차례로 줄을 낸다.
+    let all: BTreeSet<String> = ours.into_iter().chain(theirs).collect();
+    demote(o, &all.into_iter().collect::<Vec<_>>());
 }
 
 /// **이 줄은 화면 말을 모른다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 병합마다 부르는 길이라
@@ -545,11 +547,15 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
 /// 열쇠 없이 지킬 수 있는 전부다. id 가 읽히는 줄은 [`keyed`] 가 짝지어 그 판을 [`settle`] 로
 /// 보내고, 거기서는 표식이 그 줄에만 선다.
 ///
-/// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 이쪽이 더한 줄, 저쪽이
-/// 더한 줄이 뒤따른다. 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다.
-/// 잃는 것은 없고(줄은 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지
-/// 커밋에 한 번 뜬다.
+/// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 두 쪽이 더한 줄이 뒤따른다.
+/// 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다. 잃는 것은 없고(줄은
+/// 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지 커밋에 한 번 뜬다.
+///
+/// **더한 줄은 이쪽 것이 먼저가 아니다**(moai-mo9v.qgj). 두 쪽 가운데 못 읽는 줄 목록이 사전순으로
+/// 앞서는 쪽의 것이 먼저 선다 — 이쪽을 먼저 세우던 판은 두 쪽이 다 더한 판에서 머지 방향에 따라
+/// 바이트를 갈랐다. 한 쪽이 더한 줄끼리의 차례는 그 쪽의 것 그대로다.
 fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
+    let (a, b) = if a <= b { (a, b) } else { (b, a) };
     let (co, ca, cb) = (tally(o), tally(a), tally(b));
     let at = |m: &BTreeMap<&'s str, usize>, l: &'s str| m.get(l).copied().unwrap_or(0);
     let mut want = BTreeMap::new();
@@ -570,6 +576,11 @@ fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
             out.push(*l);
         }
     }
+    // **다음 머지가 열쇠를 줄 줄이 앞에 선다**(moai-mo9v.qgj). 여기 오는 줄 가운데 머리가 긁히는
+    // 것은 [`unpair`] 가 열쇠를 거둔 줄뿐인데, 다음 머지는 그 줄을 다시 짝지어 이 칸보다 앞의
+    // `carried` 로 낸다. 이쪽 줄을 먼저 세우던 판은 그 줄이 우연히 앞에 서서 고정점이었고, 차례를
+    // 방향에서 떼자 뒤에 서는 판이 생겼다. 안정 정렬이라 같은 갈래 안의 차례는 그대로다.
+    out.sort_by_cached_key(|l| row(l).is_none());
     out
 }
 
@@ -702,7 +713,7 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
             && rows_alike(o, x)
             && rows_alike(o, y)
         {
-            return Settled::Each(x.iter().map(&take).collect());
+            return Settled::Each(both_kept(o, x, y).into_iter().map(&take).collect());
         }
         return clash();
     }
@@ -718,8 +729,12 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
         // 지운 쪽과 고친 쪽이 맞선다.
         (Some(_), _, None) | (Some(_), None, _) => clash(),
         (o, Some(x), Some(y)) => {
-            // 둘이 같거나 저쪽이 안 건드렸으면 이쪽 값이 답이다.
-            if alike(x, y) || same(o, y) {
+            // 둘이 같으면 바이트는 [`kept`] 가 방향 없이 고른다(moai-mo9v.qgj).
+            if alike(x, y) {
+                return take(kept(o, x, y));
+            }
+            // 저쪽이 안 건드렸으면 이쪽 값이 답이다.
+            if same(o, y) {
                 return take(x);
             }
             if same(o, x) {
@@ -733,6 +748,63 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
             fields(o, x, y).map_or_else(clash, |v| built(&v))
         }
     }
+}
+
+/// 값이 같은 두 줄 가운데 **바이트를 낼 쪽** — 머지 방향과 상관없이 같은 줄을 고른다(moai-mo9v.qgj,
+/// 2026-09-29 사용자 결정).
+///
+/// 읽히는 줄은 [`shaped`] 가 표준형으로 다시 지으므로 어느 쪽을 골라도 바이트가 같다. 갈리는 것은
+/// [`settle`] 의 `take` 가 원문 그대로 싣는 못 읽는 줄이다 — [`alike`] 는 값(`Read::Json`)이나 꼬리
+/// 흰 글자를 뗀 원문(`Read::Broken`)으로 견주므로, 키 차례나 꼬리 빈칸만 다른 두 줄이 "같다" 로
+/// 읽힌다. 늘 이쪽 것을 고르던 판은 `A` 에서 `B` 를 합친 것과 `B` 에서 `A` 를 합친 것의 바이트가
+/// 갈랐다(idea moai-y1vb).
+///
+/// **바이트로 3-way 를 돌린다.** 바탕과 바이트가 같은 쪽은 바이트를 안 건드린 쪽이니 다른 쪽의
+/// 바이트가 답이다 — 읽히는 줄에서 "한쪽만 고쳤다" 를 푸는 것과 같은 자다. 두 쪽이 다 바꿨으면
+/// 바이트 사전순으로 작은 쪽이다. 그 줄을 다시 짓지 않는 것은 남이 남긴 줄의 바이트를 병합이
+/// 고치지 않기 위해서다 — `store::with_write` 도 그 줄을 원문 그대로 되쓴다.
+fn kept<'r, 's>(o: Option<&Row<'_>>, x: &'r Row<'s>, y: &'r Row<'s>) -> &'r Row<'s> {
+    if x.raw == y.raw {
+        return x;
+    }
+    match o.map(|o| o.raw) {
+        Some(was) if was == x.raw => y,
+        Some(was) if was == y.raw => x,
+        _ => std::cmp::min_by(x, y, |p, q| p.raw.cmp(q.raw)),
+    }
+}
+
+/// 세 쪽이 한 id 로 같은 줄들을 든 판([`rows_alike`])에서 **낼 줄들** — [`kept`] 를 줄마다 돌린다.
+///
+/// 두 쪽이 바이트까지 같으면 이쪽 차례 그대로다. 아니면 **바탕의 차례로** 짝을 짓는다: 이쪽과
+/// 저쪽을 저마다 바탕에 맞추므로 두 쪽을 바꿔 넘겨도 짝이 안 바뀐다. 짝은 바이트가 같은 줄부터
+/// 짓고 남은 것을 [`alike`] 로 짓는다 — 값만 같은 줄을 먼저 집으면 바이트까지 같은 짝을 놓친다.
+fn both_kept<'r, 's>(o: &'r [Row<'s>], x: &'r [Row<'s>], y: &'r [Row<'s>]) -> Vec<&'r Row<'s>> {
+    if x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.raw == q.raw) {
+        return x.iter().collect();
+    }
+    /// 바탕의 줄마다 그 쪽에서 짝지은 줄의 자리.
+    fn paired(o: &[Row<'_>], side: &[Row<'_>]) -> Vec<usize> {
+        let mut taken = vec![false; side.len()];
+        let mut at = vec![usize::MAX; o.len()];
+        for exact in [true, false] {
+            for (k, was) in o.iter().enumerate() {
+                if at[k] != usize::MAX {
+                    continue;
+                }
+                let hit = (0..side.len()).find(|i| {
+                    !taken[*i] && if exact { side[*i].raw == was.raw } else { alike(was, &side[*i]) }
+                });
+                if let Some(i) = hit {
+                    taken[i] = true;
+                    at[k] = i;
+                }
+            }
+        }
+        at
+    }
+    let (px, py) = (paired(o, x), paired(o, y));
+    o.iter().zip(px.into_iter().zip(py)).map(|(was, (i, j))| kept(Some(was), &x[i], &y[j])).collect()
 }
 
 /// 이슈로 읽고 **표준형으로 맞추기만 한다** — 검사는 [`issue`] 가 얹는다.
@@ -2508,6 +2580,83 @@ mod tests {
         assert_eq!(ours, theirs, "머지 방향이 답을 가른다");
         assert!(ours.contains("\"status\":\"in_progress\""), "고친 쪽 값이 안 섰다\n{ours}");
         assert!(ours.contains("\"due_on\":\"2026-09-20\""), "낡은 값이 사라졌다\n{ours}");
+    }
+
+    /// 두 방향으로 합쳐 **바이트가 같은가**를 재고 그 답을 낸다. 충돌이 서면 방향에 따라 표식의
+    /// 두 칸이 뒤바뀌는 것이 맞으므로 여기서는 충돌 없는 판만 잰다.
+    fn both_ways(o: &str, a: &str, b: &str) -> String {
+        let (ours, clashes) = merge(o, a, b);
+        assert!(clashes.is_empty(), "{clashes:?}\n{ours}");
+        let (theirs, clashes) = merge(o, b, a);
+        assert!(clashes.is_empty(), "{clashes:?}\n{theirs}");
+        assert_eq!(ours, theirs, "머지 방향이 바이트를 가른다");
+        ours
+    }
+
+    /// **값이 같고 바이트만 다른 못 읽는 줄은 방향 없이 한 바이트를 낸다**(moai-mo9v.qgj).
+    /// 한쪽만 바이트를 바꿨으면 그 쪽 것이다 — 바이트로 돌린 3-way 다. 원문을 그대로 싣던 판은
+    /// `x.v == y.v` 갈래에서 늘 이쪽 것을 골라, 두 방향이 서로 다른 파일을 냈다(idea moai-y1vb).
+    #[test]
+    fn an_unreadable_line_one_side_reordered_merges_the_same_both_ways() {
+        // `title` 이 글이 아니라 `Issue` 로는 못 읽고 JSON 으로는 읽힌다(`Read::Json`).
+        let was = "{\"id\":\"argos-0009\",\"title\":5}";
+        let now = "{\"title\":5,\"id\":\"argos-0009\"}";
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let a = format!("{live}\n{now}\n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(now), "바이트를 바꾼 쪽 것이 안 섰다\n{text}");
+        assert!(!text.contains(was), "바이트를 안 바꾼 쪽 것이 섰다\n{text}");
+    }
+
+    /// 두 쪽이 **다 바이트를 바꿨으면** 사전순으로 작은 쪽이다. 어느 쪽이 나아서가 아니라, 방향이
+    /// 답을 가르지 않게 하는 자가 그것이다. 줄을 다시 짓지는 않는다.
+    #[test]
+    fn an_unreadable_line_both_sides_rebyted_picks_the_smaller_bytes() {
+        let was = "{\"id\":\"argos-0009\",\"title\":5}";
+        let one = "{\"title\":5,\"id\":\"argos-0009\"}";
+        let two = "{\"id\":\"argos-0009\",  \"title\":5}";
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let text = both_ways(&o, &format!("{live}\n{one}\n"), &format!("{live}\n{two}\n"));
+        assert!(text.contains(two.min(one)), "사전순으로 작은 쪽이 안 섰다\n{text}");
+        assert!(!text.contains(two.max(one)), "두 벌이 다 섰다\n{text}");
+    }
+
+    /// JSON 조차 아닌 줄(`Read::Broken`)은 꼬리 흰 글자를 떼고 견준다([`alike`]). 그 빈칸만
+    /// 다른 두 줄도 방향 없이 한 바이트를 낸다.
+    #[test]
+    fn a_broken_line_with_a_trailing_blank_merges_the_same_both_ways() {
+        let was = "{\"id\":\"argos-0009\",\"title\":\"잘";
+        let now = format!("{was}  ");
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let a = format!("{live}\n{now}\n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(&now), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+    }
+
+    /// 산 줄과 그 줄의 깨진 쌍둥이가 선 판([`Settled::Each`])도 같다. 한쪽이 쌍둥이의 꼬리에
+    /// 빈칸만 더했으면 그 쪽 바이트가 선다.
+    #[test]
+    fn a_twin_file_merges_the_same_both_ways() {
+        let live = line("argos-0001", "");
+        let twin = "{\"id\":\"argos-0001\",\"title\":\"잘";
+        let o = format!("{live}\n{twin}\n");
+        let a = format!("{live}\n{twin} \n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(&format!("{twin} \n")), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+    }
+
+    /// 열쇠 없는 줄을 **두 쪽이 저마다 더했으면** 차례가 방향을 안 따른다([`unkeyed`]).
+    #[test]
+    fn unkeyed_lines_both_sides_added_merge_the_same_both_ways() {
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n");
+        let a = format!("{live}\n[\"이쪽\"]\n");
+        let b = format!("{live}\n[\"저쪽\"]\n");
+        let text = both_ways(&o, &a, &b);
+        assert!(text.contains("[\"이쪽\"]") && text.contains("[\"저쪽\"]"), "더한 줄이 빠졌다\n{text}");
     }
 
     /// **지나 보내는 줄도 표준형으로 맞춘다**([`shaped`], 리뷰 moai-85o3.p4w). 건너뛰는 것은
