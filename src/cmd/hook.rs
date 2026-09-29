@@ -526,8 +526,11 @@ fn picks_dir(repo: &Repo) -> Option<PathBuf> {
 /// 규칙 2 를 껐다. 옮길 루트가 있는데([`crate::worktree::tracker_root`]) 이 뿌리가 거기 없다는 것이
 /// 곧 갈라 놓은 트래커다. 맨몸 저장소의 워크트리는 옮길 루트가 없어 전처럼 한 자리를 함께 쓴다.
 fn picks_key(root: &Path) -> u64 {
-    let apart = crate::worktree::tracker_root(root).is_some();
-    match crate::worktree::tracker_place(root).filter(|_| !apart) {
+    let shared = match crate::worktree::tracker_root(root) {
+        Some(_) => None,
+        None => crate::worktree::tracker_place(root),
+    };
+    match shared {
         Some((common, rel)) => crate::text::fnv1a64_from(
             crate::text::fnv1a64_from(crate::text::fnv1a64(common.as_os_str().as_encoded_bytes()), &[0]),
             rel.as_os_str().as_encoded_bytes(),
@@ -544,9 +547,20 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     }
     let Some(sid) = safe_sid(input) else { return };
     let Some(dir) = picks_dir(repo) else { return };
+    let Some(home) = dir.parent() else { return };
+    // **남이 못 쓰는 자리에 짓는다**(리뷰 moai-59k3.4c3) — 설정 디렉터리가 그룹에 열려 있고 umask 가
+    // `002` 면 같은 그룹이 기록을 심어 temp 에서 막으려던 것이 그대로 돌아온다. `read_marks` 와 같이
+    // **처음 지을 때만** 닫는다 — 사람이 나중에 연 권한을 쓰기마다 되돌리지 않는다.
+    let fresh = !home.exists();
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
+    #[cfg(unix)]
+    if fresh {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700));
+    }
+    let _ = fresh;
     // **벽시계로 적는다 — `model::now` 가 아니다.** 그쪽은 `MOAI_NOW` 로 멈춰 초 단위라, 두 세션의
     // 집기가 같은 때로 서서 누가 마지막인지 못 가린다. 이 기록은 트래커가 아니라 이 기계의 표다.
     let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else { return };
@@ -554,31 +568,53 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     // 줄의 칸 시각(`status_since`)과 견줄 때는 같은 시계로 잰다 — `MOAI_NOW` 가 서면 그것이다.
     let stamp = crate::model::parse_rfc3339(&model::now());
     let lines: String = ids.iter().map(|(id, sure)| crate::hook::Picks::line(now, stamp, id, *sure)).collect();
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(&sid)) {
+    let mut open = std::fs::OpenOptions::new();
+    open.create(true).append(true);
+    // **링크를 따라 쓰지 않는다**(리뷰 moai-59k3.4c3) — 심어 둔 링크 하나가 남의 파일에 이 줄을 덧붙인다.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut open, libc::O_NOFOLLOW);
+    if let Ok(mut f) = open.open(dir.join(&sid)) {
         let _ = f.write_all(lines.as_bytes());
     }
-    prune_picks(&dir, &sid);
+    prune_picks(home, &dir, &sid);
 }
 
 /// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 읽는 쪽([`read_picks`])은 판정마다 이 디렉터리를
 /// 통째로 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 두 주 넘게
 /// 한 줄도 안 적은 세션의 기록을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다. 적을 때만 치운다 — 드물다.
-fn prune_picks(dir: &Path, sid: &str) {
+///
+/// **다른 트래커의 자리도 치운다**(리뷰 moai-59k3.4c3). temp 에 둘 때는 기계가 치웠지만 설정 곁은 아무도
+/// 안 치운다 — 지운 워크트리·옮긴 저장소의 자리는 다시 안 적혀, 제 자리만 치우던 판에서는 영영 남았다.
+/// 옆 자리는 오래된 기록만 지우고, 빈 디렉터리는 걷는다(`remove_dir` 는 빈 것만 지운다).
+fn prune_picks(home: &Path, dir: &Path, sid: &str) {
     const KEEP: std::time::Duration = std::time::Duration::from_secs(14 * 24 * 60 * 60);
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.filter_map(Result::ok) {
-        if entry.file_name() == sid {
-            continue;
-        }
-        let stale = entry
+    let stale = |entry: &std::fs::DirEntry| {
+        entry
             .metadata()
             .ok()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > KEEP);
-        if stale {
-            let _ = std::fs::remove_file(entry.path());
+            .is_some_and(|age| age > KEEP)
+    };
+    let sweep = |at: &Path, keep: Option<&str>| {
+        let Ok(entries) = std::fs::read_dir(at) else { return };
+        for entry in entries.filter_map(Result::ok) {
+            if keep.is_some_and(|k| entry.file_name() == k) {
+                continue;
+            }
+            if stale(&entry) {
+                let _ = std::fs::remove_file(entry.path());
+            }
         }
+    };
+    sweep(dir, Some(sid));
+    let Ok(others) = std::fs::read_dir(home) else { return };
+    for entry in others.filter_map(Result::ok) {
+        if entry.path() == dir || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        sweep(&entry.path(), None);
+        let _ = std::fs::remove_dir(entry.path());
     }
 }
 
@@ -587,8 +623,9 @@ fn prune_picks(dir: &Path, sid: &str) {
 fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hook::Picks {
     let Some(me) = safe_sid(input) else { return Default::default() };
     let Some(Ok(dir)) = picks_dir(repo).map(std::fs::read_dir) else { return Default::default() };
-    // **보통 파일만 읽는다** — 한때 임시 디렉터리였고 지금도 손으로 놓을 수 있는 자리라 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의
-    // 파일을 읽힌다(리뷰 moai-3k2d.1df). 적는 쪽은 보통 파일만 만든다.
+    // **보통 파일만 읽는다** — 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의 파일을
+    // 읽힌다(리뷰 moai-3k2d.1df). 설정 곁으로 옮긴 뒤에도 손으로 놓을 수 있는 자리라 그대로 둔다.
+    // 적는 쪽은 보통 파일만 만든다.
     let files =
         dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
             let text = std::fs::read_to_string(entry.path()).ok()?;

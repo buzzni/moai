@@ -12432,6 +12432,7 @@ fn pick_dirs(s: &Scratch) -> Vec<PathBuf> {
 /// 값을 내지만 보는 스냅샷이 달라, 한 자리에 적던 판은 루트의 집기가 워크트리의 `held()` 를 채워
 /// 규칙 2 를 껐다. 옮겨 가는 워크트리(맨 `moai`)는 루트와 같은 자리다 — 집기는 루트에서 치고 일은
 /// 워크트리에서 한다.
+#[cfg(unix)]
 #[test]
 fn pick_records_sit_beside_the_user_config_one_per_tracker() {
     let s = Scratch::new("hookpickhome");
@@ -12462,6 +12463,21 @@ fn pick_records_sit_beside_the_user_config_one_per_tracker() {
         .filter(|e| e.file_name().to_string_lossy().starts_with("moai-picks-"))
         .collect();
     assert!(temp.is_empty(), "temp 에 아직 적는다 — {temp:?}");
+    // **남이 못 쓰는 자리다**(리뷰 moai-59k3.4c3) — 그룹에 열린 설정 디렉터리에서도 기록 자리는 닫힌다.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(s.path().join("hookcfg/picks")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "기록 자리를 남에게 열어 뒀다 — {mode:o}");
+    }
+    // **심어 둔 링크를 따라 쓰지 않는다** — 따라 쓰면 남의 파일에 이 세션의 줄이 붙는다.
+    let bait = s.path().join("bait");
+    std::fs::write(&bait, "").unwrap();
+    std::fs::remove_file(root[0].join("s2")).ok();
+    std::os::unix::fs::symlink(&bait, root[0].join("s2")).unwrap();
+    let as_s2 = input(&main).replace("\"s1\"", "\"s2\"");
+    assert!(hook_in(&s, &main, "pre-tool-use", &as_s2).stdout.is_empty());
+    assert!(std::fs::read_to_string(&bait).unwrap().is_empty(), "심어 둔 링크를 따라 썼다");
+    std::fs::remove_file(root[0].join("s2")).unwrap();
 
     // 옮겨 가는 워크트리는 루트와 한 자리다.
     assert!(hook_in(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
@@ -12498,13 +12514,27 @@ fn old_pick_records_are_pruned_when_a_new_pick_is_written() {
     };
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
     let dir = pick_dirs(&s).pop().expect("집기를 안 적었다");
-    let old = dir.join("gone");
-    std::fs::write(&old, format!("1\t{id}\n")).unwrap();
     let weeks = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 24 * 60 * 60);
-    std::fs::File::options().write(true).open(&old).unwrap().set_modified(weeks).unwrap();
+    let aged = |path: &Path| {
+        std::fs::write(path, format!("1\t{id}\n")).unwrap();
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(weeks).unwrap();
+    };
+    let old = dir.join("gone");
+    aged(&old);
+    // **다시 안 적힐 트래커의 자리도 걷힌다**(리뷰 moai-59k3.4c3) — 지운 워크트리·옮긴 저장소의 자리다.
+    // 오래되지 않은 기록이 든 옆 자리는 그대로다.
+    let home = dir.parent().unwrap();
+    let orphan = home.join("00000000000000aa");
+    std::fs::create_dir_all(&orphan).unwrap();
+    aged(&orphan.join("left"));
+    let alive = home.join("00000000000000bb");
+    std::fs::create_dir_all(&alive).unwrap();
+    std::fs::write(alive.join("now"), format!("1\t{id}\n")).unwrap();
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
     assert!(!old.exists(), "두 주 넘게 안 적힌 세션의 기록이 남았다");
     assert!(dir.join("fresh").exists(), "제 기록까지 지웠다");
+    assert!(!orphan.exists(), "다시 안 적힐 트래커의 자리가 남았다");
+    assert!(alive.join("now").exists(), "옆 트래커의 새 기록까지 지웠다");
 }
 
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
@@ -17094,14 +17124,12 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
 /// 프로젝트마다 git 을 부르는데(`check-attr`·`config`), 그 부름에 시간 상한이 없어 한 줄이 멈추면
 /// 줄마다 띄운 실을 전부 기다리는 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다.
 ///
-/// 죽은 마운트는 `PATH` 앞에 세운 가짜 git 이 대신한다 — 그 프로젝트를 가리킨 부름만 잠든다.
+/// 죽은 마운트는 `PATH` 앞에 세운 가짜 git 이 대신한다 — 그 프로젝트를 가리킨 부름만 잠든다. 잠든
+/// 부름이 정말 섰는지도 본다: 가짜 git 을 못 띄우면(ETXTBSY) 시험이 한도를 안 밟고 초록이 된다.
 #[cfg(unix)]
 #[test]
 fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
-    use std::os::unix::fs::PermissionsExt;
     let s = Scratch::new("hungmount");
-    let config = s.path().join("user/config.toml");
-    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     let live = s.path().join("live");
     let dead = s.path().join("dead");
     for (dir, title) in [(&live, "살아 있는 일"), (&dead, "잠든 일")] {
@@ -17109,32 +17137,24 @@ fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
         git(dir, &["init", "-q"]);
         ok(dir, &["init", "argos"]);
         ok(dir, &["add", title]);
-        let out = staged(&["project", "add", &dir.display().to_string()])
-            .current_dir(dir)
-            .env("MOAI_CONFIG", &config)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
-    let real = std::env::split_paths(&path_without_moai())
-        .map(|d| d.join("git"))
-        .find(|g| g.is_file())
-        .expect("git 을 못 찾았다");
+    let config = registry(&s, &[&live, &dead]);
+    let kept = path_without_moai();
+    let real = std::env::split_paths(&kept).map(|d| d.join("git")).find(|g| g.is_file()).expect("git 을 못 찾았다");
     let bin = s.path().join("fakebin");
     std::fs::create_dir_all(&bin).unwrap();
-    let fake = bin.join("git");
-    std::fs::write(
-        &fake,
-        format!(
-            "#!/bin/sh\ncase \"$*\" in *{}*) exec sleep 30;; esac\nexec {} \"$@\"\n",
+    let slept = s.path().join("slept");
+    write_exe(
+        &bin.join("git"),
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *{}*) : > '{}'; exec sleep 30;; esac\nexec {} \"$@\"\n",
             dead.display(),
+            slept.display(),
             real.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let mut path = vec![bin];
-    path.extend(std::env::split_paths(&path_without_moai()));
+    path.extend(std::env::split_paths(&kept));
 
     let outside = s.path().join("outside");
     std::fs::create_dir_all(&outside).unwrap();
@@ -17150,6 +17170,7 @@ fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(took < std::time::Duration::from_secs(20), "잠든 프로젝트가 한눈 보기를 붙들었다 — {took:?}\n{said}");
     assert!(said.contains("live") && said.contains("dead"), "프로젝트 한 줄을 빠뜨렸다\n{said}");
+    assert!(slept.exists(), "잠든 git 이 한 번도 안 불렸다 — 한도를 안 밟았다\n{said}");
 }
 
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).

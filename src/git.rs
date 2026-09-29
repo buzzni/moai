@@ -159,7 +159,12 @@ fn cut_paths(s: &str) -> String {
 /// 한글 제목 한 줄이 깨져 — ASCII 제목까지 같이 — 커밋 칸이 통째로 빌 수 있다. 그래도 깨진 채로
 /// 오는 이력은 [`stream_log`] 가 관대하게 읽는다.
 fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Error> {
-    let out = invocation(root, args).output().map_err(Error::Spawn)?;
+    finished(invocation(root, args))
+}
+
+/// 띄울 명령을 **끝까지 기다려** 받는다 — [`output`] 과 한도 없는 [`finish_within`] 이 함께 쓴다.
+fn finished(mut cmd: std::process::Command) -> Result<Vec<u8>, Error> {
+    let out = cmd.output().map_err(Error::Spawn)?;
     if !out.status.success() {
         return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
     }
@@ -186,70 +191,96 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
 }
 
-/// [`run`] 과 같되 **`budget` 안에 안 끝나면 기다리지 않는다** — 그 판은 `None` 이다(moai-59k3.u09).
+/// [`run`] 과 같되 **`budget` 안에 안 끝나면 기다리지 않는다** — 그때는 `None` 이다(moai-59k3.u09).
+/// `budget` 이 없으면 [`run`] 처럼 끝까지 기다리고, 답은 늘 `Some` 이다.
 ///
-/// `Command::output` 에는 시간 상한이 없어, 등록한 프로젝트 하나가 죽은 sshfs·NFS 마운트에 있으면
-/// 그 자리에 대고 부른 git 이 영영 안 끝났다. 한눈 보기(`projects::each`)는 줄마다 실을 띄우고 전부
-/// 기다리므로, 그 한 줄이 나머지 프로젝트의 보드까지 한 줄도 안 내고 붙들었다.
+/// `Command::output` 에는 시간 상한이 없어, 부른 git 이 답하지 않으면 영영 안 끝났다. 한눈
+/// 보기(`projects::each`)는 줄마다 실을 띄우고 전부 기다리므로, 그 한 줄이 나머지 프로젝트의 보드까지
+/// 한 줄도 안 내고 붙들었다. **이 한도가 막는 것은 git 만 멈춘 경우다**(리뷰 moai-59k3.4c3) — 설정의
+/// `include`·`core.attributesFile` 이 죽은 sshfs·NFS 마운트를 가리키는 때가 그렇다. 프로젝트 디렉터리째
+/// 죽은 마운트는 moai 가 제 손으로 여는 파일(`Repo::open`·`.moai`·`AGENTS.md`)에서 먼저 멈추고, 이
+/// 한도는 거기에 안 닿는다.
 ///
-/// **모든 git 부름의 계약을 바꾸지 않는다.** 여기로 오는 것은 답을 몰라도 입을 다물면 되는
+/// **모든 git 부름의 계약을 바꾸지 않는다.** 한도를 주는 것은 답을 몰라도 입을 다물면 되는
 /// 물음뿐이다 — 병합 드라이버 알림의 셋이 그렇다. 이력·워크트리처럼 답이 곧 화면인 부름에
 /// 마감을 두면 느린 기계에서 멀쩡한 줄이 말없이 빈다.
+///
+/// **같은 물음이라도 한도는 부르는 자리가 정한다**(리뷰 moai-59k3.4c3). `merge_driver::declared` 는
+/// 알림에서는 모르면 입을 다물면 되지만, `moai init` 이 드라이버를 심을지 가르는 자리에서 모르는 것을
+/// "안 걸었다" 로 접으면 심을 드라이버를 말없이 안 심고 `init --check` 는 `off` 를 낸다. 사람이 친
+/// 명령의 답이라 그 둘은 `None` 으로 끝까지 기다린다 — 이 에픽 전과 같다.
 ///
 /// 표준 출력과 오류도 마감 안에서만 기다린다 — git 이 끝났어도 파이프를 쥔 손자가 있으면 읽기가
 /// 안 끝나기 때문이다. 넘긴 git 은 죽이고, **거두는 일은 딴 실로 보낸다**: 죽은 마운트에 걸린
 /// 프로세스는 SIGKILL 을 받고도 커널 안에서 한참 안 끝날 수 있어, 여기서 `wait` 하면 마감이 샌다.
-pub fn run_within(root: &Path, args: &[&str], budget: std::time::Duration) -> Option<Result<String, Error>> {
-    finish_within(invocation(root, args), budget).map(|r| r.and_then(|b| String::from_utf8(b).map_err(Error::NotUtf8)))
+pub fn run_within(root: &Path, args: &[&str], budget: Option<std::time::Duration>) -> Option<Result<String, Error>> {
+    finish_within(invocation(root, args), budget)
 }
 
-/// 띄운 명령을 `budget` 안에서 끝까지 받는다 — [`run_within`] 과 [`run_reading_user_config`] 의 몸통.
-fn finish_within(mut cmd: std::process::Command, budget: std::time::Duration) -> Option<Result<Vec<u8>, Error>> {
-    use std::io::Read;
+/// 띄울 명령을 `budget` 안에서 끝까지 받아 글로 푼다 — [`run_within`] 과 [`run_reading_user_config`]
+/// 의 몸통이다. `budget` 이 없으면 [`finished`] 로 끝까지 기다린다.
+///
+/// **파이프가 닫히기를 먼저 기다린다**(리뷰 moai-59k3.4c3). git 이 끝나면 파이프도 곧 닫히므로 늦게
+/// 깨지 않는다 — 끝을 먼저 기다리던 때는 [`waited`] 가 자는 간격만큼 늦게 알았다(부를 때마다 1~2ms).
+/// 한도는 띄우기 전에 한 번 세고, 셋이 그 하나를 나눠 쓴다.
+///
+/// **실을 못 띄워도 넘어지지 않는다**(리뷰 moai-59k3.4c3). `std::thread::spawn` 은 OS 가 실을 못 내면
+/// 부른 실에서 패닉하는데, 여기는 `moai status` 와 훅의 보드가 지나는 길이라 둘이 101 로 끝났다 —
+/// `projects::each` 가 실을 못 띄우면 그 자리에서 부르는 길도 여기서 무너졌다. [`std::thread::Builder`]
+/// 로 띄우고(`latest::spawn` 과 같은 자), 파이프를 비울 실을 못 띄우면 git 을 죽이고 모르는 것(`None`)
+/// 으로 접는다. 거둘 실을 못 띄우면 안 거두고 간다 — 좀비는 이 프로세스가 끝날 때 걷힌다.
+fn finish_within(mut cmd: std::process::Command, budget: Option<std::time::Duration>) -> Option<Result<String, Error>> {
     use std::process::Stdio;
-    let deadline = std::time::Instant::now() + budget;
+    use std::time::Instant;
+    let text = |out: Vec<u8>| String::from_utf8(out).map_err(Error::NotUtf8);
+    let Some(budget) = budget else { return Some(finished(cmd).and_then(text)) };
+    let deadline = Instant::now() + budget;
+    let left = || deadline.saturating_duration_since(Instant::now());
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(e) => return Some(Err(Error::Spawn(e))),
     };
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            let _ = tx.send(buf);
-        });
-        rx
-    };
-    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let received = waited(&mut child, budget).and_then(|status| {
-        let left = || deadline.saturating_duration_since(std::time::Instant::now());
+    let received = drained(child.stdout.take()).zip(drained(child.stderr.take())).and_then(|(out, err)| {
         let stdout = out.recv_timeout(left()).ok()?;
         let stderr = err.recv_timeout(left()).ok()?;
-        Some((status, stdout, stderr))
+        Some((waited(&mut child, left())?, stdout, stderr))
     });
     let Some((status, stdout, stderr)) = received else {
         let _ = child.kill();
-        std::thread::spawn(move || child.wait());
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
         return None;
     };
     if !status.success() {
         return Some(Err(Error::Failed(String::from_utf8_lossy(&stderr).trim().to_string())));
     }
-    Some(Ok(stdout))
+    Some(text(stdout))
+}
+
+/// 파이프 하나를 **딴 실에서** 끝까지 읽어 보낸다 — [`finish_within`] 이 두 파이프에 쓴다. 실을 못
+/// 띄우면 `None` 이다.
+fn drained(pipe: Option<impl std::io::Read + Send + 'static>) -> Option<std::sync::mpsc::Receiver<Vec<u8>>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            let _ = tx.send(buf);
+        })
+        .ok()?;
+    Some(rx)
 }
 
 /// `budget` 안에 끝나면 그 끝을, 아니면 `None` — **죽이지도 거두지도 않는다.** 넘겼을 때 할 일은
-/// 부르는 쪽마다 다르다([`finish_within`] 은 거두기를 딴 실로 보내고, 병합 드라이버의 `probe` 는
+/// 부르는 쪽마다 다르다([`finish_within`] 은 거두기를 딴 실로 보내고, 병합 드라이버의 `reaped` 는
 /// 그 자리에서 거둔다).
 ///
-/// **기다리는 칸을 늘려 간다**(리뷰 moai-vbmn.spv). 한 칸을 2ms 로 못박던 판은 3.8ms 에 끝나는
-/// 부름을 다음 2ms 자리까지 올림해, 잰 값이 판마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
-/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빠른 판은 거의 안 자고, 느린 판은
-/// 10ms 칸으로 자 2초 한도까지 깨는 횟수가 이백 번을 안 넘는다.
+/// **기다리는 간격을 늘려 간다**(리뷰 moai-vbmn.spv). 간격을 2ms 로 못박던 때는 3.8ms 에 끝나는
+/// 부름을 다음 2ms 자리까지 올림해, 측정값이 부를 때마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
+/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빨리 끝나는 부름은 거의 안 자고, 느린
+/// 부름은 10ms 간격으로 자 `budget` 이 2초(`merge_driver` 의 `PROBE_BUDGET`)여도 깨는 횟수가 이백 번을
+/// 안 넘는다.
 pub fn waited(child: &mut std::process::Child, budget: std::time::Duration) -> Option<std::process::ExitStatus> {
     use std::time::{Duration, Instant};
     const FLOOR: Duration = Duration::from_micros(200);
@@ -281,11 +312,11 @@ pub fn waited(child: &mut std::process::Child, budget: std::time::Duration) -> O
 /// 시험의 격리도 그대로다: `tests/cli.rs` 의 `isolated` 와 `git::isolated` 가 이 셋을 `/dev/null`
 /// 로 **채워** 주므로, 물려받아도 사람의 진짜 `~/.gitconfig` 는 안 드러난다.
 ///
-/// **마감도 [`run_within`] 과 같다**(moai-59k3.u09) — 그 하나뿐인 자리가 알림의 물음이다.
+/// **한도도 [`run_within`] 과 같다**(moai-59k3.u09) — 주면 그 안에서만 기다리고, 안 주면 끝까지 기다린다.
 pub fn run_reading_user_config(
     root: &Path,
     args: &[&str],
-    budget: std::time::Duration,
+    budget: Option<std::time::Duration>,
 ) -> Option<Result<String, Error>> {
     let mut cmd = invocation(root, args);
     for var in crate::git_leaks::CONFIG_FILES {
@@ -293,7 +324,7 @@ pub fn run_reading_user_config(
             cmd.env(var, v);
         }
     }
-    finish_within(cmd, budget).map(|r| r.and_then(|b| String::from_utf8(b).map_err(Error::NotUtf8)))
+    finish_within(cmd, budget)
 }
 
 /// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
@@ -623,9 +654,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::git_leaks::{REPO, TEST};
 
-    /// **마감 안에 끝난 부름은 그대로 답하고, 넘긴 부름은 기다리지 않는다**(moai-59k3.u09). 죽은
-    /// 마운트에 걸린 git 을 `sleep` 이 대신한다 — 그 자리에서 멈춘 git 과 이쪽에서 보이는 것이 같다.
-    /// 손자가 파이프를 쥔 판도 잰다: 아이가 끝나도 읽기가 안 끝나 마감이 새던 자리다.
+    /// **마감 안에 끝난 부름은 그대로 답하고, 넘긴 부름은 기다리지 않는다**(moai-59k3.u09). 멈춘
+    /// git 을 `sleep` 이 대신한다 — 그 자리에서 멈춘 git 과 이쪽에서 보이는 것이 같다. 손자가 파이프를
+    /// 쥔 경우도 본다: 아이가 끝나도 읽기가 안 끝나 마감이 새던 자리다. 한도를 안 주면 끝까지
+    /// 기다린다(리뷰 moai-59k3.4c3).
     #[cfg(unix)]
     #[test]
     fn a_call_past_its_budget_is_not_waited_for() {
@@ -638,14 +670,18 @@ pub(crate) mod tests {
         };
         let budget = Duration::from_millis(300);
 
-        let said = finish_within(sh("echo hi"), Duration::from_secs(10)).expect("끝난 부름을 넘겼다고 한다");
-        assert_eq!(said.expect("0 으로 끝난 부름을 실패라 한다"), b"hi\n");
-        let failed = finish_within(sh("echo why >&2; exit 3"), Duration::from_secs(10)).expect("끝난 부름을 넘겼다");
-        assert!(matches!(failed, Err(Error::Failed(ref why)) if why == "why"), "{failed:?}");
+        for given in [Some(Duration::from_secs(10)), None] {
+            let said = finish_within(sh("echo hi"), given).expect("끝난 부름을 넘겼다고 한다");
+            assert_eq!(said.expect("0 으로 끝난 부름을 실패라 한다"), "hi\n");
+            let failed = finish_within(sh("echo why >&2; exit 3"), given).expect("끝난 부름을 넘겼다");
+            assert!(matches!(failed, Err(Error::Failed(ref why)) if why == "why"), "{failed:?}");
+        }
 
-        for script in ["sleep 30", "sleep 30 & echo hi"] {
+        // `exec` 로 갈아 끼운다 — 껍데기가 `sleep` 을 따로 띄우면 죽이는 것은 껍데기뿐이라 시험이 끝난
+        // 뒤에도 그것이 남는다(`merge_driver` 의 probe 시험과 같은 까닭). 손자는 일부러 남기되 짧게 둔다.
+        for script in ["exec sleep 30", "sleep 3 & echo hi"] {
             let clock = Instant::now();
-            assert!(finish_within(sh(script), budget).is_none(), "{script}: 넘긴 부름에 답이 섰다");
+            assert!(finish_within(sh(script), Some(budget)).is_none(), "{script}: 넘긴 부름에 답이 섰다");
             assert!(clock.elapsed() < budget * 5, "{script}: 마감을 안 지켰다 — {:?}", clock.elapsed());
         }
     }
