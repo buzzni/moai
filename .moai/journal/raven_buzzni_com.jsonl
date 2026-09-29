@@ -1753,3 +1753,33 @@
 {"ts":"2026-09-29T01:42:09Z","id":"moai-cgcm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-le2s 에서 펼쳤다 — 자리 없는 키에 값을 넘기는 헛 fill 하나를 걷는다"}
 {"ts":"2026-09-29T01:42:09Z","id":"moai-le2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-cgcm 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-09-29T01:42:21Z","id":"moai-cgcm.81v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T01:42:29Z","id":"moai-45hf.wqg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided 2026-09-29 by the person (recommended option): the shell line confirms the mark. It passes a slip path (MOAI_HOOK_HANDOFF, named with its own $$ and the session id); moai writes the mark name there instead of creating the mark; the line creates it with set -C only after printf succeeded, and only from a slip it owns (-O) that is not a symlink (-h). No slip or an unwritable slip falls back to the old direct mark, so an old planted line still gets one board per session. Rejected: moving the mark after print() inside moai only (leaves the shell printf window). Residual (moai-ol3d): a verdict held in $o is still lost if the group is killed in the microseconds between moai exit and printf."}
+{"ts":"2026-09-29T01:42:29Z","id":"moai-45hf.3do","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided 2026-09-29 by the person (recommended option): outside exits 0/1, $o counts as a verdict only when it matches {*}. Anything else (torn {\"hookSpecificOutp, a foreign moai usage text + exit 64, a lone space) is dropped and the notice speaks — never two objects. Exits 0/1 still forward whatever moai wrote."}
+{"ts":"2026-09-29T01:42:29Z","id":"moai-45hf.6z2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided 2026-09-29 by the person (recommended option): keep the mark in ${TMPDIR:-/tmp}, create it with set -C (O_EXCL, builtin, one winner among overlapping hooks). A loser stays silent only if the path is its own (-O) and not a symlink (-h); a squatted, linked or unwritable spot speaks every time. Rejected: a dir next to the user config (shell would have to mimic MOAI_CONFIG/XDG/HOME, needs mkdir -p, marks pile up forever). Foreign ownership is not tested (needs root); the symlink case is."}
+{"ts":"2026-09-29T01:42:39Z","id":"moai-45hf.nab","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix running in background (9bdff6fb..HEAD); take its fixes in a fix: commit, then merge per brief steps 8-12"}
+{"ts":"2026-09-29T01:45:23Z","id":"moai-he27","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.4"}
+{"ts":"2026-09-29T01:45:36Z","id":"moai-59k3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"조용히 꺼지는 가드와 마감 없는 부름"}
+{"ts":"2026-09-29T01:45:36Z","id":"moai-59k3.yo6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"집기 기록 자리를 남이 먼저 잡아도 훅의 규칙 1·2 가 안 꺼진다"}
+{"ts":"2026-09-29T01:45:36Z","id":"moai-59k3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-l7df 에서 펼쳤다 — 집기 기록 자리를 남이 먼저 만들면 훅의 규칙 1·2 가 꺼진다"}
+{"ts":"2026-09-29T01:45:36Z","id":"moai-l7df","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-59k3 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-29T01:45:50Z","id":"moai-59k3.u09","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"설치 알림을 묻는 git 부름에 마감을 둔다 — 죽은 마운트가 한눈 보기를 멈추지 않게"}
+{"ts":"2026-09-29T01:45:50Z","id":"moai-59k3.u09","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9b2s 에서 펼쳤다 — 설치 알림을 묻는 git 부름에 마감이 없다 — 죽은 마운트 하나가 한눈 보기를 멈춘다"}
+{"ts":"2026-09-29T01:45:50Z","id":"moai-9b2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-59k3 의 멤버 moai-59k3.u09 로 펼쳤다"}
+{"ts":"2026-09-29T01:45:51Z","id":"moai-ydm7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기 경로의 락과 임시 파일"}
+{"ts":"2026-09-29T01:45:51Z","id":"moai-ydm7.7wq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫는 쓰기가 락 안에서 ready 를 세 판 돌지 않게 한다"}
+{"ts":"2026-09-29T01:45:51Z","id":"moai-ydm7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mxs7 에서 펼쳤다 — freed 가 닫는 쓰기마다 락 안에서 ready 를 세 판 돈다"}
+{"ts":"2026-09-29T01:45:51Z","id":"moai-mxs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ydm7 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-29T01:46:03Z","id":"moai-ydm7.976","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"write_atomic 의 임시 파일을 O_EXCL 로 연다"}
+{"ts":"2026-09-29T01:46:03Z","id":"moai-ydm7.976","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-qmji 에서 펼쳤다 — write_atomic 의 임시 파일을 O_EXCL 로 열지 정한다"}
+{"ts":"2026-09-29T01:46:03Z","id":"moai-qmji","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ydm7 의 멤버 moai-ydm7.976 로 펼쳤다"}
+{"ts":"2026-09-29T01:46:04Z","id":"moai-mo9v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄을 사람이 도구 안에서 다룬다"}
+{"ts":"2026-09-29T01:46:04Z","id":"moai-mo9v.3yp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄을 지우는 길을 도구에 둔다"}
+{"ts":"2026-09-29T01:46:04Z","id":"moai-mo9v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yuvu 에서 펼쳤다 — 못 읽는 줄을 지우는 명령이 없다"}
+{"ts":"2026-09-29T01:46:04Z","id":"moai-yuvu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mo9v 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-mo9v.qgj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄이 머지 방향에 따라 바이트를 가르지 않게 한다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-mo9v.qgj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-y1vb 에서 펼쳤다 — 못 읽는 줄을 원문으로 실으면 머지 방향에 따라 바이트가 갈린다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-y1vb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mo9v 의 멤버 moai-mo9v.qgj 로 펼쳤다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-s3i7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시간대를 안 그리는 명령이 zoneinfo 없는 기계에서 시끄럽다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-s3i7.9uh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready·prime·show 목록·idea ls 가 안 쓰는 시간대를 안 든다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-s3i7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-a682 에서 펼쳤다 — ready·prime·show 목록·idea ls 도 시간대를 들기만 하고 안 그린다"}
+{"ts":"2026-09-29T01:46:25Z","id":"moai-a682","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-s3i7 로 펼쳤다 (이슈 1건)"}
