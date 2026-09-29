@@ -3951,86 +3951,124 @@ pub fn prime<'a>(issues: &'a [Issue], cfg: &Config) -> Prime<'a> {
     Prime { held: wip(issues, cfg), picks: all.into_iter().take(PRIME_PICKS).collect(), rest, focus }
 }
 
-/// **막음만 보는 목록** — 도는 마일스톤은 안 본다. [`unblocked`] 가 이것으로 두 판을 견준다.
-///
-/// 마일스톤 우선은 **막음이 아니다**(리뷰 moai-493a.2om 2). 거른 목록으로 견주면, 마일스톤이
-/// 끝나는 순간 밖의 일 전부가 "이로써 풀림" 으로 서서 아무도 안 막던 줄을 막혔던 것으로 말한다.
-fn ready_unfocused<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
-    picks_in(issues, cfg, false).0
+fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Issue>, Focus<'a>) {
+    Picking::of(issues, cfg).picks(focused)
 }
 
-fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Issue>, Focus<'a>) {
-    // **소속 지도는 한 벌이다**([`ties`]) — 에픽 지도와 마일스톤 지도를 따로 부르면 뒤의 것이
-    // 앞의 것을 제 안에서 다시 짓는다.
-    let lines = Lines::of(issues);
-    let group = Handing::over(issues, &lines);
-    let mile_of = milestones_over(issues, &group, &lines);
-    // **줄 지도도 한 벌이다** — [`Lines`] 가 이미 든 그 지도다(리뷰 moai-jk2u.m60).
-    let by_id = &lines.by_id;
-    // **막음과 차례가 한 번의 셈을 쓴다.** 끝나가는지를 롤업으로 따로 재면 미룬 멤버를 세는
-    // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
-    // 늘어나는 셈은 없다. **도는 마일스톤도 같은 셈에서 읽는다** — 따로 재면 `ready` 가 빼는
-    // 자와 `status` 가 비추는 자가 갈린다.
-    // **줄마다의 답을 먼저 잰다**(moai-u3ta) — 내주는 문은 줄에 묻고([`unblocked_pick`]), 도는
-    // 마일스톤을 고르는 자는 id 에 묻는다. 두 답이 한 번의 셈에서 나와야 갈리지 않는다.
-    let off = shelved_over(issues, &lines, &group, &mile_of);
-    let roots = fold_roots(issues, &off);
-    let kind_of = kinds(issues);
-    let stands = group_stands_in(issues, cfg, &lines, &group, &mile_of, &kind_of, &off);
-    let progress: BTreeMap<&str, u8> = stands.iter().map(|((_, id), s)| (*id, s.progress.unwrap_or(0))).collect();
-    let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
-    let running = match focused {
-        true => running_in(cfg, by_id, &stands, &out_of_plan),
-        false => Vec::new(),
-    };
-    let (states, waits) = split_stands(stands);
-    // **종류 지도는 한 벌이다**(리뷰) — `eclipsed(issues)` 는 제 안에서 [`kinds`] 를 또 짓는데
-    // 위에서 이미 하나 지었다. `rollups`·`group_members` 가 같은 자리에서 걷어낸 그것이다.
-    let eclipsed = |i: &Issue| is_eclipsed(&kind_of, i);
-    let mut out: Vec<&Issue> = issues
-        .iter()
-        .enumerate()
-        // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
-        .filter(|(k, i)| !is_blocked(i, by_id, &states, &waits) && unblocked_pick(i, *k, issues, cfg, &off, &eclipsed))
-        .map(|(_, i)| i)
-        .collect();
+/// 스냅샷 하나에서 [`ready`] 를 고르는 데 드는 것 — **한 벌 지어 여러 번 묻는다**(moai-ydm7.7wq).
+///
+/// 닫는 쓰기([`freed`])는 `after` 에 두 번 묻는다 — 도는 마일스톤을 안 보는 목록([`unblocked`])과
+/// 보는 목록([`next_of`]). 두 목록은 **거르는 자와 차례만 다르고** 재료(소속 지도·미룸·묶음 칸·
+/// 막음을 거친 후보)는 같다. 판마다 새로 지으면 그 전부가 `store::with_write` 의 배타 락 안에서
+/// 세 벌이 되고, 이 저장소 1,566줄에서 `mv … done` 의 락 쥔 시간이 21.6ms 에서 35ms 로 늘었다.
+/// **목록을 합치지는 않는다** — 걸린 목록으로 견주면 마일스톤이 끝나는 순간 밖의 일 전부가
+/// "풀림" 으로 선다(리뷰 moai-493a.2om).
+///
+/// **저장하지 않는다.** 한 쓰기 안에서만 사는 값이다.
+struct Picking<'a> {
+    lines: Lines<'a>,
+    group: Handing<'a>,
+    /// 줄마다 — 계획에서 뺀 줄([`shelved_over`]). `issues` 와 자리가 같다.
+    off: Vec<Option<&'a str>>,
+    kind_of: BTreeMap<&'a str, Kind>,
+    progress: BTreeMap<&'a str, u8>,
+    /// 도는 마일스톤 — 거르개를 걸 때만 쓴다.
+    running: Vec<&'a Issue>,
+    /// 막음·미룸·열린 자식을 거친 후보. 차례도 마일스톤 거르개도 아직 안 걸었다.
+    open: Vec<&'a Issue>,
+}
 
-    // **도는 마일스톤 안인가.** 소속은 물려받은 것까지다(`milestones`) — 에픽의 마일스톤이
-    // 그 멤버의 것이므로, 이슈마다 마일스톤을 다시 적은 저장소가 아니어도 선다.
-    //
-    // **소속은 [`Placed`] 에 묻는다**(리뷰) — 이 문이 지도를 곧바로 짚던 때는, `moai show <마일스톤>`
-    // 이 `멤버 0/2` 로 세어 그린 그 줄을 `moai ready` 가 `밖에 남았다` 며 안 냈다. 배정의 문이라
-    // 한 번 틀리면 일이 안 나간다.
-    let in_stone = Placed::milestone(&group, &lines);
-    let inside = |i: &Issue| in_stone.at(i).is_some_and(|m| running.iter().any(|r| r.id == m));
-    // **`p0` 은 마일스톤과 무관하게 남는다**(사용자 결정 2) — 핫픽스 자리다. 그 자리가 없으면
-    // 마일스톤이 도는 동안 밖에서 터진 것을 고칠 길이 도구 밖에만 남는다.
-    let mut outside = Vec::new();
-    if !running.is_empty() {
-        let (picks, held) = out.into_iter().partition(|i| inside(i) || i.priority() == 0);
-        out = picks;
-        outside = held;
+#[cfg(test)]
+thread_local! {
+    /// [`Picking::of`] 가 이 스레드에서 몇 번 지어졌나 — 닫는 쓰기가 몇 벌 짓는지 시험이 잰다.
+    static PICKINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl<'a> Picking<'a> {
+    fn of(issues: &'a [Issue], cfg: &Config) -> Picking<'a> {
+        #[cfg(test)]
+        PICKINGS.with(|n| n.set(n.get() + 1));
+        // **소속 지도는 한 벌이다**([`ties`]) — 에픽 지도와 마일스톤 지도를 따로 부르면 뒤의 것이
+        // 앞의 것을 제 안에서 다시 짓는다.
+        let lines = Lines::of(issues);
+        let group = Handing::over(issues, &lines);
+        let mile_of = milestones_over(issues, &group, &lines);
+        // **막음과 차례가 한 번의 셈을 쓴다.** 끝나가는지를 롤업으로 따로 재면 미룬 멤버를 세는
+        // 자와 안 세는 자가 한 명령 안에 둘이 된다(moai-ha03). 롤업도 같은 걸음을 걸었으므로
+        // 늘어나는 셈은 없다. **도는 마일스톤도 같은 셈에서 읽는다** — 따로 재면 `ready` 가 빼는
+        // 자와 `status` 가 비추는 자가 갈린다.
+        // **줄마다의 답을 먼저 잰다**(moai-u3ta) — 내주는 문은 줄에 묻고([`unblocked_pick`]), 도는
+        // 마일스톤을 고르는 자는 id 에 묻는다. 두 답이 한 번의 셈에서 나와야 갈리지 않는다.
+        let off = shelved_over(issues, &lines, &group, &mile_of);
+        let roots = fold_roots(issues, &off);
+        let kind_of = kinds(issues);
+        let stands = group_stands_in(issues, cfg, &lines, &group, &mile_of, &kind_of, &off);
+        let progress: BTreeMap<&str, u8> = stands.iter().map(|((_, id), s)| (*id, s.progress.unwrap_or(0))).collect();
+        let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
+        // **줄 지도도 한 벌이다** — [`Lines`] 가 이미 든 그 지도다(리뷰 moai-jk2u.m60).
+        let running = running_in(cfg, &lines.by_id, &stands, &out_of_plan);
+        let (states, waits) = split_stands(stands);
+        let open = {
+            // **종류 지도는 한 벌이다**(리뷰) — `eclipsed(issues)` 는 제 안에서 [`kinds`] 를 또 짓는데
+            // 위에서 이미 하나 지었다. `rollups`·`group_members` 가 같은 자리에서 걷어낸 그것이다.
+            let eclipsed = |i: &Issue| is_eclipsed(&kind_of, i);
+            issues
+                .iter()
+                .enumerate()
+                // 값싼 막음 검사를 먼저 한다 — `unblocked_pick` 은 자식을 찾느라 목록을 걷는다.
+                .filter(|(k, i)| {
+                    !is_blocked(i, &lines.by_id, &states, &waits) && unblocked_pick(i, *k, issues, cfg, &off, &eclipsed)
+                })
+                .map(|(_, i)| i)
+                .collect()
+        };
+        Picking { lines, group, off, kind_of, progress, running, open }
     }
 
-    // 급한 것 → 도는 마일스톤 안 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
-    // 벌여 놓은 에픽이 줄어든다.
-    //
-    // **급한 것이 먼저고 마일스톤은 그다음이다.** 뒤집으면 밖에 선 `p0` 핫픽스가 마일스톤 안의
-    // `p2` 밑으로 내려간다 — 핫픽스를 밖에서도 집기로 한 결정이 차례에서 도로 무너진다.
-    // **에픽도 줄마다 묻는다**(리뷰, [`joined_in`]) — 지도를 곧바로 짚으면 같은 id 의 앞줄이
-    // 뒷줄의 에픽으로 줄을 서, 화면이 대는 소속과 차례를 정하는 소속이 갈린다.
-    let pct = |i: &Issue| group.at(i).and_then(|e| progress.get(e)).copied().unwrap_or(0);
-    out.sort_by(|a, b| {
-        let (pa, pb) = (pct(a), pct(b));
-        a.priority()
-            .cmp(&b.priority())
-            .then_with(|| inside(b).cmp(&inside(a)))
-            .then_with(|| pb.cmp(&pa))
-            .then_with(|| a.created_at.cmp(&b.created_at))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-    outside.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
-    (out, Focus { running, outside })
+    /// 후보에 차례를 매긴다. `focused` 면 도는 마일스톤 밖의 일을 [`Focus::outside`] 로 뺀다.
+    fn picks(&self, focused: bool) -> (Vec<&'a Issue>, Focus<'a>) {
+        let running: &[&Issue] = match focused {
+            true => &self.running,
+            false => &[],
+        };
+        // **도는 마일스톤 안인가.** 소속은 물려받은 것까지다(`milestones`) — 에픽의 마일스톤이
+        // 그 멤버의 것이므로, 이슈마다 마일스톤을 다시 적은 저장소가 아니어도 선다.
+        //
+        // **소속은 [`Placed`] 에 묻는다**(리뷰) — 이 문이 지도를 곧바로 짚던 때는, `moai show <마일스톤>`
+        // 이 `멤버 0/2` 로 세어 그린 그 줄을 `moai ready` 가 `밖에 남았다` 며 안 냈다. 배정의 문이라
+        // 한 번 틀리면 일이 안 나간다.
+        let in_stone = Placed::milestone(&self.group, &self.lines);
+        let inside = |i: &Issue| in_stone.at(i).is_some_and(|m| running.iter().any(|r| r.id == m));
+        // **`p0` 은 마일스톤과 무관하게 남는다**(사용자 결정 2) — 핫픽스 자리다. 그 자리가 없으면
+        // 마일스톤이 도는 동안 밖에서 터진 것을 고칠 길이 도구 밖에만 남는다.
+        let mut out = self.open.clone();
+        let mut outside = Vec::new();
+        if !running.is_empty() {
+            let (picks, held) = out.into_iter().partition(|i| inside(i) || i.priority() == 0);
+            out = picks;
+            outside = held;
+        }
+
+        // 급한 것 → 도는 마일스톤 안 → 끝나가는 에픽 → 오래된 것. 끝나가는 것을 먼저 집어야
+        // 벌여 놓은 에픽이 줄어든다.
+        //
+        // **급한 것이 먼저고 마일스톤은 그다음이다.** 뒤집으면 밖에 선 `p0` 핫픽스가 마일스톤 안의
+        // `p2` 밑으로 내려간다 — 핫픽스를 밖에서도 집기로 한 결정이 차례에서 도로 무너진다.
+        // **에픽도 줄마다 묻는다**(리뷰, [`joined_in`]) — 지도를 곧바로 짚으면 같은 id 의 앞줄이
+        // 뒷줄의 에픽으로 줄을 서, 화면이 대는 소속과 차례를 정하는 소속이 갈린다.
+        let pct = |i: &Issue| self.group.at(i).and_then(|e| self.progress.get(e)).copied().unwrap_or(0);
+        out.sort_by(|a, b| {
+            let (pa, pb) = (pct(a), pct(b));
+            a.priority()
+                .cmp(&b.priority())
+                .then_with(|| inside(b).cmp(&inside(a)))
+                .then_with(|| pb.cmp(&pa))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        outside.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
+        (out, Focus { running: running.to_vec(), outside })
+    }
 }
 
 /// **이로써 풀린 일** — 쓰기 전(`before`)에는 [`ready`] 가 아니었고 쓴 뒤(`after`)에는
@@ -4040,9 +4078,19 @@ fn picks_in<'a>(issues: &'a [Issue], cfg: &Config, focused: bool) -> (Vec<&'a Is
 /// `ready` 가 내는 것과 이 줄이 대는 것이 갈린다 — 두 번 불러 견준다. 차례는 `after` 의
 /// `ready` 차례 그대로다. **저장하지 않는다** — 막힌 줄의 "풀렸나" 는 막는 줄을 닫을
 /// 때마다 달라지는 파생값이다.
-pub fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
-    let was: BTreeSet<&str> = ready_unfocused(before, cfg).into_iter().map(|i| i.id.as_str()).collect();
-    ready_unfocused(after, cfg).into_iter().filter(|i| !was.contains(i.id.as_str())).collect()
+#[cfg(test)]
+fn unblocked<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    unblocked_over(&Picking::of(before, cfg), &Picking::of(after, cfg))
+}
+
+/// [`unblocked`] 와 같은 것. 두 판의 [`Picking`] 을 이미 든 쪽([`freed`])이 그것을 다시 짓지 않게 받는다.
+///
+/// **막음만 보는 목록으로 견준다** — 도는 마일스톤은 안 본다. 마일스톤 우선은 **막음이
+/// 아니다**(리뷰 moai-493a.2om 2). 거른 목록으로 견주면, 마일스톤이 끝나는 순간 밖의 일 전부가
+/// "이로써 풀림" 으로 서서 아무도 안 막던 줄을 막혔던 것으로 말한다.
+fn unblocked_over<'a>(was: &Picking<'_>, now: &Picking<'a>) -> Vec<&'a Issue> {
+    let was: BTreeSet<&str> = was.picks(false).0.into_iter().map(|i| i.id.as_str()).collect();
+    now.picks(false).0.into_iter().filter(|i| !was.contains(i.id.as_str())).collect()
 }
 
 /// 닫는 쓰기가 **연 것 셋** — 이로써 집을 수 있게 된 일, 이제 닫을 수 있는 부모, 같은
@@ -4072,31 +4120,56 @@ pub struct Freed<'a> {
 
 /// [`Freed`] 를 읽어 낸다. `closed` 는 이 쓰기가 실제로 `done` 으로 옮긴 id 들이다.
 ///
-/// **[`ready`] 를 세 번 센다**(`before` 한 번, `after` 를 거르개 없이·있이 각각 한 번). 닫는
-/// 쓰기에서만 도는 자리라 그 값을 치른다 — [`Freed::next`] 가 도는 마일스톤을 봐야 하고
-/// ([`ready_in`]), [`unblocked`] 는 봐서는 안 되기 때문이다([`ready_unfocused`]): 마일스톤이
-/// 끝나는 순간 밖의 일 전부가 "풀림" 으로 서면 아무도 안 막던 줄을 막혔던 것으로 말한다.
+/// **스냅샷마다 [`Picking`] 을 한 벌씩, 모두 두 벌 짓는다**(moai-ydm7.7wq). 이 셈은 전부
+/// `store::with_write` 의 배타 락 안이다 — `Lock::acquire` 는 25ms 마다 두드리고 5초에 포기하고,
+/// 여기는 세션 예닐곱이 같은 `.moai` 를 쓴다. 한때 판마다 새로 지어 [`ready`] 를 세 번,
+/// 소속 지도와 미룸을 네 벌 더 지었다(`closable` 이 `shelved` 둘과 `eclipsed`, `next_of` 가
+/// `Handing` 하나).
+///
+/// **목록은 두 가지로 묻는다** — [`Freed::next`] 는 도는 마일스톤을 봐야 하고([`ready_in`]),
+/// [`unblocked`] 는 봐서는 안 된다([`unblocked_over`]): 마일스톤이 끝나는 순간 밖의 일 전부가
+/// "풀림" 으로 서면 아무도 안 막던 줄을 막혔던 것으로 말한다. 재료는 같고 거르개만 다르다.
 pub fn freed<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config, closed: &[&str]) -> Freed<'a> {
-    let unblocked = unblocked(before, after, cfg);
-    Freed { closable: closable(before, after, cfg), next: next_of(after, cfg, closed, &unblocked), unblocked }
+    let (was, now) = (Picking::of(before, cfg), Picking::of(after, cfg));
+    let unblocked = unblocked_over(&was, &now);
+    Freed {
+        closable: closable_over(before, &was.off, after, &now, cfg),
+        next: next_over(after, &now, closed, &unblocked),
+        unblocked,
+    }
 }
 
 /// 마지막 안 끝난 일 자식이 이 쓰기로 닫힌 부모 — **이미 시작한 칸에 선 것만**.
 ///
 /// 첫 칸의 부모는 [`unblocked`] 가 이미 낸다([`unblocked_pick`] 의 `has_open_child`). 여기서
 /// 그것까지 세면 같은 줄이 두 번 불린다.
+#[cfg(test)]
 fn closable<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
+    closable_over(before, &shelved(before), after, &Picking::of(after, cfg), cfg)
+}
+
+/// [`closable`] 의 몸. `was_off` 는 `before` 와, `now` 는 `after` 와 자리가 같다.
+fn closable_over<'a>(
+    before: &[Issue],
+    was_off: &[Option<&str>],
+    after: &'a [Issue],
+    now: &Picking<'a>,
+    cfg: &Config,
+) -> Vec<&'a Issue> {
     // **미룬 자식은 안 끝난 자식이 아니다** — `unblocked_pick` 이 `ready` 에서 쓰는 자와 같다.
     // 이것을 안 맞추면 미룬 자식 하나가 남은 부모를 여기서는 "닫을 수 있다" 로, `ready` 에서는
     // "아직 자식이 있다" 로 말한다. **그래서 여기도 줄에 묻는다**(리뷰 moai-jk2u.hr4) — 그쪽이
     // 자리로 옮겨 갈 때 여기만 접은 지도에 남으면 그 약속이 글로만 남는다. 술어는 아예 한
     // 몸이다([`has_open_child`]) — 글로 맺은 약속을 부르는 자리로 옮긴다.
-    let (was_off, now_off) = (shelved(before), shelved(after));
+    //
+    // **미룸도 종류 지도도 [`Picking`] 이 이미 지은 것이다**(moai-ydm7.7wq) — `ready` 가 고른
+    // 그 판의 자를 그대로 쓰므로, 두 자가 갈릴 틈도 없다.
+    let now_off = &now.off;
     // **가려진 줄은 여기 안 든다** — `unblocked_pick` 과 [`wip`] 가 그 줄을 집은 일로 안 세는
     // 것과 같은 자다(moai-es40). 안 맞추면 쌍둥이에게 자리를 뺏긴 부모에게 "닫으면 된다" 고
     // 대는데, 그 id 는 `duplicate_id` 로 파일째 쓰기가 막혀 있어 시킨 명령을 도구가 제 손으로
     // 거절한다 — 덫을 하나 놓는 일이다.
-    let eclipsed = eclipsed(after);
+    let eclipsed = |i: &Issue| is_eclipsed(&now.kind_of, i);
     after
         .iter()
         .enumerate()
@@ -4105,19 +4178,25 @@ fn closable<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config) -> Vec<&'a I
                 && now_off[*k].is_none()
                 && !eclipsed(p)
                 && cfg.is_started(p.status.as_str())
-                && !has_open_child(after, &p.id, &now_off)
-                && has_open_child(before, &p.id, &was_off)
+                && !has_open_child(after, &p.id, now_off)
+                && has_open_child(before, &p.id, was_off)
         })
         .map(|(_, p)| p)
         .collect()
 }
 
 /// 닫은 줄들의 에픽마다 **다음에 집을 것 하나**. 차례는 [`ready_in`] 의 차례 그대로다.
+#[cfg(test)]
 fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
+    next_over(after, &Picking::of(after, cfg), closed, said)
+}
+
+/// [`next_of`] 의 몸. `now` 는 `after` 에서 지은 것이다.
+fn next_over<'a>(after: &'a [Issue], now: &Picking<'a>, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
     // **소속을 먼저 묻고 차례는 나중에 잰다.** 에픽 없는 줄을 닫은 것은 여기서 할 말이
-    // 없는데([`groups`] 에 안 든다), 차례를 먼저 재면 그 판이 빈 답을 내려고 스냅샷을 한 번
-    // 더 걷는다 — 닫는 쓰기는 락을 쥔 자리라 헛걸음 한 판이 그대로 락 시간이다.
-    let epic_of = Handing::of(after);
+    // 없는데([`groups`] 에 안 든다), 차례를 매기면 헛걸음이다 — 닫는 쓰기는 락을 쥔 자리라
+    // 헛걸음 한 판이 그대로 락 시간이다. 소속 지도는 [`Picking`] 이 이미 지은 것을 쓴다.
+    let epic_of = &now.group;
     // **닫은 줄의 소속도 줄마다 묻는다**(리뷰, [`joined_in`]) — 지도만 짚으면 제 `epic` 을 적은
     // 앞줄을 닫았을 때 뒷줄의 빈 값이 나와, `moai show <에픽>` 이 멤버로 세는 그 줄을 닫고도
     // "이 에픽의 다음" 이 아무 말도 안 한다. 아래 고르는 자와 한 자를 쓴다.
@@ -4132,7 +4211,7 @@ fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Is
     if epics.is_empty() {
         return Vec::new();
     }
-    let (picks, _) = ready_in(after, cfg);
+    let (picks, _) = now.picks(true);
     let already: BTreeSet<&str> = said.iter().map(|i| i.id.as_str()).collect();
     // **한 줄은 한 에픽에만 든다**([`groups`] 는 id 마다 에픽 하나를 낸다). 그래서 서로 다른
     // 에픽이 같은 줄을 고를 수 없고, 겹침을 거르는 자리는 위의 `already` 하나뿐이다 —
@@ -6545,6 +6624,39 @@ mod tests {
         loose.push(make("argos-000e", Kind::Issue, "done"));
         assert!(next_of(&loose, &cfg(), &["argos-000e"], &[]).is_empty(), "에픽 없는 줄에 남의 다음을 댔다");
         assert!(next_of(&issues, &cfg(), &[], &[]).is_empty(), "닫은 것이 없으면 다음도 없다");
+    }
+
+    /// **닫는 쓰기는 스냅샷마다 [`Picking`] 을 한 벌만 짓는다**(moai-ydm7.7wq) — 이 셈은 전부
+    /// `store::with_write` 의 배타 락 안이다. 판마다 새로 지으면 세 벌이 되고, 락 쥔 시간이
+    /// 그만큼 는다. 세 목록은 따로 부른 것과 같아야 한다 — 한 벌을 나눠 쓴다고 답이 바뀌면 안 된다.
+    #[test]
+    fn freed_builds_one_picking_per_snapshot() {
+        let mut blocked = member("argos-000c", "argos-0001", "todo");
+        blocked.blocked_by = vec!["argos-000a".into()];
+        let before = vec![
+            make("argos-0001", Kind::Epic, "todo"),
+            member("argos-000a", "argos-0001", "in_progress"), // 이 쓰기가 닫는다
+            member("argos-000b", "argos-0001", "todo"),        // 그 에픽의 다음
+            blocked,                                           // 이로써 풀린다
+            make("argos-0003", Kind::Issue, "in_progress"),    // 자식이 닫혀 닫을 수 있게 되는 부모
+            make("argos-0003.x1y", Kind::Issue, "in_progress"),
+        ];
+        let mut after = before.clone();
+        after[1].status = Status::new("done");
+        after[5].status = Status::new("done");
+        let closed = ["argos-000a", "argos-0003.x1y"];
+
+        PICKINGS.with(|n| n.set(0));
+        let got = freed(&before, &after, &cfg(), &closed);
+        assert_eq!(PICKINGS.with(|n| n.get()), 2, "스냅샷마다 한 벌이어야 한다 — before 하나, after 하나");
+
+        let ids = |v: &[&Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&got.unblocked), ["argos-000c"]);
+        assert_eq!(ids(&got.closable), ["argos-0003"]);
+        assert_eq!(ids(&got.next), ["argos-000b"]);
+        assert_eq!(ids(&got.unblocked), ids(&unblocked(&before, &after, &cfg())));
+        assert_eq!(ids(&got.closable), ids(&closable(&before, &after, &cfg())));
+        assert_eq!(ids(&got.next), ids(&next_of(&after, &cfg(), &closed, &got.unblocked)));
     }
 
     /// 급한 것 먼저, 그다음 끝나가는 에픽 먼저.
