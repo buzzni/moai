@@ -63,6 +63,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   With several `#` roots the line counts them.
 - `--body -` that reads nothing from stdin says so on stderr (`add`, `add --from`,
   `edit`) instead of ending in 0 with no body. Nothing is blocked.
+- **The hook sees a `find -execdir` write under an absolute start inside the
+  repository.** `find /repo/src -execdir tee x \;` used to read every start that
+  opens with `/` as somewhere else and drop its relative writes, so rule 2 let it
+  through. A relative path in such a line is now read as sitting under each start
+  (`/repo/src/x`) — and under the start's parent, where `-execdir` runs for the
+  start itself at depth 0 — and counted like any absolute path; `find /tmp -execdir …`
+  still goes through. A `-fprint` file on such a line is now seen too. `moai` run through
+  `-execdir` is still not counted against this tracker.
 
 ### Fixed
 
