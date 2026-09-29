@@ -360,7 +360,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read): (Issue, super::Read) = repo.with_write(
+    let (made, read, kept): (Issue, super::Read, Option<super::edit::InheritedMilestone>) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             if let Some(p) = &args.parent
@@ -400,12 +400,28 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
             let read = super::read_of(issues, cfg, &[issue.id.as_str()], ctx.json);
-            Ok((vec![entry], (issue, read)))
+            // **적은 마일스톤이 에픽·조상에게 졌으면 `edit` 과 같은 말로 댄다**(moai-pp9i.wvo). `add -e
+            // <에픽> --milestone <다른 것>` 은 안 읽힐 필드를 말없이 썼고, 같은 판에서 `edit` 은 한 줄을
+            // 댔다 — 한 바이너리가 한 필드를 두 말로 다뤘다. 판정도 글도 `edit` 의 것 한 벌이다.
+            let kept =
+                args.milestone.as_deref().and_then(|m| super::edit::InheritedMilestone::of(issues, &issue.id, Some(m)));
+            Ok((vec![entry], (issue, read, kept)))
         },
     )?;
 
     if ctx.json {
-        return super::json_line(&super::Row::from(&made, &read));
+        // **곁들이는 키도 `edit --json` 과 같다** — `inherited_milestone` 은 이미 `cmd::OURS` 에 있다.
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            #[serde(flatten)]
+            row: super::Row<'a>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            inherited_milestone: Option<&'a super::edit::InheritedMilestone>,
+        }
+        return super::json_line(&Out { row: super::Row::from(&made, &read), inherited_milestone: kept.as_ref() });
+    }
+    if let (Some(k), Some(wrote)) = (&kept, args.milestone.as_deref()) {
+        super::edit::milestone_kept_line(&made.id, k, wrote, ctx.lang());
     }
     if args.quiet {
         return Ok(vec![made.id]);

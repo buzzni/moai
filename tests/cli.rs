@@ -4900,6 +4900,36 @@ fn a_rehearsal_measures_the_milestone_it_reports() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// **`add` 도 에픽에 진 마일스톤을 `edit` 과 같은 말로 댄다**(moai-pp9i.wvo). `add -e <에픽>
+/// --milestone <다른 것>` 이 안 읽힐 필드를 말없이 썼고, 같은 판의 `edit` 은 한 줄을 댔다.
+#[test]
+fn add_says_a_milestone_lost_to_its_epic_as_edit_does() {
+    let s = init("addlostmilestone");
+    let m1 = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v0.2", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "에픽", "--milestone", &m1, "-q"]).trim().to_string();
+
+    let made = moai(s.path(), &["add", "새 줄", "-e", &epic, "--milestone", &m2, "-q"]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let id = String::from_utf8(made.stdout).unwrap().trim().to_string();
+    let said = String::from_utf8_lossy(&made.stderr).replace(&id, "<id>");
+    assert!(said.contains(&epic) && said.contains(&m1), "add 가 말없이 썼다\n{said}");
+
+    // 같은 판을 `edit` 으로 만들면 같은 글이 선다 — id 만 다르다.
+    let other = add(s.path(), &["곁 줄", "-e", &epic]);
+    let edited = moai(s.path(), &["edit", &other, "--milestone", &m2]);
+    assert_eq!(said, String::from_utf8_lossy(&edited.stderr).replace(&other, "<id>"), "두 명령이 다른 말을 한다");
+
+    // `--json` 도 `edit` 과 같은 키를 곁들인다.
+    let json =
+        String::from_utf8(moai(s.path(), &["add", "셋째", "-e", &epic, "--milestone", &m2, "--json"]).stdout).unwrap();
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","epic":"{epic}"}}"#)), "{json}");
+
+    // 이기는 쪽이 없으면 아무 말도 없다.
+    let plain = moai(s.path(), &["add", "넷째", "--milestone", &m2, "-q"]);
+    assert!(plain.stderr.is_empty(), "{}", String::from_utf8_lossy(&plain.stderr));
+}
+
 /// **없는 마일스톤에 "선다" 고 말하지 않고, 뿌리 둘은 둘로 센다**(moai-pp9i.gxf). 헛 id 를 받은
 /// 계획이 0 으로 끝나며 "선다" 고 찍었는데 같은 저장소의 `moai status` 는 그 에픽을
 /// `dangling_milestone` 으로 셌다. 막지는 않는다 — 곁의 `--epic <없는 것>` 처럼 알리고 넣는다.
@@ -4930,7 +4960,8 @@ fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
         assert!(said.contains(&format!("에픽 2개가 마일스톤 {stone} 에 선다")), "dry={dry}: 둘을 하나로 셌다\n{said}");
     }
     let one = "# 한 에픽\n- 하나\n";
-    let said = String::from_utf8(from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], one).stdout).unwrap();
+    let said =
+        String::from_utf8(from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], one).stdout).unwrap();
     assert!(said.contains(&format!("에픽은 마일스톤 {stone} 에 선다")), "{said}");
 }
 
@@ -10405,7 +10436,10 @@ fn a_duplicate_id_names_what_to_type() {
 
     let board = text(&moai(s.path(), &["status"]));
     assert!(board.contains("→ `moai show argos-0002`"), "보드가 칠 줄을 안 댔다\n{board}");
-    assert!(board.contains("moai rm <id>") && board.contains("앞줄을 지운다"), "rm 이 무엇을 지우는지 안 말했다\n{board}");
+    assert!(
+        board.contains("moai rm <id>") && board.contains("앞줄을 지운다"),
+        "rm 이 무엇을 지우는지 안 말했다\n{board}"
+    );
     assert!(!board.contains("→ `moai rm"), "지우는 명령을 따라 칠 줄로 댔다\n{board}");
 
     let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
