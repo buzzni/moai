@@ -488,7 +488,8 @@ Arguments:
 
 Options:
       --line <n>             Remove the unreadable line at number <n>
-      --yes                  With --line: remove it. Without, it is only shown
+      --yes                  With --line and --match: remove it. Else only shown
+      --match <hash>         With --yes: the hash the preview printed
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -502,15 +503,16 @@ Options:
   remove it by its line number; a row a newer moai wrote reads again after
   upgrading, so keep that one:
 
-  moai rm --line 812          shows the line, removes nothing
-  moai rm --line 812 --yes    removes it
+  moai rm --line 812                          shows the line and its hash
+  moai rm --line 812 --yes --match 1a2b3c4d   removes it
 
   Only an unreadable line is removed; any other line is refused, and the
   refusal lists the unreadable lines as they stand now. Numbers move when a
-  row comes or goes - an earlier removal included - so look again before
-  each --yes. Removing cannot be undone: the raw line is printed, goes into
-  the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
-  be put back by hand.
+  row comes or goes - an earlier removal included - so --yes needs the hash
+  the preview printed, and a line at that number that no longer matches it
+  is refused with the number the line shown stands at now. Removing cannot
+  be undone: the raw line is printed, goes into the journal's `rm` entry (up
+  to 64KB) and `--json` hands it back whole, to be put back by hand.
 ```
 
 ## `moai note`

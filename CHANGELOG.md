@@ -28,10 +28,13 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   that does not read as an issue — most often the broken twin of an issue that also
   stands whole, left by a hand-resolved merge — could only be removed by opening
   `.moai/issues.jsonl` in an editor. The number is the one `moai show` names. Without
-  `--yes` the line is only shown; with it, that line alone goes, and a number that
+  `--yes` the line is only shown, together with a short hash of it and the whole
+  command to type; `--yes` needs that hash in `--match`, so when rows came or went
+  after the preview and another line now stands at that number, nothing is removed
+  and the refusal names the number the line you saw stands at now. A number that
   points at a readable line is refused. The removed text is printed, handed back
-  under `--json` (`dry_run` tells the preview from the removal) and kept in the
-  journal's `rm` entry.
+  under `--json` (`dry_run` tells the preview from the removal, `match` carries the
+  hash) and kept in the journal's `rm` entry.
 
 ### Changed
 
@@ -61,6 +64,20 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   `MOAI_REPO` when it is not the default. A directory at `<dir>/moai` is refused even
   with `--force`, and an install directory that cannot be made or written stops
   before the download too.
+
+- **The merge driver settles an id that stands twice as one group.** A readable row
+  and an unreadable twin under one id went to a person unless all three sides held
+  the same rows, so a branch that removed the twin with `moai rm --line` conflicted
+  with every branch that had not touched it, and when both had removed it the two
+  panels held the same line. The rows under that id are now compared as a group,
+  three-way: a group only one side changed is taken as that side holds it, a group
+  both sides changed alike is taken once, and only a group the two sides changed
+  differently goes to a person — one side removing the live row while the other
+  removes its twin still does, and so does removing the twin on one side while the
+  issue is edited on the other. This takes back part of 0.1.2's "everything either
+  side touched still goes to a person": a branch that brought in a twin is now
+  merged as it holds it, at exit 0, and `moai status` is what names the id
+  (`Ids standing twice`).
 
 ### Fixed
 

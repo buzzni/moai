@@ -1646,6 +1646,11 @@ fn field(json: &str, key: &str) -> String {
     rest[..rest.find('"').unwrap()].to_string()
 }
 
+/// `moai rm --line <n>` 이 보여 준 원문 해시 — `--yes` 에 곁들일 `--match` 값(moai-6nha).
+fn line_match(dir: &Path, n: &str) -> String {
+    field(&ok(dir, &["rm", "--line", n, "--json"]), "match")
+}
+
 /// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 **id 만 든** 것. 없으면 `None` 이고,
 /// **빈 배열과 없는 키는 다르다**(AGENTS.md).
 ///
@@ -9846,9 +9851,11 @@ fn rm_line_removes_only_the_broken_twin() {
     assert!(!asked.contains("\"removed\""), "`rm <id>` 의 배열 키를 불리언으로 세웠다\n{asked}");
     assert_eq!(issues(s.path()), before, "--yes 없이 지웠다");
     let shown = ok(s.path(), &["rm", "--line", &n.to_string()]);
-    assert!(shown.contains(&twin) && shown.contains("--yes"), "원문과 다음 걸음을 안 보였다\n{shown}");
+    let hash = field(&asked, "match");
+    let next = format!("moai rm --line {n} --yes --match {hash}");
+    assert!(shown.contains(&twin) && shown.contains(&next), "원문과 그대로 칠 명령을 안 보였다\n{shown}");
 
-    let done = ok(s.path(), &["rm", "--line", &n.to_string(), "--yes", "--json"]);
+    let done = ok(s.path(), &["rm", "--line", &n.to_string(), "--yes", "--match", &hash, "--json"]);
     assert!(done.contains("\"dry_run\":false") && done.contains("잘"), "{done}");
     let after = issues(s.path());
     assert!(!after.contains(&twin), "쌍둥이가 남았다\n{after}");
@@ -9872,7 +9879,7 @@ fn rm_line_refuses_a_readable_or_missing_line() {
     let id = add(s.path(), &["산 줄"]);
     let before = issues(s.path());
 
-    let out = moai(s.path(), &["rm", "--line", "1", "--yes"]);
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", "00000000"]);
     assert!(!out.status.success(), "읽히는 줄을 번호로 지웠다");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
@@ -9896,7 +9903,8 @@ fn rm_line_removes_a_line_with_no_id() {
     let hint = moai(s.path(), &["show"]);
     assert!(String::from_utf8_lossy(&hint.stderr).contains("moai rm --line"), "지우는 길을 안 댔다");
 
-    let done = ok(s.path(), &["rm", "--line", "1", "--yes", "--json"]);
+    let hash = line_match(s.path(), "1");
+    let done = ok(s.path(), &["rm", "--line", "1", "--yes", "--match", &hash, "--json"]);
     assert!(done.contains("\"id\":null"), "없는 id 를 지어냈다\n{done}");
     assert!(!issues(s.path()).contains("JSON 도 아니다"));
     assert!(moai(s.path(), &["status"]).status.success());
@@ -9919,12 +9927,114 @@ fn rm_line_refusal_after_a_shift_names_where_the_line_went() {
     assert_ne!(now, 1, "쌍둥이가 안 밀렸다 — 시험이 낡았다");
     let before = issues(s.path());
 
-    let out = moai(s.path(), &["rm", "--line", "1", "--yes"]);
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", "00000000"]);
     assert!(!out.status.success(), "밀린 번호로 산 줄을 지웠다");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
     assert!(err.contains(&format!("{now} ({first})")), "쌍둥이가 간 자리를 안 댔다\n{err}");
     assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+}
+
+/// **`--yes` 는 보여 준 줄에 묶인다**(moai-6nha, 2026-09-29 사용자 결정). 보여 준 뒤 줄 수가 바뀌어
+/// 번호가 밀리면, 그 번호에는 **다른** 못 읽는 줄이 설 수 있다 — 번호만 보고 지우던 때는 그 줄이
+/// 말없이 갔다(리뷰 moai-mo9v.1ln 2번). 그 번호의 원문이 보여 준 해시와 다르면 거절하고 파일을 안 바꾼다.
+#[test]
+fn rm_line_yes_is_bound_to_the_line_shown() {
+    let s = init("rmlinematch");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("첫 쓰레기\n둘째 쓰레기\n{}", issues(s.path()))).unwrap();
+    let first = line_match(s.path(), "1");
+    let second = line_match(s.path(), "2");
+    assert_ne!(first, second, "다른 줄이 같은 해시를 냈다");
+    let before = issues(s.path());
+
+    // 2줄에서 본 해시를 들고 1줄을 지우려 든다 — 밀린 번호가 떨어지는 바로 그 경우다.
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", &second, "--json"]);
+    assert!(!out.status.success(), "보여 준 것과 다른 줄을 지웠다");
+    let said = text(&out);
+    assert!(said.contains("not_found"), "{said}");
+    // **보여 준 줄이 지금 선 번호를 댄다**(리뷰 moai-mo9v.w12). 그 번호에 선 딴 줄의 해시나 같은 번호를
+    // 다시 보라는 명령은 안 댄다 — 둘 다 아무도 안 본 줄을 지울 인자다.
+    assert!(said.contains("자리: 2"), "보여 준 줄이 선 자리를 안 댔다\n{said}");
+    assert!(!said.contains(&first) && !said.contains("moai rm "), "그 번호에 선 딴 줄을 지울 인자를 댔다\n{said}");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+
+    // 대소문자와 앞뒤 빈칸은 안 가린다 — 손으로 옮겨 친 값이다.
+    ok(s.path(), &["rm", "--line", "1", "--yes", "--match", &format!(" {} ", first.to_uppercase())]);
+    let after = issues(s.path());
+    assert!(!after.contains("첫 쓰레기") && after.contains("둘째 쓰레기"), "{after}");
+}
+
+/// **같은 명령을 다시 쳐도 둘째 벌은 안 간다**(리뷰 moai-mo9v.w12). 똑같은 못 읽는 줄 두 벌 가운데 하나를
+/// 지우면 그 번호로 밀려 온 둘째 벌은 바이트로는 보여 준 줄과 같다 — 해시가 벌 수를 안 세던 동안은 시간이
+/// 넘쳐 다시 친 같은 명령에 그 벌도 말없이 갔다. 새 moai 가 쓴 줄이 두 벌 남은 경우 한 벌은 남길 줄이다.
+#[test]
+fn rm_line_the_same_command_twice_leaves_the_second_copy() {
+    let s = init("rmlinecopies");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}새 줄\n새 줄\n", issues(s.path()))).unwrap();
+    let hash = line_match(s.path(), "2");
+    ok(s.path(), &["rm", "--line", "2", "--yes", "--match", &hash]);
+    let once = issues(s.path());
+    assert_eq!(once.lines().filter(|l| *l == "새 줄").count(), 1, "한 벌만 지워야 한다\n{once}");
+
+    let again = moai(s.path(), &["rm", "--line", "2", "--yes", "--match", &hash]);
+    assert!(!again.status.success(), "같은 명령이 둘째 벌까지 지웠다");
+    assert_eq!(issues(s.path()), once, "거절하고도 파일을 바꿨다");
+}
+
+/// **해시 없는 `--yes` 와 `--yes` 없는 해시는 거절한다**(moai-6nha). 앞의 것은 번호만 보고 지우던
+/// 옛 길이고, 뒤의 것은 친 사람이 지운 줄로 읽는다. 둘 다 `bad_input` 이고 파일을 안 바꾼다.
+///
+/// **해시 꼴이 아닌 값도 해시가 없는 것이다**(리뷰 moai-mo9v.w12). 빈 값·오타를 락 안까지 가져가면
+/// "줄이 움직였거나 바뀌었다" 로 거절해, 움직이지 않은 줄을 두고 다시 보라고 했다. id 로 지우는 길에
+/// 붙인 `--match` 도 `bad_input` 이다 — 그 거절문이 `--yes` 만 대던 동안 `yes_without_line` 과 돌았다.
+#[test]
+fn rm_line_refuses_yes_without_match_and_match_without_yes() {
+    let s = init("rmlinenomatch");
+    let id = add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("쓰레기\n{}", issues(s.path()))).unwrap();
+    let hash = line_match(s.path(), "1");
+    let before = issues(s.path());
+
+    for args in [
+        &["rm", "--line", "1", "--yes", "--json"][..],
+        &["rm", "--line", "1", "--match", &hash, "--json"],
+        &["rm", "--line", "1", "--yes", "--match", "", "--json"],
+        &["rm", "--line", "1", "--yes", "--match", "zz", "--json"],
+        &["rm", &id, "--match", &hash, "--json"],
+    ] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?}: 지나 보냈다");
+        let said = text(&out);
+        assert!(said.contains("bad_input"), "{args:?}: {said}");
+        assert_eq!(issues(s.path()), before, "{args:?}: 거절하고도 파일을 바꿨다");
+    }
+}
+
+/// **보여 준 명령은 보여 준 트래커로 간다**(리뷰 moai-mo9v.w12). `-C` 로 부른 미리 보기가 맨 명령을 대면
+/// 따라 친 셸이 제 자리의 트래커를 열고, 그 트래커의 같은 번호에 같은 바이트가 서 있으면 해시까지 맞는다.
+/// 해시 없는 `--yes` 의 거절문이 대는 보는 명령도 같은 꼴이다.
+#[test]
+fn rm_line_preview_command_keeps_the_dir_it_was_given() {
+    let s = init("rmlinedir");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}쓰레기\n", issues(s.path()))).unwrap();
+    let root = std::fs::canonicalize(s.path()).unwrap();
+    let dir = s.path().display().to_string();
+    let away = Scratch::new("rmlinedir-away");
+
+    let hash = field(&ok(away.path(), &["-C", &dir, "rm", "--line", "2", "--json"]), "match");
+    let shown = ok(away.path(), &["-C", &dir, "rm", "--line", "2"]);
+    let go = format!("moai -C {} rm --line 2 --yes --match {hash}", root.display());
+    assert!(shown.contains(&go), "-C 로 본 줄을 지우는 명령에 -C 가 없다\n{shown}");
+    let out = moai(away.path(), &["-C", &dir, "rm", "--line", "2", "--yes"]);
+    let said = text(&out);
+    assert!(said.contains(&format!("moai -C {} rm --line 2", root.display())), "{said}");
 }
 
 /// **지운 줄의 원문은 사람 화면에도 선다**(리뷰 moai-mo9v.1ln). 번호가 다른 못 읽는 줄에 떨어져도
@@ -9943,9 +10053,13 @@ fn rm_line_prints_what_it_removed_without_control_characters() {
     let n = (issues(s.path()).lines().position(|l| l == twin).unwrap() + 1).to_string();
     let n = n.as_str();
     let drawn = format!("{{\"id\":\"{id}\",\"title\":\"x[2JY");
+    let hash = line_match(s.path(), n);
 
     // **색을 켜고 잰다** — `--color always` 는 `NO_COLOR` 를 이겨 anstream 이 아무것도 안 걷는다.
-    for args in [&["rm", "--line", n, "--color", "always"][..], &["rm", "--line", n, "--yes", "--color", "always"]] {
+    for args in [
+        &["rm", "--line", n, "--color", "always"][..],
+        &["rm", "--line", n, "--yes", "--match", &hash, "--color", "always"],
+    ] {
         let out = ok(s.path(), args);
         assert!(out.contains(&drawn), "{args:?}: 지울 줄의 원문을 안 보였다\n{out:?}");
         assert!(!out.contains("\u{1b}[2J") && !out.contains('\r'), "{args:?}: 파일의 제어문자를 그렸다\n{out:?}");
