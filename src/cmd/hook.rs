@@ -63,8 +63,10 @@ pub fn run(ctx: &Ctx, event: Event) -> R<Vec<String>> {
     anstream::ColorChoice::Never.write_global();
 
     // **넘길 자리의 옛 쪽지는 맨 먼저 걷는다**(moai-45hf.wqg). 그 이름은 셸의 pid 로 지어져, pid 가
-    // 돌아오면 먼저 죽은 셸이 못 올린 쪽지가 이번 판의 것처럼 읽힌다 — 보드를 안 지은 판이 남의
-    // 표식을 세운다. 이번 판이 쓸 것은 [`once_per_session`] 이 새로 쓴다.
+    // 돌아오면 먼저 죽은 셸이 못 올린 쪽지가 이번 호출의 것처럼 읽힌다 — 보드를 안 지은 호출이 남의
+    // 표식을 세운다. 이번 호출이 쓸 것은 [`once_per_session`] 이 새로 쓴다. **어느 이벤트든 걷는다** —
+    // 셸은 `moai` 가 무엇이든 내면 쪽지를 읽으니(`PreToolUse` 의 거절도), 보드를 안 짓는 이벤트가 곧
+    // 그 호출이다.
     if let Some(slip) = handoff() {
         let _ = std::fs::remove_file(slip);
     }
@@ -763,10 +765,10 @@ fn baseline(input: &Input, repo: &Repo) -> Option<usize> {
 /// 그래서 셸이 [`HANDOFF`] 로 쪽지 자리를 주면 표식 이름을 거기에 적어 넘기고, 셸이 `printf` 에
 /// 이긴 뒤에 그 이름으로 표식을 세운다.
 ///
-/// **쪽지를 못 쓰면 옛 길로 간다** — 표식을 여기서 바로 세운다. 쪽지 자리를 안 주는 셸은 이 판 전에
+/// **쪽지를 못 쓰면 옛 길로 간다** — 표식을 여기서 바로 세운다. 쪽지 자리를 안 주는 셸은 이 버전 전에
 /// 심은 줄이고(다시 심을 때까지 그 복사가 돈다), 그 줄에서 표식을 안 세우면 보드가 매 프롬프트에
-/// 실린다. 쪽지 자리를 남이 먼저 잡은 판도 같다: 셸은 제 것이 아닌 쪽지를 안 읽으므로 여기서
-/// 안 세우면 아무도 안 세운다.
+/// 실린다. 쪽지 자리를 남이 먼저 잡은 경우도 같다: 셸은 제 것이 아닌 쪽지를 안 읽으므로 여기서
+/// 안 세우면 아무도 안 세운다. 쪽지 자리나 표식 이름이 상대 경로인 경우도 같다([`hand_off`]).
 fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() -> Decision) -> Decision {
     let Some(path) = session_file(input, repo, what) else {
         // 누구인지 모르면 한 번을 보장할 수 없다. **그러면 싣지 않는다** —
@@ -787,8 +789,13 @@ fn once_per_session(input: &Input, repo: &Repo, what: &str, make: impl FnOnce() 
 pub const HANDOFF: &str = "MOAI_HOOK_HANDOFF";
 
 /// 셸이 준 쪽지 자리. 빈 값은 없는 것이다.
+///
+/// **절대 경로만 받는다**(리뷰 moai-45hf.nab). 셸은 `$h` 를 제 자리에서 푸는데 `moai` 는 [`run`] 에서
+/// stdin 의 `cwd` 로 옮긴 **뒤에** 쪽지를 쓴다. 상대 `TMPDIR` 이고 두 자리가 갈리면(훅 프로세스의 자리는
+/// 아무도 약속하지 않았다) 둘이 다른 파일을 가리켜, 셸은 쪽지를 못 찾고 `moai` 는 표식을 안 세워 보드가
+/// 매 프롬프트에, `Stop` 의 붙듦이 매 턴에 섰다. 안 받으면 옛 길이라 한 번은 그대로 한 번이다.
 fn handoff() -> Option<PathBuf> {
-    std::env::var_os(HANDOFF).filter(|v| !v.is_empty()).map(PathBuf::from)
+    std::env::var_os(HANDOFF).filter(|v| !v.is_empty()).map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
 /// 표식 이름을 쪽지에 적는다. 적었으면 참이다.
@@ -797,19 +804,63 @@ fn handoff() -> Option<PathBuf> {
 /// 파일, 링크) 거기에 안 쓴다. `run` 이 맨 앞에서 제 옛 쪽지를 걷었으니 남은 것은 못 걷은 것이다.
 ///
 /// **줄바꿈이 든 이름은 안 넘긴다** — 셸은 `read -r` 로 첫 줄만 읽으니, 그 이름은 딴 파일을 세운다.
-/// 덜 쓴 쪽지도 같은 까닭으로 걷는다: 잘린 이름이 셸에게는 멀쩡한 이름이다.
+/// **덜 쓴 쪽지는 따로 걷지 않는다**(리뷰 moai-45hf.nab) — 줄바꿈이 맨 끝 바이트라 쓰기가 지면 쪽지는
+/// 줄바꿈 없이 끝나고, 셸의 `read` 는 줄바꿈 전에 끝난 줄에 비영을 내 그 이름으로 아무것도 안 세운다.
+/// 남은 쪽지는 [`prune_slips`] 가 걷는다.
+///
+/// **상대 이름도 안 넘긴다**(리뷰 moai-45hf.nab). 표식 자리는 `std::env::temp_dir()` 에서 오는데, 그
+/// 값은 `TMPDIR` 을 거르지 않고 돌려줘 빈 값(`TMPDIR=`)이면 빈 경로다. 셸의 `${TMPDIR:-/tmp}` 는 그것을
+/// `/tmp` 로 읽어 쪽지 자리만 절대가 되고, 상대 이름은 셸이 제 자리에 세우는 동안 `moai` 는 옮겨 간
+/// stdin 의 `cwd` 에서 찾는다. 그래서 [`handoff`] 와 따로 본다.
+///
+/// **쪽지는 제 것만 읽고 쓰게(`0600`) 만든다**(리뷰 moai-45hf.nab). 셸은 주인(`-O`)만 보고 적힌 글은
+/// 믿는다 — 느슨한 umask(`002` 에 같은 그룹)에서는 그 사이에 옆 사람이 이름을 바꿔 적을 수 있고, 그러면
+/// 셸이 남이 고른 자리에 빈 파일을 세운다.
 fn hand_off(mark: &Path) -> bool {
     use std::io::Write as _;
     let Some(slip) = handoff() else { return false };
-    let Some(name) = mark.to_str().filter(|n| !n.contains('\n')) else { return false };
-    let Ok(mut file) = std::fs::OpenOptions::new().write(true).create_new(true).open(&slip) else {
+    if !mark.is_absolute() {
         return false;
-    };
-    let wrote = writeln!(file, "{name}").is_ok();
-    if !wrote {
-        let _ = std::fs::remove_file(&slip);
     }
+    let Some(name) = mark.to_str().filter(|n| !n.contains('\n')) else { return false };
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
+    let wrote = open.open(&slip).is_ok_and(|mut file| writeln!(file, "{name}").is_ok());
+    prune_slips(&slip);
     wrote
+}
+
+/// **다 쓴 쪽지는 다음 쪽지를 쓸 때 걷는다**(리뷰 moai-45hf.nab). 셸은 내장만 써서 읽은 쪽지를 못
+/// 지우고, [`run`] 이 맨 앞에서 걷는 것은 제 셸의 `$$` 로 지은 이름 하나뿐이다 — 앞선 호출의 쪽지는
+/// 아무도 안 걷어 보드와 `Stop` 을 넘길 때마다 하나씩 영영 쌓였다. 셸은 넘겨받은 쪽지를 매니페스트
+/// `timeout`(15초) 안에 읽거나 그 전에 죽으므로, 그보다 한참 오래된 쪽지는 읽을 이가 없다.
+///
+/// 지우는 것은 같은 자리의 `moai-hook-*.handoff` 보통 파일뿐이다(링크는 안 따라간다). 넘길 때만
+/// 치운다 — 세션에 한두 번이라, 임시 디렉터리를 훑는 비용을 도구 호출마다 치르지 않는다.
+fn prune_slips(mine: &Path) {
+    const KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+    let Some(dir) = mine.parent() else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let ours = name.to_str().is_some_and(|n| n.starts_with("moai-hook-") && n.ends_with(".handoff"));
+        if !ours || entry.path() == mine {
+            continue;
+        }
+        // `DirEntry::metadata` 는 링크를 안 따라간다 — 링크는 보통 파일로 안 센다.
+        let stale = entry
+            .metadata()
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > KEEP);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// `Stop` 이 견줄 기준선 — 세션이 열릴 때의 경고 수.
