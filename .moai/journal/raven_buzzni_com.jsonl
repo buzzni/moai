@@ -2025,3 +2025,9 @@
 {"ts":"2026-09-29T10:35:36Z","id":"moai-y8v2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 남은 일 없음. 27865a3d 로 develop 에 병합했고 감독(moa-issue-b6)에게 보고했다. 넘긴 것은 idea moai-re3s 하나다"}
 {"ts":"2026-09-29T10:36:18Z","id":"moai-59k3.u09","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T10:36:19Z","id":"moai-59k3.yo6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T10:38:44Z","id":"moai-7myd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"A linked tracker file bypasses the merge driver"}
+{"ts":"2026-09-29T10:38:46Z","id":"moai-iral","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"The worktree overlay loses its deletion baseline when the tracker is a link"}
+{"ts":"2026-09-29T10:38:47Z","id":"moai-jo3h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai status says so when the tracker file is a link"}
+{"ts":"2026-09-29T10:38:59Z","id":"moai-wd44","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Appends to repository files still follow links out of the checkout"}
+{"ts":"2026-09-29T10:39:01Z","id":"moai-illd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init prints \"make it writable\" after a link refusal that already said why"}
+{"ts":"2026-09-29T10:39:19Z","id":"moai-59k3.yo6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-09-29): 집기 기록 자리를 temp 밖, 사용자 config 곁(`<config dir>/picks/<key>`)으로 옮긴다. key 는 실제 트래커 자리로 잰다. config 자리를 모르면 기록을 안 남긴다."}
