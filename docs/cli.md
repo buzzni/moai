@@ -496,15 +496,21 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  An unreadable line - one `moai show` and `moai status` name but cannot
-  read as an issue - is not reachable by id. Remove it by its line number:
+  An unreadable line - a row that cannot be read as an issue, which
+  `moai status` counts and `moai show` names by line number - is not
+  reachable by id. When it is not worth keeping (a broken twin, junk),
+  remove it by its line number; a row a newer moai wrote reads again after
+  upgrading, so keep that one:
 
   moai rm --line 812          shows the line, removes nothing
   moai rm --line 812 --yes    removes it
 
-  Only an unreadable line is removed; a line that reads as an issue is refused
-  (remove that by id). Removing cannot be undone - the raw line goes into the
-  journal's `rm` entry and `--json` hands it back, to be put back by hand.
+  Only an unreadable line is removed; any other line is refused, and the
+  refusal lists the unreadable lines as they stand now. Numbers move when a
+  row comes or goes - an earlier removal included - so look again before
+  each --yes. Removing cannot be undone: the raw line is printed, goes into
+  the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
+  be put back by hand.
 ```
 
 ## `moai note`

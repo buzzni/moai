@@ -90,9 +90,15 @@ moai rm --line 812          # shows the line, removes nothing
 moai rm --line 812 --yes    # removes it
 ```
 
-Only an unreadable line is removed that way; a line that reads as an issue is
-refused and named, so remove that one by id. The raw line goes into the
-journal's `rm` entry and `--json` hands it back.
+Only an unreadable line is removed that way; any other line is refused, and
+the refusal lists the unreadable lines as they stand now, each with the id it
+carries. Numbers move whenever a row comes or goes — an earlier `rm --line`
+included — so look again before each `--yes`. The removed line is printed,
+goes into the journal's `rm` entry (up to 64KB) and `--json` hands it back
+whole.
+
+A row written by a newer moai — a `kind` this binary does not know — is not
+broken. It reads again once this binary is upgraded, so leave it where it is.
 
 Reading a broken file still works for the lines that parse, so `moai show` and
 `moai ready` keep answering while you fix it.

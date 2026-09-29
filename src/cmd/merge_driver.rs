@@ -332,18 +332,18 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
 /// **두 쪽의 답을 먼저 다 재고 나서 옮긴다.** 이쪽을 먼저 옮기면 이쪽 `opaque` 가 그 옮김으로
 /// 늘어, 저쪽을 잴 때 "늘었는가" 가 이 함수가 만든 사실로 참이 된다.
 ///
-/// **짝을 푼 줄이 든 답은 제 자신의 고정점이 아니다**(리뷰 moai-47yo.76c 8번, 2026-09-23
-/// 사용자 결정으로 받아들였다). 여기서 푼 줄은 이번 답에서 [`unkeyed`] 가 내고(바탕의 못 읽는
-/// 줄 **뒤**), 다음 머지는 그 줄의 머리를 다시 긁어 짝지어 `carried` 로 내므로(그 **앞**)
-/// 자리가 한 칸 옮는다. 바탕에 다른 못 읽는 줄이 있을 때만 보이고, 잰 판은 이렇다 —
-/// `[0002, 쓰레기, 이쪽깨짐, 저쪽깨짐]` 이 `[0002, 이쪽깨짐, 쓰레기, 저쪽깨짐]` 이 된다.
+/// **짝을 푼 줄의 벌 수는 [`unkeyed`] 가 세고, 자리는 [`by_issue`] 가 정한다**(리뷰 moai-mo9v.1ln).
+/// 여기서 푼 줄을 `carried` 로 바로 실으면 [`unkeyed`] 의 벌 수 셈을 건너뛰어, 바탕의 깨진 줄이
+/// 지워져야 할 자리에서 되살아난다(재 봤다). 그래서 셈은 [`unkeyed`] 에 맡기고, 살아남은 줄 가운데
+/// 머리가 긁히는 것만 [`by_issue`] 가 `carried` 의 id 차례에 끼운다 — 다음 머지가 그 줄을 다시
+/// 짝지어 내는 자리가 거기다.
 ///
-/// **줄은 하나도 안 사라지고 한 번만 움직인다.** `store::with_write` 의 고정점은 그대로 선다 —
-/// `store::render_issues` 는 못 읽는 줄을 읽은 차례대로 파일 끝에 쓰므로 그 답을 읽고 되쓰면
-/// 바이트가 같다. 여기서 푼 줄을 `carried` 로 바로 실어 고치려 들면 [`unkeyed`] 의 벌 수 셈을
-/// 건너뛰어, 바탕의 깨진 줄이 지워져야 할 자리에서 되살아난다(재 봤다). 그 셈과 자리를 한 자로
-/// 모으는 것은 moai-1a55.4oh 가 정한 [`unkeyed`] 의 계약을 다시 짜는 일이라, 고칠 때가 오면
-/// 멤버를 따로 세운다.
+/// 한때 이 답은 제 자신의 고정점이 아니었다(리뷰 moai-47yo.76c 8번, 2026-09-23 사용자 결정으로
+/// 받아들였다). 푼 줄을 [`unkeyed`] 가 제 칸에 내고 다음 머지는 `carried` 로 내어, 자리가 한 칸
+/// 옮았다 — `[0002, 쓰레기, 이쪽깨짐, 저쪽깨짐]` 이 `[0002, 이쪽깨짐, 쓰레기, 저쪽깨짐]` 이 됐고,
+/// `carried` 에 더 큰 id 의 못 읽는 줄이 서면 그 둘이 자리를 바꿨다. 줄은 그때도 하나도 안 사라졌고,
+/// `store::with_write` 의 고정점은 어느 때나 선다 — `store::render_issues` 는 못 읽는 줄을 읽은
+/// 차례대로 파일 끝에 쓴다.
 fn unpair<'s>(o: &mut Keyed<'s>, a: &mut Keyed<'s>, b: &mut Keyed<'s>) {
     /// 열쇠를 거둘 id 들. 순수 함수다.
     fn loosened(base: &BTreeMap<&str, usize>, o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>) -> Vec<String> {
@@ -427,6 +427,12 @@ fn keyed(src: &str) -> Option<Keyed<'_>> {
     let mut by_id: BTreeMap<String, Vec<Row<'_>>> = BTreeMap::new();
     let mut opaque = Vec::new();
     for line in src.lines() {
+        // **꼬리의 `\r` 하나는 줄 끝 표시다**(리뷰 moai-mo9v.1ln). `str::lines` 는 `\n` 앞의 `\r` 만 같이
+        // 떼므로, CRLF 로 받은 체크아웃에서 끝 줄바꿈이 없는 파일의 마지막 줄만 `\r` 을 달고 선다. 그
+        // 줄을 그대로 실으면 답이 `…\r\n` 을 쓰고 다음 읽기가 그 `\r` 을 떼어, 아무도 안 건드린 줄이
+        // 한 번 더 뜬다 — [`kept`] 가 바이트로 3-way 를 돌리며 그 `\r` 을 "고친 쪽" 으로 골랐다. 다른
+        // 줄의 `\r` 은 `lines` 가 이미 뗐으니, 여기서 떼야 세 쪽의 모든 줄이 한 자로 선다.
+        let line = line.strip_suffix('\r').unwrap_or(line);
         if line.trim().is_empty() {
             continue;
         }
@@ -478,7 +484,9 @@ fn row(line: &str) -> Option<(String, Row<'_>)> {
 fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: usize) -> (String, Vec<String>) {
     let ids: BTreeSet<&String> = o.by_id.keys().chain(a.by_id.keys()).chain(b.by_id.keys()).collect();
     let mut out = String::with_capacity(hint);
-    let mut carried = Vec::new();
+    // 짝은 졌지만 `Issue` 로 못 읽는 줄 — **그 id 와 함께** 든다. 아래에서 [`unkeyed`] 가 살린 줄 가운데
+    // 머리가 긁히는 줄을 같은 id 차례에 끼우려면 id 가 있어야 한다.
+    let mut carried: Vec<(String, String)> = Vec::new();
     let mut clashes = Vec::new();
     for id in ids {
         fn at<'r, 's>(k: &'r Keyed<'s>, id: &str) -> Option<&'r [Row<'s>]> {
@@ -490,7 +498,7 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
             id: &str,
             marker: usize,
             out: &mut String,
-            carried: &mut Vec<String>,
+            carried: &mut Vec<(String, String)>,
             clashes: &mut Vec<String>,
         ) {
             match s {
@@ -500,7 +508,7 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
                     out.push('\n');
                 }
                 // 짝은 졌지만 `Issue` 로 못 읽는 줄이다 — 아래 못 읽는 줄 칸으로 미룬다.
-                Settled::Opaque(line) => carried.push(line),
+                Settled::Opaque(line) => carried.push((id.to_string(), line)),
                 Settled::Each(all) => {
                     for one in all {
                         place(one, id, marker, out, carried, clashes);
@@ -514,14 +522,29 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
         }
         place(settle(at(o, id), at(a, id), at(b, id)), id, marker, &mut out, &mut carried, &mut clashes);
     }
+    // **머리가 긁히는 줄은 그 id 자리에 선다**(리뷰 moai-mo9v.1ln). [`unkeyed`] 가 벌 수로 살린 줄
+    // 가운데 [`row`] 가 열쇠를 주는 것은 [`unpair`] 가 열쇠를 거둔 줄뿐인데, 다음 머지는 그 줄을 다시
+    // 짝지어 `carried` 로 — id 차례로 — 낸다. 여기서 같은 차례에 세워야 이 답이 제 고정점이다. 벌 수는
+    // 그대로 [`unkeyed`] 의 셈이라, 거둔 줄을 셈 앞에서 `carried` 로 싣던 판이 되살리던 줄은 여기 안 온다.
+    //
+    // 안정 정렬이라 한 id 안의 차례는 그대로다 — [`settle`] 이 낸 줄과 [`unkeyed`] 가 낸 줄이 한 id 를
+    // 나누는 일은 없다([`unpair`] 가 거둔 id 는 두 쪽 어디에도 안 남아 [`settle`] 이 아무것도 안 낸다).
+    let mut keyless = Vec::new();
+    for line in unkeyed(&o.opaque, &a.opaque, &b.opaque) {
+        match row(line) {
+            Some((id, _)) => carried.push((id, line.to_string())),
+            None => keyless.push(line),
+        }
+    }
+    carried.sort_by(|p, q| p.0.cmp(&q.0));
     // **못 읽는 줄은 뒤에 원문 그대로 붙는다** — `store::render_issues` 가 두는 자리와 같다.
     // 짝지은 것이 id 차례로 먼저 서고 열쇠 없는 것이 뒤따르는데, 그 다음 쓰기가 읽은 차례를
     // 그대로 되쓰므로 이 차례가 곧 고정점이다(멱등성).
-    for line in carried {
+    for (_, line) in carried {
         out.push_str(&line);
         out.push('\n');
     }
-    for line in unkeyed(&o.opaque, &a.opaque, &b.opaque) {
+    for line in keyless {
         out.push_str(line);
         out.push('\n');
     }
@@ -549,10 +572,11 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
 ///
 /// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 두 쪽이 더한 줄이 뒤따른다.
 /// 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다. 잃는 것은 없고(줄은
-/// 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지 커밋에 한 번 뜬다.
+/// 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지 커밋에 한 번 뜬다. 여기서
+/// 낸 줄 가운데 [`unpair`] 가 열쇠를 거둔 줄은 [`by_issue`] 가 `carried` 의 id 자리로 옮긴다.
 ///
 /// **더한 줄은 이쪽 것이 먼저가 아니다**(moai-mo9v.qgj). 두 쪽 가운데 못 읽는 줄 목록이 사전순으로
-/// 앞서는 쪽의 것이 먼저 선다 — 이쪽을 먼저 세우던 판은 두 쪽이 다 더한 판에서 머지 방향에 따라
+/// 앞서는 쪽의 것이 먼저 선다 — 이쪽을 먼저 세우던 판은 두 쪽이 다 더한 경우에 머지 방향에 따라
 /// 바이트를 갈랐다. 한 쪽이 더한 줄끼리의 차례는 그 쪽의 것 그대로다.
 fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
@@ -576,11 +600,6 @@ fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
             out.push(*l);
         }
     }
-    // **다음 머지가 열쇠를 줄 줄이 앞에 선다**(moai-mo9v.qgj). 여기 오는 줄 가운데 머리가 긁히는
-    // 것은 [`unpair`] 가 열쇠를 거둔 줄뿐인데, 다음 머지는 그 줄을 다시 짝지어 이 칸보다 앞의
-    // `carried` 로 낸다. 이쪽 줄을 먼저 세우던 판은 그 줄이 우연히 앞에 서서 고정점이었고, 차례를
-    // 방향에서 떼자 뒤에 서는 판이 생겼다. 안정 정렬이라 같은 갈래 안의 차례는 그대로다.
-    out.sort_by_cached_key(|l| row(l).is_none());
     out
 }
 
@@ -698,9 +717,11 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
     if [o, a, b].iter().any(|v| v.is_some_and(|rs| rs.len() > 1)) {
         // **세 쪽이 그 줄들을 똑같이 들었으면 이번 머지가 고른 것이 없다**(moai-ijfy,
         // 2026-09-23 사용자 결정). 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일이 그 판인데, 세 쪽이
-        // 같은 줄들을 들어 표식의 두 칸도 같은 두 줄이라 사람이 고를 것이 없고 영영 되풀이됐다 — 그
-        // 쌍둥이를 지우는 `moai` 명령도 없다. moai-0k2e 가 검사에 이미 쓴 원칙("답이 한쪽 가지에
-        // 이미 서 있으면")을 이 가드에 그대로 옮긴 것이다. moai-2m94 가 잰 판 둘(한쪽이 `J` 를
+        // 같은 줄들을 들어 표식의 두 칸도 같은 두 줄이라 사람이 고를 것이 없고 영영 되풀이됐다 — 그때는
+        // 그 쌍둥이를 지우는 `moai` 명령도 없었다(지금은 `moai rm --line` 이 지운다. 한쪽만 지운 경우는
+        // 아래 `clash()` 로 여전히 사람에게 간다 — 리뷰 moai-mo9v.1ln 이 사람의 결정으로 넘겼다).
+        // moai-0k2e 가 검사에 이미 쓴 원칙("답이 한쪽 가지에 이미 서 있으면")을 이 가드에 그대로
+        // 옮긴 것이다. moai-2m94 가 잰 판 둘(한쪽이 `J` 를
         // 한쪽이 `G` 를 지운 판, 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 선 판)은 세 쪽이 다르니
         // 그대로 사람에게 간다. 겹쳤다는 사실은 `report` 의 `duplicate_id` 가 말한다(moai-ijfy 가
         // `crate::id::id_of` 로 모은 자리다).
@@ -774,7 +795,7 @@ fn kept<'r, 's>(o: Option<&Row<'_>>, x: &'r Row<'s>, y: &'r Row<'s>) -> &'r Row<
     }
 }
 
-/// 세 쪽이 한 id 로 같은 줄들을 든 판([`rows_alike`])에서 **낼 줄들** — [`kept`] 를 줄마다 돌린다.
+/// 세 쪽이 한 id 로 같은 줄들을 든 경우([`rows_alike`])에 **낼 줄들** — [`kept`] 를 줄마다 돌린다.
 ///
 /// 두 쪽이 바이트까지 같으면 이쪽 차례 그대로다. 아니면 **바탕의 차례로** 짝을 짓는다: 이쪽과
 /// 저쪽을 저마다 바탕에 맞추므로 두 쪽을 바꿔 넘겨도 짝이 안 바뀐다. 짝은 바이트가 같은 줄부터
@@ -2582,7 +2603,7 @@ mod tests {
     }
 
     /// 두 방향으로 합쳐 **바이트가 같은가**를 재고 그 답을 낸다. 충돌이 서면 방향에 따라 표식의
-    /// 두 칸이 뒤바뀌는 것이 맞으므로 여기서는 충돌 없는 판만 잰다.
+    /// 두 칸이 뒤바뀌는 것이 맞으므로 여기서는 충돌 없는 경우만 잰다.
     fn both_ways(o: &str, a: &str, b: &str) -> String {
         let (ours, clashes) = merge(o, a, b);
         assert!(clashes.is_empty(), "{clashes:?}\n{ours}");
@@ -2633,9 +2654,12 @@ mod tests {
         let a = format!("{live}\n{now}\n");
         let text = both_ways(&o, &a, &o);
         assert!(text.contains(&now), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+        // **한 벌만 선다**(리뷰 moai-mo9v.1ln) — 바꾼 줄이 옛 줄을 머리로 품어, `contains` 만으로는 두
+        // 벌이 다 선 답도 지난다.
+        assert_eq!(text.lines().filter(|l| l.starts_with(was)).count(), 1, "두 벌이 다 섰다\n{text:?}");
     }
 
-    /// 산 줄과 그 줄의 깨진 쌍둥이가 선 판([`Settled::Each`])도 같다. 한쪽이 쌍둥이의 꼬리에
+    /// 산 줄과 그 줄의 깨진 쌍둥이가 선 경우([`Settled::Each`])도 같다. 한쪽이 쌍둥이의 꼬리에
     /// 빈칸만 더했으면 그 쪽 바이트가 선다.
     #[test]
     fn a_twin_file_merges_the_same_both_ways() {
@@ -2645,6 +2669,22 @@ mod tests {
         let a = format!("{live}\n{twin} \n");
         let text = both_ways(&o, &a, &o);
         assert!(text.contains(&format!("{twin} \n")), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+        // 쌍둥이도 한 벌만 선다 — 두 벌이 서면 산 id 밑에 셋째 줄이 선다.
+        assert_eq!(text.lines().filter(|l| l.starts_with(twin)).count(), 1, "쌍둥이가 두 벌 섰다\n{text:?}");
+    }
+
+    /// **끝 줄의 꼬리 `\r` 은 바이트 고침이 아니다**(리뷰 moai-mo9v.1ln). CRLF 로 받은 체크아웃에서 끝
+    /// 줄바꿈이 없는 파일은 마지막 줄만 `\r` 을 단다([`keyed`]). [`kept`] 가 그것을 "저쪽이 바꾼 바이트"
+    /// 로 골라 답이 `…\r\n` 을 썼고, 다음 읽기가 그 `\r` 을 떼어 이 답이 제 고정점이 아니었다.
+    #[test]
+    fn a_trailing_carriage_return_is_not_carried_into_the_answer() {
+        let (_, broken) = beheaded("argos-0002");
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{broken}\n");
+        let b = format!("{live}\r\n{broken}\r");
+        let text = both_ways(&o, &o, &b);
+        assert!(!text.contains('\r'), "줄 끝 표시를 원문으로 실었다\n{text:?}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text:?}");
     }
 
     /// 열쇠 없는 줄을 **두 쪽이 저마다 더했으면** 차례가 방향을 안 따른다([`unkeyed`]).
@@ -2656,6 +2696,44 @@ mod tests {
         let b = format!("{live}\n[\"저쪽\"]\n");
         let text = both_ways(&o, &a, &b);
         assert!(text.contains("[\"이쪽\"]") && text.contains("[\"저쪽\"]"), "더한 줄이 빠졌다\n{text}");
+    }
+
+    /// **열쇠를 거둔 줄은 `carried` 의 id 자리에 선다**(리뷰 moai-mo9v.1ln). [`unkeyed`] 가 그 줄을
+    /// 제 칸 앞에만 세우던 동안, `carried` 에 더 큰 id 의 못 읽는 줄이 서 있으면 다음 머지가 둘의 자리를
+    /// 바꿔 이 답이 제 고정점이 아니었다. 다음 머지가 그 줄을 다시 짝지어 내는 자리가 곧 id 차례다.
+    #[test]
+    fn a_line_unpair_demoted_stands_in_its_id_place() {
+        let (intact, ours) = beheaded("argos-0001");
+        // 저쪽은 id 안에서 잘라 머리가 안 긁힌다 — 그래서 [`unpair`] 가 이쪽 줄의 열쇠를 거둔다.
+        let theirs = "{\"id\":\"argos-00";
+        // 세 쪽이 똑같이 든 못 읽는 줄 — [`settle`] 이 `carried` 로 낸다. id 가 거둔 줄보다 크다.
+        let (_, five) = beheaded("argos-0005");
+        let two = line("argos-0002", "");
+        let o = format!("{intact}\n{two}\n{five}\n");
+        let a = format!("{ours}\n{two}\n{five}\n");
+        let b = format!("{theirs}\n{two}\n{five}\n");
+        let text = both_ways(&o, &a, &b);
+        let at = |l: &str| text.lines().position(|x| x == l).unwrap_or_else(|| panic!("{l} 가 안 섰다\n{text}"));
+        assert!(at(&ours) < at(&five), "거둔 줄이 id 자리에 안 섰다\n{text}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
+    }
+
+    /// 두 쪽이 저마다 한 줄씩 짝을 풀어도 같다 — 거둔 줄끼리도 id 차례로 선다. 열쇠를 거둔 줄을
+    /// [`unkeyed`] 의 칸 앞에 모으기만 하던 판은 둘의 차례를 두 쪽 목록의 차례로 세워, 다음 머지가 그
+    /// 둘을 바꿨다.
+    #[test]
+    fn lines_unpair_demoted_on_both_sides_stand_in_id_order() {
+        let (three, three_cut) = beheaded("argos-0003");
+        let (nine, nine_cut) = beheaded("argos-0009");
+        let two = line("argos-0002", "");
+        let o = format!("{three}\n{two}\n{nine}\n");
+        // 이쪽은 0003 을 id 안에서 자르고 0009 의 꼬리를 잘랐다. 저쪽은 그 거울이다.
+        let a = format!("{{\"id\":\"argos-00\n{two}\n{nine_cut}\n");
+        let b = format!("{three_cut}\n{two}\n{{\"id\":\"argos-000\n");
+        let text = both_ways(&o, &a, &b);
+        let at = |l: &str| text.lines().position(|x| x == l).unwrap_or_else(|| panic!("{l} 가 안 섰다\n{text}"));
+        assert!(at(&three_cut) < at(&nine_cut), "거둔 줄이 id 차례로 안 섰다\n{text}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
     }
 
     /// **지나 보내는 줄도 표준형으로 맞춘다**([`shaped`], 리뷰 moai-85o3.p4w). 건너뛰는 것은

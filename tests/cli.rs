@@ -9824,15 +9824,17 @@ fn rm_line_removes_only_the_broken_twin() {
     let before = issues(s.path());
     let n = before.lines().position(|l| l == twin).unwrap() + 1;
 
-    // 묻기만 한다 — 파일도 저널도 그대로다.
+    // 묻기만 한다 — 파일도 저널도 그대로다. 미리 보기와 실행을 가르는 키는 `dry_run` 이다 — 같은
+    // 명령의 `rm <id> --json` 에서 `removed` 는 배열이라 여기서 불리언으로 세우지 않는다(리뷰 moai-mo9v.1ln).
     let asked = ok(s.path(), &["rm", "--line", &n.to_string(), "--json"]);
-    assert!(asked.contains("\"removed\":false") && asked.contains(&format!("\"id\":\"{id}\"")), "{asked}");
+    assert!(asked.contains("\"dry_run\":true") && asked.contains(&format!("\"id\":\"{id}\"")), "{asked}");
+    assert!(!asked.contains("\"removed\""), "`rm <id>` 의 배열 키를 불리언으로 세웠다\n{asked}");
     assert_eq!(issues(s.path()), before, "--yes 없이 지웠다");
     let shown = ok(s.path(), &["rm", "--line", &n.to_string()]);
     assert!(shown.contains(&twin) && shown.contains("--yes"), "원문과 다음 걸음을 안 보였다\n{shown}");
 
     let done = ok(s.path(), &["rm", "--line", &n.to_string(), "--yes", "--json"]);
-    assert!(done.contains("\"removed\":true"), "{done}");
+    assert!(done.contains("\"dry_run\":false") && done.contains("잘"), "{done}");
     let after = issues(s.path());
     assert!(!after.contains(&twin), "쌍둥이가 남았다\n{after}");
     assert!(after.contains("\"title\":\"산 줄\""), "산 줄까지 지웠다\n{after}");
@@ -9845,7 +9847,10 @@ fn rm_line_removes_only_the_broken_twin() {
 }
 
 /// **읽히는 줄은 번호로 안 지운다.** 보여 준 뒤 옆 세션의 쓰기로 줄이 밀리면 번호가 산 이슈를
-/// 가리킬 수 있다 — 거절하고 그 줄을 지울 id 를 댄다. 없는 번호도 거절한다.
+/// 가리킬 수 있다 — 거절한다. 없는 번호도 거절한다.
+///
+/// **거절문은 지우는 명령을 안 댄다**(리뷰 moai-mo9v.1ln). 한때 `moai rm <그 줄의 id>` 를 댔는데,
+/// 번호가 밀린 경우 그 id 는 아무도 겨누지 않은 옆 이슈였다 — 따라 친 쪽이 산 이슈를 잃는다.
 #[test]
 fn rm_line_refuses_a_readable_or_missing_line() {
     let s = init("rmlinelive");
@@ -9855,7 +9860,7 @@ fn rm_line_refuses_a_readable_or_missing_line() {
     let out = moai(s.path(), &["rm", "--line", "1", "--yes"]);
     assert!(!out.status.success(), "읽히는 줄을 번호로 지웠다");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains(&format!("moai rm {id}")), "지울 길을 안 댔다\n{err}");
+    assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
     let out = moai(s.path(), &["rm", "--line", "99"]);
     assert!(!out.status.success(), "없는 줄을 보였다");
     assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
@@ -9880,6 +9885,61 @@ fn rm_line_removes_a_line_with_no_id() {
     assert!(done.contains("\"id\":null"), "없는 id 를 지어냈다\n{done}");
     assert!(!issues(s.path()).contains("JSON 도 아니다"));
     assert!(moai(s.path(), &["status"]).status.success());
+}
+
+/// **밀린 번호의 거절문은 줄이 간 자리를 댄다**(리뷰 moai-mo9v.1ln). 손으로 푼 머지가 쌍둥이를
+/// 앞에 남긴 파일에서 옆 세션이 한 번 쓰면, 쌍둥이는 끝으로 가고 그 번호에는 산 이슈가 선다. 거절은
+/// 지우는 명령 대신 지금 못 읽는 줄을 번호와 id 로 댄다 — 산 줄의 쌍둥이를 거기서 고른다.
+#[test]
+fn rm_line_refusal_after_a_shift_names_where_the_line_went() {
+    let s = init("rmlineshift");
+    let first = add(s.path(), &["첫 줄"]);
+    add(s.path(), &["둘째 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    let twin = format!("{{\"id\":\"{first}\",\"title\":\"잘");
+    std::fs::write(&path, format!("{twin}\n{}", issues(s.path()))).unwrap();
+    // 옆 세션이 한 번 쓴다 — 쌍둥이는 파일 끝으로 가고 1줄에는 산 이슈가 선다.
+    add(s.path(), &["셋째 줄"]);
+    let now = issues(s.path()).lines().position(|l| l == twin).expect("쌍둥이가 사라졌다") + 1;
+    assert_ne!(now, 1, "쌍둥이가 안 밀렸다 — 시험이 낡았다");
+    let before = issues(s.path());
+
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes"]);
+    assert!(!out.status.success(), "밀린 번호로 산 줄을 지웠다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
+    assert!(err.contains(&format!("{now} ({first})")), "쌍둥이가 간 자리를 안 댔다\n{err}");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+}
+
+/// **지운 줄의 원문은 사람 화면에도 선다**(리뷰 moai-mo9v.1ln). 번호가 다른 못 읽는 줄에 떨어져도
+/// 그 자리에서 보이고, 저널 쓰기가 실패했거나 64KB 에서 잘린 줄은 그 화면 말고는 온전히 남는 곳이
+/// 없다. 파일에서 온 글이라 제어문자는 걷고 그린다 — ESC 가 든 줄이 화면을 다시 칠하지 않게.
+///
+/// 산 이슈의 이력은 그 줄을 **못 읽는 줄 삭제** 로 적는다. 이슈를 지운 `rm` 과 같은 낱말로 그리면
+/// 멀쩡한 이슈의 이력이 "삭제" 로 끝난다.
+#[test]
+fn rm_line_prints_what_it_removed_without_control_characters() {
+    let s = init("rmlineprint");
+    let id = add(s.path(), &["산 줄"]);
+    let twin = format!("{{\"id\":\"{id}\",\"title\":\"x\u{1b}[2J\rY");
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}{twin}\n", issues(s.path()))).unwrap();
+    let n = (issues(s.path()).lines().position(|l| l == twin).unwrap() + 1).to_string();
+    let n = n.as_str();
+    let drawn = format!("{{\"id\":\"{id}\",\"title\":\"x[2JY");
+
+    // **색을 켜고 잰다** — `--color always` 는 `NO_COLOR` 를 이겨 anstream 이 아무것도 안 걷는다.
+    for args in [&["rm", "--line", n, "--color", "always"][..], &["rm", "--line", n, "--yes", "--color", "always"]] {
+        let out = ok(s.path(), args);
+        assert!(out.contains(&drawn), "{args:?}: 지울 줄의 원문을 안 보였다\n{out:?}");
+        assert!(!out.contains("\u{1b}[2J") && !out.contains('\r'), "{args:?}: 파일의 제어문자를 그렸다\n{out:?}");
+    }
+    assert!(!issues(s.path()).contains(&twin), "쌍둥이가 남았다");
+
+    let shown = ok(s.path(), &["show", &id, "--color", "always"]);
+    assert!(shown.contains("못 읽는 줄 삭제"), "산 이슈의 이력이 이슈를 지운 것으로 섰다\n{shown}");
+    assert!(!shown.contains("\u{1b}[2J") && !shown.contains('\r'), "이력이 제어문자를 그렸다\n{shown:?}");
 }
 
 /// **가려진 줄의 소속은 표면 어디서도 같은 답이다**(moai-53s2). 소속 지도는 id 로 짠 것이라
