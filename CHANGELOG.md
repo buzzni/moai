@@ -10,6 +10,8 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-29
+
 ### Changed
 
 - **The planted worker brief no longer teaches a git command the harness refuses.** In a
