@@ -1560,8 +1560,7 @@ type Bases = std::collections::HashMap<String, BTreeMap<String, String>>;
 fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
     let mut then = BTreeMap::new();
     let Ok(base) = git(root, &["merge-base", mine, theirs]) else { return then };
-    // `<커밋>:./<경로>` 는 `-C` 로 준 디렉터리에서 푼다 — moai 뿌리가 꼭대기가 아니어도 된다.
-    let Ok(src) = git(root, &["show", &format!("{}:./.moai/issues.jsonl", base.trim())]) else { return then };
+    let Some(src) = snapshot_at(root, base.trim()) else { return then };
     for i in crate::store::parse_issues(&src).issues {
         let at = then.entry(i.id).or_insert_with(String::new);
         if i.updated_at > *at {
@@ -1569,6 +1568,36 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
         }
     }
     then
+}
+
+/// 커밋 `at` 의 `.moai/issues.jsonl` 글 — **링크로 커밋됐으면 그 커밋 안에서 링크를 따라간다**(moai-iral).
+///
+/// `git show <커밋>:<링크>` 는 가리키는 파일이 아니라 링크 글(`../shared/issues.jsonl`)을 낸다. 그것을
+/// 스냅샷으로 풀면 줄이 하나도 없어 지운 줄을 가를 바탕이 비고, main 에서 `moai rm` 한 줄이 옆
+/// 워크트리의 것으로 되살아나 `ready --worktree` 에 말없이 섰다. 상대 링크는 그 링크가 든 자리에서
+/// 잰다 — `<커밋>:./<경로>` 는 `-C` 로 준 디렉터리에서 풀리고 `..` 도 git 이 접는다. moai 뿌리가
+/// 꼭대기가 아니어도 된다.
+///
+/// **그 커밋 안에서 못 푸는 링크는 `None` 이다** — 절대 경로이거나, 저장소 밖을 가리키거나, 고리다.
+/// 그 파일의 옛 글은 git 에 없으니 바탕이 없는 것이고, [`base_of`] 가 말하지 않는 것과 같은 까닭이다.
+/// 링크인 트래커는 `moai status` 가 따로 한 줄로 비춘다(moai-jo3h).
+fn snapshot_at(root: &Path, at: &str) -> Option<String> {
+    let mut path = PathBuf::from("./.moai/issues.jsonl");
+    // 깊이의 끝은 [`crate::path::follow_links`] 와 같은 마흔 번이다.
+    for _ in 0..=40 {
+        let spec = format!("{at}:{}", path.to_str()?);
+        let tree = git(root, &["ls-tree", at, "--", path.to_str()?]).ok()?;
+        let src = git(root, &["show", &spec]).ok()?;
+        if !tree.starts_with("120000 ") {
+            return Some(src);
+        }
+        let to = Path::new(&src);
+        if to.is_absolute() {
+            return None;
+        }
+        path = crate::path::dir_of(&path).join(to);
+    }
+    None
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {

@@ -15246,6 +15246,34 @@ fn worktree_does_not_revive_a_line_removed_here() {
     assert!(!status.contains(&t.tied), "{status}");
 }
 
+/// **링크로 커밋된 트래커도 지운 줄의 바탕을 잃지 않는다**(moai-iral). `git show <갈린 자리>:.moai/issues.jsonl`
+/// 이 가리키는 파일이 아니라 링크 글을 내, 바탕이 비고 여기서 `rm` 한 줄이 옆 워크트리의 것으로 말없이
+/// 되살아났다. 바탕은 그 커밋 안에서 링크를 따라가 읽는다.
+#[cfg(unix)]
+#[test]
+fn worktree_keeps_the_removal_base_of_a_linked_tracker() {
+    let s = Scratch::new("wtrmlink");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("shared")).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "moai 이전"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::rename(main.join(".moai/issues.jsonl"), main.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", main.join(".moai/issues.jsonl")).unwrap();
+    let kept = add(&main, &["남는 일"]);
+    let gone = add(&main, &["여기서 지울 일"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+    ok(&main, &["rm", &gone]);
+
+    let shown = ok(&main, &["show", "--worktree"]);
+    assert!(shown.contains(&kept), "{shown}");
+    assert!(!shown.contains(&gone), "여기서 지운 줄이 링크인 트래커의 옆 줄로 되살았다\n{shown}");
+    let ready = ok(&main, &["ready", "--worktree", "--json"]);
+    assert!(!ready.contains(&gone), "지운 일을 집으라고 낸다\n{ready}");
+}
+
 /// 옆에서 **늦게 미루거나 도로 집은 것**은 여기서 먼저 옮긴 칸에 가려지지 않는다(moai-l11z).
 /// 미루기는 칸을 안 옮기지만 `planned_at` 이 그 때를 적는다 — 도로 집어 `deferred_at` 이
 /// 지워져도 남는다. (moai-4i82 에서 e9 세션이 짠 시험을 받았다.)
