@@ -1318,6 +1318,15 @@ mod tests {
 
     /// **프로젝트마다 제 파일이다**(moai-omx7) — 이름이 같은 디렉터리 둘이 같은 id 를 써도 서로의
     /// 읽음을 안 민다. 그 섞임이 이 에픽을 연 까닭이다.
+    /// **읽음을 고쳐 적어도 사람이 적은 따옴표가 남는다**(moai-5thc) — 적는 자가 설정과 같은 `write_value` 다.
+    #[test]
+    fn a_rewritten_mark_keeps_its_quotes() {
+        let src = "[read]\nmoai-1 = '2026-09-01T00:00:00Z'  # 처음\n";
+        let mut sheet = Sheet::parse(src).unwrap();
+        sheet.mark(&marks(&[("moai-1", "2026-09-02T00:00:00Z")])).unwrap();
+        assert_eq!(sheet.render(), "[read]\nmoai-1 = '2026-09-02T00:00:00Z'  # 처음\n");
+    }
+
     #[test]
     fn two_projects_with_the_same_id_do_not_push_each_other() {
         let s = Scratch::new("read-marks-split");

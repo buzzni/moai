@@ -1318,7 +1318,7 @@ fn merge_words(
         return drop_key(t, key, left);
     };
     if t.get(key).and_then(Item::as_array).is_none() {
-        return write_value(t, key, new.iter().map(String::as_str).collect::<toml_edit::Array>().into());
+        return write_value(t, key, new.iter().map(|w| quoted(None, w)).collect::<toml_edit::Array>().into());
     }
     let base = base.unwrap_or_default();
     let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
@@ -1358,8 +1358,18 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
 ///
 /// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
 /// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다.
+///
+/// **문자열이 문자열을 갈면 따옴표 꼴도 옮긴다**(moai-5thc, 리뷰 moai-333l.wj6 의 5·6번). `Value::from` 은
+/// `Repr` 없이 와서, 꾸밈만 옮기던 판은 `sort = 'title'` 을 `sort = "created"` 로, `'''title'''` 도 큰따옴표로
+/// 폈다 — 주석은 남고 따옴표만 바뀌었다. 옛 값의 꼴로 [`quoted`] 가 다시 짓는다. 새로 적는 키와 문자열이
+/// 아니던 값에는 본이 없어 `quoted(None, …)` 이다 — 안 보이는 글자만 큰따옴표로 적고 나머지는 받은 값 그대로다.
 pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: toml_edit::Value) -> bool {
     if !t.contains_key(key) {
+        // 본이 없어도 안 보이는 글자는 [`quoted`] 가 큰따옴표로 적는다 — `Value::from` 은 `"` 가 든 낱말을
+        // 작은따옴표로 지어 탭·제로폭 공백을 날것으로 세웠다.
+        if let Some(word) = v.as_str() {
+            v = quoted(None, word);
+        }
         t.insert(key, Item::Value(v));
         return true;
     }
@@ -1372,6 +1382,14 @@ pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: to
         };
         if same {
             return false;
+        }
+        if let Some(word) = v.as_str() {
+            // 옛 값이 문자열이 아니거나(`sort = 3`) 이 판이 지은 값이면 본이 없다 — 그래도 [`quoted`] 를 지난다.
+            let q = match old {
+                toml_edit::Value::String(a) => quote_of(a),
+                _ => None,
+            };
+            v = quoted(q, word);
         }
         *v.decor_mut() = old.decor().clone();
     }
@@ -1490,8 +1508,8 @@ fn push_word(words: &mut toml_edit::Array, word: &str, shape: &Shape) {
 /// 지운 뒤 칸 하나를 숨기는 길) 뒤에서는 본뜰 것이 안 남는다. 그 자리에서 사람이 적은 따옴표와 들여쓰기가
 /// 함께 사라졌고, 섞어 적은 배열은 왕복 바이트까지 깨졌다(리뷰 moai-333l.wj6 의 1·3·4번).
 struct Shape {
-    /// 끝 문자열 원소가 작은따옴표인가([`worded`]). 본뜰 문자열이 없으면 `None`.
-    literal: Option<bool>,
+    /// 끝 문자열 원소의 따옴표([`worded`]). 본뜰 문자열이 없으면 `None`.
+    quote: Option<Quote>,
     /// 줄을 연 마지막 원소의 들여쓰기([`push_word`]). 제 줄을 연 원소가 없으면 `None`.
     indent: Option<String>,
 }
@@ -1502,15 +1520,16 @@ struct Shape {
 /// 이 판이 지은 것이고, 문자열이 아닌 원소(새 바이너리의 모양)는 따옴표를 모른다. 들여쓰기는 제 줄을 연
 /// 원소, 곧 머리에 줄바꿈이 든 원소의 것이다 — 한 줄에 여럿이 선 배열의 끝 원소는 제 줄을 안 열어 모른다.
 fn shape_of(words: &toml_edit::Array) -> Shape {
-    let literal = (0..words.len()).rev().find_map(|i| match words.get(i)? {
-        toml_edit::Value::String(f) => Some(f.as_repr()?.as_raw().as_str()?.starts_with('\'')),
+    // 여러 줄 문자열이 본이어도 더한 낱말은 한 줄로 선다 — 배열 원소 하나를 여러 줄로 지어낼 까닭이 없다.
+    let quote = (0..words.len()).rev().find_map(|i| match words.get(i)? {
+        toml_edit::Value::String(f) => quote_of(f).map(Quote::single_line),
         _ => None,
     });
     let indent = (0..words.len()).rev().find_map(|i| {
         let p = prefix_of(words.get(i)?.decor());
         p.rfind('\n').map(|at| p[at + 1..].to_string())
     });
-    Shape { literal, indent }
+    Shape { quote, indent }
 }
 
 /// 더할 낱말의 값 — **본뜰 원소의 따옴표를 따른다**(`push_word`, moai-kh81). `Value::from` 은 여느 낱말을
@@ -1518,28 +1537,127 @@ fn shape_of(words: &toml_edit::Array) -> Shape {
 /// 어긋났다. 잃는 값도 더했다 뺀 왕복도 그대로지만, 사람이 적은 모양을 지키겠다는 [`push_word`] 의 약속이
 /// 거기서 조용히 깨진다(리뷰 `moai-4qbv.zea` 15번).
 ///
-/// 본은 [`Shape`] 가 **병합이 손대기 전의 배열에서** 든 끝 문자열 원소다. 본뜰 문자열이 없었으면 큰따옴표다
-/// — 없는 본을 지어내지 않는다. 한 병합에서 여럿을 더해도 그 하나를 같이 보므로 답은 안 바뀐다.
-///
-/// **한쪽으로만 민다.** 본이 작은따옴표일 때 작은따옴표로 적을 뿐, 본이 큰따옴표라고 큰따옴표를 강제하지
-/// 않는다. `Value::from` 이 늘 큰따옴표인 것도 아니다 — 낱말에 `"` 가 들고 `'` 가 없으면 `toml_writer` 가
-/// 작은따옴표를 고른다(`'say "hi"'`). 칸 이름은 `statuses` 에서 오는 자유로운 글이라, 그런 낱말 하나가
-/// 큰따옴표 배열에 서면 다음 실행부터 그것이 본이 되어 배열 전체가 넘어간다. `it's` 는 거꾸로다.
-///
-/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 지은 뒤 다시 읽어 같은 낱말인지
-/// 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지 않고
-/// 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+/// 본은 [`Shape`] 가 **병합이 손대기 전의 배열에서** 든 끝 문자열 원소다. 본뜰 문자열이 없었으면
+/// `Value::from` 에 맡긴다 — 없는 본을 지어내지 않는다. 한 병합에서 여럿을 더해도 그 하나를 같이 보므로 답은
+/// 안 바뀐다. 따옴표를 짓는 자는 [`quoted`] 하나다.
 fn worded(shape: &Shape, word: &str) -> toml_edit::Value {
-    if shape.literal != Some(true) {
-        return toml_edit::Value::from(word);
+    quoted(shape.quote, word)
+}
+
+/// 문자열 값을 적은 따옴표 꼴(`write_value`·[`worded`], moai-5thc). `Repr` 의 머리 글자로 가른다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Quote {
+    /// `"…"`
+    Basic,
+    /// `'…'`
+    Literal,
+    /// `"""…"""`
+    MlBasic,
+    /// `'''…'''`
+    MlLiteral,
+}
+
+impl Quote {
+    fn single_line(self) -> Quote {
+        match self {
+            Quote::MlBasic => Quote::Basic,
+            Quote::MlLiteral => Quote::Literal,
+            q => q,
+        }
     }
-    match format!("'{word}'").parse::<toml_edit::Value>() {
+}
+
+/// 파일에서 읽어 온 문자열의 따옴표 꼴. `Repr` 이 없으면(이 판이 지은 값이다) `None` — 사람이 적은 꼴이
+/// 아니라 본이 못 된다.
+fn quote_of(f: &toml_edit::Formatted<String>) -> Option<Quote> {
+    let raw = f.as_repr()?.as_raw().as_str()?;
+    Some(if raw.starts_with("'''") {
+        Quote::MlLiteral
+    } else if raw.starts_with('\'') {
+        Quote::Literal
+    } else if raw.starts_with(r#"""""#) {
+        Quote::MlBasic
+    } else {
+        Quote::Basic
+    })
+}
+
+/// `word` 를 따옴표 꼴 `quote` 로 지은 값(moai-5thc). `None` 이면 `Value::from` 에 맡긴다.
+///
+/// **양쪽으로 민다.** 본이 작은따옴표면 작은따옴표로, 큰따옴표면 큰따옴표로 적는다. 한쪽으로만 밀던 판은 본이
+/// 큰따옴표일 때 `Value::from` 에 맡겼는데, 그것이 늘 큰따옴표인 것은 아니다 — 낱말에 `"` 가 들고 `'` 가
+/// 없으면 `toml_writer` 가 작은따옴표를 고른다(`'say "hi"'`). 칸 이름은 `statuses` 에서 오는 자유로운 글이라,
+/// 그런 낱말 하나가 큰따옴표 배열에 서면 다음 실행부터 그것이 본이 되어 배열 전체가 넘어갔다(리뷰
+/// moai-333l.wj6 의 2번).
+///
+/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 어느 꼴이든 지은 뒤 다시 읽어 같은
+/// 낱말인지 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지
+/// 않고 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+///
+/// **안 보이는 글자가 든 낱말은 작은따옴표를 안 고른다**(리뷰 moai-333l.wj6 의 15번). 작은따옴표 안에서는 탭·
+/// 제로폭 공백·줄 구분자가 날것으로 서서, 다시 읽으면 같은 낱말이어도 사람 눈에는 안 보이고, 줄 끝 공백을
+/// 지우는 편집기가 설정 값을 조용히 바꿀 수 있다. 큰따옴표 안에서는 [`escaped`] 가 그것을 `\t`·`​` 로
+/// 적어 보이게 둔다. 본이 없을 때도 같다 — `Value::from` 도 `"` 가 든 낱말에는 작은따옴표를 고른다.
+fn quoted(quote: Option<Quote>, word: &str) -> toml_edit::Value {
+    if word.chars().any(unseen) && quote != Some(Quote::MlBasic) {
+        return basic(word);
+    }
+    let text = match quote {
+        None => return toml_edit::Value::from(word),
+        Some(Quote::Basic) => return basic(word),
+        Some(Quote::Literal) => format!("'{word}'"),
+        Some(Quote::MlLiteral) => format!("'''{word}'''"),
+        Some(Quote::MlBasic) => format!(r#""""{}""""#, escaped(word)),
+    };
+    match text.parse::<toml_edit::Value>() {
         // 지은 값의 꾸밈은 부르는 쪽이 정한다 — `Value::from_str` 이 제가 비우고 오므로(`toml_edit` 의
         // `value.rs`, "Only take the repr and not decor") 여기서 다시 비우지 않는다. 비어 있어야
         // `toml_edit` 의 기본 모양(`, `)이 선다.
         Ok(v) if v.as_str() == Some(word) => v,
+        _ => basic(word),
+    }
+}
+
+/// 큰따옴표 한 줄 문자열([`quoted`]). 그렇게도 못 지으면 `Value::from` 이 마지막이다.
+fn basic(word: &str) -> toml_edit::Value {
+    match format!("\"{}\"", escaped(word)).parse::<toml_edit::Value>() {
+        Ok(v) if v.as_str() == Some(word) => v,
         _ => toml_edit::Value::from(word),
     }
+}
+
+/// 눈에 안 보이거나 여느 띄어쓰기로 보이는 글자인가([`quoted`]·[`escaped`]) — 제어 문자, 스페이스 밖의 공백
+/// (탭·줄 구분자·NBSP 들), 폭 없는 서식 글자(제로폭 공백·조이너·방향 표시·BOM·소프트 하이픈·태그 글자),
+/// 그리고 빈칸으로 그려지는 한글 채움 글자(`U+3164` 들).
+fn unseen(c: char) -> bool {
+    c.is_control()
+        || (c.is_whitespace() && c != ' ')
+        || matches!(c,
+            '\u{AD}' | '\u{34F}' | '\u{61C}' | '\u{115F}' | '\u{1160}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{3164}'
+            | '\u{FEFF}' | '\u{FFA0}' | '\u{FFF9}'..='\u{FFFB}' | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}' | '\u{E0020}'..='\u{E007F}')
+}
+
+/// 큰따옴표 문자열 안에 설 글([`quoted`]). `\`·`"` 와 안 보이는 글자([`unseen`])를 이스케이프로 적는다.
+fn escaped(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    for c in word.chars() {
+        match c {
+            '\\' => out.push_str(r"\\"),
+            '"' => out.push_str(r#"\""#),
+            '\n' => out.push_str(r"\n"),
+            '\t' => out.push_str(r"\t"),
+            '\r' => out.push_str(r"\r"),
+            '\u{8}' => out.push_str(r"\b"),
+            '\u{c}' => out.push_str(r"\f"),
+            // `\u` 는 네 자리뿐이다 — 그 밖의 글자는 `\U` 여덟 자리로 적어야 다시 읽어 같다.
+            c if unseen(c) && (c as u32) <= 0xFFFF => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c if unseen(c) => out.push_str(&format!("\\U{:08X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -2685,6 +2803,128 @@ mod tests {
             show("[tui]\nhidden = ['todo', 42]\n", &["todo"], &["todo", "done"]),
             "[tui]\nhidden = ['todo', 42, 'done']\n"
         );
+    }
+
+    /// **낱값을 갈아도 사람이 적은 따옴표가 남는다**(moai-5thc, 리뷰 moai-333l.wj6 의 5·6번, [`write_value`]).
+    /// 꾸밈만 옮기던 판은 `Value::from` 의 큰따옴표가 섰다 — 주석은 남고 따옴표만 바뀌었다.
+    #[test]
+    fn a_rewritten_scalar_keeps_the_quotes_it_was_written_with() {
+        let look = |src: &str, new: Look| {
+            let mut doc = Doc::parse(src).unwrap();
+            let base = doc.look().0;
+            doc.merge_look(&base, &new).unwrap();
+            doc.render()
+        };
+        let sort = |s: &str| Look { sort: Some(s.into()), ..Look::default() };
+        assert_eq!(look("[tui]\nsort = 'title'\n", sort("created")), "[tui]\nsort = 'created'\n");
+        assert_eq!(look("[tui]\nsort = '''title'''\n", sort("created")), "[tui]\nsort = '''created'''\n");
+        assert_eq!(look("[tui]\nsort = \"\"\"title\"\"\"\n", sort("created")), "[tui]\nsort = \"\"\"created\"\"\"\n");
+        assert_eq!(look("[tui]\nsort = \"title\"\n", sort("created")), "[tui]\nsort = \"created\"\n");
+        // 값 뒤의 주석도 따옴표도 함께 남는다.
+        let tz = Look { timezone: Some("UTC".into()), ..Look::default() };
+        assert_eq!(look("[tui]\ntimezone = 'Asia/Seoul'  # 내 자리\n", tz), "[tui]\ntimezone = 'UTC'  # 내 자리\n");
+        // 작은따옴표 안에 못 서는 낱말은 그 값만 큰따옴표다.
+        assert_eq!(look("[tui]\nsort = 'title'\n", sort("it's")), "[tui]\nsort = \"it's\"\n");
+        // 새로 적는 키에는 본이 없다 — 받은 값 그대로다.
+        assert_eq!(look("[tui]\nx = 1\n", sort("title")), "[tui]\nx = 1\nsort = \"title\"\n");
+
+        // 색(`set_hue`)도 같은 길이다.
+        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\ncolor = 'red'  # 눈에 띄게\n").unwrap();
+        doc.set_hue(&["/a".into()], Hue::named("green")).unwrap();
+        assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\ncolor = 'green'  # 눈에 띄게\n");
+    }
+
+    /// **안 보이는 글자가 든 낱말은 작은따옴표로 안 적는다**(moai-5thc, 리뷰 moai-333l.wj6 의 15번, [`quoted`]).
+    /// 작은따옴표 안에서는 탭·제로폭 공백이 날것으로 서 눈에 안 보였다 — 큰따옴표의 이스케이프로 보이게 둔다.
+    #[test]
+    fn an_unseen_character_is_never_left_raw_in_single_quotes() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let src = "[tui]\nhidden = ['todo']\n";
+        assert_eq!(show(src, &["todo"], &["todo", "a\tb"]), "[tui]\nhidden = ['todo', \"a\\tb\"]\n");
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{200B}b"]), "[tui]\nhidden = ['todo', \"a\\u200Bb\"]\n");
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{2028}b"]), "[tui]\nhidden = ['todo', \"a\\u2028b\"]\n");
+        // 본뜰 것이 없어도 같다 — `"` 가 든 낱말이라 `Value::from` 이면 작은따옴표였다.
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["\"x\"\u{200B}"]), "[tui]\nhidden = [\"\\\"x\\\"\\u200B\"]\n");
+        // 다시 읽으면 같은 낱말이다.
+        let doc = Doc::parse(&show(src, &["todo"], &["todo", "a\t\u{FEFF}b"])).unwrap();
+        assert_eq!(doc.look().0.hidden, Some(vec!["todo".to_string(), "a\t\u{FEFF}b".to_string()]));
+        // 낱값도 같다 — 사람이 작은따옴표로 적었어도 그 값만 큰따옴표다. 여느 스페이스는 안 보이는 글자가 아니다.
+        let mut doc = Doc::parse("[tui]\nsort = 'title'\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { sort: Some("a\u{200B}b".into()), ..Look::default() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\nsort = \"a\\u200Bb\"\n");
+        assert_eq!(show(src, &["todo"], &["todo", " lead"]), "[tui]\nhidden = ['todo', ' lead']\n");
+
+        // 본이 없는 두 길도 같다 — 새로 적는 키와, 배열이 아닌 값을 배열로 갈아 적는 자리다.
+        let said = "say \"a\tb\u{200B}\"";
+        let mut doc = Doc::parse("[tui]\nx = 1\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { sort: Some(said.into()), ..Look::default() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\nx = 1\nsort = \"say \\\"a\\tb\\u200B\\\"\"\n");
+        let mut doc = Doc::parse("[tui]\nhidden = 'todo'\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { hidden: Some(vec!["q\"\u{200B}".into(), "b".into()]), ..Look::default() })
+            .unwrap();
+        assert_eq!(doc.render(), "[tui]\nhidden = [\"q\\\"\\u200B\", \"b\"]\n");
+        // 한글 채움 글자도 안 보이는 글자고, `U+FFFF` 밖의 태그 글자는 `\U` 로 적어야 다시 읽어 같다.
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{3164}b"]), "[tui]\nhidden = ['todo', \"a\\u3164b\"]\n");
+        let tagged = show(src, &["todo"], &["todo", "a\u{E0041}b"]);
+        assert_eq!(tagged, "[tui]\nhidden = ['todo', \"a\\U000E0041b\"]\n");
+        assert_eq!(Doc::parse(&tagged).unwrap().look().0.hidden, Some(vec!["todo".into(), "a\u{E0041}b".into()]));
+    }
+
+    /// **여러 줄 꼴은 따옴표로 끝나는 낱말도 같은 꼴로 선다**(moai-5thc, [`quoted`]) — 닫는 따옴표 앞 두 자까지는
+    /// 글이다.
+    #[test]
+    fn a_multi_line_quote_holds_a_word_ending_in_a_quote() {
+        let look = |src: &str, s: &str| {
+            let mut doc = Doc::parse(src).unwrap();
+            let base = doc.look().0;
+            doc.merge_look(&base, &Look { sort: Some(s.into()), ..Look::default() }).unwrap();
+            let out = doc.render();
+            assert_eq!(Doc::parse(&out).unwrap().look().0.sort.as_deref(), Some(s));
+            out
+        };
+        assert_eq!(look("[tui]\nsort = '''title'''\n", "it'"), "[tui]\nsort = '''it''''\n");
+        assert_eq!(look("[tui]\nsort = \"\"\"title\"\"\"\n", "q\""), "[tui]\nsort = \"\"\"q\\\"\"\"\"\n");
+    }
+
+    /// **본이 큰따옴표면 큰따옴표로 민다**(moai-5thc, 리뷰 moai-333l.wj6 의 2번, [`quoted`]). `Value::from` 은
+    /// `"` 가 들고 `'` 가 없는 낱말을 작은따옴표로 짓는다 — 그 낱말이 끝 원소가 되면 다음 병합부터 그것이
+    /// 본이라, 큰따옴표로 적은 배열 전체가 넘어갔다.
+    #[test]
+    fn a_double_quoted_model_pushes_double_quotes_too() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let said = r#"say "hi""#;
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\"]\n", &["todo"], &["todo", said]),
+            "[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\"]\n"
+        );
+        // 다음 병합의 본은 여전히 큰따옴표다 — 넘어가지 않는다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\"]\n", &["todo", said], &["todo", said, "done"]),
+            "[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\", \"done\"]\n"
+        );
+        // 여러 줄 큰따옴표가 본이어도 더한 낱말은 한 줄 큰따옴표다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"\"\"todo\"\"\"]\n", &["todo"], &["todo", said]),
+            "[tui]\nhidden = [\"\"\"todo\"\"\", \"say \\\"hi\\\"\"]\n"
+        );
+        // 역빗금도 큰따옴표 안에서는 이스케이프로 선다 — 다시 읽으면 같은 낱말이다.
+        let doc = Doc::parse(&show("[tui]\nhidden = [\"todo\"]\n", &["todo"], &["todo", r"a\b"])).unwrap();
+        assert_eq!(doc.look().0.hidden, Some(vec!["todo".to_string(), r"a\b".to_string()]));
     }
 
     /// **본은 원소를 빼기 전에 든다**(moai-1ia9, [`shape_of`]). `merge_words` 는 뺀 **뒤에** 더해, 한 번의
