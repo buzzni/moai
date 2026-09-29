@@ -12,6 +12,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **Commands that draw no time stay quiet on a machine without zoneinfo.** `moai ready`,
+  `moai prime`, `moai show` (the list), `moai idea ls` and the overview outside a `.moai`
+  used to resolve the system timezone while building the screen, so on a machine with no
+  tzdb — the static musl build dropped into Alpine or scratch — each of them printed the
+  "no timezone data" line on stderr without drawing a single timestamp. The timezone is now
+  resolved the first time a screen actually draws a time, so the line stands only where a
+  time is drawn (`moai show <id>`, `moai edit`) or a deadline is judged (`moai status`, the
+  hook). Nothing was ever blocked and the exit code is unchanged.
 - **A write no longer truncates a temporary file that someone else is still writing.**
   A write that replaces a file goes through a temporary file and a `rename`; that file
   was opened with a plain create, which silently empties whatever already sits at that
