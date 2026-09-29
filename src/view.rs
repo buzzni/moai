@@ -388,6 +388,7 @@ pub fn list(
             None => "—".into(),
             Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
             Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
+            Some(crate::report::EpicLabel::Lost) => clip(say(lang, "nav.lost"), EPIC_CAP),
         })
         .collect();
 
@@ -1269,6 +1270,7 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
             // 말묶음의 낱말이라 지금은 줄바꿈이 들 수 없지만, 여기만 비껴 두면 그 낱말에
             // 줄이 하나 새는 날 `- \`id\`` 줄이 반으로 갈려 뒤 반쪽이 이 판의 글로 선다.
             Some(crate::report::EpicLabel::Gone) => format!(" {}", one_line(&gone_epic(lang))),
+            Some(crate::report::EpicLabel::Lost) => format!(" {}", one_line(say(lang, "nav.lost"))),
         };
         let col = if column { format!(" · {}", one_line(i.status.as_str())) } else { String::new() };
         // **남의 가지에서 온 줄에는 그 가지를 단다**(`--worktree`). 안 달면 옆 워크트리가
@@ -1409,6 +1411,9 @@ pub fn ready(
                 None => say(lang, "ready.no_epic").to_string(),
                 Some(crate::report::EpicLabel::Named(t)) => clip(t, EPIC_CAP),
                 Some(crate::report::EpicLabel::Gone) => clip(&gone_epic(lang), EPIC_CAP),
+                // 쌍둥이 부모 밑의 줄은 `에픽 없음` 이 아니라 `(길 잃음)` 이다 — `no_epic` 은 그 줄을
+                // 안 세고 `twin_parent` 가 댄다(리뷰 moai-mibi.ndh 5번).
+                Some(crate::report::EpicLabel::Lost) => clip(say(lang, "nav.lost"), EPIC_CAP),
             };
             out.push(
                 format!(

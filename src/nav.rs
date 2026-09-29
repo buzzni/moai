@@ -711,7 +711,10 @@ impl<'a> Ctx<'a> {
             let rooted_thought =
                 crate::report::is_idea(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
             let passed = if rooted_thought { None } else { self.epic_at(&self.issues[pat]) };
-            if self.epic_at(me) == passed {
+            // **뿌리로 올라간 생각은 안 접는다**(리뷰 moai-mibi.ndh 9번) — `report` 가 정한 그대로 묻는다.
+            // 제 에픽을 적은 생각이 갈린 부모 쌍둥이 밑에 서면 뒷줄 하나로 견준 이 자리만 파일 차례로
+            // 접었다 말았다 했다. 쌍둥이가 없는 판에서는 위 견줌과 늘 같은 답이다.
+            if self.epic_at(me) == passed && !self.lines.rooted(me) {
                 path.push(Seg::Issue(p.to_string()));
                 return path;
             }
@@ -1500,11 +1503,11 @@ mod tests {
     }
 
     /// **제 `epic` 을 적은 생각이 쌍둥이 부모의 어느 줄을 고르느냐로 접히기도 하고 뿌리로 오르기도 하면,
-    /// 그 밑의 줄은 `(길 잃음)` 에 선다**(리뷰 moai-mibi.ndh). 한때 트리는 그 생각을 부모의 뒷줄 밑에 접어
-    /// 그리면서 자식은 그 생각에서 떼어 뿌리의 `에픽 없음` 에 그렸다 — 소속을 정하는 자가 그 생각을
-    /// 뿌리로 올렸기 때문이다. 두 차례를 다 잰다.
+    /// 그 생각은 안 접히고 뿌리에 선다**(리뷰 moai-mibi.ndh 9번, 2026-09-29 사용자 결정). 한때 트리는
+    /// 그 생각을 부모의 뒷줄 밑에 접었다 말았다 해 파일 차례로 자리가 뒤집혔다. 그 자식은 뿌리에 선
+    /// 생각 밑에 접힌다. 두 차례를 다 잰다.
     #[test]
-    fn a_child_under_an_idea_torn_between_twin_parents_goes_to_the_lost_bucket() {
+    fn an_idea_torn_between_twin_parents_stands_at_the_root() {
         let mut thought = make("argos-0010.t01", Kind::Idea);
         thought.epic = Some("argos-0002".into());
         for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
@@ -1517,7 +1520,8 @@ mod tests {
                 make("argos-0010.t01.c01", Kind::Issue),
             ];
             let index = Index::of(&issues);
-            assert_eq!(index.home_of(5), &vec![Seg::Lost], "{a} 가 앞");
+            assert_eq!(index.home_of(4), &Vec::<Seg>::new(), "{a} 가 앞: 생각이 부모 밑에 접혔다");
+            assert_eq!(index.home_of(5), &vec![Seg::Issue("argos-0010.t01".into())], "{a} 가 앞");
             assert_exactly_once(&issues);
         }
     }
