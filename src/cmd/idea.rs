@@ -74,7 +74,10 @@ fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str
     if let Some(src) = crate::report::deferred_roots(issues).get(m) {
         let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_deferred"), &[("id", m), ("src", src)]);
         eprintln!("moai: {said}");
-    } else if crate::report::group_states_of(issues, cfg, &[m]).get(m).is_some_and(|col| *col == crate::config::DONE) {
+    } else if crate::report::group_states_of(issues, cfg, &[m])
+        .get(&(crate::model::Kind::Milestone, m))
+        .is_some_and(|col| *col == crate::config::DONE)
+    {
         let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_closed"), &[("id", m)]);
         eprintln!("moai: {said}");
     }

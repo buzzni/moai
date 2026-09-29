@@ -41,9 +41,9 @@ pub struct Where<'a> {
     /// 다는 묶음 줄을 `--deferred` 가 안 냈다.
     pub shelved: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
-    pub states: BTreeMap<&'a str, &'a str>,
+    pub states: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
-    pub since: BTreeMap<&'a str, &'a str>,
+    pub since: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
     /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
     /// 나온다. 비었으면(`Where::default`) 가려진 줄이 없는 것으로 친다.
@@ -103,7 +103,7 @@ impl<'a> Where<'a> {
 
     /// 그 줄이 서 있는 칸 (`report::column`).
     pub fn column<'x>(&'x self, i: &'x Issue) -> &'x str {
-        crate::report::column(&self.kinds, i, &self.states)
+        crate::report::column(i, &self.states)
     }
 
     /// 그 줄이 **든 에픽** (`report::stands_in`) — `--json` 의 `derived_epic` 과 같은 답이다.
@@ -125,7 +125,7 @@ impl<'a> Where<'a> {
         if self.eclipsed(i) {
             return None;
         }
-        crate::report::stood_at_line(i, self.epic_of(i), &self.lines)
+        self.epic.stood(i, &self.lines)
     }
 
     /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
@@ -137,8 +137,7 @@ impl<'a> Where<'a> {
         // **고르는 자와 재는 자가 한 문을 지난다**(리뷰, `report::stands_on`). 위의 `column` 만
         // 가려진 줄을 거르면, `-s` 가 제 칸으로 고른 그 줄의 나이는 쌍둥이 묶음의 셈에서 와
         // `--stale` 이 265일 된 줄을 하루짜리로 잰다.
-        crate::report::stands_on(&self.kinds, i, || self.since.get(i.id.as_str()).copied())
-            .unwrap_or(i.status_since.as_str())
+        crate::report::stands_on(i, |k| self.since.get(&k).copied()).unwrap_or(i.status_since.as_str())
     }
 
     /// 목록에서 미룬 것으로 치는가. **제 줄의 미룸이나 물려받은 미룸.**
@@ -424,7 +423,10 @@ impl Filter {
         // 다른 쌍둥이의 것이고, 트리는 그 줄을 `(길 잃음)` 에 두며 롤업은 어느 묶음에도
         // 안 센다(moai-2m9p). 여기서 지도를 그대로 읽으면 `moai show <에픽>` 이 `0/0` 이라
         // 말하는 에픽을 `moai show -e <에픽>` 은 그 줄로 채운다.
-        let eclipsed = wh.eclipsed(i);
+        //
+        // **쌍둥이 부모 밑에서 소속을 못 정한 줄도 그렇다**(moai-mibi.wpj) — 에픽이 없는 것이 아니라
+        // 못 정한 것이라 `-e none` 이 고르면 `twin_parent` 가 댄 줄을 `no_epic` 의 힌트가 또 낸다.
+        let eclipsed = wh.eclipsed(i) || wh.epic.lost(i);
         // **길 잃은 줄 밑에 접힌 줄은 `none` 으로 안 고른다**(moai-phw9, 사용자와 정함). 소속
         // 지도에 없다는 사실만 보면 트리가 `(길 잃음)` 안에 그리고 status 가 안 세는 줄을
         // "없는 것" 으로 고른다. 고칠 곳은 부모의 끊긴 참조라 `-e none` 으로 찾을 줄이 아니다.
@@ -1283,6 +1285,53 @@ mod tests {
         assert_eq!(picked(Raw { epic: s(&["argos-0001"]), ..Raw::default() }), []);
         assert_eq!(picked(Raw { epic: s(&["none"]), ..Raw::default() }), [("argos-0001", Kind::Epic)]);
         assert_eq!(picked(Raw::default()), [("argos-0001", Kind::Epic), ("argos-0002", Kind::Issue)]);
+    }
+
+    /// **쌍둥이 부모 밑에서 소속을 못 정한 줄도 어느 소속으로도 안 고른다**(moai-mibi.wpj) —
+    /// `-e none`·`--milestone none` 도. 에픽이 없는 것이 아니라 못 정한 것이고, 트리는 그 줄을
+    /// `(길 잃음)` 에 둔다. 한때 뒷줄의 에픽으로 골렸다. **두 차례를 다 잰다**(리뷰 moai-mibi.ndh) — 한
+    /// 차례만 재면 뒷줄이 마일스톤 없는 에픽을 넘기는 판이라, `-e argos-0001`·`--milestone argos-0009`
+    /// 가 옛 바이너리에서도 푸르게 선다.
+    #[test]
+    fn a_child_under_disagreeing_twin_parents_is_picked_by_no_membership() {
+        let group = |id: &str, kind: Kind| {
+            let mut i = issue(id, "todo", &[]);
+            i.kind = kind;
+            i
+        };
+        let parent = |to: &str| {
+            let mut i = issue("argos-0010", "todo", &[]);
+            i.epic = Some(to.into());
+            i
+        };
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let mut e1 = group("argos-0001", Kind::Epic);
+            e1.milestone = Some("argos-0009".into());
+            let all = vec![
+                e1,
+                group("argos-0002", Kind::Epic),
+                group("argos-0009", Kind::Milestone),
+                parent(a),
+                parent(b),
+                issue("argos-0010.aa1", "todo", &[]),
+            ];
+            let cfg = cfg();
+            let wh = Where::of(&all, &cfg);
+            let picked = |raw: Raw| -> bool {
+                let f = Filter::build(raw).unwrap();
+                f.matches(&all[5], NOW, &wh)
+            };
+            for sel in ["argos-0001", "argos-0002", "none"] {
+                assert!(!picked(Raw { epic: s(&[sel]), ..Raw::default() }), "{b} 가 뒤: -e {sel} 가 골랐다");
+            }
+            for sel in ["argos-0009", "none"] {
+                assert!(
+                    !picked(Raw { milestone: s(&[sel]), ..Raw::default() }),
+                    "{b} 가 뒤: --milestone {sel} 가 골랐다"
+                );
+            }
+            assert!(picked(Raw::default()), "{b} 가 뒤: 거르개 없이도 안 나온다");
+        }
     }
 
     /// **`--milestone` 은 마일스톤 줄을 다른 마일스톤의 것으로 안 고른다**(moai-8tav). 마일스톤 줄이

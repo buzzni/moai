@@ -35,6 +35,7 @@
   "warn.dangling_epic": "Rows naming something unusable as an epic {n}",
   "warn.dangling_milestone": "Rows naming something unusable as a milestone {n}",
   "warn.orphan_child": "Children with no parent row {n}",
+  "warn.twin_parent": "Children under a parent id whose twin rows disagree {n} — which row they belong to cannot be told, so they stand in (lost) until that duplicate_id is resolved",
   "warn.dangling_blocked_by": "Blocked by an issue that is not there {n}",
   "warn.future_timestamp": "Rows stamped over a day ahead {n} — a hand-edited time or a wrong clock",
   "warn.idea_pile": "Ideas piled up {n}",

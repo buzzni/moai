@@ -8068,7 +8068,7 @@ fn shelving_closes<'a>(
         i.deferred_at = Some(i.updated_at.clone());
     }
     let after = report::group_states(&shelved, cfg);
-    aims.into_iter().filter(|(_, e)| after.get(e) == Some(&crate::config::DONE)).collect()
+    aims.into_iter().filter(|(_, e)| after.get(&(crate::model::Kind::Epic, *e)) == Some(&crate::config::DONE)).collect()
 }
 
 /// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.

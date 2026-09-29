@@ -35,6 +35,7 @@
   "warn.dangling_epic": "에픽으로 쓸 수 없는 것을 가리키는 줄 {n}건",
   "warn.dangling_milestone": "마일스톤으로 쓸 수 없는 것을 가리키는 줄 {n}건",
   "warn.orphan_child": "부모 줄이 없는 자식 {n}건",
+  "warn.twin_parent": "부모 id 의 쌍둥이 줄이 서로 다른 소속을 넘겨 자리를 못 정한 자식 {n}건 — 그 duplicate_id 를 풀 때까지 (길 잃음) 에 선다",
   "warn.dangling_blocked_by": "없는 이슈에게 막혀 있다는 것 {n}건",
   "warn.future_timestamp": "지금보다 하루 넘게 뒤인 시각을 든 줄 {n}건 — 손으로 고친 시각이나 틀린 시계",
   "warn.idea_pile": "쌓인 idea {n}건",

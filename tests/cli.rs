@@ -10005,13 +10005,20 @@ fn an_eclipsed_group_row_wears_its_own_column_on_every_surface() {
         )
     };
     // `argos-e001` 이 마일스톤으로 한 번, 에픽으로 한 번. 뒷줄(에픽)이 그 id 의 뜻을 정한다.
+    // 멤버는 제 `epic` 을 **적는다** — id 로만 받으면 부모 쌍둥이가 서로 다른 소속을 넘겨
+    // `(길 잃음)` 에 서므로(moai-mibi.wpj) 에픽의 칸을 움직일 멤버가 없다.
+    let member = row("argos-e001.aa1", "멤버", "issue", "in_progress").replacen(
+        "\"kind\":\"issue\"",
+        "\"kind\":\"issue\",\"epic\":\"argos-e001\"",
+        1,
+    );
     std::fs::write(
         s.path().join(".moai/issues.jsonl"),
         format!(
             "{}{}{}",
             row("argos-e001", "가려진 마일스톤", "milestone", "todo"),
             row("argos-e001", "가리는 에픽", "epic", "todo"),
-            row("argos-e001.aa1", "멤버", "issue", "in_progress"),
+            member,
         ),
     )
     .unwrap();

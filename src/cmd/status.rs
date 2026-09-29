@@ -352,7 +352,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                     picked: b
                         .picked
                         .iter()
-                        .map(|i| super::Row::of(i, None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin))
+                        .map(|i| {
+                            super::Row::of(i, |_| None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin)
+                        })
                         .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
                     trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),

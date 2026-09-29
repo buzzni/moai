@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.2 hash:67ba9215 -->
+<!-- moai:begin v:0.1.2 hash:0d0a56f5 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -40,7 +40,9 @@ no epic at all, and on a group row it never stands. One row reads the two keys a
 each other: where the same id stands twice and the other line is a different `kind`,
 this line is counted into no group anywhere — the tree draws it under `(lost)`, `-e`
 picks it up for no epic, and `derived_epic` is absent even when `epic` is written.
-`duplicate_id` on the board names that id. Two surfaces carry neither key —
+`duplicate_id` on the board names that id. A row below an id that stands twice, where
+the lines hand down different answers, is counted into no group either — which line
+it hangs from cannot be told — and `twin_parent` names it. Two surfaces carry neither key —
 `rm --json` hands the removed lines back exactly as the file held them, and `tui
 --json` prints the explorer's own shorter row — and there you read the epic off the id.
 
