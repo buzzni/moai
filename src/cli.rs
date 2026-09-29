@@ -392,9 +392,12 @@ IDEA
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
-  closes on Esc or SPC and goes one level up on Backspace. Toggles and sorts
-  (SPC v, SPC c, SPC s) do not close it — try them, watch the state, and
-  leave with Esc. That level says so at the bottom right with a close hint.
+  closes on Esc or SPC and goes one level up on Backspace. Keys that move
+  the focused pane close the menu and make that move in the same press,
+  unless a key on that level holds the letter (SPC c h, SPC v l, SPC m g).
+  Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
+  the state, and leave with Esc. That level says so at the bottom right with a
+  close hint.
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
@@ -424,6 +427,13 @@ IDEA
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
+
+  The version line in the header says whether a newer release is out. When
+  one is, the banner says so, and on quitting the explorer prints the
+  install.sh line that upgrades the moai you are running — with --dir when it
+  lives under your home but not in ~/.local/bin. No line is shown for a build
+  from source, for a moai outside your home, or on a machine the releases do
+  not cover.
 
   Of what came to me (assigned to me or under it), rows changed since the
   last look carry a [NEW] mark in front of the title. Read marks live in my own
@@ -513,6 +523,11 @@ IDEA
         event: crate::hook::Event,
     },
 
+    // **이 첫 줄은 `install.sh` 가 읽는 계약이다**(moai-8rmw, 리뷰). 깔린 moai 가 이 moai 인지를
+    // `merge-driver --help` 가 이 글을 내는지로 가르고(`ours`), 나간 판마다 이 글이 박혀 있다.
+    // 고치려면 `install.sh` 가 옛 글과 새 글을 다 받게 먼저 고친다 — 안 그러면 새 글을 단 판부터
+    // 올리기가 모두 "이 moai 가 아니다" 로 거절된다. 진짜 바이너리로 재는 시험이
+    // `the_real_binary_is_recognised_as_this_moai` 다.
     /// Called by git. Merges issues.jsonl per issue, three-way
     #[command(after_help = "  The only thing anyone types by hand is `--install`. Git gives the rest.
 
