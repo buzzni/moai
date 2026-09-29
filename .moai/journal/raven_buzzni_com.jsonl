@@ -2141,3 +2141,16 @@
 {"ts":"2026-09-29T16:08:21Z","id":"moai-witj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T16:08:49Z","id":"moai-witj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — scripts/bump-version.sh 가 한 것을 커밋하고 Cargo.lock 을 손으로 맞췄다)"}
 {"ts":"2026-09-29T16:08:49Z","id":"moai-witj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.1.4 로 서고 CHANGELOG 에 [0.1.4] - 2026-09-29 가 열렸다. 태그는 main 머지 커밋에 단다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-5shy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"status and the hook resolve the timezone even when no deadline exists"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-9ls7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"rm --line 힌트가 -C 와 MOAI_HERE 를 빼고 댄다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-adto","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Remaining Lines/map rebuilds noted on moai-6mnm"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-dq4l","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"mv 가 freed 와 read_of 를 락 안에서 센다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-i6zn","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 줄의 번호가 --json 어디에도 안 선다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-jxog","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"stone_twin misses flips that need two twin ids swapped at once"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-oaaq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"has_open_child 가 락 안에서 후보마다 목록 전체를 훑는다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-p3k7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Pick record key edge cases left after moving picks beside the config"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-re3s","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"메뉴에서 닫고 남은 g 가 다음 SPC 를 삼킨다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-u1ck","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 가 제 판을 스스로 올리는 명령 (moai upgrade)"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-u3zv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"a linked tracker target with spaces or glob characters gets no .gitattributes line; quoting the pattern would cover it (review moai-ydm7.exk)"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-z4wk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"쌍둥이 지우기와 산 줄 고침이 겹치면 여전히 충돌한다"}
+{"ts":"2026-09-29T16:22:12Z","id":"moai-14oz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"worktree overlay caches the removal base per sibling HEAD, not per merge-base: siblings forked after one worker repeat the same 1.8MB show and parse (review moai-ydm7.exk)"}
