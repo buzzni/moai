@@ -5047,11 +5047,14 @@ pub fn status_in<'a>(
         // <id>` 가 듣기는 하지만 지우는 것은 앞줄이라, 그것을 그대로 대면 남기고 싶은 줄이 앞줄인
         // 사람이 따라 쳐서 그 줄을 잃는다. 두 줄을 나란히 보고 고르게 하고, `rm` 이 무엇을 지우는지는
         // 경고 글(`warn.duplicate_id`)이 말한다. id 가 하나면 그 id 를 그대로 댄다 — 따라 칠 줄이다.
-        let hint = match dups.as_slice() {
+        // **id 하나는 거른 뒤에 센다**(리뷰) — `dups` 는 겹친 줄마다 id 를 담아, 한 id 가 세 줄에
+        // 서면 `[a, a]` 라 id 가 하나인데도 `<id>` 를 댔다. `Warning::new` 가 거른 `ids` 를 읽는다.
+        let w = Warning::new("duplicate_id", dups);
+        let hint = match w.ids.as_slice() {
             [one] => format!("moai show {one}"),
             _ => "moai show <id>".to_string(),
         };
-        warnings.push(Warning::new("duplicate_id", dups).hint(&hint).fatal());
+        warnings.push(w.hint(&hint).fatal());
     }
     if !unreadable.is_empty() {
         // **어느 줄인지는 여기가 아니라 저기서 난다.** 배너는 수만 말할 수

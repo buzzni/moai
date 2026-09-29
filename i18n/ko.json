@@ -704,7 +704,7 @@
   "refuse.as_plan_epics": "에픽 목록은 `moai show epic`",
   "show.lossy_title": "{id} 의 제목은 이 형식으로 도로 넣으면 달리 읽힌다 — 넣기 전에 고친다",
   "refuse.title_looks_like_a_flag": "`{title}` 은 제목이 아니라 플래그로 보인다.",
-  "refuse.title_after_dashes": "정말 제목이면 `--` 뒤에 둔다 — `moai add -- {title}`",
+  "refuse.title_after_dashes": "정말 제목이면 `--` 뒤에 둔다 — `moai {verb} -- {title}`",
   "refuse.title_after_equals": "정말 제목이면 `=` 로 붙여 쓴다 — `moai edit {id} --title={title}`",
   "refuse.note_looks_like_a_flag": "`{title}` 은 노트가 아니라 플래그로 보인다.",
   "refuse.note_after_dashes": "정말 노트면 `--` 뒤에 둔다 — `moai note {id} -- {title}`",

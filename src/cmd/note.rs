@@ -14,6 +14,12 @@ use crate::style::{self, paint};
 
 pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
+    // **자리 인자로 온 깃발 같은 토막은 노트가 아니다**(moai-pp9i.gzl) — `moai note <id> -x` 가
+    // `-x` 라는 노트를 이력에 남기고 0 으로 끝났다. `-b` 로 온 글은 사람이 "이것이 글이다" 라고
+    // 깃발로 말한 것이라 안 잰다.
+    if let Some(t) = &args.text {
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::Note(&args.id), ctx.lang())?;
+    }
     // **읽는 것을 락보다 먼저 한다.** `-b -` 는 stdin 을 기다린다. 락을 쥔
     // 뒤에 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다 — 저장소를
     // 찾는 일(`open_repo`)은 락을 안 잡으므로 그 앞뒤는 상관없다.
@@ -23,12 +29,6 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     // **"안 줬다" 와 "준 자리가 비었다" 는 다른 말이다.** 파일을 잘못 짚어
     // 빈 stdin 이 들어온 사람에게 "무엇을 적을지 안 줬다" 고 하면, 제가 준
     // 것을 도구가 못 본 줄 알고 같은 명령을 다시 친다.
-    // **자리 인자로 온 깃발 같은 토막은 노트가 아니다**(moai-pp9i.gzl) — `moai note <id> -x` 가
-    // `-x` 라는 노트를 이력에 남기고 0 으로 끝났다. `-b` 로 온 글은 사람이 "이것이 글이다" 라고
-    // 깃발로 말한 것이라 안 잰다.
-    if let Some(t) = &args.text {
-        super::refuse_if_flag_like(t.trim(), super::FlagLike::Note(&args.id), ctx.lang())?;
-    }
     let asked = args.body.is_some();
     let given = match (args.text, super::add::read_body(args.body)?) {
         (Some(t), _) => t,

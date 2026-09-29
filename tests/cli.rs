@@ -4947,6 +4947,16 @@ fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
         let (said, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(!said.contains("에 선다"), "dry={dry}: 없는 마일스톤에 선다고 했다\n{said}");
         assert!(err.contains("argos-zzzz") && err.contains("마일스톤이 없다"), "dry={dry}: 말없이 지나갔다\n{err}");
+
+        // `--json` 도 알린다 — 그리는 줄이 없다고 알림까지 빠지면 기계만 말없이 받는다(리뷰).
+        args.push("--json");
+        let out = from_stdin(s.path(), &args, two);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("argos-zzzz") && err.contains("마일스톤이 없다"),
+            "dry={dry} --json: 말없이 지나갔다\n{err}"
+        );
     }
 
     // 있는 마일스톤이면 뿌리 수대로 말한다 — 연습도 진짜도.
@@ -6238,6 +6248,11 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
         assert!(err.contains("플래그로 보인다") && err.contains(&format!("moai add -- {}", bad[1])), "{err}");
     }
     assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
+
+    // 빠져나갈 길은 부른 동사로 댄다 — `moai add -- -x` 를 따라 치면 생각 대신 이슈가 선다(리뷰).
+    let out = moai(s.path(), &["idea", "add", "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai idea add -- -x"), "{err}");
 
     // `--from` 과 함께 와도 깃발을 댄다 — `[title]` 을 받지 않는다는 말이 아니다.
     std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
@@ -10442,6 +10457,12 @@ fn a_duplicate_id_names_what_to_type() {
     );
     assert!(!board.contains("→ `moai rm"), "지우는 명령을 따라 칠 줄로 댔다\n{board}");
 
+    let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(json.contains(r#""hint":"moai show argos-0002""#), "{json}");
+
+    // 세 줄에 서도 id 는 하나다 — 겹친 줄 수로 세면 `<id>` 로 물러선다(리뷰).
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}{}", line("앞줄"), line("가운데"), line("뒷줄")))
+        .unwrap();
     let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
     assert!(json.contains(r#""hint":"moai show argos-0002""#), "{json}");
 }

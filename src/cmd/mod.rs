@@ -500,9 +500,9 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
     let pairs = [("title", value)];
     // 갈래마다 제 `say` 를 적는다 — 키를 도우미로 고르면 소스를 훑는 시험이 그 키를 못 본다.
     let (what, how) = match at {
-        FlagLike::Title => (
+        FlagLike::Title(verb) => (
             fill(say(lang, "refuse.title_looks_like_a_flag"), &pairs),
-            fill(say(lang, "refuse.title_after_dashes"), &pairs),
+            fill(say(lang, "refuse.title_after_dashes"), &[("title", value), ("verb", verb)]),
         ),
         FlagLike::EditTitle(id) => (
             fill(say(lang, "refuse.title_looks_like_a_flag"), &pairs),
@@ -519,8 +519,9 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
 /// [`refuse_if_flag_like`] 를 부른 자리 — 거절문과 빠져나갈 길이 여기서 갈린다.
 #[derive(Clone, Copy)]
 pub enum FlagLike<'a> {
-    /// `add` 의 제목 자리 인자.
-    Title,
+    /// `add` 의 제목 자리 인자. 든 것은 부른 동사(`add`·`idea add`…)다 — `moai idea add -x` 에
+    /// `moai add -- -x` 를 대면 따라 친 사람이 생각 대신 보드에 선 이슈를 얻는다(리뷰).
+    Title(&'a str),
     /// `edit <id> --title` 의 값.
     EditTitle(&'a str),
     /// `note <id>` 의 글 자리 인자.

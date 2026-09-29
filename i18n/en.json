@@ -704,7 +704,7 @@
   "refuse.as_plan_epics": "the epics are `moai show epic`",
   "show.lossy_title": "the title of {id} reads differently when put back in through this format — fix it before you do",
   "refuse.title_looks_like_a_flag": "`{title}` reads as a flag, not a title.",
-  "refuse.title_after_dashes": "if it really is the title, put it after `--` — `moai add -- {title}`",
+  "refuse.title_after_dashes": "if it really is the title, put it after `--` — `moai {verb} -- {title}`",
   "refuse.title_after_equals": "if it really is the title, join it with `=` — `moai edit {id} --title={title}`",
   "refuse.note_looks_like_a_flag": "`{title}` reads as a flag, not a note.",
   "refuse.note_after_dashes": "if it really is the note, put it after `--` — `moai note {id} -- {title}`",

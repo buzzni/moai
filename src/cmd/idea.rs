@@ -191,7 +191,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
+        let known = crate::cmd::add::is_milestone(&load.issues, stone.as_deref());
         if ctx.json {
+            crate::cmd::add::say_no_such_milestone(stone.as_deref(), known, ctx.lang());
             // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
             // `moai show <idea>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref(), None);
@@ -202,7 +204,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
         out.extend(crate::cmd::add::milestone_line(
             stone.as_deref(),
-            crate::cmd::add::is_milestone(&load.issues, stone.as_deref()),
+            known,
             drafts.iter().filter(|d| d.epic.is_none()).count(),
             ctx.lang(),
         ));
@@ -341,6 +343,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     )?;
 
     if ctx.json {
+        crate::cmd::add::say_no_such_milestone(crate::cmd::add::stood_on(&made), known, ctx.lang());
         // **닫힌 생각까지 낸다.** 사람 출력에는 `→ done` 이 있는데 기계
         // 출력에만 없으면 받는 쪽이 두 표면 중 하나를 못 믿게 된다 —
         // `mv --json` 이 옮긴 것 말고도 다 내는 것과 같은 까닭이다.

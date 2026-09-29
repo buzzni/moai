@@ -202,7 +202,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 사람이 친 제목이 아니라 clap 이 제목 자리로 넘긴 깃발인데, 아래 `--from` 갈래가 먼저 서면
     // "`--from` 은 [title] 을 안 받는다" 는, 아무도 안 친 제목을 대는 거절이 나갔다.
     if let Some(t) = &args.title {
-        super::refuse_if_flag_like(t.trim(), super::FlagLike::Title, ctx.lang())?;
+        let verb = kind_override.map(|k| format!("{} add", k.as_str()));
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::Title(verb.as_deref().unwrap_or("add")), ctx.lang())?;
     }
     if let Some(from) = &args.from {
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
@@ -479,7 +480,13 @@ fn bulk(
 
     if dry_run {
         check_plan(&drafts, rooted, ctx.lang())?;
+        // 연습은 락을 안 쥐고 읽는다 — 진짜는 락 안에서 다시 잰다. 마일스톤이 없으면 읽지도 않는다.
+        let known = match milestone {
+            Some(_) => is_milestone(&repo.read()?.issues, milestone),
+            None => false,
+        };
         if ctx.json {
+            say_no_such_milestone(milestone, known, ctx.lang());
             return json_rehearsal(&drafts, None, None, milestone, body_lands_on(&drafts, body));
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
@@ -487,11 +494,6 @@ fn bulk(
         out.extend(drafts.iter().map(|d| line_of(d, None)));
         out.push(String::new());
         out.push(tally(&drafts, ctx.lang()));
-        // 연습은 락을 안 쥐고 읽는다 — 진짜는 락 안에서 다시 잰다. 마일스톤이 없으면 읽지도 않는다.
-        let known = match milestone {
-            Some(_) => is_milestone(&repo.read()?.issues, milestone),
-            None => false,
-        };
         let roots = drafts.iter().filter(|d| d.epic.is_none()).count();
         out.extend(milestone_line(milestone, known, roots, ctx.lang()));
         out.extend(body_line(&drafts, body, ctx.lang()));
@@ -513,6 +515,7 @@ fn bulk(
     )?;
 
     if ctx.json {
+        say_no_such_milestone(stood_on(&made), known, ctx.lang());
         let rows: Vec<super::Row> = made.iter().map(|i| super::Row::from(i, &read)).collect();
         return super::json_line(&rows);
     }
@@ -874,7 +877,7 @@ fn body_lands_on(drafts: &[Draft], body: Option<&str>) -> Option<usize> {
 pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: crate::i18n::Lang) -> Option<String> {
     let id = milestone?;
     if !known {
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+        say_no_such_milestone(Some(id), known, lang);
         return None;
     }
     let said = match roots {
@@ -882,6 +885,16 @@ pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: 
         n => crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone_many"), &[("id", id), ("n", &n.to_string())]),
     };
     Some(paint(style::DIM, &said))
+}
+
+/// 없는 마일스톤을 stderr 에 한 줄 알린다 — [`milestone_line`] 이 부르고, 그 줄을 안 그리는
+/// `--json` 길도 부른다(리뷰). 그리는 쪽에만 달아 두면 `add --from - --milestone <헛 id> --json` 이
+/// 말없이 0 으로 끝나, 이 알림이 막으려던 판이 기계에게만 그대로 남는다. 곁의
+/// `add.no_such_epic_yet` 도 `--json` 을 가리지 않는다.
+pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::i18n::Lang) {
+    if let Some(id) = milestone.filter(|_| !known) {
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+    }
 }
 
 /// `id` 가 이 저장소의 **마일스톤 줄**인가 — `moai status` 의 `dangling_milestone` 과 같은 자다
