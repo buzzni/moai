@@ -842,6 +842,14 @@ impl Browse {
         matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt)
     }
 
+    /// **목록을 움직이는 동작인가** — 줄·쪽·맨 위아래·펼침·접기(moai-y8v2, 사용자 결정). 열린
+    /// 메뉴에서 이 동작의 키는 메뉴를 닫고 곧 그 이동을 한다([`super::menu::feed`]). 드나들기
+    /// (`Enter`·`Bksp`)·재귀 펼침(`Tab`)·포커스는 안 든다. SPC 밑에는 이런 항목이 없다 — 그래서
+    /// 메뉴가 열린 채로 이것이 나왔으면 그 키가 메뉴를 닫은 것이다(`App::key` 의 알림).
+    pub fn moves(self) -> bool {
+        matches!(self, Browse::Step(_) | Browse::Expand | Browse::Collapse)
+    }
+
     /// 사람에게 대는 낱말. **켜고 끄는 것은 지금 상태로 가는 곳을 댄다** — 색이 혼자 뜻을
     /// 지지 않는다.
     pub fn what(self, c: &Ctx) -> &'static str {

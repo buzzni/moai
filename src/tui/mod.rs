@@ -4049,7 +4049,8 @@ impl App {
         // 채로 두므로([`menu::feed`]), `SPC v w` 가 단 알림을 읽고 메뉴를 닫는 Esc 가 곧 "다음 키"
         // 다. 거기서 걷으면 그 알림은 메뉴 창이 떠 있는 동안만 살고, 메뉴를 닫자마자 사라진다 —
         // 알림을 남긴 키와 그것을 지우는 키가 한 누름이다. 메뉴가 열린 채 아무 동작도 안 돈 키
-        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다.
+        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다. 메뉴를 닫고
+        // 이동한 키도 그 닫는 몫으로 도로 세운다(moai-y8v2, 아래 `act.moves()`).
         let carried = self.notice.take();
         let in_menu = menu::open(&self.chord);
         // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
@@ -4084,6 +4085,14 @@ impl App {
             }
             return;
         };
+        // **메뉴를 닫은 이동키도 알림을 도로 세운다**(moai-y8v2) — 메뉴를 닫는 Esc 와 그 이동을 한
+        // 누름에 한 키라, Esc 가 남기는 알림은 이것도 남긴다(moai-g56h). 걷으면 `SPC v w` 뒤 곧 `j`
+        // 로 목록에 가는 흐름에서 알림이 메뉴 창이 떠 있는 동안만 산다. SPC 밑에는 이동 항목이
+        // 없으므로([`keys::Browse::moves`]) 열린 메뉴에서 이동이 나왔으면 그 키가 메뉴를 닫은 것이다.
+        // 이동이 제 알림을 달면(`enabled` 의 까닭) 그것이 덮는다.
+        if in_menu && act.moves() {
+            self.notice = carried;
+        }
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -6305,12 +6314,7 @@ mod tests {
         assert!(menu::open(&a.chord), "SPC 가 메뉴를 곧바로 안 열었다");
         let before = (a.cursor, a.focus, a.site.path.clone());
         // 이동키(`j`·`G`)는 여기 없다 — 메뉴를 닫고 그 이동을 한다(`a_move_key_in_the_menu_closes_it_and_moves`).
-        for k in [
-            key(KeyCode::Char('x')),
-            key(KeyCode::Char('r')),
-            key(KeyCode::Enter),
-            key(KeyCode::Tab),
-        ] {
+        for k in [key(KeyCode::Char('x')), key(KeyCode::Char('r')), key(KeyCode::Enter), key(KeyCode::Tab)] {
             a.key(k);
             assert!(menu::open(&a.chord), "{k:?} 가 메뉴를 닫았다");
             assert_eq!(a.notice, None, "{k:?} 가 알림을 달았다");
@@ -8139,6 +8143,26 @@ mod tests {
         assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 Esc 가 알림을 함께 지웠다");
 
         a.hit("j");
+        assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
+    }
+
+    /// **메뉴를 닫는 이동키도 토글이 낸 알림을 안 지운다**(moai-y8v2) — Esc 와 이동을 한 누름에
+    /// 한 키라, 걷으면 토글 층에서 맞추고 곧 목록으로 가는 흐름에서 알림이 메뉴 창이 떠 있는
+    /// 동안만 산다(moai-g56h 와 같은 실패). 걷는 것은 여전히 메뉴 밖의 다음 키다.
+    #[test]
+    fn a_move_key_closing_the_menu_keeps_the_notice_the_toggle_left() {
+        let (_scratch, mut a) = writable("menu-move-notice");
+        a.read = lost;
+        a.hit("SPC v w Esc");
+        a.hit("SPC v w");
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — 토글을 누르고도 메뉴가 떠 있다");
+
+        a.hit("j");
+        assert!(!super::menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 이동키가 알림을 함께 지웠다");
+
+        a.hit("k");
         assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
     }
 

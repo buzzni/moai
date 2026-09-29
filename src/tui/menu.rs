@@ -94,15 +94,12 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 
 /// 메뉴를 닫고 탐색으로 넘길 키인가 — 목록을 움직이는 키 전부다(사용자 결정: 줄·쪽·맨 위아래·
 /// 펼침·접기). 접두어는 **그 밑이 모두 이동일 때만** 센다: `g`(`gg`)는 들고 `Ctrl-w`(포커스)는
-/// 안 든다. 판정은 키 표에서 읽는다 — 이동키를 더하면 여기도 따라온다.
+/// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
+/// 더하면 여기도 따라온다.
 fn moves(k: KeyEvent) -> bool {
-    let is_move = |a: Browse| matches!(a, Browse::Step(_) | Browse::Expand | Browse::Collapse);
     match lookup(BROWSE, &[k]) {
-        Lookup::Run(act) => is_move(act),
-        Lookup::Pending => BROWSE
-            .iter()
-            .filter(|b| b.seq.len() > 1 && b.seq[0].matches(k))
-            .all(|b| is_move(b.act)),
+        Lookup::Run(act) => act.moves(),
+        Lookup::Pending => BROWSE.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
     }
 }
@@ -655,7 +652,10 @@ mod tests {
             let mut ch = Chord::default();
             feed(&mut ch, &c, k(' '));
             feed(&mut ch, &c, k(layer));
-            assert!(entries(ch.held(), &c, &[]).iter().any(|e| e.key == x.to_string()), "시험의 전제 — SPC {layer} 에 {x} 가 섰다");
+            assert!(
+                entries(ch.held(), &c, &[]).iter().any(|e| e.key == x.to_string()),
+                "시험의 전제 — SPC {layer} 에 {x} 가 섰다"
+            );
             assert_eq!(feed(&mut ch, &c, k(x)), Some(item), "SPC {layer} {x} 가 항목을 안 했다");
         }
         // 그 글자가 안 선 층에서는 이동이다 — 뿌리의 `h`·`l`, `SPC s` 의 `g`.
