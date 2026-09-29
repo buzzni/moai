@@ -2041,3 +2041,14 @@
 {"ts":"2026-09-29T10:42:46Z","id":"moai-iral","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T10:42:46Z","id":"moai-jo3h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-29T10:42:47Z","id":"moai-wd44","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T10:55:17Z","id":"moai-59k3.4c3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-59k3 epic end (picks record place, git deadline)"}
+{"ts":"2026-09-29T10:55:22Z","id":"moai-59k3.4c3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T10:55:53Z","id":"moai-59k3.u09","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T10:55:54Z","id":"moai-59k3.yo6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-09-29T10:55:54Z","id":"moai-59k3.4c3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: epic-end /code-review max --fix is running in the background; take its findings in as a separate fix: commit, then merge per the supervisor brief (step 7-1 onward)."}
+{"ts":"2026-09-29T10:57:23Z","id":"moai-ydm7.exk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — linked tracker: append bound, overlay base, merge attribute, status notice"}
+{"ts":"2026-09-29T10:57:28Z","id":"moai-ydm7.exk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T10:57:49Z","id":"moai-ydm7.exk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: epic-end review (max --fix) is running on worktree-moai-ydm7 over the four members; take its findings in, then CHANGELOG, merge per the brief, close the four and this review"}
+{"ts":"2026-09-29T11:59:32Z","id":"moai-3q30","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"A project dir on a dead mount still hangs the overview before any git call"}
+{"ts":"2026-09-29T11:59:33Z","id":"moai-p3k7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Pick record key edge cases left after moving picks beside the config"}
+{"ts":"2026-09-29T11:59:35Z","id":"moai-oxq4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Timed-out notice asks leak threads in the long-lived TUI"}
