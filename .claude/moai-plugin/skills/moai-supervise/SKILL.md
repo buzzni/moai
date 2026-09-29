@@ -101,9 +101,31 @@ the script in 2 does not print as a `worktree` row.
       Work running alongside: <other work> — do not touch those files (4-3)
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
       Before you commit or merge in the root, **only check** that the root still stands on that
-      branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-      someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-      the wrong HEAD leaves no reference at all once `branch -d` runs
+      branch — come out with ExitWorktree(keep) first and run `git symbolic-ref -q HEAD` **in the root**.
+      If it is not `refs/heads/<base branch>` (detached, or someone switched the branch), do not run the
+      merge: tell the supervisor and stop. A merge that lands on the wrong HEAD leaves no reference at all
+      once `branch -d` runs.
+          **Do not ask this from inside the worktree.** A `git -C <root> …` call is refused there —
+          see the git shapes below
+      **Git in a worktree session: one plain command per call.** The harness reads each Bash call
+      and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+      intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+      refusals in all.
+      - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+        compound commands (`&&`, `;`, `||`)
+      - Commit messages go in a file: write it with Write, then `git commit -F <that file>`. A heredoc
+        is a refusal shape (205 cases)
+      - Several git steps in a row: put them in a script file and call it as a bare
+        `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+        refused had `&&`, a pipe or `$PWD` after them
+      - Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+        `computed at runtime` (119 cases)
+      - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+        `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+        ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+      - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+        commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+        session has not committed yet
       Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
@@ -358,9 +380,31 @@ worker reads in its own window in 9-1.
     Work running alongside: <other work> — do not touch those files (4-3)
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
     Before you commit or merge in the root, **only check** that the root still stands on that
-    branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-    someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-    the wrong HEAD leaves no reference at all once `branch -d` runs
+    branch — come out with ExitWorktree(keep) first and run `git symbolic-ref -q HEAD` **in the root**.
+    If it is not `refs/heads/<base branch>` (detached, or someone switched the branch), do not run the
+    merge: tell the supervisor and stop. A merge that lands on the wrong HEAD leaves no reference at all
+    once `branch -d` runs.
+        **Do not ask this from inside the worktree.** A `git -C <root> …` call is refused there —
+        see the git shapes below
+    **Git in a worktree session: one plain command per call.** The harness reads each Bash call
+    and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+    intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+    refusals in all.
+    - One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+      compound commands (`&&`, `;`, `||`)
+    - Commit messages go in a file: write it with Write, then `git commit -F <that file>`. A heredoc
+      is a refusal shape (205 cases)
+    - Several git steps in a row: put them in a script file and call it as a bare
+      `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+      refused had `&&`, a pipe or `$PWD` after them
+    - Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+      `computed at runtime` (119 cases)
+    - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+      `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+      ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+    - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+      commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+      session has not committed yet
     1. Unfold it in the root — the one way to turn an idea into work is
        `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
        issue. Look at `--dry-run` first — that is for this window to see, not to show a person

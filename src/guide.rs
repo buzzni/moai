@@ -252,9 +252,43 @@ const BESIDE: &str = "Work running alongside: <other work> — do not touch thos
 /// 받는다 — 거둔 일은 4-1 부터만 이어 받아, 머리에 없으면 8 의 병합 말고는 트래커 커밋이 대조
 /// 없이 엉뚱한 HEAD 에 선다.
 const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on that
-branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-the wrong HEAD leaves no reference at all once `branch -d` runs"#;
+branch — come out with ExitWorktree(keep) first and run `git symbolic-ref -q HEAD` **in the root**.
+If it is not `refs/heads/<base branch>` (detached, or someone switched the branch), do not run the
+merge: tell the supervisor and stop. A merge that lands on the wrong HEAD leaves no reference at all
+once `branch -d` runs.
+    **Do not ask this from inside the worktree.** A `git -C <root> …` call is refused there —
+    see the git shapes below"#;
+
+/// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
+/// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
+/// 판정은 "위험하다" 가 아니라 **"확인 불가"** 다.
+///
+/// 2026-09-29 에 이 저장소의 전사 246개(561MB)를 훑어 **714건**을 셌다. 복합 명령이 든 것이
+/// 608건(85%)이고, 꾸밈 하나 없는 단일 명령 28건은 전부 `git -C <루트>` 처럼 **과녁이 밖**인
+/// 것이었다. 그 28건 안에 옛 [`BRANCH_CHECK`] 가 이르던 `git -C <root> symbolic-ref -q HEAD`
+/// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
+///
+/// **일꾼과 거둔 일이 같은 글을 받는다** — 한쪽만 고치면 그 글을 안 읽는 쪽이 회차마다 다시
+/// 걸린다.
+const GIT_SHAPES: &str = r#"**Git in a worktree session: one plain command per call.** The harness reads each Bash call
+and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+refusals in all.
+- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+  compound commands (`&&`, `;`, `||`)
+- Commit messages go in a file: write it with Write, then `git commit -F <that file>`. A heredoc
+  is a refusal shape (205 cases)
+- Several git steps in a row: put them in a script file and call it as a bare
+  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+  refused had `&&`, a pipe or `$PWD` after them
+- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+  `computed at runtime` (119 cases)
+- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+  session has not committed yet"#;
 
 /// 밖의 idea 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -1313,6 +1347,7 @@ pub fn supervise() -> String {
     let epic_rule = epic_review_rule();
     let reclaim_model = indent(&model_line(), "      ");
     let reclaim_check = indent(BRANCH_CHECK, "      ");
+    let reclaim_shapes = indent(GIT_SHAPES, "      ");
     format!(
         r#"---
 name: moai-supervise
@@ -1412,6 +1447,7 @@ the script in 2 does not print as a `worktree` row.
       {BESIDE}
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
 {reclaim_check}
+{reclaim_shapes}
       Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
@@ -2124,6 +2160,7 @@ fn brief() -> String {
     let epic_rule = indent(&epic_review_rule(), "       ");
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
+    let shapes = indent(GIT_SHAPES, "    ");
     // 용어 보존은 안내 글과 한 출처다 — 규칙 3 의 64KB 가 그랬듯, 손으로 옮겨 적으면 이 표면만 낡는다.
     let keep = KEEP_TERMS;
     format!(
@@ -2133,6 +2170,7 @@ fn brief() -> String {
     {BESIDE}
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
 {branch_check}
+{shapes}
     1. Unfold it in the root — the one way to turn an idea into work is
        `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
        issue. Look at `--dry-run` first — that is for this window to see, not to show a person
@@ -3811,6 +3849,24 @@ sys.exit(1 if bad else 0)
             head.contains(&indent(BRANCH_CHECK, "      ")),
             "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다"
         );
+        // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
+        // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
+        assert!(!brief.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
+        assert!(brief.contains("run `git symbolic-ref -q HEAD` **in the root**"), "대조를 어디서 하는지 안 적었다");
+        // **git 꼴 다섯은 두 글에 다 선다**(moai-rgp9) — 한쪽만 고치면 그 글을 안 읽는 쪽이
+        // 회차마다 다시 걸린다.
+        assert!(brief.contains(&indent(GIT_SHAPES, "    ")), "새 일의 머리에 git 꼴이 없다");
+        assert!(head.contains(&indent(GIT_SHAPES, "      ")), "거둔 일의 머리에 git 꼴이 없다");
+        for (piece, why) in [
+            ("One command per call", "한 호출에 한 명령이라는 줄이 없다"),
+            ("`git commit -F <that file>`", "커밋 글을 파일로 주라는 줄이 없다"),
+            ("`bash /abs/path/script.sh`", "여러 걸음을 스크립트로 빼라는 줄이 없다"),
+            ("computed at runtime", "치환으로 만든 명령이 거절되는 것을 안 적었다"),
+            ("Do not aim git at the root from inside the worktree", "루트를 겨누지 말라는 줄이 없다"),
+            ("`git status -- .moai/`", "남의 트래커 줄을 쓸어 가는 자리를 안 적었다"),
+        ] {
+            assert!(GIT_SHAPES.contains(piece), "{why} — {piece}");
+        }
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
