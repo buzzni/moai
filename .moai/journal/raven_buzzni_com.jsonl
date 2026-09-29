@@ -1946,3 +1946,9 @@
 {"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.2mo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"받기 전에 깔 자리를 먼저 본다"}
 {"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.665","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"새 판 알림과 README 가 올리는 명령을 준다"}
 {"ts":"2026-09-29T06:23:38Z","id":"moai-u1ck","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 가 제 판을 스스로 올리는 명령 (moai upgrade)"}
+{"ts":"2026-09-29T06:27:50Z","id":"moai-ydm7.7wq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:27:50Z","id":"moai-ydm7.976","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:27:53Z","id":"moai-8rmw.lj5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.t8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.2mo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T06:27:54Z","id":"moai-8rmw.665","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
