@@ -1560,8 +1560,7 @@ type Bases = std::collections::HashMap<String, BTreeMap<String, String>>;
 fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
     let mut then = BTreeMap::new();
     let Ok(base) = git(root, &["merge-base", mine, theirs]) else { return then };
-    // `<커밋>:./<경로>` 는 `-C` 로 준 디렉터리에서 푼다 — moai 뿌리가 꼭대기가 아니어도 된다.
-    let Ok(src) = git(root, &["show", &format!("{}:./.moai/issues.jsonl", base.trim())]) else { return then };
+    let Some(src) = snapshot_at(root, base.trim()) else { return then };
     for i in crate::store::parse_issues(&src).issues {
         let at = then.entry(i.id).or_insert_with(String::new);
         if i.updated_at > *at {
@@ -1569,6 +1568,69 @@ fn base_of(root: &Path, mine: &str, theirs: &str) -> BTreeMap<String, String> {
         }
     }
     then
+}
+
+/// 커밋 `at` 의 `.moai/issues.jsonl` 글 — **링크로 커밋됐으면 그 커밋 안에서 링크를 따라간다**(moai-iral).
+///
+/// `git show <커밋>:<링크>` 는 가리키는 파일이 아니라 링크 글(`../shared/issues.jsonl`)을 낸다. 그것을
+/// 스냅샷으로 풀면 줄이 하나도 없어 지운 줄을 가를 바탕이 비고, main 에서 `moai rm` 한 줄이 옆
+/// 워크트리의 것으로 되살아나 `ready --worktree` 에 말없이 섰다. 상대 링크는 그 링크가 든 자리에서
+/// 잰다 — `<커밋>:./<경로>` 는 `-C` 로 준 디렉터리에서 풀리고 `..` 도 git 이 접는다. moai 뿌리가
+/// 꼭대기가 아니어도 된다.
+///
+/// **그 커밋 안에서 못 푸는 링크는 `None` 이다** — 절대 경로이거나, 저장소 밖을 가리키거나, 고리다.
+/// 그 파일의 옛 글은 git 에 없으니 바탕이 없는 것이고, [`base_of`] 가 말하지 않는 것과 같은 까닭이다.
+/// 링크인 트래커는 `moai status` 가 따로 한 줄로 비춘다(moai-jo3h).
+///
+/// **흔한 판은 `show` 하나로 끝낸다**(리뷰). 모드를 묻는 `ls-tree` 를 늘 먼저 띄우던 판은 링크가 아닌
+/// 트래커에도 옆 HEAD 마다 git 을 하나 더 띄웠다 — 이 길은 훅의 거절 길이고, 옆마다 띄우는 git 을
+/// 줄인 것이 moai-h498 이다([`side`]). 줄이 선 스냅샷은 개행을 들고 링크 글은 안 든다. 빈 글도
+/// 링크가 아니다 — git 은 빈 링크를 못 담는다. 그래서 모드는 개행 없는 한 줄 글에만 묻는다.
+/// `ls-tree` 는 경로를 pathspec 으로 받아 `GIT_ICASE_PATHSPECS` 같은 환경에서 죽는데, 그 값도 이제
+/// 링크인 트래커만 치른다.
+///
+/// **링크면 지금 줄이 사는 자리부터 묻는다**(리뷰, [`crate::cmd::init::tracker_file`]). 커밋 안의 링크를
+/// 한 칸씩 따라가는 길은 가운데 디렉터리가 링크인 판(`.moai -> tracker`, `../data/…` 의 `data` 가
+/// 링크)을 못 건너 바탕을 잃었는데, 병합 줄을 거는 쪽과 링크 알림은 같은 판을 이미 디스크에서 푼다.
+/// 갈라진 뒤 배치가 바뀌어 그 자리에 글이 없으면 한 칸씩 따라가는 길로 물러선다.
+fn snapshot_at(root: &Path, at: &str) -> Option<String> {
+    // 줄이 선 스냅샷은 개행을 들고, 빈 글은 줄 없는 스냅샷이다 — 링크 글은 둘 다 아니다.
+    let snapshot = |src: &str| src.is_empty() || src.contains('\n');
+    let home = crate::path::real(root);
+    let lives = crate::cmd::init::tracker_file(root)
+        .and_then(|f| f.strip_prefix(&home).ok().map(Path::to_path_buf))
+        .filter(|rel| rel.as_path() != Path::new(crate::cmd::merge_driver::SNAPSHOT));
+    if let Some(rel) = lives
+        && let Ok(src) = git(root, &["show", &format!("{at}:./{}", rel.to_str()?)])
+        && snapshot(&src)
+    {
+        return Some(src);
+    }
+    let mut path = PathBuf::from("./.moai/issues.jsonl");
+    // 고리는 같은 자리를 다시 밟는 데서 끊는다 — 마흔 번을 다 돌면 git 을 여든 번 넘게 띄운다(리뷰).
+    // `..` 은 git 도 글자로 접으므로 같은 자로 접어 견준다.
+    let mut seen = std::collections::HashSet::new();
+    // 깊이의 끝은 [`crate::path::follow_links`] 와 같은 마흔 번이다.
+    for _ in 0..=40 {
+        if !seen.insert(crate::path::lexical(&path)) {
+            return None;
+        }
+        let spec = format!("{at}:{}", path.to_str()?);
+        let src = git(root, &["show", &spec]).ok()?;
+        if snapshot(&src) {
+            return Some(src);
+        }
+        let tree = git(root, &["ls-tree", at, "--", path.to_str()?]).ok()?;
+        if !tree.starts_with("120000 ") {
+            return Some(src);
+        }
+        let to = Path::new(&src);
+        if to.is_absolute() {
+            return None;
+        }
+        path = crate::path::dir_of(&path).join(to);
+    }
+    None
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {

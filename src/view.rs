@@ -938,6 +938,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 안 쓰기로 한 저장소는 그 선언이 없어 이 줄을 아예 안 본다. 댈 경로가 없으니 `ids` 도
         // 없고, 칠 줄은 `hint` 가 낸다.
         "merge_driver_absent" => one(say(lang, "warn.merge_driver_absent")),
+        // **링크인 트래커**(moai-jo3h). 가리키는 파일은 `preview` 가 한 줄로 낸다 — 막지 않고 비추기만 한다.
+        "tracker_linked" => one(say(lang, "warn.tracker_linked")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는

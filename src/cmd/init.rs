@@ -237,8 +237,80 @@ pub fn agents_state(root: &Path) -> Result<BlockState, String> {
 /// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
 /// 빠졌을 때의 결과가 파일마다 달라 화면의 낱말이 갈리고(`view::says`), 기계도 `kind` 로 그것을
 /// 가른다. `agents_stale`·`agents_hand_edited` 가 이미 그 자리다.
-const DOTFILES: [(&str, &str, &str); 2] =
-    [(".gitattributes", GITATTRIBUTES, "gitattributes_rules"), (".gitignore", GITIGNORE, "gitignore_rules")];
+///
+/// **블록은 뿌리를 받아 짓는다** — `.gitattributes` 의 블록은 저장소마다 한 줄이 더 설 수 있다
+/// ([`attributes_for`]). 이름으로 블록을 고르는 `match` 를 따로 두던 판은 `_` 갈래가 모르는 이름에
+/// `.gitignore` 블록을 줬다(리뷰). 칸이 표에 있으면 줄을 더할 때 블록을 빠뜨릴 수 없다.
+const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
+    [(".gitattributes", attributes_for, "gitattributes_rules"), (".gitignore", gitignore_for, "gitignore_rules")];
+
+/// `.gitignore` 에 심을 블록 — 어느 뿌리에서나 같다. 뿌리를 받는 것은 [`DOTFILES`] 의 칸 꼴이다.
+fn gitignore_for(_: &Path) -> std::borrow::Cow<'static, str> {
+    GITIGNORE.into()
+}
+
+/// `.gitattributes` 에 심을 블록 — **트래커가 체크아웃 안의 파일을 가리키는 링크면 그 파일에도
+/// `merge=moai` 를 건다**(moai-7myd).
+///
+/// git 은 링크를 링크 글로 담고, 줄이 사는 파일은 가리켜진 경로로 따로 담는다. 병합에서 실제로
+/// 합쳐지는 것은 그 파일인데 선언은 링크 경로에만 걸려, 그 파일이 git 의 기본 글 병합을 받아
+/// 충돌 표식을 든 JSONL 이 됐다 — 그런데 `init --check` 는 드라이버가 `current` 라고 했다.
+/// 선언을 재는 [`crate::cmd::merge_driver`] 의 `declared` 는 그대로 링크 경로를 묻는다. 빠진 것은
+/// 이 한 줄이고, 그것은 [`dotfile_gaps`] 가 `gitattributes_rules` 로 비춘다.
+///
+/// **뿌리에 못박는다**(`/<경로>`). `/` 없는 한 조각 패턴은 어느 깊이의 같은 이름에도 걸린다.
+/// 쓸 수 없는 경로는 줄을 안 세운다 — 뿌리 밖(위 디렉터리·체크아웃 밖, 쓰기가 거절하는 자리다)이거나
+/// 패턴 글자·빈칸·제어 문자가 든 이름이다. 그 트래커는 `moai status` 의 링크 알림이 비춘다(moai-jo3h).
+///
+/// **거는 속성은 스냅샷 줄의 것을 그대로 옮긴다**(리뷰) — 손으로 다시 적으면 그 줄이 바뀌는 날 병합이
+/// 실제로 도는 이 파일만 옛 속성에 남는다. 스냅샷 줄이 드라이버를 거는지는
+/// `the_declared_path_is_the_one_init_writes` 가 맨다.
+fn attributes_for(root: &Path) -> std::borrow::Cow<'static, str> {
+    let Some(rel) = linked_snapshot(root) else { return GITATTRIBUTES.into() };
+    let snapshot = crate::cmd::merge_driver::SNAPSHOT;
+    let attrs = GITATTRIBUTES
+        .lines()
+        .rev()
+        .find_map(|l| l.strip_prefix(snapshot).filter(|rest| rest.starts_with(char::is_whitespace)))
+        .unwrap_or_default();
+    format!("{GITATTRIBUTES}{LINKED_COMMENT}/{rel}{attrs}\n").into()
+}
+
+/// [`attributes_for`] 가 더하는 줄 위의 주석. **글을 고치지 않는다** — 줄 단위로 견주어 덧붙이므로
+/// 고친 글은 이미 심은 저장소에 한 벌 더 붙는다(`GITATTRIBUTES` 위의 글과 같은 까닭이다).
+const LINKED_COMMENT: &str = "\
+# .moai/issues.jsonl is a link. git merges the file it points at, so that file
+# carries the same attributes.
+";
+
+/// 이 뿌리의 트래커 줄이 **실제로 사는 파일** — 끝 조각의 링크 사슬을 따라가고([`crate::path::follow_links`])
+/// 그 파일이 든 디렉터리를 통째로 푼다. 끝 파일은 없어도 된다. 사슬이 고리거나 그 디렉터리가 없으면
+/// `None` 이다.
+///
+/// **디렉터리를 통째로 푸는 까닭**은 `.moai` 가 링크인 판이다(리뷰). 끝 조각만 보던 판은
+/// `.moai -> tracker` 에서 링크를 못 보고 병합 줄도 알림도 안 세웠는데, git 은 거기서도 줄이 사는
+/// `tracker/issues.jsonl` 을 그 경로로 합쳐 충돌 표식을 냈다.
+///
+/// **거는 쪽([`linked_snapshot`])과 비추는 쪽(`cmd::status` 의 링크 알림)이 이 하나로 푼다** — 둘이 따로
+/// 풀던 판은 링크를 알아보는 길부터 갈렸다(리뷰).
+pub(crate) fn tracker_file(root: &Path) -> Option<std::path::PathBuf> {
+    let end = crate::path::follow_links(&root.join(crate::cmd::merge_driver::SNAPSHOT)).ok()?;
+    Some(std::fs::canonicalize(crate::path::dir_of(&end)).ok()?.join(end.file_name()?))
+}
+
+/// 트래커가 링크면 **이 뿌리 안에서** 그것이 가리키는 파일의 경로(`shared/issues.jsonl`). 링크가 아니거나
+/// [`attributes_for`] 가 줄로 못 거는 자리면 `None` 이다 — 푼 자리가 제자리(`.moai/issues.jsonl`)면 링크가
+/// 아니다.
+///
+/// **제어 문자가 든 이름도 줄로 안 건다**(리뷰). 받은 저장소가 링크와 그 이름의 디렉터리를 커밋하면 그
+/// 글자가 `init --check` 와 `init` 이 찍는 규칙 줄에 그대로 실려 터미널을 다시 칠한다.
+fn linked_snapshot(root: &Path) -> Option<String> {
+    let snapshot = crate::cmd::merge_driver::SNAPSHOT;
+    let end = tracker_file(root)?;
+    let rel = end.strip_prefix(crate::path::real(root)).ok()?.to_str()?;
+    let plain = |c: char| !c.is_whitespace() && !c.is_control() && !"*?[]\\\"#!".contains(c);
+    (rel != snapshot && !rel.is_empty() && rel.chars().all(plain)).then(|| rel.to_string())
+}
 
 /// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 알림의 갈래, 빠진 줄들)`, 빠진 것이
 /// 있는 파일만.
@@ -250,7 +322,7 @@ const DOTFILES: [(&str, &str, &str); 2] =
 /// **없는 파일은 통째로 빠진 것이다.** `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰 자리라
 /// (moai-mxtb) 입을 다물면 안 된다. 갈림은 **오류의 갈래로** 짓는다 — `exists()` 로 물으면 못 읽는
 /// 파일과 없는 파일이 정확히 거꾸로 선다.
-pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'static str>)> {
+pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>)> {
     DOTFILES
         .into_iter()
         .filter_map(|(name, block, kind)| {
@@ -259,7 +331,8 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<&'stati
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
                 Err(_) => return None,
             };
-            let missing = missing_rules(&text, block);
+            let block = block(root);
+            let missing: Vec<String> = missing_rules(&text, &block).into_iter().map(str::to_string).collect();
             (!missing.is_empty()).then_some((name, kind, missing))
         })
         .collect()
@@ -293,7 +366,7 @@ pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
     }
     let away = away_root(root, chdir);
     gaps.into_iter()
-        .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, &missing, away.as_deref()))
+        .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, missing, away.as_deref()))
         .collect()
 }
 
@@ -632,8 +705,11 @@ impl Added {
 /// 남의 `.gitignore` 가 반쯤 잘린 채 남고, 위의 결정 때문에 그 실패가 0 으로 끝나 아무도 모른다.
 /// `O_APPEND` 는 못 쓰면 한 글자도 안 바뀌고, 쓰다 끊겨도 남의 줄은 그대로다 — 이 함수가 내건
 /// "남의 내용을 지우지 않는다" 를 실제로 지키는 것은 이쪽이다.
+///
+/// **링크는 체크아웃 안에서만 따라간다**(moai-wd44) — 받은 저장소가 커밋한 `.gitignore -> ~/.bashrc` 에
+/// `init` 이 줄을 덧붙이던 자리다. 거절은 못 쓴 것과 같은 길로 간다: 손으로 더할 줄을 대고 이어 간다.
+/// 뿌리는 이 파일이 든 자리다 — [`plant`] 와 같은 자로 잰다.
 fn ensure_lines(path: &Path, block: &str) -> Added {
-    use std::io::Write as _;
     let existing = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -652,12 +728,10 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     }
     tail.push_str(&missing.join("\n"));
     tail.push('\n');
-    let wrote =
-        std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(tail.as_bytes()));
-    match wrote {
+    match crate::store::append_inside(path, tail.as_bytes(), crate::path::dir_of(path)) {
         // 규칙은 [`missing_rules`] 와 **같은 자**로 가른다 — 주석이 아닌 줄이다.
         Ok(()) => Added::Wrote { rules: missing.iter().any(|l| !l.trim_start().starts_with('#')) },
-        Err(e) => Added::Unwritable { why: e.to_string(), missing: missing.iter().map(|l| (*l).to_string()).collect() },
+        Err(e) => Added::Unwritable { why: e.message, missing: missing.iter().map(|l| (*l).to_string()).collect() },
     }
 }
 
@@ -788,12 +862,24 @@ fn decided(have: &str, want: &str) -> bool {
     fn path(l: &str) -> Option<&str> {
         l.split_whitespace().next().map(|p| p.trim_start_matches('/'))
     }
-    // 스냅샷에 union 을 건 줄 — 결정이 아니라 고쳐야 할 줄이다.
-    let union_on_snapshot = |l: &str| {
-        path(l) == Some(crate::cmd::merge_driver::SNAPSHOT) && l.split_whitespace().skip(1).any(|t| t == "merge=union")
-    };
+    // 스냅샷에 union 을 건 줄 — 결정이 아니라 고쳐야 할 줄이다. **스냅샷은 경로가 아니라 거는 값으로
+    // 가른다** — 드라이버를 걸어야 하는 자리가 곧 스냅샷이다. 링크인 트래커가 가리키는 파일
+    // (`/shared/issues.jsonl`, moai-7myd)도 그 자리라, `.moai/issues.jsonl` 로만 가르던 판은 거기 걸린
+    // `merge=union` 을 결정으로 읽어 줄도 안 쓰고 알림도 재웠다 — 그 파일이 union 으로 합쳐졌다(리뷰).
+    let moai = format!("merge={}", crate::cmd::merge_driver::DRIVER);
+    let drives = |l: &str| l.split_whitespace().skip(1).any(|t| t == moai);
+    let union_on_snapshot = |l: &str| drives(want) && l.split_whitespace().skip(1).any(|t| t == "merge=union");
+    // **스냅샷에 적은 결정은 그 스냅샷이 가리키는 파일에도 선다**(리뷰). 링크인 트래커가 가리키는 파일의
+    // 줄([`attributes_for`])은 스냅샷의 속성을 옮기려고 서는 것이라, 스냅샷에 `-merge` 로 드라이버를 안
+    // 쓰기로 한 저장소에 그 줄을 요구하면 알림이 영영 서고 그 `init` 이 드라이버를 도로 건다 — 위의
+    // 탈출구가 링크 하나로 닫혔다. 드라이버를 거는 줄은 결정이 아니라 우리 줄이다.
+    let decided_on_snapshot =
+        || drives(want) && path(have) == Some(crate::cmd::merge_driver::SNAPSHOT) && !drives(have);
     // 속성이 없는 줄은 `.gitignore` 의 줄이다 — 그쪽은 위의 자로만 잰다.
-    path(have) == path(want) && sets(want, "merge") && sets(have, "merge") && !union_on_snapshot(have)
+    (path(have) == path(want) || decided_on_snapshot())
+        && sets(want, "merge")
+        && sets(have, "merge")
+        && !union_on_snapshot(have)
 }
 
 pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
@@ -961,8 +1047,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
     }
 
-    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES);
-    let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE);
+    // 블록은 [`DOTFILES`] 의 칸과 같은 자가 짓는다 — 비추는 길([`dotfile_gaps`])이 요구하는 줄과 여기서
+    // 쓰는 줄이 갈릴 자리가 없다.
+    let (attributes, ignored) = (attributes_for(&root), gitignore_for(&root));
+    let attrs = ensure_lines(&root.join(".gitattributes"), &attributes);
+    let ignore = ensure_lines(&root.join(".gitignore"), &ignored);
     // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
     // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
     // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는
@@ -972,7 +1061,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다.
     let untouched: Vec<(&str, &Added, &str)> =
-        [(".gitattributes", &attrs, GITATTRIBUTES), (".gitignore", &ignore, GITIGNORE)]
+        [(".gitattributes", &attrs, &*attributes), (".gitignore", &ignore, &*ignored)]
             .into_iter()
             .filter(|(_, done, _)| done.trouble().is_some())
             .collect();
@@ -1208,6 +1297,74 @@ mod tests {
             rule.contains(&format!("merge={}", crate::cmd::merge_driver::DRIVER)),
             "그 줄이 드라이버를 안 건다 — {rule}"
         );
+    }
+
+    /// **링크인 트래커가 가리키는 파일의 `merge=union` 도 결정이 아니다**(리뷰). 스냅샷을 경로로 알아보던
+    /// 판은 그 줄을 사람의 결정으로 읽어 `merge=moai` 줄을 안 쓰고 알림도 재웠다 — 그 파일이 union 으로
+    /// 합쳐져 한 id 가 두 줄로 섰다. 사람이 union 아닌 값을 적은 것은 그대로 결정이다.
+    #[test]
+    fn union_on_the_file_a_linked_tracker_points_at_is_not_a_decision() {
+        let want = "/shared/issues.jsonl   text eol=lf merge=moai";
+        assert_eq!(missing_rules("shared/issues.jsonl merge=union\n", want), [want], "union 을 결정으로 읽었다");
+        assert!(missing_rules("shared/issues.jsonl -merge\n", want).is_empty(), "사람의 결정을 덮었다");
+        // **스냅샷에 적은 결정은 가리키는 파일에도 선다** — 드라이버를 안 쓰기로 한 저장소가 링크 하나로
+        // 다시 졸리면 안 된다. 스냅샷에 드라이버를 거는 우리 줄과 union 은 결정이 아니다.
+        assert!(missing_rules(".moai/issues.jsonl   text eol=lf -merge\n", want).is_empty(), "스냅샷의 결정을 덮었다");
+        let ours = ".moai/issues.jsonl   text eol=lf merge=moai\n";
+        assert_eq!(missing_rules(ours, want), [want], "스냅샷에 건 우리 줄로 가리키는 파일까지 덮었다고 읽었다");
+        assert_eq!(missing_rules(".moai/issues.jsonl merge=union\n", want), [want]);
+        // 저널은 반대다 — 거기 걸리는 값이 union 이다.
+        let journal = ".moai/journal/*.jsonl  text eol=lf merge=union";
+        assert!(missing_rules(".moai/journal/*.jsonl merge=union\n", journal).is_empty());
+    }
+
+    /// **트래커가 링크인지는 푼 자리로 잰다**(리뷰) — 끝 조각이 링크인 판도, `.moai` 가 링크인 판도 줄은
+    /// 딴 파일에 살고 git 은 그 파일을 그 경로로 합친다. 끝 조각만 보던 판은 뒤의 것을 링크가 아니라고
+    /// 읽어 병합 줄을 안 세웠다. 뿌리 밖과, 규칙 줄에 못 싣는 이름(빈칸·패턴 글자·제어 문자)은 안 건다.
+    #[cfg(unix)]
+    #[test]
+    fn the_file_a_tracker_lives_in_is_read_through_any_link_on_the_way() {
+        use std::os::unix::fs::symlink;
+        let s = crate::scratch::Scratch::new("init-linked-snapshot");
+        let root = |name: &str| {
+            let r = s.join(name);
+            std::fs::create_dir_all(&r).unwrap();
+            r
+        };
+
+        let plain = root("plain");
+        std::fs::create_dir(plain.join(".moai")).unwrap();
+        std::fs::write(plain.join(".moai/issues.jsonl"), "").unwrap();
+        assert_eq!(linked_snapshot(&plain), None, "제자리의 트래커를 링크로 읽었다");
+        assert_eq!(attributes_for(&plain), GITATTRIBUTES);
+
+        let file = root("file");
+        std::fs::create_dir_all(file.join(".moai")).unwrap();
+        std::fs::create_dir_all(file.join("shared")).unwrap();
+        symlink("../shared/issues.jsonl", file.join(".moai/issues.jsonl")).unwrap();
+        assert_eq!(linked_snapshot(&file).as_deref(), Some("shared/issues.jsonl"));
+        let rule = "/shared/issues.jsonl   text eol=lf merge=moai";
+        assert!(attributes_for(&file).lines().any(|l| l == rule), "스냅샷 줄의 속성을 그대로 안 옮겼다");
+
+        let dir = root("dir");
+        std::fs::create_dir_all(dir.join("tracker")).unwrap();
+        std::fs::write(dir.join("tracker/issues.jsonl"), "").unwrap();
+        symlink("tracker", dir.join(".moai")).unwrap();
+        assert_eq!(linked_snapshot(&dir).as_deref(), Some("tracker/issues.jsonl"), "`.moai` 가 링크인 판을 놓쳤다");
+
+        // 제어 문자는 패턴 글자와 따로 잰다 — `ESC c` 는 터미널을 통째로 되돌리는데 `[` 도 `]` 도 안 든다.
+        for (name, target) in [("space", "shared data"), ("glob", "sh*red"), ("control", "sh\u{1b}cared")] {
+            let r = root(name);
+            std::fs::create_dir_all(r.join(".moai")).unwrap();
+            std::fs::create_dir_all(r.join(target)).unwrap();
+            symlink(format!("../{target}/issues.jsonl"), r.join(".moai/issues.jsonl")).unwrap();
+            assert_eq!(linked_snapshot(&r), None, "{name}: 규칙 줄에 못 싣는 이름을 걸었다");
+        }
+        let away = root("away");
+        let out = root("out");
+        std::fs::create_dir_all(out.join(".moai")).unwrap();
+        symlink(away.join("issues.jsonl"), out.join(".moai/issues.jsonl")).unwrap();
+        assert_eq!(linked_snapshot(&out), None, "뿌리 밖을 가리키는 링크에 줄을 걸었다");
     }
 
     /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에

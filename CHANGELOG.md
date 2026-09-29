@@ -116,6 +116,19 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the directory that file lives in, so their writes no longer silently undo each other, and
   `moai init` no longer asks for an `@AGENTS.md` line in a `CLAUDE.md` that is the same file
   as `AGENTS.md`.
+- **A linked tracker is merged, overlaid and appended to where its rows live.** With
+  `.moai/issues.jsonl` (or `.moai` itself) linked to another file in the checkout, git
+  merged that file with its default text merge, so two branches editing neighbouring issues
+  left conflict markers in the tracker while `moai init --check` said nothing was missing.
+  `moai init` now adds a `merge=moai` line for the file the link points at, and `moai status`
+  and `init --check` name that line when it is missing. `--worktree` views lost the base
+  that tells a row removed here from one created beside, so a row `moai rm`'d on the main
+  checkout came back from a sibling worktree; the base is now read where the rows live.
+  Appends — the journal, and the lines `init` adds to `.gitignore` and `.gitattributes` —
+  follow a link only inside the checkout, the same rule rewrites follow, a directory link
+  on the way included, and nothing the repository holds follows a link into `.git/`.
+  `moai status` shows one notice naming the file a linked tracker points at; it blocks
+  nothing.
 
 ## [0.1.3] - 2026-09-29
 
