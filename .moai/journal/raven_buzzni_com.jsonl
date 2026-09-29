@@ -1847,3 +1847,6 @@
 {"ts":"2026-09-29T02:06:06Z","id":"moai-pp9i.wvo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-09-29T02:06:07Z","id":"moai-pp9i.hrr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1, 2, 3, 5, 8 (reviewer fixes) and fixed 4, 7, 9 myself; 6 parked as idea moai-nhue; 10 left as a minor extra read on dry runs with --milestone."}
 {"ts":"2026-09-29T02:06:13Z","id":"moai-pp9i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: epic done and merged (0b129d5d). Open follow-up is idea moai-nhue (single add --milestone <missing id> is silent); the release binary in the root is older than the merge until someone rebuilds."}
+{"ts":"2026-09-29T02:09:11Z","id":"moai-mibi.wpj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T02:09:11Z","id":"moai-mibi.pv6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T02:09:12Z","id":"moai-mibi.rfn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
