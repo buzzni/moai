@@ -565,13 +565,9 @@ fn resolve_config(path: &Path) -> Result<Option<PathBuf>, WriteTrouble> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => {}
     }
-    // 링크의 사슬을 끝까지 따라간다. 상대 대상은 그 링크가 든 디렉터리에서 잰다. 고리는 `canonicalize` 가 이미
-    // `NotFound` 가 아닌 것으로 댔다 — 여기의 횟수 제한은 그래도 끝나게 하는 울타리다.
-    let mut at = path.to_path_buf();
-    for _ in 0..40 {
-        let Ok(to) = std::fs::read_link(&at) else { break };
-        at = dir_of(&at).join(to);
-    }
+    // 링크의 사슬을 끝까지 따라간다 — `store::write_atomic` 과 같은 자다([`crate::path::follow_links`]). 고리는
+    // `canonicalize` 가 이미 `NotFound` 가 아닌 것으로 댔다.
+    let Ok(at) = crate::path::follow_links(path) else { return Ok(None) };
     if at == path {
         return Ok(None);
     }

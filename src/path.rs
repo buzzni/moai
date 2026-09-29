@@ -116,6 +116,26 @@ pub(crate) fn real_prefix(p: &Path) -> PathBuf {
     p.to_path_buf()
 }
 
+/// 심볼릭 링크의 사슬을 끝까지 따라간 자리(moai-4oab). 링크가 아니면 준 철자 그대로다.
+///
+/// 상대 대상은 그 링크가 든 디렉터리에서 잰다. **끝의 파일은 없어도 된다** — dotfiles 는 링크를
+/// 먼저 걸고 파일은 첫 쓰기에 생기기도 한다. 통째 `canonicalize` 는 거기서 실패하고, 가운데의
+/// 디렉터리 링크까지 풀어 쓸 자리의 철자를 바꾼다. 여기서 푸는 것은 끝 조각의 링크뿐이다.
+///
+/// 따라가도 링크가 남으면(고리거나 너무 깊다) `Err` 다. 그 링크를 대상으로 삼아 `rename` 하면
+/// 링크가 보통 파일로 갈아끼워진다 — 이 함수가 막으려는 바로 그 손실이다.
+pub(crate) fn follow_links(path: &Path) -> std::io::Result<PathBuf> {
+    let mut at = path.to_path_buf();
+    for _ in 0..40 {
+        let Ok(to) = std::fs::read_link(&at) else { return Ok(at) };
+        at = dir_of(&at).join(to);
+    }
+    match std::fs::symlink_metadata(&at) {
+        Ok(m) if m.file_type().is_symlink() => Err(std::io::Error::other("too many levels of symbolic links")),
+        _ => Ok(at),
+    }
+}
+
 /// 파일이 든 디렉터리. 디렉터리 조각이 없는 상대 철자(`config.toml`)면 `.` 이다.
 pub(crate) fn dir_of(path: &Path) -> &Path {
     path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))

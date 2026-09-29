@@ -1371,9 +1371,19 @@ fn process_nonce() -> u64 {
 /// 자리가 아니라 부르는 쪽의 실수이고(뿌리 `/` 나 빈 경로), 이 함수는 머지 드라이버도 부른다 —
 /// 화면 말을 물려주면 git 이 부르는 길이 사용자 설정을 연다. io 가 내는 줄과 같은 결로 영어 한
 /// 줄을 둔다.
+///
+/// **링크면 링크가 가리키는 파일을 갈아끼우고 링크는 그대로 둔다**(moai-4oab, 2026-09-29 사용자
+/// 결정). 푸는 것은 [`write_atomic_in`] 이 하고, 여기서는 임시 자리만 **가리키는 파일 곁**으로
+/// 고른다 — 링크 곁에 두면 대상이 다른 파일시스템일 때 `rename` 이 `EXDEV` 로 멈춘다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
-    write_atomic_in(path, bytes, dir)
+    let real = follow(path)?;
+    let dir = real.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
+    write_atomic_in(&real, bytes, dir)
+}
+
+/// 쓸 자리의 링크를 푼다([`crate::path::follow_links`]). 못 풀면 준 철자를 대는 거절이다.
+fn follow(path: &Path) -> R<PathBuf> {
+    crate::path::follow_links(path).map_err(|e| Fail::new(format!("{}: {e}", path.display())))
 }
 
 /// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
@@ -1382,7 +1392,16 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 이 다른 파일시스템이면 `Err` 다 — 그때 옆자리로
 /// 물러서는 것은 고르는 쪽이 한다(`cmd::init::plant`). 실패하면 **임시 파일을 남기지 않고** 대상은
 /// 한 글자도 안 바뀐다.
+///
+/// **대상이 심볼릭 링크면 링크를 따라가 가리키는 파일을 바꾼다**(moai-4oab). `rename` 은 링크를
+/// 안 따라가고 링크 자체를 갈아끼운다 — `AGENTS.md -> CLAUDE.md` 인 저장소의 `init` 이
+/// `AGENTS.md` 를 따로 선 파일로 만들고 `CLAUDE.md` 에는 블록을 안 넣었고, 링크인
+/// `issues.jsonl` 은 다음 쓰기에 보통 파일이 되어 가리키던 쪽이 옛 글에 멈췄다. 사용자 설정
+/// ([`crate::user_config::update`])은 그 전부터 이렇게 했다. 여기서 푸는 까닭은 부르는 자리가
+/// 여럿이라서다 — 부르는 쪽마다 풀게 두면 푼 곳과 잊은 곳이 갈린다.
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
+    let real = follow(path)?;
+    let path = real.as_path();
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let dir = path.parent().ok_or_else(|| Fail::new(format!("{}: no parent directory", path.display())))?;
     let (tmp, mut f) = open_tmp(path, tmp_dir)?;
@@ -2736,5 +2755,70 @@ mod tests {
         // 찌꺼기도 안 남는다 — 스레드마다 이름이 갈려도 쓰고 나면 치운다.
         let left: Vec<_> = std::fs::read_dir(s.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, vec![std::ffi::OsString::from("held.toml")], "임시 파일이 남았다: {left:?}");
+    }
+
+    /// **링크를 따라가 가리키는 파일을 바꾸고 링크는 그대로 둔다**(moai-4oab). 사슬(링크의 링크)도,
+    /// 임시 자리를 따로 주는 [`write_atomic_in`] 도 같다. 가리키는 파일의 권한도 지킨다 — 링크 곁에서
+    /// 권한을 읽으면 링크가 아니라 대상의 것을 읽어야 한다.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_symlink_changes_the_target_and_keeps_the_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("store-atomic-link");
+        let is_link = |p: &Path| std::fs::symlink_metadata(p).unwrap().file_type().is_symlink();
+        std::fs::create_dir(s.join("dots")).unwrap();
+        let real = s.join("dots/real");
+        std::fs::write(&real, "옛\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mid = s.join("mid");
+        std::os::unix::fs::symlink("dots/real", &mid).unwrap();
+        let link = s.join("link");
+        std::os::unix::fs::symlink(&mid, &link).unwrap();
+
+        write_atomic(&link, "새\n".as_bytes()).unwrap();
+        assert!(is_link(&link) && is_link(&mid), "링크를 보통 파일로 갈아끼웠다");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "새\n");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600, "대상의 권한이 풀렸다");
+        // 임시 파일은 가리키는 파일 곁에서 났다가 치워진다 — 링크 곁에도 안 남는다.
+        let names = |d: &Path| {
+            let mut v: Vec<_> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names(&s.join("dots")), vec![std::ffi::OsString::from("real")]);
+        assert_eq!(names(s.path()).len(), 3, "링크 곁에 찌꺼기가 남았다: {:?}", names(s.path()));
+
+        std::fs::create_dir(s.join("tmp")).unwrap();
+        write_atomic_in(&link, "셋째\n".as_bytes(), &s.join("tmp")).unwrap();
+        assert!(is_link(&link), "임시 자리를 따로 준 쓰기가 링크를 갈아끼웠다");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "셋째\n");
+    }
+
+    /// **가리키는 파일이 아직 없으면 거기에 만든다** — dotfiles 는 링크를 먼저 걸기도 한다. 가리키는
+    /// 디렉터리마저 없으면 쓰기는 실패하고 링크는 그대로다. **고리인 링크는 거절한다** — 따라가다
+    /// 멈춘 링크에 `rename` 하면 그것을 보통 파일로 갈아끼운다.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_or_looping_symlink_never_becomes_a_plain_file() {
+        let s = Scratch::new("store-atomic-dangling");
+        let is_link = |p: &Path| std::fs::symlink_metadata(p).unwrap().file_type().is_symlink();
+        let link = s.join("link");
+        std::os::unix::fs::symlink("later", &link).unwrap();
+        write_atomic(&link, "처음\n".as_bytes()).unwrap();
+        assert!(is_link(&link));
+        assert_eq!(std::fs::read_to_string(s.join("later")).unwrap(), "처음\n");
+
+        let gone = s.join("gone");
+        std::os::unix::fs::symlink("nowhere/file", &gone).unwrap();
+        assert!(write_atomic(&gone, "x\n".as_bytes()).is_err(), "없는 디렉터리를 가리키는 링크에 썼다");
+        assert!(is_link(&gone), "실패한 쓰기가 링크를 갈아끼웠다");
+
+        let (a, b) = (s.join("a"), s.join("b"));
+        std::os::unix::fs::symlink("b", &a).unwrap();
+        std::os::unix::fs::symlink("a", &b).unwrap();
+        assert!(write_atomic(&a, "x\n".as_bytes()).is_err(), "고리인 링크에 썼다");
+        assert!(is_link(&a) && is_link(&b), "고리인 링크를 갈아끼웠다");
+        let left: Vec<_> = std::fs::read_dir(s.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left.len(), 5, "찌꺼기가 남았다: {left:?}");
     }
 }
