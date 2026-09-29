@@ -2136,3 +2136,4 @@
 {"ts":"2026-09-29T15:58:06Z","id":"moai-mo9v.w12","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"14건을 받아 fix 커밋과 changelog 커밋으로 담았다. 9번(쌍둥이 지우기와 산 줄 고침이 겹치면 충돌)은 idea moai-z4wk 로 넘겼다"}
 {"ts":"2026-09-29T15:58:08Z","id":"moai-6nha","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T15:58:09Z","id":"moai-fl7e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-29T15:58:29Z","id":"moai-mo9v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버와 리뷰가 모두 닫혔고 f915b22b 로 develop 에 머지했다. 남은 것은 idea moai-z4wk(쌍둥이 지우기와 산 줄 고침이 겹칠 때의 충돌)뿐이고, 사람이 규칙을 정한다"}
