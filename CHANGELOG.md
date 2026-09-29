@@ -44,6 +44,38 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   with `--force`, and an install directory that cannot be made or written stops
   before the download too.
 
+### Fixed
+
+- **Commands that draw no time stay quiet on a machine without zoneinfo.** `moai ready`
+  (in a `.moai` and its overview outside one), `moai prime`, `moai show` (the list and the
+  tree), `moai idea ls` and `moai show <id> --json` used to resolve the system timezone while
+  building the screen, so on a machine with no tzdb — the static musl build dropped into
+  Alpine or scratch — each of them printed the "no timezone data" line on stderr without
+  drawing a single timestamp. The timezone is now resolved the first time a screen actually
+  draws a time, so the line stands where a time is drawn (`moai show <id>`, `moai edit`) and
+  wherever deadlines are judged — `moai status` and its overview (a bare `moai` included) and
+  the hook, which still resolve it whether or not any milestone carries a deadline. Nothing
+  was ever blocked and the exit code is unchanged.
+- **A write no longer truncates a temporary file that someone else is still writing.**
+  A write that replaces a file goes through a temporary file and a `rename`; that file
+  was opened with a plain create, which silently empties whatever already sits at that
+  name. Two processes with the same pid in different pid namespaces — two containers
+  sharing one mount — could pick the same name. The tracker, the user config and read marks
+  are written under a lock that already kept such processes apart on one machine, but a file
+  written without it (`latest.toml`, the `AGENTS.md` that `moai init` plants) could end up
+  with text that was neither side's. The temporary file is now created exclusively
+  (`O_EXCL`): a name that is taken is left alone and the next one is tried, and when every
+  name is taken the write fails with the target untouched. The names after the first belong
+  to this process alone, so the files a killed write leaves behind — no longer reused by the
+  next write with the same pid — can never use them all up.
+- **Closing work holds the tracker lock for less time.** `moai mv <id> done` works out
+  what the close just freed while it still holds the exclusive lock, and it used to build
+  the whole ready list up to three times over to do it, with four more copies of the
+  membership maps on top — on this repository that took the lock-held time of a close from
+  21.6ms to 35ms, in a place where half a dozen sessions share one `.moai`. It now builds
+  the ground once per snapshot and asks it twice: in a debug build on this repository,
+  that part of a close went from 194ms to 101ms.
+
 ## [0.1.3] - 2026-09-29
 
 ### Changed

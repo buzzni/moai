@@ -196,7 +196,7 @@ fn decide(
                 &now,
                 &source,
                 0,
-                view::Screen::new(ctx.lang()).at(ctx.zone()),
+                view::Screen::new(ctx.lang()).at(ctx.clock()),
             );
             crate::hook::board(&lines, ctx.lang())
         }),

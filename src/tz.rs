@@ -407,6 +407,28 @@ fn block(raw: &[u8], at: usize, h: &Head, time: usize) -> Option<(Vec<(i64, i32)
     Some((shifts, before))
 }
 
+/// 이 기계의 시간대를 **처음 읽을 때 푼다**(moai-s3i7). 명령 층이 [`crate::view::Screen::at`] 에
+/// 이것을 얹고, 화면이 시각을 실제로 그릴 때에만 [`System::zone`] 이 tzdb 를 만진다.
+///
+/// 옛 자리는 화면을 지을 때 시간대를 풀어 얹었다. 그래서 `ready`·`prime`·`show`(목록)·
+/// `idea ls` 처럼 시각을 한 줄도 안 그리는 명령도 zoneinfo 없는 기계(정적 musl 판, moai-77ap)
+/// 에서 [`System::trouble`] 한 줄을 stderr 에 냈다. 알림은 **드는 자리가 아니라 그리는 자리**
+/// 에서 선다 — 푼 적 없는 판은 할 말이 없다.
+#[derive(Default)]
+pub struct System(std::sync::OnceLock<(Zone, Option<Trouble>)>);
+
+impl System {
+    /// 이 기계의 시간대. 처음 부를 때 [`Zone::system`] 으로 한 번 푼다.
+    pub fn zone(&self) -> &Zone {
+        &self.0.get_or_init(Zone::system).0
+    }
+
+    /// 풀다 만난 것. **[`System::zone`] 을 부른 판에서만 선다** — 안 읽은 판은 `None` 이다.
+    pub fn trouble(&self) -> Option<&Trouble> {
+        self.0.get().and_then(|(_, why)| why.as_ref())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
