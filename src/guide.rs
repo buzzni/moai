@@ -252,9 +252,44 @@ const BESIDE: &str = "Work running alongside: <other work> — do not touch thos
 /// 받는다 — 거둔 일은 4-1 부터만 이어 받아, 머리에 없으면 8 의 병합 말고는 트래커 커밋이 대조
 /// 없이 엉뚱한 HEAD 에 선다.
 const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on that
-branch — if `git -C <root> symbolic-ref -q HEAD` is not `refs/heads/<base branch>` (detached, or
-someone switched the branch), do not run it: tell the supervisor and stop. A merge that lands on
-the wrong HEAD leaves no reference at all once `branch -d` runs"#;
+branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+(detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
+stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+    **Ask it where you already are.** Before the first tracker commit you are still in the root, so
+    it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+    refused there (the git shapes below): come out with ExitWorktree(keep), ask, and if work is
+    left in that worktree go back in with EnterWorktree(path)"#;
+
+/// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
+/// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
+/// 판정은 "위험하다" 가 아니라 **"확인 불가"** 다.
+///
+/// 2026-09-29 에 이 저장소의 전사 246개(561MB)를 훑어 **714건**을 셌다. 복합 명령이 든 것이
+/// 608건(85%)이고, 꾸밈 하나 없는 단일 명령 28건은 전부 `git -C <루트>` 처럼 **과녁이 밖**인
+/// 것이었다. 그 28건 안에 옛 [`BRANCH_CHECK`] 가 이르던 `git -C <root> symbolic-ref -q HEAD`
+/// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
+///
+/// **일꾼과 거둔 일이 같은 글을 받는다** — 한쪽만 고치면 그 글을 안 읽는 쪽이 회차마다 다시
+/// 걸린다.
+const GIT_SHAPES: &str = r#"**Git in a worktree session: one plain command per call.** The harness reads each Bash call
+and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
+intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
+refusals in all.
+- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
+  compound commands (`&&`, `;`, `||`)
+- `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+  When the message runs past one line, write it with Write and use `git commit -F <that file>`
+- Several git steps in a row: put them in a script file and call it as a bare
+  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
+  refused had `&&`, a pipe or `$PWD` after them
+- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
+  `computed at runtime` (119 cases)
+- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
+  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
+- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
+  session has not committed yet"#;
 
 /// 밖의 idea 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -272,7 +307,14 @@ const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that id
 
 /// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
-const SUBDIR: &str = r#"cd "$(git -C <root> rev-parse --show-prefix)""#;
+///
+/// **자리를 감독이 채운다**(리뷰 moai-rgp9.sdj 1번). 옛 줄은
+/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 [`GIT_SHAPES`] 가 거절된다고
+/// 적어 둔 두 꼴을 동시에 든다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다.
+/// 게다가 이 걸음은 **워크트리 안으로** 드는 것이라 `ExitWorktree` 로 피할 수도 없었다. 감독은
+/// 2 의 스크립트에서 이미 그 상대 경로를 `subdir` 줄로 읽으므로, 값을 채워 보내면 일꾼은 `cd` 만
+/// 한다. 꼭대기 프로젝트에는 그 줄이 안 서고 이 걸음도 없다.
+const SUBDIR: &str = "cd <subdir>";
 
 /// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
 /// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
@@ -1313,6 +1355,7 @@ pub fn supervise() -> String {
     let epic_rule = epic_review_rule();
     let reclaim_model = indent(&model_line(), "      ");
     let reclaim_check = indent(BRANCH_CHECK, "      ");
+    let reclaim_shapes = indent(GIT_SHAPES, "      ");
     format!(
         r#"---
 name: moai-supervise
@@ -1412,6 +1455,7 @@ the script in 2 does not print as a `worktree` row.
       {BESIDE}
       Base branch: <base branch> — the supervisor read it in the root and filled it in; do not read it again.
 {reclaim_check}
+{reclaim_shapes}
       Root: <root> — the `root dir` from 2. The tracker you edit is always the one there (4-1 of the text in 3)
       - If the worktree is there, go in with EnterWorktree(path), read how far it got with
         `git log <base branch>..HEAD` and `git status`, and carry on
@@ -1421,7 +1465,9 @@ the script in 2 does not print as a `worktree` row.
       - **If the root is not the top of the repository** (a subdirectory project in a
         monorepo), go into the worktree and then move to the same subdirectory inside it and
         work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-        hook does not count edits under `.claude/`
+        hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+        by the supervisor; with no `<subdir>` in the header, the root is the top and this step
+        does not exist
           {SUBDIR}
       - The member's column is already picked up — do not pick it up again
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
@@ -1618,7 +1664,7 @@ with `/model`.
 **3. Send.** Send **one** idea to one idle session with `SendMessage`. The worker knows
 nothing of this conversation, so send the text below **whole** — it is all the worker
 receives, so everything the worker has to keep is inside it.
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>` and `<root>`.
+Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root.
 `<milestone>` is the release that idea already stands under **and that is still alive**,
@@ -2124,6 +2170,7 @@ fn brief() -> String {
     let epic_rule = indent(&epic_review_rule(), "       ");
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
+    let shapes = indent(GIT_SHAPES, "    ");
     // 용어 보존은 안내 글과 한 출처다 — 규칙 3 의 64KB 가 그랬듯, 손으로 옮겨 적으면 이 표면만 낡는다.
     let keep = KEEP_TERMS;
     format!(
@@ -2133,6 +2180,7 @@ fn brief() -> String {
     {BESIDE}
     Base branch: <base branch> — the branch name below. The supervisor read it in the root and filled it in; do not read it again.
 {branch_check}
+{shapes}
     1. Unfold it in the root — the one way to turn an idea into work is
        `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
        issue. Look at `--dry-run` first — that is for this window to see, not to show a person
@@ -2173,7 +2221,9 @@ fn brief() -> String {
        **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
        worktree stands for the whole repository, so once inside, move to the same subdirectory in
        it and work there — standing at the worktree top, `moai` walks up and finds the root's
-       `.moai` to write, and the hook does not count edits under `.claude/`
+       `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+       relative path, filled in by the supervisor; if the header carries no `<subdir>`, the root
+       **is** the top and this step does not exist
          {SUBDIR}
     4. Do not guess a design decision that is not in the notes — ask with AskUserQuestion; a
        person is watching the worker's window
@@ -2876,7 +2926,9 @@ mod tests {
             ("only sessions on this\n  machine", "원격 세션에 루트를 묻는다"),
             ("whose sent idea has not had its report checked", "맡긴 일을 하던 세션에 또 맡긴다"),
             ("moai show <epic>", "idea 로 확인하면 멤버가 안 보인다"),
-            ("and `<root>`.", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
+            // 목록의 끝은 `<subdir>` 이 붙어 바뀌었다(리뷰 moai-rgp9.sdj 1번) — 자리 이름만 맨다.
+            ("`<root>`", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
+            ("`<subdir>`", "모노레포 하위 자리를 감독이 안 채워 일꾼이 거절되는 꼴로 구한다"),
             // 거둔 일을 맡기는 글은 brief 의 일부만 잇는다 — 그 범위가 4-1 위에서 끊기면
             // 이어받은 일꾼만 워크트리의 `.moai` 를 고친다. **끝은 번호로 적지 않는다**:
             // `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를 못 받았다.
@@ -3811,6 +3863,34 @@ sys.exit(1 if bad else 0)
             head.contains(&indent(BRANCH_CHECK, "      ")),
             "거둔 일의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 선다"
         );
+        // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
+        // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
+        assert!(!brief.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
+        // **심은 글이 거절되는 꼴을 아무 걸음에서도 시키지 않는다**(리뷰 moai-rgp9.sdj 1번) —
+        // `SUBDIR` 이 `$(git -C <root> …)` 이던 자리가 그것이었고, 그 걸음은 워크트리 **안으로**
+        // 드는 것이라 ExitWorktree 로 피할 수도 없었다.
+        // 꼴을 **이르는** 자리만 잰다 — `GIT_SHAPES` 는 거절되는 꼴의 이름을 대야 하므로 그 글자가
+        // 그 안에 서는 것은 맞다.
+        for shape in ["$(git -C", "git -C <root> rev-parse"] {
+            assert!(!brief.contains(shape), "브리프가 거절되는 꼴을 시킨다 — {shape}");
+            assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
+        }
+        assert!(brief.contains("run `git symbolic-ref -q HEAD` **in the root**"), "대조를 어디서 하는지 안 적었다");
+        // **git 꼴 여섯은 두 글에 다 선다**(moai-rgp9) — 한쪽만 고치면 그 글을 안 읽는 쪽이
+        // 회차마다 다시 걸린다.
+        assert!(brief.contains(&indent(GIT_SHAPES, "    ")), "새 일의 머리에 git 꼴이 없다");
+        assert!(head.contains(&indent(GIT_SHAPES, "      ")), "거둔 일의 머리에 git 꼴이 없다");
+        for (piece, why) in [
+            ("One command per call", "한 호출에 한 명령이라는 줄이 없다"),
+            ("`git commit -F <that file>`", "긴 커밋 글을 파일로 주라는 줄이 없다"),
+            ("`-m \"…\"` on one plain command is fine", "-m 이 되는 것을 안 적어 브리프의 걸음과 어긋난다"),
+            ("`bash /abs/path/script.sh`", "여러 걸음을 스크립트로 빼라는 줄이 없다"),
+            ("computed at runtime", "치환으로 만든 명령이 거절되는 것을 안 적었다"),
+            ("Do not aim git at the root from inside the worktree", "루트를 겨누지 말라는 줄이 없다"),
+            ("`git status -- .moai/`", "남의 트래커 줄을 쓸어 가는 자리를 안 적었다"),
+        ] {
+            assert!(GIT_SHAPES.contains(piece), "{why} — {piece}");
+        }
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도

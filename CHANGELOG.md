@@ -12,6 +12,18 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **The planted worker brief no longer teaches a git command the harness refuses.** In a
+  session isolated to a git worktree, Claude Code reads each Bash call and refuses what it
+  cannot prove stays inside that worktree; the brief's own pre-merge check
+  (`git -C <root> symbolic-ref -q HEAD`) and its monorepo step (`cd "$(git -C <root>
+  rev-parse --show-prefix)"`) were both such shapes, so a worker doing as told was blocked
+  with no way through. The check now happens in the root, the monorepo step takes a
+  `<subdir>` the supervisor fills in, and a new block in both the brief and the
+  reclaimed-work text names the shapes that pass: one plain command per call, a heredoc
+  message in a file (`-m "…"` is fine), several steps in a `bash /abs/script.sh`, no path
+  built with `$(…)`, no git aimed at the root from inside the worktree, and a look at
+  `git status -- .moai/` before a tracker commit in the shared root. Measured over one
+  repository's transcripts: 714 refusals, 608 of them compound commands.
 - **Work is never pulled into a running milestone.** The three teachings — the
   `AGENTS.md` block, the supervisor skill and the worker brief — now say who may put
   work into a release that has started: the person attaches it, or it came out of a
