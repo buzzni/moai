@@ -632,8 +632,10 @@ impl Added {
 /// 남의 `.gitignore` 가 반쯤 잘린 채 남고, 위의 결정 때문에 그 실패가 0 으로 끝나 아무도 모른다.
 /// `O_APPEND` 는 못 쓰면 한 글자도 안 바뀌고, 쓰다 끊겨도 남의 줄은 그대로다 — 이 함수가 내건
 /// "남의 내용을 지우지 않는다" 를 실제로 지키는 것은 이쪽이다.
-fn ensure_lines(path: &Path, block: &str) -> Added {
-    use std::io::Write as _;
+///
+/// **링크는 체크아웃 안에서만 따라간다**(moai-wd44) — 받은 저장소가 커밋한 `.gitignore -> ~/.bashrc` 에
+/// `init` 이 줄을 덧붙이던 자리다. 거절은 못 쓴 것과 같은 길로 간다: 손으로 더할 줄을 대고 이어 간다.
+fn ensure_lines(path: &Path, block: &str, checkout: &Path) -> Added {
     let existing = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -652,12 +654,10 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     }
     tail.push_str(&missing.join("\n"));
     tail.push('\n');
-    let wrote =
-        std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(tail.as_bytes()));
-    match wrote {
+    match crate::store::append_inside(path, tail.as_bytes(), checkout) {
         // 규칙은 [`missing_rules`] 와 **같은 자**로 가른다 — 주석이 아닌 줄이다.
         Ok(()) => Added::Wrote { rules: missing.iter().any(|l| !l.trim_start().starts_with('#')) },
-        Err(e) => Added::Unwritable { why: e.to_string(), missing: missing.iter().map(|l| (*l).to_string()).collect() },
+        Err(e) => Added::Unwritable { why: e.message, missing: missing.iter().map(|l| (*l).to_string()).collect() },
     }
 }
 
@@ -961,8 +961,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
     }
 
-    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES);
-    let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE);
+    let attrs = ensure_lines(&root.join(".gitattributes"), GITATTRIBUTES, &root);
+    let ignore = ensure_lines(&root.join(".gitignore"), GITIGNORE, &root);
     // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
     // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
     // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는

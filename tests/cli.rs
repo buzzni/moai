@@ -1197,6 +1197,27 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 고쳐 썼다");
     assert!(is_link(&cloned.path().join("AGENTS.md")), "링크를 갈아끼웠다");
     assert!(said.contains("outside"), "왜 안 썼는지를 안 댔다\n{said}");
+
+    // **덧붙이는 파일도 같다**(moai-wd44) — `O_APPEND` 도 링크를 따라가, `.gitignore -> ~/.bashrc` 에
+    // `init` 이 줄을, `.moai/journal/<사람>.jsonl -> ~/.bashrc` 에 `add` 가 JSON 을 붙이던 자리다.
+    let appended = Scratch::new("init-link-append");
+    let root = appended.path();
+    std::os::unix::fs::symlink(&rc, root.join(".gitignore")).unwrap();
+    let out = moai(root, &["init", "argos"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "덧붙이지 못한 것 하나로 init 이 멈췄다\n{said}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 .gitignore 에 덧붙였다");
+    assert!(said.contains("outside") && said.contains(".moai/*.tmp.*"), "왜 안 썼는지와 손으로 더할 줄이 없다\n{said}");
+    add(root, &["저널을 지을 첫 줄"]);
+    let journals: Vec<_> = std::fs::read_dir(root.join(".moai/journal")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(journals.len(), 1, "{journals:?}");
+    std::fs::remove_file(&journals[0]).unwrap();
+    std::os::unix::fs::symlink(&rc, &journals[0]).unwrap();
+    let out = moai(root, &["add", "저널이 밖을 가리킨다"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일에 저널 줄을 붙였다");
+    assert!(is_link(&journals[0]) && said.contains("outside"), "왜 안 적었는지를 안 댔다\n{said}");
+    assert!(issues(root).contains("저널이 밖을 가리킨다"), "스냅샷은 담겨야 한다 — 저널만 빠진다");
 }
 
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.

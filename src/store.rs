@@ -906,13 +906,8 @@ impl Repo {
                 buf.push_str(&serde_json::to_string(e).map_err(|e| Fail::new(e.to_string()))?);
                 buf.push('\n');
             }
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
-            f.write_all(buf.as_bytes()).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
-            f.sync_all().map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+            // 링크는 체크아웃 안에서만 따라간다(moai-wd44) — 커밋된 링크 하나가 저널 줄을 `~/.bashrc` 에 싣던 자리다.
+            append_inside(&path, buf.as_bytes(), &self.root)?;
         }
         // **자리도 적는다**(리뷰, [`write_atomic_in`] 과 같은 자). 첫 쓰기가 디렉터리와 파일을
         // 함께 새로 짓는데, `sync_all` 은 그 파일의 내용만 적고 **자리의 이름은 안 적는다** —
@@ -1518,6 +1513,25 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
 /// 따른다**([`write_atomic_inside`] 와 같은 까닭이다).
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkout: &Path) -> R<()> {
     replace(&target_of(path, Some(checkout))?, bytes, tmp_dir)
+}
+
+/// 저장소가 든 파일에 **제자리에서 덧붙인다**(`O_APPEND`) — 링크는 [`write_atomic_inside`] 와 같은 자로
+/// `checkout` 안을 가리킬 때만 따라간다(moai-wd44). 저널(`.moai/journal/*.jsonl`)과 `init` 이 줄을 더하는
+/// `.gitignore`·`.gitattributes` 가 여기로 온다.
+///
+/// 갈아끼우는 쓰기만 막던 때는 받은 저장소의 `.moai/journal/<사람>.jsonl -> ~/.bashrc` 에 다음
+/// `moai add` 가 JSON 한 줄을 덧붙였다 — `O_APPEND` 도 링크를 따라간다. 거절은 [`target_of`] 의 말
+/// 그대로다(링크와 그 끝을 대고, 보통 파일이 아니거나 디렉터리가 없는 자리도 같다). 쓸 자리가 없으면
+/// 새로 짓는 것은 전과 같다.
+///
+/// **푼 자리를 연다** — 받은 철자를 다시 열면 재고 난 뒤 바뀐 링크를 따라간다. 이미 푼 자리의 끝이 그
+/// 사이에 링크로 바뀌는 것까지는 못 막는다 — 갈아끼우는 쪽과 같은 틈이다.
+pub(crate) fn append_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
+    let real = target_of(path, Some(checkout))?;
+    let fail = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&real).map_err(fail)?;
+    f.write_all(bytes).map_err(fail)?;
+    f.sync_all().map_err(fail)
 }
 
 /// [`write_atomic`]·[`write_atomic_in`] 의 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
@@ -3067,6 +3081,8 @@ mod tests {
             assert!(e.message.contains("outside"), "{}", e.message);
             let e = write_atomic_in(&link, b"x\n", &repo_dir, &repo_dir).expect_err("체크아웃 밖을 고쳐 썼다");
             assert!(e.message.contains("outside"), "{}", e.message);
+            let e = append_inside(&link, b"x\n", &repo_dir).expect_err("체크아웃 밖에 덧붙였다");
+            assert!(e.message.contains("outside"), "{}", e.message);
             assert!(is_link(&link), "{name}: 링크를 갈아끼웠다");
         }
         assert_eq!(std::fs::read_to_string(away.join("rc")).unwrap(), "옛\n");
@@ -3077,6 +3093,9 @@ mod tests {
         std::os::unix::fs::symlink("inside/real", repo_dir.join("near")).unwrap();
         write_atomic_inside(&repo_dir.join("near"), b"in\n", &repo_dir).unwrap();
         assert_eq!(std::fs::read_to_string(repo_dir.join("inside/real")).unwrap(), "in\n");
+        append_inside(&repo_dir.join("near"), b"more\n", &repo_dir).unwrap();
+        assert_eq!(std::fs::read_to_string(repo_dir.join("inside/real")).unwrap(), "in\nmore\n");
+        assert!(is_link(&repo_dir.join("near")), "덧붙이다 링크를 갈아끼웠다");
         write_atomic(&repo_dir.join("dotdot"), b"dotfiles\n").unwrap();
         assert_eq!(std::fs::read_to_string(away.join("rc")).unwrap(), "dotfiles\n");
     }
