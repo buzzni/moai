@@ -1490,8 +1490,8 @@ fn push_word(words: &mut toml_edit::Array, word: &str, shape: &Shape) {
 /// 지운 뒤 칸 하나를 숨기는 길) 뒤에서는 본뜰 것이 안 남는다. 그 자리에서 사람이 적은 따옴표와 들여쓰기가
 /// 함께 사라졌고, 섞어 적은 배열은 왕복 바이트까지 깨졌다(리뷰 moai-333l.wj6 의 1·3·4번).
 struct Shape {
-    /// 끝 문자열 원소가 작은따옴표인가([`worded`]). 본뜰 문자열이 없으면 `None`.
-    literal: Option<bool>,
+    /// 끝 문자열 원소의 따옴표([`worded`]). 본뜰 문자열이 없으면 `None`.
+    quote: Option<Quote>,
     /// 줄을 연 마지막 원소의 들여쓰기([`push_word`]). 제 줄을 연 원소가 없으면 `None`.
     indent: Option<String>,
 }
@@ -1502,15 +1502,16 @@ struct Shape {
 /// 이 판이 지은 것이고, 문자열이 아닌 원소(새 바이너리의 모양)는 따옴표를 모른다. 들여쓰기는 제 줄을 연
 /// 원소, 곧 머리에 줄바꿈이 든 원소의 것이다 — 한 줄에 여럿이 선 배열의 끝 원소는 제 줄을 안 열어 모른다.
 fn shape_of(words: &toml_edit::Array) -> Shape {
-    let literal = (0..words.len()).rev().find_map(|i| match words.get(i)? {
-        toml_edit::Value::String(f) => Some(f.as_repr()?.as_raw().as_str()?.starts_with('\'')),
+    // 여러 줄 문자열이 본이어도 더한 낱말은 한 줄로 선다 — 배열 원소 하나를 여러 줄로 지어낼 까닭이 없다.
+    let quote = (0..words.len()).rev().find_map(|i| match words.get(i)? {
+        toml_edit::Value::String(f) => quote_of(f).map(Quote::single_line),
         _ => None,
     });
     let indent = (0..words.len()).rev().find_map(|i| {
         let p = prefix_of(words.get(i)?.decor());
         p.rfind('\n').map(|at| p[at + 1..].to_string())
     });
-    Shape { literal, indent }
+    Shape { quote, indent }
 }
 
 /// 더할 낱말의 값 — **본뜰 원소의 따옴표를 따른다**(`push_word`, moai-kh81). `Value::from` 은 여느 낱말을
@@ -1518,28 +1519,104 @@ fn shape_of(words: &toml_edit::Array) -> Shape {
 /// 어긋났다. 잃는 값도 더했다 뺀 왕복도 그대로지만, 사람이 적은 모양을 지키겠다는 [`push_word`] 의 약속이
 /// 거기서 조용히 깨진다(리뷰 `moai-4qbv.zea` 15번).
 ///
-/// 본은 [`Shape`] 가 **병합이 손대기 전의 배열에서** 든 끝 문자열 원소다. 본뜰 문자열이 없었으면 큰따옴표다
-/// — 없는 본을 지어내지 않는다. 한 병합에서 여럿을 더해도 그 하나를 같이 보므로 답은 안 바뀐다.
-///
-/// **한쪽으로만 민다.** 본이 작은따옴표일 때 작은따옴표로 적을 뿐, 본이 큰따옴표라고 큰따옴표를 강제하지
-/// 않는다. `Value::from` 이 늘 큰따옴표인 것도 아니다 — 낱말에 `"` 가 들고 `'` 가 없으면 `toml_writer` 가
-/// 작은따옴표를 고른다(`'say "hi"'`). 칸 이름은 `statuses` 에서 오는 자유로운 글이라, 그런 낱말 하나가
-/// 큰따옴표 배열에 서면 다음 실행부터 그것이 본이 되어 배열 전체가 넘어간다. `it's` 는 거꾸로다.
-///
-/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 지은 뒤 다시 읽어 같은 낱말인지
-/// 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지 않고
-/// 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+/// 본은 [`Shape`] 가 **병합이 손대기 전의 배열에서** 든 끝 문자열 원소다. 본뜰 문자열이 없었으면
+/// `Value::from` 에 맡긴다 — 없는 본을 지어내지 않는다. 한 병합에서 여럿을 더해도 그 하나를 같이 보므로 답은
+/// 안 바뀐다. 따옴표를 짓는 자는 [`quoted`] 하나다.
 fn worded(shape: &Shape, word: &str) -> toml_edit::Value {
-    if shape.literal != Some(true) {
-        return toml_edit::Value::from(word);
+    quoted(shape.quote, word)
+}
+
+/// 문자열 값을 적은 따옴표 꼴(`write_value`·[`worded`], moai-5thc). `Repr` 의 머리 글자로 가른다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Quote {
+    /// `"…"`
+    Basic,
+    /// `'…'`
+    Literal,
+    /// `"""…"""`
+    MlBasic,
+    /// `'''…'''`
+    MlLiteral,
+}
+
+impl Quote {
+    fn single_line(self) -> Quote {
+        match self {
+            Quote::MlBasic => Quote::Basic,
+            Quote::MlLiteral => Quote::Literal,
+            q => q,
+        }
     }
-    match format!("'{word}'").parse::<toml_edit::Value>() {
+}
+
+/// 파일에서 읽어 온 문자열의 따옴표 꼴. `Repr` 이 없으면(이 판이 지은 값이다) `None` — 사람이 적은 꼴이
+/// 아니라 본이 못 된다.
+fn quote_of(f: &toml_edit::Formatted<String>) -> Option<Quote> {
+    let raw = f.as_repr()?.as_raw().as_str()?;
+    Some(if raw.starts_with("'''") {
+        Quote::MlLiteral
+    } else if raw.starts_with('\'') {
+        Quote::Literal
+    } else if raw.starts_with(r#"""""#) {
+        Quote::MlBasic
+    } else {
+        Quote::Basic
+    })
+}
+
+/// `word` 를 따옴표 꼴 `quote` 로 지은 값(moai-5thc). `None` 이면 `Value::from` 에 맡긴다.
+///
+/// **양쪽으로 민다.** 본이 작은따옴표면 작은따옴표로, 큰따옴표면 큰따옴표로 적는다. 한쪽으로만 밀던 판은 본이
+/// 큰따옴표일 때 `Value::from` 에 맡겼는데, 그것이 늘 큰따옴표인 것은 아니다 — 낱말에 `"` 가 들고 `'` 가
+/// 없으면 `toml_writer` 가 작은따옴표를 고른다(`'say "hi"'`). 칸 이름은 `statuses` 에서 오는 자유로운 글이라,
+/// 그런 낱말 하나가 큰따옴표 배열에 서면 다음 실행부터 그것이 본이 되어 배열 전체가 넘어갔다(리뷰
+/// moai-333l.wj6 의 2번).
+///
+/// 작은따옴표 문자열은 **글자를 그대로** 담아 이스케이프가 없다. 그래서 어느 꼴이든 지은 뒤 다시 읽어 같은
+/// 낱말인지 보고, 아니면 큰따옴표로 돌아간다 — 낱말에 작은따옴표나 줄바꿈이 든 자리다(`it's`). 읽어 견주지
+/// 않고 글자만 보면 `''''` 가 `''''''` 이 되어 여러 줄 빈 문자열로 읽히는 자리를 놓친다.
+fn quoted(quote: Option<Quote>, word: &str) -> toml_edit::Value {
+    let text = match quote {
+        None => return toml_edit::Value::from(word),
+        Some(Quote::Basic) => return basic(word),
+        Some(Quote::Literal) => format!("'{word}'"),
+        Some(Quote::MlLiteral) => format!("'''{word}'''"),
+        Some(Quote::MlBasic) => format!(r#""""{}""""#, escaped(word)),
+    };
+    match text.parse::<toml_edit::Value>() {
         // 지은 값의 꾸밈은 부르는 쪽이 정한다 — `Value::from_str` 이 제가 비우고 오므로(`toml_edit` 의
         // `value.rs`, "Only take the repr and not decor") 여기서 다시 비우지 않는다. 비어 있어야
         // `toml_edit` 의 기본 모양(`, `)이 선다.
         Ok(v) if v.as_str() == Some(word) => v,
+        _ => basic(word),
+    }
+}
+
+/// 큰따옴표 한 줄 문자열([`quoted`]). 그렇게도 못 지으면 `Value::from` 이 마지막이다.
+fn basic(word: &str) -> toml_edit::Value {
+    match format!("\"{}\"", escaped(word)).parse::<toml_edit::Value>() {
+        Ok(v) if v.as_str() == Some(word) => v,
         _ => toml_edit::Value::from(word),
     }
+}
+
+/// 큰따옴표 문자열 안에 설 글([`quoted`]). `\`·`"` 와 제어 문자를 이스케이프로 적는다.
+fn escaped(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    for c in word.chars() {
+        match c {
+            '\\' => out.push_str(r"\\"),
+            '"' => out.push_str(r#"\""#),
+            '\n' => out.push_str(r"\n"),
+            '\t' => out.push_str(r"\t"),
+            '\r' => out.push_str(r"\r"),
+            '\u{8}' => out.push_str(r"\b"),
+            '\u{c}' => out.push_str(r"\f"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// 배열에서 `gone` 인 원소를 뺀다(`merge_words`). 뺀 수를 낸다.
@@ -2685,6 +2762,38 @@ mod tests {
             show("[tui]\nhidden = ['todo', 42]\n", &["todo"], &["todo", "done"]),
             "[tui]\nhidden = ['todo', 42, 'done']\n"
         );
+    }
+
+    /// **본이 큰따옴표면 큰따옴표로 민다**(moai-5thc, 리뷰 moai-333l.wj6 의 2번, [`quoted`]). `Value::from` 은
+    /// `"` 가 들고 `'` 가 없는 낱말을 작은따옴표로 짓는다 — 그 낱말이 끝 원소가 되면 다음 병합부터 그것이
+    /// 본이라, 큰따옴표로 적은 배열 전체가 넘어갔다.
+    #[test]
+    fn a_double_quoted_model_pushes_double_quotes_too() {
+        let show = |src: &str, base: &[&str], new: &[&str]| {
+            let words = |w: &[&str]| Some(w.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let b = Look { hidden: words(base), ..Look::default() };
+            let mut doc = Doc::parse(src).unwrap();
+            doc.merge_look(&b, &Look { hidden: words(new), ..b.clone() }).unwrap();
+            doc.render()
+        };
+        let said = r#"say "hi""#;
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\"]\n", &["todo"], &["todo", said]),
+            "[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\"]\n"
+        );
+        // 다음 병합의 본은 여전히 큰따옴표다 — 넘어가지 않는다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\"]\n", &["todo", said], &["todo", said, "done"]),
+            "[tui]\nhidden = [\"todo\", \"say \\\"hi\\\"\", \"done\"]\n"
+        );
+        // 여러 줄 큰따옴표가 본이어도 더한 낱말은 한 줄 큰따옴표다.
+        assert_eq!(
+            show("[tui]\nhidden = [\"\"\"todo\"\"\"]\n", &["todo"], &["todo", said]),
+            "[tui]\nhidden = [\"\"\"todo\"\"\", \"say \\\"hi\\\"\"]\n"
+        );
+        // 역빗금도 큰따옴표 안에서는 이스케이프로 선다 — 다시 읽으면 같은 낱말이다.
+        let doc = Doc::parse(&show("[tui]\nhidden = [\"todo\"]\n", &["todo"], &["todo", r"a\b"])).unwrap();
+        assert_eq!(doc.look().0.hidden, Some(vec!["todo".to_string(), r"a\b".to_string()]));
     }
 
     /// **본은 원소를 빼기 전에 든다**(moai-1ia9, [`shape_of`]). `merge_words` 는 뺀 **뒤에** 더해, 한 번의
