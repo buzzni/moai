@@ -2822,10 +2822,7 @@ mod tests {
         assert_eq!(look("[tui]\nsort = \"title\"\n", sort("created")), "[tui]\nsort = \"created\"\n");
         // 값 뒤의 주석도 따옴표도 함께 남는다.
         let tz = Look { timezone: Some("UTC".into()), ..Look::default() };
-        assert_eq!(
-            look("[tui]\ntimezone = 'Asia/Seoul'  # 내 자리\n", tz),
-            "[tui]\ntimezone = 'UTC'  # 내 자리\n"
-        );
+        assert_eq!(look("[tui]\ntimezone = 'Asia/Seoul'  # 내 자리\n", tz), "[tui]\ntimezone = 'UTC'  # 내 자리\n");
         // 작은따옴표 안에 못 서는 낱말은 그 값만 큰따옴표다.
         assert_eq!(look("[tui]\nsort = 'title'\n", sort("it's")), "[tui]\nsort = \"it's\"\n");
         // 새로 적는 키에는 본이 없다 — 받은 값 그대로다.
@@ -2853,10 +2850,7 @@ mod tests {
         assert_eq!(show(src, &["todo"], &["todo", "a\u{200B}b"]), "[tui]\nhidden = ['todo', \"a\\u200Bb\"]\n");
         assert_eq!(show(src, &["todo"], &["todo", "a\u{2028}b"]), "[tui]\nhidden = ['todo', \"a\\u2028b\"]\n");
         // 본뜰 것이 없어도 같다 — `"` 가 든 낱말이라 `Value::from` 이면 작은따옴표였다.
-        assert_eq!(
-            show("[tui]\nhidden = []\n", &[], &["\"x\"\u{200B}"]),
-            "[tui]\nhidden = [\"\\\"x\\\"\\u200B\"]\n"
-        );
+        assert_eq!(show("[tui]\nhidden = []\n", &[], &["\"x\"\u{200B}"]), "[tui]\nhidden = [\"\\\"x\\\"\\u200B\"]\n");
         // 다시 읽으면 같은 낱말이다.
         let doc = Doc::parse(&show(src, &["todo"], &["todo", "a\t\u{FEFF}b"])).unwrap();
         assert_eq!(doc.look().0.hidden, Some(vec!["todo".to_string(), "a\t\u{FEFF}b".to_string()]));
