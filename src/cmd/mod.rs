@@ -489,8 +489,15 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
     // 값이 아니라 구분자라 clap 이 언제나 삼키고, argv 에 남아 있다는 것은
     // 사용자가 그것을 적었다는 뜻 말고 다른 뜻이 없다. `--title=<값>` 도 같다 — 붙여 쓴 값은
     // clap 이 깃발로 읽을 길이 없으니, 그렇게 적은 사람은 그것이 값이라고 말한 것이다.
-    let edit = matches!(at, FlagLike::EditTitle(_));
-    if std::env::args().any(|a| a == "--" || edit && a.starts_with("--title=")) {
+    //
+    // **`edit` 에는 `--` 가 안 듣는다**(리뷰 moai-pp9i.hrr 7번) — 거절문이 그렇게 말하는데 argv 의 `--`
+    // 를 받아 주면 `edit X --title -x --` 가 말한 길을 안 지나고 지나간다. 붙여 쓴 꼴도 **그 값을 든
+    // 것**만 센다: 아무 `--title=` 이나 받으면 `-b '--title=…'` 같은 남의 값이 검사를 끈다.
+    let escaped = |a: &str| match at {
+        FlagLike::EditTitle(_) => a.strip_prefix("--title=").is_some_and(|v| v.trim() == value),
+        _ => a == "--",
+    };
+    if std::env::args().any(|a| escaped(&a)) {
         return Ok(());
     }
     let flag_like = value.starts_with('-') && value.chars().count() > 1 && !value.contains(char::is_whitespace);

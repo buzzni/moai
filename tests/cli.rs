@@ -6271,6 +6271,8 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && err.contains(&format!("moai edit {id} --title=-x")), "{err}");
     assert!(moai(s.path(), &["edit", &id, "--title=-x"]).status.success());
+    // 거절문이 안 듣는다고 한 `--` 는 `edit` 에서 길이 아니다(리뷰 moai-pp9i.hrr 7번).
+    assert!(!moai(s.path(), &["edit", &id, "--title", "-y", "--"]).status.success());
 
     // `note` 의 자리 인자도 같다. `-b` 로 준 글은 사람이 글이라고 말한 것이라 안 잰다.
     let out = moai(s.path(), &["note", &id, "-x"]);
