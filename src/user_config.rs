@@ -1358,6 +1358,11 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
 ///
 /// **키는 안 건드리고 값만 바꾼다.** 키 위의 주석은 키의 꾸밈에 붙어 있어 `Table::insert` 로 갈아 끼우면
 /// 지워진다(키 모양을 새로 짓는다). 값 뒤의 주석은 있던 값의 꾸밈에 붙어 있어 옮겨 단다.
+///
+/// **문자열이 문자열을 갈면 따옴표 꼴도 옮긴다**(moai-5thc, 리뷰 moai-333l.wj6 의 5·6번). `Value::from` 은
+/// `Repr` 없이 와서, 꾸밈만 옮기던 판은 `sort = 'title'` 을 `sort = "created"` 로, `'''title'''` 도 큰따옴표로
+/// 폈다 — 주석은 남고 따옴표만 바뀌었다. 옛 값의 꼴로 [`quoted`] 가 다시 짓는다. 새로 적는 키에는 본이 없어
+/// 받은 값 그대로다.
 pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: toml_edit::Value) -> bool {
     if !t.contains_key(key) {
         t.insert(key, Item::Value(v));
@@ -1372,6 +1377,11 @@ pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: to
         };
         if same {
             return false;
+        }
+        if let (toml_edit::Value::String(a), Some(word)) = (old, v.as_str()) {
+            if let Some(q) = quote_of(a) {
+                v = quoted(Some(q), word);
+            }
         }
         *v.decor_mut() = old.decor().clone();
     }
@@ -2762,6 +2772,38 @@ mod tests {
             show("[tui]\nhidden = ['todo', 42]\n", &["todo"], &["todo", "done"]),
             "[tui]\nhidden = ['todo', 42, 'done']\n"
         );
+    }
+
+    /// **낱값을 갈아도 사람이 적은 따옴표가 남는다**(moai-5thc, 리뷰 moai-333l.wj6 의 5·6번, [`write_value`]).
+    /// 꾸밈만 옮기던 판은 `Value::from` 의 큰따옴표가 섰다 — 주석은 남고 따옴표만 바뀌었다.
+    #[test]
+    fn a_rewritten_scalar_keeps_the_quotes_it_was_written_with() {
+        let look = |src: &str, new: Look| {
+            let mut doc = Doc::parse(src).unwrap();
+            let base = doc.look().0;
+            doc.merge_look(&base, &new).unwrap();
+            doc.render()
+        };
+        let sort = |s: &str| Look { sort: Some(s.into()), ..Look::default() };
+        assert_eq!(look("[tui]\nsort = 'title'\n", sort("created")), "[tui]\nsort = 'created'\n");
+        assert_eq!(look("[tui]\nsort = '''title'''\n", sort("created")), "[tui]\nsort = '''created'''\n");
+        assert_eq!(look("[tui]\nsort = \"\"\"title\"\"\"\n", sort("created")), "[tui]\nsort = \"\"\"created\"\"\"\n");
+        assert_eq!(look("[tui]\nsort = \"title\"\n", sort("created")), "[tui]\nsort = \"created\"\n");
+        // 값 뒤의 주석도 따옴표도 함께 남는다.
+        let tz = Look { timezone: Some("UTC".into()), ..Look::default() };
+        assert_eq!(
+            look("[tui]\ntimezone = 'Asia/Seoul'  # 내 자리\n", tz),
+            "[tui]\ntimezone = 'UTC'  # 내 자리\n"
+        );
+        // 작은따옴표 안에 못 서는 낱말은 그 값만 큰따옴표다.
+        assert_eq!(look("[tui]\nsort = 'title'\n", sort("it's")), "[tui]\nsort = \"it's\"\n");
+        // 새로 적는 키에는 본이 없다 — 받은 값 그대로다.
+        assert_eq!(look("[tui]\nx = 1\n", sort("title")), "[tui]\nx = 1\nsort = \"title\"\n");
+
+        // 색(`set_hue`)도 같은 길이다.
+        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\ncolor = 'red'  # 눈에 띄게\n").unwrap();
+        doc.set_hue(&["/a".into()], Hue::named("green")).unwrap();
+        assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\ncolor = 'green'  # 눈에 띄게\n");
     }
 
     /// **본이 큰따옴표면 큰따옴표로 민다**(moai-5thc, 리뷰 moai-333l.wj6 의 2번, [`quoted`]). `Value::from` 은
