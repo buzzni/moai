@@ -55,6 +55,21 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **The hook's record of which session picked what no longer lives in the shared temp
+  directory.** It sat at a guessable `/tmp/moai-picks-<key>`, where a directory or record
+  planted by someone else silently switched rules 1 and 2 off. It now lives beside your
+  user config, in `<config dir>/picks/`, created closed to others, and a planted symlink is
+  never written through. A worktree kept on its own tracker with `MOAI_HERE=1` no longer
+  shares that record with the main checkout — the two read different snapshots, and a pick
+  made in the root kept rule 2 off in the worktree. With no config location (or a relative
+  `MOAI_CONFIG`) nothing is recorded and the hook judges as it did without a record.
+- **One unresponsive project no longer stalls `moai status` outside a `.moai`.** The
+  merge-driver notice asks git three questions per project (`check-attr`, then `config`),
+  and none of them had a time limit — a project whose git hung held back the board of every
+  other project. Each question now gets the same 2 seconds the driver probe already had, and
+  a question left unanswered keeps the notice quiet. `moai init` and `moai init --check`
+  still wait for the answer, since there "unknown" is not "off". A project directory that
+  is itself on a dead mount can still stall the overview before git is asked.
 - **Commands that draw no time stay quiet on a machine without zoneinfo.** `moai ready`
   (in a `.moai` and its overview outside one), `moai prime`, `moai show` (the list and the
   tree), `moai idea ls` and `moai show <id> --json` used to resolve the system timezone while
