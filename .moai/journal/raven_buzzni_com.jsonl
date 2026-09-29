@@ -1906,3 +1906,4 @@
 {"ts":"2026-09-29T04:46:23Z","id":"moai-xk0q.cjg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1, 2, 5, 6 (depth-0 parent dir, unknowable joined paths, runnable nested test, folded double find_spots). Findings 3 and 4 (ancestor start; cd or outer wrapper before find) are old leaks, handed on as idea moai-tp4u. 7 (per-seg copy) left as minor."}
 {"ts":"2026-09-29T04:46:23Z","id":"moai-xk0q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — hook write-guard path)"}
 {"ts":"2026-09-29T04:46:23Z","id":"moai-xk0q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-29T04:47:00Z","id":"moai-xk0q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left here. Merged 50711176, closed with the review; remaining old leaks (ancestor start, cd or wrapper before find) are idea moai-tp4u."}
