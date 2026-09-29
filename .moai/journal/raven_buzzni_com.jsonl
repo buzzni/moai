@@ -1746,3 +1746,10 @@
 {"ts":"2026-09-27T06:36:17Z","id":"moai-mibi.zph","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-27T06:36:17Z","id":"moai-mibi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 재는 걸음(.zph)이 끝났다 — 증인이 열아홉이고 서명은 셋이며, 막는 것은 .wpj 의 사람 갈림이다. 다음은 .wpj 를 사람에게 묻고(권장: 그런 자식도 (길 잃음) 으로 보내고 새 경고가 그 id 를 댄다), 그 답 위에서 .pv6 → .rfn 을 잇는다."}
 {"ts":"2026-09-29T01:29:04Z","id":"moai-mibi.wpj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람이 정했다(2026-09-29): 부모 id 에 쌍둥이가 서면 그 밑의 자식도 (길 잃음) 으로 보내고, 새 경고 낱말이 그 자식 id 를 댄다. 뒷줄을 조용히 입는 지금 행동을 걷는 쪽이고, 이미 선 lost_to_duplicate_id 와 결이 같다. 가려짐(Kinds)의 뜻을 넓히는 길은 접었다 — no_twins 증인 열아홉이 무엇을 증언하는지가 흐려진다."}
+{"ts":"2026-09-29T01:41:48Z","id":"moai-45hf.nab","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — hook shell line: handoff mark, shape check, O_EXCL notice mark"}
+{"ts":"2026-09-29T01:41:53Z","id":"moai-45hf.nab","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T01:42:09Z","id":"moai-cgcm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 걸기 알림의 죽은 fill 을 걷는다"}
+{"ts":"2026-09-29T01:42:09Z","id":"moai-cgcm.81v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자리 없는 키에 값을 넘기는 fill 을 prompt_help 한 줄로 줄인다"}
+{"ts":"2026-09-29T01:42:09Z","id":"moai-cgcm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-le2s 에서 펼쳤다 — 자리 없는 키에 값을 넘기는 헛 fill 하나를 걷는다"}
+{"ts":"2026-09-29T01:42:09Z","id":"moai-le2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-cgcm 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-09-29T01:42:21Z","id":"moai-cgcm.81v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
