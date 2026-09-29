@@ -58,7 +58,10 @@ pub struct Screen<'a> {
     /// 서기 때문인데, 시간대의 처음값은 **저장된 값 그 자체**라 지어낸 답이 아니다. 명령 층이
     /// [`Screen::at`] 으로 사람의 시간대를 얹고, 안 얹은 자리는 지금까지 그리던 그대로 선다.
     /// 명령 층이 빠짐없이 얹는 것은 `every_command_screen_carries_the_zone` 이 글로 잰다.
-    zone: Option<&'a crate::tz::Zone>,
+    ///
+    /// **얹는 것은 아직 안 푼 시간대다**(moai-s3i7) — [`Screen::zone`] 이 처음 읽을 때 푼다.
+    /// 그래서 zoneinfo 없는 기계의 알림 줄은 시각을 실제로 그린 명령에서만 선다.
+    zone: Option<&'a crate::tz::System>,
 }
 
 impl<'a> Screen<'a> {
@@ -67,14 +70,15 @@ impl<'a> Screen<'a> {
         Self { lang, origin: None, zone: None }
     }
 
-    /// 같은 화면을 이 사람의 시간대로. 명령 층이 한 번 얹는다(`Ctx::zone`).
-    pub fn at(self, zone: &'a crate::tz::Zone) -> Self {
+    /// 같은 화면을 이 사람의 시간대로. 명령 층이 한 번 얹는다(`Ctx::clock`).
+    pub fn at(self, zone: &'a crate::tz::System) -> Self {
         Self { zone: Some(zone), ..self }
     }
 
-    /// 시각을 옮겨 적을 시간대. 안 얹었으면 저장된 그대로(UTC)다.
+    /// 시각을 옮겨 적을 시간대. 안 얹었으면 저장된 그대로(UTC)다. **여기서 처음 푼다** —
+    /// 이 자리를 안 지나는 화면은 tzdb 를 안 만진다.
     fn zone(&self) -> &'a crate::tz::Zone {
-        self.zone.unwrap_or(crate::tz::Zone::stored())
+        self.zone.map_or(crate::tz::Zone::stored(), crate::tz::System::zone)
     }
 
     /// 같은 말로, 이 출처를 겹친 화면. **한눈 보기가 프로젝트마다 이것으로 바꿔 쓴다** —
@@ -934,6 +938,10 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 안 쓰기로 한 저장소는 그 선언이 없어 이 줄을 아예 안 본다. 댈 경로가 없으니 `ids` 도
         // 없고, 칠 줄은 `hint` 가 낸다.
         "merge_driver_absent" => one(say(lang, "warn.merge_driver_absent")),
+        // **링크인 트래커**(moai-jo3h). 가리키는 파일은 `preview` 가 한 줄로 낸다 — 막지 않고 비추기만 한다.
+        "tracker_linked" => one(say(lang, "warn.tracker_linked")),
+        // **링크인 딸린 파일**(moai-yke5). 어느 파일인지는 `preview` 가 한 줄로 낸다 — 칠 줄이 없다.
+        "dotfile_linked" => one(say(lang, "warn.dotfile_linked")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -2178,9 +2186,11 @@ pub fn commit_lines(commits: &[crate::git::Commit]) -> Vec<(&str, String)> {
 /// `screen` 에서 말과 시간대를 함께 받는다 — 상세와 같은 자로 시각을 적어야 한 화면의 두
 /// 덩어리가 다른 시계로 서지 않는다.
 pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
-    let (lang, z) = (screen.lang, screen.zone());
+    let lang = screen.lang;
     let mut out = Vec::new();
     if !journal.is_empty() {
+        // **시각을 그릴 때 푼다**(moai-s3i7) — 빈 이력은 시각을 한 줄도 안 그리므로 tzdb 를 안 만진다.
+        let z = screen.zone();
         out.push(String::new());
         out.push(paint(style::HEAD, say(lang, "detail.history")));
         for e in journal {
@@ -2202,25 +2212,35 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
 /// **칸 이름과 모르는 갈래는 그대로 낸다** — 칸은 설정에서 오는 낱말이고, 모르는 갈래는 새
 /// 바이너리나 옛 줄이 적은 자료다. 옮기는 것은 이쪽이 아는 갈래의 낱말뿐이다. `note:` 도
 /// 그대로다 — 저널에 적힌 갈래 이름이라, 옮기면 화면의 낱말과 파일의 낱말이 갈린다.
+///
+/// **그대로 내되 제어문자는 걷는다**(`text::sanitize`, 리뷰 moai-mo9v.1ln). 저널은 손으로 고칠 수 있는
+/// 파일이고, `moai rm --line` 은 아무도 치지 않은 못 읽는 줄의 원문을 메모로 싣는다 — ESC 가 든 그
+/// 줄이 `moai show` 마다 화면을 다시 칠한다. 저널은 덧붙이기만 하므로 걷을 자리는 그리는 여기 하나다.
+/// 줄바꿈은 남긴다: 여러 줄 메모는 [`history`] 가 줄마다 가른다.
 fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
+    let clean = crate::text::sanitize;
     let what = match e.kind.as_str() {
         "create" => say(lang, "journal.create").to_string(),
+        // **제목 없는 `rm` 은 못 읽는 줄을 지운 것이다**([`JournalEntry::removed_line`]). 그 id 의 이슈는
+        // 멀쩡히 설 수 있다 — 산 줄의 깨진 쌍둥이를 지운 경우다. 이슈를 지운 `rm` 은 늘 제목을 든다
+        // ([`JournalEntry::removed`]). 둘을 한 낱말로 그리면 산 이슈의 이력이 "삭제" 로 끝난다.
+        "rm" if e.title.is_none() => say(lang, "journal.remove_line").to_string(),
         "rm" => say(lang, "journal.remove").to_string(),
         "status" => format!(
             "{} → {}",
-            e.from.as_deref().unwrap_or("?"),
-            paint(style::status_style(e.to.as_deref().unwrap_or("")), e.to.as_deref().unwrap_or("?"))
+            clean(e.from.as_deref().unwrap_or("?")),
+            paint(style::status_style(e.to.as_deref().unwrap_or("")), &clean(e.to.as_deref().unwrap_or("?")))
         ),
-        "note" => format!("note: {}", e.text.as_deref().unwrap_or("")),
-        other => other.to_string(),
+        "note" => format!("note: {}", clean(e.text.as_deref().unwrap_or(""))),
+        other => clean(other),
     };
-    let note = e.note.as_deref().map(|n| format!("  — {n}")).unwrap_or_default();
+    let note = e.note.as_deref().map(|n| format!("  — {}", clean(n))).unwrap_or_default();
     // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
     // 꼬리 공백 두 칸이 남는다.
     format!(
         "{what}{}  {}",
         paint(style::DIM, &note),
-        paint(style::DIM, &crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming))
+        paint(style::DIM, &clean(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
     )
     .trim_end()
     .to_string()
@@ -3882,14 +3902,16 @@ mod tests {
                         continue;
                     }
                     seen += 1;
-                    if !code.contains(".at(") {
+                    // **`Ctx` 의 것을 얹는다** — `.at(&tz::System::default())` 도 컴파일되지만, 그 값은
+                    // 제 자리에서 따로 풀려 `Ctx::zone_trouble` 이 못 보고 알림 줄이 조용히 사라진다.
+                    if !code.contains(".at(ctx.clock())") {
                         bare.push(format!("{name}:{}", n + 1));
                     }
                 }
             }
         }
         assert!(seen >= 8, "명령 층에서 화면을 짓는 자리를 못 찾았다 — 이 시험이 아무것도 안 잰다");
-        assert!(bare.is_empty(), "시간대를 안 얹은 화면 — `.at(ctx.zone())` 을 붙인다: {bare:?}");
+        assert!(bare.is_empty(), "시간대를 안 얹은 화면 — `.at(ctx.clock())` 을 붙인다: {bare:?}");
     }
 
     /// **안 물었는데 표가 사라지지 않는다.** 표를 달지 말지를 결과의 내용으로

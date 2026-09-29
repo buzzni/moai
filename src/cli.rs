@@ -267,6 +267,22 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
 printf '\\none more line\\n'; } | moai edit <id> -b -")]
     Edit(EditArgs),
     /// Remove
+    #[command(after_help = "  An unreadable line - a row that cannot be read as an issue, which
+  `moai status` counts and `moai show` names by line number - is not
+  reachable by id. When it is not worth keeping (a broken twin, junk),
+  remove it by its line number; a row a newer moai wrote reads again after
+  upgrading, so keep that one:
+
+  moai rm --line 812                          shows the line and its hash
+  moai rm --line 812 --yes --match 1a2b3c4d   removes it
+
+  Only an unreadable line is removed; any other line is refused, and the
+  refusal lists the unreadable lines as they stand now. Numbers move when a
+  row comes or goes - an earlier removal included - so --yes needs the hash
+  the preview printed, and a line at that number that no longer matches it
+  is refused with the number the line shown stands at now. Removing cannot
+  be undone: the raw line is printed, goes into the journal's `rm` entry (up
+  to 64KB) and `--json` hands it back whole, to be put back by hand.")]
     Rm(RmArgs),
     /// Leave a note on an issue (journal only)
     #[command(after_help = "  moai note moai-4aex 'the parser dies on a BOM'
@@ -392,9 +408,12 @@ IDEA
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
-  closes on Esc or SPC and goes one level up on Backspace. Toggles and sorts
-  (SPC v, SPC c, SPC s) do not close it — try them, watch the state, and
-  leave with Esc. That level says so at the bottom right with a close hint.
+  closes on Esc or SPC and goes one level up on Backspace. Keys that move
+  the focused pane close the menu and make that move in the same press,
+  unless a key on that level holds the letter (SPC c h, SPC v l, SPC m g).
+  Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
+  the state, and leave with Esc. That level says so at the bottom right with a
+  close hint.
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
@@ -424,6 +443,13 @@ IDEA
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
+
+  The version line in the header says whether a newer release is out. When
+  one is, the banner says so, and on quitting the explorer prints the
+  install.sh line that upgrades the moai you are running — with --dir when it
+  lives under your home but not in ~/.local/bin. No line is shown for a build
+  from source, for a moai outside your home, or on a machine the releases do
+  not cover.
 
   Of what came to me (assigned to me or under it), rows changed since the
   last look carry a [NEW] mark in front of the title. Read marks live in my own
@@ -513,6 +539,11 @@ IDEA
         event: crate::hook::Event,
     },
 
+    // **이 첫 줄은 `install.sh` 가 읽는 계약이다**(moai-8rmw, 리뷰). 깔린 moai 가 이 moai 인지를
+    // `merge-driver --help` 가 이 글을 내는지로 가르고(`ours`), 나간 판마다 이 글이 박혀 있다.
+    // 고치려면 `install.sh` 가 옛 글과 새 글을 다 받게 먼저 고친다 — 안 그러면 새 글을 단 판부터
+    // 올리기가 모두 "이 moai 가 아니다" 로 거절된다. 진짜 바이너리로 재는 시험이
+    // `the_real_binary_is_recognised_as_this_moai` 다.
     /// Called by git. Merges issues.jsonl per issue, three-way
     #[command(after_help = "  The only thing anyone types by hand is `--install`. Git gives the rest.
 
@@ -1097,8 +1128,24 @@ pub struct ReadArgs {
 
 #[derive(Args, Debug)]
 pub struct RmArgs {
-    #[arg(required = true, value_name = "id")]
+    #[arg(required_unless_present = "line", conflicts_with = "line", value_name = "id")]
     pub ids: Vec<String>,
+    /// Remove the unreadable line at number <n>
+    #[arg(long, value_name = "n")]
+    pub line: Option<usize>,
+    // `requires = "line"` 을 안 건다 — clap 은 `requires` 가 지목한 인자(`line`)가 이미 준 인자(`ids`)와
+    // `conflicts` 면 그 `requires` 를 조용히 건너뛰어, `moai rm <id> --yes` 가 clap 을 지나 말없이
+    // 지웠다(재 봤다). 거절은 `rm::run` 이 `BAD_INPUT` 으로 해서 `--json` 도 `code` 를 받는다 —
+    // `add --dry-run` 이 제 거절을 `add::run` 에 두는 것과 같은 까닭이다(moai-yhb1).
+    /// With --line and --match: remove it. Else only shown
+    #[arg(long)]
+    pub yes: bool,
+    /// With --yes: the hash the preview printed
+    // **`--yes` 를 보여 준 줄에 묶는다**(moai-6nha, 2026-09-29 사용자 결정). 번호만 보고 지우면
+    // 줄 수가 바뀐 뒤 보여 준 것과 다른 못 읽는 줄이 간다. 거절은 `rm::run` 이 한다 — `yes` 와 같은
+    // 까닭으로 `requires` 를 안 건다. 해시 꼴이 아닌 값(빈 값·오타)도 거기서 `bad_input` 으로 거절한다.
+    #[arg(long = "match", value_name = "hash")]
+    pub matches: Option<String>,
 }
 
 /// git 이 주는 자리 셋과, 사람이 치는 `--install`.

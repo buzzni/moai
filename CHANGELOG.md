@@ -10,6 +10,169 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-29
+
+### Added
+
+- **`moai tui` prints the line that upgrades it when you quit, if a newer release is
+  out.** The version line in the header only had room to say that a release is out,
+  so whoever saw it went to the README to find out how. The banner now says the line
+  will be printed, and quitting leaves
+  `curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh`
+  in the shell — whole, where the banner cut it at 80 columns — with
+  `-s -- --dir <dir>` added when the running `moai` lives under your home but not
+  in `~/.local/bin`. A build from source (a cargo `target/` or `cargo install`), a
+  `moai` outside your home and a machine the releases do not cover get no line — a
+  line that does not upgrade the binary you are running is worse than none. It is not
+  marked urgent: there is something to receive, not something to fix.
+
+- **`moai rm --line <n>` removes an unreadable line from inside the tool.** A line
+  that does not read as an issue — most often the broken twin of an issue that also
+  stands whole, left by a hand-resolved merge — could only be removed by opening
+  `.moai/issues.jsonl` in an editor. The number is the one `moai show` names. Without
+  `--yes` the line is only shown, together with a short hash of it and the whole
+  command to type; `--yes` needs that hash in `--match`, so when rows came or went
+  after the preview and another line now stands at that number, nothing is removed
+  and the refusal names the number the line you saw stands at now. A number that
+  points at a readable line is refused. The removed text is printed, handed back
+  under `--json` (`dry_run` tells the preview from the removal, `match` carries the
+  hash) and kept in the journal's `rm` entry.
+
+### Changed
+
+- **A move key in the `moai tui` SPC menu closes the menu and makes the move.** The
+  menu used to ignore every key it did not list, so moving the cursor meant Esc first
+  and then the move — two presses for one. Now j·k·h·l, the arrows, gg·G,
+  Ctrl-d/u/f/b, Home·End·PgUp·PgDn close the menu and act on the focused pane in the
+  same press, toggle levels (`SPC v`, `SPC c`, `SPC s`) included. A letter the open
+  level holds itself stays that level's item — `SPC c h`, `SPC v l`, `SPC m g` — even
+  where the item is switched off, and a move that would do nothing where the cursor
+  stands leaves the menu open rather than just making it vanish.
+
+- **The install one-liner upgrades.** When the `moai` already in the install
+  directory is this moai — `install.sh` runs it, and it answers `--version` with
+  `moai <version>` and `merge-driver --help` with this tool's first line, as every
+  release from 0.1.0 on does — it is replaced without `--force`, and the installer
+  says which version it went from and to. The same version downloads nothing and
+  exits 0. A `moai` newer than the latest release is left alone unless you ask for an
+  older release with `--version`, which replaces it and says it is going down.
+  `--force` is for what the installer will not replace on its own — another tool
+  called `moai`, or a symlink — and for fetching the same version again. The README
+  used to promise that an existing `moai` is never overwritten without `--force`;
+  over this moai it now is.
+- **What the installer will not replace is refused before anything is downloaded**,
+  and the refusal prints the line to run again with `--force` added — in both the
+  pipe form and the file form, carrying the directory and version you gave, and
+  `MOAI_REPO` when it is not the default. A directory at `<dir>/moai` is refused even
+  with `--force`, and an install directory that cannot be made or written stops
+  before the download too.
+
+- **The merge driver settles an id that stands twice as one group.** A readable row
+  and an unreadable twin under one id went to a person unless all three sides held
+  the same rows, so a branch that removed the twin with `moai rm --line` conflicted
+  with every branch that had not touched it, and when both had removed it the two
+  panels held the same line. The rows under that id are now compared as a group,
+  three-way: a group only one side changed is taken as that side holds it, a group
+  both sides changed alike is taken once, and only a group the two sides changed
+  differently goes to a person — one side removing the live row while the other
+  removes its twin still does, and so does removing the twin on one side while the
+  issue is edited on the other. This takes back part of 0.1.2's "everything either
+  side touched still goes to a person": a branch that brought in a twin is now
+  merged as it holds it, at exit 0, and `moai status` is what names the id
+  (`Ids standing twice`).
+
+### Fixed
+
+- **The merge driver writes the same bytes whichever way you merge.** Two sides
+  holding the same unreadable line with different bytes — key order, a trailing
+  blank, a trailing `\r` — used to keep this side's bytes, so merging A into B and B
+  into A left different files. The side that changed the bytes now wins, and when
+  both did, the smaller bytes win; the line is still carried as written, not rebuilt.
+  Unreadable lines both sides added no longer follow the merge direction either.
+
+- **The hook's record of which session picked what no longer lives in the shared temp
+  directory.** It sat at a guessable `/tmp/moai-picks-<key>`, where a directory or record
+  planted by someone else silently switched rules 1 and 2 off. It now lives beside your
+  user config, in `<config dir>/picks/`, created closed to others, and a planted symlink is
+  never written through. A worktree kept on its own tracker with `MOAI_HERE=1` no longer
+  shares that record with the main checkout — the two read different snapshots, and a pick
+  made in the root kept rule 2 off in the worktree. With no config location (or a relative
+  `MOAI_CONFIG`) nothing is recorded and the hook judges as it did without a record.
+- **One unresponsive project no longer stalls `moai status` outside a `.moai`.** The
+  merge-driver notice asks git three questions per project (`check-attr`, then `config`),
+  and none of them had a time limit — a project whose git hung held back the board of every
+  other project. Each question now gets the same 2 seconds the driver probe already had, and
+  a question left unanswered keeps the notice quiet. `moai init` and `moai init --check`
+  still wait for the answer, since there "unknown" is not "off". A project directory that
+  is itself on a dead mount can still stall the overview before git is asked.
+- **Commands that draw no time stay quiet on a machine without zoneinfo.** `moai ready`
+  (in a `.moai` and its overview outside one), `moai prime`, `moai show` (the list and the
+  tree), `moai idea ls` and `moai show <id> --json` used to resolve the system timezone while
+  building the screen, so on a machine with no tzdb — the static musl build dropped into
+  Alpine or scratch — each of them printed the "no timezone data" line on stderr without
+  drawing a single timestamp. The timezone is now resolved the first time a screen actually
+  draws a time, so the line stands where a time is drawn (`moai show <id>`, `moai edit`) and
+  wherever deadlines are judged — `moai status` and its overview (a bare `moai` included) and
+  the hook, which still resolve it whether or not any milestone carries a deadline. Nothing
+  was ever blocked and the exit code is unchanged.
+- **A write no longer truncates a temporary file that someone else is still writing.**
+  A write that replaces a file goes through a temporary file and a `rename`; that file
+  was opened with a plain create, which silently empties whatever already sits at that
+  name. Two processes with the same pid in different pid namespaces — two containers
+  sharing one mount — could pick the same name. The tracker, the user config and read marks
+  are written under a lock that already kept such processes apart on one machine, but a file
+  written without it (`latest.toml`, the `AGENTS.md` that `moai init` plants) could end up
+  with text that was neither side's. The temporary file is now created exclusively
+  (`O_EXCL`): a name that is taken is left alone and the next one is tried, and when every
+  name is taken the write fails with the target untouched. The names after the first belong
+  to this process alone, so the files a killed write leaves behind — no longer reused by the
+  next write with the same pid — can never use them all up.
+- **Closing work holds the tracker lock for less time.** `moai mv <id> done` works out
+  what the close just freed while it still holds the exclusive lock, and it used to build
+  the whole ready list up to three times over to do it, with four more copies of the
+  membership maps on top — on this repository that took the lock-held time of a close from
+  21.6ms to 35ms, in a place where half a dozen sessions share one `.moai`. It now builds
+  the ground once per snapshot and asks it twice: in a debug build on this repository,
+  that part of a close went from 194ms to 101ms.
+- **A write no longer replaces a symlink with a plain file.** Every file moai rewrites goes
+  through a temporary file and a `rename`, and `rename` swaps the link itself, not the file
+  it points to. So in a repository with `AGENTS.md -> CLAUDE.md`, `moai init` turned
+  `AGENTS.md` into a separate file and never put the block into `CLAUDE.md`, and a
+  `.moai/issues.jsonl` linked to another place became a plain file on the next write, leaving
+  the file it pointed to behind. Writes now follow the link and keep it. The temporary file is
+  still made next to the name that was given — inside `.moai/` for the tracker, where it is
+  ignored — and next to the file the link points to only when the two are on different
+  filesystems. A file the repository holds (`.moai/issues.jsonl`, `AGENTS.md`) follows a link only
+  when it points inside the checkout — a cloned repository could otherwise commit a link to
+  `~/.bashrc` and have `moai init` or `moai add` rewrite it — while your own config, read marks
+  and update check follow links anywhere, as dotfiles need. A link loop, a link into a directory that is not there, and a link to something
+  that is not a regular file (a device, a socket, a FIFO) are refused with the link named and
+  nothing written. Two trackers whose `issues.jsonl` point at one file also take the lock of
+  the directory that file lives in, so their writes no longer silently undo each other, and
+  `moai init` no longer asks for an `@AGENTS.md` line in a `CLAUDE.md` that is the same file
+  as `AGENTS.md`.
+- **A linked tracker is merged, overlaid and appended to where its rows live.** With
+  `.moai/issues.jsonl` (or `.moai` itself) linked to another file in the checkout, git
+  merged that file with its default text merge, so two branches editing neighbouring issues
+  left conflict markers in the tracker while `moai init --check` said nothing was missing.
+  `moai init` now adds a `merge=moai` line for the file the link points at, and `moai status`
+  and `init --check` name that line when it is missing. `--worktree` views lost the base
+  that tells a row removed here from one created beside, so a row `moai rm`'d on the main
+  checkout came back from a sibling worktree; the base is now read where the rows live.
+  Journal appends follow a link only inside the checkout, the same rule rewrites follow, a
+  directory link on the way included, and nothing the repository holds follows a link into
+  `.git/`. When the tracker lives behind a link, `moai init` also names its lock, its
+  temporary files and its journal where they really sit — `tracker/lock` for `.moai -> tracker`,
+  `shared/lock` and `shared/issues.jsonl.tmp.*` for a linked `issues.jsonl` — since git never
+  follows the link to match the `.moai/` lines. `moai status` shows one notice naming the file
+  a linked tracker points at; it blocks nothing.
+- **`moai init` no longer writes into a `.gitignore` or `.gitattributes` that is a symbolic
+  link.** git 2.32 and later never read one inside the checkout, so the lines `init` appended
+  through it applied nowhere while `init` said it wrote them. It now leaves the link alone and
+  says so — `moai status` shows a `dotfile_linked` notice, `moai init --check --json` gains a
+  `linked` key — and asks for a regular file instead: one holding what the link pointed at when
+  that file is in the checkout, a fresh one when the link leads outside it.
+
 ## [0.1.3] - 2026-09-29
 
 ### Changed

@@ -1129,6 +1129,121 @@ fn init_can_be_run_again_to_refresh() {
     assert!(!journal(s.path()).is_empty());
 }
 
+/// **링크인 뿌리 파일과 트래커는 링크로 남고, 쓰기는 가리키는 파일에 든다**(moai-4oab). `rename` 이
+/// 링크 자체를 갈아끼우던 때는 `AGENTS.md -> CLAUDE.md` 인 저장소의 `init` 이 `AGENTS.md` 를 따로 선
+/// 파일로 만들었고(`CLAUDE.md` 에는 블록이 안 들었다), 링크인 `issues.jsonl` 은 다음 `add` 에 보통
+/// 파일이 되어 가리키던 쪽이 옛 글에 멈췄다.
+///
+/// **두 이름이 한 파일이면 `@AGENTS.md` 를 넣으라고 하지 않는다**(리뷰) — 그 말을 따르면 `CLAUDE.md` 가 저를
+/// 부른다. 링크를 거꾸로 건 `CLAUDE.md -> AGENTS.md` 도 같다. **링크 너머의 자리에는 그 자리의 락이 선다** —
+/// 그 파일을 함께 쓰는 다른 트래커와 서로를 막는 락이다(`store::Repo::far_lock`).
+#[cfg(unix)]
+#[test]
+fn symlinked_agents_md_and_issue_file_stay_links() {
+    let s = Scratch::new("init-link");
+    let root = s.path();
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).unwrap().file_type().is_symlink();
+    std::fs::write(root.join("CLAUDE.md"), "# 사람의 글\n").unwrap();
+    std::os::unix::fs::symlink("CLAUDE.md", root.join("AGENTS.md")).unwrap();
+
+    let said = ok(root, &["init", "argos"]);
+    assert!(is_link(&root.join("AGENTS.md")), "init 이 AGENTS.md 링크를 보통 파일로 갈아끼웠다");
+    let claude = std::fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    assert!(claude.starts_with("# 사람의 글\n"), "사람의 글을 잃었다\n{claude}");
+    assert!(claude.contains("moai status"), "가리키는 파일에 블록이 안 들었다\n{claude}");
+    assert!(!said.contains("@AGENTS.md"), "한 파일인 CLAUDE.md 에 저를 부르라고 했다\n{said}");
+
+    // 트래커를 다른 디렉터리의 파일로 건다 — 상대 링크라 링크가 든 자리에서 잰다.
+    std::fs::create_dir(root.join("shared")).unwrap();
+    std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    let id = add(root, &["링크 너머에 선다"]);
+    assert!(is_link(&root.join(".moai/issues.jsonl")), "add 가 issues.jsonl 링크를 보통 파일로 갈아끼웠다");
+    assert!(
+        std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap().contains(&id),
+        "가리키는 파일에 안 썼다"
+    );
+    let listed = |d: &str| {
+        let mut v: Vec<String> =
+            std::fs::read_dir(root.join(d)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(listed("shared"), ["issues.jsonl", "lock"], "임시 파일이 남았거나 너머의 락이 없다");
+    // **보드가 링크라고 한 줄로 비춘다**(moai-jo3h, 사용자 결정) — 가리키는 파일을 대고, 아무것도 안 막는다.
+    let board = ok(root, &["status"]);
+    let said = board.lines().skip_while(|l| !l.contains("이 링크다")).take(2).collect::<Vec<_>>().join("\n");
+    assert!(said.contains("shared/issues.jsonl"), "링크인 트래커와 그 파일을 안 댔다\n{board}");
+    let json = ok(root, &["status", "--json"]);
+    assert!(json.contains("\"tracker_linked\""), "{json}");
+    let plain = Scratch::new("init-link-plain");
+    ok(plain.path(), &["init", "argos"]);
+    assert!(!ok(plain.path(), &["status", "--json"]).contains("tracker_linked"), "링크가 아닌 트래커에 알림이 섰다");
+    assert!(listed(".moai").iter().all(|n| !n.contains(".tmp.")), "임시 파일이 남았다: {:?}", listed(".moai"));
+
+    // 거꾸로 건 링크도 한 파일이다.
+    let back = Scratch::new("init-link-back");
+    std::fs::write(back.path().join("AGENTS.md"), "# 사람의 글\n").unwrap();
+    std::os::unix::fs::symlink("AGENTS.md", back.path().join("CLAUDE.md")).unwrap();
+    let said = ok(back.path(), &["init", "argos"]);
+    assert!(!said.contains("@AGENTS.md"), "CLAUDE.md -> AGENTS.md 에 저를 부르라고 했다\n{said}");
+    assert!(is_link(&back.path().join("CLAUDE.md")), "init 이 CLAUDE.md 링크를 갈아끼웠다");
+    // 두 파일이 따로 서면 안내는 그대로 선다 — 위의 둘이 푸른 것이 안내를 아예 끈 덕이 아니다.
+    let apart = Scratch::new("init-link-apart");
+    std::fs::write(apart.path().join("CLAUDE.md"), "# 사람의 글\n").unwrap();
+    let said = ok(apart.path(), &["init", "argos"]);
+    assert!(said.contains("@AGENTS.md"), "따로 선 CLAUDE.md 에 안내가 안 섰다\n{said}");
+
+    // **체크아웃 밖을 가리키는 링크는 안 따라간다**(moai-4oab, 사용자 결정 둘째 판) — 받은 저장소가
+    // `AGENTS.md -> ~/.bashrc` 를 커밋해 두면 `init` 이 그 파일에 블록을 붙이던 자리다.
+    let away = Scratch::new("init-link-away");
+    let rc = away.path().join("rc");
+    std::fs::write(&rc, "# 사람의 rc\n").unwrap();
+    let cloned = Scratch::new("init-link-cloned");
+    std::os::unix::fs::symlink(&rc, cloned.path().join("AGENTS.md")).unwrap();
+    let out = moai(cloned.path(), &["init", "argos"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 고쳐 썼다");
+    assert!(is_link(&cloned.path().join("AGENTS.md")), "링크를 갈아끼웠다");
+    assert!(said.contains("outside"), "왜 안 썼는지를 안 댔다\n{said}");
+
+    // **덧붙이는 파일도 같다**(moai-wd44) — `O_APPEND` 도 링크를 따라가, `.gitignore -> ~/.bashrc` 에
+    // `init` 이 줄을, `.moai/journal/<사람>.jsonl -> ~/.bashrc` 에 `add` 가 JSON 을 붙이던 자리다.
+    let appended = Scratch::new("init-link-append");
+    let root = appended.path();
+    std::os::unix::fs::symlink(&rc, root.join(".gitignore")).unwrap();
+    let out = moai(root, &["init", "argos"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "덧붙이지 못한 것 하나로 init 이 멈췄다\n{said}");
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 .gitignore 에 덧붙였다");
+    // **링크인 딸린 파일은 git 이 안 읽는다**(moai-yke5) — 손으로 더할 줄을 대면 사람이 그 줄을 링크 너머
+    // (`~/.bashrc`)에 적는다. 링크라고 말하고 보통 파일로 바꾸라고만 한다. 알림도 `moai init` 이 못 걷는
+    // "빠진 줄" 이 아니라 링크라는 알림이다.
+    assert!(
+        said.contains("심볼릭 링크") && !said.contains(".moai/*.tmp.*"),
+        "링크라고 안 했거나 링크에 적을 줄을 댔다\n{said}"
+    );
+    // **밖을 가리키는 링크에는 옮겨 담으라고 안 한다**(리뷰) — 그 말을 따르면 `~/.bashrc` 가 커밋에 실린다.
+    assert!(
+        said.contains("체크아웃 밖") && !said.contains("가리키는 내용을 담은"),
+        "밖의 파일을 옮겨 담으라고 했다\n{said}"
+    );
+    let status = ok(root, &["status", "--json"]);
+    assert!(status.contains("dotfile_linked") && !status.contains("gitignore_rules"), "{status}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(check.contains(r#""linked":[".gitignore"]"#), "{check}");
+    add(root, &["저널을 지을 첫 줄"]);
+    let journals: Vec<_> = std::fs::read_dir(root.join(".moai/journal")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(journals.len(), 1, "{journals:?}");
+    std::fs::remove_file(&journals[0]).unwrap();
+    std::os::unix::fs::symlink(&rc, &journals[0]).unwrap();
+    let out = moai(root, &["add", "저널이 밖을 가리킨다"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일에 저널 줄을 붙였다");
+    assert!(is_link(&journals[0]) && said.contains("outside"), "왜 안 적었는지를 안 댔다\n{said}");
+    assert!(issues(root).contains("저널이 밖을 가리킨다"), "스냅샷은 담겨야 한다 — 저널만 빠진다");
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
@@ -1529,6 +1644,11 @@ fn field(json: &str, key: &str) -> String {
     let at = json.find(&format!("\"{key}\":\"")).unwrap_or_else(|| panic!("{key} 가 없다 — {json}"));
     let rest = &json[at + key.len() + 4..];
     rest[..rest.find('"').unwrap()].to_string()
+}
+
+/// `moai rm --line <n>` 이 보여 준 원문 해시 — `--yes` 에 곁들일 `--match` 값(moai-6nha).
+fn line_match(dir: &Path, n: &str) -> String {
+    field(&ok(dir, &["rm", "--line", n, "--json"]), "match")
 }
 
 /// `--json` 의 문자열 배열 키 하나 — `members`·`children` 처럼 **id 만 든** 것. 없으면 `None` 이고,
@@ -9711,6 +9831,246 @@ fn status_names_an_unreadable_line_that_reuses_a_live_id() {
     assert!(other.status.success(), "{}", String::from_utf8_lossy(&other.stderr));
 }
 
+/// **산 줄의 깨진 쌍둥이를 도구 안에서 치운다**(moai-mo9v.3yp, 2026-09-29 사용자 결정).
+/// `--yes` 가 없으면 보여 주기만 하고, 있으면 그 줄만 지우고 산 줄은 남긴다. 지운 원문은 저널의
+/// `rm` 줄과 `--json` 에 남는다 — 되돌릴 수 없는 지우기의 마지막 자리다.
+#[test]
+fn rm_line_removes_only_the_broken_twin() {
+    let s = init("rmline");
+    let id = add(s.path(), &["산 줄"]);
+    let twin = format!("{{\"id\":\"{id}\",\"title\":\"잘");
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}{twin}\n", issues(s.path()))).unwrap();
+    let before = issues(s.path());
+    let n = before.lines().position(|l| l == twin).unwrap() + 1;
+
+    // 묻기만 한다 — 파일도 저널도 그대로다. 미리 보기와 실행을 가르는 키는 `dry_run` 이다 — 같은
+    // 명령의 `rm <id> --json` 에서 `removed` 는 배열이라 여기서 불리언으로 세우지 않는다(리뷰 moai-mo9v.1ln).
+    let asked = ok(s.path(), &["rm", "--line", &n.to_string(), "--json"]);
+    assert!(asked.contains("\"dry_run\":true") && asked.contains(&format!("\"id\":\"{id}\"")), "{asked}");
+    assert!(!asked.contains("\"removed\""), "`rm <id>` 의 배열 키를 불리언으로 세웠다\n{asked}");
+    assert_eq!(issues(s.path()), before, "--yes 없이 지웠다");
+    let shown = ok(s.path(), &["rm", "--line", &n.to_string()]);
+    let hash = field(&asked, "match");
+    let next = format!("moai rm --line {n} --yes --match {hash}");
+    assert!(shown.contains(&twin) && shown.contains(&next), "원문과 그대로 칠 명령을 안 보였다\n{shown}");
+
+    let done = ok(s.path(), &["rm", "--line", &n.to_string(), "--yes", "--match", &hash, "--json"]);
+    assert!(done.contains("\"dry_run\":false") && done.contains("잘"), "{done}");
+    let after = issues(s.path());
+    assert!(!after.contains(&twin), "쌍둥이가 남았다\n{after}");
+    assert!(after.contains("\"title\":\"산 줄\""), "산 줄까지 지웠다\n{after}");
+    // 산 줄만 남았으니 `status` 는 이제 0 으로 끝난다 — 치명으로 세던 두 경고가 함께 걷혔다.
+    assert!(moai(s.path(), &["status"]).status.success(), "치운 뒤에도 깨진 데이터로 섰다");
+    let j = journal(s.path());
+    assert!(j.lines().any(|l| l.contains("\"kind\":\"rm\"") && l.contains("잘")), "저널에 원문을 안 실었다\n{j}");
+    // 산 줄은 여전히 제 id 로 읽힌다.
+    ok(s.path(), &["show", &id]);
+}
+
+/// **읽히는 줄은 번호로 안 지운다.** 보여 준 뒤 옆 세션의 쓰기로 줄이 밀리면 번호가 산 이슈를
+/// 가리킬 수 있다 — 거절한다. 없는 번호도 거절한다.
+///
+/// **거절문은 지우는 명령을 안 댄다**(리뷰 moai-mo9v.1ln). 한때 `moai rm <그 줄의 id>` 를 댔는데,
+/// 번호가 밀린 경우 그 id 는 아무도 겨누지 않은 옆 이슈였다 — 따라 친 쪽이 산 이슈를 잃는다.
+#[test]
+fn rm_line_refuses_a_readable_or_missing_line() {
+    let s = init("rmlinelive");
+    let id = add(s.path(), &["산 줄"]);
+    let before = issues(s.path());
+
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", "00000000"]);
+    assert!(!out.status.success(), "읽히는 줄을 번호로 지웠다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
+    let out = moai(s.path(), &["rm", "--line", "99"]);
+    assert!(!out.status.success(), "없는 줄을 보였다");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+
+    // id 와 `--line` 은 함께 못 준다. `--yes` 는 `--line` 에만 붙는다.
+    assert!(!moai(s.path(), &["rm", &id, "--line", "1"]).status.success());
+    assert!(!moai(s.path(), &["rm", &id, "--yes"]).status.success());
+    assert_eq!(issues(s.path()), before);
+}
+
+/// **id 조차 못 읽는 줄도 지운다** — 그런 줄은 어떤 id 로도 못 부른다. 저널의 `id` 는 빈 글이다.
+#[test]
+fn rm_line_removes_a_line_with_no_id() {
+    let s = init("rmlinenoid");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("이건 JSON 도 아니다\n{}", issues(s.path()))).unwrap();
+    let hint = moai(s.path(), &["show"]);
+    assert!(String::from_utf8_lossy(&hint.stderr).contains("moai rm --line"), "지우는 길을 안 댔다");
+
+    let hash = line_match(s.path(), "1");
+    let done = ok(s.path(), &["rm", "--line", "1", "--yes", "--match", &hash, "--json"]);
+    assert!(done.contains("\"id\":null"), "없는 id 를 지어냈다\n{done}");
+    assert!(!issues(s.path()).contains("JSON 도 아니다"));
+    assert!(moai(s.path(), &["status"]).status.success());
+}
+
+/// **밀린 번호의 거절문은 줄이 간 자리를 댄다**(리뷰 moai-mo9v.1ln). 손으로 푼 머지가 쌍둥이를
+/// 앞에 남긴 파일에서 옆 세션이 한 번 쓰면, 쌍둥이는 끝으로 가고 그 번호에는 산 이슈가 선다. 거절은
+/// 지우는 명령 대신 지금 못 읽는 줄을 번호와 id 로 댄다 — 산 줄의 쌍둥이를 거기서 고른다.
+#[test]
+fn rm_line_refusal_after_a_shift_names_where_the_line_went() {
+    let s = init("rmlineshift");
+    let first = add(s.path(), &["첫 줄"]);
+    add(s.path(), &["둘째 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    let twin = format!("{{\"id\":\"{first}\",\"title\":\"잘");
+    std::fs::write(&path, format!("{twin}\n{}", issues(s.path()))).unwrap();
+    // 옆 세션이 한 번 쓴다 — 쌍둥이는 파일 끝으로 가고 1줄에는 산 이슈가 선다.
+    add(s.path(), &["셋째 줄"]);
+    let now = issues(s.path()).lines().position(|l| l == twin).expect("쌍둥이가 사라졌다") + 1;
+    assert_ne!(now, 1, "쌍둥이가 안 밀렸다 — 시험이 낡았다");
+    let before = issues(s.path());
+
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", "00000000"]);
+    assert!(!out.status.success(), "밀린 번호로 산 줄을 지웠다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("moai rm "), "지우는 명령을 따라 칠 줄로 댔다\n{err}");
+    assert!(err.contains(&format!("{now} ({first})")), "쌍둥이가 간 자리를 안 댔다\n{err}");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+}
+
+/// **`--yes` 는 보여 준 줄에 묶인다**(moai-6nha, 2026-09-29 사용자 결정). 보여 준 뒤 줄 수가 바뀌어
+/// 번호가 밀리면, 그 번호에는 **다른** 못 읽는 줄이 설 수 있다 — 번호만 보고 지우던 때는 그 줄이
+/// 말없이 갔다(리뷰 moai-mo9v.1ln 2번). 그 번호의 원문이 보여 준 해시와 다르면 거절하고 파일을 안 바꾼다.
+#[test]
+fn rm_line_yes_is_bound_to_the_line_shown() {
+    let s = init("rmlinematch");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("첫 쓰레기\n둘째 쓰레기\n{}", issues(s.path()))).unwrap();
+    let first = line_match(s.path(), "1");
+    let second = line_match(s.path(), "2");
+    assert_ne!(first, second, "다른 줄이 같은 해시를 냈다");
+    let before = issues(s.path());
+
+    // 2줄에서 본 해시를 들고 1줄을 지우려 든다 — 밀린 번호가 떨어지는 바로 그 경우다.
+    let out = moai(s.path(), &["rm", "--line", "1", "--yes", "--match", &second, "--json"]);
+    assert!(!out.status.success(), "보여 준 것과 다른 줄을 지웠다");
+    let said = text(&out);
+    assert!(said.contains("not_found"), "{said}");
+    // **보여 준 줄이 지금 선 번호를 댄다**(리뷰 moai-mo9v.w12). 그 번호에 선 딴 줄의 해시나 같은 번호를
+    // 다시 보라는 명령은 안 댄다 — 둘 다 아무도 안 본 줄을 지울 인자다.
+    assert!(said.contains("자리: 2"), "보여 준 줄이 선 자리를 안 댔다\n{said}");
+    assert!(!said.contains(&first) && !said.contains("moai rm "), "그 번호에 선 딴 줄을 지울 인자를 댔다\n{said}");
+    assert_eq!(issues(s.path()), before, "거절하고도 파일을 바꿨다");
+
+    // 대소문자와 앞뒤 빈칸은 안 가린다 — 손으로 옮겨 친 값이다.
+    ok(s.path(), &["rm", "--line", "1", "--yes", "--match", &format!(" {} ", first.to_uppercase())]);
+    let after = issues(s.path());
+    assert!(!after.contains("첫 쓰레기") && after.contains("둘째 쓰레기"), "{after}");
+}
+
+/// **같은 명령을 다시 쳐도 둘째 벌은 안 간다**(리뷰 moai-mo9v.w12). 똑같은 못 읽는 줄 두 벌 가운데 하나를
+/// 지우면 그 번호로 밀려 온 둘째 벌은 바이트로는 보여 준 줄과 같다 — 해시가 벌 수를 안 세던 동안은 시간이
+/// 넘쳐 다시 친 같은 명령에 그 벌도 말없이 갔다. 새 moai 가 쓴 줄이 두 벌 남은 경우 한 벌은 남길 줄이다.
+#[test]
+fn rm_line_the_same_command_twice_leaves_the_second_copy() {
+    let s = init("rmlinecopies");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}새 줄\n새 줄\n", issues(s.path()))).unwrap();
+    let hash = line_match(s.path(), "2");
+    ok(s.path(), &["rm", "--line", "2", "--yes", "--match", &hash]);
+    let once = issues(s.path());
+    assert_eq!(once.lines().filter(|l| *l == "새 줄").count(), 1, "한 벌만 지워야 한다\n{once}");
+
+    let again = moai(s.path(), &["rm", "--line", "2", "--yes", "--match", &hash]);
+    assert!(!again.status.success(), "같은 명령이 둘째 벌까지 지웠다");
+    assert_eq!(issues(s.path()), once, "거절하고도 파일을 바꿨다");
+}
+
+/// **해시 없는 `--yes` 와 `--yes` 없는 해시는 거절한다**(moai-6nha). 앞의 것은 번호만 보고 지우던
+/// 옛 길이고, 뒤의 것은 친 사람이 지운 줄로 읽는다. 둘 다 `bad_input` 이고 파일을 안 바꾼다.
+///
+/// **해시 꼴이 아닌 값도 해시가 없는 것이다**(리뷰 moai-mo9v.w12). 빈 값·오타를 락 안까지 가져가면
+/// "줄이 움직였거나 바뀌었다" 로 거절해, 움직이지 않은 줄을 두고 다시 보라고 했다. id 로 지우는 길에
+/// 붙인 `--match` 도 `bad_input` 이다 — 그 거절문이 `--yes` 만 대던 동안 `yes_without_line` 과 돌았다.
+#[test]
+fn rm_line_refuses_yes_without_match_and_match_without_yes() {
+    let s = init("rmlinenomatch");
+    let id = add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("쓰레기\n{}", issues(s.path()))).unwrap();
+    let hash = line_match(s.path(), "1");
+    let before = issues(s.path());
+
+    for args in [
+        &["rm", "--line", "1", "--yes", "--json"][..],
+        &["rm", "--line", "1", "--match", &hash, "--json"],
+        &["rm", "--line", "1", "--yes", "--match", "", "--json"],
+        &["rm", "--line", "1", "--yes", "--match", "zz", "--json"],
+        &["rm", &id, "--match", &hash, "--json"],
+    ] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?}: 지나 보냈다");
+        let said = text(&out);
+        assert!(said.contains("bad_input"), "{args:?}: {said}");
+        assert_eq!(issues(s.path()), before, "{args:?}: 거절하고도 파일을 바꿨다");
+    }
+}
+
+/// **보여 준 명령은 보여 준 트래커로 간다**(리뷰 moai-mo9v.w12). `-C` 로 부른 미리 보기가 맨 명령을 대면
+/// 따라 친 셸이 제 자리의 트래커를 열고, 그 트래커의 같은 번호에 같은 바이트가 서 있으면 해시까지 맞는다.
+/// 해시 없는 `--yes` 의 거절문이 대는 보는 명령도 같은 꼴이다.
+#[test]
+fn rm_line_preview_command_keeps_the_dir_it_was_given() {
+    let s = init("rmlinedir");
+    add(s.path(), &["산 줄"]);
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}쓰레기\n", issues(s.path()))).unwrap();
+    let root = std::fs::canonicalize(s.path()).unwrap();
+    let dir = s.path().display().to_string();
+    let away = Scratch::new("rmlinedir-away");
+
+    let hash = field(&ok(away.path(), &["-C", &dir, "rm", "--line", "2", "--json"]), "match");
+    let shown = ok(away.path(), &["-C", &dir, "rm", "--line", "2"]);
+    let go = format!("moai -C {} rm --line 2 --yes --match {hash}", root.display());
+    assert!(shown.contains(&go), "-C 로 본 줄을 지우는 명령에 -C 가 없다\n{shown}");
+    let out = moai(away.path(), &["-C", &dir, "rm", "--line", "2", "--yes"]);
+    let said = text(&out);
+    assert!(said.contains(&format!("moai -C {} rm --line 2", root.display())), "{said}");
+}
+
+/// **지운 줄의 원문은 사람 화면에도 선다**(리뷰 moai-mo9v.1ln). 번호가 다른 못 읽는 줄에 떨어져도
+/// 그 자리에서 보이고, 저널 쓰기가 실패했거나 64KB 에서 잘린 줄은 그 화면 말고는 온전히 남는 곳이
+/// 없다. 파일에서 온 글이라 제어문자는 걷고 그린다 — ESC 가 든 줄이 화면을 다시 칠하지 않게.
+///
+/// 산 이슈의 이력은 그 줄을 **못 읽는 줄 삭제** 로 적는다. 이슈를 지운 `rm` 과 같은 낱말로 그리면
+/// 멀쩡한 이슈의 이력이 "삭제" 로 끝난다.
+#[test]
+fn rm_line_prints_what_it_removed_without_control_characters() {
+    let s = init("rmlineprint");
+    let id = add(s.path(), &["산 줄"]);
+    let twin = format!("{{\"id\":\"{id}\",\"title\":\"x\u{1b}[2J\rY");
+    let path = s.path().join(".moai/issues.jsonl");
+    std::fs::write(&path, format!("{}{twin}\n", issues(s.path()))).unwrap();
+    let n = (issues(s.path()).lines().position(|l| l == twin).unwrap() + 1).to_string();
+    let n = n.as_str();
+    let drawn = format!("{{\"id\":\"{id}\",\"title\":\"x[2JY");
+    let hash = line_match(s.path(), n);
+
+    // **색을 켜고 잰다** — `--color always` 는 `NO_COLOR` 를 이겨 anstream 이 아무것도 안 걷는다.
+    for args in [
+        &["rm", "--line", n, "--color", "always"][..],
+        &["rm", "--line", n, "--yes", "--match", &hash, "--color", "always"],
+    ] {
+        let out = ok(s.path(), args);
+        assert!(out.contains(&drawn), "{args:?}: 지울 줄의 원문을 안 보였다\n{out:?}");
+        assert!(!out.contains("\u{1b}[2J") && !out.contains('\r'), "{args:?}: 파일의 제어문자를 그렸다\n{out:?}");
+    }
+    assert!(!issues(s.path()).contains(&twin), "쌍둥이가 남았다");
+
+    let shown = ok(s.path(), &["show", &id, "--color", "always"]);
+    assert!(shown.contains("못 읽는 줄 삭제"), "산 이슈의 이력이 이슈를 지운 것으로 섰다\n{shown}");
+    assert!(!shown.contains("\u{1b}[2J") && !shown.contains('\r'), "이력이 제어문자를 그렸다\n{shown:?}");
+}
+
 /// **가려진 줄의 소속은 표면 어디서도 같은 답이다**(moai-53s2). 소속 지도는 id 로 짠 것이라
 /// 종류가 다른 쌍둥이에게 가려진 줄에 쌍둥이의 값을 주는데, 트리는 그 줄을 `(길 잃음)` 에 두고
 /// `show <에픽>` 은 `0/0` 이라 말하며 `-e <에픽>` 은 안 고른다 — `show --json` 목록만 그 줄에
@@ -11314,6 +11674,9 @@ fn hook_at_home(
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
+    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 시험마다 제 자리를 준다. 모든 시험이 함께
+    // 쓰는 `isolated` 의 자리로 두면 남의 시험이 적은 기록이 한 디렉터리에 쌓인다. 시험이 준 값이 이긴다.
+    cmd.env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"));
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -12343,6 +12706,83 @@ fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
     assert!(lost.trim().is_empty(), "진 집기를 겨눈 트래커의 줄로 붙든다\n{lost}");
 }
 
+/// 훅이 집기를 적은 디렉터리들 — [`hook_at_home`] 이 준 설정 곁의 `picks/` 아래다.
+fn pick_dirs(s: &Scratch) -> Vec<PathBuf> {
+    let Ok(dir) = std::fs::read_dir(s.path().join("hookcfg").join("picks")) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = dir.filter_map(Result::ok).map(|e| e.path()).collect();
+    out.sort();
+    out
+}
+
+/// **집기 기록은 누구나 쓰는 temp 에 안 놓인다**(moai-59k3.yo6, 2026-09-29 사용자 결정). 이름을 넘겨짚을 수
+/// 있는 `/tmp/moai-picks-<key>` 에 남이 먼저 만든 디렉터리나 심어 둔 기록 하나가 규칙 1·2 를 조용히
+/// 껐다. 이제 사용자 설정 곁(`<설정 디렉터리>/picks/<key>`)이다.
+///
+/// **`MOAI_HERE` 로 갈라 놓은 워크트리는 루트와 딴 자리에 적는다** — 두 쪽은 `tracker_place` 가 같은
+/// 값을 내지만 보는 스냅샷이 달라, 한 자리에 적던 판은 루트의 집기가 워크트리의 `held()` 를 채워
+/// 규칙 2 를 껐다. 옮겨 가는 워크트리(맨 `moai`)는 루트와 같은 자리다 — 집기는 루트에서 치고 일은
+/// 워크트리에서 한다.
+#[cfg(unix)]
+#[test]
+fn pick_records_sit_beside_the_user_config_one_per_tracker() {
+    let s = Scratch::new("hookpickhome");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
+    let inside = main.join(".claude/worktrees/w");
+    let input = |cwd: &Path| {
+        format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&cwd.display().to_string()),
+            json_str(&format!("moai mv {id} in_progress"))
+        )
+    };
+
+    assert!(hook_in(&s, &main, "pre-tool-use", &input(&main)).stdout.is_empty());
+    let root = pick_dirs(&s);
+    assert_eq!(root.len(), 1, "루트의 집기를 설정 곁에 안 적었다 — {root:?}");
+    assert!(root[0].join("s1").is_file(), "세션의 기록이 없다 — {root:?}");
+    let temp: Vec<_> = std::fs::read_dir(s.path().join("hooktmp"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("moai-picks-"))
+        .collect();
+    assert!(temp.is_empty(), "temp 에 아직 적는다 — {temp:?}");
+    // **남이 못 쓰는 자리다**(리뷰 moai-59k3.4c3) — 그룹에 열린 설정 디렉터리에서도 기록 자리는 닫힌다.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(s.path().join("hookcfg/picks")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "기록 자리를 남에게 열어 뒀다 — {mode:o}");
+    }
+    // **심어 둔 링크를 따라 쓰지 않는다** — 따라 쓰면 남의 파일에 이 세션의 줄이 붙는다.
+    let bait = s.path().join("bait");
+    std::fs::write(&bait, "").unwrap();
+    std::fs::remove_file(root[0].join("s2")).ok();
+    std::os::unix::fs::symlink(&bait, root[0].join("s2")).unwrap();
+    let as_s2 = input(&main).replace("\"s1\"", "\"s2\"");
+    assert!(hook_in(&s, &main, "pre-tool-use", &as_s2).stdout.is_empty());
+    assert!(std::fs::read_to_string(&bait).unwrap().is_empty(), "심어 둔 링크를 따라 썼다");
+    std::fs::remove_file(root[0].join("s2")).unwrap();
+
+    // 옮겨 가는 워크트리는 루트와 한 자리다.
+    assert!(hook_in(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    assert_eq!(pick_dirs(&s), root, "옮겨 가는 워크트리가 루트와 딴 자리에 적는다");
+
+    // 갈라 놓은 워크트리는 제 자리다.
+    assert!(hook_here(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    let both = pick_dirs(&s);
+    assert_eq!(both.len(), 2, "MOAI_HERE 워크트리가 루트의 기록 자리를 함께 쓴다 — {both:?}");
+
+    // 설정 자리가 상대경로면 적지 않는다 — 훅이 선 자리마다 딴 디렉터리가 된다.
+    hook_at_home(&s, &main, None, &[("MOAI_CONFIG", "rel/config.toml")], "pre-tool-use", &input(&main));
+    assert!(!main.join("rel").exists(), "상대 설정 자리 곁에 적었다");
+}
+
 /// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 훅은 판정마다 기록 디렉터리를 통째로
 /// 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 적을 때 두 주
 /// 넘게 안 적힌 남의 파일을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다.
@@ -12363,19 +12803,28 @@ fn old_pick_records_are_pruned_when_a_new_pick_is_written() {
         String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
     };
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
-    let dir = std::fs::read_dir(s.path().join("hooktmp"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("moai-picks-")))
-        .expect("집기를 안 적었다");
-    let old = dir.join("gone");
-    std::fs::write(&old, format!("1\t{id}\n")).unwrap();
+    let dir = pick_dirs(&s).pop().expect("집기를 안 적었다");
     let weeks = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 24 * 60 * 60);
-    std::fs::File::options().write(true).open(&old).unwrap().set_modified(weeks).unwrap();
+    let aged = |path: &Path| {
+        std::fs::write(path, format!("1\t{id}\n")).unwrap();
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(weeks).unwrap();
+    };
+    let old = dir.join("gone");
+    aged(&old);
+    // **다시 안 적힐 트래커의 자리도 걷힌다**(리뷰 moai-59k3.4c3) — 지운 워크트리·옮긴 저장소의 자리다.
+    // 오래되지 않은 기록이 든 옆 자리는 그대로다.
+    let home = dir.parent().unwrap();
+    let orphan = home.join("00000000000000aa");
+    std::fs::create_dir_all(&orphan).unwrap();
+    aged(&orphan.join("left"));
+    let alive = home.join("00000000000000bb");
+    std::fs::create_dir_all(&alive).unwrap();
+    std::fs::write(alive.join("now"), format!("1\t{id}\n")).unwrap();
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
     assert!(!old.exists(), "두 주 넘게 안 적힌 세션의 기록이 남았다");
     assert!(dir.join("fresh").exists(), "제 기록까지 지웠다");
+    assert!(!orphan.exists(), "다시 안 적힐 트래커의 자리가 남았다");
+    assert!(alive.join("now").exists(), "옆 트래커의 새 기록까지 지웠다");
 }
 
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
@@ -15153,6 +15602,63 @@ fn worktree_does_not_revive_a_line_removed_here() {
     assert!(!ready.contains(&t.tied), "지운 일을 집으라고 낸다\n{ready}");
     let status = ok(&main, &["status", "--worktree", "--json"]);
     assert!(!status.contains(&t.tied), "{status}");
+
+    // **링크가 아닌 트래커의 바탕은 `show` 하나로 읽는다**(리뷰) — 모드를 묻는 `ls-tree` 를 늘 먼저 띄우던
+    // 판은 pathspec 을 받는 그 명령이 `GIT_ICASE_PATHSPECS` 아래에서 죽어, 흔한 트래커의 바탕까지 잃었다.
+    let out = staged(&["show", "--worktree"]).current_dir(&main).env("GIT_ICASE_PATHSPECS", "1").output().unwrap();
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && !shown.contains(&t.tied), "pathspec 환경에서 바탕을 잃었다\n{shown}");
+}
+
+/// **링크로 커밋된 트래커도 지운 줄의 바탕을 잃지 않는다**(moai-iral). `git show <갈린 자리>:.moai/issues.jsonl`
+/// 이 가리키는 파일이 아니라 링크 글을 내, 바탕이 비고 여기서 `rm` 한 줄이 옆 워크트리의 것으로 말없이
+/// 되살아났다. 바탕은 그 커밋 안에서 링크를 따라가 읽는다.
+#[cfg(unix)]
+#[test]
+fn worktree_keeps_the_removal_base_of_a_linked_tracker() {
+    let s = Scratch::new("wtrmlink");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("shared")).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "moai 이전"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::rename(main.join(".moai/issues.jsonl"), main.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", main.join(".moai/issues.jsonl")).unwrap();
+    let kept = add(&main, &["남는 일"]);
+    let gone = add(&main, &["여기서 지울 일"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+    ok(&main, &["rm", &gone]);
+
+    let shown = ok(&main, &["show", "--worktree"]);
+    assert!(shown.contains(&kept), "{shown}");
+    assert!(!shown.contains(&gone), "여기서 지운 줄이 링크인 트래커의 옆 줄로 되살았다\n{shown}");
+    let ready = ok(&main, &["ready", "--worktree", "--json"]);
+    assert!(!ready.contains(&gone), "지운 일을 집으라고 낸다\n{ready}");
+
+    // **링크 알림은 사람이 선 자리에서 잰 경로를 댄다**(리뷰) — 딸린 워크트리의 셸에서 뿌리에서 잰
+    // `shared/issues.jsonl` 을 열면 그 워크트리가 갈라질 때의 사본이 열린다. 머리(`source_of`)와 같은 자다.
+    let board = ok(&s.path().join("feat"), &["status", "--json"]);
+    assert!(board.contains("\"../main/shared/issues.jsonl\""), "옆 워크트리의 사본을 가리켰다\n{board}");
+
+    // **`.moai` 가 링크인 판도 같다**(리뷰) — 커밋 안의 링크를 한 칸씩 따라가는 길은 가운데 디렉터리
+    // 링크를 못 건너 바탕을 잃었다. 줄이 지금 사는 자리를 먼저 묻는다.
+    let d = Scratch::new("wtrmdirlink");
+    let main = d.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "moai 이전"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::rename(main.join(".moai"), main.join("tracker")).unwrap();
+    std::os::unix::fs::symlink("tracker", main.join(".moai")).unwrap();
+    let gone = add(&main, &["여기서 지울 일"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../feat", "-b", "feat/x"]);
+    ok(&main, &["rm", &gone]);
+    let shown = ok(&main, &["show", "--worktree"]);
+    assert!(!shown.contains(&gone), "`.moai` 가 링크인 트래커에서 지운 줄이 되살았다\n{shown}");
 }
 
 /// 옆에서 **늦게 미루거나 도로 집은 것**은 여기서 먼저 옮긴 칸에 가려지지 않는다(moai-l11z).
@@ -15322,13 +15828,8 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
 /// 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던 줄 하나를 stderr 에
 /// 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
 ///
-/// **이름을 `project ls` 로 좁혀 둔다 — "시각을 안 그리는 명령" 전부가 아니다**(리뷰 moai-j4ie
-/// 가 쟀다). `ready`·`prime`·`show`(목록)·`idea ls` 는 시간대로 한 글자도 안 달라지는데 여전히
-/// 이 줄을 낸다. 그쪽은 `view::Screen` 을 지어 `.at(ctx.zone())` 을 얹기 때문이고, 화면의
-/// 시간대를 실제로 읽는 자리는 `view::detail`·`view::history` 둘(곧 `show <id>`·`edit`)뿐이다.
-/// 그래서 같은 길로 못 고친다 — `view::every_command_screen_carries_the_zone` 이 `src/cmd/**`
-/// 를 훑어 `.at` 없는 `Screen::new` 을 거절하므로, 저쪽을 고치는 일은 그 잣대를 함께 옮기는
-/// 결정이다(그 결정은 아직 없다). `project ls` 가 화면을 아예 안 지어 여기만 먼저 닫혔다.
+/// 화면을 짓는 명령(`ready`·`prime`·`show` 목록·`idea ls`)은 길이 달라 따로 잰다 —
+/// `screens_that_draw_no_time_never_reach_for_the_timezone`(moai-s3i7).
 ///
 /// **대조를 함께 잰다** — 같은 환경의 `moai status` 는 기한을 그리므로 그 줄이 서야 한다.
 /// 없으면 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다.
@@ -15367,6 +15868,62 @@ fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
     let st = run(repo.path(), &["status"]);
     assert!(st.status.success(), "{}", text(&st));
     let said = String::from_utf8_lossy(&st.stderr);
+    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
+}
+
+/// **화면을 지어도 시각을 안 그리면 tzdb 를 안 만진다**(moai-s3i7). `ready`·`prime`·
+/// `show`(목록)·`idea ls` 는 `view::Screen` 에 시간대를 얹지만, 그 시간대를 실제로 읽는 자리는
+/// `view::detail`·`view::history` 둘뿐이다. 얹는 값이 아직 안 푼 시간대(`tz::System`)라
+/// 그 넷은 zoneinfo 없는 기계에서 알림 줄을 안 낸다. 한눈 보기(`.moai` 밖의 `ready`)도 같은
+/// 화면을 짓는다.
+///
+/// **대조를 함께 잰다** — 같은 환경의 `show <id>` 는 시각을 그리므로 그 줄이 서야 한다. 없으면
+/// 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다. 옛 자리(화면을 지을
+/// 때 푼 판)로 되돌리면 아래 자리가 모두 붉어진다. 트리(`show --tree`)는 목록과 같은 화면을
+/// 나눠 쓰므로 함께 잰다.
+#[test]
+fn screens_that_draw_no_time_never_reach_for_the_timezone() {
+    let home = Scratch::new("screen-tz");
+    let config = home.path().join("config.toml");
+    let repo = init("screen-tz-repo");
+    let id = ok(repo.path(), &["add", "시각 없는 줄", "-q"]);
+    let id = id.trim();
+    ok(repo.path(), &["idea", "add", "나중 생각"]);
+    project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
+    // 없는 자리를 가리켜 tzdb 를 깨뜨린다 — `TZ` 가 UTC 면 자료 없이 서서 이 판이 안 난다.
+    let nowhere = home.path().join("no-zoneinfo");
+    let run = |dir: &Path, args: &[&str]| {
+        isolated(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &config)
+            .env("NO_COLOR", "1")
+            .env("TZDIR", &nowhere)
+            .env("TZ", "Asia/Seoul")
+            .output()
+            .expect("moai 를 실행하지 못했다")
+    };
+
+    let quiet: [(&Path, &[&str], &str); 6] = [
+        (repo.path(), &["ready"], id),
+        (repo.path(), &["prime"], id),
+        (repo.path(), &["show"], id),
+        (repo.path(), &["show", "--tree"], id),
+        (repo.path(), &["idea", "ls"], "나중 생각"),
+        (home.path(), &["ready"], id),
+    ];
+    for (dir, args, want) in quiet {
+        let out = run(dir, args);
+        assert!(out.status.success(), "{args:?}: {}", text(&out));
+        // **줄이 실제로 섰는지부터 본다** — 빈 화면은 시각을 그릴 자리가 애초에 없다.
+        assert!(String::from_utf8_lossy(&out.stdout).contains(want), "{args:?} 에 줄이 안 섰다 — {}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(!said.contains("시간대 자료가 없다"), "{args:?} 는 시각을 안 그리는데 tzdb 를 만졌다 — {said}");
+    }
+
+    let one = run(repo.path(), &["show", id]);
+    assert!(one.status.success(), "{}", text(&one));
+    let said = String::from_utf8_lossy(&one.stderr);
     assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
 }
 
@@ -16604,6 +17161,65 @@ fn the_merge_driver_settles_edits_to_different_issues() {
     assert_eq!(issues(root), before, "병합 결과가 표준형이 아니라 다음 쓰기가 헛 diff 를 냈다");
 }
 
+/// **링크인 트래커도 드라이버로 합쳐진다**(moai-7myd). git 은 링크를 링크 글로 담고 줄이 사는 파일은
+/// 가리켜진 경로로 따로 합치는데, 선언이 링크 경로에만 걸려 그 파일이 기본 글 병합을 받았다 — 이웃한
+/// 두 줄의 고침이 충돌 표식을 든 JSONL 이 됐고, 그래도 `init --check` 는 빠진 것이 없다고 했다.
+/// 이제 그 파일에 거는 줄이 빠진 규칙으로 서고 `init` 이 그것을 심는다.
+///
+/// **`.moai` 가 링크인 판도 같다**(리뷰) — 그 판도 git 은 줄이 사는 `shared/issues.jsonl` 을 그 경로로
+/// 합친다. 끝 조각만 보던 판은 거기서 링크를 못 봐 줄도 알림도 없이 충돌 표식을 냈다.
+#[cfg(unix)]
+#[test]
+fn the_merge_driver_covers_the_file_a_linked_tracker_points_at() {
+    let file_link = |root: &Path| {
+        std::fs::create_dir(root.join("shared")).unwrap();
+        std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+        std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    };
+    let dir_link = |root: &Path| {
+        std::fs::rename(root.join(".moai"), root.join("shared")).unwrap();
+        std::os::unix::fs::symlink("shared", root.join(".moai")).unwrap();
+    };
+    for (name, link) in [("file", &file_link as &dyn Fn(&Path)), ("dir", &dir_link)] {
+        let s = init(&format!("mergelinked-{name}"));
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        ok(root, &["merge-driver", "--install", "--as", BIN]);
+        link(root);
+
+        let rule = "/shared/issues.jsonl   text eol=lf merge=moai";
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert!(check.contains(rule), "{name}: 링크가 가리키는 파일에 선언이 빠진 것을 안 댔다\n{check}");
+        ok(root, &["init", "argos"]);
+        let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+        assert!(attrs.lines().any(|l| l == rule), "{name}: init 이 그 파일에 선언을 안 걸었다\n{attrs}");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert!(!check.contains("\"missing\""), "{name}: 심은 뒤에도 빠졌다고 한다\n{check}");
+        ok(root, &["init", "argos"]);
+        let again = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+        assert_eq!(again, attrs, "{name}: 다시 부르자 줄을 또 붙였다");
+        let board = ok(root, &["status", "--json"]);
+        assert!(board.contains("\"tracker_linked\"") && board.contains("\"shared/issues.jsonl\""), "{name}\n{board}");
+
+        let one = add(root, &["첫째"]);
+        let two = add(root, &["둘째"]);
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        git(root, &["checkout", "-qb", "side"]);
+        ok(root, &["edit", &two, "--tag", "parser"]);
+        git(root, &["commit", "-qam", "side"]);
+        git(root, &["checkout", "-q", "main"]);
+        ok(root, &["edit", &one, "--tag", "bug"]);
+        git(root, &["commit", "-qam", "main"]);
+
+        git(root, &["merge", "--no-edit", "side"]);
+        let merged = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
+        assert!(!merged.contains("<<<<<<<"), "{name}: 링크가 가리키는 파일에 충돌 표식이 남았다\n{merged}");
+        let (a, b) = (line_of(root, &one), line_of(root, &two));
+        assert!(a.contains("\"bug\"") && b.contains("\"parser\""), "{name}\n{merged}");
+    }
+}
+
 /// **같은 이슈의 같은 필드를 둘이 다르게 고친 것은 사람에게 온다.** 한쪽을 말없이
 /// 고르면 다른 쪽의 고침이 아무 자취 없이 사라진다 — 조용한 손실이 이 도구가 못 견디는
 /// 유일한 실패 모드다.
@@ -16908,6 +17524,59 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
     let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
     assert_eq!(planted.lines().count(), 1, "{planted}");
     assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
+}
+
+/// **죽은 마운트에 선 프로젝트 하나가 한눈 보기를 붙들지 않는다**(moai-59k3.u09). 설치 알림은
+/// 프로젝트마다 git 을 부르는데(`check-attr`·`config`), 그 부름에 시간 상한이 없어 한 줄이 멈추면
+/// 줄마다 띄운 실을 전부 기다리는 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다.
+///
+/// 죽은 마운트는 `PATH` 앞에 세운 가짜 git 이 대신한다 — 그 프로젝트를 가리킨 부름만 잠든다. 잠든
+/// 부름이 정말 섰는지도 본다: 가짜 git 을 못 띄우면(ETXTBSY) 시험이 한도를 안 밟고 초록이 된다.
+#[cfg(unix)]
+#[test]
+fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
+    let s = Scratch::new("hungmount");
+    let live = s.path().join("live");
+    let dead = s.path().join("dead");
+    for (dir, title) in [(&live, "살아 있는 일"), (&dead, "잠든 일")] {
+        std::fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-q"]);
+        ok(dir, &["init", "argos"]);
+        ok(dir, &["add", title]);
+    }
+    let config = registry(&s, &[&live, &dead]);
+    let kept = path_without_moai();
+    let real = std::env::split_paths(&kept).map(|d| d.join("git")).find(|g| g.is_file()).expect("git 을 못 찾았다");
+    let bin = s.path().join("fakebin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let slept = s.path().join("slept");
+    write_exe(
+        &bin.join("git"),
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *{}*) : > '{}'; exec sleep 30;; esac\nexec {} \"$@\"\n",
+            dead.display(),
+            slept.display(),
+            real.display()
+        ),
+    );
+    let mut path = vec![bin];
+    path.extend(std::env::split_paths(&kept));
+
+    let outside = s.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let clock = std::time::Instant::now();
+    let out = staged(&["status"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .output()
+        .unwrap();
+    let took = clock.elapsed();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(20), "잠든 프로젝트가 한눈 보기를 붙들었다 — {took:?}\n{said}");
+    assert!(said.contains("live") && said.contains("dead"), "프로젝트 한 줄을 빠뜨렸다\n{said}");
+    assert!(slept.exists(), "잠든 git 이 한 번도 안 불렸다 — 한도를 안 밟았다\n{said}");
 }
 
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
@@ -18049,7 +18718,8 @@ fn the_files_the_release_packs_are_all_there() {
 #[cfg(unix)]
 #[test]
 fn what_the_receiver_curls_is_main() {
-    for name in ["README.md", "install.sh"] {
+    // `src/latest.rs` 는 탐색기가 새 판을 알릴 때 대는 한 줄을 든다(moai-8rmw.665).
+    for name in ["README.md", "install.sh", "src/latest.rs"] {
         let text = std::fs::read_to_string(at_root(name)).unwrap();
         for (n, line) in text.lines().enumerate() {
             let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };
@@ -18161,6 +18831,14 @@ fn printing_the_target_runs_the_platform_table() {
 /// 네트워크를 타지 않는다.
 #[cfg(unix)]
 fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
+    install_cmd(base, dir, more)
+        .output()
+        .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
+}
+
+/// [`install`] 이 부를 명령. 환경을 더 얹을 시험이 쓴다.
+#[cfg(unix)]
+fn install_cmd(base: &Path, dir: &Path, more: &[&str]) -> Command {
     let mut cmd = isolated("sh");
     cmd.arg(at_root("install.sh"))
         .args(more)
@@ -18168,9 +18846,41 @@ fn install(base: &Path, dir: &Path, more: &[&str]) -> Output {
         .env("MOAI_VERSION", "v9.9.9")
         .env("MOAI_INSTALL_DIR", dir)
         .env("MOAI_TARGET", FAKE_TARGET)
-        .output()
-        .expect("sh 를 실행하지 못했다 — 설치 시험에는 sh·curl·tar·sha256sum 이 있어야 한다")
+        // **최신 판을 묻는 자리도 받을 것이 없는 곳이다**(리뷰). 판을 걷는 시험이 이것까지 안 걷으면
+        // `install.sh` 가 GitHub 에 묻는다 — 거절이 물음보다 뒤로 밀리는 날 시험이 조용히 바깥을
+        // 두드리고, 그물이 없는 기계에서만 붉어진다. 최신 판을 재는 시험은 이것을 덮는다.
+        .env("MOAI_API_URL", format!("file://{NOWHERE}/latest.json"))
+        // 거울에서 깐 사람의 셸에 서 있을 수 있다 — 새면 거절문이 싣는 주소가 사람마다 달라진다.
+        .env_remove("MOAI_REPO");
+    cmd
 }
+
+/// 깔 자리에 먼저 선 `moai` 를 흉내 낸다. `ours` 면 이 moai 만 하는 대답
+/// (`merge-driver --help` 의 첫 줄)까지 한다 — `install.sh` 가 가르는 자가 그것이다.
+/// 아니면 `--version` 꼴만 같은 남의 바이너리다(옛 moai 프로젝트가 그렇다). 진짜
+/// 바이너리가 같은 대답을 하는지는 [`the_real_binary_is_recognised_as_this_moai`] 가 잰다.
+///
+/// **[`write_exe`] 로 놓는다**(리뷰) — `install.sh` 가 이 파일을 돌리므로, 이 프로세스가 쓰면
+/// 옆 시험의 fork 가 쓰기 fd 를 물고 있다가 ETXTBSY 로 돌기를 막는다. 그러면 이 moai 가
+/// 남의 것으로 읽혀 거절되는데, 그것이 바로 이 시험들이 재는 답이라 가끔만 붉어진다.
+#[cfg(unix)]
+fn placed_moai(dir: &Path, version: &str, ours: bool) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    let answer = if ours {
+        "echo 'Called by git. Merges issues.jsonl per issue, three-way'"
+    } else {
+        "echo \"error: unrecognized subcommand 'merge-driver'\" >&2; exit 2"
+    };
+    let body = format!(
+        "#!/bin/sh\ncase $1 in\n--version) echo 'moai {version}' ;;\nmerge-driver) {answer} ;;\n*) exit 2 ;;\nesac\n"
+    );
+    write_exe(&dir.join("moai"), &body);
+    body
+}
+
+/// 받을 것이 없는 자리. 여기를 가리키고도 0 으로 끝난 경우는 **안 받고** 끝났다는 증거다.
+#[cfg(unix)]
+const NOWHERE: &str = "/moai-nowhere";
 
 /// 설치 시험이 지어 두는 가짜 릴리스의 타깃 이름. **이 기계에 맞는 판이 있든 없든
 /// 같다**(moai-utya) — 재는 것은 설치 길이지 어느 플랫폼에 내는가가 아니다. 이름을
@@ -18280,6 +18990,374 @@ fn an_existing_moai_is_not_overwritten_without_being_told_to() {
     let forced = install(&base, &dir, &["--force"]);
     assert!(forced.status.success(), "--force 로도 못 덮었다\n{}", text(&forced));
     assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), "남의 moai", "--force 인데 안 덮었다");
+}
+
+/// **깔린 것이 이 moai 면 `--force` 없이 판을 올린다**(moai-8rmw.lj5). 같은 한 줄이 처음
+/// 깔기와 올리기를 함께 한다 — 올릴 때마다 `--force` 를 요구하면 사람은 그것을 늘 붙이게
+/// 되고, 그러면 남의 바이너리를 덮는 날에도 아무 말 없이 지나간다.
+#[cfg(unix)]
+#[test]
+fn an_older_moai_of_ours_is_upgraded_without_force() {
+    let s = Scratch::new("install-upgrade");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    let old = placed_moai(&dir, "0.1.2", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "이 moai 의 옛 판을 못 올렸다\n{}", text(&out));
+    assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), old, "올렸다면서 안 덮었다");
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("0.1.2 에서 9.9.9 로 올린다"), "판이 어떻게 바뀌는지 안 말한다\n{said}");
+}
+
+/// **같은 판이면 받지 않는다.** 받을 것이 없는 자리를 가리켜도 0 으로 끝나야 한다 — 그래야
+/// 받기 전에 끝났다는 것이 선다. `--force` 는 같은 판도 다시 받는다.
+#[cfg(unix)]
+#[test]
+fn the_same_version_is_not_downloaded_again() {
+    let s = Scratch::new("install-same");
+    let dir = s.path().join("bin");
+    let same = placed_moai(&dir, "9.9.9", true);
+
+    let out = install(Path::new(NOWHERE), &dir, &[]);
+    assert!(out.status.success(), "같은 판에서 멈췄다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("이미 9.9.9"), "같은 판이라고 안 말한다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), same, "같은 판인데 건드렸다");
+
+    let (base, _) = fake_release(&s);
+    let forced = install(&base, &dir, &["--force"]);
+    assert!(forced.status.success(), "--force 로 다시 못 받았다\n{}", text(&forced));
+    assert_ne!(std::fs::read_to_string(dir.join("moai")).unwrap(), same, "--force 인데 다시 안 받았다");
+}
+
+/// **판을 내리는 것도 덮되, 내린다고 말한다.** `--version` 으로 옛 판을 고른 사람은 그것을
+/// 원한 것이지만, 모르고 내린 사람에게는 그 한 줄이 유일한 단서다. 여기서 판을 준 것은
+/// [`install_cmd`] 의 `MOAI_VERSION` 이다 — 판을 안 준 한 줄은 안 내린다
+/// ([`a_newer_moai_of_ours_is_left_alone_when_no_version_is_given`]).
+#[cfg(unix)]
+#[test]
+fn a_newer_moai_of_ours_is_downgraded_and_says_so() {
+    let s = Scratch::new("install-downgrade");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "10.0.0", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "판을 못 내렸다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("10.0.0 에서 9.9.9 로 내린다"), "내린다고 안 말한다\n{said}");
+}
+
+/// **`--version` 꼴만 같은 남의 바이너리는 받기 전에 거절한다**(moai-8rmw.lj5·2mo·t8y).
+/// 옛 moai 프로젝트의 바이너리가 같은 이름과 같은 `moai <판>` 을 쓴다 — `--version` 하나로
+/// 가르면 그쪽을 덮어 그 저장소의 훅이 깨진다. 거절은 받기 전에 온다(받을 것이 없는 자리를
+/// 가리켜도 받기 실패가 아니라 거절이 먼저 선다). 거절문은 다시 칠 줄을 두 꼴로 준다.
+#[cfg(unix)]
+#[test]
+fn a_foreign_moai_is_refused_before_downloading_with_a_line_to_run() {
+    let s = Scratch::new("install-foreign");
+    let dir = s.path().join("bin");
+    let theirs = placed_moai(&dir, "0.1.2", false);
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("MOAI_REPO", "someone/fork").output().unwrap();
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), theirs, "말없이 덮었다");
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!said.contains("못 받았다"), "거절보다 받기가 먼저 왔다\n{said}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).is_empty(),
+        "받기 전에 거절해야 하는데 무언가 시작했다\n{}",
+        text(&out)
+    );
+    // 받는 사람이 준 값(여기서는 환경으로 준 자리와 판)과 저장소가 그대로 실린다.
+    let again = format!(" --force --dir {} --version v9.9.9", dir.display());
+    assert!(
+        said.contains(&format!(
+            "curl -fsSL https://raw.githubusercontent.com/someone/fork/main/install.sh | MOAI_REPO=someone/fork sh -s --{again}"
+        )),
+        "파이프로 칠 줄이 없다\n{said}"
+    );
+    assert!(said.contains(&format!("MOAI_REPO=someone/fork sh install.sh{again}")), "파일로 칠 줄이 없다\n{said}");
+}
+
+/// 거절문의 줄에 실리는 값은 셸이 그대로 읽는 꼴로 싸인다 — 빈칸이 든 자리를 싸지 않으면
+/// 옮겨 친 줄이 다른 자리를 가리킨다. 기본 저장소면 `MOAI_REPO` 를 싣지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_refusal_line_quotes_what_the_shell_would_split() {
+    let s = Scratch::new("install-quote");
+    let dir = s.path().join("my bin");
+    placed_moai(&dir, "0.1.2", false);
+
+    // 판도 자리도 **준 것만** 싣는지 보려고 `install_cmd` 가 환경으로 주는 둘을 걷는다 — 나머지
+    // 격리(`MOAI_REPO`·최신 판을 묻는 자리)는 그 함수 하나에서 온다.
+    let given = dir.display().to_string();
+    let out = install_cmd(Path::new(NOWHERE), &dir, &["--dir", &given])
+        .env_remove("MOAI_VERSION")
+        .env_remove("MOAI_INSTALL_DIR")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        said.contains(&format!("install.sh | sh -s -- --force --dir '{}'\n", dir.display())),
+        "빈칸이 든 자리를 안 쌌거나 주지 않은 값을 실었다\n{said}"
+    );
+    assert!(!said.contains("MOAI_REPO"), "기본 저장소인데 MOAI_REPO 를 실었다\n{said}");
+}
+
+/// **만들 수 없는 자리면 받기 전에 끝낸다**(moai-8rmw.2mo).
+#[cfg(unix)]
+#[test]
+fn an_unmakeable_dir_stops_before_downloading() {
+    let s = Scratch::new("install-nodir");
+    let file = s.path().join("a-file");
+    std::fs::write(&file, "").unwrap();
+    let out = install(Path::new(NOWHERE), &file.join("bin"), &[]);
+    assert!(!out.status.success(), "못 만드는 자리에 깔았다고 한다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("못 만들었다") && !said.contains("못 받았다"), "받기가 먼저 왔다\n{said}");
+}
+
+/// **깔린 진짜 바이너리가 이 moai 로 읽힌다**(리뷰). `install.sh` 는 `merge-driver --help` 의 첫
+/// 줄(`src/cli.rs` 의 `MergeDriver` 설명)로 이 moai 를 가르는데, 다른 시험은 그 글을 베낀 가짜
+/// ([`placed_moai`])만 돌린다 — 그 설명을 고쳐도 모두 푸르게 선 채, 새 글을 단 판부터 올리기가
+/// 모두 거절된다. 여기서 진짜 바이너리로 잰다. `--version` 의 꼴도 함께 선다.
+#[cfg(unix)]
+#[test]
+fn the_real_binary_is_recognised_as_this_moai() {
+    let s = Scratch::new("install-real");
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    place_exe(Path::new(BIN), &dir.join("moai"));
+    let ver = env!("CARGO_PKG_VERSION");
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("MOAI_VERSION", format!("v{ver}")).output().unwrap();
+    assert!(out.status.success(), "진짜 moai 를 남의 것으로 읽었다\n{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains(&format!("이미 {ver} 이다")),
+        "같은 판이라고 안 말한다\n{}",
+        text(&out)
+    );
+}
+
+/// **판을 안 준 한 줄은 앞선 판을 안 내린다**(리뷰, moai-8rmw.lj5). 판을 내리는 것은 `--version`
+/// 으로 옛 판을 고른 때다 — 최신 판을 물어 채운 한 줄이 소스에서 지은 판이나 먼저 골라 깐
+/// 앞판을 되돌리면, 새 판 알림을 따라 친 사람이 제 판을 잃는다.
+#[cfg(unix)]
+#[test]
+fn a_newer_moai_of_ours_is_left_alone_when_no_version_is_given() {
+    let s = Scratch::new("install-ahead");
+    let dir = s.path().join("bin");
+    let ahead = placed_moai(&dir, "10.0.0", true);
+    let latest = s.path().join("latest.json");
+    std::fs::write(&latest, r#"{"tag_name": "v9.9.9"}"#).unwrap();
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[])
+        .env_remove("MOAI_VERSION")
+        .env("MOAI_API_URL", format!("file://{}", latest.display()))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "앞선 판 앞에서 멈췄다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("앞선 10.0.0 이다"), "앞섰다고 안 말한다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai")).unwrap(), ahead, "판을 안 줬는데 내렸다");
+}
+
+/// **오르는지 내리는지 모르면 안 가른다**(리뷰). 수가 같고 글만 다른 두 판(`9.9.9-rc1` 과
+/// `9.9.9`)을 `order` 는 `ne` 로 내는데, 그것을 "올린다" 로 말하던 판은 `9.9.9` 에서
+/// `9.9.9-rc1` 로 가는 내림까지 올린다고 했다.
+#[cfg(unix)]
+#[test]
+fn a_moai_that_differs_only_after_the_numbers_is_changed_not_upgraded() {
+    let s = Scratch::new("install-ne");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "9.9.9-rc1", true);
+
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("9.9.9-rc1 에서 9.9.9 로 바꾼다"), "방향을 모르는데 말했다\n{said}");
+    assert!(!said.contains("로 올린다") && !said.contains("로 내린다"), "방향을 모르는데 말했다\n{said}");
+}
+
+/// **링크는 `--force` 없이 안 덮는다**(리뷰). 링크 너머가 이 moai 여도 `mv` 는 링크 자체를 보통
+/// 파일로 바꾸고, 가리키던 바이너리(소스에서 지은 판 따위)는 옛 판 그대로 남는다.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_moai_is_not_replaced_without_force() {
+    let s = Scratch::new("install-link");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = s.path().join("src");
+    let body = placed_moai(&real, "0.1.2", true);
+    std::os::unix::fs::symlink(real.join("moai"), dir.join("moai")).unwrap();
+
+    let out = install(&base, &dir, &[]);
+    assert!(!out.status.success(), "링크를 말없이 덮었다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("링크"), "왜 멈췄는지 안 말한다\n{}", text(&out));
+    assert!(dir.join("moai").is_symlink(), "링크가 사라졌다");
+
+    let forced = install(&base, &dir, &["--force"]);
+    assert!(forced.status.success(), "--force 로도 못 덮었다\n{}", text(&forced));
+    assert!(!dir.join("moai").is_symlink(), "--force 인데 링크가 그대로다");
+    assert_eq!(std::fs::read_to_string(real.join("moai")).unwrap(), body, "링크 너머를 건드렸다");
+
+    // 가리키는 것이 사라진 링크도 링크다(`cargo clean` 뒤의 개발 판) — `-e` 만 보면 링크를 따라가
+    // 거짓이 되어, 묻지도 거절하지도 않고 갈아 끼웠다.
+    let gone = s.path().join("gone");
+    std::fs::create_dir_all(&gone).unwrap();
+    std::os::unix::fs::symlink(s.path().join("cleaned").join("moai"), gone.join("moai")).unwrap();
+    let dangling = install(&base, &gone, &[]);
+    assert!(!dangling.status.success(), "가리키는 것이 사라진 링크를 말없이 갈았다\n{}", text(&dangling));
+    assert!(gone.join("moai").is_symlink(), "링크가 사라졌다");
+}
+
+/// **디렉터리는 `--force` 로도 안 덮는다**(리뷰). `mv` 가 받은 것을 그 **안으로** 옮기고 깔았다고
+/// 말해, 그 자리에는 돌릴 것이 하나도 안 남았다 — 거절문의 `--force` 줄이 사람을 그 길로 보냈다.
+#[cfg(unix)]
+#[test]
+fn a_directory_named_moai_is_never_installed_into() {
+    let s = Scratch::new("install-dirmoai");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(dir.join("moai")).unwrap();
+
+    for more in [&[][..], &["--force"][..]] {
+        let out = install(&base, &dir, more);
+        assert!(!out.status.success(), "{more:?}: 디렉터리 안에 깔았다고 한다\n{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(said.contains("디렉터리"), "{more:?}: 왜 멈췄는지 안 말한다\n{said}");
+    }
+    assert_eq!(std::fs::read_dir(dir.join("moai")).unwrap().count(), 0, "디렉터리 안에 무언가 놓였다");
+}
+
+/// **쓸 수 없는 자리는 받기 전에 끝낸다**(리뷰). 안 보면 올린다·받는다·checksums 가 맞다까지
+/// 다 말한 뒤 `cp` 의 날 오류로 죽었다. 같은 판이면 쓸 일이 없으니 그대로 0 이다.
+#[cfg(unix)]
+#[test]
+fn an_unwritable_dir_stops_before_downloading() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("install-readonly");
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "0.1.2", true);
+    let lock = |mode| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    lock(0o555);
+    // root 는 권한 비트를 안 탄다 — 그 기계에서는 잴 것이 없다.
+    if std::fs::write(dir.join("probe"), "").is_ok() {
+        lock(0o755);
+        return;
+    }
+    let out = install(Path::new(NOWHERE), &dir, &[]);
+    lock(0o755);
+    assert!(!out.status.success(), "쓸 수 없는 자리에 깔았다고 한다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("쓸 수 없다") && !said.contains("못 받았다"), "받기가 먼저 왔다\n{}", text(&out));
+
+    placed_moai(&dir, "9.9.9", true);
+    lock(0o555);
+    let same = install(Path::new(NOWHERE), &dir, &[]);
+    lock(0o755);
+    assert!(same.status.success(), "같은 판인데 쓸 자리를 따졌다\n{}", text(&same));
+}
+
+/// **같은 판이어도 PATH 에서 먼저 서는 옛 moai 를 댄다**(리뷰). 새 판 알림을 보고 친 사람이
+/// "이미 … 이다" 만 듣고 끝나면, PATH 가 먼저 고르는 옛 판을 계속 돌리며 같은 알림을 다시
+/// 본다 — 받아서 깐 경우만 그 말을 했다.
+#[cfg(unix)]
+#[test]
+fn the_same_version_still_names_an_older_moai_first_on_path() {
+    let s = Scratch::new("install-shadow");
+    let shadow = s.path().join("shadow");
+    placed_moai(&shadow, "0.1.2", true);
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "9.9.9", true);
+    let path = format!("{}:{}", shadow.display(), std::env::var("PATH").unwrap_or_default());
+
+    let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", path).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        said.contains(&format!("PATH 에는 {} 가 먼저 선다", shadow.join("moai").display())),
+        "PATH 에서 먼저 서는 옛 moai 를 안 댄다\n{}",
+        text(&out)
+    );
+
+    // **같은 파일은 철자가 달라도 같은 moai 다**(`-ef`, 리뷰). PATH 에 선 자리 끝에 `/` 가
+    // 붙었다고(dash 의 `command -v` 는 `…//moai` 로 댄다) 딴 moai 가 먼저 선다고 말하지 않는다.
+    let slashed = format!("{}/:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+    let same = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", slashed).output().unwrap();
+    assert!(same.status.success(), "{}", text(&same));
+    assert!(
+        !String::from_utf8_lossy(&same.stderr).contains("먼저 선다"),
+        "같은 파일을 두고 딴 moai 가 먼저 선다고 한다\n{}",
+        text(&same)
+    );
+}
+
+/// **물은 바이너리가 남긴 하위 프로세스가 설치를 붙들지 않는다**(리뷰). 답을 파이프로 받던 판은
+/// 표준 출력을 쥔 하위 프로세스가 살아 있는 동안 — 데몬이면 영영 — 멈춰 섰다. `timeout` 은 물은
+/// 것이 이미 끝났으니 할 일이 없어 이것을 못 끊는다. 가짜가 남기는 하위 프로세스는 멈춤 표지가
+/// 서거나 제 자리가 사라지면 끝난다 — 고치기 전의 스크립트가 시험을 영영 붙들지 않게.
+#[cfg(unix)]
+#[test]
+fn a_child_left_holding_the_answer_does_not_hang_the_install() {
+    let s = Scratch::new("install-held");
+    let (base, _) = fake_release(&s);
+    let dir = s.path().join("bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stop = s.path().join("stop");
+    write_exe(
+        &dir.join("moai"),
+        &format!(
+            "#!/bin/sh\ncase $1 in\n--version)\n  (n=0; while [ -d '{d}' ] && [ ! -e '{stop}' ] && [ $n -lt 600 ]; do sleep 0.1; n=$((n + 1)); done) &\n  echo 'moai 0.1.2' ;;\nmerge-driver) echo 'Called by git. Merges issues.jsonl per issue, three-way' ;;\n*) exit 2 ;;\nesac\n",
+            d = dir.display(),
+            stop = stop.display()
+        ),
+    );
+
+    let mut child = install_cmd(&base, &dir, &[]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let mut done = None;
+    for _ in 0..200 {
+        if let Some(status) = child.try_wait().unwrap() {
+            done = Some(status);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // 멈춤 표지를 세워 붙들린 경우를 놓는다 — 그다음에 끝났다면 표지가 풀어 준 것이다.
+    std::fs::write(&stop, "").unwrap();
+    let status = match done {
+        Some(status) => status,
+        None => child.wait().unwrap(),
+    };
+    assert!(done.is_some(), "물은 바이너리의 하위 프로세스가 설치를 붙들었다");
+    assert!(status.success(), "하위 프로세스를 남긴 이 moai 를 못 올렸다");
+}
+
+/// **`timeout` 이 그 꼴로 돌지 않으면 마감 없이 묻는다**(리뷰). BusyBox 1.30 전의 `timeout` 은
+/// `-t 초` 를 받아 `10` 을 프로그램으로 돌렸고, 그대로 쓰던 판은 물음이 늘 실패해 이 moai 까지
+/// 남의 것으로 읽었다. 그 꼴로 도는 가짜 `timeout` 을 PATH 앞에 세운다.
+#[cfg(unix)]
+#[test]
+fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
+    let s = Scratch::new("install-oldtimeout");
+    let (base, _) = fake_release(&s);
+    let shim = s.path().join("shim");
+    std::fs::create_dir_all(&shim).unwrap();
+    // BusyBox 1.29 의 꼴: `timeout [-t SECS] [-s SIG] PROG ARGS` — 옵션 뒤 첫 낱말이 프로그램이다.
+    write_exe(
+        &shim.join("timeout"),
+        "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in -t | -s) shift 2 ;; *) break ;; esac\ndone\nexec \"$@\"\n",
+    );
+    let dir = s.path().join("bin");
+    placed_moai(&dir, "0.1.2", true);
+    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+
+    let out = install_cmd(&base, &dir, &[]).env("PATH", path).output().unwrap();
+    assert!(out.status.success(), "이 moai 를 남의 것으로 읽었다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("0.1.2 에서 9.9.9 로 올린다"), "{}", text(&out));
 }
 
 /// `scripts/bump-version.sh` 는 두 파일을 **함께** 움직인다(moai-jy55). 하나만

@@ -1013,6 +1013,11 @@ pub struct App {
     /// 새 판을 묻는 딴 실 — **한 판에 하나만 띄운다.** 손잡이를 드는 것이 그 하나를 세는 자다
     /// ([`crate::latest::spawn`]). 끝에서 기다리지는 않는다.
     latest_job: Option<crate::latest::Job>,
+    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_line`], 리뷰). 새 판이 나왔을 때
+    /// 배너가 댄다. `None` 이면 그 줄로는 이 바이너리를 못 올린다 — 소스에서 지었거나, 판을 안
+    /// 내는 기계거나, 누가 채웠는지 모르는 자리다. 파일 시스템을 보므로 [`App::ask_latest`] 가
+    /// 여는 걸음에 한 번 채운다.
+    upgrade: Option<String>,
     /// 탐색에서 접두어(`gg` 의 첫 `g`) 뒤를 기다리는 키 열. **`Mode` 가 아니다** — 탐색이 아닌
     /// 모드는 전부 글칸으로 가므로(`App::key`), 모드로 두면 기다리는 `g` 뒤의 `g` 가 글자로 샌다.
     chord: keys::Chord,
@@ -1538,6 +1543,7 @@ impl App {
             pending: None,
             latest: crate::latest::Seen::Unasked(crate::latest::Why::not_asked()),
             latest_job: None,
+            upgrade: None,
             chord: keys::Chord::default(),
             discarded: Vec::new(),
             let_go: 0,
@@ -2176,6 +2182,7 @@ impl App {
             return;
         }
         self.latest = crate::latest::held(&dir, &url);
+        self.upgrade = crate::latest::upgrade_here();
         let now = self.site.now.clone();
         self.latest_job = crate::latest::spawn(dir, url, now, crate::latest::WINDOW);
     }
@@ -2206,6 +2213,30 @@ impl App {
     #[cfg(test)]
     pub fn set_latest(&mut self, seen: crate::latest::Seen) {
         self.latest = seen;
+    }
+
+    /// 도는 이 바이너리를 올리는 한 줄. 새 판이 나왔으면 배너가 그것이 있다고 말하고, 줄 자체는
+    /// 나갈 때 [`App::upgrade_note`] 가 낸다.
+    pub fn upgrade(&self) -> Option<&str> {
+        self.upgrade.as_deref()
+    }
+
+    /// 탐색기를 끝낸 뒤 셸에 남길 글 — 새 판이 나왔고 이 바이너리를 올릴 줄이 있을 때만 선다
+    /// (moai-8rmw.665, 2026-09-29 사용자 결정). **배너에 두지 않는 까닭**: 그 줄은 104칸이라 80칸
+    /// 창에서 늘 잘렸다. 터미널을 걷은 뒤의 셸에서는 잘리지 않고 그대로 복사된다.
+    pub fn upgrade_note(&self) -> Option<String> {
+        let (crate::latest::Seen::Newer { tag }, Some(line)) = (&self.latest, self.upgrade.as_deref()) else {
+            return None;
+        };
+        // 말묶음은 한 줄이라 명령은 여기서 제 줄에 세운다 — 들여 쓴 줄이라 골라 복사하기 쉽다.
+        let said = crate::i18n::fill(crate::i18n::say(self.site.lang, "tui.quit.upgrade"), &[("tag", tag)]);
+        Some(format!("{said}\n\n  {line}\n"))
+    }
+
+    /// 올리는 줄을 손으로 세운다 — 진짜 길은 [`App::ask_latest`] 가 도는 바이너리의 자리로 고른다.
+    #[cfg(test)]
+    pub fn set_upgrade(&mut self, line: Option<String>) {
+        self.upgrade = line;
     }
 
     /// 새 커밋 표가 필요하면(`commits_due`) 짓는 스레드를 띄우고, 다 지었으면 받는다(moai-a4i0).
@@ -4018,7 +4049,8 @@ impl App {
         // 채로 두므로([`menu::feed`]), `SPC v w` 가 단 알림을 읽고 메뉴를 닫는 Esc 가 곧 "다음 키"
         // 다. 거기서 걷으면 그 알림은 메뉴 창이 떠 있는 동안만 살고, 메뉴를 닫자마자 사라진다 —
         // 알림을 남긴 키와 그것을 지우는 키가 한 누름이다. 메뉴가 열린 채 아무 동작도 안 돈 키
-        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다.
+        // (Esc·SPC 닫기, Bksp 한 층 위, 모르는 키, 한 층 내려가기)에는 도로 세운다. 메뉴를 닫고
+        // 이동한 키도 그 닫는 몫으로 도로 세운다(moai-y8v2, 아래 `act.moves()`).
         let carried = self.notice.take();
         let in_menu = menu::open(&self.chord);
         // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
@@ -4038,7 +4070,7 @@ impl App {
         }
         // **키의 뜻은 표에서 읽는다**([`keys::BROWSE`]). 표에 없는 키 — Ctrl·Alt 붙은 글자키도
         // — 는 여기 뜻이 없다. 접두어(`g`)는 다음 키를 기다리고, 뜻 없는 다음 키는 그 `g` 와 함께
-        // 버린다. SPC 는 메뉴를 열고, 열린 메뉴는 제 규칙(모르는 키 무시·Esc·Bksp)으로 받는다
+        // 버린다. SPC 는 메뉴를 열고, 열린 메뉴는 제 규칙(모르는 키 무시·Esc·Bksp·이동키는 닫고 이동)으로 받는다
         // ([`menu::feed`]) — 메뉴로 누른 동작도 바로 누른 키와 같은 아래 `match` 를 지난다.
         // 목록은 여기서 **한 번** 센다 — 커서의 사실(`Ctx::leaf`)과 이동의 끝(`step`)이 같은 줄을 읽는다.
         let rows = self.rows();
@@ -4053,6 +4085,14 @@ impl App {
             }
             return;
         };
+        // **메뉴를 닫은 이동키도 알림을 도로 세운다**(moai-y8v2) — 메뉴를 닫는 Esc 와 그 이동을 한
+        // 누름에 한 키라, Esc 가 남기는 알림은 이것도 남긴다(moai-g56h). 걷으면 `SPC v w` 뒤 곧 `j`
+        // 로 목록에 가는 흐름에서 알림이 메뉴 창이 떠 있는 동안만 산다. SPC 밑에는 이동 항목이
+        // 없으므로([`keys::Browse::moves`]) 열린 메뉴에서 이동이 나왔으면 그 키가 메뉴를 닫은 것이다.
+        // 이동이 제 알림을 달면(`enabled` 의 까닭) 그것이 덮는다.
+        if in_menu && act.moves() {
+            self.notice = carried;
+        }
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
         // 적을 키를 고르므로 둘이 안 갈린다. 층에서 뜻이 없는 키는 왜 안 되는지를 한 줄로
         // 말한다. `n` 은 층에서도 듣는다 — 커서의 프로젝트를 담을 곳으로 박는다([`App::open_form`]).
@@ -6273,13 +6313,8 @@ mod tests {
         a.hit("SPC");
         assert!(menu::open(&a.chord), "SPC 가 메뉴를 곧바로 안 열었다");
         let before = (a.cursor, a.focus, a.site.path.clone());
-        for k in [
-            key(KeyCode::Char('x')),
-            key(KeyCode::Char('j')),
-            key(KeyCode::Enter),
-            key(KeyCode::Tab),
-            key(KeyCode::Char('G')),
-        ] {
+        // 이동키(`j`·`G`)는 여기 없다 — 메뉴를 닫고 그 이동을 한다(`a_move_key_in_the_menu_closes_it_and_moves`).
+        for k in [key(KeyCode::Char('x')), key(KeyCode::Char('r')), key(KeyCode::Enter), key(KeyCode::Tab)] {
             a.key(k);
             assert!(menu::open(&a.chord), "{k:?} 가 메뉴를 닫았다");
             assert_eq!(a.notice, None, "{k:?} 가 알림을 달았다");
@@ -6320,6 +6355,27 @@ mod tests {
         let was = a.worktree;
         a.hit("SPC v w Esc");
         assert_eq!(a.worktree, !was);
+    }
+
+    /// **메뉴의 이동키는 메뉴를 닫고 곧 목록을 움직인다**(moai-y8v2) — 한 누름이다. 토글 층에서도
+    /// 같고, `gg` 는 첫 `g` 가 메뉴를 닫고 둘째가 맨 위로 간다. App 의 길을 지나 커서가 실제로 옮는지를 본다.
+    #[test]
+    fn a_move_key_in_the_menu_closes_it_and_moves() {
+        let mut a = app();
+        assert!(a.rows().len() > 1, "시험의 전제 — 움직일 줄이 둘 넘게 있다");
+        let start = a.cursor;
+        a.hit("SPC j");
+        assert!(!menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
+        assert_eq!(a.cursor, start + 1, "j 가 커서를 안 옮겼다");
+        a.hit("SPC s k");
+        assert!(!menu::open(&a.chord), "토글 층의 k 가 메뉴를 안 닫았다");
+        assert_eq!(a.cursor, start, "토글 층의 k 가 커서를 안 옮겼다");
+        a.hit("SPC G");
+        assert_eq!(a.cursor, a.rows().len() - 1, "G 가 맨 아래로 안 갔다");
+        a.hit("SPC g");
+        assert!(!menu::open(&a.chord), "g 가 메뉴를 안 닫았다");
+        a.hit("g");
+        assert_eq!(a.cursor, 0, "메뉴에서 시작한 gg 가 맨 위로 안 갔다");
     }
 
     /// **`SPC m g` 은 커서가 든 묶음까지만 읽는다**(moai-z9pc.9av). 에픽 밖의 줄에서 누르면
@@ -8087,6 +8143,26 @@ mod tests {
         assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 Esc 가 알림을 함께 지웠다");
 
         a.hit("j");
+        assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
+    }
+
+    /// **메뉴를 닫는 이동키도 토글이 낸 알림을 안 지운다**(moai-y8v2) — Esc 와 이동을 한 누름에
+    /// 한 키라, 걷으면 토글 층에서 맞추고 곧 목록으로 가는 흐름에서 알림이 메뉴 창이 떠 있는
+    /// 동안만 산다(moai-g56h 와 같은 실패). 걷는 것은 여전히 메뉴 밖의 다음 키다.
+    #[test]
+    fn a_move_key_closing_the_menu_keeps_the_notice_the_toggle_left() {
+        let (_scratch, mut a) = writable("menu-move-notice");
+        a.read = lost;
+        a.hit("SPC v w Esc");
+        a.hit("SPC v w");
+        let said = a.notice.clone().expect("켰는데 못 찾은 까닭을 안 댄다");
+        assert!(super::menu::open(&a.chord), "시험의 전제 — 토글을 누르고도 메뉴가 떠 있다");
+
+        a.hit("j");
+        assert!(!super::menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "메뉴를 닫는 이동키가 알림을 함께 지웠다");
+
+        a.hit("k");
         assert_eq!(a.notice, None, "메뉴 밖의 다음 키가 알림을 안 걷었다");
     }
 

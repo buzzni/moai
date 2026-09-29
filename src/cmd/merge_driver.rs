@@ -159,9 +159,9 @@ struct Keyed<'s> {
     /// 있는가**에 달리는 순간 세 쪽이 서로 다르게 갈리고, 그러면 [`settle`] 과 [`unkeyed`] 가
     /// 같은 줄을 서로 다른 자로 풀기 때문이다 — 한쪽이 지운 줄이 말없이 되살아나던 자리다.
     ///
-    /// 그 겹침은 [`settle`] 이 사람에게 넘긴다. **세 쪽이 그 줄들을 똑같이 들었을 때만 그대로
-    /// 지나간다**(moai-ijfy) — 이번 머지가 고른 것이 없어 넘겨 봐야 표식의 두 칸이 같은 줄들이고,
-    /// 넘기면 그 파일은 영영 머지마다 충돌한다.
+    /// 그 겹침은 [`settle`] 이 **묶음째** 3-way 로 푼다(moai-fl7e) — 한쪽만 바뀌었거나 두 쪽이 같게
+    /// 바뀌었으면 그 묶음이 답이고, 두 쪽이 다르게 바뀌었을 때만 사람에게 간다(moai-2m94). 묶음
+    /// 안의 줄을 하나씩 풀지 않는 것은 그중 어느 줄이 "그 이슈" 인지 고를 자가 없어서다.
     by_id: BTreeMap<String, Vec<Row<'s>>>,
     /// **id 조차 못 읽는 줄**의 원문 그대로. `store::render_issues` 의 `opaque` 와 같은 자리고,
     /// 열쇠가 없어 이슈마다 풀 수가 없다 — [`unkeyed`] 가 줄마다 센 수로 3-way 를 돌린다.
@@ -189,16 +189,16 @@ enum Settled {
     /// 읽는 줄을 파일 끝에 모아 쓰므로, 여기서 id 차례로 끼워 넣으면 병합 직후의 파일이 다음
     /// 쓰기에서 통째로 헛 diff 를 낸다(멱등성).
     Opaque(String),
-    /// **세 쪽이 그 id 로 같은 줄들을 들었다**(moai-ijfy). 그 줄들을 저마다 푼 것이 여기 선다 —
+    /// **겹친 id 의 줄 묶음을 받았다**(moai-ijfy, moai-fl7e). 그 줄들을 저마다 푼 것이 여기 선다 —
     /// 한 줄이 id 차례에 서고 다른 줄이 파일 끝으로 가는 판이라 갈래 하나로는 못 담는다.
     ///
-    /// 여기 드는 것은 [`Settled::Line`] 과 [`Settled::Opaque`] 뿐이다. 겹친 id 는 아무도 안
-    /// 건드렸을 때만 이 갈래로 오고, 그때는 풀 것이 없어 충돌도 새 줄도 안 난다 — 그 말을
+    /// 여기 드는 것은 [`Settled::Line`] 과 [`Settled::Opaque`] 뿐이다. 겹친 id 는 한쪽 가지에 이미
+    /// 선 묶음을 받을 때만 이 갈래로 오고, 그때는 새로 지을 것이 없어 충돌도 새 줄도 안 난다 — 그 말을
     /// 지키는 자는 [`settle`] 의 `take` 고, 갈래로는 안 막혀 있다(리뷰 moai-47yo.76c:
     /// 여기 `Clash` 가 들면 [`by_issue`] 의 `place` 가 같은 id 를 `clashes` 에 여러 벌 넣어
     /// `--json` 의 `conflicts` 와 거절문의 건수가 부푼다. 그날 `take` 를 먼저 고쳐야 한다).
     ///
-    /// "같은 줄들" 은 [`rows_alike`] 가 재고, **차례는 안 본다** — 그 까닭은 그쪽에 적었다.
+    /// 두 묶음이 같은가는 [`rows_alike`] 가 재고, **차례는 안 본다** — 그 까닭은 그쪽에 적었다.
     Each(Vec<Settled>),
     /// 사람이 푼다. 두 쪽의 줄을 **원문 그대로** 든다 — 고쳐 적으면 사람이 보는 글이
     /// 제가 친 것과 달라진다([`Row`]).
@@ -299,9 +299,9 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
 /// 줄이며, **없는 쪽이 바탕에 없던 못 읽는 줄을 새로 들었으면** 그 깨진 줄의 열쇠를 거두어
 /// [`Keyed::opaque`] 로 돌린다. 그 칸에 **산 줄이 남아 있으면 안 푼다**(리뷰 moai-47yo.76c) —
 /// 깨진 줄만 뽑아내면 표식의 이쪽 칸이 그 쌍둥이를 잃고, 사람이 저쪽을 골라 표식을 지워도
-/// 쌍둥이만 홀로 남아 저쪽의 지우기가 반만 이뤄진다. 그 판은 moai-2m94 가 정한 대로 통째로
-/// 사람에게 간다. 그러면 그 id 는 "두 쪽이 다 깨뜨려 읽히는 줄이 남지 않았다" 로
-/// 풀리고, 두 쪽의 깨진 바이트는 [`unkeyed`] 가 파일 끝으로 실어 낸다 — 줄은 하나도 안 사라지고,
+/// 쌍둥이만 홀로 남아 저쪽의 지우기가 반만 이뤄진다. 그 경우는 [`settle`] 이 묶음째 푼다
+/// (moai-fl7e) — 이쪽이 안 건드렸으면 저쪽의 지우기를 받고, 건드렸으면 사람에게 간다. 짝을 풀면
+/// 그 id 는 "두 쪽이 다 깨뜨려 읽히는 줄이 남지 않았다" 로 풀리고, 두 쪽의 깨진 바이트는 [`unkeyed`] 가 파일 끝으로 실어 낸다 — 줄은 하나도 안 사라지고,
 /// 이 에픽 전과 같은 자리다. `moai status` 가 그 둘을 못 읽는 줄로 세어 사람에게 말한다.
 ///
 /// **없는 쪽이 못 읽는 줄을 안 늘렸으면 그대로 둔다** — 그때 빈 칸은 참이다(저쪽이 정말 지웠다).
@@ -332,18 +332,18 @@ fn plan(o: &str, a: &str, b: &str, marker: usize) -> (String, Vec<String>) {
 /// **두 쪽의 답을 먼저 다 재고 나서 옮긴다.** 이쪽을 먼저 옮기면 이쪽 `opaque` 가 그 옮김으로
 /// 늘어, 저쪽을 잴 때 "늘었는가" 가 이 함수가 만든 사실로 참이 된다.
 ///
-/// **짝을 푼 줄이 든 답은 제 자신의 고정점이 아니다**(리뷰 moai-47yo.76c 8번, 2026-09-23
-/// 사용자 결정으로 받아들였다). 여기서 푼 줄은 이번 답에서 [`unkeyed`] 가 내고(바탕의 못 읽는
-/// 줄 **뒤**), 다음 머지는 그 줄의 머리를 다시 긁어 짝지어 `carried` 로 내므로(그 **앞**)
-/// 자리가 한 칸 옮는다. 바탕에 다른 못 읽는 줄이 있을 때만 보이고, 잰 판은 이렇다 —
-/// `[0002, 쓰레기, 이쪽깨짐, 저쪽깨짐]` 이 `[0002, 이쪽깨짐, 쓰레기, 저쪽깨짐]` 이 된다.
+/// **짝을 푼 줄의 벌 수는 [`unkeyed`] 가 세고, 자리는 [`by_issue`] 가 정한다**(리뷰 moai-mo9v.1ln).
+/// 여기서 푼 줄을 `carried` 로 바로 실으면 [`unkeyed`] 의 벌 수 셈을 건너뛰어, 바탕의 깨진 줄이
+/// 지워져야 할 자리에서 되살아난다(재 봤다). 그래서 셈은 [`unkeyed`] 에 맡기고, 살아남은 줄 가운데
+/// 머리가 긁히는 것만 [`by_issue`] 가 `carried` 의 id 차례에 끼운다 — 다음 머지가 그 줄을 다시
+/// 짝지어 내는 자리가 거기다.
 ///
-/// **줄은 하나도 안 사라지고 한 번만 움직인다.** `store::with_write` 의 고정점은 그대로 선다 —
-/// `store::render_issues` 는 못 읽는 줄을 읽은 차례대로 파일 끝에 쓰므로 그 답을 읽고 되쓰면
-/// 바이트가 같다. 여기서 푼 줄을 `carried` 로 바로 실어 고치려 들면 [`unkeyed`] 의 벌 수 셈을
-/// 건너뛰어, 바탕의 깨진 줄이 지워져야 할 자리에서 되살아난다(재 봤다). 그 셈과 자리를 한 자로
-/// 모으는 것은 moai-1a55.4oh 가 정한 [`unkeyed`] 의 계약을 다시 짜는 일이라, 고칠 때가 오면
-/// 멤버를 따로 세운다.
+/// 한때 이 답은 제 자신의 고정점이 아니었다(리뷰 moai-47yo.76c 8번, 2026-09-23 사용자 결정으로
+/// 받아들였다). 푼 줄을 [`unkeyed`] 가 제 칸에 내고 다음 머지는 `carried` 로 내어, 자리가 한 칸
+/// 옮았다 — `[0002, 쓰레기, 이쪽깨짐, 저쪽깨짐]` 이 `[0002, 이쪽깨짐, 쓰레기, 저쪽깨짐]` 이 됐고,
+/// `carried` 에 더 큰 id 의 못 읽는 줄이 서면 그 둘이 자리를 바꿨다. 줄은 그때도 하나도 안 사라졌고,
+/// `store::with_write` 의 고정점은 어느 때나 선다 — `store::render_issues` 는 못 읽는 줄을 읽은
+/// 차례대로 파일 끝에 쓴다.
 fn unpair<'s>(o: &mut Keyed<'s>, a: &mut Keyed<'s>, b: &mut Keyed<'s>) {
     /// 열쇠를 거둘 id 들. 순수 함수다.
     fn loosened(base: &BTreeMap<&str, usize>, o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>) -> Vec<String> {
@@ -396,8 +396,10 @@ fn unpair<'s>(o: &mut Keyed<'s>, a: &mut Keyed<'s>, b: &mut Keyed<'s>) {
     let (ours, theirs) = (loosened(&base, o, a, b), loosened(&base, o, b, a));
     demote(a, &ours);
     demote(b, &theirs);
-    demote(o, &ours);
-    demote(o, &theirs);
+    // **바탕은 두 쪽의 것을 한 번에 id 차례로 거둔다**(moai-mo9v.qgj). 이쪽 것을 먼저 거두면 바탕의
+    // 못 읽는 줄 차례가 머지 방향을 따라 갈리고, [`unkeyed`] 가 그 차례로 줄을 낸다.
+    let all: BTreeSet<String> = ours.into_iter().chain(theirs).collect();
+    demote(o, &all.into_iter().collect::<Vec<_>>());
 }
 
 /// **이 줄은 화면 말을 모른다**(moai-uzgp, 2026-09-21 사용자 결정). git 이 병합마다 부르는 길이라
@@ -425,6 +427,12 @@ fn keyed(src: &str) -> Option<Keyed<'_>> {
     let mut by_id: BTreeMap<String, Vec<Row<'_>>> = BTreeMap::new();
     let mut opaque = Vec::new();
     for line in src.lines() {
+        // **꼬리의 `\r` 하나는 줄 끝 표시다**(리뷰 moai-mo9v.1ln). `str::lines` 는 `\n` 앞의 `\r` 만 같이
+        // 떼므로, CRLF 로 받은 체크아웃에서 끝 줄바꿈이 없는 파일의 마지막 줄만 `\r` 을 달고 선다. 그
+        // 줄을 그대로 실으면 답이 `…\r\n` 을 쓰고 다음 읽기가 그 `\r` 을 떼어, 아무도 안 건드린 줄이
+        // 한 번 더 뜬다 — [`kept`] 가 바이트로 3-way 를 돌리며 그 `\r` 을 "고친 쪽" 으로 골랐다. 다른
+        // 줄의 `\r` 은 `lines` 가 이미 뗐으니, 여기서 떼야 세 쪽의 모든 줄이 한 자로 선다.
+        let line = line.strip_suffix('\r').unwrap_or(line);
         if line.trim().is_empty() {
             continue;
         }
@@ -439,7 +447,8 @@ fn keyed(src: &str) -> Option<Keyed<'_>> {
         }
         // **못 읽는 줄이 낀 겹침은 밀어내지 않고 쌓는다**(moai-2m94). 한 줄을 `opaque` 로
         // 밀어내면 그 줄이 어느 칸에 서는지가 그 파일의 다른 줄에 달려, 세 쪽이 서로 다르게
-        // 갈린다. [`settle`] 이 그 id 를 통째로 사람에게 넘긴다.
+        // 갈린다. [`settle`] 이 그 id 의 줄 묶음을 통째로 3-way 로 풀고, 두 쪽이 다르게 바꾼
+        // 묶음만 사람에게 넘긴다(moai-fl7e).
         slot.push(r);
     }
     Some(Keyed { by_id, opaque })
@@ -476,7 +485,9 @@ fn row(line: &str) -> Option<(String, Row<'_>)> {
 fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: usize) -> (String, Vec<String>) {
     let ids: BTreeSet<&String> = o.by_id.keys().chain(a.by_id.keys()).chain(b.by_id.keys()).collect();
     let mut out = String::with_capacity(hint);
-    let mut carried = Vec::new();
+    // 짝은 졌지만 `Issue` 로 못 읽는 줄 — **그 id 와 함께** 든다. 아래에서 [`unkeyed`] 가 살린 줄 가운데
+    // 머리가 긁히는 줄을 같은 id 차례에 끼우려면 id 가 있어야 한다.
+    let mut carried: Vec<(String, String)> = Vec::new();
     let mut clashes = Vec::new();
     for id in ids {
         fn at<'r, 's>(k: &'r Keyed<'s>, id: &str) -> Option<&'r [Row<'s>]> {
@@ -488,7 +499,7 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
             id: &str,
             marker: usize,
             out: &mut String,
-            carried: &mut Vec<String>,
+            carried: &mut Vec<(String, String)>,
             clashes: &mut Vec<String>,
         ) {
             match s {
@@ -498,7 +509,7 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
                     out.push('\n');
                 }
                 // 짝은 졌지만 `Issue` 로 못 읽는 줄이다 — 아래 못 읽는 줄 칸으로 미룬다.
-                Settled::Opaque(line) => carried.push(line),
+                Settled::Opaque(line) => carried.push((id.to_string(), line)),
                 Settled::Each(all) => {
                     for one in all {
                         place(one, id, marker, out, carried, clashes);
@@ -512,14 +523,29 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
         }
         place(settle(at(o, id), at(a, id), at(b, id)), id, marker, &mut out, &mut carried, &mut clashes);
     }
+    // **머리가 긁히는 줄은 그 id 자리에 선다**(리뷰 moai-mo9v.1ln). [`unkeyed`] 가 벌 수로 살린 줄
+    // 가운데 [`row`] 가 열쇠를 주는 것은 [`unpair`] 가 열쇠를 거둔 줄뿐인데, 다음 머지는 그 줄을 다시
+    // 짝지어 `carried` 로 — id 차례로 — 낸다. 여기서 같은 차례에 세워야 이 답이 제 고정점이다. 벌 수는
+    // 그대로 [`unkeyed`] 의 셈이라, 거둔 줄을 셈 앞에서 `carried` 로 싣던 판이 되살리던 줄은 여기 안 온다.
+    //
+    // 안정 정렬이라 한 id 안의 차례는 그대로다 — [`settle`] 이 낸 줄과 [`unkeyed`] 가 낸 줄이 한 id 를
+    // 나누는 일은 없다([`unpair`] 가 거둔 id 는 두 쪽 어디에도 안 남아 [`settle`] 이 아무것도 안 낸다).
+    let mut keyless = Vec::new();
+    for line in unkeyed(&o.opaque, &a.opaque, &b.opaque) {
+        match row(line) {
+            Some((id, _)) => carried.push((id, line.to_string())),
+            None => keyless.push(line),
+        }
+    }
+    carried.sort_by(|p, q| p.0.cmp(&q.0));
     // **못 읽는 줄은 뒤에 원문 그대로 붙는다** — `store::render_issues` 가 두는 자리와 같다.
     // 짝지은 것이 id 차례로 먼저 서고 열쇠 없는 것이 뒤따르는데, 그 다음 쓰기가 읽은 차례를
     // 그대로 되쓰므로 이 차례가 곧 고정점이다(멱등성).
-    for line in carried {
+    for (_, line) in carried {
         out.push_str(&line);
         out.push('\n');
     }
-    for line in unkeyed(&o.opaque, &a.opaque, &b.opaque) {
+    for line in keyless {
         out.push_str(line);
         out.push('\n');
     }
@@ -545,11 +571,16 @@ fn by_issue(o: &Keyed<'_>, a: &Keyed<'_>, b: &Keyed<'_>, marker: usize, hint: us
 /// 열쇠 없이 지킬 수 있는 전부다. id 가 읽히는 줄은 [`keyed`] 가 짝지어 그 판을 [`settle`] 로
 /// 보내고, 거기서는 표식이 그 줄에만 선다.
 ///
-/// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 이쪽이 더한 줄, 저쪽이
-/// 더한 줄이 뒤따른다. 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다.
-/// 잃는 것은 없고(줄은 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지
-/// 커밋에 한 번 뜬다.
+/// **차례는 바탕을 따른다** — 바탕에 섰던 줄이 그 차례대로 먼저 서고, 두 쪽이 더한 줄이 뒤따른다.
+/// 한쪽이 제 못 읽는 줄의 차례만 바꿔 두었으면 그 바꿈은 여기서 되물러진다. 잃는 것은 없고(줄은
+/// 다 선다) 다음 쓰기의 고정점도 그대로지만, 아무도 안 건드린 줄이 머지 커밋에 한 번 뜬다. 여기서
+/// 낸 줄 가운데 [`unpair`] 가 열쇠를 거둔 줄은 [`by_issue`] 가 `carried` 의 id 자리로 옮긴다.
+///
+/// **더한 줄은 이쪽 것이 먼저가 아니다**(moai-mo9v.qgj). 두 쪽 가운데 못 읽는 줄 목록이 사전순으로
+/// 앞서는 쪽의 것이 먼저 선다 — 이쪽을 먼저 세우던 판은 두 쪽이 다 더한 경우에 머지 방향에 따라
+/// 바이트를 갈랐다. 한 쪽이 더한 줄끼리의 차례는 그 쪽의 것 그대로다.
 fn unkeyed<'s>(o: &[&'s str], a: &[&'s str], b: &[&'s str]) -> Vec<&'s str> {
+    let (a, b) = if a <= b { (a, b) } else { (b, a) };
     let (co, ca, cb) = (tally(o), tally(a), tally(b));
     let at = |m: &BTreeMap<&'s str, usize>, l: &'s str| m.get(l).copied().unwrap_or(0);
     let mut want = BTreeMap::new();
@@ -673,36 +704,41 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
         Read::Issue(v) => render(&shaped(v).expect("`Read::Issue` 인 줄이다")),
         Read::Json(_) | Read::Broken => Settled::Opaque(r.raw.to_string()),
     };
-    // **두 쪽이 다 지웠으면 겹침을 따질 것이 없다**(리뷰 moai-47yo.76c). 아래 겹침 가드보다
-    // 먼저 서야 한다 — 바탕만 줄을 여럿 들고 두 쪽이 다 없는 판에서 그 가드가 서면 `side` 가
-    // 둘 다 `None` 을 내어 **두 칸이 다 빈 표식**이 선다. 사람이 고를 쪽이 없는 그 표식은
-    // 지우는 것 말고 풀 길이 없고, 아래 `(_, None, None)` 이 내는 답과도 다르다.
+    // **두 쪽이 다 지웠으면 겹침을 따질 것이 없다**(리뷰 moai-47yo.76c). 바탕만 줄을 여럿 든
+    // 경우도 여기서 끝난다 — 아래 묶음 갈래도 빈 두 묶음을 같다고 읽어 아무것도 안 내지만, 세 쪽이
+    // 같을 때만 지나 보내던 옛 가드는 이 경우에 **두 칸이 다 빈 표식**을 지었다(`side` 가 둘 다
+    // `None`). 사람이 고를 쪽이 없는 그 표식이 갈래를 고치다 되살아나지 않게 한 줄로 먼저 막는다.
     if a.is_none() && b.is_none() {
         return Settled::Line(None);
     }
-    // **한 쪽이라도 같은 id 로 둘을 들면 그 id 는 사람이 푼다**(moai-2m94). 읽히는 줄 둘은
-    // [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이 낀 판이고, 그 둘 중 무엇이 "그
-    // 이슈" 인지 고를 자가 없다 — 고르면 다른 하나가, 또는 한쪽의 지우기가 말없이 사라진다.
-    // 그런 파일은 `moai status` 가 치명으로 센다(`Ids standing twice`·`Unreadable rows`).
+    // **한 쪽이라도 같은 id 로 둘을 들면 그 id 의 줄 묶음을 통째로 3-way 로 푼다**(moai-fl7e,
+    // 2026-09-29 사용자 결정). 읽히는 줄 둘은 [`keyed`] 가 이미 걸렀으니 여기 오는 것은 못 읽는 줄이
+    // 낀 경우고, 묶음 **안의** 어느 줄이 "그 이슈" 인지 고를 자는 여전히 없다 — 그래서 줄마다 풀지
+    // 않고 묶음째 견준다. 한쪽만 바탕에서 바뀌었으면 바뀐 쪽 묶음이, 두 쪽이 같게 바뀌었으면 그
+    // 묶음이 답이다. 둘 다 이미 한쪽 가지에 선 답이라 이번 머지가 고른 것이 없다 — moai-0k2e 가
+    // 검사에 쓴 원칙("답이 한쪽 가지에 이미 서 있으면")이고, moai-ijfy 가 세 쪽이 같은 경우에만 쓰던 것을
+    // 넓힌 것이다. `moai rm --line` 이 쌍둥이를 한쪽에서 지우는 경우가 흔해져, 세 쪽이 같을 때만
+    // 지나 보내던 동안 그 지우기가 안 건드린 쪽과의 머지마다 충돌했다(리뷰 moai-mo9v.1ln 5번).
+    //
+    // **두 쪽이 다르게 바뀌었으면 사람이 푼다**(moai-2m94). 그 결정이 막은 조용한 되물림 — 한쪽은 산
+    // 줄 `G` 를, 한쪽은 깨진 줄 `J` 를 지워 줄마다 풀면 `J` 만 남던 경우 — 가 바로 이 갈래다. 겹친 id 를
+    // 든 묶음이 답으로 나가는 경우(한쪽만 쌍둥이를 들였다)는 그 가지에 이미 섰던 파일이고, 겹쳤다는
+    // 사실은 `report` 의 `duplicate_id` 가 말한다(moai-ijfy 가 `crate::id::id_of` 로 모은 자리다).
+    //
+    // **"같다" 는 [`rows_alike`] 가 재고, 차례는 안 본다**(리뷰 moai-47yo.76c). 차례로 견주던 판은
+    // 산 줄과 깨진 쌍둥이의 자리가 바뀌기만 해도 갈렸는데, 그 자리는 `store::render_issues` 가 못
+    // 읽는 줄을 파일 끝에 모아 쓰면서 **쓰기 한 번에** 바뀐다. 빈 쪽(지웠거나 없던 쪽)은 빈 묶음이다.
     if [o, a, b].iter().any(|v| v.is_some_and(|rs| rs.len() > 1)) {
-        // **세 쪽이 그 줄들을 똑같이 들었으면 이번 머지가 고른 것이 없다**(moai-ijfy,
-        // 2026-09-23 사용자 결정). 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 파일이 그 판인데, 세 쪽이
-        // 같은 줄들을 들어 표식의 두 칸도 같은 두 줄이라 사람이 고를 것이 없고 영영 되풀이됐다 — 그
-        // 쌍둥이를 지우는 `moai` 명령도 없다. moai-0k2e 가 검사에 이미 쓴 원칙("답이 한쪽 가지에
-        // 이미 서 있으면")을 이 가드에 그대로 옮긴 것이다. moai-2m94 가 잰 판 둘(한쪽이 `J` 를
-        // 한쪽이 `G` 를 지운 판, 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 선 판)은 세 쪽이 다르니
-        // 그대로 사람에게 간다. 겹쳤다는 사실은 `report` 의 `duplicate_id` 가 말한다(moai-ijfy 가
-        // `crate::id::id_of` 로 모은 자리다).
-        //
-        // **"똑같이" 는 [`rows_alike`] 가 재고, 차례는 안 본다**(리뷰 moai-47yo.76c). 차례로
-        // 견주던 판은 산 줄과 깨진 쌍둥이의 자리가 바뀌기만 해도 갈렸는데, 그 자리는
-        // `store::render_issues` 가 못 읽는 줄을 파일 끝에 모아 쓰면서 **쓰기 한 번에** 바뀐다 —
-        // 두 쪽이 바이트로 같은 파일을 들고도 머지마다 충돌했다.
-        if let (Some(o), Some(x), Some(y)) = (o, a, b)
-            && rows_alike(o, x)
-            && rows_alike(o, y)
-        {
-            return Settled::Each(x.iter().map(&take).collect());
+        let (o, x, y) = (o.unwrap_or_default(), a.unwrap_or_default(), b.unwrap_or_default());
+        let each = |rs: Vec<&Row<'_>>| Settled::Each(rs.into_iter().map(&take).collect());
+        if rows_alike(x, y) {
+            return each(both_kept(o, x, y));
+        }
+        if rows_alike(o, y) {
+            return each(x.iter().collect());
+        }
+        if rows_alike(o, x) {
+            return each(y.iter().collect());
         }
         return clash();
     }
@@ -718,8 +754,12 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
         // 지운 쪽과 고친 쪽이 맞선다.
         (Some(_), _, None) | (Some(_), None, _) => clash(),
         (o, Some(x), Some(y)) => {
-            // 둘이 같거나 저쪽이 안 건드렸으면 이쪽 값이 답이다.
-            if alike(x, y) || same(o, y) {
+            // 둘이 같으면 바이트는 [`kept`] 가 방향 없이 고른다(moai-mo9v.qgj).
+            if alike(x, y) {
+                return take(kept(o, x, y));
+            }
+            // 저쪽이 안 건드렸으면 이쪽 값이 답이다.
+            if same(o, y) {
                 return take(x);
             }
             if same(o, x) {
@@ -733,6 +773,74 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
             fields(o, x, y).map_or_else(clash, |v| built(&v))
         }
     }
+}
+
+/// 값이 같은 두 줄 가운데 **바이트를 낼 쪽** — 머지 방향과 상관없이 같은 줄을 고른다(moai-mo9v.qgj,
+/// 2026-09-29 사용자 결정).
+///
+/// 읽히는 줄은 [`shaped`] 가 표준형으로 다시 지으므로 어느 쪽을 골라도 바이트가 같다. 갈리는 것은
+/// [`settle`] 의 `take` 가 원문 그대로 싣는 못 읽는 줄이다 — [`alike`] 는 값(`Read::Json`)이나 꼬리
+/// 흰 글자를 뗀 원문(`Read::Broken`)으로 견주므로, 키 차례나 꼬리 빈칸만 다른 두 줄이 "같다" 로
+/// 읽힌다. 늘 이쪽 것을 고르던 판은 `A` 에서 `B` 를 합친 것과 `B` 에서 `A` 를 합친 것의 바이트가
+/// 갈랐다(idea moai-y1vb).
+///
+/// **바이트로 3-way 를 돌린다.** 바탕과 바이트가 같은 쪽은 바이트를 안 건드린 쪽이니 다른 쪽의
+/// 바이트가 답이다 — 읽히는 줄에서 "한쪽만 고쳤다" 를 푸는 것과 같은 자다. 두 쪽이 다 바꿨으면
+/// 바이트 사전순으로 작은 쪽이다. 그 줄을 다시 짓지 않는 것은 남이 남긴 줄의 바이트를 병합이
+/// 고치지 않기 위해서다 — `store::with_write` 도 그 줄을 원문 그대로 되쓴다.
+fn kept<'r, 's>(o: Option<&Row<'_>>, x: &'r Row<'s>, y: &'r Row<'s>) -> &'r Row<'s> {
+    if x.raw == y.raw {
+        return x;
+    }
+    match o.map(|o| o.raw) {
+        Some(was) if was == x.raw => y,
+        Some(was) if was == y.raw => x,
+        _ => std::cmp::min_by(x, y, |p, q| p.raw.cmp(q.raw)),
+    }
+}
+
+/// 두 쪽이 한 id 로 같은 줄들을 든 경우([`rows_alike`])에 **낼 줄들** — [`kept`] 를 줄마다 돌린다.
+///
+/// 두 쪽이 바이트까지 같으면 이쪽 차례 그대로다. 아니면 **바탕의 차례로** 짝을 짓는다: 이쪽과
+/// 저쪽을 저마다 바탕에 맞추므로 두 쪽을 바꿔 넘겨도 짝이 안 바뀐다. 짝은 바이트가 같은 줄부터
+/// 짓고 남은 것을 [`alike`] 로 짓는다 — 값만 같은 줄을 먼저 집으면 바이트까지 같은 짝을 놓친다.
+///
+/// **바탕이 두 쪽과 다르면 두 쪽 가운데 바이트로 앞서는 묶음을 통째로 낸다**(moai-fl7e). 두 쪽이 같게
+/// 바꾼 경우(둘 다 쌍둥이를 지웠다)가 그것이고, 그때 바탕은 줄 수부터 달라 짝을 못 짓는다. 이쪽 묶음을
+/// 내면 머지 방향에 따라 바이트가 갈린다 — [`kept`] 가 바이트를 방향 없이 고르는 것과 같은 까닭이다.
+///
+/// **그 묶음은 줄마다 고르지 않는다**(리뷰 moai-mo9v.w12). 한때 앞서는 묶음을 바탕 자리에 세우고 짝마다
+/// 작은 바이트를 골랐는데, 두 쪽이 서로 다른 줄의 바이트만 바꾼 경우(이쪽은 `B` 에, 저쪽은 `A` 에 꼬리
+/// 빈칸) 어느 가지에도 없던 묶음을 지었다. 한쪽 가지에 이미 선 묶음을 내야 [`settle`] 의 까닭("이번
+/// 머지가 고른 것이 없다")이 선다.
+fn both_kept<'r, 's>(o: &'r [Row<'s>], x: &'r [Row<'s>], y: &'r [Row<'s>]) -> Vec<&'r Row<'s>> {
+    if x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.raw == q.raw) {
+        return x.iter().collect();
+    }
+    if !rows_alike(o, x) {
+        return std::cmp::min_by(x, y, |p, q| p.iter().map(|r| r.raw).cmp(q.iter().map(|r| r.raw))).iter().collect();
+    }
+    /// 바탕의 줄마다 그 쪽에서 짝지은 줄의 자리.
+    fn paired(o: &[Row<'_>], side: &[Row<'_>]) -> Vec<usize> {
+        let mut taken = vec![false; side.len()];
+        let mut at = vec![usize::MAX; o.len()];
+        for exact in [true, false] {
+            for (k, was) in o.iter().enumerate() {
+                if at[k] != usize::MAX {
+                    continue;
+                }
+                let hit = (0..side.len())
+                    .find(|i| !taken[*i] && if exact { side[*i].raw == was.raw } else { alike(was, &side[*i]) });
+                if let Some(i) = hit {
+                    taken[i] = true;
+                    at[k] = i;
+                }
+            }
+        }
+        at
+    }
+    let (px, py) = (paired(o, x), paired(o, y));
+    o.iter().zip(px.into_iter().zip(py)).map(|(was, (i, j))| kept(Some(was), &x[i], &y[j])).collect()
 }
 
 /// 이슈로 읽고 **표준형으로 맞추기만 한다** — 검사는 [`issue`] 가 얹는다.
@@ -1060,7 +1168,9 @@ pub fn notice(repo: &Repo, chdir: bool) -> Option<crate::report::Warning> {
 /// 여기로 들어온다([`state_at`]).
 fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::Warning> {
     // **먼저 묻는다.** 뒤로 미루면 안 쓰기로 한 저장소에서도 설정을 읽고 `probe` 가 뜬다.
-    declared(tracker).then(|| told(here, chdir)).flatten()
+    // **한도는 알림에만 둔다**([`PROBE_BUDGET`]) — 모르면 입을 다물면 되는 자리가 여기다.
+    let budget = Some(PROBE_BUDGET);
+    declared(tracker, budget).then(|| told(here, chdir, budget)).flatten()
 }
 
 /// [`notice_at`] 에서 **선언을 이미 확인한 뒤**의 몸통 — 심긴 줄을 재어 할 말을 고른다.
@@ -1070,13 +1180,19 @@ fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::
 /// 보고는 못 가린다. 재는 자리를 이렇게 나누지 않고 그쪽에서 [`declared`] 를 한 번 더 부르던
 /// 판은 `moai init --check` 한 번에 `git check-attr` 를 두 번 띄웠고, "선언이 없다" 의 뜻이
 /// 두 자리에 따로 적혀 손으로 맞춰야 했다.
-fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
+///
+/// `budget` 은 git 을 기다리는 한도다 — 알림([`notice_at`])만 주고, `init --check`([`state_at`])는
+/// 끝까지 기다린다([`crate::git::run_within`]).
+fn told(here: &Path, chdir: bool, budget: Option<std::time::Duration>) -> Option<crate::report::Warning> {
     /// 키가 없을 때 git 이 돌려줄 글. **값이 될 수 없는 것이라야 한다** — 심는 줄은 껍데기 명령이고
     /// 제어문자 하나만 든 줄은 그 무엇도 아니다.
     const UNSET: &str = "\u{1}";
     let root = here;
     let key = driver_key();
-    let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
+    // **마감 안에 못 들은 답은 모르는 것이다**(moai-59k3.u09) — 옛 git 의 물러설 길로도 안 간다. 같은
+    // 마운트에 한 번 더 물으면 한도를 두 번 쓴다.
+    let planted = match crate::git::run_within(root, &["config", "--local", "--get", "--default", UNSET, &key], budget)?
+    {
         Ok(v) => v,
         // **`--default` 가 없는 git 에서도 셋은 말한다**(리뷰 moai-vbmn.spv). 그 옵션은 2.18
         // 부터고, 없는 git 은 `unknown option` 으로 비영이라 `.ok()?` 가 알림 식구를 통째로
@@ -1084,7 +1200,7 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // 있던 말을 잃는 꼴이다. 맨 `--get` 으로 한 번 더 묻는다: 키가 없을 때의 비영은
         // 예전처럼 입을 다무는 길이라, 옛 git 은 "안 심었다" 하나만 못 말하고 나머지는 산다.
         // 이 저장소가 판을 가정하지 않고 내려앉는 자리는 `worktree::table` 이 이미 그 꼴이다.
-        Err(_) => crate::git::run(root, &["config", "--local", "--get", &key]).ok()?,
+        Err(_) => crate::git::run_within(root, &["config", "--local", "--get", &key], budget)?.ok()?,
     };
     let planted = planted.trim();
     let away = crate::cmd::init::away_root(root, chdir);
@@ -1102,7 +1218,7 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // **넓게 묻는 것은 조르기 직전뿐이다.** 위의 `--local` 은 그대로다 — 넓은 자리의 줄은
         // 재지도 고치라고 하지도 않는다(남이 적은 줄을 "썩었다" 고 안 부르는 moai-h6aq.cx8 의
         // 규칙이 그 자리다). 여기서 넓은 자리는 **입을 다물 까닭**으로만 쓴다.
-        return (!planted_anywhere(root)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
+        return (!planted_anywhere(root, budget)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
     }
     let word = planted_word(planted)?;
     match probe(root, &word) {
@@ -1144,9 +1260,10 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
 /// 바닥(`--default`, 2.18)을 올린다. **줄이는 부름은 조르기 직전 한 번뿐이다** — 여기는
 /// `--local` 이 비었을 때만 돌고, 그 갈래는 어차피 [`probe`] 를 안 띄운다. 바닥을 올리거나
 /// 길을 하나 더 두는 값이 그보다 크다.
-fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()])
-        .map_or(true, |v| !v.trim().is_empty())
+fn planted_anywhere(root: &Path, budget: Option<std::time::Duration>) -> bool {
+    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()], budget)
+        .and_then(Result::ok)
+        .is_none_or(|v| !v.trim().is_empty())
 }
 
 /// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.
@@ -1157,9 +1274,14 @@ fn planted_anywhere(root: &Path) -> bool {
 /// 이쪽이다. `check-attr` 에게 물으면 git 이 제 규칙으로 답한다.
 ///
 /// `-z` 로 받는다 — 맨 출력은 `<경로>: merge: <값>` 이라 경로에 `: ` 가 들면 자를 자리가 갈린다.
-/// 못 물어봤으면(저장소 밖이다, git 이 없다) **거짓이다**: 모르면 입을 다문다.
-fn declared(root: &Path) -> bool {
-    let Ok(out) = crate::git::run(root, &["check-attr", "-z", "merge", "--", SNAPSHOT]) else {
+/// 못 물어봤으면(저장소 밖이다, git 이 없다, 한도 안에 못 들었다) **거짓이다**: 모르면 입을 다문다.
+///
+/// **한도는 부르는 쪽이 준다**(리뷰 moai-59k3.4c3) — 알림([`notice_at`])만 주고, `moai init` 이 심을지
+/// 가르는 자리([`plant_for_init`])와 `init --check`([`state_at`])는 끝까지 기다린다. 한 한도를 셋이
+/// 함께 쓰던 때는 `check-attr` 가 2초를 넘긴 저장소에서 `init` 이 드라이버를 말없이 안 심었고
+/// `--check` 는 `off` 를 냈다 — 거기서 "모른다" 는 "안 걸었다" 가 아니다.
+fn declared(root: &Path, budget: Option<std::time::Duration>) -> bool {
+    let Some(Ok(out)) = crate::git::run_within(root, &["check-attr", "-z", "merge", "--", SNAPSHOT], budget) else {
         return false;
     };
     let mut f = out.split('\0');
@@ -1227,6 +1349,13 @@ enum Probe {
 /// `moai status` 는 세션이 여는 화면이자 훅의 `UserPromptSubmit` 보드다(`cmd/hook.rs`) — 그 명령
 /// 하나가 잠들면 사람의 다음 프롬프트가 글자 한 줄 없이 함께 잠든다. `--help` 는 이 기계에서
 /// 9ms 였으니 2초는 느린 기계와 찬 캐시에도 넉넉하고, 넘긴 판은 **어차피 말할 것이 없다.**
+///
+/// **알림에서는 그 앞의 git 물음 셋도 이 한도를 쓴다**(moai-59k3.u09) — `check-attr`([`declared`])와
+/// 심은 줄을 읽는 `config` 둘이다. 한도가 `probe` 하나에만 있던 때는 git 이 답하지 않는 프로젝트
+/// 하나가 그 앞에서 멈춰, 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다. 못 들은 답은
+/// 모르는 것이라 알림이 입을 다문다 — `probe` 가 한도를 넘긴 때와 같은 쪽이다. 한도는 부름마다 따로다.
+/// `moai init` 과 `init --check` 는 같은 물음을 한도 없이 한다(리뷰 moai-59k3.4c3,
+/// [`crate::git::run_within`]).
 const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
@@ -1254,9 +1383,9 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// 심었으면 9~11ms 다(2026-09-20 이 기계에서 잰 값). **어느 저장소냐로 비율이 갈린다**: 이슈와
 /// 워크트리가 쌓인 이 저장소의 `status` 는 90~126ms 라 10% 아래지만, 이 알림이 겨누는 **새
 /// 클론**의 `status` 는 13ms 라 같은 부름이 30% 다(리뷰 moai-vbmn.spv 의 실측 — 앞 글은 7% 만
-/// 적어 겨누는 쪽을 빠뜨렸다). 훅의 보드는 세션당 한 번이고(`once_per_session`) 한눈 보기는
-/// 이것을 아예 안 부른다. 그만큼을 내고 사는 것은 "심었는데 안 돈다" 를 **틀리게 말하지 않는
-/// 것**이다.
+/// 적어 겨누는 쪽을 빠뜨렸다). 훅의 보드는 세션당 한 번이고(`once_per_session`), 한눈 보기도
+/// moai-zog5 뒤로는 프로젝트마다 이것을 부른다. 그만큼을 내고 사는 것은 "심었는데 안 돈다" 를
+/// **틀리게 말하지 않는 것**이다.
 ///
 /// **표준 입력을 끊는다.** 물려주면 그 명령이 stdin 을 읽는 순간 `moai status` 가 사람의 터미널을
 /// 붙들고 영영 안 끝난다. 표준 오류는 버리고, 표준 출력은 **파일로 받는다**([`Said`]) — 사람의
@@ -1413,32 +1542,14 @@ impl Drop for Said {
 
 /// [`PROBE_BUDGET`] 안에 끝나면 그 끝을, 아니면 죽이고 거둔 뒤 `None`.
 ///
-/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다.
-///
-/// **기다리는 칸을 늘려 간다**(리뷰 moai-vbmn.spv). 한 칸을 2ms 로 못박던 판은 3.8ms 에 끝나는
-/// 부름을 다음 2ms 자리까지 올림해, 잰 값이 판마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
-/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빠른 판은 거의 안 자고, 느린 판은
-/// 10ms 칸으로 자 [`PROBE_BUDGET`] 까지 깨는 횟수가 이백 번을 안 넘는다.
+/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다. 기다리는 자는
+/// [`crate::git::waited`] 와 한 벌이다 — 기다리는 간격을 늘려 가는 까닭도 거기 적혀 있다.
 fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
-    use std::time::{Duration, Instant};
-    const FLOOR: Duration = Duration::from_micros(200);
-    const CEIL: Duration = Duration::from_millis(10);
-    let deadline = Instant::now() + PROBE_BUDGET;
-    let mut nap = FLOOR;
-    loop {
-        match child.try_wait() {
-            Ok(Some(st)) => return Some(st),
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(nap);
-                nap = (nap * 2).min(CEIL);
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
+    crate::git::waited(child, PROBE_BUDGET).or_else(|| {
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    })
 }
 
 /// 아무도 안 주면 심을 명령 — **`PATH` 의 `moai` 가 같은 판이면 그쪽, 아니면 지금 이
@@ -1609,7 +1720,8 @@ pub(crate) enum Planting {
 /// **안 걸어 둔 저장소에는 안 심는다.** 선언을 읽는 자는 [`declared`] 하나고, 그래서 moai-47bt
 /// 의 탈출구(`.gitattributes` 에 `-merge` 를 적는 것)가 여기에도 그대로 선다.
 pub(crate) fn plant_for_init(root: &Path) -> Planting {
-    if !declared(root) {
+    // 한도 없이 묻는다 — 모르는 것을 "안 걸었다" 로 접으면 심을 드라이버를 말없이 안 심는다([`declared`]).
+    if !declared(root, None) {
         return Planting::Off;
     }
     // **먼저 선 줄을 본다.** 여기서 물러나면 [`chosen_command`] 의 두 부름(`--version`·[`probe`])
@@ -1646,12 +1758,14 @@ pub(crate) fn plant_for_init(root: &Path) -> Planting {
 /// 낱말은 [`notice`] 의 갈래를 그대로 쓴다 — 두 화면이 같은 것을 다른 이름으로 부르면 받는
 /// 쪽이 표를 둘 든다. 선언이 없으면 `off`, 알림이 없으면 `current` 다.
 pub(crate) fn state_at(here: &Path, tracker: &Path, chdir: bool) -> &'static str {
-    if !declared(tracker) {
+    // **한도 없이 묻는다**([`declared`]) — 이 한 낱말은 기계가 읽는 답이라, 한도를 넘긴 것을
+    // `off`·`current` 로 접으면 거짓 낱말이 선다.
+    if !declared(tracker, None) {
         return "off";
     }
     // **[`told`] 로 든다** — [`notice_at`] 으로 들면 선언을 한 번 더 묻는다(같은 답이 나올
     // 물음에 `git check-attr` 를 한 번 더 띄운다).
-    match told(here, chdir) {
+    match told(here, chdir, None) {
         Some(w) => w.kind.trim_start_matches("merge_driver_"),
         None => "current",
     }
@@ -2008,21 +2122,80 @@ mod tests {
         assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
     }
 
-    /// **그래도 moai-2m94 가 잰 판 둘은 그대로 사람에게 간다.** 겹친 id 를 지나 보내는 것은
-    /// 세 쪽이 그 줄들을 똑같이 들었을 때뿐이라, 한쪽이라도 건드리면 고를 자가 없다는 계약이
-    /// 그대로 선다.
+    /// **두 쪽이 겹친 id 를 다르게 바꾸면 그대로 사람에게 간다**(moai-2m94). 묶음째 3-way 로
+    /// 풀어도(moai-fl7e) 그 결정이 막은 조용한 되물림 — 이쪽은 깨진 줄을, 저쪽은 산 줄을 지워 줄마다
+    /// 풀면 깨진 줄만 남던 경우 — 는 두 쪽이 다 바탕에서 바뀐 경우라 여전히 표식이 선다.
     #[test]
-    fn a_twin_either_side_touched_still_goes_to_a_person() {
+    fn a_twin_both_sides_changed_differently_goes_to_a_person() {
         let (intact, broken) = beheaded("argos-0001");
         // 바탕에 산 줄과 깨진 줄이 함께 서고, 이쪽이 깨진 줄을, 저쪽이 산 줄을 지웠다.
         let o = format!("{intact}\n{broken}\n");
-        let (text, clashes) = merge(&o, &format!("{intact}\n"), &format!("{broken}\n"));
-        assert_eq!(clashes, ["argos-0001"], "한쪽의 지우기를 말없이 되물렀다\n{text}");
+        for (a, b) in [(format!("{intact}\n"), format!("{broken}\n")), (format!("{broken}\n"), format!("{intact}\n"))] {
+            let (text, clashes) = merge(&o, &a, &b);
+            assert_eq!(clashes, ["argos-0001"], "한쪽의 지우기를 말없이 되물렀다\n{text}");
+        }
+    }
 
-        // 저쪽에만 같은 id 의 깨진 줄이 하나 더 섰다 — 그대로 합치면 겹친 id 가 남는다.
+    /// **한쪽이 쌍둥이를 지우면 안 건드린 쪽과의 머지가 충돌하지 않는다**(moai-fl7e, 2026-09-29
+    /// 사용자 결정). `moai rm --line` 이 쌍둥이를 지우는 길을 열며 흔해진 경우다 — 세 쪽이 같을 때만
+    /// 겹친 id 를 지나 보내던 동안, 그 지우기는 안 건드린 가지와 합칠 때마다 두 방향 다 표식을 받았다
+    /// (리뷰 moai-mo9v.1ln 5번). 두 쪽이 다 지웠으면 표식의 두 칸이 같은 한 줄이었다.
+    #[test]
+    fn a_twin_removed_on_one_side_merges_both_ways() {
+        let (intact, broken) = beheaded("argos-0001");
+        let other = line("argos-0002", "");
+        let o = format!("{intact}\n{other}\n{broken}\n");
+        let removed = format!("{intact}\n{other}\n");
+        for (a, b) in [(&removed, &o), (&o, &removed), (&removed, &removed)] {
+            let (text, clashes) = merge(&o, a, b);
+            assert!(clashes.is_empty(), "쌍둥이를 지운 쪽을 사람에게 넘겼다 — {clashes:?}\n{text}");
+            assert_eq!(text, removed, "지운 쌍둥이가 남았거나 산 줄을 잃었다\n{text}");
+            assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
+        }
+    }
+
+    /// **한쪽만 쌍둥이를 들였으면 그 묶음이 답이다**(moai-fl7e). 그 가지에 이미 선 파일이라 이번
+    /// 머지가 고른 것이 없고, 겹쳤다는 사실은 `moai status` 의 `duplicate_id` 가 말한다. 한쪽이 산 줄을
+    /// 고치고 다른 쪽이 쌍둥이를 들였으면 두 쪽이 다 바뀐 것이라 사람에게 간다.
+    #[test]
+    fn a_twin_added_on_one_side_is_taken_as_that_side_holds_it() {
+        let (intact, broken) = beheaded("argos-0001");
+        let one = format!("{intact}\n");
+        let both = format!("{intact}\n{broken}\n");
+        for (a, b) in [(&one, &both), (&both, &one)] {
+            let (text, clashes) = merge(&one, a, b);
+            assert!(clashes.is_empty(), "{clashes:?}\n{text}");
+            assert_eq!(text, both, "들인 쪽의 묶음이 아니다\n{text}");
+        }
+        let edited = format!("{}\n", line("argos-0001", ",\"priority\":1"));
+        let (text, clashes) = merge(&one, &edited, &both);
+        assert_eq!(clashes, ["argos-0001"], "두 쪽이 다 바꾼 묶음을 말없이 풀었다\n{text}");
+    }
+
+    /// **두 쪽이 같게 바꾼 묶음은 머지 방향과 상관없이 같은 바이트다**(moai-fl7e, moai-mo9v.qgj).
+    /// 바탕과 줄 수가 달라 바탕의 차례로 짝을 못 짓는 경우라, 두 쪽 가운데 바이트로 앞서는 묶음이
+    /// 통째로 선다. 두 쪽이 같은 쌍둥이를 값은 같고 바이트만 다르게(꼬리 빈칸) 들인 경우로 잰다.
+    ///
+    /// **쌍둥이가 둘이면 차례와 섞임까지 잰다**(리뷰 moai-mo9v.w12). 쌍둥이 하나로는 이쪽 묶음을 그대로
+    /// 내도 두 방향이 같아, 앞서는 묶음을 고르는 자리가 무너져도 이 시험이 푸르렀다. 둘이면 차례가 머지
+    /// 방향을 따라 갈리고, 줄마다 작은 바이트를 고르면 어느 가지에도 없던 묶음이 선다.
+    #[test]
+    fn a_group_both_sides_changed_alike_is_the_same_bytes_both_ways() {
+        let (intact, broken) = beheaded("argos-0001");
         let o = format!("{intact}\n");
-        let (text, clashes) = merge(&o, &o, &format!("{intact}\n{broken}\n"));
-        assert_eq!(clashes, ["argos-0001"], "겹친 id 를 든 파일을 말없이 냈다\n{text}");
+        let ab = both_ways(&o, &format!("{intact}\n{broken}\n"), &format!("{intact}\n{broken} \n"));
+        // 깨진 줄은 산 줄의 앞머리라 `starts_with` 로 세면 산 줄까지 센다 — 꼬리 빈칸만 떼고 견준다.
+        assert_eq!(ab.lines().filter(|l| l.trim_end() == broken).count(), 1, "쌍둥이가 한 벌이 아니다\n{ab}");
+
+        // 쌍둥이 둘의 차례만 다르다 — 어느 차례로 설지가 머지 방향을 따르면 안 된다.
+        let (one, two) = (format!("{broken},\"a"), format!("{broken},\"b"));
+        both_ways(&o, &format!("{intact}\n{one}\n{two}\n"), &format!("{intact}\n{two}\n{one}\n"));
+
+        // 두 쪽이 서로 다른 쌍둥이의 바이트만 바꿨다 — 한쪽 가지의 묶음이 통째로 선다.
+        let a = format!("{intact}\n{one}\n{two} \n");
+        let b = format!("{intact}\n{one} \n{two}\n");
+        let ab = both_ways(&o, &a, &b);
+        assert!(ab == a || ab == b, "어느 가지에도 없던 묶음을 지었다\n{ab}");
     }
 
     /// **두 쪽이 다르게 깨뜨린 줄에 빈 칸이 서지 않는다**(moai-58io, 2026-09-23 사용자 결정).
@@ -2104,17 +2277,23 @@ mod tests {
     ///
     /// [`unpair`] 가 깨진 줄만 골라 빼던 동안, 산 줄과 그 줄의 깨진 쌍둥이가 함께 선 칸에서
     /// 쌍둥이만 표식 밖으로 빠졌다. 사람이 저쪽을 골라 표식을 지우면 그 쌍둥이만 홀로 남아,
-    /// 저쪽의 지우기가 반만 이뤄진다. 그 판은 moai-2m94 가 정한 대로 통째로 사람에게 간다.
+    /// 저쪽의 지우기가 반만 이뤄진다. 그 칸은 [`settle`] 이 묶음째 푼다(moai-fl7e) — 이쪽이 안
+    /// 건드렸으면 저쪽의 지우기가 두 줄 다에 서고, 이쪽이 쌍둥이를 고쳤으면 두 줄이 함께 표식에 선다.
     #[test]
     fn a_slot_that_still_holds_a_live_row_is_not_unpaired() {
         let (intact, broken) = beheaded("argos-0001");
         let o = format!("{intact}\n{}\n{broken}\n", line("argos-0002", ""));
-        let a = o.clone();
         let b = format!("{}\n그냥 쓰레기\n", line("argos-0002", ""));
 
+        let (text, clashes) = merge(&o, &o, &b);
+        assert!(clashes.is_empty(), "안 건드린 쪽과 지운 쪽을 사람에게 넘겼다 — {clashes:?}\n{text}");
+        assert!(!text.contains(&intact) && !text.contains(&broken), "저쪽의 지우기가 반만 섰다\n{text}");
+
+        let touched = format!("{broken}x");
+        let a = format!("{intact}\n{}\n{touched}\n", line("argos-0002", ""));
         let (text, clashes) = merge(&o, &a, &b);
-        assert_eq!(clashes, ["argos-0001"], "겹친 id 를 말없이 풀었다\n{text}");
-        assert_eq!(ours_side(&text), format!("{intact}\n{broken}\n"), "쌍둥이가 표식 밖으로 샜다\n{text}");
+        assert_eq!(clashes, ["argos-0001"], "지우기와 고침이 맞선 묶음을 말없이 풀었다\n{text}");
+        assert_eq!(ours_side(&text), format!("{intact}\n{touched}\n"), "쌍둥이가 표식 밖으로 샜다\n{text}");
     }
 
     /// **차례만 바뀐 쌍둥이는 충돌하지 않는다**(리뷰 moai-47yo.76c).
@@ -2258,13 +2437,16 @@ mod tests {
         assert_eq!(ours_side(&text), "", "{text}");
     }
 
-    /// **같은 id 를 든 줄이 둘이면 그 id 가 통째로 사람에게 간다**(moai-2m94, 리뷰
-    /// moai-1a55.67v 의 6·7·13번). 한 줄을 열쇠 없는 칸으로 밀어냈을 때는 그 줄이 어느 칸에
-    /// 서는지가 **그 파일에 무엇이 또 있는가**에 달려, 세 쪽이 서로 다르게 갈렸다. 그러면
-    /// [`settle`] 과 [`unkeyed`] 가 같은 줄을 서로 다른 자로 풀어, 한쪽이 지운 줄이 말없이
-    /// 되살아나거나 겹친 id 를 든 파일이 그대로 나왔다 — 둘 다 종료 코드 0 이었다.
+    /// **같은 id 를 든 줄이 둘이면 그 id 는 묶음째 풀린다**(moai-2m94, 리뷰 moai-1a55.67v 의
+    /// 6·7·13번, moai-fl7e). 한 줄을 열쇠 없는 칸으로 밀어냈을 때는 그 줄이 어느 칸에 서는지가
+    /// **그 파일에 무엇이 또 있는가**에 달려, 세 쪽이 서로 다르게 갈렸다. 그러면 [`settle`] 과
+    /// [`unkeyed`] 가 같은 줄을 서로 다른 자로 풀어, 한쪽이 지운 줄이 말없이 되살아났다.
+    ///
+    /// 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 선 경우는 한때 사람에게 갔다. 이제는 한쪽만 바뀐
+    /// 묶음이라 저쪽 묶음이 답이다(2026-09-29 사용자 결정) — 그 가지에 이미 선 파일이고,
+    /// 겹쳤다는 사실은 `moai status` 의 `duplicate_id` 가 말한다.
     #[test]
-    fn rows_sharing_one_id_go_to_a_person() {
+    fn rows_sharing_one_id_are_settled_as_one_group() {
         let junk = line("argos-0001", ",\"kind\":\"spike\"");
         let good = line("argos-0001", "");
         // 혼자면 제 id 로 짝지어진다 — 열쇠 없는 칸에는 id 가 읽히는 줄이 안 선다.
@@ -2279,14 +2461,15 @@ mod tests {
             assert!(k.opaque.is_empty(), "겹친 줄 하나를 열쇠 없는 칸으로 밀어냈다\n{src}");
         }
         let both = format!("{good}\n{junk}\n");
-        // 잰 판 하나 — 이쪽이 `junk` 를, 저쪽이 `good` 을 지웠다. 골라 주면 한쪽 지우기가 사라진다.
+        // 잰 경우 하나 — 이쪽이 `junk` 를, 저쪽이 `good` 을 지웠다. 골라 주면 한쪽 지우기가 사라진다.
         let (text, clashes) = merge(&both, &format!("{good}\n"), &format!("{junk}\n"));
         assert_eq!(clashes, ["argos-0001"], "겹친 id 에서 한쪽 지우기를 말없이 되물렀다\n{text}");
         assert!(text.contains("\"title\":\"argos-0001 제목\""), "두 쪽을 다 안 보여 준다\n{text}");
-        // 잰 판 둘 — 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 있다.
+        // 잰 경우 둘 — 저쪽에만 같은 id 의 못 읽는 줄이 하나 더 있다. 저쪽이 든 그대로 선다.
         let one = format!("{good}\n");
         let (text, clashes) = merge(&one, &one, &both);
-        assert_eq!(clashes, ["argos-0001"], "겹친 id 를 든 파일을 말없이 냈다\n{text}");
+        assert!(clashes.is_empty(), "한쪽만 바뀐 묶음을 사람에게 넘겼다 — {clashes:?}\n{text}");
+        assert_eq!(text, both, "저쪽 묶음이 아니다\n{text}");
     }
 
     /// **id 조차 못 읽는 줄은 센 수로 3-way 한다**(moai-1a55.4oh). 한쪽이 더한 것은 더하고 한쪽이
@@ -2502,6 +2685,140 @@ mod tests {
         assert_eq!(ours, theirs, "머지 방향이 답을 가른다");
         assert!(ours.contains("\"status\":\"in_progress\""), "고친 쪽 값이 안 섰다\n{ours}");
         assert!(ours.contains("\"due_on\":\"2026-09-20\""), "낡은 값이 사라졌다\n{ours}");
+    }
+
+    /// 두 방향으로 합쳐 **바이트가 같은가**를 재고 그 답을 낸다. 충돌이 서면 방향에 따라 표식의
+    /// 두 칸이 뒤바뀌는 것이 맞으므로 여기서는 충돌 없는 경우만 잰다.
+    fn both_ways(o: &str, a: &str, b: &str) -> String {
+        let (ours, clashes) = merge(o, a, b);
+        assert!(clashes.is_empty(), "{clashes:?}\n{ours}");
+        let (theirs, clashes) = merge(o, b, a);
+        assert!(clashes.is_empty(), "{clashes:?}\n{theirs}");
+        assert_eq!(ours, theirs, "머지 방향이 바이트를 가른다");
+        ours
+    }
+
+    /// **값이 같고 바이트만 다른 못 읽는 줄은 방향 없이 한 바이트를 낸다**(moai-mo9v.qgj).
+    /// 한쪽만 바이트를 바꿨으면 그 쪽 것이다 — 바이트로 돌린 3-way 다. 원문을 그대로 싣던 판은
+    /// `x.v == y.v` 갈래에서 늘 이쪽 것을 골라, 두 방향이 서로 다른 파일을 냈다(idea moai-y1vb).
+    #[test]
+    fn an_unreadable_line_one_side_reordered_merges_the_same_both_ways() {
+        // `title` 이 글이 아니라 `Issue` 로는 못 읽고 JSON 으로는 읽힌다(`Read::Json`).
+        let was = "{\"id\":\"argos-0009\",\"title\":5}";
+        let now = "{\"title\":5,\"id\":\"argos-0009\"}";
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let a = format!("{live}\n{now}\n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(now), "바이트를 바꾼 쪽 것이 안 섰다\n{text}");
+        assert!(!text.contains(was), "바이트를 안 바꾼 쪽 것이 섰다\n{text}");
+    }
+
+    /// 두 쪽이 **다 바이트를 바꿨으면** 사전순으로 작은 쪽이다. 어느 쪽이 나아서가 아니라, 방향이
+    /// 답을 가르지 않게 하는 자가 그것이다. 줄을 다시 짓지는 않는다.
+    #[test]
+    fn an_unreadable_line_both_sides_rebyted_picks_the_smaller_bytes() {
+        let was = "{\"id\":\"argos-0009\",\"title\":5}";
+        let one = "{\"title\":5,\"id\":\"argos-0009\"}";
+        let two = "{\"id\":\"argos-0009\",  \"title\":5}";
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let text = both_ways(&o, &format!("{live}\n{one}\n"), &format!("{live}\n{two}\n"));
+        assert!(text.contains(two.min(one)), "사전순으로 작은 쪽이 안 섰다\n{text}");
+        assert!(!text.contains(two.max(one)), "두 벌이 다 섰다\n{text}");
+    }
+
+    /// JSON 조차 아닌 줄(`Read::Broken`)은 꼬리 흰 글자를 떼고 견준다([`alike`]). 그 빈칸만
+    /// 다른 두 줄도 방향 없이 한 바이트를 낸다.
+    #[test]
+    fn a_broken_line_with_a_trailing_blank_merges_the_same_both_ways() {
+        let was = "{\"id\":\"argos-0009\",\"title\":\"잘";
+        let now = format!("{was}  ");
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{was}\n");
+        let a = format!("{live}\n{now}\n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(&now), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+        // **한 벌만 선다**(리뷰 moai-mo9v.1ln) — 바꾼 줄이 옛 줄을 머리로 품어, `contains` 만으로는 두
+        // 벌이 다 선 답도 지난다.
+        assert_eq!(text.lines().filter(|l| l.starts_with(was)).count(), 1, "두 벌이 다 섰다\n{text:?}");
+    }
+
+    /// 산 줄과 그 줄의 깨진 쌍둥이가 선 경우([`Settled::Each`])도 같다. 한쪽이 쌍둥이의 꼬리에
+    /// 빈칸만 더했으면 그 쪽 바이트가 선다.
+    #[test]
+    fn a_twin_file_merges_the_same_both_ways() {
+        let live = line("argos-0001", "");
+        let twin = "{\"id\":\"argos-0001\",\"title\":\"잘";
+        let o = format!("{live}\n{twin}\n");
+        let a = format!("{live}\n{twin} \n");
+        let text = both_ways(&o, &a, &o);
+        assert!(text.contains(&format!("{twin} \n")), "빈칸을 더한 쪽 것이 안 섰다\n{text:?}");
+        // 쌍둥이도 한 벌만 선다 — 두 벌이 서면 산 id 밑에 셋째 줄이 선다.
+        assert_eq!(text.lines().filter(|l| l.starts_with(twin)).count(), 1, "쌍둥이가 두 벌 섰다\n{text:?}");
+    }
+
+    /// **끝 줄의 꼬리 `\r` 은 바이트 고침이 아니다**(리뷰 moai-mo9v.1ln). CRLF 로 받은 체크아웃에서 끝
+    /// 줄바꿈이 없는 파일은 마지막 줄만 `\r` 을 단다([`keyed`]). [`kept`] 가 그것을 "저쪽이 바꾼 바이트"
+    /// 로 골라 답이 `…\r\n` 을 썼고, 다음 읽기가 그 `\r` 을 떼어 이 답이 제 고정점이 아니었다.
+    #[test]
+    fn a_trailing_carriage_return_is_not_carried_into_the_answer() {
+        let (_, broken) = beheaded("argos-0002");
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n{broken}\n");
+        let b = format!("{live}\r\n{broken}\r");
+        let text = both_ways(&o, &o, &b);
+        assert!(!text.contains('\r'), "줄 끝 표시를 원문으로 실었다\n{text:?}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text:?}");
+    }
+
+    /// 열쇠 없는 줄을 **두 쪽이 저마다 더했으면** 차례가 방향을 안 따른다([`unkeyed`]).
+    #[test]
+    fn unkeyed_lines_both_sides_added_merge_the_same_both_ways() {
+        let live = line("argos-0001", "");
+        let o = format!("{live}\n");
+        let a = format!("{live}\n[\"이쪽\"]\n");
+        let b = format!("{live}\n[\"저쪽\"]\n");
+        let text = both_ways(&o, &a, &b);
+        assert!(text.contains("[\"이쪽\"]") && text.contains("[\"저쪽\"]"), "더한 줄이 빠졌다\n{text}");
+    }
+
+    /// **열쇠를 거둔 줄은 `carried` 의 id 자리에 선다**(리뷰 moai-mo9v.1ln). [`unkeyed`] 가 그 줄을
+    /// 제 칸 앞에만 세우던 동안, `carried` 에 더 큰 id 의 못 읽는 줄이 서 있으면 다음 머지가 둘의 자리를
+    /// 바꿔 이 답이 제 고정점이 아니었다. 다음 머지가 그 줄을 다시 짝지어 내는 자리가 곧 id 차례다.
+    #[test]
+    fn a_line_unpair_demoted_stands_in_its_id_place() {
+        let (intact, ours) = beheaded("argos-0001");
+        // 저쪽은 id 안에서 잘라 머리가 안 긁힌다 — 그래서 [`unpair`] 가 이쪽 줄의 열쇠를 거둔다.
+        let theirs = "{\"id\":\"argos-00";
+        // 세 쪽이 똑같이 든 못 읽는 줄 — [`settle`] 이 `carried` 로 낸다. id 가 거둔 줄보다 크다.
+        let (_, five) = beheaded("argos-0005");
+        let two = line("argos-0002", "");
+        let o = format!("{intact}\n{two}\n{five}\n");
+        let a = format!("{ours}\n{two}\n{five}\n");
+        let b = format!("{theirs}\n{two}\n{five}\n");
+        let text = both_ways(&o, &a, &b);
+        let at = |l: &str| text.lines().position(|x| x == l).unwrap_or_else(|| panic!("{l} 가 안 섰다\n{text}"));
+        assert!(at(&ours) < at(&five), "거둔 줄이 id 자리에 안 섰다\n{text}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
+    }
+
+    /// 두 쪽이 저마다 한 줄씩 짝을 풀어도 같다 — 거둔 줄끼리도 id 차례로 선다. 열쇠를 거둔 줄을
+    /// [`unkeyed`] 의 칸 앞에 모으기만 하던 판은 둘의 차례를 두 쪽 목록의 차례로 세워, 다음 머지가 그
+    /// 둘을 바꿨다.
+    #[test]
+    fn lines_unpair_demoted_on_both_sides_stand_in_id_order() {
+        let (three, three_cut) = beheaded("argos-0003");
+        let (nine, nine_cut) = beheaded("argos-0009");
+        let two = line("argos-0002", "");
+        let o = format!("{three}\n{two}\n{nine}\n");
+        // 이쪽은 0003 을 id 안에서 자르고 0009 의 꼬리를 잘랐다. 저쪽은 그 거울이다.
+        let a = format!("{{\"id\":\"argos-00\n{two}\n{nine_cut}\n");
+        let b = format!("{three_cut}\n{two}\n{{\"id\":\"argos-000\n");
+        let text = both_ways(&o, &a, &b);
+        let at = |l: &str| text.lines().position(|x| x == l).unwrap_or_else(|| panic!("{l} 가 안 섰다\n{text}"));
+        assert!(at(&three_cut) < at(&nine_cut), "거둔 줄이 id 차례로 안 섰다\n{text}");
+        assert_eq!(merge(&text, &text, &text).0, text, "고정점이 아니다\n{text}");
     }
 
     /// **지나 보내는 줄도 표준형으로 맞춘다**([`shaped`], 리뷰 moai-85o3.p4w). 건너뛰는 것은

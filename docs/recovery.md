@@ -81,6 +81,30 @@ from the last commit where it was whole:
 git checkout <commit> -- .moai/issues.jsonl
 ```
 
+When the line is not worth keeping — most often the broken twin of an issue
+that also stands whole, left by a hand-resolved merge — remove it inside the
+tool. `moai show` names it by line number:
+
+```sh
+moai rm --line 812                          # shows the line and its hash
+moai rm --line 812 --yes --match 1a2b3c4d   # removes it
+```
+
+Only an unreadable line is removed that way; any other line is refused, and
+the refusal lists the unreadable lines as they stand now, each with the id it
+carries. Numbers move whenever a row comes or goes — an earlier `rm --line`
+included — so `--yes` is bound to the line you saw: the preview prints a short
+hash of that line and the whole command to type, `--yes` needs that hash in
+`--match`, and when the line now at that number does not match it nothing is
+removed and the refusal names the number the line you saw stands at now. Each
+removal needs its own preview — the hash also counts identical copies of the
+line, so typing the same command again after it went is refused. The removed
+line is printed, goes into the journal's `rm` entry (up to 64KB) and `--json`
+hands it back whole.
+
+A row written by a newer moai — a `kind` this binary does not know — is not
+broken. It reads again once this binary is upgraded, so leave it where it is.
+
 Reading a broken file still works for the lines that parse, so `moai show` and
 `moai ready` keep answering while you fix it.
 
