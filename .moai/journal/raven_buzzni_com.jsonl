@@ -2117,3 +2117,4 @@
 {"ts":"2026-09-29T14:10:04Z","id":"moai-mo9v.3yp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T14:10:04Z","id":"moai-mo9v.qgj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-29T14:10:04Z","id":"moai-mo9v.1ln","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·4·6~12번을 받았다. 2번은 moai-6nha, 5번은 moai-fl7e 로 넘겨 에픽 멤버로 첫 칸에 두었고(사람이 정한다), 13·14·15번은 idea moai-i6zn·moai-9ls7·moai-0thq 로 넘겼다"}
+{"ts":"2026-09-29T14:11:37Z","id":"moai-mo9v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 moai-6nha(--yes 를 보여 준 줄에 묶는 인자)와 moai-fl7e(겹친 줄 머지 가드 완화)가 첫 칸에 남았다. 둘 다 사람의 결정이 먼저다. 이 둘로 에픽을 닫는 창은 에픽 끝 리뷰(max)를 다시 부른다"}
