@@ -24,7 +24,7 @@ struct Moved {
     read: super::Read,
     /// 그 가운데 **끝난 멤버가 있는** 묶음 — 남은 멤버를 미뤄 접히는 것.
     finished: std::collections::BTreeSet<String>,
-    /// `done` 으로 옮겨 **이로써 집을 수 있게 된 일**(moai-942k, `report::unblocked`).
+    /// `done` 으로 옮겨 **이로써 집을 수 있게 된 일**(moai-942k, `report::Freed::unblocked`).
     unblocked: Vec<Issue>,
     /// 그 쓰기로 **이제 닫을 수 있게 된 부모**(moai-j4xs, `report::Freed::closable`).
     closable: Vec<Issue>,
@@ -275,7 +275,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 .map(|((_, id), col)| Stands { id, derived_status: col })
                 .collect(),
             // **이 셋에 `derived_status` 는 안 선다 — 그래도 `Row::from` 으로 짓는다**(리뷰).
-            // 셋 다 일 줄뿐이라(`report::closable`·`unblocked_pick` 이 `is_work` 로 거른다)
+            // 셋 다 일 줄뿐이라(`report::closable_over`·`unblocked_pick` 이 `is_work` 로 거른다)
             // `Row::of` 가 묶음이 아닌 줄의 읽은 칸을 버리는 자리에서 값이 저절로 빈다. 줄을
             // 짓는 자를 따로 두면 `Row` 에 키가 하나 더 설 때 이 셋만 빠진다.
             unblocked: moved.unblocked.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
