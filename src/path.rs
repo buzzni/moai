@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 /// 철자 그대로다.**
 ///
 /// **떨어지는 자를 하나로 둔다**(moai-8csx). 이 여섯 줄이 저마다 적혀 있었다 —
-/// `worktree::canonical`, `cmd::hook` 의 `picks_dir`, `cmd::skill` 의 `which` 와 `same_dir`,
+/// `worktree::canonical`, `cmd::hook` 의 `picks_key`, `cmd::skill` 의 `which` 와 `same_dir`,
 /// `scratch` 의 `Scratch::real`·`inside_checkout`, 그리고 `cmd::merge_driver` 의 `chosen_command`
 /// (목록에서 빠져 있던 여섯째다, 리뷰). 나중에 정할 것(윈도의 `\\?\` 접두어를 걷을 것인가, 못 푼
 /// 자리를 어떻게 셀 것인가)이 여섯 중 하나에만 닿으면 나머지 다섯은 옛 답을 낸다.

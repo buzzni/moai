@@ -1060,7 +1060,9 @@ pub fn notice(repo: &Repo, chdir: bool) -> Option<crate::report::Warning> {
 /// 여기로 들어온다([`state_at`]).
 fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::Warning> {
     // **먼저 묻는다.** 뒤로 미루면 안 쓰기로 한 저장소에서도 설정을 읽고 `probe` 가 뜬다.
-    declared(tracker).then(|| told(here, chdir)).flatten()
+    // **한도는 알림에만 둔다**([`PROBE_BUDGET`]) — 모르면 입을 다물면 되는 자리가 여기다.
+    let budget = Some(PROBE_BUDGET);
+    declared(tracker, budget).then(|| told(here, chdir, budget)).flatten()
 }
 
 /// [`notice_at`] 에서 **선언을 이미 확인한 뒤**의 몸통 — 심긴 줄을 재어 할 말을 고른다.
@@ -1070,13 +1072,19 @@ fn notice_at(here: &Path, tracker: &Path, chdir: bool) -> Option<crate::report::
 /// 보고는 못 가린다. 재는 자리를 이렇게 나누지 않고 그쪽에서 [`declared`] 를 한 번 더 부르던
 /// 판은 `moai init --check` 한 번에 `git check-attr` 를 두 번 띄웠고, "선언이 없다" 의 뜻이
 /// 두 자리에 따로 적혀 손으로 맞춰야 했다.
-fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
+///
+/// `budget` 은 git 을 기다리는 한도다 — 알림([`notice_at`])만 주고, `init --check`([`state_at`])는
+/// 끝까지 기다린다([`crate::git::run_within`]).
+fn told(here: &Path, chdir: bool, budget: Option<std::time::Duration>) -> Option<crate::report::Warning> {
     /// 키가 없을 때 git 이 돌려줄 글. **값이 될 수 없는 것이라야 한다** — 심는 줄은 껍데기 명령이고
     /// 제어문자 하나만 든 줄은 그 무엇도 아니다.
     const UNSET: &str = "\u{1}";
     let root = here;
     let key = driver_key();
-    let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
+    // **마감 안에 못 들은 답은 모르는 것이다**(moai-59k3.u09) — 옛 git 의 물러설 길로도 안 간다. 같은
+    // 마운트에 한 번 더 물으면 한도를 두 번 쓴다.
+    let planted = match crate::git::run_within(root, &["config", "--local", "--get", "--default", UNSET, &key], budget)?
+    {
         Ok(v) => v,
         // **`--default` 가 없는 git 에서도 셋은 말한다**(리뷰 moai-vbmn.spv). 그 옵션은 2.18
         // 부터고, 없는 git 은 `unknown option` 으로 비영이라 `.ok()?` 가 알림 식구를 통째로
@@ -1084,7 +1092,7 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // 있던 말을 잃는 꼴이다. 맨 `--get` 으로 한 번 더 묻는다: 키가 없을 때의 비영은
         // 예전처럼 입을 다무는 길이라, 옛 git 은 "안 심었다" 하나만 못 말하고 나머지는 산다.
         // 이 저장소가 판을 가정하지 않고 내려앉는 자리는 `worktree::table` 이 이미 그 꼴이다.
-        Err(_) => crate::git::run(root, &["config", "--local", "--get", &key]).ok()?,
+        Err(_) => crate::git::run_within(root, &["config", "--local", "--get", &key], budget)?.ok()?,
     };
     let planted = planted.trim();
     let away = crate::cmd::init::away_root(root, chdir);
@@ -1102,7 +1110,7 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
         // **넓게 묻는 것은 조르기 직전뿐이다.** 위의 `--local` 은 그대로다 — 넓은 자리의 줄은
         // 재지도 고치라고 하지도 않는다(남이 적은 줄을 "썩었다" 고 안 부르는 moai-h6aq.cx8 의
         // 규칙이 그 자리다). 여기서 넓은 자리는 **입을 다물 까닭**으로만 쓴다.
-        return (!planted_anywhere(root)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
+        return (!planted_anywhere(root, budget)).then(|| crate::report::Warning::merge_driver_absent(away.as_deref()));
     }
     let word = planted_word(planted)?;
     match probe(root, &word) {
@@ -1144,9 +1152,10 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
 /// 바닥(`--default`, 2.18)을 올린다. **줄이는 부름은 조르기 직전 한 번뿐이다** — 여기는
 /// `--local` 이 비었을 때만 돌고, 그 갈래는 어차피 [`probe`] 를 안 띄운다. 바닥을 올리거나
 /// 길을 하나 더 두는 값이 그보다 크다.
-fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()])
-        .map_or(true, |v| !v.trim().is_empty())
+fn planted_anywhere(root: &Path, budget: Option<std::time::Duration>) -> bool {
+    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()], budget)
+        .and_then(Result::ok)
+        .is_none_or(|v| !v.trim().is_empty())
 }
 
 /// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.
@@ -1157,9 +1166,14 @@ fn planted_anywhere(root: &Path) -> bool {
 /// 이쪽이다. `check-attr` 에게 물으면 git 이 제 규칙으로 답한다.
 ///
 /// `-z` 로 받는다 — 맨 출력은 `<경로>: merge: <값>` 이라 경로에 `: ` 가 들면 자를 자리가 갈린다.
-/// 못 물어봤으면(저장소 밖이다, git 이 없다) **거짓이다**: 모르면 입을 다문다.
-fn declared(root: &Path) -> bool {
-    let Ok(out) = crate::git::run(root, &["check-attr", "-z", "merge", "--", SNAPSHOT]) else {
+/// 못 물어봤으면(저장소 밖이다, git 이 없다, 한도 안에 못 들었다) **거짓이다**: 모르면 입을 다문다.
+///
+/// **한도는 부르는 쪽이 준다**(리뷰 moai-59k3.4c3) — 알림([`notice_at`])만 주고, `moai init` 이 심을지
+/// 가르는 자리([`plant_for_init`])와 `init --check`([`state_at`])는 끝까지 기다린다. 한 한도를 셋이
+/// 함께 쓰던 때는 `check-attr` 가 2초를 넘긴 저장소에서 `init` 이 드라이버를 말없이 안 심었고
+/// `--check` 는 `off` 를 냈다 — 거기서 "모른다" 는 "안 걸었다" 가 아니다.
+fn declared(root: &Path, budget: Option<std::time::Duration>) -> bool {
+    let Some(Ok(out)) = crate::git::run_within(root, &["check-attr", "-z", "merge", "--", SNAPSHOT], budget) else {
         return false;
     };
     let mut f = out.split('\0');
@@ -1227,6 +1241,13 @@ enum Probe {
 /// `moai status` 는 세션이 여는 화면이자 훅의 `UserPromptSubmit` 보드다(`cmd/hook.rs`) — 그 명령
 /// 하나가 잠들면 사람의 다음 프롬프트가 글자 한 줄 없이 함께 잠든다. `--help` 는 이 기계에서
 /// 9ms 였으니 2초는 느린 기계와 찬 캐시에도 넉넉하고, 넘긴 판은 **어차피 말할 것이 없다.**
+///
+/// **알림에서는 그 앞의 git 물음 셋도 이 한도를 쓴다**(moai-59k3.u09) — `check-attr`([`declared`])와
+/// 심은 줄을 읽는 `config` 둘이다. 한도가 `probe` 하나에만 있던 때는 git 이 답하지 않는 프로젝트
+/// 하나가 그 앞에서 멈춰, 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다. 못 들은 답은
+/// 모르는 것이라 알림이 입을 다문다 — `probe` 가 한도를 넘긴 때와 같은 쪽이다. 한도는 부름마다 따로다.
+/// `moai init` 과 `init --check` 는 같은 물음을 한도 없이 한다(리뷰 moai-59k3.4c3,
+/// [`crate::git::run_within`]).
 const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
@@ -1254,9 +1275,9 @@ const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// 심었으면 9~11ms 다(2026-09-20 이 기계에서 잰 값). **어느 저장소냐로 비율이 갈린다**: 이슈와
 /// 워크트리가 쌓인 이 저장소의 `status` 는 90~126ms 라 10% 아래지만, 이 알림이 겨누는 **새
 /// 클론**의 `status` 는 13ms 라 같은 부름이 30% 다(리뷰 moai-vbmn.spv 의 실측 — 앞 글은 7% 만
-/// 적어 겨누는 쪽을 빠뜨렸다). 훅의 보드는 세션당 한 번이고(`once_per_session`) 한눈 보기는
-/// 이것을 아예 안 부른다. 그만큼을 내고 사는 것은 "심었는데 안 돈다" 를 **틀리게 말하지 않는
-/// 것**이다.
+/// 적어 겨누는 쪽을 빠뜨렸다). 훅의 보드는 세션당 한 번이고(`once_per_session`), 한눈 보기도
+/// moai-zog5 뒤로는 프로젝트마다 이것을 부른다. 그만큼을 내고 사는 것은 "심었는데 안 돈다" 를
+/// **틀리게 말하지 않는 것**이다.
 ///
 /// **표준 입력을 끊는다.** 물려주면 그 명령이 stdin 을 읽는 순간 `moai status` 가 사람의 터미널을
 /// 붙들고 영영 안 끝난다. 표준 오류는 버리고, 표준 출력은 **파일로 받는다**([`Said`]) — 사람의
@@ -1413,32 +1434,14 @@ impl Drop for Said {
 
 /// [`PROBE_BUDGET`] 안에 끝나면 그 끝을, 아니면 죽이고 거둔 뒤 `None`.
 ///
-/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다.
-///
-/// **기다리는 칸을 늘려 간다**(리뷰 moai-vbmn.spv). 한 칸을 2ms 로 못박던 판은 3.8ms 에 끝나는
-/// 부름을 다음 2ms 자리까지 올림해, 잰 값이 판마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
-/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빠른 판은 거의 안 자고, 느린 판은
-/// 10ms 칸으로 자 [`PROBE_BUDGET`] 까지 깨는 횟수가 이백 번을 안 넘는다.
+/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다. 기다리는 자는
+/// [`crate::git::waited`] 와 한 벌이다 — 기다리는 간격을 늘려 가는 까닭도 거기 적혀 있다.
 fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
-    use std::time::{Duration, Instant};
-    const FLOOR: Duration = Duration::from_micros(200);
-    const CEIL: Duration = Duration::from_millis(10);
-    let deadline = Instant::now() + PROBE_BUDGET;
-    let mut nap = FLOOR;
-    loop {
-        match child.try_wait() {
-            Ok(Some(st)) => return Some(st),
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(nap);
-                nap = (nap * 2).min(CEIL);
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
+    crate::git::waited(child, PROBE_BUDGET).or_else(|| {
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    })
 }
 
 /// 아무도 안 주면 심을 명령 — **`PATH` 의 `moai` 가 같은 판이면 그쪽, 아니면 지금 이
@@ -1609,7 +1612,8 @@ pub(crate) enum Planting {
 /// **안 걸어 둔 저장소에는 안 심는다.** 선언을 읽는 자는 [`declared`] 하나고, 그래서 moai-47bt
 /// 의 탈출구(`.gitattributes` 에 `-merge` 를 적는 것)가 여기에도 그대로 선다.
 pub(crate) fn plant_for_init(root: &Path) -> Planting {
-    if !declared(root) {
+    // 한도 없이 묻는다 — 모르는 것을 "안 걸었다" 로 접으면 심을 드라이버를 말없이 안 심는다([`declared`]).
+    if !declared(root, None) {
         return Planting::Off;
     }
     // **먼저 선 줄을 본다.** 여기서 물러나면 [`chosen_command`] 의 두 부름(`--version`·[`probe`])
@@ -1646,12 +1650,14 @@ pub(crate) fn plant_for_init(root: &Path) -> Planting {
 /// 낱말은 [`notice`] 의 갈래를 그대로 쓴다 — 두 화면이 같은 것을 다른 이름으로 부르면 받는
 /// 쪽이 표를 둘 든다. 선언이 없으면 `off`, 알림이 없으면 `current` 다.
 pub(crate) fn state_at(here: &Path, tracker: &Path, chdir: bool) -> &'static str {
-    if !declared(tracker) {
+    // **한도 없이 묻는다**([`declared`]) — 이 한 낱말은 기계가 읽는 답이라, 한도를 넘긴 것을
+    // `off`·`current` 로 접으면 거짓 낱말이 선다.
+    if !declared(tracker, None) {
         return "off";
     }
     // **[`told`] 로 든다** — [`notice_at`] 으로 들면 선언을 한 번 더 묻는다(같은 답이 나올
     // 물음에 `git check-attr` 를 한 번 더 띄운다).
-    match told(here, chdir) {
+    match told(here, chdir, None) {
         Some(w) => w.kind.trim_start_matches("merge_driver_"),
         None => "current",
     }

@@ -11384,6 +11384,9 @@ fn hook_at_home(
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
+    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 시험마다 제 자리를 준다. 모든 시험이 함께
+    // 쓰는 `isolated` 의 자리로 두면 남의 시험이 적은 기록이 한 디렉터리에 쌓인다. 시험이 준 값이 이긴다.
+    cmd.env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"));
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -12413,6 +12416,83 @@ fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
     assert!(lost.trim().is_empty(), "진 집기를 겨눈 트래커의 줄로 붙든다\n{lost}");
 }
 
+/// 훅이 집기를 적은 디렉터리들 — [`hook_at_home`] 이 준 설정 곁의 `picks/` 아래다.
+fn pick_dirs(s: &Scratch) -> Vec<PathBuf> {
+    let Ok(dir) = std::fs::read_dir(s.path().join("hookcfg").join("picks")) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = dir.filter_map(Result::ok).map(|e| e.path()).collect();
+    out.sort();
+    out
+}
+
+/// **집기 기록은 누구나 쓰는 temp 에 안 놓인다**(moai-59k3.yo6, 2026-09-29 사용자 결정). 이름을 넘겨짚을 수
+/// 있는 `/tmp/moai-picks-<key>` 에 남이 먼저 만든 디렉터리나 심어 둔 기록 하나가 규칙 1·2 를 조용히
+/// 껐다. 이제 사용자 설정 곁(`<설정 디렉터리>/picks/<key>`)이다.
+///
+/// **`MOAI_HERE` 로 갈라 놓은 워크트리는 루트와 딴 자리에 적는다** — 두 쪽은 `tracker_place` 가 같은
+/// 값을 내지만 보는 스냅샷이 달라, 한 자리에 적던 판은 루트의 집기가 워크트리의 `held()` 를 채워
+/// 규칙 2 를 껐다. 옮겨 가는 워크트리(맨 `moai`)는 루트와 같은 자리다 — 집기는 루트에서 치고 일은
+/// 워크트리에서 한다.
+#[cfg(unix)]
+#[test]
+fn pick_records_sit_beside_the_user_config_one_per_tracker() {
+    let s = Scratch::new("hookpickhome");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "집을 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
+    let inside = main.join(".claude/worktrees/w");
+    let input = |cwd: &Path| {
+        format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+            json_str(&cwd.display().to_string()),
+            json_str(&format!("moai mv {id} in_progress"))
+        )
+    };
+
+    assert!(hook_in(&s, &main, "pre-tool-use", &input(&main)).stdout.is_empty());
+    let root = pick_dirs(&s);
+    assert_eq!(root.len(), 1, "루트의 집기를 설정 곁에 안 적었다 — {root:?}");
+    assert!(root[0].join("s1").is_file(), "세션의 기록이 없다 — {root:?}");
+    let temp: Vec<_> = std::fs::read_dir(s.path().join("hooktmp"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("moai-picks-"))
+        .collect();
+    assert!(temp.is_empty(), "temp 에 아직 적는다 — {temp:?}");
+    // **남이 못 쓰는 자리다**(리뷰 moai-59k3.4c3) — 그룹에 열린 설정 디렉터리에서도 기록 자리는 닫힌다.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(s.path().join("hookcfg/picks")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "기록 자리를 남에게 열어 뒀다 — {mode:o}");
+    }
+    // **심어 둔 링크를 따라 쓰지 않는다** — 따라 쓰면 남의 파일에 이 세션의 줄이 붙는다.
+    let bait = s.path().join("bait");
+    std::fs::write(&bait, "").unwrap();
+    std::fs::remove_file(root[0].join("s2")).ok();
+    std::os::unix::fs::symlink(&bait, root[0].join("s2")).unwrap();
+    let as_s2 = input(&main).replace("\"s1\"", "\"s2\"");
+    assert!(hook_in(&s, &main, "pre-tool-use", &as_s2).stdout.is_empty());
+    assert!(std::fs::read_to_string(&bait).unwrap().is_empty(), "심어 둔 링크를 따라 썼다");
+    std::fs::remove_file(root[0].join("s2")).unwrap();
+
+    // 옮겨 가는 워크트리는 루트와 한 자리다.
+    assert!(hook_in(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    assert_eq!(pick_dirs(&s), root, "옮겨 가는 워크트리가 루트와 딴 자리에 적는다");
+
+    // 갈라 놓은 워크트리는 제 자리다.
+    assert!(hook_here(&s, &inside, "pre-tool-use", &input(&inside)).stdout.is_empty());
+    let both = pick_dirs(&s);
+    assert_eq!(both.len(), 2, "MOAI_HERE 워크트리가 루트의 기록 자리를 함께 쓴다 — {both:?}");
+
+    // 설정 자리가 상대경로면 적지 않는다 — 훅이 선 자리마다 딴 디렉터리가 된다.
+    hook_at_home(&s, &main, None, &[("MOAI_CONFIG", "rel/config.toml")], "pre-tool-use", &input(&main));
+    assert!(!main.join("rel").exists(), "상대 설정 자리 곁에 적었다");
+}
+
 /// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 훅은 판정마다 기록 디렉터리를 통째로
 /// 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 적을 때 두 주
 /// 넘게 안 적힌 남의 파일을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다.
@@ -12433,19 +12513,28 @@ fn old_pick_records_are_pruned_when_a_new_pick_is_written() {
         String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
     };
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
-    let dir = std::fs::read_dir(s.path().join("hooktmp"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("moai-picks-")))
-        .expect("집기를 안 적었다");
-    let old = dir.join("gone");
-    std::fs::write(&old, format!("1\t{id}\n")).unwrap();
+    let dir = pick_dirs(&s).pop().expect("집기를 안 적었다");
     let weeks = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 24 * 60 * 60);
-    std::fs::File::options().write(true).open(&old).unwrap().set_modified(weeks).unwrap();
+    let aged = |path: &Path| {
+        std::fs::write(path, format!("1\t{id}\n")).unwrap();
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(weeks).unwrap();
+    };
+    let old = dir.join("gone");
+    aged(&old);
+    // **다시 안 적힐 트래커의 자리도 걷힌다**(리뷰 moai-59k3.4c3) — 지운 워크트리·옮긴 저장소의 자리다.
+    // 오래되지 않은 기록이 든 옆 자리는 그대로다.
+    let home = dir.parent().unwrap();
+    let orphan = home.join("00000000000000aa");
+    std::fs::create_dir_all(&orphan).unwrap();
+    aged(&orphan.join("left"));
+    let alive = home.join("00000000000000bb");
+    std::fs::create_dir_all(&alive).unwrap();
+    std::fs::write(alive.join("now"), format!("1\t{id}\n")).unwrap();
     assert!(pick("fresh", &format!("moai mv {id} in_progress")).trim().is_empty());
     assert!(!old.exists(), "두 주 넘게 안 적힌 세션의 기록이 남았다");
     assert!(dir.join("fresh").exists(), "제 기록까지 지웠다");
+    assert!(!orphan.exists(), "다시 안 적힐 트래커의 자리가 남았다");
+    assert!(alive.join("now").exists(), "옆 트래커의 새 기록까지 지웠다");
 }
 
 /// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
@@ -17029,6 +17118,59 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
     let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
     assert_eq!(planted.lines().count(), 1, "{planted}");
     assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
+}
+
+/// **죽은 마운트에 선 프로젝트 하나가 한눈 보기를 붙들지 않는다**(moai-59k3.u09). 설치 알림은
+/// 프로젝트마다 git 을 부르는데(`check-attr`·`config`), 그 부름에 시간 상한이 없어 한 줄이 멈추면
+/// 줄마다 띄운 실을 전부 기다리는 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다.
+///
+/// 죽은 마운트는 `PATH` 앞에 세운 가짜 git 이 대신한다 — 그 프로젝트를 가리킨 부름만 잠든다. 잠든
+/// 부름이 정말 섰는지도 본다: 가짜 git 을 못 띄우면(ETXTBSY) 시험이 한도를 안 밟고 초록이 된다.
+#[cfg(unix)]
+#[test]
+fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
+    let s = Scratch::new("hungmount");
+    let live = s.path().join("live");
+    let dead = s.path().join("dead");
+    for (dir, title) in [(&live, "살아 있는 일"), (&dead, "잠든 일")] {
+        std::fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-q"]);
+        ok(dir, &["init", "argos"]);
+        ok(dir, &["add", title]);
+    }
+    let config = registry(&s, &[&live, &dead]);
+    let kept = path_without_moai();
+    let real = std::env::split_paths(&kept).map(|d| d.join("git")).find(|g| g.is_file()).expect("git 을 못 찾았다");
+    let bin = s.path().join("fakebin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let slept = s.path().join("slept");
+    write_exe(
+        &bin.join("git"),
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *{}*) : > '{}'; exec sleep 30;; esac\nexec {} \"$@\"\n",
+            dead.display(),
+            slept.display(),
+            real.display()
+        ),
+    );
+    let mut path = vec![bin];
+    path.extend(std::env::split_paths(&kept));
+
+    let outside = s.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let clock = std::time::Instant::now();
+    let out = staged(&["status"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .output()
+        .unwrap();
+    let took = clock.elapsed();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(20), "잠든 프로젝트가 한눈 보기를 붙들었다 — {took:?}\n{said}");
+    assert!(said.contains("live") && said.contains("dead"), "프로젝트 한 줄을 빠뜨렸다\n{said}");
+    assert!(slept.exists(), "잠든 git 이 한 번도 안 불렸다 — 한도를 안 밟았다\n{said}");
 }
 
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
