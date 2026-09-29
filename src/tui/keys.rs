@@ -1795,6 +1795,9 @@ mod tests {
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
         // Esc 는 메뉴를 닫는 Esc 지 거름망을 푸는 Esc 가 아니다.
         ("MENU", SPC, "Toggles and sorts"),
+        // 이동키가 메뉴를 닫는다는 문장(moai-y8v2)도 메뉴의 것이다 — 여기 적힌 글자는 메뉴 안의
+        // 규칙이지, 목록 문단이 대야 할 이동키를 대신하지 않는다.
+        ("MENU", SPC, "Keys that move"),
         ("MENU", SPC, "That level says so at the bottom right"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "field to type a path"),
