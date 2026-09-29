@@ -282,6 +282,8 @@ struct Stood {
 pub struct Ground {
     stands: States,
     epic: std::collections::BTreeMap<String, String>,
+    /// 쌍둥이 부모 밑에서 소속을 못 정한 줄(`report::Handing::twin`) — `epic` 과 함께 옮긴다.
+    twin: std::collections::BTreeSet<String>,
     /// 계획에서 빠진 줄 → 그것을 뺀 줄, **id 로 접은 것**(`report::deferred_roots`).
     put_off: std::collections::BTreeMap<String, String>,
     /// 뺀 줄이 **줄마다 갈리는** id(`report::split_roots`). 성한 저장소에서는 빈다.
@@ -350,6 +352,7 @@ impl Ground {
         Ground {
             stands,
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            twin: soil.epic.twin().iter().map(|k| k.to_string()).collect(),
             put_off: soil.roots.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             split,
             split_rows,
@@ -382,7 +385,10 @@ impl Ground {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
         crate::query::Where {
-            epic: crate::report::Handing::of_handed(borrow(&self.epic)),
+            epic: crate::report::Handing::of_handed(
+                borrow(&self.epic),
+                self.twin.iter().map(String::as_str).collect(),
+            ),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
             // (moai-jk2u.wvn). 나머지처럼 적재 때 재어 둘 수도 없다: `report::Lines` 는
             // `&Issue` 를 들고 `Ground` 는 제 줄을 안 든다.

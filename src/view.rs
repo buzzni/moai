@@ -883,6 +883,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         "dangling_epic" => one(say(lang, "warn.dangling_epic")),
         "dangling_milestone" => one(say(lang, "warn.dangling_milestone")),
         "orphan_child" => one(say(lang, "warn.orphan_child")),
+        // 고칠 곳은 이 줄이 아니라 부모 id 의 쌍둥이다 — 그 id 는 `duplicate_id` 가 댄다(moai-mibi.wpj).
+        "twin_parent" => one(say(lang, "warn.twin_parent")),
         "dangling_blocked_by" => one(say(lang, "warn.dangling_blocked_by")),
         // 도구는 제 시계로만 적으므로 이런 시각은 손으로 고친 줄이나 틀린 시계다(moai-ugjp).
         "future_timestamp" => one(say(lang, "warn.future_timestamp")),
@@ -1123,7 +1125,10 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     const SHOW: usize = 3;
     let mut out = Vec::new();
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
-    if matches!(w.kind, "wip_overload" | "duplicate_id" | "orphan_child" | "dangling_blocked_by" | "future_timestamp") {
+    if matches!(
+        w.kind,
+        "wip_overload" | "duplicate_id" | "orphan_child" | "twin_parent" | "dangling_blocked_by" | "future_timestamp"
+    ) {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
         }

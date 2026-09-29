@@ -1476,6 +1476,29 @@ mod tests {
         assert_exactly_once(&issues);
     }
 
+    /// **부모 id 의 쌍둥이가 서로 다른 에픽을 넘기면 자식은 `(길 잃음)` 에 선다**(moai-mibi.wpj).
+    /// 두 차례를 다 잰다 — 한때 뒷줄의 에픽 밑에 그려져 파일 차례로 자리가 뒤집혔다.
+    #[test]
+    fn a_child_under_disagreeing_twin_parents_goes_to_the_lost_bucket() {
+        let parent = |to: &str| {
+            let mut i = make("argos-0010", Kind::Issue);
+            i.epic = Some(to.into());
+            i
+        };
+        for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
+            let issues = vec![
+                make("argos-0001", Kind::Epic),
+                make("argos-0002", Kind::Epic),
+                parent(a),
+                parent(b),
+                make("argos-0010.aa1", Kind::Issue),
+            ];
+            let index = Index::of(&issues);
+            assert_eq!(index.home_of(4), &vec![Seg::Lost], "{a} 가 앞");
+            assert_exactly_once(&issues);
+        }
+    }
+
     /// **멤버 없는 에픽도 디렉터리다.** 비었다고 잎이 되면 `--path` 가 그
     /// 에픽 대신 부모를 열고, 훑는 쪽은 제자리를 돈다.
     #[test]

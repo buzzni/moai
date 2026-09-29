@@ -731,7 +731,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
             // 사라지기도 했다. 값은 [`stood_at_line`] 이 낸다 — `mile_of` 를 짓는 그 몸이라
             // id 가 하나뿐인 줄에서는 글자째 같은 답이다.
             let stone = match line {
-                Some(i) if at == start => stood_at_line(i, epic, self.lines),
+                Some(i) if at == start => self.epic_of.stood(i, epic, self.lines),
                 _ => self.mile_of.get(at).copied(),
             };
             if matches!(here, Some(Kind::Issue | Kind::Idea | Kind::Epic))
@@ -776,17 +776,40 @@ impl<'a, 'm> Shelf<'a, 'm> {
 /// 읽는 자는 [`under_lost`] 하나이고 그마저 "길 잃은 줄이 하나라도 있는가" 문 뒤에 선다 —
 /// 길 잃은 줄 없는 흔한 저장소에서는 [`Lines`] 를 짓는 열댓 자리가 모두 그 지도를 짓고
 /// 아무도 안 읽었다. 필요한 한 자리에서 짓는다.
+///
+/// **쌍둥이 줄도 든다**(moai-mibi.wpj). 부모 id 에 줄이 둘이면 `by_id` 는 뒷줄 하나만 드는데,
+/// 자식이 받는 소속이 어느 줄의 것인지는 id 만으로 못 가른다 — [`Handed::from`] 이 그 id 의
+/// 줄을 다 보고 답이 갈리는지 잰다. 성한 저장소에서는 빈 지도다.
 #[derive(Default)]
 pub struct Lines<'a> {
     by_id: BTreeMap<&'a str, &'a Issue>,
     rooted: BTreeSet<&'a str>,
+    twins: Twins<'a>,
+}
+
+/// id → 그 id 를 든 줄 **전부**(파일 차례). 두 줄 이상인 id 만 든다([`Lines`]).
+type Twins<'a> = BTreeMap<&'a str, Vec<&'a Issue>>;
+
+/// 같은 id 를 두 번 이상 든 줄들.
+fn twins_of(all: &[Issue]) -> Twins<'_> {
+    let mut seen: Twins<'_> = BTreeMap::new();
+    for i in all {
+        seen.entry(i.id.as_str()).or_default().push(i);
+    }
+    seen.retain(|_, v| v.len() > 1);
+    seen
 }
 
 impl<'a> Lines<'a> {
     pub fn of(all: &'a [Issue]) -> Lines<'a> {
         let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
-        let rooted = rooted_thoughts(&by_id);
-        Lines { by_id, rooted }
+        // id 수가 줄 수와 같으면 쌍둥이가 없다 — 성한 저장소에서 한 번 더 훑지 않는다.
+        let twins = match by_id.len() == all.len() {
+            true => BTreeMap::new(),
+            false => twins_of(all),
+        };
+        let rooted = rooted_thoughts(&by_id, &twins);
+        Lines { by_id, rooted, twins }
     }
 
     /// 그 id 를 **마지막으로 든 줄** — 같은 id 가 둘이면 뒷줄이다. 조상을 짚는 자리가
@@ -984,7 +1007,7 @@ impl<'a> Ties<'a> {
         if self.stones.is_none() || is_eclipsed(&self.kinds, i) {
             return None;
         }
-        stood_at_line(i, self.epic_of(i), &self.lines)
+        self.epics.stood(i, self.epic_of(i), &self.lines)
     }
 
     /// 그 **id** 가 든 에픽 — 줄이 손에 없는 자리(조상 오름)만 쓴다.
@@ -2435,6 +2458,11 @@ pub struct Handing<'a> {
     /// id → 그 id 의 부모가 넘기는 에픽. 제 `epic` 을 적었거나 묶음이거나 부모가 없는 줄은
     /// 여기 안 든다([`hands_down`]) — 그 셋은 [`joined_in`] 이 지도를 짚기 전에 답한다.
     from_id: BTreeMap<&'a str, &'a str>,
+    /// 부모 쪽 걸음이 **답이 갈리는 쌍둥이 id** 를 지난 줄의 id(moai-mibi.wpj, 2026-09-29 사용자
+    /// 결정). 자식 id 는 `<부모>.<꼬리>` 뿐이라 부모 줄이 둘이면 어느 줄에 속하는지 id 만으로는
+    /// 못 가른다 — 뒷줄을 조용히 입던 자리다. 그 줄은 어느 묶음에도 안 서고 `(길 잃음)` 에
+    /// 서며([`misplace_of`] 의 [`Misplace::Twin`]), `twin_parent` 가 그 id 를 댄다.
+    twin: BTreeSet<&'a str>,
 }
 
 /// 소속을 **id 부모에게서 받는** 줄 — [`Handing::over`] 가 지도에 담는 술어이자 [`handed_of`]
@@ -2458,8 +2486,9 @@ impl<'a> Handing<'a> {
     /// `지도는 한 벌이다` moai-g0zx).
     pub fn over(all: &'a [Issue], lines: &Lines<'a>) -> Handing<'a> {
         let (by_id, rooted) = (&lines.by_id, &lines.rooted);
-        let mut handed = Handed::new();
+        let mut handed = Handed::new(&lines.twins);
         let mut from_id = BTreeMap::new();
+        let mut twin = BTreeSet::new();
         for i in all {
             // 지도를 짚는 줄만 든다 — [`joined_in`] 이 묶음 줄과 제 `epic` 을 적은 줄에서
             // 먼저 돌아서므로, 그 줄들의 값을 여기 담으면 아무도 안 읽는다.
@@ -2467,11 +2496,33 @@ impl<'a> Handing<'a> {
                 continue;
             }
             let Some(p) = crate::id::parent_of(&i.id) else { continue };
-            if let Some(e) = handed.from(p, by_id, rooted) {
-                from_id.insert(i.id.as_str(), e);
+            match handed.from(p, by_id, rooted) {
+                Hand::Given(Some(e)) => {
+                    from_id.insert(i.id.as_str(), e);
+                }
+                Hand::Given(None) => {}
+                Hand::Twin => {
+                    twin.insert(i.id.as_str());
+                }
             }
         }
-        Handing { from_id }
+        Handing { from_id, twin }
+    }
+
+    /// 그 **줄**이 쌍둥이 부모 밑에서 소속을 못 정한 줄인가(moai-mibi.wpj). 제 `epic` 을 적은
+    /// 줄은 부모에게 안 물으므로 여기 안 걸린다([`hands_down`]).
+    pub fn lost(&self, i: &Issue) -> bool {
+        !self.twin.is_empty() && hands_down(i) && self.twin.contains(i.id.as_str())
+    }
+
+    /// 그 **줄**이 선 마일스톤([`stood_at_line`]) — 쌍둥이 부모 밑에서 길 잃은 줄은 `None` 이다.
+    /// 에픽이 마일스톤을 이기는데 그 에픽을 못 정했으니, 조상을 타고 오른 값을 주면 같은 줄이
+    /// 에픽 축에서는 `(길 잃음)` 이고 마일스톤 축에서는 뒷줄의 릴리스에 선다.
+    pub(crate) fn stood(&self, i: &'a Issue, epic: Option<&'a str>, lines: &Lines<'a>) -> Option<&'a str> {
+        if self.lost(i) {
+            return None;
+        }
+        stood_at_line(i, epic, lines)
     }
 
     /// 그 **줄**이 든 에픽 — 적힌 `epic` 이 먼저고, 없으면 id 부모가 넘기는 것이다
@@ -2496,9 +2547,48 @@ impl<'a> Handing<'a> {
         &self.from_id
     }
 
-    /// [`Handing::handed`] 가 낸 것을 도로 든다 — 지도를 제 것으로 옮겨 든 쪽이 짚을 때 쓴다.
-    pub fn of_handed(from_id: BTreeMap<&'a str, &'a str>) -> Handing<'a> {
-        Handing { from_id }
+    /// 쌍둥이 부모 밑에서 길 잃은 줄의 id([`Handing::lost`]) — [`Handing::handed`] 와 함께 옮겨 담는다.
+    pub fn twin(&self) -> &BTreeSet<&'a str> {
+        &self.twin
+    }
+
+    /// [`Handing::handed`]·[`Handing::twin`] 이 낸 것을 도로 든다 — 지도를 제 것으로 옮겨 든 쪽이
+    /// 짚을 때 쓴다. 둘을 함께 받는 까닭은 하나만 옮기면 탐색기의 거름망이 길 잃은 줄을 `-e none`
+    /// 으로 고르기 때문이다.
+    pub fn of_handed(from_id: BTreeMap<&'a str, &'a str>, twin: BTreeSet<&'a str>) -> Handing<'a> {
+        Handing { from_id, twin }
+    }
+}
+
+/// [`Handed::from`] 의 답 — 부모 쪽이 넘기는 에픽(없으면 `None`)이거나, 걸음이 **답이 갈리는
+/// 쌍둥이 id** 를 지나 못 정한 것([`Handing::lost`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Hand<'a> {
+    Given(Option<&'a str>),
+    Twin,
+}
+
+/// 오름의 한 걸음이 **그 줄에서** 내는 답 — 멈추며 에픽을 주거나, 부모로 더 오른다.
+/// 쌍둥이의 줄마다 이것을 재어 견준다([`Handed::from`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step<'a> {
+    Stop(Option<&'a str>),
+    Up,
+}
+
+/// **없는 부모와 뿌리로 올라간 생각에서 멈춘다** — [`epic_through`] 가 조상을 짚을 때 거르던
+/// 그 자다. 차례도 같다: 뿌리 판정이 먼저다. `rooted` 는 id 로 짠 것이라(뒷줄이 생각일 때만
+/// 선다) 줄의 종류를 함께 본다 — 쌍둥이 한쪽만 생각이면 그 줄만 거기서 멈춘다.
+fn step<'a>(cur: &'a Issue, rooted: &BTreeSet<&str>) -> Step<'a> {
+    if is_idea(cur) && rooted.contains(cur.id.as_str()) {
+        return Step::Stop(None);
+    }
+    if cur.kind == Kind::Epic {
+        return Step::Stop(Some(cur.id.as_str()));
+    }
+    match &cur.epic {
+        Some(e) => Step::Stop(Some(e.as_str())),
+        None => Step::Up,
     }
 }
 
@@ -2513,27 +2603,30 @@ impl<'a> Handing<'a> {
 /// 앞자리(`last`)는 **줄이 id 순으로 온다는 데 기대지 않는 지름길**이다. 파일이
 /// id 로 정렬돼 있어 한 에픽의 멤버가 잇따라 오면 지도를 안 짚고 끝나고, 섞여 와도
 /// 빗나간 한 번의 견줌만 치른다.
-struct Handed<'a> {
-    seen: BTreeMap<&'a str, Option<&'a str>>,
-    last: Option<(&'a str, Option<&'a str>)>,
+///
+/// **쌍둥이 id 에서는 줄을 다 본다**(moai-mibi.wpj). 한때 `by_id` 의 뒷줄 하나만 보아, 부모 id 에
+/// 서로 다른 에픽을 적은 줄이 둘이면 자식의 에픽이 파일 차례로 뒤집혔다 — 어디서도 말하지
+/// 않고. 이제 그 id 의 줄마다 한 걸음([`step`])을 재어 **다 같으면 그 답**을 쓰고, 갈리면
+/// [`Hand::Twin`] 이다. 같은 답이면 막을 까닭이 없다: 에픽 줄이 머지로 두 번 선 흔한 흉터에서
+/// 계획의 멤버가 통째로 에픽을 잃지 않는다(2026-09-29 사용자 결정 — 답이 갈릴 때만).
+struct Handed<'a, 't> {
+    seen: BTreeMap<&'a str, Hand<'a>>,
+    last: Option<(&'a str, Hand<'a>)>,
+    twins: &'t Twins<'a>,
 }
 
-impl<'a> Handed<'a> {
-    fn new() -> Handed<'a> {
-        Handed { seen: BTreeMap::new(), last: None }
+impl<'a, 't> Handed<'a, 't> {
+    fn new(twins: &'t Twins<'a>) -> Handed<'a, 't> {
+        Handed { seen: BTreeMap::new(), last: None, twins }
     }
 
     /// `from` 이 제 id 자식에게 넘기는 에픽. [`epic_through`] 의 오름을 그 조상에서
     /// 끊어 낸 조각이라 답이 같은 줄끼리 쪽지를 나눠 쓴다.
     ///
     /// 오르며 지난 줄은 **모두 같은 답을 받는다** — 제 `epic` 도 없고 뿌리로 올라간
-    /// 생각도 에픽도 아니어서 넘어온 줄들이라, 그 답이 곧 제 답이다.
-    fn from(
-        &mut self,
-        from: &'a str,
-        by_id: &BTreeMap<&'a str, &'a Issue>,
-        rooted: &BTreeSet<&str>,
-    ) -> Option<&'a str> {
+    /// 생각도 에픽도 아니어서 넘어온 줄들이라, 그 답이 곧 제 답이다. 쌍둥이를 지나 못 정한
+    /// 답([`Hand::Twin`])도 그렇다 — 그 위에서 갈린 것은 밑의 누구에게나 갈린다.
+    fn from(&mut self, from: &'a str, by_id: &BTreeMap<&'a str, &'a Issue>, rooted: &BTreeSet<&str>) -> Hand<'a> {
         if let Some((id, answer)) = self.last
             && id == from
         {
@@ -2542,24 +2635,26 @@ impl<'a> Handed<'a> {
         let mut walked: Vec<&'a str> = Vec::new();
         let mut at = Some(from);
         let answer = loop {
-            let Some(id) = at else { break None };
+            let Some(id) = at else { break Hand::Given(None) };
             if let Some(hit) = self.seen.get(id) {
                 break *hit;
             }
             walked.push(id);
-            let Some(cur) = by_id.get(id).copied() else { break None };
-            // **없는 부모와 뿌리로 올라간 생각에서 멈춘다** — [`epic_through`] 가
-            // 조상을 짚을 때 거르던 그 자다. 차례도 같다: 뿌리 판정이 먼저다.
-            if rooted.contains(id) {
-                break None;
+            let Some(cur) = by_id.get(id).copied() else { break Hand::Given(None) };
+            let here = match self.twins.get(id) {
+                None => step(cur, rooted),
+                Some(rows) => {
+                    let first = step(rows[0], rooted);
+                    if rows[1..].iter().any(|r| step(r, rooted) != first) {
+                        break Hand::Twin;
+                    }
+                    first
+                }
+            };
+            match here {
+                Step::Stop(e) => break Hand::Given(e),
+                Step::Up => at = crate::id::parent_of(&cur.id),
             }
-            if cur.kind == Kind::Epic {
-                break Some(cur.id.as_str());
-            }
-            if let Some(e) = &cur.epic {
-                break Some(e.as_str());
-            }
-            at = crate::id::parent_of(&cur.id);
         };
         for id in walked {
             self.seen.insert(id, answer);
@@ -2712,11 +2807,18 @@ impl<'m, 'a> Placed<'m, 'a> {
         }
     }
 
+    /// 쌍둥이 부모 밑에서 소속을 못 정한 줄인가([`Handing::lost`]) — 두 축이 같은 답을 한다.
+    pub fn lost(&self, i: &Issue) -> bool {
+        match self {
+            Placed::Epic(epic_of) | Placed::Milestone { epic_of, .. } => epic_of.lost(i),
+        }
+    }
+
     /// 이 줄이 선 묶음. 어디에도 안 서면 `None`.
     pub fn at(&self, i: &'a Issue) -> Option<&'a str> {
         match self {
             Placed::Epic(epic_of) => epic_of.at(i),
-            Placed::Milestone { epic_of, lines } => stood_at_line(i, epic_of.at(i), lines),
+            Placed::Milestone { epic_of, lines } => epic_of.stood(i, epic_of.at(i), lines),
         }
     }
 }
@@ -2812,20 +2914,22 @@ pub fn milestone_from_above<'a>(
     }
     // **에픽 지도는 한 번만 짓는다**(moai-oxup) — `milestones` 가 안에서 다시 지었다. `edit --milestone`
     // 마다 락 안에서 도는 길이다.
-    let epic_of = Handing::of(all);
-    let milestone = milestones_in(all, &epic_of).get(id).copied();
+    // [`Lines`] 도 한 벌이다 — 줄 지도와 뿌리로 올라간 생각을 여기서 따로 지으면 쌍둥이를 보는 자가
+    // 둘이 된다(moai-mibi.wpj).
+    let lines = Lines::of(all);
+    let epic_of = Handing::over(all, &lines);
+    let milestone = milestones_over(all, &epic_of, &lines).get(id).copied();
     if milestone == wrote {
         return None;
     }
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|i| (i.id.as_str(), i)).collect();
+    let (by_id, rooted) = (&lines.by_id, &lines.rooted);
     if let Some(e) = epic_of.at(line) {
         // 못 쓸 에픽의 멤버는 `(길 잃음)` 에 선다 — `milestones` 가 그 줄에 값을 안 주는 것과
         // 같은 자(없는 id·종류가 틀린 것)다. 그 id 의 마일스톤을 고치라고 대면 헛말이다.
         let usable = by_id.get(e).is_some_and(|x| x.kind == Kind::Epic);
         return Some((milestone, if usable { Above::Epic(e) } else { Above::Lost(e) }));
     }
-    let rooted = rooted_thoughts(&by_id);
-    let Some(top) = fold_top(line, &by_id, &rooted) else {
+    let Some(top) = fold_top(line, by_id, rooted) else {
         // 뿌리로 올라간 생각 밑에 접혔다 — 그 밑은 `(마일스톤 없음)` 에 서고(`fold_top`), 어느
         // 필드를 고쳐도 안 옮겨진다. 조용하면 `show --milestone X` 가 그 줄을 말없이 못 낸다.
         let thought = std::iter::successors(crate::id::parent_of(&line.id), |p| crate::id::parent_of(p))
@@ -2835,7 +2939,7 @@ pub fn milestone_from_above<'a>(
     // 값을 든 줄은 `climb` 이 읽는 그 줄이다 — 자를 따로 두면 안내가 셈과 어긋난다.
     // 그 줄이 제 줄이면 제 필드가 답이다(접히지 않은 줄의 제 `milestone`).
     // 아무도 값을 안 들었으면 정한 것은 접힌 맨 위 줄이다 — 제 필드는 거기서 안 읽힌다.
-    match stood_at(top, &by_id, &rooted) {
+    match stood_at(top, by_id, rooted) {
         Some(source) if source.id == line.id => None,
         // id 가 마일스톤 밑이다. 비우는 것은 못 끊는다. 다른 마일스톤은 접힌 맨 위 줄이 제 줄이
         // 아니면 그 줄에 적어 옮긴다 — `stood_at` 이 마일스톤 조상보다 그 줄의 필드를 먼저 읽는다.
@@ -2863,7 +2967,7 @@ pub fn milestone_from_above<'a>(
 /// 접히는 조건은 `nav::home_of_work` 와 같은 자다 — 부모가 이슈나 생각이고,
 /// 제 에픽이 부모가 넘기는 에픽과 같다. 부모는 id 가 더 짧으므로 짧은 것부터
 /// 정하면 한 번 훑어 끝난다.
-fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str> {
+fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>, twins: &Twins<'a>) -> BTreeSet<&'a str> {
     let mut thoughts: Vec<&Issue> = by_id.values().copied().filter(|i| is_idea(i)).collect();
     thoughts.sort_by_key(|t| t.id.len());
     let mut rooted = BTreeSet::new();
@@ -2872,7 +2976,7 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>) -> BTreeSet<&'a str
     // 오름은 `t` 의 조상만 짚고 조상의 id 는 반드시 더 짧아, 길이 순으로 도는 이 고리에서
     // 그 줄은 앞서 정해졌다(생각 아닌 줄은 `rooted` 에 아예 안 든다). 길이 순 정렬을
     // 걷어내면 이 쪽지부터 거짓이 된다.
-    let mut handed = Handed::new();
+    let mut handed = Handed::new(twins);
     for t in thoughts {
         let folds = crate::id::parent_of(&t.id)
             .and_then(|p| by_id.get(p).copied())
@@ -2909,17 +3013,20 @@ fn epic_through<'a>(
     i: &'a Issue,
     by_id: &BTreeMap<&'a str, &'a Issue>,
     rooted: &BTreeSet<&str>,
-    handed: &mut Handed<'a>,
-) -> Option<&'a str> {
+    handed: &mut Handed<'a, '_>,
+) -> Hand<'a> {
     if !joins(i) {
-        return None;
+        return Hand::Given(None);
     }
     if let Some(e) = &i.epic {
-        return Some(e.as_str());
+        return Hand::Given(Some(e.as_str()));
     }
     // 제 줄 위로는 한 걸음도 제 것이 아니다 — 조상이 넘기는 답은 그 조상을 부모로 둔
     // 모든 줄에 같으므로 [`Handed`] 가 한 번만 푼다.
-    handed.from(crate::id::parent_of(&i.id)?, by_id, rooted)
+    match crate::id::parent_of(&i.id) {
+        Some(p) => handed.from(p, by_id, rooted),
+        None => Hand::Given(None),
+    }
 }
 
 /// id 부모인 묶음을 소속으로 **받는** 줄 — 이슈와 생각. 트리가 묶음 밑에 둘 수 있는
@@ -2974,7 +3081,7 @@ pub fn milestones_over<'a>(all: &'a [Issue], epic_of: &Handing<'a>, lines: &Line
     for i in all {
         // **소속은 그 줄에 적힌 `epic` 이 먼저다**([`joined_in`], moai-7iyc.rt6) — 지도를
         // 곧바로 짚으면 같은 id 의 앞줄이 뒷줄의 에픽을 타고 남의 마일스톤으로 세어진다.
-        let got = stood_at_line(i, epic_of.at(i), lines);
+        let got = epic_of.stood(i, epic_of.at(i), lines);
         // **못 받은 줄도 지도를 쓴다 — 같은 id 의 뒷줄이 이긴다.** 멤버는 에픽 줄을
         // `by_id`(뒷줄이 이긴다)로 찾는데, 받은 줄만 적으면 같은 id 의 앞줄이 받은
         // 값이 남아 `nav::under_milestone(e)` 는 그 값으로 그리고 멤버는 뒷줄의
@@ -3279,6 +3386,9 @@ pub enum Misplace {
     Epic,
     /// 마일스톤 자리에 없는 것이나 마일스톤 아닌 것이 있다.
     Milestone,
+    /// 적은 참조는 없는데, 소속을 넘겨받을 부모 id 에 **답이 갈리는 쌍둥이 줄**이 섰다
+    /// ([`Handing::lost`], moai-mibi.wpj). 고칠 곳은 이 줄이 아니라 그 부모의 `duplicate_id` 다.
+    Twin,
 }
 
 /// 소속으로 쓸 수 없는 참조를 가진 줄.
@@ -3335,6 +3445,9 @@ pub(crate) fn misplace_of<'a>(
         // idea 도 같은 자를 받는다. 에픽을 안 적은 idea 는 아무것도 안
         // 가리키므로 여기 걸릴 것이 없고, 적었는데 그것이 에픽이 아니면
         // 일과 똑같이 드러나야 한다.
+        // 쌍둥이 부모 밑에서 소속을 못 정한 줄이 먼저다 — 에픽이 없다고 읽고 조상의 마일스톤을
+        // 재면, 못 가른다던 그 부모의 뒷줄을 거기서 다시 입는다.
+        Kind::Issue | Kind::Idea if epic_of.lost(i) => Some(Misplace::Twin),
         Kind::Issue | Kind::Idea => match epic_of.at(i) {
             Some(e) if kind_of.get(e) != Some(&Kind::Epic) => Some(Misplace::Epic),
             // 에픽이 멀쩡하면 그 에픽의 마일스톤을 따르므로 여기서 안 본다.
@@ -3511,7 +3624,10 @@ pub fn rollup_of_in(
     // 어느 묶음에도 안 딸린 일. 에픽은 일이 아니라 묶음이라 세지 않는다.
     // **여기도 [`Placed::at`] 에 묻는다** — 지도만 짚으면 앞줄이 뒷줄의 소속을 입어, 위에서 묶음
     // 밑에 센 그 줄이 여기 "어느 묶음에도 안 딸린 것" 에 한 번 더 선다(moai-7iyc.rt6).
-    let loose: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !eclipsed(i) && placed.at(i).is_none()).collect();
+    // 쌍둥이 부모 밑에서 소속을 못 정한 줄도 안 센다 — 트리는 그 줄을 `(길 잃음)` 에 둔다
+    // (moai-mibi.wpj). "묶음이 없다" 가 아니라 "못 정했다" 다.
+    let loose: Vec<&Issue> =
+        issues.iter().filter(|i| is_work(i) && !eclipsed(i) && !placed.lost(i) && placed.at(i).is_none()).collect();
     let (counts, total, done, percent) = tally(&loose);
     // **이 줄의 이름은 여기서 안 짓는다**(리뷰) — `id` 가 `None` 인 것이 이미 "어느 묶음에도
     // 안 딸린 것" 이라는 말이고, 화면에 설 낱말은 `view` 가 제 말묶음에서 고른다
@@ -4664,7 +4780,13 @@ pub fn status_in<'a>(
             // **소속은 [`Placed`] 에 묻는다** — 위의 롤업이 `어느 묶음에도 안 딸린 것` 을 고르는
             // 그 자다(`rollup_of_in` 의 `loose`). 지도를 곧바로 짚으면 같은 id 의 앞줄이 뒷줄의
             // 빈 값을 입어, 에픽이 멤버로 센 줄을 같은 화면이 `에픽 없음` 으로 꾸짖는다(리뷰).
-            !i.status.is_done() && !eclipsed(i) && in_epic.at(i).is_none() && !folded.contains(i.id.as_str())
+            // 쌍둥이 부모 밑의 줄도 안 센다(moai-mibi.wpj) — 에픽이 없는 것이 아니라 못 정한 것이고,
+            // `twin_parent` 가 따로 댄다.
+            !i.status.is_done()
+                && !eclipsed(i)
+                && !in_epic.lost(i)
+                && in_epic.at(i).is_none()
+                && !folded.contains(i.id.as_str())
         })
         .collect();
     // **분모는 미룬 일까지 센다.** 에픽을 통째로 미루면 그 멤버만 `work` 에서 빠져,
@@ -4705,6 +4827,7 @@ pub fn status_in<'a>(
                 // 트리가 그 줄을 `(길 잃음)` 안에 그리고, 고칠 곳은 부모의 끊긴 참조다.
                 !i.status.is_done()
                     && !eclipsed(i)
+                    && !in_stone.lost(i)
                     && !folded.contains(i.id.as_str())
                     && (in_stone.at(i).is_none() || soil.adrift(i) == Some(Misplace::Milestone))
             })
@@ -4873,6 +4996,14 @@ pub fn status_in<'a>(
         issues.iter().filter(|i| crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p))).collect();
     if !orphans.is_empty() {
         warnings.push(Warning::new("orphan_child", ids_of(&orphans)));
+    }
+    // 부모 id 에 답이 갈리는 쌍둥이가 서서 소속을 못 정한 줄(moai-mibi.wpj, 2026-09-29 사용자
+    // 결정). 한때 이 줄은 부모의 뒷줄을 조용히 입어, 두 줄의 차례를 바꾸면 에픽이 뒤집혔고
+    // `duplicate_id` 는 부모 id 만 댔다 — 자식이 자리를 옮긴 것을 말하는 자가 없었다. **줄마다
+    // 묻는다**: `placed` 는 id 로 접은 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
+    let twin_parent: Vec<&Issue> = issues.iter().filter(|i| in_epic.lost(i)).collect();
+    if !twin_parent.is_empty() {
+        warnings.push(Warning::new("twin_parent", ids_of(&twin_parent)));
     }
     let dangling_blockers: Vec<&Issue> =
         issues.iter().filter(|i| i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
@@ -8281,6 +8412,121 @@ mod tests {
             assert_eq!(wh.epic_of(front), Some(a), "{what}: -e 가 앞줄을 달리 봤다");
             assert_eq!(wh.epic_of(back), Some(b), "{what}: -e 가 뒷줄을 달리 봤다");
         }
+    }
+
+    /// **부모 id 의 쌍둥이가 서로 다른 에픽을 넘기면 자식은 어디에도 안 서고, `twin_parent` 가
+    /// 그 자식을 댄다** (moai-mibi.wpj, 2026-09-29 사용자 결정).
+    ///
+    /// 자식 id 는 `<부모>.<꼬리>` 뿐이라 부모 줄이 둘이면 어느 줄에 속하는지 id 만으로는 못
+    /// 가른다. 한때 [`Handed::from`] 이 `by_id` 의 뒷줄 하나를 보아, 두 부모 줄의 차례를 바꾸면
+    /// 자식의 `derived_epic` 이 `argos-e009` 에서 `argos-e008` 로 뒤집혔고 `duplicate_id` 는
+    /// 부모 id 만 댔다. **두 차례를 다 잰다** — 답이 파일 차례를 안 따라야 한다.
+    #[test]
+    fn a_child_under_disagreeing_twin_parents_is_lost_and_named() {
+        let parent = |to: &str| {
+            let mut i = make("argos-p001", Kind::Issue, "todo");
+            i.epic = Some(to.into());
+            i
+        };
+        for (what, first, second) in
+            [("e009 가 뒤", "argos-e008", "argos-e009"), ("e008 이 뒤", "argos-e009", "argos-e008")]
+        {
+            let rows = vec![
+                make("argos-e008", Kind::Epic, "todo"),
+                make("argos-e009", Kind::Epic, "todo"),
+                parent(first),
+                parent(second),
+                make("argos-p001.aaa", Kind::Issue, "todo"),
+                make("argos-p001.aaa.bbb", Kind::Issue, "todo"),
+            ];
+            let (child, grand) = (&rows[4], &rows[5]);
+            let handing = Handing::of(&rows);
+            for i in [child, grand] {
+                assert!(handing.lost(i), "{what}: {} 가 뒷줄의 에픽을 입었다", i.id);
+                assert_eq!(handing.at(i), None, "{what}: {} 에 에픽이 섰다", i.id);
+            }
+            assert!(!groups(&rows).contains_key("argos-p001.aaa"), "{what}: 접은 지도가 자식에 에픽을 줬다");
+            assert!(handed_of(&rows, &["argos-p001.aaa"]).is_empty(), "{what}: derived_epic 이 섰다");
+            let soil = Soil::of(&rows);
+            assert_eq!(soil.adrift(child), Some(Misplace::Twin), "{what}: 트리가 자식을 (길 잃음) 에 안 둔다");
+
+            // 굴림은 어느 에픽에도, `어느 묶음에도 안 딸린 것` 에도 안 센다.
+            let roll = rollup_of(Kind::Epic, &rows, &cfg());
+            let loose = roll.iter().find(|r| r.id.is_none()).map_or(0, |r| r.total);
+            assert_eq!(loose, 0, "{what}: 못 정한 자식을 `묶음 없음` 으로 셌다");
+
+            let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
+            let w = st.warnings.iter().find(|w| w.kind == "twin_parent").expect("twin_parent 가 없다");
+            assert_eq!(w.ids, ["argos-p001.aaa", "argos-p001.aaa.bbb"], "{what}: {w:?}");
+            assert!(!w.fatal, "twin_parent 는 데이터가 깨졌다는 말이 아니다 — 그 말은 duplicate_id 가 한다");
+            let no_epic = st.warnings.iter().filter(|w| w.kind == "no_epic").flat_map(|w| w.ids.iter());
+            assert!(!no_epic.clone().any(|id| id.starts_with("argos-p001.")), "{what}: no_epic 이 또 댔다");
+        }
+    }
+
+    /// **쌍둥이가 같은 답을 넘기면 막지 않는다** (moai-mibi.wpj, 2026-09-29 사용자 결정 — 답이
+    /// 갈릴 때만). 에픽 줄이 머지로 두 번 선 흔한 흉터에서 계획의 멤버(`<에픽>.<꼬리>`)가 통째로
+    /// 에픽을 잃으면, 흉터 하나로 에픽이 `0/0` 이 된다. 같은 에픽을 적은 이슈 쌍둥이도 같다.
+    #[test]
+    fn twins_that_agree_still_hand_down() {
+        let mut same_a = make("argos-p002", Kind::Issue, "todo");
+        same_a.epic = Some("argos-e010".into());
+        let mut same_b = same_a.clone();
+        same_b.title = "뒷줄".into();
+        let rows = vec![
+            make("argos-e010", Kind::Epic, "todo"),
+            make("argos-e010", Kind::Epic, "todo"),
+            make("argos-e010.aaa", Kind::Issue, "todo"),
+            same_a,
+            same_b,
+            make("argos-p002.bbb", Kind::Issue, "todo"),
+        ];
+        let handing = Handing::of(&rows);
+        for i in [&rows[2], &rows[5]] {
+            assert!(!handing.lost(i), "{}: 같은 답을 넘기는 쌍둥이에 막혔다", i.id);
+            assert_eq!(handing.at(i), Some("argos-e010"), "{}", i.id);
+        }
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
+        assert!(!st.warnings.iter().any(|w| w.kind == "twin_parent"), "{:?}", st.warnings);
+    }
+
+    /// **쌍둥이 한쪽이 에픽이고 한쪽이 이슈면 답이 갈린다** — 에픽 줄은 제 id 를, 이슈 줄은 제
+    /// `epic`(없으면 제 부모의 것)을 넘긴다. 가려짐(`Kinds`)의 뜻을 넓혀 덮는 길은 접었으므로
+    /// 자식은 같은 자리 — `(길 잃음)` 과 `twin_parent` — 로 간다.
+    #[test]
+    fn a_child_under_an_epic_and_issue_twin_is_lost() {
+        let rows = vec![
+            make("argos-e011", Kind::Epic, "todo"),
+            make("argos-e011", Kind::Issue, "todo"),
+            make("argos-e011.aaa", Kind::Issue, "todo"),
+        ];
+        let handing = Handing::of(&rows);
+        assert!(handing.lost(&rows[2]));
+        let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
+        let w = st.warnings.iter().find(|w| w.kind == "twin_parent").expect("twin_parent 가 없다");
+        assert_eq!(w.ids, ["argos-e011.aaa"]);
+    }
+
+    /// **제 `epic` 을 적은 자식은 쌍둥이 부모에 안 묻는다** — 적은 것이 먼저다([`joined_in`]).
+    #[test]
+    fn a_child_that_wrote_its_epic_ignores_twin_parents() {
+        let parent = |to: &str| {
+            let mut i = make("argos-p003", Kind::Issue, "todo");
+            i.epic = Some(to.into());
+            i
+        };
+        let mut child = make("argos-p003.aaa", Kind::Issue, "todo");
+        child.epic = Some("argos-e008".into());
+        let rows = vec![
+            make("argos-e008", Kind::Epic, "todo"),
+            make("argos-e009", Kind::Epic, "todo"),
+            parent("argos-e008"),
+            parent("argos-e009"),
+            child,
+        ];
+        let handing = Handing::of(&rows);
+        assert!(!handing.lost(&rows[4]));
+        assert_eq!(handing.at(&rows[4]), Some("argos-e008"));
     }
 
     /// **가려진 줄은 `derived_epic` 도 안 단다** (moai-53s2, 2026-09-23 사용자 결정).
