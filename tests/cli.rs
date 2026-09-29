@@ -4900,6 +4900,81 @@ fn a_rehearsal_measures_the_milestone_it_reports() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// **`add` 도 에픽에 진 마일스톤을 `edit` 과 같은 말로 댄다**(moai-pp9i.wvo). `add -e <에픽>
+/// --milestone <다른 것>` 이 안 읽힐 필드를 말없이 썼고, 같은 판의 `edit` 은 한 줄을 댔다.
+#[test]
+fn add_says_a_milestone_lost_to_its_epic_as_edit_does() {
+    let s = init("addlostmilestone");
+    let m1 = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let m2 = ok(s.path(), &["milestone", "add", "v0.2", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "에픽", "--milestone", &m1, "-q"]).trim().to_string();
+
+    let made = moai(s.path(), &["add", "새 줄", "-e", &epic, "--milestone", &m2, "-q"]);
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let id = String::from_utf8(made.stdout).unwrap().trim().to_string();
+    let said = String::from_utf8_lossy(&made.stderr).replace(&id, "<id>");
+    assert!(said.contains(&epic) && said.contains(&m1), "add 가 말없이 썼다\n{said}");
+
+    // 같은 판을 `edit` 으로 만들면 같은 글이 선다 — id 만 다르다.
+    let other = add(s.path(), &["곁 줄", "-e", &epic]);
+    let edited = moai(s.path(), &["edit", &other, "--milestone", &m2]);
+    assert_eq!(said, String::from_utf8_lossy(&edited.stderr).replace(&other, "<id>"), "두 명령이 다른 말을 한다");
+
+    // `--json` 도 `edit` 과 같은 키를 곁들인다.
+    let json =
+        String::from_utf8(moai(s.path(), &["add", "셋째", "-e", &epic, "--milestone", &m2, "--json"]).stdout).unwrap();
+    assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","epic":"{epic}"}}"#)), "{json}");
+
+    // 이기는 쪽이 없으면 아무 말도 없다.
+    let plain = moai(s.path(), &["add", "넷째", "--milestone", &m2, "-q"]);
+    assert!(plain.stderr.is_empty(), "{}", String::from_utf8_lossy(&plain.stderr));
+}
+
+/// **없는 마일스톤에 "선다" 고 말하지 않고, 뿌리 둘은 둘로 센다**(moai-pp9i.gxf). 헛 id 를 받은
+/// 계획이 0 으로 끝나며 "선다" 고 찍었는데 같은 저장소의 `moai status` 는 그 에픽을
+/// `dangling_milestone` 으로 셌다. 막지는 않는다 — 곁의 `--epic <없는 것>` 처럼 알리고 넣는다.
+#[test]
+fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
+    let s = init("planstonemissing");
+    let two = "# 첫 에픽\n- 하나\n# 둘째 에픽\n- 둘\n";
+    for dry in [true, false] {
+        let mut args = vec!["add", "--from", "-", "--milestone", "argos-zzzz"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = from_stdin(s.path(), &args, two);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let (said, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!said.contains("에 선다"), "dry={dry}: 없는 마일스톤에 선다고 했다\n{said}");
+        assert!(err.contains("argos-zzzz") && err.contains("마일스톤이 없다"), "dry={dry}: 말없이 지나갔다\n{err}");
+
+        // `--json` 도 알린다 — 그리는 줄이 없다고 알림까지 빠지면 기계만 말없이 받는다(리뷰).
+        args.push("--json");
+        let out = from_stdin(s.path(), &args, two);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("argos-zzzz") && err.contains("마일스톤이 없다"),
+            "dry={dry} --json: 말없이 지나갔다\n{err}"
+        );
+    }
+
+    // 있는 마일스톤이면 뿌리 수대로 말한다 — 연습도 진짜도.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    for dry in [true, false] {
+        let mut args = vec!["add", "--from", "-", "--milestone", stone.as_str()];
+        if dry {
+            args.push("--dry-run");
+        }
+        let said = String::from_utf8(from_stdin(s.path(), &args, two).stdout).unwrap();
+        assert!(said.contains(&format!("에픽 2개가 마일스톤 {stone} 에 선다")), "dry={dry}: 둘을 하나로 셌다\n{said}");
+    }
+    let one = "# 한 에픽\n- 하나\n";
+    let said =
+        String::from_utf8(from_stdin(s.path(), &["add", "--from", "-", "--milestone", &stone], one).stdout).unwrap();
+    assert!(said.contains(&format!("에픽은 마일스톤 {stone} 에 선다")), "{said}");
+}
+
 /// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
 /// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
 /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
@@ -6158,6 +6233,81 @@ fn a_mistyped_flag_does_not_become_an_issue() {
     // `edit --title` 도 같은 규칙을 쓴다
     let id = add(s.path(), &["평범한 제목"]);
     assert!(!moai(s.path(), &["edit", &id, "--title", "--dryrun"]).status.success());
+}
+
+/// 하이픈 하나로 여는 토막도 깃발이다(moai-pp9i.gzl). `--` 만 보던 판은 `add -x`·`add -bWHY` 가
+/// 그 토막을 제목으로 삼킨 이슈를 만들고 0 으로 끝났고, `--from p.md -b-` 는 아무도 안 친 제목을
+/// 대며 거절했다. 빠져나갈 길은 명령마다 제 것을 댄다.
+#[test]
+fn a_single_dash_token_is_a_flag_not_a_title() {
+    let s = init("flaglike1");
+    for bad in [&["add", "-x"][..], &["add", "-bWHY"]] {
+        let out = moai(s.path(), bad);
+        assert!(!out.status.success(), "{bad:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("플래그로 보인다") && err.contains(&format!("moai add -- {}", bad[1])), "{err}");
+    }
+    assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
+
+    // 빠져나갈 길은 부른 동사로 댄다 — `moai add -- -x` 를 따라 치면 생각 대신 이슈가 선다(리뷰).
+    let out = moai(s.path(), &["idea", "add", "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai idea add -- -x"), "{err}");
+
+    // `--from` 과 함께 와도 깃발을 댄다 — `[title]` 을 받지 않는다는 말이 아니다.
+    std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
+    let out = moai(s.path(), &["add", "--from", "p.md", "-b-"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("`-b-`") && !err.contains("[title]"), "{err}");
+
+    // `-` 한 글자와 여러 낱말 제목은 그대로 받는다.
+    add(s.path(), &["-x 가 제목을 삼킨다"]);
+    let out = moai(s.path(), &["add", "-q", "--", "-x"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // `edit --title` 은 뒤에 자리 인자가 없어 `--` 가 안 듣는다 — `=` 로 붙여 쓰는 길을 댄다.
+    let id = add(s.path(), &["평범한 제목"]);
+    let out = moai(s.path(), &["edit", &id, "--title", "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains(&format!("moai edit {id} --title=-x")), "{err}");
+    assert!(moai(s.path(), &["edit", &id, "--title=-x"]).status.success());
+    // 거절문이 안 듣는다고 한 `--` 는 `edit` 에서 길이 아니다(리뷰 moai-pp9i.hrr 7번).
+    assert!(!moai(s.path(), &["edit", &id, "--title", "-y", "--"]).status.success());
+
+    // `note` 의 자리 인자도 같다. `-b` 로 준 글은 사람이 글이라고 말한 것이라 안 잰다.
+    let out = moai(s.path(), &["note", &id, "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains(&format!("moai note {id} -- -x")), "{err}");
+    assert!(moai(s.path(), &["note", &id, "--", "-x"]).status.success());
+    assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
+}
+
+/// 본문을 stdin 으로 준다고 하고 아무것도 안 온 판은 한 줄로 말한다(moai-pp9i.kj2). 막지는 않는다 —
+/// 2026-09-29 사람이 정했다. `add`·`add --from`·`edit` 셋이 같은 말을 한다.
+#[test]
+fn an_empty_stdin_body_is_said_out_loud() {
+    let s = init("emptybody");
+    let said = "아무것도 안 왔다";
+
+    let out = from_stdin(s.path(), &["add", "제목 하나", "-b", "-"], "");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "add 가 말없이 지나갔다");
+
+    std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
+    let out = from_stdin(s.path(), &["add", "--from", "p.md", "--body", "-"], "\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "add --from 이 말없이 지나갔다");
+
+    let id = add(s.path(), &["고칠 것"]);
+    let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(said), "edit 이 말없이 지나갔다");
+
+    // 글이 오면 아무 말도 없고, argv 로 비워 준 것은 사람이 비운 것이라 말하지 않는다.
+    let out = from_stdin(s.path(), &["add", "본문 있음", "-b", "-"], "글");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
+    let out = moai(s.path(), &["add", "argv 로 비움", "-b", ""]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
 }
 
 /// clap 의 `2 values required by '<id> <id>...'` 는 무엇을 빠뜨렸는지
@@ -10287,6 +10437,36 @@ fn a_line_inherits_the_defer_of_the_release_it_wrote_on_itself() {
     assert!(held.contains("뒷줄") && !held.contains("앞줄"), "릴리스가 제 줄이 아닌 것을 셌다\n{held}");
     let ready = String::from_utf8(moai(s.path(), &["ready", "--json"]).stdout).unwrap();
     assert!(ready.contains("앞줄"), "아무것도 안 적은 줄이 뒷줄의 미룸을 입어 사라졌다\n{ready}");
+}
+
+/// `duplicate_id` 는 무엇을 칠지 댄다(moai-pp9i.gtc) — 지우는 `rm` 이 아니라 보는 `show` 를 대고,
+/// `rm` 이 어느 줄을 지우는지는 경고 글이 말한다. 따라 친 `rm` 이 남기려던 앞줄을 지우는 판을 막는다.
+#[test]
+fn a_duplicate_id_names_what_to_type() {
+    let line = |title: &str| {
+        format!(
+            "{{\"id\":\"argos-0002\",\"title\":\"{title}\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("twinhint");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}", line("앞줄"), line("뒷줄"))).unwrap();
+
+    let board = text(&moai(s.path(), &["status"]));
+    assert!(board.contains("→ `moai show argos-0002`"), "보드가 칠 줄을 안 댔다\n{board}");
+    assert!(
+        board.contains("moai rm <id>") && board.contains("앞줄을 지운다"),
+        "rm 이 무엇을 지우는지 안 말했다\n{board}"
+    );
+    assert!(!board.contains("→ `moai rm"), "지우는 명령을 따라 칠 줄로 댔다\n{board}");
+
+    let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(json.contains(r#""hint":"moai show argos-0002""#), "{json}");
+
+    // 세 줄에 서도 id 는 하나다 — 겹친 줄 수로 세면 `<id>` 로 물러선다(리뷰).
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}{}{}", line("앞줄"), line("가운데"), line("뒷줄")))
+        .unwrap();
+    let json = String::from_utf8(moai(s.path(), &["status", "--json"]).stdout).unwrap();
+    assert!(json.contains(r#""hint":"moai show argos-0002""#), "{json}");
 }
 
 /// **표면 넷이 같은 줄을 말한다**(moai-u3ta).

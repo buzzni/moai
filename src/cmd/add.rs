@@ -105,6 +105,25 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     }
 }
 
+/// [`read_body`] 에 **"준다고 하고 아무것도 안 왔다" 를 한 줄로 말하기**를 더한 것 — `add`·`edit` 이
+/// 쓴다(moai-pp9i.kj2, 2026-09-29 사람이 정했다: 막지 않고 stderr 한 줄, exit 0).
+///
+/// 빈 stdin 은 빈 본문을 뜻하지 않는다 — `""` 로 쓰는 것이 답이 아닌 까닭은 `read_body` 가 빈 글을
+/// `None` 으로 접는 그대로다. 다만 `moai add --from plan.md --body - </dev/null` 이 계획을 다 세우고
+/// 0 으로 끝나면, 파일을 잘못 짚은 사람은 본문이 없다는 것을 `moai show` 로 열어 보고서야 안다.
+/// `note` 는 여기를 안 지난다 — 그쪽은 빈 글을 이미 거절한다(`refuse.note_empty`).
+///
+/// **argv 에 적힌 빈 글(`-b ''`)은 말하지 않는다.** 그것은 사람이 비워 준 것이지 오다가 사라진 것이
+/// 아니다.
+pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
+    let from_stdin = arg.as_deref() == Some("-");
+    let body = read_body(arg)?;
+    if from_stdin && body.is_none() {
+        eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
+    }
+    Ok(body)
+}
+
 /// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
 ///
 /// 여기 사는 까닭은 [`crate::cli::AddArgs::from`] 위에 적어 두었다(moai-yhb1) — 짧게는, clap 의
@@ -179,6 +198,13 @@ fn flags_a_plan_cannot_keep(args: &AddArgs) -> Vec<&'static str> {
 
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
+    // **깃발 같은 제목은 무엇보다 먼저 잰다**(moai-pp9i.gzl). `moai add --from p.md -b-` 의 `-b-` 는
+    // 사람이 친 제목이 아니라 clap 이 제목 자리로 넘긴 깃발인데, 아래 `--from` 갈래가 먼저 서면
+    // "`--from` 은 [title] 을 안 받는다" 는, 아무도 안 친 제목을 대는 거절이 나갔다.
+    if let Some(t) = &args.title {
+        let verb = kind_override.map(|k| format!("{} add", k.as_str()));
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::Title(verb.as_deref().unwrap_or("add")), ctx.lang())?;
+    }
     if let Some(from) = &args.from {
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
         // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른
@@ -275,7 +301,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         }
         // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
         // stdin 을 읽는 쪽은 많아야 하나다.
-        let body = read_body(args.body.clone())?;
+        let body = read_body_said(args.body.clone(), ctx)?;
         return bulk(
             ctx,
             &repo,
@@ -321,8 +347,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
         return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.add_no_title")));
     };
-    super::refuse_if_flag_like(&title, ctx.lang())?;
-    let body = read_body(args.body)?;
+    let body = read_body_said(args.body, ctx)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
     let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
     // 칸 검사는 id 를 뽑기 **전에** 한다. 나중에 하면 쓰이지도 않은 id 가
@@ -336,7 +361,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read): (Issue, super::Read) = repo.with_write(
+    let (made, read, kept): (Issue, super::Read, Option<super::edit::InheritedMilestone>) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             if let Some(p) = &args.parent
@@ -376,12 +401,28 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
             let read = super::read_of(issues, cfg, &[issue.id.as_str()], ctx.json);
-            Ok((vec![entry], (issue, read)))
+            // **적은 마일스톤이 에픽·조상에게 졌으면 `edit` 과 같은 말로 댄다**(moai-pp9i.wvo). `add -e
+            // <에픽> --milestone <다른 것>` 은 안 읽힐 필드를 말없이 썼고, 같은 판에서 `edit` 은 한 줄을
+            // 댔다 — 한 바이너리가 한 필드를 두 말로 다뤘다. 판정도 글도 `edit` 의 것 한 벌이다.
+            let kept =
+                args.milestone.as_deref().and_then(|m| super::edit::InheritedMilestone::of(issues, &issue.id, Some(m)));
+            Ok((vec![entry], (issue, read, kept)))
         },
     )?;
 
     if ctx.json {
-        return super::json_line(&super::Row::from(&made, &read));
+        // **곁들이는 키도 `edit --json` 과 같다** — `inherited_milestone` 은 이미 `cmd::OURS` 에 있다.
+        #[derive(serde::Serialize)]
+        struct Out<'a> {
+            #[serde(flatten)]
+            row: super::Row<'a>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            inherited_milestone: Option<&'a super::edit::InheritedMilestone>,
+        }
+        return super::json_line(&Out { row: super::Row::from(&made, &read), inherited_milestone: kept.as_ref() });
+    }
+    if let (Some(k), Some(wrote)) = (&kept, args.milestone.as_deref()) {
+        super::edit::milestone_kept_line(&made.id, k, wrote, ctx.lang());
     }
     if args.quiet {
         return Ok(vec![made.id]);
@@ -439,7 +480,13 @@ fn bulk(
 
     if dry_run {
         check_plan(&drafts, rooted, ctx.lang())?;
+        // 연습은 락을 안 쥐고 읽는다 — 진짜는 락 안에서 다시 잰다. 마일스톤이 없으면 읽지도 않는다.
+        let known = match milestone {
+            Some(_) => is_milestone(&repo.read()?.issues, milestone),
+            None => false,
+        };
         if ctx.json {
+            say_no_such_milestone(milestone, known, ctx.lang());
             return json_rehearsal(&drafts, None, None, milestone, body_lands_on(&drafts, body));
         }
         // 만들지 않으므로 id 가 없다. 무엇이 어디에 붙는지만 보여 준다.
@@ -447,7 +494,8 @@ fn bulk(
         out.extend(drafts.iter().map(|d| line_of(d, None)));
         out.push(String::new());
         out.push(tally(&drafts, ctx.lang()));
-        out.extend(milestone_line(milestone, ctx.lang()));
+        let roots = drafts.iter().filter(|d| d.epic.is_none()).count();
+        out.extend(milestone_line(milestone, known, roots, ctx.lang()));
         out.extend(body_line(&drafts, body, ctx.lang()));
         return Ok(out);
     }
@@ -455,17 +503,19 @@ fn bulk(
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let who = assignee_of(assignee.as_deref(), &by);
-    let (made, read): (Vec<Issue>, super::Read) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = super::read_of(issues, cfg, &ids, ctx.json);
-            Ok((entries, (made, read)))
+            let known = is_milestone(issues, stood_on(&made));
+            Ok((entries, (made, read, known)))
         },
     )?;
 
     if ctx.json {
+        say_no_such_milestone(stood_on(&made), known, ctx.lang());
         let rows: Vec<super::Row> = made.iter().map(|i| super::Row::from(i, &read)).collect();
         return super::json_line(&rows);
     }
@@ -475,7 +525,7 @@ fn bulk(
     out.push(tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — `idea promote` 와 한 자리다(리뷰). 적은 값을 그대로 찍으면
     // 같은 한 줄을 한쪽은 argv 로, 한쪽은 파일로 셈해, 쓰기에 정규화가 붙는 날 둘이 갈린다.
-    out.extend(milestone_line(stood_on(&made), ctx.lang()));
+    out.extend(milestone_line(stood_on(&made), known, made.iter().filter(|i| is_root(i)).count(), ctx.lang()));
     Ok(out)
 }
 
@@ -816,10 +866,41 @@ fn body_lands_on(drafts: &[Draft], body: Option<&str>) -> Option<usize> {
 /// **본문 글자는 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
 /// (`moai show <idea>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
 /// 선다는 **사실**은 [`body_line`] 이 낸다 — 글자를 안 찍는다는 이 결정과 어긋나지 않는다.
-pub fn milestone_line(milestone: Option<&str>, lang: crate::i18n::Lang) -> Option<String> {
+///
+/// **없는 마일스톤에는 "선다" 고 말하지 않는다**(moai-pp9i.gxf). `--milestone <없는 id>` 가 0 으로
+/// 끝나며 선다고 찍었는데, 같은 저장소의 `moai status` 는 그 에픽을 `dangling_milestone` 으로
+/// 셌다. 그때는 이 줄을 안 내고 stderr 에 한 줄 알린다 — 곁의 `--epic <없는 것>`
+/// (`add.no_such_epic_yet`)과 같은 꼴로, 막지는 않는다. 재는 자는 [`is_milestone`] 이다.
+///
+/// **뿌리가 둘이면 둘로 센다** — 계획은 `#` 줄을 여럿 받고 마일스톤은 뿌리마다 선다
+/// ([`create_drafts`]). 단수로 말하면 받는 쪽이 첫 에픽 하나만 그 릴리스에 든 줄 안다.
+pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: crate::i18n::Lang) -> Option<String> {
     let id = milestone?;
-    let said = crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]);
+    if !known {
+        say_no_such_milestone(Some(id), known, lang);
+        return None;
+    }
+    let said = match roots {
+        0 | 1 => crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone"), &[("id", id)]),
+        n => crate::i18n::fill(crate::i18n::say(lang, "add.on_milestone_many"), &[("id", id), ("n", &n.to_string())]),
+    };
     Some(paint(style::DIM, &said))
+}
+
+/// 없는 마일스톤을 stderr 에 한 줄 알린다 — [`milestone_line`] 이 부르고, 그 줄을 안 그리는
+/// `--json` 길도 부른다(리뷰). 그리는 쪽에만 달아 두면 `add --from - --milestone <헛 id> --json` 이
+/// 말없이 0 으로 끝나, 이 알림이 막으려던 판이 기계에게만 그대로 남는다. 곁의
+/// `add.no_such_epic_yet` 도 `--json` 을 가리지 않는다.
+pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::i18n::Lang) {
+    if let Some(id) = milestone.filter(|_| !known) {
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+    }
+}
+
+/// `id` 가 이 저장소의 **마일스톤 줄**인가 — `moai status` 의 `dangling_milestone` 과 같은 자다
+/// (`report::misplace_of` 가 가리킨 id 의 종류가 마일스톤인지를 본다). `None` 이면 `false` 다.
+pub fn is_milestone(issues: &[Issue], id: Option<&str>) -> bool {
+    id.is_some_and(|m| issues.iter().any(|i| i.id == m && i.kind == Kind::Milestone))
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

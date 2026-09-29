@@ -225,7 +225,8 @@ PLAN
 Plan templates (`{{name}}` filled by --var, every variable required):
   moai add --from .moai/templates/release.md --var version=1.2
 
-A title may start with `--`. Anything that is not a known flag is a title."
+A title of several words may start with `-`. One word that opens with `-`
+reads as a flag — put it after `--` (`moai add -- -x`)."
     )]
     Add(AddArgs),
     /// Open one, or list them
@@ -790,7 +791,7 @@ pub struct PromoteArgs {
 
 #[derive(Args, Debug)]
 pub struct AddArgs {
-    /// One line. Wrap it in quotes. It may start with `--`
+    /// One line. Wrap it in quotes. A lone `-x` needs `--` in front
     #[arg(value_name = "title", allow_hyphen_values = true)]
     pub title: Option<String>,
 
@@ -1012,7 +1013,7 @@ pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
 
-    /// One line. It may start with `--`
+    /// One line. A lone `-x` needs `--title=-x`
     #[arg(long, value_name = "text", allow_hyphen_values = true)]
     pub title: Option<String>,
 
@@ -1159,7 +1160,7 @@ pub struct LinkArgs {
 pub struct NoteArgs {
     #[arg(value_name = "id")]
     pub id: String,
-    /// What the next person (or agent) should read. May start with `--`
+    /// What the next person (or agent) should read. A lone `-x` needs `--`
     #[arg(value_name = "text", allow_hyphen_values = true)]
     pub text: Option<String>,
 

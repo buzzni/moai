@@ -22,6 +22,27 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   picked up a row outside the running release, is still written down; only the answer
   changed). **Nothing is blocked** — `moai edit --milestone` and `moai mv` behave
   exactly as before, because a refusal here would be a gate.
+- **A one-word title or note that opens with a single `-` is refused as a flag.**
+  This breaks a caller: `moai add -x`, `moai add -bWHY`, `moai note <id> -x` and
+  `moai edit <id> --title -x` used to write that token as the title or note and
+  exit 0; they now exit 1 (`bad_input`) and name the way through —
+  `moai <verb> -- -x` for `add` and `note`, `moai edit <id> --title=-x` for `edit`,
+  whose `--title` has no positional after it for `--` to guard. A title of several
+  words, a lone `-`, and a note given with `-b` go in as before.
+- **`moai add --json` carries `inherited_milestone`** when the `--milestone` it wrote
+  lost to the row's epic or ancestor, the same key `moai edit --json` carries; the
+  text output says it on stderr in `edit`'s words.
+- **`duplicate_id` names what to type** — `moai show <id>` as its hint, and the
+  warning says which row `moai rm <id>` removes.
+
+### Fixed
+
+- `moai add --from … --milestone <id>` and `moai idea promote` no longer say the
+  epics stand on a milestone that is not there; they say on stderr that there is no
+  such milestone (with `--json` too) and still write it, as `--epic <missing>` does.
+  With several `#` roots the line counts them.
+- `--body -` that reads nothing from stdin says so on stderr (`add`, `add --from`,
+  `edit`) instead of ending in 0 with no body. Nothing is blocked.
 
 ## [0.1.2] - 2026-09-23
 

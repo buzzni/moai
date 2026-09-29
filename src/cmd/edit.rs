@@ -85,8 +85,11 @@ struct Inherited {
 /// 선다. `none` 이 못 끊은 것(moai-0lmn)과, 다른 마일스톤을 적었는데 에픽·조상이 이긴
 /// 것(moai-mhxf)이다. 정한 자리는 `epic` 이나 `parent` 둘 중 하나만 선다 — 옮기는 길이
 /// 달라서다. `milestone` 은 실제로 선 마일스톤이고, 마일스톤 없는 에픽이 이겼으면 `null` 이다.
+///
+/// **`add` 도 이것을 쓴다**(moai-pp9i.wvo) — `add -e <에픽> --milestone <다른 것>` 이 안 읽힐 필드를
+/// 말없이 쓰던 자리다. 한 바이너리가 한 필드를 두 말로 다루지 않게 판정도 글도 여기 한 벌이다.
 #[derive(serde::Serialize)]
-struct InheritedMilestone {
+pub(super) struct InheritedMilestone {
     milestone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     epic: Option<String>,
@@ -95,6 +98,27 @@ struct InheritedMilestone {
     /// 옮기는 길 — 사람 화면의 안내만 쓴다. `report::Above` 를 락 밖으로 들고 나온 모양이다.
     #[serde(skip)]
     way: Way,
+}
+
+impl InheritedMilestone {
+    /// `id` 줄에 `--milestone <wrote>` 를 적었는데 **적은 대로 안 섰으면** 그 답. 비우라고 적었으면
+    /// `wrote` 가 `None` 이다. 판정은 `report::milestone_from_above` 가 하고 여기는 모양만 옮긴다.
+    pub(super) fn of(issues: &[Issue], id: &str, wrote: Option<&str>) -> Option<InheritedMilestone> {
+        use crate::report::Above;
+        let (m, above) = crate::report::milestone_from_above(issues, id, wrote)?;
+        let (epic, parent, way) = match above {
+            Above::Epic(e) => (Some(e), None, Way::Epic),
+            Above::Lost(e) => (Some(e), None, Way::Lost),
+            Above::Parent(p) => (None, Some(p), Way::Parent),
+            Above::Pinned(p) => (None, Some(p), Way::Pinned),
+        };
+        Some(InheritedMilestone {
+            milestone: m.map(str::to_string),
+            epic: epic.map(str::to_string),
+            parent: parent.map(str::to_string),
+            way,
+        })
+    }
 }
 
 /// [`crate::report::Above`] 의 갈래. 자리 id 는 `InheritedMilestone` 의 `epic`·`parent` 가 든다.
@@ -121,10 +145,10 @@ struct Out<'a> {
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args, ctx)?;
     if let Some(t) = &args.title {
-        super::refuse_if_flag_like(t.trim(), ctx.lang())?;
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::EditTitle(&args.id), ctx.lang())?;
     }
     let repo = super::open_repo(ctx)?;
-    let body = super::add::read_body(args.body.clone())?;
+    let body = super::add::read_body_said(args.body.clone(), ctx)?;
     let at = model::now();
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
@@ -211,23 +235,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 졌는지와 옮길 길은
             // `report` 가 가른다 — 여기서는 무엇을 적었는지만 넘긴다.
             let wrote_milestone = args.milestone.as_deref().map(super::clearable);
-            let kept_milestone = |issues: &[Issue]| {
-                use crate::report::Above;
-                let wrote = wrote_milestone.as_ref()?;
-                let (m, above) = crate::report::milestone_from_above(issues, &args.id, wrote.as_deref())?;
-                let (epic, parent, way) = match above {
-                    Above::Epic(e) => (Some(e), None, Way::Epic),
-                    Above::Lost(e) => (Some(e), None, Way::Lost),
-                    Above::Parent(p) => (None, Some(p), Way::Parent),
-                    Above::Pinned(p) => (None, Some(p), Way::Pinned),
-                };
-                Some(InheritedMilestone {
-                    milestone: m.map(str::to_string),
-                    epic: epic.map(str::to_string),
-                    parent: parent.map(str::to_string),
-                    way,
-                })
-            };
+            let kept_milestone =
+                |issues: &[Issue]| InheritedMilestone::of(issues, &args.id, wrote_milestone.as_ref()?.as_deref());
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
@@ -351,7 +360,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 ///
 /// `none` 은 "안 끊긴다" 로, 다른 마일스톤은 "필드에만 적혔다" 로 말한다(moai-mhxf) —
 /// 앞의 것은 필드가 비워졌는데 소속이 남았고, 뒤의 것은 필드가 바뀌었는데 소속이 안 따라왔다.
-fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str, lang: crate::i18n::Lang) {
+pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str, lang: crate::i18n::Lang) {
     use crate::i18n::{fill, say};
     let cut = wrote == "none";
     // **갈래마다 제 `say` 를 적는다** — 키를 도우미로 고르면 소스를 훑는 시험(`i18n::tests::keys_in`)이
