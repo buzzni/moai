@@ -4663,6 +4663,18 @@ impl Warning {
         Warning::new(kind, missing).notice().hint(&Warning::init_hint(root))
     }
 
+    /// 트래커 파일(`.moai/issues.jsonl`)이 **링크라는 알림**(moai-jo3h, 2026-09-29 사용자 결정). 재는 쪽은
+    /// `cmd::status::install_notices` 고, `ids` 에 링크가 가리키는 파일을 든다.
+    ///
+    /// **막는 것이 없다.** 링크인 트래커는 살아 있는 길이다 — 쓰기는 체크아웃 안에서 그것을 따라가고
+    /// (moai-4oab), 병합과 겹쳐 보기도 가리키는 파일을 읽는다(moai-7myd·moai-iral). 비추는 까닭은 그
+    /// 셋이 저마다 링크를 따로 풀어서다: 체크아웃 밖을 가리키면 쓰기가 거절되고, 뿌리 밖이면 병합
+    /// 선언을 못 걸고, 커밋에 없는 파일이면 겹쳐 보기의 바탕이 빈다. 어느 파일이 줄을 드는지가 보드에
+    /// 서야 그 셋이 어긋날 때 사람이 어디를 볼지 안다.
+    pub fn tracker_linked(target: String) -> Warning {
+        Warning::new("tracker_linked", vec![target]).notice()
+    }
+
     /// 심은 머지 드라이버가 **못 도는** 상태의 알림(moai-2ewr). 재는 쪽은
     /// `cmd::merge_driver::notice` 고, `status` 와 훅의 보드가 이것을 `notices` 에 얹는다 —
     /// [`status`] 는 `&[Issue]` 만 받는 순수 함수라 설정도 파일도 안 읽는다.

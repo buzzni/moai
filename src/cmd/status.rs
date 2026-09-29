@@ -216,7 +216,25 @@ pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::rep
     out.extend(crate::cmd::init::agents_notice(repo.here(), chdir));
     out.extend(crate::cmd::init::dotfile_notice(repo.here(), chdir));
     out.extend(crate::cmd::merge_driver::notice(repo, chdir));
+    out.extend(tracker_linked(repo));
     out
+}
+
+/// 트래커 파일이 링크면 그 알림(moai-jo3h) — 가리키는 파일을 **뿌리에서 잰 경로**로 대고, 뿌리 밖이면
+/// 절대 경로로 댄다. 재는 파일은 보드가 정말 읽은 루트의 트래커다([`source_of`] 와 같은 자리).
+///
+/// 링크를 못 풀면(고리) 푼 자리 대신 받은 철자를 댄다 — 그 트래커는 쓰기가 이미 그 말로 멈춘다.
+fn tracker_linked(repo: &crate::store::Repo) -> Option<crate::report::Warning> {
+    let link = repo.issues_path();
+    std::fs::symlink_metadata(&link).ok().filter(|m| m.file_type().is_symlink())?;
+    let real = crate::path::follow_links(&link).unwrap_or_else(|_| link.clone());
+    // 링크 글의 `..` 과 가운데 디렉터리 링크를 걷는다 — 끝 파일은 없어도 된다.
+    let real = match (std::fs::canonicalize(crate::path::dir_of(&real)), real.file_name()) {
+        (Ok(dir), Some(name)) => dir.join(name),
+        _ => real,
+    };
+    let shown = real.strip_prefix(crate::path::real(&repo.root)).unwrap_or(&real);
+    Some(crate::report::Warning::tracker_linked(shown.display().to_string()))
 }
 
 /// 보드가 **정말 읽은 파일**을 머리에 댄다 — 딸린 워크트리 안에서는 그 자리의 `.moai` 가 아니라

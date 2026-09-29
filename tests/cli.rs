@@ -1170,6 +1170,15 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
         v
     };
     assert_eq!(listed("shared"), ["issues.jsonl", "lock"], "임시 파일이 남았거나 너머의 락이 없다");
+    // **보드가 링크라고 한 줄로 비춘다**(moai-jo3h, 사용자 결정) — 가리키는 파일을 대고, 아무것도 안 막는다.
+    let board = ok(root, &["status"]);
+    let said = board.lines().skip_while(|l| !l.contains("이 링크다")).take(2).collect::<Vec<_>>().join("\n");
+    assert!(said.contains("shared/issues.jsonl"), "링크인 트래커와 그 파일을 안 댔다\n{board}");
+    let json = ok(root, &["status", "--json"]);
+    assert!(json.contains("\"tracker_linked\""), "{json}");
+    let plain = Scratch::new("init-link-plain");
+    ok(plain.path(), &["init", "argos"]);
+    assert!(!ok(plain.path(), &["status", "--json"]).contains("tracker_linked"), "링크가 아닌 트래커에 알림이 섰다");
     assert!(listed(".moai").iter().all(|n| !n.contains(".tmp.")), "임시 파일이 남았다: {:?}", listed(".moai"));
 
     // 거꾸로 건 링크도 한 파일이다.
