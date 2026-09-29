@@ -58,7 +58,10 @@ pub struct Screen<'a> {
     /// 서기 때문인데, 시간대의 처음값은 **저장된 값 그 자체**라 지어낸 답이 아니다. 명령 층이
     /// [`Screen::at`] 으로 사람의 시간대를 얹고, 안 얹은 자리는 지금까지 그리던 그대로 선다.
     /// 명령 층이 빠짐없이 얹는 것은 `every_command_screen_carries_the_zone` 이 글로 잰다.
-    zone: Option<&'a crate::tz::Zone>,
+    ///
+    /// **얹는 것은 아직 안 푼 시간대다**(moai-s3i7) — [`Screen::zone`] 이 처음 읽을 때 푼다.
+    /// 그래서 zoneinfo 없는 기계의 알림 줄은 시각을 실제로 그린 명령에서만 선다.
+    zone: Option<&'a crate::tz::System>,
 }
 
 impl<'a> Screen<'a> {
@@ -67,14 +70,15 @@ impl<'a> Screen<'a> {
         Self { lang, origin: None, zone: None }
     }
 
-    /// 같은 화면을 이 사람의 시간대로. 명령 층이 한 번 얹는다(`Ctx::zone`).
-    pub fn at(self, zone: &'a crate::tz::Zone) -> Self {
+    /// 같은 화면을 이 사람의 시간대로. 명령 층이 한 번 얹는다(`Ctx::clock`).
+    pub fn at(self, zone: &'a crate::tz::System) -> Self {
         Self { zone: Some(zone), ..self }
     }
 
-    /// 시각을 옮겨 적을 시간대. 안 얹었으면 저장된 그대로(UTC)다.
+    /// 시각을 옮겨 적을 시간대. 안 얹었으면 저장된 그대로(UTC)다. **여기서 처음 푼다** —
+    /// 이 자리를 안 지나는 화면은 tzdb 를 안 만진다.
     fn zone(&self) -> &'a crate::tz::Zone {
-        self.zone.unwrap_or(crate::tz::Zone::stored())
+        self.zone.map_or(crate::tz::Zone::stored(), crate::tz::System::zone)
     }
 
     /// 같은 말로, 이 출처를 겹친 화면. **한눈 보기가 프로젝트마다 이것으로 바꿔 쓴다** —
@@ -3889,7 +3893,7 @@ mod tests {
             }
         }
         assert!(seen >= 8, "명령 층에서 화면을 짓는 자리를 못 찾았다 — 이 시험이 아무것도 안 잰다");
-        assert!(bare.is_empty(), "시간대를 안 얹은 화면 — `.at(ctx.zone())` 을 붙인다: {bare:?}");
+        assert!(bare.is_empty(), "시간대를 안 얹은 화면 — `.at(ctx.clock())` 을 붙인다: {bare:?}");
     }
 
     /// **안 물었는데 표가 사라지지 않는다.** 표를 달지 말지를 결과의 내용으로

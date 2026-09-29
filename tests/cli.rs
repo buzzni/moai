@@ -15322,13 +15322,8 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
 /// 셈은 기한 판정뿐이라, 시간대를 들던 판은 zoneinfo 없는 기계에서 없던 줄 하나를 stderr 에
 /// 냈다 — 정적 musl 판을 그런 기계에 받은 자리(moai-77ap)다.
 ///
-/// **이름을 `project ls` 로 좁혀 둔다 — "시각을 안 그리는 명령" 전부가 아니다**(리뷰 moai-j4ie
-/// 가 쟀다). `ready`·`prime`·`show`(목록)·`idea ls` 는 시간대로 한 글자도 안 달라지는데 여전히
-/// 이 줄을 낸다. 그쪽은 `view::Screen` 을 지어 `.at(ctx.zone())` 을 얹기 때문이고, 화면의
-/// 시간대를 실제로 읽는 자리는 `view::detail`·`view::history` 둘(곧 `show <id>`·`edit`)뿐이다.
-/// 그래서 같은 길로 못 고친다 — `view::every_command_screen_carries_the_zone` 이 `src/cmd/**`
-/// 를 훑어 `.at` 없는 `Screen::new` 을 거절하므로, 저쪽을 고치는 일은 그 잣대를 함께 옮기는
-/// 결정이다(그 결정은 아직 없다). `project ls` 가 화면을 아예 안 지어 여기만 먼저 닫혔다.
+/// 화면을 짓는 명령(`ready`·`prime`·`show` 목록·`idea ls`)은 길이 달라 따로 잰다 —
+/// `screens_that_draw_no_time_never_reach_for_the_timezone`(moai-s3i7).
 ///
 /// **대조를 함께 잰다** — 같은 환경의 `moai status` 는 기한을 그리므로 그 줄이 서야 한다.
 /// 없으면 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다.
@@ -15367,6 +15362,60 @@ fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
     let st = run(repo.path(), &["status"]);
     assert!(st.status.success(), "{}", text(&st));
     let said = String::from_utf8_lossy(&st.stderr);
+    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
+}
+
+/// **화면을 지어도 시각을 안 그리면 tzdb 를 안 만진다**(moai-s3i7). `ready`·`prime`·
+/// `show`(목록)·`idea ls` 는 `view::Screen` 에 시간대를 얹지만, 그 시간대를 실제로 읽는 자리는
+/// `view::detail`·`view::history` 둘뿐이다. 얹는 값이 아직 안 푼 시간대(`tz::System`)라
+/// 그 넷은 zoneinfo 없는 기계에서 알림 줄을 안 낸다. 한눈 보기(`.moai` 밖의 `ready`)도 같은
+/// 화면을 짓는다.
+///
+/// **대조를 함께 잰다** — 같은 환경의 `show <id>` 는 시각을 그리므로 그 줄이 서야 한다. 없으면
+/// 이 시험은 "고쳤다" 가 아니라 "환경이 시간대를 못 깨뜨렸다" 를 재고 있다. 옛 자리(화면을 지을
+/// 때 푼 판)로 되돌리면 위의 넷이 붉어진다.
+#[test]
+fn screens_that_draw_no_time_never_reach_for_the_timezone() {
+    let home = Scratch::new("screen-tz");
+    let config = home.path().join("config.toml");
+    let repo = init("screen-tz-repo");
+    let id = ok(repo.path(), &["add", "시각 없는 줄", "-q"]);
+    let id = id.trim();
+    ok(repo.path(), &["idea", "add", "나중 생각"]);
+    project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
+    // 없는 자리를 가리켜 tzdb 를 깨뜨린다 — `TZ` 가 UTC 면 자료 없이 서서 이 판이 안 난다.
+    let nowhere = home.path().join("no-zoneinfo");
+    let run = |dir: &Path, args: &[&str]| {
+        isolated(BIN)
+            .args(args)
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &config)
+            .env("NO_COLOR", "1")
+            .env("TZDIR", &nowhere)
+            .env("TZ", "Asia/Seoul")
+            .output()
+            .expect("moai 를 실행하지 못했다")
+    };
+
+    let quiet: [(&Path, &[&str], &str); 5] = [
+        (repo.path(), &["ready"], id),
+        (repo.path(), &["prime"], id),
+        (repo.path(), &["show"], id),
+        (repo.path(), &["idea", "ls"], "나중 생각"),
+        (home.path(), &["ready"], id),
+    ];
+    for (dir, args, want) in quiet {
+        let out = run(dir, args);
+        assert!(out.status.success(), "{args:?}: {}", text(&out));
+        // **줄이 실제로 섰는지부터 본다** — 빈 화면은 시각을 그릴 자리가 애초에 없다.
+        assert!(String::from_utf8_lossy(&out.stdout).contains(want), "{args:?} 에 줄이 안 섰다 — {}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(!said.contains("시간대 자료가 없다"), "{args:?} 는 시각을 안 그리는데 tzdb 를 만졌다 — {said}");
+    }
+
+    let one = run(repo.path(), &["show", id]);
+    assert!(one.status.success(), "{}", text(&one));
+    let said = String::from_utf8_lossy(&one.stderr);
     assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
 }
 

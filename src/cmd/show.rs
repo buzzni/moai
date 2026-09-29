@@ -278,7 +278,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // 멀리 떨어진 `if ctx.json` 의 되돌아감에 기대게 되고, 그 차례를 건드리는 날 CLI 가 터진다.
     // **화면은 한 번 짓는다** — 트리와 목록은 갈라져 서지만 같은 맥락으로 그리므로, 두 자리에서
     // 따로 지으면 한쪽만 고치는 날 같은 명령의 두 표면이 다른 말이나 다른 출처로 선다.
-    let screen = view::Screen::new(ctx.lang()).at(ctx.zone()).over(&origin);
+    let screen = view::Screen::new(ctx.lang()).at(ctx.clock()).over(&origin);
     if tree_now {
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
@@ -483,7 +483,7 @@ fn one(
         // 칸 지도의 열쇠가 (종류, id) 라 가려진 자식은 제 종류로 센 칸이 없다(`report::GroupKey`,
         // moai-mibi.rfn) — 한때 곁에 펼친 줄과 그 자식만의 종류 지도를 따로 지었다.
         states: report::group_states_of(all, &repo.config, &near),
-        screen: view::Screen::new(ctx.lang()).at(ctx.zone()).over(origin),
+        screen: view::Screen::new(ctx.lang()).at(ctx.clock()).over(origin),
         blocks: report::blocks_of(all, &repo.config, issue),
         places,
     };

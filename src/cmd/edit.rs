@@ -342,7 +342,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         ),
         states: read.columns().collect(),
         // 쓰는 길은 옆 워크트리를 겹쳐 보지 않는다 — 겹칠 것이 없는 화면이다.
-        screen: view::Screen::new(ctx.lang()).at(ctx.zone()),
+        screen: view::Screen::new(ctx.lang()).at(ctx.clock()),
         blocks: blocked.blocks(),
         places: None,
     };
