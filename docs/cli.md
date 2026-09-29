@@ -217,7 +217,7 @@ Usage: moai add [OPTIONS] [title]
 
 Arguments:
   [title]
-          One line. Wrap it in quotes. It may start with `--`
+          One line. Wrap it in quotes. A lone `-x` needs `--` in front
 
 Options:
   -e, --epic <id>
@@ -330,7 +330,8 @@ PLAN
 Plan templates (`{{name}}` filled by --var, every variable required):
   moai add --from .moai/templates/release.md --var version=1.2
 
-A title may start with `--`. Anything that is not a known flag is a title.
+A title of several words may start with `-`. One word that opens with `-`
+reads as a flag — put it after `--` (`moai add -- -x`).
 ```
 
 ## `moai show`
@@ -447,7 +448,7 @@ Arguments:
   <id>  
 
 Options:
-      --title <text>         One line. It may start with `--`
+      --title <text>         One line. A lone `-x` needs `--title=-x`
   -b, --body <text>          Body. `-` reads it from stdin
   -t, --tag <tag>            Add tags
       --untag <tag>          Remove tags
@@ -506,7 +507,7 @@ Arguments:
           
 
   [text]
-          What the next person (or agent) should read. May start with `--`
+          What the next person (or agent) should read. A lone `-x` needs `--`
 
 Options:
   -b, --body <text>
@@ -725,7 +726,7 @@ Usage: moai issue add [OPTIONS] [title]
 
 Arguments:
   [title]
-          One line. Wrap it in quotes. It may start with `--`
+          One line. Wrap it in quotes. A lone `-x` needs `--` in front
 
 Options:
   -e, --epic <id>
@@ -877,7 +878,7 @@ Usage: moai epic add [OPTIONS] [title]
 
 Arguments:
   [title]
-          One line. Wrap it in quotes. It may start with `--`
+          One line. Wrap it in quotes. A lone `-x` needs `--` in front
 
 Options:
   -e, --epic <id>
@@ -1029,7 +1030,7 @@ Usage: moai milestone add [OPTIONS] [title]
 
 Arguments:
   [title]
-          One line. Wrap it in quotes. It may start with `--`
+          One line. Wrap it in quotes. A lone `-x` needs `--` in front
 
 Options:
   -e, --epic <id>
@@ -1202,7 +1203,7 @@ Usage: moai idea add [OPTIONS] [title]
 
 Arguments:
   [title]
-          One line. Wrap it in quotes. It may start with `--`
+          One line. Wrap it in quotes. A lone `-x` needs `--` in front
 
 Options:
   -e, --epic <id>

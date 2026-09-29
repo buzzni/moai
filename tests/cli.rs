@@ -6160,6 +6160,46 @@ fn a_mistyped_flag_does_not_become_an_issue() {
     assert!(!moai(s.path(), &["edit", &id, "--title", "--dryrun"]).status.success());
 }
 
+/// 하이픈 하나로 여는 토막도 깃발이다(moai-pp9i.gzl). `--` 만 보던 판은 `add -x`·`add -bWHY` 가
+/// 그 토막을 제목으로 삼킨 이슈를 만들고 0 으로 끝났고, `--from p.md -b-` 는 아무도 안 친 제목을
+/// 대며 거절했다. 빠져나갈 길은 명령마다 제 것을 댄다.
+#[test]
+fn a_single_dash_token_is_a_flag_not_a_title() {
+    let s = init("flaglike1");
+    for bad in [&["add", "-x"][..], &["add", "-bWHY"]] {
+        let out = moai(s.path(), bad);
+        assert!(!out.status.success(), "{bad:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("플래그로 보인다") && err.contains(&format!("moai add -- {}", bad[1])), "{err}");
+    }
+    assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
+
+    // `--from` 과 함께 와도 깃발을 댄다 — `[title]` 을 받지 않는다는 말이 아니다.
+    std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
+    let out = moai(s.path(), &["add", "--from", "p.md", "-b-"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("`-b-`") && !err.contains("[title]"), "{err}");
+
+    // `-` 한 글자와 여러 낱말 제목은 그대로 받는다.
+    add(s.path(), &["-x 가 제목을 삼킨다"]);
+    let out = moai(s.path(), &["add", "-q", "--", "-x"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // `edit --title` 은 뒤에 자리 인자가 없어 `--` 가 안 듣는다 — `=` 로 붙여 쓰는 길을 댄다.
+    let id = add(s.path(), &["평범한 제목"]);
+    let out = moai(s.path(), &["edit", &id, "--title", "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains(&format!("moai edit {id} --title=-x")), "{err}");
+    assert!(moai(s.path(), &["edit", &id, "--title=-x"]).status.success());
+
+    // `note` 의 자리 인자도 같다. `-b` 로 준 글은 사람이 글이라고 말한 것이라 안 잰다.
+    let out = moai(s.path(), &["note", &id, "-x"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains(&format!("moai note {id} -- -x")), "{err}");
+    assert!(moai(s.path(), &["note", &id, "--", "-x"]).status.success());
+    assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
+}
+
 /// clap 의 `2 values required by '<id> <id>...'` 는 무엇을 빠뜨렸는지
 /// 말해 주지 않는다.
 #[test]

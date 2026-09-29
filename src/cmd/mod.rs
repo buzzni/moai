@@ -473,26 +473,58 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 ///
 /// **띄어쓰기가 가른다.** 사람이 쓰는 제목은 낱말이 여럿이고, 오타 난
 /// 플래그는 한 낱말이다. 정말 그 제목을 쓰겠다면 `--` 로 넘긴다.
-pub fn refuse_if_flag_like(title: &str, lang: crate::i18n::Lang) -> R<()> {
+///
+/// **하이픈 하나로 여는 토막도 같은 판이다**(moai-pp9i.gzl). `--` 만 보던 판은 `moai add -x` 와
+/// `moai add -bWHY` 가 제목이 `-x`·`-bWHY` 인 이슈를 만들고 0 으로 끝났다 — 자리 인자가 하이픈
+/// 값을 받으면 clap 은 아는 짧은 깃발을 붙여 쓴 꼴(`-bWHY`)까지 그 자리로 넘긴다. `-` 한 글자는
+/// 깃발이 아니라 값이라(stdin 을 뜻하는 자리가 많다) 안 막는다.
+///
+/// **빠져나갈 길은 부른 자리마다 다르다**([`FlagLike`]). `edit --title` 은 뒤에 받을 자리 인자가
+/// 없어 `--` 가 안 듣는다 — 그 자리는 `--title=<값>` 으로 붙여 쓰는 것이 길이다.
+pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lang) -> R<()> {
+    use crate::i18n::{fill, say};
     // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
     //
     // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
     // 값이 아니라 구분자라 clap 이 언제나 삼키고, argv 에 남아 있다는 것은
-    // 사용자가 그것을 적었다는 뜻 말고 다른 뜻이 없다.
-    if std::env::args().any(|a| a == "--") {
+    // 사용자가 그것을 적었다는 뜻 말고 다른 뜻이 없다. `--title=<값>` 도 같다 — 붙여 쓴 값은
+    // clap 이 깃발로 읽을 길이 없으니, 그렇게 적은 사람은 그것이 값이라고 말한 것이다.
+    let edit = matches!(at, FlagLike::EditTitle(_));
+    if std::env::args().any(|a| a == "--" || edit && a.starts_with("--title=")) {
         return Ok(());
     }
-    if title.starts_with("--") && !title.contains(char::is_whitespace) {
-        return Err(Fail::coded(
-            format!(
-                "{}\n                       {}",
-                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_looks_like_a_flag"), &[("title", title)]),
-                crate::i18n::fill(crate::i18n::say(lang, "refuse.title_after_dashes"), &[("title", title)]),
-            ),
-            code::BAD_INPUT,
-        ));
+    let flag_like = value.starts_with('-') && value.chars().count() > 1 && !value.contains(char::is_whitespace);
+    if !flag_like {
+        return Ok(());
     }
-    Ok(())
+    let pairs = [("title", value)];
+    // 갈래마다 제 `say` 를 적는다 — 키를 도우미로 고르면 소스를 훑는 시험이 그 키를 못 본다.
+    let (what, how) = match at {
+        FlagLike::Title => (
+            fill(say(lang, "refuse.title_looks_like_a_flag"), &pairs),
+            fill(say(lang, "refuse.title_after_dashes"), &pairs),
+        ),
+        FlagLike::EditTitle(id) => (
+            fill(say(lang, "refuse.title_looks_like_a_flag"), &pairs),
+            fill(say(lang, "refuse.title_after_equals"), &[("title", value), ("id", id)]),
+        ),
+        FlagLike::Note(id) => (
+            fill(say(lang, "refuse.note_looks_like_a_flag"), &pairs),
+            fill(say(lang, "refuse.note_after_dashes"), &[("title", value), ("id", id)]),
+        ),
+    };
+    Err(Fail::coded(format!("{what}\n                       {how}"), code::BAD_INPUT))
+}
+
+/// [`refuse_if_flag_like`] 를 부른 자리 — 거절문과 빠져나갈 길이 여기서 갈린다.
+#[derive(Clone, Copy)]
+pub enum FlagLike<'a> {
+    /// `add` 의 제목 자리 인자.
+    Title,
+    /// `edit <id> --title` 의 값.
+    EditTitle(&'a str),
+    /// `note <id>` 의 글 자리 인자.
+    Note(&'a str),
 }
 
 /// `--json` 일 때 한 줄로 낸다.

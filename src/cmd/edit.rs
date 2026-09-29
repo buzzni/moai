@@ -121,7 +121,7 @@ struct Out<'a> {
 pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     fail_if_nothing(&args, ctx)?;
     if let Some(t) = &args.title {
-        super::refuse_if_flag_like(t.trim(), ctx.lang())?;
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::EditTitle(&args.id), ctx.lang())?;
     }
     let repo = super::open_repo(ctx)?;
     let body = super::add::read_body(args.body.clone())?;

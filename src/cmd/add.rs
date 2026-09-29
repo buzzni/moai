@@ -179,6 +179,12 @@ fn flags_a_plan_cannot_keep(args: &AddArgs) -> Vec<&'static str> {
 
 pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
+    // **깃발 같은 제목은 무엇보다 먼저 잰다**(moai-pp9i.gzl). `moai add --from p.md -b-` 의 `-b-` 는
+    // 사람이 친 제목이 아니라 clap 이 제목 자리로 넘긴 깃발인데, 아래 `--from` 갈래가 먼저 서면
+    // "`--from` 은 [title] 을 안 받는다" 는, 아무도 안 친 제목을 대는 거절이 나갔다.
+    if let Some(t) = &args.title {
+        super::refuse_if_flag_like(t.trim(), super::FlagLike::Title, ctx.lang())?;
+    }
     if let Some(from) = &args.from {
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
         // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른
@@ -321,7 +327,6 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let Some(title) = args.title.clone().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) else {
         return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.add_no_title")));
     };
-    super::refuse_if_flag_like(&title, ctx.lang())?;
     let body = read_body(args.body)?;
     let kind = kind_override.or(args.kind).unwrap_or_default();
     let status = Status::new(args.status.clone().unwrap_or_else(|| repo.config.first_status().to_string()));
