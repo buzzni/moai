@@ -1318,7 +1318,7 @@ fn merge_words(
         return drop_key(t, key, left);
     };
     if t.get(key).and_then(Item::as_array).is_none() {
-        return write_value(t, key, new.iter().map(String::as_str).collect::<toml_edit::Array>().into());
+        return write_value(t, key, new.iter().map(|w| quoted(None, w)).collect::<toml_edit::Array>().into());
     }
     let base = base.unwrap_or_default();
     let words = t.get_mut(key).and_then(Item::as_array_mut).expect("방금 배열인 것을 봤다");
@@ -1361,10 +1361,15 @@ fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::V
 ///
 /// **문자열이 문자열을 갈면 따옴표 꼴도 옮긴다**(moai-5thc, 리뷰 moai-333l.wj6 의 5·6번). `Value::from` 은
 /// `Repr` 없이 와서, 꾸밈만 옮기던 판은 `sort = 'title'` 을 `sort = "created"` 로, `'''title'''` 도 큰따옴표로
-/// 폈다 — 주석은 남고 따옴표만 바뀌었다. 옛 값의 꼴로 [`quoted`] 가 다시 짓는다. 새로 적는 키에는 본이 없어
-/// 받은 값 그대로다.
+/// 폈다 — 주석은 남고 따옴표만 바뀌었다. 옛 값의 꼴로 [`quoted`] 가 다시 짓는다. 새로 적는 키와 문자열이
+/// 아니던 값에는 본이 없어 `quoted(None, …)` 이다 — 안 보이는 글자만 큰따옴표로 적고 나머지는 받은 값 그대로다.
 pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: toml_edit::Value) -> bool {
     if !t.contains_key(key) {
+        // 본이 없어도 안 보이는 글자는 [`quoted`] 가 큰따옴표로 적는다 — `Value::from` 은 `"` 가 든 낱말을
+        // 작은따옴표로 지어 탭·제로폭 공백을 날것으로 세웠다.
+        if let Some(word) = v.as_str() {
+            v = quoted(None, word);
+        }
         t.insert(key, Item::Value(v));
         return true;
     }
@@ -1378,10 +1383,13 @@ pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: to
         if same {
             return false;
         }
-        if let (toml_edit::Value::String(a), Some(word)) = (old, v.as_str()) {
-            if let Some(q) = quote_of(a) {
-                v = quoted(Some(q), word);
-            }
+        if let Some(word) = v.as_str() {
+            // 옛 값이 문자열이 아니거나(`sort = 3`) 이 판이 지은 값이면 본이 없다 — 그래도 [`quoted`] 를 지난다.
+            let q = match old {
+                toml_edit::Value::String(a) => quote_of(a),
+                _ => None,
+            };
+            v = quoted(q, word);
         }
         *v.decor_mut() = old.decor().clone();
     }
@@ -1619,13 +1627,16 @@ fn basic(word: &str) -> toml_edit::Value {
 }
 
 /// 눈에 안 보이거나 여느 띄어쓰기로 보이는 글자인가([`quoted`]·[`escaped`]) — 제어 문자, 스페이스 밖의 공백
-/// (탭·줄 구분자·NBSP 들), 그리고 폭 없는 서식 글자(제로폭 공백·조이너·방향 표시·BOM·소프트 하이픈).
+/// (탭·줄 구분자·NBSP 들), 폭 없는 서식 글자(제로폭 공백·조이너·방향 표시·BOM·소프트 하이픈·태그 글자),
+/// 그리고 빈칸으로 그려지는 한글 채움 글자(`U+3164` 들).
 fn unseen(c: char) -> bool {
     c.is_control()
         || (c.is_whitespace() && c != ' ')
         || matches!(c,
-            '\u{AD}' | '\u{34F}' | '\u{61C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}')
+            '\u{AD}' | '\u{34F}' | '\u{61C}' | '\u{115F}' | '\u{1160}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{3164}'
+            | '\u{FEFF}' | '\u{FFA0}' | '\u{FFF9}'..='\u{FFFB}' | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}' | '\u{E0001}' | '\u{E0020}'..='\u{E007F}')
 }
 
 /// 큰따옴표 문자열 안에 설 글([`quoted`]). `\`·`"` 와 안 보이는 글자([`unseen`])를 이스케이프로 적는다.
@@ -1640,7 +1651,9 @@ fn escaped(word: &str) -> String {
             '\r' => out.push_str(r"\r"),
             '\u{8}' => out.push_str(r"\b"),
             '\u{c}' => out.push_str(r"\f"),
-            c if unseen(c) => out.push_str(&format!("\\u{:04X}", c as u32)),
+            // `\u` 는 네 자리뿐이다 — 그 밖의 글자는 `\U` 여덟 자리로 적어야 다시 읽어 같다.
+            c if unseen(c) && (c as u32) <= 0xFFFF => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c if unseen(c) => out.push_str(&format!("\\U{:08X}", c as u32)),
             c => out.push(c),
         }
     }
@@ -2853,6 +2866,39 @@ mod tests {
         doc.merge_look(&base, &Look { sort: Some("a\u{200B}b".into()), ..Look::default() }).unwrap();
         assert_eq!(doc.render(), "[tui]\nsort = \"a\\u200Bb\"\n");
         assert_eq!(show(src, &["todo"], &["todo", " lead"]), "[tui]\nhidden = ['todo', ' lead']\n");
+
+        // 본이 없는 두 길도 같다 — 새로 적는 키와, 배열이 아닌 값을 배열로 갈아 적는 자리다.
+        let said = "say \"a\tb\u{200B}\"";
+        let mut doc = Doc::parse("[tui]\nx = 1\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { sort: Some(said.into()), ..Look::default() }).unwrap();
+        assert_eq!(doc.render(), "[tui]\nx = 1\nsort = \"say \\\"a\\tb\\u200B\\\"\"\n");
+        let mut doc = Doc::parse("[tui]\nhidden = 'todo'\n").unwrap();
+        let base = doc.look().0;
+        doc.merge_look(&base, &Look { hidden: Some(vec!["q\"\u{200B}".into(), "b".into()]), ..Look::default() })
+            .unwrap();
+        assert_eq!(doc.render(), "[tui]\nhidden = [\"q\\\"\\u200B\", \"b\"]\n");
+        // 한글 채움 글자도 안 보이는 글자고, `U+FFFF` 밖의 태그 글자는 `\U` 로 적어야 다시 읽어 같다.
+        assert_eq!(show(src, &["todo"], &["todo", "a\u{3164}b"]), "[tui]\nhidden = ['todo', \"a\\u3164b\"]\n");
+        let tagged = show(src, &["todo"], &["todo", "a\u{E0041}b"]);
+        assert_eq!(tagged, "[tui]\nhidden = ['todo', \"a\\U000E0041b\"]\n");
+        assert_eq!(Doc::parse(&tagged).unwrap().look().0.hidden, Some(vec!["todo".into(), "a\u{E0041}b".into()]));
+    }
+
+    /// **여러 줄 꼴은 따옴표로 끝나는 낱말도 같은 꼴로 선다**(moai-5thc, [`quoted`]) — 닫는 따옴표 앞 두 자까지는
+    /// 글이다.
+    #[test]
+    fn a_multi_line_quote_holds_a_word_ending_in_a_quote() {
+        let look = |src: &str, s: &str| {
+            let mut doc = Doc::parse(src).unwrap();
+            let base = doc.look().0;
+            doc.merge_look(&base, &Look { sort: Some(s.into()), ..Look::default() }).unwrap();
+            let out = doc.render();
+            assert_eq!(Doc::parse(&out).unwrap().look().0.sort.as_deref(), Some(s));
+            out
+        };
+        assert_eq!(look("[tui]\nsort = '''title'''\n", "it'"), "[tui]\nsort = '''it''''\n");
+        assert_eq!(look("[tui]\nsort = \"\"\"title\"\"\"\n", "q\""), "[tui]\nsort = \"\"\"q\\\"\"\"\"\n");
     }
 
     /// **본이 큰따옴표면 큰따옴표로 민다**(moai-5thc, 리뷰 moai-333l.wj6 의 2번, [`quoted`]). `Value::from` 은
