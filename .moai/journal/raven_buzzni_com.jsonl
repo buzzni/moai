@@ -1791,3 +1791,35 @@
 {"ts":"2026-09-29T01:49:38Z","id":"moai-cgcm.81v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (low — 되돌린 나무에 한 줄 고침을 체리픽으로 얹었다. 글은 원 커밋 그대로고 제목의 id 만 이 줄로 바꿨다)"}
 {"ts":"2026-09-29T01:49:46Z","id":"moai-cgcm.7b2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 0건. 옮겨 붙은 자리를 다 확인했다 (moai-cgcm.81v)"}
 {"ts":"2026-09-29T01:49:46Z","id":"moai-cgcm.81v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-09-29T01:51:25Z","id":"moai-pp9i.hrr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-pp9i epic diff"}
+{"ts":"2026-09-29T01:51:33Z","id":"moai-pp9i.hrr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-31v7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"기한 날짜의 낱말 둘 — 터무니없는 해와 status_due_days 0"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-35w3","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"층과 안쪽 배너의 알림 수는 옆 워크트리가 없을 때만 딱 맞는다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-3l3t","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"감싸는 명령 자신이 쓰는 자리를 훅이 못 본다 — script 의 기록 파일과 find 의 -delete"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-3w54","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 묶음 펼치기·접기에 메뉴로 닿는 키를 둔다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-42o6","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 원문을 `-b -` 로 넣을 때는 한국어 알림이 안 뜬다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-48ke","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"한국어 doc comment 의 용어를 파일째 맞춘다 — src/hook.rs 의 \"감싸는 명령\""}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-6ay6","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"project ls 가 셈 넷을 얻으려 경고 판을 통째로 짓고, 그것을 차례로 돈다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-7f03","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"add -e 도 자식 id 를 줄 것인가"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-a512","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"넘기는 값의 경계와 마일스톤 축에 타입이 안 서 있다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-ci2b","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"merge_driver 가 심는 경로를 지금 이 uid 로 고른다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-d28a","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"지도를 다시 짓는 자리들 — ready·status·prime 의 종류 지도와 show 의 소속 지도"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-d2vy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"rm 한 에픽 밑의 계획 멤버는 다시 못 붙는다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-d68v","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"path.rs 와 store.rs 의 글이 실제와 어긋난다 — 없는 이름·부르는 쪽 목록·재는 자 없는 real"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-dux7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"tui --json 과 탐색기가 다른 시계로 센다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-fufl","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 1만 줄이 넘으면 몇 초를 쓴다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-fyqf","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"find 한 줄의 자리를 술어 무리마다 잰다 — -execdir 과 -fprint 가 함께 선 줄"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-i15e","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"report::Dues 의 값과 기본값 — 글자로 든 기한과 자리 0·문턱 0"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-i4px","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 아닌 줄에 선 기한 — 보드가 안 비추고 판정이 세 층에 따로 있다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-intw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"든 시간의 멤버를 탐색기와 CLI 가 다른 지도에서 고른다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-jyce","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"판 검사의 답을 자리마다 한 줄로 들지 정한다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-mepu","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"태그로 어느 파트의 일인지 알 수 있게 한다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-mkd0","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC 메뉴에서 j·k·h·l 은 메뉴를 닫고 그 키의 일을 한다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-p0bs","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰가 넘긴 나머지 넷 — parallel 의 -l, runuser 의 자리 인자, 표 읽는 값, 되풀이 걷기"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-p3pv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"draw::screen 이 한 프레임에 banner 를 두 번 부른다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-sx2d","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"판정 안 한 보고서를 내는 문을 꼴로 막는다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-t4vq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Settled::Each 가 구조로는 Clash 를 들 수 있다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-tctc","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"UpdateTrouble 을 LookTrouble 에 접을지 정한다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-vwwo","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 상세가 가려진 줄에 적힌 에픽을 그대로 그린다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-wl64","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 밖으로 낸 줄이 경고 둘을 세운다"}
+{"ts":"2026-09-29T01:51:36Z","id":"moai-y2rc","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"조립한 줄이 걸릴 때 거절문이 어느 필드인지 안 댄다"}
