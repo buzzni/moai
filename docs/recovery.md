@@ -96,9 +96,11 @@ carries. Numbers move whenever a row comes or goes — an earlier `rm --line`
 included — so `--yes` is bound to the line you saw: the preview prints a short
 hash of that line and the whole command to type, `--yes` needs that hash in
 `--match`, and when the line now at that number does not match it nothing is
-removed. The removed line is printed,
-goes into the journal's `rm` entry (up to 64KB) and `--json` hands it back
-whole.
+removed and the refusal names the number the line you saw stands at now. Each
+removal needs its own preview — the hash also counts identical copies of the
+line, so typing the same command again after it went is refused. The removed
+line is printed, goes into the journal's `rm` entry (up to 64KB) and `--json`
+hands it back whole.
 
 A row written by a newer moai — a `kind` this binary does not know — is not
 broken. It reads again once this binary is upgraded, so leave it where it is.

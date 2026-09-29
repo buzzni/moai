@@ -280,9 +280,9 @@ printf '\\none more line\\n'; } | moai edit <id> -b -")]
   refusal lists the unreadable lines as they stand now. Numbers move when a
   row comes or goes - an earlier removal included - so --yes needs the hash
   the preview printed, and a line at that number that no longer matches it
-  is refused. Removing cannot be undone: the raw line is printed, goes into
-  the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
-  be put back by hand.")]
+  is refused with the number the line shown stands at now. Removing cannot
+  be undone: the raw line is printed, goes into the journal's `rm` entry (up
+  to 64KB) and `--json` hands it back whole, to be put back by hand.")]
     Rm(RmArgs),
     /// Leave a note on an issue (journal only)
     #[command(after_help = "  moai note moai-4aex 'the parser dies on a BOM'
@@ -1137,13 +1137,13 @@ pub struct RmArgs {
     // `conflicts` 면 그 `requires` 를 조용히 건너뛰어, `moai rm <id> --yes` 가 clap 을 지나 말없이
     // 지웠다(재 봤다). 거절은 `rm::run` 이 `BAD_INPUT` 으로 해서 `--json` 도 `code` 를 받는다 —
     // `add --dry-run` 이 제 거절을 `add::run` 에 두는 것과 같은 까닭이다(moai-yhb1).
-    /// With --line: remove it. Without, it is only shown
+    /// With --line and --match: remove it. Else only shown
     #[arg(long)]
     pub yes: bool,
     /// With --yes: the hash the preview printed
     // **`--yes` 를 보여 준 줄에 묶는다**(moai-6nha, 2026-09-29 사용자 결정). 번호만 보고 지우면
     // 줄 수가 바뀐 뒤 보여 준 것과 다른 못 읽는 줄이 간다. 거절은 `rm::run` 이 한다 — `yes` 와 같은
-    // 까닭으로 `requires` 를 안 건다.
+    // 까닭으로 `requires` 를 안 건다. 해시 꼴이 아닌 값(빈 값·오타)도 거기서 `bad_input` 으로 거절한다.
     #[arg(long = "match", value_name = "hash")]
     pub matches: Option<String>,
 }
