@@ -45,8 +45,10 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   rows: when it folds under one and not the other and that changes what it hands
   down, the rows below it stand in `(lost)` too. `derived_epic` is absent on such a
   row, `-e none` and `--milestone none` do not pick it, and `no_epic`·`no_milestone`
-  do not count it. The warning is not fatal; resolving the `duplicate_id` brings the
-  row back.
+  do not count it. It inherits no deferral and no worktree claim through that id, and
+  it stays in `moai ready` labelled `(lost)`. An idea that wrote its own epic is not
+  folded under such a parent; it stands at the root. The warning is not fatal;
+  resolving the `duplicate_id` brings the row back.
 
 ### Fixed
 
