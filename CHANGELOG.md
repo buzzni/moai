@@ -37,6 +37,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **The user config keeps the quotes you wrote.** Changing a value such as
+  `sort = 'title'` or `color = 'red'` from the explorer, or a read mark, used to
+  write it back double-quoted; it now keeps `'…'`, `'''…'''` or
+  `"""…"""` as it stood, with the comment after it. A word added to a double-quoted
+  array stays double-quoted even when it holds a `"` — one such column name used to
+  flip the whole array to single quotes on the next write. A word holding a tab, a
+  zero-width space or another invisible character is written double-quoted with an
+  escape (`"a\tb"`, `"a​b"`) instead of standing raw inside single quotes.
 - `moai add --from … --milestone <id>` and `moai idea promote` no longer say the
   epics stand on a milestone that is not there; they say on stderr that there is no
   such milestone (with `--json` too) and still write it, as `--epic <missing>` does.
