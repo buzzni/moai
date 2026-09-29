@@ -1940,3 +1940,9 @@
 {"ts":"2026-09-29T06:02:43Z","id":"moai-mrbv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh 가 cargo 1.97 에서 Cargo.lock 을 못 고친 채 고쳤다고 말한다"}
 {"ts":"2026-09-29T06:02:54Z","id":"moai-z66o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — scripts/bump-version.sh 가 한 것을 커밋하고 Cargo.lock 을 손으로 맞췄다)"}
 {"ts":"2026-09-29T06:02:54Z","id":"moai-z66o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.1.3 으로 서고 CHANGELOG 에 [0.1.3] - 2026-09-29 가 열렸다. 태그는 main 머지 커밋에 단다"}
+{"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"install.sh 로 판을 올릴 때 사람이 막히지 않는다"}
+{"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.lj5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"깔린 것이 이 moai 면 --force 없이 판을 올린다"}
+{"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.t8y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거절문이 파이프로 그대로 칠 명령을 준다"}
+{"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.2mo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"받기 전에 깔 자리를 먼저 본다"}
+{"ts":"2026-09-29T06:23:15Z","id":"moai-8rmw.665","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"새 판 알림과 README 가 올리는 명령을 준다"}
+{"ts":"2026-09-29T06:23:38Z","id":"moai-u1ck","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 가 제 판을 스스로 올리는 명령 (moai upgrade)"}
