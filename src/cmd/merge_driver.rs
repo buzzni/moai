@@ -1076,16 +1076,19 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
     const UNSET: &str = "\u{1}";
     let root = here;
     let key = driver_key();
-    let planted = match crate::git::run(root, &["config", "--local", "--get", "--default", UNSET, &key]) {
-        Ok(v) => v,
-        // **`--default` 가 없는 git 에서도 셋은 말한다**(리뷰 moai-vbmn.spv). 그 옵션은 2.18
-        // 부터고, 없는 git 은 `unknown option` 으로 비영이라 `.ok()?` 가 알림 식구를 통째로
-        // 삼켰다 — 이 에픽 전에는 `rotten` 과 `stale` 이 거기서도 돌았으니, 정확도를 더하려다
-        // 있던 말을 잃는 꼴이다. 맨 `--get` 으로 한 번 더 묻는다: 키가 없을 때의 비영은
-        // 예전처럼 입을 다무는 길이라, 옛 git 은 "안 심었다" 하나만 못 말하고 나머지는 산다.
-        // 이 저장소가 판을 가정하지 않고 내려앉는 자리는 `worktree::table` 이 이미 그 꼴이다.
-        Err(_) => crate::git::run(root, &["config", "--local", "--get", &key]).ok()?,
-    };
+    // **마감 안에 못 들은 답은 모르는 것이다**(moai-59k3.u09) — 옛 git 의 물러설 길로도 안 간다. 같은
+    // 마운트에 한 번 더 물으면 한도를 두 번 쓴다.
+    let planted =
+        match crate::git::run_within(root, &["config", "--local", "--get", "--default", UNSET, &key], PROBE_BUDGET)? {
+            Ok(v) => v,
+            // **`--default` 가 없는 git 에서도 셋은 말한다**(리뷰 moai-vbmn.spv). 그 옵션은 2.18
+            // 부터고, 없는 git 은 `unknown option` 으로 비영이라 `.ok()?` 가 알림 식구를 통째로
+            // 삼켰다 — 이 에픽 전에는 `rotten` 과 `stale` 이 거기서도 돌았으니, 정확도를 더하려다
+            // 있던 말을 잃는 꼴이다. 맨 `--get` 으로 한 번 더 묻는다: 키가 없을 때의 비영은
+            // 예전처럼 입을 다무는 길이라, 옛 git 은 "안 심었다" 하나만 못 말하고 나머지는 산다.
+            // 이 저장소가 판을 가정하지 않고 내려앉는 자리는 `worktree::table` 이 이미 그 꼴이다.
+            Err(_) => crate::git::run_within(root, &["config", "--local", "--get", &key], PROBE_BUDGET)?.ok()?,
+        };
     let planted = planted.trim();
     let away = crate::cmd::init::away_root(root, chdir);
     // 키는 있는데 비웠다 — 안 심은 것이 아니다. 위의 글이 까닭을 적는다.
@@ -1145,8 +1148,9 @@ fn told(here: &Path, chdir: bool) -> Option<crate::report::Warning> {
 /// `--local` 이 비었을 때만 돌고, 그 갈래는 어차피 [`probe`] 를 안 띄운다. 바닥을 올리거나
 /// 길을 하나 더 두는 값이 그보다 크다.
 fn planted_anywhere(root: &Path) -> bool {
-    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()])
-        .map_or(true, |v| !v.trim().is_empty())
+    crate::git::run_reading_user_config(root, &["config", "--get", "--default", "", &driver_key()], PROBE_BUDGET)
+        .and_then(Result::ok)
+        .is_none_or(|v| !v.trim().is_empty())
 }
 
 /// 이 저장소가 스냅샷에 `merge=moai` 를 걸어 뒀는가 — [`notice`] 네 갈래 전부의 막이다.
@@ -1159,7 +1163,8 @@ fn planted_anywhere(root: &Path) -> bool {
 /// `-z` 로 받는다 — 맨 출력은 `<경로>: merge: <값>` 이라 경로에 `: ` 가 들면 자를 자리가 갈린다.
 /// 못 물어봤으면(저장소 밖이다, git 이 없다) **거짓이다**: 모르면 입을 다문다.
 fn declared(root: &Path) -> bool {
-    let Ok(out) = crate::git::run(root, &["check-attr", "-z", "merge", "--", SNAPSHOT]) else {
+    let Some(Ok(out)) = crate::git::run_within(root, &["check-attr", "-z", "merge", "--", SNAPSHOT], PROBE_BUDGET)
+    else {
         return false;
     };
     let mut f = out.split('\0');
@@ -1227,6 +1232,11 @@ enum Probe {
 /// `moai status` 는 세션이 여는 화면이자 훅의 `UserPromptSubmit` 보드다(`cmd/hook.rs`) — 그 명령
 /// 하나가 잠들면 사람의 다음 프롬프트가 글자 한 줄 없이 함께 잠든다. `--help` 는 이 기계에서
 /// 9ms 였으니 2초는 느린 기계와 찬 캐시에도 넉넉하고, 넘긴 판은 **어차피 말할 것이 없다.**
+///
+/// **그 앞의 git 물음 셋도 이 한도로 잰다**(moai-59k3.u09) — `check-attr`([`declared`])와 심은 줄을
+/// 읽는 `config` 둘이다. 한도가 `probe` 하나에만 있던 판은 죽은 sshfs·NFS 마운트에 선 프로젝트
+/// 하나가 그 앞에서 멈춰, 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다. 못 들은 답은
+/// 모르는 것이라 알림이 입을 다문다 — `probe` 가 넘긴 판과 같은 쪽이다.
 const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
@@ -1413,32 +1423,14 @@ impl Drop for Said {
 
 /// [`PROBE_BUDGET`] 안에 끝나면 그 끝을, 아니면 죽이고 거둔 뒤 `None`.
 ///
-/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다.
-///
-/// **기다리는 칸을 늘려 간다**(리뷰 moai-vbmn.spv). 한 칸을 2ms 로 못박던 판은 3.8ms 에 끝나는
-/// 부름을 다음 2ms 자리까지 올림해, 잰 값이 판마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
-/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빠른 판은 거의 안 자고, 느린 판은
-/// 10ms 칸으로 자 [`PROBE_BUDGET`] 까지 깨는 횟수가 이백 번을 안 넘는다.
+/// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다. 기다리는 자는
+/// [`crate::git::waited`] 와 한 벌이다 — 칸을 늘려 가는 까닭도 거기 적혀 있다.
 fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
-    use std::time::{Duration, Instant};
-    const FLOOR: Duration = Duration::from_micros(200);
-    const CEIL: Duration = Duration::from_millis(10);
-    let deadline = Instant::now() + PROBE_BUDGET;
-    let mut nap = FLOOR;
-    loop {
-        match child.try_wait() {
-            Ok(Some(st)) => return Some(st),
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(nap);
-                nap = (nap * 2).min(CEIL);
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
+    crate::git::waited(child, PROBE_BUDGET).or_else(|| {
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    })
 }
 
 /// 아무도 안 주면 심을 명령 — **`PATH` 의 `moai` 가 같은 판이면 그쪽, 아니면 지금 이

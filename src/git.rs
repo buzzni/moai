@@ -186,6 +186,88 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     String::from_utf8(output(root, args)?).map_err(Error::NotUtf8)
 }
 
+/// [`run`] 과 같되 **`budget` 안에 안 끝나면 기다리지 않는다** — 그 판은 `None` 이다(moai-59k3.u09).
+///
+/// `Command::output` 에는 시간 상한이 없어, 등록한 프로젝트 하나가 죽은 sshfs·NFS 마운트에 있으면
+/// 그 자리에 대고 부른 git 이 영영 안 끝났다. 한눈 보기(`projects::each`)는 줄마다 실을 띄우고 전부
+/// 기다리므로, 그 한 줄이 나머지 프로젝트의 보드까지 한 줄도 안 내고 붙들었다.
+///
+/// **모든 git 부름의 계약을 바꾸지 않는다.** 여기로 오는 것은 답을 몰라도 입을 다물면 되는
+/// 물음뿐이다 — 병합 드라이버 알림의 셋이 그렇다. 이력·워크트리처럼 답이 곧 화면인 부름에
+/// 마감을 두면 느린 기계에서 멀쩡한 줄이 말없이 빈다.
+///
+/// 표준 출력과 오류도 마감 안에서만 기다린다 — git 이 끝났어도 파이프를 쥔 손자가 있으면 읽기가
+/// 안 끝나기 때문이다. 넘긴 git 은 죽이고, **거두는 일은 딴 실로 보낸다**: 죽은 마운트에 걸린
+/// 프로세스는 SIGKILL 을 받고도 커널 안에서 한참 안 끝날 수 있어, 여기서 `wait` 하면 마감이 샌다.
+pub fn run_within(root: &Path, args: &[&str], budget: std::time::Duration) -> Option<Result<String, Error>> {
+    finish_within(invocation(root, args), budget).map(|r| r.and_then(|b| String::from_utf8(b).map_err(Error::NotUtf8)))
+}
+
+/// 띄운 명령을 `budget` 안에서 끝까지 받는다 — [`run_within`] 과 [`run_reading_user_config`] 의 몸통.
+fn finish_within(mut cmd: std::process::Command, budget: std::time::Duration) -> Option<Result<Vec<u8>, Error>> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let deadline = std::time::Instant::now() + budget;
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => return Some(Err(Error::Spawn(e))),
+    };
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            let _ = tx.send(buf);
+        });
+        rx
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let received = waited(&mut child, budget).and_then(|status| {
+        let left = || deadline.saturating_duration_since(std::time::Instant::now());
+        let stdout = out.recv_timeout(left()).ok()?;
+        let stderr = err.recv_timeout(left()).ok()?;
+        Some((status, stdout, stderr))
+    });
+    let Some((status, stdout, stderr)) = received else {
+        let _ = child.kill();
+        std::thread::spawn(move || child.wait());
+        return None;
+    };
+    if !status.success() {
+        return Some(Err(Error::Failed(String::from_utf8_lossy(&stderr).trim().to_string())));
+    }
+    Some(Ok(stdout))
+}
+
+/// `budget` 안에 끝나면 그 끝을, 아니면 `None` — **죽이지도 거두지도 않는다.** 넘겼을 때 할 일은
+/// 부르는 쪽마다 다르다([`finish_within`] 은 거두기를 딴 실로 보내고, 병합 드라이버의 `probe` 는
+/// 그 자리에서 거둔다).
+///
+/// **기다리는 칸을 늘려 간다**(리뷰 moai-vbmn.spv). 한 칸을 2ms 로 못박던 판은 3.8ms 에 끝나는
+/// 부름을 다음 2ms 자리까지 올림해, 잰 값이 판마다 2~5ms 씩 늘었다 — 자는 동안 끝난 것을
+/// 모르고 더 자기 때문이다. 0.2ms 에서 시작해 갑절로 늘리면 빠른 판은 거의 안 자고, 느린 판은
+/// 10ms 칸으로 자 2초 한도까지 깨는 횟수가 이백 번을 안 넘는다.
+pub fn waited(child: &mut std::process::Child, budget: std::time::Duration) -> Option<std::process::ExitStatus> {
+    use std::time::{Duration, Instant};
+    const FLOOR: Duration = Duration::from_micros(200);
+    const CEIL: Duration = Duration::from_millis(10);
+    let deadline = Instant::now() + budget;
+    let mut nap = FLOOR;
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => return Some(st),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(nap);
+                nap = (nap * 2).min(CEIL);
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// [`run`] 과 같되 **설정 파일의 자리를 돌리는 변수 셋은 물려준다**(moai-b5np,
 /// [`crate::git_leaks::CONFIG_FILES`]).
 ///
@@ -198,18 +280,20 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
 /// 여는가**를 바꾸지 못하게 하는 것이 걷기가 선 까닭이고(moai-g1a3), 그것은 이 물음과 무관하다.
 /// 시험의 격리도 그대로다: `tests/cli.rs` 의 `isolated` 와 `git::isolated` 가 이 셋을 `/dev/null`
 /// 로 **채워** 주므로, 물려받아도 사람의 진짜 `~/.gitconfig` 는 안 드러난다.
-pub fn run_reading_user_config(root: &Path, args: &[&str]) -> Result<String, Error> {
+///
+/// **마감도 [`run_within`] 과 같다**(moai-59k3.u09) — 그 하나뿐인 자리가 알림의 물음이다.
+pub fn run_reading_user_config(
+    root: &Path,
+    args: &[&str],
+    budget: std::time::Duration,
+) -> Option<Result<String, Error>> {
     let mut cmd = invocation(root, args);
     for var in crate::git_leaks::CONFIG_FILES {
         if let Some(v) = std::env::var_os(var) {
             cmd.env(var, v);
         }
     }
-    let out = cmd.output().map_err(Error::Spawn)?;
-    if !out.status.success() {
-        return Err(Error::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string()));
-    }
-    String::from_utf8(out.stdout).map_err(Error::NotUtf8)
+    finish_within(cmd, budget).map(|r| r.and_then(|b| String::from_utf8(b).map_err(Error::NotUtf8)))
 }
 
 /// `git log` 을 띄우고 **레코드를 하나씩 흘려 보낸다**(moai-iol3).
@@ -538,6 +622,33 @@ fn records_of(record: &str) -> Option<(&str, &str, &str)> {
 pub(crate) mod tests {
     use super::*;
     use crate::git_leaks::{REPO, TEST};
+
+    /// **마감 안에 끝난 부름은 그대로 답하고, 넘긴 부름은 기다리지 않는다**(moai-59k3.u09). 죽은
+    /// 마운트에 걸린 git 을 `sleep` 이 대신한다 — 그 자리에서 멈춘 git 과 이쪽에서 보이는 것이 같다.
+    /// 손자가 파이프를 쥔 판도 잰다: 아이가 끝나도 읽기가 안 끝나 마감이 새던 자리다.
+    #[cfg(unix)]
+    #[test]
+    fn a_call_past_its_budget_is_not_waited_for() {
+        use std::process::Command;
+        use std::time::{Duration, Instant};
+        let sh = |script: &str| {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", script]).stdin(std::process::Stdio::null());
+            cmd
+        };
+        let budget = Duration::from_millis(300);
+
+        let said = finish_within(sh("echo hi"), Duration::from_secs(10)).expect("끝난 부름을 넘겼다고 한다");
+        assert_eq!(said.expect("0 으로 끝난 부름을 실패라 한다"), b"hi\n");
+        let failed = finish_within(sh("echo why >&2; exit 3"), Duration::from_secs(10)).expect("끝난 부름을 넘겼다");
+        assert!(matches!(failed, Err(Error::Failed(ref why)) if why == "why"), "{failed:?}");
+
+        for script in ["sleep 30", "sleep 30 & echo hi"] {
+            let clock = Instant::now();
+            assert!(finish_within(sh(script), budget).is_none(), "{script}: 넘긴 부름에 답이 섰다");
+            assert!(clock.elapsed() < budget * 5, "{script}: 마감을 안 지켰다 — {:?}", clock.elapsed());
+        }
+    }
 
     /// **기계에 내는 까닭은 경로를 자른다**(moai-6p1n) — git 의 stderr 에 실린 절대 경로가 `--json`
     /// 으로 나가지 않는다. 상대 경로와 경로 아닌 낱말은 그대로다.

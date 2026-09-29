@@ -17020,6 +17020,68 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
     assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
 }
 
+/// **죽은 마운트에 선 프로젝트 하나가 한눈 보기를 붙들지 않는다**(moai-59k3.u09). 설치 알림은
+/// 프로젝트마다 git 을 부르는데(`check-attr`·`config`), 그 부름에 시간 상한이 없어 한 줄이 멈추면
+/// 줄마다 띄운 실을 전부 기다리는 한눈 보기가 나머지 프로젝트의 보드까지 한 줄도 안 냈다.
+///
+/// 죽은 마운트는 `PATH` 앞에 세운 가짜 git 이 대신한다 — 그 프로젝트를 가리킨 부름만 잠든다.
+#[cfg(unix)]
+#[test]
+fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("hungmount");
+    let config = s.path().join("user/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let live = s.path().join("live");
+    let dead = s.path().join("dead");
+    for (dir, title) in [(&live, "살아 있는 일"), (&dead, "잠든 일")] {
+        std::fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-q"]);
+        ok(dir, &["init", "argos"]);
+        ok(dir, &["add", title]);
+        let out = staged(&["project", "add", &dir.display().to_string()])
+            .current_dir(dir)
+            .env("MOAI_CONFIG", &config)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let real = std::env::split_paths(&path_without_moai())
+        .map(|d| d.join("git"))
+        .find(|g| g.is_file())
+        .expect("git 을 못 찾았다");
+    let bin = s.path().join("fakebin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let fake = bin.join("git");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *{}*) exec sleep 30;; esac\nexec {} \"$@\"\n",
+            dead.display(),
+            real.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut path = vec![bin];
+    path.extend(std::env::split_paths(&path_without_moai()));
+
+    let outside = s.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let clock = std::time::Instant::now();
+    let out = staged(&["status"])
+        .current_dir(&outside)
+        .env("MOAI_CONFIG", &config)
+        .env("PATH", std::env::join_paths(path).unwrap())
+        .output()
+        .unwrap();
+    let took = clock.elapsed();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(took < std::time::Duration::from_secs(20), "잠든 프로젝트가 한눈 보기를 붙들었다 — {took:?}\n{said}");
+    assert!(said.contains("live") && said.contains("dead"), "프로젝트 한 줄을 빠뜨렸다\n{said}");
+}
+
 /// **심어 놓고 못 도는 드라이버를 `status` 가 한 줄로 비춘다**(moai-2ewr).
 ///
 /// 돈다고 믿는데 안 도는 자리다. 둘을 한 자리에서 잰다: 썩었을 때 대는가, 제대로 심으면
