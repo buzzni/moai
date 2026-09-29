@@ -273,13 +273,14 @@ printf '\\none more line\\n'; } | moai edit <id> -b -")]
   remove it by its line number; a row a newer moai wrote reads again after
   upgrading, so keep that one:
 
-  moai rm --line 812          shows the line, removes nothing
-  moai rm --line 812 --yes    removes it
+  moai rm --line 812                          shows the line and its hash
+  moai rm --line 812 --yes --match 1a2b3c4d   removes it
 
   Only an unreadable line is removed; any other line is refused, and the
   refusal lists the unreadable lines as they stand now. Numbers move when a
-  row comes or goes - an earlier removal included - so look again before
-  each --yes. Removing cannot be undone: the raw line is printed, goes into
+  row comes or goes - an earlier removal included - so --yes needs the hash
+  the preview printed, and a line at that number that no longer matches it
+  is refused. Removing cannot be undone: the raw line is printed, goes into
   the journal's `rm` entry (up to 64KB) and `--json` hands it back whole, to
   be put back by hand.")]
     Rm(RmArgs),
@@ -1139,6 +1140,12 @@ pub struct RmArgs {
     /// With --line: remove it. Without, it is only shown
     #[arg(long)]
     pub yes: bool,
+    /// With --yes: the hash the preview printed
+    // **`--yes` 를 보여 준 줄에 묶는다**(moai-6nha, 2026-09-29 사용자 결정). 번호만 보고 지우면
+    // 줄 수가 바뀐 뒤 보여 준 것과 다른 못 읽는 줄이 간다. 거절은 `rm::run` 이 한다 — `yes` 와 같은
+    // 까닭으로 `requires` 를 안 건다.
+    #[arg(long = "match", value_name = "hash")]
+    pub matches: Option<String>,
 }
 
 /// git 이 주는 자리 셋과, 사람이 치는 `--install`.

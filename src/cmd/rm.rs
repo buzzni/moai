@@ -14,9 +14,14 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     if args.yes && args.line.is_none() {
         return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.yes_without_line"), super::code::BAD_INPUT));
     }
+    // **`--match` 는 `--yes` 의 것이다.** 없이 준 해시는 아무것도 안 묶는다 — 보여 주기만 하는 길에서
+    // 받아 두면 친 사람은 지운 줄로 읽는다.
+    if args.matches.is_some() && !args.yes {
+        return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.match_without_yes"), super::code::BAD_INPUT));
+    }
     let repo = super::open_repo(ctx)?;
     if let Some(n) = args.line {
-        return line(ctx, &repo, n, args.yes);
+        return line(ctx, &repo, n, args.yes.then_some(args.matches.as_deref()));
     }
     let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
@@ -97,6 +102,9 @@ struct Line<'a> {
     id: Option<&'a str>,
     /// 파일에 있던 그대로의 원문. 지웠으면 이것이 되살릴 바이트다.
     text: &'a str,
+    /// 원문의 짧은 해시([`fingerprint`]). `--yes --match` 에 그대로 준다.
+    #[serde(rename = "match")]
+    matches: String,
     /// `--yes` 가 없어 보여 주기만 했다.
     dry_run: bool,
 }
@@ -120,10 +128,14 @@ struct Line<'a> {
 /// 대신 보는 명령을 대는 것과 같은 까닭이다(moai-pp9i.gtc). 그 줄이 무엇인지 알려고 파일을 한 번 더
 /// 읽던 길도 함께 걷었다 — `store` 밖의 둘째 읽기였고, 락 밖에서는 두 벌의 파일을 섞어 말했다.
 ///
-/// **번호가 다른 못 읽는 줄에 떨어지는 것은 못 막는다.** 줄이 늘거나 줄면 번호가 움직이고 — 앞의
-/// `--line` 한 번도 그렇다 — `--yes` 는 보여 준 원문을 모른다. 막으려면 보여 준 줄에 묶는 새 인자가
-/// 있어야 해서 사람이 정할 일로 남겼다. 그래서 지운 뒤에도 원문을 찍어 무엇이 갔는지 그 자리에서 보인다.
-fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: bool) -> R<Vec<String>> {
+/// **`--yes` 는 보여 준 원문에 묶인다**(moai-6nha, 2026-09-29 사용자 결정). 줄이 늘거나 줄면 번호가
+/// 움직이고 — 앞의 `--line` 한 번도 그렇다 — 번호만 보고 지우면 보여 준 것과 다른 못 읽는 줄이 간다.
+/// 그래서 보여 줄 때 원문의 짧은 해시와 그대로 칠 명령을 내고, `--yes` 는 그 해시(`--match`)가 있어야
+/// 하며, 락 안에서 다시 읽은 그 번호의 원문이 해시와 다르면 거절한다. 지운 뒤에도 원문을 찍는다 —
+/// 저널 쓰기가 실패했거나 64KB 에서 잘린 줄은 그 화면 말고는 온전히 남는 곳이 없다.
+///
+/// `yes` 는 `--yes` 가 없으면 `None`, 있으면 `--match` 로 받은 해시다(없으면 안의 `None`).
+fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: Option<Option<&str>>) -> R<Vec<String>> {
     let lang = ctx.lang();
     // 거절문은 그 순간 읽은 못 읽는 줄로 짓는다. 번호에 id 를 곁들여야 산 줄의 깨진 쌍둥이를 골라낸다.
     let refuse = |errors: &[crate::store::LoadError]| -> Fail {
@@ -145,7 +157,14 @@ fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: bool) -> R<Vec<Stri
         )
     };
 
-    let e = if yes {
+    let e = if let Some(want) = yes {
+        // 해시 없는 `--yes` 는 파일을 열기 전에 거절한다 — 보여 주는 길이 해시와 칠 명령을 낸다.
+        let Some(want) = want else {
+            return Err(Fail::coded(
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.yes_without_match"), &[("line", &n.to_string())]),
+                super::code::BAD_INPUT,
+            ));
+        };
         let at = model::now();
         let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?;
         repo.with_write_lines(
@@ -153,6 +172,17 @@ fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: bool) -> R<Vec<Stri
             |_, unread, _, _| {
                 // 락 안에서 다시 읽은 줄로 찾고 거절문도 그것으로 짓는다 — 밖에서 본 번호는 낡았을 수 있다.
                 let Some(k) = unread.iter().position(|e| e.line == n) else { return Err(refuse(unread)) };
+                // 해시는 대소문자를 안 가린다 — 손으로 옮겨 친 값이 대문자여도 같은 줄이다.
+                let now = fingerprint(&unread[k].text);
+                if !now.eq_ignore_ascii_case(want.trim()) {
+                    return Err(Fail::coded(
+                        crate::i18n::fill(
+                            crate::i18n::say(lang, "refuse.line_does_not_match"),
+                            &[("line", &n.to_string()), ("match", &crate::text::one_line(want)), ("now", &now)],
+                        ),
+                        super::code::NOT_FOUND,
+                    ));
+                }
                 let e = unread.remove(k);
                 Ok((vec![JournalEntry::removed_line(e.id.as_deref(), &e.text, &at, &by)], e))
             },
@@ -162,7 +192,8 @@ fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: bool) -> R<Vec<Stri
         let Some(k) = errors.iter().position(|e| e.line == n) else { return Err(refuse(&errors)) };
         errors.swap_remove(k)
     };
-    let l = Line { line: n, id: e.id.as_deref(), text: &e.text, dry_run: !yes };
+    let dry_run = yes.is_none();
+    let l = Line { line: n, id: e.id.as_deref(), text: &e.text, matches: fingerprint(&e.text), dry_run };
     if ctx.json {
         return super::json_line(&l);
     }
@@ -170,13 +201,25 @@ fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, yes: bool) -> R<Vec<Stri
     // 아무도 못 보고, 저널 쓰기가 실패했거나 64KB 에서 잘린 줄은 어디에도 온전히 안 남는다. 파일에서 온
     // 글이라 제어문자를 걷어 그린다(`text::one_line`) — 바이트 그대로는 `--json` 의 `text` 에 있다.
     let mut out = vec![head(ctx, &l), format!("  {}", crate::text::one_line(&e.text))];
-    if !yes {
-        out.push(crate::i18n::say(lang, "rm.line_ask").to_string());
+    if dry_run {
+        out.push(crate::i18n::fill(
+            crate::i18n::say(lang, "rm.line_ask"),
+            &[("cmd", &format!("moai rm --line {n} --yes --match {}", l.matches))],
+        ));
     } else if e.text.len() > model::MAX_TEXT_BYTES {
         // 저널의 `rm` 줄은 `model::fit_bytes` 가 자른 앞머리만 든다(`JournalEntry::removed_line`).
         out.push(crate::i18n::say(lang, "rm.line_cut").to_string());
     }
     Ok(out)
+}
+
+/// 못 읽는 줄 원문의 짧은 해시 — `--yes` 를 보여 준 줄에 묶는 `--match` 의 값(moai-6nha).
+///
+/// FNV-1a 32비트([`crate::text::fnv1a32`])를 16진 8자로 낸다. 적대적 입력을 막는 자리가 아니라 번호가
+/// 밀려 **다른** 못 읽는 줄에 떨어진 것을 가르는 자리라, 충돌에 강할 까닭이 없다. 바이트는 파일의
+/// 원문 그대로다 — 화면에 그린 글(`text::one_line`)로 세면 제어문자만 다른 두 줄이 같은 값이 된다.
+fn fingerprint(text: &str) -> String {
+    format!("{:08x}", crate::text::fnv1a32(text.as_bytes()))
 }
 
 /// `line 812 (argos-0001):` 또는 `removed line 812 (argos-0001):` — id 를 못 읽은 줄은 괄호가 안 선다.
