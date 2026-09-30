@@ -4877,6 +4877,40 @@ fn show_removed_lists_what_rm_took_out() {
     assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
 }
 
+/// **끊긴 저널 꼬리가 지움을 조용히 삼키지 않는다**(moai-a65c, moai-g8ho). 쓰는 쪽은 꼬리를 채운 뒤에 덧붙여
+/// 새 `rm` 줄을 제 줄에 세우고, 읽는 쪽은 이미 붙어 버린 줄(옛 바이너리가 쓴 것)을 파일과 줄 번호로 대며 0 이
+/// 아닌 코드로 끝난다. 목록은 그대로 낸다 — `--json` 을 읽는 기계는 코드로 덜 온 답인 줄 안다.
+#[test]
+fn a_torn_journal_tail_never_swallows_a_removal() {
+    let s = init("removed-torn");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(r#"{"ts":"2026-09-02T00:00:00Z","id":"x","kind":"no"#);
+    std::fs::write(&journal, &text).unwrap();
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &first]);
+    let listed = ok(s.path(), &["show", "--removed", "--json"]);
+    assert!(listed.contains(&format!("\"id\":\"{first}\"")), "끊긴 꼬리 뒤의 rm 이 빠졌다 — {listed}");
+
+    // 옛 바이너리가 끊긴 꼬리에 붙여 쓴 `rm` 줄이다.
+    let torn_at = std::fs::read_to_string(&journal).unwrap().lines().count() + 1;
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-06T00:00:00Z\",\"id\":\"x\",\"kind\":\"no{{\"ts\":\"2026-09-07T00:00:00Z\",\"id\":\"{second}\",\"kind\":\"rm\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    for json in [true, false] {
+        let args: &[&str] = if json { &["show", "--removed", "--json"] } else { &["show", "--removed"] };
+        let out = moai(s.path(), args);
+        let (listed, said) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!out.status.success(), "못 푼 rm 줄을 두고 0 으로 끝냈다 — {said}");
+        assert!(listed.contains(&first), "목록을 안 냈다 — {listed}");
+        let name = journal.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(said.contains(&format!("{name}:{torn_at}")), "못 푼 줄의 자리를 안 댔다 — {said}");
+    }
+}
+
 /// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
 /// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
 #[test]

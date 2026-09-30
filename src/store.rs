@@ -1044,10 +1044,15 @@ impl Repo {
     /// 손으로 쓴 줄은 `kind` 의 값 글자를 `\u` 이스케이프(뒤에 16진 넷)로 적을 수 있고, 그 줄도 풀면 `rm` 이다
     /// (`model::may_hold_note` 와 같은 까닭). 그것을 거르면 `moai show <id>` 의 이력은 그 줄을 "삭제" 로
     /// 그리는데 `--removed` 에는 안 선다 — `JournalEntry::removes_issue` 가 막으려던 어긋남이다.
-    pub fn journal_of_kind(&self, kind: &str) -> Vec<JournalEntry> {
+    ///
+    /// **앞 거르개를 지났는데 못 푼 줄은 자리째 곁에 낸다**(moai-g8ho). 저널을 관대하게 읽어도 되는 까닭은
+    /// "저널은 상태를 안 만든다" 였는데, `--removed` 에서는 저널이 답의 전부다 — 끊긴 꼬리에 붙어 못 풀린
+    /// `rm` 줄을 말없이 빼면 그 지움이 조용히 사라진다. 그 줄이 정말 `rm` 이었는지는 못 풀었으니 모른다:
+    /// 낼 수 있는 것은 "지움을 들었을 수 있는 줄" 이고, 알리는 것은 부르는 쪽이 한다.
+    pub fn journal_of_kind(&self, kind: &str) -> (Vec<JournalEntry>, Vec<Garbled>) {
         let quoted = format!("\"{kind}\"");
         let mut out = Vec::new();
-        self.each_entry(
+        let garbled = self.each_entry(
             |l| l.contains(&quoted) || l.contains("\\u"),
             |e| {
                 if e.kind == kind {
@@ -1056,13 +1061,18 @@ impl Repo {
             },
         );
         in_ts_order(&mut out);
-        out
+        (out, garbled)
     }
 
     /// 저널 파일을 다 걸으며 `line` 이 고른 줄을 풀어 `take` 에 건넨다 — [`Repo::journal_by_id`] 와
     /// [`Repo::journal_of_kind`] 가 지나는 한 걸음. 읽는 법의 까닭은 `journal_by_id` 에 적혀 있다.
     /// 차례는 읽은 차례(파일 차례, 파일 안의 줄 차례)고, `ts` 로 세우는 것은 부르는 쪽이 [`in_ts_order`] 로 한다.
-    fn each_entry(&self, line: impl Fn(&str) -> bool, mut take: impl FnMut(JournalEntry)) {
+    ///
+    /// 돌려주는 것은 **`line` 이 골랐는데 못 푼 줄**의 자리다([`Garbled`], moai-g8ho). 글자가 깨진 줄도 고를지는
+    /// 깨진 글자를 `�` 로 바꾼 글로 묻는다 — 그 글로 풀지는 않는다(까닭은 `journal_by_id` 에 있다). 이력은
+    /// 그것을 버리고, 저널이 답의 전부인 [`Repo::journal_of_kind`] 는 곁에 낸다.
+    fn each_entry(&self, line: impl Fn(&str) -> bool, mut take: impl FnMut(JournalEntry)) -> Vec<Garbled> {
+        let mut garbled = Vec::new();
         for path in self.journal_files() {
             let bytes = match std::fs::read(&path) {
                 Ok(b) => b,
@@ -1078,18 +1088,31 @@ impl Repo {
                 }
             };
             let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
-            for raw in bytes.split(|b| *b == b'\n') {
+            for (n, raw) in bytes.split(|b| *b == b'\n').enumerate() {
                 // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
-                let Ok(l) = std::str::from_utf8(raw) else { continue };
-                let l = l.strip_suffix('\r').unwrap_or(l);
+                let (text, whole) = match std::str::from_utf8(raw) {
+                    Ok(l) => (std::borrow::Cow::Borrowed(l), true),
+                    Err(_) => (String::from_utf8_lossy(raw), false),
+                };
+                let l = text.strip_suffix('\r').unwrap_or(&text);
                 if l.trim().is_empty() || !line(l) {
                     continue;
                 }
-                let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
-                take(e);
+                match whole.then(|| serde_json::from_str::<JournalEntry>(l).ok()).flatten() {
+                    Some(e) => take(e),
+                    None => garbled.push(Garbled { at: path.clone(), line: n + 1 }),
+                }
             }
         }
+        garbled
     }
+}
+
+/// 저널에서 고른 줄인데 못 푼 자리 — 파일과 1부터 센 줄 번호([`Repo::journal_of_kind`], moai-g8ho).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Garbled {
+    pub at: PathBuf,
+    pub line: usize,
 }
 
 /// 저널 줄을 `ts` 차례로 세운다 — **안정 정렬이다**: 같은 `ts` 를 든 줄은 읽은 차례 그대로 남고, 그 차례를
@@ -2629,8 +2652,9 @@ mod tests {
     /// 모르므로 `journal_by_id` 로는 못 물어, `show --removed` 가 이것을 부른다.
     ///
     /// 한 번에 넷을 잰다 — 글이 `rm` 인 `note` 와 제목이 `rm` 인 `create` 는 앞 거르개를 지나도 `kind` 가
-    /// 달라 빠지고, `"rm"` 을 든 채 깨진 줄은 파서에서 넘어져도 파일 하나를 넘어뜨리지 않고(리뷰 — 앞 거르개에서
-    /// 걸러지는 깨진 줄로는 파서의 관대함을 못 잰다), 같은 `ts` 는 파일 차례(옛 한 파일이 먼저)를 지키고,
+    /// 달라 빠지고, `"rm"` 을 든 채 깨진 줄은 파서에서 넘어져도 파일 하나를 넘어뜨리지 않되 그 자리를 곁에 내고
+    /// (리뷰 — 앞 거르개에서 걸러지는 깨진 줄로는 파서의 관대함을 못 잰다, moai-g8ho), 같은 `ts` 는 파일 차례(옛 한
+    /// 파일이 먼저)를 지키고,
     /// `kind` 를 `\u` 로 적은 손 줄도 고른다(리뷰).
     #[test]
     fn journal_of_kind_picks_one_kind_across_files_in_ts_order() {
@@ -2659,7 +2683,8 @@ mod tests {
         std::fs::write(d.join(".moai/journal").join(journal_file(&by.email).unwrap()), split.join("\n") + "\n")
             .unwrap();
 
-        let got: Vec<(String, String)> = r.journal_of_kind("rm").into_iter().map(|e| (e.ts, e.id)).collect();
+        let (rows, garbled) = r.journal_of_kind("rm");
+        let got: Vec<(String, String)> = rows.into_iter().map(|e| (e.ts, e.id)).collect();
         assert_eq!(
             got,
             [
@@ -2671,7 +2696,31 @@ mod tests {
             ],
             "kind·차례·관대함·이스케이프 가운데 하나가 어긋났다"
         );
-        assert!(r.journal_of_kind("status").is_empty(), "없는 kind 에서 줄을 지어냈다");
+        assert_eq!(garbled, [Garbled { at: r.journal_path(), line: 3 }], "못 푼 rm 줄의 자리를 안 댔다");
+        let (rows, garbled) = r.journal_of_kind("status");
+        assert!(rows.is_empty(), "없는 kind 에서 줄을 지어냈다");
+        assert!(garbled.is_empty(), "앞 거르개에 안 걸린 깨진 줄을 댔다: {garbled:?}");
+    }
+
+    /// **못 푼 줄은 앞 거르개를 지났을 때만 댄다**(moai-g8ho) — 글자가 깨진 줄도 같다. 끊긴 꼬리에 붙은 `rm`
+    /// 줄을 말없이 빼면 `show --removed` 가 그 지움을 조용히 잃는다. 깨진 글자를 `�` 로 바꾼 글로 **고르기만**
+    /// 하고 풀지는 않는다 — 그 글로 풀면 망가진 값이 이력에 선다.
+    #[test]
+    fn a_garbled_line_that_may_hold_the_kind_is_named() {
+        let (r, _d) = repo("ofkind-garbled");
+        let by = crate::model::someone("raven");
+        let whole = serde_json::to_string(&JournalEntry::removed("argos-0001", "하나", T, &by)).unwrap();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"{\"ts\":\"2026-09-10\",\"kind\":\"note\",\"text\":\"x\"\n");
+        bytes.extend_from_slice(b"{\"ts\":\"2026-09-10\",\"kind\":\"rm\",\"title\":\"\xed\x95\n");
+        bytes.extend_from_slice(format!("{whole}\n").as_bytes());
+        bytes.extend_from_slice(b"{\"ts\":\"2026-09-11\",\"kind\":\"no{\"ts\":\"2026-09-12\",\"kind\":\"rm\"}\n");
+        std::fs::write(r.journal_path(), bytes).unwrap();
+        let (rows, garbled) = r.journal_of_kind("rm");
+        assert_eq!(rows.len(), 1);
+        let lines: Vec<usize> = garbled.iter().map(|g| g.line).collect();
+        assert_eq!(lines, [2, 4], "고른 줄 가운데 못 푼 것만 대야 한다");
+        assert_eq!(r.journal_of("argos-0001").len(), 1, "이력 쪽 읽기가 달라졌다");
     }
 
     /// **끊긴 꼬리 뒤에 적은 줄은 제 줄에 선다**(moai-a65c). 저널이 `\n` 없이 끝난 뒤(디스크가 찼거나 덧붙이다
@@ -2691,7 +2740,7 @@ mod tests {
             |_, _, _| Ok((vec![JournalEntry::removed("argos-0003", "셋", T, &by)], ())),
         )
         .unwrap();
-        let removed: Vec<String> = r.journal_of_kind("rm").into_iter().map(|e| e.id).collect();
+        let removed: Vec<String> = r.journal_of_kind("rm").0.into_iter().map(|e| e.id).collect();
         assert_eq!(removed, ["argos-0003"], "끊긴 꼬리 뒤의 rm 줄이 그 꼬리에 붙었다");
         assert_eq!(r.journal_of("argos-0001").len(), 1, "앞의 온전한 줄을 잃었다");
         let text = std::fs::read_to_string(&file).unwrap();

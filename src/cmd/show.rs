@@ -504,12 +504,38 @@ fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) ->
     // 때를 읽는 자는 목록의 `--since` 와 한 벌이다(`Filter::build`) — 날로 친 때는 읽는 사람의 날이다.
     let timed = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
     let zone = timed.needs_zone().then(|| ctx.zone());
-    let entries = repo.journal_of_kind("rm");
+    let (entries, garbled) = repo.journal_of_kind("rm");
+    name_garbled(ctx, &garbled);
     let rows = crate::query::removed(&entries, &timed.updated, zone);
     if ctx.json {
         return super::json_line(&rows);
     }
     Ok(view::removed(&rows, &repo.config, view::Screen::new(ctx.lang()).at(ctx.clock())))
+}
+
+/// `--removed` 가 **못 푼 줄**을 stderr 로 대고 비영 종료하게 한다(moai-g8ho). 스냅샷의 못 읽는 줄을
+/// [`super::report_load_errors`] 가 다루는 것과 같은 꼴이다 — 목록은 그대로 내고, 덜 온 답이라는 것은 말과
+/// 종료 코드가 진다.
+///
+/// 이력(`show <id>`)은 같은 줄을 말없이 건너뛰는데 여기만 말하는 까닭은 **저널이 이 답의 전부라서다.**
+/// 이력에서 빠진 줄은 스냅샷이 여전히 그 이슈를 말하지만, 여기서 빠진 `rm` 은 어디에도 안 남는다. 자리는
+/// 파일째로 댄다 — 고치는 법이 그 줄을 여는 것이고, 받은 저장소의 파일 이름일 수 있어 한 줄로 거른다.
+fn name_garbled(ctx: &Ctx, garbled: &[crate::store::Garbled]) {
+    use crate::i18n::{fill, say};
+    if garbled.is_empty() {
+        return;
+    }
+    let lang = ctx.lang();
+    eprintln!("{}", fill(say(lang, "show.removed_garbled"), &[("n", &garbled.len().to_string())]));
+    for g in garbled.iter().take(5) {
+        let at = crate::text::one_line(&g.at.display().to_string());
+        eprintln!("{}", fill(say(lang, "show.removed_garbled_at"), &[("at", &at), ("line", &g.line.to_string())]));
+    }
+    if garbled.len() > 5 {
+        eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(garbled.len() - 5).to_string())]));
+    }
+    // **말한 뒤에 세운다** — 이 줄이 안 나갔는데 코드만 1 이면 사람은 까닭 없는 실패를 본다.
+    super::note_partial();
 }
 
 /// 목록의 줄 하나 — 줄에 `work` 를 곁들인다(moai-p8qj).

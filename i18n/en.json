@@ -730,6 +730,8 @@
   "show.lossy_title": "the title of {id} reads differently when put back in through this format — fix it before you do",
   "show.removed_with": "`{flag}` cannot be used with `--removed` — it lays the journal's removals out whole, oldest first.",
   "show.removed_with_how": "only `--since` narrows it: `moai show --removed --since <when>`",
+  "show.removed_garbled": "unreadable journal lines that may record a removal: {n} — this list may be missing them",
+  "show.removed_garbled_at": "  {at}:{line}",
   "refuse.title_looks_like_a_flag": "`{title}` reads as a flag, not a title.",
   "refuse.title_after_dashes": "if it really is the title, put it after `--` — `moai {verb} -- {title}`",
   "refuse.title_after_equals": "if it really is the title, join it with `=` — `moai edit {id} --title={title}`",
