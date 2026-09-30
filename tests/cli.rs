@@ -4783,6 +4783,100 @@ fn show_filters_by_time() {
     assert_eq!(picked(&["--done", "2026-09-05", "-s", "done,review"]), sorted(&[&closed, &epic, &member]));
 }
 
+/// **지운 이슈는 저널에서 받는다**(moai-7dmq) — `--since` 는 줄 자신의 도장으로 거르므로 `rm` 이 지운 줄을
+/// 모른다. `--removed` 가 저널의 `rm` 줄을 `ts` 차례로 내고 `--since` 로 그때부터를 고른다. `--json` 은 봉투
+/// 없는 저널 줄 배열이다 — `show <id> --json` 의 `journal` 원소와 같은 꼴.
+#[test]
+fn show_removed_lists_what_rm_took_out() {
+    let s = init("removed");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let kept = add_at(s.path(), "2026-09-01T00:00:00Z", &["남길 일"]);
+    // 지운 차례와 id 차례를 거꾸로 세운다 — 차례가 `ts` 인지 id 인지 가른다.
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &second]);
+    ok_at(s.path(), "2026-09-07T00:00:00Z", &["rm", &first]);
+    ok_at(s.path(), "2026-09-08T00:00:00Z", &["note", &kept, "rm"]);
+    // 못 읽는 줄을 지운 `rm` 은 이슈를 지운 것이 아니다 — 제목이 없다(`JournalEntry::removed_line`).
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-09T00:00:00Z\",\"id\":\"{kept}\",\"kind\":\"rm\",\"by\":\"t\",\"by_email\":\"t@example.com\",\"note\":\"{{깨진\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    let ids = |json: &str| -> Vec<String> {
+        json.match_indices(r#""id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+    };
+
+    let all = ok(s.path(), &["show", "--removed", "--json"]);
+    assert_eq!(ids(&all), [second.as_str(), first.as_str()], "지운 이슈를 지운 차례로 안 냈다 — {all}");
+    assert!(all.starts_with("[{\"ts\":\"2026-09-05T00:00:00Z\""), "저널 줄 그대로가 아니다 — {all}");
+    assert!(all.contains("\"kind\":\"rm\"") && all.contains("\"title\":\"나중 지울 일\""), "{all}");
+    let since = ok(s.path(), &["show", "--removed", "--since", "2026-09-06T00:00:00Z", "--json"]);
+    assert_eq!(ids(&since), [first.as_str()], "`--since` 가 지운 때로 안 걸렀다 — {since}");
+    let sugar = ok(s.path(), &["show", "--removed", "--filter", "since=2026-09-06", "--json"]);
+    assert_eq!(ids(&sugar), [first.as_str()], "`--filter since=` 가 안 먹었다 — {sugar}");
+    assert_eq!(ok(s.path(), &["show", "--removed", "--since", "2026-09-10", "--json"]).trim(), "[]");
+    // 사람 화면도 같은 줄이다.
+    let human = ok(s.path(), &["show", "--removed"]);
+    assert!(human.contains(&first) && human.contains("먼저 지울 일") && human.contains(&second), "{human}");
+    assert!(!human.contains(&kept), "지운 이슈가 아닌 줄을 냈다 — {human}");
+
+    // **`--since` 말고는 안 받는다** — 거를 칸도 커서로 삼을 줄도 없다. 말없이 먹으면 걸러진 목록이라 믿는다.
+    // `ShowArgs`·`FilterArgs`·`PageArgs` 의 필드마다 하나씩이다(리뷰 — 아홉만 재던 자리다). 거절이 **그 이름을 제
+    // 자리에** 짚는지 본다: 말묶음의 `--removed`·`--since` 가 늘 서 있어, 글 어디엔가 있는지만 보면 `-s` 는 늘 참이다.
+    let named = |flag: &str| format!("`--removed` 에는 `{flag}` 를");
+    for bad in [
+        &["-s", "todo"][..],
+        &["-t", "bug"][..],
+        &["--no-tag", "bug"][..],
+        &["-e", "none"][..],
+        &["--milestone", "none"][..],
+        &["--parent", "none"][..],
+        &["-p", "1"][..],
+        &["-a", "none"][..],
+        &["--type", "issue"][..],
+        &["-g", "지울"][..],
+        &["--stale", "3"][..],
+        &["--created", "2026-09-01.."][..],
+        &["--done", "..2026-09-10"][..],
+        &["--deferred"][..],
+        &["--all"][..],
+        &["--filter", "status=todo"][..],
+        &["--sort", "id"][..],
+        &["--reverse"][..],
+        &["-n", "1"][..],
+        &["--after", kept.as_str()][..],
+        &["--worktree"][..],
+        &["--tree"][..],
+        &["--raw"][..],
+        &["--as-plan"][..],
+        &[kept.as_str()][..],
+    ] {
+        let mut args = vec!["show", "--removed", "--json"];
+        args.extend_from_slice(bad);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains(r#""code":"bad_filter""#) && said.contains(&named(bad[0])), "{bad:?} — {said}");
+    }
+    // **`--filter` 의 항목은 목록과 같은 자가 읽는다**(`query::desugar`, 리뷰) — `=` 없는 항목과 없는 항목 이름은
+    // 목록이 대는 그 말로 거절하고, 빈 항목은 목록처럼 건너뛴다.
+    for (item, says) in [("since", "항목=값"), ("bogus=1", "`bogus` 라는 필터 항목이 없다")] {
+        let out = moai(s.path(), &["show", "--removed", "--filter", item, "--json"]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && said.contains(r#""code":"bad_filter""#) && said.contains(says),
+            "{item} — {said}"
+        );
+    }
+    assert_eq!(
+        ids(&ok(s.path(), &["show", "--removed", "--filter", " ", "--json"])),
+        [second.as_str(), first.as_str()]
+    );
+    let out = moai(s.path(), &["epic", "show", "--removed"]);
+    assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
+}
+
 /// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
 /// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
 #[test]
@@ -6504,6 +6598,7 @@ fn every_command_still_speaks_json() {
         vec!["prime", "--json"],
         vec!["show", "--json"],
         vec!["show", "--tree", "--json"],
+        vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
@@ -7077,6 +7172,13 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         let said = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(said.contains(flag[0]), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
     }
+    // **지운 줄을 늘어놓는 말도 목록의 것이다**(moai-7dmq). 다만 그 거절은 제 길(`show::removed`)에서 나고, 그 말에는
+    // `--removed` 가 늘 서 있다 — 위 고리에 두면 `said.contains("--removed")` 가 늘 참이라 아무것도 안 잰다(리뷰).
+    // 그래서 버린 것(펼칠 id)을 제 자리에 짚는지 본다.
+    let out = moai(s.path(), &["show", id.as_str(), "--removed"]);
+    assert!(!out.status.success(), "`--removed` 를 말없이 버렸다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains(&format!("`--removed` 에는 `{id}` 를")), "펼칠 id 를 안 짚었다 — {said}");
 }
 
 /// **트리는 모든 줄을 정확히 한 번 낸다.** 자리를 정하는 코드가 둘이면

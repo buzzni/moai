@@ -2243,8 +2243,9 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
         // **제목 없는 `rm` 은 못 읽는 줄을 지운 것이다**([`JournalEntry::removed_line`]). 그 id 의 이슈는
         // 멀쩡히 설 수 있다 — 산 줄의 깨진 쌍둥이를 지운 경우다. 이슈를 지운 `rm` 은 늘 제목을 든다
         // ([`JournalEntry::removed`]). 둘을 한 낱말로 그리면 산 이슈의 이력이 "삭제" 로 끝난다.
-        "rm" if e.title.is_none() => say(lang, "journal.remove_line").to_string(),
-        "rm" => say(lang, "journal.remove").to_string(),
+        // 가르는 자는 [`JournalEntry::removes_issue`] 하나다 — `moai show --removed` 가 같은 자로 고른다.
+        "rm" if e.removes_issue() => say(lang, "journal.remove").to_string(),
+        "rm" => say(lang, "journal.remove_line").to_string(),
         "status" => format!(
             "{} → {}",
             clean(e.from.as_deref().unwrap_or("?")),
@@ -2263,6 +2264,42 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     )
     .trim_end()
     .to_string()
+}
+
+/// `moai show --removed` 의 줄 — 지운 때, id, 제목, 지운 사람(moai-7dmq). **접지 않는다** — 받은
+/// 저널 줄을 받은 차례로 한 줄씩 그린다.
+///
+/// 시각은 이력([`history`])과 같은 시계(보는 사람의 시간대)로 적되 **해까지 적는다**([`stamp`], 리뷰). 이 목록은
+/// 한 이슈의 이력이 아니라 저장소의 지움 전부라 해를 넘기고, `MM-DD` 만 적으면 작년 줄과 올해 줄이 안 갈려
+/// 오래된 것부터 선 차례가 뒤섞여 보인다.
+///
+/// 저널에서 온 글은 **도장까지** 한 줄로 걷어낸다(`text::one_line`) — 저널은 손으로 고칠 수 있는 파일이고,
+/// 못 읽는 도장은 [`stamp`] 가 그대로 돌려주므로 거기 든 ESC 가 화면을 다시 칠한다(리뷰). 여러 줄 글이 그대로
+/// 나가면 줄 하나가 한 이슈라는 약속도 깨진다.
+pub fn removed(entries: &[&JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
+    let lang = screen.lang;
+    if entries.is_empty() {
+        return vec![say(lang, "list.none").to_string()];
+    }
+    let z = screen.zone();
+    let ids: Vec<String> = entries.iter().map(|e| one_line(&e.id)).collect();
+    let id_w = ids.iter().map(|id| width(id)).max().unwrap_or(0);
+    entries
+        .iter()
+        .zip(&ids)
+        .map(|(e, id)| {
+            let by = one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming));
+            format!(
+                "  {}   {}  {}  {}",
+                paint(style::DIM, &one_line(&stamp(&e.ts, z))),
+                cell(style::ID, id, id_w),
+                one_line(e.title.as_deref().unwrap_or("")),
+                paint(style::DIM, &by)
+            )
+            .trim_end()
+            .to_string()
+        })
+        .collect()
 }
 
 /// 한눈 보기에서 연 프로젝트 하나를 셈한 것 — `moai status` 가 `.moai` 밖에서 낸다.
@@ -3714,6 +3751,28 @@ mod tests {
         assert!(joined.contains("이력"), "{joined}");
         assert!(joined.contains("todo → in_progress"), "{joined}");
         assert!(joined.contains("09-09 14:02"), "{joined}");
+    }
+
+    /// **지운 줄의 도장도 화면을 못 다시 칠하고, 해를 단다**(moai-7dmq 리뷰). 저널은 손으로 고칠 수 있어 못 읽는
+    /// 도장에 ESC·줄바꿈이 들 수 있고, [`stamp`] 는 못 읽은 글을 그대로 돌려준다. 해는 목록이 저장소의 지움
+    /// 전부라 해를 넘기기 때문이다 — `12-31 23:30` 둘이 한 해 차이로 서도 화면으로 못 가른다.
+    #[test]
+    fn a_removed_row_is_one_clean_line_with_its_year() {
+        let by = crate::model::someone("raven");
+        let evil = JournalEntry::removed("argos-0001", "하나", "x\u{1b}[2J\ny", &by);
+        let old = JournalEntry::removed("argos-0002", "둘", "2025-12-31T23:30:00Z", &by);
+        let new = JournalEntry::removed("argos-0003", "셋", "2026-12-31T23:30:00Z", &by);
+        let out = removed(&[&evil, &old, &new], &cfg(), Screen::new(Lang::Ko));
+        assert_eq!(out.len(), 3, "지운 이슈 하나가 한 줄이 아니다 — {out:?}");
+        for l in &out {
+            // 칠하는 이스케이프는 남는다 — 걷혀야 하는 것은 저널에서 온 화면 지우기와 줄바꿈이다.
+            assert!(!l.contains("\u{1b}[2J") && !l.contains('\n'), "도장이 화면에 닿았다 — {l:?}");
+        }
+        let shown = plain(&out);
+        assert!(
+            shown[1].contains("2025-12-31 23:30") && shown[2].contains("2026-12-31 23:30"),
+            "해가 없다 — {shown:?}"
+        );
     }
 
     /// **상세의 왼쪽 이름 칸은 어느 말에서도 한 폭이다**(`label_width`).

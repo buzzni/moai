@@ -1,5 +1,6 @@
 //! 무엇을 보여줄지 고르고 어떤 차례로 놓을지 정한다.
-//! **순수 함수다** — `&[Issue]` 만 본다. 나중에 TUI 가 그대로 쓴다.
+//! **순수 함수다** — `&[Issue]` 와, 부르는 쪽이 읽어 건넨 저널 줄(노트·`rm` 줄)만 본다. 나중에 TUI 가
+//! 그대로 쓴다.
 //!
 //! 문법은 한 문장이다:
 //!
@@ -660,10 +661,7 @@ impl Filter {
         // 뒤에 바뀌었는지 모른다. 폭을 안 물었으면(빈 목록) **시각을 풀지도 않는다** — 인자는 부르기 전에
         // 셈해지고(위의 `--milestone` 과 같은 까닭), 탐색기의 거름망은 키 하나에 줄마다 여기를 지난다.
         // 날로 친 끝은 읽는 사람의 벽시계로 견준다([`End::Wall`]) — 시간대가 안 실렸으면(`None`) 도장 그대로다.
-        let wall = |t: i64| wh.zone.map_or(t, |z| z.local(t));
-        let within = |spans: &[Vec<Span>], at: Option<i64>| {
-            spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t, wall(t)))))
-        };
+        let within = |spans: &[Vec<Span>], at: Option<i64>| spans_hold(spans, at, wh.zone);
         if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
             return false;
         }
@@ -781,6 +779,37 @@ fn instant(raw: &str, end: bool) -> Result<End, String> {
     }
 }
 
+/// 때 `at` 이 폭 묶음에 드는가 — 바깥이 그리고, 안쪽이 또는([`Filter::updated`] 의 꼴). 날로 친 끝은 읽는
+/// 사람의 벽시계로 견준다([`End::Wall`]) — 시간대가 없으면(`None`) 도장 그대로다. **못 읽은 때(`None`)는
+/// 어느 폭에도 안 든다.** 빈 묶음은 늘 든다 — 폭을 안 물은 것이다.
+///
+/// 줄의 도장([`Filter::matches`])과 저널 줄의 도장([`removed`])이 **이 한 자로** 잰다 — 둘로 두면 같은
+/// `--since` 가 목록과 `--removed` 에서 다른 날을 가리키는 날이 온다.
+fn spans_hold(spans: &[Vec<Span>], at: Option<i64>, zone: Option<&crate::tz::Zone>) -> bool {
+    let wall = |t: i64| zone.map_or(t, |z| z.local(t));
+    spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t, wall(t)))))
+}
+
+/// 지운 이슈의 저널 줄 가운데 `--since` 의 폭에 든 것 — 받은 차례 그대로(moai-7dmq, `moai show --removed`).
+///
+/// **이력을 늘어놓을 뿐 접지 않는다**(2026-09-30 사용자 결정). 어느 줄이 보드에 서는지를 정하지 않고
+/// 스냅샷과 견주지도 않는다 — 지운 뒤 같은 id 가 되살아났어도 그 `rm` 줄은 그대로 선다. 빼려면 저널을
+/// 스냅샷에 접어야 하고, 그것이 저널이 상태의 원천이 되는 첫걸음이다.
+///
+/// 못 읽는 줄을 지운 `rm` 은 이슈를 지운 것이 아니라 빠진다([`JournalEntry::removes_issue`]). 도장을 못
+/// 읽는 줄은 `--since` 가 있으면 어느 폭에도 안 든다 — 줄의 `updated_at` 과 같은 약속이다.
+pub fn removed<'a>(
+    entries: &'a [crate::model::JournalEntry],
+    since: &[Vec<Span>],
+    zone: Option<&crate::tz::Zone>,
+) -> Vec<&'a crate::model::JournalEntry> {
+    entries
+        .iter()
+        .filter(|e| e.removes_issue())
+        .filter(|e| since.is_empty() || spans_hold(since, parse_rfc3339(&e.ts), zone))
+        .collect()
+}
+
 /// 플래그 되풀이는 그리고, 쉼표는 또는 — `--created a..b,c..d` 는 두 폭 가운데 하나다. `one` 이 한 조각을
 /// 폭으로 읽는다(`--since` 는 한 끝만, 나머지는 `from..to`).
 ///
@@ -806,7 +835,11 @@ fn spans(raw: &[String], one: fn(&str) -> Result<Span, String>) -> Result<Vec<Ve
 /// **한 번에 한 항목이다.** `;` 로 여럿을 받던 것을 걷어냈다 — 그러면
 /// `--filter grep=a;b` 의 `;` 가 글자가 아니라 구분자가 되고, 제목에
 /// 세미콜론이 든 이슈를 영영 못 찾는다. 여럿은 플래그를 되풀이한다.
-fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
+///
+/// **항목을 읽는 자는 이것 하나다** — `moai show --removed` 도 `--filter since=…` 를 가려내려고 이것을
+/// 부른다(`cmd::show`, moai-7dmq 리뷰). 거기서 따로 쪼개던 때는 `--filter since`(`=` 없음)가 목록과
+/// `--removed` 에서 다른 말로 거절됐다.
+pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
     {
         let one = text.trim();
         if one.is_empty() {
@@ -1704,6 +1737,32 @@ mod tests {
         assert!(needs(Raw { since: s(&["2026-10-01"]), ..Raw::default() }));
         assert!(!needs(Raw { since: s(&["2026-10-01T00:00:00Z"]), ..Raw::default() }));
         assert!(!needs(Raw::default()));
+    }
+
+    /// **지운 줄도 목록의 `--since` 와 같은 자로 잰다**(moai-7dmq) — 날로 친 때는 읽는 사람의 날이고, 못
+    /// 읽는 도장은 폭이 있으면 어느 폭에도 안 든다. 못 읽는 줄을 지운 `rm`(제목 없음)과 다른 `kind` 는 빠지고,
+    /// 남은 줄은 받은 차례 그대로다.
+    #[test]
+    fn removed_keeps_issue_removals_within_since() {
+        use crate::model::JournalEntry;
+        let by = crate::model::someone("raven");
+        let entries = [
+            JournalEntry::removed("a-0003", "셋", "2026-09-29T00:00:00Z", &by),
+            JournalEntry::removed_line(Some("a-0004"), "{깨진", "2026-09-30T21:00:00Z", &by),
+            JournalEntry::note("a-0005", "rm", "2026-09-30T22:00:00Z", &by),
+            JournalEntry::removed("a-0001", "하나", "2026-09-30T20:00:00Z", &by),
+            JournalEntry::removed("a-0002", "둘", "어제", &by),
+        ];
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let pick = |since: &[&str], zone: Option<&crate::tz::Zone>| {
+            let f = Filter::build(Raw { since: s(since), ..Raw::default() }).unwrap();
+            removed(&entries, &f.updated, zone).into_iter().map(|e| e.id.as_str()).collect::<Vec<_>>()
+        };
+        assert_eq!(pick(&[], None), ["a-0003", "a-0001", "a-0002"], "`--since` 없이는 지운 이슈 전부다");
+        // 서울의 10-01 05:00 은 UTC 로 09-30 20:00 이다.
+        assert_eq!(pick(&["2026-10-01"], Some(&seoul)), ["a-0001"], "읽는 사람의 날로 안 쟀다");
+        assert!(pick(&["2026-10-01"], None).is_empty(), "시간대 없이는 UTC 의 날이다");
+        assert_eq!(pick(&["2026-09-29T00:00:00Z"], Some(&seoul)), ["a-0003", "a-0001"], "못 읽는 도장이 폭에 들었다");
     }
 
     /// **때로 물으면 숨긴 줄을 다 연다**(2026-09-30 사용자 결정) — 그사이 닫힌 줄도 바뀐 줄이다. `--done` 은

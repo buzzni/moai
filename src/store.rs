@@ -1018,6 +1018,51 @@ impl Repo {
         line: impl Fn(&str) -> bool,
     ) -> BTreeMap<String, Vec<JournalEntry>> {
         let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
+        self.each_entry(line, |e| {
+            if want.contains(e.id.as_str()) {
+                out.entry(e.id.clone()).or_default().push(e);
+            }
+        });
+        for v in out.values_mut() {
+            in_ts_order(v);
+        }
+        out
+    }
+
+    /// 그 `kind` 의 줄 전부를 `ts` 차례로(moai-7dmq). 지운 id 는 부르는 쪽이 모르므로
+    /// [`Repo::journal_by_id`] 처럼 id 로는 못 고른다 — `moai show --removed` 가 부른다.
+    ///
+    /// **읽는 규칙은 `journal_by_id` 와 한 벌이다**([`Repo::each_entry`]) — 관대함도, 파일 차례도,
+    /// 못 읽은 파일을 [`journal_unread`] 에 세는 것도 같다. 따로 적으면 한쪽만 깨진 줄을 받아들이는
+    /// 날이 온다.
+    ///
+    /// **여전히 접지 않는다.** 돌려주는 것은 적힌 줄 그대로다 — 그 id 가 지금 스냅샷에 되살아나
+    /// 있는지는 묻지 않는다(2026-09-30 사용자 결정).
+    ///
+    /// 풀기 전에 `"<kind>"` 글자로 먼저 거른다. 저널의 거의 모든 줄이 `note`·`status` 라, 이 거르개 없이는
+    /// 저널을 통째로 푼다(`journal_by_id` 의 `line` 과 같은 까닭이다). **`\u` 가 든 줄은 다 푼다**(리뷰) —
+    /// 손으로 쓴 줄은 `kind` 의 값 글자를 `\u` 이스케이프(뒤에 16진 넷)로 적을 수 있고, 그 줄도 풀면 `rm` 이다
+    /// (`model::may_hold_note` 와 같은 까닭). 그것을 거르면 `moai show <id>` 의 이력은 그 줄을 "삭제" 로
+    /// 그리는데 `--removed` 에는 안 선다 — `JournalEntry::removes_issue` 가 막으려던 어긋남이다.
+    pub fn journal_of_kind(&self, kind: &str) -> Vec<JournalEntry> {
+        let quoted = format!("\"{kind}\"");
+        let mut out = Vec::new();
+        self.each_entry(
+            |l| l.contains(&quoted) || l.contains("\\u"),
+            |e| {
+                if e.kind == kind {
+                    out.push(e);
+                }
+            },
+        );
+        in_ts_order(&mut out);
+        out
+    }
+
+    /// 저널 파일을 다 걸으며 `line` 이 고른 줄을 풀어 `take` 에 건넨다 — [`Repo::journal_by_id`] 와
+    /// [`Repo::journal_of_kind`] 가 지나는 한 걸음. 읽는 법의 까닭은 `journal_by_id` 에 적혀 있다.
+    /// 차례는 읽은 차례(파일 차례, 파일 안의 줄 차례)고, `ts` 로 세우는 것은 부르는 쪽이 [`in_ts_order`] 로 한다.
+    fn each_entry(&self, line: impl Fn(&str) -> bool, mut take: impl FnMut(JournalEntry)) {
         for path in self.journal_files() {
             let bytes = match std::fs::read(&path) {
                 Ok(b) => b,
@@ -1041,18 +1086,18 @@ impl Repo {
                     continue;
                 }
                 let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
-                if want.contains(e.id.as_str()) {
-                    out.entry(e.id.clone()).or_default().push(e);
-                }
+                take(e);
             }
         }
-        for v in out.values_mut() {
-            // **안정 정렬이다** — 같은 `ts` 를 든 줄은 읽은 차례 그대로 남는다.
-            // 그 차례를 세우는 자가 [`Repo::journal_files`] 다.
-            v.sort_by(|a, b| a.ts.cmp(&b.ts));
-        }
-        out
     }
+}
+
+/// 저널 줄을 `ts` 차례로 세운다 — **안정 정렬이다**: 같은 `ts` 를 든 줄은 읽은 차례 그대로 남고, 그 차례를
+/// 세우는 자가 [`Repo::journal_files`] 다. [`Repo::journal_by_id`] 와 [`Repo::journal_of_kind`] 가 이 한 자로
+/// 세운다(리뷰) — 둘로 적으면 한쪽 차례만 바뀌어도 한 이슈의 이력과 `show --removed` 가 같은 줄들을 다른
+/// 차례로 낸다.
+fn in_ts_order(v: &mut [JournalEntry]) {
+    v.sort_by(|a, b| a.ts.cmp(&b.ts));
 }
 
 /// 메일에서 저널 파일 이름을 짓는다 — `raven@buzzni.com` 이면 `raven_buzzni_com.jsonl`(moai-nzlo).
@@ -2553,6 +2598,55 @@ mod tests {
         let j = r.journal_of("argos-4aex");
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].text.as_deref(), Some("발견"));
+    }
+
+    /// **`kind` 로 고른 줄은 파일을 가로질러 `ts` 차례로 선다**(moai-7dmq). 지운 id 는 부르는 쪽이
+    /// 모르므로 `journal_by_id` 로는 못 물어, `show --removed` 가 이것을 부른다.
+    ///
+    /// 한 번에 넷을 잰다 — 글이 `rm` 인 `note` 와 제목이 `rm` 인 `create` 는 앞 거르개를 지나도 `kind` 가
+    /// 달라 빠지고, `"rm"` 을 든 채 깨진 줄은 파서에서 넘어져도 파일 하나를 넘어뜨리지 않고(리뷰 — 앞 거르개에서
+    /// 걸러지는 깨진 줄로는 파서의 관대함을 못 잰다), 같은 `ts` 는 파일 차례(옛 한 파일이 먼저)를 지키고,
+    /// `kind` 를 `\u` 로 적은 손 줄도 고른다(리뷰).
+    #[test]
+    fn journal_of_kind_picks_one_kind_across_files_in_ts_order() {
+        let (r, d) = repo("ofkind");
+        let by = crate::model::someone("raven");
+        let line = |e: &JournalEntry| serde_json::to_string(e).unwrap();
+        let old = [
+            line(&JournalEntry::removed("argos-0003", "셋", "2026-09-12T00:00:00Z", &by)),
+            line(&JournalEntry::note("argos-0009", "rm", "2026-09-10T00:00:00Z", &by)),
+            "{\"ts\":\"2026-09-1\",\"kind\":\"rm\"".to_string(),
+            line(&JournalEntry::removed("argos-0002", "둘", "2026-09-11T00:00:00Z", &by)),
+        ];
+        std::fs::write(r.journal_path(), old.join("\n") + "\n").unwrap();
+        let split = [
+            line(&JournalEntry::removed("argos-0001", "하나", "2026-09-10T00:00:00Z", &by)),
+            line(&JournalEntry::create("argos-0004", "rm", "2026-09-09T00:00:00Z", &by)),
+            line(&JournalEntry::removed_line(Some("argos-0005"), "{깨진", "2026-09-11T00:00:00Z", &by)),
+            // `kind` 의 `m` 을 `\u` 이스케이프로 적은 손 줄이다. 역슬래시는 글자로 끼운다 — 소스에 이스케이프를
+            // 그대로 적으면 편집기에 따라 풀려, 시험이 아무것도 안 잰다.
+            format!(
+                r#"{{"ts":"2026-09-13T00:00:00Z","id":"argos-0006","kind":"r{bs}u006d","by":"손","title":"이스케이프"}}"#,
+                bs = '\\'
+            ),
+        ];
+        std::fs::create_dir_all(d.join(".moai/journal")).unwrap();
+        std::fs::write(d.join(".moai/journal").join(journal_file(&by.email).unwrap()), split.join("\n") + "\n")
+            .unwrap();
+
+        let got: Vec<(String, String)> = r.journal_of_kind("rm").into_iter().map(|e| (e.ts, e.id)).collect();
+        assert_eq!(
+            got,
+            [
+                ("2026-09-10T00:00:00Z".to_string(), "argos-0001".to_string()),
+                ("2026-09-11T00:00:00Z".to_string(), "argos-0002".to_string()),
+                ("2026-09-11T00:00:00Z".to_string(), "argos-0005".to_string()),
+                ("2026-09-12T00:00:00Z".to_string(), "argos-0003".to_string()),
+                ("2026-09-13T00:00:00Z".to_string(), "argos-0006".to_string()),
+            ],
+            "kind·차례·관대함·이스케이프 가운데 하나가 어긋났다"
+        );
+        assert!(r.journal_of_kind("status").is_empty(), "없는 kind 에서 줄을 지어냈다");
     }
 
     /// **옛 한 파일 자리가 보통 파일이 아니면 안 연다**(리뷰 moai-wcy8.rbj) — `journal/` 의 것과 같은 자다.
