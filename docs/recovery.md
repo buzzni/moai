@@ -43,6 +43,18 @@ rows. The key is absent when nothing was skipped — `journal` is always there, 
 an empty `journal` with no `journal_error` beside it is "no history", and the
 same empty array with the key beside it is "could not be read".
 
+**A journal line cut short stays as it is.** A full disk or a crash in the middle
+of an append leaves the last line without its newline. The next append puts the
+newline back before it writes, so the new line stands on its own and the cut one
+is left alone; the history skips it. A whole line that an older moai wrote
+straight onto a cut one is read back and shown. `moai show --removed` is the one
+place a cut line can hide part of the answer, since the journal is all it reads:
+a cut line that may have held a removal — judged by the kind the line names
+itself — is named there on stderr by file and line, and the run ends non-zero.
+With `--since` that happens only when the line's own stamp falls in the range or
+cannot be read. moai never rewrites the journal, so the fix is by hand: look at
+what the line held, delete it, and commit.
+
 Two habits make recovery cheap, and both are properties of the tool rather than
 advice:
 

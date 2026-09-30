@@ -123,23 +123,28 @@ fn rcell(style: Style, text: &str, w: usize) -> String {
 ///
 /// **보는 사람의 시간대로 옮겨 적는다**(moai-p5az) — 저장된 글자는 UTC 그대로고 `--json` 도
 /// 그대로다. 옮기는 자리가 여기 하나여서, 화면에 서는 시각이 한 자로 모인다.
+///
+/// **낸 글은 한 줄로 걷어 낸다**(`text::one_line`, moai-fmoa 리뷰). 도장은 손으로 고칠 수 있는 파일(스냅샷의
+/// `created_at`·저널의 `ts`)에서 오고, 못 읽는 글은 그대로 돌려주며 긴 글은 가운데를 잘라 내므로 ESC 와
+/// 줄바꿈이 그대로 남는다. 부르는 자리마다 걷게 두던 판은 이력과 `--removed` 만 걷어, 상세의 생성·수정·
+/// 시작·끝 줄이 화면을 다시 칠했다.
 pub fn stamp(at: &str, z: &crate::tz::Zone) -> String {
     let at = z.shift(at);
-    match (at.get(..10), at.get(11..16)) {
+    one_line(&match (at.get(..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
-        _ => at.to_string(),
-    }
+        _ => at,
+    })
 }
 
 /// `2026-09-11T15:18:26Z` → `09-11 15:18`. **이력 줄 전용이다** — 한 줄에
 /// 시각·글·사람이 함께 들어가는 자리라 연도까지 적을 칸이 없다. 언제인지가
-/// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다.
+/// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다. 한 줄로 걷는 것도 [`stamp`] 와 같다.
 pub fn short_stamp(at: &str, z: &crate::tz::Zone) -> String {
     let at = z.shift(at);
-    match (at.get(5..10), at.get(11..16)) {
+    one_line(&match (at.get(5..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
-        _ => at.to_string(),
-    }
+        _ => at,
+    })
 }
 
 /// `#a #b` — 태그를 사람에게 댈 때의 모양. CLI 표·상세와 탐색기의 목록 열·상세가 같이 쓴다.
@@ -2215,6 +2220,9 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
         for e in journal {
             // 메모는 여러 줄일 수 있다. 한 원소에 `\n` 을 담으면 "원소 하나가
             // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
+            //
+            // **도장은 이미 한 줄이다**(moai-fmoa) — [`short_stamp`] 가 걷어 낸다. 걷기 전의 폭으로 재면 이어지는
+            // 줄이 열을 잃는다.
             let ts = short_stamp(&e.ts, z);
             let pad = " ".repeat(width(&ts) + 5);
             for (n, l) in entry(e, cfg, lang).split('\n').enumerate() {
@@ -2235,7 +2243,10 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
 /// **그대로 내되 제어문자는 걷는다**(`text::sanitize`, 리뷰 moai-mo9v.1ln). 저널은 손으로 고칠 수 있는
 /// 파일이고, `moai rm --line` 은 아무도 치지 않은 못 읽는 줄의 원문을 메모로 싣는다 — ESC 가 든 그
 /// 줄이 `moai show` 마다 화면을 다시 칠한다. 저널은 덧붙이기만 하므로 걷을 자리는 그리는 여기 하나다.
-/// 줄바꿈은 남긴다: 여러 줄 메모는 [`history`] 가 줄마다 가른다.
+/// 줄바꿈은 **여러 줄일 수 있는 글에만** 남긴다: 메모(`text`)와 옮김의 말(`note`)은 [`history`] 가 줄마다
+/// 가른다. 칸 이름·갈래·사람은 한 줄짜리 값이라 한 줄로 접는다(`text::one_line`, moai-fmoa 리뷰) — 거기 든
+/// 줄바꿈은 뒤를 이어지는 줄처럼 그려, 손으로 고친 줄 하나가 없던 이력 줄을 지어냈다. [`removed`] 가 같은
+/// 저널 줄의 사람을 이미 이렇게 그린다.
 fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     let clean = crate::text::sanitize;
     let what = match e.kind.as_str() {
@@ -2248,11 +2259,11 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
         "rm" => say(lang, "journal.remove_line").to_string(),
         "status" => format!(
             "{} → {}",
-            clean(e.from.as_deref().unwrap_or("?")),
-            paint(style::status_style(e.to.as_deref().unwrap_or("")), &clean(e.to.as_deref().unwrap_or("?")))
+            one_line(e.from.as_deref().unwrap_or("?")),
+            paint(style::status_style(e.to.as_deref().unwrap_or("")), &one_line(e.to.as_deref().unwrap_or("?")))
         ),
         "note" => format!("note: {}", clean(e.text.as_deref().unwrap_or(""))),
-        other => clean(other),
+        other => one_line(other),
     };
     let note = e.note.as_deref().map(|n| format!("  — {}", clean(n))).unwrap_or_default();
     // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
@@ -2260,7 +2271,7 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     format!(
         "{what}{}  {}",
         paint(style::DIM, &note),
-        paint(style::DIM, &clean(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
+        paint(style::DIM, &one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
     )
     .trim_end()
     .to_string()
@@ -2273,9 +2284,9 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
 /// 한 이슈의 이력이 아니라 저장소의 지움 전부라 해를 넘기고, `MM-DD` 만 적으면 작년 줄과 올해 줄이 안 갈려
 /// 오래된 것부터 선 차례가 뒤섞여 보인다.
 ///
-/// 저널에서 온 글은 **도장까지** 한 줄로 걷어낸다(`text::one_line`) — 저널은 손으로 고칠 수 있는 파일이고,
-/// 못 읽는 도장은 [`stamp`] 가 그대로 돌려주므로 거기 든 ESC 가 화면을 다시 칠한다(리뷰). 여러 줄 글이 그대로
-/// 나가면 줄 하나가 한 이슈라는 약속도 깨진다.
+/// 저널에서 온 글은 **도장까지** 한 줄로 걷어낸다(`text::one_line`) — 저널은 손으로 고칠 수 있는 파일이라
+/// 거기 든 ESC 가 화면을 다시 칠한다(리뷰). 도장은 [`stamp`] 가 걷는다. 여러 줄 글이 그대로 나가면 줄 하나가
+/// 한 이슈라는 약속도 깨진다.
 pub fn removed(entries: &[&JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
     let lang = screen.lang;
     if entries.is_empty() {
@@ -2291,7 +2302,7 @@ pub fn removed(entries: &[&JournalEntry], cfg: &Config, screen: Screen) -> Vec<S
             let by = one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming));
             format!(
                 "  {}   {}  {}  {}",
-                paint(style::DIM, &one_line(&stamp(&e.ts, z))),
+                paint(style::DIM, &stamp(&e.ts, z)),
                 cell(style::ID, id, id_w),
                 one_line(e.title.as_deref().unwrap_or("")),
                 paint(style::DIM, &by)
@@ -3881,6 +3892,72 @@ mod tests {
             shown[1].contains("2025-12-31 23:30") && shown[2].contains("2026-12-31 23:30"),
             "해가 없다 — {shown:?}"
         );
+    }
+
+    /// **이력의 도장도 화면을 못 다시 칠한다**(moai-fmoa). [`removed`] 가 같은 저널 줄의 도장을 걷는데 이력만
+    /// 그대로 찍던 자리다 — 못 읽는 도장은 [`short_stamp`] 가 그대로 돌려주므로 ESC 가 `moai show <id>` 화면에
+    /// 닿고, 줄바꿈은 원소 하나가 한 줄이라는 약속을 깬다. 글이 여러 줄인 메모는 여전히 줄마다 갈린다.
+    #[test]
+    fn a_history_stamp_is_one_clean_line() {
+        let by = crate::model::someone("raven");
+        let j = [
+            JournalEntry::note("argos-0001", "첫 줄\n둘째 줄", "x\u{1b}[2J\ny", &by),
+            JournalEntry::note("argos-0001", "뒤", "2026-09-09T05:02:00Z", &by),
+        ];
+        let out = history(&j, &cfg(), Screen::new(Lang::Ko));
+        for l in &out {
+            assert!(!l.contains("\u{1b}[2J") && !l.contains('\n'), "도장이 화면에 닿았다 — {l:?}");
+        }
+        let shown = plain(&out);
+        // 머리 두 줄(빈 줄·`이력`) 뒤로 메모 두 줄과 둘째 줄이다.
+        assert_eq!(shown.len(), 5, "{shown:?}");
+        assert!(shown[2].contains("첫 줄") && shown[3].trim_start().starts_with("둘째 줄"), "{shown:?}");
+        // 이어지는 줄은 걷은 도장의 폭만큼 들여 선다 — 걷기 전 폭으로 재면 열이 어긋난다.
+        let col = |l: &str, needle: &str| width(&l[..l.find(needle).unwrap()]);
+        assert_eq!(col(&shown[2], "note:"), col(&shown[3], "둘째 줄"), "{shown:?}");
+    }
+
+    /// **이력의 한 줄짜리 값도 줄을 못 지어낸다**(moai-fmoa 리뷰) — 칸 이름·모르는 갈래·사람에 든 줄바꿈이
+    /// 이어지는 줄처럼 그려져, 손으로 고친 저널 줄 하나가 없던 칸 옮김을 이력에 세웠다. 여러 줄일 수 있는
+    /// 메모와 옮김의 말은 여전히 줄마다 갈린다.
+    #[test]
+    fn a_one_line_value_in_the_history_never_makes_a_row() {
+        let by = crate::model::Actor { name: "Mallory\n  09-30 09:05   review → done".into(), email: "m@x".into() };
+        let mut moved = JournalEntry::status(
+            "argos-0001",
+            &Status::new("todo"),
+            &Status::new("in_progress\n09-30 09:00   done → todo"),
+            Some("첫 말\n둘째 말".into()),
+            "2026-09-09T05:02:00Z",
+            &by,
+        );
+        let odd = JournalEntry { kind: "future\n09-30 09:10   done → todo".into(), note: None, ..moved.clone() };
+        moved.from = Some("todo\nX".into());
+        let out = plain(&history(&[moved, odd], &cfg(), Screen::new(Lang::Ko)));
+        // 머리 두 줄 뒤로 칸 옮김(말이 두 줄)과 모르는 갈래 한 줄이다.
+        assert_eq!(out.len(), 5, "한 줄짜리 값이 줄을 지어냈다 — {out:?}");
+        assert!(out[3].trim_start().starts_with("둘째 말"), "옮김의 말은 줄마다 갈려야 한다 — {out:?}");
+        assert!(out.iter().all(|l| !l.contains('\n')), "{out:?}");
+    }
+
+    /// **상세의 시각 줄도 화면을 못 다시 칠한다**(moai-fmoa 리뷰) — 스냅샷의 `created_at`·`started_at` 도 손으로
+    /// 고칠 수 있는데, [`stamp`] 가 못 읽는 글을 그대로 돌려주던 판은 상세의 생성·시작 줄로 ESC 를 냈다. 걷는
+    /// 자리가 부르는 쪽마다였던 탓이다 — 이제 [`stamp`]·[`short_stamp`] 가 걷는다.
+    #[test]
+    fn a_hand_edited_stamp_in_the_detail_never_reaches_the_terminal() {
+        let mut i = issue("argos-0001", "제목", "in_progress");
+        i.created_at = "\u{1b}[2J\u{1b}[Hxx\ny".into();
+        i.started_at = Some("2026-09-1\u{1b}]0;pwned\u{7}AAAA".into());
+        let lines = detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false);
+        for l in &lines {
+            for bad in ["\u{1b}[2J", "\u{1b}[H", "\u{1b}]", "\u{7}", "\n"] {
+                assert!(!l.contains(bad), "손으로 고친 도장이 화면에 닿았다 — {l:?}");
+            }
+        }
+        assert!(plain(&lines).iter().any(|l| l.contains("[2J[Hxx  y")), "걷은 도장이 안 섰다 — {lines:?}");
+        let utc = crate::tz::Zone::utc();
+        assert_eq!(stamp("x\u{1b}[2J\ny", &utc), "x[2J  y");
+        assert_eq!(short_stamp("x\u{1b}[2J\ny", &utc), "x[2J  y");
     }
 
     /// **상세의 왼쪽 이름 칸은 어느 말에서도 한 폭이다**(`label_width`).

@@ -4877,6 +4877,70 @@ fn show_removed_lists_what_rm_took_out() {
     assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
 }
 
+/// **끊긴 저널 꼬리가 지움을 조용히 삼키지 않는다**(moai-a65c, moai-g8ho). 쓰는 쪽은 꼬리를 채운 뒤에 덧붙여
+/// 새 `rm` 줄을 제 줄에 세우고, 읽는 쪽은 이미 붙어 버린 줄(옛 바이너리가 쓴 것)을 파일과 줄 번호로 대며 0 이
+/// 아닌 코드로 끝난다. 목록은 그대로 낸다 — `--json` 을 읽는 기계는 코드로 덜 온 답인 줄 안다.
+#[test]
+fn a_torn_journal_tail_never_swallows_a_removal() {
+    let s = init("removed-torn");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(r#"{"ts":"2026-09-02T00:00:00Z","id":"x","kind":"no"#);
+    std::fs::write(&journal, &text).unwrap();
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &first]);
+    let listed = ok(s.path(), &["show", "--removed", "--json"]);
+    assert!(listed.contains(&format!("\"id\":\"{first}\"")), "끊긴 꼬리 뒤의 rm 이 빠졌다 — {listed}");
+
+    // 끊긴 꼬리에 붙은, 필드가 모자란 `rm` 줄이다 — 온전하면 되찾지만(아래 시험) 이것은 못 풀어 댄다.
+    let torn_at = std::fs::read_to_string(&journal).unwrap().lines().count() + 1;
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-06T00:00:00Z\",\"id\":\"x\",\"kind\":\"no{{\"ts\":\"2026-09-07T00:00:00Z\",\"id\":\"{second}\",\"kind\":\"rm\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    for json in [true, false] {
+        let args: &[&str] = if json { &["show", "--removed", "--json"] } else { &["show", "--removed"] };
+        let out = moai(s.path(), args);
+        let (listed, said) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!out.status.success(), "못 푼 rm 줄을 두고 0 으로 끝냈다 — {said}");
+        assert!(listed.contains(&first), "목록을 안 냈다 — {listed}");
+        let name = journal.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(said.contains(&format!("{name}:{torn_at}")), "못 푼 줄의 자리를 안 댔다 — {said}");
+    }
+}
+
+/// **`--since` 는 그 폭에 들었을 수 있는 조각만 대고, 붙은 줄의 온전한 쪽은 되찾는다**(moai-g8ho 리뷰). 오래전에
+/// 끊긴 줄 하나로 증분 받기가 부를 때마다 넘어지면, 도구 안에는 그 줄을 치울 길이 없어 받는 쪽이 영영 멈춘다.
+/// 옛 바이너리가 끊긴 줄 끝에 붙여 쓴 `rm` 은 온전한 줄이라 목록에 선다.
+#[test]
+fn a_torn_journal_line_fails_only_the_windows_it_could_fall_in() {
+    let s = init("removed-torn-window");
+    let gone = add_at(s.path(), "2026-09-01T00:00:00Z", &["되찾을 일"]);
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    // 9월 3일에 `"rm"` 을 다 적기 전에 끊긴 조각, 그리고 옛 바이너리가 끊긴 노트 끝에 붙여 쓴 온전한 `rm`.
+    text.push_str("{\"ts\":\"2026-09-03T00:00:00Z\",\"id\":\"argos-zzzz\",\"kind\":\"r\n");
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-04T00:00:00Z\",\"id\":\"x\",\"kind\":\"no{{\"ts\":\"2026-09-05T00:00:00Z\",\"id\":\"{gone}\",\"kind\":\"rm\",\"by\":\"Tester\",\"title\":\"되찾을 일\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    let listed = |since: Option<&str>| {
+        let mut args = vec!["show", "--removed", "--json"];
+        args.extend(since.map(|t| ["--since", t]).into_iter().flatten());
+        let out = moai(s.path(), &args);
+        let (stdout, said) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.success(), stdout.contains(&format!("\"id\":\"{gone}\"")), said.into_owned())
+    };
+    let (clean, found, said) = listed(None);
+    assert!(!clean && found, "`--since` 없이 끊긴 조각을 넘겼거나 붙은 rm 을 못 되찾았다 — {said}");
+    let (clean, found, said) = listed(Some("2026-09-04T00:00:00Z"));
+    assert!(clean && found, "폭 밖의 조각으로 증분 받기를 넘어뜨렸다 — {said}");
+    let (clean, _, said) = listed(Some("2026-09-02T00:00:00Z"));
+    assert!(!clean, "폭 안의 조각을 말없이 넘겼다 — {said}");
+}
+
 /// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 거절문을 한국어로 박아 지어, 아무것도
 /// 안 고른 기계(영어)의 화면과 `--json` 의 `error` 에도 한국어가 섰다. 목록과 `--removed` 가 같은 자로
 /// 거절하니 둘 다 잰다 — 고쳐 칠 명령은 말과 무관하게 그대로 선다.

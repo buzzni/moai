@@ -181,7 +181,12 @@ no human-shaped output mixed in.
   cannot be picked up, with where to pick it up from.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
-  `stale` side by side, so a loser in a race reads `stale` and moves on.
+  `stale` side by side, so a loser in a race reads `stale` and moves on. The
+  one exception is a command whose `--json` is a bare array — the `moai show`
+  list and `moai show --removed`: a row or journal line it could not read is
+  named on stderr and the exit code is not 0, while stdout still carries the
+  whole array of what it could read. Valid JSON on stdout with a non-zero exit
+  is that partial answer; a failure prints no array.
 - **A value that cannot be absent is never absent.** `kind` and `priority` have
   defaults, and the snapshot leaves a default out so that one file-wide diff does
   not follow every release — but that silence is legible only to the writer, so
@@ -254,6 +259,13 @@ the full compare below. It reads the journal beside the tracker only (other
 worktrees are not overlaid), takes `--since` and no other filter, and leaves out
 `rm --line`, which removed an unreadable line rather than an issue. A journal
 file moai cannot read is skipped, named on stderr, and the exit code is not 0.
+The same goes for a journal line it cannot read that may have held a removal —
+one cut short by a full disk or a crash: the list still comes out, the line is
+named on stderr by file and line, and the exit code is not 0. With `--since`
+only a line whose own stamp falls in the range, or cannot be read, counts, so
+one old cut line does not fail every later pass. moai never rewrites the
+journal, so look at what the line held and then delete it by hand. A whole line
+that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
 `moai show --all --json`, plus `moai idea show --all --json` since `--all` still
