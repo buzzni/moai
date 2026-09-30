@@ -1004,6 +1004,10 @@ impl Repo {
     /// 이 망가진 값으로 통계에 선다. `\n` 바이트는 UTF-8 글자 안에 안 나오므로 바이트로 갈라도
     /// 글자를 자르지 않는다. 파일이 없으면 빈 손이다 — 저널만 없는 저장소는 고장이 아니다.
     ///
+    /// **끊긴 꼬리에 붙어 한 줄이 된 줄은 줄 머리(`{"ts":"`)마다 갈라 온전한 쪽을 푼다**(리뷰). 새 바이너리는
+    /// 꼬리를 채운 뒤에 덧붙이지만(moai-a65c) 옛 바이너리는 끊긴 줄 끝에 그대로 붙인다 — 붙은 쪽은 온전한
+    /// 줄이라, 통째로 버리면 그 노트와 칸 옮김이 이력·`-g`·`work` 에서 말없이 사라진다([`pieces`]).
+    ///
     /// **여전히 접지 않는다** — 돌려주는 것은 줄 그대로지 상태가 아니다.
     ///
     /// **못 읽는 *파일*은 넘어가되 [`journal_unread`] 에 선다**(2026-09-21 사용자 결정, moai-6ney).
@@ -1018,11 +1022,17 @@ impl Repo {
         line: impl Fn(&str) -> bool,
     ) -> BTreeMap<String, Vec<JournalEntry>> {
         let mut out: BTreeMap<String, Vec<JournalEntry>> = BTreeMap::new();
-        self.each_entry(line, |e| {
-            if want.contains(e.id.as_str()) {
-                out.entry(e.id.clone()).or_default().push(e);
-            }
-        });
+        // **못 푼 조각은 안 묻는다**(`None`) — 이력에서 빠진 줄은 스냅샷이 여전히 그 이슈를 말한다. 저널이 답의
+        // 전부인 [`Repo::journal_of_kind`] 만 묻는다(moai-g8ho).
+        self.each_entry(
+            line,
+            |e| {
+                if want.contains(e.id.as_str()) {
+                    out.entry(e.id.clone()).or_default().push(e);
+                }
+            },
+            None,
+        );
         for v in out.values_mut() {
             in_ts_order(v);
         }
@@ -1044,9 +1054,20 @@ impl Repo {
     /// 손으로 쓴 줄은 `kind` 의 값 글자를 `\u` 이스케이프(뒤에 16진 넷)로 적을 수 있고, 그 줄도 풀면 `rm` 이다
     /// (`model::may_hold_note` 와 같은 까닭). 그것을 거르면 `moai show <id>` 의 이력은 그 줄을 "삭제" 로
     /// 그리는데 `--removed` 에는 안 선다 — `JournalEntry::removes_issue` 가 막으려던 어긋남이다.
-    pub fn journal_of_kind(&self, kind: &str) -> Vec<JournalEntry> {
+    ///
+    /// **못 푼 조각은 자리째 곁에 낸다**(moai-g8ho). 저널을 관대하게 읽어도 되는 까닭은 "저널은 상태를 안
+    /// 만든다" 였는데, `--removed` 에서는 저널이 답의 전부다 — 끊긴 `rm` 줄을 말없이 빼면 그 지움이 조용히
+    /// 사라진다. 그 줄이 정말 `rm` 이었는지는 못 풀었으니 모른다: 낼 수 있는 것은 "지움을 들었을 수 있는
+    /// 줄" 이고, 알리는 것은 부르는 쪽이 한다.
+    ///
+    /// **들었을 수 있는지는 조각이 제 입으로 댄 `kind` 로 가른다**([`may_be`], 리뷰). 앞 거르개는 풀 줄을
+    /// 고르는 빠른 길일 뿐이다 — 그것으로 가르던 판은 `"rm"` 을 다 적기 전에 끊긴 줄을 말없이 뺐고, `\u` 가 든
+    /// 끊긴 노트를 지움이라 불렀다. 그래서 앞 거르개를 못 지난 줄도 끊긴 꼴이면([`cut`]) 조각으로 본다.
+    /// 조각의 도장도 읽어 둔다([`Garbled::ts`]) — `--since` 는 그 폭에 들었을 수 있는 조각만 댄다.
+    pub fn journal_of_kind(&self, kind: &str) -> (Vec<JournalEntry>, Vec<Garbled>) {
         let quoted = format!("\"{kind}\"");
         let mut out = Vec::new();
+        let mut garbled: Vec<Garbled> = Vec::new();
         self.each_entry(
             |l| l.contains(&quoted) || l.contains("\\u"),
             |e| {
@@ -1054,42 +1075,217 @@ impl Repo {
                     out.push(e);
                 }
             },
+            Some(&mut |piece: &str, at: &Path, line: usize| {
+                if !may_be(kind, piece) {
+                    return;
+                }
+                let ts = stamp_of(piece);
+                match garbled.last_mut() {
+                    // 한 줄의 두 조각은 한 자리로 댄다. 도장은 폭에 들 수 있는 쪽을 남긴다 — 못 읽었거나 늦은 쪽.
+                    Some(g) if g.at == at && g.line == line => g.ts = g.ts.take().zip(ts).map(|(a, b)| a.max(b)),
+                    _ => garbled.push(Garbled { at: at.to_path_buf(), line, ts }),
+                }
+            }),
         );
         in_ts_order(&mut out);
-        out
+        (out, garbled)
     }
 
     /// 저널 파일을 다 걸으며 `line` 이 고른 줄을 풀어 `take` 에 건넨다 — [`Repo::journal_by_id`] 와
     /// [`Repo::journal_of_kind`] 가 지나는 한 걸음. 읽는 법의 까닭은 `journal_by_id` 에 적혀 있다.
     /// 차례는 읽은 차례(파일 차례, 파일 안의 줄 차례)고, `ts` 로 세우는 것은 부르는 쪽이 [`in_ts_order`] 로 한다.
-    fn each_entry(&self, line: impl Fn(&str) -> bool, mut take: impl FnMut(JournalEntry)) {
+    ///
+    /// **못 푼 조각은 `torn` 에 건넨다**(moai-g8ho) — 조각의 글, 파일, 1부터 센 줄 번호다. 이력은 `None` 을
+    /// 넘겨 묻지 않고(그러면 깨진 글자가 든 줄은 풀기 전에 건너뛴다), 저널이 답의 전부인
+    /// [`Repo::journal_of_kind`] 가 묻는다. 깨진 글자는 `�` 로 바꾼 글로 고르고 가르기만 하지 풀지는 않는다.
+    ///
+    /// **`\n` 없이 끝난 줄이 조각을 내면 그 파일을 다시 읽는다**(리뷰). 읽기는 락을 안 잡으므로, 옆 세션이
+    /// 덧붙이는 도중의 줄이 끝에 반쯤 보일 수 있다 — ext4 는 한 번의 덧붙이기도 쪽(4KiB)마다 드러내, 여러 쪽에
+    /// 걸친 `rm` 의 끝이 조각으로 잡혀 멀쩡한 저널로 0 아닌 코드를 냈다. 다시 읽어 파일이 뒤로 자랐으면 그쪽을
+    /// 믿고, 자라기를 멈췄는데도 반쯤이면(정말 끊겼다) 조각으로 댄다. 몇 번까지만 다시 읽는다 — 쉬지 않고
+    /// 덧붙이는 쪽 곁에서도 읽기가 끝나야 한다.
+    fn each_entry(
+        &self,
+        line: impl Fn(&str) -> bool,
+        mut take: impl FnMut(JournalEntry),
+        mut torn: Option<&mut dyn FnMut(&str, &Path, usize)>,
+    ) {
+        const REREADS: usize = 3;
+        let asks = torn.is_some();
         for path in self.journal_files() {
-            let bytes = match std::fs::read(&path) {
-                Ok(b) => b,
-                // 없는 파일은 건너뛴다 — 옛 한 파일이 없는 저장소가 흔하다.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                // **못 읽는 파일은 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney).
-                // 여기서 멈추던 때는 남의 파일 하나가 0600 으로 서는 것만으로 **제 파일에만**
-                // 이력이 있는 이슈까지 아무것도 안 보였다. 조용한 손실을 막는 일은 이제
-                // [`note_unread`] 와 그것을 대는 `cmd::run` 이 한다 — 종료 코드도 0 이 아니다.
-                Err(e) => {
-                    note_unread(&self.root, &path, &e);
-                    continue;
+            let Some(mut bytes) = self.journal_bytes(&path) else { continue };
+            let mut read = scan(&bytes, &line, asks);
+            for _ in 0..REREADS {
+                if !read.open_tail {
+                    break;
                 }
-            };
-            let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(&bytes);
-            for raw in bytes.split(|b| *b == b'\n') {
-                // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
-                let Ok(l) = std::str::from_utf8(raw) else { continue };
-                let l = l.strip_suffix('\r').unwrap_or(l);
-                if l.trim().is_empty() || !line(l) {
-                    continue;
+                match self.journal_bytes(&path) {
+                    Some(again) if again.len() > bytes.len() && again.starts_with(&bytes) => {
+                        read = scan(&again, &line, asks);
+                        bytes = again;
+                    }
+                    _ => break,
                 }
-                let Ok(e) = serde_json::from_str::<JournalEntry>(l) else { continue };
-                take(e);
+            }
+            read.entries.into_iter().for_each(&mut take);
+            if let Some(t) = torn.as_deref_mut() {
+                for (piece, n) in &read.torn {
+                    t(piece, &path, *n);
+                }
             }
         }
     }
+
+    /// 저널 파일 하나를 통째로 읽는다. 없는 파일은 `None` 이다 — 옛 한 파일이 없는 저장소가 흔하다.
+    ///
+    /// **못 읽는 파일은 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney). 여기서 멈추던 때는
+    /// 남의 파일 하나가 0600 으로 서는 것만으로 **제 파일에만** 이력이 있는 이슈까지 아무것도 안 보였다.
+    /// 조용한 손실을 막는 일은 이제 [`note_unread`] 와 그것을 대는 `cmd::run` 이 한다 — 종료 코드도 0 이 아니다.
+    fn journal_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        match std::fs::read(path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                note_unread(&self.root, path, &e);
+                None
+            }
+        }
+    }
+}
+
+/// 저널에서 못 푼 조각의 자리 — 파일과 1부터 센 줄 번호, 그리고 읽혔으면 그 조각의 도장
+/// ([`Repo::journal_of_kind`], moai-g8ho).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Garbled {
+    pub at: PathBuf,
+    pub line: usize,
+    /// 조각이 댄 `ts` — 값이 닫는 따옴표까지 온전히 읽힐 때만 선다([`stamp_of`]). `--removed --since` 가 이것으로
+    /// 댈지를 가른다(`query::may_fall_in`): 도장이 폭 밖이면 온전했어도 그 목록에 안 섰을 줄이다.
+    pub ts: Option<String>,
+}
+
+/// 파일 하나를 가른 것 — [`Repo::each_entry`] 가 파일마다 한 번(덜 적힌 꼬리면 다시 읽을 때마다 한 번 더) 짓는다.
+#[derive(Default)]
+struct Scan {
+    entries: Vec<JournalEntry>,
+    /// 못 푼 조각과 그 줄 번호(1부터). 묻는 쪽이 있을 때만 모은다.
+    torn: Vec<(String, usize)>,
+    /// `\n` 없이 끝난 마지막 줄이 조각을 냈다 — 옆 세션이 아직 적는 줄일 수 있다.
+    open_tail: bool,
+}
+
+/// 파일 하나의 바이트를 줄로 가르고 푼다 — 읽는 법은 [`Repo::journal_by_id`] 에, 조각을 가르는 법은
+/// [`Repo::journal_of_kind`] 에 적혀 있다. `asks` 가 거짓이면 조각을 안 모으고, 깨진 글자가 든 줄은 바꾼 글을
+/// 짓기 전에 건너뛴다(리뷰) — 이력은 그 줄을 안 푸는데, 지어서 버리면 인코딩이 통째로 틀린 저널에서 읽기가
+/// 몇 배로 는다.
+fn scan(bytes: &[u8], line: &impl Fn(&str) -> bool, asks: bool) -> Scan {
+    let bytes = bytes.strip_prefix("\u{feff}".as_bytes()).unwrap_or(bytes);
+    let mut out = Scan::default();
+    let mut last = 0;
+    for (n, raw) in bytes.split(|b| *b == b'\n').enumerate() {
+        last = n;
+        // `str::lines` 와 같은 줄이다 — `\n` 에서 가르고 끝의 `\r` 을 뗀다.
+        let text = match std::str::from_utf8(raw) {
+            Ok(l) => std::borrow::Cow::Borrowed(l),
+            Err(_) if !asks => continue,
+            Err(_) => String::from_utf8_lossy(raw),
+        };
+        let whole = matches!(text, std::borrow::Cow::Borrowed(_));
+        let l = text.strip_suffix('\r').unwrap_or(&text);
+        if l.trim().is_empty() {
+            continue;
+        }
+        let picked = line(l);
+        if picked
+            && whole
+            && let Ok(e) = serde_json::from_str::<JournalEntry>(l)
+        {
+            out.entries.push(e);
+            continue;
+        }
+        if !picked && !(asks && cut(l)) {
+            continue;
+        }
+        for piece in pieces(l) {
+            match whole.then(|| serde_json::from_str::<JournalEntry>(piece).ok()).flatten() {
+                // 앞 거르개가 고른 줄에서 푼 것만 건넨다 — 안 고른 줄의 조각은 부르는 쪽이 찾는 줄일 수 없다.
+                Some(e) if picked => out.entries.push(e),
+                Some(_) => {}
+                None if asks => out.torn.push((piece.to_string(), n + 1)),
+                None => {}
+            }
+        }
+    }
+    out.open_tail = !bytes.ends_with(b"\n") && out.torn.last().is_some_and(|(_, n)| *n == last + 1);
+    out
+}
+
+/// 줄 머리 — 저널 줄은 `serde_json` 이 쓰고 `ts` 가 첫 필드라 모든 줄이 이 글자로 연다. 따옴표는 JSON 글
+/// 안에서 늘 `\"` 로 적히므로 이 글자는 값 안에 못 선다 — 줄 가운데에 서면 거기서 다른 줄이 붙은 것이다.
+const HEAD: &str = "{\"ts\":\"";
+
+/// 끊긴 줄의 꼴인가 — 앞 거르개를 못 지난 줄도 조각인지 여기서 가른다([`Repo::journal_of_kind`]). `{` 로 열었는데
+/// `}` 로 안 닫혔거나, 제 `kind` 를 다 적기 전에 다른 줄이 붙었다: 첫 `kind` 열쇠 앞에 줄 머리([`HEAD`])가 또
+/// 섰거나, 그 값에 `{` 가 들었다(`"kind":"r{"ts":"…`).
+///
+/// **첫 `kind` 에서 멈춘다**(리뷰) — `kind` 를 다 적은 뒤에 끊긴 앞 토막은 그 값으로 이미 갈리고(다른 갈래면
+/// 지움이 아니다), 붙은 뒤 토막이 찾는 갈래면 줄째 앞 거르개를 지났다. 줄 끝까지 훑으면 거르개를 못 지난 모든
+/// 줄을 한 번 더 읽어 `--removed` 가 눈에 띄게 느려졌다. `}` 로 닫혔는데 `kind` 열쇠가 아예 없는 줄은 붙은 저널
+/// 줄이 아니다 — 붙은 뒤 토막은 온전한 줄이라 늘 그 열쇠를 든다.
+fn cut(l: &str) -> bool {
+    const KIND: &str = "\"kind\":\"";
+    let t = l.trim();
+    if !t.starts_with('{') {
+        return false;
+    }
+    if !t.ends_with('}') {
+        return true;
+    }
+    t.find(KIND).is_some_and(|k| {
+        t[1..k].contains(HEAD) || t[k + KIND.len()..].split('"').next().is_some_and(|v| v.contains('{'))
+    })
+}
+
+/// 한 줄을 줄 머리([`HEAD`])마다 가른다 — 끊긴 꼬리에 옛 바이너리가 붙여 쓴 줄은 한 줄에 둘이 든다(moai-a65c
+/// 전의 바이너리). 머리가 맨 앞에만 서면 줄 그대로 하나다.
+fn pieces(l: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = l;
+    loop {
+        let skip = rest.chars().next().map_or(0, char::len_utf8);
+        match rest[skip..].find(HEAD) {
+            Some(i) => {
+                out.push(&rest[..skip + i]);
+                rest = &rest[skip + i..];
+            }
+            None => {
+                out.push(rest);
+                return out;
+            }
+        }
+    }
+}
+
+/// 못 푼 조각이 `kind` 의 줄이었을 수 있는가 — 조각이 **제 입으로 댄 `kind`** 로 가른다(리뷰). 값이 온전히
+/// 읽히고 다른 갈래면 아니다. 값 가운데서 잘렸으면 그 토막으로 시작하는 갈래만, 열쇠에 못 닿았으면 무엇이든
+/// 될 수 있다. 값에 역슬래시가 들면 풀지 않고 "그럴 수 있다" 로 친다 — 손으로 쓴 줄은 값 글자를 `\u` 로 적을 수
+/// 있다(`model::may_hold_note` 와 같은 까닭).
+fn may_be(kind: &str, piece: &str) -> bool {
+    const KEY: &str = "\"kind\":\"";
+    let Some(at) = piece.find(KEY) else { return true };
+    let value = &piece[at + KEY.len()..];
+    match value.find('"') {
+        Some(end) => value[..end].contains('\\') || &value[..end] == kind,
+        None => value.contains('\\') || kind.starts_with(value),
+    }
+}
+
+/// 조각의 도장 — `"ts":"…"` 의 값이 닫는 따옴표까지 읽힐 때만. 잘렸거나 이스케이프가 들면 `None` 이다.
+fn stamp_of(piece: &str) -> Option<String> {
+    const KEY: &str = "\"ts\":\"";
+    let value = &piece[piece.find(KEY)? + KEY.len()..];
+    let stamp = &value[..value.find('"')?];
+    (!stamp.contains('\\')).then(|| stamp.to_string())
 }
 
 /// 저널 줄을 `ts` 차례로 세운다 — **안정 정렬이다**: 같은 `ts` 를 든 줄은 읽은 차례 그대로 남고, 그 차례를
@@ -1659,12 +1855,48 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkou
 ///
 /// **푼 자리를 연다** — 받은 철자를 다시 열면 재고 난 뒤 바뀐 링크를 따라간다. 이미 푼 자리의 끝이 그
 /// 사이에 링크로 바뀌는 것까지는 못 막는다 — 갈아끼우는 쪽과 같은 틈이다.
+///
+/// **끊긴 꼬리를 먼저 채운다**(moai-a65c). 파일이 `\n` 없이 끝나면(디스크가 찼거나 덧붙이다 죽었다 —
+/// [`Repo::with_write`] 가 흔한 일로 치는 것) 새 줄이 그 끝에 그대로 붙어, 끊긴 줄과 새 줄이 한 줄이
+/// 되고 둘 다 못 읽힌다. 저널이면 이번에 적은 `rm` 이 `show --removed` 에서 통째로 빠진다. 그래서
+/// 끝 바이트가 `\n` 이 아니면 `\n` 하나를 앞에 붙여 **한 번에** 쓴다 — 끊긴 줄은 끊긴 채 남고
+/// (이력은 건너뛰고, `show --removed` 는 지움을 들었을 수 있으면 댄다 — `Repo::journal_of_kind`) 새 줄은
+/// 제 줄에 선다. 채우는 곳을 여기 하나로 둔 까닭은 부르는 쪽마다 채우면 둘이 겹쳐 빈 줄이 하나 더 서기
+/// 때문이다 — `init` 의 `ensure_lines` 도 제 몫을 걷었다.
+/// 락 없이 둘이 함께 채우면 빈 줄이 하나 더 설 수 있지만, 빈 줄은 저널에서도 딸린 파일에서도 뜻이 없다.
+///
+/// **꼬리를 못 보면 전처럼 덧붙이기만 한다**(리뷰). 끝 바이트를 보려고 읽기까지 열었는데, 쓰기만 되는
+/// 파일(`0200`)은 그 열기에서 넘어져 덧붙이기 자체를 잃었다 — `moai note` 가 실패하고 `mv` 는 이력을 못
+/// 남겼다. 채우기 하나 때문에 줄을 잃으면 막으려던 손실보다 크다. 그런 자리에서 붙어 버린 줄은 읽는 쪽이
+/// 줄 머리로 갈라 되찾는다(`Repo::journal_by_id`).
 pub(crate) fn append_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
     let real = target_of(path, Some(checkout))?;
     let fail = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&real).map_err(fail)?;
-    f.write_all(bytes).map_err(fail)?;
+    let open = |read: bool| std::fs::OpenOptions::new().read(read).create(true).append(true).open(&real);
+    let (mut f, torn) = match open(true) {
+        Ok(mut f) => {
+            let torn = torn_tail(&mut f).unwrap_or(false);
+            (f, torn)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => (open(false).map_err(fail)?, false),
+        Err(e) => return Err(fail(e)),
+    };
+    let lead: &[u8] = if torn { b"\n" } else { b"" };
+    f.write_all(&[lead, bytes].concat()).map_err(fail)?;
     f.sync_all().map_err(fail)
+}
+
+/// 비지 않은 파일이 `\n` 없이 끝나는가 — [`append_inside`] 가 채울지를 가른다. 읽는 것은 끝 한
+/// 바이트뿐이고, `O_APPEND` 라 읽으려고 옮긴 자리가 다음 쓰기의 자리를 바꾸지 않는다.
+fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+    if f.metadata()?.len() == 0 {
+        return Ok(false);
+    }
+    f.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    f.read_exact(&mut last)?;
+    Ok(last[0] != b'\n')
 }
 
 /// [`write_atomic`]·[`write_atomic_in`] 의 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
@@ -2604,8 +2836,9 @@ mod tests {
     /// 모르므로 `journal_by_id` 로는 못 물어, `show --removed` 가 이것을 부른다.
     ///
     /// 한 번에 넷을 잰다 — 글이 `rm` 인 `note` 와 제목이 `rm` 인 `create` 는 앞 거르개를 지나도 `kind` 가
-    /// 달라 빠지고, `"rm"` 을 든 채 깨진 줄은 파서에서 넘어져도 파일 하나를 넘어뜨리지 않고(리뷰 — 앞 거르개에서
-    /// 걸러지는 깨진 줄로는 파서의 관대함을 못 잰다), 같은 `ts` 는 파일 차례(옛 한 파일이 먼저)를 지키고,
+    /// 달라 빠지고, `"rm"` 을 든 채 깨진 줄은 파서에서 넘어져도 파일 하나를 넘어뜨리지 않되 그 자리를 곁에 내고
+    /// (리뷰 — 앞 거르개에서 걸러지는 깨진 줄로는 파서의 관대함을 못 잰다, moai-g8ho), 같은 `ts` 는 파일 차례(옛 한
+    /// 파일이 먼저)를 지키고,
     /// `kind` 를 `\u` 로 적은 손 줄도 고른다(리뷰).
     #[test]
     fn journal_of_kind_picks_one_kind_across_files_in_ts_order() {
@@ -2634,7 +2867,8 @@ mod tests {
         std::fs::write(d.join(".moai/journal").join(journal_file(&by.email).unwrap()), split.join("\n") + "\n")
             .unwrap();
 
-        let got: Vec<(String, String)> = r.journal_of_kind("rm").into_iter().map(|e| (e.ts, e.id)).collect();
+        let (rows, garbled) = r.journal_of_kind("rm");
+        let got: Vec<(String, String)> = rows.into_iter().map(|e| (e.ts, e.id)).collect();
         assert_eq!(
             got,
             [
@@ -2646,7 +2880,167 @@ mod tests {
             ],
             "kind·차례·관대함·이스케이프 가운데 하나가 어긋났다"
         );
-        assert!(r.journal_of_kind("status").is_empty(), "없는 kind 에서 줄을 지어냈다");
+        assert_eq!(
+            garbled,
+            [Garbled { at: r.journal_path(), line: 3, ts: Some("2026-09-1".into()) }],
+            "못 푼 rm 줄의 자리를 안 댔다"
+        );
+        let (rows, garbled) = r.journal_of_kind("status");
+        assert!(rows.is_empty(), "없는 kind 에서 줄을 지어냈다");
+        assert!(garbled.is_empty(), "다른 갈래를 댄 조각을 댔다: {garbled:?}");
+    }
+
+    /// **못 푼 조각은 제 입으로 댄 `kind` 로 가른다**(moai-g8ho, 리뷰). 앞 거르개(`"rm"`·`\u`)로 가르던 판은 두
+    /// 쪽으로 틀렸다 — `"rm"` 을 다 적기 전에 끊긴 줄은 말없이 빠졌고, `\u` 가 든 끊긴 노트는 지움으로 불렸다.
+    /// 붙은 줄은 줄 머리로 갈라 온전한 쪽을 되찾는다. 깨진 글자는 `�` 로 바꾼 글로 **가르기만** 하고 풀지는
+    /// 않는다 — 꼴이 온전한 줄이라도 그 글로 풀면 망가진 제목이 목록과 이력에 선다.
+    #[test]
+    fn a_garbled_line_that_may_hold_the_kind_is_named() {
+        let (r, _d) = repo("ofkind-garbled");
+        let by = crate::model::someone("raven");
+        let line = |e: &JournalEntry| serde_json::to_string(e).unwrap();
+        let whole = line(&JournalEntry::removed("argos-0001", "하나", T, &by));
+        let glued = [
+            &b"{\"ts\":\"2026-09-16T00:00:00Z\",\"id\":\"argos-0008\",\"kind\":\"no"[..],
+            line(&JournalEntry::removed("argos-0009", "아홉", "2026-09-16T00:00:00Z", &by)).as_bytes(),
+        ]
+        .concat();
+        // 앞 거르개를 못 지나는 붙은 줄 둘 — `kind` 값 가운데서, 또는 `kind` 에 닿기 전에 끊긴 `rm` 에 노트가 붙었다.
+        let note = line(&JournalEntry::note("argos-0013", "x", "2026-09-20T00:00:00Z", &by));
+        let onto_value =
+            [&b"{\"ts\":\"2026-09-18T00:00:00Z\",\"id\":\"argos-0011\",\"kind\":\"r"[..], note.as_bytes()].concat();
+        let onto_key = [&b"{\"ts\":\"2026-09-19T00:00:00Z\",\"id\":\"argos-0012\",\""[..], note.as_bytes()].concat();
+        let mut bytes = Vec::new();
+        for l in [
+            // 1: 끊긴 노트 — 제 `kind` 가 노트라 안 댄다.
+            &b"{\"ts\":\"2026-09-10\",\"kind\":\"note\",\"text\":\"x\""[..],
+            // 2: 글자가 깨진 채 끊긴 `rm` — 댄다.
+            b"{\"ts\":\"2026-09-10\",\"kind\":\"rm\",\"title\":\"\xed\x95",
+            // 3: 온전한 줄.
+            whole.as_bytes(),
+            // 4: 끊긴 노트에 붙은, 필드가 모자란 `rm` — 앞 토막은 노트, 뒤 토막은 `rm` 이라 댄다.
+            b"{\"ts\":\"2026-09-11\",\"kind\":\"no{\"ts\":\"2026-09-12\",\"kind\":\"rm\"}",
+            // 5: `"rm"` 을 다 적기 전에 끊긴 줄 — 앞 거르개를 못 지나도 댄다.
+            b"{\"ts\":\"2026-09-13T00:00:00Z\",\"id\":\"argos-0005\",\"kind\":\"r",
+            // 6: `kind` 에 닿기 전에 끊긴 줄 — 무엇이었는지 모르니 댄다.
+            b"{\"ts\":\"2026-09-14T00:00:00Z\",\"id\":\"argos-0006\",\"",
+            // 7: `\u` 가 든 끊긴 노트 — 앞 거르개는 지나도 제 `kind` 가 노트라 안 댄다.
+            b"{\"ts\":\"2026-09-15T00:00:00Z\",\"id\":\"argos-0007\",\"kind\":\"note\",\"by\":\"x\",\"text\":\"\\u001b[31mre",
+            // 8: 옛 바이너리가 끊긴 노트에 붙여 쓴 온전한 `rm` — 되찾아 목록에 세운다.
+            &glued,
+            // 9: 꼴은 온전한데 제목의 한 바이트가 깨진 `rm` — 풀지 않고 댄다.
+            b"{\"ts\":\"2026-09-17T00:00:00Z\",\"id\":\"argos-0010\",\"kind\":\"rm\",\"by\":\"x\",\"title\":\"\xff\"}",
+            // 10·11: 끊긴 `rm` 에 붙은 노트 — 줄은 `}` 로 닫혀도 앞 토막을 댄다.
+            &onto_value,
+            &onto_key,
+        ] {
+            bytes.extend_from_slice(l);
+            bytes.push(b'\n');
+        }
+        std::fs::write(r.journal_path(), bytes).unwrap();
+        let (rows, garbled) = r.journal_of_kind("rm");
+        let ids: Vec<&str> = rows.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["argos-0001", "argos-0009"], "붙은 줄의 온전한 쪽을 못 되찾았거나 깨진 글자를 풀었다");
+        let named: Vec<(usize, Option<&str>)> = garbled.iter().map(|g| (g.line, g.ts.as_deref())).collect();
+        assert_eq!(
+            named,
+            [
+                (2, Some("2026-09-10")),
+                (4, Some("2026-09-12")),
+                (5, Some("2026-09-13T00:00:00Z")),
+                (6, Some("2026-09-14T00:00:00Z")),
+                (9, Some("2026-09-17T00:00:00Z")),
+                (10, Some("2026-09-18T00:00:00Z")),
+                (11, Some("2026-09-19T00:00:00Z")),
+            ],
+            "지움을 들었을 수 있는 조각만, 그 도장과 함께 대야 한다"
+        );
+        assert_eq!(r.journal_of("argos-0001").len(), 1, "이력 쪽 읽기가 달라졌다");
+        assert_eq!(r.journal_of("argos-0009").len(), 1, "붙은 줄을 이력이 되찾지 못했다");
+    }
+
+    /// **`\n` 없이 끝난 줄이 조각을 낼 때만 다시 읽을 까닭이 선다**(리뷰) — 읽기는 락을 안 잡아, 옆 세션이
+    /// 덧붙이는 도중의 줄이 끝에 반쯤 보일 수 있다. 채운 꼬리 뒤의 조각, 끝의 온전한 줄, 조각을 안 묻는 읽기는
+    /// 까닭이 아니다.
+    #[test]
+    fn only_a_torn_last_line_asks_for_a_second_read() {
+        let full = r#"{"ts":"2026-09-01T00:00:00Z","id":"argos-0001","kind":"rm","by":"x","title":"t"}"#;
+        let half = r#"{"ts":"2026-09-02T00:00:00Z","id":"argos-0002","kind":"rm","by":"Te"#;
+        let pick = |l: &str| l.contains("\"rm\"");
+        let open = |text: String, asks: bool| scan(text.as_bytes(), &pick, asks).open_tail;
+        assert!(open(format!("{full}\n{half}"), true), "반쯤 적힌 끝줄을 다시 안 읽는다");
+        assert!(!open(format!("{half}\n{full}"), true), "채운 꼬리 뒤의 조각으로 다시 읽는다");
+        assert!(!open(format!("{full}\n{half}\n"), true), "`\\n` 으로 끝난 조각으로 다시 읽는다");
+        assert!(!open(full.to_string(), true), "`\\n` 없이 끝난 온전한 줄로 다시 읽는다");
+        assert!(!open(format!("{full}\n{half}"), false), "조각을 안 묻는 읽기가 다시 읽는다");
+    }
+
+    /// **끊긴 꼬리 뒤에 적은 줄은 제 줄에 선다**(moai-a65c). 저널이 `\n` 없이 끝난 뒤(디스크가 찼거나 덧붙이다
+    /// 죽었다) 다음 `rm` 이 그 끝에 붙어, 끊긴 줄과 새 줄이 한 줄이 되고 `show --removed` 에서 그 지움이 빠지던
+    /// 자리다. 끊긴 줄은 끊긴 채 남고, 새 줄은 이력에도 `kind` 읽기에도 선다.
+    #[test]
+    fn a_journal_line_after_a_torn_tail_stands_on_its_own_line() {
+        let (r, d) = repo("torn-tail");
+        let by = crate::model::someone("raven");
+        let file = d.join(".moai/journal").join(journal_file(&by.email).unwrap());
+        std::fs::create_dir_all(crate::path::dir_of(&file)).unwrap();
+        let whole = serde_json::to_string(&JournalEntry::note("argos-0001", "앞", T, &by)).unwrap();
+        let torn = r#"{"ts":"2026-09-10T00:00:00Z","id":"argos-0002","kind":"no"#;
+        std::fs::write(&file, format!("{whole}\n{torn}")).unwrap();
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |_, _, _| Ok((vec![JournalEntry::removed("argos-0003", "셋", T, &by)], ())),
+        )
+        .unwrap();
+        let removed: Vec<String> = r.journal_of_kind("rm").0.into_iter().map(|e| e.id).collect();
+        assert_eq!(removed, ["argos-0003"], "끊긴 꼬리 뒤의 rm 줄이 그 꼬리에 붙었다");
+        assert_eq!(r.journal_of("argos-0001").len(), 1, "앞의 온전한 줄을 잃었다");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with(&format!("{whole}\n{torn}\n{{")), "끊긴 줄을 고쳐 썼거나 빈 줄을 더 세웠다\n{text}");
+    }
+
+    /// [`append_inside`] 는 **끝이 `\n` 이 아닐 때만** 채운다 — 빈 파일과 새 파일, 온전히 끝난 파일에는 한
+    /// 바이트도 더하지 않는다. 채우는 자리가 둘이던 판(`init` 도 채웠다)은 빈 줄이 하나 더 섰다.
+    #[test]
+    fn append_inside_heals_a_torn_tail_and_nothing_else() {
+        let s = Scratch::new("store-append-torn");
+        let dir = s.join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str, before: Option<&str>| {
+            let p = dir.join(name);
+            if let Some(b) = before {
+                std::fs::write(&p, b).unwrap();
+            }
+            append_inside(&p, b"new\n", &dir).unwrap();
+            std::fs::read_to_string(&p).unwrap()
+        };
+        assert_eq!(at("fresh", None), "new\n");
+        assert_eq!(at("empty", Some("")), "new\n");
+        assert_eq!(at("whole", Some("old\n")), "old\nnew\n");
+        assert_eq!(at("torn", Some("old")), "old\nnew\n");
+        assert_eq!(at("crlf", Some("old\r")), "old\r\nnew\n");
+    }
+
+    /// **읽기가 안 되는 파일에도 전처럼 덧붙인다**(리뷰) — 꼬리를 보려고 읽기까지 열던 판은 쓰기만 되는
+    /// 파일(`0200`)에서 덧붙이기 자체를 잃었다. 꼬리를 못 보니 채우지는 않는다. 읽기 권한을 안 따지는 사용자
+    /// (root)로 돌면 막힌 자리를 못 지으니 건너뛴다.
+    #[cfg(unix)]
+    #[test]
+    fn append_inside_still_appends_to_a_file_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("store-append-writeonly");
+        let dir = s.join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("w.jsonl");
+        std::fs::write(&p, "old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o200)).unwrap();
+        if std::fs::read(&p).is_ok() {
+            return;
+        }
+        let got = append_inside(&p, b"new\n", &dir);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        got.expect("읽기가 안 되는 파일에 덧붙이기를 잃었다");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "oldnew\n");
     }
 
     /// **옛 한 파일 자리가 보통 파일이 아니면 안 연다**(리뷰 moai-wcy8.rbj) — `journal/` 의 것과 같은 자다.

@@ -438,7 +438,10 @@ Order and paging:
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1011,7 +1014,10 @@ Order and paging:
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1241,7 +1247,10 @@ Order and paging:
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1471,7 +1480,10 @@ Order and paging:
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1722,7 +1734,10 @@ Order and paging:
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1823,9 +1838,10 @@ Options:
   as read (see [NEW] below).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
-  looks: everything, id, title, tag or body. The header at the top
-  numbers every registered project, and pressing that number without SPC
-  jumps straight there — 0 is everything, one list of all projects.
+  looks: everything, id, title, tag, body or note (everything reads the
+  notes too). The header at the top numbers every registered project, and
+  pressing that number without SPC jumps straight there — 0 is everything,
+  one list of all projects.
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,

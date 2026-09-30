@@ -2105,4 +2105,31 @@ mod tests {
         assert_eq!(next_keys(PICK, &g), vec![("g".to_string(), Pick::Step(Move::Top)), ("p".to_string(), Pick::Path)]);
         assert!(next_keys(BROWSE, &[]).iter().all(|(n, _)| n != "Right" && n != "l"), "숨은 별칭을 댄다");
     }
+
+    /// **도움말의 검색 범위는 Tab 이 도는 차례 그대로다**(moai-msw7 리뷰) — 도움말이 범위를 손으로 적어, 노트
+    /// 범위를 더한 날(moai-wcy8.3v9) 도움말만 옛 목록에 머물렀다. 범위를 하나 더하면 아래 `match` 가 먼저
+    /// 컴파일되지 않고, 낱말을 적으면 도움말이 그것을 대는지 여기서 잰다.
+    #[test]
+    fn the_search_scopes_in_the_help_follow_the_tab_cycle() {
+        use crate::query::GrepIn;
+        let word = |g: GrepIn| match g {
+            GrepIn::All => "everything",
+            GrepIn::Id => "id",
+            GrepIn::Title => "title",
+            GrepIn::Tag => "tag",
+            GrepIn::Body => "body",
+            GrepIn::Note => "note",
+        };
+        let mut words = vec![word(GrepIn::All)];
+        let mut g = GrepIn::All.next();
+        while g != GrepIn::All {
+            words.push(word(g));
+            g = g.next();
+        }
+        let (last, rest) = words.split_last().expect("범위가 하나도 없다");
+        let listed = format!("looks: {} or {last}", rest.join(", "));
+        // 도움말은 줄을 접으므로 빈칸을 하나로 모아 견준다.
+        let help = tui_help().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(help.contains(&listed), "도움말의 검색 범위가 Tab 의 차례와 다르다 — `{listed}` 가 없다");
+    }
 }
