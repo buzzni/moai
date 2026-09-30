@@ -2384,9 +2384,13 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // 칸에도 없어, 노트로 걸린 줄은 이것 없이는 왜 걸렸는지가 안 보인다. **검색이 노트를 볼 때만, 걸린 줄만**
     // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu).
     //
-    // **본문 앞에 선다** — 이 절은 검색 중에만 서고, 그때 사람이 찾는 것이 "왜 걸렸나" 다. 본문 뒤에 두던 판은
-    // 본문이 긴 에픽에서 이 절이 패널 밖 30줄 아래로 밀려, 노트로만 걸린 줄은 걸린 까닭을 스크롤해 찾아야 했다.
-    // 본문에서 걸린 글자는 본문에 칠해지니 본문이 조금 밀려도 까닭은 그대로 보인다.
+    // **노트로만 걸린 줄이면 본문 앞에, 다른 칸으로도 걸린 줄이면 본문 뒤에 선다**(리뷰 moai-wcy8.rbj 7번). 이 절은
+    // 검색 중에만 서고, 그때 사람이 찾는 것이 "왜 걸렸나" 다. 본문 뒤에만 두던 판은 본문이 긴 에픽에서 이 절이
+    // 패널 밖 30줄 아래로 밀려, 노트로만 걸린 줄은 까닭을 스크롤해 찾아야 했다. 본문 앞에만 두던 판은 `moai-`
+    // 처럼 id 마다 든 글에서 걸린 767줄 가운데 62줄의 본문을 30줄 넘는 노트가 패널 밖으로 밀었다(폭 70). 까닭이
+    // id·제목·태그·본문에 이미 칠해져 있으면 노트는 덧붙인 까닭이라 뒤로 간다. 다른 칸으로 걸렸는가는 거름망과
+    // 같은 자(`GrepIn::hits`)로 가른다.
+    let mut notes_block: Vec<Line<'a>> = Vec::new();
     if let Some(q) = seen(GrepIn::sees_notes) {
         let texts = site.ground.notes_of(&i.id);
         // 편 줄은 [`fill_note_hits`] 가 그리기 전에 들여 둔 것이다 — 안 맞으면 여기서 편다. 캐시는 **값일
@@ -2396,10 +2400,14 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             None => note_hit_lines(texts, q, w),
         };
         if !laid.is_empty() {
-            out.push(Line::from(""));
-            out.push(Line::from(Span::styled(say(site.lang, "tui.about.notes"), bold())));
-            out.extend(laid);
+            notes_block.push(Line::from(""));
+            notes_block.push(Line::from(Span::styled(say(site.lang, "tui.about.notes"), bold())));
+            notes_block.extend(laid);
         }
+    }
+    let caught_elsewhere = grep.is_some_and(|(g, q)| g.hits(i, &q.to_lowercase()));
+    if !caught_elsewhere {
+        out.append(&mut notes_block);
     }
 
     if let Some(body) = &i.body {
@@ -2415,6 +2423,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         };
         out.extend(laid.into_iter().map(|l| mark_line(l, in_body)));
     }
+    // 다른 칸으로도 걸린 줄의 노트는 본문 뒤다 — 위의 까닭. 앞에서 이미 냈으면 빈다.
+    out.append(&mut notes_block);
     // **커밋은 CLI 상세와 같은 자리, 본문 뒤다**(moai-a4i0). 무엇을 그릴지는 `view::commit_lines`
     // 가 정한다. 표는 다시 읽기 스레드가 지어 온 것이라 여기서 git 을 부르지 않는다.
     let drawn = crate::view::commit_lines(site.commits_of(&i.id));
@@ -7790,8 +7800,13 @@ pub(super) mod tests {
         // 제목으로 걸린 줄 — 제목 범위는 노트를 안 보므로, 노트에 같은 글이 있어도 그 절을 안 세운다.
         let (screen, _) = drawn("에픽", 2);
         assert!(screen.contains(" 검색·제목 ") && !screen.contains("걸린 노트"), "{screen}");
+        // 전체 범위는 세우되 **본문 뒤에** 둔다 — 걸린 까닭이 제목에 이미 칠해져 있다(리뷰 moai-wcy8.rbj 7번).
         let (screen, _) = drawn("에픽", 0);
         assert!(screen.contains("걸린 노트"), "전체 범위가 노트의 걸린 줄을 안 그렸다\n{screen}");
+        assert!(
+            screen.find("걸린 노트") > screen.find("본문 첫 줄"),
+            "제목으로도 걸린 줄의 노트가 본문 앞에 섰다\n{screen}"
+        );
     }
 
     /// **걸린 노트 줄은 한 번 펴서 든다**(리뷰 moai-wcy8.rbj) — 본문([`Body`])과 같은 까닭이고, 노트는 본문보다
