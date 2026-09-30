@@ -121,8 +121,18 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   the chosen language, and so do the new time filters and `show --removed`. On
   the command line the command to type instead, such as `-s todo,review`, stands
   as it was, except that a value the shell would split — an assignee's
-  `Name (email)` — now comes back quoted. `type=` keeps the English sentence
+  `Name (email)` — now comes back quoted, and a third repeat (`-s todo -s review
+  -s done`) is no longer dropped from it. `type=` keeps the English sentence
   `--type` gives.
+
+- **The explorer's filter prompt shows what to type instead, in its own form.**
+  The prompt was one row and drew only the first line of a refusal, so the
+  command to type instead — and the list of keys after an unknown one — never
+  showed; had it shown, it was the command line's `-s todo,review`, which the
+  prompt refuses again. While you write a filter (`SPC f`) the bottom now holds
+  two rows: the refusal stays beside what you typed, and the row above it offers
+  the prompt's own `status=todo,review`, `done=` and `status=review,done`. The
+  row stands even with nothing refused, so the list does not jump as you type.
 
 - **Times after a zone's last listed change follow the zone's own rule.** zic has
   built zone files `-b slim` by default since 2020b, and a slim file stops listing
