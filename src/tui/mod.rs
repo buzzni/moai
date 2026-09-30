@@ -435,6 +435,12 @@ impl Ground {
         crate::report::Kinds::kept(&self.kinds)
     }
 
+    /// 그 이슈의 노트 글([`Ground::notes`]) — 상세가 걸린 노트 줄을 고르는 재료다(moai-wcy8.3v9). 거름망이 보는
+    /// 것과 같은 지도라, 상세에 선 줄은 거름망이 본 글에서 나온다. 노트가 없으면 빈 조각이다.
+    pub(super) fn notes_of(&self, id: &str) -> &[String] {
+        self.notes.get(id).map_or(&[], Vec::as_slice)
+    }
+
     /// 거름망이 볼 꼴 — 든 지도는 빌리기만 한다. 빌린 지도를 짓는 값은 **이슈 수에 비례한다**:
     /// 소속 지도(`epic`)는 멤버 줄마다 한 칸이다. 그래도 재는 값(`Where::of`, 1만 건에서 수십 ms)보다
     /// 한참 싸서 거름망이 키마다 부른다. 필드는 **이름으로** 넘긴다 — 같은 타입의 지도가 셋이라
@@ -7541,8 +7547,8 @@ mod tests {
         assert_eq!(a.grep_was, None, "Enter 로 건 뒤에도 되돌릴 자리를 들고 있다");
     }
 
-    /// **Tab·Shift-Tab 이 찾을 자리를 돈다**(moai-kojj) — 전체 → id → 제목 → 태그 → 본문. 좁힌 범위는
-    /// 뱃지에 `/<범위>:` 로 서고, 다시 읽어도 그 범위로 다시 건다(moai-fmmg).
+    /// **Tab·Shift-Tab 이 찾을 자리를 돈다**(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
+    /// 좁힌 범위는 뱃지에 `/<범위>:` 로 서고, 다시 읽어도 그 범위로 다시 건다(moai-fmmg).
     #[test]
     fn tab_turns_what_slash_searches_and_a_reread_keeps_it() {
         let mut a = app();
@@ -7553,14 +7559,25 @@ mod tests {
         }
         assert_eq!(shown(&a), ["argos-0009"], "전체가 태그를 안 봤다");
         let mut seen = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..6 {
             a.key(key(KeyCode::Tab));
             let Mode::Grep(_, g) = a.mode else { panic!("{:?}", a.mode) };
             seen.push((g, a.hit_count()));
         }
-        assert_eq!(seen, [(GrepIn::Id, 0), (GrepIn::Title, 0), (GrepIn::Tag, 1), (GrepIn::Body, 0), (GrepIn::All, 1)]);
+        assert_eq!(
+            seen,
+            [
+                (GrepIn::Id, 0),
+                (GrepIn::Title, 0),
+                (GrepIn::Tag, 1),
+                (GrepIn::Body, 0),
+                (GrepIn::Note, 0),
+                (GrepIn::All, 1)
+            ]
+        );
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert!(matches!(a.mode, Mode::Grep(_, GrepIn::Body)), "Shift-Tab 이 거꾸로 안 돌았다");
+        assert!(matches!(a.mode, Mode::Grep(_, GrepIn::Note)), "Shift-Tab 이 거꾸로 안 돌았다");
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(key(KeyCode::Enter));
         assert_eq!(a.filter_text.as_deref(), Some("/태그:pars"));

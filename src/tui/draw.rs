@@ -2378,6 +2378,24 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         out.extend(rollup(app, site, e, w));
     }
 
+    // **노트에서 걸린 줄을 그린다**(moai-wcy8.3v9, 2026-09-30 사용자 결정) — 노트는 목록에도 이 패널의 다른
+    // 칸에도 없어, 노트로 걸린 줄은 이것 없이는 왜 걸렸는지가 안 보인다. **검색이 노트를 볼 때만, 걸린 줄만**
+    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu).
+    //
+    // **본문 앞에 선다** — 이 절은 검색 중에만 서고, 그때 사람이 찾는 것이 "왜 걸렸나" 다. 본문 뒤에 두던 판은
+    // 본문이 긴 에픽에서 이 절이 패널 밖 30줄 아래로 밀려, 노트로만 걸린 줄은 걸린 까닭을 스크롤해 찾아야 했다.
+    // 본문에서 걸린 글자는 본문에 칠해지니 본문이 조금 밀려도 까닭은 그대로 보인다.
+    if let Some(q) = seen(GrepIn::sees_notes) {
+        let hit = crate::query::noted_lines(site.ground.notes_of(&i.id), q);
+        if !hit.is_empty() {
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled(say(site.lang, "tui.about.notes"), bold())));
+            for l in hit {
+                out.extend(wrapped(l, w, Style::new()).into_iter().map(|l| mark_line(l, Some(q))));
+            }
+        }
+    }
+
     if let Some(body) = &i.body {
         out.push(Line::from(""));
         out.push(Line::from(Span::styled("─".repeat(w.min(40)), dim())));
@@ -7635,9 +7653,11 @@ pub(super) mod tests {
         let painted = found_text(&mut a);
         assert!(painted.contains(&q.to_lowercase()), "찾은 글자를 안 칠했다\n{painted}");
 
-        // 태그 범위는 id·제목을 안 본다 — 칠할 것이 없다. 이름표가 범위를 말한다.
-        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        // 태그 범위는 id·제목을 안 본다 — 칠할 것이 없다. 이름표가 범위를 말한다. 거꾸로 세 번이다: 전체 → 노트
+        // → 본문 → 태그(moai-wcy8.3v9).
+        for _ in 0..3 {
+            a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        }
         let prompt = render(&mut a, 100, 20).join("\n");
         assert!(prompt.contains(" 검색·태그 "), "{prompt}");
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
@@ -7670,6 +7690,44 @@ pub(super) mod tests {
         // 거꾸로도 — 태그 범위는 본문에 같은 글이 있어도 태그만 칠한다(moai-xemz 리뷰: 한쪽만 매 두면 범위를
         // 가르는 `sees_*` 가 태그 범위에 본문까지 켜도 이 시험이 초록으로 남는다).
         assert_eq!(painted("quux", 3).matches("quux").count(), 1, "태그 범위인데 본문을 칠했다");
+    }
+
+    /// **노트에서 걸린 줄은 상세에 그린다**(moai-wcy8.3v9) — 걸린 줄만, 찾은 글자를 칠해서. 노트는 목록에도
+    /// 상세의 다른 칸에도 없어, 이것 없이는 노트로 걸린 줄이 왜 걸렸는지 안 보인다. 노트를 안 보는 범위는
+    /// 같은 글이 노트에 있어도 안 그린다.
+    #[test]
+    fn the_detail_draws_the_note_lines_that_matched() {
+        let drawn = |q: &str, tabs: usize| {
+            let mut is = issues();
+            is[0].body = Some("본문 첫 줄".into());
+            let mut a = every(is);
+            let note = "첫 줄은 상관없다\n사용자 결정: zebra 에픽 길".to_string();
+            a.site.ground.notes = [("argos-0001".to_string(), vec![note, "다른 노트".to_string()])].into();
+            a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            for c in q.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            for _ in 0..tabs {
+                a.hit("Tab");
+            }
+            (render(&mut a, 100, 30).join("\n"), found_text(&mut a))
+        };
+        for (tabs, scope) in [(0, "전체"), (5, "노트")] {
+            let (screen, found) = drawn("zebra", tabs);
+            assert!(screen.contains("걸린 노트") && screen.contains("사용자 결정: zebra 에픽 길"), "{scope}\n{screen}");
+            assert!(
+                !screen.contains("첫 줄은 상관없다") && !screen.contains("다른 노트"),
+                "안 걸린 줄을 그렸다\n{screen}"
+            );
+            assert!(found.contains("zebra"), "{scope} 범위에서 노트의 찾은 글자를 안 칠했다 — {found:?}");
+            // 본문 앞에 선다 — 긴 본문 뒤에 두면 걸린 까닭이 패널 밖으로 밀린다.
+            assert!(screen.find("걸린 노트") < screen.find("본문 첫 줄"), "걸린 노트가 본문 뒤에 섰다\n{screen}");
+        }
+        // 제목으로 걸린 줄 — 제목 범위는 노트를 안 보므로, 노트에 같은 글이 있어도 그 절을 안 세운다.
+        let (screen, _) = drawn("에픽", 2);
+        assert!(screen.contains(" 검색·제목 ") && !screen.contains("걸린 노트"), "{screen}");
+        let (screen, _) = drawn("에픽", 0);
+        assert!(screen.contains("걸린 노트"), "전체 범위가 노트의 걸린 줄을 안 그렸다\n{screen}");
     }
 
     /// **칠은 거름망과 같은 자로 접는다**(moai-4tgv). 거름망은 글을 통째로 `to_lowercase` 해 견준다 —
