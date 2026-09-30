@@ -2154,3 +2154,10 @@
 {"ts":"2026-09-29T16:22:12Z","id":"moai-u3zv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"a linked tracker target with spaces or glob characters gets no .gitattributes line; quoting the pattern would cover it (review moai-ydm7.exk)"}
 {"ts":"2026-09-29T16:22:12Z","id":"moai-z4wk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"쌍둥이 지우기와 산 줄 고침이 겹치면 여전히 충돌한다"}
 {"ts":"2026-09-29T16:22:12Z","id":"moai-14oz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"worktree overlay caches the removal base per sibling HEAD, not per merge-base: siblings forked after one worker repeat the same 1.8MB show and parse (review moai-ydm7.exk)"}
+{"ts":"2026-09-30T02:41:04Z","id":"moai-lomk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.5"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖에서 목록을 가져가기 쉽게 — 정렬·자르기·시간·노트"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc.6sq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show 에 --sort·--reverse 를 둔다 (query::order_by)"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc.ku7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show·ready 에 -n/--limit, show 에 --after <id> 커서"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc.ip5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시간으로 거른다 — --since(updated_at)와 created·done 범위"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc.zyc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"-g 가 노트도 찾게 한다"}
+{"ts":"2026-09-30T02:41:14Z","id":"moai-efoc.x93","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--json 에 jq·duckdb 로 SQL 을 거는 예를 문서에 싣는다"}
