@@ -2285,3 +2285,5 @@
 {"ts":"2026-09-30T10:13:27Z","id":"moai-2htt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-30T10:13:28Z","id":"moai-efoc.ln9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 15건 가운데 13건(1·2·3·5·6·7·8·10·11·12·13·14·15)과 컷 아래 넷을 fix 커밋으로 받았고, cargo test·clippy·fmt 로 다시 쟀다. 넘긴 것: 4번(slim tzdata 의 POSIX footer)은 moai-r621, 9번(탐색기 거름망이 CLI 꼴 명령을 대는 것)은 moai-tckz — 둘 다 #bug 라 이 에픽의 멤버로 세워 v0.1.5 안에 둔다. 잔가지(`DoneOutside` 가 `-s` 를 박은 것)는 moai-tckz 가 표면을 가를 때 함께 본다"}
 {"ts":"2026-09-30T10:13:55Z","id":"moai-efoc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 moai-r621(slim tzdata 의 POSIX footer)과 moai-tckz(탐색기 거름망 거절문의 CLI 꼴 명령)가 첫 칸에 남아 에픽을 연다. 둘은 리뷰 moai-efoc.ln9 가 넘긴 것이라 아직 아무 리뷰도 안 봤다 — 그것을 닫는 창이 에픽 끝 리뷰를 다시 부른다"}
+{"ts":"2026-09-30T10:15:39Z","id":"moai-r621","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T10:15:40Z","id":"moai-tckz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
