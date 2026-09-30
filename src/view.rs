@@ -2215,7 +2215,11 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
         for e in journal {
             // 메모는 여러 줄일 수 있다. 한 원소에 `\n` 을 담으면 "원소 하나가
             // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
-            let ts = short_stamp(&e.ts, z);
+            //
+            // **도장도 한 줄로 걷는다**(moai-fmoa) — 못 읽는 도장은 [`short_stamp`] 가 그대로 돌려주므로, 손으로
+            // 고친 저널 줄의 ESC 가 화면을 다시 칠하고 줄바꿈은 없는 이력 줄을 지어낸다. [`removed`] 가 같은 저널
+            // 줄을 이미 이렇게 그린다 — 두 화면이 한 줄을 달리 다루던 자리다.
+            let ts = one_line(&short_stamp(&e.ts, z));
             let pad = " ".repeat(width(&ts) + 5);
             for (n, l) in entry(e, cfg, lang).split('\n').enumerate() {
                 out.push(match n {
@@ -3773,6 +3777,29 @@ mod tests {
             shown[1].contains("2025-12-31 23:30") && shown[2].contains("2026-12-31 23:30"),
             "해가 없다 — {shown:?}"
         );
+    }
+
+    /// **이력의 도장도 화면을 못 다시 칠한다**(moai-fmoa). [`removed`] 가 같은 저널 줄의 도장을 걷는데 이력만
+    /// 그대로 찍던 자리다 — 못 읽는 도장은 [`short_stamp`] 가 그대로 돌려주므로 ESC 가 `moai show <id>` 화면에
+    /// 닿고, 줄바꿈은 원소 하나가 한 줄이라는 약속을 깬다. 글이 여러 줄인 메모는 여전히 줄마다 갈린다.
+    #[test]
+    fn a_history_stamp_is_one_clean_line() {
+        let by = crate::model::someone("raven");
+        let j = [
+            JournalEntry::note("argos-0001", "첫 줄\n둘째 줄", "x\u{1b}[2J\ny", &by),
+            JournalEntry::note("argos-0001", "뒤", "2026-09-09T05:02:00Z", &by),
+        ];
+        let out = history(&j, &cfg(), Screen::new(Lang::Ko));
+        for l in &out {
+            assert!(!l.contains("\u{1b}[2J") && !l.contains('\n'), "도장이 화면에 닿았다 — {l:?}");
+        }
+        let shown = plain(&out);
+        // 머리 두 줄(빈 줄·`이력`) 뒤로 메모 두 줄과 둘째 줄이다.
+        assert_eq!(shown.len(), 5, "{shown:?}");
+        assert!(shown[2].contains("첫 줄") && shown[3].trim_start().starts_with("둘째 줄"), "{shown:?}");
+        // 이어지는 줄은 걷은 도장의 폭만큼 들여 선다 — 걷기 전 폭으로 재면 열이 어긋난다.
+        let col = |l: &str, needle: &str| width(&l[..l.find(needle).unwrap()]);
+        assert_eq!(col(&shown[2], "note:"), col(&shown[3], "둘째 줄"), "{shown:?}");
     }
 
     /// **상세의 왼쪽 이름 칸은 어느 말에서도 한 폭이다**(`label_width`).
