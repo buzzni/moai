@@ -104,6 +104,16 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   append. A whole line that an older moai already glued onto a cut one is read
   back: the history, `-g`, `work` and `--removed` all see it again.
 
+- **A journal reached through a symbolic link is read once.** When a file under
+  `.moai/journal/`, or the old `.moai/journal.jsonl`, was a link to another
+  journal file — someone who changed their email linking the old
+  `<email>.jsonl` to the new one — both names were read, so every line in that
+  file stood twice in the history, `-g` and `--removed`, and `work` added its
+  tokens twice. Names that resolve to the same file are now read once, and a
+  line moai cannot read there is named by that file, not by the link. A hard
+  link still reads twice: it cannot be told apart from two files, and git
+  commits it as two.
+
 - **A hand-edited stamp no longer reaches the terminal.** A stamp moai cannot
   read was printed as it stood, so an escape sequence or a newline in a journal
   line's `ts`, or in a row's `created_at`, `updated_at`, `started_at` or
