@@ -116,13 +116,15 @@ pub enum Mode {
 /// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
 ///
 /// **뱃지는 이것을 그리기만 한다**([`draw::badge`]). 한때 뱃지 글(`/노트:x`)을 들고 거기서 범위와 검색어를
-/// 되읽었다. 그러자 범위 이름이 곧 되읽는 자의 열쇠라 화면 말로 못 옮겼다(영어 화면에 `/노트:x` 가 섰다).
+/// 되읽었다. 그러자 범위 이름이 곧 되읽는 자의 열쇠라 화면 말로 못 옮겼고(영어 화면에 `/노트:x` 가 섰다),
+/// `/` 로 시작하는 글만 검색으로 읽어 `f` 의 `grep=` 으로 건 줄은 찾은 자리를 못 칠했다(moai-lpzj.4ks).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hung {
     /// `/` 검색 — 친 글과 찾는 자리.
     Grep { text: String, scope: GrepIn },
-    /// `f` 거름망 — 친 `항목=값` 글.
-    Filter { text: String },
+    /// `f` 거름망 — 친 `항목=값` 글과, 그 가운데 `grep=` 이 찾는 글. 뒤엣것은 걸 때 [`Filter::build`] 가
+    /// 읽은 값을 받아 둔다([`App::apply`]) — 찾은 자리를 칠하는 쪽이 줄마다 글을 다시 쪼개지 않게.
+    Filter { text: String, grep: Option<String> },
 }
 
 impl Hung {
@@ -130,7 +132,15 @@ impl Hung {
     fn mode(&self) -> Mode {
         match self {
             Hung::Grep { text, scope } => Mode::Grep(Input::new(text), *scope),
-            Hung::Filter { text } => Mode::Filter(Input::new(text)),
+            Hung::Filter { text, .. } => Mode::Filter(Input::new(text)),
+        }
+    }
+
+    /// 글로 찾는 범위와 글 — `/` 검색이든 `f` 의 `grep=` 이든. `grep=` 은 CLI 의 `-g` 처럼 늘 전체를 본다.
+    fn query(&self) -> Option<(GrepIn, &str)> {
+        match self {
+            Hung::Grep { text, scope } => Some((*scope, text)),
+            Hung::Filter { grep, .. } => grep.as_deref().map(|q| (GrepIn::All, q)),
         }
     }
 }
@@ -2435,12 +2445,11 @@ impl App {
         }
     }
 
-    /// 걸린 검색의 범위와 친 글. 거름망(`f`)이거나 걸린 것이 없으면 `None`.
+    /// 걸린 거르개가 글로 찾는 범위와 글 — 찾은 자리를 칠하는 쪽이 읽는다. `/` 검색이든 `f` 의 `grep=` 이든
+    /// 같다(moai-lpzj.4ks): `grep=` 으로 건 줄도 노트에만 든 글로 걸릴 수 있고, 칠이 없으면 왜 걸렸는지가 안
+    /// 보인다. 글로 찾지 않으면 `None`. 보기를 걷는 것은 이것이 아니라 [`App::searching`] 이다.
     pub fn grep_query(&self) -> Option<(GrepIn, &str)> {
-        match self.hung.as_ref()? {
-            Hung::Grep { text, scope } => Some((*scope, text)),
-            Hung::Filter { .. } => None,
-        }
+        self.hung.as_ref()?.query()
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
@@ -2549,7 +2558,7 @@ impl App {
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.hung = Some(match mode {
             Mode::Grep(_, scope) => Hung::Grep { text, scope: *scope },
-            _ => Hung::Filter { text },
+            _ => Hung::Filter { text, grep: filter.grep.clone() },
         });
         Ok(())
     }
@@ -6463,7 +6472,7 @@ mod tests {
         }
 
         // Esc 는 메뉴를 닫는 것이 먼저다 — 걸어 둔 거름망은 안 푼다.
-        a.hung = Some(Hung::Filter { text: "tag=x".into() });
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
         a.key(key(KeyCode::Esc));
         assert!(!menu::open(&a.chord));
         assert_eq!(badge(&a).as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
