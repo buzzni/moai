@@ -5040,7 +5040,7 @@ mod tests {
 
     /// 걸린 거름망의 뱃지 글 — 화면이 그리는 그 글([`draw::badge`])이다.
     fn badge(a: &App) -> Option<String> {
-        a.hung.as_ref().map(draw::badge)
+        a.hung.as_ref().map(|h| draw::badge(h, a.site.lang))
     }
 
     fn make(id: &str, kind: Kind) -> Issue {

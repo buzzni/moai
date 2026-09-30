@@ -1038,8 +1038,10 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
     let lang = app.site.lang;
     let badge = app.hung.as_ref().map(|h| {
-        let said =
-            fill(say(lang, "tui.crumbs.filter"), &[("text", &badge(h)), ("key", &label(BROWSE, Browse::ClearFilter))]);
+        let said = fill(
+            say(lang, "tui.crumbs.filter"),
+            &[("text", &badge(h, lang)), ("key", &label(BROWSE, Browse::ClearFilter))],
+        );
         clip(&said, w)
     });
     let room = match &badge {
@@ -3196,20 +3198,38 @@ fn prompt_help(apply: &str, lang: Lang) -> String {
 }
 
 /// 걸린 거름망의 뱃지 글(moai-lpzj.i7i) — 거름망이면 친 글 그대로, 검색이면 `/<글>`, 범위를 좁혔으면
-/// `/<범위>:<글>`. **그리기만 한다** — 이 글을 되읽는 자는 없다: 범위와 글은 [`Hung`] 이 따로 든다.
-pub(super) fn badge(h: &Hung) -> String {
+/// `/<범위>:<글>`. **그리기만 한다** — 이 글을 되읽는 자는 없다: 범위와 글은 [`Hung`] 이 따로 든다. 그래서
+/// 범위 이름이 화면 말을 따른다([`scope_word`]).
+pub(super) fn badge(h: &Hung, lang: Lang) -> String {
     match h {
         Hung::Filter { text } => text.clone(),
-        Hung::Grep { text, scope: GrepIn::All } => format!("/{text}"),
-        Hung::Grep { text, scope } => format!("/{}:{text}", scope.name()),
+        Hung::Grep { text, scope } => match scope_word(*scope, lang) {
+            Some(word) => format!("/{word}:{text}"),
+            None => format!("/{text}"),
+        },
     }
+}
+
+/// 좁힌 검색 범위의 화면 말(moai-lpzj.3nv) — 검색 칸 이름표(`search·title`)와 뱃지(`/title:…`)가 함께 쓴다.
+/// **전체는 이름이 안 선다** — 이름표는 `search`, 뱃지는 `/<글>` 이다. 한때 `GrepIn::name` 이 한국어 이름을
+/// 박아 두어 영어 화면에도 `search·노트` 가 섰다. 그 이름이 뱃지를 되읽는 열쇠이기도 해서 말만 바꿀 수가
+/// 없었는데, 범위를 데이터로 들게 되면서([`Hung`]) 풀렸다.
+fn scope_word(g: GrepIn, lang: Lang) -> Option<&'static str> {
+    Some(match g {
+        GrepIn::All => return None,
+        GrepIn::Id => say(lang, "tui.grep.in.id"),
+        GrepIn::Title => say(lang, "tui.grep.in.title"),
+        GrepIn::Tag => say(lang, "tui.grep.in.tag"),
+        GrepIn::Body => say(lang, "tui.grep.in.body"),
+        GrepIn::Note => say(lang, "tui.grep.in.note"),
+    })
 }
 
 /// 검색 칸 이름표 — 좁힌 범위면 `검색·id` 처럼 붙인다(moai-kojj). 전체면 옛 이름 그대로다.
 fn grep_label(g: GrepIn, lang: Lang) -> String {
-    match g {
-        GrepIn::All => say(lang, "tui.grep.label").to_string(),
-        g => fill(say(lang, "tui.grep.label_in"), &[("scope", g.name())]),
+    match scope_word(g, lang) {
+        Some(word) => fill(say(lang, "tui.grep.label_in"), &[("scope", word)]),
+        None => say(lang, "tui.grep.label").to_string(),
     }
 }
 
@@ -7754,6 +7774,34 @@ pub(super) mod tests {
         let prompt = render(&mut a, 100, 20).join("\n");
         assert!(prompt.contains(" 검색·태그 "), "{prompt}");
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
+    }
+
+    /// **검색 범위의 이름은 화면 말을 따른다**(moai-lpzj.3nv) — 영어 화면에도 `search·노트`·`/노트:…` 가 섰다.
+    /// 그 이름이 뱃지 글이기도 해서 되읽는 자가 거기 매여 있었다. 범위를 데이터로 든 뒤로는(moai-lpzj.i7i)
+    /// 말만 바뀐다 — 걸린 범위와 글은 두 말에서 같다.
+    #[test]
+    fn the_search_scope_speaks_the_screen_language() {
+        for (lang, label, crumb) in
+            [(Lang::En, " search·note ", "[/note:zebra]"), (Lang::Ko, " 검색·노트 ", "[/노트:zebra]")]
+        {
+            let mut a = app();
+            a.site.lang = lang;
+            a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            for c in "zebra".chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            // 전체에서 거꾸로 한 번이 노트다(moai-wcy8.3v9).
+            a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+            let prompt = render(&mut a, 100, 20).join("\n");
+            assert!(prompt.contains(label), "{lang:?}: 검색 칸 이름표가 화면 말이 아니다\n{prompt}");
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            let screen = render(&mut a, 100, 20).join("\n");
+            assert!(screen.contains(crumb), "{lang:?}: 뱃지가 화면 말이 아니다\n{screen}");
+            if lang == Lang::En {
+                assert!(!screen.contains("/노트:") && !prompt.contains("·노트"), "영어 화면에 한국어 범위가 섰다");
+            }
+            assert_eq!(a.grep_query(), Some((GrepIn::Note, "zebra")), "{lang:?}: 걸린 범위나 글이 말을 탔다");
+        }
     }
 
     /// **상세 칸은 태그·본문에서 찾은 글자도 칠한다**(moai-lw7i) — 목록 줄은 id·제목만 칠해, 태그·본문

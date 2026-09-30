@@ -1897,7 +1897,10 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.hung.as_ref().map(crate::tui::draw::badge).as_deref(), Some("status=in_progress"));
+        assert_eq!(
+            a.hung.as_ref().map(|h| crate::tui::draw::badge(h, a.site.lang)).as_deref(),
+            Some("status=in_progress")
+        );
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -3369,7 +3372,10 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.hung.as_ref().map(crate::tui::draw::badge).as_deref(), Some("status=in_progress"));
+        assert_eq!(
+            a.hung.as_ref().map(|h| crate::tui::draw::badge(h, a.site.lang)).as_deref(),
+            Some("status=in_progress")
+        );
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
