@@ -161,7 +161,7 @@ pub enum Cmd {
   column, or was deferred and picked back up, later wins - so editing only
   the title or priority here does not free what the other side picked up, and
   work the other side deferred later is not offered here.")]
-    Ready(WorktreeArg),
+    Ready(ReadyArgs),
 
     /// A short markdown page - what you hold and what comes next
     #[command(after_help = "  Made for a session's first read and for the context injected again
@@ -767,8 +767,11 @@ pub enum Typed {
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
     /// `moai idea add` and `moai idea show` (`ls`) - the same verbs, kind pinned
+    // **상자에 담는다**(moai-efoc) — `ShowArgs` 가 차례·쪽 플래그로 자라 `Typed` 가 `Promote` 의
+    // 세 배를 넘었고, clippy 의 `large_enum_variant` 가 그 차이를 잡는다. 한 판에 한 번 짓는 값이라
+    // 상자 하나의 값은 없는 것과 같다.
     #[command(flatten)]
-    Common(Typed),
+    Common(Box<Typed>),
     /// Unfold into one epic and several issues, and close that thought
     #[command(after_help = "  The markdown it takes is the same shape as `add --from`. With two shapes,
   you get the grammar wrong every single time.
@@ -927,7 +930,17 @@ pub struct AddArgs {
 const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). --reverse turns the whole order around.";
+  id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json";
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
@@ -957,10 +970,10 @@ pub struct ShowArgs {
     pub page: PageArgs,
 }
 
-/// 목록의 차례(moai-efoc). **거르개가 아니다** — 무엇을 고르는지는 안 바꾸고, 고른 것을 어떤
-/// 차례로 내는지만 정한다. 그래서 `FilterArgs` 와 머리글이 따로다.
+/// 목록의 차례와 쪽(moai-efoc). **거르개가 아니다** — 무엇을 고르는지는 안 바꾸고, 고른 것을 어떤
+/// 차례로 몇 줄 내는지만 정한다. 그래서 `FilterArgs` 와 머리글이 따로다.
 #[derive(Args, Debug, Default)]
-#[command(next_help_heading = "Order")]
+#[command(next_help_heading = "Order and paging")]
 pub struct PageArgs {
     /// Order the list by that key (priority when absent)
     #[arg(long, value_name = "key", value_enum, hide_possible_values = true)]
@@ -969,6 +982,29 @@ pub struct PageArgs {
     /// Turn the order around, ties included
     #[arg(long)]
     pub reverse: bool,
+
+    /// Give at most this many rows
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::value_parser!(u64).range(1..))]
+    pub limit: Option<u64>,
+
+    /// Start after this row: the last id of the page before
+    #[arg(long, value_name = "id")]
+    pub after: Option<String>,
+}
+
+/// `moai ready` 가 받는 것 — 워크트리 겹쳐 보기와 자르기(moai-efoc). `status`·`prime` 은 자를
+/// 목록이 없어 [`WorktreeArg`] 만 받는다.
+///
+/// **`--after` 는 없다.** `ready` 의 차례는 우선순위·마일스톤·나이를 섞은 판단이라 그 값으로 줄을
+/// 되짚을 키가 없고, 집을 일은 앞에서부터 집는 것이라 다음 쪽이 뜻이 없다.
+#[derive(Args, Debug, Default)]
+pub struct ReadyArgs {
+    #[command(flatten)]
+    pub worktree: WorktreeArg,
+
+    /// Give at most this many rows (held stays whole)
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::value_parser!(u64).range(1..))]
+    pub limit: Option<u64>,
 }
 
 /// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이

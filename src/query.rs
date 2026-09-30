@@ -680,15 +680,46 @@ pub fn order_by(
     if reversed { order.reverse() } else { order }
 }
 
-/// 고른 줄을 `sort` 차례로 세운다(moai-efoc) — `moai show` 의 목록이 지나는 자리다.
+/// 고른 줄을 `sort` 차례로 세우고, 커서(`after`) **뒤**에 선 줄부터 `limit` 줄만 남긴다(moai-efoc) —
+/// `moai show` 의 목록이 지나는 자리다. 돌려주는 것은 `limit` 에 잘려 나간 줄 수다 — 사람 화면이
+/// "N건 더" 를 댄다.
 ///
 /// 칸은 **목록의 글리프와 같은 자**([`Where::column`])로 읽는다 — 묶음의 칸은 멤버에서 읽은 것이다.
 /// 담당은 화면에 선 이름으로 견준다(`cfg.naming`). 탐색기와 같은 [`order_by`] 를 지나므로 같은 낱말이
 /// 두 표면에서 같은 차례로 선다. 기본값(`Sort::default`)은 [`display_order`] 와 한 치도 안 갈린다.
-pub fn page(shown: &mut [Issue], wh: &Where, cfg: &crate::config::Config, sort: Sort) {
-    shown.sort_by(|a, b| {
+///
+/// **커서는 자리가 아니라 값이다**(키셋). 커서 줄의 **지금** 값으로 견주어 그보다 뒤인 줄만 남기므로,
+/// 앞 쪽을 받은 뒤 다른 줄이 생기거나 지워져도 밀리거나 겹치지 않는다 — offset 으로 넘기면 세션
+/// 여럿이 쓰는 사이 줄이 밀려 빠지거나 겹친다(에픽 본문의 결정). 커서 줄은 걸러져 목록에 없어도
+/// 된다 — 닫혀 숨었어도 값은 있다. 커서 줄 **자신**의 값이 바뀌면 그 옛 자리 둘레가 겹치거나 빠진다.
+/// 그 값마저 안 움직이는 차례가 [`SortKey::Id`] 다.
+///
+/// 견주는 자가 둘이 아니다 — 세우는 것과 커서를 넘는 것이 같은 `cmp` 를 지나야, 커서 줄 바로 뒤의
+/// 줄이 두 판정 사이에서 갈리지 않는다. 차례는 id 까지 가르므로 커서와 같은(`Equal`) 줄은 같은 id
+/// 를 든 쌍둥이뿐이고, 그 줄은 커서와 함께 앞 쪽에 선 것으로 친다.
+pub fn page(
+    shown: &mut Vec<Issue>,
+    wh: &Where,
+    cfg: &crate::config::Config,
+    sort: Sort,
+    after: Option<&Issue>,
+    limit: Option<usize>,
+) -> usize {
+    let cmp = |a: &Issue, b: &Issue| {
         order_by(sort.key, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
-    });
+    };
+    shown.sort_by(|a, b| cmp(a, b));
+    if let Some(c) = after {
+        shown.retain(|i| cmp(i, c) == std::cmp::Ordering::Greater);
+    }
+    match limit {
+        Some(n) if shown.len() > n => {
+            let cut = shown.len() - n;
+            shown.truncate(n);
+            cut
+        }
+        _ => 0,
+    }
 }
 
 /// **안 읽은 줄** — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것(moai-50mn).
@@ -1297,9 +1328,41 @@ mod tests {
         v[0].priority = Some(0);
         let all = v.clone();
         let c = cfg();
-        page(&mut v, &Where::of(&all, &c), &c, Sort::default());
+        page(&mut v, &Where::of(&all, &c), &c, Sort::default(), None, None);
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
+    }
+
+    /// **커서는 자리가 아니라 값이다**(moai-efoc.ku7) — 앞 쪽을 받은 뒤 줄이 지워지거나 생겨도 다음 쪽이
+    /// 밀리지 않고, 커서 줄이 목록에서 빠져도(닫혀 숨었다) 그 값으로 넘는다. offset 이면 둘 다 어긋난다.
+    #[test]
+    fn a_page_starts_after_the_cursor_value_not_its_position() {
+        let all: Vec<Issue> = (1..=5).map(|n| issue(&format!("a-000{n}"), "todo", &[])).collect();
+        let c = cfg();
+        let by_id = Sort { key: SortKey::Id, reversed: false };
+        let run = |rows: &[Issue], sort: Sort, after: Option<&str>, limit: Option<usize>| {
+            let wh = Where::of(&all, &c);
+            let mut v = rows.to_vec();
+            let cursor = after.map(|id| all.iter().find(|i| i.id == id).unwrap());
+            let cut = page(&mut v, &wh, &c, sort, cursor, limit);
+            (v.into_iter().map(|i| i.id).collect::<Vec<_>>(), cut)
+        };
+        assert_eq!(run(&all, by_id, None, Some(2)), (s(&["a-0001", "a-0002"]), 3), "첫 쪽");
+        assert_eq!(run(&all, by_id, Some("a-0002"), Some(2)), (s(&["a-0003", "a-0004"]), 1), "둘째 쪽");
+        assert_eq!(run(&all, by_id, Some("a-0004"), Some(2)), (s(&["a-0005"]), 0), "끝 쪽 — 잘린 것이 없다");
+        // 앞 쪽을 받은 뒤 a-0001 이 지워졌다 — offset 2 면 a-0004 부터 받아 a-0003 을 놓친다.
+        let gone: Vec<Issue> = all.iter().filter(|i| i.id != "a-0001").cloned().collect();
+        assert_eq!(run(&gone, by_id, Some("a-0002"), Some(2)).0, s(&["a-0003", "a-0004"]), "지운 줄에 쪽이 밀렸다");
+        // 커서 줄이 걸러져 목록에 없다 — 값으로 넘으므로 그래도 그 뒤부터다.
+        let hidden: Vec<Issue> = all.iter().filter(|i| i.id != "a-0002").cloned().collect();
+        assert_eq!(run(&hidden, by_id, Some("a-0002"), None).0, s(&["a-0003", "a-0004", "a-0005"]));
+        // 뒤집은 차례에서 "뒤" 는 뒤집은 차례의 뒤다.
+        let back = Sort { key: SortKey::Id, reversed: true };
+        assert_eq!(
+            run(&all, back, Some("a-0004"), None).0,
+            s(&["a-0003", "a-0002", "a-0001"]),
+            "뒤집은 차례의 뒤가 아니다"
+        );
     }
     /// **묶음은 서 있는 칸으로 고르고 숨긴다** (moai-j3b3). 멤버가 집힌 에픽이
     /// `-s todo` 에 걸리거나, 손으로 `done` 에 둔 진행 중인 에픽이 목록에서

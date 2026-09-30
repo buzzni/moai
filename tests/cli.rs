@@ -4616,6 +4616,69 @@ fn show_orders_the_list_by_the_key_it_is_given() {
     assert!(!moai(s.path(), &["show", "--sort", "nope"]).status.success(), "모르는 차례를 받았다");
 }
 
+/// **쪽은 커서의 값으로 넘는다**(moai-efoc.ku7) — `-n` 으로 자르고 `--after <앞 쪽의 마지막 id>` 로
+/// 이어 받으면 빠지는 줄도 겹치는 줄도 없고, 그사이 앞 쪽의 줄이 지워져도 밀리지 않는다. `--json` 은
+/// 배열 그대로다 — 받은 수가 `-n` 보다 적으면 끝이다.
+#[test]
+fn show_pages_with_a_limit_and_a_cursor() {
+    let s = init("paged");
+    let mut ids: Vec<String> = (0..5).map(|n| add(s.path(), &[&format!("일 {n}")])).collect();
+    ids.sort();
+    let page = |extra: &[&str]| {
+        let mut args = vec!["show", "--sort", "id", "--json"];
+        args.extend_from_slice(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    assert_eq!(page(&["-n", "2"]), ids[..2], "첫 쪽");
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "둘째 쪽");
+    assert_eq!(page(&["-n", "2", "--after", &ids[3]]), ids[4..], "끝 쪽은 -n 보다 적다");
+    assert!(page(&["-n", "2", "--after", &ids[4]]).is_empty(), "끝을 넘은 쪽이 비지 않았다");
+    one_json_value(&ok(s.path(), &["show", "-n", "2", "--json"]));
+
+    // 사람 화면은 잘린 것을 세고 다음 쪽을 여는 명령을 댄다.
+    let human = ok(s.path(), &["show", "--sort", "id", "-n", "2"]);
+    assert!(human.contains("3건 더") && human.contains(&format!("--after {}", ids[1])), "다음 쪽을 안 댔다 — {human}");
+    assert!(!ok(s.path(), &["show", "--sort", "id"]).contains("건 더"), "안 자른 목록에 꼬리가 붙었다");
+
+    // 앞 쪽의 줄이 지워져도 다음 쪽은 밀리지 않는다 — offset 이면 ids[2] 를 놓친다.
+    ok(s.path(), &["rm", &ids[0]]);
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "지운 줄에 쪽이 밀렸다");
+    // 앞 쪽의 마지막 줄이 닫혀 목록에서 빠져도 그 값으로 넘는다.
+    ok(s.path(), &["mv", &ids[1], "done"]);
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "숨은 커서 줄을 못 넘었다");
+
+    // 커서 줄이 아예 없으면 넘을 값이 없다 — 말없이 첫 쪽을 내지 않고 `not_found` 로 말한다.
+    let out = moai(s.path(), &["show", "--after", &ids[0], "--json"]);
+    assert!(!out.status.success(), "지운 커서로 무언가를 냈다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(r#""code":"not_found""#) && err.contains(&ids[0]), "{err}");
+
+    assert!(!moai(s.path(), &["show", "-n", "0"]).status.success(), "`-n 0` 을 받았다");
+    for flag in [&["-n", "2"][..], &["--after", &ids[2]][..]] {
+        let mut args = vec!["show", "--tree"];
+        args.extend_from_slice(flag);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{flag:?} 를 트리에서 말없이 먹었다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(flag[0]), "{flag:?} 를 거절하며 이름을 안 짚었다");
+    }
+}
+
+/// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.
+#[test]
+fn ready_takes_a_limit_and_keeps_the_count() {
+    let s = init("readyn");
+    for n in 0..3 {
+        add(s.path(), &[&format!("일 {n}")]);
+    }
+    let json = ok(s.path(), &["ready", "-n", "1", "--json"]);
+    one_json_value(&json);
+    assert_eq!(ids_in(&json).len(), 1, "-n 1 인데 {json}");
+    assert!(json.contains(r#""held":["#), "held 키가 빠졌다 — {json}");
+    let human = ok(s.path(), &["ready", "-n", "1"]);
+    assert!(human.contains("집을 수 있는 일  3건") && human.contains("2건 더"), "셈이나 꼬리가 틀렸다 — {human}");
+    assert_eq!(ids_in(&ok(s.path(), &["ready", "--json"])).len(), 3, "-n 없이도 잘렸다");
+}
+
 // ── S4 — moai status ─────────────────────────────────────────────────
 
 fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
@@ -6799,6 +6862,8 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         // **차례도 목록에서만 뜻이 있다**(moai-efoc) — `PageArgs` 의 필드마다 하나씩.
         vec!["--sort", "id"],
         vec!["--reverse"],
+        vec!["-n", "2"],
+        vec!["--after", "argos-0001"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());

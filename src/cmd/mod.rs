@@ -408,7 +408,9 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Link(a) => link::run(ctx, a),
         Cmd::Defer(a) => defer::run(ctx, a),
         Cmd::Read(a) => read::run(ctx, a),
-        Cmd::Ready(w) => ready::run(ctx, w.worktree),
+        Cmd::Ready(a) => {
+            ready::run(ctx, a.worktree.worktree, a.limit.map(|n| usize::try_from(n).unwrap_or(usize::MAX)))
+        }
         Cmd::Prime(w) => prime::run(ctx, w.worktree),
         Cmd::Status(w) => status::run(ctx, w.worktree),
         Cmd::Tui(a) => tui::run(ctx, a),
@@ -417,7 +419,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, t, Kind::Idea),
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, *t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
     }
 }

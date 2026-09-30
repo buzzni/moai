@@ -10,10 +10,13 @@ use crate::report;
 use crate::store::Repo;
 use crate::view;
 
-pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
+/// `limit` 은 `-n` 이다(moai-efoc) — **집을 것만 자른다.** `held`·`outside` 는 목록이 왜 짧은지를
+/// 대는 자리라 통째로 남는다: 그것까지 자르면 막힌 까닭이 앞 n 줄만 남아 도는 고리가 그 밖의
+/// 막음을 "없다" 로 읽는다.
+pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     // `.moai` 밖이면 등록한 프로젝트마다 집을 것. 안이면 아래 그대로다 (결정 3).
     let Some(repo) = Repo::find(|| ctx.lang())? else {
-        return overview(ctx, worktree);
+        return overview(ctx, worktree, limit);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
@@ -21,7 +24,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
-    let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+    let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
+    let more = cut(&mut picks, limit);
     // 미뤄 둔 것·빈 묶음에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
     let held = report::held(&load.issues, &repo.config);
     if ctx.json {
@@ -76,7 +80,20 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let wip = report::wip(&load.issues, &repo.config);
 
     let screen = view::Screen::new(ctx.lang()).at(ctx.clock()).over(&origin);
-    Ok(view::ready(&picks, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
+    Ok(view::ready(&picks, more, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
+}
+
+/// 앞에서 `limit` 줄만 남기고 잘린 수를 돌려준다. `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 —
+/// 여기서는 끊기만 한다.
+fn cut<T>(picks: &mut Vec<T>, limit: Option<usize>) -> usize {
+    match limit {
+        Some(n) if picks.len() > n => {
+            let gone = picks.len() - n;
+            picks.truncate(n);
+            gone
+        }
+        _ => 0,
+    }
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
@@ -85,7 +102,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 ///
 /// **못 읽는 줄이 있어도 0 으로 끝난다** (`status::overview` 와 같은 까닭). 그 줄은
 /// 프로젝트 줄 밑에 수로 말하고, 어느 줄인지는 그 프로젝트의 `show` 가 낸다.
-fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
+///
+/// `-n` 은 **프로젝트마다** 자른다 — 한 프로젝트의 일이 다른 프로젝트의 몫을 밀어내지 않는다.
+/// 사람 화면은 그 가운데서도 앞 몇 줄만 그리고(`view::projects_ready`) 나머지를 "N건 더" 로 센다 —
+/// `-n` 에 잘린 줄도 그 셈에 든다([`view::Picks::more`]).
+fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     let (reg, projects) = super::registered(ctx, worktree)?;
     let seen: Vec<Seen<view::Picks>> = projects
         .iter()
@@ -94,7 +115,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // **저장소 안의 `ready` 와 같은 자다.** 도는 마일스톤이 목록을 줄였으면 그
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
-                let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+                let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
+                let more = cut(&mut picks, limit);
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
@@ -107,6 +129,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 };
                 view::Picks {
                     picks,
+                    more,
                     focus,
                     unreadable: load.errors.len(),
                     epics,

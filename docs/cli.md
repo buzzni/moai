@@ -156,6 +156,7 @@ Usage: moai ready [OPTIONS]
 
 Options:
       --worktree             Also overlay other worktrees (no file changes)
+  -n, --limit <count>        Give at most this many rows (held stays whole)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -372,14 +373,26 @@ Filters  (comma = or,  repeated = and):
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
 
-Order:
-      --sort <key>  Order the list by that key (priority when absent)
-      --reverse     Turn the order around, ties included
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
 
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
   id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
 ```
 
 ## `moai mv`
@@ -876,14 +889,26 @@ Filters  (comma = or,  repeated = and):
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
 
-Order:
-      --sort <key>  Order the list by that key (priority when absent)
-      --reverse     Turn the order around, ties included
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
 
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
   id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
 ```
 
 ## `moai epic`
@@ -1037,14 +1062,26 @@ Filters  (comma = or,  repeated = and):
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
 
-Order:
-      --sort <key>  Order the list by that key (priority when absent)
-      --reverse     Turn the order around, ties included
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
 
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
   id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
 ```
 
 ## `moai milestone`
@@ -1198,14 +1235,26 @@ Filters  (comma = or,  repeated = and):
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
 
-Order:
-      --sort <key>  Order the list by that key (priority when absent)
-      --reverse     Turn the order around, ties included
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
 
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
   id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
 ```
 
 ## `moai idea`
@@ -1380,14 +1429,26 @@ Filters  (comma = or,  repeated = and):
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
 
-Order:
-      --sort <key>  Order the list by that key (priority when absent)
-      --reverse     Turn the order around, ties included
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
 
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
   id (an order no edit ever moves). --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  If the cursor row itself changed in the order, rows around its old place
+  can repeat or be skipped; --sort id never moves. --json stays an array -
+  fewer rows than -n means the list has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
 ```
 
 ## `moai idea promote`

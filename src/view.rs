@@ -352,10 +352,14 @@ pub struct Asked {
 ///
 /// `asked` 는 **부르는 쪽이 무엇만 달라고 했는가**다([`Asked`]) — 미룬 것만·생각만 물었으면
 /// 줄마다 같은 표식이 붙어 봐야 자리만 먹는다.
+///
+/// `more` 는 `-n` 에 잘려 안 낸 줄 수다(moai-efoc) — 0 이 아니면 다음 쪽을 여는 명령을 꼬리에 댄다.
+/// 안 대면 잘린 목록과 끝난 목록이 화면에서 같아 보인다.
 pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
+    more: usize,
     epics: &crate::report::EpicLabels,
     asked: Asked,
     wh: &crate::query::Where,
@@ -454,6 +458,11 @@ pub fn list(
 
     out.push(String::new());
     out.push(summary(issues, cfg, hidden, wh, lang));
+    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page`) 앞 쪽의 마지막 줄이 곧 그 값이다.
+    if let Some(last) = issues.last().filter(|_| more > 0) {
+        let said = fill(say(lang, "list.more"), &[("n", &more.to_string()), ("id", &one_line(&last.id))]);
+        out.push(paint(style::DIM, &said));
+    }
     out
 }
 
@@ -1390,8 +1399,11 @@ pub fn prime_commands(lang: Lang) -> Vec<(&'static str, &'static str)> {
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
+/// `more` 는 `-n` 에 잘려 `picks` 에 없는 줄 수다(moai-efoc). 머리의 셈은 그것까지 센다 — 자른 것은
+/// 보여 줄 줄이지 집을 수 있는 일의 수가 아니다.
 pub fn ready(
     picks: &[&Issue],
+    more: usize,
     epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
@@ -1399,7 +1411,7 @@ pub fn ready(
     screen: Screen,
 ) -> Vec<String> {
     let lang = screen.lang;
-    let mut out = vec![fill(say(lang, "ready.count"), &[("n", &picks.len().to_string())])];
+    let mut out = vec![fill(say(lang, "ready.count"), &[("n", &(picks.len() + more).to_string())])];
     if picks.is_empty() {
         out.push(String::new());
         out.push(paint(style::DIM, say(lang, "ready.none")));
@@ -1438,6 +1450,9 @@ pub fn ready(
                 .trim_end()
                 .to_string(),
             );
+        }
+        if more > 0 {
+            out.push(format!("  {}", paint(style::DIM, &fill(say(lang, "ready.more"), &[("n", &more.to_string())]))));
         }
     }
 
@@ -2281,6 +2296,9 @@ pub struct Board<'a> {
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
 pub struct Picks<'a> {
     pub picks: Vec<&'a Issue>,
+    /// `-n` 에 잘려 `picks` 에 없는 줄 수(moai-efoc). 머리의 셈과 "N건 더" 는 이것까지 센다 —
+    /// 자른 것은 보여 줄 줄이지 집을 일의 수가 아니다.
+    pub more: usize,
     /// 도는 마일스톤이 이 목록에 한 일(`report::ready_in`). **한눈 보기에서도 댄다** — 저장소
     /// 안의 `ready` 가 목록이 왜 짧은지를 대는데 여기만 입을 다물면, 같은 명령이 선 자리에
     /// 따라 짧아진 목록을 "할 일이 없다" 로 읽는다.
@@ -2490,7 +2508,7 @@ pub fn projects_ready(
     let total: usize = seen
         .iter()
         .map(|s| match s {
-            Seen::Ok(k) => k.picks.len(),
+            Seen::Ok(k) => k.picks.len() + k.more,
             _ => 0,
         })
         .sum();
@@ -2514,7 +2532,7 @@ pub fn projects_ready(
         let screen = screen.over(k.origin);
         // **셈 하나에도 말이 든다** — 한국어의 `건` 이 여기 박혀 있던 동안, 말묶음에서 온
         // `overlaid` 꼬리와 한 줄에 서서 `1건   ⎇ feat/x overlaid` 가 나왔다(리뷰 moai-4y5s.jy3 #5).
-        let count = fill(say(lang, "overview.picks"), &[("n", &k.picks.len().to_string())]);
+        let count = fill(say(lang, "overview.picks"), &[("n", &(k.picks.len() + k.more).to_string())]);
         out.push(project_head(p, &format!("{count}{}", overlaid(screen))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
@@ -2530,7 +2548,7 @@ pub fn projects_ready(
                 marked(screen.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
-        let rest = k.picks.len() - shown.len();
+        let rest = k.picks.len() - shown.len() + k.more;
         if rest > 0 {
             // **`status` 의 경고 꼬리와 키가 같다**(`status.more`) — 같은 "N건 더" 를 두 키로
             // 두면 한쪽만 옮긴 말에서 한 화면이 두 모양으로 센다. 뒤의 명령은 자료라 그대로다.
@@ -3340,11 +3358,12 @@ mod tests {
             crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
         let as_prime = plain(&prime(&p, &labels, Screen::new(lang))).join("\n");
         let as_ready =
-            plain(&ready(&[&i], &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
+            plain(&ready(&[&i], 0, &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
         let as_list = plain(&list(
             &[i.clone()],
             &cfg(),
             Hidden::default(),
+            0,
             &labels,
             Asked::default(),
             &Default::default(),
@@ -3467,6 +3486,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3487,6 +3507,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3504,6 +3525,7 @@ mod tests {
                 &[],
                 &cfg(),
                 Hidden { done: 0, ..Hidden::default() },
+                0,
                 &no_epics(),
                 Asked::default(),
                 &Default::default(),
@@ -3516,6 +3538,7 @@ mod tests {
                 &[],
                 &cfg(),
                 Hidden { done: 3, ..Hidden::default() },
+                0,
                 &no_epics(),
                 Asked::default(),
                 &Default::default(),
@@ -3532,6 +3555,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 5, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3549,6 +3573,7 @@ mod tests {
             &[issue("argos-0001", &long, "todo")],
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3576,6 +3601,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &tagged,
             Asked::default(),
             &Default::default(),
@@ -3590,6 +3616,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &tagged,
             Asked::default(),
             &Default::default(),
@@ -3746,6 +3773,7 @@ mod tests {
             &[i.clone()],
             &cfg(),
             Hidden::default(),
+            0,
             &labels,
             Asked::default(),
             &Default::default(),
@@ -3760,6 +3788,7 @@ mod tests {
             &[i],
             &cfg(),
             Hidden::default(),
+            0,
             &dangling,
             Asked::default(),
             &Default::default(),
@@ -3930,6 +3959,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3943,6 +3973,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked { deferred: true },
             &Default::default(),
@@ -3972,6 +4003,7 @@ mod tests {
             &[plain_work, thought, put_off, both],
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -4234,7 +4266,7 @@ mod tests {
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();
-        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &none, Screen::new(lang)));
+        let out = plain(&ready(&[&a, &b], 0, &labels, &[&wip], &[], &none, Screen::new(lang)));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
         // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `say` 를 지나므로,
@@ -4245,7 +4277,7 @@ mod tests {
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &none, Screen::new(lang)));
+        let empty = plain(&ready(&[], 0, &labels, &[], &[], &none, Screen::new(lang)));
         let joined = empty.join("\n");
         assert!(
             joined.contains(&fill(say(lang, "ready.count"), &[("n", "0")])) && joined.contains(say(lang, "ready.none")),
