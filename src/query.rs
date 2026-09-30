@@ -10,7 +10,7 @@
 //! 문자열은 Bash heredoc 안에서 따옴표가 겹쳐 자주 깨진다. 서로 다른 필드
 //! 사이에 OR 이 필요하다는 요청이 실제로 올 때 다시 본다.
 
-use crate::model::{Issue, Kind, days_since, parse_date, parse_rfc3339};
+use crate::model::{Issue, Kind, days_since, parse_date, parse_instant, parse_rfc3339};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// `epic=none` 처럼 "값이 없는 것" 을 고르는 자리.
@@ -64,7 +64,7 @@ pub struct Where<'a> {
     /// 이슈 id → 그 이슈의 노트 글([`Notes`], moai-efoc.zyc). `-g` 가 노트까지 보는 재료다.
     ///
     /// **여기는 읽지 않는다 — 받는다**(2026-09-30 사용자 결정). 노트는 저널에 살고 이 모듈은 I/O 없는
-    /// 순수 함수라, 저널을 읽는 것은 명령 층(`cmd::show`)이고 맞는지 가르는 것은 여기다. 안 실렸으면
+    /// 순수 함수라, 저널을 읽는 것은 `cmd::show` 이고 맞는지 가르는 것은 여기다. 안 실렸으면
     /// (`None`, 탐색기와 `Where::default`) 노트를 안 본다 — 없는 노트와 안 읽은 노트를 가를 일이 이
     /// 모듈에는 없다. 상태 계산이 아니라 글 찾기라 "저널은 상태 계산에 안 읽힌다" 와 안 부딪친다.
     pub notes: Option<&'a Notes>,
@@ -321,7 +321,8 @@ pub struct Filter {
     pub updated: Vec<Vec<Span>>,
     /// `created_at` 이 든 폭(`--created`).
     pub created: Vec<Vec<Span>>,
-    /// **지금 done 에 선 줄이 거기 든 때**의 폭(`--done`). 재는 자는 [`Where::since`] 다.
+    /// **지금 done 에 선 줄이 거기 든 때**의 폭(`--done`). 재는 자는 [`Where::since`] 다 — 묶음이면 멤버가
+    /// 마지막으로 done 에 든 때라, 남은 멤버를 미루거나 지우거나 빼서 닫힌 묶음도 그 앞선 때로 선다.
     pub done: Vec<Vec<Span>>,
     /// done 을 포함한다.
     pub all: bool,
@@ -426,15 +427,29 @@ impl Filter {
         // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각까지.
         // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
         // `--since` 로 증분을 받는 쪽이 닫힌 줄을 말없이 놓친다 — 사람 화면은 꼬리에 숨긴 수를 대지만
-        // `--json` 에는 그 꼬리가 없다. 다시 좁히는 것은 `-s`·`--deferred` 다.
+        // `--json` 에는 그 꼬리가 없다. 다시 좁히는 것은 `-s`(칸을 적는다)와 `--type` 이다 — `--deferred` 는
+        // 미룬 것**만** 남기고, 미룬 줄을 빼는 말은 없다.
         let timed = !(raw.since.is_empty() && raw.created.is_empty() && raw.done.is_empty());
         let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred || timed;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
         let deferred = raw.deferred.then_some(true);
+        let status = once(&raw.status, "-s", "상태")?;
+        let done = spans(&raw.done, Span::parse)?;
+        // **`--done` 은 지금 done 에 선 줄만 본다** — `-s` 가 done 을 안 들면 두 거르개에 함께 걸리는 줄이
+        // 없어 늘 0건이다. 조용히 0건을 내면 "그때 닫힌 것이 없었다" 와 안 갈린다(`-s todo -s review` 를
+        // 거절하는 `once` 와 같은 까닭이다). `-s done,review` 처럼 done 이 든 목록은 그대로 받는다.
+        if !done.is_empty() && !status.is_empty() && !status.iter().any(|s| s == crate::config::DONE) {
+            let asked = status.join(",");
+            return Err(format!(
+                "`--done` 은 지금 {done} 에 선 줄만 본다 — `-s {asked}` 에 함께 걸리는 줄이 없다.\n      \
+                 `-s {asked},{done}` 으로 넓히거나 `-s` 를 뺀다",
+                done = crate::config::DONE
+            ));
+        }
         Ok(Filter {
-            status: once(&raw.status, "-s", "상태")?,
+            status,
             tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
             no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
             epic: sel(once(&raw.epic, "-e", "에픽")?),
@@ -449,7 +464,7 @@ impl Filter {
             stale: raw.stale,
             updated: spans(&raw.since, Span::since)?,
             created: spans(&raw.created, Span::parse)?,
-            done: spans(&raw.done, Span::parse)?,
+            done,
             all: raw.all || timed,
             ideas,
             deferred,
@@ -577,20 +592,23 @@ impl Filter {
             return false;
         }
         // 못 읽는 시각은 **어느 폭에도 안 든다** — 손으로 고친 줄의 `updated_at` 이 깨졌으면 그 줄이 그
-        // 뒤에 바뀌었는지 모른다. 폭을 안 물었으면(빈 목록) 묻지도 않는다.
+        // 뒤에 바뀌었는지 모른다. 폭을 안 물었으면(빈 목록) **시각을 풀지도 않는다** — 인자는 부르기 전에
+        // 셈해지고(위의 `--milestone` 과 같은 까닭), 탐색기의 거름망은 키 하나에 줄마다 여기를 지난다.
         let within = |spans: &[Vec<Span>], at: Option<i64>| {
             spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t))))
         };
-        if !within(&self.updated, parse_rfc3339(&i.updated_at)) {
+        if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
             return false;
         }
-        if !within(&self.created, parse_rfc3339(&i.created_at)) {
+        if !self.created.is_empty() && !within(&self.created, parse_rfc3339(&i.created_at)) {
             return false;
         }
         // **끝난 때는 지금 done 에 선 줄에만 있다.** `done_at` 은 되돌려도 남으니(moai-38mh) 그것만 보면
         // 다시 연 줄이 "그 주에 닫힌 것" 으로 선다 — 지금 닫혔는가는 칸이 말한다. 때는 **그 칸에 든 때**
         // ([`Where::since`])로 잰다: done 에 선 줄이면 `done_at` 과 같은 값이고, `done_at` 전에 닫힌 옛
-        // 줄에도 있으며, 묶음이면 멤버에서 읽은 칸이 done 이 된 때다 — 한 자로 세 경우가 선다.
+        // 줄에도 있다. 묶음이면 멤버가 마지막으로 done 에 든 때다 — `Stand::since` 는 미룸·지움·빼냄을 안
+        // 세므로(방치를 재는 시계다), 남은 멤버를 미뤄 닫힌 묶음은 그 앞선 때로 선다. 그 날짜는 되짚을 줄이
+        // 없어(지운 줄은 없고 뺀 줄에는 흔적이 없다) 도움말이 그렇게 댄다.
         if !self.done.is_empty()
             && !within(&self.done, (wh.column(i) == crate::config::DONE).then(|| parse_rfc3339(wh.since(i))).flatten())
         {
@@ -642,12 +660,17 @@ impl Span {
     }
 }
 
-/// 때 한 끝 — `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ`. **날은 UTC 의 하루다** — 마일스톤 기한
-/// (`model::days_until`)과 같은 자다. 여는 끝이면 그날 0시, 닫는 끝(`end`)이면 그날의 마지막 초라
-/// `..2026-09-15` 가 15일을 통째로 품는다. 날짜는 없는 날(`2026-02-30`)을 거절한다(`parse_date`).
+/// 때 한 끝 — `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ`. **날은 UTC 의 하루다**(moai-efoc.ip5 사용자 결정) —
+/// 읽는 사람의 날이 아니다. 상세의 생성·끝 시각과 마일스톤 기한(`report::Dues::split`, moai-h2th)은 읽는
+/// 사람의 시간대로 서므로, UTC 보다 앞선 곳(서울의 0~9시)에서는 화면이 대는 날과 하루 어긋난다 — 그 결정이
+/// 댄 "마일스톤 기한과 같은 자" 는 moai-h2th 뒤로 참이 아니다. 정확히 재려면 `…T…Z` 를 준다.
+///
+/// 여는 끝이면 그날 0시, 닫는 끝(`end`)이면 그날의 마지막 초라 `..2026-09-15` 가 15일을 통째로 품는다. 두
+/// 꼴 다 없는 날(`2026-02-30`)과 부호를 거절한다 — 사람이 이번에 치는 값이라 엄한 자(`parse_date`·
+/// `parse_instant`)로 잰다. 파일을 읽는 관대한 자(`parse_rfc3339`)로 재면 오타가 말없이 옆 날로 샌다.
 fn instant(raw: &str, end: bool) -> Result<i64, String> {
     let raw = raw.trim();
-    if let Some(t) = parse_rfc3339(raw) {
+    if let Some(t) = parse_instant(raw) {
         return Ok(t);
     }
     match parse_date(raw) {
@@ -658,8 +681,21 @@ fn instant(raw: &str, end: bool) -> Result<i64, String> {
 
 /// 플래그 되풀이는 그리고, 쉼표는 또는 — `--created a..b,c..d` 는 두 폭 가운데 하나다. `one` 이 한 조각을
 /// 폭으로 읽는다(`--since` 는 한 끝만, 나머지는 `from..to`).
+///
+/// **때가 하나도 없는 값은 거절한다**(moai-efoc 리뷰) — `--since ''`·`--filter since=`·`--created ,` 는 빈
+/// 또는-묶음이 되어 어느 줄도 못 지나, 숨김을 다 연 채 말없이 0건을 냈다. 비어 있던 커서 변수로 증분을
+/// 받는 쪽은 그것을 "바뀐 것이 없다" 로 읽는다. 끝이 하나도 없는 `..` 를 거절하는 것과 같은 까닭이다 — 태그처럼
+/// "거르지 않는다" 로 읽으면 같은 값이 숨긴 줄을 안 연 기본 목록을 내, 그사이 닫힌 줄을 말없이 놓친다.
 fn spans(raw: &[String], one: fn(&str) -> Result<Span, String>) -> Result<Vec<Vec<Span>>, String> {
-    raw.iter().map(|v| csv(v).iter().map(|w| one(w)).collect()).collect()
+    raw.iter()
+        .map(|v| {
+            let pieces = csv(v);
+            if pieces.is_empty() {
+                return Err("때가 비었다. `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ` 를 적는다".to_string());
+            }
+            pieces.iter().map(|w| one(w)).collect()
+        })
+        .collect()
 }
 
 /// `--filter k=v` 를 플래그와 같은 자리(`Raw`)에 풀어 놓는다. **뜻을 정하지
@@ -776,8 +812,8 @@ pub enum SortKey {
     Title,
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
-    /// 차례 표(`tui::keys::Order`)에는 없다 — 사람이 훑는 화면에서는 id 차례가 곧 만든 차례라
-    /// `Created` 와 겹친다.
+    /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
+    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다.
     Id,
 }
 
@@ -838,32 +874,66 @@ pub fn order_by(
 /// **커서는 자리가 아니라 값이다**(키셋). 커서 줄의 **지금** 값으로 견주어 그보다 뒤인 줄만 남기므로,
 /// 앞 쪽을 받은 뒤 다른 줄이 생기거나 지워져도 밀리거나 겹치지 않는다 — offset 으로 넘기면 세션
 /// 여럿이 쓰는 사이 줄이 밀려 빠지거나 겹친다(에픽 본문의 결정). 커서 줄은 걸러져 목록에 없어도
-/// 된다 — 닫혀 숨었어도 값은 있다. 커서 줄 **자신**의 값이 바뀌면 그 옛 자리 둘레가 겹치거나 빠진다.
-/// 그 값마저 안 움직이는 차례가 [`SortKey::Id`] 다.
+/// 된다 — 닫혀 숨었어도 값은 있다. **쪽 사이에 차례 안의 자리가 바뀐 줄은 커서 줄이든 다른 줄이든
+/// 커서를 넘어 겹치거나 빠진다** — 같은 값은 우선순위로 가르므로 `Created` 차례도 우선순위를 고치면
+/// 움직인다(moai-efoc 리뷰). 안 움직이는 차례는 [`SortKey::Id`] 하나다.
+///
+/// **한 id 의 줄은 한 덩어리다**(moai-efoc 리뷰). 머지가 남긴 쌍둥이는 값이 달라 차례에서 떨어져 설 수
+/// 있는데 커서는 id 하나라 어느 줄에서 끊겼는지 모른다 — 줄 하나(`Load::get` 의 뒷줄)로 넘던 때는 사이의
+/// 줄을 건너뛰거나 같은 쪽을 끝없이 되받았다. 그래서 id 마다 **머리 줄**(그 id 의 줄 가운데 이 차례에서 맨
+/// 앞에 서는 것)을 세우고 쌍둥이를 그 자리에 모아 세운다. 커서도 머리로 넘어 그 id 의 줄은 다 앞 쪽에 선
+/// 것으로 치고, `limit` 은 한 id 의 줄을 가르지 않는다 — 가르느니 그 쪽을 늘린다(줄이면 받는 쪽이 짧은
+/// 쪽을 "끝났다" 로 읽는다). 머리는 **걸러지기 전의 줄 전부**(`all`)에서 고른다 — 걸러진 줄로 고르면 쪽마다
+/// 머리가 달라질 수 있다. 쌍둥이가 없는 목록에서는 머리가 곧 그 줄이라 아무것도 안 바뀐다.
 ///
 /// 견주는 자가 둘이 아니다 — 세우는 것과 커서를 넘는 것이 같은 `cmp` 를 지나야, 커서 줄 바로 뒤의
-/// 줄이 두 판정 사이에서 갈리지 않는다. 차례는 id 까지 가르므로 커서와 같은(`Equal`) 줄은 같은 id
-/// 를 든 쌍둥이뿐이고, 그 줄은 커서와 함께 앞 쪽에 선 것으로 친다.
+/// 줄이 두 판정 사이에서 갈리지 않는다.
 pub fn page(
     shown: &mut Vec<Issue>,
+    all: &[Issue],
     wh: &Where,
     cfg: &crate::config::Config,
     sort: Sort,
     after: Option<&Issue>,
     limit: Option<usize>,
 ) -> usize {
+    use std::cmp::Ordering;
     let cmp = |a: &Issue, b: &Issue| {
         order_by(sort.key, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
     };
-    shown.sort_by(|a, b| cmp(a, b));
-    if let Some(c) = after {
-        shown.retain(|i| cmp(i, c) == std::cmp::Ordering::Greater);
+    let mut heads: BTreeMap<&str, &Issue> = BTreeMap::new();
+    for i in all {
+        if !heads.get(i.id.as_str()).is_some_and(|h| cmp(h, i) != Ordering::Greater) {
+            heads.insert(i.id.as_str(), i);
+        }
     }
+    shown.sort_by(|a, b| cmp(head_of(&heads, a), head_of(&heads, b)).then_with(|| cmp(a, b)));
+    if let Some(c) = after {
+        let c = head_of(&heads, c);
+        shown.retain(|i| cmp(head_of(&heads, i), c) == Ordering::Greater);
+    }
+    let Some(n) = limit else { return 0 };
+    // 끊는 자리가 한 id 의 줄 사이면 그 id 의 남은 줄까지 이 쪽에 싣는다.
+    let mut end = n;
+    while end > 0 && end < shown.len() && shown[end].id == shown[end - 1].id {
+        end += 1;
+    }
+    cut(shown, Some(end))
+}
+
+/// 그 줄의 id 의 머리 줄([`page`]). 머리를 모르는 줄(`all` 밖에서 온 줄)은 제가 제 머리다.
+fn head_of<'x>(heads: &BTreeMap<&str, &'x Issue>, i: &'x Issue) -> &'x Issue {
+    heads.get(i.id.as_str()).copied().unwrap_or(i)
+}
+
+/// 앞에서 `limit` 줄만 남기고 잘린 수를 돌려준다 — `moai show` 의 쪽([`page`])과 `moai ready -n` 이 같은
+/// 자로 자른다(moai-efoc 리뷰: 두 벌이던 자리다). 차례는 부르는 쪽이 이미 세웠다.
+pub fn cut<T>(rows: &mut Vec<T>, limit: Option<usize>) -> usize {
     match limit {
-        Some(n) if shown.len() > n => {
-            let cut = shown.len() - n;
-            shown.truncate(n);
-            cut
+        Some(n) if rows.len() > n => {
+            let gone = rows.len() - n;
+            rows.truncate(n);
+            gone
         }
         _ => 0,
     }
@@ -1489,6 +1559,17 @@ mod tests {
         }
         assert!(Span::since("2026-09-02..").is_err(), "--since 가 폭을 받았다");
         assert!(Span::since("2026-09-02").is_ok());
+        // 치는 시각도 날짜처럼 엄하다 — 없는 날·부호·`:60` 을 옆 날로 넘기지 않고 거절한다(moai-efoc 리뷰).
+        for bad in [
+            "2026-02-30T00:00:00Z",
+            "2026-09-31T00:00:00Z..",
+            "+026-09-02T00:00:00Z..",
+            "2026-09-02T-1:00:00Z..",
+            "..2026-02-28T23:59:60Z",
+        ] {
+            assert!(Span::parse(bad).is_err(), "{bad} 를 받았다");
+        }
+        assert!(Span::since("2026-02-30T00:00:00Z").is_err(), "--since 가 없는 날을 받았다");
     }
 
     /// **때로 물으면 숨긴 줄을 다 연다**(2026-09-30 사용자 결정) — 그사이 닫힌 줄도 바뀐 줄이다. `--done` 은
@@ -1540,6 +1621,25 @@ mod tests {
         assert_eq!(pick(or), ["a-0002", "a-0005"], "쉼표가 또는이 아니다");
         // `--filter` 도 같은 자리에 쌓인다.
         assert_eq!(pick(Raw { filter: s(&["since=2026-09-06"]), ..Raw::default() }), ["a-0003"]);
+        // 때가 하나도 없는 값은 거절한다 — 빈 또는-묶음은 어느 줄도 못 지나 말없이 0건이 됐다(moai-efoc 리뷰).
+        for empty in [
+            Raw { since: s(&[""]), ..Raw::default() },
+            Raw { since: s(&[" , "]), ..Raw::default() },
+            Raw { since: s(&["2026-09-01", ""]), ..Raw::default() },
+            Raw { created: s(&[""]), ..Raw::default() },
+            Raw { done: s(&[","]), ..Raw::default() },
+            Raw { filter: s(&["since="]), ..Raw::default() },
+        ] {
+            assert!(Filter::build(empty).is_err(), "빈 때를 받았다");
+        }
+        // `--done` 은 done 칸의 줄만 본다 — done 이 없는 `-s` 와 함께 쓰면 늘 0건이라 거절한다.
+        let e = Filter::build(Raw { done: s(&["2026-09-05"]), status: s(&["review"]), ..Raw::default() }).unwrap_err();
+        assert!(e.contains("--done") && e.contains("-s review,done"), "{e}");
+        assert_eq!(
+            pick(Raw { done: s(&["2026-09-04.."]), status: s(&["todo,done"]), ..Raw::default() }),
+            ["a-0002", "a-0005"],
+            "done 이 든 `-s` 를 거절했다"
+        );
     }
 
     /// **`-g` 는 실린 노트까지 본다**(moai-efoc.zyc) — 전체 범위만. 노트가 안 실렸으면(탐색기) 안 본다.
@@ -1569,7 +1669,7 @@ mod tests {
         v[0].priority = Some(0);
         let all = v.clone();
         let c = cfg();
-        page(&mut v, &Where::of(&all, &c), &c, Sort::default(), None, None);
+        page(&mut v, &all, &Where::of(&all, &c), &c, Sort::default(), None, None);
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
     }
@@ -1585,7 +1685,7 @@ mod tests {
             let wh = Where::of(&all, &c);
             let mut v = rows.to_vec();
             let cursor = after.map(|id| all.iter().find(|i| i.id == id).unwrap());
-            let cut = page(&mut v, &wh, &c, sort, cursor, limit);
+            let cut = page(&mut v, &all, &wh, &c, sort, cursor, limit);
             (v.into_iter().map(|i| i.id).collect::<Vec<_>>(), cut)
         };
         assert_eq!(run(&all, by_id, None, Some(2)), (s(&["a-0001", "a-0002"]), 3), "첫 쪽");
@@ -1605,6 +1705,77 @@ mod tests {
             "뒤집은 차례의 뒤가 아니다"
         );
     }
+
+    /// **한 id 의 줄은 한 덩어리로 넘는다**(moai-efoc 리뷰) — 머지가 남긴 쌍둥이가 차례에서 떨어져 서도, 커서를
+    /// 따라 쪽을 넘기는 쪽은 줄마다 꼭 한 번 받고 끝난다. 뒷줄(`Load::get`) 하나로 넘던 때는 사이의 줄을
+    /// 건너뛰거나 같은 쪽을 끝없이 되받거나 `-n` 이 가른 쌍둥이를 잃었다.
+    #[test]
+    fn a_page_walk_delivers_every_twin_line_once() {
+        let c = cfg();
+        let line = |id: &str, p: u8, title: &str| {
+            let mut i = issue(id, "todo", &[]);
+            i.priority = Some(p);
+            i.title = title.to_string();
+            i
+        };
+        // `--json` 으로 도는 쪽 그대로 — 마지막 줄의 id 를 커서로 주고, `-n` 보다 짧은 쪽이 오면 멈춘다.
+        let walk = |all: &[Issue], sort: Sort, n: usize| {
+            let wh = Where::of(all, &c);
+            let mut got: Vec<String> = Vec::new();
+            let mut after: Option<String> = None;
+            for _ in 0..20 {
+                let mut v = all.to_vec();
+                let cursor = after.as_deref().map(|id| all.iter().rfind(|i| i.id == id).unwrap());
+                page(&mut v, all, &wh, &c, sort, cursor, Some(n));
+                got.extend(v.iter().map(|i| i.title.clone()));
+                if v.len() < n {
+                    got.sort();
+                    return got;
+                }
+                after = v.last().map(|i| i.id.clone());
+            }
+            panic!("쪽 넘기기가 안 끝났다 — {got:?}");
+        };
+        let by_priority = Sort::default();
+        let by_id = Sort { key: SortKey::Id, reversed: false };
+        let shapes = [
+            // 앞줄이 먼저 선다 — 뒷줄로 넘으면 사이의 b·c 를 건너뛰었다.
+            (
+                vec![line("a-0001", 1, "a1"), line("a-0001", 3, "a3"), line("a-0002", 2, "b"), line("a-0003", 2, "c")],
+                by_priority,
+                1,
+            ),
+            // 뒷줄이 먼저 선다 — 같은 쪽을 끝없이 되받았다.
+            (
+                vec![
+                    line("a-0001", 3, "a3"),
+                    line("a-0001", 1, "a1"),
+                    line("a-0002", 2, "b"),
+                    line("a-0003", 4, "c"),
+                    line("a-0009", 0, "x"),
+                ],
+                by_priority,
+                2,
+            ),
+            // id 차례에서 `-n 1` 이 쌍둥이를 갈랐다.
+            (vec![line("a-0001", 1, "a1"), line("a-0001", 3, "a3"), line("a-0002", 2, "b")], by_id, 1),
+            (vec![line("a-0001", 3, "a3"), line("a-0001", 1, "a1"), line("a-0002", 2, "b")], by_id, 1),
+            // 값이 같은 쌍둥이(머지의 흔한 흔적)도 `-n` 이 가르면 뒷줄을 잃었다.
+            (vec![line("a-0001", 2, "ours"), line("a-0001", 2, "theirs"), line("a-0002", 2, "b")], by_priority, 1),
+        ];
+        for (all, sort, n) in shapes {
+            let mut want: Vec<String> = all.iter().map(|i| i.title.clone()).collect();
+            want.sort();
+            assert_eq!(walk(&all, sort, n), want, "줄을 잃거나 두 번 받았다 — {sort:?} -n {n}");
+        }
+        // 쌍둥이는 머리 줄 자리에 모여 서고, 쪽은 그 둘을 가르지 않는다 — 가르느니 그 쪽을 늘린다.
+        let all = vec![line("a-0001", 1, "a1"), line("a-0001", 3, "a3"), line("a-0002", 2, "b")];
+        let mut v = all.clone();
+        let more = page(&mut v, &all, &Where::of(&all, &c), &c, by_priority, None, Some(1));
+        assert_eq!(v.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["a1", "a3"], "쌍둥이를 갈랐다");
+        assert_eq!(more, 1, "잘린 수가 틀렸다");
+    }
+
     /// **묶음은 서 있는 칸으로 고르고 숨긴다** (moai-j3b3). 멤버가 집힌 에픽이
     /// `-s todo` 에 걸리거나, 손으로 `done` 에 둔 진행 중인 에픽이 목록에서
     /// 사라지면 거름망이 화면과 다른 칸을 본다.

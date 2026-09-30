@@ -408,9 +408,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Link(a) => link::run(ctx, a),
         Cmd::Defer(a) => defer::run(ctx, a),
         Cmd::Read(a) => read::run(ctx, a),
-        Cmd::Ready(a) => {
-            ready::run(ctx, a.worktree.worktree, a.limit.map(|n| usize::try_from(n).unwrap_or(usize::MAX)))
-        }
+        Cmd::Ready(a) => ready::run(ctx, a.worktree.worktree, a.limit),
         Cmd::Prime(w) => prime::run(ctx, w.worktree),
         Cmd::Status(w) => status::run(ctx, w.worktree),
         Cmd::Tui(a) => tui::run(ctx, a),

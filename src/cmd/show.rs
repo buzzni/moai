@@ -127,9 +127,13 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if let Target::One(id) = &target {
         // 필터를 조용히 버리지 않는다. 하나를 콕 집었으면 거를 것이 없고,
         // 버린 채로 그 하나를 내면 부르는 쪽은 걸러진 결과라고 믿는다.
-        if let Some(flag) =
-            args.tree.then_some("--tree").or_else(|| first_given(&args.filter)).or_else(|| first_ordered(&args.page))
-        {
+        let filtered = args.tree.then_some("--tree").or_else(|| first_given(&args.filter));
+        if let Some(flag) = filtered.or_else(|| first_ordered(&args.page)) {
+            // 차례·쪽 플래그에 "거르려면" 을 대면 까닭이 틀린다(moai-efoc 리뷰) — 할 일(id 를 뺀다)은 같다.
+            let how = match filtered {
+                Some(_) => crate::i18n::say(ctx.lang(), "refuse.show_filter_how"),
+                None => crate::i18n::say(ctx.lang(), "refuse.show_order_how"),
+            };
             return Err(Fail::coded(
                 format!(
                     "{}\n      {}",
@@ -137,7 +141,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                         crate::i18n::say(ctx.lang(), "refuse.show_filter_on_one"),
                         &[("id", id), ("flag", flag)]
                     ),
-                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.show_filter_how"), &[("flag", flag)]),
+                    crate::i18n::fill(how, &[("flag", flag)]),
                 ),
                 "bad_filter",
             ));
@@ -181,8 +185,8 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     }
     // **트리의 차례도 조용히 안 버린다.** 트리는 묶음 → 멤버 → 자식으로 서고 그 차례는 `nav` 가
     // 정한다 — `--sort` 를 말없이 먹으면 부르는 쪽은 고른 차례로 섰다고 믿는다. 자르기도 같다: 트리를
-    // n 줄에서 끊으면 조상 없는 자식이 서거나 묶음이 반만 선다. `--json` 은 트리를 안 그리지만 같은
-    // 판으로 거절한다: 한 조합의 뜻이 출력 모양에 따라 갈리지 않게.
+    // n 줄에서 끊으면 조상 없는 자식이 서거나 묶음이 반만 선다. `--json` 은 트리를 안 그리지만 똑같이
+    // 거절한다: 한 조합의 뜻이 출력 모양에 따라 갈리지 않게.
     if args.tree
         && let Some(flag) = first_ordered(&args.page)
     {
@@ -260,7 +264,15 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // **`-g` 는 노트도 본다**(moai-efoc.zyc, 2026-09-30 사용자 결정). 노트는 저널에 살아 `query` 가 못 읽으니
     // 여기서 읽어 자료로 건네고, 맞는지는 `query` 가 가른다. **`-g` 를 물었을 때만 읽는다** — 거르개 없는
     // 목록마다 저널 전체를 풀 까닭이 없다. 커서 줄처럼 걸러지기 전의 줄 전부가 대상이다.
-    let notes = filter.grep.is_some().then(|| notes_by_id(&repo, &origin, &load.issues));
+    //
+    // **읽은 저널은 `--json` 의 `work` 도 쓴다**(moai-efoc 리뷰) — 따로 읽던 때는 `show -g … --json` 한 번이
+    // 저널 파일을 두 번 읽고 풀었다. `work` 를 내는 줄은 다 노트를 내는 줄이지만(`model::work_of` 는
+    // `note_of` 의 글만 본다) 두 거르개를 함께 걸어 `work_by_id` 가 푸는 줄을 빠짐없이 든다.
+    let journal = filter
+        .grep
+        .is_some()
+        .then(|| journal_of_rows(&repo, &origin, &load.issues, |l| model::may_hold_note(l) || model::may_hold_work(l)));
+    let notes = journal.as_ref().map(notes_of);
     let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
     wh.notes = notes.as_ref();
     let mut shown: Vec<Issue> = Vec::new();
@@ -292,29 +304,35 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     };
     // **커서 줄은 걸러지기 전의 줄에서 찾는다** — 값으로 넘으므로(`query::page`) 앞 쪽의 마지막 줄이
     // 그사이 닫혀 목록에서 빠졌어도 넘을 수 있다. 줄 자체가 없으면(지웠다) 넘을 값이 없다: 말없이
-    // 처음부터 내면 받는 쪽은 다음 쪽이라 믿고 앞 쪽을 두 번 받는다.
+    // 처음부터 내면 받는 쪽은 다음 쪽이라 믿고 앞 쪽을 두 번 받는다. 같은 id 의 줄이 둘이면 어느 줄이든
+    // 된다 — `page` 는 그 id 의 머리 줄로 넘는다.
+    //
+    // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 쪽 넘김의 걸음만 곁에 단다.
     let cursor = match args.page.after.as_deref() {
         None => None,
         Some(id) => Some(load.get(id).ok_or_else(|| {
             Fail::coded(
                 format!(
                     "{}\n      {}",
-                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.after_gone"), &[("id", id)]),
+                    Fail::not_found(id, ctx.lang()).message,
                     crate::i18n::say(ctx.lang(), "refuse.after_gone_how"),
                 ),
                 super::code::NOT_FOUND,
             )
         })?),
     };
-    let limit = args.page.limit.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
-    let more = crate::query::page(&mut shown, &wh, &repo.config, sort_of(&args.page), cursor, limit);
+    let more =
+        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, sort_of(&args.page), cursor, args.page.limit);
 
     if ctx.json {
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
         // `show <id> --json` 을 500번 부르면 저널 전체를 500번 읽는다 — 여기서는 뿌리마다
-        // 한 번 읽어 id 로 가른다.
-        let work = work_by_id(&repo, &origin, &shown);
-        // **못 읽은 저널은 저널을 읽은 **뒤**에 묻는다** — `work_by_id` 가 그 읽기다. 뿌리마다
+        // 한 번 읽어 id 로 가른다. `-g` 가 이미 읽었으면 그것을 쓴다.
+        let work = match &journal {
+            Some(journal) => work_in(journal, &shown),
+            None => work_by_id(&repo, &origin, &shown),
+        };
+        // **못 읽은 저널은 저널을 읽은 **뒤**에 묻는다** — `work_by_id`(`-g` 면 위의 한 번)가 그 읽기다. 뿌리마다
         // 한 번 접어 두고 줄마다 그 줄의 뿌리 것을 빌린다(`home`): 줄 수만큼 글을 다시 짓지 않고,
         // 겹쳐 온 줄은 제 워크트리의 실패만 달고 선다.
         let unread = crate::store::journal_unread();
@@ -456,18 +474,23 @@ fn work_by_id(
     origin: &crate::worktree::Origin,
     shown: &[Issue],
 ) -> std::collections::BTreeMap<String, Vec<model::Work>> {
-    journal_of_rows(repo, origin, shown, model::may_hold_work)
-        .into_iter()
-        .map(|(id, journal)| (id, model::work_of(&journal)))
-        .collect()
+    work_in(&journal_of_rows(repo, origin, shown, model::may_hold_work), shown)
 }
 
-/// 그 줄들의 노트 글([`crate::query::Notes`], moai-efoc.zyc) — 노트를 들 수 있는 저널 줄만 푼다
-/// (`model::may_hold_note`). 어느 갈래가 노트인지는 `model::note_of` 가 정한다.
-fn notes_by_id(repo: &Repo, origin: &crate::worktree::Origin, rows: &[Issue]) -> crate::query::Notes {
-    journal_of_rows(repo, origin, rows, model::may_hold_note)
-        .into_iter()
-        .map(|(id, journal)| (id, journal.iter().filter_map(model::note_of).map(str::to_string).collect()))
+/// 이미 읽은 이력에서 낼 줄들의 `work` 를 가른다 — 이력이 없는 id 는 키가 안 선다(`journal_by_id` 와 같다).
+fn work_in(
+    journal: &std::collections::BTreeMap<String, Vec<model::JournalEntry>>,
+    shown: &[Issue],
+) -> std::collections::BTreeMap<String, Vec<model::Work>> {
+    shown.iter().filter_map(|i| journal.get(&i.id).map(|j| (i.id.clone(), model::work_of(j)))).collect()
+}
+
+/// 읽은 이력의 노트 글([`crate::query::Notes`], moai-efoc.zyc). 어느 갈래가 노트인지는 `model::note_of` 가
+/// 정한다.
+fn notes_of(journal: &std::collections::BTreeMap<String, Vec<model::JournalEntry>>) -> crate::query::Notes {
+    journal
+        .iter()
+        .map(|(id, entries)| (id.clone(), entries.iter().filter_map(model::note_of).map(str::to_string).collect()))
         .collect()
 }
 
@@ -807,6 +830,27 @@ mod tests {
         assert!(added.iter().any(|k| k == "work"), "곁들인 키를 못 셌다 — {added:?}");
         for k in &added {
             assert!(super::super::OURS.contains(&k.as_str()), "`Listed` 가 곁들이는 {k} 가 `OURS` 에 없다");
+        }
+    }
+
+    /// **`--sort` 의 낱말은 탐색기가 설정에 적는 이름과 같고 같은 차례를 가리킨다**(moai-efoc 리뷰) —
+    /// [`crate::cli::SortArg`] 가 적어 둔 약속을 여기서 맨다. 한쪽만 이름이나 잇는 곳을 바꾸면 한 낱말이 두
+    /// 표면에서 다른 차례를 가리키는데, 그때 붉어질 시험이 없었다.
+    #[test]
+    fn every_explorer_order_is_the_same_sort_word() {
+        use crate::tui::keys::Order;
+        use clap::ValueEnum;
+        for o in Order::ALL {
+            let arg = crate::cli::SortArg::from_str(o.name(), false)
+                .unwrap_or_else(|_| panic!("탐색기의 `{}` 가 `--sort` 에 없다", o.name()));
+            let page = crate::cli::PageArgs { sort: Some(arg), ..Default::default() };
+            assert_eq!(sort_of(&page).key, crate::tui::App::sort_key(o), "`{}` 가 두 표면에서 다른 차례다", o.name());
+        }
+        // 거꾸로 — `--sort` 에만 있는 낱말은 쪽을 넘기는 커서의 `id` 하나다(`query::SortKey::Id`).
+        for v in crate::cli::SortArg::value_variants() {
+            let word = v.to_possible_value().expect("숨긴 낱말이 없다");
+            let word = word.get_name();
+            assert!(word == "id" || Order::named(word).is_some(), "탐색기가 모르는 `--sort {word}`");
         }
     }
 }

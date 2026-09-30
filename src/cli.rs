@@ -767,9 +767,9 @@ pub enum Typed {
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
     /// `moai idea add` and `moai idea show` (`ls`) - the same verbs, kind pinned
-    // **상자에 담는다**(moai-efoc) — `ShowArgs` 가 차례·쪽 플래그로 자라 `Typed` 가 `Promote` 의
-    // 세 배를 넘었고, clippy 의 `large_enum_variant` 가 그 차이를 잡는다. 한 판에 한 번 짓는 값이라
-    // 상자 하나의 값은 없는 것과 같다.
+    // **`Box` 에 담는다**(moai-efoc) — `ShowArgs` 가 차례·쪽 플래그로 자라 `Typed` 가 `Promote` 의
+    // 세 배를 넘었고, clippy 의 `large_enum_variant` 가 그 차이를 잡는다. 실행마다 한 번 짓는 값이라
+    // `Box` 하나의 비용은 없는 것과 같다.
     #[command(flatten)]
     Common(Box<Typed>),
     /// Unfold into one epic and several issues, and close that thought
@@ -930,28 +930,40 @@ pub struct AddArgs {
 const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). --reverse turns the whole order around.
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
-  If the cursor row itself changed in the order, rows around its old place
-  can repeat or be skipped; --sort id never moves. --json stays an array -
-  fewer rows than -n means the list has ended.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
 
-  Time: --since <when> keeps what changed at or after it, by the row's own
-  updated_at. --created and --done take a range from..to with either side
-  left open, or a single day. <when> is YYYY-MM-DD, a UTC day (the end of a
-  range takes that whole day), or YYYY-MM-DDTHH:MM:SSZ. --done looks at rows
-  standing in done now, at the time they last got there. Asking by time opens
-  what the list hides by default - done, deferred and ideas - because a row
-  closed meanwhile changed too; narrow it again with -s or --deferred.
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a UTC day and not the local
+  date the screen prints (the end of a range takes that whole day), or
+  YYYY-MM-DDTHH:MM:SSZ. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
 
-  --since sees neither a removed row nor a note: `moai rm` leaves no row to
-  change, and `moai note` writes the journal, not the row.
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -960,9 +972,10 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   not hold - a group's column, an inherited epic - so run SQL on the --json
   output, where derived_status and derived_epic are worked out already:
 
-    moai show --json | jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
-    moai show --all --json |
-      duckdb -c \"SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1\"";
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
+    moai show --all --json | duckdb -c \"SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1\"";
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
@@ -1006,8 +1019,11 @@ pub struct PageArgs {
     pub reverse: bool,
 
     /// Give at most this many rows
-    #[arg(short = 'n', long, value_name = "count", value_parser = clap::value_parser!(u64).range(1..))]
-    pub limit: Option<u64>,
+    // **`usize` 로 바로 받는다**(moai-efoc 리뷰) — `u64` 로 받아 쓰는 자리마다 `usize::try_from` 을 되풀이하던
+    // 자리다. 범위 검사와 오류 글은 `value_parser!(u64).range(1..)` 와 같다(`value_parser!(usize)` 에는
+    // `range` 가 없다).
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub limit: Option<usize>,
 
     /// Start after this row: the last id of the page before
     #[arg(long, value_name = "id")]
@@ -1025,8 +1041,8 @@ pub struct ReadyArgs {
     pub worktree: WorktreeArg,
 
     /// Give at most this many rows (held stays whole)
-    #[arg(short = 'n', long, value_name = "count", value_parser = clap::value_parser!(u64).range(1..))]
-    pub limit: Option<u64>,
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub limit: Option<usize>,
 }
 
 /// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이

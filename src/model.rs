@@ -808,7 +808,7 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// **`rm` 의 `note` 는 안 든다** — 그것은 못 읽는 줄을 지울 때 남긴 원문이지(`JournalEntry::removed_line`)
 /// 사람이 이슈에 붙인 글이 아니다. 거기 든 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
 ///
-/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기가 나중에 같은 글을 본다. 그래서 명령 층이
+/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기가 나중에 같은 글을 본다. 그래서 명령 레이어(`cmd`)가
 /// 아니라 여기 둔다: 어느 갈래를 노트로 치는지가 두 표면에서 갈리지 않게.
 pub fn note_of(e: &JournalEntry) -> Option<&str> {
     match e.kind.as_str() {
@@ -1207,6 +1207,28 @@ pub fn parse_date(s: &str) -> Option<i64> {
         return None;
     }
     Some(days_from_civil(y, mo, d))
+}
+
+/// `2026-09-30T04:12:03Z` → epoch 초. **사람이 이번에 치는 시각을 읽는 자다**(moai-efoc 리뷰) — [`parse_date`]
+/// 와 같은 까닭으로 엄하다.
+///
+/// [`parse_rfc3339`] 는 파일에 이미 적힌 시각을 읽는 관대한 자라 `2026-02-30T…` 를 3월로, `T-1:00:00Z` 를
+/// 전날로, `+026-…` 을 26년으로, `:60` 을 다음 분으로 넘긴다. 치는 값에서 그것은 오타고, 받으면 그 폭이 말없이
+/// 옆 날로 샌다. 날짜 자리는 [`parse_date`] 가 재고(없는 날과 부호를 거절한다) 시각 자리는 자리마다 숫자인지
+/// 본다. [`format_rfc3339`] 가 쓰는 꼴은 다 받는다 — `--json` 에서 옮겨 친 `updated_at` 은 그대로 선다.
+pub fn parse_instant(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() != 20
+        || b[10] != b'T'
+        || b[19] != b'Z'
+        || !b[11..19].iter().enumerate().all(|(x, c)| if matches!(x, 2 | 5) { *c == b':' } else { c.is_ascii_digit() })
+    {
+        return None;
+    }
+    let day = parse_date(s.get(..10)?)?;
+    let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let (h, mi, se) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
+    (h <= 23 && mi <= 59 && se <= 59).then(|| day * 86_400 + h * 3600 + mi * 60 + se)
 }
 
 /// 그 달의 날수 — 윤년은 그레고리력 그대로다.
@@ -1662,6 +1684,37 @@ mod tests {
         assert_eq!(days_until("2026-09-13", now), Some(2));
         assert_eq!(days_until("2026-09-09", now), Some(-2));
         assert_eq!(days_until("어제", now), None);
+    }
+
+    /// **치는 시각도 날짜처럼 엄하다**(moai-efoc 리뷰) — [`parse_rfc3339`] 는 없는 날과 부호와 `:60` 을
+    /// 옆 날로 넘기는데, `--since`·`--created`·`--done` 에 그것을 받으면 폭이 말없이 옆 날로 샌다. 도구가 쓴
+    /// 꼴은 다 받는다 — `--json` 에서 옮겨 친 도장이 거절되면 안 된다.
+    #[test]
+    fn a_typed_instant_is_as_strict_as_a_date() {
+        for secs in [0, 59, 86_399, 1_789_000_000, 1_790_000_000 + 86_399, 4_102_444_799] {
+            let stamp = format_rfc3339(secs);
+            assert_eq!(parse_instant(&stamp), Some(secs), "도구가 쓴 {stamp} 를 거절했다");
+        }
+        assert_eq!(parse_instant("2026-09-11T04:12:03Z"), parse_rfc3339("2026-09-11T04:12:03Z"));
+        for bad in [
+            "2026-02-30T00:00:00Z",
+            "2026-09-31T00:00:00Z",
+            "+026-09-02T00:00:00Z",
+            "-026-09-02T00:00:00Z",
+            "2026-+9-02T00:00:00Z",
+            "2026-09-+2T00:00:00Z",
+            "2026-09-02T+1:00:00Z",
+            "2026-09-02T-1:00:00Z",
+            "2026-09-02T24:00:00Z",
+            "2026-09-02T00:60:00Z",
+            "2026-02-28T23:59:60Z",
+            "2026-09-02T00:00:00",
+            "2026-09-02 00:00:00Z",
+            "2026-09-02",
+            "",
+        ] {
+            assert_eq!(parse_instant(bad), None, "{bad:?} 를 시각으로 받았다");
+        }
     }
 
     /// **새 필드가 옛 바이너리의 되쓰기와 같은 자리에 선다**(moai-tfcp). 이 필드를 모르는

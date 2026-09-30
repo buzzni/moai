@@ -459,8 +459,10 @@ pub fn list(
     out.push(String::new());
     out.push(summary(issues, cfg, hidden, wh, lang));
     // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page`) 앞 쪽의 마지막 줄이 곧 그 값이다.
+    // "N건 더" 는 다른 잘린 목록과 한 키다([`more_of`]) — 뒤의 명령은 자료라 `{go}` 로 말묶음 밖에서 온다.
     if let Some(last) = issues.last().filter(|_| more > 0) {
-        let said = fill(say(lang, "list.more"), &[("n", &more.to_string()), ("id", &one_line(&last.id))]);
+        let go = format!("--after {}", one_line(&last.id));
+        let said = format!("{} — {}", more_of(more, lang), fill(say(lang, "list.next_page"), &[("go", &go)]));
         out.push(paint(style::DIM, &said));
     }
     out
@@ -1247,7 +1249,8 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     out
 }
 
-/// 목록에서 안 보인 나머지 — "N건 더". `status` 의 경고 밑에서만 선다.
+/// 목록에서 안 보인 나머지 — "N건 더". **잘린 목록은 다 이 한 키로 센다**(`status.more`) — `status` 의 경고,
+/// `prime`, 한눈 보기의 `ready`, `-n` 에 잘린 `show`·`ready`. 뒤따르는 명령은 부르는 쪽이 자료로 붙인다.
 ///
 /// **[`Screen`] 이 아니라 말만 받는다**(리뷰) — 셈을 글로 옮기는 것뿐이라 겹침을 볼 일이 없다.
 /// 그리기 맥락을 통째로 받으면 이 두 줄이 옆 워크트리에 매인 것으로 읽힌다.
@@ -1451,8 +1454,9 @@ pub fn ready(
                 .to_string(),
             );
         }
+        // `prime` 의 꼬리와 같은 꼴이다([`more_of`] 에 명령은 자료로) — 다 보려면 `-n` 없이 부른다.
         if more > 0 {
-            out.push(format!("  {}", paint(style::DIM, &fill(say(lang, "ready.more"), &[("n", &more.to_string())]))));
+            out.push(format!("  {}", paint(style::DIM, &format!("{} — `moai ready`", more_of(more, lang)))));
         }
     }
 

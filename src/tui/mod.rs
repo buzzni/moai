@@ -2447,7 +2447,8 @@ impl App {
 
     /// 키 표의 차례(조각)를 `query` 의 차례로 잇는다. 둘을 한 타입으로 두지 않는 까닭은 키 표가
     /// 조각이라 `crate::query` 를 못 부르기 때문이다(`input::tests::components_know_neither…`).
-    fn sort_key(o: keys::Order) -> crate::query::SortKey {
+    /// `moai show --sort` 가 같은 낱말로 같은 차례를 가리키는지 `cmd::show` 의 시험이 이것과 견준다.
+    pub(crate) fn sort_key(o: keys::Order) -> crate::query::SortKey {
         use crate::query::SortKey;
         match o {
             keys::Order::Priority => SortKey::Priority,

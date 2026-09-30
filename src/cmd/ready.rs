@@ -25,7 +25,8 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
     let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
-    let more = cut(&mut picks, limit);
+    // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다.
+    let more = crate::query::cut(&mut picks, limit);
     // 미뤄 둔 것·빈 묶음에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
     let held = report::held(&load.issues, &repo.config);
     if ctx.json {
@@ -83,19 +84,6 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     Ok(view::ready(&picks, more, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
 }
 
-/// 앞에서 `limit` 줄만 남기고 잘린 수를 돌려준다. `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 —
-/// 여기서는 끊기만 한다.
-fn cut<T>(picks: &mut Vec<T>, limit: Option<usize>) -> usize {
-    match limit {
-        Some(n) if picks.len() > n => {
-            let gone = picks.len() - n;
-            picks.truncate(n);
-            gone
-        }
-        _ => 0,
-    }
-}
-
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
 /// (`report::ready`)가 **그 프로젝트의 줄만 보고** 정한다 — 남의 프로젝트에서 집은
 /// 일이 이쪽의 막음을 풀거나 걸지 않는다.
@@ -116,7 +104,7 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
                 let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
-                let more = cut(&mut picks, limit);
+                let more = crate::query::cut(&mut picks, limit);
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
