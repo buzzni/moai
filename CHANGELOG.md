@@ -60,7 +60,11 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   this repository `show -g '사용자 결정' --all` goes from 85 rows to 254. The
   journal is read only when `-g` is given, and `query` stays a pure function —
   the command reads the notes and hands them in. The text a `moai rm --line`
-  kept is not a note. `moai tui`'s `/` does not look at notes yet.
+  kept is not a note. `moai tui`'s `/` looks through them too, in its whole
+  scope and in a notes scope at the end of the Tab cycle, and the detail shows
+  the note lines that matched. The explorer opens the journal only while such a
+  search, or a `grep=` filter, is applied: then every time it reads the tracker
+  again, and a note added on its own is also a reason to read again.
 
 - **The README says where SQL goes.** There is no query language inside moai: the
   filters read values the file does not hold — a group's column, an inherited

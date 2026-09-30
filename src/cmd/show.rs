@@ -274,7 +274,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         .then(|| journal_of_rows(&repo, &origin, &load.issues, |l| model::may_hold_note(l) || model::may_hold_work(l)));
     let notes = journal.as_ref().map(notes_of);
     let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
-    wh.notes = notes.as_ref();
+    // **받은 글 그대로 싣는다**(리뷰 moai-wcy8.rbj) — 한 번 거르고 끝나는 이 길은 숨길 줄의 노트까지 미리 접을
+    // 까닭이 없다. 키마다 다시 거르는 탐색기는 접어 둔 것을 싣는다([`crate::query::NoteView`]).
+    wh.notes = notes.as_ref().map(crate::query::NoteView::Raw);
     // **날로 친 때는 읽는 사람의 날이다**(moai-efoc, 2026-09-30 사용자 결정) — 마일스톤 기한과 같은 시간대다.
     // 날로 친 끝이 있을 때만 푼다: 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
     if filter.needs_zone() {
@@ -429,8 +431,9 @@ struct Listed<'a> {
 /// 커밋은 [`commit_home`] 이 따로 고른다 — 저널은 트래커 곁에 살고 `HEAD` 는 체크아웃의 것이다.
 ///
 /// 하나를 펼칠 때([`one`])와 목록([`work_by_id`])이 **이 한 자로** 고른다 — 따로 적던 때는 한쪽만
-/// 이쪽 뿌리로 돌려도 아무 시험도 안 붉어졌다(리뷰 moai-u5bk.3wq).
-fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'a std::path::Path {
+/// 이쪽 뿌리로 돌려도 아무 시험도 안 붉어졌다(리뷰 moai-u5bk.3wq). 탐색기가 노트를 읽은 저널의 표식을
+/// 재는 뿌리도 이것으로 고른다(`tui::Ground::read_notes`, 리뷰 moai-wcy8.rbj).
+pub(crate) fn home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str) -> &'a std::path::Path {
     origin.root(id).unwrap_or(&repo.root)
 }
 
@@ -448,14 +451,14 @@ fn commit_home<'a>(repo: &'a Repo, origin: &'a crate::worktree::Origin, id: &str
 }
 
 /// 그 뿌리의 저널을 읽을 저장소. 설정은 이쪽 것을 빌린다 — 저널을 읽는 데는 안 쓴다.
-fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
+pub(crate) fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
     Repo::at(root.to_path_buf(), repo.config.clone())
 }
 
 /// 그 줄들의 이력 — **저널을 뿌리마다 한 번** 읽고 `line` 이 고른 줄만 푼다. 줄마다 제 뿌리([`home`])의
 /// 저널에서 읽는다 — 겹쳐 온 줄은 저쪽 워크트리에서 적힌 이력을 든다. `work` 와 노트가 이 한 걸음을
 /// 지난다: 뿌리를 가르는 법이 둘이면 한쪽만 이쪽 뿌리로 돌려도 아무 시험도 안 붉어진다(리뷰 moai-u5bk.3wq).
-/// 탐색기가 적재 때 노트를 싣는 것도 이 걸음이다(`tui::notes_at`, moai-wcy8.vip).
+/// 탐색기가 노트를 읽는 것도 이 걸음이다(`tui::Ground::read_notes`, moai-wcy8.vip).
 pub(crate) fn journal_of_rows(
     repo: &Repo,
     origin: &crate::worktree::Origin,
