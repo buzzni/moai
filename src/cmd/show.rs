@@ -455,7 +455,8 @@ fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
 /// 그 줄들의 이력 — **저널을 뿌리마다 한 번** 읽고 `line` 이 고른 줄만 푼다. 줄마다 제 뿌리([`home`])의
 /// 저널에서 읽는다 — 겹쳐 온 줄은 저쪽 워크트리에서 적힌 이력을 든다. `work` 와 노트가 이 한 걸음을
 /// 지난다: 뿌리를 가르는 법이 둘이면 한쪽만 이쪽 뿌리로 돌려도 아무 시험도 안 붉어진다(리뷰 moai-u5bk.3wq).
-fn journal_of_rows(
+/// 탐색기가 적재 때 노트를 싣는 것도 이 걸음이다(`tui::notes_at`, moai-wcy8.vip).
+pub(crate) fn journal_of_rows(
     repo: &Repo,
     origin: &crate::worktree::Origin,
     rows: &[Issue],
@@ -492,7 +493,7 @@ fn work_in(
 
 /// 읽은 이력의 노트 글([`crate::query::Notes`], moai-efoc.zyc). 어느 갈래가 노트인지는 `model::note_of` 가
 /// 정한다.
-fn notes_of(journal: &std::collections::BTreeMap<String, Vec<model::JournalEntry>>) -> crate::query::Notes {
+pub(crate) fn notes_of(journal: &std::collections::BTreeMap<String, Vec<model::JournalEntry>>) -> crate::query::Notes {
     journal
         .iter()
         .map(|(id, entries)| (id.clone(), entries.iter().filter_map(model::note_of).map(str::to_string).collect()))

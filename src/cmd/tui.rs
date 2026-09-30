@@ -33,7 +33,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
-    let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+    // **노트도 싣는다**(moai-wcy8.vip) — `/` 의 전체 범위가 CLI `-g` 처럼 노트까지 본다. 다시 읽기
+    // (`tui::prepare`)와 같은 몸이다. `--json` 은 거르개가 없어 노트를 안 읽는다.
+    let (index, ground) = match ctx.json {
+        true => crate::tui::measure(&load.issues, &repo.config),
+        false => crate::tui::measure_read(&repo, &origin, &load.issues),
+    };
     let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.

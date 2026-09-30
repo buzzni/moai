@@ -297,6 +297,11 @@ pub struct Ground {
     split_rows: Vec<(usize, Option<String>)>,
     kinds: std::collections::BTreeMap<String, crate::model::Kind>,
     folded: std::collections::BTreeSet<String>,
+    /// 이슈 id → 그 이슈의 노트 글(moai-wcy8.vip) — `/` 의 전체·노트 범위가 보는 재료다([`Ground::here`]).
+    /// **저널에서 읽은 값이라 저장소를 읽는 적재만 채운다**([`measure_read`]) — 줄만 받는 [`measure`] 로 지은
+    /// 것(시험·층의 가짜 줄)은 빈다. 읽는 걸음은 CLI `-g` 와 한 벌이다(`cmd::show::journal_of_rows`): 둘로
+    /// 두면 같은 "전체" 가 두 표면에서 다른 답을 낸다.
+    notes: crate::query::Notes,
 }
 
 /// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
@@ -312,6 +317,32 @@ pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
 /// 들고 나는지가 여는 길과 다시 읽는 길에서 갈린다.
 fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
     (Index::in_soil(issues, soil), Ground::in_soil(issues, cfg, soil))
+}
+
+/// 저장소를 읽는 적재 — [`measure`] 에 **저널에서 읽은 노트**를 얹는다(moai-wcy8.vip). 여는 길(`cmd::tui`)과
+/// 다시 읽기([`prepare`])가 이 몸을 지난다 — 한쪽만 노트를 실으면 띄운 화면과 한 번 쓴 뒤의 화면이 `/` 에
+/// 다른 답을 낸다.
+pub fn measure_read(repo: &Repo, origin: &crate::worktree::Origin, issues: &[Issue]) -> (Index, Ground) {
+    measure_read_in(repo, origin, issues, &crate::report::Soil::of(issues))
+}
+
+/// [`measure_read`] 와 같은 것. 이미 잰 지도를 받는다 — [`measure_in`] 과 같은 까닭이다.
+fn measure_read_in(
+    repo: &Repo,
+    origin: &crate::worktree::Origin,
+    issues: &[Issue],
+    soil: &crate::report::Soil<'_>,
+) -> (Index, Ground) {
+    let (index, mut ground) = measure_in(issues, &repo.config, soil);
+    ground.notes = notes_at(repo, origin, issues);
+    (index, ground)
+}
+
+/// 줄마다 제 뿌리의 저널에서 읽은 노트 글 — CLI `-g` 와 **같은 걸음**이다(`cmd::show::journal_of_rows`).
+/// 겹쳐 온 줄은 저쪽 워크트리의 저널에서 읽는다(2026-09-30 사용자 결정, moai-wcy8).
+fn notes_at(repo: &Repo, origin: &crate::worktree::Origin, issues: &[Issue]) -> crate::query::Notes {
+    let journal = crate::cmd::show::journal_of_rows(repo, origin, issues, crate::model::may_hold_note);
+    crate::cmd::show::notes_of(&journal)
 }
 
 impl Ground {
@@ -362,6 +393,8 @@ impl Ground {
             split_rows,
             kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
+            // 줄만으로는 모른다 — 저장소를 읽는 적재가 얹는다([`measure_read`]).
+            notes: crate::query::Notes::new(),
         }
     }
 
@@ -409,9 +442,9 @@ impl Ground {
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
             folded: self.folded.iter().map(String::as_str).collect(),
-            // **탐색기는 아직 노트를 안 싣는다**(moai-efoc.zyc, 2026-09-30 사용자 결정) — `/` 의 전체 범위는
-            // 스냅샷만 본다. 싣는 날(moai-wcy8)이 이 한 줄이다.
-            notes: None,
+            // **노트도 빌린다**(moai-wcy8.vip) — 적재 때 저널에서 읽어 둔 것이다([`Ground::notes`]). 그래서 `/` 의
+            // 전체 범위가 CLI `-g` 와 같은 자로 선다.
+            notes: Some(&self.notes),
             // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
             zone: None,
         }
@@ -551,7 +584,8 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     // 나눠 쓴다([`measure_in`]).
     let now = crate::model::now();
     let soil = crate::report::Soil::of(&issues);
-    let (index, ground) = measure_in(&issues, &repo.config, &soil);
+    // 노트까지 싣는다(moai-wcy8.vip) — 여는 길(`cmd::tui`)과 같은 몸이다([`measure_read`]).
+    let (index, ground) = measure_read_in(repo, &g.origin, &issues, &soil);
     let (mut warnings, notices) = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
     // **알림은 `moai status` 와 같은 자로 센다**(moai-k6ff) — 순수한 셈이 낸 것에 설치가 어긋난
     // 셋을 더한 것이 보드가 세우는 수고, 프로젝트 층의 `+N` 도 그것이다(`layer::summarize`). 들어간 화면이
@@ -8024,6 +8058,49 @@ mod tests {
         std::fs::write(&other, "{}\n").unwrap();
         settle(&mut a);
         assert_ne!(a.site.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
+    }
+
+    /// 두 줄을 든 저장소와, 둘째 줄에만 노트 하나를 적은 저널(moai-wcy8). 노트는 저널에만 산다 — 스냅샷에는
+    /// 그 글자가 어디에도 없다.
+    fn noted(name: &str) -> (Scratch, Repo) {
+        let scratch = scratch(name);
+        let dir = scratch.path().to_path_buf();
+        let rows: Vec<String> = ["argos-0001", "argos-0002"]
+            .iter()
+            .map(|id| serde_json::to_string(&make(id, Kind::Issue)).unwrap() + "\n")
+            .collect();
+        std::fs::write(dir.join(".moai/issues.jsonl"), rows.concat()).unwrap();
+        let by = crate::model::Actor { name: "레이븐".into(), email: "raven@example.com".into() };
+        let note = crate::model::JournalEntry::note("argos-0002", "사용자 결정: 둘째 길", "2026-09-30T00:00:00Z", &by);
+        std::fs::create_dir_all(dir.join(".moai/journal")).unwrap();
+        std::fs::write(dir.join(".moai/journal/raven_example_com.jsonl"), serde_json::to_string(&note).unwrap() + "\n")
+            .unwrap();
+        (scratch, Repo::at(dir, cfg()))
+    }
+
+    /// 저장소를 읽는 적재로 연다 — 여는 길(`cmd::tui`)과 같은 몸이다([`measure_read`]).
+    fn opened(repo: Repo) -> App {
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let (index, ground) = measure_read(&repo, &crate::worktree::Origin::default(), &load.issues);
+        App::open(repo, load, index, ground, Path::new(), stamp)
+    }
+
+    /// **`/` 의 전체 범위는 적재가 읽은 노트까지 본다**(moai-wcy8.vip) — CLI `-g` 와 같은 자다. 여는 적재와
+    /// 다시 읽기([`prepare`])가 함께 싣는다: 한쪽만 실으면 쓰기 한 번에 같은 검색의 답이 바뀐다.
+    #[test]
+    fn the_whole_search_sees_the_notes_the_load_read() {
+        let (_scratch, repo) = noted("notes-load");
+        let mut a = opened(repo);
+        search(&mut a, "둘째 길");
+        assert_eq!(shown(&a), ["argos-0002"], "여는 적재가 노트를 안 실었다");
+        a.key(key(KeyCode::Enter));
+        a.reload();
+        assert_eq!(shown(&a), ["argos-0002"], "다시 읽기가 노트를 떨궜다");
+        // 줄만 받은 적재([`measure`])에는 노트가 없다 — 위의 답이 노트에서 왔다는 방증이다.
+        let issues = a.site.issues.clone();
+        a.adopt(issues);
+        assert!(shown(&a).is_empty(), "노트 없이 걸렸다 — 시험이 노트를 재지 않는다");
     }
 
     /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** 갱신을 부르기 전에
