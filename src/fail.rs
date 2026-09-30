@@ -47,6 +47,13 @@ impl Fail {
     pub fn no_actor(why: &crate::model::NoActor, lang: crate::i18n::Lang) -> Fail {
         Fail::coded(crate::view::no_actor(lang, why), why.code())
     }
+
+    /// 거르개가 값을 거절했다([`crate::query::BadFilter`], moai-2htt) — 글은 `view::bad_filter` 가 고른 말로
+    /// 짓고 코드는 늘 `bad_filter` 다. 부르는 자리(`show` 의 목록과 `--removed`)가 저마다 글과 코드를 짝지으면
+    /// 한 거절이 자리마다 다른 코드로 나갈 수 있다([`Fail::no_actor`] 와 같은 까닭, 리뷰 moai-efoc.ln9).
+    pub fn bad_filter(why: &crate::query::BadFilter, lang: crate::i18n::Lang) -> Fail {
+        Fail::coded(crate::view::bad_filter(lang, why), code::BAD_FILTER)
+    }
 }
 
 impl std::fmt::Display for Fail {

@@ -413,7 +413,8 @@ Order and paging:
   it. Asking by time opens what the list hides by default - done, deferred
   and ideas - because a row closed meanwhile changed too. Narrow it again
   with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out.
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -985,7 +986,8 @@ Order and paging:
   it. Asking by time opens what the list hides by default - done, deferred
   and ideas - because a row closed meanwhile changed too. Narrow it again
   with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out.
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1214,7 +1216,8 @@ Order and paging:
   it. Asking by time opens what the list hides by default - done, deferred
   and ideas - because a row closed meanwhile changed too. Narrow it again
   with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out.
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1443,7 +1446,8 @@ Order and paging:
   it. Asking by time opens what the list hides by default - done, deferred
   and ideas - because a row closed meanwhile changed too. Narrow it again
   with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out.
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1693,7 +1697,8 @@ Order and paging:
   it. Asking by time opens what the list hides by default - done, deferred
   and ideas - because a row closed meanwhile changed too. Narrow it again
   with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out.
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1855,7 +1860,8 @@ Options:
              it. Whether it stands at all is SPC v d
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
-             Stored times stay UTC, and so does --json
+             Stored times stay UTC, and so does --json; a bare day in an
+             SPC f filter (created=2026-10-01) is a day on this clock too
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.

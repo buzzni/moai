@@ -3348,6 +3348,21 @@ mod tests {
             assert!(crate::hook::hangul(&ko), "한국어를 골랐는데 한국어가 아니다 — {ko}");
             assert!(!en.contains('{') && !ko.contains('{'), "안 채운 자리가 남았다 — {en} / {ko}");
         }
+        // **두 번 쓴 거르개는 갈래마다 제 이름과 제 플래그를 댄다**(리뷰 moai-efoc.ln9) — 이름은 여기, 플래그는
+        // `query::Once::flag` 에 따로 적혀, 한쪽을 맞바꿔도 위의 셈은 푸르다. `--parent` 를 두 번 쓴 사람에게
+        // `-p a,b` 를 대면 그것은 우선순위 거르개다.
+        for (field, noun, flag) in [
+            (Once::Status, "status", "-s"),
+            (Once::Epic, "epic", "-e"),
+            (Once::Milestone, "milestone", "--milestone"),
+            (Once::Parent, "parent", "--parent"),
+            (Once::Priority, "priority", "-p"),
+            (Once::Assignee, "assignee", "-a"),
+        ] {
+            let said = bad_filter(Lang::En, &twice(field));
+            assert!(said.starts_with(&format!("the {noun} cannot be")), "{field:?} — {said}");
+            assert!(said.contains(&format!("`{flag} todo,review`")), "{field:?} — {said}");
+        }
         // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
         for lang in [Lang::En, Lang::Ko] {
             let said = |why: &BadFilter| bad_filter(lang, why);

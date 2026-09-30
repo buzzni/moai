@@ -72,8 +72,8 @@ pub struct Where<'a> {
     pub notes: Option<NoteView<'a>>,
     /// 읽는 사람의 시간대(moai-efoc). `YYYY-MM-DD` 로 친 때의 끝([`End::Wall`])을 그 사람의 날로 재는
     /// 재료다 — 마일스톤 기한이 `report::Dues::split` 에서 받는 것과 같은 값이다. **받는다**: 시간대를 푸는
-    /// 것은 명령 층이고, 날로 친 끝이 없으면 풀지도 않는다([`Filter::needs_zone`]). 안 실렸으면(`None`)
-    /// 도장 그대로, 곧 UTC 로 잰다.
+    /// 것은 명령 레이어(`cmd`)고, 날로 친 끝이 없으면 풀지도 얹지도 않는다([`Filter::needs_zone`]) — 탐색기도
+    /// 같은 문으로 제 화면의 시간대(`tui::App::zone`)를 얹는다. 안 실렸으면(`None`) 도장 그대로, 곧 UTC 로 잰다.
     pub zone: Option<&'a crate::tz::Zone>,
 }
 
@@ -416,6 +416,8 @@ pub enum BadFilter {
     NotAPriority(String),
     /// `type=` 의 값이 종류가 아니다. **`Kind` 의 거절문을 그대로 든다** — 그 글은 `--type` 을 푸는 clap 과
     /// 한 덩이로 서도록 영어 하나로 정했다(moai-ivt9). 같은 값을 두 자리가 다른 말로 거절하면 안 된다.
+    /// **`Kind` 처럼 moai 가 글을 쥔 자리에만 선다** — `--stale x` 는 clap 이 수로 풀다 제 영어(표준
+    /// 라이브러리의 글)로 거절해 나눠 쓸 글이 없으므로, `stale=` 은 [`BadFilter::NotDays`] 로 고른 말을 따른다.
     NotAKind(String),
 }
 
@@ -798,10 +800,15 @@ impl Span {
             }
         };
         // 거꾸로 선 폭은 늘 0건이다 — 조용히 0건을 내면 "그때는 아무것도 없었다" 와 안 갈린다. 두 끝의 자가
-        // 다르면(날과 순간) 시간대를 모르는 여기서는 못 견준다 — 하루 안쪽의 어긋남이라 넘긴다.
-        if let (Some(End::At(f)), Some(End::At(t))) | (Some(End::Wall(f)), Some(End::Wall(t))) = (from, to)
-            && f > t
-        {
+        // 다르면(날과 순간) 시간대를 모르는 여기서는 **하루 안쪽의 어긋남만** 못 가린다 — 시간대가 옮기는 폭은
+        // 하루보다 좁으므로, 그보다 더 거꾸로 선 폭은 어느 시간대에서도 0건이라 거절한다. 섞였다고 통째로
+        // 넘기던 코드는 `2026-12-01..2026-01-01T00:00:00Z` 를 거절 없이 0건으로 받았다(리뷰 moai-efoc.ln9).
+        let backwards = match (from, to) {
+            (Some(End::At(f)), Some(End::At(t))) | (Some(End::Wall(f)), Some(End::Wall(t))) => f > t,
+            (Some(End::At(f) | End::Wall(f)), Some(End::At(t) | End::Wall(t))) => f > t + 86_400,
+            _ => false,
+        };
+        if backwards {
             return Err(BadFilter::Backwards(raw.to_string()));
         }
         Ok(Span { from, to })
@@ -834,8 +841,10 @@ fn instant(raw: &str, end: bool) -> Result<End, BadFilter> {
 /// 줄의 도장([`Filter::matches`])과 저널 줄의 도장([`removed`])이 **이 한 자로** 잰다 — 둘로 두면 같은
 /// `--since` 가 목록과 `--removed` 에서 다른 날을 가리키는 날이 온다.
 fn spans_hold(spans: &[Vec<Span>], at: Option<i64>, zone: Option<&crate::tz::Zone>) -> bool {
-    let wall = |t: i64| zone.map_or(t, |z| z.local(t));
-    spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t, wall(t)))))
+    let Some(t) = at else { return spans.is_empty() };
+    // 벽시계는 **줄마다 한 번** 옮긴다(리뷰 moai-efoc.ln9) — 폭마다 옮기면 같은 값을 폭 수만큼 다시 잰다.
+    let wall = zone.map_or(t, |z| z.local(t));
+    spans.iter().all(|any| any.iter().any(|s| s.holds(t, wall)))
 }
 
 /// 지운 이슈의 저널 줄 가운데 `--since` 의 폭에 든 것 — 받은 차례 그대로(moai-7dmq, `moai show --removed`).
@@ -1458,7 +1467,8 @@ mod tests {
     fn repeating_status_is_a_friendly_error() {
         let e = Filter::build(Raw { status: s(&["todo", "review"]), all: true, ..Raw::default() }).unwrap_err();
         assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() });
-        assert_eq!(Once::Status.flag(), "-s", "고쳐 칠 명령이 `-s todo,review` 가 아니다");
+        // 고쳐 칠 명령(`-s todo,review`)은 글을 펴는 쪽이 갈래마다 잰다
+        // (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`).
     }
 
     #[test]
@@ -1620,8 +1630,12 @@ mod tests {
         assert_eq!(e, BadFilter::NoSuchKey("statu".into()));
         let e = Filter::build(Raw { filter: s(&["todo"]), ..Raw::default() }).unwrap_err();
         assert_eq!(e, BadFilter::NotAPair("todo".into()));
-        // 있는 항목의 목록은 글을 펴는 쪽(`view::bad_filter`)이 이것에서 읽는다.
-        assert!(KEYS.join(", ").starts_with("status, tag"), "{KEYS:?}");
+        // 있는 항목의 목록은 글을 펴는 쪽(`view::bad_filter`)이 이것에서 읽는다 — **대는 항목은 다 받아야 한다.**
+        // 목록과 `desugar` 의 갈래는 손으로 적는 두 벌이라, 목록에만 남은 항목은 거절문이 대고 곧바로 거절한다.
+        for k in KEYS {
+            let said = desugar(&mut Raw::default(), &format!("{k}=1"));
+            assert_ne!(said, Err(BadFilter::NoSuchKey((*k).to_string())), "`{k}` 를 대면서 안 받는다");
+        }
     }
 
     #[test]
@@ -1722,8 +1736,9 @@ mod tests {
         assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into() });
     }
 
-    /// **때의 폭은 두 끝을 다 품고, 날은 UTC 의 하루다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로
-    /// 품는다 — 안 품으면 `..2026-09-03` 이 3일 0시에서 끊겨 그날 한 일이 빠진다.
+    /// **때의 폭은 두 끝을 다 품고, 날은 하루를 통째로 품는다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로
+    /// 품는다 — 안 품으면 `..2026-09-03` 이 3일 0시에서 끊겨 그날 한 일이 빠진다. 여기서는 시간대 없이(UTC)
+    /// 잰다 — 날이 읽는 사람의 날이라는 것은 `a_day_is_the_readers_day_and_an_instant_is_utc` 가 잰다.
     #[test]
     fn a_time_span_holds_both_ends_and_a_day_is_whole() {
         let t = |s: &str| parse_rfc3339(s).unwrap();
@@ -1739,8 +1754,17 @@ mod tests {
             Span::parse("2026-09-02T01:02:03Z..").unwrap(),
             Span { from: Some(End::At(t("2026-09-02T01:02:03Z"))), to: None }
         );
-        // 조용히 0건을 내는 대신 거절한다 — 오타와 "그때는 없었다" 가 안 갈린다.
-        for bad in ["..", "2026-02-30", "어제", "2026-9-2", "2026-09-03..2026-09-02"] {
+        // 조용히 0건을 내는 대신 거절한다 — 오타와 "그때는 없었다" 가 안 갈린다. 날과 순간이 섞인 폭도 하루를
+        // 넘게 거꾸로 섰으면 어느 시간대에서도 0건이다(리뷰 moai-efoc.ln9).
+        for bad in [
+            "..",
+            "2026-02-30",
+            "어제",
+            "2026-9-2",
+            "2026-09-03..2026-09-02",
+            "2026-12-01..2026-01-01T00:00:00Z",
+            "2026-12-01T00:00:00Z..2026-01-01",
+        ] {
             assert!(Span::parse(bad).is_err(), "{bad} 를 받았다");
         }
         assert!(Span::since("2026-09-02..").is_err(), "--since 가 폭을 받았다");
@@ -1780,11 +1804,16 @@ mod tests {
         // 순간으로 친 끝은 시간대가 안 옮긴다.
         assert!(pick(Some(&seoul), "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
         assert!(!pick(Some(&seoul), "2026-09-30T20:00:01Z.."), "시각 끝을 시간대로 옮겼다");
+        // 날과 순간이 섞인 폭은 **하루 안쪽이면 받는다** — UTC 로는 거꾸로 서도 서울에서는 그 줄을 품는다.
+        assert!(pick(Some(&seoul), "2026-10-01..2026-09-30T20:00:00Z"), "하루 안쪽의 섞인 폭을 거절했다");
         // 날로 친 끝이 있을 때만 시간대를 푼다.
         let needs = |raw: Raw| Filter::build(raw).unwrap().needs_zone();
         assert!(needs(Raw { since: s(&["2026-10-01"]), ..Raw::default() }));
         assert!(!needs(Raw { since: s(&["2026-10-01T00:00:00Z"]), ..Raw::default() }));
         assert!(!needs(Raw::default()));
+        // 세 거르개가 다 묻는다 — 하나라도 빠지면 그 거르개만 말없이 UTC 의 날로 잰다(리뷰 moai-efoc.ln9).
+        assert!(needs(Raw { created: s(&["2026-09-30T00:00:00Z..2026-10-01"]), ..Raw::default() }));
+        assert!(needs(Raw { done: s(&["2026-10-01"]), ..Raw::default() }));
     }
 
     /// **지운 줄도 목록의 `--since` 와 같은 자로 잰다**(moai-7dmq) — 날로 친 때는 읽는 사람의 날이고, 못
