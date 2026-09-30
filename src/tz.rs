@@ -134,6 +134,12 @@ impl Zone {
         }
     }
 
+    /// 그 순간(epoch 초)의 **이 시간대의 벽시계** — epoch 초 꼴로(moai-efoc). [`Zone::shift`] 와 같은 값을
+    /// 글자로 안 짓고 수로 낸다: 날로 거르는 자(`query::Span`)가 줄마다 부르므로 글을 짓고 다시 풀 까닭이 없다.
+    pub fn local(&self, secs: i64) -> i64 {
+        secs + i64::from(self.offset_at(secs))
+    }
+
     /// `2026-09-21T08:24:58Z` → 이 시간대의 같은 순간(`2026-09-21T17:24:58Z` 꼴).
     ///
     /// **꼴을 안 바꾼다** — 받은 그대로의 RFC3339 를 내므로 [`crate::view::stamp`] 가 하던

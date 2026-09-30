@@ -156,6 +156,7 @@ Usage: moai ready [OPTIONS]
 
 Options:
       --worktree             Also overlay other worktrees (no file changes)
+  -n, --limit <count>        Give at most this many rows (held stays whole)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -366,11 +367,71 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json | duckdb -c "SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
 ## `moai mv`
@@ -861,11 +922,71 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json | duckdb -c "SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
 ## `moai epic`
@@ -1013,11 +1134,71 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json | duckdb -c "SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
 ## `moai milestone`
@@ -1165,11 +1346,71 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json | duckdb -c "SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
 ## `moai idea`
@@ -1338,11 +1579,71 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order and paging:
+      --sort <key>     Order the list by that key (priority when absent)
+      --reverse        Turn the order around, ties included
+  -n, --limit <count>  Give at most this many rows
+      --after <id>     Start after this row: the last id of the page before
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row), a note (`moai note` writes the journal, not the row), a
+  row whose derived value changed without a write of its own (a group's
+  column, an inherited epic) and a row merged in with an older stamp. A
+  stamp moai cannot read (fractions, an offset) falls in no time range. For
+  a complete copy, pull the whole list and compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json | duckdb -c "SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
 ## `moai idea promote`
