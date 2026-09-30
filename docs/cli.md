@@ -1818,9 +1818,10 @@ Options:
   as read (see [NEW] below).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
-  looks: everything, id, title, tag or body. The header at the top
-  numbers every registered project, and pressing that number without SPC
-  jumps straight there — 0 is everything, one list of all projects.
+  looks: everything, id, title, tag, body or note (everything reads the
+  notes too). The header at the top numbers every registered project, and
+  pressing that number without SPC jumps straight there — 0 is everything,
+  one list of all projects.
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
