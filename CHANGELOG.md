@@ -53,6 +53,18 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   changed without a write of its own and a row merged in with an older stamp —
   for a complete copy, pull the whole list and compare.
 
+- **`moai show --removed [--since <when>]` lists the issues `moai rm` took out.**
+  A removed row leaves nothing for `--since` to find; its one trace is the
+  journal's `rm` line, and this lays those lines out oldest first — `--json` in
+  the shape of `journal` in `moai show <id> --json`, so each carries `ts`, `id`
+  and `title`. It is history, not state: nothing is held against the snapshot,
+  so an id listed there may live again, and `moai show <id>` says whether it
+  does. `--since` keys on the `rm` line's own stamp, so a removal merged in with
+  an older stamp is missed the way such a row is; the full compare stays the
+  complete answer. It reads the journal beside the tracker only, leaves out
+  `rm --line` (an unreadable line, not an issue), takes `--since` and no other
+  filter, and is refused under `moai <kind> show`.
+
 ### Changed
 
 - **`-g` looks through notes and move messages too.** A decision written only in
