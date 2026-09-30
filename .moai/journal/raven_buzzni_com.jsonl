@@ -2287,3 +2287,12 @@
 {"ts":"2026-09-30T10:13:55Z","id":"moai-efoc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 moai-r621(slim tzdata 의 POSIX footer)과 moai-tckz(탐색기 거름망 거절문의 CLI 꼴 명령)가 첫 칸에 남아 에픽을 연다. 둘은 리뷰 moai-efoc.ln9 가 넘긴 것이라 아직 아무 리뷰도 안 봤다 — 그것을 닫는 창이 에픽 끝 리뷰를 다시 부른다"}
 {"ts":"2026-09-30T10:15:39Z","id":"moai-r621","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-30T10:15:40Z","id":"moai-tckz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T10:17:35Z","id":"moai-p9mq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널 디렉터리 안의 링크가 가리키는 저널을 두 번 읽는다"}
+{"ts":"2026-09-30T10:17:37Z","id":"moai-ldjg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 집기 기록이 끊긴 꼬리를 채우지 않고 덧붙인다"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-pxwt","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC f 의 grep= 으로 건 줄은 왜 걸렸는지 칠하지 않는다"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-bkb9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"moai rm on one of two twin rows reports the children as dangling"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-c4sn","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"README 가 화면의 기본 말을 한국어라 적는다"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-cyqb","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"docs/recovery.md tells users to git show <commit>:.moai/issues.jsonl, which prints only link text for a linked tracker (review moai-ydm7.exk)"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-ocll","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 저널 파일로 빠진 노트를 탐색기가 세션 안에서 말하지 않는다"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-bgan","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"저널 읽기가 앞 거르개 전에 줄마다 UTF-8 을 잰다"}
+{"ts":"2026-09-30T10:21:04Z","id":"moai-ug6s","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ready --json 에 -n 이 자른 수를 싣는다"}
