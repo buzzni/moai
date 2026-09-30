@@ -1312,6 +1312,10 @@ impl App {
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
         parked.keep = vec![true; parked.issues.len()];
+        // **읽은 노트도 두고 가지 않는다**(리뷰 moai-wcy8.rbj) — 노트는 그 프로젝트 안에서 노트를 보는 검색이
+        // 읽은 것인데(`Ground::read_notes`), 레이어에서는 `/` 가 안 서고 도로 들어가면 새로 읽는다. 두고 가면
+        // 그 줄이 다시 읽힐 때까지 글과 접은 글 두 벌(이 저장소에서 9MB)이 쓸 데 없이 남는다.
+        parked.ground.notes = None;
         if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
             && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
         {
@@ -1339,6 +1343,8 @@ impl App {
         // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
         self.body = None;
+        // 펴 둔 걸린 노트 줄도 같다(리뷰 moai-wcy8.rbj, `draw::NoteHits`) — 노트는 본문보다 크다.
+        self.note_hits = None;
         self.detail.rewind();
     }
 

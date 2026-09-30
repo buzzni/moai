@@ -573,8 +573,18 @@ impl Repo {
     /// 관대하고 쓰기는 엄하다는 규약의 자리다. 대신 [`note_unread`] 로 세어 두고, `cmd::run` 이
     /// 나오면서 stderr 로 대며 비영 종료로 끝낸다. 목록의 줄 하나를 못 읽는 것도 같다: 그 줄이
     /// 누구의 파일이었는지는 아무도 모르니 그 사실 그대로 센다.
+    ///
+    /// **옛 한 파일도 보통 파일일 때만 든다**(리뷰 moai-wcy8.rbj) — 아래 `journal/` 의 것과 같은 자다. 그
+    /// 자리의 FIFO 를 여는 `fs::read` 는 쓰는 쪽이 올 때까지 영영 멈추고(`/dev/zero` 로 가는 링크면 메모리가
+    /// 찰 때까지 읽는다), 탐색기는 이 읽기를 루프에서도 부른다. 없는 자리와 못 잰 자리는 그대로 든다 — 없으면
+    /// 읽는 쪽이 넘기고 표식([`Repo::journal_marks`])이 나중에 생긴 것을 알아채며, 못 잰 까닭은 읽는 쪽이
+    /// 센다([`note_unread`]).
     fn journal_files(&self) -> Vec<PathBuf> {
-        let mut out = vec![self.journal_path()];
+        let legacy = self.journal_path();
+        let mut out = match std::fs::metadata(&legacy) {
+            Ok(m) if !m.is_file() => Vec::new(),
+            _ => vec![legacy],
+        };
         let at = self.journal_dir();
         let dir = match std::fs::read_dir(&at) {
             Ok(d) => d,
@@ -613,6 +623,28 @@ impl Repo {
         }
         split.sort();
         out.extend(split);
+        out
+    }
+
+    /// 저널의 표식 — [`Repo::journal_dir`] 디렉터리 자체와, [`Repo::journal_files`] 가 읽는 파일마다
+    /// (moai-wcy8.403). 탐색기가 노트를 읽고(`tui::Ground::read_notes`) 이것으로 다시 읽을 때를 안다 —
+    /// `moai note` 는 스냅샷을 안 바꾸므로 스냅샷 표식만 보면 새 노트가 영영 안 실린다.
+    ///
+    /// **디렉터리도 잰다** — 처음 쓰는 사람의 `<메일>.jsonl` 은 목록에 없던 파일이라, 파일만 재면 그 사람의
+    /// 첫 노트를 못 알아챈다. 파일이 생기면 디렉터리의 고친 때가 바뀐다. 없는 자리는 `None` 으로 서므로
+    /// 나중에 생긴 것도 알아챈다([`stamp`]).
+    ///
+    /// **디렉터리는 훑기 전에 잰다**(리뷰 moai-wcy8.rbj) — `worktree::heads` 가 제 디렉터리를 재는 차례와
+    /// 같다. 훑고 나서 재면 그 사이에 생긴 `<메일>.jsonl` 이 목록에는 없는데 디렉터리의 표식은 이미 그것을 센
+    /// 뒤라, 그 사람이 이어 적는 노트를 걸음이 다음 시계까지 못 알아챈다.
+    pub fn journal_marks(&self) -> Vec<(PathBuf, Stamp)> {
+        let dir = self.journal_dir();
+        let dir_stamp = stamp(&dir);
+        let mut out = vec![(dir, dir_stamp)];
+        out.extend(self.journal_files().into_iter().map(|p| {
+            let s = stamp(&p);
+            (p, s)
+        }));
         out
     }
 
@@ -2615,6 +2647,40 @@ mod tests {
             "kind·차례·관대함·이스케이프 가운데 하나가 어긋났다"
         );
         assert!(r.journal_of_kind("status").is_empty(), "없는 kind 에서 줄을 지어냈다");
+    }
+
+    /// **옛 한 파일 자리가 보통 파일이 아니면 안 연다**(리뷰 moai-wcy8.rbj) — `journal/` 의 것과 같은 자다.
+    /// FIFO 를 여는 `fs::read` 는 쓰는 쪽이 올 때까지 영영 멈추고, 탐색기는 `/` 가 노트를 처음 볼 때 이 읽기를
+    /// 루프에서 부른다. 제 파일의 이력은 그대로 온다. `mkfifo` 가 없는 기계면 건너뛴다(`write_atomic` 의 시험과
+    /// 같은 길이다).
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_where_the_old_journal_was_is_not_opened() {
+        let (r, _d) = repo("journal-fifo");
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ()))
+            },
+        )
+        .unwrap();
+        if !std::process::Command::new("mkfifo").arg(r.journal_path()).status().is_ok_and(|st| st.success()) {
+            return;
+        }
+        let reader = Repo::at(r.root.clone(), r.config.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(reader.journal_of("argos-4aex"));
+        });
+        let got = rx.recv_timeout(std::time::Duration::from_secs(5));
+        if got.is_err() {
+            // 멈춘 읽기를 풀어 준다 — 쓰는 쪽이 열었다 닫으면 읽는 쪽은 끝을 본다.
+            let _ = std::fs::OpenOptions::new().write(true).open(r.journal_path());
+        }
+        let j = got.expect("옛 저널 자리의 FIFO 에서 읽기가 멈췄다");
+        assert!(j.iter().any(|e| e.text.as_deref() == Some("발견")), "제 파일의 이력을 잃었다: {j:?}");
+        assert!(!r.journal_marks().iter().any(|(p, _)| *p == r.journal_path()), "FIFO 를 저널로 쟀다");
     }
 
     /// **저널만 못 적은 쓰기는 담긴 것으로 끝나고, 저널이 전부인 쓰기는 실패다**(moai-52z9).

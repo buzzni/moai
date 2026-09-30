@@ -818,8 +818,9 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// **`rm` 의 `note` 는 안 든다** — 그것은 못 읽는 줄을 지울 때 남긴 원문이지(`JournalEntry::removed_line`)
 /// 사람이 이슈에 붙인 글이 아니다. 거기 든 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
 ///
-/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기가 나중에 같은 글을 본다. 그래서 명령 레이어(`cmd`)가
-/// 아니라 여기 둔다: 어느 갈래를 노트로 치는지가 두 표면에서 갈리지 않게.
+/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기의 `/` 가 같은 글을 본다(`tui::Ground::read_notes`,
+/// moai-wcy8). 그래서 명령 레이어(`cmd`)가 아니라 여기 둔다: 어느 갈래를 노트로 치는지가 두 표면에서 갈리지
+/// 않게.
 pub fn note_of(e: &JournalEntry) -> Option<&str> {
     match e.kind.as_str() {
         "note" => e.text.as_deref(),

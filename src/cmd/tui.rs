@@ -33,6 +33,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
+    // **노트는 여기서 안 읽는다**(리뷰 moai-wcy8.rbj) — `/` 가 노트를 처음 볼 때 읽는다(`tui::Ground::read_notes`).
+    // 여기서 읽던 판은 첫 화면 앞에서, 터미널이 없어 거절될 판에서도 저널 전체를 풀었다.
     let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
     let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
 

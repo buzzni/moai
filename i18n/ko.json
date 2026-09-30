@@ -427,6 +427,7 @@
   "tui.about.started": "시작",
   "tui.about.ended": "끝",
   "tui.about.commits": "커밋",
+  "tui.about.notes": "걸린 노트",
   "tui.block.missing": "끊김",
   "tui.block.missing_text": "! {id}  없는 이슈라 막지 않는다",
   "tui.block.done": "풀림",
