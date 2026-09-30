@@ -287,18 +287,6 @@ pub enum GrepIn {
 impl GrepIn {
     const ORDER: [GrepIn; 6] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::Note];
 
-    /// 화면에 적는 이름. 거름망 뱃지의 `/id:…` 앞머리이기도 하다.
-    pub fn name(self) -> &'static str {
-        match self {
-            GrepIn::All => "전체",
-            GrepIn::Id => "id",
-            GrepIn::Title => "제목",
-            GrepIn::Tag => "태그",
-            GrepIn::Body => "본문",
-            GrepIn::Note => "노트",
-        }
-    }
-
     /// Tab 의 다음 범위. 끝에서 처음으로 돈다.
     pub fn next(self) -> GrepIn {
         let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);
@@ -1566,7 +1554,7 @@ mod tests {
             assert!(hit(&f, &i), "전체가 {q} 를 못 찾았다");
             for g in GrepIn::ORDER.into_iter().filter(|g| *g != GrepIn::All) {
                 f.grep_in = g;
-                assert_eq!(hit(&f, &i), g == only, "{} 범위가 {q} 에 틀렸다", g.name());
+                assert_eq!(hit(&f, &i), g == only, "{g:?} 범위가 {q} 에 틀렸다");
             }
         }
         // 차례는 전체 → id → 제목 → 태그 → 본문 → 노트 → 전체, 거꾸로도 돈다. 노트 범위가 제 글을 찾는 것은

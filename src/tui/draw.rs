@@ -15,7 +15,7 @@ use super::menu;
 use super::picker::{self, Picker};
 use super::scroll::Move;
 use super::scroll::Scroll;
-use super::{App, Input, Mode, Pane, Row, Seat, Site};
+use super::{App, Hung, Input, Mode, Pane, Row, Seat, Site};
 use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
@@ -1037,11 +1037,14 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 먼저 뗀다** — 경로를 줄 폭 전체로 자르면 깊이 들어갔을 때 뱃지가 줄
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
     let lang = app.site.lang;
-    let badge = app.filter_text.as_ref().map(|t| {
-        let said = fill(say(lang, "tui.crumbs.filter"), &[("text", t), ("key", &label(BROWSE, Browse::ClearFilter))]);
+    let hung = app.hung.as_ref().map(|h| {
+        let said = fill(
+            say(lang, "tui.crumbs.filter"),
+            &[("text", &badge(h, lang)), ("key", &label(BROWSE, Browse::ClearFilter))],
+        );
         clip(&said, w)
     });
-    let room = match &badge {
+    let room = match &hung {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
     };
@@ -1125,7 +1128,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(l, dim()));
     }
-    if let Some(b) = badge {
+    if let Some(b) = hung {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(b, Style::new().fg(Color::Black).bg(Color::LightYellow)));
     }
@@ -2390,7 +2393,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
 
     // **노트에서 걸린 줄을 그린다**(moai-wcy8.3v9, 2026-09-30 사용자 결정) — 노트는 목록에도 이 패널의 다른
     // 칸에도 없어, 노트로 걸린 줄은 이것 없이는 왜 걸렸는지가 안 보인다. **검색이 노트를 볼 때만, 걸린 줄만**
-    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu).
+    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu). `f` 의 `grep=` 으로 건 줄도 여기서는 같다
+    // (moai-lpzj.4ks) — 글로 찾는 거르개면 그린다([`App::grep_query`]). 보기를 걷는 검색([`App::searching`])은 `/` 뿐이다.
     //
     // **노트로만 걸린 줄이면 본문 앞에, 다른 칸으로도 걸린 줄이면 본문 뒤에 선다**(리뷰 moai-wcy8.rbj 7번). 이 절은
     // 검색 중에만 서고, 그때 사람이 찾는 것이 "왜 걸렸나" 다. 본문 뒤에만 두던 판은 본문이 긴 에픽에서 이 절이
@@ -3074,7 +3078,7 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
     };
     // 늘 남는 것: 걸어 둔 거름망을 푸는 길, 그리고 나머지 전부로 가는 메뉴.
     let mut keep = Vec::new();
-    if app.filter_text.is_some() {
+    if app.hung.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
     keep.push((menu::title(&[LEADER.event()]), menu::root(app.site.lang)));
@@ -3194,11 +3198,39 @@ fn prompt_help(apply: &str, lang: Lang) -> String {
     )
 }
 
+/// 걸린 거름망의 뱃지 글(moai-lpzj.i7i) — 거름망이면 친 글 그대로, 검색이면 `/<글>`, 범위를 좁혔으면
+/// `/<범위>:<글>`. **그리기만 한다** — 이 글을 되읽는 자는 없다: 범위와 글은 [`Hung`] 이 따로 든다. 그래서
+/// 범위 이름이 화면 말을 따른다([`scope_word`]).
+pub(super) fn badge(h: &Hung, lang: Lang) -> String {
+    match h {
+        Hung::Filter { text, .. } => text.clone(),
+        Hung::Grep { text, scope } => match scope_word(*scope, lang) {
+            Some(word) => format!("/{word}:{text}"),
+            None => format!("/{text}"),
+        },
+    }
+}
+
+/// 좁힌 검색 범위의 화면 말(moai-lpzj.3nv) — 검색 칸 이름표(`search·title`)와 뱃지(`/title:…`)가 함께 쓴다.
+/// **전체는 이름이 안 선다** — 이름표는 `search`, 뱃지는 `/<글>` 이다. 한때 `GrepIn::name` 이 한국어 이름을
+/// 박아 두어 영어 화면에도 `search·노트` 가 섰다. 그 이름이 뱃지를 되읽는 열쇠이기도 해서 말만 바꿀 수가
+/// 없었는데, 범위를 데이터로 들게 되면서([`Hung`]) 풀렸다.
+fn scope_word(g: GrepIn, lang: Lang) -> Option<&'static str> {
+    Some(match g {
+        GrepIn::All => return None,
+        GrepIn::Id => say(lang, "tui.grep.in.id"),
+        GrepIn::Title => say(lang, "tui.grep.in.title"),
+        GrepIn::Tag => say(lang, "tui.grep.in.tag"),
+        GrepIn::Body => say(lang, "tui.grep.in.body"),
+        GrepIn::Note => say(lang, "tui.grep.in.note"),
+    })
+}
+
 /// 검색 칸 이름표 — 좁힌 범위면 `검색·id` 처럼 붙인다(moai-kojj). 전체면 옛 이름 그대로다.
 fn grep_label(g: GrepIn, lang: Lang) -> String {
-    match g {
-        GrepIn::All => say(lang, "tui.grep.label").to_string(),
-        g => fill(say(lang, "tui.grep.label_in"), &[("scope", g.name())]),
+    match scope_word(g, lang) {
+        Some(word) => fill(say(lang, "tui.grep.label_in"), &[("scope", word)]),
+        None => say(lang, "tui.grep.label").to_string(),
     }
 }
 
@@ -5746,7 +5778,7 @@ pub(super) mod tests {
             let mut a = app();
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.trim_end().ends_with("SPC 메뉴"), "{w}칸에서 메뉴 키가 잘렸다 — {bar:?}");
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.contains("Esc 풀기") && bar.trim_end().ends_with("SPC 메뉴"), "{w}칸 — {bar:?}");
             // 옮긴 키는 바에 없다.
@@ -7055,7 +7087,7 @@ pub(super) mod tests {
     fn the_key_bar_keeps_its_order_as_the_cursor_moves_at_eighty_columns() {
         for place in Place::ALL {
             let mut a = place.app();
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
             for at in 0..a.rows().len() {
                 a.cursor = at;
                 let c = a.key_ctx(&a.rows());
@@ -7113,7 +7145,7 @@ pub(super) mod tests {
     fn the_key_bar_fits_whole_at_eighty_columns() {
         for w in [80u16, 100, 120] {
             let mut a = Place::LayeredInsideUp.app();
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             for shown in
                 ["j·k 이동", "Ctrl-w w 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"]
@@ -7143,7 +7175,7 @@ pub(super) mod tests {
                 for on in [false, true] {
                     let mut a = place.map_or_else(|| layered(At::Layer), Place::app);
                     a.focus = pane;
-                    a.filter_text = on.then(|| "tag=x".to_string());
+                    a.hung = on.then(|| Hung::Filter { text: "tag=x".into(), grep: None });
                     (a.worktree, a.raw) = (on, on);
                     let c = a.key_ctx(&a.rows());
                     seen.insert((c.list_focus, c.leaf, c.root));
@@ -7745,6 +7777,34 @@ pub(super) mod tests {
         assert!(found_text(&mut a).trim().is_empty(), "보지 않는 자리를 칠했다");
     }
 
+    /// **검색 범위의 이름은 화면 말을 따른다**(moai-lpzj.3nv) — 영어 화면에도 `search·노트`·`/노트:…` 가 섰다.
+    /// 그 이름이 뱃지 글이기도 해서 되읽는 자가 거기 매여 있었다. 범위를 데이터로 든 뒤로는(moai-lpzj.i7i)
+    /// 말만 바뀐다 — 걸린 범위와 글은 두 말에서 같다.
+    #[test]
+    fn the_search_scope_speaks_the_screen_language() {
+        for (lang, label, crumb) in
+            [(Lang::En, " search·note ", "[/note:zebra]"), (Lang::Ko, " 검색·노트 ", "[/노트:zebra]")]
+        {
+            let mut a = app();
+            a.site.lang = lang;
+            a.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+            for c in "zebra".chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            // 전체에서 거꾸로 한 번이 노트다(moai-wcy8.3v9).
+            a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+            let prompt = render(&mut a, 100, 20).join("\n");
+            assert!(prompt.contains(label), "{lang:?}: 검색 칸 이름표가 화면 말이 아니다\n{prompt}");
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            let screen = render(&mut a, 100, 20).join("\n");
+            assert!(screen.contains(crumb), "{lang:?}: 뱃지가 화면 말이 아니다\n{screen}");
+            if lang == Lang::En {
+                assert!(!screen.contains("/노트:") && !prompt.contains("·노트"), "영어 화면에 한국어 범위가 섰다");
+            }
+            assert_eq!(a.grep_query(), Some((GrepIn::Note, "zebra")), "{lang:?}: 걸린 범위나 글이 말을 탔다");
+        }
+    }
+
     /// **상세 칸은 태그·본문에서 찾은 글자도 칠한다**(moai-lw7i) — 목록 줄은 id·제목만 칠해, 태그·본문
     /// 범위로 찾으면 걸린 줄에 칠한 글자가 없어 왜 걸렸는지 안 보인다. 그 범위를 안 보는 검색은 안 칠한다.
     #[test]
@@ -7815,6 +7875,55 @@ pub(super) mod tests {
             screen.find("걸린 노트") > screen.find("본문 첫 줄"),
             "제목으로도 걸린 줄의 노트가 본문 앞에 섰다\n{screen}"
         );
+    }
+
+    /// **`f` 의 `grep=` 으로 건 줄도 찾은 자리를 칠한다**(moai-lpzj.4ks) — 칠하는 쪽이 `/` 로 시작하는 뱃지 글만
+    /// 검색으로 읽어, `grep=` 으로 걸면 본문으로 걸렸든 노트로만 걸렸든 상세에 아무 표가 없었다. `grep=` 은
+    /// CLI 의 `-g` 처럼 전체를 본다. **보기는 걷지 않는다** — 거름망은 보기를 따른다(moai-qnkn).
+    #[test]
+    fn a_filter_grep_paints_what_it_found_like_a_search() {
+        let hung = |text: &str| {
+            let mut is = issues();
+            is[0].body = Some("본문에 든 낱말 zebra".into());
+            let mut a = every(is);
+            let note = "첫 줄은 상관없다\n사용자 결정: quux 에픽 길".to_string();
+            a.site.ground.hand_notes([("argos-0001".to_string(), vec![note])].into());
+            a.hit("SPC f");
+            for c in text.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert!(a.hung.is_some() && !a.searching(), "{text}: 거름망으로 안 걸렸거나 검색으로 걸렸다");
+            a
+        };
+        let mut a = hung("grep=ZEBRA");
+        assert!(found_text(&mut a).contains("zebra"), "grep= 으로 건 줄의 본문에서 찾은 글자를 안 칠했다");
+        // 노트에만 든 글 — 걸린 노트 줄을 본문 앞에 그리고 찾은 글자를 칠한다.
+        let mut a = hung("grep=quux");
+        let screen = render(&mut a, 100, 30).join("\n");
+        assert!(screen.contains("사용자 결정: quux 에픽 길"), "grep= 이 노트로 건 줄을 안 그렸다\n{screen}");
+        assert!(!screen.contains("첫 줄은 상관없다"), "안 걸린 노트 줄을 그렸다\n{screen}");
+        assert!(found_text(&mut a).contains("quux"), "grep= 으로 건 노트 줄에서 찾은 글자를 안 칠했다");
+        // 글로 안 찾는 거름망은 칠할 것이 없다.
+        let mut a = hung("priority=2");
+        assert_eq!(a.grep_query(), None);
+        assert!(found_text(&mut a).trim().is_empty(), "글로 안 찾는 거름망이 칠했다");
+        // **보기는 걷지 않는다** — 칠하기가 `grep=` 을 받아도 줄을 세우는 쪽은 `/` 만 본다. done 을 숨긴 보기에서
+        // `grep=멤버` 는 끝난 멤버(argos-0003)를 안 세우고, 같은 글을 `/` 로 찾으면 세운다. `searching()` 의 값만
+        // 재면 목록을 세우는 자가 `grep_query()` 로 갈아타도 푸르다 — 그래서 선 줄 수로 잰다.
+        let veiled = |keys: &str, text: &str| {
+            let mut a = every(issues());
+            a.view = super::super::view::View::hiding("done");
+            a.see();
+            a.hit(keys);
+            for c in text.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            a.hit_count()
+        };
+        assert_eq!(veiled("SPC f", "grep=멤버"), 1, "grep= 이 보기가 숨긴 끝난 줄을 세웠다");
+        assert_eq!(veiled("/", "멤버"), 2, "시험의 전제 — `/` 는 보기가 숨긴 줄도 세운다");
     }
 
     /// **걸린 노트 줄은 한 번 펴서 든다**(리뷰 moai-wcy8.rbj) — 본문([`Body`])과 같은 까닭이고, 노트는 본문보다

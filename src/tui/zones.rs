@@ -175,7 +175,7 @@ impl App {
         // **걸어 둔 거름망은 이 시간대로 다시 건다**(리뷰 moai-efoc.ln9) — 날로 친 때(`created=2026-10-01`)는
         // 화면의 시간대로 재어 `keep` 에 접히므로([`super::App::apply`]), 안 걸면 상세는 새 시간대의 날을 그리는데
         // 목록은 다음 다시 읽기까지 옛 시간대의 날로 남는다. 커서는 다시 읽을 때처럼 붙든 줄에 다시 세운다.
-        if self.filter_text.is_some() {
+        if self.hung.is_some() {
             let held = self.current().map(|r| self.anchor_of(&r));
             self.reapply();
             self.regrip(held);

@@ -157,6 +157,17 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   at a file which is not zone data, such as `TZ=leapseconds`, is now reported in
   the language you picked rather than in Korean.
 
+- **The explorer's search scopes speak the language you picked, and a `grep=`
+  filter marks what it found.** On the English screen a narrowed search (`/`, then
+  Tab) was labelled `search·노트` and its badge read `/노트:…`; it now reads
+  `search·note` and `/note:…`. The names could not change before because the
+  explorer read the scope and the query back out of the badge text; it now holds
+  them apart and only draws the badge. A `grep=` typed into `SPC f` found its rows
+  but marked nothing, so a row caught by its body or only by a note showed no
+  reason in the detail; it now marks the matched text and draws the matching note
+  lines, as `/` does. It still leaves the view alone — only `/` brings back what
+  the view hides.
+
 ## [0.1.4] - 2026-09-29
 
 ### Added

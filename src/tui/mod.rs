@@ -113,6 +113,40 @@ pub enum Mode {
     Zone(zones::Zones),
 }
 
+/// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
+///
+/// **뱃지는 이것을 그리기만 한다**([`draw::badge`]). 한때 뱃지 글(`/노트:x`)을 들고 거기서 범위와 검색어를
+/// 되읽었다. 그러자 범위 이름이 곧 되읽는 자의 열쇠라 화면 말로 못 옮겼고(영어 화면에 `/노트:x` 가 섰다),
+/// `/` 로 시작하는 글만 검색으로 읽어 `f` 의 `grep=` 으로 건 줄은 찾은 자리를 못 칠했다(moai-lpzj.4ks).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hung {
+    /// `/` 검색 — 친 글과 찾는 자리.
+    Grep { text: String, scope: GrepIn },
+    /// `f` 거름망 — 친 `항목=값` 글과, 그 가운데 `grep=` 이 찾는 범위와 글. 뒤엣것은 걸 때 [`Filter::build`]
+    /// 가 읽은 값(`grep_in`·`grep`, 글은 소문자로 접힌 것)을 그대로 받아 둔다([`App::apply`]) — 찾은 자리를
+    /// 칠하는 쪽이 줄마다 글을 다시 쪼개지 않게, 그리고 범위를 여기서 따로 정하지 않게.
+    Filter { text: String, grep: Option<(GrepIn, String)> },
+}
+
+impl Hung {
+    /// 이 거름망을 다시 걸 칸 — 다시 읽을 때([`App::reapply`]).
+    fn mode(&self) -> Mode {
+        match self {
+            Hung::Grep { text, scope } => Mode::Grep(Input::new(text), *scope),
+            Hung::Filter { text, .. } => Mode::Filter(Input::new(text)),
+        }
+    }
+
+    /// 글로 찾는 범위와 글 — `/` 검색이든 `f` 의 `grep=` 이든. 범위는 걸 때 거르개가 정한 것이다 — `grep=` 은
+    /// 지금 CLI 의 `-g` 처럼 늘 전체를 본다.
+    fn query(&self) -> Option<(GrepIn, &str)> {
+        match self {
+            Hung::Grep { text, scope } => Some((*scope, text)),
+            Hung::Filter { grep, .. } => grep.as_ref().map(|(g, q)| (*g, q.as_str())),
+        }
+    }
+}
+
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
 /// 들고 있다가 되돌려 놓는 모드 안에 있고, 이 함수는 거기서 다시 읽어 쓴다.
 /// 닫는 함수(`FnOnce`)를 통째로 들고 있으면 그 결과를 받을 자리가 없어
@@ -1008,14 +1042,11 @@ pub struct App {
     /// 이동키(`↑↓`·PageUp/Down·Home/End)를 먹는 칸. `Tab`·`Shift-Tab` 이 돌린다.
     /// **다시 읽어도 그대로다** — 굴리던 사람의 손이 갱신 한 번에 목록으로 튀면 안 된다.
     pub focus: Pane,
-    /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다.
-    pub filter_text: Option<String>,
-    /// 걸린 검색이 찾는 자리. `filter_text` 가 `/` 로 시작할 때만 뜻이 있다 — 다시 읽을 때
-    /// 뱃지 글(`/id:0004`)을 되읽지 않고 이것으로 거름망을 다시 짓는다.
-    pub grep_in: GrepIn,
-    /// 검색 칸을 열기 전의 거름망·범위·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
+    /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다 — 뱃지는 이것을 그린다.
+    pub hung: Option<Hung>,
+    /// 검색 칸을 열기 전의 거름망·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
     /// 그만두려면 되돌아갈 자리를 들고 있어야 한다. Enter 로 걸면 버린다.
-    grep_was: Option<(Option<String>, GrepIn, usize)>,
+    grep_was: Option<(Option<Hung>, usize)>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
     /// 조용히 삼키면 갱신이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 기다리고 또 기다리며 까닭을 못 얻는다.
@@ -1610,8 +1641,7 @@ impl App {
             focus: Pane::default(),
             detail: Scroll::default(),
             raw: false,
-            filter_text: None,
-            grep_in: GrepIn::All,
+            hung: None,
             grep_was: None,
             trouble: None,
             unlayered: None,
@@ -2276,9 +2306,11 @@ impl App {
     }
 
     /// 걸린 거름망이 노트를 보는가([`crate::query::Filter::sees_notes`]) — 다시 읽는 스레드가 노트까지 읽어
-    /// 올지를 가른다([`App::follow`]). 거름망은 다시 거는 자([`App::reapply`])와 같은 자로 되세운다.
+    /// 올지를 가른다([`App::follow`]). **칠하는 쪽([`App::grep_query`])과 같은 값을 읽는다** — 그 범위와 글은
+    /// 걸 때 거르개가 정한 그대로라([`Hung::query`]) `Filter::sees_notes` 와 같은 답이고, 글을 다시 쪼개
+    /// 거르개를 새로 짓지 않는다. 둘이 따로 읽으면 노트를 안 읽어 온 판에 상세가 노트를 그리려 드는 틈이 난다.
     fn sees_notes(&self) -> bool {
-        self.applied().and_then(|mode| self.build_filter(&mode).ok()).is_some_and(|f| f.sees_notes())
+        self.grep_query().is_some_and(|(g, _)| g.sees_notes())
     }
 
     /// 새 판을 묻는 실을 띄운다(moai-3gia) — **부르는 쪽이 문을 지난 뒤에만 부른다**
@@ -2409,35 +2441,19 @@ impl App {
         self.commits_job.is_some() || (self.commits_due && self.site.repo.is_some())
     }
 
-    /// 들고 있는 `filter_text` 를 지금 `issues` 에 다시 건다. 못 걸면 푼다.
+    /// 들고 있는 거름망([`App::hung`])을 지금 `issues` 에 다시 건다. 못 걸면 푼다.
     fn reapply(&mut self) {
-        let Some(mode) = self.applied() else { return self.clear_filter() };
+        let Some(mode) = self.hung.as_ref().map(Hung::mode) else { return self.clear_filter() };
         if self.apply(&mode).is_err() {
             self.clear_filter();
         }
     }
 
-    /// 걸린 거름망을 칸의 꼴로 되세운다 — 걸린 것이 없으면 `None`. 다시 거는 자([`App::reapply`])와 노트를
-    /// 볼지 묻는 자([`App::sees_notes`])가 이것 하나로 되세운다.
-    fn applied(&self) -> Option<Mode> {
-        match (self.grep_query(), &self.filter_text) {
-            (Some((g, q)), _) => Some(Mode::Grep(Input::new(q), g)),
-            (None, Some(t)) => Some(Mode::Filter(Input::new(t))),
-            (None, None) => None,
-        }
-    }
-
-    /// 걸린 검색의 범위와 친 글. 거름망(`f`)이거나 걸린 것이 없으면 `None`.
-    ///
-    /// 뱃지 글은 `/<글>` 이거나 범위를 좁혔으면 `/<범위>:<글>` 이다([`App::apply`]). 범위는
-    /// 글에서 되읽지 않고 [`App::grep_in`] 을 믿는다 — `/id:x` 를 전체 범위로 친 사람도 있다.
+    /// 걸린 거르개가 글로 찾는 범위와 글 — 찾은 자리를 칠하는 쪽이 읽는다. `/` 검색이든 `f` 의 `grep=` 이든
+    /// 같다(moai-lpzj.4ks): `grep=` 으로 건 줄도 노트에만 든 글로 걸릴 수 있고, 칠이 없으면 왜 걸렸는지가 안
+    /// 보인다. 글로 찾지 않으면 `None`. 보기를 걷는 것은 이것이 아니라 [`App::searching`] 이다.
     pub fn grep_query(&self) -> Option<(GrepIn, &str)> {
-        let q = self.filter_text.as_deref()?.strip_prefix('/')?;
-        let q = match self.grep_in {
-            GrepIn::All => q,
-            g => q.strip_prefix(g.name()).and_then(|q| q.strip_prefix(':')).unwrap_or(q),
-        };
-        Some((self.grep_in, q))
+        self.hung.as_ref()?.query()
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
@@ -2468,7 +2484,7 @@ impl App {
     /// 따른다: 그것은 "무엇을 볼지" 를 좁히는 물음이지 찾는 물음이 아니다. 칸을 Enter 로 닫아도 검색이
     /// 걸려 있는 한 그대로고, 풀면(Esc) 설정된 보기로 돌아간다 — **보기는 건드리지도 적지도 않는다.**
     pub fn searching(&self) -> bool {
-        self.grep_query().is_some()
+        matches!(self.hung, Some(Hung::Grep { .. }))
     }
 
     /// 이 줄이 **검색 덕에 선 숨은 줄**인가(moai-4x87) — 검색을 풀면 보기가 도로 가릴 줄. 목록이
@@ -2508,7 +2524,7 @@ impl App {
             }
         };
         if text.trim().is_empty() {
-            self.filter_text = None;
+            self.hung = None;
             self.site.keep = vec![true; self.site.issues.len()];
             return Ok(());
         }
@@ -2544,14 +2560,10 @@ impl App {
             wh.zone = Some(&self.zone);
         }
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
-        self.filter_text = Some(match mode {
-            Mode::Grep(_, GrepIn::All) => format!("/{text}"),
-            Mode::Grep(_, g) => format!("/{}:{text}", g.name()),
-            _ => text,
+        self.hung = Some(match mode {
+            Mode::Grep(_, scope) => Hung::Grep { text, scope: *scope },
+            _ => Hung::Filter { text, grep: filter.grep.clone().map(|q| (filter.grep_in, q)) },
         });
-        if let Mode::Grep(_, g) = mode {
-            self.grep_in = *g;
-        }
         Ok(())
     }
 
@@ -2575,7 +2587,7 @@ impl App {
     }
 
     pub fn clear_filter(&mut self) {
-        self.filter_text = None;
+        self.hung = None;
         self.site.keep = vec![true; self.site.issues.len()];
     }
 
@@ -4302,7 +4314,7 @@ impl App {
                 }
             }
             B::Grep => {
-                self.grep_was = Some((self.filter_text.clone(), self.grep_in, self.cursor));
+                self.grep_was = Some((self.hung.clone(), self.cursor));
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
             }
             B::Filter => self.mode = Mode::Filter(Input::default()),
@@ -4517,9 +4529,8 @@ impl App {
                 // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
                 let held = self.current().map(|r| self.anchor_of(&r));
                 // 검색이었는지는 **칸을 열기 전**의 것까지 본다 — 검색 칸은 치는 대로 걸어(`live`) 지금
-                // `filter_text` 가 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
-                let was = self.searching()
-                    || self.grep_was.as_ref().is_some_and(|(t, ..)| t.as_deref().is_some_and(|t| t.starts_with('/')));
+                // 걸린 거름망이 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
+                let was = self.searching() || matches!(self.grep_was, Some((Some(Hung::Grep { .. }), _)));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
@@ -4536,10 +4547,9 @@ impl App {
                 // **커서도 열기 전 자리로 간다** — 검색 칸에서는 커서를 못 옮기니 되돌린 목록은 열기 전 그 목록이고,
                 // 그 번호가 열기 전 그 줄이다. 검색을 푸는 길(`after_search`)을 타면 치는 동안 커서 밑에 섰던
                 // 줄로 가 "안 한 것" 이 아니게 되고, 되돌린 거름망(`f`)이 가린 줄을 두고 보기에 가렸다고 댄다.
-                if let (Mode::Grep(..), Some((text, g, cursor))) = (&self.mode, self.grep_was.take()) {
+                if let (Mode::Grep(..), Some((hung, cursor))) = (&self.mode, self.grep_was.take()) {
                     let held = self.current().map(|r| self.anchor_of(&r));
-                    self.filter_text = text;
-                    self.grep_in = g;
+                    self.hung = hung;
                     self.reapply();
                     self.settle(held, cursor);
                 }
@@ -5039,6 +5049,11 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 걸린 거름망의 뱃지 글 — 화면이 그리는 그 글([`draw::badge`])이다.
+    fn badge(a: &App) -> Option<String> {
+        a.hung.as_ref().map(|h| draw::badge(h, a.site.lang))
     }
 
     fn make(id: &str, kind: Kind) -> Issue {
@@ -6461,11 +6476,11 @@ mod tests {
         }
 
         // Esc 는 메뉴를 닫는 것이 먼저다 — 걸어 둔 거름망은 안 푼다.
-        a.filter_text = Some("tag=x".into());
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
         a.key(key(KeyCode::Esc));
         assert!(!menu::open(&a.chord));
-        assert_eq!(a.filter_text.as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
-        a.filter_text = None;
+        assert_eq!(badge(&a).as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
+        a.hung = None;
 
         // Bksp 는 한 층 위 — 뒤의 목록을 나가지 않는다.
         a.key(key(KeyCode::Enter));
@@ -7567,7 +7582,7 @@ mod tests {
         assert!(matches!(a.mode, Mode::Grep(..)));
         typed(&mut a, "0004");
         assert_eq!(a.mode, Mode::Browse);
-        assert_eq!(a.filter_text.as_deref(), Some("/0004"));
+        assert_eq!(badge(&a).as_deref(), Some("/0004"));
 
         // **뿌리에 그것을 품은 에픽이 서고, 걸린 줄이 그 밑에 딸려 선다**(moai-i5io) — 검색이
         // 맞힌 자리는 저절로 열린다. 들어가서 보는 목록도 같은 줄이다.
@@ -7587,11 +7602,11 @@ mod tests {
         for c in "0004".chars() {
             a.key(key(KeyCode::Char(c)));
         }
-        assert_eq!(a.filter_text.as_deref(), Some("/0004"), "치는 동안 안 걸렸다");
+        assert_eq!(badge(&a).as_deref(), Some("/0004"), "치는 동안 안 걸렸다");
         // 걸린 줄은 그것을 품은 에픽 밑에 딸려 선다(moai-i5io) — 셈은 여전히 걸린 줄 하나다.
         assert_eq!((shown(&a), a.hit_count()), (vec!["argos-0001".to_string(), "argos-0004".to_string()], 1));
         a.key(key(KeyCode::Esc));
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "Esc 가 열기 전 거름망을 못 돌렸다");
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"), "Esc 가 열기 전 거름망을 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
 
         // 붙여 넣은 글도 치는 것과 같이 거른다. 비우면 거름망이 없다.
@@ -7601,7 +7616,7 @@ mod tests {
         a.key(key(KeyCode::Backspace));
         a.key(key(KeyCode::Char('9')));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("/0009"));
+        assert_eq!(badge(&a).as_deref(), Some("/0009"));
         assert_eq!(a.grep_was, None, "Enter 로 건 뒤에도 되돌릴 자리를 들고 있다");
     }
 
@@ -7638,12 +7653,23 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("/태그:pars"));
+        assert_eq!(badge(&a).as_deref(), Some("/태그:pars"));
         assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")));
 
         // 다시 읽기 — 뱃지 글이 아니라 들고 있는 범위로 다시 짓는다.
         a.reapply();
-        assert_eq!(a.filter_text.as_deref(), Some("/태그:pars"));
+        assert_eq!(badge(&a).as_deref(), Some("/태그:pars"));
+        assert_eq!(shown(&a), ["argos-0009"]);
+
+        // 칸을 다시 열어 치다가 Esc — 열기 전 범위까지 돌아온다(`grep_was` 가 [`Hung`] 째로 든다). 다시 연 칸은
+        // 전체 범위라, 범위를 빼고 들면 `/pars` 로 돌아와 줄은 같아도 걸린 범위가 바뀐다.
+        a.key(key(KeyCode::Char('/')));
+        for c in "zz".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(shown(&a).is_empty(), "시험의 전제 — 치는 동안 안 걸렸다");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")), "Esc 가 좁힌 범위를 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0009"]);
 
         // 거름망(`f`) 칸의 Tab 은 아무 일도 안 한다.
@@ -7658,7 +7684,7 @@ mod tests {
         let mut a = app();
         a.hit("SPC f");
         typed(&mut a, "type=epic");
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"));
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
 
         // 잘못 적으면 걸리지 않고 그 자리에 남는다 — 지우고 다시 치게 하지 않는다
@@ -7667,7 +7693,7 @@ mod tests {
         typed(&mut a, "statu=todo");
         assert!(matches!(a.mode, Mode::Filter(_)), "잘못 적었는데 넘어갔다");
         assert!(a.input_error().is_some());
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
 
         // 그 거절문은 화면의 말로 선다(moai-2htt) — `query` 가 한국어로 박아 짓던 때는 영어 화면에도 한국어였다.
         // **두 말로 다 잰다**(리뷰 moai-efoc.ln9) — 처음값이 영어라 영어만 재면 말을 박아 넣어도 푸르다.
@@ -7703,7 +7729,7 @@ mod tests {
             a.hit("SPC f");
             typed(&mut a, &again);
             assert_eq!(a.mode, Mode::Browse, "댄 글을 쳤는데 다시 거절했다 — {:?}", a.input_error());
-            assert_eq!(a.filter_text.as_deref(), Some(again.as_str()));
+            assert_eq!(badge(&a).as_deref(), Some(again.as_str()));
         }
     }
 
@@ -7722,7 +7748,7 @@ mod tests {
         assert_eq!(shown(&a), ["argos-0009"], "화면의 시간대로 안 쟀다");
         a.set_zone("UTC");
         assert!(shown(&a).is_empty(), "시간대를 바꿨는데 거름망이 옛 날에 남았다 — {:?}", shown(&a));
-        assert_eq!(a.filter_text.as_deref(), Some("created=2026-10-01"), "다시 걸다가 거름망을 풀었다");
+        assert_eq!(badge(&a).as_deref(), Some("created=2026-10-01"), "다시 걸다가 거름망을 풀었다");
     }
 
     /// **값에 빈칸이 들어간다.** 띄어쓰기로 죄다 쪼개면 `grep=원자적 쓰기` 를
@@ -7755,7 +7781,7 @@ mod tests {
         typed(&mut a, "status=in-progress");
         assert!(matches!(a.mode, Mode::Filter(_)), "오타인데 걸렸다");
         assert!(a.input_error().is_some_and(|e| e.contains("칸")), "{:?}", a.input_error());
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
     }
 
     /// raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **글을 받는 중에도** 받아야
@@ -7820,9 +7846,9 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Char('/')));
         typed(&mut a, "0004");
-        assert!(a.filter_text.is_some());
+        assert!(a.hung.is_some());
         a.key(key(KeyCode::Esc));
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
         assert!(!a.quit);
         assert_eq!(shown(&a).len(), 3);
     }
@@ -7960,7 +7986,7 @@ mod tests {
         let mut more = a.site.issues.clone();
         more.push(make("argos-0007", Kind::Epic));
         a.adopt(more);
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"));
         assert_eq!(shown(&a).len(), 3, "거름망이 새 자료에 다시 걸리지 않았다");
     }
 
@@ -8840,7 +8866,7 @@ mod tests {
         assert_eq!(a.site.issues.len(), 2, "쓰기가 안 닿았다");
         assert_eq!((a.site.path.clone(), a.cursor), (path, cursor), "가려진 줄을 찾아 자리를 옮겼다");
         assert_eq!(on(&a).as_deref(), Some("argos-0001"));
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다"));
     }
 
