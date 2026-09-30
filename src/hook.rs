@@ -7367,8 +7367,9 @@ fn writes_text(verbs: &[&str]) -> bool {
 /// 비출지([`korean_write`])와, 영어로 부른 화면에 한글이 남았는지를 세는 시험
 /// ([`tests::the_loaded_text_speaks_the_language_it_is_handed`]). 시험이 제 자를 따로 두던 판은
 /// 음절만 봐 `ㄱ`·`ㅅ` 만 남은 줄을 못 보고 푸른 채였다 — 재는 자가 도구보다 좁으면 그 시험은
-/// 지키려던 것을 안 지킨다.
-fn hangul(t: &str) -> bool {
+/// 지키려던 것을 안 지킨다. 거르개 거절문이 영어 화면에 한글을 안 흘리는지를 재는 시험
+/// (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`, moai-2htt)도 이것으로 잰다.
+pub(crate) fn hangul(t: &str) -> bool {
     t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'))
 }
 

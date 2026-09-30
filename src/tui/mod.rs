@@ -2562,8 +2562,9 @@ impl App {
             }
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
-        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
-        Filter::build(raw)
+        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
+        // 화면의 말로 편다(moai-2htt).
+        Filter::build(raw).map_err(|e| crate::view::bad_filter(self.site.lang, &e))
     }
 
     pub fn clear_filter(&mut self) {
@@ -7660,6 +7661,14 @@ mod tests {
         assert!(matches!(a.mode, Mode::Filter(_)), "잘못 적었는데 넘어갔다");
         assert!(a.input_error().is_some());
         assert_eq!(a.filter_text, None);
+
+        // 그 거절문은 화면의 말로 선다(moai-2htt) — `query` 가 한국어로 박아 짓던 때는 영어 화면에도 한국어였다.
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::En;
+        a.hit("SPC f");
+        typed(&mut a, "statu=todo");
+        let said = a.input_error().expect("잘못 적었는데 거절문이 없다");
+        assert!(said.contains("`statu`") && !crate::hook::hangul(&said), "{said}");
     }
 
     /// **값에 빈칸이 들어간다.** 띄어쓰기로 죄다 쪼개면 `grep=원자적 쓰기` 를

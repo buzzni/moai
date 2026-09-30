@@ -3035,6 +3035,54 @@ pub fn fallen_place(lang: Lang, said: &str) -> String {
     format!("{said} — {}", say(lang, "sheet.fallen_place"))
 }
 
+/// 거르개가 값을 거절한 글([`crate::query::BadFilter`], moai-2htt). `show` 의 목록과 `--removed`, 탐색기의
+/// 거름망 프롬프트가 이것 하나로 편다 — 같은 값을 세 자리가 같은 말로 거절한다.
+///
+/// **갈래마다 제 `say` 를 적는다**([`no_such_column`] 과 같은 까닭). 두 줄짜리는 여기서 잇는다 — 실린 글은
+/// 한 줄이어야 한다(`i18n::tests::every_translation_keeps_the_places_english_marks`).
+pub fn bad_filter(lang: Lang, why: &crate::query::BadFilter) -> String {
+    use crate::query::{BadFilter, KEYS, Once};
+    let two = |head: String, how: String| format!("{head}\n      {how}");
+    match why {
+        BadFilter::Twice { field, a, b } => {
+            let v = [("a", a.as_str()), ("b", b.as_str())];
+            let head = match field {
+                Once::Status => fill(say(lang, "refuse.filter_twice_status"), &v),
+                Once::Epic => fill(say(lang, "refuse.filter_twice_epic"), &v),
+                Once::Milestone => fill(say(lang, "refuse.filter_twice_milestone"), &v),
+                Once::Parent => fill(say(lang, "refuse.filter_twice_parent"), &v),
+                Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
+                Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
+            };
+            two(head, fill(say(lang, "refuse.filter_twice_how"), &[("flag", field.flag()), ("a", a), ("b", b)]))
+        }
+        BadFilter::DoneOutside { asked } => {
+            let v = [("done", crate::config::DONE), ("asked", asked.as_str())];
+            two(
+                fill(say(lang, "refuse.filter_done_outside"), &v),
+                fill(say(lang, "refuse.filter_done_outside_how"), &v),
+            )
+        }
+        BadFilter::Endless(raw) => fill(say(lang, "refuse.filter_endless"), &[("raw", raw)]),
+        BadFilter::Backwards(raw) => fill(say(lang, "refuse.filter_backwards"), &[("raw", raw)]),
+        BadFilter::NotATime(raw) => fill(say(lang, "refuse.filter_not_a_time"), &[("raw", raw)]),
+        BadFilter::NoTime => say(lang, "refuse.filter_no_time").to_string(),
+        BadFilter::NotAPair(raw) => {
+            fill(say(lang, "refuse.filter_not_a_pair"), &[("raw", raw), ("keys", &KEYS.join(", "))])
+        }
+        BadFilter::NoSuchKey(key) => two(
+            fill(say(lang, "refuse.filter_no_key"), &[("key", key)]),
+            fill(say(lang, "refuse.filter_keys"), &[("keys", &KEYS.join(", "))]),
+        ),
+        BadFilter::NotDays(raw) => fill(say(lang, "refuse.filter_not_days"), &[("raw", raw)]),
+        BadFilter::NotAPriority(raw) => fill(
+            say(lang, "refuse.filter_not_a_priority"),
+            &[("raw", raw), ("max", &crate::model::MAX_PRIORITY.to_string())],
+        ),
+        BadFilter::NotAKind(said) => said.clone(),
+    }
+}
+
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
 ///
 /// **두 거절은 잰 것이 다르다.** 설정만 보고 거절한 자리(`add -s`·`mv <칸>`)는 "그런 칸이
@@ -3268,6 +3316,51 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 한국어로 박아 지어, 영어 화면과
+    /// `--json` 의 `error` 에도 한국어가 섰다. 갈래를 다 그려 본다 — 영어에 한글이 남거나, 자리 이름이
+    /// 글과 어긋나거나(`fill` 의 잡는 자가 터진다), 고쳐 칠 명령이 빠지면 여기서 붉어진다.
+    #[test]
+    fn a_bad_filter_speaks_the_language_it_is_handed() {
+        use crate::query::{BadFilter, Once};
+        let twice = |field| BadFilter::Twice { field, a: "todo".into(), b: "review".into() };
+        let all = [
+            twice(Once::Status),
+            twice(Once::Epic),
+            twice(Once::Milestone),
+            twice(Once::Parent),
+            twice(Once::Priority),
+            twice(Once::Assignee),
+            BadFilter::DoneOutside { asked: "review".into() },
+            BadFilter::Endless("..".into()),
+            BadFilter::Backwards("2026-09-03..2026-09-02".into()),
+            BadFilter::NotATime("yesterday".into()),
+            BadFilter::NoTime,
+            BadFilter::NotAPair("todo".into()),
+            BadFilter::NoSuchKey("statu".into()),
+            BadFilter::NotDays("x".into()),
+            BadFilter::NotAPriority("9".into()),
+        ];
+        for why in &all {
+            let (en, ko) = (bad_filter(Lang::En, why), bad_filter(Lang::Ko, why));
+            assert!(!crate::hook::hangul(&en), "영어 화면에 한국어가 섰다 — {en}");
+            assert!(crate::hook::hangul(&ko), "한국어를 골랐는데 한국어가 아니다 — {ko}");
+            assert!(!en.contains('{') && !ko.contains('{'), "안 채운 자리가 남았다 — {en} / {ko}");
+        }
+        // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
+        for lang in [Lang::En, Lang::Ko] {
+            let said = |why: &BadFilter| bad_filter(lang, why);
+            assert!(said(&twice(Once::Status)).contains("`-s todo,review`"), "{}", said(&twice(Once::Status)));
+            assert!(said(&twice(Once::Assignee)).contains("`-a todo,review`"));
+            assert!(said(&BadFilter::DoneOutside { asked: "review".into() }).contains("-s review,done"));
+            assert!(said(&BadFilter::NoSuchKey("statu".into())).contains("status, tag"));
+            assert!(said(&BadFilter::NotAPair("todo".into())).contains("status, tag"));
+            assert!(said(&BadFilter::NotAPriority("9".into())).contains(&crate::model::MAX_PRIORITY.to_string()));
+        }
+        // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
+        let kind = "x".parse::<Kind>().unwrap_err();
+        assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
     }
 
     /// **고를 것이 있는 거절은 고를 것을 댄다**(moai-ivt9). 글이 말묶음으로 가면서 자료 쪽

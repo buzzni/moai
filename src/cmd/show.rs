@@ -257,7 +257,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         deferred: a.deferred,
         filter: a.filter,
     })
-    .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    .map_err(|e| Fail::coded(view::bad_filter(ctx.lang(), &e), super::code::BAD_FILTER))?;
     resolve_me(&mut filter.assignee, ctx, &repo.root)?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
@@ -492,7 +492,8 @@ fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) ->
     let mut stray_filter = false;
     for one in items.iter().filter(|one| !one.trim().is_empty()) {
         let mut probe = Raw::default();
-        crate::query::desugar(&mut probe, one).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+        crate::query::desugar(&mut probe, one)
+            .map_err(|e| Fail::coded(view::bad_filter(ctx.lang(), &e), super::code::BAD_FILTER))?;
         match probe.since.pop() {
             Some(v) => since.push(v),
             None => stray_filter = true,
@@ -502,7 +503,8 @@ fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) ->
         return Err(refuse(flag));
     }
     // 때를 읽는 자는 목록의 `--since` 와 한 벌이다(`Filter::build`) — 날로 친 때는 읽는 사람의 날이다.
-    let timed = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    let timed = Filter::build(Raw { since, ..Raw::default() })
+        .map_err(|e| Fail::coded(view::bad_filter(ctx.lang(), &e), super::code::BAD_FILTER))?;
     let zone = timed.needs_zone().then(|| ctx.zone());
     let entries = repo.journal_of_kind("rm");
     let rows = crate::query::removed(&entries, &timed.updated, zone);

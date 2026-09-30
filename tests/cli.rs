@@ -4877,6 +4877,38 @@ fn show_removed_lists_what_rm_took_out() {
     assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
 }
 
+/// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 거절문을 한국어로 박아 지어, 아무것도
+/// 안 고른 기계(영어)의 화면과 `--json` 의 `error` 에도 한국어가 섰다. 목록과 `--removed` 가 같은 자로
+/// 거절하니 둘 다 잰다 — 고쳐 칠 명령은 말과 무관하게 그대로 선다.
+#[test]
+fn a_filter_refusal_speaks_the_chosen_language() {
+    let s = init("filterlang");
+    let cases: [(&[&str], &str); 4] = [
+        (&["show", "-s", "todo", "-s", "review"], "`-s todo,review`"),
+        (&["show", "--filter", "statu=todo"], "`statu`"),
+        (&["show", "--since", ".."], "`..`"),
+        (&["show", "--removed", "--filter", "since"], "`since`"),
+    ];
+    for (args, names) in cases {
+        for json in [false, true] {
+            let mut args = args.to_vec();
+            if json {
+                args.push("--json");
+            }
+            for lang in [None, Some("en"), Some("ko")] {
+                let mut cmd = staged(&args);
+                with_lang(&mut cmd, lang);
+                let out = cmd.current_dir(s.path()).output().unwrap();
+                let err = String::from_utf8_lossy(&out.stderr);
+                assert!(!out.status.success(), "{args:?} 를 받았다 — {err}");
+                assert!(err.contains(names), "{args:?} ({lang:?}) 가 무엇을 거절했는지 안 댔다 — {err}");
+                assert!(!json || err.contains(r#""code":"bad_filter""#), "{args:?} — {err}");
+                assert_eq!(hangul(&err), lang == Some("ko"), "{args:?} ({lang:?}) 가 고른 말로 안 섰다 — {err}");
+            }
+        }
+    }
+}
+
 /// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
 /// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
 #[test]
