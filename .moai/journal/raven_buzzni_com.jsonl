@@ -2184,3 +2184,13 @@
 {"ts":"2026-09-30T03:14:36Z","id":"moai-8ocx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-wcy8 로 펼쳤다 (이슈 3건)"}
 {"ts":"2026-09-30T03:14:58Z","id":"moai-hmcx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/fable-5.1 tokens=199598 (high — moai-hmcx·moai-8ocx 펼침 초안, 코드 읽기만)"}
 {"ts":"2026-09-30T03:14:58Z","id":"moai-8ocx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/fable-5.1 (high — moai-hmcx 와 한 번에 펼침 초안, 토큰은 moai-hmcx 에 적었다)"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-86qo","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"An epic row duplicated with different milestones flips its members milestone by file order"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-illd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init prints \"make it writable\" after a link refusal that already said why"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-m2f6","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init reports a dotfile append as unwritable when only its new sync_all fails, and asks for lines already appended (review moai-ydm7.exk)"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-jegn","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Journal union rules miss a linked .moai/journal directory or journal file"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-oicd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Dotfile rule checks infer from the filesystem where asking the VCS would be exact"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-z7kj","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Mirrored rule paths drop names git cannot match as written"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-3q30","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"A project dir on a dead mount still hangs the overview before any git call"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-oxq4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Timed-out notice asks leak threads in the long-lived TUI"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-t6oz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Board/Stop session marks are gated by a bare path.exists() anyone can squat"}
+{"ts":"2026-09-30T03:40:18Z","id":"moai-tp4u","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"hook: find -execdir relative writes lost after cd, outer wrapper, or ancestor start"}
