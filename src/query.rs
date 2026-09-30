@@ -61,13 +61,14 @@ pub struct Where<'a> {
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
     pub(crate) folded: BTreeSet<&'a str>,
-    /// 이슈 id → 그 이슈의 노트 글([`Notes`], moai-efoc.zyc). `-g` 가 노트까지 보는 재료다.
+    /// 이슈 id → 그 이슈의 노트 글([`NoteView`], moai-efoc.zyc). `-g` 가 노트까지 보는 재료다.
     ///
     /// **여기는 읽지 않는다 — 받는다**(2026-09-30 사용자 결정). 노트는 저널에 살고 이 모듈은 I/O 없는
-    /// 순수 함수라, 저널을 읽는 것은 `cmd::show` 이고 맞는지 가르는 것은 여기다. 안 실렸으면
-    /// (`None`, 탐색기와 `Where::default`) 노트를 안 본다 — 없는 노트와 안 읽은 노트를 가를 일이 이
-    /// 모듈에는 없다. 상태 계산이 아니라 글 찾기라 "저널은 상태 계산에 안 읽힌다" 와 안 부딪친다.
-    pub notes: Option<&'a Notes>,
+    /// 순수 함수라, 저널을 읽는 것은 `cmd::show` 와 탐색기(`tui::Ground::read_notes`, moai-wcy8.vip)고
+    /// 맞는지 가르는 것은 여기다. 안 실렸으면(`None`, `Where::default`) 노트를 안 본다 — 없는 노트와
+    /// 안 읽은 노트를 가를 일이 이 모듈에는 없다. 상태 계산이 아니라 글 찾기라 "저널은 상태 계산에 안
+    /// 읽힌다" 와 안 부딪친다.
+    pub notes: Option<NoteView<'a>>,
     /// 읽는 사람의 시간대(moai-efoc). `YYYY-MM-DD` 로 친 때의 끝([`End::Wall`])을 그 사람의 날로 재는
     /// 재료다 — 마일스톤 기한이 `report::Dues::split` 에서 받는 것과 같은 값이다. **받는다**: 시간대를 푸는
     /// 것은 명령 층이고, 날로 친 끝이 없으면 풀지도 않는다([`Filter::needs_zone`]). 안 실렸으면(`None`)
@@ -78,6 +79,41 @@ pub struct Where<'a> {
 /// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
 /// **이슈의 필드가 아니다** — 스냅샷에 안 적히고 저널에서 읽힌 값이라, 줄(`Issue`) 곁에 따로 든다.
 pub type Notes = BTreeMap<String, Vec<String>>;
+
+/// [`Where::notes`] 가 받은 노트 — **이미 접었는가**를 함께 든다(리뷰 moai-wcy8.rbj).
+///
+/// 거름망은 노트를 [`Filter::build`] 가 `q` 를 접는 것과 같은 `to_lowercase` 로 접어 견준다. 그 접기를 언제
+/// 하느냐가 부르는 쪽마다 다르다 — 한 번 거르고 끝나는 CLI(`show -g`)는 숨길 줄의 노트까지 미리 접을 까닭이
+/// 없고, 키마다 다시 거르는 탐색기는 한 번 접어 두어야 한다. 이 저장소의 노트 4.4MB 를 키마다 접으면
+/// release 로 85ms 가 들고, 접어 둔 것에서 찾으면 1ms 도 안 든다. 어느 쪽이든 답은 같다.
+#[derive(Debug, Clone, Copy)]
+pub enum NoteView<'a> {
+    /// 받은 글 그대로 — 견줄 때 그 줄의 노트만 접는다.
+    Raw(&'a Notes),
+    /// [`fold_notes`] 로 이미 접은 글.
+    Folded(&'a Notes),
+}
+
+/// 노트를 거름망의 자로 **한 번** 접는다 — [`NoteView::Folded`] 가 드는 꼴이다. 접는 법은 [`Filter::build`] 가
+/// `q` 를 접는 것과 같은 `to_lowercase` 하나다.
+pub fn fold_notes(notes: &Notes) -> Notes {
+    notes.iter().map(|(id, texts)| (id.clone(), texts.iter().map(|t| t.to_lowercase()).collect())).collect()
+}
+
+/// 노트 글에서 `q` 가 든 **줄**(moai-wcy8.3v9) — 탐색기 상세가 노트에서 걸린 줄이 왜 걸렸는지 그리는
+/// 재료다. `q` 는 친 그대로 받아 여기서 접는다 — [`Filter::build`] 와 같은 `to_lowercase` 라, 거름망이
+/// 노트로 건 줄([`Where::noted`])에는 여기서도 걸린 줄이 선다. 거름망은 노트를 통째로 견주지만, 탐색기의
+/// 검색 칸은 줄바꿈을 빈칸으로 받으므로 친 글이 두 줄에 걸칠 일이 없다.
+///
+/// 빈칸뿐인 글은 아무 줄도 안 낸다 — 칠하는 쪽(`tui::draw::mark`)도 그런 글은 안 칠한다. 모든 노트 줄을
+/// 늘어놓는 것은 "왜 걸렸나" 의 답이 아니다.
+pub fn noted_lines<'n>(texts: &'n [String], q: &str) -> Vec<&'n str> {
+    if q.trim().is_empty() {
+        return Vec::new();
+    }
+    let q = q.to_lowercase();
+    texts.iter().flat_map(|t| t.lines()).filter(|l| l.to_lowercase().contains(&q)).collect()
+}
 
 /// [`Where::lines`] 의 그릇 — 지은 것이거나, 처음 물을 때 지을 줄이다.
 ///
@@ -149,9 +185,16 @@ impl<'a> Where<'a> {
     }
 
     /// 그 줄의 노트 가운데 `q` 가 든 것이 있는가(moai-efoc.zyc). `q` 는 이미 소문자다([`Filter::build`]).
-    /// 노트가 안 실렸으면 거짓이다 — [`Where::notes`].
+    /// 노트가 안 실렸으면 거짓이다 — [`Where::notes`]. 받은 글 그대로면 여기서 접고, 접어 둔 것이면 그대로
+    /// 찾는다([`NoteView`]).
     pub fn noted(&self, i: &Issue, q: &str) -> bool {
-        self.notes.and_then(|n| n.get(&i.id)).is_some_and(|texts| texts.iter().any(|t| t.to_lowercase().contains(q)))
+        match self.notes {
+            None => false,
+            Some(NoteView::Raw(n)) => {
+                n.get(&i.id).is_some_and(|texts| texts.iter().any(|t| t.to_lowercase().contains(q)))
+            }
+            Some(NoteView::Folded(n)) => n.get(&i.id).is_some_and(|texts| texts.iter().any(|t| t.contains(q))),
+        }
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
@@ -220,13 +263,13 @@ impl<'a> Where<'a> {
 
 /// 글로 찾을 때 **어디를 보는가**(moai-kojj). TUI 검색 칸의 Tab 이 이 차례로 돈다.
 ///
-/// `All` 은 넷을 다 본다 — CLI 의 `-g` 도 이것이다. 한때 제목·본문만 봤는데, 그러면 id
+/// `All` 은 다른 범위를 다 본다 — CLI 의 `-g` 도 이것이다. 한때 제목·본문만 봤는데, 그러면 id
 /// 조각이나 태그로 찾은 것이 `All` 에서는 안 걸리고 좁힌 범위에서만 걸린다. 좁힌 것이
 /// 넓은 것보다 더 찾으면 "전체" 라는 이름이 거짓말이 된다.
 ///
-/// **노트는 `All` 만 본다**(moai-efoc.zyc, [`GrepIn::sees_notes`]) — 노트가 실렸을 때만([`Where::notes`]).
-/// 노트만 보는 범위는 아직 없다: Tab 이 도는 범위를 늘리면 탐색기가 바뀌고, 탐색기는 노트를 아직 안
-/// 싣는다(moai-wcy8 이 연다).
+/// **노트는 `All` 과 `Note` 가 본다**(moai-efoc.zyc·moai-wcy8.3v9, [`GrepIn::sees_notes`]) — 노트가 실렸을
+/// 때만([`Where::notes`]). 노트는 줄의 필드가 아니라 저널에서 읽힌 글이라, 실은 쪽(CLI `show`·탐색기의
+/// 거름망, [`Filter::sees_notes`])이 없으면 두 범위 다 노트로는 아무것도 못 찾는다.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum GrepIn {
     #[default]
@@ -235,10 +278,13 @@ pub enum GrepIn {
     Title,
     Tag,
     Body,
+    /// 노트만 — `moai note` 의 글과 칸 옮김의 `-m`(`model::note_of`). **맨 끝에 선다**: 줄에 적힌
+    /// 넷을 다 돈 뒤에 저널로 넘어간다(2026-09-30 사용자 결정, moai-wcy8).
+    Note,
 }
 
 impl GrepIn {
-    const ORDER: [GrepIn; 5] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body];
+    const ORDER: [GrepIn; 6] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::Note];
 
     /// 화면에 적는 이름. 거름망 뱃지의 `/id:…` 앞머리이기도 하다.
     pub fn name(self) -> &'static str {
@@ -248,6 +294,7 @@ impl GrepIn {
             GrepIn::Title => "제목",
             GrepIn::Tag => "태그",
             GrepIn::Body => "본문",
+            GrepIn::Note => "노트",
         }
     }
 
@@ -281,10 +328,11 @@ impl GrepIn {
         matches!(self, GrepIn::All | GrepIn::Body)
     }
 
-    /// 노트를 이 범위가 보는가(moai-efoc.zyc). 글은 줄 곁에 따로 오므로 [`GrepIn::hits`] 가 아니라
-    /// [`Filter::matches`] 가 [`Where::noted`] 와 함께 묻는다.
+    /// 노트를 이 범위가 보는가(moai-efoc.zyc·moai-wcy8.3v9). 글은 줄 곁에 따로 오므로 [`GrepIn::hits`] 가
+    /// 아니라 [`Filter::matches`] 가 [`Where::noted`] 와 함께 묻는다. 탐색기 상세가 걸린 노트 줄을 그릴지도
+    /// 이것으로 가른다 — 칠할 자리를 가르는 `sees_*` 넷과 같은 까닭이다.
     pub fn sees_notes(self) -> bool {
-        matches!(self, GrepIn::All)
+        matches!(self, GrepIn::All | GrepIn::Note)
     }
 
     /// `q` 는 이미 소문자다([`Filter::build`]).
@@ -474,6 +522,12 @@ impl Filter {
             ideas,
             deferred,
         })
+    }
+
+    /// 노트를 봐야 답하는가 — 글로 찾고, 그 범위가 노트를 본다([`GrepIn::sees_notes`]). 없으면 부르는 쪽이
+    /// 저널을 풀지 않는다(탐색기의 `App::apply`, 리뷰 moai-wcy8.rbj) — [`Filter::needs_zone`] 과 같은 결이다.
+    pub fn sees_notes(&self) -> bool {
+        self.grep.is_some() && self.grep_in.sees_notes()
     }
 
     /// 읽는 사람의 시간대가 있어야 답하는가 — `YYYY-MM-DD` 로 친 때가 있다([`End::Wall`]). 없으면 부르는 쪽이
@@ -1385,9 +1439,10 @@ mod tests {
                 assert_eq!(hit(&f, &i), g == only, "{} 범위가 {q} 에 틀렸다", g.name());
             }
         }
-        // 차례는 전체 → id → 제목 → 태그 → 본문 → 전체, 거꾸로도 돈다.
+        // 차례는 전체 → id → 제목 → 태그 → 본문 → 노트 → 전체, 거꾸로도 돈다. 노트 범위가 제 글을 찾는 것은
+        // 노트를 실어야 재므로 `grep_sees_the_notes_it_is_handed_in_the_whole_and_note_scopes` 가 본다.
         let mut g = GrepIn::All;
-        for want in [GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::All] {
+        for want in [GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::Note, GrepIn::All] {
             g = g.next();
             assert_eq!(g, want);
             assert_eq!(g.prev().next(), g);
@@ -1721,24 +1776,68 @@ mod tests {
         );
     }
 
-    /// **`-g` 는 실린 노트까지 본다**(moai-efoc.zyc) — 전체 범위만. 노트가 안 실렸으면(탐색기) 안 본다.
+    /// **`-g` 는 실린 노트까지 본다**(moai-efoc.zyc) — 전체 범위와 노트 범위만(moai-wcy8.3v9). 노트가 안
+    /// 실렸으면 안 본다. 노트 범위는 노트**만** 본다 — 제목에 든 글로는 안 걸린다. 받은 글 그대로 실든
+    /// 미리 접어 싣든([`NoteView`], 리뷰 moai-wcy8.rbj) 답이 같다.
     #[test]
-    fn grep_sees_the_notes_it_is_handed_in_the_whole_scope_only() {
+    fn grep_sees_the_notes_it_is_handed_in_the_whole_and_note_scopes() {
         let all = vec![issue("a-0001", "todo", &[]), issue("a-0002", "todo", &[])];
         let c = cfg();
         let notes: Notes = [("a-0002".to_string(), vec!["사용자 결정: 둘째 길 (Recommended)".to_string()])].into();
+        let folded = fold_notes(&notes);
         let mut wh = Where::of(&all, &c);
         let pick = |wh: &Where, grep_in: GrepIn, q: &str| {
             let f = Filter::build(Raw { grep: Some(q.into()), grep_in, ..Raw::default() }).unwrap();
             all.iter().filter(|i| f.matches(i, NOW, wh)).map(|i| i.id.as_str()).collect::<Vec<_>>()
         };
         assert!(pick(&wh, GrepIn::All, "둘째 길").is_empty(), "안 실린 노트를 봤다");
-        wh.notes = Some(&notes);
-        assert_eq!(pick(&wh, GrepIn::All, "둘째 길"), ["a-0002"], "실린 노트를 안 봤다");
-        assert_eq!(pick(&wh, GrepIn::All, "recommended"), ["a-0002"], "노트는 대소문자를 안 가린다");
-        assert!(pick(&wh, GrepIn::Title, "둘째 길").is_empty(), "좁힌 범위가 노트를 봤다");
-        // 제목에 걸린 줄은 노트 없이도 그대로 걸린다.
-        assert_eq!(pick(&wh, GrepIn::All, "a-0001 제목"), ["a-0001"]);
+        for view in [NoteView::Raw(&notes), NoteView::Folded(&folded)] {
+            wh.notes = Some(view);
+            assert_eq!(pick(&wh, GrepIn::All, "둘째 길"), ["a-0002"], "실린 노트를 안 봤다 — {view:?}");
+            assert_eq!(pick(&wh, GrepIn::All, "RECOMMENDED"), ["a-0002"], "노트는 대소문자를 안 가린다 — {view:?}");
+            assert!(pick(&wh, GrepIn::Title, "둘째 길").is_empty(), "좁힌 범위가 노트를 봤다 — {view:?}");
+            assert_eq!(pick(&wh, GrepIn::Note, "둘째 길"), ["a-0002"], "노트 범위가 노트를 안 봤다 — {view:?}");
+            // 제목에 걸린 줄은 노트 없이도 그대로 걸린다. 노트 범위는 제목을 안 본다.
+            assert_eq!(pick(&wh, GrepIn::All, "a-0001 제목"), ["a-0001"]);
+            assert!(pick(&wh, GrepIn::Note, "a-0001 제목").is_empty(), "노트 범위가 제목을 봤다 — {view:?}");
+        }
+    }
+
+    /// **상세가 그리는 것은 노트에서 걸린 줄뿐이고, 그 줄은 거름망이 노트로 건 줄에 늘 선다**(moai-wcy8.3v9) —
+    /// 친 그대로 받아 거름망과 같이 접는다. 빈칸뿐인 글은 아무 줄도 안 낸다.
+    ///
+    /// **거름망과 나란히 잰다**(리뷰 moai-wcy8.rbj) — 둘 가운데 하나만 접는 법이 바뀌면(`draw::mark` 의 `ς`→`σ`,
+    /// 앞뒤 빈칸 걷기) 노트로 걸린 줄의 상세가 빈다. 글자째 적은 답만 보던 판은 그 어긋남에 안 붉어졌다. 두
+    /// 글자로 접히는 `İ` 와 낱말 끝 `Σ` 를 줄 끝과 줄 가운데에 둔다 — 통째로 접을 때와 줄마다 접을 때가
+    /// 갈리면 여기서 선다.
+    #[test]
+    fn the_note_lines_that_matched_are_the_lines_the_filter_saw() {
+        let texts = vec![
+            "첫 줄\n사용자 결정: 둘째 길 (Recommended)\n끝".to_string(),
+            "둘째 노트의 한 줄".to_string(),
+            "ΟΔΟΣ\nİstanbul ΟΔΟΣ ΕΝΑ".to_string(),
+        ];
+        assert_eq!(noted_lines(&texts, "RECOMMENDED"), ["사용자 결정: 둘째 길 (Recommended)"]);
+        assert_eq!(noted_lines(&texts, "둘째"), ["사용자 결정: 둘째 길 (Recommended)", "둘째 노트의 한 줄"]);
+        assert!(noted_lines(&texts, "없는 말").is_empty());
+        assert!(noted_lines(&texts, "  ").is_empty(), "빈칸으로 모든 줄을 냈다");
+
+        let all = vec![issue("a-0001", "todo", &[])];
+        let c = cfg();
+        let notes: Notes = [("a-0001".to_string(), texts.clone())].into();
+        let folded = fold_notes(&notes);
+        let mut wh = Where::of(&all, &c);
+        wh.notes = Some(NoteView::Folded(&folded));
+        // 줄바꿈을 든 글은 안 잰다 — 탐색기의 검색 칸은 그것을 빈칸으로 받는다([`noted_lines`]).
+        for q in ["recommended", "둘째", "없는 말", "οδος", "οδοσ", "ΟΔΟΣ", "i̇stanbul", "İSTANBUL", "ος ενα"]
+        {
+            let f = Filter::build(Raw { grep: Some(q.into()), grep_in: GrepIn::Note, ..Raw::default() }).unwrap();
+            assert_eq!(
+                f.matches(&all[0], NOW, &wh),
+                !noted_lines(&texts, q).is_empty(),
+                "거름망과 상세가 {q:?} 에 다른 답을 냈다"
+            );
+        }
     }
 
     /// **목록의 기본 차례는 급한 것 → id 다** — 차례를 고르지 않은 [`page`] 가 [`display_order`] 와 같다.

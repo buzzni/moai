@@ -929,7 +929,8 @@ impl Menu {
 pub enum Prompt {
     Apply,
     Cancel,
-    /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문. 다른 칸은 안 쓴다.
+    /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
+    /// 다른 칸은 안 쓴다.
     NextScope,
     PrevScope,
 }

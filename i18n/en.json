@@ -427,6 +427,7 @@
   "tui.about.started": "started",
   "tui.about.ended": "ended",
   "tui.about.commits": "commits",
+  "tui.about.notes": "matching notes",
   "tui.block.missing": "dangling",
   "tui.block.missing_text": "! {id}  no such issue, so it does not block",
   "tui.block.done": "cleared",
