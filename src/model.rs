@@ -745,6 +745,16 @@ impl JournalEntry {
             ..Self::base("rm", id.unwrap_or(""), at, by)
         }
     }
+
+    /// **이슈를 지운 줄인가** — `rm` 가운데 제목을 든 것([`JournalEntry::removed`]). 제목 없는 `rm` 은 못
+    /// 읽는 줄을 지운 것이라([`JournalEntry::removed_line`]) 그 id 의 이슈는 멀쩡히 설 수 있다.
+    ///
+    /// **가르는 자는 여기 하나다**(moai-7dmq) — 상세의 이력(`view::entry`)이 "삭제" 와 "못 읽는 줄 삭제" 를
+    /// 가르는 것과 `moai show --removed` 가 지운 이슈를 고르는 것이 같은 자를 쓴다. 둘로 두면 한쪽만
+    /// 바뀌는 날 이력은 "삭제" 라 대는데 `--removed` 에는 안 서는 줄이 생긴다.
+    pub fn removes_issue(&self) -> bool {
+        self.kind == "rm" && self.title.is_some()
+    }
 }
 
 // ── 일한 것 ────────────────────────────────────────────────────────────

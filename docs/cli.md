@@ -349,6 +349,7 @@ Options:
       --raw                  Print the body as it is in the file, not rendered
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
+      --removed              Removed issues, from the journal (see below)
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -415,14 +416,26 @@ Order and paging:
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
@@ -904,6 +917,7 @@ Options:
       --raw                  Print the body as it is in the file, not rendered
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
+      --removed              Removed issues, from the journal (see below)
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -970,14 +984,26 @@ Order and paging:
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
@@ -1116,6 +1142,7 @@ Options:
       --raw                  Print the body as it is in the file, not rendered
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
+      --removed              Removed issues, from the journal (see below)
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1182,14 +1209,26 @@ Order and paging:
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
@@ -1328,6 +1367,7 @@ Options:
       --raw                  Print the body as it is in the file, not rendered
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
+      --removed              Removed issues, from the journal (see below)
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1394,14 +1434,26 @@ Order and paging:
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
@@ -1561,6 +1613,7 @@ Options:
       --raw                  Print the body as it is in the file, not rendered
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
+      --removed              Removed issues, from the journal (see below)
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1627,14 +1680,26 @@ Order and paging:
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json

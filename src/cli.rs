@@ -960,14 +960,26 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   is deferred, and no flag leaves deferred rows out.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
-  leaves no row), a note (`moai note` writes the journal, not the row), a
-  row whose derived value changed without a write of its own (a group's
-  column, an inherited epic) and a row merged in with an older stamp. A
-  stamp moai cannot read (fractions, an offset) falls in no time range. For
-  a complete copy, pull the whole list and compare row by row.
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: --removed lists the issues `moai rm` took out, oldest first,
+  read from the journal beside the tracker - other worktrees are not
+  overlaid, and `rm --line` removed an unreadable line, not an issue.
+  With --since, those removed at or after it. --json gives the journal
+  lines as they are - the shape of `journal` in `moai show <id> --json`.
+  It lays the history out and holds it against nothing: an id created
+  again after its removal still stands there, and the snapshot says
+  whether it lives now. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
 
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
@@ -995,6 +1007,12 @@ pub struct ShowArgs {
     /// Print an epic back as `add --from` markdown
     #[arg(long)]
     pub as_plan: bool,
+
+    // 거르개 머리글 밑에 안 두는 까닭 — 무엇을 거르는 말이 아니라 **다른 목록**(저널의 `rm` 줄)을 고르는
+    // 말이다(moai-7dmq). 받는 거르개도 `--since` 하나라, 그 머리글 밑에 서면 나머지도 받는 줄로 읽힌다.
+    /// Removed issues, from the journal (see below)
+    #[arg(long)]
+    pub removed: bool,
 
     #[command(flatten)]
     pub worktree: WorktreeArg,

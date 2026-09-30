@@ -62,6 +62,13 @@ fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
 
 /// 목록 자리에서만 뜻이 있는 플래그가 왔는가. 온 것 중 첫 이름을 돌려준다.
 fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
+    given(a).into_iter().find_map(|(given, name)| given.then_some(name))
+}
+
+/// 거르개 플래그마다 (왔는가, 이름). **목록은 여기 하나다** — [`first_given`] 과 `--removed` 의 거절
+/// ([`removed`])이 같이 읽는다. 둘로 적으면 거르개를 더하는 날 한쪽만 알아, `--removed` 가 새 거르개를
+/// 말없이 먹는다.
+fn given(a: &crate::cli::FilterArgs) -> [(bool, &'static str); 17] {
     [
         (!a.status.is_empty(), "-s"),
         (!a.tag.is_empty(), "-t"),
@@ -84,8 +91,6 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
         // 그대로 내고, 부르는 쪽은 그 마일스톤에 든 것이라고 믿는다.
         (!a.milestone.is_empty(), "--milestone"),
     ]
-    .into_iter()
-    .find_map(|(given, name)| given.then_some(name))
 }
 
 /// 차례·쪽 플래그([`crate::cli::PageArgs`]) 가운데 온 것의 첫 이름(moai-efoc). 목록에서만 뜻이 있다 —
@@ -114,6 +119,10 @@ fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
+    // **스냅샷보다 먼저 가른다** — 지운 줄은 스냅샷에 없으니 읽을 까닭이 없다.
+    if args.removed {
+        return removed(ctx, &repo, &args, kind_filter);
+    }
     let crate::worktree::Gathered { load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
@@ -403,6 +412,58 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         &wh,
         screen,
     ))
+}
+
+/// `--removed` — `moai rm` 이 지운 이슈를 저널에서 `ts` 차례로 낸다(moai-7dmq). `--since` 가 있으면 그때부터다.
+///
+/// **이력을 늘어놓을 뿐이다**(2026-09-30 사용자 결정) — 스냅샷을 안 읽고 견주지도 않는다. 고르는 자는
+/// `query::removed`, 저널을 읽는 자는 `Repo::journal_of_kind` 다. **제 뿌리의 저널만 읽는다** — 옆 워크트리의
+/// 지움은 병합되면 이 저널에 들어온다.
+///
+/// **받는 것은 `--since` 하나다**(`--filter since=…` 도 같은 말이다). 나머지를 말없이 먹으면 부르는 쪽은
+/// 걸러지거나 잘린 목록이라 믿는다 — 하나를 펼치는 자리가 거르개를 거절하는 것과 같은 까닭이다. `rm` 줄에는
+/// 칸도 태그도 종류도 없어 거를 값이 없고, 커서(`--after`)로 삼을 스냅샷의 줄도 없다.
+fn removed(ctx: &Ctx, repo: &Repo, args: &ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
+    let a = &args.filter;
+    // `--filter since=…` 는 `--since` 로 옮긴다 — 다른 항목이 하나라도 섞이면 `--filter` 를 댄다.
+    // 빈 항목은 `query` 가 건너뛰는 것이라 여기서도 건너뛴다.
+    let mut since = a.since.clone();
+    let mut stray_filter = false;
+    for one in &a.filter {
+        match one.split_once('=') {
+            Some((k, v)) if k.trim() == "since" => since.push(v.trim().to_string()),
+            _ if one.trim().is_empty() => {}
+            _ => stray_filter = true,
+        }
+    }
+    let target = kind_filter.as_ref().map(Kind::as_str).or(args.target.as_deref());
+    let stray = target
+        .or(args.tree.then_some("--tree"))
+        .or(args.raw.then_some("--raw"))
+        .or(args.as_plan.then_some("--as-plan"))
+        .or(args.worktree.worktree.then_some("--worktree"))
+        .or_else(|| given(a).into_iter().find_map(|(g, n)| (g && n != "--since" && n != "--filter").then_some(n)))
+        .or(stray_filter.then_some("--filter"))
+        .or_else(|| first_ordered(&args.page));
+    if let Some(flag) = stray {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.removed_with"), &[("flag", flag)]),
+                crate::i18n::say(ctx.lang(), "show.removed_with_how"),
+            ),
+            super::code::BAD_FILTER,
+        ));
+    }
+    // 때를 읽는 자는 목록의 `--since` 와 한 벌이다(`Filter::build`) — 날로 친 때는 읽는 사람의 날이다.
+    let filter = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    let zone = filter.needs_zone().then(|| ctx.zone());
+    let entries = repo.journal_of_kind("rm");
+    let rows = crate::query::removed(&entries, &filter.updated, zone);
+    if ctx.json {
+        return super::json_line(&rows);
+    }
+    Ok(view::removed(&rows, &repo.config, view::Screen::new(ctx.lang()).at(ctx.clock())))
 }
 
 /// 목록의 줄 하나 — 줄에 `work` 를 곁들인다(moai-p8qj).

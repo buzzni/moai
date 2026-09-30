@@ -2243,8 +2243,9 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
         // **제목 없는 `rm` 은 못 읽는 줄을 지운 것이다**([`JournalEntry::removed_line`]). 그 id 의 이슈는
         // 멀쩡히 설 수 있다 — 산 줄의 깨진 쌍둥이를 지운 경우다. 이슈를 지운 `rm` 은 늘 제목을 든다
         // ([`JournalEntry::removed`]). 둘을 한 낱말로 그리면 산 이슈의 이력이 "삭제" 로 끝난다.
-        "rm" if e.title.is_none() => say(lang, "journal.remove_line").to_string(),
-        "rm" => say(lang, "journal.remove").to_string(),
+        // 가르는 자는 [`JournalEntry::removes_issue`] 하나다 — `moai show --removed` 가 같은 자로 고른다.
+        "rm" if e.removes_issue() => say(lang, "journal.remove").to_string(),
+        "rm" => say(lang, "journal.remove_line").to_string(),
         "status" => format!(
             "{} → {}",
             clean(e.from.as_deref().unwrap_or("?")),
@@ -2263,6 +2264,38 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     )
     .trim_end()
     .to_string()
+}
+
+/// `moai show --removed` 의 줄 — 지운 때, id, 제목, 지운 사람(moai-7dmq). **접지 않는다** — 받은
+/// 저널 줄을 받은 차례로 한 줄씩 그린다.
+///
+/// 시각은 이력([`history`])과 같은 자로 적는다 — 한 사람이 두 화면에서 같은 줄을 다른 시계로 읽지 않게.
+/// 제목도 id 도 저널에서 온 글이라 한 줄로 걷어낸다(`text::one_line`) — 저널은 손으로 고칠 수 있는
+/// 파일이고, 여러 줄 제목이 그대로 나가면 줄 하나가 한 이슈라는 약속이 깨진다.
+pub fn removed(entries: &[&JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
+    let lang = screen.lang;
+    if entries.is_empty() {
+        return vec![say(lang, "list.none").to_string()];
+    }
+    let z = screen.zone();
+    let ids: Vec<String> = entries.iter().map(|e| crate::text::one_line(&e.id)).collect();
+    let id_w = ids.iter().map(|id| width(id)).max().unwrap_or(0);
+    entries
+        .iter()
+        .zip(&ids)
+        .map(|(e, id)| {
+            let by = crate::text::one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming));
+            format!(
+                "  {}   {}  {}  {}",
+                paint(style::DIM, &short_stamp(&e.ts, z)),
+                pad(&paint(style::ID, id), width(id), id_w),
+                crate::text::one_line(e.title.as_deref().unwrap_or("")),
+                paint(style::DIM, &by)
+            )
+            .trim_end()
+            .to_string()
+        })
+        .collect()
 }
 
 /// 한눈 보기에서 연 프로젝트 하나를 셈한 것 — `moai status` 가 `.moai` 밖에서 낸다.

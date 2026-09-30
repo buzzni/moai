@@ -4783,6 +4783,67 @@ fn show_filters_by_time() {
     assert_eq!(picked(&["--done", "2026-09-05", "-s", "done,review"]), sorted(&[&closed, &epic, &member]));
 }
 
+/// **지운 이슈는 저널에서 받는다**(moai-7dmq) — `--since` 는 줄 자신의 도장으로 거르므로 `rm` 이 지운 줄을
+/// 모른다. `--removed` 가 저널의 `rm` 줄을 `ts` 차례로 내고 `--since` 로 그때부터를 고른다. `--json` 은 봉투
+/// 없는 저널 줄 배열이다 — `show <id> --json` 의 `journal` 원소와 같은 꼴.
+#[test]
+fn show_removed_lists_what_rm_took_out() {
+    let s = init("removed");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let kept = add_at(s.path(), "2026-09-01T00:00:00Z", &["남길 일"]);
+    // 지운 차례와 id 차례를 거꾸로 세운다 — 차례가 `ts` 인지 id 인지 가른다.
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &second]);
+    ok_at(s.path(), "2026-09-07T00:00:00Z", &["rm", &first]);
+    ok_at(s.path(), "2026-09-08T00:00:00Z", &["note", &kept, "rm"]);
+    // 못 읽는 줄을 지운 `rm` 은 이슈를 지운 것이 아니다 — 제목이 없다(`JournalEntry::removed_line`).
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-09T00:00:00Z\",\"id\":\"{kept}\",\"kind\":\"rm\",\"by\":\"t\",\"by_email\":\"t@example.com\",\"note\":\"{{깨진\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    let ids = |json: &str| -> Vec<String> {
+        json.match_indices(r#""id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+    };
+
+    let all = ok(s.path(), &["show", "--removed", "--json"]);
+    assert_eq!(ids(&all), [second.as_str(), first.as_str()], "지운 이슈를 지운 차례로 안 냈다 — {all}");
+    assert!(all.starts_with("[{\"ts\":\"2026-09-05T00:00:00Z\""), "저널 줄 그대로가 아니다 — {all}");
+    assert!(all.contains("\"kind\":\"rm\"") && all.contains("\"title\":\"나중 지울 일\""), "{all}");
+    let since = ok(s.path(), &["show", "--removed", "--since", "2026-09-06T00:00:00Z", "--json"]);
+    assert_eq!(ids(&since), [first.as_str()], "`--since` 가 지운 때로 안 걸렀다 — {since}");
+    let sugar = ok(s.path(), &["show", "--removed", "--filter", "since=2026-09-06", "--json"]);
+    assert_eq!(ids(&sugar), [first.as_str()], "`--filter since=` 가 안 먹었다 — {sugar}");
+    assert_eq!(ok(s.path(), &["show", "--removed", "--since", "2026-09-10", "--json"]).trim(), "[]");
+    // 사람 화면도 같은 줄이다.
+    let human = ok(s.path(), &["show", "--removed"]);
+    assert!(human.contains(&first) && human.contains("먼저 지울 일") && human.contains(&second), "{human}");
+    assert!(!human.contains(&kept), "지운 이슈가 아닌 줄을 냈다 — {human}");
+
+    // **`--since` 말고는 안 받는다** — 거를 칸도 커서로 삼을 줄도 없다. 말없이 먹으면 걸러진 목록이라 믿는다.
+    for bad in [
+        &["-s", "todo"][..],
+        &["--type", "issue"][..],
+        &["--filter", "status=todo"][..],
+        &["--sort", "id"][..],
+        &["-n", "1"][..],
+        &["--after", kept.as_str()][..],
+        &["--worktree"][..],
+        &["--tree"][..],
+        &[kept.as_str()][..],
+    ] {
+        let mut args = vec!["show", "--removed", "--json"];
+        args.extend_from_slice(bad);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains(r#""code":"bad_filter""#) && said.contains(bad[0]), "{bad:?} — {said}");
+    }
+    let out = moai(s.path(), &["epic", "show", "--removed"]);
+    assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
+}
+
 /// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
 /// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
 #[test]
@@ -6504,6 +6565,7 @@ fn every_command_still_speaks_json() {
         vec!["prime", "--json"],
         vec!["show", "--json"],
         vec!["show", "--tree", "--json"],
+        vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
@@ -7066,6 +7128,8 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["--since", "2026-09-01"],
         vec!["--created", "2026-09-01.."],
         vec!["--done", "..2026-09-01"],
+        // 지운 줄을 늘어놓는 말도 목록의 것이다(moai-7dmq).
+        vec!["--removed"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());
