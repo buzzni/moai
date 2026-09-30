@@ -865,10 +865,9 @@ fn ensure_lines(path: &Path, block: &str) -> Added {
     if missing.is_empty() {
         return Added::Already;
     }
+    // 끝에 `\n` 이 없는 파일의 꼬리는 `append_inside` 가 채운다(moai-a65c) — 여기서도 채우면 빈 줄이
+    // 하나 더 선다. 아래 한 줄은 앞 규칙과 이 블록을 가르는 빈 줄이다.
     let mut tail = String::new();
-    if !existing.is_empty() && !existing.ends_with('\n') {
-        tail.push('\n');
-    }
     if !existing.is_empty() {
         tail.push('\n');
     }
@@ -1688,6 +1687,20 @@ mod tests {
             panic!("링크를 링크로 안 읽었다")
         };
         assert!(!to.chars().any(char::is_control), "링크 글의 제어 문자를 그대로 실었다: {to:?}");
+    }
+
+    /// **`\n` 없이 끝난 딸린 파일 뒤에도 빈 줄은 하나다**(moai-a65c). 꼬리를 채우는 것은 이제
+    /// `store::append_inside` 하나다 — 여기도 채우던 판이 그대로 남으면 앞 규칙과 이 블록 사이에 빈 줄이 둘 선다.
+    #[test]
+    fn a_dotfile_without_a_trailing_newline_gets_one_blank_line() {
+        let s = crate::scratch::Scratch::new("init-torn-dotfile");
+        let root = s.join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".gitignore"), "target/").unwrap();
+        assert!(matches!(ensure_lines(&root.join(".gitignore"), GITIGNORE), Added::Wrote { .. }));
+        let text = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(text.starts_with("target/\n\n") && !text.starts_with("target/\n\n\n"), "{text:?}");
+        assert!(text.ends_with('\n'), "{text:?}");
     }
 
     /// **손잡이를 켠 셸에서는 `--check` 의 끝줄이 둘이다**(moai-ha0f). 첫 줄은 손잡이 없는 셸에

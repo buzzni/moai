@@ -1659,12 +1659,37 @@ pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkou
 ///
 /// **푼 자리를 연다** — 받은 철자를 다시 열면 재고 난 뒤 바뀐 링크를 따라간다. 이미 푼 자리의 끝이 그
 /// 사이에 링크로 바뀌는 것까지는 못 막는다 — 갈아끼우는 쪽과 같은 틈이다.
+///
+/// **끊긴 꼬리를 먼저 채운다**(moai-a65c). 파일이 `\n` 없이 끝나면(디스크가 찼거나 덧붙이다 죽었다 —
+/// [`Repo::with_write`] 가 흔한 일로 치는 것) 새 줄이 그 끝에 그대로 붙어, 끊긴 줄과 새 줄이 한 줄이
+/// 되고 둘 다 못 읽힌다. 저널이면 이번에 적은 `rm` 이 `show --removed` 에서 통째로 빠진다. 그래서
+/// 끝 바이트가 `\n` 이 아니면 `\n` 하나를 앞에 붙여 **한 번에** 쓴다 — 끊긴 줄은 끊긴 채 남고
+/// (읽는 쪽이 건너뛴다) 새 줄은 제 줄에 선다. 채우는 곳을 여기 하나로 둔 까닭은 부르는 쪽마다
+/// 채우면 둘이 겹쳐 빈 줄이 하나 더 서기 때문이다 — `init` 의 `ensure_lines` 도 제 몫을 걷었다.
+/// 락 없이 둘이 함께 채우면 빈 줄이 하나 더 설 수 있지만, 빈 줄은 저널에서도 딸린 파일에서도 뜻이 없다.
 pub(crate) fn append_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
     let real = target_of(path, Some(checkout))?;
     let fail = |e: std::io::Error| Fail::new(format!("{}: {e}", path.display()));
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&real).map_err(fail)?;
-    f.write_all(bytes).map_err(fail)?;
+    let mut f = std::fs::OpenOptions::new().read(true).create(true).append(true).open(&real).map_err(fail)?;
+    match torn_tail(&mut f).map_err(fail)? {
+        true => f.write_all(&[b"\n", bytes].concat()),
+        false => f.write_all(bytes),
+    }
+    .map_err(fail)?;
     f.sync_all().map_err(fail)
+}
+
+/// 비지 않은 파일이 `\n` 없이 끝나는가 — [`append_inside`] 가 채울지를 가른다. 읽는 것은 끝 한
+/// 바이트뿐이고, `O_APPEND` 라 읽으려고 옮긴 자리가 다음 쓰기의 자리를 바꾸지 않는다.
+fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+    if f.metadata()?.len() == 0 {
+        return Ok(false);
+    }
+    f.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    f.read_exact(&mut last)?;
+    Ok(last[0] != b'\n')
 }
 
 /// [`write_atomic`]·[`write_atomic_in`] 의 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
@@ -2647,6 +2672,52 @@ mod tests {
             "kind·차례·관대함·이스케이프 가운데 하나가 어긋났다"
         );
         assert!(r.journal_of_kind("status").is_empty(), "없는 kind 에서 줄을 지어냈다");
+    }
+
+    /// **끊긴 꼬리 뒤에 적은 줄은 제 줄에 선다**(moai-a65c). 저널이 `\n` 없이 끝난 뒤(디스크가 찼거나 덧붙이다
+    /// 죽었다) 다음 `rm` 이 그 끝에 붙어, 끊긴 줄과 새 줄이 한 줄이 되고 `show --removed` 에서 그 지움이 빠지던
+    /// 자리다. 끊긴 줄은 끊긴 채 남고, 새 줄은 이력에도 `kind` 읽기에도 선다.
+    #[test]
+    fn a_journal_line_after_a_torn_tail_stands_on_its_own_line() {
+        let (r, d) = repo("torn-tail");
+        let by = crate::model::someone("raven");
+        let file = d.join(".moai/journal").join(journal_file(&by.email).unwrap());
+        std::fs::create_dir_all(crate::path::dir_of(&file)).unwrap();
+        let whole = serde_json::to_string(&JournalEntry::note("argos-0001", "앞", T, &by)).unwrap();
+        let torn = r#"{"ts":"2026-09-10T00:00:00Z","id":"argos-0002","kind":"no"#;
+        std::fs::write(&file, format!("{whole}\n{torn}")).unwrap();
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |_, _, _| Ok((vec![JournalEntry::removed("argos-0003", "셋", T, &by)], ())),
+        )
+        .unwrap();
+        let removed: Vec<String> = r.journal_of_kind("rm").into_iter().map(|e| e.id).collect();
+        assert_eq!(removed, ["argos-0003"], "끊긴 꼬리 뒤의 rm 줄이 그 꼬리에 붙었다");
+        assert_eq!(r.journal_of("argos-0001").len(), 1, "앞의 온전한 줄을 잃었다");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with(&format!("{whole}\n{torn}\n{{")), "끊긴 줄을 고쳐 썼거나 빈 줄을 더 세웠다\n{text}");
+    }
+
+    /// [`append_inside`] 는 **끝이 `\n` 이 아닐 때만** 채운다 — 빈 파일과 새 파일, 온전히 끝난 파일에는 한
+    /// 바이트도 더하지 않는다. 채우는 자리가 둘이던 판(`init` 도 채웠다)은 빈 줄이 하나 더 섰다.
+    #[test]
+    fn append_inside_heals_a_torn_tail_and_nothing_else() {
+        let s = Scratch::new("store-append-torn");
+        let dir = s.join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str, before: Option<&str>| {
+            let p = dir.join(name);
+            if let Some(b) = before {
+                std::fs::write(&p, b).unwrap();
+            }
+            append_inside(&p, b"new\n", &dir).unwrap();
+            std::fs::read_to_string(&p).unwrap()
+        };
+        assert_eq!(at("fresh", None), "new\n");
+        assert_eq!(at("empty", Some("")), "new\n");
+        assert_eq!(at("whole", Some("old\n")), "old\nnew\n");
+        assert_eq!(at("torn", Some("old")), "old\nnew\n");
+        assert_eq!(at("crlf", Some("old\r")), "old\r\nnew\n");
     }
 
     /// **옛 한 파일 자리가 보통 파일이 아니면 안 연다**(리뷰 moai-wcy8.rbj) — `journal/` 의 것과 같은 자다.
