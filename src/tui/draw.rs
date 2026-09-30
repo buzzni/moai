@@ -15,7 +15,7 @@ use super::menu;
 use super::picker::{self, Picker};
 use super::scroll::Move;
 use super::scroll::Scroll;
-use super::{App, Input, Mode, Pane, Row, Seat, Site};
+use super::{App, Hung, Input, Mode, Pane, Row, Seat, Site};
 use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
@@ -1037,8 +1037,9 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 먼저 뗀다** — 경로를 줄 폭 전체로 자르면 깊이 들어갔을 때 뱃지가 줄
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
     let lang = app.site.lang;
-    let badge = app.filter_text.as_ref().map(|t| {
-        let said = fill(say(lang, "tui.crumbs.filter"), &[("text", t), ("key", &label(BROWSE, Browse::ClearFilter))]);
+    let badge = app.hung.as_ref().map(|h| {
+        let said =
+            fill(say(lang, "tui.crumbs.filter"), &[("text", &badge(h)), ("key", &label(BROWSE, Browse::ClearFilter))]);
         clip(&said, w)
     });
     let room = match &badge {
@@ -3074,7 +3075,7 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
     };
     // 늘 남는 것: 걸어 둔 거름망을 푸는 길, 그리고 나머지 전부로 가는 메뉴.
     let mut keep = Vec::new();
-    if app.filter_text.is_some() {
+    if app.hung.is_some() {
         keep.push(hint(&[B::ClearFilter]));
     }
     keep.push((menu::title(&[LEADER.event()]), menu::root(app.site.lang)));
@@ -3192,6 +3193,16 @@ fn prompt_help(apply: &str, lang: Lang) -> String {
         say(lang, "tui.prompt.help"),
         &[("ok", &label(PROMPT, Prompt::Apply)), ("apply", apply), ("cancel", &label(PROMPT, Prompt::Cancel))],
     )
+}
+
+/// 걸린 거름망의 뱃지 글(moai-lpzj.i7i) — 거름망이면 친 글 그대로, 검색이면 `/<글>`, 범위를 좁혔으면
+/// `/<범위>:<글>`. **그리기만 한다** — 이 글을 되읽는 자는 없다: 범위와 글은 [`Hung`] 이 따로 든다.
+pub(super) fn badge(h: &Hung) -> String {
+    match h {
+        Hung::Filter { text } => text.clone(),
+        Hung::Grep { text, scope: GrepIn::All } => format!("/{text}"),
+        Hung::Grep { text, scope } => format!("/{}:{text}", scope.name()),
+    }
 }
 
 /// 검색 칸 이름표 — 좁힌 범위면 `검색·id` 처럼 붙인다(moai-kojj). 전체면 옛 이름 그대로다.
@@ -5746,7 +5757,7 @@ pub(super) mod tests {
             let mut a = app();
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.trim_end().ends_with("SPC 메뉴"), "{w}칸에서 메뉴 키가 잘렸다 — {bar:?}");
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into() });
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             assert!(bar.contains("Esc 풀기") && bar.trim_end().ends_with("SPC 메뉴"), "{w}칸 — {bar:?}");
             // 옮긴 키는 바에 없다.
@@ -7055,7 +7066,7 @@ pub(super) mod tests {
     fn the_key_bar_keeps_its_order_as_the_cursor_moves_at_eighty_columns() {
         for place in Place::ALL {
             let mut a = place.app();
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into() });
             for at in 0..a.rows().len() {
                 a.cursor = at;
                 let c = a.key_ctx(&a.rows());
@@ -7113,7 +7124,7 @@ pub(super) mod tests {
     fn the_key_bar_fits_whole_at_eighty_columns() {
         for w in [80u16, 100, 120] {
             let mut a = Place::LayeredInsideUp.app();
-            a.filter_text = Some("tag=x".into());
+            a.hung = Some(Hung::Filter { text: "tag=x".into() });
             let bar = render(&mut a, w, 14).last().cloned().unwrap_or_default();
             for shown in
                 ["j·k 이동", "Ctrl-w w 상세", "/ 검색", "Bksp 나가기", "Enter 들어가기", "Esc 풀기", "SPC 메뉴"]
@@ -7143,7 +7154,7 @@ pub(super) mod tests {
                 for on in [false, true] {
                     let mut a = place.map_or_else(|| layered(At::Layer), Place::app);
                     a.focus = pane;
-                    a.filter_text = on.then(|| "tag=x".to_string());
+                    a.hung = on.then(|| Hung::Filter { text: "tag=x".into() });
                     (a.worktree, a.raw) = (on, on);
                     let c = a.key_ctx(&a.rows());
                     seen.insert((c.list_focus, c.leaf, c.root));
