@@ -2341,3 +2341,12 @@
 {"ts":"2026-09-30T12:42:20Z","id":"moai-p9mq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-30T12:42:22Z","id":"moai-7dmq.j2a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·2·4·5·6·9~13 을 받고, 3·8 은 멤버 moai-karj·moai-o4jt 로, 7 은 idea moai-dzo0 으로 넘긴다. 14 는 커밋을 다시 안 쓰려고 둔다"}
 {"ts":"2026-09-30T12:45:03Z","id":"moai-7dmq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 첫 칸의 멤버 둘이 에픽을 연다 — moai-karj(procfs 링크가 저널 읽기의 메모리를 다 쓴다), moai-o4jt(Emacs 잠금 링크가 저널 읽기를 비영 종료로 만든다). 둘 다 에픽 전부터 있던 #bug 이고 리뷰 moai-7dmq.j2a 가 넘겼다. v0.1.5 에 둘지는 사람이 정한다. 이 둘을 닫는 창이 에픽 끝 리뷰를 다시 부른다 — 멤버 moai-a65c 가 쓰기 경로라 등급은 max 다"}
+{"ts":"2026-09-30T13:48:52Z","id":"moai-xd7b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 에픽 전부터 있던 버그라서 v0.1.5 밖으로 뺐다. 도는 릴리스에는 회귀(`Regression-of:` 를 쓸 수 있는 것)만 둔다(2026-09-30 사용자 결정)"}
+{"ts":"2026-09-30T13:48:52Z","id":"moai-karj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 에픽 전부터 있던 버그라서 v0.1.5 밖으로 뺐다. 도는 릴리스에는 회귀(`Regression-of:` 를 쓸 수 있는 것)만 둔다(2026-09-30 사용자 결정)"}
+{"ts":"2026-09-30T13:48:52Z","id":"moai-o4jt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"이 에픽 전부터 있던 버그라서 v0.1.5 밖으로 뺐다. 도는 릴리스에는 회귀(`Regression-of:` 를 쓸 수 있는 것)만 둔다(2026-09-30 사용자 결정)"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 검색 범위를 데이터로 든다 — 영어 화면 이름·SPC f 의 칠"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj.i7i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색 범위와 검색어를 뱃지 글이 아니라 데이터로 든다"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj.3nv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"검색 범위 이름을 i18n 으로 옮긴다"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj.4ks","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC f 의 grep= 으로 건 줄도 찾은 자리를 칠한다"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2ksl 에서 펼쳤다 — 탐색기가 검색 범위를 뱃지 글에서 되읽는다"}
+{"ts":"2026-09-30T13:49:02Z","id":"moai-2ksl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lpzj 로 펼쳤다 (이슈 3건)"}
