@@ -2340,3 +2340,4 @@
 {"ts":"2026-09-30T12:42:14Z","id":"moai-7dmq.j2a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=454286 (max — epic-end review, a member touched the write path)"}
 {"ts":"2026-09-30T12:42:20Z","id":"moai-p9mq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-30T12:42:22Z","id":"moai-7dmq.j2a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·2·4·5·6·9~13 을 받고, 3·8 은 멤버 moai-karj·moai-o4jt 로, 7 은 idea moai-dzo0 으로 넘긴다. 14 는 커밋을 다시 안 쓰려고 둔다"}
+{"ts":"2026-09-30T12:45:03Z","id":"moai-7dmq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 첫 칸의 멤버 둘이 에픽을 연다 — moai-karj(procfs 링크가 저널 읽기의 메모리를 다 쓴다), moai-o4jt(Emacs 잠금 링크가 저널 읽기를 비영 종료로 만든다). 둘 다 에픽 전부터 있던 #bug 이고 리뷰 moai-7dmq.j2a 가 넘겼다. v0.1.5 에 둘지는 사람이 정한다. 이 둘을 닫는 창이 에픽 끝 리뷰를 다시 부른다 — 멤버 moai-a65c 가 쓰기 경로라 등급은 max 다"}
