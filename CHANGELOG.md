@@ -118,9 +118,24 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   `stale=` that is not a number of days were refused in Korean even on the
   default English screen, and the same Korean came out in the `error` of
   `--json`. The list and the explorer's filter prompt now word these refusals in
-  the chosen language, and so do the new time filters and `show --removed`; the
-  command to type instead, such as `-s todo,review`, stands as it was. `type=`
-  keeps the English sentence `--type` gives.
+  the chosen language, and so do the new time filters and `show --removed`. On
+  the command line the command to type instead, such as `-s todo,review`, stands
+  as it was, except that a value the shell would split — an assignee's
+  `Name (email)` — now comes back quoted. `type=` keeps the English sentence
+  `--type` gives.
+
+- **Times after a zone's last listed change follow the zone's own rule.** zic has
+  built zone files `-b slim` by default since 2020b, and a slim file stops listing
+  changes once the rule at its end can work them out — New York's last listed one
+  is March 2007. moai read the listed ones only, so on a machine with such files
+  every later time kept that last offset: New York drew January 2026 an hour off,
+  on daylight time, and a day typed into `--created`, `--since`, `--done` or the
+  explorer's `created=` picked its rows by the same clock. moai now reads that
+  rule, the POSIX TZ string at the end of the file, and follows it from its first
+  change after the last listed one, as tzcode's own reader does; a rule it cannot
+  read leaves the last listed offset in force, as before. A zone name that points
+  at a file which is not zone data, such as `TZ=leapseconds`, is now reported in
+  the language you picked rather than in Korean.
 
 ## [0.1.4] - 2026-09-29
 

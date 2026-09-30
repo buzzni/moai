@@ -92,9 +92,11 @@
 멈춘 까닭이 한 말로 서는 것을 `the_read_sheet_speaks_the_chosen_language` 가 잰다.
 
 **거르개의 거절문도 말묶음에 왔다**(moai-2htt) — `query::Filter::build`·`desugar` 는 자료(`query::BadFilter`)만
-내고 `view::bad_filter` 가 `refuse.filter_*` 로 편다. `show` 의 목록과 `--removed`, 탐색기의 거름망 프롬프트가
-그 하나를 함께 쓴다. `type=` 의 거절만은 `Kind` 의 영어 글 그대로다 — `--type` 을 푸는 clap 과 한 말이어야
-해서다(moai-ivt9). 검색 범위의 이름(`GrepIn::name`)은 아직 한국어다(idea moai-2ksl).
+내고 `view::bad_filter_on` 이 `refuse.filter_*` 로 편다. `show` 의 목록과 `--removed` 는 `view::bad_filter`(CLI 꼴)로,
+탐색기의 거름망 프롬프트는 `view::Surface::Pairs` 를 건네 그 하나를 함께 쓴다. 말은 같고 고쳐 칠 글만 표면마다
+다르다(`-s todo,review` 와 `status=todo,review`, moai-tckz) — 그래서 `{fix}`·`{by_done}`·`{by_status}`·`{widen}`·
+`{status}` 자리에는 코드가 지은 명령이 통째로 든다. `type=` 의 거절만은 `Kind` 의 영어 글 그대로다 — `--type` 을
+푸는 clap 과 한 말이어야 해서다(moai-ivt9). 검색 범위의 이름(`GrepIn::name`)은 아직 한국어다(idea moai-2ksl).
 
 **설정을 읽다 멈춘 줄도 말묶음에 왔다**(moai-ivt9) — `config::Trouble`·`Refused`·`Want` 는
 자료만 내고 `view::config_trouble`·`config_refused` 가 `config.*` 로 편다. 사람을 못 푼 줄

@@ -2870,6 +2870,7 @@ pub fn zone_trouble(lang: Lang, why: &crate::tz::Trouble) -> String {
         Trouble::NoTzdb { at } => fill(say(lang, "tz.no_tzdb"), &[("at", &at.display().to_string())]),
         Trouble::Unknown { name } => fill(say(lang, "tz.unknown"), &[("name", name)]),
         Trouble::Unreadable { name, said } => fill(say(lang, "tz.unreadable"), &[("name", name), ("said", said)]),
+        Trouble::NotTzif { name } => fill(say(lang, "tz.not_tzif"), &[("name", name)]),
         Trouble::NoSystemZone => say(lang, "tz.no_system_zone").to_string(),
     };
     format!("moai: {said}")
@@ -3069,9 +3070,14 @@ impl Surface {
     }
 
     /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
+    ///
+    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로
+    /// `-a 홍 길동 (a@b.c),김 철수 (c@d.e)` 를 그대로 대면 옮겨 친 셸이 `(` 에서 멈춘다. 따옴표가 필요 없는
+    /// 값(`todo,review`)은 글자째 그대로다([`crate::text::quoted`]). 거름망은 `=` 없는 낱말을 앞 항목에 잇는
+    /// 칸이라 감싸지 않는다.
     fn spell(self, field: crate::query::Once, value: &str) -> String {
         match self {
-            Surface::Flags => format!("{} {value}", field.flag()),
+            Surface::Flags => format!("{} {}", field.flag(), crate::text::quoted(value)),
             Surface::Pairs => format!("{}={value}", field.key()),
         }
     }
@@ -3442,11 +3448,25 @@ mod tests {
                 assert!(pairs.contains(want), "{lang:?} 거름망에 {want} 가 없다 — {pairs}");
             }
             assert!(!pairs.contains("--done") && !pairs.contains("-s"), "거름망에 CLI 꼴을 댔다 — {pairs}");
+            // `done=` 은 `Once` 가 아니라 `query::tests::each_once_key_reads_back_as_its_own_filter` 가 못 잰다(리뷰
+            // moai-efoc.3e1) — 댄 낱말을 `desugar` 에 되먹여, 항목 이름을 바꾸는 날 이 글이 옛 이름을 대면 여기서 붉어진다.
+            let named = pairs.split('`').nth(1).expect("첫 따옴표에 선 것이 없다");
+            let mut raw = crate::query::Raw::default();
+            crate::query::desugar(&mut raw, &format!("{named}2026-01-01..")).expect("거름망이 댄 항목을 안 받는다");
+            assert_eq!(raw.done, ["2026-01-01.."], "{lang:?} 거름망이 댄 {named} 이 done 거르개가 아니다");
             let flags = bad_filter(lang, &outside);
             for want in ["`--done`", "`-s review`", "`-s review,done`", "`-s`"] {
                 assert!(flags.contains(want), "{lang:?} CLI 에 {want} 가 없다 — {flags}");
             }
         }
+        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로 그대로
+        // 대면 옮겨 친 셸이 `(` 에서 멈춘다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다.
+        let people =
+            BadFilter::Twice { field: Once::Assignee, a: "홍 길동 (a@b.c)".into(), b: "김 철수 (c@d.e)".into() };
+        let said = bad_filter(Lang::En, &people);
+        assert!(said.contains("`-a '홍 길동 (a@b.c),김 철수 (c@d.e)'`"), "{said}");
+        let said = bad_filter_on(Lang::En, &people, Surface::Pairs);
+        assert!(said.contains("`assignee=홍 길동 (a@b.c),김 철수 (c@d.e)`"), "{said}");
         // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
         for lang in [Lang::En, Lang::Ko] {
             let said = |why: &BadFilter| bad_filter(lang, why);
@@ -3460,6 +3480,16 @@ mod tests {
         // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
         let kind = "x".parse::<Kind>().unwrap_err();
         assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
+    }
+
+    /// **TZif 가 아닌 시간대 파일도 고른 말로 선다**(리뷰 moai-efoc.3e1) — `tz::Trouble::Unreadable` 의 `said` 에
+    /// 한국어 글을 싣던 판은 `TZ=leapseconds` 한 번에 영어 화면에도 "TZif 가 아니다" 를 냈다.
+    #[test]
+    fn a_zone_file_that_is_not_tzif_speaks_the_language_it_is_handed() {
+        let why = crate::tz::Trouble::NotTzif { name: "leapseconds".into() };
+        let (en, ko) = (zone_trouble(Lang::En, &why), zone_trouble(Lang::Ko, &why));
+        assert!(!crate::hook::hangul(&en) && en.contains("leapseconds"), "{en}");
+        assert!(crate::hook::hangul(&ko) && ko.contains("leapseconds"), "{ko}");
     }
 
     /// **고를 것이 있는 거절은 고를 것을 댄다**(moai-ivt9). 글이 말묶음으로 가면서 자료 쪽

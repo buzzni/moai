@@ -302,6 +302,7 @@
   "tz.no_tzdb": "no timezone data at {at} - times are shown in UTC",
   "tz.unknown": "this machine does not know the timezone {name} - times are shown in UTC",
   "tz.unreadable": "could not read the timezone {name} · {said} - times are shown in UTC",
+  "tz.not_tzif": "the timezone {name} is not a TZif file - times are shown in UTC",
   "tz.no_system_zone": "the system does not name its timezone - times are shown in UTC",
   "tui.act.timezone": "timezone",
   "tui.tz.title": "timezone",

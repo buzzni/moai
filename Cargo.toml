@@ -72,7 +72,9 @@ libc          = "0.2"
 # 적어 둔다**: 안 적으면 다음 사람이 걷어도 되는지 못 가린다.
 too_many_arguments = "allow"
 # 반환 튜플의 모양이 곧 계약이다. `type` 별칭을 씌우면 부르는 쪽에서 무엇이
-# 나오는지 안 보인다. 걸리는 자리는 `model.rs`·`report.rs`·`tui/keys.rs`·`worktree.rs` 넷이다.
+# 나오는지 안 보인다. 걸리는 자리는 `model.rs`·`report.rs`·`tui/keys.rs`·`worktree.rs`·`tz.rs`(`parse`)·`hook.rs`·
+# `store.rs`·`cmd/hook.rs`·`cmd/init.rs`·`tui/layer.rs` 열 파일이다(2026-09-30 에 이 줄을 `warn` 으로 내려 셌다 —
+# 넷으로 적혀 있던 동안 뒤의 다섯이 말없이 늘었다, 리뷰 moai-efoc.3e1).
 type_complexity = "allow"
 # `projects::State` 는 실패한 까닭을 통째로 들고 온다. 박싱하면 그 값을 읽는 자리가
 # 모두 한 겹 깊어지는데, 이 경로는 사람이 한 번 부르는 명령이라 값어치가 없다.

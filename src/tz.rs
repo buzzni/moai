@@ -34,8 +34,12 @@ pub enum Trouble {
     NoTzdb { at: PathBuf },
     /// 그 이름의 자료가 없다 — 오타이거나, 이 기계의 tzdb 가 그 이름을 모른다.
     Unknown { name: String },
-    /// 자료는 있는데 못 읽거나 TZif 가 아니다.
+    /// 자료는 있는데 못 읽는다. `said` 는 운영체제가 낸 글이다.
     Unreadable { name: String, said: String },
+    /// 읽었는데 TZif 가 아니다 — tzdb 디렉터리에 함께 사는 `leapseconds`·`zone.tab` 같은 파일이거나 잘린 파일이다.
+    /// **까닭을 글로 싣지 않는다**(리뷰 moai-efoc.3e1) — `Unreadable` 의 `said` 에 한국어 글을 싣던 판은 영어 화면에도
+    /// 그 글을 냈다. 말은 [`crate::view::zone_trouble`] 이 짓는다.
+    NotTzif { name: String },
     /// 시스템이 어느 시간대인지를 말해 주지 않는다 — `/etc/localtime` 이 이름을 안 댄다.
     NoSystemZone,
 }
@@ -48,10 +52,10 @@ pub struct Zone {
     name: String,
     /// (그때부터, UTC 에 더할 초). 차례대로 오름차순이다.
     shifts: Vec<(i64, i32)>,
-    /// 첫 전환보다 앞선 때에 더할 초.
+    /// 첫 전환보다 앞선 때에 더할 초. 전환이 하나도 없고 규칙이 있으면 안 쓴다 — 그때는 규칙이 모든 때를 잰다.
     before: i32,
-    /// 마지막 전환보다 뒤를 재는 규칙 — 파일 꼬리의 POSIX TZ 글([`Rule`], moai-r621). 없거나 못 읽으면
-    /// 마지막 전환의 값이 뒤로 이어진다.
+    /// 마지막 전환보다 뒤를 재는 규칙 — 파일 꼬리(footer)의 POSIX TZ 글([`Rule`], moai-r621). 규칙이 마지막 전환
+    /// 뒤에 처음 바꾸는 때부터 잰다([`Zone::offset_at`]). 없거나 못 읽으면 마지막 전환의 값이 뒤로 이어진다.
     rule: Option<Rule>,
 }
 
@@ -86,8 +90,8 @@ impl Zone {
     /// 기계에서 조용히 아무것도 안 재게 된다(`if let Ok(seoul)` 로 통째로 건너뛴다). 재려는 것이
     /// "옮긴 뒤의 답" 이지 "tzdb 를 읽는 법" 이 아닌 자리에서는 자료 없이 옮기는 자가 낫다.
     /// 여름 시간이 없는 자리(`Asia/Seoul` 이 그렇다)는 이 꼴이 실제 자료와 같은 답을 낸다.
-    /// **0 은 안 받는다**(리뷰) — [`Zone::is_utc`] 가 `shifts` 와 `before` 만 보므로 `fixed(.., 0)`
-    /// 은 이름이 무엇이든 UTC 고, [`Zone::shift`] 가 그 자리에서 되돌아간다. 시간대를 재려고 쓴
+    /// **0 은 안 받는다**(리뷰) — 이 꼴은 전환도 꼬리 규칙도 없어 [`Zone::is_utc`] 가 `before` 하나로 가르므로
+    /// `fixed(.., 0)` 은 이름이 무엇이든 UTC 고, [`Zone::shift`] 가 그 자리에서 되돌아간다. 시간대를 재려고 쓴
     /// 시험이 그런 시간대를 들면 아무것도 안 재면서 푸르게 지나간다.
     #[cfg(test)]
     pub fn fixed(name: &str, secs: i32) -> Zone {
@@ -97,10 +101,11 @@ impl Zone {
 
     /// UTC 인가 — 화면이 이것으로 "그대로 둔다" 를 가른다.
     ///
-    /// **꼬리의 규칙도 본다**(moai-r621). 전환이 하나도 없는 파일은 그 규칙이 모든 때를 잰다 — `before` 만
-    /// 보면 규칙만 든 파일이 UTC 로 읽혀 [`Zone::shift`] 가 그 자리에서 되돌아간다.
+    /// **꼬리의 규칙도 본다**(moai-r621). 전환이 하나도 없는 파일은 규칙이 있으면 그것이, 없으면 `before` 가 모든
+    /// 때를 잰다 — [`Zone::offset_at`] 과 같은 갈래다. `before` 만 보면 규칙만 든 파일이 UTC 로 읽혀
+    /// [`Zone::shift`] 가 그 자리에서 되돌아간다.
     pub fn is_utc(&self) -> bool {
-        self.shifts.is_empty() && self.before == 0 && self.rule.as_ref().is_none_or(Rule::is_utc)
+        self.shifts.is_empty() && self.rule.as_ref().map_or(self.before == 0, Rule::is_utc)
     }
 
     /// 이름으로 연다. `UTC` 는 자료를 안 본다 — tzdb 가 없는 기계에서도 서야 한다.
@@ -117,8 +122,7 @@ impl Zone {
             std::io::ErrorKind::NotFound => Trouble::Unknown { name: name.to_string() },
             _ => Trouble::Unreadable { name: name.to_string(), said: e.to_string() },
         })?;
-        let (shifts, before, rule) = parse(&raw)
-            .ok_or_else(|| Trouble::Unreadable { name: name.to_string(), said: "TZif 가 아니다".into() })?;
+        let (shifts, before, rule) = parse(&raw).ok_or_else(|| Trouble::NotTzif { name: name.to_string() })?;
         Ok(Zone { name: name.to_string(), shifts, before, rule })
     }
 
@@ -138,15 +142,26 @@ impl Zone {
 
     /// 그때 UTC 에 더할 초.
     ///
-    /// **마지막 전환부터는 꼬리의 규칙이 잰다**(RFC 8536 3.3, moai-r621). 전환이 하나도 없으면 모든 때를
-    /// 그 규칙이 잰다. 규약이 그 규칙을 마지막 전환과 같은 답을 내게 못박으므로, 전환 그 순간부터 넘겨도 답은
-    /// 같다.
+    /// **마지막 전환 뒤는 꼬리의 규칙이 잰다**(RFC 8536 3.3, moai-r621) — 다만 규칙이 그 전환 **뒤에** 처음
+    /// 바꾸는 때부터다. 그 사이는 마지막 전환의 값이 선다. tzcode 의 `localtime.c` 가 꼬리로 지은 전환 가운데
+    /// 마지막 전환보다 뒤의 것만 잇는 것과 같은 자다. 규약은 꼬리가 마지막 전환과 같은 답을 내야 한다고 하지만
+    /// 2023c 까지의 zic(glibc 2.39 가 싣는 것도)이 지은 slim 파일이 그것을 어긴다: `America/Ojinaga` 는
+    /// 2022-10-30 에 CST 로 옮긴 것이 마지막 전환인데 꼬리(`CST6CDT,M3.2.0,M11.1.0`)는 11-06 까지 CDT 다.
+    /// 규칙을 그 순간부터 대던 판은 그 한 주를 한 시간 앞선 시각으로 그렸다(리뷰 moai-efoc.3e1). 규약대로 지은
+    /// 파일에서는 두 자의 답이 같다.
+    ///
+    /// 전환이 하나도 없으면 모든 때를 규칙이 잰다.
     fn offset_at(&self, secs: i64) -> i32 {
         let n = self.shifts.partition_point(|(at, _)| *at <= secs);
         if n == self.shifts.len()
             && let Some(rule) = &self.rule
         {
-            return rule.offset_at(secs);
+            let Some(&(last, _)) = self.shifts.last() else { return rule.offset_at(secs) };
+            if let Some((at, offset)) = rule.last_change(secs)
+                && at > i128::from(last)
+            {
+                return offset;
+            }
         }
         match n {
             0 => self.before,
@@ -344,11 +359,11 @@ fn is_tzif(at: &Path) -> bool {
 /// **판 2 이상이면 뒤 자료를 읽는다.** 앞의 판 1 자료는 32비트 시각이라 2038년에 끊긴다. 판 1
 /// 짜리 파일(요즘은 거의 없다)은 앞 자료를 그대로 쓰고, 꼬리가 없다.
 ///
-/// **꼬리의 POSIX 규칙 글(`EST5EDT,M3.2.0,M11.1.0`)을 읽는다**(moai-r621). 마지막 전환보다 뒤를 그
-/// 규칙이 잰다. 한때 안 읽었다 — tzdb 가 앞으로 수십 년어치 전환을 담는다고 봤는데, 그것은 `zic -b fat`
-/// 으로 지은 파일만 그렇다. 2020b 부터 zic 의 기본인 `slim` 은 규칙으로 잴 수 있는 전환을 안 적어, New
-/// York 의 마지막 전환이 2007년이고 그 뒤는 꼬리만 잰다. 안 읽던 판은 2026년 1월의 줄을 서머타임으로
-/// 그렸고, 날로 친 거르개(`--created <날>`)가 어느 줄을 내는지도 그 어긋남을 따랐다.
+/// **꼬리(footer)의 POSIX 규칙 글(`EST5EDT,M3.2.0,M11.1.0`)을 읽는다**(moai-r621). 마지막 전환보다 뒤를 그
+/// 규칙이 잰다. 한때 안 읽었다 — tzdb 가 앞으로 수십 년어치 전환을 담는다고 봤는데, `zic -b fat` 으로 지은
+/// 파일도 2037년까지만 적어 그 뒤는 꼬리만 잰다. 2020b 부터 zic 의 기본인 `slim` 은 규칙으로 잴 수 있는 전환을
+/// 아예 안 적어, New York 의 마지막 전환이 2007년이다. 안 읽던 판은 2026년 1월의 줄을 서머타임으로 그렸고,
+/// 날로 친 거르개(`--created <날>`)가 어느 줄을 내는지도 그 어긋남을 따랐다.
 ///
 /// **꼬리를 못 읽어도 파일은 선다** — 읽기는 관대하다. 그때는 옛 판처럼 마지막 전환의 값이 뒤로 이어진다.
 fn parse(raw: &[u8]) -> Option<(Vec<(i64, i32)>, i32, Option<Rule>)> {
@@ -471,7 +486,7 @@ struct Dst {
     end: (Day, i32),
 }
 
-/// 규칙의 날 하나. 셋 다 그해 안의 날을 가리킨다.
+/// 규칙의 날 하나. 셋 다 그해의 날을 가리킨다 — 평년의 `365` 만은 이듬해 1월 1일이다(glibc 와 같다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Day {
     /// `Jn` — 1..=365. 2월 29일을 안 센다(윤년에도 `J60` 은 3월 1일이다).
@@ -512,27 +527,32 @@ impl Rule {
     }
 
     /// 그때 UTC 에 더할 초.
-    ///
-    /// **그해와 앞뒤 해의 전환을 늘어놓고, 그 순간까지 온 마지막 것을 본다.** 남반구처럼 서머타임이 해를
-    /// 넘겨 걸치는 자리도, 전환 시각이 해 끝을 넘는 자리(`J365/25`, RFC 8536 의 늘 서머타임)도 한 식으로
-    /// 선다. 두 전환이 한 순간이면 들어가는 쪽을 뒤로 친다 — 늘 서머타임은 나오자마자 다시 들어간다.
-    /// 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도 날 수에 86,400 을 곱하다 넘치지 않는다.
     fn offset_at(&self, secs: i64) -> i32 {
-        let Some(dst) = &self.dst else { return self.std };
+        self.last_change(secs).map_or(self.std, |(_, offset)| offset)
+    }
+
+    /// 그 순간까지 온 마지막 전환 — (그 순간, 그때부터 UTC 에 더할 초). 서머타임이 없으면 전환도 없다.
+    ///
+    /// **두 해 앞부터 한 해 뒤까지의 전환을 늘어놓고, 그 순간까지 온 마지막 것을 본다.** 남반구처럼 서머타임이
+    /// 해를 넘겨 걸치는 자리도, 전환 시각이 해 끝을 넘는 자리(`J365/25`, RFC 8536 의 늘 서머타임)도 한 식으로
+    /// 선다. 두 해 앞까지 보는 까닭은 시각이 167시까지 가서다(RFC 8536 3.3.1) — 앞 해의 두 전환이 다 이 해로
+    /// 넘어오면 그때 선 것은 두 해 앞의 전환이다(`J365/167,J365/100`, 리뷰 moai-efoc.3e1). 한 해의 전환은 그해
+    /// 앞뒤 여드레 남짓 안에 서므로 세 해 앞이나 두 해 뒤는 답이 될 수 없다. 두 전환이 한 순간이면 들어가는
+    /// 쪽을 뒤로 친다 — 늘 서머타임은 나오자마자 다시 들어간다. 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도
+    /// 날 수에 86,400 을 곱하다 넘치지 않는다.
+    fn last_change(&self, secs: i64) -> Option<(i128, i32)> {
+        let dst = self.dst.as_ref()?;
         let year = crate::model::civil_from_days(secs.div_euclid(86_400)).0;
-        let mut last: Option<(i128, bool)> = None;
-        for y in [year - 1, year, year + 1] {
-            for (on, (day, time), before) in [(true, dst.start, self.std), (false, dst.end, dst.offset)] {
-                let at = i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before);
-                if at <= i128::from(secs) && last.is_none_or(|l| (at, on) > l) {
-                    last = Some((at, on));
-                }
-            }
-        }
-        match last {
-            Some((_, true)) => dst.offset,
-            _ => self.std,
-        }
+        // `(때, 들어가는가)` 의 최댓값이 마지막 전환이다 — `true` 가 `false` 보다 커서 한 순간이면 들어가는 쪽이 이긴다.
+        let (at, on) = (year - 2..=year + 1)
+            .flat_map(|y| {
+                [(true, dst.start, self.std), (false, dst.end, dst.offset)].map(|(on, (day, time), before)| {
+                    (i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before), on)
+                })
+            })
+            .filter(|&(at, _)| at <= i128::from(secs))
+            .max()?;
+        Some((at, if on { dst.offset } else { self.std }))
     }
 }
 
@@ -592,23 +612,18 @@ impl Posix<'_> {
 
     /// `[+-]hh[:mm[:ss]]` — 부호를 붙인 초. 시는 `hours` 까지 받는다.
     fn hms(&mut self, hours: i64) -> Option<i32> {
-        let sign = match self.peek() {
-            Some(b'-') => {
-                self.at += 1;
-                -1
-            }
-            Some(b'+') => {
-                self.at += 1;
-                1
-            }
-            _ => 1,
+        let sign = if self.eat(b'-').is_some() {
+            -1
+        } else {
+            self.eat(b'+');
+            1
         };
-        let mut secs = self.num(hours)? * 3600;
+        let mut secs = self.num(0..=hours)? * 3600;
         for unit in [60, 1] {
             if self.eat(b':').is_none() {
                 break;
             }
-            secs += self.num(59)? * unit;
+            secs += self.num(0..=59)? * unit;
         }
         i32::try_from(sign * secs).ok()
     }
@@ -621,24 +636,17 @@ impl Posix<'_> {
     /// 날과, `/` 뒤의 시각(없으면 02:00). **시각은 부호가 붙고 167 시까지 간다** — RFC 8536 3.3.1 이
     /// POSIX 를 넓힌 자리다(`M3.5.0/-1`, 늘 서머타임의 `J365/25`).
     fn when(&mut self) -> Option<(Day, i32)> {
-        let day = match self.peek()? {
-            b'J' => {
-                self.at += 1;
-                Day::Julian(u16::try_from(self.num(365)?).ok().filter(|n| *n >= 1)?)
-            }
-            b'M' => {
-                self.at += 1;
-                let m = self.num(12)?;
-                self.eat(b'.')?;
-                let w = self.num(5)?;
-                self.eat(b'.')?;
-                let d = self.num(6)?;
-                if m < 1 || w < 1 {
-                    return None;
-                }
-                Day::Month { m: m as u8, w: w as u8, d: d as u8 }
-            }
-            _ => Day::Ordinal(u16::try_from(self.num(365)?).ok()?),
+        // 자리마다 받는 폭을 [`Posix::num`] 에 건넨다 — 폭 안의 값이라 좁히는 `as` 는 잃는 것이 없다.
+        let day = if self.eat(b'J').is_some() {
+            Day::Julian(self.num(1..=365)? as u16)
+        } else if self.eat(b'M').is_some() {
+            let m = self.num(1..=12)? as u8;
+            self.eat(b'.')?;
+            let w = self.num(1..=5)? as u8;
+            self.eat(b'.')?;
+            Day::Month { m, w, d: self.num(0..=6)? as u8 }
+        } else {
+            Day::Ordinal(self.num(0..=365)? as u16)
         };
         let time = match self.eat(b'/') {
             Some(()) => self.hms(167)?,
@@ -647,12 +655,12 @@ impl Posix<'_> {
         Some((day, time))
     }
 
-    /// 숫자 하나. 없거나 `max` 를 넘으면 `None`.
-    fn num(&mut self, max: i64) -> Option<i64> {
+    /// 숫자 하나. 없거나 `range` 밖이면 `None`.
+    fn num(&mut self, range: std::ops::RangeInclusive<i64>) -> Option<i64> {
         let len = self.s[self.at..].iter().take_while(|c| c.is_ascii_digit()).count();
         let n = std::str::from_utf8(&self.s[self.at..self.at + len]).ok()?.parse::<i64>().ok()?;
         self.at += len;
-        (n <= max).then_some(n)
+        range.contains(&n).then_some(n)
     }
 }
 
@@ -808,9 +816,36 @@ mod tests {
         let z = Zone { name: "America/New_York".into(), shifts, before, rule };
         assert_eq!(z.shift("2026-01-15T04:30:00Z"), "2026-01-14T23:30:00Z", "겨울을 서머타임으로 그렸다");
         assert_eq!(z.shift("2026-07-01T12:00:00Z"), "2026-07-01T08:00:00Z");
-        // 적힌 전환 안쪽은 전환이 잰다.
-        assert_eq!(z.shift("2007-01-15T04:30:00Z"), "2007-01-14T23:30:00Z");
         assert_eq!(z.shift("2007-07-01T12:00:00Z"), "2007-07-01T08:00:00Z");
+        // **적힌 전환 안쪽은 전환이 잰다**(리뷰 moai-efoc.3e1) — 2006-11-01 은 10-29 에 EST 로 옮긴 뒤지만 2007년부터의
+        // 규칙으로 재면 11-05 까지 EDT 다. 규칙을 전환보다 앞세우는 판이 여기서 붉어진다.
+        assert_eq!(z.shift("2006-11-01T12:00:00Z"), "2006-11-01T07:00:00Z", "적힌 전환 안쪽을 규칙이 쟀다");
+        assert_eq!(z.shift("2007-01-15T04:30:00Z"), "2007-01-14T23:30:00Z");
+    }
+
+    /// **마지막 전환 뒤는 규칙이 그 뒤에 처음 바꾸는 때부터 잰다**(리뷰 moai-efoc.3e1). slim 으로 지은
+    /// `America/Ojinaga` 는 2022-10-30 에 CST 로 옮긴 것이 마지막 전환인데, 꼬리(`CST6CDT,M3.2.0,M11.1.0`)는 11-06
+    /// 까지 CDT 다 — 규칙을 그 순간부터 대던 판은 그 한 주를 한 시간 앞선 시각으로 그렸다. tzcode 는 꼬리로 지은 전환 가운데
+    /// 마지막 전환보다 뒤의 것만 잇고, fat 판과 tzdata 원본(`-6 - CST 2022 N 30`)도 그 주는 CST 다.
+    #[test]
+    fn the_footer_takes_over_at_its_first_change_after_the_last_transition() {
+        let at = |s: &str| crate::model::parse_rfc3339(s).unwrap();
+        let z = Zone {
+            name: "America/Ojinaga".into(),
+            shifts: vec![(at("2022-03-13T09:00:00Z"), -6 * 3600), (at("2022-10-30T08:00:00Z"), -6 * 3600)],
+            before: -7 * 3600,
+            rule: Rule::parse("CST6CDT,M3.2.0,M11.1.0"),
+        };
+        for (when, off) in [
+            ("2022-10-30T08:00:00Z", -6),
+            ("2022-11-01T12:00:00Z", -6),
+            ("2022-11-06T07:00:00Z", -6),
+            ("2023-03-12T07:59:59Z", -6),
+            ("2023-03-12T08:00:00Z", -5),
+            ("2023-11-05T07:00:00Z", -6),
+        ] {
+            assert_eq!(z.offset_at(at(when)), off * 3600, "Ojinaga {when}");
+        }
     }
 
     /// 꼬리 글의 꼴 — 실제 tzdb 가 쓰는 것들이다. 전환 앞뒤 한 초씩을 잰다.
@@ -870,6 +905,14 @@ mod tests {
         let casablanca = rule("<+00>0<+01>,0/0,J365/25");
         for when in ["2026-01-01T00:00:00Z", "2025-12-31T23:00:00Z", "2026-06-30T12:00:00Z", "2028-12-31T23:30:00Z"] {
             assert_eq!(casablanca.offset_at(at(when)), h(1.0), "Casablanca {when}");
+        }
+
+        // 시각이 167시까지 가면 앞 해의 두 전환이 다 이 해로 넘어온다 — 그때 선 것은 두 해 앞의 전환이다(리뷰
+        // moai-efoc.3e1). 2024년 몫의 들어감(2025-01-06 23:00)이 2026-01-04 03:00 의 나옴까지 이어진다.
+        let late = rule("STD0DST,J365/167,J365/100");
+        for (when, off) in [("2026-01-02T00:00:00Z", 1.0), ("2026-01-04T03:00:00Z", 0.0), ("2026-01-06T23:00:00Z", 1.0)]
+        {
+            assert_eq!(late.offset_at(at(when)), h(off), "J365/167 {when}");
         }
 
         // 서머타임 없는 규칙 — 분이 든 오프셋은 부호를 뒤집어 읽는다.
