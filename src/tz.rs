@@ -5,6 +5,10 @@
 //! `said` 만 옮긴 것과 같은 줄이고, "설정은 화면만 바꾼다. 설정이 이미 쓴 줄을 바꾸면 그건
 //! 설정이 아니라 마이그레이션이다" 와도 같다.
 //!
+//! **사람이 치는 날도 이 자로 읽는다** — 마일스톤 기한(moai-h2th)과 날로 친 때 거르개(`query::End::Wall`,
+//! moai-efoc)는 읽는 사람의 날로 잰다. 적힌 값은 그대로지만, `show --created <날> --json` 이 **어느 줄을**
+//! 내는지는 시간대를 따른다.
+//!
 //! **크레이트를 안 들인다**(2026-09-21 사용자 결정). 길이 둘이었다 — 시스템의
 //! `/usr/share/zoneinfo` 를 읽거나, 크레이트가 tzdb 를 박아 넣거나. 바이너리 15MB 예산과
 //! `ratatui` 의 달력 위젯이 `time` 을 끌고 와 일부러 기본 기능을 껐던 판단을 그대로 두는 쪽을
@@ -134,8 +138,10 @@ impl Zone {
         }
     }
 
-    /// 그 순간(epoch 초)의 **이 시간대의 벽시계** — epoch 초 꼴로(moai-efoc). [`Zone::shift`] 와 같은 값을
-    /// 글자로 안 짓고 수로 낸다: 날로 거르는 자(`query::Span`)가 줄마다 부르므로 글을 짓고 다시 풀 까닭이 없다.
+    /// 그 순간(epoch 초)의 **이 시간대의 벽시계** — epoch 초 꼴로(moai-efoc). [`Zone::shift`] 가 글자로 짓는
+    /// 값을 수로 낸다: 날로 거르는 자(`query::spans_hold`)가 줄마다 부르므로 글을 짓고 다시 풀 까닭이 없다.
+    /// **셈은 여기 하나다** — `shift` 도 이것을 부른다. 화면이 대는 날과 거르개가 잡는 날이 한 식에서 나와야
+    /// `--created <날>` 이 상세가 댄 날의 줄을 잡는다(리뷰 moai-efoc.ln9).
     pub fn local(&self, secs: i64) -> i64 {
         secs + i64::from(self.offset_at(secs))
     }
@@ -151,7 +157,7 @@ impl Zone {
         }
         match crate::model::parse_rfc3339(at) {
             None => at.to_string(),
-            Some(secs) => crate::model::format_rfc3339(secs + i64::from(self.offset_at(secs))),
+            Some(secs) => crate::model::format_rfc3339(self.local(secs)),
         }
     }
 }

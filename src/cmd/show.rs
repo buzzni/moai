@@ -173,7 +173,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                     ),
                     crate::i18n::fill(how, &[("flag", flag)]),
                 ),
-                "bad_filter",
+                super::code::BAD_FILTER,
             ));
         }
         // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 손으로
@@ -198,7 +198,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                 crate::i18n::say(ctx.lang(), "refuse.show_raw_on_list"),
                 crate::i18n::say(ctx.lang(), "refuse.show_raw_how"),
             ),
-            "bad_filter",
+            super::code::BAD_FILTER,
         ));
     }
     // 되뽑을 에픽이 없다. 목록을 통째로 되뽑으면 에픽 없는 이슈가 `add --from` 에
@@ -257,7 +257,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         deferred: a.deferred,
         filter: a.filter,
     })
-    .map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    .map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
     resolve_me(&mut filter.assignee, ctx, &repo.root)?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
@@ -492,7 +492,7 @@ fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) ->
     let mut stray_filter = false;
     for one in items.iter().filter(|one| !one.trim().is_empty()) {
         let mut probe = Raw::default();
-        crate::query::desugar(&mut probe, one).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+        crate::query::desugar(&mut probe, one).map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
         match probe.since.pop() {
             Some(v) => since.push(v),
             None => stray_filter = true,
@@ -502,7 +502,7 @@ fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) ->
         return Err(refuse(flag));
     }
     // 때를 읽는 자는 목록의 `--since` 와 한 벌이다(`Filter::build`) — 날로 친 때는 읽는 사람의 날이다.
-    let timed = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    let timed = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
     let zone = timed.needs_zone().then(|| ctx.zone());
     let (entries, garbled) = repo.journal_of_kind("rm");
     // **`--since` 의 폭에 들었을 수 있는 조각만 댄다**(리뷰) — 가르는 자는 목록과 같은 `query` 에 있다.

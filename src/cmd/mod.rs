@@ -117,7 +117,8 @@ impl Ctx {
     /// 화면에 얹을 시간대 — **아직 안 푼 채로** 준다(moai-s3i7). `view::Screen` 이 시각을 실제로
     /// 그릴 때에만 풀리므로, 화면을 짓기만 하고 시각을 안 그리는 `ready`·`prime`·`show`(목록)·
     /// `idea ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
-    /// 자리(`report::status` 의 기한 판정)는 여전히 [`Ctx::zone`] 으로 바로 푼다.
+    /// 자리(`report::status` 의 기한 판정, `show` 와 `show --removed` 의 날로 친 때 거르개 —
+    /// `query::Filter::needs_zone`)는 여전히 [`Ctx::zone`] 으로 바로 푼다 — 그 목록은 그때만 tzdb 를 만진다.
     pub fn clock(&self) -> &crate::tz::System {
         &self.zone
     }
@@ -380,7 +381,14 @@ pub fn run(mut cli: Cli) -> R<Vec<String>> {
     //
     // **한 줄뿐이다.** 정적 musl 판을 zoneinfo 없는 기계에 받으면 이 일이 **매 명령**에 나므로,
     // 고치는 법까지 늘어놓으면 그 기계에서는 모든 출력에 안내문이 한 뭉치씩 붙는다.
-    if let Some(why) = ctx.zone_trouble() {
+    //
+    // **`--json` 으로 넘어진 길에서는 안 댄다**(리뷰 moai-efoc.ln9) — 그 길의 stderr 는 기계의 것이라
+    // `main` 이 오류 객체 하나만 낸다(거기 적힌 "`--json` 은 빼고 댄다" 와 같은 까닭). 날로 친 때를 물은
+    // `show --since <날> --after <지운 id> --json` 이 시간대를 푼 뒤 넘어지던 자리다 — 그 앞에 사람 말 한 줄이
+    // 서면 `code` 로 가르던 고리가 파싱 실패를 만난다.
+    if let Some(why) = ctx.zone_trouble()
+        && !(ctx.json && out.is_err())
+    {
         eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
     }
     out
