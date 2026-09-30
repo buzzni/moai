@@ -97,9 +97,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let rows = app.rows();
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
-    // 누군지 묻는 동안만 아랫줄이 둘이다 — 왜 묻는지와 다시 안 묻게 하는 법은 글칸
-    // 뒤에 붙이면 적는 글에 밀려 사라진다. 그 둘이 이 칸의 알맹이다.
-    let keys_h = if matches!(app.mode, Mode::Ask(_)) { 2 } else { 1 };
+    // 누군지 묻는 동안과 거름망을 적는 동안만 아랫줄이 둘이다. 묻는 칸은 왜 묻는지와 다시 안 묻게
+    // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
+    // 글에 밀려 사라진다.
+    let keys_h = if matches!(app.mode, Mode::Ask(_) | Mode::Filter(_)) { 2 } else { 1 };
     // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
     //
     // **창은 몸통을 밀어 올린다**(moai-apsa). 덮으면 커서가 선 줄이 창 밑에 숨어, 메뉴가 무엇에
@@ -219,15 +220,19 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
         Mode::Grep(q, g) => prompt(f, keys, &grep_label(*g, app.site.lang), q, app.input_error(), &grep_help(app, q)),
         Mode::Filter(q) => {
+            // **거름망은 내내 두 줄이다**(moai-tckz, 2026-09-30 사용자 결정). 거절문의 둘째 줄 — 이 칸에 그대로 칠
+            // 고칠 글(`status=todo,review`)이나 있는 항목의 목록 — 이 윗줄에 선다. 글칸 옆은 한 줄 자리라 첫 줄만
+            // 들어가서, 한 줄이던 때는 그 둘째 줄이 한 번도 안 그려졌다. 거절이 있을 때만 늘리면 치는 동안 거절이
+            // 서고 걷힐 때마다 목록이 한 줄씩 오르내린다.
+            let [more, line] = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(keys);
             let lang = app.site.lang;
-            prompt(
-                f,
-                keys,
-                say(lang, "tui.prompt.filter"),
-                q,
-                app.input_error(),
-                &prompt_help(say(lang, "tui.prompt.hang"), lang),
-            )
+            let error = app.input_error();
+            if let Some((_, rest)) = error.as_deref().and_then(|e| e.split_once('\n')) {
+                let rest = rest.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+                let text = clip(&format!(" {rest}"), more.width as usize);
+                f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::LightRed)))), more);
+            }
+            prompt(f, line, say(lang, "tui.prompt.filter"), q, error, &prompt_help(say(lang, "tui.prompt.hang"), lang))
         }
         Mode::Ask(ask) => {
             // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
@@ -1140,6 +1145,9 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
 /// 않는 까닭은 그 줄이 배너 자리라서다: 쓰기의 알림과 실패가 차례를 정해 서
 /// 있고(moai-064q), 치는 동안 매 키에 나타났다 사라지는 말이 거기 끼면 그 차례가
 /// 흔들린다. 무엇이 틀렸는지는 친 글 바로 옆에 있어야 읽힌다.
+///
+/// **여기는 오류의 첫 줄만 그린다.** 거름망은 둘째 줄(고칠 글)을 제 윗줄에 따로 그린다 — 배너가 아니라
+/// 거름망을 적는 동안만 서는 제 줄이다([`screen`] 의 `Mode::Filter`, moai-tckz).
 ///
 /// 안내(`help`)는 몫을 안 받는다 — Enter·Esc 는 한 번 읽으면 끝이고, 긴 글을
 /// 치는 사람에게는 글이 더 값지다. 그래서 오류가 서고 걷힐 때 긴 글의 조각이
@@ -8199,6 +8207,30 @@ pub(super) mod tests {
         assert_eq!(x, 9 + 10);
         let (row, _) = filter_line("tag=parser", 80);
         assert!(row.starts_with(" 거름망  tag=parser    Enter 걸기  Esc 그만"), "{row}");
+    }
+
+    /// **거름망은 거절문의 둘째 줄을 제 윗줄에 그린다**(moai-tckz). 한 줄이던 때는 글칸 옆에 첫 줄만 들어가,
+    /// 이 칸에 그대로 칠 고칠 글(`status=todo,review`)이 한 번도 화면에 안 섰다 — `input_error` 만 재던 시험은
+    /// 그동안 푸르렀다. 거절이 없어도 두 줄이라, 치는 동안 목록이 오르내리지 않는다.
+    #[test]
+    fn a_filter_refusal_draws_its_fix_above_the_prompt() {
+        let drawn = |q: &str| {
+            let mut a = app();
+            a.hit("SPC f");
+            for c in q.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            super::tests::render(&mut a, 120, 16)
+        };
+        let refused = drawn("status=todo status=review");
+        let (above, line) = (&refused[refused.len() - 2], &refused[refused.len() - 1]);
+        assert!(above.contains("`status=todo,review`"), "고칠 글이 안 그려졌다 — {above}");
+        assert!(line.contains("status=todo status=review") && !line.contains("status=todo,review"), "{line}");
+
+        let clean = drawn("status=todo");
+        assert!(clean[clean.len() - 2].trim().is_empty(), "거절이 없는데 윗줄에 무엇이 섰다 — {:?}", clean);
+        let floor = |ls: &[String]| ls.iter().rposition(|l| l.contains('└'));
+        assert_eq!(floor(&refused), floor(&clean), "거절이 서고 걷힐 때 목록이 오르내린다");
     }
 
     /// **좁으면 오류를 `…` 로 자르고 글칸은 남긴다.** 오류에 다 주면 틀렸다는 말만 있고

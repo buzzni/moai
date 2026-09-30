@@ -1131,7 +1131,7 @@ pub fn now() -> String {
 }
 
 /// 1970-01-01 부터의 날 수를 (년, 월, 일) 로. Howard Hinnant 의 `civil_from_days`.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -1151,7 +1151,7 @@ pub fn format_rfc3339(secs: i64) -> String {
     format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y.rem_euclid(400);
@@ -1243,7 +1243,7 @@ pub fn parse_instant(s: &str) -> Option<i64> {
 }
 
 /// 그 달의 날수 — 윤년은 그레고리력 그대로다.
-fn days_in_month(y: i64, mo: u32) -> u32 {
+pub(crate) fn days_in_month(y: i64, mo: u32) -> u32 {
     match mo {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,

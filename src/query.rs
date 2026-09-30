@@ -393,8 +393,10 @@ pub struct Filter {
 /// 설정(`config::Trouble`)이 자료만 내고 `view` 가 펴는 것과 같은 꼴이다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BadFilter {
-    /// 한 번만 쓰는 거르개를 두 번 썼다 — `-s todo -s review`. `a`·`b` 는 앞의 두 값이다.
-    Twice { field: Once, a: String, b: String },
+    /// 한 번만 쓰는 거르개를 두 번 썼다 — `-s todo -s review`. `a`·`b` 는 앞의 두 값이고, `rest` 는 그 뒤의 값이다.
+    /// **셋째부터도 든다**(리뷰 moai-efoc.3e1) — 앞의 둘만 들던 판은 `-s todo -s review -s done` 에 `-s todo,review` 를
+    /// 대어, 그대로 친 사람이 done 의 줄을 말없이 잃었다.
+    Twice { field: Once, a: String, b: String, rest: Vec<String> },
     /// `--done` 에 done 을 안 든 `-s` 를 함께 줬다 — 두 거르개에 함께 걸리는 줄이 없다. `asked` 는 `-s` 의
     /// 값을 쉼표로 이은 것이다.
     DoneOutside { asked: String },
@@ -444,6 +446,19 @@ impl Once {
             Once::Assignee => "-a",
         }
     }
+
+    /// 그 거르개의 항목 이름 — `--filter`·탐색기 거름망의 `항목=값` 에서 `=` 앞에 서는 낱말이다([`KEYS`]).
+    /// 거름망의 거절문이 고쳐 칠 글을 이것으로 짓는다(moai-tckz).
+    pub fn key(self) -> &'static str {
+        match self {
+            Once::Status => "status",
+            Once::Epic => "epic",
+            Once::Milestone => "milestone",
+            Once::Parent => "parent",
+            Once::Priority => "priority",
+            Once::Assignee => "assignee",
+        }
+    }
 }
 
 /// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
@@ -452,7 +467,7 @@ fn once(values: &[String], field: Once) -> Result<Vec<String>, BadFilter> {
     match values {
         [] => Ok(Vec::new()),
         [one] => Ok(csv(one)),
-        [a, b, ..] => Err(BadFilter::Twice { field, a: a.clone(), b: b.clone() }),
+        [a, b, rest @ ..] => Err(BadFilter::Twice { field, a: a.clone(), b: b.clone(), rest: rest.to_vec() }),
     }
 }
 
@@ -1475,9 +1490,27 @@ mod tests {
     #[test]
     fn repeating_status_is_a_friendly_error() {
         let e = Filter::build(Raw { status: s(&["todo", "review"]), all: true, ..Raw::default() }).unwrap_err();
-        assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() });
+        assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec![] });
+        // 셋째부터도 든다 — 고칠 글이 그것을 빼면 그대로 친 사람이 그 줄을 잃는다.
+        let e = Filter::build(Raw { status: s(&["todo", "review", "done"]), all: true, ..Raw::default() }).unwrap_err();
+        assert_eq!(
+            e,
+            BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] }
+        );
         // 고쳐 칠 명령(`-s todo,review`)은 글을 펴는 쪽이 갈래마다 잰다
         // (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`).
+    }
+
+    /// **`Once::key` 는 `desugar` 가 그 거르개로 읽는 낱말이다**(moai-tckz). 거름망의 거절문이 이 낱말로 고쳐 칠
+    /// 글을 짓는다 — 둘이 어긋나면 `parent=a,b` 를 대고 그 글이 우선순위나 모르는 항목으로 읽힌다.
+    #[test]
+    fn each_once_key_reads_back_as_its_own_filter() {
+        use Once::*;
+        for field in [Status, Epic, Milestone, Parent, Priority, Assignee] {
+            let pairs = [format!("{}=1", field.key()), format!("{}=2", field.key())];
+            let e = Filter::build(Raw { filter: pairs.to_vec(), ..Raw::default() }).unwrap_err();
+            assert_eq!(e, BadFilter::Twice { field, a: "1".into(), b: "2".into(), rest: vec![] }, "{field:?}");
+        }
     }
 
     #[test]
@@ -1601,7 +1634,7 @@ mod tests {
     /// 한 뜻이라면 두 번 쓴 것을 나무라는 자리도 하나여야 한다.
     #[test]
     fn a_filter_string_stacks_with_the_flags_it_mirrors() {
-        let twice = BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() };
+        let twice = BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec![] };
         let e =
             Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() }).unwrap_err();
         assert_eq!(e, twice);
@@ -1742,7 +1775,7 @@ mod tests {
     #[test]
     fn repeating_assignee_is_a_friendly_error() {
         let e = Filter::build(Raw { assignee: s(&["철수", "영희"]), all: true, ..Raw::default() }).unwrap_err();
-        assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into() });
+        assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into(), rest: vec![] });
     }
 
     /// **때의 폭은 두 끝을 다 품고, 날은 하루를 통째로 품는다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로
