@@ -982,7 +982,10 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   know. It lays the history out and holds it against nothing: an id there
   may live again - created anew, or brought back with an older stamp the
   row list misses - and only the snapshot says whether it lives now.
-  --since is the one flag it takes.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 

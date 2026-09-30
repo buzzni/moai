@@ -254,6 +254,13 @@ the full compare below. It reads the journal beside the tracker only (other
 worktrees are not overlaid), takes `--since` and no other filter, and leaves out
 `rm --line`, which removed an unreadable line rather than an issue. A journal
 file moai cannot read is skipped, named on stderr, and the exit code is not 0.
+The same goes for a journal line it cannot read that may have held a removal —
+one cut short by a full disk or a crash: the list still comes out, the line is
+named on stderr by file and line, and the exit code is not 0. With `--since`
+only a line whose own stamp falls in the range, or cannot be read, counts, so
+one old cut line does not fail every later pass. moai never rewrites the
+journal, so look at what the line held and then delete it by hand. A whole line
+that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
 `moai show --all --json`, plus `moai idea show --all --json` since `--all` still

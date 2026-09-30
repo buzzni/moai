@@ -810,6 +810,15 @@ pub fn removed<'a>(
         .collect()
 }
 
+/// 저널의 못 푼 조각이 `--since` 의 폭에 들었을 수 있는가 — `moai show --removed` 가 그 조각을 댈지 가른다
+/// (moai-g8ho 리뷰). 조각이 도장을 댔으면 [`removed`] 와 같은 자로 재고, 못 읽었으면 들었을 수 있다.
+///
+/// **폭 밖의 조각은 대지 않는다.** 온전했어도 이 목록에 안 섰을 줄이라 빠진 것이 없다 — 대면 증분으로 받는
+/// 쪽은 오래전에 끊긴 줄 하나로 부를 때마다 실패하고, 도구 안에는 그 줄을 치울 길도 없다. 폭이 없으면 늘 댄다.
+pub fn may_fall_in(since: &[Vec<Span>], ts: Option<&str>, zone: Option<&crate::tz::Zone>) -> bool {
+    since.is_empty() || ts.and_then(parse_rfc3339).is_none_or(|t| spans_hold(since, Some(t), zone))
+}
+
 /// 플래그 되풀이는 그리고, 쉼표는 또는 — `--created a..b,c..d` 는 두 폭 가운데 하나다. `one` 이 한 조각을
 /// 폭으로 읽는다(`--since` 는 한 끝만, 나머지는 `from..to`).
 ///
@@ -1763,6 +1772,28 @@ mod tests {
         assert_eq!(pick(&["2026-10-01"], Some(&seoul)), ["a-0001"], "읽는 사람의 날로 안 쟀다");
         assert!(pick(&["2026-10-01"], None).is_empty(), "시간대 없이는 UTC 의 날이다");
         assert_eq!(pick(&["2026-09-29T00:00:00Z"], Some(&seoul)), ["a-0003", "a-0001"], "못 읽는 도장이 폭에 들었다");
+    }
+
+    /// **못 푼 조각은 온전했으면 섰을 폭에서만 댄다**(moai-g8ho 리뷰) — 도장을 읽었으면 [`removed`] 와 같은 자로
+    /// 재고, 못 읽었으면 들었을 수 있다. 폭이 없으면 늘 댄다.
+    #[test]
+    fn a_torn_line_counts_only_where_it_could_have_stood() {
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let may = |since: &[&str], ts: Option<&str>| {
+            let f = Filter::build(Raw { since: s(since), ..Raw::default() }).unwrap();
+            may_fall_in(&f.updated, ts, Some(&seoul))
+        };
+        assert!(may(&[], Some("2026-09-01T00:00:00Z")), "폭이 없는데 조각을 뺐다");
+        assert!(may(&[], None), "폭이 없는데 조각을 뺐다");
+        assert!(!may(&["2026-09-29T00:00:00Z"], Some("2026-09-28T23:59:59Z")), "폭 밖의 조각을 댔다");
+        assert!(may(&["2026-09-29T00:00:00Z"], Some("2026-09-29T00:00:00Z")), "폭 안의 조각을 뺐다");
+        // 서울의 10-01 은 UTC 로 09-30 15:00 부터다 — 날로 친 폭은 읽는 사람의 날로 잰다.
+        assert!(
+            may(&["2026-10-01"], Some("2026-09-30T15:00:00Z")) && !may(&["2026-10-01"], Some("2026-09-30T14:59:59Z"))
+        );
+        for unread in [None, Some("2026-09-1"), Some("어제")] {
+            assert!(may(&["2026-09-29T00:00:00Z"], unread), "못 읽는 도장의 조각을 뺐다: {unread:?}");
+        }
     }
 
     /// **때로 물으면 숨긴 줄을 다 연다**(2026-09-30 사용자 결정) — 그사이 닫힌 줄도 바뀐 줄이다. `--done` 은

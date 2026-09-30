@@ -732,6 +732,7 @@
   "show.removed_with_how": "only `--since` narrows it: `moai show --removed --since <when>`",
   "show.removed_garbled": "unreadable journal lines that may record a removal: {n} — this list may be missing them",
   "show.removed_garbled_at": "  {at}:{line}",
+  "show.removed_garbled_fix": "  moai only appends to the journal — see what that line held, then delete it by hand",
   "refuse.title_looks_like_a_flag": "`{title}` reads as a flag, not a title.",
   "refuse.title_after_dashes": "if it really is the title, put it after `--` — `moai {verb} -- {title}`",
   "refuse.title_after_equals": "if it really is the title, join it with `=` — `moai edit {id} --title={title}`",
