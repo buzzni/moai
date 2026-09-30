@@ -4815,6 +4815,29 @@ fn grep_finds_what_only_a_note_says() {
     assert!(!ok(s.path(), &["show", "-g", "사용자 결정", "--json"]).contains("둘째 길"), "노트 글이 줄에 실렸다");
 }
 
+/// **날로 친 때는 읽는 사람의 날이다**(moai-efoc, 2026-09-30 사용자 결정) — 서울의 10-01 05:00 에 만든 줄은
+/// 화면이 10-01 로 대므로 `--created 2026-10-01` 에 걸린다. `…Z` 로 친 때는 시간대가 안 옮긴다.
+#[test]
+fn a_bare_day_is_the_readers_day() {
+    let s = init("wallday");
+    let dawn = add_at(s.path(), "2026-09-30T20:00:00Z", &["서울의 새벽"]);
+    let picked = |tz: &str, created: &str| {
+        let out =
+            staged(&["show", "--created", created, "--json"]).current_dir(s.path()).env("TZ", tz).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        ids_in(&String::from_utf8_lossy(&out.stdout)).contains(&dawn)
+    };
+    assert!(picked("UTC", "2026-09-30") && !picked("UTC", "2026-10-01"), "UTC 에서는 09-30 이다");
+    assert!(picked("UTC", "2026-09-30T20:00:00Z"));
+    // **자료가 있는 기계에서만 잰다** — 기한 판정의 시험(moai-h2th)과 같은 까닭이다. 없는 기계에서는 UTC 로
+    // 떨어지므로 위의 줄이 답이고, 여기를 재면 "동작이 바뀐 것" 과 "자료가 없는 것" 을 못 가린다.
+    if std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+        assert!(picked("Asia/Seoul", "2026-10-01"), "서울의 그날 만든 줄이 그날에 안 걸렸다");
+        assert!(!picked("Asia/Seoul", "2026-09-30"), "서울에서 전날에 걸렸다");
+        assert!(picked("Asia/Seoul", "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
+    }
+}
+
 /// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.
 #[test]
 fn ready_takes_a_limit_and_keeps_the_count() {

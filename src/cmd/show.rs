@@ -275,6 +275,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let notes = journal.as_ref().map(notes_of);
     let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
     wh.notes = notes.as_ref();
+    // **날로 친 때는 읽는 사람의 날이다**(moai-efoc, 2026-09-30 사용자 결정) — 마일스톤 기한과 같은 시간대다.
+    // 날로 친 끝이 있을 때만 푼다: 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
+    if filter.needs_zone() {
+        wh.zone = Some(ctx.zone());
+    }
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
     // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.

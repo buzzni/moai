@@ -68,6 +68,11 @@ pub struct Where<'a> {
     /// (`None`, 탐색기와 `Where::default`) 노트를 안 본다 — 없는 노트와 안 읽은 노트를 가를 일이 이
     /// 모듈에는 없다. 상태 계산이 아니라 글 찾기라 "저널은 상태 계산에 안 읽힌다" 와 안 부딪친다.
     pub notes: Option<&'a Notes>,
+    /// 읽는 사람의 시간대(moai-efoc). `YYYY-MM-DD` 로 친 때의 끝([`End::Wall`])을 그 사람의 날로 재는
+    /// 재료다 — 마일스톤 기한이 `report::Dues::split` 에서 받는 것과 같은 값이다. **받는다**: 시간대를 푸는
+    /// 것은 명령 층이고, 날로 친 끝이 없으면 풀지도 않는다([`Filter::needs_zone`]). 안 실렸으면(`None`)
+    /// 도장 그대로, 곧 UTC 로 잰다.
+    pub zone: Option<&'a crate::tz::Zone>,
 }
 
 /// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
@@ -140,7 +145,7 @@ impl<'a> Where<'a> {
             all.iter().zip(&shelved).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
         let shelved = crate::report::Shelved::kept(roots, split, rows);
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded, notes: None }
+        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded, notes: None, zone: None }
     }
 
     /// 그 줄의 노트 가운데 `q` 가 든 것이 있는가(moai-efoc.zyc). `q` 는 이미 소문자다([`Filter::build`]).
@@ -471,6 +476,12 @@ impl Filter {
         })
     }
 
+    /// 읽는 사람의 시간대가 있어야 답하는가 — `YYYY-MM-DD` 로 친 때가 있다([`End::Wall`]). 없으면 부르는 쪽이
+    /// 시간대를 풀지 않는다: 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
+    pub fn needs_zone(&self) -> bool {
+        [&self.updated, &self.created, &self.done].iter().any(|v| v.iter().flatten().any(Span::walled))
+    }
+
     /// 기본 목록이 이 줄을 숨기는가, 숨긴다면 **어느 한 낱말이 그것을 여는가.**
     ///
     /// **숨김 규칙은 여기 하나다.** `matches` 도 이것으로 거르고, 숨긴 수를
@@ -594,8 +605,10 @@ impl Filter {
         // 못 읽는 시각은 **어느 폭에도 안 든다** — 손으로 고친 줄의 `updated_at` 이 깨졌으면 그 줄이 그
         // 뒤에 바뀌었는지 모른다. 폭을 안 물었으면(빈 목록) **시각을 풀지도 않는다** — 인자는 부르기 전에
         // 셈해지고(위의 `--milestone` 과 같은 까닭), 탐색기의 거름망은 키 하나에 줄마다 여기를 지난다.
+        // 날로 친 끝은 읽는 사람의 벽시계로 견준다([`End::Wall`]) — 시간대가 안 실렸으면(`None`) 도장 그대로다.
+        let wall = |t: i64| wh.zone.map_or(t, |z| z.local(t));
         let within = |spans: &[Vec<Span>], at: Option<i64>| {
-            spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t))))
+            spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t, wall(t)))))
         };
         if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
             return false;
@@ -618,16 +631,50 @@ impl Filter {
     }
 }
 
-/// 때 한 폭 — **두 끝이 다 든다**(moai-efoc.ip5). epoch 초다. 끝이 없으면 그쪽으로 열렸다.
+/// 때 한 폭 — **두 끝이 다 든다**(moai-efoc.ip5). 끝이 없으면 그쪽으로 열렸다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    pub from: Option<i64>,
-    pub to: Option<i64>,
+    pub from: Option<End>,
+    pub to: Option<End>,
+}
+
+/// 폭의 한 끝 — **무엇과 견주는지가 끝마다 다르다**(moai-efoc, 2026-09-30 사용자 결정).
+///
+/// - `At` 은 `…T…Z` 로 친 한 순간이다 — UTC epoch 초로 줄의 도장과 곧바로 견준다
+/// - `Wall` 은 `YYYY-MM-DD` 로 친 날의 끝이다 — **읽는 사람의 벽시계**로 잰 epoch 초 꼴이라, 줄의 도장도
+///   그 사람의 시간대로 옮겨(`tz::Zone::local`) 견준다. 사람이 치는 날은 제 날이고, 상세가 대는 날짜와
+///   마일스톤 기한(moai-h2th)도 그 날로 선다 — UTC 로 재면 서울의 0~9시에 만든 줄을 화면은 그날이라 대는데
+///   `--created <그날>` 에는 안 걸렸다. 시간대는 [`Where::zone`] 이 든다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum End {
+    At(i64),
+    Wall(i64),
+}
+
+impl End {
+    /// 이 끝과 견줄 줄의 값과 이 끝의 값 — `utc` 는 줄의 도장, `wall` 은 그것을 읽는 사람의 벽시계로 옮긴 것.
+    fn against(self, utc: i64, wall: i64) -> (i64, i64) {
+        match self {
+            End::At(e) => (utc, e),
+            End::Wall(e) => (wall, e),
+        }
+    }
 }
 
 impl Span {
-    fn holds(&self, t: i64) -> bool {
-        self.from.is_none_or(|f| t >= f) && self.to.is_none_or(|e| t <= e)
+    fn holds(&self, utc: i64, wall: i64) -> bool {
+        self.from.is_none_or(|f| {
+            let (v, e) = f.against(utc, wall);
+            v >= e
+        }) && self.to.is_none_or(|t| {
+            let (v, e) = t.against(utc, wall);
+            v <= e
+        })
+    }
+
+    /// 읽는 사람의 날로 잰 끝이 있는가 — 있으면 시간대를 풀어야 한다([`Filter::needs_zone`]).
+    fn walled(&self) -> bool {
+        [self.from, self.to].iter().any(|e| matches!(e, Some(End::Wall(_))))
     }
 
     /// `--since <때>` — 그때부터 열린 폭. `..` 를 받지 않는다: 한 끝만 받는 플래그다.
@@ -650,8 +697,9 @@ impl Span {
                 (from, to)
             }
         };
-        // 거꾸로 선 폭은 늘 0건이다 — 조용히 0건을 내면 "그때는 아무것도 없었다" 와 안 갈린다.
-        if let (Some(f), Some(t)) = (from, to)
+        // 거꾸로 선 폭은 늘 0건이다 — 조용히 0건을 내면 "그때는 아무것도 없었다" 와 안 갈린다. 두 끝의 자가
+        // 다르면(날과 순간) 시간대를 모르는 여기서는 못 견준다 — 하루 안쪽의 어긋남이라 넘긴다.
+        if let (Some(End::At(f)), Some(End::At(t))) | (Some(End::Wall(f)), Some(End::Wall(t))) = (from, to)
             && f > t
         {
             return Err(format!("`{raw}` 는 끝이 앞보다 이르다"));
@@ -660,21 +708,21 @@ impl Span {
     }
 }
 
-/// 때 한 끝 — `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ`. **날은 UTC 의 하루다**(moai-efoc.ip5 사용자 결정) —
-/// 읽는 사람의 날이 아니다. 상세의 생성·끝 시각과 마일스톤 기한(`report::Dues::split`, moai-h2th)은 읽는
-/// 사람의 시간대로 서므로, UTC 보다 앞선 곳(서울의 0~9시)에서는 화면이 대는 날과 하루 어긋난다 — 그 결정이
-/// 댄 "마일스톤 기한과 같은 자" 는 moai-h2th 뒤로 참이 아니다. 정확히 재려면 `…T…Z` 를 준다.
+/// 때 한 끝 — `YYYY-MM-DDTHH:MM:SSZ` 면 그 순간([`End::At`]), `YYYY-MM-DD` 면 **읽는 사람의 그날**
+/// ([`End::Wall`], 2026-09-30 사용자 결정). 처음에는 UTC 의 하루로 정했는데 그 결정이 댄 "마일스톤 기한과
+/// 같은 자" 는 moai-h2th 뒤로 참이 아니었다 — 기한과 상세의 날짜는 읽는 사람의 시간대로 선다. 바로잡은
+/// 물음에 사람이 다시 골랐다.
 ///
 /// 여는 끝이면 그날 0시, 닫는 끝(`end`)이면 그날의 마지막 초라 `..2026-09-15` 가 15일을 통째로 품는다. 두
 /// 꼴 다 없는 날(`2026-02-30`)과 부호를 거절한다 — 사람이 이번에 치는 값이라 엄한 자(`parse_date`·
 /// `parse_instant`)로 잰다. 파일을 읽는 관대한 자(`parse_rfc3339`)로 재면 오타가 말없이 옆 날로 샌다.
-fn instant(raw: &str, end: bool) -> Result<i64, String> {
+fn instant(raw: &str, end: bool) -> Result<End, String> {
     let raw = raw.trim();
     if let Some(t) = parse_instant(raw) {
-        return Ok(t);
+        return Ok(End::At(t));
     }
     match parse_date(raw) {
-        Some(day) => Ok(day * 86_400 + if end { 86_399 } else { 0 }),
+        Some(day) => Ok(End::Wall(day * 86_400 + if end { 86_399 } else { 0 })),
         None => Err(format!("`{raw}` 는 때가 아니다. `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ` 다")),
     }
 }
@@ -1543,15 +1591,17 @@ mod tests {
     #[test]
     fn a_time_span_holds_both_ends_and_a_day_is_whole() {
         let t = |s: &str| parse_rfc3339(s).unwrap();
+        // 시간대 없이(UTC) 잰다 — 벽시계가 도장과 같다.
+        let at = |span: &Span, s: &str| span.holds(t(s), t(s));
         let range = Span::parse("2026-09-02..2026-09-03").unwrap();
-        assert!(range.holds(t("2026-09-02T00:00:00Z")) && range.holds(t("2026-09-03T23:59:59Z")), "끝을 안 품었다");
-        assert!(!range.holds(t("2026-09-01T23:59:59Z")) && !range.holds(t("2026-09-04T00:00:00Z")), "폭 밖을 품었다");
+        assert!(at(&range, "2026-09-02T00:00:00Z") && at(&range, "2026-09-03T23:59:59Z"), "끝을 안 품었다");
+        assert!(!at(&range, "2026-09-01T23:59:59Z") && !at(&range, "2026-09-04T00:00:00Z"), "폭 밖을 품었다");
         let one = Span::parse("2026-09-02").unwrap();
-        assert!(one.holds(t("2026-09-02T12:00:00Z")) && !one.holds(t("2026-09-03T00:00:00Z")), "한 날이 하루가 아니다");
+        assert!(at(&one, "2026-09-02T12:00:00Z") && !at(&one, "2026-09-03T00:00:00Z"), "한 날이 하루가 아니다");
         assert_eq!(Span::parse("..2026-09-02").unwrap().from, None, "빈 앞끝이 열리지 않았다");
         assert_eq!(
             Span::parse("2026-09-02T01:02:03Z..").unwrap(),
-            Span { from: Some(t("2026-09-02T01:02:03Z")), to: None }
+            Span { from: Some(End::At(t("2026-09-02T01:02:03Z"))), to: None }
         );
         // 조용히 0건을 내는 대신 거절한다 — 오타와 "그때는 없었다" 가 안 갈린다.
         for bad in ["..", "2026-02-30", "어제", "2026-9-2", "2026-09-03..2026-09-02"] {
@@ -1570,6 +1620,35 @@ mod tests {
             assert!(Span::parse(bad).is_err(), "{bad} 를 받았다");
         }
         assert!(Span::since("2026-02-30T00:00:00Z").is_err(), "--since 가 없는 날을 받았다");
+    }
+
+    /// **날로 친 때는 읽는 사람의 날이고, 시각으로 친 때는 그 순간이다**(moai-efoc, 2026-09-30 사용자 결정) —
+    /// 서울의 10-01 05:00 은 UTC 로 09-30 20:00 이다. 화면은 그 줄을 10-01 에 만든 것으로 대므로
+    /// `--created 2026-10-01` 에 걸려야 한다. `…Z` 로 친 끝은 시간대와 무관하다.
+    #[test]
+    fn a_day_is_the_readers_day_and_an_instant_is_utc() {
+        let mut dawn = issue("a-0001", "todo", &[]);
+        dawn.created_at = "2026-09-30T20:00:00Z".into();
+        let all = vec![dawn];
+        let c = cfg();
+        let seoul = crate::tz::Zone::fixed("Asia/Seoul", 9 * 3600);
+        let pick = |zone: Option<&crate::tz::Zone>, created: &str| {
+            let f = Filter::build(Raw { created: s(&[created]), ..Raw::default() }).unwrap();
+            let mut wh = Where::of(&all, &c);
+            wh.zone = zone;
+            all.iter().any(|i| f.matches(i, NOW, &wh))
+        };
+        assert!(pick(Some(&seoul), "2026-10-01"), "서울의 그날 만든 줄이 그날에 안 걸렸다");
+        assert!(!pick(Some(&seoul), "2026-09-30"), "서울에서 전날에 걸렸다");
+        assert!(pick(None, "2026-09-30") && !pick(None, "2026-10-01"), "시간대 없이는 UTC 의 날이다");
+        // 순간으로 친 끝은 시간대가 안 옮긴다.
+        assert!(pick(Some(&seoul), "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
+        assert!(!pick(Some(&seoul), "2026-09-30T20:00:01Z.."), "시각 끝을 시간대로 옮겼다");
+        // 날로 친 끝이 있을 때만 시간대를 푼다.
+        let needs = |raw: Raw| Filter::build(raw).unwrap().needs_zone();
+        assert!(needs(Raw { since: s(&["2026-10-01"]), ..Raw::default() }));
+        assert!(!needs(Raw { since: s(&["2026-10-01T00:00:00Z"]), ..Raw::default() }));
+        assert!(!needs(Raw::default()));
     }
 
     /// **때로 물으면 숨긴 줄을 다 연다**(2026-09-30 사용자 결정) — 그사이 닫힌 줄도 바뀐 줄이다. `--done` 은

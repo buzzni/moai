@@ -412,6 +412,8 @@ impl Ground {
             // **탐색기는 아직 노트를 안 싣는다**(moai-efoc.zyc, 2026-09-30 사용자 결정) — `/` 의 전체 범위는
             // 스냅샷만 본다. 싣는 날(moai-wcy8)이 이 한 줄이다.
             notes: None,
+            // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
+            zone: None,
         }
     }
 }
@@ -2412,7 +2414,10 @@ impl App {
         let now = self.site.now.clone();
         // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
         // (`Ground::here` 의 `lines` 는 `--milestone` 을 묻는 거르개만 짓는다 — 그 doc 에 까닭이 있다.)
-        let wh = self.site.ground.here(&self.site.issues);
+        let mut wh = self.site.ground.here(&self.site.issues);
+        // **날은 보는 사람의 날이다**(moai-efoc) — `SPC f` 의 `since=2026-09-30` 도 CLI 의 `--since` 와 같은 날을
+        // 가리킨다. 화면이 시각을 그리는 그 시간대다.
+        wh.zone = Some(&self.zone);
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.filter_text = Some(match mode {
             Mode::Grep(_, GrepIn::All) => format!("/{text}"),

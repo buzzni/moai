@@ -948,9 +948,10 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
-  open, or a single day. <when> is YYYY-MM-DD, a UTC day and not the local
-  date the screen prints (the end of a range takes that whole day), or
-  YYYY-MM-DDTHH:MM:SSZ. --done looks at rows standing in done now, at the
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone at the time its last
   member got to done; deferring or removing the rest later does not move
   it. Asking by time opens what the list hides by default - done, deferred

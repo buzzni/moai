@@ -213,9 +213,10 @@ below shrink is the output, and with it the tokens.
   is the one order no edit moves. The output stays a bare array — fewer rows
   than `-n` means the list has ended.
 - `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
-  and `--created` and `--done` take a range `from..to`. Asking by time opens
-  what the list hides by default — done, deferred and ideas — since a row closed
-  meanwhile changed too.
+  and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
+  a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
+  is an instant in UTC. Asking by time opens what the list hides by default —
+  done, deferred and ideas — since a row closed meanwhile changed too.
 - `-g` looks through the notes and move messages as well as the id, title, tags
   and body.
 
