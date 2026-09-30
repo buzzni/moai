@@ -2977,7 +2977,8 @@ fn journal_file(dir: &Path) -> PathBuf {
 /// 저널 전부 — 옛 한 파일과 `.moai/journal/` 의 파일을 이름 차례로 잇는다(moai-b7cq).
 ///
 /// **파일이 여럿인 것이 정상 꼴이라** 시험도 한 파일을 집지 않는다. 차례는 `Repo::journal_files`
-/// 와 같다: 옛 한 파일이 먼저, 그다음 이름 순.
+/// 와 같다: 옛 한 파일이 먼저, 그다음 이름 순. **링크로 이은 파일은 안 접는다** — `journal_files` 는 푼 자리가
+/// 같은 파일을 한 번만 읽지만(moai-p9mq) 이것은 이름마다 읽으니, 저널에 링크를 거는 시험은 이것으로 줄을 세지 않는다.
 fn journal(dir: &Path) -> String {
     let mut out = std::fs::read_to_string(dir.join(".moai/journal.jsonl")).unwrap_or_default();
     let mut split: Vec<PathBuf> = std::fs::read_dir(dir.join(".moai/journal"))

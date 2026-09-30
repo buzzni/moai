@@ -560,7 +560,9 @@ impl Repo {
         self.dir().join("journal")
     }
 
-    /// 읽을 저널 파일 전부 — 옛 한 파일이 먼저, 그다음 [`Repo::journal_dir`] 의 것이 이름 차례로.
+    /// 저널 자리의 이름 전부 — 옛 한 파일이 먼저, 그다음 [`Repo::journal_dir`] 의 것이 이름 차례로. 링크로
+    /// 이은 이름을 아직 안 접은 목록이라, 읽는 쪽은 [`Repo::journal_files`] 를 부르고 이것을 바로 쓰는 것은
+    /// 표식([`Repo::journal_marks`])뿐이다.
     ///
     /// **차례가 계약이다.** 같은 `ts` 를 든 줄은 [`Repo::journal_by_id`] 의 안정 정렬이 읽은
     /// 차례 그대로 두므로, 파일 차례가 흔들리면 같은 저장소에서 부를 때마다 이력의 차례가
@@ -579,7 +581,7 @@ impl Repo {
     /// 찰 때까지 읽는다), 탐색기는 이 읽기를 루프에서도 부른다. 없는 자리와 못 잰 자리는 그대로 든다 — 없으면
     /// 읽는 쪽이 넘기고 표식([`Repo::journal_marks`])이 나중에 생긴 것을 알아채며, 못 잰 까닭은 읽는 쪽이
     /// 센다([`note_unread`]).
-    fn journal_files(&self) -> Vec<PathBuf> {
+    fn journal_names(&self) -> Vec<PathBuf> {
         let legacy = self.journal_path();
         let mut out = match std::fs::metadata(&legacy) {
             Ok(m) if !m.is_file() => Vec::new(),
@@ -626,7 +628,40 @@ impl Repo {
         out
     }
 
-    /// 저널의 표식 — [`Repo::journal_dir`] 디렉터리 자체와, [`Repo::journal_files`] 가 읽는 파일마다
+    /// 읽을 저널 파일 — [`Repo::journal_names`] 에서 **푼 자리가 같은 파일을 한 번만** 남긴다(moai-p9mq).
+    ///
+    /// 메일을 바꾼 사람이 옛 `<메일>.jsonl` 을 새 파일로 이어 두면 `journal_names` 의 `metadata` 가 링크를
+    /// 따라가 둘 다 보통 파일로 보여, 같은 줄이 이력·`-g`·`show --removed` 에 두 번 서고 `work` 는 토큰을 두 번
+    /// 더했다. 쓰기([`append_inside`])는 링크를 따라 한 파일에만 드니 읽기도 그 한 파일로 센다. 차례는 이름
+    /// 목록의 것이고, 한 파일은 **처음 만난 이름의 자리**에 선다.
+    ///
+    /// **링크 이름은 푼 자리로 바꿔 둔다**(리뷰 moai-7dmq.j2a). 링크 철자를 남기면 둘이 샌다. 목록을 짓고 읽기
+    /// 전에 그 링크가 사라지면(체크아웃·머지가 갈아끼운다) 읽는 쪽이 없는 자리로 넘겨, 멀쩡히 선 끝 파일의 이력이
+    /// 말없이 빠졌다. 또 못 푼 조각의 자리(`Garbled.at`)와 못 읽은 자리가 링크를 대, 그것을 보고 `sed -i` 로
+    /// 고치면 링크가 보통 파일로 갈려 겹침이 영영 돌아왔다. 보통 파일의 이름은 받은 철자 그대로다 — 조상에 링크가
+    /// 있는 뿌리에서 모든 자리가 다른 철자로 나가지 않게 한다.
+    ///
+    /// 푸는 자는 [`crate::path::real`] 이라 풀지 못한 자리(없는 옛 한 파일, 제 자리를 가리키는 링크, 그 사이에
+    /// 사라진 파일)는 받은 철자 그대로 들어 다른 파일과 접히지 않는다 — 읽는 쪽이 넘기거나 센다. 빼면 못 읽은
+    /// 까닭이 말없이 사라진다.
+    ///
+    /// **하드 링크는 못 접는다** — 풀어도 이름이 둘이다. 그 링크를 건 체크아웃에서는 같은 줄이 두 번 서고, git 은
+    /// 하드 링크를 싣지 않아 받은 저장소에서는 같은 줄을 든 보통 파일 둘로 선다. 그 둘은 어느 접기로도 못 잡는다.
+    fn journal_files(&self) -> Vec<PathBuf> {
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::new();
+        for p in self.journal_names() {
+            let real = crate::path::real(&p);
+            if !seen.insert(real.clone()) {
+                continue;
+            }
+            let link = std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink());
+            out.push(if link { real } else { p });
+        }
+        out
+    }
+
+    /// 저널의 표식 — [`Repo::journal_dir`] 디렉터리 자체와, [`Repo::journal_names`] 의 이름마다
     /// (moai-wcy8.403). 탐색기가 노트를 읽고(`tui::Ground::read_notes`) 이것으로 다시 읽을 때를 안다 —
     /// `moai note` 는 스냅샷을 안 바꾸므로 스냅샷 표식만 보면 새 노트가 영영 안 실린다.
     ///
@@ -637,11 +672,15 @@ impl Repo {
     /// **디렉터리는 훑기 전에 잰다**(리뷰 moai-wcy8.rbj) — `worktree::heads` 가 제 디렉터리를 재는 차례와
     /// 같다. 훑고 나서 재면 그 사이에 생긴 `<메일>.jsonl` 이 목록에는 없는데 디렉터리의 표식은 이미 그것을 센
     /// 뒤라, 그 사람이 이어 적는 노트를 걸음이 다음 시계까지 못 알아챈다.
+    ///
+    /// **접기 전의 이름을 잰다**(리뷰 moai-7dmq.j2a) — [`Repo::journal_files`] 가 접어 뺀 링크가 다른 파일로
+    /// 옮겨 가도 그 이름의 표식은 바뀐다. 접은 목록만 재면 그 옮김을 걸음이 다음 강제 다시 읽기까지 못
+    /// 알아챈다. [`stamp`] 는 링크를 따라가니 같은 파일을 두 번 재는 셈이지만, 표식은 견주기만 하니 겹쳐도 된다.
     pub fn journal_marks(&self) -> Vec<(PathBuf, Stamp)> {
         let dir = self.journal_dir();
         let dir_stamp = stamp(&dir);
         let mut out = vec![(dir, dir_stamp)];
-        out.extend(self.journal_files().into_iter().map(|p| {
+        out.extend(self.journal_names().into_iter().map(|p| {
             let s = stamp(&p);
             (p, s)
         }));
@@ -1476,7 +1515,7 @@ fn note_unread(root: &Path, at: &Path, err: &std::io::Error) {
 /// **가르는 것은 고칠 수 있는가다.** `permission` 하나만 따로 세우는 까닭은 그것이 `chmod` 한
 /// 줄로 풀리는 유일한 갈래여서고, 나머지는 받는 쪽이 할 일이 같다. 없는 저널은 고장이 아니라
 /// [`Repo::journal_files`] 와 [`Repo::journal_by_id`] 가 그냥 넘기므로 `NotFound` 는 거의 안
-/// 온다 — `journal/` 안의 끊긴 심볼릭 링크가 [`Repo::journal_files`] 의 `metadata` 에서 하나
+/// 온다 — `journal/` 안의 끊긴 심볼릭 링크가 [`Repo::journal_names`] 의 `metadata` 에서 하나
 /// 들어오는데, 그것도 `chmod` 로는 안 풀리니 `failed` 가 제자리다.
 fn unread_kind(err: &std::io::Error) -> &'static str {
     match err.kind() {
@@ -2781,6 +2820,101 @@ mod tests {
         assert_eq!(once[0].kind, "permission", "{once:?}");
         assert!(theirs_hist.is_empty());
         assert_eq!(twice.len(), 1, "같은 파일을 두 번 셌다");
+    }
+
+    /// **링크가 가리키는 저널은 한 번만 읽는다**(moai-p9mq). 메일을 바꾼 사람이 옛 `<메일>.jsonl` 을 새
+    /// 파일로 이어 두면 `metadata` 가 링크를 따라가 둘 다 보통 파일로 보여, 같은 줄이 이력·`-g`·`work`·
+    /// `show --removed` 에 두 번 섰다 — `work` 는 토큰을 두 번 더했다. 옛 한 파일이 링크인 경우도 같다.
+    ///
+    /// 남의 파일은 제 줄대로 선다 — 푼 자리가 다른 파일까지 하나로 접으면 이력을 잃는다.
+    ///
+    /// **두 단계로 나눠 본다**(리뷰) — 옛 한 파일은 늘 먼저 만나므로, 그 링크를 처음부터 세우면 `journal/` 안의
+    /// 링크끼리 접히는 경우(moai-p9mq 가 겨눈 경우)와 거기서 한 파일이 어느 자리에 서는지가 통째로 가려진다.
+    /// 그때는 두 링크를 지워도, 남는 철자를 바꿔도 이 시험이 푸르렀다.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_reached_through_a_link_is_read_once() {
+        let (r, _d) = repo("journal-link");
+        let mine = crate::model::someone("raven");
+        let theirs = crate::model::someone("other");
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::note("argos-4aex", "model: anthropic/opus-5 tokens=100", T, &mine)], ()))
+            },
+        )
+        .unwrap();
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |_, _, _| {
+                Ok((
+                    vec![
+                        JournalEntry::removed("argos-0002", "둘", T, &mine),
+                        JournalEntry::note("argos-4aex", "남", T, &theirs),
+                    ],
+                    (),
+                ))
+            },
+        )
+        .unwrap();
+        let name = journal_file(&mine.email).unwrap();
+        let real = crate::path::real(&r.journal_dir().join(&name));
+        let old = r.journal_dir().join("0-old.jsonl");
+        let late = r.journal_dir().join("zzz-old.jsonl");
+        let other = r.journal_dir().join(journal_file(&theirs.email).unwrap());
+        // 줄은 두 단계 모두 한 번씩이다 — 달라지는 것은 한 파일이 서는 자리뿐이다.
+        let read_once = |step: &str| {
+            let hist: Vec<_> = r.journal_of("argos-4aex").into_iter().filter_map(|e| e.text).collect();
+            assert_eq!(
+                hist,
+                ["model: anthropic/opus-5 tokens=100", "남"],
+                "{step}: 링크가 가리키는 저널을 다시 읽었거나 남의 줄을 잃었다"
+            );
+            let removed: Vec<String> = r.journal_of_kind("rm").0.into_iter().map(|e| e.id).collect();
+            assert_eq!(removed, ["argos-0002"], "{step}: 지운 줄이 두 번 섰다");
+            r.journal_files()
+        };
+
+        // 첫 단계는 `journal/` 안의 링크뿐이다 — 이름 차례로 제 끝의 앞과 뒤에 하나씩.
+        std::os::unix::fs::symlink(&name, &old).unwrap();
+        std::os::unix::fs::symlink(&name, &late).unwrap();
+        // **처음 만난 이름의 자리에 푼 자리가 선다** — 링크 철자로 두면 읽기 전에 그 링크가 사라질 때 끝 파일의
+        // 이력이 말없이 빠진다. 아직 없는 옛 한 파일은 못 풀어도 접지 않고 남는다.
+        assert_eq!(read_once("journal/ 안의 링크"), [r.journal_path(), real.clone(), other.clone()]);
+        // 표식은 접기 전의 이름을 다 잰다 — 접어 뺀 링크가 다른 파일로 옮겨 가도 알아챈다.
+        let marked: Vec<PathBuf> = r.journal_marks().into_iter().map(|(p, _)| p).collect();
+        let names = [r.journal_dir(), r.journal_path(), old, other.clone(), r.journal_dir().join(&name), late];
+        assert_eq!(marked, names);
+
+        // 옛 한 파일도 같은 파일로 이으면 맨 앞의 그 자리에 선다.
+        std::os::unix::fs::symlink(format!("journal/{name}"), r.journal_path()).unwrap();
+        assert_eq!(read_once("옛 한 파일의 링크"), [real, other]);
+    }
+
+    /// **못 푼 옛 한 파일은 접지 않고 읽는 쪽에 넘긴다**(리뷰) — 목록에서 빼면 읽는 쪽이 그 자리를 못 만나
+    /// 못 읽은 까닭([`journal_unread`])도 안 선다. 제 자리를 가리키는 링크는 `metadata` 도 푸는 것도 ELOOP 로
+    /// 지는데, 그 이력이 빠진 화면이 stderr 한 줄 없이 0 으로 끝나면 moai-6ney 가 막은 조용한 손실이다.
+    ///
+    /// `journal/` 이 있어야 접는 걸음까지 간다 — 없으면 [`Repo::journal_files`] 가 그 앞에서 돌아온다.
+    #[cfg(unix)]
+    #[test]
+    fn an_old_journal_that_cannot_be_resolved_is_still_told() {
+        let (r, d) = repo("journal-loop");
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &crate::model::someone("raven"))], ()))
+            },
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("journal.jsonl", r.journal_path()).unwrap();
+
+        let got = r.journal_of("argos-4aex");
+        assert_eq!(got.len(), 1, "제 파일의 이력을 잃었다: {got:?}");
+        let told = unread_under(d.path());
+        assert!(told.iter().any(|u| u.at == r.journal_path()), "못 푼 옛 한 파일을 말없이 뺐다 — {told:?}");
     }
 
     /// **메일이 없으면 아무것도 안 쓴다**(moai-nzlo, 2026-09-21 사용자 결정). `unknown.jsonl` 도,
