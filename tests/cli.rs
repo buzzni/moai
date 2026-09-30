@@ -4877,6 +4877,41 @@ fn show_removed_lists_what_rm_took_out() {
     assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
 }
 
+/// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 거절문을 한국어로 박아 지어, 아무것도
+/// 안 고른 기계(영어)의 화면과 `--json` 의 `error` 에도 한국어가 섰다. 목록과 `--removed` 가 같은 자로
+/// 거절하니 둘 다 잰다 — 고쳐 칠 명령은 말과 무관하게 그대로 선다.
+#[test]
+fn a_filter_refusal_speaks_the_chosen_language() {
+    let s = init("filterlang");
+    // `--removed` 는 거절하는 자리가 둘이다 — 항목을 가려내는 `desugar` 와 때를 읽는 `Filter::build`. 둘 다 잰다
+    // (리뷰 moai-efoc.ln9 — 앞의 것만 재던 시험은 뒤의 것이 말을 박아도 푸르렀다).
+    let cases: [(&[&str], &str); 5] = [
+        (&["show", "-s", "todo", "-s", "review"], "`-s todo,review`"),
+        (&["show", "--filter", "statu=todo"], "`statu`"),
+        (&["show", "--since", ".."], "`..`"),
+        (&["show", "--removed", "--filter", "since"], "`since`"),
+        (&["show", "--removed", "--since", "yesterday"], "`yesterday`"),
+    ];
+    for (args, names) in cases {
+        for json in [false, true] {
+            let mut args = args.to_vec();
+            if json {
+                args.push("--json");
+            }
+            for lang in [None, Some("en"), Some("ko")] {
+                let mut cmd = staged(&args);
+                with_lang(&mut cmd, lang);
+                let out = cmd.current_dir(s.path()).output().unwrap();
+                let err = String::from_utf8_lossy(&out.stderr);
+                assert!(!out.status.success(), "{args:?} 를 받았다 — {err}");
+                assert!(err.contains(names), "{args:?} ({lang:?}) 가 무엇을 거절했는지 안 댔다 — {err}");
+                assert!(!json || err.contains(r#""code":"bad_filter""#), "{args:?} — {err}");
+                assert_eq!(hangul(&err), lang == Some("ko"), "{args:?} ({lang:?}) 가 고른 말로 안 섰다 — {err}");
+            }
+        }
+    }
+}
+
 /// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
 /// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
 #[test]
@@ -4924,12 +4959,43 @@ fn a_bare_day_is_the_readers_day() {
     assert!(picked("UTC", "2026-09-30") && !picked("UTC", "2026-10-01"), "UTC 에서는 09-30 이다");
     assert!(picked("UTC", "2026-09-30T20:00:00Z"));
     // **자료가 있는 기계에서만 잰다** — 기한 판정의 시험(moai-h2th)과 같은 까닭이다. 없는 기계에서는 UTC 로
-    // 떨어지므로 위의 줄이 답이고, 여기를 재면 "동작이 바뀐 것" 과 "자료가 없는 것" 을 못 가린다.
-    if std::path::Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+    // 떨어지므로 위의 줄이 답이고, 여기를 재면 "동작이 바뀐 것" 과 "자료가 없는 것" 을 못 가린다. 자료의 자리는
+    // 바이너리가 읽는 자리로 본다 — `TZDIR` 이 먼저다(`tz::zoneinfo`, 리뷰 moai-efoc.ln9).
+    let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+    let seoul = tzdb.join("Asia/Seoul").exists();
+    if seoul {
         assert!(picked("Asia/Seoul", "2026-10-01"), "서울의 그날 만든 줄이 그날에 안 걸렸다");
         assert!(!picked("Asia/Seoul", "2026-09-30"), "서울에서 전날에 걸렸다");
         assert!(picked("Asia/Seoul", "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
     }
+    // **지운 줄도 같은 날로 잰다**(`show --removed`, 리뷰 moai-efoc.ln9) — 목록과 한 자(`query::spans_hold`)를
+    // 지나도 시간대를 얹는 문은 명령에 따로 있어, 여기서 안 재면 그 문을 걷어도 푸르다.
+    ok_at(s.path(), "2026-09-30T20:00:00Z", &["rm", &dawn]);
+    let removed = |tz: &str, since: &str| {
+        let out = staged(&["show", "--removed", "--since", since, "--json"])
+            .current_dir(s.path())
+            .env("TZ", tz)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"id\":\"{dawn}\""))
+    };
+    assert!(removed("UTC", "2026-09-30") && !removed("UTC", "2026-10-01"), "UTC 에서는 09-30 에 지웠다");
+    if seoul {
+        assert!(removed("Asia/Seoul", "2026-10-01"), "서울의 그날 지운 줄이 그날에 안 걸렸다");
+    }
+    // **넘어진 `--json` 의 stderr 는 오류 객체 하나다**(리뷰 moai-efoc.ln9) — 날로 친 때가 시간대를 푼 뒤에
+    // 넘어져도(`--after` 가 지운 id) "시간대를 모른다" 는 사람 말이 그 앞에 서지 않는다. 못 푸는 이름을 주면
+    // 자료가 있든 없든 그 줄이 날 자리다.
+    let out = staged(&["show", "--since", "2026-09-30", "--after", &dawn, "--json"])
+        .current_dir(s.path())
+        .env("TZ", "Mars/Olympus")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "지운 커서를 받았다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    one_json_value(&err);
+    assert!(err.contains(r#""code":"not_found""#), "{err}");
 }
 
 /// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.

@@ -72,8 +72,8 @@ pub struct Where<'a> {
     pub notes: Option<NoteView<'a>>,
     /// 읽는 사람의 시간대(moai-efoc). `YYYY-MM-DD` 로 친 때의 끝([`End::Wall`])을 그 사람의 날로 재는
     /// 재료다 — 마일스톤 기한이 `report::Dues::split` 에서 받는 것과 같은 값이다. **받는다**: 시간대를 푸는
-    /// 것은 명령 층이고, 날로 친 끝이 없으면 풀지도 않는다([`Filter::needs_zone`]). 안 실렸으면(`None`)
-    /// 도장 그대로, 곧 UTC 로 잰다.
+    /// 것은 명령 레이어(`cmd`)고, 날로 친 끝이 없으면 풀지도 얹지도 않는다([`Filter::needs_zone`]) — 탐색기도
+    /// 같은 문으로 제 화면의 시간대(`tui::App::zone`)를 얹는다. 안 실렸으면(`None`) 도장 그대로, 곧 UTC 로 잰다.
     pub zone: Option<&'a crate::tz::Zone>,
 }
 
@@ -388,16 +388,71 @@ pub struct Filter {
     pub ideas: bool,
 }
 
+/// 거르개가 값을 거절한 까닭. **자료만 든다**(moai-2htt) — 말은 [`crate::view::bad_filter`] 가 고른 말로
+/// 짓는다. 여기서 글을 지으면 영어 화면과 `--json` 의 `error` 에도 한국어가 선다. 읽음 표(`read_marks`)와
+/// 설정(`config::Trouble`)이 자료만 내고 `view` 가 펴는 것과 같은 꼴이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BadFilter {
+    /// 한 번만 쓰는 거르개를 두 번 썼다 — `-s todo -s review`. `a`·`b` 는 앞의 두 값이다.
+    Twice { field: Once, a: String, b: String },
+    /// `--done` 에 done 을 안 든 `-s` 를 함께 줬다 — 두 거르개에 함께 걸리는 줄이 없다. `asked` 는 `-s` 의
+    /// 값을 쉼표로 이은 것이다.
+    DoneOutside { asked: String },
+    /// 끝이 하나도 없는 폭(`..`).
+    Endless(String),
+    /// 끝이 앞보다 이른 폭.
+    Backwards(String),
+    /// 때로 못 읽는 값.
+    NotATime(String),
+    /// 때가 하나도 없는 값(`--since ''`·`--created ,`).
+    NoTime,
+    /// `--filter` 의 항목이 `항목=값` 꼴이 아니다.
+    NotAPair(String),
+    /// 없는 항목 이름(`--filter statu=todo`).
+    NoSuchKey(String),
+    /// `stale=` 의 값이 날 수가 아니다.
+    NotDays(String),
+    /// 우선순위로 못 읽는 값.
+    NotAPriority(String),
+    /// `type=` 의 값이 종류가 아니다. **`Kind` 의 거절문을 그대로 든다** — 그 글은 `--type` 을 푸는 clap 과
+    /// 한 덩이로 서도록 영어 하나로 정했다(moai-ivt9). 같은 값을 두 자리가 다른 말로 거절하면 안 된다.
+    /// **`Kind` 처럼 moai 가 글을 쥔 자리에만 선다** — `--stale x` 는 clap 이 수로 풀다 제 영어(표준
+    /// 라이브러리의 글)로 거절해 나눠 쓸 글이 없으므로, `stale=` 은 [`BadFilter::NotDays`] 로 고른 말을 따른다.
+    NotAKind(String),
+}
+
+/// 한 번만 쓰는 거르개 — [`BadFilter::Twice`] 가 어느 것을 두 번 썼는지 댄다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Once {
+    Status,
+    Epic,
+    Milestone,
+    Parent,
+    Priority,
+    Assignee,
+}
+
+impl Once {
+    /// 그 거르개의 플래그 — 거절문이 고쳐 칠 명령에 그대로 싣는다.
+    pub fn flag(self) -> &'static str {
+        match self {
+            Once::Status => "-s",
+            Once::Epic => "-e",
+            Once::Milestone => "--milestone",
+            Once::Parent => "--parent",
+            Once::Priority => "-p",
+            Once::Assignee => "-a",
+        }
+    }
+}
+
 /// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
 /// 사람이 실제로 저지르는 실수를 잡는다.
-fn once(values: &[String], flag: &str, what: &str) -> Result<Vec<String>, String> {
+fn once(values: &[String], field: Once) -> Result<Vec<String>, BadFilter> {
     match values {
         [] => Ok(Vec::new()),
         [one] => Ok(csv(one)),
-        [a, b, ..] => Err(format!(
-            "{what}는 {a} 이면서 동시에 {b} 일 수 없다.\n      \
-             둘 중 하나를 찾는 것이면 `{flag} {a},{b}` 다"
-        )),
+        [a, b, ..] => Err(BadFilter::Twice { field, a: a.clone(), b: b.clone() }),
     }
 }
 
@@ -461,7 +516,7 @@ pub enum Hide {
 }
 
 impl Filter {
-    pub fn build(mut raw: Raw) -> Result<Filter, String> {
+    pub fn build(mut raw: Raw) -> Result<Filter, BadFilter> {
         // `--filter` 는 **플래그와 같은 자리에 쌓인다.** 뜻을 정하는 코드가
         // 아래 한 곳뿐이라야 두 표현이 갈라지지 않는다 — 예전처럼 `Filter` 에
         // 직접 쓰면 `--filter` 가 플래그를 조용히 덮어썼고, `-s` 를 두 번 썼을
@@ -489,28 +544,23 @@ impl Filter {
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
         let deferred = raw.deferred.then_some(true);
-        let status = once(&raw.status, "-s", "상태")?;
+        let status = once(&raw.status, Once::Status)?;
         let done = spans(&raw.done, Span::parse)?;
         // **`--done` 은 지금 done 에 선 줄만 본다** — `-s` 가 done 을 안 들면 두 거르개에 함께 걸리는 줄이
         // 없어 늘 0건이다. 조용히 0건을 내면 "그때 닫힌 것이 없었다" 와 안 갈린다(`-s todo -s review` 를
         // 거절하는 `once` 와 같은 까닭이다). `-s done,review` 처럼 done 이 든 목록은 그대로 받는다.
         if !done.is_empty() && !status.is_empty() && !status.iter().any(|s| s == crate::config::DONE) {
-            let asked = status.join(",");
-            return Err(format!(
-                "`--done` 은 지금 {done} 에 선 줄만 본다 — `-s {asked}` 에 함께 걸리는 줄이 없다.\n      \
-                 `-s {asked},{done}` 으로 넓히거나 `-s` 를 뺀다",
-                done = crate::config::DONE
-            ));
+            return Err(BadFilter::DoneOutside { asked: status.join(",") });
         }
         Ok(Filter {
             status,
             tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
             no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
-            epic: sel(once(&raw.epic, "-e", "에픽")?),
-            milestone: sel(once(&raw.milestone, "--milestone", "마일스톤")?),
-            parent: sel(once(&raw.parent, "--parent", "부모")?),
-            priority: parse_priorities(&once(&raw.priority, "-p", "우선순위")?)?,
-            assignee: sel(once(&raw.assignee, "-a", "담당")?),
+            epic: sel(once(&raw.epic, Once::Epic)?),
+            milestone: sel(once(&raw.milestone, Once::Milestone)?),
+            parent: sel(once(&raw.parent, Once::Parent)?),
+            priority: parse_priorities(&once(&raw.priority, Once::Priority)?)?,
+            assignee: sel(once(&raw.assignee, Once::Assignee)?),
             kind: raw.kind,
             // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
             grep: raw.grep.map(|q| q.to_lowercase()),
@@ -730,19 +780,19 @@ impl Span {
     }
 
     /// `--since <때>` — 그때부터 열린 폭. `..` 를 받지 않는다: 한 끝만 받는 플래그다.
-    fn since(raw: &str) -> Result<Span, String> {
+    fn since(raw: &str) -> Result<Span, BadFilter> {
         Ok(Span { from: Some(instant(raw, false)?), to: None })
     }
 
     /// `from..to` — 한쪽은 비워도 된다. `..` 없이 한 때만 주면 **그 하루**(시각이면 그 초)다 —
     /// `--created 2026-09-15` 를 "그날 만든 것" 말고 달리 읽을 길이 없다.
-    fn parse(raw: &str) -> Result<Span, String> {
+    fn parse(raw: &str) -> Result<Span, BadFilter> {
         let (from, to) = match raw.split_once("..") {
             None => (Some(instant(raw, false)?), Some(instant(raw, true)?)),
             Some((a, b)) => {
                 let (a, b) = (a.trim(), b.trim());
                 if a.is_empty() && b.is_empty() {
-                    return Err(format!("`{raw}` 는 끝이 하나도 없는 폭이다. `from..to` 에서 한쪽은 적는다"));
+                    return Err(BadFilter::Endless(raw.to_string()));
                 }
                 let from = (!a.is_empty()).then(|| instant(a, false)).transpose()?;
                 let to = (!b.is_empty()).then(|| instant(b, true)).transpose()?;
@@ -750,11 +800,16 @@ impl Span {
             }
         };
         // 거꾸로 선 폭은 늘 0건이다 — 조용히 0건을 내면 "그때는 아무것도 없었다" 와 안 갈린다. 두 끝의 자가
-        // 다르면(날과 순간) 시간대를 모르는 여기서는 못 견준다 — 하루 안쪽의 어긋남이라 넘긴다.
-        if let (Some(End::At(f)), Some(End::At(t))) | (Some(End::Wall(f)), Some(End::Wall(t))) = (from, to)
-            && f > t
-        {
-            return Err(format!("`{raw}` 는 끝이 앞보다 이르다"));
+        // 다르면(날과 순간) 시간대를 모르는 여기서는 **하루 안쪽의 어긋남만** 못 가린다 — 시간대가 옮기는 폭은
+        // 하루보다 좁으므로, 그보다 더 거꾸로 선 폭은 어느 시간대에서도 0건이라 거절한다. 섞였다고 통째로
+        // 넘기던 코드는 `2026-12-01..2026-01-01T00:00:00Z` 를 거절 없이 0건으로 받았다(리뷰 moai-efoc.ln9).
+        let backwards = match (from, to) {
+            (Some(End::At(f)), Some(End::At(t))) | (Some(End::Wall(f)), Some(End::Wall(t))) => f > t,
+            (Some(End::At(f) | End::Wall(f)), Some(End::At(t) | End::Wall(t))) => f > t + 86_400,
+            _ => false,
+        };
+        if backwards {
+            return Err(BadFilter::Backwards(raw.to_string()));
         }
         Ok(Span { from, to })
     }
@@ -768,14 +823,14 @@ impl Span {
 /// 여는 끝이면 그날 0시, 닫는 끝(`end`)이면 그날의 마지막 초라 `..2026-09-15` 가 15일을 통째로 품는다. 두
 /// 꼴 다 없는 날(`2026-02-30`)과 부호를 거절한다 — 사람이 이번에 치는 값이라 엄한 자(`parse_date`·
 /// `parse_instant`)로 잰다. 파일을 읽는 관대한 자(`parse_rfc3339`)로 재면 오타가 말없이 옆 날로 샌다.
-fn instant(raw: &str, end: bool) -> Result<End, String> {
+fn instant(raw: &str, end: bool) -> Result<End, BadFilter> {
     let raw = raw.trim();
     if let Some(t) = parse_instant(raw) {
         return Ok(End::At(t));
     }
     match parse_date(raw) {
         Some(day) => Ok(End::Wall(day * 86_400 + if end { 86_399 } else { 0 })),
-        None => Err(format!("`{raw}` 는 때가 아니다. `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ` 다")),
+        None => Err(BadFilter::NotATime(raw.to_string())),
     }
 }
 
@@ -786,8 +841,10 @@ fn instant(raw: &str, end: bool) -> Result<End, String> {
 /// 줄의 도장([`Filter::matches`])과 저널 줄의 도장([`removed`])이 **이 한 자로** 잰다 — 둘로 두면 같은
 /// `--since` 가 목록과 `--removed` 에서 다른 날을 가리키는 날이 온다.
 fn spans_hold(spans: &[Vec<Span>], at: Option<i64>, zone: Option<&crate::tz::Zone>) -> bool {
-    let wall = |t: i64| zone.map_or(t, |z| z.local(t));
-    spans.iter().all(|any| at.is_some_and(|t| any.iter().any(|s| s.holds(t, wall(t)))))
+    let Some(t) = at else { return spans.is_empty() };
+    // 벽시계는 **줄마다 한 번** 옮긴다(리뷰 moai-efoc.ln9) — 폭마다 옮기면 같은 값을 폭 수만큼 다시 잰다.
+    let wall = zone.map_or(t, |z| z.local(t));
+    spans.iter().all(|any| any.iter().any(|s| s.holds(t, wall)))
 }
 
 /// 지운 이슈의 저널 줄 가운데 `--since` 의 폭에 든 것 — 받은 차례 그대로(moai-7dmq, `moai show --removed`).
@@ -817,12 +874,12 @@ pub fn removed<'a>(
 /// 또는-묶음이 되어 어느 줄도 못 지나, 숨김을 다 연 채 말없이 0건을 냈다. 비어 있던 커서 변수로 증분을
 /// 받는 쪽은 그것을 "바뀐 것이 없다" 로 읽는다. 끝이 하나도 없는 `..` 를 거절하는 것과 같은 까닭이다 — 태그처럼
 /// "거르지 않는다" 로 읽으면 같은 값이 숨긴 줄을 안 연 기본 목록을 내, 그사이 닫힌 줄을 말없이 놓친다.
-fn spans(raw: &[String], one: fn(&str) -> Result<Span, String>) -> Result<Vec<Vec<Span>>, String> {
+fn spans(raw: &[String], one: fn(&str) -> Result<Span, BadFilter>) -> Result<Vec<Vec<Span>>, BadFilter> {
     raw.iter()
         .map(|v| {
             let pieces = csv(v);
             if pieces.is_empty() {
-                return Err("때가 비었다. `YYYY-MM-DD` 나 `YYYY-MM-DDTHH:MM:SSZ` 를 적는다".to_string());
+                return Err(BadFilter::NoTime);
             }
             pieces.iter().map(|w| one(w)).collect()
         })
@@ -839,15 +896,13 @@ fn spans(raw: &[String], one: fn(&str) -> Result<Span, String>) -> Result<Vec<Ve
 /// **항목을 읽는 자는 이것 하나다** — `moai show --removed` 도 `--filter since=…` 를 가려내려고 이것을
 /// 부른다(`cmd::show`, moai-7dmq 리뷰). 거기서 따로 쪼개던 때는 `--filter since`(`=` 없음)가 목록과
 /// `--removed` 에서 다른 말로 거절됐다.
-pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
+pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
     {
         let one = text.trim();
         if one.is_empty() {
             return Ok(());
         }
-        let (k, v) = one
-            .split_once('=')
-            .ok_or_else(|| format!("`{one}` 은 `항목=값` 이 아니다. 있는 항목: {}", KEYS.join(", ")))?;
+        let (k, v) = one.split_once('=').ok_or_else(|| BadFilter::NotAPair(one.to_string()))?;
         let (k, v) = (k.trim(), v.trim().to_string());
         match k {
             "status" => raw.status.push(v),
@@ -858,15 +913,13 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
             "parent" => raw.parent.push(v),
             "priority" => raw.priority.push(v),
             "assignee" => raw.assignee.push(v),
-            "type" => raw.kind = Some(v.parse()?),
+            "type" => raw.kind = Some(v.parse().map_err(BadFilter::NotAKind)?),
             "grep" => raw.grep = Some(v),
-            "stale" => raw.stale = Some(v.parse().map_err(|_| format!("`{v}` 는 날 수가 아니다"))?),
+            "stale" => raw.stale = Some(v.parse().map_err(|_| BadFilter::NotDays(v))?),
             "since" => raw.since.push(v),
             "created" => raw.created.push(v),
             "done" => raw.done.push(v),
-            _ => {
-                return Err(format!("`{k}` 라는 필터 항목이 없다.\n      있는 것: {}", KEYS.join(", ")));
-            }
+            _ => return Err(BadFilter::NoSuchKey(k.to_string())),
         }
     }
     Ok(())
@@ -911,7 +964,7 @@ fn matches_sel(sel: &[Sel], value: Option<&str>) -> bool {
         })
 }
 
-fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, String> {
+fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, BadFilter> {
     raw.iter()
         .map(|p| {
             // `p` 한 글자만 벗긴다. `trim_start_matches` 는 `ppp0` 도 받아들인다.
@@ -920,7 +973,7 @@ fn parse_priorities(raw: &[String]) -> Result<Vec<u8>, String> {
                 .parse::<u8>()
                 .ok()
                 .filter(|n| *n <= crate::model::MAX_PRIORITY)
-                .ok_or_else(|| format!("`{p}` 는 우선순위가 아니다. 0~{} 다", crate::model::MAX_PRIORITY))
+                .ok_or_else(|| BadFilter::NotAPriority(p.clone()))
         })
         .collect()
 }
@@ -1413,7 +1466,9 @@ mod tests {
     #[test]
     fn repeating_status_is_a_friendly_error() {
         let e = Filter::build(Raw { status: s(&["todo", "review"]), all: true, ..Raw::default() }).unwrap_err();
-        assert!(e.contains("동시에") && e.contains("-s todo,review"), "{e}");
+        assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() });
+        // 고쳐 칠 명령(`-s todo,review`)은 글을 펴는 쪽이 갈래마다 잰다
+        // (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`).
     }
 
     #[test]
@@ -1537,11 +1592,12 @@ mod tests {
     /// 한 뜻이라면 두 번 쓴 것을 나무라는 자리도 하나여야 한다.
     #[test]
     fn a_filter_string_stacks_with_the_flags_it_mirrors() {
+        let twice = BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() };
         let e =
             Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() }).unwrap_err();
-        assert!(e.contains("동시에"), "{e}");
+        assert_eq!(e, twice);
         let e = Filter::build(Raw { filter: s(&["status=todo", "status=review"]), ..Raw::default() }).unwrap_err();
-        assert!(e.contains("동시에"), "{e}");
+        assert_eq!(e, twice);
 
         // 태그는 쌓이는 쪽이라 둘 다 걸린다 (반복=그리고).
         let f =
@@ -1571,9 +1627,15 @@ mod tests {
     #[test]
     fn unknown_filter_keys_list_the_real_ones() {
         let e = Filter::build(Raw { filter: s(&["statu=todo"]), ..Raw::default() }).unwrap_err();
-        assert!(e.contains("statu") && e.contains("status, tag"), "{e}");
+        assert_eq!(e, BadFilter::NoSuchKey("statu".into()));
         let e = Filter::build(Raw { filter: s(&["todo"]), ..Raw::default() }).unwrap_err();
-        assert!(e.contains("항목=값"), "{e}");
+        assert_eq!(e, BadFilter::NotAPair("todo".into()));
+        // 있는 항목의 목록은 글을 펴는 쪽(`view::bad_filter`)이 이것에서 읽는다 — **대는 항목은 다 받아야 한다.**
+        // 목록과 `desugar` 의 갈래는 손으로 적는 두 벌이라, 목록에만 남은 항목은 거절문이 대고 곧바로 거절한다.
+        for k in KEYS {
+            let said = desugar(&mut Raw::default(), &format!("{k}=1"));
+            assert_ne!(said, Err(BadFilter::NoSuchKey((*k).to_string())), "`{k}` 를 대면서 안 받는다");
+        }
     }
 
     #[test]
@@ -1582,7 +1644,7 @@ mod tests {
         assert_eq!(f.priority, [0, 1]);
         for bad in ["9", "ppp0"] {
             let e = Filter::build(Raw { priority: s(&[bad]), all: true, ..Raw::default() }).unwrap_err();
-            assert!(e.contains("우선순위가 아니다"), "{bad} → {e}");
+            assert_eq!(e, BadFilter::NotAPriority(bad.into()), "{bad}");
         }
     }
 
@@ -1671,11 +1733,12 @@ mod tests {
     #[test]
     fn repeating_assignee_is_a_friendly_error() {
         let e = Filter::build(Raw { assignee: s(&["철수", "영희"]), all: true, ..Raw::default() }).unwrap_err();
-        assert!(e.contains("동시에") && e.contains("-a 철수,영희"), "{e}");
+        assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into() });
     }
 
-    /// **때의 폭은 두 끝을 다 품고, 날은 UTC 의 하루다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로
-    /// 품는다 — 안 품으면 `..2026-09-03` 이 3일 0시에서 끊겨 그날 한 일이 빠진다.
+    /// **때의 폭은 두 끝을 다 품고, 날은 하루를 통째로 품는다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로
+    /// 품는다 — 안 품으면 `..2026-09-03` 이 3일 0시에서 끊겨 그날 한 일이 빠진다. 여기서는 시간대 없이(UTC)
+    /// 잰다 — 날이 읽는 사람의 날이라는 것은 `a_day_is_the_readers_day_and_an_instant_is_utc` 가 잰다.
     #[test]
     fn a_time_span_holds_both_ends_and_a_day_is_whole() {
         let t = |s: &str| parse_rfc3339(s).unwrap();
@@ -1691,8 +1754,17 @@ mod tests {
             Span::parse("2026-09-02T01:02:03Z..").unwrap(),
             Span { from: Some(End::At(t("2026-09-02T01:02:03Z"))), to: None }
         );
-        // 조용히 0건을 내는 대신 거절한다 — 오타와 "그때는 없었다" 가 안 갈린다.
-        for bad in ["..", "2026-02-30", "어제", "2026-9-2", "2026-09-03..2026-09-02"] {
+        // 조용히 0건을 내는 대신 거절한다 — 오타와 "그때는 없었다" 가 안 갈린다. 날과 순간이 섞인 폭도 하루를
+        // 넘게 거꾸로 섰으면 어느 시간대에서도 0건이다(리뷰 moai-efoc.ln9).
+        for bad in [
+            "..",
+            "2026-02-30",
+            "어제",
+            "2026-9-2",
+            "2026-09-03..2026-09-02",
+            "2026-12-01..2026-01-01T00:00:00Z",
+            "2026-12-01T00:00:00Z..2026-01-01",
+        ] {
             assert!(Span::parse(bad).is_err(), "{bad} 를 받았다");
         }
         assert!(Span::since("2026-09-02..").is_err(), "--since 가 폭을 받았다");
@@ -1732,11 +1804,16 @@ mod tests {
         // 순간으로 친 끝은 시간대가 안 옮긴다.
         assert!(pick(Some(&seoul), "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
         assert!(!pick(Some(&seoul), "2026-09-30T20:00:01Z.."), "시각 끝을 시간대로 옮겼다");
+        // 날과 순간이 섞인 폭은 **하루 안쪽이면 받는다** — UTC 로는 거꾸로 서도 서울에서는 그 줄을 품는다.
+        assert!(pick(Some(&seoul), "2026-10-01..2026-09-30T20:00:00Z"), "하루 안쪽의 섞인 폭을 거절했다");
         // 날로 친 끝이 있을 때만 시간대를 푼다.
         let needs = |raw: Raw| Filter::build(raw).unwrap().needs_zone();
         assert!(needs(Raw { since: s(&["2026-10-01"]), ..Raw::default() }));
         assert!(!needs(Raw { since: s(&["2026-10-01T00:00:00Z"]), ..Raw::default() }));
         assert!(!needs(Raw::default()));
+        // 세 거르개가 다 묻는다 — 하나라도 빠지면 그 거르개만 말없이 UTC 의 날로 잰다(리뷰 moai-efoc.ln9).
+        assert!(needs(Raw { created: s(&["2026-09-30T00:00:00Z..2026-10-01"]), ..Raw::default() }));
+        assert!(needs(Raw { done: s(&["2026-10-01"]), ..Raw::default() }));
     }
 
     /// **지운 줄도 목록의 `--since` 와 같은 자로 잰다**(moai-7dmq) — 날로 친 때는 읽는 사람의 날이고, 못
@@ -1827,7 +1904,7 @@ mod tests {
         }
         // `--done` 은 done 칸의 줄만 본다 — done 이 없는 `-s` 와 함께 쓰면 늘 0건이라 거절한다.
         let e = Filter::build(Raw { done: s(&["2026-09-05"]), status: s(&["review"]), ..Raw::default() }).unwrap_err();
-        assert!(e.contains("--done") && e.contains("-s review,done"), "{e}");
+        assert_eq!(e, BadFilter::DoneOutside { asked: "review".into() });
         assert_eq!(
             pick(Raw { done: s(&["2026-09-04.."]), status: s(&["todo,done"]), ..Raw::default() }),
             ["a-0002", "a-0005"],

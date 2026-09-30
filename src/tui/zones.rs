@@ -172,7 +172,15 @@ impl App {
                 self.notice = Some(crate::view::zone_trouble(self.site.lang, &why));
             }
         }
-        // **다시 세는 것이 없다**(moai-fgjj, 2026-09-23 사용자 결정) — 배너와 층의 수에 기한 판정이
+        // **걸어 둔 거름망은 이 시간대로 다시 건다**(리뷰 moai-efoc.ln9) — 날로 친 때(`created=2026-10-01`)는
+        // 화면의 시간대로 재어 `keep` 에 접히므로([`super::App::apply`]), 안 걸면 상세는 새 시간대의 날을 그리는데
+        // 목록은 다음 다시 읽기까지 옛 시간대의 날로 남는다. 커서는 다시 읽을 때처럼 붙든 줄에 다시 세운다.
+        if self.filter_text.is_some() {
+            let held = self.current().map(|r| self.anchor_of(&r));
+            self.reapply();
+            self.regrip(held);
+        }
+        // **수는 다시 세지 않는다**(moai-fgjj, 2026-09-23 사용자 결정) — 배너와 층의 수에 기한 판정이
         // 안 접혀 있어([`super::Surfaced`]) 그리는 걸음이 이 시간대로 잰다. 한때 여기서 셈을 다시
         // 돌렸고(그때 이름은 `recount`, 지금 [`super::App::count_all`])(리뷰), 그것으로도 프로젝트
         // 층의 줄과 도는 읽기는 못 고쳐 이 이슈가 섰다.

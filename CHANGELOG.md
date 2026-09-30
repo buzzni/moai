@@ -84,6 +84,17 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   and DuckDB run on the `--json` output instead, next to one on paging and
   incremental sync.
 
+### Fixed
+
+- **A refused filter now speaks the language you picked.** `-s todo -s review`,
+  an unknown or malformed `--filter` item, a priority out of range and a
+  `stale=` that is not a number of days were refused in Korean even on the
+  default English screen, and the same Korean came out in the `error` of
+  `--json`. The list and the explorer's filter prompt now word these refusals in
+  the chosen language, and so do the new time filters and `show --removed`; the
+  command to type instead, such as `-s todo,review`, stands as it was. `type=`
+  keeps the English sentence `--type` gives.
+
 ## [0.1.4] - 2026-09-29
 
 ### Added
