@@ -444,6 +444,19 @@ impl Once {
             Once::Assignee => "-a",
         }
     }
+
+    /// 그 거르개의 항목 이름 — `--filter`·탐색기 거름망의 `항목=값` 에서 `=` 앞에 서는 낱말이다([`KEYS`]).
+    /// 거름망의 거절문이 고쳐 칠 글을 이것으로 짓는다(moai-tckz).
+    pub fn key(self) -> &'static str {
+        match self {
+            Once::Status => "status",
+            Once::Epic => "epic",
+            Once::Milestone => "milestone",
+            Once::Parent => "parent",
+            Once::Priority => "priority",
+            Once::Assignee => "assignee",
+        }
+    }
 }
 
 /// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
@@ -1478,6 +1491,18 @@ mod tests {
         assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() });
         // 고쳐 칠 명령(`-s todo,review`)은 글을 펴는 쪽이 갈래마다 잰다
         // (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`).
+    }
+
+    /// **`Once::key` 는 `desugar` 가 그 거르개로 읽는 낱말이다**(moai-tckz). 거름망의 거절문이 이 낱말로 고쳐 칠
+    /// 글을 짓는다 — 둘이 어긋나면 `parent=a,b` 를 대고 그 글이 우선순위나 모르는 항목으로 읽힌다.
+    #[test]
+    fn each_once_key_reads_back_as_its_own_filter() {
+        use Once::*;
+        for field in [Status, Epic, Milestone, Parent, Priority, Assignee] {
+            let pairs = [format!("{}=1", field.key()), format!("{}=2", field.key())];
+            let e = Filter::build(Raw { filter: pairs.to_vec(), ..Raw::default() }).unwrap_err();
+            assert_eq!(e, BadFilter::Twice { field, a: "1".into(), b: "2".into() }, "{field:?}");
+        }
     }
 
     #[test]

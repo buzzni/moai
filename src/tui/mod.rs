@@ -2567,8 +2567,11 @@ impl App {
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
-        // 화면의 말로 편다(moai-2htt).
-        Filter::build(raw).map_err(|e| crate::view::bad_filter(self.site.lang, &e))
+        // 화면의 말로 편다(moai-2htt). **고쳐 칠 글만 이 칸의 꼴(`항목=값`)이다**(moai-tckz) — CLI 의
+        // `-s todo,review` 를 대면 그 글을 여기 그대로 쳐도 다시 거절된다. `/` 검색은 `-s` 도 `항목=값` 도 안
+        // 받지만, 검색이 거르개를 두 번 쓰는 길이 없어 그 갈래는 안 선다.
+        let on = crate::view::Surface::Pairs;
+        Filter::build(raw).map_err(|e| crate::view::bad_filter_on(self.site.lang, &e, on))
     }
 
     pub fn clear_filter(&mut self) {
@@ -7676,6 +7679,31 @@ mod tests {
             let said = a.input_error().expect("잘못 적었는데 거절문이 없다");
             assert!(said.contains("`statu`"), "{said}");
             assert_eq!(crate::hook::hangul(&said), korean, "{lang:?} 화면의 말로 안 섰다 — {said}");
+        }
+    }
+
+    /// **거름망의 거절문은 이 칸에 그대로 칠 글을 댄다**(moai-tckz). CLI 꼴(`-s todo,review`)을 대던 때는 그 글을
+    /// 옮겨 치면 `항목=값` 이 아니라고 다시 거절됐다. 댄 글을 그대로 쳐서 걸리는지까지 잰다.
+    #[test]
+    fn a_filter_refusal_offers_what_this_prompt_takes() {
+        for (bad, fix, rest) in [
+            ("status=todo status=review", "status=todo,review", ""),
+            ("status=review done=2026-01-01..", "status=review,done", " done=2026-01-01.."),
+        ] {
+            let mut a = app();
+            a.hit("SPC f");
+            typed(&mut a, bad);
+            assert!(matches!(a.mode, Mode::Filter(_)), "{bad} 가 걸렸다");
+            let said = a.input_error().expect("거절문이 없다");
+            assert!(said.contains(&format!("`{fix}`")), "{said}");
+            assert!(!said.contains("`-s"), "거름망에 CLI 꼴을 댔다 — {said}");
+
+            let again = format!("{fix}{rest}");
+            let mut a = app();
+            a.hit("SPC f");
+            typed(&mut a, &again);
+            assert_eq!(a.mode, Mode::Browse, "댄 글을 쳤는데 다시 거절했다 — {:?}", a.input_error());
+            assert_eq!(a.filter_text.as_deref(), Some(again.as_str()));
         }
     }
 

@@ -3046,12 +3046,49 @@ pub fn fallen_place(lang: Lang, said: &str) -> String {
     format!("{said} — {}", say(lang, "sheet.fallen_place"))
 }
 
-/// 거르개가 값을 거절한 글([`crate::query::BadFilter`], moai-2htt). `show` 의 목록과 `--removed`, 탐색기의
-/// 거름망 프롬프트가 이것 하나로 편다 — 같은 값을 세 자리가 같은 말로 거절한다.
+/// 거르개를 적은 표면(moai-tckz). 거절문의 고쳐 칠 글을 그 꼴로 짓는다.
+///
+/// 탐색기 거름망에 CLI 꼴(`-s todo,review`)을 대면, 그 글을 프롬프트에 그대로 쳤을 때 `항목=값` 이 아니라고
+/// 다시 거절된다. **말은 같고 명령만 다르다** — 명령은 옮기지 않는 글자라 말묶음에는 자리 하나(`{fix}` 등)만 두고
+/// 여기서 통째로 짓는다([`no_actor`] 가 고칠 명령을 여기서 짓는 것과 같은 까닭이다).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    /// CLI 의 플래그 — `-s todo,review`. `--filter` 로 적은 것도 여기다: CLI 에서는 플래그가 곧 고쳐 칠 글이다.
+    Flags,
+    /// 탐색기 거름망(`SPC f`)의 `항목=값` — `status=todo,review`.
+    Pairs,
+}
+
+impl Surface {
+    /// 거르개의 이름만 — `-s` 이거나 `status=`.
+    fn name(self, field: crate::query::Once) -> String {
+        match self {
+            Surface::Flags => field.flag().to_string(),
+            Surface::Pairs => format!("{}=", field.key()),
+        }
+    }
+
+    /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
+    fn spell(self, field: crate::query::Once, value: &str) -> String {
+        match self {
+            Surface::Flags => format!("{} {value}", field.flag()),
+            Surface::Pairs => format!("{}={value}", field.key()),
+        }
+    }
+}
+
+/// 거르개가 값을 거절한 글([`crate::query::BadFilter`], moai-2htt) — CLI 의 꼴로. `show` 의 목록과 `--removed`
+/// 가 부른다. 탐색기 거름망은 [`bad_filter_on`] 에 [`Surface::Pairs`] 를 건넨다.
+pub fn bad_filter(lang: Lang, why: &crate::query::BadFilter) -> String {
+    bad_filter_on(lang, why, Surface::Flags)
+}
+
+/// 거르개가 값을 거절한 글. `show` 의 목록과 `--removed`, 탐색기의 거름망 프롬프트가 이것 하나로 편다 — 같은
+/// 값을 세 자리가 같은 말로 거절하고, **고쳐 칠 글만 그 표면의 꼴로 짓는다**(moai-tckz).
 ///
 /// **갈래마다 제 `say` 를 적는다**([`no_such_column`] 과 같은 까닭). 두 줄짜리는 여기서 잇는다 — 실린 글은
 /// 한 줄이어야 한다(`i18n::tests::every_translation_keeps_the_places_english_marks`).
-pub fn bad_filter(lang: Lang, why: &crate::query::BadFilter) -> String {
+pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> String {
     use crate::query::{BadFilter, KEYS, Once};
     let two = |head: String, how: String| format!("{head}\n      {how}");
     match why {
@@ -3065,10 +3102,27 @@ pub fn bad_filter(lang: Lang, why: &crate::query::BadFilter) -> String {
                 Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
                 Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
             };
-            two(head, fill(say(lang, "refuse.filter_twice_how"), &[("flag", field.flag()), ("a", a), ("b", b)]))
+            let fix = on.spell(*field, &format!("{a},{b}"));
+            two(head, fill(say(lang, "refuse.filter_twice_how"), &[("fix", &fix)]))
         }
         BadFilter::DoneOutside { asked } => {
-            let v = [("done", crate::config::DONE), ("asked", asked.as_str())];
+            let done = crate::config::DONE;
+            let by_done = match on {
+                Surface::Flags => "--done",
+                Surface::Pairs => "done=",
+            };
+            let (by_status, widen, status) = (
+                on.spell(Once::Status, asked),
+                on.spell(Once::Status, &format!("{asked},{done}")),
+                on.name(Once::Status),
+            );
+            let v = [
+                ("done", done),
+                ("by_done", by_done),
+                ("by_status", by_status.as_str()),
+                ("widen", widen.as_str()),
+                ("status", status.as_str()),
+            ];
             two(
                 fill(say(lang, "refuse.filter_done_outside"), &v),
                 fill(say(lang, "refuse.filter_done_outside_how"), &v),
@@ -3373,6 +3427,25 @@ mod tests {
             let said = bad_filter(Lang::En, &twice(field));
             assert!(said.starts_with(&format!("the {noun} cannot be")), "{field:?} — {said}");
             assert!(said.contains(&format!("`{flag} todo,review`")), "{field:?} — {said}");
+            // **거름망에는 거름망의 꼴로 댄다**(moai-tckz) — 그 칸에 `-s todo,review` 를 치면 `항목=값` 이 아니라고
+            // 다시 거절된다. 말은 같고 고쳐 칠 글만 다르다.
+            let pairs = bad_filter_on(Lang::En, &twice(field), Surface::Pairs);
+            assert!(pairs.starts_with(&format!("the {noun} cannot be")), "{field:?} — {pairs}");
+            assert!(pairs.contains(&format!("`{noun}=todo,review`")), "{field:?} — {pairs}");
+            assert!(!pairs.contains(&format!("{flag} ")), "거름망에 CLI 꼴을 댔다 — {pairs}");
+        }
+        // `--done` 과 `-s` 를 박아 넣던 갈래도 표면을 따른다.
+        let outside = BadFilter::DoneOutside { asked: "review".into() };
+        for lang in [Lang::En, Lang::Ko] {
+            let pairs = bad_filter_on(lang, &outside, Surface::Pairs);
+            for want in ["`done=`", "`status=review`", "`status=review,done`", "`status=`"] {
+                assert!(pairs.contains(want), "{lang:?} 거름망에 {want} 가 없다 — {pairs}");
+            }
+            assert!(!pairs.contains("--done") && !pairs.contains("-s"), "거름망에 CLI 꼴을 댔다 — {pairs}");
+            let flags = bad_filter(lang, &outside);
+            for want in ["`--done`", "`-s review`", "`-s review,done`", "`-s`"] {
+                assert!(flags.contains(want), "{lang:?} CLI 에 {want} 가 없다 — {flags}");
+            }
         }
         // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
         for lang in [Lang::En, Lang::Ko] {
