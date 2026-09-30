@@ -197,6 +197,59 @@ Nothing here is derived at read time from folding the journal, and `report` and
 `query` are pure functions over `&[Issue]` that print nothing. That is what makes
 a second surface — a TUI, a web view, your own tool — cheap to attach.
 
+### Taking the list out
+
+`moai show --json` is the list. The file is always read whole; what the flags
+below shrink is the output, and with it the tokens.
+
+- `--sort <key>` and `--reverse` pick the order — `priority` (the default),
+  `created`, `updated`, `status`, `assignee`, `title` or `id`.
+- `-n <count>` cuts the list, and `--after <id>` starts the next page after the
+  last id of the page before. The cursor is that row's value in the order, not
+  an offset, so rows other sessions create or remove meanwhile never shift a
+  page; `--sort id` is the order no edit ever moves. The output stays a bare
+  array — fewer rows than `-n` means the list has ended.
+- `--since <when>` keeps what changed at or after a time, by the row's own
+  `updated_at`, and `--created` and `--done` take a range `from..to`. Asking by
+  time opens what the list hides by default — done, deferred and ideas — since a
+  row closed meanwhile changed too. `--since` sees neither a removed row nor a
+  note: `moai rm` leaves no row behind, and `moai note` writes the journal, not
+  the row.
+- `-g` looks through the notes and move messages as well as the id, title, tags
+  and body.
+
+```sh
+# everything that changed since the last sync, a page at a time
+moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --json
+moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --after <last id> --json
+```
+
+`--all` still leaves ideas out; `moai idea show --all --json` lists those.
+
+### SQL over the output
+
+There is no query language inside moai. The filters look at derived values — the
+column a group reads from its members, the epic a row inherits, a row eclipsed by
+a twin, a deferral handed down from a group — so SQL run on
+`.moai/issues.jsonl` itself gets those answers wrong. Run it on the `--json`
+output, where they are already worked out (`derived_status`, `derived_epic`):
+
+```sh
+# open work per epic
+moai show --json | jq -r 'group_by(.derived_epic) | .[] | "\(.[0].derived_epic // "none")\t\(length)"'
+
+# rows per column - a group stands in the column its members give it
+moai show --all --json | duckdb -c "
+  SELECT coalesce(derived_status, status) AS col, kind, count(*) AS n
+  FROM read_json('/dev/stdin') GROUP BY ALL ORDER BY n DESC"
+
+# tokens per model, read from the `model:` note lines on each issue
+moai show --all --json | duckdb -c "
+  SELECT w.model, sum(w.tokens) AS tokens
+  FROM (SELECT unnest(work) AS w FROM read_json('/dev/stdin'))
+  GROUP BY ALL ORDER BY tokens DESC NULLS LAST"
+```
+
 ## Screen language
 
 The interface currently defaults to Korean. Pick another with `MOAI_LANG`:

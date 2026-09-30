@@ -410,6 +410,14 @@ Order and paging:
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --json | jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json |
+      duckdb -c "SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1"
 ```
 
 ## `moai mv`
@@ -943,6 +951,14 @@ Order and paging:
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --json | jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json |
+      duckdb -c "SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1"
 ```
 
 ## `moai epic`
@@ -1133,6 +1149,14 @@ Order and paging:
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --json | jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json |
+      duckdb -c "SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1"
 ```
 
 ## `moai milestone`
@@ -1323,6 +1347,14 @@ Order and paging:
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --json | jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json |
+      duckdb -c "SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1"
 ```
 
 ## `moai idea`
@@ -1534,6 +1566,14 @@ Order and paging:
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --json | jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
+    moai show --all --json |
+      duckdb -c "SELECT kind, count(*) FROM read_json('/dev/stdin') GROUP BY 1"
 ```
 
 ## `moai idea promote`
