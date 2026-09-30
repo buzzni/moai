@@ -2266,3 +2266,7 @@
 {"ts":"2026-09-30T08:40:02Z","id":"moai-7dmq.ydz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 15건 가운데 13건과 9번의 도움말. 넘긴 것: 4번을 사람 결정에 따라 멤버 moai-g8ho(읽기)·moai-a65c(쓰기)로, history 도장을 멤버 moai-fmoa 로 세웠다(셋 다 첫 칸). 이번 판 밖은 idea moai-bgan·moai-dci4. 두 노트의 5번은 kind 를 \"rm\" 로 적은 줄을 말하는데, 옮겨 적다가 이스케이프가 풀렸다"}
 {"ts":"2026-09-30T08:41:10Z","id":"moai-2htt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-09-30T08:42:05Z","id":"moai-7dmq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 첫 칸의 멤버 셋이 에픽을 연다 — moai-g8ho(못 푼 rm 줄 알림), moai-a65c(끊긴 저널 꼬리에 \\n 채우기), moai-fmoa(history 도장 걷기). 이 셋을 닫는 창이 에픽 끝 리뷰를 다시 부른다. a65c 가 쓰기 경로라 등급은 max 다. develop 을 받을 때 난 src/store.rs 시험 충돌의 해결도 그때 함께 본다"}
+{"ts":"2026-09-30T08:44:18Z","id":"moai-a65c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T08:44:19Z","id":"moai-g8ho","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T08:44:20Z","id":"moai-fmoa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T08:44:22Z","id":"moai-msw7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
