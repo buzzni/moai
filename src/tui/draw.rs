@@ -1037,14 +1037,14 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 먼저 뗀다** — 경로를 줄 폭 전체로 자르면 깊이 들어갔을 때 뱃지가 줄
     // 밖으로 밀려 통째로 사라지고, 하필 그때가 목록이 가장 짧아 보이는 때다.
     let lang = app.site.lang;
-    let badge = app.hung.as_ref().map(|h| {
+    let hung = app.hung.as_ref().map(|h| {
         let said = fill(
             say(lang, "tui.crumbs.filter"),
             &[("text", &badge(h, lang)), ("key", &label(BROWSE, Browse::ClearFilter))],
         );
         clip(&said, w)
     });
-    let room = match &badge {
+    let room = match &hung {
         Some(b) => w.saturating_sub(crate::text::width(b) + 3),
         None => w,
     };
@@ -1128,7 +1128,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(l, dim()));
     }
-    if let Some(b) = badge {
+    if let Some(b) = hung {
         spans.push(Span::raw("   "));
         spans.push(Span::styled(b, Style::new().fg(Color::Black).bg(Color::LightYellow)));
     }
@@ -2393,7 +2393,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
 
     // **노트에서 걸린 줄을 그린다**(moai-wcy8.3v9, 2026-09-30 사용자 결정) — 노트는 목록에도 이 패널의 다른
     // 칸에도 없어, 노트로 걸린 줄은 이것 없이는 왜 걸렸는지가 안 보인다. **검색이 노트를 볼 때만, 걸린 줄만**
-    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu). `f` 의 `grep=` 도 검색이다(moai-lpzj.4ks, [`App::grep_query`]).
+    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu). `f` 의 `grep=` 으로 건 줄도 여기서는 같다
+    // (moai-lpzj.4ks) — 글로 찾는 거르개면 그린다([`App::grep_query`]). 보기를 걷는 검색([`App::searching`])은 `/` 뿐이다.
     //
     // **노트로만 걸린 줄이면 본문 앞에, 다른 칸으로도 걸린 줄이면 본문 뒤에 선다**(리뷰 moai-wcy8.rbj 7번). 이 절은
     // 검색 중에만 서고, 그때 사람이 찾는 것이 "왜 걸렸나" 다. 본문 뒤에만 두던 판은 본문이 긴 에픽에서 이 절이
@@ -7907,6 +7908,22 @@ pub(super) mod tests {
         let mut a = hung("priority=2");
         assert_eq!(a.grep_query(), None);
         assert!(found_text(&mut a).trim().is_empty(), "글로 안 찾는 거름망이 칠했다");
+        // **보기는 걷지 않는다** — 칠하기가 `grep=` 을 받아도 줄을 세우는 쪽은 `/` 만 본다. done 을 숨긴 보기에서
+        // `grep=멤버` 는 끝난 멤버(argos-0003)를 안 세우고, 같은 글을 `/` 로 찾으면 세운다. `searching()` 의 값만
+        // 재면 목록을 세우는 자가 `grep_query()` 로 갈아타도 푸르다 — 그래서 선 줄 수로 잰다.
+        let veiled = |keys: &str, text: &str| {
+            let mut a = every(issues());
+            a.view = super::super::view::View::hiding("done");
+            a.see();
+            a.hit(keys);
+            for c in text.chars() {
+                a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+            }
+            a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            a.hit_count()
+        };
+        assert_eq!(veiled("SPC f", "grep=멤버"), 1, "grep= 이 보기가 숨긴 끝난 줄을 세웠다");
+        assert_eq!(veiled("/", "멤버"), 2, "시험의 전제 — `/` 는 보기가 숨긴 줄도 세운다");
     }
 
     /// **걸린 노트 줄은 한 번 펴서 든다**(리뷰 moai-wcy8.rbj) — 본문([`Body`])과 같은 까닭이고, 노트는 본문보다

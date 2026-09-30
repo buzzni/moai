@@ -122,13 +122,14 @@ pub enum Mode {
 pub enum Hung {
     /// `/` 검색 — 친 글과 찾는 자리.
     Grep { text: String, scope: GrepIn },
-    /// `f` 거름망 — 친 `항목=값` 글과, 그 가운데 `grep=` 이 찾는 글. 뒤엣것은 걸 때 [`Filter::build`] 가
-    /// 읽은 값을 받아 둔다([`App::apply`]) — 찾은 자리를 칠하는 쪽이 줄마다 글을 다시 쪼개지 않게.
-    Filter { text: String, grep: Option<String> },
+    /// `f` 거름망 — 친 `항목=값` 글과, 그 가운데 `grep=` 이 찾는 범위와 글. 뒤엣것은 걸 때 [`Filter::build`]
+    /// 가 읽은 값(`grep_in`·`grep`, 글은 소문자로 접힌 것)을 그대로 받아 둔다([`App::apply`]) — 찾은 자리를
+    /// 칠하는 쪽이 줄마다 글을 다시 쪼개지 않게, 그리고 범위를 여기서 따로 정하지 않게.
+    Filter { text: String, grep: Option<(GrepIn, String)> },
 }
 
 impl Hung {
-    /// 이 거름망을 다시 걸 칸 — 다시 읽을 때([`App::reapply`])와 노트를 볼지 물을 때([`App::sees_notes`]).
+    /// 이 거름망을 다시 걸 칸 — 다시 읽을 때([`App::reapply`]).
     fn mode(&self) -> Mode {
         match self {
             Hung::Grep { text, scope } => Mode::Grep(Input::new(text), *scope),
@@ -136,11 +137,12 @@ impl Hung {
         }
     }
 
-    /// 글로 찾는 범위와 글 — `/` 검색이든 `f` 의 `grep=` 이든. `grep=` 은 CLI 의 `-g` 처럼 늘 전체를 본다.
+    /// 글로 찾는 범위와 글 — `/` 검색이든 `f` 의 `grep=` 이든. 범위는 걸 때 거르개가 정한 것이다 — `grep=` 은
+    /// 지금 CLI 의 `-g` 처럼 늘 전체를 본다.
     fn query(&self) -> Option<(GrepIn, &str)> {
         match self {
             Hung::Grep { text, scope } => Some((*scope, text)),
-            Hung::Filter { grep, .. } => grep.as_deref().map(|q| (GrepIn::All, q)),
+            Hung::Filter { grep, .. } => grep.as_ref().map(|(g, q)| (*g, q.as_str())),
         }
     }
 }
@@ -2304,9 +2306,11 @@ impl App {
     }
 
     /// 걸린 거름망이 노트를 보는가([`crate::query::Filter::sees_notes`]) — 다시 읽는 스레드가 노트까지 읽어
-    /// 올지를 가른다([`App::follow`]). 거름망은 다시 거는 자([`App::reapply`])와 같은 자([`Hung::mode`])로 되세운다.
+    /// 올지를 가른다([`App::follow`]). **칠하는 쪽([`App::grep_query`])과 같은 값을 읽는다** — 그 범위와 글은
+    /// 걸 때 거르개가 정한 그대로라([`Hung::query`]) `Filter::sees_notes` 와 같은 답이고, 글을 다시 쪼개
+    /// 거르개를 새로 짓지 않는다. 둘이 따로 읽으면 노트를 안 읽어 온 판에 상세가 노트를 그리려 드는 틈이 난다.
     fn sees_notes(&self) -> bool {
-        self.hung.as_ref().and_then(|h| self.build_filter(&h.mode()).ok()).is_some_and(|f| f.sees_notes())
+        self.grep_query().is_some_and(|(g, _)| g.sees_notes())
     }
 
     /// 새 판을 묻는 실을 띄운다(moai-3gia) — **부르는 쪽이 문을 지난 뒤에만 부른다**
@@ -2558,7 +2562,7 @@ impl App {
         self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
         self.hung = Some(match mode {
             Mode::Grep(_, scope) => Hung::Grep { text, scope: *scope },
-            _ => Hung::Filter { text, grep: filter.grep.clone() },
+            _ => Hung::Filter { text, grep: filter.grep.clone().map(|q| (filter.grep_in, q)) },
         });
         Ok(())
     }
@@ -7655,6 +7659,17 @@ mod tests {
         // 다시 읽기 — 뱃지 글이 아니라 들고 있는 범위로 다시 짓는다.
         a.reapply();
         assert_eq!(badge(&a).as_deref(), Some("/태그:pars"));
+        assert_eq!(shown(&a), ["argos-0009"]);
+
+        // 칸을 다시 열어 치다가 Esc — 열기 전 범위까지 돌아온다(`grep_was` 가 [`Hung`] 째로 든다). 다시 연 칸은
+        // 전체 범위라, 범위를 빼고 들면 `/pars` 로 돌아와 줄은 같아도 걸린 범위가 바뀐다.
+        a.key(key(KeyCode::Char('/')));
+        for c in "zz".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(shown(&a).is_empty(), "시험의 전제 — 치는 동안 안 걸렸다");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")), "Esc 가 좁힌 범위를 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0009"]);
 
         // 거름망(`f`) 칸의 Tab 은 아무 일도 안 한다.
