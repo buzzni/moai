@@ -393,8 +393,10 @@ pub struct Filter {
 /// 설정(`config::Trouble`)이 자료만 내고 `view` 가 펴는 것과 같은 꼴이다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BadFilter {
-    /// 한 번만 쓰는 거르개를 두 번 썼다 — `-s todo -s review`. `a`·`b` 는 앞의 두 값이다.
-    Twice { field: Once, a: String, b: String },
+    /// 한 번만 쓰는 거르개를 두 번 썼다 — `-s todo -s review`. `a`·`b` 는 앞의 두 값이고, `rest` 는 그 뒤의 값이다.
+    /// **셋째부터도 든다**(리뷰 moai-efoc.3e1) — 앞의 둘만 들던 판은 `-s todo -s review -s done` 에 `-s todo,review` 를
+    /// 대어, 그대로 친 사람이 done 의 줄을 말없이 잃었다.
+    Twice { field: Once, a: String, b: String, rest: Vec<String> },
     /// `--done` 에 done 을 안 든 `-s` 를 함께 줬다 — 두 거르개에 함께 걸리는 줄이 없다. `asked` 는 `-s` 의
     /// 값을 쉼표로 이은 것이다.
     DoneOutside { asked: String },
@@ -465,7 +467,7 @@ fn once(values: &[String], field: Once) -> Result<Vec<String>, BadFilter> {
     match values {
         [] => Ok(Vec::new()),
         [one] => Ok(csv(one)),
-        [a, b, ..] => Err(BadFilter::Twice { field, a: a.clone(), b: b.clone() }),
+        [a, b, rest @ ..] => Err(BadFilter::Twice { field, a: a.clone(), b: b.clone(), rest: rest.to_vec() }),
     }
 }
 
@@ -1488,7 +1490,13 @@ mod tests {
     #[test]
     fn repeating_status_is_a_friendly_error() {
         let e = Filter::build(Raw { status: s(&["todo", "review"]), all: true, ..Raw::default() }).unwrap_err();
-        assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() });
+        assert_eq!(e, BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec![] });
+        // 셋째부터도 든다 — 고칠 글이 그것을 빼면 그대로 친 사람이 그 줄을 잃는다.
+        let e = Filter::build(Raw { status: s(&["todo", "review", "done"]), all: true, ..Raw::default() }).unwrap_err();
+        assert_eq!(
+            e,
+            BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] }
+        );
         // 고쳐 칠 명령(`-s todo,review`)은 글을 펴는 쪽이 갈래마다 잰다
         // (`view::tests::a_bad_filter_speaks_the_language_it_is_handed`).
     }
@@ -1501,7 +1509,7 @@ mod tests {
         for field in [Status, Epic, Milestone, Parent, Priority, Assignee] {
             let pairs = [format!("{}=1", field.key()), format!("{}=2", field.key())];
             let e = Filter::build(Raw { filter: pairs.to_vec(), ..Raw::default() }).unwrap_err();
-            assert_eq!(e, BadFilter::Twice { field, a: "1".into(), b: "2".into() }, "{field:?}");
+            assert_eq!(e, BadFilter::Twice { field, a: "1".into(), b: "2".into(), rest: vec![] }, "{field:?}");
         }
     }
 
@@ -1626,7 +1634,7 @@ mod tests {
     /// 한 뜻이라면 두 번 쓴 것을 나무라는 자리도 하나여야 한다.
     #[test]
     fn a_filter_string_stacks_with_the_flags_it_mirrors() {
-        let twice = BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into() };
+        let twice = BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec![] };
         let e =
             Filter::build(Raw { status: s(&["todo"]), filter: s(&["status=review"]), ..Raw::default() }).unwrap_err();
         assert_eq!(e, twice);
@@ -1767,7 +1775,7 @@ mod tests {
     #[test]
     fn repeating_assignee_is_a_friendly_error() {
         let e = Filter::build(Raw { assignee: s(&["철수", "영희"]), all: true, ..Raw::default() }).unwrap_err();
-        assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into() });
+        assert_eq!(e, BadFilter::Twice { field: Once::Assignee, a: "철수".into(), b: "영희".into(), rest: vec![] });
     }
 
     /// **때의 폭은 두 끝을 다 품고, 날은 하루를 통째로 품는다**(moai-efoc.ip5). 닫는 끝의 날짜는 그날을 통째로

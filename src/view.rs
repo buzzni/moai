@@ -3098,7 +3098,7 @@ pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> 
     use crate::query::{BadFilter, KEYS, Once};
     let two = |head: String, how: String| format!("{head}\n      {how}");
     match why {
-        BadFilter::Twice { field, a, b } => {
+        BadFilter::Twice { field, a, b, rest } => {
             let v = [("a", a.as_str()), ("b", b.as_str())];
             let head = match field {
                 Once::Status => fill(say(lang, "refuse.filter_twice_status"), &v),
@@ -3108,7 +3108,9 @@ pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> 
                 Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
                 Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
             };
-            let fix = on.spell(*field, &format!("{a},{b}"));
+            // 고칠 글은 준 값을 다 잇는다 — 말(`{a}`·`{b}`)은 앞의 둘로 서지만, 셋째를 빼면 그대로 친 사람이 그 줄을 잃는다.
+            let all = [a, b].into_iter().chain(rest).map(String::as_str).collect::<Vec<_>>().join(",");
+            let fix = on.spell(*field, &all);
             two(head, fill(say(lang, "refuse.filter_twice_how"), &[("fix", &fix)]))
         }
         BadFilter::DoneOutside { asked } => {
@@ -3395,7 +3397,7 @@ mod tests {
     #[test]
     fn a_bad_filter_speaks_the_language_it_is_handed() {
         use crate::query::{BadFilter, Once};
-        let twice = |field| BadFilter::Twice { field, a: "todo".into(), b: "review".into() };
+        let twice = |field| BadFilter::Twice { field, a: "todo".into(), b: "review".into(), rest: vec![] };
         let all = [
             twice(Once::Status),
             twice(Once::Epic),
@@ -3461,8 +3463,17 @@ mod tests {
         }
         // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로 그대로
         // 대면 옮겨 친 셸이 `(` 에서 멈춘다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다.
-        let people =
-            BadFilter::Twice { field: Once::Assignee, a: "홍 길동 (a@b.c)".into(), b: "김 철수 (c@d.e)".into() };
+        let people = BadFilter::Twice {
+            field: Once::Assignee,
+            a: "홍 길동 (a@b.c)".into(),
+            b: "김 철수 (c@d.e)".into(),
+            rest: vec![],
+        };
+        // 셋째부터도 고칠 글에 든다(리뷰 moai-efoc.3e1).
+        let three =
+            BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] };
+        assert!(bad_filter(Lang::En, &three).contains("`-s todo,review,done`"), "{}", bad_filter(Lang::En, &three));
+        assert!(bad_filter_on(Lang::En, &three, Surface::Pairs).contains("`status=todo,review,done`"));
         let said = bad_filter(Lang::En, &people);
         assert!(said.contains("`-a '홍 길동 (a@b.c),김 철수 (c@d.e)'`"), "{said}");
         let said = bad_filter_on(Lang::En, &people, Surface::Pairs);
