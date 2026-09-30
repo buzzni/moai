@@ -302,6 +302,14 @@ pub struct Ground {
     /// 것(시험·층의 가짜 줄)은 빈다. 읽는 걸음은 CLI `-g` 와 한 벌이다(`cmd::show::journal_of_rows`): 둘로
     /// 두면 같은 "전체" 가 두 표면에서 다른 답을 낸다.
     notes: crate::query::Notes,
+    /// 그 노트를 읽은 저널의 표식 — 뿌리마다(`Repo::journal_marks`, moai-wcy8.403). `moai note` 는 스냅샷을
+    /// 안 바꾸므로 스냅샷 표식만 보면 새 노트가 영영 안 실린다. 걸음([`App::follow`])이 이것도 잰다.
+    ///
+    /// **노트와 한 자리에서 잰다**([`measure_read`]) — 노트를 싣는 길이 곧 이것을 채우는 길이라, 한 길이
+    /// 노트는 새로 들고 표식은 옛것을 드는 일이 없다. **`Site::watched` 에 섞지 않는다** — 그 목록이
+    /// 움직이면 커밋 표를 다시 짓는데(`App::apply_fresh`), 노트와 칸 옮김은 쓰기마다 저널을 바꾸고 커밋과는
+    /// 상관이 없다.
+    journals: Vec<(std::path::PathBuf, Stamp)>,
 }
 
 /// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
@@ -334,8 +342,24 @@ fn measure_read_in(
     soil: &crate::report::Soil<'_>,
 ) -> (Index, Ground) {
     let (index, mut ground) = measure_in(issues, &repo.config, soil);
+    // **읽기 전에 잰다** — [`prepare`] 의 스냅샷 표식과 같은 까닭이다. 읽고 나서 재면 그 사이에 적힌 노트가
+    // "이미 본 것" 으로 적혀 다음 쓰기까지 안 실린다. 먼저 재면 최악이 헛 갱신 하나다.
+    ground.journals = journal_marks(repo, origin);
     ground.notes = notes_at(repo, origin, issues);
     (index, ground)
+}
+
+/// 노트를 읽는 뿌리마다의 저널 표식([`Ground::journals`]). 뿌리는 [`notes_at`] 이 읽는 자리를 다 덮는다 — 이
+/// 저장소와, 줄을 보태 온 옆 워크트리(`Origin::roots`). `cmd::show::journal_of_rows` 가 줄마다 고르는 뿌리가
+/// 그 둘 가운데 하나다. 같은 뿌리는 한 번만 잰다.
+fn journal_marks(repo: &Repo, origin: &crate::worktree::Origin) -> Vec<(std::path::PathBuf, Stamp)> {
+    let mut roots: Vec<&std::path::Path> = Vec::new();
+    for root in std::iter::once(repo.root.as_path()).chain(origin.roots()) {
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots.into_iter().flat_map(|root| Repo::at(root.to_path_buf(), repo.config.clone()).journal_marks()).collect()
 }
 
 /// 줄마다 제 뿌리의 저널에서 읽은 노트 글 — CLI `-g` 와 **같은 걸음**이다(`cmd::show::journal_of_rows`).
@@ -395,6 +419,7 @@ impl Ground {
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
             // 줄만으로는 모른다 — 저장소를 읽는 적재가 얹는다([`measure_read`]).
             notes: crate::query::Notes::new(),
+            journals: Vec::new(),
         }
     }
 
@@ -2146,6 +2171,9 @@ impl App {
     /// 공용 git 디렉터리의 `worktrees/` 표식으로 알아챈다(`worktree::heads`) — 걸음마다
     /// git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이라, 파일만 잰다.
     ///
+    /// **저널도 본다**([`Ground::journals`], moai-wcy8.403) — `/` 가 노트를 보는데 `moai note` 는 스냅샷을
+    /// 안 바꾼다. 노트를 읽은 뿌리마다 저널 파일과 `journal/` 디렉터리를 잰다.
+    ///
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
@@ -2186,9 +2214,12 @@ impl App {
         // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
         // 순간 층의 `!` 와 이 배너가 갈린다. 저장소가 서 있으면 읽은 때도 늘 서 있다 — 띄울 때의 첫
         // 읽기도 들인 읽기로 찍는다(`App::open`).
+        // **저널도 본다**(moai-wcy8.403) — `moai note` 는 스냅샷을 안 바꾸는데 `/` 는 노트를 본다. 따로 든
+        // 까닭은 [`Ground::journals`] 에 있다.
         let moved = layer::due(self.site.read_at)
             || stamp_of(repo) != self.site.stamp
-            || self.site.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
+            || self.site.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was)
+            || self.site.ground.journals.iter().any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
             let (tx, rx) = std::sync::mpsc::channel();
             let repo = repo.clone();
@@ -8101,6 +8132,39 @@ mod tests {
         let issues = a.site.issues.clone();
         a.adopt(issues);
         assert!(shown(&a).is_empty(), "노트 없이 걸렸다 — 시험이 노트를 재지 않는다");
+    }
+
+    /// **새 노트는 다시 읽을 까닭이다**(moai-wcy8.403) — `moai note` 는 스냅샷을 안 바꾼다. 적힌 파일에 이어
+    /// 붙인 노트도, 처음 쓰는 사람의 새 저널 파일도 알아챈다. 안 바뀌었으면 읽지 않는다.
+    #[test]
+    fn a_new_note_is_a_reason_to_reread() {
+        let (scratch, repo) = noted("notes-follow");
+        // 디렉터리의 고친 때를 옛날로 돌려 둔다 — 파일 시각은 거친 시계라, 바로 앞에서 만든 디렉터리에
+        // 같은 틈 안에 새 파일이 서면 고친 때가 안 바뀐 것처럼 보인다. 시험이 재려는 것은 그 틈이 아니다.
+        let dir = scratch.join(".moai/journal");
+        std::fs::File::open(&dir).unwrap().set_modified(std::time::UNIX_EPOCH).unwrap();
+        let mut a = opened(repo);
+        a.site.now = "읽기 전".into();
+        settle(&mut a);
+        assert_eq!(a.site.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
+        search(&mut a, "셋째");
+        a.key(key(KeyCode::Enter));
+        assert!(shown(&a).is_empty(), "{:?}", shown(&a));
+
+        let by = crate::model::Actor { name: "레이븐".into(), email: "raven@example.com".into() };
+        let note = |id: &str, text: &str| {
+            serde_json::to_string(&crate::model::JournalEntry::note(id, text, "2026-09-30T01:00:00Z", &by)).unwrap()
+                + "\n"
+        };
+        let mine = dir.join("raven_example_com.jsonl");
+        let had = std::fs::read_to_string(&mine).unwrap();
+        std::fs::write(&mine, had + &note("argos-0001", "셋째 길")).unwrap();
+        settle(&mut a);
+        assert_eq!(shown(&a), ["argos-0001"], "이어 붙인 노트를 못 알아챘다");
+
+        std::fs::write(dir.join("other_example_com.jsonl"), note("argos-0002", "셋째 문")).unwrap();
+        settle(&mut a);
+        assert_eq!(shown(&a), ["argos-0001", "argos-0002"], "처음 쓰는 사람의 저널 파일을 못 알아챘다");
     }
 
     /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** 갱신을 부르기 전에

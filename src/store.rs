@@ -616,6 +616,25 @@ impl Repo {
         out
     }
 
+    /// 저널의 표식 — [`Repo::journal_files`] 가 읽는 파일마다와, [`Repo::journal_dir`] 디렉터리 자체
+    /// (moai-wcy8.403). 탐색기가 노트를 싣고(`tui::measure_read`) 이것으로 다시 읽을 때를 안다 — `moai note`
+    /// 는 스냅샷을 안 바꾸므로 스냅샷 표식만 보면 새 노트가 영영 안 실린다.
+    ///
+    /// **디렉터리도 잰다** — 처음 쓰는 사람의 `<메일>.jsonl` 은 목록에 없던 파일이라, 파일만 재면 그 사람의
+    /// 첫 노트를 못 알아챈다. 파일이 생기면 디렉터리의 고친 때가 바뀐다. 없는 자리는 `None` 으로 서므로
+    /// 나중에 생긴 것도 알아챈다([`stamp`]).
+    pub fn journal_marks(&self) -> Vec<(PathBuf, Stamp)> {
+        let dir = self.journal_dir();
+        self.journal_files()
+            .into_iter()
+            .chain(std::iter::once(dir))
+            .map(|p| {
+                let s = stamp(&p);
+                (p, s)
+            })
+            .collect()
+    }
+
     /// 전부 메모리로 읽는다. 디스크 인덱스는 두지 않는다 — 이전 시도가
     /// SQLite 인덱스를 만들어 재 보고 **순수 손해**임을 확인했다.
     ///
