@@ -2315,3 +2315,11 @@
 {"ts":"2026-09-30T11:12:55Z","id":"moai-wcy8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Closed with moai-msw7; its epic-end review re-ran as moai-7dmq.9xz and merged in a4e869e3."}
 {"ts":"2026-09-30T11:13:11Z","id":"moai-ldjg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 집기 기록이 끊긴 꼬리를 채우지 않고 덧붙인다"}
 {"ts":"2026-09-30T11:14:27Z","id":"moai-p9mq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T11:22:18Z","id":"moai-7dmq.j2a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-7dmq 에픽 끝 셋째 (journal_files 가 링크를 접는다)"}
+{"ts":"2026-09-30T11:22:23Z","id":"moai-7dmq.j2a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T11:23:22Z","id":"moai-7dmq.j2a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix is running in the background; on return take its fixes in a fix: commit, add the CHANGELOG Fixed entry, merge worktree-moai-7dmq, then close moai-p9mq and this review."}
+{"ts":"2026-09-30T12:19:34Z","id":"moai-xd7b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 거름망의 `assignee=me` 가 지금 사람으로 안 풀린다"}
+{"ts":"2026-09-30T12:19:36Z","id":"moai-8ot5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"`TZ=JST-9` 같은 POSIX 규칙 글도 시간대로 받는다"}
+{"ts":"2026-09-30T12:19:38Z","id":"moai-7idw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한 해 넘게 이어지는 서머타임 꼬리를 늘 서머타임으로 읽는다"}
+{"ts":"2026-09-30T12:19:40Z","id":"moai-hg4v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TZif 머리의 크기 셈이 32비트 기계에서 넘칠 수 있다"}
+{"ts":"2026-09-30T12:19:58Z","id":"moai-r621","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"처음 커밋 메시지는 slim 과 fat 이 `America/Ojinaga` 2022 에서 갈린 것을 tzdata 판 차이로 적었는데, 틀렸다. 까닭은 꼬리가 마지막 전환과 어긋난 것이다(2023c 까지의 zic 이 지은 slim 파일). 리뷰 moai-efoc.3e1 의 고침으로, 이제 tzcode 처럼 규칙이 마지막 전환 뒤에 처음 바꾸는 때부터 잰다"}
