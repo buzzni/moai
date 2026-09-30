@@ -940,7 +940,21 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   fewer rows than -n means the list has ended.
 
     moai show --sort id -n 100 --json
-    moai show --sort id -n 100 --after <last id> --json";
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps what changed at or after it, by the row's own
+  updated_at. --created and --done take a range from..to with either side
+  left open, or a single day. <when> is YYYY-MM-DD, a UTC day (the end of a
+  range takes that whole day), or YYYY-MM-DDTHH:MM:SSZ. --done looks at rows
+  standing in done now, at the time they last got there. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a row
+  closed meanwhile changed too; narrow it again with -s or --deferred.
+
+  --since sees neither a removed row nor a note: `moai rm` leaves no row to
+  change, and `moai note` writes the journal, not the row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue";
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {
@@ -1081,6 +1095,18 @@ pub struct FilterArgs {
     /// Sitting in its column that long
     #[arg(long, value_name = "days")]
     pub stale: Option<i64>,
+
+    /// Changed since that time (see below)
+    #[arg(long, value_name = "when")]
+    pub since: Vec<String>,
+
+    /// Created in that range (see below)
+    #[arg(long, value_name = "from..to")]
+    pub created: Vec<String>,
+
+    /// Closed in that range (see below)
+    #[arg(long, value_name = "from..to")]
+    pub done: Vec<String>,
 
     /// Only what is deferred
     #[arg(long)]

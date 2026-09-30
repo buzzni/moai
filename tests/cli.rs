@@ -4663,6 +4663,60 @@ fn show_pages_with_a_limit_and_a_cursor() {
     }
 }
 
+/// **때로 거른다**(moai-efoc.ip5) — `--since` 는 줄 자신의 `updated_at`, `--created`·`--done` 은 폭이다.
+/// 때로 물으면 기본 목록이 숨기는 줄(done·생각)도 열고, `--done` 은 지금 done 에 선 줄이 거기 든 때로
+/// 잰다 — 묶음이면 멤버에서 읽은 칸이 done 이 된 때다.
+#[test]
+fn show_filters_by_time() {
+    let s = init("timed");
+    let old = add_at(s.path(), "2026-09-01T00:00:00Z", &["옛 일"]);
+    let closed = add_at(s.path(), "2026-09-02T00:00:00Z", &["닫을 일"]);
+    let epic = add_at(s.path(), "2026-09-02T00:00:00Z", &["묶음", "--type", "epic"]);
+    let member = add_at(s.path(), "2026-09-02T00:00:00Z", &["멤버", "-e", &epic]);
+    for id in [&closed, &member] {
+        assert!(at(s.path(), "2026-09-05T00:00:00Z", &["mv", id, "done"]).status.success());
+    }
+    assert!(at(s.path(), "2026-09-06T00:00:00Z", &["edit", &old, "--title", "옛 일 고침"]).status.success());
+    let idea = {
+        let out = at(s.path(), "2026-09-06T00:00:00Z", &["idea", "add", "생각", "-q"]);
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let picked = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        let mut v = ids_in(&ok(s.path(), &args));
+        v.sort();
+        v
+    };
+    let sorted = |ids: &[&String]| {
+        let mut v: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+        v.sort();
+        v
+    };
+    // 생각도 열린다 — 기본 목록은 그것을 숨긴다.
+    assert_eq!(picked(&["--since", "2026-09-06"]), sorted(&[&old, &idea]), "그날 바뀐 것이 아니다");
+    // 그사이 닫힌 줄도 바뀐 줄이다. 묶음 줄은 제 줄이 안 바뀌어 안 선다 — 멤버에서 읽은 칸은 줄의 값이 아니다.
+    assert_eq!(picked(&["--since", "2026-09-05"]), sorted(&[&old, &closed, &member, &idea]), "닫힌 줄을 놓쳤다");
+    assert_eq!(picked(&["--done", "2026-09-05"]), sorted(&[&closed, &epic, &member]), "묶음의 끝난 때를 못 쟀다");
+    assert_eq!(picked(&["--created", "2026-09-02"]), sorted(&[&closed, &epic, &member]), "그날 만든 것이 아니다");
+    assert_eq!(picked(&["--filter", "created=..2026-09-01"]), sorted(&[&old]), "`--filter` 가 안 먹었다");
+    // 다시 좁히는 것은 `-s` 다.
+    assert_eq!(picked(&["--since", "2026-09-05", "-s", "todo"]), sorted(&[&old, &idea]));
+    // 사람 화면도 같은 줄을 낸다.
+    let human = ok(s.path(), &["show", "--since", "2026-09-06"]);
+    assert!(human.contains(&old) && human.contains(&idea) && !human.contains(&closed), "{human}");
+
+    // 못 읽는 때는 조용히 0건을 내지 않는다.
+    for bad in [&["--since", "어제"][..], &["--created", "2026-09-03..2026-09-02"][..], &["--done", "2026-02-30"][..]]
+    {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(bad);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_filter""#), "{bad:?}");
+    }
+}
+
 /// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.
 #[test]
 fn ready_takes_a_limit_and_keeps_the_count() {
@@ -6864,6 +6918,9 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["--reverse"],
         vec!["-n", "2"],
         vec!["--after", "argos-0001"],
+        vec!["--since", "2026-09-01"],
+        vec!["--created", "2026-09-01.."],
+        vec!["--done", "..2026-09-01"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());
