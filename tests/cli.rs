@@ -4822,15 +4822,34 @@ fn show_removed_lists_what_rm_took_out() {
     assert!(!human.contains(&kept), "지운 이슈가 아닌 줄을 냈다 — {human}");
 
     // **`--since` 말고는 안 받는다** — 거를 칸도 커서로 삼을 줄도 없다. 말없이 먹으면 걸러진 목록이라 믿는다.
+    // `ShowArgs`·`FilterArgs`·`PageArgs` 의 필드마다 하나씩이다(리뷰 — 아홉만 재던 자리다). 거절이 **그 이름을 제
+    // 자리에** 짚는지 본다: 말묶음의 `--removed`·`--since` 가 늘 서 있어, 글 어디엔가 있는지만 보면 `-s` 는 늘 참이다.
+    let named = |flag: &str| format!("`--removed` 에는 `{flag}` 를");
     for bad in [
         &["-s", "todo"][..],
+        &["-t", "bug"][..],
+        &["--no-tag", "bug"][..],
+        &["-e", "none"][..],
+        &["--milestone", "none"][..],
+        &["--parent", "none"][..],
+        &["-p", "1"][..],
+        &["-a", "none"][..],
         &["--type", "issue"][..],
+        &["-g", "지울"][..],
+        &["--stale", "3"][..],
+        &["--created", "2026-09-01.."][..],
+        &["--done", "..2026-09-10"][..],
+        &["--deferred"][..],
+        &["--all"][..],
         &["--filter", "status=todo"][..],
         &["--sort", "id"][..],
+        &["--reverse"][..],
         &["-n", "1"][..],
         &["--after", kept.as_str()][..],
         &["--worktree"][..],
         &["--tree"][..],
+        &["--raw"][..],
+        &["--as-plan"][..],
         &[kept.as_str()][..],
     ] {
         let mut args = vec!["show", "--removed", "--json"];
@@ -4838,8 +4857,22 @@ fn show_removed_lists_what_rm_took_out() {
         let out = moai(s.path(), &args);
         assert!(!out.status.success(), "{bad:?} 를 받았다");
         let said = String::from_utf8_lossy(&out.stderr);
-        assert!(said.contains(r#""code":"bad_filter""#) && said.contains(bad[0]), "{bad:?} — {said}");
+        assert!(said.contains(r#""code":"bad_filter""#) && said.contains(&named(bad[0])), "{bad:?} — {said}");
     }
+    // **`--filter` 의 항목은 목록과 같은 자가 읽는다**(`query::desugar`, 리뷰) — `=` 없는 항목과 없는 항목 이름은
+    // 목록이 대는 그 말로 거절하고, 빈 항목은 목록처럼 건너뛴다.
+    for (item, says) in [("since", "항목=값"), ("bogus=1", "`bogus` 라는 필터 항목이 없다")] {
+        let out = moai(s.path(), &["show", "--removed", "--filter", item, "--json"]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && said.contains(r#""code":"bad_filter""#) && said.contains(says),
+            "{item} — {said}"
+        );
+    }
+    assert_eq!(
+        ids(&ok(s.path(), &["show", "--removed", "--filter", " ", "--json"])),
+        [second.as_str(), first.as_str()]
+    );
     let out = moai(s.path(), &["epic", "show", "--removed"]);
     assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
 }
@@ -7128,8 +7161,6 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["--since", "2026-09-01"],
         vec!["--created", "2026-09-01.."],
         vec!["--done", "..2026-09-01"],
-        // 지운 줄을 늘어놓는 말도 목록의 것이다(moai-7dmq).
-        vec!["--removed"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());
@@ -7141,6 +7172,13 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         let said = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(said.contains(flag[0]), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
     }
+    // **지운 줄을 늘어놓는 말도 목록의 것이다**(moai-7dmq). 다만 그 거절은 제 길(`show::removed`)에서 나고, 그 말에는
+    // `--removed` 가 늘 서 있다 — 위 고리에 두면 `said.contains("--removed")` 가 늘 참이라 아무것도 안 잰다(리뷰).
+    // 그래서 버린 것(펼칠 id)을 제 자리에 짚는지 본다.
+    let out = moai(s.path(), &["show", id.as_str(), "--removed"]);
+    assert!(!out.status.success(), "`--removed` 를 말없이 버렸다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains(&format!("`--removed` 에는 `{id}` 를")), "펼칠 id 를 안 짚었다 — {said}");
 }
 
 /// **트리는 모든 줄을 정확히 한 번 낸다.** 자리를 정하는 코드가 둘이면

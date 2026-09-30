@@ -780,7 +780,11 @@ fn spans(raw: &[String], one: fn(&str) -> Result<Span, String>) -> Result<Vec<Ve
 /// **한 번에 한 항목이다.** `;` 로 여럿을 받던 것을 걷어냈다 — 그러면
 /// `--filter grep=a;b` 의 `;` 가 글자가 아니라 구분자가 되고, 제목에
 /// 세미콜론이 든 이슈를 영영 못 찾는다. 여럿은 플래그를 되풀이한다.
-fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
+///
+/// **항목을 읽는 자는 이것 하나다** — `moai show --removed` 도 `--filter since=…` 를 가려내려고 이것을
+/// 부른다(`cmd::show`, moai-7dmq 리뷰). 거기서 따로 쪼개던 때는 `--filter since`(`=` 없음)가 목록과
+/// `--removed` 에서 다른 말로 거절됐다.
+pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), String> {
     {
         let one = text.trim();
         if one.is_empty() {
@@ -1680,7 +1684,7 @@ mod tests {
     }
 
     /// **지운 줄도 목록의 `--since` 와 같은 자로 잰다**(moai-7dmq) — 날로 친 때는 읽는 사람의 날이고, 못
-    /// 읽는 도장은 폭이 있으면 어느 폭에도 안 든다. 못 읽는 줄을 지운 `rm`(제목 없음)과 다른 갈래는 빠지고,
+    /// 읽는 도장은 폭이 있으면 어느 폭에도 안 든다. 못 읽는 줄을 지운 `rm`(제목 없음)과 다른 `kind` 는 빠지고,
     /// 남은 줄은 받은 차례 그대로다.
     #[test]
     fn removed_keeps_issue_removals_within_since() {

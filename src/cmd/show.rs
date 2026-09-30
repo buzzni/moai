@@ -61,42 +61,63 @@ fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
 }
 
 /// 목록 자리에서만 뜻이 있는 플래그가 왔는가. 온 것 중 첫 이름을 돌려준다.
+///
+/// **목록은 여기 하나다** — 하나를 펼치는 자리와 `--removed` 의 거절([`removed`])이 같이 읽는다. 둘로
+/// 적으면 거르개를 더하는 날 한쪽만 알아, `--removed` 가 새 거르개를 말없이 먹는다.
+///
+/// **필드를 다 푼다**(`..` 없이, moai-7dmq 리뷰) — `FilterArgs` 에 거르개가 더해지면 여기가 컴파일되지 않아
+/// 이 목록에 넣을지 정하게 된다. 필드를 이름으로 짚던 때는 빠뜨린 것을 아무도 못 봤다(아래 `--milestone`).
 fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
-    given(a).into_iter().find_map(|(given, name)| given.then_some(name))
-}
-
-/// 거르개 플래그마다 (왔는가, 이름). **목록은 여기 하나다** — [`first_given`] 과 `--removed` 의 거절
-/// ([`removed`])이 같이 읽는다. 둘로 적으면 거르개를 더하는 날 한쪽만 알아, `--removed` 가 새 거르개를
-/// 말없이 먹는다.
-fn given(a: &crate::cli::FilterArgs) -> [(bool, &'static str); 17] {
+    let crate::cli::FilterArgs {
+        status,
+        tag,
+        no_tag,
+        epic,
+        milestone,
+        parent,
+        priority,
+        assignee,
+        kind,
+        grep,
+        stale,
+        since,
+        created,
+        done,
+        deferred,
+        all,
+        filter,
+    } = a;
     [
-        (!a.status.is_empty(), "-s"),
-        (!a.tag.is_empty(), "-t"),
-        (!a.no_tag.is_empty(), "--no-tag"),
-        (!a.epic.is_empty(), "-e"),
-        (!a.parent.is_empty(), "--parent"),
-        (!a.priority.is_empty(), "-p"),
-        (!a.assignee.is_empty(), "-a"),
-        (a.kind.is_some(), "--type"),
-        (a.grep.is_some(), "-g"),
-        (a.stale.is_some(), "--stale"),
-        (!a.since.is_empty(), "--since"),
-        (!a.created.is_empty(), "--created"),
-        (!a.done.is_empty(), "--done"),
-        (a.all, "--all"),
-        (a.deferred, "--deferred"),
-        (!a.filter.is_empty(), "--filter"),
+        (!status.is_empty(), "-s"),
+        (!tag.is_empty(), "-t"),
+        (!no_tag.is_empty(), "--no-tag"),
+        (!epic.is_empty(), "-e"),
+        (!parent.is_empty(), "--parent"),
+        (!priority.is_empty(), "-p"),
+        (!assignee.is_empty(), "-a"),
+        (kind.is_some(), "--type"),
+        (grep.is_some(), "-g"),
+        (stale.is_some(), "--stale"),
+        (!since.is_empty(), "--since"),
+        (!created.is_empty(), "--created"),
+        (!done.is_empty(), "--done"),
+        (*all, "--all"),
+        (*deferred, "--deferred"),
+        (!filter.is_empty(), "--filter"),
         // `--milestone` 도 아래에서 `Filter::build` 로 넘어간다. 여기 빠져
         // 있으면 `moai show <id> --milestone <m>` 이 걸러지지 않은 그 이슈를
         // 그대로 내고, 부르는 쪽은 그 마일스톤에 든 것이라고 믿는다.
-        (!a.milestone.is_empty(), "--milestone"),
+        (!milestone.is_empty(), "--milestone"),
     ]
+    .into_iter()
+    .find_map(|(given, name)| given.then_some(name))
 }
 
 /// 차례·쪽 플래그([`crate::cli::PageArgs`]) 가운데 온 것의 첫 이름(moai-efoc). 목록에서만 뜻이 있다 —
-/// 하나를 펼치는 자리에도 트리에도 세울 차례와 자를 목록이 없다.
+/// 하나를 펼치는 자리에도 트리에도 세울 차례와 자를 목록이 없다. 필드를 다 푸는 까닭은 [`first_given`] 과 같다.
 fn first_ordered(p: &crate::cli::PageArgs) -> Option<&'static str> {
-    [(p.sort.is_some(), "--sort"), (p.reverse, "--reverse"), (p.limit.is_some(), "-n"), (p.after.is_some(), "--after")]
+    let crate::cli::PageArgs { sort, reverse, limit, after } = p;
+    [(sort.is_some(), "--sort"), (*reverse, "--reverse"), (limit.is_some(), "-n"), (after.is_some(), "--after")]
         .into_iter()
         .find_map(|(given, name)| given.then_some(name))
 }
@@ -121,7 +142,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let repo = super::open_repo(ctx)?;
     // **스냅샷보다 먼저 가른다** — 지운 줄은 스냅샷에 없으니 읽을 까닭이 없다.
     if args.removed {
-        return removed(ctx, &repo, &args, kind_filter);
+        return removed(ctx, &repo, args, kind_filter);
     }
     let crate::worktree::Gathered { load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
@@ -423,43 +444,66 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
 /// **받는 것은 `--since` 하나다**(`--filter since=…` 도 같은 말이다). 나머지를 말없이 먹으면 부르는 쪽은
 /// 걸러지거나 잘린 목록이라 믿는다 — 하나를 펼치는 자리가 거르개를 거절하는 것과 같은 까닭이다. `rm` 줄에는
 /// 칸도 태그도 종류도 없어 거를 값이 없고, 커서(`--after`)로 삼을 스냅샷의 줄도 없다.
-fn removed(ctx: &Ctx, repo: &Repo, args: &ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
-    let a = &args.filter;
-    // `--filter since=…` 는 `--since` 로 옮긴다 — 다른 항목이 하나라도 섞이면 `--filter` 를 댄다.
-    // 빈 항목은 `query` 가 건너뛰는 것이라 여기서도 건너뛴다.
-    let mut since = a.since.clone();
-    let mut stray_filter = false;
-    for one in &a.filter {
-        match one.split_once('=') {
-            Some((k, v)) if k.trim() == "since" => since.push(v.trim().to_string()),
-            _ if one.trim().is_empty() => {}
-            _ => stray_filter = true,
-        }
-    }
-    let target = kind_filter.as_ref().map(Kind::as_str).or(args.target.as_deref());
-    let stray = target
-        .or(args.tree.then_some("--tree"))
-        .or(args.raw.then_some("--raw"))
-        .or(args.as_plan.then_some("--as-plan"))
-        .or(args.worktree.worktree.then_some("--worktree"))
-        .or_else(|| given(a).into_iter().find_map(|(g, n)| (g && n != "--since" && n != "--filter").then_some(n)))
-        .or(stray_filter.then_some("--filter"))
-        .or_else(|| first_ordered(&args.page));
-    if let Some(flag) = stray {
-        return Err(Fail::coded(
+fn removed(ctx: &Ctx, repo: &Repo, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
+    // **필드를 다 푼다**(`..` 없이, 리뷰) — `ShowArgs` 에 플래그가 더해지면 여기가 컴파일되지 않아, 그 플래그를
+    // 거절할지 정하게 된다. 이름으로 짚어 가던 때는 새 플래그를 `--removed` 가 말없이 먹을 수 있었다.
+    let ShowArgs {
+        target,
+        raw,
+        tree,
+        as_plan,
+        removed: _,
+        worktree: crate::cli::WorktreeArg { worktree },
+        mut filter,
+        page,
+    } = args;
+    let refuse = |flag: &str| {
+        Fail::coded(
             format!(
                 "{}\n      {}",
                 crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.removed_with"), &[("flag", flag)]),
                 crate::i18n::say(ctx.lang(), "show.removed_with_how"),
             ),
             super::code::BAD_FILTER,
-        ));
+        )
+    };
+    // `--since` 와 `--filter` 는 꺼내 따로 읽는다 — 남은 거르개는 [`first_given`] 이 댄다(그 목록은 하나다).
+    let mut since = std::mem::take(&mut filter.since);
+    let items = std::mem::take(&mut filter.filter);
+    let stray = kind_filter
+        .as_ref()
+        .map(Kind::as_str)
+        .or(target.as_deref())
+        .or_else(|| {
+            [(tree, "--tree"), (raw, "--raw"), (as_plan, "--as-plan"), (worktree, "--worktree")]
+                .into_iter()
+                .find_map(|(given, name)| given.then_some(name))
+        })
+        .or_else(|| first_given(&filter));
+    if let Some(flag) = stray {
+        return Err(refuse(flag));
+    }
+    // **`--filter` 의 항목은 목록과 같은 자가 읽는다**(`query::desugar`, 리뷰) — 여기서 따로 쪼개던 때는 같은
+    // 항목이 두 자리에서 다른 말로 거절됐다(`=` 없는 항목, 없는 항목 이름). `since=` 는 `--since` 로 옮기고,
+    // 다른 항목이 하나라도 서면 `--filter` 를 댄다. 빈 항목은 `desugar` 가 아무것도 안 하고 넘기는 것이라
+    // 여기서도 건너뛴다 — 안 건너뛰면 `since` 가 아닌 항목으로 읽혀 거절된다.
+    let mut stray_filter = false;
+    for one in items.iter().filter(|one| !one.trim().is_empty()) {
+        let mut probe = Raw::default();
+        crate::query::desugar(&mut probe, one).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+        match probe.since.pop() {
+            Some(v) => since.push(v),
+            None => stray_filter = true,
+        }
+    }
+    if let Some(flag) = stray_filter.then_some("--filter").or_else(|| first_ordered(&page)) {
+        return Err(refuse(flag));
     }
     // 때를 읽는 자는 목록의 `--since` 와 한 벌이다(`Filter::build`) — 날로 친 때는 읽는 사람의 날이다.
-    let filter = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
-    let zone = filter.needs_zone().then(|| ctx.zone());
+    let timed = Filter::build(Raw { since, ..Raw::default() }).map_err(|e| Fail::coded(e, super::code::BAD_FILTER))?;
+    let zone = timed.needs_zone().then(|| ctx.zone());
     let entries = repo.journal_of_kind("rm");
-    let rows = crate::query::removed(&entries, &filter.updated, zone);
+    let rows = crate::query::removed(&entries, &timed.updated, zone);
     if ctx.json {
         return super::json_line(&rows);
     }

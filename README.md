@@ -231,22 +231,29 @@ seconds or an offset left by a hand edit — falls in no time range, for
 
 ```sh
 # rows written since the last pass, a page at a time - keep the time the last
-# pass started, not the time it ended, and drop repeats by id
+# pass started, not the time it ended, less a few seconds (a write takes its
+# stamp before it waits up to 5s for the lock), and drop repeats by id
 moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --json
 moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --after <last id> --json
 # and the issues removed since then, from the journal
 moai show --removed --since 2026-09-29T00:00:00Z --json
 ```
 
-`moai show --removed` lists what `moai rm` took out, oldest first, as the
-journal lines themselves — the shape of `journal` in `moai show <id> --json`,
-so each carries `ts`, `id` and `title`. Without `--since` it is the whole
-history. It lays that history out and holds it against nothing: an id created
-again after its removal still stands there, and the list above says whether it
-lives now. It reads the journal beside the tracker only (other worktrees are not
-overlaid), takes `--since` and no other filter, and leaves out `rm --line`,
-which removed an unreadable line rather than an issue. A journal file moai
-cannot read is skipped, named on stderr, and the exit code is not 0.
+`moai show --removed` lists what `moai rm` took out, oldest first, as journal
+lines in the shape of `journal` in `moai show <id> --json` — each carries `ts`,
+`id` and `title`, and a field this build does not know is left out. Without
+`--since` it is the whole history. It lays that history out and holds it against
+nothing, so an id listed there may live again: created anew, or brought back
+with an older stamp that the list above misses — a restored snapshot, or the
+twin left when `moai rm` took one of two lines sharing an id. Before dropping an
+id from a copy, ask the snapshot: `moai show <id> --json` answers `not_found`
+for one that is gone. `--since` keys on the `rm` line's own stamp, so like the
+list above it misses a removal merged in from another branch with an older
+stamp, and nothing lists a removal whose journal line was never written — keep
+the full compare below. It reads the journal beside the tracker only (other
+worktrees are not overlaid), takes `--since` and no other filter, and leaves out
+`rm --line`, which removed an unreadable line rather than an issue. A journal
+file moai cannot read is skipped, named on stderr, and the exit code is not 0.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
 `moai show --all --json`, plus `moai idea show --all --json` since `--all` still

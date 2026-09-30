@@ -426,14 +426,18 @@ Order and paging:
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
 
-  Removed: --removed lists the issues `moai rm` took out, oldest first,
-  read from the journal beside the tracker - other worktrees are not
-  overlaid, and `rm --line` removed an unreadable line, not an issue.
-  With --since, those removed at or after it. --json gives the journal
-  lines as they are - the shape of `journal` in `moai show <id> --json`.
-  It lays the history out and holds it against nothing: an id created
-  again after its removal still stands there, and the snapshot says
-  whether it lives now. --since is the one flag it takes.
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -994,14 +998,18 @@ Order and paging:
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
 
-  Removed: --removed lists the issues `moai rm` took out, oldest first,
-  read from the journal beside the tracker - other worktrees are not
-  overlaid, and `rm --line` removed an unreadable line, not an issue.
-  With --since, those removed at or after it. --json gives the journal
-  lines as they are - the shape of `journal` in `moai show <id> --json`.
-  It lays the history out and holds it against nothing: an id created
-  again after its removal still stands there, and the snapshot says
-  whether it lives now. --since is the one flag it takes.
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1219,14 +1227,18 @@ Order and paging:
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
 
-  Removed: --removed lists the issues `moai rm` took out, oldest first,
-  read from the journal beside the tracker - other worktrees are not
-  overlaid, and `rm --line` removed an unreadable line, not an issue.
-  With --since, those removed at or after it. --json gives the journal
-  lines as they are - the shape of `journal` in `moai show <id> --json`.
-  It lays the history out and holds it against nothing: an id created
-  again after its removal still stands there, and the snapshot says
-  whether it lives now. --since is the one flag it takes.
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1444,14 +1456,18 @@ Order and paging:
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
 
-  Removed: --removed lists the issues `moai rm` took out, oldest first,
-  read from the journal beside the tracker - other worktrees are not
-  overlaid, and `rm --line` removed an unreadable line, not an issue.
-  With --since, those removed at or after it. --json gives the journal
-  lines as they are - the shape of `journal` in `moai show <id> --json`.
-  It lays the history out and holds it against nothing: an id created
-  again after its removal still stands there, and the snapshot says
-  whether it lives now. --since is the one flag it takes.
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
@@ -1690,14 +1706,18 @@ Order and paging:
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
 
-  Removed: --removed lists the issues `moai rm` took out, oldest first,
-  read from the journal beside the tracker - other worktrees are not
-  overlaid, and `rm --line` removed an unreadable line, not an issue.
-  With --since, those removed at or after it. --json gives the journal
-  lines as they are - the shape of `journal` in `moai show <id> --json`.
-  It lays the history out and holds it against nothing: an id created
-  again after its removal still stands there, and the snapshot says
-  whether it lives now. --since is the one flag it takes.
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  --since is the one flag it takes.
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 

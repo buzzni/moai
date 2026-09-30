@@ -727,7 +727,7 @@
   "refuse.as_plan_not_an_epic": "`{id}` is {is}. `--as-plan` takes an epic back out",
   "refuse.as_plan_epics": "the epics are `moai show epic`",
   "show.lossy_title": "the title of {id} reads differently when put back in through this format — fix it before you do",
-  "show.removed_with": "`{flag}` cannot be used with `--removed` — it lays out the journal's removals as they are, with nothing to pick them by.",
+  "show.removed_with": "`{flag}` cannot be used with `--removed` — it lays the journal's removals out whole, oldest first.",
   "show.removed_with_how": "only `--since` narrows it: `moai show --removed --since <when>`",
   "refuse.title_looks_like_a_flag": "`{title}` reads as a flag, not a title.",
   "refuse.title_after_dashes": "if it really is the title, put it after `--` — `moai {verb} -- {title}`",
