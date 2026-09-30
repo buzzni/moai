@@ -63,7 +63,14 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   an older stamp is missed the way such a row is; the full compare stays the
   complete answer. It reads the journal beside the tracker only, leaves out
   `rm --line` (an unreadable line, not an issue), takes `--since` and no other
-  filter, and is refused under `moai <kind> show`.
+  filter, and is refused under `moai <kind> show`. A journal line it cannot read
+  that may still hold a removal — one cut short by a full disk or a crash — is
+  named on stderr by file and line, and the run ends non-zero; the list still
+  comes out. Whether a cut line may hold a removal is read from the kind it
+  names itself, and with `--since` only a line stamped in the range, or with no
+  stamp left to read, counts, so one old cut line does not fail every later
+  pass. moai never rewrites the journal: once you have seen what the line held,
+  delete it by hand.
 
 ### Changed
 
@@ -83,6 +90,28 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
   epic — so SQL on `.moai/issues.jsonl` gets them wrong. A new section shows jq
   and DuckDB run on the `--json` output instead, next to one on paging and
   incremental sync.
+
+### Fixed
+
+- **A line written after a cut journal tail stands on its own line.** When the
+  journal ended without its newline — a full disk, or a write cut short — the
+  next line was glued onto the cut one and neither could be read, so a
+  `moai rm` made then vanished from `moai show --removed`. Appending now puts
+  the newline back first; the cut line stays as it was — the history skips it,
+  and `--removed` names it if it may have held a removal. A file moai may write
+  to but not read is appended to as before, without that check. The lines
+  `moai init` adds to `.gitignore` and `.gitattributes` go through the same
+  append. A whole line that an older moai already glued onto a cut one is read
+  back: the history, `-g`, `work` and `--removed` all see it again.
+
+- **A hand-edited stamp no longer reaches the terminal.** A stamp moai cannot
+  read was printed as it stood, so an escape sequence or a newline in a journal
+  line's `ts`, or in a row's `created_at`, `updated_at`, `started_at` or
+  `done_at`, could repaint the screen from `moai show <id>`. Every stamp is now
+  folded onto one line with its control characters taken out. The history's
+  column names, kinds and names are folded the same way, so a newline in them
+  no longer draws a history line that was never written; notes and move
+  messages still keep their lines.
 
 ## [0.1.4] - 2026-09-29
 
