@@ -371,6 +371,15 @@ Filters  (comma = or,  repeated = and):
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order:
+      --sort <key>  Order the list by that key (priority when absent)
+      --reverse     Turn the order around, ties included
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.
 ```
 
 ## `moai mv`
@@ -866,6 +875,15 @@ Filters  (comma = or,  repeated = and):
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order:
+      --sort <key>  Order the list by that key (priority when absent)
+      --reverse     Turn the order around, ties included
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.
 ```
 
 ## `moai epic`
@@ -1018,6 +1036,15 @@ Filters  (comma = or,  repeated = and):
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order:
+      --sort <key>  Order the list by that key (priority when absent)
+      --reverse     Turn the order around, ties included
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.
 ```
 
 ## `moai milestone`
@@ -1170,6 +1197,15 @@ Filters  (comma = or,  repeated = and):
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order:
+      --sort <key>  Order the list by that key (priority when absent)
+      --reverse     Turn the order around, ties included
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.
 ```
 
 ## `moai idea`
@@ -1343,6 +1379,15 @@ Filters  (comma = or,  repeated = and):
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
       --filter <item=value>               Filters as one string (`status=todo`)
+
+Order:
+      --sort <key>  Order the list by that key (priority when absent)
+      --reverse     Turn the order around, ties included
+
+  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.
 ```
 
 ## `moai idea promote`

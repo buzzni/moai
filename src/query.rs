@@ -617,10 +617,6 @@ pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
     a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id))
 }
 
-pub fn sort_for_display(issues: &mut [Issue]) {
-    issues.sort_by(display_order);
-}
-
 /// 사람이 고르는 차례(moai-55cp). 기본은 [`display_order`] 다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortKey {
@@ -631,6 +627,18 @@ pub enum SortKey {
     Status,
     Assignee,
     Title,
+    /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
+    /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
+    /// 차례 표(`tui::keys::Order`)에는 없다 — 사람이 훑는 화면에서는 id 차례가 곧 만든 차례라
+    /// `Created` 와 겹친다.
+    Id,
+}
+
+/// 고른 차례와 그 방향 — `moai show --sort`·`--reverse` 가 드는 한 벌이다(moai-efoc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Sort {
+    pub key: SortKey,
+    pub reversed: bool,
 }
 
 /// 고른 차례로 두 줄을 견준다. 줄마다 **칸을 곁에 받는다** — 묶음의 칸은 멤버에서 읽은
@@ -666,9 +674,21 @@ pub fn order_by(
             (None, None) => Ordering::Equal,
         },
         SortKey::Title => caseless(&a.0.title, &b.0.title),
+        SortKey::Id => a.0.id.cmp(&b.0.id),
     };
     let order = natural.then_with(|| display_order(a.0, b.0));
     if reversed { order.reverse() } else { order }
+}
+
+/// 고른 줄을 `sort` 차례로 세운다(moai-efoc) — `moai show` 의 목록이 지나는 자리다.
+///
+/// 칸은 **목록의 글리프와 같은 자**([`Where::column`])로 읽는다 — 묶음의 칸은 멤버에서 읽은 것이다.
+/// 담당은 화면에 선 이름으로 견준다(`cfg.naming`). 탐색기와 같은 [`order_by`] 를 지나므로 같은 낱말이
+/// 두 표면에서 같은 차례로 선다. 기본값(`Sort::default`)은 [`display_order`] 와 한 치도 안 갈린다.
+pub fn page(shown: &mut [Issue], wh: &Where, cfg: &crate::config::Config, sort: Sort) {
+    shown.sort_by(|a, b| {
+        order_by(sort.key, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
+    });
 }
 
 /// **안 읽은 줄** — 내게 온 것 가운데 내가 마지막으로 본 뒤에 바뀐 것(moai-50mn).
@@ -862,6 +882,9 @@ mod tests {
         assert_eq!(sorted(SortKey::Created, true), ["a-1", "a-3", "a-2"]);
         assert_eq!(sorted(SortKey::Status, false), ["a-2", "a-1", "a-3"], "설정의 칸 차례가 아니다");
         assert_eq!(sorted(SortKey::Assignee, false), ["a-3", "a-1", "a-2"], "담당 없는 줄이 뒤로 안 갔다");
+        // **id 차례는 우선순위를 안 본다**(moai-efoc) — 급한 a-2 가 앞으로 나오면 안 움직이는 차례가 아니다.
+        assert_eq!(sorted(SortKey::Id, false), ["a-1", "a-2", "a-3"], "id 차례에 우선순위가 끼었다");
+        assert_eq!(sorted(SortKey::Id, true), ["a-3", "a-2", "a-1"]);
 
         // **담당은 화면에 선 이름으로 선다**(moai-2kyl 단계 리뷰) — 메일로 대면 메일의 가나다다.
         let mut mailed = [issues[0].clone(), issues[2].clone()];
@@ -1267,11 +1290,14 @@ mod tests {
         assert!(e.contains("동시에") && e.contains("-a 철수,영희"), "{e}");
     }
 
+    /// **목록의 기본 차례는 급한 것 → id 다** — 차례를 고르지 않은 [`page`] 가 [`display_order`] 와 같다.
     #[test]
     fn sorting_puts_the_urgent_first_then_id() {
         let mut v = vec![issue("a-0003", "todo", &[]), issue("a-0001", "todo", &[]), issue("a-0002", "todo", &[])];
         v[0].priority = Some(0);
-        sort_for_display(&mut v);
+        let all = v.clone();
+        let c = cfg();
+        page(&mut v, &Where::of(&all, &c), &c, Sort::default());
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
     }

@@ -85,6 +85,28 @@ fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
     .find_map(|(given, name)| given.then_some(name))
 }
 
+/// 차례 플래그([`crate::cli::PageArgs`]) 가운데 온 것의 첫 이름(moai-efoc). 목록에서만 뜻이 있다 —
+/// 하나를 펼치는 자리에도 트리에도 세울 차례가 없다.
+fn first_ordered(p: &crate::cli::PageArgs) -> Option<&'static str> {
+    [(p.sort.is_some(), "--sort"), (p.reverse, "--reverse")].into_iter().find_map(|(given, name)| given.then_some(name))
+}
+
+/// argv 의 낱말을 `query` 의 차례로 잇는다 — `query` 는 clap 을 모른다(`tui::App::sort_key` 와 같은 자리).
+fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
+    use crate::cli::SortArg;
+    use crate::query::SortKey;
+    let key = match p.sort {
+        None | Some(SortArg::Priority) => SortKey::Priority,
+        Some(SortArg::Created) => SortKey::Created,
+        Some(SortArg::Updated) => SortKey::Updated,
+        Some(SortArg::Status) => SortKey::Status,
+        Some(SortArg::Assignee) => SortKey::Assignee,
+        Some(SortArg::Title) => SortKey::Title,
+        Some(SortArg::Id) => SortKey::Id,
+    };
+    crate::query::Sort { key, reversed: p.reverse }
+}
+
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let crate::worktree::Gathered { load, origin, sides, mine, .. } =
@@ -100,7 +122,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if let Target::One(id) = &target {
         // 필터를 조용히 버리지 않는다. 하나를 콕 집었으면 거를 것이 없고,
         // 버린 채로 그 하나를 내면 부르는 쪽은 걸러진 결과라고 믿는다.
-        if let Some(flag) = args.tree.then_some("--tree").or_else(|| first_given(&args.filter)) {
+        if let Some(flag) =
+            args.tree.then_some("--tree").or_else(|| first_given(&args.filter)).or_else(|| first_ordered(&args.page))
+        {
             return Err(Fail::coded(
                 format!(
                     "{}\n      {}",
@@ -148,6 +172,21 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
                 crate::i18n::say(ctx.lang(), "refuse.as_plan_how"),
             ),
             super::code::BAD_TARGET,
+        ));
+    }
+    // **트리의 차례도 조용히 안 버린다.** 트리는 묶음 → 멤버 → 자식으로 서고 그 차례는 `nav` 가
+    // 정한다 — `--sort` 를 말없이 먹으면 부르는 쪽은 고른 차례로 섰다고 믿는다. `--json` 은 트리를
+    // 안 그리지만 같은 판으로 거절한다: 한 조합의 뜻이 출력 모양에 따라 갈리지 않게.
+    if args.tree
+        && let Some(flag) = first_ordered(&args.page)
+    {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.order_on_tree"), &[("flag", flag)]),
+                crate::i18n::say(ctx.lang(), "refuse.order_on_tree_how"),
+            ),
+            super::code::BAD_FILTER,
         ));
     }
 
@@ -237,7 +276,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         }
         h
     };
-    crate::query::sort_for_display(&mut shown);
+    crate::query::page(&mut shown, &wh, &repo.config, sort_of(&args.page));
 
     if ctx.json {
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고

@@ -4541,6 +4541,81 @@ fn tree_is_refused_on_a_single_issue() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("--tree"));
 }
 
+/// 그 시각에 만든 이슈 하나의 id — 만든 때로 차례를 재는 시험이 쓴다.
+fn add_at(dir: &Path, now: &str, args: &[&str]) -> String {
+    let mut v = vec!["add"];
+    v.extend_from_slice(args);
+    v.push("-q");
+    let out = at(dir, now, &v);
+    assert!(out.status.success(), "{v:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// **목록은 고른 차례로 서고 `--reverse` 는 통째로 뒤집는다**(moai-efoc.6sq). 기계와 사람이 같은 차례를
+/// 받고, 칸 차례는 묶음이 멤버에서 읽은 칸으로 잰다 — 탐색기와 같은 `query::order_by` 를 지난다.
+#[test]
+fn show_orders_the_list_by_the_key_it_is_given() {
+    let s = init("sorted");
+    let banana = add_at(s.path(), "2026-09-01T00:00:00Z", &["Banana", "-p", "2"]);
+    let apple = add_at(s.path(), "2026-09-02T00:00:00Z", &["apple", "-p", "1"]);
+    let cherry = add_at(s.path(), "2026-09-03T00:00:00Z", &["cherry", "-p", "2"]);
+    let epic = add_at(s.path(), "2026-09-04T00:00:00Z", &["묶음", "--type", "epic", "-p", "0"]);
+    let member = add_at(s.path(), "2026-09-05T00:00:00Z", &["멤버", "-e", &epic, "-p", "3"]);
+    ok(s.path(), &["mv", &member, "in_progress"]);
+    let order = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    // 같은 우선순위끼리는 id 로 가른다 — id 는 무작위라 시험이 제 손으로 가른다.
+    let by_id = |a: &str, b: &str| if a < b { [a.to_string(), b.to_string()] } else { [b.to_string(), a.to_string()] };
+    let [p2a, p2b] = by_id(&banana, &cherry);
+
+    assert_eq!(
+        order(&[]),
+        [epic.clone(), apple.clone(), p2a.clone(), p2b.clone(), member.clone()],
+        "기본 차례가 바뀌었다"
+    );
+    assert_eq!(order(&["--sort", "priority"]), order(&[]), "`priority` 가 기본 차례와 다르다");
+    assert_eq!(
+        order(&["--sort", "created"]),
+        [member.clone(), epic.clone(), cherry.clone(), apple.clone(), banana.clone()],
+        "새것이 위가 아니다"
+    );
+    assert_eq!(
+        order(&["--sort", "created", "--reverse"]),
+        [banana.clone(), apple.clone(), cherry.clone(), epic.clone(), member.clone()],
+        "`--reverse` 가 안 뒤집었다"
+    );
+    let mut ids = vec![banana.clone(), apple.clone(), cherry.clone(), epic.clone(), member.clone()];
+    ids.sort();
+    assert_eq!(order(&["--sort", "id"]), ids, "id 차례가 아니다");
+    // 대소문자를 접어 가나다 — 접지 않으면 `Banana` 가 `apple` 앞에 선다.
+    assert_eq!(order(&["--sort", "title"])[..3], [apple.clone(), banana.clone(), cherry.clone()], "제목 차례가 아니다");
+    // **묶음은 멤버에서 읽은 칸으로 선다** — 에픽 줄에 적힌 칸은 `todo` 지만 멤버가 집혀 `in_progress` 다.
+    // 적힌 칸으로 재면 p0 인 에픽이 `todo` 의 맨 앞에 선다.
+    assert_eq!(
+        order(&["--sort", "status"]),
+        [apple.clone(), p2a.clone(), p2b.clone(), epic.clone(), member.clone()],
+        "칸 차례가 묶음의 읽은 칸을 안 봤다"
+    );
+
+    // 사람 화면도 같은 차례다.
+    let human = ok(s.path(), &["show", "--sort", "title"]);
+    let at_of = |id: &str| human.find(id).unwrap_or_else(|| panic!("{id} 이 안 섰다 — {human}"));
+    assert!(at_of(&apple) < at_of(&banana) && at_of(&banana) < at_of(&cherry), "사람 화면의 차례가 다르다 — {human}");
+
+    // 트리에는 세울 차례가 없다 — 말없이 먹지 않고 그 이름을 대며 거절한다.
+    for flag in [&["--sort", "id"][..], &["--reverse"][..]] {
+        let mut args = vec!["show", "--tree"];
+        args.extend_from_slice(flag);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{flag:?} 를 트리에서 말없이 먹었다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(flag[0]), "{flag:?} 를 거절하며 이름을 안 짚었다");
+    }
+    assert!(!moai(s.path(), &["show", "--sort", "nope"]).status.success(), "모르는 차례를 받았다");
+}
+
 // ── S4 — moai status ─────────────────────────────────────────────────
 
 fn at(dir: &Path, now: &str, args: &[&str]) -> Output {
@@ -6721,6 +6796,9 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["--filter", "status=todo"],
         vec!["--milestone", "없는것"],
         vec!["--tree"],
+        // **차례도 목록에서만 뜻이 있다**(moai-efoc) — `PageArgs` 의 필드마다 하나씩.
+        vec!["--sort", "id"],
+        vec!["--reverse"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());

@@ -718,6 +718,8 @@
   "refuse.show_raw_how": "`moai show <id> --raw` 처럼 하나를 집어서 쓴다",
   "refuse.as_plan_on_list": "`--as-plan` 은 에픽 하나를 되뽑는다.",
   "refuse.as_plan_how": "`moai show <에픽> --as-plan` 처럼 하나를 집어서 쓴다",
+  "refuse.order_on_tree": "`--tree` 에는 `{flag}` 를 쓸 수 없다 — 트리는 묶음의 차례로 선다.",
+  "refuse.order_on_tree_how": "차례를 고르려면 `--tree` 없이 친다",
   "refuse.as_plan_with_raw": "`--as-plan` 과 `--raw` 는 같이 쓸 수 없다 — 되뽑은 계획에는 본문이 없다",
   "refuse.as_plan_not_an_epic": "`{id}` 는 {is} 다. `--as-plan` 은 에픽을 되뽑는다",
   "refuse.as_plan_epics": "에픽 목록은 `moai show epic`",

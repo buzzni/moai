@@ -718,6 +718,8 @@
   "refuse.show_raw_how": "pick one out, as in `moai show <id> --raw`",
   "refuse.as_plan_on_list": "`--as-plan` takes one epic back out.",
   "refuse.as_plan_how": "pick one out, as in `moai show <epic> --as-plan`",
+  "refuse.order_on_tree": "`{flag}` cannot be used with `--tree` — the tree stands in the order of its groups.",
+  "refuse.order_on_tree_how": "to order the list, leave `--tree` out",
   "refuse.as_plan_with_raw": "`--as-plan` and `--raw` do not go together — a plan taken back out has no bodies",
   "refuse.as_plan_not_an_epic": "`{id}` is {is}. `--as-plan` takes an epic back out",
   "refuse.as_plan_epics": "the epics are `moai show epic`",

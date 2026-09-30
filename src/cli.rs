@@ -230,6 +230,7 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     )]
     Add(AddArgs),
     /// Open one, or list them
+    #[command(after_help = SHOW_LIST)]
     Show(ShowArgs),
     /// Move the status
     #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
@@ -752,7 +753,7 @@ pub enum Typed {
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
     /// Open one, or list them (`ls` is the same)
-    #[command(alias = "ls")]
+    #[command(alias = "ls", after_help = SHOW_LIST)]
     Show(ShowArgs),
 }
 
@@ -921,6 +922,13 @@ pub struct AddArgs {
     pub quiet: bool,
 }
 
+/// 목록의 차례를 한자리에서 댄다(moai-efoc) — `moai show` 와 `moai <종류> show` 가 같은 글을 싣는다.
+/// 두 벌로 적으면 한쪽만 고쳐지는 날 같은 플래그가 명령마다 다른 뜻으로 읽힌다.
+const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). --reverse turns the whole order around.";
+
 #[derive(Args, Debug)]
 pub struct ShowArgs {
     /// An issue id, or a kind (issue, epic). The whole list when absent
@@ -944,6 +952,39 @@ pub struct ShowArgs {
 
     #[command(flatten)]
     pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub page: PageArgs,
+}
+
+/// 목록의 차례(moai-efoc). **거르개가 아니다** — 무엇을 고르는지는 안 바꾸고, 고른 것을 어떤
+/// 차례로 내는지만 정한다. 그래서 `FilterArgs` 와 머리글이 따로다.
+#[derive(Args, Debug, Default)]
+#[command(next_help_heading = "Order")]
+pub struct PageArgs {
+    /// Order the list by that key (priority when absent)
+    #[arg(long, value_name = "key", value_enum, hide_possible_values = true)]
+    pub sort: Option<SortArg>,
+
+    /// Turn the order around, ties included
+    #[arg(long)]
+    pub reverse: bool,
+}
+
+/// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
+/// 두 표면에서 다른 차례를 가리키면 안 된다. 잇는 것은 `cmd::show` 다(`query` 는 clap 을 모른다).
+///
+/// **갈래마다 `///` 를 안 단다** — 하나라도 달리면 clap 이 `show --help` 전체를 줄 바꿈 모양으로
+/// 펼쳐 옵션 서른 줄이 두 배가 된다. 낱말마다의 방향은 `Show` 의 `after_help` 가 한자리에서 댄다.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub enum SortArg {
+    Priority,
+    Created,
+    Updated,
+    Status,
+    Assignee,
+    Title,
+    Id,
 }
 
 /// `status`·`ready`·`show` 가 함께 받는다. **전역 플래그로 두지 않는다** — 쓰는
