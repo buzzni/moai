@@ -2350,3 +2350,6 @@
 {"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj.4ks","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC f 의 grep= 으로 건 줄도 찾은 자리를 칠한다"}
 {"ts":"2026-09-30T13:49:02Z","id":"moai-lpzj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2ksl 에서 펼쳤다 — 탐색기가 검색 범위를 뱃지 글에서 되읽는다"}
 {"ts":"2026-09-30T13:49:02Z","id":"moai-2ksl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-lpzj 로 펼쳤다 (이슈 3건)"}
+{"ts":"2026-09-30T13:51:05Z","id":"moai-lpzj.i7i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T13:51:06Z","id":"moai-lpzj.3nv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T13:51:08Z","id":"moai-lpzj.4ks","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
