@@ -257,7 +257,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     let tree_now = args.tree && !ctx.json;
     let index = tree_now.then(|| crate::nav::Index::in_soil(&load.issues, &soil));
     let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil));
-    let wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
+    // **`-g` 는 노트도 본다**(moai-efoc.zyc, 2026-09-30 사용자 결정). 노트는 저널에 살아 `query` 가 못 읽으니
+    // 여기서 읽어 자료로 건네고, 맞는지는 `query` 가 가른다. **`-g` 를 물었을 때만 읽는다** — 거르개 없는
+    // 목록마다 저널 전체를 풀 까닭이 없다. 커서 줄처럼 걸러지기 전의 줄 전부가 대상이다.
+    let notes = filter.grep.is_some().then(|| notes_by_id(&repo, &origin, &load.issues));
+    let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
+    wh.notes = notes.as_ref();
     let mut shown: Vec<Issue> = Vec::new();
     // 숨긴 줄과 까닭. **세는 것은 그린 뒤다** — 트리는 걸리지 않은 줄도 걸린
     // 자손의 조상이면 그리므로, 먼저 세면 방금 그린 줄을 숨겼다고 말한다.
@@ -424,25 +429,46 @@ fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
     Repo::at(root.to_path_buf(), repo.config.clone())
 }
 
-/// 낼 줄들의 `work` — **저널을 뿌리마다 한 번** 읽고, 그 가운데 `model:` 줄을 들 수 있는 줄만
-/// 푼다(`model::may_hold_work`). 답은 하나를 펼칠 때(`model::work_of(&journal)`)와 같다 — 거른
-/// 줄은 `work` 를 못 내는 줄뿐이고, 남은 줄의 차례는 그대로다.
+/// 그 줄들의 이력 — **저널을 뿌리마다 한 번** 읽고 `line` 이 고른 줄만 푼다. 줄마다 제 뿌리([`home`])의
+/// 저널에서 읽는다 — 겹쳐 온 줄은 저쪽 워크트리에서 적힌 이력을 든다. `work` 와 노트가 이 한 걸음을
+/// 지난다: 뿌리를 가르는 법이 둘이면 한쪽만 이쪽 뿌리로 돌려도 아무 시험도 안 붉어진다(리뷰 moai-u5bk.3wq).
+fn journal_of_rows(
+    repo: &Repo,
+    origin: &crate::worktree::Origin,
+    rows: &[Issue],
+    line: fn(&str) -> bool,
+) -> std::collections::BTreeMap<String, Vec<model::JournalEntry>> {
+    let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
+    for i in rows {
+        by_root.entry(home(repo, origin, &i.id)).or_default().insert(i.id.as_str());
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (root, ids) in by_root {
+        out.extend(at_home(repo, root).journal_by_id(&ids, line));
+    }
+    out
+}
+
+/// 낼 줄들의 `work` — `model:` 줄을 들 수 있는 저널 줄만 푼다(`model::may_hold_work`). 답은 하나를 펼칠
+/// 때(`model::work_of(&journal)`)와 같다 — 거른 줄은 `work` 를 못 내는 줄뿐이고, 남은 줄의 차례는 그대로다.
 fn work_by_id(
     repo: &Repo,
     origin: &crate::worktree::Origin,
     shown: &[Issue],
 ) -> std::collections::BTreeMap<String, Vec<model::Work>> {
-    let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
-    for i in shown {
-        by_root.entry(home(repo, origin, &i.id)).or_default().insert(i.id.as_str());
-    }
-    let mut out = std::collections::BTreeMap::new();
-    for (root, ids) in by_root {
-        for (id, journal) in at_home(repo, root).journal_by_id(&ids, model::may_hold_work) {
-            out.insert(id, model::work_of(&journal));
-        }
-    }
-    out
+    journal_of_rows(repo, origin, shown, model::may_hold_work)
+        .into_iter()
+        .map(|(id, journal)| (id, model::work_of(&journal)))
+        .collect()
+}
+
+/// 그 줄들의 노트 글([`crate::query::Notes`], moai-efoc.zyc) — 노트를 들 수 있는 저널 줄만 푼다
+/// (`model::may_hold_note`). 어느 갈래가 노트인지는 `model::note_of` 가 정한다.
+fn notes_by_id(repo: &Repo, origin: &crate::worktree::Origin, rows: &[Issue]) -> crate::query::Notes {
+    journal_of_rows(repo, origin, rows, model::may_hold_note)
+        .into_iter()
+        .map(|(id, journal)| (id, journal.iter().filter_map(model::note_of).map(str::to_string).collect()))
+        .collect()
 }
 
 /// `--as-plan` — 에픽 하나를 `add --from` 이 받는 마크다운으로 되뽑는다.

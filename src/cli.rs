@@ -1088,7 +1088,7 @@ pub struct FilterArgs {
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// In id, title, tag or body
+    /// In id, title, tag, body or notes
     #[arg(short = 'g', long, value_name = "text")]
     pub grep: Option<String>,
 

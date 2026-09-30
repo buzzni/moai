@@ -4717,6 +4717,38 @@ fn show_filters_by_time() {
     }
 }
 
+/// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
+/// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
+#[test]
+fn grep_finds_what_only_a_note_says() {
+    let s = init("grepnote");
+    let noted = add(s.path(), &["노트에 결정이 있다"]);
+    let moved = add(s.path(), &["옮기며 남겼다"]);
+    let plain = add(s.path(), &["아무 말 없다"]);
+    ok(s.path(), &["note", &noted, "사용자 결정: 둘째 길"]);
+    ok(s.path(), &["mv", &moved, "review", "-m", "둘째 길로 간다"]);
+    let found = |q: &str| {
+        let mut v = ids_in(&ok(s.path(), &["show", "-g", q, "--json"]));
+        v.sort();
+        v
+    };
+    let mut both = vec![noted.clone(), moved.clone()];
+    both.sort();
+    assert_eq!(found("둘째 길"), both, "노트나 `-m` 에만 적힌 말을 못 찾았다");
+    assert_eq!(found("사용자 결정"), std::slice::from_ref(&noted));
+    assert!(!found("둘째").contains(&plain));
+    // `--filter grep=` 도 같은 자리다.
+    assert_eq!(
+        ids_in(&ok(s.path(), &["show", "--filter", "grep=사용자 결정", "--json"])),
+        std::slice::from_ref(&noted)
+    );
+    // 사람 화면도 같은 줄을 낸다.
+    let human = ok(s.path(), &["show", "-g", "사용자 결정"]);
+    assert!(human.contains(&noted) && !human.contains(&moved), "{human}");
+    // 노트는 줄의 값이 아니다 — 목록의 `--json` 줄에 노트 글이 실리지 않는다.
+    assert!(!ok(s.path(), &["show", "-g", "사용자 결정", "--json"]).contains("둘째 길"), "노트 글이 줄에 실렸다");
+}
+
 /// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.
 #[test]
 fn ready_takes_a_limit_and_keeps_the_count() {

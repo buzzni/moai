@@ -367,7 +367,7 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
       --since <when>                      Changed since that time (see below)
       --created <from..to>                Created in that range (see below)
@@ -900,7 +900,7 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
       --since <when>                      Changed since that time (see below)
       --created <from..to>                Created in that range (see below)
@@ -1090,7 +1090,7 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
       --since <when>                      Changed since that time (see below)
       --created <from..to>                Created in that range (see below)
@@ -1280,7 +1280,7 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
       --since <when>                      Changed since that time (see below)
       --created <from..to>                Created in that range (see below)
@@ -1491,7 +1491,7 @@ Filters  (comma = or,  repeated = and):
   -p, --priority <0-3>                    
   -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
       --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag or body
+  -g, --grep <text>                       In id, title, tag, body or notes
       --stale <days>                      Sitting in its column that long
       --since <when>                      Changed since that time (see below)
       --created <from..to>                Created in that range (see below)

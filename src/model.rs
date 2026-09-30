@@ -783,11 +783,7 @@ pub struct Work {
 pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
     let mut out = Vec::new();
     for e in journal {
-        let text = match e.kind.as_str() {
-            "note" => e.text.as_deref(),
-            "status" => e.note.as_deref(),
-            _ => None,
-        };
+        let text = note_of(e);
         let mut fenced = false;
         for line in text.unwrap_or_default().lines() {
             let bare = line.trim_start();
@@ -804,6 +800,32 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
         }
     }
     out
+}
+
+/// 저널 한 줄이 이슈에 붙인 **노트 글** — `moai note` 의 글과 칸 옮김의 `-m`(moai-efoc.zyc). 이력이
+/// "노트" 로 그리는 두 갈래이고, [`work_of`] 가 `model:` 줄을 찾는 곳도 이 둘이다.
+///
+/// **`rm` 의 `note` 는 안 든다** — 그것은 못 읽는 줄을 지울 때 남긴 원문이지(`JournalEntry::removed_line`)
+/// 사람이 이슈에 붙인 글이 아니다. 거기 든 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
+///
+/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기가 나중에 같은 글을 본다. 그래서 명령 층이
+/// 아니라 여기 둔다: 어느 갈래를 노트로 치는지가 두 표면에서 갈리지 않게.
+pub fn note_of(e: &JournalEntry) -> Option<&str> {
+    match e.kind.as_str() {
+        "note" => e.text.as_deref(),
+        "status" => e.note.as_deref(),
+        _ => None,
+    }
+}
+
+/// 저널 한 줄 — **풀기 전의 JSON** — 이 [`note_of`] 에서 글을 낼 수 **있는가**(moai-efoc.zyc). 저널을 통째로
+/// 풀지 않으려고 먼저 거르는 자다([`may_hold_work`] 와 같은 결).
+///
+/// **글을 내는 줄은 빠뜨리지 않는다.** 노트 줄은 `"kind":"note"` 를, 칸 옮김의 `-m` 은 `"note":` 키를
+/// 든다 — 둘 다 날것에 `note` 가 선다. 키 이름을 `\uXXXX` 로 적은 손 줄이 있을 수 있어 `\u` 가 든 줄은 다
+/// 푼다. 더 받는 것은 괜찮다 — 푼 뒤에 [`note_of`] 가 다시 가른다.
+pub fn may_hold_note(raw: &str) -> bool {
+    raw.contains("note") || raw.contains("\\u")
 }
 
 /// 저널 한 줄 — **풀기 전의 JSON** — 이 [`work_of`] 에서 값을 낼 수 **있는가**(moai-p8qj). 목록의
@@ -1404,6 +1426,34 @@ mod tests {
         // `model:` 이 없는 줄은 안 푼다 — 그것이 이 거르개의 값이다.
         let plain = serde_json::to_string(&JournalEntry::note("argos-4aex", "그냥 메모", at, &by)).unwrap();
         assert!(!may_hold_work(&plain), "{plain}");
+    }
+
+    /// **노트는 `moai note` 의 글과 칸 옮김의 `-m` 둘이고, 그 줄은 거르개를 빠짐없이 지난다**(moai-efoc.zyc).
+    /// `rm` 이 남긴 원문은 노트가 아니다 — 그 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
+    #[test]
+    fn a_note_is_a_note_or_a_move_message_and_passes_the_prefilter() {
+        let by = someone("raven");
+        let at = "2026-09-11T04:12:03Z";
+        let (s, d) = (Status::new("todo"), Status::new("done"));
+        let yielding = [
+            JournalEntry::note("argos-4aex", "사용자 결정: 둘째 길", at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, Some("닫으며 남긴 말".into()), at, &by),
+        ];
+        for e in &yielding {
+            let raw = serde_json::to_string(e).unwrap();
+            assert!(note_of(e).is_some(), "시험이 틀렸다 — 글을 안 내는 줄이다: {raw}");
+            assert!(may_hold_note(&raw), "글을 내는 줄을 걸렀다: {raw}");
+        }
+        let silent = [
+            JournalEntry::create("argos-4aex", "제목", at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, None, at, &by),
+            JournalEntry::removed_line(Some("argos-4aex"), r#"{"id":"argos-4aex","title":"깨진 쌍둥이"}"#, at, &by),
+        ];
+        for e in &silent {
+            assert_eq!(note_of(e), None, "노트가 아닌 줄이 글을 냈다: {e:?}");
+        }
+        // 손으로 쓴 줄이 키를 이스케이프로 적었어도 푼다.
+        assert!(may_hold_note(r#"{"ts":"t","id":"argos-4aex","kind":"\u006eote","by":"r","text":"x"}"#));
     }
 
     /// 계획 시각도 되쓰면 바이트가 같다 — 도로 집은 줄은 `deferred_at` 없이 `planned_at` 만

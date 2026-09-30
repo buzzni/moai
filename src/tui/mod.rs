@@ -409,6 +409,9 @@ impl Ground {
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
             folded: self.folded.iter().map(String::as_str).collect(),
+            // **탐색기는 아직 노트를 안 싣는다**(moai-efoc.zyc, 2026-09-30 사용자 결정) — `/` 의 전체 범위는
+            // 스냅샷만 본다. 싣는 날(moai-wcy8)이 이 한 줄이다.
+            notes: None,
         }
     }
 }

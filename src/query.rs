@@ -61,7 +61,18 @@ pub struct Where<'a> {
     /// status 가 `no_epic`·`no_milestone` 으로 안 세는 그 집합이다 — `none` 거름이 같은 자로
     /// 고르게 한다(moai-phw9).
     pub(crate) folded: BTreeSet<&'a str>,
+    /// 이슈 id → 그 이슈의 노트 글([`Notes`], moai-efoc.zyc). `-g` 가 노트까지 보는 재료다.
+    ///
+    /// **여기는 읽지 않는다 — 받는다**(2026-09-30 사용자 결정). 노트는 저널에 살고 이 모듈은 I/O 없는
+    /// 순수 함수라, 저널을 읽는 것은 명령 층(`cmd::show`)이고 맞는지 가르는 것은 여기다. 안 실렸으면
+    /// (`None`, 탐색기와 `Where::default`) 노트를 안 본다 — 없는 노트와 안 읽은 노트를 가를 일이 이
+    /// 모듈에는 없다. 상태 계산이 아니라 글 찾기라 "저널은 상태 계산에 안 읽힌다" 와 안 부딪친다.
+    pub notes: Option<&'a Notes>,
 }
+
+/// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
+/// **이슈의 필드가 아니다** — 스냅샷에 안 적히고 저널에서 읽힌 값이라, 줄(`Issue`) 곁에 따로 든다.
+pub type Notes = BTreeMap<String, Vec<String>>;
 
 /// [`Where::lines`] 의 그릇 — 지은 것이거나, 처음 물을 때 지을 줄이다.
 ///
@@ -129,7 +140,13 @@ impl<'a> Where<'a> {
             all.iter().zip(&shelved).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
         let shelved = crate::report::Shelved::kept(roots, split, rows);
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded }
+        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded, notes: None }
+    }
+
+    /// 그 줄의 노트 가운데 `q` 가 든 것이 있는가(moai-efoc.zyc). `q` 는 이미 소문자다([`Filter::build`]).
+    /// 노트가 안 실렸으면 거짓이다 — [`Where::notes`].
+    pub fn noted(&self, i: &Issue, q: &str) -> bool {
+        self.notes.and_then(|n| n.get(&i.id)).is_some_and(|texts| texts.iter().any(|t| t.to_lowercase().contains(q)))
     }
 
     /// 그 줄이 종류가 다른 쌍둥이에게 id 가 가려졌는가 (`report::is_eclipsed`).
@@ -201,6 +218,10 @@ impl<'a> Where<'a> {
 /// `All` 은 넷을 다 본다 — CLI 의 `-g` 도 이것이다. 한때 제목·본문만 봤는데, 그러면 id
 /// 조각이나 태그로 찾은 것이 `All` 에서는 안 걸리고 좁힌 범위에서만 걸린다. 좁힌 것이
 /// 넓은 것보다 더 찾으면 "전체" 라는 이름이 거짓말이 된다.
+///
+/// **노트는 `All` 만 본다**(moai-efoc.zyc, [`GrepIn::sees_notes`]) — 노트가 실렸을 때만([`Where::notes`]).
+/// 노트만 보는 범위는 아직 없다: Tab 이 도는 범위를 늘리면 탐색기가 바뀌고, 탐색기는 노트를 아직 안
+/// 싣는다(moai-wcy8 이 연다).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum GrepIn {
     #[default]
@@ -253,6 +274,12 @@ impl GrepIn {
 
     pub fn sees_body(self) -> bool {
         matches!(self, GrepIn::All | GrepIn::Body)
+    }
+
+    /// 노트를 이 범위가 보는가(moai-efoc.zyc). 글은 줄 곁에 따로 오므로 [`GrepIn::hits`] 가 아니라
+    /// [`Filter::matches`] 가 [`Where::noted`] 와 함께 묻는다.
+    pub fn sees_notes(self) -> bool {
+        matches!(self, GrepIn::All)
     }
 
     /// `q` 는 이미 소문자다([`Filter::build`]).
@@ -538,6 +565,7 @@ impl Filter {
         }
         if let Some(q) = &self.grep
             && !self.grep_in.hits(i, q)
+            && !(self.grep_in.sees_notes() && wh.noted(i, q))
         {
             return false;
         }
@@ -1512,6 +1540,26 @@ mod tests {
         assert_eq!(pick(or), ["a-0002", "a-0005"], "쉼표가 또는이 아니다");
         // `--filter` 도 같은 자리에 쌓인다.
         assert_eq!(pick(Raw { filter: s(&["since=2026-09-06"]), ..Raw::default() }), ["a-0003"]);
+    }
+
+    /// **`-g` 는 실린 노트까지 본다**(moai-efoc.zyc) — 전체 범위만. 노트가 안 실렸으면(탐색기) 안 본다.
+    #[test]
+    fn grep_sees_the_notes_it_is_handed_in_the_whole_scope_only() {
+        let all = vec![issue("a-0001", "todo", &[]), issue("a-0002", "todo", &[])];
+        let c = cfg();
+        let notes: Notes = [("a-0002".to_string(), vec!["사용자 결정: 둘째 길 (Recommended)".to_string()])].into();
+        let mut wh = Where::of(&all, &c);
+        let pick = |wh: &Where, grep_in: GrepIn, q: &str| {
+            let f = Filter::build(Raw { grep: Some(q.into()), grep_in, ..Raw::default() }).unwrap();
+            all.iter().filter(|i| f.matches(i, NOW, wh)).map(|i| i.id.as_str()).collect::<Vec<_>>()
+        };
+        assert!(pick(&wh, GrepIn::All, "둘째 길").is_empty(), "안 실린 노트를 봤다");
+        wh.notes = Some(&notes);
+        assert_eq!(pick(&wh, GrepIn::All, "둘째 길"), ["a-0002"], "실린 노트를 안 봤다");
+        assert_eq!(pick(&wh, GrepIn::All, "recommended"), ["a-0002"], "노트는 대소문자를 안 가린다");
+        assert!(pick(&wh, GrepIn::Title, "둘째 길").is_empty(), "좁힌 범위가 노트를 봤다");
+        // 제목에 걸린 줄은 노트 없이도 그대로 걸린다.
+        assert_eq!(pick(&wh, GrepIn::All, "a-0001 제목"), ["a-0001"]);
     }
 
     /// **목록의 기본 차례는 급한 것 → id 다** — 차례를 고르지 않은 [`page`] 가 [`display_order`] 와 같다.
