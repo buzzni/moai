@@ -10,6 +10,64 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai show` takes the list out in pieces: `--sort`, `--reverse`, `-n` and
+  `--after <id>`.** An agent or a third-party UI reading `show --json` used to get
+  the whole list at once — 1.48MB on this repository — in the one fixed order.
+  `--sort` takes `priority` (the default), `created`, `updated`, `status`,
+  `assignee`, `title` or `id`, the same words the explorer writes to its config,
+  and `--reverse` turns the whole order around. `-n` cuts the list and `--after
+  <id>` starts the next page after the last id of the page before. The cursor is
+  that row's value in the order, not an offset, so rows other sessions create or
+  remove meanwhile never shift a page, and a cursor row that has since closed and
+  dropped out of the list still works. A row whose place in the order changes
+  between pages can repeat or be skipped — ties in every order fall to priority,
+  so a priority edit moves rows under `created` too — and `--sort id` is the one
+  order no edit moves. Lines that share one id, the twins a merge can leave,
+  stand together and a page never splits them. A cursor id that no row carries
+  any more is refused with `not_found` rather than starting over silently.
+  `--json` stays a bare array — fewer rows than `-n` means the list has ended —
+  and the human list names how many were cut and the command for the next page.
+  On one id and on `--tree` these flags are refused, not swallowed.
+
+- **`moai ready -n <count>`** cuts what is ready to pick. `held` and `outside`
+  stay whole — they say why the list is short — and the count at the top is the
+  number before the cut.
+
+- **`moai show --since <when>`, `--created <from>..<to>` and `--done
+  <from>..<to>` filter by time.** `--since` reads the row's own `updated_at`, so
+  the rows written since a time come back with one flag. A time is `YYYY-MM-DD`,
+  a day on your own clock — the time zone the screen and milestone deadlines use;
+  the end of a range takes the whole day — or `YYYY-MM-DDTHH:MM:SSZ`, an instant
+  in UTC. Either side of a range may be left open, and a single day stands for
+  that day. An empty value, a reversed range, a day or time that does not exist,
+  and `--done` with a `-s` that leaves out done are refused rather than answered
+  with nothing. Asking by time opens what the list hides by default — done,
+  deferred and ideas — because a row closed meanwhile changed too; `-s` and
+  `--type` narrow it again. `--done` looks at rows
+  standing in done now, at the time they last got there, so a reopened row is not
+  counted as closed and a group counts from the moment its last member got to
+  done. `--since` keys on each row's own stamp, so it misses a removed row, a
+  note (`moai note` writes the journal, not the row), a row whose derived value
+  changed without a write of its own and a row merged in with an older stamp —
+  for a complete copy, pull the whole list and compare.
+
+### Changed
+
+- **`-g` looks through notes and move messages too.** A decision written only in
+  a `moai note`, or in the `-m` of a move, was invisible to `moai show -g`; on
+  this repository `show -g '사용자 결정' --all` goes from 85 rows to 254. The
+  journal is read only when `-g` is given, and `query` stays a pure function —
+  the command reads the notes and hands them in. The text a `moai rm --line`
+  kept is not a note. `moai tui`'s `/` does not look at notes yet.
+
+- **The README says where SQL goes.** There is no query language inside moai: the
+  filters read values the file does not hold — a group's column, an inherited
+  epic — so SQL on `.moai/issues.jsonl` gets them wrong. A new section shows jq
+  and DuckDB run on the `--json` output instead, next to one on paging and
+  incremental sync.
+
 ## [0.1.4] - 2026-09-29
 
 ### Added
