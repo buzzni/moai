@@ -2216,3 +2216,6 @@
 {"ts":"2026-09-30T06:03:15Z","id":"moai-efoc.x93","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-09-30T06:03:25Z","id":"moai-efoc.omv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 쌍둥이 id 를 한 덩어리로 넘기기, 빈 때·없는 시각·done 없는 -s 거절, 저널 한 번 읽기, 도움말·README·duckdb 예 바로잡기, 거절문의 까닭. 날의 시간대는 전제를 바로잡아 사람에게 다시 물었고 읽는 사람의 날로 고쳤다(리뷰 뒤라 다시 본 눈은 없다). 넘긴 것: moai-2htt(영어 화면의 한국어 거절문, 이 에픽의 멤버로 첫 칸에 남긴다), moai-i778(created 동점을 id 로), moai-ug6s(ready --json 의 잘린 수), moai-c4sn(README 의 기본 말). 지운 커서로 이어 받기는 not_found 결정대로 안 한다. 효율 몇 가지는 값이 낮아 넘겼다."}
 {"ts":"2026-09-30T06:05:55Z","id":"moai-efoc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 moai-2htt(영어 화면의 한국어 거절문)가 첫 칸에 남아 에픽을 연다. 그것을 닫는 창이 에픽 끝 리뷰를 다시 부른다 — 리뷰 뒤에 들어간 읽는 사람의 날 고침(End::Wall, Where::zone)도 아직 다시 본 눈이 없으니 함께 본다"}
+{"ts":"2026-09-30T06:10:23Z","id":"moai-7dmq.vm6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T06:10:25Z","id":"moai-7dmq.2x2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-09-30T06:10:26Z","id":"moai-7dmq.rnp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
