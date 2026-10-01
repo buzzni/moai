@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-01
+
 ### Fixed
 
 - **An editor's lock file beside a journal no longer fails every read of the
