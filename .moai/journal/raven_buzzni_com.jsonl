@@ -2373,3 +2373,9 @@
 {"ts":"2026-10-01T00:59:20Z","id":"moai-punz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-01T01:02:44Z","id":"moai-punz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — scripts/bump-version.sh 를 돌리고 Cargo.lock 을 cargo metadata 로 맞췄다)"}
 {"ts":"2026-10-01T01:02:44Z","id":"moai-punz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.1.5 로 서고 CHANGELOG 에 [0.1.5] - 2026-10-01 이 열렸다. 태그는 main 머지 커밋에 단다"}
+{"ts":"2026-10-01T02:58:24Z","id":"moai-7pkf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.1.6"}
+{"ts":"2026-10-01T02:58:24Z","id":"moai-ug3j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판 번호를 CHANGELOG 절에서 계산한다"}
+{"ts":"2026-10-01T02:58:24Z","id":"moai-ug3j.r1y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh 가 auto·minor·patch 를 받아 [Unreleased] 절에서 판을 고른다"}
+{"ts":"2026-10-01T02:58:24Z","id":"moai-ug3j.w0c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh --next 가 아무것도 쓰지 않고 다음 판과 까닭을 찍는다"}
+{"ts":"2026-10-01T02:58:24Z","id":"moai-ug3j.gq0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 규약: 마일스톤을 잠정 판으로 짓고 릴리스 때 --next 로 확정한다"}
+{"ts":"2026-10-01T02:58:31Z","id":"moai-ug3j.r1y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
