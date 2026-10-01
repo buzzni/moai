@@ -29,6 +29,16 @@ does not tag — see `CONTRIBUTING.md`.
   and `b` switches day and week. The numbers come from the snapshot and the note
   lines only — how long a row stood in review, say, is not among them.
 
+- **The explorer takes the mouse.** A click puts the focus on the pane and the
+  cursor on the row under it. The wheel moves whichever pane is under the
+  pointer — the list's cursor, the detail, the `SPC p s` window — and leaves the
+  focus where it was. Dragging the line between the list and the detail resizes
+  them; the share the list takes is kept under `[tui]` as `list_width` (detail
+  left or right) and `list_height` (detail above or below), in percent, and is
+  not written until you drag. Over a form, a picker, a prompt or the `SPC` menu
+  the mouse does nothing. It is caught from the start, so most terminals select
+  text with Shift held; `SPC o m` lets it go and keeps that as `[tui] mouse`.
+
 - **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
   and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a
   machine with no zoneinfo directory too — the static musl build. A name the
