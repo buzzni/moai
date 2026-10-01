@@ -2575,3 +2575,4 @@
 {"ts":"2026-10-01T22:40:16Z","id":"moai-zhzz.qgu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T22:40:18Z","id":"moai-zhzz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"CHANGELOG 에 줄을 따로 안 적었다. `SPC p s` 창 자체가 [Unreleased] 의 Added 에 처음 선 기능이라, 여백 손질은 그 줄 안에 든다 — 나간 판에는 이 창이 없었다. 리뷰가 짚은 대로 차트/글 경계가 창 54칸(전에는 50), 칸·우선순위를 나란히 세우는 폭이 78칸(전에는 74)으로 옮겼다"}
 {"ts":"2026-10-01T22:41:59Z","id":"moai-zhzz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 멤버와 리뷰가 다 닫혔고 develop 에 머지했다(785c5940). 남긴 멤버도 넘긴 idea 도 없다"}
+{"ts":"2026-10-01T22:53:42Z","id":"moai-muqy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mosh 아래에서는 DA1 답이 먼저 와 마우스 보고가 샌다"}
