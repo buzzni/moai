@@ -10,6 +10,8 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-01
+
 ### Added
 
 - **`moai show` takes the list out in pieces: `--sort`, `--reverse`, `-n` and
