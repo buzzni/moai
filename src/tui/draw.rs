@@ -450,9 +450,6 @@ const STATS_SIDE_BY_SIDE_W: u16 = 72;
 /// 흐름 차트의 높이 — 막대 여섯 줄, 값은 막대 맨 아래 줄에 서고, 막대 이름(`+`·`✓`)과 칸 이름(날짜)이 두 줄.
 const STATS_FLOW_H: u16 = 9;
 
-/// 가로 막대가 이름 열 뒤에 늘 남기는 칸 — 오른쪽 글이 길어도 막대가 이만큼은 선다.
-const STAT_BAR_MIN: usize = 8;
-
 /// 통계 창(moai-1hka.bq9). 목록·상세 자리를 **폼처럼 통째로** 덮는다([`jot`]·[`pick`] 과 같은 까닭).
 ///
 /// **센 값을 펴기만 한다** — 셈은 연 순간 끝났다(`tui::stats`). 그리는 것은 막대와 글뿐이라 프레임마다 그려도
@@ -480,7 +477,7 @@ fn stats_window(f: &mut Frame, w: &mut super::stats::Window, at: Rect, lang: Lan
     let parts = if inner.width >= STATS_CHART_W {
         stats_parts(w.stats(), inner.width, lang)
     } else {
-        stats_text(w.stats(), lang)
+        stats_text(w.stats(), inner.width, lang)
     };
     let total: u16 = parts.iter().map(|p| p.height).sum();
     w.scroll.fit(inner.height as usize, total as usize);
@@ -534,6 +531,23 @@ fn stat_lines<'a>(lines: Vec<Line<'a>>) -> StatPart<'a> {
     }
 }
 
+/// 폭을 넘는 줄을 접어 여러 줄로 — **창은 옆으로 굴릴 수 없다.** `Paragraph` 는 넘친 꼬리를 말없이 잘라, 좁은 창의
+/// 칸 줄에서 `✓ done 2` 가, 소요 줄에서 `· 1 unknown` 이 통째로 사라졌다 — 수를 늘 함께 낸다는 약속이 화면에서만
+/// 깨진다. 맞는 줄은 칠한 그대로 두고, 넘치는 줄만 글로 접는다(칠은 잃어도 뜻은 글리프와 낱말이 진다).
+fn folded(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    let w = width as usize;
+    lines
+        .into_iter()
+        .flat_map(|l| {
+            if l.width() <= w {
+                return vec![l];
+            }
+            let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+            wrapped(&text, w, Style::new())
+        })
+        .collect()
+}
+
 /// 가로 막대 한 줄 — 이름, 값, 막대 색, 막대 오른쪽에 설 글(수와 낱말).
 struct StatBar<'a> {
     name: Line<'a>,
@@ -550,24 +564,28 @@ fn stat_bars<'a>(rows: Vec<StatBar<'a>>) -> StatPart<'a> {
     StatPart {
         height: rows.len() as u16,
         draw: Box::new(move |at, buf| {
-            // **오른쪽 글이 먼저 자리를 얻는다** — 막대는 줄어도 읽히지만 잘린 수는 못 읽는다. 다만 이름 열 뒤에 막대 몇
-            // 칸은 남긴다: 막대가 아예 없으면 차트가 아니다.
-            let label_w = rows.iter().map(|r| r.name.width()).max().unwrap_or(0);
-            let room = (at.width as usize).saturating_sub(label_w + 1 + STAT_BAR_MIN + 1);
-            let side_w = rows.iter().map(|r| r.side.width()).max().unwrap_or(0).min(room) as u16;
-            let chart_w = at.width.saturating_sub(side_w + 1);
+            // **오른쪽 글이 먼저 자리를 얻고, 다음이 이름이며, 막대는 남는 자리다** — 막대는 줄어도 읽히지만 잘린 수는
+            // 못 읽는다. 이름 열과 막대 몇 칸을 먼저 떼어 두던 판은 80칸 창의 AI 작업 줄에서 `40,957,750` 을
+            // `40,957` 로 잘라 그럴듯한 다른 수로 냈고, 긴 칸 이름 곁에서는 수가 통째로 빠졌다. 그래도 넘치는 이름과
+            // 글은 `…` 로 잘라([`fit`]) 잘린 것이 보이게 한다.
+            let width = at.width as usize;
+            let side_w = rows.iter().map(|r| r.side.width()).max().unwrap_or(0).min(width.saturating_sub(2));
+            let label_w = rows.iter().map(|r| r.name.width()).max().unwrap_or(0).min(width.saturating_sub(side_w + 2));
+            let chart_w = at.width.saturating_sub(side_w as u16 + 1);
             let max = rows.iter().map(|r| r.value).max().unwrap_or(0).max(1);
             let bars: Vec<ratatui::widgets::Bar> = rows
                 .iter()
                 .map(|r| {
-                    ratatui::widgets::Bar::with_label(r.name.clone(), r.value).text_value(String::new()).style(r.look)
+                    ratatui::widgets::Bar::with_label(fit(r.name.clone(), label_w), r.value)
+                        .text_value(String::new())
+                        .style(r.look)
                 })
                 .collect();
             let chart = ratatui::widgets::BarChart::horizontal(bars).bar_width(1).bar_gap(0).max(max);
             ratatui::widgets::Widget::render(chart, Rect { width: chart_w, ..at }, buf);
             for (n, r) in rows.into_iter().enumerate() {
-                let line = Rect::new(at.x + chart_w + 1, at.y + n as u16, side_w, 1);
-                ratatui::widgets::Widget::render(Paragraph::new(r.side), line, buf);
+                let line = Rect::new(at.x + chart_w + 1, at.y + n as u16, side_w as u16, 1);
+                ratatui::widgets::Widget::render(Paragraph::new(fit(r.side, side_w)), line, buf);
             }
         }),
     }
@@ -596,27 +614,15 @@ fn stat_head(text: &str) -> Span<'static> {
 fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<StatPart<'static>> {
     use crate::report::stats::{Axis, Key};
     let plain = |s: String| crate::style::plain(&s);
-    let by = |axis: Axis| st.by.iter().find(|(a, _)| *a == axis).map(|(_, c)| c.as_slice()).unwrap_or(&[]);
-    let key_text = |c: &crate::report::stats::Count| match &c.key {
-        Some(Key::Text(t)) => crate::text::one_line(t),
-        Some(Key::Number(p)) => format!("p{p}"),
-        None => say(lang, "stats.none").to_string(),
-    };
+    let by = |axis: Axis| st.on(axis).unwrap_or(&[]);
+    // 글 덩이는 창 폭을 넘으면 접는다([`folded`]) — 잘린 꼬리에 선 수를 잃지 않게.
+    let lines = |l: Vec<Line<'static>>| stat_lines(folded(l, width));
     let mut out: Vec<StatPart<'static>> = Vec::new();
 
-    // 머리 — 무엇을 몇 셌나, 그리고 고른 줄의 종류(센 것과 안 센 것).
-    let picked: usize = by(Axis::Kind).iter().map(|c| c.rows).sum();
-    let kinds: Vec<String> =
-        by(Axis::Kind).iter().filter(|c| c.rows > 0).map(|c| format!("{} {}", key_text(c), c.rows)).collect();
-    out.push(stat_lines(vec![
-        Line::from(stat_head(&fill(
-            say(lang, "stats.head"),
-            &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())],
-        ))),
-        Line::from(Span::styled(
-            fill(say(lang, "stats.picked"), &[("n", &picked.to_string()), ("kinds", &kinds.join(" · "))]),
-            dim(),
-        )),
+    // 머리 — 무엇을 몇 셌나, 그리고 고른 줄의 종류(센 것과 안 센 것). 낱말은 CLI 의 한눈 보기와 한 자다(`view`).
+    out.push(lines(vec![
+        Line::from(stat_head(&crate::view::stats_head(st, lang))),
+        Line::from(Span::styled(crate::view::picked_said(by(Axis::Kind), lang), dim())),
     ]));
     out.push(stat_gap());
 
@@ -624,34 +630,47 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
     let flow = &st.flow;
     let made = from_anstyle(style::OTHER);
     let closed = status(crate::config::DONE);
-    let per = match flow.bucket {
-        crate::report::stats::Bucket::Week => say(lang, "stats.flow_week"),
-        crate::report::stats::Bucket::Day => say(lang, "stats.flow_day"),
-    };
-    out.push(stat_lines(vec![Line::from(vec![
+    out.push(lines(vec![Line::from(vec![
         stat_head(say(lang, "stats.flow")),
-        Span::styled(format!("  {}   ", fill(per, &[("zone", flow.zone.as_str())])), dim()),
+        Span::styled(format!("  {}   ", crate::view::flow_said(flow, lang)), dim()),
         Span::styled("+", made),
         Span::raw(format!(" {}  ", say(lang, "stats.created"))),
         Span::styled("✓", closed),
         Span::raw(format!(" {}", say(lang, "stats.done"))),
     ])]));
-    let most = flow.buckets.iter().map(|b| b.created.max(b.done)).max().unwrap_or(0) as u64;
     // **막대 폭은 가장 긴 수보다 한 칸 넓다** — 위젯은 막대 폭과 같은 길이의 수를 막대가 한 칸을 다 채울 때만 쓰고
     // (`Bar::render_value`), 짧은 막대의 세 자리 수가 말없이 사라졌다. 날짜(`09-28`)가 두 막대 밑에 들려면 둘은 돼야 한다.
     // 두 막대 사이에 한 칸을 띄운다 — 붙이면 `165`·`152` 가 `165152` 로 읽힌다.
-    let bar_w = (most.to_string().len() as u16 + 1).max(2);
     let (bar_gap, group_gap) = (1u16, 2u16);
+    let room = width.saturating_sub(2);
     // **칸 하나가 차지하는 폭은 위젯이 세는 그대로다**(`BarChart::render_vertical_bars`) — 막대마다 `bar_w + bar_gap`
     // 을 건너뛰고 칸 끝에 `group_gap` 을 더한다. 마지막 막대 뒤의 틈도 든다: 그것을 빼고 세면 0 을 적는 자리가
-    // 칸마다 한 칸씩 밀린다. 드는 칸 수도 위젯의 자로 센다 — 마지막 칸은 막대 둘의 폭(`group_w`)만 들면 된다.
-    let stride = 2 * (bar_w + bar_gap) + group_gap;
-    let group_w = 2 * bar_w + bar_gap;
-    let room = width.saturating_sub(2);
-    let fit = if room > group_w { ((room - group_w - 1) / stride + 1) as usize } else { 0 };
-    let shown: Vec<crate::report::stats::Slot> = flow.buckets[flow.buckets.len().saturating_sub(fit)..].to_vec();
+    // 칸마다 한 칸씩 밀린다. 드는 칸 수도 위젯의 자로 센다(`BarChart::group_ticks`) — 남은 폭이 막대 둘의 폭
+    // (`group_w`)과 **같아도** 그 칸은 통째로 선다(위젯의 `else` 갈래가 막대 둘을 낸다).
+    let geometry = |most: u64| {
+        let bar_w = (most.to_string().len() as u16 + 1).max(2);
+        let stride = 2 * (bar_w + bar_gap) + group_gap;
+        let group_w = 2 * bar_w + bar_gap;
+        let fit = if room >= group_w { ((room - group_w) / stride + 1) as usize } else { 0 };
+        (bar_w, stride, fit)
+    };
+    // **막대 폭과 높이는 보이는 칸으로 정한다** — 폭에 다 안 들어 잘린 옛 칸의 큰 수가 막대를 넓혀 칸을 더 밀어내거나,
+    // 보이는 막대를 그 수에 맞춰 납작하게 누르지 않게. 최근 칸부터 하나씩 늘리며 그 꼬리의 가장 큰 수로 잰 폭에 다
+    // 드는 가장 긴 꼬리를 고른다 — 꼬리가 길수록 폭은 넓어지고 드는 수는 줄어, 한 번 안 들면 더 길어도 안 든다.
+    let peak = |b: &crate::report::stats::Slot| b.created.max(b.done) as u64;
+    let mut take = 0usize;
+    for k in 1..=flow.buckets.len() {
+        let most = flow.buckets[flow.buckets.len() - k..].iter().map(peak).max().unwrap_or(0);
+        if geometry(most).2 < k {
+            break;
+        }
+        take = k;
+    }
+    let shown: Vec<crate::report::stats::Slot> = flow.buckets[flow.buckets.len() - take..].to_vec();
+    let most = shown.iter().map(peak).max().unwrap_or(0);
+    let (bar_w, stride, _) = geometry(most);
     if shown.len() < flow.buckets.len() {
-        out.push(stat_lines(vec![Line::from(Span::styled(
+        out.push(lines(vec![Line::from(Span::styled(
             format!(
                 "  {}",
                 fill(
@@ -700,15 +719,16 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
     out.push(stat_gap());
 
     // 칸과 우선순위 — 넓으면 나란히, 좁으면 위아래로.
+    // 글리프와 색은 적힌 칸 이름으로, 화면 글은 걷은 이름으로 — CLI 의 칸 줄과 같은 자다(`view::count_said`).
     let columns: Vec<StatBar<'static>> = by(Axis::Status)
         .iter()
         .map(|c| {
-            let name = key_text(c);
-            let look = status(&name);
+            let raw = crate::view::count_raw(c);
+            let look = status(&raw);
             StatBar {
                 name: Line::from(vec![
-                    Span::styled(style::glyph(&name).to_string(), look),
-                    Span::raw(format!(" {name}")),
+                    Span::styled(style::glyph(&raw).to_string(), look),
+                    Span::raw(format!(" {}", crate::view::count_said(c, lang))),
                 ]),
                 value: c.rows as u64,
                 look,
@@ -724,7 +744,7 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
                 _ => Style::new(),
             };
             StatBar {
-                name: Line::from(Span::styled(key_text(c), look)),
+                name: Line::from(Span::styled(crate::view::count_said(c, lang), look)),
                 value: c.rows as u64,
                 look,
                 side: Line::from(c.rows.to_string()),
@@ -758,7 +778,7 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
     out.push(stat_gap());
 
     // 소요 — 중앙값과 p90 을 막대로, 몇을 쟀나를 글로. 못 잰 것은 막대 없이 낱말이 선다.
-    out.push(stat_lines(vec![Line::from(vec![
+    out.push(lines(vec![Line::from(vec![
         stat_head(say(lang, "tui.stats.durations")),
         Span::styled(format!("  {}", say(lang, "tui.stats.wall_clock")), dim()),
     ])]));
@@ -779,22 +799,24 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
         }
     }
     out.push(indented(stat_bars(spans)));
-    let named = [(say(lang, "stats.lead"), &st.lead_time), (say(lang, "stats.cycle"), &st.cycle_time)];
-    let name_w = named.iter().map(|(n, _)| crate::text::width(n)).max().unwrap_or(0);
+    // 묶음의 cycle time 은 제 시작을 안 읽는다 — 그 모름을 "시작이 안 적혔다" 로 대지 않는다(`view::span_counts`).
+    let named =
+        [(say(lang, "stats.lead"), &st.lead_time, false), (say(lang, "stats.cycle"), &st.cycle_time, st.of_groups())];
+    let name_w = named.iter().map(|(n, ..)| crate::text::width(n)).max().unwrap_or(0);
     let counts: Vec<Line<'static>> = named
         .into_iter()
-        .map(|(name, sp)| {
+        .map(|(name, sp, unread)| {
             Line::from(vec![
                 Span::raw(format!("  {}  ", pad(name, name_w))),
-                Span::styled(crate::view::span_counts(sp, lang), dim()),
+                Span::styled(crate::view::span_counts(sp, unread, lang), dim()),
             ])
         })
         .collect();
-    out.push(stat_lines(counts));
+    out.push(lines(counts));
     out.push(stat_gap());
 
     // AI 작업 — 회사·모델마다 줄 수를 막대로, 토큰을 글로.
-    out.push(stat_lines(vec![Line::from(vec![
+    out.push(lines(vec![Line::from(vec![
         stat_head(say(lang, "stats.work")),
         Span::raw("  "),
         Span::raw(plain(crate::view::work_said(&st.work, lang))),
@@ -804,48 +826,38 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
         .by_model
         .iter()
         .map(|m| {
-            let name = crate::text::one_line(&match &m.provider {
-                Some(p) => format!("{p}/{}", m.model),
-                None => m.model.clone(),
-            });
-            let lines = fill(say(lang, "stats.lines"), &[("n", &m.tally.lines.to_string())]);
+            let count = fill(say(lang, "stats.lines"), &[("n", &m.tally.lines.to_string())]);
             StatBar {
-                name: Line::from(name),
+                name: Line::from(crate::view::model_name(m)),
                 value: m.tally.lines as u64,
                 look: from_anstyle(style::BAR),
-                side: Line::from(format!("{lines} · {}", plain(crate::view::tally_said(&m.tally, lang)))),
+                side: Line::from(format!("{count} · {}", plain(crate::view::tally_said(&m.tally, lang)))),
             }
         })
         .collect();
     if !models.is_empty() {
         out.push(indented(stat_bars(models)));
     }
-    out.push(stat_lines(crate::view::grade_line(&st.work, lang).map(|l| Line::from(plain(l))).into_iter().collect()));
+    out.push(lines(crate::view::grade_line(&st.work, lang).map(|l| Line::from(plain(l))).into_iter().collect()));
     out.push(stat_gap());
     let mut tail: Vec<Line<'static>> = vec![Line::from(vec![
         stat_head(say(lang, "stats.reviews")),
-        Span::raw(format!(
-            "  {}",
-            fill(
-                say(lang, "stats.reviews_rows"),
-                &[("rows", &st.reviews.rows.to_string()), ("recorded", &st.reviews.work.recorded.to_string())],
-            )
-        )),
+        Span::raw(format!("  {}", crate::view::reviews_said(&st.reviews, lang))),
     ])];
     tail.extend(crate::view::grade_line(&st.reviews.work, lang).map(|l| Line::from(plain(l))));
-    out.push(stat_lines(tail));
+    out.push(lines(tail));
     out
 }
 
 /// 좁은 창의 통계 — 차트 대신 `moai stats` 의 한눈 보기 글을 그대로 쓴다. 칠은 걷는다: 그 글은 터미널 칠
-/// (SGR)을 든 채 오는데, 화면의 칸에는 글자만 들어가야 한다.
-fn stats_text(st: &crate::report::stats::Stats, lang: Lang) -> Vec<StatPart<'static>> {
-    let head = fill(say(lang, "stats.head"), &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())]);
-    let lines = std::iter::once(head)
+/// (SGR)을 든 채 오는데, 화면의 칸에는 글자만 들어가야 한다. **창 폭에 맞춰 접는다**([`folded`]) — 한눈 보기의 칸
+/// 줄과 소요 줄은 좁은 창보다 길어, 접지 않으면 `done` 의 수와 `unknown` 이 화면 밖으로 잘려 사라진다.
+fn stats_text(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<StatPart<'static>> {
+    let lines = std::iter::once(crate::view::stats_head(st, lang))
         .chain(crate::view::stats_overview(st, lang))
         .map(|l| Line::from(crate::style::plain(&l)))
         .collect();
-    vec![stat_lines(lines)]
+    vec![stat_lines(folded(lines, width))]
 }
 
 /// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기. 이름과 낱말은 키 표([`keys::STATS`])에서 읽는다.

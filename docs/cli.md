@@ -505,8 +505,9 @@ Filters  (comma = or,  repeated = and):
   The numbers come from the rows and from the `model:` lines in the notes -
   the same `work` that `moai show --json` gives.
 
-  Axes - --by status,tag prints those in full, and without --by the
-  overview shows the first three:
+  Axes - --by status,tag prints those in full (with --bucket or --last
+  the flow follows them), and without --by the overview shows the first
+  three:
     status      the column, a group's read from its members as on the board
     kind        issue, epic, milestone, idea - every row picked
     priority    0 to 3
@@ -540,7 +541,10 @@ Filters  (comma = or,  repeated = and):
   holds the axes asked (all seven without --by), an assignee carries email
   only when one is written, and journal_error stands only when a journal
   could not be read - then work and reviews are short. A null key means
-  none - no tag, no epic, no assignee. Durations are minutes.
+  none - no tag, no epic, no assignee. An axis need not add up to rows: a
+  row counts once per tag, and a row placed in no group (a twin's eclipsed
+  line, as -e none leaves it out) stands under no epic or milestone at
+  all. Durations are minutes.
 
     {"kind":"issue","rows":42,
      "by":{"status":[{"key":"todo","rows":9},...],

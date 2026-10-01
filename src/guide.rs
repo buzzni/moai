@@ -857,11 +857,16 @@ the same numbers as bars, narrowed by the filter that is hung.
   the time they got there. A reopened row is not counted as closed
 - **Flow buckets are cut in the screen's time zone**, the zone `--created <day>`
   reads; `flow.zone` names it. Weeks start on Monday
+- **An axis need not add up to `rows`.** A row counts once per tag, and a row
+  that stands in no group — a twin's eclipsed line, which `-e none` leaves out
+  too — is under no epic and no milestone, not under `null`
 - **Every key is always there** except `by` (narrowed by `--by`), `email` on an
   assignee with none, and `journal_error` (only when a journal could not be read)
-- The median of `moai show <epic>`'s "Spent" folds closed children into their
-  parent's span; `stats` takes each row as its own sample, so the two can differ
-  on the same epic"#;
+- `moai show <milestone>`'s "Spent" folds closed children into their parent's
+  span and ends at `done_at`; `stats` takes each row as its own sample and ends
+  when the row entered done (the time `--done` reads). So the two can differ on
+  the same milestone — where children closed, and on rows whose `done_at` and
+  column time disagree (closed before `done_at` existed, or edited by hand)"#;
 
 const PEOPLE: &str = r#"**The assignee comes for free** — whoever created it is the assignee. To hand it to
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and

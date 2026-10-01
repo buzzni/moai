@@ -875,6 +875,7 @@
   "stats.span_unknown": "모름 {n}",
   "stats.span_none": "잰 것이 없다 — 완료 {done} 에 시작이 안 적혔다",
   "stats.span_nothing": "완료한 것이 없다",
+  "stats.span_group": "묶음은 제 시작을 안 읽는다 — 완료 {done}, 멤버로 잰다(-e·--milestone)",
   "stats.work": "AI 작업",
   "stats.work_lines": "`model:` 줄 {lines} · 적힌 이슈 {rows}",
   "stats.lines": "{n}줄",

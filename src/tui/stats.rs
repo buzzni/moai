@@ -7,8 +7,10 @@
 //! 프레임마다 이슈 전부를 훑던 자리로 여러 번 멈췄다(moai-ropk·moai-56jf). 흐름의 칸 너비(주·날)는 둘 다 연
 //! 순간에 세어 들고 있다가 키 하나로 바꾼다 — 바꿀 때 다시 세면 그사이 다시 읽힌 줄로 수가 흔들린다.
 //!
-//! **노트는 탐색기가 든 것을 쓴다**([`super::Ground`] 의 노트, `/` 의 노트 검색이 읽는 그 한 벌) — 아직 안
-//! 읽었으면 여는 이 한 번에 읽어 그 자리에 든다. 저널을 따로 한 번 더 풀지 않는다.
+//! **노트는 탐색기가 이미 든 것이 있으면 그것을 쓴다**([`super::Ground`] 의 노트, `/` 의 노트 검색이 읽는 그 한 벌).
+//! 안 들었으면 CLI 와 같은 걸음으로 저널에서 `model:` 줄만 읽고(`cmd::show::journal_of_rows`), **`Ground` 에 들이지
+//! 않는다** — 들이면 레이어의 프로젝트에서는 다시 읽을 자가 없어 뒤에 적힌 `model:` 줄을 영영 못 세고, 두 벌(글과
+//! 접은 글)이 쓸 데 없이 남는다(`App::leave_project` 가 걷는 그것이다).
 //!
 //! **무엇을 세나**
 //!
@@ -72,30 +74,37 @@ impl Window {
 
 /// 한 프로젝트의 줄을 센다 — 주마다 한 벌, 날마다 한 벌.
 ///
-/// **노트는 `ground` 가 든 것이다** — 안 읽었으면 여기서 한 번 읽어 그 자리에 든다([`Ground::read_notes`]). 읽은
-/// 노트 글에서 `model:` 줄을 읽는 법은 CLI 와 같은 몸이다(`model::work_in_note`).
+/// **노트는 `ground` 가 이미 든 것만 빌린다** — 노트를 보는 검색이 걸려 있으면 거는 쪽(`App::apply`)과 다시 읽는
+/// 걸음(`App::follow`)이 늘 새것으로 들고 있다. 안 들었으면 CLI 와 같은 걸음으로 고른 줄의 `model:` 줄만 읽고
+/// (`cmd::show::journal_of_rows`·`work_in`), `ground` 에는 아무것도 안 들인다. 노트 글에서 `model:` 줄을 읽는 법은
+/// 어느 쪽이든 같은 몸이다(`model::work_in_note`).
 fn count(
     issues: &[Issue],
     cfg: &Config,
-    ground: &mut Ground,
+    ground: &Ground,
     repo: Option<&Repo>,
     origin: &crate::worktree::Origin,
     filter: &Filter,
     zone: &crate::tz::Zone,
     now: &str,
 ) -> (Stats, Stats) {
-    if let Some(repo) = repo {
-        ground.read_notes(repo, origin, issues);
-    }
     let mut wh = ground.here(issues);
     // **흐름의 날은 보는 사람의 날이다** — 화면이 시각을 그리는 그 시간대고(`SPC o t`), 거름망의 `created=<날>` 도
     // 이것으로 읽는다(`App::apply`).
     wh.zone = Some(zone);
     let rows = stats::select(issues, filter, &wh, now);
-    let work: BTreeMap<String, Vec<Work>> = rows
-        .iter()
-        .map(|i| (i.id.clone(), ground.notes_of(&i.id).iter().flat_map(|t| crate::model::work_in_note(t)).collect()))
-        .collect();
+    let work: BTreeMap<String, Vec<Work>> = match (ground.notes.is_some(), repo) {
+        (false, Some(repo)) => crate::cmd::show::work_in(
+            &crate::cmd::show::journal_of_rows(repo, origin, rows.iter().copied(), crate::model::may_hold_work),
+            rows.iter().copied(),
+        ),
+        _ => rows
+            .iter()
+            .map(|i| {
+                (i.id.clone(), ground.notes_of(&i.id).iter().flat_map(|t| crate::model::work_in_note(t)).collect())
+            })
+            .collect(),
+    };
     let ask = |bucket: Bucket| Ask { kind: filter.kind, by: Vec::new(), bucket, last: bucket.default_last() };
     (
         stats::of(&rows, &wh, cfg, &work, &ask(Bucket::Week), now),
@@ -125,11 +134,11 @@ impl App {
             let shown = self.hung.as_ref().map(|h| super::draw::badge(h, lang));
             let project = self.project_name();
             let site = &mut self.site;
-            let overlaid = !site.origin.labels().is_empty();
+            let overlaid = !site.origin.roots().is_empty();
             let (week, day) = count(
                 &site.issues,
                 &site.cfg,
-                &mut site.ground,
+                &site.ground,
                 site.repo.as_ref(),
                 &site.origin,
                 &filter,
@@ -150,34 +159,43 @@ impl App {
         let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
         let (name, path) = (place.name.clone(), place.path.clone());
         let filter = Filter::default();
-        // **펼쳐 든 줄이 있으면 그것을 센다** — 화면에 선 그 줄이다.
+        // **펼쳐 든 줄이 있으면 그것을 센다** — 화면에 선 그 줄이다. **흐름의 끝은 지금이다** — 레이어의 프로젝트는
+        // 표식(스냅샷·설정·워크트리)이 움직여야 다시 읽혀, 아무도 안 쓰는 프로젝트의 `site.now` 는 며칠 묵는다. 그
+        // 값으로 세우면 날마다의 흐름이 그 읽은 날에서 끝난다. 거름망이 없는 자리라 고르는 데는 시각이 안 든다.
         if let Some(site) = self.site_mut(Seat::Place(at)) {
-            let overlaid = !site.origin.labels().is_empty();
-            let (week, day) = count(
-                &site.issues,
-                &site.cfg,
-                &mut site.ground,
-                site.repo.as_ref(),
-                &site.origin,
-                &filter,
-                &zone,
-                &site.now,
-            );
+            let overlaid = !site.origin.roots().is_empty();
+            let now = crate::model::now();
+            let (week, day) =
+                count(&site.issues, &site.cfg, &site.ground, site.repo.as_ref(), &site.origin, &filter, &zone, &now);
             self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day)));
             return;
         }
         // **접혀 아직 안 읽은 프로젝트는 그 자리에서 읽는다** — 누른 사람은 결과를 기다리고 있다(들어가는 길
-        // `App::enter_project` 와 같다). 여는 데까지만 보고(`Depth::Lean`) 줄은 같은 읽기(`App::read`)로 읽는다 —
-        // 못 열면 `open_place` 가 그 줄을 고쳐 세우고 까닭을 알림으로 댄다.
-        let Some(repo) = self.open_place(at, Depth::Lean) else { return };
+        // `App::enter_project` 와 같다). 여는 데까지만 보고(`Depth::Lean`) 줄은 같은 읽기(`App::read`)로 읽는다.
+        //
+        // **열어 보기만 하고 레이어의 줄은 안 건드린다** — `open_place` 는 그 줄을 손으로 세운 것으로 적어
+        // (`Layer::set_by_hand`) 그 줄에 돌던 읽기의 답을 버리고 다시 줄 세우며, 요약도 다시 읽힌다. 세기만 하는 키가
+        // 그 값을 치를 까닭이 없다. 못 열 때만 그 길로 간다 — 그 줄을 고쳐 세우고 까닭을 알림으로 대는 자가 거기 하나다.
+        let repo = match crate::projects::open_shallow(&path, lang) {
+            Ok(repo) => repo,
+            Err(_) => {
+                let Some(repo) = self.open_place(at, Depth::Lean) else { return };
+                repo
+            }
+        };
         let held = Told::held(self.layer.as_ref().and_then(|l| l.told_install(&path)));
         match (self.read)(&repo, self.worktree, lang, held) {
-            Ok(mut fresh) => {
-                let overlaid = !fresh.origin.labels().is_empty();
+            Ok(fresh) => {
+                // **물어서 센 설치 값은 그 줄에 적는다** — 들어가는 길(`App::enter_project`)과 같은 자다. 안 적으면 다음
+                // 쓸기가 같은 디렉터리에 하위 프로세스 셋을 또 띄운다.
+                if let (Some(asked), Some(layer)) = (fresh.asked_install, self.layer.as_mut()) {
+                    layer.stamp_install(&path, asked);
+                }
+                let overlaid = !fresh.origin.roots().is_empty();
                 let (week, day) = count(
                     &fresh.issues,
                     &repo.config,
-                    &mut fresh.ground,
+                    &fresh.ground,
                     Some(&repo),
                     &fresh.origin,
                     &filter,
@@ -368,8 +386,32 @@ mod tests {
         let label_at = col(&wide[days], "08-31").unwrap();
         let three_at = col(&wide[days - 2], "3").unwrap();
         assert!(three_at.abs_diff(label_at) <= 1, "08-31 칸의 수가 제 칸 밑에 안 섰다\n{all}");
-        // 좁은 창 — 같은 수를 글로 낸다.
+        // 좁은 창 — 같은 수를 글로 낸다. **창보다 긴 줄은 접는다** — 칸 줄의 `✓ done 1` 과 소요 줄의 까닭이 창 밖으로
+        // 잘려 사라지던 자리다(옆으로 굴릴 길이 없다).
         let narrow = super::super::draw::tests::render(&mut a, 40, 40).join("\n");
         assert!(narrow.contains("센 줄  issue 3건") && narrow.contains("2026-08-31"), "글로 안 떨어졌다\n{narrow}");
+        assert!(narrow.contains("✓ done 1"), "좁은 창이 칸 줄의 꼬리를 잘랐다\n{narrow}");
+        assert!(narrow.contains("적혔다"), "좁은 창이 소요 줄의 까닭을 잘랐다\n{narrow}");
+    }
+
+    /// **수가 막대보다 먼저 자리를 얻는다** — 이름 열과 막대 몇 칸을 먼저 떼어 두던 판은 긴 모델 이름 곁의 토큰 합을
+    /// 통째로 빼거나(이 폭에서는 `2줄 · 토큰` 까지만 섰다) `40,957` 처럼 그럴듯한 다른 수로 잘랐다. 이름은 `…` 로
+    /// 잘려도 수는 온전히 선다.
+    #[test]
+    fn numbers_keep_their_digits_beside_a_long_model_name() {
+        let mut a = app();
+        let notes = [(
+            "argos-0001".to_string(),
+            vec![
+                "model: anthropic/claude-sonnet-4-5-20250929 tokens=40957750 (high — x)\nmodel: anthropic/claude-sonnet-4-5-20250929 (high — y)"
+                    .to_string(),
+            ],
+        )];
+        a.site.ground.hand_notes(notes.into_iter().collect());
+        a.hit("SPC p s");
+        let screen = super::super::draw::tests::render(&mut a, 60, 80).join("\n");
+        // 막대 곁의 글 통째로 — 머리 줄(`AI 작업 …`)에도 같은 합이 서므로 막대 쪽에만 있는 머리(`2줄 · `)부터 잰다.
+        assert!(screen.contains("2줄 · 토큰 40,957,750 — 1줄의 합 (안 적은 줄 1)"), "막대 곁의 수가 잘렸다\n{screen}");
+        assert!(screen.contains("anthr…"), "넘친 모델 이름을 잘렸다고 안 댔다\n{screen}");
     }
 }

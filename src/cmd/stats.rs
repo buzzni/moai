@@ -33,18 +33,28 @@ pub fn run(ctx: &Ctx, args: StatsArgs) -> R<Vec<String>> {
     // (`Filter::needs_zone`), 여기는 흐름이 늘 날로 가른다.
     wh.zone = Some(ctx.zone());
     let rows = stats::select(&load.issues, &filter, &wh, &now);
-    // **센 줄의 노트만 푼다** — 고르지 않은 줄의 `model:` 줄은 어느 수에도 안 든다.
+    // **센 줄의 `work` 만 가른다** — 고르지 않은 줄의 `model:` 줄은 어느 수에도 안 든다. 푸는 양은 줄지 않는다:
+    // 저널은 줄마다 다 푼 뒤에 id 로 거른다(`Repo::journal_by_id`). 고른 줄이 없으면 아무 저널도 안 연다.
+    //
+    // **`work` 를 그리는 자리에서만 푼다** — 사람 화면의 `--by` 는 물은 축만 그리고 AI 작업은 안 낸다(`view::stats`).
+    // 거기서도 풀면 못 읽는 저널 하나가 빠짐없이 그린 화면에 "이력이 빠졌다" 는 말과 비영 종료를 얹는다.
+    let drawn = ctx.json || by.is_empty();
     let journal = match noted {
         Some(j) => j,
-        None => super::show::journal_of_rows(&repo, &origin, rows.iter().copied(), model::may_hold_work),
+        None if drawn => super::show::journal_of_rows(&repo, &origin, rows.iter().copied(), model::may_hold_work),
+        None => Default::default(),
     };
     let work = super::show::work_in(&journal, rows.iter().copied());
+    // `--bucket`·`--last` 는 흐름을 묻는 말이다 — `--by` 곁에서도 사람 화면이 흐름을 그린다(`view::stats`).
+    let flow_asked = bucket.is_some() || last.is_some();
     let bucket = match bucket {
         None | Some(BucketArg::Week) => Bucket::Week,
         Some(BucketArg::Day) => Bucket::Day,
     };
     let ask = Ask {
-        kind,
+        // **센 종류는 지은 거르개에서 읽는다** — `--filter type=…` 은 `Filter::build` 안에서야 풀린다. argv 의
+        // `--type` 으로 정하면 그 종류의 줄만 골라 놓고 `issue` 로 세어 모든 수가 0 이다. 탐색기의 창도 이 값을 읽는다.
+        kind: filter.kind,
         by: by.into_iter().map(axis_of).collect(),
         bucket,
         last: last.unwrap_or_else(|| bucket.default_last()),
@@ -66,8 +76,8 @@ pub fn run(ctx: &Ctx, args: StatsArgs) -> R<Vec<String>> {
         return super::json_line(&Said { stats: &st, journal_error });
     }
     let screen = crate::view::Screen::new(ctx.lang()).at(ctx.clock()).over(&origin);
-    // `--by` 를 줬으면 물은 축만 통째로 그린다 — 한눈 보기는 그것을 안 물었을 때다.
-    Ok(crate::view::stats(&st, &load.issues, &repo.config, !ask.by.is_empty(), screen))
+    // `--by` 를 줬으면 물은 축만 통째로 그린다 — 한눈 보기는 그것을 안 물었을 때다. 흐름을 물었으면 그 밑에 흐름도.
+    Ok(crate::view::stats(&st, &load.issues, &repo.config, !ask.by.is_empty(), flow_asked, screen))
 }
 
 /// argv 의 낱말을 `report` 의 축으로 잇는다 — `report` 는 clap 을 모른다(`show::sort_of` 와 같은 자리).

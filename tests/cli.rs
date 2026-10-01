@@ -10740,6 +10740,13 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
     // 가리는 줄은 처음부터 성하다 — 가려진 쪽을 재느라 이쪽의 답까지 지우지 않았다.
     let holds = ok(s.path(), &["show", "argos-0002", "--json"]);
     assert!(holds.contains(r#""derived_epic":"argos-0001""#), "가리는 줄이 제 소속을 잃었다\n{holds}");
+
+    // **통계의 소속 축도 같은 답이다**(리뷰 moai-1hka.hvb 7번) — 가려진 줄은 에픽에도 "없음" 에도 안 선다.
+    // "없음" 에 세면 `stats --by epic` 의 없음과 `stats -e none` 의 수가 갈린다.
+    let by = ok(s.path(), &["stats", "--by", "epic", "--json"]);
+    assert!(by.contains(r#""epic":[{"key":"argos-0001","rows":1}]"#), "가려진 줄을 소속 축에 셌다\n{by}");
+    let none = ok(s.path(), &["stats", "-e", "none", "--json"]);
+    assert!(none.starts_with(r#"{"kind":"issue","rows":0,"#), "-e none 이 가려진 줄을 골랐다\n{none}");
 }
 
 /// **같은 종류의 쌍둥이도 표면 어디서나 같은 에픽을 답한다**(moai-7iyc.rt6, 2026-09-23 사용자 결정).
@@ -20494,6 +20501,12 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
         ok(s.path(), &["stats", "--type", "idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
         "--type 이 센 종류를 바꾼다"
     );
+    // **`--filter type=…` 도 같은 말이다** — 센 종류는 지은 거르개에서 읽는다. argv 의 `--type` 만 읽던 판은 생각만
+    // 골라 놓고 `issue` 로 세어 `rows:0` 을 냈다(탐색기의 `SPC f type=idea` 는 처음부터 생각을 셌다).
+    assert!(
+        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        "--filter type= 이 센 종류를 안 바꿨다"
+    );
     // `--all` 은 받고 아무것도 안 바꾼다 — 이미 다 연 채로 센다.
     assert_eq!(ok(s.path(), &["stats", "--all", "--json"]), json);
 
@@ -20632,6 +20645,10 @@ fn stats_draws_an_overview_or_the_axes_asked() {
     assert!(axes.contains("tag별") && axes.contains("#bug") && axes.contains("(없음)"), "{axes}");
     assert!(axes.find("tag별") < axes.find("status별"), "물은 차례대로 서지 않았다\n{axes}");
     assert!(!axes.contains("흐름"), "물은 축만 내야 한다\n{axes}");
+    // **`--bucket`·`--last` 는 흐름을 묻는 말이다** — `--by` 곁에서도 말없이 먹지 않고 축 밑에 흐름을 그린다.
+    let with_flow = ok(s.path(), &["stats", "--by", "tag", "--bucket", "day", "--last", "3"]);
+    assert!(with_flow.contains("#bug") && with_flow.contains("날마다"), "--bucket 을 말없이 먹었다\n{with_flow}");
+    assert_eq!(with_flow.matches("\n  20").count(), 3, "--last 3 이 칸 셋을 안 냈다\n{with_flow}");
 
     let mut cmd = staged(&["stats"]);
     with_lang(&mut cmd, None);
@@ -20640,4 +20657,51 @@ fn stats_draws_an_overview_or_the_axes_asked() {
     for want in ["Counted  issue 2", "Flow", "Lead time", "Cycle time", "AI work", "Reviews"] {
         assert!(english.contains(want), "{want} 가 없다\n{english}");
     }
+}
+
+/// **사람 화면의 `--by` 는 저널을 안 푼다** — 물은 축만 그리고 AI 작업은 안 내므로, 못 읽는 저널 하나가 빠짐없이
+/// 그린 화면에 "이력이 빠졌다" 는 말과 비영 종료를 얹을 까닭이 없다. `work` 를 내는 `--json` 은 그대로 모자람을 댄다.
+#[cfg(unix)]
+#[test]
+fn stats_by_on_screen_does_not_read_the_journal() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("stats-by-unread");
+    let id = add(s.path(), &["하나"]);
+    ok(s.path(), &["note", &id, "model: anthropic/opus-5 tokens=1 (high — x)"]);
+    let journal = only_journal(s.path());
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&journal).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return; // root 는 권한을 안 본다
+    }
+    let screen = moai(s.path(), &["stats", "--by", "status"]);
+    let json = moai(s.path(), &["stats", "--by", "status", "--json"]);
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(screen.status.success(), "물은 축만 그렸는데 저널 탓에 실패했다\n{}", text(&screen));
+    assert!(screen.stderr.is_empty(), "다 그린 화면에 이력이 빠졌다고 했다\n{}", text(&screen));
+    assert!(!json.status.success(), "`work` 가 모자란 기계 답을 0 으로 끝냈다\n{}", text(&json));
+    assert!(String::from_utf8_lossy(&json.stdout).contains(r#""journal_error":"#), "{}", text(&json));
+}
+
+/// **묶음의 cycle time 은 "시작이 안 적혔다" 가 아니다** — 제 시작을 일부러 안 읽으므로(멤버로 잰다) 그렇게 댄다.
+/// 시작을 든 묶음 앞에서 "적힌 시작이 없다" 고 하면 거짓말이다. **끊긴 에픽은 목록과 같은 말로 댄다**(`(없는 에픽)`).
+#[test]
+fn stats_names_a_group_s_unread_start_and_a_gone_epic() {
+    let s = init("stats-groups");
+    let rows = [
+        r#"{"id":"argos-0001","title":"묶음","kind":"epic","status":"todo","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T00:00:00Z","status_since":"2026-09-08T00:00:00Z","started_at":"2026-09-08T01:00:00Z"}"#,
+        r#"{"id":"argos-0001.a1b","title":"멤버","status":"done","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-09T00:00:00Z","status_since":"2026-09-09T00:00:00Z","done_at":"2026-09-09T00:00:00Z","started_at":"2026-09-08T02:00:00Z"}"#,
+        r#"{"id":"argos-0002","title":"끊긴 소속","status":"todo","epic":"argos-zzzz","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T00:00:00Z","status_since":"2026-09-08T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), rows.join("\n") + "\n").unwrap();
+
+    let groups = ok(s.path(), &["stats", "--type", "epic"]);
+    assert!(groups.contains("묶음은 제 시작을 안 읽는다"), "묶음의 모름을 자료가 빈 것으로 댔다\n{groups}");
+    assert!(!groups.contains("시작이 안 적혔다"), "시작을 든 묶음에 시작이 없다고 했다\n{groups}");
+    // 일의 cycle time 은 그대로 잰다 — 멤버는 시작과 끝을 다 든다.
+    let work = ok(s.path(), &["stats"]);
+    assert!(work.contains("중앙값 22시간"), "멤버의 cycle time 이 안 섰다\n{work}");
+
+    let epics = ok(s.path(), &["stats", "--by", "epic"]);
+    assert!(epics.contains("argos-zzzz  (없는 에픽)"), "끊긴 에픽을 빈 제목으로 댔다\n{epics}");
 }

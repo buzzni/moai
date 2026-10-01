@@ -875,6 +875,7 @@
   "stats.span_unknown": "{n} unknown",
   "stats.span_none": "not measured - none of the {done} done carry a start",
   "stats.span_nothing": "nothing done",
+  "stats.span_group": "not read for a group - {done} done, measure the members with -e or --milestone",
   "stats.work": "AI work",
   "stats.work_lines": "{lines} lines on {rows} rows",
   "stats.lines": "{n} lines",

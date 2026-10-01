@@ -807,8 +807,8 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// 노트 글 **하나**에서 읽은 일한 것 — [`work_of`] 가 저널 줄마다 부르는 몸이다. `at`·`by` 는 비어 있다: 글만
 /// 받아서는 누가 언제 적었는지 모른다.
 ///
-/// **탐색기의 통계 창이 이것을 부른다**(moai-1hka.bq9) — 창은 저널을 다시 안 풀고 이미 읽어 든 노트 글
-/// (`tui::Ground` 의 노트, `note_of` 가 낸 그 글)에서 읽는다. 울타리를 가르는 법이 두 벌이면 CLI 의
+/// **탐색기의 통계 창이 이것을 부른다**(moai-1hka.bq9) — 창은 노트를 이미 들고 있으면(`tui::Ground` 의 노트,
+/// `note_of` 가 낸 그 글) 저널을 다시 안 풀고 그 글에서 읽는다. 울타리를 가르는 법이 두 벌이면 CLI 의
 /// `moai stats` 와 창이 같은 노트를 두고 다른 토큰 합을 낸다.
 pub(crate) fn work_in_note(text: &str) -> impl Iterator<Item = Work> + '_ {
     let mut fenced = false;

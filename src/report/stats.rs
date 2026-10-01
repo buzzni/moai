@@ -132,6 +132,20 @@ pub struct Stats {
     pub reviews: Reviews,
 }
 
+impl Stats {
+    /// 그 축의 분포 — 물은 축이 아니면 없다. **축을 찾는 자는 이것 하나다** — CLI 의 한눈 보기와 탐색기의 창이
+    /// 저마다 `by` 를 훑으면 없는 축을 다루는 법이 표면마다 갈린다.
+    pub fn on(&self, axis: Axis) -> Option<&[Count]> {
+        self.by.iter().find(|(a, _)| *a == axis).map(|(_, c)| c.as_slice())
+    }
+
+    /// 셀 종류가 묶음인가 — 묶음의 cycle time 은 제 시작을 안 읽어 늘 모른다([`of`]). 그 "모름" 은 적힌 것이
+    /// 없어서가 아니라 읽지 않기로 한 것이라, 그리는 쪽이 다른 말로 댄다.
+    pub fn of_groups(&self) -> bool {
+        matches!(self.kind, Kind::Epic | Kind::Milestone)
+    }
+}
+
 /// `by` 를 **축 이름 → 분포** 의 객체로 낸다. 축 차례는 물은 차례다.
 fn as_map<S: serde::Serializer>(by: &[(Axis, Vec<Count>)], s: S) -> Result<S::Ok, S::Error> {
     s.collect_map(by.iter().map(|(axis, counts)| (axis.name(), counts)))
@@ -188,7 +202,8 @@ pub struct Spans {
     pub done: usize,
     /// 그 가운데 시작과 끝을 다 읽은 것.
     pub measured: usize,
-    /// 못 잰 것 — 시작이 안 적혔거나, 못 읽거나, 끝이 시작보다 앞선다. **0 분이 아니다.**
+    /// 측정하지 못한 것 — 시작이 안 적혔거나, 못 읽거나, 끝이 시작보다 앞서거나, 줄의 도장이 앞날로 멀리
+    /// 적혔다(`future_timestamp`). **0 분이 아니다.**
     pub unknown: usize,
     pub median: Option<i64>,
     /// 잰 것의 90번째 백분위수(nearest-rank).
@@ -307,10 +322,10 @@ pub fn of(
         rows: counted.len(),
         by,
         flow: flow(&counted, wh, ask, now),
-        lead_time: spans(&counted, wh, |i| Some(i.created_at.as_str())),
+        lead_time: spans(&counted, wh, now, |i| Some(i.created_at.as_str())),
         // **묶음의 시작은 안 읽는다** — 그 줄의 `started_at` 은 누가 그 줄에 손으로 `mv` 를 쳤나일 뿐이다(CLAUDE.md
         // "묶음의 기간은 멤버로 잰다"). 모르는 것으로 센다.
-        cycle_time: spans(&counted, wh, |i| (!super::is_group(i)).then_some(i.started_at.as_deref()).flatten()),
+        cycle_time: spans(&counted, wh, now, |i| (!super::is_group(i)).then_some(i.started_at.as_deref()).flatten()),
         work: spend(&counted, work),
         reviews: Reviews { rows: reviewed.len(), work: spend(&reviewed, work) },
     }
@@ -351,12 +366,46 @@ fn spread(axis: Axis, rows: &[&Issue], counted: &[&Issue], wh: &Where, cfg: &Con
             if tags.is_empty() { vec![None] } else { tags.into_iter().map(|t| Some((t, None))).collect() }
         })),
         // **이름과 메일의 짝으로 센다.** 담당이 없는 줄은 `-a none` 이 고르는 줄과 같다 — 이름이 없으면 없다.
+        //
+        // **메일은 대소문자를 접어 견준다** — `-a` 가 한 사람으로 고르는 줄(`query::is_assignee` 의
+        // `eq_ignore_ascii_case`)을 이 축이 둘로 가르면, `stats -a <메일> --by assignee` 한 번이 센 사람을 두 줄로
+        // 낸다. 접은 꼴(소문자)로 낸다 — 적힌 꼴이 여럿이라 어느 하나를 고를 까닭이 없다.
         Axis::Assignee => {
-            ranked(counted.iter().map(|i| i.assignee.as_deref().map(|name| (name, i.assignee_email.as_deref()))))
+            let folded: Vec<Option<(&str, Option<String>)>> = counted
+                .iter()
+                .map(|i| {
+                    i.assignee.as_deref().map(|name| (name, i.assignee_email.as_deref().map(str::to_ascii_lowercase)))
+                })
+                .collect();
+            ranked(folded.iter().map(|k| k.as_ref().map(|(name, mail)| (*name, mail.as_deref()))))
         }
-        Axis::Epic => ranked(counted.iter().map(|i| wh.epic_of(i).map(|e| (e, None)))),
-        Axis::Milestone => ranked(counted.iter().map(|i| wh.milestone_of(i).map(|m| (m, None)))),
+        // **어느 묶음에도 안 드는 줄은 두 축에서 빠진다**(리뷰 moai-1hka.hvb 7번) — 종류가 다른 쌍둥이에게 가려진
+        // 줄, 쌍둥이 부모 밑에서 소속을 못 정한 줄, 길 잃은 줄 밑에 접힌 줄이다. `-e none`·`--milestone none` 도
+        // 그 줄을 안 고르고 트리는 `(길 잃음)` 에 둔다(`query` 의 `placed`). "없음" 에 세면 `stats --by epic` 의
+        // 없음과 `stats -e none` 의 수가 갈린다. 그래서 이 두 축의 합은 줄 수보다 작을 수 있다 — 그 줄은
+        // `moai status` 가 `duplicate_id`·`twin_parent` 로 댄다.
+        Axis::Epic => ranked(placed(counted, wh, |i| wh.epic_of(i))),
+        Axis::Milestone => ranked(placed(counted, wh, |i| wh.milestone_of(i))),
     }
+}
+
+/// 소속 축의 값 — `query` 의 `placed` 와 **같은 금**이다. 가려진 줄과 소속을 못 정한 줄은 어느 값으로도 안
+/// 서고, 길 잃은 줄 밑에 접힌 줄은 "없음" 으로만 안 선다(이름이 있는 값은 그대로다 — `-e X` 가 그 줄을 고른다).
+fn placed<'x>(
+    counted: &'x [&'x Issue],
+    wh: &'x Where,
+    of: impl Fn(&'x Issue) -> Option<&'x str> + 'x,
+) -> impl Iterator<Item = Option<(&'x str, Option<&'x str>)>> + 'x {
+    counted.iter().filter_map(move |i| {
+        if wh.eclipsed(i) || wh.epic.lost(i) {
+            return None;
+        }
+        match of(i) {
+            Some(v) => Some(Some((v, None))),
+            None if wh.folded.contains(i.id.as_str()) => None,
+            None => Some(None),
+        }
+    })
 }
 
 fn plain(key: Option<Key>, rows: usize) -> Count {
@@ -392,6 +441,9 @@ fn flow(counted: &[&Issue], wh: &Where, ask: &Ask, now: &str) -> Flow {
         None => crate::tz::Zone::stored(),
     };
     let mut out = Flow { bucket: ask.bucket, zone: zone.name().to_string(), buckets: Vec::new() };
+    // **앞날로 멀리 적힌 줄은 흐름에 안 든다** — 보드의 흐름이 `future_timestamp` 로 짚은 줄을 빼는 것과 같은 금이다
+    // (`report::far_ahead`, moai-ugjp). 시계를 잘못 친 도장 하나가 지금 든 칸의 수로 새지 않게.
+    let stamped = now;
     // 지금을 못 읽으면 칸을 세울 끝이 없다 — 지어낸 날로 세우지 않는다.
     let Some(now) = parse_rfc3339(now) else { return out };
     let step = ask.bucket.days();
@@ -410,7 +462,7 @@ fn flow(counted: &[&Issue], wh: &Where, ask: &Ask, now: &str) -> Flow {
         let s = ask.bucket.start(day(parse_rfc3339(stamp)?));
         (first..=last).contains(&s).then(|| ((s - first) / step) as usize)
     };
-    for i in counted {
+    for i in counted.iter().filter(|i| !super::far_ahead(i, stamped)) {
         if let Some(k) = at(&i.created_at) {
             out.buckets[k].created += 1;
         }
@@ -427,15 +479,24 @@ fn flow(counted: &[&Issue], wh: &Where, ask: &Ask, now: &str) -> Flow {
 /// `unknown` 이다. 그런 줄을 0 으로 눌러 담으면 "0 분에 했다" 가 잰 값으로 선다.
 ///
 /// **자식을 부모 구간에 접지 않는다** — `spent_in` 은 묶음 하나의 벽시계를 **더하려고** 부모 구간 안의 자식을
-/// 접지만, 여기는 줄 하나하나가 표본이다. 그래서 `moai show <에픽>` 의 중앙값과 `moai stats -e <에픽>` 의
-/// cycle time 중앙값은 자식이 닫힌 묶음에서 다를 수 있다 — 묻는 것이 다르다.
-fn spans<'x>(counted: &[&'x Issue], wh: &'x Where, from: impl Fn(&'x Issue) -> Option<&'x str>) -> Spans {
+/// 접지만, 여기는 줄 하나하나가 표본이다. **끝도 다르다** — `spent_in` 은 `done_at` 에서 끝나고 그것이 없으면 안
+/// 재지만, 여기는 지금 done 에 든 때(`--done` 이 읽는 때, [`closed_at`])에서 끝난다. 그래서 `moai show <마일스톤>` 의
+/// "소요" 와 `moai stats --milestone <마일스톤>` 의 cycle time 은 자식이 닫힌 묶음에서, 그리고 두 도장이 갈린 줄
+/// (`done_at` 전에 닫힌 줄·손으로 고친 줄·머지가 칸과 `done_at` 을 다른 쪽에서 가져온 줄)에서 다를 수 있다 — 묻는
+/// 것이 다르다.
+///
+/// **앞날로 멀리 적힌 줄도 모른다** — 보드가 `future_timestamp` 로 짚는 줄이다(`report::far_ahead`). 그 도장으로 재면
+/// 시계 오타 하나가 p90 을 몇십 년으로 끌고 간다. 빼지 않고 `unknown` 에 둔다: `measured + unknown == done` 이다.
+fn spans<'x>(counted: &[&'x Issue], wh: &'x Where, now: &str, from: impl Fn(&'x Issue) -> Option<&'x str>) -> Spans {
     let mut out = Spans::default();
     let mut minutes: Vec<i64> = Vec::new();
     for i in counted.iter().copied() {
         let Some(end) = closed_at(i, wh) else { continue };
         out.done += 1;
-        let span = from(i).and_then(parse_rfc3339).zip(parse_rfc3339(end)).filter(|(s, e)| e >= s);
+        let span = (!super::far_ahead(i, now))
+            .then(|| from(i).and_then(parse_rfc3339).zip(parse_rfc3339(end)))
+            .flatten()
+            .filter(|(s, e)| e >= s);
         match span {
             Some((s, e)) => minutes.push((e - s) / 60),
             None => out.unknown += 1,
@@ -798,5 +859,45 @@ mod tests {
 
         let json = serde_json::to_string(&st.work.by_model[1]).unwrap();
         assert_eq!(json, r#"{"provider":null,"model":"opus-5","lines":1,"tokened":0,"tokens":null}"#);
+    }
+
+    /// **앞날로 멀리 적힌 줄은 소요도 흐름도 안 끌고 간다** — 보드가 `future_timestamp` 로 짚는 그 줄이다
+    /// (`report::far_ahead`). 시계 오타 하나가 p90 을 몇십 년으로 만들던 자리다. 빼지 않고 모름으로 센다.
+    #[test]
+    fn a_far_future_stamp_is_unknown_not_a_span() {
+        let typo = closed("argos-0002", "2026-09-28T00:00:00Z", None, "2099-01-01T00:00:00Z");
+        let all = vec![closed("argos-0001", "2026-09-29T00:00:00Z", None, "2026-09-29T02:00:00Z"), typo];
+        let st = count(&all, &Ask { last: 1, ..Ask::default() }, &BTreeMap::new());
+        assert_eq!(
+            st.lead_time,
+            Spans { done: 2, measured: 1, unknown: 1, median: Some(120), p90: Some(120) },
+            "오타 난 도장으로 소요를 쟀다"
+        );
+        assert_eq!(
+            st.flow.buckets,
+            [Slot { start: "2026-09-28".into(), created: 1, done: 1 }],
+            "오타 난 줄이 흐름에 섰다"
+        );
+    }
+
+    /// **담당의 메일은 대소문자를 접어 센다** — `-a` 가 한 사람으로 고르는 줄(`query::is_assignee`)을 축이 둘로
+    /// 가르지 않는다. 이름만 적힌 줄은 그대로 따로다: 같은 사람인지 모른다.
+    #[test]
+    fn the_assignee_axis_folds_the_mail_s_case() {
+        let who = |id: &str, mail: Option<&str>| {
+            let mut i = row(id, "todo", "2026-09-01T00:00:00Z");
+            i.assignee = Some("Kim".into());
+            i.assignee_email = mail.map(str::to_string);
+            i
+        };
+        let all = vec![
+            who("argos-0001", Some("Kim@Example.com")),
+            who("argos-0002", Some("kim@example.com")),
+            who("argos-0003", None),
+        ];
+        let st = count(&all, &Ask::default(), &BTreeMap::new());
+        let got: Vec<(Option<Key>, Option<&str>, usize)> =
+            axis(&st, Axis::Assignee).iter().map(|c| (c.key.clone(), c.email.as_deref(), c.rows)).collect();
+        assert_eq!(got, [(text("Kim"), Some("kim@example.com"), 2), (text("Kim"), None, 1)]);
     }
 }

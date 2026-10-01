@@ -3469,6 +3469,10 @@ mod tests {
         assert_eq!((w.project.as_str(), w.stats().rows), ("one", 1), "이슈 줄의 프로젝트를 안 셌다");
         // 두 프로젝트가 같은 id 를 써도 남의 줄을 안 센다 — two 의 둘째(done)가 여기 없다.
         assert_eq!(w.stats().lead_time.done, 0);
+        // **세면서 노트를 레이어의 프로젝트에 두고 가지 않는다** — 거기서는 다시 읽을 자가 없어 뒤에 적힌 `model:` 줄을
+        // 영영 못 세고, 두 벌(글과 접은 글)이 쓸 데 없이 남는다(`App::leave_project` 가 걷는 그것이다).
+        let held = a.layer.as_ref().and_then(|l| l.places[0].site.as_ref()).map(|site| site.ground.notes.is_some());
+        assert_eq!(held, Some(false), "통계 창이 레이어의 프로젝트에 노트를 들였다");
     }
 
     /// **담을 곳은 여는 순간 경로로 박힌다.** 폼이 열린 동안 층이 다시 읽혀 차례가 바뀌고
