@@ -19988,6 +19988,111 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
     assert!(checked.status.success(), "올린 판의 태그를 막았다\n{}", text(&checked));
 }
 
+/// `have` 판에 `[Unreleased]` 를 깔고 `bump-version.sh` 를 부른다. 돌려주는 것은 그 출력과
+/// 뒤의 `Cargo.toml`·`CHANGELOG.md` 다.
+///
+/// **지난 판의 절은 `### Added` 로 둔다.** 읽는 자가 `[Unreleased]` 밖으로 새면 고친 것만
+/// 든 판도 minor 로 읽혀, patch 를 재는 시험이 그 자리에서 붉어진다.
+#[cfg(unix)]
+fn bump_with(name: &str, have: &str, unreleased: &str, args: &[&str]) -> (Output, String, String) {
+    let s = Scratch::new(name);
+    let root = s.path();
+    std::fs::create_dir(root.join("scripts")).unwrap();
+    for name in ["bump-version.sh", "check-version.sh"] {
+        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
+    }
+    std::fs::write(root.join("Cargo.toml"), manifest_saying(have)).unwrap();
+    std::fs::write(
+        root.join("CHANGELOG.md"),
+        format!(
+            "# Changelog\n\n## [Unreleased]\n\n{unreleased}## [{have}] - 2026-09-01\n\n### Added\n\n- 지난 판의 줄\n"
+        ),
+    )
+    .unwrap();
+    let out = isolated("bash")
+        .arg(root.join("scripts/bump-version.sh"))
+        .args(args)
+        .env("MOAI_NOW", "2026-10-01T09:00:00Z")
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    let log = std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap();
+    (out, manifest, log)
+}
+
+/// **`auto` 는 `[Unreleased]` 의 절로 판을 고른다**(moai-ug3j.r1y, 2026-10-01 사용자 결정).
+///
+/// 손으로 셈하던 판은 0.1.1 부터 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
+/// 1.0 전에는 Fixed·Security 만 있으면 patch, 그 밖의 절이 하나라도 서면 minor 다. **동작
+/// 변경(Changed)도 minor 다** — 그 하나만 든 판이 patch 로 나가던 자리를 따로 잰다.
+#[cfg(unix)]
+#[test]
+fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
+    let cases = [
+        ("bump-added", "### Added\n\n- 새 명령\n\n### Fixed\n\n- 고친 것\n\n", "0.2.0", "Added"),
+        ("bump-changed", "### Changed\n\n- 바뀐 동작\n\n", "0.2.0", "Changed"),
+        ("bump-removed", "### Removed\n\n- 걷은 깃발\n\n", "0.2.0", "Removed"),
+        ("bump-fixed", "### Fixed\n\n- 고친 것\n\n### Security\n\n- 막은 구멍\n\n", "0.1.6", "Fixed·Security"),
+    ];
+    for (name, unreleased, want, why) in cases {
+        let (out, manifest, log) = bump_with(name, "0.1.5", unreleased, &["auto"]);
+        assert!(out.status.success(), "{name}: 판을 못 골랐다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{name}: {want} 가 아니다\n{manifest}");
+        assert!(
+            log.contains(&format!("## [Unreleased]\n\n## [{want}] - 2026-10-01\n")),
+            "{name}: 판을 안 열었다\n{log}"
+        );
+        // 고른 까닭이 한 줄로 선다 — 다음 사람이 "왜 minor 였나" 를 거기서 읽는다.
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains(why) && said.contains(&format!("0.1.5 → {want}")), "{name}: 까닭을 안 댔다\n{said}");
+    }
+}
+
+/// **못 가르는 `[Unreleased]` 는 고르지 않고 멈춘다 — 아무것도 안 움직인 채로.**
+///
+/// 빈 절은 낼 것이 없다는 뜻이고, 절 밖의 줄과 모르는 절은 어느 칸인지 모른다. 어림으로
+/// patch 를 주면 기능이 든 판이 고친 판으로 나간다. 1.0 뒤의 금은 아직 안 그었다.
+#[cfg(unix)]
+#[test]
+fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
+    let cases = [
+        ("bump-empty", "0.1.5", "", "비었다"),
+        ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "절 밖의 줄"),
+        ("bump-odd", "0.1.5", "### Improved\n\n- 모르는 절\n\n", "Improved"),
+        ("bump-one", "1.2.0", "### Fixed\n\n- 고친 것\n\n", "1.0 뒤"),
+    ];
+    for (name, have, unreleased, said) in cases {
+        let (out, manifest, log) = bump_with(name, have, unreleased, &["auto"]);
+        assert_eq!(out.status.code(), Some(2), "{name}: 멈추지 않았다\n{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains(said), "{name}: 까닭을 안 댔다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{have}\"")), "{name}: 판을 움직였다\n{manifest}");
+        assert!(!log.contains("2026-10-01"), "{name}: 판을 열었다\n{log}");
+    }
+    // 1.0 뒤에도 손으로 고른 한 칸은 그대로 지나간다 — 막은 것은 고르는 일이지 올리는 일이 아니다.
+    let (out, manifest, _) = bump_with("bump-one-minor", "1.2.0", "", &["minor"]);
+    assert!(out.status.success(), "손으로 고른 칸을 막았다\n{}", text(&out));
+    assert!(manifest.contains("version = \"1.3.0\""), "{manifest}");
+}
+
+/// `minor`·`patch` 는 칸만 고르고 번호는 센다. `major` 는 안 받는다 — 1.0 은 사람이 판을
+/// 직접 주어 연다.
+#[cfg(unix)]
+#[test]
+fn a_named_step_counts_from_the_current_version() {
+    for (arg, want) in [("minor", "0.2.0"), ("patch", "0.1.6")] {
+        let (out, manifest, _) = bump_with(&format!("bump-{arg}"), "0.1.5", "", &[arg]);
+        assert!(out.status.success(), "{arg}: 못 올렸다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{arg}: {want} 가 아니다\n{manifest}");
+    }
+    let (out, manifest, _) = bump_with("bump-major", "0.1.5", "", &["major"]);
+    assert_eq!(out.status.code(), Some(2), "major 를 받았다\n{}", text(&out));
+    assert!(manifest.contains("version = \"0.1.5\""), "{manifest}");
+    // 꼬리 붙은 판에서 한 칸이 무엇인지는 정한 적이 없다.
+    let (out, _, _) = bump_with("bump-rc", "0.2.0-rc.1", "", &["patch"]);
+    assert_eq!(out.status.code(), Some(2), "꼬리 붙은 판에서 한 칸을 셌다\n{}", text(&out));
+}
+
 /// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).
 ///
 /// **여기가 없으면 키를 더해 놓고 그 키가 닿는지 아무도 안 잰다.** 단위 시험은
