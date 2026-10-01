@@ -416,7 +416,8 @@ mod tests {
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
         a.hit("SPC p s");
-        let screen = super::super::draw::tests::render(&mut a, 60, 80).join("\n");
+        // 안쪽 폭 58 — 창 64 에서 테두리 두 칸과 좌우 여백(상세와 같은 두 칸씩) 네 칸을 뺀 폭이다.
+        let screen = super::super::draw::tests::render(&mut a, 64, 80).join("\n");
         // 막대 곁의 글 통째로 — 머리 줄(`AI 작업 …`)에도 같은 합이 서므로 막대 쪽에만 있는 머리(`2줄 · `)부터 잰다.
         assert!(screen.contains("2줄 · 토큰 40,957,750 — 1줄의 합 (안 적은 줄 1)"), "막대 곁의 수가 잘렸다\n{screen}");
         assert!(screen.contains("anthr…"), "넘친 모델 이름을 잘렸다고 안 댔다\n{screen}");
