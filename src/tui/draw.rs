@@ -184,6 +184,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Idea(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
+        Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -268,6 +269,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
+        Mode::Stats(w) => stats_keys(f, w, keys, app.site.lang),
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
@@ -436,6 +438,431 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &z.list, at, "", true, lang);
+}
+
+/// 통계 창이 차트를 세우려면 이만큼은 넓어야 한다(안쪽 칸 수). 좁으면 차트 대신 `moai stats` 의 글로 떨어진다
+/// ([`crate::view::stats_overview`]) — 막대가 칸 두셋으로 눌리면 읽을 수 없고, 라벨과 수가 겹쳐 글자가 섞인다.
+const STATS_CHART_W: u16 = 48;
+
+/// 통계 창에서 둘을 나란히 세우려면(칸·우선순위) 이만큼은 넓어야 한다. 좁으면 위아래로 쌓는다.
+const STATS_SIDE_BY_SIDE_W: u16 = 72;
+
+/// 흐름 차트의 높이 — 막대 여섯 줄, 값은 막대 맨 아래 줄에 서고, 막대 이름(`+`·`✓`)과 칸 이름(날짜)이 두 줄.
+const STATS_FLOW_H: u16 = 9;
+
+/// 가로 막대가 이름 열 뒤에 늘 남기는 칸 — 오른쪽 글이 길어도 막대가 이만큼은 선다.
+const STAT_BAR_MIN: usize = 8;
+
+/// 통계 창(moai-1hka.bq9). 목록·상세 자리를 **폼처럼 통째로** 덮는다([`jot`]·[`pick`] 과 같은 까닭).
+///
+/// **센 값을 펴기만 한다** — 셈은 연 순간 끝났다(`tui::stats`). 그리는 것은 막대와 글뿐이라 프레임마다 그려도
+/// 이슈를 훑지 않는다.
+///
+/// **굴릴 수 있게 한 벌을 통째로 그린 뒤 보이는 몫만 옮긴다** — 차트 위젯은 위쪽 몇 줄을 잘라 그릴 수 없어,
+/// 창 높이에 맞춰 위젯을 자르면 굴린 자리에서 막대가 반쯤 사라진다. 그래서 창 폭으로 전체 높이의 버퍼에
+/// 그리고([`stats_parts`]), 굴린 자리부터 창 높이만큼을 화면에 옮긴다.
+///
+/// **색이 혼자 뜻을 지지 않는다** — 막대마다 이름(칸 글리프·`p0`·모델 이름)과 수가 붙고, 흐름의 두 막대는
+/// `+`(만듦)·`✓`(닫음) 글리프와 범례 낱말로 갈린다.
+fn stats_window(f: &mut Frame, w: &mut super::stats::Window, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(clip(&stats_title(w, lang), inner_w));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let parts = if inner.width >= STATS_CHART_W {
+        stats_parts(w.stats(), inner.width, lang)
+    } else {
+        stats_text(w.stats(), lang)
+    };
+    let total: u16 = parts.iter().map(|p| p.height).sum();
+    w.scroll.fit(inner.height as usize, total as usize);
+    if total == 0 {
+        return;
+    }
+    let mut canvas = ratatui::buffer::Buffer::empty(Rect::new(0, 0, inner.width, total));
+    let mut y = 0u16;
+    for p in parts {
+        let h = p.height;
+        (p.draw)(Rect::new(0, y, inner.width, h), &mut canvas);
+        y += h;
+    }
+    let from = w.scroll.offset() as u16;
+    let buf = f.buffer_mut();
+    for row in 0..inner.height {
+        let Some(src) = from.checked_add(row).filter(|r| *r < total) else { break };
+        for x in 0..inner.width {
+            buf[(inner.x + x, inner.y + row)] = canvas[(x, src)].clone();
+        }
+    }
+    scroll_mark(f, &w.scroll, at, "", true, lang);
+}
+
+/// 창 제목 — 무엇을 셌나. **걸린 거름망을 그대로 댄다**: 좁힌 수를 전체 수로 읽지 않게. 옆 워크트리의 줄이
+/// 섞였으면 그것도 댄다 — CLI 의 `moai stats` 는 안 겹쳐, 같은 프로젝트를 두고 수가 다를 수 있다.
+fn stats_title(w: &super::stats::Window, lang: Lang) -> String {
+    let filter = match &w.filter {
+        Some(text) => fill(say(lang, "tui.stats.filtered"), &[("filter", &crate::text::one_line(text))]),
+        None => say(lang, "tui.stats.unfiltered").to_string(),
+    };
+    let mut title = format!(" {} · {} · {filter}", say(lang, "tui.stats.title"), crate::text::one_line(&w.project));
+    if w.overlaid {
+        title.push_str(&format!(" · {}", say(lang, "tui.stats.overlaid")));
+    }
+    title.push(' ');
+    title
+}
+
+/// 통계 창의 한 덩이 — 차지하는 줄 수와, 그 자리에 그리는 일.
+struct StatPart<'a> {
+    height: u16,
+    draw: Box<dyn FnOnce(Rect, &mut ratatui::buffer::Buffer) + 'a>,
+}
+
+/// 글 몇 줄짜리 덩이.
+fn stat_lines<'a>(lines: Vec<Line<'a>>) -> StatPart<'a> {
+    StatPart {
+        height: lines.len() as u16,
+        draw: Box::new(move |at, buf| ratatui::widgets::Widget::render(Paragraph::new(lines), at, buf)),
+    }
+}
+
+/// 가로 막대 한 줄 — 이름, 값, 막대 색, 막대 오른쪽에 설 글(수와 낱말).
+struct StatBar<'a> {
+    name: Line<'a>,
+    value: u64,
+    look: Style,
+    side: Line<'a>,
+}
+
+/// 가로 막대 덩이([`ratatui::widgets::BarChart`]). **수는 막대 위가 아니라 오른쪽 열에 선다** — 막대 위의
+/// 글은 위젯이 바이트 길이로 자리를 재어(`Bar::render_value_with_different_styles`) 한글이 든 글을 엉뚱한 칸에
+/// 놓는다. 오른쪽 열은 그냥 글 줄이라 어느 말에서도 제자리에 서고, 수가 한 열로 줄 서 견주기 좋다. 0 인
+/// 막대는 막대가 없어도 그 열에 `0` 이 선다.
+fn stat_bars<'a>(rows: Vec<StatBar<'a>>) -> StatPart<'a> {
+    StatPart {
+        height: rows.len() as u16,
+        draw: Box::new(move |at, buf| {
+            // **오른쪽 글이 먼저 자리를 얻는다** — 막대는 줄어도 읽히지만 잘린 수는 못 읽는다. 다만 이름 열 뒤에 막대 몇
+            // 칸은 남긴다: 막대가 아예 없으면 차트가 아니다.
+            let label_w = rows.iter().map(|r| r.name.width()).max().unwrap_or(0);
+            let room = (at.width as usize).saturating_sub(label_w + 1 + STAT_BAR_MIN + 1);
+            let side_w = rows.iter().map(|r| r.side.width()).max().unwrap_or(0).min(room) as u16;
+            let chart_w = at.width.saturating_sub(side_w + 1);
+            let max = rows.iter().map(|r| r.value).max().unwrap_or(0).max(1);
+            let bars: Vec<ratatui::widgets::Bar> = rows
+                .iter()
+                .map(|r| {
+                    ratatui::widgets::Bar::with_label(r.name.clone(), r.value).text_value(String::new()).style(r.look)
+                })
+                .collect();
+            let chart = ratatui::widgets::BarChart::horizontal(bars).bar_width(1).bar_gap(0).max(max);
+            ratatui::widgets::Widget::render(chart, Rect { width: chart_w, ..at }, buf);
+            for (n, r) in rows.into_iter().enumerate() {
+                let line = Rect::new(at.x + chart_w + 1, at.y + n as u16, side_w, 1);
+                ratatui::widgets::Widget::render(Paragraph::new(r.side), line, buf);
+            }
+        }),
+    }
+}
+
+/// 한 칸 들인 덩이 — 제목 밑의 차트가 제목보다 두 칸 안에 선다.
+fn indented(p: StatPart<'_>) -> StatPart<'_> {
+    StatPart {
+        height: p.height,
+        draw: Box::new(move |at, buf| {
+            (p.draw)(Rect { x: at.x + 2, width: at.width.saturating_sub(2), ..at }, buf);
+        }),
+    }
+}
+
+fn stat_gap<'a>() -> StatPart<'a> {
+    stat_lines(vec![Line::from("")])
+}
+
+/// 이름 칸 하나 — 굵게.
+fn stat_head(text: &str) -> Span<'static> {
+    Span::styled(text.to_string(), bold())
+}
+
+/// 차트로 그리는 통계 — 머리·흐름·칸과 우선순위·소요·AI 작업·리뷰.
+fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<StatPart<'static>> {
+    use crate::report::stats::{Axis, Key};
+    let plain = |s: String| crate::style::plain(&s);
+    let by = |axis: Axis| st.by.iter().find(|(a, _)| *a == axis).map(|(_, c)| c.as_slice()).unwrap_or(&[]);
+    let key_text = |c: &crate::report::stats::Count| match &c.key {
+        Some(Key::Text(t)) => crate::text::one_line(t),
+        Some(Key::Number(p)) => format!("p{p}"),
+        None => say(lang, "stats.none").to_string(),
+    };
+    let mut out: Vec<StatPart<'static>> = Vec::new();
+
+    // 머리 — 무엇을 몇 셌나, 그리고 고른 줄의 종류(센 것과 안 센 것).
+    let picked: usize = by(Axis::Kind).iter().map(|c| c.rows).sum();
+    let kinds: Vec<String> =
+        by(Axis::Kind).iter().filter(|c| c.rows > 0).map(|c| format!("{} {}", key_text(c), c.rows)).collect();
+    out.push(stat_lines(vec![
+        Line::from(stat_head(&fill(
+            say(lang, "stats.head"),
+            &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())],
+        ))),
+        Line::from(Span::styled(
+            fill(say(lang, "stats.picked"), &[("n", &picked.to_string()), ("kinds", &kinds.join(" · "))]),
+            dim(),
+        )),
+    ]));
+    out.push(stat_gap());
+
+    // 흐름 — 칸마다 두 막대(만듦 `+`·닫음 `✓`). 폭에 드는 만큼 **최근 칸부터** 세운다.
+    let flow = &st.flow;
+    let made = from_anstyle(style::OTHER);
+    let closed = status(crate::config::DONE);
+    let per = match flow.bucket {
+        crate::report::stats::Bucket::Week => say(lang, "stats.flow_week"),
+        crate::report::stats::Bucket::Day => say(lang, "stats.flow_day"),
+    };
+    out.push(stat_lines(vec![Line::from(vec![
+        stat_head(say(lang, "stats.flow")),
+        Span::styled(format!("  {}   ", fill(per, &[("zone", flow.zone.as_str())])), dim()),
+        Span::styled("+", made),
+        Span::raw(format!(" {}  ", say(lang, "stats.created"))),
+        Span::styled("✓", closed),
+        Span::raw(format!(" {}", say(lang, "stats.done"))),
+    ])]));
+    let most = flow.buckets.iter().map(|b| b.created.max(b.done)).max().unwrap_or(0) as u64;
+    // **막대 폭은 가장 긴 수보다 한 칸 넓다** — 위젯은 막대 폭과 같은 길이의 수를 막대가 한 칸을 다 채울 때만 쓰고
+    // (`Bar::render_value`), 짧은 막대의 세 자리 수가 말없이 사라졌다. 날짜(`09-28`)가 두 막대 밑에 들려면 둘은 돼야 한다.
+    // 두 막대 사이에 한 칸을 띄운다 — 붙이면 `165`·`152` 가 `165152` 로 읽힌다.
+    let bar_w = (most.to_string().len() as u16 + 1).max(2);
+    let (bar_gap, group_gap) = (1u16, 2u16);
+    // **칸 하나가 차지하는 폭은 위젯이 세는 그대로다**(`BarChart::render_vertical_bars`) — 막대마다 `bar_w + bar_gap`
+    // 을 건너뛰고 칸 끝에 `group_gap` 을 더한다. 마지막 막대 뒤의 틈도 든다: 그것을 빼고 세면 0 을 적는 자리가
+    // 칸마다 한 칸씩 밀린다. 드는 칸 수도 위젯의 자로 센다 — 마지막 칸은 막대 둘의 폭(`group_w`)만 들면 된다.
+    let stride = 2 * (bar_w + bar_gap) + group_gap;
+    let group_w = 2 * bar_w + bar_gap;
+    let room = width.saturating_sub(2);
+    let fit = if room > group_w { ((room - group_w - 1) / stride + 1) as usize } else { 0 };
+    let shown: Vec<crate::report::stats::Slot> = flow.buckets[flow.buckets.len().saturating_sub(fit)..].to_vec();
+    if shown.len() < flow.buckets.len() {
+        out.push(stat_lines(vec![Line::from(Span::styled(
+            format!(
+                "  {}",
+                fill(
+                    say(lang, "tui.stats.flow_cut"),
+                    &[("shown", &shown.len().to_string()), ("all", &flow.buckets.len().to_string())]
+                )
+            ),
+            dim(),
+        ))]));
+    }
+    out.push(indented(StatPart {
+        height: STATS_FLOW_H,
+        draw: Box::new(move |at, buf| {
+            let mut chart = ratatui::widgets::BarChart::default()
+                .bar_width(bar_w)
+                .bar_gap(bar_gap)
+                .group_gap(group_gap)
+                .max(most.max(1))
+                .label_style(dim());
+            let bar = |value: usize, glyph: &'static str, look: Style| {
+                ratatui::widgets::Bar::with_label(glyph, value as u64)
+                    .style(look)
+                    .value_style(Style::new().fg(Color::Black).bg(look.fg.unwrap_or(Color::Reset)))
+            };
+            for b in &shown {
+                let day = b.start.get(5..).unwrap_or(&b.start).to_string();
+                chart = chart.data(
+                    ratatui::widgets::BarGroup::new(vec![bar(b.created, "+", made), bar(b.done, "✓", closed)])
+                        .label(Line::from(day)),
+                );
+            }
+            ratatui::widgets::Widget::render(chart, at, buf);
+            // **0 도 수다** — 위젯은 0 인 막대에 수를 안 쓴다. 비어 있으면 "안 셌다" 와 "0 이다" 가 안 갈린다. 값이
+            // 서는 줄(막대 맨 아래 줄)은 이름 두 줄 바로 위고, 막대 자리는 위젯이 세우는 차례 그대로다.
+            let y = at.bottom().saturating_sub(3);
+            for (n, b) in shown.iter().enumerate() {
+                for (k, v) in [b.created, b.done].into_iter().enumerate() {
+                    let x = at.x + n as u16 * stride + k as u16 * (bar_w + bar_gap) + (bar_w - 1) / 2;
+                    if v == 0 && x < at.right() && y >= at.y {
+                        buf.set_string(x, y, "0", dim());
+                    }
+                }
+            }
+        }),
+    }));
+    out.push(stat_gap());
+
+    // 칸과 우선순위 — 넓으면 나란히, 좁으면 위아래로.
+    let columns: Vec<StatBar<'static>> = by(Axis::Status)
+        .iter()
+        .map(|c| {
+            let name = key_text(c);
+            let look = status(&name);
+            StatBar {
+                name: Line::from(vec![
+                    Span::styled(style::glyph(&name).to_string(), look),
+                    Span::raw(format!(" {name}")),
+                ]),
+                value: c.rows as u64,
+                look,
+                side: Line::from(c.rows.to_string()),
+            }
+        })
+        .collect();
+    let priorities: Vec<StatBar<'static>> = by(Axis::Priority)
+        .iter()
+        .map(|c| {
+            let look = match &c.key {
+                Some(Key::Number(p)) => priority(*p),
+                _ => Style::new(),
+            };
+            StatBar {
+                name: Line::from(Span::styled(key_text(c), look)),
+                value: c.rows as u64,
+                look,
+                side: Line::from(c.rows.to_string()),
+            }
+        })
+        .collect();
+    let (col_title, pri_title) = (say(lang, "tui.stats.status"), say(lang, "tui.stats.priority"));
+    if width >= STATS_SIDE_BY_SIDE_W {
+        let half = width / 2;
+        let height = columns.len().max(priorities.len()) as u16;
+        out.push(StatPart {
+            height: height + 1,
+            draw: Box::new(move |at, buf| {
+                let left = Rect { width: half, ..at };
+                let right = Rect { x: at.x + half, width: at.width - half, ..at };
+                for (side, title, rows) in [(left, col_title, columns), (right, pri_title, priorities)] {
+                    let n = rows.len() as u16;
+                    (stat_lines(vec![Line::from(stat_head(title))]).draw)(Rect { height: 1, ..side }, buf);
+                    let body = Rect { x: side.x + 2, y: side.y + 1, width: side.width.saturating_sub(4), height: n };
+                    (stat_bars(rows).draw)(body, buf);
+                }
+            }),
+        });
+    } else {
+        out.push(stat_lines(vec![Line::from(stat_head(col_title))]));
+        out.push(indented(stat_bars(columns)));
+        out.push(stat_gap());
+        out.push(stat_lines(vec![Line::from(stat_head(pri_title))]));
+        out.push(indented(stat_bars(priorities)));
+    }
+    out.push(stat_gap());
+
+    // 소요 — 중앙값과 p90 을 막대로, 몇을 쟀나를 글로. 못 잰 것은 막대 없이 낱말이 선다.
+    out.push(stat_lines(vec![Line::from(vec![
+        stat_head(say(lang, "tui.stats.durations")),
+        Span::styled(format!("  {}", say(lang, "tui.stats.wall_clock")), dim()),
+    ])]));
+    let look = from_anstyle(style::OTHER);
+    let mut spans: Vec<StatBar<'static>> = Vec::new();
+    for (name, sp) in [(say(lang, "stats.lead"), &st.lead_time), (say(lang, "stats.cycle"), &st.cycle_time)] {
+        for (what, value) in [(say(lang, "tui.stats.median"), sp.median), (say(lang, "tui.stats.p90"), sp.p90)] {
+            let side = match value {
+                Some(m) => crate::view::minutes(m, lang),
+                None => say(lang, "tui.stats.unmeasured").to_string(),
+            };
+            spans.push(StatBar {
+                name: Line::from(format!("{name} {what}")),
+                value: value.unwrap_or(0).max(0) as u64,
+                look,
+                side: Line::from(side),
+            });
+        }
+    }
+    out.push(indented(stat_bars(spans)));
+    let named = [(say(lang, "stats.lead"), &st.lead_time), (say(lang, "stats.cycle"), &st.cycle_time)];
+    let name_w = named.iter().map(|(n, _)| crate::text::width(n)).max().unwrap_or(0);
+    let counts: Vec<Line<'static>> = named
+        .into_iter()
+        .map(|(name, sp)| {
+            Line::from(vec![
+                Span::raw(format!("  {}  ", pad(name, name_w))),
+                Span::styled(crate::view::span_counts(sp, lang), dim()),
+            ])
+        })
+        .collect();
+    out.push(stat_lines(counts));
+    out.push(stat_gap());
+
+    // AI 작업 — 회사·모델마다 줄 수를 막대로, 토큰을 글로.
+    out.push(stat_lines(vec![Line::from(vec![
+        stat_head(say(lang, "stats.work")),
+        Span::raw("  "),
+        Span::raw(plain(crate::view::work_said(&st.work, lang))),
+    ])]));
+    let models: Vec<StatBar<'static>> = st
+        .work
+        .by_model
+        .iter()
+        .map(|m| {
+            let name = crate::text::one_line(&match &m.provider {
+                Some(p) => format!("{p}/{}", m.model),
+                None => m.model.clone(),
+            });
+            let lines = fill(say(lang, "stats.lines"), &[("n", &m.tally.lines.to_string())]);
+            StatBar {
+                name: Line::from(name),
+                value: m.tally.lines as u64,
+                look: from_anstyle(style::BAR),
+                side: Line::from(format!("{lines} · {}", plain(crate::view::tally_said(&m.tally, lang)))),
+            }
+        })
+        .collect();
+    if !models.is_empty() {
+        out.push(indented(stat_bars(models)));
+    }
+    out.push(stat_lines(crate::view::grade_line(&st.work, lang).map(|l| Line::from(plain(l))).into_iter().collect()));
+    out.push(stat_gap());
+    let mut tail: Vec<Line<'static>> = vec![Line::from(vec![
+        stat_head(say(lang, "stats.reviews")),
+        Span::raw(format!(
+            "  {}",
+            fill(
+                say(lang, "stats.reviews_rows"),
+                &[("rows", &st.reviews.rows.to_string()), ("recorded", &st.reviews.work.recorded.to_string())],
+            )
+        )),
+    ])];
+    tail.extend(crate::view::grade_line(&st.reviews.work, lang).map(|l| Line::from(plain(l))));
+    out.push(stat_lines(tail));
+    out
+}
+
+/// 좁은 창의 통계 — 차트 대신 `moai stats` 의 한눈 보기 글을 그대로 쓴다. 칠은 걷는다: 그 글은 터미널 칠
+/// (SGR)을 든 채 오는데, 화면의 칸에는 글자만 들어가야 한다.
+fn stats_text(st: &crate::report::stats::Stats, lang: Lang) -> Vec<StatPart<'static>> {
+    let head = fill(say(lang, "stats.head"), &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())]);
+    let lines = std::iter::once(head)
+        .chain(crate::view::stats_overview(st, lang))
+        .map(|l| Line::from(crate::style::plain(&l)))
+        .collect();
+    vec![stat_lines(lines)]
+}
+
+/// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기. 이름과 낱말은 키 표([`keys::STATS`])에서 읽는다.
+fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
+    use super::keys::{STATS, Stat};
+    let weekly = w.bucket == crate::report::stats::Bucket::Week;
+    if !w.chord.held().is_empty() {
+        let next = keys::next_keys(STATS, w.chord.held())
+            .into_iter()
+            .map(|(k, a)| (k, if let Stat::Step(m) = a { keys::move_word(m, lang) } else { a.what(weekly, lang) }))
+            .collect();
+        return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
+    }
+    let scroll = labels(STATS, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
+    let optional = vec![key(&scroll, Stat::Step(Move::LineDown).what(weekly, lang))];
+    let hint = |a: Stat| key(&label(STATS, a), a.what(weekly, lang));
+    bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close)]);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.

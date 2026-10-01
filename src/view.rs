@@ -2091,7 +2091,7 @@ pub fn spend_of(sp: &crate::report::Spent, lang: Lang) -> Option<Spend> {
 ///
 /// **날 단위는 안 쓴다.** `720시간` 이 길어 보여도 `30일` 로 바꾸면 그것이 벽시계 30일인지
 /// 일한 30일인지 읽는 쪽이 못 가른다 — 시간은 겹쳐 세어진 값이라 날로 접으면 그 사실이 숨는다.
-fn minutes(m: i64, lang: Lang) -> String {
+pub(crate) fn minutes(m: i64, lang: Lang) -> String {
     let (h, rest) = (m / 60, m % 60);
     let hours = || fill(say(lang, "detail.spent_hours"), &[("h", &h.to_string())]);
     let mins = |m: i64| fill(say(lang, "detail.spent_minutes"), &[("m", &m.to_string())]);
@@ -2117,7 +2117,6 @@ pub fn stats(
     full: bool,
     screen: Screen,
 ) -> Vec<String> {
-    use crate::report::stats::Axis;
     let lang = screen.lang;
     let head = fill(say(lang, "stats.head"), &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())]);
     let mut out = vec![paint(style::HEAD, &head)];
@@ -2129,6 +2128,18 @@ pub fn stats(
         }
         return out;
     }
+    out.extend(stats_overview(st, lang));
+    out.push(String::new());
+    out.push(paint(style::DIM, say(lang, "stats.more")));
+    out
+}
+
+/// `moai stats` 한눈 보기의 몸 — 머리줄과 꼬리(`--by` 안내) 사이다. **탐색기의 통계 창도 이것을 그린다**
+/// (moai-1hka.bq9): 창이 차트를 세울 폭이 없을 때 이 글로 떨어지고, 차트 곁의 낱말도 여기 도우미에서 온다 —
+/// 같은 수를 두 표면이 다른 말로 대지 않게.
+pub(crate) fn stats_overview(st: &crate::report::stats::Stats, lang: Lang) -> Vec<String> {
+    use crate::report::stats::Axis;
+    let mut out = Vec::new();
     // 한눈 보기는 **칸 · 우선순위 · 고른 줄** 차례다 — 고른 줄은 센 것의 바탕이 아니라 곁들이라 흐리게 맨 뒤에 둔다.
     let said = |c: &crate::report::stats::Count| match &c.key {
         Some(k) => key_text(k),
@@ -2211,8 +2222,6 @@ pub fn stats(
     );
     out.push(format!("{}  {reviews}", label(names[3])));
     out.extend(grade_line(&st.reviews.work, lang));
-    out.push(String::new());
-    out.push(paint(style::DIM, say(lang, "stats.more")));
     out
 }
 
@@ -2290,27 +2299,33 @@ fn spread_rows(
 
 /// 소요 한 줄 — 중앙값과 p90, 그리고 몇을 쟀는지. **잰 수를 늘 함께 낸다**([`spent`] 와 같은 까닭).
 fn spans_said(sp: &crate::report::stats::Spans, lang: Lang) -> String {
-    let done = sp.done.to_string();
-    let (Some(median), Some(p90)) = (sp.median, sp.p90) else {
-        return match sp.done {
-            0 => paint(style::DIM, say(lang, "stats.span_nothing")),
-            _ => paint(style::DIM, &fill(say(lang, "stats.span_none"), &[("done", &done)])),
-        };
-    };
-    let of = fill(say(lang, "stats.span_of"), &[("measured", &sp.measured.to_string()), ("done", &done)]);
-    let unknown = match sp.unknown {
-        0 => String::new(),
-        n => format!(" · {}", fill(say(lang, "stats.span_unknown"), &[("n", &n.to_string())])),
-    };
+    let (Some(median), Some(p90)) = (sp.median, sp.p90) else { return paint(style::DIM, &span_counts(sp, lang)) };
     format!(
         "{}   {}",
         fill(say(lang, "stats.span"), &[("median", &minutes(median, lang)), ("p90", &minutes(p90, lang))]),
-        paint(style::DIM, &format!("{of}{unknown}")),
+        paint(style::DIM, &span_counts(sp, lang)),
     )
 }
 
+/// 소요 한 줄의 **몇을 쟀나** 몫 — 잰 것이 없으면 그 까닭이 그 자리에 선다. 칠하지 않는다: 탐색기의 통계 창이
+/// 차트 곁에 같은 글을 놓는다(moai-1hka.bq9).
+pub(crate) fn span_counts(sp: &crate::report::stats::Spans, lang: Lang) -> String {
+    let done = sp.done.to_string();
+    if sp.measured == 0 {
+        return match sp.done {
+            0 => say(lang, "stats.span_nothing").to_string(),
+            _ => fill(say(lang, "stats.span_none"), &[("done", &done)]),
+        };
+    }
+    let of = fill(say(lang, "stats.span_of"), &[("measured", &sp.measured.to_string()), ("done", &done)]);
+    match sp.unknown {
+        0 => of,
+        n => format!("{of} · {}", fill(say(lang, "stats.span_unknown"), &[("n", &n.to_string())])),
+    }
+}
+
 /// AI 작업의 머리 줄 — 줄 수와 토큰.
-fn work_said(sp: &crate::report::stats::Spend, lang: Lang) -> String {
+pub(crate) fn work_said(sp: &crate::report::stats::Spend, lang: Lang) -> String {
     if sp.all.lines == 0 {
         return paint(style::DIM, say(lang, "stats.no_work"));
     }
@@ -2323,7 +2338,7 @@ fn work_said(sp: &crate::report::stats::Spend, lang: Lang) -> String {
 
 /// 토큰 한 덩이 — 적힌 줄만 더한 합과, 안 적힌 줄의 수. **하나도 안 적혔으면 합을 안 낸다** — 0 은 "공짜로
 /// 했다" 로 읽힌다.
-fn tally_said(t: &crate::report::stats::Tally, lang: Lang) -> String {
+pub(crate) fn tally_said(t: &crate::report::stats::Tally, lang: Lang) -> String {
     let Some(tokens) = t.tokens else { return paint(style::DIM, say(lang, "stats.tokens_none")) };
     let sum = fill(say(lang, "stats.tokens"), &[("tokens", &grouped(tokens)), ("tokened", &t.tokened.to_string())]);
     match t.lines - t.tokened {
@@ -2362,7 +2377,7 @@ fn work_detail(sp: &crate::report::stats::Spend, lang: Lang) -> Vec<String> {
 }
 
 /// 등급마다 줄 수를 한 줄로. 줄이 없으면 안 선다.
-fn grade_line(sp: &crate::report::stats::Spend, lang: Lang) -> Option<String> {
+pub(crate) fn grade_line(sp: &crate::report::stats::Spend, lang: Lang) -> Option<String> {
     if sp.by_grade.is_empty() {
         return None;
     }

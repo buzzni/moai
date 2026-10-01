@@ -1958,6 +1958,7 @@ Options:
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
+    SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -2039,6 +2040,16 @@ Options:
   On a header row, SPC p d asks once and then only drops it from the list —
   y is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
+
+  SPC p s opens the statistics window in place of the list and the detail —
+  the numbers `moai stats` gives, drawn as bars: the flow per week, the
+  columns and priorities, lead and cycle time, and AI work by model. It
+  counts the project you are in, or on the one list (0) the project of the
+  row under the cursor. With a filter hung (SPC f or /) it counts only what
+  passes, and the title says so. b switches the flow between weeks and
+  days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
+  Esc goes back to where you were, with the cursor, the filter and the
+  detail as they were. On a narrow screen it shows the same figures as text.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

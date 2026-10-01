@@ -793,23 +793,36 @@ pub struct Work {
 pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
     let mut out = Vec::new();
     for e in journal {
-        let text = note_of(e);
-        let mut fenced = false;
-        for line in text.unwrap_or_default().lines() {
-            let bare = line.trim_start();
-            if bare.starts_with("```") || bare.starts_with("~~~") {
-                fenced = !fenced;
-                continue;
-            }
-            if fenced {
-                continue;
-            }
-            if let Some(w) = parse_work(line) {
-                out.push(Work { at: e.ts.clone(), by: e.by.clone(), by_email: e.by_email.clone(), ..w });
-            }
-        }
+        let text = note_of(e).unwrap_or_default();
+        out.extend(work_in_note(text).map(|w| Work {
+            at: e.ts.clone(),
+            by: e.by.clone(),
+            by_email: e.by_email.clone(),
+            ..w
+        }));
     }
     out
+}
+
+/// 노트 글 **하나**에서 읽은 일한 것 — [`work_of`] 가 저널 줄마다 부르는 몸이다. `at`·`by` 는 비어 있다: 글만
+/// 받아서는 누가 언제 적었는지 모른다.
+///
+/// **탐색기의 통계 창이 이것을 부른다**(moai-1hka.bq9) — 창은 저널을 다시 안 풀고 이미 읽어 든 노트 글
+/// (`tui::Ground` 의 노트, `note_of` 가 낸 그 글)에서 읽는다. 울타리를 가르는 법이 두 벌이면 CLI 의
+/// `moai stats` 와 창이 같은 노트를 두고 다른 토큰 합을 낸다.
+pub(crate) fn work_in_note(text: &str) -> impl Iterator<Item = Work> + '_ {
+    let mut fenced = false;
+    text.lines().filter_map(move |line| {
+        let bare = line.trim_start();
+        if bare.starts_with("```") || bare.starts_with("~~~") {
+            fenced = !fenced;
+            return None;
+        }
+        if fenced {
+            return None;
+        }
+        parse_work(line)
+    })
 }
 
 /// 저널 한 줄이 이슈에 붙인 **노트 글** — `moai note` 의 글과 칸 옮김의 `-m`(moai-efoc.zyc). 이력이

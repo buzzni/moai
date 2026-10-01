@@ -112,7 +112,7 @@ pub struct Ask {
 }
 
 /// 센 것 전부. **CLI 의 `--json` 이 이 모양 그대로다** — 키를 바꾸면 그 계약이 바뀐다(`moai stats --help`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Stats {
     /// 아래 모든 수가 센 종류.
     pub kind: Kind,
