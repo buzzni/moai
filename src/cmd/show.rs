@@ -103,6 +103,64 @@ fn first_ordered(p: &crate::cli::PageArgs) -> Option<&'static str> {
         .find_map(|(given, name)| given.then_some(name))
 }
 
+/// argv 의 거르개를 `query` 의 거름망으로 옮긴다 — `me` 를 사람으로 풀고 모르는 칸은 거절한다. `kind` 는 부르는
+/// 쪽이 정한다(`show epic` 처럼 대상이 종류를 고른다).
+///
+/// **목록과 `moai stats` 가 이 한 자로 거른다**(moai-1hka.k16). 같은 거르개가 두 명령에서 다른 줄을 고르면 "이
+/// 목록의 수" 와 "통계의 수" 가 갈린다. 숨김을 여는 것은 부르는 쪽의 몫이다 — 목록은 숨긴 수를 세고, 통계는 다
+/// 연 채로 센다(`report::stats::select`).
+pub(crate) fn filter_of(
+    ctx: &Ctx,
+    repo: &Repo,
+    all: &[Issue],
+    a: crate::cli::FilterArgs,
+    kind: Option<Kind>,
+) -> R<Filter> {
+    // argv 를 그대로 옮겨 담을 뿐이다. 뜻을 정하는 것은 `query` 다.
+    let mut filter = Filter::build(Raw {
+        status: a.status,
+        tag: a.tag,
+        no_tag: a.no_tag,
+        epic: a.epic,
+        milestone: a.milestone,
+        parent: a.parent,
+        priority: a.priority,
+        assignee: a.assignee,
+        kind,
+        grep: a.grep,
+        grep_in: crate::query::GrepIn::All,
+        stale: a.stale,
+        since: a.since,
+        created: a.created,
+        done: a.done,
+        all: a.all,
+        ideas: false,
+        deferred: a.deferred,
+        filter: a.filter,
+    })
+    .map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
+    // `me` 는 탐색기의 `SPC f` 와 **같은 자로** 푼다([`super::resolve_me`], moai-xd7b). 사람은 이 자리에서 푼다.
+    super::resolve_me(&mut filter.assignee, || {
+        let me = model::actor(ctx.user.as_deref(), &repo.root)?;
+        Ok(model::label(&me.name, Some(&me.email), crate::config::Naming::Full))
+    })
+    .map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
+
+    // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
+    // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
+    //
+    // **어느 줄이 선 칸이면 받는다** — `--from` 과 같은 술어다(moai-hym7, 사람이 정했다).
+    // `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은 옮길 수는 있는데 못 찾으면,
+    // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
+    for s in &filter.status {
+        if !crate::report::knows_column(all, &repo.config, s) {
+            let why = super::unknown_column(s, &repo.config);
+            return Err(Fail::coded(crate::view::no_such_column(ctx.lang(), &why), super::code::BAD_STATUS));
+        }
+    }
+    Ok(filter)
+}
+
 /// argv 의 낱말을 `query` 의 차례로 잇는다 — `query` 는 clap 을 모른다(`tui::App::sort_key` 와 같은 자리).
 fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
     use crate::cli::SortArg;
@@ -211,53 +269,11 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         ));
     }
 
-    let a = args.filter;
     let kind = match target {
         Target::OfKind(k) => Some(k),
-        _ => a.kind,
+        _ => args.filter.kind,
     };
-    // argv 를 그대로 옮겨 담을 뿐이다. 뜻을 정하는 것은 `query` 다.
-    let mut filter = Filter::build(Raw {
-        status: a.status,
-        tag: a.tag,
-        no_tag: a.no_tag,
-        epic: a.epic,
-        milestone: a.milestone,
-        parent: a.parent,
-        priority: a.priority,
-        assignee: a.assignee,
-        kind,
-        grep: a.grep,
-        grep_in: crate::query::GrepIn::All,
-        stale: a.stale,
-        since: a.since,
-        created: a.created,
-        done: a.done,
-        all: a.all,
-        ideas: false,
-        deferred: a.deferred,
-        filter: a.filter,
-    })
-    .map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
-    // `me` 는 탐색기의 `SPC f` 와 **같은 자로** 푼다([`super::resolve_me`], moai-xd7b). 사람은 이 자리에서 푼다.
-    super::resolve_me(&mut filter.assignee, || {
-        let me = model::actor(ctx.user.as_deref(), &repo.root)?;
-        Ok(model::label(&me.name, Some(&me.email), crate::config::Naming::Full))
-    })
-    .map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-
-    // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
-    // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
-    //
-    // **어느 줄이 선 칸이면 받는다** — `--from` 과 같은 술어다(moai-hym7, 사람이 정했다).
-    // `config` 에서 칸 이름을 고친 뒤 옛 이름에 선 줄은 옮길 수는 있는데 못 찾으면,
-    // 읽기가 쓰기보다 엄해져 "읽기는 관대하고 쓰기는 엄하다" 가 뒤집힌다.
-    for s in &filter.status {
-        if !crate::report::knows_column(&load.issues, &repo.config, s) {
-            let why = super::unknown_column(s, &repo.config);
-            return Err(Fail::coded(crate::view::no_such_column(ctx.lang(), &why), super::code::BAD_STATUS));
-        }
-    }
+    let filter = filter_of(ctx, &repo, &load.issues, args.filter, kind)?;
 
     let now = model::now();
     // 한 번만 훑는다. 숨기는 규칙은 `Filter::hidden_by` 하나가 알고, 여기서는
@@ -578,11 +594,12 @@ pub(crate) fn at_home(repo: &Repo, root: &std::path::Path) -> Repo {
 /// 그 줄들의 이력 — **저널을 뿌리마다 한 번** 읽고 `line` 이 고른 줄만 푼다. 줄마다 제 뿌리([`home`])의
 /// 저널에서 읽는다 — 겹쳐 온 줄은 저쪽 워크트리에서 적힌 이력을 든다. `work` 와 노트가 이 한 걸음을
 /// 지난다: 뿌리를 가르는 법이 둘이면 한쪽만 이쪽 뿌리로 돌려도 아무 시험도 안 붉어진다(리뷰 moai-u5bk.3wq).
-/// 탐색기가 노트를 읽는 것도 이 걸음이다(`tui::Ground::read_notes`, moai-wcy8.vip).
-pub(crate) fn journal_of_rows(
+/// 탐색기가 노트를 읽는 것도 이 걸음이다(`tui::Ground::read_notes`, moai-wcy8.vip). `moai stats` 가 센 줄의
+/// `work` 를 읽는 것도 이 걸음이라(moai-1hka.k16), 줄을 빌린 목록(`&[&Issue]`)도 받는다.
+pub(crate) fn journal_of_rows<'r>(
     repo: &Repo,
     origin: &crate::worktree::Origin,
-    rows: &[Issue],
+    rows: impl IntoIterator<Item = &'r Issue>,
     line: fn(&str) -> bool,
 ) -> std::collections::BTreeMap<String, Vec<model::JournalEntry>> {
     let mut by_root: std::collections::BTreeMap<&std::path::Path, BTreeSet<&str>> = Default::default();
@@ -607,11 +624,12 @@ fn work_by_id(
 }
 
 /// 이미 읽은 이력에서 낼 줄들의 `work` 를 가른다 — 이력이 없는 id 는 키가 안 선다(`journal_by_id` 와 같다).
-fn work_in(
+/// `moai stats` 도 이것으로 가른다(moai-1hka.k16) — 목록의 `work` 와 통계의 합이 한 자에서 나와야 한다.
+pub(crate) fn work_in<'r>(
     journal: &std::collections::BTreeMap<String, Vec<model::JournalEntry>>,
-    shown: &[Issue],
+    shown: impl IntoIterator<Item = &'r Issue>,
 ) -> std::collections::BTreeMap<String, Vec<model::Work>> {
-    shown.iter().filter_map(|i| journal.get(&i.id).map(|j| (i.id.clone(), model::work_of(j)))).collect()
+    shown.into_iter().filter_map(|i| journal.get(&i.id).map(|j| (i.id.clone(), model::work_of(j)))).collect()
 }
 
 /// 읽은 이력의 노트 글([`crate::query::Notes`], moai-efoc.zyc). 어느 갈래가 노트인지는 `model::note_of` 가

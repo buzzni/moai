@@ -20,6 +20,7 @@ pub mod ready;
 pub mod rm;
 pub mod show;
 pub mod skill;
+pub mod stats;
 pub mod status;
 pub mod tui;
 
@@ -424,6 +425,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
         Cmd::Add(a) => add::run(ctx, a, None),
         Cmd::Show(a) => show::run(ctx, a, None),
+        Cmd::Stats(a) => stats::run(ctx, a),
         Cmd::Mv(a) => mv::run(ctx, a),
         Cmd::Edit(a) => edit::run(ctx, a),
         Cmd::Rm(a) => rm::run(ctx, a),

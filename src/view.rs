@@ -2102,6 +2102,294 @@ fn minutes(m: i64, lang: Lang) -> String {
     }
 }
 
+/// `moai stats` 의 사람 화면(moai-1hka.k16). **셈은 [`crate::report::stats::of`] 가 끝냈다** — 여기는 그리기만
+/// 한다. 탐색기의 통계 창도 같은 값을 그리므로, 여기서 무언가를 다시 세면 두 표면의 수가 갈린다.
+///
+/// `full` 이면(`--by` 를 줬으면) 물은 축을 통째로 그리고 나머지는 안 그린다 — 물은 것만 낸다. 아니면 한눈
+/// 보기다: 칸·우선순위를 한 줄씩, 고른 줄의 종류를 흐리게, 그리고 흐름·소요·AI 작업. 나머지 축은 꼬리가
+/// `--by` 로 연다고 댄다.
+///
+/// **색이 혼자 뜻을 지지 않는다** — 칸은 글리프와 이름을, 우선순위는 `p0` 낱말을 함께 칠한다.
+pub fn stats(
+    st: &crate::report::stats::Stats,
+    issues: &[Issue],
+    cfg: &Config,
+    full: bool,
+    screen: Screen,
+) -> Vec<String> {
+    use crate::report::stats::Axis;
+    let lang = screen.lang;
+    let head = fill(say(lang, "stats.head"), &[("kind", st.kind.as_str()), ("n", &st.rows.to_string())]);
+    let mut out = vec![paint(style::HEAD, &head)];
+    if full {
+        for (axis, counts) in &st.by {
+            out.push(String::new());
+            out.push(paint(style::HEAD, &fill(say(lang, "stats.by"), &[("axis", axis.name())])));
+            out.extend(spread_rows(*axis, counts, issues, cfg, lang));
+        }
+        return out;
+    }
+    // 한눈 보기는 **칸 · 우선순위 · 고른 줄** 차례다 — 고른 줄은 센 것의 바탕이 아니라 곁들이라 흐리게 맨 뒤에 둔다.
+    let said = |c: &crate::report::stats::Count| match &c.key {
+        Some(k) => key_text(k),
+        None => say(lang, "stats.none").to_string(),
+    };
+    let on = |axis: Axis| st.by.iter().find(|(a, _)| *a == axis).map(|(_, c)| c.as_slice());
+    if let Some(counts) = on(Axis::Status) {
+        let cols: Vec<String> = counts
+            .iter()
+            .map(|c| {
+                let name = said(c);
+                let s = style::status_style(&name);
+                format!("{} {}", paint(s, style::glyph(&name)), paint(s, &format!("{} {}", one_line(&name), c.rows)))
+            })
+            .collect();
+        out.push(format!("  {}", cols.join("    ")));
+    }
+    if let Some(counts) = on(Axis::Priority) {
+        let cols: Vec<String> = counts
+            .iter()
+            .map(|c| match &c.key {
+                Some(crate::report::stats::Key::Number(p)) => {
+                    format!("{} {}", paint(style::priority_style(*p), &format!("p{p}")), c.rows)
+                }
+                _ => format!("{} {}", said(c), c.rows),
+            })
+            .collect();
+        out.push(format!("  {}", cols.join("   ")));
+    }
+    // 종류는 **고른 줄 전부**를 센 축이다 — 센 것과 안 센 것을 한 줄로 댄다. 0 인 종류는 안 그린다.
+    if let Some(counts) = on(Axis::Kind) {
+        let total: usize = counts.iter().map(|c| c.rows).sum();
+        let kinds: Vec<String> =
+            counts.iter().filter(|c| c.rows > 0).map(|c| format!("{} {}", said(c), c.rows)).collect();
+        let line = fill(say(lang, "stats.picked"), &[("n", &total.to_string()), ("kinds", &kinds.join(" · "))]);
+        out.push(format!("  {}", paint(style::DIM, &line)));
+    }
+
+    // 흐름 — 칸의 첫날과 두 수. 날짜 열은 늘 열 칸이고 수는 오른쪽에 붙인다.
+    let f = &st.flow;
+    out.push(String::new());
+    let per = match f.bucket {
+        crate::report::stats::Bucket::Week => say(lang, "stats.flow_week"),
+        crate::report::stats::Bucket::Day => say(lang, "stats.flow_day"),
+    };
+    out.push(format!(
+        "{}  {}",
+        paint(style::HEAD, say(lang, "stats.flow")),
+        paint(style::DIM, &fill(per, &[("zone", f.zone.as_str())]))
+    ));
+    let (created, done) = (say(lang, "stats.created"), say(lang, "stats.done"));
+    let digits = |n: usize| n.to_string().len();
+    let w_c = width(created).max(f.buckets.iter().map(|b| digits(b.created)).max().unwrap_or(1));
+    let w_d = width(done).max(f.buckets.iter().map(|b| digits(b.done)).max().unwrap_or(1));
+    out.push(format!("  {}  {}  {}", " ".repeat(10), rcell(style::DIM, created, w_c), rcell(style::DIM, done, w_d)));
+    for b in &f.buckets {
+        out.push(format!(
+            "  {}  {}  {}",
+            b.start,
+            rcell(style::PLAIN, &b.created.to_string(), w_c),
+            rcell(style::PLAIN, &b.done.to_string(), w_d)
+        ));
+    }
+
+    // 소요와 AI 작업 — 이름 칸을 한 폭으로 맞춘다.
+    let names =
+        [say(lang, "stats.lead"), say(lang, "stats.cycle"), say(lang, "stats.work"), say(lang, "stats.reviews")];
+    let w = names.iter().map(|n| width(n)).max().unwrap_or(0);
+    let label = |n: &str| pad(&paint(style::HEAD, n), width(n), w);
+    out.push(String::new());
+    for (name, sp) in [(names[0], &st.lead_time), (names[1], &st.cycle_time)] {
+        out.push(format!("{}  {}", label(name), spans_said(sp, lang)));
+    }
+    out.push(String::new());
+    out.push(format!("{}  {}", label(names[2]), work_said(&st.work, lang)));
+    out.extend(work_detail(&st.work, lang));
+    let reviews = fill(
+        say(lang, "stats.reviews_rows"),
+        &[("rows", &st.reviews.rows.to_string()), ("recorded", &st.reviews.work.recorded.to_string())],
+    );
+    out.push(format!("{}  {reviews}", label(names[3])));
+    out.extend(grade_line(&st.reviews.work, lang));
+    out.push(String::new());
+    out.push(paint(style::DIM, say(lang, "stats.more")));
+    out
+}
+
+/// 분포 칸의 값을 글로 — 우선순위는 `p0` 꼴이다.
+fn key_text(k: &crate::report::stats::Key) -> String {
+    match k {
+        crate::report::stats::Key::Text(t) => t.clone(),
+        crate::report::stats::Key::Number(p) => format!("p{p}"),
+    }
+}
+
+/// 한 축을 통째로 — 값 하나에 한 줄, 수는 오른쪽에 붙인다.
+///
+/// **파일에서 온 글은 한 줄로 걷는다**(`text::one_line`) — 태그·담당·제목·칸 이름은 손으로 고칠 수 있는 파일에서
+/// 온다. 에픽·마일스톤은 id 곁에 제목을 단다: id 만으로는 사람이 못 읽는다.
+fn spread_rows(
+    axis: crate::report::stats::Axis,
+    counts: &[crate::report::stats::Count],
+    issues: &[Issue],
+    cfg: &Config,
+    lang: Lang,
+) -> Vec<String> {
+    use crate::report::stats::{Axis, Key};
+    let titles: BTreeMap<&str, &str> = match axis {
+        Axis::Epic | Axis::Milestone => issues.iter().map(|i| (i.id.as_str(), i.title.as_str())).collect(),
+        _ => BTreeMap::new(),
+    };
+    let labels: Vec<(String, usize)> = counts
+        .iter()
+        .map(|c| {
+            let Some(key) = &c.key else {
+                let none = say(lang, "stats.none");
+                return (paint(style::DIM, none), width(none));
+            };
+            let text = one_line(&key_text(key));
+            match (axis, key) {
+                (Axis::Status, _) => {
+                    let s = style::status_style(&text);
+                    let shown = format!("{} {text}", style::glyph(&text));
+                    (paint(s, &shown), width(&shown))
+                }
+                (Axis::Priority, Key::Number(p)) => (paint(style::priority_style(*p), &text), width(&text)),
+                (Axis::Tag, _) => {
+                    let shown = format!("#{text}");
+                    (paint(style::TAG, &shown), width(&shown))
+                }
+                (Axis::Assignee, _) => {
+                    let shown = one_line(&crate::model::label(&text, c.email.as_deref(), cfg.naming));
+                    let w = width(&shown);
+                    (shown, w)
+                }
+                (Axis::Epic | Axis::Milestone, _) => {
+                    let title = clip(&one_line(titles.get(text.as_str()).copied().unwrap_or("")), TITLE_CAP);
+                    let shown = format!("{}  {title}", paint(style::ID, &text));
+                    let w = width(&text) + 2 + width(&title);
+                    (shown, w)
+                }
+                _ => {
+                    let w = width(&text);
+                    (text, w)
+                }
+            }
+        })
+        .collect();
+    let w_label = labels.iter().map(|(_, w)| *w).max().unwrap_or(0);
+    let w_rows = counts.iter().map(|c| c.rows.to_string().len()).max().unwrap_or(1);
+    labels
+        .into_iter()
+        .zip(counts)
+        .map(|((shown, w), c)| {
+            format!("  {}  {}", pad(&shown, w, w_label), rcell(style::PLAIN, &c.rows.to_string(), w_rows))
+        })
+        .collect()
+}
+
+/// 소요 한 줄 — 중앙값과 p90, 그리고 몇을 쟀는지. **잰 수를 늘 함께 낸다**([`spent`] 와 같은 까닭).
+fn spans_said(sp: &crate::report::stats::Spans, lang: Lang) -> String {
+    let done = sp.done.to_string();
+    let (Some(median), Some(p90)) = (sp.median, sp.p90) else {
+        return match sp.done {
+            0 => paint(style::DIM, say(lang, "stats.span_nothing")),
+            _ => paint(style::DIM, &fill(say(lang, "stats.span_none"), &[("done", &done)])),
+        };
+    };
+    let of = fill(say(lang, "stats.span_of"), &[("measured", &sp.measured.to_string()), ("done", &done)]);
+    let unknown = match sp.unknown {
+        0 => String::new(),
+        n => format!(" · {}", fill(say(lang, "stats.span_unknown"), &[("n", &n.to_string())])),
+    };
+    format!(
+        "{}   {}",
+        fill(say(lang, "stats.span"), &[("median", &minutes(median, lang)), ("p90", &minutes(p90, lang))]),
+        paint(style::DIM, &format!("{of}{unknown}")),
+    )
+}
+
+/// AI 작업의 머리 줄 — 줄 수와 토큰.
+fn work_said(sp: &crate::report::stats::Spend, lang: Lang) -> String {
+    if sp.all.lines == 0 {
+        return paint(style::DIM, say(lang, "stats.no_work"));
+    }
+    let lines = fill(
+        say(lang, "stats.work_lines"),
+        &[("lines", &sp.all.lines.to_string()), ("rows", &sp.recorded.to_string())],
+    );
+    format!("{lines} · {}", tally_said(&sp.all, lang))
+}
+
+/// 토큰 한 덩이 — 적힌 줄만 더한 합과, 안 적힌 줄의 수. **하나도 안 적혔으면 합을 안 낸다** — 0 은 "공짜로
+/// 했다" 로 읽힌다.
+fn tally_said(t: &crate::report::stats::Tally, lang: Lang) -> String {
+    let Some(tokens) = t.tokens else { return paint(style::DIM, say(lang, "stats.tokens_none")) };
+    let sum = fill(say(lang, "stats.tokens"), &[("tokens", &grouped(tokens)), ("tokened", &t.tokened.to_string())]);
+    match t.lines - t.tokened {
+        0 => sum,
+        n => format!("{sum} {}", paint(style::DIM, &fill(say(lang, "stats.tokens_without"), &[("n", &n.to_string())]))),
+    }
+}
+
+/// 회사·모델마다 한 줄, 그 밑에 등급 한 줄.
+fn work_detail(sp: &crate::report::stats::Spend, lang: Lang) -> Vec<String> {
+    let names: Vec<String> = sp
+        .by_model
+        .iter()
+        .map(|m| {
+            one_line(&match &m.provider {
+                Some(p) => format!("{p}/{}", m.model),
+                None => m.model.clone(),
+            })
+        })
+        .collect();
+    let w = names.iter().map(|n| width(n)).max().unwrap_or(0);
+    // 줄 수 칸도 한 폭으로 — 오른쪽에 붙여야 자릿수가 갈린 줄끼리 견준다.
+    let lines: Vec<String> =
+        sp.by_model.iter().map(|m| fill(say(lang, "stats.lines"), &[("n", &m.tally.lines.to_string())])).collect();
+    let w_lines = lines.iter().map(|l| width(l)).max().unwrap_or(0);
+    let mut out: Vec<String> = names
+        .iter()
+        .zip(&lines)
+        .zip(&sp.by_model)
+        .map(|((n, l), m)| {
+            format!("    {}  {} · {}", pad(n, width(n), w), rcell(style::PLAIN, l, w_lines), tally_said(&m.tally, lang))
+        })
+        .collect();
+    out.extend(grade_line(sp, lang));
+    out
+}
+
+/// 등급마다 줄 수를 한 줄로. 줄이 없으면 안 선다.
+fn grade_line(sp: &crate::report::stats::Spend, lang: Lang) -> Option<String> {
+    if sp.by_grade.is_empty() {
+        return None;
+    }
+    let grades: Vec<String> = sp
+        .by_grade
+        .iter()
+        .map(|g| {
+            let name = g.grade.as_deref().map(one_line).unwrap_or_else(|| say(lang, "stats.none").to_string());
+            format!("{name} {}", g.tally.lines)
+        })
+        .collect();
+    Some(format!("    {}  {}", paint(style::DIM, say(lang, "stats.grade")), grades.join(" · ")))
+}
+
+/// 큰 수를 세 자리마다 끊는다 — 토큰은 수백만이라 끊지 않으면 자릿수를 세어야 읽힌다.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (k, c) in digits.chars().enumerate() {
+        if k > 0 && (digits.len() - k).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// 생성·수정 줄과 시작·끝 줄의 이름 칸을 **한 폭으로** 맞추는 두 자. 왼쪽 칸은
 /// `생성`·`시작`, 오른쪽 칸은 `수정`·`끝` 이 나눠 쓴다.
 ///

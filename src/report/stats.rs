@@ -27,9 +27,6 @@
 //! - **모르는 것은 0 이 아니다** — `started_at` 이 없는 줄은 `unknown` 으로 따로 세고(`Spent` 와 같은 금),
 //!   `tokens=` 가 없는 `model:` 줄은 토큰 합에 안 든다. 하나도 없으면 합은 `None` 이다
 
-// 읽는 표면(`moai stats`, moai-1hka.k16)이 다음 커밋에 선다 — 그때 걷는다.
-#![allow(dead_code)]
-
 use crate::config::{Config, DONE};
 use crate::model::{Issue, Kind, MAX_PRIORITY, Work, parse_rfc3339};
 use crate::query::{Filter, Where};

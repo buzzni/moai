@@ -6296,6 +6296,8 @@ const JSON_SWEEP: &[&str] = &[
     "ready",
     "prime",
     "show",
+    // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
+    "stats",
     "note",
     "link",
     "defer",
@@ -6732,6 +6734,7 @@ fn every_command_still_speaks_json() {
         vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
+        vec!["stats", "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
         vec!["defer", &id, "--json"],
@@ -20272,4 +20275,232 @@ fn the_bar_names_how_many_members_are_deferred_on_every_surface() {
     ok(s.path(), &["defer", &shelved, "--undo"]);
     let board = ok(s.path(), &["status"]);
     assert!(!board.contains("미룬 1"), "도로 집었는데 미룬 수가 남았다\n{board}");
+}
+
+// ── 통계 (moai-1hka.k16) ─────────────────────────────────────────────
+
+/// `--json` 에서 **그 키의 값 한 덩이** — 객체·배열이면 닫히는 곳까지, 수·글이면 그 값까지. 처음 만난 키를
+/// 짚으므로, 같은 이름이 안쪽에도 서는 키(`kind`)는 먼저 바깥 덩이를 떼어 그 안에서 찾는다. 따옴표 안의 괄호는
+/// 안 센다.
+fn value_at<'a>(json: &'a str, key: &str) -> &'a str {
+    let head = format!("\"{key}\":");
+    let at = json.find(&head).unwrap_or_else(|| panic!("{key} 가 없다 — {json}")) + head.len();
+    let rest = &json[at..];
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in rest.char_indices() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') => quoted = false,
+            (true, false, _) => {}
+            (false, _, '"') => quoted = true,
+            (false, _, '{' | '[') => depth += 1,
+            (false, _, '}' | ']') if depth == 0 => return &rest[..i],
+            (false, _, '}' | ']') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[..=i];
+                }
+            }
+            (false, _, ',') if depth == 0 => return &rest[..i],
+            (false, _, _) => {}
+        }
+    }
+    rest
+}
+
+/// **`moai stats` 는 `show` 의 거르개로 고르고, 끝난 것·미룬 것·생각까지 연 채로 센다**(moai-1hka). 세는 것은
+/// 일이고, `kind` 축만 고른 줄 전부를 세어 무엇을 안 셌는지 댄다. 같은 거르개의 목록과 수가 맞는다.
+#[test]
+fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
+    let s = init("stats-count");
+    add(s.path(), &["버그 하나", "-t", "bug", "-p", "1"]);
+    let done = add(s.path(), &["끝낸 일"]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let put_off = add(s.path(), &["미룬 일"]);
+    ok(s.path(), &["defer", &put_off]);
+    add(s.path(), &["에픽", "--type", "epic"]);
+    ok(s.path(), &["idea", "add", "생각"]);
+
+    let json = ok(s.path(), &["stats", "--json"]);
+    one_json_value(&json);
+    assert!(json.starts_with(r#"{"kind":"issue","rows":3,"by":{"#), "끝낸 일과 미룬 일도 센다\n{json}");
+    let by = value_at(&json, "by");
+    assert_eq!(
+        value_at(by, "status"),
+        r#"[{"key":"todo","rows":2},{"key":"in_progress","rows":0},{"key":"review","rows":0},{"key":"done","rows":1}]"#,
+        "설정의 칸은 비어도 차례대로 선다"
+    );
+    assert_eq!(
+        value_at(by, "kind"),
+        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"idea","rows":1}]"#,
+        "kind 축은 고른 줄 전부다"
+    );
+    assert_eq!(
+        value_at(by, "priority"),
+        r#"[{"key":0,"rows":0},{"key":1,"rows":1},{"key":2,"rows":2},{"key":3,"rows":0}]"#,
+        "우선순위는 수다 — 안 적은 줄은 기본값 2"
+    );
+    assert_eq!(value_at(by, "tag"), r#"[{"key":"bug","rows":1},{"key":null,"rows":2}]"#, "없음은 null 이고 맨 뒤다");
+    assert!(value_at(by, "assignee").starts_with(r#"[{"key":"테스터","email":"tester@example.com","rows":3}"#));
+    assert_eq!(value_at(by, "epic"), r#"[{"key":null,"rows":3}]"#);
+
+    // **목록과 한 자로 거른다** — `--all` 로 끝난 것·미룬 것을 연 목록의 일 줄 수가 곧 센 수다.
+    let listed = ids_in(&ok(s.path(), &["show", "--all", "--type", "issue", "--json"])).len();
+    assert_eq!(listed, 3, "같은 거르개의 목록과 수가 갈렸다");
+
+    // 좁히는 말은 그대로 듣는다.
+    assert!(ok(s.path(), &["stats", "-t", "bug", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(ok(s.path(), &["stats", "--deferred", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(ok(s.path(), &["stats", "-s", "done", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(
+        ok(s.path(), &["stats", "--type", "idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        "--type 이 센 종류를 바꾼다"
+    );
+    // `--all` 은 받고 아무것도 안 바꾼다 — 이미 다 연 채로 센다.
+    assert_eq!(ok(s.path(), &["stats", "--all", "--json"]), json);
+
+    // **`--by` 는 `by` 만 좁힌다** — 나머지 키는 늘 선다.
+    let narrow = ok(s.path(), &["stats", "--by", "tag", "--json"]);
+    assert_eq!(value_at(&narrow, "by"), r#"{"tag":[{"key":"bug","rows":1},{"key":null,"rows":2}]}"#);
+    for key in ["flow", "lead_time", "cycle_time", "work", "reviews"] {
+        value_at(&narrow, key);
+    }
+}
+
+/// **소요는 지금 done 에 선 줄만 재고, 시작을 모르는 줄은 0 이 아니라 `unknown` 이다.** 토큰은 `tokens=` 를 든
+/// 줄만 더하고 하나도 없으면 null 이다. 흐름은 만든 때와 닫힌 때(`--done` 이 읽는 값)로 주마다 센다.
+#[test]
+fn stats_measures_time_and_work_without_turning_unknown_into_zero() {
+    let s = init("stats-time");
+    let rows = [
+        r#"{"id":"argos-0001","title":"닫은 일","status":"done","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T03:00:00Z","status_since":"2026-09-08T03:00:00Z","done_at":"2026-09-08T03:00:00Z","started_at":"2026-09-08T01:00:00Z"}"#,
+        r#"{"id":"argos-0002","title":"시작을 모르는 리뷰","status":"done","tags":["review"],"created_at":"2026-09-09T00:00:00Z","updated_at":"2026-09-09T10:00:00Z","status_since":"2026-09-09T10:00:00Z","done_at":"2026-09-09T10:00:00Z"}"#,
+        r#"{"id":"argos-0003","title":"지난주 일","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), rows.join("\n") + "\n").unwrap();
+    ok(s.path(), &["note", "argos-0001", "model: anthropic/opus-5 tokens=1000 (high — the write path)"]);
+    ok(s.path(), &["note", "argos-0002", "model: anthropic/opus-5 (max — review)"]);
+
+    let json = ok(s.path(), &["stats", "--last", "2", "--json"]);
+    // 만든 지 3시간·10시간 — 가운데 둘의 평균과 nearest-rank p90.
+    assert_eq!(value_at(&json, "lead_time"), r#"{"done":2,"measured":2,"unknown":0,"median":390,"p90":600}"#);
+    assert_eq!(
+        value_at(&json, "cycle_time"),
+        r#"{"done":2,"measured":1,"unknown":1,"median":120,"p90":120}"#,
+        "시작을 모르는 줄이 0 분으로 들어갔다"
+    );
+    // `MOAI_NOW` 는 2026-09-11(금) — 지금 든 주는 9월 7일 월요일부터다.
+    assert_eq!(
+        value_at(&json, "flow"),
+        r#"{"bucket":"week","zone":"UTC","buckets":[{"start":"2026-08-31","created":1,"done":0},{"start":"2026-09-07","created":2,"done":2}]}"#
+    );
+    let work = value_at(&json, "work");
+    assert!(work.starts_with(r#"{"recorded":2,"lines":2,"tokened":1,"tokens":1000,"#), "{work}");
+    let reviews = value_at(&json, "reviews");
+    assert!(
+        reviews.starts_with(r#"{"rows":1,"work":{"recorded":1,"lines":1,"tokened":0,"tokens":null,"#),
+        "토큰을 안 적은 줄만 있으면 합은 0 이 아니라 null 이다\n{reviews}"
+    );
+    assert!(value_at(reviews, "by_grade").contains(r#"{"grade":"max","lines":1,"tokened":0,"tokens":null}"#));
+
+    // 사람 화면도 같은 수를 낸다 — 모르는 것을 따로 댄다.
+    let screen = ok(s.path(), &["stats"]);
+    assert!(screen.contains("중앙값 2시간 · p90 2시간"), "{screen}");
+    assert!(screen.contains("모름 1"), "모르는 수를 안 댄다\n{screen}");
+    assert!(screen.contains("토큰 1,000"), "{screen}");
+}
+
+/// **흐름의 날은 읽는 사람의 날이고, `--created <날>` 이 그날을 읽는 시간대와 같다.** 그래서 칸 하나의 수가 그날로
+/// 거른 목록의 수와 맞는다 — UTC 일요일 23시는 서울의 월요일이다.
+#[test]
+fn stats_flow_counts_the_day_the_created_filter_reads() {
+    let s = init("stats-zone");
+    let row = r#"{"id":"argos-0001","title":"자정 언저리","status":"todo","created_at":"2026-09-06T23:00:00Z","updated_at":"2026-09-06T23:00:00Z","status_since":"2026-09-06T23:00:00Z"}"#;
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{row}\n")).unwrap();
+    let run = |tz: &str, args: &[&str]| {
+        let out = staged(args).current_dir(s.path()).env("TZ", tz).output().expect("moai 를 못 돌렸다");
+        assert!(out.status.success(), "{tz} {args:?}: {}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let created_on = |tz: &str, day: &str| -> usize {
+        let flow = run(tz, &["stats", "--bucket", "day", "--last", "7", "--json"]);
+        let slot = flow
+            .split(r#"{"start":"#)
+            .find(|b| b.starts_with(&format!("\"{day}\"")))
+            .unwrap_or_else(|| panic!("{day} 칸이 없다 — {flow}"));
+        let listed = ids_in(&run(tz, &["show", "--created", day, "--json"])).len();
+        let counted = if slot.contains(r#""created":1"#) { 1 } else { 0 };
+        assert_eq!(counted, listed, "{tz} 의 {day}: 흐름 {counted}, 목록 {listed}");
+        counted
+    };
+    assert_eq!(created_on("UTC", "2026-09-06"), 1);
+    assert_eq!(created_on("UTC", "2026-09-07"), 0);
+    // **자료가 있는 기계에서만 잰다** — 정적 판이 zoneinfo 없는 기계도 받는다(moai-77ap).
+    if Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+        assert_eq!(created_on("Asia/Seoul", "2026-09-07"), 1, "서울의 월요일에 안 섰다");
+        assert_eq!(created_on("Asia/Seoul", "2026-09-06"), 0);
+        assert!(run("Asia/Seoul", &["stats", "--json"]).contains(r#""zone":"Asia/Seoul""#));
+    }
+}
+
+/// **세는 자리에 뜻이 없는 플래그는 말없이 안 먹는다** — 차례·쪽·겹쳐 보기는 받지 않고, 모르는 칸과 축은
+/// 거절한다. 거절은 stdout 에 아무것도 안 낸다.
+#[test]
+fn stats_refuses_what_it_does_not_take() {
+    let s = init("stats-refuse");
+    add(s.path(), &["하나"]);
+    for args in [
+        &["stats", "--sort", "id"][..],
+        &["stats", "-n", "3"],
+        &["stats", "--after", "argos-0001"],
+        &["stats", "--worktree"],
+        &["stats", "--tree"],
+        &["stats", "--by", "colour"],
+        &["stats", "--bucket", "month"],
+        &["stats", "--last", "0"],
+        &["stats", "-s", "in-progress"],
+        &["stats", "--done", "2026-09-01", "-s", "todo"],
+    ] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 를 받았다\n{}", text(&out));
+        assert!(out.stdout.is_empty(), "{args:?} 가 거절하며 무언가 냈다\n{}", text(&out));
+    }
+}
+
+/// 사람 화면 — 한눈 보기는 칸·우선순위·흐름·소요·AI 작업을, `--by` 는 물은 축만 통째로 낸다. 영어가 기본이다.
+#[test]
+fn stats_draws_an_overview_or_the_axes_asked() {
+    let s = init("stats-screen");
+    add(s.path(), &["버그 하나", "-t", "bug"]);
+    let done = add(s.path(), &["끝낸 일"]);
+    ok(s.path(), &["mv", &done, "done"]);
+
+    let overview = ok(s.path(), &["stats"]);
+    for want in [
+        "센 줄  issue 2건",
+        "· todo 1",
+        "✓ done 1",
+        "p2 2",
+        "흐름",
+        "리드 타임",
+        "사이클 타임",
+        "AI 작업",
+        "리뷰",
+        "더 보기",
+    ] {
+        assert!(overview.contains(want), "{want} 가 없다\n{overview}");
+    }
+    let axes = ok(s.path(), &["stats", "--by", "tag,status"]);
+    assert!(axes.contains("tag별") && axes.contains("#bug") && axes.contains("(없음)"), "{axes}");
+    assert!(axes.find("tag별") < axes.find("status별"), "물은 차례대로 서지 않았다\n{axes}");
+    assert!(!axes.contains("흐름"), "물은 축만 내야 한다\n{axes}");
+
+    let mut cmd = staged(&["stats"]);
+    with_lang(&mut cmd, None);
+    let out = cmd.current_dir(s.path()).output().expect("moai 를 실행하지 못했다");
+    let english = String::from_utf8(out.stdout).unwrap();
+    for want in ["Counted  issue 2", "Flow", "Lead time", "Cycle time", "AI work", "Reviews"] {
+        assert!(english.contains(want), "{want} 가 없다\n{english}");
+    }
 }
