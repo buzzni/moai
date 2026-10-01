@@ -340,7 +340,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
     modes_off_on_panic();
     // **마우스도 같은 두 길로 끈다**(moai-irrj.9xq) — 안 끄고 나가면 셸에서 마우스를 움직이거나 누를
     // 때마다 `^[[<0;12;5M` 같은 글이 프롬프트에 찍힌다. 놓아 둔 사람(`SPC o m`)에게는 켜지 않는다.
-    modes_on(app.mouse_on);
+    modes_on(app.wants_mouse());
     // **패닉으로 끝나도 여기서 걷는다**(moai-46xe). 다시 읽기 스레드의 패닉은 루프가 `resume_unwind`
     // 로 되던지는데 그것은 훅을 안 지난다 — 훅이 이미 걷은 터미널을 편집기에서 돌아오며 다시
     // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
@@ -641,7 +641,8 @@ fn suspend() {
 /// 다음 그림이 빈칸 아닌 칸을 모두 다시 낸다. `clear` 가 온 화면 뷰포트에서 하는 일과 같고
 /// 묻는 것만 없다. 커서는 그림마다 숨기거나 두므로 따로 안 만진다.
 ///
-/// 마우스는 **놓아 둔 사람에게는 다시 안 잡는다**(`mouse`, [`App::mouse_on`]).
+/// 마우스는 **잡을 때만 다시 잡는다**(`mouse`, [`App::wants_mouse`]) — 놓아 둔 사람에게도, 편집기에서 돌아와 선
+/// 폼 위에서도 안 잡는다.
 fn resume(term: &mut DefaultTerminal, mouse: bool) -> std::io::Result<()> {
     use ratatui::crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, enable_raw_mode};
     enable_raw_mode()?;
@@ -826,10 +827,10 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
     // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
     let mut stale_due = std::time::Instant::now() + if app.loading() { LOAD_POLL } else { TICK };
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
-    // 터미널이 지금 마우스를 잡고 있는가 — `screen` 이 띄울 때 `app.mouse_on` 대로 켰다. `SPC o m` 이 바꾼
-    // 값은 키를 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서 돌아올 때(`resume`)도 `app.mouse_on` 대로 켜므로
-    // 이 값과 어긋나지 않는다.
-    let mut caught = app.mouse_on;
+    // 터미널이 지금 마우스를 잡고 있는가 — `screen` 이 띄울 때 `app.wants_mouse()` 대로 켰다. `SPC o m` 이 바꾼
+    // 값도, 폼·글 받는 칸·고르는 창이 열리고 닫히며 바뀐 값도 사건을 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서
+    // 돌아올 때(`resume`)도 같은 값대로 켜므로 이 값과 어긋나지 않는다.
+    let mut caught = app.wants_mouse();
     while !app.quit {
         let began = std::time::Instant::now();
         term.draw(|f| crate::tui::draw::screen(f, app))?;
@@ -857,9 +858,9 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             }
             take(app, ev);
         }
-        if app.mouse_on != caught {
-            let _ = mouse_capture(&mut std::io::stdout(), app.mouse_on);
-            caught = app.mouse_on;
+        if app.wants_mouse() != caught {
+            caught = app.wants_mouse();
+            let _ = mouse_capture(&mut std::io::stdout(), caught);
         }
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
@@ -872,7 +873,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // **올린 뒤에 연다.** 먼저 열면 기다리던 훅이 이미 내린 터미널을 걷고, 그 뒤에 올린
             // 화면은 `resume_unwind` 가 훅 없이 끝내며 raw·대체 화면인 채로 셸에 남는다. 올리기가
             // 실패해도 연다 — 기다리던 훅이 패닉 글을 내야 한다.
-            let up = resume(term, app.mouse_on);
+            let up = resume(term, app.wants_mouse());
             EDITING.release();
             up?;
         }
