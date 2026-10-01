@@ -109,10 +109,28 @@ impl Zone {
     }
 
     /// 이름으로 연다. `UTC` 는 자료를 안 본다 — tzdb 가 없는 기계에서도 서야 한다.
+    ///
+    /// **tzdb 에 없는 이름은 POSIX 규칙 글로 읽는다**(moai-btxt.1gk) — `JST-9`·`<+09>-9`·`CST6CDT,M3.2.0,M11.1.0`.
+    /// glibc 의 차례(파일 먼저, 규칙 다음)와 같아서 `EST5EDT` 처럼 둘 다인 이름은 tzdb 의 것이 선다. 그 시간대의
+    /// 이름은 **받은 글 그대로**다(2026-10-01 사용자 결정) — 설정에 적어도 같은 자로 다시 열린다. 규칙 글은 자료가
+    /// 필요 없어 tzdb 가 없는 기계(정적 musl 판)에서도 선다. 규칙으로도 못 읽으면 tzdb 의 까닭을 그대로 낸다.
     pub fn load(name: &str) -> Result<Zone, Trouble> {
         if name == "UTC" {
             return Ok(Zone::utc());
         }
+        match Zone::from_tzdb(name) {
+            Err(why @ (Trouble::NoTzdb { .. } | Trouble::Unknown { .. })) => Zone::from_rule(name).ok_or(why),
+            found => found,
+        }
+    }
+
+    /// POSIX 규칙 글 하나로 선 시간대 — 전환이 없고 모든 때를 규칙이 잰다.
+    fn from_rule(text: &str) -> Option<Zone> {
+        let rule = Rule::parse(text)?;
+        Some(Zone { name: text.to_string(), shifts: Vec::new(), before: rule.std, rule: Some(rule) })
+    }
+
+    fn from_tzdb(name: &str) -> Result<Zone, Trouble> {
         let dir = zoneinfo();
         if !dir.is_dir() {
             return Err(Trouble::NoTzdb { at: dir });
@@ -233,10 +251,15 @@ fn system_name() -> Option<String> {
         })
 }
 
-/// `TZ` 가 대는 이름. 없거나 이름 꼴이 아니면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
+/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
 fn env_name() -> Option<String> {
+    tz_name(&std::env::var_os("TZ")?)
+}
+
+/// `TZ` 의 값을 이름으로 — [`env_name`] 의 셈. 환경을 안 읽어야 시험이 꼴마다 잰다.
+fn tz_name(value: &std::ffi::OsStr) -> Option<String> {
     // `TZ=:Asia/Seoul` 처럼 콜론을 다는 꼴이 있다(POSIX).
-    let raw = std::env::var_os("TZ")?.to_string_lossy().trim_start_matches(':').to_string();
+    let raw = value.to_string_lossy().trim_start_matches(':').to_string();
     // **빈 `TZ` 는 UTC 다**(POSIX) — 설정해 두고 비운 것은 "여기는 UTC 로 보겠다" 는 말이지
     // "안 정했다" 가 아니다. 안 받고 `/etc/localtime` 으로 내려가면 같은 기계의 다른 도구와
     // 시각이 갈린다.
@@ -251,10 +274,11 @@ fn env_name() -> Option<String> {
         let at = PathBuf::from(&raw);
         return name_under(&at, &zoneinfo()).or_else(|| name_under(&at, Path::new("/usr/share/zoneinfo")));
     }
-    // **이름 꼴만 받는다.** `TZ=<+09>-9` 같은 POSIX 규칙 글은 이름이 아니다. `EST5EDT`·`Etc/GMT+9`
-    // 처럼 숫자와 부호를 쓰는 **진짜 이름**이 있어 숫자로는 못 가르므로, 가르는 것은 글자뿐이다 —
-    // 그물을 빠져나온 규칙 글은 tzdb 에서 못 찾고 UTC 로 떨어지며 한 줄로 알린다.
-    raw.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)).then_some(raw)
+    // **그 밖은 다 이름으로 넘긴다** — `TZ=<+09>-9` 같은 POSIX 규칙 글도 [`Zone::load`] 가 tzdb 다음에
+    // 읽는다(moai-btxt.1gk). 한때 이름 꼴의 글자만 받아, 꺾쇠가 든 규칙 글은 `/etc/localtime` 으로 조용히
+    // 내려갔고 `JST-9` 는 tzdb 에서 못 찾아 UTC 로 떨어졌다. 둘 다 아닌 글은 `load` 가 못 풀어 UTC 로
+    // 떨어지며 한 줄로 알린다 — glibc 도 못 읽는 `TZ` 를 UTC 로 읽는다.
+    Some(raw)
 }
 
 /// `at` 이 `dir` 밑을 가리키면 그 아래 경로가 곧 시간대 이름이다.
@@ -765,6 +789,41 @@ mod tests {
             Some("Asia/Tokyo".into())
         );
         assert_eq!(name_under(Path::new("/usr/share/./zoneinfo/UTC"), zone), Some("UTC".into()));
+
+        // **규칙 글도 이름으로 넘긴다**(moai-btxt.1gk) — 꺾쇠가 든 글을 거르던 판은 `/etc/localtime` 으로 내려갔다.
+        let name = |v: &str| tz_name(std::ffi::OsStr::new(v));
+        assert_eq!(name(""), Some("UTC".into()));
+        assert_eq!(name(":Asia/Seoul"), Some("Asia/Seoul".into()));
+        for rule in ["JST-9", "<+09>-9", "<-03>3", "CST6CDT,M3.2.0,M11.1.0", "AEST-10AEDT,M10.1.0,M4.1.0/3"] {
+            assert_eq!(name(rule), Some(rule.into()), "{rule:?} 를 이름으로 안 넘겼다");
+            assert_eq!(name(&format!(":{rule}")), Some(rule.into()), ":{rule:?} 를 이름으로 안 넘겼다");
+        }
+    }
+
+    /// **tzdb 에 없는 이름은 POSIX 규칙 글로 연다**(moai-btxt.1gk) — 이름은 받은 글 그대로다(2026-10-01 사용자
+    /// 결정). 규칙 글은 자료가 필요 없어, 이 기계에 tzdb 가 있든 없든 같은 답이다.
+    #[test]
+    fn a_posix_rule_opens_as_a_zone_under_its_own_text() {
+        let at = |s: &str| crate::model::parse_rfc3339(s).unwrap();
+        for text in ["JST-9", "<+09>-9"] {
+            let z = Zone::load(text).unwrap_or_else(|why| panic!("{text:?} 를 못 열었다 — {why:?}"));
+            assert_eq!(z.name(), text, "받은 글이 이름으로 안 섰다");
+            assert!(!z.is_utc());
+            assert_eq!(z.shift("2026-10-01T00:00:00Z"), "2026-10-01T09:00:00Z");
+        }
+        let ny = Zone::load("EST5EDT,M3.2.0,M11.1.0").expect("서머타임이 든 규칙 글을 못 열었다");
+        assert_eq!(ny.local(at("2026-01-15T12:00:00Z")), at("2026-01-15T07:00:00Z"));
+        assert_eq!(ny.local(at("2026-07-01T12:00:00Z")), at("2026-07-01T08:00:00Z"));
+        // UTC 와 같은 규칙은 UTC 다 — 화면이 그 자리에서 그대로 둔다.
+        assert!(Zone::load("UTC0").expect("UTC0 를 못 열었다").is_utc());
+        // 이름도 규칙도 아니면 tzdb 의 까닭이 그대로 선다 — 규칙으로 못 읽었다는 말을 따로 짓지 않는다.
+        for bad in ["JST", "JST-9x", "<+09"] {
+            match Zone::load(bad) {
+                Err(Trouble::Unknown { name }) => assert_eq!(name, bad),
+                Err(Trouble::NoTzdb { .. }) => {}
+                other => panic!("{bad:?} 가 시간대로 섰다 — {other:?}"),
+            }
+        }
     }
 
     /// 손으로 지은 TZif 를 판 1·판 2 두 꼴로 읽는다. **판 2 면 뒤 자료를 읽는다** — 앞의 32비트
