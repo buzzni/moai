@@ -4,6 +4,7 @@
 #     scripts/bump-version.sh auto      [Unreleased] 의 절을 읽고 판을 고른다
 #     scripts/bump-version.sh minor     한 칸을 손으로 고른다 (patch 도 같다)
 #     scripts/bump-version.sh 0.2.0     판을 그대로 준다 — 1.0 은 이 길로만 연다
+#     scripts/bump-version.sh --next    auto 가 고를 판만 찍는다. 아무것도 안 쓴다
 #
 # **태그는 사람이 단다.** 이 스크립트는 커밋도 태그도 하지 않고 파일만 고친다 —
 # 무엇이 바뀌었는지 사람이 보고 커밋하는 자리를 남긴다. 태그를 여기서 달면
@@ -79,11 +80,12 @@ step() {
   esac
 }
 
-[ "$#" -eq 1 ] || die "올릴 판을 하나 준다 — auto · minor · patch · 0.2.0"
-want=$1 level='' why=''
+[ "$#" -eq 1 ] || die "올릴 판을 하나 준다 — auto · minor · patch · 0.2.0 (보기만 하려면 --next)"
+want=$1 level='' why='' next=''
 case $want in
 v*) die "앞의 v 를 빼고 준다 — ${want#v}" ;;
 auto | minor | patch) level=$want ;;
+--next) level=auto next=1 ;;
 major) die "major 는 판을 직접 준다 — 1.0 은 사람이 연다" ;;
 *) [[ $want =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die "버전 꼴이 아니다 — $want" ;;
 esac
@@ -109,6 +111,16 @@ minor | patch)
   step
   ;;
 esac
+
+# **`--next` 는 판 하나만 stdout 에 낸다**(moai-ug3j.w0c). 릴리스 때 마일스톤의 잠정
+# 제목과 견주는 자리라 `v$(scripts/bump-version.sh --next)` 로 그대로 받게 하고, 까닭은
+# 사람이 읽도록 stderr 로 보낸다. 고르는 길은 `auto` 와 한 길이다 — 따로 셈하면 미리
+# 본 판과 실제로 올린 판이 갈릴 수 있다.
+if [ -n "$next" ]; then
+  printf 'bump-version: %s — %s, %s → %s\n' "$why" "$level" "$have" "$want" >&2
+  printf '%s\n' "$want"
+  exit 0
+fi
 [ -z "$why" ] || printf 'bump-version: %s — %s, %s → %s\n' "$why" "$level" "$have" "$want"
 [ "$have" != "$want" ] || die "이미 $want 다"
 

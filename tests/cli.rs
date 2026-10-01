@@ -20093,6 +20093,27 @@ fn a_named_step_counts_from_the_current_version() {
     assert_eq!(out.status.code(), Some(2), "꼬리 붙은 판에서 한 칸을 셌다\n{}", text(&out));
 }
 
+/// **`--next` 는 `auto` 가 고를 판 하나만 stdout 에 내고 아무것도 안 쓴다**(moai-ug3j.w0c).
+///
+/// 릴리스 때 마일스톤의 잠정 제목과 견주는 자리라 `v$(… --next)` 로 그대로 받는다 — 까닭이
+/// stdout 에 섞이면 받는 쪽이 판 대신 문장을 쥔다. 못 고르는 판은 `auto` 와 같이 멈춘다.
+#[cfg(unix)]
+#[test]
+fn next_prints_the_version_auto_would_pick_and_writes_nothing() {
+    let unreleased = "### Changed\n\n- 바뀐 동작\n\n";
+    let (out, manifest, log) = bump_with("bump-next", "0.1.5", unreleased, &["--next"]);
+    assert!(out.status.success(), "판을 못 골랐다\n{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "0.2.0\n", "stdout 에 판 하나만 서야 한다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("Changed") && said.contains("0.1.5 → 0.2.0"), "까닭을 안 댔다\n{said}");
+    assert!(manifest.contains("version = \"0.1.5\""), "판을 움직였다\n{manifest}");
+    assert!(!log.contains("2026-10-01"), "판을 열었다\n{log}");
+
+    let (out, _, _) = bump_with("bump-next-empty", "0.1.5", "", &["--next"]);
+    assert_eq!(out.status.code(), Some(2), "빈 [Unreleased] 에서 판을 냈다\n{}", text(&out));
+    assert!(out.stdout.is_empty(), "멈추면서 판을 냈다\n{}", text(&out));
+}
+
 /// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).
 ///
 /// **여기가 없으면 키를 더해 놓고 그 키가 닿는지 아무도 안 잰다.** 단위 시험은
