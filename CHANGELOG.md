@@ -12,6 +12,32 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
+  and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a
+  machine with no zoneinfo directory too — the static musl build. A name the
+  zoneinfo directory holds still comes first, as in glibc, and the zone is called
+  by the text you gave, so `[tui] timezone` takes the same text. Before, a rule
+  with angle brackets was ignored without a word in favour of `/etc/localtime`,
+  and `JST-9` fell back to UTC with a line saying the zone was unknown. A `TZ`
+  that is neither a name nor a rule now falls back to UTC with that line, the way
+  glibc reads it. The `SPC o t` list still holds the zoneinfo names alone.
+
+### Fixed
+
+- **Daylight saving time that runs past the next year's start is read as
+  permanent.** A zone file whose footer rule ends daylight saving after the next
+  year's begins — `AAA3BBB,J1/0,J365/26` — was drawn on standard time for most of
+  every year, because that end was taken for a change. moai now reads such a rule
+  the way tzcode does, as daylight saving time all year. Footers written by zic
+  (`J365/25`) were already read right.
+
+- **A zone file whose header counts more data than the file holds is no longer
+  read.** It is reported as not zone data, as tzcode and glibc report it. Before,
+  a cut file could still be read with its tail missing, and on a 32-bit machine
+  the size those counts add up to could overflow.
+
 ## [0.1.6] - 2026-10-01
 
 ### Fixed
