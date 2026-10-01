@@ -617,7 +617,17 @@ fn whoami_at(
     user: Option<&str>,
     root: &std::path::Path,
 ) -> Option<String> {
-    identify(user, root).ok().map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
+    person_at(identify, user, root).ok()
+}
+
+/// [`whoami_at`] 과 같되 **못 푼 까닭을 든다**(moai-xd7b). 거름망의 `me` 는 못 풀면 그 까닭으로 거절하고
+/// ([`App::me_for_filter`]), [NEW]·헤더는 몰라도 그만이라 까닭을 버린다. 푸는 법은 여전히 이 한 자리다.
+fn person_at(
+    identify: fn(Option<&str>, &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor>,
+    user: Option<&str>,
+    root: &std::path::Path,
+) -> Result<String, crate::model::NoActor> {
+    identify(user, root).map(|a| crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
 }
 
 /// 저장소를 읽어 [`Fresh`] 를 짓는다. **어느 스레드에서 불러도 같다.**
@@ -2583,7 +2593,29 @@ impl App {
         // `-s todo,review` 를 대면 그 글을 여기 그대로 쳐도 다시 거절된다. `/` 검색은 `-s` 도 `항목=값` 도 안
         // 받지만, 검색이 거르개를 두 번 쓰는 길이 없어 그 갈래는 안 선다.
         let on = crate::view::Surface::Pairs;
-        Filter::build(raw).map_err(|e| crate::view::bad_filter_on(self.site.lang, &e, on))
+        let mut filter = Filter::build(raw).map_err(|e| crate::view::bad_filter_on(self.site.lang, &e, on))?;
+        // **`me` 는 CLI 의 `-a me` 와 같은 자로 푼다**(moai-xd7b) — 안 풀던 때는 `me` 라는 이름을 찾아 0건이었다.
+        // 못 풀면 CLI 와 같은 글로 거절한다. 사람을 묻지는 않는다 — 읽기는 묻지 않는다(CLAUDE.md).
+        crate::cmd::resolve_me(&mut filter.assignee, || self.me_for_filter())
+            .map_err(|e| crate::view::no_actor(self.site.lang, &e))?;
+        Ok(filter)
+    }
+
+    /// 거름망의 `me` 가 가리킬 사람(moai-xd7b). **띄울 때·들어갈 때 푼 값**([`Site::me`])을 읽는다 — 이 자리는
+    /// 거절문을 짓느라 **그리는 걸음마다** 돈다([`App::input_error`]). 여기서 `identify` 를 부르면 `git config`
+    /// 프로세스 둘이 치는 동안 걸음마다 `term.draw` 와 `event::poll` 사이에 선다(moai-ropk 와 같은 자리).
+    ///
+    /// **모를 때만 다시 푼다** — 거절문은 못 푼 까닭(`NoActor`)으로 글을 고르는데, [`Site::me`] 는 그 까닭을
+    /// 버린 값이다. 그 프로세스는 `me` 를 물었고 사람을 모를 때만, 곧 거절문이 선 동안만 선다. `--user` 를
+    /// 줬으면 [`crate::model::actor`] 가 첫 갈래에서 답해 그것도 안 선다.
+    ///
+    /// 뿌리는 헤더와 같은 [`App::user_root`] — 들어간 그 프로젝트다(moai-d3sy). 층에서는 거름망이 안 서므로
+    /// (`keys::Browse::Filter`) 남의 프로젝트의 사람이 끼어들 자리가 없다.
+    fn me_for_filter(&self) -> Result<String, crate::model::NoActor> {
+        match &self.site.me {
+            Some(me) => Ok(me.clone()),
+            None => person_at(self.identify, self.user.as_deref(), self.user_root()),
+        }
     }
 
     pub fn clear_filter(&mut self) {
@@ -7782,6 +7814,73 @@ mod tests {
         assert!(matches!(a.mode, Mode::Filter(_)), "오타인데 걸렸다");
         assert!(a.input_error().is_some_and(|e| e.contains("칸")), "{:?}", a.input_error());
         assert_eq!(a.hung, None);
+    }
+
+    /// **거름망의 `me` 는 지금 사람이다**(moai-xd7b) — CLI 의 `-a me` 와 같은 자로 푼다. 안 풀던 때는
+    /// `me` 라는 이름을 찾아 0건이었고, 오타와도 "아무도 안 맡았다" 와도 갈리지 않았다. 쉼표로 이은 항도 푼다.
+    ///
+    /// **사람은 띄울 때 푼 값([`Site::me`])을 읽는다** — 거절문은 그리는 걸음마다 다시 재므로([`App::input_error`]),
+    /// 거기서 `identify` 를 부르면 치는 동안 걸음마다 `git config` 가 선다. 묻는 자를 패닉으로 세워 그 자리를 맨다.
+    /// 뱃지는 친 글 그대로다 — 푼 이름으로 바꿔 대면 다시 열었을 때 고칠 글이 사람이 친 것이 아니다.
+    #[test]
+    fn me_in_the_filter_is_the_person_on_this_screen() {
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            panic!("띄울 때 푼 사람을 두고 걸음마다 다시 물었다")
+        }
+        let mut issues = vec![
+            make("argos-0001", Kind::Epic),
+            make("argos-0003", Kind::Issue),
+            make("argos-0004", Kind::Issue),
+            make("argos-0009", Kind::Issue),
+        ];
+        (issues[1].assignee, issues[1].assignee_email) = (Some("레이븐".into()), Some("raven@example.com".into()));
+        issues[2].assignee = Some("철수".into());
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
+        a.identify = refuse;
+        for asked in ["assignee=me", "assignee=me,아무도아님"] {
+            a.hit("SPC f");
+            typed(&mut a, asked);
+            assert_eq!(a.mode, Mode::Browse, "{asked} 를 거절했다 — {:?}", a.input_error());
+            assert_eq!(shown(&a), ["argos-0003"], "{asked} 가 내 줄만 남기지 않았다");
+            assert_eq!(badge(&a).as_deref(), Some(asked));
+        }
+    }
+
+    /// **누군지 모르면 `me` 를 거절한다 — CLI 의 `-a me` 와 같은 글로**(moai-xd7b). 조용히 0건을 내면 "내게 온
+    /// 것이 없다" 로 읽힌다. 거절문은 화면의 말로 서고, 못 푼 까닭(`NoActor`)을 그대로 든다 — 모양이 틀린
+    /// `--user` 에 "git 설정이 없다" 를 대면 고칠 곳을 잘못 가리킨다.
+    ///
+    /// **사람을 묻지 않는다** — 읽기는 묻지 않는다(CLAUDE.md). 묻는 칸([`Mode::Ask`])이 아니라 거름망 칸에 남고,
+    /// `me` 를 안 물은 거르개는 사람을 풀지도 않고 걸린다.
+    #[test]
+    fn me_in_the_filter_without_a_person_is_refused_like_the_cli() {
+        use crate::model::NoActor;
+        fn refuse(_: Option<&str>, _: &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            panic!("`me` 를 안 물었는데 누군지 물었다")
+        }
+        let malformed = NoActor::Malformed { what: "--user", raw: "레이븐".into() };
+        for (user, why) in [(None, NoActor::Unknown), (Some("레이븐"), malformed)] {
+            for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+                let mut a = app();
+                a.site.lang = lang;
+                (a.user, a.site.me) = (user.map(String::from), None);
+                a.identify = nobody;
+                a.hit("SPC f");
+                typed(&mut a, "assignee=me");
+                assert!(matches!(a.mode, Mode::Filter(_)), "누군지 모르는데 걸렸거나 사람을 물었다 — {:?}", a.mode);
+                assert_eq!(a.input_error(), Some(crate::view::no_actor(lang, &why)), "{user:?} {lang:?}");
+                assert_eq!(a.hung, None);
+            }
+        }
+
+        let mut a = app();
+        (a.user, a.site.me) = (None, None);
+        a.identify = refuse;
+        a.hit("SPC f");
+        typed(&mut a, "type=epic");
+        assert_eq!(a.mode, Mode::Browse, "{:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
     }
 
     /// raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **글을 받는 중에도** 받아야
