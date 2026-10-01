@@ -849,6 +849,7 @@
   "look.want_bool": "true·false 여야",
   "look.want_word": "낱말이어야",
   "look.want_words": "낱말 배열이어야",
+  "look.want_number": "정수여야",
   "look.not_a_word": "`{key}` 의 `{value}` 는 낱말이 아니다 — 건너뛴다",
   "sheet.not_a_table": "`{table}` 는 `[{table}]` 표여야 한다 — 지금은 {is}",
   "sheet.not_a_stamp": "`{key}` 는 때를 적은 낱말이어야 한다 — 지금은 {is}",

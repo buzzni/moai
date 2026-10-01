@@ -1202,6 +1202,15 @@ pub struct App {
     /// **쓰는 곳은 `draw::screen` 하나다**([`App::spun`] 과 같은 결) — 자리를 여기서 다시 셈하면
     /// 그리는 쪽의 가르기(`draw::split_body`)와 따로 맞춰야 한다.
     pub drawn: mouse::Drawn,
+    /// 목록이 가져가는 몫(%) — 상세가 좌우에 설 때의 폭(moai-irrj.mhr). 칸 사이 선을 끌어 정하고 설정에 남는다.
+    /// **끈 적 없으면 `None`** 이고 그리는 쪽의 처음값(`draw::LEFT`)이 선다 — 처음값을 설정에 박으면 처음값을
+    /// 고치는 날 끌어 본 적 없는 사람까지 옛 몫에 묶인다.
+    pub list_width: Option<u16>,
+    /// 위아래로 가를 때 목록이 가져가는 높이의 몫(%). 폭과 **따로다** — 처음값부터 다르다(`draw::ABOVE`).
+    pub list_height: Option<u16>,
+    /// 칸 사이 선을 잡고 끄는 중인가. 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다 적으면 손짓 하나가
+    /// 파일을 수십 번 다시 쓴다.
+    dragging: bool,
     /// 화면의 시각을 적을 시간대(moai-p5az). **화면 하나에 하나다** — 프로젝트를 옮겨도 보는
     /// 사람은 그대로라, `Site` 가 아니라 여기 산다(보기·정렬과 같은 자리다).
     ///
@@ -1707,6 +1716,9 @@ impl App {
             detail_at: view::DetailAt::default(),
             mouse: true,
             drawn: mouse::Drawn::default(),
+            list_width: None,
+            list_height: None,
+            dragging: false,
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
             saved: Default::default(),
@@ -2894,6 +2906,10 @@ impl App {
         if let Some(on) = look.mouse {
             self.mouse = on;
         }
+        // **범위 밖의 수는 끝으로 당긴다** — 읽기는 관대하다. `list_width = 95` 를 적은 사람의 뜻은 "목록을 크게" 고,
+        // 끝으로 당긴 값은 입힌 뒤의 보기(`App::saved`)에 들어 이 세션이 끌기 전에는 파일의 줄을 안 건드린다.
+        self.list_width = look.list_width.map(draw::share);
+        self.list_height = look.list_height.map(draw::share);
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -2912,6 +2928,8 @@ impl App {
             detail_at: Some(self.detail_at.name().to_string()),
             timezone: self.saved_zone.clone(),
             mouse: Some(self.mouse),
+            list_width: self.list_width.map(i64::from),
+            list_height: self.list_height.map(i64::from),
         }
     }
 

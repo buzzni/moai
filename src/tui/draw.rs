@@ -28,7 +28,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph};
 
-/// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다.
+/// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다. **처음값이다** — 칸 사이 선을 끌면
+/// 사람이 고른 몫(`App::list_width`)이 선다(moai-irrj.mhr).
 const LEFT: u16 = 55;
 
 /// 위아래로 가를 때 **목록**이 가져가는 높이(moai-l7e2). **[`LEFT`] 와 다른 자다** — 가로의 55%
@@ -42,6 +43,20 @@ const DETAIL_MIN_V: u16 = 6;
 
 /// 좌우로 갈랐을 때 **상세**의 바닥 — 테두리 둘과 글 여덟 칸. 세로의 [`DETAIL_MIN_V`] 와 짝이다.
 const DETAIL_MIN_H: u16 = 10;
+
+/// 좌우로 갈랐을 때 **목록**의 바닥 — 상세의 바닥([`DETAIL_MIN_H`])과 같다. 몫이 처음값뿐이던 때는 목록이 늘 큰
+/// 쪽이라 바닥이 없어도 됐는데, 끌어서 몫을 줄이면(moai-irrj.mhr) 좁은 창에서 목록이 제 테두리만 남는다.
+const LIST_MIN_H: u16 = 10;
+
+/// 끌어서 고를 수 있는 목록의 몫(%) — 가로·세로 같다(moai-irrj.mhr). 끝까지 밀어도 다른 칸이 제 몫의 15% 는
+/// 든다: 한쪽을 0 으로 밀면 그 칸을 다시 잡을 선이 화면 끝에 붙어, 끌어 되돌리기 어렵다. 칸을 아예 걷는 것은
+/// `SPC v d` 가 한다.
+pub(super) const SHARES: std::ops::RangeInclusive<u16> = 15..=85;
+
+/// 설정이나 끌기가 낸 몫을 [`SHARES`] 안으로 당긴다.
+pub(super) fn share(n: i64) -> u16 {
+    n.clamp(i64::from(*SHARES.start()), i64::from(*SHARES.end())) as u16
+}
 
 /// 위아래로 갈랐을 때 **목록**의 바닥 — 테두리 둘과 줄 하나. [`super::menu::BODY_MIN`] 과 같은
 /// 꼴이다: 커서가 선 줄이 안 보이면 상세가 무엇에 대한 것인지를 잃는다.
@@ -1449,9 +1464,13 @@ fn unchecked_said(lang: Lang, kind: crate::latest::Trouble) -> &'static str {
 ///   눌린 목록은 커서가 선 줄조차 못 내 상세가 무엇에 대한 것인지를 잃는다. 그때는 숨긴 것과 같은
 ///   답(`None`)을 내 목록이 몸통을 다 쓴다 — [`super::menu::BODY_MIN`] 이 격자를 접는 것과 같은 꼴이다
 ///
-/// **자리를 맞바꿀 때 몫도 함께 따라간다**([`super::view::DetailAt::first`]) — 목록이 늘 큰
-/// 쪽이다. 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서 55%·70% 를 가져가, 자리를 한 번
+/// **자리를 맞바꿀 때 몫도 함께 따라간다**([`super::view::DetailAt::first`]) — 처음값으로는 목록이
+/// 큰 쪽이다. 두 조각을 그린 뒤 이름만 바꾸면 상세가 왼쪽·위에서 55%·70% 를 가져가, 자리를 한 번
 /// 돌렸을 뿐인데 목록이 반으로 준다.
+///
+/// **몫은 사람이 끌어 바꾼다**(moai-irrj.mhr) — 끈 몫(`App::list_width`·`list_height`)이 있으면 그것이 서고,
+/// 그때는 상세가 더 클 수도 있다. 어느 몫이든 목록의 바닥([`LIST_MIN_H`]·[`LIST_MIN_V`])은 지킨다: 몫을 그만큼
+/// 올려 그린다. 상세의 바닥은 `Constraint::Min` 이 지킨다.
 fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
     if !app.detail_open {
         return (body, None);
@@ -1460,7 +1479,14 @@ fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
     if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
         return (body, None);
     }
-    let (share, least) = if at.vertical() { (ABOVE, DETAIL_MIN_V) } else { (LEFT, DETAIL_MIN_H) };
+    let (share, least, len, list_least) = if at.vertical() {
+        (app.list_height.unwrap_or(ABOVE), DETAIL_MIN_V, body.height, LIST_MIN_V)
+    } else {
+        (app.list_width.unwrap_or(LEFT), DETAIL_MIN_H, body.width, LIST_MIN_H)
+    };
+    // 목록의 바닥을 지키는 가장 작은 몫 — 올림이라 그 몫으로 그리면 바닥보다 작아지지 않는다.
+    let floor = (u32::from(list_least) * 100).div_ceil(u32::from(len.max(1))).min(100) as u16;
+    let share = share.max(floor);
     // 앞에 서는 쪽이 첫 조각이다 — 목록의 몫(`share`)은 어느 쪽에 서든 목록을 따라간다.
     let hold = if at.first() {
         [Constraint::Min(least), Constraint::Percentage(share)]

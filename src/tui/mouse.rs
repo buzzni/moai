@@ -65,8 +65,16 @@ impl App {
         match (m.kind, wheel) {
             (MouseEventKind::Down(MouseButton::Left), _) => {
                 self.acted();
-                self.press(at);
+                // 뗀 것을 못 받은 끌기 — 창 밖에서 단추를 떼면 안 알리는 터미널이 있다. 끈 몫은 여기서 적는다.
+                self.drop_line();
+                if self.on_line(at) {
+                    self.dragging = true;
+                } else {
+                    self.press(at);
+                }
             }
+            (MouseEventKind::Drag(MouseButton::Left), _) if self.dragging => self.drag_to(at),
+            (MouseEventKind::Up(_), _) => self.drop_line(),
             (_, Some(by)) => {
                 self.acted();
                 self.wheel(at, by);
@@ -103,6 +111,53 @@ impl App {
             if n < self.rows().len() {
                 self.move_to(n);
             }
+        }
+    }
+
+    /// 칸 사이의 선인가 — 맞닿은 두 테두리 줄이다(moai-irrj.mhr). 상세가 안 섰으면 선이 없다.
+    ///
+    /// 앞에 선 칸(왼쪽·위)의 끝 테두리와 뒤에 선 칸의 첫 테두리, 둘 다 잡힌다 — 한 칸짜리 줄만 받으면 손이
+    /// 한 칸 어긋날 때마다 그 칸을 누른 것이 된다. 상세가 위아래에 서면 그 줄은 칸의 제목 줄이기도 하다.
+    fn on_line(&self, at: Position) -> bool {
+        let d = self.drawn;
+        let Some(detail) = d.detail else { return false };
+        let (front, back) = if self.detail_at.first() { (detail, d.list) } else { (d.list, detail) };
+        if self.detail_at.vertical() {
+            (d.body.x..d.body.right()).contains(&at.x) && (at.y + 1 == front.bottom() || at.y == back.y)
+        } else {
+            (d.body.y..d.body.bottom()).contains(&at.y) && (at.x + 1 == front.right() || at.x == back.x)
+        }
+    }
+
+    /// 잡은 선을 `at` 으로 끈다. **선이 손을 따라온다** — 앞에 선 칸이 그 자리까지 차도록 목록의 몫을 센다.
+    /// 몸통 밖으로 끌어도 끝(`draw::SHARES`)에서 멈춘다. 적는 것은 놓을 때다([`App::drop_line`]).
+    ///
+    /// 몫은 백분율이라 200칸 넘는 창에서는 선이 두 칸씩 간다 — 설정에 사람이 읽고 고칠 수 있는 수로 남기는
+    /// 값이고, 칸 단위로 들면 창 크기가 바뀔 때마다 뜻이 바뀐다.
+    fn drag_to(&mut self, at: Position) {
+        let body = self.drawn.body;
+        let vertical = self.detail_at.vertical();
+        let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
+        if len == 0 {
+            return;
+        }
+        // 앞에 선 칸이 차지할 칸 수 — 손이 선 칸이 그 칸의 끝 테두리다.
+        let front = (p.saturating_sub(start) + 1).min(len);
+        let list = if self.detail_at.first() { len - front } else { front };
+        // 반올림한 백분율 — 버림이면 선이 늘 손보다 한 칸 앞(왼쪽·위)에 선다.
+        let share = Some(super::draw::share(i64::from((u32::from(list) * 200 + u32::from(len)) / (2 * u32::from(len)))));
+        if vertical {
+            self.list_height = share;
+        } else {
+            self.list_width = share;
+        }
+    }
+
+    /// 끌기를 놓는다 — **그때 한 번** 설정에 적는다(`App::save_look`). 끄는 동안의 칸마다 적으면 손짓 하나가
+    /// 설정 파일을 수십 번 다시 쓰고, 옆 탐색기와 그만큼 자주 부딪친다. 끌던 것이 없으면 아무 일도 없다.
+    fn drop_line(&mut self) {
+        if std::mem::take(&mut self.dragging) {
+            self.save_look();
         }
     }
 
@@ -280,5 +335,130 @@ mod tests {
         roll(&mut a, true, bx, by);
         let Mode::Zone(z) = &a.mode else { panic!("휠이 고르는 창을 닫았다") };
         assert_eq!(((z.cursor, z.list.offset()), a.cursor), (before, 0), "고르는 창 위의 휠이 무언가 움직였다");
+    }
+
+    fn drag(a: &mut App, column: u16, row: u16) {
+        a.mouse(event(MouseEventKind::Drag(MouseButton::Left), column, row));
+    }
+
+    fn release(a: &mut App, column: u16, row: u16) {
+        a.mouse(event(MouseEventKind::Up(MouseButton::Left), column, row));
+    }
+
+    /// **칸 사이 선을 잡아 끌면 선이 손을 따라오고, 놓을 때 한 번 설정에 적힌다**(moai-irrj.mhr). 잡는 것은
+    /// 누르기가 아니다 — 포커스도 커서도 안 옮긴다. 다음 실행이 끈 몫으로 뜬다.
+    #[test]
+    fn dragging_the_line_resizes_the_panes_and_is_kept_on_release() {
+        let s = crate::scratch::Scratch::new("tui-mouse-drag");
+        let user = s.join("user.toml");
+        let mut a = drawn(5, 100, 20);
+        a.user_config = Some(user.clone());
+        let line = a.drawn.list.right() - 1;
+        click(&mut a, line, 5);
+        assert!(a.dragging, "선을 못 잡았다");
+        assert_eq!((a.focus, a.cursor), (Pane::Explorer, 0), "선을 잡은 것이 누르기로 읽혔다");
+        drag(&mut a, 29, 6);
+        super::super::draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.list_width, Some(30));
+        assert_eq!(a.drawn.list.right() - 1, 29, "선이 손을 안 따라왔다: {:?}", a.drawn);
+        assert!(!user.exists(), "끄는 동안 설정을 적었다");
+        release(&mut a, 29, 6);
+        assert!(!a.dragging);
+        let text = std::fs::read_to_string(&user).expect("놓았는데 끈 몫이 설정에 안 적혔다");
+        assert!(text.contains("list_width = 30") && !text.contains("list_height"), "{text}");
+
+        // 놓은 뒤의 끌기는 아무것도 안 한다.
+        drag(&mut a, 60, 6);
+        assert_eq!(a.list_width, Some(30), "놓은 선이 따라왔다");
+
+        let mut b = drawn(5, 100, 20);
+        b.user_config = Some(user);
+        b.load_look();
+        assert_eq!(b.list_width, Some(30), "끈 몫이 다음 실행에 안 이어졌다");
+    }
+
+    /// **상세가 앞에 서면 선 앞의 칸이 상세다**, 위아래로 서면 높이의 몫을 따로 든다. 맞닿은 두 테두리 줄이
+    /// 다 잡힌다. 끝까지 밀어도 다른 칸이 제 몫을 든다([`super::super::draw::SHARES`]).
+    #[test]
+    fn the_line_follows_every_side_and_stops_short_of_the_edges() {
+        use super::super::view::DetailAt;
+        let mut a = drawn(5, 100, 30);
+        a.detail_at = DetailAt::Left;
+        super::super::draw::tests::render(&mut a, 100, 30);
+        // 몸통 안의 한 줄 — 높은 창에서는 머리가 위에 선다.
+        let y = a.drawn.body.y + 2;
+        let line = a.drawn.list.x;
+        click(&mut a, line, y);
+        drag(&mut a, 29, y);
+        release(&mut a, 29, y);
+        assert_eq!(a.list_width, Some(70), "상세가 왼쪽인데 목록의 몫을 앞 칸으로 셌다");
+
+        a.detail_at = DetailAt::Bottom;
+        super::super::draw::tests::render(&mut a, 100, 30);
+        let detail = a.drawn.detail.expect("아래 상세가 안 섰다");
+        let body = a.drawn.body;
+        click(&mut a, 10, detail.y);
+        // 몸통 높이의 반 — 앞 칸(목록)이 그 줄까지 찬다. 몫은 반올림한 백분율이다.
+        let front = body.height / 2;
+        drag(&mut a, 10, body.y + front - 1);
+        release(&mut a, 10, body.y + front - 1);
+        let want = ((u32::from(front) * 200 + u32::from(body.height)) / (2 * u32::from(body.height))) as u16;
+        assert_eq!((a.list_width, a.list_height), (Some(70), Some(want)), "높이의 몫이 폭과 안 갈렸다: {body:?}");
+        super::super::draw::tests::render(&mut a, 100, 30);
+        assert_eq!(a.drawn.list.height, front, "선이 손을 안 따라왔다: {:?}", a.drawn);
+
+        a.detail_at = DetailAt::Right;
+        super::super::draw::tests::render(&mut a, 100, 30);
+        let line = a.drawn.detail.expect("상세가 안 섰다").x;
+        click(&mut a, line, y);
+        drag(&mut a, 0, y);
+        assert_eq!(a.list_width, Some(15), "왼쪽 끝을 지났다");
+        drag(&mut a, 200, y);
+        assert_eq!(a.list_width, Some(85), "오른쪽 끝을 지났다");
+        release(&mut a, 200, y);
+        super::super::draw::tests::render(&mut a, 100, 30);
+        assert!(a.drawn.detail.is_some_and(|d| d.width >= 10), "상세가 바닥 밑으로 줄었다: {:?}", a.drawn);
+    }
+
+    /// 뗀 것을 못 받아도(창 밖에서 단추를 떼면 안 알리는 터미널이 있다) **다음 누르기가 끈 몫을 적는다** —
+    /// 안 그러면 그 끌기는 화면에만 서고 다음 실행에서 사라진다.
+    #[test]
+    fn a_lost_release_is_saved_by_the_next_click() {
+        let s = crate::scratch::Scratch::new("tui-mouse-lost-up");
+        let user = s.join("user.toml");
+        let mut a = drawn(5, 100, 20);
+        a.user_config = Some(user.clone());
+        let line = a.drawn.list.right() - 1;
+        click(&mut a, line, 5);
+        drag(&mut a, 39, 5);
+        assert!(!user.exists());
+        let rows = a.drawn.rows;
+        click(&mut a, rows.x + 2, rows.y + 1);
+        assert!(!a.dragging);
+        assert_eq!(a.cursor, 1, "끌기 뒤의 누르기가 안 들었다");
+        assert!(std::fs::read_to_string(&user).unwrap_or_default().contains("list_width = 40"));
+    }
+
+    /// **설정의 몫은 관대하게 읽는다** — 범위 밖의 수는 끝으로 당겨 서고, 이 세션이 안 끄는 한 파일의 줄은 그대로다.
+    /// 수가 아닌 값은 그 까닭을 한 줄로 대고 나머지 보기는 입힌다. 좁은 창에서 몫이 작아도 목록은 바닥을 지킨다.
+    #[test]
+    fn a_share_in_the_config_is_read_leniently_and_the_list_keeps_its_floor() {
+        let s = crate::scratch::Scratch::new("tui-mouse-share-config");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nlist_width = 5\nlist_height = \"tall\"\nsort = \"title\"\n").unwrap();
+        let mut a = drawn(5, 100, 20);
+        a.user_config = Some(user.clone());
+        a.load_look();
+        assert_eq!((a.list_width, a.list_height), (Some(15), None));
+        let said = a.notice.clone().unwrap_or_default();
+        assert!(said.contains("list_height") && said.contains(crate::i18n::say(a.site.lang, "look.want_number")), "{said}");
+        assert_eq!(a.order.by, super::super::keys::Order::Title, "틀린 키 하나로 나머지를 버렸다");
+        a.hit("SPC v l Esc");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("list_width = 5") && text.contains("list_height = \"tall\""), "안 끈 몫을 고쳐 적었다\n{text}");
+
+        // 좁은 창 — 15% 는 4칸이지만 목록은 바닥(테두리 둘과 여덟 칸)을 든다.
+        super::super::draw::tests::render(&mut a, 30, 20);
+        assert!(a.drawn.list.width >= 10, "목록이 바닥 밑으로 줄었다: {:?}", a.drawn);
     }
 }
