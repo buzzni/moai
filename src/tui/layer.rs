@@ -3601,6 +3601,50 @@ mod tests {
         );
     }
 
+    /// **거름망의 `me` 는 들어간 그 프로젝트의 사람이다**(moai-xd7b). 프로젝트마다 git 설정이 다를 수 있어
+    /// 사람은 그 뿌리에서 푼다(moai-d3sy) — 띄운 자리의 사람으로 풀면 `moai -C <그 프로젝트> show -a me` 와 다른
+    /// 줄이 남는다. 층에서는 거름망이 안 서므로(`keys::Browse::Filter`) 사람이 갈리는 자리는 프로젝트 안뿐이다.
+    #[test]
+    fn the_filters_me_is_the_person_of_the_project_entered() {
+        fn by_root(_: Option<&str>, root: &Path) -> Result<crate::model::Actor, crate::model::NoActor> {
+            let name = if root.ends_with("two") { "둘" } else { "하나" };
+            Ok(crate::model::Actor { name: name.into(), email: format!("{name}@example.com") })
+        }
+        let s = Scratch::fenced("layer-filter-me");
+        let dirs: Vec<PathBuf> = ["one", "two"]
+            .into_iter()
+            .map(|name| {
+                let dir = s.project(name, &[]);
+                let body: String = [("argos-0001", "하나"), ("argos-0002", "둘")]
+                    .into_iter()
+                    .map(|(id, who)| {
+                        let title = format!("{name} 의 {who} 것");
+                        let mut i =
+                            Issue::new(id.into(), title, Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+                        (i.assignee, i.assignee_email) = (Some(who.into()), Some(format!("{who}@example.com")));
+                        format!("{}\n", serde_json::to_string(&i).unwrap())
+                    })
+                    .collect();
+                std::fs::write(dir.join(".moai/issues.jsonl"), body).unwrap();
+                dir
+            })
+            .collect();
+        let cfg = s.register(&[&dirs[0], &dirs[1]]);
+        let mut a = layered(&cfg);
+        (a.user, a.identify) = (None, by_root);
+        for (at, want) in [(0, "one 의 하나 것"), (1, "two 의 둘 것")] {
+            a.enter_project(at);
+            assert!(!a.on_layer(), "시험의 전제 — 들어갔다");
+            a.hit("SPC f");
+            type_in(&mut a, "assignee=me");
+            a.key(key(KeyCode::Enter));
+            assert_eq!(a.mode, Mode::Browse, "{:?}", a.input_error());
+            assert_eq!(titles(&a), [want], "들어간 프로젝트의 사람으로 안 풀었다");
+            a.climb();
+            assert!(a.on_layer(), "시험의 전제 — 올라왔다");
+        }
+    }
+
     /// **누군지 묻고 이어진 쓰기도 박은 프로젝트에 담는다.** 층에서 연 폼이 묻는 칸을 지나
     /// 담기면 그 프로젝트 파일에만 선다.
     #[test]

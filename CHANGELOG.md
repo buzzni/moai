@@ -4,11 +4,48 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-`scripts/bump-version.sh <version>` moves whatever has accumulated under
+`scripts/bump-version.sh auto` moves whatever has accumulated under
 `[Unreleased]` into a new release section and leaves `[Unreleased]` empty for the
-next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
+next one. The headings pick the version: before 1.0, `Fixed` and `Security` alone
+make a patch release and anything else a minor one. It does not commit and it
+does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
+
+## [0.1.6] - 2026-10-01
+
+### Fixed
+
+- **An editor's lock file beside a journal no longer fails every read of the
+  history.** Opening `.moai/journal/<email>.jsonl` in Emacs without saving leaves
+  a dangling link `.#<email>.jsonl` beside it, and moai counted that link as a
+  journal it could not read: while the file stayed open, `moai show`, `-g`,
+  `--json` and `--removed` in every session said the history was unreadable and
+  exited 1, though no line was missing. Names under `.moai/journal/` that begin
+  with `.` are no longer read as journals — moai never writes one, and the ones
+  that land there (Emacs locks, macOS `._` AppleDouble files) belong to other
+  tools.
+
+- **`assignee=me` in the explorer's filter now means you.** `SPC f` with
+  `assignee=me` looked for someone literally named `me` and showed nothing, while
+  `moai show -a me` and `--filter assignee=me` already meant the current person.
+  The explorer now resolves `me` the same way, to the person the header names in
+  the project you are in. When it cannot tell who you are, the prompt refuses the
+  filter with the first line of the command line's refusal, in the language you
+  picked; it never asks who you are.
+
+- **A journal link that points outside the checkout is no longer read.** If a
+  repository committed `.moai/journal/<name>.jsonl`, the old
+  `.moai/journal.jsonl` or `.moai/journal` itself as a link to a file outside its
+  checkout — `/proc/self/pagemap`, say — `moai show`, `-g`, `--removed` and the
+  explorer's note search kept reading until memory ran out. Reads now follow the
+  rule writes already did: a file the repository holds follows a link only inside
+  its own checkout, and never into `.git/`. A journal is also read no further
+  than the size its open file reports, so a name swapped for such a link between
+  the check and the read cannot run away either. The skipped link is named on
+  stderr with where it points and the run ends non-zero, as with any journal that
+  cannot be read; links inside the checkout, such as an old address's file
+  linked to the new one, are read as before.
 
 ## [0.1.5] - 2026-10-01
 
