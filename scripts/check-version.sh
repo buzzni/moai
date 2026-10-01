@@ -13,6 +13,7 @@
 #   scripts/check-version.sh v0.1.0    릴리스 워크플로의 첫 스텝
 #   scripts/check-version.sh           pre-push 훅. git 이 주는 줄을 stdin 에서 읽는다
 #   scripts/check-version.sh --print   Cargo.toml 의 판을 찍는다 (파일 이름을 짓는 자리)
+#   scripts/check-version.sh --print-name   Cargo.toml 의 크레이트 이름을 찍는다 (bump-version.sh)
 #
 # **판은 미는 커밋에서 읽는다**(moai-ler5). 작업본만 보던 판은 이미 다음 판으로
 # 넘어간 자리에서 옛 태그를 다시 미는 것을 막았다 — 그 태그의 커밋에는 맞는 판이
@@ -44,8 +45,8 @@ die() {
   exit 2
 }
 
-# `[package]` 안의 첫 `version` 만 읽는다. 의존성 표에도 같은 낱말이 서 있어,
-# 표를 안 가리면 아무 크레이트의 판이나 집는다.
+# `[package]` 안에서 `key`(`version`·`name`)로 선 첫 줄 하나만 읽는다. 의존성 표에도
+# `version` 이 서 있어, 표를 안 가리면 아무 크레이트의 판이나 집는다.
 #
 # **늘 stdin 을 읽는다.** 미는 커밋의 `Cargo.toml` 은 파일로 안 서고 `git show` 가
 # 흘려 주므로 부르는 자리가 둘인데, 읽는 자를 그쪽에 한 번 더 적으면 `[package]` 표를
@@ -53,10 +54,13 @@ die() {
 # stdin 을 겸하던 판은 인자 없이 부르는 쪽이 bash 4.4 아래(맥의 `/bin/bash` 3.2)에서
 # 빈 `"$@"` 를 `set -u` 위반으로 읽어, 미는 커밋을 못 꺼내고 조용히 작업본으로
 # 내려앉았다 (리뷰 moai-6mk3.lgj).
-manifest_version() {
-  awk '
+#
+# 같은 표에서 `name` 도 읽는다(`--print-name`). `bump-version.sh` 가 `Cargo.lock` 에서 자기
+# 줄을 찾을 때 쓴다 — 거기서 표를 가리는 awk 를 다시 적으면 위의 두 군데가 되살아난다.
+manifest_key() {
+  awk -v key="$1" '
     /^[[:space:]]*\[/ { pkg = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*$/); next }
-    pkg && /^[[:space:]]*version[[:space:]]*=/ {
+    pkg && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
       sub(/^[^=]*=[[:space:]]*/, "")
       sub(/[[:space:]]*#.*$/, "")
       gsub(/^[[:space:]]*"|"[[:space:]]*$/, "")
@@ -66,13 +70,22 @@ manifest_version() {
   '
 }
 
-# 작업본의 판. `--print` 와, 커밋에서 못 꺼냈을 때의 내려앉는 자리다.
-working_version() {
+manifest_version() {
+  manifest_key version
+}
+
+# 작업본의 `[package]` 값 하나. `--print`·`--print-name` 과, 커밋에서 못 꺼냈을 때의
+# 내려앉는 자리다.
+working_key() {
   local said
   [ -f "$manifest" ] || die "Cargo.toml 을 못 찾았다 — $manifest"
-  said=$(manifest_version <"$manifest")
-  [ -n "$said" ] || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
+  said=$(manifest_key "$1" <"$manifest")
+  [ -n "$said" ] || die "Cargo.toml 의 [package] 에서 $1 을 못 읽었다"
   printf '%s\n' "$said"
+}
+
+working_version() {
+  working_key version
 }
 
 # 미는 커밋의 판. 못 꺼내면 1 로 물러나고 부른 쪽이 작업본으로 내려앉는다.
@@ -147,6 +160,10 @@ if [ "$#" -gt 0 ]; then
   # 산출물 이름)가 보는 것이 작업본이고, 태그를 받지도 않는다.
   --print)
     working_version
+    exit
+    ;;
+  --print-name)
+    working_key name
     exit
     ;;
   refs/tags/* | v[0-9]* | [0-9]*)
