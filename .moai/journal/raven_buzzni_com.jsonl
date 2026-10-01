@@ -2496,3 +2496,4 @@
 {"ts":"2026-10-01T07:42:43Z","id":"moai-btxt.1gk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T07:42:44Z","id":"moai-btxt.xia","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T07:42:44Z","id":"moai-btxt.0ln","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것 7건: 규칙 글 폴백을 tzdb 의 모든 실패로 넓혔고, Head 가 time 을 들며, glibc 를 잘못 적은 글을 고쳤고, tzdb 없는 CLI 시험과 `/` 가 든 규칙 글 시험을 더했고, 문서 둘을 고쳤다. 넘긴 것: 2번 SPC o t 커서는 idea moai-2djp 로 담아 릴리스 밖에 두었다."}
+{"ts":"2026-10-01T07:43:11Z","id":"moai-btxt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 남은 일 없음. 멤버 셋과 리뷰가 닫혔다(머지 53c425dd). 리뷰가 넘긴 SPC o t 커서는 idea moai-2djp 로 릴리스 밖에 있다."}
