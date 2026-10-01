@@ -367,16 +367,15 @@ fn is_tzif(at: &Path) -> bool {
 ///
 /// **꼬리를 못 읽어도 파일은 선다** — 읽기는 관대하다. 그때는 옛 판처럼 마지막 전환의 값이 뒤로 이어진다.
 fn parse(raw: &[u8]) -> Option<(Vec<(i64, i32)>, i32, Option<Rule>)> {
-    let (v1, version) = head(raw, 0)?;
+    let (v1, version) = head(raw, 0, 4)?;
     if version < b'2' {
         let (shifts, before) = block(raw, v1.after, &v1, 4)?;
         return Some((shifts, before, None));
     }
     // 판 1 자료를 건너뛴 자리에 판 2 머리가 다시 선다.
-    let skip = v1.size(4);
-    let (v2, _) = head(raw, v1.after + skip)?;
+    let (v2, _) = head(raw, v1.after + v1.size, 8)?;
     let (shifts, before) = block(raw, v2.after, &v2, 8)?;
-    Some((shifts, before, footer(raw, v2.after + v2.size(8))))
+    Some((shifts, before, footer(raw, v2.after + v2.size)))
 }
 
 /// 판 2 자료 뒤의 꼬리 — 줄바꿈 둘 사이의 POSIX TZ 글. 비었으면(규약이 허락한다) 규칙이 없다.
@@ -386,48 +385,37 @@ fn footer(raw: &[u8], at: usize) -> Option<Rule> {
     Rule::parse(std::str::from_utf8(&tail[..end]).ok()?)
 }
 
-/// TZif 머리글의 셈들.
+/// TZif 머리글의 셈들. [`block`] 이 읽는 넷만 든다.
 struct Head {
-    isutcnt: usize,
-    isstdcnt: usize,
-    leapcnt: usize,
     timecnt: usize,
     typecnt: usize,
-    charcnt: usize,
     /// 머리글 바로 뒤 — 자료가 시작하는 자리.
     after: usize,
+    /// 이 머리글이 낸 자료 덩어리의 바이트 수. **파일 안에 다 든다** — [`head`] 가 재 두었다.
+    size: usize,
 }
 
-impl Head {
-    /// 이 셈이 낸 자료 덩어리의 바이트 수. `time` 은 전환 시각 하나의 크기(4 또는 8)다.
-    fn size(&self, time: usize) -> usize {
-        self.timecnt * (time + 1)
-            + self.typecnt * 6
-            + self.charcnt
-            + self.leapcnt * (time + 4)
-            + self.isstdcnt
-            + self.isutcnt
-    }
-}
-
-fn head(raw: &[u8], at: usize) -> Option<(Head, u8)> {
+/// `at` 의 머리글을 읽는다. `time` 은 그 자료의 전환 시각 하나의 크기(판 1 은 4, 판 2 는 8)다.
+///
+/// **자료 덩어리가 파일 안에 다 들어야 머리글로 받는다**(moai-btxt.xia). 셈 여섯은 남이 지은 파일(`TZDIR`)이
+/// 대는 32비트 수라, 곱해 더한 크기가 `usize` 가 32비트인 기계에서 넘칠 수 있다 — 그 크기는 `u64` 로 재고,
+/// 파일 길이를 넘으면 여기서 돌려보낸다. 그러면 [`block`] 과 [`parse`] 가 이 셈으로 짓는 자리는 모두 파일
+/// 길이 안이라 어느 기계에서도 안 넘친다. 판 1 파일은 뒤쪽(윤초·표준/UT 표시)을 안 읽지만 그 자리가 잘렸으면
+/// 못 받는다 — tzcode 와 glibc 도 그런 파일을 안 받는다.
+fn head(raw: &[u8], at: usize, time: usize) -> Option<(Head, u8)> {
     let b = raw.get(at..at + 44)?;
     if &b[..4] != b"TZif" {
         return None;
     }
-    let n = |i: usize| -> usize { u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as usize };
-    Some((
-        Head {
-            isutcnt: n(20),
-            isstdcnt: n(24),
-            leapcnt: n(28),
-            timecnt: n(32),
-            typecnt: n(36),
-            charcnt: n(40),
-            after: at + 44,
-        },
-        b[4],
-    ))
+    let n = |i: usize| u64::from(u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]));
+    let (isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt) = (n(20), n(24), n(28), n(32), n(36), n(40));
+    // 셈 하나가 2³² 아래이고 곱하는 수가 열둘 아래라, 여섯을 더해도 `u64` 에 넉넉히 든다.
+    let time = time as u64;
+    let size = timecnt * (time + 1) + typecnt * 6 + charcnt + leapcnt * (time + 4) + isstdcnt + isutcnt;
+    let after = at + 44;
+    let size = usize::try_from(size).ok().filter(|size| *size <= raw.len() - after)?;
+    // 파일 안에 드는 크기보다 작은 셈이라 `usize` 로 옮겨도 잃는 것이 없다.
+    Some((Head { timecnt: timecnt as usize, typecnt: typecnt as usize, after, size }, b[4]))
 }
 
 fn block(raw: &[u8], at: usize, h: &Head, time: usize) -> Option<(Vec<(i64, i32)>, i32)> {
@@ -808,6 +796,33 @@ mod tests {
         odd.extend_from_slice(&v2);
         odd.extend_from_slice(b"\nEST5EDT\n");
         assert_eq!(parse(&odd), Some((vec![(100, 3600), (1 << 40, 7200)], 0, None)));
+    }
+
+    /// **머리글의 셈이 파일 밖을 대면 TZif 가 아니다**(moai-btxt.xia). 셈은 남이 지은 파일(`TZDIR`)이 대는 32비트
+    /// 수라, 곱해 더하면 `usize` 가 32비트인 기계에서 넘친다 — 거기서 넘친 크기로 자리를 지으면 엉뚱한 바이트를
+    /// 읽거나 첨자가 터진다. 64비트 기계에서는 셈 하나를 끝까지 올려도 안 넘치니, 여기서 붉어지는 것은 파일 길이로
+    /// 묶는 자다. 판 1 파일의 뒤쪽이 잘린 것도 같은 자에 걸린다.
+    #[test]
+    fn a_header_that_counts_past_the_file_is_not_a_tzif() {
+        let fine = tzif(b'\0', 4, &[(100i64, 1)], &[0, 3600]);
+        assert_eq!(parse(&fine), Some((vec![(100, 3600)], 0, None)));
+        // isutcnt·isstdcnt·leapcnt·timecnt·typecnt·charcnt 차례로 하나씩 끝까지 올린다.
+        for at in [20, 24, 28, 32, 36, 40] {
+            let mut huge = fine.clone();
+            huge[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+            assert_eq!(parse(&huge), None, "{at} 자리의 셈이 파일 밖을 대는데 읽었다");
+        }
+        // 윤초 하나를 댔는데 그 자리가 없다 — 판 1 은 그 자리를 안 읽어도, 잘린 파일이라 못 받는다.
+        let mut cut = fine.clone();
+        cut[28..32].copy_from_slice(&1u32.to_be_bytes());
+        assert_eq!(parse(&cut), None, "잘린 판 1 파일을 읽었다");
+        // 판 2 의 앞 자료가 파일 밖을 대면 뒤 머리글을 찾으러 가지 않는다.
+        let mut v2 = tzif(b'2', 4, &[(100i64, 1)], &[0, 3600]);
+        v2.extend_from_slice(&tzif(b'2', 8, &[(100i64, 1)], &[0, 3600]));
+        v2.extend_from_slice(b"\nSTD0\n");
+        assert!(parse(&v2).is_some());
+        v2[32..36].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(parse(&v2), None, "판 1 자료의 셈이 파일 밖을 대는데 읽었다");
     }
 
     /// **slim 파일은 마지막 전환 뒤를 꼬리가 잰다**(moai-r621). `zic -b slim`(2020b 부터 기본)으로 지은
