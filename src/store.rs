@@ -608,6 +608,20 @@ impl Repo {
             if !p.extension().is_some_and(|x| x == "jsonl") {
                 continue;
             }
+            // **`.` 로 시작하는 이름은 저널이 아니다**(moai-o4jt). Emacs 는 저장하지 않은 채 연 파일 곁에
+            // 잠금 링크 `.#<이름>.jsonl -> user@host.PID:BOOT` 를 세운다. 가리키는 곳이 없는 링크라 아래
+            // `metadata` 가 지고, 그것을 못 읽은 저널로 세어 — 빠진 줄은 하나도 없는데 — 모든 세션의
+            // `show`·`-g`·`--removed` 가 1 로 끝났다. `--removed` 의 알림은 손으로 줄을 지우라고까지 권했다.
+            //
+            // **`.#` 하나가 아니라 `.` 전부를 거른다.** 이 도구가 짓는 이름은 [`journal_file`] 이 메일의
+            // `.` 를 모두 `_` 로 접어, `.jsonl` 앞에 `.` 가 서는 일이 처음부터 없다 — 메일의 앞부분도 `.` 로
+            // 시작할 수 없다. 그러니 넓혀도 잃는 저널이 없다. 반대로 이 디렉터리에 실제로 서는 숨은 이름은
+            // 다 다른 도구의 것이다. Emacs 의 잠금 링크 말고도, macOS 가 SMB·exFAT 같은 파일시스템이나
+            // tar·zip 아카이브에 까는 AppleDouble(`._<이름>.jsonl`)이 있다. `.#` 만 막으면 다음 철자가 같은
+            // 구멍을 다시 연다. 숨지 않은 이름(옛 `<메일>.jsonl` 을 이은 링크 같은 것)은 그대로 읽는다.
+            if p.file_name().is_some_and(|n| n.as_encoded_bytes().starts_with(b".")) {
+                continue;
+            }
             // **`metadata` 로 잰다** — `read_dir` 의 `file_type` 은 심볼릭 링크를 따라가지 않아,
             // 디렉터리를 가리키는 링크가 `!is_dir` 을 지나 아래 `fs::read` 에서 EISDIR 로 터진다.
             //
@@ -2915,6 +2929,39 @@ mod tests {
         assert_eq!(got.len(), 1, "제 파일의 이력을 잃었다: {got:?}");
         let told = unread_under(d.path());
         assert!(told.iter().any(|u| u.at == r.journal_path()), "못 푼 옛 한 파일을 말없이 뺐다 — {told:?}");
+    }
+
+    /// **`.` 로 시작하는 이름은 저널이 아니다**(moai-o4jt). Emacs 는 저장하지 않은 채 연 파일 곁에 잠금
+    /// 링크 `.#<이름>.jsonl -> user@host.PID:BOOT` 를 세운다. `.jsonl` 거르개를 지나는데 가리키는 곳이
+    /// 없는 링크라 `metadata` 가 졌고, 그것을 못 읽은 저널로 세어 빠진 줄이 하나도 없는데 1 로 끝났다.
+    ///
+    /// macOS 가 까는 AppleDouble(`._<이름>.jsonl`)도 함께 잰다 — 이쪽은 보통 파일이라 못 읽은 것으로는
+    /// 안 서지만, 그 안을 저널 줄로 풀 까닭도 없다. `.#` 만 거르면 `files` 를 견주는 줄이 붉어진다.
+    #[cfg(unix)]
+    #[test]
+    fn a_hidden_name_beside_the_journal_is_not_a_journal() {
+        let (r, d) = repo("journal-hidden");
+        let by = crate::model::someone("raven");
+        r.with_write(
+            || crate::i18n::Lang::Ko,
+            |i, _, _| {
+                i.push(issue("argos-4aex"));
+                Ok((vec![JournalEntry::note("argos-4aex", "발견", T, &by)], ()))
+            },
+        )
+        .unwrap();
+        let name = journal_file(&by.email).unwrap();
+        let mine = r.journal_dir().join(&name);
+        let lock = r.journal_dir().join(format!(".#{name}"));
+        std::os::unix::fs::symlink("raven@host.4242:1727740800", &lock).unwrap();
+        std::fs::write(r.journal_dir().join(format!("._{name}")), b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X").unwrap();
+
+        let files = r.journal_files();
+        let hist = r.journal_of("argos-4aex");
+        let told = unread_under(d.path());
+        assert!(told.is_empty(), "편집기의 잠금 링크를 못 읽은 저널로 셌다 — {told:?}");
+        assert_eq!(files, [r.journal_path(), mine], "숨은 이름을 저널로 들였다");
+        assert_eq!(hist.len(), 1, "제 이력을 잃었다");
     }
 
     /// **메일이 없으면 아무것도 안 쓴다**(moai-nzlo, 2026-09-21 사용자 결정). `unknown.jsonl` 도,
