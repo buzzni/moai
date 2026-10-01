@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # `Cargo.toml` 과 `CHANGELOG.md` 의 버전을 한 번에 움직인다.
 #
-#     scripts/bump-version.sh 0.2.0
+#     scripts/bump-version.sh auto      [Unreleased] 의 절을 읽고 판을 고른다
+#     scripts/bump-version.sh minor     한 칸을 손으로 고른다 (patch 도 같다)
+#     scripts/bump-version.sh 0.2.0     판을 그대로 준다 — 1.0 은 이 길로만 연다
+#     scripts/bump-version.sh --next    auto 가 고를 판만 찍는다. 아무것도 안 쓴다
 #
 # **태그는 사람이 단다.** 이 스크립트는 커밋도 태그도 하지 않고 파일만 고친다 —
 # 무엇이 바뀌었는지 사람이 보고 커밋하는 자리를 남긴다. 태그를 여기서 달면
@@ -20,12 +23,90 @@ die() {
   exit 2
 }
 
-[ "$#" -eq 1 ] || die "올릴 버전을 하나 준다 — scripts/bump-version.sh 0.2.0"
-want=$1
+# **판을 고르는 자는 `[Unreleased]` 의 절이다**(moai-ug3j, 2026-10-01 사용자 결정).
+# 1.0 전에는 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
+# 있으면 minor 다 — 동작이 바뀌었으면 고친 것이 아니다. AI 든 사람이든 고르는 것은 줄을
+# 어느 절에 넣는가이고, 번호는 여기서 센다. 세션마다 손으로 셈하던 판은 0.1.1 부터
+# 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
+#
+# 모르는 절은 어느 칸인지 못 가르므로 고르지 않고 멈춘다. 어림으로 patch 를 주면 기능이
+# 든 판이 고친 판으로 나간다.
+#
+# **첫 절 앞의 머리글은 세지 않는다**(리뷰 moai-ug3j.rrc 4번). 0.1.2 는 깨지는 것 둘을
+# 머리글에 모아 두고 같은 것을 아래 절에 다시 적었다 — 그 꼴을 막으면 판을 다시 손으로
+# 주는 수밖에 없다. 대신 머리글만 있고 절이 비었으면 멈추고, 머리글을 건너뛰었다는 것을
+# 까닭 줄에 적는다. 항목은 절 안에 적는다.
+pick() {
+  [ -f "$changelog" ] || die "auto 는 CHANGELOG.md 의 [Unreleased] 를 읽는다 — 파일이 없다"
+  local class head sorted minor='' patch='' odd='' lead=''
+  # awk 를 process substitution 으로 받으면 그 실패가 종료 코드째 사라져 "비었다" 로 읽힌다.
+  # 먼저 받아 두고, 실패하면 그 자리에서 멈춘다.
+  #
+  # `####` 는 절이 아니라 그 절의 글이다 — 절의 이름으로 읽으면 `# Detail` 같은 모르는
+  # 절이 되어 고르지 못한다. 울타리(```) 안의 `#` 은 셸 주석이지 제목이 아니다 — 거기서
+  # 끊으면 그 뒤의 절을 못 읽어 minor 가 patch 로 나간다.
+  sorted=$(awk '
+    !on && /^##[[:space:]]*\[Unreleased\]/ { on = 1; found = 1; next }
+    !on { next }
+    /^[[:space:]]*(```|~~~)/ { fence = !fence }
+    !fence && (/^#$/ || /^#[^#]/ || /^##$/ || /^##[^#]/) { exit }
+    !fence && (/^###$/ || /^###[^#]/) { h = $0; sub(/^###[[:space:]]*/, "", h); sub(/[[:space:]]+$/, "", h); next }
+    /^[[:space:]]*$/ { next }
+    {
+      if (h in seen) next
+      seen[h] = 1
+      k = tolower(h)
+      if (h == "") print "lead\t"
+      else if (k ~ /^(added|changed|deprecated|removed)$/) print "minor\t" h
+      else if (k ~ /^(fixed|security)$/) print "patch\t" h
+      else print "odd\t" h
+    }
+    END { if (!found) print "missing\t" }
+  ' "$changelog") || die "CHANGELOG.md 의 [Unreleased] 를 못 읽었다"
+  while IFS=$'\t' read -r class head; do
+    case $class in
+    '') ;;
+    lead) lead=1 ;;
+    minor) minor="$minor${minor:+·}$head" ;;
+    patch) patch="$patch${patch:+·}$head" ;;
+    missing) die 'CHANGELOG.md 에 ## [Unreleased] 줄이 없다' ;;
+    *) odd="$odd${odd:+, }$head" ;;
+    esac
+  done <<<"$sorted"
+  [ -z "$odd" ] || die "[Unreleased] 에서 칸을 못 가른다 — $odd. Added·Changed·Deprecated·Removed·Fixed·Security 중 하나로 옮기거나 판을 직접 준다"
+  if [ -n "$minor" ]; then
+    level=minor why="[Unreleased] 에 $minor 가 있다"
+  elif [ -n "$patch" ]; then
+    level=patch why="[Unreleased] 에 $patch 뿐이다"
+  elif [ -n "$lead" ]; then
+    die "[Unreleased] 에 첫 절 앞의 글만 있다 — 항목을 Added·Changed·Deprecated·Removed·Fixed·Security 절 안에 적는다"
+  else
+    die "[Unreleased] 가 비었다 — 낼 것이 없다"
+  fi
+  [ -z "$lead" ] || why="$why (첫 절 앞의 머리글은 세지 않았다)"
+}
+
+# `have` 에서 `level` 한 칸을 올린다. 꼬리(`-rc.1`)가 붙은 판에서 한 칸이 무엇인지는 정한
+# 적이 없으니 판을 직접 받는다.
+step() {
+  [[ $have =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+    die "지금 판 $have 에서 한 칸을 못 잰다 — 판을 직접 준다"
+  local x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]} z=${BASH_REMATCH[3]}
+  case $level in
+  minor) want=$x.$((y + 1)).0 ;;
+  patch) want=$x.$y.$((z + 1)) ;;
+  esac
+}
+
+[ "$#" -eq 1 ] || die "올릴 판을 하나 준다 — auto · minor · patch · 0.2.0 (보기만 하려면 --next)"
+want=$1 level='' why='' next=''
 case $want in
 v*) die "앞의 v 를 빼고 준다 — ${want#v}" ;;
+auto | minor | patch) level=$want ;;
+--next) level=auto next=1 ;;
+major) die "major 는 판을 직접 준다 — 1.0 은 사람이 연다" ;;
+*) [[ $want =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die "버전 꼴이 아니다 — $want" ;;
 esac
-[[ $want =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die "버전 꼴이 아니다 — $want"
 [ -f "$manifest" ] || die "Cargo.toml 을 못 찾았다 — $manifest"
 
 # **판을 읽는 자는 `check-version.sh` 하나다.** 같은 awk 를 여기 한 번 더 적으면
@@ -34,6 +115,31 @@ esac
 [ -x "$check" ] || die "scripts/check-version.sh 를 못 찾았다 — $check"
 have=$("$check" --print) || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
 [ -n "$have" ] || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
+
+# 위의 규칙은 1.0 전의 것이다. 1.0 뒤에는 Removed 와 동작 변경이 major 일 수 있는데 그
+# 금은 아직 안 그었다 — 그은 척 minor 를 내느니 사람에게 넘긴다.
+case $level in
+auto)
+  [[ $have == 0.* ]] || die "1.0 뒤의 규칙은 아직 안 정했다 — minor · patch · 판을 직접 준다"
+  pick
+  step
+  ;;
+minor | patch)
+  why="손으로 고른 $level"
+  step
+  ;;
+esac
+
+# **`--next` 는 판 하나만 stdout 에 낸다**(moai-ug3j.w0c). 릴리스 때 마일스톤의 잠정
+# 제목과 견주는 자리라 `v$(scripts/bump-version.sh --next)` 로 그대로 받게 하고, 까닭은
+# 사람이 읽도록 stderr 로 보낸다. 고르는 길은 `auto` 와 한 길이다 — 따로 셈하면 미리
+# 본 판과 실제로 올린 판이 갈릴 수 있다.
+if [ -n "$next" ]; then
+  printf 'bump-version: %s — %s, %s → %s\n' "$why" "$level" "$have" "$want" >&2
+  printf '%s\n' "$want"
+  exit 0
+fi
+[ -z "$why" ] || printf 'bump-version: %s — %s, %s → %s\n' "$why" "$level" "$have" "$want"
 [ "$have" != "$want" ] || die "이미 $want 다"
 
 # **CHANGELOG 를 먼저 본다.** 뒤에서 죽으면 `Cargo.toml` 만 움직인 반쪽이 남고, 그

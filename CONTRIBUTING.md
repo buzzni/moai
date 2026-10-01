@@ -140,13 +140,28 @@ commit, and a review point you decided not to act on gets a sentence saying why.
 ## Releasing
 
 ```sh
-scripts/bump-version.sh 0.2.0                     # Cargo.toml, Cargo.lock, CHANGELOG.md
+scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes nothing
+scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
 git push origin develop
 gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
 git fetch origin && git tag v0.2.0 origin/main
 git push origin v0.2.0
 ```
+
+**The changelog picks the number.** `auto` reads the headings under
+`[Unreleased]` that hold entries. Before 1.0, `Fixed` and `Security` alone make a
+patch release, and any `Added`, `Changed`, `Deprecated` or `Removed` makes a minor
+one — a change in behaviour is not a fix. So the call you make is which heading an
+entry goes under, and the script counts the number from there: two people, or two
+agents, releasing the same changelog get the same version. A heading it does not
+know, or an `[Unreleased]` with no entry under a heading, stops it with nothing
+moved. A lead paragraph above the first heading — 0.1.2 gathered its breaking
+changes there — is left out of the count, so every entry goes under a heading
+as well. It never picks a major version — `1.0.0` is given by hand — and
+after 1.0 `auto` stops as well, because which removals and behaviour changes count
+as breaking has not been decided yet. `minor`, `patch` or an explicit version
+still go through where the rule does not fit.
 
 **The tag goes on the merge commit in `main`, not on the tip of `develop`.**
 `main` is what a release is cut from, and a tag on `develop` would build

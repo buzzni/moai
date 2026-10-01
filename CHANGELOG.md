@@ -4,9 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-`scripts/bump-version.sh <version>` moves whatever has accumulated under
+`scripts/bump-version.sh auto` moves whatever has accumulated under
 `[Unreleased]` into a new release section and leaves `[Unreleased]` empty for the
-next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
+next one. The headings pick the version: before 1.0, `Fixed` and `Security` alone
+make a patch release and anything else a minor one. It does not commit and it
+does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
