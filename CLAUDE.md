@@ -197,6 +197,41 @@
 한 커밋은 한 가지 일이다. 리뷰 지적을 반영한 것은 별도 `fix:` 커밋으로 남기고,
 반영하지 않기로 한 것은 이유를 적는다.
 
+## 릴리스와 판 번호
+
+**판 번호는 사람도 AI 도 셈하지 않는다.** `CHANGELOG.md` 의 `[Unreleased]` 에 선 절이
+고른다(2026-10-01 사용자 결정, `moai-ug3j`). 절차 전체는 `CONTRIBUTING.md` 의 "Releasing" 에 있다.
+
+    scripts/bump-version.sh --next      고를 판만 찍는다. 아무것도 안 쓴다
+    scripts/bump-version.sh auto        판을 올리고 [Unreleased] 를 그 판의 절로 연다
+
+- 1.0 전에는 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
+  있으면 minor 다. **동작 변경(Changed)도 minor 다** — 고친 것이 아니다
+- 판단할 것은 CHANGELOG 의 줄을 **어느 절에 넣는가** 하나다. 버그를 고치며 플래그를 더했으면
+  Fixed 와 Added 에 나눠 적고, 판은 minor 가 된다
+- 절 밖에 선 줄, 모르는 절, 빈 `[Unreleased]` 앞에서는 고르지 않고 멈춘다
+- major 는 스크립트가 올리지 않는다. 1.0 은 사람이 판을 직접 주어 연다. 1.0 뒤의 금은 아직
+  안 그어서 그때는 `auto` 가 멈춘다
+- 0.1.1~0.1.5 는 이 규칙 전에 손으로 셈한 판이다. `### Added` 가 있었는데도 patch 였다.
+  나간 태그는 되돌리지 않는다
+
+**판이 바뀌는 일에는 마일스톤을 단다.** 제목은 만들 때 잠정 판으로 짓고, 릴리스 때 확정한다.
+
+- 만들 때는 계획에 든 일이 CHANGELOG 의 어느 절로 갈지를 본다. Fixed·Security 뿐이면 다음
+  patch, 다른 절이 하나라도 서면 다음 minor 다
+- 기여자 스크립트·문서·트래커만 바꾸는 일은 CHANGELOG 에 줄을 남기지 않으니 판을 올리지
+  않는다. 그런 일만 든 마일스톤은 다음 patch 로 지어 둔다(`moai-7pkf` 가 그렇게 섰다)
+- 낼 때 `--next` 가 고른 판과 마일스톤 제목이 다르면 제목부터 바꾸고 `auto` 를 부른다.
+  id 는 그대로라 멤버가 따라온다
+
+      moai edit <마일스톤> --title "v$(scripts/bump-version.sh --next)"
+
+- 끝에서 다시 맞추는 까닭은, 도는 마일스톤에 일을 끌어들이지 않아도 함께 나가는 것이 있기
+  때문이다. 마일스톤 밖의 `p0` 나 다른 에픽의 일도 develop 에 머지되면 그 판에 실린다.
+  무엇이 나가는지를 그대로 담은 것은 CHANGELOG 하나다
+- 판 번호는 moai 의 기능이 아니라 이 저장소의 규약이다. moai 는 범용 트래커라 semver 를
+  모르고, 알 까닭도 없다
+
 ## 일한 AI 를 남긴다
 
 닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다(`moai-olaj` 가 정한 자리,
