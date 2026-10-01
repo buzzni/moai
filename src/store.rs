@@ -660,6 +660,8 @@ impl Repo {
     /// - **안을 가리키는 링크는 그대로 따른다** — 메일을 바꾼 사람의 `<옛 메일>.jsonl -> <새 메일>.jsonl`
     ///   (moai-p9mq)이 그렇다. 딸린 워크트리에서 부른 `moai` 는 루트의 트래커를 읽으므로 `self.root` 가 그
     ///   루트다 — 쓰기가 견주는 뿌리와 같다
+    /// - **안이라도 `.git/` 은 아니다** — [`target_of`] 와 같다. `x.jsonl -> ../../.git/objects/pack/…` 는
+    ///   몇 GiB 짜리 팩을 통째로 담는다
     /// - **못 푼 자리는 재지 않는다**(`real == p`) — 받은 철자 그대로라 어디로 가는지 모른다. 뿌리의 조상에 링크가
     ///   있으면 그 철자는 푼 뿌리와 안 맞아 밖으로 잘못 읽힌다. 못 푼 자리는 읽는 쪽이 넘기거나 센다
     /// - **접기 전에 잰다** — 밖을 가리키는 이름이 둘이면 둘 다 센다. 접고 나서 재면 둘째가 말없이 빠진다
@@ -670,15 +672,28 @@ impl Repo {
         let mut out = Vec::new();
         for p in self.journal_names() {
             let real = crate::path::real(&p);
-            if real != p && !real.starts_with(&home) {
-                let why = format!(
-                    "it points at {}, outside {}. A file the repository holds follows a link only inside its own \
-                     checkout",
-                    crate::text::one_line(&real.display().to_string()),
-                    home.display()
-                );
-                note_unread(&self.root, &p, &std::io::Error::other(why));
-                continue;
+            if real != p {
+                let end = || crate::text::one_line(&real.display().to_string());
+                let why = match real.strip_prefix(&home) {
+                    Err(_) => Some(format!(
+                        "it points at {}, outside {}. A file the repository holds follows a link only inside its \
+                         own checkout",
+                        end(),
+                        home.display()
+                    )),
+                    // 쓰기([`target_of`])와 같은 자다 — 체크아웃 안이라도 git 의 자리는 저널이 아니다. 팩 파일
+                    // 하나가 몇 GiB 라도 통째로 담긴다.
+                    Ok(rest) if rest.components().any(|c| c.as_os_str() == ".git") => Some(format!(
+                        "it points at {}, inside git's own directory. A file the repository holds never follows a \
+                         link into .git",
+                        end()
+                    )),
+                    Ok(_) => None,
+                };
+                if let Some(why) = why {
+                    note_unread(&self.root, &p, &std::io::Error::other(why));
+                    continue;
+                }
             }
             if !seen.insert(real.clone()) {
                 continue;
@@ -1208,8 +1223,24 @@ impl Repo {
     /// **못 읽는 파일은 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney). 여기서 멈추던 때는
     /// 남의 파일 하나가 0600 으로 서는 것만으로 **제 파일에만** 이력이 있는 이슈까지 아무것도 안 보였다.
     /// 조용한 손실을 막는 일은 이제 [`note_unread`] 와 그것을 대는 `cmd::run` 이 한다 — 종료 코드도 0 이 아니다.
+    ///
+    /// **연 파일이 댄 크기까지만 읽는다**(moai-karj 리뷰). [`Repo::journal_files`] 는 이름으로 재므로, 잰 뒤
+    /// 읽기 전에 체크아웃·머지가 그 이름을 procfs 로 가는 링크로 갈아끼우면 `fs::read` 가 크기 0 이라 답한
+    /// 파일을 끝없이 읽는다. 연 손잡이의 `fstat` 은 그 틈이 없다 — 디스크의 보통 파일은 크기를 바로 대고,
+    /// 덧붙는 중의 꼬리는 [`Repo::each_entry`] 가 다시 읽어 받는다.
     fn journal_bytes(&self, path: &Path) -> Option<Vec<u8>> {
-        match std::fs::read(path) {
+        let bounded = || -> std::io::Result<Vec<u8>> {
+            use std::io::Read;
+            let f = std::fs::File::open(path)?;
+            let m = f.metadata()?;
+            if !m.is_file() {
+                return Err(std::io::Error::other("not a regular file"));
+            }
+            let mut out = Vec::new();
+            f.take(m.len()).read_to_end(&mut out)?;
+            Ok(out)
+        };
+        match bounded() {
             Ok(b) => Some(b),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
@@ -2983,6 +3014,30 @@ mod tests {
         assert_eq!(spelled.journal_of("argos-4aex").len(), 1, "링크로 연 뿌리에서 제 이력을 잃었다");
         let told = unread_under(&via);
         assert!(told.is_empty(), "링크로 연 뿌리의 저널을 밖이라고 했다 — {told:?}");
+
+        // **체크아웃 안이라도 `.git/` 으로 가는 링크는 안 읽는다**(리뷰) — 쓰기([`target_of`])와 같은 자다.
+        let (r, d) = repo("journal-into-git");
+        std::fs::create_dir_all(d.join(".git")).unwrap();
+        std::fs::copy(&theirs, d.join(".git/x.jsonl")).unwrap();
+        std::fs::create_dir_all(r.journal_dir()).unwrap();
+        let link = r.journal_dir().join("g.jsonl");
+        std::os::unix::fs::symlink("../../.git/x.jsonl", &link).unwrap();
+        assert!(r.journal_of("argos-4aex").is_empty(), "링크를 지나 .git 안의 파일을 저널로 읽었다");
+        let told = unread_under(d.path());
+        assert!(told.iter().any(|u| u.at == link && u.said.contains(".git")), "{told:?}");
+    }
+
+    /// **연 파일이 댄 크기까지만 읽는다**(moai-karj 리뷰) — 이름으로 잰 뒤 읽기 전에 그 자리가 procfs 로 갈리는
+    /// 틈을 손잡이의 크기가 닫는다. `/proc/self/status` 는 `stat` 이 크기 0 이라 답하면서 글을 내는 파일이라,
+    /// 고침이 없으면 글이 읽히고 고치면 빈 것이다. 끝없이 읽는 파일로 재지 않는다 — 고침이 없으면 시험이
+    /// 메모리를 다 쓴다.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_journal_is_read_no_further_than_the_size_its_handle_gives() {
+        let (r, _d) = repo("journal-bounded");
+        let status = Path::new("/proc/self/status");
+        assert_eq!(std::fs::metadata(status).unwrap().len(), 0, "procfs 가 크기를 대는 판이다 — 시험이 못 잰다");
+        assert_eq!(r.journal_bytes(status), Some(Vec::new()), "손잡이가 댄 크기 너머를 읽었다");
     }
 
     /// **못 푼 옛 한 파일은 접지 않고 읽는 쪽에 넘긴다**(리뷰) — 목록에서 빼면 읽는 쪽이 그 자리를 못 만나
