@@ -167,22 +167,67 @@ chmod 644 -- "$tmp"
 mv -- "$tmp" "$manifest"
 printf 'bump-version: Cargo.toml  %s → %s\n' "$have" "$want"
 
+# `Cargo.lock` 에서 이 크레이트의 판을 읽는다. 이름은 `Cargo.toml` 의 `[package]` 에서 오고,
+# `source` 가 선 줄은 세지 않는다 — 작업 공간의 멤버에는 `source` 가 안 서니, 같은 이름의
+# 레지스트리 크레이트를 자기 줄로 읽지 않는다. 못 찾으면 빈 줄을 낸다.
+lock_version() {
+  [ -f "$root/Cargo.lock" ] || return 0
+  awk '
+    function value(line) {
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      sub(/[[:space:]]*#.*$/, "", line)
+      gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", line)
+      return line
+    }
+    function flush() {
+      if (entry && n == name && s == "" && !said) { print v; said = 1 }
+      entry = 0; n = v = s = ""
+    }
+    FNR == NR {
+      if (/^[[:space:]]*\[/) pkg = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*$/)
+      else if (pkg && name == "" && /^[[:space:]]*name[[:space:]]*=/) name = value($0)
+      next
+    }
+    /^\[/ { flush(); entry = ($0 ~ /^\[\[package\]\][[:space:]]*$/); next }
+    entry && /^name[[:space:]]*=/ { n = value($0) }
+    entry && /^version[[:space:]]*=/ { v = value($0) }
+    entry && /^source[[:space:]]*=/ { s = value($0) }
+    END { flush() }
+  ' "$manifest" "$root/Cargo.lock"
+}
+
 # 잠금 파일의 자기 줄도 같이 움직인다. 안 맞으면 `--locked` 로 도는 CI 가 떨어진다.
+#
+# **cargo 의 종료 코드는 고쳤다는 뜻이 아니다**(moai-mrbv). 앞의 판은 `cargo metadata
+# --no-deps` 를 불렀는데, cargo 1.97 에서 그것은 의존성을 풀지 않아 잠금 파일을 안 건드리고
+# 0 으로 끝났다 — 0.1.3·0.1.6 판 올리기에서 `Cargo.lock` 이 지난 판에 남은 채 "다시
+# 적었다" 가 찍혔다. 그래서 돈 뒤에 파일을 다시 읽어 판을 견준다. 견주는 자가 쓰는 자와
+# 다른 손이어야 어긋남이 보인다.
+#
+# 부르는 것은 `cargo update --workspace` 다. 작업 공간의 멤버만 움직이고, cargo 문서가
+# `Cargo.toml` 의 판을 바꾼 뒤 잠금 파일을 맞출 때 쓰라고 댄 길이다. `--no-deps` 를 뗀
+# `metadata` 도 맞추지만 거기서 맞추는 것은 덤이라, 다음 cargo 에서 또 갈릴 수 있다.
 #
 # 여기서 죽지 않는다. `Cargo.toml` 은 이미 고쳤고, 여기서 멈추면 CHANGELOG 만
 # 안 움직인 반쪽이 남는다 — 어긋난 잠금 파일은 CI 가 다시 잡지만 반쪽은 사람이
 # 손으로 되짚어야 한다.
-lock_said='bump-version: Cargo.lock 을 못 고쳤다 — cargo metadata 를 손으로 한 번 돌린다'
-locked=1
+lock_fix='cargo update --workspace 를 손으로 한 번 돌린다'
+locked=0
 if ! command -v cargo >/dev/null; then
-  locked=0
-  printf '%s\n' "$lock_said" >&2
-elif (cd -- "$root" && cargo metadata --no-deps --format-version 1 --offline >/dev/null 2>&1) \
-  || (cd -- "$root" && cargo metadata --no-deps --format-version 1 >/dev/null); then
-  printf 'bump-version: Cargo.lock  자기 줄을 다시 적었다\n'
+  printf 'bump-version: Cargo.lock 을 못 고쳤다 — cargo 가 없다. %s\n' "$lock_fix" >&2
+elif ! { (cd -- "$root" && cargo update --workspace --offline >/dev/null 2>&1) ||
+  (cd -- "$root" && cargo update --workspace >/dev/null); }; then
+  printf 'bump-version: Cargo.lock 을 못 고쳤다 — %s\n' "$lock_fix" >&2
 else
-  locked=0
-  printf '%s\n' "$lock_said" >&2
+  lock_now=$(lock_version) || lock_now=''
+  if [ "$lock_now" = "$want" ]; then
+    locked=1
+    printf 'bump-version: Cargo.lock  자기 줄을 %s 로 다시 적었다\n' "$want"
+  elif [ -n "$lock_now" ]; then
+    printf 'bump-version: cargo 는 끝났는데 Cargo.lock 의 자기 줄이 아직 %s 다 — %s\n' "$lock_now" "$lock_fix" >&2
+  else
+    printf 'bump-version: cargo 는 끝났는데 Cargo.lock 에 자기 줄이 없다 — %s\n' "$lock_fix" >&2
+  fi
 fi
 
 # CHANGELOG 의 `[Unreleased]` 밑에 이번 판을 연다. 위의 `[Unreleased]` 는 다음
@@ -216,7 +261,7 @@ if [ "$locked" = 0 ]; then
   cat <<NEXT >&2
 
 다음
-  cargo metadata --no-deps >/dev/null      먼저 Cargo.lock 을 맞춘다
+  cargo update --workspace                 먼저 Cargo.lock 을 맞추고 자기 줄이 $want 인지 본다
   그 뒤에 커밋하고 태그를 단다 — 릴리스는 \`--locked\` 로 짓는다
 NEXT
   exit 0
