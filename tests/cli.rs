@@ -7846,6 +7846,39 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
     assert!(String::from_utf8(out.stdout).unwrap().contains("2026-09-11 04:12"), "UTC 로 안 떨어졌다");
 }
 
+/// **`TZ` 의 POSIX 규칙 글은 tzdb 없이 선다**(moai-btxt.1gk, 리뷰 moai-btxt.0ln). 정적 musl 판을 zoneinfo 없는
+/// 기계에 받은 자리에서 `TZ=<+09>-9` 가 서는지는 `TZDIR` 을 바꿔야 잴 수 있다 — 단위 시험은 한 프로세스의 환경을
+/// 나눠 써서 그것을 못 바꾼다. tzdb 가 그 이름의 파일을 TZif 로 못 읽어도 규칙으로 선다(glibc 와 같다).
+#[test]
+fn a_posix_rule_in_tz_needs_no_tzdb() {
+    let s = init("tzrule");
+    let id = add(s.path(), &["규칙 글로 본 줄"]);
+    let at = |tzdir: &Path, tz: &str| -> (String, String) {
+        let out = staged(&["show", &id]).current_dir(s.path()).env("TZDIR", tzdir).env("TZ", tz).output().unwrap();
+        assert!(out.status.success(), "{tz}: {}", String::from_utf8_lossy(&out.stderr));
+        (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+    // 시계는 04:12 UTC 에 못박혀 있다 — UTC+9 면 13:12 다.
+    let nowhere = s.path().join("no-zoneinfo");
+    for tz in ["<+09>-9", "JST-9", ":JST-9"] {
+        let (shown, said) = at(&nowhere, tz);
+        assert!(shown.contains("2026-09-11 13:12"), "{tz} 를 규칙으로 안 읽었다\n{shown}");
+        assert_eq!(said, "", "{tz} 가 tzdb 없음을 알렸다");
+    }
+    // 이름도 규칙도 아니면 예전처럼 UTC 로 떨어지고 한 줄로 알린다.
+    let (shown, said) = at(&nowhere, "Asia/Seoul");
+    assert!(shown.contains("2026-09-11 04:12"), "{shown}");
+    assert_eq!(said.lines().count(), 1, "{said:?}");
+
+    // tzdb 에 같은 이름의 파일이 있는데 TZif 가 아니면 규칙으로 읽는다.
+    let junk = s.path().join("junk-zoneinfo");
+    std::fs::create_dir_all(&junk).unwrap();
+    std::fs::write(junk.join("JST-9"), "TZif 가 아니다\n").unwrap();
+    let (shown, said) = at(&junk, "JST-9");
+    assert!(shown.contains("2026-09-11 13:12"), "TZif 아닌 파일 뒤에서 규칙을 안 읽었다\n{shown}");
+    assert_eq!(said, "", "{said:?}");
+}
+
 #[test]
 fn the_explorer_names_its_baskets_in_the_chosen_language() {
     let s = init("tuilang");
