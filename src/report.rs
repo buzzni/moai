@@ -9,6 +9,8 @@ use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod stats;
+
 /// 에픽 하나(또는 "에픽 없음")의 집계. **저장하지 않는다** — 멤버 하나를
 /// 닫을 때 에픽 줄까지 써야 한다면 그 필드는 파생값이고, 두 줄 쓰기 중간에
 /// 죽으면 에픽이 영원히 거짓말한다.
@@ -1959,13 +1961,20 @@ pub fn spent_in(members: &[&Issue]) -> Spent {
     }
     let closed = done.len();
     spans.sort_unstable();
-    // 짝수 개면 가운데 둘의 평균이다 — 내림으로 자른다(분 단위라 한 분 아래는 뜻이 없다).
-    let median = match spans.len() {
+    Spent { closed, measured: spans.len(), minutes: spans.iter().sum(), median: median(&spans) }
+}
+
+/// 정렬한 값의 중앙값. 짝수 개면 가운데 둘의 평균이다 — 내림으로 자른다(분 단위라 한 분 아래는 뜻이
+/// 없다). 빈 것은 `None` 이다.
+///
+/// **자는 하나다** — 묶음의 소요([`spent_in`])와 통계의 소요([`stats::of`])가 이것으로 잰다. 둘이 따로
+/// 적으면 같은 줄을 두고 상세와 `moai stats` 가 한 분씩 어긋난 중앙값을 낸다.
+pub(crate) fn median(sorted: &[i64]) -> Option<i64> {
+    match sorted.len() {
         0 => None,
-        n if n % 2 == 1 => Some(spans[n / 2]),
-        n => Some((spans[n / 2 - 1] + spans[n / 2]) / 2),
-    };
-    Spent { closed, measured: spans.len(), minutes: spans.iter().sum(), median }
+        n if n % 2 == 1 => Some(sorted[n / 2]),
+        n => Some((sorted[n / 2 - 1] + sorted[n / 2]) / 2),
+    }
 }
 
 /// 묶음(에픽·마일스톤) id → **멤버에서 읽은 칸.**

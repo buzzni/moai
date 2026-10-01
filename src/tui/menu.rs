@@ -716,10 +716,11 @@ mod tests {
         assert_eq!(keys_of(&root_layer), ["n", "q", "p", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
+        // 통계(`s`)는 어디서든 선다 — 세는 것은 프로젝트라 포커스와 상관이 없다(moai-1hka.bq9).
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a", "s"], "프로젝트 안에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d", "s"]);
         let detail = Ctx { list_focus: false, ..layer() };
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a", "s"], "상세 포커스에서 해제가 섰다");
         // 층에서도 상세 칸은 있다 — 숨기기(`d`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
         // 보기(`w`)는 빠진다.
         assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["d", "r"], "층에서 워크트리나 줄 보기가 섰다");

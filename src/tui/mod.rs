@@ -14,6 +14,7 @@ pub mod menu;
 pub mod picker;
 pub mod register;
 pub mod scroll;
+mod stats;
 pub mod view;
 mod zones;
 
@@ -111,6 +112,9 @@ pub enum Mode {
     /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
     /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Zone(zones::Zones),
+    /// `SPC p s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다. **상자에 담는다** —
+    /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
+    Stats(Box<stats::Window>),
 }
 
 /// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
@@ -2543,9 +2547,13 @@ impl App {
     pub fn apply(&mut self, mode: &Mode) -> Result<(), String> {
         let text = match mode {
             Mode::Grep(q, _) | Mode::Filter(q) => q.text().to_string(),
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
-                String::new()
-            }
+            Mode::Browse
+            | Mode::Ask(_)
+            | Mode::Idea(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_)
+            | Mode::Stats(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.hung = None;
@@ -2597,9 +2605,13 @@ impl App {
         let raw = match mode {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
             Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
-            Mode::Browse | Mode::Ask(_) | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => {
-                Raw::default()
-            }
+            Mode::Browse
+            | Mode::Ask(_)
+            | Mode::Idea(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_)
+            | Mode::Stats(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
@@ -4388,6 +4400,8 @@ impl App {
             B::Pick => self.open_picker(),
             // 해제는 층의 줄에서만, 목록 포커스로(`enabled`) — 커서가 선 줄을 뺀다.
             B::Unregister => self.ask_unregister(),
+            // **포커스와 상관없이 연다** — 세는 것은 프로젝트라 어느 칸을 보고 있었는지와 상관이 없다(moai-1hka.bq9).
+            B::Stats => self.open_stats(),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             B::ClearFilter => {
@@ -4554,6 +4568,7 @@ impl App {
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
             Mode::Zone(_) => return self.pick_zone(k),
+            Mode::Stats(_) => return self.stats_key(k),
             _ => {}
         }
         let eaten = match &mut self.mode {
@@ -4565,7 +4580,9 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) => return,
+            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) | Mode::Stats(_) => {
+                return;
+            }
         };
         if eaten {
             return self.live();
@@ -4762,6 +4779,8 @@ impl App {
             // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
             Mode::Zone(z) => z.paste(s),
             Mode::Unregister(_) => self.mode = Mode::Browse,
+            // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
+            Mode::Stats(_) => {}
         }
     }
 

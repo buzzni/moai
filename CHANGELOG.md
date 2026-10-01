@@ -14,6 +14,21 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **`moai stats` adds the tracker up, and `SPC p s` draws it.** Rows per column,
+  priority, tag, assignee, epic and milestone; how many were created and closed
+  per week or day (`--bucket`, `--last`); lead time (created → done) and cycle
+  time (started → done) as median and p90; and the AI work written in `model:`
+  note lines, summed by model and by grade, with reviews apart. It takes the
+  filters `moai show` takes, `--by` picks the axes printed in full, and `--json`
+  gives the same numbers to a machine — every key is always there but `by`,
+  `email` and `journal_error`. What cannot be told is not guessed: a closed row
+  with no recorded start counts as `unknown`, not zero minutes, and lines with no
+  token count are counted apart. In the explorer `SPC p s` opens the same
+  numbers as bars in place of the list and the detail, narrowed by the filter
+  that is hung; on the all-projects view it counts the project under the cursor,
+  and `b` switches day and week. The numbers come from the snapshot and the note
+  lines only — how long a row stood in review, say, is not among them.
+
 - **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
   and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a
   machine with no zoneinfo directory too — the static musl build. A name the

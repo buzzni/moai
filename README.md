@@ -271,6 +271,24 @@ When a copy has to be complete, pull the whole list and compare it row by row:
 `moai show --all --json`, plus `moai idea show --all --json` since `--all` still
 leaves ideas out. An id missing from the new pull was removed.
 
+### Counting
+
+`moai stats` adds the tracker up — rows per column and priority, how many were
+created and closed per week or day, lead time (created → done) and cycle time
+(started → done), and the AI work written in `model:` note lines, by model and by
+grade. It takes the filters `moai show` takes, and `--json` gives the same numbers
+to a machine. In the explorer `SPC p s` draws them as bars.
+
+```sh
+moai stats                               # overview
+moai stats -e <epic> --by tag,assignee   # one epic, two axes in full
+moai stats --bucket day --last 14 --json # daily flow for a script
+```
+
+What it cannot tell, it says rather than guessing: a closed row with no recorded
+start counts as `unknown` in cycle time, not as zero minutes, and a model line
+without a token count is counted apart from the ones that have it.
+
 ### SQL over the output
 
 There is no query language inside moai. The filters look at derived values — the

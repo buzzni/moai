@@ -2558,7 +2558,8 @@ mod tests {
             | Mode::Filter(_)
             | Mode::Pick(_)
             | Mode::Unregister(_)
-            | Mode::Zone(_) => None,
+            | Mode::Zone(_)
+            | Mode::Stats(_) => None,
         }
     }
 
@@ -3434,6 +3435,44 @@ mod tests {
         });
         assert_eq!(on.as_deref(), Some("one 에 담을 것"), "만든 줄에 안 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("✓ 담김 · one · ")), "{:?}", a.notice);
+    }
+
+    /// **한눈 보기에서 `SPC p s` 는 커서가 선 줄의 프로젝트를 센다**(moai-1hka.bq9) — 머리줄이면 그 프로젝트,
+    /// 펼친 이슈 줄이면 그 줄이 사는 프로젝트다(`SPC n`·`r` 과 같은 규칙). 아직 안 읽은 프로젝트도 그 자리에서
+    /// 읽어 센다. 닫으면 층의 같은 자리다.
+    #[test]
+    fn spc_p_s_on_the_layer_counts_the_project_of_the_row_under_the_cursor() {
+        let s = Scratch::fenced("layer-stats");
+        let one = s.project("one", &[("argos-0001", "one 의 줄", "todo")]);
+        let two = s.project("two", &[("argos-0001", "two 의 줄", "todo"), ("argos-0002", "two 의 둘째", "done")]);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        let head = a.rows().iter().position(|r| matches!(r, Row::Project(1))).expect("two 의 머리줄");
+        a.cursor = head;
+        a.hit("SPC p s");
+        let Mode::Stats(w) = &a.mode else { panic!("창이 안 열렸다 — {:?} / {:?}", a.mode, a.notice) };
+        assert_eq!((w.project.as_str(), w.stats().rows), ("two", 2), "머리줄의 프로젝트를 안 셌다");
+        assert_eq!(w.filter, None, "한눈 보기에는 거름망이 없다");
+        a.key(key(KeyCode::Esc));
+        assert!(a.on_layer() && a.mode == Mode::Browse, "닫으며 층을 떠났다");
+        assert_eq!(a.cursor, head, "닫으며 커서가 옮겨 갔다");
+
+        // 펼친 프로젝트의 이슈 줄 — 그 줄이 사는 프로젝트를 센다.
+        a.want_site(0);
+        settle(&mut a);
+        let item =
+            a.rows().iter().position(|r| matches!(r, Row::Item(super::super::Seat::Place(0), ..))).expect("one 의 줄");
+        a.cursor = item;
+        a.hit("SPC p s");
+        let Mode::Stats(w) = &a.mode else { panic!("창이 안 열렸다 — {:?} / {:?}", a.mode, a.notice) };
+        assert_eq!((w.project.as_str(), w.stats().rows), ("one", 1), "이슈 줄의 프로젝트를 안 셌다");
+        // 두 프로젝트가 같은 id 를 써도 남의 줄을 안 센다 — two 의 둘째(done)가 여기 없다.
+        assert_eq!(w.stats().lead_time.done, 0);
+        // **세면서 노트를 레이어의 프로젝트에 두고 가지 않는다** — 거기서는 다시 읽을 자가 없어 뒤에 적힌 `model:` 줄을
+        // 영영 못 세고, 두 벌(글과 접은 글)이 쓸 데 없이 남는다(`App::leave_project` 가 걷는 그것이다).
+        let held = a.layer.as_ref().and_then(|l| l.places[0].site.as_ref()).map(|site| site.ground.notes.is_some());
+        assert_eq!(held, Some(false), "통계 창이 레이어의 프로젝트에 노트를 들였다");
     }
 
     /// **담을 곳은 여는 순간 경로로 박힌다.** 폼이 열린 동안 층이 다시 읽혀 차례가 바뀌고

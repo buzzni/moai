@@ -27,6 +27,7 @@ Commands:
   prime         A short markdown page - what you hold and what comes next
   add           Create an issue
   show          Open one, or list them
+  stats         Count them - spread, flow, lead and cycle time, AI work
   mv            Move the status
   edit          Edit title, body, tags, epic or priority
   rm            Remove
@@ -453,6 +454,113 @@ Order and paging:
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
     moai show --all --json | duckdb -c "SELECT kind, count(*)
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
+```
+
+## `moai stats`
+
+```
+Count them - spread, flow, lead and cycle time, AI work
+
+Usage: moai stats [OPTIONS]
+
+Options:
+      --by <axis>            Print these axes in full (see below)
+      --bucket <day|week>    What one row of the flow covers (week when absent)
+      --last <n>             How many rows of flow, the current one included
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+Filters  (comma = or,  repeated = and):
+  -s, --status <status>                   In that column
+  -t, --tag <tag>                         Carrying that tag
+      --no-tag <tag>                      Not carrying that tag
+  -e, --epic <id|none>                    In that epic (`none` = no epic)
+      --milestone <id|none>               In that milestone (`none` = none)
+      --parent <id|none>                  A child of that issue (`none` = top)
+  -p, --priority <0-3>                    
+  -a, --assignee <who|none|me>            That assignee (`none` and `me` too)
+      --type <issue|epic|milestone|idea>  
+  -g, --grep <text>                       In id, title, tag, body or notes
+      --stale <days>                      Sitting in its column that long
+      --since <when>                      Changed since that time (see below)
+      --created <from..to>                Created in that range (see below)
+      --done <from..to>                   Closed in that range (see below)
+      --deferred                          Only what is deferred
+      --all                               Include done and what is deferred
+      --filter <item=value>               Filters as one string (`status=todo`)
+
+  Counts the rows the filters pick - the same filters as `moai show` -
+  with done, deferred and ideas in: it counts what happened, so nothing
+  finished is hidden. Every number counts one kind, issue unless --type
+  names another; a group is measured through its members (-e, --milestone).
+  The kind axis alone counts every row picked, to show what was left out.
+  --all is taken and changes nothing. The time filters read as in
+  `moai show --help`.
+
+  Nothing is stored, and the journal's column moves are never folded in.
+  The numbers come from the rows and from the `model:` lines in the notes -
+  the same `work` that `moai show --json` gives.
+
+  Axes - --by status,tag prints those in full (with --bucket or --last
+  the flow follows them), and without --by the overview shows the first
+  three:
+    status      the column, a group's read from its members as on the board
+    kind        issue, epic, milestone, idea - every row picked
+    priority    0 to 3
+    tag         a row counts once per tag it carries
+    assignee    name and email
+    epic        the epic a row stands in (derived_epic)
+    milestone   the milestone it stands in, through its epic too
+
+  Flow: per day or per week (Monday first) on your clock - the day
+  `--created <day>` reads. Created counts rows made then, done counts rows
+  standing in done that got there then (the time --done reads). --last is
+  how many buckets, the current one included (14 days or 8 weeks).
+
+  Lead time runs from created to done, cycle time from started_at - the
+  first move out of the first column - to done, over rows standing in done,
+  in minutes. A row with no start is unknown, not zero: measured and
+  unknown are counted apart, and the median and p90 cover the measured
+  ones only. It is wall clock, not effort.
+
+  AI work sums the `model:` lines, and recorded counts the rows that carry
+  one. Tokens add up over the lines that carry them (tokened), and tokens
+  is null when none does - unknown, not 0. Reviews are the rows tagged
+  review; the grade on their lines is the review grade.
+
+  moai stats                           the overview
+  moai stats -e moai-1hka              one epic's members
+  moai stats --by tag,assignee         two axes in full
+  moai stats --bucket day --last 30 --json
+
+  --json gives one object. Every key is always there except three: `by`
+  holds the axes asked (all seven without --by), an assignee carries email
+  only when one is written, and journal_error stands only when a journal
+  could not be read - then work and reviews are short. A null key means
+  none - no tag, no epic, no assignee. An axis need not add up to rows: a
+  row counts once per tag, and a row placed in no group (a twin's eclipsed
+  line, as -e none leaves it out) stands under no epic or milestone at
+  all. Durations are minutes.
+
+    {"kind":"issue","rows":42,
+     "by":{"status":[{"key":"todo","rows":9},...],
+           "priority":[{"key":0,"rows":1},...],
+           "assignee":[{"key":"Kim","email":"kim@example.com","rows":7},
+                       {"key":null,"rows":2}],...},
+     "flow":{"bucket":"week","zone":"UTC",
+             "buckets":[{"start":"2026-09-28","created":3,"done":2},...]},
+     "lead_time":{"done":30,"measured":30,"unknown":0,
+                  "median":95,"p90":4100},
+     "cycle_time":{...the same keys...},
+     "work":{"recorded":25,"lines":31,"tokened":28,"tokens":5100000,
+             "by_model":[{"provider":"anthropic","model":"opus-5",
+                          "lines":31,"tokened":28,"tokens":5100000}],
+             "by_grade":[{"grade":"high","lines":12,...},...]},
+     "reviews":{"rows":6,"work":{...the same keys as work...}}}
 ```
 
 ## `moai mv`
@@ -1854,6 +1962,7 @@ Options:
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
+    SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -1935,6 +2044,16 @@ Options:
   On a header row, SPC p d asks once and then only drops it from the list —
   y is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
+
+  SPC p s opens the statistics window in place of the list and the detail —
+  the numbers `moai stats` gives, drawn as bars: the flow per week, the
+  columns and priorities, lead and cycle time, and AI work by model. It
+  counts the project you are in, or on the one list (0) the project of the
+  row under the cursor. With a filter hung (SPC f or /) it counts only what
+  passes, and the title says so. b switches the flow between weeks and
+  days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
+  Esc goes back to where you were, with the cursor, the filter and the
+  detail as they were. On a narrow screen it shows the same figures as text.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

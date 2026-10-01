@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.2 hash:0d0a56f5 -->
+<!-- moai:begin v:0.1.6 hash:457a66d6 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -14,6 +14,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai show -s todo -t bug               filters (comma = or, repeated flag = and)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
+    moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
@@ -415,7 +416,9 @@ work. It is a note, not a field.
   note. Only lines that start at the beginning of a line count; indented lines and
   lines inside a fence are read as examples
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
-  are adding several issues up, call the list once instead of calling per id
+  are adding several issues up, call the list once instead of calling per id, or let
+  `moai stats --json` add them up: its `work` sums tokens by model and by grade and
+  counts the lines that carry none apart
 
 ### The four things the hook actually watches
 
