@@ -41,7 +41,8 @@ does not tag — see `CONTRIBUTING.md`.
   when you quit, or when `SPC n` hands the terminal to `$EDITOR`, are thrown
   away rather than landing at the shell prompt as `65;40;12M` or in the editor
   as keystrokes: the explorer asks the terminal (DA1) and drops what comes before
-  the answer, so keys typed in that one round trip go with them.
+  the answer, so keys typed in that one round trip go with them. A terminal that
+  never answers is waited on for one second at most.
 
 - **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
   and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a

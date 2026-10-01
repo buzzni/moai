@@ -578,6 +578,12 @@ fn drain_reports() {
             Err(_) => return,
         }
     };
+    // **답을 못 읽을 자리에는 묻지 않는다.** poll 이 그 fd 를 못 보거나(POLLNVAL) 끊겼으면(POLLHUP·POLLERR)
+    // 아래 기다림은 곧바로 손을 떼고, 그 뒤에 온 답은 버려지지 않은 채 셸에 찍힌다 — 묻지 않은 것보다 나쁘다.
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    if unsafe { libc::poll(&mut p, 1, 0) } < 0 || p.revents & (libc::POLLNVAL | libc::POLLHUP | libc::POLLERR) != 0 {
+        return;
+    }
     let mut out = std::io::stdout();
     if out.write_all(b"\x1b[c").and_then(|()| out.flush()).is_err() {
         return;
@@ -636,9 +642,13 @@ fn drain_until_answer(fd: std::os::fd::RawFd, until: std::time::Instant) -> bool
 
 /// DA1 의 답 `ESC [ ? <수와 ;> c` 를 한 바이트씩 받아 알아본다. 마우스 보고(`ESC [ < … M`, 1006 을 모르는 터미널의
 /// `ESC [ M` 과 세 바이트)도, kitty 의 키 플래그 답(`ESC [ ? … u`)도, DA2(`ESC [ > … c`)도 이 꼴이 아니다.
+///
+/// 유닉스에서만 짓는다 — 읽는 자([`drain_until_answer`])가 유닉스에만 있어, 다른 데서는 죽은 코드다.
+#[cfg(unix)]
 #[derive(Default)]
 struct Answer(Heard);
 
+#[cfg(unix)]
 #[derive(Default, Clone, Copy)]
 enum Heard {
     #[default]
@@ -648,6 +658,7 @@ enum Heard {
     Params,
 }
 
+#[cfg(unix)]
 impl Answer {
     /// 한 바이트를 받는다. 답이 막 끝났으면 참이다.
     fn push(&mut self, byte: u8) -> bool {
@@ -961,7 +972,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
     // 터미널이 지금 마우스를 잡고 있는가 — `screen` 이 띄울 때 `app.wants_mouse()` 대로 켰다. `SPC o m` 이 바꾼
     // 값도, 폼·글 받는 칸·고르는 창이 열리고 닫히며 바뀐 값도 사건을 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서
-    // 돌아올 때(`resume`)도 같은 값대로 켜므로 이 값과 어긋나지 않는다.
+    // 돌아올 때(`resume`)는 그때의 `wants_mouse` 대로 켜고 이 값도 그것으로 고쳐 적는다.
     let mut caught = app.wants_mouse();
     while !app.quit {
         let began = std::time::Instant::now();
@@ -1005,7 +1016,11 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // **올린 뒤에 연다.** 먼저 열면 기다리던 훅이 이미 내린 터미널을 걷고, 그 뒤에 올린
             // 화면은 `resume_unwind` 가 훅 없이 끝내며 raw·대체 화면인 채로 셸에 남는다. 올리기가
             // 실패해도 연다 — 기다리던 훅이 패닉 글을 내야 한다.
-            let up = resume(term, app.wants_mouse());
+            //
+            // **다시 잡은 값을 `caught` 에 적는다.** 담기가 폼을 열어 두면(못 담음·누구냐 물음) 여기서는 안 잡는데,
+            // 옛 값을 들고 있으면 그 폼을 바로 닫은 사건 뒤에 `wants_mouse` 가 옛 값과 같아 다시 잡지 않는다.
+            caught = app.wants_mouse();
+            let up = resume(term, caught);
             EDITING.release();
             up?;
         }
@@ -1136,6 +1151,7 @@ mod tests {
     }
 
     /// 받은 바이트를 넘기며 **DA1 의 답이 끝나는 자리**를 댄다 — 없으면 `None`.
+    #[cfg(unix)]
     fn answered_at(bytes: &[u8]) -> Option<usize> {
         let mut a = Answer::default();
         bytes.iter().position(|&b| a.push(b))
@@ -1144,6 +1160,7 @@ mod tests {
     /// **DA1 의 답만 답이다**(moai-1thb). 터미널마다 매개변수가 다르고(xterm `64;…`, 리눅스 콘솔 `6`, tmux `1;2`),
     /// 그 앞에 마우스 보고와 키가 섞여 와도 답에서 멈춘다. 마우스 보고·kitty 의 키 플래그 답·DA2 를 답으로 읽으면
     /// 보고가 다 오기 전에 비우기를 멈춘다.
+    #[cfg(unix)]
     #[test]
     fn only_a_da1_reply_ends_the_drain() {
         for reply in [&b"\x1b[?64;1;2;6;9;15;18;21;22c"[..], b"\x1b[?6c", b"\x1b[?1;2c", b"\x1b[?c"] {
