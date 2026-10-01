@@ -20034,6 +20034,19 @@ fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
         ("bump-changed", "### Changed\n\n- 바뀐 동작\n\n", "0.2.0", "Changed"),
         ("bump-removed", "### Removed\n\n- 걷은 깃발\n\n", "0.2.0", "Removed"),
         ("bump-fixed", "### Fixed\n\n- 고친 것\n\n### Security\n\n- 막은 구멍\n\n", "0.1.6", "Fixed·Security"),
+        // `####` 는 그 절의 글이다 — 모르는 절로 읽으면 고친 것만 든 판을 못 고른다.
+        ("bump-h4", "### Fixed\n\n- 고친 것\n\n#### 자세히\n\n- 덧붙임\n\n", "0.1.6", "Fixed"),
+        // `#` 제목도 [Unreleased] 를 닫는다 — 그 밑의 절을 이번 판으로 세면 patch 가 minor 로 나간다.
+        ("bump-h1", "### Fixed\n\n- 고친 것\n\n# 꼬리\n\n### Added\n\n- 남의 줄\n\n", "0.1.6", "Fixed"),
+        // 울타리 안의 `#` 은 셸 주석이다 — 거기서 끊으면 그 뒤의 Added 를 못 읽는다.
+        ("bump-fence", "### Fixed\n\n- 고친 것\n\n```sh\n# 주석\n```\n\n### Added\n\n- 새 명령\n\n", "0.2.0", "Added"),
+        // 0.1.2 의 꼴 — 첫 절 앞의 머리글은 세지 않고, 건너뛰었다는 것을 까닭에 적는다.
+        (
+            "bump-lead",
+            "**깨지는 것 하나.** 아래에 다시 적었다.\n\n- 모은 줄\n\n### Fixed\n\n- 고친 것\n\n",
+            "0.1.6",
+            "머리글",
+        ),
     ];
     for (name, unreleased, want, why) in cases {
         let (out, manifest, log) = bump_with(name, "0.1.5", unreleased, &["auto"]);
@@ -20051,14 +20064,15 @@ fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
 
 /// **못 가르는 `[Unreleased]` 는 고르지 않고 멈춘다 — 아무것도 안 움직인 채로.**
 ///
-/// 빈 절은 낼 것이 없다는 뜻이고, 절 밖의 줄과 모르는 절은 어느 칸인지 모른다. 어림으로
-/// patch 를 주면 기능이 든 판이 고친 판으로 나간다. 1.0 뒤의 금은 아직 안 그었다.
+/// 빈 절은 낼 것이 없다는 뜻이고, 모르는 절은 어느 칸인지 모른다. 어림으로 patch 를 주면
+/// 기능이 든 판이 고친 판으로 나간다. 머리글만 서고 절이 빈 판도 고를 것이 없다. 1.0 뒤의
+/// 금은 아직 안 그었다.
 #[cfg(unix)]
 #[test]
 fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
     let cases = [
         ("bump-empty", "0.1.5", "", "비었다"),
-        ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "절 밖의 줄"),
+        ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "첫 절 앞의 글만"),
         ("bump-odd", "0.1.5", "### Improved\n\n- 모르는 절\n\n", "Improved"),
         ("bump-one", "1.2.0", "### Fixed\n\n- 고친 것\n\n", "1.0 뒤"),
     ];

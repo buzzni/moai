@@ -154,9 +154,11 @@ git push origin v0.2.0
 patch release, and any `Added`, `Changed`, `Deprecated` or `Removed` makes a minor
 one — a change in behaviour is not a fix. So the call you make is which heading an
 entry goes under, and the script counts the number from there: two people, or two
-agents, releasing the same changelog get the same version. A line outside a
-heading, a heading it does not know, or an empty `[Unreleased]` stops it with
-nothing moved. It never picks a major version — `1.0.0` is given by hand — and
+agents, releasing the same changelog get the same version. A heading it does not
+know, or an `[Unreleased]` with no entry under a heading, stops it with nothing
+moved. A lead paragraph above the first heading — 0.1.2 gathered its breaking
+changes there — is left out of the count, so every entry goes under a heading
+as well. It never picks a major version — `1.0.0` is given by hand — and
 after 1.0 `auto` stops as well, because which removals and behaviour changes count
 as breaking has not been decided yet. `minor`, `patch` or an explicit version
 still go through where the rule does not fit.

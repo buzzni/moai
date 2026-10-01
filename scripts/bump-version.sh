@@ -29,43 +29,61 @@ die() {
 # 어느 절에 넣는가이고, 번호는 여기서 센다. 세션마다 손으로 셈하던 판은 0.1.1 부터
 # 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
 #
-# 절 밖에 선 줄과 모르는 절은 어느 칸인지 못 가르므로 고르지 않고 멈춘다. 어림으로
-# patch 를 주면 기능이 든 판이 고친 판으로 나간다.
+# 모르는 절은 어느 칸인지 못 가르므로 고르지 않고 멈춘다. 어림으로 patch 를 주면 기능이
+# 든 판이 고친 판으로 나간다.
+#
+# **첫 절 앞의 머리글은 세지 않는다**(리뷰 moai-ug3j.rrc 4번). 0.1.2 는 깨지는 것 둘을
+# 머리글에 모아 두고 같은 것을 아래 절에 다시 적었다 — 그 꼴을 막으면 판을 다시 손으로
+# 주는 수밖에 없다. 대신 머리글만 있고 절이 비었으면 멈추고, 머리글을 건너뛰었다는 것을
+# 까닭 줄에 적는다. 항목은 절 안에 적는다.
 pick() {
   [ -f "$changelog" ] || die "auto 는 CHANGELOG.md 의 [Unreleased] 를 읽는다 — 파일이 없다"
-  local class head minor='' patch='' odd=''
-  while IFS=$'\t' read -r class head; do
-    case $class in
-    minor) minor="$minor${minor:+·}$head" ;;
-    patch) patch="$patch${patch:+·}$head" ;;
-    missing) die 'CHANGELOG.md 에 ## [Unreleased] 줄이 없다' ;;
-    *) odd="$odd${odd:+, }$head" ;;
-    esac
-  done < <(awk '
-    /^##[[:space:]]*\[Unreleased\]/ { on = 1; found = 1; next }
+  local class head sorted minor='' patch='' odd='' lead=''
+  # awk 를 process substitution 으로 받으면 그 실패가 종료 코드째 사라져 "비었다" 로 읽힌다.
+  # 먼저 받아 두고, 실패하면 그 자리에서 멈춘다.
+  #
+  # `####` 는 절이 아니라 그 절의 글이다 — 절의 이름으로 읽으면 `# Detail` 같은 모르는
+  # 절이 되어 고르지 못한다. 울타리(```) 안의 `#` 은 셸 주석이지 제목이 아니다 — 거기서
+  # 끊으면 그 뒤의 절을 못 읽어 minor 가 patch 로 나간다.
+  sorted=$(awk '
+    !on && /^##[[:space:]]*\[Unreleased\]/ { on = 1; found = 1; next }
     !on { next }
-    /^##$/ || /^##[^#]/ { exit }
-    /^###/ { h = $0; sub(/^###[[:space:]]*/, "", h); sub(/[[:space:]]+$/, "", h); next }
+    /^[[:space:]]*(```|~~~)/ { fence = !fence }
+    !fence && (/^#$/ || /^#[^#]/ || /^##$/ || /^##[^#]/) { exit }
+    !fence && (/^###$/ || /^###[^#]/) { h = $0; sub(/^###[[:space:]]*/, "", h); sub(/[[:space:]]+$/, "", h); next }
     /^[[:space:]]*$/ { next }
     {
       if (h in seen) next
       seen[h] = 1
       k = tolower(h)
-      if (h == "") print "odd\t### 절 밖의 줄"
+      if (h == "") print "lead\t"
       else if (k ~ /^(added|changed|deprecated|removed)$/) print "minor\t" h
       else if (k ~ /^(fixed|security)$/) print "patch\t" h
       else print "odd\t" h
     }
     END { if (!found) print "missing\t" }
-  ' "$changelog")
+  ' "$changelog") || die "CHANGELOG.md 의 [Unreleased] 를 못 읽었다"
+  while IFS=$'\t' read -r class head; do
+    case $class in
+    '') ;;
+    lead) lead=1 ;;
+    minor) minor="$minor${minor:+·}$head" ;;
+    patch) patch="$patch${patch:+·}$head" ;;
+    missing) die 'CHANGELOG.md 에 ## [Unreleased] 줄이 없다' ;;
+    *) odd="$odd${odd:+, }$head" ;;
+    esac
+  done <<<"$sorted"
   [ -z "$odd" ] || die "[Unreleased] 에서 칸을 못 가른다 — $odd. Added·Changed·Deprecated·Removed·Fixed·Security 중 하나로 옮기거나 판을 직접 준다"
   if [ -n "$minor" ]; then
     level=minor why="[Unreleased] 에 $minor 가 있다"
   elif [ -n "$patch" ]; then
     level=patch why="[Unreleased] 에 $patch 뿐이다"
+  elif [ -n "$lead" ]; then
+    die "[Unreleased] 에 첫 절 앞의 글만 있다 — 항목을 Added·Changed·Deprecated·Removed·Fixed·Security 절 안에 적는다"
   else
     die "[Unreleased] 가 비었다 — 낼 것이 없다"
   fi
+  [ -z "$lead" ] || why="$why (첫 절 앞의 머리글은 세지 않았다)"
 }
 
 # `have` 에서 `level` 한 칸을 올린다. 꼬리(`-rc.1`)가 붙은 판에서 한 칸이 무엇인지는 정한
