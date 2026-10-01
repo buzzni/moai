@@ -538,18 +538,28 @@ impl Rule {
     /// 선다. 두 해 앞까지 보는 까닭은 시각이 167시까지 가서다(RFC 8536 3.3.1) — 앞 해의 두 전환이 다 이 해로
     /// 넘어오면 그때 선 것은 두 해 앞의 전환이다(`J365/167,J365/100`, 리뷰 moai-efoc.3e1). 한 해의 전환은 그해
     /// 앞뒤 여드레 남짓 안에 서므로 세 해 앞이나 두 해 뒤는 답이 될 수 없다. 두 전환이 한 순간이면 들어가는
-    /// 쪽을 뒤로 친다 — 늘 서머타임은 나오자마자 다시 들어간다. 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도
-    /// 날 수에 86,400 을 곱하다 넘치지 않는다.
+    /// 쪽을 뒤로 친다. 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도 날 수에 86,400 을 곱하다 넘치지 않는다.
+    ///
+    /// **이듬해의 들어감에 닿은 나옴은 없는 전환이다**(moai-btxt.49f). `J1/0,J365/26` 처럼 서머타임이 한 해 넘게
+    /// 걸리면 두 해의 서머타임이 겹친다 — 그 나옴을 전환으로 치던 판은 한 해 대부분을 표준시로 그렸다. glibc 는
+    /// 해마다 그해의 들어감과 나옴 사이를 서머타임으로 보고, tzcode 는 나옴이 한 해 넘게 뒤인 해에 전환을 안
+    /// 지어 둘 다 늘 서머타임으로 읽는다. 겹침은 **해마다** 가린다: 서수 날(`n`)은 2월 29일을 세어 같은 규칙이
+    /// 평년에만 겹칠 수 있고, 그때 윤년의 나옴은 그대로 선다(glibc 와 같다). 한 순간에 맞물린 나옴(`J365/25`,
+    /// RFC 8536 의 늘 서머타임)도 이 갈래다. 해를 넘겨 걸친 남반구는 나옴이 그해의 들어감보다 앞이라 안 걸린다.
     fn last_change(&self, secs: i64) -> Option<(i128, i32)> {
         let dst = self.dst.as_ref()?;
         let year = crate::model::civil_from_days(secs.div_euclid(86_400)).0;
+        let moment = |y: i64, (day, time): (Day, i32), before: i32| {
+            i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before)
+        };
+        let start = |y: i64| moment(y, dst.start, self.std);
         // `(때, 들어가는가)` 의 최댓값이 마지막 전환이다 — `true` 가 `false` 보다 커서 한 순간이면 들어가는 쪽이 이긴다.
         let (at, on) = (year - 2..=year + 1)
             .flat_map(|y| {
-                [(true, dst.start, self.std), (false, dst.end, dst.offset)].map(|(on, (day, time), before)| {
-                    (i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before), on)
-                })
+                let end = Some(moment(y, dst.end, dst.offset)).filter(|end| *end < start(y + 1));
+                [Some((start(y), true)), end.map(|end| (end, false))]
             })
+            .flatten()
             .filter(|&(at, _)| at <= i128::from(secs))
             .max()?;
         Some((at, if on { dst.offset } else { self.std }))
@@ -913,6 +923,35 @@ mod tests {
         for (when, off) in [("2026-01-02T00:00:00Z", 1.0), ("2026-01-04T03:00:00Z", 0.0), ("2026-01-06T23:00:00Z", 1.0)]
         {
             assert_eq!(late.offset_at(at(when)), h(off), "J365/167 {when}");
+        }
+
+        // **한 해 넘게 걸친 서머타임은 늘 서머타임이다**(moai-btxt.49f) — 그해의 나옴(이듬해 1월 1일 04:00 UTC)이
+        // 이듬해의 들어감(03:00 UTC)보다 늦어 두 해의 서머타임이 겹친다. 나옴을 마지막 전환으로 치던 판은 1월 1일
+        // 04:00 부터 한 해 내내 표준시(-3)로 그렸다. glibc 와 tzcode 는 늘 서머타임(-2)으로 읽는다. 윤년도 같다.
+        let spanning = rule("AAA3BBB,J1/0,J365/26");
+        for when in [
+            "2026-01-01T02:59:59Z",
+            "2026-01-01T03:00:00Z",
+            "2026-01-01T04:00:00Z",
+            "2026-07-01T12:00:00Z",
+            "2028-12-31T12:00:00Z",
+            "2029-01-01T04:00:00Z",
+        ] {
+            assert_eq!(spanning.offset_at(at(when)), h(-2.0), "J1/0,J365/26 {when}");
+        }
+
+        // 겹침은 **해마다** 가린다 — 서수 날(`n`)은 2월 29일을 세어, 같은 `365/1` 이 평년에는 이듬해의 들어감과
+        // 맞물리고 윤년에는 12월 31일에 끝난다. 그날 하루만 표준시다(glibc 와 같다).
+        let ordinal = rule("STD0DST,0/0,365/1");
+        for (when, off) in [
+            ("2026-12-31T12:00:00Z", 1.0),
+            ("2027-06-01T00:00:00Z", 1.0),
+            ("2028-12-30T23:59:59Z", 1.0),
+            ("2028-12-31T00:00:00Z", 0.0),
+            ("2028-12-31T23:59:59Z", 0.0),
+            ("2029-01-01T00:00:00Z", 1.0),
+        ] {
+            assert_eq!(ordinal.offset_at(at(when)), h(off), "0/0,365/1 {when}");
         }
 
         // 서머타임 없는 규칙 — 분이 든 오프셋은 부호를 뒤집어 읽는다.
