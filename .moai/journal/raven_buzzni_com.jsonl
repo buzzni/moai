@@ -2434,3 +2434,6 @@
 {"ts":"2026-10-01T04:24:31Z","id":"moai-karj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T04:24:42Z","id":"moai-gcqb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판을 0.1.6 으로 올리고 CHANGELOG 의 [0.1.6] 절을 연다"}
 {"ts":"2026-10-01T04:24:43Z","id":"moai-gcqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-01T04:25:22Z","id":"moai-y2il","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version 이 Cargo.lock 을 고쳤다고 하고 안 고친다"}
+{"ts":"2026-10-01T04:26:38Z","id":"moai-gcqb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — scripts/bump-version.sh auto 가 Fixed 뿐이라 patch 를 골랐다. Cargo.lock 은 cargo metadata 를 --no-deps 없이 돌려 맞췄다, idea moai-y2il)"}
+{"ts":"2026-10-01T04:26:38Z","id":"moai-gcqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.1.6 으로 서고 CHANGELOG 에 [0.1.6] - 2026-10-01 이 열렸다. 태그는 main 머지 커밋에 단다"}
