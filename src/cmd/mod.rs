@@ -916,6 +916,40 @@ pub fn unknown_column(name: &str, cfg: &crate::config::Config) -> crate::config:
     crate::config::NoSuchColumn { name: name.to_string(), nor_rows: true, known: cfg.statuses.clone() }
 }
 
+/// 담당의 `me` 를 지금 사람으로 바꾼다. **`Filter::build` 뒤에 한다.** CLI 의 `show` 와 탐색기의 `SPC f` 가
+/// **같이 부른다**(moai-xd7b) — 탐색기가 안 부르던 때는 `assignee=me` 가 `me` 라는 이름을 찾아 0건이었다.
+///
+/// `query` 는 순수 함수라 지금 사람이 누구인지 모르므로 푸는 일은 부르는 쪽 몫이다.
+/// 다만 argv 를 넘기기 *전에* 풀면 두 군데가 어긋난다 — `--filter assignee=me`
+/// 는 `build` 안에서야 항이 되므로 손이 닿지 않아 `me` 라는 이름을 찾게 되고,
+/// 미리 푼 `이름 (메일)` 은 뒤이어 쉼표로 다시 쪼개져 이름에 쉼표가 든 사람을
+/// 영영 못 찾는다. 쪼개진 뒤의 항을 바꾸면 두 문제가 같이 없어진다.
+///
+/// **사람은 부르는 쪽이 댄다**(`who`, `이름 (메일)` 한 줄) — 표면마다 사람을 아는 길이 다르다. CLI 는 그
+/// 자리에서 `model::actor` 로 풀고, 탐색기는 띄울 때 푼 값을 든다(`tui::Site::me`). **`me` 를 물었을 때만
+/// 부른다** — 읽기는 사람을 묻지 않으니, `me` 없는 거르개가 설정 없는 기계에서 넘어지면 안 된다. 여러 번
+/// 물어도 한 번만 부른다.
+///
+/// **말이 아니라 자료를 낸다**([`unknown_column`] 과 같은 자) — 글은 [`crate::view::no_actor`] 가 그 표면의
+/// 말로 짓는다.
+pub fn resolve_me(
+    sel: &mut [crate::query::Sel],
+    who: impl FnOnce() -> Result<String, crate::model::NoActor>,
+) -> Result<(), crate::model::NoActor> {
+    use crate::query::Sel;
+    let asked = |s: &Sel| matches!(s, Sel::Is(v) if v == "me");
+    if !sel.iter().any(asked) {
+        return Ok(());
+    }
+    let me = who()?;
+    for one in sel.iter_mut() {
+        if asked(one) {
+            *one = Sel::Is(me.clone());
+        }
+    }
+    Ok(())
+}
+
 /// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.
 ///
 /// **[`Read`] 와는 다른 자다.** 이쪽은 `--from` 이 견줄 칸 하나만 담고 아무것도 안 낸다.
