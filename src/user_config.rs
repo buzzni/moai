@@ -1248,7 +1248,8 @@ pub struct Look {
     /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub detail_at: Option<String>,
     /// 탐색기가 시각을 적을 시간대 이름 — `Asia/Seoul`·`UTC`(moai-3oz2). **낱말로 든다**: 무슨
-    /// 이름이 있는지는 이 기계의 tzdb 가 안다(`tz::names`). 못 푸는 이름은 탐색기가 UTC 로
+    /// 이름이 있는지는 이 기계의 tzdb 가 안다(`tz::names`). tzdb 에 없는 이름은 POSIX 규칙 글(`JST-9`)로
+    /// 읽고(`tz::Zone::load`, moai-btxt.1gk), 그것으로도 못 푸는 이름은 탐색기가 UTC 로
     /// 떨어지며 한 줄로 알리고(moai-77ap) 이 줄은 그대로 둔다 — 읽기는 관대하고, 받은 기계에
     /// zoneinfo 가 없다고 사람이 고른 이름을 지우면 그 설정을 되살릴 길이 도구 밖에만 남는다.
     pub timezone: Option<String>,
