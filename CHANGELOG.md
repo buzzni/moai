@@ -24,6 +24,14 @@ does not tag — see `CONTRIBUTING.md`.
   that land there (Emacs locks, macOS `._` AppleDouble files) belong to other
   tools.
 
+- **`assignee=me` in the explorer's filter now means you.** `SPC f` with
+  `assignee=me` looked for someone literally named `me` and showed nothing, while
+  `moai show -a me` and `--filter assignee=me` already meant the current person.
+  The explorer now resolves `me` the same way, to the person the header names in
+  the project you are in. When it cannot tell who you are, the prompt refuses the
+  filter with the first line of the command line's refusal, in the language you
+  picked; it never asks who you are.
+
 ## [0.1.5] - 2026-10-01
 
 ### Added
