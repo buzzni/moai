@@ -329,6 +329,7 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai show -s todo -t bug               filters (comma = or, repeated flag = and)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
+    moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
@@ -830,7 +831,37 @@ work. It is a note, not a field.
   note. Only lines that start at the beginning of a line count; indented lines and
   lines inside a fence are read as examples
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
-  are adding several issues up, call the list once instead of calling per id"#;
+  are adding several issues up, call the list once instead of calling per id, or let
+  `moai stats --json` add them up: its `work` sums tokens by model and by grade and
+  counts the lines that carry none apart"#;
+
+/// 통계(moai-1hka). **세는 자는 `report::stats` 하나다** — CLI 와 탐색기(`SPC p s`)가 같은 값을
+/// 읽으므로, 여기 적는 계약은 둘 다의 것이다. 읽는 것은 스냅샷의 필드와 노트의 `model:` 줄뿐이고
+/// 저널의 칸 옮김은 접지 않는다(CLAUDE.md "저널은 상태 계산에 읽히지 않는다").
+const STATS: &str = r#"    moai stats                           columns, priorities, flow, lead and cycle time, AI work
+    moai stats -e <epic> --by tag,assignee   one epic, two axes in full
+    moai stats --bucket day --last 14    flow per day for the last fourteen days
+    moai stats --json                    the same numbers for a machine
+
+It takes the filters `moai show` takes and counts one kind — `issue` unless
+`--type` names another; a group is measured through its members (`-e`,
+`--milestone`). Done, deferred and ideas are opened, because a count of history
+that hides what closed would say nothing closed. In the explorer `SPC p s` opens
+the same numbers as bars, narrowed by the filter that is hung.
+
+- **Unknown is not zero.** A done row with no `started_at` (it closed before that
+  field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;
+  `tokens` is `null` when no line carried a count, and the lines without one are
+  counted apart. Durations are wall clock in minutes, not effort
+- **When a row closed** is the time `--done` reads — rows standing in done now, at
+  the time they got there. A reopened row is not counted as closed
+- **Flow buckets are cut in the screen's time zone**, the zone `--created <day>`
+  reads; `flow.zone` names it. Weeks start on Monday
+- **Every key is always there** except `by` (narrowed by `--by`), `email` on an
+  assignee with none, and `journal_error` (only when a journal could not be read)
+- The median of `moai show <epic>`'s "Spent" folds closed children into their
+  parent's span; `stats` takes each row as its own sample, so the two can differ
+  on the same epic"#;
 
 const PEOPLE: &str = r#"**The assignee comes for free** — whoever created it is the assignee. To hand it to
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
@@ -1254,6 +1285,10 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 ## Name the AI that did the work
 
 {WORK}
+
+## Statistics
+
+{STATS}
 
 ## How to find what a review said
 

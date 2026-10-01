@@ -443,7 +443,36 @@ work. It is a note, not a field.
   note. Only lines that start at the beginning of a line count; indented lines and
   lines inside a fence are read as examples
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
-  are adding several issues up, call the list once instead of calling per id
+  are adding several issues up, call the list once instead of calling per id, or let
+  `moai stats --json` add them up: its `work` sums tokens by model and by grade and
+  counts the lines that carry none apart
+
+## Statistics
+
+    moai stats                           columns, priorities, flow, lead and cycle time, AI work
+    moai stats -e <epic> --by tag,assignee   one epic, two axes in full
+    moai stats --bucket day --last 14    flow per day for the last fourteen days
+    moai stats --json                    the same numbers for a machine
+
+It takes the filters `moai show` takes and counts one kind — `issue` unless
+`--type` names another; a group is measured through its members (`-e`,
+`--milestone`). Done, deferred and ideas are opened, because a count of history
+that hides what closed would say nothing closed. In the explorer `SPC p s` opens
+the same numbers as bars, narrowed by the filter that is hung.
+
+- **Unknown is not zero.** A done row with no `started_at` (it closed before that
+  field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;
+  `tokens` is `null` when no line carried a count, and the lines without one are
+  counted apart. Durations are wall clock in minutes, not effort
+- **When a row closed** is the time `--done` reads — rows standing in done now, at
+  the time they got there. A reopened row is not counted as closed
+- **Flow buckets are cut in the screen's time zone**, the zone `--created <day>`
+  reads; `flow.zone` names it. Weeks start on Monday
+- **Every key is always there** except `by` (narrowed by `--by`), `email` on an
+  assignee with none, and `journal_error` (only when a journal could not be read)
+- The median of `moai show <epic>`'s "Spent" folds closed children into their
+  parent's span; `stats` takes each row as its own sample, so the two can differ
+  on the same epic
 
 ## How to find what a review said
 

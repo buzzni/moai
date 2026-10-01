@@ -15,6 +15,7 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
     moai show -s todo -t bug               filters (comma = or, repeated flag = and)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
+    moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
