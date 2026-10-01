@@ -346,7 +346,9 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
     // 글은 그 뒤에도 루프가 그린 한 프레임에 덮였을 수 있다.
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
-    modes_off();
+    // 루프는 사건마다 터미널의 잡기를 `wants_mouse` 에 맞춰 두므로, 제대로 끝난 자리의 값이 곧 터미널의 것이다.
+    // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
+    modes_off_draining(app.wants_mouse());
     ratatui::restore();
     // 오류·패닉으로 끝났으면 폼에 남은 글부터 건진다 — 터미널을 걷은 **뒤라** 그 말이 셸에 보이고,
     // 패닉을 되던지기 **전이라** 남길 기회가 있다(moai-y3r7).
@@ -533,6 +535,147 @@ fn modes_off() {
     let _ = bracketed_paste(&mut std::io::stdout(), false);
 }
 
+/// 모드를 다 놓고, 마우스를 잡고 있었으면(`mouse`) **길에 남은 보고를 버린다**([`drain_reports`]) — 끝낼 때와
+/// 편집기로 넘길 때가 같은 차례다. raw mode 를 걷기 **전에** 부른다.
+///
+/// 패닉 훅은 [`modes_off`] 만 부른다 — 훅은 아무 스레드에서나 돌고, 루프 스레드가 키를 읽는 동안 같은 tty 를
+/// 읽으면 둘이 바이트를 나눠 가져 키도 답도 반쪽이 된다.
+fn modes_off_draining(mouse: bool) {
+    modes_off();
+    if mouse {
+        drain_reports();
+    }
+}
+
+/// 마우스를 놓은 뒤에도 tty 에 쌓인 보고를 **셸이나 편집기가 읽기 전에 버린다**(moai-1thb). 휠을 굴리다 곧바로
+/// 끝내면(트랙패드의 관성, 느린 ssh) 놓는 글이 터미널에 닿기 전에 나온 보고가 쌓여 있다가, raw mode 를 걷은 셸
+/// 프롬프트에 `65;40;12M` 같은 글로 찍히거나 편집기에 키로 들어간다.
+///
+/// **다 왔는지는 터미널에 물어 안다**(DA1, 사용자 결정 2026-10-01). 놓는 글 뒤에 `ESC[c` 를 쓰면 터미널은 받은
+/// 차례대로 답하므로, 그 답(`ESC[?…c`)이 오면 앞서 나온 보고는 다 온 것이다. 그때까지 온 것은 다 버린다 — 그사이
+/// 친 키도 함께 버려진다(왕복 한 번). 시간만 재고 비우면 느린 ssh 에서 아직 길에 있던 보고가 지나가고, 이미 온
+/// 것만 비우면(`poll(ZERO)`) 그마저 놓친다. 답 **뒤**의 글은 안 건드린다 — 한 바이트씩 읽어 답에서 멈춘다.
+///
+/// **답이 안 오면 [`ANSWER_WAIT`] 에서 끊는다.** 늦게 온 답은 그 자체가 셸에 찍히니 넉넉히 둔다.
+/// **raw mode 가 이미 걷혔으면 안 묻는다** — 줄 단위 입력에서는 줄바꿈 없는 답이 끝내 안 읽혀 끊을 때까지
+/// 기다리고, 답은 그대로 셸에 남는다. 루프 스레드가 패닉하면 ratatui 의 훅이 `screen` 보다 먼저 걷는다.
+#[cfg(unix)]
+fn drain_reports() {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    if !ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
+        return;
+    }
+    // crossterm 이 키를 읽는 그 자리다 — stdin 이 터미널이면 stdin, 아니면 `/dev/tty`.
+    let tty;
+    let fd = if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
+        libc::STDIN_FILENO
+    } else {
+        match std::fs::File::open("/dev/tty") {
+            Ok(f) => {
+                tty = f;
+                tty.as_raw_fd()
+            }
+            Err(_) => return,
+        }
+    };
+    // **답을 못 읽을 자리에는 묻지 않는다.** poll 이 그 fd 를 못 보거나(POLLNVAL) 끊겼으면(POLLHUP·POLLERR)
+    // 아래 기다림은 곧바로 손을 떼고, 그 뒤에 온 답은 버려지지 않은 채 셸에 찍힌다 — 묻지 않은 것보다 나쁘다.
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    if unsafe { libc::poll(&mut p, 1, 0) } < 0 || p.revents & (libc::POLLNVAL | libc::POLLHUP | libc::POLLERR) != 0 {
+        return;
+    }
+    let mut out = std::io::stdout();
+    if out.write_all(b"\x1b[c").and_then(|()| out.flush()).is_err() {
+        return;
+    }
+    drain_until_answer(fd, std::time::Instant::now() + ANSWER_WAIT);
+}
+
+/// 윈도의 콘솔은 마우스를 글이 아니라 입력 레코드로 주고, 셸은 그것을 키로 읽지 않는다 — 버릴 것이 없다.
+#[cfg(not(unix))]
+fn drain_reports() {}
+
+/// DA1 의 답을 기다리는 가장 긴 때. 터미널은 거의 다 답하고 곁에서는 1ms 안이다 — 이만큼 기다리는 것은 답하지 않는
+/// 터미널이고, 그 사람은 마우스를 잡은 채 끝낼 때마다 이만큼 늦는다.
+#[cfg(unix)]
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `fd` 에서 DA1 의 답이 올 때까지 **한 바이트씩** 읽어 버린다. 답을 보면 참이고, 때가 지나거나 못 읽으면 거짓이다.
+/// 쓰는 쪽과 가른 것은 시험이 파이프로 재려고서다.
+#[cfg(unix)]
+fn drain_until_answer(fd: std::os::fd::RawFd, until: std::time::Instant) -> bool {
+    let mut answer = Answer::default();
+    loop {
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let ms = i32::try_from(left.as_millis()).unwrap_or(i32::MAX).max(1);
+        let ready = unsafe { libc::poll(&mut p, 1, ms) };
+        if ready < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        if ready == 0 {
+            continue;
+        }
+        if ready < 0 || p.revents & libc::POLLIN == 0 {
+            return false;
+        }
+        let mut byte = 0u8;
+        match unsafe { libc::read(fd, (&raw mut byte).cast(), 1) } {
+            1 => {
+                if answer.push(byte) {
+                    return true;
+                }
+            }
+            0 => return false,
+            _ => {
+                let e = std::io::Error::last_os_error().kind();
+                if !matches!(e, std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) {
+                    return false;
+                }
+            }
+        }
+    }
+}
+
+/// DA1 의 답 `ESC [ ? <수와 ;> c` 를 한 바이트씩 받아 알아본다. 마우스 보고(`ESC [ < … M`, 1006 을 모르는 터미널의
+/// `ESC [ M` 과 세 바이트)도, kitty 의 키 플래그 답(`ESC [ ? … u`)도, DA2(`ESC [ > … c`)도 이 꼴이 아니다.
+///
+/// 유닉스에서만 짓는다 — 읽는 자([`drain_until_answer`])가 유닉스에만 있어, 다른 데서는 죽은 코드다.
+#[cfg(unix)]
+#[derive(Default)]
+struct Answer(Heard);
+
+#[cfg(unix)]
+#[derive(Default, Clone, Copy)]
+enum Heard {
+    #[default]
+    Nothing,
+    Esc,
+    Csi,
+    Params,
+}
+
+#[cfg(unix)]
+impl Answer {
+    /// 한 바이트를 받는다. 답이 막 끝났으면 참이다.
+    fn push(&mut self, byte: u8) -> bool {
+        use Heard::*;
+        self.0 = match (self.0, byte) {
+            (_, 0x1b) => Esc,
+            (Esc, b'[') => Csi,
+            (Csi, b'?') => Params,
+            (Params, b'0'..=b'9' | b';') => Params,
+            (Params, b'c') => return true,
+            _ => Nothing,
+        };
+        false
+    }
+}
+
 /// 패닉하면 **먼저 마우스 잡기와 bracketed paste 를 끄고** 걸려 있던 훅(ratatui 의 터미널 복구)으로
 /// 넘긴다. 어느 스레드의 패닉에도 돈다 — 버린 다시 읽기 스레드가 터져도 셸이 붙여넣기를 싸서 받지
 /// 않고, 마우스를 움직일 때마다 프롬프트에 좌표 글이 찍히지 않는다. 마우스를 놓아 둔 때에도 끄는 글을
@@ -620,15 +763,16 @@ fn on_path(name: &str) -> bool {
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
 ///
-/// 끝낼 때(`screen`)와 같은 차례다: 마우스 잡기와 bracketed paste 를 끄고 raw mode·대체 화면을 걷는다.
+/// 끝낼 때(`screen`)와 같은 차례다: 마우스 잡기와 bracketed paste 를 끄고, 마우스를 잡고 있었으면(`mouse`) 길에
+/// 남은 보고를 버리고([`drain_reports`]), raw mode·대체 화면을 걷는다.
 /// 안 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어가고, 마우스를 모르는 편집기에 누른 자리가 글로
 /// 찍힌다. 편집기가 도는 동안 **루프 스레드는
 /// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
 /// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 쥔 뒤에 그 스레드가
 /// 터지면 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
-fn suspend() {
+fn suspend(mouse: bool) {
     EDITING.hold();
-    modes_off();
+    modes_off_draining(mouse);
     ratatui::restore();
 }
 
@@ -829,7 +973,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
     // 터미널이 지금 마우스를 잡고 있는가 — `screen` 이 띄울 때 `app.wants_mouse()` 대로 켰다. `SPC o m` 이 바꾼
     // 값도, 폼·글 받는 칸·고르는 창이 열리고 닫히며 바뀐 값도 사건을 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서
-    // 돌아올 때(`resume`)도 같은 값대로 켜므로 이 값과 어긋나지 않는다.
+    // 돌아올 때(`resume`)는 그때의 `wants_mouse` 대로 켜고 이 값도 그것으로 고쳐 적는다.
     let mut caught = app.wants_mouse();
     while !app.quit {
         let began = std::time::Instant::now();
@@ -865,7 +1009,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
-            suspend();
+            suspend(caught);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
@@ -873,7 +1017,11 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // **올린 뒤에 연다.** 먼저 열면 기다리던 훅이 이미 내린 터미널을 걷고, 그 뒤에 올린
             // 화면은 `resume_unwind` 가 훅 없이 끝내며 raw·대체 화면인 채로 셸에 남는다. 올리기가
             // 실패해도 연다 — 기다리던 훅이 패닉 글을 내야 한다.
-            let up = resume(term, app.wants_mouse());
+            //
+            // **다시 잡은 값을 `caught` 에 적는다.** 담기가 폼을 열어 두면(못 담음·누구냐 물음) 여기서는 안 잡는데,
+            // 옛 값을 들고 있으면 그 폼을 바로 닫은 사건 뒤에 `wants_mouse` 가 옛 값과 같아 다시 잡지 않는다.
+            caught = app.wants_mouse();
+            let up = resume(term, caught);
             EDITING.release();
             up?;
         }
@@ -1001,6 +1149,88 @@ mod tests {
         out.clear();
         mouse_capture(&mut out, false).unwrap();
         assert_eq!(out, b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+    }
+
+    /// 받은 바이트를 넘기며 **DA1 의 답이 끝나는 자리**를 댄다 — 없으면 `None`.
+    #[cfg(unix)]
+    fn answered_at(bytes: &[u8]) -> Option<usize> {
+        let mut a = Answer::default();
+        bytes.iter().position(|&b| a.push(b))
+    }
+
+    /// **DA1 의 답만 답이다**(moai-1thb). 터미널마다 매개변수가 다르고(xterm `64;…`, 리눅스 콘솔 `6`, tmux `1;2`),
+    /// 그 앞에 마우스 보고와 키가 섞여 와도 답에서 멈춘다. 마우스 보고·kitty 의 키 플래그 답·DA2 를 답으로 읽으면
+    /// 보고가 다 오기 전에 비우기를 멈춘다.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_da1_reply_ends_the_drain() {
+        for reply in [&b"\x1b[?64;1;2;6;9;15;18;21;22c"[..], b"\x1b[?6c", b"\x1b[?1;2c", b"\x1b[?c"] {
+            assert_eq!(
+                answered_at(reply),
+                Some(reply.len() - 1),
+                "{:?} 를 답으로 못 읽었다",
+                String::from_utf8_lossy(reply)
+            );
+        }
+        let mixed = b"\x1b[<65;40;12M\x1b[<64;40;12Mjk\x1b\x1b[?62;22c";
+        assert_eq!(answered_at(mixed), Some(mixed.len() - 1), "앞에 보고와 키가 섞이자 답을 놓쳤다");
+        for not in [
+            &b"\x1b[<65;40;12M\x1b[<0;3;4m"[..],
+            b"\x1b[M`!!",
+            b"\x1b[?1u",
+            b"\x1b[>1;10;0c",
+            b"?64c",
+            b"\x1b[?64;1x2c",
+        ] {
+            assert_eq!(answered_at(not), None, "{:?} 를 답으로 읽었다", String::from_utf8_lossy(not));
+        }
+    }
+
+    /// 파이프를 하나 열고 `bytes` 를 써 둔다 — 읽는 쪽과 쓰는 쪽. 쓰는 쪽을 버리면 읽는 쪽은 남은 것 뒤에서 끝난다.
+    #[cfg(unix)]
+    fn pipe_with(bytes: &[u8]) -> (std::os::fd::OwnedFd, std::os::fd::OwnedFd) {
+        use std::os::fd::FromRawFd;
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let wrote = unsafe { libc::write(fds[1], bytes.as_ptr().cast(), bytes.len()) };
+        assert_eq!(usize::try_from(wrote).ok(), Some(bytes.len()));
+        unsafe { (std::os::fd::OwnedFd::from_raw_fd(fds[0]), std::os::fd::OwnedFd::from_raw_fd(fds[1])) }
+    }
+
+    /// 읽는 쪽에 남은 것 전부.
+    #[cfg(unix)]
+    fn rest_of(read: std::os::fd::OwnedFd) -> Vec<u8> {
+        let mut rest = Vec::new();
+        std::io::Read::read_to_end(&mut std::fs::File::from(read), &mut rest).unwrap();
+        rest
+    }
+
+    /// **답까지 버리고 답 뒤는 남긴다**(moai-1thb) — 쌓인 보고는 셸에 안 가고, 답 뒤에 친 키는 셸이 받는다. 덩어리로
+    /// 읽으면 답 뒤의 키까지 삼킨다.
+    #[cfg(unix)]
+    #[test]
+    fn the_drain_eats_up_to_the_reply_and_leaves_what_follows() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = pipe_with(b"\x1b[<65;40;12M\x1b[<65;40;12M\x1b[<64;41;12Mq\x1b[?62;22cls\n");
+        drop(write);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        assert!(drain_until_answer(read.as_raw_fd(), until), "답을 보고도 참을 안 냈다");
+        assert_eq!(rest_of(read), b"ls\n", "답 뒤의 글을 건드렸다");
+    }
+
+    /// **답이 안 오면 때에서 끊는다** — 답하지 않는 터미널에서 끝내기가 멈추지 않는다. 그동안 온 보고는 버린다.
+    #[cfg(unix)]
+    #[test]
+    fn the_drain_gives_up_when_no_reply_comes() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = pipe_with(b"\x1b[<65;40;12M\x1b[<64;40;12M");
+        let began = std::time::Instant::now();
+        assert!(!drain_until_answer(read.as_raw_fd(), began + Duration::from_millis(40)), "답 없이 참을 냈다");
+        let took = began.elapsed();
+        assert!(took >= Duration::from_millis(40), "때보다 먼저 끊었다 — {took:?}");
+        assert!(took < Duration::from_secs(1), "때를 넘겨 기다렸다 — {took:?}");
+        drop(write);
+        assert_eq!(rest_of(read), b"", "기다리는 동안 온 보고를 남겼다");
     }
 
     /// **휠·끌기만 몰아 받는다**(리뷰) — 누르기·뗌·키·붙여넣기는 하나씩 받고 그린다. 키는 편집기를 부르거나 끝낼 수 있고,
