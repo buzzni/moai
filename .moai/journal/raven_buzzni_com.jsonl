@@ -2481,3 +2481,4 @@
 {"ts":"2026-10-01T07:25:32Z","id":"moai-74sb.ywk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=139696 (high — 에픽 끝 리뷰, 멤버 하나가 medium 이라 한 칸 위)"}
 {"ts":"2026-10-01T07:25:37Z","id":"moai-74sb.5bw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T07:25:37Z","id":"moai-74sb.ywk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 리뷰 1·4·5·6번(표 읽기를 check-version.sh --print-name 하나로 모으기, 가짜 cargo 시험의 PATH, 낡은 주석, 시험 깔기 모으기). 안 받은 것: 2번(이 저장소는 Cargo.lock 을 커밋한다). 넘긴 것: 3번은 idea moai-i9x7 로 담았다"}
+{"ts":"2026-10-01T07:28:38Z","id":"moai-74sb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 머지 8700b94d 로 닫았다. 넘긴 것은 idea moai-i9x7(작은따옴표 TOML) 하나"}
