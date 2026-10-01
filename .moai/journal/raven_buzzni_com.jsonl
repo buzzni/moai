@@ -2527,3 +2527,12 @@
 {"ts":"2026-10-01T11:44:12Z","id":"moai-irrj.6on","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-01T11:44:12Z","id":"moai-irrj.mhr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-01T11:44:12Z","id":"moai-irrj.ix7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-01T12:11:33Z","id":"moai-irrj.xf3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — epic end: explorer mouse (capture, click, wheel, divider drag)"}
+{"ts":"2026-10-01T12:11:37Z","id":"moai-irrj.xf3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-01T12:12:08Z","id":"moai-irrj.9xq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: code done and committed on worktree-moai-irrj; waiting on the epic-end review moai-irrj.xf3 (running in the background), then merge and close"}
+{"ts":"2026-10-01T12:12:09Z","id":"moai-irrj.yzm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: code done and committed on worktree-moai-irrj; waiting on the epic-end review moai-irrj.xf3 (running in the background), then merge and close"}
+{"ts":"2026-10-01T12:12:10Z","id":"moai-irrj.6on","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: code done and committed on worktree-moai-irrj; waiting on the epic-end review moai-irrj.xf3 (running in the background), then merge and close"}
+{"ts":"2026-10-01T12:12:12Z","id":"moai-irrj.mhr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: code done and committed on worktree-moai-irrj; waiting on the epic-end review moai-irrj.xf3 (running in the background), then merge and close"}
+{"ts":"2026-10-01T12:12:13Z","id":"moai-irrj.ix7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: code done and committed on worktree-moai-irrj; waiting on the epic-end review moai-irrj.xf3 (running in the background), then merge and close"}
+{"ts":"2026-10-01T12:12:15Z","id":"moai-irrj.xf3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix is running in the background in the worktree; take its findings in, note its text here, then close with -m"}
+{"ts":"2026-10-01T16:17:13Z","id":"moai-fpxd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Drain queued mouse reports before leaving raw mode"}
