@@ -1197,7 +1197,9 @@ pub struct App {
     pub detail_at: view::DetailAt,
     /// 마우스를 잡는가(moai-irrj.9xq). **처음에는 잡는다**(사용자 결정 2026-10-01) — `SPC o m` 이 놓고
     /// 잡으며 설정에 남는다. 터미널에 그 글을 내는 것은 루프다(`cmd::tui`): 여기는 원하는 값만 든다.
-    pub mouse: bool,
+    /// 이름이 `mouse` 가 아닌 것은 사건을 받는 [`App::mouse`] 와 가르려서다 — 같은 이름이면 문서의 고리가 말없이
+    /// 그 함수로 간다(리뷰).
+    pub mouse_on: bool,
     /// 지난 프레임이 칸을 그린 자리 — 마우스가 무엇을 눌렀는지 맞히는 바탕이다([`mouse::Drawn`]).
     /// **쓰는 곳은 `draw::screen` 하나다**([`App::spun`] 과 같은 결) — 자리를 여기서 다시 셈하면
     /// 그리는 쪽의 가르기(`draw::split_body`)와 따로 맞춰야 한다.
@@ -1208,9 +1210,9 @@ pub struct App {
     pub list_width: Option<u16>,
     /// 위아래로 가를 때 목록이 가져가는 높이의 몫(%). 폭과 **따로다** — 처음값부터 다르다(`draw::ABOVE`).
     pub list_height: Option<u16>,
-    /// 칸 사이 선을 잡고 끄는 중인가. 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다 적으면 손짓 하나가
-    /// 파일을 수십 번 다시 쓴다.
-    dragging: bool,
+    /// 칸 사이 선을 잡고 끄는 중이면 잡은 자리([`mouse::Grab`]). 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다
+    /// 적으면 손짓 하나가 파일을 수십 번 다시 쓴다. 놓친 뗌은 다음 마우스 사건이나 다음 키가 대신한다(`App::drop_line`).
+    dragging: Option<mouse::Grab>,
     /// 화면의 시각을 적을 시간대(moai-p5az). **화면 하나에 하나다** — 프로젝트를 옮겨도 보는
     /// 사람은 그대로라, `Site` 가 아니라 여기 산다(보기·정렬과 같은 자리다).
     ///
@@ -1714,11 +1716,11 @@ impl App {
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
-            mouse: true,
+            mouse_on: true,
             drawn: mouse::Drawn::default(),
             list_width: None,
             list_height: None,
-            dragging: false,
+            dragging: None,
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
             saved: Default::default(),
@@ -2904,7 +2906,7 @@ impl App {
             self.detail_at = at;
         }
         if let Some(on) = look.mouse {
-            self.mouse = on;
+            self.mouse_on = on;
         }
         // **범위 밖의 수는 끝으로 당긴다** — 읽기는 관대하다. `list_width = 95` 를 적은 사람의 뜻은 "목록을 크게" 고,
         // 끝으로 당긴 값은 입힌 뒤의 보기(`App::saved`)에 들어 이 세션이 끌기 전에는 파일의 줄을 안 건드린다.
@@ -2927,7 +2929,7 @@ impl App {
             detail: Some(self.detail_open),
             detail_at: Some(self.detail_at.name().to_string()),
             timezone: self.saved_zone.clone(),
-            mouse: Some(self.mouse),
+            mouse: Some(self.mouse_on),
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
         }
@@ -4310,6 +4312,10 @@ impl App {
         // 이동한 키도 그 닫는 몫으로 도로 세운다(moai-y8v2, 아래 `act.moves()`).
         let carried = self.notice.take();
         let in_menu = menu::open(&self.chord);
+        // **키가 오면 끌기는 끝났다**(리뷰, moai-irrj) — 뗌을 놓치는 터미널이 있어(창 밖에서 떼면 안 알린다), 그 뒤로 키만
+        // 쓰다 끝내면 끈 몫이 화면에만 서고 다음 실행에서 사라진다. 끝내는 키(Ctrl-C)보다 먼저 적는다. 알림을 걷은 **뒤에**
+        // 부른다 — 적다가 진 까닭(`App::save_look`)이 이 키에 걷히면 사람이 못 본다.
+        self.drop_line();
         // raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **어느 모드에서든 먼저 받는다** — 글을
         // 받는 중에 글자로 먹으면 검색칸에 `c` 가 찍히고, 폼·창·물음에서 막히면 멈춘 화면에서
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
@@ -4490,15 +4496,15 @@ impl App {
                 self.detail_at = self.detail_at.next();
                 self.save_look();
             }
-            // **여는 자리에서 tzdb 를 읽는다**(moai-3oz2) — 띄울 때 읽으면 시간대를 한 번도
-            // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
-            // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
             // **원하는 값만 바꾼다** — 터미널에 잡기·놓기 글을 내는 것은 루프다(`cmd::tui`). 메뉴는
             // 열린 채로 남아 `[켜짐]`·`[꺼짐]` 이 바로 바뀐다(`Browse::stateful`).
             B::Mouse => {
-                self.mouse = !self.mouse;
+                self.mouse_on = !self.mouse_on;
                 self.save_look();
             }
+            // **여는 자리에서 tzdb 를 읽는다**(moai-3oz2) — 띄울 때 읽으면 시간대를 한 번도
+            // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
+            // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
             B::Timezone => {
                 let (all, why) = crate::tz::names();
                 self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
@@ -4554,7 +4560,7 @@ impl App {
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             deferred_hidden: self.view.hide_deferred,
             detail_at: self.detail_at,
-            mouse: self.mouse,
+            mouse: self.mouse_on,
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
@@ -9264,11 +9270,11 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = App::new(Vec::new(), cfg(), Path::new());
         a.user_config = Some(user.clone());
-        assert!(a.mouse, "처음부터 잡고 있어야 한다");
+        assert!(a.mouse_on, "처음부터 잡고 있어야 한다");
         let state = |a: &App| keys::Browse::Mouse.state(&a.key_ctx(&a.rows()));
         assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.on")));
         a.hit("SPC o m");
-        assert!(!a.mouse, "SPC o m 이 마우스를 안 놓았다");
+        assert!(!a.mouse_on, "SPC o m 이 마우스를 안 놓았다");
         assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.off")));
         assert!(menu::open(&a.chord), "상태를 대는 항목인데 메뉴가 닫혔다");
         a.hit("Esc");
@@ -9278,24 +9284,20 @@ mod tests {
         let mut b = App::new(Vec::new(), cfg(), Path::new());
         b.user_config = Some(user.clone());
         b.load_look();
-        assert!(!b.mouse, "놓은 마우스가 다음 실행에 안 이어졌다");
-        // 놓은 뒤에 온 사건 — 칸을 눌러도 포커스가 안 간다.
-        b.drawn = mouse::Drawn {
-            body: ratatui::layout::Rect::new(0, 0, 80, 20),
-            list: ratatui::layout::Rect::new(0, 0, 44, 20),
-            rows: ratatui::layout::Rect::new(1, 1, 42, 18),
-            detail: Some(ratatui::layout::Rect::new(44, 0, 36, 20)),
-        };
+        assert!(!b.mouse_on, "놓은 마우스가 다음 실행에 안 이어졌다");
+        // 놓은 뒤에 온 사건 — 그린 상세의 한가운데를 눌러도 포커스가 안 간다.
+        render_smoke(&mut b);
+        let detail = b.drawn.detail.expect("상세가 안 섰다");
         let press = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: 60,
-            row: 5,
+            column: detail.x + detail.width / 2,
+            row: detail.y + detail.height / 2,
             modifiers: KeyModifiers::NONE,
         };
         b.mouse(press);
         assert_eq!(b.focus, Pane::Explorer, "놓은 마우스가 포커스를 옮겼다");
         b.hit("SPC o m Esc");
-        assert!(b.mouse);
+        assert!(b.mouse_on);
         assert!(std::fs::read_to_string(&user).unwrap().contains("mouse = true"));
     }
 

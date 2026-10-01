@@ -1993,9 +1993,10 @@ Options:
              taking the focus there: the list's cursor, the detail, the
              statistics window. Dragging the line between the list and the
              detail resizes them, and the share the list takes is kept under
-             [tui] as list_width and list_height. Over a form, a picker, a
-             prompt or the SPC menu the mouse does nothing. While it is on,
-             most terminals select text with Shift held
+             [tui] as list_width and list_height. While a form, a picker, a
+             prompt or the SPC menu is up, the mouse does nothing. With the
+             mouse on, the terminal's own selection and middle-button paste
+             need Shift held in most terminals, Option in iTerm2
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.

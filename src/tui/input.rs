@@ -647,7 +647,10 @@ mod tests {
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("draw.rs", "그림 — Frame 에 찍는다"),
         ("layer.rs", "프로젝트 층 — 등록한 프로젝트를 열고(Repo·사용자 설정) 스레드에서 읽는다"),
-        ("mouse.rs", "마우스 — App 의 포커스·커서·굴린 자리를 옮기고, 끈 칸의 몫을 사용자 설정에 적는다(App::save_look)"),
+        (
+            "mouse.rs",
+            "마우스 — App 의 포커스·커서·굴린 자리를 옮기고, 끈 칸의 몫을 사용자 설정에 적는다(App::save_look)",
+        ),
         ("register.rs", "등록·해제 — 디렉터리를 읽고(fs) 사용자 설정을 쓴다. 창의 상태와 키는 조각 picker.rs 가 든다"),
         (
             "stats.rs",

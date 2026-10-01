@@ -62,6 +62,13 @@ impl Window {
         }
     }
 
+    /// 휠 한 칸(moai-irrj) — **키(`j`·`k`)가 옮기는 그 굴린 자리를 옮기고**([`App::stats_key`]), 기다리던 `g` 는 버린다:
+    /// 휠을 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면 사람이 친 적 없는 맨 위로 가기가 선다.
+    pub(super) fn roll(&mut self, by: isize) {
+        self.chord.clear();
+        self.scroll.by(by);
+    }
+
     /// 칸 너비를 바꾼다. **굴린 자리는 그대로 둔다** — 흐름 밑의 소요·AI 작업을 보다가 바꾼 사람이 맨 위로
     /// 튕기면 보던 것을 다시 찾아야 한다. 흐름의 높이는 칸 너비와 상관없이 같다.
     pub fn switch(&mut self) {

@@ -46,7 +46,9 @@ const DETAIL_MIN_H: u16 = 10;
 
 /// 좌우로 갈랐을 때 **목록**의 바닥 — 상세의 바닥([`DETAIL_MIN_H`])과 같다. 몫이 처음값뿐이던 때는 목록이 늘 큰
 /// 쪽이라 바닥이 없어도 됐는데, 끌어서 몫을 줄이면(moai-irrj.mhr) 좁은 창에서 목록이 제 테두리만 남는다.
-const LIST_MIN_H: u16 = 10;
+/// **두 바닥을 다 들 만큼 넓을 때만 선다**(둘을 더한 20칸) — 그보다 좁으면 상세의 바닥(`Constraint::Min`)이 몫보다
+/// 먼저 서고, 그것은 끌기 전부터 그랬다.
+const LIST_MIN_H: u16 = DETAIL_MIN_H;
 
 /// 끌어서 고를 수 있는 목록의 몫(%) — 가로·세로 같다(moai-irrj.mhr). 끝까지 밀어도 다른 칸이 제 몫의 15% 는
 /// 든다: 한쪽을 0 으로 밀면 그 칸을 다시 잡을 선이 화면 끝에 붙어, 끌어 되돌리기 어렵다. 칸을 아예 걷는 것은
@@ -56,6 +58,21 @@ pub(super) const SHARES: std::ops::RangeInclusive<u16> = 15..=85;
 /// 설정이나 끌기가 낸 몫을 [`SHARES`] 안으로 당긴다.
 pub(super) fn share(n: i64) -> u16 {
     n.clamp(i64::from(*SHARES.start()), i64::from(*SHARES.end())) as u16
+}
+
+/// 목록이 몸통에서 `list` 칸을 들게 하는 몫 — 끈 선이 손이 놓은 자리에 서도록 [`split_body`] 를 거꾸로 푼다
+/// (moai-irrj.mhr, 끄는 쪽은 `mouse.rs`).
+///
+/// **그릴 수 없는 칸 수는 바닥으로 당긴다**(리뷰). 목록의 바닥([`LIST_MIN_H`]·[`LIST_MIN_V`])과 상세의 바닥
+/// (`Constraint::Min`)이 몫보다 먼저 서서, 바닥 밖의 몫은 화면의 선을 안 움직인다. 당기지 않으면 끄는 동안 선은 바닥에
+/// 선 채로 몫만 손을 따라가, 화면에 한 번도 안 선 몫이 설정에 남고 큰 창에서 그 몫이 선다.
+pub(super) fn share_for(body: Rect, at: super::view::DetailAt, list: u16) -> u16 {
+    let (len, least, list_least) =
+        if at.vertical() { (body.height, DETAIL_MIN_V, LIST_MIN_V) } else { (body.width, DETAIL_MIN_H, LIST_MIN_H) };
+    let len = u32::from(len.max(1));
+    let list = u32::from(list.max(list_least)).min(len.saturating_sub(u32::from(least)));
+    // 반올림한 백분율 — 버림이면 선이 늘 손보다 한 칸 앞(왼쪽·위)에 선다.
+    share(i64::from((list * 200 + len) / (2 * len)))
 }
 
 /// 위아래로 갈랐을 때 **목록**의 바닥 — 테두리 둘과 줄 하나. [`super::menu::BODY_MIN`] 과 같은
@@ -147,8 +164,6 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     ])
     .areas(area);
     let (left, right) = split_body(body, app);
-    // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 뒤에 채운다(`list`).
-    app.drawn = super::mouse::Drawn { body, list: left, rows: Rect::default(), detail: right };
     // **안 선 칸에는 포커스가 못 선다**(리뷰, moai-l7e2). 세로로 접힌 상세는 `detail_open` 이 켜진
     // 채로 자리가 없다 — 그대로 두면 `Ctrl-w w` 가 안 그려진 칸으로 가고, 거기서 ↑↓ 는 보이지 않는
     // 글을 굴려 목록이 멈춘 것처럼 보인다. 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은
@@ -171,7 +186,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         let text = clip(&text, note.width as usize);
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
-    list(f, app, left, &rows);
+    let rows_at = list(f, app, left, &rows);
+    // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 안쪽이라 그린 쪽이 낸다.
+    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right };
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }
@@ -1470,7 +1487,8 @@ fn unchecked_said(lang: Lang, kind: crate::latest::Trouble) -> &'static str {
 ///
 /// **몫은 사람이 끌어 바꾼다**(moai-irrj.mhr) — 끈 몫(`App::list_width`·`list_height`)이 있으면 그것이 서고,
 /// 그때는 상세가 더 클 수도 있다. 어느 몫이든 목록의 바닥([`LIST_MIN_H`]·[`LIST_MIN_V`])은 지킨다: 몫을 그만큼
-/// 올려 그린다. 상세의 바닥은 `Constraint::Min` 이 지킨다.
+/// 올려 그린다. 상세의 바닥은 `Constraint::Min` 이 지키고, 둘이 다 안 들어가는 좁은 몸통에서는 상세의 바닥이 먼저다.
+/// 끈 선이 이 가르기를 거꾸로 푸는 자리는 [`share_for`] 다 — 두 바닥을 거기서도 같이 본다.
 fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
     if !app.detail_open {
         return (body, None);
@@ -1684,7 +1702,9 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
     }
 }
 
-fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
+/// 목록을 그리고 **줄이 선 자리**를 낸다 — 테두리와 열 이름 줄을 뗀 안쪽이다. 마우스가 누른 줄을 그것으로 센다
+/// (`mouse::Drawn::rows`).
+fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
     let inner = at.width.saturating_sub(2) as usize;
     // **셈은 줄마다 한 번만 센다** — 머리를 걷는 셈(`Head::of`)·오른쪽 열 걷기·이름 줄·줄(`row_line`)이
@@ -1820,7 +1840,6 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         f.render_widget(Paragraph::new(names_line(common, cols, tallied, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
-    app.drawn.rows = list_at;
     if let Some(at) = selected {
         app.list.reveal(at);
     }
@@ -1850,6 +1869,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         &mut state,
     );
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
+    list_at
 }
 
 /// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은

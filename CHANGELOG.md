@@ -35,9 +35,8 @@ does not tag — see `CONTRIBUTING.md`.
   focus where it was. Dragging the line between the list and the detail resizes
   them; the share the list takes is kept under `[tui]` as `list_width` (detail
   left or right) and `list_height` (detail above or below), in percent, and is
-  not written until you drag. Over a form, a picker, a prompt or the `SPC` menu
-  the mouse does nothing. It is caught from the start, so most terminals select
-  text with Shift held; `SPC o m` lets it go and keeps that as `[tui] mouse`.
+  not written until you drag. While a form, a picker, a prompt or the `SPC`
+  menu is up, the mouse does nothing.
 
 - **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
   and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a
@@ -48,6 +47,14 @@ does not tag — see `CONTRIBUTING.md`.
   and `JST-9` fell back to UTC with a line saying the zone was unknown. A `TZ`
   that is neither a name nor a rule now falls back to UTC with that line, the way
   glibc reads it. The `SPC o t` list still holds the zoneinfo names alone.
+
+### Changed
+
+- **The explorer holds the mouse from the start.** A plain drag in `moai tui`
+  no longer selects text in the terminal, and a middle click no longer pastes
+  into the `/` search, a filter or the `SPC n` form — most terminals do both
+  with Shift held, iTerm2 with Option. `SPC o m` lets the mouse go, and the
+  choice is kept as `[tui] mouse`.
 
 ### Fixed
 

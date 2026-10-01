@@ -1240,6 +1240,10 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// fields = ["id", "priority", "tally", "assignee"]
 /// # 적는 쪽이 아는 열 전부 — 바이너리를 따라 자란다. `fields_known = []` 의 뜻을 얼린 목록과 다른 목록이다.
 /// fields_known = ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"]
+/// mouse = true
+/// # 목록이 가져가는 몫(%) — 칸 사이 선을 끈 적이 있을 때만 선다.
+/// list_width = 55
+/// list_height = 70
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
