@@ -258,7 +258,7 @@ impl Window {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{App, Hung, Input, Mode, Pane};
+    use super::super::{App, Hung, Input, Mode, Pane, draw};
     use super::Window;
     use crate::config::Config;
     use crate::model::{Issue, Kind, Status};
@@ -288,6 +288,12 @@ mod tests {
         let mut a = App::new(issues, cfg(), Path::new());
         a.site.now = "2026-09-10T00:00:00Z".into();
         a
+    }
+
+    /// 창 폭에서 안쪽 폭을 뺀 몫 — 테두리 두 칸과 좌우 여백(상세와 같은 [`draw::left_gutter`]). 시험이 폭을 손으로 셈하면
+    /// 커서 글리프의 폭이 바뀐 날 재던 경계가 말없이 옮겨 간다.
+    fn edge() -> u16 {
+        2 + 2 * draw::left_gutter() as u16
     }
 
     fn window(a: &App) -> &Window {
@@ -365,8 +371,23 @@ mod tests {
     fn the_window_draws_at_any_size_and_falls_back_to_text_when_narrow() {
         let mut a = app();
         a.hit("SPC p s");
-        for (w, h) in [(1, 1), (4, 3), (12, 6), (30, 8), (49, 20), (50, 20), (60, 4), (80, 24), (140, 60)] {
-            let screen = super::super::draw::tests::render(&mut a, w, h).join("\n");
+        // `edge` 와 그 한 칸 위는 여백이 안쪽을 0칸·1칸만 남기는 폭이고, `cut` 의 앞뒤는 차트와 글이 갈리는 폭이다
+        // ([`draw::STATS_CHART_W`]). 둘 다 [`edge`] 에서 셈한다 — 커서 글리프의 폭이 바뀌어도 같은 경계를 잰다.
+        let cut = draw::STATS_CHART_W + edge();
+        for (w, h) in [
+            (1, 1),
+            (4, 3),
+            (edge(), 3),
+            (edge() + 1, 3),
+            (12, 6),
+            (30, 8),
+            (cut - 1, 20),
+            (cut, 20),
+            (60, 4),
+            (80, 24),
+            (140, 60),
+        ] {
+            let screen = draw::tests::render(&mut a, w, h).join("\n");
             assert!(matches!(a.mode, Mode::Stats(_)), "{w}x{h} 에서 창이 닫혔다");
             if w >= 80 && h >= 24 {
                 assert!(screen.contains("통계"), "{w}x{h} 에 제목이 없다\n{screen}");
@@ -375,7 +396,7 @@ mod tests {
         }
         // 넓은 창 — 차트다. 셋을 다 9월 1일에 만들었고(08-31 주) 하나를 9월 3일에 닫았다. 칸마다 두 막대에
         // 수가 서고, 0 인 막대에도 `0` 이 **그 막대 밑에** 선다 — 칸 이름 줄과 같은 걸음으로.
-        let wide = super::super::draw::tests::render(&mut a, 140, 60);
+        let wide = draw::tests::render(&mut a, 140, 60);
         let all = wide.join("\n");
         assert!(all.contains("+ 생성") && all.contains("✓ 완료"), "범례가 없다\n{all}");
         assert!(all.contains("· todo"), "칸 막대에 이름이 없다\n{all}");
@@ -395,7 +416,7 @@ mod tests {
         assert!(three_at.abs_diff(label_at) <= 1, "08-31 칸의 수가 제 칸 밑에 안 섰다\n{all}");
         // 좁은 창 — 같은 수를 글로 낸다. **창보다 긴 줄은 접는다** — 칸 줄의 `✓ done 1` 과 소요 줄의 까닭이 창 밖으로
         // 잘려 사라지던 자리다(옆으로 굴릴 길이 없다).
-        let narrow = super::super::draw::tests::render(&mut a, 40, 40).join("\n");
+        let narrow = draw::tests::render(&mut a, 40, 40).join("\n");
         assert!(narrow.contains("센 줄  issue 3건") && narrow.contains("2026-08-31"), "글로 안 떨어졌다\n{narrow}");
         assert!(narrow.contains("✓ done 1"), "좁은 창이 칸 줄의 꼬리를 잘랐다\n{narrow}");
         assert!(narrow.contains("적혔다"), "좁은 창이 소요 줄의 까닭을 잘랐다\n{narrow}");
@@ -416,7 +437,8 @@ mod tests {
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
         a.hit("SPC p s");
-        let screen = super::super::draw::tests::render(&mut a, 60, 80).join("\n");
+        // 안쪽 폭 58 — 이 폭에서 이름이 `anthr…` 로 잘린다. 창 폭은 그 안쪽에 [`edge`] 를 더한 것이다.
+        let screen = draw::tests::render(&mut a, 58 + edge(), 80).join("\n");
         // 막대 곁의 글 통째로 — 머리 줄(`AI 작업 …`)에도 같은 합이 서므로 막대 쪽에만 있는 머리(`2줄 · `)부터 잰다.
         assert!(screen.contains("2줄 · 토큰 40,957,750 — 1줄의 합 (안 적은 줄 1)"), "막대 곁의 수가 잘렸다\n{screen}");
         assert!(screen.contains("anthr…"), "넘친 모델 이름을 잘렸다고 안 댔다\n{screen}");
