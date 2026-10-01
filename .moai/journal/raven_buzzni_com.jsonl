@@ -2581,3 +2581,4 @@
 {"ts":"2026-10-01T22:54:40Z","id":"moai-1thb.e9q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 터미널 raw mode 를 떠나는 길이고 설계 결정이 있다)"}
 {"ts":"2026-10-01T22:54:48Z","id":"moai-1thb.e9q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T22:54:48Z","id":"moai-1thb.53f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1(편집기에서 돌아온 뒤 caught), 2(못 들을 fd 에는 묻지 않는다), 5(유닉스 전용), 7(CHANGELOG 의 1초), 4 는 주석만 고쳤다. 넘긴 것: 6 mosh 는 idea moai-muqy(회귀가 아니라서 릴리스 밖). 3 EDITING 문은 안 받는다 — 패닉 훅의 차례가 바뀌고, 경합 폭은 왕복 한 번이다"}
+{"ts":"2026-10-01T22:56:25Z","id":"moai-1thb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 남은 것 없음 — 2a8f86ef 로 머지했고 멤버와 리뷰를 닫았다. 넘긴 것은 idea moai-muqy(mosh 에서 DA1 답이 먼저 오는 한계, 릴리스 밖) 하나다"}
