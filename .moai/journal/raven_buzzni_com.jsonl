@@ -2550,3 +2550,8 @@
 {"ts":"2026-10-01T16:18:51Z","id":"moai-irrj.mhr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T16:18:52Z","id":"moai-irrj.ix7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T16:21:24Z","id":"moai-irrj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged in df901ac2, all members and the review closed; the one handed-on finding is idea moai-fpxd (drain queued mouse reports on quit)"}
+{"ts":"2026-10-01T22:23:53Z","id":"moai-1thb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쌓인 마우스 보고가 셸로 새지 않게 한다"}
+{"ts":"2026-10-01T22:23:53Z","id":"moai-1thb.e9q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끝낼 때와 편집기를 열 때 쌓인 마우스 보고를 비운다"}
+{"ts":"2026-10-01T22:23:53Z","id":"moai-1thb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-fpxd 에서 펼쳤다 — Drain queued mouse reports before leaving raw mode"}
+{"ts":"2026-10-01T22:23:53Z","id":"moai-fpxd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-1thb 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-01T22:24:01Z","id":"moai-1thb.e9q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
