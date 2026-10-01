@@ -2445,3 +2445,7 @@
 {"ts":"2026-10-01T06:48:33Z","id":"moai-1hka.aje","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록·README·docs/cli.md·CHANGELOG 에 stats 를 싣는다"}
 {"ts":"2026-10-01T06:48:45Z","id":"moai-1hka.f4x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-01T06:48:45Z","id":"moai-1hka.k16","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-01T06:49:19Z","id":"moai-1hka.f4x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 워크트리 moai-1hka 에서 일꾼 서브에이전트가 report::stats 와 moai stats(moai-1hka.k16)를 함께 짓는다. 끝나면 탐색기 SPC p s(moai-1hka.bq9)를 같은 워크트리에서 잇고, 문서(moai-1hka.aje)를 적은 뒤 에픽 끝에서 xhigh 로 한 번 본다"}
+{"ts":"2026-10-01T06:50:30Z","id":"moai-mrbv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"0.1.6 판 올리기(moai-gcqb)에서도 같았다 — Cargo.lock 이 0.1.5 로 남았고 --no-deps 없는 cargo metadata 로 맞췄다. 그때 이 idea 를 못 찾고 moai-y2il 을 따로 세웠다가 지운다"}
+{"ts":"2026-10-01T06:50:31Z","id":"moai-y2il","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version 이 Cargo.lock 을 고쳤다고 하고 안 고친다"}
+{"ts":"2026-10-01T06:58:51Z","id":"moai-rbjn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기를 마우스로 다룬다 — 누르기·휠·칸 크기 끌기"}
