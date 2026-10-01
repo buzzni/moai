@@ -2507,3 +2507,9 @@
 {"ts":"2026-10-01T09:31:48Z","id":"moai-1hka.hvb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 리뷰가 고친 13건(11번은 반)을 받았다. 7번은 넘긴 채 두지 않고 내가 고쳤다. 가려진 줄과 소속을 못 정한 줄을 에픽·마일스톤 축에서 빼고 query 의 placed 와 같은 금을 쓴다. --json 계약은 아직 나가지 않았으니 지금 정하는 것이 싸다. 축의 합이 줄 수보다 작을 수 있다는 것은 도움말과 안내에 적었다. 12번은 idea moai-q58v 로 넘겼다(탐색기 전체에 한 번 정할 일이다). 아래 칸의 정리들은 받지 않았다 — 동작이 아니라 모양이다"}
 {"ts":"2026-10-01T09:31:48Z","id":"moai-1hka.hvb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=797255 (max — 통계 에픽 끝 리뷰, CLI·탐색기·문서를 가로지른다)"}
 {"ts":"2026-10-01T09:31:49Z","id":"moai-1hka.hvb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1~6·8~11(11번은 반)·13~15, 그리고 내가 고친 7번(소속 축에서 가려진 줄 빼기). 넘긴 것: 12번 idea moai-q58v. 에픽 안 idea moai-t12k(겹쳐 보기 수 차이)는 릴리스 밖으로 뺐다"}
+{"ts":"2026-10-01T09:32:05Z","id":"moai-1hka.aje","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — AGENTS 블록·스킬·README·CHANGELOG·CLAUDE.md 글, 이 창에서 직접 했다)"}
+{"ts":"2026-10-01T09:32:05Z","id":"moai-1hka.f4x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T09:32:05Z","id":"moai-1hka.k16","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T09:32:05Z","id":"moai-1hka.bq9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T09:32:06Z","id":"moai-1hka.aje","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T09:32:07Z","id":"moai-1hka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 멤버 넷과 에픽 끝 리뷰(max)를 닫고 eafaf609 로 머지했다. 넘긴 것은 idea moai-q58v(탐색기가 못 읽은 저널을 안 알림)와 moai-t12k(겹쳐 보기에서 통계 창과 CLI 의 수가 다름), 둘 다 릴리스 밖이다"}
