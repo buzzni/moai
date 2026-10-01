@@ -167,15 +167,17 @@ chmod 644 -- "$tmp"
 mv -- "$tmp" "$manifest"
 printf 'bump-version: Cargo.toml  %s → %s\n' "$have" "$want"
 
-# `Cargo.lock` 에서 이 크레이트의 판을 읽는다. 이름은 `Cargo.toml` 의 `[package]` 에서 오고,
-# `source` 가 선 줄은 세지 않는다 — 작업 공간의 멤버에는 `source` 가 안 서니, 같은 이름의
-# 레지스트리 크레이트를 자기 줄로 읽지 않는다. 못 찾으면 빈 줄을 낸다.
+# `Cargo.lock` 에서 이 크레이트의 판을 읽는다. 이름은 `Cargo.toml` 의 `[package]` 에서 오고
+# — 그 표를 가리는 자는 판과 같이 `check-version.sh` 하나다(`--print-name`) — `source` 가
+# 선 줄은 세지 않는다. 작업 공간의 멤버에는 `source` 가 안 서니, 같은 이름의 레지스트리
+# 크레이트를 자기 줄로 읽지 않는다. 못 찾으면 빈 줄을 낸다.
 lock_version() {
+  local name
   [ -f "$root/Cargo.lock" ] || return 0
-  awk '
+  name=$("$check" --print-name) || return 0
+  awk -v name="$name" '
     function value(line) {
       sub(/^[^=]*=[[:space:]]*/, "", line)
-      sub(/[[:space:]]*#.*$/, "", line)
       gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", line)
       return line
     }
@@ -183,17 +185,12 @@ lock_version() {
       if (entry && n == name && s == "" && !said) { print v; said = 1 }
       entry = 0; n = v = s = ""
     }
-    FNR == NR {
-      if (/^[[:space:]]*\[/) pkg = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*$/)
-      else if (pkg && name == "" && /^[[:space:]]*name[[:space:]]*=/) name = value($0)
-      next
-    }
     /^\[/ { flush(); entry = ($0 ~ /^\[\[package\]\][[:space:]]*$/); next }
     entry && /^name[[:space:]]*=/ { n = value($0) }
     entry && /^version[[:space:]]*=/ { v = value($0) }
     entry && /^source[[:space:]]*=/ { s = value($0) }
     END { flush() }
-  ' "$manifest" "$root/Cargo.lock"
+  ' "$root/Cargo.lock"
 }
 
 # 잠금 파일의 자기 줄도 같이 움직인다. 안 맞으면 `--locked` 로 도는 CI 가 떨어진다.

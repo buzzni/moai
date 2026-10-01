@@ -18728,6 +18728,18 @@ fn script(name: &str) -> PathBuf {
     at_root("scripts").join(name)
 }
 
+/// 판 올리기 두 스크립트를 `scripts/` 에 깐 빈 자리. 스크립트는 뿌리를 제 자리에서
+/// 읽으므로(`BASH_SOURCE`) 둘이 함께 거기 서야 `bump-version.sh` 가 `check-version.sh` 를 찾는다.
+#[cfg(unix)]
+fn release_scratch(name: &str) -> Scratch {
+    let s = Scratch::new(name);
+    std::fs::create_dir(s.path().join("scripts")).unwrap();
+    for file in ["bump-version.sh", "check-version.sh"] {
+        std::fs::copy(script(file), s.path().join("scripts").join(file)).unwrap();
+    }
+    s
+}
+
 /// `Cargo.toml` 의 `[package]` 버전. **cargo 가 읽어 준 값을 쓴다** — 시험이 TOML 을
 /// 제 손으로 다시 파싱하면 `[package]` 표를 가리는 자가 셋째로 늘고(스크립트 둘에
 /// 더해), 스크립트와 같은 자리를 같이 틀려도 시험은 초록으로 선다. `env!` 는 스크립트
@@ -18759,7 +18771,7 @@ fn run_script_at(path: &Path, dir: Option<&Path>, args: &[&str], fed: Option<&st
     use std::io::Write as _;
     let said = "bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다";
     let mut cmd = isolated("bash");
-    // 스크립트가 부르는 `cargo metadata` 가 네트워크로 새지 않게 한다.
+    // 스크립트가 부르는 `cargo update` 가 네트워크로 새지 않게 한다.
     cmd.arg(path).args(args).env("CARGO_NET_OFFLINE", "true");
     if let Some(dir) = dir {
         cmd.current_dir(dir);
@@ -18822,6 +18834,16 @@ fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
     let out = run_script("check-version.sh", &["--print"], None);
     assert!(out.status.success(), "판을 못 찍었다\n{}", text(&out));
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), MANIFEST_VERSION);
+}
+
+/// `--print-name` 은 같은 `[package]` 표에서 이름을 읽는다 — `bump-version.sh` 가 `Cargo.lock`
+/// 의 자기 줄을 찾는 자리라, 표를 가리는 awk 를 거기 한 번 더 적지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_prints_the_crate_name_for_the_lock_reader() {
+    let out = run_script("check-version.sh", &["--print-name"], None);
+    assert!(out.status.success(), "이름을 못 찍었다\n{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), env!("CARGO_PKG_NAME"));
 }
 
 /// 미는 태그 하나가 어긋나면 그 푸시가 멈춘다.
@@ -19978,12 +20000,8 @@ fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
 #[cfg(unix)]
 #[test]
 fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
-    let s = Scratch::new("bump");
+    let s = release_scratch("bump");
     let root = s.path();
-    std::fs::create_dir(root.join("scripts")).unwrap();
-    for name in ["bump-version.sh", "check-version.sh"] {
-        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
-    }
     // 의존성 표를 함께 든 `Cargo.toml` 은 [`manifest_saying`] 이 짓는다 — 같은 글을 두 군데
     // 적으면 한쪽만 손본 날 `[package]` 표를 가리는 자가 반만 시험된다.
     std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
@@ -20029,12 +20047,8 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
 /// 든 판도 minor 로 읽혀, patch 를 재는 시험이 그 자리에서 붉어진다.
 #[cfg(unix)]
 fn bump_with(name: &str, have: &str, unreleased: &str, args: &[&str]) -> (Output, String, String) {
-    let s = Scratch::new(name);
+    let s = release_scratch(name);
     let root = s.path();
-    std::fs::create_dir(root.join("scripts")).unwrap();
-    for name in ["bump-version.sh", "check-version.sh"] {
-        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
-    }
     std::fs::write(root.join("Cargo.toml"), manifest_saying(have)).unwrap();
     std::fs::write(
         root.join("CHANGELOG.md"),
@@ -20176,12 +20190,8 @@ const LOCK_HEAD: &str =
 /// 한다.
 #[cfg(unix)]
 fn bump_crate(name: &str, lock: &str, fake_cargo: Option<&str>) -> (Output, String) {
-    let s = Scratch::new(name);
+    let s = release_scratch(name);
     let root = s.path();
-    std::fs::create_dir(root.join("scripts")).unwrap();
-    for name in ["bump-version.sh", "check-version.sh"] {
-        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
-    }
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
     std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"moai\"\nversion = \"0.1.5\"\nedition = \"2021\"\n")
@@ -20201,7 +20211,11 @@ fn bump_crate(name: &str, lock: &str, fake_cargo: Option<&str>) -> (Output, Stri
         let shim = root.join("shim");
         std::fs::create_dir(&shim).unwrap();
         write_exe(&shim.join("cargo"), body);
-        cmd.env("PATH", format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default()));
+        // [`isolated`] 가 걸러 둔 `PATH` 앞에 세운다 — 시험의 맨 `PATH` 를 다시 읽으면 걷은
+        // `moai` 자리가 도로 들어온다.
+        let kept = path_without_moai();
+        let path = std::env::join_paths(std::iter::once(shim).chain(std::env::split_paths(&kept))).unwrap();
+        cmd.env("PATH", path);
     }
     let out = cmd.output().expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
     let after = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
