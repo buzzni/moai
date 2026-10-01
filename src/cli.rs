@@ -161,7 +161,7 @@ pub enum Cmd {
   column, or was deferred and picked back up, later wins - so editing only
   the title or priority here does not free what the other side picked up, and
   work the other side deferred later is not offered here.")]
-    Ready(WorktreeArg),
+    Ready(ReadyArgs),
 
     /// A short markdown page - what you hold and what comes next
     #[command(after_help = "  Made for a session's first read and for the context injected again
@@ -230,6 +230,7 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     )]
     Add(AddArgs),
     /// Open one, or list them
+    #[command(after_help = SHOW_LIST)]
     Show(ShowArgs),
     /// Move the status
     #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
@@ -402,9 +403,10 @@ IDEA
   as read (see [NEW] below).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
-  looks: everything, id, title, tag or body. The header at the top
-  numbers every registered project, and pressing that number without SPC
-  jumps straight there — 0 is everything, one list of all projects.
+  looks: everything, id, title, tag, body or note (everything reads the
+  notes too). The header at the top numbers every registered project, and
+  pressing that number without SPC jumps straight there — 0 is everything,
+  one list of all projects.
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
@@ -439,7 +441,8 @@ IDEA
              it. Whether it stands at all is SPC v d
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
-             Stored times stay UTC, and so does --json
+             Stored times stay UTC, and so does --json; a bare day in an
+             SPC f filter (created=2026-10-01) is a day on this clock too
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -752,7 +755,7 @@ pub enum Typed {
     // `ls` 는 같은 것의 다른 이름이다. **어휘를 둘로 만들지 않으려고 별명으로
     // 둔다** — 목록을 내는 동사가 둘이면 도움말이 둘 다 가르쳐야 한다.
     /// Open one, or list them (`ls` is the same)
-    #[command(alias = "ls")]
+    #[command(alias = "ls", after_help = SHOW_LIST)]
     Show(ShowArgs),
 }
 
@@ -766,8 +769,11 @@ pub enum Typed {
 #[derive(Subcommand, Debug)]
 pub enum IdeaCmd {
     /// `moai idea add` and `moai idea show` (`ls`) - the same verbs, kind pinned
+    // **`Box` 에 담는다**(moai-efoc) — `ShowArgs` 가 차례·쪽 플래그로 자라 `Typed` 가 `Promote` 의
+    // 세 배를 넘었고, clippy 의 `large_enum_variant` 가 그 차이를 잡는다. 실행마다 한 번 짓는 값이라
+    // `Box` 하나의 비용은 없는 것과 같다.
     #[command(flatten)]
-    Common(Typed),
+    Common(Box<Typed>),
     /// Unfold into one epic and several issues, and close that thought
     #[command(after_help = "  The markdown it takes is the same shape as `add --from`. With two shapes,
   you get the grammar wrong every single time.
@@ -921,6 +927,79 @@ pub struct AddArgs {
     pub quiet: bool,
 }
 
+/// 목록의 차례를 한자리에서 댄다(moai-efoc) — `moai show` 와 `moai <종류> show` 가 같은 글을 싣는다.
+/// 두 벌로 적으면 한쪽만 고쳐지는 날 같은 플래그가 명령마다 다른 뜻으로 읽힌다.
+const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
+  updated (newest first), status (the column order of .moai/config.toml),
+  assignee (the name the screen shows, unowned last), title (ignoring case),
+  id (an order no edit ever moves). Ties in every order fall to priority,
+  then id. --reverse turns the whole order around.
+
+  Paging: -n cuts the list, and --after <id> starts the next page after the
+  last id of the page before. The cursor is that row's value in the order,
+  not a position, so rows created or removed meanwhile never shift a page.
+  A row whose place in the order changes between pages - the cursor row or
+  any other, a priority edit included - can repeat or be skipped; --sort id
+  is the one order no edit moves. Lines sharing one id (twins a merge left
+  behind) stand together and a page never splits them, so such a page can
+  run past -n. --json stays an array - fewer rows than -n means the list
+  has ended.
+
+    moai show --sort id -n 100 --json
+    moai show --sort id -n 100 --after <last id> --json
+
+  Time: --since <when> keeps the rows whose own updated_at is at or after
+  it. --created and --done take a range from..to with either side left
+  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
+  the time zone the screen and milestone deadlines use; the end of a range
+  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
+  time zone moves. --done looks at rows standing in done now, at the
+  time they last got there - an epic or milestone at the time its last
+  member got to done; deferring or removing the rest later does not move
+  it. Asking by time opens what the list hides by default - done, deferred
+  and ideas - because a row closed meanwhile changed too. Narrow it again
+  with -s (name the columns you want) or --type; --deferred keeps only what
+  is deferred, and no flag leaves deferred rows out. A lone instant given
+  to --created or --done is that one second, not a day.
+
+  --since keys on each row's own stamp. It misses a removed row (`moai rm`
+  leaves no row - --removed below gives those), a note (`moai note` writes
+  the journal, not the row), a row whose derived value changed without a
+  write of its own (a group's column, an inherited epic) and a row merged
+  in with an older stamp. A stamp moai cannot read (fractions, an offset)
+  falls in no time range. For a complete copy, pull the whole list and
+  compare row by row.
+
+    moai show --since 2026-09-29T00:00:00Z --json
+    moai show --done 2026-09-01..2026-09-30 --type issue
+
+  Removed: `moai show --removed` lists the issues `moai rm` took out,
+  oldest first, read from the journal beside the tracker - other
+  worktrees are not overlaid, `rm --line` removed an unreadable line, not
+  an issue, and `moai <kind> show` refuses it. With --since, those whose
+  rm line is stamped at or after it - like --since on rows, that misses a
+  removal merged in with an older stamp or never written to the journal,
+  so keep the full compare. --json gives each line in the shape of
+  `journal` in `moai show <id> --json`, without fields this build does not
+  know. It lays the history out and holds it against nothing: an id there
+  may live again - created anew, or brought back with an older stamp the
+  row list misses - and only the snapshot says whether it lives now.
+  A journal line it cannot read that may have held a removal - one cut
+  short by a full disk or a crash - is named on stderr by file and line,
+  and the exit code is not 0; with --since, only a line stamped in the
+  range or with no stamp it can read. --since is the one flag it takes.
+
+    moai show --removed --since 2026-09-29T00:00:00Z --json
+
+  There is no query language. The filters read derived values the file does
+  not hold - a group's column, an inherited epic - so run SQL on the --json
+  output, where derived_status and derived_epic are worked out already:
+
+    moai show --type issue --json |
+      jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
+    moai show --all --json | duckdb -c \"SELECT kind, count(*)
+      FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1\"";
+
 #[derive(Args, Debug)]
 pub struct ShowArgs {
     /// An issue id, or a kind (issue, epic). The whole list when absent
@@ -939,11 +1018,76 @@ pub struct ShowArgs {
     #[arg(long)]
     pub as_plan: bool,
 
+    // 거르개 머리글 밑에 안 두는 까닭 — 무엇을 거르는 말이 아니라 **다른 목록**(저널의 `rm` 줄)을 고르는
+    // 말이다(moai-7dmq). 받는 거르개도 `--since` 하나라, 그 머리글 밑에 서면 나머지도 받는 줄로 읽힌다.
+    /// Removed issues, from the journal (see below)
+    #[arg(long)]
+    pub removed: bool,
+
     #[command(flatten)]
     pub worktree: WorktreeArg,
 
     #[command(flatten)]
     pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub page: PageArgs,
+}
+
+/// 목록의 차례와 쪽(moai-efoc). **거르개가 아니다** — 무엇을 고르는지는 안 바꾸고, 고른 것을 어떤
+/// 차례로 몇 줄 내는지만 정한다. 그래서 `FilterArgs` 와 머리글이 따로다.
+#[derive(Args, Debug, Default)]
+#[command(next_help_heading = "Order and paging")]
+pub struct PageArgs {
+    /// Order the list by that key (priority when absent)
+    #[arg(long, value_name = "key", value_enum, hide_possible_values = true)]
+    pub sort: Option<SortArg>,
+
+    /// Turn the order around, ties included
+    #[arg(long)]
+    pub reverse: bool,
+
+    /// Give at most this many rows
+    // **`usize` 로 바로 받는다**(moai-efoc 리뷰) — `u64` 로 받아 쓰는 자리마다 `usize::try_from` 을 되풀이하던
+    // 자리다. 범위 검사와 오류 글은 `value_parser!(u64).range(1..)` 와 같다(`value_parser!(usize)` 에는
+    // `range` 가 없다).
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub limit: Option<usize>,
+
+    /// Start after this row: the last id of the page before
+    #[arg(long, value_name = "id")]
+    pub after: Option<String>,
+}
+
+/// `moai ready` 가 받는 것 — 워크트리 겹쳐 보기와 자르기(moai-efoc). `status`·`prime` 은 자를
+/// 목록이 없어 [`WorktreeArg`] 만 받는다.
+///
+/// **`--after` 는 없다.** `ready` 의 차례는 우선순위·마일스톤·나이를 섞은 판단이라 그 값으로 줄을
+/// 되짚을 키가 없고, 집을 일은 앞에서부터 집는 것이라 다음 쪽이 뜻이 없다.
+#[derive(Args, Debug, Default)]
+pub struct ReadyArgs {
+    #[command(flatten)]
+    pub worktree: WorktreeArg,
+
+    /// Give at most this many rows (held stays whole)
+    #[arg(short = 'n', long, value_name = "count", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub limit: Option<usize>,
+}
+
+/// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
+/// 두 표면에서 다른 차례를 가리키면 안 된다. 잇는 것은 `cmd::show` 다(`query` 는 clap 을 모른다).
+///
+/// **갈래마다 `///` 를 안 단다** — 하나라도 달리면 clap 이 `show --help` 전체를 줄 바꿈 모양으로
+/// 펼쳐 옵션 서른 줄이 두 배가 된다. 낱말마다의 방향은 `Show` 의 `after_help` 가 한자리에서 댄다.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub enum SortArg {
+    Priority,
+    Created,
+    Updated,
+    Status,
+    Assignee,
+    Title,
+    Id,
 }
 
 /// `status`·`ready`·`show` 가 함께 받는다. **전역 플래그로 두지 않는다** — 쓰는
@@ -997,13 +1141,25 @@ pub struct FilterArgs {
     #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
     pub kind: Option<Kind>,
 
-    /// In id, title, tag or body
+    /// In id, title, tag, body or notes
     #[arg(short = 'g', long, value_name = "text")]
     pub grep: Option<String>,
 
     /// Sitting in its column that long
     #[arg(long, value_name = "days")]
     pub stale: Option<i64>,
+
+    /// Changed since that time (see below)
+    #[arg(long, value_name = "when")]
+    pub since: Vec<String>,
+
+    /// Created in that range (see below)
+    #[arg(long, value_name = "from..to")]
+    pub created: Vec<String>,
+
+    /// Closed in that range (see below)
+    #[arg(long, value_name = "from..to")]
+    pub done: Vec<String>,
 
     /// Only what is deferred
     #[arg(long)]

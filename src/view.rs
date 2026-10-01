@@ -123,23 +123,28 @@ fn rcell(style: Style, text: &str, w: usize) -> String {
 ///
 /// **보는 사람의 시간대로 옮겨 적는다**(moai-p5az) — 저장된 글자는 UTC 그대로고 `--json` 도
 /// 그대로다. 옮기는 자리가 여기 하나여서, 화면에 서는 시각이 한 자로 모인다.
+///
+/// **낸 글은 한 줄로 걷어 낸다**(`text::one_line`, moai-fmoa 리뷰). 도장은 손으로 고칠 수 있는 파일(스냅샷의
+/// `created_at`·저널의 `ts`)에서 오고, 못 읽는 글은 그대로 돌려주며 긴 글은 가운데를 잘라 내므로 ESC 와
+/// 줄바꿈이 그대로 남는다. 부르는 자리마다 걷게 두던 판은 이력과 `--removed` 만 걷어, 상세의 생성·수정·
+/// 시작·끝 줄이 화면을 다시 칠했다.
 pub fn stamp(at: &str, z: &crate::tz::Zone) -> String {
     let at = z.shift(at);
-    match (at.get(..10), at.get(11..16)) {
+    one_line(&match (at.get(..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
-        _ => at.to_string(),
-    }
+        _ => at,
+    })
 }
 
 /// `2026-09-11T15:18:26Z` → `09-11 15:18`. **이력 줄 전용이다** — 한 줄에
 /// 시각·글·사람이 함께 들어가는 자리라 연도까지 적을 칸이 없다. 언제인지가
-/// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다.
+/// 뜻을 갖는 자리(생성·수정)는 [`stamp`] 를 쓴다. 한 줄로 걷는 것도 [`stamp`] 와 같다.
 pub fn short_stamp(at: &str, z: &crate::tz::Zone) -> String {
     let at = z.shift(at);
-    match (at.get(5..10), at.get(11..16)) {
+    one_line(&match (at.get(5..10), at.get(11..16)) {
         (Some(d), Some(t)) => format!("{d} {t}"),
-        _ => at.to_string(),
-    }
+        _ => at,
+    })
 }
 
 /// `#a #b` — 태그를 사람에게 댈 때의 모양. CLI 표·상세와 탐색기의 목록 열·상세가 같이 쓴다.
@@ -352,10 +357,14 @@ pub struct Asked {
 ///
 /// `asked` 는 **부르는 쪽이 무엇만 달라고 했는가**다([`Asked`]) — 미룬 것만·생각만 물었으면
 /// 줄마다 같은 표식이 붙어 봐야 자리만 먹는다.
+///
+/// `more` 는 `-n` 에 잘려 안 낸 줄 수다(moai-efoc) — 0 이 아니면 다음 쪽을 여는 명령을 꼬리에 댄다.
+/// 안 대면 잘린 목록과 끝난 목록이 화면에서 같아 보인다.
 pub fn list(
     issues: &[Issue],
     cfg: &Config,
     hidden: Hidden,
+    more: usize,
     epics: &crate::report::EpicLabels,
     asked: Asked,
     wh: &crate::query::Where,
@@ -454,6 +463,13 @@ pub fn list(
 
     out.push(String::new());
     out.push(summary(issues, cfg, hidden, wh, lang));
+    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page`) 앞 쪽의 마지막 줄이 곧 그 값이다.
+    // "N건 더" 는 다른 잘린 목록과 한 키다([`more_of`]) — 뒤의 명령은 자료라 `{go}` 로 말묶음 밖에서 온다.
+    if let Some(last) = issues.last().filter(|_| more > 0) {
+        let go = format!("--after {}", one_line(&last.id));
+        let said = format!("{} — {}", more_of(more, lang), fill(say(lang, "list.next_page"), &[("go", &go)]));
+        out.push(paint(style::DIM, &said));
+    }
     out
 }
 
@@ -1238,7 +1254,8 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     out
 }
 
-/// 목록에서 안 보인 나머지 — "N건 더". `status` 의 경고 밑에서만 선다.
+/// 목록에서 안 보인 나머지 — "N건 더". **잘린 목록은 다 이 한 키로 센다**(`status.more`) — `status` 의 경고,
+/// `prime`, 한눈 보기의 `ready`, `-n` 에 잘린 `show`·`ready`. 뒤따르는 명령은 부르는 쪽이 자료로 붙인다.
 ///
 /// **[`Screen`] 이 아니라 말만 받는다**(리뷰) — 셈을 글로 옮기는 것뿐이라 겹침을 볼 일이 없다.
 /// 그리기 맥락을 통째로 받으면 이 두 줄이 옆 워크트리에 매인 것으로 읽힌다.
@@ -1390,8 +1407,11 @@ pub fn prime_commands(lang: Lang) -> Vec<(&'static str, &'static str)> {
 }
 
 /// 집을 수 있는 일. 그리고 이미 벌여 놓은 것.
+/// `more` 는 `-n` 에 잘려 `picks` 에 없는 줄 수다(moai-efoc). 머리의 셈은 그것까지 센다 — 자른 것은
+/// 보여 줄 줄이지 집을 수 있는 일의 수가 아니다.
 pub fn ready(
     picks: &[&Issue],
+    more: usize,
     epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
@@ -1399,7 +1419,7 @@ pub fn ready(
     screen: Screen,
 ) -> Vec<String> {
     let lang = screen.lang;
-    let mut out = vec![fill(say(lang, "ready.count"), &[("n", &picks.len().to_string())])];
+    let mut out = vec![fill(say(lang, "ready.count"), &[("n", &(picks.len() + more).to_string())])];
     if picks.is_empty() {
         out.push(String::new());
         out.push(paint(style::DIM, say(lang, "ready.none")));
@@ -1438,6 +1458,10 @@ pub fn ready(
                 .trim_end()
                 .to_string(),
             );
+        }
+        // `prime` 의 꼬리와 같은 꼴이다([`more_of`] 에 명령은 자료로) — 다 보려면 `-n` 없이 부른다.
+        if more > 0 {
+            out.push(format!("  {}", paint(style::DIM, &format!("{} — `moai ready`", more_of(more, lang)))));
         }
     }
 
@@ -2196,6 +2220,9 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
         for e in journal {
             // 메모는 여러 줄일 수 있다. 한 원소에 `\n` 을 담으면 "원소 하나가
             // 한 줄" 이라는 약속이 깨지고, 이어지는 줄이 열을 잃는다.
+            //
+            // **도장은 이미 한 줄이다**(moai-fmoa) — [`short_stamp`] 가 걷어 낸다. 걷기 전의 폭으로 재면 이어지는
+            // 줄이 열을 잃는다.
             let ts = short_stamp(&e.ts, z);
             let pad = " ".repeat(width(&ts) + 5);
             for (n, l) in entry(e, cfg, lang).split('\n').enumerate() {
@@ -2216,7 +2243,10 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
 /// **그대로 내되 제어문자는 걷는다**(`text::sanitize`, 리뷰 moai-mo9v.1ln). 저널은 손으로 고칠 수 있는
 /// 파일이고, `moai rm --line` 은 아무도 치지 않은 못 읽는 줄의 원문을 메모로 싣는다 — ESC 가 든 그
 /// 줄이 `moai show` 마다 화면을 다시 칠한다. 저널은 덧붙이기만 하므로 걷을 자리는 그리는 여기 하나다.
-/// 줄바꿈은 남긴다: 여러 줄 메모는 [`history`] 가 줄마다 가른다.
+/// 줄바꿈은 **여러 줄일 수 있는 글에만** 남긴다: 메모(`text`)와 옮김의 말(`note`)은 [`history`] 가 줄마다
+/// 가른다. 칸 이름·갈래·사람은 한 줄짜리 값이라 한 줄로 접는다(`text::one_line`, moai-fmoa 리뷰) — 거기 든
+/// 줄바꿈은 뒤를 이어지는 줄처럼 그려, 손으로 고친 줄 하나가 없던 이력 줄을 지어냈다. [`removed`] 가 같은
+/// 저널 줄의 사람을 이미 이렇게 그린다.
 fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     let clean = crate::text::sanitize;
     let what = match e.kind.as_str() {
@@ -2224,15 +2254,16 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
         // **제목 없는 `rm` 은 못 읽는 줄을 지운 것이다**([`JournalEntry::removed_line`]). 그 id 의 이슈는
         // 멀쩡히 설 수 있다 — 산 줄의 깨진 쌍둥이를 지운 경우다. 이슈를 지운 `rm` 은 늘 제목을 든다
         // ([`JournalEntry::removed`]). 둘을 한 낱말로 그리면 산 이슈의 이력이 "삭제" 로 끝난다.
-        "rm" if e.title.is_none() => say(lang, "journal.remove_line").to_string(),
-        "rm" => say(lang, "journal.remove").to_string(),
+        // 가르는 자는 [`JournalEntry::removes_issue`] 하나다 — `moai show --removed` 가 같은 자로 고른다.
+        "rm" if e.removes_issue() => say(lang, "journal.remove").to_string(),
+        "rm" => say(lang, "journal.remove_line").to_string(),
         "status" => format!(
             "{} → {}",
-            clean(e.from.as_deref().unwrap_or("?")),
-            paint(style::status_style(e.to.as_deref().unwrap_or("")), &clean(e.to.as_deref().unwrap_or("?")))
+            one_line(e.from.as_deref().unwrap_or("?")),
+            paint(style::status_style(e.to.as_deref().unwrap_or("")), &one_line(e.to.as_deref().unwrap_or("?")))
         ),
         "note" => format!("note: {}", clean(e.text.as_deref().unwrap_or(""))),
-        other => clean(other),
+        other => one_line(other),
     };
     let note = e.note.as_deref().map(|n| format!("  — {}", clean(n))).unwrap_or_default();
     // 이름도 메일도 없는 줄은 낼 것이 없다. `trim_end` 가 없으면 그 자리에
@@ -2240,10 +2271,46 @@ fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     format!(
         "{what}{}  {}",
         paint(style::DIM, &note),
-        paint(style::DIM, &clean(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
+        paint(style::DIM, &one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming)))
     )
     .trim_end()
     .to_string()
+}
+
+/// `moai show --removed` 의 줄 — 지운 때, id, 제목, 지운 사람(moai-7dmq). **접지 않는다** — 받은
+/// 저널 줄을 받은 차례로 한 줄씩 그린다.
+///
+/// 시각은 이력([`history`])과 같은 시계(보는 사람의 시간대)로 적되 **해까지 적는다**([`stamp`], 리뷰). 이 목록은
+/// 한 이슈의 이력이 아니라 저장소의 지움 전부라 해를 넘기고, `MM-DD` 만 적으면 작년 줄과 올해 줄이 안 갈려
+/// 오래된 것부터 선 차례가 뒤섞여 보인다.
+///
+/// 저널에서 온 글은 **도장까지** 한 줄로 걷어낸다(`text::one_line`) — 저널은 손으로 고칠 수 있는 파일이라
+/// 거기 든 ESC 가 화면을 다시 칠한다(리뷰). 도장은 [`stamp`] 가 걷는다. 여러 줄 글이 그대로 나가면 줄 하나가
+/// 한 이슈라는 약속도 깨진다.
+pub fn removed(entries: &[&JournalEntry], cfg: &Config, screen: Screen) -> Vec<String> {
+    let lang = screen.lang;
+    if entries.is_empty() {
+        return vec![say(lang, "list.none").to_string()];
+    }
+    let z = screen.zone();
+    let ids: Vec<String> = entries.iter().map(|e| one_line(&e.id)).collect();
+    let id_w = ids.iter().map(|id| width(id)).max().unwrap_or(0);
+    entries
+        .iter()
+        .zip(&ids)
+        .map(|(e, id)| {
+            let by = one_line(&crate::model::label(&e.by, e.by_email.as_deref(), cfg.naming));
+            format!(
+                "  {}   {}  {}  {}",
+                paint(style::DIM, &stamp(&e.ts, z)),
+                cell(style::ID, id, id_w),
+                one_line(e.title.as_deref().unwrap_or("")),
+                paint(style::DIM, &by)
+            )
+            .trim_end()
+            .to_string()
+        })
+        .collect()
 }
 
 /// 한눈 보기에서 연 프로젝트 하나를 셈한 것 — `moai status` 가 `.moai` 밖에서 낸다.
@@ -2281,6 +2348,9 @@ pub struct Board<'a> {
 /// 한눈 보기에서 연 프로젝트 하나의 집을 것 — `moai ready` 가 `.moai` 밖에서 낸다.
 pub struct Picks<'a> {
     pub picks: Vec<&'a Issue>,
+    /// `-n` 에 잘려 `picks` 에 없는 줄 수(moai-efoc). 머리의 셈과 "N건 더" 는 이것까지 센다 —
+    /// 자른 것은 보여 줄 줄이지 집을 일의 수가 아니다.
+    pub more: usize,
     /// 도는 마일스톤이 이 목록에 한 일(`report::ready_in`). **한눈 보기에서도 댄다** — 저장소
     /// 안의 `ready` 가 목록이 왜 짧은지를 대는데 여기만 입을 다물면, 같은 명령이 선 자리에
     /// 따라 짧아진 목록을 "할 일이 없다" 로 읽는다.
@@ -2490,7 +2560,7 @@ pub fn projects_ready(
     let total: usize = seen
         .iter()
         .map(|s| match s {
-            Seen::Ok(k) => k.picks.len(),
+            Seen::Ok(k) => k.picks.len() + k.more,
             _ => 0,
         })
         .sum();
@@ -2514,7 +2584,7 @@ pub fn projects_ready(
         let screen = screen.over(k.origin);
         // **셈 하나에도 말이 든다** — 한국어의 `건` 이 여기 박혀 있던 동안, 말묶음에서 온
         // `overlaid` 꼬리와 한 줄에 서서 `1건   ⎇ feat/x overlaid` 가 나왔다(리뷰 moai-4y5s.jy3 #5).
-        let count = fill(say(lang, "overview.picks"), &[("n", &k.picks.len().to_string())]);
+        let count = fill(say(lang, "overview.picks"), &[("n", &(k.picks.len() + k.more).to_string())]);
         out.push(project_head(p, &format!("{count}{}", overlaid(screen))));
         let shown = &k.picks[..k.picks.len().min(READY_SHOWN)];
         // 남의 스냅샷에서 온 글자다 — 걸러서 찍고 걸러서 잰다(`projects_status` 와 같은 까닭).
@@ -2530,7 +2600,7 @@ pub fn projects_ready(
                 marked(screen.branch(&i.id), &one_line(&i.title), TITLE_CAP, style::PLAIN).0,
             ));
         }
-        let rest = k.picks.len() - shown.len();
+        let rest = k.picks.len() - shown.len() + k.more;
         if rest > 0 {
             // **`status` 의 경고 꼬리와 키가 같다**(`status.more`) — 같은 "N건 더" 를 두 키로
             // 두면 한쪽만 옮긴 말에서 한 화면이 두 모양으로 센다. 뒤의 명령은 자료라 그대로다.
@@ -2800,6 +2870,7 @@ pub fn zone_trouble(lang: Lang, why: &crate::tz::Trouble) -> String {
         Trouble::NoTzdb { at } => fill(say(lang, "tz.no_tzdb"), &[("at", &at.display().to_string())]),
         Trouble::Unknown { name } => fill(say(lang, "tz.unknown"), &[("name", name)]),
         Trouble::Unreadable { name, said } => fill(say(lang, "tz.unreadable"), &[("name", name), ("said", said)]),
+        Trouble::NotTzif { name } => fill(say(lang, "tz.not_tzif"), &[("name", name)]),
         Trouble::NoSystemZone => say(lang, "tz.no_system_zone").to_string(),
     };
     format!("moai: {said}")
@@ -2974,6 +3045,115 @@ pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::
 /// 무엇을 잃는지만 댄다.
 pub fn fallen_place(lang: Lang, said: &str) -> String {
     format!("{said} — {}", say(lang, "sheet.fallen_place"))
+}
+
+/// 거르개를 적은 표면(moai-tckz). 거절문의 고쳐 칠 글을 그 꼴로 짓는다.
+///
+/// 탐색기 거름망에 CLI 꼴(`-s todo,review`)을 대면, 그 글을 프롬프트에 그대로 쳤을 때 `항목=값` 이 아니라고
+/// 다시 거절된다. **말은 같고 명령만 다르다** — 명령은 옮기지 않는 글자라 말묶음에는 자리 하나(`{fix}` 등)만 두고
+/// 여기서 통째로 짓는다([`no_actor`] 가 고칠 명령을 여기서 짓는 것과 같은 까닭이다).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    /// CLI 의 플래그 — `-s todo,review`. `--filter` 로 적은 것도 여기다: CLI 에서는 플래그가 곧 고쳐 칠 글이다.
+    Flags,
+    /// 탐색기 거름망(`SPC f`)의 `항목=값` — `status=todo,review`.
+    Pairs,
+}
+
+impl Surface {
+    /// 거르개의 이름만 — `-s` 이거나 `status=`.
+    fn name(self, field: crate::query::Once) -> String {
+        match self {
+            Surface::Flags => field.flag().to_string(),
+            Surface::Pairs => format!("{}=", field.key()),
+        }
+    }
+
+    /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
+    ///
+    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로
+    /// `-a 홍 길동 (a@b.c),김 철수 (c@d.e)` 를 그대로 대면 옮겨 친 셸이 `(` 에서 멈춘다. 따옴표가 필요 없는
+    /// 값(`todo,review`)은 글자째 그대로다([`crate::text::quoted`]). 거름망은 `=` 없는 낱말을 앞 항목에 잇는
+    /// 칸이라 감싸지 않는다.
+    fn spell(self, field: crate::query::Once, value: &str) -> String {
+        match self {
+            Surface::Flags => format!("{} {}", field.flag(), crate::text::quoted(value)),
+            Surface::Pairs => format!("{}={value}", field.key()),
+        }
+    }
+}
+
+/// 거르개가 값을 거절한 글([`crate::query::BadFilter`], moai-2htt) — CLI 의 꼴로. `show` 의 목록과 `--removed`
+/// 가 부른다. 탐색기 거름망은 [`bad_filter_on`] 에 [`Surface::Pairs`] 를 건넨다.
+pub fn bad_filter(lang: Lang, why: &crate::query::BadFilter) -> String {
+    bad_filter_on(lang, why, Surface::Flags)
+}
+
+/// 거르개가 값을 거절한 글. `show` 의 목록과 `--removed`, 탐색기의 거름망 프롬프트가 이것 하나로 편다 — 같은
+/// 값을 세 자리가 같은 말로 거절하고, **고쳐 칠 글만 그 표면의 꼴로 짓는다**(moai-tckz).
+///
+/// **갈래마다 제 `say` 를 적는다**([`no_such_column`] 과 같은 까닭). 두 줄짜리는 여기서 잇는다 — 실린 글은
+/// 한 줄이어야 한다(`i18n::tests::every_translation_keeps_the_places_english_marks`).
+pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> String {
+    use crate::query::{BadFilter, KEYS, Once};
+    let two = |head: String, how: String| format!("{head}\n      {how}");
+    match why {
+        BadFilter::Twice { field, a, b, rest } => {
+            let v = [("a", a.as_str()), ("b", b.as_str())];
+            let head = match field {
+                Once::Status => fill(say(lang, "refuse.filter_twice_status"), &v),
+                Once::Epic => fill(say(lang, "refuse.filter_twice_epic"), &v),
+                Once::Milestone => fill(say(lang, "refuse.filter_twice_milestone"), &v),
+                Once::Parent => fill(say(lang, "refuse.filter_twice_parent"), &v),
+                Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
+                Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
+            };
+            // 고칠 글은 준 값을 다 잇는다 — 말(`{a}`·`{b}`)은 앞의 둘로 서지만, 셋째를 빼면 그대로 친 사람이 그 줄을 잃는다.
+            let all = [a, b].into_iter().chain(rest).map(String::as_str).collect::<Vec<_>>().join(",");
+            let fix = on.spell(*field, &all);
+            two(head, fill(say(lang, "refuse.filter_twice_how"), &[("fix", &fix)]))
+        }
+        BadFilter::DoneOutside { asked } => {
+            let done = crate::config::DONE;
+            let by_done = match on {
+                Surface::Flags => "--done",
+                Surface::Pairs => "done=",
+            };
+            let (by_status, widen, status) = (
+                on.spell(Once::Status, asked),
+                on.spell(Once::Status, &format!("{asked},{done}")),
+                on.name(Once::Status),
+            );
+            let v = [
+                ("done", done),
+                ("by_done", by_done),
+                ("by_status", by_status.as_str()),
+                ("widen", widen.as_str()),
+                ("status", status.as_str()),
+            ];
+            two(
+                fill(say(lang, "refuse.filter_done_outside"), &v),
+                fill(say(lang, "refuse.filter_done_outside_how"), &v),
+            )
+        }
+        BadFilter::Endless(raw) => fill(say(lang, "refuse.filter_endless"), &[("raw", raw)]),
+        BadFilter::Backwards(raw) => fill(say(lang, "refuse.filter_backwards"), &[("raw", raw)]),
+        BadFilter::NotATime(raw) => fill(say(lang, "refuse.filter_not_a_time"), &[("raw", raw)]),
+        BadFilter::NoTime => say(lang, "refuse.filter_no_time").to_string(),
+        BadFilter::NotAPair(raw) => {
+            fill(say(lang, "refuse.filter_not_a_pair"), &[("raw", raw), ("keys", &KEYS.join(", "))])
+        }
+        BadFilter::NoSuchKey(key) => two(
+            fill(say(lang, "refuse.filter_no_key"), &[("key", key)]),
+            fill(say(lang, "refuse.filter_keys"), &[("keys", &KEYS.join(", "))]),
+        ),
+        BadFilter::NotDays(raw) => fill(say(lang, "refuse.filter_not_days"), &[("raw", raw)]),
+        BadFilter::NotAPriority(raw) => fill(
+            say(lang, "refuse.filter_not_a_priority"),
+            &[("raw", raw), ("max", &crate::model::MAX_PRIORITY.to_string())],
+        ),
+        BadFilter::NotAKind(said) => said.clone(),
+    }
 }
 
 /// 모르는 칸 한 줄([`crate::config::NoSuchColumn`], moai-fdk7).
@@ -3211,6 +3391,118 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
+    /// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 한국어로 박아 지어, 영어 화면과
+    /// `--json` 의 `error` 에도 한국어가 섰다. 갈래를 다 그려 본다 — 영어에 한글이 남거나, 자리 이름이
+    /// 글과 어긋나거나(`fill` 의 잡는 자가 터진다), 고쳐 칠 명령이 빠지면 여기서 붉어진다.
+    #[test]
+    fn a_bad_filter_speaks_the_language_it_is_handed() {
+        use crate::query::{BadFilter, Once};
+        let twice = |field| BadFilter::Twice { field, a: "todo".into(), b: "review".into(), rest: vec![] };
+        let all = [
+            twice(Once::Status),
+            twice(Once::Epic),
+            twice(Once::Milestone),
+            twice(Once::Parent),
+            twice(Once::Priority),
+            twice(Once::Assignee),
+            BadFilter::DoneOutside { asked: "review".into() },
+            BadFilter::Endless("..".into()),
+            BadFilter::Backwards("2026-09-03..2026-09-02".into()),
+            BadFilter::NotATime("yesterday".into()),
+            BadFilter::NoTime,
+            BadFilter::NotAPair("todo".into()),
+            BadFilter::NoSuchKey("statu".into()),
+            BadFilter::NotDays("x".into()),
+            BadFilter::NotAPriority("9".into()),
+        ];
+        for why in &all {
+            let (en, ko) = (bad_filter(Lang::En, why), bad_filter(Lang::Ko, why));
+            assert!(!crate::hook::hangul(&en), "영어 화면에 한국어가 섰다 — {en}");
+            assert!(crate::hook::hangul(&ko), "한국어를 골랐는데 한국어가 아니다 — {ko}");
+            assert!(!en.contains('{') && !ko.contains('{'), "안 채운 자리가 남았다 — {en} / {ko}");
+        }
+        // **두 번 쓴 거르개는 갈래마다 제 이름과 제 플래그를 댄다**(리뷰 moai-efoc.ln9) — 이름은 여기, 플래그는
+        // `query::Once::flag` 에 따로 적혀, 한쪽을 맞바꿔도 위의 셈은 푸르다. `--parent` 를 두 번 쓴 사람에게
+        // `-p a,b` 를 대면 그것은 우선순위 거르개다.
+        for (field, noun, flag) in [
+            (Once::Status, "status", "-s"),
+            (Once::Epic, "epic", "-e"),
+            (Once::Milestone, "milestone", "--milestone"),
+            (Once::Parent, "parent", "--parent"),
+            (Once::Priority, "priority", "-p"),
+            (Once::Assignee, "assignee", "-a"),
+        ] {
+            let said = bad_filter(Lang::En, &twice(field));
+            assert!(said.starts_with(&format!("the {noun} cannot be")), "{field:?} — {said}");
+            assert!(said.contains(&format!("`{flag} todo,review`")), "{field:?} — {said}");
+            // **거름망에는 거름망의 꼴로 댄다**(moai-tckz) — 그 칸에 `-s todo,review` 를 치면 `항목=값` 이 아니라고
+            // 다시 거절된다. 말은 같고 고쳐 칠 글만 다르다.
+            let pairs = bad_filter_on(Lang::En, &twice(field), Surface::Pairs);
+            assert!(pairs.starts_with(&format!("the {noun} cannot be")), "{field:?} — {pairs}");
+            assert!(pairs.contains(&format!("`{noun}=todo,review`")), "{field:?} — {pairs}");
+            assert!(!pairs.contains(&format!("{flag} ")), "거름망에 CLI 꼴을 댔다 — {pairs}");
+        }
+        // `--done` 과 `-s` 를 박아 넣던 갈래도 표면을 따른다.
+        let outside = BadFilter::DoneOutside { asked: "review".into() };
+        for lang in [Lang::En, Lang::Ko] {
+            let pairs = bad_filter_on(lang, &outside, Surface::Pairs);
+            for want in ["`done=`", "`status=review`", "`status=review,done`", "`status=`"] {
+                assert!(pairs.contains(want), "{lang:?} 거름망에 {want} 가 없다 — {pairs}");
+            }
+            assert!(!pairs.contains("--done") && !pairs.contains("-s"), "거름망에 CLI 꼴을 댔다 — {pairs}");
+            // `done=` 은 `Once` 가 아니라 `query::tests::each_once_key_reads_back_as_its_own_filter` 가 못 잰다(리뷰
+            // moai-efoc.3e1) — 댄 낱말을 `desugar` 에 되먹여, 항목 이름을 바꾸는 날 이 글이 옛 이름을 대면 여기서 붉어진다.
+            let named = pairs.split('`').nth(1).expect("첫 따옴표에 선 것이 없다");
+            let mut raw = crate::query::Raw::default();
+            crate::query::desugar(&mut raw, &format!("{named}2026-01-01..")).expect("거름망이 댄 항목을 안 받는다");
+            assert_eq!(raw.done, ["2026-01-01.."], "{lang:?} 거름망이 댄 {named} 이 done 거르개가 아니다");
+            let flags = bad_filter(lang, &outside);
+            for want in ["`--done`", "`-s review`", "`-s review,done`", "`-s`"] {
+                assert!(flags.contains(want), "{lang:?} CLI 에 {want} 가 없다 — {flags}");
+            }
+        }
+        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로 그대로
+        // 대면 옮겨 친 셸이 `(` 에서 멈춘다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다.
+        let people = BadFilter::Twice {
+            field: Once::Assignee,
+            a: "홍 길동 (a@b.c)".into(),
+            b: "김 철수 (c@d.e)".into(),
+            rest: vec![],
+        };
+        // 셋째부터도 고칠 글에 든다(리뷰 moai-efoc.3e1).
+        let three =
+            BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] };
+        assert!(bad_filter(Lang::En, &three).contains("`-s todo,review,done`"), "{}", bad_filter(Lang::En, &three));
+        assert!(bad_filter_on(Lang::En, &three, Surface::Pairs).contains("`status=todo,review,done`"));
+        let said = bad_filter(Lang::En, &people);
+        assert!(said.contains("`-a '홍 길동 (a@b.c),김 철수 (c@d.e)'`"), "{said}");
+        let said = bad_filter_on(Lang::En, &people, Surface::Pairs);
+        assert!(said.contains("`assignee=홍 길동 (a@b.c),김 철수 (c@d.e)`"), "{said}");
+        // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
+        for lang in [Lang::En, Lang::Ko] {
+            let said = |why: &BadFilter| bad_filter(lang, why);
+            assert!(said(&twice(Once::Status)).contains("`-s todo,review`"), "{}", said(&twice(Once::Status)));
+            assert!(said(&twice(Once::Assignee)).contains("`-a todo,review`"));
+            assert!(said(&BadFilter::DoneOutside { asked: "review".into() }).contains("-s review,done"));
+            assert!(said(&BadFilter::NoSuchKey("statu".into())).contains("status, tag"));
+            assert!(said(&BadFilter::NotAPair("todo".into())).contains("status, tag"));
+            assert!(said(&BadFilter::NotAPriority("9".into())).contains(&crate::model::MAX_PRIORITY.to_string()));
+        }
+        // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
+        let kind = "x".parse::<Kind>().unwrap_err();
+        assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
+    }
+
+    /// **TZif 가 아닌 시간대 파일도 고른 말로 선다**(리뷰 moai-efoc.3e1) — `tz::Trouble::Unreadable` 의 `said` 에
+    /// 한국어 글을 싣던 판은 `TZ=leapseconds` 한 번에 영어 화면에도 "TZif 가 아니다" 를 냈다.
+    #[test]
+    fn a_zone_file_that_is_not_tzif_speaks_the_language_it_is_handed() {
+        let why = crate::tz::Trouble::NotTzif { name: "leapseconds".into() };
+        let (en, ko) = (zone_trouble(Lang::En, &why), zone_trouble(Lang::Ko, &why));
+        assert!(!crate::hook::hangul(&en) && en.contains("leapseconds"), "{en}");
+        assert!(crate::hook::hangul(&ko) && ko.contains("leapseconds"), "{ko}");
+    }
+
     /// **고를 것이 있는 거절은 고를 것을 댄다**(moai-ivt9). 글이 말묶음으로 가면서 자료 쪽
     /// 시험은 갈래만 재게 됐는데, 그 갈래가 아는 목록을 안 달고 나가면 "그 값이 아니다" 만
     /// 듣고 무엇을 적어야 하는지는 설정 파일 어디에도 없다 — 옛 글이 목록을 달고 있던 까닭이다.
@@ -3340,11 +3632,12 @@ mod tests {
             crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
         let as_prime = plain(&prime(&p, &labels, Screen::new(lang))).join("\n");
         let as_ready =
-            plain(&ready(&[&i], &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
+            plain(&ready(&[&i], 0, &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
         let as_list = plain(&list(
             &[i.clone()],
             &cfg(),
             Hidden::default(),
+            0,
             &labels,
             Asked::default(),
             &Default::default(),
@@ -3467,6 +3760,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3487,6 +3781,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3504,6 +3799,7 @@ mod tests {
                 &[],
                 &cfg(),
                 Hidden { done: 0, ..Hidden::default() },
+                0,
                 &no_epics(),
                 Asked::default(),
                 &Default::default(),
@@ -3516,6 +3812,7 @@ mod tests {
                 &[],
                 &cfg(),
                 Hidden { done: 3, ..Hidden::default() },
+                0,
                 &no_epics(),
                 Asked::default(),
                 &Default::default(),
@@ -3532,6 +3829,7 @@ mod tests {
             &issues,
             &cfg(),
             Hidden { done: 5, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3549,6 +3847,7 @@ mod tests {
             &[issue("argos-0001", &long, "todo")],
             &cfg(),
             Hidden { done: 0, ..Hidden::default() },
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3576,6 +3875,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &tagged,
             Asked::default(),
             &Default::default(),
@@ -3590,6 +3890,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &tagged,
             Asked::default(),
             &Default::default(),
@@ -3685,6 +3986,94 @@ mod tests {
         assert!(joined.contains("09-09 14:02"), "{joined}");
     }
 
+    /// **지운 줄의 도장도 화면을 못 다시 칠하고, 해를 단다**(moai-7dmq 리뷰). 저널은 손으로 고칠 수 있어 못 읽는
+    /// 도장에 ESC·줄바꿈이 들 수 있고, [`stamp`] 는 못 읽은 글을 그대로 돌려준다. 해는 목록이 저장소의 지움
+    /// 전부라 해를 넘기기 때문이다 — `12-31 23:30` 둘이 한 해 차이로 서도 화면으로 못 가른다.
+    #[test]
+    fn a_removed_row_is_one_clean_line_with_its_year() {
+        let by = crate::model::someone("raven");
+        let evil = JournalEntry::removed("argos-0001", "하나", "x\u{1b}[2J\ny", &by);
+        let old = JournalEntry::removed("argos-0002", "둘", "2025-12-31T23:30:00Z", &by);
+        let new = JournalEntry::removed("argos-0003", "셋", "2026-12-31T23:30:00Z", &by);
+        let out = removed(&[&evil, &old, &new], &cfg(), Screen::new(Lang::Ko));
+        assert_eq!(out.len(), 3, "지운 이슈 하나가 한 줄이 아니다 — {out:?}");
+        for l in &out {
+            // 칠하는 이스케이프는 남는다 — 걷혀야 하는 것은 저널에서 온 화면 지우기와 줄바꿈이다.
+            assert!(!l.contains("\u{1b}[2J") && !l.contains('\n'), "도장이 화면에 닿았다 — {l:?}");
+        }
+        let shown = plain(&out);
+        assert!(
+            shown[1].contains("2025-12-31 23:30") && shown[2].contains("2026-12-31 23:30"),
+            "해가 없다 — {shown:?}"
+        );
+    }
+
+    /// **이력의 도장도 화면을 못 다시 칠한다**(moai-fmoa). [`removed`] 가 같은 저널 줄의 도장을 걷는데 이력만
+    /// 그대로 찍던 자리다 — 못 읽는 도장은 [`short_stamp`] 가 그대로 돌려주므로 ESC 가 `moai show <id>` 화면에
+    /// 닿고, 줄바꿈은 원소 하나가 한 줄이라는 약속을 깬다. 글이 여러 줄인 메모는 여전히 줄마다 갈린다.
+    #[test]
+    fn a_history_stamp_is_one_clean_line() {
+        let by = crate::model::someone("raven");
+        let j = [
+            JournalEntry::note("argos-0001", "첫 줄\n둘째 줄", "x\u{1b}[2J\ny", &by),
+            JournalEntry::note("argos-0001", "뒤", "2026-09-09T05:02:00Z", &by),
+        ];
+        let out = history(&j, &cfg(), Screen::new(Lang::Ko));
+        for l in &out {
+            assert!(!l.contains("\u{1b}[2J") && !l.contains('\n'), "도장이 화면에 닿았다 — {l:?}");
+        }
+        let shown = plain(&out);
+        // 머리 두 줄(빈 줄·`이력`) 뒤로 메모 두 줄과 둘째 줄이다.
+        assert_eq!(shown.len(), 5, "{shown:?}");
+        assert!(shown[2].contains("첫 줄") && shown[3].trim_start().starts_with("둘째 줄"), "{shown:?}");
+        // 이어지는 줄은 걷은 도장의 폭만큼 들여 선다 — 걷기 전 폭으로 재면 열이 어긋난다.
+        let col = |l: &str, needle: &str| width(&l[..l.find(needle).unwrap()]);
+        assert_eq!(col(&shown[2], "note:"), col(&shown[3], "둘째 줄"), "{shown:?}");
+    }
+
+    /// **이력의 한 줄짜리 값도 줄을 못 지어낸다**(moai-fmoa 리뷰) — 칸 이름·모르는 갈래·사람에 든 줄바꿈이
+    /// 이어지는 줄처럼 그려져, 손으로 고친 저널 줄 하나가 없던 칸 옮김을 이력에 세웠다. 여러 줄일 수 있는
+    /// 메모와 옮김의 말은 여전히 줄마다 갈린다.
+    #[test]
+    fn a_one_line_value_in_the_history_never_makes_a_row() {
+        let by = crate::model::Actor { name: "Mallory\n  09-30 09:05   review → done".into(), email: "m@x".into() };
+        let mut moved = JournalEntry::status(
+            "argos-0001",
+            &Status::new("todo"),
+            &Status::new("in_progress\n09-30 09:00   done → todo"),
+            Some("첫 말\n둘째 말".into()),
+            "2026-09-09T05:02:00Z",
+            &by,
+        );
+        let odd = JournalEntry { kind: "future\n09-30 09:10   done → todo".into(), note: None, ..moved.clone() };
+        moved.from = Some("todo\nX".into());
+        let out = plain(&history(&[moved, odd], &cfg(), Screen::new(Lang::Ko)));
+        // 머리 두 줄 뒤로 칸 옮김(말이 두 줄)과 모르는 갈래 한 줄이다.
+        assert_eq!(out.len(), 5, "한 줄짜리 값이 줄을 지어냈다 — {out:?}");
+        assert!(out[3].trim_start().starts_with("둘째 말"), "옮김의 말은 줄마다 갈려야 한다 — {out:?}");
+        assert!(out.iter().all(|l| !l.contains('\n')), "{out:?}");
+    }
+
+    /// **상세의 시각 줄도 화면을 못 다시 칠한다**(moai-fmoa 리뷰) — 스냅샷의 `created_at`·`started_at` 도 손으로
+    /// 고칠 수 있는데, [`stamp`] 가 못 읽는 글을 그대로 돌려주던 판은 상세의 생성·시작 줄로 ESC 를 냈다. 걷는
+    /// 자리가 부르는 쪽마다였던 탓이다 — 이제 [`stamp`]·[`short_stamp`] 가 걷는다.
+    #[test]
+    fn a_hand_edited_stamp_in_the_detail_never_reaches_the_terminal() {
+        let mut i = issue("argos-0001", "제목", "in_progress");
+        i.created_at = "\u{1b}[2J\u{1b}[Hxx\ny".into();
+        i.started_at = Some("2026-09-1\u{1b}]0;pwned\u{7}AAAA".into());
+        let lines = detail(&i, None, &[], &bare_seen(Lang::Ko), &cfg(), "2026-09-11T04:12:03Z", false);
+        for l in &lines {
+            for bad in ["\u{1b}[2J", "\u{1b}[H", "\u{1b}]", "\u{7}", "\n"] {
+                assert!(!l.contains(bad), "손으로 고친 도장이 화면에 닿았다 — {l:?}");
+            }
+        }
+        assert!(plain(&lines).iter().any(|l| l.contains("[2J[Hxx  y")), "걷은 도장이 안 섰다 — {lines:?}");
+        let utc = crate::tz::Zone::utc();
+        assert_eq!(stamp("x\u{1b}[2J\ny", &utc), "x[2J  y");
+        assert_eq!(short_stamp("x\u{1b}[2J\ny", &utc), "x[2J  y");
+    }
+
     /// **상세의 왼쪽 이름 칸은 어느 말에서도 한 폭이다**(`label_width`).
     ///
     /// 한국어는 `에픽`·`자식`·`생성`·`막힘` 이 모두 두 글자라 이 자가 없어도 섰고, 영어는
@@ -3746,6 +4135,7 @@ mod tests {
             &[i.clone()],
             &cfg(),
             Hidden::default(),
+            0,
             &labels,
             Asked::default(),
             &Default::default(),
@@ -3760,6 +4150,7 @@ mod tests {
             &[i],
             &cfg(),
             Hidden::default(),
+            0,
             &dangling,
             Asked::default(),
             &Default::default(),
@@ -3930,6 +4321,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -3943,6 +4335,7 @@ mod tests {
             &all,
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked { deferred: true },
             &Default::default(),
@@ -3972,6 +4365,7 @@ mod tests {
             &[plain_work, thought, put_off, both],
             &cfg(),
             Hidden::default(),
+            0,
             &no_epics(),
             Asked::default(),
             &Default::default(),
@@ -4234,7 +4628,7 @@ mod tests {
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();
-        let out = plain(&ready(&[&a, &b], &labels, &[&wip], &[], &none, Screen::new(lang)));
+        let out = plain(&ready(&[&a, &b], 0, &labels, &[&wip], &[], &none, Screen::new(lang)));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
         // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `say` 를 지나므로,
@@ -4245,7 +4639,7 @@ mod tests {
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], &labels, &[], &[], &none, Screen::new(lang)));
+        let empty = plain(&ready(&[], 0, &labels, &[], &[], &none, Screen::new(lang)));
         let joined = empty.join("\n");
         assert!(
             joined.contains(&fill(say(lang, "ready.count"), &[("n", "0")])) && joined.contains(say(lang, "ready.none")),

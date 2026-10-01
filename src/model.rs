@@ -745,6 +745,16 @@ impl JournalEntry {
             ..Self::base("rm", id.unwrap_or(""), at, by)
         }
     }
+
+    /// **이슈를 지운 줄인가** — `rm` 가운데 제목을 든 것([`JournalEntry::removed`]). 제목 없는 `rm` 은 못
+    /// 읽는 줄을 지운 것이라([`JournalEntry::removed_line`]) 그 id 의 이슈는 멀쩡히 설 수 있다.
+    ///
+    /// **가르는 자는 여기 하나다**(moai-7dmq) — 상세의 이력(`view::entry`)이 "삭제" 와 "못 읽는 줄 삭제" 를
+    /// 가르는 것과 `moai show --removed` 가 지운 이슈를 고르는 것이 같은 자를 쓴다. 둘로 두면 한쪽만
+    /// 바뀌는 날 이력은 "삭제" 라 대는데 `--removed` 에는 안 서는 줄이 생긴다.
+    pub fn removes_issue(&self) -> bool {
+        self.kind == "rm" && self.title.is_some()
+    }
 }
 
 // ── 일한 것 ────────────────────────────────────────────────────────────
@@ -783,11 +793,7 @@ pub struct Work {
 pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
     let mut out = Vec::new();
     for e in journal {
-        let text = match e.kind.as_str() {
-            "note" => e.text.as_deref(),
-            "status" => e.note.as_deref(),
-            _ => None,
-        };
+        let text = note_of(e);
         let mut fenced = false;
         for line in text.unwrap_or_default().lines() {
             let bare = line.trim_start();
@@ -804,6 +810,33 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
         }
     }
     out
+}
+
+/// 저널 한 줄이 이슈에 붙인 **노트 글** — `moai note` 의 글과 칸 옮김의 `-m`(moai-efoc.zyc). 이력이
+/// "노트" 로 그리는 두 갈래이고, [`work_of`] 가 `model:` 줄을 찾는 곳도 이 둘이다.
+///
+/// **`rm` 의 `note` 는 안 든다** — 그것은 못 읽는 줄을 지울 때 남긴 원문이지(`JournalEntry::removed_line`)
+/// 사람이 이슈에 붙인 글이 아니다. 거기 든 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
+///
+/// 읽는 자가 둘이다 — `-g` 가 노트를 보고(`cmd::show`) 탐색기의 `/` 가 같은 글을 본다(`tui::Ground::read_notes`,
+/// moai-wcy8). 그래서 명령 레이어(`cmd`)가 아니라 여기 둔다: 어느 갈래를 노트로 치는지가 두 표면에서 갈리지
+/// 않게.
+pub fn note_of(e: &JournalEntry) -> Option<&str> {
+    match e.kind.as_str() {
+        "note" => e.text.as_deref(),
+        "status" => e.note.as_deref(),
+        _ => None,
+    }
+}
+
+/// 저널 한 줄 — **풀기 전의 JSON** — 이 [`note_of`] 에서 글을 낼 수 **있는가**(moai-efoc.zyc). 저널을 통째로
+/// 풀지 않으려고 먼저 거르는 자다([`may_hold_work`] 와 같은 결).
+///
+/// **글을 내는 줄은 빠뜨리지 않는다.** 노트 줄은 `"kind":"note"` 를, 칸 옮김의 `-m` 은 `"note":` 키를
+/// 든다 — 둘 다 날것에 `note` 가 선다. 키 이름을 `\uXXXX` 로 적은 손 줄이 있을 수 있어 `\u` 가 든 줄은 다
+/// 푼다. 더 받는 것은 괜찮다 — 푼 뒤에 [`note_of`] 가 다시 가른다.
+pub fn may_hold_note(raw: &str) -> bool {
+    raw.contains("note") || raw.contains("\\u")
 }
 
 /// 저널 한 줄 — **풀기 전의 JSON** — 이 [`work_of`] 에서 값을 낼 수 **있는가**(moai-p8qj). 목록의
@@ -1098,7 +1131,7 @@ pub fn now() -> String {
 }
 
 /// 1970-01-01 부터의 날 수를 (년, 월, 일) 로. Howard Hinnant 의 `civil_from_days`.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -1118,7 +1151,7 @@ pub fn format_rfc3339(secs: i64) -> String {
     format!("{y:04}-{mo:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y.rem_euclid(400);
@@ -1187,8 +1220,30 @@ pub fn parse_date(s: &str) -> Option<i64> {
     Some(days_from_civil(y, mo, d))
 }
 
+/// `2026-09-30T04:12:03Z` → epoch 초. **사람이 이번에 치는 시각을 읽는 자다**(moai-efoc 리뷰) — [`parse_date`]
+/// 와 같은 까닭으로 엄하다.
+///
+/// [`parse_rfc3339`] 는 파일에 이미 적힌 시각을 읽는 관대한 자라 `2026-02-30T…` 를 3월로, `T-1:00:00Z` 를
+/// 전날로, `+026-…` 을 26년으로, `:60` 을 다음 분으로 넘긴다. 치는 값에서 그것은 오타고, 받으면 그 폭이 말없이
+/// 옆 날로 샌다. 날짜 자리는 [`parse_date`] 가 재고(없는 날과 부호를 거절한다) 시각 자리는 자리마다 숫자인지
+/// 본다. [`format_rfc3339`] 가 쓰는 꼴은 다 받는다 — `--json` 에서 옮겨 친 `updated_at` 은 그대로 선다.
+pub fn parse_instant(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() != 20
+        || b[10] != b'T'
+        || b[19] != b'Z'
+        || !b[11..19].iter().enumerate().all(|(x, c)| if matches!(x, 2 | 5) { *c == b':' } else { c.is_ascii_digit() })
+    {
+        return None;
+    }
+    let day = parse_date(s.get(..10)?)?;
+    let n = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let (h, mi, se) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
+    (h <= 23 && mi <= 59 && se <= 59).then(|| day * 86_400 + h * 3600 + mi * 60 + se)
+}
+
 /// 그 달의 날수 — 윤년은 그레고리력 그대로다.
-fn days_in_month(y: i64, mo: u32) -> u32 {
+pub(crate) fn days_in_month(y: i64, mo: u32) -> u32 {
     match mo {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -1406,6 +1461,34 @@ mod tests {
         assert!(!may_hold_work(&plain), "{plain}");
     }
 
+    /// **노트는 `moai note` 의 글과 칸 옮김의 `-m` 둘이고, 그 줄은 거르개를 빠짐없이 지난다**(moai-efoc.zyc).
+    /// `rm` 이 남긴 원문은 노트가 아니다 — 그 글자로 `-g` 가 산 이슈를 고르면 지운 쌍둥이의 제목이 걸린다.
+    #[test]
+    fn a_note_is_a_note_or_a_move_message_and_passes_the_prefilter() {
+        let by = someone("raven");
+        let at = "2026-09-11T04:12:03Z";
+        let (s, d) = (Status::new("todo"), Status::new("done"));
+        let yielding = [
+            JournalEntry::note("argos-4aex", "사용자 결정: 둘째 길", at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, Some("닫으며 남긴 말".into()), at, &by),
+        ];
+        for e in &yielding {
+            let raw = serde_json::to_string(e).unwrap();
+            assert!(note_of(e).is_some(), "시험이 틀렸다 — 글을 안 내는 줄이다: {raw}");
+            assert!(may_hold_note(&raw), "글을 내는 줄을 걸렀다: {raw}");
+        }
+        let silent = [
+            JournalEntry::create("argos-4aex", "제목", at, &by),
+            JournalEntry::status("argos-4aex", &s, &d, None, at, &by),
+            JournalEntry::removed_line(Some("argos-4aex"), r#"{"id":"argos-4aex","title":"깨진 쌍둥이"}"#, at, &by),
+        ];
+        for e in &silent {
+            assert_eq!(note_of(e), None, "노트가 아닌 줄이 글을 냈다: {e:?}");
+        }
+        // 손으로 쓴 줄이 키를 이스케이프로 적었어도 푼다.
+        assert!(may_hold_note(r#"{"ts":"t","id":"argos-4aex","kind":"\u006eote","by":"r","text":"x"}"#));
+    }
+
     /// 계획 시각도 되쓰면 바이트가 같다 — 도로 집은 줄은 `deferred_at` 없이 `planned_at` 만
     /// 든다(moai-l11z). 늦은 계획 시각이 [`Issue::planned`] 가 된다.
     #[test]
@@ -1612,6 +1695,37 @@ mod tests {
         assert_eq!(days_until("2026-09-13", now), Some(2));
         assert_eq!(days_until("2026-09-09", now), Some(-2));
         assert_eq!(days_until("어제", now), None);
+    }
+
+    /// **치는 시각도 날짜처럼 엄하다**(moai-efoc 리뷰) — [`parse_rfc3339`] 는 없는 날과 부호와 `:60` 을
+    /// 옆 날로 넘기는데, `--since`·`--created`·`--done` 에 그것을 받으면 폭이 말없이 옆 날로 샌다. 도구가 쓴
+    /// 꼴은 다 받는다 — `--json` 에서 옮겨 친 도장이 거절되면 안 된다.
+    #[test]
+    fn a_typed_instant_is_as_strict_as_a_date() {
+        for secs in [0, 59, 86_399, 1_789_000_000, 1_790_000_000 + 86_399, 4_102_444_799] {
+            let stamp = format_rfc3339(secs);
+            assert_eq!(parse_instant(&stamp), Some(secs), "도구가 쓴 {stamp} 를 거절했다");
+        }
+        assert_eq!(parse_instant("2026-09-11T04:12:03Z"), parse_rfc3339("2026-09-11T04:12:03Z"));
+        for bad in [
+            "2026-02-30T00:00:00Z",
+            "2026-09-31T00:00:00Z",
+            "+026-09-02T00:00:00Z",
+            "-026-09-02T00:00:00Z",
+            "2026-+9-02T00:00:00Z",
+            "2026-09-+2T00:00:00Z",
+            "2026-09-02T+1:00:00Z",
+            "2026-09-02T-1:00:00Z",
+            "2026-09-02T24:00:00Z",
+            "2026-09-02T00:60:00Z",
+            "2026-02-28T23:59:60Z",
+            "2026-09-02T00:00:00",
+            "2026-09-02 00:00:00Z",
+            "2026-09-02",
+            "",
+        ] {
+            assert_eq!(parse_instant(bad), None, "{bad:?} 를 시각으로 받았다");
+        }
     }
 
     /// **새 필드가 옛 바이너리의 되쓰기와 같은 자리에 선다**(moai-tfcp). 이 필드를 모르는

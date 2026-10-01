@@ -113,6 +113,40 @@ pub enum Mode {
     Zone(zones::Zones),
 }
 
+/// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
+///
+/// **뱃지는 이것을 그리기만 한다**([`draw::badge`]). 한때 뱃지 글(`/노트:x`)을 들고 거기서 범위와 검색어를
+/// 되읽었다. 그러자 범위 이름이 곧 되읽는 자의 열쇠라 화면 말로 못 옮겼고(영어 화면에 `/노트:x` 가 섰다),
+/// `/` 로 시작하는 글만 검색으로 읽어 `f` 의 `grep=` 으로 건 줄은 찾은 자리를 못 칠했다(moai-lpzj.4ks).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hung {
+    /// `/` 검색 — 친 글과 찾는 자리.
+    Grep { text: String, scope: GrepIn },
+    /// `f` 거름망 — 친 `항목=값` 글과, 그 가운데 `grep=` 이 찾는 범위와 글. 뒤엣것은 걸 때 [`Filter::build`]
+    /// 가 읽은 값(`grep_in`·`grep`, 글은 소문자로 접힌 것)을 그대로 받아 둔다([`App::apply`]) — 찾은 자리를
+    /// 칠하는 쪽이 줄마다 글을 다시 쪼개지 않게, 그리고 범위를 여기서 따로 정하지 않게.
+    Filter { text: String, grep: Option<(GrepIn, String)> },
+}
+
+impl Hung {
+    /// 이 거름망을 다시 걸 칸 — 다시 읽을 때([`App::reapply`]).
+    fn mode(&self) -> Mode {
+        match self {
+            Hung::Grep { text, scope } => Mode::Grep(Input::new(text), *scope),
+            Hung::Filter { text, .. } => Mode::Filter(Input::new(text)),
+        }
+    }
+
+    /// 글로 찾는 범위와 글 — `/` 검색이든 `f` 의 `grep=` 이든. 범위는 걸 때 거르개가 정한 것이다 — `grep=` 은
+    /// 지금 CLI 의 `-g` 처럼 늘 전체를 본다.
+    fn query(&self) -> Option<(GrepIn, &str)> {
+        match self {
+            Hung::Grep { text, scope } => Some((*scope, text)),
+            Hung::Filter { grep, .. } => grep.as_ref().map(|(g, q)| (*g, q.as_str())),
+        }
+    }
+}
+
 /// 받고 나서 다시 부를 쓰기. **붙잡는 것이 없는 함수다** — 적던 것은 [`Ask`] 가
 /// 들고 있다가 되돌려 놓는 모드 안에 있고, 이 함수는 거기서 다시 읽어 쓴다.
 /// 닫는 함수(`FnOnce`)를 통째로 들고 있으면 그 결과를 받을 자리가 없어
@@ -297,6 +331,36 @@ pub struct Ground {
     split_rows: Vec<(usize, Option<String>)>,
     kinds: std::collections::BTreeMap<String, crate::model::Kind>,
     folded: std::collections::BTreeSet<String>,
+    /// 읽은 노트([`Noted`], moai-wcy8.vip) — `/` 의 전체·노트 범위가 보는 재료다([`Ground::here`]). `None` 이면
+    /// 아직 안 읽었다. **노트를 보는 거름망이 처음 걸릴 때 읽는다**([`Ground::read_notes`], 리뷰 moai-wcy8.rbj).
+    ///
+    /// **적재는 노트를 안 읽는다**([`measure`]·[`prepare`]) — 그 길은 쓰기·`SPC v w`·프로젝트 들어가기마다
+    /// 루프에서 돌고(`App::reload`), 레이어(`tui::layer`)가 펼친 프로젝트를 읽는 길이기도 한데 레이어에서는
+    /// `/` 가 안 선다. 적재 때 읽던 판은 쓰기마다 루프에서 저널 6MB 를 풀었고, 검색을 한 번도 안 한 세션도
+    /// 못 읽는 저널 파일 하나로 비영 종료했다(`store::journal_unread`). 노트를 쓰는 자는 노트를 보는 검색
+    /// 하나라 그때 읽는다 — CLI 가 `-g` 를 물었을 때만 읽는 것(`cmd::show`)과 같은 자다.
+    ///
+    /// **다시 읽으면 빈다** — 적재가 새 `Ground` 를 지어 통째로 갈아 끼우므로(`App::take`) 옛 노트가 새 줄
+    /// 곁에 남지 않는다. 걸린 검색이 노트를 보면 스레드의 다시 읽기는 노트까지 읽어 오고(`App::follow`),
+    /// 루프에서 부르는 다시 읽기(`App::reload`)는 거름망을 다시 거는 걸음(`App::reapply`)이 새로 읽는다.
+    notes: Option<Noted>,
+}
+
+/// 읽은 노트 한 벌(리뷰 moai-wcy8.rbj) — 글과, 거름망의 자로 접은 것과, 그것을 읽은 저널의 표식. **셋을 한
+/// 자리에 든다** — 따로 들면 한 길이 노트는 새로 들고 표식은 옛것을 드는 일이 선다.
+struct Noted {
+    /// 이슈 id → 그 이슈의 노트 글 — 상세가 걸린 노트 줄을 고르는 재료다([`Ground::notes_of`]). 읽는 걸음은
+    /// CLI `-g` 와 한 벌이다(`cmd::show::journal_of_rows`): 둘로 두면 같은 "전체" 가 두 표면에서 다른 답을 낸다.
+    texts: crate::query::Notes,
+    /// 같은 글을 거름망의 자로 **한 번** 접은 것 — 키마다 도는 거름망이 이것을 빌린다
+    /// ([`crate::query::NoteView::Folded`]). 이 저장소의 노트 4.4MB 를 키마다 접으면 release 로 85ms 다.
+    folded: crate::query::Notes,
+    /// 노트를 읽은 저널의 표식 — 뿌리마다(`Repo::journal_marks`, moai-wcy8.403). `moai note` 는 스냅샷을
+    /// 안 바꾸므로 스냅샷 표식만 보면 새 노트가 영영 안 실린다. 걸음([`App::follow`])이 이것도 잰다.
+    ///
+    /// **`Site::watched` 에 섞지 않는다** — 그 목록이 움직이면 커밋 표를 다시 짓는데(`App::apply_fresh`),
+    /// 노트와 칸 옮김은 쓰기마다 저널을 바꾸고 커밋과는 상관이 없다.
+    journals: Vec<(std::path::PathBuf, Stamp)>,
 }
 
 /// 적재 한 걸음(moai-fbdg) — 색인과 [`Ground`] 를 **한 번 잰 지도**(`report::Soil`)에서 짓는다. 여는 길
@@ -362,7 +426,44 @@ impl Ground {
             split_rows,
             kinds: soil.kinds.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
+            // 줄만으로는 모른다 — 노트를 보는 거름망이 처음 걸릴 때 읽는다([`Ground::read_notes`]).
+            notes: None,
         }
+    }
+
+    /// 노트를 읽는다 — **이미 읽었으면 그대로 둔다**(리뷰 moai-wcy8.rbj, [`Ground::notes`]). 줄마다 제 뿌리의
+    /// 저널에서 읽는다: CLI `-g` 와 **같은 걸음**이다(`cmd::show::journal_of_rows`). 겹쳐 온 줄은 저쪽
+    /// 워크트리의 저널에서 읽는다(2026-09-30 사용자 결정, moai-wcy8).
+    ///
+    /// **표식은 읽기 전에 잰다** — [`prepare`] 의 스냅샷 표식과 같은 까닭이다. 읽고 나서 재면 그 사이에 적힌
+    /// 노트가 "이미 본 것" 으로 적혀 다음 쓰기까지 안 실린다. 먼저 재면 최악이 헛 갱신 하나다. **재는 뿌리는
+    /// 읽는 뿌리와 한 자(`cmd::show::home`)로 고른다** — 따로 고르던 판은 한쪽만 옮겨도 아무 시험도 안
+    /// 붉어졌다(`journal_of_rows` 에 적힌 리뷰 moai-u5bk.3wq 의 까닭이다).
+    fn read_notes(&mut self, repo: &Repo, origin: &crate::worktree::Origin, issues: &[Issue]) {
+        if self.notes.is_some() {
+            return;
+        }
+        let roots: std::collections::BTreeSet<&std::path::Path> =
+            issues.iter().map(|i| crate::cmd::show::home(repo, origin, &i.id)).collect();
+        let journals =
+            roots.into_iter().flat_map(|root| crate::cmd::show::at_home(repo, root).journal_marks()).collect();
+        let journal = crate::cmd::show::journal_of_rows(repo, origin, issues, crate::model::may_hold_note);
+        let texts = crate::cmd::show::notes_of(&journal);
+        let folded = crate::query::fold_notes(&texts);
+        self.notes = Some(Noted { texts, folded, journals });
+    }
+
+    /// 시험이 저장소 없이 노트를 든다 — 진짜 길은 [`Ground::read_notes`] 다.
+    #[cfg(test)]
+    fn hand_notes(&mut self, texts: crate::query::Notes) {
+        let folded = crate::query::fold_notes(&texts);
+        self.notes = Some(Noted { texts, folded, journals: Vec::new() });
+    }
+
+    /// 읽은 노트의 저널 표식([`Noted::journals`]) — 안 읽었으면 빈다: 노트를 안 쓰는 화면은 `moai note` 로 다시
+    /// 읽을 까닭이 없다.
+    fn journals(&self) -> &[(std::path::PathBuf, Stamp)] {
+        self.notes.as_ref().map_or(&[], |n| n.journals.as_slice())
     }
 
     /// (종류, 묶음 id) → 멤버에서 읽은 칸(`report::group_states` 와 같은 답). 거름망과 `tui --json` 의 줄이 쓴다.
@@ -375,6 +476,12 @@ impl Ground {
     /// 열쇠가 가른다(`report::GroupKey`, moai-mibi.rfn).
     fn kinds(&self) -> crate::report::Kinds<'_> {
         crate::report::Kinds::kept(&self.kinds)
+    }
+
+    /// 그 이슈의 노트 글([`Noted::texts`]) — 상세가 걸린 노트 줄을 고르는 재료다(moai-wcy8.3v9). 거름망이 보는
+    /// 것과 같은 한 벌이라, 상세에 선 줄은 거름망이 본 글에서 나온다. 안 읽었거나 노트가 없으면 빈 조각이다.
+    pub(super) fn notes_of(&self, id: &str) -> &[String] {
+        self.notes.as_ref().and_then(|n| n.texts.get(id)).map_or(&[], Vec::as_slice)
     }
 
     /// 거름망이 볼 꼴 — 든 지도는 빌리기만 한다. 빌린 지도를 짓는 값은 **이슈 수에 비례한다**:
@@ -409,6 +516,12 @@ impl Ground {
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
             folded: self.folded.iter().map(String::as_str).collect(),
+            // **노트도 빌린다**(moai-wcy8.vip) — 그래서 `/` 의 전체 범위가 CLI `-g` 와 같은 자로 선다. **접어 둔
+            // 꼴로 빌린다**(리뷰 moai-wcy8.rbj) — 키마다 도는 이 자리가 노트를 다시 접지 않는다. 안 읽었으면 없다:
+            // 노트를 보는 거름망은 거는 쪽(`App::apply`)이 먼저 읽힌다([`Ground::read_notes`]).
+            notes: self.notes.as_ref().map(|n| crate::query::NoteView::Folded(&n.folded)),
+            // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
+            zone: None,
         }
     }
 }
@@ -546,6 +659,8 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     // 나눠 쓴다([`measure_in`]).
     let now = crate::model::now();
     let soil = crate::report::Soil::of(&issues);
+    // **노트는 안 읽는다**(리뷰 moai-wcy8.rbj) — 이 길은 쓰기마다 루프에서도 돈다. 노트를 보는 거름망이 걸리면
+    // 들인 뒤에 그 걸음이 읽는다([`Ground::notes`]).
     let (index, ground) = measure_in(&issues, &repo.config, &soil);
     let (mut warnings, notices) = warnings_in(&issues, &unreadable, &repo.config, &now, &soil);
     // **알림은 `moai status` 와 같은 자로 센다**(moai-k6ff) — 순수한 셈이 낸 것에 설치가 어긋난
@@ -927,14 +1042,11 @@ pub struct App {
     /// 이동키(`↑↓`·PageUp/Down·Home/End)를 먹는 칸. `Tab`·`Shift-Tab` 이 돌린다.
     /// **다시 읽어도 그대로다** — 굴리던 사람의 손이 갱신 한 번에 목록으로 튀면 안 된다.
     pub focus: Pane,
-    /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다.
-    pub filter_text: Option<String>,
-    /// 걸린 검색이 찾는 자리. `filter_text` 가 `/` 로 시작할 때만 뜻이 있다 — 다시 읽을 때
-    /// 뱃지 글(`/id:0004`)을 되읽지 않고 이것으로 거름망을 다시 짓는다.
-    pub grep_in: GrepIn,
-    /// 검색 칸을 열기 전의 거름망·범위·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
+    /// 지금 걸린 거름망. 사람이 적은 글 그대로도 들고 있어야 화면에 되비친다 — 뱃지는 이것을 그린다.
+    pub hung: Option<Hung>,
+    /// 검색 칸을 열기 전의 거름망·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
     /// 그만두려면 되돌아갈 자리를 들고 있어야 한다. Enter 로 걸면 버린다.
-    grep_was: Option<(Option<String>, GrepIn, usize)>,
+    grep_was: Option<(Option<Hung>, usize)>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
     /// 조용히 삼키면 갱신이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 기다리고 또 기다리며 까닭을 못 얻는다.
@@ -955,6 +1067,9 @@ pub struct App {
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
     /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
     body: Option<draw::Body>,
+    /// 상세의 "걸린 노트" 절을 펼쳐 둔 한 벌(리뷰 moai-wcy8.rbj, [`draw::NoteHits`]) — [`App::body`] 와 같은
+    /// 까닭으로 `draw::fill_note_hits` 가 그리기 전에 채운다. 값일 뿐이다.
+    note_hits: Option<draw::NoteHits>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 아래의 [`App::held`] 가 대므로
     /// (moai-23pm) 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
@@ -1526,8 +1641,7 @@ impl App {
             focus: Pane::default(),
             detail: Scroll::default(),
             raw: false,
-            filter_text: None,
-            grep_in: GrepIn::All,
+            hung: None,
             grep_was: None,
             trouble: None,
             unlayered: None,
@@ -1535,6 +1649,7 @@ impl App {
             write_failed: false,
             notice: None,
             body: None,
+            note_hits: None,
             user: None,
             identify: crate::model::actor,
             header_user: None,
@@ -2107,6 +2222,10 @@ impl App {
     /// 공용 git 디렉터리의 `worktrees/` 표식으로 알아챈다(`worktree::heads`) — 걸음마다
     /// git 을 띄우는 것은 700ms 마다 프로세스 하나를 만드는 일이라, 파일만 잰다.
     ///
+    /// **저널도 본다**([`Ground::journals`], moai-wcy8.403) — `/` 가 노트를 보는데 `moai note` 는 스냅샷을
+    /// 안 바꾼다. 노트를 읽은 뿌리마다 저널 파일과 `journal/` 디렉터리를 잰다. 노트를 안 읽었으면 잴 것이
+    /// 없다 — 노트를 안 쓰는 화면이 다시 읽을 까닭이 아니다(리뷰 moai-wcy8.rbj).
+    ///
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
@@ -2147,9 +2266,16 @@ impl App {
         // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
         // 순간 층의 `!` 와 이 배너가 갈린다. 저장소가 서 있으면 읽은 때도 늘 서 있다 — 띄울 때의 첫
         // 읽기도 들인 읽기로 찍는다(`App::open`).
+        // **읽은 노트의 저널도 본다**(moai-wcy8.403) — `moai note` 는 스냅샷을 안 바꾸는데 `/` 는 노트를 본다.
+        // 따로 든 까닭은 [`Noted::journals`] 에 있다. 움직였는지 재는 자는 두 목록에 하나다.
         let moved = layer::due(self.site.read_at)
             || stamp_of(repo) != self.site.stamp
-            || self.site.watched.iter().any(|(path, was)| crate::store::stamp(path) != *was);
+            || self
+                .site
+                .watched
+                .iter()
+                .chain(self.site.ground.journals())
+                .any(|(path, was)| crate::store::stamp(path) != *was);
         if moved {
             let (tx, rx) = std::sync::mpsc::channel();
             let repo = repo.clone();
@@ -2161,11 +2287,30 @@ impl App {
             // 보내던 때는 이 읽기가 도는 사이에 `SPC o t` 를 누르면 옛 달로 판정한 수가 닿았다.
             // 받는 쪽이 사라졌으면(사람이 누른 갱신이 버렸으면) 보내기가 실패한다 — 버린 것이라 그대로 둔다.
             let held = layer::Told::held(self.site.install);
+            // **노트를 보는 거름망이 걸려 있으면 노트도 이 스레드가 읽는다**(리뷰 moai-wcy8.rbj) — 읽기는 노트를
+            // 안 싣고([`Ground::notes`]) 들인 뒤의 거름망이 비어 있는 노트를 루프에서 읽게 되는데, 그러면 다른
+            // 세션의 쓰기와 1분 시계마다 저널 6MB 를 루프에서 푼다. 들이는 쪽([`App::apply`])은 이미 든 노트를
+            // 다시 안 읽는다. 걸린 것이 없으면 안 읽는다 — 노트를 안 쓰는 화면이 저널을 풀 까닭이 없다.
+            let notes = self.sees_notes();
             let handle = std::thread::spawn(move || {
-                let _ = tx.send(read(&repo, worktree, lang, held));
+                let fresh = read(&repo, worktree, lang, held).map(|mut f| {
+                    if notes {
+                        f.ground.read_notes(&repo, &f.origin, &f.issues);
+                    }
+                    f
+                });
+                let _ = tx.send(fresh);
             });
             self.pending = Some((rx, handle));
         }
+    }
+
+    /// 걸린 거름망이 노트를 보는가([`crate::query::Filter::sees_notes`]) — 다시 읽는 스레드가 노트까지 읽어
+    /// 올지를 가른다([`App::follow`]). **칠하는 쪽([`App::grep_query`])과 같은 값을 읽는다** — 그 범위와 글은
+    /// 걸 때 거르개가 정한 그대로라([`Hung::query`]) `Filter::sees_notes` 와 같은 답이고, 글을 다시 쪼개
+    /// 거르개를 새로 짓지 않는다. 둘이 따로 읽으면 노트를 안 읽어 온 판에 상세가 노트를 그리려 드는 틈이 난다.
+    fn sees_notes(&self) -> bool {
+        self.grep_query().is_some_and(|(g, _)| g.sees_notes())
     }
 
     /// 새 판을 묻는 실을 띄운다(moai-3gia) — **부르는 쪽이 문을 지난 뒤에만 부른다**
@@ -2296,29 +2441,19 @@ impl App {
         self.commits_job.is_some() || (self.commits_due && self.site.repo.is_some())
     }
 
-    /// 들고 있는 `filter_text` 를 지금 `issues` 에 다시 건다. 못 걸면 푼다.
+    /// 들고 있는 거름망([`App::hung`])을 지금 `issues` 에 다시 건다. 못 걸면 푼다.
     fn reapply(&mut self) {
-        let mode = match (self.grep_query(), &self.filter_text) {
-            (Some((g, q)), _) => Mode::Grep(Input::new(q), g),
-            (None, Some(t)) => Mode::Filter(Input::new(t)),
-            (None, None) => return self.clear_filter(),
-        };
+        let Some(mode) = self.hung.as_ref().map(Hung::mode) else { return self.clear_filter() };
         if self.apply(&mode).is_err() {
             self.clear_filter();
         }
     }
 
-    /// 걸린 검색의 범위와 친 글. 거름망(`f`)이거나 걸린 것이 없으면 `None`.
-    ///
-    /// 뱃지 글은 `/<글>` 이거나 범위를 좁혔으면 `/<범위>:<글>` 이다([`App::apply`]). 범위는
-    /// 글에서 되읽지 않고 [`App::grep_in`] 을 믿는다 — `/id:x` 를 전체 범위로 친 사람도 있다.
+    /// 걸린 거르개가 글로 찾는 범위와 글 — 찾은 자리를 칠하는 쪽이 읽는다. `/` 검색이든 `f` 의 `grep=` 이든
+    /// 같다(moai-lpzj.4ks): `grep=` 으로 건 줄도 노트에만 든 글로 걸릴 수 있고, 칠이 없으면 왜 걸렸는지가 안
+    /// 보인다. 글로 찾지 않으면 `None`. 보기를 걷는 것은 이것이 아니라 [`App::searching`] 이다.
     pub fn grep_query(&self) -> Option<(GrepIn, &str)> {
-        let q = self.filter_text.as_deref()?.strip_prefix('/')?;
-        let q = match self.grep_in {
-            GrepIn::All => q,
-            g => q.strip_prefix(g.name()).and_then(|q| q.strip_prefix(':')).unwrap_or(q),
-        };
-        Some((self.grep_in, q))
+        self.hung.as_ref()?.query()
     }
 
     /// 걸린 거름망에 **제 줄이 걸린** 이슈 수. 걸린 것을 품어 남은 디렉터리는 안 센다.
@@ -2349,7 +2484,7 @@ impl App {
     /// 따른다: 그것은 "무엇을 볼지" 를 좁히는 물음이지 찾는 물음이 아니다. 칸을 Enter 로 닫아도 검색이
     /// 걸려 있는 한 그대로고, 풀면(Esc) 설정된 보기로 돌아간다 — **보기는 건드리지도 적지도 않는다.**
     pub fn searching(&self) -> bool {
-        self.grep_query().is_some()
+        matches!(self.hung, Some(Hung::Grep { .. }))
     }
 
     /// 이 줄이 **검색 덕에 선 숨은 줄**인가(moai-4x87) — 검색을 풀면 보기가 도로 가릴 줄. 목록이
@@ -2389,7 +2524,7 @@ impl App {
             }
         };
         if text.trim().is_empty() {
-            self.filter_text = None;
+            self.hung = None;
             self.site.keep = vec![true; self.site.issues.len()];
             return Ok(());
         }
@@ -2407,18 +2542,28 @@ impl App {
         // 시계는 **적재마다** 고정한 것을 쓴다. 여기서 다시 잡으면 `stale=`
         // 같은 물음이 화면의 나머지와 다른 시각으로 판정된다.
         let now = self.site.now.clone();
+        // **노트는 노트를 보는 거름망이 처음 걸릴 때 읽는다**(리뷰 moai-wcy8.rbj) — 까닭은 [`Ground::notes`] 에
+        // 있다. 한 번 읽으면 다음 적재까지 든다: 키마다 도는 이 자리가 저널을 다시 읽거나 노트를 다시 접지 않는다.
+        if filter.sees_notes()
+            && let Some(repo) = &self.site.repo
+        {
+            self.site.ground.read_notes(repo, &self.site.origin, &self.site.issues);
+        }
         // **적재 때 잰 것을 빌린다**(moai-fbdg) — 여기서 다시 재면 키 하나마다 소속 지도가 다시 선다.
         // (`Ground::here` 의 `lines` 는 `--milestone` 을 묻는 거르개만 짓는다 — 그 doc 에 까닭이 있다.)
-        let wh = self.site.ground.here(&self.site.issues);
-        self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
-        self.filter_text = Some(match mode {
-            Mode::Grep(_, GrepIn::All) => format!("/{text}"),
-            Mode::Grep(_, g) => format!("/{}:{text}", g.name()),
-            _ => text,
-        });
-        if let Mode::Grep(_, g) = mode {
-            self.grep_in = *g;
+        let mut wh = self.site.ground.here(&self.site.issues);
+        // **날은 보는 사람의 날이다**(moai-efoc) — `SPC f` 의 `since=2026-09-30` 은 화면이 시각을 그리는 그
+        // 시간대의 날이다. 탐색기에서 시간대를 고른 적이 없으면(`SPC o t`) CLI 의 `--since` 와 같은 날이고, 골랐으면
+        // 고른 시간대의 날이다 — CLI 는 `[tui] timezone` 을 안 읽는다(`Ctx::zone`). **이 값으로 `keep` 을 접으므로
+        // 시간대를 바꾸면 다시 건다**([`App::set_zone`]). 얹는 문은 CLI 와 같다([`Filter::needs_zone`]).
+        if filter.needs_zone() {
+            wh.zone = Some(&self.zone);
         }
+        self.site.keep = self.site.issues.iter().map(|i| filter.matches(i, &now, &wh)).collect();
+        self.hung = Some(match mode {
+            Mode::Grep(_, scope) => Hung::Grep { text, scope: *scope },
+            _ => Hung::Filter { text, grep: filter.grep.clone().map(|q| (filter.grep_in, q)) },
+        });
         Ok(())
     }
 
@@ -2433,18 +2578,23 @@ impl App {
             }
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
-        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다.
-        Filter::build(raw)
+        // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
+        // 화면의 말로 편다(moai-2htt). **고쳐 칠 글만 이 칸의 꼴(`항목=값`)이다**(moai-tckz) — CLI 의
+        // `-s todo,review` 를 대면 그 글을 여기 그대로 쳐도 다시 거절된다. `/` 검색은 `-s` 도 `항목=값` 도 안
+        // 받지만, 검색이 거르개를 두 번 쓰는 길이 없어 그 갈래는 안 선다.
+        let on = crate::view::Surface::Pairs;
+        Filter::build(raw).map_err(|e| crate::view::bad_filter_on(self.site.lang, &e, on))
     }
 
     pub fn clear_filter(&mut self) {
-        self.filter_text = None;
+        self.hung = None;
         self.site.keep = vec![true; self.site.issues.len()];
     }
 
     /// 키 표의 차례(조각)를 `query` 의 차례로 잇는다. 둘을 한 타입으로 두지 않는 까닭은 키 표가
     /// 조각이라 `crate::query` 를 못 부르기 때문이다(`input::tests::components_know_neither…`).
-    fn sort_key(o: keys::Order) -> crate::query::SortKey {
+    /// `moai show --sort` 가 같은 낱말로 같은 차례를 가리키는지 `cmd::show` 의 시험이 이것과 견준다.
+    pub(crate) fn sort_key(o: keys::Order) -> crate::query::SortKey {
         use crate::query::SortKey;
         match o {
             keys::Order::Priority => SortKey::Priority,
@@ -4164,7 +4314,7 @@ impl App {
                 }
             }
             B::Grep => {
-                self.grep_was = Some((self.filter_text.clone(), self.grep_in, self.cursor));
+                self.grep_was = Some((self.hung.clone(), self.cursor));
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
             }
             B::Filter => self.mode = Mode::Filter(Input::default()),
@@ -4379,9 +4529,8 @@ impl App {
                 // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
                 let held = self.current().map(|r| self.anchor_of(&r));
                 // 검색이었는지는 **칸을 열기 전**의 것까지 본다 — 검색 칸은 치는 대로 걸어(`live`) 지금
-                // `filter_text` 가 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
-                let was = self.searching()
-                    || self.grep_was.as_ref().is_some_and(|(t, ..)| t.as_deref().is_some_and(|t| t.starts_with('/')));
+                // 걸린 거름망이 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
+                let was = self.searching() || matches!(self.grep_was, Some((Some(Hung::Grep { .. }), _)));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
@@ -4398,10 +4547,9 @@ impl App {
                 // **커서도 열기 전 자리로 간다** — 검색 칸에서는 커서를 못 옮기니 되돌린 목록은 열기 전 그 목록이고,
                 // 그 번호가 열기 전 그 줄이다. 검색을 푸는 길(`after_search`)을 타면 치는 동안 커서 밑에 섰던
                 // 줄로 가 "안 한 것" 이 아니게 되고, 되돌린 거름망(`f`)이 가린 줄을 두고 보기에 가렸다고 댄다.
-                if let (Mode::Grep(..), Some((text, g, cursor))) = (&self.mode, self.grep_was.take()) {
+                if let (Mode::Grep(..), Some((hung, cursor))) = (&self.mode, self.grep_was.take()) {
                     let held = self.current().map(|r| self.anchor_of(&r));
-                    self.filter_text = text;
-                    self.grep_in = g;
+                    self.hung = hung;
                     self.reapply();
                     self.settle(held, cursor);
                 }
@@ -4901,6 +5049,11 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 걸린 거름망의 뱃지 글 — 화면이 그리는 그 글([`draw::badge`])이다.
+    fn badge(a: &App) -> Option<String> {
+        a.hung.as_ref().map(|h| draw::badge(h, a.site.lang))
     }
 
     fn make(id: &str, kind: Kind) -> Issue {
@@ -6323,11 +6476,11 @@ mod tests {
         }
 
         // Esc 는 메뉴를 닫는 것이 먼저다 — 걸어 둔 거름망은 안 푼다.
-        a.filter_text = Some("tag=x".into());
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
         a.key(key(KeyCode::Esc));
         assert!(!menu::open(&a.chord));
-        assert_eq!(a.filter_text.as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
-        a.filter_text = None;
+        assert_eq!(badge(&a).as_deref(), Some("tag=x"), "메뉴의 Esc 가 거름망까지 풀었다");
+        a.hung = None;
 
         // Bksp 는 한 층 위 — 뒤의 목록을 나가지 않는다.
         a.key(key(KeyCode::Enter));
@@ -7429,7 +7582,7 @@ mod tests {
         assert!(matches!(a.mode, Mode::Grep(..)));
         typed(&mut a, "0004");
         assert_eq!(a.mode, Mode::Browse);
-        assert_eq!(a.filter_text.as_deref(), Some("/0004"));
+        assert_eq!(badge(&a).as_deref(), Some("/0004"));
 
         // **뿌리에 그것을 품은 에픽이 서고, 걸린 줄이 그 밑에 딸려 선다**(moai-i5io) — 검색이
         // 맞힌 자리는 저절로 열린다. 들어가서 보는 목록도 같은 줄이다.
@@ -7449,11 +7602,11 @@ mod tests {
         for c in "0004".chars() {
             a.key(key(KeyCode::Char(c)));
         }
-        assert_eq!(a.filter_text.as_deref(), Some("/0004"), "치는 동안 안 걸렸다");
+        assert_eq!(badge(&a).as_deref(), Some("/0004"), "치는 동안 안 걸렸다");
         // 걸린 줄은 그것을 품은 에픽 밑에 딸려 선다(moai-i5io) — 셈은 여전히 걸린 줄 하나다.
         assert_eq!((shown(&a), a.hit_count()), (vec!["argos-0001".to_string(), "argos-0004".to_string()], 1));
         a.key(key(KeyCode::Esc));
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "Esc 가 열기 전 거름망을 못 돌렸다");
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"), "Esc 가 열기 전 거름망을 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
 
         // 붙여 넣은 글도 치는 것과 같이 거른다. 비우면 거름망이 없다.
@@ -7463,12 +7616,12 @@ mod tests {
         a.key(key(KeyCode::Backspace));
         a.key(key(KeyCode::Char('9')));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("/0009"));
+        assert_eq!(badge(&a).as_deref(), Some("/0009"));
         assert_eq!(a.grep_was, None, "Enter 로 건 뒤에도 되돌릴 자리를 들고 있다");
     }
 
-    /// **Tab·Shift-Tab 이 찾을 자리를 돈다**(moai-kojj) — 전체 → id → 제목 → 태그 → 본문. 좁힌 범위는
-    /// 뱃지에 `/<범위>:` 로 서고, 다시 읽어도 그 범위로 다시 건다(moai-fmmg).
+    /// **Tab·Shift-Tab 이 찾을 자리를 돈다**(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
+    /// 좁힌 범위는 뱃지에 `/<범위>:` 로 서고, 다시 읽어도 그 범위로 다시 건다(moai-fmmg).
     #[test]
     fn tab_turns_what_slash_searches_and_a_reread_keeps_it() {
         let mut a = app();
@@ -7479,22 +7632,44 @@ mod tests {
         }
         assert_eq!(shown(&a), ["argos-0009"], "전체가 태그를 안 봤다");
         let mut seen = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..6 {
             a.key(key(KeyCode::Tab));
             let Mode::Grep(_, g) = a.mode else { panic!("{:?}", a.mode) };
             seen.push((g, a.hit_count()));
         }
-        assert_eq!(seen, [(GrepIn::Id, 0), (GrepIn::Title, 0), (GrepIn::Tag, 1), (GrepIn::Body, 0), (GrepIn::All, 1)]);
+        assert_eq!(
+            seen,
+            [
+                (GrepIn::Id, 0),
+                (GrepIn::Title, 0),
+                (GrepIn::Tag, 1),
+                (GrepIn::Body, 0),
+                (GrepIn::Note, 0),
+                (GrepIn::All, 1)
+            ]
+        );
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert!(matches!(a.mode, Mode::Grep(_, GrepIn::Body)), "Shift-Tab 이 거꾸로 안 돌았다");
+        assert!(matches!(a.mode, Mode::Grep(_, GrepIn::Note)), "Shift-Tab 이 거꾸로 안 돌았다");
+        a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("/태그:pars"));
+        assert_eq!(badge(&a).as_deref(), Some("/태그:pars"));
         assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")));
 
         // 다시 읽기 — 뱃지 글이 아니라 들고 있는 범위로 다시 짓는다.
         a.reapply();
-        assert_eq!(a.filter_text.as_deref(), Some("/태그:pars"));
+        assert_eq!(badge(&a).as_deref(), Some("/태그:pars"));
+        assert_eq!(shown(&a), ["argos-0009"]);
+
+        // 칸을 다시 열어 치다가 Esc — 열기 전 범위까지 돌아온다(`grep_was` 가 [`Hung`] 째로 든다). 다시 연 칸은
+        // 전체 범위라, 범위를 빼고 들면 `/pars` 로 돌아와 줄은 같아도 걸린 범위가 바뀐다.
+        a.key(key(KeyCode::Char('/')));
+        for c in "zz".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(shown(&a).is_empty(), "시험의 전제 — 치는 동안 안 걸렸다");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")), "Esc 가 좁힌 범위를 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0009"]);
 
         // 거름망(`f`) 칸의 Tab 은 아무 일도 안 한다.
@@ -7509,7 +7684,7 @@ mod tests {
         let mut a = app();
         a.hit("SPC f");
         typed(&mut a, "type=epic");
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"));
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
 
         // 잘못 적으면 걸리지 않고 그 자리에 남는다 — 지우고 다시 치게 하지 않는다
@@ -7518,7 +7693,62 @@ mod tests {
         typed(&mut a, "statu=todo");
         assert!(matches!(a.mode, Mode::Filter(_)), "잘못 적었는데 넘어갔다");
         assert!(a.input_error().is_some());
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
+
+        // 그 거절문은 화면의 말로 선다(moai-2htt) — `query` 가 한국어로 박아 짓던 때는 영어 화면에도 한국어였다.
+        // **두 말로 다 잰다**(리뷰 moai-efoc.ln9) — 처음값이 영어라 영어만 재면 말을 박아 넣어도 푸르다.
+        for (lang, korean) in [(crate::i18n::Lang::En, false), (crate::i18n::Lang::Ko, true)] {
+            let mut a = app();
+            a.site.lang = lang;
+            a.hit("SPC f");
+            typed(&mut a, "statu=todo");
+            let said = a.input_error().expect("잘못 적었는데 거절문이 없다");
+            assert!(said.contains("`statu`"), "{said}");
+            assert_eq!(crate::hook::hangul(&said), korean, "{lang:?} 화면의 말로 안 섰다 — {said}");
+        }
+    }
+
+    /// **거름망의 거절문은 이 칸에 그대로 칠 글을 댄다**(moai-tckz). CLI 꼴(`-s todo,review`)을 대던 때는 그 글을
+    /// 옮겨 치면 `항목=값` 이 아니라고 다시 거절됐다. 댄 글을 그대로 쳐서 걸리는지까지 잰다.
+    #[test]
+    fn a_filter_refusal_offers_what_this_prompt_takes() {
+        for (bad, fix, rest) in [
+            ("status=todo status=review", "status=todo,review", ""),
+            ("status=review done=2026-01-01..", "status=review,done", " done=2026-01-01.."),
+        ] {
+            let mut a = app();
+            a.hit("SPC f");
+            typed(&mut a, bad);
+            assert!(matches!(a.mode, Mode::Filter(_)), "{bad} 가 걸렸다");
+            let said = a.input_error().expect("거절문이 없다");
+            assert!(said.contains(&format!("`{fix}`")), "{said}");
+            assert!(!said.contains("`-s"), "거름망에 CLI 꼴을 댔다 — {said}");
+
+            let again = format!("{fix}{rest}");
+            let mut a = app();
+            a.hit("SPC f");
+            typed(&mut a, &again);
+            assert_eq!(a.mode, Mode::Browse, "댄 글을 쳤는데 다시 거절했다 — {:?}", a.input_error());
+            assert_eq!(badge(&a).as_deref(), Some(again.as_str()));
+        }
+    }
+
+    /// **거름망의 날은 화면의 시간대로 재고, 시간대를 바꾸면 다시 건다**(moai-efoc, 리뷰 moai-efoc.ln9) — 서울의
+    /// 10-01 05:00 은 UTC 로 09-30 20:00 이다. 상세가 그 줄을 10-01 로 그리는 동안은 `created=2026-10-01` 에
+    /// 걸려야 하고, `SPC o t` 로 UTC 를 고르면 그 날에서 빠져야 한다 — 안 다시 걸면 상세는 새 시간대로 그리는데
+    /// 목록은 옛 시간대의 날로 남는다.
+    #[test]
+    fn a_filtered_day_is_the_screens_day_and_follows_a_new_zone() {
+        let mut dawn = make("argos-0009", Kind::Issue);
+        dawn.created_at = "2026-09-30T20:00:00Z".into();
+        let mut a = App::new(vec![make("argos-0001", Kind::Epic), dawn], cfg(), Path::new());
+        a.zone = crate::tz::Zone::fixed("T", 9 * 3600);
+        a.hit("SPC f");
+        typed(&mut a, "created=2026-10-01");
+        assert_eq!(shown(&a), ["argos-0009"], "화면의 시간대로 안 쟀다");
+        a.set_zone("UTC");
+        assert!(shown(&a).is_empty(), "시간대를 바꿨는데 거름망이 옛 날에 남았다 — {:?}", shown(&a));
+        assert_eq!(badge(&a).as_deref(), Some("created=2026-10-01"), "다시 걸다가 거름망을 풀었다");
     }
 
     /// **값에 빈칸이 들어간다.** 띄어쓰기로 죄다 쪼개면 `grep=원자적 쓰기` 를
@@ -7551,7 +7781,7 @@ mod tests {
         typed(&mut a, "status=in-progress");
         assert!(matches!(a.mode, Mode::Filter(_)), "오타인데 걸렸다");
         assert!(a.input_error().is_some_and(|e| e.contains("칸")), "{:?}", a.input_error());
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
     }
 
     /// raw mode 에서는 Ctrl-C 가 신호로 오지 않는다. **글을 받는 중에도** 받아야
@@ -7616,9 +7846,9 @@ mod tests {
         let mut a = app();
         a.key(key(KeyCode::Char('/')));
         typed(&mut a, "0004");
-        assert!(a.filter_text.is_some());
+        assert!(a.hung.is_some());
         a.key(key(KeyCode::Esc));
-        assert_eq!(a.filter_text, None);
+        assert_eq!(a.hung, None);
         assert!(!a.quit);
         assert_eq!(shown(&a).len(), 3);
     }
@@ -7756,7 +7986,7 @@ mod tests {
         let mut more = a.site.issues.clone();
         more.push(make("argos-0007", Kind::Epic));
         a.adopt(more);
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"));
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"));
         assert_eq!(shown(&a).len(), 3, "거름망이 새 자료에 다시 걸리지 않았다");
     }
 
@@ -8015,6 +8245,147 @@ mod tests {
         std::fs::write(&other, "{}\n").unwrap();
         settle(&mut a);
         assert_ne!(a.site.now, "읽기 전", "옆 스냅샷이 바뀐 것을 못 알아챘다");
+    }
+
+    /// 두 줄을 든 저장소와, 둘째 줄에만 노트 하나를 적은 저널(moai-wcy8). 노트는 저널에만 산다 — 스냅샷에는
+    /// 그 글자가 어디에도 없다.
+    fn noted(name: &str) -> (Scratch, Repo) {
+        let scratch = scratch(name);
+        let dir = scratch.path().to_path_buf();
+        let rows: Vec<String> = ["argos-0001", "argos-0002"]
+            .iter()
+            .map(|id| serde_json::to_string(&make(id, Kind::Issue)).unwrap() + "\n")
+            .collect();
+        std::fs::write(dir.join(".moai/issues.jsonl"), rows.concat()).unwrap();
+        std::fs::create_dir_all(dir.join(".moai/journal")).unwrap();
+        std::fs::write(journal_at(&dir, "raven"), note_line("raven", "argos-0002", "사용자 결정: 둘째 길")).unwrap();
+        (scratch, Repo::at(dir, cfg()))
+    }
+
+    /// 그 사람의 저널 파일 — 이름은 쓰는 쪽과 같은 자로 짓는다(`store::journal_file`).
+    fn journal_at(root: &std::path::Path, who: &str) -> std::path::PathBuf {
+        let email = crate::model::someone(who).email;
+        root.join(".moai/journal").join(crate::store::journal_file(&email).unwrap())
+    }
+
+    /// `moai note` 가 그 사람의 저널에 적는 한 줄.
+    fn note_line(who: &str, id: &str, text: &str) -> String {
+        let by = crate::model::someone(who);
+        serde_json::to_string(&crate::model::JournalEntry::note(id, text, "2026-09-30T00:00:00Z", &by)).unwrap() + "\n"
+    }
+
+    /// 그 파일 끝에 한 줄을 붙인다 — 없으면 새로 선다. 저널은 덧붙여 쓰는 파일이다.
+    fn append(path: &std::path::Path, line: &str) {
+        let had = std::fs::read_to_string(path).unwrap_or_default();
+        std::fs::write(path, had + line).unwrap();
+    }
+
+    /// 여는 길(`cmd::tui`)과 같은 몸으로 연다 — 적재는 노트를 안 읽는다([`Ground::notes`]).
+    fn opened(repo: Repo) -> App {
+        let stamp = stamp_of(&repo);
+        let load = repo.read().unwrap();
+        let (index, ground) = measure(&load.issues, &repo.config);
+        App::open(repo, load, index, ground, Path::new(), stamp)
+    }
+
+    /// **`/` 의 전체 범위는 저널의 노트까지 본다**(moai-wcy8.vip) — CLI `-g` 와 같은 자다. **노트는 노트를 보는
+    /// 거름망이 처음 걸릴 때 읽는다**(리뷰 moai-wcy8.rbj) — 여는 적재도, 노트를 안 보는 범위도 저널을 안 연다.
+    /// 다시 읽어 `Ground` 가 갈려도 걸린 검색이 새로 읽어 같은 답을 낸다.
+    #[test]
+    fn the_whole_search_reads_the_notes_when_it_first_looks() {
+        let (scratch, repo) = noted("notes-load");
+        let mut a = opened(repo);
+        assert!(a.site.ground.notes.is_none(), "여는 적재가 저널을 읽었다");
+        // 제목 범위로 찾으면 노트를 안 읽는다 — 범위를 먼저 돌린다(빈 칸의 Tab 은 거르지 않는다).
+        a.hit("/");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Tab));
+        for c in "둘째 길".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        assert!(matches!(a.mode, Mode::Grep(_, GrepIn::Title)), "{:?}", a.mode);
+        assert!(shown(&a).is_empty(), "{:?}", shown(&a));
+        assert!(a.site.ground.notes.is_none(), "노트를 안 보는 범위가 저널을 읽었다");
+        a.key(key(KeyCode::Esc));
+
+        search(&mut a, "둘째 길");
+        assert_eq!(shown(&a), ["argos-0002"], "전체 범위가 노트를 안 봤다");
+        a.key(key(KeyCode::Enter));
+        a.reload();
+        assert_eq!(shown(&a), ["argos-0002"], "다시 읽기가 노트를 떨궜다");
+        // 저널을 걷고 다시 읽으면 안 걸린다 — 위의 답이 저널에서 왔다는 방증이다.
+        std::fs::remove_file(journal_at(scratch.path(), "raven")).unwrap();
+        a.reload();
+        assert!(shown(&a).is_empty(), "저널 없이 걸렸다 — 시험이 노트를 재지 않는다");
+    }
+
+    /// **새 노트는 다시 읽을 까닭이다**(moai-wcy8.403) — `moai note` 는 스냅샷을 안 바꾼다. 적힌 파일에 이어
+    /// 붙인 노트도, 처음 쓰는 사람의 새 저널 파일도 알아챈다. 안 바뀌었으면 읽지 않고, **노트를 안 읽은 화면은
+    /// 저널을 안 잰다**(리뷰 moai-wcy8.rbj) — 노트를 안 쓰는 화면이 다시 읽을 까닭이 아니다.
+    ///
+    /// 디렉터리를 `File::open` 으로 열어 고친 때를 돌리는 길이 유닉스의 것이라 유닉스에서만 돈다.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_note_is_a_reason_to_reread() {
+        let (scratch, repo) = noted("notes-follow");
+        // 디렉터리의 고친 때를 옛날로 돌려 둔다 — 파일 시각은 거친 시계라, 바로 앞에서 만든 디렉터리에
+        // 같은 틈 안에 새 파일이 서면 고친 때가 안 바뀐 것처럼 보인다. 시험이 재려는 것은 그 틈이 아니다.
+        std::fs::File::open(scratch.join(".moai/journal")).unwrap().set_modified(std::time::UNIX_EPOCH).unwrap();
+        let mut a = opened(repo);
+        a.site.now = "읽기 전".into();
+        let mine = journal_at(scratch.path(), "raven");
+        append(&mine, &note_line("raven", "argos-0001", "첫째 문"));
+        settle(&mut a);
+        assert_eq!(a.site.now, "읽기 전", "노트를 안 읽은 화면이 저널을 보고 다시 읽었다");
+        search(&mut a, "셋째");
+        a.key(key(KeyCode::Enter));
+        assert!(shown(&a).is_empty(), "{:?}", shown(&a));
+        settle(&mut a);
+        assert_eq!(a.site.now, "읽기 전", "아무것도 안 바뀌었는데 다시 읽었다");
+
+        append(&mine, &note_line("raven", "argos-0001", "셋째 길"));
+        settle(&mut a);
+        assert_eq!(shown(&a), ["argos-0001"], "이어 붙인 노트를 못 알아챘다");
+
+        append(&journal_at(scratch.path(), "other"), &note_line("other", "argos-0002", "셋째 문"));
+        settle(&mut a);
+        assert_eq!(shown(&a), ["argos-0001", "argos-0002"], "처음 쓰는 사람의 저널 파일을 못 알아챘다");
+    }
+
+    /// **노트를 보는 검색이 걸린 채 다시 읽으면 노트는 읽는 스레드가 읽어 온다**(리뷰 moai-wcy8.rbj) — 들이는
+    /// 루프는 이미 든 노트를 다시 안 읽는다. 루프가 읽던 판은 다른 세션의 쓰기와 1분 시계마다 저널을 루프에서
+    /// 풀었다. 걸린 검색이 노트를 안 보면 스레드도 저널을 안 연다.
+    #[test]
+    fn the_reread_thread_reads_the_notes_only_for_a_search_that_sees_them() {
+        let (_scratch, repo) = noted("notes-thread");
+        let mut a = opened(repo);
+        let fresh_of = |a: &mut App| {
+            // 표식을 비워 다시 읽을 까닭을 세운다 — 무엇이 바뀌었는지는 이 시험의 몫이 아니다.
+            a.site.stamp = None;
+            a.follow();
+            let (rx, handle) = a.pending.take().expect("다시 읽기를 안 띄웠다");
+            let fresh = rx.recv().unwrap().unwrap();
+            handle.join().unwrap();
+            fresh
+        };
+        assert!(fresh_of(&mut a).ground.notes.is_none(), "걸린 것이 없는데 스레드가 저널을 열었다");
+
+        a.hit("/");
+        a.key(key(KeyCode::Tab));
+        a.key(key(KeyCode::Tab));
+        for c in "둘째".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.key(key(KeyCode::Enter));
+        assert!(fresh_of(&mut a).ground.notes.is_none(), "노트를 안 보는 범위인데 스레드가 저널을 열었다");
+        a.key(key(KeyCode::Esc));
+
+        search(&mut a, "둘째");
+        a.key(key(KeyCode::Enter));
+        let fresh = fresh_of(&mut a);
+        assert!(fresh.ground.notes.is_some(), "노트를 보는 검색이 걸렸는데 스레드가 노트를 안 읽어 왔다");
+        a.receive(Ok(fresh));
+        assert_eq!(shown(&a), ["argos-0002"], "스레드가 읽어 온 노트로 안 걸렸다");
     }
 
     /// **사람이 누른 갱신이 스레드의 늦은 결과에 덮이지 않는다.** 갱신을 부르기 전에
@@ -8495,7 +8866,7 @@ mod tests {
         assert_eq!(a.site.issues.len(), 2, "쓰기가 안 닿았다");
         assert_eq!((a.site.path.clone(), a.cursor), (path, cursor), "가려진 줄을 찾아 자리를 옮겼다");
         assert_eq!(on(&a).as_deref(), Some("argos-0001"));
-        assert_eq!(a.filter_text.as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
+        assert_eq!(badge(&a).as_deref(), Some("type=epic"), "거름망을 대신 풀었다");
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다"));
     }
 

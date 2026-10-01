@@ -181,7 +181,12 @@ no human-shaped output mixed in.
   cannot be picked up, with where to pick it up from.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
-  `stale` side by side, so a loser in a race reads `stale` and moves on.
+  `stale` side by side, so a loser in a race reads `stale` and moves on. The
+  one exception is a command whose `--json` is a bare array — the `moai show`
+  list and `moai show --removed`: a row or journal line it could not read is
+  named on stderr and the exit code is not 0, while stdout still carries the
+  whole array of what it could read. Valid JSON on stdout with a non-zero exit
+  is that partial answer; a failure prints no array.
 - **A value that cannot be absent is never absent.** `kind` and `priority` have
   defaults, and the snapshot leaves a default out so that one file-wide diff does
   not follow every release — but that silence is legible only to the writer, so
@@ -196,6 +201,103 @@ no human-shaped output mixed in.
 Nothing here is derived at read time from folding the journal, and `report` and
 `query` are pure functions over `&[Issue]` that print nothing. That is what makes
 a second surface — a TUI, a web view, your own tool — cheap to attach.
+
+### Taking the list out
+
+`moai show --json` is the list. The file is always read whole; what the flags
+below shrink is the output, and with it the tokens.
+
+- `--sort <key>` and `--reverse` pick the order — `priority` (the default),
+  `created`, `updated`, `status`, `assignee`, `title` or `id`. Ties in every
+  order fall to priority, then id.
+- `-n <count>` cuts the list, and `--after <id>` starts the next page after the
+  last id of the page before. The cursor is that row's value in the order, not
+  an offset, so rows other sessions create or remove meanwhile never shift a
+  page. A row whose place in the order changes between pages — the cursor row
+  or any other, a priority edit included — can repeat or be skipped; `--sort id`
+  is the one order no edit moves. The output stays a bare array — fewer rows
+  than `-n` means the list has ended.
+- `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
+  and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
+  a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
+  is an instant in UTC. Asking by time opens what the list hides by default —
+  done, deferred and ideas — since a row closed meanwhile changed too.
+- `-g` looks through the notes and move messages as well as the id, title, tags
+  and body.
+
+`--since` keys on each row's own stamp, so it is a list of rows written since a
+time, not a full change feed. It misses a removed row (`moai rm` leaves no row
+behind — `--removed` below lists those), a note (`moai note` writes the journal,
+not the row), a row whose derived value changed without a write of its own (a
+group's column, an inherited epic, milestone or deferral) and a row merged in
+from another branch with an older stamp. A stamp moai cannot read — fractional
+seconds or an offset left by a hand edit — falls in no time range, for
+`--created` and `--done` too.
+
+```sh
+# rows written since the last pass, a page at a time - keep the time the last
+# pass started, not the time it ended, less a few seconds (a write takes its
+# stamp before it waits up to 5s for the lock), and drop repeats by id
+moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --json
+moai show --since 2026-09-29T00:00:00Z --sort id -n 200 --after <last id> --json
+# and the issues removed since then, from the journal
+moai show --removed --since 2026-09-29T00:00:00Z --json
+```
+
+`moai show --removed` lists what `moai rm` took out, oldest first, as journal
+lines in the shape of `journal` in `moai show <id> --json` — each carries `ts`,
+`id` and `title`, and a field this build does not know is left out. Without
+`--since` it is the whole history. It lays that history out and holds it against
+nothing, so an id listed there may live again: created anew, or brought back
+with an older stamp that the list above misses — a restored snapshot, or the
+twin left when `moai rm` took one of two lines sharing an id. Before dropping an
+id from a copy, ask the snapshot: `moai show <id> --json` answers `not_found`
+for one that is gone. `--since` keys on the `rm` line's own stamp, so like the
+list above it misses a removal merged in from another branch with an older
+stamp, and nothing lists a removal whose journal line was never written — keep
+the full compare below. It reads the journal beside the tracker only (other
+worktrees are not overlaid), takes `--since` and no other filter, and leaves out
+`rm --line`, which removed an unreadable line rather than an issue. A journal
+file moai cannot read is skipped, named on stderr, and the exit code is not 0.
+The same goes for a journal line it cannot read that may have held a removal —
+one cut short by a full disk or a crash: the list still comes out, the line is
+named on stderr by file and line, and the exit code is not 0. With `--since`
+only a line whose own stamp falls in the range, or cannot be read, counts, so
+one old cut line does not fail every later pass. moai never rewrites the
+journal, so look at what the line held and then delete it by hand. A whole line
+that an older moai wrote straight onto a cut one is read back and listed.
+
+When a copy has to be complete, pull the whole list and compare it row by row:
+`moai show --all --json`, plus `moai idea show --all --json` since `--all` still
+leaves ideas out. An id missing from the new pull was removed.
+
+### SQL over the output
+
+There is no query language inside moai. The filters look at derived values — the
+column a group reads from its members, the epic a row inherits, a row eclipsed by
+a twin, a deferral handed down from a group — so SQL run on
+`.moai/issues.jsonl` itself gets those answers wrong. Run it on the `--json`
+output, where they are already worked out (`derived_status`, `derived_epic`).
+A key that can be absent stays absent — `derived_status` stands only on group
+rows — so name the columns you read:
+
+```sh
+# open work per epic - an epic or a milestone row is a group, not work
+moai show --type issue --json | jq -r 'group_by(.derived_epic) | .[] | "\(.[0].derived_epic // "none")\t\(length)"'
+
+# rows per column - a group stands in the column its members give it
+moai show --all --json | duckdb -c "
+  SELECT coalesce(derived_status, status) AS col, kind, count(*) AS n
+  FROM read_json('/dev/stdin', columns = {status: 'VARCHAR', derived_status: 'VARCHAR', kind: 'VARCHAR'})
+  GROUP BY ALL ORDER BY n DESC"
+
+# tokens per model, read from the `model:` note lines on each issue
+moai show --all --json | duckdb -c "
+  SELECT w.model, sum(w.tokens) AS tokens
+  FROM (SELECT unnest(work) AS w
+        FROM read_json('/dev/stdin', columns = {work: 'STRUCT(model VARCHAR, tokens BIGINT)[]'}))
+  GROUP BY ALL ORDER BY tokens DESC NULLS LAST"
+```
 
 ## Screen language
 

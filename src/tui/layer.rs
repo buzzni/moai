@@ -1308,16 +1308,20 @@ impl App {
         parked.path.clear();
         parked.remembered.clear();
         parked.expanded.clear();
-        // **거름망 마스크도 푼다**(리뷰). 아래에서 `filter_text` 를 비우므로 걸린 글은 사라지는데,
+        // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
         parked.keep = vec![true; parked.issues.len()];
+        // **읽은 노트도 두고 가지 않는다**(리뷰 moai-wcy8.rbj) — 노트는 그 프로젝트 안에서 노트를 보는 검색이
+        // 읽은 것인데(`Ground::read_notes`), 레이어에서는 `/` 가 안 서고 도로 들어가면 새로 읽는다. 두고 가면
+        // 그 줄이 다시 읽힐 때까지 글과 접은 글 두 벌(이 저장소에서 9MB)이 쓸 데 없이 남는다.
+        parked.ground.notes = None;
         if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
             && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
         {
             place.site = Some(parked);
         }
-        self.filter_text = None;
+        self.hung = None;
         // **보기는 돌리지 않는다**(moai-2bzp). 보기·정렬·열은 사람의 설정이라 사용자 설정에 적혀
         // 프로젝트를 옮겨도 이어진다 — 한때(moai-fmv5) 여기서 처음값으로 돌렸는데, 그러면 저장한
         // 보기가 층을 한 번 오갈 때마다 사라진다. 그때의 까닭(다른 프로젝트의 칸 이름이 뱃지에 남아
@@ -1339,6 +1343,8 @@ impl App {
         // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
         self.body = None;
+        // 펴 둔 걸린 노트 줄도 같다(리뷰 moai-wcy8.rbj, `draw::NoteHits`) — 노트는 본문보다 크다.
+        self.note_hits = None;
         self.detail.rewind();
     }
 
@@ -1891,7 +1897,7 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
+        assert_eq!(a.hung, Some(crate::tui::Hung::Filter { text: "status=in_progress".into(), grep: None }));
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -1900,7 +1906,7 @@ mod tests {
             "층에 올라왔는데 프로젝트의 줄이 남았다"
         );
         assert_eq!(a.current(), Some(Row::Project(0)), "떠난 프로젝트에 안 섰다");
-        assert_eq!(a.filter_text, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
+        assert_eq!(a.hung, None, "한 프로젝트에 건 거름망이 층까지 따라왔다");
 
         // **떠난 프로젝트는 펼쳐진 채로 선다**(moai-i0wd) — 그 밑에 그 줄이 서므로 다음 머리줄은
         // 한 칸 아래가 아니다. 아직 안 읽은 둘째 프로젝트는 머리줄만이라 맨 아랫줄이 그것이다.
@@ -3363,13 +3369,13 @@ mod tests {
             a.key(key(KeyCode::Char(c)));
         }
         a.key(key(KeyCode::Enter));
-        assert_eq!(a.filter_text.as_deref(), Some("status=in_progress"));
+        assert_eq!(a.hung, Some(crate::tui::Hung::Filter { text: "status=in_progress".into(), grep: None }));
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
 
         a.hit("2");
         assert_eq!(a.here(), Some(two), "2 가 둘째 프로젝트로 안 갔다");
-        assert_eq!(a.filter_text, None, "거름망이 옆 프로젝트로 따라왔다");
+        assert_eq!(a.hung, None, "거름망이 옆 프로젝트로 따라왔다");
         assert!(a.worktree, "끈 겹쳐 보기가 옆 프로젝트로 따라왔다");
     }
 

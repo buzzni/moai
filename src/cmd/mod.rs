@@ -117,7 +117,8 @@ impl Ctx {
     /// 화면에 얹을 시간대 — **아직 안 푼 채로** 준다(moai-s3i7). `view::Screen` 이 시각을 실제로
     /// 그릴 때에만 풀리므로, 화면을 짓기만 하고 시각을 안 그리는 `ready`·`prime`·`show`(목록)·
     /// `idea ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
-    /// 자리(`report::status` 의 기한 판정)는 여전히 [`Ctx::zone`] 으로 바로 푼다.
+    /// 자리(`report::status` 의 기한 판정, `show` 와 `show --removed` 의 날로 친 때 거르개 —
+    /// `query::Filter::needs_zone`)는 여전히 [`Ctx::zone`] 으로 바로 푼다 — 그 목록은 그때만 tzdb 를 만진다.
     pub fn clock(&self) -> &crate::tz::System {
         &self.zone
     }
@@ -335,25 +336,40 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
         return;
     }
     let at = path.display().to_string();
-    eprintln!("{}", fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
-    for e in errors.iter().take(5) {
+    tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
+    name_capped(lang, errors, |e| {
         // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
         // 모르고, 보드의 `duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서 온 글이라
         // 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
         let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
         let why = crate::text::one_line(&e.message);
-        eprintln!(
-            "{}",
-            fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
-        );
-    }
-    if errors.len() > 5 {
-        eprintln!("{}", fill(say(lang, "warn.unreadable_more"), &[("n", &(errors.len() - 5).to_string())]));
-    }
+        fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
+    });
     // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
     // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
     // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다.
-    eprintln!("{}", say(lang, "warn.unreadable_rm"));
+    tell(say(lang, "warn.unreadable_rm"));
+}
+
+/// 못 읽은 줄을 **다섯까지** 대고 나머지는 수로 접는다(`warn.unreadable_more`) — [`name_load_errors`] 와
+/// `show --removed` 의 못 푼 조각이 한 자로 자른다(리뷰). 둘로 두면 한쪽만 자르는 수가 바뀐다.
+pub(crate) fn name_capped<T>(lang: crate::i18n::Lang, items: &[T], one: impl Fn(&T) -> String) {
+    const SHOWN: usize = 5;
+    for x in items.iter().take(SHOWN) {
+        tell(&one(x));
+    }
+    if items.len() > SHOWN {
+        let more = (items.len() - SHOWN).to_string();
+        tell(&crate::i18n::fill(crate::i18n::say(lang, "warn.unreadable_more"), &[("n", &more)]));
+    }
+}
+
+/// stderr 에 한 줄 — **stderr 가 끊겨도 넘어지지 않는다**(리뷰). `eprintln!` 은 읽는 쪽이 사라진 파이프(EPIPE)
+/// 에서 패닉해, 이미 고른 답까지 못 내고 101 로 끝난다. `main` 의 끝 알림이 `writeln!` 의 실패를 버리는 것과
+/// 같은 자다.
+pub(crate) fn tell(line: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 pub fn run(mut cli: Cli) -> R<Vec<String>> {
@@ -365,7 +381,14 @@ pub fn run(mut cli: Cli) -> R<Vec<String>> {
     //
     // **한 줄뿐이다.** 정적 musl 판을 zoneinfo 없는 기계에 받으면 이 일이 **매 명령**에 나므로,
     // 고치는 법까지 늘어놓으면 그 기계에서는 모든 출력에 안내문이 한 뭉치씩 붙는다.
-    if let Some(why) = ctx.zone_trouble() {
+    //
+    // **`--json` 으로 넘어진 길에서는 안 댄다**(리뷰 moai-efoc.ln9) — 그 길의 stderr 는 기계의 것이라
+    // `main` 이 오류 객체 하나만 낸다(거기 적힌 "`--json` 은 빼고 댄다" 와 같은 까닭). 날로 친 때를 물은
+    // `show --since <날> --after <지운 id> --json` 이 시간대를 푼 뒤 넘어지던 자리다 — 그 앞에 사람 말 한 줄이
+    // 서면 `code` 로 가르던 고리가 파싱 실패를 만난다.
+    if let Some(why) = ctx.zone_trouble()
+        && !(ctx.json && out.is_err())
+    {
         eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
     }
     out
@@ -408,7 +431,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Link(a) => link::run(ctx, a),
         Cmd::Defer(a) => defer::run(ctx, a),
         Cmd::Read(a) => read::run(ctx, a),
-        Cmd::Ready(w) => ready::run(ctx, w.worktree),
+        Cmd::Ready(a) => ready::run(ctx, a.worktree.worktree, a.limit),
         Cmd::Prime(w) => prime::run(ctx, w.worktree),
         Cmd::Status(w) => status::run(ctx, w.worktree),
         Cmd::Tui(a) => tui::run(ctx, a),
@@ -417,7 +440,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, t, Kind::Idea),
+        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, *t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
     }
 }

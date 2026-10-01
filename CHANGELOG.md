@@ -10,6 +10,166 @@ next one. It does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-01
+
+### Added
+
+- **`moai show` takes the list out in pieces: `--sort`, `--reverse`, `-n` and
+  `--after <id>`.** An agent or a third-party UI reading `show --json` used to get
+  the whole list at once — 1.48MB on this repository — in the one fixed order.
+  `--sort` takes `priority` (the default), `created`, `updated`, `status`,
+  `assignee`, `title` or `id`, the same words the explorer writes to its config,
+  and `--reverse` turns the whole order around. `-n` cuts the list and `--after
+  <id>` starts the next page after the last id of the page before. The cursor is
+  that row's value in the order, not an offset, so rows other sessions create or
+  remove meanwhile never shift a page, and a cursor row that has since closed and
+  dropped out of the list still works. A row whose place in the order changes
+  between pages can repeat or be skipped — ties in every order fall to priority,
+  so a priority edit moves rows under `created` too — and `--sort id` is the one
+  order no edit moves. Lines that share one id, the twins a merge can leave,
+  stand together and a page never splits them. A cursor id that no row carries
+  any more is refused with `not_found` rather than starting over silently.
+  `--json` stays a bare array — fewer rows than `-n` means the list has ended —
+  and the human list names how many were cut and the command for the next page.
+  On one id and on `--tree` these flags are refused, not swallowed.
+
+- **`moai ready -n <count>`** cuts what is ready to pick. `held` and `outside`
+  stay whole — they say why the list is short — and the count at the top is the
+  number before the cut.
+
+- **`moai show --since <when>`, `--created <from>..<to>` and `--done
+  <from>..<to>` filter by time.** `--since` reads the row's own `updated_at`, so
+  the rows written since a time come back with one flag. A time is `YYYY-MM-DD`,
+  a day on your own clock — the time zone the screen and milestone deadlines use;
+  the end of a range takes the whole day — or `YYYY-MM-DDTHH:MM:SSZ`, an instant
+  in UTC. Either side of a range may be left open, and a single day stands for
+  that day. An empty value, a reversed range, a day or time that does not exist,
+  and `--done` with a `-s` that leaves out done are refused rather than answered
+  with nothing. Asking by time opens what the list hides by default — done,
+  deferred and ideas — because a row closed meanwhile changed too; `-s` and
+  `--type` narrow it again. `--done` looks at rows
+  standing in done now, at the time they last got there, so a reopened row is not
+  counted as closed and a group counts from the moment its last member got to
+  done. `--since` keys on each row's own stamp, so it misses a removed row, a
+  note (`moai note` writes the journal, not the row), a row whose derived value
+  changed without a write of its own and a row merged in with an older stamp —
+  for a complete copy, pull the whole list and compare.
+
+- **`moai show --removed [--since <when>]` lists the issues `moai rm` took out.**
+  A removed row leaves nothing for `--since` to find; its one trace is the
+  journal's `rm` line, and this lays those lines out oldest first — `--json` in
+  the shape of `journal` in `moai show <id> --json`, so each carries `ts`, `id`
+  and `title`. It is history, not state: nothing is held against the snapshot,
+  so an id listed there may live again, and `moai show <id>` says whether it
+  does. `--since` keys on the `rm` line's own stamp, so a removal merged in with
+  an older stamp is missed the way such a row is; the full compare stays the
+  complete answer. It reads the journal beside the tracker only, leaves out
+  `rm --line` (an unreadable line, not an issue), takes `--since` and no other
+  filter, and is refused under `moai <kind> show`. A journal line it cannot read
+  that may still hold a removal — one cut short by a full disk or a crash — is
+  named on stderr by file and line, and the run ends non-zero; the list still
+  comes out. Whether a cut line may hold a removal is read from the kind it
+  names itself, and with `--since` only a line stamped in the range, or with no
+  stamp left to read, counts, so one old cut line does not fail every later
+  pass. moai never rewrites the journal: once you have seen what the line held,
+  delete it by hand.
+
+### Changed
+
+- **`-g` looks through notes and move messages too.** A decision written only in
+  a `moai note`, or in the `-m` of a move, was invisible to `moai show -g`; on
+  this repository `show -g '사용자 결정' --all` goes from 85 rows to 254. The
+  journal is read only when `-g` is given, and `query` stays a pure function —
+  the command reads the notes and hands them in. The text a `moai rm --line`
+  kept is not a note. `moai tui`'s `/` looks through them too, in its whole
+  scope and in a notes scope at the end of the Tab cycle, and the detail shows
+  the note lines that matched. The explorer opens the journal only while such a
+  search, or a `grep=` filter, is applied: then every time it reads the tracker
+  again, and a note added on its own is also a reason to read again.
+
+- **The README says where SQL goes.** There is no query language inside moai: the
+  filters read values the file does not hold — a group's column, an inherited
+  epic — so SQL on `.moai/issues.jsonl` gets them wrong. A new section shows jq
+  and DuckDB run on the `--json` output instead, next to one on paging and
+  incremental sync.
+
+### Fixed
+
+- **A line written after a cut journal tail stands on its own line.** When the
+  journal ended without its newline — a full disk, or a write cut short — the
+  next line was glued onto the cut one and neither could be read, so a
+  `moai rm` made then vanished from `moai show --removed`. Appending now puts
+  the newline back first; the cut line stays as it was — the history skips it,
+  and `--removed` names it if it may have held a removal. A file moai may write
+  to but not read is appended to as before, without that check. The lines
+  `moai init` adds to `.gitignore` and `.gitattributes` go through the same
+  append. A whole line that an older moai already glued onto a cut one is read
+  back: the history, `-g`, `work` and `--removed` all see it again.
+
+- **A journal reached through a symbolic link is read once.** When a file under
+  `.moai/journal/`, or the old `.moai/journal.jsonl`, was a link to another
+  journal file — someone who changed their email linking the old
+  `<email>.jsonl` to the new one — both names were read, so every line in that
+  file stood twice in the history, `-g` and `--removed`, and `work` added its
+  tokens twice. Names that resolve to the same file are now read once, and a
+  line moai cannot read there is named by that file, not by the link. A hard
+  link still reads twice: it cannot be told apart from two files, and git
+  commits it as two.
+
+- **A hand-edited stamp no longer reaches the terminal.** A stamp moai cannot
+  read was printed as it stood, so an escape sequence or a newline in a journal
+  line's `ts`, or in a row's `created_at`, `updated_at`, `started_at` or
+  `done_at`, could repaint the screen from `moai show <id>`. Every stamp is now
+  folded onto one line with its control characters taken out. The history's
+  column names, kinds and names are folded the same way, so a newline in them
+  no longer draws a history line that was never written; notes and move
+  messages still keep their lines.
+
+- **A refused filter now speaks the language you picked.** `-s todo -s review`,
+  an unknown or malformed `--filter` item, a priority out of range and a
+  `stale=` that is not a number of days were refused in Korean even on the
+  default English screen, and the same Korean came out in the `error` of
+  `--json`. The list and the explorer's filter prompt now word these refusals in
+  the chosen language, and so do the new time filters and `show --removed`. On
+  the command line the command to type instead, such as `-s todo,review`, stands
+  as it was, except that a value the shell would split — an assignee's
+  `Name (email)` — now comes back quoted, and a third repeat (`-s todo -s review
+  -s done`) is no longer dropped from it. `type=` keeps the English sentence
+  `--type` gives.
+
+- **The explorer's filter prompt shows what to type instead, in its own form.**
+  The prompt was one row and drew only the first line of a refusal, so the
+  command to type instead — and the list of keys after an unknown one — never
+  showed; had it shown, it was the command line's `-s todo,review`, which the
+  prompt refuses again. While you write a filter (`SPC f`) the bottom now holds
+  two rows: the refusal stays beside what you typed, and the row above it offers
+  the prompt's own `status=todo,review`, `done=` and `status=review,done`. The
+  row stands even with nothing refused, so the list does not jump as you type.
+
+- **Times after a zone's last listed change follow the zone's own rule.** zic has
+  built zone files `-b slim` by default since 2020b, and a slim file stops listing
+  changes once the rule at its end can work them out — New York's last listed one
+  is March 2007. moai read the listed ones only, so on a machine with such files
+  every later time kept that last offset: New York drew January 2026 an hour off,
+  on daylight time, and a day typed into `--created`, `--since`, `--done` or the
+  explorer's `created=` picked its rows by the same clock. moai now reads that
+  rule, the POSIX TZ string at the end of the file, and follows it from its first
+  change after the last listed one, as tzcode's own reader does; a rule it cannot
+  read leaves the last listed offset in force, as before. A zone name that points
+  at a file which is not zone data, such as `TZ=leapseconds`, is now reported in
+  the language you picked rather than in Korean.
+
+- **The explorer's search scopes speak the language you picked, and a `grep=`
+  filter marks what it found.** On the English screen a narrowed search (`/`, then
+  Tab) was labelled `search·노트` and its badge read `/노트:…`; it now reads
+  `search·note` and `/note:…`. The names could not change before because the
+  explorer read the scope and the query back out of the badge text; it now holds
+  them apart and only draws the badge. A `grep=` typed into `SPC f` found its rows
+  but marked nothing, so a row caught by its body or only by a note showed no
+  reason in the detail; it now marks the matched text and draws the matching note
+  lines, as `/` does. It still leaves the view alone — only `/` brings back what
+  the view hides.
+
 ## [0.1.4] - 2026-09-29
 
 ### Added

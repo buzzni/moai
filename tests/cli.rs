@@ -2977,7 +2977,8 @@ fn journal_file(dir: &Path) -> PathBuf {
 /// 저널 전부 — 옛 한 파일과 `.moai/journal/` 의 파일을 이름 차례로 잇는다(moai-b7cq).
 ///
 /// **파일이 여럿인 것이 정상 꼴이라** 시험도 한 파일을 집지 않는다. 차례는 `Repo::journal_files`
-/// 와 같다: 옛 한 파일이 먼저, 그다음 이름 순.
+/// 와 같다: 옛 한 파일이 먼저, 그다음 이름 순. **링크로 이은 파일은 안 접는다** — `journal_files` 는 푼 자리가
+/// 같은 파일을 한 번만 읽지만(moai-p9mq) 이것은 이름마다 읽으니, 저널에 링크를 거는 시험은 이것으로 줄을 세지 않는다.
 fn journal(dir: &Path) -> String {
     let mut out = std::fs::read_to_string(dir.join(".moai/journal.jsonl")).unwrap_or_default();
     let mut split: Vec<PathBuf> = std::fs::read_dir(dir.join(".moai/journal"))
@@ -4539,6 +4540,567 @@ fn tree_is_refused_on_a_single_issue() {
     let out = moai(s.path(), &["show", &member, "--tree"]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--tree"));
+}
+
+/// 그 시각에 만든 이슈 하나의 id — 만든 때로 차례를 재는 시험이 쓴다. 부르는 자는 [`ok_at`] 이다 — 실패하면
+/// stdout 과 stderr 를 함께 댄다(`ok_env` 가 베껴 두지 말라는 까닭).
+fn add_at(dir: &Path, now: &str, args: &[&str]) -> String {
+    let mut v = vec!["add"];
+    v.extend_from_slice(args);
+    v.push("-q");
+    ok_at(dir, now, &v).trim().to_string()
+}
+
+/// **목록은 고른 차례로 서고 `--reverse` 는 통째로 뒤집는다**(moai-efoc.6sq). 기계와 사람이 같은 차례를
+/// 받고, 칸 차례는 묶음이 멤버에서 읽은 칸으로 잰다 — 탐색기와 같은 `query::order_by` 를 지난다.
+#[test]
+fn show_orders_the_list_by_the_key_it_is_given() {
+    let s = init("sorted");
+    let banana = add_at(s.path(), "2026-09-01T00:00:00Z", &["Banana", "-p", "2"]);
+    let apple = add_at(s.path(), "2026-09-02T00:00:00Z", &["apple", "-p", "1"]);
+    let cherry = add_at(s.path(), "2026-09-03T00:00:00Z", &["cherry", "-p", "2"]);
+    let epic = add_at(s.path(), "2026-09-04T00:00:00Z", &["묶음", "--type", "epic", "-p", "0"]);
+    let member = add_at(s.path(), "2026-09-05T00:00:00Z", &["멤버", "-e", &epic, "-p", "3"]);
+    ok(s.path(), &["mv", &member, "in_progress"]);
+    let order = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    // 같은 우선순위끼리는 id 로 가른다 — id 는 무작위라 시험이 제 손으로 가른다.
+    let by_id = |a: &str, b: &str| if a < b { [a.to_string(), b.to_string()] } else { [b.to_string(), a.to_string()] };
+    let [p2a, p2b] = by_id(&banana, &cherry);
+
+    assert_eq!(
+        order(&[]),
+        [epic.clone(), apple.clone(), p2a.clone(), p2b.clone(), member.clone()],
+        "기본 차례가 바뀌었다"
+    );
+    assert_eq!(order(&["--sort", "priority"]), order(&[]), "`priority` 가 기본 차례와 다르다");
+    assert_eq!(
+        order(&["--sort", "created"]),
+        [member.clone(), epic.clone(), cherry.clone(), apple.clone(), banana.clone()],
+        "새것이 위가 아니다"
+    );
+    assert_eq!(
+        order(&["--sort", "created", "--reverse"]),
+        [banana.clone(), apple.clone(), cherry.clone(), epic.clone(), member.clone()],
+        "`--reverse` 가 안 뒤집었다"
+    );
+    let mut ids = vec![banana.clone(), apple.clone(), cherry.clone(), epic.clone(), member.clone()];
+    ids.sort();
+    assert_eq!(order(&["--sort", "id"]), ids, "id 차례가 아니다");
+    // 대소문자를 접어 가나다 — 접지 않으면 `Banana` 가 `apple` 앞에 선다.
+    assert_eq!(order(&["--sort", "title"])[..3], [apple.clone(), banana.clone(), cherry.clone()], "제목 차례가 아니다");
+    // **묶음은 멤버에서 읽은 칸으로 선다** — 에픽 줄에 적힌 칸은 `todo` 지만 멤버가 집혀 `in_progress` 다.
+    // 적힌 칸으로 재면 p0 인 에픽이 `todo` 의 맨 앞에 선다.
+    assert_eq!(
+        order(&["--sort", "status"]),
+        [apple.clone(), p2a.clone(), p2b.clone(), epic.clone(), member.clone()],
+        "칸 차례가 묶음의 읽은 칸을 안 봤다"
+    );
+
+    // 사람 화면도 같은 차례다.
+    let human = ok(s.path(), &["show", "--sort", "title"]);
+    let at_of = |id: &str| human.find(id).unwrap_or_else(|| panic!("{id} 이 안 섰다 — {human}"));
+    assert!(at_of(&apple) < at_of(&banana) && at_of(&banana) < at_of(&cherry), "사람 화면의 차례가 다르다 — {human}");
+
+    // 트리에는 세울 차례가 없다 — 말없이 먹지 않고 그 이름을 대며 거절한다.
+    for flag in [&["--sort", "id"][..], &["--reverse"][..]] {
+        let mut args = vec!["show", "--tree"];
+        args.extend_from_slice(flag);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{flag:?} 를 트리에서 말없이 먹었다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(flag[0]), "{flag:?} 를 거절하며 이름을 안 짚었다");
+    }
+    assert!(!moai(s.path(), &["show", "--sort", "nope"]).status.success(), "모르는 차례를 받았다");
+
+    // **고친 때는 만든 때와 다른 차례다**(moai-efoc 리뷰) — 위의 줄들은 만든 차례와 고친 차례가 같아, 두
+    // 낱말을 바꿔 이어도 아무 시험도 안 붉어졌다. 가장 먼저 만든 줄을 가장 늦게 고친다.
+    ok_at(s.path(), "2026-09-20T00:00:00Z", &["edit", &banana, "--title", "Banana 고침"]);
+    assert_eq!(
+        order(&["--sort", "updated"]),
+        [banana.clone(), member.clone(), epic.clone(), cherry.clone(), apple.clone()],
+        "고친 차례가 아니다"
+    );
+}
+
+/// **쪽은 커서의 값으로 넘는다**(moai-efoc.ku7) — `-n` 으로 자르고 `--after <앞 쪽의 마지막 id>` 로
+/// 이어 받으면 빠지는 줄도 겹치는 줄도 없고, 그사이 앞 쪽의 줄이 지워져도 밀리지 않는다. `--json` 은
+/// 배열 그대로다 — 받은 수가 `-n` 보다 적으면 끝이다.
+#[test]
+fn show_pages_with_a_limit_and_a_cursor() {
+    let s = init("paged");
+    let mut ids: Vec<String> = (0..5).map(|n| add(s.path(), &[&format!("일 {n}")])).collect();
+    ids.sort();
+    let page = |extra: &[&str]| {
+        let mut args = vec!["show", "--sort", "id", "--json"];
+        args.extend_from_slice(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    assert_eq!(page(&["-n", "2"]), ids[..2], "첫 쪽");
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "둘째 쪽");
+    assert_eq!(page(&["-n", "2", "--after", &ids[3]]), ids[4..], "끝 쪽은 -n 보다 적다");
+    assert!(page(&["-n", "2", "--after", &ids[4]]).is_empty(), "끝을 넘은 쪽이 비지 않았다");
+    one_json_value(&ok(s.path(), &["show", "-n", "2", "--json"]));
+
+    // 사람 화면은 잘린 것을 세고 다음 쪽을 여는 명령을 댄다.
+    let human = ok(s.path(), &["show", "--sort", "id", "-n", "2"]);
+    assert!(human.contains("3건 더") && human.contains(&format!("--after {}", ids[1])), "다음 쪽을 안 댔다 — {human}");
+    assert!(!ok(s.path(), &["show", "--sort", "id"]).contains("건 더"), "안 자른 목록에 꼬리가 붙었다");
+
+    // 앞 쪽의 줄이 지워져도 다음 쪽은 밀리지 않는다 — offset 이면 ids[2] 를 놓친다.
+    ok(s.path(), &["rm", &ids[0]]);
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "지운 줄에 쪽이 밀렸다");
+    // 앞 쪽의 마지막 줄이 닫혀 목록에서 빠져도 그 값으로 넘는다.
+    ok(s.path(), &["mv", &ids[1], "done"]);
+    assert_eq!(page(&["-n", "2", "--after", &ids[1]]), ids[2..4], "숨은 커서 줄을 못 넘었다");
+
+    // 커서 줄이 아예 없으면 넘을 값이 없다 — 말없이 첫 쪽을 내지 않고 `not_found` 로 말한다.
+    let out = moai(s.path(), &["show", "--after", &ids[0], "--json"]);
+    assert!(!out.status.success(), "지운 커서로 무언가를 냈다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(r#""code":"not_found""#) && err.contains(&ids[0]), "{err}");
+
+    assert!(!moai(s.path(), &["show", "-n", "0"]).status.success(), "`-n 0` 을 받았다");
+    for flag in [&["-n", "2"][..], &["--after", &ids[2]][..]] {
+        let mut args = vec!["show", "--tree"];
+        args.extend_from_slice(flag);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{flag:?} 를 트리에서 말없이 먹었다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(flag[0]), "{flag:?} 를 거절하며 이름을 안 짚었다");
+    }
+}
+
+/// **한 id 의 줄은 한 덩어리로 넘는다**(moai-efoc 리뷰) — 머지가 남긴 쌍둥이가 차례에서 떨어져 서도, `--json`
+/// 으로 쪽을 넘기는 쪽은 줄마다 꼭 한 번 받고 끝난다. 뒷줄 하나로 넘던 때는 도구가 대 준 다음 쪽 명령이 사이의
+/// 줄을 건너뛰어 목록이 끝난 것으로 읽혔고, 쌍둥이의 자리가 바뀌면 같은 쪽을 끝없이 되받았다.
+#[test]
+fn show_pages_through_twin_lines_once() {
+    let s = init("twinpage");
+    let line = |id: &str, p: u8, title: &str| {
+        format!(
+            r#"{{"id":"{id}","title":"{title}","status":"todo","priority":{p},"created_at":"{NOW}","updated_at":"{NOW}","status_since":"{NOW}"}}"#
+        )
+    };
+    let rows = [
+        line("argos-aaaa", 1, "a first"),
+        line("argos-aaaa", 3, "a second"),
+        line("argos-bbbb", 2, "b"),
+        line("argos-cccc", 2, "c"),
+        line("argos-xxxx", 0, "x"),
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), rows.join("\n") + "\n").unwrap();
+    let titles = |json: &str| -> Vec<String> {
+        json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "title")).collect()
+    };
+    for sort in ["priority", "id"] {
+        for n in ["1", "2", "3"] {
+            let mut got: Vec<String> = Vec::new();
+            let mut after: Option<String> = None;
+            for round in 0.. {
+                assert!(round < 10, "--sort {sort} -n {n}: 쪽 넘기기가 안 끝났다 — {got:?}");
+                let mut args = vec!["show", "--sort", sort, "-n", n, "--json"];
+                if let Some(a) = &after {
+                    args.extend(["--after", a.as_str()]);
+                }
+                let json = ok(s.path(), &args);
+                let page = titles(&json);
+                got.extend(page.iter().cloned());
+                if page.len() < n.parse().unwrap() {
+                    break;
+                }
+                after = ids_in(&json).pop();
+            }
+            got.sort();
+            assert_eq!(got, ["a first", "a second", "b", "c", "x"], "--sort {sort} -n {n}: 줄을 잃거나 두 번 받았다");
+        }
+    }
+    // 사람 화면이 대는 다음 쪽 명령도 사이의 줄을 안 건너뛴다 — 쌍둥이는 앞 쪽에 함께 섰다.
+    let human = ok(s.path(), &["show", "-n", "2"]);
+    assert!(human.contains("--after argos-aaaa"), "{human}");
+    let next = ids_in(&ok(s.path(), &["show", "-n", "2", "--after", "argos-aaaa", "--json"]));
+    assert_eq!(next, ["argos-bbbb", "argos-cccc"], "다음 쪽이 사이의 줄을 건너뛰었다");
+}
+
+/// **때로 거른다**(moai-efoc.ip5) — `--since` 는 줄 자신의 `updated_at`, `--created`·`--done` 은 폭이다.
+/// 때로 물으면 기본 목록이 숨기는 줄(done·생각)도 열고, `--done` 은 지금 done 에 선 줄이 거기 든 때로
+/// 잰다 — 묶음이면 멤버가 마지막으로 done 에 든 때다.
+#[test]
+fn show_filters_by_time() {
+    let s = init("timed");
+    let old = add_at(s.path(), "2026-09-01T00:00:00Z", &["옛 일"]);
+    let closed = add_at(s.path(), "2026-09-02T00:00:00Z", &["닫을 일"]);
+    let epic = add_at(s.path(), "2026-09-02T00:00:00Z", &["묶음", "--type", "epic"]);
+    let member = add_at(s.path(), "2026-09-02T00:00:00Z", &["멤버", "-e", &epic]);
+    for id in [&closed, &member] {
+        ok_at(s.path(), "2026-09-05T00:00:00Z", &["mv", id, "done"]);
+    }
+    ok_at(s.path(), "2026-09-06T00:00:00Z", &["edit", &old, "--title", "옛 일 고침"]);
+    let idea = ok_at(s.path(), "2026-09-06T00:00:00Z", &["idea", "add", "생각", "-q"]).trim().to_string();
+    let picked = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        let mut v = ids_in(&ok(s.path(), &args));
+        v.sort();
+        v
+    };
+    let sorted = |ids: &[&String]| {
+        let mut v: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+        v.sort();
+        v
+    };
+    // 생각도 열린다 — 기본 목록은 그것을 숨긴다.
+    assert_eq!(picked(&["--since", "2026-09-06"]), sorted(&[&old, &idea]), "그날 바뀐 것이 아니다");
+    // 그사이 닫힌 줄도 바뀐 줄이다. 묶음 줄은 제 줄이 안 바뀌어 안 선다 — 멤버에서 읽은 칸은 줄의 값이 아니다.
+    assert_eq!(picked(&["--since", "2026-09-05"]), sorted(&[&old, &closed, &member, &idea]), "닫힌 줄을 놓쳤다");
+    assert_eq!(picked(&["--done", "2026-09-05"]), sorted(&[&closed, &epic, &member]), "묶음의 끝난 때를 못 쟀다");
+    assert_eq!(picked(&["--created", "2026-09-02"]), sorted(&[&closed, &epic, &member]), "그날 만든 것이 아니다");
+    assert_eq!(picked(&["--filter", "created=..2026-09-01"]), sorted(&[&old]), "`--filter` 가 안 먹었다");
+    // 다시 좁히는 것은 `-s` 다.
+    assert_eq!(picked(&["--since", "2026-09-05", "-s", "todo"]), sorted(&[&old, &idea]));
+    // 사람 화면도 같은 줄을 낸다.
+    let human = ok(s.path(), &["show", "--since", "2026-09-06"]);
+    assert!(human.contains(&old) && human.contains(&idea) && !human.contains(&closed), "{human}");
+
+    // 못 읽는 때는 조용히 0건을 내지 않는다. 때가 하나도 없는 값, 없는 날을 든 시각, done 이 빠진 `-s` 와
+    // 겹친 `--done` 도 그렇다 — 셋 다 말없이 `[]` 를 내던 자리다(moai-efoc 리뷰).
+    for bad in [
+        &["--since", "어제"][..],
+        &["--created", "2026-09-03..2026-09-02"][..],
+        &["--done", "2026-02-30"][..],
+        &["--since", ""][..],
+        &["--filter", "since="][..],
+        &["--created", "2026-09-31T00:00:00Z.."][..],
+        &["--done", "2026-09-05", "-s", "review"][..],
+    ] {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(bad);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_filter""#), "{bad:?}");
+    }
+    // done 이 든 `-s` 는 그대로 받는다.
+    assert_eq!(picked(&["--done", "2026-09-05", "-s", "done,review"]), sorted(&[&closed, &epic, &member]));
+}
+
+/// **지운 이슈는 저널에서 받는다**(moai-7dmq) — `--since` 는 줄 자신의 도장으로 거르므로 `rm` 이 지운 줄을
+/// 모른다. `--removed` 가 저널의 `rm` 줄을 `ts` 차례로 내고 `--since` 로 그때부터를 고른다. `--json` 은 봉투
+/// 없는 저널 줄 배열이다 — `show <id> --json` 의 `journal` 원소와 같은 꼴.
+#[test]
+fn show_removed_lists_what_rm_took_out() {
+    let s = init("removed");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let kept = add_at(s.path(), "2026-09-01T00:00:00Z", &["남길 일"]);
+    // 지운 차례와 id 차례를 거꾸로 세운다 — 차례가 `ts` 인지 id 인지 가른다.
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &second]);
+    ok_at(s.path(), "2026-09-07T00:00:00Z", &["rm", &first]);
+    ok_at(s.path(), "2026-09-08T00:00:00Z", &["note", &kept, "rm"]);
+    // 못 읽는 줄을 지운 `rm` 은 이슈를 지운 것이 아니다 — 제목이 없다(`JournalEntry::removed_line`).
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-09T00:00:00Z\",\"id\":\"{kept}\",\"kind\":\"rm\",\"by\":\"t\",\"by_email\":\"t@example.com\",\"note\":\"{{깨진\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    let ids = |json: &str| -> Vec<String> {
+        json.match_indices(r#""id":""#).map(|(at, _)| field(&json[at..], "id")).collect()
+    };
+
+    let all = ok(s.path(), &["show", "--removed", "--json"]);
+    assert_eq!(ids(&all), [second.as_str(), first.as_str()], "지운 이슈를 지운 차례로 안 냈다 — {all}");
+    assert!(all.starts_with("[{\"ts\":\"2026-09-05T00:00:00Z\""), "저널 줄 그대로가 아니다 — {all}");
+    assert!(all.contains("\"kind\":\"rm\"") && all.contains("\"title\":\"나중 지울 일\""), "{all}");
+    let since = ok(s.path(), &["show", "--removed", "--since", "2026-09-06T00:00:00Z", "--json"]);
+    assert_eq!(ids(&since), [first.as_str()], "`--since` 가 지운 때로 안 걸렀다 — {since}");
+    let sugar = ok(s.path(), &["show", "--removed", "--filter", "since=2026-09-06", "--json"]);
+    assert_eq!(ids(&sugar), [first.as_str()], "`--filter since=` 가 안 먹었다 — {sugar}");
+    assert_eq!(ok(s.path(), &["show", "--removed", "--since", "2026-09-10", "--json"]).trim(), "[]");
+    // 사람 화면도 같은 줄이다.
+    let human = ok(s.path(), &["show", "--removed"]);
+    assert!(human.contains(&first) && human.contains("먼저 지울 일") && human.contains(&second), "{human}");
+    assert!(!human.contains(&kept), "지운 이슈가 아닌 줄을 냈다 — {human}");
+
+    // **`--since` 말고는 안 받는다** — 거를 칸도 커서로 삼을 줄도 없다. 말없이 먹으면 걸러진 목록이라 믿는다.
+    // `ShowArgs`·`FilterArgs`·`PageArgs` 의 필드마다 하나씩이다(리뷰 — 아홉만 재던 자리다). 거절이 **그 이름을 제
+    // 자리에** 짚는지 본다: 말묶음의 `--removed`·`--since` 가 늘 서 있어, 글 어디엔가 있는지만 보면 `-s` 는 늘 참이다.
+    let named = |flag: &str| format!("`--removed` 에는 `{flag}` 를");
+    for bad in [
+        &["-s", "todo"][..],
+        &["-t", "bug"][..],
+        &["--no-tag", "bug"][..],
+        &["-e", "none"][..],
+        &["--milestone", "none"][..],
+        &["--parent", "none"][..],
+        &["-p", "1"][..],
+        &["-a", "none"][..],
+        &["--type", "issue"][..],
+        &["-g", "지울"][..],
+        &["--stale", "3"][..],
+        &["--created", "2026-09-01.."][..],
+        &["--done", "..2026-09-10"][..],
+        &["--deferred"][..],
+        &["--all"][..],
+        &["--filter", "status=todo"][..],
+        &["--sort", "id"][..],
+        &["--reverse"][..],
+        &["-n", "1"][..],
+        &["--after", kept.as_str()][..],
+        &["--worktree"][..],
+        &["--tree"][..],
+        &["--raw"][..],
+        &["--as-plan"][..],
+        &[kept.as_str()][..],
+    ] {
+        let mut args = vec!["show", "--removed", "--json"];
+        args.extend_from_slice(bad);
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains(r#""code":"bad_filter""#) && said.contains(&named(bad[0])), "{bad:?} — {said}");
+    }
+    // **`--filter` 의 항목은 목록과 같은 자가 읽는다**(`query::desugar`, 리뷰) — `=` 없는 항목과 없는 항목 이름은
+    // 목록이 대는 그 말로 거절하고, 빈 항목은 목록처럼 건너뛴다.
+    for (item, says) in [("since", "항목=값"), ("bogus=1", "`bogus` 라는 필터 항목이 없다")] {
+        let out = moai(s.path(), &["show", "--removed", "--filter", item, "--json"]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && said.contains(r#""code":"bad_filter""#) && said.contains(says),
+            "{item} — {said}"
+        );
+    }
+    assert_eq!(
+        ids(&ok(s.path(), &["show", "--removed", "--filter", " ", "--json"])),
+        [second.as_str(), first.as_str()]
+    );
+    let out = moai(s.path(), &["epic", "show", "--removed"]);
+    assert!(!out.status.success(), "종류 네임스페이스의 `--removed` 를 받았다");
+}
+
+/// **끊긴 저널 꼬리가 지움을 조용히 삼키지 않는다**(moai-a65c, moai-g8ho). 쓰는 쪽은 꼬리를 채운 뒤에 덧붙여
+/// 새 `rm` 줄을 제 줄에 세우고, 읽는 쪽은 이미 붙어 버린 줄(옛 바이너리가 쓴 것)을 파일과 줄 번호로 대며 0 이
+/// 아닌 코드로 끝난다. 목록은 그대로 낸다 — `--json` 을 읽는 기계는 코드로 덜 온 답인 줄 안다.
+#[test]
+fn a_torn_journal_tail_never_swallows_a_removal() {
+    let s = init("removed-torn");
+    let first = add_at(s.path(), "2026-09-01T00:00:00Z", &["먼저 지울 일"]);
+    let second = add_at(s.path(), "2026-09-01T00:00:00Z", &["나중 지울 일"]);
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(r#"{"ts":"2026-09-02T00:00:00Z","id":"x","kind":"no"#);
+    std::fs::write(&journal, &text).unwrap();
+    ok_at(s.path(), "2026-09-05T00:00:00Z", &["rm", &first]);
+    let listed = ok(s.path(), &["show", "--removed", "--json"]);
+    assert!(listed.contains(&format!("\"id\":\"{first}\"")), "끊긴 꼬리 뒤의 rm 이 빠졌다 — {listed}");
+
+    // 끊긴 꼬리에 붙은, 필드가 모자란 `rm` 줄이다 — 온전하면 되찾지만(아래 시험) 이것은 못 풀어 댄다.
+    let torn_at = std::fs::read_to_string(&journal).unwrap().lines().count() + 1;
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-06T00:00:00Z\",\"id\":\"x\",\"kind\":\"no{{\"ts\":\"2026-09-07T00:00:00Z\",\"id\":\"{second}\",\"kind\":\"rm\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    for json in [true, false] {
+        let args: &[&str] = if json { &["show", "--removed", "--json"] } else { &["show", "--removed"] };
+        let out = moai(s.path(), args);
+        let (listed, said) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!out.status.success(), "못 푼 rm 줄을 두고 0 으로 끝냈다 — {said}");
+        assert!(listed.contains(&first), "목록을 안 냈다 — {listed}");
+        let name = journal.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(said.contains(&format!("{name}:{torn_at}")), "못 푼 줄의 자리를 안 댔다 — {said}");
+    }
+}
+
+/// **`--since` 는 그 폭에 들었을 수 있는 조각만 대고, 붙은 줄의 온전한 쪽은 되찾는다**(moai-g8ho 리뷰). 오래전에
+/// 끊긴 줄 하나로 증분 받기가 부를 때마다 넘어지면, 도구 안에는 그 줄을 치울 길이 없어 받는 쪽이 영영 멈춘다.
+/// 옛 바이너리가 끊긴 줄 끝에 붙여 쓴 `rm` 은 온전한 줄이라 목록에 선다.
+#[test]
+fn a_torn_journal_line_fails_only_the_windows_it_could_fall_in() {
+    let s = init("removed-torn-window");
+    let gone = add_at(s.path(), "2026-09-01T00:00:00Z", &["되찾을 일"]);
+    let journal = journal_file(s.path());
+    let mut text = std::fs::read_to_string(&journal).unwrap();
+    // 9월 3일에 `"rm"` 을 다 적기 전에 끊긴 조각, 그리고 옛 바이너리가 끊긴 노트 끝에 붙여 쓴 온전한 `rm`.
+    text.push_str("{\"ts\":\"2026-09-03T00:00:00Z\",\"id\":\"argos-zzzz\",\"kind\":\"r\n");
+    text.push_str(&format!(
+        "{{\"ts\":\"2026-09-04T00:00:00Z\",\"id\":\"x\",\"kind\":\"no{{\"ts\":\"2026-09-05T00:00:00Z\",\"id\":\"{gone}\",\"kind\":\"rm\",\"by\":\"Tester\",\"title\":\"되찾을 일\"}}\n"
+    ));
+    std::fs::write(&journal, text).unwrap();
+    let listed = |since: Option<&str>| {
+        let mut args = vec!["show", "--removed", "--json"];
+        args.extend(since.map(|t| ["--since", t]).into_iter().flatten());
+        let out = moai(s.path(), &args);
+        let (stdout, said) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.success(), stdout.contains(&format!("\"id\":\"{gone}\"")), said.into_owned())
+    };
+    let (clean, found, said) = listed(None);
+    assert!(!clean && found, "`--since` 없이 끊긴 조각을 넘겼거나 붙은 rm 을 못 되찾았다 — {said}");
+    let (clean, found, said) = listed(Some("2026-09-04T00:00:00Z"));
+    assert!(clean && found, "폭 밖의 조각으로 증분 받기를 넘어뜨렸다 — {said}");
+    let (clean, _, said) = listed(Some("2026-09-02T00:00:00Z"));
+    assert!(!clean, "폭 안의 조각을 말없이 넘겼다 — {said}");
+}
+
+/// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 거절문을 한국어로 박아 지어, 아무것도
+/// 안 고른 기계(영어)의 화면과 `--json` 의 `error` 에도 한국어가 섰다. 목록과 `--removed` 가 같은 자로
+/// 거절하니 둘 다 잰다 — 고쳐 칠 명령은 말과 무관하게 그대로 선다.
+#[test]
+fn a_filter_refusal_speaks_the_chosen_language() {
+    let s = init("filterlang");
+    // `--removed` 는 거절하는 자리가 둘이다 — 항목을 가려내는 `desugar` 와 때를 읽는 `Filter::build`. 둘 다 잰다
+    // (리뷰 moai-efoc.ln9 — 앞의 것만 재던 시험은 뒤의 것이 말을 박아도 푸르렀다).
+    let cases: [(&[&str], &str); 5] = [
+        (&["show", "-s", "todo", "-s", "review"], "`-s todo,review`"),
+        (&["show", "--filter", "statu=todo"], "`statu`"),
+        (&["show", "--since", ".."], "`..`"),
+        (&["show", "--removed", "--filter", "since"], "`since`"),
+        (&["show", "--removed", "--since", "yesterday"], "`yesterday`"),
+    ];
+    for (args, names) in cases {
+        for json in [false, true] {
+            let mut args = args.to_vec();
+            if json {
+                args.push("--json");
+            }
+            for lang in [None, Some("en"), Some("ko")] {
+                let mut cmd = staged(&args);
+                with_lang(&mut cmd, lang);
+                let out = cmd.current_dir(s.path()).output().unwrap();
+                let err = String::from_utf8_lossy(&out.stderr);
+                assert!(!out.status.success(), "{args:?} 를 받았다 — {err}");
+                assert!(err.contains(names), "{args:?} ({lang:?}) 가 무엇을 거절했는지 안 댔다 — {err}");
+                assert!(!json || err.contains(r#""code":"bad_filter""#), "{args:?} — {err}");
+                assert_eq!(hangul(&err), lang == Some("ko"), "{args:?} ({lang:?}) 가 고른 말로 안 섰다 — {err}");
+            }
+        }
+    }
+}
+
+/// **`-g` 는 노트도 찾는다**(moai-efoc.zyc) — `moai note` 의 글과 칸 옮김의 `-m`. 결정이 노트에만 적힌
+/// 이슈가 `-g` 에 안 걸리던 자리다. 노트는 스냅샷이 아니라 저널에 있어 줄의 `--json` 에는 안 실린다.
+#[test]
+fn grep_finds_what_only_a_note_says() {
+    let s = init("grepnote");
+    let noted = add(s.path(), &["노트에 결정이 있다"]);
+    let moved = add(s.path(), &["옮기며 남겼다"]);
+    let plain = add(s.path(), &["아무 말 없다"]);
+    ok(s.path(), &["note", &noted, "사용자 결정: 둘째 길"]);
+    ok(s.path(), &["mv", &moved, "review", "-m", "둘째 길로 간다"]);
+    let found = |q: &str| {
+        let mut v = ids_in(&ok(s.path(), &["show", "-g", q, "--json"]));
+        v.sort();
+        v
+    };
+    let mut both = vec![noted.clone(), moved.clone()];
+    both.sort();
+    assert_eq!(found("둘째 길"), both, "노트나 `-m` 에만 적힌 말을 못 찾았다");
+    assert_eq!(found("사용자 결정"), std::slice::from_ref(&noted));
+    assert!(!found("둘째").contains(&plain));
+    // `--filter grep=` 도 같은 자리다.
+    assert_eq!(
+        ids_in(&ok(s.path(), &["show", "--filter", "grep=사용자 결정", "--json"])),
+        std::slice::from_ref(&noted)
+    );
+    // 사람 화면도 같은 줄을 낸다.
+    let human = ok(s.path(), &["show", "-g", "사용자 결정"]);
+    assert!(human.contains(&noted) && !human.contains(&moved), "{human}");
+    // 노트는 줄의 값이 아니다 — 목록의 `--json` 줄에 노트 글이 실리지 않는다.
+    assert!(!ok(s.path(), &["show", "-g", "사용자 결정", "--json"]).contains("둘째 길"), "노트 글이 줄에 실렸다");
+}
+
+/// **날로 친 때는 읽는 사람의 날이다**(moai-efoc, 2026-09-30 사용자 결정) — 서울의 10-01 05:00 에 만든 줄은
+/// 화면이 10-01 로 대므로 `--created 2026-10-01` 에 걸린다. `…Z` 로 친 때는 시간대가 안 옮긴다.
+#[test]
+fn a_bare_day_is_the_readers_day() {
+    let s = init("wallday");
+    let dawn = add_at(s.path(), "2026-09-30T20:00:00Z", &["서울의 새벽"]);
+    let picked = |tz: &str, created: &str| {
+        let out =
+            staged(&["show", "--created", created, "--json"]).current_dir(s.path()).env("TZ", tz).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        ids_in(&String::from_utf8_lossy(&out.stdout)).contains(&dawn)
+    };
+    assert!(picked("UTC", "2026-09-30") && !picked("UTC", "2026-10-01"), "UTC 에서는 09-30 이다");
+    assert!(picked("UTC", "2026-09-30T20:00:00Z"));
+    // **자료가 있는 기계에서만 잰다** — 기한 판정의 시험(moai-h2th)과 같은 까닭이다. 없는 기계에서는 UTC 로
+    // 떨어지므로 위의 줄이 답이고, 여기를 재면 "동작이 바뀐 것" 과 "자료가 없는 것" 을 못 가린다. 자료의 자리는
+    // 바이너리가 읽는 자리로 본다 — `TZDIR` 이 먼저다(`tz::zoneinfo`, 리뷰 moai-efoc.ln9).
+    let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+    let seoul = tzdb.join("Asia/Seoul").exists();
+    if seoul {
+        assert!(picked("Asia/Seoul", "2026-10-01"), "서울의 그날 만든 줄이 그날에 안 걸렸다");
+        assert!(!picked("Asia/Seoul", "2026-09-30"), "서울에서 전날에 걸렸다");
+        assert!(picked("Asia/Seoul", "2026-09-30T20:00:00Z"), "시각 끝을 시간대로 옮겼다");
+    }
+    // **지운 줄도 같은 날로 잰다**(`show --removed`, 리뷰 moai-efoc.ln9) — 목록과 한 자(`query::spans_hold`)를
+    // 지나도 시간대를 얹는 문은 명령에 따로 있어, 여기서 안 재면 그 문을 걷어도 푸르다.
+    ok_at(s.path(), "2026-09-30T20:00:00Z", &["rm", &dawn]);
+    let removed = |tz: &str, since: &str| {
+        let out = staged(&["show", "--removed", "--since", since, "--json"])
+            .current_dir(s.path())
+            .env("TZ", tz)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"id\":\"{dawn}\""))
+    };
+    assert!(removed("UTC", "2026-09-30") && !removed("UTC", "2026-10-01"), "UTC 에서는 09-30 에 지웠다");
+    if seoul {
+        assert!(removed("Asia/Seoul", "2026-10-01"), "서울의 그날 지운 줄이 그날에 안 걸렸다");
+    }
+    // **넘어진 `--json` 의 stderr 는 오류 객체 하나다**(리뷰 moai-efoc.ln9) — 날로 친 때가 시간대를 푼 뒤에
+    // 넘어져도(`--after` 가 지운 id) "시간대를 모른다" 는 사람 말이 그 앞에 서지 않는다. 못 푸는 이름을 주면
+    // 자료가 있든 없든 그 줄이 날 자리다.
+    let out = staged(&["show", "--since", "2026-09-30", "--after", &dawn, "--json"])
+        .current_dir(s.path())
+        .env("TZ", "Mars/Olympus")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "지운 커서를 받았다");
+    let err = String::from_utf8_lossy(&out.stderr);
+    one_json_value(&err);
+    assert!(err.contains(r#""code":"not_found""#), "{err}");
+}
+
+/// **`ready -n` 은 집을 것만 자른다**(moai-efoc.ku7) — 머리의 셈은 자르기 전의 수고, `held` 는 통째로다.
+#[test]
+fn ready_takes_a_limit_and_keeps_the_count() {
+    let s = init("readyn");
+    for n in 0..3 {
+        add(s.path(), &[&format!("일 {n}")]);
+    }
+    let json = ok(s.path(), &["ready", "-n", "1", "--json"]);
+    one_json_value(&json);
+    assert_eq!(ids_in(&json).len(), 1, "-n 1 인데 {json}");
+    assert!(json.contains(r#""held":["#), "held 키가 빠졌다 — {json}");
+    let human = ok(s.path(), &["ready", "-n", "1"]);
+    assert!(human.contains("집을 수 있는 일  3건") && human.contains("2건 더"), "셈이나 꼬리가 틀렸다 — {human}");
+    assert_eq!(ids_in(&ok(s.path(), &["ready", "--json"])).len(), 3, "-n 없이도 잘렸다");
+}
+
+/// **`ready -n` 은 한눈 보기에서도 프로젝트마다 자르고, 셈은 자르기 전의 수다**(moai-efoc 리뷰) — 저장소 안의
+/// `ready -n` 만 시험하던 동안에는 한눈 보기의 자르기나 그 셈(`view::Picks::more`)을 걷어도 아무 시험도 안
+/// 붉어졌다. 한 프로젝트의 일이 다른 프로젝트의 몫을 밀어내지 않는다.
+#[test]
+fn ready_limit_cuts_each_registered_project() {
+    let s = Scratch::new("readyn-overview");
+    let out = dir_in(&s, "out");
+    let a = init("readyn-a");
+    let b = init("readyn-b");
+    for n in 0..4 {
+        add(a.path(), &[&format!("일 {n}")]);
+    }
+    let lone = add(b.path(), &["하나"]);
+    let cfg = registry(&s, &[a.path(), b.path()]);
+    let json = ok_with(&out, &cfg, &["ready", "-n", "2", "--json"]);
+    one_json_value(&json);
+    let ids = ids_in(&json);
+    assert_eq!(ids.len(), 3, "넷은 둘로, 하나는 그대로여야 한다 — {json}");
+    assert!(ids.contains(&lone), "한 프로젝트의 일이 다른 프로젝트의 몫을 밀어냈다 — {json}");
+    let human = ok_with(&out, &cfg, &["ready", "-n", "2"]);
+    assert!(human.contains("프로젝트 2곳 · 5건"), "머리의 셈이 자른 뒤의 수다 — {human}");
+    assert!(human.contains("2건 더"), "잘린 둘을 안 셌다 — {human}");
 }
 
 // ── S4 — moai status ─────────────────────────────────────────────────
@@ -6167,6 +6729,7 @@ fn every_command_still_speaks_json() {
         vec!["prime", "--json"],
         vec!["show", "--json"],
         vec!["show", "--tree", "--json"],
+        vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["note", &id, "메모", "--json"],
@@ -6721,6 +7284,14 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["--filter", "status=todo"],
         vec!["--milestone", "없는것"],
         vec!["--tree"],
+        // **차례도 목록에서만 뜻이 있다**(moai-efoc) — `PageArgs` 의 필드마다 하나씩.
+        vec!["--sort", "id"],
+        vec!["--reverse"],
+        vec!["-n", "2"],
+        vec!["--after", "argos-0001"],
+        vec!["--since", "2026-09-01"],
+        vec!["--created", "2026-09-01.."],
+        vec!["--done", "..2026-09-01"],
     ] {
         let mut args = vec!["show", id.as_str()];
         args.extend(flag.iter().copied());
@@ -6732,6 +7303,13 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         let said = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(said.contains(flag[0]), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
     }
+    // **지운 줄을 늘어놓는 말도 목록의 것이다**(moai-7dmq). 다만 그 거절은 제 길(`show::removed`)에서 나고, 그 말에는
+    // `--removed` 가 늘 서 있다 — 위 고리에 두면 `said.contains("--removed")` 가 늘 참이라 아무것도 안 잰다(리뷰).
+    // 그래서 버린 것(펼칠 id)을 제 자리에 짚는지 본다.
+    let out = moai(s.path(), &["show", id.as_str(), "--removed"]);
+    assert!(!out.status.success(), "`--removed` 를 말없이 버렸다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains(&format!("`--removed` 에는 `{id}` 를")), "펼칠 id 를 안 짚었다 — {said}");
 }
 
 /// **트리는 모든 줄을 정확히 한 번 낸다.** 자리를 정하는 코드가 둘이면
