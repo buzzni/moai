@@ -117,7 +117,7 @@ const HEADER_LABEL_W: usize = HEADER_LABEL + 3;
 /// 좌우 여백. **`CURSOR` 에서 잰다** — 우측 패널의 여백도 이 값인데, 숫자를
 /// 따로 적어 두면 커서 글리프를 바꾼 날 두 패널이 말없이 갈라진다. 한쪽만
 /// 테두리에 붙으면 같은 화면에서 규칙이 둘이 되고, 붙은 쪽이 답답하게 읽힌다.
-fn left_gutter() -> usize {
+pub(in crate::tui) fn left_gutter() -> usize {
     crate::text::width(CURSOR)
 }
 
@@ -476,7 +476,7 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
 
 /// 통계 창이 차트를 세우려면 이만큼은 넓어야 한다(테두리와 좌우 여백을 뺀 안쪽 칸 수). 좁으면 차트 대신 `moai stats` 의 글로 떨어진다
 /// ([`crate::view::stats_overview`]) — 막대가 칸 두셋으로 눌리면 읽을 수 없고, 라벨과 수가 겹쳐 글자가 섞인다.
-const STATS_CHART_W: u16 = 48;
+pub(in crate::tui) const STATS_CHART_W: u16 = 48;
 
 /// 통계 창에서 둘을 나란히 세우려면(칸·우선순위) 이만큼은 넓어야 한다. 좁으면 위아래로 쌓는다.
 const STATS_SIDE_BY_SIDE_W: u16 = 72;
@@ -497,7 +497,8 @@ const STATS_FLOW_H: u16 = 9;
 /// `+`(만듦)·`✓`(닫음) 글리프와 범례 낱말로 갈린다.
 fn stats_window(f: &mut Frame, w: &mut super::stats::Window, at: Rect, lang: Lang) {
     f.render_widget(Clear, at);
-    let inner_w = at.width.saturating_sub(2) as usize;
+    // 제목은 테두리 줄에 서니 여백을 안 뺀다 — 안쪽 폭(`inner.width`)과 다르다.
+    let title_w = at.width.saturating_sub(2) as usize;
     // **좌우 여백은 상세와 한 자다**([`left_gutter`], moai-zhzz) — 머리 줄이 좌측 테두리에, 막대 곁의 수가 우측
     // 테두리에 붙어 있었다. 여백을 블록에 두어 `inner` 가 그 안쪽이 되니, 차트와 글을 가르는 폭([`STATS_CHART_W`])도
     // 수가 잘리지 않게 재는 폭([`stat_bars`])도 같은 안쪽 폭을 받는다.
@@ -506,7 +507,7 @@ fn stats_window(f: &mut Frame, w: &mut super::stats::Window, at: Rect, lang: Lan
         .border_type(BorderType::Thick)
         .border_style(from_anstyle(style::FOCUS))
         .padding(Padding::horizontal(left_gutter() as u16))
-        .title(clip(&stats_title(w, lang), inner_w));
+        .title(clip(&stats_title(w, lang), title_w));
     let inner = block.inner(at);
     f.render_widget(block, at);
     if inner.width == 0 || inner.height == 0 {
