@@ -2549,3 +2549,4 @@
 {"ts":"2026-10-01T16:18:49Z","id":"moai-irrj.6on","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T16:18:51Z","id":"moai-irrj.mhr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T16:18:52Z","id":"moai-irrj.ix7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T16:21:24Z","id":"moai-irrj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged in df901ac2, all members and the review closed; the one handed-on finding is idea moai-fpxd (drain queued mouse reports on quit)"}
