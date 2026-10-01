@@ -14,6 +14,10 @@ use super::{App, Mode, Pane, menu};
 use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
+/// 휠 한 칸에 가는 줄 수. 대개의 터미널·편집기가 그만큼 간다. **목록과 상세가 같은 걸음이다** — 칸마다
+/// 다르면 같은 손짓의 뜻이 마우스가 선 칸에 따라 바뀐다(`scroll::PAGE` 와 같은 까닭).
+pub const WHEEL: isize = 3;
+
 /// 지난 프레임이 그린 자리. **쓰는 곳은 `draw::screen` 하나다** — 여기는 읽기만 한다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Drawn {
@@ -36,15 +40,38 @@ impl App {
         if !self.mouse {
             return;
         }
-        match &self.mode {
-            // 메뉴가 열린 동안은 메뉴가 키를 기다린다 — 뒤의 칸을 누른 것으로 메뉴를 닫지 않는다.
-            Mode::Browse if !menu::open(&self.chord) => {}
-            _ => return,
-        }
         let at = Position::new(m.column, m.row);
-        if let MouseEventKind::Down(MouseButton::Left) = m.kind {
-            self.acted();
-            self.press(at);
+        let wheel = match m.kind {
+            MouseEventKind::ScrollUp => Some(-WHEEL),
+            MouseEventKind::ScrollDown => Some(WHEEL),
+            _ => None,
+        };
+        // **통계 창은 휠만 받는다**(사용자 결정 2026-10-01) — 목록·상세 자리를 통째로 덮은 창이라 그 위의 휠은
+        // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기고, 기다리던 `g` 는 버린다.
+        if let Mode::Stats(w) = &mut self.mode {
+            if let Some(by) = wheel
+                && self.drawn.body.contains(at)
+            {
+                self.notice = None;
+                w.chord.clear();
+                w.scroll.by(by);
+            }
+            return;
+        }
+        // 메뉴가 열린 동안은 메뉴가 키를 기다린다 — 뒤의 칸을 누른 것으로 메뉴를 닫지 않는다.
+        if self.mode != Mode::Browse || menu::open(&self.chord) {
+            return;
+        }
+        match (m.kind, wheel) {
+            (MouseEventKind::Down(MouseButton::Left), _) => {
+                self.acted();
+                self.press(at);
+            }
+            (_, Some(by)) => {
+                self.acted();
+                self.wheel(at, by);
+            }
+            _ => {}
         }
     }
 
@@ -78,6 +105,26 @@ impl App {
             }
         }
     }
+
+    /// 휠을 굴렸다. **마우스가 올라선 칸이 받는다** — 포커스는 안 옮긴다(사용자 결정 2026-10-01). 목록에
+    /// 서 있으면서 상세를 읽어 내려가는 손짓이 그것이고, 굴렸다고 포커스가 튀면 다음 `j` 가 엉뚱한 칸을
+    /// 움직인다.
+    ///
+    /// - 상세는 굴린다 — 끝과 첫 줄 밖으로는 안 나간다(`Scroll::by`)
+    /// - 목록은 **커서를** 옮긴다 — 커서가 없는 줄을 굴려 보이게만 하면 상세는 그대로라, 굴려서 찾은
+    ///   줄을 보려면 다시 눌러야 한다. 끝에서는 멈춘다(`scroll::cursor` 와 같다)
+    fn wheel(&mut self, at: Position, by: isize) {
+        let d = self.drawn;
+        if d.detail.is_some_and(|r| r.contains(at)) {
+            self.detail.by(by);
+            return;
+        }
+        if !d.list.contains(at) {
+            return;
+        }
+        let Some(last) = self.rows().len().checked_sub(1) else { return };
+        self.move_to(self.cursor.saturating_add_signed(by).min(last));
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +149,11 @@ mod tests {
 
     fn event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+    }
+
+    fn roll(a: &mut App, down: bool, column: u16, row: u16) {
+        let kind = if down { MouseEventKind::ScrollDown } else { MouseEventKind::ScrollUp };
+        a.mouse(event(kind, column, row));
     }
 
     fn click(a: &mut App, column: u16, row: u16) {
@@ -174,5 +226,59 @@ mod tests {
         assert_eq!((a.cursor, a.notice.as_deref()), (4, None), "알림이 안 걷혔다");
         a.hit("g");
         assert_eq!(a.cursor, 4, "누르기 앞의 g 와 뒤의 g 가 gg 로 이었다");
+    }
+
+    /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 목록 위에서는 커서가 세 줄씩
+    /// 가고 끝에서 멈춘다. 상세 위에서는 목록에 포커스가 선 채로 상세가 굴러, 다음 `j` 는 여전히 목록을
+    /// 움직인다.
+    #[test]
+    fn the_wheel_moves_the_pane_under_the_pointer_and_leaves_the_focus() {
+        let mut a = drawn(5, 100, 20);
+        a.site.issues[0].body = Some((1..=80).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n\n"));
+        super::super::draw::tests::render(&mut a, 100, 20);
+        let (lx, ly) = middle(a.drawn.list);
+        let (dx, dy) = middle(a.drawn.detail.expect("상세가 안 섰다"));
+
+        roll(&mut a, true, dx, dy);
+        assert_eq!((a.focus, a.cursor, a.detail.offset()), (Pane::Explorer, 0, 3), "상세가 세 줄 안 굴렀다");
+        roll(&mut a, false, dx, dy);
+        roll(&mut a, false, dx, dy);
+        assert_eq!(a.detail.offset(), 0, "첫 줄 위로 굴렀다");
+        a.hit("j");
+        assert_eq!(a.cursor, 1, "휠이 포커스를 옮겼다");
+
+        roll(&mut a, true, lx, ly);
+        assert_eq!(a.cursor, 4, "목록 위의 휠이 커서를 세 줄 안 옮겼다");
+        roll(&mut a, true, lx, ly);
+        assert_eq!(a.cursor, 4, "끝을 지났다");
+        roll(&mut a, false, lx, ly);
+        assert_eq!(a.cursor, 1);
+        roll(&mut a, false, lx, ly);
+        assert_eq!(a.cursor, 0, "첫 줄 위로 갔다");
+    }
+
+    /// **통계 창 위의 휠은 창을 굴린다**(사용자 결정 2026-10-01) — 키(`j`·`k`)가 옮기는 그 자리다. 덮인 목록은
+    /// 안 움직인다. 고르는 창처럼 키로만 다루는 창 위에서는 휠도 아무것도 안 한다.
+    #[test]
+    fn the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker() {
+        let mut a = drawn(30, 100, 12);
+        a.hit("SPC p s");
+        super::super::draw::tests::render(&mut a, 100, 12);
+        let (bx, by) = middle(a.drawn.body);
+        let at = |a: &App| match &a.mode {
+            Mode::Stats(w) => w.scroll.offset(),
+            other => panic!("통계 창이 안 열렸다: {other:?}"),
+        };
+        roll(&mut a, true, bx, by);
+        assert_eq!((at(&a), a.cursor), (3, 0), "휠이 통계 창을 안 굴렸다");
+        roll(&mut a, false, bx, by);
+        assert_eq!(at(&a), 0);
+
+        a.hit("Esc SPC o t");
+        let Mode::Zone(z) = &a.mode else { panic!("시간대 고르는 창이 안 열렸다: {:?}", a.mode) };
+        let before = (z.cursor, z.list.offset());
+        roll(&mut a, true, bx, by);
+        let Mode::Zone(z) = &a.mode else { panic!("휠이 고르는 창을 닫았다") };
+        assert_eq!(((z.cursor, z.list.offset()), a.cursor), (before, 0), "고르는 창 위의 휠이 무언가 움직였다");
     }
 }
