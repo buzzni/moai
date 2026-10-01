@@ -2431,3 +2431,4 @@
 {"ts":"2026-10-01T04:22:07Z","id":"moai-karj.8zm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=122538 (high — 체크아웃 밖 저널 링크 리뷰)"}
 {"ts":"2026-10-01T04:22:07Z","id":"moai-karj.8zm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 2번(연 손잡이 크기까지만 읽기), 3번(.git 으로 가는 링크 거절). 넘긴 것: 1번은 idea moai-sxwq, 4·5번은 idea moai-wd0o"}
 {"ts":"2026-10-01T04:22:19Z","id":"moai-xd7b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T04:24:31Z","id":"moai-karj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
