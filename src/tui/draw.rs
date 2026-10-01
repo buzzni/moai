@@ -132,6 +132,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     ])
     .areas(area);
     let (left, right) = split_body(body, app);
+    // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 뒤에 채운다(`list`).
+    app.drawn = super::mouse::Drawn { body, list: left, rows: Rect::default(), detail: right };
     // **안 선 칸에는 포커스가 못 선다**(리뷰, moai-l7e2). 세로로 접힌 상세는 `detail_open` 이 켜진
     // 채로 자리가 없다 — 그대로 두면 `Ctrl-w w` 가 안 그려진 칸으로 가고, 거기서 ↑↓ 는 보이지 않는
     // 글을 굴려 목록이 멈춘 것처럼 보인다. 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은
@@ -1792,6 +1794,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         f.render_widget(Paragraph::new(names_line(common, cols, tallied, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
+    app.drawn.rows = list_at;
     if let Some(at) = selected {
         app.list.reveal(at);
     }
