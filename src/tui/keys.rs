@@ -339,6 +339,9 @@ pub enum Browse {
     /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
     /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Timezone,
+    /// 마우스를 잡고 놓는다 — `SPC o m`(moai-irrj.9xq). 잡으면 누르기·휠·칸 끌기가 듣고, 터미널의
+    /// 끌어서 글 고르기는 Shift 를 눌러야 된다. 놓으면 거꾸로다 — 고르는 사람이 그 값을 정한다.
+    Mouse,
     /// 이 줄을 읽음으로(moai-z9pc). 바로 누르는 `r` 이다 — 가장 자주 하는 것이라.
     Read,
     /// 이 프로젝트의 안 읽은 것 전부. **보이는 줄만이 아니다** — 거름망·칸 숨김·지금 디렉터리와
@@ -625,6 +628,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 바꾸면 그건 설정이 아니라 마이그레이션이다.
         row!(DetailAt, Some("SPC o d"), LEADER, Key::plain('o'), Key::plain('d')),
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
+        // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
+        row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
     ]
 };
 
@@ -672,6 +677,8 @@ pub struct Ctx {
     pub deferred_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
+    /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
+    pub mouse: bool,
     /// 고른 차례와 그 방향.
     pub sorting: Sorting,
     /// 켜 둔 목록 열.
@@ -830,6 +837,8 @@ impl Browse {
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
             Browse::DetailAt => Some(c.detail_at.word(c.lang)),
+            Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on")),
+            Browse::Mouse => Some(say(c.lang, "tui.state.off")),
             _ => None,
         }
     }
@@ -845,7 +854,7 @@ impl Browse {
     /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
     pub fn stateful(self) -> bool {
         use Browse::*;
-        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt)
+        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt | Mouse)
     }
 
     /// **목록을 움직이는 동작인가** — 줄·쪽·맨 위아래·펼침·접기(moai-y8v2, 사용자 결정). 열린
@@ -899,6 +908,7 @@ impl Browse {
             Detail => say(c.lang, "tui.act.detail"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             Timezone => say(c.lang, "tui.act.timezone"),
+            Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
         }
     }

@@ -199,6 +199,8 @@ pub enum Want {
     Word,
     /// 낱말 배열
     Words,
+    /// 정수 — 목록이 가져가는 몫(`list_width`·`list_height`, moai-irrj.mhr)
+    Number,
 }
 
 /// 설정을 읽다 만난 것([`Registry::problems`], moai-aiid) — **말이 아니라 자료다**
@@ -1017,6 +1019,9 @@ impl Doc {
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
             detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
             timezone: look_one(t, TIMEZONE, Want::Word, word, &mut problems),
+            mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
+            list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
+            list_height: look_one(t, LIST_HEIGHT, Want::Number, Item::as_integer, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
         // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
@@ -1077,6 +1082,9 @@ impl Doc {
         let mut detail = base.detail != new.detail;
         let mut detail_at = base.detail_at != new.detail_at;
         let mut timezone = base.timezone != new.timezone;
+        let mut mouse = base.mouse != new.mouse;
+        let mut list_width = base.list_width != new.list_width;
+        let mut list_height = base.list_height != new.list_height;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
         // 적어 둔 것인지 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다).
@@ -1120,6 +1128,9 @@ impl Doc {
         odd(&[DETAIL], false, &mut detail);
         odd(&[DETAIL_AT], false, &mut detail_at);
         odd(&[TIMEZONE], false, &mut timezone);
+        odd(&[MOUSE], false, &mut mouse);
+        odd(&[LIST_WIDTH], false, &mut list_width);
+        odd(&[LIST_HEIGHT], false, &mut list_height);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
         let mut left = String::new();
@@ -1152,6 +1163,15 @@ impl Doc {
         }
         if timezone {
             changed |= put_value(t, TIMEZONE, new.timezone.as_deref().map(toml_edit::Value::from), &mut left);
+        }
+        if mouse {
+            changed |= put_value(t, MOUSE, new.mouse.map(toml_edit::Value::from), &mut left);
+        }
+        if list_width {
+            changed |= put_value(t, LIST_WIDTH, new.list_width.map(toml_edit::Value::from), &mut left);
+        }
+        if list_height {
+            changed |= put_value(t, LIST_HEIGHT, new.list_height.map(toml_edit::Value::from), &mut left);
         }
         self.dirty |= changed;
         // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij).
@@ -1197,6 +1217,11 @@ const DETAIL_AT: &str = "detail_at";
 /// 안 읽고 시스템(`TZ`·`/etc/localtime`)을 그대로 따른다. 고르는 자리가 탐색기 하나(`SPC o t`)고,
 /// 고른 적 없으면 두 표면이 같은 시계로 선다.
 const TIMEZONE: &str = "timezone";
+/// 탐색기가 마우스를 잡는가(moai-irrj.9xq). 보는 사람의 손에 매인 것이라 `[tui]` 에 산다.
+const MOUSE: &str = "mouse";
+/// 목록이 가져가는 몫(%) — 좌우로 가를 때의 폭과 위아래로 가를 때의 높이(moai-irrj.mhr). 칸 사이 선을 끌어 정한다.
+const LIST_WIDTH: &str = "list_width";
+const LIST_HEIGHT: &str = "list_height";
 const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
@@ -1215,6 +1240,10 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// fields = ["id", "priority", "tally", "assignee"]
 /// # 적는 쪽이 아는 열 전부 — 바이너리를 따라 자란다. `fields_known = []` 의 뜻을 얼린 목록과 다른 목록이다.
 /// fields_known = ["id", "priority", "assignee", "created", "updated", "tally", "tags", "names", "branch"]
+/// mouse = true
+/// # 목록이 가져가는 몫(%) — 칸 사이 선을 끈 적이 있을 때만 선다.
+/// list_width = 55
+/// list_height = 70
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
@@ -1253,6 +1282,16 @@ pub struct Look {
     /// 떨어지며 한 줄로 알리고(moai-77ap) 이 줄은 그대로 둔다 — 읽기는 관대하고, 받은 기계에
     /// zoneinfo 가 없다고 사람이 고른 이름을 지우면 그 설정을 되살릴 길이 도구 밖에만 남는다.
     pub timezone: Option<String>,
+    /// 탐색기가 마우스를 잡는가(moai-irrj.9xq). 없으면 잡는다 — 잡으면 터미널의 끌어서 글 고르기가
+    /// Shift 를 눌러야 되므로, 그것이 더 아쉬운 사람이 `SPC o m` 으로 끈 값이 여기 남는다.
+    pub mouse: Option<bool>,
+    /// 상세가 좌우에 설 때 목록이 가져가는 폭의 몫(%) — 칸 사이 선을 끌어 정한다(moai-irrj.mhr). **끈 적 없으면
+    /// 안 적힌다**: 처음값을 설정에 박으면 처음값을 고치는 날 끌어 본 적 없는 사람까지 옛 몫에 묶인다
+    /// ([`Look::timezone`] 을 고른 적 없으면 안 적는 것과 같은 결). 범위 밖의 수는 탐색기가 끝으로 당긴다.
+    pub list_width: Option<i64>,
+    /// 상세가 위아래에 설 때 목록이 가져가는 높이의 몫(%). [`Look::list_width`] 와 **따로다** — 폭의 몫을 높이에
+    /// 그대로 쓰면 상세가 화면을 반 넘게 먹는다(`draw::ABOVE` 가 `draw::LEFT` 와 따로인 까닭).
+    pub list_height: Option<i64>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
@@ -1379,6 +1418,9 @@ pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: to
         let same = match (old, &v) {
             (toml_edit::Value::String(a), toml_edit::Value::String(b)) => a.value() == b.value(),
             (toml_edit::Value::Boolean(a), toml_edit::Value::Boolean(b)) => a.value() == b.value(),
+            // 목록의 몫(`list_width`·`list_height`, moai-irrj.mhr)이 처음 든 수다 — 없으면 같은 몫을 다시 적어도
+            // 파일을 다시 쓴다.
+            (toml_edit::Value::Integer(a), toml_edit::Value::Integer(b)) => a.value() == b.value(),
             _ => false,
         };
         if same {
@@ -3054,6 +3096,9 @@ mod tests {
             detail: Some(false),
             detail_at: Some("bottom".into()),
             timezone: Some("Asia/Seoul".into()),
+            mouse: Some(false),
+            list_width: Some(40),
+            list_height: Some(60),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -3307,6 +3352,9 @@ mod tests {
             detail: Some(true),
             detail_at: None,
             timezone: None,
+            mouse: None,
+            list_width: None,
+            list_height: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };

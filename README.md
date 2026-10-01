@@ -124,6 +124,12 @@ moai idea promote <id> --from -      # opens it into an epic and issues
 Work you have decided not to do *right now* is deferred, not closed. `moai defer
 <id> --undo` brings the same line back, in the same column, with the same kind.
 
+`moai tui` walks the same tracker on one screen — the list on one side, the
+issue under the cursor on the other. It answers keys and the mouse alike: click
+a pane or a row, roll the wheel over the pane you want to move, drag the line
+between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
+lets the mouse go when you would rather select or paste with it in the terminal.
+
 ## Working in parallel
 
 Several sessions in one repository is the normal case, not the exception.

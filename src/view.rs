@@ -3202,6 +3202,7 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
         Want::Bool => say(lang, "look.want_bool"),
         Want::Word => say(lang, "look.want_word"),
         Want::Words => say(lang, "look.want_words"),
+        Want::Number => say(lang, "look.want_number"),
     };
     match why {
         LookTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", TUI), ("found", found)]),

@@ -337,14 +337,16 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 화면만 걷으므로, 안 걸면 패닉 뒤 사용자 셸에 붙인 글이 `200~…201~` 에 싸여 들어간다.
     // 훅은 `try_init` **뒤에** 건다 — 그래야 끄기가 ratatui 의 복구를 감싸 먼저 돈다. 켜기를
     // 못 해도 멈추지 않는다: 붙여넣기가 옛날처럼 키로 올 뿐이다.
-    paste_off_on_panic();
-    let _ = bracketed_paste(&mut std::io::stdout(), true);
+    modes_off_on_panic();
+    // **마우스도 같은 두 길로 끈다**(moai-irrj.9xq) — 안 끄고 나가면 셸에서 마우스를 움직이거나 누를
+    // 때마다 `^[[<0;12;5M` 같은 글이 프롬프트에 찍힌다. 놓아 둔 사람(`SPC o m`)에게는 켜지 않는다.
+    modes_on(app.wants_mouse());
     // **패닉으로 끝나도 여기서 걷는다**(moai-46xe). 다시 읽기 스레드의 패닉은 루프가 `resume_unwind`
     // 로 되던지는데 그것은 훅을 안 지난다 — 훅이 이미 걷은 터미널을 편집기에서 돌아오며 다시
     // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
     // 글은 그 뒤에도 루프가 그린 한 프레임에 덮였을 수 있다.
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
-    let _ = bracketed_paste(&mut std::io::stdout(), false);
+    modes_off();
     ratatui::restore();
     // 오류·패닉으로 끝났으면 폼에 남은 글부터 건진다 — 터미널을 걷은 **뒤라** 그 말이 셸에 보이고,
     // 패닉을 되던지기 **전이라** 남길 기회가 있다(moai-y3r7).
@@ -482,10 +484,12 @@ const LOST: &str = "lost";
 
 use crate::tui::App;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, Event, KeyEventKind, MouseEventKind,
+};
 
 /// bracketed paste 를 켜거나 끈다 — xterm 의 2004 번. 쓰는 곳을 받는 것은 시험이 그 글을
-/// 보려고서다([`paste_off_on_panic`] 이 같은 글을 낸다).
+/// 보려고서다([`modes_off_on_panic`] 이 같은 글을 낸다).
 fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
     if on {
         ratatui::crossterm::execute!(out, EnableBracketedPaste)
@@ -494,15 +498,52 @@ fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<(
     }
 }
 
-/// 패닉하면 **먼저 bracketed paste 를 끄고** 걸려 있던 훅(ratatui 의 터미널 복구)으로 넘긴다.
-/// 어느 스레드의 패닉에도 돈다 — 버린 다시 읽기 스레드가 터져도 셸이 붙여넣기를 싸서 받지 않는다.
+/// 마우스 잡기를 켜거나 끈다 — xterm 의 1000 번(누르고 뗌)·1002 번(누른 채 끌기)·1006 번(SGR 좌표).
+///
+/// **켤 때는 crossterm 의 `EnableMouseCapture` 를 안 쓴다.** 그것은 1003 번(누르지 않은 움직임까지 전부)도 켜는데,
+/// 루프는 사건이 오면 깨어 그린다 — 마우스를 화면 위로 지나가게만 해도 이슈 1만 개 저장소에서 22ms 짜리 프레임이
+/// 움직이는 내내 돈다. 듣는 것은 누르기·휠·끌기뿐이고 휠도 제 좌표를 실어 오므로, 올라선 칸(hover)을 알려고
+/// 움직임을 받을 까닭이 없다. 1015 번(urxvt 좌표)도 안 켠다 — 1006 을 아는 터미널은 그쪽을 쓰고, 둘을 다 켜면
+/// 어느 꼴로 올지가 터미널마다 갈린다. **켜기 전에 둘을 끈다**(리뷰) — 편집기 같은 남이 켜 둔 채 끝났으면 그대로
+/// 남아 움직임마다 사건이 온다.
+///
+/// **끌 때는 `DisableMouseCapture` 를 쓴다**(리뷰) — 켠 차례의 거꾸로이고 1003·1015 번까지 끈다. 안 켠 것을 끄는
+/// 것은 터미널에 아무 일도 아니다.
+///
+/// 쓰는 곳을 받는 것은 [`bracketed_paste`] 와 같은 까닭이다 — 시험이 그 글을 본다.
+fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
+    if !on {
+        return ratatui::crossterm::execute!(out, DisableMouseCapture);
+    }
+    out.write_all(b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h")?;
+    out.flush()
+}
+
+/// 화면이 잡는 모드를 켠다 — bracketed paste 와, 놓아 두지 않았으면 마우스. 띄울 때와 편집기에서 돌아올 때가
+/// 같은 차례다. **켜기를 못 해도 멈추지 않는다** — 붙여넣기는 옛날처럼 키로 오고, 마우스는 터미널의 것으로 남는다.
+fn modes_on(mouse: bool) {
+    let _ = bracketed_paste(&mut std::io::stdout(), true);
+    let _ = mouse_capture(&mut std::io::stdout(), mouse);
+}
+
+/// 화면이 잡은 모드를 다 놓는다 — 켠 차례의 거꾸로다. 끝낼 때·패닉 훅·편집기로 넘길 때가 같은 글을 낸다
+/// (리뷰) — 셋이 저마다 적으면 모드를 하나 더하는 날 한 곳이 빠져, 그 길로 나간 셸에 날 글이 찍힌다.
+fn modes_off() {
+    let _ = mouse_capture(&mut std::io::stdout(), false);
+    let _ = bracketed_paste(&mut std::io::stdout(), false);
+}
+
+/// 패닉하면 **먼저 마우스 잡기와 bracketed paste 를 끄고** 걸려 있던 훅(ratatui 의 터미널 복구)으로
+/// 넘긴다. 어느 스레드의 패닉에도 돈다 — 버린 다시 읽기 스레드가 터져도 셸이 붙여넣기를 싸서 받지
+/// 않고, 마우스를 움직일 때마다 프롬프트에 좌표 글이 찍히지 않는다. 마우스를 놓아 둔 때에도 끄는 글을
+/// 낸다 — 안 켠 것을 끄는 것은 터미널에 아무 일도 아니고, 훅은 지금 무엇이 켜졌는지 모른다.
 ///
 /// **편집기가 터미널을 쥔 동안에는 편집기가 끝날 때까지 기다린다**([`EDITING`]).
-fn paste_off_on_panic() {
+fn modes_off_on_panic() {
     let next = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         EDITING.wait();
-        let _ = bracketed_paste(&mut std::io::stdout(), false);
+        modes_off();
         next(info);
     }));
 }
@@ -579,14 +620,15 @@ fn on_path(name: &str) -> bool {
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
 ///
-/// 끝낼 때(`screen`)와 같은 차례다: bracketed paste 를 끄고 raw mode·대체 화면을 걷는다. 안
-/// 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어간다. 편집기가 도는 동안 **루프 스레드는
+/// 끝낼 때(`screen`)와 같은 차례다: 마우스 잡기와 bracketed paste 를 끄고 raw mode·대체 화면을 걷는다.
+/// 안 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어가고, 마우스를 모르는 편집기에 누른 자리가 글로
+/// 찍힌다. 편집기가 도는 동안 **루프 스레드는
 /// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
 /// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 쥔 뒤에 그 스레드가
 /// 터지면 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
 fn suspend() {
     EDITING.hold();
-    let _ = bracketed_paste(&mut std::io::stdout(), false);
+    modes_off();
     ratatui::restore();
 }
 
@@ -598,11 +640,14 @@ fn suspend() {
 /// 루프가 끝난다 — 실제로 그렇게 끝났다. 온 화면을 지우고 앞 그림을 비우면(`swap_buffers`)
 /// 다음 그림이 빈칸 아닌 칸을 모두 다시 낸다. `clear` 가 온 화면 뷰포트에서 하는 일과 같고
 /// 묻는 것만 없다. 커서는 그림마다 숨기거나 두므로 따로 안 만진다.
-fn resume(term: &mut DefaultTerminal) -> std::io::Result<()> {
+///
+/// 마우스는 **잡을 때만 다시 잡는다**(`mouse`, [`App::wants_mouse`]) — 놓아 둔 사람에게도, 편집기에서 돌아와 선
+/// 폼 위에서도 안 잡는다.
+fn resume(term: &mut DefaultTerminal, mouse: bool) -> std::io::Result<()> {
     use ratatui::crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, enable_raw_mode};
     enable_raw_mode()?;
     ratatui::crossterm::execute!(std::io::stdout(), EnterAlternateScreen, Clear(ClearType::All))?;
-    let _ = bracketed_paste(&mut std::io::stdout(), true);
+    modes_on(mouse);
     term.swap_buffers();
     Ok(())
 }
@@ -715,14 +760,34 @@ fn keep_unsaved(app: &App) {
 /// - 키는 **누를 때만** 받는다. crossterm 은 kitty 프로토콜 터미널에서 뗄 때도 보내므로,
 ///   거르지 않으면 키 하나가 두 번 먹는다
 /// - 붙여넣기는 글로 넘긴다([`App::paste`]) — 키로 풀지 않는다
+/// - 마우스는 그대로 넘긴다([`App::mouse`]) — 어느 칸을 눌렀는지는 탐색기가 지난 그림으로 맞힌다
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
 fn take(app: &mut App, ev: Event) {
     match ev {
         Event::Key(k) if k.kind == KeyEventKind::Press => app.key(k),
         Event::Paste(text) => app.paste(&text),
+        Event::Mouse(m) => app.mouse(m),
         _ => {}
     }
 }
+
+/// 몰아 받는 사건인가 — 휠과 누른 채 끌기(moai-irrj, 리뷰). 둘 다 한 손짓에 칸마다 하나씩 오는데, 사건마다 한 프레임을
+/// 그리면 큰 저장소(이슈 1만 개에 한 프레임 22ms)에서 손을 멈춘 뒤에도 목록이 한참 따라 구른다.
+///
+/// **누르기·뗌·키는 안 몬다** — 하나 받고 그린다. 키는 편집기를 부르거나(`App::edit`) 끝낼 수 있고, 누르기는 다음
+/// 누르기가 맞힐 화면을 바꾼다(커서·포커스·알림 줄). 몰아 받는 동안 맞히는 바탕은 지난 프레임이고, 그동안 안 그렸으니
+/// 그것이 곧 사람이 보는 화면이다.
+fn rolls(ev: &Event) -> bool {
+    use MouseEventKind as K;
+    matches!(
+        ev,
+        Event::Mouse(m) if matches!(m.kind, K::Drag(_) | K::Moved | K::ScrollUp | K::ScrollDown | K::ScrollLeft | K::ScrollRight)
+    )
+}
+
+/// 몰아 받는 데 쓰는 가장 긴 때. 넘으면 받던 것을 두고 한 번 그린다 — 목록 위의 휠은 사건마다 목록을 세므로, 끝없이
+/// 오는 휠에 그림이 안 서면 화면이 멈춘 것으로 보인다.
+const BURST: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// 파일이 바뀌었는지 보러 깨는 걸음. 바뀌었으면 저절로 다시 읽는다(`App::follow`) —
 /// 커서는 줄의 정체를 따라가므로 읽던 자리를 잃지 않는다.
@@ -762,6 +827,10 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
     // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
     let mut stale_due = std::time::Instant::now() + if app.loading() { LOAD_POLL } else { TICK };
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
+    // 터미널이 지금 마우스를 잡고 있는가 — `screen` 이 띄울 때 `app.wants_mouse()` 대로 켰다. `SPC o m` 이 바꾼
+    // 값도, 폼·글 받는 칸·고르는 창이 열리고 닫히며 바뀐 값도 사건을 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서
+    // 돌아올 때(`resume`)도 같은 값대로 켜므로 이 값과 어긋나지 않는다.
+    let mut caught = app.wants_mouse();
     while !app.quit {
         let began = std::time::Instant::now();
         term.draw(|f| crate::tui::draw::screen(f, app))?;
@@ -779,7 +848,19 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
         let wait = wake.saturating_duration_since(std::time::Instant::now());
         if event::poll(wait)? {
-            take(app, event::read()?);
+            // **휠·끌기는 몰아 받는다**(`rolls`) — 이어 와 있는 동안은 그리지 않고 받고, 그 밖의 사건 하나에서 멈춰
+            // 그것까지 받은 뒤 그린다. 받는 때는 [`BURST`] 로 묶는다.
+            let until = std::time::Instant::now() + BURST;
+            let mut ev = event::read()?;
+            while rolls(&ev) && std::time::Instant::now() < until && event::poll(std::time::Duration::ZERO)? {
+                take(app, ev);
+                ev = event::read()?;
+            }
+            take(app, ev);
+        }
+        if app.wants_mouse() != caught {
+            caught = app.wants_mouse();
+            let _ = mouse_capture(&mut std::io::stdout(), caught);
         }
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
@@ -792,7 +873,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // **올린 뒤에 연다.** 먼저 열면 기다리던 훅이 이미 내린 터미널을 걷고, 그 뒤에 올린
             // 화면은 `resume_unwind` 가 훅 없이 끝내며 raw·대체 화면인 채로 셸에 남는다. 올리기가
             // 실패해도 연다 — 기다리던 훅이 패닉 글을 내야 한다.
-            let up = resume(term);
+            let up = resume(term, app.wants_mouse());
             EDITING.release();
             up?;
         }
@@ -905,6 +986,36 @@ mod tests {
         bracketed_paste(&mut out, true).unwrap();
         bracketed_paste(&mut out, false).unwrap();
         assert_eq!(out, b"\x1b[?2004h\x1b[?2004l");
+    }
+
+    /// 마우스 잡기는 **xterm 의 1000·1002·1006 번**이고 끌 때는 거꾸로 걷는다(moai-irrj.9xq). 1003 번(누르지
+    /// 않은 움직임)이 끼면 마우스가 화면을 지날 때마다 한 프레임을 그린다 — 그래서 crossterm 의
+    /// `EnableMouseCapture` 를 안 쓰고 여기서 박아 둔다. **켜기 전에 1003·1015 번을 끄고**, 끌 때는
+    /// `DisableMouseCapture` 대로 둘까지 끈다(리뷰) — 남이 켜 둔 것이 남지 않게. 끄는 글은 패닉 훅과 편집기로
+    /// 넘기는 길도 쓴다(`modes_off`).
+    #[test]
+    fn mouse_capture_is_modes_1000_1002_1006_and_never_1003() {
+        let mut out = Vec::new();
+        mouse_capture(&mut out, true).unwrap();
+        assert_eq!(out, b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+        out.clear();
+        mouse_capture(&mut out, false).unwrap();
+        assert_eq!(out, b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+    }
+
+    /// **휠·끌기만 몰아 받는다**(리뷰) — 누르기·뗌·키·붙여넣기는 하나씩 받고 그린다. 키는 편집기를 부르거나 끝낼 수 있고,
+    /// 누르기는 다음 누르기가 맞힐 화면을 바꾼다.
+    #[test]
+    fn only_wheel_and_drag_events_roll_together() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent};
+        let mouse = |kind| Event::Mouse(MouseEvent { kind, column: 3, row: 4, modifiers: KeyModifiers::NONE });
+        assert!(rolls(&mouse(MouseEventKind::ScrollDown)));
+        assert!(rolls(&mouse(MouseEventKind::ScrollUp)));
+        assert!(rolls(&mouse(MouseEventKind::Drag(MouseButton::Left))));
+        assert!(!rolls(&mouse(MouseEventKind::Down(MouseButton::Left))));
+        assert!(!rolls(&mouse(MouseEventKind::Up(MouseButton::Left))));
+        assert!(!rolls(&Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))));
+        assert!(!rolls(&Event::Paste("x".into())));
     }
 
     /// **편집기가 쥔 문 앞에서 남의 훅은 서고, 쥔 스레드 자신은 안 선다**(moai-46xe). 전역

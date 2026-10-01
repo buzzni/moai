@@ -447,6 +447,18 @@ IDEA
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day in an
              SPC f filter (created=2026-10-01) is a day on this clock too
+    SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
+             Clicking puts the focus on the pane and the cursor on the row
+             under it. The wheel moves the pane under the pointer without
+             taking the focus there: the list's cursor, the detail, the
+             statistics window. Dragging the line between the list and the
+             detail resizes them, and the share the list takes is kept under
+             [tui] as list_width and list_height. Over the SPC menu the
+             mouse does nothing, and while a form, a picker or a prompt is
+             up it is the terminal's again — selecting and middle-button
+             paste work there as they always did. Over the list and the
+             detail, the terminal's own selection and paste need Shift held
+             in most terminals, Option in iTerm2
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
