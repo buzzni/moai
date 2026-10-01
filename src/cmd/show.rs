@@ -7,7 +7,7 @@
 use super::{Ctx, Fail, R};
 use crate::cli::ShowArgs;
 use crate::model::{self, Issue, Kind};
-use crate::query::{Filter, Hide, Raw, Sel};
+use crate::query::{Filter, Hide, Raw};
 use crate::report;
 use crate::store::Repo;
 use crate::view;
@@ -39,25 +39,6 @@ fn resolve(target: Option<&str>, lang: crate::i18n::Lang) -> R<Target> {
             super::code::BAD_TARGET,
         )),
     }
-}
-
-/// 담당의 `me` 를 지금 사람으로 바꾼다. **`Filter::build` 뒤에 한다.**
-///
-/// `query` 는 순수 함수라 지금 사람이 누구인지 모르므로 푸는 일은 여기 몫이다.
-/// 다만 argv 를 넘기기 *전에* 풀면 두 군데가 어긋난다 — `--filter assignee=me`
-/// 는 `build` 안에서야 항이 되므로 손이 닿지 않아 `me` 라는 이름을 찾게 되고,
-/// 미리 푼 `이름 (메일)` 은 뒤이어 쉼표로 다시 쪼개져 이름에 쉼표가 든 사람을
-/// 영영 못 찾는다. 쪼개진 뒤의 항을 바꾸면 두 문제가 같이 없어진다.
-fn resolve_me(sel: &mut [Sel], ctx: &Ctx, root: &std::path::Path) -> R<()> {
-    for one in sel {
-        if let Sel::Is(v) = one
-            && v == "me"
-        {
-            let me = model::actor(ctx.user.as_deref(), root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-            *one = Sel::Is(format!("{} ({})", me.name, me.email));
-        }
-    }
-    Ok(())
 }
 
 /// 목록 자리에서만 뜻이 있는 플래그가 왔는가. 온 것 중 첫 이름을 돌려준다.
@@ -258,7 +239,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         filter: a.filter,
     })
     .map_err(|e| Fail::bad_filter(&e, ctx.lang()))?;
-    resolve_me(&mut filter.assignee, ctx, &repo.root)?;
+    // `me` 는 탐색기의 `SPC f` 와 **같은 자로** 푼다([`super::resolve_me`], moai-xd7b). 사람은 이 자리에서 푼다.
+    super::resolve_me(&mut filter.assignee, || {
+        let me = model::actor(ctx.user.as_deref(), &repo.root)?;
+        Ok(model::label(&me.name, Some(&me.email), crate::config::Naming::Full))
+    })
+    .map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
 
     // 모르는 칸은 거부한다. 조용히 0건을 내면 `-s in-progress` 같은 오타가
     // "그 칸은 비었다" 와 구별되지 않는다 — `add`·`mv` 는 이미 거부한다.
