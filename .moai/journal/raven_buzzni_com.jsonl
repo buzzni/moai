@@ -2432,3 +2432,5 @@
 {"ts":"2026-10-01T04:22:07Z","id":"moai-karj.8zm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 2번(연 손잡이 크기까지만 읽기), 3번(.git 으로 가는 링크 거절). 넘긴 것: 1번은 idea moai-sxwq, 4·5번은 idea moai-wd0o"}
 {"ts":"2026-10-01T04:22:19Z","id":"moai-xd7b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-01T04:24:31Z","id":"moai-karj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-01T04:24:42Z","id":"moai-gcqb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판을 0.1.6 으로 올리고 CHANGELOG 의 [0.1.6] 절을 연다"}
+{"ts":"2026-10-01T04:24:43Z","id":"moai-gcqb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
