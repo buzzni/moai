@@ -1988,7 +1988,14 @@ Options:
              Stored times stay UTC, and so does --json; a bare day in an
              SPC f filter (created=2026-10-01) is a day on this clock too
     SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
-             While it is on, most terminals select text with Shift held
+             Clicking puts the focus on the pane and the cursor on the row
+             under it. The wheel moves the pane under the pointer without
+             taking the focus there: the list's cursor, the detail, the
+             statistics window. Dragging the line between the list and the
+             detail resizes them, and the share the list takes is kept under
+             [tui] as list_width and list_height. Over a form, a picker, a
+             prompt or the SPC menu the mouse does nothing. While it is on,
+             most terminals select text with Shift held
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
