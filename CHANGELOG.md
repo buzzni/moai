@@ -12,6 +12,18 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An editor's lock file beside a journal no longer fails every read of the
+  history.** Opening `.moai/journal/<email>.jsonl` in Emacs without saving leaves
+  a dangling link `.#<email>.jsonl` beside it, and moai counted that link as a
+  journal it could not read: while the file stayed open, `moai show`, `-g`,
+  `--json` and `--removed` in every session said the history was unreadable and
+  exited 1, though no line was missing. Names under `.moai/journal/` that begin
+  with `.` are no longer read as journals — moai never writes one, and the ones
+  that land there (Emacs locks, macOS `._` AppleDouble files) belong to other
+  tools.
+
 ## [0.1.5] - 2026-10-01
 
 ### Added

@@ -16117,6 +16117,40 @@ fn only_journal(root: &Path) -> PathBuf {
     split.remove(0)
 }
 
+/// **편집기의 잠금 링크로는 실패하지 않는다**(moai-o4jt). Emacs 로 `<메일>.jsonl` 을 열고 저장하지
+/// 않으면 곁에 `.#<메일>.jsonl -> user@host.PID:BOOT` 가 선다. 그 끊긴 링크를 못 읽은 저널로 세던 때는
+/// 파일이 열려 있는 동안 모든 세션의 `show`·`-g`·`--json`·`--removed` 가 이력을 못 읽었다며 1 로
+/// 끝났다 — 빠진 줄은 하나도 없었다. `--removed` 의 알림은 손으로 줄을 지우라고까지 권했다.
+#[cfg(unix)]
+#[test]
+fn an_editor_lock_beside_the_journal_does_not_fail_the_run() {
+    let s = init("emacslock");
+    let kept = add(s.path(), &["남길 일"]);
+    let gone = add(s.path(), &["지울 일"]);
+    ok(s.path(), &["note", &kept, "잠금 곁의 노트"]);
+    ok(s.path(), &["rm", &gone]);
+    let journal = journal_file(s.path());
+    let name = journal.file_name().unwrap().to_string_lossy().to_string();
+    std::os::unix::fs::symlink("tester@host.4242:1727740800", journal.with_file_name(format!(".#{name}"))).unwrap();
+
+    for args in [
+        &["show", kept.as_str()][..],
+        &["show", kept.as_str(), "--json"][..],
+        &["show", "-g", "잠금 곁"][..],
+        &["show", "--removed"][..],
+    ] {
+        let out = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{args:?}: 잠금 링크로 실패했다 — {err}");
+        assert!(!err.contains(".#"), "{args:?}: 잠금 링크를 못 읽은 저널로 댔다 — {err}");
+    }
+    // 이력은 그대로 나온다 — 거른 것은 잠금 링크뿐이다.
+    assert!(ok(s.path(), &["show", &kept]).contains("잠금 곁의 노트"), "제 이력을 잃었다");
+    assert!(!ok(s.path(), &["show", &kept, "--json"]).contains("journal_error"), "멀쩡한 이력에 키를 달았다");
+    assert!(ok(s.path(), &["show", "-g", "잠금 곁"]).contains(&kept), "노트 찾기가 그 줄을 못 찾았다");
+    assert!(ok(s.path(), &["show", "--removed"]).contains(&gone), "지운 줄을 못 냈다");
+}
+
 /// **stderr 의 경고도 말묶음에서 온다**(moai-dpbi). 기본이 영어인데(moai-bn1j) 이 줄만 한국어로
 /// 남으면 세션이 시작하는 화면이 두 말로 선다 — 설정에 `lang` 을 잘못 적은 영어 사용자가 가장
 /// 읽어야 할 줄이 그 줄이다.
