@@ -4493,6 +4493,34 @@ pub(super) mod tests {
         assert!(text.contains("칸 3개 더"), "못 세운 칸을 제목이 안 댄다\n{text}");
     }
 
+    /// **좁은 창에서 칸 창이 `h`·`l` 을 따라간다**(moai-oagj.w0g) — 창 밖 칸으로 가면 그만큼만 밀고, 보이는 칸으로
+    /// 돌아오면 안 민다. 못 세운 칸은 그때마다 제목 줄이 이름과 수로 댄다. 창을 세우는 자는 첫 보드 에픽이
+    /// 넣었고(moai-9nfw.isu, 리뷰 moai-9nfw.fnb), 이 시험은 그것을 키에서 그림까지 이어 잰다.
+    #[test]
+    fn on_a_narrow_board_the_column_window_follows_h_and_l() {
+        let mut a = board_app(1);
+        // 폭 44 에는 칸이 둘 선다. 칸은 idea · 미룸 · todo · in_progress · review 이고 커서는 todo 의 첫 카드다.
+        let frame = |a: &mut App| {
+            let lines = render(a, 44, 14);
+            let top = lines.iter().position(|l| l.contains('┏')).unwrap_or_else(|| panic!("{lines:#?}"));
+            (lines[top].clone(), lines[top + 1].clone(), lines.join("\n"))
+        };
+        let (title, heads, text) = frame(&mut a);
+        assert!(heads.contains("미룸 0") && heads.contains("todo 2"), "처음 창이 커서의 칸까지만 밀지 않았다\n{text}");
+        assert!(title.contains("칸 3개 더") && title.contains("in_progress 1"), "창 밖 칸을 제목이 안 댄다\n{text}");
+
+        a.hit("l");
+        let (title, heads, text) = frame(&mut a);
+        assert!(heads.contains("todo 2") && heads.contains("in_progress 1"), "l 로 창 밖 칸에 갔는데 창이 안 밀렸다\n{text}");
+        assert!(text.contains("> argos-0080"), "{text}");
+        assert!(title.contains("미룸 0") && !title.contains("in_progress"), "제목이 밀린 창을 안 따라왔다\n{text}");
+
+        a.hit("h");
+        let (_, heads, text) = frame(&mut a);
+        assert!(heads.contains("in_progress 1"), "보이는 칸으로 돌아왔는데 창이 도로 밀렸다\n{text}");
+        assert!(text.contains("> argos-0100"), "{text}");
+    }
+
     /// **굴리기는 보드 통째로 하나고, 고른 카드는 통째로 보인다**(moai-9nfw) — 아래로 내려가도 카드의 몸이 칸 밖에
     /// 남지 않는다. 굴린 만큼은 목록처럼 아래 테두리가 댄다. 칸 머리줄은 굴려도 남는다.
     #[test]
