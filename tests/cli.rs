@@ -6235,6 +6235,102 @@ fn a_rehearsal_reads_a_twinned_milestone_the_way_status_does() {
     assert!(says_no_such_milestone(&out, "argos-m009"), "뒷줄이 이슈인 id 를 마일스톤으로 읽었다\n{}", text(&out));
 }
 
+/// **없는 에픽 알림도 마일스톤 알림의 꼴을 따른다**(moai-q5zs). `add -e <헛 id>` 는 락 안에서 쓰기가
+/// 받아들여지기 전에 알려, 뒤에 거절된 부름(`--due` 를 이슈에 적은 것)도 "에픽이 아직 없다" 를 먼저
+/// 말했다. 재는 자도 "그 id 의 줄이 있는가" 라서 이슈 id 를 에픽으로 적으면 말이 없었는데 `moai status`
+/// 는 그 줄을 `dangling_epic` 으로 셌다. 이제 `status` 의 자(`add::is_epic`)로 재고, 쓰기가 선 뒤에
+/// 말하며, `--json` 도 가리지 않는다. 막지는 않는다.
+#[test]
+fn a_single_add_says_an_epic_that_is_not_there() {
+    let s = init("addepicmissing");
+    let said = |out: &Output, id: &str| says_no_such_epic(out, id);
+
+    let out = moai(s.path(), &["add", "헛 에픽", "-e", "argos-zzzz"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said(&out, "argos-zzzz"), "말없이 지나갔다\n{}", text(&out));
+    // 막지 않는다 — 줄은 적은 대로 선다.
+    assert!(issues(s.path()).contains(r#""epic":"argos-zzzz""#), "줄이 안 적혔다");
+
+    // `--json` 도 알린다 — 알림은 stderr 라 stdout 의 JSON 은 그대로다.
+    let out = moai(s.path(), &["add", "기계가 받는다", "-e", "argos-zzzz", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said(&out, "argos-zzzz"), "--json: 말없이 지나갔다\n{}", text(&out));
+    let row = String::from_utf8(out.stdout).unwrap();
+    assert!(row.trim_start().starts_with('{') && row.contains(r#""epic":"argos-zzzz""#), "{row}");
+
+    // 거절된 쓰기는 알리지 않는다 — 기한은 마일스톤 줄에만 서므로 이 쓰기는 락 안에서 물린다.
+    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--due", "2026-10-10"]);
+    assert!(!out.status.success(), "기한을 든 이슈가 받아들여졌다\n{}", text(&out));
+    assert!(!said(&out, "argos-zzzz"), "거절된 쓰기가 알림을 먼저 냈다\n{}", text(&out));
+
+    // 에픽이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_epic` 과 같다.
+    let issue = add(s.path(), &["그냥 이슈"]);
+    let out = moai(s.path(), &["add", "이슈를 에픽이라 함", "-e", &issue, "-q"]);
+    assert!(said(&out, &issue), "에픽이 아닌 줄을 지나 보냈다\n{}", text(&out));
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_epic"), "알린 말의 근거가 없다\n{status}");
+
+    // idea 도 이 길을 지난다.
+    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "-e", "argos-zzzz", "-q"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said(&out, "argos-zzzz"), "idea add 가 말없이 지나갔다\n{}", text(&out));
+
+    // 있는 에픽이면 아무 말도 없다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["add", "멀쩡한 줄", "-e", &epic, "-q"]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", text(&out));
+}
+
+/// **`edit -e` 는 적은 부름마다 말한다 — `--milestone` 과 한 정책이다**(moai-q5zs). 줄이 바뀐 때만
+/// 알리던 판은 같은 헛 id 를 다시 적은 부름에 말이 없었고, 거꾸로 `-e` 를 안 준 고침(제목만)에도 줄에
+/// 이미 선 헛 id 를 다시 말했다. 한 명령 안에서 두 필드가 다른 규칙을 따랐다.
+#[test]
+fn edit_says_an_epic_that_is_not_there() {
+    let s = init("editepicmissing");
+    let id = add(s.path(), &["에픽을 옮길 줄"]);
+    let said = |out: &Output, epic: &str| says_no_such_epic(out, epic);
+
+    let out = moai(s.path(), &["edit", &id, "-e", "argos-zzzz"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said(&out, "argos-zzzz"), "말없이 지나갔다\n{}", text(&out));
+    assert!(line_of(s.path(), &id).contains(r#""epic":"argos-zzzz""#), "줄이 안 적혔다");
+
+    // 같은 헛 id 를 다시 적어도(바뀐 것이 없어도) 알린다. `--json` 의 stdout 은 그대로다.
+    let out = moai(s.path(), &["edit", &id, "-e", "argos-zzzz", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(said(&out, "argos-zzzz"), "--json·안 바뀐 부름: 말없이 지나갔다\n{}", text(&out));
+    let row = String::from_utf8(out.stdout).unwrap();
+    assert!(row.trim_start().starts_with('{') && row.contains(r#""epic":"argos-zzzz""#), "{row}");
+
+    // `-e` 를 안 준 고침은 줄에 이미 선 헛 id 를 다시 말하지 않는다 — 그것은 `status` 의 몫이다.
+    let out = moai(s.path(), &["edit", &id, "--title", "제목만 고친다"]);
+    assert!(out.status.success() && !said(&out, "argos-zzzz"), "{}", text(&out));
+
+    // 거절된 쓰기는 알리지 않는다 — 64KB 를 넘는 본문은 락 안에서 물린다.
+    let big = "가".repeat(30_000);
+    let out = moai(s.path(), &["edit", &id, "-e", "argos-yyyy", "-b", &big]);
+    assert!(!out.status.success(), "64KB 를 넘는 본문이 받아들여졌다");
+    assert!(!said(&out, "argos-yyyy"), "거절된 쓰기가 알림을 먼저 냈다\n{}", String::from_utf8_lossy(&out.stderr));
+
+    // 에픽이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_epic` 과 같다.
+    let other = add(s.path(), &["그냥 이슈"]);
+    let out = moai(s.path(), &["edit", &id, "-e", &other]);
+    assert!(said(&out, &other), "에픽이 아닌 줄을 지나 보냈다\n{}", text(&out));
+
+    // 있는 에픽과 비우기에는 아무 말도 없다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["edit", &id, "-e", &epic]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", text(&out));
+    let out = moai(s.path(), &["edit", &id, "-e", "none"]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", text(&out));
+}
+
+/// stderr 가 `id` 라는 에픽이 없다고 말하는가 — `add.no_such_epic_yet`·`edit.no_such_epic` 의 한국어 글이
+/// 함께 든 토막이다.
+fn says_no_such_epic(out: &Output, id: &str) -> bool {
+    String::from_utf8_lossy(&out.stderr).contains(&format!("{id} 라는 에픽이"))
+}
+
 /// stderr 가 `id` 라는 마일스톤이 없다고 말하는가 — `add.no_such_milestone` 의 한국어 글이다.
 fn says_no_such_milestone(out: &Output, id: &str) -> bool {
     let err = String::from_utf8_lossy(&out.stderr);

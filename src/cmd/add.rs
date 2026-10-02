@@ -394,7 +394,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read, kept, known) = repo.with_write(
+    let (made, read, kept, known, known_epic) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             if let Some(p) = &args.parent
@@ -406,17 +406,6 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
             let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
-
-            // 없는 에픽을 가리키는 것은 막지 않고 **알려만 준다** — 에픽을 나중에
-            // 만드는 순서가 실제로 있고, 끊긴 참조는 `moai status` 가 드러낸다.
-            if let Some(e) = &args.epic
-                && !issues.iter().any(|i| &i.id == e)
-            {
-                eprintln!(
-                    "moai: {}",
-                    crate::i18n::fill(crate::i18n::say(ctx.lang(), "add.no_such_epic_yet"), &[("id", e)])
-                );
-            }
 
             let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
             issue.epic = args.epic.clone();
@@ -443,7 +432,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             // 재는 자도 같은 [`is_milestone`] 이고, 락 안의 줄로 잰다. **만든 줄에서 읽는다** — `bulk` 의
             // `stood_on(&made)` 와 같은 까닭이다(쓰기에 정규화가 붙는 날 argv 와 줄이 갈린다).
             let known = is_milestone(issues, issue.milestone.as_deref());
-            Ok((vec![entry], (issue, read, kept, known)))
+            // 없는 에픽을 가리키는 것도 막지 않고 **알려만 준다** — 에픽을 나중에 만드는 순서가 실제로
+            // 있고, 끊긴 참조는 `moai status` 가 드러낸다. 재는 자와 자리는 마일스톤의 것을 따른다
+            // (moai-q5zs): `status` 의 자([`is_epic`])로 만든 줄을 재고, 말은 쓰기가 선 뒤에 한다.
+            let known_epic = issue.epic.is_none() || is_epic(issues, issue.epic.as_deref());
+            Ok((vec![entry], (issue, read, kept, known, known_epic)))
         },
     )?;
 
@@ -451,7 +444,10 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
     // 나는 경우에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
     // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`"). 제 에픽이 못 쓸 것이면
-    // `dangling_epic` 이 먼저다 — `edit` 의 같은 자리가 그 경우를 적어 두었다.
+    // `dangling_epic` 이 먼저다 — `edit` 의 같은 자리가 그 경우를 적어 두었다. 그래서 에픽 알림이 앞에 선다.
+    if let Some(e) = made.epic.as_deref().filter(|_| !known_epic) {
+        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "add.no_such_epic_yet"), &[("id", e)]));
+    }
     say_no_such_milestone(made.milestone.as_deref(), known, ctx.lang());
 
     if ctx.json {
@@ -947,7 +943,20 @@ pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::
 /// 연습(`add --from --dry-run`·`idea promote --dry-run`)이 "선다" 고 냈는데, `status` 는 그 id 에 선 줄을
 /// `dangling_milestone` 으로 셌다(리뷰 moai-3hxc.uhh). 쓰는 길은 쌍둥이가 선 파일을 통째로 물려 여기 안 닿는다.
 pub fn is_milestone(issues: &[Issue], id: Option<&str>) -> bool {
-    id.is_some_and(|m| crate::report::kinds_of(issues, &[m]).get(m) == Some(&Kind::Milestone))
+    is_a(issues, id, Kind::Milestone)
+}
+
+/// `id` 가 이 저장소의 **에픽 줄**인가 — `moai status` 의 `dangling_epic` 과 같은 자다(`report::broken_in`
+/// 이 적힌 `epic` 이 가리킨 id 의 종류가 에픽인지를 본다). [`is_milestone`] 과 같이 그 id 의 뒷줄로 읽는다.
+///
+/// "그 id 의 줄이 있는가" 로 재던 때는 `-e <이슈 id>` 가 말없이 지나갔는데 `status` 는 그 줄을
+/// `dangling_epic` 으로 셌다(리뷰 moai-3hxc.uhh 9번).
+pub fn is_epic(issues: &[Issue], id: Option<&str>) -> bool {
+    is_a(issues, id, Kind::Epic)
+}
+
+fn is_a(issues: &[Issue], id: Option<&str>, kind: Kind) -> bool {
+    id.is_some_and(|m| crate::report::kinds_of(issues, &[m]).get(m) == Some(&kind))
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {
