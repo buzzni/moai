@@ -4295,7 +4295,7 @@ pub struct Freed<'a> {
 /// "같은 에픽의 다음" 이 남의 줄을 대면, 시킨 대로 집은 줄을 규칙 5 가 막는다. 모르면 가르지 않는다.
 ///
 /// **스냅샷마다 [`Picking`] 을 한 벌씩, 모두 두 벌 짓는다**(moai-ydm7.7wq). 이 셈은 전부
-/// `store::with_write` 의 배타 락 안이다 — `Lock::acquire` 는 25ms 마다 두드리고 5초에 포기하고,
+/// `store::with_write` 의 배타 락 안이다 — 그 락(`store::Lock::wait`)은 25ms 마다 두드리고 5초에 포기하고,
 /// 여기는 세션 예닐곱이 같은 `.moai` 를 쓴다. 한때 부를 때마다 새로 지어 [`ready`] 를 세 번,
 /// 소속 지도와 미룸을 네 벌 더 지었다(`closable` 이 `shelved` 둘과 `eclipsed`, `next_of` 가
 /// `Handing` 하나).

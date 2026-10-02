@@ -1835,8 +1835,10 @@ fn a_lock_that_is_a_link_stops_every_write_instead_of_losing_them() {
     let lines = issues(s.path()).lines().count();
     assert_eq!(lines, won, "{won}개가 0 으로 끝났는데 {lines}줄만 남았다 — 조용한 손실이다");
     assert_eq!(won, 0, "링크를 따라 락을 잡고 썼다");
+    // 까닭까지 본다 — 링크를 따라 연 뒤 보통 파일이 아니라서 진 판(stderr 의 파이프)도 `broken` 이라, 코드만 재면
+    // 링크를 따르는 고침이 이 시험을 지난다. 말은 [`isolated`] 가 박은 한국어다(`held.link`).
     for o in &outs {
-        assert!(text(o).contains(r#""code":"broken""#), "{}", text(o));
+        assert!(text(o).contains(r#""code":"broken""#) && text(o).contains("링크다"), "{}", text(o));
     }
     assert!(std::fs::symlink_metadata(&lock).unwrap().file_type().is_symlink(), "링크를 갈아끼웠다");
 }
