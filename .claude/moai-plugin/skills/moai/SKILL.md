@@ -108,8 +108,12 @@ members inherit it; without it the whole plan stands outside the release, and of
 because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
-plan creates, which is where `moai show <epic>` reads it from. `--body -` and
-`--from -` cannot both read stdin, so give one of them a file.
+plan creates, which is where `moai show <epic>` reads it from. `--body <text>` takes
+the text itself (a file path there becomes the body as written), `--body -` reads
+stdin, and only `--from <file>` reads a file. `--body -` and `--from -` cannot both
+read stdin, so either put the plan in a file and stream the body —
+`moai add --from plan.md --body -` — or keep the plan on stdin and pass the body as
+text — `moai add --from - --body '<text>'`.
 
 ## What to write in an issue
 
