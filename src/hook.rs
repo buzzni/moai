@@ -7278,7 +7278,95 @@ pub fn guard_moai(
     let focus = held(issues, cfg, away);
     create_in(issues, &focus, line, only, aim)
         .then(|| close_in(issues, cfg, away, line, only, aim))
+        .then(|| take_in(issues, cfg, away, line, only, aim))
         .then(|| aside_in(issues, &focus, line, only, aim))
+}
+
+/// 이 `moai` 인자가 **넘겨받는다고 적었는가**(`mv --take`). `--` 뒤는 플래그가 아니다([`flag_values`] 와
+/// 같은 자).
+fn takes(args: &[String]) -> bool {
+    args.iter().take_while(|a| *a != "--").any(|a| a == "--take")
+}
+
+/// 이 명령줄에 **규칙 5 가 물을 토막**이 있는가 — 시작 칸으로 옮기는 `moai mv` 가 `--take` 없이 섰다.
+/// 사람을 푸는 쪽(`cmd/hook.rs`)이 이것으로 문을 지킨다 — 집은 것이 없는 세션의 첫 집기가 규칙 5 의
+/// 가장 흔한 자리라, 집은 것이 있을 때만 사람을 풀면 그 자리에서 규칙이 꺼진다. 아닌 흔한 호출은
+/// `git` 을 안 띄운다.
+pub fn asks_owner(line: &Line<'_>, cfg: &Config) -> bool {
+    line.used().any(|seg| picks_up(seg, cfg) && moai_args(seg).is_some_and(|args| !takes(args)))
+}
+
+/// 규칙 5 — **남의 줄은 묻고 집는다**(moai-0zjo, 2026-10-02 사용자 결정).
+///
+/// 시작 칸으로 옮기는 `moai mv` 가 담당이 내가 아닌 줄(남의 것, 담당 없는 것)을 `--take` 없이 겨누면
+/// 막는다. **막는 자리는 여기 하나다** — `mv` 는 옮기고 한 줄로 알리며, 터미널의 사람은 훅을 안 지나
+/// 안 막힌다. 거절문은 넘겨받는 줄을 그대로 내민다: 사람이 그러라고 했으면 그 줄을 그대로 친다.
+/// `p0` 도 묻는다(사용자 결정) — 급한 것이 남의 것을 가져갈 까닭은 아니다.
+///
+/// 사람은 그 토막의 `--user` 가 이기고, 없으면 이 세션의 사람([`Away::me`])이다 — `mv` 가 가리는 사람과
+/// 같아야 거절과 알림이 한 줄을 두고 갈리지 않는다. **모르면 지나간다** — 누군지 모르는 기계에서 모든
+/// 집기를 막으면 그것은 게이트다. 같은 id 의 줄이 둘이면 앞줄로 잰다 — `mv` 가 옮기는 줄이 그것이다.
+fn take_in(
+    issues: &[Issue],
+    cfg: &Config,
+    away: &Away,
+    line: &Line<'_>,
+    only: &dyn Fn(usize) -> bool,
+    aim: Toward<'_>,
+) -> Decision {
+    for (k, seg) in line.used().enumerate() {
+        if !only(k) || !picks_up(seg, cfg) {
+            continue;
+        }
+        let Some(args) = moai_args(seg) else { continue };
+        if takes(args) {
+            continue;
+        }
+        let verbs = positionals(args);
+        // `picks_up` 이 `mv <id>… <칸>` 을 이미 잰 자리다 — 맨 끝이 갈 칸이고 그 앞이 옮길 줄이다.
+        let Some((&to, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
+        // 틀린 모양의 `--user` 는 `mv` 가 스스로 거절한다 — 여기서 물을 사람이 없다.
+        let me = match flag_values(args, &["--user"]).pop() {
+            Some(raw) => crate::model::Actor::parse(&raw).map(|a| crate::query::Me::of(&a)),
+            None => away.me.clone(),
+        };
+        let Some(me) = me else { continue };
+        let Some((row, owner)) = ids.iter().find_map(|id| {
+            let row = issues.iter().find(|i| i.id == *id)?;
+            report::owner(&me, row).map(|o| (row, o))
+        }) else {
+            continue;
+        };
+        let whose = match (owner, row.assignee.as_deref()) {
+            (report::Owner::Theirs, Some(a)) => format!(
+                "{} is {}'s.",
+                row.id,
+                crate::text::one_line(&crate::model::label(
+                    a,
+                    row.assignee_email.as_deref(),
+                    crate::config::Naming::Full
+                ))
+            ),
+            _ => format!("{} has no assignee.", row.id),
+        };
+        // **본 칸을 그대로 옮겨 싣는다** — `--from` 을 걸고 막힌 사람에게 그것 없는 줄을 내밀면, 시킨
+        // 대로 친 줄이 옆 세션의 집기를 덮는다.
+        let from =
+            flag_values(args, &["--from"]).pop().map(|f| format!(" --from {}", echo_dir(&f))).unwrap_or_default();
+        return refuse(
+            5,
+            format!(
+                "{whose} Ask the person watching before you pick it up.\n\
+                 On a yes, take it over and say who said yes — you become the assignee in the same\n\
+                 write, and a note keeps whose it was:\n\
+                 \x20 {} mv {} {}{from} --take -m '<who said yes>'",
+                echo_moai(aim(k).and_then(Aimed::standing), &seg.words),
+                row.id,
+                echo_dir(to),
+            ),
+        );
+    }
+    Decision::Pass
 }
 
 /// 집은 줄들의 에픽과, 에픽 없는 집은 줄 — **에픽 줄이 실제로 선 것만** 에픽이다. 집은 차례로, 에픽은
@@ -8416,6 +8504,43 @@ mod tests {
         ));
         // 모르면 가르지 않는다.
         assert_eq!(held(&all, &cfg(), &here()).len(), 4);
+    }
+
+    /// **규칙 5 — 남의 줄은 묻고 집는다**(moai-0zjo, 2026-10-02 사용자 결정). 시작 칸으로 옮기는 `mv` 가
+    /// 남의 줄이나 담당 없는 줄을 `--take` 없이 겨누면 막고, 넘겨받는 줄을 그대로 내민다 — 본 칸(`--from`)
+    /// 까지. `p0` 도 묻는다. 내 줄·`--take`·닫기·사람을 모를 때는 지나간다. 토막의 `--user` 가 이 세션의
+    /// 사람을 이긴다 — `mv` 가 가리는 사람과 같아야 한다.
+    #[test]
+    fn rule_five_asks_before_someone_elses_row_is_picked_up() {
+        let mut urgent = owned("t-1", "todo", Some("B"));
+        urgent.assignee_email = Some("b@x.io".into());
+        urgent.priority = Some(0);
+        let all = vec![urgent, owned("t-2", "todo", None), owned("t-3", "todo", Some("Raven"))];
+        let away = Away { me: Some(me()), ..Away::default() };
+        let judge = |cmd: &str, away: &Away| guard_moai(&all, &cfg(), away, cmd, &|_| true, &|_| None);
+
+        let why = denied(&judge("moai mv t-1 in_progress --from todo", &away)).to_string();
+        assert!(why.starts_with(&crate::guide::rule_head(5)), "{why}");
+        assert!(why.contains("t-1 is B (b@x.io)'s."), "{why}");
+        assert!(why.contains("moai mv t-1 in_progress --from todo --take -m '<who said yes>'"), "{why}");
+        let why = denied(&judge("moai mv t-2 in_progress", &away)).to_string();
+        assert!(why.contains("t-2 has no assignee."), "{why}");
+
+        for pass in [
+            "moai mv t-1 in_progress --take -m 'B 가 그러라고 했다'",
+            "moai mv t-3 in_progress",
+            "moai mv t-1 done",
+            "moai --user 'B (b@x.io)' mv t-1 in_progress",
+            "moai mv t-1 in_progress --help",
+        ] {
+            assert_eq!(judge(pass, &away), Decision::Pass, "{pass}");
+        }
+        // 사람을 모르면 지나간다.
+        assert_eq!(judge("moai mv t-1 in_progress", &here()), Decision::Pass);
+        // 사람을 푸는 문 — 물을 토막이 설 때만 연다.
+        assert!(asks_owner(&Line::new("moai mv t-1 in_progress"), &cfg()));
+        assert!(!asks_owner(&Line::new("moai mv t-1 in_progress --take"), &cfg()));
+        assert!(!asks_owner(&Line::new("moai mv t-1 done && cargo test"), &cfg()));
     }
 
     /// 옆에서 그 일을 펼쳐 집은 것도 옆의 것이다 — 그 밑의 자식, 그 에픽에 든 줄.

@@ -140,7 +140,7 @@ English goes in as it is.
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`
 
-## The four things the hook actually watches
+## The five things the hook actually watches
 
 **1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -182,6 +182,17 @@ server — one line kills every session in it. A tmux you are testing gets its
 own server.
 
     env -u TMUX tmux -L <unique name> …
+
+**5. Ask before you pick up someone else's work.** A `moai mv` into a started column on a row whose assignee is
+someone else — or nobody — is refused unless it carries `--take`. Ask the person
+watching first. On a yes, take it over and say who said yes:
+
+    moai mv <id> in_progress --take -m '<who said yes>'
+
+You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
+keeps whose it was. `moai ready` hands out only your own rows and sets the rest
+apart (`others`), and what someone else picked up is not your focus. When who you
+are is unknown, nothing is refused.
 
 ## Before you close the session
 

@@ -20,13 +20,14 @@
 //!
 //! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
 
-/// 규칙 넷의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 규칙 다섯의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
 /// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
-pub const RULES: [&str; 4] = [
+pub const RULES: [&str; 5] = [
     "New issues stay inside what you picked up",
     "Pick something up before you change the repository",
     "A review is an issue too",
     "Never kill the person's tmux server",
+    "Ask before you pick up someone else's work",
 ];
 
 /// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
@@ -898,9 +899,9 @@ pub fn handoff(id: &str) -> String {
 /// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
 pub const PLEDGE: &str = "cannot deliver what it promised without this";
 
-/// 규칙 넷. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+/// 규칙 다섯. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
-    let [one, two, three, four] = RULES;
+    let [one, two, three, four, five] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <the issue>");
     format!(
@@ -940,9 +941,23 @@ review text lives is in the skill's `references/commands.md`.
 server — one line kills every session in it. A tmux you are testing gets its
 own server.
 
-    {TMUX_OWN}"#
+    {TMUX_OWN}
+
+**5. {five}.** A `moai mv` into a started column on a row whose assignee is
+someone else — or nobody — is refused unless it carries `--take`. Ask the person
+watching first. On a yes, take it over and say who said yes:
+
+    {TAKE_OVER}
+
+You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
+keeps whose it was. `moai ready` hands out only your own rows and sets the rest
+apart (`others`), and what someone else picked up is not your focus. When who you
+are is unknown, nothing is refused."#
     )
 }
+
+/// 남의 줄을 넘겨받는 줄 — 규칙 5 의 글과 그 거절문(`hook::take_in`)과 일꾼 브리프가 함께 쓴다(moai-0zjo).
+pub const TAKE_OVER: &str = "moai mv <id> in_progress --take -m '<who said yes>'";
 
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
@@ -1031,7 +1046,7 @@ whether it is stale, `moai init --check` — it writes nothing and answers
 
 {WORK}
 
-### The four things the hook actually watches
+### The five things the hook actually watches
 
 They stand once `moai skill install` has planted the hooks into Claude.
 
@@ -1089,7 +1104,7 @@ Whoever creates an issue is its assignee, for free.
 
 {KOREAN}
 
-## The four things the hook actually watches
+## The five things the hook actually watches
 
 {rules}
 

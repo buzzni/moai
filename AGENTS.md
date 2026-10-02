@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.1.6 hash:457a66d6 -->
+<!-- moai:begin v:0.2.0 hash:31d67bee -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -420,7 +420,7 @@ work. It is a note, not a field.
   `moai stats --json` add them up: its `work` sums tokens by model and by grade and
   counts the lines that carry none apart
 
-### The four things the hook actually watches
+### The five things the hook actually watches
 
 They stand once `moai skill install` has planted the hooks into Claude.
 
@@ -464,6 +464,17 @@ server — one line kills every session in it. A tmux you are testing gets its
 own server.
 
     env -u TMUX tmux -L <unique name> …
+
+**5. Ask before you pick up someone else's work.** A `moai mv` into a started column on a row whose assignee is
+someone else — or nobody — is refused unless it carries `--take`. Ask the person
+watching first. On a yes, take it over and say who said yes:
+
+    moai mv <id> in_progress --take -m '<who said yes>'
+
+You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
+keeps whose it was. `moai ready` hands out only your own rows and sets the rest
+apart (`others`), and what someone else picked up is not your focus. When who you
+are is unknown, nothing is refused.
 
 ### The supervisor
 

@@ -12913,6 +12913,25 @@ fn what_someone_else_picked_up_does_not_free_my_writes() {
     assert!(call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1").trim().is_empty(), "넘겨받았는데도 막는다");
 }
 
+/// **규칙 5 는 집은 것이 없는 세션의 첫 집기에서도 선다**(moai-0zjo) — 그것이 가장 흔한 자리다. 사람은
+/// 그 토막을 볼 때만 푼다. 거절문이 내민 줄을 그대로 치면 지나간다.
+#[test]
+fn rule_five_refuses_picking_up_someone_elses_row_and_hands_the_take_over() {
+    let s = init("hookrule5");
+    let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
+    let cmd = format!("moai mv {theirs} in_progress --from todo");
+    let why = refusal(&call(&s, "Bash", &format!("{{\"command\":\"{cmd}\"}}"), "s1"));
+    assert!(why.starts_with("Rule 5"), "{why}");
+    let take = format!("moai mv {theirs} in_progress --from todo --take -m '<who said yes>'");
+    assert!(why.contains(&take), "넘겨받는 줄을 안 내민다 — {why}");
+    let took = format!("moai mv {theirs} in_progress --from todo --take -m 'B 가 그러라고 했다'");
+    assert!(call(&s, "Bash", &format!("{{\"command\":\"{took}\"}}"), "s1").trim().is_empty(), "내민 줄을 막았다");
+    // 내 줄은 묻지 않는다.
+    let mine = add(s.path(), &["내 일"]);
+    let mv = format!("{{\"command\":\"moai mv {mine} in_progress\"}}");
+    assert!(call(&s, "Bash", &mv, "s1").trim().is_empty());
+}
+
 /// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는
 /// 글이어야 한다** — 고칠 명령 없는 거절은 사람을 부르는 게이트다.
 #[test]
