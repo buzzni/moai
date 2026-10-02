@@ -2792,3 +2792,4 @@
 {"ts":"2026-10-02T10:41:10Z","id":"moai-psyu.zjf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=114510 (high — created·updated 동점 리뷰)"}
 {"ts":"2026-10-02T10:41:10Z","id":"moai-psyu.0t3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-02T10:41:10Z","id":"moai-psyu.zjf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in all three findings: CHANGELOG Changed line, the page-edit test now starts from level priorities, SortKey::Id doc names Created too. Handed on nothing."}
+{"ts":"2026-10-02T10:43:03Z","id":"moai-psyu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — the one member is merged (0290457a) and closed, review taken in; the CHANGELOG Changed line ships with v0.3.0."}
