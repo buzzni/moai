@@ -11,6 +11,9 @@
 //!   읽기 전에 그 이름이 갈리는 틈을 손잡이가 닫는다. `O_NONBLOCK` 으로 열어 FIFO 앞에서 쓰는 쪽을
 //!   기다리며 멈추지 않는다
 //!
+//! 저장소 락([`lock`], moai-sn57)도 이 둘 위에 선다 — 디렉터리는 [`place`] 로 재고, 끝 조각은 [`read`] 처럼
+//! 연 손잡이로 잰다. 하나가 더 엄하다: 락은 안을 가리키는 링크도 안 따른다.
+//!
 //! **거절은 자료다**([`Unheld`]) — 글은 부르는 쪽이 고른 말로 [`said`] 가 짓는다. 말을 못 고르는 자리
 //! (제 트래커를 지은 뒤에 링크가 갈린 경우의 [`crate::store::Repo::read`])는 말 없는 꼴 [`spelled`] 를 쓴다.
 
@@ -41,6 +44,9 @@ pub enum Unheld {
     IntoGit { to: PathBuf },
     /// 보통 파일이 아니다 — FIFO·장치·디렉터리·소켓. 링크가 아니라 그 자리에 바로 선 것도 든다.
     NotAFile,
+    /// 링크다 — **저장소 락만 이 까닭을 낸다**([`lock`]). 읽는 자리는 안을 가리키는 링크를 따르지만 락은
+    /// 어디를 가리키든 안 따른다(moai-sn57, 2026-10-02 사용자 결정).
+    Link,
 }
 
 /// [`read`]·[`read_inside`]·[`open_inside`] 가 진 까닭 — **안 읽기로 한 것과 io 가 진 것을 가른다.** 앞의
@@ -169,6 +175,59 @@ fn opened(p: &Path) -> Result<(std::fs::File, u64), Fell> {
     Ok((f, m.len()))
 }
 
+/// **저장소 락을 연다**(moai-sn57) — `.moai/lock` 과, 링크 너머 스냅샷 곁의 락(`store::Lock::inside`). 받은
+/// 저장소가 커밋할 수 있는 자리라 읽는 자리와 같은 자로 재고, 하나를 더 건다.
+///
+/// - **디렉터리는 [`place`] 로 잰다** — 체크아웃 안이고 `.git/` 밖일 때만 그 푼 자리에 짓는다. `.moai` 가
+///   밖을 가리키는 저장소에서는 스냅샷이 아직 없으면 아무도 안 재어, 락 파일 하나가 체크아웃 밖에 섰다
+/// - **끝 조각은 링크를 아예 안 따른다**(`O_NOFOLLOW`, [`Unheld::Link`]) — 안을 가리켜도 그렇다. 커밋된
+///   `-> /proc/self/fd/2` 는 프로세스마다 제 stderr 를 잠가, 동시 `add` 스물넷이 다 0 으로 끝나고 셋에서
+///   다섯만 남았다. `-> ../.git/index.lock` 이면 그 뒤의 git 커밋이 다 졌다. 안을 가리키는 `-> issues.jsonl`
+///   도 쓰기마다 `rename` 으로 갈리는 아이노드를 잠가 두 쓰는 쪽이 서로 다른 파일을 쥔다
+/// - **보통 파일일 때만** 손잡이를 낸다 — 연 손잡이의 `fstat` 으로 잰다. 막히지 않게 열어([`unblocked`])
+///   FIFO 앞에서도 안 멈춘다
+///
+/// 흔한 길에 더해진 것은 디렉터리를 푸는 것과 `fstat` 이다 — 둘 다 아무것도 안 연다. 열기가 진 뒤에만 그
+/// 자리를 한 번 더 잰다(`lstat`).
+pub(crate) fn lock(p: &Path, home: &Home) -> Result<std::fs::File, Fell> {
+    let name = p.file_name().ok_or(Fell::Unheld(Unheld::NotAFile))?;
+    // 디렉터리의 거절은 그 안의 락 자리로 댄다 — 사람이 보는 것은 디렉터리가 아니라 락이 설 자리다.
+    let beneath = |why| match why {
+        Unheld::Outside { to, home } => Unheld::Outside { to: to.join(name), home },
+        Unheld::IntoGit { to } => Unheld::IntoGit { to: to.join(name) },
+        other => other,
+    };
+    let at = place(crate::path::dir_of(p), home).map_err(|why| Fell::Unheld(beneath(why)))?.join(name);
+    let mut o = std::fs::OpenOptions::new();
+    o.create(true).write(true).truncate(false);
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(Fell::Unheld(Unheld::Link));
+    }
+    let f = match unblocked(&mut o, NOFOLLOW, &at) {
+        Ok(f) => f,
+        // 링크면 `ELOOP`(FreeBSD 는 `EMLINK`), FIFO 는 `ENXIO`, 디렉터리는 `EISDIR` 다 — 낱말 대신 자리를 잰다.
+        Err(e) => {
+            return Err(match std::fs::symlink_metadata(&at) {
+                Ok(m) if m.file_type().is_symlink() => Fell::Unheld(Unheld::Link),
+                Ok(m) if !m.is_file() => Fell::Unheld(Unheld::NotAFile),
+                _ => Fell::Io(e),
+            });
+        }
+    };
+    match f.metadata() {
+        Ok(m) if m.is_file() => Ok(f),
+        Ok(_) => Err(Fell::Unheld(Unheld::NotAFile)),
+        Err(e) => Err(Fell::Io(e)),
+    }
+}
+
+/// [`lock`] 이 [`unblocked`] 에 더 거는 것 — 끝 조각의 링크를 안 따른다.
+#[cfg(unix)]
+const NOFOLLOW: i32 = libc::O_NOFOLLOW;
+#[cfg(not(unix))]
+const NOFOLLOW: i32 = 0;
+
 /// 남이 쓰기 리스를 쥔 파일을 다시 열어 볼 때까지 기다리는 끝 — 리눅스가 리스를 걷는 기본 시간
 /// (`/proc/sys/fs/lease-break-time`)과 같다. 막히는 `open` 이 그만큼 기다리던 자리다.
 const LEASE_BREAK: std::time::Duration = std::time::Duration::from_secs(45);
@@ -184,11 +243,20 @@ const LEASE_BREAK: std::time::Duration = std::time::Duration::from_secs(45);
 fn open(p: &Path) -> std::io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
+    unblocked(&mut o, 0, p)
+}
+
+/// **막히지 않게 여는 자리는 여기 하나다** — [`open`] 의 읽기와 [`lock`] 의 쓰기가 함께 지난다. `flags` 는
+/// `O_NONBLOCK` 위에 더 걸 것이다(unix 밖에서는 안 쓴다). 리스 앞에서 쉬며 다시 여는 까닭은 [`open`] 에 있다 —
+/// 쓰기로 여는 락은 남이 쥔 **읽기** 리스에도 같은 갈래로 진다.
+fn unblocked(o: &mut std::fs::OpenOptions, flags: i32, p: &Path) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        o.custom_flags(libc::O_NONBLOCK);
+        o.custom_flags(libc::O_NONBLOCK | flags);
     }
+    #[cfg(not(unix))]
+    let _ = flags;
     let until = std::time::Instant::now() + LEASE_BREAK;
     loop {
         match o.open(p) {
@@ -212,6 +280,7 @@ pub fn said(lang: crate::i18n::Lang, why: &Unheld) -> String {
         }
         Unheld::IntoGit { to } => fill(say(lang, "held.into_git"), &[("to", &shown(to))]),
         Unheld::NotAFile => say(lang, "held.not_a_file").to_string(),
+        Unheld::Link => say(lang, "held.link").to_string(),
     }
 }
 
@@ -233,6 +302,7 @@ pub fn spelled(at: &Path, why: &Unheld) -> String {
             format!("{} -> {}", at.display(), crate::text::one_line(&to.display().to_string()))
         }
         Unheld::NotAFile => format!("{}: not a regular file", at.display()),
+        Unheld::Link => format!("{}: a link, not followed", at.display()),
     }
 }
 

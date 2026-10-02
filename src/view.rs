@@ -3277,6 +3277,11 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
         Trouble::NotADirectory { at } => fill(say(lang, "store.not_a_directory"), &[("at", at)]),
         Trouble::DuplicateId { id } => fill(say(lang, "store.duplicate_id"), &[("id", id)]),
         Trouble::LockBusy { secs } => fill(say(lang, "store.lock_busy"), &[("secs", &secs.to_string())]),
+        // 까닭은 스냅샷·설정의 거절과 같은 말로 편다([`crate::held::said`]) — 한 처지를 두 글로 대지 않는다.
+        Trouble::LockUnheld { at, why } => fill(
+            say(lang, "store.lock_unheld"),
+            &[("at", &at.display().to_string()), ("why", &crate::held::said(lang, why))],
+        ),
         // **말이 함께 사라진 줄만 이름을 댄다** — 하나도 없으면 io 가 낸 줄 그대로다.
         Trouble::JournalLost { said, ids } if ids.is_empty() => said.clone(),
         Trouble::JournalLost { said, ids } => {

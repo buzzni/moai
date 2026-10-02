@@ -31,6 +31,9 @@ pub enum Trouble {
     DuplicateId { id: String },
     /// 다른 moai 가 쓰고 있어 물러났다 — 기다린 초.
     LockBusy { secs: u64 },
+    /// 저장소 락을 그 자리에 못 잡는다([`crate::held::lock`], moai-sn57) — 락 자리와 까닭. 링크이거나 보통
+    /// 파일이 아니거나, 그 디렉터리가 체크아웃 밖·`.git/` 으로 풀린다. 기다려도 안 풀리니 `locked` 가 아니다.
+    LockUnheld { at: PathBuf, why: crate::held::Unheld },
     /// 스냅샷은 담겼는데 저널을 못 적었다 — io 가 낸 말과, 말이 함께 사라진 이슈들.
     JournalLost { said: String, ids: Vec<String> },
     /// 쓰려는 줄이 검사에 걸렸다([`crate::model::Invalid`], moai-yve0) — 가리키는 자리와 그 까닭.
@@ -51,8 +54,9 @@ impl Trouble {
     /// **낱말을 빠짐없이 적는다** — `_` 로 받으면 갈래가 느는 날 새 거절이 말없이 `error` 가 된다.
     fn code(&self) -> &'static str {
         match self {
-            // 파일이 상했다 — 사람이 손으로 푼다.
-            Trouble::DuplicateId { .. } => code::BROKEN,
+            // 파일이 상했다 — 사람이 손으로 푼다. 락 자리의 거절은 스냅샷의 거절(`Repo::rooted`)과 같은 코드다 —
+            // `locked` 로 내면 그 코드에 다시 해 보는 고리가 끝없이 돈다(2026-10-02 사용자 결정).
+            Trouble::DuplicateId { .. } | Trouble::LockUnheld { .. } => code::BROKEN,
             Trouble::LockBusy { .. } => code::LOCKED,
             // 고칠 곳이 argv 가 아니라 사용자 정보다 — `model::NoActor` 와 같은 코드로 나간다.
             Trouble::NoJournalEmail { .. } => code::NO_ACTOR,
@@ -866,10 +870,14 @@ impl Repo {
     {
         // 묻는 길을 **그대로 넘긴다** — `|| lang()` 로 한 겹 더 싸면 clippy 의
         // `redundant_closure` 가 붉어진다(CI 의 ci-gate 가 `-D warnings` 로 돈다).
-        let lock = Lock::acquire(&self.dir().join("lock"), lang)?;
+        //
+        // **저장소 락은 받은 저장소가 커밋할 수 있는 자리다**([`Lock::inside`], moai-sn57) — 링크를 안 따르고
+        // 체크아웃 안에만 짓는다. 뿌리는 여기서 한 번 푼다.
+        let home = crate::held::Home::of(&self.root);
+        let lock = Lock::inside(&self.dir().join("lock"), &home, lang)?;
         // 링크 너머의 트래커 자리에도 그 자리의 락을 잡는다 — 까닭은 [`Repo::far_lock`] 에 있다. 차례는
         // 늘 제 락 → 너머의 락이다.
-        let _far = self.far_lock(&lock, lang)?;
+        let _far = self.far_lock(&lock, &home, lang)?;
 
         // 락을 잡은 **뒤에** 읽는다. 밖에서 읽으면 두 프로세스가 같은 옛 상태를
         // 고쳐 쓰고, 나중에 rename 한 쪽이 앞의 이슈를 조용히 지운다.
@@ -1091,7 +1099,12 @@ impl Repo {
     /// **이미 쥔 락인지는 철자가 아니라 파일로 견준다**([`Lock::holds`]) — 같은 `.moai` 안의 링크나 위
     /// 디렉터리가 링크라 철자만 다른 자리를 다시 잡으면, 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다.
     /// 쓸 자리가 못 쓰는 자리면([`target_of`] 의 거절 — 고리, 없는 디렉터리) 여기서 그 말로 멈춘다.
-    fn far_lock(&self, held: &Lock, lang: &impl Fn() -> crate::i18n::Lang) -> R<Option<Lock>> {
+    fn far_lock(
+        &self,
+        held: &Lock,
+        home: &crate::held::Home,
+        lang: &impl Fn() -> crate::i18n::Lang,
+    ) -> R<Option<Lock>> {
         let here = self.issues_path();
         let real = target_of(&here, Some(&self.root))?;
         if real == here {
@@ -1102,7 +1115,7 @@ impl Repo {
         if held.holds(&at).unwrap_or_else(|| crate::user_config::same_dir(dir, &self.dir())) {
             return Ok(None);
         }
-        Lock::acquire(&at, lang).map(Some)
+        Lock::inside(&at, home, lang).map(Some)
     }
 
     /// 적을 줄을 **파일마다 나눠 담는다**(moai-nzlo). 한 판의 줄이 한 사람의 것이 아닐 수 있어
@@ -1614,7 +1627,10 @@ impl Unread {
         match &self.why {
             Missed::Io { kind, .. } => kind,
             Missed::Held(crate::held::Unheld::NotAFile) => "failed",
-            Missed::Held(_) => "outside",
+            // 링크를 고칠 일이다. `Link` 는 락만 내고 저널은 안 낸다([`crate::held::lock`]).
+            Missed::Held(
+                crate::held::Unheld::Outside { .. } | crate::held::Unheld::IntoGit { .. } | crate::held::Unheld::Link,
+            ) => "outside",
         }
     }
 
@@ -2402,6 +2418,10 @@ impl Lock {
     ///
     /// **말은 물러날 때만 묻는다**(moai-iq7j) — `lang` 이 값이 아니라 묻는 길인 까닭이고,
     /// 락을 아직 안 쥔 자리라 여기서 물어도 제 락에 걸리지 않는다.
+    ///
+    /// **링크를 따른다** — 사용자 자신의 파일(설정·읽음 표시) 곁의 락이 이 문을 지난다. stow·rcm 은 dotfiles 의
+    /// 파일을 하나씩 걸어 락까지 걸리고(`user_config::a_linked_lock_file_is_locked_once`), 그 락을 막으면 그런
+    /// 사람의 설정 쓰기가 다 선다. 받은 저장소가 커밋할 수 있는 락은 [`Lock::inside`] 를 지난다.
     pub(crate) fn acquire(path: &Path, lang: impl FnOnce() -> crate::i18n::Lang) -> R<Lock> {
         let f = std::fs::OpenOptions::new()
             .create(true)
@@ -2409,6 +2429,30 @@ impl Lock {
             .truncate(false)
             .open(path)
             .map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
+        Lock::wait(f, path, lang)
+    }
+
+    /// **저장소 락** — `.moai/lock` 과 링크 너머 스냅샷 곁의 락([`Repo::far_lock`]). 연 자리를
+    /// [`crate::held::lock`] 이 잰다: 디렉터리는 `home` 안이고 `.git/` 밖이어야 하며, 끝 조각은 어디를
+    /// 가리키든 링크를 안 따르고, 보통 파일이어야 한다(moai-sn57, 2026-10-02 사용자 결정).
+    ///
+    /// 따르던 판은 커밋된 `.moai/lock -> /proc/self/fd/2` 하나로 프로세스마다 제 stderr 를 잠가, 동시
+    /// `moai add` 스물넷이 다 0 으로 끝나고 이슈는 셋에서 다섯만 남았다 — 이 도구가 못 견디는 조용한 손실이다.
+    /// 거절은 아무것도 안 쓰고 `broken` 으로 멈춘다([`Trouble::LockUnheld`]).
+    pub(crate) fn inside(path: &Path, home: &crate::held::Home, lang: impl FnOnce() -> crate::i18n::Lang) -> R<Lock> {
+        let f = match crate::held::lock(path, home) {
+            Ok(f) => f,
+            Err(crate::held::Fell::Unheld(why)) => {
+                let why = Trouble::LockUnheld { at: path.to_path_buf(), why };
+                return Err(Fail::coded(crate::view::store_trouble(lang(), &why), why.code()));
+            }
+            Err(crate::held::Fell::Io(e)) => return Err(Fail::new(format!("{}: {e}", path.display()))),
+        };
+        Lock::wait(f, path, lang)
+    }
+
+    /// 연 락 파일에 `flock` 을 잡을 때까지 기다린다 — [`Lock::acquire`]·[`Lock::inside`] 의 몸통.
+    fn wait(f: std::fs::File, path: &Path, lang: impl FnOnce() -> crate::i18n::Lang) -> R<Lock> {
         let start = Instant::now();
         loop {
             match f.try_lock_exclusive() {
@@ -4272,6 +4316,75 @@ mod tests {
         });
         assert_eq!(a.read().unwrap().issues.len(), threads * each, "링크로 함께 쓰는 두 트래커가 서로를 지웠다");
         assert!(is_link(&a.issues_path()) && is_link(&b.issues_path()), "링크를 보통 파일로 갈아끼웠다");
+    }
+
+    /// **저장소 락은 링크를 안 따르고 체크아웃 밖에 안 선다**(moai-sn57, 2026-10-02 사용자 결정). 받은 저장소가
+    /// `.moai/lock` 을 링크로 커밋하면 따르던 판은 그 끝에 락을 지었다 — `-> ../.git/index.lock` 이면 그 뒤의 git
+    /// 커밋이 다 졌고, 밖을 가리키면 체크아웃 밖에 파일이 섰다. 안을 가리키는 `-> issues.jsonl` 도 거절한다 —
+    /// 쓰기마다 `rename` 으로 갈리는 아이노드라 두 쓰는 쪽이 서로 다른 파일을 쥔다. 보통 파일이 아닌 자리도
+    /// 거절하고, FIFO 앞에서는 안 멈춘다. 어느 것이든 아무것도 안 쓰고 `broken` 으로 멈추며 심어 둔 것은 남는다.
+    /// 동시 쓰기로 재는 것은 `tests/cli.rs` 의 `a_lock_that_is_a_link_stops_every_write_instead_of_losing_them` 이다.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_lock_never_follows_a_link_nor_stands_outside_its_checkout() {
+        let away = Scratch::new("store-lock-away");
+        let refused = |r: &Repo, what: &str| {
+            let wrote = r.with_write(
+                || crate::i18n::Lang::En,
+                |issues, _, _| {
+                    issues.push(issue("argos-4aex"));
+                    Ok((vec![], ()))
+                },
+            );
+            let e = wrote.expect_err(what);
+            assert_eq!(e.code, code::BROKEN, "{what}: {}", e.message);
+            assert!(r.read().unwrap().issues.is_empty(), "{what}: 거절하고도 썼다");
+            e.message
+        };
+
+        // 링크 셋 — 밖으로, `.git/` 안으로(끝이 없다), 안의 보통 파일로.
+        for (name, to) in [
+            ("out", away.join("lock")),
+            ("git", PathBuf::from("../.git/index.lock")),
+            ("in", PathBuf::from("issues.jsonl")),
+        ] {
+            let (r, d) = repo(&format!("lock-link-{name}"));
+            std::fs::create_dir(d.join(".git")).unwrap();
+            let lock = r.dir().join("lock");
+            std::os::unix::fs::symlink(&to, &lock).unwrap();
+            let said = refused(&r, name);
+            assert!(said.contains("a link"), "{name}: 링크라고 안 댔다 — {said}");
+            assert!(is_link(&lock), "{name}: 링크를 갈아끼웠다");
+            assert!(!d.join(".git/index.lock").exists(), "{name}: .git 안에 락을 지었다");
+        }
+        assert!(!away.join("lock").exists(), "체크아웃 밖에 락을 지었다");
+
+        // 보통 파일이 아닌 락 자리 — 디렉터리와 FIFO. FIFO 를 쓰기로 그냥 열면 읽는 쪽을 영영 기다린다.
+        let (r, _d) = repo("lock-dir");
+        std::fs::create_dir(r.dir().join("lock")).unwrap();
+        let said = refused(&r, "디렉터리");
+        assert!(said.contains("not a regular file"), "{said}");
+        let (r, d) = repo("lock-fifo");
+        let at = r.dir().join("lock");
+        let c = std::ffi::CString::new(at.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: 널로 끝나는 경로와 권한 비트만 넘긴다.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "FIFO 를 못 지었다");
+        let home = crate::held::Home::of(d.path());
+        let got = crate::held::tests::within("FIFO 인 락", move || {
+            Lock::inside(&at, &home, || crate::i18n::Lang::En).map(|_| ())
+        });
+        assert_eq!(got.expect_err("FIFO 에 락을 잡았다").code, code::BROKEN);
+
+        // `.moai` 자체가 밖을 가리키는데 스냅샷이 아직 없으면 아무도 안 재어, 락 파일 하나가 밖에 섰다.
+        let (plain, _p) = repo("lock-moai-out-config");
+        let s = Scratch::new("store-lock-moai-out");
+        let elsewhere = away.join("moai");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, s.join(".moai")).unwrap();
+        let r = Repo::at(s.to_path_buf(), plain.config.clone());
+        let said = refused(&r, ".moai 가 밖");
+        assert!(said.contains("outside"), "{said}");
+        assert!(!elsewhere.join("lock").exists(), "`.moai` 링크를 따라 체크아웃 밖에 락을 지었다");
     }
 
     /// **저장소가 든 파일은 체크아웃 밖을 가리키는 링크를 안 따라간다**(moai-4oab, 2026-09-29 사용자 결정

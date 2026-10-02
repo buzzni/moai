@@ -1807,6 +1807,40 @@ fn concurrent_adds_all_survive() {
     assert_eq!(lines, n, "{n}개를 동시에 넣었는데 {lines}줄만 남았다");
 }
 
+/// **링크인 락 자리는 쓰기를 다 멈춘다 — 조용히 잃지 않는다**(moai-sn57). 받은 저장소가 `.moai/lock ->
+/// /proc/self/fd/2` 를 커밋해 두면 따르던 판은 프로세스마다 제 stderr 를 잠가 아무도 서로를 안 막았다 —
+/// 동시 `add` 스물넷이 다 0 으로 끝나고 셋에서 다섯만 남았다. 이제는 아무도 안 쓰고 `broken` 으로 멈춘다.
+///
+/// stderr 는 프로세스마다 제 파이프다 — 물려받으면 모두가 한 터미널을 잠가 서로를 막으므로 손실이 안 선다.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_lock_that_is_a_link_stops_every_write_instead_of_losing_them() {
+    let s = init("race-lock-link");
+    let lock = s.path().join(".moai/lock");
+    let _ = std::fs::remove_file(&lock);
+    std::os::unix::fs::symlink("/proc/self/fd/2", &lock).unwrap();
+    let n = 24;
+    let kids: Vec<_> = (0..n)
+        .map(|i| {
+            staged_live(&["add", &format!("동시 {i}"), "-q", "--json"])
+                .current_dir(s.path())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outs: Vec<Output> = kids.into_iter().map(|k| k.wait_with_output().unwrap()).collect();
+    let won = outs.iter().filter(|o| o.status.success()).count();
+    let lines = issues(s.path()).lines().count();
+    assert_eq!(lines, won, "{won}개가 0 으로 끝났는데 {lines}줄만 남았다 — 조용한 손실이다");
+    assert_eq!(won, 0, "링크를 따라 락을 잡고 썼다");
+    for o in &outs {
+        assert!(text(o).contains(r#""code":"broken""#), "{}", text(o));
+    }
+    assert!(std::fs::symlink_metadata(&lock).unwrap().file_type().is_symlink(), "링크를 갈아끼웠다");
+}
+
 /// 깨진 줄이 있어도 나머지를 보여주고, 어느 줄인지 말하고, 비영으로 끝난다.
 #[test]
 fn a_broken_line_is_reported_but_the_rest_still_shows() {
