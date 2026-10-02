@@ -247,7 +247,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -661,7 +664,7 @@ Arguments:
 
 Options:
       --title <text>         One line. A lone `-x` needs `--title=-x`
-  -b, --body <text>          Body. `-` reads it from stdin
+  -b, --body <text>          Text, not a path. `-` reads stdin: `-b - < <file>`
   -t, --tag <tag>            Add tags
       --untag <tag>          Remove tags
   -e, --epic <id|none>       Move the epic (`none` clears only its own field)
@@ -977,7 +980,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1210,7 +1216,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1443,7 +1452,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1697,7 +1709,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it

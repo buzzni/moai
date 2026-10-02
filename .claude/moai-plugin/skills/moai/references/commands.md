@@ -186,8 +186,11 @@ PLAN
 which epic a `--body` would land on, and refuses a body the write would refuse.
 
 `--body` says why these issues are one bundle. It goes onto the first epic the plan
-creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
-`--from` can read stdin, so give the other one a file or write the body as text —
+creates, which is where `moai show <epic>` reads it from. `--body <text>` takes the
+text itself — a file path there becomes the body as written — `--body -` reads
+stdin, and only `--from <file>` reads a file, so a file goes in as the body with
+`--body - < <file>`. `--body -` and `--from -` cannot both read stdin: put the plan
+in a file and stream the body, or keep the plan on stdin and pass the body as text.
 `moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{name}}` with `--var name=value` (the

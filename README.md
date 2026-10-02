@@ -343,14 +343,16 @@ moai show --all --json | duckdb -c "
 
 ## Screen language
 
-The interface currently defaults to Korean. Pick another with `MOAI_LANG`:
+The interface defaults to English. Pick another with `MOAI_LANG`:
 
 ```sh
-MOAI_LANG=en moai status
+MOAI_LANG=ko moai status
 ```
 
-`en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet translated falls
-back to English. `i18n/README.md` describes how to add a language.
+To keep one, put `lang = "ko"` under `[i18n]` in your user config; `MOAI_LANG` wins
+over it. `en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet translated
+falls back to English, and the system locale (`LANG`, `LC_ALL`) is not read.
+`i18n/README.md` describes how to add a language.
 
 ## Budgets
 

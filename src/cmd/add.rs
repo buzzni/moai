@@ -115,13 +115,46 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 ///
 /// **argv 에 적힌 빈 글(`-b ''`)은 말하지 않는다.** 그것은 사람이 비워 준 것이지 오다가 사라진 것이
 /// 아니다.
+///
+/// **반대쪽 판도 한 줄로 말한다**(moai-3hxc.58k) — argv 에 적힌 글이 **한 줄이고 그 이름의 파일이
+/// 있으면** "글로 받았다" 고 알린다. `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는데,
+/// `moai add --from - --body plan.md` 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이
+/// 2026-10-01 에 두 번 있었다. 막지도 본문을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
+/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
+/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add` 가 같은 말을 한다.
 pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
+    read_body_told(arg, ctx, false)
+}
+
+/// [`read_body_said`] 의 몸 — `plan_on_stdin` 은 **계획이 이미 stdin 을 쥐었는가**다(리뷰). 그 판에
+/// `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은
+/// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
+fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
         eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
     }
+    // stdin 에서 온 글은 사람이 파일 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
+    if !from_stdin && let Some(text) = body.as_deref().filter(|b| names_a_file(b)) {
+        let lang = ctx.lang();
+        let how = match plan_on_stdin {
+            true => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
+            false => crate::i18n::say(lang, "add.body_names_a_file"),
+        };
+        // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
+        let said =
+            crate::i18n::fill(how, &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(text))]);
+        eprintln!("moai: {said}");
+    }
     Ok(body)
+}
+
+/// 본문 글이 **한 줄이고, 지금 디렉터리에서 그 이름으로 일반 파일이 서 있는가.** `--from` 이 읽는 경로와 같은
+/// 기준(cwd, `-C` 를 따른 뒤)이다. `metadata` 만 부르고 열지 않으며, 없거나 못 읽는 경로는 `false` 다 —
+/// 알림은 덤이라 stat 이 실패했다고 쓰기를 막을 까닭이 없다.
+fn names_a_file(text: &str) -> bool {
+    !text.contains(['\n', '\r']) && std::path::Path::new(text).is_file()
 }
 
 /// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
@@ -301,7 +334,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         }
         // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
         // stdin 을 읽는 쪽은 많아야 하나다.
-        let body = read_body_said(args.body.clone(), ctx)?;
+        let body = read_body_told(args.body.clone(), ctx, reads_stdin(from))?;
         return bulk(
             ctx,
             &repo,
@@ -361,7 +394,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read, kept): (Issue, super::Read, Option<super::edit::InheritedMilestone>) = repo.with_write(
+    let (made, read, kept, known) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             if let Some(p) = &args.parent
@@ -406,9 +439,19 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             // 댔다 — 한 바이너리가 한 필드를 두 말로 다뤘다. 판정도 글도 `edit` 의 것 한 벌이다.
             let kept =
                 args.milestone.as_deref().and_then(|m| super::edit::InheritedMilestone::of(issues, &issue.id, Some(m)));
-            Ok((vec![entry], (issue, read, kept)))
+            // **없는 마일스톤도 막지 않고 알려만 준다**(moai-3hxc.uyt) — 계획 길(`bulk`)이 이미 그렇다.
+            // 재는 자도 같은 [`is_milestone`] 이고, 락 안의 줄로 잰다. **만든 줄에서 읽는다** — `bulk` 의
+            // `stood_on(&made)` 와 같은 까닭이다(쓰기에 정규화가 붙는 날 argv 와 줄이 갈린다).
+            let known = is_milestone(issues, issue.milestone.as_deref());
+            Ok((vec![entry], (issue, read, kept, known)))
         },
     )?;
+
+    // 쓰기가 선 **뒤에** 말한다 — `bulk` 와 같은 자리고, 거절된 쓰기가 줄 알림이 아니다. `--json` 도
+    // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
+    // 나는 판에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
+    // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`").
+    say_no_such_milestone(made.milestone.as_deref(), known, ctx.lang());
 
     if ctx.json {
         // **곁들이는 키도 `edit --json` 과 같다** — `inherited_milestone` 은 이미 `cmd::OURS` 에 있다.
