@@ -2841,3 +2841,8 @@
 {"ts":"2026-10-02T11:48:56Z","id":"moai-3hxc.u1x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-3hxc round 3: add/edit -e notice after the write, measured as status"}
 {"ts":"2026-10-02T11:48:59Z","id":"moai-3hxc.u1x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-02T11:49:28Z","id":"moai-3hxc.u1x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review high --fix is running in the background over the fix commit (worktree .claude/worktrees/moai-3hxc, branch worktree-moai-3hxc, develop already merged in). When it reports: note its text here, commit what it fixed, add the CHANGELOG Fixed line, merge, close moai-q5zs and this review."}
+{"ts":"2026-10-02T11:58:52Z","id":"moai-sn57","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"락이 커밋된 링크를 따라간다"}
+{"ts":"2026-10-02T11:58:52Z","id":"moai-sn57.l9a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"락 파일을 링크 없이 보통 파일로만 연다"}
+{"ts":"2026-10-02T11:58:52Z","id":"moai-sn57","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xyhe 에서 펼쳤다 — 커밋된 .moai/lock 링크를 따라 락을 연다"}
+{"ts":"2026-10-02T11:58:52Z","id":"moai-xyhe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-sn57 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-02T11:58:58Z","id":"moai-sn57.l9a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
