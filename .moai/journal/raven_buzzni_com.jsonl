@@ -3002,3 +3002,4 @@
 {"ts":"2026-10-02T17:54:40Z","id":"moai-oagj.rku","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"들인 것: 15건 중 14건(fix 커밋 하나와 docs(changelog) 커밋) — 휠, 반 쪽 걸음, board_column, 칸이 없을 때의 머리줄, 보드로 바꿀 때 설 자리, 숨김을 되돌리는 토글, laid·card_height 의 낭비, 도움말, CHANGELOG, `층`, fmt. 넘긴 것: 10번(좁은 카드에서 남의 줄 낱말이 잘림 — 사용자 결정의 자리라 사람이 정한다) → moai-cm0v, 범위 밖 relayer 첨자 → moai-k98r. 둘 다 v0.4.0 밖의 idea 다. 작은 정리(owner_label 재사용·말 키 합치기 등)는 화면 낱말이 바뀌어서 안 했다"}
 {"ts":"2026-10-02T17:56:53Z","id":"moai-acfk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드의 휠과 Ctrl-u/d 는 화면을 굴린다"}
 {"ts":"2026-10-02T17:56:53Z","id":"moai-acfk.87a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드 휠·Ctrl-u/d 를 카드 이동에서 스크롤로 바꾼다"}
+{"ts":"2026-10-02T17:57:10Z","id":"moai-oagj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다. 남은 것은 넘긴 idea 둘(moai-cm0v·moai-k98r)이고 둘 다 v0.4.0 밖이다"}
