@@ -232,6 +232,9 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     /// Open one, or list them
     #[command(after_help = SHOW_LIST)]
     Show(ShowArgs),
+    /// Count them - spread, flow, lead and cycle time, AI work
+    #[command(after_help = STATS_HELP)]
+    Stats(StatsArgs),
     /// Move the status
     #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
   Column names and their order come from statuses in .moai/config.toml
@@ -419,6 +422,7 @@ IDEA
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
+    SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -443,6 +447,18 @@ IDEA
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day in an
              SPC f filter (created=2026-10-01) is a day on this clock too
+    SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
+             Clicking puts the focus on the pane and the cursor on the row
+             under it. The wheel moves the pane under the pointer without
+             taking the focus there: the list's cursor, the detail, the
+             statistics window. Dragging the line between the list and the
+             detail resizes them, and the share the list takes is kept under
+             [tui] as list_width and list_height. Over the SPC menu the
+             mouse does nothing, and while a form, a picker or a prompt is
+             up it is the terminal's again — selecting and middle-button
+             paste work there as they always did. Over the list and the
+             detail, the terminal's own selection and paste need Shift held
+             in most terminals, Option in iTerm2
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -500,6 +516,16 @@ IDEA
   On a header row, SPC p d asks once and then only drops it from the list —
   y is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
+
+  SPC p s opens the statistics window in place of the list and the detail —
+  the numbers `moai stats` gives, drawn as bars: the flow per week, the
+  columns and priorities, lead and cycle time, and AI work by model. It
+  counts the project you are in, or on the one list (0) the project of the
+  row under the cursor. With a filter hung (SPC f or /) it counts only what
+  passes, and the title says so. b switches the flow between weeks and
+  days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
+  Esc goes back to where you were, with the cursor, the filter and the
+  detail as they were. On a narrow screen it shows the same figures as text.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
@@ -999,6 +1025,118 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
       jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
     moai show --all --json | duckdb -c \"SELECT kind, count(*)
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1\"";
+
+// **`--json` 의 모양을 여기 적는다** — 에이전트가 읽는 계약이라(moai-1hka.k16) 도움말이 그 문서다. 모양을
+// 바꾸면 이 글과 `report::stats::Stats` 를 함께 고치고, `docs/cli.md` 를 다시 짓는다.
+const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters as `moai show` -
+  with done, deferred and ideas in: it counts what happened, so nothing
+  finished is hidden. Every number counts one kind, issue unless --type
+  names another; a group is measured through its members (-e, --milestone).
+  The kind axis alone counts every row picked, to show what was left out.
+  --all is taken and changes nothing. The time filters read as in
+  `moai show --help`.
+
+  Nothing is stored, and the journal's column moves are never folded in.
+  The numbers come from the rows and from the `model:` lines in the notes -
+  the same `work` that `moai show --json` gives.
+
+  Axes - --by status,tag prints those in full (with --bucket or --last
+  the flow follows them), and without --by the overview shows the first
+  three:
+    status      the column, a group's read from its members as on the board
+    kind        issue, epic, milestone, idea - every row picked
+    priority    0 to 3
+    tag         a row counts once per tag it carries
+    assignee    name and email
+    epic        the epic a row stands in (derived_epic)
+    milestone   the milestone it stands in, through its epic too
+
+  Flow: per day or per week (Monday first) on your clock - the day
+  `--created <day>` reads. Created counts rows made then, done counts rows
+  standing in done that got there then (the time --done reads). --last is
+  how many buckets, the current one included (14 days or 8 weeks).
+
+  Lead time runs from created to done, cycle time from started_at - the
+  first move out of the first column - to done, over rows standing in done,
+  in minutes. A row with no start is unknown, not zero: measured and
+  unknown are counted apart, and the median and p90 cover the measured
+  ones only. It is wall clock, not effort.
+
+  AI work sums the `model:` lines, and recorded counts the rows that carry
+  one. Tokens add up over the lines that carry them (tokened), and tokens
+  is null when none does - unknown, not 0. Reviews are the rows tagged
+  review; the grade on their lines is the review grade.
+
+  moai stats                           the overview
+  moai stats -e moai-1hka              one epic's members
+  moai stats --by tag,assignee         two axes in full
+  moai stats --bucket day --last 30 --json
+
+  --json gives one object. Every key is always there except three: `by`
+  holds the axes asked (all seven without --by), an assignee carries email
+  only when one is written, and journal_error stands only when a journal
+  could not be read - then work and reviews are short. A null key means
+  none - no tag, no epic, no assignee. An axis need not add up to rows: a
+  row counts once per tag, and a row placed in no group (a twin's eclipsed
+  line, as -e none leaves it out) stands under no epic or milestone at
+  all. Durations are minutes.
+
+    {\"kind\":\"issue\",\"rows\":42,
+     \"by\":{\"status\":[{\"key\":\"todo\",\"rows\":9},...],
+           \"priority\":[{\"key\":0,\"rows\":1},...],
+           \"assignee\":[{\"key\":\"Kim\",\"email\":\"kim@example.com\",\"rows\":7},
+                       {\"key\":null,\"rows\":2}],...},
+     \"flow\":{\"bucket\":\"week\",\"zone\":\"UTC\",
+             \"buckets\":[{\"start\":\"2026-09-28\",\"created\":3,\"done\":2},...]},
+     \"lead_time\":{\"done\":30,\"measured\":30,\"unknown\":0,
+                  \"median\":95,\"p90\":4100},
+     \"cycle_time\":{...the same keys...},
+     \"work\":{\"recorded\":25,\"lines\":31,\"tokened\":28,\"tokens\":5100000,
+             \"by_model\":[{\"provider\":\"anthropic\",\"model\":\"opus-5\",
+                          \"lines\":31,\"tokened\":28,\"tokens\":5100000}],
+             \"by_grade\":[{\"grade\":\"high\",\"lines\":12,...},...]},
+     \"reviews\":{\"rows\":6,\"work\":{...the same keys as work...}}}";
+
+/// `moai stats` 가 받는 것(moai-1hka.k16). **거르개는 `show` 의 것을 그대로 받는다**(`FilterArgs`) — 차례와 쪽
+/// (`PageArgs`)·겹쳐 보기(`WorktreeArg`)는 안 받는다: 세는 자리에 세울 차례도 자를 목록도 없고, 겹쳐 본 줄을
+/// 세면 옆 가지에서 집은 일이 이 저장소의 흐름에 두 번 선다. 안 받는 플래그는 clap 이 이름을 대며 거절한다 —
+/// 말없이 먹지 않는다.
+#[derive(Args, Debug)]
+pub struct StatsArgs {
+    /// Print these axes in full (see below)
+    #[arg(long, value_name = "axis", value_enum, value_delimiter = ',', hide_possible_values = true)]
+    pub by: Vec<AxisArg>,
+
+    /// What one row of the flow covers (week when absent)
+    #[arg(long, value_name = "day|week", value_enum, hide_possible_values = true)]
+    pub bucket: Option<BucketArg>,
+
+    /// How many rows of flow, the current one included
+    #[arg(long, value_name = "n", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..=1000))]
+    pub last: Option<usize>,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+}
+
+/// `--by` 의 낱말 — `report::stats::Axis` 의 이름과 같다. 잇는 것은 `cmd::stats` 다(`report` 는 clap 을 모른다).
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub enum AxisArg {
+    Status,
+    Kind,
+    Priority,
+    Tag,
+    Assignee,
+    Epic,
+    Milestone,
+}
+
+/// `--bucket` 의 낱말.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq)]
+pub enum BucketArg {
+    Day,
+    Week,
+}
 
 #[derive(Args, Debug)]
 pub struct ShowArgs {

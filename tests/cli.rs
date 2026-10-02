@@ -6296,6 +6296,8 @@ const JSON_SWEEP: &[&str] = &[
     "ready",
     "prime",
     "show",
+    // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
+    "stats",
     "note",
     "link",
     "defer",
@@ -6732,6 +6734,7 @@ fn every_command_still_speaks_json() {
         vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
+        vec!["stats", "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
         vec!["defer", &id, "--json"],
@@ -7844,6 +7847,39 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
         assert!(said.contains("Mars/Olympus"), "{said:?}");
     }
     assert!(String::from_utf8(out.stdout).unwrap().contains("2026-09-11 04:12"), "UTC 로 안 떨어졌다");
+}
+
+/// **`TZ` 의 POSIX 규칙 글은 tzdb 없이 선다**(moai-btxt.1gk, 리뷰 moai-btxt.0ln). 정적 musl 판을 zoneinfo 없는
+/// 기계에 받은 자리에서 `TZ=<+09>-9` 가 서는지는 `TZDIR` 을 바꿔야 잴 수 있다 — 단위 시험은 한 프로세스의 환경을
+/// 나눠 써서 그것을 못 바꾼다. tzdb 가 그 이름의 파일을 TZif 로 못 읽어도 규칙으로 선다(glibc 와 같다).
+#[test]
+fn a_posix_rule_in_tz_needs_no_tzdb() {
+    let s = init("tzrule");
+    let id = add(s.path(), &["규칙 글로 본 줄"]);
+    let at = |tzdir: &Path, tz: &str| -> (String, String) {
+        let out = staged(&["show", &id]).current_dir(s.path()).env("TZDIR", tzdir).env("TZ", tz).output().unwrap();
+        assert!(out.status.success(), "{tz}: {}", String::from_utf8_lossy(&out.stderr));
+        (String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+    };
+    // 시계는 04:12 UTC 에 못박혀 있다 — UTC+9 면 13:12 다.
+    let nowhere = s.path().join("no-zoneinfo");
+    for tz in ["<+09>-9", "JST-9", ":JST-9"] {
+        let (shown, said) = at(&nowhere, tz);
+        assert!(shown.contains("2026-09-11 13:12"), "{tz} 를 규칙으로 안 읽었다\n{shown}");
+        assert_eq!(said, "", "{tz} 가 tzdb 없음을 알렸다");
+    }
+    // 이름도 규칙도 아니면 예전처럼 UTC 로 떨어지고 한 줄로 알린다.
+    let (shown, said) = at(&nowhere, "Asia/Seoul");
+    assert!(shown.contains("2026-09-11 04:12"), "{shown}");
+    assert_eq!(said.lines().count(), 1, "{said:?}");
+
+    // tzdb 에 같은 이름의 파일이 있는데 TZif 가 아니면 규칙으로 읽는다.
+    let junk = s.path().join("junk-zoneinfo");
+    std::fs::create_dir_all(&junk).unwrap();
+    std::fs::write(junk.join("JST-9"), "TZif 가 아니다\n").unwrap();
+    let (shown, said) = at(&junk, "JST-9");
+    assert!(shown.contains("2026-09-11 13:12"), "TZif 아닌 파일 뒤에서 규칙을 안 읽었다\n{shown}");
+    assert_eq!(said, "", "{said:?}");
 }
 
 #[test]
@@ -10704,6 +10740,13 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
     // 가리는 줄은 처음부터 성하다 — 가려진 쪽을 재느라 이쪽의 답까지 지우지 않았다.
     let holds = ok(s.path(), &["show", "argos-0002", "--json"]);
     assert!(holds.contains(r#""derived_epic":"argos-0001""#), "가리는 줄이 제 소속을 잃었다\n{holds}");
+
+    // **통계의 소속 축도 같은 답이다**(리뷰 moai-1hka.hvb 7번) — 가려진 줄은 에픽에도 "없음" 에도 안 선다.
+    // "없음" 에 세면 `stats --by epic` 의 없음과 `stats -e none` 의 수가 갈린다.
+    let by = ok(s.path(), &["stats", "--by", "epic", "--json"]);
+    assert!(by.contains(r#""epic":[{"key":"argos-0001","rows":1}]"#), "가려진 줄을 소속 축에 셌다\n{by}");
+    let none = ok(s.path(), &["stats", "-e", "none", "--json"]);
+    assert!(none.starts_with(r#"{"kind":"issue","rows":0,"#), "-e none 이 가려진 줄을 골랐다\n{none}");
 }
 
 /// **같은 종류의 쌍둥이도 표면 어디서나 같은 에픽을 답한다**(moai-7iyc.rt6, 2026-09-23 사용자 결정).
@@ -18728,6 +18771,18 @@ fn script(name: &str) -> PathBuf {
     at_root("scripts").join(name)
 }
 
+/// 판 올리기 두 스크립트를 `scripts/` 에 깐 빈 자리. 스크립트는 뿌리를 제 자리에서
+/// 읽으므로(`BASH_SOURCE`) 둘이 함께 거기 서야 `bump-version.sh` 가 `check-version.sh` 를 찾는다.
+#[cfg(unix)]
+fn release_scratch(name: &str) -> Scratch {
+    let s = Scratch::new(name);
+    std::fs::create_dir(s.path().join("scripts")).unwrap();
+    for file in ["bump-version.sh", "check-version.sh"] {
+        std::fs::copy(script(file), s.path().join("scripts").join(file)).unwrap();
+    }
+    s
+}
+
 /// `Cargo.toml` 의 `[package]` 버전. **cargo 가 읽어 준 값을 쓴다** — 시험이 TOML 을
 /// 제 손으로 다시 파싱하면 `[package]` 표를 가리는 자가 셋째로 늘고(스크립트 둘에
 /// 더해), 스크립트와 같은 자리를 같이 틀려도 시험은 초록으로 선다. `env!` 는 스크립트
@@ -18759,7 +18814,7 @@ fn run_script_at(path: &Path, dir: Option<&Path>, args: &[&str], fed: Option<&st
     use std::io::Write as _;
     let said = "bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다";
     let mut cmd = isolated("bash");
-    // 스크립트가 부르는 `cargo metadata` 가 네트워크로 새지 않게 한다.
+    // 스크립트가 부르는 `cargo update` 가 네트워크로 새지 않게 한다.
     cmd.arg(path).args(args).env("CARGO_NET_OFFLINE", "true");
     if let Some(dir) = dir {
         cmd.current_dir(dir);
@@ -18822,6 +18877,16 @@ fn the_version_check_prints_the_manifest_version_for_the_release_workflow() {
     let out = run_script("check-version.sh", &["--print"], None);
     assert!(out.status.success(), "판을 못 찍었다\n{}", text(&out));
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), MANIFEST_VERSION);
+}
+
+/// `--print-name` 은 같은 `[package]` 표에서 이름을 읽는다 — `bump-version.sh` 가 `Cargo.lock`
+/// 의 자기 줄을 찾는 자리라, 표를 가리는 awk 를 거기 한 번 더 적지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_version_check_prints_the_crate_name_for_the_lock_reader() {
+    let out = run_script("check-version.sh", &["--print-name"], None);
+    assert!(out.status.success(), "이름을 못 찍었다\n{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), env!("CARGO_PKG_NAME"));
 }
 
 /// 미는 태그 하나가 어긋나면 그 푸시가 멈춘다.
@@ -19978,12 +20043,8 @@ fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
 #[cfg(unix)]
 #[test]
 fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
-    let s = Scratch::new("bump");
+    let s = release_scratch("bump");
     let root = s.path();
-    std::fs::create_dir(root.join("scripts")).unwrap();
-    for name in ["bump-version.sh", "check-version.sh"] {
-        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
-    }
     // 의존성 표를 함께 든 `Cargo.toml` 은 [`manifest_saying`] 이 짓는다 — 같은 글을 두 군데
     // 적으면 한쪽만 손본 날 `[package]` 표를 가리는 자가 반만 시험된다.
     std::fs::write(root.join("Cargo.toml"), manifest_saying("0.1.0")).unwrap();
@@ -20029,12 +20090,8 @@ fn bumping_moves_the_manifest_and_opens_a_changelog_section() {
 /// 든 판도 minor 로 읽혀, patch 를 재는 시험이 그 자리에서 붉어진다.
 #[cfg(unix)]
 fn bump_with(name: &str, have: &str, unreleased: &str, args: &[&str]) -> (Output, String, String) {
-    let s = Scratch::new(name);
+    let s = release_scratch(name);
     let root = s.path();
-    std::fs::create_dir(root.join("scripts")).unwrap();
-    for name in ["bump-version.sh", "check-version.sh"] {
-        std::fs::copy(script(name), root.join("scripts").join(name)).unwrap();
-    }
     std::fs::write(root.join("Cargo.toml"), manifest_saying(have)).unwrap();
     std::fs::write(
         root.join("CHANGELOG.md"),
@@ -20162,6 +20219,96 @@ fn next_prints_the_version_auto_would_pick_and_writes_nothing() {
     assert!(out.stdout.is_empty(), "멈추면서 판을 냈다\n{}", text(&out));
 }
 
+/// cargo 가 쓰는 `Cargo.lock` 의 머리. 판 4 는 cargo 1.78 부터 읽으니 MSRV(1.88)에서도 선다.
+#[cfg(unix)]
+const LOCK_HEAD: &str =
+    "# This file is automatically @generated by Cargo.\n# It is not intended for manual editing.\nversion = 4\n";
+
+/// 의존성 없는 크레이트 하나를 `0.1.5` 로 깔고 `bump-version.sh 0.2.0` 을 부른다. `lock` 이 처음
+/// `Cargo.lock` 이고, `fake_cargo` 를 주면 그 몸의 `cargo` 를 `PATH` 앞에 세운다. 돌려주는 것은
+/// 그 출력과 뒤의 `Cargo.lock` 이다.
+///
+/// **의존성을 안 둔다.** [`bump_with`] 의 `Cargo.toml` 은 `clap` 을 들고 소스가 없어 cargo 가
+/// 거기서 늘 실패한다 — 잠금 파일을 실제로 고치는 길을 재려면 레지스트리 없이 풀리는 크레이트라야
+/// 한다.
+#[cfg(unix)]
+fn bump_crate(name: &str, lock: &str, fake_cargo: Option<&str>) -> (Output, String) {
+    let s = release_scratch(name);
+    let root = s.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"moai\"\nversion = \"0.1.5\"\nedition = \"2021\"\n")
+        .unwrap();
+    std::fs::write(root.join("Cargo.lock"), lock).unwrap();
+    std::fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- 고친 것\n\n## [0.1.5] - 2026-09-01\n",
+    )
+    .unwrap();
+    let mut cmd = isolated("bash");
+    cmd.arg(root.join("scripts/bump-version.sh"))
+        .arg("0.2.0")
+        .env("MOAI_NOW", "2026-10-01T09:00:00Z")
+        .env("CARGO_NET_OFFLINE", "true");
+    if let Some(body) = fake_cargo {
+        let shim = root.join("shim");
+        std::fs::create_dir(&shim).unwrap();
+        write_exe(&shim.join("cargo"), body);
+        // [`isolated`] 가 걸러 둔 `PATH` 앞에 세운다 — 시험의 맨 `PATH` 를 다시 읽으면 걷은
+        // `moai` 자리가 도로 들어온다.
+        let kept = path_without_moai();
+        let path = std::env::join_paths(std::iter::once(shim).chain(std::env::split_paths(&kept))).unwrap();
+        cmd.env("PATH", path);
+    }
+    let out = cmd.output().expect("bash 를 실행하지 못했다 — 릴리스 스크립트 시험에는 bash 가 있어야 한다");
+    let after = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+    (out, after)
+}
+
+/// **잠금 파일은 실제로 움직여야 움직였다고 말한다**(moai-mrbv). 앞의 판이 부르던 `cargo
+/// metadata --no-deps` 는 cargo 1.97 에서 잠금 파일을 안 건드리고 0 으로 끝났다 — 0.1.3·0.1.6
+/// 판 올리기가 `Cargo.lock` 을 지난 판에 둔 채 "다시 적었다" 를 찍었다. 진짜 cargo 로 돌리고,
+/// 자기 줄이 새 판이 됐는지를 파일에서 잰다.
+#[cfg(unix)]
+#[test]
+fn bumping_moves_the_lock_line_with_the_manifest() {
+    let lock = format!("{LOCK_HEAD}\n[[package]]\nname = \"moai\"\nversion = \"0.1.5\"\n");
+    let (out, after) = bump_crate("bump-lock", &lock, None);
+    assert!(out.status.success(), "판을 못 올렸다\n{}", text(&out));
+    assert!(after.contains("name = \"moai\"\nversion = \"0.2.0\"\n"), "Cargo.lock 의 자기 줄을 안 움직였다\n{after}");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("자기 줄을 0.2.0 로 다시 적었다"), "움직인 것을 안 댔다\n{}", text(&out));
+    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다.
+    assert!(said.contains("git tag v0.2.0"), "태그 자리를 안 댔다\n{}", text(&out));
+}
+
+/// **cargo 가 0 으로 끝나도 파일을 다시 읽는다**(moai-mrbv). 아무것도 안 하고 0 으로 끝나는
+/// 가짜 `cargo` 가 1.97 의 `metadata --no-deps` 꼴이다. 종료 코드만 믿던 판은 여기서 "다시
+/// 적었다" 를 찍고 태그를 댔다.
+///
+/// 레지스트리의 같은 이름 크레이트를 자기 줄 **앞에** 둔다 — `source` 를 안 가리면 그 줄의 판을
+/// 자기 줄로 읽어, 안 움직인 잠금 파일을 맞았다고 한다.
+#[cfg(unix)]
+#[test]
+fn a_lock_cargo_left_alone_is_said_and_the_tag_waits() {
+    let lock = format!(
+        "{LOCK_HEAD}\n[[package]]\nname = \"moai\"\nversion = \"0.2.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n\n[[package]]\nname = \"moai\"\nversion = \"0.1.5\"\n"
+    );
+    let (out, after) = bump_crate("bump-lock-stale", &lock, Some("#!/bin/sh\nexit 0\n"));
+    // 여기서 죽으면 `Cargo.toml` 만 움직이고 CHANGELOG 는 안 움직인 반쪽이 남는다.
+    assert!(out.status.success(), "잠금 파일 때문에 멈췄다\n{}", text(&out));
+    assert_eq!(after, lock, "가짜 cargo 인데 잠금 파일이 바뀌었다");
+    let said = String::from_utf8_lossy(&out.stdout);
+    let warned = String::from_utf8_lossy(&out.stderr);
+    assert!(!said.contains("다시 적었다"), "안 움직인 잠금 파일을 움직였다고 했다\n{}", text(&out));
+    assert!(
+        warned.contains("아직 0.1.5 다") && warned.contains("cargo update --workspace"),
+        "무엇이 어긋났고 무엇을 칠지 안 댔다\n{}",
+        text(&out)
+    );
+    assert!(!said.contains("git tag"), "어긋난 잠금 파일로 태그를 댔다\n{}", text(&out));
+}
+
 /// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).
 ///
 /// **여기가 없으면 키를 더해 놓고 그 키가 닿는지 아무도 안 잰다.** 단위 시험은
@@ -20272,4 +20419,289 @@ fn the_bar_names_how_many_members_are_deferred_on_every_surface() {
     ok(s.path(), &["defer", &shelved, "--undo"]);
     let board = ok(s.path(), &["status"]);
     assert!(!board.contains("미룬 1"), "도로 집었는데 미룬 수가 남았다\n{board}");
+}
+
+// ── 통계 (moai-1hka.k16) ─────────────────────────────────────────────
+
+/// `--json` 에서 **그 키의 값 한 덩이** — 객체·배열이면 닫히는 곳까지, 수·글이면 그 값까지. 처음 만난 키를
+/// 짚으므로, 같은 이름이 안쪽에도 서는 키(`kind`)는 먼저 바깥 덩이를 떼어 그 안에서 찾는다. 따옴표 안의 괄호는
+/// 안 센다.
+fn value_at<'a>(json: &'a str, key: &str) -> &'a str {
+    let head = format!("\"{key}\":");
+    let at = json.find(&head).unwrap_or_else(|| panic!("{key} 가 없다 — {json}")) + head.len();
+    let rest = &json[at..];
+    let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
+    for (i, c) in rest.char_indices() {
+        match (quoted, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') => quoted = false,
+            (true, false, _) => {}
+            (false, _, '"') => quoted = true,
+            (false, _, '{' | '[') => depth += 1,
+            (false, _, '}' | ']') if depth == 0 => return &rest[..i],
+            (false, _, '}' | ']') => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[..=i];
+                }
+            }
+            (false, _, ',') if depth == 0 => return &rest[..i],
+            (false, _, _) => {}
+        }
+    }
+    rest
+}
+
+/// **`moai stats` 는 `show` 의 거르개로 고르고, 끝난 것·미룬 것·생각까지 연 채로 센다**(moai-1hka). 세는 것은
+/// 일이고, `kind` 축만 고른 줄 전부를 세어 무엇을 안 셌는지 댄다. 같은 거르개의 목록과 수가 맞는다.
+#[test]
+fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
+    let s = init("stats-count");
+    add(s.path(), &["버그 하나", "-t", "bug", "-p", "1"]);
+    let done = add(s.path(), &["끝낸 일"]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let put_off = add(s.path(), &["미룬 일"]);
+    ok(s.path(), &["defer", &put_off]);
+    add(s.path(), &["에픽", "--type", "epic"]);
+    ok(s.path(), &["idea", "add", "생각"]);
+
+    let json = ok(s.path(), &["stats", "--json"]);
+    one_json_value(&json);
+    assert!(json.starts_with(r#"{"kind":"issue","rows":3,"by":{"#), "끝낸 일과 미룬 일도 센다\n{json}");
+    let by = value_at(&json, "by");
+    assert_eq!(
+        value_at(by, "status"),
+        r#"[{"key":"todo","rows":2},{"key":"in_progress","rows":0},{"key":"review","rows":0},{"key":"done","rows":1}]"#,
+        "설정의 칸은 비어도 차례대로 선다"
+    );
+    assert_eq!(
+        value_at(by, "kind"),
+        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"idea","rows":1}]"#,
+        "kind 축은 고른 줄 전부다"
+    );
+    assert_eq!(
+        value_at(by, "priority"),
+        r#"[{"key":0,"rows":0},{"key":1,"rows":1},{"key":2,"rows":2},{"key":3,"rows":0}]"#,
+        "우선순위는 수다 — 안 적은 줄은 기본값 2"
+    );
+    assert_eq!(value_at(by, "tag"), r#"[{"key":"bug","rows":1},{"key":null,"rows":2}]"#, "없음은 null 이고 맨 뒤다");
+    assert!(value_at(by, "assignee").starts_with(r#"[{"key":"테스터","email":"tester@example.com","rows":3}"#));
+    assert_eq!(value_at(by, "epic"), r#"[{"key":null,"rows":3}]"#);
+
+    // **목록과 한 자로 거른다** — `--all` 로 끝난 것·미룬 것을 연 목록의 일 줄 수가 곧 센 수다.
+    let listed = ids_in(&ok(s.path(), &["show", "--all", "--type", "issue", "--json"])).len();
+    assert_eq!(listed, 3, "같은 거르개의 목록과 수가 갈렸다");
+
+    // 좁히는 말은 그대로 듣는다.
+    assert!(ok(s.path(), &["stats", "-t", "bug", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(ok(s.path(), &["stats", "--deferred", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(ok(s.path(), &["stats", "-s", "done", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
+    assert!(
+        ok(s.path(), &["stats", "--type", "idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        "--type 이 센 종류를 바꾼다"
+    );
+    // **`--filter type=…` 도 같은 말이다** — 센 종류는 지은 거르개에서 읽는다. argv 의 `--type` 만 읽던 판은 생각만
+    // 골라 놓고 `issue` 로 세어 `rows:0` 을 냈다(탐색기의 `SPC f type=idea` 는 처음부터 생각을 셌다).
+    assert!(
+        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        "--filter type= 이 센 종류를 안 바꿨다"
+    );
+    // `--all` 은 받고 아무것도 안 바꾼다 — 이미 다 연 채로 센다.
+    assert_eq!(ok(s.path(), &["stats", "--all", "--json"]), json);
+
+    // **`--by` 는 `by` 만 좁힌다** — 나머지 키는 늘 선다.
+    let narrow = ok(s.path(), &["stats", "--by", "tag", "--json"]);
+    assert_eq!(value_at(&narrow, "by"), r#"{"tag":[{"key":"bug","rows":1},{"key":null,"rows":2}]}"#);
+    for key in ["flow", "lead_time", "cycle_time", "work", "reviews"] {
+        value_at(&narrow, key);
+    }
+}
+
+/// **소요는 지금 done 에 선 줄만 재고, 시작을 모르는 줄은 0 이 아니라 `unknown` 이다.** 토큰은 `tokens=` 를 든
+/// 줄만 더하고 하나도 없으면 null 이다. 흐름은 만든 때와 닫힌 때(`--done` 이 읽는 값)로 주마다 센다.
+#[test]
+fn stats_measures_time_and_work_without_turning_unknown_into_zero() {
+    let s = init("stats-time");
+    let rows = [
+        r#"{"id":"argos-0001","title":"닫은 일","status":"done","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T03:00:00Z","status_since":"2026-09-08T03:00:00Z","done_at":"2026-09-08T03:00:00Z","started_at":"2026-09-08T01:00:00Z"}"#,
+        r#"{"id":"argos-0002","title":"시작을 모르는 리뷰","status":"done","tags":["review"],"created_at":"2026-09-09T00:00:00Z","updated_at":"2026-09-09T10:00:00Z","status_since":"2026-09-09T10:00:00Z","done_at":"2026-09-09T10:00:00Z"}"#,
+        r#"{"id":"argos-0003","title":"지난주 일","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), rows.join("\n") + "\n").unwrap();
+    ok(s.path(), &["note", "argos-0001", "model: anthropic/opus-5 tokens=1000 (high — the write path)"]);
+    ok(s.path(), &["note", "argos-0002", "model: anthropic/opus-5 (max — review)"]);
+
+    let json = ok(s.path(), &["stats", "--last", "2", "--json"]);
+    // 만든 지 3시간·10시간 — 가운데 둘의 평균과 nearest-rank p90.
+    assert_eq!(value_at(&json, "lead_time"), r#"{"done":2,"measured":2,"unknown":0,"median":390,"p90":600}"#);
+    assert_eq!(
+        value_at(&json, "cycle_time"),
+        r#"{"done":2,"measured":1,"unknown":1,"median":120,"p90":120}"#,
+        "시작을 모르는 줄이 0 분으로 들어갔다"
+    );
+    // `MOAI_NOW` 는 2026-09-11(금) — 지금 든 주는 9월 7일 월요일부터다.
+    assert_eq!(
+        value_at(&json, "flow"),
+        r#"{"bucket":"week","zone":"UTC","buckets":[{"start":"2026-08-31","created":1,"done":0},{"start":"2026-09-07","created":2,"done":2}]}"#
+    );
+    let work = value_at(&json, "work");
+    assert!(work.starts_with(r#"{"recorded":2,"lines":2,"tokened":1,"tokens":1000,"#), "{work}");
+    let reviews = value_at(&json, "reviews");
+    assert!(
+        reviews.starts_with(r#"{"rows":1,"work":{"recorded":1,"lines":1,"tokened":0,"tokens":null,"#),
+        "토큰을 안 적은 줄만 있으면 합은 0 이 아니라 null 이다\n{reviews}"
+    );
+    assert!(value_at(reviews, "by_grade").contains(r#"{"grade":"max","lines":1,"tokened":0,"tokens":null}"#));
+
+    // 사람 화면도 같은 수를 낸다 — 모르는 것을 따로 댄다.
+    let screen = ok(s.path(), &["stats"]);
+    assert!(screen.contains("중앙값 2시간 · p90 2시간"), "{screen}");
+    assert!(screen.contains("모름 1"), "모르는 수를 안 댄다\n{screen}");
+    assert!(screen.contains("토큰 1,000"), "{screen}");
+}
+
+/// **흐름의 날은 읽는 사람의 날이고, `--created <날>` 이 그날을 읽는 시간대와 같다.** 그래서 칸 하나의 수가 그날로
+/// 거른 목록의 수와 맞는다 — UTC 일요일 23시는 서울의 월요일이다.
+#[test]
+fn stats_flow_counts_the_day_the_created_filter_reads() {
+    let s = init("stats-zone");
+    let row = r#"{"id":"argos-0001","title":"자정 언저리","status":"todo","created_at":"2026-09-06T23:00:00Z","updated_at":"2026-09-06T23:00:00Z","status_since":"2026-09-06T23:00:00Z"}"#;
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{row}\n")).unwrap();
+    let run = |tz: &str, args: &[&str]| {
+        let out = staged(args).current_dir(s.path()).env("TZ", tz).output().expect("moai 를 못 돌렸다");
+        assert!(out.status.success(), "{tz} {args:?}: {}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let created_on = |tz: &str, day: &str| -> usize {
+        let flow = run(tz, &["stats", "--bucket", "day", "--last", "7", "--json"]);
+        let slot = flow
+            .split(r#"{"start":"#)
+            .find(|b| b.starts_with(&format!("\"{day}\"")))
+            .unwrap_or_else(|| panic!("{day} 칸이 없다 — {flow}"));
+        let listed = ids_in(&run(tz, &["show", "--created", day, "--json"])).len();
+        let counted = if slot.contains(r#""created":1"#) { 1 } else { 0 };
+        assert_eq!(counted, listed, "{tz} 의 {day}: 흐름 {counted}, 목록 {listed}");
+        counted
+    };
+    assert_eq!(created_on("UTC", "2026-09-06"), 1);
+    assert_eq!(created_on("UTC", "2026-09-07"), 0);
+    // **자료가 있는 기계에서만 잰다** — 정적 판이 zoneinfo 없는 기계도 받는다(moai-77ap).
+    if Path::new("/usr/share/zoneinfo/Asia/Seoul").exists() {
+        assert_eq!(created_on("Asia/Seoul", "2026-09-07"), 1, "서울의 월요일에 안 섰다");
+        assert_eq!(created_on("Asia/Seoul", "2026-09-06"), 0);
+        assert!(run("Asia/Seoul", &["stats", "--json"]).contains(r#""zone":"Asia/Seoul""#));
+    }
+}
+
+/// **세는 자리에 뜻이 없는 플래그는 말없이 안 먹는다** — 차례·쪽·겹쳐 보기는 받지 않고, 모르는 칸과 축은
+/// 거절한다. 거절은 stdout 에 아무것도 안 낸다.
+#[test]
+fn stats_refuses_what_it_does_not_take() {
+    let s = init("stats-refuse");
+    add(s.path(), &["하나"]);
+    for args in [
+        &["stats", "--sort", "id"][..],
+        &["stats", "-n", "3"],
+        &["stats", "--after", "argos-0001"],
+        &["stats", "--worktree"],
+        &["stats", "--tree"],
+        &["stats", "--by", "colour"],
+        &["stats", "--bucket", "month"],
+        &["stats", "--last", "0"],
+        &["stats", "-s", "in-progress"],
+        &["stats", "--done", "2026-09-01", "-s", "todo"],
+    ] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?} 를 받았다\n{}", text(&out));
+        assert!(out.stdout.is_empty(), "{args:?} 가 거절하며 무언가 냈다\n{}", text(&out));
+    }
+}
+
+/// 사람 화면 — 한눈 보기는 칸·우선순위·흐름·소요·AI 작업을, `--by` 는 물은 축만 통째로 낸다. 영어가 기본이다.
+#[test]
+fn stats_draws_an_overview_or_the_axes_asked() {
+    let s = init("stats-screen");
+    add(s.path(), &["버그 하나", "-t", "bug"]);
+    let done = add(s.path(), &["끝낸 일"]);
+    ok(s.path(), &["mv", &done, "done"]);
+
+    let overview = ok(s.path(), &["stats"]);
+    for want in [
+        "센 줄  issue 2건",
+        "· todo 1",
+        "✓ done 1",
+        "p2 2",
+        "흐름",
+        "리드 타임",
+        "사이클 타임",
+        "AI 작업",
+        "리뷰",
+        "더 보기",
+    ] {
+        assert!(overview.contains(want), "{want} 가 없다\n{overview}");
+    }
+    let axes = ok(s.path(), &["stats", "--by", "tag,status"]);
+    assert!(axes.contains("tag별") && axes.contains("#bug") && axes.contains("(없음)"), "{axes}");
+    assert!(axes.find("tag별") < axes.find("status별"), "물은 차례대로 서지 않았다\n{axes}");
+    assert!(!axes.contains("흐름"), "물은 축만 내야 한다\n{axes}");
+    // **`--bucket`·`--last` 는 흐름을 묻는 말이다** — `--by` 곁에서도 말없이 먹지 않고 축 밑에 흐름을 그린다.
+    let with_flow = ok(s.path(), &["stats", "--by", "tag", "--bucket", "day", "--last", "3"]);
+    assert!(with_flow.contains("#bug") && with_flow.contains("날마다"), "--bucket 을 말없이 먹었다\n{with_flow}");
+    assert_eq!(with_flow.matches("\n  20").count(), 3, "--last 3 이 칸 셋을 안 냈다\n{with_flow}");
+
+    let mut cmd = staged(&["stats"]);
+    with_lang(&mut cmd, None);
+    let out = cmd.current_dir(s.path()).output().expect("moai 를 실행하지 못했다");
+    let english = String::from_utf8(out.stdout).unwrap();
+    for want in ["Counted  issue 2", "Flow", "Lead time", "Cycle time", "AI work", "Reviews"] {
+        assert!(english.contains(want), "{want} 가 없다\n{english}");
+    }
+}
+
+/// **사람 화면의 `--by` 는 저널을 안 푼다** — 물은 축만 그리고 AI 작업은 안 내므로, 못 읽는 저널 하나가 빠짐없이
+/// 그린 화면에 "이력이 빠졌다" 는 말과 비영 종료를 얹을 까닭이 없다. `work` 를 내는 `--json` 은 그대로 모자람을 댄다.
+#[cfg(unix)]
+#[test]
+fn stats_by_on_screen_does_not_read_the_journal() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("stats-by-unread");
+    let id = add(s.path(), &["하나"]);
+    ok(s.path(), &["note", &id, "model: anthropic/opus-5 tokens=1 (high — x)"]);
+    let journal = only_journal(s.path());
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&journal).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return; // root 는 권한을 안 본다
+    }
+    let screen = moai(s.path(), &["stats", "--by", "status"]);
+    let json = moai(s.path(), &["stats", "--by", "status", "--json"]);
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(screen.status.success(), "물은 축만 그렸는데 저널 탓에 실패했다\n{}", text(&screen));
+    assert!(screen.stderr.is_empty(), "다 그린 화면에 이력이 빠졌다고 했다\n{}", text(&screen));
+    assert!(!json.status.success(), "`work` 가 모자란 기계 답을 0 으로 끝냈다\n{}", text(&json));
+    assert!(String::from_utf8_lossy(&json.stdout).contains(r#""journal_error":"#), "{}", text(&json));
+}
+
+/// **묶음의 cycle time 은 "시작이 안 적혔다" 가 아니다** — 제 시작을 일부러 안 읽으므로(멤버로 잰다) 그렇게 댄다.
+/// 시작을 든 묶음 앞에서 "적힌 시작이 없다" 고 하면 거짓말이다. **끊긴 에픽은 목록과 같은 말로 댄다**(`(없는 에픽)`).
+#[test]
+fn stats_names_a_group_s_unread_start_and_a_gone_epic() {
+    let s = init("stats-groups");
+    let rows = [
+        r#"{"id":"argos-0001","title":"묶음","kind":"epic","status":"todo","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T00:00:00Z","status_since":"2026-09-08T00:00:00Z","started_at":"2026-09-08T01:00:00Z"}"#,
+        r#"{"id":"argos-0001.a1b","title":"멤버","status":"done","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-09T00:00:00Z","status_since":"2026-09-09T00:00:00Z","done_at":"2026-09-09T00:00:00Z","started_at":"2026-09-08T02:00:00Z"}"#,
+        r#"{"id":"argos-0002","title":"끊긴 소속","status":"todo","epic":"argos-zzzz","created_at":"2026-09-08T00:00:00Z","updated_at":"2026-09-08T00:00:00Z","status_since":"2026-09-08T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), rows.join("\n") + "\n").unwrap();
+
+    let groups = ok(s.path(), &["stats", "--type", "epic"]);
+    assert!(groups.contains("묶음은 제 시작을 안 읽는다"), "묶음의 모름을 자료가 빈 것으로 댔다\n{groups}");
+    assert!(!groups.contains("시작이 안 적혔다"), "시작을 든 묶음에 시작이 없다고 했다\n{groups}");
+    // 일의 cycle time 은 그대로 잰다 — 멤버는 시작과 끝을 다 든다.
+    let work = ok(s.path(), &["stats"]);
+    assert!(work.contains("중앙값 22시간"), "멤버의 cycle time 이 안 섰다\n{work}");
+
+    let epics = ok(s.path(), &["stats", "--by", "epic"]);
+    assert!(epics.contains("argos-zzzz  (없는 에픽)"), "끊긴 에픽을 빈 제목으로 댔다\n{epics}");
 }

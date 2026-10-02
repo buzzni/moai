@@ -643,11 +643,19 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 5] = [
+    const NOT_COMPONENTS: [(&str, &str); 7] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("draw.rs", "그림 — Frame 에 찍는다"),
         ("layer.rs", "프로젝트 층 — 등록한 프로젝트를 열고(Repo·사용자 설정) 스레드에서 읽는다"),
+        (
+            "mouse.rs",
+            "마우스 — App 의 포커스·커서·굴린 자리를 옮기고, 끈 칸의 몫을 사용자 설정에 적는다(App::save_look)",
+        ),
         ("register.rs", "등록·해제 — 디렉터리를 읽고(fs) 사용자 설정을 쓴다. 창의 상태와 키는 조각 picker.rs 가 든다"),
+        (
+            "stats.rs",
+            "통계 창 — 저장소(Repo)를 열어 읽고 탐색기가 든 노트를 읽어 센다(report::stats). 창의 상태는 같은 파일 위쪽의 Window 가 든다",
+        ),
         (
             "zones.rs",
             "시간대 고르기 — tzdb(crate::tz)를 읽고 사용자 설정을 쓴다. 창의 상태와 거르기는 같은 파일 위쪽의 Zones 가 조각으로 든다",

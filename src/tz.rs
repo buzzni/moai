@@ -32,7 +32,7 @@ fn zoneinfo() -> PathBuf {
 pub enum Trouble {
     /// tzdb 가 아예 없다 — 정적 musl 판을 알파인·scratch 에 받은 자리다.
     NoTzdb { at: PathBuf },
-    /// 그 이름의 자료가 없다 — 오타이거나, 이 기계의 tzdb 가 그 이름을 모른다.
+    /// 그 이름의 자료가 없고 POSIX 규칙 글로도 안 읽힌다 — 오타이거나, 이 기계의 tzdb 가 그 이름을 모른다.
     Unknown { name: String },
     /// 자료는 있는데 못 읽는다. `said` 는 운영체제가 낸 글이다.
     Unreadable { name: String, said: String },
@@ -109,10 +109,29 @@ impl Zone {
     }
 
     /// 이름으로 연다. `UTC` 는 자료를 안 본다 — tzdb 가 없는 기계에서도 서야 한다.
+    ///
+    /// **tzdb 로 못 연 이름은 POSIX 규칙 글로 읽는다**(moai-btxt.1gk) — `JST-9`·`<+09>-9`·`CST6CDT,M3.2.0,M11.1.0`.
+    /// glibc 의 차례(파일 먼저, 규칙 다음)와 같아서 `EST5EDT` 처럼 둘 다인 이름은 tzdb 의 것이 선다. 그 시간대의
+    /// 이름은 **받은 글 그대로**다(2026-10-01 사용자 결정) — 설정에 적어도 같은 자로 다시 열린다. 규칙 글은 자료가
+    /// 필요 없어 tzdb 가 없는 기계(정적 musl 판)에서도 선다. 규칙으로도 못 읽으면 tzdb 의 까닭을 그대로 낸다.
+    ///
+    /// **tzdb 가 낸 까닭을 가리지 않는다**(리뷰 moai-btxt.0ln) — glibc 는 파일을 못 열면 까닭이 무엇이든 규칙으로
+    /// 읽는다. 없는 이름(`Unknown`)만 넘기던 판은 tzdb 디렉터리에 권한이 없는 샌드박스에서 `TZ=JST-9` 를
+    /// `Unreadable` 로 떨궜다. 규칙 글이 아닌 이름은 규칙으로도 안 풀려 tzdb 의 까닭이 그대로 선다.
     pub fn load(name: &str) -> Result<Zone, Trouble> {
         if name == "UTC" {
             return Ok(Zone::utc());
         }
+        Zone::from_tzdb(name).or_else(|why| Zone::from_rule(name).ok_or(why))
+    }
+
+    /// POSIX 규칙 글 하나로 선 시간대 — 전환이 없고 모든 때를 규칙이 잰다.
+    fn from_rule(text: &str) -> Option<Zone> {
+        let rule = Rule::parse(text)?;
+        Some(Zone { name: text.to_string(), shifts: Vec::new(), before: rule.std, rule: Some(rule) })
+    }
+
+    fn from_tzdb(name: &str) -> Result<Zone, Trouble> {
         let dir = zoneinfo();
         if !dir.is_dir() {
             return Err(Trouble::NoTzdb { at: dir });
@@ -233,10 +252,15 @@ fn system_name() -> Option<String> {
         })
 }
 
-/// `TZ` 가 대는 이름. 없거나 이름 꼴이 아니면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
+/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
 fn env_name() -> Option<String> {
+    tz_name(&std::env::var_os("TZ")?)
+}
+
+/// `TZ` 의 값을 이름으로 — [`env_name`] 의 셈. 환경을 안 읽어야 시험이 꼴마다 잰다.
+fn tz_name(value: &std::ffi::OsStr) -> Option<String> {
     // `TZ=:Asia/Seoul` 처럼 콜론을 다는 꼴이 있다(POSIX).
-    let raw = std::env::var_os("TZ")?.to_string_lossy().trim_start_matches(':').to_string();
+    let raw = value.to_string_lossy().trim_start_matches(':').to_string();
     // **빈 `TZ` 는 UTC 다**(POSIX) — 설정해 두고 비운 것은 "여기는 UTC 로 보겠다" 는 말이지
     // "안 정했다" 가 아니다. 안 받고 `/etc/localtime` 으로 내려가면 같은 기계의 다른 도구와
     // 시각이 갈린다.
@@ -251,10 +275,11 @@ fn env_name() -> Option<String> {
         let at = PathBuf::from(&raw);
         return name_under(&at, &zoneinfo()).or_else(|| name_under(&at, Path::new("/usr/share/zoneinfo")));
     }
-    // **이름 꼴만 받는다.** `TZ=<+09>-9` 같은 POSIX 규칙 글은 이름이 아니다. `EST5EDT`·`Etc/GMT+9`
-    // 처럼 숫자와 부호를 쓰는 **진짜 이름**이 있어 숫자로는 못 가르므로, 가르는 것은 글자뿐이다 —
-    // 그물을 빠져나온 규칙 글은 tzdb 에서 못 찾고 UTC 로 떨어지며 한 줄로 알린다.
-    raw.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)).then_some(raw)
+    // **그 밖은 다 이름으로 넘긴다** — `TZ=<+09>-9` 같은 POSIX 규칙 글도 [`Zone::load`] 가 tzdb 다음에
+    // 읽는다(moai-btxt.1gk). 한때 이름 꼴의 글자만 받아, 꺾쇠가 든 규칙 글은 `/etc/localtime` 으로 조용히
+    // 내려갔고 `JST-9` 는 tzdb 에서 못 찾아 UTC 로 떨어졌다. 둘 다 아닌 글은 `load` 가 못 풀어 UTC 로
+    // 떨어지며 한 줄로 알린다 — glibc 도 못 읽는 `TZ` 를 UTC 로 읽는다.
+    Some(raw)
 }
 
 /// `at` 이 `dir` 밑을 가리키면 그 아래 경로가 곧 시간대 이름이다.
@@ -367,16 +392,15 @@ fn is_tzif(at: &Path) -> bool {
 ///
 /// **꼬리를 못 읽어도 파일은 선다** — 읽기는 관대하다. 그때는 옛 판처럼 마지막 전환의 값이 뒤로 이어진다.
 fn parse(raw: &[u8]) -> Option<(Vec<(i64, i32)>, i32, Option<Rule>)> {
-    let (v1, version) = head(raw, 0)?;
+    let (v1, version) = head(raw, 0, 4)?;
     if version < b'2' {
-        let (shifts, before) = block(raw, v1.after, &v1, 4)?;
+        let (shifts, before) = block(raw, &v1)?;
         return Some((shifts, before, None));
     }
     // 판 1 자료를 건너뛴 자리에 판 2 머리가 다시 선다.
-    let skip = v1.size(4);
-    let (v2, _) = head(raw, v1.after + skip)?;
-    let (shifts, before) = block(raw, v2.after, &v2, 8)?;
-    Some((shifts, before, footer(raw, v2.after + v2.size(8))))
+    let (v2, _) = head(raw, v1.after + v1.size, 8)?;
+    let (shifts, before) = block(raw, &v2)?;
+    Some((shifts, before, footer(raw, v2.after + v2.size)))
 }
 
 /// 판 2 자료 뒤의 꼬리 — 줄바꿈 둘 사이의 POSIX TZ 글. 비었으면(규약이 허락한다) 규칙이 없다.
@@ -386,51 +410,46 @@ fn footer(raw: &[u8], at: usize) -> Option<Rule> {
     Rule::parse(std::str::from_utf8(&tail[..end]).ok()?)
 }
 
-/// TZif 머리글의 셈들.
+/// TZif 머리글의 셈들. [`block`] 이 읽는 것만 든다.
 struct Head {
-    isutcnt: usize,
-    isstdcnt: usize,
-    leapcnt: usize,
     timecnt: usize,
     typecnt: usize,
-    charcnt: usize,
+    /// 전환 시각 하나의 크기 — 판 1 자료는 4, 판 2 자료는 8. **[`head`] 가 `size` 를 셀 때 쓴 값 그대로 든다**
+    /// (리뷰 moai-btxt.0ln): [`block`] 이 따로 받으면 그 값과 어긋날 수 있고, 그때는 파일 안이라고 확인해 둔
+    /// `size` 가 [`block`] 이 읽는 범위를 묶지 못한다.
+    time: usize,
     /// 머리글 바로 뒤 — 자료가 시작하는 자리.
     after: usize,
+    /// 이 머리글이 낸 자료 덩어리의 바이트 수. **파일 안에 다 든다** — [`head`] 가 재 두었다.
+    size: usize,
 }
 
-impl Head {
-    /// 이 셈이 낸 자료 덩어리의 바이트 수. `time` 은 전환 시각 하나의 크기(4 또는 8)다.
-    fn size(&self, time: usize) -> usize {
-        self.timecnt * (time + 1)
-            + self.typecnt * 6
-            + self.charcnt
-            + self.leapcnt * (time + 4)
-            + self.isstdcnt
-            + self.isutcnt
-    }
-}
-
-fn head(raw: &[u8], at: usize) -> Option<(Head, u8)> {
+/// `at` 의 머리글을 읽는다. `time` 은 그 자료의 전환 시각 하나의 크기(판 1 은 4, 판 2 는 8)다.
+///
+/// **자료 덩어리가 파일 안에 다 들어야 머리글로 받는다**(moai-btxt.xia). 셈 여섯은 남이 지은 파일(`TZDIR`)이
+/// 대는 32비트 수라, 곱해 더한 크기가 `usize` 가 32비트인 기계에서 넘칠 수 있다 — 그 크기는 `u64` 로 재고,
+/// 파일 길이를 넘으면 여기서 돌려보낸다. 그러면 [`block`] 과 [`parse`] 가 이 셈으로 짓는 자리는 모두 파일
+/// 길이 안이라 어느 기계에서도 안 넘친다. 뒤쪽(윤초·표준/UT 표시)은 안 읽지만 그 자리가 잘렸으면 못 받는다 —
+/// 판 1 파일도, 판 2 자료도 그렇다(판 2 는 한때 꼬리만 없는 것으로 읽었다). tzcode 와 glibc 도 그런 파일을 안 받는다.
+fn head(raw: &[u8], at: usize, time: usize) -> Option<(Head, u8)> {
     let b = raw.get(at..at + 44)?;
     if &b[..4] != b"TZif" {
         return None;
     }
-    let n = |i: usize| -> usize { u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as usize };
-    Some((
-        Head {
-            isutcnt: n(20),
-            isstdcnt: n(24),
-            leapcnt: n(28),
-            timecnt: n(32),
-            typecnt: n(36),
-            charcnt: n(40),
-            after: at + 44,
-        },
-        b[4],
-    ))
+    let n = |i: usize| u64::from(u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]));
+    let (isutcnt, isstdcnt, leapcnt, timecnt, typecnt, charcnt) = (n(20), n(24), n(28), n(32), n(36), n(40));
+    // 셈 하나가 2³² 아래이고 곱하는 수가 열둘 아래라, 여섯을 더해도 `u64` 에 넉넉히 든다.
+    let t = time as u64;
+    let size = timecnt * (t + 1) + typecnt * 6 + charcnt + leapcnt * (t + 4) + isstdcnt + isutcnt;
+    let after = at + 44;
+    let size = usize::try_from(size).ok().filter(|size| *size <= raw.len() - after)?;
+    // 파일 안에 드는 크기보다 작은 셈이라 `usize` 로 옮겨도 잃는 것이 없다.
+    Some((Head { timecnt: timecnt as usize, typecnt: typecnt as usize, time, after, size }, b[4]))
 }
 
-fn block(raw: &[u8], at: usize, h: &Head, time: usize) -> Option<(Vec<(i64, i32)>, i32)> {
+/// 머리글 `h` 가 낸 자료 덩어리를 읽는다 — 자리와 시각의 크기는 그 머리글이 든 값이다.
+fn block(raw: &[u8], h: &Head) -> Option<(Vec<(i64, i32)>, i32)> {
+    let (at, time) = (h.after, h.time);
     if h.typecnt == 0 {
         return None;
     }
@@ -538,18 +557,31 @@ impl Rule {
     /// 선다. 두 해 앞까지 보는 까닭은 시각이 167시까지 가서다(RFC 8536 3.3.1) — 앞 해의 두 전환이 다 이 해로
     /// 넘어오면 그때 선 것은 두 해 앞의 전환이다(`J365/167,J365/100`, 리뷰 moai-efoc.3e1). 한 해의 전환은 그해
     /// 앞뒤 여드레 남짓 안에 서므로 세 해 앞이나 두 해 뒤는 답이 될 수 없다. 두 전환이 한 순간이면 들어가는
-    /// 쪽을 뒤로 친다 — 늘 서머타임은 나오자마자 다시 들어간다. 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도
-    /// 날 수에 86,400 을 곱하다 넘치지 않는다.
+    /// 쪽을 뒤로 친다. 셈은 `i128` 로 한다: 받는 초가 `i64` 끝이어도 날 수에 86,400 을 곱하다 넘치지 않는다.
+    ///
+    /// **이듬해의 들어감에 닿은 나옴은 없는 전환이다**(moai-btxt.49f). `J1/0,J365/26` 처럼 서머타임이 한 해 넘게
+    /// 걸리면 두 해의 서머타임이 겹친다 — 그 나옴을 전환으로 치던 판은 한 해 대부분을 표준시로 그렸다. tzcode 는
+    /// 나옴이 한 해 넘게 뒤인 해에 전환을 안 지어 늘 서머타임으로 읽고, 이 셈도 그쪽을 따른다. glibc 는 해마다
+    /// UTC 의 그해 안에서만 들어감과 나옴을 견줘, 1월 1일 0시(UTC)부터 그해의 들어감까지(`J1/0` 이면 세 시간)를
+    /// 표준시로 그린다(리뷰 moai-btxt.0ln, Python `time.localtime` 으로 확인했다). 앞 해의 서머타임이 아직 안
+    /// 끝난 때라 그 세 시간도 tzcode 를 따른다. 겹침은 **해마다** 가린다: 서수 날(`n`)은 2월 29일을 세어 같은
+    /// 규칙이 평년에만 겹칠 수 있고, 그때 윤년의 나옴은 그대로 선다(glibc 와 같다). 한 순간에 맞물린 나옴
+    /// (`J365/25`, RFC 8536 의 늘 서머타임)도 이 갈래다. 해를 넘겨 걸친 남반구는 나옴이 그해의 들어감보다 앞이라
+    /// 안 걸린다.
     fn last_change(&self, secs: i64) -> Option<(i128, i32)> {
         let dst = self.dst.as_ref()?;
         let year = crate::model::civil_from_days(secs.div_euclid(86_400)).0;
+        let moment = |y: i64, (day, time): (Day, i32), before: i32| {
+            i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before)
+        };
+        let start = |y: i64| moment(y, dst.start, self.std);
         // `(때, 들어가는가)` 의 최댓값이 마지막 전환이다 — `true` 가 `false` 보다 커서 한 순간이면 들어가는 쪽이 이긴다.
         let (at, on) = (year - 2..=year + 1)
             .flat_map(|y| {
-                [(true, dst.start, self.std), (false, dst.end, dst.offset)].map(|(on, (day, time), before)| {
-                    (i128::from(day.in_year(y)) * 86_400 + i128::from(time) - i128::from(before), on)
-                })
+                let end = Some(moment(y, dst.end, dst.offset)).filter(|end| *end < start(y + 1));
+                [Some((start(y), true)), end.map(|end| (end, false))]
             })
+            .flatten()
             .filter(|&(at, _)| at <= i128::from(secs))
             .max()?;
         Some((at, if on { dst.offset } else { self.std }))
@@ -767,6 +799,45 @@ mod tests {
             Some("Asia/Tokyo".into())
         );
         assert_eq!(name_under(Path::new("/usr/share/./zoneinfo/UTC"), zone), Some("UTC".into()));
+
+        // **규칙 글도 이름으로 넘긴다**(moai-btxt.1gk) — 꺾쇠가 든 글을 거르던 판은 `/etc/localtime` 으로 내려갔다.
+        let name = |v: &str| tz_name(std::ffi::OsStr::new(v));
+        assert_eq!(name(""), Some("UTC".into()));
+        assert_eq!(name(":Asia/Seoul"), Some("Asia/Seoul".into()));
+        for rule in ["JST-9", "<+09>-9", "<-03>3", "CST6CDT,M3.2.0,M11.1.0", "AEST-10AEDT,M10.1.0,M4.1.0/3"] {
+            assert_eq!(name(rule), Some(rule.into()), "{rule:?} 를 이름으로 안 넘겼다");
+            assert_eq!(name(&format!(":{rule}")), Some(rule.into()), ":{rule:?} 를 이름으로 안 넘겼다");
+        }
+    }
+
+    /// **tzdb 에 없는 이름은 POSIX 규칙 글로 연다**(moai-btxt.1gk) — 이름은 받은 글 그대로다(2026-10-01 사용자
+    /// 결정). 규칙 글은 자료가 필요 없어, 이 기계에 tzdb 가 있든 없든 같은 답이다.
+    #[test]
+    fn a_posix_rule_opens_as_a_zone_under_its_own_text() {
+        let at = |s: &str| crate::model::parse_rfc3339(s).unwrap();
+        for text in ["JST-9", "<+09>-9"] {
+            let z = Zone::load(text).unwrap_or_else(|why| panic!("{text:?} 를 못 열었다 — {why:?}"));
+            assert_eq!(z.name(), text, "받은 글이 이름으로 안 섰다");
+            assert!(!z.is_utc());
+            assert_eq!(z.shift("2026-10-01T00:00:00Z"), "2026-10-01T09:00:00Z");
+        }
+        let ny = Zone::load("EST5EDT,M3.2.0,M11.1.0").expect("서머타임이 든 규칙 글을 못 열었다");
+        assert_eq!(ny.local(at("2026-01-15T12:00:00Z")), at("2026-01-15T07:00:00Z"));
+        assert_eq!(ny.local(at("2026-07-01T12:00:00Z")), at("2026-07-01T08:00:00Z"));
+        // `/` 가 든 규칙 글은 tzdb 쪽에서 여러 마디의 경로로 찾다가 못 찾고 규칙으로 선다(리뷰 moai-btxt.0ln).
+        let sydney = Zone::load("AEST-10AEDT,M10.1.0,M4.1.0/3").expect("`/` 가 든 규칙 글을 못 열었다");
+        assert_eq!(sydney.local(at("2026-01-15T00:00:00Z")), at("2026-01-15T11:00:00Z"));
+        assert_eq!(sydney.local(at("2026-07-01T00:00:00Z")), at("2026-07-01T10:00:00Z"));
+        // UTC 와 같은 규칙은 UTC 다 — 화면이 그 자리에서 그대로 둔다.
+        assert!(Zone::load("UTC0").expect("UTC0 를 못 열었다").is_utc());
+        // 이름도 규칙도 아니면 tzdb 의 까닭이 그대로 선다 — 규칙으로 못 읽었다는 말을 따로 짓지 않는다.
+        for bad in ["JST", "JST-9x", "<+09"] {
+            match Zone::load(bad) {
+                Err(Trouble::Unknown { name }) => assert_eq!(name, bad),
+                Err(Trouble::NoTzdb { .. }) => {}
+                other => panic!("{bad:?} 가 시간대로 섰다 — {other:?}"),
+            }
+        }
     }
 
     /// 손으로 지은 TZif 를 판 1·판 2 두 꼴로 읽는다. **판 2 면 뒤 자료를 읽는다** — 앞의 32비트
@@ -798,6 +869,33 @@ mod tests {
         odd.extend_from_slice(&v2);
         odd.extend_from_slice(b"\nEST5EDT\n");
         assert_eq!(parse(&odd), Some((vec![(100, 3600), (1 << 40, 7200)], 0, None)));
+    }
+
+    /// **머리글의 셈이 파일 밖을 대면 TZif 가 아니다**(moai-btxt.xia). 셈은 남이 지은 파일(`TZDIR`)이 대는 32비트
+    /// 수라, 곱해 더하면 `usize` 가 32비트인 기계에서 넘친다 — 거기서 넘친 크기로 자리를 지으면 엉뚱한 바이트를
+    /// 읽거나 첨자가 터진다. 64비트 기계에서는 셈 하나를 끝까지 올려도 안 넘치니, 여기서 붉어지는 것은 파일 길이로
+    /// 묶는 자다. 판 1 파일의 뒤쪽이 잘린 것도 같은 자에 걸린다.
+    #[test]
+    fn a_header_that_counts_past_the_file_is_not_a_tzif() {
+        let fine = tzif(b'\0', 4, &[(100i64, 1)], &[0, 3600]);
+        assert_eq!(parse(&fine), Some((vec![(100, 3600)], 0, None)));
+        // isutcnt·isstdcnt·leapcnt·timecnt·typecnt·charcnt 차례로 하나씩 끝까지 올린다.
+        for at in [20, 24, 28, 32, 36, 40] {
+            let mut huge = fine.clone();
+            huge[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+            assert_eq!(parse(&huge), None, "{at} 자리의 셈이 파일 밖을 대는데 읽었다");
+        }
+        // 윤초 하나를 댔는데 그 자리가 없다 — 판 1 은 그 자리를 안 읽어도, 잘린 파일이라 못 받는다.
+        let mut cut = fine.clone();
+        cut[28..32].copy_from_slice(&1u32.to_be_bytes());
+        assert_eq!(parse(&cut), None, "잘린 판 1 파일을 읽었다");
+        // 판 2 의 앞 자료가 파일 밖을 대면 뒤 머리글을 찾으러 가지 않는다.
+        let mut v2 = tzif(b'2', 4, &[(100i64, 1)], &[0, 3600]);
+        v2.extend_from_slice(&tzif(b'2', 8, &[(100i64, 1)], &[0, 3600]));
+        v2.extend_from_slice(b"\nSTD0\n");
+        assert!(parse(&v2).is_some());
+        v2[32..36].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(parse(&v2), None, "판 1 자료의 셈이 파일 밖을 대는데 읽었다");
     }
 
     /// **slim 파일은 마지막 전환 뒤를 꼬리가 잰다**(moai-r621). `zic -b slim`(2020b 부터 기본)으로 지은
@@ -913,6 +1011,37 @@ mod tests {
         for (when, off) in [("2026-01-02T00:00:00Z", 1.0), ("2026-01-04T03:00:00Z", 0.0), ("2026-01-06T23:00:00Z", 1.0)]
         {
             assert_eq!(late.offset_at(at(when)), h(off), "J365/167 {when}");
+        }
+
+        // **한 해 넘게 걸친 서머타임은 늘 서머타임이다**(moai-btxt.49f) — 그해의 나옴(이듬해 1월 1일 04:00 UTC)이
+        // 이듬해의 들어감(03:00 UTC)보다 늦어 두 해의 서머타임이 겹친다. 나옴을 마지막 전환으로 치던 판은 1월 1일
+        // 04:00 부터 한 해 내내 표준시(-3)로 그렸다. tzcode 는 늘 서머타임(-2)으로 읽는다. 윤년도 같다. 첫 줄에서는
+        // glibc 와 갈린다 — glibc 는 그해의 들어감(03:00 UTC) 앞의 세 시간을 표준시로 그리지만, 앞 해의 서머타임이
+        // 아직 안 끝난 때라 tzcode 를 따른다(리뷰 moai-btxt.0ln).
+        let spanning = rule("AAA3BBB,J1/0,J365/26");
+        for when in [
+            "2026-01-01T02:59:59Z",
+            "2026-01-01T03:00:00Z",
+            "2026-01-01T04:00:00Z",
+            "2026-07-01T12:00:00Z",
+            "2028-12-31T12:00:00Z",
+            "2029-01-01T04:00:00Z",
+        ] {
+            assert_eq!(spanning.offset_at(at(when)), h(-2.0), "J1/0,J365/26 {when}");
+        }
+
+        // 겹침은 **해마다** 가린다 — 서수 날(`n`)은 2월 29일을 세어, 같은 `365/1` 이 평년에는 이듬해의 들어감과
+        // 맞물리고 윤년에는 12월 31일에 끝난다. 그날 하루만 표준시다(glibc 와 같다).
+        let ordinal = rule("STD0DST,0/0,365/1");
+        for (when, off) in [
+            ("2026-12-31T12:00:00Z", 1.0),
+            ("2027-06-01T00:00:00Z", 1.0),
+            ("2028-12-30T23:59:59Z", 1.0),
+            ("2028-12-31T00:00:00Z", 0.0),
+            ("2028-12-31T23:59:59Z", 0.0),
+            ("2029-01-01T00:00:00Z", 1.0),
+        ] {
+            assert_eq!(ordinal.offset_at(at(when)), h(off), "0/0,365/1 {when}");
         }
 
         // 서머타임 없는 규칙 — 분이 든 오프셋은 부호를 뒤집어 읽는다.

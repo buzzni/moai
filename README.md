@@ -8,14 +8,18 @@ is something `moai status` reflects back at you, never something it enforces.
 
 ```
 $ moai
-이슈 941  · 에픽 148       .moai/issues.jsonl
+Issues 941  · Epics 148       .moai/issues.jsonl
 
   · todo 36    ▸ in_progress 5    ? review 0    ✓ done 900
 
-! 한 번에 벌여 놓은 것 5건 — 하나씩 끝내는 편이 낫다
-+ 쌓인 idea 36건
+! Started at once 5 — finishing one at a time goes better
 
-다음:  `moai ready` 로 집을 것을 고른다
++ Ideas piled up 36 (oldest 4 days)
+    → `moai idea ls`
+
+Last 7 days   created 41  ·  done 38   piling up +3
+
+Next:  `moai ready` picks what to take
 ```
 
 ## Why it exists
@@ -123,6 +127,12 @@ moai idea promote <id> --from -      # opens it into an epic and issues
 
 Work you have decided not to do *right now* is deferred, not closed. `moai defer
 <id> --undo` brings the same line back, in the same column, with the same kind.
+
+`moai tui` walks the same tracker on one screen — the list on one side, the
+issue under the cursor on the other. It answers keys and the mouse alike: click
+a pane or a row, roll the wheel over the pane you want to move, drag the line
+between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
+lets the mouse go when you would rather select or paste with it in the terminal.
 
 ## Working in parallel
 
@@ -270,6 +280,24 @@ that an older moai wrote straight onto a cut one is read back and listed.
 When a copy has to be complete, pull the whole list and compare it row by row:
 `moai show --all --json`, plus `moai idea show --all --json` since `--all` still
 leaves ideas out. An id missing from the new pull was removed.
+
+### Counting
+
+`moai stats` adds the tracker up — rows per column and priority, how many were
+created and closed per week or day, lead time (created → done) and cycle time
+(started → done), and the AI work written in `model:` note lines, by model and by
+grade. It takes the filters `moai show` takes, and `--json` gives the same numbers
+to a machine. In the explorer `SPC p s` draws them as bars.
+
+```sh
+moai stats                               # overview
+moai stats -e <epic> --by tag,assignee   # one epic, two axes in full
+moai stats --bucket day --last 14 --json # daily flow for a script
+```
+
+What it cannot tell, it says rather than guessing: a closed row with no recorded
+start counts as `unknown` in cycle time, not as zero minutes, and a model line
+without a token count is counted apart from the ones that have it.
 
 ### SQL over the output
 

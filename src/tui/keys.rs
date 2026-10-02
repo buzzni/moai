@@ -310,6 +310,9 @@ pub enum Browse {
     Jot,
     Pick,
     Unregister,
+    /// 통계 창을 연다 — `SPC p s`(moai-1hka.bq9). 프로젝트 안이면 그 프로젝트를, 한눈 보기면 커서가
+    /// 선 줄의 프로젝트를 센다(`SPC n`·`r` 과 같은 규칙).
+    Stats,
     ClearFilter,
     Worktree,
     Raw,
@@ -336,6 +339,9 @@ pub enum Browse {
     /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
     /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Timezone,
+    /// 마우스를 잡고 놓는다 — `SPC o m`(moai-irrj.9xq). 잡으면 누르기·휠·칸 끌기가 듣고, 터미널의
+    /// 끌어서 글 고르기는 Shift 를 눌러야 된다. 놓으면 거꾸로다 — 고르는 사람이 그 값을 정한다.
+    Mouse,
     /// 이 줄을 읽음으로(moai-z9pc). 바로 누르는 `r` 이다 — 가장 자주 하는 것이라.
     Read,
     /// 이 프로젝트의 안 읽은 것 전부. **보이는 줄만이 아니다** — 거름망·칸 숨김·지금 디렉터리와
@@ -550,6 +556,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
+        // **통계는 `p`(project) 밑이다**(moai-1hka.bq9, 2026-10-01 사용자 결정) — 세는 것이 한 프로젝트라서다.
+        row!(Stats, Some("SPC p s"), LEADER, Key::plain('p'), Key::plain('s')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -620,6 +628,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 바꾸면 그건 설정이 아니라 마이그레이션이다.
         row!(DetailAt, Some("SPC o d"), LEADER, Key::plain('o'), Key::plain('d')),
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
+        // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
+        row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
     ]
 };
 
@@ -667,6 +677,8 @@ pub struct Ctx {
     pub deferred_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
+    /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
+    pub mouse: bool,
     /// 고른 차례와 그 방향.
     pub sorting: Sorting,
     /// 켜 둔 목록 열.
@@ -790,6 +802,7 @@ impl Browse {
             Jot => say(c.lang, "tui.menu.jot"),
             Pick => say(c.lang, "tui.menu.pick"),
             Unregister => say(c.lang, "tui.menu.unregister"),
+            Stats => say(c.lang, "tui.menu.stats"),
             Worktree => say(c.lang, "tui.menu.worktree"),
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
@@ -824,6 +837,8 @@ impl Browse {
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
             Browse::DetailAt => Some(c.detail_at.word(c.lang)),
+            Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on")),
+            Browse::Mouse => Some(say(c.lang, "tui.state.off")),
             _ => None,
         }
     }
@@ -839,7 +854,7 @@ impl Browse {
     /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
     pub fn stateful(self) -> bool {
         use Browse::*;
-        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt)
+        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt | Mouse)
     }
 
     /// **목록을 움직이는 동작인가** — 줄·쪽·맨 위아래·펼침·접기(moai-y8v2, 사용자 결정). 열린
@@ -876,6 +891,7 @@ impl Browse {
             Pick if c.layer => say(c.lang, "tui.act.pick"),
             Pick => say(c.lang, "tui.act.pick_project"),
             Unregister => say(c.lang, "tui.act.unregister"),
+            Stats => say(c.lang, "tui.act.stats"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
@@ -892,6 +908,7 @@ impl Browse {
             Detail => say(c.lang, "tui.act.detail"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             Timezone => say(c.lang, "tui.act.timezone"),
+            Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
         }
     }
@@ -994,6 +1011,53 @@ pub const PICK: &[Bind<Pick>] = {
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
     ]
 };
+
+/// 통계 창(moai-1hka.bq9) — 굴리기, 흐름의 칸 너비 바꾸기, 닫기. **키를 적게 둔다**: 창은 보는 자리라 고를
+/// 것이 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stat {
+    /// 굴리기 — 탐색의 목록과 같은 키([`moves!`]).
+    Step(Move),
+    /// 흐름을 주와 날 사이에서 바꾼다.
+    Bucket,
+    Close,
+}
+
+/// **`q` 는 안 둔다** — 고르기 창에서 걷은 까닭(moai-en4u)이 여기도 선다: 탐색에서 `q` 가 아무것도 안 하는데
+/// 창에서만 닫으면 같은 글자가 자리마다 뜻이 갈린다. 닫는 것은 다른 창과 같은 Esc 다.
+pub const STATS: &[Bind<Stat>] = {
+    const MOVES: [Bind<Stat>; 14] = moves!(Stat::Step, Key::bare);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Stat::Bucket, Some("b"), Key::plain('b')),
+        row!(Stat::Close, Some("Esc"), Key::bare(KeyCode::Esc)),
+    ]
+};
+
+impl Stat {
+    /// 바의 낱말. 칸 너비 바꾸기는 **누르면 갈 곳**을 댄다 — 지금 주마다면 `날마다`.
+    pub fn what(self, weekly: bool, lang: Lang) -> &'static str {
+        match self {
+            Stat::Step(_) => say(lang, "tui.act.scroll"),
+            Stat::Bucket if weekly => say(lang, "tui.stats.to_day"),
+            Stat::Bucket => say(lang, "tui.stats.to_week"),
+            Stat::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
 
 impl Pick {
     pub fn what(self, show_hidden: bool, lang: Lang) -> &'static str {
@@ -1453,6 +1517,23 @@ mod tests {
         each("jot", JOT);
         each("confirm", CONFIRM);
         each("menu", MENU);
+        each("stats", STATS);
+    }
+
+    /// **통계 창은 `SPC p s` 다**(moai-1hka.bq9) — `p`(project) 밑, 등록·해제 곁이다. 창 안의 키는 적다: 굴리기,
+    /// `b`(주↔날), Esc. **`q` 는 창을 안 닫는다** — 탐색에서 아무것도 안 하는 글자다(moai-en4u).
+    #[test]
+    fn statistics_open_from_spc_p_s_and_the_window_keeps_its_keys_few() {
+        let seq = parse_seq("SPC p s").unwrap();
+        assert_eq!(lookup(BROWSE, &seq), Lookup::Run(Browse::Stats));
+        assert_eq!(label(BROWSE, Browse::Stats), "SPC p s");
+        assert_eq!(Browse::Stats.enabled(&inside()), Ok(()));
+        assert_eq!(Browse::Stats.enabled(&layer()), Ok(()), "한눈 보기에서도 커서의 프로젝트를 센다");
+        assert_eq!(Browse::Stats.enabled(&Ctx { list_focus: false, ..inside() }), Ok(()), "포커스와 상관없이 연다");
+        assert_eq!(lookup(STATS, &[press(KeyCode::Char('b'))]), Lookup::Run(Stat::Bucket));
+        assert_eq!(lookup(STATS, &[press(KeyCode::Esc)]), Lookup::Run(Stat::Close));
+        assert_eq!(lookup(STATS, &[press(KeyCode::Char('j'))]), Lookup::Run(Stat::Step(Move::LineDown)));
+        assert_eq!(lookup(STATS, &[press(KeyCode::Char('q'))]), Lookup::Unknown, "q 가 창을 닫는다");
     }
 
     /// **적힌 키 이름은 그 키다.** 이름을 키로 풀어 표에서 찾으면 그 줄의 동작이 나온다 — 바에
@@ -1474,6 +1555,7 @@ mod tests {
         each("jot", JOT);
         each("confirm", CONFIRM);
         each("menu", MENU);
+        each("stats", STATS);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
@@ -1667,6 +1749,7 @@ mod tests {
             "SPC /",
             "SPC p a",
             "SPC p d",
+            "SPC p s",
             "SPC v w",
             "SPC v r",
             "SPC s p",
@@ -1785,6 +1868,8 @@ mod tests {
     const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
     const JOTTING: &str = "SPC n opens the jot form";
+    /// 통계 창 문단(moai-1hka.bq9).
+    const STATISTICS: &str = "SPC p s opens the statistics window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -1824,6 +1909,7 @@ mod tests {
         ("PICK", &[PICKER]),
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
+        ("STATS", &[STATISTICS]),
     ];
 
     /// `head` 로 시작하는 문단.
@@ -1860,7 +1946,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 8] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 9] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("MENU", named(MENU)),
@@ -1869,6 +1955,7 @@ mod tests {
             ("PATH", named(PATH)),
             ("JOT", named(JOT)),
             ("CONFIRM", named(CONFIRM)),
+            ("STATS", named(STATS)),
         ];
         // 고르기 창이 목록 문단에서 빌리는 이동 키 — 표와 같은 매크로에서 읽는다.
         // `const` 로 받는다 — 매크로의 `&[…]` 는 상수 자리에서만 `'static` 이다(표도 그렇게 받는다).
@@ -1938,6 +2025,7 @@ mod tests {
             bare(lookup(PROMPT, k)),
             bare(lookup(PATH, k)),
             bare(lookup(CONFIRM, k)),
+            bare(lookup(STATS, k)),
         ];
         if tables.contains(&Lookup::Run(())) {
             Lookup::Run(())

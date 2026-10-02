@@ -12,6 +12,72 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-02
+
+### Added
+
+- **`moai stats` adds the tracker up, and `SPC p s` draws it.** Rows per column,
+  priority, tag, assignee, epic and milestone; how many were created and closed
+  per week or day (`--bucket`, `--last`); lead time (created → done) and cycle
+  time (started → done) as median and p90; and the AI work written in `model:`
+  note lines, summed by model and by grade, with reviews apart. It takes the
+  filters `moai show` takes, `--by` picks the axes printed in full, and `--json`
+  gives the same numbers to a machine — every key is always there but `by`,
+  `email` and `journal_error`. What cannot be told is not guessed: a closed row
+  with no recorded start counts as `unknown`, not zero minutes, and lines with no
+  token count are counted apart. In the explorer `SPC p s` opens the same
+  numbers as bars in place of the list and the detail, narrowed by the filter
+  that is hung; on the all-projects view it counts the project under the cursor,
+  and `b` switches day and week. The numbers come from the snapshot and the note
+  lines only — how long a row stood in review, say, is not among them.
+
+- **The explorer takes the mouse.** A click puts the focus on the pane and the
+  cursor on the row under it. The wheel moves whichever pane is under the
+  pointer — the list's cursor, the detail, the `SPC p s` window — and leaves the
+  focus where it was. Dragging the line between the list and the detail resizes
+  them; the share the list takes is kept under `[tui]` as `list_width` (detail
+  left or right) and `list_height` (detail above or below), in percent, and is
+  not written until you drag. Over the `SPC` menu the mouse does nothing, and
+  while a form, a picker or a prompt is up the explorer lets it go, so selecting
+  and middle-button paste work there as before. Wheel reports still on their way
+  when you quit, or when `SPC n` hands the terminal to `$EDITOR`, are thrown
+  away rather than landing at the shell prompt as `65;40;12M` or in the editor
+  as keystrokes: the explorer asks the terminal (DA1) and drops what comes before
+  the answer, so keys typed in that one round trip go with them. A terminal that
+  never answers is waited on for one second at most.
+
+- **`TZ` takes a POSIX rule as well as a zone name.** `TZ=JST-9`, `TZ=<+09>-9`
+  and `TZ=EST5EDT,M3.2.0,M11.1.0` now set the clock times are written in, on a
+  machine with no zoneinfo directory too — the static musl build. A name the
+  zoneinfo directory holds still comes first, as in glibc, and the zone is called
+  by the text you gave, so `[tui] timezone` takes the same text. Before, a rule
+  with angle brackets was ignored without a word in favour of `/etc/localtime`,
+  and `JST-9` fell back to UTC with a line saying the zone was unknown. A `TZ`
+  that is neither a name nor a rule now falls back to UTC with that line, the way
+  glibc reads it. The `SPC o t` list still holds the zoneinfo names alone.
+
+### Changed
+
+- **The explorer holds the mouse from the start.** Over the list and the
+  detail a plain drag no longer selects text in the terminal and a middle click
+  no longer pastes — most terminals do both with Shift held, iTerm2 with
+  Option. `SPC o m` lets the mouse go everywhere, and the choice is kept as
+  `[tui] mouse`.
+
+### Fixed
+
+- **Daylight saving time that runs past the next year's start is read as
+  permanent.** A zone file whose footer rule ends daylight saving after the next
+  year's begins — `AAA3BBB,J1/0,J365/26` — was drawn on standard time for most of
+  every year, because that end was taken for a change. moai now reads such a rule
+  the way tzcode does, as daylight saving time all year. Footers written by zic
+  (`J365/25`) were already read right.
+
+- **A zone file whose header counts more data than the file holds is no longer
+  read.** It is reported as not zone data, as tzcode and glibc report it. Before,
+  a cut file could still be read with its tail missing, and on a 32-bit machine
+  the size those counts add up to could overflow.
+
 ## [0.1.6] - 2026-10-01
 
 ### Fixed
