@@ -636,13 +636,15 @@ const TRAIL_QUIET: std::time::Duration = std::time::Duration::from_millis(300);
 /// **조용한 틈([`TRAIL_QUIET`])마다 다시 잰다** — 바이트 하나를 받을 때마다 틈이 새로 열리고, 틈 안에 아무것도 안
 /// 오면 끝낸다. 가장 긴 때는 `until` 이다.
 ///
-/// **보고가 아닌 바이트가 오면 멈춘다 — 그 한 바이트는 먹힌다**(사람이 받아들인 비용이다). tty 는 엿볼 수 없어, 읽어
-/// 봐야 키인지 안다. 그 비용을 휠을 굴린 직후에 끝낸 때에만 치르게 하는 것은 부르는 쪽의 문([`drain_answered`])이다
+/// **보고가 아닌 키가 오면 멈춘다 — 그 키 하나는 먹힌다**(사람이 받아들인 비용이다). tty 는 엿볼 수 없어, 읽어 봐야
+/// 키인 줄 안다. 그 비용을 휠을 굴린 직후에 끝낸 때에만 치르게 하는 것은 부르는 쪽의 문([`drain_answered`])이다
 /// — 휠을 안 쓴 끝내기는 전처럼 안 기다리고 키도 안 먹는다. 편집기로 넘길 때([`suspend`])도 같은 문을 지난다.
 ///
-/// **보고의 머리처럼 보이는 앞 바이트도 함께 먹힌다.** `ESC`·`ESC [` 는 보고의 첫머리라 읽고 나서야 키인 줄 안다 —
-/// 화살표(`ESC [ A`)는 통째로 사라지고, 수를 단 키는 머리만 먹혀 꼬리가 셸에 남는다(Delete `ESC [ 3 ~` 는 `~`,
-/// Ctrl-← `ESC [ 1 ; 5 D` 는 `;5D`). 키 하나를 끝까지 먹을지는 사람의 결정이 "그 한 바이트" 라 그대로 두었다(리뷰).
+/// **먹는 것은 키 하나를 끝까지다**(2026-10-02 사용자 결정, 리뷰 moai-pvpb.rrr 8번) — 멈춘 바이트가 여러 바이트 키의
+/// 머리면 그 키의 끝 바이트까지 읽어 버린다([`Rest`]): 수를 단 키(Delete `ESC [ 3 ~`, Ctrl-← `ESC [ 1 ; 5 D`)는 끝
+/// 글자까지, F1 같은 `ESC O P` 는 한 바이트 더, 한글 한 자는 UTF-8 의 나머지 바이트까지. 한 바이트에서 멈추던 판은
+/// 그 꼬리(`~`·`;5D`·깨진 글자)를 셸 프롬프트에 남겼다. **새 `ESC` 는 처음부터 다시 잰다** — 혼자 온 Esc 키 뒤에 보고가
+/// 이어지면(`ESC ESC [ < …`) 앞의 Esc 만 먹고 보고는 계속 버린다.
 ///
 /// 알아보는 보고는 켠 모드의 둘이다([`mouse_capture`]): 1006 의 `ESC [ < 수;수;수 M|m` 과, 1006 을 모르는 터미널의
 /// `ESC [ M` 과 세 바이트.
@@ -650,11 +652,49 @@ const TRAIL_QUIET: std::time::Duration = std::time::Duration::from_millis(300);
 fn drain_trailing(fd: std::os::fd::RawFd, quiet: std::time::Duration, until: std::time::Instant) -> usize {
     let mut report = Report::default();
     let mut dropped = 0;
+    while let Some(byte) = next_byte(fd, quiet, until) {
+        match report.push(byte) {
+            Step::Report => dropped += 1,
+            Step::More => {}
+            Step::Key(rest) => {
+                swallow(fd, rest, quiet, until);
+                return dropped;
+            }
+        }
+    }
+    dropped
+}
+
+/// 키의 나머지를 읽어 버린다([`Rest`]). 키의 바이트는 함께 오므로 조용한 틈 안에 안 오면 거기서 끝낸다.
+#[cfg(unix)]
+fn swallow(fd: std::os::fd::RawFd, rest: Rest, quiet: std::time::Duration, until: std::time::Instant) {
+    match rest {
+        Rest::Done => {}
+        Rest::Final => {
+            // 매개변수·중간 바이트(`0x20..=0x3F`)를 지나 끝 글자(`0x40..=0x7E`)까지.
+            while let Some(b) = next_byte(fd, quiet, until) {
+                if !(0x20..=0x3f).contains(&b) {
+                    return;
+                }
+            }
+        }
+        Rest::Bytes(n) => {
+            for _ in 0..n {
+                if next_byte(fd, quiet, until).is_none() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// 한 바이트를 기다려 읽는다 — `quiet` 와 `until` 중 이른 때까지. 안 오거나 못 읽으면 `None` 이다.
+#[cfg(unix)]
+fn next_byte(fd: std::os::fd::RawFd, quiet: std::time::Duration, until: std::time::Instant) -> Option<u8> {
     loop {
-        let now = std::time::Instant::now();
-        let left = until.saturating_duration_since(now).min(quiet);
+        let left = until.saturating_duration_since(std::time::Instant::now()).min(quiet);
         if left.is_zero() {
-            return dropped;
+            return None;
         }
         let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
         let ms = i32::try_from(left.as_millis()).unwrap_or(i32::MAX).max(1);
@@ -663,28 +703,56 @@ fn drain_trailing(fd: std::os::fd::RawFd, quiet: std::time::Duration, until: std
             continue;
         }
         if ready <= 0 || p.revents & libc::POLLIN == 0 {
-            return dropped;
+            return None;
         }
         let mut byte = 0u8;
         match unsafe { libc::read(fd, (&raw mut byte).cast(), 1) } {
-            1 => match report.push(byte) {
-                Some(true) => dropped += 1,
-                Some(false) => {}
-                None => return dropped,
-            },
-            0 => return dropped,
+            1 => return Some(byte),
+            0 => return None,
             _ => {
                 let e = std::io::Error::last_os_error().kind();
                 if !matches!(e, std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) {
-                    return dropped;
+                    return None;
                 }
             }
         }
     }
 }
 
-/// 마우스 보고 하나를 한 바이트씩 알아본다 — [`Answer`] 와 같은 꼴이다. `push` 는 보고가 막 끝났으면
-/// `Some(true)`, 아직이면 `Some(false)`, 보고가 아닌 바이트면 `None` 이다.
+/// [`Report::push`] 의 답 — 보고가 막 끝났다, 아직이다, 보고가 아닌 키다(그 나머지와 함께).
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Report,
+    More,
+    Key(Rest),
+}
+
+/// 보고가 아닌 키에서 **아직 안 읽은 나머지**.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum Rest {
+    /// 다 읽었다.
+    Done,
+    /// CSI 키 — 끝 글자(`0x40..=0x7E`)까지.
+    Final,
+    /// 바이트 몇 개 더 — `ESC O x` 의 `x` 하나, UTF-8 글자의 나머지.
+    Bytes(u8),
+}
+
+/// 이 바이트로 시작하는 UTF-8 글자의 나머지 바이트 수. ASCII 와 이어지는 바이트는 0 이다.
+#[cfg(unix)]
+fn utf8_rest(lead: u8) -> u8 {
+    match lead {
+        0xc0..=0xdf => 1,
+        0xe0..=0xef => 2,
+        0xf0..=0xf7 => 3,
+        _ => 0,
+    }
+}
+
+/// 마우스 보고 하나를 한 바이트씩 알아본다 — [`Answer`] 와 같은 꼴이다. 보고가 아닌 키를 만나면 그 키의 나머지를
+/// 함께 댄다([`Step::Key`]).
 #[cfg(unix)]
 #[derive(Default)]
 struct Report(Reading);
@@ -704,21 +772,35 @@ enum Reading {
 
 #[cfg(unix)]
 impl Report {
-    fn push(&mut self, byte: u8) -> Option<bool> {
+    fn push(&mut self, byte: u8) -> Step {
         use Reading::*;
-        let (next, done) = match (self.0, byte) {
-            (Start, 0x1b) => (Esc, false),
-            (Esc, b'[') => (Csi, false),
-            (Csi, b'<') => (Sgr, false),
-            (Csi, b'M') => (Raw(3), false),
-            (Sgr, b'0'..=b'9' | b';') => (Sgr, false),
-            (Sgr, b'M' | b'm') => (Start, true),
-            (Raw(1), _) => (Start, true),
-            (Raw(n), _) => (Raw(n - 1), false),
-            _ => return None,
+        let key = |rest| {
+            // 키를 만나면 처음으로 돌아간다 — 부르는 쪽은 거기서 멈추지만, 상태를 남기지 않는다.
+            (Start, Step::Key(rest))
+        };
+        let (next, step) = match (self.0, byte) {
+            // 옛 꼴의 세 바이트는 무엇이든 보고다(좌표가 `ESC` 와 같은 값일 수도 있다).
+            (Raw(1), _) => (Start, Step::Report),
+            (Raw(n), _) => (Raw(n - 1), Step::More),
+            // **새 `ESC` 는 처음부터 다시 잰다** — 앞의 것은 혼자 온 Esc 키였다.
+            (_, 0x1b) => (Esc, Step::More),
+            (Start, b) => key(Rest::Bytes(utf8_rest(b))),
+            (Esc, b'[') => (Csi, Step::More),
+            // SS3 키(F1 `ESC O P`, 어떤 터미널의 화살표) — 한 바이트 더.
+            (Esc, b'O') => key(Rest::Bytes(1)),
+            // Alt 와 함께 친 글자 — 그 글자의 나머지까지.
+            (Esc, b) => key(Rest::Bytes(utf8_rest(b))),
+            (Csi, b'<') => (Sgr, Step::More),
+            (Csi, b'M') => (Raw(3), Step::More),
+            (Sgr, b'0'..=b'9' | b';') => (Sgr, Step::More),
+            (Sgr, b'M' | b'm') => (Start, Step::Report),
+            // CSI 키 — 끝 글자면 다 왔고, 매개변수·중간 바이트면 끝 글자까지 더 읽는다.
+            (Csi | Sgr, 0x40..=0x7e) => key(Rest::Done),
+            (Csi | Sgr, 0x20..=0x3f) => key(Rest::Final),
+            (Csi | Sgr, _) => key(Rest::Done),
         };
         self.0 = next;
-        Some(done)
+        step
     }
 }
 
@@ -1379,6 +1461,37 @@ mod tests {
         drop(write);
         assert_eq!(drain_trailing(read.as_raw_fd(), Duration::from_millis(40), until), 0);
         assert_eq!(rest_of(read), b"x");
+    }
+
+    /// **멈춘 키는 끝까지 먹는다**(2026-10-02 사용자 결정, 리뷰 moai-pvpb.rrr 8번) — 여러 바이트 키의 머리에서 멈추면
+    /// 그 꼬리가 셸 프롬프트에 남았다(Delete 의 `~`, Ctrl-← 의 `;5D`, F1 의 `P`, 한글 한 자의 나머지 바이트). 그 뒤의
+    /// 글은 안 건드린다. 혼자 온 Esc 키 뒤에 보고가 이어지면 Esc 만 먹고 보고는 계속 버린다.
+    #[cfg(unix)]
+    #[test]
+    fn the_trailing_drain_eats_the_whole_key_it_stops_at() {
+        use std::os::fd::AsRawFd;
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        let eaten = |sent: &[u8]| {
+            let (read, write) = pipe_with(sent);
+            drop(write);
+            let dropped = drain_trailing(read.as_raw_fd(), Duration::from_millis(40), until);
+            (dropped, rest_of(read))
+        };
+        for (what, key) in [
+            ("Delete", &b"\x1b[3~"[..]),
+            ("Ctrl-←", b"\x1b[1;5D"),
+            ("F1", b"\x1bOP"),
+            ("Alt-x", b"\x1bx"),
+            ("한글", "한".as_bytes()),
+            ("ASCII", b"l"),
+        ] {
+            let mut sent = b"\x1b[<65;40;12M".to_vec();
+            sent.extend_from_slice(key);
+            sent.extend_from_slice(b"ls\n");
+            assert_eq!(eaten(&sent), (1, b"ls\n".to_vec()), "{what} 의 꼬리를 남겼거나 그 뒤를 먹었다");
+        }
+        // 혼자 온 Esc 뒤의 보고 — Esc 를 먹고 보고도 버린다.
+        assert_eq!(eaten(b"\x1b\x1b[<65;40;12Mx"), (1, b"".to_vec()));
     }
 
     /// **문은 [`drain_answered`] 하나다**(moai-pvpb.m2f, 사용자 결정) — 휠을 안 쓴 끝내기는 답에서 멈춰 그 뒤의 보고도
