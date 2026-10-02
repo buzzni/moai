@@ -24,6 +24,12 @@ struct Edited {
     kept: Option<Inherited>,
     /// `--milestone` 을 받았는데도 적은 대로 안 선 마일스톤 — 그것을 정한 에픽이나 id 부모.
     kept_milestone: Option<InheritedMilestone>,
+    /// 고친 줄의 `milestone` 이 마일스톤 줄인가 — `--milestone <id>` 를 받았을 때만 잰다. 안 적었거나
+    /// 비웠으면 `true` 다 — 말할 것이 없다.
+    known_milestone: bool,
+    /// 고친 줄의 `epic` 을 `status` 가 `dangling_epic` 으로 세는 까닭 — [`Edited::known_milestone`] 과 같이
+    /// `-e <id>` 를 받았을 때만 잰다. 안 적었거나 비웠으면 `None` 이다.
+    held_epic: Option<crate::report::HeldEpic>,
     /// 고친 줄의 막음을 가른 답. 상세가 `show <id>` 와 같은 막음 줄을 그린다(moai-xe74).
     blocked: Blocked,
 }
@@ -221,28 +227,45 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
             // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
             let changed = *i != before;
+            if changed {
+                i.updated_at = at.clone();
+            }
+            let out = i.clone();
             // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
             // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
             // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
             let cut = args.epic.as_deref().is_some_and(|e| super::clearable(e).is_none());
-            let kept = |issues: &[Issue]| {
-                cut.then(|| crate::report::epic_from_parent(issues, &args.id))
-                    .flatten()
-                    .map(|(e, p)| Inherited { epic: e.to_string(), parent: p.to_string() })
-            };
+            let kept = cut
+                .then(|| crate::report::epic_from_parent(issues, &args.id))
+                .flatten()
+                .map(|(e, p)| Inherited { epic: e.to_string(), parent: p.to_string() });
             // `--milestone none` 도 같다(moai-0lmn) — 에픽과 부모가 마일스톤을 이긴다. 다른
             // 마일스톤을 적어도 진다(moai-mhxf): 필드는 X 가 되는데 줄은 에픽·조상이 선 곳에
             // 그대로 서, `show --milestone X` 가 조용히 그 줄을 못 낸다. 졌는지와 옮길 길은
             // `report` 가 가른다 — 여기서는 무엇을 적었는지만 넘긴다.
             let wrote_milestone = args.milestone.as_deref().map(super::clearable);
             let kept_milestone =
-                |issues: &[Issue]| InheritedMilestone::of(issues, &args.id, wrote_milestone.as_ref()?.as_deref());
+                wrote_milestone.as_ref().and_then(|w| InheritedMilestone::of(issues, &args.id, w.as_deref()));
+            // **없는 마일스톤은 막지 않고 알려만 준다 — `add` 와 같은 자, 같은 글이다**(moai-3hxc.id1).
+            // `add --milestone <헛 id>` 는 알리는데 `edit` 만 말없이 0 으로 끝나, 같은 필드를 두 길이 달리
+            // 다뤘다. 재는 것은 적은 id 가 아니라 **고친 줄의 값**이다 — `add` 가 `issue.milestone` 을 재는
+            // 것과 같은 까닭이다(쓰기에 정규화가 붙는 날 argv 와 줄이 갈린다). 안 바뀌어도 잰다: 같은
+            // 헛 id 를 다시 적은 부름도 그 id 를 그대로 둔다.
+            let known_milestone =
+                !matches!(wrote_milestone, Some(Some(_))) || super::add::is_milestone(issues, out.milestone.as_deref());
+            // **없는 에픽도 같은 정책이다**(moai-q5zs) — 재는 자는 `status` 의 것
+            // ([`crate::report::epic_held_wrong`])이고, `-e <id>` 를 적은 부름마다 잰다. 줄이 바뀐 때만, 그리고
+            // "그 id 의 줄이 있는가" 로 재던 판은 같은 헛 id 를 다시 적은 부름과 이슈 id 를 적은 부름에 말이
+            // 없었다 — 한 명령의 두 필드가 다른 규칙을 따랐다(리뷰 moai-3hxc.uhh 8·9번).
+            let held_epic = args
+                .epic
+                .as_deref()
+                .and_then(super::clearable)
+                .and_then(|_| crate::report::epic_held_wrong(issues, &out));
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
                 let read = super::read_of(issues, cfg, &[before.id.as_str()], ctx.json);
-                let kept = kept(issues);
-                let kept_milestone = kept_milestone(issues);
                 return Ok((
                     vec![],
                     Edited {
@@ -254,24 +277,18 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                         changed: false,
                         kept,
                         kept_milestone,
+                        known_milestone,
+                        held_epic,
                         // 바뀐 것이 없으면 상세를 안 그린다.
                         blocked: Blocked::default(),
                     },
                 ));
             }
-            i.updated_at = at.clone();
-            let out = i.clone();
 
             // 상세를 그릴 재료를 **여기서** 챙긴다. 락을 놓은 뒤 파일을 다시 읽으면
             // 1만 줄을 두 번 파싱하고(측정: 한 번 더 읽는 데만 25%), 그 틈에 남이
             // 쓴 것이 섞여 방금 쓴 이슈와 주변이 어긋난다.
             let epic = out.epic.as_ref().and_then(|e| issues.iter().find(|x| &x.id == e).cloned());
-            // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다.
-            if let Some(e) = &out.epic
-                && epic.is_none()
-            {
-                eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "edit.no_such_epic"), &[("id", e)]));
-            }
             // **자식을 고르는 자는 하나다**([`crate::report::children_of`]) — 그쪽이 차례까지
             // 정한다(상세의 자식 줄은 목록 차례다). 여기서 따로 걸러 담던 때는 그 차례가 빠져
             // 같은 에픽의 자식 줄이 `moai show` 와 `moai edit` 에서 다른 순서로 섰다(리뷰).
@@ -292,18 +309,51 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 .collect();
             // 묶음의 칸도 멤버에서 읽는다 — 제 줄만 들고 나가면 상세가 손으로 둔 칸을 그린다.
             let read = super::read_of(issues, cfg, &near, ctx.json);
-            let kept = kept(issues);
-            let kept_milestone = kept_milestone(issues);
             // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
             let blocked = Blocked::of(issues, cfg, &out);
             Ok((
                 vec![],
-                Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked },
+                Edited {
+                    issue: out,
+                    epic,
+                    children,
+                    shelved,
+                    read,
+                    changed: true,
+                    kept,
+                    kept_milestone,
+                    known_milestone,
+                    held_epic,
+                    blocked,
+                },
             ))
         },
     )?;
 
-    let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
+    let Edited {
+        issue: edited,
+        epic,
+        children,
+        shelved,
+        read,
+        changed,
+        kept,
+        kept_milestone,
+        known_milestone,
+        held_epic,
+        blocked,
+    } = done;
+    // 쓰기가 선 **뒤에** 말한다 — `add` 와 같은 자리다. `--json` 도 가리지 않는다(stderr 라 stdout 의 JSON 은
+    // 그대로다). 필드가 에픽·조상에게 져서 `kept_milestone` 줄이 함께 나는 경우에도 말한다 — 제 에픽이 멀쩡한
+    // 줄이 든 헛 id 는 안 읽혀도 `status` 가 `dangling_milestone` 으로 센다. **제 `epic` 이 못 쓸 것이면
+    // 다르다**: `status` 는 그 줄을 `dangling_epic` 으로만 세어(`report::broken_in` 이 에픽을 먼저 본다),
+    // 알림 글의 "dangling_milestone 으로 센다" 는 에픽을 고친 뒤에야 맞는다(리뷰 moai-3hxc.uhh). 글은
+    // `add` 와 한 벌이라 고칠 때 함께 고친다.
+    //
+    // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다. `status` 가 에픽을 먼저
+    // 보므로 이 줄이 앞에 선다.
+    super::add::say_held_epic(&edited, held_epic, ctx.lang());
+    super::add::say_no_such_milestone(edited.milestone.as_deref(), known_milestone, ctx.lang());
     if ctx.json {
         // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은
         // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.
@@ -323,7 +373,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         );
     }
     if let Some(k) = &kept_milestone {
-        milestone_kept_line(&edited.id, k, args.milestone.as_deref().unwrap_or("none"), ctx.lang());
+        milestone_kept_line(&edited.id, k, args.milestone.as_deref().unwrap_or("none"), known_milestone, ctx.lang());
     }
     if !changed {
         return Ok(vec![format!(
@@ -358,9 +408,18 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 ///
 /// `none` 은 "안 끊긴다" 로, 다른 마일스톤은 "필드에만 적혔다" 로 말한다(moai-mhxf) —
 /// 앞의 것은 필드가 비워졌는데 소속이 남았고, 뒤의 것은 필드가 바뀌었는데 소속이 안 따라왔다.
-pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str, lang: crate::i18n::Lang) {
+///
+/// **없는 마일스톤으로 옮기라고 대지 않는다**(리뷰 moai-3hxc.uhh). 적은 id 가 마일스톤 줄이 아니면
+/// (`known` 이 거짓이면) 옮길 곳 자리에 그 id 대신 자리표(`edit.any_milestone`)를 댄다. 그대로 대면 바로
+/// 위의 "그런 마일스톤이 없다" 줄과 어긋나고, 따라 친 쪽이 에픽이나 조상을 그 밑의 형제까지 함께 없는
+/// 마일스톤으로 옮긴다. 필드에 무엇이 적혔는지(`edit.lost_field`)는 적은 그대로 댄다.
+pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str, known: bool, lang: crate::i18n::Lang) {
     use crate::i18n::{fill, say};
     let cut = wrote == "none";
+    let to = match known {
+        true => wrote,
+        false => say(lang, "edit.any_milestone"),
+    };
     // **갈래마다 제 `say` 를 적는다** — 키를 도우미로 고르면 소스를 훑는 시험(`i18n::tests::keys_in`)이
     // 그 키를 못 본다. 조각을 이어 한 줄로 세우는 것은 그대로다: 자리마다 옮기는 길이 다르다.
     let stood = match &k.milestone {
@@ -380,12 +439,12 @@ pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str,
         }
         Way::Epic => (
             fill(say(lang, "edit.from_epic"), &[("at", at)]),
-            fill(say(lang, "edit.go_epic"), &[("id", id), ("at", at), ("wrote", wrote)]),
+            fill(say(lang, "edit.go_epic"), &[("id", id), ("at", at), ("wrote", to)]),
         ),
         Way::Lost => (fill(say(lang, "edit.from_lost"), &[("at", at)]), fill(say(lang, "edit.go_lost"), &[("id", id)])),
         Way::Parent => (
             fill(say(lang, "edit.from_parent"), &[("at", at)]),
-            fill(say(lang, "edit.go_parent"), &[("at", at), ("wrote", wrote)]),
+            fill(say(lang, "edit.go_parent"), &[("at", at), ("wrote", to)]),
         ),
     };
     let verb = match cut {

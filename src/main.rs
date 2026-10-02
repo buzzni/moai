@@ -12,6 +12,7 @@ mod fail;
 mod git;
 mod git_leaks;
 mod guide;
+mod held;
 mod hook;
 mod i18n;
 mod id;
@@ -396,7 +397,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn at(root: &str, at: &str, why: &str) -> store::Unread {
-        store::Unread { root: PathBuf::from(root), at: PathBuf::from(at), kind: "permission", said: why.to_string() }
+        let why = store::Missed::Io { kind: "permission", said: why.to_string() };
+        store::Unread { root: PathBuf::from(root), at: PathBuf::from(at), why }
     }
 
     fn one(at: &str, why: &str) -> Vec<store::Unread> {

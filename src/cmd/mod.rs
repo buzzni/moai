@@ -688,6 +688,8 @@ pub const OURS: &[&str] = &[
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",
+    // `ready --json` 의 `others` 가 곁들이는 까닭(moai-0zjo, [`Other`]).
+    "owner",
 ];
 
 /// 기계에 낼 **못 읽은 저널** — `show --json` 의 `journal_error` 한 자리(moai-f2lc).
@@ -700,7 +702,7 @@ pub const OURS: &[&str] = &[
 /// 그 자리가 곧 고치는 법이다 — `chmod` 를 어디에 하는지가 이 값의 쓸모다.
 #[derive(Debug, serde::Serialize)]
 pub struct JournalError {
-    /// `permission`·`failed`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
+    /// `permission`·`failed`·`outside`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
     pub kind: &'static str,
     /// 사람이 읽을 한 줄 — `main` 이 stderr 로 내는 줄과 **같은 글이다**. 두 자리에서 따로
     /// 지으면 같은 실패를 화면과 `--json` 이 다른 말로 말한다.
@@ -713,6 +715,11 @@ pub struct JournalError {
 /// "이 줄의 이력이 덜 왔다" 라는 말이 된다. `None` 이면 다 든다(`main` 의 stderr).
 ///
 /// **순수하다** — 전역을 안 읽는다. 읽는 자는 부르는 쪽이다.
+///
+/// **자리도 한 줄로 거른다**(리뷰 moai-itsu.n8z) — 저널의 이름은 받은 저장소가 커밋한 것이라, ESC·OSC 가 든
+/// 이름 하나가 화면을 다시 칠하고 줄바꿈이 든 이름은 `moai: …` 줄을 지어낸다. 까닭 쪽의 링크 끝은
+/// [`crate::held::said`] 가 이미 거르고, 못 푼 조각의 자리(`show --removed`)도 같은 자로 거른다. 담아 둔
+/// 자리([`crate::store::Unread::at`])는 그대로다 — 같은 짝을 가르고 뿌리로 고르는 값이다.
 pub fn journal_errors(
     lang: crate::i18n::Lang,
     unread: &[crate::store::Unread],
@@ -722,10 +729,10 @@ pub fn journal_errors(
         .iter()
         .filter(|u| root.is_none_or(|r| u.root == r))
         .map(|u| JournalError {
-            kind: u.kind,
+            kind: u.kind(),
             said: crate::i18n::fill(
                 crate::i18n::say(lang, "warn.unread_journal"),
-                &[("at", &u.at.display().to_string()), ("why", &u.said)],
+                &[("at", &crate::text::one_line(&u.at.display().to_string())), ("why", &u.said(lang))],
             ),
         })
         .collect()
@@ -950,6 +957,33 @@ pub fn resolve_me(
         }
     }
     Ok(())
+}
+
+/// **지금 사람** — `ready`·`prime` 이 내 것과 남의 것을 가를 자([`crate::query::Me`], moai-0zjo).
+///
+/// **읽기는 사람을 묻지 않는다** — 모르면(`--user`·`MOAI_ACTOR`·git 설정 모두 없거나 틀린 모양) `None`
+/// 이고, 받는 쪽([`crate::report::by_owner`])은 가르지 않는다. 설정 없는 기계에서 `ready` 가 넘어지면
+/// 도구가 고장 난 것으로 보인다. 뿌리는 그 트래커의 것이다 — `model::actor` 의 `root` 와 같은 까닭.
+///
+/// `git` 을 두 번 띄우는 자리라 **물을 줄이 있을 때만** 부른다 — 부르는 쪽이 그 문을 지킨다.
+pub fn me_at(ctx: &Ctx, root: &std::path::Path) -> Option<crate::query::Me> {
+    me_of(ctx.user.as_deref(), root)
+}
+
+/// [`me_at`] 의 몸 — 훅이 닫힘에 담아 나중에 부르므로(`cmd::hook` 의 `person_at`) `Ctx` 없이 받는다. **한
+/// 자다**: `ready` 가 내 것으로 내미는 줄과 규칙 5 가 내 것으로 보는 줄이 같은 사람에서 갈린다.
+pub fn me_of(user: Option<&str>, root: &std::path::Path) -> Option<crate::query::Me> {
+    crate::model::actor(user, root).ok().map(|a| crate::query::Me::of(&a))
+}
+
+/// `ready --json`·`prime --json` 이 내 것과 따로 싣는 줄 하나 — 그 표면의 줄 모양에 **늘 서는**
+/// `owner` 키를 곁들인다(moai-0zjo, 2026-10-02 사용자 결정). 고리가 두 목록을 같은 코드로 읽고
+/// `owner` 로 가른다.
+#[derive(serde::Serialize)]
+pub struct Other<T: serde::Serialize> {
+    #[serde(flatten)]
+    pub row: T,
+    pub owner: crate::report::Owner,
 }
 
 /// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.
@@ -1266,8 +1300,7 @@ mod tests {
         crate::store::Unread {
             root: std::path::PathBuf::from(root),
             at: std::path::PathBuf::from(at),
-            kind: "permission",
-            said: "Permission denied".to_string(),
+            why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".to_string() },
         }
     }
 
@@ -1305,6 +1338,48 @@ mod tests {
         for e in [&en[0], &ko[0]] {
             assert!(e.said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", e.said);
             assert!(e.said.contains("Permission denied"), "{}", e.said);
+        }
+    }
+
+    /// **체크아웃 밖을 가리키는 링크는 `outside` 로 서고 그 까닭도 고른 말로 선다**(moai-itsu). `failed` 로 세우던
+    /// 판은 기계가 "그 링크를 걷어라" 를 잠깐의 io 실패와 못 갈랐고, moai 가 지은 영어 문장이 `MOAI_LANG=ko` 의
+    /// 한국어 머리 뒤에 붙었다(리뷰 moai-karj.8zm 4·5번). **글자로 가르지 않는다** — `kind` 로 가르고, 까닭이
+    /// 말묶음을 지났는지는 두 말의 글이 갈리는 것으로 본다. 링크의 끝은 어느 말에서나 선다 — 고칠 곳이다.
+    #[test]
+    fn a_link_out_of_the_checkout_is_outside_and_said_in_the_chosen_language() {
+        let to = std::path::PathBuf::from("/proc/self/pagemap");
+        let one = [crate::store::Unread {
+            root: std::path::PathBuf::from("/w/mine"),
+            at: std::path::PathBuf::from("/w/mine/.moai/journal/a.jsonl"),
+            why: crate::store::Missed::Held(crate::held::Unheld::Outside {
+                to: to.clone(),
+                home: std::path::PathBuf::from("/w/mine"),
+            }),
+        }];
+        let en = journal_errors(crate::i18n::Lang::En, &one, None);
+        let ko = journal_errors(crate::i18n::Lang::Ko, &one, None);
+        assert_eq!((en[0].kind, ko[0].kind), ("outside", "outside"));
+        let (en_why, ko_why) = (one[0].said(crate::i18n::Lang::En), one[0].said(crate::i18n::Lang::Ko));
+        assert_ne!(en_why, ko_why, "까닭이 말묶음을 안 지났다 — 고른 말과 상관없이 같은 글이다");
+        for e in [&en[0], &ko[0]] {
+            assert!(e.said.contains("/proc/self/pagemap"), "고칠 링크의 끝을 안 댄다 — {}", e.said);
+        }
+    }
+
+    /// **받은 저장소가 커밋한 저널 이름의 제어 문자는 화면에 안 닿는다**(리뷰 moai-itsu.n8z) — ESC·OSC 가 든
+    /// 이름은 터미널을 다시 칠하고, 줄바꿈이 든 이름은 `moai: …` 줄 하나를 지어낸다. 거르지 않던 판은 링크의
+    /// 끝만 걸렀다.
+    #[test]
+    fn a_journal_name_with_control_characters_is_said_on_one_clean_line() {
+        let one = [crate::store::Unread {
+            root: std::path::PathBuf::from("/w/mine"),
+            at: std::path::PathBuf::from("/w/mine/.moai/journal/x\u{1b}]0;P\u{7}\u{1b}[2J\nmoai: forged.jsonl"),
+            why: crate::store::Missed::Held(crate::held::Unheld::NotAFile),
+        }];
+        for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+            let said = &journal_errors(lang, &one, None)[0].said;
+            assert!(!said.contains(['\u{1b}', '\u{7}', '\n']), "제어 문자가 그대로 나간다 — {said:?}");
+            assert!(said.contains("forged.jsonl"), "자리를 통째로 지웠다 — {said:?}");
         }
     }
 }

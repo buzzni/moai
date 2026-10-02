@@ -169,6 +169,12 @@ Options:
   unfinished children are left out.
   Urgent first, then epics near the end, then the oldest.
 
+  Only your own rows are offered. A row that is someone else's or nobody's
+  stands apart below - ask before you pick it up (`moai mv <id> <column>
+  --take` on a yes). --json carries it under others, always an array, with
+  owner theirs or unowned. Who you are comes from --user, MOAI_ACTOR or git
+  config; when it is unknown nothing is set apart.
+
   With --worktree, work already picked up in another worktree drops out here
   and what you hold shows with its branch. For one id the row that moved
   column, or was deferred and picked back up, later wins - so editing only
@@ -206,6 +212,9 @@ Options:
 
     moai prime
 
+  What you hold and what comes next are your own rows - the same split
+  `moai ready` makes, with the rest under others.
+
   With --worktree, work picked up in a sibling worktree shows with its branch
   and drops out of what is next - the same overlay `moai ready` uses.
 ```
@@ -238,7 +247,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -387,18 +399,18 @@ Order and paging:
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
@@ -585,6 +597,9 @@ Options:
           looked at again inside the lock, and a row whose column changed in
           the meantime is left untouched and stands as a partial failure.
 
+      --take
+          Become the assignee and note whose it was
+
       --json
           Machine-readable output. Every human line goes away
 
@@ -621,6 +636,16 @@ Options:
 
   moai mv moai-4aex in_progress --from todo
 
+  Work that is someone else's, or nobody's, is asked about before it is picked
+  up. Moving it into a started column still goes through - one stderr line says
+  whose it is. On a yes, `--take` makes you the assignee in the same write and
+  leaves a note `Taken-over: <who it was|none>`; `-m` says who said yes. It also
+  takes a row that already stands in that column. `--json` carries taken
+  (rows whose assignee changed) and theirs (moved without --take), always as
+  arrays.
+
+  moai mv moai-4aex in_progress --from todo --take -m 'the owner said yes'
+
   Closing says what that write opened - work that just became ready, a parent
   whose last unfinished child is now done, and the next pick in the same epic.
   Nothing of that is stored: it is read from the rows each time, and `--json`
@@ -639,7 +664,7 @@ Arguments:
 
 Options:
       --title <text>         One line. A lone `-x` needs `--title=-x`
-  -b, --body <text>          Body. `-` reads it from stdin
+  -b, --body <text>          Text, not a path. `-` reads stdin: `-b - < <file>`
   -t, --tag <tag>            Add tags
       --untag <tag>          Remove tags
   -e, --epic <id|none>       Move the epic (`none` clears only its own field)
@@ -721,7 +746,7 @@ Arguments:
 
 Options:
   -b, --body <text>
-          A long text. `-` reads it from stdin
+          Text, not a path. `-` reads stdin: `-b - < <file>`
           
           **It pushes the positional out.** Given both, nobody can remember
           which one wins, and a rule nobody remembers erases someone's text
@@ -955,7 +980,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1070,18 +1098,18 @@ Order and paging:
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
@@ -1188,7 +1216,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1303,18 +1334,18 @@ Order and paging:
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
@@ -1421,7 +1452,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1536,18 +1570,18 @@ Order and paging:
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
@@ -1675,7 +1709,10 @@ Options:
           The column it first stands in. The first column when absent
 
   -b, --body <text>
-          Body. `-` reads it from stdin (with `--from`, on the first epic)
+          Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+          
+          **A file goes in as `--body - < <file>`.** `--body <path>` takes
+          the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
           Assignee. The creator when absent; `none` clears it
@@ -1790,18 +1827,18 @@ Order and paging:
   Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json

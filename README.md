@@ -147,6 +147,18 @@ moai ready --worktree                  # overlay what neighbouring worktrees hol
 non-zero exit and moves on instead of silently taking over work someone else
 already picked up.
 
+When several *people* share one tracker, an agent asks before it picks up work
+that is not its person's. `moai ready` hands out only your own rows and sets the
+rest apart — someone else's, or nobody's. On a yes, take it over in one write:
+
+```sh
+moai mv <id> in_progress --from todo --take -m 'Kim said yes'   # you become the assignee
+```
+
+The assignee changes and a note `Taken-over: <who it was|none>` keeps whose it
+was. A person in a terminal is never stopped — `mv` moves and says whose it was
+on stderr; the planted hook is what refuses an agent's pick-up without `--take`.
+
 `.moai/issues.jsonl` is one line per issue, so two branches that touched
 different issues collide only because their lines are neighbours. Install the
 merge driver once per clone and git resolves those per issue:
@@ -187,8 +199,10 @@ no human-shaped output mixed in.
   `already_exists`, `locked`, `broken`, and `error` as the catch-all. The human
   sentence beside it is not something to match on.
 - Keys that are always present stay present. `moai ready --json` is
-  `{"ready":[…],"held":[…]}`, never a bare array — `held` is work that exists but
-  cannot be picked up, with where to pick it up from.
+  `{"ready":[…],"others":[…],"held":[…]}`, never a bare array — `others` is ready
+  work that is someone else's or nobody's (`owner` says which), and `held` is work
+  that exists but cannot be picked up, with where to pick it up from. `moai mv`
+  carries `taken` and `theirs` the same way, always as arrays.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
   `stale` side by side, so a loser in a race reads `stale` and moves on. The
@@ -218,15 +232,16 @@ a second surface — a TUI, a web view, your own tool — cheap to attach.
 below shrink is the output, and with it the tokens.
 
 - `--sort <key>` and `--reverse` pick the order — `priority` (the default),
-  `created`, `updated`, `status`, `assignee`, `title` or `id`. Ties in every
-  order fall to priority, then id.
+  `created`, `updated`, `status`, `assignee`, `title` or `id`. Ties under
+  `created` and `updated` fall to id alone, and under every other order to
+  priority, then id.
 - `-n <count>` cuts the list, and `--after <id>` starts the next page after the
   last id of the page before. The cursor is that row's value in the order, not
   an offset, so rows other sessions create or remove meanwhile never shift a
   page. A row whose place in the order changes between pages — the cursor row
   or any other, a priority edit included — can repeat or be skipped; `--sort id`
-  is the one order no edit moves. The output stays a bare array — fewer rows
-  than `-n` means the list has ended.
+  and `--sort created` are the orders no edit moves. The output stays a bare
+  array — fewer rows than `-n` means the list has ended.
 - `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
   and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
   a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
@@ -329,14 +344,16 @@ moai show --all --json | duckdb -c "
 
 ## Screen language
 
-The interface currently defaults to Korean. Pick another with `MOAI_LANG`:
+The interface defaults to English. Pick another with `MOAI_LANG`:
 
 ```sh
-MOAI_LANG=en moai status
+MOAI_LANG=ko moai status
 ```
 
-`en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet translated falls
-back to English. `i18n/README.md` describes how to add a language.
+To keep one, put `lang = "ko"` under `[i18n]` in your user config; `MOAI_LANG` wins
+over it. `en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet translated
+falls back to English, and the system locale (`LANG`, `LC_ALL`) is not read.
+`i18n/README.md` describes how to add a language.
 
 ## Budgets
 

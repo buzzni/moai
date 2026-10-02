@@ -156,6 +156,12 @@ pub enum Cmd {
   unfinished children are left out.
   Urgent first, then epics near the end, then the oldest.
 
+  Only your own rows are offered. A row that is someone else's or nobody's
+  stands apart below - ask before you pick it up (`moai mv <id> <column>
+  --take` on a yes). --json carries it under others, always an array, with
+  owner theirs or unowned. Who you are comes from --user, MOAI_ACTOR or git
+  config; when it is unknown nothing is set apart.
+
   With --worktree, work already picked up in another worktree drops out here
   and what you hold shows with its branch. For one id the row that moved
   column, or was deferred and picked back up, later wins - so editing only
@@ -177,6 +183,9 @@ pub enum Cmd {
   that is a SessionStart hook, which fires again after a compact:
 
     moai prime
+
+  What you hold and what comes next are your own rows - the same split
+  `moai ready` makes, with the rest under others.
 
   With --worktree, work picked up in a sibling worktree shows with its branch
   and drops out of what is next - the same overlay `moai ready` uses.")]
@@ -253,6 +262,16 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
   with several, the won and the lost rows share one exit code.
 
   moai mv moai-4aex in_progress --from todo
+
+  Work that is someone else's, or nobody's, is asked about before it is picked
+  up. Moving it into a started column still goes through - one stderr line says
+  whose it is. On a yes, `--take` makes you the assignee in the same write and
+  leaves a note `Taken-over: <who it was|none>`; `-m` says who said yes. It also
+  takes a row that already stands in that column. `--json` carries taken
+  (rows whose assignee changed) and theirs (moved without --take), always as
+  arrays.
+
+  moai mv moai-4aex in_progress --from todo --take -m 'the owner said yes'
 
   Closing says what that write opened - work that just became ready, a parent
   whose last unfinished child is now done, and the next pick in the same epic.
@@ -878,8 +897,11 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "status")]
     pub status: Option<String>,
 
-    /// Body. `-` reads it from stdin (with `--from`, on the first epic)
-    #[arg(short, long, value_name = "text")]
+    /// Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+    ///
+    /// **A file goes in as `--body - < <file>`.** `--body <path>` takes
+    /// the path as the body, it does not open the file.
+    #[arg(short, long, value_name = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 
     /// Assignee. The creator when absent; `none` clears it
@@ -958,18 +980,18 @@ pub struct AddArgs {
 const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
@@ -1331,6 +1353,10 @@ pub struct MvArgs {
     /// the meantime is left untouched and stands as a partial failure.
     #[arg(long, value_name = "column", verbatim_doc_comment)]
     pub from: Option<String>,
+
+    /// Become the assignee and note whose it was
+    #[arg(long)]
+    pub take: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1342,7 +1368,7 @@ pub struct EditArgs {
     #[arg(long, value_name = "text", allow_hyphen_values = true)]
     pub title: Option<String>,
 
-    /// Body. `-` reads it from stdin
+    /// Text, not a path. `-` reads stdin: `-b - < <file>`
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub body: Option<String>,
 
@@ -1505,7 +1531,7 @@ pub struct NoteArgs {
     #[arg(value_name = "text", allow_hyphen_values = true)]
     pub text: Option<String>,
 
-    /// A long text. `-` reads it from stdin
+    /// Text, not a path. `-` reads stdin: `-b - < <file>`
     ///
     /// **It pushes the positional out.** Given both, nobody can remember
     /// which one wins, and a rule nobody remembers erases someone's text

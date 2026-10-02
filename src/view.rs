@@ -1263,6 +1263,45 @@ fn more_of(rest: usize, lang: Lang) -> String {
     fill(say(lang, "status.more"), &[("n", &rest.to_string())])
 }
 
+/// `ready` 가 내 것과 따로 대는 줄(moai-0zjo) — 담당이 남이거나 없는 줄과, `-n` 에 잘린 수.
+pub struct Others<'a, 'i> {
+    pub rows: &'a [(&'i Issue, crate::report::Owner)],
+    pub more: usize,
+    /// 담당을 그리는 모양 — 설정의 `naming` 이다. 화면만 바꾼다.
+    pub naming: crate::config::Naming,
+    /// 집는 칸의 이름(`Config::started_status`) — 내미는 `moai mv <id> <칸> --take` 에 든다.
+    pub column: &'a str,
+    /// 그 줄이 선 칸(`Config::first_status` — `ready` 의 줄은 첫 칸에 선다). 내미는 줄의 `--from` 이다 —
+    /// 빼면 그러라는 말을 듣는 사이 주인이 먼저 집은 줄을 `--take` 가 덮는다.
+    pub from: &'a str,
+}
+
+/// 내 것이 아닌 줄 `n` 건을 대는 한 줄 — `ready`·`prime`·한눈 보기가 같은 글자로 선다(moai-0zjo).
+///
+/// **칸 이름은 셸 낱말로 감싸 넣는다**([`crate::text::quoted`]) — 설정의 `statuses` 는 손으로 고칠 수 있는
+/// 글이고, 한눈 보기에서는 남의 저장소의 것이다. 안 감싸면 `하는 중` 은 두 낱말로 갈려 내민 줄이 안 돌고,
+/// `$(…)` 는 붙여 넣는 순간 돈다. 감싸는 자는 제어문자도 `$'…'` 로 적어 이 화면을 다시 칠하지 못한다.
+/// 꼬리는 규칙 5 의 거절문과 같은 [`crate::guide::TAKE_YES`] 다 — 누가 그러라고 했는지가 노트에 남는다.
+/// 본 칸(`from`)도 싣는다 — 집기는 `--from` 으로 하는 것이 여러 세션이 한 `.moai` 를 쓸 때의 약속이다.
+fn others_said(n: usize, column: &str, from: &str, lang: Lang) -> String {
+    let (column, from) = (crate::text::quoted(column), crate::text::quoted(from));
+    fill(
+        say(lang, "ready.others"),
+        &[("n", &n.to_string()), ("column", &column), ("from", &from), ("take", crate::guide::TAKE_YES)],
+    )
+}
+
+/// 내 것이 아닌 줄의 담당 — 남의 것이면 그 사람, 담당이 없으면 그 낱말이다(moai-0zjo). 합치는 자는
+/// [`crate::model::label`] 하나다.
+fn owner_label(i: &Issue, o: crate::report::Owner, naming: crate::config::Naming, lang: Lang) -> String {
+    match (o, i.assignee.as_deref()) {
+        (crate::report::Owner::Theirs, Some(a)) => {
+            one_line(&crate::model::label(a, i.assignee_email.as_deref(), naming))
+        }
+        _ => say(lang, "ready.unowned").to_string(),
+    }
+}
+
 /// `moai prime` 한 판. **마크다운이고 칠하지 않는다**(moai-5ok8).
 ///
 /// 이 글은 세션 첫머리와 접힌 뒤에 **다시 주입되는 맥락**이라, 보드처럼 표로 서지 않는다.
@@ -1275,7 +1314,12 @@ fn more_of(rest: usize, lang: Lang) -> String {
 ///
 /// **아무것도 막지 않는다.** 경고도 흐름도 안 싣는다 — 그것을 여기 실으면 세션마다 처음 읽는
 /// 글이 잔소리가 되고, 잔소리는 곧 린트고 린트는 곧 게이트다.
-pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen: Screen) -> Vec<String> {
+pub fn prime(
+    p: &crate::report::Prime,
+    epics: &crate::report::EpicLabels,
+    cfg: &crate::config::Config,
+    screen: Screen,
+) -> Vec<String> {
     let lang = screen.lang;
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
 
@@ -1330,6 +1374,19 @@ pub fn prime(p: &crate::report::Prime, epics: &crate::report::EpicLabels, screen
         // (`projects_ready` 가 같은 자리를 같은 꼴로 푼다).
         if p.rest > 0 {
             out.push(format!("- {} — `moai ready`", more_of(p.rest, lang)));
+        }
+    }
+    // **내 것이 아닌 줄은 따로 댄다**(moai-0zjo) — `ready` 의 덩이와 같은 말이다. 안 대면 남의 일만
+    // 남은 저장소에서 이 판이 "집을 것이 없다" 로 읽힌다.
+    if !p.others.is_empty() {
+        let n = p.others.len() + p.others_rest;
+        out.push(String::new());
+        out.push(format!("> {}", others_said(n, cfg.started_status(), cfg.first_status(), lang)));
+        out.extend(
+            p.others.iter().map(|(i, o)| format!("{} · {}", row(i, false), owner_label(i, *o, cfg.naming, lang))),
+        );
+        if p.others_rest > 0 {
+            out.push(format!("- {} — `moai ready`", more_of(p.others_rest, lang)));
         }
     }
     // 도는 마일스톤은 **목록 밑에서** 댄다 — `ready` 가 짧아진 까닭을 그 자리에서 읽는다.
@@ -1412,6 +1469,7 @@ pub fn prime_commands(lang: Lang) -> Vec<(&'static str, &'static str)> {
 pub fn ready(
     picks: &[&Issue],
     more: usize,
+    others: Others,
     epics: &crate::report::EpicLabels,
     wip: &[&Issue],
     held: &[crate::report::Held],
@@ -1462,6 +1520,35 @@ pub fn ready(
         // `prime` 의 꼬리와 같은 꼴이다([`more_of`] 에 명령은 자료로) — 다 보려면 `-n` 없이 부른다.
         if more > 0 {
             out.push(format!("  {}", paint(style::DIM, &format!("{} — `moai ready`", more_of(more, lang)))));
+        }
+    }
+
+    // **내 것이 아닌 줄은 목록 밑에 따로 댄다**(moai-0zjo, 2026-10-02 사용자 결정). 머리의 수에는
+    // 안 든다 — 그 수는 "지금 집을 것" 이다. 안 대면 남의 일만 남은 저장소에서 목록이 까닭 없이 빈다.
+    // 글리프는 `?` 다 — 고칠 것(`!`)이 아니라 물을 것이다.
+    if !others.rows.is_empty() {
+        out.push(String::new());
+        let said = others_said(others.rows.len() + others.more, others.column, others.from, lang);
+        out.push(format!("{} {}", paint(style::DIM, "?"), paint(style::DIM, &said)));
+        let heads: Vec<(String, usize)> =
+            others.rows.iter().map(|(i, _)| marked(screen.branch(&i.id), &i.title, TITLE_CAP, style::DIM)).collect();
+        let w_id = others.rows.iter().map(|(i, _)| width(&i.id)).max().unwrap_or(2);
+        let w_title = heads.iter().map(|(_, w)| *w).max().unwrap_or(4);
+        for ((i, o), (title, w_this)) in others.rows.iter().zip(&heads) {
+            out.push(
+                format!(
+                    "  {}{}{}{}",
+                    cell(style::ID, &i.id, w_id + 3),
+                    cell(style::priority_style(i.priority()), &format!("p{}", i.priority()), 4),
+                    pad(title, *w_this, w_title + 3),
+                    paint(style::DIM, &owner_label(i, *o, others.naming, lang)),
+                )
+                .trim_end()
+                .to_string(),
+            );
+        }
+        if others.more > 0 {
+            out.push(format!("  {}", paint(style::DIM, &format!("{} — `moai ready`", more_of(others.more, lang)))));
         }
     }
 
@@ -2723,6 +2810,15 @@ pub struct Picks<'a> {
     /// `-n` 에 잘려 `picks` 에 없는 줄 수(moai-efoc). 머리의 셈과 "N건 더" 는 이것까지 센다 —
     /// 자른 것은 보여 줄 줄이지 집을 일의 수가 아니다.
     pub more: usize,
+    /// 집을 수 있지만 **내 것이 아닌** 줄(`report::by_owner`, moai-0zjo) — 저장소 안의 `ready` 와 같은
+    /// 자로 가른다. 사람은 그 프로젝트의 뿌리에서 푼다. 머리의 셈에는 안 든다.
+    pub others: Vec<(&'a Issue, crate::report::Owner)>,
+    /// `-n` 에 잘려 `others` 에 없는 줄 수.
+    pub others_more: usize,
+    /// 그 프로젝트의 집는 칸 — 내미는 `--take` 줄에 든다.
+    pub column: &'a str,
+    /// 그 프로젝트의 첫 칸 — 내미는 줄의 `--from` 이다([`Others::from`] 과 같은 까닭).
+    pub from: &'a str,
     /// 도는 마일스톤이 이 목록에 한 일(`report::ready_in`). **한눈 보기에서도 댄다** — 저장소
     /// 안의 `ready` 가 목록이 왜 짧은지를 대는데 여기만 입을 다물면, 같은 명령이 선 자리에
     /// 따라 짧아진 목록을 "할 일이 없다" 로 읽는다.
@@ -2987,6 +3083,12 @@ pub fn projects_ready(
             let said = fill(say(lang, "ready.outside_held"), &[("n", &k.focus.outside.len().to_string())]);
             out.push(format!("  {} {}", paint(style::DIM, "+"), paint(style::DIM, &said)));
         }
+        // **내 것이 아닌 줄은 수만 댄다**(moai-0zjo) — 저장소 안의 `ready` 와 같은 글자·같은 글리프다.
+        // 줄은 그 프로젝트의 `ready` 가 낸다. 한눈 보기의 몫은 집을 줄이 왜 적은지를 알리는 데까지다.
+        if !k.others.is_empty() {
+            let said = others_said(k.others.len() + k.others_more, k.column, k.from, lang);
+            out.push(format!("  {} {}", paint(style::DIM, "?"), paint(style::DIM, &said)));
+        }
         // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
         troubles(&mut out, k.trouble, lang);
         if k.unreadable > 0 {
@@ -3175,6 +3277,19 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
         Trouble::NotADirectory { at } => fill(say(lang, "store.not_a_directory"), &[("at", at)]),
         Trouble::DuplicateId { id } => fill(say(lang, "store.duplicate_id"), &[("id", id)]),
         Trouble::LockBusy { secs } => fill(say(lang, "store.lock_busy"), &[("secs", &secs.to_string())]),
+        // 스냅샷의 거절과 **같은 꼴**(`<자리>: <까닭>`)로 편다([`crate::held::refused`]) — 한 처지를 두 글로
+        // 대지 않는다. 쓰기만 서는 자리라 "아무것도 안 바뀌었다" 를 덧붙인다.
+        Trouble::LockUnheld { at, why } => {
+            fill(say(lang, "store.lock_unheld"), &[("said", &crate::held::refused(lang, at, why))])
+        }
+        // 두 자리 다 커밋된 링크를 따라 푼 철자라 제어 문자를 걷는다(`text::one_line`).
+        Trouble::SnapshotOnLock { at, to } => fill(
+            say(lang, "store.snapshot_on_lock"),
+            &[
+                ("at", &crate::text::one_line(&at.display().to_string())),
+                ("to", &crate::text::one_line(&to.display().to_string())),
+            ],
+        ),
         // **말이 함께 사라진 줄만 이름을 댄다** — 하나도 없으면 io 가 낸 줄 그대로다.
         Trouble::JournalLost { said, ids } if ids.is_empty() => said.clone(),
         Trouble::JournalLost { said, ids } => {
@@ -3609,6 +3724,7 @@ pub fn config_trouble(lang: Lang, why: &crate::config::Trouble) -> String {
     let quoted = |s: &str| format!("{s:?}");
     match why {
         Trouble::Unreadable { said } => said.clone(),
+        Trouble::Held(why) => crate::held::said(lang, why),
         Trouble::Unbalanced { line } => fill(say(lang, "config.unbalanced"), &[("line", &line.to_string())]),
         Trouble::NotAPair { line } => fill(say(lang, "config.not_a_pair"), &[("line", &line.to_string())]),
         Trouble::NotQuoted { line, key, raw } => {
@@ -3710,6 +3826,11 @@ pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
         // **다른 것은 자리에 드는 것뿐이다** — 열어 본 이쪽은 열다 진 까닭을, 안 열어 본 저쪽은 그
         // 워크트리의 자리를 싣는다. 둘 다 `⎇ 가지: <무엇>` 한 모양이다([`at_branch`]).
         Trouble::Unread { branch, why } => unread_said(lang, &at_branch(branch, why)),
+        // **안 읽기로 한 까닭도 같은 문장에 든다** — 다른 것은 그 까닭을 고른 말로 펴는 것뿐이다(moai-itsu).
+        // 제 트래커의 거절과 같은 꼴(`<자리>: <까닭>`, [`crate::held::refused`])이다.
+        Trouble::Unheld { branch, at, why } => {
+            unread_said(lang, &at_branch(branch, &crate::held::refused(lang, at, why)))
+        }
         Trouble::Skipped { branch, path, lines } => fill(
             say(lang, "trouble.skipped"),
             &[("at", &at_branch(branch, &path.display().to_string())), ("n", &lines.to_string())],
@@ -3762,6 +3883,78 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 내 것이 아닌 줄이 없는 `ready` — 가르기 전의 화면이다.
+    fn no_others() -> Others<'static, 'static> {
+        Others { rows: &[], more: 0, naming: crate::config::Naming::Full, column: "in_progress", from: "todo" }
+    }
+
+    /// **`prime` 도 내 것이 아닌 줄을 따로 댄다**(moai-0zjo 리뷰) — `ready` 의 `?` 덩이와 같은 말과 같은 꼬리다.
+    /// 안 대면 남의 일만 남은 저장소에서 세션 첫머리의 요약이 "집을 것이 없다" 로 읽힌다. 칸 이름은 셸 낱말로
+    /// 감싼다 — `하는 중` 이 두 낱말로 갈리면 내민 줄이 안 돈다.
+    #[test]
+    fn prime_sets_what_is_not_mine_apart() {
+        use crate::report::Owner;
+        let lang = Lang::En;
+        let labels = crate::report::EpicLabels::titled(BTreeMap::new());
+        let mut theirs = issue("argos-0002", "theirs", "todo");
+        theirs.assignee = Some("B".into());
+        theirs.assignee_email = Some("b@x.io".into());
+        let mut nobody = issue("argos-0003", "nobody's", "todo");
+        nobody.assignee = None;
+        let p = crate::report::Prime {
+            held: Vec::new(),
+            picks: Vec::new(),
+            rest: 0,
+            others: vec![(&theirs, Owner::Theirs), (&nobody, Owner::Unowned)],
+            others_rest: 2,
+            focus: crate::report::Focus::default(),
+        };
+        let spaced = Config::parse("prefix = \"argos\"\nstatuses = \"todo,하는 중,done\"\n").unwrap();
+        let out = plain(&prime(&p, &labels, &spaced, Screen::new(lang))).join("\n");
+        let said = others_said(4, "하는 중", "todo", lang);
+        assert!(out.contains(&format!("> {said}")), "덩이 머리가 없다 — {out}");
+        assert!(said.contains("moai mv <id> '하는 중' --from todo --take -m '<who said yes>'"), "{said}");
+        assert!(out.lines().any(|l| l.contains("argos-0002") && l.ends_with("B (b@x.io)")), "{out}");
+        assert!(out.lines().any(|l| l.contains("argos-0003") && l.ends_with(say(lang, "ready.unowned"))), "{out}");
+        assert!(out.contains(&more_of(2, lang)), "잘린 수를 안 댔다 — {out}");
+        let bare = crate::report::Prime { others: Vec::new(), others_rest: 0, ..p };
+        assert!(!plain(&prime(&bare, &labels, &spaced, Screen::new(lang))).join("\n").contains(&said));
+    }
+
+    /// **내 것이 아닌 줄은 목록 밑 따로 한 덩이다**(moai-0zjo, 2026-10-02 사용자 결정) — 머리의 수는 내 것만
+    /// 세고, 덩이는 `?` 와 함께 남의 담당과 "담당 없음" 을 대며, `--take` 줄의 칸은 설정의 집는 칸이다.
+    /// 그 덩이가 없으면 화면은 가르기 전과 글자째 같다 — 한 사람 저장소의 출력이 안 바뀐다.
+    #[test]
+    fn ready_sets_what_is_not_mine_apart() {
+        use crate::report::Owner;
+        let lang = Lang::En;
+        let labels = crate::report::EpicLabels::titled(BTreeMap::new());
+        let none = crate::report::Focus::default();
+        let mine = issue("argos-0001", "mine", "todo");
+        let mut theirs = issue("argos-0002", "theirs", "todo");
+        theirs.assignee = Some("B".into());
+        theirs.assignee_email = Some("b@x.io".into());
+        let mut nobody = issue("argos-0003", "nobody's", "todo");
+        nobody.assignee = None;
+        let rows = [(&theirs, Owner::Theirs), (&nobody, Owner::Unowned)];
+        let others =
+            Others { rows: &rows, more: 1, naming: crate::config::Naming::Full, column: "doing", from: "backlog" };
+        let out = plain(&ready(&[&mine], 0, others, &labels, &[], &[], &none, Screen::new(lang)));
+        let joined = out.join("\n");
+        assert_eq!(out[0], fill(say(lang, "ready.count"), &[("n", "1")]), "머리의 수가 남의 줄까지 셌다");
+        let said = others_said(3, "doing", "backlog", lang);
+        assert!(joined.contains(&format!("? {said}")), "덩이 머리가 없다 — {joined}");
+        assert!(said.contains("moai mv <id> doing --from backlog --take"), "설정의 칸이 안 들었다 — {said}");
+        let theirs_line = out.iter().find(|l| l.contains("argos-0002")).expect("남의 줄이 안 섰다");
+        assert!(theirs_line.contains("B (b@x.io)"), "{theirs_line}");
+        let nobody_line = out.iter().find(|l| l.contains("argos-0003")).expect("담당 없는 줄이 안 섰다");
+        assert!(nobody_line.contains(say(lang, "ready.unowned")), "{nobody_line}");
+        assert!(joined.contains(&more_of(1, lang)), "잘린 수를 안 댔다 — {joined}");
+        // 덩이가 없으면 가르기 전과 같다.
+        let bare = plain(&ready(&[&mine], 0, no_others(), &labels, &[], &[], &none, Screen::new(lang)));
+        assert!(!bare.join("\n").contains('?'), "남의 줄이 없는데 덩이가 섰다 — {bare:?}");
     }
 
     /// **거르개의 거절문은 고른 말로 선다**(moai-2htt). 한때 `query` 가 한국어로 박아 지어, 영어 화면과
@@ -4001,11 +4194,26 @@ mod tests {
         // `argos-e001` 이 없는 표 — 줄이 제 `epic` 으로 답을 내고 그 id 를 못 찾아 `Gone` 이다.
         let labels = crate::report::EpicLabels::titled(BTreeMap::new());
 
-        let p =
-            crate::report::Prime { held: vec![&i], picks: Vec::new(), rest: 0, focus: crate::report::Focus::default() };
-        let as_prime = plain(&prime(&p, &labels, Screen::new(lang))).join("\n");
-        let as_ready =
-            plain(&ready(&[&i], 0, &labels, &[], &[], &crate::report::Focus::default(), Screen::new(lang))).join("\n");
+        let p = crate::report::Prime {
+            held: vec![&i],
+            picks: Vec::new(),
+            rest: 0,
+            others: Vec::new(),
+            others_rest: 0,
+            focus: crate::report::Focus::default(),
+        };
+        let as_prime = plain(&prime(&p, &labels, &cfg(), Screen::new(lang))).join("\n");
+        let as_ready = plain(&ready(
+            &[&i],
+            0,
+            no_others(),
+            &labels,
+            &[],
+            &[],
+            &crate::report::Focus::default(),
+            Screen::new(lang),
+        ))
+        .join("\n");
         let as_list = plain(&list(
             &[i.clone()],
             &cfg(),
@@ -5001,7 +5209,7 @@ mod tests {
 
         let lang = Lang::Ko;
         let none = crate::report::Focus::default();
-        let out = plain(&ready(&[&a, &b], 0, &labels, &[&wip], &[], &none, Screen::new(lang)));
+        let out = plain(&ready(&[&a, &b], 0, no_others(), &labels, &[&wip], &[], &none, Screen::new(lang)));
         let joined = out.join("\n");
         // **글자는 말묶음에서 온다**(moai-zeyv) — 여기에 한국어를 박으면 기본 언어(영어)에서 깨진다.
         // **셈이 화면에 닿는지는 따로 잰다**(리뷰 moai-80qw) — 기댓값도 같은 `say` 를 지나므로,
@@ -5012,7 +5220,7 @@ mod tests {
         assert!(joined.contains("이미 잡고 있는 것 1건"), "{joined}");
         assert!(joined.contains("argos-0004"), "{joined}");
 
-        let empty = plain(&ready(&[], 0, &labels, &[], &[], &none, Screen::new(lang)));
+        let empty = plain(&ready(&[], 0, no_others(), &labels, &[], &[], &none, Screen::new(lang)));
         let joined = empty.join("\n");
         assert!(
             joined.contains(&fill(say(lang, "ready.count"), &[("n", "0")])) && joined.contains(say(lang, "ready.none")),

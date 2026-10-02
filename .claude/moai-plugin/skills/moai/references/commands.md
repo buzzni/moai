@@ -186,8 +186,11 @@ PLAN
 which epic a `--body` would land on, and refuses a body the write would refuse.
 
 `--body` says why these issues are one bundle. It goes onto the first epic the plan
-creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
-`--from` can read stdin, so give the other one a file or write the body as text —
+creates, which is where `moai show <epic>` reads it from. `--body <text>` takes the
+text itself — a file path there becomes the body as written — `--body -` reads
+stdin, and only `--from <file>` reads a file, so a file goes in as the body with
+`--body - < <file>`. `--body -` and `--from -` cannot both read stdin: put the plan
+in a file and stream the body, or keep the plan on stdin and pass the body as text.
 `moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{name}}` with `--var name=value` (the
@@ -307,9 +310,9 @@ the moment it is created — not in `ready`, not in `held`, and no warning says 
 **A dead release is said out loud**: unfolding into a deferred or closed milestone
 prints one line on stderr naming it, and nothing is blocked.
 
-The id in that line is the release `moai show --milestone` stands that idea under. What is checked is the shape
-alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
-`dangling_milestone` warning.
+The id in that line is the release `moai show --milestone` stands that idea under. Only its shape is checked, so `moai-zzzz`
+goes in with exit 0 — but one line on stderr says there is no such milestone,
+and `moai status` counts the row as `dangling_milestone`.
 
 ## Deferring
 
@@ -328,6 +331,20 @@ the work under it drops out with it.
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
 email come from `git config`, and when they are not there you pass them with
 `--user "Name (email)"` or `MOAI_ACTOR`.
+
+**Work that is not yours is asked about.** `moai ready` and `moai prime` hand out
+only your own rows; a row assigned to someone else, or to nobody, stands apart under
+`others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
+and on a yes take it over and say who said yes:
+
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
+
+You become the assignee in the same write and a note `Taken-over: <who it was|none>`
+keeps whose it was — it also takes a row that already stands in that column, so give
+`--from` the column you saw: if the owner picked it up meanwhile, nothing is taken. Without
+`--take` a person in a terminal still moves it (one line on stderr says whose it is);
+the hook refuses it (rule 5). Who you are is matched by name or email, the same as
+`-a me`; when it is unknown nothing is set apart.
 
 ## What to write in an issue — an example
 

@@ -326,10 +326,23 @@ pub struct Config {
 }
 
 impl Config {
+    /// **저장소가 든 파일이라 그 체크아웃 안에서만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
+    /// `config.toml -> /proc/self/pagemap` 을 커밋해 두면 `fs::read_to_string` 이 끝없이 읽어 모든 명령이
+    /// 메모리를 다 썼다 — 이 파일은 [`crate::store::Repo`] 를 지을 때마다 읽히고, 훅이 도구 호출마다 지난다.
     pub fn load(root: &Path) -> Result<Config, Refused> {
+        Config::load_in(root, &crate::held::Home::of(root))
+    }
+
+    /// [`Config::load`] 를 **이미 푼 뿌리로** — `store::Repo::rooted` 가 스냅샷을 잴 뿌리와 한 번에 푼다.
+    pub(crate) fn load_in(root: &Path, home: &crate::held::Home) -> Result<Config, Refused> {
         let path = root.join(".moai/config.toml");
         let at = |why| Refused { at: path.clone(), why };
-        let src = std::fs::read_to_string(&path).map_err(|e| at(Trouble::Unreadable { said: e.to_string() }))?;
+        let src = crate::held::read_inside(&path, home).map_err(|fell| {
+            at(match fell {
+                crate::held::Fell::Unheld(why) => Trouble::Held(why),
+                crate::held::Fell::Io(e) => Trouble::Unreadable { said: e.to_string() },
+            })
+        })?;
         Config::parse(&src).map_err(at)
     }
 
@@ -382,8 +395,9 @@ impl Config {
     /// 두 칸짜리 설정이면 첫 칸이다: 거기서는 "시작했지만 안 끝났다" 를 말할
     /// 낱말이 없고, `done` 으로 말하면 안 끝난 것을 끝났다고 한다.
     ///
-    /// **"시작했는가" 를 묻는 데 쓰지 않는다** — 그것은 [`Config::is_started`] 다. 이 칸은
-    /// 묶음이 반쯤 끝났는데 시작한 멤버가 없을 때 설 자리를 댈 때만 쓴다.
+    /// **"시작했는가" 를 묻는 데 쓰지 않는다** — 그것은 [`Config::is_started`] 다. 이 칸은 설 자리 하나를
+    /// 댈 때 쓴다 — 묶음이 반쯤 끝났는데 시작한 멤버가 없을 때, 그리고 `ready` 가 남의 줄 밑에 내미는
+    /// 넘겨받는 줄의 칸(moai-0zjo).
     pub fn started_status(&self) -> &str {
         self.statuses
             .iter()
@@ -416,6 +430,9 @@ impl Config {
 pub enum Trouble {
     /// 파일을 못 읽었다 — io 가 낸 말. **이미 글이다**(운영체제의 것이라 안 옮긴다).
     Unreadable { said: String },
+    /// 저장소가 든 파일이라 안 읽었다([`crate::held`], moai-itsu) — 체크아웃 밖·`.git/` 으로 가는 링크거나
+    /// 보통 파일이 아니다. **고칠 것은 그 링크다** — `--json` 의 코드가 `broken` 인 까닭이다([`Trouble::code`]).
+    Held(crate::held::Unheld),
     /// 따옴표가 짝이 안 맞는다 — 그 줄.
     Unbalanced { line: usize },
     /// `키 = "값"` 꼴이 아니다 — 그 줄.
@@ -448,6 +465,36 @@ pub enum Trouble {
     StatusTwice { status: String },
     /// `naming` 이 모르는 값이다 — 쓰인 그대로.
     NamingUnknown { raw: String },
+}
+
+impl Trouble {
+    /// 이 거절의 `--json` 코드 — **갈래가 쥔다**(`store::Trouble::code` 와 같은 까닭). 안 읽기로 한 링크는
+    /// 사람이 손으로 고칠 파일이라 `broken` 이고(2026-10-02 사용자 결정, moai-itsu), 나머지는 전처럼 `error` 다.
+    ///
+    /// **갈래를 빠짐없이 적는다** — `_` 로 받으면 갈래가 느는 날 새 거절이 말없이 `error` 가 된다(리뷰
+    /// moai-itsu.n8z, `store::Trouble::code` 와 같은 자).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Trouble::Held(_) => crate::fail::code::BROKEN,
+            Trouble::Unreadable { .. }
+            | Trouble::Unbalanced { .. }
+            | Trouble::NotAPair { .. }
+            | Trouble::NotQuoted { .. }
+            | Trouble::NumberQuoted { .. }
+            | Trouble::NotANumber { .. }
+            | Trouble::RatioRange { .. }
+            | Trouble::PrefixCharset { .. }
+            | Trouble::PrefixDash { .. }
+            | Trouble::FlowDaysZero
+            | Trouble::NoSuchThreshold { .. }
+            | Trouble::ThresholdInTable { .. }
+            | Trouble::NoPrefix
+            | Trouble::NoStatuses
+            | Trouble::NoDone { .. }
+            | Trouble::StatusTwice { .. }
+            | Trouble::NamingUnknown { .. } => crate::fail::code::ERROR,
+        }
+    }
 }
 
 /// 수가 어떤 꼴이어야 하는가([`Trouble::NotANumber`]). **낱말이 아니라 갈래로 든다** —

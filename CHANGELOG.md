@@ -12,6 +12,218 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-02
+
+### Added
+
+- **`moai mv --take` takes someone else's work over in one write.** The
+  assignee becomes you and a note `Taken-over: <who it was|none>` keeps whose it
+  was, in the same write as the move; `-m` says who said yes. It also takes a row
+  that already stands in that column, which is how stalled work is reclaimed.
+  `--json` carries `taken` and `theirs`, always as arrays.
+
+- **Hook rule 5 — ask before you pick up someone else's work.** The planted hook
+  refuses an agent's `moai mv` into a started column on a row whose assignee is
+  someone else, or nobody, unless it carries `--take`, and hands back the line to
+  run on a yes. It is the one place that refuses: when who you are is unknown it
+  lets the move through.
+
+- **A `--body` that names a file says so.** `--body <text>` takes the text
+  itself, so `moai add --from - --body plan.md` put the words `plan.md` on the
+  epic, not the file's contents. When the value is one line and a file by that
+  name exists, one line on stderr says the body is those words and how to stream
+  the file instead (`--body - < plan.md`, or with the plan on stdin, the plan
+  moved into a file). It covers `add`, `add --from`, `idea add`, `edit -b` and
+  `note -b`; the file is not opened, the text is kept as given and the exit code
+  does not change. The `--body` help of all of them now says it takes text, not
+  a path.
+
+### Changed
+
+- **`moai ready` and `moai prime` hand out only your own rows.** A ready row
+  assigned to someone else, or to nobody, stands apart below the list, and under
+  `others` in `--json` with `owner` set to `theirs` or `unowned` — the key is
+  always there, and `prime --json` carries `others` and `others_rest` the same
+  way, each row naming its `assignee`. `p0` is no exception. `prime`'s `picked`
+  and the "already picked up" line under `moai ready` drop what someone else
+  picked up or nobody owns, and the planted hook no longer counts those rows as
+  your focus. Who you are is matched by name or email, the same as `-a me`; when it
+  is unknown (no `--user`, `MOAI_ACTOR` or git identity) nothing is set apart.
+  A repository run under one name reads as before as long as its rows carry an
+  assignee — a row left with `-a none`, or written before rows carried one, now
+  stands apart as `unowned`. The next pick in the same epic that `moai mv … done`
+  names is your own row too.
+
+- **A `moai mv` of someone else's row into a started column says so.** It still
+  moves — one line on stderr names whose it is and the `--take` line to run, and
+  the exit code does not change.
+
+- **A journal link that points out of the checkout stands as `outside`.** In
+  `journal_error` (`show --json`, `stats --json`) such a link — one that leaves
+  the checkout or goes into `.git/` — stood as `kind: failed`, so a machine could
+  not tell "fix that link" from a passing I/O failure, and `said` carried an
+  English sentence moai wrote itself, so under `MOAI_LANG=ko` a Korean line ended
+  in English. `kind` is now `outside` and the reason in `said` comes in the
+  chosen language. The same holds when the link's target is missing, cannot be
+  reached or is not a regular file: such a link stood as `failed` or
+  `permission`, or was passed over without a word. A `kind` you do not know still
+  reads as `failed`.
+
+- **A snapshot or config linked out of the checkout, or not a regular file,
+  stops the commands in that repository as `broken`.** A `.moai/config.toml`
+  linked to a file outside the checkout or inside `.git/` used to be read by
+  every command, and a `.moai/issues.jsonl` linked there was read under a
+  `tracker_linked` notice, only writes refusing it, as `error` under `--json`.
+  Both now stop reads too, with one line naming the file and why. The checkout
+  is the directory that holds `.moai`, so a monorepo sub-tracker whose
+  `config.toml` links to a shared file elsewhere in the same git work tree stops
+  as well — copy the file in, or keep the link inside that directory. A snapshot
+  or config that is a directory already stopped every command, but with the
+  system's `Is a directory` and the code `error`; it now stops with moai's own
+  line in the chosen language and the code `broken`. A loop branching on `code`
+  sees `broken` in all of these — the fix is the link or the file
+  (`docs/recovery.md`).
+
+- **A `.moai/lock` that is a link or not a regular file stops every write as
+  `broken`.** A link there used to be followed wherever it pointed, even inside
+  the checkout, and a directory there stopped writes with the system's `Is a
+  directory` and the code `error`. moai no longer takes its lock through a link
+  at all — one pointing at `issues.jsonl` lands on a file each write replaces —
+  so every write now stops with moai's own line naming the lock and why, in the
+  chosen language, and the code `broken`. The lock beside a linked
+  `.moai/issues.jsonl` follows the same rule, and reads are not affected. moai
+  makes that file itself, so the fix is to remove what stands there
+  (`docs/recovery.md`).
+
+- **Ties under `--sort created` and `--sort updated` fall to id alone.** A
+  plan creates its rows within one second, so rows sharing a `created_at` are
+  common. Those ties used to fall to priority, then id, so a priority edit
+  between pages moved a row across the `--after` cursor and it was repeated or
+  skipped. They now fall to id alone, and
+  `--sort created` joins `--sort id` as an order no edit moves; `updated` still
+  moves, since an edit changes the row's own `updated_at`. Every other order
+  still breaks ties by priority, then id. The explorer's `SPC s` goes through
+  the same order, so its created and updated lists change the same way.
+
+### Fixed
+
+- **A `.moai/lock` that is a link no longer loses writes.** A cloned repository
+  could commit `.moai/lock` as a link, and every write took its lock through it:
+  with `-> /proc/self/fd/2` each process locked its own stderr, so 24 concurrent
+  `moai add` all exited 0 and only a handful of issues remained, and
+  `-> ../.git/index.lock` broke every later `git commit`; a FIFO there hung every
+  write. The lock is now taken only on a regular file, never through a link, and
+  only inside the checkout and outside `.git/`. The lock beside a linked
+  `.moai/issues.jsonl` is taken the same way, and a link there is no longer
+  passed over as a lock moai already holds — `-> /proc/self/fd/3` resolved to
+  each process's own `.moai/lock`, so two trackers sharing one snapshot both
+  skipped it and lost writes. A snapshot linked onto a lock (`.moai/issues.jsonl -> lock`),
+  which replaced the lock on every write and lost writes the same way, is
+  refused too. Each of these stops the write with one line naming the file and
+  why, nothing is changed, and under `--json` the code is `broken`; links that
+  used to be followed, and a directory there, are under **Changed**. A `.moai`
+  directory linked out of the checkout no longer leaves a lock file out there.
+  The locks beside your user config and read marks still follow links, so
+  dotfiles linked by stow or rcm keep working.
+
+- **A snapshot or config that links out of the checkout no longer runs every
+  command out of memory.** A cloned repository that committed
+  `.moai/issues.jsonl -> /proc/self/pagemap` or `.moai/config.toml -> /dev/zero`
+  made every command read without end, and a FIFO there hung every command.
+  Both files are now read the way 0.1.6 reads the journal: only when the link
+  lands inside the checkout and outside `.git/`, only when it is a regular file,
+  and no further than the size its open handle gives. A link whose target is
+  missing is measured where it would land, so one pointing out of the checkout
+  no longer reads as an empty board. Otherwise the commands in that repository
+  stop with one line naming the file and why, and under `--json` the code is
+  `broken`; links that used to read, and a directory in either place, are under
+  **Changed**. A sibling worktree's snapshot in that state is skipped and named
+  in the chosen language, and a FIFO there no longer hangs `moai status`.
+
+- **A journal's file name can no longer repaint the terminal.** A cloned
+  repository decides the names under `.moai/journal/`, and a journal moai could
+  not read was named as it stood, so an escape sequence in that name reached the
+  terminal from `moai show`, `-g`, `--removed` and `stats`, and a newline in it
+  drew a `moai:` line that was never said. The name is now folded onto one line
+  with its control characters taken out, on stderr and in `journal_error`'s
+  `said`.
+
+- **`Tab` on a project the explorer could not open no longer opens it whole
+  later.** When a project in the explorer's list could not be opened — a broken
+  `config.toml`, or a snapshot that is not a file moai reads — the `Tab` meant
+  for it stayed behind, and once the file was fixed, `l` opened the whole
+  project, every epic's members included, instead of one level.
+
+- **Journal names hard-linked to one file are read once.** Each line stood twice
+  in the history, `-g` and `--removed`, and `work` added its tokens twice. Names
+  now fold by the file itself, as symlinked names already did. A clone still gets
+  two separate files — git does not carry hard links.
+
+- **`moai add --milestone` with an id that is not a milestone says so on a
+  single issue too.** It wrote the field and exited 0 without a word, and the
+  mistake surfaced only later as a `dangling_milestone` warning; `add --from`
+  and `idea promote` already said it. The row is still written and the exit code
+  does not change.
+
+- **`moai edit --milestone` with an id that is not a milestone says so too.**
+  It wrote the field and exited 0 without a word, while `moai add` already said
+  it. One line on stderr now, under `--json` too and when the field already held
+  that id; the row is still written and the exit code does not change. When an
+  epic or ancestor decides the milestone instead, the line that says so no
+  longer offers that missing id as the way to move it — on `add` either.
+
+- **`moai add -e` and `moai edit -e` say a wrong epic the way `--milestone`
+  does.** The line came before the write was accepted, so a write refused
+  afterwards had already said "no epic"; it only asked whether some row had that
+  id, so `-e <an issue id>`, and `-e <an epic>` on an epic or milestone row, went
+  by without a word while `moai status` counted the row as `dangling_epic`; and
+  `edit` said it only when the row changed. It now comes after the write,
+  measured the way `moai status` measures it, under `--json` too, and `edit`
+  says it on every call that writes `-e <id>` and not on one that leaves `-e`
+  alone. The row is still written and the exit code does not change.
+
+- **`moai rm` names the rows whose milestone or epic it removed.** Removing a
+  milestone ended with `dangling: []`, and the next `moai status` warned
+  `dangling_milestone` for the rows on it; removing an epic named only rows
+  whose own `epic` field held it, not the ones that took it from a parent (a
+  review row made with `--parent`). Those rows are now named on stderr and in
+  `--json`'s `dangling`, measured the way `moai status` measures them; a row
+  that was already dangling on that axis before the removal is not named.
+
+- **`moai rm` no longer calls rows cut off while a twin of the removed id
+  stands.** Where one id stood on two lines, removing one of them named its
+  children, blocked rows and epic members as dangling, though the other line
+  still answered for them. An epic member is still named when the line left
+  behind is not an epic, as `moai status` counts it.
+
+- **The docs no longer point down three wrong paths.** The README said the
+  screen defaults to Korean (it is English); `docs/recovery.md` gave
+  `git show <commit>:.moai/issues.jsonl` to recover a removed line, which on a
+  linked tracker prints only the link — it now uses
+  `git cat-file --batch --follow-symlinks`; and the AGENTS block and the refusal
+  for `--from - --body -` read as if `--body` took a file.
+
+- **`SPC o t` no longer picks a zone when yours is a rule.** When the zone in use
+  is a POSIX rule such as `TZ=JST-9`, it is not a name on the list, so the window
+  now opens with no row highlighted and says so at the bottom. Enter alone keeps
+  the zone; moving or typing picks one. Before, Enter switched to the first name,
+  `Africa/Abidjan`, and wrote it to your config. Typing a filter that matches no
+  name now says so, instead of claiming the machine has no timezone data.
+
+- **The explorer says when it could not read a journal.** A journal it could not
+  open — someone else's file left at `0600`, say — now stands as a third header
+  row, `Journal : <n> unreadable — <first file> (<kind>)`, until you quit; in a
+  window too low for the header it is one banner line. Before, the stats window
+  and the `/` note search counted without that history and said nothing until the
+  explorer quit.
+
+- **Wheel reports no longer reach the shell under mosh.** mosh answers the
+  explorer's "are the reports all in?" question itself, before the wheel reports
+  still crossing the network arrive. When you quit or open the editor within a
+  second of scrolling or dragging, the explorer now keeps dropping mouse reports
+  that follow the answer until 300ms pass quietly or a key arrives — that first
+  key is lost. Quitting without having scrolled waits no longer and loses nothing.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added

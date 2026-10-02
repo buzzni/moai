@@ -267,6 +267,10 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
 pub enum Trouble {
     /// 그 워크트리의 스냅샷을 못 읽었다 — 가지와 까닭.
     Unread { branch: String, why: String },
+    /// 그 워크트리의 스냅샷을 **안 읽기로 했다**([`crate::held::Unheld`], moai-itsu) — 가지·그 스냅샷의 자리·까닭.
+    /// 까닭을 글로 받던 판은 한국어 머리 뒤에 moai 가 지은 영어(`not a regular file`)가 붙었고, 밖을 가리키는
+    /// 링크는 까닭 없이 `<자리> -> <끝>` 만 댔다(리뷰 moai-itsu.n8z).
+    Unheld { branch: String, at: PathBuf, why: crate::held::Unheld },
     /// 못 푸는 줄을 빼고 겹쳤다 — 가지·그 파일·뺀 줄 수.
     Skipped { branch: String, path: PathBuf, lines: usize },
     /// 옆 워크트리를 **찾지 못했다**([`Gathered::unfound`]) — git 이 없거나 저장소가 아니다.
@@ -536,10 +540,16 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
-                match crate::store::read_snapshot(&path) {
+                match crate::store::read_snapshot(&root) {
                     unread @ (Err(_) | Ok(None)) => {
-                        if let Err(e) = unread {
-                            trouble.push(Trouble::Unread { branch: tree.label.clone(), why: e.to_string() });
+                        match unread {
+                            Err(crate::store::Unsnapped::Held { at, why }) => {
+                                trouble.push(Trouble::Unheld { branch: tree.label.clone(), at, why });
+                            }
+                            Err(crate::store::Unsnapped::Failed(e)) => {
+                                trouble.push(Trouble::Unread { branch: tree.label.clone(), why: e.to_string() });
+                            }
+                            Ok(_) => {}
                         }
                         // **디렉터리가 사라진 워크트리는 이름도 안 든다** — 훅의 `away` 가 읽는
                         // `on_disk` 가 그렇게 거른다. git 은 잠근 워크트리를 경로가 사라져도 목록에
@@ -648,7 +658,7 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
         let mut bases = Bases::new();
         for (tree, root) in trees {
-            let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
+            let Ok(Some(other)) = crate::store::read_snapshot(&root) else {
                 continue;
             };
             others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
@@ -852,11 +862,11 @@ fn holds(
     // **이미 판 것이 있으면 다시 안 판다**(moai-kos1) — 겹쳐 보는 길([`gather`])은 바로 앞에서
     // 같은 파일을 열어 풀었다. 재는 자는 그대로 아래 하나다: 건네받은 것도 안 건네받은 것도
     // [`holds_of`] 를 지난다.
-    if let Some(side) = dug.side(&tree.path.join(&disk.rel)) {
+    let root = root_in(disk, tree);
+    if let Some(side) = dug.side(&root) {
         return Some(holds_of(side, mine));
     }
-    let path = snapshot_in(disk, tree);
-    let side = match crate::store::read_snapshot(&path) {
+    let side = match crate::store::read_snapshot(&root) {
         Ok(Some(side)) => side,
         Ok(None) => return Some(Default::default()),
         Err(_) => return None,
@@ -880,15 +890,20 @@ fn holds_of(side: &SideFloor, mine: &Floor) -> (BTreeSet<String>, BTreeSet<Strin
     (side.open.clone(), later)
 }
 
-/// 그 워크트리의 스냅샷 파일 자리 — [`holds`] 와 값싼 문([`unreadable_snapshot`])이 같은 자를 쓴다.
-fn snapshot_in(disk: &Disk, tree: &Tree) -> PathBuf {
-    tree.path.join(&disk.rel).join(".moai").join("issues.jsonl")
+/// 그 워크트리의 트래커 뿌리 — [`holds`] 와 값싼 문([`unreadable_snapshot`])이 같은 자를 쓴다. 스냅샷의
+/// 자리와 견줄 체크아웃이 이 한 값에서 나온다([`crate::store::read_snapshot`]). 뿌리가 워크트리 꼭대기면
+/// 빈 조각을 안 붙인다 — `join("")` 은 끝에 가름선만 더해, 그 철자를 푸는 길이 디렉터리인지를 한 번 더 묻는다.
+fn root_in(disk: &Disk, tree: &Tree) -> PathBuf {
+    match disk.rel.as_os_str().is_empty() {
+        true => tree.path.clone(),
+        false => tree.path.join(&disk.rel),
+    }
 }
 
 /// **그 스냅샷을 못 읽는가** — 값싼 자다: 열어서 한 바이트를 읽어 본다.
 ///
 /// 없는 것은 못 읽는 것이 아니다([`holds`] 의 `Ok(None)` 과 같은 답) — moai 를 들이기 전에
-/// 갈라진 가지다. 자리에 디렉터리가 섰으면 열리기는 해도 안 읽혀 여기서 걸린다(moai-7p48 의
+/// 갈라진 가지다. 자리에 디렉터리가 섰으면 열리기는 해도 보통 파일이 아니라 여기서 걸린다(moai-7p48 의
 /// 재현이 그 꼴이다).
 ///
 /// **읽어 보지는 않는다** — 스냅샷을 푸는 값이 이 문을 둔 까닭이고(moai-7igy 의 측정), 여는
@@ -900,11 +915,18 @@ fn snapshot_in(disk: &Disk, tree: &Tree) -> PathBuf {
 /// 걸지 않아(`read_exact` 와 다르다), 신호 하나가 멀쩡한 워크트리를 "깨졌다" 로 세울 수 있다.
 /// 여기는 말만 하는 자리라 모를 때는 입을 다무는 쪽이 싸다 — 판정이 걸리는 자리면 파는 길이
 /// 제 답으로 덮는다.
-fn unreadable_snapshot(path: &Path) -> bool {
+///
+/// **파는 길과 같은 자로 연다**([`crate::held::open_inside`], moai-itsu) — 그 체크아웃(`root`) 밖·`.git/` 으로
+/// 가는 링크거나 보통 파일이 아니면 파는 길([`crate::store::read_snapshot`])이 안 읽으므로 여기서도 못 읽는
+/// 것이다. 잰 자리를 **막히지 않게** 열고 그 손잡이로 보통 파일인지를 본다 — 그 자리의 FIFO 를 그냥 열면 쓰는
+/// 쪽이 올 때까지 `moai status` 가 멈췄고, 막히지 않게 연 FIFO 의 한 바이트 읽기는 실패가 아니라 0 을 낸다.
+fn unreadable_snapshot(root: &Path) -> bool {
     use std::io::{ErrorKind, Read};
     let quiet = |k: ErrorKind| matches!(k, ErrorKind::NotFound | ErrorKind::Interrupted);
-    match std::fs::File::open(path) {
-        Err(e) => !quiet(e.kind()),
+    let snapshot = root.join(".moai").join("issues.jsonl");
+    match crate::held::open_inside(&snapshot, &crate::held::Home::of(root)) {
+        Err(crate::held::Fell::Unheld(_)) => true,
+        Err(crate::held::Fell::Io(e)) => !quiet(e.kind()),
         Ok(mut f) => f.read(&mut [0u8]).is_err_and(|e| !quiet(e.kind())),
     }
 }
@@ -1030,7 +1052,7 @@ pub fn workplaces_in(
         // **묻는 곳은 여기 하나다** — 파는 길에서는 아래가 실제로 읽은 답으로 `broken` 을 통째로
         // 덮으므로, 거기서 또 열어 보면 워크트리마다 버릴 `open` 하나씩이다.
         for (place, tree) in out.iter_mut().zip(&linked) {
-            place.broken = unreadable_snapshot(&snapshot_in(&disk, tree));
+            place.broken = unreadable_snapshot(&root_in(&disk, tree));
         }
         return out;
     }
@@ -1051,7 +1073,7 @@ pub fn workplaces_in(
         Some(floor) => floor,
         None => {
             // 못 읽으면 바닥이 빈다 — 옆의 줄이 다 만진 흔적이 되어 자리를 넉넉히 대는 쪽으로 틀린다.
-            let read = crate::store::read_snapshot(&snapshot).ok().flatten().unwrap_or_default();
+            let read = crate::store::read_snapshot(&base).ok().flatten().unwrap_or_default();
             own = Floor::of(snapshot, &read.issues);
             &own
         }
@@ -2218,8 +2240,13 @@ mod tests {
         assert_eq!(got.origin.working("t-1"), Some("worktree-t-1"), "스냅샷 없는 워크트리의 이름을 못 봤다");
         assert_eq!(got.origin.working("t-2"), Some("worktree-t-2"), "스냅샷이 깨진 워크트리의 이름을 못 봤다");
         assert!(got.origin.labels().is_empty(), "겹치지 않은 곳을 겹쳐 봤다고 댄다 — {:?}", got.origin.labels());
-        // **어느 워크트리인지를 자료로 든다**(moai-dpbi) — 글은 `view::trouble_line` 이 편다.
-        let said = |b: &str| got.trouble.iter().any(|t| matches!(t, Trouble::Unread { branch, .. } if branch == b));
+        // **어느 워크트리인지를 자료로 든다**(moai-dpbi) — 글은 `view::trouble_line` 이 편다. 디렉터리는 보통
+        // 파일이 아니라 안 읽기로 한 갈래로 선다(moai-itsu).
+        let said = |b: &str| {
+            got.trouble
+                .iter()
+                .any(|t| matches!(t, Trouble::Unread { branch, .. } | Trouble::Unheld { branch, .. } if branch == b))
+        };
         assert!(said("worktree-t-2"), "깨진 스냅샷을 말하지 않는다 — {:?}", got.trouble);
         for id in ["t-1", "t-2"] {
             assert!(away(&main).names.contains(id), "훅의 자가 {id} 를 안 센다 — 이 시험이 견줄 것이 없다");
@@ -2285,12 +2312,84 @@ mod tests {
             std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
         }
         let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
-        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl")).unwrap().unwrap().issues;
+        let mine = crate::store::read_snapshot(&main).unwrap().unwrap().issues;
         assert!(crate::report::wip(&mine, &cfg).is_empty(), "가려진 줄이 집은 일로 섰다 — 이 시험이 견줄 것이 없다");
 
         let trees = workplaces(&main, &cfg, false, &mine);
         let side = trees.iter().find(|t| t.branch == "worktree-agent-x").expect("옆 워크트리가 없다");
         assert!(side.holds.contains("t-0001"), "가려진 집힌 줄을 옆 스냅샷에서 안 셌다 — {:?}", side.holds);
+    }
+
+    /// **옆 워크트리의 스냅샷도 그 체크아웃 안에서만 읽는다**(moai-itsu). 밖을 가리키는 링크는 겹치지 않고
+    /// 고른 말로 까닭까지 말하며, FIFO 는 열다 멈추지 않는다 — 고침이 없으면 이 시험은 `t-2` 의 FIFO 앞에서
+    /// 영영 멈춘다(쓰는 쪽이 없다). 겹쳐 보는 길([`gather`]), 파는 길([`holds`]), 값싼 문
+    /// ([`unreadable_snapshot`])을 다 지난다 — 자리 셈은 집은 줄이 이름에 다 잡힐 때만 값싼 문을 여닫으므로
+    /// (`workplaces_in`), 이름이 못 잡는 `t-0001` 을 든 판은 파는 길로, 집은 줄이 없는 판은 값싼 문으로 간다.
+    /// 둘은 `unknown` 으로 갈린다 — 그것을 세우는 것은 파는 길뿐이다(리뷰 moai-itsu.n8z).
+    #[cfg(unix)]
+    #[test]
+    fn a_siblings_snapshot_is_read_only_inside_its_checkout() {
+        let scratch = crate::scratch::Scratch::fenced("held-sibling");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        let row = |id: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"title\":\"집힌 일\",\"status\":\"in_progress\",\"created_at\":\"2026-09-11T00:00:00Z\",\
+                 \"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+            )
+        };
+        for dir in [main.clone(), base.join("t-1"), base.join("t-2")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        }
+        std::fs::write(main.join(".moai/issues.jsonl"), row("t-0001")).unwrap();
+        // 밖에 선 멀쩡한 스냅샷 — 고침이 없으면 그 줄이 겹쳐 선다.
+        std::fs::write(base.join("away.jsonl"), row("t-0009")).unwrap();
+        std::os::unix::fs::symlink(base.join("away.jsonl"), base.join("t-1/.moai/issues.jsonl")).unwrap();
+        let fifo = std::ffi::CString::new(base.join("t-2/.moai/issues.jsonl").as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: 널로 끝나는 경로와 권한 비트만 넘긴다.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0, "FIFO 를 못 지었다");
+
+        let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+            panic!("저장소가 안 열렸다")
+        };
+        // FIFO 앞에서 멈추면 기다리지 않고 진다([`crate::held::tests::within`]) — 붉은 시험의 이름이 CI 의 시간
+        // 끝보다 먼저 서게 한다.
+        use crate::held::tests::within;
+        let got = within("gather", move || gather(&repo, true).unwrap());
+        assert!(got.load.issues.iter().all(|i| i.id != "t-0009"), "체크아웃 밖의 스냅샷을 겹쳤다");
+        // **까닭은 자료로 실려 고른 말로 펴진다**(리뷰 moai-itsu.n8z) — 글로 지어 싣던 판은 한국어 머리 뒤에
+        // moai 가 지은 영어(`not a regular file`)가 붙었고, 밖 링크는 까닭 없이 `<자리> -> <끝>` 만 댔다.
+        let lang = crate::i18n::Lang::Ko;
+        for (b, outside) in [("worktree-t-1", true), ("worktree-t-2", false)] {
+            let t = got.trouble.iter().find(|t| matches!(t, Trouble::Unheld { branch, .. } if branch == b));
+            let Some(t @ Trouble::Unheld { why, .. }) = t else {
+                panic!("{b}: 안 읽은 스냅샷을 자료로 말하지 않는다 — {:?}", got.trouble)
+            };
+            assert_eq!(
+                matches!(why, crate::held::Unheld::Outside { .. }),
+                outside,
+                "{b}: 까닭의 갈래가 틀렸다 — {why:?}"
+            );
+            let line = crate::view::trouble_line(lang, t);
+            assert!(line.contains(&crate::held::said(lang, why)), "{b}: 고른 말의 까닭이 안 선다 — {line}");
+            assert!(!line.contains("not a regular file"), "{b}: moai 가 지은 영어가 붙었다 — {line}");
+        }
+        let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
+        let mine = crate::store::read_snapshot(&main).unwrap().unwrap().issues;
+        let (at, kept) = (main.clone(), cfg.clone());
+        for t in within("파는 길", move || workplaces(&at, &kept, false, &mine)) {
+            assert!(t.broken && t.unknown, "{}: 파는 길 — broken={} unknown={}", t.branch, t.broken, t.unknown);
+        }
+        for t in within("값싼 문", move || workplaces(&main, &cfg, false, &[])) {
+            assert!(t.broken && !t.unknown, "{}: 값싼 문 — broken={} unknown={}", t.branch, t.broken, t.unknown);
+        }
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

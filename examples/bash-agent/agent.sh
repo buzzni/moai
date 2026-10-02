@@ -8,6 +8,8 @@
 # 일이 스스로 칸을 옮기거나 미뤘으면(review·defer) 닫지 않고 그 판단을 그대로 둔다.
 # 필요한 것: bash, jq, 기본 칸(todo → in_progress → done), 누가 하는지(git config 또는
 # MOAI_ACTOR="이름 (메일)"). PATH 의 moai 가 아닌 것을 쓰려면 MOAI=./target/release/moai.
+# 남의 일과 담당 없는 일은 집지 않는다 — `ready` 가 그것을 `others` 로 따로 대고, 넘겨받을지는
+# 사람이 정한다(`moai mv <id> in_progress --take`). 그래서 이 루프는 사람 없이 돌아도 남의 줄을 안 건드린다.
 set -euo pipefail
 moai=${MOAI:-moai} work=${AGENT_WORK:-} seen=' '
 # **채비는 저장소를 건드리기 전에 다 잰다.** 여기서 걸리면 아무것도 안 집는다(종료 코드 2).
@@ -30,14 +32,16 @@ while :; do
   queue=$("$moai" ready --json) || {
     [ -n "$queue" ] || { echo "moai 저장소(.moai 가 있는 디렉터리) 안에서 돌린다" >&2; exit 2; }
     exit 1
-  }                                                   # {"ready":[…],"held":[…]}
+  }                                                   # {"ready":[…],"others":[…],"held":[…]}
   jq -e 'has("ready")' <<<"$queue" >/dev/null || {
     echo "moai 저장소(.moai 가 있는 디렉터리) 안에서 돌린다: $queue" >&2; exit 2
   }
   id=$(jq -r '.ready[0].id // empty' <<<"$queue")
   if [ -z "$id" ]; then
     # `held` 는 미뤄 둔 것·빈 묶음에 막힌 일뿐이다 — 잡혀 있는 일에 막힌 것은 안 센다.
-    echo "집을 일이 없다 (미뤄 둔 것·빈 묶음에 막힌 일 $(jq '.held | length' <<<"$queue")건)"; exit 0
+    # `others` 는 집을 수 있지만 내 것이 아닌 일이다 — 사람이 넘겨줄 때까지 기다린다.
+    echo "집을 일이 없다 (미뤄 둔 것·빈 묶음에 막힌 일 $(jq '.held | length' <<<"$queue")건 ·" \
+      "남의 것·담당 없는 일 $(jq '.others | length' <<<"$queue")건은 사람에게 묻는다)"; exit 0
   fi
   # 한 판에 한 줄은 한 번만 다룬다. 같은 줄이 또 오면 집기가 먹지 않거나(첫 칸이 in_progress 인
   # 설정) 일이 그 줄을 첫 칸으로 되돌린 것이다 — 그대로 두면 같은 줄을 끝없이 돈다.

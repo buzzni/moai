@@ -1,7 +1,8 @@
 //! 지운다. 에이전트가 잘못 만든 것을 치우는 길이다.
 //!
-//! 자식이나 에픽 멤버가 남아 끊긴 참조가 되는 것은 **막지 않고 알린다.**
-//! `moai status` 가 끊긴 참조를 드러내므로 여기서 막을 이유가 없다.
+//! 지운 줄을 가리키던 자식·에픽 멤버·막힌 줄, 그리고 그 지우기로 `moai status` 가 새로 끊긴 소속
+//! (`dangling_epic`·`dangling_milestone`)으로 세게 된 줄이 남아 끊긴 참조가 되는 것은 **막지 않고
+//! 알린다.** `moai status` 가 끊긴 참조를 드러내므로 여기서 막을 이유가 없다.
 
 use super::{Ctx, Fail, R};
 use crate::cli::RmArgs;
@@ -47,6 +48,16 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
         |issues, _, _| {
             let (mut gone, mut missing, mut dangling) = (Vec::new(), Vec::new(), Vec::new());
             let mut entries = Vec::new();
+            // **소속 참조는 `status` 의 자로 앞뒤를 견준다**(moai-4bio, 리뷰 moai-3hxc.uhh). 지운 마일스톤이나
+            // 에픽을 적은 줄, 그 줄 밑에서 그것을 물려받던 자식, 지운 마일스톤에 선 에픽 — `status` 는 이 줄들을
+            // `dangling_milestone`·`dangling_epic` 으로 세는데 `rm` 은 제 `epic` 필드에 적은 줄만 댔다. 규칙을
+            // 여기 따로 적지 않고 그 경고의 몸(`report::dangling_lines`)을 지우기 전과 뒤에 줄마다 불러, 어느
+            // 축으로든 새로 끊긴 줄만 댄다. 같은 자라 쌍둥이 줄이 남은 id 밑은 끊기지 않은 것으로 읽고, 지우기
+            // 전부터 그 축으로 끊겨 있던 줄은 이 `rm` 이 끊은 것이 아니라 안 댄다. 앞의 판정은 줄을 걷을 때
+            // 같은 자리를 함께 걷어 `issues` 와 자리를 맞춘다.
+            //
+            // **앞의 셈은 첫 줄을 걷기 직전에 한다** — 없는 id 만 준 부름은 쓰기 락을 쥔 채 판정을 안 짓는다.
+            let mut before: Option<Vec<crate::report::Dangling>> = None;
             for id in &args.ids {
                 // 같은 id 를 두 번 적은 것은 실패가 아니다. 인자 목록은 glob·
                 // xargs·에이전트가 짓는 것이라 중복이 흔하고, 지워 놓고
@@ -58,15 +69,36 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
                     missing.push(id.clone());
                     continue;
                 };
+                before.get_or_insert_with(|| crate::report::dangling_lines(issues)).remove(at_idx);
                 let i = issues.remove(at_idx);
                 entries.push(JournalEntry::removed(&i.id, &i.title, &at, &by));
                 gone.push(i);
             }
-            for i in issues.iter() {
-                let orphan = crate::id::parent_of(&i.id).is_some_and(|p| gone.iter().any(|g| g.id == p));
-                let lost = i.epic.as_deref().is_some_and(|e| gone.iter().any(|g| g.id == e));
-                let unblocked = i.blocked_by.iter().any(|b| gone.iter().any(|g| &g.id == b));
-                if orphan || lost || unblocked {
+            // **끊긴 id 는 "지운 줄이 있었다" 가 아니라 "지운 뒤 그 id 의 줄이 하나도 안 선다" 다.**
+            // 같은 id 가 두 줄이면(`duplicate_id`) `rm <id>` 는 앞줄만 걷어 내고 쌍둥이가 남는다 — 그 id 를
+            // 가리키던 자식·멤버·막힌 줄은 여전히 닿는 곳이 있다. 지운 id 만 보고 세면 끊기지 않은 것을
+            // 끊겼다고 알려, 알림이 거짓이 되고 `--json` 을 읽는 뒤처리가 헛 고침을 한다. 부모·막는 줄은
+            // 이 집합 하나로 답한다.
+            let cut: Vec<&str> =
+                gone.iter().map(|g| g.id.as_str()).filter(|id| !issues.iter().any(|i| i.id == *id)).collect();
+            // **에픽 참조는 남은 줄의 종류까지 본다**(리뷰). `status` 의 `dangling_epic` 은 "그 id 의 줄이
+            // 에픽인가"(`report::kinds`, 뒷줄이 이긴다)로 재므로, 에픽 줄을 걷어 낸 뒤 남은 쌍둥이가 이슈면
+            // 멤버는 끊긴 것이다 — 닿는 줄이 있다고 지나 보내면 `status` 가 세는 줄을 `rm` 만 모른다.
+            let left = crate::report::kinds_of(issues, &gone.iter().map(|g| g.id.as_str()).collect::<Vec<_>>());
+            let no_epic: Vec<&str> =
+                gone.iter().map(|g| g.id.as_str()).filter(|id| left.get(id) != Some(&model::Kind::Epic)).collect();
+            // 걷은 줄이 없으면 견줄 것도 없다 — 뒤의 판정도 안 짓는다.
+            let (was, now) = match before {
+                Some(was) => (was, crate::report::dangling_lines(issues)),
+                None => (Vec::new(), Vec::new()),
+            };
+            debug_assert_eq!(was.len(), now.len(), "앞의 판정이 줄과 자리를 맞춰야 한다");
+            for (k, i) in issues.iter().enumerate() {
+                let orphan = crate::id::parent_of(&i.id).is_some_and(|p| cut.contains(&p));
+                let lost = i.epic.as_deref().is_some_and(|e| no_epic.contains(&e));
+                let unblocked = i.blocked_by.iter().any(|b| cut.contains(&b.as_str()));
+                let newly = now.get(k).zip(was.get(k)).is_some_and(|(now, was)| now.newly_since(*was));
+                if orphan || lost || unblocked || newly {
                     dangling.push(i.id.clone());
                 }
             }

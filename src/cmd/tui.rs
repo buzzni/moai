@@ -348,7 +348,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
     // 루프는 사건마다 터미널의 잡기를 `wants_mouse` 에 맞춰 두므로, 제대로 끝난 자리의 값이 곧 터미널의 것이다.
     // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
-    modes_off_draining(app.wants_mouse());
+    modes_off_draining(app.wants_mouse(), app.rolled_at);
     ratatui::restore();
     // 오류·패닉으로 끝났으면 폼에 남은 글부터 건진다 — 터미널을 걷은 **뒤라** 그 말이 셸에 보이고,
     // 패닉을 되던지기 **전이라** 남길 기회가 있다(moai-y3r7).
@@ -536,14 +536,15 @@ fn modes_off() {
 }
 
 /// 모드를 다 놓고, 마우스를 잡고 있었으면(`mouse`) **길에 남은 보고를 버린다**([`drain_reports`]) — 끝낼 때와
-/// 편집기로 넘길 때가 같은 차례다. raw mode 를 걷기 **전에** 부른다.
+/// 편집기로 넘길 때가 같은 차례다. raw mode 를 걷기 **전에** 부른다. `rolled` 는 루프가 휠·끌기를 마지막으로 받은
+/// 때다([`App::rolled_at`]).
 ///
 /// 패닉 훅은 [`modes_off`] 만 부른다 — 훅은 아무 스레드에서나 돌고, 루프 스레드가 키를 읽는 동안 같은 tty 를
 /// 읽으면 둘이 바이트를 나눠 가져 키도 답도 반쪽이 된다.
-fn modes_off_draining(mouse: bool) {
+fn modes_off_draining(mouse: bool, rolled: Option<std::time::Instant>) {
     modes_off();
     if mouse {
-        drain_reports();
+        drain_reports(rolled);
     }
 }
 
@@ -555,12 +556,14 @@ fn modes_off_draining(mouse: bool) {
 /// 차례대로 답하므로, 그 답(`ESC[?…c`)이 오면 앞서 나온 보고는 다 온 것이다. 그때까지 온 것은 다 버린다 — 그사이
 /// 친 키도 함께 버려진다(왕복 한 번). 시간만 재고 비우면 느린 ssh 에서 아직 길에 있던 보고가 지나가고, 이미 온
 /// 것만 비우면(`poll(ZERO)`) 그마저 놓친다. 답 **뒤**의 글은 안 건드린다 — 한 바이트씩 읽어 답에서 멈춘다.
+/// **휠·끌기 직후에 끝낸 때만 예외다**([`drain_answered`], moai-pvpb.m2f) — mosh 처럼 답이 먼저 오는 자리에서 답
+/// 뒤로 이어지는 보고까지 버리고, 보고가 아닌 첫 바이트에서 멈춘다(그 한 바이트는 먹힌다).
 ///
 /// **답이 안 오면 [`ANSWER_WAIT`] 에서 끊는다.** 늦게 온 답은 그 자체가 셸에 찍히니 넉넉히 둔다.
 /// **raw mode 가 이미 걷혔으면 안 묻는다** — 줄 단위 입력에서는 줄바꿈 없는 답이 끝내 안 읽혀 끊을 때까지
 /// 기다리고, 답은 그대로 셸에 남는다. 루프 스레드가 패닉하면 ratatui 의 훅이 `screen` 보다 먼저 걷는다.
 #[cfg(unix)]
-fn drain_reports() {
+fn drain_reports(rolled: Option<std::time::Instant>) {
     use std::io::Write;
     use std::os::fd::AsRawFd;
     if !ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
@@ -589,12 +592,221 @@ fn drain_reports() {
     if out.write_all(b"\x1b[c").and_then(|()| out.flush()).is_err() {
         return;
     }
-    drain_until_answer(fd, std::time::Instant::now() + ANSWER_WAIT);
+    drain_answered(fd, || rolled_lately(rolled, std::time::Instant::now()));
+}
+
+/// DA1 의 답까지 버리고, **답을 봤고 휠·끌기 직후에 끝낸 때(`rolled`)만** 답 뒤의 보고까지 더 버린다(moai-pvpb.m2f,
+/// 2026-10-02 사용자 결정) — 까닭은 [`drain_trailing`] 의 문서다. 휠을 안 쓴 끝내기는 전처럼 답에서 멈춰 그 뒤를 안
+/// 건드린다. 묻는 글(`ESC[c`)을 쓰는 쪽과 가른 것은 시험이 이 문을 파이프로 재려고서다.
+///
+/// `rolled` 는 **답을 본 뒤에** 묻는다 — 답을 기다린 동안도 휠에서 멀어진 때로 센다.
+#[cfg(unix)]
+fn drain_answered(fd: std::os::fd::RawFd, rolled: impl FnOnce() -> bool) {
+    if drain_until_answer(fd, std::time::Instant::now() + ANSWER_WAIT) && rolled() {
+        drain_trailing(fd, TRAIL_QUIET, std::time::Instant::now() + ANSWER_WAIT);
+    }
+}
+
+/// 끝내기 [`ROLLED_LATELY`] 안에 휠·끌기가 있었는가 — `rolled` 는 루프가 그것을 마지막으로 받은 때다
+/// ([`App::rolled_at`]). 없었으면 답 뒤로 올 보고도 없다고 본다.
+///
+/// **그 때는 `App` 이 든다**(리뷰). 한때 프로세스 하나의 전역에 두었는데, 읽는 두 자리([`screen`]·[`suspend`])가 다
+/// `App` 을 쥐고 있어 전역일 까닭이 없었다 — 전역인 [`EDITING`] 은 아무 스레드에서나 도는 패닉 훅이 읽어서다. 전역이면
+/// 나란히 도는 시험 하나가 휠을 [`take`] 에 먹이는 날 다른 시험의 "오래전 휠" 이 깨진다.
+#[cfg(unix)]
+fn rolled_lately(rolled: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    rolled.is_some_and(|at| now.saturating_duration_since(at) <= ROLLED_LATELY)
+}
+
+/// 휠·끌기 뒤 이만큼 안에 끝내면 답 뒤를 더 비운다(사용자 결정). 트랙패드의 관성과 원격의 왕복이 이 안에 든다.
+#[cfg(unix)]
+const ROLLED_LATELY: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// 답 뒤로 보고가 끊긴 채 이만큼 조용하면 다 온 것으로 본다(사용자 결정). mosh 의 왕복이 대개 이 안이다.
+#[cfg(unix)]
+const TRAIL_QUIET: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// DA1 의 답 **뒤로** 마우스 보고가 이어지는 동안 더 버린다(moai-pvpb.m2f, 2026-10-02 사용자 결정). 버린 보고 수를 낸다.
+///
+/// **mosh 아래에서는 답이 먼저 온다.** mosh-server 가 `ESC[c` 에 제 손으로 곧바로 답하는데, 사람의 터미널이
+/// 낸 휠 보고는 아직 망을 건너오고 있다 — [`drain_until_answer`] 가 그 이른 답에서 멈추면 늦은 보고가 셸 프롬프트나
+/// `$EDITOR` 에 찍힌다. tmux 는 마우스를 끈 칸에 보고를 안 넘겨 이 일이 없다. GNU screen 은 기본값(`mousetrack off`)
+/// 에서 제가 답한 뒤에 온 보고를 그대로 넘겨 mosh 와 같은 일이 난다(리뷰 — screen 의 `display.c` 를 읽었다).
+///
+/// **조용한 틈([`TRAIL_QUIET`])마다 다시 잰다** — 바이트 하나를 받을 때마다 틈이 새로 열리고, 틈 안에 아무것도 안
+/// 오면 끝낸다. 가장 긴 때는 `until` 이다.
+///
+/// **보고가 아닌 키가 오면 멈춘다 — 그 키 하나는 먹힌다**(사람이 받아들인 비용이다). tty 는 엿볼 수 없어, 읽어 봐야
+/// 키인 줄 안다. 그 비용을 휠을 굴린 직후에 끝낸 때에만 치르게 하는 것은 부르는 쪽의 문([`drain_answered`])이다
+/// — 휠을 안 쓴 끝내기는 전처럼 안 기다리고 키도 안 먹는다. 편집기로 넘길 때([`suspend`])도 같은 문을 지난다.
+///
+/// **먹는 것은 키 하나를 끝까지다**(2026-10-02 사용자 결정, 리뷰 moai-pvpb.rrr 8번) — 멈춘 바이트가 여러 바이트 키의
+/// 머리면 그 키의 끝 바이트까지 읽어 버린다([`Rest`]): 수를 단 키(Delete `ESC [ 3 ~`, Ctrl-← `ESC [ 1 ; 5 D`)는 끝
+/// 글자까지, F1 같은 `ESC O P` 는 한 바이트 더, 한글 한 자는 UTF-8 의 나머지 바이트까지. 한 바이트에서 멈추던 판은
+/// 그 꼬리(`~`·`;5D`·깨진 글자)를 셸 프롬프트에 남겼다. **새 `ESC` 는 처음부터 다시 잰다** — 혼자 온 Esc 키 뒤에 보고가
+/// 이어지면(`ESC ESC [ < …`) 앞의 Esc 만 먹고 보고는 계속 버린다.
+///
+/// 알아보는 보고는 켠 모드의 둘이다([`mouse_capture`]): 1006 의 `ESC [ < 수;수;수 M|m` 과, 1006 을 모르는 터미널의
+/// `ESC [ M` 과 세 바이트.
+#[cfg(unix)]
+fn drain_trailing(fd: std::os::fd::RawFd, quiet: std::time::Duration, until: std::time::Instant) -> usize {
+    let mut report = Report::default();
+    let mut dropped = 0;
+    while let Some(byte) = next_byte(fd, quiet, until) {
+        match report.push(byte) {
+            Step::Report => dropped += 1,
+            Step::More => {}
+            Step::Key(rest) => {
+                swallow(fd, rest, quiet, until);
+                return dropped;
+            }
+        }
+    }
+    dropped
+}
+
+/// 키의 나머지를 읽어 버린다([`Rest`]). 키의 바이트는 함께 오므로 조용한 틈 안에 안 오면 거기서 끝낸다.
+#[cfg(unix)]
+fn swallow(fd: std::os::fd::RawFd, rest: Rest, quiet: std::time::Duration, until: std::time::Instant) {
+    match rest {
+        Rest::Done => {}
+        Rest::Final => {
+            // 매개변수·중간 바이트(`0x20..=0x3F`)를 지나 끝 글자(`0x40..=0x7E`)까지.
+            while let Some(b) = next_byte(fd, quiet, until) {
+                if !(0x20..=0x3f).contains(&b) {
+                    return;
+                }
+            }
+        }
+        Rest::Bytes(n) => {
+            for _ in 0..n {
+                if next_byte(fd, quiet, until).is_none() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// 한 바이트를 기다려 읽는다 — `quiet` 와 `until` 중 이른 때까지. 안 오거나 못 읽으면 `None` 이다.
+#[cfg(unix)]
+fn next_byte(fd: std::os::fd::RawFd, quiet: std::time::Duration, until: std::time::Instant) -> Option<u8> {
+    loop {
+        let left = until.saturating_duration_since(std::time::Instant::now()).min(quiet);
+        if left.is_zero() {
+            return None;
+        }
+        let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let ms = i32::try_from(left.as_millis()).unwrap_or(i32::MAX).max(1);
+        let ready = unsafe { libc::poll(&mut p, 1, ms) };
+        if ready < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        if ready <= 0 || p.revents & libc::POLLIN == 0 {
+            return None;
+        }
+        let mut byte = 0u8;
+        match unsafe { libc::read(fd, (&raw mut byte).cast(), 1) } {
+            1 => return Some(byte),
+            0 => return None,
+            _ => {
+                let e = std::io::Error::last_os_error().kind();
+                if !matches!(e, std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// [`Report::push`] 의 답 — 보고가 막 끝났다, 아직이다, 보고가 아닌 키다(그 나머지와 함께).
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Report,
+    More,
+    Key(Rest),
+}
+
+/// 보고가 아닌 키에서 **아직 안 읽은 나머지**.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum Rest {
+    /// 다 읽었다.
+    Done,
+    /// CSI 키 — 끝 글자(`0x40..=0x7E`)까지.
+    Final,
+    /// 바이트 몇 개 더 — `ESC O x` 의 `x` 하나, UTF-8 글자의 나머지.
+    Bytes(u8),
+}
+
+/// 이 바이트로 시작하는 UTF-8 글자의 나머지 바이트 수. ASCII 와 이어지는 바이트는 0 이다.
+#[cfg(unix)]
+fn utf8_rest(lead: u8) -> u8 {
+    match lead {
+        0xc0..=0xdf => 1,
+        0xe0..=0xef => 2,
+        0xf0..=0xf7 => 3,
+        _ => 0,
+    }
+}
+
+/// 마우스 보고 하나를 한 바이트씩 알아본다 — [`Answer`] 와 같은 꼴이다. 보고가 아닌 키를 만나면 그 키의 나머지를
+/// 함께 댄다([`Step::Key`]).
+#[cfg(unix)]
+#[derive(Default)]
+struct Report(Reading);
+
+#[cfg(unix)]
+#[derive(Default, Clone, Copy)]
+enum Reading {
+    #[default]
+    Start,
+    Esc,
+    Csi,
+    /// 1006 의 수와 `;`.
+    Sgr,
+    /// 1006 을 모르는 터미널의 `ESC [ M` 뒤 — 남은 바이트 수.
+    Raw(u8),
+}
+
+#[cfg(unix)]
+impl Report {
+    fn push(&mut self, byte: u8) -> Step {
+        use Reading::*;
+        let key = |rest| {
+            // 키를 만나면 처음으로 돌아간다 — 부르는 쪽은 거기서 멈추지만, 상태를 남기지 않는다.
+            (Start, Step::Key(rest))
+        };
+        let (next, step) = match (self.0, byte) {
+            // 옛 꼴의 세 바이트는 무엇이든 보고다(좌표가 `ESC` 와 같은 값일 수도 있다).
+            (Raw(1), _) => (Start, Step::Report),
+            (Raw(n), _) => (Raw(n - 1), Step::More),
+            // **새 `ESC` 는 처음부터 다시 잰다** — 앞의 것은 혼자 온 Esc 키였다.
+            (_, 0x1b) => (Esc, Step::More),
+            (Start, b) => key(Rest::Bytes(utf8_rest(b))),
+            (Esc, b'[') => (Csi, Step::More),
+            // SS3 키(F1 `ESC O P`, 어떤 터미널의 화살표) — 한 바이트 더.
+            (Esc, b'O') => key(Rest::Bytes(1)),
+            // Alt 와 함께 친 글자 — 그 글자의 나머지까지.
+            (Esc, b) => key(Rest::Bytes(utf8_rest(b))),
+            (Csi, b'<') => (Sgr, Step::More),
+            (Csi, b'M') => (Raw(3), Step::More),
+            (Sgr, b'0'..=b'9' | b';') => (Sgr, Step::More),
+            (Sgr, b'M' | b'm') => (Start, Step::Report),
+            // CSI 키 — 끝 글자면 다 왔고, 매개변수·중간 바이트면 끝 글자까지 더 읽는다.
+            (Csi | Sgr, 0x40..=0x7e) => key(Rest::Done),
+            (Csi | Sgr, 0x20..=0x3f) => key(Rest::Final),
+            (Csi | Sgr, _) => key(Rest::Done),
+        };
+        self.0 = next;
+        step
+    }
 }
 
 /// 윈도의 콘솔은 마우스를 글이 아니라 입력 레코드로 주고, 셸은 그것을 키로 읽지 않는다 — 버릴 것이 없다.
 #[cfg(not(unix))]
-fn drain_reports() {}
+fn drain_reports(_rolled: Option<std::time::Instant>) {}
 
 /// DA1 의 답을 기다리는 가장 긴 때. 터미널은 거의 다 답하고 곁에서는 1ms 안이다 — 이만큼 기다리는 것은 답하지 않는
 /// 터미널이고, 그 사람은 마우스를 잡은 채 끝낼 때마다 이만큼 늦는다.
@@ -764,15 +976,15 @@ fn on_path(name: &str) -> bool {
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
 ///
 /// 끝낼 때(`screen`)와 같은 차례다: 마우스 잡기와 bracketed paste 를 끄고, 마우스를 잡고 있었으면(`mouse`) 길에
-/// 남은 보고를 버리고([`drain_reports`]), raw mode·대체 화면을 걷는다.
+/// 남은 보고를 버리고([`drain_reports`] — 휠·끌기 직후(`rolled`)면 답 뒤까지), raw mode·대체 화면을 걷는다.
 /// 안 끄면 편집기에 붙인 글이 `200~…201~` 에 싸여 들어가고, 마우스를 모르는 편집기에 누른 자리가 글로
 /// 찍힌다. 편집기가 도는 동안 **루프 스레드는
 /// 편집기를 기다리며 서 있다** — 그리기·스피너·다시 읽기 받기(`follow`)가 전부 멈춘다. 다시
 /// 읽기 스레드는 계속 짓지만 그리지 않고, 돌아오면 다음 걸음이 받는다. 쥔 뒤에 그 스레드가
 /// 터지면 훅은 [`EDITING`] 앞에서 선다 — 문은 **걷기 전에** 쥐고, 여는 것은 루프가 올린 뒤다.
-fn suspend(mouse: bool) {
+fn suspend(mouse: bool, rolled: Option<std::time::Instant>) {
     EDITING.hold();
-    modes_off_draining(mouse);
+    modes_off_draining(mouse, rolled);
     ratatui::restore();
 }
 
@@ -907,6 +1119,10 @@ fn keep_unsaved(app: &App) {
 /// - 마우스는 그대로 넘긴다([`App::mouse`]) — 어느 칸을 눌렀는지는 탐색기가 지난 그림으로 맞힌다
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
 fn take(app: &mut App, ev: Event) {
+    // 휠·끌기를 받은 때를 적는다 — 끝낼 때 답 뒤를 더 비울지 가르는 자다([`rolled_lately`], moai-pvpb.m2f).
+    if rolls(&ev) {
+        app.rolled_at = Some(std::time::Instant::now());
+    }
     match ev {
         Event::Key(k) if k.kind == KeyEventKind::Press => app.key(k),
         Event::Paste(text) => app.paste(&text),
@@ -1009,7 +1225,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
-            suspend(caught);
+            suspend(caught, app.rolled_at);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
@@ -1216,6 +1432,111 @@ mod tests {
         let until = std::time::Instant::now() + Duration::from_secs(5);
         assert!(drain_until_answer(read.as_raw_fd(), until), "답을 보고도 참을 안 냈다");
         assert_eq!(rest_of(read), b"ls\n", "답 뒤의 글을 건드렸다");
+    }
+
+    /// **답 뒤로 이어지는 보고까지 버린다**(moai-pvpb.m2f, 2026-10-02 사용자 결정) — mosh 처럼 답이 먼저 오는 자리다.
+    /// 1006 꼴과 옛 `ESC [ M` 꼴을 다 보고로 읽고, 보고가 아닌 첫 바이트에서 멈춘다 — 그 한 바이트는 먹히고 그 뒤는
+    /// 남는다. 아무것도 안 오면 조용한 틈에서 끝낸다.
+    #[cfg(unix)]
+    #[test]
+    fn the_trailing_drain_eats_reports_after_the_reply_and_stops_at_a_key() {
+        use std::os::fd::AsRawFd;
+        let (read, write) = pipe_with(b"\x1b[<65;40;12M\x1b[<64;40;12m\x1b[M`!!ls\n");
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        assert_eq!(drain_trailing(read.as_raw_fd(), Duration::from_millis(200), until), 3, "보고를 다 안 버렸다");
+        drop(write);
+        assert_eq!(rest_of(read), b"s\n", "키의 첫 바이트 뒤를 건드렸다");
+
+        // 보고가 끊기면 조용한 틈에서 끝낸다 — 쓰는 쪽이 열려 있어도 기다림이 그 틈을 안 넘는다.
+        let (read, write) = pipe_with(b"\x1b[<65;40;12M");
+        let began = std::time::Instant::now();
+        assert_eq!(drain_trailing(read.as_raw_fd(), Duration::from_millis(40), began + Duration::from_secs(5)), 1);
+        let took = began.elapsed();
+        assert!(took >= Duration::from_millis(40) && took < Duration::from_secs(1), "틈을 안 지켰다 — {took:?}");
+        drop(write);
+        assert_eq!(rest_of(read), b"");
+
+        // 화살표 키(`ESC [ A`)는 보고가 아니다 — 거기서 멈춘다.
+        let (read, write) = pipe_with(b"\x1b[Ax");
+        drop(write);
+        assert_eq!(drain_trailing(read.as_raw_fd(), Duration::from_millis(40), until), 0);
+        assert_eq!(rest_of(read), b"x");
+    }
+
+    /// **멈춘 키는 끝까지 먹는다**(2026-10-02 사용자 결정, 리뷰 moai-pvpb.rrr 8번) — 여러 바이트 키의 머리에서 멈추면
+    /// 그 꼬리가 셸 프롬프트에 남았다(Delete 의 `~`, Ctrl-← 의 `;5D`, F1 의 `P`, 한글 한 자의 나머지 바이트). 그 뒤의
+    /// 글은 안 건드린다. 혼자 온 Esc 키 뒤에 보고가 이어지면 Esc 만 먹고 보고는 계속 버린다.
+    #[cfg(unix)]
+    #[test]
+    fn the_trailing_drain_eats_the_whole_key_it_stops_at() {
+        use std::os::fd::AsRawFd;
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        let eaten = |sent: &[u8]| {
+            let (read, write) = pipe_with(sent);
+            drop(write);
+            let dropped = drain_trailing(read.as_raw_fd(), Duration::from_millis(40), until);
+            (dropped, rest_of(read))
+        };
+        for (what, key) in [
+            ("Delete", &b"\x1b[3~"[..]),
+            ("Ctrl-←", b"\x1b[1;5D"),
+            ("F1", b"\x1bOP"),
+            ("Alt-x", b"\x1bx"),
+            ("한글", "한".as_bytes()),
+            ("ASCII", b"l"),
+        ] {
+            let mut sent = b"\x1b[<65;40;12M".to_vec();
+            sent.extend_from_slice(key);
+            sent.extend_from_slice(b"ls\n");
+            assert_eq!(eaten(&sent), (1, b"ls\n".to_vec()), "{what} 의 꼬리를 남겼거나 그 뒤를 먹었다");
+        }
+        // 혼자 온 Esc 뒤의 보고 — Esc 를 먹고 보고도 버린다.
+        assert_eq!(eaten(b"\x1b\x1b[<65;40;12Mx"), (1, b"".to_vec()));
+    }
+
+    /// **문은 [`drain_answered`] 하나다**(moai-pvpb.m2f, 사용자 결정) — 휠을 안 쓴 끝내기는 답에서 멈춰 그 뒤의 보고도
+    /// 키도 안 건드리고, 휠 직후의 끝내기만 답 뒤의 보고를 버린 뒤 보고가 아닌 첫 바이트에서 멈춘다. 문을 걷거나 늘
+    /// 열어 두면 여기가 붉어진다.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_recent_wheel_drains_past_the_answer() {
+        use std::os::fd::AsRawFd;
+        let sent = b"\x1b[<65;40;12M\x1b[?62c\x1b[<64;40;12Mls\n";
+        let (read, write) = pipe_with(sent);
+        drop(write);
+        drain_answered(read.as_raw_fd(), || false);
+        assert_eq!(rest_of(read), b"\x1b[<64;40;12Mls\n", "휠을 안 쓴 끝내기가 답 뒤를 건드렸다");
+        let (read, write) = pipe_with(sent);
+        drop(write);
+        drain_answered(read.as_raw_fd(), || true);
+        assert_eq!(rest_of(read), b"s\n", "휠 직후의 끝내기가 답 뒤의 보고를 안 버렸다");
+    }
+
+    /// **답 뒤를 더 비우는 것은 휠·끌기 직후에 끝낸 때뿐이다**(사용자 결정) — 휠을 안 쓴 끝내기는 전처럼 안 기다리고
+    /// 키도 안 먹는다. 그 때는 루프가 사건을 넘기는 [`take`] 가 `App` 에 적고, 키는 적지 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_recent_wheel_opens_the_trailing_drain() {
+        let now = std::time::Instant::now();
+        assert!(!rolled_lately(None, now), "휠이 없었는데 답 뒤를 비웠다");
+        assert!(!rolled_lately(Some(now - Duration::from_secs(5)), now), "오래전 휠로 답 뒤를 비웠다");
+        assert!(rolled_lately(Some(now - Duration::from_millis(200)), now));
+        let wheel = Event::Mouse(ratatui::crossterm::event::MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        });
+        let key = ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('j'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        );
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let mut app = App::new(Vec::new(), cfg, crate::nav::Path::new());
+        take(&mut app, Event::Key(key));
+        assert_eq!(app.rolled_at, None, "키를 휠로 적었다");
+        take(&mut app, wheel);
+        assert!(rolled_lately(app.rolled_at, std::time::Instant::now()), "받은 휠을 안 적었다");
     }
 
     /// **답이 안 오면 때에서 끊는다** — 답하지 않는 터미널에서 끝내기가 멈추지 않는다. 그동안 온 보고는 버린다.

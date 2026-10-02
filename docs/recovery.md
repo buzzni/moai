@@ -36,8 +36,12 @@ are fine, and a neighbour's permissions are not your command failing.
 
 **`--json` says which row paid for it.** `show <id> --json` and the list carry a
 `journal_error` array beside the row whose history came up short, shaped like
-`commits_error`: `kind` (`permission` or `failed`) is what a machine branches on,
-`said` is the same line stderr prints, naming the file to `chmod`. A row carries
+`commits_error`: `kind` (`permission`, `outside` or `failed`) is what a machine
+branches on, `said` is the same line stderr prints, naming the file to `chmod`.
+`outside` is a journal link that points out of the checkout or into `.git/` — moai
+follows a link in a file the repository holds only inside its own checkout, so
+the fix is that link, not a permission. Treat a `kind` you do not know as
+`failed`. A row carries
 only its own root's failures, so a neighbour's locked journal never lands on your
 rows. The key is absent when nothing was skipped — `journal` is always there, so
 an empty `journal` with no `journal_error` beside it is "no history", and the
@@ -120,6 +124,69 @@ broken. It reads again once this binary is upgraded, so leave it where it is.
 Reading a broken file still works for the lines that parse, so `moai show` and
 `moai ready` keep answering while you fix it.
 
+## "broken": the snapshot or config is not a file moai reads
+
+Commands in that repository stop — `moai show`, `moai ready` and `moai rm --line`
+included — with one line naming `.moai/issues.jsonl` or `.moai/config.toml`, and
+`--json` says `"code":"broken"`. The file is a link that leaves the checkout or
+goes into `.git/` (a link whose target is missing counts too), or it is not a
+regular file (a FIFO, a socket, a device, a directory); the line says which, and
+where a link points. moai follows a link in a file the repository holds only
+inside its own checkout — the directory that holds `.moai` — so a committed
+`issues.jsonl -> /dev/zero` cannot make it read without end. A link that stays
+inside (`-> ../data/issues.jsonl`) reads as before. Where several projects are
+shown at once (`moai status` outside a repository, `moai project ls`, the
+explorer), that project is named as one that cannot be read and the rest go on.
+
+There is no line to remove; the fix is the file. If it changed only in your
+checkout, put the committed one back (a directory there goes with everything in
+it, so look first):
+
+```sh
+git checkout -- .moai/issues.jsonl    # or .moai/config.toml
+```
+
+If the link itself was committed, that brings the same link back. Take the file
+from the last commit where it was a regular file, and commit it:
+
+```sh
+git log --oneline -- .moai/issues.jsonl
+git checkout <commit> -- .moai/issues.jsonl
+```
+
+Do not copy what the link points at into its place without looking — it may be
+`/dev/zero` or a file under `/proc` that never ends.
+
+## "broken": the lock is not a file moai locks
+
+Every write stops — `moai add`, `mv`, `note` and the rest — with one line naming
+`.moai/lock`, or the `lock` beside the file a linked `.moai/issues.jsonl` points
+at, and `--json` says `"code":"broken"`. Nothing was written, and reads keep
+working. moai takes its lock only on a regular file it makes itself, never
+through a link — not even one that points inside the checkout — and only in a
+directory that stays inside the checkout and outside `.git/`. The line says
+which of those it is.
+
+The lock holds nothing, so remove whatever stands there and run the command
+again (a directory goes with everything in it, so look first):
+
+```sh
+rm .moai/lock
+```
+
+`moai init` puts `.moai/lock` in `.gitignore`, so a link there that keeps coming
+back after a checkout was committed anyway. Take it out of the repository:
+
+```sh
+git rm --cached .moai/lock
+git commit -m 'Stop tracking the moai lock'
+```
+
+If the line says the lock points out of the checkout or into `.git/`, it is the
+`.moai` directory itself that is a link — the fix is that link. If it says
+`.moai/issues.jsonl` points at a lock, the snapshot is the link to fix, the same
+way as in the section above.
+
 ## A conflicted `issues.jsonl`
 
 Lines are sorted by id, so two branches that touched *different* issues still
@@ -187,13 +254,20 @@ Nothing is destroyed by a move. `moai mv <id> todo` puts it back, and the
 journal keeps every move including the wrong one.
 
 `moai rm` is the exception: it removes the line. The journal records the removal
-and git has the file, so:
+and git has the file, so, with `<commit>` any commit from before the removal:
 
 ```sh
-git show <commit>:.moai/issues.jsonl | grep '"<id>"'
+echo '<commit>:.moai/issues.jsonl' | git cat-file --batch --follow-symlinks | grep '"<id>"'
 ```
 
 gets the line back; append it and let the next write re-sort the file.
+
+This reads the file whether `.moai/issues.jsonl` is a plain file or a link to a
+file elsewhere in the checkout (a linked tracker). `git show
+<commit>:.moai/issues.jsonl` only does the first: for a link it prints the link's
+target text and nothing else, so the `grep` finds nothing and says nothing. A link
+that points outside the repository comes back as `symlink` and the target path —
+git holds no copy of that file, so read it there.
 
 Work you are not doing right now should be `moai defer <id> -m 'why'` rather than
 `done` — `--undo` brings back the same line, in the same column, with the same

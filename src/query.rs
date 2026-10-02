@@ -958,14 +958,42 @@ fn sel(values: Vec<String>) -> Vec<Sel> {
 ///
 /// 이름과 메일 중 **하나만 맞아도** 통과다. 이름을 바꾼 사람이 옛 줄에서
 /// 사라지지 않고, 남의 메일을 모르는 채 이름으로만 맡긴 줄도 찾힌다.
-fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
-    let Sel::Is(raw) = want else { return i.assignee.is_none() };
+pub(crate) fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
+    // **빈 담당은 없는 것이다**(`Issue::normalize` 와 같은 자) — 읽기는 정규화를 안 거쳐 손으로 푼 머지의
+    // `"assignee":""` 가 그대로 온다. `-a none` 과 `ready` 의 `unowned`(`report::owner`)가 이 한 자로 갈린다.
+    let Sel::Is(raw) = want else { return i.assignee.as_deref().is_none_or(|a| a.trim().is_empty()) };
     let (name, email) = crate::model::split_assignee(raw);
     let by_name = name.as_deref().is_some_and(|n| i.assignee.as_deref() == Some(n));
     // 메일은 대소문자를 가리지 않는다. 같은 사람이 저장소마다 다르게 적는다.
     let mail = |e: &str| i.assignee_email.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(e));
     // 괄호 없이 준 것은 `split_assignee` 가 이름으로 본다. 메일일 수도 있어 한 번 더 잰다.
     by_name || email.as_deref().is_some_and(&mail) || mail(raw)
+}
+
+/// **지금 사람** — 이 줄이 내 것인가를 묻는 한 항(moai-0zjo, 2026-10-02 사용자 결정).
+///
+/// 가르는 자는 [`is_assignee`] 하나다 — `-a me` 가 고르는 줄과 `ready` 가 "내 것" 으로 내미는 줄과
+/// 훅이 초점에 남기는 줄이 같은 자로 갈린다. 이름이나 메일 하나만 맞아도 내 것이고, 메일은
+/// 대소문자를 접는다. 자를 따로 세우면 `show -a me` 에 서는 줄을 `ready` 가 남의 것으로 내민다.
+///
+/// **담당은 줄마다 본다** — 에픽이나 부모에게서 물려받지 않는다. 내 에픽 밑에 남이 맡은 줄은 남의
+/// 것이다. 담당 없는 줄도 내 것이 아니다(사용자 결정) — 묻고 집는다.
+///
+/// 사람을 푸는 일(`model::actor`)은 부르는 쪽 몫이다 — 이 모듈은 순수 함수라 git 설정을 안 연다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Me(Sel);
+
+impl Me {
+    /// 푼 사람 하나로 짓는다. 담당 칸에 적히는 것과 같은 `이름 (메일)` 한 줄로 든다 — `-a me` 가
+    /// 그 줄로 풀리는 것과 같은 자리다(`cmd::resolve_me`).
+    pub fn of(a: &crate::model::Actor) -> Me {
+        Me(Sel::Is(crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full)))
+    }
+
+    /// 이 줄의 담당이 나인가.
+    pub fn owns(&self, i: &crate::model::Issue) -> bool {
+        is_assignee(&self.0, i)
+    }
 }
 
 fn matches_sel(sel: &[Sel], value: Option<&str>) -> bool {
@@ -1013,7 +1041,8 @@ pub enum SortKey {
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
     /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
-    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다.
+    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다. 안 움직이는
+    /// 차례는 이것과 [`SortKey::Created`] 둘이다 — 생성 차례의 동점도 id 로만 가른다(moai-psyu).
     Id,
 }
 
@@ -1033,6 +1062,10 @@ pub struct Sort {
 /// - 담당은 **화면에 선 이름**(`model::label`, `naming`)으로 견준다 — 이름만 견주면 `naming = "email"`
 ///   에서 담당 열이 가나다로 안 선다(moai-2kyl 단계 리뷰)
 /// - 같으면 [`display_order`] 로 가른다 — 차례가 흔들리지 않는다
+/// - **생성·수정만은 같으면 id 로만 가른다**(moai-psyu, 사용자 결정 2026-10-02). 계획 하나가 한 초에
+///   서서 같은 초를 나눈 줄이 흔하고(이 저장소 1561 중 859), 우선순위로 가르면 쪽을 넘기는 사이 우선순위를
+///   고친 줄이 커서([`page`])를 넘는다. id 는 씨앗 해시라 같은 초 안의 차례가 만든 차례는 아니지만,
+///   한 번 서면 안 바뀐다
 /// - `reversed` 는 가른 것까지 통째로 뒤집는다
 pub fn order_by(
     key: SortKey,
@@ -1059,7 +1092,10 @@ pub fn order_by(
         SortKey::Title => caseless(&a.0.title, &b.0.title),
         SortKey::Id => a.0.id.cmp(&b.0.id),
     };
-    let order = natural.then_with(|| display_order(a.0, b.0));
+    let order = natural.then_with(|| match key {
+        SortKey::Created | SortKey::Updated => a.0.id.cmp(&b.0.id),
+        _ => display_order(a.0, b.0),
+    });
     if reversed { order.reverse() } else { order }
 }
 
@@ -1075,8 +1111,9 @@ pub fn order_by(
 /// 앞 쪽을 받은 뒤 다른 줄이 생기거나 지워져도 밀리거나 겹치지 않는다 — offset 으로 넘기면 세션
 /// 여럿이 쓰는 사이 줄이 밀려 빠지거나 겹친다(에픽 본문의 결정). 커서 줄은 걸러져 목록에 없어도
 /// 된다 — 닫혀 숨었어도 값은 있다. **쪽 사이에 차례 안의 자리가 바뀐 줄은 커서 줄이든 다른 줄이든
-/// 커서를 넘어 겹치거나 빠진다** — 같은 값은 우선순위로 가르므로 `Created` 차례도 우선순위를 고치면
-/// 움직인다(moai-efoc 리뷰). 안 움직이는 차례는 [`SortKey::Id`] 하나다.
+/// 커서를 넘어 겹치거나 빠진다**(moai-efoc 리뷰). 아무 고침에도 안 움직이는 차례는 [`SortKey::Id`] 와
+/// [`SortKey::Created`] 다 — 생성 때도 id 도 한 번 서면 안 바뀌고, 생성 차례의 동점은 id 로만
+/// 가른다(moai-psyu). `Updated` 는 동점을 같이 가르지만 고칠 때마다 제 값이 바뀌어 움직인다.
 ///
 /// **한 id 의 줄은 한 덩어리다**(moai-efoc 리뷰). 머지가 남긴 쌍둥이는 값이 달라 차례에서 떨어져 설 수
 /// 있는데 커서는 id 하나라 어느 줄에서 끊겼는지 모른다 — 줄 하나(`Load::get` 의 뒷줄)로 넘던 때는 사이의
@@ -2140,6 +2177,47 @@ mod tests {
         let more = page(&mut v, &all, &Where::of(&all, &c), &c, by_priority, None, Some(1));
         assert_eq!(v.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["a1", "a3"], "쌍둥이를 갈랐다");
         assert_eq!(more, 1, "잘린 수가 틀렸다");
+    }
+
+    /// **생성·수정 차례의 동점은 id 로만 가른다**(moai-psyu) — 계획 하나가 한 초에 서므로 같은 `created_at` 은
+    /// 흔하다. 우선순위로 가르면 쪽 사이에 우선순위를 고친 줄이 커서를 넘어 빠지거나 겹친다. 다른 차례의 동점은
+    /// 그대로 [`display_order`] 다.
+    #[test]
+    fn created_and_updated_ties_fall_to_id_alone() {
+        let c = cfg();
+        // `issue` 는 다 같은 초에 만들고 고친 줄이다.
+        let urgent = |id: &str, p: u8| {
+            let mut i = issue(id, "todo", &[]);
+            i.priority = Some(p);
+            i
+        };
+        let all = vec![urgent("a-0001", 2), urgent("a-0002", 0), urgent("a-0003", 1)];
+        let ids = |v: &[Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        let sorted = |key, reversed| {
+            let mut v = all.clone();
+            page(&mut v, &all, &Where::of(&all, &c), &c, Sort { key, reversed }, None, None);
+            ids(&v)
+        };
+        for key in [SortKey::Created, SortKey::Updated] {
+            assert_eq!(sorted(key, false), s(&["a-0001", "a-0002", "a-0003"]), "{key:?} 의 동점에 우선순위가 끼었다");
+            assert_eq!(sorted(key, true), s(&["a-0003", "a-0002", "a-0001"]), "{key:?} 를 뒤집은 동점");
+        }
+        for key in [SortKey::Priority, SortKey::Status, SortKey::Assignee] {
+            assert_eq!(sorted(key, false), s(&["a-0002", "a-0003", "a-0001"]), "{key:?} 의 동점이 기본 차례가 아니다");
+        }
+
+        // 우선순위가 다 같은 줄로 첫 쪽을 받은 뒤 a-0003 을 p0 으로 고쳤다 — 우선순위로 가르면 커서(a-0001)
+        // 앞으로 올라가 빠진다. 첫 쪽은 옛 차례와 새 차례가 같아야 고친 줄이 넘는지를 잰다.
+        let level = vec![urgent("a-0001", 2), urgent("a-0002", 2), urgent("a-0003", 2)];
+        let by_created = Sort { key: SortKey::Created, reversed: false };
+        let mut first = level.clone();
+        page(&mut first, &level, &Where::of(&level, &c), &c, by_created, None, Some(1));
+        assert_eq!(ids(&first), s(&["a-0001"]));
+        let mut edited = level.clone();
+        edited[2].priority = Some(0);
+        let mut rest = edited.clone();
+        page(&mut rest, &edited, &Where::of(&edited, &c), &c, by_created, Some(&edited[0]), None);
+        assert_eq!(ids(&rest), s(&["a-0002", "a-0003"]), "우선순위를 고친 줄이 커서를 넘었다");
     }
 
     /// **묶음은 서 있는 칸으로 고르고 숨긴다** (moai-j3b3). 멤버가 집힌 에픽이

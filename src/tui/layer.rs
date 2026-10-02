@@ -953,8 +953,9 @@ impl App {
         let place = self.layer.as_mut()?.places.get_mut(at)?;
         let marks = marks_of(&place.path);
         // **여는 길은 층의 줄과 같다**([`look_one`] 의 `projects::open_one`) — 스냅샷까지 읽어 본다.
-        // `Repo::open` 만으로는 `.moai/config.toml` 까지만 보여, 층의 줄은 "못 읽는다" 로 서는데 `n` 은
-        // 폼을 열고 사람은 다 적고 Ctrl-S 를 눌러서야 못 담는다고 듣는다(적은 것이 갈 데가 없다). 여는
+        // `Repo::open` 만으로는 `.moai/config.toml` 과 스냅샷이 보통 파일인지까지만 보여(moai-itsu), 층의 줄은
+        // "못 읽는다" 로 서는데 `n` 은 폼을 열고 사람은 다 적고 Ctrl-S 를 눌러서야 못 담는다고 듣는다(적은
+        // 것이 갈 데가 없다). 여는
         // 법을 두 벌로 적으면 한쪽만 고쳐져 Enter 와 층의 줄이 같은 디렉터리를 달리 가른다. 한 번 더
         // 읽는 값은 사람이 키를 누른 한 번뿐이라 싸다.
         //
@@ -3153,10 +3154,10 @@ mod tests {
     fn expanding_opens_without_reading_the_snapshot_here() {
         let s = Scratch::fenced("layer-lean-open");
         let bad = s.project("bad", &[("argos-0001", "못 읽을 줄", "todo")]);
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
         let file = bad.join(".moai/issues.jsonl");
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&bad]);
         let mut a = layered(&cfg);
         a.notice = None;
@@ -3216,9 +3217,9 @@ mod tests {
         write_group(&deep);
         let file = deep.join(".moai/issues.jsonl");
         let body = std::fs::read_to_string(&file).unwrap();
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&deep]);
         let mut a = layered(&cfg);
         let heads = a.rows().len();
@@ -3228,6 +3229,41 @@ mod tests {
         assert_eq!(a.rows().len(), heads, "시험의 전제 — 못 읽었으니 머리줄만 선다");
 
         // 파일을 고치고 이번에는 `l` 로 한 층만 편다.
+        std::fs::write(&file, body).unwrap();
+        a.hit("l");
+        settle(&mut a);
+        assert!(a.rows().len() > heads, "고친 뒤의 l 이 프로젝트를 안 폈다");
+        assert!(
+            !titles(&a).contains(&"에픽의 멤버".to_string()),
+            "걷지 않은 Tab 의 뜻이 l 을 통째로 폈다 — {:?}",
+            titles(&a)
+        );
+    }
+
+    /// **못 연 저장소도 `Tab` 의 뜻을 걷는다**(리뷰 moai-itsu.n8z) — 스냅샷 자리에 디렉터리가 서면 moai-itsu
+    /// 뒤로는 읽기가 아니라 여는 쪽(`Repo::open`)에서 걸려, 읽기가 아예 안 뜬다. 그 갈래가 뜻을 안 걷던 판은
+    /// 고친 뒤의 `l` 이 프로젝트를 통째로 폈다. 바로 위 시험은 UTF-8 이 아닌 글로 읽기에서 지는 갈래를 잰다.
+    #[test]
+    fn a_failed_open_does_not_leave_the_tab_intent_behind() {
+        let s = Scratch::fenced("layer-tab-unopened");
+        let deep = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        write_group(&deep);
+        let file = deep.join(".moai/issues.jsonl");
+        let body = std::fs::read_to_string(&file).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let cfg = s.register(&[&deep]);
+        let mut a = layered(&cfg);
+        let heads = a.rows().len();
+
+        a.hit("Tab");
+        assert!(a.layer.as_ref().unwrap().reading.is_none(), "시험의 전제 — 여는 쪽에서 걸려 읽기가 안 뜬다");
+        settle(&mut a);
+        assert_eq!(a.rows().len(), heads, "시험의 전제 — 못 열었으니 머리줄만 선다");
+        // **뜻 자체를 잰다** — 아래 `l` 은 고친 파일의 표식이 움직여 다시 읽히는 사이에 펼침이 새로 서므로,
+        // 남은 뜻이 화면에 늘 드러나지는 않는다. 그 뜻을 쥔 자리는 이것 하나다.
+        assert!(a.deep.is_empty(), "못 연 저장소에 Tab 의 뜻을 남겼다 — {:?}", a.deep);
+
         std::fs::remove_dir(&file).unwrap();
         std::fs::write(&file, body).unwrap();
         a.hit("l");
@@ -3301,10 +3337,10 @@ mod tests {
         let s = Scratch::fenced("layer-enter-lean");
         let here = s.project("here", &[("argos-0001", "여기 줄", "todo")]);
         let bad = s.project("bad", &[("argos-0002", "못 읽을 줄", "todo")]);
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
         let file = bad.join(".moai/issues.jsonl");
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&here, &bad]);
         let mut a = layered(&cfg);
         a.hit("1");

@@ -29,7 +29,7 @@
 
 | 옛 moai | 여기 |
 |---|---|
-| `draft → accepted` 에 사람 승인. AI 가 버그 하나 고치려 해도 사람을 불렀다 | **승인 게이트가 없다.** 생성도 상태 전이도 전부 자유 |
+| `draft → accepted` 에 사람 승인. AI 가 버그 하나 고치려 해도 사람을 불렀다 | **승인 게이트가 없다.** 생성도 상태 전이도 전부 자유 — 예외는 하나, 남의 일을 집을 때다(아래) |
 | 이벤트를 접어서 상태를 계산 (`event.rs` 1,534줄) | **스냅샷이 진실이다.** 접지 않는다 |
 | `.moai/events.jsonl merge=union` → id 중복 → relabel → 영구 별칭 → 모든 조회가 별칭 해소 | 스냅샷에는 union 을 쓰지 않는다. 충돌은 사람이 푼다 |
 | 에픽·백로그가 파생 뷰라 이슈 트래커로 쓰기 불편 | 에픽·칸·태그·필터가 1급 |
@@ -82,6 +82,21 @@
   둘 다 사람 없이 채워지기 때문이고, 그래서 `status`·`ready`·`show` 는
   끝까지 사람을 묻지 않는다 — 물으면 설정 없는 기계에서 도구가 고장 난 것으로
   보인다.
+- **남의 일은 묻고 집는다 — 승인 게이트가 없다는 결정의 하나뿐인 예외다**(2026-10-02
+  사용자 결정, `moai-0zjo`). 여러 사람이 한 트래커를 쓰면 에이전트가 남의 줄이나 담당
+  없는 줄까지 집어 진행했다. 그래서 에이전트가 담당이 지금 사람이 아닌 줄(남의 것·
+  담당 없음)을 시작 칸으로 옮기려면 사람에게 먼저 묻는다. 허락을 받으면
+  `moai mv <id> <칸> --take -m '<누가 허락했나>'` 로 담당을 바꾸고, 도구가 같은 쓰기 안에서
+  `Taken-over: <옛 담당|none>` 노트를 남긴다. 이것이 옛 moai 의 게이트로 돌아간 것이 아닌
+  까닭은 셋이다.
+  - **도구가 사람을 기다리지 않는다.** 막는 자리는 훅 규칙 5 하나이고, 거절문이 고칠 명령을
+    그대로 내준다(리뷰 이슈의 규칙 3 과 같은 꼴). 묻는 일은 글(AGENTS 블록·브리프)이 시킨다
+  - **터미널의 사람은 안 막힌다.** 사람은 훅을 안 지난다. `mv` 는 `--take` 없이도 옮기고
+    한 줄로 알릴 뿐이다
+  - **한 사람 이름으로만 도는 저장소에서는 아무것도 안 바뀐다 — 담당 없는 줄이 없다면.**
+    `ready` 의 `others` 가 비고 출력이 바이트째 그대로다. 담당 없는 줄(`-a none`, 담당이 생기기
+    전의 옛 줄)은 한 사람 저장소에서도 내 것이 아니라서 `others` 로 가고 규칙 5 에 걸린다
+  되돌리려면 이 절과 규칙 5 를 함께 걷는다. 한쪽만 걷으면 글과 훅이 다른 말을 한다.
 
 ## 예산
 
@@ -167,8 +182,12 @@
     moai mv <id> in_progress --from todo          develop 에서 집는다
     git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
     git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> develop
+    mkdir -p /tmp/cargo-target/moai-<id>          빌드 출력은 로컬 디스크로(아래)
+    ln -s /tmp/cargo-target/moai-<id> .claude/worktrees/moai-<id>/target
     (작업 · 커밋 · 필요하면 develop 을 받는다)
     git merge worktree-moai-<id>                  develop 에서, "merge: … (<id>)"
+    git worktree remove .claude/worktrees/moai-<id>
+    rm -rf /tmp/cargo-target/moai-<id>            링크만 지워지고 출력은 남으므로 따로 지운다
     moai mv <id> done                             "chore(tracker): <id> 를 develop 머지와 함께 닫는다"
 
 - **집기는 develop 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
@@ -189,6 +208,17 @@
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
 - 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다(3~7분)
+- **`target/` 은 `/tmp/cargo-target/<이름>` 으로 가는 링크다**(2026-10-02 사용자 결정, `moai-c5xo`).
+  `/home/coder` 는 Ceph RBD 라, 빌드가 겹치면 장치가 포화해 ext4 저널이 멈추고 `/home` 에 쓰는
+  모든 프로세스가 선다 — 그날 오전 htop 과 다른 프로젝트의 세션까지 D 상태로 섰다. `/tmp` 는 노드의
+  로컬 디스크다(동기 쓰기 1.8ms 대 30ms, 남은 자리 220GB 남짓). 링크라서 `./target/release/moai`·
+  머지 드라이버가 적어 둔 경로·`MOAI=… scripts/gen-cli-docs.sh` 가 그대로 산다
+  - 루트의 것은 `/tmp/cargo-target/root` 다
+  - **`git worktree remove` 는 링크만 지운다.** 출력은 `rm -rf /tmp/cargo-target/moai-<id>` 로 따로
+    지운다. 놓친 것은 감독이 회차마다 한 번 쓸어 낸다 — 살아 있는 워크트리가 가리키지 않는 디렉터리를 지운다
+  - 컨테이너를 다시 만들면 출력이 사라진다. 지킬 것(소스·트래커)은 `/home` 에 있으니 다시 빌드하면 된다
+  - 확인용으로 scratchpad 에 따로 짓는 `CARGO_TARGET_DIR` 도 쓴 뒤 지운다. 그날 `/tmp/claude-1000` 에
+    그렇게 남은 것이 30GB 였다
 
 ## 커밋
 
