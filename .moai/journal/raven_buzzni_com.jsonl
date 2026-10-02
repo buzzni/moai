@@ -2836,3 +2836,4 @@
 {"ts":"2026-10-02T11:45:24Z","id":"moai-49sy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo fmt 한 번)"}
 {"ts":"2026-10-02T11:45:24Z","id":"moai-49sy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-02T11:45:24Z","id":"moai-kyp7.13y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Review found nothing; the diff is the rustfmt split of one call plus its trailing comma. Took in nothing, handed on nothing."}
+{"ts":"2026-10-02T11:45:44Z","id":"moai-kyp7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — moai-49sy (fmt regression) is merged as 9d91b535 and closed, review moai-kyp7.13y found nothing."}
