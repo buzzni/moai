@@ -26,7 +26,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+};
 
 /// 좌우를 가르는 자리. MC 처럼 반반이되 왼쪽을 조금 넓게 — 제목이 길다. **처음값이다** — 칸 사이 선을 끌면
 /// 사람이 고른 몫(`App::list_width`)이 선다(moai-irrj.mhr).
@@ -106,7 +108,7 @@ const HEADER_MIN_H: u16 = HEADER_H + 18;
 /// 로고와 파이프 사이, 파이프와 정보 사이의 여백 한 칸씩.
 const HEADER_GAP: usize = 1;
 
-/// 정보 줄의 라벨 칸 — `User`·`Version` 이 줄 서는 폭.
+/// 정보 줄의 라벨 칸 — `User`·`Version`·`Journal` 이 줄 서는 폭.
 const HEADER_LABEL: usize = 7;
 
 /// `<라벨 칸> : ` — 라벨과 " : " 세 칸. 정보 줄의 붙박이 앞자리다. **라벨을 [`pad`] 로
@@ -127,9 +129,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 돈다. 값은 [`App::rows`] 의 문서가 든다 — 여기에도 적어 두었더니 둘이
     // 두 배 차이로 갈렸다(리뷰).
     let rows = app.rows();
+    let area = f.area();
+    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
+    // **격자보다 먼저 센다** — 격자가 몸통에 [`menu::BODY_MIN`] 을 남기는지는 헤더를
+    // 뺀 높이로 따져야 한다. 지금은 [`menu::MAX_ROWS`] 가 먼저 걸려 답이 같지만,
+    // 그 상한이 올라가는 날 헤더 몫만큼 몸통을 덜 남기고도 격자가 선다.
+    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
     // **헤더가 안 서는 창에서는 못 읽은 저널을 알림 띠가 한 번 댄다**(moai-pvpb.6g6) — 헤더의 셋째 줄이
-    // 늘 대는 그것이다. 배너 높이를 재기 전에 세워야 이 그림에서 선다.
-    if f.area().height < HEADER_MIN_H {
+    // 늘 대는 그것이다. 배너 높이를 재기 전에 세워야 이 그림에서 선다. 헤더가 서는지는 위의 `header_h` 하나로
+    // 묻는다 — 따로 재면 헤더의 문턱이 바뀌는 날 어느 쪽도 저널을 안 대는 창이 생긴다(리뷰).
+    if header_h == 0 {
         app.tell_journals();
     }
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
@@ -143,13 +152,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // **창은 몸통을 밀어 올린다**(moai-apsa). 덮으면 커서가 선 줄이 창 밑에 숨어, 메뉴가 무엇에
     // 대한 것인지를 잃는다. 목록·상세는 줄어든 높이로 커서를 드러내므로(`Scroll::reveal`) 따로
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
-    // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]).
-    let area = f.area();
-    // 헤더는 짧은 터미널에서는 서지 않는다 — 여섯 줄을 내주면 목록이 한두 줄만 남는다.
-    // **격자보다 먼저 센다** — 격자가 몸통에 [`menu::BODY_MIN`] 을 남기는지는 헤더를
-    // 뺀 높이로 따져야 한다. 지금은 [`menu::MAX_ROWS`] 가 먼저 걸려 답이 같지만,
-    // 그 상한이 올라가는 날 헤더 몫만큼 몸통을 덜 남기고도 격자가 선다.
-    let header_h = if area.height >= HEADER_MIN_H { HEADER_H } else { 0 };
+    // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
     let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
         let ctx = app.key_ctx(&rows);
         let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
@@ -458,14 +461,20 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
             dim(),
         )));
     } else if rows.is_empty() {
-        // tzdb 는 있는데 거르는 글에 하나도 안 걸렸다 — 그것은 탈이 아니라 글이 좁은 것이다.
-        block = block
-            .title_bottom(Line::from(Span::styled(clip(&format!(" {} ", say(lang, "tui.tz.none")), inner), dim())));
+        // **이 기계에 이름이 없는 것과 거르는 글에 하나도 안 걸린 것은 다른 말이다**(리뷰). 뒤의 것은 탈이 아니라 글이
+        // 좁은 것인데, 그것까지 "자료가 없다" 로 대면 tzdb 가 멀쩡한 기계에서 거짓이 된다 — 규칙 글(`JST-9`)을 그대로
+        // 쳐 본 사람이 아래 갈래의 "쳐서 고른다" 를 따라 처음 만나는 자리다.
+        let said = if z.knows_none() { say(lang, "tui.tz.none") } else { say(lang, "tui.tz.no_match") };
+        block = block.title_bottom(Line::from(Span::styled(clip(&format!(" {said} "), inner), dim())));
     } else if z.unlisted() {
         // **지금 쓰는 것이 목록에 없다**(moai-pvpb.1yh) — 규칙 글(`TZ=JST-9`)로 선 시간대다. 칠한 줄이 없는
         // 까닭을 여기서 댄다 — 안 대면 사람은 커서가 어디 갔는지 모른다.
+        //
+        // **오른쪽의 굴림 표시 몫을 남긴다**(`pick` 과 같은 20칸, 리뷰) — 이름이 수백 개라 이 창은 늘 굴러 표시가 선다.
+        // 안 남기면 표시가 이 줄의 끝을 덮어, 80칸에서 "그냥 Enter 는 그대로 둔다" 가 통째로 사라졌다. 글도 그 말부터 댄다.
         let said = crate::i18n::fill(say(lang, "tui.tz.unlisted"), &[("now", &crate::text::one_line(z.now()))]);
-        block = block.title_bottom(Line::from(Span::styled(clip(&format!(" {said} "), inner), dim())));
+        block =
+            block.title_bottom(Line::from(Span::styled(clip(&format!(" {said} "), inner.saturating_sub(20)), dim())));
     }
     let selected = z.selected();
     z.list.fit(at.height.saturating_sub(2) as usize, rows.len());
@@ -477,7 +486,10 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
         List::new(items)
             .block(block)
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(CURSOR),
+            .highlight_symbol(CURSOR)
+            // **아무 줄도 안 가리키는 동안에도 커서 칸을 비워 둔다**(리뷰) — ratatui 는 고른 줄이 있을 때만 그 칸을 내어,
+            // 목록에 없는 시간대로 연 창(`Zones::unlisted`)에서는 첫걸음에 이름이 모두 두 칸씩 밀렸다.
+            .highlight_spacing(HighlightSpacing::Always),
         at,
         &mut state,
     );
@@ -1251,7 +1263,8 @@ fn banner(app: &App) -> Option<(String, bool)> {
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
 ///
-/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다.
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 못 읽은 저널이 있으면 셋째 줄이
+/// 그것을 댄다(moai-pvpb.6g6, [`journal_said`]).
 ///
 /// 돌려주는 것은 둘이다 — **빛**("지금 선 프로젝트에 빛이 섰는가", [`screen`] 이 `App::spun` 에
 /// 함께 센다)과 **번호**("프로젝트 번호를 실제로 적었는가"). 번호는 키 바가 읽는다(리뷰):
@@ -1263,9 +1276,7 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 따로 맞추면 줄끼리 어긋나 그림이 깨진다. 문구 줄이 가장 넓어 그 줄은 제자리다.
     let art = &LOGO[..LOGO.len() - 1];
     let art_in = (logo_w - art.iter().map(|l| crate::text::width(l)).max().unwrap_or(0)) / 2;
-    let told = told_of(app);
-    // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
-    let told_w = told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
+    let mut told = Vec::from(told_of(app));
     // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
     // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
     let tags = numbered_projects(app);
@@ -1277,6 +1288,14 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 통째로 지우는 화면이 났다 — 그 번호가 숫자 키를 설명하는 유일한 자리라, 로고를 지키자고
     // 지울 것이 아니다(메일을 안 자르는 것과 같은 자).
     let want = if cell == 0 { 0 } else { HEADER_GAP + cell };
+    // **못 읽은 저널은 셋째 줄로 선다**(moai-pvpb.6g6, 2026-10-02 사용자 결정) — 없으면 줄이 안 선다: 헤더는 가르기
+    // 전과 글자째 같다. 그 줄은 **번호 칸을 밀어내지 않는다** — 로고 없이 파이프 오른쪽에 남는 폭에서 번호 칸을 뺀
+    // 만큼이 그 줄의 몫이고, 자리 글이 그 안에 맞춰 줄어든다([`journal_said`]). 자리 글 몫만 묶던 판은 줄이 60칸
+    // 남짓이 되어, 80칸에서 `<1>` 부터의 번호를 통째로 지웠다(리뷰).
+    let room = (at.width as usize).saturating_sub(1 + HEADER_GAP + want + HEADER_LABEL_W);
+    told.extend(journal_said(app, room).map(|said| ("Journal", said)));
+    // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
+    let told_w = told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
     // 로고 양옆에 같은 여백을 둔다(moai-ehr7) — 왼쪽이 0칸이면 로고가 가장자리에 붙어
     // 한쪽으로 쏠려 보인다. **그 여백도 문턱에 센다**: 안 세면 모자란 한 칸만큼 오른쪽이 잘린다.
     // 로고가 빠지면 여백도 함께 빠져 파이프가 첫 열에 선다.
@@ -1413,7 +1432,8 @@ fn spans_width(spans: &[Span]) -> usize {
     spans.iter().map(|s| crate::text::width(&s.content)).sum()
 }
 
-/// 파이프 오른쪽 줄들 — 위에서부터 사람, 판. 그 밑은 번호 붙은 프로젝트가 채운다(moai-mr83).
+/// 파이프 오른쪽 줄들 — 위에서부터 사람, 판. 그 밑은 번호 붙은 프로젝트가 채운다(moai-mr83). 셋째 줄인 못 읽은
+/// 저널은 [`header`] 가 남은 폭을 재어 잇는다([`journal_said`]).
 ///
 /// **누군지 모르면 그 자리를 비우고 넘어간다**(moai-56jf). 여는 화면은 읽기고, 읽기는 사람을
 /// 묻지 않는다 — 여기서 `Mode::Ask` 를 세우면 설정 없는 기계에서 탐색기가 묻는 칸으로 열린다.
@@ -1421,43 +1441,56 @@ fn spans_width(spans: &[Span]) -> usize {
 /// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
-fn told_of(app: &mut App) -> Vec<(&'static str, String)> {
+fn told_of(app: &mut App) -> [(&'static str, String); 2] {
     let said = version_said(app.site.lang, app.latest());
     let user = app.told_user().to_string();
-    let mut told = vec![("User", user), ("Version", said)];
-    // **못 읽은 저널은 셋째 줄로 늘 선다**(moai-pvpb.6g6, 2026-10-02 사용자 결정) — 못 읽은 동안 내내다.
-    // 없으면 줄이 안 선다: 헤더는 가르기 전과 글자째 같다.
-    told.extend(journal_said(app).map(|said| ("Journal", said)));
-    told
+    [("User", user), ("Version", said)]
 }
 
-/// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래(`permission`·`failed`).
+/// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래([`crate::store::Unread::kind`] —
+/// `permission`·`failed`·`outside`). 줄은 `room` 칸 안에 들게 짓는다([`header`] 가 번호 칸 앞까지 남은 폭을 준다).
+///
+/// **목록은 탐색기를 나갈 때까지 줄지 않는다**([`App::unread_journals`]) — 파일을 고쳐도 이 줄은 그때까지 선다.
 ///
 /// **자리는 그 저장소 뿌리에서 본 길로 줄인다** — 통째의 절대 경로는 헤더의 좁은 칸에서 번호 칸까지
 /// 밀어낸다. 고치는 법(`chmod`)은 그 자리에 대는 것이라 파일까지는 남긴다. 뿌리가 이 화면의 것이
-/// 아니면(옆 워크트리·딴 프로젝트) 그 뿌리의 이름을 앞에 붙인다. 그래도 길면 [`JOURNAL_AT_W`] 에서 **앞을**
-/// 자르고 `…` 를 남긴다 — 고칠 파일 이름은 끝에 있다. 남의 글자라 한 줄로 접는다.
-fn journal_said(app: &App) -> Option<String> {
+/// 아니면(옆 워크트리·딴 프로젝트) 그 뿌리의 이름을 앞에 붙인다. 그래도 길면 [`JOURNAL_AT_W`] 와 `room` 에서 남은
+/// 폭 중 좁은 쪽에 맞춰 가운데를 줄인다([`journal_at`]). 남의 글자라 한 줄로 접는다.
+fn journal_said(app: &App, room: usize) -> Option<String> {
     let unread = app.unread_journals();
     let first = unread.first()?;
-    let rel = first.at.strip_prefix(&first.root).unwrap_or(&first.at).display().to_string();
+    let rel = crate::text::one_line(&first.at.strip_prefix(&first.root).unwrap_or(&first.at).display().to_string());
     let home = app.site.repo.as_ref().map(|r| r.root.as_path());
-    let at = match (home == Some(first.root.as_path()), first.root.file_name()) {
-        (false, Some(name)) => format!("{}/{rel}", name.to_string_lossy()),
-        _ => rel,
+    let head = match (home == Some(first.root.as_path()), first.root.file_name()) {
+        (false, Some(name)) => format!("{}/", crate::text::one_line(&name.to_string_lossy())),
+        _ => String::new(),
     };
-    Some(crate::i18n::fill(
-        say(app.site.lang, "tui.header.journal"),
-        &[
-            ("n", &unread.len().to_string()),
-            ("at", &crate::text::clip_front(&crate::text::one_line(&at), JOURNAL_AT_W)),
-            ("kind", first.kind()),
-        ],
-    ))
+    let n = unread.len().to_string();
+    let said = |at: &str| {
+        crate::i18n::fill(say(app.site.lang, "tui.header.journal"), &[("n", &n), ("at", at), ("kind", first.kind())])
+    };
+    // 자리 글 말고 나머지(수·갈래·이음말)가 먹는 폭 — 그것을 뺀 만큼이 자리 글의 몫이다. 몫이 없어도 `…` 한 칸은
+    // 남겨 무엇이 잘렸는지 보인다.
+    let fits = JOURNAL_AT_W.min(room.saturating_sub(crate::text::width(&said("")))).max(1);
+    Some(said(&journal_at(&head, &rel, fits)))
 }
 
-/// 헤더의 저널 줄이 자리에 내주는 칸 — 넘으면 `…` 로 자른다. 사람·판 줄이 대개 이보다 짧아, 이 줄이
-/// 번호 칸을 밀어내지 않을 만큼이다.
+/// 저널 자리를 `max` 칸에 넣는다 — **앞의 뿌리 이름과 끝의 파일 이름을 남기고 가운데를 `…` 로 줄인다.** 가운데는
+/// 늘 같은 `.moai/journal` 이라 줄여도 잃는 것이 없다. 통째로 앞을 자르던 판은 옆 체크아웃을 가르는 뿌리 이름부터
+/// 잃어, 메일로 지은 파일 이름(`raven_buzzni_com.jsonl`)에서는 두 체크아웃의 줄이 글자째 같았다(리뷰). 그래도
+/// 넘치면 앞을 자른다 — 고칠 파일 이름이 끝에 있다.
+fn journal_at(head: &str, rel: &str, max: usize) -> String {
+    let whole = format!("{head}{rel}");
+    if crate::text::width(&whole) <= max {
+        return whole;
+    }
+    let file = std::path::Path::new(rel).file_name().map_or_else(|| rel.into(), |f| f.to_string_lossy());
+    crate::text::clip_front(&format!("{head}…/{file}"), max)
+}
+
+/// 헤더의 저널 줄이 자리 글에 내주는 가장 넓은 칸 — 넘으면 가운데를 `…` 로 줄인다([`journal_at`]). 번호 칸 앞까지
+/// 남은 폭이 이보다 좁으면 그 폭에 맞춘다([`journal_said`] 의 `room`) — 이 상한만으로는 수·갈래·이음말까지 60칸
+/// 남짓이 되어 80칸에서 번호 칸을 밀어냈다(리뷰).
 const JOURNAL_AT_W: usize = 32;
 
 /// 판 줄의 글 — 내 판 뒤에 소식 한 낱말을 잇는다.
@@ -1468,7 +1501,7 @@ const JOURNAL_AT_W: usize = 32;
 /// 것을 최신이라 적으면 그 글이 거짓이다.
 ///
 /// **묻는 일은 여기서 안 한다.** 이 함수는 키 하나, 깜빡임 한 번마다 도는 자리라 [`App`] 이
-/// 받아 둔 답([`App::latest`])을 읽기만 한다 — 바로 위 `told_of` 가 `model::actor` 를 여기서 안
+/// 받아 둔 답([`App::latest`])을 읽기만 한다 — [`told_of`] 가 `model::actor` 를 여기서 안
 /// 부르는 것과 같은 까닭이고, 묻는 실은 `cmd::tui` 가 여는 걸음에 한 번 띄운다.
 ///
 /// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
@@ -6409,6 +6442,73 @@ pub(super) mod tests {
             &[("n", "2"), ("at", "argos/.moai/journal/kim.jsonl"), ("kind", "permission")],
         );
         assert!(lines[2].contains(&format!("Journal : {said}")), "셋째 줄에 안 섰다\n{}", lines[..6].join("\n"));
+        // 헤더가 서는 창에서는 알림 띠로 또 말하지 않는다 — 띠는 헤더가 안 서는 창의 몫이다(리뷰).
+        assert_eq!(a.notice, None, "헤더가 서는 창에서 띠로도 말했다");
+
+        // 메일로 지은 긴 파일 이름은 줄어도 **뿌리 이름과 파일 이름**이 남는다 — 앞을 자르면 뿌리 이름부터 사라져 제
+        // 체크아웃의 같은 파일과 글자째 같아진다(리뷰).
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/moai-x".into(),
+                at: "/w/moai-x/.moai/journal/raven_buzzni_com.jsonl".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied (os error 13)".into() },
+            }]
+        };
+        let lines = render(&mut a, 120, 30);
+        assert!(lines[2].contains("moai-x/…/raven_buzzni_com.jsonl (permission)"), "{}", lines[..6].join("\n"));
+    }
+
+    /// **저널 줄은 번호 칸을 밀어내지 않는다**(moai-pvpb.6g6 리뷰) — 자리 글 몫(`JOURNAL_AT_W`)만 묶던 판은 수·갈래까지
+    /// 60칸 남짓이 되어, 80칸에서 `<1>` 부터의 번호를 통째로 지웠다. 자리 글이 가운데부터 줄어 맞추고 파일 이름이 든 끝은
+    /// 남는다.
+    #[test]
+    fn the_journal_row_leaves_room_for_the_project_numbers() {
+        use super::super::layer::{At, Look, Shut};
+        let mut a = app();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/argos".into(),
+                at: "/w/argos/.moai/journal/raven_buzzni_com.jsonl".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied (os error 13)".into() },
+            }]
+        };
+        for w in [80u16, 100] {
+            let head = render(&mut a, w, 30)[..6].join("\n");
+            assert!(head.contains("<1> moai-supervise"), "{w}칸에서 저널 줄이 번호를 밀어냈다\n{head}");
+            assert!(
+                head.contains("Journal : ") && head.contains(".jsonl (permission)"),
+                "{w}칸에서 줄의 끝이 잘렸다\n{head}"
+            );
+        }
+    }
+
+    /// **목록에 없는 시간대로 연 창**(moai-pvpb.1yh 리뷰) — 아무 줄도 안 가리키는 동안에도 커서 칸이 비어 있어 첫걸음에
+    /// 이름이 밀리지 않고, 늘 서는 굴림 표시가 아랫줄의 말을 덮지 않아 80칸에서도 그냥 Enter 가 무엇을 하는지 보인다.
+    /// 거른 글에 하나도 안 걸리면 "자료가 없다" 가 아니라 맞는 이름이 없다고 댄다.
+    #[test]
+    fn an_unlisted_zone_window_keeps_its_gutter_and_its_footer() {
+        let mut a = app();
+        let names: Vec<String> = (0..300).map(|n| format!("Zone/N{n:03}")).collect();
+        a.mode = Mode::Zone(super::super::zones::Zones::open(names, None, "JST-9"));
+        let col = |lines: &[String]| lines.iter().find_map(|l| l.find("Zone/N000"));
+        let before = render(&mut a, 80, 20);
+        let foot = before.iter().find(|l| l.contains("JST-9")).cloned().unwrap_or_default();
+        assert!(foot.contains("Enter"), "굴림 표시가 그냥 Enter 의 말을 덮었다\n{}", before.join("\n"));
+        // 말과 굴림 표시 사이에 테두리가 남는다 — 말이 표시 밑까지 닿으면 표시가 그 끝을 덮는다.
+        assert!(foot.contains("━ ↓"), "아랫줄의 말이 굴림 표시 자리까지 닿았다\n{foot}");
+        let Mode::Zone(z) = &mut a.mode else { unreachable!() };
+        z.step(super::super::scroll::Move::LineDown);
+        let after = render(&mut a, 80, 20);
+        assert_eq!(col(&before), col(&after), "첫걸음에 이름이 밀렸다\n{}\n{}", before.join("\n"), after.join("\n"));
+
+        let Mode::Zone(z) = &mut a.mode else { unreachable!() };
+        assert!(z.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)));
+        let none = render(&mut a, 80, 20).join("\n");
+        assert!(none.contains(say(a.site.lang, "tui.tz.no_match")), "{none}");
+        assert!(!none.contains(say(a.site.lang, "tui.tz.none")), "이름이 있는 기계에서 자료가 없다고 했다\n{none}");
     }
 
     /// **헤더가 안 서는 낮은 창에서는 알림 띠가 한 번 댄다**(moai-pvpb.6g6) — 늘 때만 다시 말한다. 띠에 다른 말이
@@ -6423,6 +6523,11 @@ pub(super) mod tests {
                 why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".into() },
             }]
         };
+        // 글을 받는 동안에는 기다린다 — 알림은 키마다 걷혀, 글칸에서 말하면 다음 글자에 사라진다(리뷰).
+        a.mode = Mode::Filter(crate::tui::input::Input::default());
+        render(&mut a, 100, 12);
+        assert_eq!(a.notice, None, "글을 받는 동안 말했다");
+        a.mode = Mode::Browse;
         a.notice = Some("다른 말".into());
         render(&mut a, 100, 12);
         assert_eq!(a.notice.as_deref(), Some("다른 말"), "띠의 다른 말을 덮었다");
@@ -6433,6 +6538,24 @@ pub(super) mod tests {
         a.notice = None;
         render(&mut a, 100, 12);
         assert_eq!(a.notice, None, "같은 것을 두 번 말했다");
+        // 늘면 **새로 든 자리를** 댄다 — 이미 말한 자리를 또 대면 늘어난 것이 무엇인지 아무 데도 안 선다(리뷰).
+        a.journals = || {
+            vec![
+                crate::store::Unread {
+                    root: "/w/argos".into(),
+                    at: "/w/argos/.moai/journal/kim.jsonl".into(),
+                    why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".into() },
+                },
+                crate::store::Unread {
+                    root: "/w/argos".into(),
+                    at: "/w/argos/.moai/journal/lee.jsonl".into(),
+                    why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".into() },
+                },
+            ]
+        };
+        render(&mut a, 100, 12);
+        let told = a.notice.clone().expect("늘었는데 아무 말도 안 했다");
+        assert!(told.contains("/w/argos/.moai/journal/lee.jsonl") && told.ends_with("(+1)"), "{told}");
     }
 
     /// **판 줄의 넷은 서로 다른 글이다**(moai-3gia, 사용자 결정 2026-09-21). 특히 못 물은 것과

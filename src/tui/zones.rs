@@ -72,7 +72,12 @@ impl Zones {
     /// 안 가리키는 커서는 연 자리에서만 생기므로(`open`) 그 까닭은 하나다. 목록이 통째로 비었으면 그쪽
     /// 까닭(`trouble`)이 선다.
     pub fn unlisted(&self) -> bool {
-        !self.aimed && !self.all.is_empty()
+        !self.aimed && !self.knows_none()
+    }
+
+    /// 이 기계가 아는 이름이 하나도 없는가 — 거른 목록이 빈 것(글이 좁다)과 가르는 자다. 창 밑의 말이 둘을 달리 댄다.
+    pub fn knows_none(&self) -> bool {
+        self.all.is_empty()
     }
 
     /// 거른 목록. **대소문자를 안 가린다** — 이름은 `Asia/Seoul` 인데 손은 `asia` 를 친다.
@@ -117,20 +122,29 @@ impl Zones {
     /// 거르는 글에 키 하나를 먹인다 — 먹었으면 `true`. **먹은 자리에서 곧바로 다시 거른다**
     /// ([`Zones::settle`]): 두 걸음으로 두면 부르는 쪽이 하나를 빠뜨리는 날 Enter 가 화면에 서 있지도
     /// 않은 줄을 고른다(리뷰). **글을 친 것은 고르러 나선 것이다** — 아무 줄도 안 가리키던 커서가 선다.
+    ///
+    /// **글이 바뀐 것만 센다**(리뷰). 칸은 바꾼 것 없이도 키를 먹는다 — 빈 칸의 Backspace·Delete·Ctrl-U, ←→·Home·End
+    /// ([`Input::key`]). 그것까지 세면 그 키 하나 뒤의 Enter 가 아무도 안 고른 첫 이름을 설정에 적는다. 다시 거르는
+    /// 것도 글이 바뀔 때뿐이다([`Zones::hits`]).
     pub fn key(&mut self, k: KeyEvent) -> bool {
+        let was = self.typing.text().to_string();
         let ate = self.typing.key(k);
-        if ate {
+        if ate && self.typing.text() != was {
             self.aimed = true;
             self.settle();
         }
         ate
     }
 
-    /// 거르는 글에 붙여 넣는다 — [`Zones::key`] 와 같은 약속이다.
+    /// 거르는 글에 붙여 넣는다 — [`Zones::key`] 와 같은 약속이다. 줄바꿈뿐인 글처럼 칸에 아무것도 안 든 붙여넣기는
+    /// 고른 것이 아니다.
     pub fn paste(&mut self, s: &str) {
+        let was = self.typing.text().to_string();
         self.typing.paste(s);
-        self.aimed = true;
-        self.settle();
+        if self.typing.text() != was {
+            self.aimed = true;
+            self.settle();
+        }
     }
 
     /// 글이 바뀌면 다시 거르고 커서를 목록 안으로 도로 들인다. **[`Zones::key`]·[`Zones::paste`]
@@ -252,6 +266,14 @@ mod tests {
         let z = Zones::open(all.clone(), None, "JST-9");
         assert_eq!((z.at(), z.selected()), (None, None), "목록에 없는 이름에서 줄을 골라 두었다");
         assert!(z.unlisted());
+        // 칸이 먹되 글은 안 바꾸는 키(빈 칸의 Backspace·Delete, ←→·Home·End)와 아무것도 안 든 붙여넣기는 고른 것이
+        // 아니다 — 세우면 그 뒤의 Enter 가 첫 이름을 설정에 적는다.
+        let mut idle = z.clone();
+        for code in [KeyCode::Backspace, KeyCode::Delete, KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End] {
+            assert!(idle.key(KeyEvent::from(code)), "{code:?} 를 칸이 안 먹었다");
+        }
+        idle.paste("\n");
+        assert_eq!((idle.at(), idle.unlisted()), (None, true), "글을 안 바꾼 키가 커서를 세웠다");
 
         let mut moved = z.clone();
         moved.step(Move::LineDown);

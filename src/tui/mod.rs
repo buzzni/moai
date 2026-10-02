@@ -1126,6 +1126,10 @@ pub struct App {
     /// 헤더가 안 서는 낮은 창에서 알림 띠로 **이미 말한** 못 읽은 저널의 수 — 늘 때만 한 번 더 말한다
     /// ([`App::tell_journals`]).
     journals_told: usize,
+    /// 루프가 **휠·끌기를 마지막으로 받은 때**(moai-pvpb.m2f) — 끝내거나 편집기로 넘길 때 DA1 의 답 뒤까지 비울지를
+    /// 이것으로 가른다(`cmd::tui::rolled_lately`). 적는 것은 루프가 사건을 넘기는 자리(`cmd::tui::take`) 하나다.
+    /// 탐색기의 뜻에는 안 쓰인다 — 터미널을 걷는 쪽이 읽는 값을 루프와 끝내는 자리가 함께 쥔 `App` 에 둔 것이다.
+    pub rolled_at: Option<std::time::Instant>,
     /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
     /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
     /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
@@ -1707,6 +1711,7 @@ impl App {
             identify: crate::model::actor,
             journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread },
             journals_told: 0,
+            rolled_at: None,
             header_user: None,
             commits_job: None,
             commits_due: true,
@@ -2008,40 +2013,44 @@ impl App {
         self.header_user.as_ref().map_or("—", |(_, _, _, said, _)| said.as_str())
     }
 
-    /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
-    /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
-    /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
     /// **못 읽은 저널** — 이 탐색기가 지금까지 저널을 읽다 못 연 자리, 만난 차례대로(moai-pvpb.6g6, 2026-10-02
     /// 사용자 결정). 헤더의 셋째 줄이 늘 대고, 헤더가 안 서는 창에서는 알림 띠가 한 번 댄다. 안 대면 통계 창의
     /// 토큰 합과 `/` 의 노트 찾기가 모자란 채 다 센 것처럼 서고, 그 말은 나간 뒤 stderr 에만 선다.
+    ///
+    /// **목록은 늘기만 한다** — [`crate::store::journal_unread`] 는 프로세스 하나의 것이고 아무도 비우지 않아, 파일을
+    /// 고쳐 다시 읽혀도 그 자리는 탐색기를 나갈 때까지 남는다.
     pub fn unread_journals(&self) -> Vec<crate::store::Unread> {
         (self.journals)()
     }
 
     /// 헤더가 안 서는 창에서 **새로 못 읽은 저널을 알림 띠로 한 번** 말한다. 띠는 한 자리를 나눠 쓰므로 다른
     /// 말이 서 있으면 기다린다 — 그 말을 덮지 않고, 띠가 빈 다음 그림에서 말한다.
+    ///
+    /// **글을 받는 동안에도 기다린다**(리뷰) — 알림은 키마다 걷히는데(`App::key`), 글칸에서는 다음 키가 곧 다음 글자다.
+    /// `/` 의 노트 찾기는 치는 첫 글자에서 저널을 읽으므로, 그 자리에서 말하면 둘째 글자에 걷혀 다시는 안 섰다. 보는
+    /// 화면(목록·통계 창 — [`App::wants_mouse`] 가 가르는 그 둘)으로 돌아온 다음 그림에서 말한다.
+    ///
+    /// **대는 자리는 새로 든 것의 첫째다**(리뷰) — 이미 말한 자리를 또 대면 늘어난 것이 무엇인지 낮은 창 어디에도 안
+    /// 선다. 뒤의 `(+n)` 은 그 밖의 못 읽은 수 전부다(헤더의 수와 같은 셈). 글은 [`crate::cmd::journal_errors`] 가
+    /// 짓는다 — 나갈 때의 stderr 와 `--json` 의 `journal_error` 가 같은 실패를 그 하나로 말하므로, 여기서 따로 지으면
+    /// 세 자리가 다른 말이 된다.
     pub fn tell_journals(&mut self) {
-        if self.notice.is_some() {
+        if self.notice.is_some() || !matches!(self.mode, Mode::Browse | Mode::Stats(_)) {
             return;
         }
         let unread = self.unread_journals();
-        if unread.len() <= self.journals_told {
-            return;
-        }
+        let new = unread.get(self.journals_told..).unwrap_or_default();
+        let Some(told) = crate::cmd::journal_errors(self.site.lang, new, None).into_iter().next() else { return };
+        self.notice = Some(match unread.len() {
+            1 => told.said,
+            n => format!("{} (+{})", told.said, n - 1),
+        });
         self.journals_told = unread.len();
-        if let Some(first) = unread.first() {
-            let at = crate::text::one_line(&first.at.display().to_string());
-            let said = crate::i18n::fill(
-                crate::i18n::say(self.site.lang, "warn.unread_journal"),
-                &[("at", &at), ("why", &crate::text::one_line(&first.said(self.site.lang)))],
-            );
-            self.notice = Some(match unread.len() {
-                1 => said,
-                n => format!("{said} (+{})", n - 1),
-            });
-        }
     }
 
+    /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
+    /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
+    /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
     fn user_root(&self) -> &std::path::Path {
         self.site
             .repo
@@ -9305,13 +9314,18 @@ mod tests {
         a.zone = crate::tz::Zone::load("JST-9").expect("규칙 글을 못 읽었다");
         a.hit("SPC o t");
         let Mode::Zone(z) = &a.mode else { panic!("SPC o t 가 창을 안 열었다 — {:?}", a.mode) };
+        assert_eq!(z.now(), "JST-9", "창이 지금 쓰는 이름으로 안 열렸다");
+        // **목록은 이 기계의 tzdb 에 기대지 않는다**(리뷰) — tzdb 가 없는 기계에서는 목록이 비어, 고치기 전의 판도
+        // `at()` 이 `None` 이라 이 시험이 아무것도 안 재며 푸르게 지나갔다(`tz::Zone::fixed` 가 막는 그 꼴). 연 길은
+        // 위에서 보고, 이름 목록만 박아 둔 것으로 갈아 끼운다.
+        let names = ["Africa/Abidjan", "Asia/Seoul", "UTC"].map(String::from).to_vec();
+        a.mode = Mode::Zone(zones::Zones::open(names, None, "JST-9"));
+        let Mode::Zone(z) = &a.mode else { unreachable!() };
         assert_eq!(z.at(), None, "목록에 없는 이름에서 줄을 골라 두었다");
-        // 칠한 줄이 없는 까닭을 창 밑에서 댄다 — 이 기계에 tzdb 가 있을 때만 목록이 선다.
-        if !z.shown().is_empty() {
-            let said = crate::i18n::fill(crate::i18n::say(a.site.lang, "tui.tz.unlisted"), &[("now", "JST-9")]);
-            let drawn = super::draw::tests::render(&mut a, 140, 20).join("\n");
-            assert!(drawn.contains(&said), "까닭을 안 댔다\n{drawn}");
-        }
+        // 칠한 줄이 없는 까닭을 창 밑에서 댄다.
+        let said = crate::i18n::fill(crate::i18n::say(a.site.lang, "tui.tz.unlisted"), &[("now", "JST-9")]);
+        let drawn = super::draw::tests::render(&mut a, 140, 20).join("\n");
+        assert!(drawn.contains(&said), "까닭을 안 댔다\n{drawn}");
         a.hit("Enter");
         assert!(matches!(a.mode, Mode::Browse), "Enter 가 창을 안 닫았다");
         assert_eq!(a.zone.name(), "JST-9", "글자 없는 Enter 가 시간대를 바꿨다");
