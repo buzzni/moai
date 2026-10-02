@@ -124,6 +124,39 @@ broken. It reads again once this binary is upgraded, so leave it where it is.
 Reading a broken file still works for the lines that parse, so `moai show` and
 `moai ready` keep answering while you fix it.
 
+## "broken": the snapshot or config is not a file moai reads
+
+Commands in that repository stop — `moai show`, `moai ready` and `moai rm --line`
+included — with one line naming `.moai/issues.jsonl` or `.moai/config.toml`, and
+`--json` says `"code":"broken"`. The file is a link that leaves the checkout or
+goes into `.git/` (a link whose target is missing counts too), or it is not a
+regular file (a FIFO, a socket, a device, a directory); the line says which, and
+where a link points. moai follows a link in a file the repository holds only
+inside its own checkout — the directory that holds `.moai` — so a committed
+`issues.jsonl -> /dev/zero` cannot make it read without end. A link that stays
+inside (`-> ../data/issues.jsonl`) reads as before. Where several projects are
+shown at once (`moai status` outside a repository, `moai project ls`, the
+explorer), that project is named as one that cannot be read and the rest go on.
+
+There is no line to remove; the fix is the file. If it changed only in your
+checkout, put the committed one back (a directory there goes with everything in
+it, so look first):
+
+```sh
+git checkout -- .moai/issues.jsonl    # or .moai/config.toml
+```
+
+If the link itself was committed, that brings the same link back. Take the file
+from the last commit where it was a regular file, and commit it:
+
+```sh
+git log --oneline -- .moai/issues.jsonl
+git checkout <commit> -- .moai/issues.jsonl
+```
+
+Do not copy what the link points at into its place without looking — it may be
+`/dev/zero` or a file under `/proc` that never ends.
+
 ## A conflicted `issues.jsonl`
 
 Lines are sorted by id, so two branches that touched *different* issues still

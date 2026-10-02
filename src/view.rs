@@ -3711,6 +3711,11 @@ pub fn trouble_line(lang: Lang, why: &crate::worktree::Trouble) -> String {
         // **다른 것은 자리에 드는 것뿐이다** — 열어 본 이쪽은 열다 진 까닭을, 안 열어 본 저쪽은 그
         // 워크트리의 자리를 싣는다. 둘 다 `⎇ 가지: <무엇>` 한 모양이다([`at_branch`]).
         Trouble::Unread { branch, why } => unread_said(lang, &at_branch(branch, why)),
+        // **안 읽기로 한 까닭도 같은 문장에 든다** — 다른 것은 그 까닭을 고른 말로 펴는 것뿐이다(moai-itsu).
+        // 제 트래커의 거절과 같은 꼴(`<자리>: <까닭>`, [`crate::held::refused`])이다.
+        Trouble::Unheld { branch, at, why } => {
+            unread_said(lang, &at_branch(branch, &crate::held::refused(lang, at, why)))
+        }
         Trouble::Skipped { branch, path, lines } => fill(
             say(lang, "trouble.skipped"),
             &[("at", &at_branch(branch, &path.display().to_string())), ("n", &lines.to_string())],

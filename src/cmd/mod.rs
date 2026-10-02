@@ -713,6 +713,11 @@ pub struct JournalError {
 /// "이 줄의 이력이 덜 왔다" 라는 말이 된다. `None` 이면 다 든다(`main` 의 stderr).
 ///
 /// **순수하다** — 전역을 안 읽는다. 읽는 자는 부르는 쪽이다.
+///
+/// **자리도 한 줄로 거른다**(리뷰 moai-itsu.n8z) — 저널의 이름은 받은 저장소가 커밋한 것이라, ESC·OSC 가 든
+/// 이름 하나가 화면을 다시 칠하고 줄바꿈이 든 이름은 `moai: …` 줄을 지어낸다. 까닭 쪽의 링크 끝은
+/// [`crate::held::said`] 가 이미 거르고, 못 푼 조각의 자리(`show --removed`)도 같은 자로 거른다. 담아 둔
+/// 자리([`crate::store::Unread::at`])는 그대로다 — 같은 짝을 가르고 뿌리로 고르는 값이다.
 pub fn journal_errors(
     lang: crate::i18n::Lang,
     unread: &[crate::store::Unread],
@@ -725,7 +730,7 @@ pub fn journal_errors(
             kind: u.kind(),
             said: crate::i18n::fill(
                 crate::i18n::say(lang, "warn.unread_journal"),
-                &[("at", &u.at.display().to_string()), ("why", &u.said(lang))],
+                &[("at", &crate::text::one_line(&u.at.display().to_string())), ("why", &u.said(lang))],
             ),
         })
         .collect()
@@ -1329,6 +1334,23 @@ mod tests {
         assert_ne!(en_why, ko_why, "까닭이 말묶음을 안 지났다 — 고른 말과 상관없이 같은 글이다");
         for e in [&en[0], &ko[0]] {
             assert!(e.said.contains("/proc/self/pagemap"), "고칠 링크의 끝을 안 댄다 — {}", e.said);
+        }
+    }
+
+    /// **받은 저장소가 커밋한 저널 이름의 제어 문자는 화면에 안 닿는다**(리뷰 moai-itsu.n8z) — ESC·OSC 가 든
+    /// 이름은 터미널을 다시 칠하고, 줄바꿈이 든 이름은 `moai: …` 줄 하나를 지어낸다. 거르지 않던 판은 링크의
+    /// 끝만 걸렀다.
+    #[test]
+    fn a_journal_name_with_control_characters_is_said_on_one_clean_line() {
+        let one = [crate::store::Unread {
+            root: std::path::PathBuf::from("/w/mine"),
+            at: std::path::PathBuf::from("/w/mine/.moai/journal/x\u{1b}]0;P\u{7}\u{1b}[2J\nmoai: forged.jsonl"),
+            why: crate::store::Missed::Held(crate::held::Unheld::NotAFile),
+        }];
+        for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+            let said = &journal_errors(lang, &one, None)[0].said;
+            assert!(!said.contains(['\u{1b}', '\u{7}', '\n']), "제어 문자가 그대로 나간다 — {said:?}");
+            assert!(said.contains("forged.jsonl"), "자리를 통째로 지웠다 — {said:?}");
         }
     }
 }

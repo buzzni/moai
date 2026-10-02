@@ -339,8 +339,8 @@ fn climb(from: &Path) -> Option<(PathBuf, bool)> {
 /// 등록을 뺀다. 둘을 한 `None` 으로 접으면 받는 쪽이 파일 시스템을 다시 뒤져야
 /// 하고, 그 뒤짐은 부르는 곳마다 조금씩 달라진다.
 ///
-/// 설정이 깨졌거나 디렉터리를 못 읽는 것은 여기가 아니라 `Err` 다 — 고칠 것이지
-/// 상태가 아니다.
+/// 설정이 깨졌거나, 스냅샷을 안 읽기로 했거나(체크아웃 밖·`.git/` 으로 가는 링크, 보통 파일이 아닌 것),
+/// 디렉터리를 못 읽는 것은 여기가 아니라 `Err` 다 — 고칠 것이지 상태가 아니다.
 #[derive(Clone)]
 pub enum Opened {
     Repo(Repo),
@@ -357,7 +357,8 @@ impl Repo {
     /// 못 찾은 것과 찾았는데 설정이 깨진 것은 다르다. `.moai` 밖에서 부른
     /// `status` 는 앞의 것일 때만 등록한 프로젝트를 보여 줘야 한다 — 뒤의 것까지
     /// 한눈 보기로 넘기면 제 저장소의 깨진 설정이 남의 프로젝트 목록 뒤에 숨는다.
-    /// **말은 거절할 때만 묻는다**(moai-iq7j·moai-ivt9) — 설정이 깨진 판에서만 [`Lang`] 을 푼다.
+    /// **말은 거절할 때만 묻는다**(moai-iq7j·moai-ivt9) — 설정이 깨졌거나 스냅샷을 안 읽기로 한 때만
+    /// [`Lang`] 을 푼다.
     /// 값으로 받으면 멀쩡한 판마다 사용자 설정을 열고, 훅은 도구 호출마다 이 길을 지난다.
     pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
         let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
@@ -407,9 +408,9 @@ impl Repo {
 
     /// [`Repo::find_from`] 과 같되 **안 옮긴다** — 찾은 자리의 트래커 그대로다.
     ///
-    /// 옮겨 갈 루트를 못 읽을 때(거기 `config.toml` 이 깨졌다) 물러설 자리다. 훅이 그 자리로
-    /// 선다 — `moai` 는 크게 실패하는 것이 맞지만, 훅까지 조용해지면 그 한 파일 때문에 저장소의
-    /// 모든 워크트리에서 규칙이 통째로 꺼진다(리뷰 moai-71ht.i1u).
+    /// 옮겨 갈 루트를 못 읽을 때(거기 `config.toml` 이 깨졌거나 스냅샷을 안 읽기로 했다, moai-itsu) 물러설
+    /// 자리다. 훅이 그 자리로 선다 — `moai` 는 크게 실패하는 것이 맞지만, 훅까지 조용해지면 그 한 파일
+    /// 때문에 저장소의 모든 워크트리에서 규칙이 통째로 꺼진다(리뷰 moai-71ht.i1u).
     pub fn find_here(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
         Repo::found_root(dir).map(|root| Repo::rooted(root, lang)).transpose()
     }
@@ -439,22 +440,28 @@ impl Repo {
     /// **설정의 거절도 자료로 받는다**(moai-ivt9) — `config::Config::load` 는 화면 말을 모르고,
     /// 펴는 자는 여기 하나다([`crate::view::config_refused`]).
     ///
-    /// **스냅샷도 여기서 먼저 잰다**(moai-itsu) — 체크아웃 밖·`.git/` 으로 가는 링크거나 보통 파일이 아니면
-    /// 모든 명령이 고른 말로 멈춘다(2026-10-02 사용자 결정, `--json` 코드는 `broken`). 받은 저장소가 커밋한
-    /// `issues.jsonl -> /proc/self/pagemap` 하나로 모든 명령이 메모리를 다 쓰던 자리다. 빈 스냅샷으로 읽고
-    /// 알리는 길도 있었지만 그러면 보드가 "이슈 0개" 라는 거짓 그림을 그린다 — 쓰기는 어차피
+    /// **스냅샷도 여기서 먼저 잰다**(moai-itsu) — 체크아웃 밖·`.git/` 으로 가는 링크거나(끝이 없는 링크도
+    /// 끝의 자리로 잰다) 보통 파일이 아니면 이 저장소를 여는 길이 고른 말로 멈춘다(2026-10-02 사용자 결정,
+    /// `--json` 코드는 `broken`). 그 저장소에서 부른 명령은 거기서 서고, 여럿을 한눈에 그리는 자리(밖의
+    /// 한눈 보기·`project ls`·탐색기의 레이어)는 그 줄을 "못 읽는다" 로 대고 나머지를 그린다. 받은 저장소가
+    /// 커밋한 `issues.jsonl -> /proc/self/pagemap` 하나로 모든 명령이 메모리를 다 쓰던 자리다. 빈 스냅샷으로
+    /// 읽고 알리는 길도 있었지만 그러면 보드가 "이슈 0개" 라는 거짓 그림을 그린다 — 쓰기는 어차피
     /// [`target_of`] 가 같은 링크를 거절한다.
     ///
     /// **재는 것은 여기고 읽는 것은 [`Repo::read`] 다.** 읽기는 화면 말을 모르는 자리라(락 안에서도
-    /// 읽는다) 거절을 고른 말로 못 편다. 여기서 먼저 물어 흔한 판은 고른 말로 서고, 그 뒤에 링크가 갈린
-    /// 판(탐색기가 떠 있는 동안 받은 `git pull`)은 읽기가 같은 자로 다시 재어 말 없는 꼴로 멈춘다.
+    /// 읽는다) 거절을 고른 말로 못 편다. 여기서 먼저 물어 흔한 경우는 고른 말로 서고, 그 뒤에 링크가 갈린
+    /// 경우(탐색기가 떠 있는 동안 받은 `git pull`)는 읽기가 같은 자로 다시 재어 말 없는 꼴로 멈춘다. 쓰기는
+    /// 그 읽기보다 먼저 [`Repo::far_lock`] 의 [`target_of`] 가 같은 링크를 제 말(`error`)로 거절한다.
+    ///
+    /// **뿌리는 한 번 푼다**([`crate::held::Home`]) — 설정과 스냅샷을 같은 뿌리로 잰다.
     fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
-        let config = match Config::load(&root) {
+        let home = crate::held::Home::of(&root);
+        let config = match Config::load_in(&root, &home) {
             Ok(c) => c,
             Err(why) => return Err(Fail::config(&why, lang())),
         };
         let issues = root.join(".moai").join("issues.jsonl");
-        if let Err(why) = crate::held::check(&issues, &crate::path::real(&root)) {
+        if let Err(why) = crate::held::check(&issues, &home) {
             return Err(Fail::coded(crate::held::refused(lang(), &issues, &why), code::BROKEN));
         }
         Ok(Repo::at(root, config))
@@ -602,11 +609,30 @@ impl Repo {
     /// **이름마다 그 파일의 자리([`FileId`])를 곁에 든다** — 판정하려고 이미 잰 `metadata` 에서 나온다.
     /// [`Repo::journal_files`] 가 하드 링크까지 접는 데 쓰고, 그것을 거기서 다시 재면 저널을 읽을 때마다 이름
     /// 수만큼 `stat` 이 는다.
+    ///
+    /// **보통 파일로 안 서는 이름과 못 잰 이름은 링크의 끝을 잰다**(리뷰 moai-itsu.n8z) — 체크아웃 밖·`.git/`
+    /// 으로 가는 링크면 `outside` 로 센다([`crate::held::place`]). 그 이름은 저널이 아니라 목록에서 빠지는데,
+    /// 재기 전에 빠지던 판은 `x.jsonl -> /dev/zero`·`-> /밖/디렉터리` 를 말없이 넘겨, 같은 커밋된 링크가 끝이
+    /// 보통 파일일 때만 `outside` 로 섰다. 못 잰 이름(끝이 없거나 못 닿는 링크)도 그 링크를 대야 고칠 곳이
+    /// 보인다 — `failed`·`permission` 으로 대면 `chmod` 를 하러 간다. 뿌리는 그런 이름을 처음 만날 때 푼다 —
+    /// 보통 파일뿐인 흔한 경우에는 안 푼다.
     fn journal_names(&self) -> Vec<(PathBuf, FileId)> {
+        let home = std::cell::OnceCell::new();
+        let outside = |p: &Path| match crate::held::place(p, home.get_or_init(|| crate::held::Home::of(&self.root))) {
+            Err(why) => {
+                note_missed(&self.root, p, Missed::Held(why));
+                true
+            }
+            Ok(_) => false,
+        };
         let legacy = self.journal_path();
         let mut out = match std::fs::metadata(&legacy) {
-            Ok(m) if !m.is_file() => Vec::new(),
+            Ok(m) if !m.is_file() => {
+                outside(&legacy);
+                Vec::new()
+            }
             Ok(m) => vec![(legacy, file_id(&m))],
+            // 못 잰 옛 한 파일은 그대로 든다 — 링크의 끝은 [`Repo::journal_files`] 가 접기 전에 잰다.
             Err(_) => vec![(legacy, None)],
         };
         let at = self.journal_dir();
@@ -654,9 +680,16 @@ impl Repo {
             // moai-6ney 인데, 정작 그 금이 여기 하나 남아 있었다.
             match p.metadata() {
                 Ok(m) if m.is_file() => split.push((p, file_id(&m))),
-                // 디렉터리(나 그것을 가리키는 링크)는 저널이 아니다 — 못 읽은 것이 아니므로 안 센다.
-                Ok(_) => {}
-                Err(e) => note_unread(&self.root, &p, &e),
+                // 디렉터리(나 그것을 가리키는 링크)는 저널이 아니다 — 못 읽은 것이 아니므로 안 센다. 다만 그
+                // 이름이 체크아웃 밖·`.git/` 으로 가는 링크면 그 링크를 댄다.
+                Ok(_) => {
+                    outside(&p);
+                }
+                Err(e) => {
+                    if !outside(&p) {
+                        note_unread(&self.root, &p, &e);
+                    }
+                }
             }
         }
         split.sort();
@@ -677,34 +710,40 @@ impl Repo {
     /// 고치면 링크가 보통 파일로 갈려 겹침이 영영 돌아왔다. 보통 파일의 이름은 받은 철자 그대로다 — 조상에 링크가
     /// 있는 뿌리에서 모든 자리가 다른 철자로 나가지 않게 한다.
     ///
-    /// 푸는 자는 [`crate::path::real`] 이라 풀지 못한 자리(없는 옛 한 파일, 제 자리를 가리키는 링크, 그 사이에
-    /// 사라진 파일)는 받은 철자 그대로 들어 다른 파일과 접히지 않는다 — 읽는 쪽이 넘기거나 센다. 빼면 못 읽은
-    /// 까닭이 말없이 사라진다.
+    /// 푸는 자는 [`crate::held::place`] 라 끝내 못 푸는 자리(없는 옛 한 파일, 제 자리를 가리키는 링크)는 받은
+    /// 철자 그대로 들어 다른 파일과 접히지 않는다 — 읽는 쪽이 넘기거나 센다. 빼면 못 읽은 까닭이 말없이 사라진다.
     ///
     /// **하드 링크도 접는다**(moai-itsu.aod) — 풀어도 이름이 둘이라 푼 자리로는 못 접던 것을, 그 파일의 자리
-    /// ([`FileId`], 장치와 inode)로 접는다. [`Lock::holds`] 가 같은 파일을 가르는 자와 같다. 잴 수 없던 이름(위의
-    /// 못 푼 자리)은 전처럼 푼 자리로 접는다. **받은 저장소에서는 여전히 못 접는다** — git 은 하드 링크를 싣지 않아
-    /// 같은 줄을 든 보통 파일 둘로 선다. 이 접기가 값을 내는 것은 링크를 건 그 체크아웃에서다.
+    /// ([`FileId`], 장치와 inode)로 접는다. [`Lock::holds`] 가 같은 파일을 가르는 자와 같다([`file_id`]). 잴 수
+    /// 없던 이름(위의 못 푼 자리)은 전처럼 푼 자리로 접는다. **받은 저장소에서는 여전히 못 접는다** — git 은 하드
+    /// 링크를 싣지 않아 같은 줄을 든 보통 파일 둘로 선다. 이 접기가 값을 내는 것은 링크를 건 그 체크아웃에서다.
+    ///
+    /// **열쇠가 겹치면 앞 이름을 다시 잰다**(리뷰 moai-itsu.n8z) — 자리는 [`Repo::journal_names`] 가 이름을 훑을
+    /// 때 잰 것이라, 그 사이에 체크아웃·머지가 지운 파일의 inode 를 새로 지은 파일이 물려받으면(ext4 는 비운
+    /// 번호를 곧바로 다시 준다) 다른 두 파일이 한 열쇠를 든다. 그대로 접으면 산 파일의 이력이 그 읽기에서 말없이
+    /// 빠진다. 앞 이름이 더는 그 자리가 아니면 뒤 이름을 읽는다 — 겹치는 것은 하드 링크와 이 틈뿐이라, 흔한
+    /// 경우에는 `stat` 이 안 는다.
     ///
     /// **체크아웃 밖으로 풀리는 자리는 안 읽는다**(moai-karj). 쓰기([`append_inside`])가 [`target_of`] 로 이미
     /// 거절하던 자리를 읽기도 같은 자로 잰다 — 저장소가 든 파일은 제 체크아웃 안에서만 링크를 따른다. 받은
     /// 저장소가 커밋한 `.moai/journal/x.jsonl -> /proc/self/pagemap` 은 `stat` 이 크기 0 인 보통 파일이라 답해
     /// [`Repo::journal_names`] 의 판정을 지나고, [`Repo::journal_bytes`] 의 `fs::read` 가 256GiB 가량을 담으려다
     /// OOM 으로 죽었다. 자는 스냅샷·설정과 한 벌이다([`crate::held::place`], moai-itsu) — 안을 가리키는 링크
-    /// (moai-p9mq 의 `<옛 메일>.jsonl -> <새 메일>.jsonl`)는 따르고, 밖·`.git/` 으로 가는 링크는 안 따르고, 못 푼
-    /// 자리는 재지 않는다. 그 까닭은 거기 적혀 있다.
+    /// (moai-p9mq 의 `<옛 메일>.jsonl -> <새 메일>.jsonl`)는 따르고, 밖·`.git/` 으로 가는 링크는 끝이 없어도 안
+    /// 따른다. 그 까닭은 거기 적혀 있다.
     ///
-    /// - 견주는 것은 접으려고 푸는 바로 그 자리다. 끝 조각의 링크도, 옛 한 파일의 링크도, 가운데 디렉터리의
-    ///   링크(`.moai/journal -> /밖`)도 거기서 다 드러난다
+    /// - 견주는 것은 [`crate::held::place`] 가 끝까지 푼 자리다. 끝 조각의 링크도, 옛 한 파일의 링크도, 가운데
+    ///   디렉터리의 링크(`.moai/journal -> /밖`)도 거기서 다 드러난다
     /// - 딸린 워크트리에서 부른 `moai` 는 루트의 트래커를 읽으므로 `self.root` 가 그 루트다 — 쓰기가 견주는
     ///   뿌리와 같다
     /// - **접기 전에 잰다** — 밖을 가리키는 이름이 둘이면 둘 다 센다. 접고 나서 재면 둘째가 말없이 빠진다
     /// - **넘기되 조용히는 아니다**(moai-6ney) — 링크 이름을 [`note_missed`] 에 `outside` 로 센다(moai-itsu).
     ///   고칠 것이 그 링크라 잠깐의 io 실패(`failed`)와 갈라 둔다
     fn journal_files(&self) -> Vec<PathBuf> {
-        let home = crate::path::real(&self.root);
-        // 접는 열쇠 — 잰 이름은 그 파일의 자리(`Ok`), 못 잰 이름은 푼 자리(`Err`)다. 둘은 서로 안 겹친다.
-        let mut seen = BTreeSet::new();
+        let home = crate::held::Home::of(&self.root);
+        // 접는 열쇠 → 그 열쇠를 처음 든 이름. 잰 이름의 열쇠는 그 파일의 자리(`Ok`), 못 잰 이름은 푼 자리(`Err`)다
+        // — 둘은 서로 안 겹친다.
+        let mut seen: BTreeMap<Result<(u64, u64), PathBuf>, PathBuf> = BTreeMap::new();
         let mut out = Vec::new();
         for (p, id) in self.journal_names() {
             let real = match crate::held::place(&p, &home) {
@@ -714,9 +753,17 @@ impl Repo {
                     continue;
                 }
             };
-            if !seen.insert(id.ok_or_else(|| real.clone())) {
-                continue;
+            let key = id.ok_or_else(|| real.clone());
+            if let Some(first) = seen.get(&key) {
+                let still = match &key {
+                    Ok(id) => std::fs::metadata(first).ok().and_then(|m| file_id(&m)).as_ref() == Some(id),
+                    Err(_) => true,
+                };
+                if still {
+                    continue;
+                }
             }
+            seen.insert(key, p.clone());
             let link = std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink());
             out.push(if link { real } else { p });
         }
@@ -756,9 +803,10 @@ impl Repo {
     /// 옛 파일 아니면 새 파일을 보지, 찢어진 파일을 볼 수 없다.
     ///
     /// **체크아웃 안에서만 읽는다**([`read_snapshot`], moai-itsu) — 고른 말로 멈추는 것은 이 저장소를 지은
-    /// [`Repo::rooted`] 가 먼저 했고, 여기서 다시 재는 것은 그 뒤에 링크가 갈린 판을 위해서다.
+    /// [`Repo::rooted`] 가 먼저 했고, 여기서 다시 재는 것은 그 뒤에 링크가 갈린 경우를 위해서다. 여기는 화면
+    /// 말을 모르는 자리라 그 거절은 말 없는 꼴([`crate::held::spelled`])로 선다.
     pub fn read(&self) -> R<Load> {
-        Ok(read_snapshot(&self.issues_path(), &self.root)?.unwrap_or_default())
+        Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
@@ -1641,7 +1689,8 @@ fn unread_kind(err: &std::io::Error) -> &'static str {
 pub type Stamp = Option<(std::time::SystemTime, u64)>;
 
 /// 파일 하나의 자리 — 장치와 inode(moai-itsu.aod). 이름이 둘이어도(하드 링크, 같은 파일로 가는 링크) 같은
-/// 파일이면 같은 값이다. 유닉스 밖에서는 안 선다 — 그때는 푼 자리로 접는다([`Repo::journal_files`]).
+/// 파일이면 같은 값이다. 유닉스 밖에서는 안 선다 — 그때는 푼 자리로 접고([`Repo::journal_files`]), 락은 견줄
+/// 길이 없다고 답한다([`Lock::holds`]).
 type FileId = Option<(u64, u64)>;
 
 fn file_id(m: &std::fs::Metadata) -> FileId {
@@ -1672,23 +1721,42 @@ pub fn stamp(path: &Path) -> Stamp {
 /// 길도 여기를 지나므로, 거기서도 락을 안 잡는다: 남의 쓰기를 기다리게 할 까닭이
 /// 없고, `rename` 이 찢어진 파일을 못 보게 한다.
 ///
-/// **그 체크아웃(`home`, 그 트래커의 뿌리) 안에서만, 연 손잡이가 댄 크기까지만 읽는다**([`crate::held`],
-/// moai-itsu). 받은 저장소가 `issues.jsonl -> /proc/self/pagemap` 을 커밋해 두면 `fs::read_to_string` 이
-/// 끝없이 읽어 모든 명령이 메모리를 다 썼고, FIFO 면 모든 명령이 멈췄다. 안 읽는 자리는 `broken` 코드로
-/// 멈추되 **말 없는 꼴**([`crate::held::spelled`])로 댄다 — 여기는 화면 말을 모른다. 제 트래커의 거절은
-/// [`Repo::rooted`] 가 먼저 고른 말로 냈고, 옆 워크트리의 것은 말묶음의 `trouble.unread` 가 감싼다.
-pub fn read_snapshot(path: &Path, home: &Path) -> R<Option<Load>> {
-    let src = match crate::held::read_inside(path, home) {
-        Ok(bytes) => crate::held::text(bytes),
-        Err(crate::held::Fell::Io(e)) => Err(e),
-        Err(crate::held::Fell::Unheld(why)) => {
-            return Err(Fail::coded(crate::held::spelled(path, &why), code::BROKEN));
-        }
-    };
-    match src {
+/// **받는 것은 그 트래커의 뿌리(`.moai` 를 든 디렉터리)다** — 읽을 자리(`<뿌리>/.moai/issues.jsonl`)와 견줄
+/// 체크아웃이 한 값에서 나온다. 둘을 따로 받던 판은 부르는 자리마다 짝을 손으로 맞췄다(리뷰 moai-itsu.n8z).
+///
+/// **그 체크아웃 안에서만, 연 손잡이가 댄 크기까지만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
+/// `issues.jsonl -> /proc/self/pagemap` 을 커밋해 두면 `fs::read_to_string` 이 끝없이 읽어 모든 명령이 메모리를
+/// 다 썼고, FIFO 면 모든 명령이 멈췄다. 안 읽는 자리는 **자료로 낸다**([`Unsnapped::Held`]) — 여기는 화면
+/// 말을 모른다. 옆 워크트리의 것은 `worktree::Trouble::Unheld` 로 실려 고른 말로 펴지고, 제 트래커를 지은
+/// 뒤에 갈린 것은 [`Repo::read`] 가 말 없는 꼴로 멈춘다([`Unsnapped::into_fail`]).
+pub fn read_snapshot(root: &Path) -> Result<Option<Load>, Unsnapped> {
+    let path = root.join(".moai").join("issues.jsonl");
+    match crate::held::read_inside(&path, &crate::held::Home::of(root)) {
         Ok(s) => Ok(Some(parse_issues(&s))),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(Fail::new(format!("{}: {e}", path.display()))),
+        Err(crate::held::Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(crate::held::Fell::Io(e)) => Err(Unsnapped::Failed(Fail::new(format!("{}: {e}", path.display())))),
+        Err(crate::held::Fell::Unheld(why)) => Err(Unsnapped::Held { at: path, why }),
+    }
+}
+
+/// [`read_snapshot`] 이 못 읽은 까닭 — **안 읽기로 한 것은 자료로 든다**(리뷰 moai-itsu.n8z). 글로 지어 내던
+/// 판은 옆 워크트리의 줄이 한국어 머리 뒤에 moai 가 지은 영어(`not a regular file`)로 끝났고, 밖 링크는 까닭
+/// 없이 `<자리> -> <끝>` 만 댔다.
+#[derive(Debug)]
+pub enum Unsnapped {
+    /// 안 읽기로 한 자리([`crate::held::Unheld`]) — 그 스냅샷의 자리와 까닭. 글은 받는 쪽이 고른 말로 편다.
+    Held { at: PathBuf, why: crate::held::Unheld },
+    /// io 가 진 것 — 이미 글이다(자리와 운영체제의 말).
+    Failed(Fail),
+}
+
+impl Unsnapped {
+    /// 말을 모르는 자리의 꼴 — 안 읽기로 한 것은 [`crate::held::spelled`] 와 `broken` 이다([`Repo::read`]).
+    pub fn into_fail(self) -> Fail {
+        match self {
+            Unsnapped::Held { at, why } => Fail::coded(crate::held::spelled(&at, &why), code::BROKEN),
+            Unsnapped::Failed(e) => e,
+        }
     }
 }
 
@@ -2367,12 +2435,14 @@ impl Lock {
     /// 파일 자체가 링크이거나, 하드 링크이거나, 대소문자를 안 가르는 볼륨이면 철자가 달라도 한 파일이다 — 그것을
     /// 가르는 자리다(`user_config::update`). 쥔 쪽은 **연 파일을 그대로** 재므로, 그 사이 그 이름이 다른 파일로
     /// 갈아끼워져도 쥔 것을 헛짚지 않는다.
+    ///
+    /// **같은 파일을 가르는 자는 [`file_id`] 하나다** — 저널을 접는 자리([`Repo::journal_files`])와 한 벌이다(리뷰
+    /// moai-itsu.n8z). unix 에서는 늘 값이 서므로 그 견줌이 곧 장치·아이노드의 견줌이다.
     pub(crate) fn holds(&self, path: &Path) -> Option<bool> {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::MetadataExt;
             Some(match (self.0.metadata(), std::fs::metadata(path)) {
-                (Ok(held), Ok(other)) => (held.dev(), held.ino()) == (other.dev(), other.ino()),
+                (Ok(held), Ok(other)) => file_id(&held) == file_id(&other),
                 _ => false,
             })
         }
@@ -3123,7 +3193,8 @@ mod tests {
     /// **연 파일이 댄 크기까지만 읽는다**(moai-karj 리뷰) — 이름으로 잰 뒤 읽기 전에 그 자리가 procfs 로 갈리는
     /// 틈을 손잡이의 크기가 닫는다. `/proc/self/status` 는 `stat` 이 크기 0 이라 답하면서 글을 내는 파일이라,
     /// 고침이 없으면 글이 읽히고 고치면 빈 것이다. 끝없이 읽는 파일로 재지 않는다 — 고침이 없으면 시험이
-    /// 메모리를 다 쓴다.
+    /// 메모리를 다 쓴다. 그 자는 [`crate::held::read`] 에 살고 거기 곁의 시험이 재므로, 여기서 지키는 것은
+    /// **저널이 그 자를 지나는가** 다 — 저널만 `fs::read` 로 돌아가면 이 시험 하나가 붉어진다.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_journal_is_read_no_further_than_the_size_its_handle_gives() {
@@ -3137,7 +3208,8 @@ mod tests {
     /// (moai-itsu, 2026-10-02 사용자 결정). 받은 저장소가 커밋한 `issues.jsonl -> /proc/self/pagemap` 하나로 모든
     /// 명령이 메모리를 다 쓰던 자리다. 끝없이 읽는 파일로 재지 않는다 — 고침이 없으면 시험이 메모리를 다 쓴다.
     /// 밖과 `.git/` 에 멀쩡한 파일을 두고 그것이 읽히지 않는지를 본다. 디렉터리는 고침 전에도 `error` 로
-    /// 멈췄으니 코드(`broken`)로 가른다.
+    /// 멈췄으니 코드(`broken`)로 가른다. **끝이 없는 링크도 같다**(리뷰 moai-itsu.n8z) — 재지 않던 판은 밖을
+    /// 가리키는 끝 없는 스냅샷을 "없음" 으로 읽어 빈 보드를 그렸다.
     #[cfg(unix)]
     #[test]
     fn a_snapshot_or_config_out_of_the_checkout_stops_every_command() {
@@ -3147,7 +3219,7 @@ mod tests {
         std::fs::write(away.join("config.toml"), "prefix = \"argos\"\n").unwrap();
         let find = |d: &Scratch, lang| Repo::find_from(d.path(), move || lang).map(|r| r.map(|r| r.root));
         for file in ["issues.jsonl", "config.toml"] {
-            for how in ["outside", "git", "directory"] {
+            for how in ["outside", "git", "directory", "dangling", "dangling-git"] {
                 let d = scratch(&format!("held-{how}"));
                 let at = d.join(".moai").join(file);
                 std::fs::remove_file(&at).unwrap();
@@ -3157,6 +3229,11 @@ mod tests {
                         std::fs::create_dir_all(d.join(".git")).unwrap();
                         std::fs::copy(away.join(file), d.join(".git").join(file)).unwrap();
                         std::os::unix::fs::symlink(format!("../.git/{file}"), &at).unwrap();
+                    }
+                    "dangling" => std::os::unix::fs::symlink(away.join(format!("missing-{file}")), &at).unwrap(),
+                    "dangling-git" => {
+                        std::fs::create_dir_all(d.join(".git")).unwrap();
+                        std::os::unix::fs::symlink(format!("../.git/missing-{file}"), &at).unwrap();
                     }
                     _ => std::fs::create_dir(&at).unwrap(),
                 }
@@ -3181,13 +3258,75 @@ mod tests {
         let r = Repo::find_from(d.path(), || crate::i18n::Lang::Ko).unwrap().expect("저장소를 못 찾았다");
         assert_eq!(r.read().unwrap().issues.len(), 1, "안을 가리키는 링크를 안 읽었다");
 
-        // **지은 뒤에 링크가 갈려도 읽기가 다시 잰다** — 탐색기가 떠 있는 동안 받은 `git pull` 이 그 판이다.
+        // **지은 뒤에 링크가 갈려도 읽기가 다시 잰다** — 탐색기가 떠 있는 동안 받은 `git pull` 이 그런 경우다.
         // 여기는 화면 말을 모르는 자리라 말 없는 꼴(`<자리> -> <끝>`)로 멈춘다.
         std::fs::remove_file(d.join(".moai/issues.jsonl")).unwrap();
         std::os::unix::fs::symlink(away.join("issues.jsonl"), d.join(".moai/issues.jsonl")).unwrap();
         let e = r.read().expect_err("지은 뒤에 갈린 링크를 따라 밖을 읽었다");
         assert_eq!(e.code, code::BROKEN, "{}", e.message);
         assert!(e.message.contains(" -> "), "{}", e.message);
+    }
+
+    /// **링크를 지나 연 뿌리도 제 스냅샷을 읽는다**(리뷰 moai-itsu.n8z) — 견줄 뿌리를 안 푼 채 재면(`held::Home`
+    /// 이 막는 꼴) 링크 철자의 뿌리 아래 멀쩡한 스냅샷이 밖으로 읽혀 모든 명령이 섰다. 손으로 적은 등록 경로
+    /// (`Repo::open`)와 훅이 `cd`·`-C` 로 찾은 자리(`Repo::find_from`)가 그 철자를 그대로 든다.
+    #[cfg(unix)]
+    #[test]
+    fn a_root_reached_through_a_link_reads_its_own_snapshot() {
+        let d = scratch("held-via-link");
+        let row = serde_json::to_string(&issue("argos-4aex")).unwrap();
+        std::fs::write(d.join(".moai/issues.jsonl"), format!("{row}\n")).unwrap();
+        let away = Scratch::new("store-held-via");
+        let via = away.join("door");
+        std::os::unix::fs::symlink(d.path(), &via).unwrap();
+        let Ok(Opened::Repo(r)) = Repo::open(&via, || crate::i18n::Lang::Ko) else {
+            panic!("링크로 연 저장소가 안 열렸다")
+        };
+        assert_eq!(r.read().unwrap().issues.len(), 1, "링크로 연 뿌리에서 제 스냅샷을 못 읽었다");
+        let r = Repo::find_from(&via, || crate::i18n::Lang::Ko).unwrap().expect("링크로 찾은 저장소가 없다");
+        assert_eq!(r.read().unwrap().issues.len(), 1, "링크로 찾은 뿌리에서 제 스냅샷을 못 읽었다");
+    }
+
+    /// **끝이 보통 파일이 아니거나 없는 밖 링크도 `outside` 로 선다**(리뷰 moai-itsu.n8z). 목록이 보통 파일만
+    /// 들던 판은 `-> /dev/null` 을 재기 전에 말없이 뺐고, 끝이 없는 밖 링크는 `failed`(ENOENT)로 섰다 — 같은
+    /// 커밋된 링크가 끝의 꼴에 따라 조용하거나 다른 갈래로 섰다. 안에 선 디렉터리는 저널이 아니라 여전히 말하지
+    /// 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_link_out_to_no_file_or_no_end_is_told_as_outside() {
+        let away = Scratch::new("store-journal-noend-away");
+        let (r, d) = repo("journal-noend");
+        std::fs::create_dir_all(r.journal_dir()).unwrap();
+        let null = r.journal_dir().join("dev.jsonl");
+        std::os::unix::fs::symlink("/dev/null", &null).unwrap();
+        let gone = r.journal_dir().join("gone.jsonl");
+        std::os::unix::fs::symlink(away.join("missing.jsonl"), &gone).unwrap();
+        std::fs::create_dir(r.journal_dir().join("sub.jsonl")).unwrap();
+        assert!(r.journal_of("argos-4aex").is_empty());
+        let told = unread_under(d.path());
+        for link in [&null, &gone] {
+            assert!(
+                told.iter().any(|u| u.at == *link && u.kind() == "outside"),
+                "{}: 밖 링크를 outside 로 안 댔다 — {told:?}",
+                link.display()
+            );
+        }
+        assert_eq!(told.len(), 2, "안의 디렉터리까지 댔거나 한 링크를 두 번 댔다 — {told:?}");
+    }
+
+    /// **읽을 때 보통 파일이 아니면 넘기되 센다** — 목록을 짓고 읽기 전에 그 이름이 디렉터리·FIFO 로 갈린
+    /// 경우다([`Repo::journal_bytes`] 의 안 읽기로 한 갈래). `failed` 로 서고 막히지 않는다. 이 갈래를 세는 줄을
+    /// 걷어도 다른 시험이 안 붉어지던 자리다(리뷰 moai-itsu.n8z).
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_that_is_no_file_at_the_read_is_told() {
+        let (r, d) = repo("journal-no-file");
+        let dir = d.join("turned.jsonl");
+        std::fs::create_dir(&dir).unwrap();
+        assert_eq!(r.journal_bytes(&dir), None, "디렉터리를 저널로 읽었다");
+        let told = unread_under(d.path());
+        let not_a_file = |u: &Unread| matches!(u.why, Missed::Held(crate::held::Unheld::NotAFile));
+        assert!(told.iter().any(|u| u.at == dir && u.kind() == "failed" && not_a_file(u)), "{told:?}");
     }
 
     /// **못 푼 옛 한 파일은 접지 않고 읽는 쪽에 넘긴다**(리뷰) — 목록에서 빼면 읽는 쪽이 그 자리를 못 만나
