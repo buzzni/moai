@@ -111,17 +111,14 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 /// 빈 stdin 은 빈 본문을 뜻하지 않는다 — `""` 로 쓰는 것이 답이 아닌 까닭은 `read_body` 가 빈 글을
 /// `None` 으로 접는 그대로다. 다만 `moai add --from plan.md --body - </dev/null` 이 계획을 다 세우고
 /// 0 으로 끝나면, 파일을 잘못 짚은 사람은 본문이 없다는 것을 `moai show` 로 열어 보고서야 안다.
-/// `note` 는 여기를 안 지난다 — 그쪽은 빈 글을 이미 거절한다(`refuse.note_empty`).
+/// `note` 는 여기를 안 지난다 — 그쪽은 빈 글을 이미 거절한다(`refuse.note_empty`). 반대쪽 판의 알림만
+/// [`say_if_body_names_a_file`] 로 따로 부른다.
 ///
 /// **argv 에 적힌 빈 글(`-b ''`)은 말하지 않는다.** 그것은 사람이 비워 준 것이지 오다가 사라진 것이
 /// 아니다.
 ///
-/// **반대쪽 판도 한 줄로 말한다**(moai-3hxc.58k) — argv 에 적힌 글이 **한 줄이고 그 이름의 파일이
-/// 있으면** "글로 받았다" 고 알린다. `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는데,
-/// `moai add --from - --body plan.md` 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이
-/// 2026-10-01 에 두 번 있었다. 막지도 본문을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
-/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
-/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add` 가 같은 말을 한다.
+/// **반대쪽 판도 한 줄로 말한다** — argv 에 적힌 글이 파일 이름이면 "글로 받았다" 고 알린다. 그 말은
+/// [`say_if_body_names_a_file`] 한 자리가 한다.
 pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
     read_body_told(arg, ctx, false)
 }
@@ -130,24 +127,41 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
 /// `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은
 /// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
 fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
+    say_if_body_names_a_file(arg.as_deref(), ctx, plan_on_stdin);
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
         eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
     }
-    // stdin 에서 온 글은 사람이 파일 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
-    if !from_stdin && let Some(text) = body.as_deref().filter(|b| names_a_file(b)) {
-        let lang = ctx.lang();
-        let how = match plan_on_stdin {
-            true => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
-            false => crate::i18n::say(lang, "add.body_names_a_file"),
-        };
-        // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
-        let said =
-            crate::i18n::fill(how, &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(text))]);
-        eprintln!("moai: {said}");
-    }
     Ok(body)
+}
+
+/// argv 에 적힌 본문 글이 **한 줄이고 그 이름의 파일이 있으면** "글로 받았다" 고 stderr 에 한 줄로
+/// 알린다(moai-3hxc.58k). `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는데,
+/// `moai add --from - --body plan.md` 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이
+/// 2026-10-01 에 두 번 있었다. 막지도 본문을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
+/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
+///
+/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add`·`note -b` 가 같은 말을 한다. `note` 는
+/// [`read_body_said`] 를 안 지나서 이것을 따로 부른다 — `note -b plan.md` 가 경로를 노트로 남기고 말이
+/// 없던 것이 2026-10-02 에 한 번 밟혔다(moai-18so.rnm).
+///
+/// `arg` 는 **argv 에 적힌 그대로**다. `-` 는 stdin 을 읽으라는 말이고, stdin 에서 온 글은 사람이 파일
+/// 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다. `plan_on_stdin` 은
+/// [`read_body_told`] 의 그것이다.
+pub fn say_if_body_names_a_file(arg: Option<&str>, ctx: &Ctx, plan_on_stdin: bool) {
+    let Some(text) = arg.filter(|a| *a != "-" && names_a_file(a)) else {
+        return;
+    };
+    let lang = ctx.lang();
+    let how = match plan_on_stdin {
+        true => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
+        false => crate::i18n::say(lang, "add.body_names_a_file"),
+    };
+    // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
+    let said =
+        crate::i18n::fill(how, &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(text))]);
+    eprintln!("moai: {said}");
 }
 
 /// 본문 글이 **한 줄이고, 지금 디렉터리에서 그 이름으로 일반 파일이 서 있는가.** `--from` 이 읽는 경로와 같은
