@@ -4109,13 +4109,9 @@ impl App {
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             site.index
-                .entries_tree(
-                    &site.issues,
-                    &site.path,
-                    keep,
-                    &|a, b| self.order_in(site, a, b),
-                    &|under| site.expanded.contains(under) || found_under.contains(under),
-                )
+                .entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|under| {
+                    site.expanded.contains(under) || found_under.contains(under)
+                })
                 .into_iter()
                 .map(|(e, twig)| Row::Item(seat, e, twig)),
         );
@@ -4153,7 +4149,8 @@ impl App {
     fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
         let mut lanes: Vec<Option<&Seg>> = Vec::new();
         let mut cards: Vec<(usize, Entry, Twig)> = Vec::new();
-        let tree = site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
+        let tree =
+            site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
         for (e, twig) in tree {
             let Some(at) = e.at().filter(|&at| keep(at) && !crate::report::is_group(&site.issues[at])) else {
                 continue;
@@ -4210,7 +4207,7 @@ impl App {
         // **레인 머리줄은 뿌리에 마일스톤 레인이 설 때만이다** — 마일스톤이나 에픽 안은 레인이 하나라
         // 머리줄이 경로 줄을 되풀이할 뿐이다.
         let headed = lanes.iter().any(Option::is_some);
-        let plan = board::Plan::of(&slots, columns.len(), draw::card_lines(self.fields), headed);
+        let plan = board::Plan::of(&slots, columns.len(), draw::card_height(self.fields), headed);
         Laid { columns, lanes, plan }
     }
 
@@ -5513,8 +5510,15 @@ mod tests {
         let mut put_off = make("argos-0007", Kind::Issue);
         put_off.priority = Some(0);
         put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
-        let issues =
-            vec![make("argos-0001", Kind::Milestone), epic, first, held, loose, make("argos-0006", Kind::Idea), put_off];
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            epic,
+            first,
+            held,
+            loose,
+            make("argos-0006", Kind::Idea),
+            put_off,
+        ];
         App::new(issues, cfg(), Path::new())
     }
 

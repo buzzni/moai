@@ -297,6 +297,8 @@
   "tui.pane.list": "목록",
   "tui.pane.detail": "상세",
   "tui.pane.board": "보드",
+  "tui.board.idea": "idea",
+  "tui.board.more": " 칸 {n}개 더: {names} ",
   "tui.badge.sorted": "정렬 {by}",
   "tui.badge.reversed": " 거꾸로",
   "tui.field.priority": "우선순위",

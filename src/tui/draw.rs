@@ -194,9 +194,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         let text = clip(&text, note.width as usize);
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
-    let rows_at = list(f, app, left, &rows);
+    // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
+    let (rows_at, cards, columns) = if app.board() {
+        let b = board(f, app, left, &rows);
+        (Rect::default(), b.cards, b.columns)
+    } else {
+        (list(f, app, left, &rows), Vec::new(), Vec::new())
+    };
     // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 안쪽이라 그린 쪽이 낸다.
-    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right };
+    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다.
+    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right, cards, columns };
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }
@@ -1953,6 +1960,303 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     list_at
 }
 
+/// 보드가 그린 자리 — 마우스가 맞히는 바탕이다(`mouse::Drawn::cards`·`columns`).
+struct Boarded {
+    /// 화면에 보이는 카드의 자리와 그 줄(`App::rows` 의 첨자).
+    cards: Vec<(Rect, usize)>,
+    /// 화면에 선 칸의 자리(머리줄부터 바닥까지)와 그 칸([`super::board::columns`] 의 첨자).
+    columns: Vec<(Rect, usize)>,
+}
+
+/// 보드를 그린다(moai-9nfw) — **목록 자리에 같은 줄을 칸반으로 세운다.** 새 창이 아니라 목록의 배치라 테두리·
+/// 포커스·굴린 자리(`App::list`)가 목록과 한 벌이다.
+///
+/// 테두리 안 첫 줄이 **칸 머리줄**이고 굴려도 남는다 — 굴린 카드가 어느 칸인지 머리가 말한다. 그 밑이 보드
+/// 한 장(캔버스)이다: 레인마다 머리줄 하나(뿌리에 마일스톤 레인이 설 때만), 그 밑에 칸마다 쌓인 카드.
+/// **굴리기는 보드 통째로 하나다**(사용자 결정) — 칸마다 따로 굴리면 같은 레인의 카드가 칸마다 다른 높이에 선다.
+///
+/// 칸은 테두리 안쪽 폭을 고르게 나눈다. 칸마다 [`super::board::CARD_MIN`] 을 못 받으면 덜 세우고, 못 세운 칸은
+/// 제목 줄에 이름과 수로 댄다 — **커서가 선 칸은 늘 선다**. **보이는 카드만 짓는다**(moai-wt4n 과 같은 까닭).
+fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
+    let laid = app.laid(rows);
+    let lang = app.site.lang;
+    let block = frame(app, Pane::Explorer);
+    let inner = block.inner(at);
+    let here = laid.plan.cards.get(app.cursor).copied();
+    let win = super::board::window(laid.columns.len(), inner.width as usize, here.map(|p| p.column));
+    let widths = super::board::widths(inner.width as usize, win.count);
+    let xs: Vec<u16> = widths
+        .iter()
+        .scan(inner.x, |x, w| {
+            let at = *x;
+            *x += *w as u16;
+            Some(at)
+        })
+        .collect();
+    let title = board_title(app, &laid, win, rows.is_empty());
+    f.render_widget(block.title(title), at);
+    let mut out = Boarded { cards: Vec::new(), columns: Vec::new() };
+    if inner.height == 0 || win.count == 0 {
+        return out;
+    }
+    let [heads, canvas] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    for (k, c) in (win.first..win.first + win.count).enumerate() {
+        let room = widths[k].saturating_sub(1);
+        f.buffer_mut().set_line(xs[k], heads.y, &fit(column_head(app, rows, &laid, c), room), room as u16);
+        out.columns.push((Rect { x: xs[k], y: inner.y, width: widths[k] as u16, height: inner.height }, c));
+    }
+
+    let card_h = laid.plan.card_h;
+    app.list.fit(canvas.height as usize, laid.plan.height);
+    if let Some(p) = here {
+        // 레인의 첫 카드면 그 레인의 머리줄까지 보인다 — 머리줄 없이 선 카드는 어느 마일스톤인지 모른다.
+        let lead = usize::from(laid.plan.headed && p.nth == 0);
+        app.list.reveal_span(p.top - lead, card_h + lead);
+    }
+    let offset = app.list.offset();
+    let seen = offset..offset + canvas.height as usize;
+    let y_of = |line: usize| canvas.y + (line - offset) as u16;
+    if laid.plan.headed {
+        for (n, lane) in laid.plan.lanes.iter().enumerate() {
+            if seen.contains(&lane.top) {
+                let line = lane_line(app, &laid, n, canvas.width as usize);
+                f.buffer_mut().set_line(canvas.x, y_of(lane.top), &line, canvas.width);
+            }
+        }
+    }
+    for (n, p) in laid.plan.cards.iter().enumerate() {
+        if !win.holds(p.column) || p.top >= seen.end || p.top + card_h <= seen.start {
+            continue;
+        }
+        let k = p.column - win.first;
+        let Some(r) = rows.get(n) else { continue };
+        let lines = card(app, r, n == app.cursor, widths[k], card_h);
+        let (from, to) = (p.top.max(seen.start), (p.top + card_h).min(seen.end));
+        for (dy, line) in lines.iter().enumerate() {
+            if (from..to).contains(&(p.top + dy)) {
+                f.buffer_mut().set_line(xs[k], y_of(p.top + dy), line, widths[k] as u16);
+            }
+        }
+        out.cards.push((Rect { x: xs[k], y: y_of(from), width: widths[k] as u16, height: (to - from) as u16 }, n));
+    }
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, lang);
+    out
+}
+
+/// 보드의 제목 줄 — **못 세운 칸을 이름과 수로 댄다**(`+2 · ? review 0 · ✓ done 4`). 칸이 다 섰으면 제목이 없다:
+/// 칸마다의 수는 칸 머리줄이 이미 댄다. 카드가 하나도 없으면 목록과 같은 말이다(보기가 다 가렸는지까지).
+fn board_title<'a>(app: &App, laid: &super::Laid, win: super::board::Window, empty: bool) -> Line<'a> {
+    let lang = app.site.lang;
+    if empty {
+        return if app.view_hides_here() {
+            say(lang, "tui.list.empty_by_view").into()
+        } else {
+            say(lang, "tui.list.empty").into()
+        };
+    }
+    let off: Vec<String> = (0..laid.columns.len())
+        .filter(|c| !win.holds(*c))
+        .map(|c| {
+            let column = &laid.columns[c];
+            format!("{} {} {}", column_glyph(column), column_name(column, lang), laid.plan.count(c))
+        })
+        .collect();
+    if off.is_empty() {
+        return Line::default();
+    }
+    fill(say(lang, "tui.board.more"), &[("n", &off.len().to_string()), ("names", &off.join(" · "))]).into()
+}
+
+/// 칸의 이름 — idea 는 종류의 이름 그대로, 미룸은 화면의 말, 칸은 설정의 이름 그대로다.
+fn column_name(c: &super::board::Column, lang: Lang) -> String {
+    match c {
+        super::board::Column::Idea => say(lang, "tui.board.idea").into(),
+        super::board::Column::Shelved => say(lang, "tui.act.deferred").into(),
+        super::board::Column::Status(s) => s.clone(),
+    }
+}
+
+/// 칸의 멈춘 글리프 — idea `◇`·미룸 `‖`·칸은 그 칸의 글리프(사용자가 그린 그림). **색이 혼자 뜻을 지지
+/// 않는다**: 글리프 곁에 늘 칸 이름이 선다.
+fn column_glyph(c: &super::board::Column) -> &'static str {
+    match c {
+        super::board::Column::Idea => "◇",
+        super::board::Column::Shelved => "‖",
+        super::board::Column::Status(s) => style::glyph(s),
+    }
+}
+
+/// 칸 머리줄 한 칸 — 글리프·이름·카드 수. 시작한 칸은 그 안에 도는 카드가 있을 때만 돈다([`count_glyph_across`]) —
+/// 목록 제목의 건수와 같은 자다.
+fn column_head<'a>(app: &App, rows: &[Row], laid: &super::Laid, c: usize) -> Line<'a> {
+    let lang = app.site.lang;
+    let column = &laid.columns[c];
+    let n = laid.plan.count(c);
+    let glyph = match column {
+        super::board::Column::Status(s) => {
+            let work: Vec<(Seat, usize)> = laid
+                .plan
+                .cards
+                .iter()
+                .zip(rows)
+                .filter(|(p, _)| p.column == c)
+                .filter_map(|(_, r)| match r {
+                    Row::Item(seat, e, _) => e.at().map(|at| (*seat, at)),
+                    _ => None,
+                })
+                .collect();
+            Span::styled(count_glyph_across(app, &work, s), glyph_style(s))
+        }
+        other => Span::styled(column_glyph(other), dim()),
+    };
+    Line::from(vec![glyph, Span::raw(format!(" {} {n}", column_name(column, lang)))])
+}
+
+/// 레인의 머리줄 — `── moai-jvfe ⠼▸ v0.3.0 ─────── 0/21 ──`. 마일스톤의 목록 줄과 같은 꼴이다: id(켰으면)·칸 글리프
+/// (도는 것은 [`Site::spins`] 가 정한다)·제목, 그리고 끝에 셈. 바구니는 이름만 선다.
+fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'a> {
+    use super::view::Field;
+    let site = &app.site;
+    let lang = site.lang;
+    let seg = laid.lanes.get(lane).cloned().flatten();
+    let mut head = vec![Span::styled("── ", dim())];
+    match &seg {
+        Some(crate::nav::Seg::Milestone(Some(id))) => match site.index.find(id) {
+            Some(at) => {
+                if app.fields.shows(Field::Id) {
+                    head.push(Span::styled(format!("{id} "), dim()));
+                }
+                head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+                head.push(Span::raw(" "));
+                let title = site.issues[at].title.clone();
+                if site.spins(at) {
+                    head.extend(shimmer(title, app.spin));
+                } else {
+                    head.push(Span::styled(title, bold()));
+                }
+            }
+            None => head.push(Span::raw(site.title_of(id))),
+        },
+        Some(crate::nav::Seg::Milestone(None)) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
+        Some(crate::nav::Seg::Lost) => head.push(Span::styled(say(lang, "nav.lost"), dim())),
+        _ => {}
+    }
+    let tally = match &seg {
+        Some(seg) if app.fields.shows(Field::Tally) => match site.index.tally(&vec![seg.clone()]) {
+            (_, 0) => String::new(),
+            (done, work) => format!(" {done}/{work} ──"),
+        },
+        _ => String::new(),
+    };
+    head.push(Span::raw(" "));
+    let head = fit(Line::from(head), w.saturating_sub(crate::text::width(&tally) + 1));
+    let rule = w.saturating_sub(spans_width(&head.spans) + crate::text::width(&tally));
+    let mut spans = head.spans;
+    spans.push(Span::styled("─".repeat(rule), dim()));
+    spans.push(Span::styled(tally, dim()));
+    Line::from(spans)
+}
+
+/// 카드 한 장 — 머리(`id · 칸 글리프 · pN`), 몸(`[NEW] ⎇ 가지 제목`), 그리고 `SPC c` 로 켠 열이 있으면 발줄.
+/// **바탕색은 없다**(사용자 결정) — "bug" 는 종류가 아니라 태그이고, 빨강은 이미 p0·p1 의 것이다. 고른 카드는
+/// `>` 와 반전이다: 색 없는 터미널에서도 선다. id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
+///
+/// 줄마다 커서 자리(`> `)만큼 들이고 오른쪽에 한 칸을 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
+fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a>> {
+    use super::view::Field;
+    let Row::Item(seat, e, _) = r else { return Vec::new() };
+    let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
+    let Some(at) = e.at() else { return Vec::new() };
+    let Some(i) = site.issues.get(at) else { return Vec::new() };
+    let room = w.saturating_sub(left_gutter() + 1);
+    let fields = app.fields;
+    let grep = app.grep_query();
+    let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
+    let in_title = grep.filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
+
+    let mut head: Vec<Span<'static>> = Vec::new();
+    if fields.shows(Field::Id) {
+        head.extend(mark(vec![Span::styled(i.id.clone(), dim())], in_id));
+        head.push(Span::raw(" "));
+    }
+    head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+    if fields.shows(Field::Priority) {
+        head.push(Span::raw(" "));
+        head.push(Span::styled(format!("p{}", i.priority()), priority(i.priority())));
+    }
+    let tally = tally_of(Some(site), r, fields);
+    if !tally.is_empty() {
+        head.push(Span::styled(format!("  {tally}"), dim()));
+    }
+    let mut head = fit(Line::from(head), room);
+    if chosen {
+        for s in &mut head.spans {
+            s.style = s.style.add_modifier(Modifier::REVERSED);
+        }
+    }
+
+    let unveiled = app.unveiled(e);
+    let tail = if unveiled { unveiled_mark(site.lang) } else { "" };
+    let mut body: Vec<Span<'static>> = Vec::new();
+    if site.unread.contains(&i.id) {
+        body.push(Span::styled(NEW_MARK, Style::new().fg(Color::Red).bg(Color::LightYellow)));
+        body.push(Span::raw(" "));
+    }
+    if let Some(m) = branch_mark(site, at, fields) {
+        body.push(Span::styled(m, branch()));
+        body.push(Span::raw(" "));
+    }
+    let title = clip(&i.title, room.saturating_sub(spans_width(&body) + crate::text::width(tail)));
+    if site.spins(at) {
+        body.extend(mark(shimmer(title, app.spin), in_title));
+    } else {
+        body.extend(mark(vec![Span::raw(title)], in_title));
+    }
+    if unveiled {
+        body.push(Span::raw(tail));
+    }
+    let mut lines = vec![head, fit(Line::from(body), room)];
+    if h > 2 {
+        lines.push(fit(Line::from(Span::styled(card_foot(site, at, fields).join("  "), dim())), room));
+    }
+    if unveiled {
+        for s in lines.iter_mut().flat_map(|l| l.spans.iter_mut()) {
+            if !s.style.sub_modifier.contains(Modifier::DIM) {
+                s.style = s.style.add_modifier(Modifier::DIM);
+            }
+        }
+    }
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(n, l)| {
+            let lead = if chosen && n == 0 { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
+            Line::from(std::iter::once(lead).chain(l.spans).collect::<Vec<_>>())
+        })
+        .collect()
+}
+
+/// 카드의 발줄 — 켠 열의 값, 목록의 오른쪽 열과 같은 차례·같은 꼴이다([`FOOT`]). 빈 태그는 자리를 안 지킨다:
+/// 줄마다 폭을 맞출 까닭이 카드에는 없다.
+fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<String> {
+    use super::view::Field;
+    let i = &site.issues[at];
+    FOOT.iter()
+        .filter(|f| fields.shows(**f))
+        .filter_map(|f| match f {
+            Field::Tags => Some(crate::view::tags_of(i)).filter(|t| !t.is_empty()),
+            Field::Assignee => Some(
+                i.assignee
+                    .as_deref()
+                    .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
+            ),
+            Field::Created => Some(format!("+{}", i.created_at.get(5..10).unwrap_or("—"))),
+            Field::Updated => Some(format!("✎{}", i.updated_at.get(5..10).unwrap_or("—"))),
+            _ => None,
+        })
+        .collect()
+}
+
 /// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은
 /// 자리, 같은 글이다 — 무엇을 적을지는 조각([`Scroll::mark`])이 정하고 여기는
 /// 놓기만 한다. 아래 테두리는 제목도 무엇도 안 쓰는 자리라 본문 한 줄을 안 뺏는다.
@@ -2466,7 +2770,7 @@ const RIGHT: [(super::view::Field, &str, usize); 4] = {
 const FOOT: [super::view::Field; 4] = [RIGHT[0].0, RIGHT[1].0, RIGHT[2].0, RIGHT[3].0];
 
 /// 카드 한 장의 줄 수 — 머리·몸, 그리고 발줄. 보드의 배치([`super::App::laid`])와 그림이 이 하나로 잰다.
-pub(super) fn card_lines(fields: super::view::Fields) -> usize {
+pub(super) fn card_height(fields: super::view::Fields) -> usize {
     2 + usize::from(FOOT.iter().any(|f| fields.shows(*f)))
 }
 
@@ -4053,6 +4357,105 @@ pub(super) mod tests {
     /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
+    }
+
+    /// 보드 그림의 바닥(moai-9nfw) — 마일스톤 0001 밑 에픽 0002 에 todo `n` 개(p1)와 in_progress 하나, 마일스톤
+    /// 없는 todo 0090 하나. 보드로 세우고 상세를 숨긴다 — 칸이 폭을 다 쓴다. 말은 한국어다.
+    fn board_app(n: usize) -> App {
+        let at = "2026-09-01T00:00:00Z";
+        let mut out = vec![
+            Issue::new("argos-0001".into(), "v0.4".into(), Kind::Milestone, Status::new("todo"), at),
+            Issue::new("argos-0002".into(), "보드 에픽".into(), Kind::Epic, Status::new("todo"), at),
+        ];
+        out[1].milestone = Some("argos-0001".into());
+        for k in 0..n {
+            let mut i =
+                Issue::new(format!("argos-01{k:02}"), format!("할 일 {k}"), Kind::Issue, Status::new("todo"), at);
+            i.epic = Some("argos-0002".into());
+            i.priority = Some(1);
+            out.push(i);
+        }
+        let mut held = Issue::new("argos-0080".into(), "집은 일".into(), Kind::Issue, Status::new("in_progress"), at);
+        held.epic = Some("argos-0002".into());
+        out.push(held);
+        out.push(Issue::new("argos-0090".into(), "떠도는 일".into(), Kind::Issue, Status::new("todo"), at));
+        let mut a = App::new(out, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.site.lang = Lang::Ko;
+        a.layout = super::super::view::Layout::Board;
+        a.detail_open = false;
+        a
+    }
+
+    /// **보드는 칸 머리줄·레인 머리줄·카드를 세우고, 고른 카드는 `>` 와 반전이다**(moai-9nfw, 사용자 결정) — 반전은
+    /// 색 없는 터미널에서도 선다. 에픽과 마일스톤은 카드가 아니다.
+    #[test]
+    fn the_board_draws_columns_lanes_and_cards_and_marks_the_chosen_one() {
+        let mut a = board_app(2);
+        let lines = render(&mut a, 120, 16);
+        let text = lines.join("\n");
+        for want in
+            ["◇ idea 0", "‖ 미룸 0", "· todo 3", "in_progress 1", "? review 0", "── argos-0001", "(마일스톤 없음)"]
+        {
+            assert!(text.contains(want), "`{want}` 가 없다\n{text}");
+        }
+        assert!(!text.contains("보드 에픽"), "에픽이 카드로 섰다\n{text}");
+        assert_eq!(text.matches("> argos-").count(), 1, "고른 카드가 하나가 아니다\n{text}");
+        // 고른 카드의 머리는 반전이다 — id 의 첫 글자 자리를 본다.
+        let y = lines.iter().position(|l| l.contains("> argos-")).unwrap() as u16;
+        let x = lines[y as usize].find("> argos-").unwrap() as u16 + 2;
+        let mut term = Terminal::new(TestBackend::new(120, 16)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED), "고른 카드의 머리가 반전이 아니다");
+        assert!(a.spun, "집은 카드가 보이는데 루프를 안 깨운다");
+        // 카드 자리를 마우스가 맞힐 바탕으로 남긴다 — 보이는 카드 넷이다.
+        assert_eq!(a.drawn.cards.len(), 4, "{:?}", a.drawn.cards);
+        assert_eq!(a.drawn.rows, Rect::default(), "보드인데 목록의 줄 자리를 남겼다");
+    }
+
+    /// **좁으면 칸을 덜 세우되 커서가 선 칸은 늘 서고, 못 세운 칸은 제목 줄이 이름과 수로 댄다**(moai-9nfw).
+    #[test]
+    fn a_narrow_board_keeps_the_cursor_column_and_names_the_rest() {
+        let mut a = board_app(1);
+        a.hit("l");
+        let text = render(&mut a, 44, 14).join("\n");
+        assert!(text.contains("in_progress 1"), "커서가 선 칸이 안 섰다\n{text}");
+        assert!(text.contains("> argos-0080"), "{text}");
+        assert!(text.contains("칸 3개 더"), "못 세운 칸을 제목이 안 댄다\n{text}");
+    }
+
+    /// **굴리기는 보드 통째로 하나고, 고른 카드는 통째로 보인다**(moai-9nfw) — 아래로 내려가도 카드의 몸이 칸 밖에
+    /// 남지 않는다. 굴린 만큼은 목록처럼 아래 테두리가 댄다. 칸 머리줄은 굴려도 남는다.
+    #[test]
+    fn the_board_scrolls_as_one_and_shows_the_whole_chosen_card() {
+        let mut a = board_app(12);
+        a.hit("G");
+        let lines = render(&mut a, 100, 14);
+        let text = lines.join("\n");
+        // todo 칸의 맨 아래는 둘째 레인의 0090 이다 — 칸은 레인을 건너 한 줄이다.
+        let y = lines.iter().position(|l| l.contains("> argos-0090")).unwrap_or_else(|| panic!("{text}"));
+        assert!(lines[y + 1].contains("떠도는 일"), "고른 카드의 몸이 칸 밖에 남았다\n{text}");
+        assert!(lines[y - 1].contains("(마일스톤 없음)"), "레인의 첫 카드인데 레인 머리줄이 안 보인다\n{text}");
+        assert!(text.contains("· todo 13"), "칸 머리줄이 굴려 사라졌다\n{text}");
+        assert!(text.contains('↑'), "굴린 만큼을 안 댄다\n{text}");
+        // 맨 위로 돌아가면 첫 레인의 머리줄부터 선다.
+        a.hit("g g");
+        let lines = render(&mut a, 100, 14);
+        let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
+    }
+
+    /// **`SPC c` 로 켠 열이 있을 때만 카드에 발줄이 선다**(사용자 결정) — 머리와 몸이 카드가 무엇인지 말한다.
+    #[test]
+    fn a_card_grows_a_foot_only_when_a_column_is_on() {
+        let mut a = board_app(1);
+        let two = render(&mut a, 120, 14);
+        let at = two.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(!two[at + 2].contains('—'), "켠 열이 없는데 발줄이 섰다\n{}", two.join("\n"));
+        a.hit("SPC c a Esc");
+        let three = render(&mut a, 120, 14);
+        let at = three.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(three[at + 2].contains('—'), "담당을 켰는데 발줄이 안 섰다\n{}", three.join("\n"));
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에

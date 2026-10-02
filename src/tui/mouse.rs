@@ -23,7 +23,7 @@ use ratatui::layout::{Position, Rect};
 pub const WHEEL: isize = 3;
 
 /// 지난 프레임이 그린 자리. **쓰는 곳은 `draw::screen` 하나다** — 여기는 읽기만 한다.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Drawn {
     /// 목록과 상세가 나눠 쓰는 몸통. 통계 창·폼은 이 자리를 통째로 덮는다.
     pub body: Rect,
@@ -34,6 +34,11 @@ pub struct Drawn {
     pub rows: Rect,
     /// 상세 칸 — 테두리까지. 숨겼거나 접혀 안 섰으면 없다(`draw::split_body`).
     pub detail: Option<Rect>,
+    /// 보드의 카드가 보이는 자리와 그 줄(`App::rows` 의 첨자)(moai-9nfw). 목록으로 세웠으면 비었다 — 그때는
+    /// [`Drawn::rows`] 가 줄 자리다.
+    pub cards: Vec<(Rect, usize)>,
+    /// 보드의 칸 자리(머리줄부터 바닥까지)와 그 칸의 첨자 — 휠이 굴릴 칸을 여기서 고른다.
+    pub columns: Vec<(Rect, usize)>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -132,7 +137,7 @@ impl App {
 
     /// 그 자리에 선 칸. 누르기와 휠이 같은 자로 가른다 — 두 칸은 겹치지 않는다(`draw::split_body`).
     fn pane_at(&self, at: Position) -> Option<Pane> {
-        let d = self.drawn;
+        let d = &self.drawn;
         if d.detail.is_some_and(|r| r.contains(at)) {
             Some(Pane::Detail)
         } else if d.list.contains(at) {
@@ -165,7 +170,7 @@ impl App {
     /// 한 칸 어긋날 때마다 그 칸을 누른 것이 된다. 상세가 위아래에 서면 그 줄은 칸의 제목 줄이기도 하다.
     /// 두 칸은 사이 없이 맞닿으므로(`draw::split_body`) 뒤 칸의 첫 테두리는 앞 칸이 끝난 바로 다음 칸이다.
     fn grab_at(&self, at: Position) -> Option<Grab> {
-        let d = self.drawn;
+        let d = &self.drawn;
         let detail = d.detail?;
         let front = if self.detail_at.first() { detail } else { d.list };
         let (p, end, was) = if self.detail_at.vertical() {
