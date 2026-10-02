@@ -1,7 +1,7 @@
 //! 지운다. 에이전트가 잘못 만든 것을 치우는 길이다.
 //!
-//! 자식이나 에픽 멤버가 남아 끊긴 참조가 되는 것은 **막지 않고 알린다.**
-//! `moai status` 가 끊긴 참조를 드러내므로 여기서 막을 이유가 없다.
+//! 자식·에픽 멤버·막힌 줄, 그리고 지운 마일스톤에 서 있던 줄이 남아 끊긴 참조가 되는 것은
+//! **막지 않고 알린다.** `moai status` 가 끊긴 참조를 드러내므로 여기서 막을 이유가 없다.
 
 use super::{Ctx, Fail, R};
 use crate::cli::RmArgs;
@@ -47,6 +47,14 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
         |issues, _, _| {
             let (mut gone, mut missing, mut dangling) = (Vec::new(), Vec::new(), Vec::new());
             let mut entries = Vec::new();
+            // **마일스톤 참조는 `status` 의 자로 앞뒤를 견준다**(moai-4bio). 지운 마일스톤을 가리키던 줄,
+            // 그 줄 밑에서 마일스톤을 물려받던 자식, 그 마일스톤에 선 에픽 — 셋 다 `status` 가
+            // `dangling_milestone` 으로 세는데 `rm` 은 하나도 안 댔다. 규칙을 여기 따로 적지 않고 그 경고를
+            // 고르는 자(`report::dangling_milestones`)를 지우기 전과 뒤에 불러, 새로 선 줄만 댄다. 같은 자라
+            // 쌍둥이 마일스톤 줄이 남은 id 밑은 끊기지 않은 것으로 읽고, 지우기 전부터 끊겨 있던 줄은
+            // 이 `rm` 이 끊은 것이 아니라 안 댄다.
+            let unstoned_before: std::collections::BTreeSet<String> =
+                crate::report::dangling_milestones(issues).into_iter().map(str::to_string).collect();
             for id in &args.ids {
                 // 같은 id 를 두 번 적은 것은 실패가 아니다. 인자 목록은 glob·
                 // xargs·에이전트가 짓는 것이라 중복이 흔하고, 지워 놓고
@@ -75,11 +83,13 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
             let left = crate::report::kinds_of(issues, &gone.iter().map(|g| g.id.as_str()).collect::<Vec<_>>());
             let no_epic: Vec<&str> =
                 gone.iter().map(|g| g.id.as_str()).filter(|id| left.get(id) != Some(&model::Kind::Epic)).collect();
+            let unstoned = crate::report::dangling_milestones(issues);
             for i in issues.iter() {
                 let orphan = crate::id::parent_of(&i.id).is_some_and(|p| cut.contains(&p));
                 let lost = i.epic.as_deref().is_some_and(|e| no_epic.contains(&e));
                 let unblocked = i.blocked_by.iter().any(|b| cut.contains(&b.as_str()));
-                if orphan || lost || unblocked {
+                let stoneless = unstoned.contains(i.id.as_str()) && !unstoned_before.contains(&i.id);
+                if orphan || lost || unblocked || stoneless {
                     dangling.push(i.id.clone());
                 }
             }

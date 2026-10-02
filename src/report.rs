@@ -3764,6 +3764,33 @@ pub fn broken_in<'a>(all: &'a [Issue], kind_of: &BTreeMap<&'a str, Kind>) -> BTr
     out
 }
 
+/// `moai status` 의 `dangling_epic`·`dangling_milestone` 이 고르는 줄 — 자리를 못 정하는 줄(`placed`,
+/// [`Soil::lost`])과 못 쓸 참조를 든 줄(`held`, [`broken_in`])을 `why` 하나로 합친다. **고르는 몸은
+/// 여기 하나다** — [`status_in`] 과 [`dangling_milestones`] 가 같이 부른다.
+fn dangling_by<'a>(
+    issues: &'a [Issue],
+    placed: &BTreeMap<&str, Misplace>,
+    held: &BTreeMap<&str, Misplace>,
+    why: Misplace,
+) -> impl Iterator<Item = &'a Issue> {
+    issues.iter().filter(move |i| {
+        let id = i.id.as_str();
+        placed.get(id) == Some(&why) || held.get(id) == Some(&why)
+    })
+}
+
+/// `moai status` 가 `dangling_milestone` 으로 세는 줄의 id — 그 경고와 **같은 자**([`dangling_by`])다.
+///
+/// `moai rm` 이 지우기 전과 뒤에 한 번씩 불러 새로 선 id 를 "끊긴 참조" 로 댄다(moai-4bio). 지운
+/// 마일스톤을 가리키던 줄만이 아니라 그 줄 밑에서 마일스톤을 물려받던 자식과 그 마일스톤에 선 에픽도
+/// `status` 가 세는 그대로 잡히고, 쌍둥이 마일스톤 줄이 남은 id 밑은 안 잡힌다 — `cmd/` 에 규칙을
+/// 따로 적으면 `rm` 과 `status` 가 또 갈린다(리뷰 moai-3hxc.qr2 6·7번).
+pub fn dangling_milestones(issues: &[Issue]) -> BTreeSet<&str> {
+    let soil = Soil::of(issues);
+    let held = broken_in(issues, &soil.kinds);
+    dangling_by(issues, &soil.lost, &held, Misplace::Milestone).map(|i| i.id.as_str()).collect()
+}
+
 /// 에픽별 집계와, 마지막에 "에픽 없음" 묶음 하나.
 ///
 /// **멤버가 없는 에픽도 줄을 갖는다.** 빠뜨리면 "계획만 세우고 안 채운 것"
@@ -5380,13 +5407,7 @@ pub fn status_in<'a>(
     // 여기서 합친다. 빼면 `moai rm` 이 "끊긴 참조가 남았다" 고 말한 그 줄에
     // 대해 `status` 가 그다음부터 영영 침묵한다.
     for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
-        let hit: Vec<&Issue> = issues
-            .iter()
-            .filter(|i| {
-                let id = i.id.as_str();
-                placed.get(id) == Some(&why) || held.get(id) == Some(&why)
-            })
-            .collect();
+        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).collect();
         if !hit.is_empty() {
             warnings.push(Warning::new(kind, ids_of(&hit)));
         }

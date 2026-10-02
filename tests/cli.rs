@@ -3654,6 +3654,67 @@ fn rm_calls_a_member_dangling_when_the_twin_left_is_not_an_epic() {
     assert!(status.contains("dangling_epic"), "{status}");
 }
 
+/// **지운 마일스톤에 서 있던 줄도 끊겼다고 댄다**(moai-4bio). `rm` 은 부모·에픽·막는 줄만 세어,
+/// `moai rm <마일스톤>` 이 `dangling: []` 로 끝난 뒤 `moai status` 가 그 줄들을 `dangling_milestone` 으로
+/// 셌다. 재는 자는 그 경고의 것이다 — 마일스톤을 적은 줄, 그 밑에서 물려받던 자식, 그 마일스톤에 선
+/// 에픽까지 `status` 가 세는 그대로 대고, 에픽 멤버(에픽이 멀쩡하다)와 전부터 끊겨 있던 줄은 안 댄다.
+/// 쌍둥이가 남은 마일스톤 밑은 끊기지 않았다.
+#[test]
+fn rm_names_the_rows_whose_milestone_it_removed() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmstone");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-0001", "마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m001\""),
+            row("argos-0001.abc", "물려받는 자식", "issue", ""),
+            row("argos-0002", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+            row("argos-0003", "전부터 끊긴 줄", "issue", ",\"milestone\":\"argos-zzzz\""),
+            row("argos-0004", "남는 마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m002\""),
+            row("argos-0009", "쌍둥이 마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m009\""),
+            row("argos-e001", "마일스톤에 선 에픽", "epic", ",\"milestone\":\"argos-m001\""),
+            row("argos-m001", "지울 마일스톤", "milestone", ""),
+            row("argos-m002", "남는 마일스톤", "milestone", ""),
+            row("argos-m009", "앞 마일스톤", "milestone", ""),
+            row("argos-m009", "뒤 마일스톤", "milestone", ""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["rm", "argos-m001", "argos-m009", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    let dangling = json.split(r#""dangling":"#).nth(1).unwrap_or_default().to_string();
+    for id in ["argos-0001", "argos-0001.abc", "argos-e001"] {
+        assert!(dangling.contains(&format!("\"{id}\"")), "{id} 를 끊겼다고 안 했다\n{json}");
+    }
+    for id in ["argos-0002", "argos-0003", "argos-0004", "argos-0009"] {
+        assert!(!dangling.contains(&format!("\"{id}\"")), "{id} 는 이 rm 이 끊은 것이 아니다\n{json}");
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("끊긴 참조가 3건"), "{err}");
+
+    // 댄 셋은 `status` 가 세는 줄이다 — 한 자로 쟀다는 근거.
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning =
+        |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    let stoneless = warning("dangling_milestone").unwrap_or_else(|| panic!("dangling_milestone 이 없다\n{st}"));
+    for id in ["argos-0001", "argos-0001.abc", "argos-e001"] {
+        assert!(stoneless.contains(&format!("\"{id}\"")), "status 는 {id} 를 안 센다\n{st}");
+    }
+
+    // 쌍둥이의 마지막 줄을 걷으면 그때 끊긴다.
+    let out = moai(s.path(), &["rm", "argos-m009", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":["argos-0009"]"#), "남은 쌍둥이를 걷었는데 안 댔다\n{json}");
+}
+
 /// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
 /// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
 #[test]
