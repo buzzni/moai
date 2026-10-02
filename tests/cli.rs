@@ -7741,10 +7741,12 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         vec!["-e", "none"],
         vec!["--parent", "argos-0001"],
         vec!["-p", "1"],
+        vec!["-a", "none"],
         vec!["--type", "issue"],
         vec!["-g", "제"],
         vec!["--stale", "3"],
         vec!["--all"],
+        vec!["--deferred"],
         vec!["--filter", "status=todo"],
         vec!["--milestone", "없는것"],
         vec!["--tree"],
@@ -7764,8 +7766,13 @@ fn every_list_only_filter_is_refused_on_a_single_issue() {
         // **무엇을 버렸는지까지 말한다.** 거절만 보면 엉뚱한 까닭(잘못된 값,
         // 없는 id)으로 실패해도 통과하고, 그러면 이 시험은 자기가 지키려던
         // 것을 안 지킨다.
+        //
+        // **거절문의 `{flag}` 자리를 짚는다**(moai-kyp7.9ja). 이름이 글 어딘가에 있는지만
+        // 보면 `-n`·`-s` 같은 한 글자는 무작위 id 가 `-` 뒤에 그 글자로 시작하는 판(`argos-n7tw`)에서
+        // 이름을 안 짚어도 통과한다.
         let said = String::from_utf8_lossy(&out.stderr).to_string();
-        assert!(said.contains(flag[0]), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
+        let named = format!("자리에는 `{}` 를 쓸 수 없다", flag[0]);
+        assert!(said.contains(&named), "{flag:?} 를 거절하며 그 이름을 안 짚었다 — {said}");
     }
     // **지운 줄을 늘어놓는 말도 목록의 것이다**(moai-7dmq). 다만 그 거절은 제 길(`show::removed`)에서 나고, 그 말에는
     // `--removed` 가 늘 서 있다 — 위 고리에 두면 `said.contains("--removed")` 가 늘 참이라 아무것도 안 잰다(리뷰).
