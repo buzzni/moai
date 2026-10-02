@@ -729,8 +729,12 @@ mod tests {
         let detail = Ctx { list_focus: false, ..layer() };
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a", "s"], "상세 포커스에서 해제가 섰다");
         // 층에서도 상세 칸은 있다 — 숨기기(`d`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
-        // 보기(`w`)는 빠진다.
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["d", "r"], "층에서 워크트리나 줄 보기가 섰다");
+        // 보기(`w`)는 빠진다. 보드(`b`)도 선다 — 한눈 보기에도 프로젝트 머리줄의 보드가 있다(moai-oagj.vcj).
+        assert_eq!(
+            keys_of(&entries(&[k(' '), k('v')], &layer(), &[])),
+            ["b", "d", "r"],
+            "층에서 워크트리나 줄 보기가 섰다"
+        );
 
         let mut ch = Chord::default();
         for x in [' ', 'v', 'w'] {

@@ -1975,6 +1975,9 @@ struct Boarded {
 /// 한 장(캔버스)이다: 레인마다 머리줄 하나(뿌리에 마일스톤 레인이 설 때만), 그 밑에 칸마다 쌓인 카드.
 /// **굴리기는 보드 통째로 하나다**(사용자 결정) — 칸마다 따로 굴리면 같은 레인의 카드가 칸마다 다른 높이에 선다.
 ///
+/// 한눈 보기에서는 프로젝트마다 **칸을 가로지르는 머리줄**이 먼저 선다(moai-oagj.vcj) — 목록의 프로젝트 줄과 같은
+/// 글이고([`place_line`]) 커서가 선다. 펼친 프로젝트면 그 밑에 그 프로젝트의 마일스톤 레인이 선다.
+///
 /// 칸은 테두리 안쪽 폭을 고르게 나눈다. 칸마다 [`super::board::CARD_MIN`] 을 못 받으면 덜 세우고, 못 세운 칸은
 /// 제목 줄에 이름과 수로 댄다 — **커서가 선 칸은 늘 선다**. **보이는 카드만 짓는다**(moai-wt4n 과 같은 까닭).
 fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
@@ -1986,7 +1989,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     // 창은 **지난 프레임이 세운 자리에 머문다**([`super::board::window`]) — `app.drawn` 은 아직 지난 프레임의 것이다
     // (`screen` 이 이 그림 뒤에 새로 적는다). 마우스가 그 자리로 칸을 맞히므로, 머물러야 휠 밑의 칸이 안 바뀐다.
     let was = app.drawn.columns.first().map_or(0, |&(_, c)| c);
-    let win = super::board::window(laid.columns.len(), inner.width as usize, here.map(|p| p.column), was);
+    let win = super::board::window(laid.columns.len(), inner.width as usize, here.and_then(|p| p.column), was);
     let widths = super::board::widths(inner.width as usize, win.count);
     let xs: Vec<u16> = widths
         .iter()
@@ -2012,28 +2015,38 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     app.list.fit(canvas.height as usize, laid.plan.height);
     if let Some(p) = here {
         // 레인의 첫 카드면 그 레인의 머리줄까지 보인다 — 머리줄 없이 선 카드는 어느 마일스톤인지 모른다.
-        let lead = usize::from(laid.plan.headed && p.nth == 0);
+        let lead = usize::from(laid.plan.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
         app.list.reveal_span(p.top - lead, p.height + lead);
     }
     let offset = app.list.offset();
     let seen = offset..offset + canvas.height as usize;
     let y_of = |line: usize| canvas.y + (line - offset) as u16;
-    if laid.plan.headed {
-        for (n, lane) in laid.plan.lanes.iter().enumerate() {
-            // 이름 없는 레인(마일스톤을 안 쓰는 저장소의 나머지 줄)은 머리줄 자리만 둔다 — 이름 없는 `── ───` 선은
-            // 무엇의 머리인지 말하지 않는다(리뷰 moai-9nfw.fnb 8번).
-            if seen.contains(&lane.top) && laid.lanes.get(n).is_some_and(Option::is_some) {
-                let line = lane_line(app, &laid, n, canvas.width as usize);
-                f.buffer_mut().set_line(canvas.x, y_of(lane.top), &line, canvas.width);
-            }
+    for (n, lane) in laid.plan.lanes.iter().enumerate() {
+        // 이름 없는 레인(마일스톤을 안 쓰는 저장소의 나머지 줄)은 머리줄 자리만 둔다 — 이름 없는 `── ───` 선은
+        // 무엇의 머리인지 말하지 않는다(리뷰 moai-9nfw.fnb 8번).
+        if lane.head && seen.contains(&lane.top) && laid.lanes.get(n).is_some_and(|l| l.seg().is_some()) {
+            let line = lane_line(app, &laid, n, canvas.width as usize);
+            f.buffer_mut().set_line(canvas.x, y_of(lane.top), &line, canvas.width);
         }
     }
     for (n, p) in laid.plan.cards.iter().enumerate() {
-        if !win.holds(p.column) || p.top >= seen.end || p.top + p.height <= seen.start {
+        if p.top >= seen.end || p.top + p.height <= seen.start {
             continue;
         }
-        let k = p.column - win.first;
         let Some(r) = rows.get(n) else { continue };
+        // 칸을 가로지르는 머리줄 — 한눈 보기의 프로젝트 줄이다. 보드 폭을 다 쓴다.
+        let Some(column) = p.column else {
+            if let Row::Project(place) = r {
+                let line = project_banner(app, *place, n == app.cursor, canvas.width as usize);
+                f.buffer_mut().set_line(canvas.x, y_of(p.top), &line, canvas.width);
+                out.cards.push((Rect { x: canvas.x, y: y_of(p.top), width: canvas.width, height: 1 }, n));
+            }
+            continue;
+        };
+        if !win.holds(column) {
+            continue;
+        }
+        let k = column - win.first;
         let lines = card(app, r, n == app.cursor, widths[k], p.height);
         let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
         for (dy, line) in lines.iter().enumerate() {
@@ -2045,6 +2058,19 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     }
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, lang);
     out
+}
+
+/// 한눈 보기 보드의 프로젝트 머리줄(moai-oagj.vcj) — 목록의 프로젝트 줄과 같은 글([`place_line`])이다: 펼치고 접는 것이
+/// 목록과 같은 키라 줄도 같은 말을 한다. 고른 줄은 카드처럼 `>` 와 반전이다 — 색 없는 터미널에서도 선다.
+fn project_banner<'a>(app: &App, place: usize, chosen: bool, w: usize) -> Line<'a> {
+    let mut line = place_line(app, place, w);
+    if chosen {
+        for s in &mut line.spans {
+            s.style = s.style.add_modifier(Modifier::REVERSED);
+        }
+    }
+    let lead = if chosen { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
+    Line::from(std::iter::once(lead).chain(line.spans).collect::<Vec<_>>())
 }
 
 /// 보드의 제목 줄 — **못 세운 칸을 이름과 수로 댄다**(`+2 · ? review 0 · ✓ done 4`). 칸이 다 섰으면 제목이 없다:
@@ -2103,7 +2129,7 @@ fn column_head<'a>(app: &App, rows: &[Row], laid: &super::Laid, c: usize) -> Lin
                 .cards
                 .iter()
                 .zip(rows)
-                .filter(|(p, _)| p.column == c)
+                .filter(|(p, _)| p.column == Some(c))
                 .filter_map(|(_, r)| match r {
                     Row::Item(seat, e, _) => e.at().map(|at| (*seat, at)),
                     _ => None,
@@ -2117,15 +2143,16 @@ fn column_head<'a>(app: &App, rows: &[Row], laid: &super::Laid, c: usize) -> Lin
 }
 
 /// 레인의 머리줄 — `── moai-jvfe ⠼▸ v0.3.0 ─────── 0/21 ──`. 마일스톤의 목록 줄과 같은 꼴이다: id(켰으면)·칸 글리프
-/// (도는 것은 [`Site::spins`] 가 정한다)·제목, 그리고 끝에 셈. 바구니는 이름만 선다.
+/// (도는 것은 [`Site::spins`] 가 정한다)·제목, 그리고 끝에 셈. 바구니는 이름만 선다. **그 레인의 프로젝트에서 읽는다**
+/// (moai-oagj.vcj) — 한눈 보기의 마일스톤은 남의 프로젝트의 것이다.
 fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'a> {
     use super::view::Field;
-    let site = &app.site;
+    let Some((seat, seg)) = laid.lanes.get(lane).and_then(super::LaneOf::seg) else { return Line::default() };
+    let Some(site) = app.site_of_seat(seat) else { return Line::default() };
     let lang = site.lang;
-    let seg = laid.lanes.get(lane).cloned().flatten();
     let mut head = vec![Span::styled("── ", dim())];
-    match &seg {
-        Some(crate::nav::Seg::Milestone(Some(id))) => match site.index.find(id) {
+    match seg {
+        crate::nav::Seg::Milestone(Some(id)) => match site.index.find(id) {
             Some(at) => {
                 if app.fields.shows(Field::Id) {
                     head.push(Span::styled(format!("{id} "), dim()));
@@ -2141,16 +2168,13 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
             }
             None => head.push(Span::raw(site.title_of(id))),
         },
-        Some(crate::nav::Seg::Milestone(None)) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
-        Some(crate::nav::Seg::Lost) => head.push(Span::styled(say(lang, "nav.lost"), dim())),
-        _ => {}
+        crate::nav::Seg::Milestone(None) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
+        crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
+        crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}
     }
-    let tally = match &seg {
-        Some(seg) if app.fields.shows(Field::Tally) => match site.index.tally(&vec![seg.clone()]) {
-            (_, 0) => String::new(),
-            (done, work) => format!(" {done}/{work} ──"),
-        },
-        _ => String::new(),
+    let tally = match app.fields.shows(Field::Tally).then(|| site.index.tally(&vec![seg.clone()])) {
+        None | Some((_, 0)) => String::new(),
+        Some((done, work)) => format!(" {done}/{work} ──"),
     };
     head.push(Span::raw(" "));
     let head = fit(Line::from(head), w.saturating_sub(crate::text::width(&tally) + 1));

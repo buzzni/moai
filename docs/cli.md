@@ -2090,8 +2090,13 @@ Options:
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
   the cursor on it, and the wheel moves the cursor one card at a time in the
-  column under the pointer, crossing over to that column first. The overview
-  (0) stays a list for now.
+  column under the pointer, crossing over to that column first. In the
+  overview (0) every project stands as a header across the columns, the same
+  line the list gives it, and an unfolded project has its milestone lanes
+  under it; the columns are those of every project shown, together. The
+  cursor stands on a header too — k from the top card of a lane goes up to
+  it — and there l unfolds, h folds, Tab unfolds everything and Enter goes
+  in, as in the list.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

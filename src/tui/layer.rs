@@ -3023,6 +3023,82 @@ mod tests {
         assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
     }
 
+    /// **한눈 보기의 보드는 프로젝트마다 머리줄 하나가 칸을 가로질러 서고, 펼친 프로젝트 밑에 그 프로젝트의 마일스톤
+    /// 레인이 선다**(moai-oagj.vcj, 사용자 결정). 머리줄에도 커서가 서서 목록처럼 `l` 이 펴고 `h` 가 접는다 — 레인 맨 위
+    /// 카드의 `k` 가 그 머리줄로 간다. 칸은 줄을 낸 프로젝트들의 칸을 합친 것이다(`App::screen_statuses`).
+    #[test]
+    fn the_overview_board_stands_a_header_per_project_and_its_milestone_lanes() {
+        use crate::tui::board::Column;
+        use crate::tui::{LaneOf, Seat};
+        let s = Scratch::fenced("layer-board");
+        let (one, two) = twins(&s);
+        // one 에 마일스톤 하나와 그 밑의 일 하나를 더한다 — 레인 머리줄이 서는 프로젝트다.
+        let at = "2026-09-01T00:00:00Z";
+        let milestone = Issue::new("argos-0010".into(), "v1 릴리스".into(), Kind::Milestone, Status::new("todo"), at);
+        let mut task = Issue::new("argos-0011".into(), "릴리스의 일".into(), Kind::Issue, Status::new("todo"), at);
+        task.milestone = Some("argos-0010".into());
+        let mut body = std::fs::read_to_string(one.join(".moai/issues.jsonl")).unwrap();
+        for i in [milestone, task] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(one.join(".moai/issues.jsonl"), body).unwrap();
+        // two 는 제 칸 하나(`waiting`)를 더 쓴다 — 보드의 칸은 둘을 합친 것이어야 한다.
+        std::fs::write(two.join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo, in_progress, waiting, done\"\n")
+            .unwrap();
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        assert!(a.board(), "한눈 보기에 보드가 안 섰다");
+        assert_eq!(a.rows(), [Row::Project(0), Row::Project(1)], "시험의 전제 — 둘 다 아직 안 폈다");
+
+        a.hit("l");
+        settle(&mut a);
+        a.key(key(KeyCode::End));
+        a.hit("l");
+        settle(&mut a);
+        let rows = a.rows();
+        let laid = a.laid(&rows);
+        assert_eq!(
+            laid.lanes.iter().filter(|l| matches!(l, LaneOf::Project(_))).count(),
+            2,
+            "프로젝트마다 머리줄이 안 섰다: {:?}",
+            laid.lanes
+        );
+        assert!(
+            laid.lanes.iter().any(|l| matches!(l, LaneOf::Seg(Seat::Place(0), Some(_)))),
+            "one 의 마일스톤 레인이 안 섰다: {:?}",
+            laid.lanes
+        );
+        assert!(laid.columns.contains(&Column::Status("waiting".into())), "two 의 칸이 보드에 없다: {:?}", laid.columns);
+        // 마일스톤을 안 쓰는 two 의 레인에는 머리줄 자리가 없다 — 옆 프로젝트 때문에 빈 줄이 서지 않는다.
+        let two_lane = laid.lanes.iter().position(|l| matches!(l, LaneOf::Seg(Seat::Place(1), _))).unwrap();
+        assert!(!laid.plan.lanes[two_lane].head, "마일스톤 없는 프로젝트의 레인에 머리줄이 섰다");
+
+        let text = super::super::draw::tests::render(&mut a, 120, 24).join("\n");
+        for want in ["v1 릴리스", "(마일스톤 없음)", "one/", "two/", "waiting 0"] {
+            assert!(text.contains(want), "`{want}` 가 없다\n{text}");
+        }
+
+        // 머리줄에서 `j` 는 그 프로젝트의 카드로, 레인 맨 위 카드의 `k` 는 머리줄로 간다.
+        a.key(key(KeyCode::Home));
+        assert_eq!(a.rows()[a.cursor], Row::Project(0));
+        a.hit("j");
+        let title = match &a.rows()[a.cursor] {
+            Row::Item(seat @ Seat::Place(0), e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone()),
+            _ => None,
+        };
+        assert_eq!(title.as_deref(), Some("릴리스의 일"), "머리줄의 j 가 one 의 맨 위 카드로 안 갔다");
+        a.hit("k");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "레인 맨 위 카드의 k 가 머리줄로 안 갔다");
+        // 머리줄의 `h` 는 목록처럼 접는다 — 보드의 옆 칸이 아니다.
+        a.hit("h");
+        assert!(
+            !a.rows().iter().any(|r| matches!(r, Row::Item(Seat::Place(0), ..))),
+            "머리줄의 h 가 one 을 안 접었다"
+        );
+        assert_eq!(a.rows()[a.cursor], Row::Project(0));
+    }
+
     /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
     /// 사용자 결정 2026-09-19). 보기·정렬·열은 보는 사람의 것이라 화면에 하나뿐이다 — 안 걸면 같은
     /// 화면의 두 프로젝트가 한 토글에 다르게 선다. 찾는 일은 반대로 한 프로젝트의 물음이다.

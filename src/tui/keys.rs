@@ -693,9 +693,12 @@ pub struct Ctx {
     pub ideas_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
-    /// 목록을 보드로 세웠는가(moai-9nfw) — 한눈 보기에서는 늘 거짓이다(`App::board`). `h`·`l` 이 옆 칸으로 가고
-    /// `Tab` 이 조용해진다.
+    /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
+    /// 빼고다.
     pub board: bool,
+    /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
+    /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
+    pub head: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,
     /// 고른 차례와 그 방향.
@@ -741,11 +744,10 @@ impl Browse {
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
-            Expand | Collapse if c.board => Ok(()),
-            ExpandAll if c.board => Err(Off::Quiet),
-            // **한눈 보기의 보드는 둘째 판이다**(moai-oagj) — 거기서는 목록이 서므로 눌러도 화면이 안 바뀐다.
-            // 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
-            Board if c.layer => Err(Off::Quiet),
+            // **한눈 보기의 프로젝트 머리줄은 목록과 같다**(moai-oagj.vcj) — 칸이 없는 줄이라 그 자리의 `h`·`l`·`Tab` 은
+            // 접고 편다. 아래 목록의 갈래를 그대로 탄다.
+            Expand | Collapse if c.board && !c.head => Ok(()),
+            ExpandAll if c.board && !c.head => Err(Off::Quiet),
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
@@ -1381,8 +1383,8 @@ mod tests {
     }
 
     /// **보드에서는 `h`·`l` 이 늘 서고 `Tab` 은 조용하다**(moai-9nfw) — 카드는 펼칠 묶음이 아니라, 펼침의 켜짐으로
-    /// 가르면 `l` 이 옆 칸으로 못 간다. 상세에 포커스가 있으면 목록처럼 조용하다. 한눈 보기에는 보드가 아직 없어
-    /// `SPC v b` 가 안 선다(moai-oagj).
+    /// 가르면 `l` 이 옆 칸으로 못 간다. 상세에 포커스가 있으면 목록처럼 조용하다. 한눈 보기의 프로젝트 머리줄은
+    /// 목록과 같다(moai-oagj.vcj).
     #[test]
     fn on_the_board_h_and_l_always_stand_and_tab_is_quiet() {
         let board = Ctx { list_focus: true, board: true, leaf: true, root: true, ..Ctx::default() };
@@ -1391,7 +1393,11 @@ mod tests {
         assert_eq!(Browse::ExpandAll.enabled(&board), Err(Off::Quiet));
         assert_eq!(Browse::Expand.enabled(&Ctx { list_focus: false, ..board }), Err(Off::Quiet));
         assert_eq!(Browse::Board.enabled(&board), Ok(()));
-        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, ..Ctx::default() }), Err(Off::Quiet));
+        // 한눈 보기에도 보드가 선다(moai-oagj.vcj) — 프로젝트 머리줄에서는 `Tab` 이 목록처럼 다 편다.
+        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, rows_here: true, ..Ctx::default() }), Ok(()));
+        let head = Ctx { layer: true, head: true, group: true, leaf: false, root: true, ..board };
+        assert_eq!(Browse::ExpandAll.enabled(&head), Ok(()), "머리줄의 Tab 이 조용하다");
+        assert_eq!(Browse::Expand.enabled(&head), Ok(()));
         assert_eq!(Browse::Board.state(&board), Some(say(board.lang, "tui.state.board")));
         assert_eq!(Browse::Board.state(&Ctx::default()), Some(say(board.lang, "tui.state.list")));
     }
