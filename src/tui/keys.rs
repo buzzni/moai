@@ -333,6 +333,9 @@ pub enum Browse {
     Cell(super::view::Field),
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
     Detail,
+    /// 목록과 칸반 보드를 오간다 — `SPC v b`(moai-9nfw). **새 창이 아니라 목록의 배치다**: 커서·거름망·보기·
+    /// 상세는 둘이 한 벌이다. 고른 배치는 설정에 남는다.
+    Board,
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
     /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v d`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
@@ -589,6 +592,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 상세 칸은 `d`(detail) — 자리 고르기 `SPC o d` 와 같은 글자다(moai-mxvn, 2026-09-22 사용자
         // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
         // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
+        // 보드는 `b`(board) — 무엇이 서는가가 아니라 선 줄을 **어떻게 놓는가**지만, 목록 칸을 켜고 끄는 상세(`d`)와
+        // 한 자리에 둔다: 둘 다 몸통의 꼴을 바꾸고, 사람이 고르는 것은 "무엇을 볼까" 의 한 갈래다(moai-9nfw).
+        row!(Board, Some("SPC v b"), LEADER, Key::plain('v'), Key::plain('b')),
         row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
@@ -609,6 +615,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 태그는 `t`(옛 `g`, 사용자 결정 moai-en4u) — 열에는 제목이 없어 `t` 가 비어 있었다. 정렬의
         // `SPC s t` 는 제목이라, 두 묶음에서 한 글자에 뜻이 갈리는 것은 이 `t` 하나다.
         row!(Cell(super::view::Field::Tags), Some("SPC c t"), LEADER, Key::plain('c'), Key::plain('t')),
+        // 에픽은 `e`(epic) — 보드에서 에픽은 카드가 아니라 카드의 발줄에 이름으로 선다(moai-9nfw, 사용자 결정).
+        row!(Cell(super::view::Field::Epic), Some("SPC c e"), LEADER, Key::plain('c'), Key::plain('e')),
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
         // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15). 바로 누르는 `r` 은 그 줄 하나라
@@ -677,6 +685,9 @@ pub struct Ctx {
     pub deferred_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
+    /// 목록을 보드로 세웠는가(moai-9nfw) — 한눈 보기에서는 늘 거짓이다(`App::board`). `h`·`l` 이 옆 칸으로 가고
+    /// `Tab` 이 조용해진다.
+    pub board: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,
     /// 고른 차례와 그 방향.
@@ -720,6 +731,13 @@ impl Browse {
         use Browse::*;
         match self {
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
+            // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
+            // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
+            Expand | Collapse if c.board => Ok(()),
+            ExpandAll if c.board => Err(Off::Quiet),
+            // **한눈 보기의 보드는 둘째 판이다**(moai-oagj) — 거기서는 목록이 서므로 눌러도 화면이 안 바뀐다.
+            // 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
+            Board if c.layer => Err(Off::Quiet),
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
@@ -807,6 +825,7 @@ impl Browse {
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
             Detail => say(c.lang, "tui.menu.detail"),
+            Board => say(c.lang, "tui.menu.board"),
             Read => say(c.lang, "tui.menu.read"),
             ReadAll => say(c.lang, "tui.menu.read_all"),
             ReadGroup => say(c.lang, "tui.menu.read_group"),
@@ -837,6 +856,9 @@ impl Browse {
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
             Browse::DetailAt => Some(c.detail_at.word(c.lang)),
+            // **지금 선 배치를 낱말로 댄다** — 상세의 자리와 같다.
+            Browse::Board if c.board => Some(say(c.lang, "tui.state.board")),
+            Browse::Board => Some(say(c.lang, "tui.state.list")),
             Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on")),
             Browse::Mouse => Some(say(c.lang, "tui.state.off")),
             _ => None,
@@ -854,7 +876,7 @@ impl Browse {
     /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
     pub fn stateful(self) -> bool {
         use Browse::*;
-        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt | Mouse)
+        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt | Board | Mouse)
     }
 
     /// **목록을 움직이는 동작인가** — 줄·쪽·맨 위아래·펼침·접기(moai-y8v2, 사용자 결정). 열린
@@ -906,6 +928,9 @@ impl Browse {
             Sort(_) => say(c.lang, "tui.act.sort"),
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
+            // 가는 곳을 댄다 — 보드에서는 목록으로, 목록에서는 보드로.
+            Board if c.board => say(c.lang, "tui.act.list"),
+            Board => say(c.lang, "tui.act.board"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
@@ -1340,6 +1365,22 @@ mod tests {
         // 접기는 펼쳐진 줄에서만 접고, 아니면 나가기를 그대로 탄다(뿌리에서는 조용하다).
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: true, root: true, ..list }), Ok(()));
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
+    }
+
+    /// **보드에서는 `h`·`l` 이 늘 서고 `Tab` 은 조용하다**(moai-9nfw) — 카드는 펼칠 묶음이 아니라, 펼침의 켜짐으로
+    /// 가르면 `l` 이 옆 칸으로 못 간다. 상세에 포커스가 있으면 목록처럼 조용하다. 한눈 보기에는 보드가 아직 없어
+    /// `SPC v b` 가 안 선다(moai-oagj).
+    #[test]
+    fn on_the_board_h_and_l_always_stand_and_tab_is_quiet() {
+        let board = Ctx { list_focus: true, board: true, leaf: true, root: true, ..Ctx::default() };
+        assert_eq!(Browse::Expand.enabled(&board), Ok(()));
+        assert_eq!(Browse::Collapse.enabled(&board), Ok(()), "뿌리의 보드에서 h 가 나가기로 읽혔다");
+        assert_eq!(Browse::ExpandAll.enabled(&board), Err(Off::Quiet));
+        assert_eq!(Browse::Expand.enabled(&Ctx { list_focus: false, ..board }), Err(Off::Quiet));
+        assert_eq!(Browse::Board.enabled(&board), Ok(()));
+        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, ..Ctx::default() }), Err(Off::Quiet));
+        assert_eq!(Browse::Board.state(&board), Some(say(board.lang, "tui.state.board")));
+        assert_eq!(Browse::Board.state(&Ctx::default()), Some(say(board.lang, "tui.state.list")));
     }
 
     /// **상태를 대는 동작은 모두 [`Browse::stateful`] 이다.** 둘이 갈리면 메뉴가 `[보임]` 을 단

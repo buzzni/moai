@@ -381,7 +381,7 @@ mod tests {
         // **`d` 는 done 이 아니다**(moai-h6z3·moai-mxvn) — done 은 제 글자를 안 갖고 번호가 세고,
         // 비운 그 글자는 상세 칸이 받았다. 한때 `d` 와 `3` 이 같은 설정을 켜고 꺼 이 목록에
         // `done [숨김]` 이 두 줄 섰다.
-        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "d", "w", "r"]);
+        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "b", "d", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
         assert_eq!(text[..5], ["미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
         let mut ch = Chord::default();
@@ -575,7 +575,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "d", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "b", "d", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -756,7 +756,10 @@ mod tests {
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])), ["l", "a", "d", "w"]);
+        assert_eq!(
+            keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
+            ["l", "a", "b", "d", "w"]
+        );
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

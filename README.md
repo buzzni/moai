@@ -133,6 +133,9 @@ issue under the cursor on the other. It answers keys and the mouse alike: click
 a pane or a row, roll the wheel over the pane you want to move, drag the line
 between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
 lets the mouse go when you would rather select or paste with it in the terminal.
+`SPC v b` lays the same list out as a kanban board — idea, deferred and your
+columns side by side, one lane per milestone — and keeps that choice for the
+next run.
 
 ## Working in parallel
 

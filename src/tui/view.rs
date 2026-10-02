@@ -136,6 +136,40 @@ impl DetailAt {
     }
 }
 
+/// 목록을 **어떻게 세우나** — 줄로(`List`) 칸반 보드로(`Board`)(moai-9nfw, 사용자 결정 2026-10-02).
+///
+/// **새 창이 아니라 목록의 배치다.** 커서·거름망·보기·검색·상세는 둘이 한 벌이고, 이것은 그 줄이 화면
+/// 어디에 서는가만 가른다(`board`). 상세의 자리([`DetailAt`])처럼 보는 사람의 것이라 설정에 남는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layout {
+    #[default]
+    List,
+    Board,
+}
+
+impl Layout {
+    /// 다른 쪽 — `SPC v b` 가 오간다.
+    pub fn flip(self) -> Layout {
+        match self {
+            Layout::List => Layout::Board,
+            Layout::Board => Layout::List,
+        }
+    }
+
+    /// 설정 파일에 적는 이름 — 화면 낱말과 따로다([`Field::name`] 과 같은 까닭).
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::List => "list",
+            Layout::Board => "board",
+        }
+    }
+
+    /// 모르는 이름은 `None` — 읽는 쪽이 목록으로 세운다. **읽기는 관대하다.**
+    pub fn named(name: &str) -> Option<Layout> {
+        [Layout::List, Layout::Board].into_iter().find(|l| l.name() == name)
+    }
+}
+
 /// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -152,6 +186,9 @@ pub enum Field {
     Names,
     /// 제목 앞의 `⎇ <가지>` — 그 이슈를 이름에 단 옆 가지(moai-nxt4).
     Branch,
+    /// 그 줄이 선 에픽의 이름(moai-9nfw). 보드에서 **에픽은 카드가 아니라** 카드의 발줄에 이름으로 선다(사용자
+    /// 결정 2026-10-02) — 목록의 오른쪽 열과 같은 자리라 `SPC c e` 하나로 둘이 함께 켜진다. 처음에는 꺼져 있다.
+    Epic,
 }
 
 impl Field {
@@ -170,16 +207,21 @@ impl Field {
             // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
             Field::Branch => say(lang, "tui.field.branch"),
+            Field::Epic => say(lang, "tui.field.epic"),
         }
     }
 
     /// 좁을 때 **걷는 차례** — 작을수록 먼저 걷힌다(사람의 결정: 날짜 → 담당 → 태그). id·우선순위·
     /// 셈은 원래 목록 줄에 있던 것이라 이 차례로 걷지 않는다 — 켜 두면 제목 몫을 줄여서라도 선다.
+    ///
+    /// **에픽은 날짜 다음이다**(moai-9nfw) — 열 가운데 가장 넓고, 상세 칸이 늘 `에픽` 줄로 그 이름을 대므로 걷혀도
+    /// 잃는 것이 적다. 담당·태그 앞의 차례(사람의 결정)는 그대로다.
     pub fn drop_rank(self) -> Option<u8> {
         match self {
             Field::Created | Field::Updated => Some(0),
-            Field::Assignee => Some(1),
-            Field::Tags => Some(2),
+            Field::Epic => Some(1),
+            Field::Assignee => Some(2),
+            Field::Tags => Some(3),
             Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => None,
         }
     }
@@ -191,7 +233,7 @@ impl Field {
     /// 이 바이너리가 아는 열 전부 — 자라는 목록이다. **열을 더하는 사람이 고치는 것은 여기뿐이다**:
     /// 밑의 [`BEFORE_KNOWN`](Field::BEFORE_KNOWN)·[`EMPTY_KNOWN`](Field::EMPTY_KNOWN) 은 옛 설정 파일이
     /// 무엇을 뜻했는지를 적어 둔 기록이라, 거기 더하면 이미 적힌 설정의 뜻이 그날 바뀐다(moai-4gy5).
-    pub const ALL: [Field; 9] = [
+    pub const ALL: [Field; 10] = [
         Field::Id,
         Field::Priority,
         Field::Assignee,
@@ -201,6 +243,7 @@ impl Field {
         Field::Tags,
         Field::Names,
         Field::Branch,
+        Field::Epic,
     ];
 
     /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
@@ -216,6 +259,7 @@ impl Field {
             Field::Tags => "tags",
             Field::Names => "names",
             Field::Branch => "branch",
+            Field::Epic => "epic",
         }
     }
 
@@ -418,7 +462,8 @@ mod tests {
                 | Field::Tally
                 | Field::Tags
                 | Field::Names
-                | Field::Branch => true,
+                | Field::Branch
+                | Field::Epic => true,
             };
             assert!(in_all);
         }
@@ -427,7 +472,7 @@ mod tests {
         // 거기 새 열을 더하면 이미 적힌 설정의 뜻이 그날 바뀐다.
         assert_eq!(
             Field::ALL.len(),
-            9,
+            10,
             "열을 더했으면 ALL 과 이 시험을 함께 고친다 — EMPTY_KNOWN 과 BEFORE_KNOWN 은 그대로 둔다(moai-4gy5)"
         );
     }
@@ -483,6 +528,16 @@ mod tests {
         let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
         assert_eq!(elsewhere.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         assert_eq!(View::hiding("blocked").badge(&known, crate::i18n::Lang::Ko), None);
+    }
+
+    #[test]
+    fn layout_names_round_trip_and_flip() {
+        for l in [Layout::List, Layout::Board] {
+            assert_eq!(Layout::named(l.name()), Some(l));
+            assert_eq!(l.flip().flip(), l);
+        }
+        assert_eq!(Layout::default(), Layout::List, "처음에는 목록이다");
+        assert_eq!(Layout::named("보드"), None, "화면 낱말을 설정 이름으로 받았다");
     }
 
     #[test]

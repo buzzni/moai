@@ -2004,6 +2004,7 @@ Options:
     SPC v l  deferred            SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
+    SPC v b  list or board [list/board] — the board is described below
     SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
@@ -2014,6 +2015,7 @@ Options:
     SPC c i  id                  SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
     SPC c t  tag                 SPC c h  column names [shown/hidden]
+    SPC c e  epic — the name of the epic the row is in; off to begin with
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
@@ -2057,13 +2059,33 @@ Options:
   Sorting puts urgent, new, earlier column and alphabetical on top, and
   pressing the chosen one again turns it around. When it is not the default
   (priority) the path line says which order it is.
-  Columns (SPC c) turn on and off with [shown/hidden]. Assignee, tag, created
-  and updated dates stand on the right of the row, and when it gets narrow
-  they are dropped in that order — dates, then assignee, then tag — to leave
-  room for the title.
+  Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
+  created and updated dates stand on the right of the row, and when it gets
+  narrow they are dropped in that order — dates, then epic, then assignee,
+  then tag — to leave room for the title.
   View, sort and columns are written into the [tui] table of the user config
   on every press and carry over to the next run and to other projects (the
   same file `moai project add` writes).
+
+  SPC v b lays the same rows out as a kanban board instead of a list. It is
+  the list's layout, not another window: the cursor, the filter, the view,
+  search, [NEW] and the detail are the list's, and the choice is kept under
+  [tui] as layout. The columns are idea, deferred and the config's columns in
+  order — idea is a kind and deferred an axis, so nothing is stored for them.
+  At the project root every milestone is a lane, with (no milestone) last;
+  inside a milestone or an epic there is one lane. Epics and milestones are
+  not cards. Each card is two lines, its id, column and priority over its title,
+  and the cursor's card is marked and drawn reversed. The foot, a third line,
+  stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
+  the board only as the name in that foot (SPC c e). j and k move within the
+  column, h and l go to the next column at the nearest height, gg and G go to
+  the column's ends, Enter and Backspace go in and out as in the list, and Tab
+  does nothing. The whole board scrolls as one; the column names stay on top.
+  When the columns do not fit, the column the cursor stands in always stands
+  and the frame title names the rest with their counts. Clicking a card puts
+  the cursor on it, and the wheel moves the cursor one card at a time in the
+  column under the pointer, crossing over to that column first. The overview
+  (0) stays a list for now.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
