@@ -2873,3 +2873,8 @@
 {"ts":"2026-10-02T12:25:59Z","id":"moai-18so","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left here; the \"body\" wording for note is idea moai-4oii"}
 {"ts":"2026-10-02T12:31:41Z","id":"moai-c5xo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"빌드 출력을 /tmp 로 옮긴다 — 워크트리 규약"}
 {"ts":"2026-10-02T12:31:42Z","id":"moai-c5xo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-02T12:32:19Z","id":"moai-c5xo.h5q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 빌드 출력 /tmp 규약 (moai-c5xo)"}
+{"ts":"2026-10-02T12:32:25Z","id":"moai-c5xo.h5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-02T12:32:51Z","id":"moai-c5xo.h5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰어 원문: CLAUDE.md 변경에서 고칠 것을 못 찾았다. diff 밖에서 하나를 더 봤다 — git worktree remove 는 추적 안 되는 파일이 남으면 거절하고, target/ 꼴의 무시 규칙은 심볼릭 링크를 못 덮는다. 이 저장소의 .gitignore 는 /target 이라 링크도 덮고, git status --ignored 가 이 워크트리의 target 링크를 무시됨으로 확인했다"}
+{"ts":"2026-10-02T12:32:52Z","id":"moai-c5xo.h5q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=67908 (low — CLAUDE.md 글 리뷰)"}
+{"ts":"2026-10-02T12:32:52Z","id":"moai-c5xo.h5q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 없음(지적 없음). 넘긴 것: 없음"}
