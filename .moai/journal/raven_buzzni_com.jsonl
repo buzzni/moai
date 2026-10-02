@@ -2910,3 +2910,4 @@
 {"ts":"2026-10-02T14:15:05Z","id":"moai-cvxa.k2f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in: nothing; the review found no defects (all three criteria held). Handed on: nothing. The point that CI cannot catch a regression to the unresolved spelling is inherent, because without a link the two spellings are the same, and it already held before this change, so I did not open an issue for it."}
 {"ts":"2026-10-02T14:15:25Z","id":"moai-cvxa.fry","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 시험 도우미 경로 견주기)"}
 {"ts":"2026-10-02T14:15:25Z","id":"moai-cvxa.fry","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-02T14:15:43Z","id":"moai-cvxa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 303fd029 로 머지해 닫았고 넘긴 것도 없다. 시험이 바이너리 경로를 견줄 때는 recorded_bin() 을 쓴다"}
