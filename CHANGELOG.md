@@ -31,9 +31,10 @@ does not tag — see `CONTRIBUTING.md`.
   epic, not the file's contents. When the value is one line and a file by that
   name exists, one line on stderr says the body is those words and how to stream
   the file instead (`--body - < plan.md`, or with the plan on stdin, the plan
-  moved into a file). It covers `add`, `add --from`, `idea add` and `edit -b`;
-  the file is not opened, the body is kept as given and the exit code does not
-  change. The `--body` help now says it takes text, not a path.
+  moved into a file). It covers `add`, `add --from`, `idea add`, `edit -b` and
+  `note -b`; the file is not opened, the text is kept as given and the exit code
+  does not change. The `--body` help of all of them now says it takes text, not
+  a path.
 
 ### Changed
 
