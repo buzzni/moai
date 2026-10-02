@@ -5,6 +5,33 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_moai");
+
+/// **바이너리가 제 자리로 적는 철자다** — `BIN` 과 글자가 다를 수 있다(moai-jq1w).
+///
+/// 제품은 제 자리를 `std::env::current_exe()` 로 읽어 적는다 — `skill install` 은 훅에,
+/// `merge-driver --install` 은 기본값으로. 리눅스에서 그 값은 `/proc/self/exe` 를 읽은 것이라
+/// 링크가 다 풀려 있고, `BIN` 은 cargo 가 target 디렉터리를 적힌 철자대로 이어 지은 것이다.
+/// `target/` 이 `/tmp/cargo-target/<이름>` 으로 가는 링크면(moai-c5xo) 둘이 갈려, 적힌 값을
+/// `BIN` 과 글자로 견주던 시험 셋이 이 기계에서만 붉었다 — CI 에는 링크가 없다.
+///
+/// **고치는 쪽은 시험이다.** 제품이 링크 철자를 적으려면 부른 쪽이 준 `argv[0]` 를 믿어야
+/// 하는데, 그 값은 부른 쪽 마음대로라 제 자리를 대지 못한다. 푼 철자도 같은 파일을 가리킨다.
+/// 그래서 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나 `--as` 로 건넬 때는 `BIN` 을
+/// 그대로 쓴다.
+///
+/// 푸는 것은 리눅스에서뿐이다. std 의 `current_exe` 는 macOS 에서 `_NSGetExecutablePath` 가
+/// 낸 철자를 풀지 않고 돌려주므로, 거기서 풀면 거꾸로 갈린다.
+fn recorded_bin() -> &'static str {
+    static SPELLED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SPELLED.get_or_init(|| {
+        if cfg!(target_os = "linux") {
+            std::fs::canonicalize(BIN).unwrap_or_else(|e| panic!("{BIN}: {e}")).display().to_string()
+        } else {
+            BIN.to_string()
+        }
+    })
+}
+
 const NOW: &str = "2026-09-11T04:12:03Z";
 /// 시험이 대는 사람. **한 자리에 둔다** — 글자를 베껴 적으면 한쪽만 고쳐도 아무도 모른다.
 const ACTOR: &str = "테스터 (tester@example.com)";
@@ -16293,7 +16320,7 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let c = Claude::new("skillgone-home");
     let (market, _) = installed(&s, &c, "0.0.1");
     let manifest = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1/.claude-plugin/plugin.json"));
-    let body = std::fs::read_to_string(&manifest).unwrap().replace(BIN, "/nowhere/moai");
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(recorded_bin(), "/nowhere/moai");
     std::fs::write(&manifest, body).unwrap();
 
     let said = text(&c.run(s.path(), &["skill", "status"], true));
@@ -19183,7 +19210,7 @@ fn re_installing_replaces_the_line_and_every_line_falls_back() {
     ok(root, &["merge-driver", "--install"]);
     let planted = git(root, &["config", "--get-all", "merge.moai.driver"]);
     assert_eq!(planted.lines().count(), 1, "{planted}");
-    assert!(planted.contains(BIN) && planted.contains("git merge-file"), "{planted}");
+    assert!(planted.contains(recorded_bin()) && planted.contains("git merge-file"), "{planted}");
 }
 
 /// **죽은 마운트에 선 프로젝트 하나가 한눈 보기를 붙들지 않는다**(moai-59k3.u09). 설치 알림은
@@ -19383,11 +19410,11 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     // **판이 다르면 안 고른다** — 틀리는 값은 덜 이르는 쪽이라야 한다. 감싼 스크립트도 여기 든다:
     // 부름을 그대로 지나도 바이트가 다르면 같은 판이 아니다.
     write_exe(&shim, &format!("#!/bin/sh\nexec '{BIN}' \"$@\"\n"));
-    assert!(planted(&path).contains(BIN), "판이 다른데 그것을 심었다");
+    assert!(planted(&path).contains(recorded_bin()), "판이 다른데 그것을 심었다");
 
     // **PATH 에 없으면 지금 바이너리다** — 앞 판이 늘 하던 일이다. git 은 남은 자리다.
     let bare = path_without_moai();
-    assert!(planted(&bare.to_string_lossy()).contains(BIN), "PATH 에 없는데 딴것을 심었다");
+    assert!(planted(&bare.to_string_lossy()).contains(recorded_bin()), "PATH 에 없는데 딴것을 심었다");
 }
 
 /// **모르는 인자를 흘려 듣고 0 을 내는 래퍼는 그대로 못 지나간다**(moai-wwbi, 2026-09-21 사용자 결정).
