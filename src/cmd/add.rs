@@ -361,7 +361,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read, kept): (Issue, super::Read, Option<super::edit::InheritedMilestone>) = repo.with_write(
+    let (made, read, kept, known) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
             if let Some(p) = &args.parent
@@ -406,9 +406,18 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             // 댔다 — 한 바이너리가 한 필드를 두 말로 다뤘다. 판정도 글도 `edit` 의 것 한 벌이다.
             let kept =
                 args.milestone.as_deref().and_then(|m| super::edit::InheritedMilestone::of(issues, &issue.id, Some(m)));
-            Ok((vec![entry], (issue, read, kept)))
+            // **없는 마일스톤도 막지 않고 알려만 준다**(moai-3hxc.uyt) — 계획 길(`bulk`)이 이미 그렇다.
+            // 재는 자도 같은 [`is_milestone`] 이고, 락 안의 줄로 잰다.
+            let known = is_milestone(issues, args.milestone.as_deref());
+            Ok((vec![entry], (issue, read, kept, known)))
         },
     )?;
+
+    // 쓰기가 선 **뒤에** 말한다 — `bulk` 와 같은 자리고, 거절된 쓰기가 줄 알림이 아니다. `--json` 도
+    // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
+    // 나는 판에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
+    // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`").
+    say_no_such_milestone(args.milestone.as_deref(), known, ctx.lang());
 
     if ctx.json {
         // **곁들이는 키도 `edit --json` 과 같다** — `inherited_milestone` 은 이미 `cmd::OURS` 에 있다.

@@ -5866,6 +5866,76 @@ fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
     assert!(said.contains(&format!("에픽은 마일스톤 {stone} 에 선다")), "{said}");
 }
 
+/// **이슈 하나를 만들 때도 없는 마일스톤을 알린다**(moai-3hxc.uyt). 계획 길은 알렸는데
+/// `moai add 't' --milestone moai-zzzz` 는 필드를 적고 0 으로 끝나며 한마디가 없어, 헛 id 가
+/// `moai status` 의 `dangling_milestone` 으로 드러나는 날까지 아무도 몰랐다. 막지는 않는다 —
+/// 줄은 적히고 종료 코드도 그대로다. `idea add` 도 같은 길(`add::run`)을 지난다.
+#[test]
+fn a_single_add_says_a_milestone_that_is_not_there() {
+    let s = init("addstonemissing");
+    let said = |out: &Output| says_no_such_milestone(out, "argos-zzzz");
+
+    let out = moai(s.path(), &["add", "헛 마일스톤", "--milestone", "argos-zzzz"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    // 막지 않는다 — 줄은 적은 대로 선다.
+    assert!(issues(s.path()).contains(r#""milestone":"argos-zzzz""#), "줄이 안 적혔다");
+
+    // `--json` 도 알린다 — 알림은 stderr 라 stdout 의 JSON 은 그대로다.
+    let out = moai(s.path(), &["add", "기계가 받는다", "--milestone", "argos-zzzz", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "--json: 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    let row = String::from_utf8(out.stdout).unwrap();
+    assert!(row.trim_start().starts_with('{') && row.contains(r#""milestone":"argos-zzzz""#), "{row}");
+
+    // `-q` 도 같다.
+    let out = moai(s.path(), &["add", "조용히", "--milestone", "argos-zzzz", "-q"]);
+    assert!(said(&out), "-q: 말없이 지나갔다");
+
+    // idea 도 이 길을 지난다.
+    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "idea add 가 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+
+    // 있는 마일스톤이면 아무 말도 없다.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["add", "멀쩡한 줄", "--milestone", &stone, "-q"]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    // 종류가 마일스톤이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_milestone` 과 같다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["add", "에픽을 마일스톤이라 함", "--milestone", &epic, "-q"]);
+    assert!(
+        says_no_such_milestone(&out, &epic),
+        "마일스톤이 아닌 줄을 지나 보냈다\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// stderr 가 `id` 라는 마일스톤이 없다고 말하는가 — `add.no_such_milestone` 의 한국어 글이다.
+fn says_no_such_milestone(out: &Output, id: &str) -> bool {
+    let err = String::from_utf8_lossy(&out.stderr);
+    err.contains(id) && err.contains("마일스톤이 없다")
+}
+
+/// **필드가 에픽에 져도 헛 id 는 알린다**(moai-3hxc.uyt). `add -e <에픽> --milestone <헛 id>` 의 필드는
+/// 안 읽히지만 `moai status` 는 그것을 `dangling_milestone` 으로 센다(제 에픽이 멀쩡한 줄이 든 엉뚱한
+/// `milestone`). 그래서 진 필드를 말하는 기존 줄(`edit` 과 같은 글)과 없는 마일스톤 줄이 **둘 다** 난다 —
+/// 둘은 다른 사실이다.
+#[test]
+fn a_single_add_says_a_missing_milestone_even_when_the_epic_overrides_it() {
+    let s = init("addstonelost");
+    let epic = ok(s.path(), &["epic", "add", "마일스톤 없는 에픽", "-q"]).trim().to_string();
+
+    let out = moai(s.path(), &["add", "에픽이 이긴다", "-e", &epic, "--milestone", "argos-zzzz", "-q"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&epic), "진 필드를 말하는 기존 줄이 사라졌다\n{err}");
+    assert!(says_no_such_milestone(&out, "argos-zzzz"), "없는 마일스톤을 말없이 지나갔다\n{err}");
+    // 알린 말이 참이라는 근거 — status 는 이 줄을 `dangling_milestone` 으로 센다.
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_milestone"), "{status}");
+}
+
 /// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
 /// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
 /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
