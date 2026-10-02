@@ -32,9 +32,10 @@ does not tag — see `CONTRIBUTING.md`.
   assigned to someone else, or to nobody, stands apart below the list, and under
   `others` in `--json` with `owner` set to `theirs` or `unowned` — the key is
   always there, and `prime --json` carries `others` and `others_rest` the same
-  way. `p0` is no exception. `prime`'s `picked` drops what someone else picked
-  up or nobody owns, and the planted hook no longer counts those rows as your
-  focus. Who you are is matched by name or email, the same as `-a me`; when it
+  way, each row naming its `assignee`. `p0` is no exception. `prime`'s `picked`
+  and the "already picked up" line under `moai ready` drop what someone else
+  picked up or nobody owns, and the planted hook no longer counts those rows as
+  your focus. Who you are is matched by name or email, the same as `-a me`; when it
   is unknown (no `--user`, `MOAI_ACTOR` or git identity) nothing is set apart.
   A repository run under one name reads as before as long as its rows carry an
   assignee — a row left with `-a none`, or written before rows carried one, now

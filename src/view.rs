@@ -1271,6 +1271,9 @@ pub struct Others<'a, 'i> {
     pub naming: crate::config::Naming,
     /// 집는 칸의 이름(`Config::started_status`) — 내미는 `moai mv <id> <칸> --take` 에 든다.
     pub column: &'a str,
+    /// 그 줄이 선 칸(`Config::first_status` — `ready` 의 줄은 첫 칸에 선다). 내미는 줄의 `--from` 이다 —
+    /// 빼면 그러라는 말을 듣는 사이 주인이 먼저 집은 줄을 `--take` 가 덮는다.
+    pub from: &'a str,
 }
 
 /// 내 것이 아닌 줄 `n` 건을 대는 한 줄 — `ready`·`prime`·한눈 보기가 같은 글자로 선다(moai-0zjo).
@@ -1279,10 +1282,12 @@ pub struct Others<'a, 'i> {
 /// 글이고, 한눈 보기에서는 남의 저장소의 것이다. 안 감싸면 `하는 중` 은 두 낱말로 갈려 내민 줄이 안 돌고,
 /// `$(…)` 는 붙여 넣는 순간 돈다. 감싸는 자는 제어문자도 `$'…'` 로 적어 이 화면을 다시 칠하지 못한다.
 /// 꼬리는 규칙 5 의 거절문과 같은 [`crate::guide::TAKE_YES`] 다 — 누가 그러라고 했는지가 노트에 남는다.
-fn others_said(n: usize, column: &str, lang: Lang) -> String {
+/// 본 칸(`from`)도 싣는다 — 집기는 `--from` 으로 하는 것이 여러 세션이 한 `.moai` 를 쓸 때의 약속이다.
+fn others_said(n: usize, column: &str, from: &str, lang: Lang) -> String {
+    let (column, from) = (crate::text::quoted(column), crate::text::quoted(from));
     fill(
         say(lang, "ready.others"),
-        &[("n", &n.to_string()), ("column", &crate::text::quoted(column)), ("take", crate::guide::TAKE_YES)],
+        &[("n", &n.to_string()), ("column", &column), ("from", &from), ("take", crate::guide::TAKE_YES)],
     )
 }
 
@@ -1376,7 +1381,7 @@ pub fn prime(
     if !p.others.is_empty() {
         let n = p.others.len() + p.others_rest;
         out.push(String::new());
-        out.push(format!("> {}", others_said(n, cfg.started_status(), lang)));
+        out.push(format!("> {}", others_said(n, cfg.started_status(), cfg.first_status(), lang)));
         out.extend(
             p.others.iter().map(|(i, o)| format!("{} · {}", row(i, false), owner_label(i, *o, cfg.naming, lang))),
         );
@@ -1523,7 +1528,7 @@ pub fn ready(
     // 글리프는 `?` 다 — 고칠 것(`!`)이 아니라 물을 것이다.
     if !others.rows.is_empty() {
         out.push(String::new());
-        let said = others_said(others.rows.len() + others.more, others.column, lang);
+        let said = others_said(others.rows.len() + others.more, others.column, others.from, lang);
         out.push(format!("{} {}", paint(style::DIM, "?"), paint(style::DIM, &said)));
         let heads: Vec<(String, usize)> =
             others.rows.iter().map(|(i, _)| marked(screen.branch(&i.id), &i.title, TITLE_CAP, style::DIM)).collect();
@@ -2812,6 +2817,8 @@ pub struct Picks<'a> {
     pub others_more: usize,
     /// 그 프로젝트의 집는 칸 — 내미는 `--take` 줄에 든다.
     pub column: &'a str,
+    /// 그 프로젝트의 첫 칸 — 내미는 줄의 `--from` 이다([`Others::from`] 과 같은 까닭).
+    pub from: &'a str,
     /// 도는 마일스톤이 이 목록에 한 일(`report::ready_in`). **한눈 보기에서도 댄다** — 저장소
     /// 안의 `ready` 가 목록이 왜 짧은지를 대는데 여기만 입을 다물면, 같은 명령이 선 자리에
     /// 따라 짧아진 목록을 "할 일이 없다" 로 읽는다.
@@ -3079,7 +3086,7 @@ pub fn projects_ready(
         // **내 것이 아닌 줄은 수만 댄다**(moai-0zjo) — 저장소 안의 `ready` 와 같은 글자·같은 글리프다.
         // 줄은 그 프로젝트의 `ready` 가 낸다. 한눈 보기의 몫은 집을 줄이 왜 적은지를 알리는 데까지다.
         if !k.others.is_empty() {
-            let said = others_said(k.others.len() + k.others_more, k.column, lang);
+            let said = others_said(k.others.len() + k.others_more, k.column, k.from, lang);
             out.push(format!("  {} {}", paint(style::DIM, "?"), paint(style::DIM, &said)));
         }
         // 목록 꼬리("N건 더") 뒤에 둔다 — 앞에 두면 그 꼬리가 문제 줄의 연속으로 읽힌다(`projects_status` 와 같은 차례).
@@ -3861,7 +3868,7 @@ mod tests {
 
     /// 내 것이 아닌 줄이 없는 `ready` — 가르기 전의 화면이다.
     fn no_others() -> Others<'static, 'static> {
-        Others { rows: &[], more: 0, naming: crate::config::Naming::Full, column: "in_progress" }
+        Others { rows: &[], more: 0, naming: crate::config::Naming::Full, column: "in_progress", from: "todo" }
     }
 
     /// **`prime` 도 내 것이 아닌 줄을 따로 댄다**(moai-0zjo 리뷰) — `ready` 의 `?` 덩이와 같은 말과 같은 꼬리다.
@@ -3887,9 +3894,9 @@ mod tests {
         };
         let spaced = Config::parse("prefix = \"argos\"\nstatuses = \"todo,하는 중,done\"\n").unwrap();
         let out = plain(&prime(&p, &labels, &spaced, Screen::new(lang))).join("\n");
-        let said = others_said(4, "하는 중", lang);
+        let said = others_said(4, "하는 중", "todo", lang);
         assert!(out.contains(&format!("> {said}")), "덩이 머리가 없다 — {out}");
-        assert!(said.contains("moai mv <id> '하는 중' --take -m '<who said yes>'"), "{said}");
+        assert!(said.contains("moai mv <id> '하는 중' --from todo --take -m '<who said yes>'"), "{said}");
         assert!(out.lines().any(|l| l.contains("argos-0002") && l.ends_with("B (b@x.io)")), "{out}");
         assert!(out.lines().any(|l| l.contains("argos-0003") && l.ends_with(say(lang, "ready.unowned"))), "{out}");
         assert!(out.contains(&more_of(2, lang)), "잘린 수를 안 댔다 — {out}");
@@ -3913,13 +3920,14 @@ mod tests {
         let mut nobody = issue("argos-0003", "nobody's", "todo");
         nobody.assignee = None;
         let rows = [(&theirs, Owner::Theirs), (&nobody, Owner::Unowned)];
-        let others = Others { rows: &rows, more: 1, naming: crate::config::Naming::Full, column: "doing" };
+        let others =
+            Others { rows: &rows, more: 1, naming: crate::config::Naming::Full, column: "doing", from: "backlog" };
         let out = plain(&ready(&[&mine], 0, others, &labels, &[], &[], &none, Screen::new(lang)));
         let joined = out.join("\n");
         assert_eq!(out[0], fill(say(lang, "ready.count"), &[("n", "1")]), "머리의 수가 남의 줄까지 셌다");
-        let said = others_said(3, "doing", lang);
+        let said = others_said(3, "doing", "backlog", lang);
         assert!(joined.contains(&format!("? {said}")), "덩이 머리가 없다 — {joined}");
-        assert!(said.contains("moai mv <id> doing --take"), "설정의 칸이 안 들었다 — {said}");
+        assert!(said.contains("moai mv <id> doing --from backlog --take"), "설정의 칸이 안 들었다 — {said}");
         let theirs_line = out.iter().find(|l| l.contains("argos-0002")).expect("남의 줄이 안 섰다");
         assert!(theirs_line.contains("B (b@x.io)"), "{theirs_line}");
         let nobody_line = out.iter().find(|l| l.contains("argos-0003")).expect("담당 없는 줄이 안 섰다");

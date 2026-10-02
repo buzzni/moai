@@ -4485,11 +4485,22 @@ fn ready_hands_out_only_my_rows_and_sets_the_rest_apart() {
 
     // `prime` — 남이 집은 줄은 내가 쥔 것이 아니다.
     ok(s.path(), &["mv", &theirs, "in_progress"]);
+    // `ready` 의 "이미 잡고 있는 것" 도 내 것만 센다 — 남의 줄을 끝내라고 권하지 않는다.
+    let human = ok(s.path(), &["ready"]);
+    assert!(!human.contains("이미 잡고 있는 것"), "남이 집은 줄을 끝내라고 권했다\n{human}");
     let primed = ok(s.path(), &["prime", "--json"]);
     one_json_value(&primed);
     let picked = &primed[..primed.find(r#""ready":"#).unwrap()];
     assert!(!picked.contains(&theirs), "남이 집은 줄을 제가 쥔 것으로 댔다\n{primed}");
     assert!(primed.contains(&format!(r#""id":"{nobody}""#)) && primed.contains(r#""owner":"unowned""#), "{primed}");
+    // `others` 는 물을 사람을 댄다 — 담당 없는 줄에는 키가 없다.
+    let later = add(s.path(), &["남의 다음 일", "-a", "B (b@x.io)"]);
+    let primed = ok(s.path(), &["prime", "--json"]);
+    assert!(
+        row_in(&primed, &later).contains(r#""assignee":"B","assignee_email":"b@x.io","owner":"theirs""#),
+        "누구의 것인지 안 댔다\n{primed}"
+    );
+    assert!(!row_in(&primed, &nobody).contains("\"assignee\""), "{primed}");
 }
 
 /// **사람을 모르면 가르지 않는다**(moai-0zjo) — 설정 없는 기계에서 모든 줄이 남의 것으로 서면
@@ -4518,7 +4529,9 @@ fn mv_moves_someone_elses_row_and_says_so_once() {
     assert!(out.status.success(), "옮기기가 막혔다 — 막는 자리는 훅뿐이다");
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(err.contains(&format!("moai: {theirs} 는 B (b@x.io) 의 것이다")), "{err}");
-    assert!(err.contains(&format!("moai mv {theirs} in_progress --take -m '<who said yes>'")), "{err}");
+    // 방금 옮겨 선 칸을 `--from` 으로 싣는다 — 그 사이 주인이 옮겼으면 넘겨받기가 진다.
+    let take = format!("moai mv {theirs} in_progress --from in_progress --take -m '<who said yes>'");
+    assert!(err.contains(&take), "{err}");
     let json = String::from_utf8(out.stdout).unwrap();
     assert!(
         json.contains(&format!(r#""taken":[],"theirs":[{{"id":"{theirs}","owner":"theirs","was":"B (b@x.io)"}}]"#)),
@@ -4568,18 +4581,24 @@ fn mv_hands_a_take_line_that_runs_as_given() {
         .unwrap();
     let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
     let err = String::from_utf8(moai(s.path(), &["mv", &theirs, "하는 중"]).stderr).unwrap();
-    assert!(err.contains(&format!("`moai mv {theirs} '하는 중' --take -m '<who said yes>'`")), "{err}");
+    assert!(
+        err.contains(&format!("`moai mv {theirs} '하는 중' --from '하는 중' --take -m '<who said yes>'`")),
+        "{err}"
+    );
     // `-C` 로 부르면 그 뿌리를 겨눈다 — 부른 사람의 셸은 거기가 아니다.
     let other = add(s.path(), &["남의 일 둘", "-a", "B (b@x.io)"]);
     let away = Scratch::new("mvtakeline-away");
     let dir = s.path().to_str().unwrap();
     let out = staged(&["-C", dir, "mv", &other, "하는 중"]).current_dir(away.path()).output().unwrap();
     let err = String::from_utf8(out.stderr).unwrap();
-    assert!(err.contains("`moai -C ") && err.contains(&format!(" mv {other} '하는 중' --take")), "{err}");
+    assert!(
+        err.contains("`moai -C ") && err.contains(&format!(" mv {other} '하는 중' --from '하는 중' --take")),
+        "{err}"
+    );
     // `--user` 로 옮겼으면 내민 줄도 그 사람으로 돈다 — 빼면 이 기계의 사람으로 넘겨받는다.
     let third = add(s.path(), &["남의 일 셋", "-a", "B (b@x.io)"]);
     let err = String::from_utf8(moai(s.path(), &["--user", "C (c@x.io)", "mv", &third, "하는 중"]).stderr).unwrap();
-    assert!(err.contains(&format!("`moai --user 'C (c@x.io)' mv {third} '하는 중' --take")), "{err}");
+    assert!(err.contains(&format!("`moai --user 'C (c@x.io)' mv {third} '하는 중' --from '하는 중' --take")), "{err}");
 }
 
 /// **닫은 뒤 "같은 에픽의 다음" 도 내 줄만 댄다**(moai-0zjo 리뷰) — `ready` 와 같은 자다. 남의 줄을 대면 시킨

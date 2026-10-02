@@ -30,8 +30,8 @@ struct Said<'a> {
     /// `ready` 에 안 실린 나머지 수. **늘 싣는다** — 0 이 "다 실었다" 는 뜻이다.
     rest: usize,
     /// 집을 수 있지만 **내 것이 아닌** 줄(moai-0zjo) — `ready --json` 의 `others` 와 같은 이름·같은
-    /// `owner` 다. 줄 모양만 이 판의 [`Brief`] 다. **늘 싣는다**.
-    others: Vec<super::Other<Brief<'a>>>,
+    /// `owner` 다. 줄 모양은 이 판의 [`Brief`] 에 담당을 곁들인 [`Whose`] 다. **늘 싣는다**.
+    others: Vec<super::Other<Whose<'a>>>,
     /// `others` 에 안 실린 나머지 수 — `rest` 와 같은 약속으로 **늘 싣는다**.
     others_rest: usize,
     /// 지금 도는 마일스톤. `ready --json` 과 같은 이름·같은 값이고, 없으면 키를 안 단다.
@@ -52,6 +52,20 @@ struct Said<'a> {
     /// "여기서는 못 물어봤다" 를 가르는 것과 같은 자리다.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_tracker: bool,
+}
+
+/// `others` 의 한 줄 — [`Brief`] 에 **그 줄의 담당**을 곁들인다(moai-0zjo 리뷰). 이 판이 남의 줄을 대는
+/// 까닭은 사람에게 물으라는 것인데, 누구의 것인지가 빠지면 받는 쪽이 `show` 를 한 번 더 부른다. 키는
+/// [`super::Row`] 가 파일에서 펴는 것과 같은 둘(`assignee`·`assignee_email`)이고, 없으면 키가 없다 —
+/// 담당 없는 줄은 `owner` 가 `unowned` 다. `picked`·`ready` 의 줄은 다 내 것이라 여기 들지 않는다.
+#[derive(serde::Serialize)]
+struct Whose<'a> {
+    #[serde(flatten)]
+    row: Brief<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignee_email: Option<&'a str>,
 }
 
 #[derive(serde::Serialize)]
@@ -203,7 +217,19 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             others: p
                 .others
                 .iter()
-                .map(|(i, owner)| super::Other { row: Brief::of(i, &epics, &kinds, &origin), owner: *owner })
+                .map(|(i, owner)| super::Other {
+                    // **빈 담당은 없는 것이다**(`report::owner` 와 같은 자) — 손으로 푼 머지의 `""` 를
+                    // 그대로 내면 `unowned` 인 줄에 빈 담당이 선다.
+                    row: Whose {
+                        row: Brief::of(i, &epics, &kinds, &origin),
+                        assignee: i.assignee.as_deref().filter(|a| !a.trim().is_empty()),
+                        assignee_email: i
+                            .assignee_email
+                            .as_deref()
+                            .filter(|_| i.assignee.as_deref().is_some_and(|a| !a.trim().is_empty())),
+                    },
+                    owner: *owner,
+                })
                 .collect(),
             others_rest: p.others_rest,
             milestone: p.focus.running.iter().map(|m| m.id.as_str()).collect(),

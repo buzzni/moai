@@ -142,8 +142,8 @@ the script in 2 does not print as a `worktree` row.
           cd <subdir>
       - The member's column is already picked up — do not pick it up again. **If its assignee
         is not you** (`moai show <member>`), ask the person watching before you carry it on; on
-        a yes, `moai mv <member> <its column> --take -m '<who said yes>'` — the column stays, the
-        assignee becomes you, and a note keeps whose it was
+        a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
+        column stays, the assignee becomes you, and a note keeps whose it was
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
         tokens are written nowhere, and without it the whole member reads as this window's work

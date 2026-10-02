@@ -884,10 +884,11 @@ only your own rows; a row assigned to someone else, or to nobody, stands apart u
 `others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
 and on a yes take it over and say who said yes:
 
-    moai mv <id> in_progress --take -m '<who said yes>'
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
 
 You become the assignee in the same write and a note `Taken-over: <who it was|none>`
-keeps whose it was — it also takes a row that already stands in that column. Without
+keeps whose it was — it also takes a row that already stands in that column, so give
+`--from` the column you saw: if the owner picked it up meanwhile, nothing is taken. Without
 `--take` a person in a terminal still moves it (one line on stderr says whose it is);
 the hook refuses it (rule 5). Who you are is matched by name or email, the same as
 `-a me`; when it is unknown nothing is set apart."#;
@@ -975,7 +976,7 @@ are is unknown, nothing is refused."#
 }
 
 /// 남의 줄을 넘겨받는 줄 — 규칙 5 의 글(`rules`)이 싣는다(moai-0zjo). 꼬리는 [`TAKE_YES`] 다.
-pub const TAKE_OVER: &str = "moai mv <id> in_progress --take -m '<who said yes>'";
+pub const TAKE_OVER: &str = "moai mv <id> in_progress --from todo --take -m '<who said yes>'";
 
 /// 넘겨받는 줄의 꼬리 — 규칙 5 의 거절문(`hook::take_in`)과 `mv` 의 알림(`cmd::mv`)이 이것으로 줄을 짓고,
 /// [`TAKE_OVER`] 가 이것으로 끝난다(`the_take_over_line_ends_with_its_tail` 이 맨다). 손으로 따로 적던 판은
@@ -1551,8 +1552,8 @@ the script in 2 does not print as a `worktree` row.
           {SUBDIR}
       - The member's column is already picked up — do not pick it up again. **If its assignee
         is not you** (`moai show <member>`), ask the person watching before you carry it on; on
-        a yes, `moai mv <member> <its column> --take -m '<who said yes>'` — the column stays, the
-        assignee becomes you, and a note keeps whose it was
+        a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
+        column stays, the assignee becomes you, and a note keeps whose it was
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
         tokens are written nowhere, and without it the whole member reads as this window's work

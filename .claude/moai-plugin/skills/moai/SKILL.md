@@ -189,7 +189,7 @@ own server.
 someone else — or nobody — is refused unless it carries `--take`. Ask the person
 watching first. On a yes, take it over and say who said yes:
 
-    moai mv <id> in_progress --take -m '<who said yes>'
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
 
 You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
 keeps whose it was. `moai ready` hands out only your own rows and sets the rest

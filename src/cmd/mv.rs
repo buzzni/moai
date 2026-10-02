@@ -70,10 +70,11 @@ impl Whose {
 ///
 /// **내미는 줄은 그대로 쳐서 돌아야 한다**(moai-0zjo 리뷰) — id 와 칸은 셸 낱말로 감싸고(`하는 중` 같은 칸
 /// 이름이 두 낱말로 갈리지 않게, 규칙 5 의 거절문과 같은 자리), `-C` 로 불렀으면 그 뿌리를 단다(`head`).
-/// 꼬리는 [`crate::guide::TAKE_YES`] 다.
+/// 꼬리는 [`crate::guide::TAKE_YES`] 다. **방금 옮겨 선 칸을 `--from` 으로 싣는다** — 그러라는 말을 듣는
+/// 사이 주인이 그 줄을 다른 칸으로 옮겼으면 `--take` 가 덮지 않고 진다.
 fn theirs_said(w: &Whose, head: &str, to: &str, lang: crate::i18n::Lang) -> String {
-    let take =
-        format!("{head} mv {} {} {}", crate::text::quoted(&w.id), crate::text::quoted(to), crate::guide::TAKE_YES);
+    let (id, col) = (crate::text::quoted(&w.id), crate::text::quoted(to));
+    let take = format!("{head} mv {id} {col} --from {col} {}", crate::guide::TAKE_YES);
     let (id, to) = (crate::text::one_line(&w.id), crate::text::one_line(&take));
     match &w.shown {
         Some(was) => crate::i18n::fill(

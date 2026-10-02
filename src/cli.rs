@@ -271,7 +271,7 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
   (rows whose assignee changed) and theirs (moved without --take), always as
   arrays.
 
-  moai mv moai-4aex in_progress --take -m 'the owner said yes'
+  moai mv moai-4aex in_progress --from todo --take -m 'the owner said yes'
 
   Closing says what that write opened - work that just became ready, a parent
   whose last unfinished child is now done, and the next pick in the same epic.

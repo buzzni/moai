@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.2.0 hash:4fb3750c -->
+<!-- moai:begin v:0.2.0 hash:1f167e29 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -73,10 +73,11 @@ only your own rows; a row assigned to someone else, or to nobody, stands apart u
 `others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
 and on a yes take it over and say who said yes:
 
-    moai mv <id> in_progress --take -m '<who said yes>'
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
 
 You become the assignee in the same write and a note `Taken-over: <who it was|none>`
-keeps whose it was — it also takes a row that already stands in that column. Without
+keeps whose it was — it also takes a row that already stands in that column, so give
+`--from` the column you saw: if the owner picked it up meanwhile, nothing is taken. Without
 `--take` a person in a terminal still moves it (one line on stderr says whose it is);
 the hook refuses it (rule 5). Who you are is matched by name or email, the same as
 `-a me`; when it is unknown nothing is set apart.
@@ -484,7 +485,7 @@ own server.
 someone else — or nobody — is refused unless it carries `--take`. Ask the person
 watching first. On a yes, take it over and say who said yes:
 
-    moai mv <id> in_progress --take -m '<who said yes>'
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
 
 You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
 keeps whose it was. `moai ready` hands out only your own rows and sets the rest

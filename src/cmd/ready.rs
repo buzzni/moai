@@ -26,9 +26,11 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
     let (picks, focus) = report::ready_in(&load.issues, &repo.config);
     // **내 것과 남의 것을 가른다**(moai-0zjo, 2026-10-02 사용자 결정). 사람은 여기서 풀어 자료로
-    // 건넨다 — `report` 는 git 설정을 안 연다. **집을 줄이 있을 때만 푼다**: `git` 을 두 번 띄운다.
-    let me = if picks.is_empty() { None } else { super::me_at(ctx, &repo.root) };
-    let (mut picks, mut others) = report::by_owner(picks, me.as_ref());
+    // 건넨다 — `report` 는 git 설정을 안 연다. **가를 줄이 있을 때만, 한 번 푼다**: `git` 을 두 번 띄운다.
+    let asked = std::cell::OnceCell::new();
+    let me = || asked.get_or_init(|| super::me_at(ctx, &repo.root)).as_ref();
+    let judge = if picks.is_empty() { None } else { me() };
+    let (mut picks, mut others) = report::by_owner(picks, judge);
     // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
     // 같은 `-n` 으로 자른다(사용자 결정) — 여러 사람이 쓰는 저장소에서 화면이 남의 일로 길어지지 않는다.
     let more = crate::query::cut(&mut picks, limit);
@@ -93,8 +95,15 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         });
     }
 
-    // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것.
-    let wip = report::wip(&load.issues, &repo.config);
+    // 첫 칸도 아니고 끝나지도 않은 것 = 누군가 이미 잡고 있는 것. **그 가운데 내 것만 센다**(moai-0zjo 리뷰) —
+    // 이 줄은 "그것부터 끝내라" 고 권하는데, 남이 집은 줄을 끝내라는 말은 규칙 5 가 막는 길로 보낸다.
+    // `prime` 의 집은 것·훅 초점과 같은 자다(2026-10-02 사용자 결정). 모르면 가르지 않는다.
+    let mut wip = report::wip(&load.issues, &repo.config);
+    if !wip.is_empty()
+        && let Some(me) = me()
+    {
+        wip.retain(|i| report::owner(me, i).is_none());
+    }
 
     let screen = view::Screen::new(ctx.lang()).at(ctx.clock()).over(&origin);
     let others = view::Others {
@@ -102,6 +111,7 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         more: others_more,
         naming: repo.config.naming,
         column: repo.config.started_status(),
+        from: repo.config.first_status(),
     };
     Ok(view::ready(&picks, more, others, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
 }
@@ -149,6 +159,7 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                     others,
                     others_more,
                     column: repo.config.started_status(),
+                    from: repo.config.first_status(),
                     focus,
                     unreadable: load.errors.len(),
                     epics,

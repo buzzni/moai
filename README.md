@@ -152,7 +152,7 @@ that is not its person's. `moai ready` hands out only your own rows and sets the
 rest apart — someone else's, or nobody's. On a yes, take it over in one write:
 
 ```sh
-moai mv <id> in_progress --take -m 'Kim said yes'   # you become the assignee
+moai mv <id> in_progress --from todo --take -m 'Kim said yes'   # you become the assignee
 ```
 
 The assignee changes and a note `Taken-over: <who it was|none>` keeps whose it

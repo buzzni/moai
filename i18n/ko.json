@@ -91,7 +91,7 @@
   "warn.milestone_overdue": "기한이 지난 마일스톤 {n}건",
   "warn.milestone_due_soon": "기한이 {d}일 안으로 다가온 마일스톤 {n}건",
   "ready.outside_held": "도는 마일스톤 밖의 일 {n}건은 안 냈다 — 그 안을 먼저 끝낸다 (p0 은 밖에서도 낸다)",
-  "ready.others": "{n}건은 남의 것이거나 담당이 없다 — 집기 전에 사람에게 묻는다. 그러라고 하면 `moai mv <id> {column} {take}`",
+  "ready.others": "{n}건은 남의 것이거나 담당이 없다 — 집기 전에 사람에게 묻는다. 그러라고 하면 `moai mv <id> {column} --from {from} {take}`",
   "ready.unowned": "(담당 없음)",
   "list.none": "없다.",
   "list.hidden": "{what} {n}건 숨김 — `{how}`",
