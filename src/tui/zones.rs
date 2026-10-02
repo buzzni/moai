@@ -28,6 +28,11 @@ pub struct Zones {
     pub typing: Input,
     /// 거른 목록에서의 커서.
     pub cursor: usize,
+    /// 커서가 **선 줄을 가리키는가**(moai-pvpb.1yh). 지금 쓰는 이름이 목록에 없으면(`TZ=JST-9` 같은 규칙
+    /// 글 — 목록은 tzdb 이름만 든다, 2026-10-01 사용자 결정) 연 자리에서 아무 줄도 안 가리킨다. 사람이
+    /// 옮기거나 글을 쳐야 선다 — 그 전의 Enter 는 아무것도 안 고른다. 맨 위에 세워 두던 판은 글자를
+    /// 안 친 Enter 가 첫 이름(`Africa/Abidjan`)을 골라 설정에 적었다.
+    aimed: bool,
     /// 굴린 자리 — 탐색기의 목록과 같은 조각이다.
     pub list: Scroll,
     /// 목록이 빈 까닭 — tzdb 가 없다([`crate::tz::Trouble`], moai-77ap). **빈 목록만 내지
@@ -37,7 +42,8 @@ pub struct Zones {
 }
 
 impl Zones {
-    /// 연다. 커서는 **지금 쓰는 이름**에 선다 — 고르러 들어온 사람이 먼저 보는 것은 지금이다.
+    /// 연다. 커서는 **지금 쓰는 이름**에 선다 — 고르러 들어온 사람이 먼저 보는 것은 지금이다. 그 이름이
+    /// 목록에 없으면 아무 줄도 안 가리킨다([`Zones::aimed`]).
     pub fn open(all: Vec<String>, trouble: Option<crate::tz::Trouble>, now: &str) -> Zones {
         let mut z = Zones {
             all,
@@ -45,12 +51,33 @@ impl Zones {
             now: now.to_string(),
             typing: Input::default(),
             cursor: 0,
+            aimed: false,
             list: Scroll::default(),
             trouble,
         };
         z.settle();
-        z.cursor = z.shown().iter().position(|n| *n == now).unwrap_or(0);
+        if let Some(at) = z.shown().iter().position(|n| *n == now) {
+            (z.cursor, z.aimed) = (at, true);
+        }
         z
+    }
+
+    /// 커서가 가리키는 줄의 자리 — 아무 줄도 안 가리키거나 목록이 비었으면 없다. 그리는 쪽과 고르는 쪽
+    /// ([`Zones::at`])이 이것 하나로 묻는다 — 따로 재면 화면에 칠해진 줄과 Enter 가 고르는 줄이 갈린다.
+    pub fn selected(&self) -> Option<usize> {
+        (self.aimed && !self.hits.is_empty()).then(|| self.cursor.min(self.hits.len() - 1))
+    }
+
+    /// 지금 쓰는 이름이 목록에 없어 커서가 아직 아무 줄도 안 가리키는가 — 창 밑에 그렇다고 한 줄 선다.
+    /// 안 가리키는 커서는 연 자리에서만 생기므로(`open`) 그 까닭은 하나다. 목록이 통째로 비었으면 그쪽
+    /// 까닭(`trouble`)이 선다.
+    pub fn unlisted(&self) -> bool {
+        !self.aimed && !self.knows_none()
+    }
+
+    /// 이 기계가 아는 이름이 하나도 없는가 — 거른 목록이 빈 것(글이 좁다)과 가르는 자다. 창 밑의 말이 둘을 달리 댄다.
+    pub fn knows_none(&self) -> bool {
+        self.all.is_empty()
     }
 
     /// 거른 목록. **대소문자를 안 가린다** — 이름은 `Asia/Seoul` 인데 손은 `asia` 를 친다.
@@ -59,9 +86,9 @@ impl Zones {
         self.hits.iter().map(|n| self.all[*n].as_str()).collect()
     }
 
-    /// 커서가 선 이름. 목록이 비었으면 없다.
+    /// 커서가 선 이름. 목록이 비었거나 아무 줄도 안 가리키면 없다 — 그때 Enter 는 아무것도 안 고른다.
     pub fn at(&self) -> Option<&str> {
-        let n = self.hits.get(self.cursor.min(self.hits.len().saturating_sub(1)))?;
+        let n = self.hits.get(self.selected()?)?;
         Some(self.all[*n].as_str())
     }
 
@@ -70,31 +97,54 @@ impl Zones {
         name == self.now
     }
 
+    /// 지금 쓰는 이름 — 목록에 없을 때 창 밑의 한 줄이 댄다([`Zones::unlisted`]).
+    pub fn now(&self) -> &str {
+        &self.now
+    }
+
     /// 커서를 옮긴다. **끝에서 멈춘다** — 목록이 길어 돌아 나오면 어디에 있었는지를 잃는다.
     ///
     /// **걸음은 탐색기와 같은 자가 센다**([`super::scroll::cursor`], 리뷰) — 한 쪽은 칸 높이가
     /// 아니라 고정 걸음이다(`scroll::PAGE`). 창마다 다르게 세면 같은 키가 칸마다 다른 만큼
     /// 움직이는데, 그것을 안 하기로 한 까닭이 `scroll` 의 머리글에 적혀 있다.
+    ///
+    /// **아무 줄도 안 가리키던 커서는 첫걸음에 선다**([`Zones::aimed`]) — 목록 위의 빈자리에서 내려오듯이,
+    /// 아래로 한 줄·위로·맨 위는 첫 줄에 서고, 맨 아래와 한 쪽 아래는 첫 줄에서 그만큼 간다.
     pub fn step(&mut self, m: Move) {
-        let at = super::scroll::cursor(m, self.cursor, || self.hits.len());
+        let at = match (self.aimed, m) {
+            (false, Move::LineDown | Move::LineUp | Move::Top | Move::PageUp) => 0,
+            _ => super::scroll::cursor(m, self.cursor, || self.hits.len()),
+        };
         self.cursor = at.min(self.hits.len().saturating_sub(1));
+        self.aimed = true;
     }
 
     /// 거르는 글에 키 하나를 먹인다 — 먹었으면 `true`. **먹은 자리에서 곧바로 다시 거른다**
     /// ([`Zones::settle`]): 두 걸음으로 두면 부르는 쪽이 하나를 빠뜨리는 날 Enter 가 화면에 서 있지도
-    /// 않은 줄을 고른다(리뷰).
+    /// 않은 줄을 고른다(리뷰). **글을 친 것은 고르러 나선 것이다** — 아무 줄도 안 가리키던 커서가 선다.
+    ///
+    /// **글이 바뀐 것만 센다**(리뷰). 칸은 바꾼 것 없이도 키를 먹는다 — 빈 칸의 Backspace·Delete·Ctrl-U, ←→·Home·End
+    /// ([`Input::key`]). 그것까지 세면 그 키 하나 뒤의 Enter 가 아무도 안 고른 첫 이름을 설정에 적는다. 다시 거르는
+    /// 것도 글이 바뀔 때뿐이다([`Zones::hits`]).
     pub fn key(&mut self, k: KeyEvent) -> bool {
+        let was = self.typing.text().to_string();
         let ate = self.typing.key(k);
-        if ate {
+        if ate && self.typing.text() != was {
+            self.aimed = true;
             self.settle();
         }
         ate
     }
 
-    /// 거르는 글에 붙여 넣는다 — [`Zones::key`] 와 같은 약속이다.
+    /// 거르는 글에 붙여 넣는다 — [`Zones::key`] 와 같은 약속이다. 줄바꿈뿐인 글처럼 칸에 아무것도 안 든 붙여넣기는
+    /// 고른 것이 아니다.
     pub fn paste(&mut self, s: &str) {
+        let was = self.typing.text().to_string();
         self.typing.paste(s);
-        self.settle();
+        if self.typing.text() != was {
+            self.aimed = true;
+            self.settle();
+        }
     }
 
     /// 글이 바뀌면 다시 거르고 커서를 목록 안으로 도로 들인다. **[`Zones::key`]·[`Zones::paste`]
@@ -205,9 +255,43 @@ mod tests {
         let z = zones();
         assert_eq!(z.at(), Some("Asia/Tokyo"));
         assert!(z.is_now("Asia/Tokyo") && !z.is_now("UTC"));
-        // 모르는 이름에서 열면 맨 위다 — 없는 줄에 커서를 둘 수는 없다.
-        let z = Zones::open(vec!["UTC".into()], None, "Mars/Olympus");
-        assert_eq!(z.at(), Some("UTC"));
+    }
+
+    /// **지금 이름이 목록에 없으면 커서는 아무 줄도 안 가리킨다**(moai-pvpb.1yh) — `TZ=JST-9` 같은 규칙 글이다.
+    /// 그때 Enter 는 아무것도 안 고른다(`at` 이 `None`). 맨 위에 세워 두던 판은 글자 없는 Enter 가 첫 이름을
+    /// 골라 설정에 적었다. 옮기거나 글을 치면 선다 — 아래로 한 줄은 첫 줄이다.
+    #[test]
+    fn an_unlisted_zone_leaves_the_cursor_on_no_row() {
+        let all = ["Africa/Abidjan", "Asia/Seoul", "UTC"].map(String::from).to_vec();
+        let z = Zones::open(all.clone(), None, "JST-9");
+        assert_eq!((z.at(), z.selected()), (None, None), "목록에 없는 이름에서 줄을 골라 두었다");
+        assert!(z.unlisted());
+        // 칸이 먹되 글은 안 바꾸는 키(빈 칸의 Backspace·Delete, ←→·Home·End)와 아무것도 안 든 붙여넣기는 고른 것이
+        // 아니다 — 세우면 그 뒤의 Enter 가 첫 이름을 설정에 적는다.
+        let mut idle = z.clone();
+        for code in [KeyCode::Backspace, KeyCode::Delete, KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End] {
+            assert!(idle.key(KeyEvent::from(code)), "{code:?} 를 칸이 안 먹었다");
+        }
+        idle.paste("\n");
+        assert_eq!((idle.at(), idle.unlisted()), (None, true), "글을 안 바꾼 키가 커서를 세웠다");
+
+        let mut moved = z.clone();
+        moved.step(Move::LineDown);
+        assert_eq!(moved.at(), Some("Africa/Abidjan"), "첫걸음이 첫 줄에 안 섰다");
+        assert!(!moved.unlisted());
+        let mut bottom = z.clone();
+        bottom.step(Move::Bottom);
+        assert_eq!(bottom.at(), Some("UTC"));
+
+        let mut typed = z.clone();
+        assert!(typed.key(KeyEvent::from(KeyCode::Char('s'))));
+        assert_eq!(typed.at(), Some("Asia/Seoul"), "글을 쳤는데 커서가 안 섰다");
+        let mut pasted = z;
+        pasted.paste("utc");
+        assert_eq!(pasted.at(), Some("UTC"));
+
+        // 목록에 있는 이름에서 열면 그 줄이다 — 가르기 전과 같다.
+        assert_eq!(Zones::open(all, None, "Asia/Seoul").at(), Some("Asia/Seoul"));
     }
 
     /// **대소문자를 안 가린다** — 이름은 `Asia/Seoul` 인데 손은 `asia` 를 친다.

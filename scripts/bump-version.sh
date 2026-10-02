@@ -150,6 +150,10 @@ fi
 
 # `[package]` 의 첫 `version` 줄 하나만 바꾼다. 의존성 표의 같은 낱말은 안 건드린다.
 #
+# **작은따옴표 줄도 바꾼다**(moai-kyp7.269). 위에서 판을 읽는 `check-version.sh` 는
+# `version = '0.1.5'` 를 읽는데 여기가 큰따옴표만 찾으면, 아무것도 안 바꾸고 "→ 새 판" 을
+# 찍는다. 따옴표는 그 줄의 것을 그대로 둔다(`\047` 이 작은따옴표다).
+#
 # `mktemp` 이 낸 파일은 0600 이고 `mv` 가 그 모드를 그대로 얹는다 — 그대로 두면
 # 판을 올린 커밋에서 `Cargo.toml` 이 주인만 읽는 파일이 되고, git 은 실행 비트만
 # 보므로 아무도 못 본다. 옮기기 전에 되돌린다.
@@ -158,7 +162,8 @@ trap 'rm -f -- "$tmp"' EXIT
 awk -v want="$want" '
   /^[[:space:]]*\[/ { pkg = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*$/); print; next }
   pkg && !done && /^[[:space:]]*version[[:space:]]*=/ {
-    sub(/=[[:space:]]*"[^"]*"/, "= \"" want "\"")
+    if (!sub(/=[[:space:]]*"[^"]*"/, "= \"" want "\""))
+      sub(/=[[:space:]]*\047[^\047]*\047/, "= \047" want "\047")
     done = 1
   }
   { print }
@@ -171,6 +176,10 @@ printf 'bump-version: Cargo.toml  %s → %s\n' "$have" "$want"
 # — 그 표를 가리는 자는 판과 같이 `check-version.sh` 하나다(`--print-name`) — `source` 가
 # 선 줄은 세지 않는다. 작업 공간의 멤버에는 `source` 가 안 서니, 같은 이름의 레지스트리
 # 크레이트를 자기 줄로 읽지 않는다. 못 찾으면 빈 줄을 낸다.
+#
+# 여기서는 큰따옴표만 벗긴다. 이것을 부르기 직전에 `cargo update` 가 잠금 파일을 다시 쓰고,
+# cargo 는 늘 큰따옴표로 쓴다. 작은따옴표 `Cargo.toml` 에서 길을 잃는 자리는 이름이었고,
+# 그 이름은 `--print-name` 이 벗겨 준다(moai-kyp7.269).
 lock_version() {
   local name
   [ -f "$root/Cargo.lock" ] || return 0

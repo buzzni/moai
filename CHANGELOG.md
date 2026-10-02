@@ -81,6 +81,16 @@ does not tag — see `CONTRIBUTING.md`.
   sees `broken` in all of these — the fix is the link or the file
   (`docs/recovery.md`).
 
+- **Ties under `--sort created` and `--sort updated` fall to id alone.** A
+  plan creates its rows within one second, so rows sharing a `created_at` are
+  common. Those ties used to fall to priority, then id, so a priority edit
+  between pages moved a row across the `--after` cursor and it was repeated or
+  skipped. They now fall to id alone, and
+  `--sort created` joins `--sort id` as an order no edit moves; `updated` still
+  moves, since an edit changes the row's own `updated_at`. Every other order
+  still breaks ties by priority, then id. The explorer's `SPC s` goes through
+  the same order, so its created and updated lists change the same way.
+
 ### Fixed
 
 - **A snapshot or config that links out of the checkout no longer runs every
@@ -134,6 +144,27 @@ does not tag — see `CONTRIBUTING.md`.
   linked tracker prints only the link — it now uses
   `git cat-file --batch --follow-symlinks`; and the AGENTS block and the refusal
   for `--from - --body -` read as if `--body` took a file.
+
+- **`SPC o t` no longer picks a zone when yours is a rule.** When the zone in use
+  is a POSIX rule such as `TZ=JST-9`, it is not a name on the list, so the window
+  now opens with no row highlighted and says so at the bottom. Enter alone keeps
+  the zone; moving or typing picks one. Before, Enter switched to the first name,
+  `Africa/Abidjan`, and wrote it to your config. Typing a filter that matches no
+  name now says so, instead of claiming the machine has no timezone data.
+
+- **The explorer says when it could not read a journal.** A journal it could not
+  open — someone else's file left at `0600`, say — now stands as a third header
+  row, `Journal : <n> unreadable — <first file> (<kind>)`, until you quit; in a
+  window too low for the header it is one banner line. Before, the stats window
+  and the `/` note search counted without that history and said nothing until the
+  explorer quit.
+
+- **Wheel reports no longer reach the shell under mosh.** mosh answers the
+  explorer's "are the reports all in?" question itself, before the wheel reports
+  still crossing the network arrive. When you quit or open the editor within a
+  second of scrolling or dragging, the explorer now keeps dropping mouse reports
+  that follow the answer until 300ms pass quietly or a key arrives — that first
+  key is lost. Quitting without having scrolled waits no longer and loses nothing.
 
 ## [0.2.0] - 2026-10-02
 
