@@ -10,7 +10,6 @@
 
 use super::keys::Side;
 use super::scroll::{HALF, Move, PAGE};
-use crate::model::Kind;
 
 /// 카드 하나가 가져가는 가장 좁은 폭 — 테두리 안쪽에서 칸을 고르게 나눌 때 이보다 좁아지면 칸을 덜 세운다.
 /// 머리(`id · 글리프 · pN`)가 `moai-9nfw.isu ⠼▸ p1` 로 스무 칸 남짓이라, 이보다 좁으면 id 가 잘려 카드가
@@ -27,12 +26,13 @@ pub enum Column {
     Status(String),
 }
 
-/// 그 줄이 서는 칸. **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 idea 는 idea 칸에 선다: idea 는 아직 일이
+/// 그 줄이 서는 칸 — `idea` 는 그 줄이 담아 둔 생각인가(종류를 든 쪽이 잰다: 조각은 이슈를 모른다).
+/// **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 idea 는 idea 칸에 선다: idea 는 아직 일이
 /// 아니라 미룸이 뜻이 없다(`moai idea` 는 미룰 일이 아니라 담아 둔 것이다). 미룬 일은 칸이 `in_progress`
 /// 여도 미룸 칸이다 — 지금 누가 손대는 줄이 아니다(`Site::spins` 가 미룬 줄을 안 돌리는 것과 같은 자).
-pub fn column_of(kind: Kind, shelved: bool, status: &str) -> Column {
-    match (kind, shelved) {
-        (Kind::Idea, _) => Column::Idea,
+pub fn column_of(idea: bool, shelved: bool, status: &str) -> Column {
+    match (idea, shelved) {
+        (true, _) => Column::Idea,
         (_, true) => Column::Shelved,
         _ => Column::Status(status.to_string()),
     }
@@ -251,9 +251,9 @@ mod tests {
 
     #[test]
     fn the_three_axes_fall_into_one_row_of_columns() {
-        assert_eq!(column_of(Kind::Idea, true, "in_progress"), Column::Idea, "미룬 idea 는 idea 칸이다");
-        assert_eq!(column_of(Kind::Issue, true, "in_progress"), Column::Shelved, "미룬 일은 미룸 칸이다");
-        assert_eq!(column_of(Kind::Issue, false, "review"), Column::Status("review".into()));
+        assert_eq!(column_of(true, true, "in_progress"), Column::Idea, "미룬 idea 는 idea 칸이다");
+        assert_eq!(column_of(false, true, "in_progress"), Column::Shelved, "미룬 일은 미룸 칸이다");
+        assert_eq!(column_of(false, false, "review"), Column::Status("review".into()));
     }
 
     /// 숨긴 칸은 빠지지만 **카드가 든 칸은 선다** — 검색이 드러낸 done 카드와 설정이 모르는 칸의 카드가
