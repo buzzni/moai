@@ -2009,12 +2009,11 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
         out.columns.push((Rect { x: xs[k], y: inner.y, width: widths[k] as u16, height: inner.height }, c));
     }
 
-    let card_h = laid.plan.card_h;
     app.list.fit(canvas.height as usize, laid.plan.height);
     if let Some(p) = here {
         // 레인의 첫 카드면 그 레인의 머리줄까지 보인다 — 머리줄 없이 선 카드는 어느 마일스톤인지 모른다.
         let lead = usize::from(laid.plan.headed && p.nth == 0);
-        app.list.reveal_span(p.top - lead, card_h + lead);
+        app.list.reveal_span(p.top - lead, p.height + lead);
     }
     let offset = app.list.offset();
     let seen = offset..offset + canvas.height as usize;
@@ -2030,13 +2029,13 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
         }
     }
     for (n, p) in laid.plan.cards.iter().enumerate() {
-        if !win.holds(p.column) || p.top >= seen.end || p.top + card_h <= seen.start {
+        if !win.holds(p.column) || p.top >= seen.end || p.top + p.height <= seen.start {
             continue;
         }
         let k = p.column - win.first;
         let Some(r) = rows.get(n) else { continue };
-        let lines = card(app, r, n == app.cursor, widths[k], card_h);
-        let (from, to) = (p.top.max(seen.start), (p.top + card_h).min(seen.end));
+        let lines = card(app, r, n == app.cursor, widths[k], p.height);
+        let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
         for (dy, line) in lines.iter().enumerate() {
             if (from..to).contains(&(p.top + dy)) {
                 f.buffer_mut().set_line(xs[k], y_of(p.top + dy), line, widths[k] as u16);
@@ -2244,14 +2243,23 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
 /// 카드의 발줄 — 켠 열의 값, 목록의 오른쪽 열과 같은 차례·같은 꼴이다([`RIGHT`]). 빈 태그는 자리를 안 지킨다:
 /// 줄마다 폭을 맞출 까닭이 카드에는 없다. **에픽은 카드가 아니라 여기 이름으로 선다**(사용자 결정) — 색은 목록의
 /// 에픽 열과 같다.
+///
+/// **남의 카드는 담당 자리에 흐린 `→ 이름`·`담당 없음` 을 단다**(moai-oagj.y88, 사용자 결정) — 담당 열을 안 켰어도
+/// 선다. 켰으면 그 칸이 이 낱말로 바뀌어 같은 이름이 두 번 서지 않는다. 내 카드는 칠하지 않는다. 누구 것인가는
+/// `ready` 와 한 자다([`Site::whose`]).
 fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<Span<'static>> {
     use super::view::Field;
+    let whose = site.whose(at);
     // 값은 목록의 오른쪽 열과 같은 글이다([`right_cell`]) — 자가 둘이면 날짜 꼴을 고치는 날 한쪽만 바뀐다.
     let parts: Vec<(Field, String)> = RIGHT
         .iter()
         .map(|&(f, _, _)| f)
-        .filter(|f| fields.shows(*f))
-        .map(|f| (f, right_cell(site, at, f)))
+        .filter(|f| fields.shows(*f) || (*f == Field::Assignee && whose.is_some()))
+        .map(|f| match (f, whose) {
+            (Field::Assignee, Some(crate::report::Owner::Theirs)) => (f, format!("→ {}", right_cell(site, at, f))),
+            (Field::Assignee, Some(crate::report::Owner::Unowned)) => (f, say(site.lang, "tui.board.unowned").into()),
+            _ => (f, right_cell(site, at, f)),
+        })
         .filter(|(f, text)| !(*f == Field::Tags && text.is_empty()))
         .collect();
     let mut out = Vec::new();
@@ -2802,8 +2810,11 @@ const RIGHT: [(super::view::Field, &str, usize); 5] = {
 /// 발줄에 서는 열은 목록의 오른쪽 열([`RIGHT`]) 그대로다(moai-9nfw). **하나라도 켜졌을 때만 발줄이 선다**(사용자
 /// 결정 2026-10-02): 머리(id·칸·우선순위)와 몸(제목)이 카드가 무엇인지 말하고, 그 밖은 사람이 `SPC c` 로 켠
 /// 만큼이다. 표를 따로 베껴 두지 않는다 — 베낀 표는 오른쪽 열을 하나 더하는 날 그 열을 말없이 빠뜨린다.
-pub(super) fn card_height(fields: super::view::Fields) -> usize {
-    2 + usize::from(RIGHT.iter().any(|(f, _, _)| fields.shows(*f)))
+///
+/// **남의 카드(`foreign`)는 켠 열이 없어도 발줄이 선다**(moai-oagj.y88, 사용자 결정) — 그 줄에 `→ 이름`·`담당 없음`
+/// 이 선다([`card_foot`]). 그래서 카드의 높이는 저마다다.
+pub(super) fn card_height(fields: super::view::Fields, foreign: bool) -> usize {
+    2 + usize::from(foreign || RIGHT.iter().any(|(f, _, _)| fields.shows(*f)))
 }
 
 /// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
@@ -4543,6 +4554,51 @@ pub(super) mod tests {
         let three = render(&mut a, 120, 14);
         let at = three.iter().position(|l| l.contains("> argos-0100")).unwrap();
         assert!(three[at + 2].contains('—'), "담당을 켰는데 발줄이 안 섰다\n{}", three.join("\n"));
+    }
+
+    /// **남의 카드와 담당 없는 카드는 켠 열이 없어도 발줄에 흐린 `→ 이름`·`담당 없음` 을 단다**(moai-oagj.y88, 사용자
+    /// 결정). 내 카드는 두 줄 그대로라 카드 높이가 저마다다. 담당 열을 켜면 그 칸이 이 낱말로 바뀌어 이름이 두 번 안
+    /// 서고, 누군지 모르면 아무 카드도 안 가른다 — `ready` 가 그때 `others` 를 안 세우는 것과 같은 자다.
+    #[test]
+    fn a_card_that_is_not_mine_names_whose_it_is_in_a_dim_foot() {
+        let mut a = board_app(2);
+        // 0100 은 내 것, 0101 은 남의 것, 0080·0090 은 담당이 없다.
+        a.site.issues[2].assignee = Some("레이븐".into());
+        a.site.issues[2].assignee_email = Some("raven@example.com".into());
+        a.site.issues[3].assignee = Some("이웃".into());
+        a.site.issues[3].assignee_email = Some("next@example.com".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
+        let lines = render(&mut a, 120, 20);
+        let text = lines.join("\n");
+        let at = |lines: &[String], id: &str| lines.iter().position(|l| l.contains(id)).unwrap_or_else(|| panic!("{id}"));
+        let mine = at(&lines, "argos-0100");
+        assert!(lines[mine + 2].contains("argos-0101"), "내 카드가 발줄을 달았다\n{text}");
+        let theirs = at(&lines, "argos-0101");
+        assert!(lines[theirs + 2].contains("→ 이웃"), "남의 카드가 담당을 안 댄다\n{text}");
+        let x = lines[theirs + 2].find("→ 이웃").unwrap();
+        let mut term = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let cell = &term.backend().buffer()[(crate::text::width(&lines[theirs + 2][..x]) as u16, (theirs + 2) as u16)];
+        assert_eq!(cell.fg, Color::DarkGray, "남의 줄 낱말이 흐리지 않다");
+        let loose = at(&lines, "argos-0080");
+        assert!(lines[loose + 2].contains("담당 없음"), "담당 없는 카드가 그것을 안 댄다\n{text}");
+
+        a.hit("SPC c a Esc");
+        let lines = render(&mut a, 120, 20);
+        let text = lines.join("\n");
+        let theirs = at(&lines, "argos-0101");
+        assert_eq!(lines[theirs + 2].matches("이웃").count(), 1, "담당 열을 켰더니 이름이 두 번 섰다\n{text}");
+        let mine = at(&lines, "argos-0100");
+        assert!(
+            lines[mine + 2].contains("레이븐") && !lines[mine + 2].contains('→'),
+            "내 카드의 담당 칸이 칠해졌다\n{text}"
+        );
+
+        a.hit("SPC c a Esc");
+        a.site.me = None;
+        let lines = render(&mut a, 120, 20);
+        let mine = at(&lines, "argos-0100");
+        assert!(lines[mine + 2].contains("argos-0101"), "누군지 모르는데 카드를 갈랐다\n{}", lines.join("\n"));
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에

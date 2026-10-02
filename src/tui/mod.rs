@@ -1523,6 +1523,16 @@ impl Site {
         root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
     }
 
+    /// 그 줄이 내 것이 아니면 그 까닭(moai-oagj.y88) — 보드 카드의 발줄이 댄다. 가르는 자는 `ready` 와 훅이 쓰는
+    /// [`crate::report::owner`] 하나다: 자를 따로 세우면 `ready` 가 `others` 로 내미는 줄을 보드가 내 것으로 그린다.
+    ///
+    /// **누군지 모르면 `None` 이다** — `ready` 가 그때 아무것도 따로 세우지 않는 것과 같은 자다(`report::by_owner`).
+    /// 설정 없는 기계에서 모든 카드에 `담당 없음` 이 서면 화면이 고장 난 것으로 보인다.
+    pub fn whose(&self, at: usize) -> Option<crate::report::Owner> {
+        let me = crate::query::Me::label(self.me.as_deref()?);
+        crate::report::owner(&me, self.issues.get(at)?)
+    }
+
     /// 보기(`SPC v`)가 이 줄을 보이는가 — 검색과 상관없이. `shown` 이 빈 때는 보인다.
     fn view_shows(&self, at: usize) -> bool {
         self.shown.get(at).copied().unwrap_or(true)
@@ -4185,18 +4195,20 @@ impl App {
     /// `j` 가 가는 카드와 화면의 아래 카드가 갈린다. `rows` 는 [`App::rows`] 가 보드로 낸 카드다.
     pub(super) fn laid(&self, rows: &[Row]) -> Laid {
         let site = &self.site;
-        let spots: Vec<Option<(Option<&Seg>, board::Column)>> = rows
+        // 줄마다 레인·칸·카드의 줄 수. **남의 카드는 켠 열이 없어도 발줄을 단다**(moai-oagj.y88, 사용자 결정).
+        let spots: Vec<Option<(Option<&Seg>, board::Column, usize)>> = rows
             .iter()
             .map(|r| match r {
                 Row::Item(Seat::Here, e, _) => e.at().filter(|&at| at < site.issues.len()).map(|at| {
                     let i = &site.issues[at];
                     let idea = crate::report::is_idea(i);
-                    (site.lane(at), board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at)))
+                    let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
+                    (site.lane(at), column, draw::card_height(self.fields, site.whose(at).is_some()))
                 }),
                 _ => None,
             })
             .collect();
-        let held: Vec<board::Column> = spots.iter().flatten().map(|(_, c)| c.clone()).collect();
+        let held: Vec<board::Column> = spots.iter().flatten().map(|(_, c, _)| c.clone()).collect();
         let statuses = &site.cfg.statuses;
         let columns = board::columns(statuses, &held, &|c| match c {
             board::Column::Idea => !self.view.hide_ideas,
@@ -4207,22 +4219,24 @@ impl App {
         let slots: Vec<board::Slot> = spots
             .iter()
             .map(|spot| {
-                let (lane, column) = match spot {
-                    Some((lane, column)) => (*lane, columns.iter().position(|c| c == column).unwrap_or(0)),
-                    None => (None, 0),
+                let (lane, column, height) = match spot {
+                    Some((lane, column, height)) => {
+                        (*lane, columns.iter().position(|c| c == column).unwrap_or(0), *height)
+                    }
+                    None => (None, 0, draw::card_height(self.fields, false)),
                 };
                 let lane = lanes.iter().position(|l| l.as_ref() == lane).unwrap_or_else(|| {
                     lanes.push(lane.cloned());
                     lanes.len() - 1
                 });
-                board::Slot { lane, column }
+                board::Slot { lane, column, height }
             })
             .collect();
         // **레인 머리줄은 뿌리에 이름 있는 레인(마일스톤·바구니)이 설 때만이다** — 마일스톤이나 에픽 안은 레인이
         // 하나라 머리줄이 경로 줄을 되풀이할 뿐이다. 마일스톤을 안 쓰는 저장소에도 `(길 잃음)` 은 레인으로 서므로,
         // 그때 이름 없는 레인(`None`)은 머리줄 자리만 비워 두고 글을 안 세운다(`draw::board`).
         let headed = lanes.iter().any(Option::is_some);
-        let plan = board::Plan::of(&slots, columns.len(), draw::card_height(self.fields), headed);
+        let plan = board::Plan::of(&slots, columns.len(), headed);
         Laid { columns, lanes, plan }
     }
 

@@ -62,6 +62,9 @@ pub fn columns(statuses: &[String], cards: &[Column], shows: &dyn Fn(&Column) ->
 pub struct Slot {
     pub lane: usize,
     pub column: usize,
+    /// 그 카드의 줄 수 — 머리·몸에 발줄이 서면 셋이다. **카드마다 다르다**(moai-oagj.y88): 남의 카드는 켠 열이
+    /// 없어도 발줄을 달고 내 카드는 두 줄 그대로다.
+    pub height: usize,
 }
 
 /// 카드 하나가 선 자리.
@@ -73,13 +76,15 @@ pub struct Placed {
     pub nth: usize,
     /// 보드 전체를 한 장으로 본 캔버스의 윗줄 — 굴린 자리(`Scroll`)가 이 자로 잰다.
     pub top: usize,
+    /// 그 카드의 줄 수([`Slot::height`]).
+    pub height: usize,
 }
 
 /// 레인 하나가 캔버스에서 차지하는 줄.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lane {
     pub top: usize,
-    /// 머리줄까지 넣은 높이 — 가장 긴 칸의 카드 수 × 카드 높이.
+    /// 머리줄까지 넣은 높이 — 가장 긴 칸의 카드 높이를 더한 것.
     pub height: usize,
 }
 
@@ -92,8 +97,6 @@ pub struct Plan {
     pub lanes: Vec<Lane>,
     /// 칸 수 — [`columns`] 가 낸 것.
     pub columns: usize,
-    /// 카드 하나의 줄 수 — 머리·몸에 발줄이 서면 셋이다.
-    pub card_h: usize,
     /// 레인마다 머리줄이 서는가 — 뿌리에 레인이 둘 이상일 때다.
     pub headed: bool,
     /// 캔버스 전체의 줄 수.
@@ -104,36 +107,39 @@ impl Plan {
     /// 줄마다 들어온 자리(`slots`)를 캔버스의 자리로 편다. 레인 안의 칸마다 **줄의 차례 그대로** 쌓는다 —
     /// 차례는 목록이 이미 정한 것(`SPC s`)이라 여기서 다시 정하지 않는다.
     ///
-    /// `headed` 면 레인마다 머리줄 한 줄이 먼저 선다. 레인 하나의 높이는 그 안의 **가장 긴 칸**이다.
-    pub fn of(slots: &[Slot], columns: usize, card_h: usize, headed: bool) -> Plan {
+    /// `headed` 면 레인마다 머리줄 한 줄이 먼저 선다. 레인 하나의 높이는 그 안의 **가장 긴 칸**이다 — 카드의 높이가
+    /// 저마다라(moai-oagj.y88) 장 수가 아니라 줄 수로 잰다.
+    pub fn of(slots: &[Slot], columns: usize, headed: bool) -> Plan {
         let lanes_n = slots.iter().map(|s| s.lane + 1).max().unwrap_or(0);
-        // 레인·칸마다 쌓인 수.
-        let mut stack = vec![vec![0usize; columns]; lanes_n];
-        let mut nth = Vec::with_capacity(slots.len());
+        // 레인·칸마다 쌓인 장 수와 줄 수. 카드의 자리는 그 칸에서 앞 카드들이 차지한 줄 밑이다.
+        let mut stack = vec![vec![(0usize, 0usize); columns]; lanes_n];
+        let mut below = Vec::with_capacity(slots.len());
         for s in slots {
-            let n = &mut stack[s.lane][s.column];
-            nth.push(*n);
+            let (n, lines) = &mut stack[s.lane][s.column];
+            below.push((*n, *lines));
             *n += 1;
+            *lines += s.height;
         }
         let head = usize::from(headed);
         let mut lanes = Vec::with_capacity(lanes_n);
         let mut top = 0;
         for counts in &stack {
-            let height = head + counts.iter().copied().max().unwrap_or(0) * card_h;
+            let height = head + counts.iter().map(|&(_, lines)| lines).max().unwrap_or(0);
             lanes.push(Lane { top, height });
             top += height;
         }
         let cards = slots
             .iter()
-            .zip(nth)
-            .map(|(s, nth)| Placed {
+            .zip(below)
+            .map(|(s, (nth, lines))| Placed {
                 lane: s.lane,
                 column: s.column,
                 nth,
-                top: lanes[s.lane].top + head + nth * card_h,
+                top: lanes[s.lane].top + head + lines,
+                height: s.height,
             })
             .collect();
-        Plan { cards, lanes, columns, card_h, headed, height: top }
+        Plan { cards, lanes, columns, headed, height: top }
     }
 
     /// 그 칸에 선 카드 수 — 칸 머리줄의 셈이다.
@@ -254,8 +260,9 @@ pub fn widths(width: usize, count: usize) -> Vec<usize> {
 mod tests {
     use super::*;
 
+    /// 두 줄짜리 카드 — 발줄 없는 카드다.
     fn slot(lane: usize, column: usize) -> Slot {
-        Slot { lane, column }
+        Slot { lane, column, height: 2 }
     }
 
     #[test]
@@ -289,20 +296,34 @@ mod tests {
     #[test]
     fn cards_stack_in_row_order_and_a_lane_is_as_tall_as_its_longest_column() {
         let slots = [slot(0, 1), slot(0, 1), slot(0, 2), slot(1, 0)];
-        let p = Plan::of(&slots, 3, 2, true);
+        let p = Plan::of(&slots, 3, true);
         assert_eq!(p.lanes, [Lane { top: 0, height: 1 + 2 * 2 }, Lane { top: 5, height: 1 + 2 }]);
         assert_eq!(p.cards.iter().map(|c| (c.nth, c.top)).collect::<Vec<_>>(), [(0, 1), (1, 3), (0, 1), (0, 6)]);
         assert_eq!(p.height, 8);
         assert_eq!((p.count(0), p.count(1), p.count(2)), (1, 2, 1));
         // 머리줄이 없으면 그 한 줄이 안 든다.
-        assert_eq!(Plan::of(&slots[..3], 3, 2, false).cards[1].top, 2);
+        assert_eq!(Plan::of(&slots[..3], 3, false).cards[1].top, 2);
+    }
+
+    /// **카드의 높이는 저마다다**(moai-oagj.y88) — 발줄을 단 카드 밑의 카드는 그만큼 내려서고, 레인은 장 수가 아니라
+    /// 줄 수가 가장 많은 칸만큼 높다.
+    #[test]
+    fn a_card_with_a_foot_pushes_the_next_one_down_and_the_lane_counts_lines() {
+        let tall = |lane, column| Slot { lane, column, height: 3 };
+        // 칸 0: 셋째 줄이 선 카드 위에 두 줄 카드. 칸 1: 두 줄 카드 둘 — 장 수는 같고 줄 수는 칸 0 이 많다.
+        let slots = [tall(0, 0), slot(0, 0), slot(0, 1), slot(0, 1), slot(1, 1)];
+        let p = Plan::of(&slots, 2, true);
+        assert_eq!(p.cards.iter().map(|c| (c.top, c.height)).collect::<Vec<_>>(), [(1, 3), (4, 2), (1, 2), (3, 2), (7, 2)]);
+        assert_eq!(p.lanes, [Lane { top: 0, height: 1 + 3 + 2 }, Lane { top: 6, height: 1 + 2 }]);
+        // 옆 칸으로 옮기는 자는 줄로 잰 높이다 — 칸 1 의 둘째 카드(윗줄 3)에서 왼쪽은 윗줄 4 의 카드다.
+        assert_eq!(step(&p, 3, Go::Side(Side::Left)), 1);
     }
 
     /// `j`·`k` 는 칸 안에서 레인을 건너 가고, 끝에서 멈춘다.
     #[test]
     fn j_and_k_walk_one_column_across_lanes() {
         // 레인 0: 칸 0 에 둘, 칸 1 에 하나. 레인 1: 칸 0 에 하나.
-        let p = Plan::of(&[slot(0, 0), slot(0, 1), slot(0, 0), slot(1, 0)], 2, 2, true);
+        let p = Plan::of(&[slot(0, 0), slot(0, 1), slot(0, 0), slot(1, 0)], 2, true);
         let down = |n| step(&p, n, Go::Move(Move::LineDown));
         let up = |n| step(&p, n, Go::Move(Move::LineUp));
         assert_eq!((down(0), down(2), down(3)), (2, 3, 3), "칸 0 을 위에서 아래로 — 끝에서 멈춘다");
@@ -317,7 +338,7 @@ mod tests {
     #[test]
     fn h_and_l_keep_the_height_and_skip_empty_columns() {
         // 칸 0 에 셋(윗줄 0·2·4), 칸 1 은 비고, 칸 2 에 둘(윗줄 0·2).
-        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 2), slot(0, 2)], 3, 2, false);
+        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 2), slot(0, 2)], 3, false);
         assert_eq!(step(&p, 2, Go::Side(Side::Right)), 4, "아래 카드에서 오른쪽은 가장 가까운 아래 카드다");
         assert_eq!(step(&p, 0, Go::Side(Side::Right)), 3);
         assert_eq!(step(&p, 4, Go::Side(Side::Left)), 1, "같은 높이의 카드로 돌아온다");
@@ -327,7 +348,7 @@ mod tests {
 
     #[test]
     fn an_empty_board_keeps_the_cursor_where_it_is() {
-        let p = Plan::of(&[], 3, 2, false);
+        let p = Plan::of(&[], 3, false);
         assert_eq!(step(&p, 0, Go::Move(Move::LineDown)), 0);
         assert_eq!(roll(&p, 0, 1, 3), 0);
         assert_eq!(p.height, 0);
@@ -336,7 +357,7 @@ mod tests {
     /// 휠은 마우스가 선 칸을 굴린다 — 커서가 딴 칸이면 먼저 그 칸으로 건너온다.
     #[test]
     fn the_wheel_moves_within_the_column_under_the_mouse() {
-        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 1)], 2, 2, false);
+        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 1)], 2, false);
         assert_eq!(roll(&p, 0, 0, 3), 2, "끝에서 멈춘다");
         assert_eq!(roll(&p, 2, 0, -3), 0);
         assert_eq!(roll(&p, 2, 1, 3), 3, "딴 칸이면 그 칸으로 건너온다");

@@ -299,6 +299,7 @@
   "tui.pane.detail": "detail",
   "tui.pane.board": "board",
   "tui.board.idea": "idea",
+  "tui.board.unowned": "unowned",
   "tui.board.more": " {n} more: {names} ",
   "tui.badge.sorted": "sort {by}",
   "tui.badge.reversed": " reversed",
