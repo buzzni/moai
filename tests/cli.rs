@@ -21062,8 +21062,11 @@ fn bump_crate(name: &str, q: char, lock: &str, fake_cargo: Option<&str>) -> (Out
     let root = s.path();
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
-    std::fs::write(root.join("Cargo.toml"), format!("[package]\nname = {q}moai{q}\nversion = {q}0.1.5{q}\nedition = {q}2021{q}\n"))
-        .unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        format!("[package]\nname = {q}moai{q}\nversion = {q}0.1.5{q}\nedition = {q}2021{q}\n"),
+    )
+    .unwrap();
     std::fs::write(root.join("Cargo.lock"), lock).unwrap();
     std::fs::write(
         root.join("CHANGELOG.md"),
