@@ -2585,3 +2585,4 @@
 {"ts":"2026-10-02T01:51:39Z","id":"moai-nejw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 소개 발표 자료(PPT)를 만든다"}
 {"ts":"2026-10-02T01:51:44Z","id":"moai-nejw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-02T01:58:41Z","id":"moai-nejw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사용자 검토를 기다린다. 워크트리 가지 worktree-moai-moai-nejw 에 커밋했고, develop 에 머지할지는 사용자가 정한다(바이너리 파일이 저장소에 들어간다). 생성 스크립트는 세션 스크래치패드에 있다"}
+{"ts":"2026-10-02T01:58:58Z","id":"moai-nejw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
