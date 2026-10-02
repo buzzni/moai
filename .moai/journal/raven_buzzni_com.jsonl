@@ -2871,3 +2871,5 @@
 {"ts":"2026-10-02T12:25:26Z","id":"moai-18so.rnm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-02T12:25:26Z","id":"moai-18so.pe7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in findings 1 and 2 as test fixes (fix commit, merged in 6b0655d5). Left 3 and 4 as they are, reasons in the note above. Handed 5 (notice calls a note \"the body\") on as idea moai-4oii."}
 {"ts":"2026-10-02T12:25:59Z","id":"moai-18so","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left here; the \"body\" wording for note is idea moai-4oii"}
+{"ts":"2026-10-02T12:31:41Z","id":"moai-c5xo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"빌드 출력을 /tmp 로 옮긴다 — 워크트리 규약"}
+{"ts":"2026-10-02T12:31:42Z","id":"moai-c5xo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
