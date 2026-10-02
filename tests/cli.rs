@@ -7811,7 +7811,9 @@ fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
     quiet(&["add", "없는 파일", "--body", "nope.md", "-q"], None);
     // 디렉터리는 `--from` 이 읽지도 못하는 자리다 — 일반 파일만 센다.
     quiet(&["add", "디렉터리", "--body", "sub", "-q"], None);
-    // 글이 stdin 에서 왔으면 사람이 이름으로 준 것이 아니다.
+    // 글이 stdin 에서 왔으면 사람이 이름으로 준 것이 아니다. 알림은 argv 의 글을 재므로, `-` 라는
+    // 이름의 파일이 서 있어야 `-` 를 거르는 줄을 걷었을 때 여기가 붉어진다(리뷰 moai-18so.pe7).
+    std::fs::write(s.path().join("-"), "x").unwrap();
     quiet(&["add", "stdin 글", "-b", "-", "-q"], Some("plan.md\n"));
     // 빈 글은 `read_body` 가 접어 없다.
     quiet(&["add", "빈 글", "-b", "", "-q"], None);
@@ -16768,6 +16770,13 @@ fn an_empty_note_is_told_apart_from_a_missing_one() {
     let blank = from_stdin(s.path(), &["note", &id, "-b", "-"], "   \n \n");
     assert!(!blank.status.success(), "빈 메모가 들어갔다");
     assert!(String::from_utf8_lossy(&blank.stderr).contains("비었다"), "{}", String::from_utf8_lossy(&blank.stderr));
+    // **한 줄로만 말한다**(리뷰 moai-18so.pe7) — `note` 가 `read_body_said` 를 지나면 "stdin 이 비었다" 가
+    // 거절문 앞에 하나 더 선다. 빈 stdin 은 이 명령이 제 말로 거절한다. 빈칸만 든 글은 `read_body` 를
+    // 지나 `Some` 이라 그 줄이 안 서므로, 아무것도 안 온 stdin 으로 잰다.
+    let nothing = from_stdin(s.path(), &["note", &id, "-b", "-"], "");
+    assert!(!nothing.status.success(), "빈 메모가 들어갔다");
+    let said = String::from_utf8_lossy(&nothing.stderr);
+    assert!(said.contains("비었다") && said.lines().count() == 1, "{said}");
 
     // 둘 다 저널에 아무것도 안 남겼다.
     let shown = ok(s.path(), &["show", &id]);
