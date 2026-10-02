@@ -152,9 +152,16 @@ impl App {
     ///
     /// 커서는 `j`·`k` 와 같은 길([`App::move_to`])로 옮긴다 — 다른 줄로 가면 상세가 첫 줄로 돌아간다.
     /// 줄이 없는 자리(마지막 줄 밑의 빈 곳·테두리·열 이름 줄)는 포커스만 옮긴다.
+    ///
+    /// **보드에서는 카드를 누른다**(moai-9nfw) — 그린 카드의 자리([`Drawn::cards`])에서 맞힌다. 카드 사이의 빈 곳·칸
+    /// 머리줄·레인 머리줄은 포커스만 옮긴다.
     fn press(&mut self, at: Position) {
         let Some(pane) = self.pane_at(at) else { return };
         self.focus = pane;
+        if let Some(&(_, n)) = self.drawn.cards.iter().find(|(r, _)| pane == Pane::Explorer && r.contains(at)) {
+            self.move_to(n);
+            return;
+        }
         let rows = self.drawn.rows;
         if pane == Pane::Explorer && rows.contains(at) {
             let n = self.list.offset() + usize::from(at.y - rows.y);
@@ -229,9 +236,18 @@ impl App {
     /// - 상세는 굴린다 — 끝과 첫 줄 밖으로는 안 나간다(`Scroll::by`)
     /// - 목록은 **커서를** 옮긴다 — 커서가 없는 줄을 굴려 보이게만 하면 상세는 그대로라, 굴려서 찾은
     ///   줄을 보려면 다시 눌러야 한다. 끝에서는 멈춘다 — `j`·`k` 와 같은 자다(`scroll::cursor_by`)
+    /// - 보드는 **마우스가 선 칸에서** 커서를 옮긴다(moai-9nfw) — 커서가 딴 칸이면 먼저 그 칸으로 건너온다
+    ///   ([`super::board::roll`]). 보드의 줄 차례는 화면의 위아래가 아니라, 줄 수만큼 옮기면 엉뚱한 칸으로 간다.
+    ///   한 칸에 카드 하나다 — 카드가 두세 줄이라 목록의 [`WHEEL`] 줄과 걸음이 얼추 맞는다
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
+            Some(Pane::Explorer) if self.board() => {
+                let Some(&(_, column)) = self.drawn.columns.iter().find(|(r, _)| r.contains(at)) else { return };
+                let rows = self.rows();
+                let to = super::board::roll(&self.laid(&rows).plan, self.cursor, column, by.signum());
+                self.move_to(to);
+            }
             Some(Pane::Explorer) => {
                 let to = scroll::cursor_by(by, self.cursor, || self.rows().len());
                 self.move_to(to);
@@ -370,6 +386,52 @@ mod tests {
         assert_eq!(a.cursor, 1);
         roll(&mut a, false, lx, ly);
         assert_eq!(a.cursor, 0, "첫 줄 위로 갔다");
+    }
+
+    /// **보드에서는 카드를 누르고, 휠은 마우스가 선 칸에서 카드를 하나씩 옮긴다**(moai-9nfw). 커서가 딴 칸이면 휠이
+    /// 먼저 그 칸의 가장 가까운 높이로 건너온다. 카드 밖(빈 곳·칸 머리줄)을 누르면 포커스만 옮긴다.
+    #[test]
+    fn on_the_board_a_click_takes_the_card_and_the_wheel_rolls_the_column_under_it() {
+        let at = "2026-09-01T00:00:00Z";
+        let issues = (1..=6)
+            .map(|k| {
+                let st = if k > 4 { "in_progress" } else { "todo" };
+                Issue::new(format!("argos-{k:04}"), format!("일 {k}"), Kind::Issue, Status::new(st), at)
+            })
+            .collect();
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), crate::nav::Path::new());
+        a.layout = super::super::view::Layout::Board;
+        super::super::draw::tests::render(&mut a, 140, 20);
+        let id = |a: &App, n: usize| match &a.rows()[n] {
+            super::super::Row::Item(_, e, _) => a.site.issues[e.at().unwrap()].id.clone(),
+            _ => String::new(),
+        };
+        let card = |a: &App, want: &str| {
+            a.drawn.cards.iter().find(|(_, n)| id(a, *n) == want).map(|(r, _)| *r).expect("카드가 안 그려졌다")
+        };
+        let column = |a: &App, name: &str| {
+            let laid = a.laid(&a.rows());
+            let c = laid.columns.iter().position(|c| *c == super::super::board::Column::Status(name.into())).unwrap();
+            a.drawn.columns.iter().find(|(_, k)| *k == c).map(|(r, _)| *r).expect("칸이 안 그려졌다")
+        };
+
+        a.focus = Pane::Detail;
+        let r = card(&a, "argos-0006");
+        click(&mut a, r.x + 3, r.y + 1);
+        assert_eq!((a.focus, id(&a, a.cursor)), (Pane::Explorer, "argos-0006".to_string()), "누른 카드에 안 섰다");
+        // 칸 머리줄은 카드가 아니다 — 포커스만 옮긴다.
+        a.focus = Pane::Detail;
+        let todo = column(&a, "todo");
+        click(&mut a, todo.x + 3, todo.y);
+        assert_eq!((a.focus, id(&a, a.cursor)), (Pane::Explorer, "argos-0006".to_string()));
+
+        roll(&mut a, true, todo.x + 3, todo.y + todo.height / 2);
+        assert_eq!(id(&a, a.cursor), "argos-0002", "휠이 그 칸의 가장 가까운 높이로 안 건너왔다");
+        roll(&mut a, true, todo.x + 3, todo.y + todo.height / 2);
+        assert_eq!(id(&a, a.cursor), "argos-0003", "휠 한 칸이 카드 하나가 아니다");
+        roll(&mut a, false, todo.x + 3, todo.y + todo.height / 2);
+        assert_eq!(id(&a, a.cursor), "argos-0002");
+        assert_eq!(a.focus, Pane::Explorer);
     }
 
     /// **통계 창 위의 휠은 창을 굴린다**(사용자 결정 2026-10-01) — 키(`j`·`k`)가 옮기는 그 자리다. 덮인 목록은
