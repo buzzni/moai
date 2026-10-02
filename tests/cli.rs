@@ -3624,6 +3624,36 @@ fn rm_does_not_call_a_reference_dangling_while_a_twin_of_the_id_stands() {
     assert!(err.contains("끊긴 참조가 3건"), "{err}");
 }
 
+/// **남은 쌍둥이가 에픽이 아니면 멤버는 끊겼다**(리뷰). `status` 의 `dangling_epic` 은 그 id 의 줄이
+/// 에픽인지로 잰다 — 에픽 줄을 걷어 낸 뒤 이슈 줄만 남으면 멤버의 `epic` 은 못 쓸 참조다. 닿는 줄이
+/// 있다는 것만 보고 지나 보내면 `status` 가 세는 줄을 `rm` 만 모른다.
+#[test]
+fn rm_calls_a_member_dangling_when_the_twin_left_is_not_an_epic() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmtwinkind");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-e001", "에픽 줄", "epic", ""),
+            row("argos-e001", "이슈 줄", "issue", ""),
+            row("argos-0004", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["rm", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":["argos-0004"]"#), "남은 줄이 이슈인데 멤버를 안 댔다\n{json}");
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_epic"), "{status}");
+}
+
 /// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
 /// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
 #[test]
@@ -7353,6 +7383,9 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "plan.md"], PLAN);
     assert!(out.status.success(), "{}", err(&out));
     assert!(err(&out).contains(said), "add --from 이 말없이 지나갔다\n{}", err(&out));
+    // 계획이 이미 stdin 을 쥐었으니 `--body - < plan.md` 를 내밀면 따라 친 부름이 거절된다(리뷰) —
+    // 계획을 파일로 옮기는 줄을 댄다.
+    assert!(err(&out).contains("--from <계획 파일> --body - < plan.md"), "stdin 을 다툴 줄을 내밀었다\n{}", err(&out));
     let made = issues(s.path());
     let root = made.lines().find(|l| l.contains(r#""title":"저장 계층""#)).expect(&made);
     assert!(root.contains(r#""body":"plan.md""#), "첫 뿌리의 본문이 바뀌었다\n{root}");

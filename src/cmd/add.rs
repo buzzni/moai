@@ -123,6 +123,13 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 /// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
 /// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add` 가 같은 말을 한다.
 pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
+    read_body_told(arg, ctx, false)
+}
+
+/// [`read_body_said`] 의 몸 — `plan_on_stdin` 은 **계획이 이미 stdin 을 쥐었는가**다(리뷰). 그 판에
+/// `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은
+/// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
+fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
@@ -130,10 +137,14 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
     }
     // stdin 에서 온 글은 사람이 파일 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
     if !from_stdin && let Some(text) = body.as_deref().filter(|b| names_a_file(b)) {
-        let said = crate::i18n::fill(
-            crate::i18n::say(ctx.lang(), "add.body_names_a_file"),
-            &[("text", text), ("path", &crate::text::shell_word(text))],
-        );
+        let lang = ctx.lang();
+        let how = match plan_on_stdin {
+            true => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
+            false => crate::i18n::say(lang, "add.body_names_a_file"),
+        };
+        // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
+        let said =
+            crate::i18n::fill(how, &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(text))]);
         eprintln!("moai: {said}");
     }
     Ok(body)
@@ -323,7 +334,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         }
         // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
         // stdin 을 읽는 쪽은 많아야 하나다.
-        let body = read_body_said(args.body.clone(), ctx)?;
+        let body = read_body_told(args.body.clone(), ctx, reads_stdin(from))?;
         return bulk(
             ctx,
             &repo,
@@ -429,8 +440,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             let kept =
                 args.milestone.as_deref().and_then(|m| super::edit::InheritedMilestone::of(issues, &issue.id, Some(m)));
             // **없는 마일스톤도 막지 않고 알려만 준다**(moai-3hxc.uyt) — 계획 길(`bulk`)이 이미 그렇다.
-            // 재는 자도 같은 [`is_milestone`] 이고, 락 안의 줄로 잰다.
-            let known = is_milestone(issues, args.milestone.as_deref());
+            // 재는 자도 같은 [`is_milestone`] 이고, 락 안의 줄로 잰다. **만든 줄에서 읽는다** — `bulk` 의
+            // `stood_on(&made)` 와 같은 까닭이다(쓰기에 정규화가 붙는 날 argv 와 줄이 갈린다).
+            let known = is_milestone(issues, issue.milestone.as_deref());
             Ok((vec![entry], (issue, read, kept, known)))
         },
     )?;
@@ -439,7 +451,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
     // 나는 판에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
     // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`").
-    say_no_such_milestone(args.milestone.as_deref(), known, ctx.lang());
+    say_no_such_milestone(made.milestone.as_deref(), known, ctx.lang());
 
     if ctx.json {
         // **곁들이는 키도 `edit --json` 과 같다** — `inherited_milestone` 은 이미 `cmd::OURS` 에 있다.

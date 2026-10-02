@@ -65,13 +65,19 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
             // **끊긴 id 는 "지운 줄이 있었다" 가 아니라 "지운 뒤 그 id 의 줄이 하나도 안 선다" 다.**
             // 같은 id 가 두 줄이면(`duplicate_id`) `rm <id>` 는 앞줄만 걷어 내고 쌍둥이가 남는다 — 그 id 를
             // 가리키던 자식·멤버·막힌 줄은 여전히 닿는 곳이 있다. 지운 id 만 보고 세면 끊기지 않은 것을
-            // 끊겼다고 알려, 알림이 거짓이 되고 `--json` 을 읽는 뒤처리가 헛 고침을 한다. 부모·에픽·막는 줄
-            // 셋이 이 집합 하나로 답한다.
+            // 끊겼다고 알려, 알림이 거짓이 되고 `--json` 을 읽는 뒤처리가 헛 고침을 한다. 부모·막는 줄은
+            // 이 집합 하나로 답한다.
             let cut: Vec<&str> =
                 gone.iter().map(|g| g.id.as_str()).filter(|id| !issues.iter().any(|i| i.id == *id)).collect();
+            // **에픽 참조는 남은 줄의 종류까지 본다**(리뷰). `status` 의 `dangling_epic` 은 "그 id 의 줄이
+            // 에픽인가"(`report::kinds`, 뒷줄이 이긴다)로 재므로, 에픽 줄을 걷어 낸 뒤 남은 쌍둥이가 이슈면
+            // 멤버는 끊긴 것이다 — 닿는 줄이 있다고 지나 보내면 `status` 가 세는 줄을 `rm` 만 모른다.
+            let left = crate::report::kinds_of(issues, &gone.iter().map(|g| g.id.as_str()).collect::<Vec<_>>());
+            let no_epic: Vec<&str> =
+                gone.iter().map(|g| g.id.as_str()).filter(|id| left.get(id) != Some(&model::Kind::Epic)).collect();
             for i in issues.iter() {
                 let orphan = crate::id::parent_of(&i.id).is_some_and(|p| cut.contains(&p));
-                let lost = i.epic.as_deref().is_some_and(|e| cut.contains(&e));
+                let lost = i.epic.as_deref().is_some_and(|e| no_epic.contains(&e));
                 let unblocked = i.blocked_by.iter().any(|b| cut.contains(&b.as_str()));
                 if orphan || lost || unblocked {
                     dangling.push(i.id.clone());
