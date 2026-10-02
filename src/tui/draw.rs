@@ -1250,7 +1250,7 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 창의 배너에서 늘 잘렸고, 앞에 경고가 서면 162칸이 들었다. 배너는 새 판과 나갈 때 줄이
     // 선다는 것만 말하고, 줄은 터미널을 걷은 뒤 셸에 남는다([`App::upgrade_note`]) — 거기서는
     // 잘리지 않고 그대로 복사된다.
-    if let (crate::latest::Seen::Newer { tag }, Some(_)) = (app.latest(), app.upgrade()) {
+    if let (Some(tag), Some(_)) = (app.latest().newer(), app.upgrade()) {
         parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
         soft += 1;
     }
@@ -1442,7 +1442,7 @@ fn spans_width(spans: &[Span]) -> usize {
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
 fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest());
+    let said = version_said(app.site.lang, app.latest(), &app.site.now);
     let user = app.told_user().to_string();
     [("User", user), ("Version", said)]
 }
@@ -1507,13 +1507,29 @@ const JOURNAL_AT_W: usize = 32;
 /// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
 /// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
 /// `kind` 뿐이라 통째로 버려지는 담기다.
-fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
+///
+/// **넷 모두 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정) — 못 물은 것은
+/// 지난번에 들은 답이 있을 때만, 그 답을 들은 때와 함께 못 물었다는 말 **뒤에** 단다. 지난
+/// 값이라는 것이 글에 보여야 해서다. 지난 답이 없으면 번호를 안 댄다. 들은 때는 `now` 로 재고,
+/// 그 값은 [`App`] 이 든 시각이라 여기서 시계를 안 읽는다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> String {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
     let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
-        Seen::Same => say(lang, "tui.version.same").to_string(),
-        Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
+        Seen::Newer { tag } => fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
+        Seen::Same { tag } => fill(say(lang, "tui.version.same"), &[("tag", tag)]),
+        Seen::Ahead { tag } => fill(say(lang, "tui.version.ahead"), &[("tag", tag)]),
+        Seen::Stale { why, tag, heard_at } => {
+            // 하루 단위로 잰다 — 창이 하루라 그보다 잘게 재도 사람이 할 일은 같다. 때를 못 읽으면
+            // 언제인지 모르는 것이지 오늘 본 것이 아니다.
+            let seen = match crate::model::days_since(heard_at, now) {
+                Some(0) => fill(say(lang, "tui.version.seen.today"), &[("tag", tag)]),
+                Some(1) => fill(say(lang, "tui.version.seen.day"), &[("tag", tag)]),
+                Some(d) => fill(say(lang, "tui.version.seen.days"), &[("tag", tag), ("d", &d.to_string())]),
+                None => fill(say(lang, "tui.version.seen.earlier"), &[("tag", tag)]),
+            };
+            format!("{} · {seen}", unchecked_said(lang, why.kind))
+        }
         Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
     };
     format!("{mine} · {said}")
@@ -6566,14 +6582,19 @@ pub(super) mod tests {
         let mine = env!("CARGO_PKG_VERSION");
         let said = |seen| {
             let mut a = app();
+            // 글을 재므로 말을 못박는다 — `App::new` 는 이 기계의 사용자 설정에서 말을 읽는다.
+            a.site.lang = Lang::En;
             a.set_latest(seen);
             let lines = render(&mut a, 100, 24);
             lines[..6].join("\n")
         };
         let newer = said(Seen::Newer { tag: "v9.9.9".into() });
         assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
-        let same = said(Seen::Same);
-        let ahead = said(Seen::Ahead);
+        // **최신·앞섰다도 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정).
+        let same = said(Seen::Same { tag: "v7.7.7".into() });
+        assert!(same.contains("latest (v7.7.7)"), "최신 판의 번호가 없다\n{same}");
+        let ahead = said(Seen::Ahead { tag: "v0.0.1".into() });
+        assert!(ahead.contains("ahead of the latest release (v0.0.1)"), "앞섰을 때 최신 판의 번호가 없다\n{ahead}");
         let unasked = said(unasked_for(Trouble::NotAsked));
         for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
         {
@@ -6617,10 +6638,20 @@ pub(super) mod tests {
         assert!(!banner.contains('!'), "받을 것을 급한 것처럼 말한다\n{banner}");
         let note = note.expect("나갈 때 낼 글이 없다");
         assert!(note.contains("v9.9.9") && note.contains(&line), "도는 바이너리를 올리는 줄이 없다\n{note}");
-        for seen in [Seen::Same, Seen::Ahead, unasked_for(Trouble::NotAsked)] {
+        for seen in [
+            Seen::Same { tag: "v1.0.0".into() },
+            Seen::Ahead { tag: "v0.0.1".into() },
+            unasked_for(Trouble::NotAsked),
+            stale(Trouble::Offline, "v0.0.1", "2026-09-19T00:00:00Z"),
+        ] {
             let (banner, note) = both(seen, Some(&line));
             assert!(banner.is_empty() && note.is_none(), "새 판이 없는데 올리라고 한다\n{banner}\n{note:?}");
         }
+        // **못 물었어도 지난번에 들은 새 판은 그대로 받을 것이다**(moai-ggxi, 2026-10-02 사용자
+        // 결정) — 판 줄만 못 물었다고 말하고, 배너와 나갈 때 줄은 선다.
+        let (banner, note) = both(stale(Trouble::Offline, "v9999.0.0", "2026-09-19T00:00:00Z"), Some(&line));
+        assert!(banner.contains("v9999.0.0"), "그물이 끊겼다고 새 판을 잊었다\n{banner}");
+        assert!(note.is_some_and(|n| n.contains(&line)), "그물이 끊겼다고 올리는 줄을 잃었다");
         let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, None);
         assert!(banner.is_empty() && note.is_none(), "그 줄로 못 올리는 바이너리에 올리라고 한다\n{banner}");
     }
@@ -6628,6 +6659,84 @@ pub(super) mod tests {
     /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
     fn unasked_for(kind: Trouble) -> crate::latest::Seen {
         crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
+    }
+
+    /// 못 물었고 지난번에 `tag` 를 `heard_at` 에 들었다.
+    fn stale(kind: Trouble, tag: &str, heard_at: &str) -> crate::latest::Seen {
+        let why = crate::latest::Why { kind, said: String::new() };
+        crate::latest::Seen::Stale { why, tag: tag.into(), heard_at: heard_at.into() }
+    }
+
+    /// **못 물었으면 지난 답과 그 때를 못 물었다는 말 뒤에 단다**(moai-ggxi, 2026-10-02 사용자
+    /// 결정). 지난 값이라는 것이 글에 보여야 한다 — 번호만 달면 지금 들은 답으로 읽힌다. 지난
+    /// 답이 없으면 번호를 안 댄다. 들은 때는 `App` 이 든 시각으로 잰다.
+    #[test]
+    fn a_failed_ask_says_the_last_answer_and_when_it_was_heard() {
+        let mine = env!("CARGO_PKG_VERSION");
+        let line_at = |seen, now: &str, width| {
+            let mut a = app();
+            a.site.lang = Lang::En;
+            a.site.now = now.into();
+            a.set_latest(seen);
+            let head = render(&mut a, width, 24)[..6].join("\n");
+            head.lines()
+                .find_map(|l| l.split_once("Version : ").map(|(_, v)| v.trim().to_string()))
+                .unwrap_or_else(|| panic!("판 줄을 못 찾았다\n{head}"))
+        };
+        let line = |seen, now: &str| line_at(seen, now, 120);
+        let heard = "2026-09-19T08:00:00Z";
+        let at = |when| line(stale(Trouble::Offline, "v0.3.0", heard), when);
+        assert_eq!(
+            at("2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 2 days ago")
+        );
+        assert_eq!(
+            at("2026-09-20T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 1 day ago")
+        );
+        assert_eq!(at("2026-09-19T09:00:00Z"), format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
+        // 들은 때를 못 읽으면 모르는 것이지 오늘 본 것이 아니다.
+        let unknown = line(stale(Trouble::Offline, "v0.3.0", "어제"), "2026-09-21T09:00:00Z");
+        assert_eq!(unknown, format!("{mine} · latest not checked (no network) · v0.3.0 seen earlier"));
+        // 까닭마다 글이 갈리던 것(moai-580l)은 그대로다 — 지난 답은 그 뒤에 붙을 뿐이다.
+        let limited = line(stale(Trouble::RateLimited, "v0.3.0", heard), "2026-09-21T09:00:00Z");
+        assert!(limited.starts_with(&format!("{mine} · latest not checked (rate limited) · ")), "{limited}");
+        // 처음 — 지난 답이 없으면 번호를 안 댄다.
+        assert_eq!(
+            line(unasked_for(Trouble::NotAsked), "2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked")
+        );
+        // **80칸에서도 안 잘린다** — 갈래마다 두 자리 날 수를 단다. 들은 때가 잘리면 지난 값이라는
+        // 말이 사라져 번호가 지금 들은 답으로 읽힌다. 넘치던 두 갈래의 까닭 글을 줄여 맞췄다
+        // (`bad answer`·`call failed`, 2026-10-02 사용자 결정).
+        for kind in [
+            Trouble::Offline,
+            Trouble::Timeout,
+            Trouble::RateLimited,
+            Trouble::Http,
+            Trouble::Tls,
+            Trouble::Garbled,
+            Trouble::Failed,
+        ] {
+            let long = line_at(stale(kind, "v0.3.0", heard), "2026-10-01T09:00:00Z", 80);
+            assert!(long.ends_with("v0.3.0 seen 12 days ago"), "{kind:?} 가 80칸에서 잘렸다 — {long}");
+        }
+    }
+
+    /// **한국어 판 줄도 같은 꼴이다** — 번호와 들은 때가 말묶음을 지나도 선다.
+    #[test]
+    fn the_korean_version_line_names_the_release_too() {
+        let line = |seen| {
+            let mut a = app();
+            a.site.lang = Lang::Ko;
+            a.site.now = "2026-09-21T09:00:00Z".into();
+            a.set_latest(seen);
+            render(&mut a, 120, 24)[..6].join("\n")
+        };
+        let same = line(crate::latest::Seen::Same { tag: "v0.3.0".into() });
+        assert!(same.contains("최신 (v0.3.0)"), "{same}");
+        let old = line(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        assert!(old.contains("최신 확인 안 함 (네트워크 없음) · 2일 전에 본 판 v0.3.0"), "{old}");
     }
 
     /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은

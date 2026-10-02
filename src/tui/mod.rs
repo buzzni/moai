@@ -2472,7 +2472,7 @@ impl App {
     /// (moai-8rmw.665, 2026-09-29 사용자 결정). **배너에 두지 않는 까닭**: 그 줄은 104칸이라 80칸
     /// 창에서 늘 잘렸다. 터미널을 걷은 뒤의 셸에서는 잘리지 않고 그대로 복사된다.
     pub fn upgrade_note(&self) -> Option<String> {
-        let (crate::latest::Seen::Newer { tag }, Some(line)) = (&self.latest, self.upgrade.as_deref()) else {
+        let (Some(tag), Some(line)) = (self.latest.newer(), self.upgrade.as_deref()) else {
             return None;
         };
         // 말묶음은 한 줄이라 명령은 여기서 제 줄에 세운다 — 들여 쓴 줄이라 골라 복사하기 쉽다.

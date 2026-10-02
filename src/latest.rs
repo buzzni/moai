@@ -16,9 +16,9 @@
 //!   잰 값은 `Cargo.toml` 의 그 줄에 있다(이 저장소에서 +1,775,096바이트, 15MB 예산의 53%) —
 //!   **한자리에만, 잰 때와 함께 적는다**: 두 벌로 적으면 다시 잴 때 한쪽이 낡고, 때가 없으면
 //!   다음 사람이 그 수를 지금 크기로 읽는다
-//! - **하루 한 번 묻는다**([`WINDOW`]). 답과 물은 때와 **물은 자리**(moai-dael), 못 들었으면
-//!   그 **까닭**(2026-09-22 사용자 결정)을 [`FILE`] 에 적고, 같은 자리의 답이 그 안이면 안
-//!   묻는다.
+//! - **하루 한 번 묻는다**([`WINDOW`]). 답과 그것을 들은 때(moai-ggxi), 물은 때와 **물은
+//!   자리**(moai-dael), 못 들었으면 그 **까닭**(2026-09-22 사용자 결정)을 [`FILE`] 에 적고,
+//!   같은 자리의 답이 그 안이면 안 묻는다.
 //!   자리는 읽음 파일([`crate::read_marks`])의 관례를 따라 설정 파일 곁이고, 판은 프로젝트마다
 //!   다르지 않으니 사람마다 한 파일이다
 //! - **기본은 켬이되 사람이 보는 화면에서만이다**([`gate`]). `--json` 과 파이프는 안 묻는다 —
@@ -58,9 +58,12 @@ pub const TAG: &str = "tag";
 /// 물은 자리(moai-dael). **옛 파일에는 없다** — 없으면 어디에 물은 답인지 모르는 것이고,
 /// 모르는 답은 다시 묻는다.
 pub const URL: &str = "url";
-/// 못 들었으면 그 까닭([`Trouble`], 2026-09-22 사용자 결정). 태그를 든 줄에는 **없다** —
-/// 파일이 드는 것은 답 하나고, 태그가 곧 그 답이다.
+/// 지난번 물음이 실패했으면 그 까닭([`Trouble`], 2026-09-22 사용자 결정). **태그 곁에도
+/// 선다**(moai-ggxi) — 그때 태그는 지난번에 들은 답이고, 이 줄은 이번에 못 물었다는 말이다.
 pub const TROUBLE: &str = "trouble";
+/// 지금 든 태그를 들은 때(moai-ggxi). [`ASKED_AT`] 과 다른 값이다 — 그쪽은 못 들은 판에도
+/// 새로 찍혀, 못 물은 줄이 "언제 본 판인가" 를 댈 때 그 값으로는 늘 "방금" 이 된다.
+pub const HEARD_AT: &str = "heard_at";
 
 /// 받아서 들 태그의 길이 상한(바이트). git 의 ref 이름은 낱말 하나라 이보다 길 수 없고,
 /// [`ask_within`] 이 받는 256KB 를 그대로 파일에 적어 둘 까닭도 없다.
@@ -156,20 +159,51 @@ pub const CHECK: &str = "check";
 /// 환경에서 이것을 끄는 자리. 값은 안 본다 — 비어 있지 않으면 끈다(환경변수의 관례).
 pub const OFF_VAR: &str = "MOAI_NO_UPDATE_CHECK";
 
-/// 물어서 안 것. **넷이 다른 글이다**(사용자 결정 4).
+/// 물어서 안 것. **넷이 다른 글이다**(사용자 결정 4) — 못 물은 것만 지난 답이 있고 없음으로
+/// 두 꼴이다([`Seen::Stale`]·[`Seen::Unasked`]).
+///
+/// **태그는 받은 그대로다** — 글에 그대로 서므로 `v` 를 떼지 않는다. 최신·앞섰다도 태그를
+/// 든다(moai-ggxi, 2026-10-02 사용자 결정): "최신" 한 낱말로는 그것이 어느 판인지 화면이 말을
+/// 못 했다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Seen {
-    /// 새 판이 있다. 태그는 받은 그대로다 — 글에 그대로 서므로 `v` 를 떼지 않는다.
+    /// 새 판이 있다.
     Newer { tag: String },
     /// 같은 판이다.
-    Same,
+    Same { tag: String },
     /// 내 판이 더 앞섰다. 소스로 빌드해 쓰는 사람이 늘 보는 자리라 "새 판" 과 갈라 둔다 —
     /// 합치면 개발 중인 사람에게 평생 "낡았다" 고 말한다.
-    Ahead,
-    /// 못 물었다. **까닭을 함께 든다**([`Why`], moai-580l) — 사람이 할 일이 까닭마다 다르기
-    /// 때문이다. 시간당 부름 수를 다 태운 것은 기다리면 풀리고, 프록시가 인증서를 갈아 끼운
-    /// 네트워크는 이 기능을 못 쓴다는 뜻이며, 네트워크가 없는 것은 둘 중 어느 것도 아니다.
+    Ahead { tag: String },
+    /// 이번에 못 물었고, **지난번에 들은 답이 있다**(moai-ggxi, 2026-10-02 사용자 결정). 화면은
+    /// 못 물었다는 말 뒤에 그 태그와 들은 때를 단다 — 지난 값이라는 것이 글에 보여야 한다.
+    ///
+    /// 이 꼴이 없던 판은 지난 태그를 새로 들은 것처럼 그렸다([`refresh`] 가 태그를 들고 가고 그
+    /// 태그로 넷 중 하나를 골랐다). 그물이 끊긴 기계가 "최신" 이라 적은 셈이다.
+    ///
+    /// **지난 태그가 새 판이면 배너와 나갈 때 줄은 그대로 선다**([`Seen::newer`]) — 판 줄만 못
+    /// 물었다고 말한다. 새 판이 났다는 사실은 그물이 끊겨도 안 바뀐다.
+    Stale { why: Why, tag: String, heard_at: String },
+    /// 못 물었고 들은 답도 없다. **까닭을 함께 든다**([`Why`], moai-580l) — 사람이 할 일이
+    /// 까닭마다 다르기 때문이다. 시간당 부름 수를 다 태운 것은 기다리면 풀리고, 프록시가
+    /// 인증서를 갈아 끼운 네트워크는 이 기능을 못 쓴다는 뜻이며, 네트워크가 없는 것은 둘 중
+    /// 어느 것도 아니다.
     Unasked(Why),
+}
+
+impl Seen {
+    /// 아는 새 판의 태그 — 이번에 들었든([`Seen::Newer`]), 못 물은 판에 지난번 들은 것이든
+    /// ([`Seen::Stale`]). 배너와 나갈 때 줄이 이것을 읽는다.
+    ///
+    /// **판 줄과 갈라 둔 까닭**: 판 줄은 "이번에 물었는가" 를 말하고 배너는 "받을 것이 있는가" 를
+    /// 말한다. 그물이 한 번 끊긴 것만으로 배너가 걷히면, 어제 새 판을 본 사람이 오늘 올리는 줄을
+    /// 잃는다.
+    pub fn newer(&self) -> Option<&str> {
+        match self {
+            Seen::Newer { tag } => Some(tag),
+            Seen::Stale { tag, .. } if compare(mine(), version_of(tag)) == Some(Ordering::Less) => Some(tag),
+            _ => None,
+        }
+    }
 }
 
 /// 못 물은 까닭 — **자료지 글이 아니다**. 꼴은 `show --json` 의 `commits_error`
@@ -417,8 +451,8 @@ pub fn seen(mine: &str, tag: Option<&str>) -> Seen {
     let Some(tag) = tag else { return Seen::Unasked(Why::not_asked()) };
     match compare(mine, version_of(tag)) {
         Some(Ordering::Less) => Seen::Newer { tag: tag.to_string() },
-        Some(Ordering::Equal) => Seen::Same,
-        Some(Ordering::Greater) => Seen::Ahead,
+        Some(Ordering::Equal) => Seen::Same { tag: tag.to_string() },
+        Some(Ordering::Greater) => Seen::Ahead { tag: tag.to_string() },
         // **받은 태그를 `said` 에 그대로 싣는다** — 무엇이 판으로 안 읽혔는지가 고칠 자리다.
         // 들어오는 자리([`tag_in`])가 제어문자와 길이를 이미 물렸으므로 화면에 실어도 된다.
         None => Seen::Unasked(Why { kind: Trouble::OddTag, said: tag.to_string() }),
@@ -431,22 +465,28 @@ pub struct Held {
     /// 물은 때(RFC3339 UTC). **물은 때지 답을 받은 때가 아니다** — 못 들은 판도 이 자리를
     /// 적으므로, 그물이 없는 기계가 부를 때마다 5초를 버리지 않는다.
     pub asked_at: String,
-    /// 받은 태그. 못 들었으면 `None` 이다.
+    /// 받은 태그. 한 번도 못 들었으면 `None` 이다. **이번에 못 들었어도 지난번 것이 선다** —
+    /// 그때는 [`Held::trouble`] 이 곁에 선다.
     pub tag: Option<String>,
+    /// 그 태그를 들은 때(moai-ggxi). **이 필드 전의 줄에는 없다** — 그때는 [`Held::heard`] 가
+    /// [`Held::asked_at`] 으로 읽는다.
+    pub heard_at: Option<String>,
     /// **어디에 물었나**(moai-dael). 옛 바이너리가 적은 줄에는 없어 `None` 이다.
     ///
     /// 이것이 없던 때는 `MOAI_API_URL` 을 한 번 바꿔 부른 답이 하루 동안 **진짜 부름에 서고**,
     /// 거울을 쓰는 사람에게는 그 반대가 됐다 — 창이 자리를 안 봤기 때문이다.
-    ///
-    /// **적어 둔 까닭과 함께 서지 않는다** — [`Held::trouble`] 은 태그가 없을 때만 선다.
     ///
     /// **사용자 정보는 떼고 든다**([`place_of`], 리뷰). 이 값은 파일에 적히는데, 그 파일의 첫
     /// 쓰기는 umask 를 따라 남이 읽을 수 있다([`crate::store::write_atomic`] 은 **이미 있는**
     /// 파일의 권한만 지킨다). `MOAI_API_URL` 에 토큰을 끼워 둔 사람의 그 토큰이 설정 디렉터리에
     /// 평문으로 하루를 사는 길이었다 — 묻는 자리인가만 가리면 되므로 그 토막은 애초에 필요 없다.
     pub url: Option<String>,
-    /// 못 들었으면 그 까닭(2026-09-22 사용자 결정, 리뷰가 연 자리). **태그를 든 줄에는 없다** —
-    /// 파일이 드는 것은 답 하나고, 태그가 섰으면 그것이 답이다.
+    /// 이번에 못 들었으면 그 까닭(2026-09-22 사용자 결정, 리뷰가 연 자리). 들었으면 `None` 이다.
+    ///
+    /// **태그를 든 줄에도 선다**(moai-ggxi, 2026-10-02 사용자 결정). 처음에는 태그가 섰으면
+    /// 그것이 답이라며 안 적었는데, 그러면 그물이 끊긴 기계의 파일이 새로 들은 줄과 글자째
+    /// 같아 하루 내내 지난 태그를 "최신" 으로 그렸다. 지금 이 줄이 드는 것은 지난 답과 이번의
+    /// 실패 둘이고, 화면은 둘을 함께 댄다([`Seen::Stale`]).
     ///
     /// 안 적던 판은 **까닭이 그 부름 한 판에만** 섰다. 창이 하루라 두 번째 부름부터는
     /// [`Trouble::NotAsked`] 한 글로 접혔고, 그러면 인증서를 갈아 끼우는 프록시 뒤의 사람은
@@ -497,6 +537,28 @@ impl Held {
         self.url.as_deref() == Some(place_of(url).as_str())
     }
 
+    /// 이 줄이 드는 답. 태그만 섰으면 그것이 답이고, 태그 곁에 까닭이 섰으면 **못 물었고 지난
+    /// 답이 있는 것**([`Seen::Stale`], moai-ggxi)이며, 태그가 없으면 **적어 둔 까닭**이다
+    /// (2026-09-22 사용자 결정) — 되읽은 까닭의 `said` 는 빈 글이다([`Held::trouble`]).
+    ///
+    /// **[`refresh`] 와 [`held`] 가 한 자를 쓴다.** 둘이 따로 풀던 판은 창 안에서 낸 답과 첫
+    /// 프레임의 답이 갈릴 자리였다.
+    pub fn answer(&self) -> Seen {
+        let why = |kind: Option<Trouble>| Why { kind: kind.unwrap_or(Trouble::NotAsked), said: String::new() };
+        match (&self.tag, self.trouble) {
+            (Some(tag), None) => seen(mine(), Some(tag)),
+            (Some(tag), kind) => Seen::Stale { why: why(kind), tag: tag.clone(), heard_at: self.heard().to_string() },
+            (None, kind) => Seen::Unasked(why(kind)),
+        }
+    }
+
+    /// 지금 든 태그를 들은 때. **[`Held::heard_at`] 이 없는 옛 줄은 물은 때로 읽는다** — 그 줄의
+    /// 태그는 늦어도 그때 들은 것이다. 옛 바이너리가 실패한 물음에 태그를 들고 가며 도장만
+    /// 새로 찍었으면 실제보다 덜 낡게 읽히고, 다음에 한 번 들어 [`HEARD_AT`] 을 적을 때까지 그렇다.
+    pub fn heard(&self) -> &str {
+        self.heard_at.as_deref().unwrap_or(&self.asked_at)
+    }
+
     /// 이 답이 아직 창 안인가. 때가 꼴이 아니면 낡은 것으로 본다 — 못 읽는 도장 하나가 묻기를
     /// 영영 막으면, 그 파일을 지우는 것 말고 되돌릴 길이 없다.
     ///
@@ -513,18 +575,6 @@ impl Held {
     /// 도 [`WINDOW`] 도 하루라, 하루 앞선 도장을 든 기계는 이틀까지 안 묻는다 — 모듈 머리의
     /// "하루 한 번 묻는다" 는 시계가 맞는 기계의 이야기다. 한자리에 둔 값을 그대로 쓰는 쪽을
     /// 골랐으나, `report` 의 `far_ahead` 를 늘리는 날 이쪽 주기가 함께 늘어난다.
-    /// 이 줄이 드는 답. 태그가 섰으면 그것이 답이고, 없으면 **적어 둔 까닭**이다
-    /// (2026-09-22 사용자 결정) — 되읽은 까닭의 `said` 는 빈 글이다([`Held::trouble`]).
-    ///
-    /// **[`refresh`] 와 [`held`] 가 한 자를 쓴다.** 둘이 따로 풀던 판은 창 안에서 낸 답과 첫
-    /// 프레임의 답이 갈릴 자리였다.
-    pub fn answer(&self) -> Seen {
-        match &self.tag {
-            Some(tag) => seen(mine(), Some(tag)),
-            None => Seen::Unasked(Why { kind: self.trouble.unwrap_or(Trouble::NotAsked), said: String::new() }),
-        }
-    }
-
     pub fn fresh(&self, now: &str, window: i64) -> bool {
         let (Some(then), Some(now)) = (crate::model::parse_rfc3339(&self.asked_at), crate::model::parse_rfc3339(now))
         else {
@@ -543,10 +593,9 @@ pub fn file_at(dir: &Path) -> PathBuf {
 pub fn read(dir: &Path) -> Option<Held> {
     let doc = doc_at(dir)?;
     let asked_at = doc.get(ASKED_AT)?.as_str()?.to_string();
-    let tag = doc.get(TAG).and_then(|i| i.as_str()).map(String::from);
-    let url = doc.get(URL).and_then(|i| i.as_str()).map(String::from);
+    let text = |key: &str| doc.get(key).and_then(|i| i.as_str()).map(String::from);
     let trouble = doc.get(TROUBLE).and_then(|i| i.as_str()).and_then(Trouble::from_name);
-    Some(Held { asked_at, tag, url, trouble })
+    Some(Held { asked_at, tag: text(TAG), heard_at: text(HEARD_AT), url: text(URL), trouble })
 }
 
 /// 파일을 문서로 읽는다. 없거나 깨졌으면 `None` — [`read`] 와 [`write`] 가 한 자를 쓴다.
@@ -597,6 +646,7 @@ pub fn write(dir: &Path, held: &Held) -> R<()> {
         }
     };
     put(TAG, &held.tag);
+    put(HEARD_AT, &held.heard_at);
     put(URL, &held.url);
     put(TROUBLE, &held.trouble.map(|k| k.name().to_string()));
     write_atomic(&file_at(dir), doc.to_string().as_bytes())
@@ -783,10 +833,14 @@ pub fn url_from(env: impl Fn(&str) -> Option<OsString>) -> String {
 /// 묻는다. 그 기계에서 에이전트가 도는 고리는 GitHub 의 시간당 60판을 금세 태운다. 지금은 아무도
 /// 안 부르므로 고치지 않고 적어 둔다 — 부르는 쪽이 서면 그 판에서 한 번 알릴지를 정한다.
 ///
-/// **못 들었다고 알던 것을 지우지는 않는다.** 도장만 새로 찍고 태그는 지난 것을 들고 간다 —
-/// 지우던 판은 어제 "새 판 v0.2.0 이 있다" 를 본 사람이 오늘 그물이 한 번 끊긴 것만으로 "못
-/// 물었다" 를 보게 했고, 그것은 [`held`] 가 "창이 지났어도 지난 답을 그대로 낸다" 고 적어 둔
-/// 약속과도 어긋난다. 릴리스는 사라지지 않으니 지난 답은 틀려도 낡은 쪽으로만 틀린다.
+/// **못 들었다고 알던 것을 지우지는 않는다.** 도장만 새로 찍고 태그와 그것을 들은 때는 지난
+/// 것을 들고 간다 — 지우던 판은 어제 "새 판 v0.2.0 이 있다" 를 본 사람이 오늘 그물이 한 번
+/// 끊긴 것만으로 그 판을 잃게 했고, 그것은 [`held`] 가 "창이 지났어도 지난 답을 그대로 낸다" 고
+/// 적어 둔 약속과도 어긋난다. 릴리스는 사라지지 않으니 지난 답은 틀려도 낡은 쪽으로만 틀린다.
+///
+/// **다만 지난 답을 새로 들은 것처럼 내지는 않는다**(moai-ggxi, 2026-10-02 사용자 결정). 까닭을
+/// 태그 곁에 적고 [`Seen::Stale`] 로 낸다 — 들고 간 태그로 넷 중 하나를 고르던 판은 그물이
+/// 끊긴 기계에 "최신" 이라 적었다. 새 판이었으면 배너는 그대로 선다([`Seen::newer`]).
 pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     // **다른 자리에 물은 답은 이 자리의 답이 아니다**(moai-dael) — 창도 안 닫고, 못 들었을 때
     // 들고 갈 지난 답도 안 된다. 거울을 한 번 보고 온 사람에게 그 태그가 진짜 릴리스로 서던
@@ -798,17 +852,22 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
         return h.answer();
     }
     let asked = ask(url);
-    let why = asked.as_ref().err().cloned();
-    let tag = asked.ok().or_else(|| held.and_then(|h| h.tag));
-    // **까닭은 태그가 없을 때만 적는다** — 태그가 섰으면 그것이 답이고, 곁에 까닭을 두면 파일이
-    // 답을 둘 드는 셈이 된다. 들은 판은 까닭을 지운다(`put` 이 키를 뺀다).
-    let trouble = tag.is_none().then(|| why.as_ref().map_or(Trouble::NotAsked, |w| w.kind));
-    let now = Held { asked_at: now.to_string(), tag, url: Some(place_of(url)), trouble };
+    let url = Some(place_of(url));
+    let stamp = Held { asked_at: now.to_string(), tag: None, heard_at: None, url, trouble: None };
+    // 들은 판은 까닭을 지운다(`put` 이 키를 뺀다). 못 들은 판은 지난 태그와 그 때를 곁에 든다.
+    let (now, why) = match asked {
+        Ok(tag) => (Held { tag: Some(tag), heard_at: Some(now.to_string()), ..stamp }, None),
+        Err(why) => {
+            let (heard_at, tag) = held.and_then(|h| Some((h.heard().to_string(), h.tag?))).unzip();
+            (Held { tag, heard_at, trouble: Some(why.kind), ..stamp }, Some(why))
+        }
+    };
     let answer = now.answer();
     let _ = write(dir, &now);
     // **적어 둔 까닭에는 `said` 가 없다**(위). 이 판의 까닭은 그 글을 들고 있으므로 그대로 낸다.
     match (answer, why) {
         (Seen::Unasked(_), Some(why)) => Seen::Unasked(why),
+        (Seen::Stale { tag, heard_at, .. }, Some(why)) => Seen::Stale { why, tag, heard_at },
         (answer, _) => answer,
     }
 }
@@ -1043,8 +1102,8 @@ mod tests {
     #[test]
     fn the_four_answers_are_four_different_things() {
         assert_eq!(seen("0.1.0", Some("v0.2.0")), Seen::Newer { tag: "v0.2.0".into() });
-        assert_eq!(seen("0.1.0", Some("v0.1.0")), Seen::Same);
-        assert_eq!(seen("0.2.0", Some("v0.1.0")), Seen::Ahead);
+        assert_eq!(seen("0.1.0", Some("v0.1.0")), Seen::Same { tag: "v0.1.0".into() });
+        assert_eq!(seen("0.2.0", Some("v0.1.0")), Seen::Ahead { tag: "v0.1.0".into() });
         assert_eq!(why_of(&seen("0.1.0", None)), Some(Trouble::NotAsked));
         // 꼴이 아닌 태그는 "새 판" 이 아니라 "못 물었다" 다 — 모르는 것을 아는 척하지 않는다.
         // **그 안에서 또 갈린다**(moai-580l): 아예 안 물은 것과 태그를 못 읽은 것은 고칠 자리가
@@ -1095,7 +1154,7 @@ mod tests {
         assert_eq!(compare("0.2.0+ci-1234", "0.2.0"), Some(Ordering::Equal));
         assert_eq!(compare("0.2.0", "0.2.0+ci-1234"), Some(Ordering::Equal));
         assert_eq!(compare("0.2.0-rc1+b.7", "0.2.0-rc1"), Some(Ordering::Equal));
-        assert_eq!(seen("0.2.0", Some("v0.2.0+ci-1234")), Seen::Same);
+        assert_eq!(seen("0.2.0", Some("v0.2.0+ci-1234")), Seen::Same { tag: "v0.2.0+ci-1234".into() });
     }
 
     #[test]
@@ -1130,6 +1189,7 @@ mod tests {
         let held = Held {
             asked_at: "2026-09-21T00:00:00Z".into(),
             tag: Some("v0.1.0".into()),
+            heard_at: None,
             url: Some(API.into()),
             trouble: None,
         };
@@ -1137,8 +1197,11 @@ mod tests {
         let src = std::fs::read_to_string(file_at(s.path())).unwrap();
         assert!(src.starts_with(HEADER), "머리 줄이 머리에 없다\n{src}");
         // 두 번째 쓰기도 머리를 흔들지 않고, 읽는 쪽은 그대로 읽는다.
-        write(s.path(), &Held { asked_at: "2026-09-22T00:00:00Z".into(), tag: None, url: None, trouble: None })
-            .unwrap();
+        write(
+            s.path(),
+            &Held { asked_at: "2026-09-22T00:00:00Z".into(), tag: None, heard_at: None, url: None, trouble: None },
+        )
+        .unwrap();
         let again = std::fs::read_to_string(file_at(s.path())).unwrap();
         assert!(again.starts_with(HEADER), "두 번째 쓰기가 머리를 흔들었다\n{again}");
         let back = read(s.path()).unwrap();
@@ -1168,6 +1231,7 @@ mod tests {
         let old = Held {
             asked_at: "2026-09-20T00:00:00Z".into(),
             tag: Some("v0.0.1".into()),
+            heard_at: None,
             url: Some(url.clone()),
             trouble: None,
         };
@@ -1191,6 +1255,7 @@ mod tests {
         let mirror = Held {
             asked_at: "2026-09-21T00:00:00Z".into(),
             tag: Some("v9.9.9".into()),
+            heard_at: None,
             url: Some("http://mirror.example/releases/latest".into()),
             trouble: None,
         };
@@ -1255,6 +1320,7 @@ mod tests {
         let stale = Held {
             asked_at: "2026-09-20T00:00:00Z".into(),
             tag: None,
+            heard_at: None,
             url: Some(url.clone()),
             trouble: Some(Trouble::Tls),
         };
@@ -1289,28 +1355,102 @@ mod tests {
         assert_eq!(old.tag.as_deref(), Some("v9.9.9"), "옛 줄을 버렸다");
         assert!(!old.asked_here(API), "자리를 모르는 줄을 이 자리의 답으로 세웠다");
         let (url, handle) = server_once(r#"{"tag_name":"v0.0.1"}"#);
-        assert_eq!(refresh(s.path(), &url, "2026-09-21T00:00:01Z", WINDOW), Seen::Ahead);
+        assert_eq!(refresh(s.path(), &url, "2026-09-21T00:00:01Z", WINDOW), Seen::Ahead { tag: "v0.0.1".into() });
         assert_eq!(handle.join().unwrap(), 1, "창 안이라며 안 물었다");
     }
 
+    /// **못 들어도 알던 것을 안 잊되, 새로 들은 것처럼 내지도 않는다**(moai-ggxi, 2026-10-02
+    /// 사용자 결정). 어제 "새 판 v9.9.9 가 있다" 를 본 사람이 오늘 그물이 한 번 끊긴 것만으로 그
+    /// 판을 잃지 않게 태그를 들고 가고, 판 줄이 그것을 "지금 안다" 로 읽지 않게 까닭을 곁에 단다.
+    /// 도장은 새로 찍혀 하루 동안 다시 안 묻고, **그 하루 내내** 같은 답이 선다 — 까닭을 안 적던
+    /// 판은 그 부름 한 판만 "못 물었다" 고 하고 다음 부름부터 지난 태그를 새 답처럼 그렸다.
     #[test]
     fn a_failed_ask_does_not_forget_what_it_already_heard() {
-        // 어제 "새 판 v9.9.9 가 있다" 를 본 사람이, 오늘 그물이 한 번 끊긴 것만으로 "못 물었다"
-        // 를 보게 하지 않는다. 도장은 새로 찍혀 하루 동안 다시 안 묻고, 태그는 지난 것이 선다.
         let s = Scratch::new("latest-keeps");
         let url = nobody_there();
+        let heard = "2026-09-20T00:00:00Z";
         let old = Held {
-            asked_at: "2026-09-20T00:00:00Z".into(),
+            asked_at: heard.into(),
             tag: Some("v9.9.9".into()),
+            heard_at: Some(heard.into()),
             url: Some(url.clone()),
             trouble: None,
         };
         write(s.path(), &old).unwrap();
         let now = "2026-09-21T00:00:01Z";
+        let stale = |seen: Seen| match seen {
+            Seen::Stale { why, tag, heard_at } => (why.kind, tag, heard_at),
+            other => panic!("못 물었는데 지난 답을 새 답처럼 냈다 — {other:?}"),
+        };
+        let got = refresh(s.path(), &url, now, WINDOW);
+        assert_eq!(got.newer(), Some("v9.9.9"), "그물 한 번 끊긴 것으로 새 판을 잃었다");
+        assert_eq!(stale(got), (Trouble::Offline, "v9.9.9".into(), heard.into()));
+        let held_now = read(s.path()).expect("도장이 없다");
+        assert_eq!(held_now.asked_at, now, "못 들었는데 도장을 안 찍었다");
+        assert_eq!(held_now.tag.as_deref(), Some("v9.9.9"), "알던 것을 지웠다");
+        assert_eq!(held_now.heard_at.as_deref(), Some(heard), "들은 때를 물은 때로 덮었다");
+        // 창 안의 다음 부름도, 첫 프레임의 값도 같은 답이다.
+        let again = refresh(s.path(), &url, "2026-09-21T12:00:00Z", WINDOW);
+        assert_eq!(stale(again), (Trouble::Offline, "v9.9.9".into(), heard.into()), "까닭이 그 한 판에만 섰다");
+        assert_eq!(stale(held(s.path(), &url)), (Trouble::Offline, "v9.9.9".into(), heard.into()));
+    }
+
+    /// **들은 때가 없는 옛 줄은 물은 때로 읽는다**(moai-ggxi). 이 필드 전의 바이너리가 적은
+    /// 파일이고, 그 태그는 늦어도 그때 들은 것이다. 못 물은 판은 그 값을 [`HEARD_AT`] 으로
+    /// 박아, 다음 도장이 그것을 덮지 않는다.
+    #[test]
+    fn a_tag_from_before_heard_at_was_heard_when_it_was_asked() {
+        let s = Scratch::new("latest-oldheard");
+        let url = nobody_there();
+        let place = place_of(&url);
+        std::fs::write(
+            file_at(s.path()),
+            format!("asked_at = \"2026-09-19T00:00:00Z\"\ntag = \"v0.0.1\"\nurl = \"{place}\"\n"),
+        )
+        .unwrap();
+        let Seen::Stale { tag, heard_at, .. } = refresh(s.path(), &url, "2026-09-21T00:00:00Z", WINDOW) else {
+            panic!("지난 답을 못 들고 갔다");
+        };
+        assert_eq!((tag.as_str(), heard_at.as_str()), ("v0.0.1", "2026-09-19T00:00:00Z"));
+        assert_eq!(read(s.path()).unwrap().heard_at.as_deref(), Some("2026-09-19T00:00:00Z"));
+    }
+
+    /// **새로 들으면 들은 때가 그 도장이다.** 못 물은 판이 남긴 까닭도 함께 걷힌다 — 남으면
+    /// 들은 판이 "못 물었다" 로 선다.
+    #[test]
+    fn hearing_again_moves_the_heard_stamp_and_drops_the_reason() {
+        let s = Scratch::new("latest-heardagain");
+        let (url, handle) = server_once(r#"{"tag_name":"v9.9.9"}"#);
+        let old = Held {
+            asked_at: "2026-09-19T00:00:00Z".into(),
+            tag: Some("v0.0.1".into()),
+            heard_at: Some("2026-09-18T00:00:00Z".into()),
+            url: Some(place_of(&url)),
+            trouble: Some(Trouble::Offline),
+        };
+        write(s.path(), &old).unwrap();
+        let now = "2026-09-21T00:00:00Z";
         assert_eq!(refresh(s.path(), &url, now, WINDOW), Seen::Newer { tag: "v9.9.9".into() });
-        let held = read(s.path()).expect("도장이 없다");
-        assert_eq!(held.asked_at, now, "못 들었는데 도장을 안 찍었다");
-        assert_eq!(held.tag.as_deref(), Some("v9.9.9"), "알던 것을 지웠다");
+        handle.join().unwrap();
+        let back = read(s.path()).unwrap();
+        assert_eq!((back.heard_at.as_deref(), back.trouble), (Some(now), None));
+    }
+
+    /// **배너가 읽는 새 판은 판 줄과 따로 잰다**(moai-ggxi, 2026-10-02 사용자 결정). 못 물은
+    /// 판이라도 지난 태그가 새 판이면 받을 것이 있다 — 같거나 앞선 태그는 아니다.
+    #[test]
+    fn a_stale_answer_still_names_a_newer_release() {
+        let stale = |tag: &str| Seen::Stale { why: Why::not_asked(), tag: tag.into(), heard_at: String::new() };
+        assert_eq!(stale("v9999.0.0").newer(), Some("v9999.0.0"));
+        assert_eq!(stale("v0.0.1").newer(), None, "앞선 판에 올리라고 한다");
+        assert_eq!(stale(&format!("v{}", mine())).newer(), None, "같은 판에 올리라고 한다");
+        assert_eq!(stale("v0.1").newer(), None, "판으로 못 읽는 태그를 새 판이라 한다");
+        assert_eq!(Seen::Newer { tag: "v9.9.9".into() }.newer(), Some("v9.9.9"));
+        for seen in
+            [Seen::Same { tag: "v1.0.0".into() }, Seen::Ahead { tag: "v0.0.1".into() }, Seen::Unasked(Why::not_asked())]
+        {
+            assert_eq!(seen.newer(), None, "{seen:?}");
+        }
     }
 
     /// **앞선 도장은 슬랙만큼만 봐준다**(moai-21un). 몇 초 어긋난 시계가 부를 때마다 바깥을
@@ -1320,18 +1460,28 @@ mod tests {
     #[test]
     fn a_stamp_from_the_future_does_not_hold_the_window_open() {
         let slack = crate::model::FUTURE_SLACK_SECS;
-        let far =
-            Held { asked_at: "2099-01-01T00:00:00Z".into(), tag: Some("v0.1.0".into()), url: None, trouble: None };
+        let far = Held {
+            asked_at: "2099-01-01T00:00:00Z".into(),
+            tag: Some("v0.1.0".into()),
+            heard_at: None,
+            url: None,
+            trouble: None,
+        };
         assert!(!far.fresh("2026-09-21T00:00:00Z", WINDOW), "시계를 되돌린 기계가 영영 안 묻는다");
         // 1초 어긋난 시계 — 이것까지 낡았다고 하면 그 기계는 부를 때마다 묻는다.
-        let ticking =
-            Held { asked_at: "2026-09-21T00:00:01Z".into(), tag: Some("v0.1.0".into()), url: None, trouble: None };
+        let ticking = Held {
+            asked_at: "2026-09-21T00:00:01Z".into(),
+            tag: Some("v0.1.0".into()),
+            heard_at: None,
+            url: None,
+            trouble: None,
+        };
         assert!(ticking.fresh("2026-09-21T00:00:00Z", WINDOW), "1초 앞선 도장에 다시 물었다");
         // 경계를 재는 자리. `slack` 만큼 앞선 것은 봐주고, 1초 더 앞선 것은 안 봐준다.
-        let at = |ahead: i64| Held { asked_at: stamp(ahead), tag: None, url: None, trouble: None };
+        let at = |ahead: i64| Held { asked_at: stamp(ahead), tag: None, heard_at: None, url: None, trouble: None };
         assert!(at(slack).fresh("2026-09-21T00:00:00Z", WINDOW), "딱 슬랙만큼 앞선 도장을 낡았다고 했다");
         assert!(!at(slack + 1).fresh("2026-09-21T00:00:00Z", WINDOW), "슬랙을 넘은 도장이 창을 열어 뒀다");
-        let broken = Held { asked_at: "어제".into(), tag: None, url: None, trouble: None };
+        let broken = Held { asked_at: "어제".into(), tag: None, heard_at: None, url: None, trouble: None };
         assert!(!broken.fresh("2026-09-21T00:00:00Z", WINDOW), "못 읽는 도장이 묻기를 막는다");
     }
 
@@ -1471,11 +1621,19 @@ mod tests {
     #[test]
     fn what_it_wrote_it_reads_back() {
         let s = Scratch::new("latest-roundtrip");
-        for (tag, trouble) in [(Some("v0.1.0"), None), (None, Some("tls")), (None, None)] {
+        // 넷째는 못 물은 판이 지난 답을 든 줄이다(moai-ggxi) — 태그와 까닭이 함께 선다.
+        let all = [
+            (Some("v0.1.0"), Some("2026-09-21T00:00:00Z"), None),
+            (None, None, Some("tls")),
+            (None, None, None),
+            (Some("v0.1.0"), Some("2026-09-19T00:00:00Z"), Some("offline")),
+        ];
+        for (tag, heard_at, trouble) in all {
             for url in [Some(API), None] {
                 let held = Held {
                     asked_at: "2026-09-21T00:00:00Z".into(),
                     tag: tag.map(String::from),
+                    heard_at: heard_at.map(String::from),
                     url: url.map(String::from),
                     trouble: trouble.map(|w| Trouble::from_name(w).expect("모르는 낱말")),
                 };
@@ -1495,6 +1653,7 @@ mod tests {
         let now = Held {
             asked_at: "2026-09-21T00:00:00Z".into(),
             tag: Some("v0.2.0".into()),
+            heard_at: None,
             url: Some(API.into()),
             trouble: None,
         };
@@ -1560,8 +1719,8 @@ mod tests {
         // 판 줄에 서는 값과 견주는 값이 갈리면, 화면은 "새 판" 인데 받아 보면 같은 판이다.
         // **`mine()` 을 `env!` 와 견주지 않는다** — 그 함수의 몸통이 바로 그 매크로라 제 자신과
         // 견주는 꼴이고, 어떤 고침도 그 줄을 못 붉힌다. 재는 것은 견주는 길 전체다.
-        assert_eq!(seen(mine(), Some(&format!("v{}", mine()))), Seen::Same);
-        assert_eq!(seen(mine(), Some(mine())), Seen::Same, "`v` 없는 태그");
+        assert_eq!(seen(mine(), Some(&format!("v{}", mine()))), Seen::Same { tag: format!("v{}", mine()) });
+        assert_eq!(seen(mine(), Some(mine())), Seen::Same { tag: mine().into() }, "`v` 없는 태그");
     }
 
     /// **올리는 줄은 도는 바이너리의 자리를 올린다**(리뷰). 고정된 한 줄은 `~/.local/bin` 만
