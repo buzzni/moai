@@ -12,6 +12,23 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **The explorer lays the list out as a kanban board.** `SPC v b` turns the
+  list into a board and back, and the choice is kept under `[tui]` as `layout`.
+  It is the list's layout, not another window: the cursor, the filter, the view,
+  search, `[NEW]` and the detail stay as they were. The columns are idea,
+  deferred and the config's columns in order — idea is a kind and deferred an
+  axis, so nothing new is stored. At the project root every milestone is a
+  lane and `(no milestone)` comes last; inside a milestone or an epic there is
+  one lane. A card is its id, column and priority over its title, with a foot
+  for the `SPC c` columns that are on. `j`/`k` move within a column, `h`/`l` to
+  the next one, a click takes a card and the wheel moves within the column under
+  the pointer. The overview (`0`) stays a list for now.
+
+- **`SPC c e` shows the epic a row is in** — a column on the right of the list
+  and, on the board, the card's foot, where epics appear instead of as cards.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
