@@ -34,6 +34,67 @@ struct Moved {
     /// 이 읽는다(moai-wuzi). **`read` 와 따로 든다**: 그쪽은 *옮기려 한* 줄의 지도라, 연 줄을
     /// 거기에 섞으면 그 줄들이 `stands` 안내에도 서서 옮긴 적 없는 묶음의 칸을 말한다.
     freed: super::Read,
+    /// `--take` 로 담당을 바꾼 줄과 그 전의 담당(moai-0zjo).
+    taken: Vec<Whose>,
+    /// `--take` 없이 **시작 칸으로 옮긴** 내 것 아닌 줄 — 막지 않고 한 줄로 알린다(moai-0zjo).
+    theirs: Vec<Whose>,
+}
+
+/// 내 것이 아니던 줄 하나 — `--take` 가 넘겨받았거나 그것 없이 옮긴 것(moai-0zjo). `--json` 의 `taken`·
+/// `theirs` 가 이 꼴이다.
+#[derive(serde::Serialize)]
+struct Whose {
+    id: String,
+    owner: crate::report::Owner,
+    /// 이 쓰기가 본 **그때의 담당** — 파일에 적힌 이름과 메일을 합친 한 줄(`이름 (메일)`). 담당이
+    /// 없던 줄에는 키가 없다(`owner` 가 `unowned` 다).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    was: Option<String>,
+    /// 화면에 그릴 담당 — 설정의 `naming` 으로 합친 것. `--json` 에는 안 싣는다(`was` 가 그 값이다).
+    #[serde(skip)]
+    shown: Option<String>,
+}
+
+impl Whose {
+    fn of(i: &Issue, owner: crate::report::Owner, naming: crate::config::Naming) -> Whose {
+        let joined = |how| i.assignee.as_deref().map(|a| model::label(a, i.assignee_email.as_deref(), how));
+        Whose { id: i.id.clone(), owner, was: joined(crate::config::Naming::Full), shown: joined(naming) }
+    }
+}
+
+/// `--take` 없이 집은 내 것 아닌 줄 하나의 알림 — 누구의 것인지와, 넘겨받는 줄을 댄다(moai-0zjo).
+/// 남의 글자(담당)는 걸러 넣는다 — 손으로 고친 줄의 이름이 터미널을 다시 칠하지 못하게.
+fn theirs_said(w: &Whose, to: &str, lang: crate::i18n::Lang) -> String {
+    let take = format!("moai mv {} {} --take -m '<who said yes>'", w.id, to);
+    let (id, to) = (crate::text::one_line(&w.id), crate::text::one_line(&take));
+    match &w.shown {
+        Some(was) => crate::i18n::fill(
+            crate::i18n::say(lang, "mv.theirs"),
+            &[("id", &id), ("was", &crate::text::one_line(was)), ("take", &to)],
+        ),
+        None => crate::i18n::fill(crate::i18n::say(lang, "mv.theirs_unowned"), &[("id", &id), ("take", &to)]),
+    }
+}
+
+/// 이 줄을 **지금 사람의 것으로** 넘겨받는다(moai-0zjo, 2026-10-02 사용자 결정) — 담당을 바꾸고 그 전의
+/// 담당을 `Taken-over:` 노트로 적는다. 저널에 적는 것은 여전히 넷뿐이다: 담당 필드의 바뀜은 적지
+/// 않고(`edit -a` 와 같다), 넘겨받았다는 말을 노트 한 줄로 남긴다. 옮기는 쓰기와 **같은
+/// `store::with_write` 안**에서 적는다 — 칸만 옮기고 담당은 못 바꾼 줄이 남지 않는다.
+///
+/// 노트의 담당은 `naming` 과 상관없이 이름과 메일을 다 적는다 — 노트는 파일에 남는 글이고, 설정은
+/// 화면만 바꾼다.
+fn take(
+    i: &mut Issue,
+    by: &model::Actor,
+    at: &str,
+    owner: crate::report::Owner,
+    naming: crate::config::Naming,
+) -> (Whose, JournalEntry) {
+    let whose = Whose::of(i, owner, naming);
+    let note = format!("Taken-over: {}", whose.was.as_deref().unwrap_or("none"));
+    (i.assignee, i.assignee_email) = by.as_assignee();
+    i.updated_at = at.to_string();
+    (whose, JournalEntry::note(&i.id, &note, at, by))
 }
 
 pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
@@ -114,6 +175,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 ));
             }
             let by = who?;
+            // **내 것인지는 옮기는 사람으로 가린다**(moai-0zjo) — `--user` 가 그 사람이다. 가르는 자는
+            // `ready` 와 훅이 쓰는 [`crate::query::Me`] 하나다.
+            let me = crate::query::Me::of(&by);
+            // 알리는 것은 **시작 칸으로 옮길 때뿐이다** — 집는 자리가 묻는 자리다. 닫거나 되돌리는 것은
+            // 남의 일을 떠안는 것이 아니다.
+            let picks_up = cfg.is_started(to.as_str());
             let mut m = Moved::default();
             let mut entries = Vec::new();
             // **닫을 때만 전의 모습을 뜬다.** 풀리는 것은 끝낼 때뿐이다 — 다른 칸으로의 이동은
@@ -152,6 +219,16 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     if let Some(msg) = &args.msg {
                         entries.push(JournalEntry::note(&i.id, msg, &at, &by));
                     }
+                    // **이미 그 칸인 줄도 넘겨받는다**(moai-0zjo) — 남이 집은 채 멈춘 줄을 되찾는 것이
+                    // `--take` 의 흔한 자리다. 옮기지 않았으니 알리지는 않는다(`theirs` 는 옮긴 줄이다).
+                    if args.take
+                        && let Some(owner) = crate::report::owner(&me, i)
+                    {
+                        let (whose, note) = take(i, &by, &at, owner, cfg.naming);
+                        entries.push(note);
+                        i.normalize();
+                        m.taken.push(whose);
+                    }
                     m.already.push(i.id.clone());
                     continue;
                 }
@@ -164,6 +241,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 // `idea promote` 도 같은 길이라 어느 동사로 닫든 같은 줄이 선다.
                 let was = i.move_to(to.clone(), &at, cfg);
                 entries.push(JournalEntry::status(&i.id, &was, &to, args.msg.clone(), &at, &by));
+                // **남의 줄은 묻고 집는다**(moai-0zjo). 여기서는 막지 않는다 — 막는 자리는 훅 규칙 5
+                // 하나고, 터미널의 사람은 훅을 안 지난다. `--take` 면 같은 쓰기에서 넘겨받는다.
+                match (crate::report::owner(&me, i), args.take) {
+                    (Some(owner), true) => {
+                        let (whose, note) = take(i, &by, &at, owner, cfg.naming);
+                        entries.push(note);
+                        m.taken.push(whose);
+                    }
+                    (Some(owner), false) if picks_up => m.theirs.push(Whose::of(i, owner, cfg.naming)),
+                    _ => {}
+                }
                 // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
                 // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
                 i.normalize();
@@ -231,6 +319,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         super::note_partial();
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "mv.stale"), &[("id", id), ("now", now)]));
     }
+    // **남의 줄을 `--take` 없이 집었으면 한 줄로 알린다**(moai-0zjo, 2026-10-02 사용자 결정). 옮기기는
+    // 했다 — 종료 코드는 그대로다. 막는 자리는 훅 규칙 5 하나다. 사람 쪽과 `--json` 쪽 모두 stderr 다:
+    // 이 줄은 부르는 쪽이 아니라 그 곁의 사람이 읽는다.
+    for w in &moved.theirs {
+        eprintln!("moai: {}", theirs_said(w, to.as_str(), lang));
+    }
 
     if ctx.json {
         // **옮긴 것만 내면 나머지를 말할 자리가 없다.** 이미 그 칸이던 것과
@@ -261,6 +355,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             closable: Vec<super::Row<'a>>,
             /// 같은 에픽에서 다음에 집을 것. `unblocked` 와 같은 약속으로 **늘 싣는다**.
             next: Vec<super::Row<'a>>,
+            /// `--take` 로 담당을 넘겨받은 줄과 그 전의 담당(moai-0zjo). **늘 싣는다**.
+            taken: &'a [Whose],
+            /// `--take` 없이 시작 칸으로 옮긴 내 것 아닌 줄 — stderr 의 한 줄과 같은 것이다. **늘 싣는다**.
+            theirs: &'a [Whose],
         }
         return super::json_line(&Out {
             moved: moved.done.iter().map(|(i, _)| super::Row::from(i, &moved.read)).collect(),
@@ -281,6 +379,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             unblocked: moved.unblocked.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
             closable: moved.closable.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
             next: moved.next.iter().map(|i| super::Row::from(i, &moved.freed)).collect(),
+            taken: &moved.taken,
+            theirs: &moved.theirs,
         });
     }
 
@@ -303,6 +403,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     for id in &moved.already {
         let said = crate::i18n::fill(crate::i18n::say(lang, "mv.already"), &[("to", to.as_str())]);
         out.push(format!("{}  {}", paint(style::ID, id), paint(style::DIM, &said)));
+    }
+    // **넘겨받은 줄은 누구의 것이었는지 댄다**(moai-0zjo) — 노트에 남긴 말과 같은 것이다.
+    for w in &moved.taken {
+        let said = match &w.shown {
+            Some(was) => crate::i18n::fill(crate::i18n::say(lang, "mv.taken"), &[("was", &crate::text::one_line(was))]),
+            None => crate::i18n::say(lang, "mv.taken_unowned").to_string(),
+        };
+        out.push(format!("{}  {}", paint(style::ID, &w.id), paint(style::DIM, &said)));
     }
     // 묶음의 칸이 적은 칸과 다르면 한 줄. 같으면 말하지 않는다 — 멤버가 다 끝난
     // 에픽을 `done` 에 두는 것은 틀린 일이 아니다. 접는 길은 `view` 가 고른다.

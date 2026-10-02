@@ -4501,6 +4501,81 @@ fn ready_does_not_split_when_it_does_not_know_who_asks() {
     assert!(json.contains(r#""others":[]"#), "{json}");
 }
 
+/// **`mv` 는 남의 줄도 옮기고 한 줄로 알린다**(moai-0zjo, 2026-10-02 사용자 결정) — 막는 자리는 훅
+/// 규칙 5 하나다. 종료 코드는 0 이고 담당은 그대로다. 알리는 것은 **시작 칸으로 옮길 때뿐**이다 — 닫는
+/// 것은 남의 일을 떠안는 것이 아니다. `--json` 의 `theirs` 가 같은 것을 싣고, `taken` 은 빈 배열로 선다.
+#[test]
+fn mv_moves_someone_elses_row_and_says_so_once() {
+    let s = init("mvtheirs");
+    let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
+    let nobody = add(s.path(), &["빈 일", "-a", "none"]);
+    let out = moai(s.path(), &["mv", &theirs, "in_progress", "--json"]);
+    assert!(out.status.success(), "옮기기가 막혔다 — 막는 자리는 훅뿐이다");
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains(&format!("moai: {theirs} 는 B (b@x.io) 의 것이다")), "{err}");
+    assert!(err.contains(&format!("moai mv {theirs} in_progress --take -m '<who said yes>'")), "{err}");
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        json.contains(&format!(r#""taken":[],"theirs":[{{"id":"{theirs}","owner":"theirs","was":"B (b@x.io)"}}]"#)),
+        "{json}"
+    );
+    assert!(
+        row_in(&ok(s.path(), &["show", &theirs, "--json"]), &theirs).contains(r#""assignee":"B""#),
+        "담당이 바뀌었다"
+    );
+    // 담당 없는 줄도 알린다 — 내 것이 아니다.
+    let out = moai(s.path(), &["mv", &nobody, "in_progress"]);
+    assert!(String::from_utf8(out.stderr).unwrap().contains("담당이 없다"), "담당 없는 줄을 그냥 집었다");
+    // 닫는 것은 알리지 않는다.
+    let out = moai(s.path(), &["mv", &theirs, "done"]);
+    assert!(out.stderr.is_empty(), "닫기에 알림이 섰다 — {}", String::from_utf8_lossy(&out.stderr));
+    // 내 줄은 조용하다.
+    let mine = add(s.path(), &["내 일"]);
+    assert!(moai(s.path(), &["mv", &mine, "in_progress"]).stderr.is_empty(), "내 줄에 알림이 섰다");
+}
+
+/// **`--take` 는 같은 쓰기에서 담당을 바꾸고 `Taken-over:` 노트를 남긴다**(moai-0zjo). 그 전의 담당은
+/// 이름과 메일을 다 적고, 담당이 없었으면 `none` 이다. 이미 그 칸에 선 줄도 넘겨받는다 — 남이 집은 채
+/// 멈춘 줄을 되찾는 자리다. 내 줄에 주면 아무것도 더 적지 않는다.
+#[test]
+fn mv_take_hands_the_row_over_and_leaves_a_note() {
+    let s = init("mvtake");
+    let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
+    let out = ok(s.path(), &["mv", &theirs, "in_progress", "--take", "-m", "B 가 그러라고 했다", "--json"]);
+    assert!(
+        out.contains(&format!(r#""taken":[{{"id":"{theirs}","owner":"theirs","was":"B (b@x.io)"}}],"theirs":[]"#)),
+        "{out}"
+    );
+    let row = ok(s.path(), &["show", &theirs, "--json"]);
+    assert!(
+        row.contains(r#""assignee":"테스터""#) && row.contains(r#""assignee_email":"tester@example.com""#),
+        "{row}"
+    );
+    let j = journal(s.path());
+    assert!(j.contains(r#""text":"Taken-over: B (b@x.io)""#), "노트가 없다\n{j}");
+    assert!(j.contains("B 가 그러라고 했다"), "누가 그러라고 했는지가 빠졌다\n{j}");
+    // 사람 쪽은 누구의 것이었는지 댄다.
+    let nobody = add(s.path(), &["빈 일", "-a", "none"]);
+    let said = ok(s.path(), &["mv", &nobody, "in_progress", "--take"]);
+    assert!(said.contains("넘겨받았다 — 담당이 없었다"), "{said}");
+    assert!(journal(s.path()).contains(r#""text":"Taken-over: none""#));
+
+    // 이미 그 칸에 선 남의 줄 — 옮길 것은 없어도 넘겨받는다.
+    let stuck = add(s.path(), &["멈춘 일", "-a", "C (c@x.io)"]);
+    ok(s.path(), &["mv", &stuck, "in_progress"]);
+    let again = ok(s.path(), &["mv", &stuck, "in_progress", "--take", "--json"]);
+    assert!(again.contains(&format!(r#""already":["{stuck}"]"#)), "{again}");
+    assert!(again.contains(&format!(r#""taken":[{{"id":"{stuck}","owner":"theirs","was":"C (c@x.io)"}}]"#)), "{again}");
+    assert!(ok(s.path(), &["show", &stuck, "--json"]).contains(r#""assignee":"테스터""#));
+
+    // 내 줄에는 아무것도 더 적지 않는다.
+    let before = journal(s.path()).matches("Taken-over:").count();
+    let mine = add(s.path(), &["내 일"]);
+    let calm = ok(s.path(), &["mv", &mine, "in_progress", "--take", "--json"]);
+    assert!(calm.contains(r#""taken":[],"theirs":[]"#), "{calm}");
+    assert_eq!(journal(s.path()).matches("Taken-over:").count(), before, "내 줄에 노트를 적었다");
+}
+
 /// **아무것도 막지 않는다** — 트래커가 없어도 0 이다. 여기서 0 아닌 값을 내면 이것을 세션
 /// 시작 훅에 건 사람의 세션이 "실패" 로 열리고, 그러면 이건 린트고 린트는 곧 게이트다.
 #[test]
