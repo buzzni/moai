@@ -974,8 +974,13 @@ are is unknown, nothing is refused."#
     )
 }
 
-/// 남의 줄을 넘겨받는 줄 — 규칙 5 의 글과 그 거절문(`hook::take_in`)과 일꾼 브리프가 함께 쓴다(moai-0zjo).
+/// 남의 줄을 넘겨받는 줄 — 규칙 5 의 글(`rules`)이 싣는다(moai-0zjo). 꼬리는 [`TAKE_YES`] 다.
 pub const TAKE_OVER: &str = "moai mv <id> in_progress --take -m '<who said yes>'";
+
+/// 넘겨받는 줄의 꼬리 — 규칙 5 의 거절문(`hook::take_in`)과 `mv` 의 알림(`cmd::mv`)이 이것으로 줄을 짓고,
+/// [`TAKE_OVER`] 가 이것으로 끝난다(`the_take_over_line_ends_with_its_tail` 이 맨다). 손으로 따로 적던 판은
+/// 이 상수의 글이 거절문에 닿는다고 적어 두고 실제로는 어디에도 안 닿았다(moai-0zjo 리뷰).
+pub const TAKE_YES: &str = "--take -m '<who said yes>'";
 
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
@@ -2717,6 +2722,14 @@ mod tests {
         for line in lines {
             assert!(line.starts_with("- "), "예시 본문이 목록이 아니다 — {line}");
         }
+    }
+
+    /// **넘겨받는 줄은 한 꼬리로 선다**(moai-0zjo 리뷰) — 규칙 5 의 글([`TAKE_OVER`])과 거절문·`mv` 의 알림
+    /// ([`TAKE_YES`])이 갈리면, 글을 고친 사람은 거절문이 따라온다고 믿고 거절문은 옛 글을 낸다.
+    #[test]
+    fn the_take_over_line_ends_with_its_tail() {
+        assert!(TAKE_OVER.ends_with(&format!(" {TAKE_YES}")), "{TAKE_OVER}");
+        assert!(rules().contains(TAKE_OVER), "규칙 5 의 글이 넘겨받는 줄을 안 싣는다");
     }
 
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.

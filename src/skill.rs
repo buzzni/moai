@@ -347,7 +347,7 @@ fn command(exe: &str, event: &str) -> String {
     // 키에 넣은 것과 같은 까닭이다. 하나로 두던 판은 **`SessionStart` 가 그 한 줄을 태웠다**:
     // 그 이벤트는 세션의 맨 앞에서 돌고, 위 표대로 거기서만 notice 가 안 서고 `hook_response`
     // 에 남는다 — 사람이 못 듣는 알림 하나가 표식을 세워 `PreToolUse`·`UserPromptSubmit`·
-    // `Stop` 의 입을 세션 내내 막았다. 규칙 넷을 싣는 `PreToolUse` 가 매 도구 호출에 져도
+    // `Stop` 의 입을 세션 내내 막았다. 규칙 다섯을 싣는 `PreToolUse` 가 매 도구 호출에 져도
     // 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다 — moai-j4ie 가 끝내려던 바로 그 침묵이다.
     // 값은 세션에 넷까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
     //
@@ -377,7 +377,7 @@ fn command(exe: &str, event: &str) -> String {
          {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
          || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
          printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-         The four moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :;; \
+         The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :;; \
          esac;; esac; exit 0"
     )
 }

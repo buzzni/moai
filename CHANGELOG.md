@@ -31,11 +31,15 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai ready` and `moai prime` hand out only your own rows.** A ready row
   assigned to someone else, or to nobody, stands apart below the list, and under
   `others` in `--json` with `owner` set to `theirs` or `unowned` — the key is
-  always there. `p0` is no exception. `prime`'s `picked` drops what someone else
-  picked up, and the planted hook no longer counts it as your focus. Who you are
-  is matched by name or email, the same as `-a me`; when it is unknown (no
-  `--user`, `MOAI_ACTOR` or git identity) nothing is set apart. A repository run
-  under one name reads exactly as before, apart from the new empty key.
+  always there, and `prime --json` carries `others` and `others_rest` the same
+  way. `p0` is no exception. `prime`'s `picked` drops what someone else picked
+  up or nobody owns, and the planted hook no longer counts those rows as your
+  focus. Who you are is matched by name or email, the same as `-a me`; when it
+  is unknown (no `--user`, `MOAI_ACTOR` or git identity) nothing is set apart.
+  A repository run under one name reads as before as long as its rows carry an
+  assignee — a row left with `-a none`, or written before rows carried one, now
+  stands apart as `unowned`. The next pick in the same epic that `moai mv … done`
+  names is your own row too.
 
 - **A `moai mv` of someone else's row into a started column says so.** It still
   moves — one line on stderr names whose it is and the `--take` line to run, and

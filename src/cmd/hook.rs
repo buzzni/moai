@@ -162,7 +162,7 @@ fn decide(
             }
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
-            let (away, latest) = releasing(input, &repo, &load.issues, &Who::at(&repo, ctx));
+            let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
             crate::hook::carried(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
@@ -237,25 +237,22 @@ fn decide(
             let toward = |k: usize| {
                 aims.get(k).and_then(Option::as_ref).map(|(at, tracker)| crate::hook::Aimed { at, tracker: *tracker })
             };
-            let who = Who::at(&repo, ctx);
-            // **남의 줄을 집는 토막이 있으면 집은 것이 없어도 사람을 푼다**(규칙 5, moai-0zjo) — 첫 집기가
-            // 그 규칙의 가장 흔한 자리다. 명령줄이 없는 호출(`Edit`)은 그 토막이 없다.
-            let asks = matches!(call, Call::Shell(_)) && crate::hook::asks_owner(line, &repo.config);
-            let decision =
-                settle(input, &repo, &load.issues, away_of(&repo, &load.issues, &who, asks), &who, &|issues, away| {
-                    match call {
-                        // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
-                        // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
-                        // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
-                        // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
-                        Call::Shell(_) => {
-                            crate::hook::guard_shell_in(issues, away, repo.here(), &cwd, &scan, &segs, &toward)
-                        }
-                        Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
-                        Call::Review => crate::hook::guard_review(issues, &repo.config, away),
-                        Call::Other => Decision::Pass,
+            // **사람은 묻는 자리에서 푼다**(moai-0zjo 리뷰, [`crate::hook::Person`]) — 여기서는 푸는 길만 건넨다.
+            let me = person_at(&repo, ctx);
+            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues, &me), &|issues, away| {
+                match call {
+                    // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
+                    // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
+                    // (`Repo::find_from`) 고치는 파일은 이 워크트리의 것이다. `repo.root` 로 세던 판은
+                    // 워크트리의 파일이 죄다 루트의 `.claude/worktrees/…` 밑으로 보여 규칙 2 가 통째로 꺼졌다.
+                    Call::Shell(_) => {
+                        crate::hook::guard_shell_in(issues, away, repo.here(), &cwd, &scan, &segs, &toward)
                     }
-                });
+                    Call::Edits(path) => crate::hook::guard_edit(issues, &repo.config, away, repo.here(), path),
+                    Call::Review => crate::hook::guard_review(issues, &repo.config, away),
+                    Call::Other => Decision::Pass,
+                }
+            });
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
             let mut decision = decision;
@@ -265,10 +262,8 @@ fn decide(
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         // 사람은 **그 트래커의 뿌리에서** 푼다 — 남의 저장소의 git 설정이 그 저장소의 사람이다.
-                        let who = Who::at(other, ctx);
-                        let asks = crate::hook::asks_owner(line, &other.config);
-                        let away = away_of(other, &load.issues, &who, asks);
-                        settle(input, other, &load.issues, away, &who, &|issues, away| {
+                        let away = away_of(other, &load.issues, &person_at(other, ctx));
+                        settle(input, other, &load.issues, away, &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
                                 Some(crate::hook::Aimed::stands(other.root.as_path()))
                             })
@@ -372,7 +367,7 @@ fn decide(
             let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
             // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
             // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
-            let (away, latest) = releasing(input, &repo, &load.issues, &Who::at(&repo, ctx));
+            let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
             crate::hook::closing(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
@@ -415,13 +410,13 @@ fn answer(event: Event, decision: Decision) -> Option<String> {
 /// 막았다(moai-dw63.e31) — 그 거절은 이미 집은 일을 집으라고 시켰다.
 ///
 /// **겹친 판의 이름도 사람을 싣는다**(moai-0zjo) — `worktree::fresh` 가 짓는 이름에는 사람이 없어,
-/// 안 실으면 겹쳐 본 판정에서만 남의 줄이 도로 제 초점이 된다. 같은 [`Who`] 라 다시 안 푼다.
+/// 안 실으면 겹쳐 본 판정에서만 남의 줄이 도로 제 초점이 된다. `base` 의 사람을 그대로 옮긴다 — 한
+/// 칸을 나눠 쓰니([`crate::hook::Person`]) 다시 안 푼다.
 fn settle(
     input: &Input,
     repo: &Repo,
     issues: &[model::Issue],
     base: crate::hook::Away,
-    who: &Who,
     judge: &dyn Fn(&[model::Issue], &crate::hook::Away) -> Decision,
 ) -> Decision {
     let first = judge(issues, &base);
@@ -440,7 +435,7 @@ fn settle(
     // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
     // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
     let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
-        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), crate::hook::Away { me: who.get(), ..beside }),
+        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), crate::hook::Away { me: base.me.clone(), ..beside }),
         None => (std::borrow::Cow::Borrowed(issues), base),
     };
     // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
@@ -467,41 +462,29 @@ fn settle(
     if again.blocks() && !wide.blocks() { wide } else { again }
 }
 
-/// **이 세션의 사람** — 훅 한 번에 **한 번만** 푼다(moai-0zjo). 담당이 내가 아닌 줄을 초점에서 빼는
-/// 자([`crate::hook::Away::me`])다. `model::actor` 는 `git` 을 두 번 띄우므로 물을 줄이 있을 때만
-/// 푼다 — 집은 것이 없고 남의 줄을 집는 토막도 없는 흔한 호출은 안 연다.
-///
-/// 트래커마다 하나다 — 사람은 그 트래커의 뿌리에서 푼다(`model::actor` 의 `root`).
-struct Who<'a> {
-    root: &'a Path,
-    user: Option<&'a str>,
-    cell: std::cell::OnceCell<Option<crate::query::Me>>,
-}
-
-impl<'a> Who<'a> {
-    fn at(repo: &'a Repo, ctx: &'a Ctx) -> Who<'a> {
-        Who { root: &repo.root, user: ctx.user.as_deref(), cell: std::cell::OnceCell::new() }
-    }
-
-    fn get(&self) -> Option<crate::query::Me> {
-        self.cell.get_or_init(|| model::actor(self.user, self.root).ok().map(|a| crate::query::Me::of(&a))).clone()
-    }
+/// **이 세션의 사람을 푸는 길** — 그 트래커의 뿌리에서 푼다(`cmd::me_of`, `ready`·`prime` 과 한 자). 푸는 것은
+/// 줄의 담당을 실제로 가르는 규칙이 처음 물을 때 한 번이다([`crate::hook::Person`]) — `model::actor` 는
+/// `git` 을 두 번 띄우는데, 훅은 도구 호출마다 돌고 그 태반(`ls`·`cargo test`·저장소 밖의 쓰기)은 초점을
+/// 안 읽는다.
+fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
+    let (user, root) = (ctx.user.clone(), repo.root.clone());
+    crate::hook::Person::asked(move || super::me_of(user.as_deref(), &root))
 }
 
 /// **옆 워크트리가 쥔 일은 제 초점이 아니다** (`hook::held`). 워크트리 목록은 집은 것이 있을 때만
 /// 읽는다 — 훅은 도구 호출마다 돌고, 집은 것이 없으면 뺄 것도 없다.
 ///
-/// **담당이 내가 아닌 줄도 뺀다**(moai-0zjo) — 사람은 같은 문 안에서만 푼다([`Who`]). `asks` 는 규칙 5 가
-/// 물을 토막이 섰다는 것이다(`hook::asks_owner`) — 그때는 집은 것이 없어도 사람만은 싣는다.
-fn away_of(repo: &Repo, issues: &[model::Issue], who: &Who, asks: bool) -> crate::hook::Away {
+/// **담당이 내가 아닌 줄도 뺀다**(moai-0zjo) — 사람은 늘 싣되 묻는 자리에서 푼다([`person_at`]). 집은 것이
+/// 없어도 싣는다 — 규칙 5 는 집은 것이 없는 세션의 첫 집기에서 가장 자주 선다.
+fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
     if report::wip(issues, &repo.config).is_empty() {
-        return crate::hook::Away { me: if asks { who.get() } else { None }, ..Default::default() };
+        return crate::hook::Away { me: me.clone(), ..Default::default() };
     }
     // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
     // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
-    crate::hook::Away { me: who.get(), ..crate::worktree::away(repo.here()) }
+    crate::hook::Away { me: me.clone(), ..crate::worktree::away(repo.here()) }
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -529,9 +512,9 @@ fn releasing(
     input: &Input,
     repo: &Repo,
     issues: &[model::Issue],
-    who: &Who,
+    me: &crate::hook::Person,
 ) -> (crate::hook::Away, Option<Vec<model::Issue>>) {
-    let mut away = away_of(repo, issues, who, false);
+    let mut away = away_of(repo, issues, me);
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
         return (away, None);
     }

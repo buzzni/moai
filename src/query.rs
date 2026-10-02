@@ -959,7 +959,9 @@ fn sel(values: Vec<String>) -> Vec<Sel> {
 /// 이름과 메일 중 **하나만 맞아도** 통과다. 이름을 바꾼 사람이 옛 줄에서
 /// 사라지지 않고, 남의 메일을 모르는 채 이름으로만 맡긴 줄도 찾힌다.
 pub(crate) fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
-    let Sel::Is(raw) = want else { return i.assignee.is_none() };
+    // **빈 담당은 없는 것이다**(`Issue::normalize` 와 같은 자) — 읽기는 정규화를 안 거쳐 손으로 푼 머지의
+    // `"assignee":""` 가 그대로 온다. `-a none` 과 `ready` 의 `unowned`(`report::owner`)가 이 한 자로 갈린다.
+    let Sel::Is(raw) = want else { return i.assignee.as_deref().is_none_or(|a| a.trim().is_empty()) };
     let (name, email) = crate::model::split_assignee(raw);
     let by_name = name.as_deref().is_some_and(|n| i.assignee.as_deref() == Some(n));
     // 메일은 대소문자를 가리지 않는다. 같은 사람이 저장소마다 다르게 적는다.

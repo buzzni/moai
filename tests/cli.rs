@@ -2624,6 +2624,11 @@ fn outside_a_repo_another_repos_own_text_cannot_repaint_the_screen() {
     {
         let shown = ok_with(&out, &cfg, args);
         assert!(!shown.contains("\u{1b}[2J"), "{args:?} 가 남의 ESC 를 흘렸다: {shown:?}");
+        // `ready` 는 **집을 줄의 제목**을 그린다 — 한 줄 밑의 `?` 줄도 칸 이름으로 `[2J` 를 대므로, 그것만으로는
+        // 제목 줄이 섰는지 모른다(moai-0zjo 리뷰).
+        if args[0] == "ready" {
+            assert!(shown.contains("[2J집을 것"), "집을 줄의 제목이 안 섰다 — {shown}");
+        }
         // 거르되 버리지는 않는다 — 글자는 남아야 어느 줄인지 안다.
         assert!(shown.contains("[2J"), "{args:?}: 글자를 통째로 버렸다 — {shown}");
         assert!(shown.contains("\u{1b}["), "{args:?}: 색이 안 켜졌다 — 시험이 아무것도 안 재고 있다");
@@ -4532,6 +4537,64 @@ fn mv_moves_someone_elses_row_and_says_so_once() {
     // 내 줄은 조용하다.
     let mine = add(s.path(), &["내 일"]);
     assert!(moai(s.path(), &["mv", &mine, "in_progress"]).stderr.is_empty(), "내 줄에 알림이 섰다");
+}
+
+/// **한눈 보기도 내 것만 내민다**(moai-0zjo 리뷰) — 저장소 안의 `ready` 와 같은 자로, 그 프로젝트의 뿌리에서
+/// 사람을 풀어 가른다. 남의 줄은 `others` 로, 사람 쪽은 수만 `?` 한 줄로 댄다.
+#[test]
+fn outside_a_repo_ready_sets_what_is_not_mine_apart() {
+    let s = Scratch::new("ovowner");
+    let (good, out) = (dir_in(&s, "good"), dir_in(&s, "out"));
+    ok(&good, &["init", "argos"]);
+    let mine = add(&good, &["내 일"]);
+    let theirs = add(&good, &["남의 일", "-p", "0", "-a", "B (b@x.io)"]);
+    let cfg = registry(&s, &[&good]);
+    let json = ok_with(&out, &cfg, &["ready", "--json"]);
+    one_json_value(&json);
+    let ready = &json[..json.find(r#""others":"#).expect("others 키가 없다")];
+    assert_eq!(ids_in(ready), std::slice::from_ref(&mine), "남의 줄을 집을 것으로 냈다\n{json}");
+    assert!(row_in(&json, &theirs).contains(r#""owner":"theirs""#), "{json}");
+    let human = ok_with(&out, &cfg, &["ready"]);
+    assert!(human.contains("? 1건은 남의 것이거나 담당이 없다"), "{human}");
+    assert!(!human.contains("남의 일"), "남의 줄 제목을 집을 것으로 그렸다\n{human}");
+}
+
+/// **`mv` 의 알림이 내미는 줄은 그대로 쳐서 돈다**(moai-0zjo 리뷰) — 칸 이름에 빈칸이 들어도 한 낱말로 감싸고,
+/// `-C` 로 불렀으면 그 뿌리를 단다. 꼬리는 규칙 5 의 거절문과 같다.
+#[test]
+fn mv_hands_a_take_line_that_runs_as_given() {
+    let s = init("mvtakeline");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,하는 중,done\"\n")
+        .unwrap();
+    let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
+    let err = String::from_utf8(moai(s.path(), &["mv", &theirs, "하는 중"]).stderr).unwrap();
+    assert!(err.contains(&format!("`moai mv {theirs} '하는 중' --take -m '<who said yes>'`")), "{err}");
+    // `-C` 로 부르면 그 뿌리를 겨눈다 — 부른 사람의 셸은 거기가 아니다.
+    let other = add(s.path(), &["남의 일 둘", "-a", "B (b@x.io)"]);
+    let away = Scratch::new("mvtakeline-away");
+    let dir = s.path().to_str().unwrap();
+    let out = staged(&["-C", dir, "mv", &other, "하는 중"]).current_dir(away.path()).output().unwrap();
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("`moai -C ") && err.contains(&format!(" mv {other} '하는 중' --take")), "{err}");
+    // `--user` 로 옮겼으면 내민 줄도 그 사람으로 돈다 — 빼면 이 기계의 사람으로 넘겨받는다.
+    let third = add(s.path(), &["남의 일 셋", "-a", "B (b@x.io)"]);
+    let err = String::from_utf8(moai(s.path(), &["--user", "C (c@x.io)", "mv", &third, "하는 중"]).stderr).unwrap();
+    assert!(err.contains(&format!("`moai --user 'C (c@x.io)' mv {third} '하는 중' --take")), "{err}");
+}
+
+/// **닫은 뒤 "같은 에픽의 다음" 도 내 줄만 댄다**(moai-0zjo 리뷰) — `ready` 와 같은 자다. 남의 줄을 대면 시킨
+/// 대로 집은 줄을 규칙 5 가 막는다. 그 에픽에 남은 내 줄을 댄다.
+#[test]
+fn mv_names_my_next_pick_in_the_epic() {
+    let s = init("mvnextmine");
+    let epic = field(&ok(s.path(), &["epic", "add", "에픽", "--json"]), "id");
+    let done = add(s.path(), &["닫을 일", "-e", &epic]);
+    let theirs = add(s.path(), &["남의 다음", "-e", &epic, "-p", "1", "-a", "B (b@x.io)"]);
+    let mine = add(s.path(), &["내 다음", "-e", &epic, "-p", "2"]);
+    ok(s.path(), &["mv", &done, "in_progress"]);
+    let json = ok(s.path(), &["mv", &done, "done", "--json"]);
+    let next = &json[json.find(r#""next":"#).expect("next 키가 없다")..];
+    assert!(next.contains(&mine) && !next.contains(&theirs), "남의 줄을 다음으로 댔다\n{json}");
 }
 
 /// **`--take` 는 같은 쓰기에서 담당을 바꾸고 `Taken-over:` 노트를 남긴다**(moai-0zjo). 그 전의 담당은
@@ -12911,6 +12974,66 @@ fn what_someone_else_picked_up_does_not_free_my_writes() {
     assert!(why.starts_with("Rule 2"), "남이 집은 줄로 쓰기를 풀었다 — {why}");
     ok(s.path(), &["mv", &theirs, "in_progress", "--take"]);
     assert!(call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1").trim().is_empty(), "넘겨받았는데도 막는다");
+}
+
+/// **겹쳐 본 판정도 남의 줄로 쓰기를 풀지 않는다**(moai-0zjo 리뷰). git 저장소에서는 막는 판정을 옆
+/// 워크트리와 겹쳐 한 번 더 보는데(`cmd/hook.rs` 의 `settle`), 겹친 판의 `Away` 는 `worktree::fresh` 가
+/// 사람 없이 짓는다 — 거기 사람을 안 실으면 그 판정에서만 남의 줄이 도로 제 초점이 되어 규칙 2 가 풀리고,
+/// 규칙 5 는 사람을 모른다며 남의 줄 집기를 보낸다. 위 시험들은 git 밖이라 그 길을 안 밟는다.
+#[test]
+fn what_someone_else_picked_up_does_not_free_my_writes_in_a_git_repository() {
+    let s = Scratch::new("hooktheirsgit");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let theirs = add(&main, &["남의 일", "-a", "B (b@x.io)"]);
+    ok(&main, &["mv", &theirs, "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Edit\",\"tool_input\":{{\"file_path\":\"src/store.rs\"}}}}",
+        json_str(&main.display().to_string())
+    );
+    let why = refusal(&String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap());
+    assert!(why.starts_with("Rule 2"), "겹쳐 본 판정이 남의 줄로 쓰기를 풀었다 — {why}");
+    // 규칙 5 도 겹쳐 본 판정에서 선다 — 거기 사람이 없으면 남의 줄 집기를 "사람을 모른다" 로 보낸다.
+    let next = add(&main, &["남의 다음", "-a", "B (b@x.io)"]);
+    let input = format!(
+        "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+        json_str(&main.display().to_string()),
+        json_str(&format!("moai mv {next} in_progress --from todo"))
+    );
+    let why = refusal(&String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap());
+    assert!(why.starts_with("Rule 5"), "겹쳐 본 판정이 남의 줄 집기를 보냈다 — {why}");
+}
+
+/// **훅은 초점을 안 읽는 부름에서 사람을 안 푼다**(moai-0zjo 리뷰). 사람을 푸는 길은 `git config` 를 두 번
+/// 띄우는데(`model::actor`) 훅은 도구 호출마다 돈다 — 어디든 집힌 줄이 있으면 `ls` 한 번에도 미리 풀던 판은
+/// moai-n2jh 가 이 길에서 걷어낸 값을 도로 치렀다. 초점을 읽는 부름(저장소 안의 쓰기)에서는 푼다 — 그것까지
+/// 재야 위의 침묵이 "재는 자가 안 돈다" 와 갈린다.
+#[test]
+fn the_hook_asks_git_who_only_where_the_focus_is_read() {
+    let s = init("hookwho");
+    let row = add(s.path(), &["집은 일"]);
+    ok(s.path(), &["mv", &row, "in_progress"]);
+    let home = dir_in(&s, "home");
+    std::fs::write(home.join(".gitconfig"), "[user]\n\tname = 테스터\n\temail = tester@example.com\n").unwrap();
+    let traced = |name: &str, tool: &str, body: &str| {
+        let trace = s.path().join(name);
+        let input = format!(
+            "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"{tool}\",\"tool_input\":{body}}}",
+            json_str(&s.path().display().to_string())
+        );
+        // 빈 `MOAI_ACTOR` 는 없는 것이다(`model::actor`) — 사람은 git 설정에서 온다.
+        let env = [("MOAI_ACTOR", ""), ("GIT_TRACE", trace.to_str().unwrap())];
+        hook_at_home(&s, s.path(), Some(&home), &env, "pre-tool-use", &input);
+        std::fs::read_to_string(&trace).unwrap_or_default()
+    };
+    let plain = traced("ls.trace", "Bash", "{\"command\":\"ls\"}");
+    assert!(!plain.contains("user.name"), "초점을 안 읽는 부름이 사람을 풀었다\n{plain}");
+    let write = traced("edit.trace", "Edit", "{\"file_path\":\"src/store.rs\"}");
+    assert!(write.contains("user.name"), "초점을 읽는 부름에서 사람을 안 풀었다 — 재는 자가 안 돈다\n{write}");
 }
 
 /// **규칙 5 는 집은 것이 없는 세션의 첫 집기에서도 선다**(moai-0zjo) — 그것이 가장 흔한 자리다. 사람은

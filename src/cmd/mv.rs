@@ -57,15 +57,23 @@ struct Whose {
 
 impl Whose {
     fn of(i: &Issue, owner: crate::report::Owner, naming: crate::config::Naming) -> Whose {
-        let joined = |how| i.assignee.as_deref().map(|a| model::label(a, i.assignee_email.as_deref(), how));
+        // **빈 담당은 없는 것이다**(`report::owner`·`Issue::normalize` 와 같은 자) — 읽기는 정규화를 안 거쳐 손으로
+        // 푼 머지의 `"assignee":""` 가 그대로 온다. 그 글을 담당으로 적으면 노트가 `Taken-over: ` 로 빈다.
+        let named = i.assignee.as_deref().filter(|a| !a.trim().is_empty());
+        let joined = |how| named.map(|a| model::label(a, i.assignee_email.as_deref(), how));
         Whose { id: i.id.clone(), owner, was: joined(crate::config::Naming::Full), shown: joined(naming) }
     }
 }
 
 /// `--take` 없이 집은 내 것 아닌 줄 하나의 알림 — 누구의 것인지와, 넘겨받는 줄을 댄다(moai-0zjo).
 /// 남의 글자(담당)는 걸러 넣는다 — 손으로 고친 줄의 이름이 터미널을 다시 칠하지 못하게.
-fn theirs_said(w: &Whose, to: &str, lang: crate::i18n::Lang) -> String {
-    let take = format!("moai mv {} {} --take -m '<who said yes>'", w.id, to);
+///
+/// **내미는 줄은 그대로 쳐서 돌아야 한다**(moai-0zjo 리뷰) — id 와 칸은 셸 낱말로 감싸고(`하는 중` 같은 칸
+/// 이름이 두 낱말로 갈리지 않게, 규칙 5 의 거절문과 같은 자리), `-C` 로 불렀으면 그 뿌리를 단다(`head`).
+/// 꼬리는 [`crate::guide::TAKE_YES`] 다.
+fn theirs_said(w: &Whose, head: &str, to: &str, lang: crate::i18n::Lang) -> String {
+    let take =
+        format!("{head} mv {} {} {}", crate::text::quoted(&w.id), crate::text::quoted(to), crate::guide::TAKE_YES);
     let (id, to) = (crate::text::one_line(&w.id), crate::text::one_line(&take));
     match &w.shown {
         Some(was) => crate::i18n::fill(
@@ -91,7 +99,10 @@ fn take(
     naming: crate::config::Naming,
 ) -> (Whose, JournalEntry) {
     let whose = Whose::of(i, owner, naming);
-    let note = format!("Taken-over: {}", whose.was.as_deref().unwrap_or("none"));
+    // **노트는 한 줄이다** — 손으로 고친 담당에 줄바꿈이 들면 그 뒷줄(`model: …`)을 `work` 가 이 노트를 쓴
+    // 사람의 일로 세고, 저널은 되돌릴 수 없다(moai-0zjo 리뷰).
+    let note =
+        format!("Taken-over: {}", whose.was.as_deref().map_or_else(|| "none".to_string(), crate::text::one_line));
     (i.assignee, i.assignee_email) = by.as_assignee();
     i.updated_at = at.to_string();
     (whose, JournalEntry::note(&i.id, &note, at, by))
@@ -293,7 +304,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
             if let Some(before) = before.filter(|_| !m.done.is_empty()) {
                 let closed: Vec<&str> = m.done.iter().map(|(i, _)| i.id.as_str()).collect();
-                let opened = crate::report::freed(&before, issues, cfg, &closed);
+                // **다음은 내 줄만 댄다**(moai-0zjo 리뷰) — `ready` 와 같은 자다. 옮기는 사람이 `me` 다.
+                let opened = crate::report::freed(&before, issues, cfg, &closed, Some(&me));
                 m.unblocked = opened.unblocked.into_iter().cloned().collect();
                 m.closable = opened.closable.into_iter().cloned().collect();
                 m.next = opened.next.into_iter().cloned().collect();
@@ -322,8 +334,19 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // **남의 줄을 `--take` 없이 집었으면 한 줄로 알린다**(moai-0zjo, 2026-10-02 사용자 결정). 옮기기는
     // 했다 — 종료 코드는 그대로다. 막는 자리는 훅 규칙 5 하나다. 사람 쪽과 `--json` 쪽 모두 stderr 다:
     // 이 줄은 부르는 쪽이 아니라 그 곁의 사람이 읽는다.
+    // `-C` 로 불렀으면 내미는 줄도 그 뿌리를 겨눈다 — 부른 사람의 셸은 여기가 아니다(`Ctx::chdir`). **`--user`
+    // 로 옮겼으면 그 사람도 싣는다**(moai-0zjo 리뷰) — 빼고 친 줄은 이 기계의 git 사람으로 넘겨받거나 사람이 없는
+    // 기계에서 진다. 규칙 5 의 거절문이 내미는 줄과 같은 자리다. `MOAI_ACTOR` 는 안 싣는다 — 내보낸 값인지 그
+    // 한 줄에만 붙인 값인지 여기서는 못 가리고, 내보낸 값이면 모든 줄에 같은 군말이 붙는다.
+    let mut head = match repo.root.to_str().filter(|_| ctx.chdir) {
+        Some(root) => format!("moai -C {}", crate::text::shell_word(root)),
+        None => "moai".to_string(),
+    };
+    if let Some(who) = &ctx.user {
+        head.push_str(&format!(" --user {}", crate::text::quoted(who.trim())));
+    }
     for w in &moved.theirs {
-        eprintln!("moai: {}", theirs_said(w, to.as_str(), lang));
+        eprintln!("moai: {}", theirs_said(w, &head, to.as_str(), lang));
     }
 
     if ctx.json {

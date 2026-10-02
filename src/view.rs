@@ -1275,10 +1275,15 @@ pub struct Others<'a, 'i> {
 
 /// 내 것이 아닌 줄 `n` 건을 대는 한 줄 — `ready`·`prime`·한눈 보기가 같은 글자로 선다(moai-0zjo).
 ///
-/// **칸 이름도 걸러 넣는다**([`one_line`]) — 설정의 `statuses` 는 손으로 고칠 수 있는 글이고, 한눈
-/// 보기에서는 남의 저장소의 것이다. 거르지 않으면 그 글자가 이 화면을 다시 칠한다.
+/// **칸 이름은 셸 낱말로 감싸 넣는다**([`crate::text::quoted`]) — 설정의 `statuses` 는 손으로 고칠 수 있는
+/// 글이고, 한눈 보기에서는 남의 저장소의 것이다. 안 감싸면 `하는 중` 은 두 낱말로 갈려 내민 줄이 안 돌고,
+/// `$(…)` 는 붙여 넣는 순간 돈다. 감싸는 자는 제어문자도 `$'…'` 로 적어 이 화면을 다시 칠하지 못한다.
+/// 꼬리는 규칙 5 의 거절문과 같은 [`crate::guide::TAKE_YES`] 다 — 누가 그러라고 했는지가 노트에 남는다.
 fn others_said(n: usize, column: &str, lang: Lang) -> String {
-    fill(say(lang, "ready.others"), &[("n", &n.to_string()), ("column", &one_line(column))])
+    fill(
+        say(lang, "ready.others"),
+        &[("n", &n.to_string()), ("column", &crate::text::quoted(column)), ("take", crate::guide::TAKE_YES)],
+    )
 }
 
 /// 내 것이 아닌 줄의 담당 — 남의 것이면 그 사람, 담당이 없으면 그 낱말이다(moai-0zjo). 합치는 자는
@@ -3859,6 +3864,39 @@ mod tests {
         Others { rows: &[], more: 0, naming: crate::config::Naming::Full, column: "in_progress" }
     }
 
+    /// **`prime` 도 내 것이 아닌 줄을 따로 댄다**(moai-0zjo 리뷰) — `ready` 의 `?` 덩이와 같은 말과 같은 꼬리다.
+    /// 안 대면 남의 일만 남은 저장소에서 세션 첫머리의 요약이 "집을 것이 없다" 로 읽힌다. 칸 이름은 셸 낱말로
+    /// 감싼다 — `하는 중` 이 두 낱말로 갈리면 내민 줄이 안 돈다.
+    #[test]
+    fn prime_sets_what_is_not_mine_apart() {
+        use crate::report::Owner;
+        let lang = Lang::En;
+        let labels = crate::report::EpicLabels::titled(BTreeMap::new());
+        let mut theirs = issue("argos-0002", "theirs", "todo");
+        theirs.assignee = Some("B".into());
+        theirs.assignee_email = Some("b@x.io".into());
+        let mut nobody = issue("argos-0003", "nobody's", "todo");
+        nobody.assignee = None;
+        let p = crate::report::Prime {
+            held: Vec::new(),
+            picks: Vec::new(),
+            rest: 0,
+            others: vec![(&theirs, Owner::Theirs), (&nobody, Owner::Unowned)],
+            others_rest: 2,
+            focus: crate::report::Focus::default(),
+        };
+        let spaced = Config::parse("prefix = \"argos\"\nstatuses = \"todo,하는 중,done\"\n").unwrap();
+        let out = plain(&prime(&p, &labels, &spaced, Screen::new(lang))).join("\n");
+        let said = others_said(4, "하는 중", lang);
+        assert!(out.contains(&format!("> {said}")), "덩이 머리가 없다 — {out}");
+        assert!(said.contains("moai mv <id> '하는 중' --take -m '<who said yes>'"), "{said}");
+        assert!(out.lines().any(|l| l.contains("argos-0002") && l.ends_with("B (b@x.io)")), "{out}");
+        assert!(out.lines().any(|l| l.contains("argos-0003") && l.ends_with(say(lang, "ready.unowned"))), "{out}");
+        assert!(out.contains(&more_of(2, lang)), "잘린 수를 안 댔다 — {out}");
+        let bare = crate::report::Prime { others: Vec::new(), others_rest: 0, ..p };
+        assert!(!plain(&prime(&bare, &labels, &spaced, Screen::new(lang))).join("\n").contains(&said));
+    }
+
     /// **내 것이 아닌 줄은 목록 밑 따로 한 덩이다**(moai-0zjo, 2026-10-02 사용자 결정) — 머리의 수는 내 것만
     /// 세고, 덩이는 `?` 와 함께 남의 담당과 "담당 없음" 을 대며, `--take` 줄의 칸은 설정의 집는 칸이다.
     /// 그 덩이가 없으면 화면은 가르기 전과 글자째 같다 — 한 사람 저장소의 출력이 안 바뀐다.
@@ -3879,7 +3917,7 @@ mod tests {
         let out = plain(&ready(&[&mine], 0, others, &labels, &[], &[], &none, Screen::new(lang)));
         let joined = out.join("\n");
         assert_eq!(out[0], fill(say(lang, "ready.count"), &[("n", "1")]), "머리의 수가 남의 줄까지 셌다");
-        let said = fill(say(lang, "ready.others"), &[("n", "3"), ("column", "doing")]);
+        let said = others_said(3, "doing", lang);
         assert!(joined.contains(&format!("? {said}")), "덩이 머리가 없다 — {joined}");
         assert!(said.contains("moai mv <id> doing --take"), "설정의 칸이 안 들었다 — {said}");
         let theirs_line = out.iter().find(|l| l.contains("argos-0002")).expect("남의 줄이 안 섰다");

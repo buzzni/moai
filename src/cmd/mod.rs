@@ -962,7 +962,13 @@ pub fn resolve_me(
 ///
 /// `git` 을 두 번 띄우는 자리라 **물을 줄이 있을 때만** 부른다 — 부르는 쪽이 그 문을 지킨다.
 pub fn me_at(ctx: &Ctx, root: &std::path::Path) -> Option<crate::query::Me> {
-    crate::model::actor(ctx.user.as_deref(), root).ok().map(|a| crate::query::Me::of(&a))
+    me_of(ctx.user.as_deref(), root)
+}
+
+/// [`me_at`] 의 몸 — 훅이 닫힘에 담아 나중에 부르므로(`cmd::hook` 의 `person_at`) `Ctx` 없이 받는다. **한
+/// 자다**: `ready` 가 내 것으로 내미는 줄과 규칙 5 가 내 것으로 보는 줄이 같은 사람에서 갈린다.
+pub fn me_of(user: Option<&str>, root: &std::path::Path) -> Option<crate::query::Me> {
+    crate::model::actor(user, root).ok().map(|a| crate::query::Me::of(&a))
 }
 
 /// `ready --json`·`prime --json` 이 내 것과 따로 싣는 줄 하나 — 그 표면의 줄 모양에 **늘 서는**
