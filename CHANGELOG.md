@@ -82,6 +82,17 @@ does not tag — see `CONTRIBUTING.md`.
   sees `broken` in all of these — the fix is the link or the file
   (`docs/recovery.md`).
 
+- **A `.moai/lock` that is a link or not a regular file stops every write as
+  `broken`.** A link there used to be followed wherever it pointed, even inside
+  the checkout, and a directory there stopped writes with the system's `Is a
+  directory` and the code `error`. moai no longer takes its lock through a link
+  at all — one pointing at `issues.jsonl` lands on a file each write replaces —
+  so every write now stops with moai's own line naming the lock and why, in the
+  chosen language, and the code `broken`. The lock beside a linked
+  `.moai/issues.jsonl` follows the same rule, and reads are not affected. moai
+  makes that file itself, so the fix is to remove what stands there
+  (`docs/recovery.md`).
+
 - **Ties under `--sort created` and `--sort updated` fall to id alone.** A
   plan creates its rows within one second, so rows sharing a `created_at` are
   common. Those ties used to fall to priority, then id, so a priority edit
@@ -93,6 +104,25 @@ does not tag — see `CONTRIBUTING.md`.
   the same order, so its created and updated lists change the same way.
 
 ### Fixed
+
+- **A `.moai/lock` that is a link no longer loses writes.** A cloned repository
+  could commit `.moai/lock` as a link, and every write took its lock through it:
+  with `-> /proc/self/fd/2` each process locked its own stderr, so 24 concurrent
+  `moai add` all exited 0 and only a handful of issues remained, and
+  `-> ../.git/index.lock` broke every later `git commit`; a FIFO there hung every
+  write. The lock is now taken only on a regular file, never through a link, and
+  only inside the checkout and outside `.git/`. The lock beside a linked
+  `.moai/issues.jsonl` is taken the same way, and a link there is no longer
+  passed over as a lock moai already holds — `-> /proc/self/fd/3` resolved to
+  each process's own `.moai/lock`, so two trackers sharing one snapshot both
+  skipped it and lost writes. A snapshot linked onto a lock (`.moai/issues.jsonl -> lock`),
+  which replaced the lock on every write and lost writes the same way, is
+  refused too. Each of these stops the write with one line naming the file and
+  why, nothing is changed, and under `--json` the code is `broken`; links that
+  used to be followed, and a directory there, are under **Changed**. A `.moai`
+  directory linked out of the checkout no longer leaves a lock file out there.
+  The locks beside your user config and read marks still follow links, so
+  dotfiles linked by stow or rcm keep working.
 
 - **A snapshot or config that links out of the checkout no longer runs every
   command out of memory.** A cloned repository that committed

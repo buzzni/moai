@@ -11,12 +11,16 @@
 //!   읽기 전에 그 이름이 갈리는 틈을 손잡이가 닫는다. `O_NONBLOCK` 으로 열어 FIFO 앞에서 쓰는 쪽을
 //!   기다리며 멈추지 않는다
 //!
+//! 저장소 락([`lock`], moai-sn57)도 이 둘 위에 선다 — 디렉터리는 [`place`] 로 재고, 끝 조각은 [`read`] 처럼
+//! 연 손잡이로 잰다. 하나가 더 엄하다: 락은 안을 가리키는 링크도 안 따른다.
+//!
 //! **거절은 자료다**([`Unheld`]) — 글은 부르는 쪽이 고른 말로 [`said`] 가 짓는다. 말을 못 고르는 자리
 //! (제 트래커를 지은 뒤에 링크가 갈린 경우의 [`crate::store::Repo::read`])는 말 없는 꼴 [`spelled`] 를 쓴다.
 
 use std::path::{Path, PathBuf};
 
-/// 견줄 뿌리 — **푼 자리로만 선다**([`Home::of`]). [`place`]·[`check`]·[`read_inside`] 가 모두 이것을 받는다.
+/// 견줄 뿌리 — **푼 자리로만 선다**([`Home::of`]). [`place`]·[`check`]·[`read_inside`]·[`open_inside`]·[`lock`] 이
+/// 모두 이것을 받는다.
 ///
 /// 한때는 맨 `&Path` 를 받아, [`place`]·[`check`] 는 "이미 푼 뿌리" 를 바라고 [`read_inside`] 는 받은 철자를
 /// 제가 풀었다. 같은 꼴에 거꾸로인 전제가 글로만 갈려, 푼 적 없는 뿌리를 [`check`] 에 넘기면 컴파일은 되고
@@ -32,7 +36,7 @@ impl Home {
     }
 }
 
-/// 저장소가 든 파일을 **안 읽는 까닭** — 말이 아니라 자료다.
+/// 저장소가 든 파일을 **안 읽는 까닭**, 락이면 **안 잡는 까닭**([`lock`]) — 말이 아니라 자료다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unheld {
     /// 링크가 체크아웃 밖으로 풀린다 — 풀린 자리와 견준 체크아웃(푼 철자).
@@ -41,11 +45,14 @@ pub enum Unheld {
     IntoGit { to: PathBuf },
     /// 보통 파일이 아니다 — FIFO·장치·디렉터리·소켓. 링크가 아니라 그 자리에 바로 선 것도 든다.
     NotAFile,
+    /// 링크다 — **저장소 락만 이 까닭을 낸다**([`lock`]). 읽는 자리는 안을 가리키는 링크를 따르지만 락은
+    /// 어디를 가리키든 안 따른다(moai-sn57, 2026-10-02 사용자 결정).
+    Link,
 }
 
-/// [`read`]·[`read_inside`]·[`open_inside`] 가 진 까닭 — **안 읽기로 한 것과 io 가 진 것을 가른다.** 앞의
-/// 것은 손으로 링크나 파일을 고칠 일이고(스냅샷·설정이면 `--json` 의 `broken`, 저널이면 `journal_error` 의
-/// `outside`·`failed`), 뒤의 것은 운영체제가 낸 말 그대로다.
+/// [`read`]·[`read_inside`]·[`open_inside`]·[`lock`] 이 진 까닭 — **안 읽기로(안 잡기로) 한 것과 io 가 진 것을
+/// 가른다.** 앞의 것은 손으로 링크나 파일을 고칠 일이고(스냅샷·설정·락이면 `--json` 의 `broken`, 저널이면
+/// `journal_error` 의 `outside`·`failed`), 뒤의 것은 운영체제가 낸 말 그대로다.
 #[derive(Debug)]
 pub enum Fell {
     Unheld(Unheld),
@@ -169,26 +176,92 @@ fn opened(p: &Path) -> Result<(std::fs::File, u64), Fell> {
     Ok((f, m.len()))
 }
 
-/// 남이 쓰기 리스를 쥔 파일을 다시 열어 볼 때까지 기다리는 끝 — 리눅스가 리스를 걷는 기본 시간
-/// (`/proc/sys/fs/lease-break-time`)과 같다. 막히는 `open` 이 그만큼 기다리던 자리다.
-const LEASE_BREAK: std::time::Duration = std::time::Duration::from_secs(45);
+/// **저장소 락을 연다**(moai-sn57) — `.moai/lock` 과, 링크 너머 스냅샷 곁의 락(`store::Lock::inside`). 받은
+/// 저장소가 커밋할 수 있는 자리라 읽는 자리와 같은 자로 재고, 하나를 더 건다.
+///
+/// - **디렉터리는 [`place`] 로 잰다** — 체크아웃 안이고 `.git/` 밖일 때만 그 푼 자리에 짓는다. `.moai` 가
+///   밖을 가리키면 여는 길(`store::Repo::rooted`)이 대개 설정에서 먼저 멈추지만, 연 뒤에 `.moai` 가 갈리거나(떠
+///   있는 탐색기가 받은 `git pull`) 스냅샷이 아직 없고 설정이 안으로 돌아오는 링크면 아무도 안 재어, 락 파일
+///   하나가 체크아웃 밖에 섰다
+/// - **끝 조각은 링크를 아예 안 따른다**(`O_NOFOLLOW`, [`Unheld::Link`]) — 안을 가리켜도 그렇다. 커밋된
+///   `-> /proc/self/fd/2` 는 프로세스마다 제 stderr 를 잠가, 동시 `add` 스물넷이 다 0 으로 끝나고 셋에서
+///   다섯만 남았다. `-> ../.git/index.lock` 이면 그 뒤의 git 커밋이 다 졌다. 안을 가리키는 `-> issues.jsonl`
+///   도 쓰기마다 `rename` 으로 갈리는 아이노드를 잠가 두 쓰는 쪽이 서로 다른 파일을 쥔다
+/// - **보통 파일일 때만** 손잡이를 낸다 — 연 손잡이의 `fstat` 으로 잰다. 막히지 않게 열어([`unblocked`])
+///   FIFO 앞에서도 안 멈춘다
+///
+/// 흔한 길에 더해진 것은 디렉터리를 푸는 것과 `fstat` 이다 — 둘 다 아무것도 안 연다. 열기가 진 뒤에만 그
+/// 자리를 한 번 더 잰다(`lstat`).
+pub(crate) fn lock(p: &Path, home: &Home) -> Result<std::fs::File, Fell> {
+    let name = p.file_name().ok_or(Fell::Unheld(Unheld::NotAFile))?;
+    // 디렉터리의 거절은 그 안의 락 자리로 댄다 — 사람이 보는 것은 디렉터리가 아니라 락이 설 자리다.
+    let beneath = |why| match why {
+        Unheld::Outside { to, home } => Unheld::Outside { to: to.join(name), home },
+        Unheld::IntoGit { to } => Unheld::IntoGit { to: to.join(name) },
+        other => other,
+    };
+    let at = place(crate::path::dir_of(p), home).map_err(|why| Fell::Unheld(beneath(why)))?.join(name);
+    let mut o = std::fs::OpenOptions::new();
+    o.create(true).write(true).truncate(false);
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(Fell::Unheld(Unheld::Link));
+    }
+    let f = match unblocked(&mut o, NOFOLLOW, &at) {
+        Ok(f) => f,
+        // 링크면 `ELOOP`(FreeBSD 는 `EMLINK`), FIFO 는 `ENXIO`, 디렉터리는 `EISDIR` 다 — 낱말 대신 자리를 잰다.
+        Err(e) => {
+            return Err(match std::fs::symlink_metadata(&at) {
+                Ok(m) if m.file_type().is_symlink() => Fell::Unheld(Unheld::Link),
+                Ok(m) if !m.is_file() => Fell::Unheld(Unheld::NotAFile),
+                _ => Fell::Io(e),
+            });
+        }
+    };
+    match f.metadata() {
+        Ok(m) if m.is_file() => Ok(f),
+        Ok(_) => Err(Fell::Unheld(Unheld::NotAFile)),
+        Err(e) => Err(Fell::Io(e)),
+    }
+}
+
+/// [`lock`] 이 [`unblocked`] 에 더 거는 것 — 끝 조각의 링크를 안 따른다.
+#[cfg(unix)]
+const NOFOLLOW: i32 = libc::O_NOFOLLOW;
+#[cfg(not(unix))]
+const NOFOLLOW: i32 = 0;
+
+/// 남이 리스를 쥔 파일을 다시 열어 볼 때까지 기다리는 끝 — 리눅스가 리스를 걷는 기본 시간
+/// (`/proc/sys/fs/lease-break-time`, 45초)보다 **한 초 길다**. 막히는 `open` 이 그만큼 기다리던 자리인데, 꼭
+/// 같은 때에 그만두면 마지막 열기가 커널이 리스를 걷는 순간과 겨뤄, 막히는 `open` 이 늘 열던 파일을 가끔 못
+/// 열었다 — 리스를 안 놓는 쪽 앞에서 서른두 번에 두 번이었다(리뷰 moai-sn57.kq4).
+const LEASE_BREAK: std::time::Duration = std::time::Duration::from_secs(46);
 
 /// 읽기 전용으로, **막히지 않게** 연다. FIFO 를 그냥 열면 쓰는 쪽이 올 때까지 `open` 에서 영영 멈춘다 —
-/// `O_NONBLOCK` 이면 FIFO 는 바로 열려 [`opened`] 의 `fstat` 에서 걸린다.
-///
-/// **보통 파일의 읽기에는 아무것도 안 바꾸지만, 여는 것은 하나 바꾼다** — 남이 쓰기 리스(`F_SETLEASE`)를 쥔
-/// 파일(커널 oplock 을 켠 Samba, 쓰기 위임을 준 knfsd)은 리스가 풀리기를 기다리지 않고 `EWOULDBLOCK` 으로 바로
-/// 진다. 막히는 `open` 은 리스가 걷힐 때까지 기다렸다가 읽었으므로, 그 실패만 잠깐씩 쉬며 다시 연다(리뷰
-/// moai-itsu.n8z). 진 열기가 이미 리스를 거두라고 알렸으니 다시 열면 곧 열린다. FIFO 의 읽기 열기는 이
-/// 갈래로 안 온다.
+/// `O_NONBLOCK` 이면 FIFO 는 바로 열려 [`opened`] 의 `fstat` 에서 걸린다. 리스 앞에서 쉬며 다시 여는 것은
+/// [`unblocked`] 의 몫이다.
 fn open(p: &Path) -> std::io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
+    unblocked(&mut o, 0, p)
+}
+
+/// **막히지 않게 여는 자리는 여기 하나다** — [`open`] 의 읽기와 [`lock`] 의 쓰기가 함께 지난다. `flags` 는
+/// `O_NONBLOCK` 위에 더 걸 것이다(unix 밖에서는 안 쓴다).
+///
+/// **보통 파일에는 아무것도 안 바꾸지만, 여는 것은 하나 바꾼다** — 남이 리스(`F_SETLEASE`)를 쥔 파일(커널
+/// oplock 을 켠 Samba, 위임을 준 knfsd)은 리스가 풀리기를 기다리지 않고 `EWOULDBLOCK` 으로 바로 진다. 읽기
+/// 열기는 쓰기 리스에, 쓰기로 여는 락은 읽기 리스에도 그렇게 진다. 막히는 `open` 은 리스가 걷힐 때까지
+/// 기다렸다가 열었으므로, 그 실패만 잠깐씩 쉬며 [`LEASE_BREAK`] 까지 다시 연다(리뷰 moai-itsu.n8z). 진 열기가
+/// 이미 리스를 거두라고 알렸으니 다시 열면 곧 열린다. FIFO 의 열기는 이 갈래로 안 온다.
+fn unblocked(o: &mut std::fs::OpenOptions, flags: i32, p: &Path) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        o.custom_flags(libc::O_NONBLOCK);
+        o.custom_flags(libc::O_NONBLOCK | flags);
     }
+    #[cfg(not(unix))]
+    let _ = flags;
     let until = std::time::Instant::now() + LEASE_BREAK;
     loop {
         match o.open(p) {
@@ -200,8 +273,8 @@ fn open(p: &Path) -> std::io::Result<std::fs::File> {
     }
 }
 
-/// 안 읽은 까닭 한 토막 — 고른 말로. 앞에 자리를 다는 것은 부르는 쪽이다(스냅샷·설정은 `<자리>: <까닭>` —
-/// 스냅샷은 [`refused`], 설정은 `view::config_refused` 가 같은 꼴로 단다. 저널은 `warn.unread_journal`).
+/// 안 읽은 까닭 한 토막 — 고른 말로. 앞에 자리를 다는 것은 부르는 쪽이다(스냅샷·설정·락은 `<자리>: <까닭>` —
+/// 스냅샷과 락은 [`refused`], 설정은 `view::config_refused` 가 같은 꼴로 단다. 저널은 `warn.unread_journal`).
 pub fn said(lang: crate::i18n::Lang, why: &Unheld) -> String {
     use crate::i18n::{fill, say};
     // 링크 글은 받은 저장소가 커밋한 것이라 제어 문자를 걷는다 — ESC 가 든 링크 하나가 화면을 다시 칠한다.
@@ -212,15 +285,19 @@ pub fn said(lang: crate::i18n::Lang, why: &Unheld) -> String {
         }
         Unheld::IntoGit { to } => fill(say(lang, "held.into_git"), &[("to", &shown(to))]),
         Unheld::NotAFile => say(lang, "held.not_a_file").to_string(),
+        Unheld::Link => say(lang, "held.link").to_string(),
     }
 }
 
 /// 안 읽어 거절한 한 줄 — `<자리>: <까닭>`. 설정의 거절(`view::config_refused`)과 **같은 꼴이다** — 한
 /// 거절을 두 모양으로 대면 같은 처지를 두 일로 읽는다. "이 명령은 여기서 멈춘다" 같은 말은 안 붙인다: 이
 /// 줄은 그 저장소를 못 연 채 나머지를 계속 그리는 자리(밖의 한눈 보기, `project ls`, `prime`)에도 선다
-/// (리뷰 moai-itsu.n8z).
+/// (리뷰 moai-itsu.n8z). 락을 못 잡은 거절([`lock`])도 이 꼴에 "아무것도 안 바뀌었다" 만 덧붙인다.
+///
+/// **자리도 제어 문자를 걷는다** — 너머의 락(`store::Repo::far_lock`)은 커밋된 링크 글을 이어 붙인 철자라
+/// 받은 저장소가 지은 디렉터리 이름이 그대로 든다(리뷰 moai-sn57.kq4).
 pub fn refused(lang: crate::i18n::Lang, at: &Path, why: &Unheld) -> String {
-    format!("{}: {}", at.display(), said(lang, why))
+    format!("{}: {}", crate::text::one_line(&at.display().to_string()), said(lang, why))
 }
 
 /// 말 없는 꼴 — `<자리> -> <풀린 자리>`. **말을 못 고르는 자리가 쓴다** — 제 트래커를 지은 뒤에 링크가 갈린
@@ -233,6 +310,7 @@ pub fn spelled(at: &Path, why: &Unheld) -> String {
             format!("{} -> {}", at.display(), crate::text::one_line(&to.display().to_string()))
         }
         Unheld::NotAFile => format!("{}: not a regular file", at.display()),
+        Unheld::Link => format!("{}: a link, not followed", at.display()),
     }
 }
 
