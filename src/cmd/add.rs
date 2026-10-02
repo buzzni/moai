@@ -115,13 +115,35 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 ///
 /// **argv 에 적힌 빈 글(`-b ''`)은 말하지 않는다.** 그것은 사람이 비워 준 것이지 오다가 사라진 것이
 /// 아니다.
+///
+/// **반대쪽 판도 한 줄로 말한다**(moai-3hxc.58k) — argv 에 적힌 글이 **한 줄이고 그 이름의 파일이
+/// 있으면** "글로 받았다" 고 알린다. `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는데,
+/// `moai add --from - --body plan.md` 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이
+/// 2026-10-01 에 두 번 있었다. 막지도 본문을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
+/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
+/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add` 가 같은 말을 한다.
 pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
         eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
     }
+    // stdin 에서 온 글은 사람이 파일 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
+    if !from_stdin && let Some(text) = body.as_deref().filter(|b| names_a_file(b)) {
+        let said = crate::i18n::fill(
+            crate::i18n::say(ctx.lang(), "add.body_names_a_file"),
+            &[("text", text), ("path", &crate::text::shell_word(text))],
+        );
+        eprintln!("moai: {said}");
+    }
     Ok(body)
+}
+
+/// 본문 글이 **한 줄이고, 지금 디렉터리에서 그 이름으로 일반 파일이 서 있는가.** `--from` 이 읽는 경로와 같은
+/// 기준(cwd, `-C` 를 따른 뒤)이다. `metadata` 만 부르고 열지 않으며, 없거나 못 읽는 경로는 `false` 다 —
+/// 알림은 덤이라 stat 이 실패했다고 쓰기를 막을 까닭이 없다.
+fn names_a_file(text: &str) -> bool {
+    !text.contains(['\n', '\r']) && std::path::Path::new(text).is_file()
 }
 
 /// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.
