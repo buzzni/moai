@@ -152,6 +152,15 @@ impl Plan {
     fn nearest(&self, column: usize, top: usize) -> Option<usize> {
         self.run(column).into_iter().min_by_key(|&n| (self.cards[n].top.abs_diff(top), self.cards[n].top))
     }
+
+    /// 커서의 칸 안에서 `by` 장 간다 — 끝에서 멈춘다. 키(`j`·`k`·반 쪽·한 쪽)와 휠이 같은 걸음을 탄다:
+    /// 둘이 저마다 적으면 끝에서 멈추는 자가 갈린다.
+    fn along(&self, cursor: usize, by: isize) -> usize {
+        let Some(here) = self.cards.get(cursor) else { return cursor };
+        let run = self.run(here.column);
+        let at = run.iter().position(|&n| n == cursor).unwrap_or(0);
+        run.get(at.saturating_add_signed(by).min(run.len().saturating_sub(1))).copied().unwrap_or(cursor)
+    }
 }
 
 /// 커서가 가는 길 — 칸 안의 이동이거나 옆 칸이다.
@@ -169,12 +178,7 @@ pub enum Go {
 /// - `h`·`l` 은 **옆 칸**으로 가고 지금 높이에 가장 가까운 카드에 선다. 빈 칸은 건너뛴다 — 설 카드가 없다
 pub fn step(plan: &Plan, cursor: usize, go: Go) -> usize {
     let Some(here) = plan.cards.get(cursor) else { return cursor };
-    let along = |by: isize| {
-        let run = plan.run(here.column);
-        let at = run.iter().position(|&n| n == cursor).unwrap_or(0);
-        let to = at.saturating_add_signed(by).min(run.len().saturating_sub(1));
-        run.get(to).copied().unwrap_or(cursor)
-    };
+    let along = |by: isize| plan.along(cursor, by);
     match go {
         Go::Move(Move::LineDown) | Go::Side(Side::Down) => along(1),
         Go::Move(Move::LineUp) | Go::Side(Side::Up) => along(-1),
@@ -202,9 +206,7 @@ pub fn roll(plan: &Plan, cursor: usize, column: usize, by: isize) -> usize {
     if here.column != column {
         return plan.nearest(column, here.top).unwrap_or(cursor);
     }
-    let run = plan.run(column);
-    let at = run.iter().position(|&n| n == cursor).unwrap_or(0);
-    run.get(at.saturating_add_signed(by).min(run.len().saturating_sub(1))).copied().unwrap_or(cursor)
+    plan.along(cursor, by)
 }
 
 /// 화면에 서는 칸의 창 — `first` 부터 `count` 개.
@@ -223,12 +225,19 @@ impl Window {
 /// 폭 `width` 에 칸 `columns` 개를 세울 창. 칸마다 [`CARD_MIN`] 을 못 받으면 덜 세운다 — **커서가 선 칸은
 /// 늘 선다**(`holding`): 안 서면 커서가 화면 밖 카드에 선 채 상세만 그 카드를 말한다. 못 세운 칸은 그리는 쪽이
 /// 제목 줄에 이름과 수로 댄다.
-pub fn window(columns: usize, width: usize, holding: Option<usize>) -> Window {
+///
+/// **창은 지난 자리(`was`, 지난 프레임의 첫 칸)에 머물고, 커서가 창 밖으로 나갈 때만 가장 적게 민다** —
+/// 목록의 [`super::scroll::Scroll::reveal`] 과 같은 자다. 커서의 칸을 늘 오른쪽 끝에 붙이면 보이는 왼쪽 칸으로
+/// `h` 를 눌러도 창이 한 칸 밀리고, 휠은 마우스 밑의 칸이 걸음마다 바뀌어 굴린 손 밑의 칸 대신 왼쪽 끝까지
+/// 칸을 건너간다.
+pub fn window(columns: usize, width: usize, holding: Option<usize>, was: usize) -> Window {
     let count = (width / CARD_MIN).clamp(1, columns.max(1)).min(columns);
-    let first = match holding {
-        Some(c) if c >= count => c + 1 - count,
-        _ => 0,
-    };
+    let mut first = was.min(columns - count);
+    match holding {
+        Some(c) if c < first => first = c,
+        Some(c) if c >= first + count => first = c + 1 - count,
+        _ => {}
+    }
     Window { first, count }
 }
 
@@ -337,13 +346,29 @@ mod tests {
     /// 칸마다 [`CARD_MIN`] 을 못 받으면 덜 세우되, 커서가 선 칸은 늘 선다.
     #[test]
     fn a_narrow_board_keeps_the_column_the_cursor_stands_in() {
-        assert_eq!(window(6, 120, Some(0)), Window { first: 0, count: 6 });
-        assert_eq!(window(6, 40, Some(0)), Window { first: 0, count: 2 });
-        assert_eq!(window(6, 40, Some(4)), Window { first: 3, count: 2 });
-        assert!(window(6, 40, Some(4)).holds(4));
-        assert_eq!(window(6, 5, None), Window { first: 0, count: 1 }, "아무리 좁아도 한 칸은 선다");
-        assert_eq!(window(0, 80, None), Window { first: 0, count: 0 });
+        assert_eq!(window(6, 120, Some(0), 0), Window { first: 0, count: 6 });
+        assert_eq!(window(6, 40, Some(0), 0), Window { first: 0, count: 2 });
+        assert_eq!(window(6, 40, Some(4), 0), Window { first: 3, count: 2 });
+        assert!(window(6, 40, Some(4), 0).holds(4));
+        assert_eq!(window(6, 5, None, 0), Window { first: 0, count: 1 }, "아무리 좁아도 한 칸은 선다");
+        assert_eq!(window(0, 80, None, 0), Window { first: 0, count: 0 });
+        assert_eq!(window(6, 120, Some(0), 4), Window { first: 0, count: 6 }, "다 서는데 지난 자리만큼 밀었다");
         assert_eq!(widths(23, 3), [8, 8, 7]);
         assert!(widths(10, 0).is_empty());
+    }
+
+    /// **창은 지난 자리에 머문다** — 보이는 칸으로 옮기면 창이 안 밀리고, 창 밖으로 나갈 때만 가장 적게 민다.
+    /// 커서의 칸을 늘 오른쪽 끝에 붙이던 때는 왼쪽 칸 위에서 굴린 휠이 걸음마다 마우스 밑의 칸을 바꿔 왼쪽 끝까지
+    /// 건너갔다.
+    #[test]
+    fn the_window_stays_put_while_the_cursor_column_is_in_it() {
+        // 칸 3·4 가 서 있고 커서가 3 으로 왔다 — 3 은 이미 보인다.
+        assert_eq!(window(6, 40, Some(3), 3), Window { first: 3, count: 2 });
+        // 2 로 가면 그만큼만 민다.
+        assert_eq!(window(6, 40, Some(2), 3), Window { first: 2, count: 2 });
+        // 오른쪽으로 나가도 그만큼만.
+        assert_eq!(window(6, 40, Some(5), 2), Window { first: 4, count: 2 });
+        // 칸이 줄어 지난 자리가 넘치면 끝에 맞춘다.
+        assert_eq!(window(3, 40, Some(2), 5), Window { first: 1, count: 2 });
     }
 }

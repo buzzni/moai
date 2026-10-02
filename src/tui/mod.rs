@@ -2246,7 +2246,13 @@ impl App {
     /// 왜 여기로 왔는지도 모르는 목록을 본다. 중복 id 면 그 디렉터리의 첫 줄이다([`Anchor`]).
     fn land(&mut self, id: &str) -> Landing {
         let Some(at) = self.site.index.find(id) else { return Landing::Missing };
-        let home = self.site.index.home_of(at).clone();
+        let mut home = self.site.index.home_of(at).clone();
+        // **보드는 지금 디렉터리 밑의 줄을 이미 카드로 세운다**(moai-9nfw) — 그 집으로 들어가면 뿌리에서 담은 생각
+        // 하나(`SPC n`)로 마일스톤 레인 전부가 `(마일스톤 없음)` 한 레인으로 줄어든다. 보드를 오가는 길(`flip_layout`)이
+        // 같은 까닭으로 디렉터리를 지킨다. 지금 자리 밖의 줄이면 목록처럼 그리로 간다 — 여기서는 카드가 안 선다.
+        if self.board() && home.starts_with(&self.site.path) {
+            home = self.site.path.clone();
+        }
         let was = std::mem::replace(&mut self.site.path, home);
         let want = Anchor::Issue(id.to_string());
         let rows = self.rows();
@@ -5214,13 +5220,24 @@ impl App {
             self.detail.rewind();
             let fallback = self.site.remembered.pop().unwrap_or(0);
             let rows = self.rows();
-            // 보드에는 폴더 줄이 없다 — 나온 폴더 밑의 첫 카드에 선다(moai-9nfw).
+            // 보드에는 폴더 줄이 없다 — 나온 폴더 밑의 카드에 선다(moai-9nfw). **들어가기 전에 서 있던 카드가 그
+            // 폴더 밑이면 그 카드다**: 보드의 Enter 는 펼친 트리의 깊은 줄로 한 번에 여러 층 들어가므로, 뿌리로 돌아온
+            // 걸음이 첫 카드에 서면 보던 카드를 잃는다. 기억한 번호가 낡았거나 건너뛴 층의 0 이면 첫 카드다.
             let mut came = self.site.path.clone();
             came.push(from.clone());
+            let under = |n: usize| {
+                matches!(rows.get(n), Some(Row::Item(Seat::Here, e, _))
+                    if e.at().is_some_and(|at| self.site.index.home_of(at).starts_with(&came)))
+            };
             self.cursor = rows
                 .iter()
                 .position(|r| matches!(r, Row::Item(_, Entry::Dir { seg, .. }, _) if *seg == from))
-                .or_else(|| self.board().then(|| self.first_under(&rows, &came)).flatten())
+                .or_else(|| {
+                    if !self.board() {
+                        return None;
+                    }
+                    if under(fallback) { Some(fallback) } else { self.first_under(&rows, &came) }
+                })
                 .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
         }
     }
@@ -5604,6 +5621,50 @@ mod tests {
         a.hit("Bksp");
         assert!(a.site.path.is_empty());
         assert_eq!(on_id(&a), "argos-0003", "나온 마일스톤 밑의 카드에 안 섰다");
+    }
+
+    /// **보드에서 들어갔다 뿌리로 돌아오면 들어가기 전의 카드에 선다**(moai-9nfw 리뷰) — 보드의 Enter 는 펼친 트리의
+    /// 깊은 줄로 여러 층을 한 번에 들어간다. 나올 때마다 폴더 밑의 첫 카드에 서면 뿌리에 와서 보던 카드를 잃는다.
+    #[test]
+    fn coming_back_to_the_root_board_stands_on_the_card_it_left_from() {
+        let mut a = boarded();
+        let mut issues = a.site.issues.clone();
+        // 0004 밑의 자식 — 0004 가 들어갈 수 있는 카드가 된다.
+        issues.push(make("argos-0004.c1a", Kind::Issue));
+        a.adopt(issues);
+        a.layout = view::Layout::Board;
+        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0004").unwrap();
+        a.hit("Enter");
+        assert_eq!(a.site.path.len(), 3, "0004 안으로 안 들어갔다 — {:?}", a.site.path);
+        a.hit("Bksp");
+        assert_eq!(on_id(&a), "argos-0004", "나온 카드에 안 섰다");
+        a.hit("Bksp");
+        a.hit("Bksp");
+        assert!(a.site.path.is_empty());
+        assert_eq!(on_id(&a), "argos-0004", "뿌리로 돌아와 들어가기 전의 카드를 잃었다");
+    }
+
+    /// **보드에서 쓴 줄이 지금 디렉터리 밑이면 디렉터리를 지킨다**(moai-9nfw 리뷰) — 목록처럼 그 줄의 집으로
+    /// 들어가면 뿌리에서 담은 줄 하나로 보드 전체가 그 에픽·바구니 하나로 줄어든다. 카드는 이미 여기 선다.
+    #[test]
+    fn a_line_written_on_the_board_keeps_the_board_where_it_is() {
+        let (_scratch, mut a) = writable("board-land");
+        a.layout = view::Layout::Board;
+        let wrote = a.write(
+            |_| {},
+            |issues, _, _, by| {
+                let at = "2026-09-13T00:00:00Z";
+                issues.push(member("argos-0003", "argos-0001"));
+                Ok((
+                    vec![crate::model::JournalEntry::create("argos-0003", "멤버", at, by)],
+                    Touched { id: "argos-0003".into(), done: "만듦" },
+                ))
+            },
+        );
+        assert_eq!(wrote.as_deref(), Some("argos-0003"));
+        assert!(a.site.path.is_empty(), "보드가 쓴 줄의 집으로 들어갔다 — {:?}", a.site.path);
+        assert_eq!(on(&a).as_deref(), Some("argos-0003"));
+        assert_eq!(a.notice.as_deref(), Some("✓ 만듦 · argos-0003"));
     }
 
     /// **고른 배치는 설정에 남고 다음 실행이 읽는다**(moai-9nfw). 모르는 낱말은 목록이다.
