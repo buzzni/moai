@@ -232,15 +232,16 @@ a second surface — a TUI, a web view, your own tool — cheap to attach.
 below shrink is the output, and with it the tokens.
 
 - `--sort <key>` and `--reverse` pick the order — `priority` (the default),
-  `created`, `updated`, `status`, `assignee`, `title` or `id`. Ties in every
-  order fall to priority, then id.
+  `created`, `updated`, `status`, `assignee`, `title` or `id`. Ties under
+  `created` and `updated` fall to id alone, and under every other order to
+  priority, then id.
 - `-n <count>` cuts the list, and `--after <id>` starts the next page after the
   last id of the page before. The cursor is that row's value in the order, not
   an offset, so rows other sessions create or remove meanwhile never shift a
   page. A row whose place in the order changes between pages — the cursor row
   or any other, a priority edit included — can repeat or be skipped; `--sort id`
-  is the one order no edit moves. The output stays a bare array — fewer rows
-  than `-n` means the list has ended.
+  and `--sort created` are the orders no edit moves. The output stays a bare
+  array — fewer rows than `-n` means the list has ended.
 - `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
   and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
   a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
