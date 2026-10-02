@@ -2021,7 +2021,9 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     let y_of = |line: usize| canvas.y + (line - offset) as u16;
     if laid.plan.headed {
         for (n, lane) in laid.plan.lanes.iter().enumerate() {
-            if seen.contains(&lane.top) {
+            // 이름 없는 레인(마일스톤을 안 쓰는 저장소의 나머지 줄)은 머리줄 자리만 둔다 — 이름 없는 `── ───` 선은
+            // 무엇의 머리인지 말하지 않는다(리뷰 moai-9nfw.fnb 8번).
+            if seen.contains(&lane.top) && laid.lanes.get(n).is_some_and(Option::is_some) {
                 let line = lane_line(app, &laid, n, canvas.width as usize);
                 f.buffer_mut().set_line(canvas.x, y_of(lane.top), &line, canvas.width);
             }
@@ -4475,6 +4477,30 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 14);
         let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
         assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
+    }
+
+    /// **이름 없는 레인에는 머리줄 글이 안 선다**(리뷰 moai-9nfw.fnb 8번) — 마일스톤을 안 쓰는 저장소에도 `(길 잃음)`
+    /// 은 레인으로 서는데, 그때 나머지 줄의 레인이 이름 없는 `── ───` 선을 이고 있었다.
+    #[test]
+    fn an_unnamed_lane_draws_no_bare_rule() {
+        let at = "2026-09-01T00:00:00Z";
+        let mut lost = Issue::new("argos-0002".into(), "길 잃은 일".into(), Kind::Issue, Status::new("todo"), at);
+        lost.epic = Some("argos-0999".into());
+        let issues =
+            vec![Issue::new("argos-0001".into(), "그냥 일".into(), Kind::Issue, Status::new("todo"), at), lost];
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.site.lang = Lang::Ko;
+        a.layout = super::super::view::Layout::Board;
+        a.detail_open = false;
+        let lines = render(&mut a, 120, 14);
+        let text = lines.join("\n");
+        assert!(text.contains("── (길 잃음)"), "길 잃은 줄의 레인이 머리를 잃었다\n{text}");
+        let bare = lines.iter().any(|l| {
+            let inside = l.trim_matches(|c: char| c == '┃' || c.is_whitespace());
+            !inside.is_empty() && inside.chars().all(|c| c == '─' || c == ' ')
+        });
+        assert!(!bare, "이름 없는 레인이 빈 선을 세웠다\n{text}");
+        assert!(text.contains("그냥 일") && text.contains("길 잃은 일"), "{text}");
     }
 
     /// **`SPC c e` 는 목록의 에픽 열과 카드의 발줄을 함께 켠다**(moai-9nfw) — 보드에서 에픽은 카드가 아니라 이름으로

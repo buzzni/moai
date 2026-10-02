@@ -4210,8 +4210,9 @@ impl App {
                 board::Slot { lane, column }
             })
             .collect();
-        // **레인 머리줄은 뿌리에 마일스톤 레인이 설 때만이다** — 마일스톤이나 에픽 안은 레인이 하나라
-        // 머리줄이 경로 줄을 되풀이할 뿐이다.
+        // **레인 머리줄은 뿌리에 이름 있는 레인(마일스톤·바구니)이 설 때만이다** — 마일스톤이나 에픽 안은 레인이
+        // 하나라 머리줄이 경로 줄을 되풀이할 뿐이다. 마일스톤을 안 쓰는 저장소에도 `(길 잃음)` 은 레인으로 서므로,
+        // 그때 이름 없는 레인(`None`)은 머리줄 자리만 비워 두고 글을 안 세운다(`draw::board`).
         let headed = lanes.iter().any(Option::is_some);
         let plan = board::Plan::of(&slots, columns.len(), draw::card_height(self.fields), headed);
         Laid { columns, lanes, plan }
