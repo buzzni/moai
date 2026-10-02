@@ -438,8 +438,25 @@ impl Repo {
 
     /// **설정의 거절도 자료로 받는다**(moai-ivt9) — `config::Config::load` 는 화면 말을 모르고,
     /// 펴는 자는 여기 하나다([`crate::view::config_refused`]).
+    ///
+    /// **스냅샷도 여기서 먼저 잰다**(moai-itsu) — 체크아웃 밖·`.git/` 으로 가는 링크거나 보통 파일이 아니면
+    /// 모든 명령이 고른 말로 멈춘다(2026-10-02 사용자 결정, `--json` 코드는 `broken`). 받은 저장소가 커밋한
+    /// `issues.jsonl -> /proc/self/pagemap` 하나로 모든 명령이 메모리를 다 쓰던 자리다. 빈 스냅샷으로 읽고
+    /// 알리는 길도 있었지만 그러면 보드가 "이슈 0개" 라는 거짓 그림을 그린다 — 쓰기는 어차피
+    /// [`target_of`] 가 같은 링크를 거절한다.
+    ///
+    /// **재는 것은 여기고 읽는 것은 [`Repo::read`] 다.** 읽기는 화면 말을 모르는 자리라(락 안에서도
+    /// 읽는다) 거절을 고른 말로 못 편다. 여기서 먼저 물어 흔한 판은 고른 말로 서고, 그 뒤에 링크가 갈린
+    /// 판(탐색기가 떠 있는 동안 받은 `git pull`)은 읽기가 같은 자로 다시 재어 말 없는 꼴로 멈춘다.
     fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
-        let config = Config::load(&root).map_err(|why| Fail::new(crate::view::config_refused(lang(), &why)))?;
+        let config = match Config::load(&root) {
+            Ok(c) => c,
+            Err(why) => return Err(Fail::config(&why, lang())),
+        };
+        let issues = root.join(".moai").join("issues.jsonl");
+        if let Err(why) = crate::held::check(&issues, &crate::path::real(&root)) {
+            return Err(Fail::coded(crate::held::refused(lang(), &issues, &why), code::BROKEN));
+        }
         Ok(Repo::at(root, config))
     }
 
@@ -749,8 +766,11 @@ impl Repo {
     ///
     /// **읽기는 락을 잡지 않는다.** 쓰기가 `rename` 으로 갈아끼우므로 독자는
     /// 옛 파일 아니면 새 파일을 보지, 찢어진 파일을 볼 수 없다.
+    ///
+    /// **체크아웃 안에서만 읽는다**([`read_snapshot`], moai-itsu) — 고른 말로 멈추는 것은 이 저장소를 지은
+    /// [`Repo::rooted`] 가 먼저 했고, 여기서 다시 재는 것은 그 뒤에 링크가 갈린 판을 위해서다.
     pub fn read(&self) -> R<Load> {
-        Ok(read_snapshot(&self.issues_path())?.unwrap_or_default())
+        Ok(read_snapshot(&self.issues_path(), &self.root)?.unwrap_or_default())
     }
 
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
@@ -1615,8 +1635,21 @@ pub fn stamp(path: &Path) -> Stamp {
 /// **락을 잡지 않는다** — [`Repo::read`] 와 같은 까닭이다. 남의 워크트리를 읽는
 /// 길도 여기를 지나므로, 거기서도 락을 안 잡는다: 남의 쓰기를 기다리게 할 까닭이
 /// 없고, `rename` 이 찢어진 파일을 못 보게 한다.
-pub fn read_snapshot(path: &Path) -> R<Option<Load>> {
-    match std::fs::read_to_string(path) {
+///
+/// **그 체크아웃(`home`, 그 트래커의 뿌리) 안에서만, 연 손잡이가 댄 크기까지만 읽는다**([`crate::held`],
+/// moai-itsu). 받은 저장소가 `issues.jsonl -> /proc/self/pagemap` 을 커밋해 두면 `fs::read_to_string` 이
+/// 끝없이 읽어 모든 명령이 메모리를 다 썼고, FIFO 면 모든 명령이 멈췄다. 안 읽는 자리는 `broken` 코드로
+/// 멈추되 **말 없는 꼴**([`crate::held::spelled`])로 댄다 — 여기는 화면 말을 모른다. 제 트래커의 거절은
+/// [`Repo::rooted`] 가 먼저 고른 말로 냈고, 옆 워크트리의 것은 말묶음의 `trouble.unread` 가 감싼다.
+pub fn read_snapshot(path: &Path, home: &Path) -> R<Option<Load>> {
+    let src = match crate::held::read_inside(path, home) {
+        Ok(bytes) => crate::held::text(bytes),
+        Err(crate::held::Fell::Io(e)) => Err(e),
+        Err(crate::held::Fell::Unheld(why)) => {
+            return Err(Fail::coded(crate::held::spelled(path, &why), code::BROKEN));
+        }
+    };
+    match src {
         Ok(s) => Ok(Some(parse_issues(&s))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Fail::new(format!("{}: {e}", path.display()))),
@@ -3052,6 +3085,63 @@ mod tests {
         let status = Path::new("/proc/self/status");
         assert_eq!(std::fs::metadata(status).unwrap().len(), 0, "procfs 가 크기를 대는 판이다 — 시험이 못 잰다");
         assert_eq!(r.journal_bytes(status), Some(Vec::new()), "손잡이가 댄 크기 너머를 읽었다");
+    }
+
+    /// **스냅샷·설정이 체크아웃 밖·`.git/` 으로 가거나 보통 파일이 아니면 모든 명령이 고른 말로 멈춘다**
+    /// (moai-itsu, 2026-10-02 사용자 결정). 받은 저장소가 커밋한 `issues.jsonl -> /proc/self/pagemap` 하나로 모든
+    /// 명령이 메모리를 다 쓰던 자리다. 끝없이 읽는 파일로 재지 않는다 — 고침이 없으면 시험이 메모리를 다 쓴다.
+    /// 밖과 `.git/` 에 멀쩡한 파일을 두고 그것이 읽히지 않는지를 본다. 디렉터리는 고침 전에도 `error` 로
+    /// 멈췄으니 코드(`broken`)로 가른다.
+    #[cfg(unix)]
+    #[test]
+    fn a_snapshot_or_config_out_of_the_checkout_stops_every_command() {
+        let away = Scratch::new("store-held-away");
+        let row = serde_json::to_string(&issue("argos-4aex")).unwrap();
+        std::fs::write(away.join("issues.jsonl"), format!("{row}\n")).unwrap();
+        std::fs::write(away.join("config.toml"), "prefix = \"argos\"\n").unwrap();
+        let find = |d: &Scratch, lang| Repo::find_from(d.path(), move || lang).map(|r| r.map(|r| r.root));
+        for file in ["issues.jsonl", "config.toml"] {
+            for how in ["outside", "git", "directory"] {
+                let d = scratch(&format!("held-{how}"));
+                let at = d.join(".moai").join(file);
+                std::fs::remove_file(&at).unwrap();
+                match how {
+                    "outside" => std::os::unix::fs::symlink(away.join(file), &at).unwrap(),
+                    "git" => {
+                        std::fs::create_dir_all(d.join(".git")).unwrap();
+                        std::fs::copy(away.join(file), d.join(".git").join(file)).unwrap();
+                        std::os::unix::fs::symlink(format!("../.git/{file}"), &at).unwrap();
+                    }
+                    _ => std::fs::create_dir(&at).unwrap(),
+                }
+                let e = find(&d, crate::i18n::Lang::Ko).expect_err(&format!("{file} ({how}): 읽고 지나갔다"));
+                assert_eq!(e.code, code::BROKEN, "{file} ({how}): {}", e.message);
+                assert!(
+                    e.message.contains(&at.display().to_string()),
+                    "{file} ({how}): 자리를 안 댄다 — {}",
+                    e.message
+                );
+                let en = find(&d, crate::i18n::Lang::En).unwrap_err().message;
+                assert_ne!(en, e.message, "{file} ({how}): 말이 안 갈린다 — 말묶음을 안 지났다");
+            }
+        }
+
+        // **안을 가리키는 링크는 그대로 읽는다** — 쓰기([`target_of`])도 따르는 자리다.
+        let d = scratch("held-inside");
+        std::fs::create_dir_all(d.join("data")).unwrap();
+        std::fs::write(d.join("data/issues.jsonl"), format!("{row}\n")).unwrap();
+        std::fs::remove_file(d.join(".moai/issues.jsonl")).unwrap();
+        std::os::unix::fs::symlink("../data/issues.jsonl", d.join(".moai/issues.jsonl")).unwrap();
+        let r = Repo::find_from(d.path(), || crate::i18n::Lang::Ko).unwrap().expect("저장소를 못 찾았다");
+        assert_eq!(r.read().unwrap().issues.len(), 1, "안을 가리키는 링크를 안 읽었다");
+
+        // **지은 뒤에 링크가 갈려도 읽기가 다시 잰다** — 탐색기가 떠 있는 동안 받은 `git pull` 이 그 판이다.
+        // 여기는 화면 말을 모르는 자리라 말 없는 꼴(`<자리> -> <끝>`)로 멈춘다.
+        std::fs::remove_file(d.join(".moai/issues.jsonl")).unwrap();
+        std::os::unix::fs::symlink(away.join("issues.jsonl"), d.join(".moai/issues.jsonl")).unwrap();
+        let e = r.read().expect_err("지은 뒤에 갈린 링크를 따라 밖을 읽었다");
+        assert_eq!(e.code, code::BROKEN, "{}", e.message);
+        assert!(e.message.contains(" -> "), "{}", e.message);
     }
 
     /// **못 푼 옛 한 파일은 접지 않고 읽는 쪽에 넘긴다**(리뷰) — 목록에서 빼면 읽는 쪽이 그 자리를 못 만나

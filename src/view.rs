@@ -3609,6 +3609,7 @@ pub fn config_trouble(lang: Lang, why: &crate::config::Trouble) -> String {
     let quoted = |s: &str| format!("{s:?}");
     match why {
         Trouble::Unreadable { said } => said.clone(),
+        Trouble::Held(why) => crate::held::said(lang, why),
         Trouble::Unbalanced { line } => fill(say(lang, "config.unbalanced"), &[("line", &line.to_string())]),
         Trouble::NotAPair { line } => fill(say(lang, "config.not_a_pair"), &[("line", &line.to_string())]),
         Trouble::NotQuoted { line, key, raw } => {

@@ -3153,10 +3153,10 @@ mod tests {
     fn expanding_opens_without_reading_the_snapshot_here() {
         let s = Scratch::fenced("layer-lean-open");
         let bad = s.project("bad", &[("argos-0001", "못 읽을 줄", "todo")]);
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
         let file = bad.join(".moai/issues.jsonl");
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&bad]);
         let mut a = layered(&cfg);
         a.notice = None;
@@ -3216,9 +3216,9 @@ mod tests {
         write_group(&deep);
         let file = deep.join(".moai/issues.jsonl");
         let body = std::fs::read_to_string(&file).unwrap();
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&deep]);
         let mut a = layered(&cfg);
         let heads = a.rows().len();
@@ -3228,7 +3228,6 @@ mod tests {
         assert_eq!(a.rows().len(), heads, "시험의 전제 — 못 읽었으니 머리줄만 선다");
 
         // 파일을 고치고 이번에는 `l` 로 한 층만 편다.
-        std::fs::remove_dir(&file).unwrap();
         std::fs::write(&file, body).unwrap();
         a.hit("l");
         settle(&mut a);
@@ -3301,10 +3300,10 @@ mod tests {
         let s = Scratch::fenced("layer-enter-lean");
         let here = s.project("here", &[("argos-0001", "여기 줄", "todo")]);
         let bad = s.project("bad", &[("argos-0002", "못 읽을 줄", "todo")]);
-        // 파일 자리에 디렉터리를 둔다 — `Repo::open` 은 설정까지만 보므로 열리고, 읽기가 터진다.
+        // UTF-8 이 아닌 글을 둔다 — `Repo::open` 은 설정과 그 자리가 보통 파일인지까지만 보므로 열리고, 읽기가
+        // 터진다. 디렉터리를 두던 판은 moai-itsu 뒤로 여는 쪽에서 걸려 이 갈래를 안 지난다.
         let file = bad.join(".moai/issues.jsonl");
-        std::fs::remove_file(&file).unwrap();
-        std::fs::create_dir(&file).unwrap();
+        std::fs::write(&file, b"\xff\xfe\n").unwrap();
         let cfg = s.register(&[&here, &bad]);
         let mut a = layered(&cfg);
         a.hit("1");

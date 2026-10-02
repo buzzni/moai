@@ -12,6 +12,7 @@ mod fail;
 mod git;
 mod git_leaks;
 mod guide;
+mod held;
 mod hook;
 mod i18n;
 mod id;

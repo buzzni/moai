@@ -536,7 +536,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             for (tree, root) in trees {
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
-                match crate::store::read_snapshot(&path) {
+                match crate::store::read_snapshot(&path, &root) {
                     unread @ (Err(_) | Ok(None)) => {
                         if let Err(e) = unread {
                             trouble.push(Trouble::Unread { branch: tree.label.clone(), why: e.to_string() });
@@ -648,7 +648,7 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
         let mut bases = Bases::new();
         for (tree, root) in trees {
-            let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl")) else {
+            let Ok(Some(other)) = crate::store::read_snapshot(&root.join(".moai").join("issues.jsonl"), &root) else {
                 continue;
             };
             others.push(side(&repo.root, &here, head, tree, root, other.issues, &mut bases));
@@ -856,7 +856,7 @@ fn holds(
         return Some(holds_of(side, mine));
     }
     let path = snapshot_in(disk, tree);
-    let side = match crate::store::read_snapshot(&path) {
+    let side = match crate::store::read_snapshot(&path, &tree.path.join(&disk.rel)) {
         Ok(Some(side)) => side,
         Ok(None) => return Some(Default::default()),
         Err(_) => return None,
@@ -900,10 +900,17 @@ fn snapshot_in(disk: &Disk, tree: &Tree) -> PathBuf {
 /// 걸지 않아(`read_exact` 와 다르다), 신호 하나가 멀쩡한 워크트리를 "깨졌다" 로 세울 수 있다.
 /// 여기는 말만 하는 자리라 모를 때는 입을 다무는 쪽이 싸다 — 판정이 걸리는 자리면 파는 길이
 /// 제 답으로 덮는다.
-fn unreadable_snapshot(path: &Path) -> bool {
+///
+/// **파는 길과 같은 자로 먼저 잰다**([`crate::held`], moai-itsu) — 체크아웃(`home`) 밖·`.git/` 으로 가는
+/// 링크거나 보통 파일이 아니면 파는 길([`crate::store::read_snapshot`])이 안 읽으므로 여기서도 못 읽는
+/// 것이다. **막히지 않게 연다** — 그 자리의 FIFO 를 그냥 열면 쓰는 쪽이 올 때까지 `moai status` 가 멈췄다.
+fn unreadable_snapshot(path: &Path, home: &Path) -> bool {
     use std::io::{ErrorKind, Read};
+    if crate::held::check(path, &crate::path::real(home)).is_err() {
+        return true;
+    }
     let quiet = |k: ErrorKind| matches!(k, ErrorKind::NotFound | ErrorKind::Interrupted);
-    match std::fs::File::open(path) {
+    match crate::held::open(path) {
         Err(e) => !quiet(e.kind()),
         Ok(mut f) => f.read(&mut [0u8]).is_err_and(|e| !quiet(e.kind())),
     }
@@ -1030,7 +1037,7 @@ pub fn workplaces_in(
         // **묻는 곳은 여기 하나다** — 파는 길에서는 아래가 실제로 읽은 답으로 `broken` 을 통째로
         // 덮으므로, 거기서 또 열어 보면 워크트리마다 버릴 `open` 하나씩이다.
         for (place, tree) in out.iter_mut().zip(&linked) {
-            place.broken = unreadable_snapshot(&snapshot_in(&disk, tree));
+            place.broken = unreadable_snapshot(&snapshot_in(&disk, tree), &tree.path.join(&disk.rel));
         }
         return out;
     }
@@ -1051,7 +1058,7 @@ pub fn workplaces_in(
         Some(floor) => floor,
         None => {
             // 못 읽으면 바닥이 빈다 — 옆의 줄이 다 만진 흔적이 되어 자리를 넉넉히 대는 쪽으로 틀린다.
-            let read = crate::store::read_snapshot(&snapshot).ok().flatten().unwrap_or_default();
+            let read = crate::store::read_snapshot(&snapshot, &base).ok().flatten().unwrap_or_default();
             own = Floor::of(snapshot, &read.issues);
             &own
         }
@@ -2285,12 +2292,61 @@ mod tests {
             std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
         }
         let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
-        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl")).unwrap().unwrap().issues;
+        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl"), &main).unwrap().unwrap().issues;
         assert!(crate::report::wip(&mine, &cfg).is_empty(), "가려진 줄이 집은 일로 섰다 — 이 시험이 견줄 것이 없다");
 
         let trees = workplaces(&main, &cfg, false, &mine);
         let side = trees.iter().find(|t| t.branch == "worktree-agent-x").expect("옆 워크트리가 없다");
         assert!(side.holds.contains("t-0001"), "가려진 집힌 줄을 옆 스냅샷에서 안 셌다 — {:?}", side.holds);
+    }
+
+    /// **옆 워크트리의 스냅샷도 그 체크아웃 안에서만 읽는다**(moai-itsu). 밖을 가리키는 링크는 겹치지 않고
+    /// 말하며, FIFO 는 열다 멈추지 않는다 — 고침이 없으면 이 시험은 `t-2` 의 FIFO 앞에서 영영 멈춘다(쓰는
+    /// 쪽이 없다). 겹쳐 보는 길([`gather`])과 값싼 문([`unreadable_snapshot`])을 다 지난다.
+    #[cfg(unix)]
+    #[test]
+    fn a_siblings_snapshot_is_read_only_inside_its_checkout() {
+        let scratch = crate::scratch::Scratch::fenced("held-sibling");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        let row = |id: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"title\":\"집힌 일\",\"status\":\"in_progress\",\"created_at\":\"2026-09-11T00:00:00Z\",\
+                 \"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+            )
+        };
+        for dir in [main.clone(), base.join("t-1"), base.join("t-2")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        }
+        std::fs::write(main.join(".moai/issues.jsonl"), row("t-0001")).unwrap();
+        // 밖에 선 멀쩡한 스냅샷 — 고침이 없으면 그 줄이 겹쳐 선다.
+        std::fs::write(base.join("away.jsonl"), row("t-0009")).unwrap();
+        std::os::unix::fs::symlink(base.join("away.jsonl"), base.join("t-1/.moai/issues.jsonl")).unwrap();
+        let fifo = std::ffi::CString::new(base.join("t-2/.moai/issues.jsonl").as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: 널로 끝나는 경로와 권한 비트만 넘긴다.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0, "FIFO 를 못 지었다");
+
+        let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+            panic!("저장소가 안 열렸다")
+        };
+        let got = gather(&repo, true).unwrap();
+        assert!(got.load.issues.iter().all(|i| i.id != "t-0009"), "체크아웃 밖의 스냅샷을 겹쳤다");
+        for b in ["worktree-t-1", "worktree-t-2"] {
+            let said = got.trouble.iter().any(|t| matches!(t, Trouble::Unread { branch, .. } if branch == b));
+            assert!(said, "{b}: 안 읽은 스냅샷을 말하지 않는다 — {:?}", got.trouble);
+        }
+        let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
+        let mine = crate::store::read_snapshot(&main.join(".moai/issues.jsonl"), &main).unwrap().unwrap().issues;
+        for t in workplaces(&main, &cfg, false, &mine) {
+            assert!(t.broken, "{}: 안 읽는 스냅샷을 멀쩡하다고 댔다", t.branch);
+        }
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.
