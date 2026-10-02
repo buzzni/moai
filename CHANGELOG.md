@@ -31,9 +31,10 @@ does not tag — see `CONTRIBUTING.md`.
   epic, not the file's contents. When the value is one line and a file by that
   name exists, one line on stderr says the body is those words and how to stream
   the file instead (`--body - < plan.md`, or with the plan on stdin, the plan
-  moved into a file). It covers `add`, `add --from`, `idea add` and `edit -b`;
-  the file is not opened, the body is kept as given and the exit code does not
-  change. The `--body` help now says it takes text, not a path.
+  moved into a file). It covers `add`, `add --from`, `idea add`, `edit -b` and
+  `note -b`; the file is not opened, the text is kept as given and the exit code
+  does not change. The `--body` help of all of them now says it takes text, not
+  a path.
 
 ### Changed
 
@@ -138,6 +139,16 @@ does not tag — see `CONTRIBUTING.md`.
   that id; the row is still written and the exit code does not change. When an
   epic or ancestor decides the milestone instead, the line that says so no
   longer offers that missing id as the way to move it — on `add` either.
+
+- **`moai add -e` and `moai edit -e` say a wrong epic the way `--milestone`
+  does.** The line came before the write was accepted, so a write refused
+  afterwards had already said "no epic"; it only asked whether some row had that
+  id, so `-e <an issue id>`, and `-e <an epic>` on an epic or milestone row, went
+  by without a word while `moai status` counted the row as `dangling_epic`; and
+  `edit` said it only when the row changed. It now comes after the write,
+  measured the way `moai status` measures it, under `--json` too, and `edit`
+  says it on every call that writes `-e <id>` and not on one that leaves `-e`
+  alone. The row is still written and the exit code does not change.
 
 - **`moai rm` names the rows whose milestone or epic it removed.** Removing a
   milestone ended with `dangling: []`, and the next `moai status` warned

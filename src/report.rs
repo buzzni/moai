@@ -3774,6 +3774,24 @@ fn broken_at(i: &Issue, kind_of: &BTreeMap<&str, Kind>) -> Option<Misplace> {
     }
 }
 
+/// 줄 `i` 가 든 `epic` 을 `moai status` 가 `dangling_epic` 으로 세는 까닭 — [`epic_held_wrong`] 의 답.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldEpic {
+    /// 그 id 에 에픽 줄이 없다 — 없는 id 거나 에픽 아닌 줄이다.
+    NotAnEpic,
+    /// 묶음 줄이라 어느 에픽에도 안 든다(moai-fg0t) — 가리키는 것이 멀쩡해도 못 쓴다.
+    Group,
+}
+
+/// 줄 `i` 가 **제가 든** `epic` 으로 `moai status` 의 `dangling_epic` 에 서는가 — 판정은 [`broken_at`] 의
+/// 에픽 축 그대로다(moai-q5zs). `add -e`·`edit -e` 가 쓰기 뒤에 알리는 자다. 종류는 그 id 의 뒷줄로 읽는다
+/// ([`kinds_of`]). id 만 재던 판은 묶음 줄에 적은 `-e <에픽>` 을 지나 보냈는데 `status` 는 그 줄을 셌다.
+pub fn epic_held_wrong(all: &[Issue], i: &Issue) -> Option<HeldEpic> {
+    let e = i.epic.as_deref()?;
+    (broken_at(i, &kinds_of(all, &[e])) == Some(Misplace::Epic))
+        .then(|| if is_group(i) { HeldEpic::Group } else { HeldEpic::NotAnEpic })
+}
+
 /// `moai status` 의 `dangling_epic`·`dangling_milestone` 이 고르는 줄 — 자리를 못 정하는 줄(`placed`,
 /// [`Soil::lost`])과 못 쓸 참조를 든 줄(`held`, [`broken_in`])을 `why` 하나로 합친다. **합치는 몸은
 /// [`dangles`] 하나다** — 줄마다 앞뒤를 견주는 [`dangling_lines`] 도 그것을 지난다.
