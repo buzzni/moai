@@ -381,9 +381,15 @@ mod tests {
         // **`d` 는 done 이 아니다**(moai-h6z3·moai-mxvn) — done 은 제 글자를 안 갖고 번호가 세고,
         // 비운 그 글자는 상세 칸이 받았다. 한때 `d` 와 `3` 이 같은 설정을 켜고 꺼 이 목록에
         // `done [숨김]` 이 두 줄 섰다.
-        assert_eq!(keys_of(&items), ["l", "a", "1", "2", "3", "b", "d", "w", "r"]);
+        assert_eq!(keys_of(&items), ["l", "i", "a", "1", "2", "3", "b", "d", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
-        assert_eq!(text[..5], ["미룸 [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]);
+        assert_eq!(
+            text[..6],
+            ["미룸 [보임]", "idea [보임]", "모두 보이기", "todo [보임]", "in_progress [보임]", "done [숨김]"]
+        );
+        // idea 는 제 축이다 — 숨기면 그 줄만 낱말이 바뀐다(moai-oagj.bjr).
+        let hiding = entries(&[k(' '), k('v')], &Ctx { ideas_hidden: true, ..c }, &columns);
+        assert_eq!(hiding.iter().map(Entry::text).nth(1).as_deref(), Some("idea [숨김]"));
         let mut ch = Chord::default();
         for x in [' ', 'v', '4'] {
             assert_eq!(feed(&mut ch, &c, k(x)), None, "없는 칸의 번호가 돌았다");
@@ -475,7 +481,7 @@ mod tests {
     /// 맞추라고 열린 채로 남는다(사용자 결정 2026-09-19).
     #[test]
     fn each_menu_path_runs_its_action_and_closes() {
-        let cases: [(&str, Browse, Ctx); 13] = [
+        let cases: [(&str, Browse, Ctx); 14] = [
             ("/", Browse::Grep, inside()),
             ("f", Browse::Filter, inside()),
             ("n", Browse::Jot, inside()),
@@ -488,6 +494,7 @@ mod tests {
             // done 은 번호로 선다(moai-h6z3) — 설정의 셋째 칸이 `done` 이다.
             ("v3", Browse::Column(2), Ctx { columns: 3, ..inside() }),
             ("vl", Browse::Deferred, inside()),
+            ("vi", Browse::Ideas, inside()),
             ("sa", Browse::Sort(super::super::keys::Order::Assignee), inside()),
             ("mg", Browse::ReadGroup, inside()),
         ];
@@ -575,7 +582,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "a", "b", "d", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "i", "a", "b", "d", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -758,7 +765,7 @@ mod tests {
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
         assert_eq!(
             keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
-            ["l", "a", "b", "d", "w"]
+            ["l", "i", "a", "b", "d", "w"]
         );
     }
 

@@ -443,7 +443,7 @@ IDEA
     SPC p a  register            SPC p d  drop from the list
     SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred            SPC v a  show all
+    SPC v l  deferred            SPC v i  ideas              SPC v a  show all
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     SPC v b  list or board [list/board] — the board is described below
@@ -514,6 +514,8 @@ IDEA
   search, [NEW] and the detail are the list's, and the choice is kept under
   [tui] as layout. The columns are idea, deferred and the config's columns in
   order — idea is a kind and deferred an axis, so nothing is stored for them.
+  SPC v i hides ideas, the idea column here and the idea rows in the list
+  alike, and is kept under [tui] as hide_ideas.
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
   not cards. Each card is two lines, its id, column and priority over its title,

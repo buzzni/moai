@@ -276,6 +276,7 @@
   "tui.act.column": "column",
   "tui.act.project": "project",
   "tui.act.deferred": "deferred",
+  "tui.act.ideas": "ideas",
   "tui.act.show_all": "all",
   "tui.act.sort": "sort",
   "tui.act.cell": "columns",

@@ -276,6 +276,7 @@
   "tui.act.column": "칸",
   "tui.act.project": "프로젝트",
   "tui.act.deferred": "미룸",
+  "tui.act.ideas": "idea",
   "tui.act.show_all": "모두",
   "tui.act.sort": "정렬",
   "tui.act.cell": "열",

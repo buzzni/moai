@@ -2814,7 +2814,10 @@ impl App {
             return;
         }
         site.shown = (0..site.issues.len())
-            .map(|at| view.shows(site.column(at), site.index.shelved_at(at).is_some(), &site.cfg.statuses))
+            .map(|at| {
+                let idea = crate::report::is_idea(&site.issues[at]);
+                view.shows(site.column(at), site.index.shelved_at(at).is_some(), idea, &site.cfg.statuses)
+            })
             .collect();
         let mut lit = std::collections::HashSet::new();
         for (at, _) in site.shown.iter().enumerate().filter(|(_, on)| **on) {
@@ -2900,6 +2903,9 @@ impl App {
         }
         if let Some(d) = look.hide_deferred {
             self.view.hide_deferred = d;
+        }
+        if let Some(i) = look.hide_ideas {
+            self.view.hide_ideas = i;
         }
         // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
         // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
@@ -3005,6 +3011,7 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
+            hide_ideas: Some(self.view.hide_ideas),
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(
@@ -3698,6 +3705,7 @@ impl App {
                 }
             }
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
+            B::Ideas => self.view.hide_ideas = !self.view.hide_ideas,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.screen_statuses()),
@@ -4191,9 +4199,9 @@ impl App {
         let held: Vec<board::Column> = spots.iter().flatten().map(|(_, c)| c.clone()).collect();
         let statuses = &site.cfg.statuses;
         let columns = board::columns(statuses, &held, &|c| match c {
-            board::Column::Idea => true,
+            board::Column::Idea => !self.view.hide_ideas,
             board::Column::Shelved => !self.view.hide_deferred,
-            board::Column::Status(s) => self.view.shows(s, false, statuses),
+            board::Column::Status(s) => self.view.shows(s, false, false, statuses),
         });
         let mut lanes: Vec<Option<Seg>> = Vec::new();
         let slots: Vec<board::Slot> = spots
@@ -4699,7 +4707,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::Ideas | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -4788,6 +4796,7 @@ impl App {
                 .filter(|(_, s)| self.view.hides(s))
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             deferred_hidden: self.view.hide_deferred,
+            ideas_hidden: self.view.hide_ideas,
             detail_at: self.detail_at,
             board: self.board(),
             mouse: self.mouse_on,
@@ -5576,6 +5585,37 @@ mod tests {
         // 목록 → 보드: 카드였던 줄은 그 카드에 선다.
         a.hit("SPC v b Esc");
         assert_eq!(on_id(&a), "argos-0004");
+    }
+
+    /// **`SPC v i` 는 보드의 idea 칸과 목록의 idea 줄을 함께 숨기고, 그 고름은 설정에 남는다**(moai-oagj.bjr).
+    /// 같은 바구니의 일은 그대로 서고, 검색은 숨긴 idea 도 찾는다 — 숨긴 칸과 같은 자다(moai-qnkn).
+    #[test]
+    fn spc_v_i_hides_ideas_on_the_board_and_the_list_and_keeps_it() {
+        let s = scratch("hide-ideas");
+        let user = s.join("user.toml");
+        let mut a = boarded();
+        a.user_config = Some(user.clone());
+        a.layout = view::Layout::Board;
+        let idea = a.site.index.find("argos-0006").unwrap();
+        assert!(row_ids(&a).contains(&"argos-0006".to_string()), "시험의 전제 — idea 카드가 섰다");
+        a.hit("SPC v i Esc");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004", "argos-0007", "argos-0005"], "idea 카드가 안 숨었다");
+        let rows = a.rows();
+        assert!(!a.laid(&rows).columns.contains(&board::Column::Idea), "빈 idea 칸이 보드에 남았다");
+        assert!(!a.visible(idea), "목록에서도 idea 가 숨어야 한다");
+        let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
+        assert!(text.contains("hide_ideas = true"), "{text}");
+
+        search(&mut a, "0006");
+        assert_eq!(row_ids(&a), ["argos-0006"], "검색이 숨긴 idea 를 못 찾았다");
+        a.hit("Esc");
+
+        let mut b = boarded();
+        b.user_config = Some(user);
+        b.load_look();
+        assert!(b.view.hide_ideas, "다음 실행이 idea 숨김을 못 읽었다");
+        b.hit("SPC v a");
+        assert!(b.visible(idea), "모두 보이기가 idea 를 안 걷었다");
     }
 
     /// **보드의 `h`·`l` 은 옆 칸이고 `j`·`k` 는 칸 안이다**(moai-9nfw). 빈 칸은 건너뛰고, `Tab` 은 조용하다 — 펼칠
