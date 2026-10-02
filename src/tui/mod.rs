@@ -2033,7 +2033,7 @@ impl App {
             let at = crate::text::one_line(&first.at.display().to_string());
             let said = crate::i18n::fill(
                 crate::i18n::say(self.site.lang, "warn.unread_journal"),
-                &[("at", &at), ("why", &crate::text::one_line(&first.said))],
+                &[("at", &at), ("why", &crate::text::one_line(&first.said(self.site.lang)))],
             );
             self.notice = Some(match unread.len() {
                 1 => said,

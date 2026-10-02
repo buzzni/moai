@@ -1451,7 +1451,7 @@ fn journal_said(app: &App) -> Option<String> {
         &[
             ("n", &unread.len().to_string()),
             ("at", &crate::text::clip_front(&crate::text::one_line(&at), JOURNAL_AT_W)),
-            ("kind", first.kind),
+            ("kind", first.kind()),
         ],
     ))
 }
@@ -6391,14 +6391,15 @@ pub(super) mod tests {
                 crate::store::Unread {
                     at: root.join(".moai/journal/kim.jsonl"),
                     root,
-                    kind: "permission",
-                    said: "Permission denied (os error 13)".into(),
+                    why: crate::store::Missed::Io {
+                        kind: "permission",
+                        said: "Permission denied (os error 13)".into(),
+                    },
                 },
                 crate::store::Unread {
                     root: "/w/other".into(),
                     at: "/w/other/.moai/journal/lee.jsonl".into(),
-                    kind: "failed",
-                    said: "Is a directory (os error 21)".into(),
+                    why: crate::store::Missed::Io { kind: "failed", said: "Is a directory (os error 21)".into() },
                 },
             ]
         };
@@ -6419,8 +6420,7 @@ pub(super) mod tests {
             vec![crate::store::Unread {
                 root: "/w/argos".into(),
                 at: "/w/argos/.moai/journal/kim.jsonl".into(),
-                kind: "permission",
-                said: "Permission denied".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".into() },
             }]
         };
         a.notice = Some("다른 말".into());
