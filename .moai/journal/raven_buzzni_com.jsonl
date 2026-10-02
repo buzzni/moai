@@ -2896,3 +2896,4 @@
 {"ts":"2026-10-02T14:00:11Z","id":"moai-sn57.l9a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 쓰기 경로와 동시성)"}
 {"ts":"2026-10-02T14:00:11Z","id":"moai-sn57.l9a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-02T14:00:11Z","id":"moai-sn57.kq4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 15건 전부(fix 커밋 하나, docs 커밋 하나). 넘긴 것: `init::read_agents` 의 끝 없는 읽기는 moai-n5uh 에, `AGENTS.md -> .moai/lock` 은 idea moai-741b 로 — 둘 다 이 에픽 전부터 있던 버그라 릴리스 밖이다"}
+{"ts":"2026-10-02T14:00:47Z","id":"moai-sn57","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — develop 머지(merge: … (moai-sn57))로 닫혔다. 넘긴 것은 moai-n5uh(노트)·moai-741b·moai-jq1w"}
