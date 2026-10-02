@@ -46,6 +46,28 @@ does not tag — see `CONTRIBUTING.md`.
   moves — one line on stderr names whose it is and the `--take` line to run, and
   the exit code does not change.
 
+### Fixed
+
+- **`SPC o t` no longer picks a zone you did not choose.** When the zone in use
+  is a POSIX rule such as `TZ=JST-9`, it is not a name on the list, so the window
+  now opens with no row highlighted and says so at the bottom. Enter alone keeps
+  the zone; moving or typing picks one. Before, Enter switched to the first name,
+  `Africa/Abidjan`, and wrote it to your config.
+
+- **The explorer says when it could not read a journal.** A journal it could not
+  open — someone else's file left at `0600`, say — now stands as a third header
+  row, `Journal : <n> unreadable — <first file> (<why>)`, for as long as it lasts;
+  in a window too low for the header it is one banner line. Before, the stats
+  window and the `/` note search counted without that history and said nothing
+  until the explorer quit.
+
+- **Wheel reports no longer reach the shell under mosh.** mosh answers the
+  explorer's "are the reports all in?" question itself, before the wheel reports
+  still crossing the network arrive. When you quit within a second of scrolling,
+  the explorer now keeps dropping mouse reports that follow the answer until 300ms
+  pass quietly or a key arrives — that first key byte is lost. Quitting without
+  having scrolled waits no longer and loses nothing.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added
