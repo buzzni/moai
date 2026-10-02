@@ -2015,6 +2015,7 @@ Options:
     SPC c i  id                  SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
     SPC c t  tag                 SPC c h  column names [shown/hidden]
+    SPC c e  epic — the name of the epic the row is in; off to begin with
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
@@ -2058,10 +2059,10 @@ Options:
   Sorting puts urgent, new, earlier column and alphabetical on top, and
   pressing the chosen one again turns it around. When it is not the default
   (priority) the path line says which order it is.
-  Columns (SPC c) turn on and off with [shown/hidden]. Assignee, tag, created
-  and updated dates stand on the right of the row, and when it gets narrow
-  they are dropped in that order — dates, then assignee, then tag — to leave
-  room for the title.
+  Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
+  created and updated dates stand on the right of the row, and when it gets
+  narrow they are dropped in that order — dates, then epic, then assignee,
+  then tag — to leave room for the title.
   View, sort and columns are written into the [tui] table of the user config
   on every press and carry over to the next run and to other projects (the
   same file `moai project add` writes).

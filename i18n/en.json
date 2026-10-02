@@ -308,6 +308,7 @@
   "tui.field.tally": "counts",
   "tui.field.tags": "tags",
   "tui.field.names": "column names",
+  "tui.field.epic": "epic",
   "tui.field.branch": "branch mark",
   "tz.no_tzdb": "no timezone data at {at} - times are shown in UTC",
   "tz.unknown": "this machine does not know the timezone {name} - times are shown in UTC",

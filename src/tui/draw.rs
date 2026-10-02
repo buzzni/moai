@@ -2217,7 +2217,7 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
     }
     let mut lines = vec![head, fit(Line::from(body), room)];
     if h > 2 {
-        lines.push(fit(Line::from(Span::styled(card_foot(site, at, fields).join("  "), dim())), room));
+        lines.push(fit(Line::from(card_foot(site, at, fields)), room));
     }
     if unveiled {
         for s in lines.iter_mut().flat_map(|l| l.spans.iter_mut()) {
@@ -2237,24 +2237,49 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
 }
 
 /// 카드의 발줄 — 켠 열의 값, 목록의 오른쪽 열과 같은 차례·같은 꼴이다([`FOOT`]). 빈 태그는 자리를 안 지킨다:
-/// 줄마다 폭을 맞출 까닭이 카드에는 없다.
-fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<String> {
+/// 줄마다 폭을 맞출 까닭이 카드에는 없다. **에픽은 카드가 아니라 여기 이름으로 선다**(사용자 결정) — 색은 목록의
+/// 에픽 열과 같다.
+fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<Span<'static>> {
     use super::view::Field;
     let i = &site.issues[at];
-    FOOT.iter()
+    let parts: Vec<(Field, String)> = FOOT
+        .iter()
         .filter(|f| fields.shows(**f))
-        .filter_map(|f| match f {
-            Field::Tags => Some(crate::view::tags_of(i)).filter(|t| !t.is_empty()),
-            Field::Assignee => Some(
-                i.assignee
+        .filter_map(|&f| {
+            let text = match f {
+                Field::Tags => Some(crate::view::tags_of(i)).filter(|t| !t.is_empty())?,
+                Field::Epic => epic_name(site, at),
+                Field::Assignee => i
+                    .assignee
                     .as_deref()
                     .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
-            ),
-            Field::Created => Some(format!("+{}", i.created_at.get(5..10).unwrap_or("—"))),
-            Field::Updated => Some(format!("✎{}", i.updated_at.get(5..10).unwrap_or("—"))),
-            _ => None,
+                Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
+                Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
+                _ => return None,
+            };
+            Some((f, text))
         })
-        .collect()
+        .collect();
+    let mut out = Vec::new();
+    for (n, (f, text)) in parts.into_iter().enumerate() {
+        if n > 0 {
+            out.push(Span::raw("  "));
+        }
+        out.push(Span::styled(text, if f == Field::Epic { epic_ref() } else { dim() }));
+    }
+    out
+}
+
+/// 그 줄이 선 에픽의 이름 — 목록의 `EPIC` 열과 카드의 발줄이 같은 자로 낸다(moai-9nfw). 자리는 트리가 정한
+/// 그대로([`crate::nav::Index::epic_of`])라, `epic` 을 안 적고 소속을 id 에 진 계획의 멤버도 제 에픽을 댄다.
+/// 에픽에 안 든 줄(에픽·마일스톤 자신, `(길 잃음)` 의 줄도)은 `—` 다.
+fn epic_name(site: &Site, at: usize) -> String {
+    site.index.epic_of(at).map_or_else(|| "—".into(), |e| site.title_of(e))
+}
+
+/// 에픽 이름의 색 — CLI 목록의 에픽 칸과 같다(`style::EPIC_REF`).
+fn epic_ref() -> Style {
+    from_anstyle(style::EPIC_REF)
 }
 
 /// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은
@@ -2409,6 +2434,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
                     .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
                 Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
                 Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
+                Field::Epic => epic_name(site, at),
                 Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
                     unreachable!("오른쪽 열이 아니다")
                 }
@@ -2416,8 +2442,13 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
             (f, pad(&clip(&text, w), w))
         })
         .collect();
-    let joined: String = cells.iter().map(|(_, t)| format!("  {t}")).collect();
-    let right = format!("{joined}{}", tally_cell(tally, cells.is_empty(), fields));
+    // 에픽 이름만 제 색이다 — CLI 목록의 에픽 칸(`style::EPIC_REF`)과 같다. 나머지는 흐리다.
+    let mut right_spans: Vec<Span<'static>> = cells
+        .iter()
+        .map(|(f, t)| Span::styled(format!("  {t}"), if *f == Field::Epic { epic_ref() } else { dim() }))
+        .collect();
+    right_spans.push(Span::styled(tally_cell(tally, cells.is_empty(), fields), dim()));
+    let right: String = right_spans.iter().map(|s| s.content.as_ref()).collect();
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
     // 지고 움직임은 곁들이라, 잘려도 되는 것부터 뺀다. 안 빼면 `/` 가 잘려 폴더와 파일이 안 갈린다.
@@ -2469,7 +2500,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
         let room = budget.saturating_sub(crate::text::width(CURSOR));
         let gap = room.saturating_sub(head_w + title_w + crate::text::width(&right));
         spans.push(Span::raw(" ".repeat(gap)));
-        spans.push(Span::styled(right, dim()));
+        spans.extend(right_spans);
     }
     if unveiled {
         // 찾은 글자(`found`)는 흐림을 일부러 걷은 조각이라 그대로 둔다 — 흐린 줄에서도 무엇이 걸렸는지 선다.
@@ -2754,10 +2785,12 @@ impl Head {
 /// 오른쪽 열이 줄에 서는 **차례**, 이름 줄에 적는 **이름**, 그리고 그 **폭** — 한 벌로 둔다.
 /// 줄(`row_line`)과 이름 줄(`names_line`)과 걷힘 셈이 모두 이 표 하나를 훑는다: 자가 둘이면 열을
 /// 하나 더하는 날 맨 위의 이름만 어긋난 채 아무것도 안 알려 준다.
-const RIGHT: [(super::view::Field, &str, usize); 4] = {
+const RIGHT: [(super::view::Field, &str, usize); 5] = {
     use super::view::Field;
     [
         (Field::Tags, "TAGS", TAGS_W),
+        // 에픽은 태그 곁이다 — CLI 목록이 태그 다음에 에픽을 세우는 차례와 같다(moai-9nfw).
+        (Field::Epic, "EPIC", EPIC_W),
         (Field::Assignee, "WHO", WHO_W),
         (Field::Created, "MADE", DATE_W),
         (Field::Updated, "EDIT", DATE_W),
@@ -2767,7 +2800,7 @@ const RIGHT: [(super::view::Field, &str, usize); 4] = {
 /// 카드의 발줄에 서는 열 — 목록의 오른쪽 열과 같은 것들이다(moai-9nfw). **하나라도 켜졌을 때만 발줄이
 /// 선다**(사용자 결정 2026-10-02): 머리(id·칸·우선순위)와 몸(제목)이 카드가 무엇인지 말하고, 그 밖은 사람이
 /// `SPC c` 로 켠 만큼이다. 차례는 목록의 [`RIGHT`] 그대로다.
-const FOOT: [super::view::Field; 4] = [RIGHT[0].0, RIGHT[1].0, RIGHT[2].0, RIGHT[3].0];
+const FOOT: [super::view::Field; 5] = [RIGHT[0].0, RIGHT[1].0, RIGHT[2].0, RIGHT[3].0, RIGHT[4].0];
 
 /// 카드 한 장의 줄 수 — 머리·몸, 그리고 발줄. 보드의 배치([`super::App::laid`])와 그림이 이 하나로 잰다.
 pub(super) fn card_height(fields: super::view::Fields) -> usize {
@@ -2777,6 +2810,8 @@ pub(super) fn card_height(fields: super::view::Fields) -> usize {
 /// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
 const WHO_W: usize = 10;
 const TAGS_W: usize = 14;
+/// 에픽 이름의 폭 — 제목이라 길다. 열 가운데 가장 넓어 좁을 때 날짜 다음으로 걷힌다(`Field::drop_rank`).
+const EPIC_W: usize = 16;
 const DATE_W: usize = 6;
 /// 오른쪽 열이 있을 때 셈의 고정 폭 — `123/456`.
 const TALLY_W: usize = 7;
@@ -4445,6 +4480,35 @@ pub(super) mod tests {
         assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
     }
 
+    /// **`SPC c e` 는 목록의 에픽 열과 카드의 발줄을 함께 켠다**(moai-9nfw) — 보드에서 에픽은 카드가 아니라 이름으로
+    /// 선다. 자리는 트리가 정한 그대로라, `epic` 을 안 적고 소속을 id 에 진 계획의 멤버(`<에픽>.<몸>`)도 제 에픽을 댄다.
+    #[test]
+    fn spc_c_e_names_the_epic_in_the_list_and_on_the_card() {
+        let mut a = board_app(0);
+        let mut planned = Issue::new(
+            "argos-0002.x1y".into(),
+            "계획의 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        planned.priority = Some(0);
+        a.site.issues.push(planned);
+        a.adopt(a.site.issues.clone());
+        let board = render(&mut a, 120, 14).join("\n");
+        assert!(!board.contains("보드 에픽"), "에픽 열을 안 켰는데 에픽이 섰다\n{board}");
+        a.hit("SPC c e Esc");
+        let lines = render(&mut a, 120, 14);
+        let at = lines.iter().position(|l| l.contains("argos-0002.x1y")).unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(lines[at + 2].contains("보드 에픽"), "카드의 발줄이 에픽을 안 댄다\n{}", lines.join("\n"));
+
+        a.hit("SPC v b Esc");
+        let lines = render(&mut a, 120, 14);
+        let row = lines.iter().find(|l| l.contains("계획의 멤버")).unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(row.contains("보드 에픽"), "목록의 에픽 열이 그 줄의 에픽을 안 댄다\n{}", lines.join("\n"));
+        assert!(lines.iter().any(|l| l.contains("EPIC")), "열 이름 줄에 EPIC 이 없다\n{}", lines.join("\n"));
+    }
+
     /// **`SPC c` 로 켠 열이 있을 때만 카드에 발줄이 선다**(사용자 결정) — 머리와 몸이 카드가 무엇인지 말한다.
     #[test]
     fn a_card_grows_a_foot_only_when_a_column_is_on() {
@@ -5104,6 +5168,8 @@ pub(super) mod tests {
             Field::Assignee => "레이븐",
             Field::Created => "+09-01",
             Field::Updated => "✎09-01",
+            // 첫 줄은 에픽 자신이라 에픽에 안 들었다.
+            Field::Epic => "—",
             Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
                 unreachable!("오른쪽 열이 아니다")
             }

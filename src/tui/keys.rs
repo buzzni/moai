@@ -615,6 +615,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 태그는 `t`(옛 `g`, 사용자 결정 moai-en4u) — 열에는 제목이 없어 `t` 가 비어 있었다. 정렬의
         // `SPC s t` 는 제목이라, 두 묶음에서 한 글자에 뜻이 갈리는 것은 이 `t` 하나다.
         row!(Cell(super::view::Field::Tags), Some("SPC c t"), LEADER, Key::plain('c'), Key::plain('t')),
+        // 에픽은 `e`(epic) — 보드에서 에픽은 카드가 아니라 카드의 발줄에 이름으로 선다(moai-9nfw, 사용자 결정).
+        row!(Cell(super::view::Field::Epic), Some("SPC c e"), LEADER, Key::plain('c'), Key::plain('e')),
         row!(Cell(super::view::Field::Names), Some("SPC c h"), LEADER, Key::plain('c'), Key::plain('h')),
         row!(Cell(super::view::Field::Branch), Some("SPC c w"), LEADER, Key::plain('c'), Key::plain('w')),
         // **읽음은 `SPC m`(mark) 밑이다**(사용자 결정 2026-09-15). 바로 누르는 `r` 은 그 줄 하나라
