@@ -2705,3 +2705,10 @@
 {"ts":"2026-10-02T08:27:34Z","id":"moai-pvpb.1yh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-02T08:27:35Z","id":"moai-pvpb.6g6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-02T08:27:35Z","id":"moai-pvpb.m2f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-02T08:33:21Z","id":"moai-n5uh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS.md·.gitignore·.gitattributes·CLAUDE.md 를 끝없이 읽는다"}
+{"ts":"2026-10-02T08:33:21Z","id":"moai-xyhe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"커밋된 .moai/lock 링크를 따라 락을 연다"}
+{"ts":"2026-10-02T08:33:21Z","id":"moai-4wxb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"prime 이 거절된 트래커를 \"없음\" 으로 읽어 init 을 권한다"}
+{"ts":"2026-10-02T08:33:22Z","id":"moai-oqcm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖 한눈 보기의 --json 이 broken 코드를 잃는다"}
+{"ts":"2026-10-02T08:33:22Z","id":"moai-b21d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 .git/ 안 자리에 무시·병합 규칙을 건다"}
+{"ts":"2026-10-02T08:33:22Z","id":"moai-zepg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기 쪽 링크 거절(target_of)이 영어와 error 로 선다"}
+{"ts":"2026-10-02T08:33:22Z","id":"moai-i5lb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"하위 트래커가 설정을 공유 파일로 이을 수 있게 할까"}
