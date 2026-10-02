@@ -3573,6 +3573,57 @@ fn rm_names_the_blocks_it_broke() {
     assert!(line_of(s.path(), &b).contains("blocked_by"));
 }
 
+/// **쌍둥이가 남은 id 밑은 끊기지 않았다**(moai-3hxc.65o). 같은 id 가 두 줄이면(`duplicate_id`) `rm <id>` 는
+/// 앞줄만 걷어 내고 뒷줄이 남는다 — 그 id 를 가리키던 자식(id 에서 읽는 부모)·에픽 멤버(`epic`)·막힌 줄
+/// (`blocked_by`)은 아직 닿는 곳이 있다. 지운 id 만 보고 세면 끊기지 않은 것을 끊겼다고 stderr 와 `--json`
+/// 의 `dangling` 에 알린다. 셋이 한 답을 읽는지 보려고 한 판에 모두 세운다. 마지막 줄을 걷으면 그때는 끊긴다.
+#[test]
+fn rm_does_not_call_a_reference_dangling_while_a_twin_of_the_id_stands() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmtwin");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-0002", "앞줄", "issue", ""),
+            row("argos-0002", "뒷줄", "issue", ""),
+            row("argos-0003", "막힌 줄", "issue", ",\"blocked_by\":[\"argos-0002\"]"),
+            row("argos-e001", "앞 에픽", "epic", ""),
+            row("argos-e001", "뒤 에픽", "epic", ""),
+            row("argos-e001.abc", "자식", "issue", ""),
+            row("argos-0004", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    // 한 부름에 둘 다 — 앞줄만 가고, 그 id 를 가리키던 셋은 하나도 안 끊겼다.
+    let out = moai(s.path(), &["rm", "argos-0002", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":[]"#), "쌍둥이가 남았는데 끊겼다고 했다\n{json}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("끊긴 참조"), "쌍둥이가 남았는데 끊겼다고 알렸다\n{err}");
+    // 앞줄이 갔고 뒷줄이 남았다 — `rm <id>` 가 무엇을 지우는지는 그대로다.
+    let left = issues(s.path());
+    assert!(!left.contains("앞줄") && !left.contains("앞 에픽"), "{left}");
+    assert!(left.contains("뒷줄") && left.contains("뒤 에픽"), "{left}");
+
+    // 마지막 한 줄을 걷으면 그때 끊긴다 — 셈이 파일을 따라간다. 막힌 줄과 자식·멤버 모두.
+    let out = moai(s.path(), &["rm", "argos-0002", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    let dangling = json.split(r#""dangling":"#).nth(1).unwrap_or_default();
+    for id in ["argos-0003", "argos-e001.abc", "argos-0004"] {
+        assert!(dangling.contains(&format!("\"{id}\"")), "{id} 를 끊겼다고 안 했다\n{json}");
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("끊긴 참조가 3건"), "{err}");
+}
+
 /// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
 /// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
 #[test]
