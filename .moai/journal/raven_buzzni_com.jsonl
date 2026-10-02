@@ -2854,3 +2854,8 @@
 {"ts":"2026-10-02T12:05:35Z","id":"moai-inma","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Covered by review moai-3hxc.u1x finding 1: add/edit -e on a group row now says add.group_in_epic after the write (merged with moai-3hxc)."}
 {"ts":"2026-10-02T12:05:44Z","id":"moai-3hxc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: round 3 merged (5ca… see merge commit \"merge: add·edit -e … (moai-3hxc)\"): moai-q5zs and review moai-3hxc.u1x closed, idea moai-inma closed as covered. All 10 members done, the epic stands done. Nothing left in the first column. Outside, still open: ideas moai-cv1o, moai-1qv4, moai-gpc4."}
 {"ts":"2026-10-02T12:05:51Z","id":"moai-3hxc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Correction to the note above: the round 3 merge commit is b6023b6e (\"5ca…\" was a slip)."}
+{"ts":"2026-10-02T12:07:33Z","id":"moai-18so","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"note -b says nothing when its text names a file"}
+{"ts":"2026-10-02T12:07:33Z","id":"moai-18so.rnm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"note -b shares the path notice and its help says text, not a path"}
+{"ts":"2026-10-02T12:07:33Z","id":"moai-18so","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mjf3 에서 펼쳤다 — note -b <one-line file path> gets no notice that the path was taken as text"}
+{"ts":"2026-10-02T12:07:33Z","id":"moai-mjf3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-18so 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-02T12:07:38Z","id":"moai-18so.rnm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
