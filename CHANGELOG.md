@@ -107,7 +107,7 @@ does not tag — see `CONTRIBUTING.md`.
   now fold by the file itself, as symlinked names already did. A clone still gets
   two separate files — git does not carry hard links.
 
-- **`SPC o t` no longer picks a zone you did not choose.** When the zone in use
+- **`SPC o t` no longer picks a zone when yours is a rule.** When the zone in use
   is a POSIX rule such as `TZ=JST-9`, it is not a name on the list, so the window
   now opens with no row highlighted and says so at the bottom. Enter alone keeps
   the zone; moving or typing picks one. Before, Enter switched to the first name,
