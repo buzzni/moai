@@ -25,6 +25,9 @@
 
 옆 워크트리에만 있는 줄(뿌리에 없다)은 뿌리에서 못 집으니 건너뛴다.
 
+**남의 일과 담당 없는 일은 집지 않는다.** `ready` 가 그것을 `others` 로 따로 대고, 넘겨받을지는
+사람이 정한다(`moai mv <id> in_progress --take`). 그래서 사람 없이 돌아도 남의 줄을 안 건드린다.
+
 AGENT_WORK 는 이슈 id 와 제목을 인자로 받는 실행 파일이다 (예: `claude -p` 를 감싼 스크립트).
 일꾼 여럿이 한꺼번에 돌므로 stdin 은 주지 않는다. 실패하면 그 일을 in_progress 로 둔 채 그
 일꾼만 멈추고, 끝에 1 로 끝난다 — 사람이 볼 차례다. 필요한 것: python 3.9+, git, 기본 칸
@@ -212,7 +215,10 @@ def shift(name):
             # 남은 것이 옆 워크트리에만 있는 줄뿐이면 그 수도 댄다 — 안 대면 `ready` 에 줄이 서 있는데
             # "없다" 고 한다.
             away_n = f" · 옆 워크트리에만 있는 줄 {len(queue['ready'])}건" if queue["ready"] else ""
-            say(name, f"집을 일이 없다 (미뤄 둔 것·빈 묶음에 막힌 일 {len(queue['held'])}건{away_n})")
+            # 집을 수 있지만 내 것이 아닌 일 — 사람이 넘겨줄 때까지 기다린다.
+            others = queue.get("others", [])
+            others_n = f" · 남의 것·담당 없는 일 {len(others)}건은 사람에게 묻는다" if others else ""
+            say(name, f"집을 일이 없다 (미뤄 둔 것·빈 묶음에 막힌 일 {len(queue['held'])}건{away_n}{others_n})")
             return
         # **줄 차례대로 겨룬다.** 맨 위 하나만 노리면 일꾼 셋이 같은 줄에 몰려 둘이 매 판 진다 —
         # 진 일꾼은 곧장 다음 줄로 간다.

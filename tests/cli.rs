@@ -17159,6 +17159,10 @@ fn the_bash_agent_example_works_the_ready_queue_until_it_is_empty() {
     // 가 늘 비어, 키 이름이 바뀌어도(`jq '.held | length'` 는 없는 키에 0 을 낸다) 아무도 안 잡는다.
     let waiting = add(s.path(), &["막힌 일", "-p", "0"]);
     ok(s.path(), &["link", &parked, "--blocks", &waiting]);
+    // **남의 일과 담당 없는 일은 집지 않는다**(moai-0zjo) — `p0` 이어도. 사람 없이 돌아도 남의 줄은
+    // 그대로 남고, 큐가 비면 그 수를 댄다.
+    let theirs = add(s.path(), &["남의 일", "-p", "0", "-a", "B (b@x.io)"]);
+    let nobody = add(s.path(), &["빈 일", "-a", "none"]);
     let work = work_script(&s, "echo \"$1 을 끝냈다: $2\"");
 
     let out = agent(s.path(), &work);
@@ -17171,11 +17175,12 @@ fn the_bash_agent_example_works_the_ready_queue_until_it_is_empty() {
         let shown = ok(s.path(), &["show", id]);
         assert!(shown.contains(&format!("{id} 을 끝냈다: {title}")), "일 명령의 출력이 노트로 안 남았다\n{shown}");
     }
-    for id in [&parked, &waiting] {
+    for id in [&parked, &waiting, &theirs, &nobody] {
         assert!(line_of(s.path(), id).contains("\"status\":\"todo\""), "{id} 를 집었다");
     }
     assert!(stdout.contains("집을 일이 없다"), "{stdout}");
     assert!(stdout.contains("막힌 일 1건"), "막혀 못 집는 일의 수를 안 댔다\n{stdout}");
+    assert!(stdout.contains("남의 것·담당 없는 일 2건"), "남의 일의 수를 안 댔다\n{stdout}");
 }
 
 #[cfg(unix)]
@@ -17747,6 +17752,28 @@ fn the_python_agents_share_the_queue_and_each_job_runs_once_in_its_own_worktree(
     }
     // 병합은 안 한다 — main 은 처음 그대로다.
     assert_eq!(git(s.path(), &["rev-list", "--count", "main"]).trim(), "2", "예제가 main 에 무언가를 합쳤다");
+}
+
+/// **일꾼들도 남의 일과 담당 없는 일은 집지 않는다**(moai-0zjo) — `ready` 가 그것을 `others` 로 따로
+/// 대므로 사람 없이 돌아도 그 줄은 첫 칸에 그대로 남고, 큐가 비면 그 수를 댄다.
+#[cfg(unix)]
+#[test]
+fn the_python_agents_leave_someone_elses_work_alone() {
+    let s = agents_repo("agents-theirs");
+    let mine = add(s.path(), &["내 일", "-p", "2"]);
+    let theirs = add(s.path(), &["남의 일", "-p", "0", "-a", "B (b@x.io)"]);
+    let nobody = add(s.path(), &["빈 일", "-a", "none"]);
+    git(s.path(), &["add", "-A"]);
+    git(s.path(), &["commit", "-q", "-m", "일감"]);
+    let work = s.path().join("work.sh");
+    write_exe(&work, "#!/bin/sh\necho \"$1 을 끝냈다\"\n");
+    let out = agents_cmd(s.path(), Path::new("./work.sh"), 2).output().expect("python3 를 실행하지 못했다");
+    assert!(out.status.success(), "예제가 실패했다\n{}", text(&out));
+    assert!(line_of(s.path(), &mine).contains("\"status\":\"done\""), "내 일을 안 했다\n{}", text(&out));
+    for id in [&theirs, &nobody] {
+        assert!(line_of(s.path(), id).contains("\"status\":\"todo\""), "{id} 를 집었다\n{}", text(&out));
+    }
+    assert!(text(&out).contains("남의 것·담당 없는 일 2건"), "남의 일의 수를 안 댔다\n{}", text(&out));
 }
 
 /// **일이 실패하면 그 일꾼만 멈추고 끝에 1 이다.** 실패한 일은 in_progress 로 남고 노트에 까닭이
