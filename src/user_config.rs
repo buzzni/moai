@@ -1012,6 +1012,7 @@ impl Doc {
         let mut look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
             hide_deferred: look_one(t, HIDE_DEFERRED, Want::Bool, Item::as_bool, &mut problems),
+            hide_ideas: look_one(t, HIDE_IDEAS, Want::Bool, Item::as_bool, &mut problems),
             sort: look_one(t, SORT, Want::Word, word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
@@ -1067,6 +1068,7 @@ impl Doc {
         // 두 번 적으면 적는 쪽에만 키를 더하는 날 거절이 그 키를 못 보고, 손으로 적은 표 모양을 낱값으로 덮는다.
         let mut hidden = base.hidden != new.hidden;
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
+        let mut hide_ideas = base.hide_ideas != new.hide_ideas;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
         // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
@@ -1124,6 +1126,7 @@ impl Doc {
         };
         odd(&[HIDDEN], true, &mut hidden);
         odd(&[HIDE_DEFERRED], false, &mut hide_deferred);
+        odd(&[HIDE_IDEAS], false, &mut hide_ideas);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
         odd(&[FIELDS], true, &mut fields);
         odd(&[FIELDS_KNOWN], true, &mut known);
@@ -1142,6 +1145,9 @@ impl Doc {
         }
         if hide_deferred {
             changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from), &mut left);
+        }
+        if hide_ideas {
+            changed |= put_value(t, HIDE_IDEAS, new.hide_ideas.map(toml_edit::Value::from), &mut left);
         }
         if sort {
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1211,6 +1217,9 @@ pub const LANG: &str = "lang";
 pub const TUI: &str = "tui";
 const HIDDEN: &str = "hidden";
 const HIDE_DEFERRED: &str = "hide_deferred";
+/// idea 를 숨기는가(moai-oagj.bjr) — 미룸([`HIDE_DEFERRED`])처럼 칸이 아니라 축이라 칸 이름 목록([`HIDDEN`])에
+/// 섞지 않는다. 섞으면 `idea` 라는 칸을 쓰는 설정에서 두 뜻이 한 낱말을 두고 갈린다.
+const HIDE_IDEAS: &str = "hide_ideas";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
@@ -1241,6 +1250,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// [tui]
 /// hidden = ["done"]
 /// hide_deferred = false
+/// hide_ideas = false
 /// detail = true
 /// detail_at = "right"
 /// layout = "board"
@@ -1259,6 +1269,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 pub struct Look {
     pub hidden: Option<Vec<String>>,
     pub hide_deferred: Option<bool>,
+    pub hide_ideas: Option<bool>,
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
@@ -3102,6 +3113,7 @@ mod tests {
         let look = Look {
             hidden: Some(vec!["done".into(), "review".into()]),
             hide_deferred: Some(true),
+            hide_ideas: Some(true),
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
@@ -3359,6 +3371,7 @@ mod tests {
         let base = Look {
             hidden: Some(vec!["done".into()]),
             hide_deferred: Some(false),
+            hide_ideas: None,
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),

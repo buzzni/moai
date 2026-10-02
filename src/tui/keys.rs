@@ -326,6 +326,9 @@ pub enum Browse {
     Project(u8),
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
     Deferred,
+    /// 담아 둔 생각(idea)을 보이고 숨긴다 — `SPC v i`(moai-oagj.bjr). 칸이 아니라 종류(`kind`)의 축이다: 보드의
+    /// idea 칸도 목록의 idea 줄도 이 하나로 숨는다.
+    Ideas,
     ShowAll,
     /// 목록 차례를 고른다(moai-55cp). 이미 고른 것을 다시 누르면 거꾸로 선다.
     Sort(Order),
@@ -577,6 +580,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 줄이다. done 이 글자를 내놓지 않았으면 못 오던 자리라, 두 결정은 한 줄에 매여 있다:
         // `d` 를 다시 done 에 주면 상세 칸이 갈 곳이 없다.
         row!(Deferred, Some("SPC v l"), LEADER, Key::plain('v'), Key::plain('l')),
+        // idea 는 `i`(idea) — 미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 `l` 곁에 선다
+        // (moai-oagj.bjr).
+        row!(Ideas, Some("SPC v i"), LEADER, Key::plain('v'), Key::plain('i')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
         // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
@@ -683,11 +689,16 @@ pub struct Ctx {
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub deferred_hidden: bool,
+    /// idea 를 숨겼는가(moai-oagj.bjr) — 메뉴 줄이 `[보임]`·`[숨김]` 으로 댄다.
+    pub ideas_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
-    /// 목록을 보드로 세웠는가(moai-9nfw) — 한눈 보기에서는 늘 거짓이다(`App::board`). `h`·`l` 이 옆 칸으로 가고
-    /// `Tab` 이 조용해진다.
+    /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
+    /// 빼고다.
     pub board: bool,
+    /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
+    /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
+    pub head: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,
     /// 고른 차례와 그 방향.
@@ -733,11 +744,10 @@ impl Browse {
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
-            Expand | Collapse if c.board => Ok(()),
-            ExpandAll if c.board => Err(Off::Quiet),
-            // **한눈 보기의 보드는 둘째 판이다**(moai-oagj) — 거기서는 목록이 서므로 눌러도 화면이 안 바뀐다.
-            // 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
-            Board if c.layer => Err(Off::Quiet),
+            // **한눈 보기의 프로젝트 머리줄은 목록과 같다**(moai-oagj.vcj) — 칸이 없는 줄이라 그 자리의 `h`·`l`·`Tab` 은
+            // 접고 편다. 아래 목록의 갈래를 그대로 탄다.
+            Expand | Collapse if c.board && !c.head => Ok(()),
+            ExpandAll if c.board && !c.head => Err(Off::Quiet),
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
@@ -780,8 +790,15 @@ impl Browse {
             // **보기·정렬·열은 줄이 선 곳에 건다.** 한눈 보기에도 줄이 서면(펼친 프로젝트가 있으면)
             // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
             // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
-            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`).
-            Column(_) | Deferred | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
+            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). **숨긴 것을 도로 보이는 키는 빼고다**(리뷰) — 줄이
+            // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i` 를 누르면 줄이 다
+            // 빠지는데, 그 키와 `SPC v a` 가 같이 꺼지면 한눈 보기에서는 되돌릴 길이 없다. 보드는 묶음 줄을 안 세워
+            // 목록보다 자주 그렇게 된다.
+            Column(_) | Deferred | Ideas | ShowAll | Sort(_) | Cell(_)
+                if c.layer && !c.rows_here && !self.unhides(c) =>
+            {
+                Err(Off::Quiet)
+            }
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
@@ -809,6 +826,17 @@ impl Browse {
             // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
             Project(n) if c.projects == 0 || usize::from(n) > c.projects => Err(Off::Quiet),
             _ => Ok(()),
+        }
+    }
+
+    /// 숨긴 것을 **도로 보이는** 보기 토글인가 — 그러면 줄이 하나도 없어도 할 일이 있다([`Browse::enabled`]).
+    fn unhides(self, c: &Ctx) -> bool {
+        match self {
+            Browse::Ideas => c.ideas_hidden,
+            Browse::Deferred => c.deferred_hidden,
+            Browse::Column(n) => c.hidden & (1 << n) != 0,
+            Browse::ShowAll => c.ideas_hidden || c.deferred_hidden || c.hidden != 0,
+            _ => false,
         }
     }
 
@@ -845,6 +873,7 @@ impl Browse {
             Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
             Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
+            Browse::Ideas => Some(shown(c.ideas_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
                 say(c.lang, "tui.state.reversed")
@@ -876,7 +905,10 @@ impl Browse {
     /// 둘이 갈리는 것은 시험(`stateful_covers_everything_that_shows_a_state`)이 막는다.
     pub fn stateful(self) -> bool {
         use Browse::*;
-        matches!(self, Worktree | Raw | Column(_) | Deferred | Sort(_) | Cell(_) | Detail | DetailAt | Board | Mouse)
+        matches!(
+            self,
+            Worktree | Raw | Column(_) | Deferred | Ideas | Sort(_) | Cell(_) | Detail | DetailAt | Board | Mouse
+        )
     }
 
     /// **목록을 움직이는 동작인가** — 줄·쪽·맨 위아래·펼침·접기(moai-y8v2, 사용자 결정). 열린
@@ -924,6 +956,7 @@ impl Browse {
             // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
             Project(_) => say(c.lang, "tui.act.project"),
             Deferred => say(c.lang, "tui.act.deferred"),
+            Ideas => say(c.lang, "tui.act.ideas"),
             ShowAll => say(c.lang, "tui.act.show_all"),
             Sort(_) => say(c.lang, "tui.act.sort"),
             Cell(_) => say(c.lang, "tui.act.cell"),
@@ -1367,9 +1400,24 @@ mod tests {
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
     }
 
+    /// **숨긴 것을 도로 보이는 보기 토글은 줄이 없어도 선다**(리뷰) — 한눈 보기에서 줄이 하나도 없는 까닭이 그 숨김일 수
+    /// 있다. 숨긴 것이 없으면 여태처럼 조용하고, 차례·열은 숨김과 상관없이 조용하다.
+    #[test]
+    fn unhiding_stands_on_the_overview_even_with_no_row() {
+        let bare = Ctx { layer: true, list_focus: true, ..Ctx::default() };
+        for act in [Browse::Ideas, Browse::Deferred, Browse::ShowAll] {
+            assert_eq!(act.enabled(&bare), Err(Off::Quiet), "{act:?} 가 숨긴 것도 없이 섰다");
+        }
+        assert_eq!(Browse::Ideas.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::Deferred.enabled(&Ctx { deferred_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::ShowAll.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::Column(0).enabled(&Ctx { columns: 1, hidden: 1, ..bare }), Ok(()));
+        assert_eq!(Browse::Sort(Order::Title).enabled(&Ctx { ideas_hidden: true, ..bare }), Err(Off::Quiet));
+    }
+
     /// **보드에서는 `h`·`l` 이 늘 서고 `Tab` 은 조용하다**(moai-9nfw) — 카드는 펼칠 묶음이 아니라, 펼침의 켜짐으로
-    /// 가르면 `l` 이 옆 칸으로 못 간다. 상세에 포커스가 있으면 목록처럼 조용하다. 한눈 보기에는 보드가 아직 없어
-    /// `SPC v b` 가 안 선다(moai-oagj).
+    /// 가르면 `l` 이 옆 칸으로 못 간다. 상세에 포커스가 있으면 목록처럼 조용하다. 한눈 보기의 프로젝트 머리줄은
+    /// 목록과 같다(moai-oagj.vcj).
     #[test]
     fn on_the_board_h_and_l_always_stand_and_tab_is_quiet() {
         let board = Ctx { list_focus: true, board: true, leaf: true, root: true, ..Ctx::default() };
@@ -1378,7 +1426,11 @@ mod tests {
         assert_eq!(Browse::ExpandAll.enabled(&board), Err(Off::Quiet));
         assert_eq!(Browse::Expand.enabled(&Ctx { list_focus: false, ..board }), Err(Off::Quiet));
         assert_eq!(Browse::Board.enabled(&board), Ok(()));
-        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, ..Ctx::default() }), Err(Off::Quiet));
+        // 한눈 보기에도 보드가 선다(moai-oagj.vcj) — 프로젝트 머리줄에서는 `Tab` 이 목록처럼 다 편다.
+        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, rows_here: true, ..Ctx::default() }), Ok(()));
+        let head = Ctx { layer: true, head: true, group: true, leaf: false, root: true, ..board };
+        assert_eq!(Browse::ExpandAll.enabled(&head), Ok(()), "머리줄의 Tab 이 조용하다");
+        assert_eq!(Browse::Expand.enabled(&head), Ok(()));
         assert_eq!(Browse::Board.state(&board), Some(say(board.lang, "tui.state.board")));
         assert_eq!(Browse::Board.state(&Ctx::default()), Some(say(board.lang, "tui.state.list")));
     }
