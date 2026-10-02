@@ -1121,9 +1121,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 접두어는 나중에 못 바꾼다. 이미 발급된 id 가 전부 그것을 달고 있고,
         // 바꾸면 그 줄들이 제 접두어를 잃는다.
         (Some(p), true) => {
-            let cur = crate::config::Config::load(&root)
-                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
-                .prefix;
+            let cur = crate::config::Config::load(&root).map_err(|e| Fail::config(&e, ctx.lang()))?.prefix;
             if p != cur {
                 return Err(Fail::coded(
                     format!(
@@ -1160,11 +1158,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
             }
             p.to_string()
         }
-        (None, true) => {
-            crate::config::Config::load(&root)
-                .map_err(|e| Fail::new(crate::view::config_refused(ctx.lang(), &e)))?
-                .prefix
-        }
+        (None, true) => crate::config::Config::load(&root).map_err(|e| Fail::config(&e, ctx.lang()))?.prefix,
         // **디렉터리 이름에서 만든 것은 줄여서 쓴다** — 사람이 고른 이름이 아니라 거절할
         // 까닭이 없다. 줄였다는 것은 출력이 말한다.
         (None, false) => {

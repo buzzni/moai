@@ -54,6 +54,12 @@ impl Fail {
     pub fn bad_filter(why: &crate::query::BadFilter, lang: crate::i18n::Lang) -> Fail {
         Fail::coded(crate::view::bad_filter(lang, why), code::BAD_FILTER)
     }
+
+    /// 저장소 설정을 못 읽었다([`crate::config::Refused`]) — 글은 `view::config_refused` 가 짓고 **코드는 자료가
+    /// 든다**([`crate::config::Trouble::code`]). `Repo` 를 짓는 길과 `init` 이 같은 거절을 같은 코드로 낸다.
+    pub fn config(why: &crate::config::Refused, lang: crate::i18n::Lang) -> Fail {
+        Fail::coded(crate::view::config_refused(lang, why), why.why.code())
+    }
 }
 
 impl std::fmt::Display for Fail {

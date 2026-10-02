@@ -20712,6 +20712,59 @@ fn an_unread_journal_stands_in_the_json_beside_the_row_it_cost() {
     let _ = (&t.epic, &t.picked);
 }
 
+/// **체크아웃 밖을 가리키는 스냅샷은 모든 명령을 `broken` 으로 세운다**(moai-itsu, 2026-10-02 사용자 결정).
+/// 받은 저장소가 커밋한 `issues.jsonl -> /proc/self/pagemap` 하나로 `moai status` 가 메모리를 다 쓰던 자리다.
+/// 끝없이 읽는 파일로 재지 않는다 — 고침이 없으면 시험이 메모리를 다 쓴다. 밖에 멀쩡한 스냅샷을 두고 그것이
+/// 안 읽히는지와, 기계가 가르는 `code` 를 바이너리로 잰다 — 단위 시험은 `main` 이 그 코드를 내는지까지 안 간다.
+#[cfg(unix)]
+#[test]
+fn a_snapshot_link_out_of_the_checkout_stops_with_broken() {
+    let s = init("heldsnap");
+    let away = Scratch::new("heldsnap-away");
+    ok(s.path(), &["add", "밖에 선 줄"]);
+    std::fs::rename(s.path().join(".moai/issues.jsonl"), away.path().join("issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink(away.path().join("issues.jsonl"), s.path().join(".moai/issues.jsonl")).unwrap();
+
+    for args in [&["status", "--json"][..], &["show", "--json"], &["ready", "--json"]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?}: 체크아웃 밖의 스냅샷을 읽고 지나갔다\n{}", text(&out));
+        assert!(out.stdout.is_empty(), "{args:?}: 멈췄는데 stdout 에 무엇을 냈다\n{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        one_json_value(&err);
+        assert!(err.contains(r#""code":"broken""#), "{args:?}: 기계가 가를 코드가 아니다\n{err}");
+    }
+    let out = moai(s.path(), &["status"]);
+    assert!(text(&out).contains(".moai/issues.jsonl"), "어느 링크를 고칠지 안 댔다\n{}", text(&out));
+}
+
+/// **체크아웃 밖을 가리키는 저널 링크는 `--json` 에 `outside` 로 선다**(moai-itsu). `failed` 로 서던 판은 기계가
+/// "그 링크를 걷어라" 를 잠깐의 io 실패와 못 갈랐다. 까닭은 고른 말로 선다 — moai 가 지은 영어 문장이 한국어
+/// 머리 뒤에 붙던 자리다. 영어 판의 그 문장이 한국어 판에 안 서는 것으로 잰다.
+#[cfg(unix)]
+#[test]
+fn a_journal_link_out_of_the_checkout_stands_as_outside_in_the_json() {
+    let s = init("heldjournal");
+    let away = Scratch::new("heldjournal-away");
+    let id = add(s.path(), &["밖을 가리키는 저널"]);
+    std::fs::write(away.path().join("x.jsonl"), "").unwrap();
+    std::os::unix::fs::symlink(away.path().join("x.jsonl"), s.path().join(".moai/journal/zz.jsonl")).unwrap();
+
+    let out = moai(s.path(), &["show", &id, "--json"]);
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    one_json_value(&shown);
+    assert!(shown.contains(r#""journal_error":[{"kind":"outside""#), "기계가 가를 갈래가 아니다\n{shown}");
+    assert!(!out.status.success(), "제 저장소의 저널을 빼고 0 으로 끝났다\n{}", text(&out));
+
+    let said = |lang: &str| {
+        let out = staged(&["show", &id]).current_dir(s.path()).env("MOAI_LANG", lang).output().unwrap();
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+    let (en, ko) = (said("en"), said("ko"));
+    let english = "follows a link only inside its own checkout";
+    assert!(en.contains(english), "시험의 전제 — 영어 판의 까닭이 바뀌었다\n{en}");
+    assert!(!ko.contains(english), "한국어 판에 moai 가 지은 영어 문장이 붙었다\n{ko}");
+}
+
 /// **막대 곁에 미룬 수가 선다 — 보드와 묶음 상세와 `--json` 셋 다**(moai-zxwj, 2026-09-21
 /// 사용자 결정).
 ///
