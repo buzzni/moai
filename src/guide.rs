@@ -335,14 +335,16 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
+    moai mv <id> in_progress --take        take over someone else's row (ask first)
     moai edit <id> --tag parser            change
     moai note <id> '<what you found>'      a memo for whoever comes next
     moai defer <id> -m '<why>'             take work out of the plan for now
 
-Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
-`held` is what is deferred or blocked behind an empty group, and where to pick it up
-again. That is enough to build a loop that runs without a person — one such loop, in
-bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
+`ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
+(ask first), and `held` is what is deferred or blocked behind an empty group, and where
+to pick it up again. That is enough to build a loop that runs without a person — one
+such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -377,7 +379,10 @@ and then the only way out is outside the tool — one line on stderr says where 
 wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
 split off, and the current rows are in the main checkout's file."#;
 
-const NO_GATE: &str = "There is no approval gate — create anything, move anything. Do not ask a human.";
+/// 승인 게이트가 없다는 말 — **한 자리만 판다**(moai-0zjo, 2026-10-02 사용자 결정): 남의 줄이나 담당
+/// 없는 줄을 집기 전에는 사람에게 묻는다. 그 밖은 여전히 묻지 않는다.
+const NO_GATE: &str = "There is no approval gate — create anything, move anything. Do not ask a human, \
+except before you pick up work that is someone else's or nobody's (hook rule 5).";
 
 const FORKS: &str = r#"**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
 If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
@@ -872,7 +877,20 @@ the same numbers as bars, narrowed by the filter that is hung.
 const PEOPLE: &str = r#"**The assignee comes for free** — whoever created it is the assignee. To hand it to
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
 email come from `git config`, and when they are not there you pass them with
-`--user "Name (email)"` or `MOAI_ACTOR`."#;
+`--user "Name (email)"` or `MOAI_ACTOR`.
+
+**Work that is not yours is asked about.** `moai ready` and `moai prime` hand out
+only your own rows; a row assigned to someone else, or to nobody, stands apart under
+`others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
+and on a yes take it over and say who said yes:
+
+    moai mv <id> in_progress --take -m '<who said yes>'
+
+You become the assignee in the same write and a note `Taken-over: <who it was|none>`
+keeps whose it was — it also takes a row that already stands in that column. Without
+`--take` a person in a terminal still moves it (one line on stderr says whose it is);
+the hook refuses it (rule 5). Who you are is matched by name or email, the same as
+`-a me`; when it is unknown nothing is set apart."#;
 
 const CLOSING: &str = r#"Run `moai status` once more and see whether the warnings grew. Warnings block
 nothing — they shine a light on issues with no epic, reviews stalled for a long
@@ -1526,7 +1544,10 @@ the script in 2 does not print as a `worktree` row.
         by the supervisor; with no `<subdir>` in the header, the root is the top and this step
         does not exist
           {SUBDIR}
-      - The member's column is already picked up — do not pick it up again
+      - The member's column is already picked up — do not pick it up again. **If its assignee
+        is not you** (`moai show <member>`), ask the person watching before you carry it on; on
+        a yes, `moai mv <member> <its column> --take -m '<who said yes>'` — the column stays, the
+        assignee becomes you, and a note keeps whose it was
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
         tokens are written nowhere, and without it the whole member reads as this window's work
@@ -1580,6 +1601,11 @@ on would make the release grow after it started, and that is the person's call a
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+
+**Send only what is yours.** An idea or member whose assignee is someone else — or
+nobody — is asked about first: ask the person, and send it only on a yes, writing in the
+text who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
+such rows apart under `others`.
 
 **2. Find a worker.** `ListAgents` does not show a session's place (cwd). Read
 `~/.claude/sessions/*.json`, which Claude Code writes per session (under
@@ -2271,6 +2297,9 @@ fn brief() -> String {
        merge with its own subject. So give the tracker commit a path. With a merge open git
        refuses it, so wait for that merge to finish and run it again
          git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+       **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
+       pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
+       hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
     3. Right after the commit in 2, branch from the local <base branch> with
        `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in with
        EnterWorktree(path). The name is the unfolded epic's id, not the idea's. Until the worktree

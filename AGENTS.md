@@ -1,8 +1,8 @@
-<!-- moai:begin v:0.2.0 hash:31d67bee -->
+<!-- moai:begin v:0.2.0 hash:4fb3750c -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
-Do not use TodoWrite or a markdown TODO list. There is no approval gate — create anything, move anything. Do not ask a human.
+Do not use TodoWrite or a markdown TODO list. There is no approval gate — create anything, move anything. Do not ask a human, except before you pick up work that is someone else's or nobody's (hook rule 5).
 
 Start a session by running `moai status`. The board and the warnings come up on one screen.
 
@@ -19,14 +19,16 @@ Start a session by running `moai status`. The board and the warnings come up on 
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
+    moai mv <id> in_progress --take        take over someone else's row (ask first)
     moai edit <id> --tag parser            change
     moai note <id> '<what you found>'      a memo for whoever comes next
     moai defer <id> -m '<why>'             take work out of the plan for now
 
-Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
-`held` is what is deferred or blocked behind an empty group, and where to pick it up
-again. That is enough to build a loop that runs without a person — one such loop, in
-bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
+`ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
+(ask first), and `held` is what is deferred or blocked behind an empty group, and where
+to pick it up again. That is enough to build a loop that runs without a person — one
+such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -65,6 +67,19 @@ split off, and the current rows are in the main checkout's file.
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
 email come from `git config`, and when they are not there you pass them with
 `--user "Name (email)"` or `MOAI_ACTOR`.
+
+**Work that is not yours is asked about.** `moai ready` and `moai prime` hand out
+only your own rows; a row assigned to someone else, or to nobody, stands apart under
+`others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
+and on a yes take it over and say who said yes:
+
+    moai mv <id> in_progress --take -m '<who said yes>'
+
+You become the assignee in the same write and a note `Taken-over: <who it was|none>`
+keeps whose it was — it also takes a row that already stands in that column. Without
+`--take` a person in a terminal still moves it (one line on stderr says whose it is);
+the hook refuses it (rule 5). Who you are is matched by name or email, the same as
+`-a me`; when it is unknown nothing is set apart.
 
 ### The three forks
 

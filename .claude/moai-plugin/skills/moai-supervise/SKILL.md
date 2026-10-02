@@ -140,7 +140,10 @@ the script in 2 does not print as a `worktree` row.
         by the supervisor; with no `<subdir>` in the header, the root is the top and this step
         does not exist
           cd <subdir>
-      - The member's column is already picked up — do not pick it up again
+      - The member's column is already picked up — do not pick it up again. **If its assignee
+        is not you** (`moai show <member>`), ask the person watching before you carry it on; on
+        a yes, `moai mv <member> <its column> --take -m '<who said yes>'` — the column stays, the
+        assignee becomes you, and a note keeps whose it was
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
         tokens are written nowhere, and without it the whole member reads as this window's work
@@ -194,6 +197,11 @@ on would make the release grow after it started, and that is the person's call a
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+
+**Send only what is yours.** An idea or member whose assignee is someone else — or
+nobody — is asked about first: ask the person, and send it only on a yes, writing in the
+text who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
+such rows apart under `others`.
 
 **2. Find a worker.** `ListAgents` does not show a session's place (cwd). Read
 `~/.claude/sessions/*.json`, which Claude Code writes per session (under
@@ -442,6 +450,9 @@ worker reads in its own window in 9-1.
        merge with its own subject. So give the tracker commit a path. With a merge open git
        refuses it, so wait for that merge to finish and run it again
          git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+       **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
+       pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
+       hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
     3. Right after the commit in 2, branch from the local <base branch> with
        `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in with
        EnterWorktree(path). The name is the unfolded epic's id, not the idea's. Until the worktree

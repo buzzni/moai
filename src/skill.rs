@@ -811,6 +811,8 @@ mod tests {
                     .replace("<epic|milestone id>", "t-e")
                     .replace("<dir>", "/tmp/elsewhere")
                     .replace("<event>", "stop")
+                    // 되짚을 멤버를 넘겨받는 줄(감독 0)은 그 멤버가 선 칸을 그대로 친다(moai-0zjo).
+                    .replace("<its column>", "in_progress")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

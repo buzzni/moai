@@ -5,7 +5,7 @@ description: Use for this repository's work, issues and plans. "what should I do
 
 # moai — this repository's issue tracker
 
-The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human.
+The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human, except before you pick up work that is someone else's or nobody's (hook rule 5).
 
     moai status                            board · warnings · flow (start a session here)
     moai prime                             what you hold and what is next, nothing else
@@ -20,14 +20,16 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
+    moai mv <id> in_progress --take        take over someone else's row (ask first)
     moai edit <id> --tag parser            change
     moai note <id> '<what you found>'      a memo for whoever comes next
     moai defer <id> -m '<why>'             take work out of the plan for now
 
-Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
-`held` is what is deferred or blocked behind an empty group, and where to pick it up
-again. That is enough to build a loop that runs without a person — one such loop, in
-bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
+`ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
+(ask first), and `held` is what is deferred or blocked behind an empty group, and where
+to pick it up again. That is enough to build a loop that runs without a person — one
+such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`

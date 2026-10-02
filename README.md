@@ -147,6 +147,18 @@ moai ready --worktree                  # overlay what neighbouring worktrees hol
 non-zero exit and moves on instead of silently taking over work someone else
 already picked up.
 
+When several *people* share one tracker, an agent asks before it picks up work
+that is not its person's. `moai ready` hands out only your own rows and sets the
+rest apart — someone else's, or nobody's. On a yes, take it over in one write:
+
+```sh
+moai mv <id> in_progress --take -m 'Kim said yes'   # you become the assignee
+```
+
+The assignee changes and a note `Taken-over: <who it was|none>` keeps whose it
+was. A person in a terminal is never stopped — `mv` moves and says whose it was
+on stderr; the planted hook is what refuses an agent's pick-up without `--take`.
+
 `.moai/issues.jsonl` is one line per issue, so two branches that touched
 different issues collide only because their lines are neighbours. Install the
 merge driver once per clone and git resolves those per issue:
@@ -187,8 +199,10 @@ no human-shaped output mixed in.
   `already_exists`, `locked`, `broken`, and `error` as the catch-all. The human
   sentence beside it is not something to match on.
 - Keys that are always present stay present. `moai ready --json` is
-  `{"ready":[…],"held":[…]}`, never a bare array — `held` is work that exists but
-  cannot be picked up, with where to pick it up from.
+  `{"ready":[…],"others":[…],"held":[…]}`, never a bare array — `others` is ready
+  work that is someone else's or nobody's (`owner` says which), and `held` is work
+  that exists but cannot be picked up, with where to pick it up from. `moai mv`
+  carries `taken` and `theirs` the same way, always as arrays.
 - A partial result says so in the payload rather than only in the exit code.
   `moai mv <id> <col> --from <col>` carries `moved`, `already`, `missing` and
   `stale` side by side, so a loser in a race reads `stale` and moves on. The
