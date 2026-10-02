@@ -2911,3 +2911,8 @@
 {"ts":"2026-10-02T14:15:25Z","id":"moai-cvxa.fry","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 시험 도우미 경로 견주기)"}
 {"ts":"2026-10-02T14:15:25Z","id":"moai-cvxa.fry","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-02T14:15:43Z","id":"moai-cvxa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 303fd029 로 머지해 닫았고 넘긴 것도 없다. 시험이 바이너리 경로를 견줄 때는 recorded_bin() 을 쓴다"}
+{"ts":"2026-10-02T14:16:19Z","id":"moai-47bu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 에 담당 규칙의 예외를 적는다"}
+{"ts":"2026-10-02T14:16:19Z","id":"moai-47bu.vqc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"\"승인 게이트가 없다\" 줄과 설계 결정에 담당 규칙 예외를 적는다"}
+{"ts":"2026-10-02T14:16:19Z","id":"moai-47bu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ufll 에서 펼쳤다 — CLAUDE.md still says there is no approval gate at all"}
+{"ts":"2026-10-02T14:16:19Z","id":"moai-ufll","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-47bu 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-02T14:16:26Z","id":"moai-47bu.vqc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
