@@ -2595,3 +2595,58 @@
 {"ts":"2026-10-02T03:22:05Z","id":"moai-se89","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-02T03:23:34Z","id":"moai-se89","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — scripts/bump-version.sh auto 가 Added·Changed 로 minor 를 골랐고, 고친 스크립트가 Cargo.lock 도 스스로 맞췄다)"}
 {"ts":"2026-10-02T03:23:34Z","id":"moai-se89","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Cargo.toml·Cargo.lock 이 0.2.0 으로 서고 CHANGELOG 에 [0.2.0] - 2026-10-02 가 열렸다. 태그는 main 머지 커밋에 단다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-jvfe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.3.0"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-jvfe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/fable-5.1 tokens=258060 (high — v0.3.0 기획: 담당 규칙 설계와 마일스톤 밖 18줄 분류, 읽기만 했다)"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"담당이 아닌 일은 묻고 집는다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.t5m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready·prime 가 내 줄과 남의 줄을 가른다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.r13","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv --take 가 담당을 바꾸고 Taken-over 노트를 남긴다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.vep","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 규칙 5 — 남의 줄을 --take 없이 집는 mv 를 거절한다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.zqt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 초점에서 남의 줄을 뺀다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.69k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록·브리프·감독·README·CHANGELOG 에 담당 규칙을 싣는다"}
+{"ts":"2026-10-02T05:19:49Z","id":"moai-0zjo.59o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"예제 루프 둘이 남의 일을 집지 않는다"}
+{"ts":"2026-10-02T05:19:55Z","id":"moai-gx32","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version 시험의 판 깔기가 두 벌이다"}
+{"ts":"2026-10-02T05:19:55Z","id":"moai-t12k","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"통계 창이 겹쳐 본 옆 워크트리 줄까지 세어 CLI 와 수가 다르다"}
+{"ts":"2026-10-02T05:20:19Z","id":"moai-itsu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽기 안전 — 스냅샷·설정도 저널과 같은 자로 읽는다"}
+{"ts":"2026-10-02T05:20:19Z","id":"moai-itsu.4u7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"issues.jsonl·config.toml 이 procfs·밖 링크면 모든 명령이 메모리를 다 쓴다"}
+{"ts":"2026-10-02T05:20:19Z","id":"moai-itsu.4u7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-sxwq 에서 펼쳤다 — issues.jsonl 이 procfs 링크면 모든 명령이 메모리를 다 쓴다"}
+{"ts":"2026-10-02T05:20:19Z","id":"moai-sxwq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-itsu 의 멤버 moai-itsu.4u7 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-itsu.1b2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖을 가리키는 저널 링크를 failed 가 아니라 outside 로 낸다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-itsu.1b2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wd0o 에서 펼쳤다 — 밖을 가리키는 저널 링크가 kind failed 로 선다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-wd0o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-itsu 의 멤버 moai-itsu.1b2 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-itsu.aod","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널 접기를 (dev, ino) 로 잰다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-itsu.aod","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dzo0 에서 펼쳤다 — 저널 접기를 (dev, ino) 로 재면 하드 링크도 접는다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-dzo0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-itsu 의 멤버 moai-itsu.aod 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-3hxc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도구와 문서가 틀린 길을 댄다"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-3hxc.19y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록·README·recovery.md 의 틀린 길 셋"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-3hxc.19y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x3wi 에서 펼쳤다 — 문서가 틀린 길을 댄다 — AGENTS.md·README·recovery.md"}
+{"ts":"2026-10-02T05:20:20Z","id":"moai-x3wi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3hxc 의 멤버 moai-3hxc.19y 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.58k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"add --body 가 있는 파일 경로 한 줄이면 알린다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.58k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-m6vh 에서 펼쳤다 — add --body 에 준 파일 경로가 글자 그대로 본문이 된다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-m6vh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3hxc 의 멤버 moai-3hxc.58k 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.uyt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"add --milestone <없는 id> 가 이슈 하나에서도 알린다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.uyt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nhue 에서 펼쳤다 — add --milestone <missing id> on a single issue passes silently"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-nhue","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3hxc 의 멤버 moai-3hxc.uyt 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.65o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"rm 이 남은 쌍둥이 밑의 자식을 끊김으로 세지 않는다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-3hxc.65o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0thq 에서 펼쳤다 — 쌍둥이 줄 앞에서 rm 안내가 어긋난다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-0thq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-3hxc 의 멤버 moai-3hxc.65o 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:21Z","id":"moai-kyp7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험과 판 스크립트의 빈틈"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-kyp7.9ja","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"한 글자 플래그 거절 시험이 {flag} 자리를 짚는다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-kyp7.9ja","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dci4 에서 펼쳤다 — 한 글자 플래그 거절 시험이 무작위 id 에 기대 통과한다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-dci4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kyp7 의 멤버 moai-kyp7.9ja 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-kyp7.269","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"check-version.sh·bump-version.sh 가 작은따옴표 TOML 도 읽는다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-kyp7.269","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-i9x7 에서 펼쳤다 — check-version.sh 가 작은따옴표 TOML 문자열을 못 읽는다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-i9x7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-kyp7 의 멤버 moai-kyp7.269 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-pvpb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 모서리 — 시간대 고르기·못 읽은 저널·mosh"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-pvpb.1yh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC o t 에서 지금 이름이 목록에 없으면 Enter 가 고르지 않는다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-pvpb.1yh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2djp 에서 펼쳤다 — `SPC o t` 에서 규칙 글 시간대일 때 Enter 가 첫 tzdb 이름을 고른다"}
+{"ts":"2026-10-02T05:20:22Z","id":"moai-2djp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-pvpb 의 멤버 moai-pvpb.1yh 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-pvpb.6g6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기가 못 읽은 저널을 창 안에서 한 번 말한다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-pvpb.6g6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-q58v 에서 펼쳤다 — 탐색기가 못 읽은 저널을 창 안에서 알리지 않는다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-q58v","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-pvpb 의 멤버 moai-pvpb.6g6 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-pvpb.m2f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mosh 아래에서 DA1 답 뒤의 마우스 보고도 버린다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-pvpb.m2f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-muqy 에서 펼쳤다 — mosh 아래에서는 DA1 답이 먼저 와 마우스 보고가 샌다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-muqy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-pvpb 의 멤버 moai-pvpb.m2f 로 펼쳤다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-psyu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 차례의 동점"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-psyu.0t3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"created·updated 차례의 동점을 id 로만 가른다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-psyu.0t3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-i778 에서 펼쳤다 — created 차례의 동점을 id 로만 가르면 쪽이 안 흔들린다"}
+{"ts":"2026-10-02T05:20:23Z","id":"moai-i778","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-psyu 의 멤버 moai-psyu.0t3 로 펼쳤다"}
