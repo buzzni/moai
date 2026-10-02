@@ -980,18 +980,18 @@ pub struct AddArgs {
 const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, then id), created and
   updated (newest first), status (the column order of .moai/config.toml),
   assignee (the name the screen shows, unowned last), title (ignoring case),
-  id (an order no edit ever moves). Ties in every order fall to priority,
-  then id. --reverse turns the whole order around.
+  id. Ties under created and updated fall to id alone, and under every
+  other order to priority, then id. --reverse turns the whole order around.
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's value in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; --sort id
-  is the one order no edit moves. Lines sharing one id (twins a merge left
-  behind) stand together and a page never splits them, so such a page can
-  run past -n. --json stays an array - fewer rows than -n means the list
-  has ended.
+  and --sort created are the orders no edit moves. Lines sharing one id
+  (twins a merge left behind) stand together and a page never splits them,
+  so such a page can run past -n. --json stays an array - fewer rows than
+  -n means the list has ended.
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json

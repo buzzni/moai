@@ -81,6 +81,16 @@ does not tag — see `CONTRIBUTING.md`.
   sees `broken` in all of these — the fix is the link or the file
   (`docs/recovery.md`).
 
+- **Ties under `--sort created` and `--sort updated` fall to id alone.** A
+  plan creates its rows within one second, so rows sharing a `created_at` are
+  common. Those ties used to fall to priority, then id, so a priority edit
+  between pages moved a row across the `--after` cursor and it was repeated or
+  skipped. They now fall to id alone, and
+  `--sort created` joins `--sort id` as an order no edit moves; `updated` still
+  moves, since an edit changes the row's own `updated_at`. Every other order
+  still breaks ties by priority, then id. The explorer's `SPC s` goes through
+  the same order, so its created and updated lists change the same way.
+
 ### Fixed
 
 - **A snapshot or config that links out of the checkout no longer runs every

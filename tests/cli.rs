@@ -4984,7 +4984,7 @@ fn show_pages_through_twin_lines_once() {
     let titles = |json: &str| -> Vec<String> {
         json.match_indices(r#"{"id":""#).map(|(at, _)| field(&json[at..], "title")).collect()
     };
-    for sort in ["priority", "id"] {
+    for sort in ["priority", "id", "created"] {
         for n in ["1", "2", "3"] {
             let mut got: Vec<String> = Vec::new();
             let mut after: Option<String> = None;
@@ -5006,6 +5006,13 @@ fn show_pages_through_twin_lines_once() {
             assert_eq!(got, ["a first", "a second", "b", "c", "x"], "--sort {sort} -n {n}: 줄을 잃거나 두 번 받았다");
         }
     }
+    // **생성 차례의 동점은 id 로만 가른다**(moai-psyu) — 다섯 줄이 다 한 초에 섰다. 우선순위로 가르면 p0 인
+    // x 가 맨 앞에 선다.
+    assert_eq!(
+        ids_in(&ok(s.path(), &["show", "--sort", "created", "--json"])),
+        ["argos-aaaa", "argos-aaaa", "argos-bbbb", "argos-cccc", "argos-xxxx"],
+        "생성 차례의 동점에 우선순위가 끼었다"
+    );
     // 사람 화면이 대는 다음 쪽 명령도 사이의 줄을 안 건너뛴다 — 쌍둥이는 앞 쪽에 함께 섰다.
     let human = ok(s.path(), &["show", "-n", "2"]);
     assert!(human.contains("--after argos-aaaa"), "{human}");
