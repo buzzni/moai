@@ -1018,6 +1018,7 @@ impl Doc {
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
             detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
+            layout: look_one(t, LAYOUT, Want::Word, word, &mut problems),
             timezone: look_one(t, TIMEZONE, Want::Word, word, &mut problems),
             mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
@@ -1081,6 +1082,7 @@ impl Doc {
         let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         let mut detail_at = base.detail_at != new.detail_at;
+        let mut layout = base.layout != new.layout;
         let mut timezone = base.timezone != new.timezone;
         let mut mouse = base.mouse != new.mouse;
         let mut list_width = base.list_width != new.list_width;
@@ -1127,6 +1129,7 @@ impl Doc {
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
         odd(&[DETAIL_AT], false, &mut detail_at);
+        odd(&[LAYOUT], false, &mut layout);
         odd(&[TIMEZONE], false, &mut timezone);
         odd(&[MOUSE], false, &mut mouse);
         odd(&[LIST_WIDTH], false, &mut list_width);
@@ -1160,6 +1163,9 @@ impl Doc {
         }
         if detail_at {
             changed |= put_value(t, DETAIL_AT, new.detail_at.as_deref().map(toml_edit::Value::from), &mut left);
+        }
+        if layout {
+            changed |= put_value(t, LAYOUT, new.layout.as_deref().map(toml_edit::Value::from), &mut left);
         }
         if timezone {
             changed |= put_value(t, TIMEZONE, new.timezone.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1213,6 +1219,9 @@ const DETAIL: &str = "detail";
 /// 서는가다. 한 키에 둘을 담으면(`detail = "right"` 로 켬까지) 옛 줄(`detail = true`)이 파싱에서
 /// 떨어져 사람이 끈 상세가 도로 켜진다.
 const DETAIL_AT: &str = "detail_at";
+/// 목록을 줄로 세우는가 칸반 보드로 세우는가 — `list`·`board`(moai-9nfw). **새 창이 아니라 목록의 배치라**
+/// 보는 사람의 것이고, 그래서 상세의 자리([`DETAIL_AT`])처럼 `[tui]` 에 낱말로 산다.
+const LAYOUT: &str = "layout";
 /// 탐색기가 시각을 적을 시간대(moai-3oz2). **탐색기의 것이라 `[tui]` 에 산다** — CLI 는 이 키를
 /// 안 읽고 시스템(`TZ`·`/etc/localtime`)을 그대로 따른다. 고르는 자리가 탐색기 하나(`SPC o t`)고,
 /// 고른 적 없으면 두 표면이 같은 시계로 선다.
@@ -1234,6 +1243,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// hide_deferred = false
 /// detail = true
 /// detail_at = "right"
+/// layout = "board"
 /// timezone = "Asia/Seoul"
 /// sort = "updated"
 /// sort_reversed = false
@@ -1276,6 +1286,9 @@ pub struct Look {
     /// 있는지는 탐색기가 안다(`tui::view::DetailAt`). 모르는 낱말은 탐색기가 처음값으로 세우고
     /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub detail_at: Option<String>,
+    /// 목록의 배치 — `list`·`board`(moai-9nfw). **낱말로 든다**: 무슨 낱말이 있는지는 탐색기가 안다
+    /// (`tui::view::Layout`). 모르는 낱말은 탐색기가 목록으로 세우고 이 줄은 그대로 둔다 — 읽기는 관대하다.
+    pub layout: Option<String>,
     /// 탐색기가 시각을 적을 시간대 이름 — `Asia/Seoul`·`UTC`(moai-3oz2). **낱말로 든다**: 무슨
     /// 이름이 있는지는 이 기계의 tzdb 가 안다(`tz::names`). tzdb 에 없는 이름은 POSIX 규칙 글(`JST-9`)로
     /// 읽고(`tz::Zone::load`, moai-btxt.1gk), 그것으로도 못 푸는 이름은 탐색기가 UTC 로
@@ -3095,6 +3108,7 @@ mod tests {
             fields_known: None,
             detail: Some(false),
             detail_at: Some("bottom".into()),
+            layout: Some("board".into()),
             timezone: Some("Asia/Seoul".into()),
             mouse: Some(false),
             list_width: Some(40),
@@ -3351,6 +3365,7 @@ mod tests {
             fields_known: None,
             detail: Some(true),
             detail_at: None,
+            layout: None,
             timezone: None,
             mouse: None,
             list_width: None,

@@ -2460,6 +2460,16 @@ const RIGHT: [(super::view::Field, &str, usize); 4] = {
     ]
 };
 
+/// 카드의 발줄에 서는 열 — 목록의 오른쪽 열과 같은 것들이다(moai-9nfw). **하나라도 켜졌을 때만 발줄이
+/// 선다**(사용자 결정 2026-10-02): 머리(id·칸·우선순위)와 몸(제목)이 카드가 무엇인지 말하고, 그 밖은 사람이
+/// `SPC c` 로 켠 만큼이다. 차례는 목록의 [`RIGHT`] 그대로다.
+const FOOT: [super::view::Field; 4] = [RIGHT[0].0, RIGHT[1].0, RIGHT[2].0, RIGHT[3].0];
+
+/// 카드 한 장의 줄 수 — 머리·몸, 그리고 발줄. 보드의 배치([`super::App::laid`])와 그림이 이 하나로 잰다.
+pub(super) fn card_lines(fields: super::view::Fields) -> usize {
+    2 + usize::from(FOOT.iter().any(|f| fields.shows(*f)))
+}
+
 /// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
 const WHO_W: usize = 10;
 const TAGS_W: usize = 14;

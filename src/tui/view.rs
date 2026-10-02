@@ -136,6 +136,40 @@ impl DetailAt {
     }
 }
 
+/// 목록을 **어떻게 세우나** — 줄로(`List`) 칸반 보드로(`Board`)(moai-9nfw, 사용자 결정 2026-10-02).
+///
+/// **새 창이 아니라 목록의 배치다.** 커서·거름망·보기·검색·상세는 둘이 한 벌이고, 이것은 그 줄이 화면
+/// 어디에 서는가만 가른다(`board`). 상세의 자리([`DetailAt`])처럼 보는 사람의 것이라 설정에 남는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layout {
+    #[default]
+    List,
+    Board,
+}
+
+impl Layout {
+    /// 다른 쪽 — `SPC v b` 가 오간다.
+    pub fn flip(self) -> Layout {
+        match self {
+            Layout::List => Layout::Board,
+            Layout::Board => Layout::List,
+        }
+    }
+
+    /// 설정 파일에 적는 이름 — 화면 낱말과 따로다([`Field::name`] 과 같은 까닭).
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::List => "list",
+            Layout::Board => "board",
+        }
+    }
+
+    /// 모르는 이름은 `None` — 읽는 쪽이 목록으로 세운다. **읽기는 관대하다.**
+    pub fn named(name: &str) -> Option<Layout> {
+        [Layout::List, Layout::Board].into_iter().find(|l| l.name() == name)
+    }
+}
+
 /// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -483,6 +517,16 @@ mod tests {
         let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
         assert_eq!(elsewhere.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         assert_eq!(View::hiding("blocked").badge(&known, crate::i18n::Lang::Ko), None);
+    }
+
+    #[test]
+    fn layout_names_round_trip_and_flip() {
+        for l in [Layout::List, Layout::Board] {
+            assert_eq!(Layout::named(l.name()), Some(l));
+            assert_eq!(l.flip().flip(), l);
+        }
+        assert_eq!(Layout::default(), Layout::List, "처음에는 목록이다");
+        assert_eq!(Layout::named("보드"), None, "화면 낱말을 설정 이름으로 받았다");
     }
 
     #[test]
