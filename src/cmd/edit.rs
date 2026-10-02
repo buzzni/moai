@@ -24,6 +24,8 @@ struct Edited {
     kept: Option<Inherited>,
     /// `--milestone` 을 받았는데도 적은 대로 안 선 마일스톤 — 그것을 정한 에픽이나 id 부모.
     kept_milestone: Option<InheritedMilestone>,
+    /// `--milestone <id>` 로 적은 id 가 마일스톤 줄인가. 안 적었거나 비웠으면 `true` 다 — 말할 것이 없다.
+    known_milestone: bool,
     /// 고친 줄의 막음을 가른 답. 상세가 `show <id>` 와 같은 막음 줄을 그린다(moai-xe74).
     blocked: Blocked,
 }
@@ -237,12 +239,21 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             let wrote_milestone = args.milestone.as_deref().map(super::clearable);
             let kept_milestone =
                 |issues: &[Issue]| InheritedMilestone::of(issues, &args.id, wrote_milestone.as_ref()?.as_deref());
+            // **없는 마일스톤은 막지 않고 알려만 준다 — `add` 와 같은 자, 같은 글이다**(moai-3hxc.id1).
+            // `add --milestone <헛 id>` 는 알리는데 `edit` 만 말없이 0 으로 끝나, 같은 필드를 두 길이 달리
+            // 다뤘다. 재는 것은 적은 id 가 아니라 **고친 줄의 값**이다 — `add` 가 `issue.milestone` 을 재는
+            // 것과 같은 까닭이다(쓰기에 정규화가 붙는 날 argv 와 줄이 갈린다). 안 바뀌어도 잰다: 같은
+            // 헛 id 를 다시 적은 부름도 그 id 를 그대로 둔다.
+            let known_milestone = |issues: &[Issue], row: &Issue| {
+                !matches!(wrote_milestone, Some(Some(_))) || super::add::is_milestone(issues, row.milestone.as_deref())
+            };
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
                 let read = super::read_of(issues, cfg, &[before.id.as_str()], ctx.json);
                 let kept = kept(issues);
                 let kept_milestone = kept_milestone(issues);
+                let known_milestone = known_milestone(issues, &before);
                 return Ok((
                     vec![],
                     Edited {
@@ -254,6 +265,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                         changed: false,
                         kept,
                         kept_milestone,
+                        known_milestone,
                         // 바뀐 것이 없으면 상세를 안 그린다.
                         blocked: Blocked::default(),
                     },
@@ -294,16 +306,43 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             let read = super::read_of(issues, cfg, &near, ctx.json);
             let kept = kept(issues);
             let kept_milestone = kept_milestone(issues);
+            let known_milestone = known_milestone(issues, &out);
             // 막음도 **락 안에서 본 모습으로** 가른다 — `ready` 의 자(`report::blocks_of`)다.
             let blocked = Blocked::of(issues, cfg, &out);
             Ok((
                 vec![],
-                Edited { issue: out, epic, children, shelved, read, changed: true, kept, kept_milestone, blocked },
+                Edited {
+                    issue: out,
+                    epic,
+                    children,
+                    shelved,
+                    read,
+                    changed: true,
+                    kept,
+                    kept_milestone,
+                    known_milestone,
+                    blocked,
+                },
             ))
         },
     )?;
 
-    let Edited { issue: edited, epic, children, shelved, read, changed, kept, kept_milestone, blocked } = done;
+    let Edited {
+        issue: edited,
+        epic,
+        children,
+        shelved,
+        read,
+        changed,
+        kept,
+        kept_milestone,
+        known_milestone,
+        blocked,
+    } = done;
+    // 쓰기가 선 **뒤에** 말한다 — `add` 와 같은 자리다. `--json` 도 가리지 않는다(stderr 라 stdout 의 JSON 은
+    // 그대로다). 필드가 에픽·조상에게 져서 `kept_milestone` 줄이 함께 나는 판에도 말한다 — 안 읽히는 필드의
+    // 헛 id 도 `status` 는 `dangling_milestone` 으로 센다.
+    super::add::say_no_such_milestone(edited.milestone.as_deref(), known_milestone, ctx.lang());
     if ctx.json {
         // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은
         // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.

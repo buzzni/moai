@@ -310,9 +310,9 @@ the moment it is created — not in `ready`, not in `held`, and no warning says 
 **A dead release is said out loud**: unfolding into a deferred or closed milestone
 prints one line on stderr naming it, and nothing is blocked.
 
-The id in that line is the release `moai show --milestone` stands that idea under. What is checked is the shape
-alone, so `moai-zzzz` goes in with exit 0 and surfaces only much later as a
-`dangling_milestone` warning.
+The id in that line is the release `moai show --milestone` stands that idea under. Nothing is refused, so `moai-zzzz`
+goes in with exit 0 — but one line on stderr says there is no such milestone,
+and `moai status` counts the row as `dangling_milestone`.
 
 ## Deferring
 
