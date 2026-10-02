@@ -449,8 +449,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
 
     // 쓰기가 선 **뒤에** 말한다 — `bulk` 와 같은 자리고, 거절된 쓰기가 줄 알림이 아니다. `--json` 도
     // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
-    // 나는 판에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
-    // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`").
+    // 나는 경우에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
+    // (`report::status_in`: "제 에픽이 멀쩡한 줄이 든 엉뚱한 `milestone`"). 제 에픽이 못 쓸 것이면
+    // `dangling_epic` 이 먼저다 — `edit` 의 같은 자리가 그 경우를 적어 두었다.
     say_no_such_milestone(made.milestone.as_deref(), known, ctx.lang());
 
     if ctx.json {
@@ -465,7 +466,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         return super::json_line(&Out { row: super::Row::from(&made, &read), inherited_milestone: kept.as_ref() });
     }
     if let (Some(k), Some(wrote)) = (&kept, args.milestone.as_deref()) {
-        super::edit::milestone_kept_line(&made.id, k, wrote, ctx.lang());
+        super::edit::milestone_kept_line(&made.id, k, wrote, known, ctx.lang());
     }
     if args.quiet {
         return Ok(vec![made.id]);
@@ -940,8 +941,13 @@ pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::
 
 /// `id` 가 이 저장소의 **마일스톤 줄**인가 — `moai status` 의 `dangling_milestone` 과 같은 자다
 /// (`report::misplace_of` 가 가리킨 id 의 종류가 마일스톤인지를 본다). `None` 이면 `false` 다.
+///
+/// **종류는 그 id 의 뒷줄로 읽는다**([`crate::report::kinds_of`]) — `status` 가 같은 id 의 줄 둘을 그렇게
+/// 읽는다. 아무 줄이나 마일스톤이면 참으로 읽던 때는 마일스톤 줄 뒤에 다른 종류의 쌍둥이가 선 id 를
+/// 연습(`add --from --dry-run`·`idea promote --dry-run`)이 "선다" 고 냈는데, `status` 는 그 id 에 선 줄을
+/// `dangling_milestone` 으로 셌다(리뷰 moai-3hxc.uhh). 쓰는 길은 쌍둥이가 선 파일을 통째로 물려 여기 안 닿는다.
 pub fn is_milestone(issues: &[Issue], id: Option<&str>) -> bool {
-    id.is_some_and(|m| issues.iter().any(|i| i.id == m && i.kind == Kind::Milestone))
+    id.is_some_and(|m| crate::report::kinds_of(issues, &[m]).get(m) == Some(&Kind::Milestone))
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

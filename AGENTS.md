@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.2.0 hash:30e0d450 -->
+<!-- moai:begin v:0.2.0 hash:c3424ccd -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -220,7 +220,7 @@ the moment it is created — not in `ready`, not in `held`, and no warning says 
 **A dead release is said out loud**: unfolding into a deferred or closed milestone
 prints one line on stderr naming it, and nothing is blocked.
 
-The id in that line is the release `moai show --milestone` stands that idea under. Nothing is refused, so `moai-zzzz`
+The id in that line is the release `moai show --milestone` stands that idea under. Only its shape is checked, so `moai-zzzz`
 goes in with exit 0 — but one line on stderr says there is no such milestone,
 and `moai status` counts the row as `dangling_milestone`.
 
