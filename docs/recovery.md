@@ -157,6 +157,36 @@ git checkout <commit> -- .moai/issues.jsonl
 Do not copy what the link points at into its place without looking — it may be
 `/dev/zero` or a file under `/proc` that never ends.
 
+## "broken": the lock is not a file moai locks
+
+Every write stops — `moai add`, `mv`, `note` and the rest — with one line naming
+`.moai/lock`, or the `lock` beside the file a linked `.moai/issues.jsonl` points
+at, and `--json` says `"code":"broken"`. Nothing was written, and reads keep
+working. moai takes its lock only on a regular file it makes itself, never
+through a link — not even one that points inside the checkout — and only in a
+directory that stays inside the checkout and outside `.git/`. The line says
+which of those it is.
+
+The lock holds nothing, so remove whatever stands there and run the command
+again (a directory goes with everything in it, so look first):
+
+```sh
+rm .moai/lock
+```
+
+`moai init` puts `.moai/lock` in `.gitignore`, so a link there that keeps coming
+back after a checkout was committed anyway. Take it out of the repository:
+
+```sh
+git rm --cached .moai/lock
+git commit -m 'Stop tracking the moai lock'
+```
+
+If the line says the lock points out of the checkout or into `.git/`, it is the
+`.moai` directory itself that is a link — the fix is that link. If it says
+`.moai/issues.jsonl` points at a lock, the snapshot is the link to fix, the same
+way as in the section above.
+
 ## A conflicted `issues.jsonl`
 
 Lines are sorted by id, so two branches that touched *different* issues still
