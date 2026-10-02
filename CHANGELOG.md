@@ -139,6 +139,16 @@ does not tag — see `CONTRIBUTING.md`.
   epic or ancestor decides the milestone instead, the line that says so no
   longer offers that missing id as the way to move it — on `add` either.
 
+- **`moai add -e` and `moai edit -e` say a wrong epic the way `--milestone`
+  does.** The line came before the write was accepted, so a write refused
+  afterwards had already said "no epic"; it only asked whether some row had that
+  id, so `-e <an issue id>`, and `-e <an epic>` on an epic or milestone row, went
+  by without a word while `moai status` counted the row as `dangling_epic`; and
+  `edit` said it only when the row changed. It now comes after the write,
+  measured the way `moai status` measures it, under `--json` too, and `edit`
+  says it on every call that writes `-e <id>` and not on one that leaves `-e`
+  alone. The row is still written and the exit code does not change.
+
 - **`moai rm` names the rows whose milestone or epic it removed.** Removing a
   milestone ended with `dangling: []`, and the next `moai status` warned
   `dangling_milestone` for the rows on it; removing an epic named only rows
