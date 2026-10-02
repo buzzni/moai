@@ -12,7 +12,39 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai mv --take` takes someone else's work over in one write.** The
+  assignee becomes you and a note `Taken-over: <who it was|none>` keeps whose it
+  was, in the same write as the move; `-m` says who said yes. It also takes a row
+  that already stands in that column, which is how stalled work is reclaimed.
+  `--json` carries `taken` and `theirs`, always as arrays.
+
+- **Hook rule 5 — ask before you pick up someone else's work.** The planted hook
+  refuses an agent's `moai mv` into a started column on a row whose assignee is
+  someone else, or nobody, unless it carries `--take`, and hands back the line to
+  run on a yes. It is the one place that refuses: when who you are is unknown it
+  lets the move through.
+
 ### Changed
+
+- **`moai ready` and `moai prime` hand out only your own rows.** A ready row
+  assigned to someone else, or to nobody, stands apart below the list, and under
+  `others` in `--json` with `owner` set to `theirs` or `unowned` — the key is
+  always there, and `prime --json` carries `others` and `others_rest` the same
+  way, each row naming its `assignee`. `p0` is no exception. `prime`'s `picked`
+  and the "already picked up" line under `moai ready` drop what someone else
+  picked up or nobody owns, and the planted hook no longer counts those rows as
+  your focus. Who you are is matched by name or email, the same as `-a me`; when it
+  is unknown (no `--user`, `MOAI_ACTOR` or git identity) nothing is set apart.
+  A repository run under one name reads as before as long as its rows carry an
+  assignee — a row left with `-a none`, or written before rows carried one, now
+  stands apart as `unowned`. The next pick in the same epic that `moai mv … done`
+  names is your own row too.
+
+- **A `moai mv` of someone else's row into a started column says so.** It still
+  moves — one line on stderr names whose it is and the `--take` line to run, and
+  the exit code does not change.
 
 - **A journal link that points out of the checkout stands as `outside`.** In
   `journal_error` (`show --json`, `stats --json`) such a link — one that leaves

@@ -5,7 +5,7 @@ description: Use for this repository's work, issues and plans. "what should I do
 
 # moai — this repository's issue tracker
 
-The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human.
+The work lives in `.moai/issues.jsonl`. There is no approval gate — create anything, move anything. Do not ask a human, except before you pick up work that is someone else's or nobody's (hook rule 5).
 
     moai status                            board · warnings · flow (start a session here)
     moai prime                             what you hold and what is next, nothing else
@@ -20,14 +20,16 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
+    moai mv <id> in_progress --take        take over someone else's row (ask first)
     moai edit <id> --tag parser            change
     moai note <id> '<what you found>'      a memo for whoever comes next
     moai defer <id> -m '<why>'             take work out of the plan for now
 
-Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
-`held` is what is deferred or blocked behind an empty group, and where to pick it up
-again. That is enough to build a loop that runs without a person — one such loop, in
-bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
+`ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
+(ask first), and `held` is what is deferred or blocked behind an empty group, and where
+to pick it up again. That is enough to build a loop that runs without a person — one
+such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -140,7 +142,7 @@ English goes in as it is.
 - `moai skill install` installs both plugins together. The detail is under "Korean text"
   in the moai skill's `references/commands.md`
 
-## The four things the hook actually watches
+## The five things the hook actually watches
 
 **1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -182,6 +184,17 @@ server — one line kills every session in it. A tmux you are testing gets its
 own server.
 
     env -u TMUX tmux -L <unique name> …
+
+**5. Ask before you pick up someone else's work.** A `moai mv` into a started column on a row whose assignee is
+someone else — or nobody — is refused unless it carries `--take`. Ask the person
+watching first. On a yes, take it over and say who said yes:
+
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
+
+You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
+keeps whose it was. `moai ready` hands out only your own rows and sets the rest
+apart (`others`), and what someone else picked up is not your focus. When who you
+are is unknown, nothing is refused.
 
 ## Before you close the session
 

@@ -5291,7 +5291,25 @@ fn adds_idea(args: &[String], verbs: &[&str]) -> bool {
 /// moai 의 도움말이 아니다. 그 줄 자체는 이제 [`Wrapper::stops`] 에서 멈추지만(moai-m4ze),
 /// 인자를 갈라 읽는 이 잣대는 감싸는 명령 열여덟 줄 전부에 그대로 선다.
 fn asks_help(words: &[String]) -> bool {
-    words.iter().any(|t| t == "-h" || t == "--help")
+    flag_words(words).any(|t| t == "-h" || t == "--help")
+}
+
+/// `moai` 인자에서 **플래그 자리에 선 낱말들** — `--` 앞까지, 값을 받는 플래그의 값은 건너뛴다([`TAKES_VALUE`],
+/// [`positionals`] 와 같은 자). `-m` 은 `-` 로 시작하는 값도 받아(`allow_hyphen_values`) `-m --take`·`-m -h`·
+/// `-m --` 의 둘째 낱말은 노트의 글이다 — 낱말로만 찾던 판(moai-0zjo 리뷰)은 그것을 넘겨받기·도움말로 읽어
+/// 규칙 5 를 지나 보냈고, `-m -- --take` 는 `--` 에서 멈춰 정말 넘겨받는 줄을 막았다.
+fn flag_words(args: &[String]) -> impl Iterator<Item = &str> {
+    let mut it = args.iter();
+    std::iter::from_fn(move || {
+        let a = it.next()?;
+        if a == "--" {
+            return None;
+        }
+        if TAKES_VALUE.contains(&a.as_str()) {
+            it.next();
+        }
+        Some(a.as_str())
+    })
 }
 
 /// 선 에픽에 멤버로 펼치는 `idea promote -e` 인가. `--from` 을 늘 들고 오므로 `--from` 을
@@ -5375,11 +5393,90 @@ pub struct Away {
     /// 빼던 판은 제 일을 통째로 놓아 `Stop` 이 안 붙들고 접힌 뒤에도 안 실었고, 좁힌 판정이 `-m` 없는 리뷰
     /// 닫기를 넘겼다. `unsure` 와 함께만 싣는다.
     pub picked: BTreeSet<String>,
+    /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**은 초점([`held`])에서 뺀다.
+    /// 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서 물려받지
+    /// 않는다. 규칙 5 가 남의 줄 집기를 가르는 자도 이것이다.
+    ///
+    /// **모르면 가르지 않는다**(`report::by_owner` 와 같은 약속). **푸는 것은 묻는 자리다**([`Person`]) —
+    /// 줄의 담당을 실제로 가르는 규칙만 부른다.
+    pub me: Person,
 }
 
 impl Away {
-    fn is_empty(&self) -> bool {
+    /// 옆 이름도 모르는 줄도 없다 — 소속 재료([`report::Ties`])를 지을 까닭이 없다.
+    fn nameless(&self) -> bool {
         self.names.is_empty() && self.unsure.is_empty()
+    }
+
+    /// 뺄 것이 없다 — 옆 이름도 모르는 줄도 없고 물을 사람도 없다. **사람을 풀지 않고 답한다.**
+    fn is_empty(&self) -> bool {
+        self.nameless() && !self.me.may_know()
+    }
+}
+
+/// 이 세션의 사람 — **처음 묻는 자리에서 한 번 푼다**(moai-0zjo 리뷰).
+///
+/// 푸는 길(`model::actor`)은 `git` 을 두 번 띄우므로 `cmd/hook.rs` 가 그 길을 닫힘으로 건네고, 줄의 담당을
+/// 실제로 가르는 자리([`held`] 가 초점을 짓는 때, [`take_in`] 이 집기를 볼 때)만 부른다. 값으로 들고
+/// 다니던 판은 저장소 어디에든 집힌 줄이 있으면 훅 부름마다 미리 풀어, moai-n2jh 가 이 길에서 걷어낸 만큼
+/// (`git` 두 번)을 `ls`·`cargo test` 한 번에도 도로 치렀다 — 그 부름들은 초점을 아예 안 읽는다.
+///
+/// **클론은 한 칸을 나눠 쓴다** — 겹친 판(`settle`)이 제 [`Away`] 에 옮겨 실어도 다시 안 푼다. 기본값은
+/// 물을 사람이 없는 것이다: 가르지 않는다.
+#[derive(Clone, Default)]
+pub struct Person(Option<std::sync::Arc<Asked>>);
+
+/// [`Person`] 의 속 — 푼 답과 푸는 길.
+struct Asked {
+    seen: std::sync::OnceLock<Option<crate::query::Me>>,
+    find: Box<dyn Fn() -> Option<crate::query::Me> + Send + Sync>,
+}
+
+impl Person {
+    /// 이미 아는 사람 — 시험이 쓴다.
+    #[cfg(test)]
+    pub fn known(me: crate::query::Me) -> Person {
+        let seen = std::sync::OnceLock::new();
+        let _ = seen.set(Some(me));
+        Person(Some(std::sync::Arc::new(Asked { seen, find: Box::new(|| None) })))
+    }
+
+    /// 물을 때 `find` 로 푸는 사람. `find` 는 한 번만 불린다.
+    pub fn asked(find: impl Fn() -> Option<crate::query::Me> + Send + Sync + 'static) -> Person {
+        Person(Some(std::sync::Arc::new(Asked { seen: std::sync::OnceLock::new(), find: Box::new(find) })))
+    }
+
+    /// 그 사람 — 처음 부를 때 푼다. 모르면 `None` 이다.
+    pub fn get(&self) -> Option<&crate::query::Me> {
+        let asked = self.0.as_ref()?;
+        asked.seen.get_or_init(|| (asked.find)()).as_ref()
+    }
+
+    /// 물을 길이 있는가 — **풀지 않고** 답한다.
+    fn may_know(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// 이미 푼 답 — 풀지 않는다. 비교와 찍기가 쓴다.
+    fn settled(&self) -> Option<&Option<crate::query::Me>> {
+        self.0.as_ref().and_then(|a| a.seen.get())
+    }
+}
+
+/// **비교는 사람을 풀지 않는다** — 술어가 `git` 을 띄우면 안 된다. 물을 길의 있고 없음과 이미 푼 답을 견준다.
+impl PartialEq for Person {
+    fn eq(&self, other: &Person) -> bool {
+        self.may_know() == other.may_know() && self.settled() == other.settled()
+    }
+}
+
+impl std::fmt::Debug for Person {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.may_know(), self.settled()) {
+            (false, _) => f.write_str("Person(nobody to ask)"),
+            (true, None) => f.write_str("Person(not asked yet)"),
+            (true, Some(me)) => write!(f, "Person({me:?})"),
+        }
     }
 }
 
@@ -5397,7 +5494,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
         return wip;
     }
     let theirs = theirs(issues, away);
-    wip.into_iter().filter(|i| !theirs(i)).collect()
+    wip.into_iter().filter(|i| !theirs(i) && !not_mine(away, i)).collect()
 }
 
 /// 이 줄이 **옆의 일**인가 — 옆 이름이 제 이름보다 가까이 가리키거나, 누구의 것인지 모른다.
@@ -5407,12 +5504,26 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 ///
 /// 소속 재료는 **한 벌만** 짓는다([`report::Ties`]) — 옆 이름과 모르는 줄을 같은 재료로 잰다. 둘이 제
 /// 지도를 따로 짓던 판은 좁힌 판정마다 두 벌을 지었다.
+///
+/// **담당은 여기서 안 본다**([`not_mine`]) — 이것은 "어느 자리가 쥐었나" 다. 리뷰를 맞추는 규칙 3
+/// ([`close_in`]·[`guard_review`]·[`closing`])도 이것으로 옆의 리뷰를 빼는데, 내 일에 매인 리뷰는 그 줄의
+/// 담당이 누구든 닫을 때 낸 글을 남겨야 한다. 담당까지 섞던 판(moai-0zjo 리뷰)은 남이 세웠거나 담당 없는
+/// 리뷰를 내 일 밑에서 `-m` 없이 닫게 두었고, `Stop` 도 그 리뷰를 놓았다.
 fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool + 'a {
-    let ties = if away.is_empty() { report::Ties::default() } else { report::Ties::of(issues) };
+    let ties = if away.nameless() { report::Ties::default() } else { report::Ties::of(issues) };
     move |i: &'a Issue| {
         report::claims_over(&ties, &away.names, &away.own, i)
             || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
     }
+}
+
+/// 이 줄이 **내 것이 아닌가**(moai-0zjo, [`Away::me`]) — 담당이 다른 사람이거나 없다. 사람을 모르면 거짓이다.
+///
+/// **초점([`held`])과 내미는 줄에만 쓴다** — 남이 집은 줄과 담당 없이 집힌 줄은 내 초점이 아니고, 남의 줄을
+/// 집으라고 내밀면 규칙 5 가 그 줄을 막는다. 담당은 그 줄 하나로 본다: 소속 재료가 안 든다. 처음 부를 때
+/// 사람을 푼다([`Person`]).
+fn not_mine(away: &Away, i: &Issue) -> bool {
+    away.me.get().is_some_and(|me| report::owner(me, i).is_some())
 }
 
 /// 세션마다 적어 둔 집기를 이 세션의 눈으로 가른 것(moai-4jsy, 사용자 결정) — 줄마다 **마지막으로
@@ -5900,15 +6011,22 @@ fn close_in(
         // 그래서 뺀다 — `closing`·[`guard_review`] 가 안 세는 줄이다(리뷰 moai-dw63.nzw).
         // 소속 지도는 **한 벌만** 짓는다([`unit_of_in`]) — `unit_of` 에 맡기고 곁에서 `groups` 를
         // 또 부르던 판은 같은 지도를 두 벌 지었다.
-        let ties = report::Ties::of(issues);
-        let unit = unit_of_in(&held(issues, cfg, away), &ties);
         let out = report::put_off(issues);
         let theirs = theirs(issues, away);
-        let open_review = ids.iter().find_map(|id| {
-            issues.iter().find(|i| {
-                i.id == *id && is_review(i, &out) && !i.status.is_done() && !theirs(i) && in_unit(&unit, &ties, i)
-            })
-        });
+        // **초점은 닫는 줄이 열린 리뷰일 때만 짓는다**(moai-0zjo 리뷰) — [`held`] 는 사람을 풀 수 있어([`Person`])
+        // `git` 을 두 번 띄운다. 보통 일을 `-m` 없이 닫는 흔한 줄이 그 값을 안 치른다. 답은 같다 — 열린 리뷰가
+        // 없으면 단위와 상관없이 지나가고, 차례(id 차례, 같은 id 면 앞줄)도 그대로다.
+        let open: Vec<&Issue> = ids
+            .iter()
+            .flat_map(|id| issues.iter().filter(move |i| i.id == *id))
+            .filter(|i| is_review(i, &out) && !i.status.is_done() && !theirs(i))
+            .collect();
+        if open.is_empty() {
+            continue;
+        }
+        let ties = report::Ties::of(issues);
+        let unit = unit_of_in(&held(issues, cfg, away), &ties);
+        let open_review = open.into_iter().find(|i| in_unit(&unit, &ties, i));
         if let Some(r) = open_review {
             return refuse(
                 3,
@@ -5963,11 +6081,16 @@ fn guard_edit_at(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, at: &
     if !counted(at, root) || !held(issues, cfg, away).is_empty() {
         return Decision::Pass;
     }
+    // **내 줄만 내민다**(moai-0zjo 리뷰) — `moai ready` 가 내 것만 내미는 것과 같은 자다([`Away::me`],
+    // [`report::owner`]). 남의 줄이나 담당 없는 줄을 내밀면 시킨 대로 친 줄이 규칙 5 에 막히고, 아래의
+    // 넘겨받는 줄은 묻지도 않고 남이 쥔 일을 가져가라고 시킨다. 사람을 모르면 가르지 않는다.
+    let mine = |i: &&Issue| !not_mine(away, i);
     // **본 칸을 함께 준다**(`--from`). 이 줄은 여럿이 같은 트래커를 쓰는 저장소에서 지어지므로, 짓고
     // 치는 사이에 옆이 그 일을 집거나 닫을 수 있다 — 그러면 옮기지 않고 말한다. 안 주던 판은 낡은
     // 스냅샷의 "집으라" 대로 이미 닫힌 일을 도로 열었다(리뷰 moai-ju21.70g).
     let picks: String = report::ready(issues, cfg)
         .into_iter()
+        .filter(mine)
         .take(3)
         .map(|i| format!("  moai mv {} in_progress --from {}   {}\n", i.id, i.status.as_str(), i.title))
         .collect();
@@ -5985,6 +6108,7 @@ fn guard_edit_at(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, at: &
     // 칸을 바꿔 둔 저장소에서는 아예 거절당하는 줄이 된다([`report::wip`] 의 글이 못박은 자다).
     let over: String = report::wip(issues, cfg)
         .into_iter()
+        .filter(mine)
         .take(3)
         .map(|i| format!("\x20 moai mv {} {}   {}\n", i.id, i.status.as_str(), i.title))
         .collect();
@@ -6041,14 +6165,22 @@ fn guard_writes_in(
     // 세 번까지 다시 부르고, 그 뒤로 기록([`picked_in`])이 또 한 번 묻는다. **빌리는 것은 `only` 가
     // 집기 토막을 다 고를 때다** — 남의 트래커를 겨눈 집기가 섞인 줄은 그 셋을 저마다 다시 훑는다.
     let writes = scan.writes(only);
-    if writes.is_empty() || !held(issues, scan.cfg(), away).is_empty() {
+    // **저장소 안에 닿는 쓰기만 남기고 초점을 묻는다**(moai-0zjo 리뷰) — [`held`] 는 사람을 풀 수 있어([`Person`])
+    // `git` 을 두 번 띄운다. `2>/dev/null`·`| tee /tmp/…` 처럼 저장소 밖에 쓰는 흔한 줄이 그 값을 안 치르게,
+    // 경로를 푸는 것(파일 계통만 묻는다)이 먼저다.
+    //
+    // **친 낱말을 그대로 넘긴다**([`guard_edit_at`]) — 글자로 풀어 넘기면 [`shown`] 이 되돌려 줄 철자가 moai 가
+    // 지은 절대 경로가 되고, 푸는 일도 한 벌 더 돈다.
+    let inside: Vec<(PathBuf, &String)> = writes
+        .iter()
+        .map(|path| (resolve_path(&cwd.join(path), root), path))
+        .filter(|(at, _)| counted(at, root))
+        .collect();
+    if inside.is_empty() || !held(issues, scan.cfg(), away).is_empty() {
         return Decision::Pass;
     }
-    for path in writes.iter() {
-        // **친 낱말을 그대로 넘긴다**([`guard_edit_at`]) — 글자로 풀어 넘기면 [`shown`] 이 되돌려
-        // 줄 철자가 moai 가 지은 절대 경로가 되고, 푸는 일도 한 벌 더 돈다.
-        let at = resolve_path(&cwd.join(path), root);
-        if let deny @ Decision::Deny(_) = guard_edit_at(issues, scan.cfg(), away, root, &at, path) {
+    for (at, path) in &inside {
+        if let deny @ Decision::Deny(_) = guard_edit_at(issues, scan.cfg(), away, root, at, path) {
             return deny;
         }
     }
@@ -7259,10 +7391,126 @@ pub fn guard_moai(
         return Decision::Pass;
     }
     // 초점은 한 번 잰다 — `held` 는 미룬 줄이 있으면 소속 지도를 다시 짓고, 훅은 도구 호출마다 돈다.
-    let focus = held(issues, cfg, away);
+    // **초점을 읽는 토막이 설 때만 짓는다**(moai-0zjo 리뷰) — 그것을 읽는 둘([`create_in`]·[`aside_in`])은
+    // 세우는 토막·담는 토막이 없으면 초점과 상관없이 지나간다. 늘 짓던 판은 `moai show`·`moai note` 한 줄에도
+    // 사람을 풀어([`Person`]) `git` 을 두 번 띄웠다.
+    let reads_focus = line.used().enumerate().any(|(k, seg)| only(k) && (creates(seg) || sets_aside(seg)));
+    let focus = if reads_focus { held(issues, cfg, away) } else { Vec::new() };
     create_in(issues, &focus, line, only, aim)
         .then(|| close_in(issues, cfg, away, line, only, aim))
+        .then(|| take_in(issues, cfg, away, line, only, aim))
         .then(|| aside_in(issues, &focus, line, only, aim))
+}
+
+/// 이 `moai` 인자가 **넘겨받는다고 적었는가**(`mv --take`). 플래그 자리만 본다([`flag_words`]) — `--` 뒤와
+/// `-m` 의 값은 플래그가 아니다.
+fn takes(args: &[String]) -> bool {
+    flag_words(args).any(|a| a == "--take")
+}
+
+/// 규칙 5 — **남의 줄은 묻고 집는다**(moai-0zjo, 2026-10-02 사용자 결정).
+///
+/// 시작 칸으로 옮기는 `moai mv` 가 담당이 내가 아닌 줄(남의 것, 담당 없는 것)을 `--take` 없이 겨누면
+/// 막는다. **막는 자리는 여기 하나다** — `mv` 는 옮기고 한 줄로 알리며, 터미널의 사람은 훅을 안 지나
+/// 안 막힌다. 거절문은 넘겨받는 줄을 그대로 내민다: 사람이 그러라고 했으면 그 줄을 그대로 친다.
+/// `p0` 도 묻는다(사용자 결정) — 급한 것이 남의 것을 가져갈 까닭은 아니다.
+///
+/// 사람은 그 토막의 `--user` 가 이기고, 없으면 이 세션의 사람([`Away::me`])이다 — `mv` 가 가리는 사람과
+/// 같아야 거절과 알림이 한 줄을 두고 갈리지 않는다. 이 세션의 사람은 **물을 토막이 설 때 여기서** 푼다
+/// ([`Person`]) — 집은 것이 없는 세션의 첫 집기가 이 규칙의 가장 흔한 자리다. **모르면 지나간다** — 누군지
+/// 모르는 기계에서 모든 집기를 막으면 그것은 게이트다. 같은 id 의 줄이 둘이면 앞줄로 잰다 — `mv` 가 옮기는
+/// 줄이 그것이다.
+fn take_in(
+    issues: &[Issue],
+    cfg: &Config,
+    away: &Away,
+    line: &Line<'_>,
+    only: &dyn Fn(usize) -> bool,
+    aim: Toward<'_>,
+) -> Decision {
+    for (k, seg) in line.used().enumerate() {
+        if !only(k) || !picks_up(seg, cfg) {
+            continue;
+        }
+        let Some(args) = moai_args(seg) else { continue };
+        if takes(args) {
+            continue;
+        }
+        let verbs = positionals(args);
+        // `picks_up` 이 `mv <id>… <칸>` 을 이미 잰 자리다 — 맨 끝이 갈 칸이고 그 앞이 옮길 줄이다.
+        let Some((&to, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
+        // **그 토막이 `mv` 에 대는 사람으로 잰다** — `--user` 가 이기고, 그다음이 토막 앞의 `MOAI_ACTOR=…` 다
+        // (`model::actor` 와 같은 차례, [`actor_prefix`]). 둘 다 없으면 이 세션의 사람이다. 틀린 모양은 `mv`
+        // 가 스스로 거절한다 — 여기서 물을 사람이 없다.
+        let named = flag_values(args, &["--user"]).pop().or_else(|| actor_prefix(seg));
+        // **줄의 다른 자리에서 `MOAI_ACTOR` 를 세웠으면 모른다**(moai-0zjo 리뷰) — `export MOAI_ACTOR=…;`·
+        // `MOAI_ACTOR=… bash -c '…'` 아래의 `mv` 가 누구로 도는지는 글자로 못 가린다. 이 세션의 사람으로 재면
+        // 제 줄을 집는 사람을 막고, 내민 줄을 그대로 치면 남의 줄이 이 세션의 사람에게 넘어간다. 모르면 지나간다.
+        if named.is_none()
+            && line.used().enumerate().any(|(j, s)| j != k && s.words.iter().any(|w| w.starts_with("MOAI_ACTOR=")))
+        {
+            continue;
+        }
+        let me = match &named {
+            Some(raw) => crate::model::Actor::parse(raw).map(|a| crate::query::Me::of(&a)),
+            None => away.me.get().cloned(),
+        };
+        let Some(me) = me else { continue };
+        let Some((row, owner)) = ids.iter().find_map(|id| {
+            let row = issues.iter().find(|i| i.id == *id)?;
+            report::owner(&me, row).map(|o| (row, o))
+        }) else {
+            continue;
+        };
+        let whose = match (owner, row.assignee.as_deref()) {
+            (report::Owner::Theirs, Some(a)) => format!(
+                "{} is {}'s.",
+                row.id,
+                crate::text::one_line(&crate::model::label(
+                    a,
+                    row.assignee_email.as_deref(),
+                    crate::config::Naming::Full
+                ))
+            ),
+            _ => format!("{} has no assignee.", row.id),
+        };
+        // **본 칸을 그대로 옮겨 싣는다** — `--from` 을 걸고 막힌 사람에게 그것 없는 줄을 내밀면, 시킨
+        // 대로 친 줄이 옆 세션의 집기를 덮는다.
+        let from =
+            flag_values(args, &["--from"]).pop().map(|f| format!(" --from {}", echo_dir(&f))).unwrap_or_default();
+        // **사람도 그대로 옮겨 싣는다**(moai-0zjo 리뷰) — 빼면 시킨 대로 친 줄이 다른 사람(이 세션의 사람)의
+        // 것으로 넘겨받거나, 사람이 없는 기계에서 "누가 하는지 모른다" 로 진다. 앞에 붙인 `MOAI_ACTOR=` 도
+        // `--user` 로 옮긴다 — 같은 사람이고, 플래그는 거절문 한 줄 안에 선다.
+        let user = named.map(|raw| format!(" --user {}", crate::text::quoted(&raw))).unwrap_or_default();
+        return refuse(
+            5,
+            format!(
+                "{whose} Ask the person watching before you pick it up.\n\
+                 On a yes, take it over and say who said yes — you become the assignee in the same\n\
+                 write, and a note keeps whose it was:\n\
+                 \x20 {}{user} mv {} {}{from} {}",
+                echo_moai(aim(k).and_then(Aimed::standing), &seg.words),
+                row.id,
+                echo_dir(to),
+                crate::guide::TAKE_YES,
+            ),
+        );
+    }
+    Decision::Pass
+}
+
+/// 토막 앞에 붙인 `MOAI_ACTOR=…` — `env` 같은 감싸는 명령을 지나도 명령 자리 앞의 것이면 센다. `mv` 가
+/// `--user` 다음으로 읽는 사람이다(`model::actor`). **빈 값은 없는 것이다** — `model::actor` 가 그렇게 읽는다.
+/// 명령 자리 앞에서만 찾는다: 뒤의 `MOAI_ACTOR=…` 는 `moai` 의 인자다.
+fn actor_prefix(seg: &Seg) -> Option<String> {
+    let head = seg.words.len() - command_of(&seg.words).len();
+    seg.words[..head]
+        .iter()
+        .rev()
+        .find_map(|w| w.strip_prefix("MOAI_ACTOR="))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
 }
 
 /// 집은 줄들의 에픽과, 에픽 없는 집은 줄 — **에픽 줄이 실제로 선 것만** 에픽이다. 집은 차례로, 에픽은
@@ -7720,13 +7968,15 @@ pub fn guard_review(issues: &[Issue], cfg: &Config, away: &Away) -> Decision {
         issues.iter().filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i)).collect();
     // [`held`] 와 같은 초점이다 — 위에서 지은 `theirs` 를 그대로 쓴다(moai-xppm). `held` 를 부르던
     // 판은 같은 소속 지도를 한 번 더 지었다.
-    let focus: Vec<&Issue> = report::wip(issues, cfg).into_iter().filter(|i| !theirs(i)).collect();
+    let focus: Vec<&Issue> =
+        report::wip(issues, cfg).into_iter().filter(|i| !theirs(i) && !not_mine(away, i)).collect();
 
     if focus.is_empty() {
         // 집은 것이 없으면 굴러가는 리뷰도 없다 — `focus` 가 곧 `wip` 이라,
         // 여기서 "굴러가는 리뷰" 를 다시 찾던 조건은 언제나 거짓이었다.
         // 굴러가는 리뷰가 있는 길은 아래 `anchored` 가 맡는다.
-        if let Some(idle) = open.first() {
+        // **남의 리뷰는 집으라고 안 댄다**(moai-0zjo 리뷰) — 시킨 대로 친 줄을 규칙 5 가 막는다.
+        if let Some(idle) = open.iter().find(|i| !not_mine(away, i)) {
             return refuse(
                 3,
                 format!(
@@ -8361,6 +8611,192 @@ mod tests {
         assert!(matches!(guard_edit(&all, &cfg(), &both, Path::new("/repo"), "/repo/src/store.rs"), Decision::Deny(_)));
     }
 
+    /// 이 세션의 사람 — 시험의 담당.
+    fn me() -> crate::query::Me {
+        crate::query::Me::of(&crate::model::Actor { name: "Raven".into(), email: "raven@x.io".into() })
+    }
+
+    fn owned(id: &str, status: &str, who: Option<&str>) -> Issue {
+        let mut i = issue(id, status);
+        i.assignee = who.map(String::from);
+        i
+    }
+
+    /// **남이 집은 줄은 초점이 아니다**(moai-0zjo, 2026-10-02 사용자 결정) — 옆 워크트리가 쥔 줄을 빼는
+    /// 것과 같은 자리다. 담당 없이 시작 칸에 선 줄도 내 것이 아니다. 담당은 줄마다 보고 에픽에서 물려받지
+    /// 않는다. 사람을 모르면(`me` 가 없으면) 가르지 않는다 — 가르기 전과 같다.
+    #[test]
+    fn what_someone_else_holds_is_not_my_focus() {
+        let mut theirs_under_mine = owned("t-1", "in_progress", Some("B"));
+        theirs_under_mine.epic = Some("t-e".into());
+        let mut e = epic("t-e");
+        e.assignee = Some("Raven".into());
+        let all = vec![
+            e,
+            theirs_under_mine,
+            owned("t-2", "in_progress", Some("Raven")),
+            owned("t-3", "in_progress", None),
+            owned("t-4", "review", Some("B")),
+        ];
+        let mine = Away { me: Person::known(me()), ..Away::default() };
+        let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(focus, ["t-2"], "남의 줄이나 담당 없는 줄을 초점에 남겼다");
+        // 남의 것만 남으면 집은 것이 없다 — 규칙 2 가 선다.
+        let only_theirs: Vec<Issue> = all.iter().filter(|i| i.id != "t-2").cloned().collect();
+        assert!(held(&only_theirs, &cfg(), &mine).is_empty());
+        assert!(matches!(
+            guard_edit(&only_theirs, &cfg(), &mine, Path::new("/repo"), "/repo/src/store.rs"),
+            Decision::Deny(_)
+        ));
+        // 모르면 가르지 않는다.
+        assert_eq!(held(&all, &cfg(), &here()).len(), 4);
+    }
+
+    /// **규칙 2 의 거절문도 내 줄만 내민다**(moai-0zjo 리뷰) — `moai ready` 와 같은 자다. 남의 줄을 내밀면
+    /// 시킨 대로 친 줄이 규칙 5 에 막히고, 넘겨받는 줄은 묻지도 않고 남이 쥔 일을 가져가라고 시킨다.
+    /// 사람을 모르면 가르지 않는다 — 가르기 전과 같다.
+    #[test]
+    fn rule_two_hands_out_only_my_rows() {
+        let mut urgent = owned("t-1", "todo", Some("B"));
+        urgent.priority = Some(0);
+        let all = vec![urgent, owned("t-2", "in_progress", Some("B")), owned("t-3", "todo", Some("Raven"))];
+        let edit =
+            |away: &Away| denied(&guard_edit(&all, &cfg(), away, Path::new("/repo"), "/repo/src/store.rs")).to_string();
+        let why = edit(&Away { me: Person::known(me()), ..Away::default() });
+        assert!(why.contains("moai mv t-3 in_progress --from todo"), "내 줄을 안 내민다 — {why}");
+        assert!(!why.contains("t-1") && !why.contains("t-2"), "남의 줄을 내밀었다 — {why}");
+        // 사람을 모르면 가르지 않는다 — 남의 시작한 줄도 초점이라 막지도 않고, 첫 칸의 줄은 그대로 내민다.
+        assert_eq!(guard_edit(&all, &cfg(), &here(), Path::new("/repo"), "/repo/src/store.rs"), Decision::Pass);
+        let unstarted: Vec<Issue> = all.iter().filter(|i| i.id != "t-2").cloned().collect();
+        let why =
+            denied(&guard_edit(&unstarted, &cfg(), &here(), Path::new("/repo"), "/repo/src/store.rs")).to_string();
+        assert!(why.contains("moai mv t-1 in_progress --from todo"), "{why}");
+    }
+
+    /// **내 일에 매인 리뷰는 담당이 누구든 규칙 3 이 본다**(moai-0zjo 리뷰). 담당은 초점([`held`])을 가를 뿐
+    /// 리뷰를 맞추는 자([`theirs`])에 안 섞인다 — 섞던 판은 남이 세웠거나 담당 없는 리뷰를 내 일 밑에서 `-m`
+    /// 없이 닫게 두었고, `Stop` 은 그 리뷰를 놓았고, `/code-review` 는 그 리뷰를 못 보고 리뷰 줄을 하나 더
+    /// 세우라고 했다. 아무것도 안 쥔 세션에 남의 리뷰를 집으라고 내밀지는 않는다 — 규칙 5 가 막는다.
+    #[test]
+    fn a_review_under_my_work_is_rule_three_whoever_owns_it() {
+        let mine = Away { me: Person::known(me()), ..Away::default() };
+        for who in [None, Some("B")] {
+            let mut r = review("t-1.r", "todo", None);
+            r.assignee = who.map(String::from);
+            let all = vec![owned("t-1", "in_progress", Some("Raven")), r];
+            assert!(matches!(guard_close(&all, &cfg(), &mine, "moai mv t-1.r done"), Decision::Deny(_)), "{who:?}");
+            let Decision::Block(why) = closing(&all, &all, &cfg(), &mine, 0, None) else {
+                panic!("안 붙들었다 — {who:?}");
+            };
+            assert!(why.contains("t-1.r"), "{who:?}\n{why}");
+            assert_eq!(guard_review(&all, &cfg(), &mine), Decision::Pass, "매인 리뷰를 못 봤다 — {who:?}");
+        }
+        // 아무것도 안 쥐었으면 남의 리뷰를 집으라고 안 댄다.
+        let mut theirs = review("t-2.r", "todo", None);
+        theirs.assignee = Some("B".into());
+        let why = denied(&guard_review(&[theirs], &cfg(), &mine)).to_string();
+        assert!(!why.contains("moai mv t-2.r"), "남의 리뷰를 집으라 한다\n{why}");
+    }
+
+    /// **사람은 묻는 자리에서만 푼다**(moai-0zjo 리뷰, [`Person`]). 초점을 안 읽는 부름(`ls`·`cargo test`·저장소
+    /// 밖의 쓰기)은 `git` 을 두 번 띄우는 푸는 길을 안 부른다 — 값으로 들고 다니던 판은 저장소 어디에든 집힌
+    /// 줄이 있으면 훅 부름마다 미리 풀어, moai-n2jh 가 이 길에서 걷어낸 값을 도로 치렀다. 묻는 자리에서도
+    /// 한 번만 푼다.
+    #[test]
+    fn a_call_that_reads_no_focus_never_asks_who() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let all = vec![owned("t-1", "in_progress", Some("B"))];
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = asked.clone();
+        let away = Away {
+            me: Person::asked(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                Some(me())
+            }),
+            ..Away::default()
+        };
+        let root = Path::new("/repo");
+        let plain = [
+            "ls",
+            "cargo test 2>&1 | tail -5",
+            "git status --short",
+            "moai show t-1",
+            "moai note t-1 '본 것'",
+            "ls 2>/dev/null",
+            "cargo test 2>&1 | tee /tmp/out.txt",
+            "echo x > /tmp/note.md",
+            "moai mv t-1 done",
+        ];
+        for cmd in plain {
+            assert_eq!(guard_shell(&all, &cfg(), &away, root, root, cmd), Decision::Pass, "{cmd}");
+        }
+        assert_eq!(guard_edit(&all, &cfg(), &away, root, "/tmp/scratch.txt"), Decision::Pass);
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "초점을 안 읽는 부름이 사람을 풀었다");
+        // 묻는 자리 — 남의 줄만 집혀 있으니 규칙 2 가 선다. 두 번 물어도 한 번 푼다.
+        assert!(matches!(guard_edit(&all, &cfg(), &away, root, "/repo/src/x.rs"), Decision::Deny(_)));
+        assert!(matches!(guard_edit(&all, &cfg(), &away, root, "/repo/src/y.rs"), Decision::Deny(_)));
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+    }
+
+    /// **규칙 5 — 남의 줄은 묻고 집는다**(moai-0zjo, 2026-10-02 사용자 결정). 시작 칸으로 옮기는 `mv` 가
+    /// 남의 줄이나 담당 없는 줄을 `--take` 없이 겨누면 막고, 넘겨받는 줄을 그대로 내민다 — 본 칸(`--from`)
+    /// 까지. `p0` 도 묻는다. 내 줄·`--take`·닫기·사람을 모를 때는 지나간다. 토막의 `--user` 가 이 세션의
+    /// 사람을 이긴다 — `mv` 가 가리는 사람과 같아야 한다.
+    #[test]
+    fn rule_five_asks_before_someone_elses_row_is_picked_up() {
+        let mut urgent = owned("t-1", "todo", Some("B"));
+        urgent.assignee_email = Some("b@x.io".into());
+        urgent.priority = Some(0);
+        let all = vec![urgent, owned("t-2", "todo", None), owned("t-3", "todo", Some("Raven"))];
+        let away = Away { me: Person::known(me()), ..Away::default() };
+        let judge = |cmd: &str, away: &Away| guard_moai(&all, &cfg(), away, cmd, &|_| true, &|_| None);
+
+        let why = denied(&judge("moai mv t-1 in_progress --from todo", &away)).to_string();
+        assert!(why.starts_with(&crate::guide::rule_head(5)), "{why}");
+        assert!(why.contains("t-1 is B (b@x.io)'s."), "{why}");
+        assert!(why.contains("moai mv t-1 in_progress --from todo --take -m '<who said yes>'"), "{why}");
+        let why = denied(&judge("moai mv t-2 in_progress", &away)).to_string();
+        assert!(why.contains("t-2 has no assignee."), "{why}");
+
+        for pass in [
+            "moai mv t-1 in_progress --take -m 'B 가 그러라고 했다'",
+            "moai mv t-3 in_progress",
+            "moai mv t-1 done",
+            "moai --user 'B (b@x.io)' mv t-1 in_progress",
+            "moai mv t-1 in_progress --help",
+        ] {
+            assert_eq!(judge(pass, &away), Decision::Pass, "{pass}");
+        }
+        // `-m` 은 `-` 로 시작하는 값도 받는다 — 그 `--take`·`-h` 는 넘겨받기도 도움말도 아니라 노트의 글이다(리뷰).
+        for note in [
+            "moai mv t-1 in_progress -m --take",
+            "moai mv t-1 in_progress --msg --take",
+            "moai mv t-1 in_progress -m -h",
+        ] {
+            assert!(matches!(judge(note, &away), Decision::Deny(_)), "{note}");
+        }
+        // 거꾸로 `-m --` 의 `--` 도 노트의 글이라, 그 뒤의 `--take` 는 정말 넘겨받는다.
+        assert_eq!(judge("moai mv t-1 in_progress -m -- --take", &away), Decision::Pass);
+        // **내민 줄은 그 토막의 사람으로 돈다**(리뷰) — `--user` 와 앞에 붙인 `MOAI_ACTOR=` 를 `mv` 처럼 읽고, 그
+        // 사람을 내민 줄에 옮겨 싣는다. 빼면 그대로 친 줄이 이 세션의 사람 것으로 넘겨받는다.
+        let why = denied(&judge("moai --user 'C (c@x.io)' mv t-1 in_progress", &away)).to_string();
+        assert!(why.contains("moai --user 'C (c@x.io)' mv t-1 in_progress --take -m '<who said yes>'"), "{why}");
+        assert_eq!(judge("MOAI_ACTOR='B (b@x.io)' moai mv t-1 in_progress", &away), Decision::Pass);
+        assert_eq!(judge("env MOAI_ACTOR='B (b@x.io)' moai mv t-1 in_progress", &away), Decision::Pass);
+        let why = denied(&judge("MOAI_ACTOR='C (c@x.io)' moai mv t-3 in_progress", &away)).to_string();
+        assert!(why.contains("t-3 is Raven's."), "{why}");
+        assert!(why.contains("moai --user 'C (c@x.io)' mv t-3 in_progress --take"), "{why}");
+        // 줄의 다른 자리에서 세운 `MOAI_ACTOR` 는 글자로 못 가린다 — 모르면 지나간다(사람을 모를 때와 같다).
+        for elsewhere in [
+            "export MOAI_ACTOR='B (b@x.io)'; moai mv t-1 in_progress",
+            "MOAI_ACTOR='B (b@x.io)' bash -c 'moai mv t-1 in_progress'",
+        ] {
+            assert_eq!(judge(elsewhere, &away), Decision::Pass, "{elsewhere}");
+        }
+        // 사람을 모르면 지나간다.
+        assert_eq!(judge("moai mv t-1 in_progress", &here()), Decision::Pass);
+    }
+
     /// 옆에서 그 일을 펼쳐 집은 것도 옆의 것이다 — 그 밑의 자식, 그 에픽에 든 줄.
     /// id 가 아닌 이름(`main`)이나 없는 id 는 아무것도 안 뺀다.
     #[test]
@@ -8906,7 +9342,7 @@ mod tests {
     /// 보드는 고른 말로 나오는데 그 위의 머리말과 `Stop` 이 붙드는 글만 한국어로 박혀 있었다 —
     /// 에이전트가 읽는 자리라 사람 눈에 가장 늦게 띈다.
     ///
-    /// **규칙 1~4 의 거절문은 말묶음에 안 든다**(moai-54k2, 2026-09-20 사용자 결정) — 그 첫 줄은
+    /// **규칙 1~5 의 거절문은 말묶음에 안 든다**(moai-54k2, 2026-09-20 사용자 결정) — 그 첫 줄은
     /// `guide::rule_head` 고, 그 글자는 `moai skill install` 이 심는 AGENTS.md 의 규칙 제목과
     /// 같아야 막힌 쪽이 무엇을 어겼는지 찾는다. 심는 문서가 영어로 통일되며 그 계약이 영어 쪽으로
     /// 풀렸다 — `guide::close_steps`(`REVIEW_STEPS`)와 `guide::handoff` 도 같은 까닭으로 영어다.

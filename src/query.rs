@@ -958,14 +958,42 @@ fn sel(values: Vec<String>) -> Vec<Sel> {
 ///
 /// 이름과 메일 중 **하나만 맞아도** 통과다. 이름을 바꾼 사람이 옛 줄에서
 /// 사라지지 않고, 남의 메일을 모르는 채 이름으로만 맡긴 줄도 찾힌다.
-fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
-    let Sel::Is(raw) = want else { return i.assignee.is_none() };
+pub(crate) fn is_assignee(want: &Sel, i: &crate::model::Issue) -> bool {
+    // **빈 담당은 없는 것이다**(`Issue::normalize` 와 같은 자) — 읽기는 정규화를 안 거쳐 손으로 푼 머지의
+    // `"assignee":""` 가 그대로 온다. `-a none` 과 `ready` 의 `unowned`(`report::owner`)가 이 한 자로 갈린다.
+    let Sel::Is(raw) = want else { return i.assignee.as_deref().is_none_or(|a| a.trim().is_empty()) };
     let (name, email) = crate::model::split_assignee(raw);
     let by_name = name.as_deref().is_some_and(|n| i.assignee.as_deref() == Some(n));
     // 메일은 대소문자를 가리지 않는다. 같은 사람이 저장소마다 다르게 적는다.
     let mail = |e: &str| i.assignee_email.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(e));
     // 괄호 없이 준 것은 `split_assignee` 가 이름으로 본다. 메일일 수도 있어 한 번 더 잰다.
     by_name || email.as_deref().is_some_and(&mail) || mail(raw)
+}
+
+/// **지금 사람** — 이 줄이 내 것인가를 묻는 한 항(moai-0zjo, 2026-10-02 사용자 결정).
+///
+/// 가르는 자는 [`is_assignee`] 하나다 — `-a me` 가 고르는 줄과 `ready` 가 "내 것" 으로 내미는 줄과
+/// 훅이 초점에 남기는 줄이 같은 자로 갈린다. 이름이나 메일 하나만 맞아도 내 것이고, 메일은
+/// 대소문자를 접는다. 자를 따로 세우면 `show -a me` 에 서는 줄을 `ready` 가 남의 것으로 내민다.
+///
+/// **담당은 줄마다 본다** — 에픽이나 부모에게서 물려받지 않는다. 내 에픽 밑에 남이 맡은 줄은 남의
+/// 것이다. 담당 없는 줄도 내 것이 아니다(사용자 결정) — 묻고 집는다.
+///
+/// 사람을 푸는 일(`model::actor`)은 부르는 쪽 몫이다 — 이 모듈은 순수 함수라 git 설정을 안 연다.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Me(Sel);
+
+impl Me {
+    /// 푼 사람 하나로 짓는다. 담당 칸에 적히는 것과 같은 `이름 (메일)` 한 줄로 든다 — `-a me` 가
+    /// 그 줄로 풀리는 것과 같은 자리다(`cmd::resolve_me`).
+    pub fn of(a: &crate::model::Actor) -> Me {
+        Me(Sel::Is(crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full)))
+    }
+
+    /// 이 줄의 담당이 나인가.
+    pub fn owns(&self, i: &crate::model::Issue) -> bool {
+        is_assignee(&self.0, i)
+    }
 }
 
 fn matches_sel(sel: &[Sel], value: Option<&str>) -> bool {
