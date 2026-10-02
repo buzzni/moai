@@ -29,6 +29,11 @@ struct Said<'a> {
     ready: Vec<Brief<'a>>,
     /// `ready` 에 안 실린 나머지 수. **늘 싣는다** — 0 이 "다 실었다" 는 뜻이다.
     rest: usize,
+    /// 집을 수 있지만 **내 것이 아닌** 줄(moai-0zjo) — `ready --json` 의 `others` 와 같은 이름·같은
+    /// `owner` 다. 줄 모양만 이 판의 [`Brief`] 다. **늘 싣는다**.
+    others: Vec<super::Other<Brief<'a>>>,
+    /// `others` 에 안 실린 나머지 수 — `rest` 와 같은 약속으로 **늘 싣는다**.
+    others_rest: usize,
     /// 지금 도는 마일스톤. `ready --json` 과 같은 이름·같은 값이고, 없으면 키를 안 단다.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     milestone: Vec<&'a str>,
@@ -119,6 +124,8 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang) -> R<Vec<String>> {
             picked: Vec::new(),
             ready: Vec::new(),
             rest: 0,
+            others: Vec::new(),
+            others_rest: 0,
             milestone: Vec::new(),
             outside: Vec::new(),
             closing: view::prime_closing(lang),
@@ -165,7 +172,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 것이 맞고, 세션을 여는 이 판은 그 반대다.
     super::name_load_errors(lang, &repo.issues_path(), &load.errors);
 
-    let p = report::prime(&load.issues, &repo.config);
+    // **내 것만 낸다**(moai-0zjo, 2026-10-02 사용자 결정) — 집은 것도 다음 일도. 사람은 여기서 풀어
+    // 자료로 건넨다. **열린 줄이 하나도 없으면 안 푼다** — 집은 것도 집을 것도 없는 판에 `git` 을 두 번
+    // 띄울 까닭이 없다. 모르면 가르지 않는다(`report::by_owner`).
+    let open = load.issues.iter().any(|i| !i.status.is_done());
+    let me = if open { super::me_at(ctx, &repo.root) } else { None };
+    let p = report::prime(&load.issues, &repo.config, me.as_ref());
     if ctx.json {
         // 소속은 **물려받은 것까지 푼다** — 자식의 에픽은 부모에게서 오므로, 줄에 적힌
         // `epic` 만 실으면 자식 줄이 에픽 없는 것으로 나간다. 사람 쪽이 제목을 내는 자와
@@ -177,7 +189,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 옮기면 한 바이너리가 `derived_epic` 에 두 답을 낸다 — `ready --json` 과 `show --json`
         // 은 id 부모의 에픽을 내는데 여기만 쌍둥이의 에픽을 냈다. 물은 줄만 묻는 것은
         // `ready --json` 과 같은 자리, 같은 까닭이다.
-        let ids: Vec<&str> = p.held.iter().chain(p.picks.iter()).map(|i| i.id.as_str()).collect();
+        let ids: Vec<&str> =
+            p.held.iter().chain(p.picks.iter()).chain(p.others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
         let epics = report::handed_of(&load.issues, &ids);
         // **가려진 줄을 가르는 지도**(moai-53s2) — 소속 지도와 나란히 둔다. `wip` 은 가려진 줄을
         // 빼므로 오늘 여기에 그런 줄이 실릴 길은 없지만, 값을 내는 자(`report::stands_in`)가
@@ -187,6 +200,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             picked: p.held.iter().map(|i| Brief::of(i, &epics, &kinds, &origin)).collect(),
             ready: p.picks.iter().map(|i| Brief::of(i, &epics, &kinds, &origin)).collect(),
             rest: p.rest,
+            others: p
+                .others
+                .iter()
+                .map(|(i, owner)| super::Other { row: Brief::of(i, &epics, &kinds, &origin), owner: *owner })
+                .collect(),
+            others_rest: p.others_rest,
             milestone: p.focus.running.iter().map(|m| m.id.as_str()).collect(),
             outside: p.focus.outside.iter().map(|i| i.id.as_str()).collect(),
             closing: view::prime_closing(lang),
@@ -195,5 +214,6 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         });
     }
 
-    Ok(view::prime(&p, &report::epic_labels(&load.issues), view::Screen::new(lang).at(ctx.clock()).over(&origin)))
+    let screen = view::Screen::new(lang).at(ctx.clock()).over(&origin);
+    Ok(view::prime(&p, &report::epic_labels(&load.issues), &repo.config, screen))
 }

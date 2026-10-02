@@ -24,15 +24,21 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
-    let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
-    // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다.
+    let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+    // **내 것과 남의 것을 가른다**(moai-0zjo, 2026-10-02 사용자 결정). 사람은 여기서 풀어 자료로
+    // 건넨다 — `report` 는 git 설정을 안 연다. **집을 줄이 있을 때만 푼다**: `git` 을 두 번 띄운다.
+    let me = if picks.is_empty() { None } else { super::me_at(ctx, &repo.root) };
+    let (mut picks, mut others) = report::by_owner(picks, me.as_ref());
+    // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
+    // 같은 `-n` 으로 자른다(사용자 결정) — 여러 사람이 쓰는 저장소에서 화면이 남의 일로 길어지지 않는다.
     let more = crate::query::cut(&mut picks, limit);
+    let others_more = crate::query::cut(&mut others, limit);
     // 미뤄 둔 것·빈 묶음에 막혀 못 집는 것. 안 대면 `ready` 가 까닭 없이 빈다.
     let held = report::held(&load.issues, &repo.config);
     if ctx.json {
         // **집은 줄의 소속을 푼다**(moai-wuzi) — 계획이 세우는 멤버는 `epic` 을 안 적으므로
         // 적힌 필드만 실으면 이 목록이 그 줄을 에픽 없는 줄로 낸다. `derived_epic` 이 읽는다.
-        let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+        let ids: Vec<&str> = picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
         let epics = report::handed_of(&load.issues, &ids);
         // 가려진 줄을 가르는 지도(moai-53s2) — 소속 지도와 같은 id 만 묻는다.
         let kinds = report::Kinds::of_ids(&load.issues, &ids);
@@ -42,6 +48,9 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         #[derive(serde::Serialize)]
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
+            /// 집을 수 있지만 **내 것이 아닌** 줄 — 남의 것(`owner: "theirs"`)과 담당 없는 것
+            /// (`"unowned"`). **늘 싣는다** — 없으면 `[]` 다. 사람을 모르면 가르지 않아 늘 빈다.
+            others: Vec<super::Other<super::Row<'a>>>,
             held: Vec<Waiting<'a>>,
             /// 지금 도는 마일스톤. 없으면 키를 안 단다.
             #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -67,6 +76,13 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 .iter()
                 .map(|i| super::Row::of(i, |_| None, epics.get(i.id.as_str()).copied(), &kinds).on(&origin))
                 .collect(),
+            others: others
+                .iter()
+                .map(|(i, owner)| super::Other {
+                    row: super::Row::of(i, |_| None, epics.get(i.id.as_str()).copied(), &kinds).on(&origin),
+                    owner: *owner,
+                })
+                .collect(),
             // **왜 짧은지를 기계에도 댄다**(moai-q04l). 사람 화면이 한 줄로 대는 것을 여기서
             // 빼면, `ready --json` 으로 도는 고리는 도는 마일스톤이 목록을 줄인 것을 "할 일이
             // 없다" 로 읽는다 — `held` 를 객체로 감싼 것과 같은 까닭이다(moai-w6n2).
@@ -81,7 +97,13 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     let wip = report::wip(&load.issues, &repo.config);
 
     let screen = view::Screen::new(ctx.lang()).at(ctx.clock()).over(&origin);
-    Ok(view::ready(&picks, more, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
+    let others = view::Others {
+        rows: &others,
+        more: others_more,
+        naming: repo.config.naming,
+        column: repo.config.started_status(),
+    };
+    Ok(view::ready(&picks, more, others, &report::epic_labels(&load.issues), &wip, &held, &focus, screen))
 }
 
 /// 등록한 프로젝트마다 집을 수 있는 일. 무엇이 ready 인지는 프로젝트마다 같은 자
@@ -103,14 +125,20 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 // **저장소 안의 `ready` 와 같은 자다.** 도는 마일스톤이 목록을 줄였으면 그
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
-                let (mut picks, focus) = report::ready_in(&load.issues, &repo.config);
+                let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+                // **저장소 안과 같은 자로 가른다**(moai-0zjo) — 사람은 그 프로젝트의 뿌리에서 푼다.
+                // 여기서 안 가르면 한눈 보기가 남의 줄을 집을 것으로 내민다.
+                let me = if picks.is_empty() { None } else { super::me_at(ctx, &repo.root) };
+                let (mut picks, mut others) = report::by_owner(picks, me.as_ref());
                 let more = crate::query::cut(&mut picks, limit);
+                let others_more = crate::query::cut(&mut others, limit);
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
                 let (epics, kinds) = match ctx.json {
                     true => {
-                        let ids: Vec<&str> = picks.iter().map(|i| i.id.as_str()).collect();
+                        let ids: Vec<&str> =
+                            picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
                         (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
                     }
                     false => Default::default(),
@@ -118,6 +146,9 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 view::Picks {
                     picks,
                     more,
+                    others,
+                    others_more,
+                    column: repo.config.started_status(),
                     focus,
                     unreadable: load.errors.len(),
                     epics,
@@ -133,6 +164,8 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         #[derive(serde::Serialize)]
         struct Said<'a> {
             ready: Vec<super::Row<'a>>,
+            /// 저장소 안의 `ready --json` 과 같은 키 — **늘 싣는다**.
+            others: Vec<super::Other<super::Row<'a>>>,
             /// 저장소 안의 `ready --json` 과 같은 두 키 — 없으면 안 단다.
             #[serde(skip_serializing_if = "Vec::is_empty")]
             milestone: Vec<&'a str>,
@@ -154,6 +187,15 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                         .iter()
                         .map(|i| {
                             super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin)
+                        })
+                        .collect(),
+                    others: k
+                        .others
+                        .iter()
+                        .map(|(i, owner)| super::Other {
+                            row: super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds)
+                                .on(&p.origin),
+                            owner: *owner,
                         })
                         .collect(),
                     milestone: k.focus.running.iter().map(|m| m.id.as_str()).collect(),

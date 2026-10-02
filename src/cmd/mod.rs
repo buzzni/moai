@@ -688,6 +688,8 @@ pub const OURS: &[&str] = &[
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",
+    // `ready --json` 의 `others` 가 곁들이는 까닭(moai-0zjo, [`Other`]).
+    "owner",
 ];
 
 /// 기계에 낼 **못 읽은 저널** — `show --json` 의 `journal_error` 한 자리(moai-f2lc).
@@ -950,6 +952,27 @@ pub fn resolve_me(
         }
     }
     Ok(())
+}
+
+/// **지금 사람** — `ready`·`prime` 이 내 것과 남의 것을 가를 자([`crate::query::Me`], moai-0zjo).
+///
+/// **읽기는 사람을 묻지 않는다** — 모르면(`--user`·`MOAI_ACTOR`·git 설정 모두 없거나 틀린 모양) `None`
+/// 이고, 받는 쪽([`crate::report::by_owner`])은 가르지 않는다. 설정 없는 기계에서 `ready` 가 넘어지면
+/// 도구가 고장 난 것으로 보인다. 뿌리는 그 트래커의 것이다 — `model::actor` 의 `root` 와 같은 까닭.
+///
+/// `git` 을 두 번 띄우는 자리라 **물을 줄이 있을 때만** 부른다 — 부르는 쪽이 그 문을 지킨다.
+pub fn me_at(ctx: &Ctx, root: &std::path::Path) -> Option<crate::query::Me> {
+    crate::model::actor(ctx.user.as_deref(), root).ok().map(|a| crate::query::Me::of(&a))
+}
+
+/// `ready --json`·`prime --json` 이 내 것과 따로 싣는 줄 하나 — 그 표면의 줄 모양에 **늘 서는**
+/// `owner` 키를 곁들인다(moai-0zjo, 2026-10-02 사용자 결정). 고리가 두 목록을 같은 코드로 읽고
+/// `owner` 로 가른다.
+#[derive(serde::Serialize)]
+pub struct Other<T: serde::Serialize> {
+    #[serde(flatten)]
+    pub row: T,
+    pub owner: crate::report::Owner,
 }
 
 /// `--from` 이 견줄 칸의 지도 — [`standing_of`] 가 낸다.

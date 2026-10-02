@@ -91,6 +91,8 @@
   "warn.milestone_overdue": "{n} milestones are past their deadline",
   "warn.milestone_due_soon": "{n} milestones fall due within {d} days",
   "ready.outside_held": "{n} outside the running milestone are not listed — finish inside first (p0 still shows)",
+  "ready.others": "{n} belong to someone else or to nobody — ask the person before you pick one up; on a yes, `moai mv <id> {column} --take`",
+  "ready.unowned": "(unowned)",
   "list.none": "Nothing.",
   "list.hidden": "{what} {n} hidden — `{how}`",
   "list.next_page": "the next page is the same command with `{go}`",
