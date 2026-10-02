@@ -46,6 +46,67 @@ does not tag — see `CONTRIBUTING.md`.
   moves — one line on stderr names whose it is and the `--take` line to run, and
   the exit code does not change.
 
+- **A journal link that points out of the checkout stands as `outside`.** In
+  `journal_error` (`show --json`, `stats --json`) such a link — one that leaves
+  the checkout or goes into `.git/` — stood as `kind: failed`, so a machine could
+  not tell "fix that link" from a passing I/O failure, and `said` carried an
+  English sentence moai wrote itself, so under `MOAI_LANG=ko` a Korean line ended
+  in English. `kind` is now `outside` and the reason in `said` comes in the
+  chosen language. The same holds when the link's target is missing, cannot be
+  reached or is not a regular file: such a link stood as `failed` or
+  `permission`, or was passed over without a word. A `kind` you do not know still
+  reads as `failed`.
+
+- **A snapshot or config linked out of the checkout, or not a regular file,
+  stops the commands in that repository as `broken`.** A `.moai/config.toml`
+  linked to a file outside the checkout or inside `.git/` used to be read by
+  every command, and a `.moai/issues.jsonl` linked there was read under a
+  `tracker_linked` notice, only writes refusing it, as `error` under `--json`.
+  Both now stop reads too, with one line naming the file and why. The checkout
+  is the directory that holds `.moai`, so a monorepo sub-tracker whose
+  `config.toml` links to a shared file elsewhere in the same git work tree stops
+  as well — copy the file in, or keep the link inside that directory. A snapshot
+  or config that is a directory already stopped every command, but with the
+  system's `Is a directory` and the code `error`; it now stops with moai's own
+  line in the chosen language and the code `broken`. A loop branching on `code`
+  sees `broken` in all of these — the fix is the link or the file
+  (`docs/recovery.md`).
+
+### Fixed
+
+- **A snapshot or config that links out of the checkout no longer runs every
+  command out of memory.** A cloned repository that committed
+  `.moai/issues.jsonl -> /proc/self/pagemap` or `.moai/config.toml -> /dev/zero`
+  made every command read without end, and a FIFO there hung every command.
+  Both files are now read the way 0.1.6 reads the journal: only when the link
+  lands inside the checkout and outside `.git/`, only when it is a regular file,
+  and no further than the size its open handle gives. A link whose target is
+  missing is measured where it would land, so one pointing out of the checkout
+  no longer reads as an empty board. Otherwise the commands in that repository
+  stop with one line naming the file and why, and under `--json` the code is
+  `broken`; links that used to read, and a directory in either place, are under
+  **Changed**. A sibling worktree's snapshot in that state is skipped and named
+  in the chosen language, and a FIFO there no longer hangs `moai status`.
+
+- **A journal's file name can no longer repaint the terminal.** A cloned
+  repository decides the names under `.moai/journal/`, and a journal moai could
+  not read was named as it stood, so an escape sequence in that name reached the
+  terminal from `moai show`, `-g`, `--removed` and `stats`, and a newline in it
+  drew a `moai:` line that was never said. The name is now folded onto one line
+  with its control characters taken out, on stderr and in `journal_error`'s
+  `said`.
+
+- **`Tab` on a project the explorer could not open no longer opens it whole
+  later.** When a project in the explorer's list could not be opened — a broken
+  `config.toml`, or a snapshot that is not a file moai reads — the `Tab` meant
+  for it stayed behind, and once the file was fixed, `l` opened the whole
+  project, every epic's members included, instead of one level.
+
+- **Journal names hard-linked to one file are read once.** Each line stood twice
+  in the history, `-g` and `--removed`, and `work` added its tokens twice. Names
+  now fold by the file itself, as symlinked names already did. A clone still gets
+  two separate files — git does not carry hard links.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added

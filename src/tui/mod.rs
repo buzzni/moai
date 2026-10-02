@@ -3692,11 +3692,20 @@ impl App {
             return;
         }
         let Some(path) = self.layer.as_mut().map(|l| l.wanted.remove(0)) else { return };
-        let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path)) else { return };
+        // **못 읽는 갈래는 `Tab` 의 뜻도 걷는다** — [`App::follow_site`] 가 진 읽기에서 걷는 것과 같은
+        // 까닭이다. 목록에서 빠진 경로와 못 연 저장소(설정이 깨졌거나, moai-itsu 뒤로는 스냅샷을 안 읽기로
+        // 한 것)는 읽기가 아예 안 떠 거기까지 못 가, 그 뜻이 남아 다음 `l` 을 통째로 폈다(리뷰 moai-itsu.n8z).
+        let Some(at) = self.layer.as_ref().and_then(|l| l.position(&path)) else {
+            self.deep.remove(&path);
+            return;
+        };
         // 여는 것은 그 자리에서 한다 — 못 여는 까닭을 그 줄에 세우는 길이 이것 하나다(`open_place`).
         // **여는 데까지만 본다**(`Depth::Lean`, moai-m59y) — 줄은 바로 아래 스레드가 읽는다.
         // 여기서 스냅샷까지 읽으면 그 한 판을 UI 실이 치르고 일꾼이 같은 파일을 또 판다.
-        let Some(repo) = self.open_place(at, layer::Depth::Lean) else { return };
+        let Some(repo) = self.open_place(at, layer::Depth::Lean) else {
+            self.deep.remove(&path);
+            return;
+        };
         let (tx, rx) = std::sync::mpsc::channel();
         let read = self.read;
         let worktree = self.worktree;
