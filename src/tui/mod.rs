@@ -3,6 +3,7 @@
 //! 상태([`App`])와 그림([`draw`])을 나눈다. 상태 전이는 터미널 없이 시험되고,
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
+pub mod board;
 pub mod draw;
 pub mod edit;
 pub mod form;
