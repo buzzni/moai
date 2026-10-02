@@ -364,7 +364,8 @@ running. It is never a release you picked for it: work is not pulled into a runn
 milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
 epic, which the tool refuses because it is not an id at all. **A wrong id it does not
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
-in quietly and surfaces only later as a `dangling_milestone` warning. Copy it off
+in with exit 0: one line on stderr says there is no such milestone, and `moai status`
+counts the epic as `dangling_milestone`. Copy it off
 the release `moai show --milestone` stands that idea under; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker

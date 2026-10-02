@@ -202,6 +202,7 @@
   "edit.go_lost": "`moai edit {id} -e <다른 에픽>`",
   "edit.from_parent": "조상 {at} 에서 오는 자리라",
   "edit.go_parent": "`moai edit {at} --milestone {wrote}`",
+  "edit.any_milestone": "<마일스톤>",
   "edit.verb_cut": "빼려면",
   "edit.verb_move": "옮기려면",
   "edit.kept_milestone": "{id} 는 {stood} — {from} {lost}. {verb} {way}",

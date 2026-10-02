@@ -132,6 +132,21 @@ does not tag — see `CONTRIBUTING.md`.
   and `idea promote` already said it. The row is still written and the exit code
   does not change.
 
+- **`moai edit --milestone` with an id that is not a milestone says so too.**
+  It wrote the field and exited 0 without a word, while `moai add` already said
+  it. One line on stderr now, under `--json` too and when the field already held
+  that id; the row is still written and the exit code does not change. When an
+  epic or ancestor decides the milestone instead, the line that says so no
+  longer offers that missing id as the way to move it — on `add` either.
+
+- **`moai rm` names the rows whose milestone or epic it removed.** Removing a
+  milestone ended with `dangling: []`, and the next `moai status` warned
+  `dangling_milestone` for the rows on it; removing an epic named only rows
+  whose own `epic` field held it, not the ones that took it from a parent (a
+  review row made with `--parent`). Those rows are now named on stderr and in
+  `--json`'s `dangling`, measured the way `moai status` measures them; a row
+  that was already dangling on that axis before the removal is not named.
+
 - **`moai rm` no longer calls rows cut off while a twin of the removed id
   stands.** Where one id stood on two lines, removing one of them named its
   children, blocked rows and epic members as dangling, though the other line

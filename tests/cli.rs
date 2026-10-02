@@ -3654,6 +3654,141 @@ fn rm_calls_a_member_dangling_when_the_twin_left_is_not_an_epic() {
     assert!(status.contains("dangling_epic"), "{status}");
 }
 
+/// **지운 마일스톤에 서 있던 줄도 끊겼다고 댄다**(moai-4bio). `rm` 은 부모·에픽·막는 줄만 세어,
+/// `moai rm <마일스톤>` 이 `dangling: []` 로 끝난 뒤 `moai status` 가 그 줄들을 `dangling_milestone` 으로
+/// 셌다. 재는 자는 그 경고의 것이다 — 마일스톤을 적은 줄, 그 밑에서 물려받던 자식, 그 마일스톤에 선
+/// 에픽까지 `status` 가 세는 그대로 대고, 에픽 멤버(에픽이 멀쩡하다)와 전부터 끊겨 있던 줄은 안 댄다.
+/// 쌍둥이가 남은 마일스톤 밑은 끊기지 않았다.
+#[test]
+fn rm_names_the_rows_whose_milestone_it_removed() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmstone");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-0001", "마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m001\""),
+            row("argos-0001.abc", "물려받는 자식", "issue", ""),
+            row("argos-0002", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+            row("argos-0003", "전부터 끊긴 줄", "issue", ",\"milestone\":\"argos-zzzz\""),
+            row("argos-0004", "남는 마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m002\""),
+            row("argos-0009", "쌍둥이 마일스톤에 선 줄", "issue", ",\"milestone\":\"argos-m009\""),
+            row("argos-e001", "마일스톤에 선 에픽", "epic", ",\"milestone\":\"argos-m001\""),
+            row("argos-m001", "지울 마일스톤", "milestone", ""),
+            row("argos-m002", "남는 마일스톤", "milestone", ""),
+            row("argos-m009", "앞 마일스톤", "milestone", ""),
+            row("argos-m009", "뒤 마일스톤", "milestone", ""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["rm", "argos-m001", "argos-m009", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    // 셋만이다 — argos-0002(에픽이 멀쩡한 멤버)·0003(전부터 끊긴 줄)·0004(남는 마일스톤)·0009(쌍둥이가 남은
+    // 마일스톤)는 이 rm 이 끊은 것이 아니다. 키 하나를 정확히 읽는다(`list_in`) — 글 끝까지 잘라 찾으면 뒤에
+    // 키가 붙는 날 딴 배열의 id 로 지나간다.
+    let dangling = list_in(&json, "dangling").unwrap_or_else(|| panic!("dangling 이 없다\n{json}"));
+    assert_eq!(dangling, ["argos-0001", "argos-0001.abc", "argos-e001"], "{json}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("끊긴 참조가 3건"), "{err}");
+
+    // 댄 셋은 `status` 가 세는 줄이다 — 한 자로 쟀다는 근거.
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning =
+        |kind: &str| st.split("{\"kind\":").find(|w| w.starts_with(&format!("\"{kind}\""))).map(str::to_string);
+    let stoneless = warning("dangling_milestone").unwrap_or_else(|| panic!("dangling_milestone 이 없다\n{st}"));
+    for id in ["argos-0001", "argos-0001.abc", "argos-e001"] {
+        assert!(stoneless.contains(&format!("\"{id}\"")), "status 는 {id} 를 안 센다\n{st}");
+    }
+
+    // 쌍둥이의 마지막 줄을 걷으면 그때 끊긴다.
+    let out = moai(s.path(), &["rm", "argos-m009", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":["argos-0009"]"#), "남은 쌍둥이를 걷었는데 안 댔다\n{json}");
+}
+
+/// **지운 에픽을 id 부모에게서 물려받던 줄도 끊겼다고 댄다**(리뷰 moai-3hxc.uhh). `rm` 의 에픽 셈은 제
+/// `epic` 필드에 적은 줄만 봐, `moai rm <에픽>` 이 멤버 하나만 대고 끝난 뒤 `moai status` 가 그 멤버 밑의
+/// 자식·손자·생각을 `dangling_epic` 으로 셌다 — `--parent <멤버>` 로 단 리뷰 줄이 흔한 꼴이다. 재는 자는
+/// 그 경고의 것이고, 지우기 전부터 끊겨 있던 줄(없는 에픽을 적은 멤버와 그 밑의 자식)은 안 댄다.
+#[test]
+fn rm_names_the_rows_that_inherited_the_epic_it_removed() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmepicheir");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-0001", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+            row("argos-0001.abc", "물려받는 자식", "issue", ""),
+            row("argos-0001.abc.def", "물려받는 손자", "issue", ""),
+            row("argos-0001.i01", "물려받는 생각", "idea", ""),
+            row("argos-0002", "전부터 끊긴 멤버", "issue", ",\"epic\":\"argos-zzzz\""),
+            row("argos-0002.abc", "전부터 끊긴 자식", "issue", ""),
+            row("argos-e001", "지울 에픽", "epic", ""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["rm", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    let dangling = list_in(&json, "dangling").unwrap_or_else(|| panic!("dangling 이 없다\n{json}"));
+    assert_eq!(dangling, ["argos-0001", "argos-0001.abc", "argos-0001.abc.def", "argos-0001.i01"], "{json}");
+
+    // 댄 넷은 `status` 가 세는 줄이다 — 한 자로 쟀다는 근거.
+    let st = ok(s.path(), &["status", "--json"]);
+    let warning = st
+        .split("{\"kind\":")
+        .find(|w| w.starts_with("\"dangling_epic\""))
+        .unwrap_or_else(|| panic!("dangling_epic 이 없다\n{st}"));
+    let counted = list_in(warning, "ids").unwrap_or_else(|| panic!("ids 가 없다\n{st}"));
+    for id in &dangling {
+        assert!(counted.contains(id), "status 는 {id} 를 안 센다\n{st}");
+    }
+}
+
+/// **지우기 전의 셈은 줄마다다**(리뷰 moai-3hxc.uhh). 같은 id 의 두 줄 가운데 이미 끊겨 있던 앞줄을 걷으며
+/// 뒷줄이 선 마일스톤까지 한 번에 지우면, 남는 뒷줄은 이 `rm` 이 끊은 것이다. id 로 접어 앞뒤를 견주던
+/// 때는 걷은 앞줄의 판정이 뒷줄에 씌워져 `dangling: []` 로 끝났고, 같은 일을 두 번에 나눠 지우면 댔다.
+/// 거꾸로 이미 끊겨 있던 뒷줄은 안 댄다.
+#[test]
+fn rm_names_the_surviving_twin_it_cut() {
+    let row = |title: &str, stone: &str| {
+        format!(
+            "{{\"id\":\"argos-0001\",\"title\":\"{title}\",\"milestone\":\"{stone}\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let stone = r#"{"id":"argos-m001","title":"마일스톤","kind":"milestone","status":"todo","created_at":"2026-09-11T00:00:00Z","updated_at":"2026-09-11T00:00:00Z","status_since":"2026-09-11T00:00:00Z"}"#;
+    for (name, front, back, want) in [
+        ("rmtwincut", "argos-zzzz", "argos-m001", vec!["argos-0001"]),
+        ("rmtwinwas", "argos-m001", "argos-zzzz", vec![]),
+    ] {
+        let s = init(name);
+        std::fs::write(
+            s.path().join(".moai/issues.jsonl"),
+            [row("앞줄", front), row("뒷줄", back), format!("{stone}\n")].concat(),
+        )
+        .unwrap();
+        let out = moai(s.path(), &["rm", "argos-0001", "argos-m001", "--json"]);
+        assert!(out.status.success(), "{name}: {}", text(&out));
+        let json = String::from_utf8(out.stdout).unwrap();
+        let dangling = list_in(&json, "dangling").unwrap_or_else(|| panic!("{name}: dangling 이 없다\n{json}"));
+        assert_eq!(dangling, want, "{name}: 앞줄 {front}, 뒷줄 {back}\n{json}");
+        assert!(issues(s.path()).contains("뒷줄"), "{name}: rm 은 앞줄을 걷는다");
+    }
+}
+
 /// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
 /// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
 #[test]
@@ -5997,6 +6132,107 @@ fn a_single_add_says_a_milestone_that_is_not_there() {
         "마일스톤이 아닌 줄을 지나 보냈다\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// **`edit --milestone` 도 없는 마일스톤을 알린다**(moai-3hxc.id1). `add` 가 알리게 된 뒤에도 `edit <id>
+/// --milestone argos-zzzz` 는 필드를 적고 0 으로 끝나며 한마디가 없었다 — 한 필드를 두 길이 달리 다뤘다.
+/// 재는 자와 글은 `add` 의 것 한 벌이다. 막지는 않는다.
+#[test]
+fn edit_says_a_milestone_that_is_not_there() {
+    let s = init("editstonemissing");
+    let id = add(s.path(), &["마일스톤을 옮길 줄"]);
+    let said = |out: &Output, stone: &str| says_no_such_milestone(out, stone);
+
+    let out = moai(s.path(), &["edit", &id, "--milestone", "argos-zzzz"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out, "argos-zzzz"), "말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    // 막지 않는다 — 줄은 적은 대로 선다.
+    assert!(line_of(s.path(), &id).contains(r#""milestone":"argos-zzzz""#), "줄이 안 적혔다");
+
+    // 같은 헛 id 를 다시 적어도(바뀐 것이 없어도) 알린다. `--json` 의 stdout 은 그대로다.
+    let out = moai(s.path(), &["edit", &id, "--milestone", "argos-zzzz", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out, "argos-zzzz"), "--json·안 바뀐 부름: 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    let row = String::from_utf8(out.stdout).unwrap();
+    assert!(row.trim_start().starts_with('{') && row.contains(r#""milestone":"argos-zzzz""#), "{row}");
+
+    // `--milestone` 을 안 준 고침은 줄에 이미 선 헛 id 를 다시 말하지 않는다 — 그것은 `status` 의 몫이다.
+    let out = moai(s.path(), &["edit", &id, "--title", "제목만 고친다"]);
+    assert!(out.status.success() && !said(&out, "argos-zzzz"), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 마일스톤이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_milestone` 과 같다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["edit", &id, "--milestone", &epic]);
+    assert!(said(&out, &epic), "마일스톤이 아닌 줄을 지나 보냈다\n{}", String::from_utf8_lossy(&out.stderr));
+
+    // 있는 마일스톤과 비우기에는 아무 말도 없다.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["edit", &id, "--milestone", &stone]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = moai(s.path(), &["edit", &id, "--milestone", "none"]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **없는 마일스톤으로 옮기라고 대지 않는다**(리뷰 moai-3hxc.uhh). 에픽 멤버나 조상 밑 자식에
+/// `--milestone <헛 id>` 를 적으면 "그런 마일스톤이 없다" 줄 바로 밑에서 진 필드를 말하는 줄이 옮기는 길로
+/// `moai edit <에픽|조상> --milestone <그 헛 id>` 를 댔다 — 따라 치면 에픽이나 조상이 그 밑의 형제까지 함께
+/// 없는 마일스톤으로 옮겨 간다. 옮길 곳 자리에는 자리표가 서고, 필드에 적힌 값은 그대로 댄다.
+#[test]
+fn a_missing_milestone_is_not_offered_as_the_way_to_move() {
+    let s = init("stonenoway");
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let epic = add(s.path(), &["에픽", "--type", "epic", "--milestone", &stone]);
+    let member = add(s.path(), &["멤버", "-e", &epic]);
+    let parent = add(s.path(), &["부모", "--milestone", &stone]);
+    let child = add(s.path(), &["자식", "--parent", &parent]);
+
+    for (id, at) in [(&member, &epic), (&child, &parent)] {
+        let out = moai(s.path(), &["edit", id, "--milestone", "argos-zzzz"]);
+        assert!(out.status.success(), "{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(says_no_such_milestone(&out, "argos-zzzz"), "{id}: {err}");
+        assert!(err.contains("`--milestone argos-zzzz`"), "{id}: 필드에 적힌 값을 안 댔다\n{err}");
+        assert!(
+            !err.contains(&format!("moai edit {at} --milestone argos-zzzz")),
+            "{id}: 없는 마일스톤으로 옮기라고 댔다\n{err}"
+        );
+        assert!(err.contains(&format!("moai edit {at} --milestone <마일스톤>")), "{id}: 옮길 길이 사라졌다\n{err}");
+    }
+    // `add` 도 같은 줄을 쓴다.
+    let out = moai(s.path(), &["add", "멤버로 만든다", "-e", &epic, "--milestone", "argos-zzzz", "-q"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !err.contains(&format!("moai edit {epic} --milestone argos-zzzz")),
+        "add: 없는 마일스톤으로 옮기라고 댔다\n{err}"
+    );
+    // 있는 마일스톤이면 그 id 를 그대로 댄다.
+    let other = ok(s.path(), &["milestone", "add", "v0.2", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["edit", &child, "--milestone", &other]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("moai edit {parent} --milestone {other}")), "{err}");
+}
+
+/// **연습도 마일스톤을 `status` 처럼 그 id 의 뒷줄로 읽는다**(리뷰 moai-3hxc.uhh). 마일스톤 줄 뒤에 다른
+/// 종류의 쌍둥이가 선 id 는 `status` 가 못 쓸 참조로 세는데, 아무 줄이나 마일스톤이면 참으로 읽던
+/// `add::is_milestone` 때문에 `add --from --dry-run` 은 에픽이 거기 "선다" 고 냈다. 진짜 쓰기는 쌍둥이가
+/// 선 파일을 통째로 물리므로 이 경우를 보는 것은 락 없이 읽는 연습뿐이다.
+#[test]
+fn a_rehearsal_reads_a_twinned_milestone_the_way_status_does() {
+    let row = |title: &str, kind: &str| {
+        format!(
+            "{{\"id\":\"argos-m009\",\"title\":\"{title}\",\"kind\":\"{kind}\",\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("stonetwinrehearse");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [row("마일스톤 줄", "milestone"), row("이슈 줄", "issue")].concat(),
+    )
+    .unwrap();
+    std::fs::write(s.path().join("plan.md"), "# 에픽\n- [p1] 하나\n").unwrap();
+    let out = moai(s.path(), &["add", "--from", "plan.md", "--milestone", "argos-m009", "--dry-run"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(says_no_such_milestone(&out, "argos-m009"), "뒷줄이 이슈인 id 를 마일스톤으로 읽었다\n{}", text(&out));
 }
 
 /// stderr 가 `id` 라는 마일스톤이 없다고 말하는가 — `add.no_such_milestone` 의 한국어 글이다.

@@ -202,6 +202,7 @@
   "edit.go_lost": "`moai edit {id} -e <another epic>`",
   "edit.from_parent": "it comes from ancestor {at}, so",
   "edit.go_parent": "`moai edit {at} --milestone {wrote}`",
+  "edit.any_milestone": "<milestone>",
   "edit.verb_cut": "To take it off,",
   "edit.verb_move": "To move it,",
   "edit.kept_milestone": "{id} {stood} — {from} {lost}. {verb} {way}",

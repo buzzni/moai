@@ -3752,16 +3752,98 @@ pub fn broken(all: &[Issue]) -> BTreeMap<&str, Misplace> {
 
 /// [`broken`] 와 같은 것. 종류 지도를 이미 가진 쪽([`Soil`])이 그것을 다시 짓지 않게 받는다.
 pub fn broken_in<'a>(all: &'a [Issue], kind_of: &BTreeMap<&'a str, Kind>) -> BTreeMap<&'a str, Misplace> {
-    let usable = |id: &Option<String>, kind: Kind| id.as_deref().is_none_or(|id| kind_of.get(id) == Some(&kind));
     let mut out = BTreeMap::new();
     for i in all {
-        if !usable(&i.epic, Kind::Epic) || (is_group(i) && i.epic.is_some()) {
-            out.insert(i.id.as_str(), Misplace::Epic);
-        } else if !usable(&i.milestone, Kind::Milestone) {
-            out.insert(i.id.as_str(), Misplace::Milestone);
+        if let Some(why) = broken_at(i, kind_of) {
+            out.insert(i.id.as_str(), why);
         }
     }
     out
+}
+
+/// [`broken_in`] 이 **줄 하나에** 내리는 판정 — 그 줄이 든 `epic`·`milestone` 이 못 쓸 것인가(에픽을 먼저
+/// 본다). 줄마다 앞뒤를 견주는 [`dangling_lines`] 가 id 로 접지 않고 쓴다.
+fn broken_at(i: &Issue, kind_of: &BTreeMap<&str, Kind>) -> Option<Misplace> {
+    let usable = |id: &Option<String>, kind: Kind| id.as_deref().is_none_or(|id| kind_of.get(id) == Some(&kind));
+    if !usable(&i.epic, Kind::Epic) || (is_group(i) && i.epic.is_some()) {
+        Some(Misplace::Epic)
+    } else if !usable(&i.milestone, Kind::Milestone) {
+        Some(Misplace::Milestone)
+    } else {
+        None
+    }
+}
+
+/// `moai status` 의 `dangling_epic`·`dangling_milestone` 이 고르는 줄 — 자리를 못 정하는 줄(`placed`,
+/// [`Soil::lost`])과 못 쓸 참조를 든 줄(`held`, [`broken_in`])을 `why` 하나로 합친다. **합치는 몸은
+/// [`dangles`] 하나다** — 줄마다 앞뒤를 견주는 [`dangling_lines`] 도 그것을 지난다.
+fn dangling_by<'a>(
+    issues: &'a [Issue],
+    placed: &BTreeMap<&str, Misplace>,
+    held: &BTreeMap<&str, Misplace>,
+    why: Misplace,
+) -> impl Iterator<Item = &'a Issue> {
+    issues.iter().filter(move |i| {
+        let id = i.id.as_str();
+        dangles(placed.get(id).copied(), held.get(id).copied(), why)
+    })
+}
+
+/// 자리 판정(`placed`)과 든 참조의 판정(`held`)이 그 줄을 `why` 축으로 끊겼다고 하는가 — `moai status` 가
+/// 그 축의 `dangling_*` 로 줄을 세는 자다. [`dangling_by`] 는 id 로 접은 판정을, [`dangling_lines`] 는
+/// 줄마다의 판정을 넣는다.
+fn dangles(placed: Option<Misplace>, held: Option<Misplace>, why: Misplace) -> bool {
+    placed == Some(why) || held == Some(why)
+}
+
+/// 줄마다 — `moai status` 의 `dangling_epic`·`dangling_milestone` 이 **그 줄의 판정으로** 그 줄을 세는가.
+/// `all` 과 자리가 같다.
+///
+/// `moai rm` 이 지우기 전과 뒤에 불러, 남은 줄 가운데 어느 축으로든 새로 끊긴 줄을 "끊긴 참조" 로 댄다
+/// (moai-4bio). 지운 마일스톤이나 에픽을 적은 줄만이 아니라 그 줄 밑에서 그것을 물려받던 자식과 지운
+/// 마일스톤에 선 에픽도 `status` 가 세는 그대로 잡히고, 쌍둥이 줄이 남은 id 밑은 안 잡힌다 — `cmd/` 에
+/// 규칙을 따로 적으면 `rm` 과 `status` 가 또 갈린다(리뷰 moai-3hxc.qr2 6·7번). **에픽 축도 함께 잰다**
+/// (리뷰 moai-3hxc.uhh) — 제 `epic` 필드만 보던 `rm` 은 그 에픽을 id 부모에게서 물려받던 줄(`--parent` 로
+/// 단 리뷰 줄이 흔한 꼴이다)을 못 댔는데, `status` 는 그 줄들을 `dangling_epic` 으로 셌다.
+///
+/// **id 로 접지 않는다**(리뷰 moai-3hxc.uhh). `status` 는 같은 id 의 줄들의 판정을 id 하나로 접어 그 id 를
+/// 대는데([`dangling_by`]), 지우기 전의 셈을 그렇게 접으면 걷어 낸 앞줄의 판정이 남는 뒷줄에 씌워진다 —
+/// 이미 끊겨 있던 앞줄과 뒷줄이 선 마일스톤을 한 번에 지운 `rm` 이 새로 끊긴 뒷줄을 못 댔다. 쌍둥이가
+/// 없는 파일에서는 줄의 판정이 곧 id 의 판정이라 `status` 와 답이 같고, 쓰기는 쌍둥이를 남기지 않으므로
+/// (`store::with_write`) 지운 뒤의 셈은 언제나 그렇다.
+///
+/// **[`Soil`] 을 통째로 짓지 않는다**(리뷰 moai-3hxc.uhh) — 읽는 것은 종류 지도와 에픽 축뿐이다
+/// ([`Ties::epics_only`]). 마일스톤 지도·미룸·접힘까지 지으면 그 셋이 한 번 부름의 절반 넘게 들고, `rm`
+/// 은 이것을 쓰기 락을 쥔 채 두 번 부른다. 자리 판정은 [`Soil::of`] 와 같은 몸([`misplace_of`])이다.
+pub fn dangling_lines(all: &[Issue]) -> Vec<Dangling> {
+    let ties = Ties::epics_only(all);
+    all.iter()
+        .map(|i| {
+            let placed = misplace_of(i, ties.kinds(), ties.epics(), ties.lines());
+            let held = broken_at(i, ties.kinds());
+            Dangling {
+                epic: dangles(placed, held, Misplace::Epic),
+                milestone: dangles(placed, held, Misplace::Milestone),
+            }
+        })
+        .collect()
+}
+
+/// [`dangling_lines`] 의 한 칸 — `moai status` 가 그 줄을 세는 축.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Dangling {
+    /// `dangling_epic` 으로 선다.
+    pub epic: bool,
+    /// `dangling_milestone` 으로 선다.
+    pub milestone: bool,
+}
+
+impl Dangling {
+    /// `was` 에서 지금으로 오며 **어느 축으로든 새로** 끊겼는가. 축을 합쳐 재면 마일스톤 쪽으로 이미
+    /// 끊겨 있던 줄이 이번에 에픽을 잃은 것을 못 가린다.
+    pub fn newly_since(self, was: Dangling) -> bool {
+        (self.epic && !was.epic) || (self.milestone && !was.milestone)
+    }
 }
 
 /// 에픽별 집계와, 마지막에 "에픽 없음" 묶음 하나.
@@ -5380,13 +5462,7 @@ pub fn status_in<'a>(
     // 여기서 합친다. 빼면 `moai rm` 이 "끊긴 참조가 남았다" 고 말한 그 줄에
     // 대해 `status` 가 그다음부터 영영 침묵한다.
     for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
-        let hit: Vec<&Issue> = issues
-            .iter()
-            .filter(|i| {
-                let id = i.id.as_str();
-                placed.get(id) == Some(&why) || held.get(id) == Some(&why)
-            })
-            .collect();
+        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).collect();
         if !hit.is_empty() {
             warnings.push(Warning::new(kind, ids_of(&hit)));
         }
@@ -8040,6 +8116,52 @@ mod tests {
             let said = status(&issues, &[], &cfg, "2026-10-01T00:00:00Z", utc());
             let count = said.notices.iter().find(|w| w.kind == "deferred").map_or(0, |w| w.count);
             assert_eq!(count, out.iter().filter(|r| r.is_some()).count(), "비추는 수가 줄마다의 답과 갈렸다");
+        }
+    }
+
+    /// **줄마다의 셈은 쌍둥이가 없는 파일에서 `status` 와 같은 줄을 센다**(리뷰 moai-3hxc.uhh). `rm` 은
+    /// [`dangling_lines`] 로 앞뒤를 견주고 `status` 는 [`dangling_by`] 로 경고를 고르는데, 둘이 갈리면
+    /// `rm` 이 댄 줄을 `status` 가 안 세거나 그 거꾸로가 된다 — moai-4bio 가 닫은 그 어긋남이다. 쓰기는
+    /// 쌍둥이를 남기지 않으므로 `rm` 의 뒤쪽 셈은 늘 이 경우다. 씨앗을 고정해 늘 같은 더미를 만든다.
+    #[test]
+    fn dangling_lines_count_what_status_counts_on_random_piles() {
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut roll = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let cfg = cfg();
+        for _ in 0..3000 {
+            let mut issues: Vec<Issue> = Vec::new();
+            for n in 0..(2 + roll(10)) {
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                // 쌍둥이는 안 섞는다 — 자식 id 와 새 id 만 짓는다.
+                let id = match roll(3) {
+                    0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
+                    _ => format!("argos-{n:04}"),
+                };
+                let mut i = make(&id, kind, ["todo", "in_progress", "done"][roll(3)]);
+                let pick = |roll: &mut dyn FnMut(usize) -> usize| match roll(4) {
+                    0 | 1 => None,
+                    2 if !issues.is_empty() => Some(issues[roll(issues.len())].id.clone()),
+                    _ => Some("argos-zzzz".to_string()),
+                };
+                i.epic = pick(&mut roll);
+                i.milestone = pick(&mut roll);
+                issues.push(i);
+            }
+            let said = status(&issues, &[], &cfg, "2026-10-01T00:00:00Z", utc());
+            let warned = |kind: &str| -> BTreeSet<String> {
+                said.warnings.iter().filter(|w| w.kind == kind).flat_map(|w| w.ids.clone()).collect()
+            };
+            let lines = dangling_lines(&issues);
+            let counted = |on: fn(&Dangling) -> bool| -> BTreeSet<String> {
+                issues.iter().zip(&lines).filter(|(_, d)| on(d)).map(|(i, _)| i.id.clone()).collect()
+            };
+            assert_eq!(counted(|d| d.epic), warned("dangling_epic"), "에픽 축이 갈렸다 — {issues:#?}");
+            assert_eq!(counted(|d| d.milestone), warned("dangling_milestone"), "마일스톤 축이 갈렸다 — {issues:#?}");
         }
     }
 
