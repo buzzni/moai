@@ -8,14 +8,18 @@ is something `moai status` reflects back at you, never something it enforces.
 
 ```
 $ moai
-이슈 941  · 에픽 148       .moai/issues.jsonl
+Issues 941  · Epics 148       .moai/issues.jsonl
 
   · todo 36    ▸ in_progress 5    ? review 0    ✓ done 900
 
-! 한 번에 벌여 놓은 것 5건 — 하나씩 끝내는 편이 낫다
-+ 쌓인 idea 36건
+! Started at once 5 — finishing one at a time goes better
 
-다음:  `moai ready` 로 집을 것을 고른다
++ Ideas piled up 36 (oldest 4 days)
+    → `moai idea ls`
+
+Last 7 days   created 41  ·  done 38   piling up +3
+
+Next:  `moai ready` picks what to take
 ```
 
 ## Why it exists
