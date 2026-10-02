@@ -1041,7 +1041,8 @@ pub enum SortKey {
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
     /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
-    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다.
+    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다. 안 움직이는
+    /// 차례는 이것과 [`SortKey::Created`] 둘이다 — 생성 차례의 동점도 id 로만 가른다(moai-psyu).
     Id,
 }
 
@@ -2205,12 +2206,14 @@ mod tests {
             assert_eq!(sorted(key, false), s(&["a-0002", "a-0003", "a-0001"]), "{key:?} 의 동점이 기본 차례가 아니다");
         }
 
-        // 첫 쪽을 받은 뒤 a-0003 을 p0 으로 고쳤다 — 우선순위로 가르면 커서(a-0001) 앞으로 올라가 빠진다.
+        // 우선순위가 다 같은 줄로 첫 쪽을 받은 뒤 a-0003 을 p0 으로 고쳤다 — 우선순위로 가르면 커서(a-0001)
+        // 앞으로 올라가 빠진다. 첫 쪽은 옛 차례와 새 차례가 같아야 고친 줄이 넘는지를 잰다.
+        let level = vec![urgent("a-0001", 2), urgent("a-0002", 2), urgent("a-0003", 2)];
         let by_created = Sort { key: SortKey::Created, reversed: false };
-        let mut first = all.clone();
-        page(&mut first, &all, &Where::of(&all, &c), &c, by_created, None, Some(1));
+        let mut first = level.clone();
+        page(&mut first, &level, &Where::of(&level, &c), &c, by_created, None, Some(1));
         assert_eq!(ids(&first), s(&["a-0001"]));
-        let mut edited = all.clone();
+        let mut edited = level.clone();
         edited[2].priority = Some(0);
         let mut rest = edited.clone();
         page(&mut rest, &edited, &Where::of(&edited, &c), &c, by_created, Some(&edited[0]), None);
