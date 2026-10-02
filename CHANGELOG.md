@@ -94,6 +94,21 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **A `.moai/lock` that is a link no longer loses writes.** A cloned repository
+  could commit `.moai/lock` as a link, and every write took its lock through it:
+  with `-> /proc/self/fd/2` each process locked its own stderr, so 24 concurrent
+  `moai add` all exited 0 and only a handful of issues remained, and
+  `-> ../.git/index.lock` broke every later `git commit`. The lock is now opened
+  without following a link — even one that points inside the checkout, since a
+  lock on `issues.jsonl` lands on a file each write replaces — only as a regular
+  file, and only inside the checkout and outside `.git/`; the lock beside a
+  linked `issues.jsonl` is taken the same way. Otherwise the write stops with one
+  line naming the lock and why, nothing is changed, and under `--json` the code
+  is `broken`. A `.moai` directory linked out of the checkout, which used to
+  leave a lock file out there before the write was refused, now stops the same
+  way. The locks beside your user config and read marks still follow links, so
+  dotfiles linked by stow or rcm keep working.
+
 - **A snapshot or config that links out of the checkout no longer runs every
   command out of memory.** A cloned repository that committed
   `.moai/issues.jsonl -> /proc/self/pagemap` or `.moai/config.toml -> /dev/zero`
