@@ -12,6 +12,35 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **A journal link that points out of the checkout stands as `outside`.** In
+  `journal_error` (`show --json`, `stats --json`) such a link — one that leaves
+  the checkout or goes into `.git/` — stood as `kind: failed`, so a machine could
+  not tell "fix that link" from a passing I/O failure, and `said` carried an
+  English sentence moai wrote itself, so under `MOAI_LANG=ko` a Korean line ended
+  in English. `kind` is now `outside` and the reason in `said` comes in the
+  chosen language. A `kind` you do not know still reads as `failed`.
+
+### Fixed
+
+- **A snapshot or config that links out of the checkout no longer runs every
+  command out of memory.** A cloned repository that committed
+  `.moai/issues.jsonl -> /proc/self/pagemap` or `.moai/config.toml -> /dev/zero`
+  made every command read without end, and a FIFO there hung every command.
+  Both files are now read the way 0.1.6 reads the journal: only when the link
+  lands inside the checkout and outside `.git/`, only when it is a regular file,
+  and no further than the size its open handle gives. Otherwise every command
+  stops with one line naming the file and where it points, and under `--json`
+  the code is `broken` — the fix is that link. A sibling worktree's snapshot in
+  that state is skipped and named, and a FIFO there no longer hangs
+  `moai status`.
+
+- **Journal names hard-linked to one file are read once.** Each line stood twice
+  in the history, `-g` and `--removed`, and `work` added its tokens twice. Names
+  now fold by the file itself, as symlinked names already did. A clone still gets
+  two separate files — git does not carry hard links.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added
