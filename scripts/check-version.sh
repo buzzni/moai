@@ -57,13 +57,17 @@ die() {
 #
 # 같은 표에서 `name` 도 읽는다(`--print-name`). `bump-version.sh` 가 `Cargo.lock` 에서 자기
 # 줄을 찾을 때 쓴다 — 거기서 표를 가리는 awk 를 다시 적으면 위의 두 군데가 되살아난다.
+#
+# **따옴표는 두 꼴을 다 벗긴다**(moai-kyp7.269). TOML 은 `version = '0.1.6'`(literal
+# string)도 받는다 — 큰따옴표만 벗기던 판은 그것을 `'0.1.6'` 으로 읽어, pre-push 와 릴리스
+# 첫 스텝이 맞는 태그를 어긋났다며 막았다. `\047` 이 작은따옴표다(셸의 작은따옴표 안이라).
 manifest_key() {
   awk -v key="$1" '
     /^[[:space:]]*\[/ { pkg = ($0 ~ /^[[:space:]]*\[package\][[:space:]]*$/); next }
     pkg && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
       sub(/^[^=]*=[[:space:]]*/, "")
       sub(/[[:space:]]*#.*$/, "")
-      gsub(/^[[:space:]]*"|"[[:space:]]*$/, "")
+      gsub(/^[[:space:]]*["\047]|["\047][[:space:]]*$/, "")
       print
       exit
     }
