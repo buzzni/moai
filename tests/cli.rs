@@ -7721,8 +7721,8 @@ fn an_empty_stdin_body_is_said_out_loud() {
 /// **`--body` 가 한 줄이고 그 이름의 파일이 있으면 글로 받았다고 알린다**(moai-3hxc.58k).
 /// `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는다 — `moai add --from - --body plan.md`
 /// 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이 2026-10-01 에 두 번 있었다.
-/// 막지도 본문을 바꾸지도 않는다. `add`·`add --from`·`edit`·`idea add` 가 한 자리
-/// (`add::read_body_said`)에서 같은 말을 한다.
+/// 막지도 본문을 바꾸지도 않는다. `add`·`add --from`·`edit`·`idea add`·`note -b` 가 한 자리
+/// (`add::say_if_body_names_a_file`)에서 같은 말을 한다.
 #[test]
 fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let s = init("bodyispath");
@@ -7758,6 +7758,17 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     assert!(out.status.success() && err(&out).contains(said), "edit 이 말없이 지나갔다\n{}", err(&out));
     let out = moai(s.path(), &["idea", "add", "나중에", "-b", "plan.md", "-q"]);
     assert!(out.status.success() && err(&out).contains(said), "idea add 가 말없이 지나갔다\n{}", err(&out));
+
+    // `note -b` 도 같은 말을 하고, 노트는 글자 그대로 선다(moai-18so.rnm). `note` 는 빈 stdin 을 제가
+    // 거절해서 `read_body_said` 를 안 지나고 알림만 따로 부른다 — 그 부름을 걷으면 여기가 붉어진다.
+    let out = moai(s.path(), &["note", &id, "-b", "plan.md", "--json"]);
+    assert!(out.status.success(), "{}", err(&out));
+    assert!(
+        err(&out).contains(said) && err(&out).contains("--body - < plan.md"),
+        "note 가 말없이 지나갔다\n{}",
+        err(&out)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""text":"plan.md""#), "노트가 바뀌었다");
 
     // 옮겨 치라고 내미는 줄은 껍데기가 한 낱말로 읽게 감싼다 — 빈칸이 든 이름이 두 낱말이 되지 않는다.
     std::fs::write(s.path().join("my plan.md"), "x").unwrap();
@@ -7806,6 +7817,11 @@ fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
     quiet(&["add", "빈 글", "-b", "", "-q"], None);
     // 본문을 안 줬으면 말할 것이 없다.
     quiet(&["add", "본문 없음", "-q"], None);
+    // `note` 도 같은 자에 선다 — 자리 인자는 `-b` 가 아니고, stdin 에서 온 글과 없는 경로는 말이 없다.
+    let id = add(s.path(), &["메모 받을 것"]);
+    quiet(&["note", &id, "plan.md"], None);
+    quiet(&["note", &id, "-b", "-"], Some("plan.md\n"));
+    quiet(&["note", &id, "-b", "nope.md"], None);
 
     // 그래도 받은 글은 그대로 선다.
     let made = issues(s.path());

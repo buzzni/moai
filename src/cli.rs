@@ -1531,7 +1531,7 @@ pub struct NoteArgs {
     #[arg(value_name = "text", allow_hyphen_values = true)]
     pub text: Option<String>,
 
-    /// A long text. `-` reads it from stdin
+    /// Text, not a path. `-` reads stdin: `-b - < <file>`
     ///
     /// **It pushes the positional out.** Given both, nobody can remember
     /// which one wins, and a rule nobody remembers erases someone's text

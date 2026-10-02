@@ -20,6 +20,10 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     if let Some(t) = &args.text {
         super::refuse_if_flag_like(t.trim(), super::FlagLike::Note(&args.id), ctx.lang())?;
     }
+    // **`-b` 에 적힌 글이 파일 이름이면 한 줄로 알린다**(moai-18so.rnm) — `add`·`edit` 과 같은 자리의
+    // 같은 말이다. `read_body_said` 를 안 지나는 까닭은 빈 stdin 을 이 명령이 이미 거절하기 때문이다.
+    // stat 하나라 락 앞뒤를 안 가린다.
+    super::add::say_if_body_names_a_file(args.body.as_deref(), ctx, false);
     // **읽는 것을 락보다 먼저 한다.** `-b -` 는 stdin 을 기다린다. 락을 쥔
     // 뒤에 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다 — 저장소를
     // 찾는 일(`open_repo`)은 락을 안 잡으므로 그 앞뒤는 상관없다.
