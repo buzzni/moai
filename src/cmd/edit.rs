@@ -27,8 +27,9 @@ struct Edited {
     /// 고친 줄의 `milestone` 이 마일스톤 줄인가 — `--milestone <id>` 를 받았을 때만 잰다. 안 적었거나
     /// 비웠으면 `true` 다 — 말할 것이 없다.
     known_milestone: bool,
-    /// 고친 줄의 `epic` 이 에픽 줄인가 — [`Edited::known_milestone`] 과 같이 `-e <id>` 를 받았을 때만 잰다.
-    known_epic: bool,
+    /// 고친 줄의 `epic` 을 `status` 가 `dangling_epic` 으로 세는 까닭 — [`Edited::known_milestone`] 과 같이
+    /// `-e <id>` 를 받았을 때만 잰다. 안 적었거나 비웠으면 `None` 이다.
+    held_epic: Option<crate::report::HeldEpic>,
     /// 고친 줄의 막음을 가른 답. 상세가 `show <id>` 와 같은 막음 줄을 그린다(moai-xe74).
     blocked: Blocked,
 }
@@ -252,12 +253,15 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 헛 id 를 다시 적은 부름도 그 id 를 그대로 둔다.
             let known_milestone =
                 !matches!(wrote_milestone, Some(Some(_))) || super::add::is_milestone(issues, out.milestone.as_deref());
-            // **없는 에픽도 같은 정책이다**(moai-q5zs) — 재는 자는 `status` 의 것([`super::add::is_epic`])이고,
-            // `-e <id>` 를 적은 부름마다 잰다. 줄이 바뀐 때만, 그리고 "그 id 의 줄이 있는가" 로 재던 판은 같은
-            // 헛 id 를 다시 적은 부름과 이슈 id 를 적은 부름에 말이 없었다 — 한 명령의 두 필드가 다른 규칙을
-            // 따랐다(리뷰 moai-3hxc.uhh 8·9번).
-            let known_epic = !args.epic.as_deref().is_some_and(|e| super::clearable(e).is_some())
-                || super::add::is_epic(issues, out.epic.as_deref());
+            // **없는 에픽도 같은 정책이다**(moai-q5zs) — 재는 자는 `status` 의 것
+            // ([`crate::report::epic_held_wrong`])이고, `-e <id>` 를 적은 부름마다 잰다. 줄이 바뀐 때만, 그리고
+            // "그 id 의 줄이 있는가" 로 재던 판은 같은 헛 id 를 다시 적은 부름과 이슈 id 를 적은 부름에 말이
+            // 없었다 — 한 명령의 두 필드가 다른 규칙을 따랐다(리뷰 moai-3hxc.uhh 8·9번).
+            let held_epic = args
+                .epic
+                .as_deref()
+                .and_then(super::clearable)
+                .and_then(|_| crate::report::epic_held_wrong(issues, &out));
             if !changed {
                 // **읽은 칸은 바뀐 것이 없어도 낸다.** 되풀이해 부르는 것이 흔한데, 그때만
                 // 키가 사라지면 받는 쪽은 그 줄이 묶음이 아닌 줄 알고 적힌 칸을 읽는다.
@@ -274,7 +278,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                         kept,
                         kept_milestone,
                         known_milestone,
-                        known_epic,
+                        held_epic,
                         // 바뀐 것이 없으면 상세를 안 그린다.
                         blocked: Blocked::default(),
                     },
@@ -319,7 +323,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     kept,
                     kept_milestone,
                     known_milestone,
-                    known_epic,
+                    held_epic,
                     blocked,
                 },
             ))
@@ -336,7 +340,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         kept,
         kept_milestone,
         known_milestone,
-        known_epic,
+        held_epic,
         blocked,
     } = done;
     // 쓰기가 선 **뒤에** 말한다 — `add` 와 같은 자리다. `--json` 도 가리지 않는다(stderr 라 stdout 의 JSON 은
@@ -348,9 +352,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     //
     // 없는 에픽은 막지 않고 알려만 준다 — 끊긴 참조는 `moai status` 가 드러낸다. `status` 가 에픽을 먼저
     // 보므로 이 줄이 앞에 선다.
-    if let Some(e) = edited.epic.as_deref().filter(|_| !known_epic) {
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "edit.no_such_epic"), &[("id", e)]));
-    }
+    super::add::say_held_epic(&edited, held_epic, ctx.lang());
     super::add::say_no_such_milestone(edited.milestone.as_deref(), known_milestone, ctx.lang());
     if ctx.json {
         // **이 키는 우리 것이다** — `--json` 을 되써 넣어 모르는 필드로 든 줄이면 한 객체에 같은

@@ -6325,8 +6325,31 @@ fn edit_says_an_epic_that_is_not_there() {
     assert!(out.status.success() && out.stderr.is_empty(), "{}", text(&out));
 }
 
-/// stderr 가 `id` 라는 에픽이 없다고 말하는가 — `add.no_such_epic_yet`·`edit.no_such_epic` 의 한국어 글이
-/// 함께 든 토막이다.
+/// **묶음 줄의 `-e <에픽>` 도 알린다**(moai-q5zs 리뷰) — 가리키는 것이 멀쩡한 에픽이어도 묶음 줄은 에픽에
+/// 안 들고 `moai status` 는 그 줄을 `dangling_epic` 으로 센다(`report::broken_at`). id 의 종류만 재던 판은
+/// `epic add -e <에픽>`·`edit <에픽> -e <에픽>` 을 말없이 지나 보냈다. 막지는 않는다.
+#[test]
+fn a_group_row_given_an_epic_is_told() {
+    let s = init("groupinepic");
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let said = |out: &Output| {
+        let err = String::from_utf8_lossy(&out.stderr);
+        err.contains("묶음 줄은 에픽에 안 든다") && err.contains(&epic) && err.contains("dangling_epic")
+    };
+
+    let out = moai(s.path(), &["epic", "add", "에픽 밑 에픽", "-e", &epic, "-q"]);
+    assert!(out.status.success() && said(&out), "{}", text(&out));
+    let out = moai(s.path(), &["milestone", "add", "에픽 밑 마일스톤", "-e", &epic, "--json"]);
+    assert!(out.status.success() && said(&out), "{}", text(&out));
+
+    let other = ok(s.path(), &["epic", "add", "다른 에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["edit", &other, "-e", &epic]);
+    assert!(out.status.success() && said(&out), "{}", text(&out));
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_epic") && status.contains(&other), "알린 말의 근거가 없다\n{status}");
+}
+
+/// stderr 가 `id` 라는 에픽이 없다고 말하는가 — `add.no_such_epic` 의 한국어 글 토막이다.
 fn says_no_such_epic(out: &Output, id: &str) -> bool {
     String::from_utf8_lossy(&out.stderr).contains(&format!("{id} 라는 에픽이"))
 }
