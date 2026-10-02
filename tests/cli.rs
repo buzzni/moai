@@ -10959,9 +10959,10 @@ fn same_kind_twins_answer_the_same_epic_on_every_surface() {
 #[test]
 fn the_hook_reads_belonging_from_the_row_not_the_id_map() {
     let s = init("hooktwin");
+    // 줄은 **시험의 사람 것**이다 — 담당 없이 집힌 줄은 초점에서 빠진다(moai-0zjo).
     let row = |id: &str, title: &str, kind: &str, status: &str, at: &str| {
         format!(
-            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{at},\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{at},\"status\":\"{status}\",\"assignee\":\"테스터\",\"assignee_email\":\"tester@example.com\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
         )
     };
     // 머지를 잘못 푼 파일. 집은 것은 앞줄이고(뒷줄은 닫혔다), 앞줄과 뒷줄이 저마다 다른 에픽과
@@ -12896,6 +12897,20 @@ fn call(s: &Scratch, tool: &str, body: &str, session: &str) -> String {
         "pre-tool-use",
         &format!("{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\",\"tool_name\":\"{tool}\",\"tool_input\":{body}}}"),
     )
+}
+
+/// **남이 집은 줄은 이 세션의 초점이 아니다**(moai-0zjo, 2026-10-02 사용자 결정) — 옆 워크트리가 쥔
+/// 줄을 빼는 것과 같은 자리다. 그것만 서 있으면 집은 것이 없어 규칙 2 가 선다. 넘겨받으면(`--take`)
+/// 제 초점이다.
+#[test]
+fn what_someone_else_picked_up_does_not_free_my_writes() {
+    let s = init("hooktheirs");
+    let theirs = add(s.path(), &["남의 일", "-a", "B (b@x.io)"]);
+    ok(s.path(), &["mv", &theirs, "in_progress"]);
+    let why = refusal(&call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1"));
+    assert!(why.starts_with("Rule 2"), "남이 집은 줄로 쓰기를 풀었다 — {why}");
+    ok(s.path(), &["mv", &theirs, "in_progress", "--take"]);
+    assert!(call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1").trim().is_empty(), "넘겨받았는데도 막는다");
 }
 
 /// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는

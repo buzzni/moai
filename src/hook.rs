@@ -5375,11 +5375,23 @@ pub struct Away {
     /// 빼던 판은 제 일을 통째로 놓아 `Stop` 이 안 붙들고 접힌 뒤에도 안 실었고, 좁힌 판정이 `-m` 없는 리뷰
     /// 닫기를 넘겼다. `unsure` 와 함께만 싣는다.
     pub picked: BTreeSet<String>,
+    /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**도 옆의 것처럼 초점에서
+    /// 뺀다. 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서
+    /// 물려받지 않는다. 규칙 5 가 남의 줄 집기를 가르는 자도 이것이다.
+    ///
+    /// **`None` 은 모른다는 뜻이다** — 가르지 않는다(`report::by_owner` 와 같은 약속). 푸는 것은
+    /// `cmd/hook.rs` 이고 물을 줄이 있을 때만 푼다 — `git` 을 두 번 띄운다.
+    pub me: Option<crate::query::Me>,
 }
 
 impl Away {
-    fn is_empty(&self) -> bool {
+    /// 옆 이름도 모르는 줄도 없다 — 소속 재료([`report::Ties`])를 지을 까닭이 없다.
+    fn nameless(&self) -> bool {
         self.names.is_empty() && self.unsure.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.nameless() && self.me.is_none()
     }
 }
 
@@ -5407,11 +5419,15 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 ///
 /// 소속 재료는 **한 벌만** 짓는다([`report::Ties`]) — 옆 이름과 모르는 줄을 같은 재료로 잰다. 둘이 제
 /// 지도를 따로 짓던 판은 좁힌 판정마다 두 벌을 지었다.
+///
+/// **담당이 내가 아닌 줄도 옆의 것이다**(moai-0zjo, [`Away::me`]) — 옆 워크트리가 쥔 줄을 빼는 것과 같은
+/// 자리다. 담당은 그 줄 하나로 본다: 소속 재료가 안 든다.
 fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool + 'a {
-    let ties = if away.is_empty() { report::Ties::default() } else { report::Ties::of(issues) };
+    let ties = if away.nameless() { report::Ties::default() } else { report::Ties::of(issues) };
     move |i: &'a Issue| {
         report::claims_over(&ties, &away.names, &away.own, i)
             || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
+            || away.me.as_ref().is_some_and(|me| report::owner(me, i).is_some())
     }
 }
 
@@ -8359,6 +8375,47 @@ mod tests {
         assert_eq!(carried(&all, &all, &cfg(), &both), Decision::Pass);
         // 그러면 규칙 2 가 선다 — 저장소를 고치려면 여기서 하나를 집는다.
         assert!(matches!(guard_edit(&all, &cfg(), &both, Path::new("/repo"), "/repo/src/store.rs"), Decision::Deny(_)));
+    }
+
+    /// 이 세션의 사람 — 시험의 담당.
+    fn me() -> crate::query::Me {
+        crate::query::Me::of(&crate::model::Actor { name: "Raven".into(), email: "raven@x.io".into() })
+    }
+
+    fn owned(id: &str, status: &str, who: Option<&str>) -> Issue {
+        let mut i = issue(id, status);
+        i.assignee = who.map(String::from);
+        i
+    }
+
+    /// **남이 집은 줄은 초점이 아니다**(moai-0zjo, 2026-10-02 사용자 결정) — 옆 워크트리가 쥔 줄을 빼는
+    /// 것과 같은 자리다. 담당 없이 시작 칸에 선 줄도 내 것이 아니다. 담당은 줄마다 보고 에픽에서 물려받지
+    /// 않는다. 사람을 모르면(`me` 가 없으면) 가르지 않는다 — 가르기 전과 같다.
+    #[test]
+    fn what_someone_else_holds_is_not_my_focus() {
+        let mut theirs_under_mine = owned("t-1", "in_progress", Some("B"));
+        theirs_under_mine.epic = Some("t-e".into());
+        let mut e = epic("t-e");
+        e.assignee = Some("Raven".into());
+        let all = vec![
+            e,
+            theirs_under_mine,
+            owned("t-2", "in_progress", Some("Raven")),
+            owned("t-3", "in_progress", None),
+            owned("t-4", "review", Some("B")),
+        ];
+        let mine = Away { me: Some(me()), ..Away::default() };
+        let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(focus, ["t-2"], "남의 줄이나 담당 없는 줄을 초점에 남겼다");
+        // 남의 것만 남으면 집은 것이 없다 — 규칙 2 가 선다.
+        let only_theirs: Vec<Issue> = all.iter().filter(|i| i.id != "t-2").cloned().collect();
+        assert!(held(&only_theirs, &cfg(), &mine).is_empty());
+        assert!(matches!(
+            guard_edit(&only_theirs, &cfg(), &mine, Path::new("/repo"), "/repo/src/store.rs"),
+            Decision::Deny(_)
+        ));
+        // 모르면 가르지 않는다.
+        assert_eq!(held(&all, &cfg(), &here()).len(), 4);
     }
 
     /// 옆에서 그 일을 펼쳐 집은 것도 옆의 것이다 — 그 밑의 자식, 그 에픽에 든 줄.
