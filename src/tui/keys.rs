@@ -790,8 +790,15 @@ impl Browse {
             // **보기·정렬·열은 줄이 선 곳에 건다.** 한눈 보기에도 줄이 서면(펼친 프로젝트가 있으면)
             // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
             // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
-            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`).
-            Column(_) | Deferred | Ideas | ShowAll | Sort(_) | Cell(_) if c.layer && !c.rows_here => Err(Off::Quiet),
+            // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). **숨긴 것을 도로 보이는 키는 빼고다**(리뷰) — 줄이
+            // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i` 를 누르면 줄이 다
+            // 빠지는데, 그 키와 `SPC v a` 가 같이 꺼지면 한눈 보기에서는 되돌릴 길이 없다. 보드는 묶음 줄을 안 세워
+            // 목록보다 자주 그렇게 된다.
+            Column(_) | Deferred | Ideas | ShowAll | Sort(_) | Cell(_)
+                if c.layer && !c.rows_here && !self.unhides(c) =>
+            {
+                Err(Off::Quiet)
+            }
             // 상세를 숨기면 갈 칸이 하나뿐이라 Tab 은 아무 일도 안 하고, 원문↔그리기는 상세의
             // 글에만 걸리므로(`draw::about` 의 `app.raw`) 눌러도 화면이 그대로다. **눌러도 아무
             // 일이 없는 키는 바에도 메뉴에도 안 선다** — 그런 키가 하나 서면 거기부터 도구를 못
@@ -819,6 +826,17 @@ impl Browse {
             // 조용하다. 등록한 수를 넘는 번호도 같다: 없는 자리로 보내면 무엇이 일어났는지 모른다.
             Project(n) if c.projects == 0 || usize::from(n) > c.projects => Err(Off::Quiet),
             _ => Ok(()),
+        }
+    }
+
+    /// 숨긴 것을 **도로 보이는** 보기 토글인가 — 그러면 줄이 하나도 없어도 할 일이 있다([`Browse::enabled`]).
+    fn unhides(self, c: &Ctx) -> bool {
+        match self {
+            Browse::Ideas => c.ideas_hidden,
+            Browse::Deferred => c.deferred_hidden,
+            Browse::Column(n) => c.hidden & (1 << n) != 0,
+            Browse::ShowAll => c.ideas_hidden || c.deferred_hidden || c.hidden != 0,
+            _ => false,
         }
     }
 
@@ -1380,6 +1398,21 @@ mod tests {
         // 접기는 펼쳐진 줄에서만 접고, 아니면 나가기를 그대로 탄다(뿌리에서는 조용하다).
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: true, root: true, ..list }), Ok(()));
         assert_eq!(Browse::Collapse.enabled(&Ctx { expanded: false, root: true, ..list }), Err(Off::Quiet));
+    }
+
+    /// **숨긴 것을 도로 보이는 보기 토글은 줄이 없어도 선다**(리뷰) — 한눈 보기에서 줄이 하나도 없는 까닭이 그 숨김일 수
+    /// 있다. 숨긴 것이 없으면 여태처럼 조용하고, 차례·열은 숨김과 상관없이 조용하다.
+    #[test]
+    fn unhiding_stands_on_the_overview_even_with_no_row() {
+        let bare = Ctx { layer: true, list_focus: true, ..Ctx::default() };
+        for act in [Browse::Ideas, Browse::Deferred, Browse::ShowAll] {
+            assert_eq!(act.enabled(&bare), Err(Off::Quiet), "{act:?} 가 숨긴 것도 없이 섰다");
+        }
+        assert_eq!(Browse::Ideas.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::Deferred.enabled(&Ctx { deferred_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::ShowAll.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::Column(0).enabled(&Ctx { columns: 1, hidden: 1, ..bare }), Ok(()));
+        assert_eq!(Browse::Sort(Order::Title).enabled(&Ctx { ideas_hidden: true, ..bare }), Err(Off::Quiet));
     }
 
     /// **보드에서는 `h`·`l` 이 늘 서고 `Tab` 은 조용하다**(moai-9nfw) — 카드는 펼칠 묶음이 아니라, 펼침의 켜짐으로

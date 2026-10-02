@@ -536,9 +536,9 @@ IDEA
   overview (0) every project stands as a header across the columns, the same
   line the list gives it, and an unfolded project has its milestone lanes
   under it; the columns are those of every project shown, together. The
-  cursor stands on a header too — k from the top card of a lane goes up to
-  it — and there l unfolds, h folds, Tab unfolds everything and Enter goes
-  in, as in the list.
+  cursor stands on a header too — k from the project's top card in a column
+  goes up to it — and there l unfolds, h folds, Tab unfolds everything and
+  Enter goes in, as in the list.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

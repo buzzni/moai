@@ -81,7 +81,7 @@ pub struct Laid {
 /// 보드의 레인 하나가 무엇인가.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaneOf {
-    /// 한눈 보기의 프로젝트 머리줄 — 층 줄의 첨자다(moai-oagj.vcj). 칸을 가로지르고 커서가 선다.
+    /// 한눈 보기의 프로젝트 머리줄 — `layer.places` 의 첨자다(moai-oagj.vcj). 칸을 가로지르고 커서가 선다.
     Project(usize),
     /// 한 프로젝트의 마일스톤·바구니. `None` 은 마일스톤 없는 저장소나 폴더 안의 하나뿐인 레인이다.
     Seg(Seat, Option<Seg>),
@@ -1242,7 +1242,11 @@ pub struct App {
     pub layout: view::Layout,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
-    board_column: usize,
+    ///
+    /// **첨자가 아니라 칸 그 자체를 든다**(리뷰) — 보드의 칸은 펼친 프로젝트와 보기 토글을 따라 다시 서서, 첨자로 들면
+    /// `SPC v i` 한 번에 옆 칸을 가리킨다. 아직 아무 카드에도 안 섰으면 `None` 이고, 그때 머리줄의 `j` 는 가장 가까운
+    /// 카드다 — 처음값 0 은 idea 칸이라 맨 아래 레인의 idea 로 내려갔다. 적는 자는 [`App::note_board_column`] 하나다.
+    board_column: Option<board::Column>,
     /// 마우스를 잡는가(moai-irrj.9xq). **처음에는 잡는다**(사용자 결정 2026-10-01) — `SPC o m` 이 놓고
     /// 잡으며 설정에 남는다. 터미널에 그 글을 내는 것은 루프다(`cmd::tui`): 여기는 원하는 값만 든다.
     /// 이름이 `mouse` 가 아닌 것은 사건을 받는 [`App::mouse`] 와 가르려서다 — 같은 이름이면 문서의 고리가 말없이
@@ -1788,7 +1792,7 @@ impl App {
             detail_open: true,
             detail_at: view::DetailAt::default(),
             layout: view::Layout::default(),
-            board_column: 0,
+            board_column: None,
             mouse_on: true,
             drawn: mouse::Drawn::default(),
             list_width: None,
@@ -4236,7 +4240,7 @@ impl App {
                         let at = e.at().filter(|&at| at < site.issues.len())?;
                         let idea = crate::report::is_idea(&site.issues[at]);
                         let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
-                        let height = draw::card_height(self.fields, site.whose(at).is_some());
+                        let height = draw::card_height(self.fields, || site.whose(at).is_some());
                         Some(Spot::Card(*seat, site.lane(at), column, height))
                     }
                     Row::Up => None,
@@ -4261,6 +4265,17 @@ impl App {
             Seat::Here => 0,
             Seat::Place(n) => n,
         };
+        // 그 프로젝트·그 마디의 레인 — 없으면 세운다. **열쇠를 지어 견주지 않는다** — 카드마다 마디의 id 를 베끼게
+        // 된다. 카드는 레인마다 모여 오므로(`App::cards_in` 이 레인 차례로 세운다) 뒤에서부터 찾는다.
+        fn lane_of(lanes: &mut Vec<LaneOf>, seat: Seat, seg: Option<&Seg>) -> usize {
+            lanes
+                .iter()
+                .rposition(|l| matches!(l, LaneOf::Seg(s, g) if *s == seat && g.as_ref() == seg))
+                .unwrap_or_else(|| {
+                    lanes.push(LaneOf::Seg(seat, seg.cloned()));
+                    lanes.len() - 1
+                })
+        }
         let mut lanes: Vec<LaneOf> = Vec::new();
         let mut slots: Vec<board::Slot> = Vec::with_capacity(spots.len());
         for spot in &spots {
@@ -4270,22 +4285,14 @@ impl App {
                     board::Slot { lane: lanes.len() - 1, column: None, height: 1, group: *n }
                 }
                 Some(Spot::Card(seat, lane, column, height)) => {
-                    let key = LaneOf::Seg(*seat, lane.cloned());
-                    let lane = lanes.iter().position(|l| *l == key).unwrap_or_else(|| {
-                        lanes.push(key);
-                        lanes.len() - 1
-                    });
+                    let lane = lane_of(&mut lanes, *seat, *lane);
                     let column = columns.iter().position(|c| c == column).unwrap_or(0);
                     board::Slot { lane, column: Some(column), height: *height, group: group(*seat) }
                 }
                 // 빠진 프로젝트의 줄 — 다음 프레임에 사라진다([`App::site_of_seat`]). 그때까지 자리만 지킨다.
                 None => {
-                    let key = LaneOf::Seg(Seat::Here, None);
-                    let lane = lanes.iter().position(|l| *l == key).unwrap_or_else(|| {
-                        lanes.push(key);
-                        lanes.len() - 1
-                    });
-                    board::Slot { lane, column: Some(0), height: draw::card_height(self.fields, false), group: 0 }
+                    let lane = lane_of(&mut lanes, Seat::Here, None);
+                    board::Slot { lane, column: Some(0), height: draw::card_height(self.fields, || false), group: 0 }
                 }
             };
             slots.push(slot);
@@ -4348,6 +4355,12 @@ impl App {
             .as_ref()
             .and_then(|a| self.row_of(&rows, a))
             .or_else(|| under.and_then(|(seat, p)| self.first_under(&rows, seat, &p)))
+            // 그 밑에 카드가 없으면 **그 줄의 프로젝트 머리줄**에 선다(리뷰) — 한눈 보기의 첫 줄은 맨 위 프로젝트의
+            // 머리줄이라, 첫 줄로 떨어지면 빈 에픽 하나에서 보던 프로젝트를 잃는다.
+            .or_else(|| match &current {
+                Some(Row::Item(Seat::Place(n), ..)) => rows.iter().position(|r| *r == Row::Project(*n)),
+                _ => None,
+            })
             .unwrap_or(0);
         self.stand(&rows, at, held.as_ref());
         self.save_look();
@@ -4928,12 +4941,20 @@ impl App {
     /// **머리줄에 선 커서는 마지막으로 선 카드의 칸을 걷는다**(moai-oagj.vcj) — 머리줄에는 칸이 없어, `k` 로 올라온
     /// 칸을 들고 있어야 `j` 가 그 칸으로 돌아간다([`board::step`] 의 `hint`).
     fn board_step(&mut self, go: board::Go, rows: &[Row]) {
-        let plan = self.laid(rows).plan;
-        if let Some(c) = plan.cards.get(self.cursor).and_then(|p| p.column) {
-            self.board_column = c;
-        }
-        let at = board::step(&plan, self.cursor, go, self.board_column);
+        let laid = self.laid(rows);
+        self.note_board_column(&laid);
+        let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
+        let at = board::step(&laid.plan, self.cursor, go, hint);
         self.move_to(at);
+    }
+
+    /// 커서가 카드에 섰으면 그 칸을 [`App::board_column`] 에 적는다. **키만이 아니라 그림도 부른다**(`draw::board`, 리뷰) —
+    /// 누르기·휠·배치 바꾸기·다시 읽기로 카드에 선 것도 머리줄이 들고 있어야 `j` 가 그 칸으로 돌아간다.
+    pub(super) fn note_board_column(&mut self, laid: &Laid) {
+        if let Some(column) = laid.plan.cards.get(self.cursor).and_then(|p| p.column).and_then(|c| laid.columns.get(c))
+        {
+            self.board_column = Some(column.clone());
+        }
     }
 
     /// 커서를 옮기고 **상세를 첫 줄로 되돌린다.** 다른 것을 보는데 굴린 자리가

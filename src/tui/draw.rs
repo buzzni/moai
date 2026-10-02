@@ -1986,6 +1986,8 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     let block = frame(app, Pane::Explorer);
     let inner = block.inner(at);
     let here = laid.plan.cards.get(app.cursor).copied();
+    // 커서가 선 카드의 칸을 적어 둔다 — 누르기·휠로 카드에 섰어도 머리줄의 `j` 가 그 칸으로 돌아간다(`App::board_column`).
+    app.note_board_column(&laid);
     // 창은 **지난 프레임이 세운 자리에 머문다**([`super::board::window`]) — `app.drawn` 은 아직 지난 프레임의 것이다
     // (`screen` 이 이 그림 뒤에 새로 적는다). 마우스가 그 자리로 칸을 맞히므로, 머물러야 휠 밑의 칸이 안 바뀐다.
     let was = app.drawn.columns.first().map_or(0, |&(_, c)| c);
@@ -2002,7 +2004,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     let title = board_title(app, &laid, win, rows.is_empty());
     f.render_widget(block.title(title), at);
     let mut out = Boarded { cards: Vec::new(), columns: Vec::new() };
-    if inner.height == 0 || win.count == 0 {
+    if inner.height == 0 {
         return out;
     }
     let [heads, canvas] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
@@ -2836,9 +2838,10 @@ const RIGHT: [(super::view::Field, &str, usize); 5] = {
 /// 만큼이다. 표를 따로 베껴 두지 않는다 — 베낀 표는 오른쪽 열을 하나 더하는 날 그 열을 말없이 빠뜨린다.
 ///
 /// **남의 카드(`foreign`)는 켠 열이 없어도 발줄이 선다**(moai-oagj.y88, 사용자 결정) — 그 줄에 `→ 이름`·`담당 없음`
-/// 이 선다([`card_foot`]). 그래서 카드의 높이는 저마다다.
-pub(super) fn card_height(fields: super::view::Fields, foreign: bool) -> usize {
-    2 + usize::from(foreign || RIGHT.iter().any(|(f, _, _)| fields.shows(*f)))
+/// 이 선다([`card_foot`]). 그래서 카드의 높이는 저마다다. **켠 열이 있으면 묻지 않는다** — 누구 것인가는 카드마다
+/// 사람을 다시 푸는 일이라([`Site::whose`]) 보드를 지을 때마다 모든 카드에 치를 까닭이 없다.
+pub(super) fn card_height(fields: super::view::Fields, foreign: impl FnOnce() -> bool) -> usize {
+    2 + usize::from(RIGHT.iter().any(|(f, _, _)| fields.shows(*f)) || foreign())
 }
 
 /// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
@@ -4511,7 +4514,10 @@ pub(super) mod tests {
 
         a.hit("l");
         let (title, heads, text) = frame(&mut a);
-        assert!(heads.contains("todo 2") && heads.contains("in_progress 1"), "l 로 창 밖 칸에 갔는데 창이 안 밀렸다\n{text}");
+        assert!(
+            heads.contains("todo 2") && heads.contains("in_progress 1"),
+            "l 로 창 밖 칸에 갔는데 창이 안 밀렸다\n{text}"
+        );
         assert!(text.contains("> argos-0080"), "{text}");
         assert!(title.contains("미룸 0") && !title.contains("in_progress"), "제목이 밀린 창을 안 따라왔다\n{text}");
 
@@ -4622,7 +4628,8 @@ pub(super) mod tests {
         a.site.me = Some("레이븐 (raven@example.com)".into());
         let lines = render(&mut a, 120, 20);
         let text = lines.join("\n");
-        let at = |lines: &[String], id: &str| lines.iter().position(|l| l.contains(id)).unwrap_or_else(|| panic!("{id}"));
+        let at =
+            |lines: &[String], id: &str| lines.iter().position(|l| l.contains(id)).unwrap_or_else(|| panic!("{id}"));
         let mine = at(&lines, "argos-0100");
         assert!(lines[mine + 2].contains("argos-0101"), "내 카드가 발줄을 달았다\n{text}");
         let theirs = at(&lines, "argos-0101");
