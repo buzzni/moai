@@ -1118,6 +1118,14 @@ pub struct App {
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
     identify: fn(Option<&str>, &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor>,
+    /// 못 읽은 저널을 묻는 길(moai-pvpb.6g6). 진짜 길은 [`crate::store::journal_unread`] 다 — 이 프로세스가
+    /// 저널을 읽다 못 연 자리를 만난 차례대로 든다. **시험에서는 빈 것이 처음값이다**: 그 목록은 프로세스
+    /// 하나의 전역이라, 같은 프로세스에서 나란히 도는 `store` 시험이 심은 0600 저널이 헤더를 재는 시험에
+    /// 샌다. 재는 시험이 갈아 끼운다.
+    journals: fn() -> Vec<crate::store::Unread>,
+    /// 헤더가 안 서는 낮은 창에서 알림 띠로 **이미 말한** 못 읽은 저널의 수 — 늘 때만 한 번 더 말한다
+    /// ([`App::tell_journals`]).
+    journals_told: usize,
     /// 헤더가 적을 사람을 푼 것 — 열쇠는 [`Self::user`] 와 **그 프로젝트의 `naming`** 이다.
     /// **프레임마다 풀지 않는다**: `model::actor` 는 `git config` 를 프로세스로 **두 번**
     /// 띄우는데, 그리는 쪽에서 부르면 묵혀 둔 화면도 초당 셋(`TICK`), 도는 것이 있으면 초당
@@ -1697,6 +1705,8 @@ impl App {
             note_hits: None,
             user: None,
             identify: crate::model::actor,
+            journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread },
+            journals_told: 0,
             header_user: None,
             commits_job: None,
             commits_due: true,
@@ -2001,6 +2011,37 @@ impl App {
     /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
     /// 없으니 띄운 자리에서 읽고, 그것도 없으면 지금 자리다. **뿌리가 바뀌면 사람도 다시
     /// 푼다** — 프로젝트마다 git 설정이 다를 수 있고, 헤더는 지금 선 프로젝트를 말해야 한다.
+    /// **못 읽은 저널** — 이 탐색기가 지금까지 저널을 읽다 못 연 자리, 만난 차례대로(moai-pvpb.6g6, 2026-10-02
+    /// 사용자 결정). 헤더의 셋째 줄이 늘 대고, 헤더가 안 서는 창에서는 알림 띠가 한 번 댄다. 안 대면 통계 창의
+    /// 토큰 합과 `/` 의 노트 찾기가 모자란 채 다 센 것처럼 서고, 그 말은 나간 뒤 stderr 에만 선다.
+    pub fn unread_journals(&self) -> Vec<crate::store::Unread> {
+        (self.journals)()
+    }
+
+    /// 헤더가 안 서는 창에서 **새로 못 읽은 저널을 알림 띠로 한 번** 말한다. 띠는 한 자리를 나눠 쓰므로 다른
+    /// 말이 서 있으면 기다린다 — 그 말을 덮지 않고, 띠가 빈 다음 그림에서 말한다.
+    pub fn tell_journals(&mut self) {
+        if self.notice.is_some() {
+            return;
+        }
+        let unread = self.unread_journals();
+        if unread.len() <= self.journals_told {
+            return;
+        }
+        self.journals_told = unread.len();
+        if let Some(first) = unread.first() {
+            let at = crate::text::one_line(&first.at.display().to_string());
+            let said = crate::i18n::fill(
+                crate::i18n::say(self.site.lang, "warn.unread_journal"),
+                &[("at", &at), ("why", &crate::text::one_line(&first.said))],
+            );
+            self.notice = Some(match unread.len() {
+                1 => said,
+                n => format!("{said} (+{})", n - 1),
+            });
+        }
+    }
+
     fn user_root(&self) -> &std::path::Path {
         self.site
             .repo

@@ -406,6 +406,7 @@
   "tui.banner.upgrade": "{tag} is out — the line that upgrades is printed when you quit",
   "tui.banner.warnings": "{n} things surfaced — `moai status` spells them out",
   "tui.header.all": "all",
+  "tui.header.journal": "{n} unreadable - {at} ({kind})",
   "tui.version.newer": "{tag} is out",
   "tui.version.same": "latest",
   "tui.version.ahead": "ahead of the latest release",

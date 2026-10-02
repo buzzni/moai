@@ -127,6 +127,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 돈다. 값은 [`App::rows`] 의 문서가 든다 — 여기에도 적어 두었더니 둘이
     // 두 배 차이로 갈렸다(리뷰).
     let rows = app.rows();
+    // **헤더가 안 서는 창에서는 못 읽은 저널을 알림 띠가 한 번 댄다**(moai-pvpb.6g6) — 헤더의 셋째 줄이
+    // 늘 대는 그것이다. 배너 높이를 재기 전에 세워야 이 그림에서 선다.
+    if f.area().height < HEADER_MIN_H {
+        app.tell_journals();
+    }
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
     // 누군지 묻는 동안과 거름망을 적는 동안만 아랫줄이 둘이다. 묻는 칸은 왜 묻는지와 다시 안 묻게
@@ -1416,11 +1421,44 @@ fn spans_width(spans: &[Span]) -> usize {
 /// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
-fn told_of(app: &mut App) -> [(&'static str, String); 2] {
+fn told_of(app: &mut App) -> Vec<(&'static str, String)> {
     let said = version_said(app.site.lang, app.latest());
     let user = app.told_user().to_string();
-    [("User", user), ("Version", said)]
+    let mut told = vec![("User", user), ("Version", said)];
+    // **못 읽은 저널은 셋째 줄로 늘 선다**(moai-pvpb.6g6, 2026-10-02 사용자 결정) — 못 읽은 동안 내내다.
+    // 없으면 줄이 안 선다: 헤더는 가르기 전과 글자째 같다.
+    told.extend(journal_said(app).map(|said| ("Journal", said)));
+    told
 }
+
+/// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래(`permission`·`failed`).
+///
+/// **자리는 그 저장소 뿌리에서 본 길로 줄인다** — 통째의 절대 경로는 헤더의 좁은 칸에서 번호 칸까지
+/// 밀어낸다. 고치는 법(`chmod`)은 그 자리에 대는 것이라 파일까지는 남긴다. 뿌리가 이 화면의 것이
+/// 아니면(옆 워크트리·딴 프로젝트) 그 뿌리의 이름을 앞에 붙인다. 그래도 길면 [`JOURNAL_AT_W`] 에서 **앞을**
+/// 자르고 `…` 를 남긴다 — 고칠 파일 이름은 끝에 있다. 남의 글자라 한 줄로 접는다.
+fn journal_said(app: &App) -> Option<String> {
+    let unread = app.unread_journals();
+    let first = unread.first()?;
+    let rel = first.at.strip_prefix(&first.root).unwrap_or(&first.at).display().to_string();
+    let home = app.site.repo.as_ref().map(|r| r.root.as_path());
+    let at = match (home == Some(first.root.as_path()), first.root.file_name()) {
+        (false, Some(name)) => format!("{}/{rel}", name.to_string_lossy()),
+        _ => rel,
+    };
+    Some(crate::i18n::fill(
+        say(app.site.lang, "tui.header.journal"),
+        &[
+            ("n", &unread.len().to_string()),
+            ("at", &crate::text::clip_front(&crate::text::one_line(&at), JOURNAL_AT_W)),
+            ("kind", first.kind),
+        ],
+    ))
+}
+
+/// 헤더의 저널 줄이 자리에 내주는 칸 — 넘으면 `…` 로 자른다. 사람·판 줄이 대개 이보다 짧아, 이 줄이
+/// 번호 칸을 밀어내지 않을 만큼이다.
+const JOURNAL_AT_W: usize = 32;
 
 /// 판 줄의 글 — 내 판 뒤에 소식 한 낱말을 잇는다.
 ///
@@ -6337,6 +6375,64 @@ pub(super) mod tests {
         assert!(head.contains("User") && head.contains("레이븐 (raven@buzzni.com)"), "사람이 없다\n{head}");
         assert!(head.contains(&format!("Version : {}", env!("CARGO_PKG_VERSION"))), "판이 없다\n{head}");
         assert!(head.contains("최신 확인 안 함"), "서버 최신판 자리가 없다\n{head}");
+    }
+
+    /// **못 읽은 저널은 헤더의 셋째 줄로 늘 선다**(moai-pvpb.6g6, 2026-10-02 사용자 결정) — 수와 첫 자리(그
+    /// 저장소 뿌리에서 본 길, 이 화면의 뿌리가 아니면 그 뿌리 이름을 붙여)와 그 갈래다. 없으면 줄이 안 선다.
+    #[test]
+    fn the_header_names_an_unreadable_journal_on_its_third_row() {
+        let mut a = app();
+        let lines = render(&mut a, 120, 30);
+        assert!(!lines[..6].join("\n").contains("Journal"), "못 읽은 것이 없는데 줄이 섰다");
+
+        a.journals = || {
+            let root = std::path::PathBuf::from("/w/argos");
+            vec![
+                crate::store::Unread {
+                    at: root.join(".moai/journal/kim.jsonl"),
+                    root,
+                    kind: "permission",
+                    said: "Permission denied (os error 13)".into(),
+                },
+                crate::store::Unread {
+                    root: "/w/other".into(),
+                    at: "/w/other/.moai/journal/lee.jsonl".into(),
+                    kind: "failed",
+                    said: "Is a directory (os error 21)".into(),
+                },
+            ]
+        };
+        let lines = render(&mut a, 120, 30);
+        let said = fill(
+            say(a.site.lang, "tui.header.journal"),
+            &[("n", "2"), ("at", "argos/.moai/journal/kim.jsonl"), ("kind", "permission")],
+        );
+        assert!(lines[2].contains(&format!("Journal : {said}")), "셋째 줄에 안 섰다\n{}", lines[..6].join("\n"));
+    }
+
+    /// **헤더가 안 서는 낮은 창에서는 알림 띠가 한 번 댄다**(moai-pvpb.6g6) — 늘 때만 다시 말한다. 띠에 다른 말이
+    /// 서 있으면 덮지 않고 기다린다.
+    #[test]
+    fn a_low_window_tells_an_unreadable_journal_once_in_the_banner() {
+        let mut a = app();
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/argos".into(),
+                at: "/w/argos/.moai/journal/kim.jsonl".into(),
+                kind: "permission",
+                said: "Permission denied".into(),
+            }]
+        };
+        a.notice = Some("다른 말".into());
+        render(&mut a, 100, 12);
+        assert_eq!(a.notice.as_deref(), Some("다른 말"), "띠의 다른 말을 덮었다");
+        a.notice = None;
+        render(&mut a, 100, 12);
+        let told = a.notice.clone().expect("낮은 창에서 아무 말도 안 했다");
+        assert!(told.contains("/w/argos/.moai/journal/kim.jsonl"), "{told}");
+        a.notice = None;
+        render(&mut a, 100, 12);
+        assert_eq!(a.notice, None, "같은 것을 두 번 말했다");
     }
 
     /// **판 줄의 넷은 서로 다른 글이다**(moai-3gia, 사용자 결정 2026-09-21). 특히 못 물은 것과

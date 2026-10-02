@@ -406,6 +406,7 @@
   "tui.banner.upgrade": "새 판 {tag} 이 나왔다 — 올리는 줄은 나갈 때 찍는다",
   "tui.banner.warnings": "드러난 것 {n}건 — `moai status` 가 자세히 낸다",
   "tui.header.all": "전체",
+  "tui.header.journal": "{n}개 못 읽음 — {at} ({kind})",
   "tui.version.newer": "새 판 {tag}",
   "tui.version.same": "최신",
   "tui.version.ahead": "릴리스보다 앞선 판",
