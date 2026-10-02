@@ -310,6 +310,7 @@
   "tui.act.mouse": "mouse",
   "tui.tz.title": "timezone",
   "tui.tz.none": "no timezone data on this machine - times stay in UTC",
+  "tui.tz.unlisted": "{now} in use is not a name on this list - move or type to pick one; Enter alone keeps it",
   "tui.tz.now": "now",
   "tui.menu.root": "menu",
   "tui.group.project": "project",

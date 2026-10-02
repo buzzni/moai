@@ -310,6 +310,7 @@
   "tui.act.mouse": "마우스",
   "tui.tz.title": "시간대",
   "tui.tz.none": "이 기계에 시간대 자료가 없다 — 시각은 UTC 로 선다",
+  "tui.tz.unlisted": "지금 쓰는 {now} 는 목록의 이름이 아니다 — 옮기거나 쳐서 고른다. 그냥 Enter 는 그대로 둔다",
   "tui.tz.now": "지금",
   "tui.menu.root": "메뉴",
   "tui.group.project": "프로젝트",

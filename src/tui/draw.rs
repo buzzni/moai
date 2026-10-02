@@ -456,8 +456,13 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
         // tzdb 는 있는데 거르는 글에 하나도 안 걸렸다 — 그것은 탈이 아니라 글이 좁은 것이다.
         block = block
             .title_bottom(Line::from(Span::styled(clip(&format!(" {} ", say(lang, "tui.tz.none")), inner), dim())));
+    } else if z.unlisted() {
+        // **지금 쓰는 것이 목록에 없다**(moai-pvpb.1yh) — 규칙 글(`TZ=JST-9`)로 선 시간대다. 칠한 줄이 없는
+        // 까닭을 여기서 댄다 — 안 대면 사람은 커서가 어디 갔는지 모른다.
+        let said = crate::i18n::fill(say(lang, "tui.tz.unlisted"), &[("now", &crate::text::one_line(z.now()))]);
+        block = block.title_bottom(Line::from(Span::styled(clip(&format!(" {said} "), inner), dim())));
     }
-    let selected = (!rows.is_empty()).then_some(z.cursor.min(rows.len().saturating_sub(1)));
+    let selected = z.selected();
     z.list.fit(at.height.saturating_sub(2) as usize, rows.len());
     if let Some(n) = selected {
         z.list.reveal(n);

@@ -9243,6 +9243,31 @@ mod tests {
         assert_eq!(a.zone.name(), before, "Esc 가 시간대를 바꿨다");
     }
 
+    /// **규칙 글 시간대에서 글자 없는 Enter 는 아무것도 안 고른다**(moai-pvpb.1yh) — `TZ=JST-9` 는 목록의
+    /// 이름이 아니라 커서가 아무 줄도 안 가리킨다. 맨 위에 세워 두던 판은 그 Enter 가 첫 tzdb 이름
+    /// (`Africa/Abidjan`)으로 바꾸고 설정에 적었다. 창 밑에는 그렇다고 한 줄 선다.
+    #[test]
+    fn enter_on_an_unlisted_zone_picks_nothing() {
+        let s = scratch("zone-unlisted");
+        let user = s.join("user.toml");
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.zone = crate::tz::Zone::load("JST-9").expect("규칙 글을 못 읽었다");
+        a.hit("SPC o t");
+        let Mode::Zone(z) = &a.mode else { panic!("SPC o t 가 창을 안 열었다 — {:?}", a.mode) };
+        assert_eq!(z.at(), None, "목록에 없는 이름에서 줄을 골라 두었다");
+        // 칠한 줄이 없는 까닭을 창 밑에서 댄다 — 이 기계에 tzdb 가 있을 때만 목록이 선다.
+        if !z.shown().is_empty() {
+            let said = crate::i18n::fill(crate::i18n::say(a.site.lang, "tui.tz.unlisted"), &[("now", "JST-9")]);
+            let drawn = super::draw::tests::render(&mut a, 140, 20).join("\n");
+            assert!(drawn.contains(&said), "까닭을 안 댔다\n{drawn}");
+        }
+        a.hit("Enter");
+        assert!(matches!(a.mode, Mode::Browse), "Enter 가 창을 안 닫았다");
+        assert_eq!(a.zone.name(), "JST-9", "글자 없는 Enter 가 시간대를 바꿨다");
+        assert!(a.saved_zone.is_none() && !user.exists(), "고르지도 않은 이름을 설정에 적었다");
+    }
+
     /// **고른 이름은 다음 실행이 그대로 든다**(moai-3oz2) — 못 푸는 이름이어도 설정의 그 줄은
     /// 그대로고, 화면만 UTC 로 떨어지며 까닭이 한 줄로 선다(moai-77ap).
     #[test]
