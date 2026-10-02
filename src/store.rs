@@ -683,49 +683,29 @@ impl Repo {
     /// 거절하던 자리를 읽기도 같은 자로 잰다 — 저장소가 든 파일은 제 체크아웃 안에서만 링크를 따른다. 받은
     /// 저장소가 커밋한 `.moai/journal/x.jsonl -> /proc/self/pagemap` 은 `stat` 이 크기 0 인 보통 파일이라 답해
     /// [`Repo::journal_names`] 의 판정을 지나고, [`Repo::journal_bytes`] 의 `fs::read` 가 256GiB 가량을 담으려다
-    /// OOM 으로 죽었다. procfs·sysfs 의 파일은 늘 체크아웃 밖이고, git 이 실을 수 있는 것은 보통 파일과 링크뿐이라
-    /// 안에 선 보통 파일은 디스크에 있는 만큼만 읽힌다.
+    /// OOM 으로 죽었다. 자는 스냅샷·설정과 한 벌이다([`crate::held::place`], moai-itsu) — 안을 가리키는 링크
+    /// (moai-p9mq 의 `<옛 메일>.jsonl -> <새 메일>.jsonl`)는 따르고, 밖·`.git/` 으로 가는 링크는 안 따르고, 못 푼
+    /// 자리는 재지 않는다. 그 까닭은 거기 적혀 있다.
     ///
-    /// - 견주는 것은 위에서 접으려고 이미 푼 자리다. 끝 조각의 링크도, 옛 한 파일의 링크도, 가운데 디렉터리의
+    /// - 견주는 것은 접으려고 푸는 바로 그 자리다. 끝 조각의 링크도, 옛 한 파일의 링크도, 가운데 디렉터리의
     ///   링크(`.moai/journal -> /밖`)도 거기서 다 드러난다
-    /// - **안을 가리키는 링크는 그대로 따른다** — 메일을 바꾼 사람의 `<옛 메일>.jsonl -> <새 메일>.jsonl`
-    ///   (moai-p9mq)이 그렇다. 딸린 워크트리에서 부른 `moai` 는 루트의 트래커를 읽으므로 `self.root` 가 그
-    ///   루트다 — 쓰기가 견주는 뿌리와 같다
-    /// - **안이라도 `.git/` 은 아니다** — [`target_of`] 와 같다. `x.jsonl -> ../../.git/objects/pack/…` 는
-    ///   몇 GiB 짜리 팩을 통째로 담는다
-    /// - **못 푼 자리는 재지 않는다**(`real == p`) — 받은 철자 그대로라 어디로 가는지 모른다. 뿌리의 조상에 링크가
-    ///   있으면 그 철자는 푼 뿌리와 안 맞아 밖으로 잘못 읽힌다. 못 푼 자리는 읽는 쪽이 넘기거나 센다
+    /// - 딸린 워크트리에서 부른 `moai` 는 루트의 트래커를 읽으므로 `self.root` 가 그 루트다 — 쓰기가 견주는
+    ///   뿌리와 같다
     /// - **접기 전에 잰다** — 밖을 가리키는 이름이 둘이면 둘 다 센다. 접고 나서 재면 둘째가 말없이 빠진다
-    /// - **넘기되 조용히는 아니다**(moai-6ney) — 링크 이름을 [`note_unread`] 에 센다. 고칠 것이 그 링크다
+    /// - **넘기되 조용히는 아니다**(moai-6ney) — 링크 이름을 [`note_missed`] 에 `outside` 로 센다(moai-itsu).
+    ///   고칠 것이 그 링크라 잠깐의 io 실패(`failed`)와 갈라 둔다
     fn journal_files(&self) -> Vec<PathBuf> {
         let home = crate::path::real(&self.root);
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
         for p in self.journal_names() {
-            let real = crate::path::real(&p);
-            if real != p {
-                let end = || crate::text::one_line(&real.display().to_string());
-                let why = match real.strip_prefix(&home) {
-                    Err(_) => Some(format!(
-                        "it points at {}, outside {}. A file the repository holds follows a link only inside its \
-                         own checkout",
-                        end(),
-                        home.display()
-                    )),
-                    // 쓰기([`target_of`])와 같은 자다 — 체크아웃 안이라도 git 의 자리는 저널이 아니다. 팩 파일
-                    // 하나가 몇 GiB 라도 통째로 담긴다.
-                    Ok(rest) if rest.components().any(|c| c.as_os_str() == ".git") => Some(format!(
-                        "it points at {}, inside git's own directory. A file the repository holds never follows a \
-                         link into .git",
-                        end()
-                    )),
-                    Ok(_) => None,
-                };
-                if let Some(why) = why {
-                    note_unread(&self.root, &p, &std::io::Error::other(why));
+            let real = match crate::held::place(&p, &home) {
+                Ok(real) => real,
+                Err(why) => {
+                    note_missed(&self.root, &p, Missed::Held(why));
                     continue;
                 }
-            }
+            };
             if !seen.insert(real.clone()) {
                 continue;
             }
@@ -1261,24 +1241,18 @@ impl Repo {
     /// **연 파일이 댄 크기까지만 읽는다**(moai-karj 리뷰). [`Repo::journal_files`] 는 이름으로 재므로, 잰 뒤
     /// 읽기 전에 체크아웃·머지가 그 이름을 procfs 로 가는 링크로 갈아끼우면 `fs::read` 가 크기 0 이라 답한
     /// 파일을 끝없이 읽는다. 연 손잡이의 `fstat` 은 그 틈이 없다 — 디스크의 보통 파일은 크기를 바로 대고,
-    /// 덧붙는 중의 꼬리는 [`Repo::each_entry`] 가 다시 읽어 받는다.
+    /// 덧붙는 중의 꼬리는 [`Repo::each_entry`] 가 다시 읽어 받는다. 읽는 자는 스냅샷·설정과 한 벌이다
+    /// ([`crate::held::read`], moai-itsu) — 막히지 않게 열어, 그 틈에 FIFO 로 갈린 이름 앞에서도 안 멈춘다.
     fn journal_bytes(&self, path: &Path) -> Option<Vec<u8>> {
-        let bounded = || -> std::io::Result<Vec<u8>> {
-            use std::io::Read;
-            let f = std::fs::File::open(path)?;
-            let m = f.metadata()?;
-            if !m.is_file() {
-                return Err(std::io::Error::other("not a regular file"));
-            }
-            let mut out = Vec::new();
-            f.take(m.len()).read_to_end(&mut out)?;
-            Ok(out)
-        };
-        match bounded() {
+        match crate::held::read(path) {
             Ok(b) => Some(b),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
+            Err(crate::held::Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(crate::held::Fell::Io(e)) => {
                 note_unread(&self.root, path, &e);
+                None
+            }
+            Err(crate::held::Fell::Unheld(why)) => {
+                note_missed(&self.root, path, Missed::Held(why));
                 None
             }
         }
@@ -1549,21 +1523,53 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
 
 /// 못 읽어 건너뛴 저널 자리 하나 — 어느 저장소의 어느 파일을 왜 못 읽었나.
 ///
-/// **`kind` 는 기계의 것이고 `said` 는 사람의 것이다**([`crate::git::Told`] 와 같은 가름,
-/// moai-f2lc). `said` 는 운영체제가 지은 글이라 `LANG` 과 libc 에 따라 바뀌고 우리가 안 옮긴다 —
-/// 받는 쪽이 그것을 부분 문자열로 맞추면 그 줄은 기계마다 다르게 읽힌다. 가르는 자는 `kind` 다.
+/// **[`Unread::kind`] 는 기계의 것이고 [`Unread::said`] 는 사람의 것이다**([`crate::git::Told`] 와 같은 가름,
+/// moai-f2lc). 받는 쪽이 글을 부분 문자열로 맞추면 그 줄은 기계마다·말마다 다르게 읽힌다. 가르는 자는 `kind` 다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unread {
     /// 그 저널이 사는 저장소의 뿌리. `main` 이 제 것과 옆 워크트리의 것을 이것으로 가른다.
     pub root: PathBuf,
     /// 못 읽은 자리 — 파일이거나, 훑지 못한 `journal/` 디렉터리다. **고치는 법이 곧 이 자리에
-    /// 대는 `chmod`** 라, 줄이지 않고 통째로 든다.
+    /// 대는 `chmod`** 나 이 링크를 고치는 것이라, 줄이지 않고 통째로 든다.
     pub at: PathBuf,
-    /// `permission`·`failed`. 늘어날 수 있으므로 받는 쪽은 모르는 값을 `failed` 처럼 다룬다 —
-    /// 고칠 수 있는 하나(`chmod`)를 가르는 것이 이 값의 일이다.
-    pub kind: &'static str,
-    /// io 가 낸 말. **안 옮긴다** — 무엇을 못 했는지는 말묶음의 `warn.unread_journal` 이 앞에 붙인다.
-    pub said: String,
+    /// 왜 못 읽었나 — 갈래와 글은 이것에서 읽는다([`Unread::kind`]·[`Unread::said`]).
+    pub why: Missed,
+}
+
+/// 저널 자리를 못 읽은 까닭 — **io 가 진 것과 안 읽기로 한 것을 가른다**(moai-itsu).
+///
+/// 한때는 둘을 한 꼴(`kind`·`said`)에 담아, 체크아웃 밖을 가리키는 링크가 `failed` 로 서고 `said` 에 moai 가
+/// 지은 영어 문장이 들었다. 기계는 "그 링크를 걷어라" 를 잠깐의 io 실패와 못 갈랐고, `MOAI_LANG=ko` 에서는
+/// 한국어 머리 뒤에 영어 설명이 붙었다(리뷰 moai-karj.8zm 4·5번).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Missed {
+    /// io 가 진 것 — `permission`·`failed` 와 운영체제가 낸 말. **말은 안 옮긴다**(`LANG` 과 libc 의 것이다).
+    Io { kind: &'static str, said: String },
+    /// 안 읽기로 한 자리([`crate::held::Unheld`]) — 글은 받는 쪽이 고른 말로 짓는다.
+    Held(crate::held::Unheld),
+}
+
+impl Unread {
+    /// `permission`·`failed`·`outside`. 늘어날 수 있으므로 받는 쪽은 모르는 값을 `failed` 처럼 다룬다 —
+    /// 고칠 길이 하나로 정해진 갈래를 가르는 것이 이 값의 일이다. `permission` 은 `chmod` 한 줄이고,
+    /// `outside` 는 체크아웃 밖·`.git/` 으로 가는 링크라 그 링크를 고친다. 보통 파일이 아닌 자리는 그 둘
+    /// 어느 쪽으로도 안 풀려 `failed` 다.
+    pub fn kind(&self) -> &'static str {
+        match &self.why {
+            Missed::Io { kind, .. } => kind,
+            Missed::Held(crate::held::Unheld::NotAFile) => "failed",
+            Missed::Held(_) => "outside",
+        }
+    }
+
+    /// 사람이 읽을 까닭 한 토막 — io 가 낸 말은 그대로, 안 읽기로 한 것은 고른 말로. 무엇을 못 했는지는
+    /// 말묶음의 `warn.unread_journal` 이 앞에 붙인다.
+    pub fn said(&self, lang: crate::i18n::Lang) -> String {
+        match &self.why {
+            Missed::Io { said, .. } => said.clone(),
+            Missed::Held(why) => crate::held::said(lang, why),
+        }
+    }
 }
 
 /// 못 읽어 건너뛴 저널 자리, 만난 차례대로([`Unread`]).
@@ -1596,7 +1602,12 @@ pub fn journal_unread() -> Vec<Unread> {
 /// 못 읽은 자리를 센다. **같은 짝은 한 번만 선다** — 한 명령이 저널을 여러 번 읽어도 사람은
 /// 같은 줄을 두 번 볼 까닭이 없다.
 fn note_unread(root: &Path, at: &Path, err: &std::io::Error) {
-    let one = Unread { root: root.to_path_buf(), at: at.to_path_buf(), kind: unread_kind(err), said: err.to_string() };
+    note_missed(root, at, Missed::Io { kind: unread_kind(err), said: err.to_string() });
+}
+
+/// [`note_unread`] 의 몸통 — 안 읽기로 한 자리([`crate::held::Unheld`])도 여기로 든다.
+fn note_missed(root: &Path, at: &Path, why: Missed) {
+    let one = Unread { root: root.to_path_buf(), at: at.to_path_buf(), why };
     let mut v = UNREAD.lock().unwrap_or_else(|e| e.into_inner());
     if !v.contains(&one) {
         v.push(one);
@@ -2839,10 +2850,10 @@ mod tests {
         assert_eq!(told.len(), 1, "못 연 자리를 안 셌거나 여러 번 셌다 — {told:?}");
         assert_eq!(told[0].root, r.root, "어느 저장소인지 안 댄다 — {told:?}");
         assert_eq!(told[0].at, dir, "어느 자리인지 안 댄다 — {told:?}");
-        assert!(!told[0].said.is_empty(), "까닭을 안 댄다");
+        assert!(!told[0].said(crate::i18n::Lang::En).is_empty(), "까닭을 안 댄다");
         // **`chmod` 로 풀리는 갈래를 기계가 가른다**(moai-f2lc) — `said` 는 운영체제가 지은
         // 글이라 `LANG` 과 libc 에 따라 바뀌니, 받는 쪽이 그것을 부분 문자열로 맞추면 안 된다.
-        assert_eq!(told[0].kind, "permission", "권한으로 막힌 자리를 그렇게 안 댄다 — {told:?}");
+        assert_eq!(told[0].kind(), "permission", "권한으로 막힌 자리를 그렇게 안 댄다 — {told:?}");
     }
 
     /// **이름은 읽히는데 잴 수 없는 자리도 센다**(리뷰, moai-6ney). `chmod 400 .moai/journal` 은
@@ -2878,7 +2889,7 @@ mod tests {
         assert!(got.is_empty(), "못 잰 자리에서 이력을 지어냈다");
         assert_eq!(told.len(), 1, "못 잰 파일을 안 셌거나 여러 번 셌다 — {told:?}");
         assert_eq!(told[0].at, mine, "어느 파일인지 안 댄다 — {told:?}");
-        assert_eq!(told[0].kind, "permission", "{told:?}");
+        assert_eq!(told[0].kind(), "permission", "{told:?}");
     }
 
     /// **남의 파일 하나가 제 이력까지 막지 않는다**(2026-09-21 사용자 결정, moai-6ney). 한
@@ -2923,7 +2934,7 @@ mod tests {
         assert_eq!(mine_hist.len(), 1, "제 파일의 이력까지 잃었다");
         assert_eq!(once.len(), 1, "못 읽은 파일을 안 셌거나 여러 번 셌다 — {once:?}");
         assert_eq!(once[0].at, theirs_file, "어느 파일인지 안 댄다 — {once:?}");
-        assert_eq!(once[0].kind, "permission", "{once:?}");
+        assert_eq!(once[0].kind(), "permission", "{once:?}");
         assert!(theirs_hist.is_empty());
         assert_eq!(twice.len(), 1, "같은 파일을 두 번 셌다");
     }
@@ -3017,7 +3028,11 @@ mod tests {
         let theirs = away.join("x.jsonl");
         let line = serde_json::to_string(&JournalEntry::note("argos-4aex", "밖", T, &crate::model::someone("other")));
         std::fs::write(&theirs, format!("{}\n", line.unwrap())).unwrap();
-        let outside = |u: &Unread, at: &Path| u.at == at && u.kind == "failed" && u.said.contains("outside");
+        // **`kind` 로 가른다**(moai-itsu) — `said` 의 낱말로 가르던 판은 `Unread` 의 글이 "가르는 자가 아니다" 라고
+        // 적은 일을 시험이 했다. 체크아웃 밖과 `.git/` 은 같은 `outside` 고, 둘은 자료의 갈래로 가른다.
+        let outside = |u: &Unread, at: &Path| {
+            u.at == at && u.kind() == "outside" && matches!(u.why, Missed::Held(crate::held::Unheld::Outside { .. }))
+        };
 
         let (r, d) = repo("journal-outside");
         r.with_write(
@@ -3071,7 +3086,8 @@ mod tests {
         std::os::unix::fs::symlink("../../.git/x.jsonl", &link).unwrap();
         assert!(r.journal_of("argos-4aex").is_empty(), "링크를 지나 .git 안의 파일을 저널로 읽었다");
         let told = unread_under(d.path());
-        assert!(told.iter().any(|u| u.at == link && u.said.contains(".git")), "{told:?}");
+        let into_git = |u: &Unread| matches!(u.why, Missed::Held(crate::held::Unheld::IntoGit { .. }));
+        assert!(told.iter().any(|u| u.at == link && u.kind() == "outside" && into_git(u)), "{told:?}");
     }
 
     /// **연 파일이 댄 크기까지만 읽는다**(moai-karj 리뷰) — 이름으로 잰 뒤 읽기 전에 그 자리가 procfs 로 갈리는

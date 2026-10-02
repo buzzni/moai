@@ -20407,6 +20407,34 @@ fn a_snapshot_link_out_of_the_checkout_stops_with_broken() {
     assert!(text(&out).contains(".moai/issues.jsonl"), "어느 링크를 고칠지 안 댔다\n{}", text(&out));
 }
 
+/// **체크아웃 밖을 가리키는 저널 링크는 `--json` 에 `outside` 로 선다**(moai-itsu). `failed` 로 서던 판은 기계가
+/// "그 링크를 걷어라" 를 잠깐의 io 실패와 못 갈랐다. 까닭은 고른 말로 선다 — moai 가 지은 영어 문장이 한국어
+/// 머리 뒤에 붙던 자리다. 영어 판의 그 문장이 한국어 판에 안 서는 것으로 잰다.
+#[cfg(unix)]
+#[test]
+fn a_journal_link_out_of_the_checkout_stands_as_outside_in_the_json() {
+    let s = init("heldjournal");
+    let away = Scratch::new("heldjournal-away");
+    let id = add(s.path(), &["밖을 가리키는 저널"]);
+    std::fs::write(away.path().join("x.jsonl"), "").unwrap();
+    std::os::unix::fs::symlink(away.path().join("x.jsonl"), s.path().join(".moai/journal/zz.jsonl")).unwrap();
+
+    let out = moai(s.path(), &["show", &id, "--json"]);
+    let shown = String::from_utf8_lossy(&out.stdout).to_string();
+    one_json_value(&shown);
+    assert!(shown.contains(r#""journal_error":[{"kind":"outside""#), "기계가 가를 갈래가 아니다\n{shown}");
+    assert!(!out.status.success(), "제 저장소의 저널을 빼고 0 으로 끝났다\n{}", text(&out));
+
+    let said = |lang: &str| {
+        let out = staged(&["show", &id]).current_dir(s.path()).env("MOAI_LANG", lang).output().unwrap();
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+    let (en, ko) = (said("en"), said("ko"));
+    let english = "follows a link only inside its own checkout";
+    assert!(en.contains(english), "시험의 전제 — 영어 판의 까닭이 바뀌었다\n{en}");
+    assert!(!ko.contains(english), "한국어 판에 moai 가 지은 영어 문장이 붙었다\n{ko}");
+}
+
 /// **막대 곁에 미룬 수가 선다 — 보드와 묶음 상세와 `--json` 셋 다**(moai-zxwj, 2026-09-21
 /// 사용자 결정).
 ///

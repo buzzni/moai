@@ -700,7 +700,7 @@ pub const OURS: &[&str] = &[
 /// 그 자리가 곧 고치는 법이다 — `chmod` 를 어디에 하는지가 이 값의 쓸모다.
 #[derive(Debug, serde::Serialize)]
 pub struct JournalError {
-    /// `permission`·`failed`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
+    /// `permission`·`failed`·`outside`([`crate::store::Unread::kind`]). 받는 쪽이 갈라 읽는 것은 이것이다.
     pub kind: &'static str,
     /// 사람이 읽을 한 줄 — `main` 이 stderr 로 내는 줄과 **같은 글이다**. 두 자리에서 따로
     /// 지으면 같은 실패를 화면과 `--json` 이 다른 말로 말한다.
@@ -722,10 +722,10 @@ pub fn journal_errors(
         .iter()
         .filter(|u| root.is_none_or(|r| u.root == r))
         .map(|u| JournalError {
-            kind: u.kind,
+            kind: u.kind(),
             said: crate::i18n::fill(
                 crate::i18n::say(lang, "warn.unread_journal"),
-                &[("at", &u.at.display().to_string()), ("why", &u.said)],
+                &[("at", &u.at.display().to_string()), ("why", &u.said(lang))],
             ),
         })
         .collect()
@@ -1266,8 +1266,7 @@ mod tests {
         crate::store::Unread {
             root: std::path::PathBuf::from(root),
             at: std::path::PathBuf::from(at),
-            kind: "permission",
-            said: "Permission denied".to_string(),
+            why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".to_string() },
         }
     }
 
@@ -1305,6 +1304,31 @@ mod tests {
         for e in [&en[0], &ko[0]] {
             assert!(e.said.contains("/w/mine/.moai/journal/a.jsonl"), "{}", e.said);
             assert!(e.said.contains("Permission denied"), "{}", e.said);
+        }
+    }
+
+    /// **체크아웃 밖을 가리키는 링크는 `outside` 로 서고 그 까닭도 고른 말로 선다**(moai-itsu). `failed` 로 세우던
+    /// 판은 기계가 "그 링크를 걷어라" 를 잠깐의 io 실패와 못 갈랐고, moai 가 지은 영어 문장이 `MOAI_LANG=ko` 의
+    /// 한국어 머리 뒤에 붙었다(리뷰 moai-karj.8zm 4·5번). **글자로 가르지 않는다** — `kind` 로 가르고, 까닭이
+    /// 말묶음을 지났는지는 두 말의 글이 갈리는 것으로 본다. 링크의 끝은 어느 말에서나 선다 — 고칠 곳이다.
+    #[test]
+    fn a_link_out_of_the_checkout_is_outside_and_said_in_the_chosen_language() {
+        let to = std::path::PathBuf::from("/proc/self/pagemap");
+        let one = [crate::store::Unread {
+            root: std::path::PathBuf::from("/w/mine"),
+            at: std::path::PathBuf::from("/w/mine/.moai/journal/a.jsonl"),
+            why: crate::store::Missed::Held(crate::held::Unheld::Outside {
+                to: to.clone(),
+                home: std::path::PathBuf::from("/w/mine"),
+            }),
+        }];
+        let en = journal_errors(crate::i18n::Lang::En, &one, None);
+        let ko = journal_errors(crate::i18n::Lang::Ko, &one, None);
+        assert_eq!((en[0].kind, ko[0].kind), ("outside", "outside"));
+        let (en_why, ko_why) = (one[0].said(crate::i18n::Lang::En), one[0].said(crate::i18n::Lang::Ko));
+        assert_ne!(en_why, ko_why, "까닭이 말묶음을 안 지났다 — 고른 말과 상관없이 같은 글이다");
+        for e in [&en[0], &ko[0]] {
+            assert!(e.said.contains("/proc/self/pagemap"), "고칠 링크의 끝을 안 댄다 — {}", e.said);
         }
     }
 }

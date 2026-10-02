@@ -36,8 +36,12 @@ are fine, and a neighbour's permissions are not your command failing.
 
 **`--json` says which row paid for it.** `show <id> --json` and the list carry a
 `journal_error` array beside the row whose history came up short, shaped like
-`commits_error`: `kind` (`permission` or `failed`) is what a machine branches on,
-`said` is the same line stderr prints, naming the file to `chmod`. A row carries
+`commits_error`: `kind` (`permission`, `outside` or `failed`) is what a machine
+branches on, `said` is the same line stderr prints, naming the file to `chmod`.
+`outside` is a journal link that points out of the checkout or into `.git/` — moai
+follows a link in a file the repository holds only inside its own checkout, so
+the fix is that link, not a permission. Treat a `kind` you do not know as
+`failed`. A row carries
 only its own root's failures, so a neighbour's locked journal never lands on your
 rows. The key is absent when nothing was skipped — `journal` is always there, so
 an empty `journal` with no `journal_error` beside it is "no history", and the
