@@ -598,11 +598,16 @@ impl Repo {
     /// 찰 때까지 읽는다), 탐색기는 이 읽기를 루프에서도 부른다. 없는 자리와 못 잰 자리는 그대로 든다 — 없으면
     /// 읽는 쪽이 넘기고 표식([`Repo::journal_marks`])이 나중에 생긴 것을 알아채며, 못 잰 까닭은 읽는 쪽이
     /// 센다([`note_unread`]).
-    fn journal_names(&self) -> Vec<PathBuf> {
+    ///
+    /// **이름마다 그 파일의 자리([`FileId`])를 곁에 든다** — 판정하려고 이미 잰 `metadata` 에서 나온다.
+    /// [`Repo::journal_files`] 가 하드 링크까지 접는 데 쓰고, 그것을 거기서 다시 재면 저널을 읽을 때마다 이름
+    /// 수만큼 `stat` 이 는다.
+    fn journal_names(&self) -> Vec<(PathBuf, FileId)> {
         let legacy = self.journal_path();
         let mut out = match std::fs::metadata(&legacy) {
             Ok(m) if !m.is_file() => Vec::new(),
-            _ => vec![legacy],
+            Ok(m) => vec![(legacy, file_id(&m))],
+            Err(_) => vec![(legacy, None)],
         };
         let at = self.journal_dir();
         let dir = match std::fs::read_dir(&at) {
@@ -648,7 +653,7 @@ impl Repo {
             // 화면이 stderr 한 줄 없이 0 으로 끝났다. 이 판을 시끄럽게 만들자는 것이
             // moai-6ney 인데, 정작 그 금이 여기 하나 남아 있었다.
             match p.metadata() {
-                Ok(m) if m.is_file() => split.push(p),
+                Ok(m) if m.is_file() => split.push((p, file_id(&m))),
                 // 디렉터리(나 그것을 가리키는 링크)는 저널이 아니다 — 못 읽은 것이 아니므로 안 센다.
                 Ok(_) => {}
                 Err(e) => note_unread(&self.root, &p, &e),
@@ -676,8 +681,10 @@ impl Repo {
     /// 사라진 파일)는 받은 철자 그대로 들어 다른 파일과 접히지 않는다 — 읽는 쪽이 넘기거나 센다. 빼면 못 읽은
     /// 까닭이 말없이 사라진다.
     ///
-    /// **하드 링크는 못 접는다** — 풀어도 이름이 둘이다. 그 링크를 건 체크아웃에서는 같은 줄이 두 번 서고, git 은
-    /// 하드 링크를 싣지 않아 받은 저장소에서는 같은 줄을 든 보통 파일 둘로 선다. 그 둘은 어느 접기로도 못 잡는다.
+    /// **하드 링크도 접는다**(moai-itsu.aod) — 풀어도 이름이 둘이라 푼 자리로는 못 접던 것을, 그 파일의 자리
+    /// ([`FileId`], 장치와 inode)로 접는다. [`Lock::holds`] 가 같은 파일을 가르는 자와 같다. 잴 수 없던 이름(위의
+    /// 못 푼 자리)은 전처럼 푼 자리로 접는다. **받은 저장소에서는 여전히 못 접는다** — git 은 하드 링크를 싣지 않아
+    /// 같은 줄을 든 보통 파일 둘로 선다. 이 접기가 값을 내는 것은 링크를 건 그 체크아웃에서다.
     ///
     /// **체크아웃 밖으로 풀리는 자리는 안 읽는다**(moai-karj). 쓰기([`append_inside`])가 [`target_of`] 로 이미
     /// 거절하던 자리를 읽기도 같은 자로 잰다 — 저장소가 든 파일은 제 체크아웃 안에서만 링크를 따른다. 받은
@@ -696,9 +703,10 @@ impl Repo {
     ///   고칠 것이 그 링크라 잠깐의 io 실패(`failed`)와 갈라 둔다
     fn journal_files(&self) -> Vec<PathBuf> {
         let home = crate::path::real(&self.root);
+        // 접는 열쇠 — 잰 이름은 그 파일의 자리(`Ok`), 못 잰 이름은 푼 자리(`Err`)다. 둘은 서로 안 겹친다.
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
-        for p in self.journal_names() {
+        for (p, id) in self.journal_names() {
             let real = match crate::held::place(&p, &home) {
                 Ok(real) => real,
                 Err(why) => {
@@ -706,7 +714,7 @@ impl Repo {
                     continue;
                 }
             };
-            if !seen.insert(real.clone()) {
+            if !seen.insert(id.ok_or_else(|| real.clone())) {
                 continue;
             }
             let link = std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink());
@@ -734,7 +742,7 @@ impl Repo {
         let dir = self.journal_dir();
         let dir_stamp = stamp(&dir);
         let mut out = vec![(dir, dir_stamp)];
-        out.extend(self.journal_names().into_iter().map(|p| {
+        out.extend(self.journal_names().into_iter().map(|(p, _)| {
             let s = stamp(&p);
             (p, s)
         }));
@@ -1631,6 +1639,23 @@ fn unread_kind(err: &std::io::Error) -> &'static str {
 /// 파일이 그때 그것인지 가늠하는 표식. 고친 때만 보면 놓친다 — rename 으로
 /// 갈아끼우는 쓰기는 같은 초에 떨어질 수 있어 길이도 함께 본다. 파일이 없으면 `None`.
 pub type Stamp = Option<(std::time::SystemTime, u64)>;
+
+/// 파일 하나의 자리 — 장치와 inode(moai-itsu.aod). 이름이 둘이어도(하드 링크, 같은 파일로 가는 링크) 같은
+/// 파일이면 같은 값이다. 유닉스 밖에서는 안 선다 — 그때는 푼 자리로 접는다([`Repo::journal_files`]).
+type FileId = Option<(u64, u64)>;
+
+fn file_id(m: &std::fs::Metadata) -> FileId {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = m;
+        None
+    }
+}
 
 pub fn stamp(path: &Path) -> Stamp {
     let m = std::fs::metadata(path).ok()?;
@@ -3006,7 +3031,12 @@ mod tests {
 
         // 옛 한 파일도 같은 파일로 이으면 맨 앞의 그 자리에 선다.
         std::os::unix::fs::symlink(format!("journal/{name}"), r.journal_path()).unwrap();
-        assert_eq!(read_once("옛 한 파일의 링크"), [real, other]);
+        assert_eq!(read_once("옛 한 파일의 링크"), [real.clone(), other.clone()]);
+
+        // **하드 링크도 한 번이다**(moai-itsu.aod) — 풀어도 이름이 둘이라 푼 자리로 접던 판은 같은 줄을 두 번
+        // 읽었다. 같은 파일의 자리(장치와 inode)로 접는다.
+        std::fs::hard_link(r.journal_dir().join(&name), r.journal_dir().join("zzzz-hard.jsonl")).unwrap();
+        assert_eq!(read_once("하드 링크"), [real, other]);
     }
 
     /// **체크아웃 밖으로 풀리는 저널 자리는 안 읽는다**(moai-karj). 받은 저장소가
