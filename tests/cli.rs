@@ -3573,6 +3573,87 @@ fn rm_names_the_blocks_it_broke() {
     assert!(line_of(s.path(), &b).contains("blocked_by"));
 }
 
+/// **쌍둥이가 남은 id 밑은 끊기지 않았다**(moai-3hxc.65o). 같은 id 가 두 줄이면(`duplicate_id`) `rm <id>` 는
+/// 앞줄만 걷어 내고 뒷줄이 남는다 — 그 id 를 가리키던 자식(id 에서 읽는 부모)·에픽 멤버(`epic`)·막힌 줄
+/// (`blocked_by`)은 아직 닿는 곳이 있다. 지운 id 만 보고 세면 끊기지 않은 것을 끊겼다고 stderr 와 `--json`
+/// 의 `dangling` 에 알린다. 셋이 한 답을 읽는지 보려고 한 판에 모두 세운다. 마지막 줄을 걷으면 그때는 끊긴다.
+#[test]
+fn rm_does_not_call_a_reference_dangling_while_a_twin_of_the_id_stands() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmtwin");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-0002", "앞줄", "issue", ""),
+            row("argos-0002", "뒷줄", "issue", ""),
+            row("argos-0003", "막힌 줄", "issue", ",\"blocked_by\":[\"argos-0002\"]"),
+            row("argos-e001", "앞 에픽", "epic", ""),
+            row("argos-e001", "뒤 에픽", "epic", ""),
+            row("argos-e001.abc", "자식", "issue", ""),
+            row("argos-0004", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    // 한 부름에 둘 다 — 앞줄만 가고, 그 id 를 가리키던 셋은 하나도 안 끊겼다.
+    let out = moai(s.path(), &["rm", "argos-0002", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":[]"#), "쌍둥이가 남았는데 끊겼다고 했다\n{json}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("끊긴 참조"), "쌍둥이가 남았는데 끊겼다고 알렸다\n{err}");
+    // 앞줄이 갔고 뒷줄이 남았다 — `rm <id>` 가 무엇을 지우는지는 그대로다.
+    let left = issues(s.path());
+    assert!(!left.contains("앞줄") && !left.contains("앞 에픽"), "{left}");
+    assert!(left.contains("뒷줄") && left.contains("뒤 에픽"), "{left}");
+
+    // 마지막 한 줄을 걷으면 그때 끊긴다 — 셈이 파일을 따라간다. 막힌 줄과 자식·멤버 모두.
+    let out = moai(s.path(), &["rm", "argos-0002", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    let dangling = json.split(r#""dangling":"#).nth(1).unwrap_or_default();
+    for id in ["argos-0003", "argos-e001.abc", "argos-0004"] {
+        assert!(dangling.contains(&format!("\"{id}\"")), "{id} 를 끊겼다고 안 했다\n{json}");
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("끊긴 참조가 3건"), "{err}");
+}
+
+/// **남은 쌍둥이가 에픽이 아니면 멤버는 끊겼다**(리뷰). `status` 의 `dangling_epic` 은 그 id 의 줄이
+/// 에픽인지로 잰다 — 에픽 줄을 걷어 낸 뒤 이슈 줄만 남으면 멤버의 `epic` 은 못 쓸 참조다. 닿는 줄이
+/// 있다는 것만 보고 지나 보내면 `status` 가 세는 줄을 `rm` 만 모른다.
+#[test]
+fn rm_calls_a_member_dangling_when_the_twin_left_is_not_an_epic() {
+    let row = |id: &str, title: &str, kind: &str, extra: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"title\":\"{title}\",\"kind\":\"{kind}\"{extra},\"status\":\"todo\",\"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"2026-09-11T00:00:00Z\",\"status_since\":\"2026-09-11T00:00:00Z\"}}\n"
+        )
+    };
+    let s = init("rmtwinkind");
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        [
+            row("argos-e001", "에픽 줄", "epic", ""),
+            row("argos-e001", "이슈 줄", "issue", ""),
+            row("argos-0004", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let out = moai(s.path(), &["rm", "argos-e001", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(r#""dangling":["argos-0004"]"#), "남은 줄이 이슈인데 멤버를 안 댔다\n{json}");
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_epic"), "{status}");
+}
+
 /// **CLI 상세도 막음을 그린다**(moai-rvcb) — `ready` 가 고르는 그 자로, 탐색기와 같은 낱말로.
 /// 막는 줄이 끝나면 풀림, 미루면 미룬 까닭과 함께 막힘, 지우면 끊김이다. `--json` 도 같은 답을 낸다.
 #[test]
@@ -5866,6 +5947,76 @@ fn a_plan_does_not_stand_on_a_milestone_that_is_not_there() {
     assert!(said.contains(&format!("에픽은 마일스톤 {stone} 에 선다")), "{said}");
 }
 
+/// **이슈 하나를 만들 때도 없는 마일스톤을 알린다**(moai-3hxc.uyt). 계획 길은 알렸는데
+/// `moai add 't' --milestone moai-zzzz` 는 필드를 적고 0 으로 끝나며 한마디가 없어, 헛 id 가
+/// `moai status` 의 `dangling_milestone` 으로 드러나는 날까지 아무도 몰랐다. 막지는 않는다 —
+/// 줄은 적히고 종료 코드도 그대로다. `idea add` 도 같은 길(`add::run`)을 지난다.
+#[test]
+fn a_single_add_says_a_milestone_that_is_not_there() {
+    let s = init("addstonemissing");
+    let said = |out: &Output| says_no_such_milestone(out, "argos-zzzz");
+
+    let out = moai(s.path(), &["add", "헛 마일스톤", "--milestone", "argos-zzzz"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    // 막지 않는다 — 줄은 적은 대로 선다.
+    assert!(issues(s.path()).contains(r#""milestone":"argos-zzzz""#), "줄이 안 적혔다");
+
+    // `--json` 도 알린다 — 알림은 stderr 라 stdout 의 JSON 은 그대로다.
+    let out = moai(s.path(), &["add", "기계가 받는다", "--milestone", "argos-zzzz", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "--json: 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+    let row = String::from_utf8(out.stdout).unwrap();
+    assert!(row.trim_start().starts_with('{') && row.contains(r#""milestone":"argos-zzzz""#), "{row}");
+
+    // `-q` 도 같다.
+    let out = moai(s.path(), &["add", "조용히", "--milestone", "argos-zzzz", "-q"]);
+    assert!(said(&out), "-q: 말없이 지나갔다");
+
+    // idea 도 이 길을 지난다.
+    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said(&out), "idea add 가 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
+
+    // 있는 마일스톤이면 아무 말도 없다.
+    let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["add", "멀쩡한 줄", "--milestone", &stone, "-q"]);
+    assert!(out.status.success() && out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    // 종류가 마일스톤이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_milestone` 과 같다.
+    let epic = ok(s.path(), &["epic", "add", "에픽", "-q"]).trim().to_string();
+    let out = moai(s.path(), &["add", "에픽을 마일스톤이라 함", "--milestone", &epic, "-q"]);
+    assert!(
+        says_no_such_milestone(&out, &epic),
+        "마일스톤이 아닌 줄을 지나 보냈다\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// stderr 가 `id` 라는 마일스톤이 없다고 말하는가 — `add.no_such_milestone` 의 한국어 글이다.
+fn says_no_such_milestone(out: &Output, id: &str) -> bool {
+    let err = String::from_utf8_lossy(&out.stderr);
+    err.contains(id) && err.contains("마일스톤이 없다")
+}
+
+/// **필드가 에픽에 져도 헛 id 는 알린다**(moai-3hxc.uyt). `add -e <에픽> --milestone <헛 id>` 의 필드는
+/// 안 읽히지만 `moai status` 는 그것을 `dangling_milestone` 으로 센다(제 에픽이 멀쩡한 줄이 든 엉뚱한
+/// `milestone`). 그래서 진 필드를 말하는 기존 줄(`edit` 과 같은 글)과 없는 마일스톤 줄이 **둘 다** 난다 —
+/// 둘은 다른 사실이다.
+#[test]
+fn a_single_add_says_a_missing_milestone_even_when_the_epic_overrides_it() {
+    let s = init("addstonelost");
+    let epic = ok(s.path(), &["epic", "add", "마일스톤 없는 에픽", "-q"]).trim().to_string();
+
+    let out = moai(s.path(), &["add", "에픽이 이긴다", "-e", &epic, "--milestone", "argos-zzzz", "-q"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&epic), "진 필드를 말하는 기존 줄이 사라졌다\n{err}");
+    assert!(says_no_such_milestone(&out, "argos-zzzz"), "없는 마일스톤을 말없이 지나갔다\n{err}");
+    // 알린 말이 참이라는 근거 — status 는 이 줄을 `dangling_milestone` 으로 센다.
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("dangling_milestone"), "{status}");
+}
+
 /// **펼치기가 idea 의 마일스톤과 본문을 에픽에 데려간다**(moai-07v1). 소속은 물려받는 것이
 /// 이 도구의 축인데 세우는 자리에서 끊기면, 펼친 에픽이 도는 마일스톤 밖에 서고
 /// `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다.
@@ -7203,6 +7354,100 @@ fn an_empty_stdin_body_is_said_out_loud() {
     assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
     let out = moai(s.path(), &["add", "argv 로 비움", "-b", ""]);
     assert!(!String::from_utf8_lossy(&out.stderr).contains(said));
+}
+
+/// **`--body` 가 한 줄이고 그 이름의 파일이 있으면 글로 받았다고 알린다**(moai-3hxc.58k).
+/// `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는다 — `moai add --from - --body plan.md`
+/// 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이 2026-10-01 에 두 번 있었다.
+/// 막지도 본문을 바꾸지도 않는다. `add`·`add --from`·`edit`·`idea add` 가 한 자리
+/// (`add::read_body_said`)에서 같은 말을 한다.
+#[test]
+fn a_one_line_body_naming_a_file_is_said_and_kept() {
+    let s = init("bodyispath");
+    let said = "글 자체를 받는다";
+    std::fs::write(s.path().join("plan.md"), "# 에픽\n- 이슈\n").unwrap();
+    let err = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+
+    // 알리고, 본문은 글자 그대로 선다 — 종료 코드도 그대로다.
+    let out = moai(s.path(), &["add", "경로를 줬다", "--body", "plan.md"]);
+    assert!(out.status.success(), "{}", err(&out));
+    assert!(err(&out).contains(said) && err(&out).contains("--body - < plan.md"), "말없이 지나갔다\n{}", err(&out));
+    assert!(issues(s.path()).contains(r#""body":"plan.md""#), "본문이 바뀌었다\n{}", issues(s.path()));
+
+    // `-b` 도 `--json` 도 같다 — 알림은 stderr 라 stdout 의 JSON 은 그대로다.
+    let out = moai(s.path(), &["add", "짧은 깃발", "-b", "plan.md", "--json"]);
+    assert!(out.status.success() && err(&out).contains(said), "{}", err(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""body":"plan.md""#));
+
+    // 계획 길 — 본문은 첫 뿌리에 서고 알림은 그 앞에서 난다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "plan.md"], PLAN);
+    assert!(out.status.success(), "{}", err(&out));
+    assert!(err(&out).contains(said), "add --from 이 말없이 지나갔다\n{}", err(&out));
+    // 계획이 이미 stdin 을 쥐었으니 `--body - < plan.md` 를 내밀면 따라 친 부름이 거절된다(리뷰) —
+    // 계획을 파일로 옮기는 줄을 댄다.
+    assert!(err(&out).contains("--from <계획 파일> --body - < plan.md"), "stdin 을 다툴 줄을 내밀었다\n{}", err(&out));
+    let made = issues(s.path());
+    let root = made.lines().find(|l| l.contains(r#""title":"저장 계층""#)).expect(&made);
+    assert!(root.contains(r#""body":"plan.md""#), "첫 뿌리의 본문이 바뀌었다\n{root}");
+
+    // `edit` 과 `idea add` 도 한 자리를 지난다.
+    let id = add(s.path(), &["고칠 것"]);
+    let out = moai(s.path(), &["edit", &id, "-b", "plan.md"]);
+    assert!(out.status.success() && err(&out).contains(said), "edit 이 말없이 지나갔다\n{}", err(&out));
+    let out = moai(s.path(), &["idea", "add", "나중에", "-b", "plan.md", "-q"]);
+    assert!(out.status.success() && err(&out).contains(said), "idea add 가 말없이 지나갔다\n{}", err(&out));
+
+    // 옮겨 치라고 내미는 줄은 껍데기가 한 낱말로 읽게 감싼다 — 빈칸이 든 이름이 두 낱말이 되지 않는다.
+    std::fs::write(s.path().join("my plan.md"), "x").unwrap();
+    let out = moai(s.path(), &["add", "빈칸", "--body", "my plan.md", "-q"]);
+    assert!(err(&out).contains("--body - < 'my plan.md'"), "{}", err(&out));
+
+    // **파일은 열지 않는다** — stat 만 한다. 읽을 권한이 없어도 알림은 선다(root 면 이 줄은 늘 지난다).
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let locked = s.path().join("locked.md");
+        std::fs::write(&locked, "x").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let out = moai(s.path(), &["add", "못 여는 파일", "--body", "locked.md", "-q"]);
+        assert!(err(&out).contains(said), "파일을 열려 했다\n{}", err(&out));
+    }
+}
+
+/// 위의 반대쪽 — **알릴 까닭이 없는 판은 말이 없다**(moai-3hxc.58k). 여러 줄, 없는 경로, 디렉터리,
+/// stdin 에서 온 글은 사람이 "이 파일" 이라고 가리킨 것이 아니다.
+#[test]
+fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
+    let s = init("bodynotpath");
+    std::fs::write(s.path().join("plan.md"), "x").unwrap();
+    std::fs::create_dir(s.path().join("sub")).unwrap();
+    let quiet = |args: &[&str], input: Option<&str>| {
+        let out = match input {
+            Some(i) => from_stdin(s.path(), args, i),
+            None => moai(s.path(), args),
+        };
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.stderr.is_empty(), "{args:?}: 말이 있다\n{}", String::from_utf8_lossy(&out.stderr));
+    };
+
+    // 여러 줄 — 첫 줄이 파일 이름이어도 본문이다. 줄바꿈이 든 이름의 파일이 **실제로 있어도** 한 줄이
+    // 아니라서 안 센다(없는 경로는 줄바꿈 규칙이 없어도 안 걸리므로, 그 규칙은 이 파일이 지킨다).
+    quiet(&["add", "여러 줄", "--body", "plan.md\n더 있다", "-q"], None);
+    std::fs::write(s.path().join("two\nlines.md"), "x").unwrap();
+    quiet(&["add", "줄바꿈 이름", "--body", "two\nlines.md", "-q"], None);
+    // 없는 경로.
+    quiet(&["add", "없는 파일", "--body", "nope.md", "-q"], None);
+    // 디렉터리는 `--from` 이 읽지도 못하는 자리다 — 일반 파일만 센다.
+    quiet(&["add", "디렉터리", "--body", "sub", "-q"], None);
+    // 글이 stdin 에서 왔으면 사람이 이름으로 준 것이 아니다.
+    quiet(&["add", "stdin 글", "-b", "-", "-q"], Some("plan.md\n"));
+    // 빈 글은 `read_body` 가 접어 없다.
+    quiet(&["add", "빈 글", "-b", "", "-q"], None);
+    // 본문을 안 줬으면 말할 것이 없다.
+    quiet(&["add", "본문 없음", "-q"], None);
+
+    // 그래도 받은 글은 그대로 선다.
+    let made = issues(s.path());
+    assert!(made.contains(r#""body":"plan.md\n더 있다""#) && made.contains(r#""body":"nope.md""#), "{made}");
 }
 
 /// clap 의 `2 values required by '<id> <id>...'` 는 무엇을 빠뜨렸는지

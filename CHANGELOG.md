@@ -26,6 +26,15 @@ does not tag — see `CONTRIBUTING.md`.
   run on a yes. It is the one place that refuses: when who you are is unknown it
   lets the move through.
 
+- **A `--body` that names a file says so.** `--body <text>` takes the text
+  itself, so `moai add --from - --body plan.md` put the words `plan.md` on the
+  epic, not the file's contents. When the value is one line and a file by that
+  name exists, one line on stderr says the body is those words and how to stream
+  the file instead (`--body - < plan.md`, or with the plan on stdin, the plan
+  moved into a file). It covers `add`, `add --from`, `idea add` and `edit -b`;
+  the file is not opened, the body is kept as given and the exit code does not
+  change. The `--body` help now says it takes text, not a path.
+
 ### Changed
 
 - **`moai ready` and `moai prime` hand out only your own rows.** A ready row
@@ -106,6 +115,25 @@ does not tag — see `CONTRIBUTING.md`.
   in the history, `-g` and `--removed`, and `work` added its tokens twice. Names
   now fold by the file itself, as symlinked names already did. A clone still gets
   two separate files — git does not carry hard links.
+
+- **`moai add --milestone` with an id that is not a milestone says so on a
+  single issue too.** It wrote the field and exited 0 without a word, and the
+  mistake surfaced only later as a `dangling_milestone` warning; `add --from`
+  and `idea promote` already said it. The row is still written and the exit code
+  does not change.
+
+- **`moai rm` no longer calls rows cut off while a twin of the removed id
+  stands.** Where one id stood on two lines, removing one of them named its
+  children, blocked rows and epic members as dangling, though the other line
+  still answered for them. An epic member is still named when the line left
+  behind is not an epic, as `moai status` counts it.
+
+- **The docs no longer point down three wrong paths.** The README said the
+  screen defaults to Korean (it is English); `docs/recovery.md` gave
+  `git show <commit>:.moai/issues.jsonl` to recover a removed line, which on a
+  linked tracker prints only the link — it now uses
+  `git cat-file --batch --follow-symlinks`; and the AGENTS block and the refusal
+  for `--from - --body -` read as if `--body` took a file.
 
 - **`SPC o t` no longer picks a zone when yours is a rule.** When the zone in use
   is a POSIX rule such as `TZ=JST-9`, it is not a name on the list, so the window

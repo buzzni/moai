@@ -224,13 +224,20 @@ Nothing is destroyed by a move. `moai mv <id> todo` puts it back, and the
 journal keeps every move including the wrong one.
 
 `moai rm` is the exception: it removes the line. The journal records the removal
-and git has the file, so:
+and git has the file, so, with `<commit>` any commit from before the removal:
 
 ```sh
-git show <commit>:.moai/issues.jsonl | grep '"<id>"'
+echo '<commit>:.moai/issues.jsonl' | git cat-file --batch --follow-symlinks | grep '"<id>"'
 ```
 
 gets the line back; append it and let the next write re-sort the file.
+
+This reads the file whether `.moai/issues.jsonl` is a plain file or a link to a
+file elsewhere in the checkout (a linked tracker). `git show
+<commit>:.moai/issues.jsonl` only does the first: for a link it prints the link's
+target text and nothing else, so the `grep` finds nothing and says nothing. A link
+that points outside the repository comes back as `symlink` and the target path —
+git holds no copy of that file, so read it there.
 
 Work you are not doing right now should be `moai defer <id> -m 'why'` rather than
 `done` — `--undo` brings back the same line, in the same column, with the same

@@ -897,8 +897,11 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "status")]
     pub status: Option<String>,
 
-    /// Body. `-` reads it from stdin (with `--from`, on the first epic)
-    #[arg(short, long, value_name = "text")]
+    /// Text, not a path. `-` reads stdin (with `--from`, on the first epic)
+    ///
+    /// **A file goes in as `--body - < <file>`.** `--body <path>` takes
+    /// the path as the body, it does not open the file.
+    #[arg(short, long, value_name = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 
     /// Assignee. The creator when absent; `none` clears it
@@ -1365,7 +1368,7 @@ pub struct EditArgs {
     #[arg(long, value_name = "text", allow_hyphen_values = true)]
     pub title: Option<String>,
 
-    /// Body. `-` reads it from stdin
+    /// Text, not a path. `-` reads stdin: `-b - < <file>`
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub body: Option<String>,
 

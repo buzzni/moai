@@ -424,8 +424,12 @@ members inherit it; without it the whole plan stands outside the release, and of
 because the plan looks urgent: that is the release changing size while it runs.
 
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
-plan creates, which is where `moai show <epic>` reads it from. `--body -` and
-`--from -` cannot both read stdin, so give one of them a file."#;
+plan creates, which is where `moai show <epic>` reads it from. `--body <text>` takes
+the text itself (a file path there becomes the body as written), `--body -` reads
+stdin, and only `--from <file>` reads a file. `--body -` and `--from -` cannot both
+read stdin, so either put the plan in a file and stream the body —
+`moai add --from plan.md --body -` — or keep the plan on stdin and pass the body as
+text — `moai add --from - --body '<text>'`."#;
 
 /// 에이전트가 이슈에 적는 글의 모양(moai-j8aq). **권고다** — 어겨도 아무것도 막히지 않는다.
 /// 훅이 이것을 검사하지 않는 것은 결정이다(사용자, moai-mthy): 글 스타일 검사는 린트이고,
@@ -1269,8 +1273,11 @@ PLAN
 which epic a `--body` would land on, and refuses a body the write would refuse.
 
 `--body` says why these issues are one bundle. It goes onto the first epic the plan
-creates, which is where `moai show <epic>` reads it from. Only one of `--body` and
-`--from` can read stdin, so give the other one a file or write the body as text —
+creates, which is where `moai show <epic>` reads it from. `--body <text>` takes the
+text itself — a file path there becomes the body as written — `--body -` reads
+stdin, and only `--from <file>` reads a file, so a file goes in as the body with
+`--body - < <file>`. `--body -` and `--from -` cannot both read stdin: put the plan
+in a file and stream the body, or keep the plan on stdin and pass the body as text.
 `moai add --from plan.md --body -` and `moai add --from - --body '<text>'` both work.
 
 Keep a plan you repeat in a file and fill `{{{{name}}}}` with `--var name=value` (the
