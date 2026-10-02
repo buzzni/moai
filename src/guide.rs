@@ -20,13 +20,14 @@
 //!
 //! 순수 모듈이다. 파일을 쓰는 것은 `cmd/init.rs` 와 `cmd/skill.rs` 가 한다.
 
-/// 규칙 넷의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
+/// 규칙 다섯의 이름. **스킬이 적은 규칙과 훅이 낸 거절문이 같은 이름을 댄다** —
 /// 다르면 막힌 쪽이 무엇을 어겼는지 두 번 읽어야 한다.
-pub const RULES: [&str; 4] = [
+pub const RULES: [&str; 5] = [
     "New issues stay inside what you picked up",
     "Pick something up before you change the repository",
     "A review is an issue too",
     "Never kill the person's tmux server",
+    "Ask before you pick up someone else's work",
 ];
 
 /// 거절문의 머리. 스킬의 규칙 제목과 글자가 같다.
@@ -334,14 +335,16 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
                                            on a group row: l one step · Tab expand all · h fold
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
+    moai mv <id> in_progress --take        take over someone else's row (ask first)
     moai edit <id> --tag parser            change
     moai note <id> '<what you found>'      a memo for whoever comes next
     moai defer <id> -m '<why>'             take work out of the plan for now
 
-Every command takes `--json`. `ready --json` gives `{"ready":[…],"held":[…]}` —
-`held` is what is deferred or blocked behind an empty group, and where to pick it up
-again. That is enough to build a loop that runs without a person — one such loop, in
-bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
+`ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
+(ask first), and `held` is what is deferred or blocked behind an empty group, and where
+to pick it up again. That is enough to build a loop that runs without a person — one
+such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -376,7 +379,10 @@ and then the only way out is outside the tool — one line on stderr says where 
 wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
 split off, and the current rows are in the main checkout's file."#;
 
-const NO_GATE: &str = "There is no approval gate — create anything, move anything. Do not ask a human.";
+/// 승인 게이트가 없다는 말 — **한 자리만 판다**(moai-0zjo, 2026-10-02 사용자 결정): 남의 줄이나 담당
+/// 없는 줄을 집기 전에는 사람에게 묻는다. 그 밖은 여전히 묻지 않는다.
+const NO_GATE: &str = "There is no approval gate — create anything, move anything. Do not ask a human, \
+except before you pick up work that is someone else's or nobody's (hook rule 5).";
 
 const FORKS: &str = r#"**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
 If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
@@ -871,7 +877,21 @@ the same numbers as bars, narrowed by the filter that is hung.
 const PEOPLE: &str = r#"**The assignee comes for free** — whoever created it is the assignee. To hand it to
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and
 email come from `git config`, and when they are not there you pass them with
-`--user "Name (email)"` or `MOAI_ACTOR`."#;
+`--user "Name (email)"` or `MOAI_ACTOR`.
+
+**Work that is not yours is asked about.** `moai ready` and `moai prime` hand out
+only your own rows; a row assigned to someone else, or to nobody, stands apart under
+`others` (`owner` is `theirs` or `unowned`). Ask the person before you pick one up,
+and on a yes take it over and say who said yes:
+
+    moai mv <id> in_progress --from todo --take -m '<who said yes>'
+
+You become the assignee in the same write and a note `Taken-over: <who it was|none>`
+keeps whose it was — it also takes a row that already stands in that column, so give
+`--from` the column you saw: if the owner picked it up meanwhile, nothing is taken. Without
+`--take` a person in a terminal still moves it (one line on stderr says whose it is);
+the hook refuses it (rule 5). Who you are is matched by name or email, the same as
+`-a me`; when it is unknown nothing is set apart."#;
 
 const CLOSING: &str = r#"Run `moai status` once more and see whether the warnings grew. Warnings block
 nothing — they shine a light on issues with no epic, reviews stalled for a long
@@ -898,9 +918,9 @@ pub fn handoff(id: &str) -> String {
 /// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
 pub const PLEDGE: &str = "cannot deliver what it promised without this";
 
-/// 규칙 넷. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
+/// 규칙 다섯. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
-    let [one, two, three, four] = RULES;
+    let [one, two, three, four, five] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <the issue>");
     format!(
@@ -940,9 +960,28 @@ review text lives is in the skill's `references/commands.md`.
 server — one line kills every session in it. A tmux you are testing gets its
 own server.
 
-    {TMUX_OWN}"#
+    {TMUX_OWN}
+
+**5. {five}.** A `moai mv` into a started column on a row whose assignee is
+someone else — or nobody — is refused unless it carries `--take`. Ask the person
+watching first. On a yes, take it over and say who said yes:
+
+    {TAKE_OVER}
+
+You become the assignee in the same write, and a note `Taken-over: <who it was|none>`
+keeps whose it was. `moai ready` hands out only your own rows and sets the rest
+apart (`others`), and what someone else picked up is not your focus. When who you
+are is unknown, nothing is refused."#
     )
 }
+
+/// 남의 줄을 넘겨받는 줄 — 규칙 5 의 글(`rules`)이 싣는다(moai-0zjo). 꼬리는 [`TAKE_YES`] 다.
+pub const TAKE_OVER: &str = "moai mv <id> in_progress --from todo --take -m '<who said yes>'";
+
+/// 넘겨받는 줄의 꼬리 — 규칙 5 의 거절문(`hook::take_in`)과 `mv` 의 알림(`cmd::mv`)이 이것으로 줄을 짓고,
+/// [`TAKE_OVER`] 가 이것으로 끝난다(`the_take_over_line_ends_with_its_tail` 이 맨다). 손으로 따로 적던 판은
+/// 이 상수의 글이 거절문에 닿는다고 적어 두고 실제로는 어디에도 안 닿았다(moai-0zjo 리뷰).
+pub const TAKE_YES: &str = "--take -m '<who said yes>'";
 
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
@@ -1031,7 +1070,7 @@ whether it is stale, `moai init --check` — it writes nothing and answers
 
 {WORK}
 
-### The four things the hook actually watches
+### The five things the hook actually watches
 
 They stand once `moai skill install` has planted the hooks into Claude.
 
@@ -1089,7 +1128,7 @@ Whoever creates an issue is its assignee, for free.
 
 {KOREAN}
 
-## The four things the hook actually watches
+## The five things the hook actually watches
 
 {rules}
 
@@ -1511,7 +1550,10 @@ the script in 2 does not print as a `worktree` row.
         by the supervisor; with no `<subdir>` in the header, the root is the top and this step
         does not exist
           {SUBDIR}
-      - The member's column is already picked up — do not pick it up again
+      - The member's column is already picked up — do not pick it up again. **If its assignee
+        is not you** (`moai show <member>`), ask the person watching before you carry it on; on
+        a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
+        column stays, the assignee becomes you, and a note keeps whose it was
       - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
         session's share is unknown` to the end of the reason — the previous session's model and
         tokens are written nowhere, and without it the whole member reads as this window's work
@@ -1565,6 +1607,11 @@ on would make the release grow after it started, and that is the person's call a
 
 **An idea you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+
+**Send only what is yours.** An idea or member whose assignee is someone else — or
+nobody — is asked about first: ask the person, and send it only on a yes, writing in the
+text who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
+such rows apart under `others`.
 
 **2. Find a worker.** `ListAgents` does not show a session's place (cwd). Read
 `~/.claude/sessions/*.json`, which Claude Code writes per session (under
@@ -2256,6 +2303,9 @@ fn brief() -> String {
        merge with its own subject. So give the tracker commit a path. With a merge open git
        refuses it, so wait for that merge to finish and run it again
          git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+       **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
+       pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
+       hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
     3. Right after the commit in 2, branch from the local <base branch> with
        `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in with
        EnterWorktree(path). The name is the unfolded epic's id, not the idea's. Until the worktree
@@ -2673,6 +2723,14 @@ mod tests {
         for line in lines {
             assert!(line.starts_with("- "), "예시 본문이 목록이 아니다 — {line}");
         }
+    }
+
+    /// **넘겨받는 줄은 한 꼬리로 선다**(moai-0zjo 리뷰) — 규칙 5 의 글([`TAKE_OVER`])과 거절문·`mv` 의 알림
+    /// ([`TAKE_YES`])이 갈리면, 글을 고친 사람은 거절문이 따라온다고 믿고 거절문은 옛 글을 낸다.
+    #[test]
+    fn the_take_over_line_ends_with_its_tail() {
+        assert!(TAKE_OVER.ends_with(&format!(" {TAKE_YES}")), "{TAKE_OVER}");
+        assert!(rules().contains(TAKE_OVER), "규칙 5 의 글이 넘겨받는 줄을 안 싣는다");
     }
 
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.

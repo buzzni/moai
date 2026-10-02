@@ -3922,6 +3922,50 @@ pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus
     Picking::of(issues, cfg).picks(true)
 }
 
+/// 내 것이 아닌 줄이 **왜** 내 것이 아닌가(moai-0zjo). `--json` 의 `owner` 키가 이 낱말이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Owner {
+    /// 담당이 다른 사람이다.
+    Theirs,
+    /// 담당이 없다 — 이것도 내 것이 아니다(2026-10-02 사용자 결정). 묻고 집는다.
+    Unowned,
+}
+
+/// 이 줄이 내 것이 아니면 그 까닭, 내 것이면 `None`. 가르는 자는 [`crate::query::Me`] 하나다.
+///
+/// **"담당 없음" 도 같은 자다**(`query::is_assignee` 의 `-a none`) — 빈 담당은 없는 것이다. 따로 재면 `ready` 가
+/// `unowned` 로 대는 줄을 `show -a none` 이 못 찾는다.
+pub fn owner(me: &crate::query::Me, i: &Issue) -> Option<Owner> {
+    if me.owns(i) {
+        return None;
+    }
+    let unowned = crate::query::is_assignee(&crate::query::Sel::Unset, i);
+    Some(if unowned { Owner::Unowned } else { Owner::Theirs })
+}
+
+/// 집을 줄을 **내 것과 아닌 것으로** 가른다(moai-0zjo, 2026-10-02 사용자 결정) — `ready`·`prime` 이
+/// 내 것만 내밀고 나머지는 `others` 로 따로 댄다. 남의 줄과 담당 없는 줄은 사람에게 묻고 집는다.
+///
+/// **차례는 건드리지 않는다** — 받은 차례 그대로 두 목록에 나눠 담는다. 고르는 자([`ready_in`])가
+/// 둘이 되지 않는다.
+///
+/// **사람을 모르면 가르지 않는다**(`me` 가 `None`) — 설정 없는 기계에서 모든 줄이 남의 것으로 서면
+/// `ready` 가 통째로 비어, 도구가 고장 난 것으로 보인다. 읽기는 사람을 묻지 않는다는 자리와 같다.
+/// 사람을 푸는 일은 부르는 쪽(`cmd`)이 하고, 여기는 그 답을 자료로 받는다.
+pub fn by_owner<'a>(picks: Vec<&'a Issue>, me: Option<&crate::query::Me>) -> (Vec<&'a Issue>, Vec<(&'a Issue, Owner)>) {
+    let Some(me) = me else { return (picks, Vec::new()) };
+    let mut mine = Vec::new();
+    let mut others = Vec::new();
+    for i in picks {
+        match owner(me, i) {
+            None => mine.push(i),
+            Some(o) => others.push((i, o)),
+        }
+    }
+    (mine, others)
+}
+
 /// `moai prime` 한 판이 읽어 낸 것 — **집은 것과 다음에 집을 것**.
 ///
 /// 세션 첫머리와 접힌 뒤에 다시 주입되는 요약이라, 보드([`status`])가 아니라 이것이다.
@@ -3933,13 +3977,18 @@ pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus
 /// `moai ready` 가 내미는 줄이 갈린다.
 #[derive(Debug)]
 pub struct Prime<'a> {
-    /// 지금 집은 일 — [`wip`] 와 같은 자다.
+    /// 지금 집은 일 — [`wip`] 에서 **내 것만** 남긴 것이다(moai-0zjo, 사용자 결정). 남이 집은 줄은
+    /// "내가 무엇을 쥐었나" 의 답이 아니다 — 훅 초점이 같은 줄을 빼는 것과 같은 자다.
     pub held: Vec<&'a Issue>,
-    /// 다음에 집을 것. [`ready_in`] 의 앞에서 [`PRIME_PICKS`] 개.
+    /// 다음에 집을 것. [`ready_in`] 에서 **내 것만** 앞에서 [`PRIME_PICKS`] 개.
     pub picks: Vec<&'a Issue>,
     /// `picks` 에 안 실린 나머지 수. **0 이 아니면 잘렸다는 뜻**이라, 받는 쪽이 이 판을
     /// "집을 것이 셋뿐" 으로 안 읽는다.
     pub rest: usize,
+    /// 집을 수 있지만 내 것이 아닌 줄([`by_owner`]) — `picks` 와 같은 수로 자른다. 잘린 수는
+    /// `others_rest` 다.
+    pub others: Vec<(&'a Issue, Owner)>,
+    pub others_rest: usize,
     /// 도는 마일스톤이 목록에 한 일 — [`ready_in`] 이 낸 그대로다.
     pub focus: Focus<'a>,
 }
@@ -3953,11 +4002,15 @@ pub struct Prime<'a> {
 /// 묶는 것은 `cmd::prime::Brief` 이고, 둘이 함께 서야 위의 말이 참이 된다.
 pub const PRIME_PICKS: usize = 3;
 
-/// [`Prime`] 을 읽어 낸다.
-pub fn prime<'a>(issues: &'a [Issue], cfg: &Config) -> Prime<'a> {
+/// [`Prime`] 을 읽어 낸다. `me` 는 [`by_owner`] 와 같은 약속이다 — 모르면 가르지 않는다.
+pub fn prime<'a>(issues: &'a [Issue], cfg: &Config, me: Option<&crate::query::Me>) -> Prime<'a> {
     let (all, focus) = ready_in(issues, cfg);
-    let rest = all.len().saturating_sub(PRIME_PICKS);
-    Prime { held: wip(issues, cfg), picks: all.into_iter().take(PRIME_PICKS).collect(), rest, focus }
+    let (mut mine, mut others) = by_owner(all, me);
+    let rest = crate::query::cut(&mut mine, Some(PRIME_PICKS));
+    let others_rest = crate::query::cut(&mut others, Some(PRIME_PICKS));
+    // 집은 것도 **같은 자로** 가른다 — 모르면 가르지 않는다는 약속까지 [`by_owner`] 하나에 산다.
+    let (held, _) = by_owner(wip(issues, cfg), me);
+    Prime { held, picks: mine, rest, others, others_rest, focus }
 }
 
 /// 스냅샷 하나에서 [`ready`] 를 고르는 데 드는 것 — **한 벌 지어 여러 번 묻는다**(moai-ydm7.7wq).
@@ -4137,7 +4190,9 @@ pub struct Freed<'a> {
     pub next: Vec<&'a Issue>,
 }
 
-/// [`Freed`] 를 읽어 낸다. `closed` 는 이 쓰기가 실제로 `done` 으로 옮긴 id 들이다.
+/// [`Freed`] 를 읽어 낸다. `closed` 는 이 쓰기가 실제로 `done` 으로 옮긴 id 들이다. `me` 는 [`by_owner`] 와
+/// 같은 약속이다 — [`Freed::next`] 는 **내 줄만** 댄다(moai-0zjo 리뷰): `moai ready` 가 내 것만 내미는데
+/// "같은 에픽의 다음" 이 남의 줄을 대면, 시킨 대로 집은 줄을 규칙 5 가 막는다. 모르면 가르지 않는다.
 ///
 /// **스냅샷마다 [`Picking`] 을 한 벌씩, 모두 두 벌 짓는다**(moai-ydm7.7wq). 이 셈은 전부
 /// `store::with_write` 의 배타 락 안이다 — `Lock::acquire` 는 25ms 마다 두드리고 5초에 포기하고,
@@ -4148,10 +4203,16 @@ pub struct Freed<'a> {
 /// **목록은 두 가지로 묻는다** — [`Freed::next`] 는 도는 마일스톤을 봐야 하고([`ready_in`]),
 /// [`Freed::unblocked`] 는 봐서는 안 된다([`unblocked_over`]): 마일스톤이 끝나는 순간 밖의 일 전부가
 /// "풀림" 으로 서면 아무도 안 막던 줄을 막혔던 것으로 말한다. 재료는 같고 거르개만 다르다.
-pub fn freed<'a>(before: &[Issue], after: &'a [Issue], cfg: &Config, closed: &[&str]) -> Freed<'a> {
+pub fn freed<'a>(
+    before: &[Issue],
+    after: &'a [Issue],
+    cfg: &Config,
+    closed: &[&str],
+    me: Option<&crate::query::Me>,
+) -> Freed<'a> {
     let (was, now) = (Picking::of(before, cfg), Picking::of(after, cfg));
     let unblocked = unblocked_over(&was, &now);
-    Freed { closable: closable_over(&was, &now, cfg), next: next_over(&now, closed, &unblocked), unblocked }
+    Freed { closable: closable_over(&was, &now, cfg), next: next_over(&now, closed, &unblocked, me), unblocked }
 }
 
 /// 시험이 두 스냅샷에서 [`closable_over`] 를 바로 부르는 짧은 길.
@@ -4199,11 +4260,17 @@ fn closable_over<'a>(was: &Picking<'_>, now: &Picking<'a>, cfg: &Config) -> Vec<
 /// 시험이 한 스냅샷에서 [`next_over`] 를 바로 부르는 짧은 길.
 #[cfg(test)]
 fn next_of<'a>(after: &'a [Issue], cfg: &Config, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
-    next_over(&Picking::of(after, cfg), closed, said)
+    next_over(&Picking::of(after, cfg), closed, said, None)
 }
 
-/// 닫은 줄들의 에픽마다 **다음에 집을 것 하나**. 차례는 [`ready_in`] 의 차례 그대로다.
-fn next_over<'a>(now: &Picking<'a>, closed: &[&str], said: &[&'a Issue]) -> Vec<&'a Issue> {
+/// 닫은 줄들의 에픽마다 **다음에 집을 것 하나**. 차례는 [`ready_in`] 의 차례 그대로고, 고르는 줄은 `ready` 처럼
+/// 내 것뿐이다([`by_owner`] — `me` 를 모르면 가르지 않는다).
+fn next_over<'a>(
+    now: &Picking<'a>,
+    closed: &[&str],
+    said: &[&'a Issue],
+    me: Option<&crate::query::Me>,
+) -> Vec<&'a Issue> {
     let after = now.issues;
     // **소속을 먼저 묻고 차례는 나중에 잰다.** 에픽 없는 줄을 닫은 것은 여기서 할 말이
     // 없는데([`groups`] 에 안 든다), 차례를 매기면 헛걸음이다 — 닫는 쓰기는 락을 쥔 자리라
@@ -4223,7 +4290,7 @@ fn next_over<'a>(now: &Picking<'a>, closed: &[&str], said: &[&'a Issue]) -> Vec<
     if epics.is_empty() {
         return Vec::new();
     }
-    let (picks, _) = now.picks(true);
+    let (picks, _) = by_owner(now.picks(true).0, me);
     let already: BTreeSet<&str> = said.iter().map(|i| i.id.as_str()).collect();
     // **한 줄은 한 에픽에만 든다**([`groups`] 는 id 마다 에픽 하나를 낸다). 그래서 서로 다른
     // 에픽이 같은 줄을 고를 수 없고, 겹침을 거르는 자리는 위의 `already` 하나뿐이다 —
@@ -6289,6 +6356,72 @@ mod tests {
         assert_eq!(roll_of(&rolls, Some("argos-0001")).percent, Some(100));
     }
 
+    /// **내 것과 아닌 것을 가른다**(moai-0zjo, 2026-10-02 사용자 결정). 이름이나 메일 하나만 맞아도 내
+    /// 것이고 메일은 대소문자를 접는다(`-a me` 와 한 자). 담당 없는 줄은 `unowned`, 남의 줄은
+    /// `theirs` 다. 담당은 에픽에서 물려받지 않는다. 사람을 모르면 가르지 않는다.
+    #[test]
+    fn by_owner_sets_apart_what_is_not_mine() {
+        let me = crate::query::Me::of(&crate::model::Actor { name: "Raven".into(), email: "raven@x.io".into() });
+        let owned = |id: &str, name: Option<&str>, email: Option<&str>| {
+            let mut i = make(id, Kind::Issue, "todo");
+            i.assignee = name.map(String::from);
+            i.assignee_email = email.map(String::from);
+            i
+        };
+        let issues = [
+            owned("argos-0001", Some("Raven"), Some("raven@x.io")),
+            owned("argos-0002", Some("Raven"), None), // 이름만 적힌 옛 줄
+            owned("argos-0003", Some("다른 이름"), Some("RAVEN@X.IO")), // 메일만 맞는다
+            owned("argos-0004", Some("B"), Some("b@x.io")),
+            owned("argos-0005", None, None),
+        ];
+        let picks: Vec<&Issue> = issues.iter().collect();
+        // 손으로 푼 머지의 빈 담당은 담당 없음이다 — `-a none` 과 한 자다(리뷰).
+        let blank = owned("argos-0006", Some("  "), None);
+        assert_eq!(owner(&me, &blank), Some(Owner::Unowned));
+        assert!(crate::query::is_assignee(&crate::query::Sel::Unset, &blank), "`-a none` 이 빈 담당을 못 찾는다");
+        let (mine, others) = by_owner(picks.clone(), Some(&me));
+        let ids = |v: &[&Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&mine), ["argos-0001", "argos-0002", "argos-0003"]);
+        let others: Vec<(&str, Owner)> = others.iter().map(|(i, o)| (i.id.as_str(), *o)).collect();
+        assert_eq!(others, [("argos-0004", Owner::Theirs), ("argos-0005", Owner::Unowned)]);
+        // 모르면 가르지 않는다 — 차례도 그대로다.
+        let (all, none) = by_owner(picks, None);
+        assert_eq!(ids(&all), ids(&issues.iter().collect::<Vec<_>>()));
+        assert!(none.is_empty());
+    }
+
+    /// **`prime` 의 집은 것도 내 것만이다**(moai-0zjo, 사용자 결정) — 남이 집은 줄은 "내가 무엇을 쥐었나"
+    /// 의 답이 아니다. 다음 일은 `ready` 와 같은 자로 가르고, 남의 것은 `others` 로 따로 잘린다.
+    #[test]
+    fn prime_holds_and_hands_out_only_what_is_mine() {
+        let me = crate::query::Me::of(&crate::model::Actor { name: "Raven".into(), email: "raven@x.io".into() });
+        let with = |id: &str, status: &str, who: Option<&str>| {
+            let mut i = make(id, Kind::Issue, status);
+            i.assignee = who.map(String::from);
+            i
+        };
+        let mut issues = vec![
+            with("argos-0001", "in_progress", Some("Raven")),
+            with("argos-0002", "in_progress", Some("B")),
+            with("argos-0003", "in_progress", None),
+        ];
+        for n in 0..5 {
+            issues.push(with(&format!("argos-01{n:02}"), "todo", Some("B")));
+        }
+        issues.push(with("argos-0200", "todo", Some("Raven")));
+        let p = prime(&issues, &cfg(), Some(&me));
+        let held: Vec<&str> = p.held.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(held, ["argos-0001"], "남이 집은 줄을 제 것으로 댔다");
+        let picks: Vec<&str> = p.picks.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(picks, ["argos-0200"]);
+        assert_eq!((p.others.len(), p.others_rest), (PRIME_PICKS, 5 - PRIME_PICKS), "남의 것을 같은 수로 안 잘랐다");
+        // 모르면 가르기 전과 같다.
+        let p = prime(&issues, &cfg(), None);
+        assert_eq!(p.held.len(), 3);
+        assert!(p.others.is_empty() && p.others_rest == 0);
+    }
+
     #[test]
     fn ready_excludes_what_is_not_pickable() {
         let issues = vec![
@@ -6663,6 +6796,14 @@ mod tests {
         loose.push(make("argos-000e", Kind::Issue, "done"));
         assert!(next_of(&loose, &cfg(), &["argos-000e"], &[]).is_empty(), "에픽 없는 줄에 남의 다음을 댔다");
         assert!(next_of(&issues, &cfg(), &[], &[]).is_empty(), "닫은 것이 없으면 다음도 없다");
+        // **다음도 내 줄만 댄다**(moai-0zjo 리뷰) — `moai ready` 와 같은 자다. 남의 줄을 대면 시킨 대로 집은
+        // 줄을 규칙 5 가 막는다. 그 에픽에 내 줄이 남았으면 그것을 댄다.
+        let me = crate::query::Me::of(&crate::model::Actor { name: "Raven".into(), email: "raven@x.io".into() });
+        let mut owned = issues.clone();
+        owned[2].assignee = Some("B".into());
+        owned[3].assignee = Some("Raven".into());
+        let got = next_over(&Picking::of(&owned, &cfg()), &["argos-000a"], &[], Some(&me));
+        assert_eq!(got.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-000c"], "남의 줄을 다음으로 댔다");
     }
 
     /// **닫는 쓰기는 스냅샷마다 [`Picking`] 을 한 벌만 짓는다**(moai-ydm7.7wq) — 이 셈은 전부
@@ -6689,7 +6830,7 @@ mod tests {
         let closed = ["argos-000a", "argos-0003.x1y"];
 
         PICKINGS.with(|n| n.set(0));
-        let got = freed(&before, &after, &cfg(), &closed);
+        let got = freed(&before, &after, &cfg(), &closed, None);
         assert_eq!(PICKINGS.with(|n| n.get()), 2, "스냅샷마다 한 벌이어야 한다 — before 하나, after 하나");
 
         let ids = |v: &[&Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
@@ -6709,7 +6850,7 @@ mod tests {
         let before = vec![make("argos-0003", Kind::Issue, "in_progress"), child];
         let mut after = before.clone();
         after[1].status = Status::new("done");
-        let got = freed(&before, &after, &cfg(), &["argos-0003.x1y"]);
+        let got = freed(&before, &after, &cfg(), &["argos-0003.x1y"], None);
         assert!(got.closable.is_empty(), "미룬 자식을 닫았다고 부모를 닫을 수 있게 됐다고 했다: {:?}", got.closable);
     }
 
@@ -6731,7 +6872,7 @@ mod tests {
             "시험의 바탕이 틀렸다 — `ready` 가 그 줄을 안 남겼다"
         );
         assert!(!picks.iter().any(|i| i.id == "argos-002b"));
-        let got = freed(&before, &after, &cfg(), &["argos-002a"]);
+        let got = freed(&before, &after, &cfg(), &["argos-002a"], None);
         assert!(got.next.is_empty(), "`ready` 가 밖에 남긴 줄을 다음으로 댔다: {:?}", got.next);
     }
 
@@ -6752,7 +6893,7 @@ mod tests {
         ];
         let mut after = before.clone();
         after[1].status = Status::new("done");
-        let got = freed(&before, &after, &cfg(), &["argos-000a"]);
+        let got = freed(&before, &after, &cfg(), &["argos-000a"], None);
         let ids = |v: &[&Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&got.unblocked), ["argos-000b"]);
         assert_eq!(ids(&got.next), ["argos-000c"], "풀림에 선 줄을 다음으로 또 댔다");
