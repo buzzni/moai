@@ -345,7 +345,8 @@ fn moai_moved(root: &Path) -> Option<String> {
 ///
 /// **뿌리에 못박는다**(`/<경로>`). `/` 없는 한 조각 패턴은 어느 깊이의 같은 이름에도 걸린다.
 /// 쓸 수 없는 경로는 줄을 안 세운다 — 뿌리 밖(위 디렉터리·체크아웃 밖, 쓰기가 거절하는 자리다)이거나
-/// 패턴 글자·빈칸·제어 문자가 든 이름이다. 그 트래커는 `moai status` 의 링크 알림이 비춘다(moai-jo3h).
+/// `.git/` 안이거나 패턴 글자·빈칸·제어 문자가 든 이름이다([`inside`]). 그 트래커는 `moai status` 의 링크
+/// 알림이 비춘다(moai-jo3h) — `.git/` 안은 그 앞에서 `status` 가 트래커를 못 읽는다고 멈춘다.
 ///
 /// **거는 속성은 스냅샷 줄의 것을 그대로 옮긴다**(리뷰) — 손으로 다시 적으면 그 줄이 바뀌는 날 병합이
 /// 실제로 도는 이 파일만 옛 속성에 남는다. 스냅샷 줄이 드라이버를 거는지는
@@ -417,8 +418,17 @@ fn linked_snapshot(root: &Path) -> Option<String> {
 /// **뿌리 자체는 받는다**(리뷰). 파일은 뿌리일 수 없어 빈 글이 안 나오지만 디렉터리는 뿌리일 수 있다 —
 /// `.moai/issues.jsonl -> ../issues.jsonl` 이면 `store::Repo::far_lock` 이 뿌리에 `lock` 을 세운다. 빈 글을
 /// 거절하던 때는 그 락에 줄이 안 서서 `git add -A` 가 그것을 담았고, `init --check` 는 빠진 것이 없다고 했다.
+///
+/// **git 의 자리(`.git/`)는 줄로 안 건다**(moai-x0o7.2q8) — 트래커 링크가 `.git/` 으로 풀리면 `init` 이
+/// `/.git/<…>/issues.jsonl … merge=moai` 와 `/.git/<…>/lock` 을 심었다. git 은 제 자리를 담지도 합치지도
+/// 않아 그 줄은 뜻이 없고, `.moai` 가 그리 가면 쓰기도 읽기도 이미 거절한다(`store::target_of`·
+/// [`crate::held::place`] 와 같은 자다). 끝 이름도 센다 — 딸린 워크트리의 `.git` 은 파일이다.
 fn inside(root: &Path, path: &Path) -> Option<String> {
-    let rel = path.strip_prefix(crate::path::real(root)).ok()?.to_str()?;
+    let rel = path.strip_prefix(crate::path::real(root)).ok()?;
+    if rel.components().any(|c| c.as_os_str() == ".git") {
+        return None;
+    }
+    let rel = rel.to_str()?;
     let plain = |c: char| !c.is_whitespace() && !c.is_control() && !"*?[]\\\"#!".contains(c);
     rel.chars().all(plain).then(|| rel.to_string())
 }
@@ -1602,6 +1612,21 @@ mod tests {
         std::fs::create_dir_all(out.join(".moai")).unwrap();
         symlink(away.join("issues.jsonl"), out.join(".moai/issues.jsonl")).unwrap();
         assert_eq!(linked_snapshot(&out), None, "뿌리 밖을 가리키는 링크에 줄을 걸었다");
+
+        // **`.git/` 안은 줄로 안 건다**(moai-x0o7.2q8) — 끝 조각이 그리 가든 `.moai` 가 그리 가든, 딸린 파일의
+        // 블록은 제자리의 것 그대로다.
+        let git = root("git");
+        std::fs::create_dir_all(git.join(".git/moai")).unwrap();
+        std::fs::create_dir_all(git.join(".moai")).unwrap();
+        symlink("../.git/moai/issues.jsonl", git.join(".moai/issues.jsonl")).unwrap();
+        assert_eq!(linked_snapshot(&git), None, ".git 안을 가리키는 스냅샷에 줄을 걸었다");
+        assert_eq!((attributes_for(&git), gitignore_for(&git)), (GITATTRIBUTES.into(), GITIGNORE.into()));
+        let moved = root("git-moved");
+        std::fs::create_dir_all(moved.join(".git/moai")).unwrap();
+        std::fs::write(moved.join(".git/moai/issues.jsonl"), "").unwrap();
+        symlink(".git/moai", moved.join(".moai")).unwrap();
+        assert_eq!(moai_moved(&moved), None, ".git 안으로 간 `.moai` 에 줄을 걸었다");
+        assert_eq!((attributes_for(&moved), gitignore_for(&moved)), (GITATTRIBUTES.into(), GITIGNORE.into()));
     }
 
     /// **링크인 트래커는 락·임시 파일·저널의 규칙도 그 자리로 옮긴다**(moai-th3b). git 은 링크를 안 따라가
