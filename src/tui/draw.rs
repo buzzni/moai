@@ -2059,7 +2059,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
 
     app.list.fit(canvas.height as usize, laid.plan.height);
     // 커서의 카드가 안 보일 때만 굴린다 — 레인의 첫 카드면 그 레인의 머리줄까지 드러낸다([`super::board::Plan::span`]).
-    // 카드가 보이면 머리줄이 가렸어도 그대로다: 화면을 한 줄 굴려 머리줄만 가린 것을 여기서 되돌리지 않는다.
+    // 카드가 보이면 머리줄이 가렸어도 그대로다: 커서 키로 머리줄만 가린 카드에 서도 화면을 한 줄 되돌리지 않는다.
     // **사람이 화면을 굴려 커서에서 떼어 놓았으면 안 드러낸다**(moai-j0jf, [`App::rolled_off`]) — 고른 카드는 화면 밖에
     // 있어도 그대로고, 다음 커서 키가 화면을 그리로 되돌린다.
     let adrift = app.rolled_off(rows);
