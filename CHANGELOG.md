@@ -12,6 +12,18 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The explorer's `Journal` header row clears once the journal can be read
+  again.** Since 0.3.0 the row named a journal it could not open until you quit,
+  so after a `chmod 644` it went on calling a readable file unreadable. The
+  explorer now checks those files again once a minute and drops the ones that
+  open; if a `/` note search is in effect, it re-reads the notes too, so the
+  search finds what the file holds. It does not check while the stats window is
+  open — that window's token totals were counted without the file, and the row is
+  what says so. What `moai tui` prints when it quits, and its exit code, still
+  name every journal it failed to read along the way.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added
