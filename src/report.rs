@@ -2107,7 +2107,8 @@ pub fn stands_on<'i, T>(i: &'i Issue, read: impl FnOnce(GroupKey<'i>) -> Option<
     is_group(i).then(|| read((i.kind, i.id.as_str()))).flatten()
 }
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 칸의 셈이 마지막으로 움직인 때.
+/// 묶음 하나를 읽은 것 — 서 있는 칸과, 그 칸의 셈이 마지막으로 움직인 때([`Stand::since`], 막힘의 시계)와
+/// 그 칸에 든 때([`Stand::entered`], 아카이브·`--done`·`--stale` 의 시계).
 /// **저장하지 않는다** ([`group_states`] 가 까닭을 적었다).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stand<'a, 'c> {
@@ -2140,6 +2141,12 @@ pub struct Stand<'a, 'c> {
     /// **지우거나(`rm`) 다른 묶음으로 뺀(`edit -e`) 멤버는 못 센다** — 스냅샷에 흔적이 없다. 그렇게 닫힌
     /// 묶음은 끝난 멤버의 때로 잰다. 잡으려면 멤버를 옮길 때 묶음 줄에 그때를 적어야 하는데, 그런 필드는
     /// 파생값이다(CLAUDE.md "파생값은 저장하지 않는다").
+    ///
+    /// **거꾸로 들어온 줄도 못 가른다**(리뷰 moai-23q4.2x8). 이미 미룬 줄을 오래전에 닫힌 묶음에 넣으면
+    /// (`edit -e`) 묶음의 칸은 그대로 done 인데, 그 줄의 미룸이 끝난 멤버보다 늦으면 이 값이 그 미룸의 때로
+    /// 옮겨 간다 — 묶음이 아카이브에서 도로 나오고 `--done` 이 그날로 잡는다. 스냅샷만 보면 "그 줄이 원래
+    /// 멤버였고 그날 미뤄져 묶음을 닫았다" 와 한 글자도 안 다르다. [`Stand::since`] 가 소속 이동을 안 세는 것
+    /// (moai-bbzg)과 달리 여기는 그 이동이 시계를 민다 — 도움말이 그 한계를 댄다.
     pub entered: &'a str,
     /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::is_started` — 첫 칸도 done 도 아님)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
@@ -2258,8 +2265,10 @@ pub fn group_stands_in<'a, 'c>(
             });
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
-            // 셈에서 미뤄 빠진 멤버가 있어야 갈린다 — 미룬 줄 없는 저장소에서는 `shelf` 가 없어 안 걷는다.
-            let entered = match (column == crate::config::DONE, shelf.as_ref()) {
+            // 셈에서 미뤄 빠진 멤버가 있어야 갈린다 — 그런 멤버가 없으면(`of` 와 `counted` 의 수가 같다) 안 걷고, 미룬
+            // 줄 없는 저장소에서는 `shelf` 가 없어 안 걷는다. 미룬 줄이 하나라도 있는 저장소에서 끝난 묶음마다
+            // 걷던 자리다(리뷰 moai-23q4.2x8) — 이 값을 안 읽는 `ready`·막음의 셈도 이 셈을 지난다.
+            let entered = match (column == crate::config::DONE && of.len() > counted.len(), shelf.as_ref()) {
                 (true, Some(shelf)) => left_at(g, of, &counted, shelf, &off).filter(|at| *at > since).unwrap_or(since),
                 _ => since,
             };
@@ -8450,8 +8459,8 @@ mod tests {
         assert_eq!(h[0].undo, ["argos-0001", "argos-0002"], "묶음만 대면 풀고도 막힌다");
     }
 
-    /// 묶음이 그 칸에 들어선 때도 멤버에서 읽는다 — `--stale` 이 재는 시각이다.
-    /// 적힌 `status_since` 로 재면 오늘 진행 중이 된 에픽이 "열흘째" 가 된다.
+    /// 묶음이 그 칸에 들어선 때도 멤버에서 읽는다 — done 이 아닌 묶음에서 `--stale` 이 재는 시각이다
+    /// ([`Stand::entered`] 가 이것과 같다). 적힌 `status_since` 로 재면 오늘 진행 중이 된 에픽이 "열흘째" 가 된다.
     #[test]
     fn a_group_dates_its_column_from_its_members() {
         let mut epic = make("argos-0001", Kind::Epic, "todo"); // 생성 09-01
@@ -8493,6 +8502,63 @@ mod tests {
         let st = status(&issues, &[], &cfg, "2026-09-30T00:00:00Z", utc());
         assert!(st.epics.iter().any(|r| r.id.as_deref() == Some("argos-0001")), "미뤄 닫은 그날 아카이브로 숨었다");
         assert_eq!(st.archived, Archived::default());
+    }
+
+    /// **[`Stand::entered`] 가 [`Stand::since`] 와 갈리는 것은 done 으로 읽히는 묶음뿐이다**(리뷰 moai-23q4.2x8).
+    /// 진행 중인 묶음에서 갈리면 멤버 하나를 미루는 것만으로 그 묶음의 `--stale` 이 새로 선다 — moai-cxk8 이
+    /// 막은 손잡이다. done 이면 **빠진 멤버 가운데 가장 늦게 빠진 때**고, 묶음 제 미룸은 멤버를 빼지 않으므로
+    /// 그 때로 안 잰다.
+    #[test]
+    fn entered_parts_from_since_only_when_a_group_reads_done() {
+        let stands_of = |issues: &[Issue]| -> BTreeMap<String, (String, String)> {
+            let (e, m) = (Handing::of(issues), milestones(issues));
+            let shelved = shelved_in(issues, &e, &m);
+            let cfg = cfg();
+            group_stands_in(issues, &cfg, &Lines::of(issues), &e, &m, &super::kinds(issues), &shelved)
+                .into_iter()
+                .map(|((_, id), s)| (id.to_string(), (s.since.to_string(), s.entered.to_string())))
+                .collect()
+        };
+        let at = |mut i: Issue, since: &str| {
+            i.status_since = since.into();
+            i
+        };
+        let put_off = |mut i: Issue, when: &str| {
+            i.deferred_at = Some(when.into());
+            i
+        };
+        let epic = || make("argos-0001", Kind::Epic, "todo");
+        let finished = || at(member("argos-0002", "argos-0001", "done"), "2026-08-01T00:00:00Z");
+
+        // 진행 중인 묶음 — 오늘 멤버를 미뤄도 그 칸에 든 때는 안 움직인다.
+        let working = [
+            epic(),
+            at(member("argos-0002", "argos-0001", "in_progress"), "2026-09-01T00:00:00Z"),
+            put_off(member("argos-0003", "argos-0001", "todo"), "2026-09-20T00:00:00Z"),
+        ];
+        let (since, entered) = &stands_of(&working)["argos-0001"];
+        assert_eq!(
+            (since.as_str(), entered.as_str()),
+            ("2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z"),
+            "진행 중인 묶음의 칸 나이를 미루기가 옮겼다"
+        );
+
+        // 빠진 멤버가 둘이면 늦게 빠진 쪽이다 — 그때까지는 남은 멤버가 있었다.
+        let two = [
+            epic(),
+            finished(),
+            put_off(member("argos-0003", "argos-0001", "todo"), "2026-09-05T00:00:00Z"),
+            put_off(member("argos-0004", "argos-0001", "todo"), "2026-09-20T00:00:00Z"),
+        ];
+        assert_eq!(stands_of(&two)["argos-0001"].1, "2026-09-20T00:00:00Z", "먼저 빠진 멤버의 때로 쟀다");
+
+        // 묶음 제 미룸(08-15)은 멤버를 셈에서 안 뺀다 — 묶음은 남은 멤버를 미룬 09-10 에 닫혔다.
+        let own = [
+            put_off(epic(), "2026-08-15T00:00:00Z"),
+            finished(),
+            put_off(member("argos-0003", "argos-0001", "todo"), "2026-09-10T00:00:00Z"),
+        ];
+        assert_eq!(stands_of(&own)["argos-0001"].1, "2026-09-10T00:00:00Z", "묶음 제 미룸의 때로 쟀다");
     }
 
     /// **묶음은 시작한 멤버 중 가장 앞 칸에 선다**(moai-p415). 칸 자리로 "시작한 칸" 을 고르면

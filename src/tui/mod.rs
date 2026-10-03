@@ -383,7 +383,7 @@ struct Stood {
     /// id 로 들되(가려진 묶음 줄은 안 세므로 한 id 에 칸 하나다) 짚는 자는 줄의 종류와 견준다.
     kind: crate::model::Kind,
     column: String,
-    /// 읽은 칸에 든 때(`report::Stand::entered`) — 아카이브와 거름망의 `--stale` 이 재는 시계다. 방치·막힘의
+    /// 읽은 칸에 든 때(`report::Stand::entered`) — 아카이브와 거름망의 `--stale`·`--done` 이 재는 시계다. 막힘의
     /// 시계(`Stand::since`)는 탐색기가 안 읽는다.
     entered: String,
     busy: bool,
@@ -6075,6 +6075,25 @@ mod tests {
         );
         assert_eq!(badge(&a), None);
         assert_eq!(a.look_now().show_archived, Some(true), "켠 아카이브가 설정에 안 실린다");
+    }
+
+    /// **남은 멤버를 미뤄 닫은 에픽은 탐색기에서도 미룬 그날 done 에 든다**(moai-23q4, 리뷰 moai-23q4.2x8) — 아카이브
+    /// ([`Site::archived`])와 거름망(`--stale`·`--done` 이 읽는 `Where::since`)이 CLI 와 같은 시계(`report::Stand::entered`)를
+    /// 읽는다. 둘 다 `Stand::since` 로 돌려도 컴파일되므로 여기서 맨다.
+    #[test]
+    fn an_epic_closed_by_deferring_is_not_archived_the_same_day() {
+        let mut finished = member("argos-0002", "argos-0001");
+        finished.status = Status::new("done");
+        finished.status_since = "2026-09-01T00:00:00Z".into();
+        finished.done_at = Some("2026-09-01T00:00:00Z".into());
+        let mut rest = member("argos-0003", "argos-0001");
+        rest.deferred_at = Some("2026-09-28T00:00:00Z".into());
+        let a = App::aging(vec![make("argos-0001", Kind::Epic), finished, rest], cfg(), "2026-09-30T00:00:00Z");
+        assert_eq!(a.site.column(0), "done", "시험의 전제 — 남은 멤버를 미뤄 에픽이 닫혔다");
+        assert!(a.site.archived(1), "시험의 전제 — 29일 전에 끝난 멤버는 아카이브다");
+        assert!(!a.site.archived(0), "미뤄 닫은 그날 에픽이 아카이브로 숨었다");
+        let wh = a.site.ground.here(&a.site.issues);
+        assert_eq!(wh.since(&a.site.issues[0]), "2026-09-28T00:00:00Z", "거름망이 끝난 멤버의 때로 쟀다");
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),

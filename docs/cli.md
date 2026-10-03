@@ -434,14 +434,15 @@ Order and paging:
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Removing the
-  rest or moving them to another epic leaves no trace on the group, so it
-  counts from its last finished member then. Asking by time opens what the
-  list hides by default - done, deferred and ideas - because a row closed
-  meanwhile changed too. Narrow it again with -s (name the columns you
-  want) or --type; --deferred keeps only what is deferred, and no flag
-  leaves deferred rows out. A lone instant given to --created or --done is
-  that one second, not a day.
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1149,14 +1150,15 @@ Order and paging:
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Removing the
-  rest or moving them to another epic leaves no trace on the group, so it
-  counts from its last finished member then. Asking by time opens what the
-  list hides by default - done, deferred and ideas - because a row closed
-  meanwhile changed too. Narrow it again with -s (name the columns you
-  want) or --type; --deferred keeps only what is deferred, and no flag
-  leaves deferred rows out. A lone instant given to --created or --done is
-  that one second, not a day.
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1400,14 +1402,15 @@ Order and paging:
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Removing the
-  rest or moving them to another epic leaves no trace on the group, so it
-  counts from its last finished member then. Asking by time opens what the
-  list hides by default - done, deferred and ideas - because a row closed
-  meanwhile changed too. Narrow it again with -s (name the columns you
-  want) or --type; --deferred keeps only what is deferred, and no flag
-  leaves deferred rows out. A lone instant given to --created or --done is
-  that one second, not a day.
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1651,14 +1654,15 @@ Order and paging:
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Removing the
-  rest or moving them to another epic leaves no trace on the group, so it
-  counts from its last finished member then. Asking by time opens what the
-  list hides by default - done, deferred and ideas - because a row closed
-  meanwhile changed too. Narrow it again with -s (name the columns you
-  want) or --type; --deferred keeps only what is deferred, and no flag
-  leaves deferred rows out. A lone instant given to --created or --done is
-  that one second, not a day.
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1923,14 +1927,15 @@ Order and paging:
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Removing the
-  rest or moving them to another epic leaves no trace on the group, so it
-  counts from its last finished member then. Asking by time opens what the
-  list hides by default - done, deferred and ideas - because a row closed
-  meanwhile changed too. Narrow it again with -s (name the columns you
-  want) or --type; --deferred keeps only what is deferred, and no flag
-  leaves deferred rows out. A lone instant given to --created or --done is
-  that one second, not a day.
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes

@@ -88,9 +88,11 @@ does not tag — see `CONTRIBUTING.md`.
   epic or milestone whose last open members were deferred used to count from
   when its last member finished, so an epic closed today by `moai defer` could
   stand weeks back; it now counts from the day the rest were deferred, if that
-  came later. The same clock is what the archive and `moai stats` read. A group
-  closed by removing the rest or moving them to another epic still counts from
-  its last finished member — nothing on the group records when that happened.
+  came later. The same clock is what the archive, `--stale` on a done group and
+  `moai stats` read. Moving rows in or out and removing them leave nothing on
+  the group: one closed by removing the rest or moving them to another epic
+  still counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral.
 
 - **The version line in the `moai tui` header names the latest release.** It
   reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it

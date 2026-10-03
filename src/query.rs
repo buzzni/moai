@@ -47,8 +47,9 @@ pub struct Where<'a> {
     pub shelved: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
     pub states: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
-    /// 묶음 → 읽은 칸에 든 때 (`report::Stand::entered`). 방치·막힘의 시계(`Stand::since`)가 아니다 —
-    /// 셈에서 미뤄 빠진 멤버가 묶음을 닫았으면 그 미룸의 때다(moai-23q4).
+    /// 묶음 → 읽은 칸에 든 때 (`report::Stand::entered`) — `--stale`·`--done`·아카이브가 읽는다. 막힘의
+    /// 시계(`Stand::since`, `blocked_since`)와는 따로다: done 이 아닌 묶음에서는 같은 값이고, 셈에서 미뤄 빠진
+    /// 멤버가 묶음을 닫았으면 그 미룸의 때다(moai-23q4).
     pub since: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
     /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
