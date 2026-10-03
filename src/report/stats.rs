@@ -290,8 +290,8 @@ pub fn select<'a>(all: &'a [Issue], filter: &Filter, wh: &Where, now: &str) -> V
 /// 그 줄이 **닫힌 때** — 지금 done 에 선 줄이 그 칸에 든 때다. `--done` 이 읽는 값과 같다(`Filter::matches`).
 ///
 /// 일 줄이면 `status_since` 고, `mv` 가 쓴 줄이면 `done_at` 과 같다. `done_at` 이 생기기 전에 닫힌 줄에도 선다.
-/// 묶음이면 멤버가 마지막으로 done 에 든 때다([`Where::since`]). 지금 done 이 아니면 없다 — 되돌린 줄의
-/// `done_at` 은 "그때 끝났었다" 지 지금 닫힌 것이 아니다.
+/// 묶음이면 멤버가 마지막으로 done 에 든 때거나 남은 멤버를 미룬 때 가운데 늦은 것이다([`Where::since`]).
+/// 지금 done 이 아니면 없다 — 되돌린 줄의 `done_at` 은 "그때 끝났었다" 지 지금 닫힌 것이 아니다.
 pub fn closed_at<'x>(i: &'x Issue, wh: &'x Where) -> Option<&'x str> {
     (wh.column(i) == DONE).then(|| wh.since(i))
 }

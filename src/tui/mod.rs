@@ -375,7 +375,7 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸의 셈이 마지막으로 움직인 때(`report::Stand::since`),
+/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸에 든 때(`report::Stand::entered`),
 /// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
 /// (`report::Stand::aside`).
 struct Stood {
@@ -383,7 +383,9 @@ struct Stood {
     /// id 로 들되(가려진 묶음 줄은 안 세므로 한 id 에 칸 하나다) 짚는 자는 줄의 종류와 견준다.
     kind: crate::model::Kind,
     column: String,
-    since: String,
+    /// 읽은 칸에 든 때(`report::Stand::entered`) — 아카이브와 거름망의 `--stale`·`--done` 이 재는 시계다. 막힘의
+    /// 시계(`Stand::since`)는 탐색기가 안 읽는다.
+    entered: String,
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
@@ -472,7 +474,7 @@ impl Ground {
                 let stood = Stood {
                     kind,
                     column: s.column.to_string(),
-                    since: s.since.to_string(),
+                    entered: s.entered.to_string(),
                     busy: s.busy,
                     waiting: s.waiting,
                     aside,
@@ -596,7 +598,7 @@ impl Ground {
                 self.split_rows.iter().map(|(at, r)| (&issues[*at], r.as_deref())),
             ),
             states: self.columns(),
-            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.since.as_str())).collect(),
+            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.entered.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
@@ -1549,11 +1551,11 @@ impl Site {
     }
 
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
-    /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 때(`report::Stand::since`)고 아니면 제 칸 시각이다. 시계는
-    /// 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
+    /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
+    /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
     pub fn archived(&self, at: usize) -> bool {
         let i = &self.issues[at];
-        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.since.as_str());
+        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.entered.as_str());
         crate::report::archived(self.column(at), since, &self.now, self.ground.archive_days)
     }
 
@@ -6073,6 +6075,25 @@ mod tests {
         );
         assert_eq!(badge(&a), None);
         assert_eq!(a.look_now().show_archived, Some(true), "켠 아카이브가 설정에 안 실린다");
+    }
+
+    /// **남은 멤버를 미뤄 닫은 에픽은 탐색기에서도 미룬 그날 done 에 든다**(moai-23q4, 리뷰 moai-23q4.2x8) — 아카이브
+    /// ([`Site::archived`])와 거름망(`--stale`·`--done` 이 읽는 `Where::since`)이 CLI 와 같은 시계(`report::Stand::entered`)를
+    /// 읽는다. 둘 다 `Stand::since` 로 돌려도 컴파일되므로 여기서 맨다.
+    #[test]
+    fn an_epic_closed_by_deferring_is_not_archived_the_same_day() {
+        let mut finished = member("argos-0002", "argos-0001");
+        finished.status = Status::new("done");
+        finished.status_since = "2026-09-01T00:00:00Z".into();
+        finished.done_at = Some("2026-09-01T00:00:00Z".into());
+        let mut rest = member("argos-0003", "argos-0001");
+        rest.deferred_at = Some("2026-09-28T00:00:00Z".into());
+        let a = App::aging(vec![make("argos-0001", Kind::Epic), finished, rest], cfg(), "2026-09-30T00:00:00Z");
+        assert_eq!(a.site.column(0), "done", "시험의 전제 — 남은 멤버를 미뤄 에픽이 닫혔다");
+        assert!(a.site.archived(1), "시험의 전제 — 29일 전에 끝난 멤버는 아카이브다");
+        assert!(!a.site.archived(0), "미뤄 닫은 그날 에픽이 아카이브로 숨었다");
+        let wh = a.site.ground.here(&a.site.issues);
+        assert_eq!(wh.since(&a.site.issues[0]), "2026-09-28T00:00:00Z", "거름망이 끝난 멤버의 때로 쟀다");
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),

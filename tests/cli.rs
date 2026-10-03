@@ -13169,6 +13169,31 @@ fn the_archive_hides_from_all_and_archived_opens_it() {
     assert!(at(later, &["show", "--all"]).contains(&old), "archive_days = 0 이 아카이브를 안 껐다");
 }
 
+/// **남은 멤버를 미뤄 닫은 에픽은 미룬 그날 done 에 든다**(moai-23q4, 2026-10-03 사용자 결정) — 끝난 멤버가 오래전에
+/// 끝났어도 보드에서 그날로 아카이브에 숨지 않고, `show --done` 도 미룬 날로 잡는다. 리뷰 moai-47mz.5il 6번이 재현한
+/// 판이다: 29일 전에 끝난 멤버 하나와 남은 멤버 하나에서, 남은 것을 미룬다.
+#[test]
+fn an_epic_closed_by_deferring_its_rest_enters_done_that_day() {
+    let s = init("deferclose");
+    let at = |now: &str, args: &[&str]| ok_at(s.path(), now, args);
+    let then = "2026-09-01T12:00:00Z";
+    let epic = at(then, &["epic", "add", "미뤄 닫는 묶음", "-q"]).trim().to_string();
+    let finished = add_at(s.path(), then, &["끝난 일", "-e", &epic]);
+    let rest = add_at(s.path(), then, &["남은 일", "-e", &epic]);
+    at(then, &["mv", &finished, "done"]);
+    let today = "2026-09-30T12:00:00Z";
+    at(today, &["defer", &rest, "-m", "다음 분기"]);
+
+    let json = at(today, &["status", "--json"]);
+    assert!(json.contains(r#""archived":{"milestones":0,"epics":0}"#), "미뤄 닫은 그날 아카이브로 숨었다\n{json}");
+    assert!(at(today, &["status"]).contains(&epic), "보드의 에픽 목록에서 빠졌다");
+    let on = |day: &str| at(today, &["show", "--done", day, "--type", "epic"]);
+    assert!(on("2026-09-30").contains(&epic), "`--done` 이 미룬 날을 안 잡았다");
+    assert!(!on("2026-09-01").contains(&epic), "`--done` 이 끝난 멤버의 날로 쟀다");
+    // 미룬 때부터 꼬박 14일이 차면 그때 숨는다.
+    assert!(!at("2026-10-14T12:00:00Z", &["status"]).contains(&epic), "미룬 지 14일이 찼는데 안 숨었다");
+}
+
 /// **사람 화면과 기계 출력이 같은 것을 멤버라 부른다.** 머리글(`rollup`)도
 /// `--json` 도 담아 둔 생각을 안 세는데 사람 화면만 그리면, `멤버 0/1` 밑에
 /// 줄 둘이 서서 어느 숫자를 믿어야 할지 알 수 없다.

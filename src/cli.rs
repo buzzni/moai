@@ -1042,12 +1042,12 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
-  epic or milestone counted from when its last member got to done. --all
-  and -s done leave it out and the tail says how many; --archived brings it
-  back, done and deferred with it. Asking by time (--since, --created,
-  --done, --stale) finds it anyway, and so does -g once done is let in
-  (-g --all). Nothing is stored: it is read
-  from the column and the clock each time.
+  epic or milestone counted from when it got to done, the clock --done
+  reads. --all and -s done leave it out and the tail says how many;
+  --archived brings it back, done and deferred with it. Asking by time
+  (--since, --created, --done, --stale) finds it anyway, and so does -g
+  once done is let in (-g --all). Nothing is stored: it is read from the
+  column and the clock each time.
 
     moai show --archived -g parser
 
@@ -1057,13 +1057,16 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   the time zone the screen and milestone deadlines use; the end of a range
   takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
   time zone moves. --done looks at rows standing in done now, at the
-  time they last got there - an epic or milestone at the time its last
-  member got to done; deferring or removing the rest later does not move
-  it. Asking by time opens what the list hides by default - done, deferred
-  and ideas - because a row closed meanwhile changed too. Narrow it again
-  with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out. A lone instant given
-  to --created or --done is that one second, not a day.
+  time they last got there - an epic or milestone when its last member got
+  to done, or when the rest were deferred if that came later. Moving rows
+  in or out and removing them leave no trace on the group: closed that way
+  it counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral. Asking by time opens
+  what the list hides by default - done, deferred and ideas - because a
+  row closed meanwhile changed too. Narrow it again with -s (name the
+  columns you want) or --type; --deferred keeps only what is deferred, and
+  no flag leaves deferred rows out. A lone instant given to --created or
+  --done is that one second, not a day.
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
