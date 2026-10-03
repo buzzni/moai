@@ -13115,6 +13115,60 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     assert!(!ideas.contains(&closed), "{ideas}");
 }
 
+/// **아카이브는 done 안의 한 겹 더다**(moai-47mz, 2026-10-03 사용자 결정) — done 에 든 지 `archive_days`(14)가
+/// 꼬박 찬 줄은 `--all` 과 `-s done` 에도 안 서고, 꼬리가 대는 `--archived` 가 연다. `-g` 는 아카이브를 찾되 done 은
+/// 그대로 숨기고, `stats` 는 셈에서 안 뺀다. 아무것도 저장하지 않으니 시계만 옮겨 잰다.
+#[test]
+fn the_archive_hides_from_all_and_archived_opens_it() {
+    let s = init("archive");
+    let old = add(s.path(), &["오래전에 끝난 일"]);
+    ok(s.path(), &["mv", &old, "done"]);
+    // 시계만 옮겨 부른다 — 부르는 자는 [`ok_at`] 하나다(실패하면 stdout 도 낸다, `ok_env`).
+    let at = |now: &str, args: &[&str]| ok_at(s.path(), now, args);
+    let fresh = add_at(s.path(), "2026-09-20T00:00:00Z", &["최근 일"]);
+    at("2026-09-20T00:00:00Z", &["mv", &fresh, "done"]);
+    // NOW(09-11 04:12:03)에서 꼬박 14일.
+    let later = "2026-09-25T04:12:03Z";
+
+    for args in [&["show", "--all"][..], &["show", "-s", "done"]] {
+        let out = at(later, args);
+        assert!(out.contains(&fresh) && !out.contains(&old), "{args:?} 가 아카이브를 냈다\n{out}");
+        assert!(out.contains("아카이브 1건 숨김 — `--archived`"), "꼬리가 아카이브를 안 댄다\n{out}");
+    }
+    let json = at(later, &["show", "--all", "--json"]);
+    assert!(!json.contains(&old), "--json 도 같은 줄을 내야 한다\n{json}");
+    let opened = at(later, &["show", "--archived"]);
+    assert!(opened.contains(&old) && opened.contains(&fresh), "--archived 가 done 까지 안 연다\n{opened}");
+    // 한 초 덜 지났으면 아직 아니다.
+    assert!(at("2026-09-25T04:12:02Z", &["show", "--all"]).contains(&old), "14일이 차기 전에 숨었다");
+
+    // `-g` 는 아카이브를 찾는다 — done 은 여느 때처럼 `--all` 이 연다.
+    let found = at(later, &["show", "-g", "오래전"]);
+    assert!(!found.contains(&old) && found.contains("done 1건 숨김 — `--all`"), "{found}");
+    assert!(at(later, &["show", "-g", "오래전", "--all"]).contains(&old), "-g --all 이 아카이브를 못 찾는다");
+    assert!(at(later, &["show", "--done", "2026-09-01..2026-09-30"]).contains(&old), "때로 물었는데 숨겼다");
+
+    // 셈은 아카이브를 안 뺀다 — 보기의 일이지 셈의 일이 아니다.
+    assert!(at(later, &["stats", "--json"]).contains(r#"{"key":"done","rows":2}"#), "stats 가 아카이브를 뺐다");
+
+    // 보드의 에픽 목록도 아카이브된 묶음을 빼고 수 한 줄로 댄다 — 머리글의 에픽 수는 전부를 센다.
+    let epic = ok(s.path(), &["epic", "add", "끝난 묶음", "-q"]).trim().to_string();
+    let member = add(s.path(), &["묶음의 일", "-e", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let board = at(later, &["status"]);
+    assert!(!board.contains(&epic) && board.contains("에픽 1"), "{board}");
+    assert!(board.contains("아카이브 1건 — `moai show --type epic --archived`"), "{board}");
+    let json = at(later, &["status", "--json"]);
+    assert!(json.contains(r#""archived":{"milestones":0,"epics":1}"#), "{json}");
+    assert!(at(NOW, &["status"]).contains(&epic), "끝난 지 얼마 안 된 에픽이 빠졌다");
+
+    // `archive_days = 0` 이면 아카이브가 없다.
+    let cfg = s.path().join(".moai/config.toml");
+    let text = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("{text}archive_days = 0\n")).unwrap();
+    assert!(at(later, &["show", "--all"]).contains(&old), "archive_days = 0 이 아카이브를 안 껐다");
+}
+
 /// **사람 화면과 기계 출력이 같은 것을 멤버라 부른다.** 머리글(`rollup`)도
 /// `--json` 도 담아 둔 생각을 안 세는데 사람 화면만 그리면, `멤버 0/1` 밑에
 /// 줄 둘이 서서 어느 숫자를 믿어야 할지 알 수 없다.

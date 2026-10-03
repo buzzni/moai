@@ -275,14 +275,15 @@ pub fn counted_kind(asked: Option<Kind>) -> Kind {
     asked.unwrap_or(Kind::Issue)
 }
 
-/// 셀 줄을 고른다 — `show` 의 거르개를 **done·미룸·생각까지 연 채로** 건다.
+/// 셀 줄을 고른다 — `show` 의 거르개를 **done·미룸·생각·아카이브까지 연 채로** 건다.
 ///
 /// **목록의 숨김을 안 따른다.** 목록은 지금 볼 것을 내는 자리라 끝난 것을 숨기지만, 여기는 지나간 것을 세는
 /// 자리다 — 숨기면 흐름의 "닫은 수" 가 늘 0 이다. 미룬 것도 센다: 미룬 일도 만들어진 일이고, 빼면 미루기가
 /// 흐름의 수를 바꾸는 손잡이가 된다(`status` 의 흐름이 `is_work` 로만 세는 까닭과 같다). 좁히는 말은
-/// 그대로 듣는다 — `--deferred` 는 미룬 것만, `-s` 는 그 칸만 고른다.
+/// 그대로 듣는다 — `--deferred` 는 미룬 것만, `-s` 는 그 칸만 고른다. **아카이브도 센다**(moai-47mz) — 오래전에
+/// 닫은 줄을 빼면 리드 타임과 닫은 수가 아카이브 날수에 따라 움직인다. 아카이브는 보기의 일이지 셈의 일이 아니다.
 pub fn select<'a>(all: &'a [Issue], filter: &Filter, wh: &Where, now: &str) -> Vec<&'a Issue> {
-    let open = Filter { all: true, ideas: true, ..filter.clone() };
+    let open = filter.unhidden();
     all.iter().filter(|i| open.matches(i, now, wh)).collect()
 }
 

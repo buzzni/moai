@@ -329,6 +329,9 @@ pub enum Browse {
     /// 담아 둔 생각(idea)을 보이고 숨긴다 — `SPC v i`(moai-oagj.bjr). 칸이 아니라 종류(`kind`)의 축이다: 보드의
     /// idea 칸도 목록의 idea 줄도 이 하나로 숨는다.
     Ideas,
+    /// 아카이브(done 에 든 지 오래된 줄)를 보이고 숨긴다 — `SPC v o`(old, moai-47mz, 2026-10-03 사용자 결정).
+    /// 칸이 아니라 시각의 축이라 번호로 못 댄다. 처음에는 숨는다 — done 을 보여도 아카이브는 안 쏟아진다.
+    Archived,
     ShowAll,
     /// 목록 차례를 고른다(moai-55cp). 이미 고른 것을 다시 누르면 거꾸로 선다.
     Sort(Order),
@@ -583,6 +586,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // idea 는 `i`(idea) — 미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 `l` 곁에 선다
         // (moai-oagj.bjr).
         row!(Ideas, Some("SPC v i"), LEADER, Key::plain('v'), Key::plain('i')),
+        // 아카이브는 `o`(old) — idea·미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 곁에 선다.
+        // **`SPC v a`(모두)는 이것을 안 연다**(moai-47mz, 사용자 결정) — `show --all` 이 아카이브를 안 여는 것과 같다.
+        row!(Archived, Some("SPC v o"), LEADER, Key::plain('v'), Key::plain('o')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
         // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
@@ -691,6 +697,8 @@ pub struct Ctx {
     pub deferred_hidden: bool,
     /// idea 를 숨겼는가(moai-oagj.bjr) — 메뉴 줄이 `[보임]`·`[숨김]` 으로 댄다.
     pub ideas_hidden: bool,
+    /// 아카이브를 숨겼는가(moai-47mz) — 처음에는 참이다.
+    pub archived_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
@@ -794,7 +802,7 @@ impl Browse {
             // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i` 를 누르면 줄이 다
             // 빠지는데, 그 키와 `SPC v a` 가 같이 꺼지면 한눈 보기에서는 되돌릴 길이 없다. 보드는 묶음 줄을 안 세워
             // 목록보다 자주 그렇게 된다.
-            Column(_) | Deferred | Ideas | ShowAll | Sort(_) | Cell(_)
+            Column(_) | Deferred | Ideas | Archived | ShowAll | Sort(_) | Cell(_)
                 if c.layer && !c.rows_here && !self.unhides(c) =>
             {
                 Err(Off::Quiet)
@@ -834,6 +842,7 @@ impl Browse {
         match self {
             Browse::Ideas => c.ideas_hidden,
             Browse::Deferred => c.deferred_hidden,
+            Browse::Archived => c.archived_hidden,
             Browse::Column(n) => c.hidden & (1 << n) != 0,
             Browse::ShowAll => c.ideas_hidden || c.deferred_hidden || c.hidden != 0,
             _ => false,
@@ -874,6 +883,7 @@ impl Browse {
             Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             Browse::Ideas => Some(shown(c.ideas_hidden, c.lang)),
+            Browse::Archived => Some(shown(c.archived_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
                 say(c.lang, "tui.state.reversed")
@@ -907,7 +917,18 @@ impl Browse {
         use Browse::*;
         matches!(
             self,
-            Worktree | Raw | Column(_) | Deferred | Ideas | Sort(_) | Cell(_) | Detail | DetailAt | Board | Mouse
+            Worktree
+                | Raw
+                | Column(_)
+                | Deferred
+                | Ideas
+                | Archived
+                | Sort(_)
+                | Cell(_)
+                | Detail
+                | DetailAt
+                | Board
+                | Mouse
         )
     }
 
@@ -957,6 +978,7 @@ impl Browse {
             Project(_) => say(c.lang, "tui.act.project"),
             Deferred => say(c.lang, "tui.act.deferred"),
             Ideas => say(c.lang, "tui.act.ideas"),
+            Archived => say(c.lang, "tui.act.archived"),
             ShowAll => say(c.lang, "tui.act.show_all"),
             Sort(_) => say(c.lang, "tui.act.sort"),
             Cell(_) => say(c.lang, "tui.act.cell"),
