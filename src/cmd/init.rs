@@ -217,22 +217,32 @@ fn stale_kind(text: &str) -> Stale {
     if first.trim_end().ends_with(&format!(" {said} -->")) { Stale::Binary } else { Stale::Edited }
 }
 
-/// 이 디렉터리의 AGENTS.md 를 읽는다. **없는 파일만 `None` 이다** — 못 읽는 파일(권한·UTF-8 아님)을 빈
-/// 글로 치면 `init` 이 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다. 보는 길([`agents_state`])과 쓰는
-/// 길([`run`])이 이 하나로 읽는다.
+/// 이 저장소가 든 뿌리 파일 하나를 읽는다 — AGENTS.md·딸린 파일·CLAUDE.md 가 모두 이 하나로 읽는다.
+/// **없는 파일만 `None` 이다** — 못 읽는 파일(권한·UTF-8 아님)을 빈 글로 치면 AGENTS.md 는 블록 하나로
+/// 덮여 사람의 산문이 통째로 사라지고(moai-gq1c), 딸린 파일은 이미 있는 줄을 빠졌다고 한다.
 ///
 /// **스냅샷과 같은 자로 읽는다**([`crate::held::read_inside`], moai-x0o7) — 체크아웃 안이고 `.git/` 밖인
 /// 보통 파일을, 연 손잡이가 댄 크기까지만. 맨 `fs::read_to_string` 으로 읽던 판은 `mkfifo AGENTS.md`
 /// 하나로 `moai status`·훅의 첫 보드·밖 한눈 보기가 쓰는 쪽을 영영 기다렸고, 커밋된
-/// `AGENTS.md -> /dev/zero` 는 메모리를 다 썼다. **안 읽기로 한 것도 못 읽은 것이다** — 멈추는 자리도
-/// 고칠 길(`--no-agents`)도 권한·UTF-8 과 같다. 그 자리는 쓰기도 거절하므로(`store::target_of`) 블록을
-/// 심을 길이 원래 없다. 까닭은 부르는 쪽이 고른 말로 편다([`agents_unread`]).
-fn read_agents(root: &Path) -> Result<Option<String>, Fell> {
-    match crate::held::read_inside(&root.join("AGENTS.md"), &crate::held::Home::of(root)) {
+/// `AGENTS.md -> /dev/zero` 는 메모리를 다 썼다.
+fn read_held(path: &Path, home: &crate::held::Home) -> Result<Option<String>, Fell> {
+    match crate::held::read_inside(path, home) {
         Ok(t) => Ok(Some(t)),
         Err(Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(fell) => Err(fell),
     }
+}
+
+/// 이 디렉터리의 AGENTS.md 를 읽는다([`read_held`]). 보는 길([`agents_state`])과 쓰는 길([`run`])이 이
+/// 하나로 읽는다.
+///
+/// **안 읽기로 한 것도 `Err` 다**([`Fell::Unheld`]) — 보는 길은 상태를 지어내지 않고(`--check` 는 0 이 아니다),
+/// 쓰는 길([`run`])은 그 파일만 못 건드린 자리로 대고 나머지를 심는다. 그 자리는 쓰기도 거절하므로
+/// (`store::target_of`) 블록을 심을 길도 지킬 산문도 없어, 멈추는 것은 권한·UTF-8 로 못 읽은 것뿐이다. 거꾸로는 아니다 — 쓰기만 거절하는
+/// 자리(락으로 풀리는 링크)는 읽히고, `init` 은 그 파일을 못 쓴 것으로 대고 이어 간다. 까닭은 부르는 쪽이
+/// 고른 말로 편다([`agents_unread`]).
+fn read_agents(root: &Path) -> Result<Option<String>, Fell> {
+    read_held(&root.join("AGENTS.md"), &crate::held::Home::of(root))
 }
 
 /// 이 디렉터리의 AGENTS.md 를 못 읽은 한 줄 — `<자리>: <까닭>`([`read_agents`]).
@@ -249,11 +259,15 @@ fn unread(lang: crate::i18n::Lang, fell: &Fell) -> String {
     }
 }
 
-/// 이 디렉터리의 AGENTS.md 를 읽어 [`block_state`] 로 가른다. 없는 파일은 `missing` 이고, 못 읽는
-/// 파일(권한·UTF-8 아님, 안 읽기로 한 자리 — [`read_agents`])만 `Err` 다 — 그때는 상태를 지어내지 않는다.
-pub fn agents_state(root: &Path) -> Result<BlockState, Fell> {
+/// 이 디렉터리의 AGENTS.md 를 읽어 [`block_state`] 로 가른다 — 그 상태와 **읽은 글**을 함께 낸다(없는 파일은
+/// 빈 글). 없는 파일은 `missing` 이고, 못 읽는 파일(권한·UTF-8 아님, 안 읽기로 한 자리 — [`read_agents`])만
+/// `Err` 다 — 그때는 상태를 지어내지 않는다.
+///
+/// **글을 함께 내는 것은 낡음의 갈래([`stale_kind`])를 같은 글에서 재려는 것이다**(리뷰 moai-x0o7.52k) — 갈래를
+/// 재려고 다시 읽던 판은 파일을 두 번 열었고, 둘째 읽기가 지면 빈 글로 쳐 바이너리가 쓴 블록을 손으로 고쳤다고 댔다.
+pub fn agents_state(root: &Path) -> Result<(BlockState, String), Fell> {
     let text = read_agents(root)?.unwrap_or_default();
-    Ok(block_state(&text, &crate::guide::agents()))
+    Ok((block_state(&text, &crate::guide::agents()), text))
 }
 
 /// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
@@ -282,7 +296,7 @@ const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
 ///
 /// 줄을 손으로 적지 않고 블록의 `.moai/` 줄을 그 자리로 옮겨 적는다([`mirrored`]) — 블록이 바뀌는 날 옮긴
 /// 줄도 같이 바뀐다. 줄로 못 거는 자리([`inside`] 가 거절하는 곳)는 뺀다 — 그 트래커는 `moai status` 의 링크
-/// 알림이 비춘다.
+/// 알림이 비춘다(`.git/` 안은 그 앞에서 `status` 가 트래커를 못 읽는다고 멈춘다).
 fn gitignore_for(root: &Path) -> std::borrow::Cow<'static, str> {
     let own = moai_moved(root);
     let mut lines = own.as_deref().map(|dir| mirrored(GITIGNORE, "", dir, None)).unwrap_or_default();
@@ -409,7 +423,7 @@ fn linked_snapshot(root: &Path) -> Option<String> {
 }
 
 /// 푼 경로 `path` 를 **규칙 줄에 실을 수 있는** 뿌리 안의 경로로 — 뿌리 자체는 빈 글이다. 뿌리 밖이거나
-/// 빈칸·패턴 글자·제어 문자가 든 이름이면 `None` 이다. 규칙 줄을 짓는 자리([`linked_snapshot`]·
+/// `.git/` 안이거나 빈칸·패턴 글자·제어 문자가 든 이름이면 `None` 이다. 규칙 줄을 짓는 자리([`linked_snapshot`]·
 /// [`moai_moved`])가 모두 이 하나로 잰다.
 ///
 /// **제어 문자가 든 이름도 줄로 안 건다**(리뷰). 받은 저장소가 링크와 그 이름의 디렉터리를 커밋하면 그
@@ -421,11 +435,12 @@ fn linked_snapshot(root: &Path) -> Option<String> {
 ///
 /// **git 의 자리(`.git/`)는 줄로 안 건다**(moai-x0o7.2q8) — 트래커 링크가 `.git/` 으로 풀리면 `init` 이
 /// `/.git/<…>/issues.jsonl … merge=moai` 와 `/.git/<…>/lock` 을 심었다. git 은 제 자리를 담지도 합치지도
-/// 않아 그 줄은 뜻이 없고, `.moai` 가 그리 가면 쓰기도 읽기도 이미 거절한다(`store::target_of`·
-/// [`crate::held::place`] 와 같은 자다). 끝 이름도 센다 — 딸린 워크트리의 `.git` 은 파일이다.
+/// 않아 그 줄은 뜻이 없고, `.moai` 가 그리 가면 쓰기도 읽기도 이미 거절한다. 재는 자는 그 둘(`store::resolve`·
+/// [`crate::held::place`])과 한 몸인 [`crate::held::into_git`] 이다 — 끝 이름도 세고(딸린 워크트리의 `.git` 은
+/// 파일이다) 대소문자를 안 가린다.
 fn inside(root: &Path, path: &Path) -> Option<String> {
     let rel = path.strip_prefix(crate::path::real(root)).ok()?;
-    if rel.components().any(|c| c.as_os_str() == ".git") {
+    if crate::held::into_git(rel) {
         return None;
     }
     let rel = rel.to_str()?;
@@ -457,11 +472,8 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>
         .into_iter()
         .filter(|(name, ..)| !root.join(name).is_symlink())
         .filter_map(|(name, block, kind)| {
-            let text = match crate::held::read_inside(&root.join(name), &home) {
-                Ok(t) => t,
-                Err(Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-                Err(_) => return None,
-            };
+            let Ok(text) = read_held(&root.join(name), &home) else { return None };
+            let text = text.unwrap_or_default();
             let block = block(root);
             let missing: Vec<String> = missing_rules(&text, &block).into_iter().map(str::to_string).collect();
             (!missing.is_empty()).then_some((name, kind, missing))
@@ -522,12 +534,9 @@ pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
 ///
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는지는 [`away_root`] 가 정한다.
 pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
-    if !matches!(agents_state(root), Ok(BlockState::Stale)) {
-        return None;
-    }
+    let Ok((BlockState::Stale, text)) = agents_state(root) else { return None };
     // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
     // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
-    let text = read_agents(root).ok().flatten().unwrap_or_default();
     Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), stale_kind(&text) == Stale::Edited))
 }
 
@@ -536,7 +545,7 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
 /// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-    let state = agents_state(&root).map_err(|fell| Fail::new(agents_unread(ctx.lang(), &root, &fell)))?;
+    let (state, text) = agents_state(&root).map_err(|fell| Fail::new(agents_unread(ctx.lang(), &root, &fell)))?;
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
     let gaps = dotfile_gaps(&root);
@@ -587,16 +596,12 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let lang = ctx.lang();
     let mut out = vec![match state {
         BlockState::Current => say(lang, "init.block_current").to_string(),
-        BlockState::Stale => {
-            let text =
-                read_agents(&root).map_err(|fell| Fail::new(agents_unread(lang, &root, &fell)))?.unwrap_or_default();
-            // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")`
-            // 모양만 읽어, 키를 변수로 넘기면 그 눈에서 통째로 사라진다.
-            match stale_kind(&text) {
-                Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
-                Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
-            }
-        }
+        // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")`
+        // 모양만 읽어, 키를 변수로 넘기면 그 눈에서 통째로 사라진다.
+        BlockState::Stale => match stale_kind(&text) {
+            Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
+            Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
+        },
         BlockState::Missing => say(lang, "init.block_missing").to_string(),
     }];
     // **규칙끼리는 쉼표로 가른다** — `.gitattributes` 의 규칙은 제 안에 띄어쓰기를 여럿 들어
@@ -897,9 +902,8 @@ fn ensure_lines(path: &Path, block: &str, lang: impl FnOnce() -> crate::i18n::La
             .is_some_and(|dir| dir.starts_with(&checkout));
         return Added::Linked { to, outside };
     }
-    let existing = match crate::held::read_inside(path, &crate::held::Home::of(crate::path::dir_of(path))) {
-        Ok(t) => t,
-        Err(Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+    let existing = match read_held(path, &crate::held::Home::of(crate::path::dir_of(path))) {
+        Ok(t) => t.unwrap_or_default(),
         Err(fell) => return Added::Unreadable(unread(lang(), &fell)),
     };
     let missing = missing_lines(&existing, block);
@@ -1226,19 +1230,31 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // AGENTS.md 도 **아무것도 심기 전에** 읽는다. 못 읽는 파일(UTF-8 아님·권한)을 빈 글로 치면
     // 블록 하나로 덮어써 사람의 산문이 통째로 사라졌다 — 멈추되, `.moai/` 를 만든 뒤에 멈추면
     // 반쯤 심긴 저장소가 남는다. `--check` 가 같은 파일에 같은 까닭을 댄다(`read_agents`).
+    //
+    // **안 읽기로 한 자리는 멈추지 않고 건너뛴다**(리뷰 moai-x0o7.52k 5번, 2026-10-03 밤 정함) — 밖·`.git` 으로
+    // 가는 링크와 보통 파일이 아닌 것은 쓰기도 거절하는 자리라(`store::target_of`) 지킬 산문이 없다. 멈추던
+    // 판은 하위 트래커의 `svc/AGENTS.md -> ../AGENTS.md` 에서 `moai init` 이 늘 1 로 끝나, 보드가 딸린 파일
+    // 규칙을 고치라며 대는 `moai init` 이 막다른 길이 됐다. 그 파일은 못 건드린 자리로 이름과 까닭을 댄다.
     let agents_path = root.join("AGENTS.md");
+    let mut agents_unheld = None;
     let agents_now = if no_agents {
         None
     } else {
-        let read = read_agents(&root).map_err(|fell| {
-            let lang = ctx.lang();
-            Fail::new(format!(
-                "{}\n      {}",
-                agents_unread(lang, &root, &fell),
-                say(lang, "refuse.init_agents_unreadable")
-            ))
-        })?;
-        Some(read.unwrap_or_default())
+        match read_agents(&root) {
+            Ok(read) => Some(read.unwrap_or_default()),
+            Err(Fell::Unheld(why)) => {
+                agents_unheld = Some(why);
+                None
+            }
+            Err(fell) => {
+                let lang = ctx.lang();
+                return Err(Fail::new(format!(
+                    "{}\n      {}",
+                    agents_unread(lang, &root, &fell),
+                    say(lang, "refuse.init_agents_unreadable")
+                )));
+            }
+        }
     };
 
     if !again {
@@ -1282,7 +1298,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 끝났다 — 같은 실행이 만든 말이 통째로 삼켜졌다. **못 읽는 것과는 다르다**: 그쪽은 아무것도
     // 심기 전에 멈춰 남의 산문을 지키지만(위의 `read_agents`), 여기서 잃을 산문은 없다. 안 써진
     // 블록은 다음 `init` 이 채우고, 그 사이는 `init --check` 와 `status` 가 말한다.
-    let mut agents_trouble = None;
+    // 안 읽기로 한 AGENTS.md 는 위에서 건너뛰었다 — 못 읽은 자리로 선다. 그 까닭의 말은 그때만 묻는다
+    // (`ensure_lines` 와 같다 — `--json` 의 흔한 길은 사용자 설정을 안 연다).
+    let mut agents_trouble = agents_unheld.map(|why| Added::Unreadable(crate::held::said(ctx.lang(), &why)));
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
@@ -1302,7 +1320,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     };
     // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
     // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
-    // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것뿐이고, 그 말은 [`hand`] 가 빈 자리에서 낸다.
+    // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것(못 썼을 때)이나 그 자리에 보통 파일을 두는 것(안 읽었을
+    // 때)뿐이고, 그 말은 [`hand`] 가 빈 자리에서 고른다.
     let untouched: Vec<(&str, &Added, &str)> =
         untouched.into_iter().chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, ""))).collect();
     // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
@@ -1320,7 +1339,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     let claude_needs_pointer = agents_now.is_some()
         && claude.exists()
         && crate::path::real(&agents_path) != crate::path::real(&claude)
-        && crate::held::read_inside(&claude, &crate::held::Home::of(&root)).is_ok_and(|t| !t.contains("AGENTS.md"));
+        && read_held(&claude, &crate::held::Home::of(&root)).is_ok_and(|t| t.is_some_and(|t| !t.contains("AGENTS.md")));
 
     if ctx.json {
         let mut v = serde_json::json!({
@@ -1449,8 +1468,15 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         out.push(head);
         // **댈 줄이 없는 자리도 있다** — AGENTS.md 블록은 줄 몇 개가 아니라 통째로 갈아 끼우는
         // 글이라 손으로 옮겨 적을 것이 아니다. 그 자리는 상태를 보는 길을 대신 댄다(moai-780n).
+        //
+        // **못 읽은 AGENTS.md 는 고칠 말이 다르다**(리뷰 moai-x0o7.52k) — 여기 오는 것은 안 읽기로 한 자리뿐이고
+        // (권한·UTF-8 로 못 읽은 것은 아무것도 심기 전에 멈췄다), 그 파일은 읽히고 쓸 수도 있어 "쓸 수 있게 고쳐라"
+        // 는 헛걸음이다. 할 일은 그 자리에 보통 파일을 두거나 `--no-agents` 로 그대로 두는 것이다.
         if done.hand(block).is_empty() {
-            out.push(say(lang, "init.untouched_fix").to_string());
+            out.push(match done {
+                Added::Unreadable(_) => say(lang, "init.agents_unheld_fix").to_string(),
+                _ => say(lang, "init.untouched_fix").to_string(),
+            });
             continue;
         }
         out.push(say(lang, "init.untouched_hand").to_string());
@@ -1627,6 +1653,13 @@ mod tests {
         symlink(".git/moai", moved.join(".moai")).unwrap();
         assert_eq!(moai_moved(&moved), None, ".git 안으로 간 `.moai` 에 줄을 걸었다");
         assert_eq!((attributes_for(&moved), gitignore_for(&moved)), (GITATTRIBUTES.into(), GITIGNORE.into()));
+        // **끝 이름도 센다**(리뷰 moai-x0o7.52k) — 딸린 워크트리의 `.git` 은 디렉터리가 아니라 `gitdir:` 한 줄짜리
+        // 파일이라, 트래커 링크가 그 파일 자체로 풀리면 `.git` 은 가운데가 아니라 끝 조각에만 선다.
+        let gitfile = root("git-file");
+        std::fs::write(gitfile.join(".git"), "gitdir: /x\n").unwrap();
+        std::fs::create_dir_all(gitfile.join(".moai")).unwrap();
+        symlink("../.git", gitfile.join(".moai/issues.jsonl")).unwrap();
+        assert_eq!(linked_snapshot(&gitfile), None, "딸린 워크트리의 .git 파일로 풀리는 스냅샷에 줄을 걸었다");
     }
 
     /// **링크인 트래커는 락·임시 파일·저널의 규칙도 그 자리로 옮긴다**(moai-th3b). git 은 링크를 안 따라가
@@ -1835,7 +1868,7 @@ mod tests {
     fn the_checked_in_agents_block_matches_the_guide() {
         let got = agents_state(Path::new(env!("CARGO_MANIFEST_DIR")));
         assert!(
-            matches!(got, Ok(BlockState::Current)),
+            matches!(got, Ok((BlockState::Current, _))),
             "AGENTS.md 블록이 guide.rs 의 글에서 낡았다 — `moai init` 을 다시 부른다: {got:?}"
         );
     }
@@ -2060,15 +2093,19 @@ mod tests {
 
     /// **밖을 가리키는 AGENTS.md 는 안 읽는다**(moai-x0o7) — 커밋된 `AGENTS.md -> /dev/zero` 가 `moai status`
     /// 에서 메모리를 다 쓰던 자리다. 끝없는 파일로는 재지 않는다: 고침이 없으면 시험이 메모리를 다 쓴다. 밖의
-    /// 보통 파일에 지금의 블록을 담아 두면, 고침이 없을 때 그것이 읽혀 `current` 로 선다. FIFO 앞에서 안 멈추는
-    /// 것은 바이너리로 잰다(`tests/cli.rs` 의 `a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing`).
+    /// 보통 파일에 **낡은 블록**을 담아 둔다 — 고침이 없으면 그것이 읽혀 `stale` 로 서고, 보드에는 남의 파일의
+    /// 낡은 블록을 고치라는 알림이 선다(리뷰 moai-x0o7.52k — 지금의 블록을 담던 판은 고침이 없어도 알림이 안 서서
+    /// 둘째 단언이 아무것도 못 쟀다). FIFO 앞에서 안 멈추는 것은 바이너리로 잰다(`tests/cli.rs` 의
+    /// `a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing`).
     #[cfg(unix)]
     #[test]
     fn an_agents_md_that_points_outside_is_not_read() {
         let s = crate::scratch::Scratch::new("init-agents-away");
         let away = crate::scratch::Scratch::new("init-agents-away-file");
         let file = away.join("AGENTS.md");
-        std::fs::write(&file, with_block("", &crate::guide::agents())).unwrap();
+        let stale = with_block("", "## an older block\n");
+        assert_eq!(block_state(&stale, &crate::guide::agents()), BlockState::Stale, "시험의 전제 — 블록이 낡지 않았다");
+        std::fs::write(&file, stale).unwrap();
         std::os::unix::fs::symlink(&file, s.join("AGENTS.md")).unwrap();
         let got = agents_state(s.path());
         assert!(

@@ -1301,14 +1301,24 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     std::fs::write(&rc, "# 사람의 rc\n").unwrap();
     let cloned = Scratch::new("init-link-cloned");
     std::os::unix::fs::symlink(&rc, cloned.path().join("AGENTS.md")).unwrap();
-    // **읽지도 않는다**(moai-x0o7) — 스냅샷과 같은 자로 읽어, 못 읽는 AGENTS.md 처럼 아무것도 심기 전에
-    // 멈추고 `--no-agents` 를 댄다.
+    // **읽지도 않는다**(moai-x0o7) — 스냅샷과 같은 자로 읽는다. 그 파일만 못 건드린 자리로 대고 나머지는
+    // 심는다(리뷰 moai-x0o7.52k 5번) — 멈추던 판은 하위 트래커의 `AGENTS.md -> ../AGENTS.md` 에서 `init` 이 늘
+    // 1 로 끝나, 보드가 대는 `moai init` 이 막다른 길이 됐다.
     let out = moai(cloned.path(), &["init", "argos"]);
     let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "안 읽은 AGENTS.md 하나로 init 이 멈췄다\n{said}");
+    assert!(cloned.path().join(".moai/config.toml").is_file(), "트래커를 안 심었다\n{said}");
     assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 고쳐 썼다");
     assert!(is_link(&cloned.path().join("AGENTS.md")), "링크를 갈아끼웠다");
-    assert!(said.contains("밖이다") && said.contains("--no-agents"), "왜 안 읽었는지를 안 댔다\n{said}");
-    assert!(!cloned.path().join(".moai").exists(), "못 읽은 AGENTS.md 를 두고 반쯤 심었다");
+    assert!(said.contains("AGENTS.md") && said.contains("밖이다"), "왜 안 읽었는지를 안 댔다\n{said}");
+    // 고칠 말은 까닭을 따른다(리뷰 moai-x0o7.52k) — 읽히고 쓸 수도 있는 파일에 "쓸 수 있게 고쳐라" 를 대면 사람은
+    // 권한을 고치러 간다.
+    assert!(
+        said.contains("보통 파일을 두고") && said.contains("--no-agents") && !said.contains("쓸 수 있게 고치고"),
+        "고칠 말이 까닭과 다르다\n{said}"
+    );
+    let json = ok(cloned.path(), &["init", "--json"]);
+    assert!(json.contains(r#""AGENTS.md":{"kind":"unreadable""#) && json.contains(r#""agents":false"#), "{json}");
 
     // **덧붙이는 파일도 같다**(moai-wd44) — `O_APPEND` 도 링크를 따라가, `.gitignore -> ~/.bashrc` 에
     // `init` 이 줄을, `.moai/journal/<사람>.jsonl -> ~/.bashrc` 에 `add` 가 JSON 을 붙이던 자리다.
@@ -1387,11 +1397,21 @@ fn a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing() {
     assert!(done, "FIFO 인 AGENTS.md 하나로 보드가 섰다\n{said}");
     let (done, said) = bounded(s.path(), &["init", "--check"]);
     assert!(!done && said.contains("보통 파일이 아니다"), "못 읽은 까닭을 안 댔다\n{said}");
-    // 심는 길은 아무것도 심기 전에 멈춘다 — 못 읽는 AGENTS.md 와 같은 자리, 같은 탈출구다.
+    // 심는 길은 그 파일만 건너뛰고 이어 간다 — 그 자리는 쓰기도 거절해 지킬 산문이 없다(리뷰 moai-x0o7.52k 5번).
     let (done, said) = bounded(s.path(), &["init"]);
-    assert!(!done && said.contains("--no-agents"), "탈출구를 안 댔다\n{said}");
+    assert!(
+        done && said.contains("보통 파일이 아니다") && said.contains("--no-agents"),
+        "까닭과 고칠 말을 안 댔다\n{said}"
+    );
     let (done, said) = bounded(s.path(), &["init", "--no-agents"]);
     assert!(done, "--no-agents 로도 못 심었다\n{said}");
+    // **처음 심는 길도 같다** — 이미 심은 자리에서는 트래커를 세우는지가 안 보이므로 안 심은 자리에서 잰다.
+    let fresh = Scratch::new("fifo-agents-fresh");
+    fifo(&fresh.path().join("AGENTS.md"));
+    let (done, said) = bounded(fresh.path(), &["init", "argos"]);
+    assert!(done && fresh.path().join(".moai/config.toml").is_file(), "안 읽은 AGENTS.md 하나로 못 심었다\n{said}");
+    let kind = std::fs::symlink_metadata(fresh.path().join("AGENTS.md")).unwrap().file_type();
+    assert!(!kind.is_file() && !kind.is_symlink(), "FIFO 를 보통 파일로 갈아끼웠다");
 
     let s = init("fifo-dotfiles");
     for name in [".gitignore", ".gitattributes", "CLAUDE.md"] {
@@ -1399,6 +1419,10 @@ fn a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing() {
     }
     let (done, said) = bounded(s.path(), &["status"]);
     assert!(done, "FIFO 인 딸린 파일 하나로 보드가 섰다\n{said}");
+    // **안 읽은 딸린 파일은 빠진 줄로 말하지 않는다**(리뷰 moai-x0o7.52k) — 무엇이 들었는지 모르고, `init` 도 그
+    // 파일은 안 건드리므로 그 알림은 영영 안 걷힌다(`dotfile_gaps`).
+    let (done, said) = bounded(s.path(), &["status", "--json"]);
+    assert!(done && !said.contains("gitignore_rules") && !said.contains("gitattributes_rules"), "{said}");
     let (done, said) = bounded(s.path(), &["init"]);
     assert!(done, "못 읽은 딸린 파일 하나로 init 이 멈췄다\n{said}");
     assert!(said.contains(".gitignore") && said.contains("보통 파일이 아니다"), "못 읽은 까닭을 안 댔다\n{said}");
