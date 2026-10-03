@@ -5009,6 +5009,8 @@ pub struct StatusReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub milestones: Vec<Roll>,
     pub epics: Vec<Roll>,
+    /// 아카이브라 위 두 목록에서 뺀 묶음의 수(moai-47mz) — **늘 선다**. 0 은 "뺀 것이 없다" 다.
+    pub archived: Archived,
     /// 고칠 것. **알림은 여기 없다.**
     ///
     /// 한때 한 배열에 섞고 `notice` 깃발로만 갈라, 사람 화면과 탐색기는 알림을
@@ -5023,6 +5025,13 @@ pub struct StatusReport {
     /// 보고서에서는 비어 있다: 그 줄들은 위 `warnings` 에 경고 둘로 서 있다.
     #[serde(skip)]
     pub dues: Dues,
+}
+
+/// 아카이브라 보드의 목록에서 뺀 묶음의 수(moai-47mz). 줄은 안 든다 — 보는 길은 `moai show --archived` 다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Archived {
+    pub milestones: usize,
+    pub epics: usize,
 }
 
 impl StatusReport {
@@ -5284,6 +5293,18 @@ pub fn status_in<'a>(
         .filter(|r| r.id.is_some())
         .map(|r| stood(in_stone.kind(), r))
         .collect();
+    // **아카이브된 묶음은 목록에서 빼고 수만 든다**(moai-47mz, 2026-10-03 사용자 결정) — 끝난 지 오래된 에픽이
+    // 다 서면 이 저장소에서 보드가 270줄이다. 재는 자는 줄과 같은 [`archived`] 고, 칸은 위에서 곁들인 읽은 칸,
+    // 때는 그 칸의 셈이 마지막으로 움직인 때([`Stand::since`])다 — `show --done` 이 묶음을 재는 시계와 같다.
+    let aged = |r: &Roll| {
+        r.id.as_deref().is_some_and(|id| {
+            let since = group_since.get(id).copied().unwrap_or_default();
+            archived(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days)
+        })
+    };
+    let (stones, old_stones): (Vec<Roll>, Vec<Roll>) = stones.into_iter().partition(|r| !aged(r));
+    let (epics, old_epics): (Vec<Roll>, Vec<Roll>) = epics.into_iter().partition(|r| !aged(r));
+    let put_away = Archived { milestones: old_stones.len(), epics: old_epics.len() };
     let mut warnings = Vec::new();
     let mut notices = Vec::new();
 
@@ -5734,6 +5755,7 @@ pub fn status_in<'a>(
         total: work.len(),
         milestones: stones,
         epics,
+        archived: put_away,
         warnings,
         notices,
         flow: Flow { days: cfg.status.flow_days, created, done: closed, net: created as i64 - closed as i64 },
@@ -7617,6 +7639,38 @@ mod tests {
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
         assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
+    }
+
+    /// **아카이브된 묶음은 보드의 목록에서 빠지고 수로만 남는다**(moai-47mz, 2026-10-03 사용자 결정). 묶음은
+    /// 멤버가 마지막으로 칸을 옮긴 때로 잰다 — 최근에 끝난 멤버가 하나라도 있으면 남는다. 마일스톤도 같다.
+    #[test]
+    fn archived_groups_leave_the_board_and_are_counted() {
+        let closed = |id: &str, epic: &str, at: &str| {
+            let mut i = member(id, epic, "done");
+            i.status_since = at.into();
+            i
+        };
+        let mut old_epic = make("argos-0001", Kind::Epic, "todo");
+        old_epic.milestone = Some("argos-m001".into());
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            old_epic,
+            closed("argos-0002", "argos-0001", "2026-09-01T00:00:00Z"),
+            make("argos-0003", Kind::Epic, "todo"),
+            closed("argos-0004", "argos-0003", "2026-09-01T00:00:00Z"),
+            closed("argos-0005", "argos-0003", "2026-09-20T00:00:00Z"),
+            make("argos-0006", Kind::Epic, "todo"),
+            member("argos-0007", "argos-0006", "todo"),
+        ];
+        let st = status(&issues, &[], &cfg(), "2026-09-30T00:00:00Z", utc());
+        let ids = |rolls: &[Roll]| rolls.iter().filter_map(|r| r.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&st.epics), ["argos-0003", "argos-0006"], "최근 멤버가 있는 에픽이나 열린 에픽이 빠졌다");
+        assert!(ids(&st.milestones).is_empty(), "멤버가 다 오래 끝난 마일스톤이 남았다");
+        assert_eq!(st.archived, Archived { milestones: 1, epics: 1 });
+        // 날수를 끄면 아무것도 안 뺀다.
+        let off = Config::parse("prefix = \"argos\"\narchive_days = 0\n").unwrap();
+        let all = status(&issues, &[], &off, "2026-09-30T00:00:00Z", utc());
+        assert_eq!((all.epics.len(), all.milestones.len(), all.archived), (3, 1, Archived::default()));
     }
 
     /// 마일스톤을 안 쓰는 저장소에는 마일스톤 이야기를 꺼내지 않는다.

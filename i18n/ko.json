@@ -3,6 +3,7 @@
   "status.epics": "· 에픽 {n}",
   "status.milestone_label": "마일스톤",
   "status.epic_label": "에픽",
+  "status.archived": "아카이브 {n}건 — `{how}`",
   "ready.count": "집을 수 있는 일  {n}건",
   "ready.none": "없다. `moai show` 로 무엇이 밀려 있는지 본다",
   "overview.ready": "집을 수 있는 일",

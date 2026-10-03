@@ -13154,6 +13154,17 @@ fn the_archive_hides_from_all_and_archived_opens_it() {
     // 셈은 아카이브를 안 뺀다 — 보기의 일이지 셈의 일이 아니다.
     assert!(at(later, &["stats", "--json"]).contains(r#"{"key":"done","rows":2}"#), "stats 가 아카이브를 뺐다");
 
+    // 보드의 에픽 목록도 아카이브된 묶음을 빼고 수 한 줄로 댄다 — 머리글의 에픽 수는 전부를 센다.
+    let epic = ok(s.path(), &["epic", "add", "끝난 묶음", "-q"]).trim().to_string();
+    let member = add(s.path(), &["묶음의 일", "-e", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let board = at(later, &["status"]);
+    assert!(!board.contains(&epic) && board.contains("에픽 1"), "{board}");
+    assert!(board.contains("아카이브 1건 — `moai show --type epic --archived`"), "{board}");
+    let json = at(later, &["status", "--json"]);
+    assert!(json.contains(r#""archived":{"milestones":0,"epics":1}"#), "{json}");
+    assert!(at(NOW, &["status"]).contains(&epic), "끝난 지 얼마 안 된 에픽이 빠졌다");
+
     // `archive_days = 0` 이면 아카이브가 없다.
     let cfg = s.path().join(".moai/config.toml");
     let text = std::fs::read_to_string(&cfg).unwrap();
