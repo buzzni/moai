@@ -958,7 +958,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 
-    /// Assignee. The creator when absent; `none` clears it
+    /// Assignee. The creator when absent; `none` clears it, `me` is you
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
@@ -1484,7 +1484,7 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// Give `name (email)`. `none` clears it
+    /// Give `name (email)`. `none` clears it, `me` is you
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 

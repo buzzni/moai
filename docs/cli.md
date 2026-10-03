@@ -258,7 +258,7 @@ Options:
           the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
-          Assignee. The creator when absent; `none` clears it
+          Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
@@ -711,7 +711,7 @@ Options:
   -e, --epic <id|none>       Move the epic (`none` clears only its own field)
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
-  -a, --assignee <who|none>  Give `name (email)`. `none` clears it
+  -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start of a milestone. `none` clears it
       --due <date|none>      Deadline of a milestone. `none` clears it
       --json                 Machine-readable output. Every human line goes away
@@ -1031,7 +1031,7 @@ Options:
           the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
-          Assignee. The creator when absent; `none` clears it
+          Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
@@ -1298,7 +1298,7 @@ Options:
           the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
-          Assignee. The creator when absent; `none` clears it
+          Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
@@ -1565,7 +1565,7 @@ Options:
           the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
-          Assignee. The creator when absent; `none` clears it
+          Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
@@ -1853,7 +1853,7 @@ Options:
           the path as the body, it does not open the file.
 
   -a, --assignee <who|none>
-          Assignee. The creator when absent; `none` clears it
+          Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)

@@ -962,12 +962,25 @@ pub struct Actor {
 impl Actor {
     /// `이름 (메일)` 한 덩이를 가른다. 괄호 앞 공백은 있어도 없어도 된다.
     ///
-    /// 뒤에서부터 여는 괄호를 찾는다 — 이름 안에 괄호가 있는 사람이 실제로 있고,
-    /// 앞에서 찾으면 그 괄호에서 잘린다.
+    /// **끝의 `)` 가 닫는 `(` 에서 가른다** — 뒤에서부터 짝을 세어 찾는다. 이름 안에 괄호가 있는
+    /// 사람이 실제로 있어 앞에서 찾으면 그 괄호에서 잘리고, 마지막 `(` 에서 자르면 메일 안의
+    /// 괄호(`a(b)@x.io`)에서 잘려 메일의 앞 토막이 이름에 붙는다(moai-v4p4.6w1). 그 자리가 비싼
+    /// 것은 합친 한 줄을 되가르는 쪽이다 — `query::Me` 가 지금 사람을 `이름 (메일)` 로 들고
+    /// `is_assignee` 가 이 함수로 되갈라, 잘린 메일이면 `ready` 와 규칙 5 가 제 줄을 남의 것으로 읽는다.
+    ///
+    /// **짝으로 못 가르면 옛 자 그대로 마지막 `(` 에서 가른다.** 짝이 모자란 메일(`a)b@x.io`)이 그렇고, 짝을
+    /// 찾다 빈칸을 넘은 때([`opening`] — `레이븐 (부재중 (a)b@x.io)` 는 메일의 `)` 가 이름에 남은 `(` 와
+    /// 짝짓는다)와 짝으로 가른 것이 사람 꼴이 아닌 때도 그렇다(리뷰 moai-v4p4.f4a). 어느 쪽이 맞는지 글만으로는
+    /// 못 가르는 꼴이고, 거절하면 어제까지 받던 `--user` 가 오늘 멈춘다 — 그래서 **옛 자가 받던 것은 다 받고,
+    /// 옛 자로 제 사람에게 돌아오던 합친 한 줄은 여전히 돌아온다.** 짝이 모자란 `(` 가 든 메일(`a(b@x.io`)은
+    /// 옛 자로도 못 돌아오던 꼴이다 — 그것까지 맞추려면 되가르지 않는 길뿐이다(`query::Me` 가 갈린 채로 든다).
     pub fn parse(raw: &str) -> Option<Actor> {
-        let (name, email) = raw.trim().strip_suffix(')')?.rsplit_once('(')?;
-        let a = Actor { name: name.trim().to_string(), email: email.trim().to_string() };
-        a.is_sane().then_some(a)
+        let inner = raw.trim().strip_suffix(')')?;
+        let at = |open: usize| {
+            let a = Actor { name: inner[..open].trim().to_string(), email: inner[open + 1..].trim().to_string() };
+            a.is_sane().then_some(a)
+        };
+        opening(inner).and_then(at).or_else(|| inner.rfind('(').and_then(at))
     }
 
     /// 이 사람을 담당 칸에 넣는 모양 — `(이름, 메일)`, **갈라진 채로.**
@@ -989,6 +1002,25 @@ impl Actor {
             && self.email.contains('@')
             && !self.email.contains(char::is_whitespace)
     }
+}
+
+/// 끝의 `)` 를 걷은 글에서 그 `)` 가 닫는 `(` 의 자리 — 뒤에서부터 짝을 센다. 짝이 모자라거나 짝을 찾기
+/// 전에 빈칸을 만나면 `None` 이다. **메일에는 빈칸이 없다**([`Actor::is_sane`]) — 빈칸을 넘어 찾은 짝은
+/// 메일의 짝 없는 `)` 가 이름에 남은 `(` 와 짝지은 것이라, 그 자리에서 가르면 이름이 잘린다(리뷰 moai-v4p4.f4a).
+/// 괄호 안을 띄워 적은 것(`( a(b)@x.io )`)도 여기서 `None` 이라 옛 자로 간다 — 손으로 친 `--user` 에만 있는
+/// 꼴이고, 되가르는 길이 읽는 합친 한 줄([`label`])은 괄호 안을 안 띄운다.
+fn opening(inner: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, c) in inner.char_indices().rev() {
+        match c {
+            ')' => depth += 1,
+            '(' if depth == 0 => return Some(at),
+            '(' => depth -= 1,
+            c if c.is_whitespace() => return None,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// 이름과 메일을 한 줄로 합치는 **유일한 곳.**
@@ -1831,6 +1863,36 @@ mod tests {
         assert_eq!(a.email, "raven@buzzni.com");
         // 괄호 앞 공백은 있어도 없어도 같다
         assert_eq!(Actor::parse("레이븐(raven@buzzni.com)"), Actor::parse("레이븐 (raven@buzzni.com)"));
+    }
+
+    /// 메일 안의 괄호도 메일이다(moai-v4p4.6w1). 마지막 `(` 에서 자르던 판은 `a(b)@x.io` 의
+    /// 앞 토막을 이름에 붙였고, `-a me` 와 `ready`·규칙 5 의 내 것 판정(`query::Me`)이 그 자로
+    /// 지금 사람을 되갈라 제 줄을 남의 것으로 읽었다.
+    #[test]
+    fn an_email_with_brackets_stays_whole() {
+        let a = Actor::parse("레이븐 (a(b)@x.io)").unwrap();
+        assert_eq!((a.name.as_str(), a.email.as_str()), ("레이븐", "a(b)@x.io"));
+        // 이름과 메일 둘 다에 괄호가 서도 닫는 괄호가 짝짓는 자리에서 가른다
+        let a = Actor::parse("레이븐(부재중)(a(b)@x.io)").unwrap();
+        assert_eq!((a.name.as_str(), a.email.as_str()), ("레이븐(부재중)", "a(b)@x.io"));
+        // 합친 한 줄을 되가르면 같은 사람이다 — `Me::of` 가 짓고 `is_assignee` 가 가르는 길
+        let me = Actor { name: "레이븐".into(), email: "x@a.io(work)".into() };
+        let label = label(&me.name, Some(&me.email), crate::config::Naming::Full);
+        assert_eq!(Actor::parse(&label), Some(me));
+        // 짝이 안 맞는 메일은 옛 자 그대로 마지막 `(` 에서 가른다 — 짝을 못 찾았다고 거절하면
+        // 어제까지 받던 `--user` 가 오늘 멈춘다
+        let a = Actor::parse("레이븐 (a)b@x.io)").unwrap();
+        assert_eq!((a.name.as_str(), a.email.as_str()), ("레이븐", "a)b@x.io"));
+        // **짝을 찾다 빈칸을 넘으면 그 짝은 메일의 것이 아니다**(리뷰 moai-v4p4.f4a) — 이름에 남은 `(` 가
+        // 메일의 짝 없는 `)` 와 짝지어, 옛 자가 받던 `--user` 를 거절하거나(`레이븐 (부재중 …`) 이름을
+        // 자르던(`레이븐 :( …`) 자리다. 옛 자로 제 사람에게 돌아오던 합친 한 줄은 여전히 돌아온다
+        for (name, email) in [("레이븐 (부재중", "a)b@x.io"), ("레이븐 :(", "a)b@x.io")] {
+            let joined = super::label(name, Some(email), crate::config::Naming::Full);
+            assert_eq!(Actor::parse(&joined), Some(Actor { name: name.into(), email: email.into() }), "{joined}");
+        }
+        // 짝으로 가른 것이 사람 꼴이 아니어도(이름이 빈다) 옛 자로 한 번 더 가른다 — 옛 자가 받던 것은 다 받는다
+        let a = Actor::parse("(a(b)@x.io)").unwrap();
+        assert_eq!((a.name.as_str(), a.email.as_str()), ("(a", "b)@x.io"));
     }
 
     /// 모양이 어긋난 것을 조용히 이름으로 삼지 않는다 — 메일 없는 줄이 그렇게

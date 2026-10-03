@@ -106,6 +106,26 @@ does not tag — see `CONTRIBUTING.md`.
   It printed a bare `No such file or directory (os error 2)`; it now says it
   cannot tell where you are.
 
+- **`moai edit -a me` and `moai add -a me` make you the assignee.** They wrote
+  a person named `me` into the row, and `moai ready`, `moai prime` and the hook
+  then read it as someone else's row — picking up a row you had just taken
+  needed `--take`. `me` now means you, as it already did in `moai show -a me`.
+  Who you are is asked only when `me` is given, and when that cannot be told
+  nothing is written. A row that already holds `me` is left as it is; run
+  `moai edit <id> -a me` on it again (`moai show --all --archived --json | jq
+  -r '.[] | select(.assignee == "me").id'` lists them). `-a ' none '` with
+  spaces around it now clears the assignee instead of naming a person `none`.
+
+- **An email with brackets in it stays whole in `Name (email)`.** `--user`,
+  `MOAI_ACTOR` and `-a` cut at the last `(`, so `Kim (k(work)@x.io)` stood as
+  the name `Kim (k` and the email `work)@x.io`. With such an email in `git
+  config`, `moai ready`, `moai prime`, `moai show -a me` and the hook read your
+  own rows as someone else's. The split now takes the `(` that the closing `)`
+  pairs with, and everything the old split accepted is still accepted. Rows
+  written before this release with the cut email keep it and now read as
+  someone else's for the same person — `moai edit <id> -a me` puts them right.
+  An email holding a `(` with no partner is still misread.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added

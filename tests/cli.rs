@@ -9965,6 +9965,29 @@ fn the_journal_records_a_name_and_an_email() {
     assert!(j.contains(r#""by":"테스터","by_email":"tester@example.com""#), "{j}");
 }
 
+/// **git 설정의 메일에 괄호가 들어도 제 줄은 제 것이다**(moai-v4p4.6w1). `ready` 는 지금 사람을 `이름 (메일)`
+/// 한 줄(`query::Me`)로 들고 `Actor::parse` 로 되가르는데, 마지막 `(` 에서 자르던 판은 `a(b)@x.io` 를
+/// `b)@x.io` 로 잘라 만든 사람 자신의 줄을 `others` 로 내밀었다 — 규칙 5 도 같은 자로 그 줄을 막는다.
+#[test]
+fn an_email_with_brackets_still_owns_its_rows() {
+    let s = init("bracketmail");
+    // 사람은 그 프로젝트의 git 설정에서 온다 — 전역 설정을 돌리는 변수는 moai 가 걷는다(`git_leaks`).
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "레이븐"]);
+    git(s.path(), &["config", "user.email", "a(b)@x.io"]);
+    let run = |args: &[&str]| {
+        let out = staged(args).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
+        assert!(out.status.success(), "{args:?}\n{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id = run(&["add", "괄호 메일", "-q"]).trim().to_string();
+    assert!(line_of(s.path(), &id).contains(r#""assignee":"레이븐","assignee_email":"a(b)@x.io""#));
+
+    let ready = run(&["ready", "--json"]);
+    assert!(ready.contains(&format!(r#""ready":[{{"id":"{id}""#)), "제 줄을 안 내밀었다\n{ready}");
+    assert!(ready.contains(r#""others":[]"#), "제 줄을 남의 것으로 읽었다\n{ready}");
+}
+
 /// `--user` 가 설정보다 앞선다 — 사람을 부르지 않고도 이름을 댈 길이 있어야
 /// 이 멈춤이 게이트가 되지 않는다.
 #[test]
@@ -10425,6 +10448,35 @@ fn me_means_me_however_it_arrives() {
         assert!(out.contains(&mine), "{args:?} 가 내 것을 못 찾았다: {out}");
         assert!(!out.contains("남의 것"), "{args:?} 가 남의 것까지 냈다: {out}");
     }
+}
+
+/// **적을 때의 `me` 도 지금 사람이다**(moai-v4p4.c2x). `show -a me` 는 나를 고르는데 `edit -a me` 는
+/// `me` 라는 이름을 적어, 그 줄을 `ready` 와 훅 규칙 5 가 남의 것(`owner: theirs`)으로 읽었다. `add` 도
+/// 같은 자로 간다. 사람을 모르면 아무것도 안 쓰고 멈추고, `me` 가 아닌 `-a` 는 사람을 안 묻는다.
+#[test]
+fn me_is_me_when_written_too() {
+    let s = init("writeme");
+    let mine = r#""assignee":"테스터","assignee_email":"tester@example.com""#;
+    let id = add(s.path(), &["남의 것", "-a", "철수"]);
+    ok(s.path(), &["edit", &id, "-a", "me"]);
+    assert!(line_of(s.path(), &id).contains(mine), "{}", line_of(s.path(), &id));
+    let ready = ok(s.path(), &["ready", "--json"]);
+    assert!(ready.contains(&format!(r#""ready":[{{"id":"{id}""#)), "제 줄을 안 내밀었다\n{ready}");
+    assert!(ready.contains(r#""others":[]"#), "제 줄을 남의 것으로 읽었다\n{ready}");
+
+    let made = add(s.path(), &["새 것", "-a", " me "]);
+    assert!(line_of(s.path(), &made).contains(mine), "{}", line_of(s.path(), &made));
+
+    // 누군지 모르면 멈추고 아무것도 안 쓴다 — `me` 라는 이름을 적던 바로 그 자리다
+    ok(s.path(), &["edit", &id, "-a", "철수"]);
+    let before = issues(s.path());
+    let out = without_user(s.path(), &["edit", &id, "-a", "me", "--json"]);
+    assert!(!out.status.success(), "사람 없이 `me` 를 적었다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"no_actor""#), "{out:?}");
+    assert_eq!(issues(s.path()), before, "멈추고도 줄을 바꿨다");
+    // `me` 가 아니면 사람을 안 묻는다 — 남에게 맡기는 부름이 설정 없는 기계에서 넘어지면 안 된다
+    let out = without_user(s.path(), &["edit", &id, "-a", "영희"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
 /// 대량 생성도 담당을 받는다. `--from` 이 `-a` 를 통째로 흘리던 자리다 —
@@ -21539,7 +21591,8 @@ fn the_commit_hook_leaves_a_message_that_is_not_written_yet_alone() {
 /// 지울 수 없는 이력에 없던 사람이 선다. `Actor::is_sane` 이 이름에서 `\n` 을 막는 것과 같은 자다.
 ///
 /// **꼴이 어긋난 값에도 아무 말을 안 한다.** 적는 쪽이 `Actor::parse`·`Actor::is_sane` 과 같은
-/// 곳에서 갈려야, moai 자신은 쓰기를 멈추는 값이 git 이력에만 남는 일이 없다.
+/// 곳에서 갈려야, moai 자신은 쓰기를 멈추는 값이 git 이력에만 남는 일이 없다. 같은 곳에서 못 가르는
+/// 값(메일 안의 괄호 — 셸은 짝을 안 센다)에는 아무것도 안 적는다.
 #[cfg(unix)]
 #[test]
 fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
@@ -21548,7 +21601,7 @@ fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
     assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
     let stamped = |n: &str, who: &str| after_msg_hook(&root, n, "feat: 무엇\n", Some("message"), Some(who));
 
-    // **이름 안의 괄호는 이름이다.** `Actor::parse` 는 뒤에서부터 여는 괄호를 찾는데
+    // **이름 안의 괄호는 이름이다.** `Actor::parse` 는 끝의 `)` 가 닫는 `(` 를 뒤에서부터 찾는데
     // (`a_name_with_brackets_still_parses`), BRE 의 `.*` 로 앞에서 자르던 판은
     // `레이븐 <부재중) (raven@buzzni.com>` 을 적었다 — mailmap 도 `%(trailers:…)` 도 못 읽는다.
     let said = stamped("m1", "레이븐 (부재중) (raven@buzzni.com)");
@@ -21563,6 +21616,13 @@ fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
     // 반쪽만 적힌 트레일러는 없는 것보다 나쁘다 — 셋 다 moai 자신이 거절하는 값이다.
     for (n, who) in [("m3", "레이븐 ()"), ("m4", "레이븐 (메일 아님)"), ("m5", "(raven@buzzni.com)")] {
         assert!(!stamped(n, who).contains("Executed-By:"), "moai 가 안 받는 사람을 적었다 — {who}");
+    }
+
+    // **메일 안의 괄호는 짝을 세야 갈린다**(moai-v4p4.6w1, 리뷰 moai-v4p4.f4a) — `Actor::parse` 는 세고 셸은
+    // 안 센다. 그래서 그런 값에는 아무것도 안 적는다: `레이븐 (a <b)@x.io>` 같은 반쪽은 moai 의 저널과 다른
+    // 사람을 이력에 세운다. 셸이 짝을 세게 되는 날 이 줄을 `레이븐 <a(b)@x.io>` 로 바꾼다.
+    for (n, who) in [("m6", "레이븐 (a(b)@x.io)"), ("m7", "레이븐 (x@a.io(work))")] {
+        assert!(!stamped(n, who).contains("Executed-By:"), "짝을 안 센 반쪽을 적었다 — {who}");
     }
 }
 
