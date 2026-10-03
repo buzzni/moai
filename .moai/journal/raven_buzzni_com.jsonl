@@ -3139,3 +3139,14 @@
 {"ts":"2026-10-03T09:27:02Z","id":"moai-o4bh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"루트의 skill install 이 링크를 푼 /tmp 실행 파일 경로를 커밋된 plugin.json 에 적는다"}
 {"ts":"2026-10-03T09:27:21Z","id":"moai-vtfu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없다 — e6747e8f 로 머지했고 멤버 다섯과 리뷰 moai-vtfu.03e 를 닫았다. 넘긴 것은 idea moai-iako(project 범위의 커밋된 마켓플레이스 선언), moai-o4bh(루트 skill install 의 /tmp 실행 파일 경로)다"}
 {"ts":"2026-10-03T09:28:14Z","id":"moai-vxld.d9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T09:36:16Z","id":"moai-vxld.d9p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사람의 답을 기다린다 — 브리프 7단계가 review 칸 유무를 어떻게 알지(A 이름 박고 거절이 답 / B 감독이 <review column> 채움 / C 일꾼이 보드 먼저 봄). 워크트리 .claude/worktrees/moai-vxld 는 아직 고친 것 없음"}
+{"ts":"2026-10-03T09:38:24Z","id":"moai-vxld.d9p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-03): A — 브리프는 칸 이름 `review` 를 그대로 적고, moai 가 \"`review` is not a column\" 으로 거절하면 그 저장소에는 이 걸음이 없는 것으로 읽어 멤버를 그 칸에 둔 채 넘어간다. 감독이 채우는 자리(B)나 보드를 먼저 읽는 걸음(C)은 두지 않는다 — 브리프 2단계가 이미 `in_progress`·`todo` 를 이름으로 박았다. 기본 칸에 review 가 든다(config::DEFAULT_STATUSES, init 이 적는 config 도 같다) — 없는 것은 statuses 를 손으로 바꾼 저장소뿐이다"}
+{"ts":"2026-10-03T09:44:35Z","id":"moai-vxld.iqe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 에픽 끝 리뷰 동안 멤버를 review 칸에 세우는 브리프 (moai-vxld)"}
+{"ts":"2026-10-03T09:44:39Z","id":"moai-vxld.d9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-03T09:44:39Z","id":"moai-vxld.iqe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끝난 일을 아카이브로 접는다"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz.cfs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"done 이 된 지 N일 지난 줄을 아카이브로 판정한다"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz.yh0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 목록과 보드는 done 을 보여도 아카이브를 숨기고 배지에 수를 댄다"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz.xk6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"/ 검색과 show -g 는 아카이브도 찾는다"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz.5lq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show 거르개와 탐색기 키로 아카이브를 보는 길을 연다"}
+{"ts":"2026-10-03T09:50:22Z","id":"moai-47mz.97f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·README·CHANGELOG 에 아카이브를 싣는다"}
