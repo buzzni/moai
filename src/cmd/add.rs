@@ -123,12 +123,11 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 /// **argv 에 적힌 글은 그대로 돌려준다.** 빈 글을 어떻게 받는지는 명령마다 이미 달라(`defer` 는
 /// 거절한다), 그 갈래를 여기로 옮기지 않는다.
 ///
-/// **argv 의 글이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — `-b <파일 이름>` 이 그러듯이. 말없이 받던
-/// 판은 `moai mv <리뷰> done -m closing.md` 의 닫는 줄을 `closing.md` 로 적었고, 훅 규칙 3 도 빈 글이 아니라고
-/// 지나보냈다. 막지는 않는다 — 경로 같은 글이 정말 글일 수 있다.
+/// **argv 의 글이 파일 이름이면 알리는 것은 부르는 쪽이다**(moai-yivo.xe9) — "저널에 남는 것은 그 글자다" 는 그
+/// 글이 실제로 저널에 들었을 때만 참이라, `mv`·`defer` 가 쓰기가 선 뒤에 [`say_if_text_names_a_file`] 를 부른다.
+/// 여기서 알리던 판은 거절된 부름에도 그 말을 했다(리뷰 moai-yivo.b5h).
 pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
     if arg.as_deref() != Some("-") {
-        say_if_text_names_a_file(arg.as_deref(), || lang, Given::Msg);
         return Ok(arg);
     }
     let text = read_body(arg)?.unwrap_or_default();
@@ -171,7 +170,7 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
 /// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
 fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
     let given = if plan_on_stdin { Given::BodyPlanOnStdin } else { Given::Body };
-    say_if_text_names_a_file(arg.as_deref(), || ctx.lang(), given);
+    say_if_text_names_a_file(arg.as_deref(), ctx, given);
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
@@ -199,22 +198,27 @@ pub enum Given {
 /// 알린다(moai-3hxc.58k). `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는데,
 /// `moai add --from - --body plan.md` 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이
 /// 2026-10-01 에 두 번 있었다. 막지도 글을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
-/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
+/// **파일은 열지 않는다**: [`names_a_file`] 은 stat 이고, 한 번도 안 열던 경로를 새로 열지 않는다.
 ///
 /// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add`·`note -b`·`mv -m`·`defer -m` 이 한 자로 잰다 —
 /// **말만 [`Given`] 을 따른다**. `note` 는 [`read_body_said`] 를 안 지나서 이것을 따로 부른다 — `note -b
 /// plan.md` 가 경로를 노트로 남기고 말이 없던 것이 2026-10-02 에 한 번 밟혔다(moai-18so.rnm). `-m` 은
-/// [`read_msg`] 가 부른다.
+/// `mv`·`defer` 가 쓰기가 선 뒤에 부른다([`read_msg`]).
+///
+/// **말은 명령이 선 뒤에 선다**([`super::tell_after`], 리뷰 moai-yivo.b5h). 재는 것(stat)은 부르는 자리에서
+/// 하되 — 락보다 먼저다: 남이 준 글의 stat 은 느린 마운트에서 멈출 수 있다 — 글은 명령이 `Ok` 로 끝날 때
+/// 낸다. 그 자리에서 내던 판은 넘어진 `--json` 의 stderr 에 오류 객체보다 먼저 사람 말을 끼웠고, `eprintln!`
+/// 이라 읽는 쪽이 사라진 stderr 에서는 쓰기 전에 패닉했다.
 ///
 /// `arg` 는 **argv 에 적힌 그대로**다. `-` 는 stdin 을 읽으라는 말이고, stdin 에서 온 글은 사람이 파일
 /// 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
 ///
-/// **말은 알릴 때만 묻는다** — `lang` 을 값으로 받으면 멀쩡한 판마다 사용자 설정을 연다([`Ctx::lang`]).
-pub fn say_if_text_names_a_file(arg: Option<&str>, lang: impl FnOnce() -> crate::i18n::Lang, given: Given) {
-    let Some(text) = arg.filter(|a| *a != "-" && names_a_file(a)) else {
+/// **말은 알릴 때만 묻는다** — [`Ctx::lang`] 은 처음 부를 때 사용자 설정을 연다.
+pub fn say_if_text_names_a_file(arg: Option<&str>, ctx: &Ctx, given: Given) {
+    let Some((text, path)) = arg.filter(|a| *a != "-").and_then(|a| names_a_file(a).map(|p| (a, p))) else {
         return;
     };
-    let lang = lang();
+    let lang = ctx.lang();
     let how = match given {
         Given::Body => crate::i18n::say(lang, "add.body_names_a_file"),
         Given::BodyPlanOnStdin => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
@@ -222,16 +226,33 @@ pub fn say_if_text_names_a_file(arg: Option<&str>, lang: impl FnOnce() -> crate:
         Given::Msg => crate::i18n::say(lang, "add.msg_names_a_file"),
     };
     // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
-    let said =
-        crate::i18n::fill(how, &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(text))]);
-    eprintln!("moai: {said}");
+    let said = crate::i18n::fill(
+        how,
+        &[("text", &crate::text::one_line(text)), ("path", &crate::text::shell_word(&path.display().to_string()))],
+    );
+    super::tell_after(format!("moai: {said}"));
 }
 
-/// 본문 글이 **한 줄이고, 지금 디렉터리에서 그 이름으로 일반 파일이 서 있는가.** `--from` 이 읽는 경로와 같은
-/// 기준(cwd, `-C` 를 따른 뒤)이다. `metadata` 만 부르고 열지 않으며, 없거나 못 읽는 경로는 `false` 다 —
-/// 알림은 덤이라 stat 이 실패했다고 쓰기를 막을 까닭이 없다.
-fn names_a_file(text: &str) -> bool {
-    !text.contains(['\n', '\r']) && std::path::Path::new(text).is_file()
+/// 글이 **한 줄이고 그 이름으로 일반 파일이 서 있으면** 권하는 `< {path}` 에 넣을 그 파일의 철자. `metadata`
+/// 만 부르고 열지 않으며, 없거나 못 읽는 경로는 `None` 이다 — 알림은 덤이라 stat 이 실패했다고 쓰기를 막을
+/// 까닭이 없다.
+///
+/// **먼저 명령을 친 자리에서 잰다**([`crate::store::invoked_dir`], 리뷰 moai-yivo.b5h) — `< {path}` 는 그 사람의
+/// 셸이 그 자리에서 푼다. `-C` 가 옮긴 자리만 재던 판은 워크트리에서 `moai -C <루트> mv <리뷰> done -m
+/// closing.md` 를 친 부름에 말이 없었다. 거기 없고 `-C` 가 옮긴 자리(`--from` 이 읽는 기준)에 있으면 **절대
+/// 경로**로 낸다 — 받은 철자를 그대로 내밀면 부른 셸에서는 없는 파일이다.
+fn names_a_file(text: &str) -> Option<std::path::PathBuf> {
+    if text.contains(['\n', '\r']) {
+        return None;
+    }
+    let typed = std::path::Path::new(text);
+    let invoked = crate::store::invoked_dir();
+    if invoked.as_deref().is_some_and(|at| at.join(typed).is_file()) {
+        return Some(typed.to_path_buf());
+    }
+    let here = std::env::current_dir().ok()?;
+    let moved = invoked.as_deref() != Some(here.as_path());
+    (moved && here.join(typed).is_file()).then(|| here.join(typed))
 }
 
 /// `--from` 에 함께 온 깃발 가운데 **계획이 못 지키는 것**을 준 것만 골라 낸다.

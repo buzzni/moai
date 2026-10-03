@@ -1432,7 +1432,11 @@ pub struct MvArgs {
     pub args: Vec<String>,
 
     /// A note on this move (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while still in this column (racing pickups)
@@ -1503,7 +1507,11 @@ pub struct DeferArgs {
     pub undo: bool,
 
     /// Why it is deferred (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while it is in this column (racing pickups)

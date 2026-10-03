@@ -626,6 +626,10 @@ Arguments:
 Options:
   -m, --msg <text>
           A note on this move (journal only). `-` reads stdin
+          
+          Text, not a path - a file goes in as `-m - < <file>`. A one-line
+          text that names a file still goes in as those words, and one
+          stderr line says so.
 
       --from <column>
           Only while still in this column (racing pickups)
@@ -839,6 +843,10 @@ Options:
 
   -m, --msg <text>
           Why it is deferred (journal only). `-` reads stdin
+          
+          Text, not a path - a file goes in as `-m - < <file>`. A one-line
+          text that names a file still goes in as those words, and one
+          stderr line says so.
 
       --from <column>
           Only while it is in this column (racing pickups)

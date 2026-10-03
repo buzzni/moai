@@ -49,7 +49,8 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             tracker_at: Option<PathBuf>,
             config: &'a Path,
         }
-        let (error, code) = (unreadable.as_ref().map(|e| e.message.as_str()), unreadable.as_ref().map(|e| e.code));
+        // 한 갈래에서 둘을 뜬다 — `error` 와 `code` 가 따로 갈릴 길을 안 둔다.
+        let (error, code) = unreadable.as_ref().map(|e| (e.message.as_str(), e.code)).unzip();
         return super::json_line(&Out { path: &dir, added, initialized, error, code, tracker_at, config: &config });
     }
 
@@ -228,7 +229,7 @@ pub fn color(ctx: &Ctx, input: &Path, word: &str) -> R<Vec<String>> {
 ///
 /// **`--json` 의 `state` 낱말은 옛 것을 그대로 둔다.** 연 것은 한눈 보기의 `ok` 가
 /// 아니라 전부터 내던 `initialized` 다 — 이미 나간 값을 바꾸면 읽던 쪽이 모르는 채로
-/// 멀쩡한 줄을 모르는 상태로 읽는다. 새로 선 것은 더하기만 한다: `unreadable`(+`error`)
+/// 멀쩡한 줄을 모르는 상태로 읽는다. 새로 선 것은 더하기만 한다: `unreadable`(+`error`·`code`)
 /// 과, 연 것 곁의 `counts`·`unreadable`. 그래서 [`projects::Seen`] 을 그대로 싣지
 /// 않고 여기서 한 번 옮긴다 — 나머지 낱말(`uninitialized`·`missing`·`unreadable`)은
 /// 그쪽과 같다.

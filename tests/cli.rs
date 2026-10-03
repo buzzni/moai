@@ -2912,8 +2912,9 @@ fn outside_a_repo_the_overview_speaks_json() {
 
 /// **못 연 프로젝트의 줄도 그 거절의 코드를 든다**(moai-yivo.ext). 그 저장소 안에서 친 명령은
 /// `{"error":…,"code":"broken"}` 으로 멈추는데, 한눈 보기의 `--json` 은 같은 처지를 글로만 냈다 — 받는
-/// 쪽은 "손으로 파일을 고칠 일"(`broken`)과 그 밖을 글을 읽어 갈라야 했다. 상태 낱말을 함께 쓰는 표면
+/// 쪽은 moai 가 안 읽기로 한 파일(`broken`)과 그 밖을 글을 읽어 갈라야 했다. 상태 낱말을 함께 쓰는 표면
 /// 넷(`status`·`ready`·`tui`·`project ls`)과 `project add` 가 같은 값을 낸다.
+#[cfg(unix)]
 #[test]
 fn outside_a_repo_an_unopened_project_carries_its_code() {
     let s = Scratch::new("ovcode");
@@ -2933,10 +2934,11 @@ fn outside_a_repo_an_unopened_project_carries_its_code() {
     assert!(!inside.status.success(), "시험의 전제 — 밖을 가리키는 스냅샷 링크는 그 저장소에서 멈춘다");
     assert!(String::from_utf8_lossy(&inside.stderr).contains("\"code\":\"broken\""), "{}", text(&inside));
 
-    // 그 프로젝트의 줄 하나 — 이름 키에서 그 객체가 닫히는 데까지.
+    // 그 프로젝트의 줄 하나 — 줄 머리(`{"name":…`)에서 그 객체가 닫히는 데까지. 까닭의 글에 경로가 들어
+    // 다음 `}` 에서 끊으면 따옴표 안에서 잘릴 수 있다 — 따옴표를 아는 [`object_at`] 으로 끊는다.
     let entry = |json: &str, key: &str, name: &str| -> String {
-        let at = json.find(&format!("\"{key}\":\"{name}\"")).unwrap_or_else(|| panic!("{name} 줄이 없다 — {json}"));
-        json[at..at + json[at..].find('}').unwrap()].to_string()
+        let at = json.find(&format!("{{\"{key}\":\"{name}\"")).unwrap_or_else(|| panic!("{name} 줄이 없다 — {json}"));
+        object_at(json, at, name).to_string()
     };
     for (args, key) in [
         (&["status", "--json"][..], "name"),
@@ -2948,11 +2950,11 @@ fn outside_a_repo_an_unopened_project_carries_its_code() {
         one_json_value(&json);
         let (l, f) = (entry(&json, key, "linked"), entry(&json, key, "afile"));
         assert!(
-            l.contains("\"state\":\"unreadable\",\"error\":\"") && l.ends_with("\"code\":\"broken\""),
+            l.contains("\"state\":\"unreadable\",\"error\":\"") && l.ends_with("\"code\":\"broken\"}"),
             "{args:?}: {l}"
         );
         assert!(
-            f.contains("\"state\":\"unreadable\",\"error\":\"") && f.ends_with("\"code\":\"error\""),
+            f.contains("\"state\":\"unreadable\",\"error\":\"") && f.ends_with("\"code\":\"error\"}"),
             "{args:?}: {f}"
         );
     }
@@ -5185,13 +5187,18 @@ fn prime_never_fails_where_there_is_no_tracker() {
     assert!(json.contains("\"no_tracker\":true") && !json.contains("tracker_error"), "{json}");
 }
 
-/// **없는 트래커와 못 연 트래커를 가른다**(moai-yivo.6je). 밖을 가리키는 스냅샷 링크나 깨진 설정이면 다른
-/// 명령은 거기서 멈추는데, `prime` 은 그것을 "`.moai` 가 없다, `moai init` 이 심는다" 와 `no_tracker:true`
-/// 로 냈다 — 세션을 여는 에이전트가 `init` 을 불렀고, `init` 은 다 괜찮다고 답했다. 종료 코드는 그대로 0 이고,
-/// 까닭은 **판이 댄다** — 세션 시작 훅은 stdout 만 맥락에 싣는다.
+/// **없는 트래커와 못 연 트래커를 가른다**(moai-yivo.6je). 밖을 가리키는 스냅샷 링크, 깨진 설정, 글을 못 읽는
+/// 스냅샷이면 다른 명령은 거기서 멈추는데, `prime` 은 그것을 "`.moai` 가 없다, `moai init` 이 심는다" 와
+/// `no_tracker:true` 로 냈다 — 세션을 여는 에이전트가 `init` 을 불렀고, 링크나 못 읽는 스냅샷이면 `init` 은 다
+/// 괜찮다고 답했다. 종료 코드는 그대로 0 이고, 까닭은 **판이 댄다** — 세션 시작 훅은 stdout 만 맥락에 싣는다.
+///
+/// **두 갈래를 다 지난다**(리뷰 moai-yivo.b5h) — 링크와 깨진 설정은 `Repo::find` 에서 서고, UTF-8 이 아닌
+/// 스냅샷은 그 문을 지나 `gather` 의 읽기에서 선다. 앞의 둘만 재던 판은 뒤 갈래를 "없음" 으로 되돌려도 푸르렀다.
+#[cfg(unix)]
 #[test]
 fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
     let s = init("primerefused");
+    let config = std::fs::read_to_string(s.path().join(".moai/config.toml")).unwrap();
     let away = Scratch::new("primerefused-away");
     let elsewhere = away.path().join("issues.jsonl");
     std::fs::write(&elsewhere, "").unwrap();
@@ -5224,10 +5231,25 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
     std::fs::remove_file(&snapshot).unwrap();
     std::fs::write(&snapshot, "").unwrap();
     std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let code = field(&String::from_utf8_lossy(&moai(s.path(), &["status", "--json"]).stderr), "code");
+    let json = ok(s.path(), &["prime", "--json"]);
+    assert!(
+        json.contains(&format!("\"tracker_error\":{{\"code\":\"{code}\",\"said\":\"")),
+        "{code} 가 아니다 — {json}"
+    );
+    assert!(!json.contains("no_tracker"), "{json}");
+
+    // 스냅샷의 글을 못 읽는 것도 못 연 것이다 — 이 갈래는 `Repo::find` 를 지나 `gather` 의 읽기에서 선다.
+    std::fs::write(s.path().join(".moai/config.toml"), &config).unwrap();
+    std::fs::write(&snapshot, b"\xff\xfe\n").unwrap();
     let inside = moai(s.path(), &["status", "--json"]);
-    let refusal = String::from_utf8_lossy(&inside.stderr).to_string();
-    let at = refusal.find("\"code\":\"").expect("거절에 코드가 없다") + "\"code\":\"".len();
-    let code = &refusal[at..at + refusal[at..].find('"').unwrap()];
+    assert!(!inside.status.success(), "시험의 전제 — UTF-8 이 아닌 스냅샷에서 멈춘다\n{}", text(&inside));
+    let code = field(&String::from_utf8_lossy(&inside.stderr), "code");
+    let out = moai(s.path(), &["prime"]);
+    assert!(out.status.success(), "못 읽는 스냅샷에 실패했다\n{}", text(&out));
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("여기 트래커를 못 읽었다 — ") && !said.contains("`.moai` 가 없다"), "{said}");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("issues.jsonl"), "{}", String::from_utf8_lossy(&out.stderr));
     let json = ok(s.path(), &["prime", "--json"]);
     assert!(
         json.contains(&format!("\"tracker_error\":{{\"code\":\"{code}\",\"said\":\"")),
@@ -5236,13 +5258,34 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
     assert!(!json.contains("no_tracker"), "{json}");
 }
 
+/// **지금 자리를 못 물으면 그렇다고 댄다**(리뷰 moai-yivo.b5h) — 지운 워크트리에 앉은 채 부른 `prime` 이
+/// "여기 트래커를 못 읽었다 — No such file or directory" 로 고칠 것을 못 댔다. errno 에 무엇을 하다 났는지를
+/// 붙인다(`refuse.no_cwd`). 종료 코드는 그대로 0 이다.
+#[cfg(unix)]
+#[test]
+fn prime_says_it_cannot_tell_where_it_is_in_a_removed_directory() {
+    let s = Scratch::new("primegone");
+    let out = isolated("sh")
+        .args(["-c", "mkdir gone && cd gone && rmdir ../gone && exec \"$0\" prime --json", BIN])
+        .current_dir(s.path())
+        .env("MOAI_ACTOR", ACTOR)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"tracker_error\":{\"code\":\"error\",\"said\":\"지금 자리를 모른다 — "), "{json}");
+}
+
 /// **깨진 트래커에서도 0 이다**(moai-5ok8). 못 읽는 줄 하나에 `?` 로 넘어지면, 이것을 세션
 /// 시작 훅에 건 쪽의 세션이 통째로 "실패" 로 열린다 — `--help` 가 내건 "the exit code is
 /// always 0" 이 실제로 서려면 그 길이 없어야 한다. 한때 `report_load_errors` 가 부분 실패
 /// 깃발을 세워 이 자리가 1 이었다.
 ///
-/// **말은 한다.** 판은 그대로 나가고 무슨 일이 있었는지는 stderr 한 줄이다 — 조용히 삼키면
-/// 깨진 줄을 아무도 못 본다.
+/// **말은 한다.** 못 읽는 줄 하나면 판은 그대로 나가고 무슨 일이 있었는지는 stderr 한 줄이다 — 조용히
+/// 삼키면 깨진 줄을 아무도 못 본다. 설정이 깨져 트래커를 통째로 못 열면 까닭은 stderr 가 아니라 판의 첫
+/// 줄이다(`prime_tells_a_tracker_it_cannot_open_from_no_tracker`, moai-yivo.6je).
 #[test]
 fn prime_never_fails_on_a_damaged_tracker() {
     let s = init("primebroken");
@@ -5259,7 +5302,7 @@ fn prime_never_fails_on_a_damaged_tracker() {
         assert!(!said.is_empty(), "판을 안 냈다 — {args:?}");
         assert!(why.contains("issues.jsonl"), "못 읽는 줄을 조용히 삼켰다 — {why}");
     }
-    // 설정이 깨져도 같다 — 여러 세션이 한 `.moai` 를 쓰는 저장소에서 그 한 줄은 잠깐 깨진다.
+    // 설정이 깨져도 0 이다 — 여러 세션이 한 `.moai` 를 쓰는 저장소에서 그 한 줄은 잠깐 깨진다.
     std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
     assert!(moai(s.path(), &["prime"]).status.success(), "깨진 설정에 실패했다");
     assert!(moai(s.path(), &["prime", "--json"]).status.success(), "깨진 설정에 --json 이 실패했다");
@@ -8095,7 +8138,8 @@ fn an_empty_stdin_body_is_said_out_loud() {
 /// `--from <파일>` 은 파일을 읽고 `--body <글>` 은 글을 받는다 — `moai add --from - --body plan.md`
 /// 를 친 사람이 파일 내용을 기대하고 경로가 본문인 에픽을 얻은 일이 2026-10-01 에 두 번 있었다.
 /// 막지도 본문을 바꾸지도 않는다. `add`·`add --from`·`edit`·`idea add`·`note -b` 가 한 자리
-/// (`add::say_if_body_names_a_file`)에서 같은 말을 한다.
+/// (`add::say_if_text_names_a_file`)에서 같은 자로 잰다 — 말은 글이 가는 자리를 따른다(노트는 노트라 한다,
+/// moai-yivo.8lh).
 #[test]
 fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let s = init("bodyispath");
@@ -8114,7 +8158,7 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     assert!(out.status.success() && err(&out).contains(said), "{}", err(&out));
     assert!(String::from_utf8_lossy(&out.stdout).contains(r#""body":"plan.md""#));
 
-    // 계획 길 — 본문은 첫 뿌리에 서고 알림은 그 앞에서 난다.
+    // 계획 길 — 본문은 첫 뿌리에 서고 알림은 계획이 선 뒤에 난다.
     let out = from_stdin(s.path(), &["add", "--from", "-", "--body", "plan.md"], PLAN);
     assert!(out.status.success(), "{}", err(&out));
     assert!(err(&out).contains(said), "add --from 이 말없이 지나갔다\n{}", err(&out));
@@ -8205,10 +8249,62 @@ fn a_msg_naming_a_file_is_said_and_kept() {
         .output()
         .unwrap();
     assert!(err(&en).contains("the journal gets the words `closing.md`"), "{}", err(&en));
+
+    // **알림은 그 글이 저널에 든 판에만 선다**(리뷰 moai-yivo.b5h) — 진 `--from` 이나 없는 id 뿐인 부름은 아무것도
+    // 안 적는데 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다.
+    let stale = moai(s.path(), &["mv", &id, "in_progress", "--from", "todo", "-m", "closing.md"]);
+    assert!(!stale.status.success() && !err(&stale).contains("-m - <"), "진 부름에 알렸다\n{}", err(&stale));
+    let gone = moai(s.path(), &["defer", "argos-zzzz", "-m", "closing.md"]);
+    assert!(!gone.status.success() && !err(&gone).contains("-m - <"), "없는 id 에 알렸다\n{}", err(&gone));
+
+    // **넘어진 `--json` 의 stderr 는 오류 객체 하나다**(리뷰 moai-yivo.b5h) — 알림이 그 앞에 끼면 `code` 로 가르던
+    // 고리가 파싱 실패를 만난다. `note -b` 도 같은 자리를 지난다.
+    for (args, code) in [
+        (vec!["mv", id.as_str(), "done", "--from", "nosuchcol", "-m", "closing.md", "--json"], "bad_status"),
+        (vec!["defer", id.as_str(), "--from", "nosuchcol", "-m", "closing.md", "--json"], "bad_status"),
+        (vec!["note", "argos-zzzz", "-b", "closing.md", "--json"], "not_found"),
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "시험의 전제 — {args:?} 는 거절된다");
+        one_json_value(&err(&out));
+        assert_eq!(field(&err(&out), "code"), code, "{args:?}");
+    }
+
+    // **명령을 친 자리에서 잰다**(리뷰 moai-yivo.b5h) — 워크트리에서 `moai -C <루트> mv … -m <파일>` 을 친 부름은
+    // `-C` 가 옮긴 자리만 재던 판에서 말이 없었다. `-C` 가 옮긴 자리에만 있는 파일은 부른 셸이 찾게 절대 경로로 댄다.
+    let side = Scratch::new("msgispath-side");
+    std::fs::write(side.path().join("handoff.md"), "x").unwrap();
+    let root = s.path().to_str().unwrap();
+    let out = moai(side.path(), &["-C", root, "mv", &id, "in_progress", "-m", "handoff.md"]);
+    assert!(
+        out.status.success() && err(&out).contains("-m - < handoff.md"),
+        "부른 자리의 파일을 못 봤다\n{}",
+        err(&out)
+    );
+    let out = moai(side.path(), &["-C", root, "mv", &id, "review", "-m", "closing.md"]);
+    let at = s.path().join("closing.md").display().to_string();
+    assert!(out.status.success() && err(&out).contains("-m - < ") && err(&out).contains(&at), "{}", err(&out));
 }
 
-/// 위의 반대쪽 — **알릴 까닭이 없는 판은 말이 없다**(moai-3hxc.58k). 여러 줄, 없는 경로, 디렉터리,
-/// stdin 에서 온 글은 사람이 "이 파일" 이라고 가리킨 것이 아니다.
+/// **알림을 못 써도 쓰기는 선다**(리뷰 moai-yivo.b5h) — `eprintln!` 은 쓰기가 실패하면 패닉해, `-m <파일 이름>` 을
+/// 준 `mv` 가 알림을 쓰려다 101 로 끝나고 아무것도 안 옮겼다. `/dev/full` 은 쓰기마다 ENOSPC 로 진다 — 읽는 쪽이
+/// 사라진 파이프(EPIPE)와 같은 자리를 겨루기 없이 세운다.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_notice_that_cannot_be_written_does_not_stop_the_write() {
+    let s = init("msgfull");
+    std::fs::write(s.path().join("closing.md"), "x").unwrap();
+    let id = add(s.path(), &["옮길 것"]);
+    let full = std::fs::OpenOptions::new().write(true).open("/dev/full").unwrap();
+    let out =
+        staged(&["mv", &id, "in_progress", "-m", "closing.md"]).current_dir(s.path()).stderr(full).output().unwrap();
+    assert!(out.status.success(), "알림을 못 써서 넘어졌다 — {:?}", out.status);
+    assert!(issues(s.path()).contains(r#""status":"in_progress""#), "옮기지 않았다\n{}", issues(s.path()));
+}
+
+/// `a_one_line_body_naming_a_file_is_said_and_kept`·`a_msg_naming_a_file_is_said_and_kept` 의 반대쪽 — **알릴
+/// 까닭이 없는 판은 말이 없다**(moai-3hxc.58k). 여러 줄, 없는 경로, 디렉터리, stdin 에서 온 글은 사람이 "이
+/// 파일" 이라고 가리킨 것이 아니다.
 #[test]
 fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
     let s = init("bodynotpath");

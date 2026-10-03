@@ -56,18 +56,22 @@ struct Said<'a> {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_tracker: bool,
     /// **트래커를 못 열었을 때만 선다**(moai-yivo.6je) — 여기서 친 다른 명령이 멈추며 낼 `code`(`broken` 이면
-    /// 손으로 고칠 파일이다)와 사람이 읽을 한 줄. 종료 코드는 그래도 0 이다 — 그 약속은 이 판의 것이고,
-    /// 가르는 것은 이 키다. 꼴은 `show --json` 의 `commits_error` 처럼 객체 하나다.
+    /// moai 가 안 읽기로 한 파일이다 — 체크아웃 밖·`.git/` 으로 가는 링크, 보통 파일이 아닌 것)와 사람이 읽을 한 줄.
+    /// 종료 코드는 그래도 0 이다 — 그 약속은 이 판의 것이고, 가르는 것은 이 키다. 꼴은 `show --json` 의
+    /// `commits_error` 처럼 객체 하나다.
     #[serde(skip_serializing_if = "Option::is_none")]
-    tracker_error: Option<TrackerError<'a>>,
+    tracker_error: Option<TrackerError>,
 }
 
 /// [`Said::tracker_error`] 의 값. **가르는 것은 `code` 다** — 다른 명령의 `--json` 거절(`{"error","code"}`)과
 /// 같은 낱말이라, 받는 쪽이 같은 갈래로 읽는다. `said` 는 사람이 읽을 한 줄이라 그 낱말에 기대지 않는다.
+///
+/// **`said` 는 한 줄로 접는다**(`text::one_line`, 리뷰 moai-yivo.b5h) — 체크아웃 자리나 커밋된 설정의 글이 들어
+/// 줄바꿈·제어문자가 설 수 있다. `commits_error` 의 `said` 가 접는 것과 같다.
 #[derive(serde::Serialize)]
-struct TrackerError<'a> {
+struct TrackerError {
     code: &'static str,
-    said: &'a str,
+    said: String,
 }
 
 /// `others` 의 한 줄 — [`Brief`] 에 **그 줄의 담당**을 곁들인다(moai-0zjo 리뷰). 이 판이 남의 줄을 대는
@@ -150,9 +154,9 @@ impl<'a> Brief<'a> {
 /// 명령을 빼던 판은 [`Said`] 가 내건 약속을 제자리에서 어겼다.
 ///
 /// `refused` 가 못 연 까닭이다(moai-yivo.6je). **없는 것과 못 연 것을 가른다** — 둘을 한 판("`.moai` 가
-/// 없다, `moai init` 이 심는다")으로 내던 때는 세션을 여는 에이전트가 `init` 을 불렀고, `init` 은 다
-/// 괜찮다고 답했다. 까닭은 **판에 싣고 stderr 에는 안 낸다** — 세션 시작 훅은 stdout 만 맥락에 싣고,
-/// 터미널의 사람에게는 같은 글이 두 번 선다.
+/// 없다, `moai init` 이 심는다")으로 내던 때는 세션을 여는 에이전트가 `init` 을 불렀고, 링크나 못 읽는
+/// 스냅샷이면 `init` 은 다 괜찮다고 답했다. 까닭은 **판에 싣고 stderr 에는 안 낸다** — 세션 시작 훅은
+/// stdout 만 맥락에 싣고, 터미널의 사람에게는 같은 글이 두 번 선다.
 fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<Vec<String>> {
     if ctx.json {
         return super::json_line(&Said {
@@ -166,7 +170,7 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<
             closing: view::prime_closing(lang),
             commands: lines(lang),
             no_tracker: refused.is_none(),
-            tracker_error: refused.map(|e| TrackerError { code: e.code, said: &e.message }),
+            tracker_error: refused.map(|e| TrackerError { code: e.code, said: crate::text::one_line(&e.message) }),
         });
     }
     Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str())))
@@ -189,7 +193,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 저장소에서 그 한 줄은 잠깐 깨졌다 낫는 것이고, 그동안 모든 세션이 실패로 열리면 안 된다.
     //
     // **다만 "없다" 로 접지 않는다**(moai-yivo.6je). 못 연 까닭은 판이 대고(사람 쪽은 첫 줄, `--json` 은
-    // `tracker_error`), `moai init` 을 시키지 않는다 — 트래커는 거기 있고, `init` 은 다 괜찮다고 답한다.
+    // `tracker_error`), `moai init` 을 시키지 않는다 — 트래커는 거기 있고, 링크나 못 읽는 스냅샷이면 `init` 은 다
+    // 괜찮다고 답한다(깨진 설정이면 `init` 도 같은 까닭으로 멈춘다). 두 갈래 다 이 자리다 — 설정과 스냅샷의 자리는
+    // `Repo::find` 가 재고, 스냅샷의 글(못 읽는 권한, UTF-8 이 아닌 바이트)은 `gather` 의 읽기에서 갈린다.
     let repo = match Repo::find(|| lang) {
         Ok(Some(repo)) => repo,
         Ok(None) => return bare(ctx, lang, None),

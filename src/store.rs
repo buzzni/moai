@@ -390,8 +390,18 @@ impl Repo {
     /// **말은 거절할 때만 묻는다**(moai-iq7j·moai-ivt9) — 설정이 깨졌거나 스냅샷을 안 읽기로 한 때만
     /// [`Lang`] 을 푼다.
     /// 값으로 받으면 멀쩡한 판마다 사용자 설정을 열고, 훅은 도구 호출마다 이 길을 지난다.
+    ///
+    /// **지금 자리를 못 물은 것은 무엇을 하다 났는지 댄다**(`refuse.no_cwd`, 리뷰 moai-yivo.b5h) — errno 한 줄은
+    /// 주어가 없다. 지운 워크트리에 앉은 채 부른 `moai prime` 이 "여기 트래커를 못 읽었다 — No such file or
+    /// directory" 로 고칠 것을 못 댔다. `cmd::project` 의 `cwd` 와 한 말이다.
     pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        let dir = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+        let dir = match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                let said = crate::i18n::fill(crate::i18n::say(lang(), "refuse.no_cwd"), &[("said", &e.to_string())]);
+                return Err(Fail::new(said));
+            }
+        };
         Repo::find_from(&dir, lang)
     }
 

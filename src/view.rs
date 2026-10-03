@@ -1429,9 +1429,10 @@ pub fn prime(
 /// `# 제목` 을 손으로 한 벌 더 짓던 판은 이 함수를 고쳐도 그쪽이 옛 모양으로 남았다.
 ///
 /// **없는 것과 못 연 것을 가른다**(moai-yivo.6je) — `refused` 가 못 연 까닭이다. 둘 다 "`.moai` 가 없다,
-/// `moai init` 이 심는다" 로 대던 판은 링크나 깨진 설정 하나로 멈춘 저장소에서 세션을 여는 에이전트에게
-/// `init` 을 시켰고, `init` 은 다 괜찮다고 답했다. 까닭은 **이 판에 싣는다** — 세션 시작 훅은 stdout 만
-/// 맥락에 싣는다. 한 줄로 접는다: 남이 커밋한 링크 끝과 설정의 글이 든 자리라, 줄이 새면 이 판의 머리글로 선다.
+/// `moai init` 이 심는다" 로 대던 판은 링크나 못 읽는 스냅샷 하나로 멈춘 저장소에서 세션을 여는 에이전트에게
+/// `init` 을 시켰고, `init` 은 다 괜찮다고 답했다(깨진 설정이면 `init` 도 같은 까닭으로 멈춘다 — 그때도 할 일은
+/// `init` 이 아니라 그 까닭이다). 까닭은 **이 판에 싣는다** — 세션 시작 훅은 stdout 만 맥락에 싣는다. 한 줄로
+/// 접는다: 남이 커밋한 링크 끝과 설정의 글이 든 자리라, 줄이 새면 이 판의 머리글로 선다.
 ///
 /// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
 /// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
@@ -1439,8 +1440,10 @@ pub fn prime_bare(lang: Lang, refused: Option<&str>) -> Vec<String> {
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
     out.push(match refused {
         None => say(lang, "prime.no_repo").to_string(),
-        // 끝의 마침표는 걷는다 — 말묶음의 글이 `{why}.` 로 이어 붙이므로, 마침표로 끝나는 거절이 `..` 로 선다.
-        Some(why) => fill(say(lang, "prime.refused"), &[("why", one_line(why).trim_end().trim_end_matches('.'))]),
+        // **끝을 깎지 않는다**(리뷰 moai-yivo.b5h) — 까닭의 끝에 선 것이 경로(`-> <링크 끝>`)일 수 있어, 마침표나
+        // 빈칸을 걷으면 다른 파일을 댄다(`one_line` 이 한 줄짜리를 안 깎는 것과 같은 까닭). 여기 닿는 거절은
+        // 마침표로 끝나지 않는다.
+        Some(why) => fill(say(lang, "prime.refused"), &[("why", &one_line(why))]),
     });
     out.push(String::new());
     out.push(format!("## {}", say(lang, "prime.closing")));
@@ -3947,6 +3950,19 @@ mod tests {
         assert!(out.contains(&more_of(2, lang)), "잘린 수를 안 댔다 — {out}");
         let bare = crate::report::Prime { others: Vec::new(), others_rest: 0, ..p };
         assert!(!plain(&prime(&bare, &labels, &spaced, Screen::new(lang))).join("\n").contains(&said));
+    }
+
+    /// **못 연 까닭의 끝을 깎지 않는다**(리뷰 moai-yivo.b5h) — 끝에 선 것이 링크 끝의 경로일 수 있다
+    /// (`held::spelled` 의 `<자리> -> <링크 끝>`). 마침표와 빈칸을 걷던 판은 `-> /away/x ` 를 `/away/x` 로 대 다른
+    /// 파일을 가리켰다. 여러 줄은 한 줄로 접는다 — 줄이 새면 이 판의 머리글로 선다.
+    #[test]
+    fn prime_bare_keeps_the_end_of_the_reason() {
+        for why in ["/r/.moai/issues.jsonl -> /away/x ", "/r/.moai/issues.jsonl -> /away/y..."] {
+            let page = prime_bare(Lang::En, Some(why)).join("\n");
+            assert!(page.contains(&format!("{why}. `moai init`")), "{page}");
+        }
+        let page = prime_bare(Lang::En, Some("first\n## forged")).join("\n");
+        assert!(!page.lines().any(|l| l.starts_with("## forged")), "{page}");
     }
 
     /// **내 것이 아닌 줄은 목록 밑 따로 한 덩이다**(moai-0zjo, 2026-10-02 사용자 결정) — 머리의 수는 내 것만
