@@ -58,8 +58,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **Done work folds into an archive.** A row that has stood in done for
   `archive_days` (14 unless `.moai/config.toml` says otherwise; `0` turns it
-  off) is the archive — an epic or a milestone counted from when its last
-  member got to done, so a group with one recent member stays. Nothing is
+  off) is the archive — an epic or a milestone counted from when it got to
+  done: when its last member got there, or when the rest were deferred if that
+  came later. A group with one recent member stays, and an epic closed today by
+  deferring what was left does not drop out the same day. Nothing is
   stored: no field, no column, no command; it is read off the column and the
   clock each time. The explorer's list and board leave the archive out even
   with done shown and the path line counts it (`[archive 312 hidden]`);
@@ -81,6 +83,14 @@ does not tag — see `CONTRIBUTING.md`.
   the same way, counted in `archived`, and so do the lists on the `moai status`
   board. In the explorer, showing done (`SPC v <n>`) or everything (`SPC v a`)
   no longer brings back done rows past `archive_days`; `SPC v o` does.
+
+- **`moai show --done` dates a group closed by deferring from the deferral.** An
+  epic or milestone whose last open members were deferred used to count from
+  when its last member finished, so an epic closed today by `moai defer` could
+  stand weeks back; it now counts from the day the rest were deferred, if that
+  came later. The same clock is what the archive and `moai stats` read. A group
+  closed by removing the rest or moving them to another epic still counts from
+  its last finished member — nothing on the group records when that happened.
 
 - **The version line in the `moai tui` header names the latest release.** It
   reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it
