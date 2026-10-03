@@ -3384,3 +3384,4 @@
 {"ts":"2026-10-03T18:36:01Z","id":"moai-m1za","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 머지 0825dced 로 끝났다. 넘긴 것은 idea moai-mkrt·moai-xmhx·moai-foyr·moai-u9w6·moai-n0f0 (v0.4.0 밖)"}
 {"ts":"2026-10-03T18:39:28Z","id":"moai-cul6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판을 0.4.0 으로 올리고 CHANGELOG 의 [0.4.0] 절을 연다"}
 {"ts":"2026-10-03T18:40:04Z","id":"moai-cul6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T18:54:03Z","id":"moai-cul6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: develop 은 f4014413 까지 push 했다(릴리스 커밋 688422f9). 남은 것 — develop→main PR(스쿼시 금지), origin/main 머지 커밋에 v0.4.0 태그, 태그 push, 워크플로 확인. gh pr create 가 auto mode 분류기에 막혀(Production Deploy) 사람이 직접 하거나 허락해야 한다. PR 본문은 CHANGELOG [0.4.0] 절"}
