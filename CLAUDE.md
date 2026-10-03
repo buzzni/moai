@@ -307,7 +307,8 @@
 한국어 글은 따로 다듬지 않고 기본으로 쓴다(2026-10-03 사용자 결정, `moai-vtfu`). 두 글쓰기 플러그인으로
 다듬던 규칙(`moai-5wk4`)과 훅의 알림(`moai-6rrb`), 용어표(`moai-iloh`)는 걷었다. `moai skill install` 은
 옛 판이 moai 곁에 깐 그 플러그인을 걷어 낸다 — 옛 판 moai 가 선 범위에서 범위당 한 번, 옛 판이 더하던
-마켓플레이스의 것만(`moai-vtfu.dvk` 노트).
+마켓플레이스의 것만(`moai-vtfu.dvk` 노트). 그 범위가 project 면 커밋된 `.claude/settings.json` 의 마켓플레이스
+선언도 moai 가 그 줄만 지운다 — "남의 JSON 을 안 만진다" 의 하나뿐인 예외다(`moai-6ugu.aae` 노트).
 
 ## 리뷰
 
