@@ -23,8 +23,12 @@ pub const ROWS: usize = 6;
 
 /// 항목 안내 밑에 서는 예. **예는 여기 하나에 둔다** — 문법이 바뀌면 이 줄만 고친다. 시험이 하나하나를 거르개에
 /// 걸어 본다(`every_example_is_a_filter_the_explorer_takes`).
-pub const EXAMPLES: &[&str] =
-    &["status=todo,review priority=p0,p1 tag=bug", "assignee=me no-tag=docs", "created=2026-10-02 stale=7"];
+pub const EXAMPLES: &[&str] = &[
+    "status=todo,review priority=p0,p1 tag=bug no-tag=docs",
+    "assignee=me assignee=ana@example.com",
+    "done_at=\"2026-10-03 00:00~2026-10-05 23:59\"",
+    "created_at=2026-10-02 started_at=2026-10-01~",
+];
 
 /// 값 목록이 서는 항목 — 값이 저장소의 줄에 있는 것. 우선순위(`p0`~`p3`)는 정해져 있어 목록이 없다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -628,6 +632,22 @@ mod tests {
         type_in(&mut a, "tag=");
         super::super::draw::tests::render(&mut a, 100, 30);
         assert!(a.offered().is_some());
+    }
+
+    /// **넣은 값은 거르개가 그대로 받는다** — 빈칸 든 이름을 따옴표로 묶어 넣으면 `query::split_items` 가 한 값으로
+    /// 읽어 그 사람의 줄만 남는다. 묶지 않거나 따옴표를 글자로 읽으면 아무 줄도 안 남는다(리뷰 moai-h2rh.koh 6번).
+    #[test]
+    fn a_quoted_name_put_in_filters_that_person() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "assignee=Kim");
+        press(&mut a, KeyCode::Enter);
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(a.mode, Mode::Browse);
+        let kept: Vec<&str> =
+            a.site.issues.iter().zip(&a.site.keep).filter(|(_, k)| **k).map(|(i, _)| i.id.as_str()).collect();
+        assert_eq!(kept, ["argos-0004"]);
     }
 
     /// 고른 값이 따옴표 안팎에서 짝을 지킨다 — 빈칸 든 이름은 `=` 바로 뒤에서만 묶고, 닫지 않은 따옴표 뒤에 친
