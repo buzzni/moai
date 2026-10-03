@@ -16454,8 +16454,9 @@ fn skill_install_writes_the_spelling_it_was_called_by() {
     assert_eq!(exe(&mut moved), real_root.join("via/moai").display().to_string(), "`-C` 로 옮긴 자리에 붙였다");
 }
 
-/// **같은 파일을 다른 철자로 불러도 "다른 moai" 라고 하지 않는다**(moai-gu5m). 훅에 부른 철자를
-/// 적게 된 뒤로, 링크 철자로 심고 푼 철자로 `status` 를 부르면 글자만 갈린다 — 견주는 것은 자리다.
+/// **같은 파일을 다른 철자로 불러도 "다른 moai" 라고 하지 않는다**(moai-gu5m). 설치본은 푼 철자로
+/// 심겼고(moai-gu5m 전의 판) 체크아웃의 `plugin.json` 은 커밋된 링크 철자로 되돌린 자리 — 루트가 실제로
+/// 그렇게 섰다. 지금 부른 쪽은 심긴 철자를 잇고 설치본의 훅은 푼 철자라 글자만 갈린다 — 견주는 것은 자리다.
 #[test]
 fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
     let s = init("skillsamefile");
@@ -16463,16 +16464,48 @@ fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
     let via = c.home.path().join("via");
     std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
     let linked = via.join("moai");
-    installed_as(&s, &c, &linked, "0.0.1");
-    let json = text(&c.command(&linked, s.path(), &["skill", "status", "--json"], true).output().unwrap());
-    installed_as(&s, &c, &linked, &field(&json, "want_version"));
+    let resolved = Path::new(recorded_bin());
+    installed_as(&s, &c, resolved, "0.0.1");
+    let json = text(&c.command(resolved, s.path(), &["skill", "status", "--json"], true).output().unwrap());
+    installed_as(&s, &c, resolved, &field(&json, "want_version"));
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(recorded_bin(), &linked.display().to_string());
+    std::fs::write(&manifest, body).unwrap();
 
-    let out = c.command(Path::new(recorded_bin()), s.path(), &["skill", "status"], true).output().unwrap();
+    let out = c.command(&linked, s.path(), &["skill", "status"], true).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
-    assert!(said.contains(&linked.display().to_string()), "훅이 링크 철자를 안 부른다\n{said}");
+    assert!(said.contains(recorded_bin()), "설치본의 훅 철자를 안 댄다\n{said}");
     assert!(!said.contains("훅이 부르는 것과 다르다"), "같은 파일을 다른 moai 라 한다\n{said}");
     assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
+}
+
+/// **이미 심긴 철자가 같은 파일이면 잇는다**(사용자 결정 2026-10-03, 리뷰 moai-gu5m.ke0 3번). 부른
+/// 철자만 따르면 같은 파일을 다른 철자로 불러 심을 때마다 커밋된 `plugin.json` 이 바뀌었다. 다른 파일이면
+/// 부른 철자다 — 그때는 훅이 부를 것이 실제로 바뀐다.
+#[test]
+fn skill_install_keeps_the_planted_spelling_of_the_same_file() {
+    let s = init("skillkeep");
+    let c = Claude::new("skillkeep-home");
+    let via = c.home.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let linked = via.join("moai");
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let install = |bin: &Path| {
+        let out = c.command(bin, s.path(), &["skill", "install"], true).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        std::fs::read_to_string(&manifest).unwrap()
+    };
+
+    let planted = install(&linked);
+    assert!(planted.contains(&linked.display().to_string()), "부른 철자로 안 심었다\n{planted}");
+    assert_eq!(install(Path::new(recorded_bin())), planted, "같은 파일을 다른 철자로 심어 plugin.json 이 바뀌었다");
+
+    let copy = c.home.path().join("otherbin/moai");
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    place_exe(Path::new(BIN), &copy);
+    let moved = install(&copy);
+    assert!(moved.contains(&copy.display().to_string()), "다른 파일인데 심긴 철자를 이었다\n{moved}");
 }
 
 /// **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때

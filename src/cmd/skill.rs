@@ -40,11 +40,28 @@ fn place(ctx: &Ctx) -> R<Place> {
     // 글자로 견주면 자리로 견준 것이다. `skill` 은 글만 짓는 모듈이라 파일 시스템을 거기서 안 본다.
     let resolved = crate::path::real(&current);
     let on_path = which("moai");
-    let exe = skill::exe_name(&invoked(current, &resolved), &resolved, on_path.as_deref());
+    let planted = std::fs::read_to_string(root.join(skill::DIR).join(".claude-plugin/plugin.json")).ok();
+    let spelling = kept(planted.as_deref(), &resolved).unwrap_or_else(|| invoked(current, &resolved));
+    let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let files = plant(&prefix, &root, &exe);
     Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
+}
+
+/// 이 체크아웃에 이미 심긴 훅의 철자 — **같은 파일이면 그것을 잇는다**(사용자 결정 2026-10-03, 리뷰
+/// moai-gu5m.ke0 3번).
+///
+/// 부른 철자만 따르면 같은 파일을 다른 철자로 불러 심을 때마다(`/tmp/cargo-target/…` 를 바로, 루트에
+/// 건 `./moai` 링크로) 커밋된 `plugin.json` 의 철자가 바뀌어 diff 가 다시 났다. 판도 철자를 따라 바뀌는데
+/// `status` 는 같은 파일이라 아무 말을 안 하니, 그 diff 는 예고 없이 섰다. 다른 파일이거나 처음 심을 때만
+/// [`invoked`] 의 부른 철자다.
+///
+/// 심긴 철자도 [`skill::spelled`] 를 지난다 — 훅 한 줄에 못 적는 철자, 프로세스마다 다른 자리, 상대
+/// 철자는 잇지 않는다.
+fn kept(planted: Option<&str>, resolved: &Path) -> Option<PathBuf> {
+    let hooked = skill::hook_exe(planted?)?;
+    skill::spelled(Some(Path::new(&hooked)), None).filter(|p| crate::path::real(p) == resolved)
 }
 
 /// 훅에 적을 이 실행 파일의 철자 — **부른 철자다**(moai-gu5m, 사용자 결정 2026-10-03).
