@@ -6,6 +6,9 @@
 //!
 //! > **쉼표는 "또는", 플래그 반복은 "그리고", 서로 다른 플래그끼리는 "그리고".**
 //!
+//! 예외는 담당 하나다 — 되풀이도 또는이다(moai-97tn, 2026-10-03 사용자 결정). 한 줄의 담당은 하나라 그리고는
+//! 늘 0건이었다.
+//!
 //! 미니 쿼리 언어(`"status=todo AND tag=bug"`)를 두지 않는다. 에이전트는
 //! `--help` 를 읽고 명령을 만드는데 플래그는 도움말이 곧 문법이고, 쿼리
 //! 문자열은 Bash heredoc 안에서 따옴표가 겹쳐 자주 깨진다. 서로 다른 필드
@@ -401,7 +404,8 @@ pub struct Filter {
     /// done 을 포함한다. **아카이브는 아니다**(moai-47mz) — 그것은 [`Filter::archived`] 가 연다.
     pub all: bool,
     /// 아카이브(done 에 든 지 오래된 줄, [`Where::archived`])까지 포함한다 — `--archived`. 글로 찾거나(`-g`)
-    /// 때로 물으면(`--since`·`--created`·`--done`) 저절로 켜진다: 찾는 물음과 때를 콕 집은 물음이다.
+    /// 때로 물으면([`Filter::times`] — `--since`·`--created`·`--done`·`*_at=`) 저절로 켜진다: 찾는 물음과 때를 콕
+    /// 집은 물음이다.
     pub archived: bool,
     /// 미뤄 둔 것만 고른다. `Some(false)` 면 미루지 않은 것만.
     pub deferred: Option<bool>,
@@ -423,7 +427,7 @@ pub enum BadFilter {
     /// `--done` 에 done 을 안 든 `-s` 를 함께 줬다 — 두 거르개에 함께 걸리는 줄이 없다. `asked` 는 `-s` 의
     /// 값을 쉼표로 이은 것이다.
     DoneOutside { asked: String },
-    /// 끝이 하나도 없는 폭(`..`).
+    /// 끝이 하나도 없는 폭(`~`·`..`).
     Endless(String),
     /// 끝이 앞보다 이른 폭.
     Backwards(String),
@@ -582,15 +586,8 @@ impl Filter {
         // 이 미뤄 둔 것을 빼서 피한 바로 그 덫이고, 여기서는 세는 쪽을 못
         // 좁히니(좁히면 미뤄 둔 에픽이 아무 데서도 안 보인다) 보는 쪽을 연다.
         //
-        // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각까지.
-        // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
-        // `--since` 로 증분을 받는 쪽이 닫힌 줄을 말없이 놓친다 — 사람 화면은 꼬리에 숨긴 수를 대지만
-        // `--json` 에는 그 꼬리가 없다. 다시 좁히는 것은 `-s`(칸을 적는다)와 `--type` 이다 — `--deferred` 는
-        // 미룬 것**만** 남기고, 미룬 줄을 빼는 말은 없다.
-        let timed = [&raw.since, &raw.created, &raw.done, &raw.updated_at, &raw.started_at, &raw.done_at]
-            .iter()
-            .any(|v| !v.is_empty());
-        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred || timed;
+        // 때로 물으면 이것도 함께 연다 — 맨 끝의 "숨김을 다 연다" 다.
+        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
@@ -603,8 +600,8 @@ impl Filter {
         if !done.is_empty() && !status.is_empty() && !status.iter().any(|s| s == crate::config::DONE) {
             return Err(BadFilter::DoneOutside { asked: status.join(",") });
         }
-        let archived = raw.archived || timed || raw.stale.is_some() || raw.grep.is_some();
-        Ok(Filter {
+        let archived = raw.archived || raw.stale.is_some() || raw.grep.is_some();
+        let mut filter = Filter {
             status,
             tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
             no_tags: raw.no_tag.iter().flat_map(|t| split_tags(t)).collect(),
@@ -613,8 +610,8 @@ impl Filter {
             parent: sel(once(&raw.parent, Once::Parent)?),
             priority: parse_priorities(&once(&raw.priority, Once::Priority)?)?,
             // **담당은 되풀이도 또는이다**(moai-97tn, 2026-10-03 사용자 결정) — `-a 철수 -a 영희` 는 둘 가운데 하나다.
-            // "되풀이는 그리고" 의 하나뿐인 예외다: 한 줄의 담당은 하나라 그리고는 늘 0건이었고, 그래서 두 번 쓰면
-            // 거절하던 자리다. 거르개 글에서 사람을 여럿 고르려면 `assignee=` 를 되풀이하는 것이 자연스럽다.
+            // 되풀이를 또는으로 읽는 거르개는 이것 하나다: 한 줄의 담당은 하나라 그리고는 늘 0건이었고, 그래서 두 번
+            // 쓰면 거절하던 자리다. 거르개 글에서 사람을 여럿 고르려면 `assignee=` 를 되풀이하는 것이 자연스럽다.
             assignee: sel(raw.assignee.iter().flat_map(|v| csv(v)).collect()),
             kind: raw.kind,
             // 한 번만 내려 두면 이슈마다 다시 만들 일이 없다.
@@ -629,15 +626,61 @@ impl Filter {
             done_at: spans(&raw.done_at, Span::parse)?,
             // **아카이브를 여는 말은 셋이다**(moai-47mz, 2026-10-03 사용자 결정). `--archived` 는 done 까지 열어
             // 옛 `--all` 과 같은 줄을 낸다. 글로 찾으면(`-g`) 연다 — 아카이브는 숨는 것이지 지운 것이 아니라
-            // 찾아져야 한다. 때로 물으면 연다 — 위의 "숨김을 다 연다" 와 같은 까닭이다. **`--stale` 도 때로 묻는
+            // 찾아져야 한다. 때로 물으면 연다 — 아래의 "숨김을 다 연다" 가 함께 연다. **`--stale` 도 때로 묻는
             // 말이다**(리뷰 moai-47mz.5il) — `-s done --stale 20` 은 아카이브 날수를 넘긴 줄만 고르는 물음이라, 안
             // 열면 늘 0건이다. 다만 `--stale` 은 숨김을 다 열지는 않는다(옛날처럼 done 은 `-s done` 이 연다).
             // **`-g` 는 done 은 안 연다** — 찾은 아카이브 줄은 done 처럼 꼬리에 세이고 `--all` 이 연다.
-            all: raw.all || timed || raw.archived,
+            all: raw.all || raw.archived,
             archived,
             ideas,
             deferred,
-        })
+        };
+        // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각·아카이브까지.
+        // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
+        // `--since` 로 증분을 받는 쪽이 닫힌 줄을 말없이 놓친다 — 사람 화면은 꼬리에 숨긴 수를 대지만
+        // `--json` 에는 그 꼬리가 없다. 다시 좁히는 것은 `-s`(칸을 적는다)와 `--type` 이다 — `--deferred` 는
+        // 미룬 것**만** 남기고, 미룬 줄을 빼는 말은 없다.
+        //
+        // **물었는지는 [`Filter::times`] 에서 읽는다**(리뷰 moai-97tn.p44) — 시간대를 묻는 자([`Filter::needs_zone`])와
+        // 한 목록이다. 날것(`Raw`)의 이름을 여기 따로 늘어놓던 때는 `updated_at=` 을 빼도 아무 시험이 안 붉어졌다.
+        // 빈 값은 `spans` 가 거절하므로 날것이 섰으면 폭도 선다 — 같은 답이다.
+        if filter.times().iter().any(|v| !v.is_empty()) {
+            (filter.all, filter.archived, filter.ideas) = (true, true, true);
+        }
+        Ok(filter)
+    }
+
+    /// 때로 묻는 폭 전부 — `--since`·`updated_at=`(한 묶음), `--created`·`created_at=`, `--done`, `started_at=`,
+    /// `done_at=`. 숨김을 여는 자([`Filter::build`])와 시간대를 묻는 자([`Filter::needs_zone`])가 이 하나를 읽는다.
+    ///
+    /// **필드를 다 푼다**(`..` 없이, `cmd::show::first_given` 과 같은 까닭) — 거르개에 필드가 더해지면 여기가
+    /// 컴파일되지 않아, 그것이 때로 묻는 폭인지 정하게 된다. 두 자가 저마다 이름을 늘어놓던 때는 한쪽을 빠뜨려도
+    /// 컴파일이 됐다 — 숨김을 안 열면 그사이 닫힌 줄을 말없이 놓치고, 시간대를 안 물으면 그 키만 UTC 의 날로 잰다.
+    fn times(&self) -> [&Vec<Vec<Span>>; 5] {
+        let Filter {
+            status: _,
+            tags: _,
+            no_tags: _,
+            epic: _,
+            milestone: _,
+            parent: _,
+            priority: _,
+            assignee: _,
+            kind: _,
+            grep: _,
+            grep_in: _,
+            stale: _,
+            updated,
+            created,
+            done,
+            started,
+            done_at,
+            all: _,
+            archived: _,
+            deferred: _,
+            ideas: _,
+        } = self;
+        [updated, created, done, started, done_at]
     }
 
     /// 노트를 봐야 답하는가 — 글로 찾고, 그 범위가 노트를 본다([`GrepIn::sees_notes`]). 없으면 부르는 쪽이
@@ -646,12 +689,11 @@ impl Filter {
         self.grep.is_some() && self.grep_in.sees_notes()
     }
 
-    /// 읽는 사람의 시간대가 있어야 답하는가 — `YYYY-MM-DD` 로 친 때가 있다([`End::Wall`]). 없으면 부르는 쪽이
-    /// 시간대를 풀지 않는다: 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
+    /// 읽는 사람의 시간대가 있어야 답하는가 — 날(`YYYY-MM-DD`)이나 분(`YYYY-MM-DD HH:MM`)으로 친 때가 있다
+    /// ([`End::Wall`]). 없으면 부르는 쪽이 시간대를 풀지 않는다: 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
+    /// 폭의 목록은 숨김을 여는 자와 한 벌이다([`Filter::times`]).
     pub fn needs_zone(&self) -> bool {
-        [&self.updated, &self.created, &self.done, &self.started, &self.done_at]
-            .iter()
-            .any(|v| v.iter().flatten().any(Span::walled))
+        self.times().iter().any(|v| v.iter().flatten().any(Span::walled))
     }
 
     /// 기본 목록이 이 줄을 숨기는가, 숨긴다면 **어느 한 낱말이 그것을 여는가.**
@@ -778,12 +820,6 @@ impl Filter {
         if self.kind.is_some_and(|k| i.kind != k) {
             return false;
         }
-        if let Some(q) = &self.grep
-            && !self.grep_in.hits(i, q)
-            && !(self.grep_in.sees_notes() && wh.noted(i, q))
-        {
-            return false;
-        }
         // 머문 기간도 **서 있는 칸**의 것이다 (`Where::since`). `-s` 는 읽은 칸으로
         // 고르는데 나이만 적힌 칸의 시각으로 재면, 한 물음의 두 조각이 다른 칸을 본다.
         if let Some(d) = self.stale
@@ -823,6 +859,14 @@ impl Filter {
         if !self.done_at.is_empty() && !within(&self.done_at, field(&i.done_at)) {
             return false;
         }
+        // **글은 맨 끝에 찾는다**(리뷰 moai-97tn.p44) — 줄의 글과 노트를 다 소문자로 접어 훑는 값비싼 물음이라, 도장
+        // 하나를 견주는 때의 폭이 먼저 거른 줄만 훑는다. 갈래는 다 부작용 없는 그리고라 차례가 답을 안 바꾼다.
+        if let Some(q) = &self.grep
+            && !self.grep_in.hits(i, q)
+            && !(self.grep_in.sees_notes() && wh.noted(i, q))
+        {
+            return false;
+        }
         true
     }
 }
@@ -837,10 +881,10 @@ pub struct Span {
 /// 폭의 한 끝 — **무엇과 견주는지가 끝마다 다르다**(moai-efoc, 2026-09-30 사용자 결정).
 ///
 /// - `At` 은 `…T…Z` 로 친 한 순간이다 — UTC epoch 초로 줄의 도장과 곧바로 견준다
-/// - `Wall` 은 `YYYY-MM-DD` 로 친 날의 끝이다 — **읽는 사람의 벽시계**로 잰 epoch 초 꼴이라, 줄의 도장도
-///   그 사람의 시간대로 옮겨(`tz::Zone::local`) 견준다. 사람이 치는 날은 제 날이고, 상세가 대는 날짜와
-///   마일스톤 기한(moai-h2th)도 그 날로 선다 — UTC 로 재면 서울의 0~9시에 만든 줄을 화면은 그날이라 대는데
-///   `--created <그날>` 에는 안 걸렸다. 시간대는 [`Where::zone`] 이 든다
+/// - `Wall` 은 `YYYY-MM-DD`(날)나 `YYYY-MM-DD HH:MM`(분, moai-97tn)으로 친 끝이다 — **읽는 사람의 벽시계**로 잰
+///   epoch 초 꼴이라, 줄의 도장도 그 사람의 시간대로 옮겨(`tz::Zone::local`) 견준다. 사람이 치는 날은 제 날이고,
+///   상세가 대는 날짜와 마일스톤 기한(moai-h2th)도 그 날로 선다 — UTC 로 재면 서울의 0~9시에 만든 줄을 화면은
+///   그날이라 대는데 `--created <그날>` 에는 안 걸렸다. 시간대는 [`Where::zone`] 이 든다
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum End {
     At(i64),
@@ -868,12 +912,12 @@ impl Span {
         })
     }
 
-    /// 읽는 사람의 날로 잰 끝이 있는가 — 있으면 시간대를 풀어야 한다([`Filter::needs_zone`]).
+    /// 읽는 사람의 벽시계로 잰 끝(날·분)이 있는가 — 있으면 시간대를 풀어야 한다([`Filter::needs_zone`]).
     fn walled(&self) -> bool {
         [self.from, self.to].iter().any(|e| matches!(e, Some(End::Wall(_))))
     }
 
-    /// `--since <때>` — 그때부터 열린 폭. `..` 를 받지 않는다: 한 끝만 받는 플래그다.
+    /// `--since <때>` — 그때부터 열린 폭. `~`·`..` 를 받지 않는다: 한 끝만 받는 플래그다.
     fn since(raw: &str) -> Result<Span, BadFilter> {
         Ok(Span { from: Some(instant(raw, false)?), to: None })
     }
@@ -939,14 +983,13 @@ fn instant(raw: &str, end: bool) -> Result<End, BadFilter> {
 
 /// `YYYY-MM-DD HH:MM` — 그 1분의 첫 초를 벽시계의 epoch 초 꼴로. 날과 시각 사이는 빈칸이고(여럿이어도 된다),
 /// 시와 분은 두 자리다. 초는 안 받는다 — 사람이 치는 꼴은 분까지고, 초가 필요하면 순간(`…T…Z`)이 있다.
+///
+/// **재는 자는 순간의 것이다**([`parse_instant`], 리뷰 moai-97tn.p44) — 날과 시각을 그 꼴(`…T…:00Z`)로 이어
+/// 같은 엄한 자에 건넨다. 따로 재던 때는 시각 자리의 숫자·부호·범위를 두 자가 저마다 적어, 한쪽만 고치는 날
+/// `+1:10` 이나 `24:00` 을 한 꼴만 받게 된다. 벽시계의 epoch 초 꼴은 순간의 것과 셈이 같다.
 fn wall_minute(raw: &str) -> Option<i64> {
     let (day, clock) = raw.split_once(char::is_whitespace)?;
-    let day = parse_date(day)?;
-    let (h, m) = clock.trim_start().split_once(':')?;
-    let two =
-        |s: &str| (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<i64>().ok()).flatten();
-    let (h, m) = (two(h)?, two(m)?);
-    (h < 24 && m < 60).then_some(day * 86_400 + h * 3_600 + m * 60)
+    parse_instant(&format!("{day}T{}:00Z", clock.trim_start()))
 }
 
 /// 때 `at` 이 폭 묶음에 드는가 — 바깥이 그리고, 안쪽이 또는([`Filter::updated`] 의 꼴). 날로 친 끝은 읽는
@@ -992,7 +1035,7 @@ pub fn may_fall_in(since: &[Vec<Span>], ts: Option<&str>, zone: Option<&crate::t
 }
 
 /// 플래그 되풀이는 그리고, 쉼표는 또는 — `--created a..b,c..d` 는 두 폭 가운데 하나다. `one` 이 한 조각을
-/// 폭으로 읽는다(`--since` 는 한 끝만, 나머지는 `from..to`).
+/// 폭으로 읽는다(`--since` 는 한 끝만, 나머지는 `from~to`·`from..to`).
 ///
 /// **때가 하나도 없는 값은 거절한다**(moai-efoc 리뷰) — `--since ''`·`--filter since=`·`--created ,` 는 빈
 /// 또는-묶음이 되어 어느 줄도 못 지나, 숨김을 다 연 채 말없이 0건을 냈다. 비어 있던 커서 변수로 증분을
@@ -1060,8 +1103,9 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
 ///   문법" 이라던 약속이 거기서 깨진다. `=` 없는 낱말은 앞 항목의 값에 빈칸 하나로 붙는다
 /// - **`=` 바로 뒤의 따옴표(`"…"`·`'…'`)는 한 값이다**(moai-97tn) — 사람이 든 예가
 ///   `done_at="2026-10-03 00:00~2026-10-05 23:59"` 다. 따옴표는 벗기고, 안의 빈칸과 `=` 는 글자 그대로다
-///   (`grep="a=b c"`). **다른 자리의 따옴표는 글자다** — 셸처럼 어디서나 따옴표를 열면 `grep=don't` 의 `'` 가
-///   줄 끝까지를 삼킨다
+///   (`grep="a=b c"`). 다만 값 양 끝의 빈칸은 [`desugar`] 가 CLI 의 `--filter` 처럼 걷는다 — `grep=" a "` 는
+///   `a` 다. **다른 자리의 따옴표는 글자다** — 셸처럼 어디서나 따옴표를 열면 `grep=don't` 의 `'` 가 줄 끝까지를
+///   삼킨다
 /// - **닫지 않은 따옴표는 줄 끝까지다** — 이 칸은 치는 동안 걸음마다 판정되므로([`desugar`] 의 거절문이 칸 밑에
 ///   선다) 닫기 전의 반쪽 글을 거절하면 치는 내내 붉다
 pub fn split_items(text: &str) -> Vec<String> {
@@ -2239,6 +2283,10 @@ mod tests {
             "2026-10-10 24:00",
             "2026-10-10 10:60",
             "2026-10-10 1:10",
+            // 부호는 시각 자리에서도 오타다 — `"-1".parse::<i64>()` 는 받으므로 숫자인지를 따로 봐야 한다.
+            "2026-10-10 -1:30",
+            "2026-10-10 +1:30",
+            "2026-10-10 10:+5",
             "2026-10-10 10:10:00",
             "2026-10-10T10:10",
             "2026-02-30 10:10",
@@ -2278,6 +2326,9 @@ mod tests {
         assert_eq!(pick(&["started_at=2000-01-01~"]), ["a-0001.m1", "a-0002"], "모르는 시작을 폭에 넣었다");
         assert_eq!(pick(&["done_at=2026-10-02"]), ["a-0001.m1", "a-0002"], "되돌린 줄의 done_at 을 안 봤다");
         assert_eq!(pick(&["done_at=2026-10-02", "status=done"]), ["a-0001.m1"]);
+        // `done_at=` 은 칸을 안 본다 — done 이 빠진 `status=` 와 함께 줘도 거절하지 않는다(`done=` 의 `DoneOutside` 와
+        // 다르다, 리뷰 moai-97tn.p44). 닫았다가 다시 연 줄을 찾는 물음이 이것이다.
+        assert_eq!(pick(&["done_at=2026-10-02", "status=todo"]), ["a-0002"], "다시 연 줄을 못 찾았다");
         // 옛 `done=` 은 지금 done 에 선 줄을 그 칸에 든 때로 — 묶음은 멤버로 닫혔다.
         assert_eq!(pick(&["done=2026-10-02"]), ["a-0001", "a-0001.m1"], "옛 done= 의 뜻이 바뀌었다");
         assert_eq!(pick(&["done_at=2026-10-02 10:00"]), ["a-0002"], "1분으로 못 골랐다");
@@ -2291,6 +2342,54 @@ mod tests {
         // 때로 물으면 숨김을 다 연다 — 새 키도 옛 키와 같다(done 에 선 멤버가 기본 목록에서 숨는다).
         let f = Filter::build(Raw { filter: s(&["done_at=2026-10-02"]), ..Raw::default() }).unwrap();
         assert!(f.all && f.archived && f.ideas, "새 시각 키가 숨김을 안 열었다");
+
+        // **손으로 옮긴 묶음은 제 필드로 걸린다**(리뷰 moai-97tn.p44) — 위의 묶음은 그 필드가 없어 "안 걸린다" 만
+        // 잰다. 묶음을 아예 빼는 고침(통계의 소요처럼)이 와도 그것만으로는 푸르다. 멤버의 때와 다르게 둔다.
+        let mut moved = issue("b-0001", "done", &[]);
+        moved.kind = Kind::Epic;
+        moved.started_at = Some("2026-09-20T09:00:00Z".into());
+        moved.done_at = Some("2026-09-25T09:00:00Z".into());
+        let mut kid = issue("b-0001.k1", "done", &[]);
+        kid.started_at = Some("2026-09-21T09:00:00Z".into());
+        kid.done_at = Some("2026-09-24T09:00:00Z".into());
+        let groups = vec![moved, kid];
+        let wg = Where::of(&groups, &c);
+        let pick = |items: &[&str]| -> Vec<&str> {
+            let f = Filter::build(Raw { filter: s(items), ..Raw::default() }).unwrap();
+            groups.iter().filter(|i| f.matches(i, NOW, &wg)).map(|i| i.id.as_str()).collect()
+        };
+        assert_eq!(pick(&["started_at=2026-09-20"]), ["b-0001"], "묶음의 제 시작을 안 봤다");
+        assert_eq!(pick(&["done_at=2026-09-25"]), ["b-0001"], "묶음의 제 끝을 안 봤다");
+        assert_eq!(pick(&["done_at=2026-09-24"]), ["b-0001.k1"], "묶음을 멤버의 끝으로 골랐다");
+    }
+
+    /// **때를 묻는 항목은 다 숨김을 열고, 날로 치면 시간대를 묻는다**(리뷰 moai-97tn.p44) — 키를 더하는 날 한쪽만
+    /// 알면 그 키만 그사이 닫힌 줄을 말없이 놓치거나 UTC 의 날로 잰다. `updated_at=` 이 숨김을 여는 자리를 빼도 아무
+    /// 시험이 안 붉어지던 판에서 세웠다.
+    ///
+    /// **항목은 손으로 적지 않고 [`KEYS`] 에서 고른다** — 때가 아닌 값을 때가 아니라고 거절하는 항목이 때 항목이다.
+    /// 새 때 항목은 저절로 여기 든다. 고르는 자가 빗나가 몇을 안 고르는 판은 아래 바닥이 막는다 — `KEYS` 에서 빠진
+    /// 항목도 거기 걸린다(거절문이 그 항목을 안 댄다).
+    #[test]
+    fn every_time_key_opens_what_is_hidden_and_asks_for_the_zone() {
+        let build = |item: String| Filter::build(Raw { filter: vec![item], ..Raw::default() });
+        let timed: Vec<&str> = KEYS
+            .iter()
+            .copied()
+            .filter(|k| matches!(build(format!("{k}=어제")), Err(BadFilter::NotATime(_))))
+            .collect();
+        for k in ["since", "created", "done", "created_at", "updated_at", "started_at", "done_at"] {
+            assert!(timed.contains(&k), "`{k}` 를 때 항목으로 못 골랐다 — {timed:?}");
+        }
+        for k in timed {
+            let f = build(format!("{k}=2026-10-01")).unwrap();
+            assert!(f.all && f.archived && f.ideas, "`{k}=` 가 숨김을 안 열었다");
+            assert!(f.needs_zone(), "`{k}=` 가 시간대를 안 물었다");
+            // 순간으로만 치면 시간대를 안 푼다 — 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
+            let f = build(format!("{k}=2026-10-01T00:00:00Z")).unwrap();
+            assert!(f.all && f.archived && f.ideas, "`{k}=` 순간이 숨김을 안 열었다");
+            assert!(!f.needs_zone(), "`{k}=` 순간이 시간대를 물었다");
+        }
     }
 
     /// **거르개 글은 `항목=` 에서 쪼개고, `=` 바로 뒤의 따옴표는 한 값이다**(moai-97tn). 사람이 든 예가 그대로

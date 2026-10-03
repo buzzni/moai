@@ -3576,10 +3576,11 @@ impl Surface {
 
     /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
     ///
-    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로
-    /// `-a 홍 길동 (a@b.c),김 철수 (c@d.e)` 를 그대로 대면 옮겨 친 셸이 `(` 에서 멈춘다. 따옴표가 필요 없는
+    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 칸 이름에 빈칸과 괄호가 들 수 있으므로
+    /// `-s to do (old),in review` 를 그대로 대면 옮겨 친 셸이 빈칸에서 가르고 `(` 에서 멈춘다. 따옴표가 필요 없는
     /// 값(`todo,review`)은 글자째 그대로다([`crate::text::quoted`]). 거름망은 `=` 없는 낱말을 앞 항목에 잇는
-    /// 칸이라 감싸지 않는다.
+    /// 칸이라 감싸지 않는다. (처음 든 까닭은 담당의 `이름 (메일)` 이었는데, 담당은 되풀이를 또는으로 받게 되어
+    /// 이 거절에 안 온다 — moai-97tn.)
     fn spell(self, field: crate::query::Once, value: &str) -> String {
         match self {
             Surface::Flags => format!("{} {}", field.flag(), crate::text::quoted(value)),
@@ -4068,6 +4069,24 @@ mod tests {
         // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
         let kind = "x".parse::<Kind>().unwrap_err();
         assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
+    }
+
+    /// **때를 거절하는 글은 받는 꼴을 다 댄다**(리뷰 moai-97tn.p44) — 분(`YYYY-MM-DD HH:MM`)과 `~` 를 받게 된 뒤에도
+    /// 글은 날과 순간과 `from..to` 만 댔다. 시를 한 자리로 친 사람(`9:05`)은 분 꼴이 없다는 말을 듣고, 그 말을 따라
+    /// `…T09:05:00Z` 를 치면 서울에서는 아홉 시간 어긋난 UTC 의 한 초를 묻는다. 꼴을 더하는 날 여기도 더한다.
+    #[test]
+    fn a_time_refusal_names_every_form_it_takes() {
+        use crate::query::BadFilter;
+        for lang in [Lang::En, Lang::Ko] {
+            for why in [BadFilter::NotATime("2026-10-03 9:05".into()), BadFilter::NoTime] {
+                let said = bad_filter(lang, &why);
+                for form in ["`YYYY-MM-DD`", "`YYYY-MM-DD HH:MM`", "`YYYY-MM-DDTHH:MM:SSZ`"] {
+                    assert!(said.contains(form), "{lang:?} 거절문에 {form} 이 없다 — {said}");
+                }
+            }
+            let said = bad_filter(lang, &BadFilter::Endless("~".into()));
+            assert!(said.contains("`from~to`") && said.contains("`from..to`"), "{lang:?} 가르개를 다 안 댔다 — {said}");
+        }
     }
 
     /// **TZif 가 아닌 시간대 파일도 고른 말로 선다**(리뷰 moai-efoc.3e1) — `tz::Trouble::Unreadable` 의 `said` 에

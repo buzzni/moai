@@ -80,11 +80,15 @@ does not tag — see `CONTRIBUTING.md`.
   `status=done` for what is closed now; `since=`, `created=` and `done=` keep
   their meaning. Every time filter, flags included, now also takes
   `YYYY-MM-DD HH:MM` — that one minute on your own clock, the way a lone day is
-  that whole day — and a range written `from~to` as well as `from..to`, either
-  side open: `done_at="2026-10-03 00:00~2026-10-05 23:59"` runs to 23:59:59. In
-  `SPC f` a value right after `=` may be quoted (`"…"` or `'…'`) and is then
-  one value with its spaces; a quote anywhere else is a character, so
-  `grep=don't` still finds what it did.
+  that whole day — and every one that takes a range takes `from~to` as well as
+  `from..to`, either side open; `--since` and `since=` still take one end.
+  `--filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'` runs to 23:59:59.
+  Quote a range that opens with `~` on the command line (`'~2026-10-05'`) —
+  zsh reads a bare `~2026-10-05` as a named directory. In `SPC f` a value
+  right after `=` may be quoted (`"…"` or `'…'`) and is then one value with
+  the spaces inside it (its two ends are trimmed, as `--filter` trims them);
+  a quote anywhere else is a character, so `grep=don't` still finds what it
+  did.
 
 ### Changed
 
@@ -169,7 +173,7 @@ does not tag — see `CONTRIBUTING.md`.
   `assignee=` repeated in `--filter` or `SPC f`, and the two mixed are one
   list read as or, the same as a comma. They used to be refused as a filter
   used twice — a row has one assignee, so "and" never picked anything. It is
-  the one filter where repeating is not and.
+  the one filter where repeating means or.
 
 ### Removed
 

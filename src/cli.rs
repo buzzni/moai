@@ -1058,17 +1058,18 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   milestone deadlines use; YYYY-MM-DD HH:MM, one minute on that clock;
   or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no time zone moves. The
   end of a range takes all it spans too, so ~2026-10-05 23:59 runs to
-  23:59:59. --done looks at rows standing in done now, at the
-  time they last got there - an epic or milestone when its last member got
-  to done, or when the rest were deferred if that came later. Moving rows
-  in or out and removing them leave no trace on the group: closed that way
-  it counts from its last finished member, and a deferred row moved into a
-  closed group dates it from that row's deferral. Asking by time opens
-  what the list hides by default - done, deferred and ideas - because a
-  row closed meanwhile changed too. Narrow it again with -s (name the
-  columns you want) or --type; --deferred keeps only what is deferred, and
-  no flag leaves deferred rows out. A lone instant given to --created or
-  --done is that one second, not a day.
+  23:59:59. Quote a range that opens with ~ ('~2026-10-05'): zsh takes a
+  bare ~2026-10-05 for a named directory. --done looks at rows standing in
+  done now, at the time they last got there - an epic or milestone when its
+  last member got to done, or when the rest were deferred if that came
+  later. Moving rows in or out and removing them leave no trace on the
+  group: closed that way it counts from its last finished member, and a
+  deferred row moved into a closed group dates it from that row's deferral.
+  Asking by time opens what the list hides by default - done, deferred and
+  ideas - because a row closed meanwhile changed too. Narrow it again with
+  -s (name the columns you want) or --type; --deferred keeps only what is
+  deferred, and no flag leaves deferred rows out. A lone instant given to
+  --created or --done is that one second, not a day.
 
   --filter takes each filter as item=value, one per flag, and adds four
   time items named after the --json fields: created_at, updated_at,
@@ -1333,7 +1334,8 @@ pub struct WorktreeArg {
     pub worktree: bool,
 }
 
-/// 쉼표는 "또는", 반복은 "그리고".
+/// 쉼표는 "또는", 반복은 "그리고". 담당(`-a`)만 반복도 "또는"이다(moai-97tn) — 머리글이 대지 않는 그 하나는
+/// 그 플래그의 도움말이 댄다.
 ///
 /// 쉼표를 clap 에게 맡기지 않는 이유가 있다 — `-s todo,review` 와
 /// `-s todo -s review` 가 구별돼야 뒤엣것에 친절한 오류를 낼 수 있다.

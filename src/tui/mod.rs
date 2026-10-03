@@ -9361,6 +9361,33 @@ mod tests {
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
     }
 
+    /// **`=` 바로 뒤의 따옴표는 한 값이다**(moai-97tn, 리뷰 moai-97tn.p44) — 거름망도 `query::split_items` 로 쪼갠다.
+    /// 따옴표 안의 `=` 와 빈칸은 글자고, 사람이 든 예(분까지 친 `~` 폭)가 화면의 시간대로 선다. 시간대를 바꿔 다시
+    /// 걸 때도 친 글 그대로 다시 쪼갠다. 빈칸으로만 잇던 옛 쪼개기는 둘 다 따옴표를 글자로 남겨 못 걸었다.
+    #[test]
+    fn a_quoted_filter_value_is_one_value() {
+        let mut issues =
+            vec![make("argos-0001", Kind::Epic), make("argos-0008", Kind::Issue), make("argos-0009", Kind::Issue)];
+        issues[1].title = "a=b c 를 고친다".into();
+        issues[2].done_at = Some("2026-10-02T15:00:00Z".into()); // 서울로 10-03 00:00
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.zone = crate::tz::Zone::fixed("T", 9 * 3600);
+        a.hit("SPC f");
+        typed(&mut a, r#"grep="a=b c""#);
+        assert_eq!(a.mode, Mode::Browse, "따옴표 값을 거절했다 — {:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0008"]);
+
+        let asked = r#"done_at="2026-10-03 00:00~2026-10-05 23:59""#;
+        a.hit("SPC f");
+        typed(&mut a, asked);
+        assert_eq!(a.mode, Mode::Browse, "사람이 든 예를 거절했다 — {:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0009"], "화면의 시간대로 안 쟀다");
+        assert_eq!(badge(&a).as_deref(), Some(asked), "뱃지가 친 글이 아니다");
+        a.set_zone("UTC");
+        assert!(shown(&a).is_empty(), "시간대를 바꿨는데 옛 날에 남았다 — {:?}", shown(&a));
+        assert_eq!(badge(&a).as_deref(), Some(asked), "다시 걸다가 거름망을 풀었다");
+    }
+
     /// **모르는 칸은 거절한다.** `cmd/show.rs` 가 쓰는 것과 같은 자다 — 조용히
     /// 0건을 내면 `status=in-progress` 같은 오타가 "그 칸은 비었다" 와
     /// 구별되지 않는다.
