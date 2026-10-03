@@ -1270,8 +1270,9 @@ fn banner(app: &App) -> Option<(String, bool)> {
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
 ///
-/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 못 읽은 저널이 있으면 셋째 줄이
-/// 그것을 댄다(moai-pvpb.6g6, [`journal_said`]).
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 판 줄의 꼬리가 번호 칸을 밀어내면
+/// 그 꼬리가 아랫줄로 내려오고(moai-ggxi), 못 읽은 저널이 있으면 그다음 줄이 그것을 댄다(moai-pvpb.6g6,
+/// [`journal_said`]).
 ///
 /// 돌려주는 것은 둘이다 — **빛**("지금 선 프로젝트에 빛이 섰는가", [`screen`] 이 `App::spun` 에
 /// 함께 센다)과 **번호**("프로젝트 번호를 실제로 적었는가"). 번호는 키 바가 읽는다(리뷰):
@@ -1283,7 +1284,8 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 따로 맞추면 줄끼리 어긋나 그림이 깨진다. 문구 줄이 가장 넓어 그 줄은 제자리다.
     let art = &LOGO[..LOGO.len() - 1];
     let art_in = (logo_w - art.iter().map(|l| crate::text::width(l)).max().unwrap_or(0)) / 2;
-    let mut told = Vec::from(told_of(app));
+    let (told, tail) = told_of(app);
+    let mut told = Vec::from(told);
     // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
     // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
     let tags = numbered_projects(app);
@@ -1300,6 +1302,17 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 만큼이 그 줄의 몫이고, 자리 글이 그 안에 맞춰 줄어든다([`journal_said`]). 자리 글 몫만 묶던 판은 줄이 60칸
     // 남짓이 되어, 80칸에서 `<1>` 부터의 번호를 통째로 지웠다(리뷰).
     let room = (at.width as usize).saturating_sub(1 + HEADER_GAP + want + HEADER_LABEL_W);
+    // **판 줄의 꼬리(지난 답과 들은 때)는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02
+    // 사용자 결정). 못 물은 줄은 63~67칸이라 80칸에서 번호 칸을 통째로 지웠다 — 자르면 들은 때가, 까닭을 빼면
+    // 까닭이 사라지므로 접는다. 남는 폭이 넉넉하면 한 줄 그대로라, 넓은 창의 헤더는 전과 같다.
+    if let Some(tail) = tail {
+        let joined = format!("{} · {tail}", told[1].1);
+        if crate::text::width(&joined) <= room {
+            told[1].1 = joined;
+        } else {
+            told.push(("", tail));
+        }
+    }
     told.extend(journal_said(app, room).map(|said| ("Journal", said)));
     // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
     let told_w = told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
@@ -1321,7 +1334,9 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
             spans.push(Span::styled("│", dim()));
             if let Some((label, said)) = told.get(n) {
                 spans.push(Span::raw(" ".repeat(HEADER_GAP)));
-                spans.push(Span::styled(format!("{} : ", pad(label, HEADER_LABEL)), dim()));
+                // 라벨 없는 줄은 윗줄의 이음이다 — 글은 윗줄 글과 같은 칸에서 시작한다.
+                let colon = if label.is_empty() { "   " } else { " : " };
+                spans.push(Span::styled(format!("{}{colon}", pad(label, HEADER_LABEL)), dim()));
                 spans.push(Span::raw(said.clone()));
             }
             Line::from(spans)
@@ -1448,10 +1463,13 @@ fn spans_width(spans: &[Span]) -> usize {
 /// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
-fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest(), &app.site.now);
+///
+/// **판 줄의 꼬리는 따로 돌려준다**([`version_said`]) — 한 줄로 이을지 아랫줄로 내릴지는 번호 칸을 잰
+/// [`header`] 가 정한다.
+fn told_of(app: &mut App) -> ([(&'static str, String); 2], Option<String>) {
+    let (said, tail) = version_said(app.site.lang, app.latest(), &app.site.now);
     let user = app.told_user().to_string();
-    [("User", user), ("Version", said)]
+    ([("User", user), ("Version", said)], tail)
 }
 
 /// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래([`crate::store::Unread::kind`] —
@@ -1519,13 +1537,16 @@ const JOURNAL_AT_W: usize = 32;
 /// 지난번에 들은 답이 있을 때만, 그 답을 들은 때와 함께 못 물었다는 말 **뒤에** 단다. 지난
 /// 값이라는 것이 글에 보여야 해서다. 지난 답이 없으면 번호를 안 댄다. 들은 때는 `now` 로 재고,
 /// 그 값은 [`App`] 이 든 시각이라 여기서 시계를 안 읽는다.
-fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> String {
+///
+/// **지난 답은 꼬리로 따로 낸다** — `(줄, 꼬리)`. 이으면 `줄 · 꼬리` 고, 좁으면 [`header`] 가 꼬리를
+/// 아랫줄로 내린다(moai-ggxi 리뷰). 꼬리는 [`Seen::Stale`](crate::latest::Seen::Stale) 에만 선다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> (String, Option<String>) {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
-    let said = match latest {
-        Seen::Newer { tag } => fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
-        Seen::Same { tag } => fill(say(lang, "tui.version.same"), &[("tag", tag)]),
-        Seen::Ahead { tag } => fill(say(lang, "tui.version.ahead"), &[("tag", tag)]),
+    let (said, tail) = match latest {
+        Seen::Newer { tag } => (fill(say(lang, "tui.version.newer"), &[("tag", tag)]), None),
+        Seen::Same { tag } => (fill(say(lang, "tui.version.same"), &[("tag", tag)]), None),
+        Seen::Ahead { tag } => (fill(say(lang, "tui.version.ahead"), &[("tag", tag)]), None),
         Seen::Stale { why, tag, heard_at } => {
             // 하루 단위로 잰다 — 창이 하루라 그보다 잘게 재도 사람이 할 일은 같다. 때를 못 읽으면
             // 언제인지 모르는 것이지 오늘 본 것이 아니다. **크게 앞선 때도 모르는 것이다**(리뷰) —
@@ -1540,11 +1561,11 @@ fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> String {
                 Some(d) => fill(say(lang, "tui.version.seen.days"), &[("tag", tag), ("d", &d.to_string())]),
                 None => fill(say(lang, "tui.version.seen.earlier"), &[("tag", tag)]),
             };
-            format!("{} · {seen}", unchecked_said(lang, why.kind))
+            (unchecked_said(lang, why.kind).to_string(), Some(seen))
         }
-        Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
+        Seen::Unasked(why) => (unchecked_said(lang, why.kind).to_string(), None),
     };
-    format!("{mine} · {said}")
+    (format!("{mine} · {said}"), tail)
 }
 
 /// 못 물은 까닭마다 다른 글 — 키 하나(moai-580l).
@@ -7121,6 +7142,63 @@ pub(super) mod tests {
                 "{w}칸에서 줄의 끝이 잘렸다\n{head}"
             );
         }
+    }
+
+    /// **못 물은 줄의 꼬리는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02 사용자 결정).
+    /// 63~67칸짜리 못 물은 줄이 80칸에서 `<0>` 부터의 번호를 통째로 지웠다 — 번호는 숫자 키를 대는 유일한 자리다.
+    /// 접어도 까닭과 들은 때는 다 서고, 꼬리는 판 줄의 글과 같은 칸에서 시작한다. 번호 칸이 없거나 넓은 창에서는
+    /// 한 줄 그대로다. 저널 줄은 그 아래로 밀린다.
+    #[test]
+    fn a_stale_version_line_folds_before_it_pushes_out_the_project_numbers() {
+        use super::super::layer::{At, Look, Shut};
+        let mine = env!("CARGO_PKG_VERSION");
+        let mut a = app();
+        a.site.lang = Lang::En;
+        a.site.now = "2026-09-21T09:00:00Z".into();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        a.set_latest(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        let head = |a: &mut App, w| render(a, w, 30)[..6].to_vec();
+        let at = |rows: &[String], text: &str| rows.iter().position(|l| l.contains(text));
+        let tail = "v0.3.0 seen 2 days ago";
+        // 번호 칸이 없으면 80칸에서도 한 줄이다.
+        let rows = head(&mut a, 80);
+        assert!(
+            rows.iter().any(|l| l.contains(&format!("Version : {mine} · latest not checked (no network) · {tail}"))),
+            "번호 칸이 없는데 접었다\n{}",
+            rows.join("\n")
+        );
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/argos".into(),
+                at: "/w/argos/.moai/journal/raven_buzzni_com.jsonl".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied (os error 13)".into() },
+            }]
+        };
+        let rows = head(&mut a, 80);
+        let all = rows.join("\n");
+        assert!(all.contains("<0> all") && all.contains("<1> moai-supervise"), "못 물은 줄이 번호를 밀어냈다\n{all}");
+        let version = at(&rows, &format!("Version : {mine} · latest not checked (no network)")).expect(&all);
+        let folded = at(&rows, tail).unwrap_or_else(|| panic!("들은 때가 잘렸다\n{all}"));
+        assert_eq!(folded, version + 1, "꼬리가 판 줄 바로 아래가 아니다\n{all}");
+        let col = |row: &str, text: &str| row.find(text).map(|b| crate::text::width(&row[..b]));
+        assert_eq!(
+            col(&rows[folded], tail),
+            col(&rows[version], mine),
+            "꼬리가 판 줄의 글과 다른 칸에서 시작한다\n{all}"
+        );
+        assert!(at(&rows, "Journal : ").is_some_and(|j| j > folded), "저널 줄이 꼬리를 덮었다\n{all}");
+        // 저널 줄은 제 자리 글의 가운데를 `…` 로 줄인다(`journal_at`) — 재는 것은 판 줄과 꼬리뿐이다.
+        assert!(![version, folded].iter().any(|&r| rows[r].contains('…')), "접었는데도 잘렸다\n{all}");
+        // 넓은 창은 번호 칸이 있어도 한 줄이다 — 넓은 창의 헤더는 전과 같다.
+        let wide = head(&mut a, 140);
+        assert!(
+            wide.iter().any(|l| l.contains(&format!("(no network) · {tail}")))
+                && wide.join("\n").contains("<1> moai-supervise"),
+            "넓은 창에서 접었다\n{}",
+            wide.join("\n")
+        );
     }
 
     /// **목록에 없는 시간대로 연 창**(moai-pvpb.1yh 리뷰) — 아무 줄도 안 가리키는 동안에도 커서 칸이 비어 있어 첫걸음에
