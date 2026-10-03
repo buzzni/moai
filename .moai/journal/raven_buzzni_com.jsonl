@@ -3267,3 +3267,4 @@
 {"ts":"2026-10-03T12:29:38Z","id":"moai-23q4.0q1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T12:29:38Z","id":"moai-23q4.zfs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T12:29:38Z","id":"moai-23q4.2x8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받음: 리뷰가 고친 1~7(1 edit -e 로 미룬 줄을 닫힌 묶음에 넣는 판은 스냅샷으로 못 가려 한계로 적음, 2·3·4 시험, 5·6 CHANGELOG·주석, 7 빠진 멤버 없으면 left_at 안 걷음). 안 고침: 8(빠진 멤버 판정이 counted 와 갈리지 않게 지킨다). 넘김: 9 → moai-co0q(idea, 멤버의 먼 미래 시각이 묶음의 닫힌 때가 되는 것 — 이미 status_since 로 서던 길)"}
+{"ts":"2026-10-03T12:31:36Z","id":"moai-23q4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 머지와 닫기 끝(develop). 남은 것은 idea moai-co0q(멤버의 먼 미래 시각이 묶음의 닫힌 때가 되는 것, 리뷰 9번) 하나 — 릴리스 밖. rm·edit -e 로 닫거나 미룬 줄을 넣은 묶음의 시계는 스냅샷 한계로 도움말에 적어 두었다. 루트 release 바이너리는 아직 옛것이다"}
