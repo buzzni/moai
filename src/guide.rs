@@ -2295,12 +2295,16 @@ fn brief() -> String {
        nobody is working on them, and `in_progress` on the board says somebody is. One id per
        call, as in 2
          {TO_REVIEW}
-       `--from in_progress` passes over the members left in the first column by 4-3 and 7-1 —
-       this review does not see them, so they do not stand in it. If moai answers
-       "{NO_REVIEW_COLUMN}", this repository's columns have no `review` and the step does not
-       exist here: leave the members where they stand and go on. If it answers that the member
-       already stands `review`, you came back from 8 — leave it. What you take in goes in a
-       separate fix: commit; what you hand on goes in a note with the issue id.
+       `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
+       when you came back from 8) — this review does not see them, so they do not stand in it.
+       moai answers that such a member already stands in the first column and moves nothing, with
+       a non-zero code: that is the pass-over, not a lost pick-up as in 2. moai answers in the
+       screen's language (`MOAI_LANG`, or `lang` in the user config), so read what it says, not
+       the words: if it refuses `review` itself and lists the columns there are without it — in
+       English "{NO_REVIEW_COLUMN}" — this repository's columns have no `review` and the step
+       does not exist here: leave the members where they stand and go on. If it answers that the
+       member already stands `review`, you came back from 8 — leave it. What you take in goes in
+       a separate fix: commit; what you hand on goes in a note with the issue id.
        Only when the worktree's hook cannot see a review issue created or picked up in the root
        and blocks you — a binary from before the hook moved the tracker to the root reads that
        worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
@@ -3198,8 +3202,14 @@ stop sending outside work while a release runs",
         assert!(brief.contains("moai mv <member> in_progress --from todo"), "2 가 멤버를 세우는 칸이 바뀌었다");
         assert!(TO_REVIEW.ends_with("--from in_progress"), "7 이 첫 칸의 멤버까지 옮긴다");
 
-        let refusal = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "refuse.no_column"), &[("name", "review"), ("known", "todo, done")]);
+        // `mv` 가 실제로 지나는 길(`require_known` → `view::no_such_column`)로 짓는다 — 키를 직접 부르면
+        // `mv` 가 다른 거절(`refuse.no_column_nor_rows`)로 바뀌어도 이 시험은 푸르다.
+        let two = crate::config::Config::parse("prefix = \"a\"\nstatuses = \"todo, in_progress, done\"\n").unwrap();
+        let why = two.require_known("review").expect_err("review 칸이 없는 설정이 review 를 받았다");
+        let refusal = crate::view::no_such_column(crate::i18n::Lang::En, &why);
         assert!(refusal.starts_with(NO_REVIEW_COLUMN), "브리프가 옮겨 적은 거절이 도구의 글과 다르다 — {refusal}");
+        // 글은 화면 말을 따른다 — 브리프는 영어 글을 "영어로는" 으로만 싣고 무엇을 읽을지를 말한다.
+        assert!(step.contains("screen's language"), "다른 말 화면에서 거절을 못 알아본다");
         assert!(step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")), "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다");
         let stale = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "mv.stale"), &[("id", "<member>"), ("now", "review")]);
         assert!(stale.contains("already stands review"), "다시 돌아온 판의 거절 글이 바뀌었다 — {stale}");

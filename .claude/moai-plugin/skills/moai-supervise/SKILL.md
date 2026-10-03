@@ -534,12 +534,16 @@ worker reads in its own window in 9-1.
        nobody is working on them, and `in_progress` on the board says somebody is. One id per
        call, as in 2
          moai -C <root> mv <member> review --from in_progress
-       `--from in_progress` passes over the members left in the first column by 4-3 and 7-1 —
-       this review does not see them, so they do not stand in it. If moai answers
-       "`review` is not a column", this repository's columns have no `review` and the step does not
-       exist here: leave the members where they stand and go on. If it answers that the member
-       already stands `review`, you came back from 8 — leave it. What you take in goes in a
-       separate fix: commit; what you hand on goes in a note with the issue id.
+       `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
+       when you came back from 8) — this review does not see them, so they do not stand in it.
+       moai answers that such a member already stands in the first column and moves nothing, with
+       a non-zero code: that is the pass-over, not a lost pick-up as in 2. moai answers in the
+       screen's language (`MOAI_LANG`, or `lang` in the user config), so read what it says, not
+       the words: if it refuses `review` itself and lists the columns there are without it — in
+       English "`review` is not a column" — this repository's columns have no `review` and the step
+       does not exist here: leave the members where they stand and go on. If it answers that the
+       member already stands `review`, you came back from 8 — leave it. What you take in goes in
+       a separate fix: commit; what you hand on goes in a note with the issue id.
        Only when the worktree's hook cannot see a review issue created or picked up in the root
        and blocks you — a binary from before the hook moved the tracker to the root reads that
        worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
