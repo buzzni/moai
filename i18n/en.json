@@ -155,6 +155,7 @@
   "refuse.link_needs_side": "Say `--blocks` or `--unblocks`.",
   "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
   "refuse.defer_empty_why": "the reason is empty",
+  "refuse.msg_stdin_empty": "`-m -` read stdin and found no text — nothing was written. Pour the text in: `-m - < <file>`",
   "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
   "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`",
   "refuse.config_no_place": "The user config has no place — give one of MOAI_CONFIG, XDG_CONFIG_HOME or HOME",

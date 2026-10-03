@@ -155,6 +155,7 @@
   "refuse.link_needs_side": "`--blocks` 나 `--unblocks` 를 적는다",
   "refuse.link_both_ways": "{id} 를 막으면서 동시에 막음을 없앨 수는 없다",
   "refuse.defer_empty_why": "까닭이 비었다",
+  "refuse.msg_stdin_empty": "`-m -` 가 stdin 을 읽었는데 글이 없다 — 아무것도 안 적었다. 글을 부어 준다: `-m - < <파일>`",
   "refuse.edit_nothing": "무엇을 고칠지 적지 않았다. `moai edit --help` 가 고칠 수 있는 것을 낸다",
   "refuse.init_no_prefix": "디렉터리 이름에서 접두어를 만들 수 없다. `moai init <접두어>`",
   "refuse.config_no_place": "사용자 설정의 자리를 모른다 — MOAI_CONFIG·XDG_CONFIG_HOME·HOME 중 하나를 준다",
