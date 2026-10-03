@@ -8167,6 +8167,46 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     }
 }
 
+/// **`mv`·`defer` 의 `-m` 도 파일 이름이면 알린다**(moai-yivo.xe9). `-b <파일 이름>` 은 "글로 받았다" 고 한 줄
+/// 알리는데 `moai mv <리뷰> done -m closing.md` 는 말없이 `closing.md` 를 닫는 줄로 적었다 — 훅 규칙 3 도 빈
+/// 글이 아니라고 지나보냈다. 그 알림의 말은 `--body` 를 대므로 `-m` 에는 제 말이 따로 선다. 막지 않고, 글은
+/// 글자 그대로 선다.
+#[test]
+fn a_msg_naming_a_file_is_said_and_kept() {
+    let s = init("msgispath");
+    std::fs::write(s.path().join("closing.md"), "받은 것: 둘\n넘긴 것: 없음\n").unwrap();
+    let err = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+    let id = add(s.path(), &["닫을 것"]);
+
+    for (args, what) in [
+        (vec!["mv", id.as_str(), "in_progress", "-m", "closing.md", "--json"], "mv"),
+        (vec!["defer", id.as_str(), "-m", "closing.md"], "defer"),
+        (vec!["defer", id.as_str(), "--undo", "-m", "closing.md"], "defer --undo"),
+        (vec!["mv", id.as_str(), "done", "--msg", "closing.md"], "mv --msg"),
+    ] {
+        let out = moai(s.path(), &args);
+        assert!(out.status.success(), "{what}: {}", err(&out));
+        let said = err(&out);
+        assert!(
+            said.contains("`-m` 은 글 자체를 받는다") && said.contains("-m - < closing.md"),
+            "{what} 이 말없이 지나갔다\n{said}"
+        );
+        assert!(!said.contains("--body"), "{what}: 받은 적 없는 깃발을 댔다\n{said}");
+    }
+    // 글자 그대로 남는다 — 알림은 덤이다.
+    let j = journal(s.path());
+    assert!(
+        j.contains(r#""note":"closing.md""#) && j.contains(r#""text":"closing.md""#),
+        "mv 의 칸 줄과 defer 의 노트\n{j}"
+    );
+    let en = staged(&["mv", &id, "review", "-m", "closing.md"])
+        .current_dir(s.path())
+        .env("MOAI_LANG", "en")
+        .output()
+        .unwrap();
+    assert!(err(&en).contains("the journal gets the words `closing.md`"), "{}", err(&en));
+}
+
 /// 위의 반대쪽 — **알릴 까닭이 없는 판은 말이 없다**(moai-3hxc.58k). 여러 줄, 없는 경로, 디렉터리,
 /// stdin 에서 온 글은 사람이 "이 파일" 이라고 가리킨 것이 아니다.
 #[test]
@@ -8205,6 +8245,11 @@ fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
     quiet(&["note", &id, "plan.md"], None);
     quiet(&["note", &id, "-b", "-"], Some("plan.md\n"));
     quiet(&["note", &id, "-b", "nope.md"], None);
+    // `mv`·`defer` 의 `-m` 도 같은 자다(moai-yivo.xe9) — stdin 에서 온 글과 없는 경로는 말이 없다.
+    quiet(&["mv", &id, "in_progress", "-m", "-"], Some("plan.md\n"));
+    quiet(&["mv", &id, "todo", "-m", "nope.md"], None);
+    quiet(&["defer", &id, "-m", "-"], Some("plan.md\n"));
+    quiet(&["defer", &id, "--undo", "-m", "nope.md"], None);
 
     // 그래도 받은 글은 그대로 선다.
     let made = issues(s.path());

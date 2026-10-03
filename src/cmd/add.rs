@@ -122,8 +122,13 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 ///
 /// **argv 에 적힌 글은 그대로 돌려준다.** 빈 글을 어떻게 받는지는 명령마다 이미 달라(`defer` 는
 /// 거절한다), 그 갈래를 여기로 옮기지 않는다.
+///
+/// **argv 의 글이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — `-b <파일 이름>` 이 그러듯이. 말없이 받던
+/// 판은 `moai mv <리뷰> done -m closing.md` 의 닫는 줄을 `closing.md` 로 적었고, 훅 규칙 3 도 빈 글이 아니라고
+/// 지나보냈다. 막지는 않는다 — 경로 같은 글이 정말 글일 수 있다.
 pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
     if arg.as_deref() != Some("-") {
+        say_if_text_names_a_file(arg.as_deref(), || lang, Given::Msg);
         return Ok(arg);
     }
     let text = read_body(arg)?.unwrap_or_default();
@@ -186,6 +191,8 @@ pub enum Given {
     /// `note -b` — **노트에는 본문이 없다**(moai-yivo.8lh). 깃발은 같은 `--body` 라 권하는 명령은 같고, 글이
     /// 가는 자리만 노트라고 댄다.
     Note,
+    /// `mv`·`defer` 의 `-m`(moai-yivo.xe9). `--body` 를 대는 말을 빌리면 받은 적 없는 깃발을 시킨다.
+    Msg,
 }
 
 /// argv 에 적힌 글이 **한 줄이고 그 이름의 파일이 있으면** "글로 받았다" 고 stderr 에 한 줄로
@@ -194,9 +201,10 @@ pub enum Given {
 /// 2026-10-01 에 두 번 있었다. 막지도 글을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
 /// **파일은 열지 않는다**: [`names_a_file`] 은 stat 하나고, 한 번도 안 열던 경로를 새로 열지 않는다.
 ///
-/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add`·`note -b` 가 한 자로 잰다 —
+/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add`·`note -b`·`mv -m`·`defer -m` 이 한 자로 잰다 —
 /// **말만 [`Given`] 을 따른다**. `note` 는 [`read_body_said`] 를 안 지나서 이것을 따로 부른다 — `note -b
-/// plan.md` 가 경로를 노트로 남기고 말이 없던 것이 2026-10-02 에 한 번 밟혔다(moai-18so.rnm).
+/// plan.md` 가 경로를 노트로 남기고 말이 없던 것이 2026-10-02 에 한 번 밟혔다(moai-18so.rnm). `-m` 은
+/// [`read_msg`] 가 부른다.
 ///
 /// `arg` 는 **argv 에 적힌 그대로**다. `-` 는 stdin 을 읽으라는 말이고, stdin 에서 온 글은 사람이 파일
 /// 이름으로 준 것이 아니다 — `echo plan.md | moai add t -b -` 는 건드리지 않는다.
@@ -211,6 +219,7 @@ pub fn say_if_text_names_a_file(arg: Option<&str>, lang: impl FnOnce() -> crate:
         Given::Body => crate::i18n::say(lang, "add.body_names_a_file"),
         Given::BodyPlanOnStdin => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
         Given::Note => crate::i18n::say(lang, "add.note_names_a_file"),
+        Given::Msg => crate::i18n::say(lang, "add.msg_names_a_file"),
     };
     // 한 줄이지만 제어문자(ESC·탭)는 남을 수 있다 — 그리는 글은 걷고, 옮겨 칠 낱말은 `shell_word` 가 감싼다.
     let said =
