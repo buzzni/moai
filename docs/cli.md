@@ -2312,9 +2312,11 @@ Options:
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.
 
-  The two plugins that polish Korean text are installed **at the same scope**
-  (korean-skills and humanize-korean). If they cannot be installed, moai's
-  own registration still stands, and they are removed along with it.
+  The two Korean text plugins an earlier moai installed alongside
+  (korean-skills and humanize-korean) are **removed**, at the scopes where
+  this repository's moai stands. The marketplaces are left behind. If one
+  cannot be removed, moai's own registration still stands and the command
+  to remove it by hand is printed.
 
   moai skill install                  just me (the default. settings.local.json)
   moai skill install --scope user     every repository on this machine
@@ -2349,7 +2351,6 @@ Options:
                   somewhere else
     install       which version at which scope, and whether it matches the
                   version that would be installed now
-    companions    whether the two Korean text plugins are in this repository
     hook          whether the executable the install calls is still there
     claude        whether it is on PATH (without it nothing can be installed
                   or removed)
@@ -2380,9 +2381,9 @@ Options:
   session holds can block that session's tool calls. Delete it after closing
   the session.
 
-  The two Korean plugins installed alongside are removed **at the scope moai
-  was removed from**. The marketplace is left behind - the name is global to
-  one machine and another repository's install uses it.
+  The two Korean plugins an earlier moai installed alongside are removed **at
+  the scope moai was removed from**. The marketplace is left behind - the name
+  is global to one machine and another repository's install uses it.
   A user-scope install is also left behind when another repository's moai
   stands there, and then the command to remove it is printed in one line.
 

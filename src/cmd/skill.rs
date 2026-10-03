@@ -53,9 +53,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
     let clash = clash_of(&market, &dir);
-    // **moai 를 등록하지 못하는 자리(이름이 남의 저장소를 가리킨다)에서는 곁의 것도 안 깐다** — 그 자리를
-    // 풀고 다시 부르면 함께 선다. 여기서만 깔면 moai 없이 곁의 것만 남는다. 연습도 같은 목록을 낸다.
-    let companions = if clash.is_none() { companions(scope) } else { Vec::new() };
+    // **옛 판이 곁에 깐 것을 걷는다**(moai-vtfu). 범위는 등록하기 **전의** 장부로 잰다 — 옛 moai 가 서
+    // 있던 자리가 그것을 함께 깐 자리다. 등록 뒤에 재면 이번 `--scope` 가 섞여, 사람이 그 범위에 손으로
+    // 깐 것까지 걷는다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
+    let retiring = if clash.is_none() { retire(&root, &market) } else { Retired::default() };
 
     if dry_run {
         if ctx.json {
@@ -67,7 +68,8 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-                "companions": companions.iter().map(Companion::json).collect::<Vec<_>>(),
+                "retired": retiring.json(&[]),
+                "kept": retiring.kept,
             }));
         }
         let lang = ctx.lang();
@@ -87,15 +89,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 &[("cmd", &format!("claude plugin install moai@{market} --scope {scope} -y"))],
             ),
         });
-        for c in &companions {
-            match c.why(lang) {
-                Some(why) => {
-                    out.push(fill(say(lang, "skill.plan_companion_skipped"), &[("why", &why)]));
-                    out.push(c.escape(lang));
-                }
-                None => out.push(fill(say(lang, "skill.plan_companion"), &[("cmd", &c.shown())])),
-            }
+        for step in &retiring.steps {
+            out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
+        out.extend(retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])));
         return Ok(out);
     }
 
@@ -126,18 +123,10 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     if !registered {
         super::note_partial();
     }
-    // **함께 까는 것은 등록과 따로 센다.** 못 깔아도(오프라인, 이름이 남의 저장소를 가리킨다) moai 의
-    // 훅은 선다 — 훅이 한글이 든 쓰기마다 "없다" 를 비추니(moai-6rrb) 조용히 묻히지 않는다. 종료
-    // 코드까지 비영으로 두면 한국어를 안 쓰는 저장소의 설치가 바깥 저장소 하나 때문에 실패로 읽힌다.
-    // **moai 가 등록되지 않았으면 부르지 않는다** — 까닭이 무엇이든 여기서만 깔면 moai 없이 곁의 것만
-    // 남고, `uninstall` 은 moai 의 설치로 범위를 재니 그것을 걷을 길도 없다. 까는 명령은 손으로 칠 줄로 낸다.
-    let companions: Vec<(Companion, bool)> = companions
-        .into_iter()
-        .map(|c| {
-            let ok = registered && c.blocked.is_none() && c.steps.iter().all(|a| run(&root, a));
-            (c, ok)
-        })
-        .collect();
+    // **옛 판이 곁에 깐 것을 걷는 일은 등록과 따로 센다**(사용자 결정, moai-vtfu.dvk). 못 걷어도 moai 의
+    // 훅은 선다 — 종료 코드는 등록 결과만 따른다. 하나가 실패해도 다음 것을 부르고, 못 걷은 것은 손으로 칠
+    // 줄로 낸다. 다시 부르면 같은 장부로 범위를 재어 남은 것을 또 걷는다.
+    let retired: Vec<bool> = retiring.steps.iter().map(|step| run(&root, &step.argv)).collect();
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
@@ -151,14 +140,8 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "companions": companions
-                .iter()
-                .map(|(c, ok)| {
-                    let mut v = c.json();
-                    v["installed"] = serde_json::json!(ok);
-                    v
-                })
-                .collect::<Vec<_>>(),
+            "retired": retiring.json(&retired),
+            "kept": retiring.kept,
         }));
     }
 
@@ -167,18 +150,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
-    for (c, ok) in &companions {
-        match (c.why(lang), ok) {
-            // **빠져나갈 길을 함께 낸다**(moai-mfw1). 이 줄만 있던 판은 다시 부르라고도, 이름을
-            // 어떻게 푸는지도 말하지 않아 — 훅의 알림이 "깔려 있지 않다" 를 영영 되풀이했다.
-            (Some(why), _) => {
-                out.push(fill(say(lang, "skill.companion_skipped"), &[("id", c.id), ("why", &why)]));
-                out.push(c.escape(lang));
-            }
-            (None, true) => out.push(fill(say(lang, "skill.companion_installed"), &[("id", c.id), ("scope", scope)])),
-            (None, false) => out.push(fill(say(lang, "skill.companion_failed"), &[("id", c.id), ("cmd", &c.shown())])),
-        }
+    for (step, ok) in retiring.steps.iter().zip(&retired) {
+        out.push(match ok {
+            true => fill(say(lang, "skill.retired"), &[("id", step.id), ("scope", &step.scope)]),
+            false => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
+        });
     }
+    out.extend(retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])));
     if registered {
         out.push(String::new());
         out.push(say(lang, "skill.reopen_claude").to_string());
@@ -235,12 +213,6 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             _ => want.clone(),
         })
         .collect();
-    // **곁 플러그인도 비춘다**(moai-mfw1). `install` 이 함께 깔고 `uninstall` 이 함께 걷는데 이
-    // 화면만 그것을 몰라, 훅이 "깔려 있지 않다" 를 비출 때 무엇이 서 있는지 볼 자리가 없었다.
-    // 세는 자는 훅과 **같다**([`korean_missing`]) — 자가 둘이면 화면과 알림이 엇갈린다.
-    let missing = korean_missing(&root);
-    let companions: Vec<(&str, bool)> =
-        crate::guide::KOREAN_PLUGINS.iter().map(|(id, _)| (*id, !missing.contains(id))).collect();
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
@@ -274,12 +246,6 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
-            // **늘 서는 배열이다.** 빈 배열과 없는 키를 가르라고 기계에 두는 키가 아니다 —
-            // 곁 플러그인은 늘 둘이고, 깔렸는지만 다르다.
-            "companions": companions
-                .iter()
-                .map(|(id, ok)| serde_json::json!({"id": id, "installed": ok}))
-                .collect::<Vec<_>>(),
         }));
     }
 
@@ -331,11 +297,6 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         };
         out.push(row(current && found, install_row, &format!("{head}{tail}")));
     }
-    let companion_row = say(lang, "skill.row_companion");
-    for (id, ok) in &companions {
-        let tail = if *ok { String::new() } else { say(lang, "skill.companion_gone").to_string() };
-        out.push(row(*ok, companion_row, &format!("{id}{tail}")));
-    }
     let hook_row = say(lang, "skill.row_hook");
     if let Some(hook) = &hooked {
         out.push(match &hook_path {
@@ -379,21 +340,10 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     let mut plan: Vec<Vec<String>> = Vec::new();
     // `plan` 의 앞 몇 걸음이 moai 플러그인을 범위마다 걷는 것인가 — 뒤는 마켓플레이스 지우기다.
     let mut unplug = 0;
-    // 함께 깐 것을 걷는 걸음과, 사용자 범위라 두고 가는 것.
-    let mut along: Vec<Vec<String>> = Vec::new();
-    let mut kept: Vec<&str> = Vec::new();
+    // 옛 판이 곁에 깐 것을 걷는 걸음과, 사용자 범위라 두고 가는 것([`retire`]).
+    let mut retiring = Retired::default();
     if clash.is_none() {
-        // **범위마다 한 번만 부른다.** 장부에 같은 범위 줄이 겹치면 같은 걷기를 두
-        // 번 부르고, 둘째는 이미 걷힌 것이라 실패한다 — 그러면 아래의 "실패하면
-        // 멈춘다" 에 걸려 마켓플레이스가 안 지워진다. 장부는 `claude` 의 것이라
-        // 고치지 않고, 읽은 쪽에서 겹침을 걷는다.
-        let mut scopes: Vec<&str> = Vec::new();
-        for i in &installs {
-            if !scopes.contains(&i.scope.as_str()) {
-                scopes.push(&i.scope);
-            }
-        }
-        for scope in &scopes {
+        for scope in scopes_of(&installs) {
             plan.push(argv(&["plugin", "uninstall", &target, "--scope", scope]));
         }
         unplug = plan.len();
@@ -401,23 +351,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             // 범위를 안 주면 모든 범위에서 걷는다.
             plan.push(argv(&["plugin", "marketplace", "remove", &market]));
         }
-        // **함께 깐 것도 moai 를 걷는 범위에서만 걷는다**(moai-lr1s). 마켓플레이스는 두고 간다 — 이름이
-        // 기계 하나에서 전역이라 다른 저장소의 설치가 그것을 쓰고 있을 수 있다. **사용자 범위의 설치도 다른
-        // 저장소의 moai 가 사용자 범위에 서 있으면 같은 까닭으로 둔다** — 그 줄은 기계에 하나라 그 저장소도 그것을
-        // 쓴다. 가리지 않던 판은 한 저장소의 걷기로 다른 저장소의 두 플러그인까지 지웠다.
-        let shared = other_user_moai(&target);
-        for (id, _) in crate::guide::KOREAN_PLUGINS {
-            let theirs = installs_here(id, &root);
-            for scope in &scopes {
-                if theirs.iter().any(|i| i.scope == *scope) {
-                    if *scope == "user" && shared {
-                        kept.push(id);
-                    } else {
-                        along.push(argv(&["plugin", "uninstall", id, "--scope", scope]));
-                    }
-                }
-            }
-        }
+        retiring = retire(&root, &market);
     }
     let claude = which("claude").is_some();
     let mut steps: Vec<(String, bool)> = Vec::new();
@@ -432,13 +366,13 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             }
         }
     }
-    // **함께 깐 것은 moai 의 걸음과 따로 센다**([`install`] 과 같은 셈). moai 플러그인을 다 걷었으면 부르고 —
+    // **옛 판이 곁에 깐 것은 moai 의 걸음과 따로 센다**([`install`] 과 같은 셈). moai 플러그인을 다 걷었으면 부르고 —
     // 마켓플레이스 지우기가 실패했어도 부른다. 다시 부르면 moai 의 설치로 범위를 재는데 그때는 그 설치가 이미
     // 없다 — 하나가 실패해도 다음 것을 부르고, 실패는 moai 의 결과를 뒤집지 않는다. 못 걷은 것은 손으로 칠 줄로
     // 낸다. moai 플러그인을 못 걷었으면 안 부른다 — 다시 부르면 남은 moai 설치로 범위를 재어 함께 걷는다.
     let unplugged = !dry_run && claude && steps.len() >= unplug && steps[..unplug].iter().all(|(_, ok)| *ok);
-    let along_steps: Vec<(String, bool)> =
-        if unplugged { along.iter().map(|a| (shown(a), run(&root, a))).collect() } else { Vec::new() };
+    let retired: Vec<bool> =
+        if unplugged { retiring.steps.iter().map(|step| run(&root, &step.argv)).collect() } else { Vec::new() };
     let failed = steps.iter().any(|(_, ok)| !ok) || clash.is_some() || (!dry_run && !claude && !plan.is_empty());
     if failed {
         super::note_partial();
@@ -454,15 +388,8 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             "removed": !dry_run && !failed && !plan.is_empty(),
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
             "claude": claude,
-            // 함께 깐 것 — 부르지 않은 걸음은 `ok` 가 `null` 이다.
-            "companions": along
-                .iter()
-                .map(|a| {
-                    let ok = along_steps.iter().find(|(c, _)| *c == shown(a)).map(|(_, ok)| *ok);
-                    serde_json::json!({"command": shown(a), "ok": ok})
-                })
-                .collect::<Vec<_>>(),
-            "kept": kept,
+            "retired": retiring.json(&retired),
+            "kept": retiring.kept,
         }));
     }
 
@@ -476,13 +403,14 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     if plan.is_empty() {
         return Ok(vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]);
     }
-    let kept_lines = kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]));
+    let kept_lines = retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]));
     if dry_run || !claude {
         let mut out = vec![match dry_run {
             true => say(lang, "skill.plan_calls").to_string(),
             false => say(lang, "skill.no_claude_by_hand").to_string(),
         }];
-        out.extend(plan.iter().chain(&along).map(|a| format!("  {}", shown(a))));
+        out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
+        out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
         out.extend(kept_lines);
         return Ok(out);
     }
@@ -501,14 +429,14 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         out.push(format!("  - {}{skipped_tail}", shown(a)));
     }
     if unplugged {
-        for (cmd, ok) in &along_steps {
+        for (step, ok) in retiring.steps.iter().zip(&retired) {
             out.push(match ok {
-                true => format!("  · {cmd}"),
-                false => format!("  ! {cmd}  {}", say(lang, "skill.step_failed_retry")),
+                true => format!("  · {}", step.shown()),
+                false => format!("  ! {}  {}", step.shown(), say(lang, "skill.step_failed_retry")),
             });
         }
     } else {
-        out.extend(along.iter().map(|a| format!("  - {}{skipped_tail}", shown(a))));
+        out.extend(retiring.steps.iter().map(|step| format!("  - {}{skipped_tail}", step.shown())));
     }
     out.extend(kept_lines);
     out.push(String::new());
@@ -586,8 +514,8 @@ fn clash_of(market: &str, dir: &Path) -> Option<PathBuf> {
     known_at(market).filter(|other| !crate::user_config::same_dir(other, dir))
 }
 
-/// 설치 id(`moai@<market>`·함께 까는 것) 하나의 설치 중 **이 저장소에 드는 것**. 셋(`status`·`uninstall`·
-/// [`korean_missing`])이 한 자로 잰다.
+/// 설치 id(`moai@<market>`·옛 판이 곁에 깐 것) 하나의 설치 중 **이 저장소에 드는 것**. `status` 와 걷는
+/// 둘(`uninstall`·[`retire`])이 한 자로 잰다.
 fn installs_here(id: &str, root: &Path) -> Vec<skill::Install> {
     ledger("installed_plugins.json")
         .map(|l| skill::installs_of(&l, id, |p| crate::user_config::same_dir(Path::new(p), root)))
@@ -625,116 +553,89 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
         .unwrap_or(0)
 }
 
-/// 이 저장소에 **안 깔린** 한국어 글쓰기 플러그인 — 사용자 범위이거나 `projectPath` 가 여기인 설치가
-/// 없는 것. 훅이 알림에 붙인다(moai-6rrb). 장부를 못 읽으면 전부 안 깔린 것으로 읽는다 — 알림이 "다시
-/// 깔라" 고 한 줄 더 말할 뿐 아무것도 막지 않는다.
+/// 옛 판이 moai 곁에 함께 깔던 한국어 글쓰기 플러그인 둘의 설치 id(moai-lr1s 가 깔았다).
 ///
-/// **같은 git 저장소의 워크트리끼리는 한 자리로 읽는다**(리뷰 moai-5wk4.76z) — `claude` 가 설치를 "여기" 로
-/// 치는 자와 같다: 자리가 같거나, 둘의 주 체크아웃이 같다. 일은 딸린 워크트리에서 하고 세션은 대개 주
-/// 체크아웃에서 열려 그 자리의 설치를 싣는다 — 워크트리의 자리로만 재던 판은 주 체크아웃에 `local` 로 깐
-/// 뒤에도 워크트리에서 한국어 글을 적을 때마다 "깔려 있지 않다" 며 사람을 부르게 했고, 시킨 대로 다시 깔아도
-/// 그 줄은 끝내 안 꺼졌다.
-pub fn korean_missing(root: &Path) -> Vec<&'static str> {
-    let ledger = ledger("installed_plugins.json");
-    let home = |p: &Path| crate::worktree::main_root(p).unwrap_or_else(|| p.to_path_buf());
-    let here = home(root);
-    let is_here = |p: &str| {
-        crate::user_config::same_dir(Path::new(p), root) || crate::user_config::same_dir(&home(Path::new(p)), &here)
-    };
-    crate::guide::KOREAN_PLUGINS
-        .iter()
-        .map(|(id, _)| *id)
-        .filter(|id| ledger.as_ref().is_none_or(|l| skill::installs_of(l, id, is_here).is_empty()))
-        .collect()
-}
+/// **이제는 깔지 않고 걷는다**(사용자 결정 moai-vtfu, 2026-10-03). 글은 기본으로 쓰고, moai 가 깐 것은 moai
+/// 가 거둔다 — `install` 과 `uninstall` 이 [`retire`] 로 같은 범위를 걷는다. 마켓플레이스(`@` 뒤)는 두고
+/// 간다: `marketplace remove` 는 기계 하나 전체에 걸려, 다른 저장소나 사람이 그것으로 깐 것까지 끊는다.
+const RETIRED: [&str; 2] = ["korean-skills@korean-skills", "humanize-korean@im-not-ai"];
 
-/// moai 곁에 함께 까는 한국어 글쓰기 플러그인 하나(moai-lr1s, 사용자 결정 moai-5wk4) — 설치 id 와
-/// 부를 `claude` 명령. **moai 와 같은 범위다** — 사용자 전역에 깔지 않고, 에이전트가 제 손으로 깔지도
-/// 않는다. 까는 것은 사람이 부르는 이 명령 하나다.
-struct Companion {
+/// [`RETIRED`] 를 걷는 걸음 하나 — 무엇을, 어느 범위에서.
+struct Retire {
     id: &'static str,
-    steps: Vec<Vec<String>>,
-    /// 같은 이름의 마켓플레이스가 **다른 저장소를** 가리키면 그것이 가리키는 자리. 건너뛴다 —
-    /// 덮으면 남의 등록을 이쪽으로 돌려놓는다(`clash_of` 와 같은 까닭).
-    ///
-    /// **까닭이 아니라 자리를 든다**(moai-mfw1). 맨 위의 `blocked_by` 는 막은 자리(경로) 하나인데
-    /// 여기만 문장이라, 한 `--json` 안에서 같은 이름의 키가 모양이 둘이었다 — 읽는 쪽이 키 이름으로
-    /// 뜻을 못 정한다. 사람이 읽을 한 줄은 [`Companion::why`] 가 그때 짓는다.
-    ///
-    /// **자리를 못 읽었으면 빈 글자다.** `None` 은 "안 막혔다" 이고 빈 글자는 "막혔는데 어디인지
-    /// 모른다" 다 — 여기에 `다른 출처` 같은 사람 말을 담으면 기계가 읽는 키에 옮기지도 않는 한국어
-    /// 문장이 서고, 자리를 기대하고 읽은 쪽이 그것을 저장소 이름으로 쓴다.
-    blocked: Option<String>,
+    scope: String,
+    argv: Vec<String>,
 }
 
-impl Companion {
-    /// 설치 id 의 `@` 뒤가 마켓플레이스 이름이다.
-    fn market(&self) -> &str {
-        self.id.split_once('@').map_or(self.id, |(_, m)| m)
-    }
-
-    /// 건너뛴 까닭 한 줄 — 사람 출력만 쓴다. 자리를 못 읽었으면(빈 글자) 그 자리를 말로 메운다.
-    fn why(&self, lang: crate::i18n::Lang) -> Option<String> {
-        self.blocked.as_ref().map(|at| {
-            let elsewhere = say(lang, "skill.some_other_source");
-            let at = if at.is_empty() { elsewhere } else { at.as_str() };
-            fill(say(lang, "skill.market_taken_short"), &[("market", self.market()), ("at", at)])
-        })
-    }
-
-    /// 빠져나갈 길 한 줄(moai-mfw1). 막힌 채로는 몇 번을 다시 불러도 건너뛰기만 한다 —
-    /// moai 의 이름이 막혔을 때 내는 줄과 같은 길이다.
-    fn escape(&self, lang: crate::i18n::Lang) -> String {
-        fill(say(lang, "skill.market_escape"), &[("market", self.market())])
-    }
-
-    fn json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "id": self.id,
-            "planned": self.steps.iter().map(|a| shown(a)).collect::<Vec<_>>(),
-            "blocked_by": self.blocked,
-        })
-    }
-
+impl Retire {
     /// 손으로 칠 한 줄 — 연습과 실패가 같은 글을 낸다.
     fn shown(&self) -> String {
-        self.steps.iter().map(|a| shown(a)).collect::<Vec<_>>().join(" && ")
+        shown(&self.argv)
     }
 }
 
-/// 함께 깔 것마다 부를 명령.
+/// 걷을 것과, 다른 저장소도 쓰는 줄이라 두고 가는 것.
+#[derive(Default)]
+struct Retired {
+    steps: Vec<Retire>,
+    /// 사용자 범위라 두고 가는 설치 id — 사람 출력은 손으로 걷는 줄을 함께 댄다.
+    kept: Vec<&'static str>,
+}
+
+impl Retired {
+    /// `--json` 의 `retired` — 걸음마다 명령과 결과. **부르지 않은 걸음은 `ok` 가 `null` 이다**(연습, 또는
+    /// moai 를 못 걷어 안 부른 `uninstall`). `ok` 는 부른 차례대로 걸음에 짝지어진다.
+    fn json(&self, ok: &[bool]) -> Vec<serde_json::Value> {
+        self.steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| serde_json::json!({"id": step.id, "scope": step.scope, "command": step.shown(), "ok": ok.get(i)}))
+            .collect()
+    }
+}
+
+/// 장부에 적힌 범위를 한 번씩 — 적힌 차례대로.
 ///
-/// **같은 출처를 같은 철자로 이미 알아도 더한다** — `claude` 는 그것을 받아 `--scope` 의 설정에 적는다
-/// (`already on disk — declared in <scope> settings`). 안 더하던 판은 `--scope project` 로 불러도 커밋되는
-/// 설정에 마켓플레이스가 안 적혀, 저장소를 받은 동료의 `claude` 가 두 플러그인을 못 찾았다 — `plugin install`
-/// 은 `enabledPlugins` 만 적는다.
+/// **범위마다 한 번만 부른다.** 장부에 같은 범위 줄이 겹치면 같은 걷기를 두 번 부르고, 둘째는 이미 걷힌
+/// 것이라 실패한다 — `uninstall` 에서는 그 실패가 "실패하면 멈춘다" 에 걸려 마켓플레이스가 안 지워진다.
+/// 장부는 `claude` 의 것이라 고치지 않고, 읽은 쪽에서 겹침을 걷는다.
+fn scopes_of(installs: &[skill::Install]) -> Vec<&str> {
+    let mut scopes: Vec<&str> = Vec::new();
+    for i in installs {
+        if !scopes.contains(&i.scope.as_str()) {
+            scopes.push(&i.scope);
+        }
+    }
+    scopes
+}
+
+/// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). 장부는 누가 깔았는지 안 적으니 **이 저장소의
+/// moai 가 서 있는 범위·자리의 설치**를 "moai 가 깐 것" 으로 읽는다 — 옛 `install` 이 정확히 그 자리에 깔았다.
 ///
-/// **같은 저장소를 다른 철자로 알면**(대소문자 — GitHub 는 가리지 않는다 — 나 `https://github.com/…` 주소)
-/// 더하지 않고 설치만 부른다. `claude` 는 설치할 때는 둘을 같은 마켓플레이스로 보지만, 더할 때는 철자가 다르면
-/// 다시 받아 덮는다. 철자만 보던 판은 upstream 안내대로 `daleseo/korean-skills` 로 더한 사람에게 "이미 다른
-/// 곳을 가리킨다" 며 영영 건너뛰었다. 이름이 **다른 저장소를** 가리킬 때만 건너뛴다 — 더하면 `claude` 가 그
-/// 등록을 이쪽으로 덮는다.
-fn companions(scope: &str) -> Vec<Companion> {
-    let known = ledger("known_marketplaces.json");
-    crate::guide::KOREAN_PLUGINS
-        .iter()
-        .map(|(id, repo)| {
-            let market = id.split_once('@').map_or(*id, |(_, m)| m);
-            let add = argv(&["plugin", "marketplace", "add", repo, "--scope", scope]);
-            let install = argv(&["plugin", "install", id, "--scope", scope, "-y"]);
-            let source = known.as_ref().and_then(|k| k.get(market)).and_then(|m| m.get("source"));
-            let (steps, blocked) = match source {
-                None => (vec![add, install], None),
-                Some(s) if *s == serde_json::json!({"source": "github", "repo": repo}) => (vec![add, install], None),
-                Some(_) => match known.as_ref().and_then(|k| skill::market_repo(k, market)) {
-                    Some(at) if at.eq_ignore_ascii_case(repo) => (vec![install], None),
-                    // 자리를 못 읽었으면 빈 글자로 둔다 — 사람이 읽을 말은 [`Companion::why`] 가 짓는다.
-                    at => (Vec::new(), Some(at.filter(|a| !a.is_empty()).unwrap_or_default())),
-                },
-            };
-            Companion { id, steps, blocked }
-        })
-        .collect()
+/// **사용자 범위의 설치는 다른 저장소의 moai 가 사용자 범위에 서 있으면 둔다** — 그 줄은 기계에 하나라 그
+/// 저장소의 옛 판도 그것을 함께 깔았다. 가리지 않던 판은 한 저장소의 걷기로 다른 저장소의 두 플러그인까지
+/// 지웠다(리뷰 moai-5wk4.76z).
+fn retire(root: &Path, market: &str) -> Retired {
+    let target = format!("moai@{market}");
+    let installs = installs_here(&target, root);
+    let scopes = scopes_of(&installs);
+    let shared = other_user_moai(&target);
+    let mut out = Retired::default();
+    for id in RETIRED {
+        let theirs = installs_here(id, root);
+        for scope in &scopes {
+            if !theirs.iter().any(|i| i.scope == *scope) {
+                continue;
+            }
+            if *scope == "user" && shared {
+                out.kept.push(id);
+            } else {
+                let argv = argv(&["plugin", "uninstall", id, "--scope", scope]);
+                out.steps.push(Retire { id, scope: scope.to_string(), argv });
+            }
+        }
+    }
+    out
 }
 
 /// `claude` 에 등록한다. **사람의 `settings.json` 은 우리가 안 건드린다** —
