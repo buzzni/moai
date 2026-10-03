@@ -3343,3 +3343,12 @@
 {"ts":"2026-10-03T17:10:53Z","id":"moai-4hmq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T17:10:59Z","id":"moai-97tn.p44","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것 12건은 fix(query) 한 커밋, AGENTS 블록·commands.md 는 멤버 moai-4hmq 로 받아 고쳤다. 넘긴 것: 서머타임 한 시간 idea moai-j2m5, grep= 덮어쓰기 idea moai-8kwq, 힌트가 KEYS 를 자르는 것·README·tui 도움말은 moai-h2rh 에 알림, 두 쪼개기 idea moai-zjez"}
 {"ts":"2026-10-03T17:11:32Z","id":"moai-97tn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 457f4f81 로 develop 에 들었다. 남은 것은 idea 셋(moai-zjez 두 쪼개기, moai-j2m5 서머타임, moai-8kwq grep= 덮어쓰기)과 moai-h2rh 가 그 파일에서 받을 README·tui 도움말·힌트 자르기다"}
+{"ts":"2026-10-03T17:15:55Z","id":"moai-m1za","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv·defer 의 -m - 가 stdin 을 읽는다"}
+{"ts":"2026-10-03T17:15:55Z","id":"moai-m1za.j74","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv -m - 가 stdin 을 읽는다"}
+{"ts":"2026-10-03T17:15:55Z","id":"moai-m1za.k2l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"defer -m - 가 stdin 을 읽는다"}
+{"ts":"2026-10-03T17:15:55Z","id":"moai-m1za","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gsaq 에서 펼쳤다 — mv -m - 가 stdin 을 안 읽고 '-' 한 글자를 적는다"}
+{"ts":"2026-10-03T17:15:55Z","id":"moai-gsaq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m1za 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-10-03T17:16:00Z","id":"moai-m1za","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 결정(2026-10-03, AskUserQuestion): `-m -` 는 stdin 을 읽는다(`note -b -` 와 같은 규칙, 빈 stdin 은 거절). `defer -m` 도 같은 규칙 — `-m` 을 받는 명령은 mv·defer 둘뿐이고 같은 깃발이 다른 뜻을 지면 다음 사람이 헷갈린다. 훅 규칙 3 은 `-m -` 의 내용을 못 보니 지나가고, 빈 글은 mv 가 스스로 거절한다."}
+{"ts":"2026-10-03T17:16:00Z","id":"moai-m1za.j74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T17:16:01Z","id":"moai-m1za.k2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T17:16:03Z","id":"moai-e0qk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-97tn 쪽 idea moai-zjez 가 같은 것을 담았다 — 펼칠 때 하나로 접는다"}
