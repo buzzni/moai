@@ -3211,8 +3211,14 @@ stop sending outside work while a release runs",
         assert!(refusal.starts_with(NO_REVIEW_COLUMN), "브리프가 옮겨 적은 거절이 도구의 글과 다르다 — {refusal}");
         // 글은 화면 말을 따른다 — 브리프는 영어 글을 "영어로는" 으로만 싣고 무엇을 읽을지를 말한다.
         assert!(step.contains("screen's language"), "다른 말 화면에서 거절을 못 알아본다");
-        assert!(step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")), "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다");
-        let stale = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "mv.stale"), &[("id", "<member>"), ("now", "review")]);
+        assert!(
+            step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")),
+            "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다"
+        );
+        let stale = crate::i18n::fill(
+            crate::i18n::say(crate::i18n::Lang::En, "mv.stale"),
+            &[("id", "<member>"), ("now", "review")],
+        );
         assert!(stale.contains("already stands review"), "다시 돌아온 판의 거절 글이 바뀌었다 — {stale}");
         assert!(step.contains("already stands `review`"), "이미 review 에 선 멤버를 두라는 말이 없다");
 
