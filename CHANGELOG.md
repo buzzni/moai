@@ -80,13 +80,14 @@ does not tag — see `CONTRIBUTING.md`.
   the one an earlier moai added — `claude` does not record who installed a
   plugin, so this is how one an earlier moai put there is told from one a
   person installed. Once a scope holds this version, nothing there is removed
-  again, and nothing is removed when moai's own registration fails. A scope
-  other than `--scope` where the earlier version still stands is first brought
-  up to this version (`claude plugin update --scope <that scope>`), so it too
-  is removed from only once; if that fails, nothing is removed there and the
-  next install tries again. A
-  user-scope install another repository's moai also stands beside is left,
-  with the command to remove it printed. The marketplaces stay on the machine —
+  again. A scope other than `--scope` where the earlier version still stands
+  is first brought up to this version (`claude plugin update --scope <that
+  scope>`), so it too is removed from only once; if that fails, nothing is
+  removed there and the next install tries again. Nothing is removed or
+  brought up when moai's own registration fails. A user-scope install another
+  repository's moai also stands beside is left, with the command to remove it
+  printed, and that scope is not brought up, so it is removed once that moai
+  is gone. The marketplaces stay on the machine —
   `claude plugin marketplace remove` reaches the whole machine. At project
   scope an earlier moai also declared them in the committed
   `.claude/settings.json`, so the team kept being offered them: moai deletes
@@ -95,12 +96,13 @@ does not tag — see `CONTRIBUTING.md`.
   leaves the rest of the file as it was — commit the change. One line
   says what was removed; a removal that fails prints the command to run by
   hand (for a declaration, where to delete it) and does not change the exit
-  code. `--dry-run` lists the removals. In `--json`, `skill install` reports
-  the scopes it brought up under `lifted` (`scope`, `command`, `ok`), the
-  removals under `retired` (`id`, `scope`, `command`, `ok`), the declarations
-  under `undeclared` (`marketplace`, `file`, `ok`), and `kept` in place of
-  `companions`; in `skill uninstall`, which already had `kept`, `companions`
-  becomes `retired` in the same shape, beside the same `undeclared`.
+  code. `--dry-run` lists the removals and the scopes it would bring up. In
+  `--json`, `skill install` reports the scopes it brought up under `lifted`
+  (`scope`, `command`, `ok`), the removals under `retired` (`id`, `scope`,
+  `command`, `ok`), the declarations under `undeclared` (`marketplace`,
+  `file`, `ok`), and `kept` in place of `companions`; in `skill uninstall`,
+  which already had `kept`, `companions` becomes `retired` in the same shape,
+  beside the same `undeclared`.
 
 - **The supervisor's worker brief stands an epic's members in `review` while
   its epic-end review runs.** Where the worker creates the review issue it now

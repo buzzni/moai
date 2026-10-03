@@ -1599,10 +1599,11 @@ pub enum SkillCmd {
   --scope, install first brings it up to this version there (claude plugin
   update --scope <that scope>), so the next install does not remove from it
   again; if that fails, nothing is removed there and the next install tries
-  again. Nothing is removed when moai's own registration fails. A
-  user-scope install is left behind when another repository's moai stands
-  there, and then the command to remove it is printed in one line. The
-  marketplaces are left behind. If one cannot be removed, moai's own
+  again. Nothing is removed or brought up when moai's own registration
+  fails. A user-scope install is left behind when another repository's moai
+  stands there, and then the command to remove it is printed in one line;
+  that scope is not brought up either, so it is removed once that moai is
+  gone. The marketplaces are left behind. If one cannot be removed, moai's own
   registration still stands and the command to remove it by hand is printed.
 
   At project scope an earlier moai also declared their marketplaces in the

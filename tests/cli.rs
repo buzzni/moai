@@ -17316,7 +17316,9 @@ fn skill_install_brings_an_old_scope_up_before_retiring_it() {
     let lift = format!("claude plugin update moai@{market} --scope project -y");
     let row = |ok: &str| format!(r#""lifted":[{{"command":"{lift}","ok":{ok},"scope":"project"}}]"#);
 
+    let quiet = c.calls().len();
     let plan = text(&c.run(s.path(), &["skill", "install", "--scope", "user", "--dry-run"], true));
+    assert_eq!(c.calls().len(), quiet, "연습인데 claude 를 불렀다\n{}", c.calls());
     let (up, off) =
         (format!("올리기: {lift}"), "걷기: claude plugin uninstall korean-skills@korean-skills --scope project");
     assert!(plan.contains(&up) && plan.contains(off), "{plan}");
@@ -17361,6 +17363,54 @@ fn skill_install_brings_an_old_scope_up_before_retiring_it() {
         said.contains("! --scope project 의 moai 를 이 판으로 못 올렸다 — 그 범위에서는 아무것도 안 걷고"),
         "{said}"
     );
+
+    // 등록이 안 되면 올리기도 안 부른다 — 걷기와 같은 셈이다. 그 범위는 옛 판 그대로라 다음 install 이 다시 잰다.
+    let unregistered = Claude::failing_on("skillkoreanlift-noreg", Some("--scope user -y"));
+    for name in ["installed_plugins.json", "known_marketplaces.json"] {
+        let ledger = std::fs::read_to_string(c.home.path().join(".claude/plugins").join(name)).unwrap();
+        unregistered.ledger(name, &ledger);
+    }
+    let out = unregistered.run(s.path(), &["skill", "install", "--scope", "user", "--json"], true);
+    assert!(!out.status.success(), "등록을 못 했는데 성공으로 끝났다\n{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(&row("null")), "{json}");
+    let calls = unregistered.calls();
+    assert!(!calls.contains("--scope project"), "등록을 못 했는데 다른 범위를 올렸다\n{calls}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "등록을 못 했는데 설정을 고쳤다");
+    let said = text(&unregistered.run(s.path(), &["skill", "install", "--scope", "user"], true));
+    assert!(said.contains(&format!("  - {lift}  — 앞 걸음이 실패해 안 불렀다")), "{said}");
+}
+
+/// **두고 간 것이 있는 사용자 범위는 안 올린다**(리뷰 moai-tl3k.wx7 2번). 올리면 그 범위의 문이 닫혀, 다른 저장소의
+/// moai 가 빠진 뒤에도 이 저장소가 그 범위의 곁의 것을 다시는 안 걷는다. 두고 갈 것이 없으면 올리고 걷는다.
+#[test]
+fn skill_install_leaves_a_shared_user_scope_on_the_old_version() {
+    let s = init("skillkoreanliftshared");
+    let c = Claude::new("skillkoreanliftshared-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let old = old_moai(c.home.path());
+    let user = |path: &str| format!("{{\"scope\":\"user\",\"installPath\":{},\"version\":\"1\"}}", json_str(path));
+    let ledger = |other: bool| {
+        format!(
+            "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{}]{},\"korean-skills@korean-skills\":[{}]}}}}",
+            user(&old),
+            if other { format!(",\"moai@moai-other-1234\":[{}]", user("/x")) } else { String::new() },
+            user("/x")
+        )
+    };
+    c.ledger("known_marketplaces.json", &known_with_retired(&market, &dir));
+    let plan =
+        || String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+
+    c.ledger("installed_plugins.json", &ledger(true));
+    let json = plan();
+    assert!(json.contains(r#""kept":["korean-skills@korean-skills"]"#), "{json}");
+    assert!(json.contains(r#""lifted":[]"#), "두고 간 사용자 범위를 올린다\n{json}");
+
+    c.ledger("installed_plugins.json", &ledger(false));
+    let json = plan();
+    assert!(json.contains(&format!("plugin update moai@{market} --scope user -y")), "{json}");
+    assert!(json.contains("plugin uninstall korean-skills@korean-skills --scope user"), "{json}");
 }
 
 /// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고

@@ -640,7 +640,7 @@ struct Lift {
 
 impl Lift {
     fn argv(&self) -> Vec<String> {
-        argv(&["plugin", "update", &self.target, "--scope", &self.scope, "-y"])
+        update_argv(&self.target, &self.scope)
     }
 
     fn shown(&self) -> String {
@@ -714,14 +714,13 @@ impl Retired {
         for lift in &mut self.lifts {
             lift.ok = Some(run(root, &lift.argv()));
         }
-        let stuck: Vec<String> = self.lifts.iter().filter(|l| l.ok == Some(false)).map(|l| l.scope.clone()).collect();
-        for step in self.steps.iter_mut().filter(|s| !stuck.contains(&s.scope)) {
+        let lifts = &self.lifts;
+        let stuck = |scope: &str| lifts.iter().any(|l| l.scope == scope && l.ok == Some(false));
+        for step in self.steps.iter_mut().filter(|s| !stuck(s.scope.as_str())) {
             step.ok = Some(run(root, &step.argv()));
         }
-        if stuck.iter().any(|s| s == "project") {
-            return;
-        }
-        for step in &mut self.undeclare {
+        // 선언은 늘 project 범위의 것이다([`retire`]) — project 를 못 올렸으면 그것도 안 지운다.
+        for step in self.undeclare.iter_mut().filter(|_| !stuck("project")) {
             step.ok = Some(step.call(root));
         }
     }
@@ -783,8 +782,11 @@ fn teaches_retired(install: &skill::Install) -> bool {
 /// 장부는 누가 깔았는지 안 적으니 셋이 겹칠 때만 "moai 가 깐 것" 으로 읽는다(사용자 결정 둘째 판).
 /// - **그 범위에 선 moai 설치본이 옛 판이다**([`teaches_retired`]). 옛 `install` 은 moai 와 같은 범위·자리에
 ///   깔았다. 새 판으로 한 번 옮겨 간 범위는 다시 안 걷는다 — 그 뒤 사람이 손으로 깐 것을 매 `install` 마다
-///   걷던 판을 막는다. `install` 이 걷는 범위는 모두 새 판으로 올라가므로([`Lift`]) 범위당 한 번이 선다. 대가로
-///   걷기가 실패한 채 등록이 되면 다음 `install` 은 다시 안 걷는다 — 손으로 칠 줄은 그때 낸다
+///   걷던 판을 막는다. `install` 이 걷는 범위는 새 판으로 올라가므로(이번 `--scope` 는 등록이, 그 밖은 [`Lift`]
+///   가 올린다) 범위당 한 번이 선다. 빈 데가 하나 있다 — 이번 `--scope` 는 등록이 된 것으로 세는데, `plugin
+///   install` 은 이미 선 설치에 0 을 내고 판을 안 올린다(claude 2.1.287 로 쟀다). 거기서 `update` 만 실패하면 그
+///   범위는 옛 판인 채 걷히고 다음 `install` 이 또 걷는다. 대가로 걷기가 실패한 채 그 범위가 올라가면 다음
+///   `install` 은 다시 안 걷는다 — 손으로 칠 줄은 그때 낸다
 /// - **그 범위·자리에 그 플러그인이 서 있다**
 /// - **마켓플레이스가 옛 판이 더하던 저장소를 가리킨다**([`skill::market_repo`] — 대소문자와 주소 꼴은 가리지
 ///   않는다). 다른 출처(포크)를 가리키거나 그 이름을 모르면 걷지 않는다 — 옛 `install` 도 그때는 안 깔았다
@@ -803,15 +805,6 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
         return out;
     }
     let scopes = scopes_of(&old);
-    // **걷을 것이 없는 옛 판 범위도 올린다** — 안 올리면 문이 열린 채라, 사람이 그 범위에 다시 깐 것을 다음
-    // `install` 이 걷는다. 출처가 옛 판의 것이 아니어서 아무것도 안 걷는 판도 같은 셈으로 올린다.
-    if let Some(here) = registering {
-        out.lifts = scopes
-            .iter()
-            .filter(|s| **s != here)
-            .map(|s| Lift { target: target.to_string(), scope: s.to_string(), ok: None })
-            .collect();
-    }
     let known = ledger("known_marketplaces.json");
     let shared = other_user_moai(target);
     for (id, repo) in RETIRED {
@@ -830,6 +823,17 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
                 out.steps.push(Retire { id, scope: scope.to_string(), ok: None });
             }
         }
+    }
+    // **걷을 것이 없는 옛 판 범위도 올린다** — 안 올리면 문이 열린 채라, 사람이 그 범위에 다시 깐 것을 다음
+    // `install` 이 걷는다. 출처가 옛 판의 것이 아니어서 아무것도 안 걷는 판도 같은 셈으로 올린다. **두고 간 것이
+    // 있는 사용자 범위는 안 올린다**(리뷰 moai-tl3k.wx7 2번) — 올리면 문이 닫혀, 다른 저장소의 moai 가 빠진 뒤에도
+    // 이 저장소가 그 범위를 다시는 안 걷는다. 옛 판으로 두면 그때 한 번 걷는다.
+    if let Some(here) = registering {
+        out.lifts = scopes
+            .iter()
+            .filter(|s| **s != here && !(**s == "user" && !out.kept.is_empty()))
+            .map(|s| Lift { target: target.to_string(), scope: s.to_string(), ok: None })
+            .collect();
     }
     // **project 범위면 커밋된 설정의 선언도 걷는다**(사용자 결정 moai-6ugu.aae). 옛 `install --scope project` 는
     // `marketplace add <저장소> --scope project` 로 그 파일에 선언을 적었고, `plugin uninstall` 은 그것을 남긴다.
@@ -893,9 +897,15 @@ fn register(
     let installed = run(root, &argv(&["plugin", "install", &target, "--scope", scope, "-y"]));
     // **`-y` 를 준다.** `claude` 는 stdout 이 TTY 가 아니면 그것을 요구하고,
     // 여기서는 언제나 파이프다 — 없으면 이 갈래가 늘 실패한다.
-    let updated = run(root, &argv(&["plugin", "update", &target, "--scope", scope, "-y"]));
+    let updated = run(root, &update_argv(&target, scope));
     steps.push((say(lang, "skill.step_plugin_registered").to_string(), installed || updated));
     steps
+}
+
+/// 한 범위의 moai 를 새 판으로 올리는 줄 — 등록([`register`])과 [`Lift`] 가 이 하나를 부른다. 둘이 따로 적으면
+/// 등록하는 범위와 함께 올리는 범위가 다른 명령으로 오른다. `-y` 의 까닭은 [`register`] 에 있다.
+fn update_argv(target: &str, scope: &str) -> Vec<String> {
+    argv(&["plugin", "update", target, "--scope", scope, "-y"])
 }
 
 /// `claude` 를 **저장소 뿌리에서** 부른다. `local`·`project` 범위는 `claude` 가
