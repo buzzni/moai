@@ -9723,7 +9723,7 @@ fn an_email_with_brackets_still_owns_its_rows() {
     git(s.path(), &["config", "user.name", "레이븐"]);
     git(s.path(), &["config", "user.email", "a(b)@x.io"]);
     let run = |args: &[&str]| {
-        let out = isolated(BIN).args(args).current_dir(s.path()).env("MOAI_NOW", NOW).output().unwrap();
+        let out = staged(args).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
         assert!(out.status.success(), "{args:?}\n{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
@@ -21338,7 +21338,8 @@ fn the_commit_hook_leaves_a_message_that_is_not_written_yet_alone() {
 /// 지울 수 없는 이력에 없던 사람이 선다. `Actor::is_sane` 이 이름에서 `\n` 을 막는 것과 같은 자다.
 ///
 /// **꼴이 어긋난 값에도 아무 말을 안 한다.** 적는 쪽이 `Actor::parse`·`Actor::is_sane` 과 같은
-/// 곳에서 갈려야, moai 자신은 쓰기를 멈추는 값이 git 이력에만 남는 일이 없다.
+/// 곳에서 갈려야, moai 자신은 쓰기를 멈추는 값이 git 이력에만 남는 일이 없다. 같은 곳에서 못 가르는
+/// 값(메일 안의 괄호 — 셸은 짝을 안 센다)에는 아무것도 안 적는다.
 #[cfg(unix)]
 #[test]
 fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
@@ -21347,7 +21348,7 @@ fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
     assert!(install_hooks(&root, &[]).status.success(), "못 심었다");
     let stamped = |n: &str, who: &str| after_msg_hook(&root, n, "feat: 무엇\n", Some("message"), Some(who));
 
-    // **이름 안의 괄호는 이름이다.** `Actor::parse` 는 뒤에서부터 여는 괄호를 찾는데
+    // **이름 안의 괄호는 이름이다.** `Actor::parse` 는 끝의 `)` 가 닫는 `(` 를 뒤에서부터 찾는데
     // (`a_name_with_brackets_still_parses`), BRE 의 `.*` 로 앞에서 자르던 판은
     // `레이븐 <부재중) (raven@buzzni.com>` 을 적었다 — mailmap 도 `%(trailers:…)` 도 못 읽는다.
     let said = stamped("m1", "레이븐 (부재중) (raven@buzzni.com)");
@@ -21362,6 +21363,13 @@ fn the_commit_hook_writes_the_same_actor_moai_itself_would_accept() {
     // 반쪽만 적힌 트레일러는 없는 것보다 나쁘다 — 셋 다 moai 자신이 거절하는 값이다.
     for (n, who) in [("m3", "레이븐 ()"), ("m4", "레이븐 (메일 아님)"), ("m5", "(raven@buzzni.com)")] {
         assert!(!stamped(n, who).contains("Executed-By:"), "moai 가 안 받는 사람을 적었다 — {who}");
+    }
+
+    // **메일 안의 괄호는 짝을 세야 갈린다**(moai-v4p4.6w1, 리뷰 moai-v4p4.f4a) — `Actor::parse` 는 세고 셸은
+    // 안 센다. 그래서 그런 값에는 아무것도 안 적는다: `레이븐 (a <b)@x.io>` 같은 반쪽은 moai 의 저널과 다른
+    // 사람을 이력에 세운다. 셸이 짝을 세게 되는 날 이 줄을 `레이븐 <a(b)@x.io>` 로 바꾼다.
+    for (n, who) in [("m6", "레이븐 (a(b)@x.io)"), ("m7", "레이븐 (x@a.io(work))")] {
+        assert!(!stamped(n, who).contains("Executed-By:"), "짝을 안 센 반쪽을 적었다 — {who}");
     }
 }
 

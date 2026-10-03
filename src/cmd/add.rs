@@ -11,12 +11,10 @@ use crate::style::{self, paint};
 /// 쌓이는 것이 기본값이면 나중에 누가 무엇을 들고 있는지 아무도 모른다.
 /// 담당 없이 만들려면 `-a none` 이고 `-a me` 는 만든 사람이다 (`edit` 과 같은 자, [`super::assignee_arg`]).
 fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>) {
-    match arg {
-        Some(v) => {
-            super::assignee_arg(v, || Ok::<_, std::convert::Infallible>(by.clone())).unwrap_or_else(|n| match n {})
-        }
-        None => by.as_assignee(),
-    }
+    let Some(v) = arg else { return by.as_assignee() };
+    // 사람은 이미 들고 있으니 묻는 길이 질 수 없다 — 그 갈래는 꼴로 지운다.
+    let Ok(who) = super::assignee_arg(v, || Ok::<_, std::convert::Infallible>(by.clone()));
+    who
 }
 
 /// `--from` 이 받는 한 덩이. `-` 이면 stdin, 아니면 파일이다.

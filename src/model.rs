@@ -968,14 +968,19 @@ impl Actor {
     /// 것은 합친 한 줄을 되가르는 쪽이다 — `query::Me` 가 지금 사람을 `이름 (메일)` 로 들고
     /// `is_assignee` 가 이 함수로 되갈라, 잘린 메일이면 `ready` 와 규칙 5 가 제 줄을 남의 것으로 읽는다.
     ///
-    /// 짝이 안 맞는 메일(`a)b@x.io`)은 짝을 못 찾으니 옛 자 그대로 마지막 `(` 에서 가른다. 어느 쪽이
-    /// 맞는지 글만으로는 못 가르는 꼴이고, 거절하면 어제까지 받던 `--user` 가 오늘 멈춘다.
+    /// **짝으로 못 가르면 옛 자 그대로 마지막 `(` 에서 가른다.** 짝이 모자란 메일(`a)b@x.io`)이 그렇고, 짝을
+    /// 찾다 빈칸을 넘은 때([`opening`] — `레이븐 (부재중 (a)b@x.io)` 는 메일의 `)` 가 이름에 남은 `(` 와
+    /// 짝짓는다)와 짝으로 가른 것이 사람 꼴이 아닌 때도 그렇다(리뷰 moai-v4p4.f4a). 어느 쪽이 맞는지 글만으로는
+    /// 못 가르는 꼴이고, 거절하면 어제까지 받던 `--user` 가 오늘 멈춘다 — 그래서 **옛 자가 받던 것은 다 받고,
+    /// 옛 자로 제 사람에게 돌아오던 합친 한 줄은 여전히 돌아온다.** 짝이 모자란 `(` 가 든 메일(`a(b@x.io`)은
+    /// 옛 자로도 못 돌아오던 꼴이다 — 그것까지 맞추려면 되가르지 않는 길뿐이다(`query::Me` 가 갈린 채로 든다).
     pub fn parse(raw: &str) -> Option<Actor> {
         let inner = raw.trim().strip_suffix(')')?;
-        let open = opening(inner).or_else(|| inner.rfind('('))?;
-        let (name, email) = (&inner[..open], &inner[open + 1..]);
-        let a = Actor { name: name.trim().to_string(), email: email.trim().to_string() };
-        a.is_sane().then_some(a)
+        let at = |open: usize| {
+            let a = Actor { name: inner[..open].trim().to_string(), email: inner[open + 1..].trim().to_string() };
+            a.is_sane().then_some(a)
+        };
+        opening(inner).and_then(at).or_else(|| inner.rfind('(').and_then(at))
     }
 
     /// 이 사람을 담당 칸에 넣는 모양 — `(이름, 메일)`, **갈라진 채로.**
@@ -999,7 +1004,11 @@ impl Actor {
     }
 }
 
-/// 끝의 `)` 를 걷은 글에서 그 `)` 가 닫는 `(` 의 자리 — 뒤에서부터 짝을 센다. 짝이 모자라면 `None`.
+/// 끝의 `)` 를 걷은 글에서 그 `)` 가 닫는 `(` 의 자리 — 뒤에서부터 짝을 센다. 짝이 모자라거나 짝을 찾기
+/// 전에 빈칸을 만나면 `None` 이다. **메일에는 빈칸이 없다**([`Actor::is_sane`]) — 빈칸을 넘어 찾은 짝은
+/// 메일의 짝 없는 `)` 가 이름에 남은 `(` 와 짝지은 것이라, 그 자리에서 가르면 이름이 잘린다(리뷰 moai-v4p4.f4a).
+/// 괄호 안을 띄워 적은 것(`( a(b)@x.io )`)도 여기서 `None` 이라 옛 자로 간다 — 손으로 친 `--user` 에만 있는
+/// 꼴이고, 되가르는 길이 읽는 합친 한 줄([`label`])은 괄호 안을 안 띄운다.
 fn opening(inner: &str) -> Option<usize> {
     let mut depth = 0usize;
     for (at, c) in inner.char_indices().rev() {
@@ -1007,6 +1016,7 @@ fn opening(inner: &str) -> Option<usize> {
             ')' => depth += 1,
             '(' if depth == 0 => return Some(at),
             '(' => depth -= 1,
+            c if c.is_whitespace() => return None,
             _ => {}
         }
     }
@@ -1873,6 +1883,16 @@ mod tests {
         // 어제까지 받던 `--user` 가 오늘 멈춘다
         let a = Actor::parse("레이븐 (a)b@x.io)").unwrap();
         assert_eq!((a.name.as_str(), a.email.as_str()), ("레이븐", "a)b@x.io"));
+        // **짝을 찾다 빈칸을 넘으면 그 짝은 메일의 것이 아니다**(리뷰 moai-v4p4.f4a) — 이름에 남은 `(` 가
+        // 메일의 짝 없는 `)` 와 짝지어, 옛 자가 받던 `--user` 를 거절하거나(`레이븐 (부재중 …`) 이름을
+        // 자르던(`레이븐 :( …`) 자리다. 옛 자로 제 사람에게 돌아오던 합친 한 줄은 여전히 돌아온다
+        for (name, email) in [("레이븐 (부재중", "a)b@x.io"), ("레이븐 :(", "a)b@x.io")] {
+            let joined = super::label(name, Some(email), crate::config::Naming::Full);
+            assert_eq!(Actor::parse(&joined), Some(Actor { name: name.into(), email: email.into() }), "{joined}");
+        }
+        // 짝으로 가른 것이 사람 꼴이 아니어도(이름이 빈다) 옛 자로 한 번 더 가른다 — 옛 자가 받던 것은 다 받는다
+        let a = Actor::parse("(a(b)@x.io)").unwrap();
+        assert_eq!((a.name.as_str(), a.email.as_str()), ("(a", "b)@x.io"));
     }
 
     /// 모양이 어긋난 것을 조용히 이름으로 삼지 않는다 — 메일 없는 줄이 그렇게

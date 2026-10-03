@@ -213,8 +213,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if let Some(d) = &args.due {
                 i.due_on = super::clearable(d);
             }
-            if let Some(who) = &assignee {
-                (i.assignee, i.assignee_email) = who.clone();
+            if let Some(who) = assignee {
+                (i.assignee, i.assignee_email) = who;
             }
 
             i.normalize();
