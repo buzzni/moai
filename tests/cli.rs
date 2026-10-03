@@ -17299,6 +17299,70 @@ fn skill_undeclares_only_behind_the_same_door() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), project_settings(&market, &dir, &[], &[]));
 }
 
+/// **이번 `--scope` 밖의 옛 판 범위는 걷기 전에 새 판으로 올린다**(사용자 결정 moai-tl3k.jvz). `claude plugin update
+/// --scope <범위>` 는 장부의 그 범위 줄만 올려, 안 올린 범위는 다음 `install` 에서도 옛 판으로 읽혀 그 사이 다시 깐
+/// 것을 매번 걷었다(리뷰 moai-6ugu.3kw 9번). 등록하는 범위는 등록이 올리니 따로 안 올린다. **못 올린 범위는 안
+/// 걷는다** — 그 범위의 플러그인도 커밋된 선언도 그대로 두고, 종료 코드는 등록만 따른다.
+#[test]
+fn skill_install_brings_an_old_scope_up_before_retiring_it() {
+    let s = init("skillkoreanlift");
+    let c = Claude::new("skillkoreanlift-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+    let file = root.join(".claude/settings.json");
+    let body = project_settings(&market, &dir, &[], &OLD_MARKETS);
+    std::fs::write(&file, &body).unwrap();
+    let lift = format!("claude plugin update moai@{market} --scope project -y");
+    let row = |ok: &str| format!(r#""lifted":[{{"command":"{lift}","ok":{ok},"scope":"project"}}]"#);
+
+    let plan = text(&c.run(s.path(), &["skill", "install", "--scope", "user", "--dry-run"], true));
+    let (up, off) =
+        (format!("올리기: {lift}"), "걷기: claude plugin uninstall korean-skills@korean-skills --scope project");
+    assert!(plan.contains(&up) && plan.contains(off), "{plan}");
+    assert!(plan.find(&up) < plan.find(off), "걷기가 올리기보다 앞선다\n{plan}");
+    let json = String::from_utf8(
+        c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run", "--json"], true).stdout,
+    )
+    .unwrap();
+    assert!(json.contains(r#""lifted":[]"#), "등록하는 범위를 따로 올린다\n{json}");
+
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "install", "--scope", "user", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains(&row("true")), "{json}");
+    let calls = c.calls()[before..].to_string();
+    let (lifted, retired) = (
+        calls.find(&format!("plugin update moai@{market} --scope project -y")),
+        calls.find("plugin uninstall korean-skills@korean-skills --scope project"),
+    );
+    assert!(lifted.is_some() && lifted < retired, "올린 뒤에 걷지 않는다\n{calls}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), project_settings(&market, &dir, &[], &[]));
+
+    // 못 올리면 그 범위에서 아무것도 안 부르고, 커밋된 선언도 그대로 둔다.
+    std::fs::write(&file, &body).unwrap();
+    let failing = Claude::failing_on("skillkoreanlift-fail", Some("--scope project -y"));
+    for name in ["installed_plugins.json", "known_marketplaces.json"] {
+        let ledger = std::fs::read_to_string(c.home.path().join(".claude/plugins").join(name)).unwrap();
+        failing.ledger(name, &ledger);
+    }
+    let out = failing.run(s.path(), &["skill", "install", "--scope", "user", "--json"], true);
+    assert!(out.status.success(), "올리기 하나가 실패했다고 설치가 실패로 끝났다\n{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains(&row("false")), "{json}");
+    assert!(json.contains(r#""id":"korean-skills@korean-skills","ok":null"#), "못 올린 범위를 걷었다\n{json}");
+    assert!(json.contains(r#""marketplace":"korean-skills","ok":null"#), "못 올린 범위의 선언을 걷었다\n{json}");
+    assert!(!failing.calls().contains("plugin uninstall"), "못 올린 범위를 걷었다\n{}", failing.calls());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "못 올린 범위의 설정을 고쳤다");
+    let said = text(&failing.run(s.path(), &["skill", "install", "--scope", "user"], true));
+    assert!(
+        said.contains("! --scope project 의 moai 를 이 판으로 못 올렸다 — 그 범위에서는 아무것도 안 걷고"),
+        "{said}"
+    );
+}
+
 /// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고
 /// 아무 말 없이 성공하는 것이 제일 나쁘다.**
 #[test]

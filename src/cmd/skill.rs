@@ -56,10 +56,14 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     let clash = clash_of(&market, &dir);
     // **옛 판이 곁에 깐 것을 걷는다**(moai-vtfu). 설치는 등록하기 **전의** 장부로 잰다 — 등록이 설치본을 새
     // 판으로 바꾸면 그 범위의 moai 가 옛 판이라는 표식([`teaches_retired`])이 사라지고, 이번 `--scope` 로 처음
-    // 서는 범위가 섞인다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
+    // 서는 범위가 섞인다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다. 이번 `--scope` 밖에서
+    // 옛 판으로 선 moai 는 걷기 전에 새 판으로 올린다([`Lift`]).
     let target = format!("moai@{market}");
-    let mut retiring =
-        if clash.is_none() { retire(&root, &target, &installs_here(&target, &root)) } else { Retired::default() };
+    let mut retiring = if clash.is_none() {
+        retire(&root, &target, &installs_here(&target, &root), Some(scope))
+    } else {
+        Retired::default()
+    };
 
     if dry_run {
         if ctx.json {
@@ -71,6 +75,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "lifted": retiring.lifted_json(),
                 "retired": retiring.json(),
                 "undeclared": retiring.undeclared_json(),
                 "kept": retiring.kept,
@@ -93,6 +98,9 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 &[("cmd", &format!("claude plugin install moai@{market} --scope {scope} -y"))],
             ),
         });
+        for lift in &retiring.lifts {
+            out.push(fill(say(lang, "skill.plan_lift"), &[("cmd", &lift.shown())]));
+        }
         for step in &retiring.steps {
             out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
@@ -132,7 +140,8 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // 훅은 선다 — 종료 코드는 등록 결과만 따른다. 하나가 실패해도 다음 것을 부르고, 못 걷은 것은 손으로 칠
     // 줄로 낸다. **등록이 안 됐으면 부르지 않는다**(사용자 결정 둘째 판) — 그때는 플러그인을 부르라는 옛 moai
     // 사본이 그대로 실려 있다. `uninstall` 이 moai 를 다 못 걷으면 안 부르는 것과 같은 셈이고, 설치본이 옛
-    // 판으로 남으니 다시 부르면 또 걷는다.
+    // 판으로 남으니 다시 부르면 또 걷는다. 이번 `--scope` 밖의 옛 판 범위는 걷기 전에 올리고, 못 올린 범위는
+    // 안 걷는다([`Retired::call`]). 올리기도 걷기처럼 종료 코드를 안 바꾼다.
     if registered {
         retiring.call(&root);
     }
@@ -149,6 +158,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+            "lifted": retiring.lifted_json(),
             "retired": retiring.json(),
             "undeclared": retiring.undeclared_json(),
             "kept": retiring.kept,
@@ -160,11 +170,18 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
+    for lift in &retiring.lifts {
+        out.push(match lift.ok {
+            Some(true) => fill(say(lang, "skill.lifted"), &[("scope", &lift.scope)]),
+            Some(false) => fill(say(lang, "skill.lift_failed"), &[("scope", &lift.scope), ("cmd", &lift.shown())]),
+            None => format!("  - {}{}", lift.shown(), say(lang, "skill.step_not_called")),
+        });
+    }
     for step in &retiring.steps {
         out.push(match step.ok {
             Some(true) => fill(say(lang, "skill.retired"), &[("id", step.id), ("scope", &step.scope)]),
             Some(false) => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
-            // 등록이 안 돼 안 불렀다 — `uninstall` 이 같은 판에 내는 줄과 같다.
+            // 등록이 안 됐거나 그 범위를 못 올려 안 불렀다 — `uninstall` 이 같은 판에 내는 줄과 같다.
             None => format!("  - {}{}", step.shown(), say(lang, "skill.step_not_called")),
         });
     }
@@ -367,7 +384,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         }
         // **moai 를 걷는 그 설치로 잰다** — 장부를 다시 읽어 재던 판은 두 읽기 사이에 `claude` 가 장부를
         // 고쳐 쓰면(옆 세션의 `skill install --scope user`) moai 를 안 걷는 범위의 것까지 걷을 수 있었다.
-        retiring = retire(&root, &target, &installs);
+        retiring = retire(&root, &target, &installs, None);
     }
     let claude = which("claude").is_some();
     let mut steps: Vec<(String, bool)> = Vec::new();
@@ -607,6 +624,30 @@ impl Retire {
     }
 }
 
+/// 이번 `--scope` 밖의 범위에 옛 판으로 선 이 저장소의 moai 를 새 판으로 올리는 걸음(사용자 결정 moai-tl3k.jvz) —
+/// `install` 만 세우고, 그 범위를 걷기 **전에** 부른다.
+///
+/// 걷는 문은 "그 범위의 moai 설치본이 옛 판" 이다([`teaches_retired`]). `claude plugin update --scope <범위>` 는
+/// 장부의 그 범위 줄만 새 판으로 올려서(claude 2.1.287 로 쟀다), 올리지 않은 범위는 다음 `install` 에서도 옛 판으로
+/// 읽혀 그 사이 사람이 손으로 다시 깐 것을 매번 걷었다(리뷰 moai-6ugu.3kw 9번). 올리면 장부가 곧 "옮긴 범위" 의
+/// 표식이라 따로 적는 상태가 없다. 이 걸음은 장부만 고치고 커밋된 설정은 안 건드린다(같은 판으로 쟀다).
+struct Lift {
+    target: String,
+    scope: String,
+    /// [`Retire::ok`] 와 같다 — 부르지 않았으면 `None`.
+    ok: Option<bool>,
+}
+
+impl Lift {
+    fn argv(&self) -> Vec<String> {
+        argv(&["plugin", "update", &self.target, "--scope", &self.scope, "-y"])
+    }
+
+    fn shown(&self) -> String {
+        shown(&self.argv())
+    }
+}
+
 /// 커밋된 설정에서 [`RETIRED`] 의 마켓플레이스 선언 하나를 지우는 걸음(사용자 결정 moai-6ugu.aae) — `claude` 를
 /// 안 부르고 moai 가 그 파일을 고친다([`skill::drop_marketplace`] 가 까닭을 든다).
 struct Undeclare {
@@ -653,6 +694,8 @@ impl Undeclare {
 /// 걷을 것과, 다른 저장소도 쓰는 줄이라 두고 가는 것.
 #[derive(Default)]
 struct Retired {
+    /// 걷기 전에 올릴 범위 — `install` 만 세운다. `uninstall` 은 moai 를 범위째 걷어 올릴 것이 없다.
+    lifts: Vec<Lift>,
     steps: Vec<Retire>,
     /// 커밋된 설정의 선언을 지우는 걸음 — 플러그인 걸음 **뒤에** 부른다.
     undeclare: Vec<Undeclare>,
@@ -661,15 +704,31 @@ struct Retired {
 }
 
 impl Retired {
-    /// 걸음마다 `claude` 를 부르고 결과를 그 걸음에 적는다 — **하나가 실패해도 다음 것을 부른다.** 선언 지우기는
-    /// 그 뒤다 — `plugin uninstall --scope project` 가 그 파일의 `enabledPlugins` 줄을 걷어야 선언이 빈다.
+    /// 걸음마다 `claude` 를 부르고 결과를 그 걸음에 적는다 — **하나가 실패해도 다음 것을 부른다.** 올리기가 맨
+    /// 앞이고 선언 지우기는 맨 뒤다 — `plugin uninstall --scope project` 가 그 파일의 `enabledPlugins` 줄을 걷어야
+    /// 선언이 빈다.
+    ///
+    /// **못 올린 범위는 안 걷는다**(사용자 결정 moai-tl3k.jvz). 그 범위의 moai 는 옛 판 그대로라 다음 `install` 이 같은
+    /// 문으로 다시 재어 올리기부터 다시 한다. 걷고 나면 옛 판이 남아, 올리기가 될 때까지 그 사이 다시 깐 것을 매번 걷는다.
     fn call(&mut self, root: &Path) {
-        for step in &mut self.steps {
+        for lift in &mut self.lifts {
+            lift.ok = Some(run(root, &lift.argv()));
+        }
+        let stuck: Vec<String> = self.lifts.iter().filter(|l| l.ok == Some(false)).map(|l| l.scope.clone()).collect();
+        for step in self.steps.iter_mut().filter(|s| !stuck.contains(&s.scope)) {
             step.ok = Some(run(root, &step.argv()));
+        }
+        if stuck.iter().any(|s| s == "project") {
+            return;
         }
         for step in &mut self.undeclare {
             step.ok = Some(step.call(root));
         }
+    }
+
+    /// `--json` 의 `lifted` — 올린 범위마다 명령과 결과. `ok` 는 `retired` 와 같은 셈이다.
+    fn lifted_json(&self) -> Vec<serde_json::Value> {
+        self.lifts.iter().map(|l| serde_json::json!({"scope": l.scope, "command": l.shown(), "ok": l.ok})).collect()
     }
 
     /// `--json` 의 `retired` — 걸음마다 명령과 결과. 부르지 않은 걸음은 `ok` 가 `null` 이다.
@@ -718,13 +777,14 @@ fn teaches_retired(install: &skill::Install) -> bool {
 
 /// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). `installs` 는 **이 저장소의 moai(`target`)의
 /// 설치**고, 부르는 쪽이 저 쓸 값을 그대로 건넨다 — `uninstall` 은 moai 를 걷는 그 설치를, `install` 은
-/// 등록하기 전의 설치를.
+/// 등록하기 전의 설치를. `registering` 은 `install` 이 등록하는 범위다 — 그 밖의 옛 판 범위는 걷기 전에 새 판으로
+/// 올린다([`Lift`]). 등록하는 범위는 등록이 올린다. `uninstall` 은 `None` 이다.
 ///
 /// 장부는 누가 깔았는지 안 적으니 셋이 겹칠 때만 "moai 가 깐 것" 으로 읽는다(사용자 결정 둘째 판).
 /// - **그 범위에 선 moai 설치본이 옛 판이다**([`teaches_retired`]). 옛 `install` 은 moai 와 같은 범위·자리에
 ///   깔았다. 새 판으로 한 번 옮겨 간 범위는 다시 안 걷는다 — 그 뒤 사람이 손으로 깐 것을 매 `install` 마다
-///   걷던 판을 막는다. 대가로 걷기가 실패한 채 등록이 되면 다음 `install` 은 다시 안 걷는다 — 손으로 칠 줄은
-///   그때 낸다
+///   걷던 판을 막는다. `install` 이 걷는 범위는 모두 새 판으로 올라가므로([`Lift`]) 범위당 한 번이 선다. 대가로
+///   걷기가 실패한 채 등록이 되면 다음 `install` 은 다시 안 걷는다 — 손으로 칠 줄은 그때 낸다
 /// - **그 범위·자리에 그 플러그인이 서 있다**
 /// - **마켓플레이스가 옛 판이 더하던 저장소를 가리킨다**([`skill::market_repo`] — 대소문자와 주소 꼴은 가리지
 ///   않는다). 다른 출처(포크)를 가리키거나 그 이름을 모르면 걷지 않는다 — 옛 `install` 도 그때는 안 깔았다
@@ -736,13 +796,22 @@ fn teaches_retired(install: &skill::Install) -> bool {
 /// **옛 판이 선 범위가 project 면 커밋된 `.claude/settings.json` 의 마켓플레이스 선언도 걷는다**(사용자 결정
 /// moai-6ugu.aae) — 같은 문 뒤에서, 그 파일에 적힌 출처가 옛 판의 것이고 그 파일이 이 마켓의 다른 플러그인을
 /// 안 켜 두었을 때만([`Undeclare`]).
-fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
+fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: Option<&str>) -> Retired {
     let old: Vec<skill::Install> = installs.iter().filter(|i| teaches_retired(i)).cloned().collect();
     let mut out = Retired::default();
     if old.is_empty() {
         return out;
     }
     let scopes = scopes_of(&old);
+    // **걷을 것이 없는 옛 판 범위도 올린다** — 안 올리면 문이 열린 채라, 사람이 그 범위에 다시 깐 것을 다음
+    // `install` 이 걷는다. 출처가 옛 판의 것이 아니어서 아무것도 안 걷는 판도 같은 셈으로 올린다.
+    if let Some(here) = registering {
+        out.lifts = scopes
+            .iter()
+            .filter(|s| **s != here)
+            .map(|s| Lift { target: target.to_string(), scope: s.to_string(), ok: None })
+            .collect();
+    }
     let known = ledger("known_marketplaces.json");
     let shared = other_user_moai(target);
     for (id, repo) in RETIRED {
