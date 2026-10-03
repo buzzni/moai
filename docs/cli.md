@@ -2186,8 +2186,9 @@ Options:
              it. Whether it stands at all is SPC v d
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
-             Stored times stay UTC, and so does --json; a bare day in an
-             SPC f filter (created=2026-10-01) is a day on this clock too
+             Stored times stay UTC, and so does --json; a bare day or a
+             minute in an SPC f filter (created=2026-10-01,
+             done_at="2026-10-03 00:00~2026-10-05 23:59") is on this clock too
     SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
              Clicking puts the focus on the pane and the cursor on the row
              under it. The wheel moves the pane under the pointer without
