@@ -3381,3 +3381,4 @@
 {"ts":"2026-10-03T18:34:33Z","id":"moai-m1za.6xy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것 9건(2 첫 줄 들여쓰기 유지·3 주석과 차례 시험·4 BOM 을 빈칸으로·5 락 전 읽기 시험·6 defer 빈 까닭 bad_input·9 CHANGELOG Fixed/Changed 가름·10 doc·11 거절문·13 죽은 assert), fix 커밋 하나. 넘긴 것: 1·14 → idea moai-mkrt(mv -m 빈 argv 글, 사람이 정할 동작 변경), 8 → moai-xmhx, 7 → moai-foyr, 12 → moai-u9w6, note -b - 걷기 → moai-n0f0. 모두 이 에픽 전부터 있던 것이라 v0.4.0 밖"}
 {"ts":"2026-10-03T18:34:33Z","id":"moai-m1za.j74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T18:34:34Z","id":"moai-m1za.k2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-03T18:36:01Z","id":"moai-m1za","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 머지 0825dced 로 끝났다. 넘긴 것은 idea moai-mkrt·moai-xmhx·moai-foyr·moai-u9w6·moai-n0f0 (v0.4.0 밖)"}
