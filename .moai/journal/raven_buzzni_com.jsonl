@@ -3282,3 +3282,4 @@
 {"ts":"2026-10-03T15:19:31Z","id":"moai-gu5m.9x9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 훅이 부를 실행 파일 철자, src/skill.rs·cmd/skill.rs·store.rs·시험)"}
 {"ts":"2026-10-03T15:19:31Z","id":"moai-gu5m.9x9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T15:19:32Z","id":"moai-gu5m.ke0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"리뷰 13건 중 12건은 리뷰 고침 그대로 받았고, 3번은 사람 결정(같은 파일이면 심긴 철자를 잇는다)으로 고쳤다. 넘긴 것: idea moai-f6gq(spelled 와 hook::resolve_path 의 겹침)"}
+{"ts":"2026-10-03T15:21:16Z","id":"moai-gu5m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지 139ef47e. 루트의 release 바이너리는 아직 옛 판이라, 고친 판으로 루트에서 skill install 하려면 cargo build --release 뒤에 부른다. 남은 정리는 idea moai-f6gq"}
