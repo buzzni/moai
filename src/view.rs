@@ -3172,7 +3172,7 @@ pub(crate) fn unopened<T>(p: &crate::projects::Project, s: &crate::projects::See
         // **까닭은 한 줄에 둔다** — `sanitize` 는 줄바꿈을 남기므로 그대로 쓰면 뒤가
         // 다음 줄로 흘러 옆 프로젝트의 줄과 안 갈린다. 이 글은 층의 알림(`layer::shut`)
         // 으로도 그대로 가는데 거기는 한 줄짜리 자리다.
-        Seen::Unreadable { error } => format!(
+        Seen::Unreadable { error, .. } => format!(
             "  {} {}",
             paint(style::ERROR, "!"),
             fill(say(lang, "overview.project_unreadable"), &[("why", &one_line(error))])

@@ -38,6 +38,10 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             /// **읽을 때는 키가 없다.** 늘 달면 전부터 내던 줄이 바뀐다.
             #[serde(skip_serializing_if = "Option::is_none")]
             error: Option<&'a str>,
+            /// 그 거절의 코드 — `error` 와 **함께 서고 함께 빠진다**(moai-yivo.ext). `project ls --json` 의
+            /// `unreadable` 줄과 그 저장소 안에서 친 명령의 `code` 와 같은 값이다.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            code: Option<&'static str>,
             /// `init` 이 여기 안 서는 딸린 워크트리면 **트래커가 설 주 체크아웃**(moai-nppo) —
             /// 사람 줄이 대는 그 자리다. **아닐 때는 키가 없다**: 늘 달면 전부터 내던 줄이 바뀌고,
             /// 있는 것 자체가 "여기에 `init` 하지 마라" 라 받는 쪽이 값을 또 가를 것이 없다.
@@ -45,8 +49,8 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
             tracker_at: Option<PathBuf>,
             config: &'a Path,
         }
-        let error = unreadable.as_deref();
-        return super::json_line(&Out { path: &dir, added, initialized, error, tracker_at, config: &config });
+        let (error, code) = (unreadable.as_ref().map(|e| e.message.as_str()), unreadable.as_ref().map(|e| e.code));
+        return super::json_line(&Out { path: &dir, added, initialized, error, code, tracker_at, config: &config });
     }
 
     let shown = one_line(&dir.display().to_string());
@@ -60,7 +64,7 @@ pub fn add(ctx: &Ctx, input: &Path) -> R<Vec<String>> {
     if let Some(error) = &unreadable {
         let why = crate::i18n::fill(
             crate::i18n::say(ctx.lang(), "overview.project_unreadable"),
-            &[("why", &one_line(error))],
+            &[("why", &one_line(&error.message))],
         );
         out.push(format!("  {} {why}", paint(style::ERROR, "!")));
     }
@@ -257,7 +261,8 @@ enum State<'a> {
     Missing,
     /// 설정이 깨졌거나, 스냅샷을 못 읽거나, 등록한 경로가 디렉터리가 아니다.
     /// **"있음" 으로 접지 않는다** — 접으면 `ls` 가 괜찮다고 한 프로젝트를 `status` 가 못 연다.
-    Unreadable { error: &'a str },
+    /// `code` 는 한눈 보기의 같은 줄([`crate::projects::Seen::Unreadable`])과 한 값이고 **늘 선다**(moai-yivo.ext).
+    Unreadable { error: &'a str, code: &'static str },
 }
 
 /// 정한 색을 `--json` 에 이름으로 싣는다. `None` 은 `skip_serializing_if` 가 빼므로 여기 안 온다.
@@ -365,7 +370,7 @@ fn state<'a>(p: &'a projects::Project, now: &str) -> State<'a> {
         }
         projects::State::Uninit(at) => State::Uninitialized { tracker_at: at.as_deref() },
         projects::State::Missing => State::Missing,
-        projects::State::Unreadable(e) => State::Unreadable { error: e },
+        projects::State::Unreadable(e) => State::Unreadable { error: &e.message, code: e.code },
     }
 }
 
@@ -400,7 +405,7 @@ fn said(state: &State, lang: crate::i18n::Lang) -> String {
         State::Uninitialized { .. } => paint(style::DIM, crate::i18n::say(lang, "project.uninit")),
         State::Missing => paint(style::WARN, crate::i18n::say(lang, "overview.missing")),
         // 까닭은 한 줄에 둔다 — 줄바꿈이 섞이면 다음 프로젝트의 줄과 갈리지 않는다.
-        State::Unreadable { error } => {
+        State::Unreadable { error, .. } => {
             let why =
                 crate::i18n::fill(crate::i18n::say(lang, "overview.project_unreadable"), &[("why", &one_line(error))]);
             format!("{} {why}", paint(style::ERROR, "!"))

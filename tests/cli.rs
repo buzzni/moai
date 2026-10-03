@@ -2910,6 +2910,57 @@ fn outside_a_repo_the_overview_speaks_json() {
     assert!(rd.contains("\"unreadable\":0"), "{rd}");
 }
 
+/// **못 연 프로젝트의 줄도 그 거절의 코드를 든다**(moai-yivo.ext). 그 저장소 안에서 친 명령은
+/// `{"error":…,"code":"broken"}` 으로 멈추는데, 한눈 보기의 `--json` 은 같은 처지를 글로만 냈다 — 받는
+/// 쪽은 "손으로 파일을 고칠 일"(`broken`)과 그 밖을 글을 읽어 갈라야 했다. 상태 낱말을 함께 쓰는 표면
+/// 넷(`status`·`ready`·`tui`·`project ls`)과 `project add` 가 같은 값을 낸다.
+#[test]
+fn outside_a_repo_an_unopened_project_carries_its_code() {
+    let s = Scratch::new("ovcode");
+    let (linked, out) = (dir_in(&s, "linked"), dir_in(&s, "out"));
+    ok(&linked, &["init", "argos"]);
+    let elsewhere = s.path().join("elsewhere.jsonl");
+    std::fs::write(&elsewhere, "").unwrap();
+    std::fs::remove_file(linked.join(".moai/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, linked.join(".moai/issues.jsonl")).unwrap();
+    // 등록한 자리가 디렉터리가 아니다 — 고칠 것은 그 저장소의 파일이 아니라 등록이라 `broken` 이 아니다.
+    let file = s.path().join("afile");
+    std::fs::write(&file, "").unwrap();
+    let cfg = registry(&s, &[&linked, &file]);
+
+    // 안에서 친 명령이 내는 코드 — 한눈 보기가 그것과 같아야 한다.
+    let inside = moai(&linked, &["status", "--json"]);
+    assert!(!inside.status.success(), "시험의 전제 — 밖을 가리키는 스냅샷 링크는 그 저장소에서 멈춘다");
+    assert!(String::from_utf8_lossy(&inside.stderr).contains("\"code\":\"broken\""), "{}", text(&inside));
+
+    // 그 프로젝트의 줄 하나 — 이름 키에서 그 객체가 닫히는 데까지.
+    let entry = |json: &str, key: &str, name: &str| -> String {
+        let at = json.find(&format!("\"{key}\":\"{name}\"")).unwrap_or_else(|| panic!("{name} 줄이 없다 — {json}"));
+        json[at..at + json[at..].find('}').unwrap()].to_string()
+    };
+    for (args, key) in [
+        (&["status", "--json"][..], "name"),
+        (&["ready", "--json"], "name"),
+        (&["tui", "--json"], "title"),
+        (&["project", "ls", "--json"], "name"),
+    ] {
+        let json = ok_with(&out, &cfg, args);
+        one_json_value(&json);
+        let (l, f) = (entry(&json, key, "linked"), entry(&json, key, "afile"));
+        assert!(
+            l.contains("\"state\":\"unreadable\",\"error\":\"") && l.ends_with("\"code\":\"broken\""),
+            "{args:?}: {l}"
+        );
+        assert!(
+            f.contains("\"state\":\"unreadable\",\"error\":\"") && f.ends_with("\"code\":\"error\""),
+            "{args:?}: {f}"
+        );
+    }
+    // 등록하는 자리도 같은 값을 `error` 곁에 단다 — 읽히는 줄에는 둘 다 없다.
+    let again = ok_with(&out, &cfg, &["project", "add", linked.to_str().unwrap(), "--json"]);
+    assert!(again.contains("\"error\":\"") && again.contains("\"code\":\"broken\""), "{again}");
+}
+
 /// **`.moai` 밖의 `tui --json` 은 프로젝트 층의 줄을 낸다**(moai-ujpu) — 탐색기 줄과 같은
 /// 키(`title`·`kind`·`dir`·`path`)에 한눈 보기와 같은 상태 낱말. 프로젝트 줄의 `path` 는
 /// 디렉터리라 `-C` 로 들어간다. 등록 차례 그대로다. `--path` 는 어느 프로젝트의 id 인지

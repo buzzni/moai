@@ -216,8 +216,8 @@ impl App {
                 // 층에서 "못 읽는다" 를 처음 만난다 (moai-9omq).
                 let bad = added
                     .unreadable
-                    .as_deref()
-                    .map(|e| fill(say(lang, "tui.register.unreadable"), &[("why", &crate::text::one_line(e))]))
+                    .as_ref()
+                    .map(|e| fill(say(lang, "tui.register.unreadable"), &[("why", &crate::text::one_line(&e.message))]))
                     .unwrap_or_default();
                 // **워크트리 갈래를 그 밑의 줄과 같이 든다**(moai-dkth). 평평한 "init 전" 한 줄만
                 // 대던 판은, 딸린 워크트리를 등록하면 그 밑에 서는 줄(`view::unopened`)이 주

@@ -69,8 +69,12 @@ pub enum State {
     Uninit(Option<PathBuf>),
     /// 디렉터리가 없다.
     Missing,
-    /// 설정이 깨졌거나 못 읽는다. 사람이 읽을 한 줄.
-    Unreadable(String),
+    /// 설정이 깨졌거나 못 읽는다 — 사람이 읽을 한 줄과 **그 거절의 코드**.
+    ///
+    /// **코드를 버리지 않는다**(moai-yivo.ext). 한때 글만 들어, 그 저장소 안에서 친 명령은 `broken` 으로
+    /// 멈추는데 한눈 보기의 `--json` 은 같은 처지를 코드 없이 냈다 — 받는 쪽은 "손으로 파일을 고칠 일"
+    /// (`broken`)과 그 밖(`error`)을 글을 읽어 갈라야 했다. 여는 길이 낸 [`crate::fail::Fail`] 을 그대로 든다.
+    Unreadable(crate::fail::Fail),
 }
 
 /// 등록 목록 차례 그대로 연다. **실패하지 않는다.**
@@ -156,7 +160,7 @@ pub fn open_shallow(path: &Path, lang: crate::i18n::Lang) -> Result<Repo, State>
         Ok(Opened::Repo(repo)) => Ok(repo),
         Ok(Opened::Uninit) => Err(State::Uninit(crate::store::init_belongs_at(path))),
         Ok(Opened::Missing) => Err(State::Missing),
-        Err(e) => Err(State::Unreadable(e.message)),
+        Err(e) => Err(State::Unreadable(e)),
     }
 }
 
@@ -202,7 +206,7 @@ impl State {
                     mine: g.mine,
                 }
             }
-            Err(e) => lone(State::Unreadable(e.message)),
+            Err(e) => lone(State::Unreadable(e)),
         }
     }
 }
@@ -226,7 +230,7 @@ impl Project {
             State::Open { repo, load } => Seen::Ok(f(repo, load)),
             State::Uninit(at) => Seen::Uninit { tracker_at: at.as_deref() },
             State::Missing => Seen::Missing,
-            State::Unreadable(e) => Seen::Unreadable { error: e },
+            State::Unreadable(e) => Seen::Unreadable { error: &e.message, code: e.code },
         }
     }
 }
@@ -249,6 +253,10 @@ pub enum Seen<'a, T> {
     Missing,
     Unreadable {
         error: &'a str,
+        /// 그 저장소 안에서 친 명령이 낼 `--json` 의 `code` 와 **같은 값**(moai-yivo.ext) — `broken` 이면
+        /// 사람이 손으로 고칠 파일이다(링크·깨진 설정, `docs/recovery.md`). **늘 선다**: 못 연 줄에서
+        /// 받는 쪽이 가르는 것은 이것이고, `error` 는 사람이 읽을 글이다.
+        code: &'static str,
     },
 }
 
@@ -259,7 +267,7 @@ impl<'a, T> Seen<'a, T> {
             Seen::Ok(t) => Seen::Ok(f(t)),
             Seen::Uninit { tracker_at } => Seen::Uninit { tracker_at: *tracker_at },
             Seen::Missing => Seen::Missing,
-            Seen::Unreadable { error } => Seen::Unreadable { error },
+            Seen::Unreadable { error, code } => Seen::Unreadable { error, code },
         }
     }
 }
@@ -297,8 +305,9 @@ pub struct Added {
     /// 여는 자리에서 함께 세므로 그리는 쪽이 다시 묻지 않는다 — [`Seen::Uninit`] 과 한 값이다.
     pub tracker_at: Option<PathBuf>,
     /// 등록은 했는데 그 저장소를 못 읽는다 — 설정이 깨졌거나 스냅샷을 못 연다. 사람이 읽을
-    /// 한 줄. **등록을 막지 않는다** — 쓰는 곳은 사람의 설정이지 그 저장소가 아니다.
-    pub unreadable: Option<String>,
+    /// 한 줄과 그 코드([`State::Unreadable`] 과 한 값). **등록을 막지 않는다** — 쓰는 곳은 사람의
+    /// 설정이지 그 저장소가 아니다.
+    pub unreadable: Option<crate::fail::Fail>,
 }
 
 /// 디렉터리 하나를 등록한다. **CLI `moai project add` 와 TUI 층의 `a` 가 함께 부른다** —
