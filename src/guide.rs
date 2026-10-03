@@ -748,9 +748,10 @@ work. It is a note, not a field.
   note. Only lines that start at the beginning of a line count; indented lines and
   lines inside a fence are read as examples
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
-  are adding several issues up, call the list once instead of calling per id, or let
-  `moai stats --json` add them up: its `work` sums tokens by model and by grade and
-  counts the lines that carry none apart"#;
+  are adding several issues up, call the list once instead of calling per id, with
+  `--archived` so every closed row is in (`--all` leaves out what has stood in done
+  for `archive_days`), or let `moai stats --json` add them up: its `work` sums tokens
+  by model and by grade and counts the lines that carry none apart"#;
 
 /// 통계(moai-1hka). **세는 자는 `report::stats` 하나다** — CLI 와 탐색기(`SPC p s`)가 같은 값을
 /// 읽으므로, 여기 적는 계약은 둘 다의 것이다. 읽는 것은 스냅샷의 필드와 노트의 `model:` 줄뿐이고
@@ -762,9 +763,9 @@ const STATS: &str = r#"    moai stats                           columns, priorit
 
 It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
-`--milestone`). Done, deferred and ideas are opened, because a count of history
-that hides what closed would say nothing closed. In the explorer `SPC p s` opens
-the same numbers as bars, narrowed by the filter that is hung.
+`--milestone`). Done, deferred, ideas and the archive are opened, because a
+count of history that hides what closed would say nothing closed. In the explorer
+`SPC p s` opens the same numbers as bars, narrowed by the filter that is hung.
 
 - **Unknown is not zero.** A done row with no `started_at` (it closed before that
   field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;
@@ -3210,8 +3211,14 @@ stop sending outside work while a release runs",
         assert!(refusal.starts_with(NO_REVIEW_COLUMN), "브리프가 옮겨 적은 거절이 도구의 글과 다르다 — {refusal}");
         // 글은 화면 말을 따른다 — 브리프는 영어 글을 "영어로는" 으로만 싣고 무엇을 읽을지를 말한다.
         assert!(step.contains("screen's language"), "다른 말 화면에서 거절을 못 알아본다");
-        assert!(step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")), "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다");
-        let stale = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "mv.stale"), &[("id", "<member>"), ("now", "review")]);
+        assert!(
+            step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")),
+            "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다"
+        );
+        let stale = crate::i18n::fill(
+            crate::i18n::say(crate::i18n::Lang::En, "mv.stale"),
+            &[("id", "<member>"), ("now", "review")],
+        );
         assert!(stale.contains("already stands review"), "다시 돌아온 판의 거절 글이 바뀌었다 — {stale}");
         assert!(step.contains("already stands `review`"), "이미 review 에 선 멤버를 두라는 말이 없다");
 

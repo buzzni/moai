@@ -2056,6 +2056,25 @@ pub fn column<'x>(i: &'x Issue, states: &BTreeMap<GroupKey<'_>, &'x str>) -> &'x
     stands_on(i, |k| states.get(&k).copied()).unwrap_or(i.status.as_str())
 }
 
+/// 아카이브인가(moai-47mz) — **서 있는 칸이 done 이고, 그 칸에 든 지 `days` 날이 지났다.** `days` 가 0 이면
+/// 아카이브가 없다(`archive_days = 0`).
+///
+/// **저장하지 않는다** — 칸과 그 칸에 든 때와 지금 시각으로 재는 파생값이다. 새 필드도 칸도 명령도 없다
+/// (2026-10-03 사용자 결정). 지금 시각은 부르는 쪽이 건넨다(`MOAI_NOW` 로 시험한다).
+///
+/// - `column` 은 **서 있는 칸**([`column()`])이다 — 묶음이면 멤버에서 읽은 칸이라, 멤버가 남은 에픽을 손으로
+///   `done` 에 뒀다고 숨지 않는다. done 에서 되돌린 줄은 `done_at` 이 남아도 done 이 아니니 아니다
+/// - `since` 는 **그 칸에 든 때**다 — `show --done <폭>` 이 재는 시계와 같은 자(`query::Where::since`)라, 두
+///   물음이 한 줄을 다르게 재지 않는다(사용자 결정). `mv` 로 닫은 줄이면 `done_at` 과 같은 값이고, 그 필드 전에
+///   닫힌 옛 줄에도 있다. 묶음이면 멤버가 마지막으로 칸을 옮긴 때([`Stand::since`])라, 멤버 하나라도 최근에
+///   끝났으면 묶음도 안 숨는다 — 속이 빈 폴더가 안 선다. 닫힌 idea 와 묶음도 같은 규칙이다(사용자 결정)
+/// - **못 읽는 시각은 아카이브가 아니다** — 숨기면 손으로 고친 줄 하나가 말없이 사라진다. 보이는 쪽이 싸다
+///
+/// "지났다" 는 **온 날로 센다**([`crate::model::days_since`]) — `days` 날이 꼬박 찬 순간부터 숨는다.
+pub fn archived(column: &str, since: &str, now: &str, days: i64) -> bool {
+    days > 0 && column == crate::config::DONE && days_since(since, now).is_some_and(|d| d >= days)
+}
+
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
 /// 아니거나 못 받았으면 없다.
 ///
@@ -4990,6 +5009,8 @@ pub struct StatusReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub milestones: Vec<Roll>,
     pub epics: Vec<Roll>,
+    /// 아카이브라 위 두 목록에서 뺀 묶음의 수(moai-47mz) — **늘 선다**. 0 은 "뺀 것이 없다" 다.
+    pub archived: Archived,
     /// 고칠 것. **알림은 여기 없다.**
     ///
     /// 한때 한 배열에 섞고 `notice` 깃발로만 갈라, 사람 화면과 탐색기는 알림을
@@ -5004,6 +5025,13 @@ pub struct StatusReport {
     /// 보고서에서는 비어 있다: 그 줄들은 위 `warnings` 에 경고 둘로 서 있다.
     #[serde(skip)]
     pub dues: Dues,
+}
+
+/// 아카이브라 보드의 목록에서 뺀 묶음의 수(moai-47mz). 줄은 안 든다 — 보는 길은 `moai show --archived` 다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Archived {
+    pub milestones: usize,
+    pub epics: usize,
 }
 
 impl StatusReport {
@@ -5258,9 +5286,10 @@ pub fn status_in<'a>(
         let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
         Roll { column, deferred, ..r }
     };
-    let epics: Vec<Roll> = rolls.iter().filter(|r| r.id.is_some()).cloned().map(|r| stood(in_epic.kind(), r)).collect();
+    let mut epics: Vec<Roll> =
+        rolls.iter().filter(|r| r.id.is_some()).cloned().map(|r| stood(in_epic.kind(), r)).collect();
     // 마일스톤을 하나도 안 쓰는 저장소에는 줄도 경고도 내지 않는다.
-    let stones: Vec<Roll> = rollup_of_in(issues, cfg, &in_stone, &eclipsed)
+    let mut stones: Vec<Roll> = rollup_of_in(issues, cfg, &in_stone, &eclipsed)
         .into_iter()
         .filter(|r| r.id.is_some())
         .map(|r| stood(in_stone.kind(), r))
@@ -5710,11 +5739,30 @@ pub fn status_in<'a>(
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed = happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
 
+    // **아카이브된 묶음은 목록에서 빼고 수만 든다**(moai-47mz, 2026-10-03 사용자 결정) — 끝난 지 오래된 에픽이
+    // 다 서면 이 저장소에서 보드가 270줄이다. 재는 자는 줄과 같은 [`archived`] 고, 칸은 위에서 곁들인 읽은 칸,
+    // 때는 그 칸의 셈이 마지막으로 움직인 때([`Stand::since`])다 — `show --done` 이 묶음을 재는 시계와 같다.
+    //
+    // **경고를 다 센 뒤에 뺀다**(리뷰 moai-47mz.5il) — 아카이브는 보드의 목록을 줄이는 보기의 일이다. 위의 1-2 가
+    // "마일스톤을 쓰는 저장소인가" 를 이 목록으로 묻는데, 먼저 빼던 판은 끝난 릴리스만 남은 저장소에서 `no_milestone`
+    // 이 시계를 따라 꺼졌다가 새 마일스톤 하나에 도로 켜졌다 — Stop 훅은 그것을 기준선보다 는 경고로 읽는다.
+    let aged = |r: &Roll| {
+        r.id.as_deref().is_some_and(|id| {
+            let since = group_since.get(id).copied().unwrap_or_default();
+            archived(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days)
+        })
+    };
+    let before = (stones.len(), epics.len());
+    stones.retain(|r| !aged(r));
+    epics.retain(|r| !aged(r));
+    let put_away = Archived { milestones: before.0 - stones.len(), epics: before.1 - epics.len() };
+
     StatusReport {
         counts,
         total: work.len(),
         milestones: stones,
         epics,
+        archived: put_away,
         warnings,
         notices,
         flow: Flow { days: cfg.status.flow_days, created, done: closed, net: created as i64 - closed as i64 },
@@ -7598,6 +7646,43 @@ mod tests {
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
         assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
+    }
+
+    /// **아카이브된 묶음은 보드의 목록에서 빠지고 수로만 남는다**(moai-47mz, 2026-10-03 사용자 결정). 묶음은
+    /// 멤버가 마지막으로 칸을 옮긴 때로 잰다 — 최근에 끝난 멤버가 하나라도 있으면 남는다. 마일스톤도 같다.
+    #[test]
+    fn archived_groups_leave_the_board_and_are_counted() {
+        let closed = |id: &str, epic: &str, at: &str| {
+            let mut i = member(id, epic, "done");
+            i.status_since = at.into();
+            i
+        };
+        let mut old_epic = make("argos-0001", Kind::Epic, "todo");
+        old_epic.milestone = Some("argos-m001".into());
+        let issues = vec![
+            make("argos-m001", Kind::Milestone, "todo"),
+            old_epic,
+            closed("argos-0002", "argos-0001", "2026-09-01T00:00:00Z"),
+            make("argos-0003", Kind::Epic, "todo"),
+            closed("argos-0004", "argos-0003", "2026-09-01T00:00:00Z"),
+            closed("argos-0005", "argos-0003", "2026-09-20T00:00:00Z"),
+            make("argos-0006", Kind::Epic, "todo"),
+            member("argos-0007", "argos-0006", "todo"),
+        ];
+        let st = status(&issues, &[], &cfg(), "2026-09-30T00:00:00Z", utc());
+        let ids = |rolls: &[Roll]| rolls.iter().filter_map(|r| r.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&st.epics), ["argos-0003", "argos-0006"], "최근 멤버가 있는 에픽이나 열린 에픽이 빠졌다");
+        assert!(ids(&st.milestones).is_empty(), "멤버가 다 오래 끝난 마일스톤이 남았다");
+        assert_eq!(st.archived, Archived { milestones: 1, epics: 1 });
+        // **경고는 아카이브를 안 본다**(리뷰 moai-47mz.5il) — 마일스톤이 다 아카이브여도 이 저장소는 마일스톤을
+        // 쓰니, 그 밖의 열린 일(argos-0007)은 `no_milestone` 으로 남는다. 목록에서 먼저 빼던 판은 이 경고가 시계를
+        // 따라 꺼졌다가 새 마일스톤 하나에 도로 켜졌다.
+        assert!(kinds(&st).contains(&"no_milestone"), "{:?}", kinds(&st));
+        // 날수를 끄면 아무것도 안 뺀다 — 경고는 날수와 상관없이 같다.
+        let off = Config::parse("prefix = \"argos\"\narchive_days = 0\n").unwrap();
+        let all = status(&issues, &[], &off, "2026-09-30T00:00:00Z", utc());
+        assert_eq!((all.epics.len(), all.milestones.len(), all.archived), (3, 1, Archived::default()));
+        assert_eq!(kinds(&st), kinds(&all), "아카이브 날수가 경고를 바꿨다");
     }
 
     /// 마일스톤을 안 쓰는 저장소에는 마일스톤 이야기를 꺼내지 않는다.

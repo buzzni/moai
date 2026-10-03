@@ -1723,9 +1723,12 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
 /// (`site: None`) 한눈 보기의 목록에 남의 프로젝트의 줄이 한 번도 안 서고, 그 줄을 그리는 길
 /// (`draw::row_line` 의 `Seat::Place`)을 그림 시험이 통째로 안 지난다 — 남의 줄이 제 프로젝트의
 /// 칸과 색으로 서는지를 아무도 안 보는 자리가 거기 있었다.
+///
+/// **아카이브는 끈다** — 까닭은 `App::new` 와 같다(박아 둔 날짜와 흐르는 벽시계, moai-47mz).
 #[cfg(test)]
 pub(super) fn fill(layer: &mut Layer, at: usize, issues: Vec<crate::model::Issue>, cfg: crate::config::Config) {
-    let (index, ground) = crate::tui::measure(&issues, &cfg);
+    let (index, mut ground) = crate::tui::measure(&issues, &cfg);
+    ground.archive_days = 0;
     layer.places[at].site = Some(super::Site::of(issues, index, ground, cfg, crate::nav::Path::new(), Vec::new()));
 }
 

@@ -298,6 +298,8 @@ pub struct Hidden {
     pub done: usize,
     pub ideas: usize,
     pub deferred: usize,
+    /// done 에 든 지 오래된 줄(moai-47mz) — `--all` 이 아니라 `--archived` 가 연다.
+    pub archived: usize,
 }
 
 impl Hidden {
@@ -305,12 +307,13 @@ impl Hidden {
     ///
     /// **`done`·`idea` 는 번역하지 않는다** — 칸 이름과 종류는 설정과 자료에서 오는 낱말이고,
     /// 바로 뒤의 플래그(`--all`·`--type idea`)가 그 글자를 그대로 받는다. 옮기면 화면이 대는
-    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸만 낱말이라 말묶음에서 온다(`status.put_off`).
+    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸과 아카이브는 낱말이라 말묶음에서 온다(`status.put_off`·`list.archive`).
     fn says(&self, lang: Lang) -> Vec<String> {
         [
             (self.done, "done", "--all"),
             (self.deferred, say(lang, "status.put_off"), "--deferred"),
             (self.ideas, "idea", "--type idea"),
+            (self.archived, say(lang, "list.archive"), "--archived"),
         ]
         .into_iter()
         .filter(|(n, _, _)| *n > 0)
@@ -326,6 +329,7 @@ impl Hidden {
             Hide::Done => self.done += 1,
             Hide::Idea => self.ideas += 1,
             Hide::Deferred => self.deferred += 1,
+            Hide::Archived => self.archived += 1,
             Hide::Unopenable => {}
         }
     }
@@ -991,7 +995,11 @@ pub fn status(
         format!(
             "{}  {}       {}{overlaid}",
             paint(style::HEAD, &fill(say(lang, "status.issues"), &[("n", &st.total.to_string())])),
-            paint(style::DIM, &fill(say(lang, "status.epics"), &[("n", &st.epics.len().to_string())])),
+            // 에픽 수는 **트래커에 있는 에픽 전부**다 — 아카이브로 목록에서 뺀 것도 센다(moai-47mz).
+            paint(
+                style::DIM,
+                &fill(say(lang, "status.epics"), &[("n", &(st.epics.len() + st.archived.epics).to_string())])
+            ),
             paint(style::DIM, at),
         ),
         String::new(),
@@ -1000,14 +1008,18 @@ pub fn status(
     out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
-    for (label, rolls) in
-        [(say(lang, "status.milestone_label"), &st.milestones), (say(lang, "status.epic_label"), &st.epics)]
-    {
-        if rolls.is_empty() {
+    // **아카이브된 묶음은 수 한 줄로 선다**(moai-47mz) — 목록은 그 줄을 뺐고(`report::Archived`), 그 줄을 보는
+    // 명령을 함께 댄다. 마일스톤이 다 아카이브여도 머리글은 선다 — 안 서면 두 수가 어느 목록의 것인지 모른다.
+    let labelled = !st.milestones.is_empty() || st.archived.milestones > 0;
+    for (label, rolls, aged, kind) in [
+        (say(lang, "status.milestone_label"), &st.milestones, st.archived.milestones, "milestone"),
+        (say(lang, "status.epic_label"), &st.epics, st.archived.epics, "epic"),
+    ] {
+        if rolls.is_empty() && aged == 0 {
             continue;
         }
         out.push(String::new());
-        if !st.milestones.is_empty() {
+        if labelled {
             out.push(paint(style::DIM, label));
         }
         let heads: Vec<(String, usize)> = rolls
@@ -1051,6 +1063,11 @@ pub fn status(
                 aside,
                 note,
             ));
+        }
+        if aged > 0 {
+            let how = format!("moai show --type {kind} --archived");
+            let line = fill(say(lang, "status.archived"), &[("n", &aged.to_string()), ("how", &how)]);
+            out.push(paint(style::DIM, &format!("  {line}")));
         }
     }
 

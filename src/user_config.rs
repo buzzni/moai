@@ -1013,6 +1013,7 @@ impl Doc {
             hidden: look_words(t, HIDDEN, &mut problems),
             hide_deferred: look_one(t, HIDE_DEFERRED, Want::Bool, Item::as_bool, &mut problems),
             hide_ideas: look_one(t, HIDE_IDEAS, Want::Bool, Item::as_bool, &mut problems),
+            show_archived: look_one(t, SHOW_ARCHIVED, Want::Bool, Item::as_bool, &mut problems),
             sort: look_one(t, SORT, Want::Word, word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
@@ -1069,6 +1070,7 @@ impl Doc {
         let mut hidden = base.hidden != new.hidden;
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
         let mut hide_ideas = base.hide_ideas != new.hide_ideas;
+        let mut show_archived = base.show_archived != new.show_archived;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
         // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
@@ -1127,6 +1129,7 @@ impl Doc {
         odd(&[HIDDEN], true, &mut hidden);
         odd(&[HIDE_DEFERRED], false, &mut hide_deferred);
         odd(&[HIDE_IDEAS], false, &mut hide_ideas);
+        odd(&[SHOW_ARCHIVED], false, &mut show_archived);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
         odd(&[FIELDS], true, &mut fields);
         odd(&[FIELDS_KNOWN], true, &mut known);
@@ -1148,6 +1151,9 @@ impl Doc {
         }
         if hide_ideas {
             changed |= put_value(t, HIDE_IDEAS, new.hide_ideas.map(toml_edit::Value::from), &mut left);
+        }
+        if show_archived {
+            changed |= put_value(t, SHOW_ARCHIVED, new.show_archived.map(toml_edit::Value::from), &mut left);
         }
         if sort {
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1220,6 +1226,9 @@ const HIDE_DEFERRED: &str = "hide_deferred";
 /// idea 를 숨기는가(moai-oagj.bjr) — 미룸([`HIDE_DEFERRED`])처럼 칸이 아니라 축이라 칸 이름 목록([`HIDDEN`])에
 /// 섞지 않는다. 섞으면 `idea` 라는 칸을 쓰는 설정에서 두 뜻이 한 낱말을 두고 갈린다.
 const HIDE_IDEAS: &str = "hide_ideas";
+/// 아카이브(done 에 든 지 오래된 줄)를 보이는가(moai-47mz) — `SPC v o`. **처음값이 숨김이라 `show_` 다** —
+/// 미룸·idea 는 처음에 보이고 사람이 숨기는 것이라 `hide_` 지만, 아카이브는 처음부터 숨고 사람이 켠다.
+const SHOW_ARCHIVED: &str = "show_archived";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
@@ -1251,6 +1260,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// hidden = ["done"]
 /// hide_deferred = false
 /// hide_ideas = false
+/// show_archived = false
 /// detail = true
 /// detail_at = "right"
 /// layout = "board"
@@ -1270,6 +1280,8 @@ pub struct Look {
     pub hidden: Option<Vec<String>>,
     pub hide_deferred: Option<bool>,
     pub hide_ideas: Option<bool>,
+    /// 아카이브를 보이는가(moai-47mz). 없으면 숨긴다 — [`SHOW_ARCHIVED`].
+    pub show_archived: Option<bool>,
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
@@ -3114,6 +3126,7 @@ mod tests {
             hidden: Some(vec!["done".into(), "review".into()]),
             hide_deferred: Some(true),
             hide_ideas: Some(true),
+            show_archived: Some(true),
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
@@ -3372,6 +3385,7 @@ mod tests {
             hidden: Some(vec!["done".into()]),
             hide_deferred: Some(false),
             hide_ideas: None,
+            show_archived: None,
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),

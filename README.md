@@ -138,6 +138,14 @@ columns side by side, one lane per milestone, and in the overview one header
 per project — and keeps that choice for the next run. `SPC v i` hides the
 ideas, and a card that is not yours says whose it is.
 
+Done work that has sat in done for two weeks is the archive. It is not removed
+and nothing is stored for it — moai reads it off the column and the clock each
+time. The list, the board and `moai status` leave it out even when done is
+shown, and say how many they left; `SPC v o` in the explorer and `moai show
+--archived` bring it back. `/` search finds it anyway, and so does `moai show
+-g` once done is let in with `--all`.
+`archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns it off.
+
 ## Working in parallel
 
 Several sessions in one repository is the normal case, not the exception.
@@ -297,8 +305,10 @@ journal, so look at what the line held and then delete it by hand. A whole line
 that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
-`moai show --all --json`, plus `moai idea show --all --json` since `--all` still
-leaves ideas out. An id missing from the new pull was removed.
+`moai show --archived --json`, plus `moai idea show --archived --json` since
+`moai show` leaves ideas out. `--all` is not enough for either: it leaves the
+archive out, and a closed idea goes to the archive like any other done row. An
+id missing from the new pull was removed.
 
 ### Counting
 
@@ -333,13 +343,13 @@ rows — so name the columns you read:
 moai show --type issue --json | jq -r 'group_by(.derived_epic) | .[] | "\(.[0].derived_epic // "none")\t\(length)"'
 
 # rows per column - a group stands in the column its members give it
-moai show --all --json | duckdb -c "
+moai show --archived --json | duckdb -c "
   SELECT coalesce(derived_status, status) AS col, kind, count(*) AS n
   FROM read_json('/dev/stdin', columns = {status: 'VARCHAR', derived_status: 'VARCHAR', kind: 'VARCHAR'})
   GROUP BY ALL ORDER BY n DESC"
 
 # tokens per model, read from the `model:` note lines on each issue
-moai show --all --json | duckdb -c "
+moai show --archived --json | duckdb -c "
   SELECT w.model, sum(w.tokens) AS tokens
   FROM (SELECT unnest(work) AS w
         FROM read_json('/dev/stdin', columns = {work: 'STRUCT(model VARCHAR, tokens BIGINT)[]'}))
