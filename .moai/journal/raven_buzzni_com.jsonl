@@ -3386,3 +3386,18 @@
 {"ts":"2026-10-03T18:40:04Z","id":"moai-cul6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-03T18:54:03Z","id":"moai-cul6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: develop 은 f4014413 까지 push 했다(릴리스 커밋 688422f9). 남은 것 — develop→main PR(스쿼시 금지), origin/main 머지 커밋에 v0.4.0 태그, 태그 push, 워크플로 확인. gh pr create 가 auto mode 분류기에 막혀(Production Deploy) 사람이 직접 하거나 허락해야 한다. PR 본문은 CHANGELOG [0.4.0] 절"}
 {"ts":"2026-10-03T19:25:25Z","id":"moai-cul6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.4.0 released: release commit 688422f9, PR #17 merged as 2ccc590e, tag v0.4.0 on 2ccc590e, release run 37147523305 succeeded; a first tag on bf45b7f1 was removed after its run failed the version check"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-e0qk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"거름망 글을 읽는 자가 둘 — query::split_items 가 자리(바이트 폭)를 내면 hint::slot 이 그것을 쓴다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-f6gq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill::spelled 가 hook::resolve_path 와 같은 접기를 따로 든다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-cv1o","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"rm re-derives dangling references in cmd/ instead of reusing report"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-qi8w","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"줄을 바꾸는 길마다 커서 자리 재기를 손으로 감싼다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-j2m5","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"서머타임이 끝나는 한 시간에 분으로 친 끝이 거꾸로 견준다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-jh44","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"옛 바이너리가 섞인 기계에서 지난 답이 새 답으로 선다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-co0q","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"묶음의 닫힌 때가 멤버의 먼 미래 시각을 받는다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-3q0h","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"등록하는 범위의 update 만 실패하면 옛 판인 채 걷힌다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-u9w6","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"stdin 이 UTF-8 이 아니면 code error·영어로 거절한다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-n0f0","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"note -b - 가 첫 줄 들여쓰기를 걷고 BOM 을 글로 남긴다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-tmlg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"좁은 카드에서 [NEW]·가지 표시가 몸을 채우면 / 가 잘린다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-teq7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"검색어에 / 가 들면 폴더 표시까지 칠한다"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-nwn4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh prints old → new even when the version line was not rewritten"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-gpc4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bumping_moves_the_lock_line_with_the_manifest failed once in a parallel sweep"}
+{"ts":"2026-10-03T19:45:22Z","id":"moai-1qv4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"store write validation looks up each row in the original by linear scan (O(n^2))"}
