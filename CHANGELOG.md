@@ -12,6 +12,20 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **An `AGENTS.md` that links out of the checkout or into `.git/`, or is not a
+  regular file, is no longer read.** `moai init` leaves it alone, plants
+  everything else and names the file and why — put a regular file there to get
+  the block, or pass `--no-agents` — and under `--json` it stands in `untouched`
+  as `unreadable`. `moai init --check` exits non-zero naming it, and the
+  stale-block notice on `moai status` stays quiet. Such a link used to be read:
+  `init` said it could not write the block (`unwritable`), while `status` and
+  `--check` reported the block of a file outside the repository. A directory
+  there used to stop `init` with the system's `Is a directory`. An `AGENTS.md`
+  that cannot be read for permissions or encoding still stops `init` before
+  anything is planted.
+
 ### Fixed
 
 - **The explorer's `Journal` header row clears once the journal can be read
@@ -23,6 +37,33 @@ does not tag — see `CONTRIBUTING.md`.
   open — that window's token totals were counted without the file, and the row is
   what says so. What `moai tui` prints when it quits, and its exit code, still
   name every journal it failed to read along the way.
+
+- **The board no longer hangs or runs out of memory on the files `moai init`
+  looks after.** `AGENTS.md`, `.gitignore`, `.gitattributes` and `CLAUDE.md` are
+  now read the way the snapshot is: only a regular file inside the checkout and
+  outside `.git/`, and no further than the size its open handle gives. A FIFO in
+  place of `AGENTS.md`, `.gitignore` or `.gitattributes` hung `moai status`, the
+  hook's first board, the overview outside a tracker and the explorer, `moai
+  init` waited on any of the four, and a committed `AGENTS.md -> /dev/zero` ran
+  them out of memory. In a git repository git itself still waits on a FIFO
+  `.gitattributes` under `moai init` and `init --check`. A dotfile that is not
+  read is passed over the way one that cannot be read always was, and `init` no
+  longer asks for an `@AGENTS.md` pointer in a `CLAUDE.md` it cannot read.
+
+- **`moai init` no longer swaps the repository lock through a link.** A
+  committed `AGENTS.md -> .moai/lock` made `init` replace the lock file once,
+  and writes running at that moment stopped keeping each other out. No file the
+  repository holds is written through a link that lands on a repository lock —
+  the one under `.moai`, the one beside a linked `.moai/issues.jsonl`, or those
+  of a tracker nested inside the checkout. The lock is matched as a file, so a
+  name in another case on a case-insensitive volume is caught too. Such a write
+  names the lock, says to put a regular file in place of the link, and changes
+  nothing.
+
+- **`moai init` no longer plants ignore or merge rules for a place inside
+  `.git/`.** When `.moai` or `.moai/issues.jsonl` linked into `.git/`, `init`
+  wrote rules for that place into `.gitignore` and `.gitattributes`, where git
+  never looks.
 
 ## [0.4.0] - 2026-10-03
 

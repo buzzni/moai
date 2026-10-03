@@ -1301,11 +1301,24 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     std::fs::write(&rc, "# 사람의 rc\n").unwrap();
     let cloned = Scratch::new("init-link-cloned");
     std::os::unix::fs::symlink(&rc, cloned.path().join("AGENTS.md")).unwrap();
+    // **읽지도 않는다**(moai-x0o7) — 스냅샷과 같은 자로 읽는다. 그 파일만 못 건드린 자리로 대고 나머지는
+    // 심는다(리뷰 moai-x0o7.52k 5번) — 멈추던 판은 하위 트래커의 `AGENTS.md -> ../AGENTS.md` 에서 `init` 이 늘
+    // 1 로 끝나, 보드가 대는 `moai init` 이 막다른 길이 됐다.
     let out = moai(cloned.path(), &["init", "argos"]);
     let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "안 읽은 AGENTS.md 하나로 init 이 멈췄다\n{said}");
+    assert!(cloned.path().join(".moai/config.toml").is_file(), "트래커를 안 심었다\n{said}");
     assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 고쳐 썼다");
     assert!(is_link(&cloned.path().join("AGENTS.md")), "링크를 갈아끼웠다");
-    assert!(said.contains("outside"), "왜 안 썼는지를 안 댔다\n{said}");
+    assert!(said.contains("AGENTS.md") && said.contains("밖이다"), "왜 안 읽었는지를 안 댔다\n{said}");
+    // 고칠 말은 까닭을 따른다(리뷰 moai-x0o7.52k) — 읽히고 쓸 수도 있는 파일에 "쓸 수 있게 고쳐라" 를 대면 사람은
+    // 권한을 고치러 간다.
+    assert!(
+        said.contains("보통 파일을 두고") && said.contains("--no-agents") && !said.contains("쓸 수 있게 고치고"),
+        "고칠 말이 까닭과 다르다\n{said}"
+    );
+    let json = ok(cloned.path(), &["init", "--json"]);
+    assert!(json.contains(r#""AGENTS.md":{"kind":"unreadable""#) && json.contains(r#""agents":false"#), "{json}");
 
     // **덧붙이는 파일도 같다**(moai-wd44) — `O_APPEND` 도 링크를 따라가, `.gitignore -> ~/.bashrc` 에
     // `init` 이 줄을, `.moai/journal/<사람>.jsonl -> ~/.bashrc` 에 `add` 가 JSON 을 붙이던 자리다.
@@ -1342,6 +1355,99 @@ fn symlinked_agents_md_and_issue_file_stay_links() {
     assert_eq!(std::fs::read_to_string(&rc).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일에 저널 줄을 붙였다");
     assert!(is_link(&journals[0]) && said.contains("outside"), "왜 안 적었는지를 안 댔다\n{said}");
     assert!(issues(root).contains("저널이 밖을 가리킨다"), "스냅샷은 담겨야 한다 — 저널만 빠진다");
+}
+
+/// **AGENTS.md·딸린 파일·CLAUDE.md 를 스냅샷과 같은 자로 읽는다**(moai-x0o7). 맨 `fs::read_to_string` 으로
+/// 읽던 판은 `mkfifo AGENTS.md` 하나로 `moai status`(훅의 첫 보드와 밖 한눈 보기가 같은 길이다)와
+/// `init --check` 가 쓰는 쪽을 영영 기다렸고, FIFO 인 `.gitignore`·`.gitattributes`·`CLAUDE.md` 앞에서는
+/// `status` 와 `init` 이 그랬다. 고침이 없으면 멈추므로 마감을 두고 부른다 — 멈춘 프로세스는 죽이고 시험이
+/// 진다. 임시 자리는 git 저장소가 아니다: git 이 FIFO 인 `.gitattributes` 를 읽다 멈추는 것은 이 시험이
+/// 재는 것이 아니다.
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing() {
+    let fifo = |p: &Path| {
+        let _ = std::fs::remove_file(p);
+        let made = Command::new("mkfifo").arg(p).status().expect("mkfifo 를 못 돌렸다");
+        assert!(made.success(), "FIFO 를 못 지었다: {}", p.display());
+    };
+    let bounded = |dir: &Path, args: &[&str]| -> (bool, String) {
+        let mut child = staged(args)
+            .current_dir(dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("moai 를 못 띄웠다");
+        for _ in 0..600 {
+            if child.try_wait().unwrap().is_some() {
+                let out = child.wait_with_output().unwrap();
+                let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+                return (out.status.success(), said);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("moai {args:?} 가 멈췄다 — FIFO 를 막히지 않게 열지 않았다");
+    };
+
+    let s = init("fifo-agents");
+    fifo(&s.path().join("AGENTS.md"));
+    let (done, said) = bounded(s.path(), &["status"]);
+    assert!(done, "FIFO 인 AGENTS.md 하나로 보드가 섰다\n{said}");
+    let (done, said) = bounded(s.path(), &["init", "--check"]);
+    assert!(!done && said.contains("보통 파일이 아니다"), "못 읽은 까닭을 안 댔다\n{said}");
+    // 심는 길은 그 파일만 건너뛰고 이어 간다 — 그 자리는 쓰기도 거절해 지킬 산문이 없다(리뷰 moai-x0o7.52k 5번).
+    let (done, said) = bounded(s.path(), &["init"]);
+    assert!(
+        done && said.contains("보통 파일이 아니다") && said.contains("--no-agents"),
+        "까닭과 고칠 말을 안 댔다\n{said}"
+    );
+    let (done, said) = bounded(s.path(), &["init", "--no-agents"]);
+    assert!(done, "--no-agents 로도 못 심었다\n{said}");
+    // **처음 심는 길도 같다** — 이미 심은 자리에서는 트래커를 세우는지가 안 보이므로 안 심은 자리에서 잰다.
+    let fresh = Scratch::new("fifo-agents-fresh");
+    fifo(&fresh.path().join("AGENTS.md"));
+    let (done, said) = bounded(fresh.path(), &["init", "argos"]);
+    assert!(done && fresh.path().join(".moai/config.toml").is_file(), "안 읽은 AGENTS.md 하나로 못 심었다\n{said}");
+    let kind = std::fs::symlink_metadata(fresh.path().join("AGENTS.md")).unwrap().file_type();
+    assert!(!kind.is_file() && !kind.is_symlink(), "FIFO 를 보통 파일로 갈아끼웠다");
+
+    let s = init("fifo-dotfiles");
+    for name in [".gitignore", ".gitattributes", "CLAUDE.md"] {
+        fifo(&s.path().join(name));
+    }
+    let (done, said) = bounded(s.path(), &["status"]);
+    assert!(done, "FIFO 인 딸린 파일 하나로 보드가 섰다\n{said}");
+    // **안 읽은 딸린 파일은 빠진 줄로 말하지 않는다**(리뷰 moai-x0o7.52k) — 무엇이 들었는지 모르고, `init` 도 그
+    // 파일은 안 건드리므로 그 알림은 영영 안 걷힌다(`dotfile_gaps`).
+    let (done, said) = bounded(s.path(), &["status", "--json"]);
+    assert!(done && !said.contains("gitignore_rules") && !said.contains("gitattributes_rules"), "{said}");
+    let (done, said) = bounded(s.path(), &["init"]);
+    assert!(done, "못 읽은 딸린 파일 하나로 init 이 멈췄다\n{said}");
+    assert!(said.contains(".gitignore") && said.contains("보통 파일이 아니다"), "못 읽은 까닭을 안 댔다\n{said}");
+    // **못 읽는 CLAUDE.md 에는 가리킴이 빠졌다고 안 한다** — 무엇이 들었는지 모른다.
+    assert!(!said.contains("@AGENTS.md"), "못 읽은 CLAUDE.md 에 가리킴을 더하라고 했다\n{said}");
+}
+
+/// **`init` 은 저장소 락으로 풀리는 `AGENTS.md` 를 따라 쓰지 않는다**(moai-x0o7.97w). 커밋된
+/// `AGENTS.md -> .moai/lock` 이면 링크를 따라 락을 `rename` 으로 한 번 갈아끼웠다 — 그때 다른 쓰기가 쥔 락은
+/// 지워진 아이노드에 남아, 그 사이에 든 쓰기 둘이 서로를 못 막았다. 못 쓴 것은 끊지 않고 말한다(moai-780n).
+#[cfg(unix)]
+#[test]
+fn init_never_swaps_the_lock_through_agents_md() {
+    use std::os::unix::fs::MetadataExt;
+    let s = init("init-agents-lock");
+    let (agents, lock) = (s.path().join("AGENTS.md"), s.path().join(".moai/lock"));
+    std::fs::write(&lock, "").unwrap();
+    std::fs::remove_file(&agents).unwrap();
+    std::os::unix::fs::symlink(".moai/lock", &agents).unwrap();
+    let before = std::fs::metadata(&lock).unwrap().ino();
+    let said = ok(s.path(), &["init"]);
+    assert_eq!(std::fs::metadata(&lock).unwrap().ino(), before, "AGENTS.md 링크를 따라 락을 갈아끼웠다\n{said}");
+    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "", "락에 블록을 썼다");
+    assert!(std::fs::symlink_metadata(&agents).unwrap().file_type().is_symlink(), "AGENTS.md 링크를 갈아끼웠다");
+    assert!(said.contains("the lock moai holds"), "왜 안 썼는지를 안 댔다\n{said}");
 }
 
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.

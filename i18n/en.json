@@ -617,6 +617,7 @@
   "init.unreadable": "  {name} could not be read, so it was left alone — {why}",
   "init.linked": "  {name} is a symbolic link ({to}), which git 2.32 and later never read, so it was left alone",
   "init.untouched_fix": "    make it writable and call again — `moai init --check` says what state the block is in",
+  "init.agents_unheld_fix": "    put a regular file there to get the block, or call with `--no-agents` to leave it be",
   "init.linked_fix": "    replace it with a regular file that holds what the link points at, then call `moai init` again",
   "init.linked_fix_outside": "    it points outside this checkout — do not copy that file in: remove the link and call `moai init` again, which starts a regular file",
   "init.untouched_hand": "    lines to add by hand (you can fix it and call `moai init` again):",
