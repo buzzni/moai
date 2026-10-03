@@ -72,6 +72,20 @@ does not tag — see `CONTRIBUTING.md`.
   outside the archive and counts the rest in one line, `archived` in `--json`.
   `moai stats` counts it as before.
 
+- **The filter text takes four more time items, minutes and `~` ranges.**
+  `created_at=`, `updated_at=`, `started_at=` and `done_at=` — in `--filter`
+  and the explorer's `SPC f` — are named after the `--json` fields and read
+  the row's own field: a group's too, never its members', and a row without
+  that field falls in no range. `done_at=` stays when a row is reopened, so add
+  `status=done` for what is closed now; `since=`, `created=` and `done=` keep
+  their meaning. Every time filter, flags included, now also takes
+  `YYYY-MM-DD HH:MM` — that one minute on your own clock, the way a lone day is
+  that whole day — and a range written `from~to` as well as `from..to`, either
+  side open: `done_at="2026-10-03 00:00~2026-10-05 23:59"` runs to 23:59:59. In
+  `SPC f` a value right after `=` may be quoted (`"…"` or `'…'`) and is then
+  one value with its spaces; a quote anywhere else is a character, so
+  `grep=don't` still finds what it did.
+
 ### Changed
 
 - **`moai show --all` and `-s done` leave the archive out.** They used to give
@@ -150,6 +164,12 @@ does not tag — see `CONTRIBUTING.md`.
   `moai init` writes have one. Closing after the merge is unchanged — `moai mv
   <member> done` closes from either column. Run `moai skill install` to plant
   the new text.
+
+- **Giving the assignee filter twice picks either one.** `-a 철수 -a 영희`,
+  `assignee=` repeated in `--filter` or `SPC f`, and the two mixed are one
+  list read as or, the same as a comma. They used to be refused as a filter
+  used twice — a row has one assignee, so "and" never picked anything. It is
+  the one filter where repeating is not and.
 
 ### Removed
 
