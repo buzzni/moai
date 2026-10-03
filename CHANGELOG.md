@@ -71,6 +71,15 @@ does not tag — see `CONTRIBUTING.md`.
   `-g` once done is let in with `--all`. `moai status` lists only the milestones and epics
   outside the archive and counts the rest in one line, `archived` in `--json`.
   `moai stats` counts it as before.
+- **The explorer's filter field says what it takes.** While `SPC f` is open, a
+  panel above the field lists the keys and a few examples. With the cursor in
+  the value of `assignee=`, `tag=`, `no-tag=` or `milestone=`, the panel lists
+  the values this tracker holds instead: people as `name (email)` (picking one
+  puts in the email), tags, and milestones by id and title, with `me` and
+  `none` where they apply. Typing narrows the list, `Up` and `Down` pick a
+  value and `Enter` puts it in. When no list is showing, `Enter` applies the
+  filter as before. The panel pushes the list up rather than covering it, the
+  same way the `SPC` menu does.
 
 ### Changed
 
