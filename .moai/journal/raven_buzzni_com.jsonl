@@ -3105,3 +3105,4 @@
 {"ts":"2026-10-03T07:19:47Z","id":"moai-r1ly.f2x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 커서 규칙이 src/tui/mod.rs·layer.rs 의 다섯 길에 걸치고 에픽 끝 리뷰를 다시 돌려야 했다)"}
 {"ts":"2026-10-03T07:19:48Z","id":"moai-r1ly.f2x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T07:20:24Z","id":"moai-r1ly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: f2x 는 8e43574e 로 머지하고 닫았다(리뷰 moai-r1ly.0d0). 남은 멤버는 첫 칸의 moai-j0jf(보드를 굴려도 고른 카드는 움직이지 않는다) 하나다. 감독이 새 창에 보낸다. j0jf 는 src/tui/mod.rs·board.rs 의 굴리기와 커서(`pull`)를 고치니, 닫는 창이 에픽 끝 리뷰를 그 diff 에 다시 부른다"}
+{"ts":"2026-10-03T07:21:44Z","id":"moai-j0jf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
