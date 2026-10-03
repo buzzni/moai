@@ -3401,3 +3401,44 @@
 {"ts":"2026-10-03T19:45:22Z","id":"moai-nwn4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh prints old → new even when the version line was not rewritten"}
 {"ts":"2026-10-03T19:45:22Z","id":"moai-gpc4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"bumping_moves_the_lock_line_with_the_manifest failed once in a parallel sweep"}
 {"ts":"2026-10-03T19:45:22Z","id":"moai-1qv4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"store write validation looks up each row in the original by linear scan (O(n^2))"}
+{"ts":"2026-10-03T19:47:16Z","id":"moai-c5mz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.5.0"}
+{"ts":"2026-10-03T19:47:42Z","id":"moai-x0o7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 과 읽기가 체크아웃 안의 링크를 믿지 않는다"}
+{"ts":"2026-10-03T19:47:42Z","id":"moai-x0o7.ixq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS.md·.gitignore·.gitattributes·CLAUDE.md 를 held::read_inside 로 읽는다"}
+{"ts":"2026-10-03T19:47:42Z","id":"moai-x0o7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n5uh 에서 펼쳤다 — AGENTS.md·.gitignore·.gitattributes·CLAUDE.md 를 끝없이 읽는다"}
+{"ts":"2026-10-03T19:47:42Z","id":"moai-n5uh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-x0o7 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T19:47:56Z","id":"moai-x0o7.97w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 저장소 락으로 풀리는 링크를 따라 쓰지 않는다"}
+{"ts":"2026-10-03T19:47:56Z","id":"moai-x0o7.97w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-741b 에서 펼쳤다 — init 이 AGENTS.md 링크를 따라 락을 갈아끼운다"}
+{"ts":"2026-10-03T19:47:56Z","id":"moai-741b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-x0o7 의 멤버 moai-x0o7.97w 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-x0o7.2q8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 .git 안을 가리키는 자리에 무시·병합 규칙을 걸지 않는다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-x0o7.2q8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-b21d 에서 펼쳤다 — init 이 .git/ 안 자리에 무시·병합 규칙을 건다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-b21d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-x0o7 의 멤버 moai-x0o7.2q8 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-v4p4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"담당자 판정이 me 와 괄호 든 메일을 바로 읽는다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-v4p4.c2x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"edit -a me 가 지금 사람으로 풀린다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-v4p4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hxri 에서 펼쳤다 — edit -a me stores the literal name \"me\""}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-hxri","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-v4p4 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-v4p4.6w1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"괄호가 든 메일을 이름 (메일) 에서 바로 가른다"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-v4p4.6w1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xcim 에서 펼쳤다 — an email with \"(\" splits wrongly in Name (email)"}
+{"ts":"2026-10-03T19:47:57Z","id":"moai-xcim","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-v4p4 의 멤버 moai-v4p4.6w1 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 커서와 머리줄이 제자리에 선다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg.tea","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC p a 뒤 커서가 새 프로젝트 머리줄에 선다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-k98r 에서 펼쳤다 — SPC p a 뒤 relayer 가 프로젝트 첨자를 줄 첨자로 써 커서가 엉뚱한 줄에 선다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-k98r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mkyg 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg.ncj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"저널을 다시 읽을 수 있으면 머리의 Journal 줄이 걷힌다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg.ncj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2src 에서 펼쳤다 — explorer header Journal row stays after the journal is readable again"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-2src","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mkyg 의 멤버 moai-mkyg.ncj 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg.dcf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거르개 항목을 읽는 자를 split_items 하나로 모은다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-mkyg.dcf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zjez 에서 펼쳤다 — 거르개 글을 읽는 자가 둘이다 — split_items 와 hint::slot"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-zjez","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mkyg 의 멤버 moai-mkyg.dcf 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-yivo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖 한눈 보기·prime·알림이 바로 말한다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-yivo.ext","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"밖 한눈 보기의 --json 이 못 연 프로젝트의 broken 코드를 낸다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-yivo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-oqcm 에서 펼쳤다 — 밖 한눈 보기의 --json 이 broken 코드를 잃는다"}
+{"ts":"2026-10-03T19:47:58Z","id":"moai-oqcm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yivo 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.6je","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"prime 이 없는 트래커와 못 연 트래커를 가른다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.6je","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4wxb 에서 펼쳤다 — prime 이 거절된 트래커를 \"없음\" 으로 읽어 init 을 권한다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-4wxb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yivo 의 멤버 moai-yivo.6je 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.8lh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"note 의 파일 이름 알림이 본문이라 하지 않는다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.8lh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-4oii 에서 펼쳤다 — path notice tells a note its text is the body"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-4oii","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yivo 의 멤버 moai-yivo.8lh 로 펼쳤다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.xe9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv·defer -m 의 글이 파일 이름이면 알린다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.xe9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xmhx 에서 펼쳤다 — mv·defer -m 에 적힌 글이 파일 이름이면 알린다"}
+{"ts":"2026-10-03T19:47:59Z","id":"moai-xmhx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yivo 의 멤버 moai-yivo.xe9 로 펼쳤다"}
