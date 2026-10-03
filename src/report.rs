@@ -898,6 +898,12 @@ pub fn is_idea(i: &Issue) -> bool {
     i.kind == Kind::Idea
 }
 
+/// **아직** 담아 둔 생각인가 — 닫힌 idea(`promote` 로 펼쳤거나 닫은 것)는 담아 둔 것이 아니다. 쌓인 생각의 셈과
+/// 탐색기 보드의 idea 칸(moai-r1ly.91p)이 이 하나로 묻는다.
+pub fn is_open_idea(i: &Issue) -> bool {
+    is_idea(i) && !i.status.is_done()
+}
+
 /// 그 칸 이름을 **이 저장소가 아는가** — `config` 가 대거나, 어느 줄이 실제로 거기 서
 /// 있거나(moai-hym7, 사람이 정했다).
 ///
@@ -5526,7 +5532,7 @@ pub fn status_in<'a>(
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |(k, i): &(usize, &Issue)| is_idea(i) && !i.status.is_done() && off[*k].is_none();
+    let piled = |(k, i): &(usize, &Issue)| is_open_idea(i) && off[*k].is_none();
     let count = issues.iter().enumerate().filter(piled).count();
     // 문턱 0 으로 `쌓인 idea 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
     if count > 0 && count >= cfg.status.idea_pile {

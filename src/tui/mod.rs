@@ -129,6 +129,11 @@ struct CardAt {
     around: Vec<Anchor>,
     /// 옛 배치의 옆 칸 — [`board::beside`] 의 차례다.
     beside: Vec<board::Column>,
+    /// 그 카드가 선 레인과 그 레인의 윗줄에서 카드까지의 줄 수. **높이는 레인 안에서 잰다**(리뷰) — 숨긴 칸이나 빠진
+    /// 카드가 위 레인을 줄이면 옛 캔버스의 줄은 새 배치에서 아래 레인을 가리킨다.
+    lane: LaneOf,
+    depth: usize,
+    /// 옛 캔버스의 줄 — 그 레인이 새 배치에 없을 때만 쓴다.
     top: usize,
     group: usize,
 }
@@ -2225,7 +2230,7 @@ impl App {
     ///
     /// **커서는 번호가 아니라 정체로 따라간다**([`Anchor`]). 보던 줄이 아직 보이면
     /// 그 줄에 서고, 사라졌으면(지워졌거나 거름망에 빠졌으면) 전처럼 그 번호를 목록
-    /// 안으로 자른 자리에 선다.
+    /// 안으로 자른 자리에 선다 — 보드는 그 카드가 섰던 칸 곁이다([`App::regrip`]).
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
         let (index, ground) = measure(&issues, &self.site.cfg);
@@ -2267,6 +2272,7 @@ impl App {
         let laid = self.laid(rows);
         let here = laid.plan.cards.get(at)?;
         let column = here.column?;
+        let lane_top = laid.plan.lanes.get(here.lane)?.top;
         Some(CardAt {
             column: laid.columns.get(column)?.clone(),
             around: board::around(&laid.plan, at)
@@ -2278,6 +2284,8 @@ impl App {
                 .into_iter()
                 .filter_map(|c| laid.columns.get(c).cloned())
                 .collect(),
+            lane: laid.lanes.get(here.lane)?.clone(),
+            depth: here.top.saturating_sub(lane_top),
             top: here.top,
             group: here.group,
         })
@@ -2288,23 +2296,37 @@ impl App {
     /// 따라가면 커서가 딴 칸으로 튄다. 보드의 줄 차례는 레인 → 우선순위라, 번호로 물러서면 그 번호의 카드는 다른 칸이나
     /// 다른 레인에 서기 쉽다.
     ///
-    /// 옛 높이는 옛 배치의 자라 새 배치와 어긋날 수 있다 — 이웃이 하나도 안 남았을 때만 쓰는 어림이다.
+    /// 높이는 **그 카드가 섰던 레인 안에서** 잰다(리뷰) — 숨긴 칸이나 빠진 카드가 위 레인을 줄이면 옛 캔버스의 줄은
+    /// 새 배치에서 아래 레인을 가리켜, 커서가 다른 마일스톤으로 건너간다. 그 레인이 새 배치에 없을 때만 옛 줄로 잰다.
+    ///
+    /// 그 프로젝트에 카드가 하나도 안 남았으면(한눈 보기) **그 프로젝트의 머리줄**이다 — 번호로 물러서면 딴 프로젝트에
+    /// 선다(`App::flip_layout` 이 같은 까닭으로 머리줄에 선다).
     fn stand_near(&self, rows: &[Row], stood: &CardAt) -> Option<usize> {
         let laid = self.laid(rows);
         let column = |c: &board::Column| laid.columns.iter().position(|k| k == c);
         // 그 칸은 빠졌을 수 있다 — 보기가 숨겼고 그 칸에 남은 카드도 없으면 보드에 안 선다([`board::columns`]).
         let home = column(&stood.column);
-        let anchors: Vec<Anchor> = rows.iter().map(|r| self.anchor_of(r)).collect();
-        let kept = stood
-            .around
+        let kept = home.and_then(|home| {
+            let anchors: Vec<Anchor> = rows.iter().map(|r| self.anchor_of(r)).collect();
+            stood
+                .around
+                .iter()
+                .filter_map(|a| anchors.iter().position(|b| b == a))
+                .find(|&n| laid.plan.cards.get(n).and_then(|p| p.column) == Some(home))
+        });
+        // 레인 안의 깊이는 그 레인의 높이 안으로 자른다 — 넘치면 다음 레인의 줄이다.
+        let top = laid
+            .lanes
             .iter()
-            .filter_map(|a| anchors.iter().position(|b| b == a))
-            .find(|&n| home.is_some() && laid.plan.cards.get(n).and_then(|p| p.column) == home);
+            .position(|l| *l == stood.lane)
+            .and_then(|n| laid.plan.lanes.get(n))
+            .map_or(stood.top, |l| l.top + stood.depth.min(l.height.saturating_sub(1)));
         kept.or_else(|| {
             home.into_iter()
                 .chain(stood.beside.iter().filter_map(column))
-                .find_map(|c| laid.plan.nearest(c, stood.top, stood.group))
+                .find_map(|c| laid.plan.nearest(c, top, stood.group))
         })
+        .or_else(|| laid.plan.cards.iter().position(|p| p.column.is_none() && p.group == stood.group))
     }
 
     /// 줄이 바뀐 뒤(다시 읽기·보기 토글) 보기를 다시 세고 **붙들어 둔 정체의 줄에 커서를 다시 세운다.**
@@ -4311,8 +4333,7 @@ impl App {
                         let site = self.site_of_seat(*seat)?;
                         let at = e.at().filter(|&at| at < site.issues.len())?;
                         // 닫힌 idea 는 담아 둔 생각이 아니다 — 닫힌 일처럼 제 칸에 선다(moai-r1ly.91p, [`board::column_of`]).
-                        let i = &site.issues[at];
-                        let idea = crate::report::is_idea(i) && !i.status.is_done();
+                        let idea = crate::report::is_open_idea(&site.issues[at]);
                         let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
                         let height = draw::card_height(self.fields, || site.whose(at).is_some());
                         Some(Spot::Card(*seat, site.lane(at), column, height))
@@ -5184,7 +5205,8 @@ impl App {
     ///   굴린 자리도 둔다(`stand` 는 정체로 가른다).
     /// - 보기가 도로 가렸으면 **보기를 안 건 차례에서 가장 가까운** 보이는 줄에 서고(아래 먼저), 가려졌다고
     ///   한 줄 댄다. 번호로 자르면 검색 때와 전혀 다른 자리의 줄에 선다. **보기가 가렸을 때만 댄다** — 검색
-    ///   대신 건 거름망(`f`)이 가린 줄에 `SPC v a` 를 대면 누른 키가 아무것도 안 한다.
+    ///   대신 건 거름망(`f`)이 가린 줄에 `SPC v a` 를 대면 누른 키가 아무것도 안 한다. **보드는 차례가 아니라
+    ///   그 카드의 칸에서 찾는다**(moai-r1ly.dwb, [`App::stand_near`]) — 보드의 줄 차례는 레인 → 우선순위다.
     /// - 검색 중 들어간 폴더가 보기에 가렸으면 보이는 폴더까지 나온다 — 가린 폴더 안에 남으면 "보기에 가려
     ///   비었다" 만 선 화면에서 왜 여기 있는지 모른다. 그때 붙들 줄은 나온 폴더다.
     ///
@@ -5947,6 +5969,36 @@ mod tests {
         a.hit("SPC v i Esc");
         assert!(!row_ids(&a).contains(&"argos-0006".to_string()), "시험의 전제 — idea 가 숨었다");
         assert_eq!(on_id(&a), "argos-0007", "빠진 칸의 옆 칸으로 안 갔다");
+    }
+
+    /// **옆 칸의 같은 높이는 그 카드가 섰던 레인 안에서 잰다**(moai-r1ly.dwb 리뷰) — 숨긴 칸이 위 레인을 줄이면 옛
+    /// 캔버스의 줄은 새 배치에서 아래 레인을 가리킨다. 그 줄로 재면 커서가 다른 마일스톤의 카드로 건너간다.
+    #[test]
+    fn a_vanished_card_keeps_its_lane_when_the_lanes_above_shrink() {
+        let at = |id: &str, column: &str, m: Option<&str>| {
+            let mut i = make(id, Kind::Issue);
+            i.status = Status::new(column);
+            i.milestone = m.map(Into::into);
+            i
+        };
+        // 레인 A 는 review 셋으로 길고, 레인 B 의 review 하나에 커서가 선다. 바구니 레인에는 todo 하나뿐이다.
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            make("argos-0002", Kind::Milestone),
+            at("argos-0003", "review", Some("argos-0001")),
+            at("argos-0004", "review", Some("argos-0001")),
+            at("argos-0005", "review", Some("argos-0001")),
+            at("argos-0006", "todo", Some("argos-0001")),
+            at("argos-0007", "review", Some("argos-0002")),
+            at("argos-0008", "todo", Some("argos-0002")),
+            at("argos-0009", "todo", None),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0007").unwrap();
+        a.hit("SPC v 3 Esc");
+        assert!(!row_ids(&a).contains(&"argos-0007".to_string()), "시험의 전제 — review 가 숨었다");
+        assert_eq!(on_id(&a), "argos-0008", "숨은 칸이 위 레인을 줄였더니 다른 레인의 카드로 건너갔다");
     }
 
     /// **보드에서 검색을 풀어 카드가 도로 가려지면 그 카드의 칸 곁에 선다**(moai-r1ly.dwb) — 목록은 보기를 안 건
