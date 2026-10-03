@@ -179,6 +179,11 @@ pub enum Cmd {
   with a non-zero code, a session that wires it into a start-up hook would
   open on a failure - and then this is a lint, and a lint is a gate.
 
+  With no tracker here it says how to start one (--json: no_tracker). With a
+  tracker it cannot read - a link out of the checkout, a broken config - it
+  says why instead and does not send you to `moai init` (--json: tracker_error,
+  whose code is the one the other commands stop with).
+
   Wire it where your editor injects context at session start. For Claude Code
   that is a SessionStart hook, which fires again after a compact:
 
@@ -1427,7 +1432,11 @@ pub struct MvArgs {
     pub args: Vec<String>,
 
     /// A note on this move (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while still in this column (racing pickups)
@@ -1498,7 +1507,11 @@ pub struct DeferArgs {
     pub undo: bool,
 
     /// Why it is deferred (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while it is in this column (racing pickups)

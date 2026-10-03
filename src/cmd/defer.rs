@@ -30,6 +30,8 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let back = args.undo;
     // **`-m -` 는 stdin 을 읽는다 — `mv -m` 과 한 자다**(moai-m1za). 락보다 먼저 읽는다: 락을 쥔 뒤에 읽으면
     // 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다. 빈 stdin 은 거기서 "stdin 이 비었다" 로 갈린다.
+    // argv 에 적힌 그대로를 곁에 둔다 — 파일 이름이면 쓰기가 선 뒤에 알린다(아래, `mv` 와 한 자).
+    let typed = args.msg.clone();
     let given = super::add::read_msg(args.msg, ctx.lang())?;
     // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
     // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다. 코드도 `note` 와 같은
@@ -154,6 +156,13 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             Ok((entries, (m, read)))
         },
     )?;
+
+    // **`-m` 이 파일 이름이면 한 줄로 알린다 — 그 글이 저널에 든 판에만**(moai-yivo.xe9, 리뷰 moai-yivo.b5h). 노트는
+    // 바꾼 줄과 이미 그 모양이던 줄에 선다 — 도로 집었어도 아직 계획 밖이라 `already` 에서 빠진 줄(`shelved`)도
+    // 노트는 받았다. `mv` 와 한 자다.
+    if !(moved.done.is_empty() && moved.already.is_empty() && moved.shelved.is_empty()) {
+        super::add::say_if_text_names_a_file(typed.as_deref(), ctx, super::add::Given::Msg);
+    }
 
     for id in &moved.missing {
         super::note_partial();

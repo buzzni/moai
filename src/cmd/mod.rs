@@ -145,6 +145,19 @@ pub fn lang_of(reg: &crate::user_config::Registry) -> crate::i18n::Lang {
 /// 이 깃발이 서면 결과를 다 낸 **뒤에** 종료 코드가 1 이 된다.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
 
+/// 명령이 **선 뒤에만** 낼 stderr 줄 — [`tell_after`] 가 쌓고 [`run`] 이 낸다(리뷰 moai-yivo.b5h).
+///
+/// 쓰기 전에 고른 알림을 그 자리에서 내면 둘이 어긋난다. 넘어진 `--json` 의 stderr 는 기계의 것이라 오류 객체
+/// 하나만 서야 하는데(`main` 의 실패 길) 그 앞에 사람 말 한 줄이 끼어 `code` 로 가르던 고리가 파싱 실패를
+/// 만나고, 거절된 쓰기에 "글로 받았다" 를 대면 없던 쓰기를 말한다. 그래서 넘어진 판에서는 버린다. 끝에 한 번
+/// 읽는 것은 `store::MOVED` 와 같은 꼴이다.
+static AFTER: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// [`AFTER`] 에 한 줄 — 명령이 `Ok` 로 끝나면 [`run`] 이 [`tell`] 로 낸다.
+pub(crate) fn tell_after(line: String) {
+    AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+}
+
 /// `none` 은 "비운다" 는 뜻이다. 제목이 `none` 인 이슈를 만들 일은 없다.
 /// `add` 와 `edit` 이 같은 낱말을 써야 한다 — 한쪽만 알면 방금 만든 이슈를
 /// 같은 말로 비우지 못한다.
@@ -275,8 +288,10 @@ pub fn had_partial() -> bool {
 /// 이 줄은 `moai status` 의 첫 화면 곁에 서므로, 그 화면과 같은 말이어야 한다.
 pub fn gather(ctx: &Ctx, repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
     let g = crate::worktree::gather(repo, worktree)?;
+    // **[`tell`] 로 낸다**(리뷰 moai-yivo.b5h) — `eprintln!` 은 읽는 쪽이 사라진 stderr 에서 패닉해, "언제나 0"
+    // 이라고 적은 `prime --worktree` 가 판 하나 못 내고 101 로 끝났다.
     for t in g.unfound.iter().chain(&g.trouble) {
-        eprintln!("{}", crate::view::trouble_line(ctx.lang(), t));
+        tell(&crate::view::trouble_line(ctx.lang(), t));
     }
     Ok(g)
 }
@@ -408,6 +423,11 @@ pub(crate) fn tell(line: &str) {
 pub fn run(mut cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
     let out = dispatch(&ctx, cli);
+    // **선 판에서만 낸다**([`AFTER`]) — 넘어진 판의 것은 버린다.
+    let after = std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()));
+    if out.is_ok() {
+        after.iter().for_each(|line| tell(line));
+    }
     // **시간대를 못 풀었으면 한 줄로 알린다**(moai-77ap) — 막지 않는다. 종료 코드도 안 건드리고,
     // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시간대를 실제로 읽은 명령만 이 자리에 닿는다:
     // 화면을 지었어도 시각을 안 그린 판은 할 말이 없다([`Ctx::zone_trouble`]).

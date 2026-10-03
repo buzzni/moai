@@ -5,8 +5,8 @@
 //! 있었나, 다음은 무엇인가. 나머지는 읽는 쪽의 맥락을 그만큼 밀어낸다. beads 가 `bd prime`
 //! 을 둔 까닭도 같다(MCP 스키마 10~50k 토큰 대 prime 1~2k, `moai-6k07` §1).
 //!
-//! **아무것도 막지 않는다.** 종료 코드는 언제나 0 이다 — `.moai` 가 없어도, 옆 워크트리를
-//! 못 읽어도. 여기서 0 아닌 값을 내는 순간 이 요약을 세션 시작 훅에 건 사람의 세션이
+//! **아무것도 막지 않는다.** 종료 코드는 언제나 0 이다 — `.moai` 가 없어도, 있는데 못 열어도,
+//! 옆 워크트리를 못 읽어도. 없는 것과 못 연 것은 판이 가른다(moai-yivo.6je). 여기서 0 아닌 값을 내는 순간 이 요약을 세션 시작 훅에 건 사람의 세션이
 //! "실패" 로 열리고, 그러면 이건 린트고 린트는 곧 게이트다(`moai status` 가 아무것도 안
 //! 막는 것과 같은 자리).
 //!
@@ -50,8 +50,28 @@ struct Said<'a> {
     /// **트래커가 없을 때만 선다.** 빈 `picked`·`ready` 만으로는 "할 일이 없다" 와 "여기엔
     /// 트래커가 없다" 가 같아 보인다 — `commits_error` 가 "아직 아무도 안 고쳤다" 와
     /// "여기서는 못 물어봤다" 를 가르는 것과 같은 자리다.
+    ///
+    /// **못 연 트래커에는 서지 않는다**(moai-yivo.6je) — 그쪽은 `tracker_error` 다. 둘 다 이 키로 내던
+    /// 판은 링크나 깨진 설정 하나로 멈춘 저장소를 "트래커 없음" 으로 읽혀, 받는 쪽이 `moai init` 을 불렀다.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_tracker: bool,
+    /// **트래커를 못 열었을 때만 선다**(moai-yivo.6je) — 여기서 친 다른 명령이 멈추며 낼 `code`(`broken` 이면
+    /// moai 가 안 읽기로 한 파일이다 — 체크아웃 밖·`.git/` 으로 가는 링크, 보통 파일이 아닌 것)와 사람이 읽을 한 줄.
+    /// 종료 코드는 그래도 0 이다 — 그 약속은 이 판의 것이고, 가르는 것은 이 키다. 꼴은 `show --json` 의
+    /// `commits_error` 처럼 객체 하나다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tracker_error: Option<TrackerError>,
+}
+
+/// [`Said::tracker_error`] 의 값. **가르는 것은 `code` 다** — 다른 명령의 `--json` 거절(`{"error","code"}`)과
+/// 같은 낱말이라, 받는 쪽이 같은 갈래로 읽는다. `said` 는 사람이 읽을 한 줄이라 그 낱말에 기대지 않는다.
+///
+/// **`said` 는 한 줄로 접는다**(`text::one_line`, 리뷰 moai-yivo.b5h) — 체크아웃 자리나 커밋된 설정의 글이 들어
+/// 줄바꿈·제어문자가 설 수 있다. `commits_error` 의 `said` 가 접는 것과 같다.
+#[derive(serde::Serialize)]
+struct TrackerError {
+    code: &'static str,
+    said: String,
 }
 
 /// `others` 의 한 줄 — [`Brief`] 에 **그 줄의 담당**을 곁들인다(moai-0zjo 리뷰). 이 판이 남의 줄을 대는
@@ -130,9 +150,14 @@ impl<'a> Brief<'a> {
     }
 }
 
-/// 트래커를 못 읽었을 때의 한 판. **두 표면이 같은 것을 낸다** — 사람 쪽만 닫기 전 목록과
+/// 트래커가 없거나 못 열었을 때의 한 판. **두 표면이 같은 것을 낸다** — 사람 쪽만 닫기 전 목록과
 /// 명령을 빼던 판은 [`Said`] 가 내건 약속을 제자리에서 어겼다.
-fn bare(ctx: &Ctx, lang: crate::i18n::Lang) -> R<Vec<String>> {
+///
+/// `refused` 가 못 연 까닭이다(moai-yivo.6je). **없는 것과 못 연 것을 가른다** — 둘을 한 판("`.moai` 가
+/// 없다, `moai init` 이 심는다")으로 내던 때는 세션을 여는 에이전트가 `init` 을 불렀고, 링크나 못 읽는
+/// 스냅샷이면 `init` 은 다 괜찮다고 답했다. 까닭은 **판에 싣고 stderr 에는 안 낸다** — 세션 시작 훅은
+/// stdout 만 맥락에 싣고, 터미널의 사람에게는 같은 글이 두 번 선다.
+fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<Vec<String>> {
     if ctx.json {
         return super::json_line(&Said {
             picked: Vec::new(),
@@ -144,10 +169,11 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang) -> R<Vec<String>> {
             outside: Vec::new(),
             closing: view::prime_closing(lang),
             commands: lines(lang),
-            no_tracker: true,
+            no_tracker: refused.is_none(),
+            tracker_error: refused.map(|e| TrackerError { code: e.code, said: crate::text::one_line(&e.message) }),
         });
     }
-    Ok(view::prime_no_repo(lang))
+    Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str())))
 }
 
 fn lines(lang: crate::i18n::Lang) -> Vec<Line<'static>> {
@@ -163,22 +189,21 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     //
     // **깨진 트래커에서도 0 이다.** 설정 한 줄이 못 읽히거나 스냅샷 한 줄이 깨졌다고 `?` 로
     // 넘어지면, 이것을 세션 시작 훅에 건 쪽의 세션이 통째로 "실패" 로 열린다 — 여기 적힌
-    // "언제나 0" 이 실제로 서려면 그 길이 없어야 한다. 무슨 일이 있었는지는 stderr 한 줄로
-    // 대고(그쪽은 사람이 읽는다) 판은 시작하는 말로 낸다. 6~7 세션이 한 `.moai` 를 같이 쓰는
+    // "언제나 0" 이 실제로 서려면 그 길이 없어야 한다. 6~7 세션이 한 `.moai` 를 같이 쓰는
     // 저장소에서 그 한 줄은 잠깐 깨졌다 낫는 것이고, 그동안 모든 세션이 실패로 열리면 안 된다.
-    let found = Repo::find(|| lang).unwrap_or_else(|e| {
-        eprintln!("moai: {e}");
-        None
-    });
-    let Some(repo) = found else {
-        return bare(ctx, lang);
+    //
+    // **다만 "없다" 로 접지 않는다**(moai-yivo.6je). 못 연 까닭은 판이 대고(사람 쪽은 첫 줄, `--json` 은
+    // `tracker_error`), `moai init` 을 시키지 않는다 — 트래커는 거기 있고, 링크나 못 읽는 스냅샷이면 `init` 은 다
+    // 괜찮다고 답한다(깨진 설정이면 `init` 도 같은 까닭으로 멈춘다). 두 갈래 다 이 자리다 — 설정과 스냅샷의 자리는
+    // `Repo::find` 가 재고, 스냅샷의 글(못 읽는 권한, UTF-8 이 아닌 바이트)은 `gather` 의 읽기에서 갈린다.
+    let repo = match Repo::find(|| lang) {
+        Ok(Some(repo)) => repo,
+        Ok(None) => return bare(ctx, lang, None),
+        Err(e) => return bare(ctx, lang, Some(&e)),
     };
     let gathered = match super::gather(ctx, &repo, worktree) {
         Ok(g) => g,
-        Err(e) => {
-            eprintln!("moai: {e}");
-            return bare(ctx, lang);
-        }
+        Err(e) => return bare(ctx, lang, Some(&e)),
     };
     let crate::worktree::Gathered { load, origin, .. } = gathered;
     // **못 읽는 줄은 말만 한다.** [`super::name_load_errors`] 는 `report_load_errors` 와 같은
@@ -237,6 +262,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             closing: view::prime_closing(lang),
             commands: lines(lang),
             no_tracker: false,
+            tracker_error: None,
         });
     }
 

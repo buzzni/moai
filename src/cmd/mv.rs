@@ -138,6 +138,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 저장소를 찾는 일, 인자 수, 갈 칸의 오타. 줄을 봐야 갈리는 것 — `--from` 의 오타, 묶음에 건 `--from`, 없는
     // id — 은 락 안이라 stdin 을 다 읽은 뒤에 갈리고, 빈 stdin 이면 그보다 이 거절(`bad_input`)이 먼저 선다(리뷰).
     // `note -b -` 가 없는 id 보다 빈 글을 먼저 대는 것과 같은 차례다.
+    // argv 에 적힌 그대로를 곁에 둔다 — 파일 이름이면 쓰기가 선 뒤에 알린다(아래).
+    let typed = args.msg.clone();
     let msg = super::add::read_msg(args.msg, ctx.lang())?;
 
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
@@ -325,6 +327,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             Ok((entries, m))
         },
     )?;
+
+    // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과
+    // 이미 그 칸이던 줄의 노트다. 진 줄·없는 줄뿐인 부름에 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다(리뷰
+    // moai-yivo.b5h). 막지 않는다 — 경로 같은 글이 정말 글일 수 있다.
+    if !(moved.done.is_empty() && moved.already.is_empty()) {
+        super::add::say_if_text_names_a_file(typed.as_deref(), ctx, super::add::Given::Msg);
+    }
 
     for id in &moved.missing {
         super::note_partial();

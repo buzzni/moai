@@ -136,7 +136,12 @@ inside its own checkout — the directory that holds `.moai` — so a committed
 `issues.jsonl -> /dev/zero` cannot make it read without end. A link that stays
 inside (`-> ../data/issues.jsonl`) reads as before. Where several projects are
 shown at once (`moai status` outside a repository, `moai project ls`, the
-explorer), that project is named as one that cannot be read and the rest go on.
+explorer), that project is named as one that cannot be read and the rest go on;
+under `--json` its entry is `"state":"unreadable"` with the same
+`"code":"broken"` beside the reason. `moai prime` does not stop either — its
+exit code is always 0 — so it names the reason on the first line of its page
+instead of sending you to `moai init`, and under `--json` it carries the same
+code as `"tracker_error":{"code":"broken","said":…}`.
 
 There is no line to remove; the fix is the file. If it changed only in your
 checkout, put the committed one back (a directory there goes with everything in
