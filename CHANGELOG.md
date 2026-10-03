@@ -29,8 +29,10 @@ does not tag — see `CONTRIBUTING.md`.
   `Ctrl-d`/`Ctrl-u`, `Ctrl-f`/`Ctrl-b` and `PageDown`/`PageUp` scroll the board,
   not the cursor: the chosen card and the detail stay as they are even once the
   card is off screen, and the board scrolls all the way to its end. The next
-  cursor key moves from that card and brings the board back to it; a reload
-  leaves the scrolled board where it is. When the cursor's card goes away — a
+  cursor key moves from that card and brings the board back to it, and so does
+  anything that lays the board out again — going in or out of a folder, a
+  search, a filter, or a `SPC v`, `SPC s` or `SPC c` toggle; a reload leaves the
+  scrolled board where it is. When the cursor's card goes away — a
   reload, a view toggle, a filter or a search — the cursor stays in that column,
   on the nearest card left in it, or else moves to the nearest column beside it.
   While a search is being typed it measures from the card the search opened on,
