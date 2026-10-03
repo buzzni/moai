@@ -138,6 +138,17 @@ struct CardAt {
     group: usize,
 }
 
+/// 검색 칸을 열기 전의 거름망과 자리 — Esc 가 돌아갈 곳이다([`App::grep_was`]).
+struct GrepWas {
+    hung: Option<Hung>,
+    /// 열기 전 커서의 정체와, 보드면 그 카드의 자리([`App::grip_of`]). **번호만 들면 칸이 열린 사이에 다시 읽기가
+    /// 떨어졌을 때 엉뚱한 줄로 돌아간다**(moai-r1ly.f2x). 다시 읽기는 칸이 열려 있어도 1분 시계와 옆 세션의
+    /// 쓰기마다 돈다.
+    grip: (Option<Anchor>, Option<CardAt>),
+    /// 그 번호. 정체로 못 찾을 때만 쓴다.
+    cursor: usize,
+}
+
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -1118,7 +1129,7 @@ pub struct App {
     pub hung: Option<Hung>,
     /// 검색 칸을 열기 전의 거름망·커서. **칸은 치는 대로 거르므로**(moai-00le) Esc 가
     /// 그만두려면 되돌아갈 자리를 들고 있어야 한다. Enter 로 걸면 버린다.
-    grep_was: Option<(Option<Hung>, usize)>,
+    grep_was: Option<GrepWas>,
     /// 마지막 갱신이나 쓰기가 **실패한** 까닭 — 무엇을 못 했는지까지 단 쪽이 적는다.
     /// 조용히 삼키면 갱신이 아무 일도 안 하는데 "바뀌었다" 배너는 붙어 있어, 사람은
     /// 기다리고 또 기다리며 까닭을 못 얻는다.
@@ -2340,12 +2351,19 @@ impl App {
     fn regrip(&mut self, held: Option<Anchor>, stood: Option<CardAt>) {
         self.see();
         let rows = self.rows();
-        let at = held
-            .as_ref()
-            .and_then(|a| self.row_of(&rows, a))
-            .or_else(|| stood.and_then(|s| self.stand_near(&rows, &s)))
-            .unwrap_or(self.cursor);
+        let at = self.regain(&rows, held.as_ref(), stood.as_ref()).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
+    }
+
+    /// 줄이 바뀐 뒤 커서가 설 자리. 붙든 정체의 줄(`held`)이 아직 서면 거기고, 사라졌으면 보드는 그 카드가 섰던
+    /// 칸 곁이다([`App::stand_near`]). 둘 다 못 찾으면 `None` 이고, 번호로 물러설지는 부르는 쪽이 정한다.
+    ///
+    /// 이 자로 고르는 길은 다섯이다(moai-r1ly.f2x) — 다시 읽기·보기 토글([`App::regrip`]), 거름망과 검색 칸
+    /// ([`App::settle`]), 검색 칸의 Esc, 층 다시 세우기(`relayer`), 한눈 보기에서 프로젝트를 다시 읽는 길
+    /// ([`App::follow_site`]). `regrip` 만 이 규칙을 따르던 때는 나머지 길에서 보드 커서가 번호로 물러서 딴 칸이나
+    /// 딴 레인의 카드에 섰다.
+    fn regain(&self, rows: &[Row], held: Option<&Anchor>, stood: Option<&CardAt>) -> Option<usize> {
+        held.and_then(|a| self.row_of(rows, a)).or_else(|| stood.and_then(|s| self.stand_near(rows, s)))
     }
 
     /// 이미 센 목록의 `at` 에 **목록 안으로 잘라** 선다. 그 자리의 줄이 `held` 가 아니면 상세를
@@ -4101,6 +4119,10 @@ impl App {
                         self.notice = Some(told);
                     }
                 }
+                // **커서는 줄의 정체로 따라간다**(moai-r1ly.f2x) — 한눈 보기의 줄은 펼친 프로젝트의 줄을 다 이어 세우므로,
+                // 위 프로젝트를 다시 읽어 줄 수가 바뀌면 같은 번호에 다른 줄이 선다. 다시 읽기(`App::take`)와 같은
+                // 자다. **줄이 바뀌기 전에** 잰다.
+                let grip = self.grip_of(&self.rows());
                 if let Some(place) = self.layer.as_mut().and_then(|l| l.places.iter_mut().find(|p| p.path == path)) {
                     place.site = Some(site);
                 }
@@ -4122,6 +4144,10 @@ impl App {
                 if deep && let Some(at) = landed {
                     self.open_all(Seat::Place(at));
                 }
+                let (held, stood) = grip;
+                let rows = self.rows();
+                let at = self.regain(&rows, held.as_ref(), stood.as_ref()).unwrap_or(self.cursor);
+                self.stand(&rows, at, held.as_ref());
                 // **읽는 사이에 쓰기가 들어왔으면 곧바로 다시 읽으러 보낸다**(moai-x1hb). 방금
                 // 들인 줄은 그 쓰기 **전**의 것이고, 표식은 이미 쓰기 뒤의 것이라 다른 자는 이
                 // 줄을 다시 안 고른다([`layer::Layer::stale`]·`adopt` 의 `again` 둘 다 표식으로
@@ -4863,7 +4889,8 @@ impl App {
                 }
             }
             B::Grep => {
-                self.grep_was = Some((self.hung.clone(), self.cursor));
+                self.grep_was =
+                    Some(GrepWas { hung: self.hung.clone(), grip: self.grip_of(&self.rows()), cursor: self.cursor });
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
             }
             B::Filter => self.mode = Mode::Filter(Input::default()),
@@ -5153,32 +5180,37 @@ impl App {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
                 // 하면 긴 거름망일수록 고치기가 벌이 된다.
-                // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다.
-                let held = self.current().map(|r| self.anchor_of(&r));
+                // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다. 보드면 그 카드의 자리도 함께다.
+                let grip = self.grip_of(&self.rows());
                 // 검색이었는지는 **칸을 열기 전**의 것까지 본다 — 검색 칸은 치는 대로 걸어(`live`) 지금
                 // 걸린 거름망이 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
-                let was = self.searching() || matches!(self.grep_was, Some((Some(Hung::Grep { .. }), _)));
+                let was = self.searching()
+                    || self.grep_was.as_ref().is_some_and(|w| matches!(w.hung, Some(Hung::Grep { .. })));
                 if self.apply(&mode).is_ok() {
                     self.mode = Mode::Browse;
                     self.grep_was = None;
                     // 자른 자리의 줄이 다른 것이면 상세도 첫 줄로(리뷰 moai-3lul.kt0) — 치는 대로 거르는
                     // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다. **검색이 풀렸으면
                     // 커서는 `after_search` 가 세운다** — 번호로 먼저 자르면 붙든 줄이 그대로 서도 상세가 되감긴다.
-                    if !self.after_search(was, held.clone()) {
-                        self.settle(held, self.cursor);
+                    if !self.after_search(was, grip.0.clone()) {
+                        self.settle(grip, self.cursor);
                     }
                 }
             }
             keys::Prompt::Cancel => {
                 // 치는 대로 걸었던 것을 **열기 전으로** 되돌린다 — Esc 는 "안 한 것으로" 다.
-                // **커서도 열기 전 자리로 간다** — 검색 칸에서는 커서를 못 옮기니 되돌린 목록은 열기 전 그 목록이고,
-                // 그 번호가 열기 전 그 줄이다. 검색을 푸는 길(`after_search`)을 타면 치는 동안 커서 밑에 섰던
+                // **커서도 열기 전 그 줄로 간다** — 검색을 푸는 길(`after_search`)을 타면 치는 동안 커서 밑에 섰던
                 // 줄로 가 "안 한 것" 이 아니게 되고, 되돌린 거름망(`f`)이 가린 줄을 두고 보기에 가렸다고 댄다.
-                if let (Mode::Grep(..), Some((hung, cursor))) = (&self.mode, self.grep_was.take()) {
+                // **번호가 아니라 정체로 찾는다**(moai-r1ly.f2x) — 칸이 열린 사이에도 다시 읽기는 돌아, 열기 전 번호에
+                // 다른 줄이 설 수 있다. 그 줄이 사라졌으면 보드는 그 카드의 칸 곁이다([`App::regain`]).
+                if let (Mode::Grep(..), Some(was)) = (&self.mode, self.grep_was.take()) {
                     let held = self.current().map(|r| self.anchor_of(&r));
-                    self.hung = hung;
+                    self.hung = was.hung;
                     self.reapply();
-                    self.settle(held, cursor);
+                    let rows = self.rows();
+                    let (open, stood) = &was.grip;
+                    let at = self.regain(&rows, open.as_ref(), stood.as_ref()).unwrap_or(was.cursor);
+                    self.stand(&rows, at, held.as_ref());
                 }
                 self.mode = Mode::Browse;
             }
@@ -5194,12 +5226,13 @@ impl App {
     /// 검색 칸이 **치는 대로 거른다**(moai-00le). 거름망(`f`) 칸은 안 한다 — 반쯤 친
     /// `status=in` 은 틀린 글이라, 치는 동안 목록이 비었다 찼다 한다.
     ///
-    /// 커서는 줄 수 안으로만 당긴다 — Enter 로 걸 때와 같은 자다.
+    /// 커서는 Enter 로 걸 때와 같은 자([`App::settle`])로 선다 — 목록은 번호를 줄 수 안으로 당기고, 보드는 붙든
+    /// 카드나 그 카드의 칸 곁이다.
     fn live(&mut self) {
         let mode @ Mode::Grep(..) = self.mode.clone() else { return };
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let grip = self.grip_of(&self.rows());
         if self.apply(&mode).is_ok() {
-            self.settle(held, self.cursor);
+            self.settle(grip, self.cursor);
         }
     }
 
@@ -5288,8 +5321,14 @@ impl App {
     /// 거름망이 바뀐 뒤 커서를 `at` 을 줄 수 안으로 자른 자리에 세운다. **그 자리의 줄이
     /// 바뀌었으면 상세를 첫 줄로 되돌린다** — 치는 대로 거르면 같은 번호에 다른 이슈가
     /// 서는데, 굴린 자리가 남으면 그 이슈를 첫 줄부터 못 본다(`move_to` 와 같은 까닭).
-    fn settle(&mut self, held: Option<Anchor>, at: usize) {
+    ///
+    /// **보드는 번호로 서지 않는다**(moai-r1ly.f2x). 붙든 카드가 아직 서면 거기, 걸러져 빠졌으면 그 카드가 섰던
+    /// 칸 곁이다([`App::regain`]). `grip` 은 **거르기 전에** 잰 [`App::grip_of`] 다. 보드의 줄 차례는 레인 →
+    /// 우선순위라, 같은 번호의 카드는 딴 칸이나 딴 레인에 서기 쉽다. 목록은 전처럼 번호를 지킨다(moai-00le) — 목록의
+    /// 줄 차례에서는 번호로 물러서도 이웃 줄이다.
+    fn settle(&mut self, (held, stood): (Option<Anchor>, Option<CardAt>), at: usize) {
         let rows = self.rows();
+        let at = if self.board() { self.regain(&rows, held.as_ref(), stood.as_ref()).unwrap_or(at) } else { at };
         self.stand(&rows, at, held.as_ref());
     }
 
@@ -6028,6 +6067,79 @@ mod tests {
         // done 의 왼쪽 review 는 비어 그 옆 in_progress 의 같은 높이다. 줄 차례의 이웃이면 0003(todo)이다.
         assert_eq!(on_id(&a), "argos-0004", "가려진 카드의 칸 곁이 아니라 줄 차례의 이웃에 섰다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0008")), "가려졌다고 안 댔다 — {:?}", a.notice);
+    }
+
+    /// **보드에서 거름망을 걸어도 커서는 번호로 서지 않는다**(moai-r1ly.f2x) — 보던 카드가 남으면 그 카드고, 걸러져
+    /// 빠졌으면 그 카드가 섰던 칸 곁이다. 보드의 줄 차례는 레인 → 우선순위라, 같은 번호의 카드는 딴 칸에 선다.
+    #[test]
+    fn a_filter_on_the_board_keeps_to_the_card_and_its_column() {
+        let on_board = |id: &str| {
+            let mut a = boarded();
+            a.layout = view::Layout::Board;
+            a.cursor = row_ids(&a).iter().position(|r| r == id).unwrap();
+            a
+        };
+        let filter = |a: &mut App| {
+            a.hit("SPC f");
+            typed(a, "status=todo");
+        };
+
+        // 남은 카드 — 위의 0004(in_progress)가 빠져 번호가 하나 당겨진다.
+        let mut a = on_board("argos-0006");
+        filter(&mut a);
+        assert!(!row_ids(&a).contains(&"argos-0004".to_string()), "시험의 전제 — in_progress 가 걸러졌다");
+        assert_eq!(on_id(&a), "argos-0006", "남은 카드를 두고 번호로 섰다");
+
+        // 빠진 카드 — in_progress 칸이 비어 왼쪽 옆 칸(todo)의 같은 높이다. 번호로 서면 바구니 레인의 카드다.
+        let mut a = on_board("argos-0004");
+        filter(&mut a);
+        assert_eq!(on_id(&a), "argos-0003", "빠진 카드의 칸 곁이 아니라 번호로 섰다");
+    }
+
+    /// **보드의 검색 칸은 치는 동안에도 카드의 칸을 지킨다**(moai-r1ly.f2x). 검색은 치는 대로 거르므로(`live`) 보던
+    /// 카드가 글자 하나에 빠질 수 있다. 번호로 서면 그 번호에 올라선 딴 칸의 카드다.
+    #[test]
+    fn typing_a_search_on_the_board_keeps_to_the_card_column() {
+        let card = |id: &str, title: &str, status: &str, p: u8| {
+            let mut i = Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), "2026-09-01T00:00:00Z");
+            i.priority = Some(p);
+            i
+        };
+        let issues = vec![
+            card("argos-0001", "alpha", "todo", 0),
+            card("argos-0002", "beta", "todo", 1),
+            card("argos-0003", "alpha", "in_progress", 2),
+            card("argos-0004", "alpha", "todo", 3),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.cursor = 1;
+        assert_eq!(on_id(&a), "argos-0002", "시험의 전제");
+        search(&mut a, "alpha");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0003", "argos-0004"], "시험의 전제 — beta 가 빠졌다");
+        // todo 칸에서 0002 가 섰던 높이(둘째)의 카드다. 번호로 서면 1 번의 0003(in_progress)이다.
+        assert_eq!(on_id(&a), "argos-0004", "치는 동안 빠진 카드의 칸을 떠났다");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(on_id(&a), "argos-0004", "Enter 가 커서를 옮겼다");
+    }
+
+    /// **검색 칸의 Esc 는 칸이 열린 사이에 다시 읽어도 열기 전 그 카드로 돌아간다**(moai-r1ly.f2x). 다시 읽기는 칸이
+    /// 열려 있어도 1분 시계와 옆 세션의 쓰기마다 돈다. 열기 전 번호로 돌아가면 그 번호에 올라선 딴 카드에 선다.
+    #[test]
+    fn cancelling_a_search_after_a_reread_goes_back_to_the_same_card() {
+        let mut a = boarded();
+        a.layout = view::Layout::Board;
+        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0005").unwrap();
+        search(&mut a, "제목");
+        // 칸이 열린 사이에 옆 세션이 p0 하나를 바구니 레인 맨 앞에 더했다.
+        let mut issues = a.site.issues.clone();
+        let mut urgent = make("argos-0008", Kind::Issue);
+        urgent.priority = Some(0);
+        issues.push(urgent);
+        a.adopt(issues);
+        a.key(key(KeyCode::Esc));
+        assert!(row_ids(&a).contains(&"argos-0008".to_string()), "시험의 전제 — 더한 줄이 선다");
+        assert_eq!(on_id(&a), "argos-0005", "Esc 가 열기 전 번호로 돌아가 딴 카드에 섰다");
     }
 
     /// **보드의 반 쪽·한 쪽은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — `Ctrl-d`·`Ctrl-u` 는 [`scroll::HALF`]
@@ -8630,7 +8742,7 @@ mod tests {
         a.key(key(KeyCode::Char('9')));
         a.key(key(KeyCode::Enter));
         assert_eq!(badge(&a).as_deref(), Some("/0009"));
-        assert_eq!(a.grep_was, None, "Enter 로 건 뒤에도 되돌릴 자리를 들고 있다");
+        assert!(a.grep_was.is_none(), "Enter 로 건 뒤에도 되돌릴 자리를 들고 있다");
     }
 
     /// **Tab·Shift-Tab 이 찾을 자리를 돈다**(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
