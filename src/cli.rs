@@ -519,13 +519,15 @@ IDEA
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
   not cards. Each card is two lines, its id, column and priority over its title,
-  and the cursor's card is marked and drawn reversed. The foot, a third line,
+  and the cursor's card is marked and drawn reversed. Cards Enter can go
+  into end their title with /, as in the list. The foot, a third line,
   stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
   the board only as the name in that foot (SPC c e). Cards that are not yours
   grow that foot anyway and say whose they are, dimmed — → name, or unowned —
   in the assignee's place; your own cards stay two lines. Whose is decided the
   way `moai ready` decides it, and when who you are is unknown no card is set
-  apart. j and k move within the
+  apart. On a narrow card the tags and the epic name shrink, longest first, so
+  whose it is and the dates still show. j and k move within the
   column, h and l go to the next column at the nearest height, gg and G go to
   the column's ends, Enter and Backspace go in and out as in the list, and Tab
   does nothing. The whole board scrolls as one; the column names stay on top.
