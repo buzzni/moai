@@ -7,6 +7,7 @@ pub mod board;
 pub mod draw;
 pub mod edit;
 pub mod form;
+mod hint;
 pub mod input;
 pub mod jotfile;
 pub mod keys;
@@ -1335,6 +1336,8 @@ pub struct App {
     /// 칸 사이 선을 잡고 끄는 중이면 잡은 자리([`mouse::Grab`]). 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다
     /// 적으면 손짓 하나가 파일을 수십 번 다시 쓴다. 놓친 뗌은 다음 마우스 사건이나 다음 키가 대신한다(`App::drop_line`).
     dragging: Option<mouse::Grab>,
+    /// 거름망 칸의 값 목록에서 겨눈 줄(moai-h2rh) — 겨눈 그 글과 커서에서만 선다([`hint::Aim`]).
+    offer_aim: hint::Aim,
     /// 화면의 시각을 적을 시간대(moai-p5az). **화면 하나에 하나다** — 프로젝트를 옮겨도 보는
     /// 사람은 그대로라, `Site` 가 아니라 여기 산다(보기·정렬과 같은 자리다).
     ///
@@ -1895,6 +1898,7 @@ impl App {
             list_width: None,
             list_height: None,
             dragging: None,
+            offer_aim: hint::Aim::default(),
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
             saved: Default::default(),
@@ -5312,6 +5316,8 @@ impl App {
             return;
         }
         match act {
+            // **값 목록이 선 동안 Enter 는 값을 넣는다**(moai-h2rh, 사용자 결정) — 안 섰을 때만 거름망을 건다.
+            keys::Prompt::Apply if self.put_offer() => {}
             keys::Prompt::Apply => {
                 let mode = self.mode.clone();
                 // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
@@ -5350,6 +5356,7 @@ impl App {
                 }
                 self.mode = Mode::Browse;
             }
+            keys::Prompt::Up | keys::Prompt::Down => self.aim_offer(act == keys::Prompt::Down),
             keys::Prompt::NextScope | keys::Prompt::PrevScope => {
                 if let Mode::Grep(_, g) = &mut self.mode {
                     *g = if act == keys::Prompt::NextScope { g.next() } else { g.prev() };
@@ -5567,7 +5574,7 @@ impl App {
                 }
             },
             keys::Prompt::Cancel => None,
-            keys::Prompt::NextScope | keys::Prompt::PrevScope => return,
+            keys::Prompt::NextScope | keys::Prompt::PrevScope | keys::Prompt::Up | keys::Prompt::Down => return,
         };
         let Mode::Ask(ask) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
         self.mode = *ask.back;

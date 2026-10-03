@@ -1,0 +1,553 @@
+//! 거름망 칸(`SPC f`)의 안내 — 쓸 수 있는 항목과 예, 그리고 값을 고르는 목록(moai-h2rh).
+//!
+//! **위쪽은 조각이다.** 친 글과 커서만 받아 커서가 선 값 자리([`Slot`])를 읽고, 건넨 값([`Offer`])을 친 글로
+//! 좁힌다. 아래 `impl App` 이 저장소의 줄에서 고를 값을 모으고 키를 받는다 — 줄(`crate::model`)을 읽으므로
+//! 이 파일은 조각 목록(`input::NOT_COMPONENTS`)에 든다. `zones.rs` 와 같은 꼴이다.
+//!
+//! 사용자가 정한 것(2026-10-03)
+//!
+//! - **자리는 입력 칸 위의 패널이다.** SPC 메뉴처럼 목록을 밀어 올리고 덮지 않는다. 커서가 값 자리
+//!   (`assignee=`·`tag=`·`milestone=`)에 서면 값 목록, 아니면 쓸 수 있는 항목과 예다
+//! - **위·아래 화살표로 옮기고 Enter 가 넣는다.** 값 목록이 선 동안 Enter 는 값을 넣고, 안 선 때만 거름망을 건다
+//! - 사람은 `이름 (메일)` 로 보이고 메일을 넣는다. 메일이 없으면 이름이다
+//! - 친 값의 부분 일치로 좁힌다. 대소문자는 안 가린다
+//!
+//! **글을 쪼개는 자는 `query` 의 것을 따른다** — 빈칸으로 가른 낱말 가운데 `=` 가 든 낱말이 새 항목을 열고, `=`
+//! 바로 뒤의 따옴표(`"…"`·`'…'`)는 닫힐 때까지 한 값이다. 여기서는 커서가 선 자리만 읽는다.
+
+use super::input::Input;
+use std::ops::Range;
+
+/// 패널이 세우는 줄 수의 위. 항목과 예가 80칸에서 이만큼 든다 — 더 받으면 목록이 그만큼 준다.
+pub const ROWS: usize = 6;
+
+/// 항목 안내 밑에 서는 예. **예는 여기 하나에 둔다** — 문법이 바뀌면 이 줄만 고친다. 시험이 하나하나를 거르개에
+/// 걸어 본다(`every_example_is_a_filter_the_explorer_takes`).
+pub const EXAMPLES: &[&str] =
+    &["status=todo,review priority=p0,p1 tag=bug", "assignee=me no-tag=docs", "created=2026-10-02 stale=7"];
+
+/// 값 목록이 서는 항목 — 값이 저장소의 줄에 있는 것. 우선순위(`p0`~`p3`)는 정해져 있어 목록이 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Assignee,
+    Tag,
+    Milestone,
+}
+
+impl Field {
+    /// 항목 이름의 값 목록. **`no-tag` 도 태그 이름을 받는다.**
+    pub fn of(key: &str) -> Option<Field> {
+        match key {
+            "assignee" => Some(Field::Assignee),
+            "tag" | "no-tag" => Some(Field::Tag),
+            "milestone" => Some(Field::Milestone),
+            _ => None,
+        }
+    }
+}
+
+/// 커서가 선 값 자리.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Slot<'a> {
+    /// `=` 앞의 항목 이름.
+    pub key: &'a str,
+    pub field: Field,
+    /// 커서 앞까지 친 값 — 여는 따옴표와 앞의 쉼표 값은 뺀 것. 좁히는 데 쓴다.
+    pub typed: &'a str,
+    /// 고른 값으로 갈아 끼울 자리. 이 값이 따옴표로 열렸으면 여는 따옴표부터 닫는 따옴표까지다.
+    pub span: Range<usize>,
+    /// `=` 바로 뒤의 값이다 — 쉼표 뒤의 값은 따옴표로 못 묶는다(문법이 `=` 바로 뒤의 따옴표만 읽는다).
+    pub first: bool,
+}
+
+/// `text` 의 `at`(바이트) 자리에 선 커서가 **값 목록이 서는 항목의 값**을 적고 있으면 그 자리.
+///
+/// 값 자리는 `항목=` 이 든 낱말 안이거나, 그 값이 따옴표로 열렸으면 닫힐 때까지다. **따옴표 없이 빈칸 뒤에 이어
+/// 적은 낱말은 아니다** — 문법은 그것을 앞 값에 붙여 읽지만, 거기서 치는 것은 대개 다음 항목이다. 거기서 목록이
+/// 서면 `tag=bug st` 의 Enter 가 거름망을 걸지 않고 값을 넣는다.
+pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
+    let item = items(text).into_iter().find(|it| it.eq < at && at <= it.end)?;
+    let key = &text[item.start..item.eq];
+    let field = Field::of(key)?;
+    let open = item.eq + 1;
+    // 따옴표 안의 글 — 닫히지 않았으면 값의 끝까지.
+    let (inner, inner_end) = match item.quote {
+        Some((_, close)) => (open + 1, close.unwrap_or(item.end)),
+        None => (open, item.end),
+    };
+    let at = at.max(inner);
+    if at > inner_end {
+        return None; // 닫는 따옴표 뒤 — 값은 끝났다
+    }
+    // 쉼표 뒤의 값만 본다 — 쉼표는 또는이다.
+    let seg = text[inner..at].rfind(',').map_or(inner, |p| inner + p + 1);
+    let first = seg == inner;
+    let end = text[at..inner_end].find(',').map_or(inner_end, |p| at + p);
+    // 따옴표로 연 값을 통째로 갈 때만 따옴표까지 간다 — 반만 걷으면 짝이 깨진다.
+    let span = match item.quote {
+        Some((_, close)) if first && end == inner_end => open..close.map_or(item.end, |c| c + 1),
+        _ => seg..end,
+    };
+    Some(Slot { key, field, typed: &text[seg..at], span, first })
+}
+
+/// 글의 한 항목 — `항목=` 이 든 낱말에서 다음 그런 낱말 앞까지가 아니라, **그 낱말 하나**(따옴표로 열렸으면 닫힐
+/// 때까지)다. 커서가 값 자리인지만 묻는 쪽이라 뒤에 이은 낱말은 안 든다.
+struct Item {
+    start: usize,
+    eq: usize,
+    end: usize,
+    /// 여는 따옴표와 닫는 따옴표의 자리. 안 닫혔으면 `None` — 글 끝까지 값이다.
+    quote: Option<(usize, Option<usize>)>,
+}
+
+fn items(text: &str) -> Vec<Item> {
+    let mut out = Vec::new();
+    let mut words = words(text).peekable();
+    while let Some((start, end)) = words.next() {
+        let Some(k) = text[start..end].find('=') else { continue };
+        let eq = start + k;
+        let open = eq + 1;
+        let item = match text[open..].chars().next().filter(|c| matches!(c, '"' | '\'')) {
+            Some(q) => {
+                let close = text[open + 1..].find(q).map(|p| open + 1 + p);
+                let stop = close.map_or(text.len(), |c| c + 1);
+                // 따옴표 안의 낱말은 이 항목의 것이다 — `=` 가 들어도 새 항목이 아니다.
+                while words.peek().is_some_and(|&(s, _)| s < stop) {
+                    words.next();
+                }
+                Item { start, eq, end: stop.max(end), quote: Some((open, close)) }
+            }
+            None => Item { start, eq, end, quote: None },
+        };
+        out.push(item);
+    }
+    out
+}
+
+/// 빈칸으로 가른 낱말과 그 바이트 자리.
+fn words(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    text.split_whitespace().map(move |w| {
+        let start = w.as_ptr() as usize - text.as_ptr() as usize;
+        (start, start + w.len())
+    })
+}
+
+/// 고를 값 하나.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Offer {
+    /// 목록에 서는 글 — 사람은 `이름 (메일)`, 마일스톤은 `id  제목`.
+    pub shown: String,
+    /// 칸에 넣는 값.
+    pub put: String,
+    /// 곁에 흐리게 서는 말 — `me`·`none` 처럼 글만으로는 뜻이 안 읽히는 값에. 화면의 말로 이미 옮긴 글이다.
+    pub note: Option<&'static str>,
+}
+
+/// 친 값으로 좁힌다 — 보이는 글이나 넣을 값에 든 것. **친 값이 이미 어느 값과 같으면 아무것도 안 낸다** — 다 친
+/// `assignee=me` 에서 Enter 가 거름망을 걸어야 한다. 목록이 서 있으면 Enter 는 값을 넣는다.
+pub fn narrow(offers: Vec<Offer>, typed: &str) -> Vec<Offer> {
+    let typed = typed.trim().to_lowercase();
+    if !typed.is_empty() && offers.iter().any(|o| o.put.to_lowercase() == typed) {
+        return Vec::new();
+    }
+    offers
+        .into_iter()
+        .filter(|o| o.shown.to_lowercase().contains(&typed) || o.put.to_lowercase().contains(&typed))
+        .collect()
+}
+
+/// 고른 값을 칸에 넣을 글. 빈칸·`=`·쉼표가 든 값은 따옴표로 묶는다 — `=` 바로 뒤일 때만 묶을 수 있다.
+pub fn quoted(put: &str, first: bool) -> String {
+    let needs = put.chars().any(|c| c.is_whitespace() || c == '=' || c == ',');
+    match (needs && first, put.contains('"')) {
+        (false, _) => put.to_string(),
+        (true, false) => format!("\"{put}\""),
+        (true, true) => format!("'{put}'"),
+    }
+}
+
+/// 값 목록에서 겨눈 줄. **겨눈 그 글과 커서에서만 선다** — 글자를 치거나 커서를 옮기면 첫 줄로 돌아간다. 칸을
+/// 열고 닫는 길마다 되돌리는 줄을 두지 않으려고 이렇게 든다.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Aim {
+    text: String,
+    at: usize,
+    row: usize,
+}
+
+impl Aim {
+    /// 줄 `n` 개인 목록에서 겨눈 줄.
+    pub fn row(&self, input: &Input, n: usize) -> usize {
+        if self.text == input.text() && self.at == input.cursor() { self.row.min(n.saturating_sub(1)) } else { 0 }
+    }
+
+    /// 한 줄 옮긴다. 끝에서는 멈춘다 — 목록의 커서와 같다.
+    pub fn step(&mut self, input: &Input, n: usize, down: bool) {
+        let row = self.row(input, n);
+        let row = if down { (row + 1).min(n.saturating_sub(1)) } else { row.saturating_sub(1) };
+        *self = Aim { text: input.text().to_string(), at: input.cursor(), row };
+    }
+}
+
+/// `rows` 줄 창에 겨눈 줄 `row` 가 들게 굴린 첫 줄. 겨눈 줄이 창 밑으로 내려가면 그 줄을 맨 밑에 둔다.
+pub fn window(row: usize, rows: usize) -> usize {
+    (row + 1).saturating_sub(rows)
+}
+
+use super::{App, Mode};
+use crate::i18n::say;
+use crate::model::{Issue, Kind};
+
+impl App {
+    /// 거름망 칸의 커서가 선 값 자리와 고를 값. **목록이 안 서면 `None`** 이다 — 값 자리가 아니거나, 좁혀 남은
+    /// 것이 없거나, 친 값이 이미 어느 값과 같으면.
+    pub(super) fn offered(&self) -> Option<(Slot<'_>, Vec<Offer>)> {
+        let Mode::Filter(q) = &self.mode else { return None };
+        let slot = slot(q.text(), q.cursor())?;
+        let offers = narrow(offers(slot.field, &self.site.issues, self.site.lang), slot.typed);
+        (!offers.is_empty()).then_some((slot, offers))
+    }
+
+    /// 값 목록의 겨눈 줄을 옮긴다. 목록이 안 섰으면 아무것도 안 한다.
+    pub(super) fn aim_offer(&mut self, down: bool) {
+        let Some(n) = self.offered().map(|(_, o)| o.len()) else { return };
+        if let Mode::Filter(q) = &self.mode {
+            self.offer_aim.step(q, n, down);
+        }
+    }
+
+    /// 겨눈 값을 칸에 넣는다. **넣었으면 참이다** — 목록이 안 섰으면 거짓이고 Enter 는 거름망을 건다.
+    ///
+    /// 값이 칸 끝에 서면 빈칸 하나를 붙인다 — 다음 항목을 바로 치고, 목록이 닫혀 다음 Enter 가 거름망을 건다.
+    pub(super) fn put_offer(&mut self) -> bool {
+        let Some((slot, offers)) = self.offered() else { return false };
+        let Mode::Filter(q) = &self.mode else { return false };
+        let picked = &offers[self.offer_aim.row(q, offers.len())];
+        let (span, text) = (slot.span.clone(), quoted(&picked.put, slot.first));
+        let Mode::Filter(q) = &mut self.mode else { return false };
+        q.splice(span, &text);
+        if q.cursor() == q.text().len() {
+            q.insert(" ");
+        }
+        true
+    }
+}
+
+/// 항목의 값 목록 — 저장소의 줄에서 모은다.
+///
+/// - 담당: `me`·`none` 다음에 담당으로 선 사람, `이름 (메일)` 의 차례. **같은 사람은 메일로 하나다** — 메일이 없으면
+///   이름으로. 화면 모양(`naming`)을 안 따른다 — 이름만 보이면 이름이 같은 두 사람을 못 가른다(사용자 결정)
+/// - 태그: 줄에 선 태그, 이름의 차례
+/// - 마일스톤: `none` 다음에 마일스톤 줄, 새로 만든 것부터 — 값은 id 다
+fn offers(field: Field, issues: &[Issue], lang: crate::i18n::Lang) -> Vec<Offer> {
+    let word = |s: &str, note: &'static str| Offer { shown: s.to_string(), put: s.to_string(), note: Some(note) };
+    match field {
+        Field::Assignee => {
+            let mut people = std::collections::BTreeMap::new();
+            for i in issues {
+                let Some(name) = i.assignee.as_deref().filter(|n| !n.trim().is_empty()) else { continue };
+                let email = i.assignee_email.as_deref().map(str::trim).filter(|e| !e.is_empty());
+                let put = email.unwrap_or(name).to_string();
+                people.entry(put.to_lowercase()).or_insert_with(|| Offer {
+                    shown: crate::model::label(name, email, crate::config::Naming::Full),
+                    put,
+                    note: None,
+                });
+            }
+            let mut people: Vec<Offer> = people.into_values().collect();
+            people.sort_by_key(|o| o.shown.to_lowercase());
+            [word("me", say(lang, "tui.hint.me")), word("none", say(lang, "tui.hint.nobody"))]
+                .into_iter()
+                .chain(people)
+                .collect()
+        }
+        Field::Tag => {
+            let tags: std::collections::BTreeSet<&str> =
+                issues.iter().flat_map(|i| i.tags.iter().map(String::as_str)).collect();
+            tags.into_iter().map(|t| Offer { shown: t.to_string(), put: t.to_string(), note: None }).collect()
+        }
+        Field::Milestone => {
+            let mut stones: Vec<&Issue> = issues.iter().filter(|i| i.kind == Kind::Milestone).collect();
+            stones.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.id.cmp(&b.id)));
+            let stones = stones.into_iter().map(|i| Offer {
+                shown: format!("{}  {}", i.id, crate::text::one_line(&i.title)),
+                put: i.id.clone(),
+                note: None,
+            });
+            std::iter::once(word("none", say(lang, "tui.hint.no_milestone"))).chain(stones).collect()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+
+    /// `|` 가 커서다.
+    fn at(s: &str) -> (String, usize) {
+        let at = s.find('|').expect("커서가 없다");
+        (s.replacen('|', "", 1), at)
+    }
+
+    fn slot_of(s: &str) -> Option<(String, Field, String, String, bool)> {
+        let (text, at) = at(s);
+        slot(&text, at)
+            .map(|sl| (sl.key.to_string(), sl.field, sl.typed.to_string(), text[sl.span.clone()].to_string(), sl.first))
+    }
+
+    #[test]
+    fn the_slot_is_the_value_of_a_key_that_lists() {
+        assert_eq!(slot_of("assignee=|"), Some(("assignee".into(), Field::Assignee, "".into(), "".into(), true)));
+        assert_eq!(
+            slot_of("tag=bug assignee=ra|"),
+            Some(("assignee".into(), Field::Assignee, "ra".into(), "ra".into(), true))
+        );
+        // 커서가 값 가운데 서면 친 것은 커서 앞까지, 갈 자리는 값 전부다.
+        assert_eq!(
+            slot_of("tag=bu|gfix status=todo"),
+            Some(("tag".into(), Field::Tag, "bu".into(), "bugfix".into(), true))
+        );
+        assert_eq!(slot_of("no-tag=d|"), Some(("no-tag".into(), Field::Tag, "d".into(), "d".into(), true)));
+        assert_eq!(slot_of("milestone=|"), Some(("milestone".into(), Field::Milestone, "".into(), "".into(), true)));
+    }
+
+    #[test]
+    fn no_slot_where_the_key_has_no_list_or_the_cursor_is_not_in_a_value() {
+        for s in ["|", "sta|", "status=to|", "priority=p|", "tag|=bug", "tag=bug |", "tag=bug st|", "assignee=a b|"] {
+            assert_eq!(slot_of(s), None, "{s}");
+        }
+    }
+
+    /// 쉼표 뒤의 값만 좁히고 그 값만 간다 — 쉼표는 또는이다.
+    #[test]
+    fn a_comma_starts_the_next_value() {
+        assert_eq!(slot_of("tag=bug,ui|"), Some(("tag".into(), Field::Tag, "ui".into(), "ui".into(), false)));
+        assert_eq!(slot_of("tag=bug,u|i,docs"), Some(("tag".into(), Field::Tag, "u".into(), "ui".into(), false)));
+        assert_eq!(slot_of("tag=b|ug,ui"), Some(("tag".into(), Field::Tag, "b".into(), "bug".into(), true)));
+    }
+
+    /// `=` 바로 뒤의 따옴표는 닫힐 때까지 한 값이다 — 빈칸이 들어도 값 자리이고, 갈 때는 따옴표까지 간다.
+    #[test]
+    fn a_quoted_value_is_one_slot_up_to_its_closing_quote() {
+        assert_eq!(
+            slot_of("assignee=\"Kim L|"),
+            Some(("assignee".into(), Field::Assignee, "Kim L".into(), "\"Kim L".into(), true))
+        );
+        assert_eq!(
+            slot_of("assignee='Kim |Lee' tag=x"),
+            Some(("assignee".into(), Field::Assignee, "Kim ".into(), "'Kim Lee'".into(), true))
+        );
+        assert_eq!(slot_of("assignee=\"Kim Lee\" |"), None);
+        // 따옴표 안의 `=` 는 새 항목이 아니다.
+        assert_eq!(slot_of("grep=\"tag=x\" tag=|"), Some(("tag".into(), Field::Tag, "".into(), "".into(), true)));
+        assert_eq!(slot_of("grep=\"a tag=|"), None, "따옴표 안의 tag= 가 항목으로 읽혔다");
+    }
+
+    fn offer(shown: &str, put: &str) -> Offer {
+        Offer { shown: shown.into(), put: put.into(), note: None }
+    }
+
+    #[test]
+    fn narrowing_matches_anywhere_and_ignores_case() {
+        let all =
+            vec![offer("Raven (raven@x.io)", "raven@x.io"), offer("joseph (jo@x.io)", "jo@x.io"), offer("Kim", "Kim")];
+        let puts = |typed: &str| narrow(all.clone(), typed).into_iter().map(|o| o.put).collect::<Vec<_>>();
+        assert_eq!(puts(""), ["raven@x.io", "jo@x.io", "Kim"]);
+        assert_eq!(puts("RAV"), ["raven@x.io"]);
+        assert_eq!(puts("x.io"), ["raven@x.io", "jo@x.io"]);
+        assert_eq!(puts("zz"), Vec::<String>::new());
+        // 다 친 값이면 목록이 안 선다 — Enter 가 거름망을 건다.
+        assert_eq!(puts("kim"), Vec::<String>::new());
+        assert_eq!(puts("jo@x.io "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn only_a_value_right_after_the_equals_sign_is_quoted() {
+        assert_eq!(quoted("raven@x.io", true), "raven@x.io");
+        assert_eq!(quoted("Kim Lee", true), "\"Kim Lee\"");
+        assert_eq!(quoted("say \"hi\"", true), "'say \"hi\"'");
+        assert_eq!(quoted("Kim Lee", false), "Kim Lee");
+    }
+
+    #[test]
+    fn the_aim_stands_only_on_the_text_and_cursor_it_was_taken_on() {
+        let q = Input::new("tag=");
+        let mut aim = Aim::default();
+        assert_eq!(aim.row(&q, 3), 0);
+        aim.step(&q, 3, true);
+        aim.step(&q, 3, true);
+        aim.step(&q, 3, true);
+        assert_eq!(aim.row(&q, 3), 2, "끝에서 멈춘다");
+        aim.step(&q, 3, false);
+        assert_eq!(aim.row(&q, 3), 1);
+        assert_eq!(aim.row(&q, 1), 0, "목록이 줄면 안으로 당긴다");
+        assert_eq!(aim.row(&Input::new("tag=b"), 3), 0, "글이 바뀌면 첫 줄이다");
+    }
+
+    #[test]
+    fn the_window_follows_the_aimed_row() {
+        assert_eq!(window(0, 3), 0);
+        assert_eq!(window(2, 3), 0);
+        assert_eq!(window(3, 3), 1);
+        assert_eq!(window(9, 3), 7);
+    }
+
+    fn row(id: &str, kind: Kind) -> Issue {
+        Issue::new(id.into(), format!("{id} 제목"), kind, crate::model::Status::new("todo"), "2026-09-01T00:00:00Z")
+    }
+
+    #[test]
+    fn people_are_listed_once_by_email_with_me_and_none_first() {
+        let mut a = row("t-1", Kind::Issue);
+        (a.assignee, a.assignee_email) = (Some("레이븐".into()), Some("raven@x.io".into()));
+        let mut b = row("t-2", Kind::Issue);
+        (b.assignee, b.assignee_email) = (Some("Raven".into()), Some("RAVEN@x.io".into()));
+        let mut c = row("t-3", Kind::Issue);
+        c.assignee = Some("anna".into());
+        let d = row("t-4", Kind::Issue);
+        let got: Vec<(String, String)> =
+            offers(Field::Assignee, &[a, b, c, d], Lang::En).into_iter().map(|o| (o.shown, o.put)).collect();
+        assert_eq!(
+            got,
+            [
+                ("me".into(), "me".into()),
+                ("none".into(), "none".into()),
+                ("anna".into(), "anna".into()),
+                ("레이븐 (raven@x.io)".into(), "raven@x.io".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn tags_are_listed_once_and_milestones_newest_first_by_id() {
+        let mut a = row("t-1", Kind::Issue);
+        a.tags = vec!["ui".into(), "bug".into()];
+        let mut b = row("t-2", Kind::Issue);
+        b.tags = vec!["bug".into()];
+        let tags: Vec<String> = offers(Field::Tag, &[a, b], Lang::En).into_iter().map(|o| o.put).collect();
+        assert_eq!(tags, ["bug", "ui"]);
+
+        let old = row("t-9", Kind::Milestone);
+        let mut new = row("t-5", Kind::Milestone);
+        new.created_at = "2026-10-01T00:00:00Z".into();
+        let got: Vec<(String, String)> = offers(Field::Milestone, &[old, new, row("t-1", Kind::Epic)], Lang::En)
+            .into_iter()
+            .map(|o| (o.shown, o.put))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("none".into(), "none".into()),
+                ("t-5  t-5 제목".into(), "t-5".into()),
+                ("t-9  t-9 제목".into(), "t-9".into())
+            ]
+        );
+    }
+
+    /// 담당 둘(레이븐·joseph), 태그 셋(bug·docs·ui), 마일스톤 하나인 탐색기.
+    fn explorer() -> App {
+        let mut a = row("argos-0001", Kind::Issue);
+        (a.assignee, a.assignee_email) = (Some("레이븐".into()), Some("raven@x.io".into()));
+        a.tags = vec!["bug".into(), "docs".into()];
+        let mut b = row("argos-0002", Kind::Issue);
+        (b.assignee, b.assignee_email) = (Some("joseph".into()), Some("jo@x.io".into()));
+        b.tags = vec!["ui".into()];
+        let m = row("argos-0003", Kind::Milestone);
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        App::new(vec![a, b, m], cfg, crate::nav::Path::new())
+    }
+
+    fn press(a: &mut App, code: ratatui::crossterm::event::KeyCode) {
+        a.key(ratatui::crossterm::event::KeyEvent::new(code, ratatui::crossterm::event::KeyModifiers::NONE));
+    }
+
+    fn type_in(a: &mut App, s: &str) {
+        for c in s.chars() {
+            press(a, ratatui::crossterm::event::KeyCode::Char(c));
+        }
+    }
+
+    fn typed(a: &App) -> &str {
+        match &a.mode {
+            Mode::Filter(q) => q.text(),
+            m => panic!("거름망 칸이 아니다: {m:?}"),
+        }
+    }
+
+    /// **값 목록이 선 동안 Enter 는 값을 넣고, 안 선 때 거름망을 건다**(사용자 결정).
+    #[test]
+    fn enter_puts_the_value_in_while_the_list_stands_and_applies_once_it_does_not() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=bug assignee=JO");
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "tag=bug assignee=jo@x.io ", "메일을 넣고 빈칸 하나를 붙인다");
+        assert!(a.offered().is_none(), "넣은 뒤에도 목록이 선다");
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(a.mode, Mode::Browse, "목록이 없는데 Enter 가 거름망을 안 걸었다");
+        assert!(a.hung.is_some());
+    }
+
+    #[test]
+    fn up_and_down_aim_the_value_enter_puts_in() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        press(&mut a, KeyCode::Up);
+        for _ in 0..5 {
+            press(&mut a, KeyCode::Down);
+        }
+        press(&mut a, KeyCode::Up);
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "tag=docs ", "bug·docs·ui 의 끝에서 하나 올라온 줄이 아니다");
+        // 커서가 값 머리에 서도 값 전부를 간다 — 친 것이 없으니 첫 줄(bug)이다.
+        for _ in 0..5 {
+            press(&mut a, KeyCode::Left);
+        }
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "tag=bug ", "커서가 선 값을 통째로 안 갈았다");
+    }
+
+    /// 다 친 값이면 목록이 안 선다 — `milestone=none` 의 Enter 가 값을 다시 넣지 않고 건다.
+    #[test]
+    fn a_value_typed_out_whole_applies_on_the_first_enter() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "milestone=none");
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// 칸 위에 안내가 선다 — 항목과 예, 값 자리에서는 고를 값과 그것을 고르는 키.
+    #[test]
+    fn the_panel_over_the_field_shows_keys_and_examples_then_values() {
+        let mut a = explorer();
+        a.hit("SPC f");
+        let lang = a.site.lang;
+        let screen = super::super::draw::tests::render(&mut a, 100, 30).join("\n");
+        assert!(screen.contains(say(lang, "tui.hint.keys")), "{screen}");
+        assert!(screen.contains("status tag no-tag"), "{screen}");
+        assert!(screen.contains(EXAMPLES[0]), "{screen}");
+        type_in(&mut a, "assignee=");
+        let screen = super::super::draw::tests::render(&mut a, 100, 30).join("\n");
+        assert!(screen.contains("> me"), "겨눈 첫 줄에 글리프가 없다\n{screen}");
+        assert!(screen.contains("레이븐 (raven@x.io)"), "{screen}");
+        assert!(screen.contains("Up·Down"), "고르는 키를 안 댄다\n{screen}");
+        assert!(!screen.contains(EXAMPLES[0]), "값 자리인데 예가 섰다\n{screen}");
+    }
+
+    /// 예는 탐색기가 받는 거르개다 — 문법이 바뀌어 예가 낡으면 여기서 붉어진다.
+    #[test]
+    fn every_example_is_a_filter_the_explorer_takes() {
+        let mut a = explorer();
+        for ex in EXAMPLES {
+            a.mode = Mode::Filter(Input::new(ex));
+            assert_eq!(a.input_error(), None, "`{ex}` 를 안 받는다");
+        }
+    }
+}

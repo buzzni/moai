@@ -2065,7 +2065,11 @@ Options:
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
-  notes too). The header at the top numbers every registered project, and
+  notes too). The filter field lists the keys it takes and a few examples
+  above itself, and with the cursor in the value of assignee=, tag=, no-tag=
+  or milestone= it lists the values there instead: typing narrows them, Up
+  and Down pick one, and Enter puts it in; with no list standing it applies
+  the filter. The header at the top numbers every registered project, and
   pressing that number without SPC jumps straight there — 0 is everything,
   one list of all projects.
 
