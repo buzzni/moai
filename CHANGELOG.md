@@ -226,6 +226,14 @@ does not tag — see `CONTRIBUTING.md`.
   the same file keeps the planted one, so the tree does not change. `skill
   status` compares the hooks and the running moai by file, not by spelling.
 
+- **`moai mv -m -` and `moai defer -m -` read the text from stdin**, the way
+  `note -b -` and `add -b -` already did. They wrote a lone `-` as the note, so
+  `moai mv <review> done -m - < <file>` closed a review with `-` for its closing
+  line, and the hook let it through as a line that was not empty. An empty stdin
+  is refused and nothing is moved or deferred: the hook reads only the command
+  line and cannot see that text, so this is where an empty closing line is
+  caught. Text given on the command line is taken as before.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
