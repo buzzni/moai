@@ -135,6 +135,29 @@ impl Scroll {
         self.offset = self.offset.min(self.last());
     }
 
+    /// 여러 줄짜리 하나(`top` 부터 `h` 줄)가 보이게 가장 적게 굴린다 — 보드의 카드가 쓴다(moai-9nfw). 한 줄짜리
+    /// [`Scroll::reveal`] 로 카드의 윗줄만 보이게 하면 아래로 내려갈 때 카드의 몸이 칸 밖에 남는다. 칸보다 크면
+    /// 윗줄이 이긴다 — 카드가 무엇인지는 머리가 말한다.
+    pub fn reveal_span(&mut self, top: usize, h: usize) {
+        if self.height == 0 {
+            return;
+        }
+        let end = top + h.max(1);
+        if top < self.offset {
+            self.offset = top;
+        } else if end > self.offset + self.height {
+            self.offset = (end - self.height).min(top);
+        }
+        self.offset = self.offset.min(self.last());
+    }
+
+    /// 여러 줄짜리 하나(`top` 부터 `h` 줄)가 이미 보이는가 — [`Scroll::reveal_span`] 이 안 굴릴 자리다(moai-acfk). 보드가
+    /// 화면을 굴린 뒤 커서가 보이는지를 이것으로 잰다: 다른 자로 재면 보인다고 남겨 둔 커서를 다음 그림의
+    /// `reveal_span` 이 드러내느라 굴린 화면을 되돌린다. 칸보다 큰 것은 윗줄이 맨 위에 섰으면 보인다.
+    pub fn shows(&self, top: usize, h: usize) -> bool {
+        self.height == 0 || (top >= self.offset && (top + h.max(1) <= self.offset + self.height || top == self.offset))
+    }
+
     /// 칸 위로 숨은 줄 수.
     pub fn above(&self) -> usize {
         self.offset.min(self.last())
@@ -340,6 +363,43 @@ mod tests {
         s.fit(5, 8);
         s.reveal(7);
         assert_eq!(s.offset(), 3);
+    }
+
+    /// 여러 줄짜리는 **통째로** 보이게 굴린다 — 아래로 갈 때 몸이 칸 밖에 남지 않는다. 칸보다 크면 윗줄이 이긴다.
+    #[test]
+    fn reveal_span_shows_the_whole_card_and_its_top_wins_when_it_cannot() {
+        let mut s = sized(6, 30);
+        s.reveal_span(4, 3);
+        assert_eq!(s.offset(), 1, "카드의 아랫줄이 칸 밖에 남았다");
+        s.reveal_span(2, 3);
+        assert_eq!(s.offset(), 1, "보이는 카드인데 굴렀다");
+        s.reveal_span(0, 3);
+        assert_eq!(s.offset(), 0);
+        s.reveal_span(20, 9);
+        assert_eq!(s.offset(), 20, "칸보다 큰 카드의 윗줄이 칸 밖에 섰다");
+        s.reveal_span(28, 3);
+        assert_eq!(s.offset(), 24, "끝을 넘겨 굴렀다");
+    }
+
+    /// **보인다는 것은 [`Scroll::reveal_span`] 이 안 굴린다는 것이다**(moai-acfk) — 둘이 갈리면 보드가 굴린 화면을 다음
+    /// 그림이 커서 쪽으로 되돌린다. 칸보다 큰 것까지 자리마다 견준다.
+    #[test]
+    fn shows_is_exactly_where_reveal_span_stays_put() {
+        for offset in 0..12 {
+            for top in 0..20 {
+                for h in 0..9 {
+                    let mut s = sized(6, 30);
+                    s.by(offset as isize);
+                    let before = s;
+                    s.reveal_span(top, h);
+                    assert_eq!(
+                        before.shows(top, h),
+                        s.offset() == before.offset(),
+                        "굴린 자리 {offset}, 윗줄 {top}, {h}줄 — 보인다는 말과 드러내기가 갈렸다"
+                    );
+                }
+            }
+        }
     }
 
     /// 커서는 목록 밖으로 못 나간다. 길이는 **필요할 때만** 센다.

@@ -28,11 +28,16 @@ struct Moved {
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let back = args.undo;
+    // **`-m -` 는 stdin 을 읽는다 — `mv -m` 과 한 자다**(moai-m1za). 락보다 먼저 읽는다: 락을 쥔 뒤에 읽으면
+    // 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다. 빈 stdin 은 거기서 "stdin 이 비었다" 로 갈린다.
+    let given = super::add::read_msg(args.msg, ctx.lang())?;
     // **빈 까닭은 안 적는다.** `moai note` 가 같은 자리에서 거절하는데 여기만
-    // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다.
-    let msg = args.msg.as_deref().map(str::trim).filter(|m| !m.is_empty());
-    if args.msg.is_some() && msg.is_none() {
-        return Err(Fail::new(crate::i18n::say(ctx.lang(), "refuse.defer_empty_why")));
+    // 받으면, 이력에 내용 없는 `note:` 줄이 부를 때마다 하나씩 쌓인다. 코드도 `note` 와 같은
+    // `bad_input` 이다(리뷰) — `error` 로 두던 판은 바로 위 빈 `-m -` 의 거절(`bad_input`)과 한 명령 안에서
+    // 같은 잘못을 두 코드로 냈다.
+    let msg = given.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    if given.is_some() && msg.is_none() {
+        return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.defer_empty_why"), super::code::BAD_INPUT));
     }
     let from = args.from.map(crate::model::Status::new);
     let at = model::now();

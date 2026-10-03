@@ -426,7 +426,11 @@ IDEA
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
-  notes too). The header at the top numbers every registered project, and
+  notes too). The filter field lists the keys it takes and a few examples
+  above itself, and with the cursor in the value of assignee=, tag=, no-tag=
+  or milestone= it lists the values there instead: typing narrows them, Up
+  and Down pick one, and Enter puts it in; with no list standing it applies
+  the filter. The header at the top numbers every registered project, and
   pressing that number without SPC jumps straight there — 0 is everything,
   one list of all projects.
 
@@ -443,9 +447,12 @@ IDEA
     SPC p a  register            SPC p d  drop from the list
     SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred            SPC v a  show all
+    SPC v l  deferred            SPC v i  ideas              SPC v a  show all
+    SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
+             leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
+    SPC v b  list or board [list/board] — the board is described below
     SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
@@ -456,6 +463,7 @@ IDEA
     SPC c i  id                  SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
     SPC c t  tag                 SPC c h  column names [shown/hidden]
+    SPC c e  epic — the name of the epic the row is in; off to begin with
     SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
   Read:
     SPC m a  everything unread   SPC m g  every member of this group
@@ -464,8 +472,9 @@ IDEA
              it. Whether it stands at all is SPC v d
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
-             Stored times stay UTC, and so does --json; a bare day in an
-             SPC f filter (created=2026-10-01) is a day on this clock too
+             Stored times stay UTC, and so does --json; a bare day or a
+             minute in an SPC f filter (created=2026-10-01,
+             done_at=\"2026-10-03 00:00~2026-10-05 23:59\") is on this clock too
     SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
              Clicking puts the focus on the pane and the cursor on the row
              under it. The wheel moves the pane under the pointer without
@@ -496,16 +505,56 @@ IDEA
   The list hides done to begin with — the [done hidden] mark on the path line
   says so. The view is separate from the filter, so Esc does not clear it and
   the two apply together.
+  Done that has sat in done for a while is the archive (archive_days in
+  .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
+  the list and the board even with done shown, and the path line counts it
+  — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
+  show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top, and
   pressing the chosen one again turns it around. When it is not the default
   (priority) the path line says which order it is.
-  Columns (SPC c) turn on and off with [shown/hidden]. Assignee, tag, created
-  and updated dates stand on the right of the row, and when it gets narrow
-  they are dropped in that order — dates, then assignee, then tag — to leave
-  room for the title.
+  Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
+  created and updated dates stand on the right of the row, and when it gets
+  narrow they are dropped in that order — dates, then epic, then assignee,
+  then tag — to leave room for the title.
   View, sort and columns are written into the [tui] table of the user config
   on every press and carry over to the next run and to other projects (the
   same file `moai project add` writes).
+
+  SPC v b lays the same rows out as a kanban board instead of a list. It is
+  the list's layout, not another window: the cursor, the filter, the view,
+  search, [NEW] and the detail are the list's, and the choice is kept under
+  [tui] as layout. The columns are idea, deferred and the config's columns in
+  order — idea is a kind and deferred an axis, so nothing is stored for them.
+  SPC v i hides ideas, the idea column here and the idea rows in the list
+  alike, and is kept under [tui] as hide_ideas.
+  At the project root every milestone is a lane, with (no milestone) last;
+  inside a milestone or an epic there is one lane. Epics and milestones are
+  not cards. Each card is two lines, its id, column and priority over its title,
+  and the cursor's card is marked and drawn reversed. Cards Enter can go
+  into end their title with /, as in the list. The foot, a third line,
+  stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
+  the board only as the name in that foot (SPC c e). Cards that are not yours
+  grow that foot anyway and say whose they are, dimmed — → name, or unowned —
+  in the assignee's place; your own cards stay two lines. Whose is decided the
+  way `moai ready` decides it, and when who you are is unknown no card is set
+  apart. On a narrow card the tags and the epic name shrink, longest first, so
+  whose it is and the dates still show. j and k move within the
+  column, h and l go to the next column at the nearest height, gg and G go to
+  the column's ends, Enter and Backspace go in and out as in the list, and Tab
+  does nothing. The whole board scrolls as one; the column names stay on top.
+  When the columns do not fit, the column the cursor stands in always stands
+  and the frame title names the rest with their counts. Clicking a card puts
+  the cursor on it. The wheel, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, and
+  PageDown and PageUp scroll the board, not the cursor: the chosen card and
+  the detail stay put even once the card is off screen, and the board scrolls
+  to its end. The next cursor key moves from that card and scrolls back to
+  it. In the overview (0) every project stands as a header
+  across the columns, the same line the list gives it, and an unfolded project
+  has its milestone lanes under it; the columns are those of every project
+  shown, together. The cursor stands on a header too — k from the project's
+  top card in a column goes up to it — and there l unfolds, h folds, Tab
+  unfolds everything and Enter goes in, as in the list.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
@@ -996,27 +1045,57 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
 
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when it got to done, the clock --done
+  reads. --all and -s done leave it out and the tail says how many;
+  --archived brings it back, done and deferred with it. Asking by time
+  (--since, --created, --done, --stale) finds it anyway, and so does -g
+  once done is let in (-g --all). Nothing is stored: it is read from the
+  column and the clock each time.
+
+    moai show --archived -g parser
+
   Time: --since <when> keeps the rows whose own updated_at is at or after
-  it. --created and --done take a range from..to with either side left
-  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
-  the time zone the screen and milestone deadlines use; the end of a range
-  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
-  time zone moves. --done looks at rows standing in done now, at the
-  time they last got there - an epic or milestone at the time its last
-  member got to done; deferring or removing the rest later does not move
-  it. Asking by time opens what the list hides by default - done, deferred
-  and ideas - because a row closed meanwhile changed too. Narrow it again
-  with -s (name the columns you want) or --type; --deferred keeps only what
-  is deferred, and no flag leaves deferred rows out. A lone instant given
-  to --created or --done is that one second, not a day.
+  it. --created and --done take a range from..to or from~to with either
+  side left open, or a single time, which is all it spans. <when> is
+  YYYY-MM-DD, a day on your own clock - the time zone the screen and
+  milestone deadlines use; YYYY-MM-DD HH:MM, one minute on that clock;
+  or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no time zone moves. The
+  end of a range takes all it spans too, so ~2026-10-05 23:59 runs to
+  23:59:59. Quote a range that opens with ~ ('~2026-10-05'): zsh takes a
+  bare ~2026-10-05 for a named directory. --done looks at rows standing in
+  done now, at the time they last got there - an epic or milestone when its
+  last member got to done, or when the rest were deferred if that came
+  later. Moving rows in or out and removing them leave no trace on the
+  group: closed that way it counts from its last finished member, and a
+  deferred row moved into a closed group dates it from that row's deferral.
+  Asking by time opens what the list hides by default - done, deferred and
+  ideas - because a row closed meanwhile changed too. Narrow it again with
+  -s (name the columns you want) or --type; --deferred keeps only what is
+  deferred, and no flag leaves deferred rows out. A lone instant given to
+  --created or --done is that one second, not a day.
+
+  --filter takes each filter as item=value, one per flag, and adds four
+  time items named after the --json fields: created_at, updated_at,
+  started_at and done_at. Each reads the row's own field - a group's too,
+  never its members' - in the forms above, and a row without that field
+  is unknown and falls in no range. done_at stays when a row is reopened,
+  so add status=done for what is closed now; done= keeps the meaning of
+  --done. updated_at= with a single day is that day, where since= runs on
+  from it. In the explorer (SPC f) a value right after = may be quoted.
+
+    moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
+    moai show -a raven -a joshep --filter started_at=2026-10-01~
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
   the journal, not the row), a row whose derived value changed without a
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
-  falls in no time range. For a complete copy, pull the whole list and
-  compare row by row.
+  falls in no time range. For a complete copy, pull the whole list
+  (--archived, and `moai idea show --archived` for ideas) and compare row
+  by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -1045,18 +1124,18 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
-    moai show --all --json | duckdb -c \"SELECT kind, count(*)
+    moai show --archived --json | duckdb -c \"SELECT kind, count(*)
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1\"";
 
 // **`--json` 의 모양을 여기 적는다** — 에이전트가 읽는 계약이라(moai-1hka.k16) 도움말이 그 문서다. 모양을
 // 바꾸면 이 글과 `report::stats::Stats` 를 함께 고치고, `docs/cli.md` 를 다시 짓는다.
 const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters as `moai show` -
-  with done, deferred and ideas in: it counts what happened, so nothing
-  finished is hidden. Every number counts one kind, issue unless --type
-  names another; a group is measured through its members (-e, --milestone).
-  The kind axis alone counts every row picked, to show what was left out.
-  --all is taken and changes nothing. The time filters read as in
-  `moai show --help`.
+  with done, deferred, ideas and the archive in: it counts what happened,
+  so nothing finished is hidden. Every number counts one kind, issue
+  unless --type names another; a group is measured through its members
+  (-e, --milestone). The kind axis alone counts every row picked, to show
+  what was left out. --all and --archived are taken and change nothing.
+  The time filters read as in `moai show --help`.
 
   Nothing is stored, and the journal's column moves are never folded in.
   The numbers come from the rows and from the `model:` lines in the notes -
@@ -1260,7 +1339,8 @@ pub struct WorktreeArg {
     pub worktree: bool,
 }
 
-/// 쉼표는 "또는", 반복은 "그리고".
+/// 쉼표는 "또는", 반복은 "그리고". 담당(`-a`)만 반복도 "또는"이다(moai-97tn) — 머리글이 대지 않는 그 하나는
+/// 그 플래그의 도움말이 댄다.
 ///
 /// 쉼표를 clap 에게 맡기지 않는 이유가 있다 — `-s todo,review` 와
 /// `-s todo -s review` 가 구별돼야 뒤엣것에 친절한 오류를 낼 수 있다.
@@ -1294,7 +1374,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Vec<String>,
 
-    /// That assignee (`none` and `me` too)
+    /// That assignee (repeated = or)
     #[arg(short, long, value_name = "who|none|me")]
     pub assignee: Vec<String>,
 
@@ -1325,9 +1405,13 @@ pub struct FilterArgs {
     #[arg(long)]
     pub deferred: bool,
 
-    /// Include done and what is deferred
+    /// Include done and deferred, no archive
     #[arg(long)]
     pub all: bool,
+
+    /// Include the archive too (old done)
+    #[arg(long)]
+    pub archived: bool,
 
     /// Filters as one string (`status=todo`)
     #[arg(long, value_name = "item=value")]
@@ -1342,7 +1426,7 @@ pub struct MvArgs {
     #[arg(required = true, num_args = 1.., value_name = "id")]
     pub args: Vec<String>,
 
-    /// One line of note on this move (journal only)
+    /// A note on this move (journal only). `-` reads stdin
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
@@ -1413,7 +1497,7 @@ pub struct DeferArgs {
     #[arg(long)]
     pub undo: bool,
 
-    /// Why it is deferred (journal only)
+    /// Why it is deferred (journal only). `-` reads stdin
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 
@@ -1545,22 +1629,43 @@ pub enum SkillCmd {
     /// Install the plugin tree and register it with `claude`
     #[command(after_help = "  Skills and hooks are installed into `.claude/moai-plugin/` and registered
   with `claude`. Your settings.json is not touched - putting the two keys in
-  is `claude`'s job.
+  is `claude`'s job. The one exception is the old declarations below.
 
-  **Nothing is deleted.** Running again only overwrites. Deleting a hook file
+  **No file is deleted.** Running again only overwrites. Deleting a hook file
   a running session holds would block every tool call of that session.
 
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.
 
-  The two plugins that polish Korean text are installed **at the same scope**
-  (korean-skills and humanize-korean). If they cannot be installed, moai's
-  own registration still stands, and they are removed along with it.
+  The two Korean text plugins an earlier moai installed alongside
+  (korean-skills and humanize-korean) are **removed**, once per scope: only
+  where this repository's moai stands as an earlier version (its installed
+  skill still teaches them), and only when their marketplace is the one an
+  earlier moai added. Once that scope holds this version, nothing there is
+  removed again. Where that earlier version stands at a scope other than
+  --scope, install first brings it up to this version there (claude plugin
+  update --scope <that scope>), so the next install does not remove from it
+  again; if that fails, nothing is removed there and the next install tries
+  again. Nothing is removed or brought up when moai's own registration
+  fails. A user-scope install is left behind when another repository's moai
+  stands there, and then the command to remove it is printed in one line;
+  that scope is not brought up either, so it is removed once that moai is
+  gone. The marketplaces are left behind. If one cannot be removed, moai's own
+  registration still stands and the command to remove it by hand is printed.
+
+  At project scope an earlier moai also declared their marketplaces in the
+  committed .claude/settings.json, which kept offering them to the team. moai
+  deletes those entries itself - only theirs, only when they point where an
+  earlier moai pointed them, and only when nothing in that file still enables
+  a plugin from them. The rest of the file stays as it was; commit the
+  change. `claude plugin marketplace remove --scope project` is not used: with
+  no other declaration in sight it removes the marketplace from the whole
+  machine. If the entry cannot be deleted, where to delete it is printed.
 
   moai skill install                  just me (the default. settings.local.json)
   moai skill install --scope user     every repository on this machine
   moai skill install --scope project  with the team (committed settings.json)
-  moai skill install --dry-run        only show what would be installed
+  moai skill install --dry-run        only show what would be done
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.")]
@@ -1577,7 +1682,7 @@ pub enum SkillCmd {
         )]
         scope: Scope,
 
-        /// Install nothing; only say what would be installed
+        /// Change nothing; only say what would be done
         #[arg(long)]
         dry_run: bool,
     },
@@ -1592,7 +1697,6 @@ pub enum SkillCmd {
                   somewhere else
     install       which version at which scope, and whether it matches the
                   version that would be installed now
-    companions    whether the two Korean text plugins are in this repository
     hook          whether the executable the install calls is still there
     claude        whether it is on PATH (without it nothing can be installed
                   or removed)")]
@@ -1602,17 +1706,21 @@ pub enum SkillCmd {
     #[command(after_help = "  This repository's install is removed per scope with
   `claude plugin uninstall`, and the marketplace with
   `claude plugin marketplace remove`. Deleting the two keys from your
-  settings is `claude`'s job - we do not touch someone else's JSON.
+  settings is `claude`'s job - we do not touch someone else's JSON, except
+  the old declarations below.
 
   **`.claude/moai-plugin/` is not deleted.** Deleting a file a running
   session holds can block that session's tool calls. Delete it after closing
   the session.
 
-  The two Korean plugins installed alongside are removed **at the scope moai
-  was removed from**. The marketplace is left behind - the name is global to
-  one machine and another repository's install uses it.
-  A user-scope install is also left behind when another repository's moai
-  stands there, and then the command to remove it is printed in one line.
+  The two Korean plugins an earlier moai installed alongside are removed **at
+  the scope moai was removed from**, under the same conditions as install: an
+  earlier version of moai stands there and the marketplace is the one it
+  added. The marketplace is left behind - the name is global to one machine
+  and another repository's install uses it. A user-scope install is also left
+  behind when another repository's moai stands there, and then the command to
+  remove it is printed in one line. At project scope the marketplace's
+  declaration in the committed .claude/settings.json goes, as with install.
 
   A Claude session already open keeps calling the old hook - reopen it for
   the removal to land.

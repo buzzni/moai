@@ -226,9 +226,9 @@ impl App {
         // 화면의 시간대로 재어 `keep` 에 접히므로([`super::App::apply`]), 안 걸면 상세는 새 시간대의 날을 그리는데
         // 목록은 다음 다시 읽기까지 옛 시간대의 날로 남는다. 커서는 다시 읽을 때처럼 붙든 줄에 다시 세운다.
         if self.hung.is_some() {
-            let held = self.current().map(|r| self.anchor_of(&r));
+            let (held, stood) = self.grip_of(&self.rows());
             self.reapply();
-            self.regrip(held);
+            self.regrip(held, stood);
         }
         // **수는 다시 세지 않는다**(moai-fgjj, 2026-09-23 사용자 결정) — 배너와 층의 수에 기한 판정이
         // 안 접혀 있어([`super::Surfaced`]) 그리는 걸음이 이 시간대로 잰다. 한때 여기서 셈을 다시

@@ -12,7 +12,7 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
-    moai show -s todo -t bug               filters (comma = or, repeated flag = and)
+    moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
     moai stats                             counts: columns, flow, lead and cycle time, AI work
@@ -128,23 +128,6 @@ the title inside the body.
 
 The one thing that matters is that the next session reads this with
 `moai show <id>`. These three are advice for that reason, not rules anything checks.
-
-## Korean text
-
-**Polish Korean text before it goes into moai** — any title, body, note or `-m`
-that carries even one Hangul character, review text included. Text written only in
-English goes in as it is.
-
-- Run `korean-skills:humanizer` to take the AI tell out, add `humanize-korean:humanize-korean`
-  when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
-- Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
-  (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
-- **Keep the technical term, and never drop the original.** An everyday word carries several
-  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
-  deleted, nobody can read the sentence back to the code — and
-  a name that came from the code goes in exactly as it is
-- `moai skill install` installs both plugins together. The detail is under "Korean text"
-  in the moai skill's `references/commands.md`
 
 ## The five things the hook actually watches
 

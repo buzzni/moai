@@ -133,6 +133,22 @@ issue under the cursor on the other. It answers keys and the mouse alike: click
 a pane or a row, roll the wheel over the pane you want to move, drag the line
 between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
 lets the mouse go when you would rather select or paste with it in the terminal.
+`SPC v b` lays the same list out as a kanban board — idea, deferred and your
+columns side by side, one lane per milestone, and in the overview one header
+per project — and keeps that choice for the next run. `SPC v i` hides the
+ideas, and a card that is not yours says whose it is.
+`SPC f` filters with the same `key=value` words as `--filter`. While you type,
+the keys it takes and a few examples stand above the field, and in the value of
+`assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
+do — typing narrows them, Up and Down pick one and Enter puts it in.
+
+Done work that has sat in done for two weeks is the archive. It is not removed
+and nothing is stored for it — moai reads it off the column and the clock each
+time. The list, the board and `moai status` leave it out even when done is
+shown, and say how many they left; `SPC v o` in the explorer and `moai show
+--archived` bring it back. `/` search finds it anyway, and so does `moai show
+-g` once done is let in with `--all`.
+`archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns it off.
 
 ## Working in parallel
 
@@ -243,10 +259,15 @@ below shrink is the output, and with it the tokens.
   and `--sort created` are the orders no edit moves. The output stays a bare
   array — fewer rows than `-n` means the list has ended.
 - `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
-  and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
-  a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
-  is an instant in UTC. Asking by time opens what the list hides by default —
-  done, deferred and ideas — since a row closed meanwhile changed too.
+  and `--created` and `--done` take a range `from~to` (or `from..to`) with
+  either side left open. A bare `YYYY-MM-DD` is a day on your own clock, the
+  time zone the screen uses; `YYYY-MM-DD HH:MM` is one minute on that clock;
+  `YYYY-MM-DDTHH:MM:SSZ` is an instant in UTC. `--filter` adds `created_at=`,
+  `updated_at=`, `started_at=` and `done_at=`, each reading the row's own field,
+  and in the explorer's `SPC f` a value right after `=` may be quoted —
+  `done_at="2026-10-03 00:00~2026-10-05 23:59"`. Asking by time opens what the
+  list hides by default — done, deferred and ideas — since a row closed
+  meanwhile changed too.
 - `-g` looks through the notes and move messages as well as the id, title, tags
   and body.
 
@@ -293,8 +314,10 @@ journal, so look at what the line held and then delete it by hand. A whole line
 that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
-`moai show --all --json`, plus `moai idea show --all --json` since `--all` still
-leaves ideas out. An id missing from the new pull was removed.
+`moai show --archived --json`, plus `moai idea show --archived --json` since
+`moai show` leaves ideas out. `--all` is not enough for either: it leaves the
+archive out, and a closed idea goes to the archive like any other done row. An
+id missing from the new pull was removed.
 
 ### Counting
 
@@ -329,13 +352,13 @@ rows — so name the columns you read:
 moai show --type issue --json | jq -r 'group_by(.derived_epic) | .[] | "\(.[0].derived_epic // "none")\t\(length)"'
 
 # rows per column - a group stands in the column its members give it
-moai show --all --json | duckdb -c "
+moai show --archived --json | duckdb -c "
   SELECT coalesce(derived_status, status) AS col, kind, count(*) AS n
   FROM read_json('/dev/stdin', columns = {status: 'VARCHAR', derived_status: 'VARCHAR', kind: 'VARCHAR'})
   GROUP BY ALL ORDER BY n DESC"
 
 # tokens per model, read from the `model:` note lines on each issue
-moai show --all --json | duckdb -c "
+moai show --archived --json | duckdb -c "
   SELECT w.model, sum(w.tokens) AS tokens
   FROM (SELECT unnest(work) AS w
         FROM read_json('/dev/stdin', columns = {work: 'STRUCT(model VARCHAR, tokens BIGINT)[]'}))
@@ -375,8 +398,6 @@ eventually needs.
 - `CONTRIBUTING.md` — building, testing, and what a commit here looks like
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
-- `docs/korean-terms.md` — the Korean terms this repository's issues, notes, commit messages
-  and `CLAUDE.md` use
 - `CHANGELOG.md` — what changed, per release
 
 ## License

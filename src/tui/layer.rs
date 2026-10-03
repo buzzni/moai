@@ -1271,6 +1271,9 @@ impl App {
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
     fn leave_project(&mut self, park_at: Option<PathBuf>) {
+        // 굴려 떼어 둔 보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰, [`App::adrift`]) — 두 프로젝트가 같은
+        // prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 카드로 읽혀, 화면 밖에 선 채다.
+        self.adrift = None;
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
@@ -1395,7 +1398,7 @@ impl App {
     /// 까닭은 이 부름이 방금 [`App::held`]·[`App::unlayered`] 에 적은 그 글이다 — 여기서 또
     /// 지어내면 배너와 알림이 갈린다.
     pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) -> Relayered {
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let (held, stood) = self.grip_of(&self.rows());
         match self.layer.take() {
             None => {
                 // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
@@ -1524,11 +1527,17 @@ impl App {
             layer.launch();
         }
         let rows = self.rows();
+        // 층의 첨자가 아니라 **그 머리줄의 줄 번호**다(moai-r1ly.f2x) — 한눈 보기에서 위 프로젝트가 펼쳐져 있으면 둘이
+        // 갈려, 방금 등록한 프로젝트 대신 위 프로젝트의 줄에 섰다.
         let landed = land.filter(|_| self.on_layer()).and_then(|want| {
             let l = self.layer.as_ref()?;
-            l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
+            let n = l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))?;
+            rows.iter().position(|r| *r == Row::Project(n))
         });
-        let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
+        // 붙든 줄이 사라지는 것은 그 프로젝트가 목록에서 빠질 때다. 보드는 그 카드의 칸 곁에 선다([`App::regain`]) —
+        // `CardAt` 이 든 층의 첨자가 이제 그 자리를 넘겨받은 프로젝트를 가리켜, 그 프로젝트의 같은 칸이다. 번호로
+        // 물러서면 줄 차례(레인 → 우선순위)의 카드라 딴 칸에 서기 쉽다.
+        let at = landed.or_else(|| self.regain(&rows, held.as_ref(), stood.as_ref())).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
         Relayered::Stood
     }
@@ -1714,9 +1723,12 @@ pub(super) fn fake(places: Vec<(&str, &str, Look)>, at: At) -> Layer {
 /// (`site: None`) 한눈 보기의 목록에 남의 프로젝트의 줄이 한 번도 안 서고, 그 줄을 그리는 길
 /// (`draw::row_line` 의 `Seat::Place`)을 그림 시험이 통째로 안 지난다 — 남의 줄이 제 프로젝트의
 /// 칸과 색으로 서는지를 아무도 안 보는 자리가 거기 있었다.
+///
+/// **아카이브는 끈다** — 까닭은 `App::new` 와 같다(박아 둔 날짜와 흐르는 벽시계, moai-47mz).
 #[cfg(test)]
 pub(super) fn fill(layer: &mut Layer, at: usize, issues: Vec<crate::model::Issue>, cfg: crate::config::Config) {
-    let (index, ground) = crate::tui::measure(&issues, &cfg);
+    let (index, mut ground) = crate::tui::measure(&issues, &cfg);
+    ground.archive_days = 0;
     layer.places[at].site = Some(super::Site::of(issues, index, ground, cfg, crate::nav::Path::new(), Vec::new()));
 }
 
@@ -3021,6 +3033,155 @@ mod tests {
         let (_one, _two, mut a) = on_layer_with_twins(&s);
         a.hit("Enter");
         assert!(!a.on_layer(), "머리줄의 Enter 가 프로젝트로 안 들어갔다");
+    }
+
+    /// **한눈 보기의 보드는 프로젝트마다 머리줄 하나가 칸을 가로질러 서고, 펼친 프로젝트 밑에 그 프로젝트의 마일스톤
+    /// 레인이 선다**(moai-oagj.vcj, 사용자 결정). 머리줄에도 커서가 서서 목록처럼 `l` 이 펴고 `h` 가 접는다 — 그
+    /// 프로젝트 맨 위 카드의 `k` 가 그 머리줄로 간다. 칸은 줄을 낸 프로젝트들의 칸을 합친 것이다(`App::screen_statuses`).
+    #[test]
+    fn the_overview_board_stands_a_header_per_project_and_its_milestone_lanes() {
+        use crate::tui::board::Column;
+        use crate::tui::{LaneOf, Seat};
+        let s = Scratch::fenced("layer-board");
+        let (one, two) = twins(&s);
+        // one 에 마일스톤 하나와 그 밑의 일 하나를 더한다 — 레인 머리줄이 서는 프로젝트다.
+        let at = "2026-09-01T00:00:00Z";
+        let milestone = Issue::new("argos-0010".into(), "v1 릴리스".into(), Kind::Milestone, Status::new("todo"), at);
+        let mut task = Issue::new("argos-0011".into(), "릴리스의 일".into(), Kind::Issue, Status::new("todo"), at);
+        task.milestone = Some("argos-0010".into());
+        let mut body = std::fs::read_to_string(one.join(".moai/issues.jsonl")).unwrap();
+        for i in [milestone, task] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(one.join(".moai/issues.jsonl"), body).unwrap();
+        // two 는 제 칸 하나(`waiting`)를 더 쓴다 — 보드의 칸은 둘을 합친 것이어야 한다.
+        std::fs::write(
+            two.join(".moai/config.toml"),
+            "prefix = \"argos\"\nstatuses = \"todo, in_progress, waiting, done\"\n",
+        )
+        .unwrap();
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        assert!(a.board(), "한눈 보기에 보드가 안 섰다");
+        assert_eq!(a.rows(), [Row::Project(0), Row::Project(1)], "시험의 전제 — 둘 다 아직 안 폈다");
+
+        a.hit("l");
+        settle(&mut a);
+        a.key(key(KeyCode::End));
+        a.hit("l");
+        settle(&mut a);
+        let rows = a.rows();
+        let laid = a.laid(&rows);
+        assert_eq!(
+            laid.lanes.iter().filter(|l| matches!(l, LaneOf::Project(_))).count(),
+            2,
+            "프로젝트마다 머리줄이 안 섰다: {:?}",
+            laid.lanes
+        );
+        assert!(
+            laid.lanes.iter().any(|l| matches!(l, LaneOf::Seg(Seat::Place(0), Some(_)))),
+            "one 의 마일스톤 레인이 안 섰다: {:?}",
+            laid.lanes
+        );
+        assert!(
+            laid.columns.contains(&Column::Status("waiting".into())),
+            "two 의 칸이 보드에 없다: {:?}",
+            laid.columns
+        );
+        // 마일스톤을 안 쓰는 two 의 레인에는 머리줄 자리가 없다 — 옆 프로젝트 때문에 빈 줄이 서지 않는다.
+        let two_lane = laid.lanes.iter().position(|l| matches!(l, LaneOf::Seg(Seat::Place(1), _))).unwrap();
+        assert!(!laid.plan.lanes[two_lane].head, "마일스톤 없는 프로젝트의 레인에 머리줄이 섰다");
+
+        let text = super::super::draw::tests::render(&mut a, 120, 24).join("\n");
+        for want in ["v1 릴리스", "(마일스톤 없음)", "one/", "two/", "waiting 0"] {
+            assert!(text.contains(want), "`{want}` 가 없다\n{text}");
+        }
+
+        // 머리줄에서 `j` 는 그 프로젝트의 카드로, 그 프로젝트 맨 위 카드의 `k` 는 머리줄로 간다.
+        a.key(key(KeyCode::Home));
+        assert_eq!(a.rows()[a.cursor], Row::Project(0));
+        a.hit("j");
+        let title = match &a.rows()[a.cursor] {
+            Row::Item(seat @ Seat::Place(0), e, _) => {
+                e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone())
+            }
+            _ => None,
+        };
+        assert_eq!(title.as_deref(), Some("릴리스의 일"), "머리줄의 j 가 one 의 맨 위 카드로 안 갔다");
+        a.hit("k");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "레인 맨 위 카드의 k 가 머리줄로 안 갔다");
+        // 머리줄의 `h` 는 목록처럼 접는다 — 보드의 옆 칸이 아니다.
+        a.hit("h");
+        assert!(!a.rows().iter().any(|r| matches!(r, Row::Item(Seat::Place(0), ..))), "머리줄의 h 가 one 을 안 접었다");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0));
+    }
+
+    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 밀려난 커서를 끌어오던
+    /// 때(moai-acfk), 아직 아무 카드에도 안 선 머리줄은 머리줄만의 길을 타 펼친 프로젝트가 화면보다 길면 다음 머리줄이
+    /// 안 보여 굴리기가 첫 걸음부터 멈췄다. 이제 굴리기는 화면만 굴리고 커서는 머리줄에 그대로다(moai-j0jf).
+    #[test]
+    fn the_overview_board_scrolls_right_after_unfolding_from_a_header() {
+        let s = Scratch::fenced("layer-board-roll");
+        let ids: Vec<String> = (1..=12).map(|k| format!("argos-{k:04}")).collect();
+        let lines: Vec<(&str, &str, &str)> = ids.iter().map(|id| (id.as_str(), "one 의 줄", "todo")).collect();
+        let one = s.project("one", &lines);
+        let two = s.project("two", &[("argos-0001", "two 의 줄", "todo")]);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.detail_open = false;
+        a.hit("l");
+        settle(&mut a);
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 펼친 머리줄에 섰다");
+        a.hit("Ctrl-d");
+        assert!(a.list.offset() > 0, "아직 칸이 없는 머리줄에서 Ctrl-d 가 보드를 안 굴렸다");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "굴린 화면이 머리줄의 커서를 끌어 옮겼다");
+        let rolled = a.list.offset();
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), rolled, "그림이 화면 밖의 머리줄을 드러내느라 굴린 화면을 되돌렸다");
+        // 머리줄의 `l` 은 그 줄의 커서 키다(moai-j0jf 리뷰) — 이미 펼쳐 아무것도 안 바뀌어도 화면을 머리줄로 되돌린다.
+        // 남기면 화면 밖의 머리줄이 펴지고 접혀도 보이는 화면은 그대로라 키가 죽은 것처럼 보인다.
+        a.hit("l");
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), 0, "머리줄의 `l` 이 화면 밖의 머리줄로 화면을 안 되돌렸다");
+    }
+
+    /// **굴린 보드에서 옆 프로젝트로 건너가면 커서의 카드를 드러낸다**(moai-j0jf 리뷰) — 굴려 떼어 둔 화면은 떠난
+    /// 프로젝트의 것이다. 두 프로젝트가 같은 prefix 를 쓰면 건너간 프로젝트의 첫 카드 `argos-0001` 이 떼어 둔 그 카드와
+    /// 정체가 같아, 남기면 들고 온 굴린 자리에서 그 카드가 화면 밖에 선 채다.
+    #[test]
+    fn crossing_to_a_twin_project_shows_the_card_it_lands_on() {
+        let s = Scratch::fenced("layer-board-adrift");
+        let ids: Vec<String> = (1..=30).map(|k| format!("argos-{k:04}")).collect();
+        let one = s.project("one", &ids.iter().map(|id| (id.as_str(), "one 의 줄", "todo")).collect::<Vec<_>>());
+        let two = s.project("two", &ids.iter().map(|id| (id.as_str(), "two 의 줄", "todo")).collect::<Vec<_>>());
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.detail_open = false;
+        let draw = |a: &mut App| super::super::draw::tests::render(a, 100, 30);
+        let shown = |a: &App| {
+            let card = a.laid(&a.rows()).plan.cards[a.cursor];
+            a.list.shows(card.top, card.height)
+        };
+        let one_at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.enter_project(one_at);
+        draw(&mut a);
+        a.hit("PageDown PageDown");
+        draw(&mut a);
+        let on = |a: &App| match &a.rows()[a.cursor] {
+            Row::Item(seat, e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.id.clone()),
+            _ => None,
+        };
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"), "시험의 전제 — 굴려도 커서는 첫 카드다");
+        assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다");
+        let two_at = a.layer.as_ref().unwrap().position(&two).expect("two 가 층에 있다");
+        a.enter_project(two_at);
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"), "시험의 전제 — 건너간 프로젝트의 같은 id 에 섰다");
+        draw(&mut a);
+        assert!(shown(&a), "건너간 프로젝트의 보드가 커서의 카드를 화면 밖에 두었다 — {}", a.list.offset());
     }
 
     /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
@@ -4502,5 +4663,224 @@ mod tests {
             "들어가면서 층이 물어 둔 설치 알림을 두고 왔다"
         );
         join_threads(&mut a);
+    }
+
+    /// 그 프로젝트의 스냅샷 끝에 줄 하나를 더한다.
+    fn append_issue(dir: &Path, i: Issue) {
+        let mut body = std::fs::read_to_string(dir.join(".moai/issues.jsonl")).unwrap_or_default();
+        body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        std::fs::write(dir.join(".moai/issues.jsonl"), body).unwrap();
+    }
+
+    /// 커서가 선 카드의 제목 — 그 줄의 프로젝트에서 읽는다([`App::issue_at`]).
+    fn title_at_cursor(a: &App) -> Option<String> {
+        match &a.rows()[a.cursor] {
+            Row::Item(seat, e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone()),
+            _ => None,
+        }
+    }
+
+    /// **칸이 하나도 없어도 한눈 보기의 보드에는 프로젝트 머리줄이 선다**(리뷰) — idea·미룸을 다 숨기고 아직 아무
+    /// 프로젝트도 안 읽었으면 칸이 없다. 칸이 없다고 그림을 통째로 접던 때는 머리줄까지 안 서 빈 테두리만 남았다.
+    #[test]
+    fn the_overview_board_stands_its_headers_even_with_no_column() {
+        let s = Scratch::fenced("layer-board-bare");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.view.hide_ideas = true;
+        a.view.hide_deferred = true;
+        assert_eq!(a.rows(), [Row::Project(0), Row::Project(1)], "시험의 전제 — 아무것도 안 폈다");
+        let text = super::super::draw::tests::render(&mut a, 120, 24).join("\n");
+        for want in ["one/", "two/"] {
+            assert!(text.contains(want), "`{want}` 가 없다\n{text}");
+        }
+    }
+
+    /// **머리줄의 `j` 는 `k` 로 올라온 그 칸으로 돌아간다 — 칸의 차례가 바뀌어도**(리뷰). 칸을 첨자로 들던 때는
+    /// `SPC v i` 가 idea 칸을 걷어 첨자가 한 칸씩 당겨지자, `in_progress` 에서 올라온 `j` 가 다른 칸으로 내려갔다.
+    #[test]
+    fn a_header_returns_to_the_column_it_came_up_from_when_the_columns_shift() {
+        let s = Scratch::fenced("layer-board-hint");
+        let (one, two) = twins(&s);
+        let at = "2026-09-01T00:00:00Z";
+        append_issue(&one, Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Idea, Status::new("todo"), at));
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.hit("l");
+        settle(&mut a);
+        a.hit("j");
+        for _ in 0..10 {
+            if title_at_cursor(&a).as_deref() == Some("one 의 둘째 줄") {
+                break;
+            }
+            a.hit("l");
+        }
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "시험의 전제 — in_progress 카드에 섰다");
+        a.hit("k");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0));
+        a.hit("SPC v i Esc");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 머리줄에 남았다");
+        a.hit("j");
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "머리줄의 j 가 올라온 칸으로 안 돌아갔다");
+    }
+
+    /// **목록에서 보드로 오며 설 카드가 없으면 그 줄의 프로젝트 머리줄에 선다**(리뷰) — 첫 줄로 떨어지던 때는 빈 에픽
+    /// 하나에서 `SPC v b` 를 누르면 맨 위 프로젝트의 머리줄로 가, 보던 프로젝트를 잃었다.
+    #[test]
+    fn flipping_to_the_board_from_a_group_with_no_card_stays_in_its_project() {
+        use crate::tui::Seat;
+        let s = Scratch::fenced("layer-board-flip");
+        let (one, two) = twins(&s);
+        let at = "2026-09-01T00:00:00Z";
+        append_issue(
+            &two,
+            Issue::new("argos-0009".into(), "two 의 빈 에픽".into(), Kind::Epic, Status::new("todo"), at),
+        );
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.key(key(KeyCode::End));
+        a.hit("l");
+        settle(&mut a);
+        let rows = a.rows();
+        let epic = rows
+            .iter()
+            .position(|r| match r {
+                Row::Item(seat @ Seat::Place(1), e, _) => {
+                    e.at().and_then(|at| a.issue_at(*seat, at)).is_some_and(|i| i.title == "two 의 빈 에픽")
+                }
+                _ => false,
+            })
+            .unwrap_or_else(|| panic!("빈 에픽이 목록에 없다: {rows:?}"));
+        a.cursor = epic;
+        a.hit("SPC v b Esc");
+        assert!(a.board(), "보드로 안 갔다");
+        assert_eq!(a.rows()[a.cursor], Row::Project(1), "보던 프로젝트 밖으로 갔다");
+    }
+
+    /// **보기 토글이 그 프로젝트의 카드를 다 숨기면 그 프로젝트의 머리줄에 선다**(moai-r1ly.dwb 리뷰) — 번호로 물러서던
+    /// 때는 그 번호에 올라선 다음 프로젝트의 머리줄에 서, 보던 프로젝트를 잃었다.
+    #[test]
+    fn hiding_every_card_of_a_project_on_the_overview_keeps_to_its_header() {
+        let s = Scratch::fenced("layer-board-emptied");
+        let solo = s.project("solo", &[]);
+        let at = "2026-09-01T00:00:00Z";
+        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        let other = s.project("other", &[("argos-0001", "other 의 줄", "todo")]);
+        let cfg = s.register(&[&solo, &other]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.hit("l");
+        settle(&mut a);
+        a.hit("j");
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — idea 카드에 섰다");
+        a.hit("SPC v i Esc");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "카드가 다 숨은 프로젝트 밖으로 갔다");
+    }
+
+    /// **한눈 보기에서 위 프로젝트를 다시 읽어도 커서는 보던 줄에 남는다**(moai-r1ly.f2x). 한눈 보기의 줄은 펼친
+    /// 프로젝트의 줄을 다 이어 세운다. 다시 읽은 줄을 들이며 커서를 안 세우던 때는 위 프로젝트의 줄 수가 바뀌면 같은
+    /// 번호에 다른 줄이 섰다.
+    #[test]
+    fn rereading_a_project_above_on_the_overview_keeps_the_row() {
+        let s = Scratch::fenced("layer-reread-cursor");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        a.want_site(1);
+        settle(&mut a);
+        a.cursor = a.rows().iter().position(|r| *r == Row::Project(1)).unwrap() + 1;
+        let seen = title_at_cursor(&a);
+        assert!(seen.as_deref().is_some_and(|t| t.starts_with("two")), "시험의 전제 — two 의 줄에 섰다: {seen:?}");
+
+        write_lines(
+            &one,
+            &[
+                ("argos-0001", "one 의 첫 줄", "todo"),
+                ("argos-0002", "one 의 둘째 줄", "in_progress"),
+                ("argos-0003", "one 의 새 줄", "todo"),
+                ("argos-0004", "one 의 또 새 줄", "todo"),
+            ],
+        );
+        settle(&mut a);
+        assert_eq!(titles(&a).iter().filter(|t| t.starts_with("one")).count(), 4, "시험의 전제 — one 을 다시 읽었다");
+        assert_eq!(title_at_cursor(&a), seen, "위 프로젝트를 다시 읽자 커서가 딴 줄로 갔다");
+    }
+
+    /// **방금 등록한 프로젝트의 머리줄에 선다 — 위 프로젝트가 펼쳐져 있어도**(moai-r1ly.f2x). 층의 첨자를 줄 번호로
+    /// 쓰던 때는 위에 펼친 줄 수만큼 어긋나 위 프로젝트의 줄에 섰다.
+    #[test]
+    fn registering_stands_on_the_new_header_below_an_open_project() {
+        let s = Scratch::fenced("layer-land-open");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.rows().len() > 1, "시험의 전제 — one 이 펼쳐졌다");
+        s.register(&[&one, &two]);
+        a.relayer(Some(&two));
+        assert_eq!(a.rows()[a.cursor], Row::Project(1), "방금 등록한 프로젝트의 머리줄에 안 섰다");
+    }
+
+    /// **보던 카드의 프로젝트가 목록에서 빠지면 그 자리를 넘겨받은 프로젝트의 같은 칸에 선다**(moai-r1ly.f2x). 번호로
+    /// 물러서면 그 프로젝트의 줄이긴 해도 줄 차례(레인 → 우선순위)의 카드라 딴 칸에 선다.
+    #[test]
+    fn dropping_the_project_of_the_card_keeps_to_its_column_on_the_overview_board() {
+        let s = Scratch::fenced("layer-board-dropped");
+        let at = "2026-09-01T00:00:00Z";
+        let card = |id: &str, title: &str, status: &str, p: u8| {
+            let mut i = Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), at);
+            i.priority = Some(p);
+            i
+        };
+        let one = s.project("one", &[("argos-0001", "one 의 줄", "todo")]);
+        let two = s.project("two", &[]);
+        append_issue(&two, card("argos-0001", "two 의 집은 줄", "in_progress", 1));
+        append_issue(&two, card("argos-0002", "two 의 줄", "todo", 2));
+        let three = s.project("three", &[]);
+        append_issue(&three, card("argos-0001", "three 의 줄", "todo", 0));
+        append_issue(&three, card("argos-0002", "three 의 집은 줄", "in_progress", 2));
+        let cfg = s.register(&[&one, &two, &three]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        for n in 0..3 {
+            a.want_site(n);
+        }
+        settle(&mut a);
+        a.cursor = a.rows().iter().position(|r| *r == Row::Project(1)).unwrap() + 1;
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("two 의 집은 줄"), "시험의 전제");
+
+        s.register(&[&one, &three]);
+        a.relayer(None);
+        // 번호로 서면 three 의 첫 줄(p0 의 todo)이다.
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("three 의 집은 줄"), "빠진 카드의 칸을 떠났다");
+    }
+
+    /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i`
+    /// 를 누르면 줄이 다 빠진다. 줄이 없다고 그 키와 `SPC v a` 까지 끄던 때는 프로젝트에 들어가야만 되돌렸다.
+    #[test]
+    fn a_view_toggle_that_hid_every_card_can_be_undone_on_the_overview() {
+        let s = Scratch::fenced("layer-board-trap");
+        let solo = s.project("solo", &[]);
+        let at = "2026-09-01T00:00:00Z";
+        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        let cfg = s.register(&[&solo]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.hit("l");
+        settle(&mut a);
+        let cards = |a: &App| a.rows().iter().filter(|r| matches!(r, Row::Item(..))).count();
+        assert_eq!(cards(&a), 1, "시험의 전제 — idea 카드 하나: {:?}", a.rows());
+        a.hit("SPC v i Esc");
+        assert_eq!(cards(&a), 0, "시험의 전제 — idea 가 숨었다");
+        a.hit("SPC v i Esc");
+        assert_eq!(cards(&a), 1, "SPC v i 가 숨긴 idea 를 못 되돌렸다");
+        a.hit("SPC v i Esc");
+        a.hit("SPC v a Esc");
+        assert_eq!(cards(&a), 1, "SPC v a 가 숨긴 idea 를 못 되돌렸다");
     }
 }

@@ -188,6 +188,18 @@ pub fn remember_invoked() {
     let _ = INVOKED.set(std::env::current_dir().ok());
 }
 
+/// [`remember_invoked`] 가 적어 둔 자리 — `-C` 가 옮기기 **전의** 현재 디렉터리다(리뷰 moai-gu5m.ke0).
+///
+/// 상대 철자로 부른 실행 파일(`argv[0]`)은 커널이 이 자리에서 찾았다. 그 철자를 되짚는 쪽(`cmd::skill` 의
+/// `invoked`)이 `-C` 가 옮긴 지금 자리에 붙이면 없는 자리를 짚는다. `main` 을 안 지난 부름(단위 시험)에서는
+/// 지금 자리다.
+pub(crate) fn invoked_dir() -> Option<PathBuf> {
+    match INVOKED.get() {
+        Some(at) => at.clone(),
+        None => std::env::current_dir().ok(),
+    }
+}
+
 /// `MOAI_HERE` 가 **켜져 있는가** — 빈 값과 흔한 "아니오" 낱말은 끈 것으로 읽는다.
 ///
 /// 글은 `MOAI_HERE=1` 로 적혀 있어 사람은 이것을 참·거짓으로 읽는다. 있기만 하면 켜던 판은

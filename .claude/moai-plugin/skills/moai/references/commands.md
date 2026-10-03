@@ -74,10 +74,12 @@ column, it is running. There is no command that opens it and no new field.
 
 ## Filters
 
-A comma means "or"; the same flag twice means "and".
+A comma means "or"; the same flag twice means "and" — except `-a`, where twice
+means either one, since a row has one assignee.
 
     moai show -s todo -t bug          todo and bug
     moai show -s todo,review          todo or review
+    moai show -a raven -a joshep      raven's or joshep's
     moai show -e none                 the ones with no epic
     moai show --deferred              only what is deferred
     moai show --stale 7               stuck in the current column for more than seven days
@@ -367,28 +369,6 @@ Three common ways it goes wrong.
   Split the call, the evidence and the next step into lines and one `moai show` is enough
 - **Emoji mark what is urgent** — urgency goes in the priority (`-p 1`). That is the one `ready` reads
 
-## Korean text
-
-The always-visible rule is under "Korean text" in `SKILL.md`. This is the procedure.
-
-- For review text, polish the sentences only — do not shorten it and do not mix your own call in.
-  That is what rule 3 means by taking the reviewer's own words. Shorten it only past 64KB, and say so with `Summary:`
-- Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
-  make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
-- Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
-- On an ordinary technical term's first mention in a body, put the original in parentheses after
-  the translation and use the translation alone from there. **That rule is not for code names** —
-  a name that came from the code goes in exactly as it is, every time, and a gloss goes in
-  parentheses after it. Take it the other way round and "the translation alone from there" drops
-  the name, which is the swap this rule exists to stop. A repository that wants a fixed list of
-  its own terms keeps that list in its own docs — this rule stands without one
-- If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
-- If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
-  That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing
-
-    korean-skills@korean-skills     https://github.com/DaleSeo/korean-skills
-    humanize-korean@im-not-ai       https://github.com/epoko77-ai/im-not-ai
-
 ## Name the id in the commit
 
 Put the id of the issue a commit touched in the commit subject — `feat: draw the blocked line (<id>)`.
@@ -460,9 +440,10 @@ work. It is a note, not a field.
   note. Only lines that start at the beginning of a line count; indented lines and
   lines inside a fence are read as examples
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
-  are adding several issues up, call the list once instead of calling per id, or let
-  `moai stats --json` add them up: its `work` sums tokens by model and by grade and
-  counts the lines that carry none apart
+  are adding several issues up, call the list once instead of calling per id, with
+  `--archived` so every closed row is in (`--all` leaves out what has stood in done
+  for `archive_days`), or let `moai stats --json` add them up: its `work` sums tokens
+  by model and by grade and counts the lines that carry none apart
 
 ## Statistics
 
@@ -473,9 +454,9 @@ work. It is a note, not a field.
 
 It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
-`--milestone`). Done, deferred and ideas are opened, because a count of history
-that hides what closed would say nothing closed. In the explorer `SPC p s` opens
-the same numbers as bars, narrowed by the filter that is hung.
+`--milestone`). Done, deferred, ideas and the archive are opened, because a
+count of history that hides what closed would say nothing closed. In the explorer
+`SPC p s` opens the same numbers as bars, narrowed by the filter that is hung.
 
 - **Unknown is not zero.** A done row with no `started_at` (it closed before that
   field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;

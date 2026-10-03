@@ -105,6 +105,44 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     }
 }
 
+/// `mv -m`·`defer -m` 의 글 — **`-` 이면 stdin 을 읽는다**(moai-m1za, 2026-10-03 사람이 정했다).
+/// `note -b -` 와 같은 규칙이다. 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의 닫는 줄을 `-`
+/// 한 글자로 적었고, 훅 규칙 3 은 그 `-` 를 빈 값이 아니라고 지나보냈다.
+///
+/// **빈 stdin 은 거절한다** — `note -b -` 와 같고, `add`·`edit` 의 `-b -` 가 stderr 한 줄로 넘기는 것
+/// ([`read_body_said`])과는 다르다. 규칙 3 은 명령줄만 읽어 `-m -` 의 글을 못 보니, 빈 글을 막을 자리가
+/// 여기 하나다. 거절하면 아무것도 안 옮긴다: 읽는 것은 락보다 먼저라(부르는 쪽이 그 차례를 지킨다)
+/// 쓰기가 서기 전이다. 파일 머리의 BOM 도 빈칸으로 친다 — 편집기가 BOM 만 남긴 빈 파일이 안 보이는 닫는
+/// 줄로 지나가지 않게(리뷰).
+///
+/// **걷는 것은 앞뒤의 빈 줄과 끝의 빈칸뿐이다 — 첫 줄의 들여쓰기는 남긴다**(리뷰). [`crate::model::work_of`]
+/// 는 들여 쓴 `model:` 줄을 옮겨 적은 예로 읽는데, 다 걷으면 첫 줄의 예가 일한 것으로 셈에 든다 — argv 로 준
+/// 같은 글은 `mv` 가 그대로 적어 안 든다. 저널은 덧붙이기만 하니 그 셈은 못 되돌린다. 다만 `defer` 는 이 글을
+/// 받아 제 자로 다시 다 걷고(argv 의 까닭과 같은 자), `note -b -` 는 이 길을 안 지나 아직 다 걷는다.
+///
+/// **argv 에 적힌 글은 그대로 돌려준다.** 빈 글을 어떻게 받는지는 명령마다 이미 달라(`defer` 는
+/// 거절한다), 그 갈래를 여기로 옮기지 않는다.
+pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
+    if arg.as_deref() != Some("-") {
+        return Ok(arg);
+    }
+    let text = read_body(arg)?.unwrap_or_default();
+    match blank_lines_trimmed(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
+        "" => Err(Fail::coded(crate::i18n::say(lang, "refuse.msg_stdin_empty"), super::code::BAD_INPUT)),
+        t => Ok(Some(t.to_owned())),
+    }
+}
+
+/// 앞뒤의 빈 줄과 끝의 빈칸을 걷고 **첫 줄의 들여쓰기는 남긴다** — [`read_msg`] 의 자. 빈칸뿐인 글은 빈 글이 된다.
+/// BOM(U+FEFF)도 빈칸으로 센다 — `str::trim` 은 그것을 글자로 남겨, 빈 줄 뒤에 붙은 BOM 하나가 안 보이는 글로
+/// 지나갔다(리뷰).
+fn blank_lines_trimmed(s: &str) -> &str {
+    let blank = |c: char| c.is_whitespace() || c == '\u{feff}';
+    let s = s.trim_end_matches(blank);
+    let first = s.len() - s.trim_start_matches(blank).len();
+    &s[s[..first].rfind('\n').map_or(0, |n| n + 1)..]
+}
+
 /// [`read_body`] 에 **"준다고 하고 아무것도 안 왔다" 를 한 줄로 말하기**를 더한 것 — `add`·`edit` 이
 /// 쓴다(moai-pp9i.kj2, 2026-09-29 사람이 정했다: 막지 않고 stderr 한 줄, exit 0).
 ///

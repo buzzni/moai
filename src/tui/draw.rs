@@ -161,7 +161,25 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
         (items, grid, menu::waits(app.chord.held(), &ctx))
     });
-    let panel_h = open_menu.as_ref().map_or(0, |(_, g, _)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 });
+    // **거름망을 적는 동안은 메뉴 자리에 안내가 선다**(moai-h2rh, 2026-10-03 사용자 결정) — 쓸 수 있는 항목과 예, 커서가
+    // 값 자리면 고를 값이다. 메뉴처럼 몸통을 밀어 올리고 덮지 않는다. 줄 수도 메뉴와 같은 자로 몸통의 몫을 먼저 남긴다.
+    //
+    // **받은 줄 수는 적어 둔다**(`App::hint_room`) — 0 이면 값 목록이 안 서는 것으로 쳐서 Enter 가 거름망을 건다. 창이
+    // 낮아 안 그린 목록이 Enter 를 먹으면 보이지 않던 값이 칸에 들어간다.
+    let hint = if matches!(app.mode, Mode::Filter(_)) {
+        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
+        let room = menu::rows_for(left).min(super::hint::ROWS);
+        app.hint_room = Some(room);
+        Some(hint_lines(app, (area.width as usize).saturating_sub(2), room)).filter(|(lines, _)| !lines.is_empty())
+    } else {
+        None
+    };
+    // 값 목록이 섰는지는 위에서 그린 것으로 읽는다 — 안내 줄이 따로 물으면 같은 목록을 한 그림에 두 번 모은다.
+    let listing = hint.as_ref().is_some_and(|(_, listing)| *listing);
+    let panel_h = match &hint {
+        Some((lines, _)) => lines.len() as u16 + 1,
+        None => open_menu.as_ref().map_or(0, |(_, g, _)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 }),
+    };
     let [head, top, note, body, panel, keys] = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Length(1),
@@ -194,9 +212,16 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         let text = clip(&text, note.width as usize);
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
     }
-    let rows_at = list(f, app, left, &rows);
+    // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
+    let (rows_at, cards, columns) = if app.board() {
+        let b = board(f, app, left, &rows);
+        (Rect::default(), b.cards, b.columns)
+    } else {
+        (list(f, app, left, &rows), Vec::new(), Vec::new())
+    };
     // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 안쪽이라 그린 쪽이 낸다.
-    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right };
+    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다.
+    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right, cards, columns };
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }
@@ -237,6 +262,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     if let Some((_, grid, _)) = &open_menu {
         menu_panel(f, grid, panel);
     }
+    if let Some((lines, _)) = hint {
+        hint_panel(f, lines, panel);
+    }
     // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 창 밖
     // 줄을 빈 줄로 두고(moai-wt4n), 상세는 굴린 위쪽 줄도 짓고, 폼은 둘을 통째로 덮는다 — 짓는 쪽에서 세면
     // 그 셋을 따로 따져야 하고, 하나를 빠뜨리면 보이는 스피너가 멈추거나 안 보이는 스피너로
@@ -275,7 +303,20 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                 let text = clip(&format!(" {rest}"), more.width as usize);
                 f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::LightRed)))), more);
             }
-            prompt(f, line, say(lang, "tui.prompt.filter"), q, error, &prompt_help(say(lang, "tui.prompt.hang"), lang))
+            // 값 목록이 서 있으면 Enter 는 값을 넣는다 — 안내도 그 말을 한다(moai-h2rh).
+            let help = if listing {
+                fill(
+                    say(lang, "tui.hint.pick"),
+                    &[
+                        ("keys", &labels(PROMPT, &[Prompt::Up, Prompt::Down])),
+                        ("ok", &label(PROMPT, Prompt::Apply)),
+                        ("cancel", &label(PROMPT, Prompt::Cancel)),
+                    ],
+                )
+            } else {
+                prompt_help(say(lang, "tui.prompt.hang"), lang)
+            };
+            prompt(f, line, say(lang, "tui.prompt.filter"), q, error, &help)
         }
         Mode::Ask(ask) => {
             // 글칸이 **아래**에서 자리를 먼저 얻는다 — 창이 낮아 한 줄만 남으면 적는 칸이
@@ -1244,13 +1285,14 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 한 줄은 `~/.local/bin` 만 올려, 다른 자리에 선 moai 는 그 줄을 치고도 옛 판을 돌렸다.
     // 그 줄로 못 올리는 바이너리(소스에서 지은 판 따위)에는 안 댄다. **급하지 않다** — 고칠 것이
     // 아니라 받을 것이 있다는 말이다. 맨 끝에 서는 것도 그래서다: 좁은 창에서 잘려도 판 줄이
-    // 여전히 새 판을 말한다.
+    // 여전히 새 판의 번호를 댄다 — 못 물은 날(`Seen::Stale`)에는 "나왔다" 가 아니라 "며칠 전에
+    // 본 판" 으로 댄다(moai-ggxi).
     //
     // **명령 줄 자체는 나갈 때 찍는다**(리뷰, 2026-09-29 사용자 결정). 그 줄은 104칸이라 80칸
     // 창의 배너에서 늘 잘렸고, 앞에 경고가 서면 162칸이 들었다. 배너는 새 판과 나갈 때 줄이
     // 선다는 것만 말하고, 줄은 터미널을 걷은 뒤 셸에 남는다([`App::upgrade_note`]) — 거기서는
     // 잘리지 않고 그대로 복사된다.
-    if let (crate::latest::Seen::Newer { tag }, Some(_)) = (app.latest(), app.upgrade()) {
+    if let (Some(tag), Some(_)) = (app.latest().newer(), app.upgrade()) {
         parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
         soft += 1;
     }
@@ -1263,8 +1305,9 @@ fn banner(app: &App) -> Option<(String, bool)> {
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
 ///
-/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 못 읽은 저널이 있으면 셋째 줄이
-/// 그것을 댄다(moai-pvpb.6g6, [`journal_said`]).
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 판 줄의 꼬리가 번호 칸을 밀어내면
+/// 그 꼬리가 아랫줄로 내려오고(moai-ggxi), 못 읽은 저널이 있으면 그다음 줄이 그것을 댄다(moai-pvpb.6g6,
+/// [`journal_said`]).
 ///
 /// 돌려주는 것은 둘이다 — **빛**("지금 선 프로젝트에 빛이 섰는가", [`screen`] 이 `App::spun` 에
 /// 함께 센다)과 **번호**("프로젝트 번호를 실제로 적었는가"). 번호는 키 바가 읽는다(리뷰):
@@ -1276,7 +1319,8 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 따로 맞추면 줄끼리 어긋나 그림이 깨진다. 문구 줄이 가장 넓어 그 줄은 제자리다.
     let art = &LOGO[..LOGO.len() - 1];
     let art_in = (logo_w - art.iter().map(|l| crate::text::width(l)).max().unwrap_or(0)) / 2;
-    let mut told = Vec::from(told_of(app));
+    let (told, tail) = told_of(app);
+    let mut told = Vec::from(told);
     // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
     // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
     let tags = numbered_projects(app);
@@ -1293,6 +1337,17 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 만큼이 그 줄의 몫이고, 자리 글이 그 안에 맞춰 줄어든다([`journal_said`]). 자리 글 몫만 묶던 판은 줄이 60칸
     // 남짓이 되어, 80칸에서 `<1>` 부터의 번호를 통째로 지웠다(리뷰).
     let room = (at.width as usize).saturating_sub(1 + HEADER_GAP + want + HEADER_LABEL_W);
+    // **판 줄의 꼬리(지난 답과 들은 때)는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02
+    // 사용자 결정). 못 물은 줄은 63~67칸이라 80칸에서 번호 칸을 통째로 지웠다 — 자르면 들은 때가, 까닭을 빼면
+    // 까닭이 사라지므로 접는다. 남는 폭이 넉넉하면 한 줄 그대로라, 넓은 창의 헤더는 전과 같다.
+    if let Some(tail) = tail {
+        let joined = format!("{} · {tail}", told[1].1);
+        if crate::text::width(&joined) <= room {
+            told[1].1 = joined;
+        } else {
+            told.push(("", tail));
+        }
+    }
     told.extend(journal_said(app, room).map(|said| ("Journal", said)));
     // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
     let told_w = told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
@@ -1314,7 +1369,9 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
             spans.push(Span::styled("│", dim()));
             if let Some((label, said)) = told.get(n) {
                 spans.push(Span::raw(" ".repeat(HEADER_GAP)));
-                spans.push(Span::styled(format!("{} : ", pad(label, HEADER_LABEL)), dim()));
+                // 라벨 없는 줄은 윗줄의 이음이다 — 글은 윗줄 글과 같은 칸에서 시작한다.
+                let colon = if label.is_empty() { "   " } else { " : " };
+                spans.push(Span::styled(format!("{}{colon}", pad(label, HEADER_LABEL)), dim()));
                 spans.push(Span::raw(said.clone()));
             }
             Line::from(spans)
@@ -1441,10 +1498,13 @@ fn spans_width(spans: &[Span]) -> usize {
 /// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
-fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest());
+///
+/// **판 줄의 꼬리는 따로 돌려준다**([`version_said`]) — 한 줄로 이을지 아랫줄로 내릴지는 번호 칸을 잰
+/// [`header`] 가 정한다.
+fn told_of(app: &mut App) -> ([(&'static str, String); 2], Option<String>) {
+    let (said, tail) = version_said(app.site.lang, app.latest(), &app.site.now);
     let user = app.told_user().to_string();
-    [("User", user), ("Version", said)]
+    ([("User", user), ("Version", said)], tail)
 }
 
 /// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래([`crate::store::Unread::kind`] —
@@ -1507,16 +1567,40 @@ const JOURNAL_AT_W: usize = 32;
 /// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
 /// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
 /// `kind` 뿐이라 통째로 버려지는 담기다.
-fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
+///
+/// **넷 모두 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정) — 못 물은 것은
+/// 지난번에 들은 답이 있을 때만, 그 답을 들은 때와 함께 못 물었다는 말 **뒤에** 단다. 지난
+/// 값이라는 것이 글에 보여야 해서다. 지난 답이 없으면 번호를 안 댄다. 들은 때는 `now` 로 재고,
+/// 그 값은 [`App`] 이 든 시각이라 여기서 시계를 안 읽는다.
+///
+/// **지난 답은 꼬리로 따로 낸다** — `(줄, 꼬리)`. 이으면 `줄 · 꼬리` 고, 좁으면 [`header`] 가 꼬리를
+/// 아랫줄로 내린다(moai-ggxi 리뷰). 꼬리는 [`Seen::Stale`](crate::latest::Seen::Stale) 에만 선다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> (String, Option<String>) {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
-    let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
-        Seen::Same => say(lang, "tui.version.same").to_string(),
-        Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
-        Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
+    let (said, tail) = match latest {
+        Seen::Newer { tag } => (fill(say(lang, "tui.version.newer"), &[("tag", tag)]), None),
+        Seen::Same { tag } => (fill(say(lang, "tui.version.same"), &[("tag", tag)]), None),
+        Seen::Ahead { tag } => (fill(say(lang, "tui.version.ahead"), &[("tag", tag)]), None),
+        Seen::Stale { why, tag, heard_at } => {
+            // 하루 단위로 잰다 — 창이 하루라 그보다 잘게 재도 사람이 할 일은 같다. 때를 못 읽으면
+            // 언제인지 모르는 것이지 오늘 본 것이 아니다. **크게 앞선 때도 모르는 것이다**(리뷰) —
+            // `days_since` 는 앞선 때를 0 으로 눌러 손으로 적은 2099 가 "오늘" 이 되고, 실패한 물음이
+            // 그 때를 날마다 들고 간다. 창([`crate::latest::Held::fresh`])과 같은 슬랙을 넘으면 안 믿는다.
+            let ahead = crate::model::parse_rfc3339(heard_at)
+                .zip(crate::model::parse_rfc3339(now))
+                .is_some_and(|(at, now)| at - now > crate::model::FUTURE_SLACK_SECS);
+            let seen = match crate::model::days_since(heard_at, now).filter(|_| !ahead) {
+                Some(0) => fill(say(lang, "tui.version.seen.today"), &[("tag", tag)]),
+                Some(1) => fill(say(lang, "tui.version.seen.day"), &[("tag", tag)]),
+                Some(d) => fill(say(lang, "tui.version.seen.days"), &[("tag", tag), ("d", &d.to_string())]),
+                None => fill(say(lang, "tui.version.seen.earlier"), &[("tag", tag)]),
+            };
+            (unchecked_said(lang, why.kind).to_string(), Some(seen))
+        }
+        Seen::Unasked(why) => (unchecked_said(lang, why.kind).to_string(), None),
     };
-    format!("{mine} · {said}")
+    (format!("{mine} · {said}"), tail)
 }
 
 /// 못 물은 까닭마다 다른 글 — 키 하나(moai-580l).
@@ -1646,7 +1730,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     });
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
-    let hidden = app.view.badge(&app.screen_statuses(), app.site.lang);
+    let hidden = app.view.badge(&app.screen_statuses(), app.aged(), app.site.lang);
     // **한눈 보기에도 보기 뱃지를 세운다**(moai-1xo5) — 거기서도 보기가 줄을 가리므로, 안 세우면
     // 줄이 왜 적은지 말할 자리가 없다. 칸 이름은 지금 선 프로젝트의 것으로 댄다.
     let look = {
@@ -1953,6 +2037,428 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     list_at
 }
 
+/// 보드가 그린 자리 — 마우스가 맞히는 바탕이다(`mouse::Drawn::cards`·`columns`).
+struct Boarded {
+    /// 화면에 보이는 카드의 자리와 그 줄(`App::rows` 의 첨자).
+    cards: Vec<(Rect, usize)>,
+    /// 화면에 선 칸의 자리(머리줄부터 바닥까지)와 그 칸([`super::board::columns`] 의 첨자).
+    columns: Vec<(Rect, usize)>,
+}
+
+/// 보드를 그린다(moai-9nfw) — **목록 자리에 같은 줄을 칸반으로 세운다.** 새 창이 아니라 목록의 배치라 테두리·
+/// 포커스·굴린 자리(`App::list`)가 목록과 한 벌이다.
+///
+/// 테두리 안 첫 줄이 **칸 머리줄**이고 굴려도 남는다 — 굴린 카드가 어느 칸인지 머리가 말한다. 그 밑이 보드
+/// 한 장(캔버스)이다: 레인마다 머리줄 하나(뿌리에 마일스톤 레인이 설 때만), 그 밑에 칸마다 쌓인 카드.
+/// **굴리기는 보드 통째로 하나다**(사용자 결정) — 칸마다 따로 굴리면 같은 레인의 카드가 칸마다 다른 높이에 선다.
+///
+/// 한눈 보기에서는 프로젝트마다 **칸을 가로지르는 머리줄**이 먼저 선다(moai-oagj.vcj) — 목록의 프로젝트 줄과 같은
+/// 글이고([`place_line`]) 커서가 선다. 펼친 프로젝트면 그 밑에 그 프로젝트의 마일스톤 레인이 선다.
+///
+/// 칸은 테두리 안쪽 폭을 고르게 나눈다. 칸마다 [`super::board::CARD_MIN`] 을 못 받으면 덜 세우고, 못 세운 칸은
+/// 제목 줄에 이름과 수로 댄다 — **커서가 선 칸은 늘 선다**. **보이는 카드만 짓는다**(moai-wt4n 과 같은 까닭).
+fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
+    let laid = app.laid(rows);
+    let lang = app.site.lang;
+    let block = frame(app, Pane::Explorer);
+    let inner = block.inner(at);
+    let here = laid.plan.cards.get(app.cursor).copied();
+    // 커서가 선 카드의 칸을 적어 둔다 — 누르기·휠로 카드에 섰어도 머리줄의 `j` 가 그 칸으로 돌아간다(`App::board_column`).
+    app.note_board_column(&laid);
+    // 창은 **지난 프레임이 세운 자리에 머문다**([`super::board::window`]) — `app.drawn` 은 아직 지난 프레임의 것이다
+    // (`screen` 이 이 그림 뒤에 새로 적는다).
+    let was = app.drawn.columns.first().map_or(0, |&(_, c)| c);
+    let win = super::board::window(laid.columns.len(), inner.width as usize, here.and_then(|p| p.column), was);
+    let widths = super::board::widths(inner.width as usize, win.count);
+    let xs: Vec<u16> = widths
+        .iter()
+        .scan(inner.x, |x, w| {
+            let at = *x;
+            *x += *w as u16;
+            Some(at)
+        })
+        .collect();
+    let title = board_title(app, &laid, win, rows.is_empty());
+    f.render_widget(block.title(title), at);
+    let mut out = Boarded { cards: Vec::new(), columns: Vec::new() };
+    if inner.height == 0 {
+        return out;
+    }
+    let [heads, canvas] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+    for (k, c) in (win.first..win.first + win.count).enumerate() {
+        let room = widths[k].saturating_sub(1);
+        f.buffer_mut().set_line(xs[k], heads.y, &fit(column_head(app, rows, &laid, c), room), room as u16);
+        out.columns.push((Rect { x: xs[k], y: inner.y, width: widths[k] as u16, height: inner.height }, c));
+    }
+
+    app.list.fit(canvas.height as usize, laid.plan.height);
+    // 커서의 카드가 안 보일 때만 굴린다 — 레인의 첫 카드면 그 레인의 머리줄까지 드러낸다([`super::board::Plan::span`]).
+    // 카드가 보이면 머리줄이 가렸어도 그대로다: 커서 키로 머리줄만 가린 카드에 서도 화면을 한 줄 되돌리지 않는다.
+    // **사람이 화면을 굴려 커서에서 떼어 놓았으면 안 드러낸다**(moai-j0jf, [`App::rolled_off`]) — 고른 카드는 화면 밖에
+    // 있어도 그대로고, 다음 커서 키가 화면을 그리로 되돌린다.
+    let adrift = app.rolled_off(rows);
+    if let Some(p) = here
+        && !adrift
+        && !app.list.shows(p.top, p.height)
+        && let Some((top, h)) = laid.plan.span(app.cursor)
+    {
+        app.list.reveal_span(top, h);
+    }
+    let offset = app.list.offset();
+    let seen = offset..offset + canvas.height as usize;
+    let y_of = |line: usize| canvas.y + (line - offset) as u16;
+    for (n, lane) in laid.plan.lanes.iter().enumerate() {
+        // 이름 없는 레인(마일스톤을 안 쓰는 저장소의 나머지 줄)은 머리줄 자리만 둔다 — 이름 없는 `── ───` 선은
+        // 무엇의 머리인지 말하지 않는다(리뷰 moai-9nfw.fnb 8번).
+        if lane.head && seen.contains(&lane.top) && laid.lanes.get(n).is_some_and(|l| l.seg().is_some()) {
+            let line = lane_line(app, &laid, n, canvas.width as usize);
+            f.buffer_mut().set_line(canvas.x, y_of(lane.top), &line, canvas.width);
+        }
+    }
+    for (n, p) in laid.plan.cards.iter().enumerate() {
+        if p.top >= seen.end || p.top + p.height <= seen.start {
+            continue;
+        }
+        let Some(r) = rows.get(n) else { continue };
+        // 칸을 가로지르는 머리줄 — 한눈 보기의 프로젝트 줄이다. 보드 폭을 다 쓴다.
+        let Some(column) = p.column else {
+            if let Row::Project(place) = r {
+                let line = project_banner(app, *place, n == app.cursor, canvas.width as usize);
+                f.buffer_mut().set_line(canvas.x, y_of(p.top), &line, canvas.width);
+                out.cards.push((Rect { x: canvas.x, y: y_of(p.top), width: canvas.width, height: 1 }, n));
+            }
+            continue;
+        };
+        if !win.holds(column) {
+            continue;
+        }
+        let k = column - win.first;
+        let lines = card(app, r, n == app.cursor, widths[k], p.height);
+        let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
+        for (dy, line) in lines.iter().enumerate() {
+            if (from..to).contains(&(p.top + dy)) {
+                f.buffer_mut().set_line(xs[k], y_of(p.top + dy), line, widths[k] as u16);
+            }
+        }
+        out.cards.push((Rect { x: xs[k], y: y_of(from), width: widths[k] as u16, height: (to - from) as u16 }, n));
+    }
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, lang);
+    out
+}
+
+/// 한눈 보기 보드의 프로젝트 머리줄(moai-oagj.vcj) — 목록의 프로젝트 줄과 같은 글([`place_line`])이다: 펼치고 접는 것이
+/// 목록과 같은 키라 줄도 같은 말을 한다. 고른 줄은 카드처럼 `>` 와 반전이다 — 색 없는 터미널에서도 선다.
+fn project_banner<'a>(app: &App, place: usize, chosen: bool, w: usize) -> Line<'a> {
+    let mut line = place_line(app, place, w);
+    if chosen {
+        for s in &mut line.spans {
+            s.style = s.style.add_modifier(Modifier::REVERSED);
+        }
+    }
+    let lead = if chosen { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
+    Line::from(std::iter::once(lead).chain(line.spans).collect::<Vec<_>>())
+}
+
+/// 보드의 제목 줄 — **못 세운 칸을 이름과 수로 댄다**(`+2 · ? review 0 · ✓ done 4`). 칸이 다 섰으면 제목이 없다:
+/// 칸마다의 수는 칸 머리줄이 이미 댄다. 카드가 하나도 없으면 목록과 같은 말이다(보기가 다 가렸는지까지).
+fn board_title<'a>(app: &App, laid: &super::Laid, win: super::board::Window, empty: bool) -> Line<'a> {
+    let lang = app.site.lang;
+    if empty {
+        return if app.view_hides_here() {
+            say(lang, "tui.list.empty_by_view").into()
+        } else {
+            say(lang, "tui.list.empty").into()
+        };
+    }
+    let off: Vec<String> = (0..laid.columns.len())
+        .filter(|c| !win.holds(*c))
+        .map(|c| {
+            let column = &laid.columns[c];
+            format!("{} {} {}", column_glyph(column), column_name(column, lang), laid.plan.count(c))
+        })
+        .collect();
+    if off.is_empty() {
+        return Line::default();
+    }
+    fill(say(lang, "tui.board.more"), &[("n", &off.len().to_string()), ("names", &off.join(" · "))]).into()
+}
+
+/// 칸의 이름 — idea 는 종류의 이름 그대로, 미룸은 화면의 말, 칸은 설정의 이름 그대로다.
+fn column_name(c: &super::board::Column, lang: Lang) -> String {
+    match c {
+        super::board::Column::Idea => say(lang, "tui.board.idea").into(),
+        super::board::Column::Shelved => say(lang, "tui.act.deferred").into(),
+        super::board::Column::Status(s) => s.clone(),
+    }
+}
+
+/// 칸의 멈춘 글리프 — idea `◇`·미룸 `‖`·칸은 그 칸의 글리프(사용자가 그린 그림). **색이 혼자 뜻을 지지
+/// 않는다**: 글리프 곁에 늘 칸 이름이 선다.
+fn column_glyph(c: &super::board::Column) -> &'static str {
+    match c {
+        super::board::Column::Idea => "◇",
+        super::board::Column::Shelved => "‖",
+        super::board::Column::Status(s) => style::glyph(s),
+    }
+}
+
+/// 칸 머리줄 한 칸 — 글리프·이름·카드 수. 시작한 칸은 그 안에 도는 카드가 있을 때만 돈다([`count_glyph_across`]) —
+/// 목록 제목의 건수와 같은 자다.
+fn column_head<'a>(app: &App, rows: &[Row], laid: &super::Laid, c: usize) -> Line<'a> {
+    let lang = app.site.lang;
+    let column = &laid.columns[c];
+    let n = laid.plan.count(c);
+    let glyph = match column {
+        super::board::Column::Status(s) => {
+            let work: Vec<(Seat, usize)> = laid
+                .plan
+                .cards
+                .iter()
+                .zip(rows)
+                .filter(|(p, _)| p.column == Some(c))
+                .filter_map(|(_, r)| match r {
+                    Row::Item(seat, e, _) => e.at().map(|at| (*seat, at)),
+                    _ => None,
+                })
+                .collect();
+            Span::styled(count_glyph_across(app, &work, s), glyph_style(s))
+        }
+        other => Span::styled(column_glyph(other), dim()),
+    };
+    Line::from(vec![glyph, Span::raw(format!(" {} {n}", column_name(column, lang)))])
+}
+
+/// 레인의 머리줄 — `── moai-jvfe ⠼▸ v0.3.0 ─────── 0/21 ──`. 마일스톤의 목록 줄과 같은 꼴이다: id(켰으면)·칸 글리프
+/// (도는 것은 [`Site::spins`] 가 정한다)·제목, 그리고 끝에 셈. 바구니는 이름만 선다. **그 레인의 프로젝트에서 읽는다**
+/// (moai-oagj.vcj) — 한눈 보기의 마일스톤은 남의 프로젝트의 것이다.
+fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'a> {
+    use super::view::Field;
+    let Some((seat, seg)) = laid.lanes.get(lane).and_then(super::LaneOf::seg) else { return Line::default() };
+    let Some(site) = app.site_of_seat(seat) else { return Line::default() };
+    let lang = site.lang;
+    let mut head = vec![Span::styled("── ", dim())];
+    match seg {
+        crate::nav::Seg::Milestone(Some(id)) => match site.index.find(id) {
+            Some(at) => {
+                if app.fields.shows(Field::Id) {
+                    head.push(Span::styled(format!("{id} "), dim()));
+                }
+                head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+                head.push(Span::raw(" "));
+                let title = site.issues[at].title.clone();
+                if site.spins(at) {
+                    head.extend(shimmer(title, app.spin));
+                } else {
+                    head.push(Span::styled(title, bold()));
+                }
+            }
+            None => head.push(Span::raw(site.title_of(id))),
+        },
+        crate::nav::Seg::Milestone(None) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
+        crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
+        crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}
+    }
+    let tally = match app.fields.shows(Field::Tally).then(|| site.index.tally(&vec![seg.clone()])) {
+        None | Some((_, 0)) => String::new(),
+        Some((done, work)) => format!(" {done}/{work} ──"),
+    };
+    head.push(Span::raw(" "));
+    let head = fit(Line::from(head), w.saturating_sub(crate::text::width(&tally) + 1));
+    let rule = w.saturating_sub(spans_width(&head.spans) + crate::text::width(&tally));
+    let mut spans = head.spans;
+    spans.push(Span::styled("─".repeat(rule), dim()));
+    spans.push(Span::styled(tally, dim()));
+    Line::from(spans)
+}
+
+/// 카드 한 장 — 머리(`id · 칸 글리프 · pN`), 몸(`[NEW] ⎇ 가지 제목`), 그리고 `SPC c` 로 켠 열이 있으면 발줄.
+/// **바탕색은 없다**(사용자 결정) — "bug" 는 종류가 아니라 태그이고, 빨강은 이미 p0·p1 의 것이다. 고른 카드는
+/// `>` 와 반전이다: 색 없는 터미널에서도 선다. id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
+///
+/// 줄마다 커서 자리(`> `)만큼 들이고 오른쪽에 한 칸을 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
+fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a>> {
+    use super::view::Field;
+    let Row::Item(seat, e, _) = r else { return Vec::new() };
+    let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
+    let Some(at) = e.at() else { return Vec::new() };
+    let Some(i) = site.issues.get(at) else { return Vec::new() };
+    let room = w.saturating_sub(left_gutter() + 1);
+    let fields = app.fields;
+    let grep = app.grep_query();
+    let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
+    let in_title = grep.filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
+
+    let mut head: Vec<Span<'static>> = Vec::new();
+    if fields.shows(Field::Id) {
+        head.extend(mark(vec![Span::styled(i.id.clone(), dim())], in_id));
+        head.push(Span::raw(" "));
+    }
+    head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+    if fields.shows(Field::Priority) {
+        head.push(Span::raw(" "));
+        head.push(Span::styled(format!("p{}", i.priority()), priority(i.priority())));
+    }
+    let tally = tally_of(Some(site), r, fields);
+    if !tally.is_empty() {
+        head.push(Span::styled(format!("  {tally}"), dim()));
+    }
+    let mut head = fit(Line::from(head), room);
+    if chosen {
+        for s in &mut head.spans {
+            s.style = s.style.add_modifier(Modifier::REVERSED);
+        }
+    }
+
+    let unveiled = app.unveiled(e);
+    let tail = if unveiled { unveiled_mark(site.lang) } else { "" };
+    let mut body: Vec<Span<'static>> = Vec::new();
+    if site.unread.contains(&i.id) {
+        body.push(Span::styled(NEW_MARK, Style::new().fg(Color::Red).bg(Color::LightYellow)));
+        body.push(Span::raw(" "));
+    }
+    if let Some(m) = branch_mark(site, at, fields) {
+        body.push(Span::styled(m, branch()));
+        body.push(Span::raw(" "));
+    }
+    // **들어갈 수 있는 카드는 제목 끝에 `/`**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이다. 셈을 끄거나
+    // 자식이 모두 idea 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 남는다 — 다만
+    // `[NEW]`·가지 표시만으로 몸이 차면 제목 몫이 없어 `fit` 이 끝의 `/` 까지 자른다(리뷰 moai-4la6.ihu 5번).
+    let title = dir_title(
+        &i.title,
+        room.saturating_sub(spans_width(&body) + crate::text::width(tail)),
+        matches!(e, Entry::Dir { .. }),
+    );
+    if site.spins(at) {
+        body.extend(mark(shimmer(title, app.spin), in_title));
+    } else {
+        body.extend(mark(vec![Span::raw(title)], in_title));
+    }
+    if unveiled {
+        body.push(Span::raw(tail));
+    }
+    let mut lines = vec![head, fit(Line::from(body), room)];
+    if h > 2 {
+        lines.push(fit(Line::from(card_foot(site, at, fields, room)), room));
+    }
+    if unveiled {
+        for s in lines.iter_mut().flat_map(|l| l.spans.iter_mut()) {
+            if !s.style.sub_modifier.contains(Modifier::DIM) {
+                s.style = s.style.add_modifier(Modifier::DIM);
+            }
+        }
+    }
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(n, l)| {
+            let lead = if chosen && n == 0 { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
+            Line::from(std::iter::once(lead).chain(l.spans).collect::<Vec<_>>())
+        })
+        .collect()
+}
+
+/// 제목을 `room` 에 맞춰 자르고, 들어갈 수 있는 줄이면 끝에 `/` 를 단다 — 목록 줄과 카드가 같은 자로 낸다.
+/// **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가 제일 먼저 잘려 나가고, 디렉터리라고
+/// 말하는 것이 달리 없다.
+fn dir_title(label: &str, room: usize, is_dir: bool) -> String {
+    let mut title = clip(label, room.saturating_sub(usize::from(is_dir)));
+    if is_dir {
+        title.push('/');
+    }
+    title
+}
+
+/// 카드의 발줄 — 켠 열의 값, 목록의 오른쪽 열과 같은 차례·같은 꼴이다([`RIGHT`]). 빈 태그는 자리를 안 지킨다:
+/// 줄마다 폭을 맞출 까닭이 카드에는 없다. **에픽은 카드가 아니라 여기 이름으로 선다**(사용자 결정) — 색은 목록의
+/// 에픽 열과 같다.
+///
+/// **남의 카드는 담당 자리에 흐린 `→ 이름`·`담당 없음` 을 단다**(moai-oagj.y88, 사용자 결정) — 담당 열을 안 켰어도
+/// 선다. 켰으면 그 칸이 이 낱말로 바뀌어 같은 이름이 두 번 서지 않는다. 내 카드는 칠하지 않는다. 누구 것인가는
+/// `ready` 와 한 자다([`Site::whose`]).
+///
+/// **폭이 모자라면 태그·에픽 이름이 줄어든다**(moai-4la6.8ga, 사용자 결정) — 길이가 정해지지 않은 값은 그 둘뿐이라,
+/// 뒤에 선 담당·날짜가 긴 에픽 이름에 밀려 잘리지 않는다. 차례는 그대로다: 낱말은 여전히 담당 칸 자리에 선다.
+/// 둘 다 길면 긴 쪽부터 줄인다([`flex_cap`]). 담당·날짜만으로 `room` 이 차도 둘은 `…` 한 칸으로 남는다 — 빠지면 켠
+/// 열이 꺼진 것처럼 보인다. 그래도 넘치면 부르는 쪽의 `fit` 이 끝을 자른다.
+fn card_foot(site: &Site, at: usize, fields: super::view::Fields, room: usize) -> Vec<Span<'static>> {
+    use super::view::Field;
+    let whose = site.whose(at);
+    // 값은 목록의 오른쪽 열과 같은 글이다([`right_cell`]) — 자가 둘이면 날짜 꼴을 고치는 날 한쪽만 바뀐다.
+    let parts: Vec<(Field, String)> = RIGHT
+        .iter()
+        .map(|&(f, _, _)| f)
+        .filter(|f| fields.shows(*f) || (*f == Field::Assignee && whose.is_some()))
+        .map(|f| match (f, whose) {
+            (Field::Assignee, Some(crate::report::Owner::Theirs)) => (f, format!("→ {}", right_cell(site, at, f))),
+            (Field::Assignee, Some(crate::report::Owner::Unowned)) => (f, say(site.lang, "tui.board.unowned").into()),
+            _ => (f, right_cell(site, at, f)),
+        })
+        .filter(|(f, text)| !(*f == Field::Tags && text.is_empty()))
+        .collect();
+    let flex = |f: Field| matches!(f, Field::Tags | Field::Epic);
+    let gaps = 2 * parts.len().saturating_sub(1);
+    let fixed = gaps + parts.iter().filter(|(f, _)| !flex(*f)).map(|(_, t)| crate::text::width(t)).sum::<usize>();
+    let widths: Vec<usize> = parts.iter().filter(|(f, _)| flex(*f)).map(|(_, t)| crate::text::width(t)).collect();
+    let cap = flex_cap(&widths, room.saturating_sub(fixed)).max(1);
+    let mut out = Vec::new();
+    for (n, (f, text)) in parts.into_iter().enumerate() {
+        if n > 0 {
+            out.push(Span::raw("  "));
+        }
+        let text = if flex(f) { clip(&text, cap) } else { text };
+        out.push(Span::styled(text, if f == Field::Epic { epic_ref() } else { dim() }));
+    }
+    out
+}
+
+/// 폭이 `widths` 인 값들을 `budget` 안에 담는 가장 큰 상한 — 상한보다 긴 값만 그 폭으로 줄어, 긴 쪽부터 깎인다.
+/// 다 들면 가장 긴 값의 폭이고, 하나도 못 담으면 0 이다.
+fn flex_cap(widths: &[usize], budget: usize) -> usize {
+    let (mut lo, mut hi) = (0, widths.iter().copied().max().unwrap_or(0));
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if widths.iter().map(|&w| w.min(mid)).sum::<usize>() <= budget {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// 오른쪽 열 하나의 값 — 목록의 줄(`row_line`)과 카드의 발줄(`card_foot`)이 **같은 글**을 낸다(moai-9nfw). 담당·
+/// 날짜가 없으면 `—`, 태그가 없으면 빈 글이다(자리를 지킬지는 부르는 쪽이 정한다). 날짜는 `+`(생성)·`✎`(수정)
+/// 글리프로 가른다 — 둘 다 `MM-DD` 라 글리프 없이는 어느 쪽인지 모른다.
+fn right_cell(site: &Site, at: usize, f: super::view::Field) -> String {
+    use super::view::Field;
+    let i = &site.issues[at];
+    match f {
+        Field::Tags => crate::view::tags_of(i),
+        Field::Assignee => i
+            .assignee
+            .as_deref()
+            .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
+        Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
+        Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
+        Field::Epic => epic_name(site, at),
+        Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
+            unreachable!("오른쪽 열이 아니다")
+        }
+    }
+}
+
+/// 그 줄이 선 에픽의 이름 — 목록의 `EPIC` 열과 카드의 발줄이 같은 자로 낸다(moai-9nfw). 자리는 트리가 정한
+/// 그대로([`crate::nav::Index::epic_of`])라, `epic` 을 안 적고 소속을 id 에 진 계획의 멤버도 제 에픽을 댄다.
+/// 에픽에 안 든 줄(에픽·마일스톤 자신, `(길 잃음)` 의 줄도)은 `—` 다.
+fn epic_name(site: &Site, at: usize) -> String {
+    site.index.epic_of(at).map_or_else(|| "—".into(), |e| site.title_of(e))
+}
+
+/// 에픽 이름의 색 — CLI 목록의 에픽 칸과 같다(`style::EPIC_REF`).
+fn epic_ref() -> Style {
+    from_anstyle(style::EPIC_REF)
+}
+
 /// 굴릴 것이 남았으면 **칸의 아래 테두리 오른쪽에** 적는다. 목록이든 상세든 같은
 /// 자리, 같은 글이다 — 무엇을 적을지는 조각([`Scroll::mark`])이 정하고 여기는
 /// 놓기만 한다. 아래 테두리는 제목도 무엇도 안 쓰는 자리라 본문 한 줄을 안 뺏는다.
@@ -2096,24 +2602,15 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     let cells: Vec<(Field, String)> = RIGHT
         .into_iter()
         .filter(|(f, _, _)| kept.shows(*f))
-        .map(|(f, _, w)| {
-            let text = match f {
-                Field::Tags => crate::view::tags_of(i),
-                Field::Assignee => i
-                    .assignee
-                    .as_deref()
-                    .map_or("—".into(), |a| crate::model::label(a, i.assignee_email.as_deref(), site.cfg.naming)),
-                Field::Created => format!("+{}", i.created_at.get(5..10).unwrap_or("—")),
-                Field::Updated => format!("✎{}", i.updated_at.get(5..10).unwrap_or("—")),
-                Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
-                    unreachable!("오른쪽 열이 아니다")
-                }
-            };
-            (f, pad(&clip(&text, w), w))
-        })
+        .map(|(f, _, w)| (f, pad(&clip(&right_cell(site, at, f), w), w)))
         .collect();
-    let joined: String = cells.iter().map(|(_, t)| format!("  {t}")).collect();
-    let right = format!("{joined}{}", tally_cell(tally, cells.is_empty(), fields));
+    // 에픽 이름만 제 색이다 — CLI 목록의 에픽 칸(`style::EPIC_REF`)과 같다. 나머지는 흐리다.
+    let mut right_spans: Vec<Span<'static>> = cells
+        .iter()
+        .map(|(f, t)| Span::styled(format!("  {t}"), if *f == Field::Epic { epic_ref() } else { dim() }))
+        .collect();
+    right_spans.push(Span::styled(tally_cell(tally, cells.is_empty(), fields), dim()));
+    let right: String = right_spans.iter().map(|s| s.content.as_ref()).collect();
     // **좁으면 스피너부터 걷는다**(moai-q59j). 목록 줄의 글리프는 두 칸(`⠋▸`·` ·`)인데, 제목
     // 한 글자와 디렉터리 `/` 가 들어갈 자리가 없으면 멈춘 글리프 한 칸만 남긴다 — 뜻은 글리프가
     // 지고 움직임은 곁들이라, 잘려도 되는 것부터 뺀다. 안 빼면 `/` 가 잘려 폴더와 파일이 안 갈린다.
@@ -2128,15 +2625,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
         head[glyph_at] = Span::styled(still, glyph_style(site.column(at)));
     }
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
-    let mut title = clip(&site.index.label(&site.issues, e, site.lang), budget.saturating_sub(used));
-    // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
-    // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
-    if is_dir {
-        if crate::text::width(&title) + 1 > budget.saturating_sub(used) {
-            title = clip(&title, budget.saturating_sub(used + 1));
-        }
-        title.push('/');
-    }
+    let title = dir_title(&site.index.label(&site.issues, e, site.lang), budget.saturating_sub(used), is_dir);
 
     let title_w = crate::text::width(&title) + crate::text::width(tail);
     let mut spans = head;
@@ -2165,7 +2654,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
         let room = budget.saturating_sub(crate::text::width(CURSOR));
         let gap = room.saturating_sub(head_w + title_w + crate::text::width(&right));
         spans.push(Span::raw(" ".repeat(gap)));
-        spans.push(Span::styled(right, dim()));
+        spans.extend(right_spans);
     }
     if unveiled {
         // 찾은 글자(`found`)는 흐림을 일부러 걷은 조각이라 그대로 둔다 — 흐린 줄에서도 무엇이 걸렸는지 선다.
@@ -2450,19 +2939,36 @@ impl Head {
 /// 오른쪽 열이 줄에 서는 **차례**, 이름 줄에 적는 **이름**, 그리고 그 **폭** — 한 벌로 둔다.
 /// 줄(`row_line`)과 이름 줄(`names_line`)과 걷힘 셈이 모두 이 표 하나를 훑는다: 자가 둘이면 열을
 /// 하나 더하는 날 맨 위의 이름만 어긋난 채 아무것도 안 알려 준다.
-const RIGHT: [(super::view::Field, &str, usize); 4] = {
+const RIGHT: [(super::view::Field, &str, usize); 5] = {
     use super::view::Field;
     [
         (Field::Tags, "TAGS", TAGS_W),
+        // 에픽은 태그 곁이다 — CLI 목록이 태그 다음에 에픽을 세우는 차례와 같다(moai-9nfw).
+        (Field::Epic, "EPIC", EPIC_W),
         (Field::Assignee, "WHO", WHO_W),
         (Field::Created, "MADE", DATE_W),
         (Field::Updated, "EDIT", DATE_W),
     ]
 };
 
+/// 카드 한 장의 줄 수 — 머리·몸, 그리고 발줄. 보드의 배치([`super::App::laid`])와 그림이 이 하나로 잰다.
+///
+/// 발줄에 서는 열은 목록의 오른쪽 열([`RIGHT`]) 그대로다(moai-9nfw). **하나라도 켜졌을 때만 발줄이 선다**(사용자
+/// 결정 2026-10-02): 머리(id·칸·우선순위)와 몸(제목)이 카드가 무엇인지 말하고, 그 밖은 사람이 `SPC c` 로 켠
+/// 만큼이다. 표를 따로 베껴 두지 않는다 — 베낀 표는 오른쪽 열을 하나 더하는 날 그 열을 말없이 빠뜨린다.
+///
+/// **남의 카드(`foreign`)는 켠 열이 없어도 발줄이 선다**(moai-oagj.y88, 사용자 결정) — 그 줄에 `→ 이름`·`담당 없음`
+/// 이 선다([`card_foot`]). 그래서 카드의 높이는 저마다다. **켠 열이 있으면 묻지 않는다** — 누구 것인가는 카드마다
+/// 사람을 다시 푸는 일이라([`Site::whose`]) 보드를 지을 때마다 모든 카드에 치를 까닭이 없다.
+pub(super) fn card_height(fields: super::view::Fields, foreign: impl FnOnce() -> bool) -> usize {
+    2 + usize::from(RIGHT.iter().any(|(f, _, _)| fields.shows(*f)) || foreign())
+}
+
 /// 오른쪽 열의 폭 — 담당·태그·날짜. 날짜는 `+MM-DD`·`✎MM-DD` 여섯 칸이다.
 const WHO_W: usize = 10;
 const TAGS_W: usize = 14;
+/// 에픽 이름의 폭 — 제목이라 길다. 열 가운데 가장 넓어 좁을 때 날짜 다음으로 걷힌다(`Field::drop_rank`).
+const EPIC_W: usize = 16;
 const DATE_W: usize = 6;
 /// 오른쪽 열이 있을 때 셈의 고정 폭 — `123/456`.
 const TALLY_W: usize = 7;
@@ -2654,10 +3160,16 @@ fn fit(line: Line<'_>, room: usize) -> Line<'_> {
         }
         let cut = crate::text::width(&s.content) > left;
         let piece = clip(&s.content, left);
-        // 잘려서 `…` 만 남은 조각은 버린다 — 아래에서 한 번 붙인다.
-        let piece = piece.trim_end_matches('…').to_string();
+        // 잘려서 `…` 만 남은 조각은 버린다 — 아래에서 한 번 붙인다. **걷는 것은 `clip` 이 붙인 `…` 뿐이다**: 안 잘린
+        // 조각의 `…` 는 그 글이라, 걷으면 줄어 `…` 한 칸으로 선 카드 발줄의 에픽 이름(moai-4la6.8ga)이 빈 조각이 되어
+        // 여기서 멈추고 뒤의 담당까지 사라졌다.
+        let piece = if cut { piece.strip_suffix('…').unwrap_or(&piece).to_string() } else { piece };
+        // 빈 조각은 잘려서 빈 것일 때만 멈춘다 — 원래 빈 조각(폭 0 의 틈)에서 멈추면 같은 까닭으로 뒤가 사라진다.
         if piece.is_empty() {
-            break;
+            if cut {
+                break;
+            }
+            continue;
         }
         used += crate::text::width(&piece);
         out.push(Span::styled(piece, s.style));
@@ -2665,7 +3177,11 @@ fn fit(line: Line<'_>, room: usize) -> Line<'_> {
             break;
         }
     }
-    out.push(Span::styled("…", dim()));
+    // 남긴 조각이 제 글의 `…` 로 끝나면 하나 더 붙이지 않는다 — 이미 줄인 값(카드 발줄의 에픽 이름)이 끝 칸에 닿으면
+    // `……` 가 섰다. 그 `…` 가 잘렸다는 표시를 겸한다.
+    if !out.last().is_some_and(|s| s.content.ends_with('…')) {
+        out.push(Span::styled("…", dim()));
+    }
     Line::from(out)
 }
 
@@ -3683,6 +4199,83 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
     f.render_widget(Paragraph::new(lines).block(block), at);
 }
 
+/// 거름망 칸 위의 안내(moai-h2rh) — 커서가 값 자리에 서면 고를 값, 아니면 쓸 수 있는 항목과 예. **`room` 줄을 안
+/// 넘는다** — 칸이 모자라면 예가 먼저 빠진다. 줄마다 왼쪽에 무엇인지를 대는 이름표가 선다(`항목`·`예`·항목 이름).
+///
+/// 항목은 `query::KEYS` 를 그대로 늘어놓는다 — 문법이 항목을 더하면 여기도 따라온다. 예는 [`super::hint::EXAMPLES`]
+/// 한 곳에 있다.
+///
+/// 둘째 값은 **값 목록을 그렸는가**다 — 칸 밑의 안내 줄이 그것으로 Enter 가 넣는지 거는지를 댄다.
+fn hint_lines(app: &App, width: usize, room: usize) -> (Vec<Line<'static>>, bool) {
+    let lang = app.site.lang;
+    let Some((slot, offers)) = app.offered() else {
+        let (heads, eg) = (say(lang, "tui.hint.keys"), say(lang, "tui.hint.examples"));
+        let lead = crate::text::width(heads).max(crate::text::width(eg));
+        let mut rows: Vec<String> = Vec::new();
+        for k in crate::query::KEYS {
+            match rows.last_mut() {
+                Some(row) if crate::text::width(row) + 1 + crate::text::width(k) <= width.saturating_sub(lead + 2) => {
+                    row.push(' ');
+                    row.push_str(k);
+                }
+                _ => rows.push((*k).to_string()),
+            }
+        }
+        let keys = rows.into_iter().enumerate().map(|(i, row)| {
+            let name = if i == 0 { heads } else { "" };
+            vec![Span::styled(pad(name, lead), dim()), Span::raw("  "), Span::styled(row, Style::new().fg(MENU_KEY))]
+        });
+        let examples = super::hint::EXAMPLES.iter().enumerate().map(|(i, ex)| {
+            let name = if i == 0 { eg } else { "" };
+            vec![Span::styled(pad(name, lead), dim()), Span::raw("  "), Span::raw(*ex)]
+        });
+        return (keys.chain(examples).take(room).map(|spans| fit(Line::from(spans), width)).collect(), false);
+    };
+    let Mode::Filter(q) = &app.mode else { return (Vec::new(), false) };
+    let aimed = app.offer_aim.row(q, offers.len());
+    let rows = offers.len().min(room);
+    let top = super::hint::window(aimed, rows);
+    // 다 안 들면 몇째를 겨눴는지 둘째 줄 이름표 자리에 댄다 — 말없이 잘리면 목록이 그것뿐인 줄 안다. **한 줄뿐이면
+    // 둘째 줄이 없으니** 항목 이름 곁에 붙인다 — 그때가 가장 많이 잘린 때다.
+    let count = if offers.len() > rows { format!("{}/{}", aimed + 1, offers.len()) } else { String::new() };
+    let (head, count) = match rows {
+        1 if !count.is_empty() => (format!("{} {count}", slot.key), String::new()),
+        _ => (slot.key.to_string(), count),
+    };
+    let lead = crate::text::width(&head).max(crate::text::width(&count));
+    let lines = offers[top..top + rows]
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            let name = match i {
+                0 => Span::styled(pad(&head, lead), bold()),
+                1 => Span::styled(pad(&count, lead), dim()),
+                _ => Span::raw(pad("", lead)),
+            };
+            // 겨눈 줄은 글리프와 뒤집은 색 둘로 선다 — 색이 혼자 뜻을 지지 않는다.
+            let (mark, look) = if top + i == aimed {
+                (CURSOR, Style::new().add_modifier(Modifier::REVERSED))
+            } else {
+                ("  ", Style::new())
+            };
+            let mut spans = vec![name, Span::raw("  "), Span::raw(mark), Span::styled(o.shown.clone(), look)];
+            if let Some(note) = o.note {
+                spans.push(Span::styled(format!("  {}", note), dim()));
+            }
+            fit(Line::from(spans), width)
+        })
+        .collect::<Vec<_>>();
+    let listing = !lines.is_empty();
+    (lines, listing)
+}
+
+/// [`hint_lines`] 를 메뉴와 같은 틀(윗선 하나)에 그린다.
+fn hint_panel(f: &mut Frame, lines: Vec<Line<'static>>, at: Rect) {
+    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
+    f.render_widget(Clear, at);
+    f.render_widget(Paragraph::new(lines).block(block), at);
+}
+
 /// SPC 메뉴의 색(사용자 결정, moai-r2dt·moai-1uod). 터미널 16색 번호로 준 것이다 — sixteen-colour-table
 /// 의 `f10b00` 은 글자색 10·바탕색 0 이지 hex 가 아니다. 키 10(밝은 초록)·`:` 8(밝은 검정)·실행
 /// 12(밝은 파랑)·`+묶음` 13(밝은 자홍). 바탕은 깔지 않는다. 뜻은 여전히 글자(`+`)가 진다.
@@ -4043,6 +4636,334 @@ pub(super) mod tests {
     /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
+    }
+
+    /// 보드 그림의 바닥(moai-9nfw) — 마일스톤 0001 밑 에픽 0002 에 todo `n` 개(p1)와 in_progress 하나, 마일스톤
+    /// 없는 todo 0090 하나. 보드로 세우고 상세를 숨긴다 — 칸이 폭을 다 쓴다. 말은 한국어다.
+    fn board_app(n: usize) -> App {
+        let at = "2026-09-01T00:00:00Z";
+        let mut out = vec![
+            Issue::new("argos-0001".into(), "v0.4".into(), Kind::Milestone, Status::new("todo"), at),
+            Issue::new("argos-0002".into(), "보드 에픽".into(), Kind::Epic, Status::new("todo"), at),
+        ];
+        out[1].milestone = Some("argos-0001".into());
+        for k in 0..n {
+            let mut i =
+                Issue::new(format!("argos-01{k:02}"), format!("할 일 {k}"), Kind::Issue, Status::new("todo"), at);
+            i.epic = Some("argos-0002".into());
+            i.priority = Some(1);
+            out.push(i);
+        }
+        let mut held = Issue::new("argos-0080".into(), "집은 일".into(), Kind::Issue, Status::new("in_progress"), at);
+        held.epic = Some("argos-0002".into());
+        out.push(held);
+        out.push(Issue::new("argos-0090".into(), "떠도는 일".into(), Kind::Issue, Status::new("todo"), at));
+        let mut a = App::new(out, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.site.lang = Lang::Ko;
+        a.layout = super::super::view::Layout::Board;
+        a.detail_open = false;
+        a
+    }
+
+    /// **보드는 칸 머리줄·레인 머리줄·카드를 세우고, 고른 카드는 `>` 와 반전이다**(moai-9nfw, 사용자 결정) — 반전은
+    /// 색 없는 터미널에서도 선다. 에픽과 마일스톤은 카드가 아니다.
+    #[test]
+    fn the_board_draws_columns_lanes_and_cards_and_marks_the_chosen_one() {
+        let mut a = board_app(2);
+        let lines = render(&mut a, 120, 16);
+        let text = lines.join("\n");
+        for want in
+            ["◇ idea 0", "‖ 미룸 0", "· todo 3", "in_progress 1", "? review 0", "── argos-0001", "(마일스톤 없음)"]
+        {
+            assert!(text.contains(want), "`{want}` 가 없다\n{text}");
+        }
+        assert!(!text.contains("보드 에픽"), "에픽이 카드로 섰다\n{text}");
+        assert_eq!(text.matches("> argos-").count(), 1, "고른 카드가 하나가 아니다\n{text}");
+        // 고른 카드의 머리는 반전이다 — id 의 첫 글자 자리를 본다.
+        let y = lines.iter().position(|l| l.contains("> argos-")).unwrap() as u16;
+        let x = lines[y as usize].find("> argos-").unwrap() as u16 + 2;
+        let mut term = Terminal::new(TestBackend::new(120, 16)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let buf = term.backend().buffer().clone();
+        assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED), "고른 카드의 머리가 반전이 아니다");
+        assert!(a.spun, "집은 카드가 보이는데 루프를 안 깨운다");
+        // 카드 자리를 마우스가 맞힐 바탕으로 남긴다 — 보이는 카드 넷이다.
+        assert_eq!(a.drawn.cards.len(), 4, "{:?}", a.drawn.cards);
+        assert_eq!(a.drawn.rows, Rect::default(), "보드인데 목록의 줄 자리를 남겼다");
+    }
+
+    /// **좁으면 칸을 덜 세우되 커서가 선 칸은 늘 서고, 못 세운 칸은 제목 줄이 이름과 수로 댄다**(moai-9nfw).
+    #[test]
+    fn a_narrow_board_keeps_the_cursor_column_and_names_the_rest() {
+        let mut a = board_app(1);
+        a.hit("l");
+        let text = render(&mut a, 44, 14).join("\n");
+        assert!(text.contains("in_progress 1"), "커서가 선 칸이 안 섰다\n{text}");
+        assert!(text.contains("> argos-0080"), "{text}");
+        assert!(text.contains("칸 3개 더"), "못 세운 칸을 제목이 안 댄다\n{text}");
+    }
+
+    /// **좁은 창에서 칸 창이 `h`·`l` 을 따라간다**(moai-oagj.w0g) — 창 밖 칸으로 가면 그만큼만 밀고, 보이는 칸으로
+    /// 돌아오면 안 민다. 못 세운 칸은 그때마다 제목 줄이 이름과 수로 댄다. 창을 세우는 자는 첫 보드 에픽이
+    /// 넣었고(moai-9nfw.isu, 리뷰 moai-9nfw.fnb), 이 시험은 그것을 키에서 그림까지 이어 잰다.
+    #[test]
+    fn on_a_narrow_board_the_column_window_follows_h_and_l() {
+        let mut a = board_app(1);
+        // 폭 44 에는 칸이 둘 선다. 칸은 idea · 미룸 · todo · in_progress · review 이고 커서는 todo 의 첫 카드다.
+        let frame = |a: &mut App| {
+            let lines = render(a, 44, 14);
+            let top = lines.iter().position(|l| l.contains('┏')).unwrap_or_else(|| panic!("{lines:#?}"));
+            (lines[top].clone(), lines[top + 1].clone(), lines.join("\n"))
+        };
+        let (title, heads, text) = frame(&mut a);
+        assert!(heads.contains("미룸 0") && heads.contains("todo 2"), "처음 창이 커서의 칸까지만 밀지 않았다\n{text}");
+        assert!(title.contains("칸 3개 더") && title.contains("in_progress 1"), "창 밖 칸을 제목이 안 댄다\n{text}");
+
+        a.hit("l");
+        let (title, heads, text) = frame(&mut a);
+        assert!(
+            heads.contains("todo 2") && heads.contains("in_progress 1"),
+            "l 로 창 밖 칸에 갔는데 창이 안 밀렸다\n{text}"
+        );
+        assert!(text.contains("> argos-0080"), "{text}");
+        assert!(title.contains("미룸 0") && !title.contains("in_progress"), "제목이 밀린 창을 안 따라왔다\n{text}");
+
+        a.hit("h");
+        let (_, heads, text) = frame(&mut a);
+        assert!(heads.contains("in_progress 1"), "보이는 칸으로 돌아왔는데 창이 도로 밀렸다\n{text}");
+        assert!(text.contains("> argos-0100"), "{text}");
+    }
+
+    /// **굴리기는 보드 통째로 하나고, 고른 카드는 통째로 보인다**(moai-9nfw) — 아래로 내려가도 카드의 몸이 칸 밖에
+    /// 남지 않는다. 굴린 만큼은 목록처럼 아래 테두리가 댄다. 칸 머리줄은 굴려도 남는다.
+    #[test]
+    fn the_board_scrolls_as_one_and_shows_the_whole_chosen_card() {
+        let mut a = board_app(12);
+        a.hit("G");
+        let lines = render(&mut a, 100, 14);
+        let text = lines.join("\n");
+        // todo 칸의 맨 아래는 둘째 레인의 0090 이다 — 칸은 레인을 건너 한 줄이다.
+        let y = lines.iter().position(|l| l.contains("> argos-0090")).unwrap_or_else(|| panic!("{text}"));
+        assert!(lines[y + 1].contains("떠도는 일"), "고른 카드의 몸이 칸 밖에 남았다\n{text}");
+        assert!(lines[y - 1].contains("(마일스톤 없음)"), "레인의 첫 카드인데 레인 머리줄이 안 보인다\n{text}");
+        assert!(text.contains("· todo 13"), "칸 머리줄이 굴려 사라졌다\n{text}");
+        assert!(text.contains('↑'), "굴린 만큼을 안 댄다\n{text}");
+        // 맨 위로 돌아가면 첫 레인의 머리줄부터 선다.
+        a.hit("g g");
+        let lines = render(&mut a, 100, 14);
+        let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
+    }
+
+    /// **고른 카드가 보이면 레인 머리줄이 가렸어도 그림이 안 굴린다**(moai-acfk 리뷰, 사용자 결정) — 머리줄까지 드러내던
+    /// 때는 화면을 한 줄 굴려 머리줄만 가려도 다음 그림이 도로 한 줄 되돌렸다. 카드가 안 보일 때는 여전히 머리줄까지다.
+    #[test]
+    fn a_visible_card_keeps_the_board_scrolled_past_its_lane_header() {
+        let mut a = board_app(12);
+        render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), 0);
+        a.list.by(1);
+        let lines = render(&mut a, 100, 14);
+        let text = lines.join("\n");
+        assert_eq!(a.list.offset(), 1, "카드가 보이는데 머리줄을 드러내느라 화면을 되돌렸다\n{text}");
+        assert!(text.contains("> argos-0100") && !text.contains("── argos-0001"), "{text}");
+    }
+
+    /// **이름 없는 레인에는 머리줄 글이 안 선다**(리뷰 moai-9nfw.fnb 8번) — 마일스톤을 안 쓰는 저장소에도 `(길 잃음)`
+    /// 은 레인으로 서는데, 그때 나머지 줄의 레인이 이름 없는 `── ───` 선을 이고 있었다.
+    #[test]
+    fn an_unnamed_lane_draws_no_bare_rule() {
+        let at = "2026-09-01T00:00:00Z";
+        let mut lost = Issue::new("argos-0002".into(), "길 잃은 일".into(), Kind::Issue, Status::new("todo"), at);
+        lost.epic = Some("argos-0999".into());
+        let issues =
+            vec![Issue::new("argos-0001".into(), "그냥 일".into(), Kind::Issue, Status::new("todo"), at), lost];
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.site.lang = Lang::Ko;
+        a.layout = super::super::view::Layout::Board;
+        a.detail_open = false;
+        let lines = render(&mut a, 120, 14);
+        let text = lines.join("\n");
+        assert!(text.contains("── (길 잃음)"), "길 잃은 줄의 레인이 머리를 잃었다\n{text}");
+        let bare = lines.iter().any(|l| {
+            let inside = l.trim_matches(|c: char| c == '┃' || c.is_whitespace());
+            !inside.is_empty() && inside.chars().all(|c| c == '─' || c == ' ')
+        });
+        assert!(!bare, "이름 없는 레인이 빈 선을 세웠다\n{text}");
+        assert!(text.contains("그냥 일") && text.contains("길 잃은 일"), "{text}");
+    }
+
+    /// **`SPC c e` 는 목록의 에픽 열과 카드의 발줄을 함께 켠다**(moai-9nfw) — 보드에서 에픽은 카드가 아니라 이름으로
+    /// 선다. 자리는 트리가 정한 그대로라, `epic` 을 안 적고 소속을 id 에 진 계획의 멤버(`<에픽>.<몸>`)도 제 에픽을 댄다.
+    #[test]
+    fn spc_c_e_names_the_epic_in_the_list_and_on_the_card() {
+        let mut a = board_app(0);
+        let mut planned = Issue::new(
+            "argos-0002.x1y".into(),
+            "계획의 멤버".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        planned.priority = Some(0);
+        a.site.issues.push(planned);
+        a.adopt(a.site.issues.clone());
+        let board = render(&mut a, 120, 14).join("\n");
+        assert!(!board.contains("보드 에픽"), "에픽 열을 안 켰는데 에픽이 섰다\n{board}");
+        a.hit("SPC c e Esc");
+        let lines = render(&mut a, 120, 14);
+        let at = lines.iter().position(|l| l.contains("argos-0002.x1y")).unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(lines[at + 2].contains("보드 에픽"), "카드의 발줄이 에픽을 안 댄다\n{}", lines.join("\n"));
+
+        a.hit("SPC v b Esc");
+        let lines = render(&mut a, 120, 14);
+        let row = lines.iter().find(|l| l.contains("계획의 멤버")).unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(row.contains("보드 에픽"), "목록의 에픽 열이 그 줄의 에픽을 안 댄다\n{}", lines.join("\n"));
+        assert!(lines.iter().any(|l| l.contains("EPIC")), "열 이름 줄에 EPIC 이 없다\n{}", lines.join("\n"));
+    }
+
+    /// **`SPC c` 로 켠 열이 있을 때만 카드에 발줄이 선다**(사용자 결정) — 머리와 몸이 카드가 무엇인지 말한다.
+    #[test]
+    fn a_card_grows_a_foot_only_when_a_column_is_on() {
+        let mut a = board_app(1);
+        let two = render(&mut a, 120, 14);
+        let at = two.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(!two[at + 2].contains('—'), "켠 열이 없는데 발줄이 섰다\n{}", two.join("\n"));
+        a.hit("SPC c a Esc");
+        let three = render(&mut a, 120, 14);
+        let at = three.iter().position(|l| l.contains("> argos-0100")).unwrap();
+        assert!(three[at + 2].contains('—'), "담당을 켰는데 발줄이 안 섰다\n{}", three.join("\n"));
+    }
+
+    /// **남의 카드와 담당 없는 카드는 켠 열이 없어도 발줄에 흐린 `→ 이름`·`담당 없음` 을 단다**(moai-oagj.y88, 사용자
+    /// 결정). 내 카드는 두 줄 그대로라 카드 높이가 저마다다. 담당 열을 켜면 그 칸이 이 낱말로 바뀌어 이름이 두 번 안
+    /// 서고, 누군지 모르면 아무 카드도 안 가른다 — `ready` 가 그때 `others` 를 안 세우는 것과 같은 자다.
+    #[test]
+    fn a_card_that_is_not_mine_names_whose_it_is_in_a_dim_foot() {
+        let mut a = board_app(2);
+        // 0100 은 내 것, 0101 은 남의 것, 0080·0090 은 담당이 없다.
+        a.site.issues[2].assignee = Some("레이븐".into());
+        a.site.issues[2].assignee_email = Some("raven@example.com".into());
+        a.site.issues[3].assignee = Some("이웃".into());
+        a.site.issues[3].assignee_email = Some("next@example.com".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
+        let lines = render(&mut a, 120, 20);
+        let text = lines.join("\n");
+        let at =
+            |lines: &[String], id: &str| lines.iter().position(|l| l.contains(id)).unwrap_or_else(|| panic!("{id}"));
+        let mine = at(&lines, "argos-0100");
+        assert!(lines[mine + 2].contains("argos-0101"), "내 카드가 발줄을 달았다\n{text}");
+        let theirs = at(&lines, "argos-0101");
+        assert!(lines[theirs + 2].contains("→ 이웃"), "남의 카드가 담당을 안 댄다\n{text}");
+        let x = lines[theirs + 2].find("→ 이웃").unwrap();
+        let mut term = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        term.draw(|f| screen(f, &mut a)).unwrap();
+        let cell = &term.backend().buffer()[(crate::text::width(&lines[theirs + 2][..x]) as u16, (theirs + 2) as u16)];
+        assert_eq!(cell.fg, Color::DarkGray, "남의 줄 낱말이 흐리지 않다");
+        let loose = at(&lines, "argos-0080");
+        assert!(lines[loose + 2].contains("담당 없음"), "담당 없는 카드가 그것을 안 댄다\n{text}");
+
+        a.hit("SPC c a Esc");
+        let lines = render(&mut a, 120, 20);
+        let text = lines.join("\n");
+        let theirs = at(&lines, "argos-0101");
+        assert_eq!(lines[theirs + 2].matches("이웃").count(), 1, "담당 열을 켰더니 이름이 두 번 섰다\n{text}");
+        let mine = at(&lines, "argos-0100");
+        assert!(
+            lines[mine + 2].contains("레이븐") && !lines[mine + 2].contains('→'),
+            "내 카드의 담당 칸이 칠해졌다\n{text}"
+        );
+
+        a.hit("SPC c a Esc");
+        a.site.me = None;
+        let lines = render(&mut a, 120, 20);
+        let mine = at(&lines, "argos-0100");
+        assert!(lines[mine + 2].contains("argos-0101"), "누군지 모르는데 카드를 갈랐다\n{}", lines.join("\n"));
+    }
+
+    /// **좁은 카드에서는 에픽 이름이 줄어 남의 줄 낱말에 자리를 내준다**(moai-4la6.8ga, 사용자 결정) — 차례는 그대로라
+    /// 낱말은 에픽 이름 뒤, 담당 칸 자리에 선다. 넓으면 에픽 이름은 다 선다.
+    #[test]
+    fn on_a_narrow_card_the_epic_name_gives_way_to_whose_it_is() {
+        let mut a = board_app(1);
+        a.site.issues[1].title = "긴 에픽 이름이 다 먹는다".into();
+        // 메일이 없어야 담당이 이름 하나로 짧게 선다 — 메일까지 서면 좁은 카드는 담당만으로 찬다.
+        a.site.issues[2].assignee = Some("이웃".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
+        a.hit("SPC c e Esc");
+        let foot = |a: &mut App, w: u16| {
+            let lines = render(a, w, 14);
+            let at = lines.iter().position(|l| l.contains("> argos-0100")).unwrap_or_else(|| panic!("{lines:#?}"));
+            (lines[at + 2].clone(), lines.join("\n"))
+        };
+        let (line, text) = foot(&mut a, 44);
+        assert!(line.contains("→ 이웃"), "에픽 이름에 밀려 남의 줄 낱말이 잘렸다\n{text}");
+        assert!(line.contains("긴 에픽") && line.contains('…'), "에픽 이름이 줄지 않고 빠지거나 다 섰다\n{text}");
+        assert!(line.find("긴 에픽") < line.find("→ 이웃"), "차례가 바뀌었다 — 낱말은 담당 칸 자리다\n{text}");
+
+        let (line, text) = foot(&mut a, 200);
+        assert!(line.contains("다 먹는다  → 이웃"), "넓은데 에픽 이름이 줄었다\n{text}");
+
+        // 담당만으로 카드가 차도 에픽 이름은 `…` 로 남는다 — 빠지면 켠 열이 꺼진 것처럼 보인다.
+        a.site.issues[2].assignee_email = Some("someone.with.a.long.mail@example.com".into());
+        let (line, text) = foot(&mut a, 44);
+        assert!(line.contains("…  → 이웃"), "담당에 밀린 에픽 이름이 자취 없이 빠졌다\n{text}");
+    }
+
+    /// 상한은 긴 값부터 깎고, 다 들면 가장 긴 값의 폭이다(moai-4la6.8ga).
+    #[test]
+    fn flex_cap_trims_the_longest_first() {
+        assert_eq!(flex_cap(&[4, 20], 30), 20, "다 드는데 줄였다");
+        assert_eq!(flex_cap(&[4, 20], 14), 10, "짧은 값까지 깎았거나 덜 깎았다");
+        assert_eq!(flex_cap(&[12, 20], 14), 7);
+        assert_eq!(flex_cap(&[12, 20], 0), 0);
+        assert_eq!(flex_cap(&[], 10), 0);
+    }
+
+    /// `fit` 은 제 글의 `…` 로 끝난 조각 뒤에 `…` 를 또 붙이지 않고, 원래 빈 조각에서 멈추지 않는다(moai-4la6.8ga 리뷰).
+    #[test]
+    fn fit_keeps_one_ellipsis_and_walks_past_empty_spans() {
+        let text = |spans: Vec<Span<'static>>, room| -> String {
+            fit(Line::from(spans), room).spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert_eq!(text(vec![Span::raw("abc…"), Span::raw("  def")], 5), "abc…");
+        assert_eq!(text(vec![Span::raw("ab"), Span::raw(""), Span::raw("cdefgh")], 6), "abcd…");
+    }
+
+    /// **들어갈 수 있는 카드는 제목 끝에 `/` 를 단다**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이고, 제목을
+    /// 먼저 잘라 좁아도 `/` 가 남는다. 카드 높이는 그대로다.
+    #[test]
+    fn a_card_that_can_be_entered_ends_its_title_with_a_slash() {
+        let mut a = board_app(2);
+        a.site.issues[2].title = "자식이 있어 들어갈 수 있는 일의 아주 긴 제목".into();
+        let mut issues = a.site.issues.clone();
+        issues.push(Issue::new(
+            "argos-0100.c1a".into(),
+            "자식".into(),
+            Kind::Idea,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        ));
+        a.adopt(issues);
+        // 카드 한 장만 짓는다 — 보드의 한 줄에는 옆 칸의 카드가 함께 선다.
+        let body = |a: &App, id: &str, w: usize| {
+            let rows = a.rows();
+            let r = rows
+                .iter()
+                .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
+                .unwrap_or_else(|| panic!("{id} 카드가 없다"));
+            let lines = card(a, r, false, w, 2);
+            assert_eq!(lines.len(), 2, "`/` 가 카드 높이를 바꿨다");
+            lines[1].spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim_end().to_string()
+        };
+        let line = body(&a, "argos-0100", 80);
+        assert!(line.ends_with("아주 긴 제목/"), "들어갈 수 있는 카드에 `/` 가 없다 — {line:?}");
+        let line = body(&a, "argos-0101", 80);
+        assert!(!line.contains('/'), "잎 카드에 `/` 가 섰다 — {line:?}");
+
+        let line = body(&a, "argos-0100", 20);
+        assert!(line.ends_with("…/"), "좁은 카드에서 `/` 가 잘려 나갔다 — {line:?}");
+        assert!(crate::text::width(&line) < 20, "줄이 카드 폭을 넘었다 — 오른쪽 한 칸은 비운다 — {line:?}");
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에
@@ -4691,6 +5612,8 @@ pub(super) mod tests {
             Field::Assignee => "레이븐",
             Field::Created => "+09-01",
             Field::Updated => "✎09-01",
+            // 첫 줄은 에픽 자신이라 에픽에 안 들었다.
+            Field::Epic => "—",
             Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => {
                 unreachable!("오른쪽 열이 아니다")
             }
@@ -6485,6 +7408,63 @@ pub(super) mod tests {
         }
     }
 
+    /// **못 물은 줄의 꼬리는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02 사용자 결정).
+    /// 63~67칸짜리 못 물은 줄이 80칸에서 `<0>` 부터의 번호를 통째로 지웠다 — 번호는 숫자 키를 대는 유일한 자리다.
+    /// 접어도 까닭과 들은 때는 다 서고, 꼬리는 판 줄의 글과 같은 칸에서 시작한다. 번호 칸이 없거나 넓은 창에서는
+    /// 한 줄 그대로다. 저널 줄은 그 아래로 밀린다.
+    #[test]
+    fn a_stale_version_line_folds_before_it_pushes_out_the_project_numbers() {
+        use super::super::layer::{At, Look, Shut};
+        let mine = env!("CARGO_PKG_VERSION");
+        let mut a = app();
+        a.site.lang = Lang::En;
+        a.site.now = "2026-09-21T09:00:00Z".into();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        a.set_latest(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        let head = |a: &mut App, w| render(a, w, 30)[..6].to_vec();
+        let at = |rows: &[String], text: &str| rows.iter().position(|l| l.contains(text));
+        let tail = "v0.3.0 seen 2 days ago";
+        // 번호 칸이 없으면 80칸에서도 한 줄이다.
+        let rows = head(&mut a, 80);
+        assert!(
+            rows.iter().any(|l| l.contains(&format!("Version : {mine} · latest not checked (no network) · {tail}"))),
+            "번호 칸이 없는데 접었다\n{}",
+            rows.join("\n")
+        );
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/argos".into(),
+                at: "/w/argos/.moai/journal/raven_buzzni_com.jsonl".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied (os error 13)".into() },
+            }]
+        };
+        let rows = head(&mut a, 80);
+        let all = rows.join("\n");
+        assert!(all.contains("<0> all") && all.contains("<1> moai-supervise"), "못 물은 줄이 번호를 밀어냈다\n{all}");
+        let version = at(&rows, &format!("Version : {mine} · latest not checked (no network)")).expect(&all);
+        let folded = at(&rows, tail).unwrap_or_else(|| panic!("들은 때가 잘렸다\n{all}"));
+        assert_eq!(folded, version + 1, "꼬리가 판 줄 바로 아래가 아니다\n{all}");
+        let col = |row: &str, text: &str| row.find(text).map(|b| crate::text::width(&row[..b]));
+        assert_eq!(
+            col(&rows[folded], tail),
+            col(&rows[version], mine),
+            "꼬리가 판 줄의 글과 다른 칸에서 시작한다\n{all}"
+        );
+        assert!(at(&rows, "Journal : ").is_some_and(|j| j > folded), "저널 줄이 꼬리를 덮었다\n{all}");
+        // 저널 줄은 제 자리 글의 가운데를 `…` 로 줄인다(`journal_at`) — 재는 것은 판 줄과 꼬리뿐이다.
+        assert!(![version, folded].iter().any(|&r| rows[r].contains('…')), "접었는데도 잘렸다\n{all}");
+        // 넓은 창은 번호 칸이 있어도 한 줄이다 — 넓은 창의 헤더는 전과 같다.
+        let wide = head(&mut a, 140);
+        assert!(
+            wide.iter().any(|l| l.contains(&format!("(no network) · {tail}")))
+                && wide.join("\n").contains("<1> moai-supervise"),
+            "넓은 창에서 접었다\n{}",
+            wide.join("\n")
+        );
+    }
+
     /// **목록에 없는 시간대로 연 창**(moai-pvpb.1yh 리뷰) — 아무 줄도 안 가리키는 동안에도 커서 칸이 비어 있어 첫걸음에
     /// 이름이 밀리지 않고, 늘 서는 굴림 표시가 아랫줄의 말을 덮지 않아 80칸에서도 그냥 Enter 가 무엇을 하는지 보인다.
     /// 거른 글에 하나도 안 걸리면 "자료가 없다" 가 아니라 맞는 이름이 없다고 댄다.
@@ -6564,17 +7544,28 @@ pub(super) mod tests {
     fn the_version_line_says_which_of_the_four_it_is() {
         use crate::latest::Seen;
         let mine = env!("CARGO_PKG_VERSION");
-        let said = |seen| {
+        // 시험의 `App` 은 한국어로 선다(moai-9it4) — 글자를 견주는 줄은 영어로 못박고, 넷이 서로
+        // 다른 글인지는 두 말 모두에서 잰다(이 시험이 원래 한국어 표를 재던 자리다).
+        let said = |lang, seen| {
             let mut a = app();
+            a.site.lang = lang;
             a.set_latest(seen);
             let lines = render(&mut a, 100, 24);
             lines[..6].join("\n")
         };
-        let newer = said(Seen::Newer { tag: "v9.9.9".into() });
+        let four = |lang| {
+            [
+                said(lang, Seen::Newer { tag: "v9.9.9".into() }),
+                said(lang, Seen::Same { tag: "v7.7.7".into() }),
+                said(lang, Seen::Ahead { tag: "v0.0.1".into() }),
+                said(lang, unasked_for(Trouble::NotAsked)),
+            ]
+        };
+        let [newer, same, ahead, unasked] = four(Lang::En);
         assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
-        let same = said(Seen::Same);
-        let ahead = said(Seen::Ahead);
-        let unasked = said(unasked_for(Trouble::NotAsked));
+        // **최신·앞섰다도 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정).
+        assert!(same.contains("latest (v7.7.7)"), "최신 판의 번호가 없다\n{same}");
+        assert!(ahead.contains("ahead of the latest release (v0.0.1)"), "앞섰을 때 최신 판의 번호가 없다\n{ahead}");
         for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
         {
             assert!(head.contains(&format!("Version : {mine}")), "{what} 에서 내 판이 사라졌다\n{head}");
@@ -6583,11 +7574,13 @@ pub(super) mod tests {
         let cut = |head: &str| {
             head.lines().find(|l| l.contains("Version")).map(|l| l.split("Version").nth(1).unwrap_or("").to_string())
         };
-        let four: Vec<_> = [&newer, &same, &ahead, &unasked].iter().filter_map(|h| cut(h)).collect();
-        assert_eq!(four.len(), 4, "판 줄을 못 찾았다");
-        for (i, a) in four.iter().enumerate() {
-            for b in &four[i + 1..] {
-                assert_ne!(a.trim(), b.trim(), "두 소식이 같은 글로 선다");
+        for (lang, heads) in [(Lang::En, [newer, same, ahead, unasked]), (Lang::Ko, four(Lang::Ko))] {
+            let four: Vec<_> = heads.iter().filter_map(|h| cut(h)).collect();
+            assert_eq!(four.len(), 4, "{lang:?}: 판 줄을 못 찾았다");
+            for (i, a) in four.iter().enumerate() {
+                for b in &four[i + 1..] {
+                    assert_ne!(a.trim(), b.trim(), "{lang:?}: 두 소식이 같은 글로 선다");
+                }
             }
         }
     }
@@ -6595,9 +7588,10 @@ pub(super) mod tests {
     /// **새 판이 나왔을 때만 배너가 그것을 말하고, 올리는 줄은 나갈 때 낸다**(moai-8rmw.665,
     /// 2026-09-29 사용자 결정). 판 줄은 나왔다는 것까지만 말할 자리고, 104칸짜리 명령 줄은 80칸
     /// 배너에서 늘 잘렸다 — 그래서 배너에는 명령이 **없어야** 하고, 줄은 `App::upgrade_note` 가
-    /// 통째로 든다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다. 나머지 세 경우
-    /// (`Seen::Same`·`Seen::Ahead`·`Seen::Unasked`)와, 도는 바이너리를 그 줄로 못 올리는 경우
-    /// (`App::upgrade` 가 `None`)에는 둘 다 서지 않는다.
+    /// 통째로 든다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다. 같은 판·앞선 판·못
+    /// 물은 때(`Seen::Same`·`Seen::Ahead`·`Seen::Unasked`, 지난 태그가 새 판이 아닌 `Seen::Stale`)와,
+    /// 도는 바이너리를 그 줄로 못 올리는 경우(`App::upgrade` 가 `None`)에는 둘 다 서지 않는다. 지난
+    /// 태그가 새 판인 `Seen::Stale` 은 `Seen::newer` 가 새 판으로 읽어 둘 다 선다(moai-ggxi).
     #[test]
     fn a_newer_release_says_so_on_the_banner_and_leaves_the_line_for_the_quit() {
         use crate::latest::Seen;
@@ -6617,10 +7611,20 @@ pub(super) mod tests {
         assert!(!banner.contains('!'), "받을 것을 급한 것처럼 말한다\n{banner}");
         let note = note.expect("나갈 때 낼 글이 없다");
         assert!(note.contains("v9.9.9") && note.contains(&line), "도는 바이너리를 올리는 줄이 없다\n{note}");
-        for seen in [Seen::Same, Seen::Ahead, unasked_for(Trouble::NotAsked)] {
+        for seen in [
+            Seen::Same { tag: "v1.0.0".into() },
+            Seen::Ahead { tag: "v0.0.1".into() },
+            unasked_for(Trouble::NotAsked),
+            stale(Trouble::Offline, "v0.0.1", "2026-09-19T00:00:00Z"),
+        ] {
             let (banner, note) = both(seen, Some(&line));
             assert!(banner.is_empty() && note.is_none(), "새 판이 없는데 올리라고 한다\n{banner}\n{note:?}");
         }
+        // **못 물었어도 지난번에 들은 새 판은 그대로 받을 것이다**(moai-ggxi, 2026-10-02 사용자
+        // 결정) — 판 줄만 못 물었다고 말하고, 배너와 나갈 때 줄은 선다.
+        let (banner, note) = both(stale(Trouble::Offline, "v9999.0.0", "2026-09-19T00:00:00Z"), Some(&line));
+        assert!(banner.contains("v9999.0.0"), "네트워크가 끊겼다고 새 판을 잊었다\n{banner}");
+        assert!(note.is_some_and(|n| n.contains(&line)), "네트워크가 끊겼다고 올리는 줄을 잃었다");
         let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, None);
         assert!(banner.is_empty() && note.is_none(), "그 줄로 못 올리는 바이너리에 올리라고 한다\n{banner}");
     }
@@ -6628,6 +7632,107 @@ pub(super) mod tests {
     /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
     fn unasked_for(kind: Trouble) -> crate::latest::Seen {
         crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
+    }
+
+    /// 못 물었고 지난번에 `tag` 를 `heard_at` 에 들었다.
+    fn stale(kind: Trouble, tag: &str, heard_at: &str) -> crate::latest::Seen {
+        let why = crate::latest::Why { kind, said: String::new() };
+        crate::latest::Seen::Stale { why, tag: tag.into(), heard_at: heard_at.into() }
+    }
+
+    /// **못 물었으면 지난 답과 그 때를 못 물었다는 말 뒤에 단다**(moai-ggxi, 2026-10-02 사용자
+    /// 결정). 지난 값이라는 것이 글에 보여야 한다 — 번호만 달면 지금 들은 답으로 읽힌다. 지난
+    /// 답이 없으면 번호를 안 댄다. 들은 때는 `App` 이 든 시각으로 잰다.
+    #[test]
+    fn a_failed_ask_says_the_last_answer_and_when_it_was_heard() {
+        let mine = env!("CARGO_PKG_VERSION");
+        let line_at = |seen, now: &str, width| {
+            let mut a = app();
+            a.site.lang = Lang::En;
+            a.site.now = now.into();
+            a.set_latest(seen);
+            let head = render(&mut a, width, 24)[..6].join("\n");
+            head.lines()
+                .find_map(|l| l.split_once("Version : ").map(|(_, v)| v.trim().to_string()))
+                .unwrap_or_else(|| panic!("판 줄을 못 찾았다\n{head}"))
+        };
+        let line = |seen, now: &str| line_at(seen, now, 120);
+        let heard = "2026-09-19T08:00:00Z";
+        let at = |when| line(stale(Trouble::Offline, "v0.3.0", heard), when);
+        assert_eq!(
+            at("2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 2 days ago")
+        );
+        assert_eq!(
+            at("2026-09-20T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 1 day ago")
+        );
+        assert_eq!(at("2026-09-19T09:00:00Z"), format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
+        // 들은 때를 못 읽으면 모르는 것이지 오늘 본 것이 아니다.
+        let unknown = line(stale(Trouble::Offline, "v0.3.0", "어제"), "2026-09-21T09:00:00Z");
+        assert_eq!(unknown, format!("{mine} · latest not checked (no network) · v0.3.0 seen earlier"));
+        // **크게 앞선 들은 때도 모르는 것이다**(리뷰) — 손으로 적은 2099 가 날마다 "오늘" 로 서지
+        // 않는다. 슬랙(하루) 안쪽으로 앞선 것은 시계가 조금 어긋난 것이라 오늘로 읽는다.
+        let far = line(stale(Trouble::Offline, "v0.3.0", "2099-01-01T00:00:00Z"), "2026-09-21T09:00:00Z");
+        assert_eq!(far, format!("{mine} · latest not checked (no network) · v0.3.0 seen earlier"));
+        let near = line(stale(Trouble::Offline, "v0.3.0", "2026-09-21T21:00:00Z"), "2026-09-21T09:00:00Z");
+        assert_eq!(near, format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
+        // 까닭마다 글이 갈리던 것(moai-580l)은 그대로다 — 지난 답은 그 뒤에 붙을 뿐이다.
+        let limited = line(stale(Trouble::RateLimited, "v0.3.0", heard), "2026-09-21T09:00:00Z");
+        assert!(limited.starts_with(&format!("{mine} · latest not checked (rate limited) · ")), "{limited}");
+        // 처음 — 지난 답이 없으면 번호를 안 댄다.
+        assert_eq!(
+            line(unasked_for(Trouble::NotAsked), "2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked")
+        );
+        // **80칸에서도 안 잘린다** — 갈래마다 두 자리 날 수를 단다. 넘치던 두 갈래의 까닭 글을 줄여
+        // 맞췄다(`bad answer`·`call failed`, 2026-10-02 사용자 결정). 잘려도 `latest not checked` 가 앞에
+        // 서므로 번호가 지금 들은 답으로 읽히지는 않지만, 지난 값이라는 말(들은 때)이 잘린다.
+        //
+        // **태그는 내 판과 같은 길이로 잰다**(리뷰). 남는 칸이 한 칸이라, 판에 두 자리 마디가 드는
+        // 날(0.10.0) 가장 긴 두 갈래가 넘친다 — `v0.3.0` 에 못박아 두면 그날도 이 시험은 파랗다.
+        let tag = format!("v{mine}");
+        for kind in [
+            Trouble::Offline,
+            Trouble::Timeout,
+            Trouble::RateLimited,
+            Trouble::Http,
+            Trouble::Tls,
+            Trouble::Garbled,
+            Trouble::Failed,
+        ] {
+            let long = line_at(stale(kind, &tag, heard), "2026-10-01T09:00:00Z", 80);
+            assert!(long.ends_with(&format!("{tag} seen 12 days ago")), "{kind:?} 가 80칸에서 잘렸다 — {long}");
+        }
+        // 갈래를 더하면 이 `match` 가 컴파일에서 위 목록을 댄다(`the_kind_words_are_the_contract` 의 자).
+        // 빠진 둘은 묻는 길(`latest::refresh`)이 태그 곁에 적지 않는 갈래다 — 손으로 고친 파일에서만 선다.
+        let _every = |kind: Trouble| match kind {
+            Trouble::Offline
+            | Trouble::Timeout
+            | Trouble::RateLimited
+            | Trouble::Http
+            | Trouble::Tls
+            | Trouble::Garbled
+            | Trouble::Failed
+            | Trouble::NotAsked
+            | Trouble::OddTag => (),
+        };
+    }
+
+    /// **한국어 판 줄도 같은 꼴이다** — 번호와 들은 때가 말묶음을 지나도 선다.
+    #[test]
+    fn the_korean_version_line_names_the_release_too() {
+        let line = |seen| {
+            let mut a = app();
+            a.site.lang = Lang::Ko;
+            a.site.now = "2026-09-21T09:00:00Z".into();
+            a.set_latest(seen);
+            render(&mut a, 120, 24)[..6].join("\n")
+        };
+        let same = line(crate::latest::Seen::Same { tag: "v0.3.0".into() });
+        assert!(same.contains("최신 (v0.3.0)"), "{same}");
+        let old = line(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        assert!(old.contains("최신 확인 안 함 (네트워크 없음) · 2일 전에 본 판 v0.3.0"), "{old}");
     }
 
     /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은

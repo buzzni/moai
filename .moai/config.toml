@@ -1,3 +1,4 @@
 # moai — 이 저장소의 이슈 트래커 설정
 prefix = "moai"
 statuses = "todo,in_progress,review,done"
+archive_days = 2

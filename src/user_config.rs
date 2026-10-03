@@ -1012,12 +1012,15 @@ impl Doc {
         let mut look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
             hide_deferred: look_one(t, HIDE_DEFERRED, Want::Bool, Item::as_bool, &mut problems),
+            hide_ideas: look_one(t, HIDE_IDEAS, Want::Bool, Item::as_bool, &mut problems),
+            show_archived: look_one(t, SHOW_ARCHIVED, Want::Bool, Item::as_bool, &mut problems),
             sort: look_one(t, SORT, Want::Word, word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
             detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
+            layout: look_one(t, LAYOUT, Want::Word, word, &mut problems),
             timezone: look_one(t, TIMEZONE, Want::Word, word, &mut problems),
             mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
@@ -1066,6 +1069,8 @@ impl Doc {
         // 두 번 적으면 적는 쪽에만 키를 더하는 날 거절이 그 키를 못 보고, 손으로 적은 표 모양을 낱값으로 덮는다.
         let mut hidden = base.hidden != new.hidden;
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
+        let mut hide_ideas = base.hide_ideas != new.hide_ideas;
+        let mut show_archived = base.show_archived != new.show_archived;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
         // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
@@ -1081,6 +1086,7 @@ impl Doc {
         let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         let mut detail_at = base.detail_at != new.detail_at;
+        let mut layout = base.layout != new.layout;
         let mut timezone = base.timezone != new.timezone;
         let mut mouse = base.mouse != new.mouse;
         let mut list_width = base.list_width != new.list_width;
@@ -1122,11 +1128,14 @@ impl Doc {
         };
         odd(&[HIDDEN], true, &mut hidden);
         odd(&[HIDE_DEFERRED], false, &mut hide_deferred);
+        odd(&[HIDE_IDEAS], false, &mut hide_ideas);
+        odd(&[SHOW_ARCHIVED], false, &mut show_archived);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
         odd(&[FIELDS], true, &mut fields);
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
         odd(&[DETAIL_AT], false, &mut detail_at);
+        odd(&[LAYOUT], false, &mut layout);
         odd(&[TIMEZONE], false, &mut timezone);
         odd(&[MOUSE], false, &mut mouse);
         odd(&[LIST_WIDTH], false, &mut list_width);
@@ -1139,6 +1148,12 @@ impl Doc {
         }
         if hide_deferred {
             changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from), &mut left);
+        }
+        if hide_ideas {
+            changed |= put_value(t, HIDE_IDEAS, new.hide_ideas.map(toml_edit::Value::from), &mut left);
+        }
+        if show_archived {
+            changed |= put_value(t, SHOW_ARCHIVED, new.show_archived.map(toml_edit::Value::from), &mut left);
         }
         if sort {
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1160,6 +1175,9 @@ impl Doc {
         }
         if detail_at {
             changed |= put_value(t, DETAIL_AT, new.detail_at.as_deref().map(toml_edit::Value::from), &mut left);
+        }
+        if layout {
+            changed |= put_value(t, LAYOUT, new.layout.as_deref().map(toml_edit::Value::from), &mut left);
         }
         if timezone {
             changed |= put_value(t, TIMEZONE, new.timezone.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1205,6 +1223,12 @@ pub const LANG: &str = "lang";
 pub const TUI: &str = "tui";
 const HIDDEN: &str = "hidden";
 const HIDE_DEFERRED: &str = "hide_deferred";
+/// idea 를 숨기는가(moai-oagj.bjr) — 미룸([`HIDE_DEFERRED`])처럼 칸이 아니라 축이라 칸 이름 목록([`HIDDEN`])에
+/// 섞지 않는다. 섞으면 `idea` 라는 칸을 쓰는 설정에서 두 뜻이 한 낱말을 두고 갈린다.
+const HIDE_IDEAS: &str = "hide_ideas";
+/// 아카이브(done 에 든 지 오래된 줄)를 보이는가(moai-47mz) — `SPC v o`. **처음값이 숨김이라 `show_` 다** —
+/// 미룸·idea 는 처음에 보이고 사람이 숨기는 것이라 `hide_` 지만, 아카이브는 처음부터 숨고 사람이 켠다.
+const SHOW_ARCHIVED: &str = "show_archived";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
 const FIELDS: &str = "fields";
@@ -1213,6 +1237,9 @@ const DETAIL: &str = "detail";
 /// 서는가다. 한 키에 둘을 담으면(`detail = "right"` 로 켬까지) 옛 줄(`detail = true`)이 파싱에서
 /// 떨어져 사람이 끈 상세가 도로 켜진다.
 const DETAIL_AT: &str = "detail_at";
+/// 목록을 줄로 세우는가 칸반 보드로 세우는가 — `list`·`board`(moai-9nfw). **새 창이 아니라 목록의 배치라**
+/// 보는 사람의 것이고, 그래서 상세의 자리([`DETAIL_AT`])처럼 `[tui]` 에 낱말로 산다.
+const LAYOUT: &str = "layout";
 /// 탐색기가 시각을 적을 시간대(moai-3oz2). **탐색기의 것이라 `[tui]` 에 산다** — CLI 는 이 키를
 /// 안 읽고 시스템(`TZ`·`/etc/localtime`)을 그대로 따른다. 고르는 자리가 탐색기 하나(`SPC o t`)고,
 /// 고른 적 없으면 두 표면이 같은 시계로 선다.
@@ -1232,8 +1259,11 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// [tui]
 /// hidden = ["done"]
 /// hide_deferred = false
+/// hide_ideas = false
+/// show_archived = false
 /// detail = true
 /// detail_at = "right"
+/// layout = "board"
 /// timezone = "Asia/Seoul"
 /// sort = "updated"
 /// sort_reversed = false
@@ -1249,6 +1279,9 @@ const FIELDS_KNOWN: &str = "fields_known";
 pub struct Look {
     pub hidden: Option<Vec<String>>,
     pub hide_deferred: Option<bool>,
+    pub hide_ideas: Option<bool>,
+    /// 아카이브를 보이는가(moai-47mz). 없으면 숨긴다 — [`SHOW_ARCHIVED`].
+    pub show_archived: Option<bool>,
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
     pub fields: Option<Vec<String>>,
@@ -1276,6 +1309,9 @@ pub struct Look {
     /// 있는지는 탐색기가 안다(`tui::view::DetailAt`). 모르는 낱말은 탐색기가 처음값으로 세우고
     /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub detail_at: Option<String>,
+    /// 목록의 배치 — `list`·`board`(moai-9nfw). **낱말로 든다**: 무슨 낱말이 있는지는 탐색기가 안다
+    /// (`tui::view::Layout`). 모르는 낱말은 탐색기가 목록으로 세우고 이 줄은 그대로 둔다 — 읽기는 관대하다.
+    pub layout: Option<String>,
     /// 탐색기가 시각을 적을 시간대 이름 — `Asia/Seoul`·`UTC`(moai-3oz2). **낱말로 든다**: 무슨
     /// 이름이 있는지는 이 기계의 tzdb 가 안다(`tz::names`). tzdb 에 없는 이름은 POSIX 규칙 글(`JST-9`)로
     /// 읽고(`tz::Zone::load`, moai-btxt.1gk), 그것으로도 못 푸는 이름은 탐색기가 UTC 로
@@ -3089,12 +3125,15 @@ mod tests {
         let look = Look {
             hidden: Some(vec!["done".into(), "review".into()]),
             hide_deferred: Some(true),
+            hide_ideas: Some(true),
+            show_archived: Some(true),
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into(), "assignee".into()]),
             fields_known: None,
             detail: Some(false),
             detail_at: Some("bottom".into()),
+            layout: Some("board".into()),
             timezone: Some("Asia/Seoul".into()),
             mouse: Some(false),
             list_width: Some(40),
@@ -3345,12 +3384,15 @@ mod tests {
         let base = Look {
             hidden: Some(vec!["done".into()]),
             hide_deferred: Some(false),
+            hide_ideas: None,
+            show_archived: None,
             sort: Some("updated".into()),
             sort_reversed: Some(false),
             fields: Some(vec!["id".into()]),
             fields_known: None,
             detail: Some(true),
             detail_at: None,
+            layout: None,
             timezone: None,
             mouse: None,
             list_width: None,

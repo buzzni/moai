@@ -264,6 +264,19 @@ impl Input {
         self.snap();
     }
 
+    /// 커서의 바이트 자리 — 늘 grapheme 경계다. 거름망 칸이 커서가 선 항목을 읽는다(moai-h2rh).
+    pub(super) fn cursor(&self) -> usize {
+        self.at
+    }
+
+    /// `range` 를 `s` 로 갈아 끼우고 커서를 넣은 글 뒤에 세운다(moai-h2rh). 거름망 칸이 고른 값을
+    /// 넣는다. **자리는 grapheme 경계여야 한다** — 부르는 쪽은 ASCII(`=`·`,`·따옴표·빈칸)에서 자른다.
+    pub(super) fn splice(&mut self, range: std::ops::Range<usize>, s: &str) {
+        self.text.replace_range(range.clone(), "");
+        self.at = range.start;
+        self.insert(s);
+    }
+
     /// 커서가 없는 줄로 그릴 조각. 머리부터 칸이 차는 데까지다.
     pub(super) fn head(&self, width: usize) -> &str {
         window(&self.text, 0, width).text
@@ -643,9 +656,13 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 7] = [
+    const NOT_COMPONENTS: [(&str, &str); 8] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("draw.rs", "그림 — Frame 에 찍는다"),
+        (
+            "hint.rs",
+            "거름망 칸의 안내 — 저장소의 줄(crate::model)에서 고를 값을 모은다. 값 자리 읽기와 좁히기는 같은 파일 위쪽이 조각으로 든다",
+        ),
         ("layer.rs", "프로젝트 층 — 등록한 프로젝트를 열고(Repo·사용자 설정) 스레드에서 읽는다"),
         (
             "mouse.rs",

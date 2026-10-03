@@ -12,6 +12,244 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-03
+
+### Added
+
+- **The explorer lays the list out as a kanban board.** `SPC v b` turns the list
+  into a board and back, and the choice is kept under `[tui]` as `layout`. It is
+  the list's layout, not another window: the cursor, the filter, the view,
+  search, `[NEW]` and the detail stay as they were. The columns are idea,
+  deferred and the config's columns in order — idea is a kind and deferred an
+  axis, so nothing new is stored. Only open ideas are cards: a promoted idea is
+  stood for by the cards it unfolded into, and the list still shows closed ones.
+  At the project root every milestone is a lane and `(no milestone)` comes last;
+  inside a milestone or an epic there is one lane. A card is its id, column and
+  priority over its title — ending in `/`, as in the list, when `Enter` can go
+  into it — with a foot for the `SPC c` columns that are on. `j`/`k` move within
+  a column, `h`/`l` to the next one, and a click takes a card. The wheel,
+  `Ctrl-d`/`Ctrl-u`, `Ctrl-f`/`Ctrl-b` and `PageDown`/`PageUp` scroll the board,
+  not the cursor: the chosen card and the detail stay as they are even once the
+  card is off screen, and the board scrolls all the way to its end. The next
+  cursor key moves from that card and brings the board back to it, and so does
+  anything that lays the board out again — going in or out of a folder, a
+  search, a filter, or a `SPC v`, `SPC s` or `SPC c` toggle; a reload leaves the
+  scrolled board where it is. When the cursor's card goes away — a
+  reload, a view toggle, a filter or a search — the cursor stays in that column,
+  on the nearest card left in it, or else moves to the nearest column beside it.
+  While a search is being typed it measures from the card the search opened on,
+  so fixing a typo brings the cursor back to that card. In the
+  overview (`0`) every project stands as a header across the columns, with an
+  unfolded project's milestone lanes under it, and the columns are those of
+  every project shown; on a header `l`, `h`, `Tab` and `Enter` unfold, fold and
+  go in as in the list.
+
+- **`SPC c e` shows the epic a row is in** — a column on the right of the list
+  and, on the board, the card's foot, where epics appear instead of as cards.
+
+- **`SPC v i` hides ideas** — the idea column on the board and the idea rows in
+  the list alike. Search still finds them, `SPC v a` brings them back, and the
+  choice is kept under `[tui]` as `hide_ideas`.
+
+- **A board card that is not yours says whose it is.** A card assigned to
+  someone else, or to nobody, grows a dim foot with `→ name` or `unowned` even
+  when no `SPC c` column is on; your own cards stay two lines. Whose is decided
+  the way `moai ready` decides it, and when who you are is unknown no card is
+  set apart. On a narrow card the tags and the epic name shrink first, so the
+  word stays in sight.
+
+- **Done work folds into an archive.** A row that has stood in done for
+  `archive_days` (14 unless `.moai/config.toml` says otherwise; `0` turns it
+  off) is the archive — an epic or a milestone counted from when it got to
+  done: when its last member got there, or when the rest were deferred if that
+  came later. A group with one recent member stays, and an epic closed today by
+  deferring what was left does not drop out the same day. Nothing is
+  stored: no field, no column, no command; it is read off the column and the
+  clock each time. The explorer's list and board leave the archive out even
+  with done shown and the path line counts it (`[archive 312 hidden]`);
+  `SPC v o` shows it and is kept under `[tui]` as `show_archived`, and `/`
+  search finds it anyway. `moai show --archived` brings it back, done and
+  deferred with it; the time filters and `--stale` find it too, and so does
+  `-g` once done is let in with `--all`. `moai status` lists only the milestones and epics
+  outside the archive and counts the rest in one line, `archived` in `--json`.
+  `moai stats` counts it as before.
+- **The explorer's filter field says what it takes.** While `SPC f` is open, a
+  panel above the field lists the keys and a few examples. With the cursor in
+  the value of `assignee=`, `tag=`, `no-tag=` or `milestone=`, the panel lists
+  the values this tracker holds instead: people as `name (email)` (picking one
+  puts in the email), tags, and milestones by id and title, with `me` and
+  `none` where they apply. Typing narrows the list, `Up` and `Down` pick a
+  value and `Enter` puts it in. When no list is showing, `Enter` applies the
+  filter as before. The panel pushes the list up rather than covering it, the
+  same way the `SPC` menu does.
+
+- **The filter text takes four more time items, minutes and `~` ranges.**
+  `created_at=`, `updated_at=`, `started_at=` and `done_at=` — in `--filter`
+  and the explorer's `SPC f` — are named after the `--json` fields and read
+  the row's own field: a group's too, never its members', and a row without
+  that field falls in no range. `done_at=` stays when a row is reopened, so add
+  `status=done` for what is closed now; `since=`, `created=` and `done=` keep
+  their meaning. Every time filter, flags included, now also takes
+  `YYYY-MM-DD HH:MM` — that one minute on your own clock, the way a lone day is
+  that whole day — and every one that takes a range takes `from~to` as well as
+  `from..to`, either side open; `--since` and `since=` still take one end.
+  `--filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'` runs to 23:59:59.
+  Quote a range that opens with `~` on the command line (`'~2026-10-05'`) —
+  zsh reads a bare `~2026-10-05` as a named directory. In `SPC f` a value
+  right after `=` may be quoted (`"…"` or `'…'`) and is then one value with
+  the spaces inside it (its two ends are trimmed, as `--filter` trims them);
+  a quote anywhere else is a character, so `grep=don't` still finds what it
+  did.
+
+### Changed
+
+- **`moai show --all` and `-s done` leave the archive out.** They used to give
+  every closed row; now done rows past `archive_days` are left out and the tail
+  says how many, with `--archived` to bring them in. `moai idea show --all`
+  leaves closed ideas past `archive_days` out the same way. A script that pulls
+  a complete copy with `--all --json` should use `--archived --json`. The
+  `milestones` and `epics` of `moai status --json` leave archived groups out
+  the same way, counted in `archived`, and so do the lists on the `moai status`
+  board. In the explorer, showing done (`SPC v <n>`) or everything (`SPC v a`)
+  no longer brings back done rows past `archive_days`; `SPC v o` does.
+
+- **`moai show --done` dates a group closed by deferring from the deferral.** An
+  epic or milestone whose last open members were deferred used to count from
+  when its last member finished, so an epic closed today by `moai defer` could
+  stand weeks back; it now counts from the day the rest were deferred, if that
+  came later. The same clock is what the archive, `--stale` on a done group and
+  `moai stats` read. Moving rows in or out and removing them leave nothing on
+  the group: one closed by removing the rest or moving them to another epic
+  still counts from its last finished member, and a deferred row moved into a
+  closed group dates it from that row's deferral.
+
+- **The version line in the `moai tui` header names the latest release.** It
+  reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it
+  used to say only `latest` and `ahead of the latest release`. When the daily
+  check fails, the line no longer draws the last answer as if it were fresh: it
+  says the check did not happen, then the release it last heard and when —
+  `latest not checked (no network) · v0.3.0 seen 2 days ago`. With no earlier
+  answer it stays `latest not checked`. If the release last heard is newer than
+  yours, the banner and the upgrade line printed on quit still stand.
+  `latest.toml` gains a `heard_at` key and keeps `trouble` next to the tag; a
+  file written before reads as heard when it was asked. Two reasons were
+  shortened so the line fits 80 columns: `(bad answer)` and `(call failed)`.
+  When the project numbers need the room, the last answer moves to the row
+  under the version line instead of pushing them out.
+
+- **`moai skill install` removes the two Korean writing plugins an earlier
+  moai installed alongside it** (`korean-skills@korean-skills` and
+  `humanize-korean@im-not-ai`) instead of installing them. It removes them once
+  per scope, only where this repository's moai still stands as an earlier
+  version (its installed skill teaches them) and only when their marketplace is
+  the one an earlier moai added — `claude` does not record who installed a
+  plugin, so this is how one an earlier moai put there is told from one a
+  person installed. Once a scope holds this version, nothing there is removed
+  again. A scope other than `--scope` where the earlier version still stands
+  is first brought up to this version (`claude plugin update --scope <that
+  scope>`), so it too is removed from only once; if that fails, nothing is
+  removed there and the next install tries again. Nothing is removed or
+  brought up when moai's own registration fails. A user-scope install another
+  repository's moai also stands beside is left, with the command to remove it
+  printed, and that scope is not brought up, so it is removed once that moai
+  is gone. The marketplaces stay on the machine —
+  `claude plugin marketplace remove` reaches the whole machine. At project
+  scope an earlier moai also declared them in the committed
+  `.claude/settings.json`, so the team kept being offered them: moai deletes
+  just those two entries itself, only when they point where an earlier moai
+  pointed them and nothing in that file still enables a plugin from them, and
+  leaves the rest of the file as it was — commit the change. One line
+  says what was removed; a removal that fails prints the command to run by
+  hand (for a declaration, where to delete it) and does not change the exit
+  code. `--dry-run` lists the removals and the scopes it would bring up. In
+  `--json`, `skill install` reports the scopes it brought up under `lifted`
+  (`scope`, `command`, `ok`), the removals under `retired` (`id`, `scope`,
+  `command`, `ok`), the declarations under `undeclared` (`marketplace`,
+  `file`, `ok`), and `kept` in place of `companions`; in `skill uninstall`,
+  which already had `kept`, `companions` becomes `retired` in the same shape,
+  beside the same `undeclared`.
+
+- **The supervisor's worker brief stands an epic's members in `review` while
+  its epic-end review runs.** Where the worker creates the review issue it now
+  moves each finished member with `moai mv <member> review --from in_progress`,
+  so the board no longer shows work under review as still in progress. The
+  `--from` passes over members left in the first column, which that review
+  does not see. In a repository whose columns have no `review`, the refusal
+  says so and the worker skips the step; the default columns and the config
+  `moai init` writes have one. Closing after the merge is unchanged — `moai mv
+  <member> done` closes from either column. Run `moai skill install` to plant
+  the new text.
+
+- **Giving the assignee filter twice picks either one.** `-a 철수 -a 영희`,
+  `assignee=` repeated in `--filter` or `SPC f`, and the two mixed are one
+  list read as or, the same as a comma. They used to be refused as a filter
+  used twice — a row has one assignee, so "and" never picked anything. It is
+  the one filter where repeating means or. The `AGENTS.md` block and the skill
+  say so; run `moai init` and `moai skill install` to bring them in.
+
+- **`-m -` on `moai mv` and `moai defer` reads stdin instead of being the
+  text.** This breaks a caller that passed a lone `-` as the note: with
+  nothing on stdin, or only blank space, it used to write `-` and exit 0, and
+  it now exits 1 (`bad_input`) with nothing moved or deferred. With other
+  input waiting on stdin, such as a `while read` loop's, that input becomes
+  the note, and in a terminal the command waits for the text. The empty case
+  is refused because the hook reads only the command line and cannot see that
+  text, so this is where an empty closing line is caught.
+
+- **`moai defer` refuses an empty reason with the code `bad_input`.** `-m ''`
+  and a reason of blank space were refused with the code `error` under
+  `--json`, while an empty `-m -` and an empty `moai note` answer
+  `bad_input`. A loop that branches on `code` now reads all three as an
+  argument to fix.
+
+### Removed
+
+- **Polishing Korean text is no longer part of moai.** The "Korean text" section
+  is gone from the `AGENTS.md` block, the planted moai skill, its
+  `references/commands.md` and the supervisor's worker brief, and the hook no
+  longer adds a polishing notice to a `moai` write that carries Hangul. Korean
+  text goes in as it is written. `moai skill status` no longer shows the
+  `alongside` row, and its `--json` no longer carries the `companions` key.
+  Rule 2 counts a `_workspace/` folder like any other — the exception existed
+  only for the plugin that created it. Run `moai init` to bring an existing
+  `AGENTS.md` block up to date.
+
+### Fixed
+
+- **`Esc` in the search box goes back to the row it was opened on, even after a
+  reload.** It went back to that row's number, and the file is re-read while
+  the box is open — every minute and on every write from another session — so a
+  different row could be standing there by then.
+
+- **In the overview, re-reading a project no longer moves the cursor to another
+  row.** The overview strings the rows of every unfolded project together, and
+  when a project above the cursor was re-read with a different number of rows,
+  the cursor kept its row number and stood on whatever row had moved into it.
+
+- **After `SPC p a` registers a project in the overview, the cursor stands on
+  that project's header.** With a project above it unfolded, the cursor landed
+  on one of that project's rows instead: the new project's place among the
+  projects was read as a row number.
+
+- **`moai skill install` writes the path moai was called by, not the one its
+  symlinks resolve to.** Called through a symlinked directory — a `target/`
+  that links elsewhere, say — it wrote the resolved path into the hooks, so a
+  committed `.claude/moai-plugin` changed on every install and `moai skill
+  status` said the hooks call another moai when they call the same file. The
+  path comes from how moai was called (with `-C`, from where it was typed) and
+  is trusted only when it is the same file as the running binary; a path the
+  hook line cannot carry, or one under `/proc` or `/dev`, falls back to the
+  resolved path. Once the hooks are planted, installing again with any path to
+  the same file keeps the planted one, so the tree does not change. `skill
+  status` compares the hooks and the running moai by file, not by spelling.
+
+- **`moai mv -m - < <file>` and `moai defer -m - < <file>` write the file's
+  text.** They wrote a lone `-` as the note, so a review closed that way had
+  `-` for its closing line, and the hook let it through as a line that was not
+  empty. `-m -` now reads stdin, the way `note -b -` and `add -b -` already
+  did; what that changes for a call that passed `-m -` is under **Changed**.
+  Text given on the command line is taken as before.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added

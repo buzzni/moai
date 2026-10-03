@@ -298,6 +298,8 @@ pub struct Hidden {
     pub done: usize,
     pub ideas: usize,
     pub deferred: usize,
+    /// done 에 든 지 오래된 줄(moai-47mz) — `--all` 이 아니라 `--archived` 가 연다.
+    pub archived: usize,
 }
 
 impl Hidden {
@@ -305,12 +307,13 @@ impl Hidden {
     ///
     /// **`done`·`idea` 는 번역하지 않는다** — 칸 이름과 종류는 설정과 자료에서 오는 낱말이고,
     /// 바로 뒤의 플래그(`--all`·`--type idea`)가 그 글자를 그대로 받는다. 옮기면 화면이 대는
-    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸만 낱말이라 말묶음에서 온다(`status.put_off`).
+    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸과 아카이브는 낱말이라 말묶음에서 온다(`status.put_off`·`list.archive`).
     fn says(&self, lang: Lang) -> Vec<String> {
         [
             (self.done, "done", "--all"),
             (self.deferred, say(lang, "status.put_off"), "--deferred"),
             (self.ideas, "idea", "--type idea"),
+            (self.archived, say(lang, "list.archive"), "--archived"),
         ]
         .into_iter()
         .filter(|(n, _, _)| *n > 0)
@@ -326,6 +329,7 @@ impl Hidden {
             Hide::Done => self.done += 1,
             Hide::Idea => self.ideas += 1,
             Hide::Deferred => self.deferred += 1,
+            Hide::Archived => self.archived += 1,
             Hide::Unopenable => {}
         }
     }
@@ -991,7 +995,11 @@ pub fn status(
         format!(
             "{}  {}       {}{overlaid}",
             paint(style::HEAD, &fill(say(lang, "status.issues"), &[("n", &st.total.to_string())])),
-            paint(style::DIM, &fill(say(lang, "status.epics"), &[("n", &st.epics.len().to_string())])),
+            // 에픽 수는 **트래커에 있는 에픽 전부**다 — 아카이브로 목록에서 뺀 것도 센다(moai-47mz).
+            paint(
+                style::DIM,
+                &fill(say(lang, "status.epics"), &[("n", &(st.epics.len() + st.archived.epics).to_string())])
+            ),
             paint(style::DIM, at),
         ),
         String::new(),
@@ -1000,14 +1008,18 @@ pub fn status(
     out.push(board(cfg, &st.counts));
 
     let shelved = crate::report::put_off(issues);
-    for (label, rolls) in
-        [(say(lang, "status.milestone_label"), &st.milestones), (say(lang, "status.epic_label"), &st.epics)]
-    {
-        if rolls.is_empty() {
+    // **아카이브된 묶음은 수 한 줄로 선다**(moai-47mz) — 목록은 그 줄을 뺐고(`report::Archived`), 그 줄을 보는
+    // 명령을 함께 댄다. 마일스톤이 다 아카이브여도 머리글은 선다 — 안 서면 두 수가 어느 목록의 것인지 모른다.
+    let labelled = !st.milestones.is_empty() || st.archived.milestones > 0;
+    for (label, rolls, aged, kind) in [
+        (say(lang, "status.milestone_label"), &st.milestones, st.archived.milestones, "milestone"),
+        (say(lang, "status.epic_label"), &st.epics, st.archived.epics, "epic"),
+    ] {
+        if rolls.is_empty() && aged == 0 {
             continue;
         }
         out.push(String::new());
-        if !st.milestones.is_empty() {
+        if labelled {
             out.push(paint(style::DIM, label));
         }
         let heads: Vec<(String, usize)> = rolls
@@ -1051,6 +1063,11 @@ pub fn status(
                 aside,
                 note,
             ));
+        }
+        if aged > 0 {
+            let how = format!("moai show --type {kind} --archived");
+            let line = fill(say(lang, "status.archived"), &[("n", &aged.to_string()), ("how", &how)]);
+            out.push(paint(style::DIM, &format!("  {line}")));
         }
     }
 
@@ -3559,10 +3576,11 @@ impl Surface {
 
     /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
     ///
-    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로
-    /// `-a 홍 길동 (a@b.c),김 철수 (c@d.e)` 를 그대로 대면 옮겨 친 셸이 `(` 에서 멈춘다. 따옴표가 필요 없는
+    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 칸 이름에 빈칸과 괄호가 들 수 있으므로
+    /// `-s to do (old),in review` 를 그대로 대면 옮겨 친 셸이 빈칸에서 가르고 `(` 에서 멈춘다. 따옴표가 필요 없는
     /// 값(`todo,review`)은 글자째 그대로다([`crate::text::quoted`]). 거름망은 `=` 없는 낱말을 앞 항목에 잇는
-    /// 칸이라 감싸지 않는다.
+    /// 칸이라 감싸지 않는다. (처음 든 까닭은 담당의 `이름 (메일)` 이었는데, 담당은 되풀이를 또는으로 받게 되어
+    /// 이 거절에 안 온다 — moai-97tn.)
     fn spell(self, field: crate::query::Once, value: &str) -> String {
         match self {
             Surface::Flags => format!("{} {}", field.flag(), crate::text::quoted(value)),
@@ -3594,7 +3612,6 @@ pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> 
                 Once::Milestone => fill(say(lang, "refuse.filter_twice_milestone"), &v),
                 Once::Parent => fill(say(lang, "refuse.filter_twice_parent"), &v),
                 Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
-                Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
             };
             // 고칠 글은 준 값을 다 잇는다 — 말(`{a}`·`{b}`)은 앞의 둘로 서지만, 셋째를 빼면 그대로 친 사람이 그 줄을 잃는다.
             let all = [a, b].into_iter().chain(rest).map(String::as_str).collect::<Vec<_>>().join(",");
@@ -3970,7 +3987,6 @@ mod tests {
             twice(Once::Milestone),
             twice(Once::Parent),
             twice(Once::Priority),
-            twice(Once::Assignee),
             BadFilter::DoneOutside { asked: "review".into() },
             BadFilter::Endless("..".into()),
             BadFilter::Backwards("2026-09-03..2026-09-02".into()),
@@ -3996,7 +4012,6 @@ mod tests {
             (Once::Milestone, "milestone", "--milestone"),
             (Once::Parent, "parent", "--parent"),
             (Once::Priority, "priority", "-p"),
-            (Once::Assignee, "assignee", "-a"),
         ] {
             let said = bad_filter(Lang::En, &twice(field));
             assert!(said.starts_with(&format!("the {noun} cannot be")), "{field:?} — {said}");
@@ -4027,28 +4042,25 @@ mod tests {
                 assert!(flags.contains(want), "{lang:?} CLI 에 {want} 가 없다 — {flags}");
             }
         }
-        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로 그대로
-        // 대면 옮겨 친 셸이 `(` 에서 멈춘다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다.
-        let people = BadFilter::Twice {
-            field: Once::Assignee,
-            a: "홍 길동 (a@b.c)".into(),
-            b: "김 철수 (c@d.e)".into(),
-            rest: vec![],
-        };
+        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 칸 이름에 빈칸이 들 수 있으므로 그대로
+        // 대면 옮겨 친 셸이 빈칸에서 가른다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다. (처음 잰
+        // 값은 담당의 `이름 (메일)` 이었는데, 담당은 되풀이를 또는으로 받게 되어 이 거절이 안 선다 — moai-97tn.)
+        let spaced =
+            BadFilter::Twice { field: Once::Status, a: "to do (old)".into(), b: "in review".into(), rest: vec![] };
         // 셋째부터도 고칠 글에 든다(리뷰 moai-efoc.3e1).
         let three =
             BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] };
         assert!(bad_filter(Lang::En, &three).contains("`-s todo,review,done`"), "{}", bad_filter(Lang::En, &three));
         assert!(bad_filter_on(Lang::En, &three, Surface::Pairs).contains("`status=todo,review,done`"));
-        let said = bad_filter(Lang::En, &people);
-        assert!(said.contains("`-a '홍 길동 (a@b.c),김 철수 (c@d.e)'`"), "{said}");
-        let said = bad_filter_on(Lang::En, &people, Surface::Pairs);
-        assert!(said.contains("`assignee=홍 길동 (a@b.c),김 철수 (c@d.e)`"), "{said}");
+        let said = bad_filter(Lang::En, &spaced);
+        assert!(said.contains("`-s 'to do (old),in review'`"), "{said}");
+        let said = bad_filter_on(Lang::En, &spaced, Surface::Pairs);
+        assert!(said.contains("`status=to do (old),in review`"), "{said}");
         // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
         for lang in [Lang::En, Lang::Ko] {
             let said = |why: &BadFilter| bad_filter(lang, why);
             assert!(said(&twice(Once::Status)).contains("`-s todo,review`"), "{}", said(&twice(Once::Status)));
-            assert!(said(&twice(Once::Assignee)).contains("`-a todo,review`"));
+            assert!(said(&twice(Once::Priority)).contains("`-p todo,review`"));
             assert!(said(&BadFilter::DoneOutside { asked: "review".into() }).contains("-s review,done"));
             assert!(said(&BadFilter::NoSuchKey("statu".into())).contains("status, tag"));
             assert!(said(&BadFilter::NotAPair("todo".into())).contains("status, tag"));
@@ -4057,6 +4069,24 @@ mod tests {
         // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
         let kind = "x".parse::<Kind>().unwrap_err();
         assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
+    }
+
+    /// **때를 거절하는 글은 받는 꼴을 다 댄다**(리뷰 moai-97tn.p44) — 분(`YYYY-MM-DD HH:MM`)과 `~` 를 받게 된 뒤에도
+    /// 글은 날과 순간과 `from..to` 만 댔다. 시를 한 자리로 친 사람(`9:05`)은 분 꼴이 없다는 말을 듣고, 그 말을 따라
+    /// `…T09:05:00Z` 를 치면 서울에서는 아홉 시간 어긋난 UTC 의 한 초를 묻는다. 꼴을 더하는 날 여기도 더한다.
+    #[test]
+    fn a_time_refusal_names_every_form_it_takes() {
+        use crate::query::BadFilter;
+        for lang in [Lang::En, Lang::Ko] {
+            for why in [BadFilter::NotATime("2026-10-03 9:05".into()), BadFilter::NoTime] {
+                let said = bad_filter(lang, &why);
+                for form in ["`YYYY-MM-DD`", "`YYYY-MM-DD HH:MM`", "`YYYY-MM-DDTHH:MM:SSZ`"] {
+                    assert!(said.contains(form), "{lang:?} 거절문에 {form} 이 없다 — {said}");
+                }
+            }
+            let said = bad_filter(lang, &BadFilter::Endless("~".into()));
+            assert!(said.contains("`from~to`") && said.contains("`from..to`"), "{lang:?} 가르개를 다 안 댔다 — {said}");
+        }
     }
 
     /// **TZif 가 아닌 시간대 파일도 고른 말로 선다**(리뷰 moai-efoc.3e1) — `tz::Trouble::Unreadable` 의 `said` 에
