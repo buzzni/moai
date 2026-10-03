@@ -21,8 +21,9 @@ does not tag — see `CONTRIBUTING.md`.
   deferred and the config's columns in order — idea is a kind and deferred an
   axis, so nothing new is stored. At the project root every milestone is a
   lane and `(no milestone)` comes last; inside a milestone or an epic there is
-  one lane. A card is its id, column and priority over its title, with a foot
-  for the `SPC c` columns that are on. `j`/`k` move within a column, `h`/`l` to
+  one lane. A card is its id, column and priority over its title — ending in
+  `/`, as in the list, when `Enter` can go into it — with a foot for the
+  `SPC c` columns that are on. `j`/`k` move within a column, `h`/`l` to
   the next one, and a click takes a card. The wheel, `Ctrl-d`/`Ctrl-u` and
   `Ctrl-f`/`Ctrl-b` scroll the board instead of moving the cursor: the cursor's
   card stays chosen while it is on screen, one pushed off is pulled to the
@@ -43,7 +44,8 @@ does not tag — see `CONTRIBUTING.md`.
   someone else, or to nobody, grows a dim foot with `→ name` or `unowned` even
   when no `SPC c` column is on; your own cards stay two lines. Whose is decided
   the way `moai ready` decides it, and when who you are is unknown no card is
-  set apart.
+  set apart. On a narrow card the tags and the epic name shrink first, so the
+  word stays in sight.
 
 ### Changed
 
