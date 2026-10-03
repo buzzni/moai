@@ -4238,7 +4238,9 @@ impl App {
                     Row::Item(seat, e, _) => {
                         let site = self.site_of_seat(*seat)?;
                         let at = e.at().filter(|&at| at < site.issues.len())?;
-                        let idea = crate::report::is_idea(&site.issues[at]);
+                        // 닫힌 idea 는 담아 둔 생각이 아니다 — 닫힌 일처럼 제 칸에 선다(moai-r1ly.91p, [`board::column_of`]).
+                        let i = &site.issues[at];
+                        let idea = crate::report::is_idea(i) && !i.status.is_done();
                         let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
                         let height = draw::card_height(self.fields, || site.whose(at).is_some());
                         Some(Spot::Card(*seat, site.lane(at), column, height))
@@ -5802,6 +5804,33 @@ mod tests {
         // 키 바가 대는 칸 이름도 보드다.
         a.focus = Pane::Detail;
         assert_eq!(a.key_ctx(&rows).next_pane, say(a.site.lang, "tui.pane.board"));
+    }
+
+    /// **닫힌 idea 는 done 칸에 선다**(moai-r1ly.91p, 사용자 결정 2026-10-03) — 종류가 칸을 정하는 것은 열린 동안뿐이다.
+    /// done 을 켜도 산 idea 곁에 안 쌓이고, done 을 숨기면 전처럼 안 보인다.
+    #[test]
+    fn a_closed_idea_stands_in_the_done_column() {
+        let mut a = boarded();
+        let mut issues = a.site.issues.clone();
+        let mut unfolded = make("argos-0009", Kind::Idea);
+        unfolded.status = Status::new("done");
+        issues.push(unfolded);
+        a.adopt(issues);
+        a.layout = view::Layout::Board;
+        assert!(!row_ids(&a).contains(&"argos-0009".to_string()), "done 을 숨겼는데 닫힌 idea 가 섰다");
+        a.hit("SPC v 4 Esc");
+        let rows = a.rows();
+        let laid = a.laid(&rows);
+        let column_of = |id: &str| {
+            let n = row_ids(&a).iter().position(|r| r == id).unwrap_or_else(|| panic!("{id} 카드가 안 섰다"));
+            laid.plan.cards[n].column.map(|c| laid.columns[c].clone())
+        };
+        assert_eq!(
+            column_of("argos-0009"),
+            Some(board::Column::Status("done".into())),
+            "닫힌 idea 가 done 칸에 안 섰다"
+        );
+        assert_eq!(column_of("argos-0006"), Some(board::Column::Idea), "산 idea 는 idea 칸이다");
     }
 
     /// **보드의 반 쪽·한 쪽은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — `Ctrl-d`·`Ctrl-u` 는 [`scroll::HALF`]
