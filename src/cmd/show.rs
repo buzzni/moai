@@ -135,6 +135,10 @@ pub(crate) fn filter_of(
         since: a.since,
         created: a.created,
         done: a.done,
+        // 플래그가 없다 — `--filter updated_at=…` 처럼 거르개 글로만 온다(moai-97tn).
+        updated_at: Vec::new(),
+        started_at: Vec::new(),
+        done_at: Vec::new(),
         all: a.all,
         archived: a.archived,
         ideas: false,

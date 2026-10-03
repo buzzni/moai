@@ -2931,9 +2931,13 @@ impl App {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
             // **아카이브도 연다**(moai-47mz) — done 처럼 거름망이 아니라 보기(`SPC v o`)가 숨긴다. 거름망이 숨기면
             // 보기를 켜도 `SPC f` 를 건 동안 아카이브가 안 돌아온다. 검색(`-g`)은 `Filter::build` 가 저절로 연다.
-            Mode::Filter(q) => {
-                Raw { filter: split_filter(q.text()), all: true, ideas: true, archived: true, ..Raw::default() }
-            }
+            Mode::Filter(q) => Raw {
+                filter: crate::query::split_items(q.text()),
+                all: true,
+                ideas: true,
+                archived: true,
+                ..Raw::default()
+            },
             Mode::Browse
             | Mode::Ask(_)
             | Mode::Idea(_)
@@ -5878,26 +5882,6 @@ fn settle_reads(a: &mut App) {
         std::thread::sleep(std::time::Duration::from_millis(2));
         a.follow();
     }
-}
-
-/// 한 줄을 `--filter` 토큰들로 쪼갠다.
-///
-/// **`항목=` 이 시작하는 데서만 쪼갠다.** 그냥 띄어쓰기로 쪼개면 값에 빈칸이
-/// 든 것(`grep=원자적 쓰기`, `status=to do`)을 이 칸에서는 아예 적을 수 없다 —
-/// CLI 는 그것을 인자 하나로 받으므로, "CLI 와 같은 문법" 이라던 약속이 거기서
-/// 깨진다. 항목 이름이 없는 조각은 앞 토큰의 값에 마저 붙는다.
-fn split_filter(q: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for w in q.split_whitespace() {
-        match out.last_mut() {
-            Some(prev) if !w.contains('=') => {
-                prev.push(' ');
-                prev.push_str(w);
-            }
-            _ => out.push(w.to_string()),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

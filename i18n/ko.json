@@ -766,7 +766,6 @@
   "refuse.filter_twice_milestone": "마일스톤은 {a} 이면서 동시에 {b} 일 수 없다.",
   "refuse.filter_twice_parent": "부모는 {a} 이면서 동시에 {b} 일 수 없다.",
   "refuse.filter_twice_priority": "우선순위는 {a} 이면서 동시에 {b} 일 수 없다.",
-  "refuse.filter_twice_assignee": "담당은 {a} 이면서 동시에 {b} 일 수 없다.",
   "refuse.filter_twice_how": "둘 중 하나를 찾는 것이면 `{fix}` 다",
   "refuse.filter_done_outside": "`{by_done}` 은 지금 {done} 에 선 줄만 본다 — `{by_status}` 에 함께 걸리는 줄이 없다.",
   "refuse.filter_done_outside_how": "`{widen}` 으로 넓히거나 `{status}` 를 뺀다",

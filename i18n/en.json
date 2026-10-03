@@ -766,7 +766,6 @@
   "refuse.filter_twice_milestone": "the milestone cannot be {a} and {b} at once.",
   "refuse.filter_twice_parent": "the parent cannot be {a} and {b} at once.",
   "refuse.filter_twice_priority": "the priority cannot be {a} and {b} at once.",
-  "refuse.filter_twice_assignee": "the assignee cannot be {a} and {b} at once.",
   "refuse.filter_twice_how": "to find either one, `{fix}`",
   "refuse.filter_done_outside": "`{by_done}` sees only rows standing in {done} now — none of them is also caught by `{by_status}`.",
   "refuse.filter_done_outside_how": "widen it to `{widen}`, or leave `{status}` out",
