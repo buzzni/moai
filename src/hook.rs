@@ -5998,6 +5998,10 @@ fn close_in(
         // 지나갔다 — 이 규칙이 지키려던 단 하나(다음 사람이 읽을 한 줄)가
         // 그대로 무너진다. 값을 보는 것은 여전히 명령줄만 읽는 일이라
         // "저널을 안 읽는다" 는 결정과 어긋나지 않는다.
+        //
+        // **`-m -` 는 stdin 을 읽는다**(moai-m1za) — 그 글은 명령줄에 없어 여기서 못 본다. 그래서 지나보내고,
+        // 빈 stdin 은 `mv` 가 스스로 거절한다(`cmd::add::read_msg`). 글자 그대로 받던 판은 `-` 한 글자를
+        // 닫는 줄로 적었는데, 이 검사가 그것을 빈 값이 아니라고 지나보냈다.
         if !flag_values(args, &["-m", "--msg"]).iter().all(|v| v.trim().is_empty()) {
             continue;
         }
@@ -11918,6 +11922,10 @@ mod tests {
             "moai mv t-r done -m \"넷을 반영하고 하나는 t-9 로 넘겼다\"",
             "moai mv t-r done --msg \"반영\"",
             "moai mv t-r done --msg=반영",
+            // **`-m -` 는 stdin 을 읽는다**(moai-m1za) — 글은 여기서 안 보이니 지나가고, 빈 stdin 은 `mv` 가
+            // 스스로 거절한다(`mv_reads_its_message_from_stdin_on_a_lone_dash`).
+            "moai mv t-r done -m - < 닫는글.md",
+            "printf '반영\\n넘김 t-9\\n' | moai mv t-r done -m -",
         ] {
             assert_eq!(guard_close(&all, &cfg(), &here(), ok), Decision::Pass, "{ok}");
         }

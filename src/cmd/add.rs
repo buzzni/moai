@@ -105,6 +105,26 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     }
 }
 
+/// `mv -m`·`defer -m` 의 글 — **`-` 이면 stdin 을 읽는다**(moai-m1za, 2026-10-03 사람이 정했다).
+/// `-b -` 와 같은 규칙이다. 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의 닫는 줄을 `-`
+/// 한 글자로 적었고, 훅 규칙 3 은 그 `-` 를 빈 값이 아니라고 지나보냈다.
+///
+/// **빈 stdin 은 거절한다** — `-b -` 가 stderr 한 줄로 넘기는 것과 다르다. 규칙 3 은 명령줄만 읽어
+/// `-m -` 의 글을 못 보니, 빈 글을 막을 자리가 여기 하나다. 거절하면 아무것도 안 옮긴다: 읽는 것은
+/// 락보다 먼저라(부르는 쪽이 그 차례를 지킨다) 쓰기가 서기 전이다. 앞뒤 빈칸은 `note` 처럼 걷는다.
+///
+/// **argv 에 적힌 글은 그대로 돌려준다.** 빈 글을 어떻게 받는지는 명령마다 이미 달라(`defer` 는
+/// 거절한다), 그 갈래를 여기로 옮기지 않는다.
+pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
+    if arg.as_deref() != Some("-") {
+        return Ok(arg);
+    }
+    match read_body(arg)?.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        Some(s) => Ok(Some(s)),
+        None => Err(Fail::coded(crate::i18n::say(lang, "refuse.msg_stdin_empty"), super::code::BAD_INPUT)),
+    }
+}
+
 /// [`read_body`] 에 **"준다고 하고 아무것도 안 왔다" 를 한 줄로 말하기**를 더한 것 — `add`·`edit` 이
 /// 쓴다(moai-pp9i.kj2, 2026-09-29 사람이 정했다: 막지 않고 stderr 한 줄, exit 0).
 ///

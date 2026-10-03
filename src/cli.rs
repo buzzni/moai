@@ -1426,7 +1426,7 @@ pub struct MvArgs {
     #[arg(required = true, num_args = 1.., value_name = "id")]
     pub args: Vec<String>,
 
-    /// One line of note on this move (journal only)
+    /// A note on this move (journal only). `-` reads stdin
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 

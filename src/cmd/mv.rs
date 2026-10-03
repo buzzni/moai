@@ -133,6 +133,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         .require_known(to.as_str())
         .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let from = args.from.map(Status::new);
+    // **`-m -` 는 stdin 을 읽는다**(moai-m1za) — `note -b -` 와 같은 까닭으로 락보다 먼저 읽는다: 락을 쥔 뒤에
+    // 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다. 갈 칸의 오타는 그 위에서 이미 갈렸다 — 틀린 부름이
+    // 터미널에서 stdin 을 기다리게 하지 않는다.
+    let msg = super::add::read_msg(args.msg, ctx.lang())?;
 
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
     // 락 안에 두면 같은 `.moai` 를 쓰는 옆 세션들이 그 subprocess 만큼 더 기다린다.
@@ -228,7 +232,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     // 옮겨 둔 줄이고, 저기서 걸리는 것은 *남이* 옮긴 줄이다. 손대지
                     // 않기로 한 줄의 이력에 메모만 남기면 그 줄에 무슨 일이 있었는지가
                     // 거꾸로 읽힌다.
-                    if let Some(msg) = &args.msg {
+                    if let Some(msg) = &msg {
                         entries.push(JournalEntry::note(&i.id, msg, &at, &by));
                     }
                     // **이미 그 칸인 줄도 넘겨받는다**(moai-0zjo) — 남이 집은 채 멈춘 줄을 되찾는 것이
@@ -252,7 +256,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 // 옮긴다. 저널을 접어 세면 저널만 못 적힌 쓰기에서 조용히 틀리므로 이 쓰기에 싣고,
                 // `idea promote` 도 같은 길이라 어느 동사로 닫든 같은 줄이 선다.
                 let was = i.move_to(to.clone(), &at, cfg);
-                entries.push(JournalEntry::status(&i.id, &was, &to, args.msg.clone(), &at, &by));
+                entries.push(JournalEntry::status(&i.id, &was, &to, msg.clone(), &at, &by));
                 // **남의 줄은 묻고 집는다**(moai-0zjo). 여기서는 막지 않는다 — 막는 자리는 훅 규칙 5
                 // 하나고, 터미널의 사람은 훅을 안 지난다. `--take` 면 같은 쓰기에서 넘겨받는다.
                 match (crate::report::owner(&me, i), args.take) {

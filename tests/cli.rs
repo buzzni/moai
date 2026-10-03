@@ -8009,6 +8009,49 @@ fn mv_says_what_is_missing() {
     assert!(ok(s.path(), &["mv", &id, "-m", "메모", "review"]).contains("todo → review"));
 }
 
+/// **`mv -m -` 는 stdin 을 읽는다**(moai-m1za) — 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의
+/// 닫는 줄을 `-` 한 글자로 적었다(moai-tl3k.wx7). 여러 줄 닫는 글(받은 것·넘긴 것)이 노트를 따로 안 붙이고
+/// 옮김의 말로 선다. **빈 stdin 은 거절하고 아무것도 안 옮긴다** — 훅 규칙 3 은 명령줄만 읽어 `-m -` 의 글을
+/// 못 보니, 빈 닫는 줄을 막을 자리가 여기 하나다.
+#[test]
+fn mv_reads_its_message_from_stdin_on_a_lone_dash() {
+    let s = init("mv-msg-stdin");
+    let id = add(s.path(), &["제목"]);
+
+    let out = from_stdin(s.path(), &["mv", &id, "review", "-m", "-"], "\n받은 것: 1·2\n넘긴 것: moai-x\n\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let j = journal(s.path());
+    assert!(
+        j.contains(r#""note":"받은 것: 1·2\n넘긴 것: moai-x""#),
+        "stdin 의 글을 앞뒤 빈 줄만 걷고 적지 않았다\n{j}"
+    );
+    assert!(!j.contains(r#""note":"-""#), "`-` 한 글자를 적었다\n{j}");
+
+    // 이미 그 칸인 줄도 적어 온 말을 버리지 않는다 — 그 갈래도 같은 글을 받는다.
+    let out = from_stdin(s.path(), &["mv", &id, "review", "-m", "-"], "다시 부른 까닭\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(journal(s.path()).contains(r#""text":"다시 부른 까닭""#), "{}", journal(s.path()));
+
+    // 빈 stdin·빈칸뿐인 stdin 은 거절한다 — 칸도 저널도 그대로다.
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+    for input in ["", " \n\n"] {
+        let out = from_stdin(s.path(), &["mv", &id, "done", "-m", "-", "--json"], input);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && err.contains(r#""code":"bad_input""#), "{input:?} → {err}");
+        assert!(err.contains("-m -"), "무엇이 비었는지 안 댄다 — {err}");
+    }
+    assert_eq!(issues(s.path()), before, "빈 stdin 으로 옮겼다");
+    assert_eq!(journal(s.path()), notes, "빈 stdin 이 저널에 남았다");
+
+    // 틀린 칸은 stdin 을 기다리기 전에 갈린다 — 같은 거절(`bad_status`)이 그대로 선다.
+    let out = moai(s.path(), &["mv", &id, "없는칸", "-m", "-", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_status""#));
+
+    // argv 에 적힌 글은 그대로다 — `-` 로 시작해도 `-` 하나가 아니면 글이다.
+    ok(s.path(), &["mv", &id, "done", "-m", "-- 넘긴 것 없음"]);
+    assert!(journal(s.path()).contains(r#""note":"-- 넘긴 것 없음""#));
+}
+
 /// `--json` 의 `code` 는 받는 쪽이 분기하는 값이다. 명령마다 다르면 계약이
 /// 아니다 — 예전에는 `show` 만 `not_found` 를 냈다.
 #[test]

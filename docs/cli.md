@@ -620,7 +620,7 @@ Arguments:
 
 Options:
   -m, --msg <text>
-          One line of note on this move (journal only)
+          A note on this move (journal only). `-` reads stdin
 
       --from <column>
           Only while still in this column (racing pickups)
