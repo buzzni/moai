@@ -34,9 +34,13 @@ fn place(ctx: &Ctx) -> R<Place> {
     // `repo.root` 로 심던 판은 워크트리에서 친 `skill install` 이 루트의 `.claude/` 를 고쳐,
     // 이 가지에서 고친 훅은 이 가지에서 한 번도 안 돌고 남의 체크아웃만 더럽혔다.
     let root = repo.here().to_path_buf();
-    let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
+    let current = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
+    // **푼 자리는 여기서 한 번 짓는다**(리뷰 moai-gu5m.ke0) — 부른 철자를 믿을지([`invoked`])와 PATH 의
+    // `moai` 가 이 파일인지([`skill::exe_name`])를 같은 값으로 가른다. `which` 도 푼 자리를 내니, 둘을
+    // 글자로 견주면 자리로 견준 것이다. `skill` 은 글만 짓는 모듈이라 파일 시스템을 거기서 안 본다.
+    let resolved = crate::path::real(&current);
     let on_path = which("moai");
-    let exe = skill::exe_name(&invoked(exe), on_path.as_deref());
+    let exe = skill::exe_name(&invoked(current, &resolved), &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let files = plant(&prefix, &root, &exe);
@@ -51,12 +55,18 @@ fn place(ctx: &Ctx) -> R<Place> {
 /// 글자로 견주는 `skill status` 는 같은 바이너리를 "훅이 부르는 것과 다르다" 고 했다.
 ///
 /// **`argv[0]` 은 같은 파일일 때만 믿는다** — 그 값은 부른 쪽 마음대로라 제 자리를 대지 못한다.
-/// [`skill::spelled`] 가 낸 철자가 푼 자리에서 `current_exe` 와 갈리면 `current_exe` 를 그대로 쓴다.
-fn invoked(current: PathBuf) -> PathBuf {
+/// [`skill::spelled`] 가 낸 철자가 푼 자리에서 `current_exe` 의 자리(`resolved`)와 갈리면 `current_exe` 를
+/// 그대로 쓴다.
+///
+/// **상대 철자는 명령을 친 자리에 붙인다**([`crate::store::invoked_dir`], 리뷰 moai-gu5m.ke0) — 커널은 그
+/// 철자를 `-C` 가 옮기기 전의 자리에서 찾았다. `main` 이 `-C` 를 따른 뒤의 자리에 붙이던 판은 없는 자리를
+/// 짚어 늘 푼 철자로 떨어졌다 — 규약이 권하는 `moai -C <dir>` 꼴에서 `/tmp/…` 가 그대로 돌아왔다. 그 자리는
+/// getcwd 라 링크가 풀려 있다 — 안 푸는 것은 `argv[0]` 이 적은 조각이다.
+fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
     let argv0 = std::env::args_os().next().map(PathBuf::from);
-    let cwd = std::env::current_dir().ok();
+    let cwd = crate::store::invoked_dir();
     match skill::spelled(argv0.as_deref(), cwd.as_deref()) {
-        Some(spelled) if crate::path::real(&spelled) == crate::path::real(&current) => spelled,
+        Some(spelled) if crate::path::real(&spelled) == resolved => spelled,
         _ => current,
     }
 }
@@ -353,11 +363,11 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             None => row(false, hook_row, &format!("{hook}  {}", say(lang, "skill.hook_unrunnable"))),
         });
         // **자리로 견준다**(moai-gu5m). `exe` 는 [`invoked`] 가 고른 부른 철자라, 같은 파일을 링크 너머의
-        // 다른 철자로 부르면 글자만 갈린다 — 그때 "다른 moai" 라고 하면 거짓이다.
-        let same = match (&hook_path, runs(&exe, on_path.as_deref())) {
-            (Some(hooked), Some(here)) => crate::path::real(hooked) == crate::path::real(&here),
-            _ => *hook == exe,
-        };
+        // 다른 철자로 부르면 글자만 갈린다 — 그때 "다른 moai" 라고 하면 거짓이다. 글자가 같으면 자리도
+        // 같고, 어느 한쪽이 안 도는 자리면 글자로만 가른다.
+        let same = *hook == exe
+            || matches!((&hook_path, runs(&exe, on_path.as_deref())),
+                (Some(there), Some(here)) if crate::path::real(there) == crate::path::real(&here));
         if !same {
             out.push(fill(say(lang, "skill.hook_is_another_moai"), &[("exe", &exe)]));
         }

@@ -17,7 +17,10 @@ const BIN: &str = env!("CARGO_BIN_EXE_moai");
 /// **머지 드라이버 쪽은 시험이 고친다.** 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나
 /// `--as` 로 건넬 때는 `BIN` 을 그대로 쓴다. `skill install` 은 다르다 — 훅에는 `argv[0]` 이 대는
 /// **부른 철자**를 적고, 그 철자가 같은 파일일 때만 믿는다(moai-gu5m). 커밋되는 `plugin.json` 에
-/// `/tmp/…` 가 적혀 루트에 diff 가 남던 자리라, 그쪽 시험은 `BIN` 과 견준다.
+/// `/tmp/…` 가 적혀 루트에 diff 가 남던 자리라, 그쪽 시험은 부른 철자와 견준다. **이 철자를 쓰는
+/// 자리가 둘 남는다**(리뷰 moai-gu5m.ke0) — `argv[0]` 을 안 믿어 `current_exe` 로 떨어진 값과 견줄
+/// 때, 그리고 같은 파일의 둘째 철자로 부를 때다. 앞의 것을 `BIN` 으로 바꾸면 링크가 없는 CI 에서는
+/// 푸르고 이 기계에서만 붉다 — moai-jq1w 가 이 자를 세운 그 덫이다.
 ///
 /// 푸는 것은 리눅스에서뿐이다. std 의 `current_exe` 는 macOS 에서 `_NSGetExecutablePath` 가
 /// 낸 철자를 풀지 않고 돌려주므로, 거기서 풀면 거꾸로 갈린다.
@@ -16361,12 +16364,19 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let c = Claude::new("skillgone-home");
     let (market, _) = installed(&s, &c, "0.0.1");
     let manifest = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1/.claude-plugin/plugin.json"));
-    // 훅에는 부른 철자가 적힌다(moai-gu5m) — 시험은 `BIN` 으로 부른다.
-    let body = std::fs::read_to_string(&manifest).unwrap().replace(BIN, "/nowhere/moai");
+    // **훅에 적힌 철자는 제품에게 묻는다**(리뷰 moai-gu5m.ke0). 훅에는 부른 철자를 `.`·`..` 만 접어
+    // 적으니(moai-gu5m) `BIN` 과 글자가 같다고 못 한다 — 상대 `CARGO_TARGET_DIR` 이면 cargo 가 `BIN` 에
+    // `..` 을 남겨, `BIN` 으로 바꾸던 판은 아무것도 안 바꾸고 붉었다.
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    let hooked = field(&json, "hook_exe");
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(&hooked, "/nowhere/moai");
     std::fs::write(&manifest, body).unwrap();
 
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
+    // 안 도는 훅과는 자리를 못 견줘 글자로 가른다 — 여기서 심으면 훅이 이 바이너리를 부르게 바뀌니
+    // 그 한 줄이 선다(리뷰 moai-gu5m.ke0, 그 갈래를 재는 시험이 없었다).
+    assert!(said.contains("훅이 부르는 것과 다르다"), "사라진 훅을 지금 부른 것과 같다고 한다\n{said}");
 
     // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 낸다(moai-j4ie). 그 줄도
     // 이제 경로를 대지만(moai-wza7), 세션·이벤트마다 한 번뿐이고(moai-f7up) 그 말을 읽는 사람이
@@ -16430,6 +16440,18 @@ fn skill_install_writes_the_spelling_it_was_called_by() {
     let mut lied = c.command(Path::new(BIN), s.path(), &plan, false);
     lied.arg0("/nowhere/moai");
     assert_eq!(exe(&mut lied), recorded_bin(), "같은 파일이 아닌 argv[0] 을 믿었다");
+    // **있는 딴 실행 파일이어도 안 믿는다**(리뷰 moai-gu5m.ke0) — 없는 자리만 재면 "있는가"·"도는가" 로
+    // 무른 견줌도 푸르고, 그 판은 훅이 엉뚱한 프로그램을 부른다.
+    let mut other = c.command(Path::new(BIN), s.path(), &plan, false);
+    other.arg0(c.bin.join("claude"));
+    assert_eq!(exe(&mut other), recorded_bin(), "있는 딴 실행 파일을 부른 철자로 믿었다");
+
+    // **상대 철자는 친 자리에 붙인다**(리뷰 moai-gu5m.ke0) — `main` 은 `-C` 를 먼저 따르지만 커널은 그
+    // 철자를 친 자리에서 찾았다. 옮긴 자리에 붙이던 판은 없는 자리를 짚어 푼 철자로 떨어졌다.
+    let mut moved =
+        c.command(Path::new(BIN), s.path(), &["-C", ".moai", "skill", "install", "--dry-run", "--json"], false);
+    moved.arg0("./via/moai");
+    assert_eq!(exe(&mut moved), real_root.join("via/moai").display().to_string(), "`-C` 로 옮긴 자리에 붙였다");
 }
 
 /// **같은 파일을 다른 철자로 불러도 "다른 moai" 라고 하지 않는다**(moai-gu5m). 훅에 부른 철자를
