@@ -74,10 +74,12 @@ column, it is running. There is no command that opens it and no new field.
 
 ## Filters
 
-A comma means "or"; the same flag twice means "and".
+A comma means "or"; the same flag twice means "and" — except `-a`, where twice
+means either one, since a row has one assignee.
 
     moai show -s todo -t bug          todo and bug
     moai show -s todo,review          todo or review
+    moai show -a raven -a joshep      raven's or joshep's
     moai show -e none                 the ones with no epic
     moai show --deferred              only what is deferred
     moai show --stale 7               stuck in the current column for more than seven days

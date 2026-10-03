@@ -327,7 +327,7 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
-    moai show -s todo -t bug               filters (comma = or, repeated flag = and)
+    moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
     moai stats                             counts: columns, flow, lead and cycle time, AI work
@@ -1061,10 +1061,12 @@ them, so where they differ the help wins.
 
 ## Filters
 
-A comma means "or"; the same flag twice means "and".
+A comma means "or"; the same flag twice means "and" — except `-a`, where twice
+means either one, since a row has one assignee.
 
     moai show -s todo -t bug          todo and bug
     moai show -s todo,review          todo or review
+    moai show -a raven -a joshep      raven's or joshep's
     moai show -e none                 the ones with no epic
     moai show --deferred              only what is deferred
     moai show --stale 7               stuck in the current column for more than seven days
