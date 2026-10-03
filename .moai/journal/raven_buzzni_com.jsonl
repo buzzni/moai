@@ -3014,3 +3014,7 @@
 {"ts":"2026-10-03T00:44:28Z","id":"moai-ggxi.4lm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T00:44:28Z","id":"moai-ggxi.xwp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in the fixes for 2, 3, 5-9, 11-14, folded the line in header() for 1 (person chose this), fixed the banner comment for 10. Handed 4 and 7 on to idea moai-jh44, outside v0.4.0. Left 15."}
 {"ts":"2026-10-03T00:44:52Z","id":"moai-ggxi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged at 5d36f1d0, both members and the review are closed. Mixed-version latest.toml edge cases are idea moai-jh44 (outside v0.4.0)."}
+{"ts":"2026-10-03T00:51:24Z","id":"moai-acfk.mzc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 보드 휠과 Ctrl-d/u/f/b 스크롤"}
+{"ts":"2026-10-03T00:51:28Z","id":"moai-acfk.mzc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T00:51:46Z","id":"moai-acfk.mzc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix 가 백그라운드에서 돈다. 돌아오면 원문을 노트로 남기고, 받은 것은 fix: 커밋으로, 넘긴 것은 id 와 함께 적는다"}
+{"ts":"2026-10-03T00:51:47Z","id":"moai-acfk.87a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 구현은 46c37f22 로 커밋했고 develop 도 받았다. 에픽 끝 리뷰(moai-acfk.mzc)가 끝나면 CHANGELOG 보드 줄을 고치고 머지한다"}
