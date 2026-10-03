@@ -160,6 +160,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
     let lang = ctx.lang();
+    // **`-a me` 의 사람도 락 밖에서 묻는다** — 같은 까닭이고, `model::actor` 는 `git` 을 두 번 띄운다.
+    // `me` 를 적었을 때만 묻는다([`super::assignee_arg`]). 모르면 아무것도 안 쓰고 멈춘다.
+    let assignee = args
+        .assignee
+        .as_deref()
+        .map(|a| super::assignee_arg(a, || model::actor(ctx.user.as_deref(), &repo.root)))
+        .transpose()
+        .map_err(|e| Fail::no_actor(&e, lang))?;
 
     let done: Edited = repo.with_write(
         || ctx.lang(),
@@ -205,11 +213,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             if let Some(d) = &args.due {
                 i.due_on = super::clearable(d);
             }
-            if let Some(a) = &args.assignee {
-                (i.assignee, i.assignee_email) = match super::clearable(a) {
-                    Some(v) => model::split_assignee(&v),
-                    None => (None, None),
-                };
+            if let Some(who) = &assignee {
+                (i.assignee, i.assignee_email) = who.clone();
             }
 
             i.normalize();

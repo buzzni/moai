@@ -9,11 +9,12 @@ use crate::style::{self, paint};
 
 /// 담당을 정한다. **`-a` 를 안 주면 만든 사람이 담당이다** — 이름 없는 줄이
 /// 쌓이는 것이 기본값이면 나중에 누가 무엇을 들고 있는지 아무도 모른다.
-/// 담당 없이 만들려면 `-a none` 이다 (`edit` 이 비우는 법과 같다).
+/// 담당 없이 만들려면 `-a none` 이고 `-a me` 는 만든 사람이다 (`edit` 과 같은 자, [`super::assignee_arg`]).
 fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>) {
-    match arg.map(super::clearable) {
-        Some(Some(v)) => model::split_assignee(&v),
-        Some(None) => (None, None),
+    match arg {
+        Some(v) => {
+            super::assignee_arg(v, || Ok::<_, std::convert::Infallible>(by.clone())).unwrap_or_else(|n| match n {})
+        }
         None => by.as_assignee(),
     }
 }

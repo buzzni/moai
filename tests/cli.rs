@@ -10068,6 +10068,35 @@ fn me_means_me_however_it_arrives() {
     }
 }
 
+/// **적을 때의 `me` 도 지금 사람이다**(moai-v4p4.c2x). `show -a me` 는 나를 고르는데 `edit -a me` 는
+/// `me` 라는 이름을 적어, 그 줄을 `ready` 와 훅 규칙 5 가 남의 것(`owner: theirs`)으로 읽었다. `add` 도
+/// 같은 자로 간다. 사람을 모르면 아무것도 안 쓰고 멈추고, `me` 가 아닌 `-a` 는 사람을 안 묻는다.
+#[test]
+fn me_is_me_when_written_too() {
+    let s = init("writeme");
+    let mine = r#""assignee":"테스터","assignee_email":"tester@example.com""#;
+    let id = add(s.path(), &["남의 것", "-a", "철수"]);
+    ok(s.path(), &["edit", &id, "-a", "me"]);
+    assert!(line_of(s.path(), &id).contains(mine), "{}", line_of(s.path(), &id));
+    let ready = ok(s.path(), &["ready", "--json"]);
+    assert!(ready.contains(&format!(r#""ready":[{{"id":"{id}""#)), "제 줄을 안 내밀었다\n{ready}");
+    assert!(ready.contains(r#""others":[]"#), "제 줄을 남의 것으로 읽었다\n{ready}");
+
+    let made = add(s.path(), &["새 것", "-a", " me "]);
+    assert!(line_of(s.path(), &made).contains(mine), "{}", line_of(s.path(), &made));
+
+    // 누군지 모르면 멈추고 아무것도 안 쓴다 — `me` 라는 이름을 적던 바로 그 자리다
+    ok(s.path(), &["edit", &id, "-a", "철수"]);
+    let before = issues(s.path());
+    let out = without_user(s.path(), &["edit", &id, "-a", "me", "--json"]);
+    assert!(!out.status.success(), "사람 없이 `me` 를 적었다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"no_actor""#), "{out:?}");
+    assert_eq!(issues(s.path()), before, "멈추고도 줄을 바꿨다");
+    // `me` 가 아니면 사람을 안 묻는다 — 남에게 맡기는 부름이 설정 없는 기계에서 넘어지면 안 된다
+    let out = without_user(s.path(), &["edit", &id, "-a", "영희"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
 /// 대량 생성도 담당을 받는다. `--from` 이 `-a` 를 통째로 흘리던 자리다 —
 /// 단건에만 붙고 계획 한 장에는 안 붙었다.
 #[test]
