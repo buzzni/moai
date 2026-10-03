@@ -2301,7 +2301,7 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
     }
     let mut lines = vec![head, fit(Line::from(body), room)];
     if h > 2 {
-        lines.push(fit(Line::from(card_foot(site, at, fields)), room));
+        lines.push(fit(Line::from(card_foot(site, at, fields, room)), room));
     }
     if unveiled {
         for s in lines.iter_mut().flat_map(|l| l.spans.iter_mut()) {
@@ -2327,7 +2327,12 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
 /// **남의 카드는 담당 자리에 흐린 `→ 이름`·`담당 없음` 을 단다**(moai-oagj.y88, 사용자 결정) — 담당 열을 안 켰어도
 /// 선다. 켰으면 그 칸이 이 낱말로 바뀌어 같은 이름이 두 번 서지 않는다. 내 카드는 칠하지 않는다. 누구 것인가는
 /// `ready` 와 한 자다([`Site::whose`]).
-fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<Span<'static>> {
+///
+/// **폭이 모자라면 태그·에픽 이름이 줄어든다**(moai-4la6.8ga, 사용자 결정) — 길이가 정해지지 않은 값은 그 둘뿐이라,
+/// 뒤에 선 담당·날짜가 긴 에픽 이름에 밀려 잘리지 않는다. 차례는 그대로다: 낱말은 여전히 담당 칸 자리에 선다.
+/// 둘 다 길면 긴 쪽부터 줄인다([`flex_cap`]). 담당·날짜만으로 `room` 이 차도 둘은 `…` 한 칸으로 남는다 — 빠지면 켠
+/// 열이 꺼진 것처럼 보인다. 그래도 넘치면 부르는 쪽의 `fit` 이 끝을 자른다.
+fn card_foot(site: &Site, at: usize, fields: super::view::Fields, room: usize) -> Vec<Span<'static>> {
     use super::view::Field;
     let whose = site.whose(at);
     // 값은 목록의 오른쪽 열과 같은 글이다([`right_cell`]) — 자가 둘이면 날짜 꼴을 고치는 날 한쪽만 바뀐다.
@@ -2342,14 +2347,35 @@ fn card_foot(site: &Site, at: usize, fields: super::view::Fields) -> Vec<Span<'s
         })
         .filter(|(f, text)| !(*f == Field::Tags && text.is_empty()))
         .collect();
+    let flex = |f: Field| matches!(f, Field::Tags | Field::Epic);
+    let gaps = 2 * parts.len().saturating_sub(1);
+    let fixed = gaps + parts.iter().filter(|(f, _)| !flex(*f)).map(|(_, t)| crate::text::width(t)).sum::<usize>();
+    let widths: Vec<usize> = parts.iter().filter(|(f, _)| flex(*f)).map(|(_, t)| crate::text::width(t)).collect();
+    let cap = flex_cap(&widths, room.saturating_sub(fixed)).max(1);
     let mut out = Vec::new();
     for (n, (f, text)) in parts.into_iter().enumerate() {
         if n > 0 {
             out.push(Span::raw("  "));
         }
+        let text = if flex(f) { clip(&text, cap) } else { text };
         out.push(Span::styled(text, if f == Field::Epic { epic_ref() } else { dim() }));
     }
     out
+}
+
+/// 폭이 `widths` 인 값들을 `budget` 안에 담는 가장 큰 상한 — 상한보다 긴 값만 그 폭으로 줄어, 긴 쪽부터 깎인다.
+/// 다 들면 가장 긴 값의 폭이고, 하나도 못 담으면 0 이다.
+fn flex_cap(widths: &[usize], budget: usize) -> usize {
+    let (mut lo, mut hi) = (0, widths.iter().copied().max().unwrap_or(0));
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if widths.iter().map(|&w| w.min(mid)).sum::<usize>() <= budget {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
 }
 
 /// 오른쪽 열 하나의 값 — 목록의 줄(`row_line`)과 카드의 발줄(`card_foot`)이 **같은 글**을 낸다(moai-9nfw). 담당·
@@ -3094,8 +3120,10 @@ fn fit(line: Line<'_>, room: usize) -> Line<'_> {
         }
         let cut = crate::text::width(&s.content) > left;
         let piece = clip(&s.content, left);
-        // 잘려서 `…` 만 남은 조각은 버린다 — 아래에서 한 번 붙인다.
-        let piece = piece.trim_end_matches('…').to_string();
+        // 잘려서 `…` 만 남은 조각은 버린다 — 아래에서 한 번 붙인다. **걷는 것은 `clip` 이 붙인 `…` 뿐이다**: 안 잘린
+        // 조각의 `…` 는 그 글이라, 걷으면 줄어 `…` 한 칸으로 선 카드 발줄의 에픽 이름(moai-4la6.8ga)이 빈 조각이 되어
+        // 여기서 멈추고 뒤의 담당까지 사라졌다.
+        let piece = if cut { piece.strip_suffix('…').unwrap_or(&piece).to_string() } else { piece };
         if piece.is_empty() {
             break;
         }
@@ -4726,6 +4754,45 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 20);
         let mine = at(&lines, "argos-0100");
         assert!(lines[mine + 2].contains("argos-0101"), "누군지 모르는데 카드를 갈랐다\n{}", lines.join("\n"));
+    }
+
+    /// **좁은 카드에서는 에픽 이름이 줄어 남의 줄 낱말에 자리를 내준다**(moai-4la6.8ga, 사용자 결정) — 차례는 그대로라
+    /// 낱말은 에픽 이름 뒤, 담당 칸 자리에 선다. 넓으면 에픽 이름은 다 선다.
+    #[test]
+    fn on_a_narrow_card_the_epic_name_gives_way_to_whose_it_is() {
+        let mut a = board_app(1);
+        a.site.issues[1].title = "긴 에픽 이름이 다 먹는다".into();
+        // 메일이 없어야 담당이 이름 하나로 짧게 선다 — 메일까지 서면 좁은 카드는 담당만으로 찬다.
+        a.site.issues[2].assignee = Some("이웃".into());
+        a.site.me = Some("레이븐 (raven@example.com)".into());
+        a.hit("SPC c e Esc");
+        let foot = |a: &mut App, w: u16| {
+            let lines = render(a, w, 14);
+            let at = lines.iter().position(|l| l.contains("> argos-0100")).unwrap_or_else(|| panic!("{lines:#?}"));
+            (lines[at + 2].clone(), lines.join("\n"))
+        };
+        let (line, text) = foot(&mut a, 44);
+        assert!(line.contains("→ 이웃"), "에픽 이름에 밀려 남의 줄 낱말이 잘렸다\n{text}");
+        assert!(line.contains("긴 에픽") && line.contains('…'), "에픽 이름이 줄지 않고 빠지거나 다 섰다\n{text}");
+        assert!(line.find("긴 에픽") < line.find("→ 이웃"), "차례가 바뀌었다 — 낱말은 담당 칸 자리다\n{text}");
+
+        let (line, text) = foot(&mut a, 200);
+        assert!(line.contains("다 먹는다  → 이웃"), "넓은데 에픽 이름이 줄었다\n{text}");
+
+        // 담당만으로 카드가 차도 에픽 이름은 `…` 로 남는다 — 빠지면 켠 열이 꺼진 것처럼 보인다.
+        a.site.issues[2].assignee_email = Some("someone.with.a.long.mail@example.com".into());
+        let (line, text) = foot(&mut a, 44);
+        assert!(line.contains("…  → 이웃"), "담당에 밀린 에픽 이름이 자취 없이 빠졌다\n{text}");
+    }
+
+    /// 상한은 긴 값부터 깎고, 다 들면 가장 긴 값의 폭이다(moai-4la6.8ga).
+    #[test]
+    fn flex_cap_trims_the_longest_first() {
+        assert_eq!(flex_cap(&[4, 20], 30), 20, "다 드는데 줄였다");
+        assert_eq!(flex_cap(&[4, 20], 14), 10, "짧은 값까지 깎았거나 덜 깎았다");
+        assert_eq!(flex_cap(&[12, 20], 14), 7);
+        assert_eq!(flex_cap(&[12, 20], 0), 0);
+        assert_eq!(flex_cap(&[], 10), 0);
     }
 
     /// **들어갈 수 있는 카드는 제목 끝에 `/` 를 단다**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이고, 제목을
