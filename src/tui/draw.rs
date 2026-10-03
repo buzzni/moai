@@ -2284,13 +2284,13 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
         body.push(Span::raw(" "));
     }
     // **들어갈 수 있는 카드는 제목 끝에 `/`**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이다. 셈을 끄거나
-    // 자식이 모두 idea 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 늘 남는다.
-    let is_dir = matches!(e, Entry::Dir { .. });
-    let slash = usize::from(is_dir);
-    let mut title = clip(&i.title, room.saturating_sub(spans_width(&body) + crate::text::width(tail) + slash));
-    if is_dir {
-        title.push('/');
-    }
+    // 자식이 모두 idea 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 남는다 — 다만
+    // `[NEW]`·가지 표시만으로 몸이 차면 제목 몫이 없어 `fit` 이 끝의 `/` 까지 자른다(리뷰 moai-4la6.ihu 5번).
+    let title = dir_title(
+        &i.title,
+        room.saturating_sub(spans_width(&body) + crate::text::width(tail)),
+        matches!(e, Entry::Dir { .. }),
+    );
     if site.spins(at) {
         body.extend(mark(shimmer(title, app.spin), in_title));
     } else {
@@ -2318,6 +2318,17 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
             Line::from(std::iter::once(lead).chain(l.spans).collect::<Vec<_>>())
         })
         .collect()
+}
+
+/// 제목을 `room` 에 맞춰 자르고, 들어갈 수 있는 줄이면 끝에 `/` 를 단다 — 목록 줄과 카드가 같은 자로 낸다.
+/// **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가 제일 먼저 잘려 나가고, 디렉터리라고
+/// 말하는 것이 달리 없다.
+fn dir_title(label: &str, room: usize, is_dir: bool) -> String {
+    let mut title = clip(label, room.saturating_sub(usize::from(is_dir)));
+    if is_dir {
+        title.push('/');
+    }
+    title
 }
 
 /// 카드의 발줄 — 켠 열의 값, 목록의 오른쪽 열과 같은 차례·같은 꼴이다([`RIGHT`]). 빈 태그는 자리를 안 지킨다:
@@ -2577,15 +2588,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
         head[glyph_at] = Span::styled(still, glyph_style(site.column(at)));
     }
     let used = crate::text::width(CURSOR) + head_w + crate::text::width(&right) + crate::text::width(tail);
-    let mut title = clip(&site.index.label(&site.issues, e, site.lang), budget.saturating_sub(used));
-    // **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가
-    // 제일 먼저 잘려 나가고, 목록에는 디렉터리라고 말하는 것이 달리 없다.
-    if is_dir {
-        if crate::text::width(&title) + 1 > budget.saturating_sub(used) {
-            title = clip(&title, budget.saturating_sub(used + 1));
-        }
-        title.push('/');
-    }
+    let title = dir_title(&site.index.label(&site.issues, e, site.lang), budget.saturating_sub(used), is_dir);
 
     let title_w = crate::text::width(&title) + crate::text::width(tail);
     let mut spans = head;
@@ -3124,8 +3127,12 @@ fn fit(line: Line<'_>, room: usize) -> Line<'_> {
         // 조각의 `…` 는 그 글이라, 걷으면 줄어 `…` 한 칸으로 선 카드 발줄의 에픽 이름(moai-4la6.8ga)이 빈 조각이 되어
         // 여기서 멈추고 뒤의 담당까지 사라졌다.
         let piece = if cut { piece.strip_suffix('…').unwrap_or(&piece).to_string() } else { piece };
+        // 빈 조각은 잘려서 빈 것일 때만 멈춘다 — 원래 빈 조각(폭 0 의 틈)에서 멈추면 같은 까닭으로 뒤가 사라진다.
         if piece.is_empty() {
-            break;
+            if cut {
+                break;
+            }
+            continue;
         }
         used += crate::text::width(&piece);
         out.push(Span::styled(piece, s.style));
@@ -3133,7 +3140,11 @@ fn fit(line: Line<'_>, room: usize) -> Line<'_> {
             break;
         }
     }
-    out.push(Span::styled("…", dim()));
+    // 남긴 조각이 제 글의 `…` 로 끝나면 하나 더 붙이지 않는다 — 이미 줄인 값(카드 발줄의 에픽 이름)이 끝 칸에 닿으면
+    // `……` 가 섰다. 그 `…` 가 잘렸다는 표시를 겸한다.
+    if !out.last().is_some_and(|s| s.content.ends_with('…')) {
+        out.push(Span::styled("…", dim()));
+    }
     Line::from(out)
 }
 
@@ -4793,6 +4804,16 @@ pub(super) mod tests {
         assert_eq!(flex_cap(&[12, 20], 14), 7);
         assert_eq!(flex_cap(&[12, 20], 0), 0);
         assert_eq!(flex_cap(&[], 10), 0);
+    }
+
+    /// `fit` 은 제 글의 `…` 로 끝난 조각 뒤에 `…` 를 또 붙이지 않고, 원래 빈 조각에서 멈추지 않는다(moai-4la6.8ga 리뷰).
+    #[test]
+    fn fit_keeps_one_ellipsis_and_walks_past_empty_spans() {
+        let text = |spans: Vec<Span<'static>>, room| -> String {
+            fit(Line::from(spans), room).spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert_eq!(text(vec![Span::raw("abc…"), Span::raw("  def")], 5), "abc…");
+        assert_eq!(text(vec![Span::raw("ab"), Span::raw(""), Span::raw("cdefgh")], 6), "abcd…");
     }
 
     /// **들어갈 수 있는 카드는 제목 끝에 `/` 를 단다**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이고, 제목을
