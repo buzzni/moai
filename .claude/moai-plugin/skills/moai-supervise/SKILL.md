@@ -529,8 +529,21 @@ worker reads in its own window in 9-1.
        <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
        (rule 3)
          moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
-       This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1. What
-       you take in goes in a separate fix: commit; what you hand on goes in a note with the issue id.
+       This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
+       **In the same breath, stand the finished members in `review`** — while the review runs
+       nobody is working on them, and `in_progress` on the board says somebody is. One id per
+       call, as in 2
+         moai -C <root> mv <member> review --from in_progress
+       `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
+       when you came back from 8) — this review does not see them, so they do not stand in it.
+       moai answers that such a member already stands in the first column and moves nothing, with
+       a non-zero code: that is the pass-over, not a lost pick-up as in 2. moai answers in the
+       screen's language (`MOAI_LANG`, or `lang` in the user config), so read what it says, not
+       the words: if it refuses `review` itself and lists the columns there are without it — in
+       English "`review` is not a column" — this repository's columns have no `review` and the step
+       does not exist here: leave the members where they stand and go on. If it answers that the
+       member already stands `review`, you came back from 8 — leave it. What you take in goes in
+       a separate fix: commit; what you hand on goes in a note with the issue id.
        Only when the worktree's hook cannot see a review issue created or picked up in the root
        and blocks you — a binary from before the hook moved the tracker to the root reads that
        worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
@@ -654,7 +667,9 @@ worker reads in its own window in 9-1.
        `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
          moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
     10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-       landed** — a worker moved them before the merge and had to undo it. Do not close the
+       landed** — a worker moved them before the merge and had to undo it. It closes a member
+       from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
+       alike. Do not close the
        members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
        the worktree still stands, the hook reads this work as a sibling worktree's and cannot
        refuse a review closed without `-m`. Close the review issue leaving what came out of it
