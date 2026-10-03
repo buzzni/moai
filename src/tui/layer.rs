@@ -3105,6 +3105,28 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
     }
 
+    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 아직 아무 카드에도 안 선
+    /// 머리줄은 머리줄만의 길을 타던 때, 펼친 프로젝트가 화면보다 길면 다음 머리줄이 안 보여 굴리기가 첫 걸음부터 멈췄다.
+    #[test]
+    fn the_overview_board_scrolls_right_after_unfolding_from_a_header() {
+        let s = Scratch::fenced("layer-board-roll");
+        let ids: Vec<String> = (1..=12).map(|k| format!("argos-{k:04}")).collect();
+        let lines: Vec<(&str, &str, &str)> = ids.iter().map(|id| (id.as_str(), "one 의 줄", "todo")).collect();
+        let one = s.project("one", &lines);
+        let two = s.project("two", &[("argos-0001", "two 의 줄", "todo")]);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.detail_open = false;
+        a.hit("l");
+        settle(&mut a);
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 펼친 머리줄에 섰다");
+        a.hit("Ctrl-d");
+        assert!(a.list.offset() > 0, "아직 칸이 없는 머리줄에서 Ctrl-d 가 보드를 안 굴렸다");
+        assert!(matches!(a.rows()[a.cursor], Row::Item(..)), "밀려난 머리줄이 보이는 카드로 안 끌려왔다");
+    }
+
     /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
     /// 사용자 결정 2026-09-19). 보기·정렬·열은 보는 사람의 것이라 화면에 하나뿐이다 — 안 걸면 같은
     /// 화면의 두 프로젝트가 한 토글에 다르게 선다. 찾는 일은 반대로 한 프로젝트의 물음이다.

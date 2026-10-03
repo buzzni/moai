@@ -23,10 +23,13 @@ does not tag — see `CONTRIBUTING.md`.
   lane and `(no milestone)` comes last; inside a milestone or an epic there is
   one lane. A card is its id, column and priority over its title, with a foot
   for the `SPC c` columns that are on. `j`/`k` move within a column, `h`/`l` to
-  the next one, a click takes a card and the wheel moves within the column under
-  the pointer. In the overview (`0`) every project stands as a header across
-  the columns, with an unfolded project's milestone lanes under it, and the
-  columns are those of every project shown; on a header `l`, `h`, `Tab` and
+  the next one, and a click takes a card. The wheel, `Ctrl-d`/`Ctrl-u` and
+  `Ctrl-f`/`Ctrl-b` scroll the board instead of moving the cursor: the cursor's
+  card stays chosen while it is on screen, one pushed off is pulled to the
+  nearest card on screen in its column, and the scrolling stops where that
+  column has none left. In the overview (`0`) every project stands as a header
+  across the columns, with an unfolded project's milestone lanes under it, and
+  the columns are those of every project shown; on a header `l`, `h`, `Tab` and
   `Enter` unfold, fold and go in as in the list.
 
 - **`SPC c e` shows the epic a row is in** — a column on the right of the list

@@ -2032,7 +2032,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     // 커서가 선 카드의 칸을 적어 둔다 — 누르기·휠로 카드에 섰어도 머리줄의 `j` 가 그 칸으로 돌아간다(`App::board_column`).
     app.note_board_column(&laid);
     // 창은 **지난 프레임이 세운 자리에 머문다**([`super::board::window`]) — `app.drawn` 은 아직 지난 프레임의 것이다
-    // (`screen` 이 이 그림 뒤에 새로 적는다). 마우스가 그 자리로 칸을 맞히므로, 머물러야 휠 밑의 칸이 안 바뀐다.
+    // (`screen` 이 이 그림 뒤에 새로 적는다).
     let was = app.drawn.columns.first().map_or(0, |&(_, c)| c);
     let win = super::board::window(laid.columns.len(), inner.width as usize, here.and_then(|p| p.column), was);
     let widths = super::board::widths(inner.width as usize, win.count);
@@ -2058,10 +2058,14 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     }
 
     app.list.fit(canvas.height as usize, laid.plan.height);
-    if let Some(p) = here {
-        // 레인의 첫 카드면 그 레인의 머리줄까지 보인다 — 머리줄 없이 선 카드는 어느 마일스톤인지 모른다.
-        let lead = usize::from(laid.plan.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
-        app.list.reveal_span(p.top - lead, p.height + lead);
+    // 커서의 카드가 안 보일 때만 굴린다 — 레인의 첫 카드면 그 레인의 머리줄까지 드러낸다([`super::board::Plan::span`]).
+    // 카드가 보이면 머리줄이 가렸어도 그대로다: 화면을 굴린 뒤 보이는 카드에 남긴 커서([`super::board::pull`])를 여기서
+    // 머리줄까지 드러내느라 굴린 화면을 되돌리지 않는다.
+    if let Some(p) = here
+        && !app.list.shows(p.top, p.height)
+        && let Some((top, h)) = laid.plan.span(app.cursor)
+    {
+        app.list.reveal_span(top, h);
     }
     let offset = app.list.offset();
     let seen = offset..offset + canvas.height as usize;
@@ -4589,6 +4593,20 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 14);
         let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
         assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
+    }
+
+    /// **고른 카드가 보이면 레인 머리줄이 가렸어도 그림이 안 굴린다**(moai-acfk 리뷰, 사용자 결정) — 머리줄까지 드러내던
+    /// 때는 화면을 한 줄 굴려 머리줄만 가려도 다음 그림이 도로 한 줄 되돌렸다. 카드가 안 보일 때는 여전히 머리줄까지다.
+    #[test]
+    fn a_visible_card_keeps_the_board_scrolled_past_its_lane_header() {
+        let mut a = board_app(12);
+        render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), 0);
+        a.list.by(1);
+        let lines = render(&mut a, 100, 14);
+        let text = lines.join("\n");
+        assert_eq!(a.list.offset(), 1, "카드가 보이는데 머리줄을 드러내느라 화면을 되돌렸다\n{text}");
+        assert!(text.contains("> argos-0100") && !text.contains("── argos-0001"), "{text}");
     }
 
     /// **이름 없는 레인에는 머리줄 글이 안 선다**(리뷰 moai-9nfw.fnb 8번) — 마일스톤을 안 쓰는 저장소에도 `(길 잃음)`

@@ -4926,7 +4926,11 @@ impl App {
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
     fn step(&mut self, m: Move, rows: &[Row]) {
         match self.focus {
-            Pane::Explorer if self.board() => self.board_step(board::Go::Move(m), rows),
+            Pane::Explorer if self.board() => match m {
+                // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 상세의 그것과 같은 걸음이다.
+                Move::HalfUp | Move::HalfDown | Move::PageUp | Move::PageDown => self.board_roll(rows, |s| s.go(m)),
+                _ => self.board_step(board::Go::Move(m), rows),
+            },
             Pane::Explorer => {
                 let at = scroll::cursor(m, self.cursor, || rows.len());
                 self.move_to(at);
@@ -4941,11 +4945,44 @@ impl App {
     /// **머리줄에 선 커서는 마지막으로 선 카드의 칸을 걷는다**(moai-oagj.vcj) — 머리줄에는 칸이 없어, `k` 로 올라온
     /// 칸을 들고 있어야 `j` 가 그 칸으로 돌아간다([`board::step`] 의 `hint`).
     fn board_step(&mut self, go: board::Go, rows: &[Row]) {
+        let (laid, hint) = self.board_hint(rows);
+        let at = board::step(&laid.plan, self.cursor, go, hint);
+        self.move_to(at);
+    }
+
+    /// 보드 한 장과 머리줄에 선 커서가 볼 칸(`hint`, [`App::board_column`]) — 키로 옮기든([`App::board_step`]) 화면을
+    /// 굴리든([`App::board_roll`]) 같은 자다. 커서가 카드에 섰으면 그 칸을 먼저 적는다.
+    fn board_hint(&mut self, rows: &[Row]) -> (Laid, Option<usize>) {
         let laid = self.laid(rows);
         self.note_board_column(&laid);
         let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
-        let at = board::step(&laid.plan, self.cursor, go, hint);
-        self.move_to(at);
+        (laid, hint)
+    }
+
+    /// 보드의 화면을 굴린다 — 휠과 반 쪽·한 쪽이다(moai-acfk, 사용자 결정 2026-10-02). 굴리는 것은 보드 통째로 하나뿐인
+    /// 굴린 자리([`App::list`])고, 커서는 [`board::pull`] 이 맞춘다: 보이는 동안은 그대로고 밀려나면 그 칸에서 보이는
+    /// 가장 가까운 카드로 끌려온다.
+    ///
+    /// **그 칸에 보이는 카드가 없으면 굴리기가 커서 카드가 화면 끝에 닿는 데서 멈춘다**(사용자 결정) — 그림이 커서를
+    /// 드러내는 자([`board::Plan::span`])로 여기서 되돌린다. 그림에 맡기면 그리기 전에 몰아 받은 휠(`cmd::tui::rolls`)이
+    /// 끝을 넘어 쌓여, 그 사이 거꾸로 굴린 칸이 넘친 만큼에 먹힌다.
+    fn board_roll(&mut self, rows: &[Row], roll: impl FnOnce(&mut scroll::Scroll)) {
+        let was = self.list.offset();
+        roll(&mut self.list);
+        // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 보이던 커서가 그대로 보인다 — 몰아 받은 휠마다 보드를 다시
+        // 펴지 않는다(리뷰).
+        if self.list.offset() == was {
+            return;
+        }
+        let (laid, hint) = self.board_hint(rows);
+        match board::pull(&laid.plan, self.cursor, hint, |top, h| self.list.shows(top, h)) {
+            Some(at) => self.move_to(at),
+            None => {
+                if let Some((top, h)) = laid.plan.span(self.cursor) {
+                    self.list.reveal_span(top, h);
+                }
+            }
+        }
     }
 
     /// 커서가 카드에 섰으면 그 칸을 [`App::board_column`] 에 적는다. **키만이 아니라 그림도 부른다**(`draw::board`, 리뷰) —
@@ -5765,6 +5802,44 @@ mod tests {
         // 키 바가 대는 칸 이름도 보드다.
         a.focus = Pane::Detail;
         assert_eq!(a.key_ctx(&rows).next_pane, say(a.site.lang, "tui.pane.board"));
+    }
+
+    /// **보드의 반 쪽·한 쪽은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — `Ctrl-d`·`Ctrl-u` 는 [`scroll::HALF`]
+    /// 줄, `Ctrl-f`·`Ctrl-b`·`PageDown`·`PageUp` 은 [`scroll::PAGE`] 줄이다. 상세의 그것과 같은 걸음이다. 고른 카드가
+    /// 보이는 동안 커서는 그대로고, 밀려나면 그 칸에서 보이는 가장 가까운 카드로 끌려온다. `j`·`k`·`G` 는 여전히
+    /// 커서를 옮긴다.
+    #[test]
+    fn on_the_board_half_and_whole_pages_scroll_the_screen() {
+        // todo 칸에 서른 장 — 카드는 두 줄이라 윗줄은 0·2·4… 다.
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.detail_open = false;
+        super::draw::tests::render(&mut a, 100, 30);
+        let (half, page) = (scroll::HALF, scroll::PAGE);
+
+        a.hit("j j j");
+        assert_eq!(on_id(&a), "argos-0004");
+        a.hit("Ctrl-d");
+        assert_eq!((a.list.offset(), on_id(&a)), (half, "argos-0004".to_string()), "Ctrl-d 가 화면을 반 쪽 안 굴렸다");
+        a.hit("Ctrl-d");
+        // 윗줄 10 부터 보인다 — 0004(6..8)가 밀려나 0006(10..12)으로 끌려온다.
+        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0006".to_string()), "밀려난 커서가 안 끌려왔다");
+        a.hit("Ctrl-f");
+        assert_eq!(
+            (a.list.offset(), on_id(&a)),
+            (2 * half + page, "argos-0011".to_string()),
+            "Ctrl-f 가 한 쪽 안 굴렸다"
+        );
+        a.hit("PageUp");
+        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0011".to_string()), "PageUp 이 한 쪽 안 굴렸다");
+        a.hit("Ctrl-u Ctrl-b");
+        assert_eq!(a.list.offset(), 0, "위로 굴리기가 첫 줄에서 안 멈췄다");
+        let seen = on_id(&a);
+        a.hit("j");
+        assert_ne!(on_id(&a), seen, "`j` 가 커서를 안 옮겼다");
+        a.hit("G");
+        assert_eq!(on_id(&a), "argos-0030", "`G` 가 그 칸의 끝으로 안 갔다");
     }
 
     /// **보드에서 한 층 나오면 나온 폴더 밑의 첫 카드에 선다**(moai-9nfw) — 보드에는 폴더 줄이 없어, 목록처럼 나온
