@@ -3352,3 +3352,11 @@
 {"ts":"2026-10-03T17:16:00Z","id":"moai-m1za.j74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-03T17:16:01Z","id":"moai-m1za.k2l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-03T17:16:03Z","id":"moai-e0qk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-97tn 쪽 idea moai-zjez 가 같은 것을 담았다 — 펼칠 때 하나로 접는다"}
+{"ts":"2026-10-03T17:16:43Z","id":"moai-h2rh.5zb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — the prompt help and a value list across src/tui/draw.rs, keys.rs and mod.rs)"}
+{"ts":"2026-10-03T17:16:43Z","id":"moai-h2rh.pjs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — the prompt help and a value list across src/tui/draw.rs, keys.rs and mod.rs)"}
+{"ts":"2026-10-03T17:16:44Z","id":"moai-h2rh.jvh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — README 와 tui 도움말의 글)"}
+{"ts":"2026-10-03T17:16:44Z","id":"moai-h2rh.koh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=264635 (xhigh — 에픽 끝 리뷰, 가장 무거운 멤버 high 에서 한 칸 위)"}
+{"ts":"2026-10-03T17:16:49Z","id":"moai-h2rh.5zb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.pjs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.jvh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.koh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·2·3·4·5·7·8·9·10·11·13·14(fix 커밋), 6 은 moai-97tn 머지 뒤 develop 을 받아 풀고 끝에서 끝까지 시험을 더했다. 넘긴 것: 12 는 idea moai-e0qk(moai-zjez 와 같은 것), 15 는 역사를 다시 쓰지 않기로 했다"}
