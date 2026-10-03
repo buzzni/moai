@@ -1052,11 +1052,13 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
     moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
-  it. --created and --done take a range from..to with either side left
-  open, or a single day. <when> is YYYY-MM-DD, a day on your own clock -
-  the time zone the screen and milestone deadlines use; the end of a range
-  takes that whole day - or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no
-  time zone moves. --done looks at rows standing in done now, at the
+  it. --created and --done take a range from..to or from~to with either
+  side left open, or a single time, which is all it spans. <when> is
+  YYYY-MM-DD, a day on your own clock - the time zone the screen and
+  milestone deadlines use; YYYY-MM-DD HH:MM, one minute on that clock;
+  or YYYY-MM-DDTHH:MM:SSZ, an instant in UTC that no time zone moves. The
+  end of a range takes all it spans too, so ~2026-10-05 23:59 runs to
+  23:59:59. --done looks at rows standing in done now, at the
   time they last got there - an epic or milestone when its last member got
   to done, or when the rest were deferred if that came later. Moving rows
   in or out and removing them leave no trace on the group: closed that way
@@ -1067,6 +1069,18 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   columns you want) or --type; --deferred keeps only what is deferred, and
   no flag leaves deferred rows out. A lone instant given to --created or
   --done is that one second, not a day.
+
+  --filter takes each filter as item=value, one per flag, and adds four
+  time items named after the --json fields: created_at, updated_at,
+  started_at and done_at. Each reads the row's own field - a group's too,
+  never its members' - in the forms above, and a row without that field
+  is unknown and falls in no range. done_at stays when a row is reopened,
+  so add status=done for what is closed now; done= keeps the meaning of
+  --done. updated_at= with a single day is that day, where since= runs on
+  from it. In the explorer (SPC f) a value right after = may be quoted.
+
+    moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
+    moai show -a raven -a joshep --filter started_at=2026-10-01~
 
   --since keys on each row's own stamp. It misses a removed row (`moai rm`
   leaves no row - --removed below gives those), a note (`moai note` writes
@@ -1353,7 +1367,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Vec<String>,
 
-    /// That assignee (`none` and `me` too)
+    /// That assignee (repeated = or)
     #[arg(short, long, value_name = "who|none|me")]
     pub assignee: Vec<String>,
 
