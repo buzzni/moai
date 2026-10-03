@@ -2091,11 +2091,11 @@ Options:
   does nothing. The whole board scrolls as one; the column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
-  the cursor on it. The wheel, Ctrl-d and Ctrl-u, and Ctrl-f and Ctrl-b
-  scroll the board instead of moving the cursor: the cursor's card stays
-  chosen while it is on screen, and one pushed off is pulled to the nearest
-  card on screen in its column. When its column has none left on screen, the
-  scrolling stops there. In the overview (0) every project stands as a header
+  the cursor on it. The wheel, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, and
+  PageDown and PageUp scroll the board, not the cursor: the chosen card and
+  the detail stay put even once the card is off screen, and the board scrolls
+  to its end. The next cursor key moves from that card and scrolls back to
+  it. In the overview (0) every project stands as a header
   across the columns, the same line the list gives it, and an unfolded project
   has its milestone lanes under it; the columns are those of every project
   shown, together. The cursor stands on a header too — k from the project's

@@ -1271,6 +1271,9 @@ impl App {
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
     fn leave_project(&mut self, park_at: Option<PathBuf>) {
+        // 굴려 떼어 둔 보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰, [`App::adrift`]) — 두 프로젝트가 같은
+        // prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 카드로 읽혀, 화면 밖에 선 채다.
+        self.adrift = None;
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
@@ -3111,8 +3114,9 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
     }
 
-    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 아직 아무 카드에도 안 선
-    /// 머리줄은 머리줄만의 길을 타던 때, 펼친 프로젝트가 화면보다 길면 다음 머리줄이 안 보여 굴리기가 첫 걸음부터 멈췄다.
+    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 밀려난 커서를 끌어오던
+    /// 때(moai-acfk), 아직 아무 카드에도 안 선 머리줄은 머리줄만의 길을 타 펼친 프로젝트가 화면보다 길면 다음 머리줄이
+    /// 안 보여 굴리기가 첫 걸음부터 멈췄다. 이제 굴리기는 화면만 굴리고 커서는 머리줄에 그대로다(moai-j0jf).
     #[test]
     fn the_overview_board_scrolls_right_after_unfolding_from_a_header() {
         let s = Scratch::fenced("layer-board-roll");
@@ -3130,7 +3134,51 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 펼친 머리줄에 섰다");
         a.hit("Ctrl-d");
         assert!(a.list.offset() > 0, "아직 칸이 없는 머리줄에서 Ctrl-d 가 보드를 안 굴렸다");
-        assert!(matches!(a.rows()[a.cursor], Row::Item(..)), "밀려난 머리줄이 보이는 카드로 안 끌려왔다");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "굴린 화면이 머리줄의 커서를 끌어 옮겼다");
+        let rolled = a.list.offset();
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), rolled, "그림이 화면 밖의 머리줄을 드러내느라 굴린 화면을 되돌렸다");
+        // 머리줄의 `l` 은 그 줄의 커서 키다(moai-j0jf 리뷰) — 이미 펼쳐 아무것도 안 바뀌어도 화면을 머리줄로 되돌린다.
+        // 남기면 화면 밖의 머리줄이 펴지고 접혀도 보이는 화면은 그대로라 키가 죽은 것처럼 보인다.
+        a.hit("l");
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), 0, "머리줄의 `l` 이 화면 밖의 머리줄로 화면을 안 되돌렸다");
+    }
+
+    /// **굴린 보드에서 옆 프로젝트로 건너가면 커서의 카드를 드러낸다**(moai-j0jf 리뷰) — 굴려 떼어 둔 화면은 떠난
+    /// 프로젝트의 것이다. 두 프로젝트가 같은 prefix 를 쓰면 건너간 프로젝트의 첫 카드 `argos-0001` 이 떼어 둔 그 카드와
+    /// 정체가 같아, 남기면 들고 온 굴린 자리에서 그 카드가 화면 밖에 선 채다.
+    #[test]
+    fn crossing_to_a_twin_project_shows_the_card_it_lands_on() {
+        let s = Scratch::fenced("layer-board-adrift");
+        let ids: Vec<String> = (1..=30).map(|k| format!("argos-{k:04}")).collect();
+        let one = s.project("one", &ids.iter().map(|id| (id.as_str(), "one 의 줄", "todo")).collect::<Vec<_>>());
+        let two = s.project("two", &ids.iter().map(|id| (id.as_str(), "two 의 줄", "todo")).collect::<Vec<_>>());
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.detail_open = false;
+        let draw = |a: &mut App| super::super::draw::tests::render(a, 100, 30);
+        let shown = |a: &App| {
+            let card = a.laid(&a.rows()).plan.cards[a.cursor];
+            a.list.shows(card.top, card.height)
+        };
+        let one_at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.enter_project(one_at);
+        draw(&mut a);
+        a.hit("PageDown PageDown");
+        draw(&mut a);
+        let on = |a: &App| match &a.rows()[a.cursor] {
+            Row::Item(seat, e, _) => e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.id.clone()),
+            _ => None,
+        };
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"), "시험의 전제 — 굴려도 커서는 첫 카드다");
+        assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다");
+        let two_at = a.layer.as_ref().unwrap().position(&two).expect("two 가 층에 있다");
+        a.enter_project(two_at);
+        assert_eq!(on(&a).as_deref(), Some("argos-0001"), "시험의 전제 — 건너간 프로젝트의 같은 id 에 섰다");
+        draw(&mut a);
+        assert!(shown(&a), "건너간 프로젝트의 보드가 커서의 카드를 화면 밖에 두었다 — {}", a.list.offset());
     }
 
     /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,
