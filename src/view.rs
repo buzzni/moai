@@ -1425,14 +1425,23 @@ pub fn prime(
     out
 }
 
-/// 트래커를 못 읽은 자리의 [`prime`]. **머리글이 한 자리에만 있다** — `cmd/prime.rs` 가 같은
+/// 트래커가 없거나 못 연 자리의 [`prime`]. **머리글이 한 자리에만 있다** — `cmd/prime.rs` 가 같은
 /// `# 제목` 을 손으로 한 벌 더 짓던 판은 이 함수를 고쳐도 그쪽이 옛 모양으로 남았다.
+///
+/// **없는 것과 못 연 것을 가른다**(moai-yivo.6je) — `refused` 가 못 연 까닭이다. 둘 다 "`.moai` 가 없다,
+/// `moai init` 이 심는다" 로 대던 판은 링크나 깨진 설정 하나로 멈춘 저장소에서 세션을 여는 에이전트에게
+/// `init` 을 시켰고, `init` 은 다 괜찮다고 답했다. 까닭은 **이 판에 싣는다** — 세션 시작 훅은 stdout 만
+/// 맥락에 싣는다. 한 줄로 접는다: 남이 커밋한 링크 끝과 설정의 글이 든 자리라, 줄이 새면 이 판의 머리글로 선다.
 ///
 /// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
 /// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
-pub fn prime_no_repo(lang: Lang) -> Vec<String> {
+pub fn prime_bare(lang: Lang, refused: Option<&str>) -> Vec<String> {
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
-    out.push(say(lang, "prime.no_repo").to_string());
+    out.push(match refused {
+        None => say(lang, "prime.no_repo").to_string(),
+        // 끝의 마침표는 걷는다 — 말묶음의 글이 `{why}.` 로 이어 붙이므로, 마침표로 끝나는 거절이 `..` 로 선다.
+        Some(why) => fill(say(lang, "prime.refused"), &[("why", one_line(why).trim_end().trim_end_matches('.'))]),
+    });
     out.push(String::new());
     out.push(format!("## {}", say(lang, "prime.closing")));
     out.push(String::new());

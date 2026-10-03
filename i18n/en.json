@@ -591,6 +591,7 @@
   "prime.cmd_done": "close it",
   "prime.cmd_idea": "park what is not for now",
   "prime.no_repo": "No `.moai` here. `moai init` starts one",
+  "prime.refused": "Could not read the tracker here — {why}. `moai init` will not fix this: fix what that names, then run `moai prime` again",
   "warn.unreadable_more": "  … {n} more",
   "warn.unreadable_rm": "  a line not worth keeping (a broken twin, junk) goes with `moai rm --line <n>` — a row a newer moai wrote reads again after upgrading, so keep that one",
   "init.block_current": "AGENTS.md block: current — the same text this binary would write",

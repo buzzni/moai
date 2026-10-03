@@ -5181,6 +5181,59 @@ fn prime_never_fails_where_there_is_no_tracker() {
     // **두 표면이 같은 것을 낸다.** 사람 쪽만 닫기 전 목록과 명령을 빼면, 훅에 건 쪽이
     // 새 체크아웃에서 규칙 없는 판을 받고 `--json` 쪽은 받는다 — 어느 것이 참인지 못 가린다.
     assert!(said.contains("moai idea add"), "사람 쪽에만 명령이 빠졌다\n{said}");
+    let json = ok(s.path(), &["prime", "--json"]);
+    assert!(json.contains("\"no_tracker\":true") && !json.contains("tracker_error"), "{json}");
+}
+
+/// **없는 트래커와 못 연 트래커를 가른다**(moai-yivo.6je). 밖을 가리키는 스냅샷 링크나 깨진 설정이면 다른
+/// 명령은 거기서 멈추는데, `prime` 은 그것을 "`.moai` 가 없다, `moai init` 이 심는다" 와 `no_tracker:true`
+/// 로 냈다 — 세션을 여는 에이전트가 `init` 을 불렀고, `init` 은 다 괜찮다고 답했다. 종료 코드는 그대로 0 이고,
+/// 까닭은 **판이 댄다** — 세션 시작 훅은 stdout 만 맥락에 싣는다.
+#[test]
+fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
+    let s = init("primerefused");
+    let away = Scratch::new("primerefused-away");
+    let elsewhere = away.path().join("issues.jsonl");
+    std::fs::write(&elsewhere, "").unwrap();
+    let snapshot = s.path().join(".moai/issues.jsonl");
+    std::fs::remove_file(&snapshot).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &snapshot).unwrap();
+    let inside = moai(s.path(), &["status", "--json"]);
+    assert!(String::from_utf8_lossy(&inside.stderr).contains("\"code\":\"broken\""), "시험의 전제\n{}", text(&inside));
+
+    let out = moai(s.path(), &["prime"]);
+    assert!(out.status.success(), "못 연 트래커에 실패했다\n{}", text(&out));
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        said.contains("여기 트래커를 못 읽었다 — ") && said.contains("issues.jsonl"),
+        "까닭을 판에 안 실었다\n{said}"
+    );
+    assert!(!said.contains("`.moai` 가 없다"), "못 연 트래커를 없는 것으로 읽었다\n{said}");
+    assert!(said.contains("moai idea add"), "닫기 전 목록과 명령이 빠졌다\n{said}");
+    // 말은 한 번 — 판이 대는 까닭을 stderr 에 또 내지 않는다.
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("issues.jsonl"), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let out = moai(s.path(), &["prime", "--json"]);
+    assert!(out.status.success(), "--json 이 못 연 트래커에 실패했다\n{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    assert!(json.contains("\"tracker_error\":{\"code\":\"broken\",\"said\":\""), "{json}");
+    assert!(!json.contains("no_tracker"), "못 연 트래커를 없는 것으로 냈다 — {json}");
+
+    // 깨진 설정도 못 연 것이다 — 코드는 그 저장소의 다른 명령이 내는 그것이다.
+    std::fs::remove_file(&snapshot).unwrap();
+    std::fs::write(&snapshot, "").unwrap();
+    std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let inside = moai(s.path(), &["status", "--json"]);
+    let refusal = String::from_utf8_lossy(&inside.stderr).to_string();
+    let at = refusal.find("\"code\":\"").expect("거절에 코드가 없다") + "\"code\":\"".len();
+    let code = &refusal[at..at + refusal[at..].find('"').unwrap()];
+    let json = ok(s.path(), &["prime", "--json"]);
+    assert!(
+        json.contains(&format!("\"tracker_error\":{{\"code\":\"{code}\",\"said\":\"")),
+        "{code} 가 아니다 — {json}"
+    );
+    assert!(!json.contains("no_tracker"), "{json}");
 }
 
 /// **깨진 트래커에서도 0 이다**(moai-5ok8). 못 읽는 줄 하나에 `?` 로 넘어지면, 이것을 세션
