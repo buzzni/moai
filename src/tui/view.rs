@@ -6,19 +6,22 @@
 //! 사실(묶음이면 멤버에서 읽은 칸, 물려받았든 미뤘는가)도 든 쪽이 재서 넘긴다 — 여기서 이슈를
 //! 풀어 칸을 다시 읽으면 목록의 글리프와 숨김이 다른 칸을 본다.
 
-/// 칸마다 보이는가, 미룬 것을 보이는가.
+/// 칸마다 보이는가, 미룬 것을 보이는가, 담아 둔 생각(idea)을 보이는가.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct View {
     /// 숨긴 칸의 이름. **보인 쪽이 아니라 숨긴 쪽을 든다** — 설정에 칸이 새로 생기면 저절로
     /// 보인다. 보인 쪽을 들면 새 칸의 줄이 이유 없이 사라진다.
     pub hidden: Vec<String>,
     pub hide_deferred: bool,
+    /// idea 를 숨긴다 — `SPC v i`(moai-oagj.bjr). **칸이 아니라 종류(`kind`)의 축이다**: 미룸이 `deferred_at` 축인
+    /// 것과 같은 결이라 칸 이름 목록(`hidden`)에 섞지 않는다. 보드의 idea 칸도 목록의 idea 줄도 이 하나로 숨는다.
+    pub hide_ideas: bool,
 }
 
 impl View {
     /// 칸 하나를 숨긴 채로.
     pub fn hiding(column: &str) -> View {
-        View { hidden: vec![column.to_string()], hide_deferred: false }
+        View { hidden: vec![column.to_string()], ..View::default() }
     }
 
     pub fn hides(&self, column: &str) -> bool {
@@ -34,14 +37,15 @@ impl View {
         }
     }
 
-    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `known` 은 이 프로젝트의 칸이다.
+    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `idea` 는 그 줄이 담아 둔 생각인가,
+    /// `known` 은 이 프로젝트의 칸이다.
     ///
     /// **숨김은 이 프로젝트에 있는 칸에만 건다**(moai-2kyl 단계 리뷰) — 뱃지([`View::badge`])와 같은 자다.
     /// 보기는 사람의 설정이라 다른 프로젝트의 칸 이름을 들고 다니는데, 그 이름이 여기서 줄을 숨기면 뱃지도
     /// 번호 토글도 없어 줄이 말없이 사라진다. 설정에서 칸 이름을 바꿔 옛 칸에 남은 줄도 그렇다.
-    pub fn shows(&self, column: &str, deferred: bool, known: &[String]) -> bool {
+    pub fn shows(&self, column: &str, deferred: bool, idea: bool, known: &[String]) -> bool {
         let hidden = self.hides(column) && known.iter().any(|k| k == column);
-        !hidden && !(deferred && self.hide_deferred)
+        !hidden && !(deferred && self.hide_deferred) && !(idea && self.hide_ideas)
     }
 
     /// 모두 보인다(`SPC v a`). **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
@@ -50,9 +54,10 @@ impl View {
     pub fn show_all(&mut self, known: &[String]) {
         self.hidden.retain(|h| !known.contains(h));
         self.hide_deferred = false;
+        self.hide_ideas = false;
     }
 
-    /// 경로 줄에 댈 한 마디 — `done·미룸 숨김`. 숨긴 것이 없으면 없다.
+    /// 경로 줄에 댈 한 마디 — `done·미룸·idea 숨김`. 숨긴 것이 없으면 없다.
     ///
     /// **이 프로젝트의 칸(`known`)만 댄다**(moai-2bzp). 보기는 사람의 설정이라 프로젝트를 옮겨도
     /// 이어지는데, 다른 프로젝트에만 있는 칸 이름까지 대면 여기서는 번호 토글이 없어 걷을 길이 없다.
@@ -62,6 +67,9 @@ impl View {
         let mut names: Vec<&str> = self.hidden.iter().filter(|h| known.contains(h)).map(String::as_str).collect();
         if self.hide_deferred {
             names.push(crate::i18n::say(lang, "tui.act.deferred"));
+        }
+        if self.hide_ideas {
+            names.push(crate::i18n::say(lang, "tui.board.idea"));
         }
         (!names.is_empty())
             .then(|| crate::i18n::fill(crate::i18n::say(lang, "tui.badge.hidden"), &[("names", &names.join("·"))]))
@@ -136,6 +144,40 @@ impl DetailAt {
     }
 }
 
+/// 목록을 **어떻게 세우나** — 줄로(`List`) 칸반 보드로(`Board`)(moai-9nfw, 사용자 결정 2026-10-02).
+///
+/// **새 창이 아니라 목록의 배치다.** 커서·거름망·보기·검색·상세는 둘이 한 벌이고, 이것은 그 줄이 화면
+/// 어디에 서는가만 가른다(`board`). 상세의 자리([`DetailAt`])처럼 보는 사람의 것이라 설정에 남는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layout {
+    #[default]
+    List,
+    Board,
+}
+
+impl Layout {
+    /// 다른 쪽 — `SPC v b` 가 오간다.
+    pub fn flip(self) -> Layout {
+        match self {
+            Layout::List => Layout::Board,
+            Layout::Board => Layout::List,
+        }
+    }
+
+    /// 설정 파일에 적는 이름 — 화면 낱말과 따로다([`Field::name`] 과 같은 까닭).
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::List => "list",
+            Layout::Board => "board",
+        }
+    }
+
+    /// 모르는 이름은 `None` — 읽는 쪽이 목록으로 세운다. **읽기는 관대하다.**
+    pub fn named(name: &str) -> Option<Layout> {
+        [Layout::List, Layout::Board].into_iter().find(|l| l.name() == name)
+    }
+}
+
 /// 목록 줄에 붙일 수 있는 열(moai-g7p8). 제목과 칸 글리프는 늘 선다 — 끄면 줄이 무엇인지 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
@@ -152,6 +194,9 @@ pub enum Field {
     Names,
     /// 제목 앞의 `⎇ <가지>` — 그 이슈를 이름에 단 옆 가지(moai-nxt4).
     Branch,
+    /// 그 줄이 선 에픽의 이름(moai-9nfw). 보드에서 **에픽은 카드가 아니라** 카드의 발줄에 이름으로 선다(사용자
+    /// 결정 2026-10-02) — 목록의 오른쪽 열과 같은 자리라 `SPC c e` 하나로 둘이 함께 켜진다. 처음에는 꺼져 있다.
+    Epic,
 }
 
 impl Field {
@@ -170,16 +215,21 @@ impl Field {
             // `SPC v w`(`keys::Toggle::Worktree`)가 이미 "워크트리" 다 — 같은 낱말을 두 줄에
             // 세우면 메뉴에서 어느 쪽이 겹쳐 보기고 어느 쪽이 줄의 표시인지 못 가른다.
             Field::Branch => say(lang, "tui.field.branch"),
+            Field::Epic => say(lang, "tui.field.epic"),
         }
     }
 
     /// 좁을 때 **걷는 차례** — 작을수록 먼저 걷힌다(사람의 결정: 날짜 → 담당 → 태그). id·우선순위·
     /// 셈은 원래 목록 줄에 있던 것이라 이 차례로 걷지 않는다 — 켜 두면 제목 몫을 줄여서라도 선다.
+    ///
+    /// **에픽은 날짜 다음이다**(moai-9nfw) — 열 가운데 가장 넓고, 상세 칸이 늘 `에픽` 줄로 그 이름을 대므로 걷혀도
+    /// 잃는 것이 적다. 담당·태그 앞의 차례(사람의 결정)는 그대로다.
     pub fn drop_rank(self) -> Option<u8> {
         match self {
             Field::Created | Field::Updated => Some(0),
-            Field::Assignee => Some(1),
-            Field::Tags => Some(2),
+            Field::Epic => Some(1),
+            Field::Assignee => Some(2),
+            Field::Tags => Some(3),
             Field::Id | Field::Priority | Field::Tally | Field::Names | Field::Branch => None,
         }
     }
@@ -191,7 +241,7 @@ impl Field {
     /// 이 바이너리가 아는 열 전부 — 자라는 목록이다. **열을 더하는 사람이 고치는 것은 여기뿐이다**:
     /// 밑의 [`BEFORE_KNOWN`](Field::BEFORE_KNOWN)·[`EMPTY_KNOWN`](Field::EMPTY_KNOWN) 은 옛 설정 파일이
     /// 무엇을 뜻했는지를 적어 둔 기록이라, 거기 더하면 이미 적힌 설정의 뜻이 그날 바뀐다(moai-4gy5).
-    pub const ALL: [Field; 9] = [
+    pub const ALL: [Field; 10] = [
         Field::Id,
         Field::Priority,
         Field::Assignee,
@@ -201,6 +251,7 @@ impl Field {
         Field::Tags,
         Field::Names,
         Field::Branch,
+        Field::Epic,
     ];
 
     /// 설정 파일에 적는 이름(moai-2bzp). 화면의 낱말([`Field::word`])과 따로 둔다 — 낱말을 다듬은 날
@@ -216,6 +267,7 @@ impl Field {
             Field::Tags => "tags",
             Field::Names => "names",
             Field::Branch => "branch",
+            Field::Epic => "epic",
         }
     }
 
@@ -418,7 +470,8 @@ mod tests {
                 | Field::Tally
                 | Field::Tags
                 | Field::Names
-                | Field::Branch => true,
+                | Field::Branch
+                | Field::Epic => true,
             };
             assert!(in_all);
         }
@@ -427,7 +480,7 @@ mod tests {
         // 거기 새 열을 더하면 이미 적힌 설정의 뜻이 그날 바뀐다.
         assert_eq!(
             Field::ALL.len(),
-            9,
+            10,
             "열을 더했으면 ALL 과 이 시험을 함께 고친다 — EMPTY_KNOWN 과 BEFORE_KNOWN 은 그대로 둔다(moai-4gy5)"
         );
     }
@@ -440,8 +493,9 @@ mod tests {
     #[test]
     fn a_hidden_column_comes_back_when_toggled_again() {
         let mut v = View::hiding("done");
-        assert!(!v.shows("done", false, &here()));
-        assert!(v.shows("todo", true, &here()), "미룬 것은 처음에 보인다");
+        assert!(!v.shows("done", false, false, &here()));
+        assert!(v.shows("todo", true, false, &here()), "미룬 것은 처음에 보인다");
+        assert!(v.shows("todo", false, true, &here()), "idea 는 처음에 보인다");
         v.toggle("done");
         assert_eq!(v, View::default());
         v.toggle("done");
@@ -451,13 +505,25 @@ mod tests {
     #[test]
     fn deferred_hides_on_its_own_axis() {
         let v = View { hide_deferred: true, ..View::default() };
-        assert!(!v.shows("todo", true, &here()));
-        assert!(v.shows("todo", false, &here()), "미룸을 숨겨도 안 미룬 칸은 그대로다");
+        assert!(!v.shows("todo", true, false, &here()));
+        assert!(v.shows("todo", false, false, &here()), "미룸을 숨겨도 안 미룬 칸은 그대로다");
+    }
+
+    /// **idea 는 제 축으로 숨는다**(moai-oagj.bjr) — 칸 이름이 아니라 종류라, 같은 `todo` 칸의 일은 그대로 선다.
+    /// 모두 보이기(`SPC v a`)가 함께 걷는다.
+    #[test]
+    fn ideas_hide_on_their_own_axis() {
+        let mut v = View { hide_ideas: true, ..View::default() };
+        assert!(!v.shows("todo", false, true, &here()));
+        assert!(v.shows("todo", false, false, &here()), "idea 를 숨겼는데 같은 칸의 일이 숨었다");
+        assert!(!v.shows("todo", true, true, &here()), "미룬 idea 도 idea 다");
+        v.show_all(&here());
+        assert!(v.shows("todo", false, true, &here()), "모두 보이기가 idea 를 안 걷었다");
     }
 
     #[test]
     fn a_column_the_config_adds_later_stays_visible() {
-        assert!(View::hiding("done").shows("blocked", false, &here()));
+        assert!(View::hiding("done").shows("blocked", false, false, &here()));
     }
 
     /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름은 여기서 줄을
@@ -465,11 +531,11 @@ mod tests {
     #[test]
     fn a_name_this_project_lacks_neither_hides_nor_is_cleared() {
         let lacks: Vec<String> = ["todo", "done"].map(String::from).to_vec();
-        let mut v = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: true };
-        assert!(v.shows("blocked", false, &lacks), "이 프로젝트에 없는 칸 이름이 줄을 숨겼다");
-        assert!(!v.shows("done", false, &lacks));
+        let mut v = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: true, hide_ideas: true };
+        assert!(v.shows("blocked", false, false, &lacks), "이 프로젝트에 없는 칸 이름이 줄을 숨겼다");
+        assert!(!v.shows("done", false, false, &lacks));
         v.show_all(&lacks);
-        assert_eq!(v, View { hidden: vec!["blocked".into()], hide_deferred: false });
+        assert_eq!(v, View { hidden: vec!["blocked".into()], ..View::default() });
     }
 
     #[test]
@@ -477,12 +543,24 @@ mod tests {
         let known: Vec<String> = ["todo", "review", "done"].map(String::from).to_vec();
         assert_eq!(View::default().badge(&known, crate::i18n::Lang::Ko), None);
         assert_eq!(View::hiding("done").badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
-        let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true };
+        let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true, ..View::default() };
         assert_eq!(v.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸 숨김"));
+        let v = View { hide_ideas: true, ..v };
+        assert_eq!(v.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸·idea 숨김"));
         // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
-        let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], hide_deferred: false };
+        let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], ..View::default() };
         assert_eq!(elsewhere.badge(&known, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         assert_eq!(View::hiding("blocked").badge(&known, crate::i18n::Lang::Ko), None);
+    }
+
+    #[test]
+    fn layout_names_round_trip_and_flip() {
+        for l in [Layout::List, Layout::Board] {
+            assert_eq!(Layout::named(l.name()), Some(l));
+            assert_eq!(l.flip().flip(), l);
+        }
+        assert_eq!(Layout::default(), Layout::List, "처음에는 목록이다");
+        assert_eq!(Layout::named("보드"), None, "화면 낱말을 설정 이름으로 받았다");
     }
 
     #[test]

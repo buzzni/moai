@@ -987,7 +987,13 @@ impl Me {
     /// 푼 사람 하나로 짓는다. 담당 칸에 적히는 것과 같은 `이름 (메일)` 한 줄로 든다 — `-a me` 가
     /// 그 줄로 풀리는 것과 같은 자리다(`cmd::resolve_me`).
     pub fn of(a: &crate::model::Actor) -> Me {
-        Me(Sel::Is(crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full)))
+        Me::label(&crate::model::label(&a.name, Some(&a.email), crate::config::Naming::Full))
+    }
+
+    /// 이미 푼 사람의 한 줄(`이름 (메일)`)로 짓는다 — [`Me::of`] 가 짓는 바로 그 글이다. 탐색기는 사람을 읽는
+    /// 스레드에서 그 꼴로 풀어 든다(`tui::Site::me`, moai-oagj.y88).
+    pub fn label(label: &str) -> Me {
+        Me(Sel::Is(label.to_string()))
     }
 
     /// 이 줄의 담당이 나인가.

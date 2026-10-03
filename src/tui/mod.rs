@@ -3,6 +3,7 @@
 //! 상태([`App`])와 그림([`draw`])을 나눈다. 상태 전이는 터미널 없이 시험되고,
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
+pub mod board;
 pub mod draw;
 pub mod edit;
 pub mod form;
@@ -68,6 +69,32 @@ pub enum Seat {
     Here,
     /// 한눈 보기의 `layer.places[n]` 이 든 프로젝트.
     Place(usize),
+}
+
+/// 보드 한 장([`App::laid`]) — 칸, 레인, 그리고 줄마다 선 자리.
+pub struct Laid {
+    pub columns: Vec<board::Column>,
+    pub lanes: Vec<LaneOf>,
+    pub plan: board::Plan,
+}
+
+/// 보드의 레인 하나가 무엇인가.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneOf {
+    /// 한눈 보기의 프로젝트 머리줄 — `layer.places` 의 첨자다(moai-oagj.vcj). 칸을 가로지르고 커서가 선다.
+    Project(usize),
+    /// 한 프로젝트의 마일스톤·바구니. `None` 은 마일스톤 없는 저장소나 폴더 안의 하나뿐인 레인이다.
+    Seg(Seat, Option<Seg>),
+}
+
+impl LaneOf {
+    /// 이름 있는 레인의 마디 — 레인 머리줄이 그 이름을 댄다.
+    pub fn seg(&self) -> Option<(Seat, &Seg)> {
+        match self {
+            LaneOf::Seg(seat, Some(seg)) => Some((*seat, seg)),
+            _ => None,
+        }
+    }
 }
 
 /// 커서가 선 줄의 **정체**. 첨자(`Entry::at`)와 줄 번호는 다시 읽으면 바뀐다 —
@@ -287,9 +314,11 @@ impl Pane {
         }
     }
 
-    /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다.
-    pub fn word(self, lang: crate::i18n::Lang) -> &'static str {
+    /// 칸의 이름. 키 바가 칸 옮기는 키가 **어디로 가는지** 댄다. 목록 칸은 보드로 세웠으면 `보드` 다
+    /// (moai-9nfw) — 화면에 선 것과 다른 이름을 대면 그 키가 어디로 가는지 못 읽는다.
+    pub fn word(self, lang: crate::i18n::Lang, layout: view::Layout) -> &'static str {
         match self {
+            Pane::Explorer if layout == view::Layout::Board => crate::i18n::say(lang, "tui.pane.board"),
             Pane::Explorer => crate::i18n::say(lang, "tui.pane.list"),
             Pane::Detail => crate::i18n::say(lang, "tui.pane.detail"),
         }
@@ -1207,6 +1236,17 @@ pub struct App {
     /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
     /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
     pub detail_at: view::DetailAt,
+    /// 목록을 줄로 세우나 칸반 보드로 세우나 — `SPC v b`(moai-9nfw). **새 창이 아니라 배치다**: 커서·거름망·
+    /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
+    /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
+    pub layout: view::Layout,
+    /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
+    /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
+    ///
+    /// **첨자가 아니라 칸 그 자체를 든다**(리뷰) — 보드의 칸은 펼친 프로젝트와 보기 토글을 따라 다시 서서, 첨자로 들면
+    /// `SPC v i` 한 번에 옆 칸을 가리킨다. 아직 아무 카드에도 안 섰으면 `None` 이고, 그때 머리줄의 `j` 는 가장 가까운
+    /// 카드다 — 처음값 0 은 idea 칸이라 맨 아래 레인의 idea 로 내려갔다. 적는 자는 [`App::note_board_column`] 하나다.
+    board_column: Option<board::Column>,
     /// 마우스를 잡는가(moai-irrj.9xq). **처음에는 잡는다**(사용자 결정 2026-10-01) — `SPC o m` 이 놓고
     /// 잡으며 설정에 남는다. 터미널에 그 글을 내는 것은 루프다(`cmd::tui`): 여기는 원하는 값만 든다.
     /// 이름이 `mouse` 가 아닌 것은 사건을 받는 [`App::mouse`] 와 가르려서다 — 같은 이름이면 문서의 고리가 말없이
@@ -1439,6 +1479,16 @@ impl Site {
         self.read_of(i).unwrap_or(i.status.as_str())
     }
 
+    /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
+    /// `(길 잃음)`)고, 폴더 안이나 마일스톤을 안 쓰는 저장소에서는 레인이 하나라 `None` 이다. 자리는 목록과 같은
+    /// [`crate::nav::Index::home_of`] 에서 읽는다 — 레인을 따로 재면 보드와 목록이 한 줄을 다른 마일스톤에 세운다.
+    pub fn lane(&self, at: usize) -> Option<&Seg> {
+        if !self.path.is_empty() {
+            return None;
+        }
+        self.index.home_of(at).first().filter(|s| matches!(s, Seg::Milestone(_) | Seg::Lost))
+    }
+
     /// 그 줄이 **입는** 읽은 칸의 셈([`crate::report::Stand`]) — 묶음이 아니거나 가려진 줄이면
     /// `None` 이다.
     ///
@@ -1496,6 +1546,16 @@ impl Site {
     pub fn commits_of(&self, id: &str) -> &[crate::git::Commit] {
         let root = self.origin.root(id).or(self.repo.as_ref().map(|r| r.here()));
         root.and_then(|r| self.commits.get(r)).and_then(|t| t.get(id)).map_or(&[], Vec::as_slice)
+    }
+
+    /// 그 줄이 내 것이 아니면 그 까닭(moai-oagj.y88) — 보드 카드의 발줄이 댄다. 가르는 자는 `ready` 와 훅이 쓰는
+    /// [`crate::report::owner`] 하나다: 자를 따로 세우면 `ready` 가 `others` 로 내미는 줄을 보드가 내 것으로 그린다.
+    ///
+    /// **누군지 모르면 `None` 이다** — `ready` 가 그때 아무것도 따로 세우지 않는 것과 같은 자다(`report::by_owner`).
+    /// 설정 없는 기계에서 모든 카드에 `담당 없음` 이 서면 화면이 고장 난 것으로 보인다.
+    pub fn whose(&self, at: usize) -> Option<crate::report::Owner> {
+        let me = crate::query::Me::label(self.me.as_deref()?);
+        crate::report::owner(&me, self.issues.get(at)?)
     }
 
     /// 보기(`SPC v`)가 이 줄을 보이는가 — 검색과 상관없이. `shown` 이 빈 때는 보인다.
@@ -1731,6 +1791,8 @@ impl App {
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
+            layout: view::Layout::default(),
+            board_column: None,
             mouse_on: true,
             drawn: mouse::Drawn::default(),
             list_width: None,
@@ -2220,7 +2282,13 @@ impl App {
     /// 왜 여기로 왔는지도 모르는 목록을 본다. 중복 id 면 그 디렉터리의 첫 줄이다([`Anchor`]).
     fn land(&mut self, id: &str) -> Landing {
         let Some(at) = self.site.index.find(id) else { return Landing::Missing };
-        let home = self.site.index.home_of(at).clone();
+        let mut home = self.site.index.home_of(at).clone();
+        // **보드는 지금 디렉터리 밑의 줄을 이미 카드로 세운다**(moai-9nfw) — 그 집으로 들어가면 뿌리에서 담은 생각
+        // 하나(`SPC n`)로 마일스톤 레인 전부가 `(마일스톤 없음)` 한 레인으로 줄어든다. 보드를 오가는 길(`flip_layout`)이
+        // 같은 까닭으로 디렉터리를 지킨다. 지금 자리 밖의 줄이면 목록처럼 그리로 간다 — 여기서는 카드가 안 선다.
+        if self.board() && home.starts_with(&self.site.path) {
+            home = self.site.path.clone();
+        }
         let was = std::mem::replace(&mut self.site.path, home);
         let want = Anchor::Issue(id.to_string());
         let rows = self.rows();
@@ -2782,7 +2850,10 @@ impl App {
             return;
         }
         site.shown = (0..site.issues.len())
-            .map(|at| view.shows(site.column(at), site.index.shelved_at(at).is_some(), &site.cfg.statuses))
+            .map(|at| {
+                let idea = crate::report::is_idea(&site.issues[at]);
+                view.shows(site.column(at), site.index.shelved_at(at).is_some(), idea, &site.cfg.statuses)
+            })
             .collect();
         let mut lit = std::collections::HashSet::new();
         for (at, _) in site.shown.iter().enumerate().filter(|(_, on)| **on) {
@@ -2868,6 +2939,9 @@ impl App {
         }
         if let Some(d) = look.hide_deferred {
             self.view.hide_deferred = d;
+        }
+        if let Some(i) = look.hide_ideas {
+            self.view.hide_ideas = i;
         }
         // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
         // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
@@ -2955,6 +3029,10 @@ impl App {
         if let Some(at) = look.detail_at.as_deref().and_then(view::DetailAt::named) {
             self.detail_at = at;
         }
+        // 모르는 낱말은 목록 그대로다 — 상세의 자리와 같은 결이다.
+        if let Some(l) = look.layout.as_deref().and_then(view::Layout::named) {
+            self.layout = l;
+        }
         if let Some(on) = look.mouse {
             self.mouse_on = on;
         }
@@ -2969,6 +3047,7 @@ impl App {
         crate::user_config::Look {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
+            hide_ideas: Some(self.view.hide_ideas),
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(
@@ -2978,6 +3057,7 @@ impl App {
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
             detail_at: Some(self.detail_at.name().to_string()),
+            layout: Some(self.layout.name().to_string()),
             timezone: self.saved_zone.clone(),
             mouse: Some(self.mouse_on),
             list_width: self.list_width.map(i64::from),
@@ -3661,6 +3741,7 @@ impl App {
                 }
             }
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
+            B::Ideas => self.view.hide_ideas = !self.view.hide_ideas,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.screen_statuses()),
@@ -4061,6 +4142,11 @@ impl App {
     /// 한 프로젝트의 줄 — [`Self::rows_where`] 와 한눈 보기가 같은 몸을 지난다(moai-eyre). 차례·검색·
     /// 펼침은 화면의 것이고(그래서 `self`), 줄과 색인과 칸은 그 프로젝트의 것이다(그래서 `site`).
     fn rows_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
+        // **보드는 같은 줄을 다르게 세운다**(moai-9nfw) — 카드만 낸다. 커서·검색·거름망이 같은 첨자를 보도록
+        // 이 자리에서 갈린다: 위의 `rows`·`rows_where` 를 부르는 쪽(검색을 풀 때 이웃 찾기까지)이 그대로 산다.
+        if self.board() {
+            return self.cards_in(seat, site, keep);
+        }
         let mut rows: Vec<Row> = Vec::new();
         let found_under = self.searched_open(site, keep);
         // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
@@ -4073,27 +4159,211 @@ impl App {
         // (`Index::entries_where`). done 에픽 밑에 남은 todo 가 폴더째 사라지면 안 된다.
         rows.extend(
             site.index
-                .entries_tree(
-                    &site.issues,
-                    &site.path,
-                    keep,
-                    &|a, b| {
-                        // 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다. 담당은 화면에 선 이름으로.
-                        crate::query::order_by(
-                            Self::sort_key(self.order.by),
-                            self.order.reversed,
-                            (&site.issues[a], site.column(a)),
-                            (&site.issues[b], site.column(b)),
-                            &site.cfg.statuses,
-                            site.cfg.naming,
-                        )
-                    },
-                    &|under| site.expanded.contains(under) || found_under.contains(under),
-                )
+                .entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|under| {
+                    site.expanded.contains(under) || found_under.contains(under)
+                })
                 .into_iter()
                 .map(|(e, twig)| Row::Item(seat, e, twig)),
         );
         rows
+    }
+
+    /// 목록의 차례 — 고른 것(`SPC s`)과 그 방향. 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다.
+    /// 담당은 화면에 선 이름으로. 목록과 보드가 이 하나로 줄을 세운다.
+    fn order_in(&self, site: &Site, a: usize, b: usize) -> std::cmp::Ordering {
+        crate::query::order_by(
+            Self::sort_key(self.order.by),
+            self.order.reversed,
+            (&site.issues[a], site.column(a)),
+            (&site.issues[b], site.column(b)),
+            &site.cfg.statuses,
+            site.cfg.naming,
+        )
+    }
+
+    /// 보드로 세우는가(moai-9nfw). **한눈 보기에도 선다**(moai-oagj.vcj) — 프로젝트마다 머리줄 하나가 칸을 가로질러
+    /// 서고, 펼친 프로젝트 밑에 그 프로젝트의 마일스톤 레인이 선다.
+    pub fn board(&self) -> bool {
+        self.layout == view::Layout::Board
+    }
+
+    /// 보드의 카드 — 지금 디렉터리를 **통째로 펼친** 줄 가운데 묶음이 아닌 것(일과 idea)이다(moai-9nfw).
+    /// 에픽·마일스톤·바구니는 카드가 아니다: 레인이 마일스톤이고, 에픽은 카드의 발줄에 이름으로 선다.
+    ///
+    /// **차례는 레인 먼저, 그 안에서는 목록의 차례(`SPC s`)다.** 트리 차례 그대로 두면 칸 하나에 에픽마다
+    /// 덩어리가 져, 우선순위로 골라 놓아도 뒤 에픽의 p0 가 앞 에픽의 p3 밑에 선다. 레인의 차례는 펼친 트리에서
+    /// 처음 나온 차례 — 목록이 마일스톤 폴더를 세우는 차례와 같다(바구니가 끝이다).
+    ///
+    /// 폴더는 제 밑에 걸린 것이 있으면 거름망을 지나도 서므로(`Index::entries_sorted`), 카드는 **제 줄이**
+    /// 걸렸을 때만 선다 — 자식이 있는 일이 자식 덕에 카드로 서면 거름망이 숨긴 것이 보드에 선다.
+    fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
+        let mut lanes: Vec<Option<&Seg>> = Vec::new();
+        let mut cards: Vec<(usize, Entry, Twig)> = Vec::new();
+        let tree =
+            site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
+        for (e, twig) in tree {
+            let Some(at) = e.at().filter(|&at| keep(at) && !crate::report::is_group(&site.issues[at])) else {
+                continue;
+            };
+            let lane = site.lane(at);
+            let rank = lanes.iter().position(|l| *l == lane).unwrap_or_else(|| {
+                lanes.push(lane);
+                lanes.len() - 1
+            });
+            cards.push((rank, e, twig));
+        }
+        let at = |e: &Entry| e.at().expect("카드는 제 줄이 있다");
+        cards.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| self.order_in(site, at(&a.1), at(&b.1))));
+        cards.into_iter().map(|(_, e, twig)| Row::Item(seat, e, twig)).collect()
+    }
+
+    /// 보드 한 장 — 칸·레인·자리(moai-9nfw). **키·그림·마우스가 이 하나를 읽는다**([`board::Plan`]): 저마다 재면
+    /// `j` 가 가는 카드와 화면의 아래 카드가 갈린다. `rows` 는 [`App::rows`] 가 보드로 낸 카드다.
+    ///
+    /// **한눈 보기에서는 프로젝트마다 머리줄 하나가 칸을 가로질러 서고**, 그 밑에 그 프로젝트의 마일스톤 레인이
+    /// 선다(moai-oagj.vcj). 칸은 줄을 낸 프로젝트들의 칸을 합친 것이다([`App::screen_statuses`]) — 번호 토글과
+    /// 뱃지가 같은 자를 본다. 카드마다 제 프로젝트의 `Site` 로 칸·레인·담당을 잰다.
+    pub(super) fn laid(&self, rows: &[Row]) -> Laid {
+        /// 줄 하나가 보드에 서는 꼴 — 프로젝트 머리줄이거나 카드다.
+        enum Spot<'a> {
+            Head(usize),
+            Card(Seat, Option<&'a Seg>, board::Column, usize),
+        }
+        // 줄마다 레인·칸·카드의 줄 수. **남의 카드는 켠 열이 없어도 발줄을 단다**(moai-oagj.y88, 사용자 결정).
+        let spots: Vec<Option<Spot>> = rows
+            .iter()
+            .map(|r| -> Option<Spot> {
+                match r {
+                    Row::Project(n) => Some(Spot::Head(*n)),
+                    Row::Item(seat, e, _) => {
+                        let site = self.site_of_seat(*seat)?;
+                        let at = e.at().filter(|&at| at < site.issues.len())?;
+                        let idea = crate::report::is_idea(&site.issues[at]);
+                        let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
+                        let height = draw::card_height(self.fields, || site.whose(at).is_some());
+                        Some(Spot::Card(*seat, site.lane(at), column, height))
+                    }
+                    Row::Up => None,
+                }
+            })
+            .collect();
+        let held: Vec<board::Column> = spots
+            .iter()
+            .filter_map(|s| match s {
+                Some(Spot::Card(_, _, c, _)) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        let statuses = self.screen_statuses();
+        let columns = board::columns(&statuses, &held, &|c| match c {
+            board::Column::Idea => !self.view.hide_ideas,
+            board::Column::Shelved => !self.view.hide_deferred,
+            board::Column::Status(s) => self.view.shows(s, false, false, &statuses),
+        });
+        // 프로젝트 하나가 `h`·`l` 의 울타리다([`board::Slot::group`]) — 프로젝트 안에서는 하나뿐이다.
+        let group = |seat: Seat| match seat {
+            Seat::Here => 0,
+            Seat::Place(n) => n,
+        };
+        // 그 프로젝트·그 마디의 레인 — 없으면 세운다. **열쇠를 지어 견주지 않는다** — 카드마다 마디의 id 를 베끼게
+        // 된다. 카드는 레인마다 모여 오므로(`App::cards_in` 이 레인 차례로 세운다) 뒤에서부터 찾는다.
+        fn lane_of(lanes: &mut Vec<LaneOf>, seat: Seat, seg: Option<&Seg>) -> usize {
+            lanes
+                .iter()
+                .rposition(|l| matches!(l, LaneOf::Seg(s, g) if *s == seat && g.as_ref() == seg))
+                .unwrap_or_else(|| {
+                    lanes.push(LaneOf::Seg(seat, seg.cloned()));
+                    lanes.len() - 1
+                })
+        }
+        let mut lanes: Vec<LaneOf> = Vec::new();
+        let mut slots: Vec<board::Slot> = Vec::with_capacity(spots.len());
+        for spot in &spots {
+            let slot = match spot {
+                Some(Spot::Head(n)) => {
+                    lanes.push(LaneOf::Project(*n));
+                    board::Slot { lane: lanes.len() - 1, column: None, height: 1, group: *n }
+                }
+                Some(Spot::Card(seat, lane, column, height)) => {
+                    let lane = lane_of(&mut lanes, *seat, *lane);
+                    let column = columns.iter().position(|c| c == column).unwrap_or(0);
+                    board::Slot { lane, column: Some(column), height: *height, group: group(*seat) }
+                }
+                // 빠진 프로젝트의 줄 — 다음 프레임에 사라진다([`App::site_of_seat`]). 그때까지 자리만 지킨다.
+                None => {
+                    let lane = lane_of(&mut lanes, Seat::Here, None);
+                    board::Slot { lane, column: Some(0), height: draw::card_height(self.fields, || false), group: 0 }
+                }
+            };
+            slots.push(slot);
+        }
+        // **레인 머리줄은 그 프로젝트에 이름 있는 레인(마일스톤·바구니)이 설 때만이다** — 마일스톤이나 에픽 안은
+        // 레인이 하나라 머리줄이 경로 줄을 되풀이할 뿐이다. 마일스톤을 안 쓰는 저장소에도 `(길 잃음)` 은 레인으로
+        // 서므로, 그때 이름 없는 레인(`None`)은 머리줄 자리만 비워 두고 글을 안 세운다(`draw::board`). 한눈 보기에서는
+        // 이것을 프로젝트마다 따로 잰다 — 마일스톤을 쓰는 옆 프로젝트 때문에 안 쓰는 프로젝트에 빈 줄이 서지 않는다.
+        let heads: Vec<bool> = lanes
+            .iter()
+            .map(|l| match l {
+                LaneOf::Project(_) => false,
+                LaneOf::Seg(seat, _) => lanes.iter().any(|o| o.seg().is_some_and(|(s, _)| s == *seat)),
+            })
+            .collect();
+        let plan = board::Plan::of(&slots, columns.len(), &heads);
+        Laid { columns, lanes, plan }
+    }
+
+    /// 보드에서 `seat` 프로젝트의 `under` 자리 밑에 걸린 **첫 카드** — 폴더 줄에서 보드로 오거나 보드에서 한 층
+    /// 나올 때 설 자리다. 폴더는 보드에 줄로 안 선다.
+    fn first_under(&self, rows: &[Row], seat: Seat, under: &Path) -> Option<usize> {
+        let site = self.site_of_seat(seat)?;
+        rows.iter().position(|r| {
+            matches!(r, Row::Item(s, e, _)
+                if *s == seat && e.at().is_some_and(|at| at < site.issues.len() && site.index.home_of(at).starts_with(under)))
+        })
+    }
+
+    /// 목록과 보드를 오간다 — `SPC v b`(moai-9nfw). **고른 줄을 그대로 든다.**
+    ///
+    /// - 목록 → 보드: 그 줄이 카드면 그 카드에, 폴더(에픽·마일스톤·바구니)면 그 밑의 첫 카드에 선다
+    /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
+    ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다
+    ///
+    /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다.
+    fn flip_layout(&mut self, rows: &[Row]) {
+        let current = self.current_of(rows);
+        let held = current.as_ref().map(|r| self.anchor_of(r));
+        let under = self.dir_of(current.clone());
+        // 보드에서 고른 카드 — 목록으로 오면 그 카드를 품은 폴더를 연다. **그 카드의 프로젝트에서** 연다: 한눈 보기의
+        // 카드는 남의 프로젝트의 것이라(moai-oagj.vcj) 지금 선 것에 열면 엉뚱한 프로젝트의 폴더가 열린다.
+        let card = match &current {
+            Some(Row::Item(seat, e, _)) if self.board() => e.at().map(|at| (*seat, at)),
+            _ => None,
+        };
+        self.layout = self.layout.flip();
+        self.list.rewind();
+        if let Some((seat, at)) = card
+            && let Some(site) = self.site_mut(seat)
+            && at < site.issues.len()
+        {
+            let home = site.index.home_of(at).clone();
+            for depth in site.path.len() + 1..=home.len() {
+                site.expanded.insert(home[..depth].to_vec());
+            }
+        }
+        let rows = self.rows();
+        let at = held
+            .as_ref()
+            .and_then(|a| self.row_of(&rows, a))
+            .or_else(|| under.and_then(|(seat, p)| self.first_under(&rows, seat, &p)))
+            // 그 밑에 카드가 없으면 **그 줄의 프로젝트 머리줄**에 선다(리뷰) — 한눈 보기의 첫 줄은 맨 위 프로젝트의
+            // 머리줄이라, 첫 줄로 떨어지면 빈 에픽 하나에서 보던 프로젝트를 잃는다.
+            .or_else(|| match &current {
+                Some(Row::Item(Seat::Place(n), ..)) => rows.iter().position(|r| *r == Row::Project(*n)),
+                _ => None,
+            })
+            .unwrap_or(0);
+        self.stand(&rows, at, held.as_ref());
+        self.save_look();
     }
 
     /// **검색이 맞힌 줄을 품은 자리는 저절로 열린다**(moai-i5io, 사용자 결정) — 접힌 묶음
@@ -4433,7 +4703,7 @@ impl App {
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
             B::Focus(side) => self.focus = self.focus.step(side, self.detail_at),
-            B::Step(m) => self.step(m, rows.len()),
+            B::Step(m) => self.step(m, &rows),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -4444,14 +4714,20 @@ impl App {
             // **머리줄에서 `l`·`→` 는 그 프로젝트를 펼친다**(moai-i0wd, 사용자 결정 2026-09-19).
             // 들어가는 것은 Enter 다 — 한눈 보기는 고르는 화면이고 파고드는 곳은 프로젝트 안이다.
             // 한때 층에서 `l` 은 들어가기였다(moai-9m2d) — 그때 층은 트리가 아니었다.
+            // **보드에서 `h`·`l` 은 옆 칸이다**(moai-9nfw) — 펼칠 묶음이 보드에는 없다(카드만 선다). 손에 익은
+            // 좌우 키가 화면의 좌우로 간다.
+            // **보드의 프로젝트 머리줄에서는 목록과 같다**(moai-oagj.vcj, 사용자 결정) — 칸이 없는 줄이라 `l` 이 펴고 `h` 가
+            // 접는다. 그래서 머리줄의 갈래가 보드의 옆 칸보다 먼저다.
             B::Expand if self.head_at(&rows).is_some() => self.unfold(&rows, false),
+            B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
+            B::Expand if self.board() => self.board_step(board::Go::Side(keys::Side::Right), &rows),
+            B::Collapse if self.board() => self.board_step(board::Go::Side(keys::Side::Left), &rows),
             B::Expand => self.expand(&rows),
             // **접을 것이 없으면 부모를 접고, 부모도 없으면 나간다** — 키 표도 그렇게 켠다
             // (`Browse::enabled`). 손에 익은 `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면
             // 어느 쪽이 고장인지 모른다.
-            // 머리줄의 `h`·`←` 는 그 프로젝트를 접는다 — 접힌 머리줄에서는 아무 일도 없다(층은
+            // 머리줄의 `h`·`←` 는 그 프로젝트를 접는다(위의 갈래) — 접힌 머리줄에서는 아무 일도 없다(층은
             // 맨 위라 나갈 데가 없다).
-            B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
             B::Collapse => {
                 if !self.collapse(&rows) && !self.fold_parent(&rows) {
                     self.leave();
@@ -4532,12 +4808,13 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Deferred | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::Ideas | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
                 self.save_look();
             }
+            B::Board => self.flip_layout(&rows),
             // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
@@ -4586,6 +4863,8 @@ impl App {
         // 칸 이름은 **한 번만** 모은다 — 번호 수와 숨김 비트가 같은 목록을 봐야 하고, 한눈 보기의
         // 이것은 줄을 낸 프로젝트를 도는 셈이다([`App::screen_statuses`]).
         let statuses = self.screen_statuses();
+        // 칸의 이름은 고른 배치로 댄다 — 한눈 보기에도 보드가 선다(moai-oagj.vcj).
+        let layout = self.layout;
         keys::Ctx {
             lang: self.site.lang,
             layer: self.on_layer(),
@@ -4618,17 +4897,20 @@ impl App {
                 .filter(|(_, s)| self.view.hides(s))
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             deferred_hidden: self.view.hide_deferred,
+            ideas_hidden: self.view.hide_ideas,
             detail_at: self.detail_at,
+            board: self.board(),
+            head: self.head_at(rows).is_some(),
             mouse: self.mouse_on,
             sorting: self.order,
             fields: self.fields,
             detail: self.detail_open,
-            next_pane: self.focus.next().word(self.site.lang),
-            prev_pane: self.focus.prev().word(self.site.lang),
-            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang),
-            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang),
-            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang),
-            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang),
+            next_pane: self.focus.next().word(self.site.lang, layout),
+            prev_pane: self.focus.prev().word(self.site.lang, layout),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang, layout),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang, layout),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang, layout),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang, layout),
         }
     }
 
@@ -4642,13 +4924,36 @@ impl App {
     ///
     /// 상세의 끝(`End`)은 마지막으로 그린 줄 수로 잰다 — 줄 수는 폭에 달렸고 폭은
     /// 그려야 나온다. 루프는 키 하나마다 한 번 그리므로 그 수는 한 걸음 넘게 낡지 않는다.
-    fn step(&mut self, m: Move, rows: usize) {
+    fn step(&mut self, m: Move, rows: &[Row]) {
         match self.focus {
+            Pane::Explorer if self.board() => self.board_step(board::Go::Move(m), rows),
             Pane::Explorer => {
-                let at = scroll::cursor(m, self.cursor, || rows);
+                let at = scroll::cursor(m, self.cursor, || rows.len());
                 self.move_to(at);
             }
             Pane::Detail => self.detail.go(m),
+        }
+    }
+
+    /// 보드에서 커서를 옮긴다 — 칸 안이든 옆 칸이든 [`board::step`] 이 정한다(moai-9nfw). 목록의 이동과 같이
+    /// [`App::move_to`] 를 지나 다른 카드로 가면 상세가 첫 줄로 돌아간다.
+    ///
+    /// **머리줄에 선 커서는 마지막으로 선 카드의 칸을 걷는다**(moai-oagj.vcj) — 머리줄에는 칸이 없어, `k` 로 올라온
+    /// 칸을 들고 있어야 `j` 가 그 칸으로 돌아간다([`board::step`] 의 `hint`).
+    fn board_step(&mut self, go: board::Go, rows: &[Row]) {
+        let laid = self.laid(rows);
+        self.note_board_column(&laid);
+        let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
+        let at = board::step(&laid.plan, self.cursor, go, hint);
+        self.move_to(at);
+    }
+
+    /// 커서가 카드에 섰으면 그 칸을 [`App::board_column`] 에 적는다. **키만이 아니라 그림도 부른다**(`draw::board`, 리뷰) —
+    /// 누르기·휠·배치 바꾸기·다시 읽기로 카드에 선 것도 머리줄이 들고 있어야 `j` 가 그 칸으로 돌아간다.
+    pub(super) fn note_board_column(&mut self, laid: &Laid) {
+        if let Some(column) = laid.plan.cards.get(self.cursor).and_then(|p| p.column).and_then(|c| laid.columns.get(c))
+        {
+            self.board_column = Some(column.clone());
         }
     }
 
@@ -5042,9 +5347,24 @@ impl App {
             self.detail.rewind();
             let fallback = self.site.remembered.pop().unwrap_or(0);
             let rows = self.rows();
+            // 보드에는 폴더 줄이 없다 — 나온 폴더 밑의 카드에 선다(moai-9nfw). **들어가기 전에 서 있던 카드가 그
+            // 폴더 밑이면 그 카드다**: 보드의 Enter 는 펼친 트리의 깊은 줄로 한 번에 여러 층 들어가므로, 뿌리로 돌아온
+            // 걸음이 첫 카드에 서면 보던 카드를 잃는다. 기억한 번호가 낡았거나 건너뛴 층의 0 이면 첫 카드다.
+            let mut came = self.site.path.clone();
+            came.push(from.clone());
+            let under = |n: usize| {
+                matches!(rows.get(n), Some(Row::Item(Seat::Here, e, _))
+                    if e.at().is_some_and(|at| self.site.index.home_of(at).starts_with(&came)))
+            };
             self.cursor = rows
                 .iter()
                 .position(|r| matches!(r, Row::Item(_, Entry::Dir { seg, .. }, _) if *seg == from))
+                .or_else(|| {
+                    if !self.board() {
+                        return None;
+                    }
+                    if under(fallback) { Some(fallback) } else { self.first_under(&rows, Seat::Here, &came) }
+                })
                 .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
         }
     }
@@ -5318,6 +5638,212 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),
+    /// 마일스톤 없는 0005(todo·p3)·idea 0006·미룬 0007(todo·p0).
+    fn boarded() -> App {
+        let mut epic = make("argos-0002", Kind::Epic);
+        epic.milestone = Some("argos-0001".into());
+        let mut first = member("argos-0003", "argos-0002");
+        first.priority = Some(1);
+        let mut held = member("argos-0004", "argos-0002");
+        held.status = Status::new("in_progress");
+        let mut loose = make("argos-0005", Kind::Issue);
+        loose.priority = Some(3);
+        let mut put_off = make("argos-0007", Kind::Issue);
+        put_off.priority = Some(0);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            epic,
+            first,
+            held,
+            loose,
+            make("argos-0006", Kind::Idea),
+            put_off,
+        ];
+        App::new(issues, cfg(), Path::new())
+    }
+
+    /// 지금 커서가 선 줄의 id — 바구니처럼 제 줄이 없으면 빈 글이다.
+    fn on_id(a: &App) -> String {
+        match a.current() {
+            Some(Row::Item(_, e, _)) => e.at().map(|at| a.site.issues[at].id.clone()).unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// **`SPC v b` 는 같은 줄을 카드로 세운다**(moai-9nfw) — 묶음은 카드가 아니고, 레인(마일스톤 → 바구니) 안에서는
+    /// 목록의 차례다. 고른 줄을 그대로 들고 오가며, 보드에서 목록으로 와도 디렉터리는 그대로다.
+    #[test]
+    fn spc_v_b_lays_the_same_rows_out_as_cards_and_keeps_the_row() {
+        let mut a = boarded();
+        assert_eq!(a.layout, view::Layout::List);
+        // 뿌리의 목록 — 마일스톤과 바구니 폴더뿐이다. 마일스톤에 서서 보드로 가면 그 밑의 첫 카드다.
+        a.hit("SPC v b Esc");
+        assert_eq!(a.layout, view::Layout::Board);
+        assert_eq!(
+            row_ids(&a),
+            ["argos-0003", "argos-0004", "argos-0007", "argos-0006", "argos-0005"],
+            "묶음이 카드로 섰거나 레인·차례가 어긋났다"
+        );
+        assert_eq!(on_id(&a), "argos-0003", "마일스톤에서 온 커서가 그 밑의 첫 카드에 안 섰다");
+        assert!(a.rows().iter().all(|r| !matches!(r, Row::Up)), "보드에 `..` 이 섰다");
+
+        // 보드 → 목록: 같은 디렉터리에 남고 그 카드를 품은 폴더가 열린다.
+        a.hit("l");
+        assert_eq!(on_id(&a), "argos-0004");
+        a.hit("SPC v b Esc");
+        assert_eq!(a.layout, view::Layout::List);
+        assert!(a.site.path.is_empty(), "목록으로 오며 디렉터리에 들어갔다");
+        assert_eq!(on_id(&a), "argos-0004", "보드에서 고른 카드를 목록이 놓쳤다");
+
+        // 목록 → 보드: 카드였던 줄은 그 카드에 선다.
+        a.hit("SPC v b Esc");
+        assert_eq!(on_id(&a), "argos-0004");
+    }
+
+    /// **`SPC v i` 는 보드의 idea 칸과 목록의 idea 줄을 함께 숨기고, 그 고름은 설정에 남는다**(moai-oagj.bjr).
+    /// 같은 바구니의 일은 그대로 서고, 검색은 숨긴 idea 도 찾는다 — 숨긴 칸과 같은 자다(moai-qnkn).
+    #[test]
+    fn spc_v_i_hides_ideas_on_the_board_and_the_list_and_keeps_it() {
+        let s = scratch("hide-ideas");
+        let user = s.join("user.toml");
+        let mut a = boarded();
+        a.user_config = Some(user.clone());
+        a.layout = view::Layout::Board;
+        let idea = a.site.index.find("argos-0006").unwrap();
+        assert!(row_ids(&a).contains(&"argos-0006".to_string()), "시험의 전제 — idea 카드가 섰다");
+        a.hit("SPC v i Esc");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004", "argos-0007", "argos-0005"], "idea 카드가 안 숨었다");
+        let rows = a.rows();
+        assert!(!a.laid(&rows).columns.contains(&board::Column::Idea), "빈 idea 칸이 보드에 남았다");
+        assert!(!a.visible(idea), "목록에서도 idea 가 숨어야 한다");
+        let text = std::fs::read_to_string(&user).expect("보기가 설정에 안 적혔다");
+        assert!(text.contains("hide_ideas = true"), "{text}");
+
+        search(&mut a, "0006");
+        assert_eq!(row_ids(&a), ["argos-0006"], "검색이 숨긴 idea 를 못 찾았다");
+        a.hit("Esc");
+
+        let mut b = boarded();
+        b.user_config = Some(user);
+        b.load_look();
+        assert!(b.view.hide_ideas, "다음 실행이 idea 숨김을 못 읽었다");
+        b.hit("SPC v a");
+        assert!(b.visible(idea), "모두 보이기가 idea 를 안 걷었다");
+    }
+
+    /// **보드의 `h`·`l` 은 옆 칸이고 `j`·`k` 는 칸 안이다**(moai-9nfw). 빈 칸은 건너뛰고, `Tab` 은 조용하다 — 펼칠
+    /// 묶음이 보드에는 없다.
+    #[test]
+    fn on_the_board_h_and_l_cross_columns_and_tab_does_nothing() {
+        let mut a = boarded();
+        a.layout = view::Layout::Board;
+        // 칸은 idea · 미룸 · todo · in_progress · review 다(done 은 처음에 숨는다). 0003·0005 가 todo 다.
+        let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
+        a.cursor = at(&a, "argos-0003");
+        a.hit("j");
+        assert_eq!(on_id(&a), "argos-0005", "todo 칸을 레인 건너 내려가지 않았다");
+        a.hit("k");
+        assert_eq!(on_id(&a), "argos-0003");
+        a.hit("h");
+        assert_eq!(on_id(&a), "argos-0007", "왼쪽 칸(미룸)으로 안 갔다");
+        a.hit("h");
+        assert_eq!(on_id(&a), "argos-0006", "idea 칸으로 안 갔다");
+        a.hit("h");
+        assert_eq!(on_id(&a), "argos-0006", "왼쪽 끝에서 움직였다");
+        a.cursor = at(&a, "argos-0004");
+        a.hit("l");
+        assert_eq!(on_id(&a), "argos-0004", "빈 review 칸 너머로 갔거나 오른쪽 끝에서 움직였다");
+        let before = (a.cursor, a.site.expanded.clone());
+        a.hit("Tab");
+        assert_eq!((a.cursor, a.site.expanded.clone()), before, "보드에서 Tab 이 무언가 했다");
+        let rows = a.rows();
+        assert_eq!(keys::Browse::ExpandAll.enabled(&a.key_ctx(&rows)), Err(keys::Off::Quiet));
+        // 키 바가 대는 칸 이름도 보드다.
+        a.focus = Pane::Detail;
+        assert_eq!(a.key_ctx(&rows).next_pane, say(a.site.lang, "tui.pane.board"));
+    }
+
+    /// **보드에서 한 층 나오면 나온 폴더 밑의 첫 카드에 선다**(moai-9nfw) — 보드에는 폴더 줄이 없어, 목록처럼 나온
+    /// 폴더를 찾으면 못 찾고 기억한 번호로 엉뚱한 카드에 선다.
+    #[test]
+    fn leaving_a_folder_on_the_board_stands_on_a_card_from_it() {
+        let mut a = boarded();
+        a.hit("Enter");
+        assert_eq!(a.crumbs(), "/argos-0001 제목");
+        a.hit("SPC v b Esc");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004"], "마일스톤 안의 보드가 그 밑의 카드만 안 냈다");
+        a.hit("Bksp");
+        assert!(a.site.path.is_empty());
+        assert_eq!(on_id(&a), "argos-0003", "나온 마일스톤 밑의 카드에 안 섰다");
+    }
+
+    /// **보드에서 들어갔다 뿌리로 돌아오면 들어가기 전의 카드에 선다**(moai-9nfw 리뷰) — 보드의 Enter 는 펼친 트리의
+    /// 깊은 줄로 여러 층을 한 번에 들어간다. 나올 때마다 폴더 밑의 첫 카드에 서면 뿌리에 와서 보던 카드를 잃는다.
+    #[test]
+    fn coming_back_to_the_root_board_stands_on_the_card_it_left_from() {
+        let mut a = boarded();
+        let mut issues = a.site.issues.clone();
+        // 0004 밑의 자식 — 0004 가 들어갈 수 있는 카드가 된다.
+        issues.push(make("argos-0004.c1a", Kind::Issue));
+        a.adopt(issues);
+        a.layout = view::Layout::Board;
+        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0004").unwrap();
+        a.hit("Enter");
+        assert_eq!(a.site.path.len(), 3, "0004 안으로 안 들어갔다 — {:?}", a.site.path);
+        a.hit("Bksp");
+        assert_eq!(on_id(&a), "argos-0004", "나온 카드에 안 섰다");
+        a.hit("Bksp");
+        a.hit("Bksp");
+        assert!(a.site.path.is_empty());
+        assert_eq!(on_id(&a), "argos-0004", "뿌리로 돌아와 들어가기 전의 카드를 잃었다");
+    }
+
+    /// **보드에서 쓴 줄이 지금 디렉터리 밑이면 디렉터리를 지킨다**(moai-9nfw 리뷰) — 목록처럼 그 줄의 집으로
+    /// 들어가면 뿌리에서 담은 줄 하나로 보드 전체가 그 에픽·바구니 하나로 줄어든다. 카드는 이미 여기 선다.
+    #[test]
+    fn a_line_written_on_the_board_keeps_the_board_where_it_is() {
+        let (_scratch, mut a) = writable("board-land");
+        a.layout = view::Layout::Board;
+        let wrote = a.write(
+            |_| {},
+            |issues, _, _, by| {
+                let at = "2026-09-13T00:00:00Z";
+                issues.push(member("argos-0003", "argos-0001"));
+                Ok((
+                    vec![crate::model::JournalEntry::create("argos-0003", "멤버", at, by)],
+                    Touched { id: "argos-0003".into(), done: "만듦" },
+                ))
+            },
+        );
+        assert_eq!(wrote.as_deref(), Some("argos-0003"));
+        assert!(a.site.path.is_empty(), "보드가 쓴 줄의 집으로 들어갔다 — {:?}", a.site.path);
+        assert_eq!(on(&a).as_deref(), Some("argos-0003"));
+        assert_eq!(a.notice.as_deref(), Some("✓ 만듦 · argos-0003"));
+    }
+
+    /// **고른 배치는 설정에 남고 다음 실행이 읽는다**(moai-9nfw). 모르는 낱말은 목록이다.
+    #[test]
+    fn the_layout_is_saved_and_read_by_the_next_run() {
+        let s = scratch("layout-save");
+        let user = s.join("user.toml");
+        let mut a = boarded();
+        a.user_config = Some(user.clone());
+        a.hit("SPC v b Esc");
+        let text = std::fs::read_to_string(&user).expect("배치가 설정에 안 적혔다");
+        assert!(text.contains("layout = \"board\""), "{text}");
+        let mut b = boarded();
+        b.user_config = Some(user.clone());
+        b.load_look();
+        assert!(b.board(), "다음 실행이 목록으로 떴다");
+        std::fs::write(&user, "[tui]\nlayout = \"grid\"\n").unwrap();
+        let mut c = boarded();
+        c.user_config = Some(user);
+        c.load_look();
+        assert_eq!(c.layout, view::Layout::List, "모르는 낱말에서 목록이 안 섰다");
     }
 
     /// 보기가 done 과 미룬 줄을 숨긴 목록 — 검색 시험의 바닥. 뿌리에 보이는 것은 0001(에픽)·0011 뿐이고,

@@ -12,6 +12,36 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **The explorer lays the list out as a kanban board.** `SPC v b` turns the
+  list into a board and back, and the choice is kept under `[tui]` as `layout`.
+  It is the list's layout, not another window: the cursor, the filter, the view,
+  search, `[NEW]` and the detail stay as they were. The columns are idea,
+  deferred and the config's columns in order — idea is a kind and deferred an
+  axis, so nothing new is stored. At the project root every milestone is a
+  lane and `(no milestone)` comes last; inside a milestone or an epic there is
+  one lane. A card is its id, column and priority over its title, with a foot
+  for the `SPC c` columns that are on. `j`/`k` move within a column, `h`/`l` to
+  the next one, a click takes a card and the wheel moves within the column under
+  the pointer. In the overview (`0`) every project stands as a header across
+  the columns, with an unfolded project's milestone lanes under it, and the
+  columns are those of every project shown; on a header `l`, `h`, `Tab` and
+  `Enter` unfold, fold and go in as in the list.
+
+- **`SPC c e` shows the epic a row is in** — a column on the right of the list
+  and, on the board, the card's foot, where epics appear instead of as cards.
+
+- **`SPC v i` hides ideas** — the idea column on the board and the idea rows in
+  the list alike. Search still finds them, `SPC v a` brings them back, and the
+  choice is kept under `[tui]` as `hide_ideas`.
+
+- **A board card that is not yours says whose it is.** A card assigned to
+  someone else, or to nobody, grows a dim foot with `→ name` or `unowned` even
+  when no `SPC c` column is on; your own cards stay two lines. Whose is decided
+  the way `moai ready` decides it, and when who you are is unknown no card is
+  set apart.
+
 ### Changed
 
 - **The version line in the `moai tui` header names the latest release.** It
