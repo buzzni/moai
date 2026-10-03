@@ -515,13 +515,32 @@ fn pretty(v: &serde_json::Value) -> String {
 pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
     let shown = current.display().to_string();
     match on_path {
-        Some(p) if p == current => "moai".to_string(),
+        // **자리로 견준다** — `current` 는 [`spelled`] 가 고른 부른 철자라 링크가 안 풀렸을 수 있다.
+        Some(p) if crate::path::real(p) == crate::path::real(current) => "moai".to_string(),
         // 따옴표를 깨는 경로는 훅 한 줄에 못 적어 `command` 가 이름으로 바꿔 적는다.
         // **여기서 먼저 바꾼다** — 안 그러면 판·설치 출력·`status` 는 절대 경로를
         // 말하는데 훅은 PATH 의 `moai` 를 불러, 셋이 서로 다른 것을 가리킨다.
         _ if !quotable(&shown) => "moai".to_string(),
         _ => shown,
     }
+}
+
+/// `argv[0]` 이 대는 이 실행 파일의 철자 — **링크를 안 푼다**(moai-gu5m, 사용자 결정 2026-10-03).
+///
+/// 슬래시가 들면 `cwd` 에 붙여 `..` 만 글자로 접는다. 이름뿐이면 `None` 이다 — PATH 에서 찾은 것과
+/// 같은 파일이면 [`exe_name`] 이 어차피 이름으로 적고, 아니면 부른 쪽이 무엇을 불렀는지 모른다.
+///
+/// **이 값이 이 실행 파일을 가리키는지는 묻지 않는다.** `argv[0]` 은 부른 쪽 마음대로라(`exec -a`)
+/// 부르는 쪽이 푼 자리를 `current_exe` 와 견준 뒤에만 쓴다.
+pub fn spelled(argv0: Option<&Path>, cwd: Option<&Path>) -> Option<PathBuf> {
+    let argv0 = argv0?;
+    if argv0.parent().is_none_or(|p| p.as_os_str().is_empty()) {
+        return None;
+    }
+    if argv0.is_absolute() {
+        return Some(crate::path::lexical(argv0));
+    }
+    cwd.filter(|c| c.is_absolute()).map(|c| crate::path::lexical(&c.join(argv0)))
 }
 
 /// 셸 한 줄의 따옴표 안에 그대로 적을 수 있는 경로인가.
@@ -1403,6 +1422,22 @@ mod tests {
         assert_eq!(exe_name(here, Some(here)), "moai");
         assert_eq!(exe_name(here, Some(Path::new("/usr/bin/moai"))), "/repo/target/release/moai");
         assert_eq!(exe_name(here, None), "/repo/target/release/moai");
+    }
+
+    /// **부른 철자는 링크를 안 풀고 `..` 만 접는다**(moai-gu5m). 이름뿐인 `argv[0]` 은 철자를 안
+    /// 낸다 — PATH 의 같은 파일이면 [`exe_name`] 이 이름으로 적는다.
+    #[test]
+    fn the_spelling_is_argv0_folded_against_cwd() {
+        let cwd = Path::new("/repo/.claude/worktrees/w");
+        let at = |argv0: &str| spelled(Some(Path::new(argv0)), Some(cwd));
+        assert_eq!(at("../../../target/release/moai"), Some(PathBuf::from("/repo/target/release/moai")));
+        assert_eq!(at("./target/release/moai"), Some(PathBuf::from("/repo/.claude/worktrees/w/target/release/moai")));
+        assert_eq!(at("/repo/./target/release/moai"), Some(PathBuf::from("/repo/target/release/moai")));
+        assert_eq!(at("moai"), None);
+        assert_eq!(spelled(None, Some(cwd)), None);
+        // `cwd` 를 못 읽으면 상대 철자는 붙일 데가 없다. 절대 철자는 그대로 선다.
+        assert_eq!(spelled(Some(Path::new("target/release/moai")), None), None);
+        assert_eq!(spelled(Some(Path::new("/x/moai")), None), Some(PathBuf::from("/x/moai")));
     }
 
     /// **이 저장소의 설치만 고른다.** 같은 이름이 옛 자리에 남은 `local` 줄을

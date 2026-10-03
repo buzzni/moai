@@ -8,16 +8,16 @@ const BIN: &str = env!("CARGO_BIN_EXE_moai");
 
 /// **바이너리가 제 자리로 적는 철자다** — `BIN` 과 글자가 다를 수 있다(moai-jq1w).
 ///
-/// 제품은 제 자리를 `std::env::current_exe()` 로 읽어 적는다 — `skill install` 은 훅에,
-/// `merge-driver --install` 은 기본값으로. 리눅스에서 그 값은 `/proc/self/exe` 를 읽은 것이라
-/// 링크가 다 풀려 있고, `BIN` 은 cargo 가 target 디렉터리를 적힌 철자대로 이어 지은 것이다.
-/// `target/` 이 `/tmp/cargo-target/<이름>` 으로 가는 링크면(moai-c5xo) 둘이 갈려, 적힌 값을
-/// `BIN` 과 글자로 견주던 시험 셋이 이 기계에서만 붉었다 — CI 에는 링크가 없다.
+/// `merge-driver --install` 은 기본값으로 제 자리를 `std::env::current_exe()` 로 읽어 적는다.
+/// 리눅스에서 그 값은 `/proc/self/exe` 를 읽은 것이라 링크가 다 풀려 있고, `BIN` 은 cargo 가
+/// target 디렉터리를 적힌 철자대로 이어 지은 것이다. `target/` 이 `/tmp/cargo-target/<이름>` 으로
+/// 가는 링크면(moai-c5xo) 둘이 갈려, 적힌 값을 `BIN` 과 글자로 견주던 시험 셋이 이 기계에서만
+/// 붉었다 — CI 에는 링크가 없다.
 ///
-/// **고치는 쪽은 시험이다.** 제품이 링크 철자를 적으려면 부른 쪽이 준 `argv[0]` 를 믿어야
-/// 하는데, 그 값은 부른 쪽 마음대로라 제 자리를 대지 못한다. 푼 철자도 같은 파일을 가리킨다.
-/// 그래서 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나 `--as` 로 건넬 때는 `BIN` 을
-/// 그대로 쓴다.
+/// **머지 드라이버 쪽은 시험이 고친다.** 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나
+/// `--as` 로 건넬 때는 `BIN` 을 그대로 쓴다. `skill install` 은 다르다 — 훅에는 `argv[0]` 이 대는
+/// **부른 철자**를 적고, 그 철자가 같은 파일일 때만 믿는다(moai-gu5m). 커밋되는 `plugin.json` 에
+/// `/tmp/…` 가 적혀 루트에 diff 가 남던 자리라, 그쪽 시험은 `BIN` 과 견준다.
 ///
 /// 푸는 것은 리눅스에서뿐이다. std 의 `current_exe` 는 macOS 에서 `_NSGetExecutablePath` 가
 /// 낸 철자를 풀지 않고 돌려주므로, 거기서 풀면 거꾸로 갈린다.
@@ -16274,11 +16274,17 @@ fn text(out: &Output) -> String {
 /// 저장소 하나에 트리를 심고, `claude` 가 적었을 장부를 그 판 `version` 으로 세운다.
 /// 설치본 디렉터리에는 트리의 매니페스트를 그대로 복사한다 — `claude` 가 하는 일이다.
 fn installed(s: &Scratch, c: &Claude, version: &str) -> (String, PathBuf) {
-    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    installed_as(s, c, Path::new(BIN), version)
+}
+
+/// [`installed`] 를 `bin` 으로 불러 심는다 — 훅에는 부른 철자가 적힌다(moai-gu5m).
+fn installed_as(s: &Scratch, c: &Claude, bin: &Path, version: &str) -> (String, PathBuf) {
+    let run = |args: &[&str]| c.command(bin, s.path(), args, true).output().unwrap();
+    let plan = String::from_utf8(run(&["skill", "install", "--dry-run", "--json"]).stdout).unwrap();
     let market = field(&plan, "market");
     let dir = PathBuf::from(field(&plan, "dir"));
     let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
-    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    assert!(run(&["skill", "install"]).status.success());
 
     let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/{version}"));
     std::fs::create_dir_all(copy.join(".claude-plugin")).unwrap();
@@ -16355,7 +16361,8 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let c = Claude::new("skillgone-home");
     let (market, _) = installed(&s, &c, "0.0.1");
     let manifest = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1/.claude-plugin/plugin.json"));
-    let body = std::fs::read_to_string(&manifest).unwrap().replace(recorded_bin(), "/nowhere/moai");
+    // 훅에는 부른 철자가 적힌다(moai-gu5m) — 시험은 `BIN` 으로 부른다.
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(BIN, "/nowhere/moai");
     std::fs::write(&manifest, body).unwrap();
 
     let said = text(&c.run(s.path(), &["skill", "status"], true));
@@ -16390,6 +16397,60 @@ fn skill_status_from_another_binary_keeps_a_current_install_current() {
     let said = text(&out);
     assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
     assert!(said.contains("훅이 부르는 것과 다르다"), "다른 moai 로 불렀다는 말이 없다\n{said}");
+}
+
+/// **훅에는 부른 철자를 적는다 — 링크를 안 푼다**(moai-gu5m, 사용자 결정 2026-10-03). `target/` 이
+/// `/tmp/cargo-target/<이름>` 으로 가는 링크인 체크아웃에서(moai-c5xo) 푼 철자를 적던 판은, 루트에서
+/// 친 `skill install` 이 커밋된 `plugin.json` 을 `/tmp/…` 로 바꿔 작업 트리에 diff 를 남겼다.
+///
+/// `argv[0]` 은 **같은 파일일 때만** 믿는다 — `exec -a` 로 엉뚱한 철자를 주면 푼 자리를 적는다.
+#[test]
+fn skill_install_writes_the_spelling_it_was_called_by() {
+    use std::os::unix::process::CommandExt as _;
+    let s = init("skillspelled");
+    let c = Claude::new("skillspelled-home");
+    let via = s.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let exe = |cmd: &mut Command| field(&text(&cmd.output().unwrap()), "exe");
+    let plan = ["skill", "install", "--dry-run", "--json"];
+
+    let linked = via.join("moai");
+    assert_eq!(
+        exe(&mut c.command(&linked, s.path(), &plan, false)),
+        linked.display().to_string(),
+        "링크를 풀어 적었다"
+    );
+
+    // 상대 철자는 `cwd` 에 붙여 `..` 만 접는다. `cwd` 는 커널이 푼 자리라 견줄 값도 푼 자리에서 짓는다.
+    let mut up = c.command(Path::new(BIN), &s.path().join(".moai"), &plan, false);
+    up.arg0("../via/moai");
+    let real_root = std::fs::canonicalize(s.path()).unwrap();
+    assert_eq!(exe(&mut up), real_root.join("via/moai").display().to_string(), "상대 철자를 그대로 적었다");
+
+    let mut lied = c.command(Path::new(BIN), s.path(), &plan, false);
+    lied.arg0("/nowhere/moai");
+    assert_eq!(exe(&mut lied), recorded_bin(), "같은 파일이 아닌 argv[0] 을 믿었다");
+}
+
+/// **같은 파일을 다른 철자로 불러도 "다른 moai" 라고 하지 않는다**(moai-gu5m). 훅에 부른 철자를
+/// 적게 된 뒤로, 링크 철자로 심고 푼 철자로 `status` 를 부르면 글자만 갈린다 — 견주는 것은 자리다.
+#[test]
+fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
+    let s = init("skillsamefile");
+    let c = Claude::new("skillsamefile-home");
+    let via = c.home.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let linked = via.join("moai");
+    installed_as(&s, &c, &linked, "0.0.1");
+    let json = text(&c.command(&linked, s.path(), &["skill", "status", "--json"], true).output().unwrap());
+    installed_as(&s, &c, &linked, &field(&json, "want_version"));
+
+    let out = c.command(Path::new(recorded_bin()), s.path(), &["skill", "status"], true).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains(&linked.display().to_string()), "훅이 링크 철자를 안 부른다\n{said}");
+    assert!(!said.contains("훅이 부르는 것과 다르다"), "같은 파일을 다른 moai 라 한다\n{said}");
+    assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
 }
 
 /// **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때

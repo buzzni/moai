@@ -36,11 +36,29 @@ fn place(ctx: &Ctx) -> R<Place> {
     let root = repo.here().to_path_buf();
     let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
     let on_path = which("moai");
-    let exe = skill::exe_name(&exe, on_path.as_deref());
+    let exe = skill::exe_name(&invoked(exe), on_path.as_deref());
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let files = plant(&prefix, &root, &exe);
     Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
+}
+
+/// 훅에 적을 이 실행 파일의 철자 — **부른 철자다**(moai-gu5m, 사용자 결정 2026-10-03).
+///
+/// `current_exe` 는 리눅스에서 `/proc/self/exe` 라 링크가 다 풀린 값이다. `target/` 이
+/// `/tmp/cargo-target/<이름>` 으로 가는 링크인 체크아웃에서(moai-c5xo) 그 값을 적으면, 루트에서 친
+/// `skill install` 이 커밋된 `plugin.json` 을 `/tmp/…` 로 바꿔 작업 트리에 diff 가 남고, 훅 철자를
+/// 글자로 견주는 `skill status` 는 같은 바이너리를 "훅이 부르는 것과 다르다" 고 했다.
+///
+/// **`argv[0]` 은 같은 파일일 때만 믿는다** — 그 값은 부른 쪽 마음대로라 제 자리를 대지 못한다.
+/// [`skill::spelled`] 가 낸 철자가 푼 자리에서 `current_exe` 와 갈리면 `current_exe` 를 그대로 쓴다.
+fn invoked(current: PathBuf) -> PathBuf {
+    let argv0 = std::env::args_os().next().map(PathBuf::from);
+    let cwd = std::env::current_dir().ok();
+    match skill::spelled(argv0.as_deref(), cwd.as_deref()) {
+        Some(spelled) if crate::path::real(&spelled) == crate::path::real(&current) => spelled,
+        _ => current,
+    }
 }
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
@@ -334,7 +352,13 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             Some(path) => row(true, hook_row, &format!("{hook} → {}", path.display())),
             None => row(false, hook_row, &format!("{hook}  {}", say(lang, "skill.hook_unrunnable"))),
         });
-        if *hook != exe {
+        // **자리로 견준다**(moai-gu5m). `exe` 는 [`invoked`] 가 고른 부른 철자라, 같은 파일을 링크 너머의
+        // 다른 철자로 부르면 글자만 갈린다 — 그때 "다른 moai" 라고 하면 거짓이다.
+        let same = match (&hook_path, runs(&exe, on_path.as_deref())) {
+            (Some(hooked), Some(here)) => crate::path::real(hooked) == crate::path::real(&here),
+            _ => *hook == exe,
+        };
+        if !same {
             out.push(fill(say(lang, "skill.hook_is_another_moai"), &[("exe", &exe)]));
         }
     }
