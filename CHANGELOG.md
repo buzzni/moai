@@ -90,6 +90,17 @@ does not tag — see `CONTRIBUTING.md`.
   `ok`) and `kept` in place of `companions`; in `skill uninstall`, which
   already had `kept`, `companions` becomes `retired` in the same shape.
 
+- **The supervisor's worker brief stands an epic's members in `review` while
+  its epic-end review runs.** Where the worker creates the review issue it now
+  moves each finished member with `moai mv <member> review --from in_progress`,
+  so the board no longer shows work under review as still in progress. The
+  `--from` passes over members left in the first column, which that review
+  does not see. In a repository whose columns have no `review`, the refusal
+  says so and the worker skips the step; the default columns and the config
+  `moai init` writes have one. Closing after the merge is unchanged — `moai mv
+  <member> done` closes from either column. Run `moai skill install` to plant
+  the new text.
+
 ### Removed
 
 - **Polishing Korean text is no longer part of moai.** The "Korean text" section
