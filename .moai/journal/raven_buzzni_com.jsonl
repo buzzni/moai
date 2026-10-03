@@ -3342,3 +3342,4 @@
 {"ts":"2026-10-03T17:10:53Z","id":"moai-97tn.96h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T17:10:53Z","id":"moai-4hmq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T17:10:59Z","id":"moai-97tn.p44","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것 12건은 fix(query) 한 커밋, AGENTS 블록·commands.md 는 멤버 moai-4hmq 로 받아 고쳤다. 넘긴 것: 서머타임 한 시간 idea moai-j2m5, grep= 덮어쓰기 idea moai-8kwq, 힌트가 KEYS 를 자르는 것·README·tui 도움말은 moai-h2rh 에 알림, 두 쪼개기 idea moai-zjez"}
+{"ts":"2026-10-03T17:11:32Z","id":"moai-97tn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 457f4f81 로 develop 에 들었다. 남은 것은 idea 셋(moai-zjez 두 쪼개기, moai-j2m5 서머타임, moai-8kwq grep= 덮어쓰기)과 moai-h2rh 가 그 파일에서 받을 README·tui 도움말·힌트 자르기다"}
