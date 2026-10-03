@@ -1605,7 +1605,7 @@ pub enum SkillCmd {
   committed .claude/settings.json, which kept offering them to the team. moai
   deletes those entries itself - only theirs, only when they point where an
   earlier moai pointed them, and only when nothing in that file still enables
-  a plugin from them. Every other byte of the file stays as it was; commit the
+  a plugin from them. The rest of the file stays as it was; commit the
   change. `claude plugin marketplace remove --scope project` is not used: with
   no other declaration in sight it removes the marketplace from the whole
   machine. If the entry cannot be deleted, where to delete it is printed.
@@ -1665,10 +1665,10 @@ pub enum SkillCmd {
   the scope moai was removed from**, under the same conditions as install: an
   earlier version of moai stands there and the marketplace is the one it
   added. The marketplace is left behind - the name is global to one machine
-  and another repository's install uses it. At project scope its declaration
-  in the committed .claude/settings.json goes, as with install.
-  A user-scope install is also left behind when another repository's moai
-  stands there, and then the command to remove it is printed in one line.
+  and another repository's install uses it. A user-scope install is also left
+  behind when another repository's moai stands there, and then the command to
+  remove it is printed in one line. At project scope the marketplace's
+  declaration in the committed .claude/settings.json goes, as with install.
 
   A Claude session already open keeps calling the old hook - reopen it for
   the removal to land.

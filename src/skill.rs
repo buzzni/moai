@@ -638,7 +638,9 @@ pub fn plugins_from(settings: &serde_json::Value, market: &str) -> Vec<String> {
 /// `claude` 가 빈 선언을 적는 꼴이다.
 ///
 /// **지운 글을 다시 읽어 원래 값에서 그 키 하나만 빠졌을 때만 낸다.** 못 읽는 글(주석 든 JSON 등), 그 이름이
-/// 없는 글, 같은 키가 둘 선 글은 `None` 이고 부르는 쪽은 손으로 지울 줄을 낸다.
+/// 없는 글, 그 이름이 둘 선 글은 `None` 이다(다른 키가 둘 선 것은 그대로 남기고 낸다). 부르는 걸음
+/// (`cmd::skill::Undeclare`)은 `None` 이면 손으로 지울 줄을 낸다 — 다만 계획할 때 못 읽은 파일에는 걸음을 안
+/// 세워 아무 말이 없고, 부를 때 그 이름이 이미 없으면 이룬 것으로 센다.
 pub fn drop_marketplace(text: &str, name: &str) -> Option<String> {
     let before: serde_json::Value = serde_json::from_str(text).ok()?;
     let mut want = before;

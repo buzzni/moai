@@ -4,7 +4,8 @@
 //! 물고 있는 훅 파일을 지우면 그 세션의 도구 호출이 전부 막힌다. 실제로 한 번
 //! 그렇게 잠겼고, 껍데기를 만들 도구조차 그 훅에 막혀 세션을 다시 여는 것
 //! 말고는 길이 없었다. **밖에서 심은 것을 안에서 걷어내지 않는다** — 걷어낼
-//! 때도 `claude` 의 등록만 걷고 파일은 남긴다.
+//! 때도 `claude` 의 등록만 걷고 파일은 남긴다. moai 가 제 손으로 고치는 사람의
+//! 설정은 옛 판이 커밋된 설정에 적은 선언을 걷는 [`Undeclare`] 하나다.
 //!
 //! `claude` 를 못 찾아도 파일은 심는다. 등록만 사람이 한 줄 치면 된다 —
 //! 절반을 해 놓고 아무 말 없이 실패하는 것이 제일 나쁘다.
@@ -745,7 +746,7 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
     let known = ledger("known_marketplaces.json");
     let shared = other_user_moai(target);
     for (id, repo) in RETIRED {
-        let market = id.split_once('@').map_or(id, |(_, m)| m);
+        let market = market_of(id);
         if !known.as_ref().and_then(|k| skill::market_repo(k, market)).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
             continue;
         }
@@ -764,24 +765,34 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
     // **project 범위면 커밋된 설정의 선언도 걷는다**(사용자 결정 moai-6ugu.aae). 옛 `install --scope project` 는
     // `marketplace add <저장소> --scope project` 로 그 파일에 선언을 적었고, `plugin uninstall` 은 그것을 남긴다.
     // 출처는 그 파일에 적힌 것으로 잰다. 그 파일이 이 마켓의 플러그인을 켜 두었으면 그것이 이번에 project 에서
-    // 걷는 바로 그 플러그인일 때만 걷는다 — 다른 것을 켜 두었으면 그 선언은 이제 그것의 것이다.
-    if scopes.contains(&"project") {
-        let file = root.join(".claude/settings.json");
-        let settings = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok());
-        for (id, repo) in RETIRED {
-            let Some(settings) = &settings else { break };
-            let market = id.split_once('@').map_or(id, |(_, m)| m);
-            if !skill::declared_repo(settings, market).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
-                continue;
-            }
-            let going = out.steps.iter().any(|s| s.id == id && s.scope == "project");
-            if skill::plugins_from(settings, market).iter().any(|p| !(going && p == id)) {
-                continue;
-            }
-            out.undeclare.push(Undeclare { market, file: file.clone(), ok: None });
+    // 걷는 바로 그 플러그인일 때만 걷는다 — 다른 것을 켜 두었으면 그 선언은 이제 그것의 것이다. 못 읽는 파일에는
+    // 걸음을 안 세운다 — 어느 출처를 선언했는지 모른다.
+    if !scopes.contains(&"project") {
+        return out;
+    }
+    let file = root.join(".claude/settings.json");
+    let Some(settings) =
+        std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return out;
+    };
+    for (id, repo) in RETIRED {
+        let market = market_of(id);
+        if !skill::declared_repo(&settings, market).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
+            continue;
         }
+        let going = out.steps.iter().any(|s| s.id == id && s.scope == "project");
+        if skill::plugins_from(&settings, market).iter().any(|p| !(going && p == id)) {
+            continue;
+        }
+        out.undeclare.push(Undeclare { market, file: file.clone(), ok: None });
     }
     out
+}
+
+/// 설치 id(`<플러그인>@<마켓플레이스>`)의 마켓플레이스 이름 — [`RETIRED`] 의 장부 줄과 설정 선언을 이 이름으로 찾는다.
+fn market_of(id: &str) -> &str {
+    id.split_once('@').map_or(id, |(_, m)| m)
 }
 
 /// `claude` 에 등록한다. **사람의 `settings.json` 은 우리가 안 건드린다** —

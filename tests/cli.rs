@@ -17209,6 +17209,34 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
     );
 }
 
+/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 고치지 않는다**(`store::write_atomic_inside`) — 받은
+/// 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃 밖의 파일을 고친다. 링크도
+/// 보통 파일로 안 바꾼다. 못 지운 것으로 세어 손으로 지울 자리를 대고, 종료 코드는 등록만 따른다.
+#[test]
+fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
+    let s = init("skillundeclarelink");
+    let c = Claude::new("skillundeclarelink-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+    let outside = c.home.path().join("outside-settings.json");
+    let body = project_settings(&market, &dir, &[], &OLD_MARKETS);
+    std::fs::write(&outside, &body).unwrap();
+    let file = root.join(".claude/settings.json");
+    let _ = std::fs::remove_file(&file);
+    std::os::unix::fs::symlink(&outside, &file).unwrap();
+
+    let out = c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true);
+    assert!(out.status.success(), "선언 하나를 못 지웠다고 설치가 실패로 끝났다\n{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    for (name, _) in OLD_MARKETS {
+        let row = format!(r#"{{"file":{},"marketplace":"{name}","ok":false}}"#, json_str(&file.display().to_string()));
+        assert!(json.contains(&row), "{json}");
+    }
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), body, "체크아웃 밖의 파일을 고쳤다");
+    assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+}
+
 /// **선언을 걷는 문은 셋이 겹칠 때만 열린다**(moai-6ugu.aae) — 옛 판 moai 가 project 범위에 섰고, 그 파일에
 /// 적힌 출처가 옛 판의 것이고, 그 파일이 이 마켓의 다른 플러그인을 안 켜 두었다. 하나라도 빠지면 그 파일을 안
 /// 건드린다. `uninstall` 도 같은 문을 쓰고, moai 를 다 못 걷으면 안 부른다.
@@ -17233,6 +17261,17 @@ fn skill_undeclares_only_behind_the_same_door() {
         assert!(c.run(s.path(), &["skill", "install"], true).status.success());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "{what}: 설정을 고쳤다");
     }
+
+    // 그 파일이 켠 것이 옛 판의 그 플러그인이어도 이번에 project 에서 걷지 않으면 안 걷는다 — 장부의 마켓플레이스가
+    // 포크라 플러그인 걸음이 안 선다. 걷겠다고 약속하면, 부를 때 켠 줄이 남아 "손으로 지워라" 가 켠 플러그인의
+    // 출처를 뺏으라는 말이 된다.
+    c.ledger(
+        "known_marketplaces.json",
+        &known_with_retired(&market, &dir).replace("DaleSeo/korean-skills", "someone/korean-skills"),
+    );
+    let body = project_settings(&market, &dir, &["korean-skills@korean-skills"], &OLD_MARKETS[..1]);
+    std::fs::write(&file, &body).unwrap();
+    assert!(plan().contains(r#""undeclared":[]"#), "이번에 안 걷는 플러그인이 켠 선언을 걷는다\n{}", plan());
 
     // moai 가 project 에 안 섰다 — local 의 옛 판만 있다.
     let body = project_settings(&market, &dir, &[], &OLD_MARKETS);
