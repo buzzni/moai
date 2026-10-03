@@ -26,14 +26,15 @@ does not tag — see `CONTRIBUTING.md`.
   priority over its title — ending in `/`, as in the list, when `Enter` can go
   into it — with a foot for the `SPC c` columns that are on. `j`/`k` move within
   a column, `h`/`l` to the next one, and a click takes a card. The wheel,
-  `Ctrl-d`/`Ctrl-u` and `Ctrl-f`/`Ctrl-b` scroll the board instead of moving the
-  cursor: the cursor's card stays chosen while it is on screen, one pushed off
-  is pulled to the nearest card on screen in its column, and the scrolling stops
-  where that column has none left. When the cursor's card goes away — a reload,
-  a view toggle, a filter or a search — the cursor stays in that column, on the
-  nearest card left in it, or else moves to the nearest column beside it. While
-  a search is being typed it measures from the card the search opened on, so
-  fixing a typo brings the cursor back to that card. In the
+  `Ctrl-d`/`Ctrl-u`, `Ctrl-f`/`Ctrl-b` and `PageDown`/`PageUp` scroll the board,
+  not the cursor: the chosen card and the detail stay as they are even once the
+  card is off screen, and the board scrolls all the way to its end. The next
+  cursor key moves from that card and brings the board back to it; a reload
+  leaves the scrolled board where it is. When the cursor's card goes away — a
+  reload, a view toggle, a filter or a search — the cursor stays in that column,
+  on the nearest card left in it, or else moves to the nearest column beside it.
+  While a search is being typed it measures from the card the search opened on,
+  so fixing a typo brings the cursor back to that card. In the
   overview (`0`) every project stands as a header across the columns, with an
   unfolded project's milestone lanes under it, and the columns are those of
   every project shown; on a header `l`, `h`, `Tab` and `Enter` unfold, fold and
@@ -68,6 +69,23 @@ does not tag — see `CONTRIBUTING.md`.
   shortened so the line fits 80 columns: `(bad answer)` and `(call failed)`.
   When the project numbers need the room, the last answer moves to the row
   under the version line instead of pushing them out.
+
+### Fixed
+
+- **`Esc` in the search box goes back to the row it was opened on, even after a
+  reload.** It went back to that row's number, and the file is re-read while
+  the box is open — every minute and on every write from another session — so a
+  different row could be standing there by then.
+
+- **In the overview, re-reading a project no longer moves the cursor to another
+  row.** The overview strings the rows of every unfolded project together, and
+  when a project above the cursor was re-read with a different number of rows,
+  the cursor kept its row number and stood on whatever row had moved into it.
+
+- **After `SPC p a` registers a project in the overview, the cursor stands on
+  that project's header.** With a project above it unfolded, the cursor landed
+  on one of that project's rows instead: the new project's place among the
+  projects was read as a row number.
 
 ## [0.3.0] - 2026-10-02
 
