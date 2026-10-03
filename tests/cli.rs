@@ -17059,6 +17059,207 @@ fn skill_uninstall_leaves_user_scope_korean_plugins_another_moai_uses() {
     assert!(calls.contains("plugin uninstall korean-skills@korean-skills --scope user"), "{calls}");
 }
 
+/// 커밋된 `.claude/settings.json` — `claude` 가 적는 꼴(두 칸 들여쓰기) 그대로. `enabled` 는 `enabledPlugins` 에
+/// moai 와 함께 둘 id, `declared` 는 moai 의 것 곁에 선언할 `(이름, 출처 저장소)`.
+fn project_settings(market: &str, dir: &Path, enabled: &[&str], declared: &[(&str, &str)]) -> String {
+    let mut on: Vec<String> = enabled.iter().map(|id| format!("    \"{id}\": true")).collect();
+    on.push(format!("    \"moai@{market}\": true"));
+    let github = |name: &str, repo: &str| {
+        format!(
+            "    \"{name}\": {{\n      \"source\": {{\n        \"source\": \"github\",\n        \"repo\": \"{repo}\"\n      }}\n    }}"
+        )
+    };
+    let mut known: Vec<String> = declared.iter().take(1).map(|(n, r)| github(n, r)).collect();
+    known.push(format!(
+        "    \"{market}\": {{\n      \"source\": {{\n        \"source\": \"directory\",\n        \"path\": {}\n      }}\n    }}",
+        json_str(&dir.display().to_string())
+    ));
+    known.extend(declared.iter().skip(1).map(|(n, r)| github(n, r)));
+    format!(
+        "{{\n  \"enabledPlugins\": {{\n{}\n  }},\n  \"extraKnownMarketplaces\": {{\n{}\n  }}\n}}\n",
+        on.join(",\n"),
+        known.join(",\n")
+    )
+}
+
+/// 옛 판의 moai 와 두 곁의 것이 **project 범위**에 선 장부.
+fn project_ledger(c: &Claude, market: &str, root: &Path, dir: &Path) {
+    let row = |path: &str| {
+        format!(
+            "{{\"scope\":\"project\",\"projectPath\":{},\"installPath\":{},\"version\":\"1\"}}",
+            json_str(&root.display().to_string()),
+            json_str(path)
+        )
+    };
+    c.ledger(
+        "installed_plugins.json",
+        &format!(
+            "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{}],\"korean-skills@korean-skills\":[{}],\"humanize-korean@im-not-ai\":[{}]}}}}",
+            row(&old_moai(c.home.path())),
+            row("/x"),
+            row("/x")
+        ),
+    );
+    c.ledger("known_marketplaces.json", &known_with_retired(market, dir));
+}
+
+const OLD_MARKETS: [(&str, &str); 2] =
+    [("korean-skills", "DaleSeo/korean-skills"), ("im-not-ai", "epoko77-ai/im-not-ai")];
+
+/// **project 범위면 커밋된 설정의 옛 마켓플레이스 선언도 걷는다 — 그 줄만**(사용자 결정 moai-6ugu.aae).
+/// `plugin uninstall` 은 `enabledPlugins` 의 줄만 걷어, 선언이 커밋된 채 동료에게 계속 권해졌다. 걷는 것은
+/// `claude` 가 아니라 moai 다 — `marketplace remove --scope project` 는 다른 범위에 같은 선언이 없으면 기계 전체를
+/// 걷는다. 다른 바이트는 그대로 남는다. 선언 지우기는 플러그인 걸음 **뒤에** 그 파일을 다시 읽는다 — 이 시험의
+/// 가짜는 `plugin uninstall … --scope project` 때 `enabledPlugins` 의 줄을 걷는다(진짜 `claude` 가 하는 일이다).
+#[test]
+fn skill_install_undeclares_the_old_marketplaces_at_project_scope() {
+    let s = init("skillundeclare");
+    let c = Claude::new("skillundeclare-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+    let file = root.join(".claude/settings.json");
+    let with = project_settings(&market, &dir, &["korean-skills@korean-skills"], &OLD_MARKETS);
+    std::fs::write(&file, &with).unwrap();
+    let unplugged = c.home.path().join("unplugged.json");
+    std::fs::write(&unplugged, project_settings(&market, &dir, &[], &OLD_MARKETS)).unwrap();
+    let source = c.home.path().join("claude-unplugging.sh");
+    std::fs::write(
+        &source,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> \"{}\"\ncase \"$*\" in *\"plugin uninstall korean-skills@korean-skills --scope project\"*) /bin/cp \"{}\" \"{}\";; esac\nexit 0\n",
+            c.log.display(),
+            unplugged.display(),
+            file.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::remove_file(c.bin.join("claude")).unwrap();
+    place_exe(&source, &c.bin.join("claude"));
+
+    let plan = text(&c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run"], true));
+    for (name, _) in OLD_MARKETS {
+        assert!(
+            plan.contains(&format!(
+                "{} 의 extraKnownMarketplaces 에서 {name} 마켓플레이스 선언을 지운다",
+                file.display()
+            )),
+            "{plan}"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), with, "연습인데 설정을 고쳤다");
+
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    for (name, _) in OLD_MARKETS {
+        let row = format!(r#"{{"file":{},"marketplace":"{name}","ok":true}}"#, json_str(&file.display().to_string()));
+        assert!(json.contains(&row), "{json}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        project_settings(&market, &dir, &[], &[]),
+        "옛 선언 두 줄 말고 다른 것이 바뀌었거나 덜 걷혔다"
+    );
+    let calls = c.calls()[before..].to_string();
+    assert!(!calls.contains("marketplace remove"), "claude 로 마켓플레이스를 걷었다\n{calls}");
+
+    // 사람 화면은 걷은 것과, 커밋해야 한다는 것을 말한다.
+    std::fs::write(&file, &with).unwrap();
+    let said = text(&c.run(s.path(), &["skill", "install", "--scope", "project"], true));
+    assert!(
+        said.contains(&format!(
+            "· {} 에서 korean-skills 마켓플레이스 선언을 지웠다 — 그 파일을 커밋해야",
+            file.display()
+        )),
+        "{said}"
+    );
+}
+
+/// **플러그인을 못 걷었으면 그 선언은 안 지운다** — 켠 플러그인이 출처를 잃는다. 손으로 지울 자리를 대고, 종료
+/// 코드는 등록만 따른다(옛 판이 곁에 깐 것의 셈과 같다). 안 켜 둔 다른 선언은 걷는다.
+#[test]
+fn skill_install_keeps_a_declaration_whose_plugin_stays() {
+    let s = init("skillundeclarefail");
+    let c = Claude::failing_on("skillundeclarefail-home", Some("plugin uninstall korean-skills"));
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+    let file = root.join(".claude/settings.json");
+    std::fs::write(&file, project_settings(&market, &dir, &["korean-skills@korean-skills"], &OLD_MARKETS)).unwrap();
+
+    let out = c.run(s.path(), &["skill", "install", "--scope", "project"], true);
+    assert!(out.status.success(), "선언 하나를 못 지웠다고 설치가 실패로 끝났다\n{}", text(&out));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        project_settings(&market, &dir, &["korean-skills@korean-skills"], &OLD_MARKETS[..1]),
+        "켠 플러그인의 선언을 지웠거나, 안 켠 것의 선언을 남겼다"
+    );
+    let said = text(&out);
+    assert!(
+        said.contains(&format!(
+            "! {} 의 korean-skills 마켓플레이스 선언을 못 지웠다 — 손으로: 그 파일의 extraKnownMarketplaces 에서 \"korean-skills\" 를 지운다",
+            file.display()
+        )),
+        "{said}"
+    );
+}
+
+/// **선언을 걷는 문은 셋이 겹칠 때만 열린다**(moai-6ugu.aae) — 옛 판 moai 가 project 범위에 섰고, 그 파일에
+/// 적힌 출처가 옛 판의 것이고, 그 파일이 이 마켓의 다른 플러그인을 안 켜 두었다. 하나라도 빠지면 그 파일을 안
+/// 건드린다. `uninstall` 도 같은 문을 쓰고, moai 를 다 못 걷으면 안 부른다.
+#[test]
+fn skill_undeclares_only_behind_the_same_door() {
+    let s = init("skillundeclaredoor");
+    let c = Claude::new("skillundeclaredoor-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    let file = root.join(".claude/settings.json");
+    let plan =
+        || String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+
+    // 포크를 가리키는 선언, 이 마켓의 다른 플러그인을 켠 파일.
+    project_ledger(&c, &market, &root, &dir);
+    for (what, body) in [
+        ("포크", project_settings(&market, &dir, &[], &[("korean-skills", "someone/korean-skills")])),
+        ("다른 플러그인", project_settings(&market, &dir, &["other@korean-skills"], &OLD_MARKETS[..1])),
+    ] {
+        std::fs::write(&file, &body).unwrap();
+        assert!(plan().contains(r#""undeclared":[]"#), "{what}: 선언을 걷는다\n{}", plan());
+        assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "{what}: 설정을 고쳤다");
+    }
+
+    // moai 가 project 에 안 섰다 — local 의 옛 판만 있다.
+    let body = project_settings(&market, &dir, &[], &OLD_MARKETS);
+    std::fs::write(&file, &body).unwrap();
+    ledger_with(&c, &market, &root, &[("korean-skills@korean-skills", "local", Some("."))]);
+    assert!(plan().contains(r#""undeclared":[]"#), "project 에 안 선 moai 로 선언을 걷는다\n{}", plan());
+
+    // `uninstall` — moai 를 걷으면 함께 걷고, 못 걷으면 안 부른다.
+    project_ledger(&c, &market, &root, &dir);
+    let failing = Claude::failing_on("skillundeclaredoor-fail", Some("plugin uninstall moai@"));
+    std::fs::create_dir_all(failing.home.path().join(".claude/plugins")).unwrap();
+    for name in ["installed_plugins.json", "known_marketplaces.json"] {
+        std::fs::copy(
+            c.home.path().join(".claude/plugins").join(name),
+            failing.home.path().join(".claude/plugins").join(name),
+        )
+        .unwrap();
+    }
+    let json = String::from_utf8(failing.run(s.path(), &["skill", "uninstall", "--json"], true).stdout).unwrap();
+    assert!(json.contains(r#""marketplace":"korean-skills","ok":null"#), "moai 를 못 걷었는데 불렀다\n{json}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "moai 를 못 걷었는데 설정을 고쳤다");
+    let out = c.run(s.path(), &["skill", "uninstall", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(String::from_utf8(out.stdout).unwrap().contains(r#""marketplace":"im-not-ai","ok":true"#));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), project_settings(&market, &dir, &[], &[]));
+}
+
 /// `claude` 가 없으면 부를 명령을 내고 비영으로 끝난다. **절반을 해 놓고
 /// 아무 말 없이 성공하는 것이 제일 나쁘다.**
 #[test]

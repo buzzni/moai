@@ -12,6 +12,10 @@
 //! 플러그인으로 심으면 훅이 **우리 디렉터리 안**에 있고, 사람의 설정에는
 //! `claude` 가 제 손으로 두 키(`extraKnownMarketplaces`·`enabledPlugins`)만
 //! 넣는다. 우리는 남의 JSON 을 만지지 않는다.
+//!
+//! **하나뿐인 예외**는 옛 판이 커밋된 `.claude/settings.json` 에 적은 한국어
+//! 플러그인의 마켓플레이스 선언을 걷는 것이다(사용자 결정 moai-6ugu.aae). 그때도
+//! 다시 짓지 않고 그 멤버의 줄만 도려내, 서식은 그대로 남는다([`drop_marketplace`]).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -600,6 +604,175 @@ pub fn market_repo(known: &serde_json::Value, name: &str) -> Option<String> {
         Some(rest.strip_suffix(".git").unwrap_or(rest).to_string())
     };
     Some(text("repo").map(str::to_string).or_else(from_url).unwrap_or_default())
+}
+
+/// 설정(`settings.json`)의 `extraKnownMarketplaces` 가 이 이름을 **어느 GitHub 저장소로 선언했는가** — 꼴이
+/// `known_marketplaces.json` 의 줄과 같아 [`market_repo`] 가 그대로 읽는다(`claude plugin marketplace add
+/// --scope <범위>` 가 그 범위의 설정에 같은 `source` 를 적는다).
+pub fn declared_repo(settings: &serde_json::Value, name: &str) -> Option<String> {
+    market_repo(settings.get("extraKnownMarketplaces")?, name)
+}
+
+/// 설정의 `enabledPlugins` 가 이 마켓플레이스(`<플러그인>@<이름>`)에서 든 플러그인 id. **값은 안 본다** —
+/// `false` 로 꺼 둔 줄도 그 선언을 가리킨다.
+pub fn plugins_from(settings: &serde_json::Value, market: &str) -> Vec<String> {
+    let tail = format!("@{market}");
+    let Some(enabled) = settings.get("enabledPlugins") else { return Vec::new() };
+    let ids: Vec<&str> = match enabled {
+        serde_json::Value::Object(m) => m.keys().map(String::as_str).collect(),
+        serde_json::Value::Array(a) => a.iter().filter_map(|v| v.as_str()).collect(),
+        _ => Vec::new(),
+    };
+    ids.into_iter().filter(|id| id.ends_with(&tail)).map(str::to_string).collect()
+}
+
+/// 커밋된 설정 글(`.claude/settings.json`)에서 `extraKnownMarketplaces` 의 `name` 하나를 **줄째** 지운 글
+/// (사용자 결정 moai-6ugu.aae). 옛 `skill install --scope project` 가 곁 플러그인의 마켓플레이스를 그 파일에
+/// 선언했고, `claude plugin uninstall` 은 `enabledPlugins` 의 줄만 걷어 선언이 동료에게 계속 권해진다. 걷는
+/// 길을 `claude` 에 맡기지 않는 까닭은 `marketplace remove --scope project` 가 다른 범위에 같은 선언이 없으면
+/// 기계 전체 장부와 다른 저장소의 설치까지 걷어서다(claude 2.1.287 에서 잼).
+///
+/// **다른 바이트는 그대로 둔다** — 이 모듈 머리의 "남의 JSON 을 안 만진다" 는 다시 쓰면 서식이 사라져서였다.
+/// 그래서 다시 짓지 않고 그 멤버의 글만 도려낸다. 줄 머리에서 선 멤버면 그 줄들을, 한 줄에 몰린 꼴이면 그
+/// 멤버만 걷고, 쉼표는 뒤의 것(끝 멤버면 앞의 것) 하나를 함께 걷는다. 하나뿐이던 멤버를 걷으면 `{}` 가 된다 —
+/// `claude` 가 빈 선언을 적는 꼴이다.
+///
+/// **지운 글을 다시 읽어 원래 값에서 그 키 하나만 빠졌을 때만 낸다.** 못 읽는 글(주석 든 JSON 등), 그 이름이
+/// 없는 글, 같은 키가 둘 선 글은 `None` 이고 부르는 쪽은 손으로 지울 줄을 낸다.
+pub fn drop_marketplace(text: &str, name: &str) -> Option<String> {
+    let before: serde_json::Value = serde_json::from_str(text).ok()?;
+    let mut want = before;
+    want.get_mut("extraKnownMarketplaces")?.as_object_mut()?.remove(name)?;
+    let b = text.as_bytes();
+    let (top, _) = json_members(b, json_ws(b, 0))?;
+    let outer = top.iter().find(|m| m.key_is(text, "extraKnownMarketplaces"))?;
+    let (list, close) = json_members(b, outer.value.0)?;
+    let at = list.iter().position(|m| m.key_is(text, name))?;
+    let m = &list[at];
+    let cut = if list.len() == 1 {
+        outer.value.0 + 1..close
+    } else if at + 1 < list.len() {
+        let comma = json_ws(b, m.value.1);
+        let start = line_head(b, m.key.0);
+        let end = b[comma + 1..].iter().position(|&c| c == b'\n').map(|n| comma + 1 + n);
+        match end {
+            Some(end) if start.is_some() && b[comma + 1..end].iter().all(|c| c.is_ascii_whitespace()) => {
+                start.unwrap()..end + 1
+            }
+            _ => m.key.0..list[at + 1].key.0,
+        }
+    } else {
+        let comma = json_ws(b, list[at - 1].value.1);
+        let mut end = m.value.1;
+        while matches!(b.get(end), Some(b' ' | b'\t')) {
+            end += 1;
+        }
+        comma..end
+    };
+    let out = format!("{}{}", &text[..cut.start], &text[cut.end..]);
+    (serde_json::from_str::<serde_json::Value>(&out).ok()? == want).then_some(out)
+}
+
+/// JSON 객체 멤버 하나의 글 자리 — 키(따옴표 포함)와 값의 `[시작, 끝)`.
+struct JsonMember {
+    key: (usize, usize),
+    value: (usize, usize),
+}
+
+impl JsonMember {
+    fn key_is(&self, text: &str, name: &str) -> bool {
+        serde_json::from_str::<String>(&text[self.key.0..self.key.1]).is_ok_and(|k| k == name)
+    }
+}
+
+/// `i` 부터 빈칸을 건넌 자리.
+fn json_ws(b: &[u8], mut i: usize) -> usize {
+    while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+        i += 1;
+    }
+    i
+}
+
+/// `i` 에서 시작하는 값 하나가 끝나는 자리. 글자열 안의 괄호와 이스케이프를 건넌다. 꼴이 맞는지는 안 잰다 —
+/// 그것은 [`drop_marketplace`] 의 다시 읽기가 잰다.
+fn json_value_end(b: &[u8], i: usize) -> Option<usize> {
+    match b.get(i)? {
+        b'"' => {
+            let mut j = i + 1;
+            loop {
+                match b.get(j)? {
+                    b'\\' => j += 2,
+                    b'"' => return Some(j + 1),
+                    _ => j += 1,
+                }
+            }
+        }
+        b'{' | b'[' => {
+            let mut depth = 0usize;
+            let mut j = i;
+            loop {
+                match b.get(j)? {
+                    b'"' => {
+                        j = json_value_end(b, j)?;
+                        continue;
+                    }
+                    b'{' | b'[' => depth += 1,
+                    b'}' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(j + 1);
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+        }
+        _ => {
+            let n = b[i..].iter().position(|c| c.is_ascii_whitespace() || matches!(c, b',' | b'}' | b']'));
+            Some(n.map_or(b.len(), |n| i + n))
+        }
+    }
+}
+
+/// `open` 의 `{` 로 여는 객체의 멤버들과 닫는 `}` 의 자리.
+fn json_members(b: &[u8], open: usize) -> Option<(Vec<JsonMember>, usize)> {
+    if b.get(open) != Some(&b'{') {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut i = json_ws(b, open + 1);
+    if b.get(i) == Some(&b'}') {
+        return Some((out, i));
+    }
+    loop {
+        if b.get(i) != Some(&b'"') {
+            return None;
+        }
+        let key = (i, json_value_end(b, i)?);
+        let colon = json_ws(b, key.1);
+        if b.get(colon) != Some(&b':') {
+            return None;
+        }
+        let start = json_ws(b, colon + 1);
+        let value = (start, json_value_end(b, start)?);
+        out.push(JsonMember { key, value });
+        i = json_ws(b, value.1);
+        match b.get(i)? {
+            b',' => i = json_ws(b, i + 1),
+            b'}' => return Some((out, i)),
+            _ => return None,
+        }
+    }
+}
+
+/// `at` 앞이 줄 머리까지 빈칸뿐이면 그 줄 머리.
+fn line_head(b: &[u8], at: usize) -> Option<usize> {
+    let mut i = at;
+    while i > 0 && matches!(b[i - 1], b' ' | b'\t') {
+        i -= 1;
+    }
+    (i == 0 || b[i - 1] == b'\n').then_some(i)
 }
 
 /// 매니페스트가 훅으로 부르는 실행 파일. `command` 가 적는 모양
@@ -1266,6 +1439,73 @@ mod tests {
         assert_eq!(market_repo(&known, "d").as_deref(), Some(""));
         assert_eq!(market_repo(&known, "e").as_deref(), Some(""));
         assert_eq!(market_repo(&known, "z"), None);
+    }
+
+    /// **`claude` 가 적은 꼴에서 그 멤버의 줄만 빠진다**(moai-6ugu.aae) — 끝 멤버면 앞 줄의 쉼표, 가운데면 제
+    /// 쉼표, 하나뿐이면 `{}`. 다른 바이트는 한 글자도 안 바뀐다.
+    #[test]
+    fn dropping_a_marketplace_takes_only_its_lines() {
+        let head = "{\n  \"enabledPlugins\": {\n    \"a@b\": true\n  },\n  \"extraKnownMarketplaces\": {\n";
+        let keep = "    \"keepme\": {\n      \"source\": {\n        \"source\": \"github\",\n        \"repo\": \"a/b\"\n      }\n    }";
+        let ks = "    \"korean-skills\": {\n      \"source\": {\n        \"source\": \"github\",\n        \"repo\": \"DaleSeo/korean-skills\"\n      }\n    }";
+        let tail = "\n  }\n}\n";
+        let last = format!("{head}{keep},\n{ks}{tail}");
+        assert_eq!(drop_marketplace(&last, "korean-skills"), Some(format!("{head}{keep}{tail}")));
+        let first = format!("{head}{ks},\n{keep}{tail}");
+        assert_eq!(drop_marketplace(&first, "korean-skills"), Some(format!("{head}{keep}{tail}")));
+        let middle = format!("{head}{keep},\n{ks},\n{}{tail}", keep.replace("keepme", "other"));
+        assert_eq!(
+            drop_marketplace(&middle, "korean-skills"),
+            Some(format!("{head}{keep},\n{}{tail}", keep.replace("keepme", "other")))
+        );
+        let alone = format!("{head}{ks}{tail}");
+        assert_eq!(
+            drop_marketplace(&alone, "korean-skills"),
+            Some("{\n  \"enabledPlugins\": {\n    \"a@b\": true\n  },\n  \"extraKnownMarketplaces\": {}\n}\n".into())
+        );
+        // CRLF 도 줄째 빠진다.
+        let crlf = last.replace('\n', "\r\n");
+        assert_eq!(drop_marketplace(&crlf, "korean-skills"), Some(format!("{head}{keep}{tail}").replace('\n', "\r\n")));
+    }
+
+    /// 한 줄에 몰린 꼴은 그 멤버와 쉼표 하나만 빠진다. 글자열 안의 괄호·따옴표는 건넌다.
+    #[test]
+    fn dropping_a_marketplace_from_one_line() {
+        let text = r#"{"x":"}\"{","extraKnownMarketplaces":{"a":{"s":"]"}, "im-not-ai":{"source":{}},"b":1}}"#;
+        assert_eq!(
+            drop_marketplace(text, "im-not-ai").as_deref(),
+            Some(r#"{"x":"}\"{","extraKnownMarketplaces":{"a":{"s":"]"}, "b":1}}"#)
+        );
+        assert_eq!(
+            drop_marketplace(r#"{"extraKnownMarketplaces":{"a":1, "im-not-ai":2 }}"#, "im-not-ai").as_deref(),
+            Some(r#"{"extraKnownMarketplaces":{"a":1}}"#)
+        );
+    }
+
+    /// **그 키 하나만 빠진 값이 아니면 안 쓴다** — 못 읽는 글, 없는 이름, 같은 키가 둘 선 글.
+    #[test]
+    fn dropping_a_marketplace_refuses_what_it_cannot_prove() {
+        for text in [
+            "// note\n{\"extraKnownMarketplaces\": {\"k\": 1}}",
+            "{\"extraKnownMarketplaces\": {\"other\": 1}}",
+            "{\"extraKnownMarketplaces\": {\"k\": 1, \"k\": 2}}",
+            "{\"enabledPlugins\": {}}",
+            "[]",
+        ] {
+            assert_eq!(drop_marketplace(text, "k"), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_settings_file_names_what_it_declares_and_enables() {
+        let settings = serde_json::json!({
+            "enabledPlugins": {"korean-skills@korean-skills": false, "x@korean-skills-fork": true},
+            "extraKnownMarketplaces": {"korean-skills": {"source": {"source": "github", "repo": "DaleSeo/korean-skills"}}},
+        });
+        assert_eq!(declared_repo(&settings, "korean-skills").as_deref(), Some("DaleSeo/korean-skills"));
+        assert_eq!(declared_repo(&settings, "im-not-ai"), None);
+        assert_eq!(plugins_from(&settings, "korean-skills"), ["korean-skills@korean-skills"]);
+        assert!(plugins_from(&serde_json::json!({}), "korean-skills").is_empty());
     }
 
     /// 매니페스트에서 훅이 부르는 실행 파일을 **심은 그대로** 꺼낸다 — 이름이든

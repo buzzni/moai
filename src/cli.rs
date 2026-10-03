@@ -1582,7 +1582,7 @@ pub enum SkillCmd {
     /// Install the plugin tree and register it with `claude`
     #[command(after_help = "  Skills and hooks are installed into `.claude/moai-plugin/` and registered
   with `claude`. Your settings.json is not touched - putting the two keys in
-  is `claude`'s job.
+  is `claude`'s job. The one exception is the old declarations below.
 
   **No file is deleted.** Running again only overwrites. Deleting a hook file
   a running session holds would block every tool call of that session.
@@ -1600,6 +1600,15 @@ pub enum SkillCmd {
   there, and then the command to remove it is printed in one line. The
   marketplaces are left behind. If one cannot be removed, moai's own
   registration still stands and the command to remove it by hand is printed.
+
+  At project scope an earlier moai also declared their marketplaces in the
+  committed .claude/settings.json, which kept offering them to the team. moai
+  deletes those entries itself - only theirs, only when they point where an
+  earlier moai pointed them, and only when nothing in that file still enables
+  a plugin from them. Every other byte of the file stays as it was; commit the
+  change. `claude plugin marketplace remove --scope project` is not used: with
+  no other declaration in sight it removes the marketplace from the whole
+  machine. If the entry cannot be deleted, where to delete it is printed.
 
   moai skill install                  just me (the default. settings.local.json)
   moai skill install --scope user     every repository on this machine
@@ -1645,7 +1654,8 @@ pub enum SkillCmd {
     #[command(after_help = "  This repository's install is removed per scope with
   `claude plugin uninstall`, and the marketplace with
   `claude plugin marketplace remove`. Deleting the two keys from your
-  settings is `claude`'s job - we do not touch someone else's JSON.
+  settings is `claude`'s job - we do not touch someone else's JSON, except
+  the old declarations below.
 
   **`.claude/moai-plugin/` is not deleted.** Deleting a file a running
   session holds can block that session's tool calls. Delete it after closing
@@ -1655,7 +1665,8 @@ pub enum SkillCmd {
   the scope moai was removed from**, under the same conditions as install: an
   earlier version of moai stands there and the marketplace is the one it
   added. The marketplace is left behind - the name is global to one machine
-  and another repository's install uses it.
+  and another repository's install uses it. At project scope its declaration
+  in the committed .claude/settings.json goes, as with install.
   A user-scope install is also left behind when another repository's moai
   stands there, and then the command to remove it is printed in one line.
 

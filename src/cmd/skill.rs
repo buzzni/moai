@@ -71,6 +71,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
                 "retired": retiring.json(),
+                "undeclared": retiring.undeclared_json(),
                 "kept": retiring.kept,
             }));
         }
@@ -94,6 +95,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         for step in &retiring.steps {
             out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
+        out.extend(retiring.undeclare.iter().map(|u| fill(say(lang, "skill.plan_retire"), &[("cmd", &u.what(lang))])));
         out.extend(retiring.kept_lines(lang));
         return Ok(out);
     }
@@ -147,6 +149,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
             "retired": retiring.json(),
+            "undeclared": retiring.undeclared_json(),
             "kept": retiring.kept,
         }));
     }
@@ -164,6 +167,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             None => format!("  - {}{}", step.shown(), say(lang, "skill.step_not_called")),
         });
     }
+    out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
     out.extend(retiring.kept_lines(lang));
     if registered {
         out.push(String::new());
@@ -401,6 +405,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
             "claude": claude,
             "retired": retiring.json(),
+            "undeclared": retiring.undeclared_json(),
             "kept": retiring.kept,
         }));
     }
@@ -422,6 +427,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         }];
         out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
         out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
+        out.extend(retiring.undeclare.iter().map(|u| format!("  {}", u.what(lang))));
         out.extend(retiring.kept_lines(lang));
         return Ok(out);
     }
@@ -447,6 +453,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             None => format!("  - {}{skipped_tail}", step.shown()),
         });
     }
+    out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
     out.extend(retiring.kept_lines(lang));
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
@@ -566,8 +573,9 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
 /// (moai-lr1s 가 깔았다).
 ///
 /// **이제는 깔지 않고 걷는다**(사용자 결정 moai-vtfu, 2026-10-03). 글은 기본으로 쓰고, moai 가 깐 것은 moai
-/// 가 거둔다 — `install` 과 `uninstall` 이 [`retire`] 로 같은 범위를 걷는다. 마켓플레이스(`@` 뒤)는 두고
-/// 간다: `marketplace remove` 는 기계 하나 전체에 걸려, 다른 저장소나 사람이 그것으로 깐 것까지 끊는다.
+/// 가 거둔다 — `install` 과 `uninstall` 이 [`retire`] 로 같은 범위를 걷는다. 마켓플레이스(`@` 뒤)는 기계에
+/// 두고 간다: `marketplace remove` 는 기계 하나 전체에 걸려, 다른 저장소나 사람이 그것으로 깐 것까지 끊는다.
+/// project 범위의 커밋된 설정에 옛 판이 적은 **선언**만 걷는다([`Undeclare`], moai-6ugu).
 const RETIRED: [(&str, &str); 2] =
     [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")];
 
@@ -598,19 +606,68 @@ impl Retire {
     }
 }
 
+/// 커밋된 설정에서 [`RETIRED`] 의 마켓플레이스 선언 하나를 지우는 걸음(사용자 결정 moai-6ugu.aae) — `claude` 를
+/// 안 부르고 moai 가 그 파일을 고친다([`skill::drop_marketplace`] 가 까닭을 든다).
+struct Undeclare {
+    market: &'static str,
+    file: PathBuf,
+    /// [`Retire::ok`] 와 같다 — 부르지 않았으면 `None`.
+    ok: Option<bool>,
+}
+
+impl Undeclare {
+    /// 그 파일에서 선언을 지운다. **이미 없으면 이룬 것이다.** 그 파일이 이 마켓의 플러그인을 아직 켜 두었으면
+    /// 안 지운다 — 같은 `call` 에서 앞선 `plugin uninstall` 이 실패한 판이고, 선언을 걷으면 켠 플러그인이 출처를
+    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다.
+    fn call(&self, root: &Path) -> bool {
+        let Ok(text) = std::fs::read_to_string(&self.file) else { return false };
+        let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+        if settings.get("extraKnownMarketplaces").and_then(|m| m.get(self.market)).is_none() {
+            return true;
+        }
+        if !skill::plugins_from(&settings, self.market).is_empty() {
+            return false;
+        }
+        skill::drop_marketplace(&text, self.market)
+            .is_some_and(|out| crate::store::write_atomic_inside(&self.file, out.as_bytes(), root).is_ok())
+    }
+
+    /// 할 일 — 연습이 [`Retire::shown`] 자리에 댄다.
+    fn what(&self, lang: crate::i18n::Lang) -> String {
+        fill(say(lang, "skill.undeclare_what"), &[("market", self.market), ("file", &self.file.display().to_string())])
+    }
+
+    /// 부른 뒤의 줄 — 지웠다·못 지웠다(손으로 지울 자리)·안 불렀다.
+    fn line(&self, lang: crate::i18n::Lang) -> String {
+        let file = self.file.display().to_string();
+        let args = [("market", self.market), ("file", file.as_str())];
+        match self.ok {
+            Some(true) => fill(say(lang, "skill.undeclared"), &args),
+            Some(false) => fill(say(lang, "skill.undeclare_failed"), &args),
+            None => format!("  - {}{}", self.what(lang), say(lang, "skill.step_not_called")),
+        }
+    }
+}
+
 /// 걷을 것과, 다른 저장소도 쓰는 줄이라 두고 가는 것.
 #[derive(Default)]
 struct Retired {
     steps: Vec<Retire>,
+    /// 커밋된 설정의 선언을 지우는 걸음 — 플러그인 걸음 **뒤에** 부른다.
+    undeclare: Vec<Undeclare>,
     /// 사용자 범위라 두고 가는 설치 id — 사람 출력은 손으로 걷는 줄을 함께 댄다.
     kept: Vec<&'static str>,
 }
 
 impl Retired {
-    /// 걸음마다 `claude` 를 부르고 결과를 그 걸음에 적는다 — **하나가 실패해도 다음 것을 부른다.**
+    /// 걸음마다 `claude` 를 부르고 결과를 그 걸음에 적는다 — **하나가 실패해도 다음 것을 부른다.** 선언 지우기는
+    /// 그 뒤다 — `plugin uninstall --scope project` 가 그 파일의 `enabledPlugins` 줄을 걷어야 선언이 빈다.
     fn call(&mut self, root: &Path) {
         for step in &mut self.steps {
             step.ok = Some(run(root, &step.argv()));
+        }
+        for step in &mut self.undeclare {
+            step.ok = Some(step.call(root));
         }
     }
 
@@ -619,6 +676,14 @@ impl Retired {
         self.steps
             .iter()
             .map(|step| serde_json::json!({"id": step.id, "scope": step.scope, "command": step.shown(), "ok": step.ok}))
+            .collect()
+    }
+
+    /// `--json` 의 `undeclared` — 선언마다 이름·파일·결과. `ok` 는 `retired` 와 같은 셈이다.
+    fn undeclared_json(&self) -> Vec<serde_json::Value> {
+        self.undeclare
+            .iter()
+            .map(|u| serde_json::json!({"marketplace": u.market, "file": u.file.display().to_string(), "ok": u.ok}))
             .collect()
     }
 
@@ -666,6 +731,10 @@ fn teaches_retired(install: &skill::Install) -> bool {
 /// **사용자 범위의 설치는 다른 저장소의 moai 가 사용자 범위에 서 있으면 둔다** — 그 줄은 기계에 하나라 그
 /// 저장소의 옛 판도 그것을 함께 깔았다. 가리지 않던 판은 한 저장소의 걷기로 다른 저장소의 두 플러그인까지
 /// 지웠다(리뷰 moai-5wk4.76z).
+///
+/// **옛 판이 선 범위가 project 면 커밋된 `.claude/settings.json` 의 마켓플레이스 선언도 걷는다**(사용자 결정
+/// moai-6ugu.aae) — 같은 문 뒤에서, 그 파일에 적힌 출처가 옛 판의 것이고 그 파일이 이 마켓의 다른 플러그인을
+/// 안 켜 두었을 때만([`Undeclare`]).
 fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
     let old: Vec<skill::Install> = installs.iter().filter(|i| teaches_retired(i)).cloned().collect();
     let mut out = Retired::default();
@@ -692,11 +761,31 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
             }
         }
     }
+    // **project 범위면 커밋된 설정의 선언도 걷는다**(사용자 결정 moai-6ugu.aae). 옛 `install --scope project` 는
+    // `marketplace add <저장소> --scope project` 로 그 파일에 선언을 적었고, `plugin uninstall` 은 그것을 남긴다.
+    // 출처는 그 파일에 적힌 것으로 잰다. 그 파일이 이 마켓의 플러그인을 켜 두었으면 그것이 이번에 project 에서
+    // 걷는 바로 그 플러그인일 때만 걷는다 — 다른 것을 켜 두었으면 그 선언은 이제 그것의 것이다.
+    if scopes.contains(&"project") {
+        let file = root.join(".claude/settings.json");
+        let settings = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok());
+        for (id, repo) in RETIRED {
+            let Some(settings) = &settings else { break };
+            let market = id.split_once('@').map_or(id, |(_, m)| m);
+            if !skill::declared_repo(settings, market).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
+                continue;
+            }
+            let going = out.steps.iter().any(|s| s.id == id && s.scope == "project");
+            if skill::plugins_from(settings, market).iter().any(|p| !(going && p == id)) {
+                continue;
+            }
+            out.undeclare.push(Undeclare { market, file: file.clone(), ok: None });
+        }
+    }
     out
 }
 
 /// `claude` 에 등록한다. **사람의 `settings.json` 은 우리가 안 건드린다** —
-/// `claude` 가 제 손으로 두 키만 넣는다.
+/// `claude` 가 제 손으로 두 키만 넣는다. 하나뿐인 예외는 옛 판이 적은 선언을 걷는 [`Undeclare`] 다.
 fn register(
     lang: crate::i18n::Lang,
     root: &Path,
