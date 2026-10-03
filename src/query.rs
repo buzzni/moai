@@ -2163,6 +2163,16 @@ mod tests {
         assert!(hit(&f, &i));
     }
 
+    /// 메일에 괄호가 든 사람도 제 줄을 제 것으로 읽는다(moai-v4p4.6w1) — [`Me`] 는 지금 사람을 `이름 (메일)` 한
+    /// 줄로 들고 [`is_assignee`] 가 그 줄을 되가른다. 줄의 이름은 옛 이름이라 메일로만 갈린다.
+    #[test]
+    fn me_with_brackets_in_the_email_owns_its_rows() {
+        let mut i = issue("a-0001", "todo", &[]);
+        (i.assignee, i.assignee_email) = (Some("옛 이름".into()), Some("a(b)@x.io".into()));
+        let me = Me::of(&crate::model::Actor { name: "레이븐".into(), email: "a(b)@x.io".into() });
+        assert!(me.owns(&i), "제 메일이 든 줄을 남의 것으로 읽었다");
+    }
+
     /// -a none 은 담당 없는 것만 고른다
     #[test]
     fn assignee_none_selects_unassigned() {
