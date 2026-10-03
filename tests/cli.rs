@@ -8,16 +8,19 @@ const BIN: &str = env!("CARGO_BIN_EXE_moai");
 
 /// **바이너리가 제 자리로 적는 철자다** — `BIN` 과 글자가 다를 수 있다(moai-jq1w).
 ///
-/// 제품은 제 자리를 `std::env::current_exe()` 로 읽어 적는다 — `skill install` 은 훅에,
-/// `merge-driver --install` 은 기본값으로. 리눅스에서 그 값은 `/proc/self/exe` 를 읽은 것이라
-/// 링크가 다 풀려 있고, `BIN` 은 cargo 가 target 디렉터리를 적힌 철자대로 이어 지은 것이다.
-/// `target/` 이 `/tmp/cargo-target/<이름>` 으로 가는 링크면(moai-c5xo) 둘이 갈려, 적힌 값을
-/// `BIN` 과 글자로 견주던 시험 셋이 이 기계에서만 붉었다 — CI 에는 링크가 없다.
+/// `merge-driver --install` 은 기본값으로 제 자리를 `std::env::current_exe()` 로 읽어 적는다.
+/// 리눅스에서 그 값은 `/proc/self/exe` 를 읽은 것이라 링크가 다 풀려 있고, `BIN` 은 cargo 가
+/// target 디렉터리를 적힌 철자대로 이어 지은 것이다. `target/` 이 `/tmp/cargo-target/<이름>` 으로
+/// 가는 링크면(moai-c5xo) 둘이 갈려, 적힌 값을 `BIN` 과 글자로 견주던 시험 셋이 이 기계에서만
+/// 붉었다 — CI 에는 링크가 없다.
 ///
-/// **고치는 쪽은 시험이다.** 제품이 링크 철자를 적으려면 부른 쪽이 준 `argv[0]` 를 믿어야
-/// 하는데, 그 값은 부른 쪽 마음대로라 제 자리를 대지 못한다. 푼 철자도 같은 파일을 가리킨다.
-/// 그래서 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나 `--as` 로 건넬 때는 `BIN` 을
-/// 그대로 쓴다.
+/// **머지 드라이버 쪽은 시험이 고친다.** 적힌 값과 견줄 때만 이 철자를 쓰고, 바이너리를 부르거나
+/// `--as` 로 건넬 때는 `BIN` 을 그대로 쓴다. `skill install` 은 다르다 — 훅에는 `argv[0]` 이 대는
+/// **부른 철자**를 적고, 그 철자가 같은 파일일 때만 믿는다(moai-gu5m). 커밋되는 `plugin.json` 에
+/// `/tmp/…` 가 적혀 루트에 diff 가 남던 자리라, 그쪽 시험은 부른 철자와 견준다. **이 철자를 쓰는
+/// 자리가 둘 남는다**(리뷰 moai-gu5m.ke0) — `argv[0]` 을 안 믿어 `current_exe` 로 떨어진 값과 견줄
+/// 때, 그리고 같은 파일의 둘째 철자로 부를 때다. 앞의 것을 `BIN` 으로 바꾸면 링크가 없는 CI 에서는
+/// 푸르고 이 기계에서만 붉다 — moai-jq1w 가 이 자를 세운 그 덫이다.
 ///
 /// 푸는 것은 리눅스에서뿐이다. std 의 `current_exe` 는 macOS 에서 `_NSGetExecutablePath` 가
 /// 낸 철자를 풀지 않고 돌려주므로, 거기서 풀면 거꾸로 갈린다.
@@ -16274,11 +16277,17 @@ fn text(out: &Output) -> String {
 /// 저장소 하나에 트리를 심고, `claude` 가 적었을 장부를 그 판 `version` 으로 세운다.
 /// 설치본 디렉터리에는 트리의 매니페스트를 그대로 복사한다 — `claude` 가 하는 일이다.
 fn installed(s: &Scratch, c: &Claude, version: &str) -> (String, PathBuf) {
-    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    installed_as(s, c, Path::new(BIN), version)
+}
+
+/// [`installed`] 를 `bin` 으로 불러 심는다 — 훅에는 부른 철자가 적힌다(moai-gu5m).
+fn installed_as(s: &Scratch, c: &Claude, bin: &Path, version: &str) -> (String, PathBuf) {
+    let run = |args: &[&str]| c.command(bin, s.path(), args, true).output().unwrap();
+    let plan = String::from_utf8(run(&["skill", "install", "--dry-run", "--json"]).stdout).unwrap();
     let market = field(&plan, "market");
     let dir = PathBuf::from(field(&plan, "dir"));
     let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
-    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    assert!(run(&["skill", "install"]).status.success());
 
     let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/{version}"));
     std::fs::create_dir_all(copy.join(".claude-plugin")).unwrap();
@@ -16355,11 +16364,19 @@ fn skill_status_notices_a_vanished_hook_binary() {
     let c = Claude::new("skillgone-home");
     let (market, _) = installed(&s, &c, "0.0.1");
     let manifest = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1/.claude-plugin/plugin.json"));
-    let body = std::fs::read_to_string(&manifest).unwrap().replace(recorded_bin(), "/nowhere/moai");
+    // **훅에 적힌 철자는 제품에게 묻는다**(리뷰 moai-gu5m.ke0). 훅에는 부른 철자를 `.`·`..` 만 접어
+    // 적으니(moai-gu5m) `BIN` 과 글자가 같다고 못 한다 — 상대 `CARGO_TARGET_DIR` 이면 cargo 가 `BIN` 에
+    // `..` 을 남겨, `BIN` 으로 바꾸던 판은 아무것도 안 바꾸고 붉었다.
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    let hooked = field(&json, "hook_exe");
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(&hooked, "/nowhere/moai");
     std::fs::write(&manifest, body).unwrap();
 
     let said = text(&c.run(s.path(), &["skill", "status"], true));
     assert!(said.contains("/nowhere/moai") && said.contains("없다"), "{said}");
+    // 안 도는 훅과는 자리를 못 견줘 글자로 가른다 — 여기서 심으면 훅이 이 바이너리를 부르게 바뀌니
+    // 그 한 줄이 선다(리뷰 moai-gu5m.ke0, 그 갈래를 재는 시험이 없었다).
+    assert!(said.contains("훅이 부르는 것과 다르다"), "사라진 훅을 지금 부른 것과 같다고 한다\n{said}");
 
     // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 낸다(moai-j4ie). 그 줄도
     // 이제 경로를 대지만(moai-wza7), 세션·이벤트마다 한 번뿐이고(moai-f7up) 그 말을 읽는 사람이
@@ -16390,6 +16407,105 @@ fn skill_status_from_another_binary_keeps_a_current_install_current() {
     let said = text(&out);
     assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
     assert!(said.contains("훅이 부르는 것과 다르다"), "다른 moai 로 불렀다는 말이 없다\n{said}");
+}
+
+/// **훅에는 부른 철자를 적는다 — 링크를 안 푼다**(moai-gu5m, 사용자 결정 2026-10-03). `target/` 이
+/// `/tmp/cargo-target/<이름>` 으로 가는 링크인 체크아웃에서(moai-c5xo) 푼 철자를 적던 판은, 루트에서
+/// 친 `skill install` 이 커밋된 `plugin.json` 을 `/tmp/…` 로 바꿔 작업 트리에 diff 를 남겼다.
+///
+/// `argv[0]` 은 **같은 파일일 때만** 믿는다 — `exec -a` 로 엉뚱한 철자를 주면 푼 자리를 적는다.
+#[test]
+fn skill_install_writes_the_spelling_it_was_called_by() {
+    use std::os::unix::process::CommandExt as _;
+    let s = init("skillspelled");
+    let c = Claude::new("skillspelled-home");
+    let via = s.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let exe = |cmd: &mut Command| field(&text(&cmd.output().unwrap()), "exe");
+    let plan = ["skill", "install", "--dry-run", "--json"];
+
+    let linked = via.join("moai");
+    assert_eq!(
+        exe(&mut c.command(&linked, s.path(), &plan, false)),
+        linked.display().to_string(),
+        "링크를 풀어 적었다"
+    );
+
+    // 상대 철자는 `cwd` 에 붙여 `..` 만 접는다. `cwd` 는 커널이 푼 자리라 견줄 값도 푼 자리에서 짓는다.
+    let mut up = c.command(Path::new(BIN), &s.path().join(".moai"), &plan, false);
+    up.arg0("../via/moai");
+    let real_root = std::fs::canonicalize(s.path()).unwrap();
+    assert_eq!(exe(&mut up), real_root.join("via/moai").display().to_string(), "상대 철자를 그대로 적었다");
+
+    let mut lied = c.command(Path::new(BIN), s.path(), &plan, false);
+    lied.arg0("/nowhere/moai");
+    assert_eq!(exe(&mut lied), recorded_bin(), "같은 파일이 아닌 argv[0] 을 믿었다");
+    // **있는 딴 실행 파일이어도 안 믿는다**(리뷰 moai-gu5m.ke0) — 없는 자리만 재면 "있는가"·"도는가" 로
+    // 무른 견줌도 푸르고, 그 판은 훅이 엉뚱한 프로그램을 부른다.
+    let mut other = c.command(Path::new(BIN), s.path(), &plan, false);
+    other.arg0(c.bin.join("claude"));
+    assert_eq!(exe(&mut other), recorded_bin(), "있는 딴 실행 파일을 부른 철자로 믿었다");
+
+    // **상대 철자는 친 자리에 붙인다**(리뷰 moai-gu5m.ke0) — `main` 은 `-C` 를 먼저 따르지만 커널은 그
+    // 철자를 친 자리에서 찾았다. 옮긴 자리에 붙이던 판은 없는 자리를 짚어 푼 철자로 떨어졌다.
+    let mut moved =
+        c.command(Path::new(BIN), s.path(), &["-C", ".moai", "skill", "install", "--dry-run", "--json"], false);
+    moved.arg0("./via/moai");
+    assert_eq!(exe(&mut moved), real_root.join("via/moai").display().to_string(), "`-C` 로 옮긴 자리에 붙였다");
+}
+
+/// **같은 파일을 다른 철자로 불러도 "다른 moai" 라고 하지 않는다**(moai-gu5m). 설치본은 푼 철자로
+/// 심겼고(moai-gu5m 전의 판) 체크아웃의 `plugin.json` 은 커밋된 링크 철자로 되돌린 자리 — 루트가 실제로
+/// 그렇게 섰다. 지금 부른 쪽은 심긴 철자를 잇고 설치본의 훅은 푼 철자라 글자만 갈린다 — 견주는 것은 자리다.
+#[test]
+fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
+    let s = init("skillsamefile");
+    let c = Claude::new("skillsamefile-home");
+    let via = c.home.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let linked = via.join("moai");
+    let resolved = Path::new(recorded_bin());
+    installed_as(&s, &c, resolved, "0.0.1");
+    let json = text(&c.command(resolved, s.path(), &["skill", "status", "--json"], true).output().unwrap());
+    installed_as(&s, &c, resolved, &field(&json, "want_version"));
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let body = std::fs::read_to_string(&manifest).unwrap().replace(recorded_bin(), &linked.display().to_string());
+    std::fs::write(&manifest, body).unwrap();
+
+    let out = c.command(&linked, s.path(), &["skill", "status"], true).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains(recorded_bin()), "설치본의 훅 철자를 안 댄다\n{said}");
+    assert!(!said.contains("훅이 부르는 것과 다르다"), "같은 파일을 다른 moai 라 한다\n{said}");
+    assert!(!said.contains("다시 심는다"), "같은 내용인데 다시 심으라 한다\n{said}");
+}
+
+/// **이미 심긴 철자가 같은 파일이면 잇는다**(사용자 결정 2026-10-03, 리뷰 moai-gu5m.ke0 3번). 부른
+/// 철자만 따르면 같은 파일을 다른 철자로 불러 심을 때마다 커밋된 `plugin.json` 이 바뀌었다. 다른 파일이면
+/// 부른 철자다 — 그때는 훅이 부를 것이 실제로 바뀐다.
+#[test]
+fn skill_install_keeps_the_planted_spelling_of_the_same_file() {
+    let s = init("skillkeep");
+    let c = Claude::new("skillkeep-home");
+    let via = c.home.path().join("via");
+    std::os::unix::fs::symlink(Path::new(BIN).parent().unwrap(), &via).unwrap();
+    let linked = via.join("moai");
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let install = |bin: &Path| {
+        let out = c.command(bin, s.path(), &["skill", "install"], true).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        std::fs::read_to_string(&manifest).unwrap()
+    };
+
+    let planted = install(&linked);
+    assert!(planted.contains(&linked.display().to_string()), "부른 철자로 안 심었다\n{planted}");
+    assert_eq!(install(Path::new(recorded_bin())), planted, "같은 파일을 다른 철자로 심어 plugin.json 이 바뀌었다");
+
+    let copy = c.home.path().join("otherbin/moai");
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    place_exe(Path::new(BIN), &copy);
+    let moved = install(&copy);
+    assert!(moved.contains(&copy.display().to_string()), "다른 파일인데 심긴 철자를 이었다\n{moved}");
 }
 
 /// **등록이 남의 자리를 가리키면 다시 심으라고 하지 않는다.** `install` 은 그때

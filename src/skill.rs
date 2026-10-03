@@ -238,7 +238,7 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 216개를 세니 훅이 걸리는 도구 호출이 **한 세션 평균 140번, 가장 많은 세션은 1,257번**이다
 /// (2026-09-23). 훅이 매 호출에 떠들면 사람이 훅을 꺼 버리고, 꺼진 규칙은 없는 규칙이다.
 ///
-/// 문턱은 `${TMPDIR:-/tmp}` 의 표식 파일 하나고, 키는 **세션·바이너리 자리·이벤트·종료 값** 넷이다.
+/// 문턱은 `${TMPDIR:-/tmp}` 의 표식 파일 하나고, 키는 **세션·바이너리 철자·이벤트·종료 값** 넷이다.
 /// **이벤트를 뺐던 판은 `SessionStart` 가 그 한 줄을 태웠다**(리뷰 moai-514e.hgz) — 위 표대로
 /// 그 이벤트에서만 notice 가 안 서는데 그것이 세션의 맨 앞에서 돌아, 사람이 못 듣는 알림 하나가
 /// 표식을 세우고 규칙 넷을 싣는 `PreToolUse` 의 입을 세션 내내 막았다. **종료 값을 뺐던 판은
@@ -334,18 +334,22 @@ fn command(exe: &str, event: &str) -> String {
     // 빠지는 것은 알림의 한 토막뿐이고 어느 파일인지는 `moai skill status` 가 댄다.
     let (spot, where_) =
         if sayable(exe) { (": %s", format!(" {}", crate::text::single_quoted(exe))) } else { ("", String::new()) };
-    // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 부를 바이너리 자리를 섞는다. 같은 세션이
+    // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 부를 바이너리의 철자를 섞는다. 같은 세션이
     // 저장소 둘을 오가면 둘 다 제 알림을 내야 하는데(제 바이너리가 저마다 못 돌 수 있다),
     // 이름만으로는 첫 저장소의 표식이 둘째의 입을 막는다. 셈은 셸이 못 하므로 **심을 때 박아
     // 둔다**.
     //
-    // **키는 저장소가 아니라 그 바이너리 자리다**(리뷰 moai-514e.hgz). 둘은 대개 같지만
+    // **키는 저장소가 아니라 그 바이너리다**(리뷰 moai-514e.hgz). 둘은 대개 같지만
     // [`exe_name`] 이 이름(`moai`)으로 적는 줄 — PATH 의 moai 가 곧 이 저장소의 바이너리라
     // 팀이 심은 트리를 그대로 커밋한 자리와 [`quotable`] 이 거절한 자리 — 에서는 갈린다.
     // 그 줄에서는 저장소가 둘이어도 훅이 실제로 부르는 파일이 하나라 알림도 하나가 맞다.
     // 갈리는 것은 저장소마다 PATH 가 다른 경우(direnv)뿐이고, 그것을 가르려면 `market` 을
     // 여기까지 들고 와야 한다 — `cmd::hook` 의 `session_file` 이 `repo.dir()` 를 쓰는 것과
     // 여기가 다른 자리다.
+    //
+    // **견주는 것은 자리가 아니라 철자다**(리뷰 moai-gu5m.ke0). 훅에는 부른 철자가 적히니(moai-gu5m) 한
+    // 파일을 두 철자로 심으면 키도 알림도 둘이다. 푼 자리로 키를 지으면 기계마다 다른 `/tmp/…` 의 해시가
+    // 커밋되는 `plugin.json` 에 다시 든다 — moai-gu5m 이 걷은 바로 그 diff 다.
     let whose = stable(exe.as_bytes()) % 0x1_0000;
     // **이벤트도 키에 든다**(리뷰 moai-514e.hgz) — `cmd::hook` 의 `session_file` 이 `what` 을
     // 키에 넣은 것과 같은 까닭이다. 하나로 두던 판은 **`SessionStart` 가 그 한 줄을 태웠다**:
@@ -512,16 +516,49 @@ fn pretty(v: &serde_json::Value) -> String {
 /// 그대로 커밋해도 남의 기계에서 산다. 아니면 절대 경로다 — 이 저장소처럼
 /// PATH 의 `moai` 가 **다른** moai 인 곳에서는 이름을 적는 것이 남의 바이너리를
 /// 부르는 일이 된다.
-pub fn exe_name(current: &Path, on_path: Option<&Path>) -> String {
-    let shown = current.display().to_string();
+///
+/// `spelling` 은 적을 철자다 — `cmd::skill` 의 `invoked` 가 고른 부른 철자이거나 `current_exe` 다.
+/// **같은 파일인지는 `resolved`(이 실행 파일의 푼 자리)로 가른다**(리뷰 moai-gu5m.ke0) — 부른 철자는
+/// 링크가 안 풀렸을 수 있고(macOS 의 `current_exe` 도 안 푼다), `on_path` 는 `which` 가 푼 자리라 글자로
+/// 견주면 자리로 견준 것이다. 푸는 일은 부르는 쪽이 한다 — 이 모듈은 파일 시스템을 안 본다.
+pub fn exe_name(spelling: &Path, resolved: &Path, on_path: Option<&Path>) -> String {
+    let shown = spelling.display().to_string();
     match on_path {
-        Some(p) if p == current => "moai".to_string(),
+        Some(p) if p == resolved => "moai".to_string(),
         // 따옴표를 깨는 경로는 훅 한 줄에 못 적어 `command` 가 이름으로 바꿔 적는다.
         // **여기서 먼저 바꾼다** — 안 그러면 판·설치 출력·`status` 는 절대 경로를
         // 말하는데 훅은 PATH 의 `moai` 를 불러, 셋이 서로 다른 것을 가리킨다.
         _ if !quotable(&shown) => "moai".to_string(),
         _ => shown,
     }
+}
+
+/// `argv[0]` 이 대는 이 실행 파일의 철자 — **링크를 안 푼다**(moai-gu5m, 사용자 결정 2026-10-03).
+///
+/// 슬래시가 들면 글자로만 접는다 — 상대 철자는 `cwd` 에 붙인 뒤 `.`·`..` 을 걷는다. 이름뿐이면
+/// `None` 이다 — PATH 에서 찾은 것과 같은 파일이면 [`exe_name`] 이 어차피 이름으로 적고, 아니면 부른
+/// 쪽이 무엇을 불렀는지 모른다.
+///
+/// **훅 한 줄에 그대로 못 적는 철자도 `None` 이다**(리뷰 moai-gu5m.ke0). 따옴표를 깨면([`quotable`])
+/// [`exe_name`] 이 이름(`moai`)으로 물러서 훅이 PATH 의 딴 moai 를 부르고, UTF-8 이 아니면 `display` 가
+/// 없는 자리로 바꿔 적어 훅이 `|| exit 0` 으로 조용히 꺼진다. 푼 자리로 떨어지면 원래 적히던 그 철자라,
+/// 부른 철자를 고른 탓에 새로 열리는 길이 없다. **프로세스마다 다른 것을 가리키는 자리**(`/proc`·`/dev`
+/// — `/proc/self/exe`·`/dev/fd/N`)도 안 낸다. 이 프로세스 안에서는 이 파일로 풀려 같은 파일 견줌을
+/// 지나지만, 훅의 셸에서는 그 셸 자신이거나 없는 자리다.
+///
+/// **이 값이 이 실행 파일을 가리키는지는 묻지 않는다.** `argv[0]` 은 부른 쪽 마음대로라(`exec -a`)
+/// 부르는 쪽이 푼 자리를 `current_exe` 와 견준 뒤에만 쓴다.
+pub fn spelled(argv0: Option<&Path>, cwd: Option<&Path>) -> Option<PathBuf> {
+    let argv0 = argv0?;
+    if argv0.parent().is_none_or(|p| p.as_os_str().is_empty()) {
+        return None;
+    }
+    let full = match argv0.is_absolute() {
+        true => crate::path::lexical(argv0),
+        false => crate::path::lexical(&cwd.filter(|c| c.is_absolute())?.join(argv0)),
+    };
+    let per_process = full.starts_with("/proc") || full.starts_with("/dev");
+    (!per_process && full.to_str().is_some_and(quotable)).then_some(full)
 }
 
 /// 셸 한 줄의 따옴표 안에 그대로 적을 수 있는 경로인가.
@@ -1400,9 +1437,58 @@ mod tests {
     #[test]
     fn the_name_is_used_only_when_path_agrees() {
         let here = Path::new("/repo/target/release/moai");
-        assert_eq!(exe_name(here, Some(here)), "moai");
-        assert_eq!(exe_name(here, Some(Path::new("/usr/bin/moai"))), "/repo/target/release/moai");
-        assert_eq!(exe_name(here, None), "/repo/target/release/moai");
+        assert_eq!(exe_name(here, here, Some(here)), "moai");
+        assert_eq!(exe_name(here, here, Some(Path::new("/usr/bin/moai"))), "/repo/target/release/moai");
+        assert_eq!(exe_name(here, here, None), "/repo/target/release/moai");
+        // **견주는 것은 푼 자리다**(moai-gu5m, 리뷰 moai-gu5m.ke0). 부른 철자는 링크가 안 풀렸고 PATH 쪽은
+        // `which` 가 푼 자리라, 철자로 견주던 판으로 되돌리면 같은 파일을 남의 것으로 읽어 절대 경로를 적는다.
+        let linked = Path::new("/home/me/link/release/moai");
+        assert_eq!(exe_name(linked, here, Some(here)), "moai");
+        assert_eq!(exe_name(linked, here, None), "/home/me/link/release/moai", "적는 것은 부른 철자다");
+    }
+
+    /// **부른 철자는 링크를 안 풀고 `.`·`..` 만 접는다**(moai-gu5m). 이름뿐인 `argv[0]` 은 철자를 안
+    /// 낸다 — PATH 의 같은 파일이면 [`exe_name`] 이 이름으로 적는다.
+    ///
+    /// **글자로 견준다**(리뷰 moai-gu5m.ke0) — `PathBuf` 의 `==` 는 조각으로 돌아 가운데 `.` 을 버려,
+    /// 안 접은 철자도 같다고 한다(`crate::path` 의 시험이 적어 둔 덫이다).
+    #[test]
+    fn the_spelling_is_argv0_folded_against_cwd() {
+        let cwd = Path::new("/repo/.claude/worktrees/w");
+        let at = |argv0: &str| spelled(Some(Path::new(argv0)), Some(cwd)).map(|p| p.display().to_string());
+        assert_eq!(at("../../../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
+        assert_eq!(at("./target/release/moai").as_deref(), Some("/repo/.claude/worktrees/w/target/release/moai"));
+        assert_eq!(at("/repo/./target/release/moai").as_deref(), Some("/repo/target/release/moai"));
+        assert_eq!(at("/repo/scripts/../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
+        assert_eq!(at("moai"), None);
+        assert_eq!(spelled(None, Some(cwd)), None);
+        // `cwd` 를 못 읽으면 상대 철자는 붙일 데가 없다. 절대 철자는 그대로 선다.
+        assert_eq!(spelled(Some(Path::new("target/release/moai")), None), None);
+        assert_eq!(spelled(Some(Path::new("/x/moai")), None), Some(PathBuf::from("/x/moai")));
+    }
+
+    /// **훅 한 줄에 못 적는 철자는 안 낸다**(리뷰 moai-gu5m.ke0) — 그러면 부르는 쪽이 푼 자리로
+    /// 떨어진다. 따옴표를 깨는 철자를 내면 [`exe_name`] 이 이름으로 물러서 훅이 PATH 의 딴 moai 를
+    /// 부르고, UTF-8 이 아닌 철자는 `display` 가 없는 자리로 바꿔 적는다. 프로세스마다 다른 것을
+    /// 가리키는 자리(`/proc`·`/dev`)는 훅의 셸에서 이 파일이 아니다.
+    #[test]
+    fn a_spelling_the_hook_cannot_carry_is_not_offered() {
+        let cwd = Path::new("/repo");
+        let at = |argv0: &Path| spelled(Some(argv0), Some(cwd));
+        for unwritable in ["/home/we$ird/moai", "../we\"ird/moai", "/home/back\\slash/moai", "/home/tick`/moai"] {
+            assert_eq!(at(Path::new(unwritable)), None, "{unwritable}: 못 적는 철자를 냈다");
+        }
+        for per_process in ["/proc/self/exe", "/proc/4242/exe", "/dev/fd/9", "/proc/self/cwd/target/release/moai"] {
+            assert_eq!(at(Path::new(per_process)), None, "{per_process}: 프로세스마다 다른 자리를 냈다");
+        }
+        // `/process` 는 `/proc` 아래가 아니다 — 조각으로 견준다.
+        assert!(at(Path::new("/process/moai")).is_some(), "이름이 `/proc` 으로 시작할 뿐인 자리를 버렸다");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt as _;
+            let lossy = Path::new(std::ffi::OsStr::from_bytes(b"/home/caf\xe9/moai"));
+            assert_eq!(at(lossy), None, "UTF-8 이 아닌 철자를 냈다");
+        }
     }
 
     /// **이 저장소의 설치만 고른다.** 같은 이름이 옛 자리에 남은 `local` 줄을
@@ -1532,14 +1618,15 @@ mod tests {
         assert!(cmd.contains("\"moai\" hook stop"), "이름으로도 안 부른다 — {cmd}");
         // **판과 출력도 같은 이름을 말한다.** 매니페스트만 이름으로 바꾸면 설치
         // 출력과 `status` 는 절대 경로를, 훅은 PATH 의 moai 를 가리킨다.
-        assert_eq!(exe_name(Path::new("/tmp/we$ird/moai"), None), "moai");
-        assert_eq!(exe_name(Path::new("/tmp/plain/moai"), None), "/tmp/plain/moai");
+        let named = |p: &str| exe_name(Path::new(p), Path::new(p), None);
+        assert_eq!(named("/tmp/we$ird/moai"), "moai");
+        assert_eq!(named("/tmp/plain/moai"), "/tmp/plain/moai");
 
         // **제어문자가 든 경로는 그대로 부르되 알림에만 안 싣는다**(moai-wza7, 리뷰
         // moai-514e.hgz 5번). 한 자로 두던 판은 셸에 멀쩡한 경로까지 이름으로 바꿔 적어 훅이
         // PATH 의 딴 moai 를 불렀다 — 이 기계에서 그것은 옛 moai 의 바이너리다.
         for hostile in ["/tmp/두\n줄/moai", "/tmp/탭\t자리/moai", "/tmp/\u{7f}/moai"] {
-            assert_eq!(exe_name(Path::new(hostile), None), hostile, "부를 자리를 이름으로 바꿔 적었다");
+            assert_eq!(named(hostile), hostile, "부를 자리를 이름으로 바꿔 적었다");
             let cmd = command(hostile, "stop");
             assert!(cmd.contains(&format!("\"{hostile}\" hook stop")), "그 경로를 안 부른다 — {cmd:?}");
             // 알림에는 그 경로가 안 든다 — JSON 문자열 안의 날 제어문자 하나면 `claude` 가
@@ -1661,7 +1748,7 @@ mod tests {
         }
     }
 
-    /// **표식 이름에 바이너리 자리와 이벤트가 든다**(moai-f7up). 한 세션이 저장소 둘을 오가는
+    /// **표식 이름에 바이너리 철자와 이벤트가 든다**(moai-f7up). 한 세션이 저장소 둘을 오가는
     /// 것은 드물지 않은데, 이름만 같으면 첫 저장소의 표식이 둘째의 입을 막는다 — 저마다 제
     /// 바이너리가 못 돌 수 있으니 둘 다 제 알림을 내야 한다. 이벤트도 같은 까닭이다
     /// (`session-start` 의 알림은 사람에게 안 들린다, 리뷰 moai-514e.hgz).
@@ -1683,7 +1770,7 @@ mod tests {
         let b = "/repo/b/target/release/moai";
         assert_ne!(mark(a, "stop"), mark(b, "stop"), "바이너리 둘이 표식을 나눠 쓴다");
         assert_ne!(mark(a, "session-start"), mark(a, "pre-tool-use"), "이벤트 둘이 표식을 나눠 쓴다");
-        // **같은 자리·같은 이벤트가 같은 표식인 것은 안 잰다** — `command` 는 인자만 보는 순수
+        // **같은 철자·같은 이벤트가 같은 표식인 것은 안 잰다** — `command` 는 인자만 보는 순수
         // 함수라 제 자신과 견주는 줄이 된다(리뷰 moai-514e.hgz). 세션 안에서 한 번만 서는지는
         // `the_notice_stands_once_a_session` 이 껍데기로 실제로 두 번 돌려 잰다.
         // 이벤트도 종료 값도 이름에 선다 — `$c` 는 껍데기가 풀 자리라 글자 그대로 남는다.
