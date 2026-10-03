@@ -12,8 +12,9 @@
 //! - 사람은 `이름 (메일)` 로 보이고 메일을 넣는다. 메일이 없으면 이름이다
 //! - 친 값의 부분 일치로 좁힌다. 대소문자는 안 가린다
 //!
-//! **글을 쪼개는 자는 `query` 의 것을 따른다** — 빈칸으로 가른 낱말 가운데 `=` 가 든 낱말이 새 항목을 열고, `=`
-//! 바로 뒤의 따옴표(`"…"`·`'…'`)는 닫힐 때까지 한 값이다. 여기서는 커서가 선 자리만 읽는다.
+//! **글을 쪼개는 자는 `query` 의 것 하나다**(`query::items`, moai-mkyg.dcf) — 빈칸으로 가른 낱말 가운데 `=` 가 든
+//! 낱말이 새 항목을 열고, `=` 바로 뒤의 따옴표(`"…"`·`'…'`)는 닫힐 때까지 한 값이다. 거름망이 읽는 글과 같은 걸음이
+//! 항목마다 선 자리를 함께 내고, 여기서는 그 자리로 커서가 선 값만 읽는다.
 
 use super::input::Input;
 use std::ops::Range;
@@ -75,10 +76,13 @@ pub struct Slot<'a> {
 /// **닫지 않은 따옴표의 갈 자리는 커서가 선 낱말까지다.** 문법으로는 줄 끝까지 한 값이지만, 줄 끝까지 갈면 커서
 /// 뒤에 이미 친 항목이 고른 값에 먹힌다 — `assignee="Ki| tag=bug` 에서 고르면 `tag=bug` 가 사라졌다.
 pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
-    let item = items(text).into_iter().find(|it| it.eq < at && at <= it.end)?;
-    let key = &text[item.start..item.eq];
+    let (item, eq) = crate::query::items(text)
+        .into_iter()
+        .filter_map(|it| it.eq.map(|eq| (it, eq)))
+        .find(|(it, eq)| *eq < at && at <= it.end)?;
+    let key = &text[item.start..eq];
     let field = Field::of(key)?;
-    let open = item.eq + 1;
+    let open = eq + 1;
     let inner = if item.quote.is_some() { open + 1 } else { open };
     let at = at.max(inner);
     // 따옴표 안의 글 — 닫히지 않았으면 커서가 선 낱말의 끝까지.
@@ -100,48 +104,6 @@ pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
     };
     let first = span.start == open;
     Some(Slot { key, field, typed: &text[seg..at], span, first })
-}
-
-/// 글의 한 항목 — `항목=` 이 든 낱말에서 다음 그런 낱말 앞까지가 아니라, **그 낱말 하나**(따옴표로 열렸으면 닫힐
-/// 때까지)다. 커서가 값 자리인지만 묻는 쪽이라 뒤에 이은 낱말은 안 든다.
-struct Item {
-    start: usize,
-    eq: usize,
-    end: usize,
-    /// 여는 따옴표와 닫는 따옴표의 자리. 안 닫혔으면 `None` — 글 끝까지 값이다.
-    quote: Option<(usize, Option<usize>)>,
-}
-
-fn items(text: &str) -> Vec<Item> {
-    let mut out = Vec::new();
-    let mut words = words(text).peekable();
-    while let Some((start, end)) = words.next() {
-        let Some(k) = text[start..end].find('=') else { continue };
-        let eq = start + k;
-        let open = eq + 1;
-        let item = match text[open..].chars().next().filter(|c| matches!(c, '"' | '\'')) {
-            Some(q) => {
-                let close = text[open + 1..].find(q).map(|p| open + 1 + p);
-                let stop = close.map_or(text.len(), |c| c + 1);
-                // 따옴표 안의 낱말은 이 항목의 것이다 — `=` 가 들어도 새 항목이 아니다.
-                while words.peek().is_some_and(|&(s, _)| s < stop) {
-                    words.next();
-                }
-                Item { start, eq, end: stop.max(end), quote: Some((open, close)) }
-            }
-            None => Item { start, eq, end, quote: None },
-        };
-        out.push(item);
-    }
-    out
-}
-
-/// 빈칸으로 가른 낱말과 그 바이트 자리.
-fn words(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
-    text.split_whitespace().map(move |w| {
-        let start = w.as_ptr() as usize - text.as_ptr() as usize;
-        (start, start + w.len())
-    })
 }
 
 /// 고를 값 하나.
