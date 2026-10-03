@@ -3226,3 +3226,4 @@
 {"ts":"2026-10-03T11:42:43Z","id":"moai-00r7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T11:42:43Z","id":"moai-47mz.12b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T11:42:43Z","id":"moai-47mz.5il","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받음: 리뷰가 고친 열하나(1~4·8~14, d5d840ce)와 넘긴 5(--stale 이 아카이브를 연다)·7(뱃지 수를 거름망·자리·보드 카드로 거른다, 480b96c2). 넘김: 6 → moai-8x70(idea, 사람이 고른 --done 과 같은 시계의 결과), CLAUDE.md:290 → moai-xq9k(idea). 안 고침: 15(테이블 안 모르는 키는 이 파서가 어디서나 넘긴다)"}
+{"ts":"2026-10-03T11:45:30Z","id":"moai-47mz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 병합(1ca3ed27)과 닫기 끝. 남은 것은 idea 둘 — moai-8x70(미뤄 닫은 묶음이 그날 아카이브로 숨는다, --done 과 같은 시계를 함께 옮길 일)·moai-xq9k(CLAUDE.md 의 work 합산 줄에 --archived). 루트 release 바이너리는 아직 옛것이다"}
