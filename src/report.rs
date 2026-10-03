@@ -2066,8 +2066,9 @@ pub fn column<'x>(i: &'x Issue, states: &BTreeMap<GroupKey<'_>, &'x str>) -> &'x
 ///   `done` 에 뒀다고 숨지 않는다. done 에서 되돌린 줄은 `done_at` 이 남아도 done 이 아니니 아니다
 /// - `since` 는 **그 칸에 든 때**다 — `show --done <폭>` 이 재는 시계와 같은 자(`query::Where::since`)라, 두
 ///   물음이 한 줄을 다르게 재지 않는다(사용자 결정). `mv` 로 닫은 줄이면 `done_at` 과 같은 값이고, 그 필드 전에
-///   닫힌 옛 줄에도 있다. 묶음이면 멤버가 마지막으로 칸을 옮긴 때([`Stand::since`])라, 멤버 하나라도 최근에
-///   끝났으면 묶음도 안 숨는다 — 속이 빈 폴더가 안 선다. 닫힌 idea 와 묶음도 같은 규칙이다(사용자 결정)
+///   닫힌 옛 줄에도 있다. 묶음이면 읽은 칸에 든 때([`Stand::entered`])라, 멤버 하나라도 최근에 끝났으면 묶음도
+///   안 숨는다 — 속이 빈 폴더가 안 선다. 남은 멤버를 미뤄 닫은 묶음은 미룬 그날부터 센다(moai-23q4). 닫힌
+///   idea 와 묶음도 같은 규칙이다(사용자 결정)
 /// - **못 읽는 시각은 아카이브가 아니다** — 숨기면 손으로 고친 줄 하나가 말없이 사라진다. 보이는 쪽이 싸다
 ///
 /// "지났다" 는 **온 날로 센다**([`crate::model::days_since`]) — `days` 날이 꼬박 찬 순간부터 숨는다.
@@ -2125,6 +2126,21 @@ pub struct Stand<'a, 'c> {
     /// **소속을 옮긴 때도 안 센다**(moai-bbzg) — 같은 까닭이다. `edit -e` 로 들어온 옛 멤버는 제
     /// 옛 칸 시각으로 세므로, 끝난 묶음이 그것으로 다시 열려도 이 시각은 안 움직인다.
     pub since: &'a str,
+    /// **읽은 칸에 든 때** — 아카이브와 `show --done`·`--stale` 이 재는 시계다([`crate::query::Where::since`]).
+    ///
+    /// 대개 [`Stand::since`] 와 같다. 갈리는 것은 칸이 `done` 이고 **셈에서 미뤄 빠진 안 끝난 멤버**가 있을
+    /// 때뿐이다 — 그 멤버가 빠진 때(그것을 뺀 미룸의 `deferred_at`)가 더 늦으면 그때다(moai-23q4, 2026-10-03
+    /// 사용자 결정). 남은 멤버를 미뤄 닫은 에픽은 미룬 그날 done 에 든 것이다. `since` 로 재던 때는 끝난 멤버가
+    /// 오래전에 끝났으면 닫힌 그날로 아카이브에 숨었다(리뷰 moai-47mz.5il 6번).
+    ///
+    /// **`since` 와 따로 둔다.** 그쪽은 방치와 막힘을 재는 시계라 미룸을 안 센다(moai-cxk8) — 미룬 멤버를
+    /// 기다리며 막는 끝난 묶음([`Waiting::Shelved`])의 막힘을 이 값으로 재면, 미루기가 `blocked_stale` 을
+    /// 지우는 손잡이가 된다.
+    ///
+    /// **지우거나(`rm`) 다른 묶음으로 뺀(`edit -e`) 멤버는 못 센다** — 스냅샷에 흔적이 없다. 그렇게 닫힌
+    /// 묶음은 끝난 멤버의 때로 잰다. 잡으려면 멤버를 옮길 때 묶음 줄에 그때를 적어야 하는데, 그런 필드는
+    /// 파생값이다(CLAUDE.md "파생값은 저장하지 않는다").
+    pub entered: &'a str,
     /// 셀 멤버 가운데 **적힌 칸이 시작한 칸**(`Config::is_started` — 첫 칸도 done 도 아님)인 일이 있는가 —
     /// 지금 누가 그 묶음 밑에서 손대고 있다는 말.
     ///
@@ -2242,6 +2258,11 @@ pub fn group_stands_in<'a, 'c>(
             });
             let column = column_of(&counted, cfg);
             let of = members.get(&(g.kind, g.id.as_str())).map(Vec::as_slice).unwrap_or_default();
+            // 셈에서 미뤄 빠진 멤버가 있어야 갈린다 — 미룬 줄 없는 저장소에서는 `shelf` 가 없어 안 걷는다.
+            let entered = match (column == crate::config::DONE, shelf.as_ref()) {
+                (true, Some(shelf)) => left_at(g, of, &counted, shelf, &off).filter(|at| *at > since).unwrap_or(since),
+                _ => since,
+            };
             let (waiting, aside) = waiting_in(of, &counted);
             let finished = counted.iter().filter(|m| m.status.is_done()).count();
             let progress = (!counted.is_empty()).then(|| (finished * 100 / counted.len()) as u8);
@@ -2261,7 +2282,7 @@ pub fn group_stands_in<'a, 'c>(
                 true => 0,
                 false => of.len() - counted.len(),
             };
-            ((g.kind, g.id.as_str()), Stand { column, since, busy, waiting, aside, progress, deferred })
+            ((g.kind, g.id.as_str()), Stand { column, since, entered, busy, waiting, aside, progress, deferred })
         })
         .collect()
 }
@@ -2352,6 +2373,30 @@ fn counted<'a>(
         .copied()
         .filter(|m| !off.contains(&std::ptr::from_ref(*m)) || shelf.every(m).iter().all(|s| mine.contains(s)))
         .collect()
+}
+
+/// 묶음 `g` 의 셈([`counted`])에서 미뤄 빠진 멤버가 **빠진 때** 가운데 가장 늦은 것 — [`Stand::entered`] 의 재료다.
+///
+/// 멤버 하나가 빠진 때는 그것을 빼는 미룸(묶음 제 미룸은 빼고) 가운데 **가장 이른** `deferred_at` 이다 — 부모가
+/// 오래전에 미뤄졌으면 그 멤버는 그때부터 셈 밖이었고, 오늘 제 줄을 또 미룬 것은 묶음의 칸을 안 바꿨다.
+/// 빠진 멤버가 없으면 없다.
+fn left_at<'a>(
+    g: &'a Issue,
+    of: &[&'a Issue],
+    counted: &[&'a Issue],
+    shelf: &Shelf<'a, '_>,
+    off: &BTreeSet<*const Issue>,
+) -> Option<&'a str> {
+    // 셈 밖인 멤버는 계획 밖인 줄 가운데 있다 — 그 문([`off_rows`])을 먼저 지나 흔한 멤버는 안 견준다.
+    let left =
+        of.iter().filter(|m| off.contains(&std::ptr::from_ref(**m)) && !counted.iter().any(|c| std::ptr::eq(*c, **m)));
+    let mine = shelf.every(g);
+    left.filter_map(|m| {
+        // 첫 걸음의 미룸은 제 줄의 것이다 — 그 위는 `Shelf` 가 고른 그 줄(`Lines::at`)에 묻는다.
+        let row = |s: &str| if s == m.id { Some(*m) } else { shelf.lines.at(s) };
+        shelf.every(m).into_iter().filter(|s| !mine.contains(s)).filter_map(|s| row(s)?.deferred_at.as_deref()).min()
+    })
+    .max()
 }
 
 /// 셀 멤버가 있고 전부 끝났는가 — 묶음의 칸이 `done` 으로 읽히는 조건.
@@ -5245,6 +5290,8 @@ pub fn status_in<'a>(
     let stands = soil.stands(issues, cfg);
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|((_, id), s)| (*id, s.since)).collect();
+    // 아카이브가 재는 때는 따로다 — 읽은 칸에 든 때([`Stand::entered`])라 막힘의 시계와 갈린다(moai-23q4).
+    let group_entered: BTreeMap<&str, &str> = stands.iter().map(|((_, id), s)| (*id, s.entered)).collect();
     // 막대 곁에 댈 미룬 수도 같은 셈에서 받는다([`Stand::deferred`], moai-zxwj).
     let put_aside: BTreeMap<&str, usize> = stands.iter().map(|((_, id), s)| (*id, s.deferred)).collect();
     let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
@@ -5741,14 +5788,14 @@ pub fn status_in<'a>(
 
     // **아카이브된 묶음은 목록에서 빼고 수만 든다**(moai-47mz, 2026-10-03 사용자 결정) — 끝난 지 오래된 에픽이
     // 다 서면 이 저장소에서 보드가 270줄이다. 재는 자는 줄과 같은 [`archived`] 고, 칸은 위에서 곁들인 읽은 칸,
-    // 때는 그 칸의 셈이 마지막으로 움직인 때([`Stand::since`])다 — `show --done` 이 묶음을 재는 시계와 같다.
+    // 때는 그 칸에 든 때([`Stand::entered`])다 — `show --done` 이 묶음을 재는 시계와 같다.
     //
     // **경고를 다 센 뒤에 뺀다**(리뷰 moai-47mz.5il) — 아카이브는 보드의 목록을 줄이는 보기의 일이다. 위의 1-2 가
     // "마일스톤을 쓰는 저장소인가" 를 이 목록으로 묻는데, 먼저 빼던 판은 끝난 릴리스만 남은 저장소에서 `no_milestone`
     // 이 시계를 따라 꺼졌다가 새 마일스톤 하나에 도로 켜졌다 — Stop 훅은 그것을 기준선보다 는 경고로 읽는다.
     let aged = |r: &Roll| {
         r.id.as_deref().is_some_and(|id| {
-            let since = group_since.get(id).copied().unwrap_or_default();
+            let since = group_entered.get(id).copied().unwrap_or_default();
             archived(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days)
         })
     };
@@ -8421,6 +8468,31 @@ mod tests {
         assert_eq!(stands["argos-0001"].since, "2026-09-11T00:00:00Z");
         // 셀 멤버가 없으면 묶음이 생긴 때다 — 안 읽히는 칸의 시각은 안 쓴다.
         assert_eq!(stands["argos-0007"].since, "2026-09-01T00:00:00Z");
+    }
+
+    /// **남은 멤버를 미뤄 닫은 묶음은 미룬 때 done 에 든다**(moai-23q4, 2026-10-03 사용자 결정) — 아카이브와 보드가
+    /// 읽는 [`Stand::entered`] 다. 방치·막힘의 시계 [`Stand::since`] 는 그대로 끝난 멤버의 때다(moai-cxk8): 미룬
+    /// 멤버를 기다리며 막는 이 에픽에 막힌 줄의 나이가 미루기로 새로 서면 안 된다.
+    #[test]
+    fn a_group_closed_by_deferring_enters_done_when_deferred() {
+        let mut old = member("argos-0002", "argos-0001", "done");
+        old.status_since = "2026-09-01T00:00:00Z".into();
+        let mut rest = member("argos-0003", "argos-0001", "todo");
+        rest.deferred_at = Some("2026-09-28T00:00:00Z".into());
+        let issues = vec![make("argos-0001", Kind::Epic, "todo"), old, rest];
+        let (e, m) = (Handing::of(&issues), milestones(&issues));
+        let shelved = shelved_in(&issues, &e, &m);
+        let cfg = cfg();
+        let stands =
+            by_id(group_stands_in(&issues, &cfg, &Lines::of(&issues), &e, &m, &super::kinds(&issues), &shelved));
+        let epic = &stands["argos-0001"];
+        assert_eq!((epic.column, epic.waiting), ("done", Waiting::Shelved));
+        assert_eq!(epic.since, "2026-09-01T00:00:00Z", "미루기가 방치·막힘의 시계를 움직였다");
+        assert_eq!(epic.entered, "2026-09-28T00:00:00Z", "남은 멤버를 미뤄 닫았는데 끝난 멤버의 때로 쟀다");
+        // 보드도 그 때로 잰다 — 이틀 전에 닫힌 에픽이 목록에 선다(리뷰 moai-47mz.5il 6번이 재현한 판).
+        let st = status(&issues, &[], &cfg, "2026-09-30T00:00:00Z", utc());
+        assert!(st.epics.iter().any(|r| r.id.as_deref() == Some("argos-0001")), "미뤄 닫은 그날 아카이브로 숨었다");
+        assert_eq!(st.archived, Archived::default());
     }
 
     /// **묶음은 시작한 멤버 중 가장 앞 칸에 선다**(moai-p415). 칸 자리로 "시작한 칸" 을 고르면

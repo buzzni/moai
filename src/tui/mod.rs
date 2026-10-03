@@ -375,7 +375,7 @@ impl Pane {
 /// 묶음 id → 멤버에서 읽은 것(`report::group_stands`). 이슈를 빌리지 않게 소유한다.
 type States = std::collections::BTreeMap<String, Stood>;
 
-/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸의 셈이 마지막으로 움직인 때(`report::Stand::since`),
+/// 묶음 하나를 읽은 것 — 서 있는 칸과 그 칸에 든 때(`report::Stand::entered`),
 /// 그 밑에 집은 일이 있는가(`report::Stand::busy`), 미뤄 뺀 멤버 덕에 `done` 으로 섰으면 그 멤버
 /// (`report::Stand::aside`).
 struct Stood {
@@ -383,7 +383,9 @@ struct Stood {
     /// id 로 들되(가려진 묶음 줄은 안 세므로 한 id 에 칸 하나다) 짚는 자는 줄의 종류와 견준다.
     kind: crate::model::Kind,
     column: String,
-    since: String,
+    /// 읽은 칸에 든 때(`report::Stand::entered`) — 아카이브와 거름망의 `--stale` 이 재는 시계다. 방치·막힘의
+    /// 시계(`Stand::since`)는 탐색기가 안 읽는다.
+    entered: String,
     busy: bool,
     waiting: crate::report::Waiting,
     aside: Vec<String>,
@@ -472,7 +474,7 @@ impl Ground {
                 let stood = Stood {
                     kind,
                     column: s.column.to_string(),
-                    since: s.since.to_string(),
+                    entered: s.entered.to_string(),
                     busy: s.busy,
                     waiting: s.waiting,
                     aside,
@@ -596,7 +598,7 @@ impl Ground {
                 self.split_rows.iter().map(|(at, r)| (&issues[*at], r.as_deref())),
             ),
             states: self.columns(),
-            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.since.as_str())).collect(),
+            since: self.stands.iter().map(|(id, s)| ((s.kind, id.as_str()), s.entered.as_str())).collect(),
             // **빌리기만 한다**(리뷰) — 이 지도만 줄마다 한 칸이라, 꼴을 맞춰 옮겨 담으면
             // 키마다 도는 이 자리가 이슈 1만 건에서 가장 큰 지도를 걸음마다 짓고 버린다.
             kinds: self.kinds(),
@@ -1549,11 +1551,11 @@ impl Site {
     }
 
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
-    /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 때(`report::Stand::since`)고 아니면 제 칸 시각이다. 시계는
-    /// 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
+    /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
+    /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
     pub fn archived(&self, at: usize) -> bool {
         let i = &self.issues[at];
-        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.since.as_str());
+        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.entered.as_str());
         crate::report::archived(self.column(at), since, &self.now, self.ground.archive_days)
     }
 

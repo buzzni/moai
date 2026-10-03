@@ -47,7 +47,8 @@ pub struct Where<'a> {
     pub shelved: crate::report::Shelved<'a>,
     /// 묶음 → 멤버에서 읽은 칸. 묶음의 칸도 제 줄만 보고는 모른다.
     pub states: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
-    /// 묶음 → 그 칸의 셈이 마지막으로 움직인 때 (`report::Stand::since`).
+    /// 묶음 → 읽은 칸에 든 때 (`report::Stand::entered`). 방치·막힘의 시계(`Stand::since`)가 아니다 —
+    /// 셈에서 미뤄 빠진 멤버가 묶음을 닫았으면 그 미룸의 때다(moai-23q4).
     pub since: BTreeMap<crate::report::GroupKey<'a>, &'a str>,
     /// id → 그 id 를 마지막으로 든 줄의 종류 (`report::kinds`). 종류가 다른 쌍둥이에게 id 가
     /// 가려진 줄을 가르는 지도다 — 위의 소속 지도는 id 로 짠 것이라 그 줄에는 쌍둥이의 값이
@@ -172,7 +173,7 @@ impl<'a> Where<'a> {
     pub fn from_soil(all: &'a [Issue], cfg: &'a crate::config::Config, soil: crate::report::Soil<'a>) -> Where<'a> {
         let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
-        let since = stands.into_iter().map(|(id, s)| (id, s.since)).collect();
+        let since = stands.into_iter().map(|(id, s)| (id, s.entered)).collect();
         let crate::report::Soil { epic, roots, shelved, kinds, folded, lines, .. } = soil;
         // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
         // 때만 서는데, `kinds` 는 id 마다 한 칸이라 그 수가 줄 수와 같으면 id 가 다 다르다 —
@@ -245,11 +246,11 @@ impl<'a> Where<'a> {
         self.epic.stood(i, self.lines.get())
     }
 
-    /// 그 줄이 **지금 칸에 들어선 때** — `--stale` 이 재는 시각.
+    /// 그 줄이 **지금 칸에 들어선 때** — `--stale`·`--done`·아카이브가 재는 시각.
     ///
-    /// 묶음이면 읽은 칸의 셈이 마지막으로 움직인 때다. 적힌 `status_since` 는 아무
-    /// 데서도 안 읽히는 칸의 시각이라, 그것으로 재면 오늘 진행 중이 된 에픽이
-    /// `-s in_progress --stale 10` 에 걸린다 — 고르는 자와 재는 자가 어긋난다.
+    /// 묶음이면 읽은 칸에 든 때다(`report::Stand::entered`) — 셈이 마지막으로 움직인 때거나, done 이면 남은
+    /// 멤버를 미룬 때 가운데 늦은 것. 적힌 `status_since` 는 아무 데서도 안 읽히는 칸의 시각이라, 그것으로
+    /// 재면 오늘 진행 중이 된 에픽이 `-s in_progress --stale 10` 에 걸린다 — 고르는 자와 재는 자가 어긋난다.
     pub fn since<'x>(&'x self, i: &'x Issue) -> &'x str {
         // **고르는 자와 재는 자가 한 문을 지난다**(리뷰, `report::stands_on`). 위의 `column` 만
         // 가려진 줄을 거르면, `-s` 가 제 칸으로 고른 그 줄의 나이는 쌍둥이 묶음의 셈에서 와
@@ -386,7 +387,8 @@ pub struct Filter {
     /// `created_at` 이 든 폭(`--created`).
     pub created: Vec<Vec<Span>>,
     /// **지금 done 에 선 줄이 거기 든 때**의 폭(`--done`). 재는 자는 [`Where::since`] 다 — 묶음이면 멤버가
-    /// 마지막으로 done 에 든 때라, 남은 멤버를 미루거나 지우거나 빼서 닫힌 묶음도 그 앞선 때로 선다.
+    /// 마지막으로 done 에 든 때거나 남은 멤버를 미룬 때 가운데 늦은 것이다. 지우거나 빼서 닫힌 묶음은 흔적이
+    /// 없어 끝난 멤버의 때로 선다(`report::Stand::entered`).
     pub done: Vec<Vec<Span>>,
     /// done 을 포함한다. **아카이브는 아니다**(moai-47mz) — 그것은 [`Filter::archived`] 가 연다.
     pub all: bool,
@@ -778,9 +780,9 @@ impl Filter {
         // **끝난 때는 지금 done 에 선 줄에만 있다.** `done_at` 은 되돌려도 남으니(moai-38mh) 그것만 보면
         // 다시 연 줄이 "그 주에 닫힌 것" 으로 선다 — 지금 닫혔는가는 칸이 말한다. 때는 **그 칸에 든 때**
         // ([`Where::since`])로 잰다: done 에 선 줄이면 `done_at` 과 같은 값이고, `done_at` 전에 닫힌 옛
-        // 줄에도 있다. 묶음이면 멤버가 마지막으로 done 에 든 때다 — `Stand::since` 는 미룸·지움·빼냄을 안
-        // 세므로(방치를 재는 시계다), 남은 멤버를 미뤄 닫힌 묶음은 그 앞선 때로 선다. 그 날짜는 되짚을 줄이
-        // 없어(지운 줄은 없고 뺀 줄에는 흔적이 없다) 도움말이 그렇게 댄다.
+        // 줄에도 있다. 묶음이면 멤버가 마지막으로 done 에 든 때거나 남은 멤버를 미룬 때 가운데 늦은 것이다
+        // (`Stand::entered`, moai-23q4). 남은 멤버를 지우거나 빼서 닫힌 묶음은 되짚을 줄이 없어(지운 줄은
+        // 없고 뺀 줄에는 흔적이 없다) 끝난 멤버의 때로 선다 — 도움말이 그렇게 댄다.
         if !self.done.is_empty()
             && !within(&self.done, (wh.column(i) == crate::config::DONE).then(|| parse_rfc3339(wh.since(i))).flatten())
         {
@@ -1642,6 +1644,47 @@ mod tests {
         let mut open = late.clone();
         open.status = Status::new("todo");
         assert!(!Where::of(&[epic.clone(), old, open], &cfg()).archived(&epic, NOW));
+    }
+
+    /// **남은 멤버를 미뤄 닫은 묶음은 미룬 때 done 에 든다**(moai-23q4, 2026-10-03 사용자 결정). 끝난 멤버가
+    /// 오래전에 끝났어도 그날로 아카이브에 숨지 않고, `--done` 도 그날로 잰다 — 둘은 한 시계다([`Where::since`]).
+    /// 멤버가 빠진 때는 그것을 뺀 미룸 가운데 **가장 이른** 것이다: 오래전에 미룬 부모 밑의 자식을 오늘 또
+    /// 미뤄도 묶음의 칸은 오늘 안 바뀌었다.
+    #[test]
+    fn a_group_closed_by_deferring_enters_done_when_deferred() {
+        let mut epic = issue("a-0010", "todo", &[]);
+        epic.kind = Kind::Epic;
+        let deferred = |id: &str, at: &str| {
+            let mut i = issue(id, "todo", &[]);
+            i.deferred_at = Some(at.into());
+            i
+        };
+        let in_epic = |mut i: Issue| {
+            i.epic = Some("a-0010".into());
+            i
+        };
+        let old = in_epic(closed_at("a-0011", "2026-08-01T00:00:00Z"));
+        let c = cfg();
+        let today = [epic.clone(), old.clone(), in_epic(deferred("a-0012", "2026-09-10T00:00:00Z"))];
+        let wh = Where::of(&today, &c);
+        assert_eq!((wh.column(&epic), wh.since(&epic)), ("done", "2026-09-10T00:00:00Z"));
+        assert!(!wh.archived(&epic, NOW), "미뤄 어제 닫힌 묶음이 그날로 숨었다");
+        let done = |span: &str| Filter::build(Raw { done: s(&[span]), ..Raw::default() }).unwrap();
+        assert!(done("2026-09-10").matches(&epic, NOW, &wh), "`--done` 이 미룬 날을 안 잡았다");
+        assert!(!done("2026-08-01").matches(&epic, NOW, &wh), "`--done` 이 끝난 멤버의 날로 쟀다");
+        // 끝난 멤버보다 먼저 미뤘으면 그 멤버가 끝난 때다.
+        let early = [epic.clone(), old.clone(), in_epic(deferred("a-0012", "2026-07-01T00:00:00Z"))];
+        assert_eq!(Where::of(&early, &c).since(&epic), "2026-08-01T00:00:00Z");
+        // 자식은 부모에게서 에픽을 받는다 — 부모를 미룬 때(08-05)부터 셈 밖이었다.
+        let nested = [
+            epic.clone(),
+            old,
+            in_epic(deferred("a-0013", "2026-08-05T00:00:00Z")),
+            deferred("a-0013.abc", "2026-09-10T00:00:00Z"),
+        ];
+        let wh = Where::of(&nested, &c);
+        assert_eq!(wh.since(&epic), "2026-08-05T00:00:00Z", "자식을 늦게 또 미룬 때로 쟀다");
+        assert!(wh.archived(&epic, NOW));
     }
 
     /// 쉼표는 또는.
