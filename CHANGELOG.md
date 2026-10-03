@@ -12,7 +12,37 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`mv -m` and `defer -m` say so when the text names a file.** `-m <text>`
+  takes the text itself, so `moai mv <review> done -m closing.md` closed the
+  review with the words `closing.md`, and nothing said so. When the value is one
+  line and a file by that name exists, one line on stderr now says the journal
+  got those words and how to stream the file instead (`-m - < closing.md`) — the
+  line `--body` has carried since 0.3.0, in words of its own. It stands only
+  once the words went into the journal; the text is kept as given and the exit
+  code does not change. The `-m` help of both now says it takes text, not a path.
+
+- **Under `--json`, a project that cannot be opened carries its `code`.** The
+  overview outside a tracker (`status`, `ready`, `tui`), `project ls` and
+  `project add` gave such a project only its `error` line, so telling a link to
+  fix by hand from anything else meant reading the words. `code` now stands
+  beside it with the value the project's own commands stop with: `broken` for a
+  snapshot or config moai will not read (a link out of the checkout or into
+  `.git/`, not a regular file), `error` otherwise.
+
 ### Changed
+
+- **`moai prime` no longer reads a tracker it cannot open as no tracker.** A
+  snapshot link out of the checkout, a snapshot it cannot read or a broken config
+  printed "No `.moai` here. `moai init` starts one" and `no_tracker:true`, with
+  the reason only on stderr — an agent opening a session ran `moai init`, which
+  answered that everything was in line. The page now names the reason on its
+  first line and says `moai init` will not fix it, and the reason is no longer
+  repeated on stderr. Under `--json`, `no_tracker` stands only where there is no
+  tracker; a tracker that cannot be opened carries `tracker_error` with `code` —
+  the one the repository's other commands stop with — and `said`. The exit code
+  is still always 0.
 
 - **An `AGENTS.md` that links out of the checkout or into `.git/`, or is not a
   regular file, is no longer read.** `moai init` leaves it alone, plants
@@ -64,6 +94,17 @@ does not tag — see `CONTRIBUTING.md`.
   `.git/`.** When `.moai` or `.moai/issues.jsonl` linked into `.git/`, `init`
   wrote rules for that place into `.gitignore` and `.gitattributes`, where git
   never looks.
+
+- **`note -b <file name>` no longer calls the note a body.** The line saying
+  the text went in as those words now says the note is those words. The same
+  line, on every command that gives it, is said only once the command stands —
+  a failed call no longer puts it ahead of the `--json` refusal object on stderr
+  — and it looks for the file where you typed the command first, so
+  `moai -C <dir> …` from elsewhere names a file your shell can stream.
+
+- **A command run from a directory that has been removed says where it failed.**
+  It printed a bare `No such file or directory (os error 2)`; it now says it
+  cannot tell where you are.
 
 ## [0.4.0] - 2026-10-03
 
