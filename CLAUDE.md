@@ -304,20 +304,9 @@
 
 ## 한국어 글
 
-moai 에 넣는 한국어 글(제목·본문·노트·`-m`·리뷰 원문)은 한국어 글쓰기 플러그인 둘로 다듬어서
-넣는다(2026-09-18 사용자 결정, `moai-5wk4`). 규칙은 @AGENTS.md 의 "Korean text" 에 있다
-(`moai init` 이 써 넣는 블록이 영어로 통일되며 그 절의 이름이 바뀌었다, `moai-54k2`).
-
-- **까는 것은 `moai skill install` 이다.** moai 와 같은 scope 로 두 플러그인을 함께 깐다(`moai-lr1s`).
-  사용자 전역에 깔지 않고, 에이전트가 스스로 `claude plugin install` 을 부르지 않는다
-- **막지 않는다.** 훅은 한글이 든 쓰기에 알림 하나를 덧붙인다(`moai-6rrb`). 글 스타일 검사를
-  게이트로 두지 않는다는 `moai-mthy` 결정을 그대로 지킨다
-- 한국어 판정은 화면 말 설정이 아니라 **글에 한글이 들었는가** 다
-- **용어는 `docs/korean-terms.md` 가 정한다**(`moai-iloh`). 기술 용어를 고유어 일반명사로 옮기고
-  원어를 지우면 읽는 쪽이 코드로 되돌아갈 길이 없다 — `tui::layer::summarize` 가 "층" 이 되고
-  `Seen::Unasked` 가 "못 물었다" 가 된 글이 실제로 있었다. 대상은 그 문서가 적어 둔 범위다
-- 긴 글은 저장소 밖에서 `humanize-korean` 을 돌리고 그 `_workspace/` 를 지운다. `.gitignore` 의 줄과
-  규칙 2 가 `_workspace` 를 안 세는 것은 안전망이다
+한국어 글은 따로 다듬지 않고 기본으로 쓴다(2026-10-03 사용자 결정, `moai-vtfu`). 두 글쓰기 플러그인으로
+다듬던 규칙(`moai-5wk4`)과 훅의 알림(`moai-6rrb`), 용어표(`moai-iloh`)는 걷었다. `moai skill install` 은
+옛 판이 moai 곁에 깐 그 플러그인을 걷어 낸다(`moai-lr1s` 가 깔던 범위 그대로).
 
 ## 리뷰
 

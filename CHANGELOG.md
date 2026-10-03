@@ -67,6 +67,30 @@ does not tag — see `CONTRIBUTING.md`.
   When the project numbers need the room, the last answer moves to the row
   under the version line instead of pushing them out.
 
+- **`moai skill install` removes the two Korean writing plugins an earlier
+  moai installed alongside it** (`korean-skills@korean-skills` and
+  `humanize-korean@im-not-ai`) instead of installing them. It removes them only
+  at the scopes where this repository's moai stands, which is where an earlier
+  install put them; a user-scope install another repository's moai also stands
+  beside is left, with the command to remove it printed. The marketplaces stay
+  — `claude plugin marketplace remove` reaches the whole machine. One line says
+  what was removed; a removal that fails prints the command to run by hand and
+  does not change the exit code. `--dry-run` lists the removals. In `--json`,
+  `skill install` and `skill uninstall` report them under `retired`
+  (`id`, `scope`, `command`, `ok`) and `kept`; the `companions` key is gone from
+  `skill install`, `skill uninstall` and `skill status`.
+
+### Removed
+
+- **Polishing Korean text is no longer part of moai.** The "Korean text" section
+  is gone from the `AGENTS.md` block, the planted moai skill, its
+  `references/commands.md` and the supervisor's worker brief, and the hook no
+  longer adds a polishing notice to a `moai` write that carries Hangul. Korean
+  text goes in as it is written. `moai skill status` no longer shows the
+  `alongside` row. Rule 2 counts a `_workspace/` folder like any other — the
+  exception existed only for the plugin that created it. Run `moai init` to
+  bring an existing `AGENTS.md` block up to date.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
