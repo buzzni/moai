@@ -3227,3 +3227,13 @@
 {"ts":"2026-10-03T11:42:43Z","id":"moai-47mz.12b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T11:42:43Z","id":"moai-47mz.5il","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받음: 리뷰가 고친 열하나(1~4·8~14, d5d840ce)와 넘긴 5(--stale 이 아카이브를 연다)·7(뱃지 수를 거름망·자리·보드 카드로 거른다, 480b96c2). 넘김: 6 → moai-8x70(idea, 사람이 고른 --done 과 같은 시계의 결과), CLAUDE.md:290 → moai-xq9k(idea). 안 고침: 15(테이블 안 모르는 키는 이 파서가 어디서나 넘긴다)"}
 {"ts":"2026-10-03T11:45:30Z","id":"moai-47mz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 병합(1ca3ed27)과 닫기 끝. 남은 것은 idea 둘 — moai-8x70(미뤄 닫은 묶음이 그날 아카이브로 숨는다, --done 과 같은 시계를 함께 옮길 일)·moai-xq9k(CLAUDE.md 의 work 합산 줄에 --archived). 루트 release 바이너리는 아직 옛것이다"}
+{"ts":"2026-10-03T11:52:00Z","id":"moai-23q4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"미뤄 닫은 묶음이 그날 아카이브로 숨지 않는다"}
+{"ts":"2026-10-03T11:52:00Z","id":"moai-23q4.0q1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"묶음이 done 에 든 때에 멤버를 미룬 때를 친다"}
+{"ts":"2026-10-03T11:52:00Z","id":"moai-23q4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8x70 에서 펼쳤다 — 미뤄 닫은 묶음이 닫힌 그날 아카이브로 숨는다"}
+{"ts":"2026-10-03T11:52:00Z","id":"moai-8x70","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-23q4 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T11:52:10Z","id":"moai-23q4.zfs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 work 합산 줄에 --archived 를 댄다"}
+{"ts":"2026-10-03T11:52:10Z","id":"moai-23q4.zfs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xq9k 에서 펼쳤다 — CLAUDE.md 의 'work 를 더할 때 moai show [거르개] --json' 줄이 아카이브를 놓친다 — --archived 를 함께 댄다"}
+{"ts":"2026-10-03T11:52:10Z","id":"moai-xq9k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-23q4 의 멤버 moai-23q4.zfs 로 펼쳤다"}
+{"ts":"2026-10-03T11:52:10Z","id":"moai-23q4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-03 사람이 정했다(AskUserQuestion): 묶음이 done 에 든 때는 셈에 남은 멤버가 마지막으로 칸을 옮긴 때와, 셈에서 빠진 안 끝난 멤버가 미뤄진 때(deferred_at) 중 늦은 것이다. 아카이브·`show --done`·done 묶음의 `--stale` 이 함께 옮긴다. 방치·막힘 시계(`Stand::since`, moai-cxk8)는 그대로. 지움(rm)·빼냄(edit -e)은 스냅샷에 흔적이 없어 그날 숨는 채로 두고 도움말에 한계를 적는다 — 잡으려면 묶음 줄에 필드를 저장해야 해 \"파생값은 저장하지 않는다\" 에 걸린다"}
+{"ts":"2026-10-03T11:52:15Z","id":"moai-23q4.0q1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T11:52:15Z","id":"moai-23q4.zfs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
