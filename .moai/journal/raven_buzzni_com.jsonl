@@ -3442,3 +3442,6 @@
 {"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.xe9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv·defer -m 의 글이 파일 이름이면 알린다"}
 {"ts":"2026-10-03T19:47:59Z","id":"moai-yivo.xe9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-xmhx 에서 펼쳤다 — mv·defer -m 에 적힌 글이 파일 이름이면 알린다"}
 {"ts":"2026-10-03T19:47:59Z","id":"moai-xmhx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-yivo 의 멤버 moai-yivo.xe9 로 펼쳤다"}
+{"ts":"2026-10-03T19:49:21Z","id":"moai-mkyg.tea","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T19:49:22Z","id":"moai-mkyg.dcf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T19:49:24Z","id":"moai-mkyg.ncj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
