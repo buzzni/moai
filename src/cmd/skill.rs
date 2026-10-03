@@ -53,17 +53,12 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
     let clash = clash_of(&market, &dir);
-    // **옛 판이 곁에 깐 것을 걷는다**(moai-vtfu). 범위는 등록하기 **전의** 장부로 잰다 — 옛 moai 가 서
-    // 있던 자리가 그것을 함께 깐 자리다. 등록 뒤에 재면 이번 `--scope` 로 처음 서는 범위가 섞여, 사람이 그
-    // 범위에 손으로 깐 것까지 이번 판에 걷는다. **막는 것은 이번 판뿐이다** — 다음 `install` 에서는 그
-    // 범위에도 moai 가 서 있어, 거기 선 두 플러그인을 누가 깔았든 moai 의 것으로 읽고 걷는다([`retire`] 의
-    // 대리). 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
+    // **옛 판이 곁에 깐 것을 걷는다**(moai-vtfu). 설치는 등록하기 **전의** 장부로 잰다 — 등록이 설치본을 새
+    // 판으로 바꾸면 그 범위의 moai 가 옛 판이라는 표식([`teaches_retired`])이 사라지고, 이번 `--scope` 로 처음
+    // 서는 범위가 섞인다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
     let target = format!("moai@{market}");
-    let mut retiring = if clash.is_none() {
-        retire(&root, &target, &scopes_of(&installs_here(&target, &root)))
-    } else {
-        Retired::default()
-    };
+    let mut retiring =
+        if clash.is_none() { retire(&root, &target, &installs_here(&target, &root)) } else { Retired::default() };
 
     if dry_run {
         if ctx.json {
@@ -132,8 +127,12 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     }
     // **옛 판이 곁에 깐 것을 걷는 일은 등록과 따로 센다**(사용자 결정, moai-vtfu.dvk). 못 걷어도 moai 의
     // 훅은 선다 — 종료 코드는 등록 결과만 따른다. 하나가 실패해도 다음 것을 부르고, 못 걷은 것은 손으로 칠
-    // 줄로 낸다. 다시 부르면 같은 장부로 범위를 재어 남은 것을 또 걷는다.
-    retiring.call(&root);
+    // 줄로 낸다. **등록이 안 됐으면 부르지 않는다**(사용자 결정 둘째 판) — 그때는 플러그인을 부르라는 옛 moai
+    // 사본이 그대로 실려 있다. `uninstall` 이 moai 를 다 못 걷으면 안 부르는 것과 같은 셈이고, 설치본이 옛
+    // 판으로 남으니 다시 부르면 또 걷는다.
+    if registered {
+        retiring.call(&root);
+    }
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
@@ -160,7 +159,9 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for step in &retiring.steps {
         out.push(match step.ok {
             Some(true) => fill(say(lang, "skill.retired"), &[("id", step.id), ("scope", &step.scope)]),
-            _ => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
+            Some(false) => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
+            // 등록이 안 돼 안 불렀다 — `uninstall` 이 같은 판에 내는 줄과 같다.
+            None => format!("  - {}{}", step.shown(), say(lang, "skill.step_not_called")),
         });
     }
     out.extend(retiring.kept_lines(lang));
@@ -359,9 +360,9 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             // 범위를 안 주면 모든 범위에서 걷는다.
             plan.push(argv(&["plugin", "marketplace", "remove", &market]));
         }
-        // **moai 를 걷는 그 범위로 잰다** — 장부를 다시 읽어 재던 판은 두 읽기 사이에 `claude` 가 장부를
+        // **moai 를 걷는 그 설치로 잰다** — 장부를 다시 읽어 재던 판은 두 읽기 사이에 `claude` 가 장부를
         // 고쳐 쓰면(옆 세션의 `skill install --scope user`) moai 를 안 걷는 범위의 것까지 걷을 수 있었다.
-        retiring = retire(&root, &target, &scopes);
+        retiring = retire(&root, &target, &installs);
     }
     let claude = which("claude").is_some();
     let mut steps: Vec<(String, bool)> = Vec::new();
@@ -561,12 +562,19 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
         .unwrap_or(0)
 }
 
-/// 옛 판이 moai 곁에 함께 깔던 한국어 글쓰기 플러그인 둘의 설치 id(moai-lr1s 가 깔았다).
+/// 옛 판이 moai 곁에 함께 깔던 한국어 글쓰기 플러그인 둘 — `(설치 id, 옛 판이 더하던 마켓플레이스 저장소)`
+/// (moai-lr1s 가 깔았다).
 ///
 /// **이제는 깔지 않고 걷는다**(사용자 결정 moai-vtfu, 2026-10-03). 글은 기본으로 쓰고, moai 가 깐 것은 moai
 /// 가 거둔다 — `install` 과 `uninstall` 이 [`retire`] 로 같은 범위를 걷는다. 마켓플레이스(`@` 뒤)는 두고
 /// 간다: `marketplace remove` 는 기계 하나 전체에 걸려, 다른 저장소나 사람이 그것으로 깐 것까지 끊는다.
-const RETIRED: [&str; 2] = ["korean-skills@korean-skills", "humanize-korean@im-not-ai"];
+const RETIRED: [(&str, &str); 2] =
+    [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")];
+
+/// 옛 판의 moai 스킬이 가르치던 글 — 설치본의 `SKILL.md` 에 이것이 있으면 그 설치는 [`RETIRED`] 를 곁에 깐
+/// 판이다. v0.1.0 부터 v0.3.0 까지 모든 판의 SKILL.md 가 `korean-skills:humanizer` 를 부르라고 했고, 이 에픽이
+/// 그 절을 걷었다(`guide::tests::no_surface_asks_for_the_korean_writing_plugins` 가 새 판에 이 글이 없음을 잰다).
+const RETIRED_MARK: &str = "korean-skills:";
 
 /// [`RETIRED`] 를 걷는 걸음 하나 — 무엇을, 어느 범위에서, 그리고 부른 결과.
 struct Retire {
@@ -635,22 +643,45 @@ fn scopes_of(installs: &[skill::Install]) -> Vec<&str> {
     scopes
 }
 
-/// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). `scopes` 는 **이 저장소의 moai(`target`)가
-/// 서 있는 범위**고, 부르는 쪽이 저 쓸 값을 그대로 건넨다 — `uninstall` 은 moai 를 걷는 그 범위를, `install`
-/// 은 등록하기 전의 범위를.
+/// 이 설치본이 [`RETIRED`] 를 곁에 깐 옛 판인가 — 설치본(`installPath`)의 moai 스킬이 [`RETIRED_MARK`] 를
+/// 가르친다. **설치본을 못 읽으면 아니다** — 걷기는 되돌리기 어려워, 모르는 것은 남기는 쪽으로 읽는다.
+fn teaches_retired(install: &skill::Install) -> bool {
+    std::fs::read_to_string(Path::new(&install.install_path).join("skills/moai/SKILL.md"))
+        .is_ok_and(|text| text.contains(RETIRED_MARK))
+}
+
+/// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). `installs` 는 **이 저장소의 moai(`target`)의
+/// 설치**고, 부르는 쪽이 저 쓸 값을 그대로 건넨다 — `uninstall` 은 moai 를 걷는 그 설치를, `install` 은
+/// 등록하기 전의 설치를.
 ///
-/// 장부는 누가 깔았는지 안 적으니 **그 범위·자리의 설치**를 "moai 가 깐 것" 으로 읽는다 — 옛 `install` 이
-/// 바로 그 자리에 깔았다. 대리라서 그 자리에 사람이 손으로 깐 것도 moai 의 것으로 읽힌다.
+/// 장부는 누가 깔았는지 안 적으니 셋이 겹칠 때만 "moai 가 깐 것" 으로 읽는다(사용자 결정 둘째 판).
+/// - **그 범위에 선 moai 설치본이 옛 판이다**([`teaches_retired`]). 옛 `install` 은 moai 와 같은 범위·자리에
+///   깔았다. 새 판으로 한 번 옮겨 간 범위는 다시 안 걷는다 — 그 뒤 사람이 손으로 깐 것을 매 `install` 마다
+///   걷던 판을 막는다. 대가로 걷기가 실패한 채 등록이 되면 다음 `install` 은 다시 안 걷는다 — 손으로 칠 줄은
+///   그때 낸다
+/// - **그 범위·자리에 그 플러그인이 서 있다**
+/// - **마켓플레이스가 옛 판이 더하던 저장소를 가리킨다**([`skill::market_repo`] — 대소문자와 주소 꼴은 가리지
+///   않는다). 다른 출처(포크)를 가리키거나 그 이름을 모르면 걷지 않는다 — 옛 `install` 도 그때는 안 깔았다
 ///
 /// **사용자 범위의 설치는 다른 저장소의 moai 가 사용자 범위에 서 있으면 둔다** — 그 줄은 기계에 하나라 그
 /// 저장소의 옛 판도 그것을 함께 깔았다. 가리지 않던 판은 한 저장소의 걷기로 다른 저장소의 두 플러그인까지
 /// 지웠다(리뷰 moai-5wk4.76z).
-fn retire(root: &Path, target: &str, scopes: &[&str]) -> Retired {
-    let shared = other_user_moai(target);
+fn retire(root: &Path, target: &str, installs: &[skill::Install]) -> Retired {
+    let old: Vec<skill::Install> = installs.iter().filter(|i| teaches_retired(i)).cloned().collect();
     let mut out = Retired::default();
-    for id in RETIRED {
+    if old.is_empty() {
+        return out;
+    }
+    let scopes = scopes_of(&old);
+    let known = ledger("known_marketplaces.json");
+    let shared = other_user_moai(target);
+    for (id, repo) in RETIRED {
+        let market = id.split_once('@').map_or(id, |(_, m)| m);
+        if !known.as_ref().and_then(|k| skill::market_repo(k, market)).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
+            continue;
+        }
         let theirs = installs_here(id, root);
-        for scope in scopes {
+        for scope in &scopes {
             if !theirs.iter().any(|i| i.scope == *scope) {
                 continue;
             }

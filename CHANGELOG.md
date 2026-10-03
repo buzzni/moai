@@ -71,10 +71,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **`moai skill install` removes the two Korean writing plugins an earlier
   moai installed alongside it** (`korean-skills@korean-skills` and
-  `humanize-korean@im-not-ai`) instead of installing them. It removes them only
-  at the scopes where this repository's moai stands, which is where an earlier
-  install put them; `claude` does not record who installed a plugin, so one
-  installed at such a scope by hand is removed too, on every install. A
+  `humanize-korean@im-not-ai`) instead of installing them. It removes them once
+  per scope, only where this repository's moai still stands as an earlier
+  version (its installed skill teaches them) and only when their marketplace is
+  the one an earlier moai added — `claude` does not record who installed a
+  plugin, so this is how one an earlier moai put there is told from one a
+  person installed. Once a scope holds this version, nothing there is removed
+  again, and nothing is removed when moai's own registration fails. A
   user-scope install another repository's moai also stands beside is left,
   with the command to remove it printed. The marketplaces stay — `claude plugin
   marketplace remove` reaches the whole machine. One line says what was

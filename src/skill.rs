@@ -582,6 +582,26 @@ pub fn installs_of(ledger: &serde_json::Value, key: &str, is_here: impl Fn(&str)
         .collect()
 }
 
+/// `known_marketplaces.json` 에서 이 이름의 마켓플레이스가 **어느 GitHub 저장소를 가리키는가**(`<owner>/<repo>`).
+/// 모르는 이름이면 `None`, GitHub 가 아닌 출처면 빈 글 — 빈 글은 "그 저장소가 아니다" 로 읽힌다.
+/// 옛 판이 곁에 깐 것을 걷을 때 그 마켓플레이스가 옛 판이 더하던 저장소인지를 이것으로 잰다
+/// (`cmd::skill::retire`, 사용자 결정 moai-vtfu.dvk).
+///
+/// **주소로 더한 GitHub 도 GitHub 다.** `claude plugin marketplace add https://github.com/<o>/<r>` 는
+/// `{"source":"git","url":"….git"}` 로 적힌다 — `repo` 만 읽던 판은 그것을 남의 출처로 보았다(`claude` 는
+/// 둘을 같은 마켓플레이스로 본다).
+pub fn market_repo(known: &serde_json::Value, name: &str) -> Option<String> {
+    let source = known.get(name)?.get("source")?;
+    let text = |k: &str| source.get(k).and_then(|v| v.as_str());
+    let from_url = || {
+        let url = text("url")?;
+        let rest = url.strip_prefix("https://github.com/").or_else(|| url.strip_prefix("git@github.com:"))?;
+        let rest = rest.trim_end_matches('/');
+        Some(rest.strip_suffix(".git").unwrap_or(rest).to_string())
+    };
+    Some(text("repo").map(str::to_string).or_else(from_url).unwrap_or_default())
+}
+
 /// 매니페스트가 훅으로 부르는 실행 파일. `command` 가 적는 모양
 /// (`command -v -- "<exe>" …`)에서 따옴표 속을 꺼낸다.
 ///
@@ -1227,6 +1247,25 @@ mod tests {
         let versions: Vec<&str> = got.iter().map(|i| i.version.as_str()).collect();
         assert_eq!(versions, ["1.2.3", "4.5.6"]);
         assert!(installs_of(&serde_json::json!({}), "moai@m", |_| true).is_empty(), "빈 장부에서 무언가 골랐다");
+    }
+
+    /// **주소로 더한 GitHub 도 그 저장소다**(리뷰 moai-5wk4.76z). `repo` 만 읽던 판은 `git` 출처를 빈 글로
+    /// 읽어 남의 출처로 보았다. GitHub 가 아닌 주소는 여전히 빈 글이다.
+    #[test]
+    fn a_github_url_marketplace_names_its_repo() {
+        let known = serde_json::json!({
+            "a": {"source": {"source": "github", "repo": "daleseo/korean-skills"}},
+            "b": {"source": {"source": "git", "url": "https://github.com/DaleSeo/korean-skills.git"}},
+            "c": {"source": {"source": "git", "url": "git@github.com:DaleSeo/korean-skills"}},
+            "d": {"source": {"source": "git", "url": "https://gitlab.com/DaleSeo/korean-skills.git"}},
+            "e": {"source": {"source": "directory", "path": "/x"}},
+        });
+        assert_eq!(market_repo(&known, "a").as_deref(), Some("daleseo/korean-skills"));
+        assert_eq!(market_repo(&known, "b").as_deref(), Some("DaleSeo/korean-skills"));
+        assert_eq!(market_repo(&known, "c").as_deref(), Some("DaleSeo/korean-skills"));
+        assert_eq!(market_repo(&known, "d").as_deref(), Some(""));
+        assert_eq!(market_repo(&known, "e").as_deref(), Some(""));
+        assert_eq!(market_repo(&known, "z"), None);
     }
 
     /// 매니페스트에서 훅이 부르는 실행 파일을 **심은 그대로** 꺼낸다 — 이름이든
