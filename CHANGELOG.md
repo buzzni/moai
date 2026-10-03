@@ -55,6 +55,8 @@ does not tag — see `CONTRIBUTING.md`.
   `latest.toml` gains a `heard_at` key and keeps `trouble` next to the tag; a
   file written before reads as heard when it was asked. Two reasons were
   shortened so the line fits 80 columns: `(bad answer)` and `(call failed)`.
+  When the project numbers need the room, the last answer moves to the row
+  under the version line instead of pushing them out.
 
 ## [0.3.0] - 2026-10-02
 
