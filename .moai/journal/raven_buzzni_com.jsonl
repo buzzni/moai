@@ -3067,3 +3067,4 @@
 {"ts":"2026-10-03T02:29:42Z","id":"moai-4la6.8ga","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — draw.rs card_foot·fit 안의 동작 변경, 시험이 둘러쌈. 창이 처음부터 opus 였다)"}
 {"ts":"2026-10-03T02:29:43Z","id":"moai-4la6.qf1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T02:29:43Z","id":"moai-4la6.8ga","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-03T02:30:12Z","id":"moai-4la6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 멤버 둘과 리뷰가 닫혔다. 넘긴 것은 idea moai-tmlg·moai-teq7 (v0.4.0 밖)"}
