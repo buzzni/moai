@@ -180,6 +180,18 @@ does not tag — see `CONTRIBUTING.md`.
   on one of that project's rows instead: the new project's place among the
   projects was read as a row number.
 
+- **`moai skill install` writes the path moai was called by, not the one its
+  symlinks resolve to.** Called through a symlinked directory — a `target/`
+  that links elsewhere, say — it wrote the resolved path into the hooks, so a
+  committed `.claude/moai-plugin` changed on every install and `moai skill
+  status` said the hooks call another moai when they call the same file. The
+  path comes from how moai was called (with `-C`, from where it was typed) and
+  is trusted only when it is the same file as the running binary; a path the
+  hook line cannot carry, or one under `/proc` or `/dev`, falls back to the
+  resolved path. Once the hooks are planted, installing again with any path to
+  the same file keeps the planted one, so the tree does not change. `skill
+  status` compares the hooks and the running moai by file, not by spelling.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
