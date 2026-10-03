@@ -173,7 +173,8 @@ does not tag — see `CONTRIBUTING.md`.
   `assignee=` repeated in `--filter` or `SPC f`, and the two mixed are one
   list read as or, the same as a comma. They used to be refused as a filter
   used twice — a row has one assignee, so "and" never picked anything. It is
-  the one filter where repeating means or.
+  the one filter where repeating means or. The `AGENTS.md` block and the skill
+  say so; run `moai init` and `moai skill install` to bring them in.
 
 ### Removed
 

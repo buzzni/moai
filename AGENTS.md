@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.3.0 hash:bd803ed7 -->
+<!-- moai:begin v:0.3.0 hash:3ab2abd7 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -11,7 +11,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
-    moai show -s todo -t bug               filters (comma = or, repeated flag = and)
+    moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
     moai stats                             counts: columns, flow, lead and cycle time, AI work
