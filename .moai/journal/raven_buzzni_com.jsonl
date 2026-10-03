@@ -3079,3 +3079,9 @@
 {"ts":"2026-10-03T02:38:26Z","id":"moai-vtfu.fjl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록·moai 스킬·감독 브리프에서 Korean text 절을 걷는다"}
 {"ts":"2026-10-03T02:38:26Z","id":"moai-vtfu.rl0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"docs/korean-terms.md 와 그것을 가리키는 줄을 걷는다"}
 {"ts":"2026-10-03T02:38:26Z","id":"moai-vtfu.kkb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 한국어 글 절을 걷고 CHANGELOG 에 Removed 를 적는다"}
+{"ts":"2026-10-03T02:38:48Z","id":"moai-r1ly.91p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 칸 하나를 고르는 동작 변경이 board.rs·mod.rs 에 걸쳤다. 사람 결정 둘을 받았다: done 칸으로 갔다가 보드에서 빼는 쪽으로 뒤집었다)"}
+{"ts":"2026-10-03T02:38:50Z","id":"moai-r1ly.dwb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — mod.rs·board.rs·zones.rs 에 걸쳐 다시 읽기·보기 토글·검색 풀기 뒤 커서 자리를 바꾼다. 감독이 붙인 등급과 같다)"}
+{"ts":"2026-10-03T02:38:51Z","id":"moai-r1ly.3rz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=250979 (xhigh — 에픽 끝 리뷰, 가장 무거운 멤버 dwb 가 high)"}
+{"ts":"2026-10-03T02:38:53Z","id":"moai-r1ly.91p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-03T02:38:54Z","id":"moai-r1ly.dwb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-03T02:38:56Z","id":"moai-r1ly.3rz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"7건 가운데 1·2·5·6번은 리뷰가 고친 대로 받았다(925bdb96). 4번은 사람 결정 A 로 자리가 없어졌다(da9eff7c: 닫힌 idea 는 보드에 안 선다). 3번은 에픽 멤버 moai-r1ly.f2x 로 되찾아 첫 칸에 남겼다. 7번은 넘기지 않는다: 줄이 바뀌기 전에만 잴 수 있어 laid 를 고쳐야 하는데, 값이 작고 rows() 를 다시 잴 때 함께 본다"}
