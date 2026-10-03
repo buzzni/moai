@@ -182,11 +182,10 @@ impl Plan {
     }
 
     /// 그 줄을 드러낼 자리 — 윗줄과 줄 수. **레인의 첫 카드면 그 레인의 머리줄까지다** — 머리줄 없이 선 카드는 어느
-    /// 마일스톤인지 모른다. 커서가 안 보일 때 그림(`draw::board`)과 멈춘 굴리기(`App::board_roll`)가 이만큼 굴린다.
+    /// 마일스톤인지 모른다. 커서가 안 보일 때 그림(`draw::board`)이 이만큼 굴린다.
     ///
-    /// **보이는가는 이 자가 아니라 그 줄만으로 잰다**(moai-acfk 리뷰) — 머리줄까지 재면 화면을 굴려 머리줄만 가린 카드가
-    /// 밀려난 것으로 읽혀, 다 보이는 카드에서 커서가 옮겨 갔다(사용자 결정: 고른 카드가 보이는 동안 커서는 그대로다).
-    /// 그림도 그 줄이 보이면 안 굴린다 — [`pull`] 이 남긴 커서를 다음 그림이 머리줄까지 드러내느라 굴린 화면을 되돌린다.
+    /// **보이는가는 이 자가 아니라 그 줄만으로 잰다**(moai-acfk 리뷰) — 그림은 그 줄이 보이면 안 굴린다. 머리줄까지 재면
+    /// 머리줄만 가린 카드로 `k` 를 눌러도 화면이 한 줄 되돌아간다.
     pub fn span(&self, n: usize) -> Option<(usize, usize)> {
         let p = self.cards.get(n)?;
         let lead = usize::from(self.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
@@ -244,8 +243,8 @@ pub enum Go {
 /// 커서를 옮긴다. 옮길 자리를 낸다 — 못 가면 제자리다.
 ///
 /// - `j`·`k` 는 **그 칸 안에서** 간다. 레인을 건너 이어진다 — 칸은 위에서 아래로 한 줄이다
-/// - 반 쪽·한 쪽(`Ctrl-d`·`Ctrl-u`·`Ctrl-f`·`Ctrl-b`)은 커서가 아니라 **화면을 굴린다**(moai-acfk, 사용자 결정
-///   2026-10-02) — 부르는 쪽이 굴리고 [`pull`] 로 커서를 맞춘다. 여기 오면 제자리다
+/// - 반 쪽·한 쪽(`Ctrl-d`·`Ctrl-u`·`Ctrl-f`·`Ctrl-b`)은 커서가 아니라 **화면을 굴린다**(moai-acfk) — 부르는 쪽이
+///   굴리고 커서는 그대로다(moai-j0jf, 사용자 결정 2026-10-03). 여기 오면 제자리다
 /// - `gg`·`G` 는 그 칸의 맨 위·맨 아래 카드다
 /// - `h`·`l` 은 **옆 칸**으로 가고 지금 높이에 가장 가까운 카드에 선다. 빈 칸은 건너뛴다 — 설 카드가 없다.
 ///   같은 프로젝트 안에서만 찾는다
@@ -272,36 +271,6 @@ pub fn step(plan: &Plan, cursor: usize, go: Go, hint: Option<usize>) -> usize {
             ahead.filter_map(|c| plan.nearest(c, here.top, here.group)).next().unwrap_or(cursor)
         }
     }
-}
-
-/// 화면을 굴린 뒤 커서가 설 자리(moai-acfk, 사용자 결정 2026-10-02). 휠과 반 쪽·한 쪽은 **화면만 굴린다** — 굴리는
-/// 것은 보드 통째로 하나뿐인 굴린 자리고, `shows(윗줄, 줄 수)` 가 굴린 뒤 그 자리가 보이는지 답한다.
-///
-/// - 커서의 줄이 보이면 제자리다 — 커서도 상세도 그대로다
-/// - 밀려났으면 **그 칸의 길에서 보이는 가장 가까운 줄**로 끌려온다. 머리줄도 그 길에 들고([`Plan::run`]), 머리줄에 선
-///   커서는 `hint` 의 칸을 본다([`step`] 과 같다)
-/// - **아직 아무 칸에도 안 선 머리줄(`hint` 없음)은 어느 칸이든 보이는 가장 가까운 줄이다**(리뷰) — 고른 칸이 없으니
-///   바꿀 칸도 없다. [`step`] 의 `j` 가 그때 가장 가까운 카드로 가는 것과 같다. 머리줄만의 길로 두면 `l` 로 펼친
-///   프로젝트가 화면보다 길 때 다음 머리줄이 안 보여, 펼친 바로 뒤의 휠이 첫 걸음부터 멈췄다
-/// - 그 길에 보이는 줄이 없으면 `None` 이다 — 부르는 쪽이 커서가 화면 끝에 닿는 데서 굴리기를 멈춘다(사용자 결정).
-///   딴 칸의 카드로 건너가면 굴린 손이 고른 칸을 바꾼다
-///
-/// 보이는가는 그 줄만으로 잰다 — 레인 머리줄이 가렸어도 카드가 다 보이면 보인다([`Plan::span`]). 그림이 커서를 드러낼지
-/// 가르는 자와 같아야 굴린 화면이 다음 그림에 안 되돌아간다.
-pub fn pull(plan: &Plan, cursor: usize, hint: Option<usize>, shows: impl Fn(usize, usize) -> bool) -> Option<usize> {
-    let seen = |n: usize| plan.cards.get(n).is_some_and(|p| shows(p.top, p.height));
-    let Some(here) = plan.cards.get(cursor) else { return Some(cursor) };
-    if seen(cursor) {
-        return Some(cursor);
-    }
-    let path: Vec<usize> = match here.column.or(hint) {
-        Some(c) => plan.run(Some(c)),
-        None => (0..plan.cards.len()).collect(),
-    };
-    // 같은 거리면 위의 것, 같은 줄이면 머리줄·왼쪽 칸 — 차례가 줄의 차례에 기대지 않게 못박는다.
-    path.into_iter()
-        .filter(|&n| seen(n))
-        .min_by_key(|&n| (plan.cards[n].top.abs_diff(here.top), plan.cards[n].top, plan.cards[n].column))
 }
 
 /// 사라진 카드 대신 설 카드의 차례(moai-r1ly.dwb, 사용자 결정 2026-10-03) — 카드 `n` 이 선 칸의 길([`Plan::run`])에서
@@ -492,7 +461,7 @@ mod tests {
         assert_eq!(down(1), 1, "혼자 선 칸에서는 제자리다");
         assert_eq!(step(&p, 0, Go::Move(Move::Bottom)), 3);
         assert_eq!(step(&p, 3, Go::Move(Move::Top)), 0);
-        // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 커서는 [`pull`] 이 맞춘다.
+        // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 커서는 그대로다(moai-j0jf).
         assert_eq!(step(&p, 0, Go::Move(Move::PageDown)), 0, "한 쪽이 커서를 옮겼다");
         assert_eq!(step(&p, 3, Go::Move(Move::HalfUp)), 3, "반 쪽이 커서를 옮겼다");
     }
@@ -545,78 +514,16 @@ mod tests {
     fn an_empty_board_keeps_the_cursor_where_it_is() {
         let p = Plan::of(&[], 3, &[]);
         assert_eq!(step(&p, 0, Go::Move(Move::LineDown)), 0);
-        assert_eq!(pull(&p, 0, None, |_, _| false), Some(0));
         assert_eq!(p.height, 0);
     }
 
-    /// 굴린 화면 — `offset` 부터 `height` 줄이 보인다. 자는 [`super::super::scroll::Scroll::shows`] 다.
-    fn screen(offset: usize, height: usize, len: usize) -> super::super::scroll::Scroll {
-        let mut s = super::super::scroll::Scroll::default();
-        s.fit(height, len);
-        s.by(offset as isize);
-        s
-    }
-
-    /// **화면만 굴린다**(moai-acfk, 사용자 결정) — 커서의 카드가 보이는 동안은 제자리고, 밀려나면 그 칸에서 보이는 가장
-    /// 가까운 카드로 끌려온다. 그 칸에 보이는 카드가 없으면 `None` 이다 — 굴리기가 거기서 멈춘다.
+    /// **드러낼 자리는 레인의 첫 카드면 그 레인의 머리줄까지다**([`Plan::span`]) — 머리줄 없이 선 카드는 어느
+    /// 마일스톤인지 모른다. 둘째 카드부터는 그 카드만이다.
     #[test]
-    fn rolling_keeps_a_visible_cursor_and_pulls_one_pushed_out_into_its_column() {
-        // 칸 0 에 다섯(윗줄 0·2·4·6·8), 칸 1 에 하나(윗줄 0).
-        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 1)], 2, &[]);
-        let at = |cursor, offset| {
-            let s = screen(offset, 4, p.height);
-            pull(&p, cursor, None, |top, h| s.shows(top, h))
-        };
-        assert_eq!(at(1, 1), Some(1), "보이는 커서가 움직였다");
-        assert_eq!(at(0, 3), Some(2), "아래로 굴려 밀려난 커서가 그 칸의 첫 보이는 카드로 안 왔다");
-        assert_eq!(at(4, 2), Some(2), "위로 굴려 밀려난 커서가 그 칸의 끝 보이는 카드로 안 왔다");
-        assert_eq!(at(0, 1), Some(1), "반쯤 가린 카드를 보인다고 셌다 — 다음 그림이 화면을 되돌린다");
-        assert_eq!(at(5, 3), None, "그 칸에 보이는 카드가 없는데 딴 칸으로 건너갔다");
-    }
-
-    /// **레인 머리줄만 가린 카드는 여전히 보인다**(moai-acfk 리뷰, 사용자 결정) — 고른 카드가 보이는 동안 커서는 그대로다.
-    /// 머리줄은 드러낼 때만 함께 든다([`Plan::span`]).
-    #[test]
-    fn a_lane_first_card_stays_chosen_while_only_its_lane_header_is_hidden() {
+    fn a_lane_first_card_is_revealed_with_its_lane_header() {
         // 레인 0: 머리줄(0) 밑에 칸 0 의 카드 둘(1·3). 레인 1: 머리줄(5) 밑에 칸 0 의 카드(6).
         let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(1, 0)], 1, &[true, true]);
         assert_eq!((p.span(0), p.span(1), p.span(2)), (Some((0, 3)), Some((3, 2)), Some((5, 3))));
-        let s = screen(1, 4, p.height);
-        assert_eq!(pull(&p, 0, None, |top, h| s.shows(top, h)), Some(0), "다 보이는 카드에서 커서가 옮겨 갔다");
-        let s = screen(2, 4, p.height);
-        assert_eq!(pull(&p, 0, None, |top, h| s.shows(top, h)), Some(1), "반쯤 가린 카드를 보인다고 셌다");
-    }
-
-    /// **머리줄도 칸의 길에 든다**(moai-oagj.vcj) — 한눈 보기에서 밀려난 커서는 보이는 프로젝트 머리줄로도 끌려온다.
-    /// 머리줄에 선 커서는 들고 있는 칸(`hint`)을 본다.
-    #[test]
-    fn rolling_pulls_onto_a_project_header_on_the_column_path() {
-        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
-        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
-        // 0: A 머리줄(0), 1: A 의 칸 0(1), 2: A 의 칸 1(1), 3: B 머리줄(3), 4: B 의 칸 1(4).
-        let slots = [banner(0, 0), card(1, 0, 0), card(1, 1, 0), banner(2, 1), card(3, 1, 1)];
-        let p = Plan::of(&slots, 2, &[]);
-        let s = screen(3, 3, p.height);
-        let shows = |top, h| s.shows(top, h);
-        assert_eq!(pull(&p, 1, None, shows), Some(3), "칸 0 의 커서가 그 길의 머리줄로 안 왔다");
-        assert_eq!(pull(&p, 0, Some(1), shows), Some(3), "머리줄의 커서가 가장 가까운 보이는 줄로 안 왔다");
-        let s = screen(1, 2, p.height);
-        assert_eq!(pull(&p, 0, Some(1), |top, h| s.shows(top, h)), Some(2), "머리줄이 들고 있는 칸을 안 봤다");
-    }
-
-    /// **아직 아무 칸에도 안 선 머리줄은 어느 칸이든 보이는 가장 가까운 줄로 끌려온다**(리뷰) — 머리줄만의 길로 두면
-    /// 펼친 프로젝트가 화면보다 길 때 다음 머리줄이 안 보여, `l` 로 펼친 바로 뒤의 휠이 첫 걸음부터 멈췄다.
-    #[test]
-    fn a_header_with_no_column_yet_pulls_onto_the_nearest_row_on_screen() {
-        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
-        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
-        // 0: A 머리줄(0), 1~6: A 의 칸 1(윗줄 1·3·5·7·9·11), 7: B 머리줄(13).
-        let mut slots = vec![banner(0, 0)];
-        slots.extend(std::iter::repeat_n(card(1, 1, 0), 6));
-        slots.push(banner(2, 1));
-        let p = Plan::of(&slots, 2, &[]);
-        let s = screen(3, 5, p.height);
-        assert_eq!(pull(&p, 0, None, |top, h| s.shows(top, h)), Some(2), "머리줄만의 길을 타 굴리기가 멈췄다");
     }
 
     /// 칸마다 [`CARD_MIN`] 을 못 받으면 덜 세우되, 커서가 선 칸은 늘 선다.

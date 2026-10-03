@@ -238,15 +238,13 @@ impl App {
     /// - 목록은 **커서를** 옮긴다 — 커서가 없는 줄을 굴려 보이게만 하면 상세는 그대로라, 굴려서 찾은
     ///   줄을 보려면 다시 눌러야 한다. 끝에서는 멈춘다 — `j`·`k` 와 같은 자다(`scroll::cursor_by`)
     /// - 보드는 **화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — 위아래를 빠르게 훑는 손짓이다. 굴리는 것은 보드
-    ///   통째로 하나라 마우스가 선 칸은 안 가린다. 커서는 보이는 동안 그대로고, 밀려나면 그 칸에서 보이는 가장 가까운
-    ///   카드로 끌려온다(`App::board_roll`). 걸음은 상세와 같은 [`WHEEL`] 줄이다
+    ///   통째로 하나라 마우스가 선 칸은 안 가린다. **커서와 상세는 그대로다** — 고른 카드가 화면 밖으로 나가도 끌려오지
+    ///   않고, 화면은 보드 끝까지 구른다(moai-j0jf, 사용자 결정 2026-10-03, `App::board_roll`). 걸음은 상세와 같은
+    ///   [`WHEEL`] 줄이다
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
-            Some(Pane::Explorer) if self.board() => {
-                let rows = self.rows();
-                self.board_roll(&rows, |s| s.by(by));
-            }
+            Some(Pane::Explorer) if self.board() => self.board_roll(|s| s.by(by)),
             Some(Pane::Explorer) => {
                 let to = scroll::cursor_by(by, self.cursor, || self.rows().len());
                 self.move_to(to);
@@ -446,11 +444,11 @@ mod tests {
         assert_eq!((a.focus, on_card(&a)), (Pane::Explorer, "argos-0018".to_string()), "칸 머리줄이 카드를 골랐다");
     }
 
-    /// **보드의 휠은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — 마우스가 선 칸과 상관없이 보드 통째로
-    /// [`WHEEL`] 줄씩이다. 고른 카드가 보이는 동안 커서도 상세의 굴린 자리도 그대로고, 밀려나면 **그 칸에서** 보이는
-    /// 가장 가까운 카드로 끌려온다. 포커스는 안 옮긴다.
+    /// **보드의 휠은 화면만 굴린다**(moai-acfk·moai-j0jf, 사용자 결정 2026-10-02·2026-10-03) — 마우스가 선 칸과
+    /// 상관없이 보드 통째로 [`WHEEL`] 줄씩이다. 고른 카드가 화면 밖으로 나가도 커서도 상세의 굴린 자리도 그대로고,
+    /// 다음 그림이 화면을 그 카드로 되돌리지 않는다. 포커스는 안 옮긴다.
     #[test]
-    fn on_the_board_the_wheel_scrolls_and_keeps_a_visible_cursor() {
+    fn on_the_board_the_wheel_scrolls_the_screen_and_leaves_the_cursor() {
         let mut a = on_board();
         let r = card_at(&a, "argos-0003");
         click(&mut a, r.x + 3, r.y + 1);
@@ -466,39 +464,41 @@ mod tests {
         assert_eq!(on_card(&a), "argos-0003", "보이는 카드인데 커서가 움직였다");
         assert_eq!((a.detail.offset(), a.focus), (3, Pane::Explorer), "커서가 그대로인데 상세가 첫 줄로 돌아갔다");
         super::super::draw::tests::render(&mut a, 140, 20);
-        assert_eq!(a.list.offset(), 3, "보인다고 둔 커서를 그림이 드러내느라 화면을 되돌렸다");
+        assert_eq!(a.list.offset(), 3, "보이는 커서를 그림이 드러내느라 화면을 되돌렸다");
 
+        // 0003 은 윗줄 4 의 두 줄 카드다 — 여섯 줄 굴리면 화면 밖이다.
         roll(&mut a, true, x, y);
         assert_eq!(a.list.offset(), 6);
-        assert_eq!(on_card(&a), "argos-0004", "밀려난 커서가 그 칸에서 보이는 가장 가까운 카드로 안 왔다");
+        assert_eq!(on_card(&a), "argos-0003", "화면 밖으로 나간 카드에서 커서가 끌려 나왔다");
+        assert_eq!(a.detail.offset(), 3, "커서가 그대로인데 상세가 첫 줄로 돌아갔다");
         super::super::draw::tests::render(&mut a, 140, 20);
-        assert_eq!(a.list.offset(), 6, "끌려온 카드를 그림이 드러내느라 화면을 되돌렸다");
+        assert_eq!(a.list.offset(), 6, "화면 밖의 커서를 그림이 드러내느라 굴린 화면을 되돌렸다");
 
         roll(&mut a, false, x, y);
         roll(&mut a, false, x, y);
-        assert_eq!((a.list.offset(), on_card(&a)), (0, "argos-0004".to_string()), "위로 굴린 휠이 화면을 안 되돌렸다");
+        assert_eq!((a.list.offset(), on_card(&a)), (0, "argos-0003".to_string()), "위로 굴린 휠이 화면을 안 되돌렸다");
     }
 
-    /// **커서의 칸에 보이는 카드가 없으면 굴리기가 거기서 멈춘다**(moai-acfk, 사용자 결정) — 딴 칸의 카드로 건너가지 않고,
-    /// 커서 카드가 화면 끝에 닿은 자리에 선다. 거꾸로 굴리면 곧바로 듣는다 — 넘친 만큼이 쌓이지 않는다.
+    /// **화면은 보드 끝까지 구른다**(moai-j0jf) — 커서의 칸이 먼저 끝나도 멈추지 않는다. 끌어오던 때(moai-acfk)는 그 칸에
+    /// 보이는 카드가 없으면 굴리기가 거기서 멈췄다. 거꾸로 굴리면 곧바로 듣는다 — 끝을 넘친 만큼이 쌓이지 않는다.
     #[test]
-    fn on_the_board_the_wheel_stops_where_the_cursor_column_runs_out() {
+    fn on_the_board_the_wheel_rolls_to_the_end_past_the_cursor_column() {
         let mut a = on_board();
         let r = card_at(&a, "argos-0017");
         click(&mut a, r.x + 3, r.y + 1);
         let todo = column_at(&a, "todo");
         let (x, y) = (todo.x + 3, todo.y + todo.height / 2);
-        for _ in 0..5 {
+        for _ in 0..20 {
             roll(&mut a, true, x, y);
         }
-        // in_progress 의 끝 카드 0020 은 윗줄 6 이다 — 화면 맨 위에 닿은 데서 멈춘다.
-        assert_eq!((a.list.offset(), on_card(&a)), (6, "argos-0020".to_string()), "딴 칸으로 건너갔거나 안 멈췄다");
+        // in_progress 의 끝 카드 0020 은 윗줄 6 이다 — 끌어오던 때는 화면이 거기서 멈췄다.
+        let end = a.list.offset();
+        assert!(end > 6 && a.list.below() == 0, "보드 끝까지 안 굴렀다 — {end}");
+        assert_eq!(on_card(&a), "argos-0017", "굴린 휠이 커서를 옮겼다");
+        super::super::draw::tests::render(&mut a, 140, 20);
+        assert_eq!(a.list.offset(), end, "그림이 굴린 화면을 커서로 되돌렸다");
         roll(&mut a, false, x, y);
-        assert_eq!(
-            (a.list.offset(), on_card(&a)),
-            (3, "argos-0020".to_string()),
-            "멈춘 뒤 위로 굴린 휠이 곧바로 안 들었다"
-        );
+        assert_eq!(a.list.offset(), end - 3, "끝에서 위로 굴린 휠이 곧바로 안 들었다");
     }
 
     /// **통계 창 위의 휠은 창을 굴린다**(사용자 결정 2026-10-01) — 키(`j`·`k`)가 옮기는 그 자리다. 덮인 목록은
