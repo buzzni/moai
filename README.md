@@ -137,6 +137,10 @@ lets the mouse go when you would rather select or paste with it in the terminal.
 columns side by side, one lane per milestone, and in the overview one header
 per project — and keeps that choice for the next run. `SPC v i` hides the
 ideas, and a card that is not yours says whose it is.
+`SPC f` filters with the same `key=value` words as `--filter`. While you type,
+the keys it takes and a few examples stand above the field, and in the value of
+`assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
+do — typing narrows them, Up and Down pick one and Enter puts it in.
 
 Done work that has sat in done for two weeks is the archive. It is not removed
 and nothing is stored for it — moai reads it off the column and the clock each
@@ -255,10 +259,15 @@ below shrink is the output, and with it the tokens.
   and `--sort created` are the orders no edit moves. The output stays a bare
   array — fewer rows than `-n` means the list has ended.
 - `--since <when>` keeps the rows whose own `updated_at` is at or after a time,
-  and `--created` and `--done` take a range `from..to`. A bare `YYYY-MM-DD` is
-  a day on your own clock, the time zone the screen uses; `YYYY-MM-DDTHH:MM:SSZ`
-  is an instant in UTC. Asking by time opens what the list hides by default —
-  done, deferred and ideas — since a row closed meanwhile changed too.
+  and `--created` and `--done` take a range `from~to` (or `from..to`) with
+  either side left open. A bare `YYYY-MM-DD` is a day on your own clock, the
+  time zone the screen uses; `YYYY-MM-DD HH:MM` is one minute on that clock;
+  `YYYY-MM-DDTHH:MM:SSZ` is an instant in UTC. `--filter` adds `created_at=`,
+  `updated_at=`, `started_at=` and `done_at=`, each reading the row's own field,
+  and in the explorer's `SPC f` a value right after `=` may be quoted —
+  `done_at="2026-10-03 00:00~2026-10-05 23:59"`. Asking by time opens what the
+  list hides by default — done, deferred and ideas — since a row closed
+  meanwhile changed too.
 - `-g` looks through the notes and move messages as well as the id, title, tags
   and body.
 

@@ -1030,6 +1030,9 @@ pub enum Prompt {
     /// 다른 칸은 안 쓴다.
     NextScope,
     PrevScope,
+    /// 거름망 칸의 값 목록에서 한 줄 위·아래(moai-h2rh). 목록이 안 선 칸에서는 아무것도 안 한다.
+    Up,
+    Down,
 }
 
 pub const PROMPT: &[Bind<Prompt>] = &[
@@ -1037,6 +1040,8 @@ pub const PROMPT: &[Bind<Prompt>] = &[
     row!(Prompt::Cancel, Some("Esc"), Key::unctrl(KeyCode::Esc)),
     row!(Prompt::NextScope, Some("Tab"), Key::unshift(KeyCode::Tab)),
     row!(Prompt::PrevScope, Some("Shift-Tab"), Key::shift(KeyCode::Tab)),
+    row!(Prompt::Up, Some("Up"), Key::bare(KeyCode::Up)),
+    row!(Prompt::Down, Some("Down"), Key::bare(KeyCode::Down)),
 ];
 
 /// 고르기 창(moai-plvy).
@@ -1825,6 +1830,9 @@ mod tests {
             (with(C::Enter, ctrl), Lookup::Unknown),
             (press(C::Tab), Lookup::Run(Prompt::NextScope)),
             (press(C::BackTab), Lookup::Run(Prompt::PrevScope)),
+            (press(C::Up), Lookup::Run(Prompt::Up)),
+            (press(C::Down), Lookup::Run(Prompt::Down)),
+            (with(C::Down, ctrl), Lookup::Unknown),
         ];
         for (k, want) in prompt {
             assert_eq!(one(PROMPT, k), want, "글칸 {k:?}");
@@ -1920,47 +1928,57 @@ mod tests {
     fn a_key_told_only_in_another_paragraph_does_not_count() {
         let help = tui_help();
         assert!(missing_in(&help).is_empty(), "고치기 전 도움말부터 빠진 키가 있다");
-        // (지울 말, 바꿀 말, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
-        for (phrase, instead, still, want) in [
+        // (지울 말과 바꿀 말들, 도움말 전체엔 남아야 하는 키, 빠졌다고 해야 하는 것)
+        for (edits, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
             (
-                "Tab and Shift-Tab pick where it",
-                "it picks where it",
+                &[("Tab and Shift-Tab pick where it", "it picks where it")][..],
                 &["Tab"][..],
                 &["PROMPT: Tab", "PROMPT: Shift-Tab"][..],
             ),
-            // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다.
+            // 좁힌 표 — 같은 문단의 목록 Enter·Esc 로 지나가면 안 된다. **값 목록의 문장도 Enter 를 대므로**
+            // (moai-h2rh) 둘 다 지운다 — 하나만 지우면 남은 쪽이 PROMPT 의 Enter 로 지나간다.
             (
-                "The search and filter fields take Enter to apply and Esc to give up",
-                "The search and filter fields apply and give up",
+                &[
+                    (
+                        "The search and filter fields take Enter to apply and Esc to give up",
+                        "The search and filter fields apply and give up",
+                    ),
+                    ("Enter puts it in", "it goes in"),
+                ][..],
                 &["Enter", "Esc"][..],
                 &["PROMPT: Enter", "PROMPT: Esc"][..],
             ),
             // 좁힌 표 — 같은 문단의 고르기 창 Enter·Esc 로 지나가면 안 된다.
             (
-                "(Enter goes, Esc gives up)",
-                "(as you would expect)",
+                &[("(Enter goes, Esc gives up)", "(as you would expect)")][..],
                 &["Enter", "Esc"][..],
                 &["PATH: Enter", "PATH: Esc"][..],
             ),
             // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
             (
-                "Enter goes in, Backspace comes back out",
-                "it goes in and comes back out",
+                &[("Enter goes in, Backspace comes back out", "it goes in and comes back out")][..],
                 &["Enter", "Backspace"][..],
                 &["BROWSE: Enter", "BROWSE: Bksp"][..],
             ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
-            ("The window closes on Esc", "The window closes", &["Esc"][..], &["PICK: Esc"][..]),
+            (&[("The window closes on Esc", "The window closes")][..], &["Esc"][..], &["PICK: Esc"][..]),
             // 거꾸로 — 목록의 Esc(거름망 풀기)가 같은 문단의 메뉴 문장(`Esc 로 나간다`·`Esc 닫기`)으로
             // 지나가면 안 된다. 그 문장들을 MENU 의 것으로 안 적으면 여기서 붉어진다.
-            ("Esc clears the filter you set", "it clears the filter you set", &["Esc"][..], &["BROWSE: Esc"][..]),
+            (
+                &[("Esc clears the filter you set", "it clears the filter you set")][..],
+                &["Esc"][..],
+                &["BROWSE: Esc"][..],
+            ),
         ] {
-            assert!(
-                help.contains(phrase),
-                "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다"
-            );
-            let broken = help.replace(phrase, instead);
+            let mut broken = help.clone();
+            for (phrase, instead) in edits {
+                assert!(
+                    broken.contains(phrase),
+                    "시험이 지울 말 `{phrase}` 이 도움말에 없다 — 문장이 바뀌었으면 여기도 고친다"
+                );
+                broken = broken.replace(phrase, instead);
+            }
             let everywhere: Vec<String> = keys_in(&broken).into_iter().map(|(w, _)| w).collect();
             for k in still {
                 assert!(
@@ -1970,7 +1988,7 @@ mod tests {
             }
             let missing = missing_in(&broken);
             for w in want {
-                assert!(missing.iter().any(|m| m == w), "`{phrase}` 를 지웠는데 {w} 를 못 잡았다: {missing:?}");
+                assert!(missing.iter().any(|m| m == w), "`{edits:?}` 를 지웠는데 {w} 를 못 잡았다: {missing:?}");
             }
         }
     }
@@ -1999,6 +2017,8 @@ mod tests {
     const SENTENCES: &[(&str, &str, &str)] = &[
         // 목록(BROWSE)과 Enter·Esc 를 나눠 쓴다.
         ("PROMPT", LIST, "The search and filter fields"),
+        // 거름망 칸의 값 목록(moai-h2rh) — 여기 적힌 Enter 는 값을 넣는 Enter 다.
+        ("PROMPT", LIST, "The filter field lists"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
         ("MENU", SPC, "stands up only what works"),
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
