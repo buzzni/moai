@@ -1206,14 +1206,24 @@ pub struct App {
     /// 그쪽은 `MOAI_ACTOR` 와 이 기계의 git 설정을 읽어, 갈아 끼우지 않으면
     /// "누군지 모를 때" 를 시험한 결과가 돌리는 사람의 설정에 달린다.
     identify: fn(Option<&str>, &std::path::Path) -> Result<crate::model::Actor, crate::model::NoActor>,
-    /// 못 읽은 저널을 묻는 길(moai-pvpb.6g6). 진짜 길은 [`crate::store::journal_unread`] 다 — 이 프로세스가
-    /// 저널을 읽다 못 연 자리를 만난 차례대로 든다. **시험에서는 빈 것이 처음값이다**: 그 목록은 프로세스
-    /// 하나의 전역이라, 같은 프로세스에서 나란히 도는 `store` 시험이 심은 0600 저널이 헤더를 재는 시험에
-    /// 샌다. 재는 시험이 갈아 끼운다.
+    /// 못 읽은 저널을 묻는 길(moai-pvpb.6g6). 진짜 길은 [`crate::store::journal_unread_now`] 다 — 이 프로세스가
+    /// 저널을 읽다 못 연 자리 가운데 아직 못 읽는 것을 만난 차례대로 든다(고친 자리는 [`Self::reopen`] 이 걷는다).
+    /// **시험에서는 빈 것이 처음값이다**: 그 목록은 프로세스 하나의 전역이라, 같은 프로세스에서 나란히 도는 `store`
+    /// 시험이 심은 0600 저널이 헤더를 재는 시험에 샌다. 재는 시험이 갈아 끼운다.
     journals: fn() -> Vec<crate::store::Unread>,
-    /// 헤더가 안 서는 낮은 창에서 알림 띠로 **이미 말한** 못 읽은 저널의 수 — 늘 때만 한 번 더 말한다
-    /// ([`App::tell_journals`]).
-    journals_told: usize,
+    /// 헤더가 안 서는 낮은 창에서 알림 띠로 **이미 말한** 못 읽은 저널 — 목록에 새 줄이 들 때만 한 번 더 말한다
+    /// ([`App::tell_journals`]). **수가 아니라 줄을 든다**(moai-mkyg.ncj) — 목록이 이제 줄기도 해서([`Self::reopen`]),
+    /// 수로 들면 걷힌 만큼 뒤에 새로 든 줄을 이미 말한 것으로 셌다.
+    journals_told: Vec<crate::store::Unread>,
+    /// 못 읽었던 저널 자리를 다시 재는 길(moai-mkyg.ncj). 진짜 길은 [`crate::store::reopen_unread`] 다 — 이제 읽히는
+    /// 자리를 [`Self::journals`] 의 목록에서 걷고 걷은 수를 낸다. **시험에서는 아무것도 안 하는 것이 처음값이다** —
+    /// 그 목록은 프로세스 하나의 전역이라, 다른 시험이 심은 자리를 이 시험이 걷는다. 재는 시험이 갈아 끼운다.
+    reopen: fn(&Config) -> usize,
+    /// [`Self::reopen`] 을 마지막으로 부른 때 — [`layer::REREAD_EVERY`] 에 한 번만 부른다([`App::reopen_journals`]).
+    reopened_at: Option<std::time::Instant>,
+    /// 걷은 자리가 있어 프로젝트를 다시 읽어야 한다([`App::follow`]) — 걷기 전에 읽은 노트에는 그 파일의 줄이 없다.
+    /// 받는 자리에서 노트를 든 동안만 듣는다 — 그 사이 프로젝트를 옮겨 노트가 없으면 버린다.
+    reread: bool,
     /// 루프가 **휠·끌기를 마지막으로 받은 때**(moai-pvpb.m2f) — 끝내거나 편집기로 넘길 때 DA1 의 답 뒤까지 비울지를
     /// 이것으로 가른다(`cmd::tui::rolled_lately`). 적는 것은 루프가 사건을 넘기는 자리(`cmd::tui::take`) 하나다.
     /// 탐색기의 뜻에는 안 쓰인다 — 터미널을 걷는 쪽이 읽는 값을 루프와 끝내는 자리가 함께 쥔 `App` 에 둔 것이다.
@@ -1872,8 +1882,11 @@ impl App {
             note_hits: None,
             user: None,
             identify: crate::model::actor,
-            journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread },
-            journals_told: 0,
+            journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread_now },
+            journals_told: Vec::new(),
+            reopen: if cfg!(test) { |_| 0 } else { crate::store::reopen_unread },
+            reopened_at: Some(std::time::Instant::now()),
+            reread: false,
             rolled_at: None,
             header_user: None,
             commits_job: None,
@@ -2181,14 +2194,40 @@ impl App {
         self.header_user.as_ref().map_or("—", |(_, _, _, said, _)| said.as_str())
     }
 
-    /// **못 읽은 저널** — 이 탐색기가 지금까지 저널을 읽다 못 연 자리, 만난 차례대로(moai-pvpb.6g6, 2026-10-02
-    /// 사용자 결정). 헤더의 셋째 줄이 늘 대고, 헤더가 안 서는 창에서는 알림 띠가 한 번 댄다. 안 대면 통계 창의
-    /// 토큰 합과 `/` 의 노트 찾기가 모자란 채 다 센 것처럼 서고, 그 말은 나간 뒤 stderr 에만 선다.
+    /// **못 읽은 저널** — 이 탐색기가 저널을 읽다 못 연 자리 가운데 아직 못 읽는 것, 만난 차례대로(moai-pvpb.6g6,
+    /// 2026-10-02 사용자 결정). 헤더의 셋째 줄이 늘 대고, 헤더가 안 서는 창에서는 알림 띠가 한 번 댄다. 안 대면 통계
+    /// 창의 토큰 합과 `/` 의 노트 찾기가 모자란 채 다 센 것처럼 서고, 그 말은 나간 뒤 stderr 에만 선다.
     ///
-    /// **목록은 늘기만 한다** — [`crate::store::journal_unread`] 는 프로세스 하나의 것이고 아무도 비우지 않아, 파일을
-    /// 고쳐 다시 읽혀도 그 자리는 탐색기를 나갈 때까지 남는다.
+    /// **고치면 걷힌다**(moai-mkyg.ncj) — 한때 읽던 [`crate::store::journal_unread`] 는 프로세스 하나의 것이고 늘기만
+    /// 해서, `chmod 644` 로 고쳐도 그 자리가 탐색기를 나갈 때까지 섰다. 지금은 걷히는
+    /// [`crate::store::journal_unread_now`] 를 읽고, [`App::reopen_journals`] 가 1분에 한 번 다시 재어 이제 읽히는 자리를
+    /// 걷는다 — 통계 창이 선 동안은 안 잰다. 나갈 때의 stderr 는 늘기만 하는 쪽을 읽어 걷힌 자리까지 댄다.
     pub fn unread_journals(&self) -> Vec<crate::store::Unread> {
         (self.journals)()
+    }
+
+    /// 못 읽었던 저널 자리를 [`layer::REREAD_EVERY`] 에 한 번 다시 잰다(moai-mkyg.ncj) — [`App::follow`] 의 걸음마다
+    /// 부르고, 시계가 안 찼거나 목록이 비었거나 통계 창이 섰으면 아무것도 안 한다. 읽는 자는
+    /// [`crate::store::reopen_unread`] 다.
+    ///
+    /// **층에서도 돈다.** 헤더는 층에서도 못 읽은 자리를 대고 층의 통계 창도 저널을 읽는데, 층에는 다시 읽을 프로젝트가
+    /// 없다 — 프로젝트의 다시 읽기에만 묶으면 층으로 나온 사람에게는 그 줄이 끝까지 선다.
+    ///
+    /// **걷은 것이 있으면 프로젝트를 다시 읽는다**([`Self::reread`]) — 든 노트는 그 파일을 못 읽은 채 지은 것이라, 줄만
+    /// 걷고 두면 `/` 가 모자란 노트로 찾으면서 헤더는 다 읽었다고 말한다. 다시 읽는 것은 노트를 들었을 때뿐이다
+    /// ([`App::follow`] 가 표를 받는 자리에서 가른다) — 노트를 안 든 화면에는 걷은 파일로 다시 지을 것이 없다.
+    ///
+    /// **통계 창이 선 동안은 안 잰다** — 그 창의 수는 연 순간에 센 것이고 다시 읽기로 안 바뀐다(`tui::stats`). 그 사이에
+    /// 걷으면 못 읽은 파일 없이 센 토큰 합이 헤더의 줄 없이 다 센 것처럼 선다 — 이 줄이 서 있는 까닭이 그 합이다. 닫으면
+    /// 시계는 이미 찼으니 다음 걸음이 잰다.
+    fn reopen_journals(&mut self) {
+        if matches!(self.mode, Mode::Stats(_)) || !layer::due(self.reopened_at) {
+            return;
+        }
+        self.reopened_at = Some(std::time::Instant::now());
+        if (self.reopen)(&self.site.cfg) > 0 && self.site.repo.is_some() {
+            self.reread = true;
+        }
     }
 
     /// 헤더가 안 서는 창에서 **새로 못 읽은 저널을 알림 띠로 한 번** 말한다. 띠는 한 자리를 나눠 쓰므로 다른
@@ -2202,18 +2241,26 @@ impl App {
     /// 선다. 뒤의 `(+n)` 은 그 밖의 못 읽은 수 전부다(헤더의 수와 같은 셈). 글은 [`crate::cmd::journal_errors`] 가
     /// 짓는다 — 나갈 때의 stderr 와 `--json` 의 `journal_error` 가 같은 실패를 그 하나로 말하므로, 여기서 따로 지으면
     /// 세 자리가 다른 말이 된다.
+    ///
+    /// **걷힌 줄은 말한 것에서도 뺀다**(moai-mkyg.ncj) — 고쳤다가 다시 못 읽게 되면 그것은 새로 진 자리다.
     pub fn tell_journals(&mut self) {
+        let unread = self.unread_journals();
+        self.journals_told.retain(|u| unread.contains(u));
         if self.notice.is_some() || !matches!(self.mode, Mode::Browse | Mode::Stats(_)) {
             return;
         }
-        let unread = self.unread_journals();
-        let new = unread.get(self.journals_told..).unwrap_or_default();
-        let Some(told) = crate::cmd::journal_errors(self.site.lang, new, None).into_iter().next() else { return };
+        let Some(told) = unread
+            .iter()
+            .find(|u| !self.journals_told.contains(u))
+            .and_then(|u| crate::cmd::journal_errors(self.site.lang, std::slice::from_ref(u), None).pop())
+        else {
+            return;
+        };
         self.notice = Some(match unread.len() {
             1 => told.said,
             n => format!("{} (+{})", told.said, n - 1),
         });
-        self.journals_told = unread.len();
+        self.journals_told = unread;
     }
 
     /// 사람을 물을 자리 — 선 프로젝트의 뿌리다(moai-d3sy). 층에 서 있으면 아직 프로젝트가
@@ -2601,6 +2648,7 @@ impl App {
         self.follow_site();
         self.follow_commits();
         self.follow_latest();
+        self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -2630,7 +2678,13 @@ impl App {
         // 읽기도 들인 읽기로 찍는다(`App::open`).
         // **읽은 노트의 저널도 본다**(moai-wcy8.403) — `moai note` 는 스냅샷을 안 바꾸는데 `/` 는 노트를 본다.
         // 따로 든 까닭은 [`Noted::journals`] 에 있다. 움직였는지 재는 자는 두 목록에 하나다.
-        let moved = layer::due(self.site.read_at)
+        // **걷은 저널 자리도 다시 읽을 까닭이다**(moai-mkyg.ncj, [`App::reopen_journals`]). 도는 읽기가 있으면 위에서
+        // 돌아서므로 표는 그 읽기가 닿은 다음 걸음까지 남는다 — 그 읽기는 걷기 전에 띄운 것일 수 있다. **노트를 든
+        // 동안만 듣는다**(리뷰 moai-mkyg.n60) — 다시 읽기가 새로 짓는 저널의 것은 노트뿐이라, 노트가 없으면 같은 화면을
+        // 한 번 더 짓는다. 거름망을 걷어도 든 노트는 남아 다음 `/` 와 통계 창이 그것을 쓰므로, 걸린 거름망이 아니라
+        // 든 노트로 가른다.
+        let moved = (std::mem::take(&mut self.reread) && (self.site.ground.notes.is_some() || self.sees_notes()))
+            || layer::due(self.site.read_at)
             || stamp_of(repo) != self.site.stamp
             || self
                 .site
@@ -10072,6 +10126,114 @@ mod tests {
         append(&journal_at(scratch.path(), "other"), &note_line("other", "argos-0002", "셋째 문"));
         settle(&mut a);
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"], "처음 쓰는 사람의 저널 파일을 못 알아챘다");
+    }
+
+    /// **걷은 저널 자리가 있으면 프로젝트를 다시 읽는다 — 재는 것은 1분에 한 번이다**(moai-mkyg.ncj). 걸린 검색의
+    /// 노트는 그 파일을 못 읽은 채 지은 것이라, 헤더의 줄만 걷고 두면 다 읽었다고 하면서 `/` 는 그 파일의 노트를 못
+    /// 찾는다. `chmod` 는 고친 때도 크기도 안 바꿔 표식으로는 안 보인다. 걷는 것은 `store` 의 시험이 재고, 여기서는
+    /// 그 길을 갈아 끼워 "걷었다" 고만 답하게 한다 — 진짜 길은 프로세스 하나의 목록을 다 재어 옆 시험의 자리까지 걷는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_reopened_journal_rereads_the_notes_it_missed() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (scratch, repo) = noted("journal-reopen");
+        let theirs = journal_at(scratch.path(), "other");
+        append(&theirs, &note_line("other", "argos-0001", "셋째 문"));
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&theirs).is_ok() {
+            std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        let mut a = opened(repo);
+        a.reopen = |_| {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            1
+        };
+        search(&mut a, "셋째");
+        a.key(key(KeyCode::Enter));
+        let missed = shown(&a);
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+        settle(&mut a);
+        let early = (CALLS.load(Ordering::SeqCst), shown(&a));
+        assert!(missed.is_empty(), "시험의 전제 — 못 읽는 파일의 노트를 찾았다: {missed:?}");
+        assert_eq!(early.0, 0, "시계가 안 찼는데 쟀다");
+        assert!(early.1.is_empty(), "시험의 전제 — 표식으로 다시 읽었다: {:?}", early.1);
+
+        // 여는 걸음이 세운 시계를 늙힌다 — 갈아 끼우면 그 시계가 안 서도(`None` 이면 영영 안 잰다) 시험이 모른다.
+        let opened = a.reopened_at.expect("여는 걸음이 1분 시계를 안 세웠다");
+        a.reopened_at = Some(opened.checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        settle(&mut a);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1, "시계가 찼는데 안 쟀다");
+        assert_eq!(shown(&a), ["argos-0001"], "걷은 뒤에 다시 읽지 않아 노트가 모자란 채다");
+        a.site.now = "읽기 전".into();
+        settle(&mut a);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1, "잰 때를 안 올려 걸음마다 쟀다");
+        assert_eq!(a.site.now, "읽기 전", "걷었다는 표를 안 비워 걸음마다 다시 읽었다");
+    }
+
+    /// **읽기가 도는 동안 걷어도 표는 그 읽기가 닿은 다음 걸음까지 남는다**(리뷰 moai-mkyg.n60) — 그 읽기는 걷기
+    /// 전에 띄운 것이라 그 파일의 노트가 없다. 표를 그 읽기 앞에서 받아 버리면 `/` 가 그 노트를 다음 1분 시계까지
+    /// 못 찾으면서 헤더는 다 읽었다고 말한다. 읽기가 끝난 것을 보고 나서 고쳐, 그 읽기가 늘 모자란 노트를 들고 오게 한다.
+    #[cfg(unix)]
+    #[test]
+    fn a_reopen_during_a_read_rereads_after_that_read_lands() {
+        use std::os::unix::fs::PermissionsExt;
+        let (scratch, repo) = noted("journal-reopen-pending");
+        let theirs = journal_at(scratch.path(), "other");
+        append(&theirs, &note_line("other", "argos-0001", "셋째 문"));
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&theirs).is_ok() {
+            std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        let mut a = opened(repo);
+        a.reopen = |_| 1;
+        search(&mut a, "셋째");
+        a.key(key(KeyCode::Enter));
+        // 1분 시계로 읽기 하나를 띄우고, 그 스레드가 끝날 때까지 기다린다 — 들이지는 않는다.
+        let read_at = a.site.read_at.expect("여는 걸음이 읽은 때를 안 찍었다");
+        a.site.read_at = Some(read_at.checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        a.follow();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !a.pending.as_ref().is_some_and(|(_, h)| h.is_finished()) {
+            assert!(std::time::Instant::now() < until, "시험의 전제 — 1분 시계가 읽기를 안 띄웠다");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let opened = a.reopened_at.expect("여는 걸음이 1분 시계를 안 세웠다");
+        a.reopened_at = Some(opened.checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        settle(&mut a); // 걷고, 도는 읽기(모자란 노트)를 들인다
+        settle(&mut a); // 남은 표로 다시 읽는다
+        assert_eq!(shown(&a), ["argos-0001"], "걷기 전에 띄운 읽기의 모자란 노트가 그대로 남았다");
+    }
+
+    /// **통계 창이 선 동안은 못 읽은 저널을 다시 재지 않는다**(리뷰 moai-mkyg.n60) — 창의 토큰 합은 연 순간에 센
+    /// 것이라(`tui::stats`), 그 사이에 걷으면 못 읽은 파일 없이 센 합이 헤더의 줄 없이 다 센 것처럼 선다. 닫으면 시계가
+    /// 이미 찼으니 다음 걸음이 잰다. **노트를 안 든 화면은 걷었다고 다시 읽지 않는다** — 다시 지을 저널의 것이 없다.
+    #[test]
+    fn the_stats_window_keeps_the_journal_line_until_it_closes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let (_scratch, repo) = noted("journal-reopen-stats");
+        let mut a = opened(repo);
+        a.reopen = |_| {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            1
+        };
+        a.hit("SPC p s");
+        assert!(matches!(a.mode, Mode::Stats(_)), "시험의 전제 — 통계 창이 열렸다: {:?}", a.mode);
+        let opened = a.reopened_at.expect("여는 걸음이 1분 시계를 안 세웠다");
+        a.reopened_at = Some(opened.checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
+        settle(&mut a);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 0, "통계 창이 선 채로 걷었다");
+        a.key(key(KeyCode::Esc));
+        assert_eq!(a.mode, Mode::Browse, "시험의 전제 — 창이 닫혔다");
+        a.site.now = "읽기 전".into();
+        settle(&mut a);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1, "창을 닫았는데 안 쟀다");
+        assert_eq!(a.site.now, "읽기 전", "노트를 안 든 화면이 걷었다고 프로젝트를 다시 읽었다");
     }
 
     /// **노트를 보는 검색이 걸린 채 다시 읽으면 노트는 읽는 스레드가 읽어 온다**(리뷰 moai-wcy8.rbj) — 들이는

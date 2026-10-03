@@ -660,6 +660,44 @@ mod tests {
         assert_eq!(s.registered().last(), Some(&s.join("work/mono")));
     }
 
+    /// **위 프로젝트를 펼쳐 둔 보드에서 `SPC p a` 로 등록해도 새 프로젝트의 머리줄에 선다**(moai-mkyg.tea).
+    /// 층의 첨자를 줄 번호로 쓰던 때는 위에 펼친 카드 수만큼 어긋나 위 프로젝트의 카드에 섰다 — 고침은
+    /// moai-r1ly.f2x 가 했고, 그 시험은 목록 보기에서 `relayer` 를 바로 부른다. 이것은 키 길과 보드로 잰다.
+    #[test]
+    fn registering_on_the_board_stands_on_the_new_header_below_an_open_project() {
+        let s = Scratch::real("register-board-land");
+        let mut a = on_layer(&s);
+        let argos = s.join("work/argos");
+        let line = |id: &str, title: &str, status: &str| {
+            let i = crate::model::Issue::new(
+                id.into(),
+                title.into(),
+                crate::model::Kind::Issue,
+                crate::model::Status::new(status),
+                "2026-09-01T00:00:00Z",
+            );
+            format!("{}\n", serde_json::to_string(&i).unwrap())
+        };
+        let body =
+            line("argos-0001", "argos 의 첫 줄", "todo") + &line("argos-0002", "argos 의 둘째 줄", "in_progress");
+        std::fs::write(argos.join(".moai/issues.jsonl"), body).unwrap();
+        let beta = s.project("work/beta");
+        a.layout = crate::tui::view::Layout::Board;
+        a.want_site(0);
+        crate::tui::settle_reads(&mut a);
+        assert!(
+            a.rows().iter().filter(|r| matches!(r, Row::Item(..))).count() >= 2,
+            "시험의 전제 — argos 의 카드가 섰다"
+        );
+
+        a.hit("SPC p a");
+        point(&mut a, "beta");
+        a.key(key(KeyCode::Char('a')));
+        assert_eq!(place_at_cursor(&a), beta, "방금 등록한 프로젝트의 머리줄에 안 섰다");
+        press(&mut a, &[KeyCode::Esc]);
+        assert_eq!(place_at_cursor(&a), beta, "창을 닫자 새 프로젝트의 머리줄을 떠났다");
+    }
+
     /// **해제는 한 번 묻고 `y` 만 뺀다.** 목록에서만 빼고 디렉터리와 `.moai` 는 그대로다.
     /// 다른 키는 그만두고 아무것도 안 쓴다.
     #[test]

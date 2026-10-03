@@ -1696,10 +1696,28 @@ impl Unread {
 /// 멀쩡한 판이 비영 종료했다 — `cmd::gather` 가 옆 워크트리의 깨진 줄에 대해 못박은 것과
 /// 같은 금이다("옆 워크트리의 깨진 줄로 `moai status` 가 비영 종료하면 제 파일은 멀쩡한데
 /// 도구가 실패로 읽힌다"). 말하는 것은 둘 다 하고, 종료 코드를 바꾸는 것은 제 뿌리뿐이다.
+///
+/// **걷는 자가 없다** — 프로세스 하나 안에서는 늘기만 한다. 탐색기 머리의 줄은 고치면 걷히는 [`UNREAD_NOW`] 를
+/// 읽는다(moai-mkyg.ncj).
 static UNREAD: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
 
 pub fn journal_unread() -> Vec<Unread> {
     UNREAD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// **지금** 못 읽는 저널 자리 — [`note_missed`] 가 [`UNREAD`] 와 함께 담되, 탐색기가 다시 재어 이제 읽히는 자리를
+/// 걷는다([`reopen_unread`], moai-mkyg.ncj). 걷혔다가 다시 진 자리는 여기서만 끝에 다시 붙는다. 탐색기 머리의 줄과
+/// 낮은 창의 알림 띠가 읽는다.
+///
+/// **둘로 가른 까닭**(리뷰 moai-mkyg.n60) — 나갈 때의 말(`main` 의 `unread_journals`)은 걷히면 안 된다. 탐색기는 다시
+/// 그리기 전에 모자란 답(통계 창의 토큰 합, `/` 의 노트 찾기)을 이미 보였고, 낮은 창의 알림 띠는 다음 키에 걷힌다 —
+/// [`MISSED`] 를 비우지 않는 것과 같은 까닭이다. 한 목록을 걷던 판은 고친 뒤에 나간 `moai tui` 가 그 자리를 안 대고
+/// 0 으로 끝났다. CLI 의 명령은 걷지 않으므로 둘이 늘 같다.
+static UNREAD_NOW: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
+
+/// [`UNREAD_NOW`] — 탐색기 머리의 줄이 읽는다.
+pub fn journal_unread_now() -> Vec<Unread> {
+    UNREAD_NOW.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// 못 읽은 자리를 센다. **같은 짝은 한 번만 선다** — 한 명령이 저널을 여러 번 읽어도 사람은
@@ -1711,10 +1729,83 @@ fn note_unread(root: &Path, at: &Path, err: &std::io::Error) {
 /// [`note_unread`] 의 몸통 — 안 읽기로 한 자리([`crate::held::Unheld`])도 여기로 든다.
 fn note_missed(root: &Path, at: &Path, why: Missed) {
     let one = Unread { root: root.to_path_buf(), at: at.to_path_buf(), why };
-    let mut v = UNREAD.lock().unwrap_or_else(|e| e.into_inner());
-    if !v.contains(&one) {
-        v.push(one);
+    CAUGHT.with_borrow_mut(|c| {
+        if let Some(c) = c {
+            c.push(one.clone());
+        }
+    });
+    for list in [&UNREAD_NOW, &UNREAD] {
+        let mut v = list.lock().unwrap_or_else(|e| e.into_inner());
+        if !v.contains(&one) {
+            v.push(one.clone());
+        }
     }
+}
+
+thread_local! {
+    /// [`reopen_unread`] 가 다시 읽는 동안 **이 스레드가** 센 자리. [`UNREAD_NOW`] 는 같은 짝을 두 번 안 담아, 거기서는
+    /// 아직 못 읽는 자리와 이제 읽히는 자리가 안 갈린다. 스레드의 것이라 옆 스레드의 읽기(탐색기의 다시 읽기)가
+    /// 센 것은 안 섞인다.
+    static CAUGHT: std::cell::RefCell<Option<Vec<Unread>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// **못 읽었던 저널 자리를 다시 재어, 이제 읽히는 자리를 [`UNREAD_NOW`] 에서 걷는다**(moai-mkyg.ncj). 걷은 수를 낸다.
+///
+/// 머리의 줄이 늘기만 하는 [`UNREAD`] 를 읽던 때는 탐색기 머리의 `Journal` 줄이 `chmod 644` 뒤에도 나갈 때까지
+/// 섰다(리뷰 moai-pvpb.rrr 7번). 부르는 자리는 탐색기 하나다 — **CLI 는 안 부른다.** 명령 하나는 앞에서 못 읽은 채
+/// 이미 내보냈으니, 뒤에 읽힌다고 걷으면 모자란 답이 0 으로 끝난다(조용한 손실). 탐색기는 화면을 다시 그리므로
+/// 머리의 줄은 "지금 못 읽는 것" 을 대는 것이 맞는 말이다. 나갈 때의 말은 이것이 안 걷는 [`UNREAD`] 가 댄다 — 다시
+/// 그리기 전에 모자란 답을 이미 보였다.
+///
+/// **읽는 자는 저널을 읽는 그 걸음이다** — [`Repo::journal_files`] 가 디렉터리·이름·링크를 다시 재고, 파일은
+/// [`Repo::journal_bytes`] 가 연다. 판정을 여기 따로 적으면 두 자가 갈려, 읽는 쪽은 넘기는 자리를 여기는 걷거나
+/// 그 반대가 된다. **여는 파일은 목록에 선 자리로 풀리는 것뿐이다** — 그 걸음이 열려다 졌거나 이름을 못 재어 못 연
+/// 자리다. 못 재었던 이름은 고치면 여기서 처음 열고, 끊겼던 링크가 이미 읽힌 파일로 이어지면 그 파일을 한 번 더
+/// 연다. 목록에 디렉터리만 섰으면 그 안의 파일은 다음 읽기가 잰다.
+///
+/// - **견주는 것은 푼 자리다**(리뷰 moai-mkyg.n60) — [`Repo::journal_files`] 는 링크 이름을 푼 자리로, 보통 이름은
+///   받은 철자로 내고 같은 파일을 처음 만난 이름으로 접는다. 철자로 견주던 판은 뿌리가 링크 너머에서 불릴 때 접던
+///   링크가 지워지거나, 끊겼던 링크가 못 읽는 파일로 이어지면 그 파일을 안 열고 고친 것으로 걷었다
+/// - 걷는 것은 **부를 때 섰던 줄 가운데** 이번에 안 센 것뿐이다. 그 사이 옆 스레드가 새로 센 줄은 이 걸음이
+///   못 본 것이라 둔다
+/// - 아직 못 읽는 줄은 제자리에 남는다 — 차례가 그대로라 머리의 줄이 대는 첫 자리가 잴 때마다 바뀌지 않는다.
+///   이미 말한 줄인지는 받는 쪽이 줄째 견준다(`tui::App::tell_journals`). 이번에 새로 진 자리는 [`note_missed`]
+///   가 늘 하듯 끝에 붙는다 — 철자만 바뀐 자리도 새 철자로 끝에 붙고, 옛 철자는 걷은 수에 든다
+///
+/// **루프에서 돈다** — 하는 일은 못 읽는 자리마다 1분에 한 번 이름을 재고 여는 것이고, 고친 파일은 한 번 통째로
+/// 읽는다(풀지는 않는다). 여는 길이 [`crate::held::read`] 라 남이 리스를 쥔 파일 앞에서는 그것이 걷힐 때까지
+/// 기다린다 — 노트를 거는 걸음(`tui::Ground::read_notes`)과 통계 창이 루프에서 저널을 읽는 것과 같은 몫이다.
+///
+/// **설정은 부르는 쪽 것을 빌린다** — 저널 읽기는 설정을 안 쓰지만 [`Repo`] 를 짓는 문이 받는다. 뿌리마다 새로
+/// 읽으면 이 프로세스가 연 적 없는 옆 워크트리의 `config.toml` 을 열고, 그것을 못 읽는 뿌리는 잴 수도 없다.
+/// 노트를 옆 뿌리의 저널에서 읽는 길(`cmd::show::at_home`)이 이미 그렇게 빌린다.
+pub fn reopen_unread(config: &Config) -> usize {
+    reopen_picked(config, |_| true)
+}
+
+/// [`reopen_unread`] 의 몸통 — `pick` 이 고른 줄만 다시 잰다. 고르는 것은 시험이다: [`UNREAD_NOW`] 는 프로세스 하나의
+/// 것이라, 다 재면 나란히 도는 시험이 심은 자리까지 걷는다.
+fn reopen_picked(config: &Config, pick: impl Fn(&Unread) -> bool) -> usize {
+    let had: Vec<Unread> = journal_unread_now().into_iter().filter(|u| pick(u)).collect();
+    if had.is_empty() {
+        return 0;
+    }
+    let roots: BTreeSet<&Path> = had.iter().map(|u| u.root.as_path()).collect();
+    let tried: BTreeSet<PathBuf> = had.iter().map(|u| crate::path::real(&u.at)).collect();
+    CAUGHT.set(Some(Vec::new()));
+    for root in &roots {
+        let repo = Repo::at(root.to_path_buf(), config.clone());
+        for p in repo.journal_files() {
+            if tried.contains(&crate::path::real(&p)) {
+                let _ = repo.journal_bytes(&p);
+            }
+        }
+    }
+    let caught = CAUGHT.take().unwrap_or_default();
+    let mut v = UNREAD_NOW.lock().unwrap_or_else(|e| e.into_inner());
+    let before = v.len();
+    v.retain(|u| !had.contains(u) || caught.contains(u));
+    before - v.len()
 }
 
 /// io 의 실패를 [`Unread::kind`] 로 접는다.
@@ -3076,6 +3167,11 @@ mod tests {
         journal_unread().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
 
+    /// [`unread_under`] 와 같되 탐색기 머리의 줄이 읽는 [`UNREAD_NOW`] 에서 고른다 — 다시 재는 걸음이 걷는 쪽이다.
+    fn unread_now_under(root: &Path) -> Vec<Unread> {
+        journal_unread_now().into_iter().filter(|u| u.at.starts_with(root)).collect()
+    }
+
     /// **못 여는 저널 자리는 넘어가되 조용히는 아니다**(2026-09-21 사용자 결정, moai-6ney).
     /// 멈추던 때는 자리 하나를 못 여는 것만으로 모든 사람의 이력이 통째로 안 보였다. 지금은
     /// 읽던 것을 내고, 못 연 자리를 [`journal_unread`] 에 세운다 — 그것을 대는 자가 `cmd::run`
@@ -3200,6 +3296,108 @@ mod tests {
         assert_eq!(once[0].kind(), "permission", "{once:?}");
         assert!(theirs_hist.is_empty());
         assert_eq!(twice.len(), 1, "같은 파일을 두 번 셌다");
+    }
+
+    /// **고친 저널 자리는 다시 재면 걷힌다 — 아직 못 읽는 자리는 남는다**(moai-mkyg.ncj). 머리의 줄이 늘기만 하는
+    /// [`UNREAD`] 를 읽던 때는 `chmod 644` 뒤에도 탐색기 머리의 `Journal` 줄이 나갈 때까지 섰다. 파일 하나와
+    /// `journal/` 디렉터리 하나를 다 본다 — 파일은 [`Repo::journal_bytes`] 가, 디렉터리는 [`Repo::journal_names`] 가
+    /// 센 자리다.
+    ///
+    /// 리뷰 moai-mkyg.n60 이 둘을 더 잰다. **걷는 것은 머리의 줄이 읽는 [`UNREAD_NOW`] 뿐이다** — 나갈 때의 말이 읽는
+    /// [`UNREAD`] 는 고쳐도 그대로다. **목록에 없던 파일은 안 연다** — 내 파일은 읽혔던 자리라, 그 뒤에 못 읽게 되어도
+    /// 다시 재는 걸음은 그것을 안 열어 새로 세지 않는다.
+    #[test]
+    fn a_fixed_journal_place_is_dropped_on_reopen_and_a_broken_one_stays() {
+        use std::os::unix::fs::PermissionsExt;
+        let (r, d) = repo("reopenjournal");
+        let mine = crate::model::someone("raven");
+        let theirs = crate::model::someone("other");
+        for by in [&mine, &theirs] {
+            r.with_write(
+                || crate::i18n::Lang::Ko,
+                |i, _, _| {
+                    let id = format!("argos-{}", &by.name[..4]);
+                    i.push(issue(&id));
+                    Ok((vec![JournalEntry::create(&id, "t", T, by)], ()))
+                },
+            )
+            .unwrap();
+        }
+        let dir = d.join(".moai/journal");
+        let theirs_file = dir.join(journal_file(&theirs.email).unwrap());
+        let mine_file = dir.join(journal_file(&mine.email).unwrap());
+        let ours = |u: &Unread| u.at.starts_with(d.path());
+        std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&theirs_file).is_ok() {
+            std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        // 재기부터 하고 권한을 되돌린 뒤에 견준다 — 위의 시험들과 같은 까닭이다.
+        r.journal_of("argos-othe");
+        let seen = unread_now_under(d.path());
+        std::fs::set_permissions(&mine_file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let kept = reopen_picked(&r.config, ours);
+        let still = unread_now_under(d.path());
+        std::fs::set_permissions(&mine_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&theirs_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let fixed = reopen_picked(&r.config, ours);
+        let after_file = unread_now_under(d.path());
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        r.journal_of("argos-othe");
+        let dir_seen = unread_now_under(d.path());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let dir_fixed = reopen_picked(&r.config, ours);
+        let after_dir = unread_now_under(d.path());
+
+        assert_eq!(seen.len(), 1, "시험의 전제 — 남의 파일을 못 읽은 자리로 셌다: {seen:?}");
+        assert_eq!((kept, &still), (0, &seen), "아직 못 읽는 자리를 걷었거나 목록에 없던 내 파일을 열었다");
+        assert_eq!(fixed, 1, "고친 파일을 안 걷었다 — {after_file:?}");
+        assert!(after_file.is_empty(), "고친 파일이 남았다 — {after_file:?}");
+        assert_eq!(dir_seen.len(), 1, "시험의 전제 — 디렉터리를 못 훑은 자리로 셌다: {dir_seen:?}");
+        assert_eq!((dir_fixed, after_dir.len()), (1, 0), "고친 디렉터리를 안 걷었다 — {after_dir:?}");
+        assert_eq!(r.journal_of("argos-othe").len(), 1, "다 고쳤는데 남의 이력을 못 읽는다");
+        assert!(unread_now_under(d.path()).is_empty(), "다 고친 뒤의 읽기가 무언가를 셌다");
+        assert_eq!(unread_under(d.path()), [seen, dir_seen].concat(), "나갈 때 댈 자리까지 걷었다");
+    }
+
+    /// **다시 재는 걸음은 철자가 아니라 푼 자리로 견준다**(리뷰 moai-mkyg.n60). 뿌리를 링크 너머에서 부르고 저널에
+    /// `a.jsonl -> c.jsonl` 이 서 있으면, 못 읽는 `c.jsonl` 은 링크가 푼 자리의 철자로 선다. 그 링크를 지우면
+    /// [`Repo::journal_files`] 는 같은 파일을 뿌리의 철자로 내는데, 철자로 견주던 판은 그것을 안 열고 고친 것으로 걷어
+    /// 머리의 줄이 아직 못 읽는 파일을 두고 사라졌다.
+    #[cfg(unix)]
+    #[test]
+    fn a_reopen_finds_a_journal_whose_spelling_changed() {
+        use std::os::unix::fs::PermissionsExt;
+        let real = scratch("reopenrespelled");
+        let outer = Scratch::new("store-reopenrespelled-link");
+        let root = outer.join("via");
+        std::os::unix::fs::symlink(real.path(), &root).unwrap();
+        let r = Repo::at(root.clone(), Config::load(&root).unwrap());
+        let dir = real.join(".moai/journal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = dir.join("c.jsonl");
+        std::fs::write(&c, "").unwrap();
+        std::os::unix::fs::symlink("c.jsonl", dir.join("a.jsonl")).unwrap();
+        std::fs::set_permissions(&c, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&c).is_ok() {
+            std::fs::set_permissions(&c, std::fs::Permissions::from_mode(0o644)).unwrap();
+            return; // root 는 권한을 안 본다 — 재현이 안 되는 자리다
+        }
+        let mine = |u: &Unread| u.root == root;
+        let now = || journal_unread_now().into_iter().filter(|u| u.root == root).collect::<Vec<_>>();
+        r.journal_of("argos-0001");
+        let seen = now();
+        std::fs::remove_file(dir.join("a.jsonl")).unwrap();
+        reopen_picked(&r.config, mine);
+        let after = now();
+        std::fs::set_permissions(&c, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(seen.len(), 1, "시험의 전제 — 못 읽는 파일을 셌다: {seen:?}");
+        assert!(
+            after.iter().any(|u| u.at.ends_with("c.jsonl")),
+            "철자만 바뀐 못 읽는 파일을 고친 것으로 걷었다 — {after:?}"
+        );
     }
 
     /// **링크가 가리키는 저널은 한 번만 읽는다**(moai-p9mq). 메일을 바꾼 사람이 옛 `<메일>.jsonl` 을 새

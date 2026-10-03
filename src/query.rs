@@ -1108,31 +1108,65 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
 ///   삼킨다
 /// - **닫지 않은 따옴표는 줄 끝까지다** — 이 칸은 치는 동안 걸음마다 판정되므로([`desugar`] 의 거절문이 칸 밑에
 ///   선다) 닫기 전의 반쪽 글을 거절하면 치는 내내 붉다
+///
+/// 쪼개는 자는 [`items`] 다 — 이것은 그 글만 든다.
 pub fn split_items(text: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut chars = text.chars().peekable();
+    items(text).into_iter().map(|it| it.text).collect()
+}
+
+/// 거르개 글의 한 항목과 그것이 선 자리 — 자리는 다 바이트다([`items`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    /// 거름망이 받는 글 — 여는 따옴표와 닫는 따옴표를 벗기고, 뒤에 이어 적은 낱말을 빈칸 하나로 붙인 것.
+    pub text: String,
+    /// 이 항목을 연 낱말의 첫 자리.
+    pub start: usize,
+    /// 그 낱말의 첫 `=`. 글 맨 앞의 `=` 없는 낱말이 연 항목에는 없다.
+    pub eq: Option<usize>,
+    /// 연 낱말의 끝 — `=` 바로 뒤의 따옴표로 열었으면 닫는 따옴표를 지나 그 뒤에 붙은 글자까지, 안 닫혔으면 글
+    /// 끝이다. **뒤에 이어 적은 낱말은 안 든다** — 그것은 `text` 에만 붙는다.
+    pub end: usize,
+    /// `=` 바로 뒤의 여는 따옴표와 닫는 따옴표. 안 닫혔으면 닫는 쪽이 없다.
+    pub quote: Option<(usize, Option<usize>)>,
+}
+
+/// 거르개 글을 항목으로 쪼개며 **항목마다 선 자리를 함께 낸다**(moai-mkyg.dcf). 쪼개는 법은 [`split_items`] 에 적은
+/// 그것이다. 거름망이 읽는 글([`split_items`])과 탐색기의 값 안내가 커서 밑의 항목을 찾는 자리(`tui::hint::slot`)가
+/// 이 하나를 읽는다 — 한때 안내가 같은 규칙(`=` 가 든 낱말이 항목을 열고 `=` 바로 뒤의 따옴표는 닫힐 때까지)을 따로
+/// 적어, 한쪽만 고치면 칸의 안내가 가리키는 항목과 거름망이 읽는 항목이 갈릴 자리였다.
+pub fn items(text: &str) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::new();
+    let mut chars = text.char_indices().peekable();
     loop {
-        while chars.next_if(|c| c.is_whitespace()).is_some() {}
-        if chars.peek().is_none() {
-            return out;
-        }
+        while chars.next_if(|(_, c)| c.is_whitespace()).is_some() {}
+        let Some(&(start, _)) = chars.peek() else { return out };
         let mut word = String::new();
-        let mut keyed = false;
-        while let Some(c) = chars.next_if(|c| !c.is_whitespace()) {
+        let (mut eq, mut quote) = (None, None);
+        while let Some((at, c)) = chars.next_if(|(_, c)| !c.is_whitespace()) {
             word.push(c);
-            if c == '=' && !keyed {
-                keyed = true;
-                if let Some(q) = chars.next_if(|c| matches!(c, '"' | '\'')) {
-                    word.extend(chars.by_ref().take_while(|c| *c != q));
+            if c == '=' && eq.is_none() {
+                eq = Some(at);
+                if let Some((open, q)) = chars.next_if(|(_, c)| matches!(c, '"' | '\'')) {
+                    let mut close = None;
+                    for (at, c) in chars.by_ref() {
+                        if c == q {
+                            close = Some(at);
+                            break;
+                        }
+                        word.push(c);
+                    }
+                    quote = Some((open, close));
                 }
             }
         }
+        // 낱말을 멈춘 글자의 자리가 곧 끝이다 — 안 닫힌 따옴표는 글을 다 먹었으니 글 끝이다.
+        let end = chars.peek().map_or(text.len(), |&(at, _)| at);
         match out.last_mut() {
-            Some(prev) if !keyed => {
-                prev.push(' ');
-                prev.push_str(&word);
+            Some(prev) if eq.is_none() => {
+                prev.text.push(' ');
+                prev.text.push_str(&word);
             }
-            _ => out.push(word),
+            _ => out.push(Item { text: word, start, eq, end, quote }),
         }
     }
 }
@@ -2427,6 +2461,33 @@ mod tests {
             Filter::build(Raw { filter: cut("todo"), ..Raw::default() }).unwrap_err(),
             BadFilter::NotAPair("todo".into())
         );
+    }
+
+    /// **항목마다 선 자리를 글과 함께 낸다**(moai-mkyg.dcf) — 탐색기의 값 안내(`tui::hint::slot`)가 커서 밑의 항목을 이
+    /// 자리로 찾는다. 자리는 바이트다(한글은 세 바이트). 연 낱말의 끝은 닫는 따옴표 뒤에 붙은 글자까지고, 뒤에 이어
+    /// 적은 낱말은 글에만 붙는다. 맨 앞의 `=` 없는 낱말도 항목이다 — `desugar` 가 그것을 거절한다.
+    #[test]
+    fn items_say_where_each_item_stands() {
+        let at = |text: &str| -> Vec<(String, usize, Option<usize>, usize, Option<(usize, Option<usize>)>)> {
+            items(text).into_iter().map(|it| (it.text, it.start, it.eq, it.end, it.quote)).collect()
+        };
+        assert_eq!(
+            at(r#"foo grep="a b"c tag=bug x assignee='Kim"#),
+            [
+                ("foo".into(), 0, None, 3, None),
+                ("grep=a bc".into(), 4, Some(8), 15, Some((9, Some(13)))),
+                ("tag=bug x".into(), 16, Some(19), 23, None),
+                ("assignee=Kim".into(), 26, Some(34), 39, Some((35, None))),
+            ]
+        );
+        assert_eq!(
+            at("tag=버그  grep=\"원자적 쓰기\""),
+            [
+                ("tag=버그".into(), 0, Some(3), 10, None),
+                ("grep=원자적 쓰기".into(), 12, Some(16), 35, Some((17, Some(34))))
+            ]
+        );
+        assert!(at(" \t ").is_empty());
     }
 
     /// **사람이 든 예가 그 사람의 시계로 선다**(moai-97tn) — 서울에서 친 `2026-10-03 00:00` 은 UTC 로 10-02
