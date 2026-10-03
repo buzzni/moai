@@ -3024,3 +3024,12 @@
 {"ts":"2026-10-03T01:11:41Z","id":"moai-acfk.87a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T01:12:03Z","id":"moai-acfk.mzc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1(한눈 보기 머리줄에서 굴리기가 멈추던 것)·2·3·4·5·9 는 리뷰가 고친 그대로 받았다. 리뷰가 넘긴 7(레인 머리줄만 가려도 커서가 옮겨 가던 것)은 사용자 결정과 어긋나 직접 고쳤다 — 보이는지는 카드만으로 재고, 머리줄은 드러낼 때만 함께 보인다. 안 받은 것: 6(닿지 않는 갈래)은 보드에서 그 이동이 무엇을 하는지 적어 두는 자리라 둔다. 8(멈춤 규칙)은 사용자가 같은 예를 보고 고른 결정이라 둔다. 문서 문구(머리줄에도 설 수 있다는 말)는 작아서 그대로 둔다. 따로 세운 이슈는 없다."}
 {"ts":"2026-10-03T01:12:30Z","id":"moai-acfk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다. 머지와 리뷰(moai-acfk.mzc)까지 닫았고 남은 멤버도 담아 둔 idea 도 없다"}
+{"ts":"2026-10-03T01:14:20Z","id":"moai-r1ly","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드의 idea 칸과 커서 자리"}
+{"ts":"2026-10-03T01:14:20Z","id":"moai-r1ly.91p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫힌 idea 가 보드 idea 칸에 선다"}
+{"ts":"2026-10-03T01:14:20Z","id":"moai-r1ly","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n2g6 에서 펼쳤다 — 보드의 idea 칸에 닫힌 idea 도 선다"}
+{"ts":"2026-10-03T01:14:20Z","id":"moai-n2g6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r1ly 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-03T01:14:23Z","id":"moai-r1ly.dwb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보던 카드가 사라지면 커서가 딴 칸으로 튄다"}
+{"ts":"2026-10-03T01:14:23Z","id":"moai-r1ly.dwb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-idux 에서 펼쳤다 — 보드에서 보던 카드가 사라지면 커서가 딴 칸으로 튄다"}
+{"ts":"2026-10-03T01:14:23Z","id":"moai-idux","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r1ly 의 멤버 moai-r1ly.dwb 로 펼쳤다"}
+{"ts":"2026-10-03T01:14:28Z","id":"moai-r1ly.91p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-03T01:14:28Z","id":"moai-r1ly.dwb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
