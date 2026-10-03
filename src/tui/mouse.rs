@@ -244,10 +244,7 @@ impl App {
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
-            Some(Pane::Explorer) if self.board() => {
-                let rows = self.rows();
-                self.board_roll(&rows, |s| s.by(by));
-            }
+            Some(Pane::Explorer) if self.board() => self.board_roll(|s| s.by(by)),
             Some(Pane::Explorer) => {
                 let to = scroll::cursor_by(by, self.cursor, || self.rows().len());
                 self.move_to(to);

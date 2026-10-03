@@ -5099,7 +5099,7 @@ impl App {
         match self.focus {
             Pane::Explorer if self.board() => match m {
                 // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 상세의 그것과 같은 걸음이다. 커서는 그대로다(moai-j0jf).
-                Move::HalfUp | Move::HalfDown | Move::PageUp | Move::PageDown => self.board_roll(rows, |s| s.go(m)),
+                Move::HalfUp | Move::HalfDown | Move::PageUp | Move::PageDown => self.board_roll(|s| s.go(m)),
                 _ => self.board_step(board::Go::Move(m), rows),
             },
             Pane::Explorer => {
@@ -5135,12 +5135,15 @@ impl App {
     /// 그 카드를 [`App::adrift`] 에 적어, 다음 그림이 커서를 드러내느라 굴린 화면을 되돌리지 않게 한다. 한때(moai-acfk)
     /// 밀려난 커서를 그 칸에서 보이는 가장 가까운 카드로 끌어왔고, 그 칸에 보이는 카드가 없으면 굴리기를 멈췄다 — 멈춤은
     /// 끌어오기 때문에 생긴 규칙이라 함께 걷었다.
-    fn board_roll(&mut self, rows: &[Row], roll: impl FnOnce(&mut scroll::Scroll)) {
+    ///
+    /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::rolls`)이 사건마다 목록을 다시 세지 않게.
+    fn board_roll(&mut self, roll: impl FnOnce(&mut scroll::Scroll)) {
         let was = self.list.offset();
         roll(&mut self.list);
         // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 새로 뗄 것이 없다 — 떼어 둔 것이 있으면 그대로 둔다.
         if self.list.offset() != was {
-            self.adrift = self.adrift_here(rows);
+            let rows = self.rows();
+            self.adrift = self.adrift_here(&rows);
         }
     }
 
