@@ -8132,8 +8132,9 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let out = moai(s.path(), &["idea", "add", "나중에", "-b", "plan.md", "-q"]);
     assert!(out.status.success() && err(&out).contains(said), "idea add 가 말없이 지나갔다\n{}", err(&out));
 
-    // `note -b` 도 같은 말을 하고, 노트는 글자 그대로 선다(moai-18so.rnm). `note` 는 빈 stdin 을 제가
+    // `note -b` 도 같은 자로 재고, 노트는 글자 그대로 선다(moai-18so.rnm). `note` 는 빈 stdin 을 제가
     // 거절해서 `read_body_said` 를 안 지나고 알림만 따로 부른다 — 그 부름을 걷으면 여기가 붉어진다.
+    // **말은 노트의 것이다**(moai-yivo.8lh) — 노트에는 본문이 없어 "본문은 … 글자다" 가 틀린 말이었다.
     let out = moai(s.path(), &["note", &id, "-b", "plan.md", "--json"]);
     assert!(out.status.success(), "{}", err(&out));
     assert!(
@@ -8141,7 +8142,14 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
         "note 가 말없이 지나갔다\n{}",
         err(&out)
     );
+    assert!(
+        err(&out).contains("노트는 그 파일이 아니라") && !err(&out).contains("본문"),
+        "노트에 본문이라 했다\n{}",
+        err(&out)
+    );
     assert!(String::from_utf8_lossy(&out.stdout).contains(r#""text":"plan.md""#), "노트가 바뀌었다");
+    let out = staged(&["note", &id, "-b", "plan.md"]).current_dir(s.path()).env("MOAI_LANG", "en").output().unwrap();
+    assert!(err(&out).contains("the note is the words `plan.md`") && !err(&out).contains("body is"), "{}", err(&out));
 
     // 옮겨 치라고 내미는 줄은 껍데기가 한 낱말로 읽게 감싼다 — 빈칸이 든 이름이 두 낱말이 되지 않는다.
     std::fs::write(s.path().join("my plan.md"), "x").unwrap();

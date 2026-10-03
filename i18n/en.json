@@ -751,6 +751,7 @@
   "add.body_stdin_empty": "`--body -` read stdin and nothing came — no body was written",
   "add.body_names_a_file": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. To use the file's contents, `--body - < {path}`",
   "add.body_names_a_file_plan_on_stdin": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. `--from -` already reads stdin, so to use the file's contents put the plan in a file — `moai add --from <plan file> --body - < {path}`",
+  "add.note_names_a_file": "`--body` takes the text itself — the note is the words `{text}`, not the file by that name. To use the file's contents, `--body - < {path}`",
   "idea.will_unfold": "To unfold",
   "idea.unfolded": "Unfolded",
   "idea.into_epic": "goes in as a member of {id}",
