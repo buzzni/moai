@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.2.0 hash:c3424ccd -->
+<!-- moai:begin v:0.3.0 hash:a752b61e -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -144,23 +144,6 @@ the title inside the body.
 
 The one thing that matters is that the next session reads this with
 `moai show <id>`. These three are advice for that reason, not rules anything checks.
-
-### Korean text
-
-**Polish Korean text before it goes into moai** — any title, body, note or `-m`
-that carries even one Hangul character, review text included. Text written only in
-English goes in as it is.
-
-- Run `korean-skills:humanizer` to take the AI tell out, add `humanize-korean:humanize-korean`
-  when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
-- Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
-  (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
-- **Keep the technical term, and never drop the original.** An everyday word carries several
-  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
-  deleted, nobody can read the sentence back to the code — and
-  a name that came from the code goes in exactly as it is
-- `moai skill install` installs both plugins together. The detail is under "Korean text"
-  in the moai skill's `references/commands.md`
 
 ### Park what is out of scope
 

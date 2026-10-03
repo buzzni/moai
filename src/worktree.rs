@@ -1441,8 +1441,7 @@ pub fn is_linked(root: &Path) -> bool {
 /// `None`. git 을 띄우지 않는다.
 ///
 /// [`tracker_root`] 가 이것으로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
-/// 병합에서 스냅샷이 충돌하기 때문이다. `crate::cmd::skill` 의 한국어 플러그인 셈도 같은 저장소의
-/// 워크트리끼리를 한 자리로 읽는 데 이것을 쓴다.
+/// 병합에서 스냅샷이 충돌하기 때문이다.
 /// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
 pub fn main_root(root: &Path) -> Option<PathBuf> {
     let (top, common) = git_dirs(root)?;

@@ -446,99 +446,6 @@ the title inside the body.
 The one thing that matters is that the next session reads this with
 `moai show <id>`. These three are advice for that reason, not rules anything checks."#;
 
-/// 한국어 글을 다듬는 두 플러그인 — `(설치 id, 마켓플레이스 저장소)`. **`moai skill install` 이
-/// moai 와 같은 scope 로 함께 깔고**(moai-lr1s), 훅은 이 id 로 깔렸는지 본다(moai-6rrb). 안내 글과
-/// 설치와 훅이 다른 이름을 대면 시킨 대로 깔아도 알림이 끝내 안 꺼진다. 설치 id 의 `@` 앞이
-/// 플러그인 이름이고, 스킬은 `<플러그인>:<스킬>` 로 불린다 — 안내 글이 스킬을 그 이름으로 대는 까닭이다.
-///
-/// **사용자 전역에 깔지 않는다**(사용자, moai-5wk4 둘째 판). 첫 판은 "없으면 사용자 전역에
-/// 설치한다" 고 가르쳐, 남의 기계의 에이전트가 묻지 않고 버전 고정 없는 바깥 코드를 전역에
-/// 들이고 `~/.claude/settings.json` 을 고칠 수 있었다(리뷰 moai-5wk4.ydh 8번). 까는 것은 사람이
-/// 부르는 `moai skill install` 하나다.
-pub const KOREAN_PLUGINS: [(&str, &str); 2] =
-    [("korean-skills@korean-skills", "DaleSeo/korean-skills"), ("humanize-korean@im-not-ai", "epoko77-ai/im-not-ai")];
-
-/// 한국어 글을 넣기 전에 다듬는다(사용자, moai-5wk4). **권고다** — `WRITING` 과 같은 까닭으로
-/// 막지 않는다. 훅이 알림을 덧붙이는 것(moai-6rrb)도 알림일 뿐이다.
-///
-/// **늘 읽히는 자리에는 이만큼만 둔다**(사용자, 리뷰 13번). AGENTS 블록과 SKILL.md 는 한국어를 안
-/// 쓰는 저장소에서도 모든 세션이 읽는다 — 자세한 절차는 참고 문서의 `KOREAN_DETAIL` 로 내린다.
-///
-/// 판정이 **글의 글자**인 것은 결정이다: 화면 말(`MOAI_LANG`)은 사람이 읽는 말이지 에이전트가
-/// 적는 말이 아니다 — 영어 화면에서 한국어 이슈를 적는 사람도 있다.
-///
-/// **맞춤법이 마지막이다**(사용자, 리뷰 11번). 윤문이 제일 크게 고치니, 그 뒤를 맞춤법이 다시 본다.
-/// `humanize-korean` 을 긴 글에만 쓰는 까닭은 비용이다 — 한 번에 서브에이전트를 1~3번 넘게 부른다.
-///
-/// **용어 보존이 보존 목록과 따로 서는 까닭**(moai-gw5e): 위의 보존 목록은 *글자 그대로 옮겨
-/// 적을 것*(id·명령·경로·숫자)이라 기술 명사가 거기 안 든다. 그 빈자리로 `layer` 가 "층" 이 되고
-/// `latest::Seen::Unasked` 가 "못 물었다" 가 된 글이 이 저장소에 쌓였다 — 일반명사는 뜻이 여러
-/// 개라 원어를 지우면 읽는 쪽이 코드로 못 돌아간다. 윤문 플러그인은 이미 같은 것을 말하지만
-/// (`humanize-korean` 의 `ai-tell-taxonomy.md`), 그 스킬은 글이 다 쓰인 뒤에 돌고 하는 일이
-/// AI 티 제거라 용어를 되살리지 않는다. 그러니 쓰기 전에 읽히는 여기에 둔다.
-///
-/// **예시에 이 저장소의 이름을 박지 않는다**([`WRITING_EXAMPLE`] 과 같은 까닭, moai-nnda). 첫 판은
-/// `Seen::Unasked` 를 그대로 적었는데, 이 글은 모든 저장소에 심겨 남의 저장소에서는 아무것도 안
-/// 가리킨다 — 규칙만 적고 이름은 읽는 쪽의 코드에서 나오게 둔다.
-const KOREAN: &str = r#"**Polish Korean text before it goes into moai** — any title, body, note or `-m`
-that carries even one Hangul character, review text included. Text written only in
-English goes in as it is.
-
-- Run `korean-skills:humanizer` to take the AI tell out, add `humanize-korean:humanize-korean`
-  when it runs past 20 lines, and finish with `korean-skills:grammar-checker` for spelling and spacing
-- Leave ids, commands, paths, numbers, code fragments and the fixed-form lines
-  (`model: …`, `Next: …`, `Regression-of: …`, `Summary: original …`) exactly as they are
-- **Keep the technical term, and never drop the original.** An everyday word carries several
-  meanings, so once `layer`, `network` or `wrapper` is traded for one and the English behind it
-  deleted, nobody can read the sentence back to the code — and
-  a name that came from the code goes in exactly as it is
-- `moai skill install` installs both plugins together. The detail is under "Korean text"
-  in the moai skill's `references/commands.md`"#;
-
-/// 용어 보존 한 줄 — [`KOREAN`] 의 글과 [`crate::hook::korean_notice`], 일꾼 브리프 4-4 가 함께
-/// 쓴다. [`PLEDGE`] 와 같은 까닭이다(moai-nxw8): 손으로 옮겨 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다.
-/// 규칙 3 의 64KB 가 네 표면 가운데 셋에만 들었던 판(리뷰 moai-4u6b.5hl)을 이 규칙이 그대로 밟아,
-/// 브리프만 옛 보존 목록에 남아 있었다.
-pub const KEEP_TERMS: &str = "a name that came from the code goes in exactly as it is";
-
-/// 한국어 글의 자세한 절차 — 참고 문서에만 둔다. 부를 때만 읽힌다.
-///
-/// **리뷰 원문도 다듬는다**(사용자 결정). 규칙 3 의 `리뷰가 낸 글을 그대로` 와 어긋나 보이니
-/// 그 말이 무엇을 막는지를 여기 적는다 — 줄이거나 제 판단을 섞는 것이지 문장을 다듬는 것이 아니다.
-///
-/// **긴 글은 저장소 밖에서 다듬는다**(사용자, 리뷰 1·12·14번). `humanize-korean` 은 cwd 에
-/// `_workspace/` 를 만들고 글의 사본을 남긴다 — 저장소 안에서 돌리면 `.gitignore` 를 고치는 편집이
-/// 저장소마다 하나 늘고, 사본은 끝없이 쌓인다.
-///
-/// **다 쓰면 저장소로 돌아온다**(리뷰 moai-5wk4.76z). 훅은 세션의 자리로 트래커를 찾는다 — 밖에 선 채로
-/// 남으면 그 세션의 모든 규칙과 알림이 말없이 꺼진다(`cmd::hook::decide`).
-const KOREAN_DETAIL: &str = r#"The always-visible rule is under "Korean text" in `SKILL.md`. This is the procedure.
-
-- For review text, polish the sentences only — do not shorten it and do not mix your own call in.
-  That is what rule 3 means by taking the reviewer's own words. Shorten it only past 64KB, and say so with `Summary:`
-- Move text longer than 20 lines outside the repository (a scratchpad or a temporary directory),
-  make that the cwd, and call `humanize-korean:humanize-korean` there. The skill creates `_workspace/` in the cwd — delete it when you are done
-- Come back into the repository afterwards — the hook finds the tracker from where the session stands, and standing outside it no rule stands at all
-- On an ordinary technical term's first mention in a body, put the original in parentheses after
-  the translation and use the translation alone from there. **That rule is not for code names** —
-  a name that came from the code goes in exactly as it is, every time, and a gloss goes in
-  parentheses after it. Take it the other way round and "the translation alone from there" drops
-  the name, which is the swap this rule exists to stop. A repository that wants a fixed list of
-  its own terms keeps that list in its own docs — this rule stands without one
-- If polishing changed the meaning, go back to the original text. Polishing fixes sentences, not facts
-- If a plugin is missing, do not install it yourself — ask the person to run `moai skill install` again.
-  That installs both of the plugins below in the same scope as moai. Without them moai blocks nothing"#;
-
-/// 한국어 글의 참고 절 — 절차에 두 플러그인의 이름을 붙인다. 이름은 `KOREAN_PLUGINS` 한 곳에서 온다.
-fn korean_detail() -> String {
-    let plugins = KOREAN_PLUGINS
-        .iter()
-        .map(|(id, repo)| format!("    {id:<32}https://github.com/{repo}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("{KOREAN_DETAIL}\n\n{plugins}")
-}
-
 /// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
 /// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
 ///
@@ -1019,10 +926,6 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 {WRITING}
 
-### Korean text
-
-{KOREAN}
-
 ### Park what is out of scope
 
 {ideas}
@@ -1127,10 +1030,6 @@ Whoever creates an issue is its assignee, for free.
 ## What to write in an issue
 
 {WRITING}
-
-## Korean text
-
-{KOREAN}
 
 ## The five things the hook actually watches
 
@@ -1321,10 +1220,6 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 
 {WRITING_EXAMPLE}
 
-## Korean text
-
-{korean}
-
 ## Name the id in the commit
 
 {COMMITS}
@@ -1413,8 +1308,7 @@ that commit. In that spot, pin it with `--user "Name (email)"` or `MOAI_ACTOR`.
 commit column are read from that tracker's `.moai` root — even with another repository
 nested inside the project (a submodule, `vendor`), a `moai` called in there does not
 write that repository's name.
-"#,
-        korean = korean_detail()
+"#
     )
 }
 
@@ -2268,8 +2162,6 @@ fn brief() -> String {
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
     let shapes = indent(GIT_SHAPES, "    ");
-    // 용어 보존은 안내 글과 한 출처다 — 규칙 3 의 64KB 가 그랬듯, 손으로 옮겨 적으면 이 표면만 낡는다.
-    let keep = KEEP_TERMS;
     format!(
         r#"    Supervisor session (<my name>) is handing you idea <id> — <title>.
     Read first: moai show <id>
@@ -2361,16 +2253,6 @@ fn brief() -> String {
        `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 11
        as **a member left because the work beside it holds the file**, together with that other
        work. The supervisor sends it once that work is done. Do not defer it
-    4-4. **Polish Korean text going into moai with the Korean writing plugins** — every title,
-       body, note, `-m` and review-text note that carries Hangul. Polish with
-       `korean-skills:humanizer`, and when it runs past 20 lines put it through
-       `humanize-korean:humanize-korean` outside the repository (the scratchpad), delete that
-       `_workspace/`, come back into the worktree (standing outside it the hook cannot find the
-       tracker and no rule stands), and finish with `korean-skills:grammar-checker` for spelling.
-       Leave ids, commands, paths and numbers as they are, and keep the technical terms —
-       {keep}, never traded for an everyday word with the English dropped. Do not polish the
-       model line in 9-1, the `Next:` line in 12, a `Regression-of:` line, or the `Summary:`
-       first line of a shortened review text. **Give a review subagent these words too**
     5. **Do not review member by member.** When one member is finished, run the tests, commit and
        move to the next — the review looks at the whole epic once, in 7, after every member is
        finished. One review is expensive; do not call it as many times as there are members. The
@@ -2550,8 +2432,7 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        assert!(reference.contains(&korean_detail()), "참고 문서에 한국어 글 절차가 없다");
-        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, KOREAN, CLOSING] {
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -2567,51 +2448,21 @@ mod tests {
         }
     }
 
-    /// **안내가 부르라는 스킬이 설치한 플러그인의 것이다**(moai-5wk4). 설치 명령은 `korean` 이
-    /// `KOREAN_PLUGINS` 에서 뽑으니 따로 안 잰다 — 손으로 적는 것은 스킬 이름뿐이다. 플러그인
-    /// 스킬은 `<플러그인>:<스킬>` 로 불려, 설치 id 의 `@` 앞과 스킬 이름의 `:` 앞이 갈라지면 시킨
-    /// 대로 설치해도 부를 스킬이 없다. 첫 판은 `im-not-ai 의 humanize-korean` 처럼 마켓플레이스
-    /// 이름을 댔다. 워커 브리프도 같은 이름을 싣는다.
+    /// **심는 글은 한국어 글 다듬기를 시키지 않는다**(사용자 결정 moai-vtfu, 2026-10-03). 그 절(moai-5wk4)과
+    /// 용어 규칙(moai-iloh)을 걷었다 — 글은 기본으로 쓴다. 한 표면에만 남으면 그 표면을 읽은 세션이 깔리지도
+    /// 않은 플러그인을 부르려 든다. 심는 다섯 글과 브리프를 다 훑는다.
     #[test]
-    fn the_korean_piece_names_skills_of_the_plugins_it_installs() {
-        let brief = brief();
-        for (id, _) in KOREAN_PLUGINS {
-            let (plugin, _) = id.split_once('@').unwrap();
-            assert!(KOREAN.contains(&format!("`{plugin}:")), "안내가 {plugin} 의 스킬을 안 댄다");
-            assert!(brief.contains(&format!("`{plugin}:")), "브리프가 {plugin} 의 스킬을 안 댄다");
-        }
-    }
-
-    /// **용어 보존은 네 표면이 한 글로 말한다**([`KEEP_TERMS`], moai-gw5e·moai-y9kv). 규칙 3 의 64KB 가
-    /// 네 표면 가운데 셋에만 들었던 판(리뷰 moai-4u6b.5hl)을 이 규칙이 그대로 밟아, 일꾼 브리프 4-4 만
-    /// 옛 보존 목록(`ids, commands, paths and numbers`)에 남았다 — 감독이 일을 넘기는 글이 바로 그것이라,
-    /// 이 규칙이 겨눈 세션이 규칙을 못 받았다. 훅의 비추는 줄도 같은 출처에서 온다.
-    #[test]
-    fn the_four_surfaces_keep_the_terms_in_one_wording() {
-        for (surface, text) in
-            [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
-        {
-            assert!(text.contains(KEEP_TERMS), "{surface} 이 용어 보존 줄을 안 쓴다 — {KEEP_TERMS}");
-        }
-        assert!(KOREAN.contains(KEEP_TERMS), "늘 읽히는 안내가 용어 보존 줄과 갈라졌다");
-        assert!(brief().contains(KEEP_TERMS), "일꾼 브리프 4-4 가 용어 보존 줄과 갈라졌다");
-        let crate::hook::Decision::Context(said) = crate::hook::korean_notice("", &[]) else {
-            panic!("비추는 답이 아니다")
-        };
-        assert!(said.contains(KEEP_TERMS), "훅의 비추는 줄이 안내 글과 갈라졌다");
-    }
-
-    /// **`docs/korean-terms.md` 를 가리키는 두 줄이 가리킬 것을 가진다.** CLAUDE.md 는 그 파일이 용어를
-    /// 정한다고 적고 README 는 그것을 문서 목록에 싣는데, 둘 다 손으로 적은 경로라 파일을 옮기면 조용히
-    /// 빈 곳을 가리킨다 — `the_cli_reference_matches_the_help` 가 `docs/cli.md` 에 대고 막는 그 실패다.
-    #[test]
-    fn the_term_table_the_guides_point_at_is_there() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = "docs/korean-terms.md";
-        assert!(root.join(path).is_file(), "{path} 가 없다 — CLAUDE.md 와 README 가 빈 곳을 가리킨다");
-        for name in ["CLAUDE.md", "README.md"] {
-            let text = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(text.contains(path), "{name} 이 {path} 를 안 가리킨다");
+    fn no_surface_asks_for_the_korean_writing_plugins() {
+        for (surface, text) in [
+            ("AGENTS 블록", agents()),
+            ("SKILL.md", skill()),
+            ("참고 문서", reference()),
+            ("감독 스킬", supervise()),
+            ("일꾼 브리프", brief()),
+        ] {
+            for gone in ["Korean text", "korean-skills", "humanize-korean", "_workspace", "korean-terms"] {
+                assert!(!text.contains(gone), "{surface} 에 걷은 한국어 글 절이 남았다 — {gone}");
+            }
         }
     }
 
@@ -2764,7 +2615,7 @@ mod tests {
     /// 닫는 일꾼마다 밟는다.
     ///
     /// **상한은 표면마다 모든 자리를 잰다**(리뷰 moai-4u6b.5hl). 두 상수만 재던 판은 규칙 3·참고
-    /// 문서·한국어 절차에 손으로 적은 `64KB` 를 안 봐, 상한을 올리면 그 셋이 옛 수를 대는 채로
+    /// 문서·그때 있던 한국어 절차에 손으로 적은 `64KB` 를 안 봐, 상한을 올리면 그 셋이 옛 수를 대는 채로
     /// 초록이었다. 수째 읽어 견준다 — `contains("4KB")` 는 `64KB` 에도 맞는다.
     #[test]
     fn the_review_note_and_the_size_limit_say_one_thing() {
@@ -2797,9 +2648,6 @@ mod tests {
                 "{what}: 글의 상한이 실제와 다르다 — {said:?}"
             );
         }
-        // 요약 표식도 한 출처여야 한다 — 한국어 절차가 그것을 손으로 옮겨 적는다.
-        let mark = "`Summary:";
-        assert!(REVIEW_OVER_LIMIT.contains(mark) && KOREAN_DETAIL.contains(mark), "요약 표식이 갈라졌다");
         assert!(rules().contains(REVIEW_OVER_LIMIT), "규칙 3 이 넘칠 때의 길을 안 댄다");
         assert!(reference().contains(REVIEW_OVER_LIMIT), "참고 문서가 넘칠 때의 길을 안 댄다");
         assert!(brief().contains(&indent(REVIEW_OVER_LIMIT, "       ")), "일꾼 브리프가 넘칠 때의 길을 안 댄다");
