@@ -9606,6 +9606,29 @@ fn the_journal_records_a_name_and_an_email() {
     assert!(j.contains(r#""by":"테스터","by_email":"tester@example.com""#), "{j}");
 }
 
+/// **git 설정의 메일에 괄호가 들어도 제 줄은 제 것이다**(moai-v4p4.6w1). `ready` 는 지금 사람을 `이름 (메일)`
+/// 한 줄(`query::Me`)로 들고 `Actor::parse` 로 되가르는데, 마지막 `(` 에서 자르던 판은 `a(b)@x.io` 를
+/// `b)@x.io` 로 잘라 만든 사람 자신의 줄을 `others` 로 내밀었다 — 규칙 5 도 같은 자로 그 줄을 막는다.
+#[test]
+fn an_email_with_brackets_still_owns_its_rows() {
+    let s = init("bracketmail");
+    // 사람은 그 프로젝트의 git 설정에서 온다 — 전역 설정을 돌리는 변수는 moai 가 걷는다(`git_leaks`).
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "레이븐"]);
+    git(s.path(), &["config", "user.email", "a(b)@x.io"]);
+    let run = |args: &[&str]| {
+        let out = isolated(BIN).args(args).current_dir(s.path()).env("MOAI_NOW", NOW).output().unwrap();
+        assert!(out.status.success(), "{args:?}\n{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id = run(&["add", "괄호 메일", "-q"]).trim().to_string();
+    assert!(line_of(s.path(), &id).contains(r#""assignee":"레이븐","assignee_email":"a(b)@x.io""#));
+
+    let ready = run(&["ready", "--json"]);
+    assert!(ready.contains(&format!(r#""ready":[{{"id":"{id}""#)), "제 줄을 안 내밀었다\n{ready}");
+    assert!(ready.contains(r#""others":[]"#), "제 줄을 남의 것으로 읽었다\n{ready}");
+}
+
 /// `--user` 가 설정보다 앞선다 — 사람을 부르지 않고도 이름을 댈 길이 있어야
 /// 이 멈춤이 게이트가 되지 않는다.
 #[test]
