@@ -1044,8 +1044,9 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when its last member got to done. --all
   and -s done leave it out and the tail says how many; --archived brings it
-  back, done and deferred with it. Asking by time finds it anyway, and so
-  does -g once done is let in (-g --all). Nothing is stored: it is read
+  back, done and deferred with it. Asking by time (--since, --created,
+  --done, --stale) finds it anyway, and so does -g once done is let in
+  (-g --all). Nothing is stored: it is read
   from the column and the clock each time.
 
     moai show --archived -g parser

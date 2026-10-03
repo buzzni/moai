@@ -584,7 +584,7 @@ impl Filter {
         if !done.is_empty() && !status.is_empty() && !status.iter().any(|s| s == crate::config::DONE) {
             return Err(BadFilter::DoneOutside { asked: status.join(",") });
         }
-        let archived = raw.archived || timed || raw.grep.is_some();
+        let archived = raw.archived || timed || raw.stale.is_some() || raw.grep.is_some();
         Ok(Filter {
             status,
             tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
@@ -604,8 +604,10 @@ impl Filter {
             done,
             // **아카이브를 여는 말은 셋이다**(moai-47mz, 2026-10-03 사용자 결정). `--archived` 는 done 까지 열어
             // 옛 `--all` 과 같은 줄을 낸다. 글로 찾으면(`-g`) 연다 — 아카이브는 숨는 것이지 지운 것이 아니라
-            // 찾아져야 한다. 때로 물으면 연다 — 위의 "숨김을 다 연다" 와 같은 까닭이다. **`-g` 는 done 은 안
-            // 연다** — 찾은 아카이브 줄은 done 처럼 꼬리에 세이고 `--all` 이 연다.
+            // 찾아져야 한다. 때로 물으면 연다 — 위의 "숨김을 다 연다" 와 같은 까닭이다. **`--stale` 도 때로 묻는
+            // 말이다**(리뷰 moai-47mz.5il) — `-s done --stale 20` 은 아카이브 날수를 넘긴 줄만 고르는 물음이라, 안
+            // 열면 늘 0건이다. 다만 `--stale` 은 숨김을 다 열지는 않는다(옛날처럼 done 은 `-s done` 이 연다).
+            // **`-g` 는 done 은 안 연다** — 찾은 아카이브 줄은 done 처럼 꼬리에 세이고 `--all` 이 연다.
             all: raw.all || timed || raw.archived,
             archived,
             ideas,
@@ -1588,6 +1590,11 @@ mod tests {
         ] {
             assert_eq!(why(&build(timed), &aged), None, "때로 물은 목록이 아카이브를 숨겼다");
         }
+        // `--stale` 도 때로 묻는 말이다(리뷰 moai-47mz.5il) — `-s done --stale 14` 가 늘 0건이던 자리다. done 은
+        // 여느 때처럼 `-s done` 이 연다.
+        let stale = build(Raw { status: s(&["done"]), stale: Some(14), ..Raw::default() });
+        assert!(hit(&stale, &aged), "-s done --stale 이 아카이브를 못 고른다");
+        assert_eq!(why(&build(Raw { stale: Some(14), ..Raw::default() }), &aged), Some(Hide::Done));
 
         // 다시 연 줄은 `done_at` 이 남아도 done 이 아니다.
         let mut reopened = aged.clone();

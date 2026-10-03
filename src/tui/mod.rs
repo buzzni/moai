@@ -1110,9 +1110,10 @@ pub struct Site {
     /// `shown`·`lit` 을 다시 세던 자리다. 그 둘은 보기와 줄의 함수라, 둘 다 그대로면 답이 같다.
     /// 줄이 바뀌는 길은 둘뿐이다 — 새로 지은 [`Site`](여기가 `None`)와 [`App::take`](거기서 비운다).
     seen_view: Option<view::View>,
-    /// **아카이브라서만** 숨은 줄의 수(moai-47mz) — 아카이브를 켜면 보일 줄이다. `shown` 과 함께 센다([`App::see`]).
-    /// 뱃지가 이 수를 댄다([`view::View::badge`]) — done 을 숨긴 동안은 done 이 먼저 숨기므로 0 이다.
-    aged: usize,
+    /// 이슈 첨자 → **아카이브라서만** 숨었는가(moai-47mz) — 아카이브를 켜면 보일 줄이다. `shown` 과 함께 센다
+    /// ([`App::see`]). 뱃지의 수는 이것을 거름망·자리·배치로 다시 걸러 센다([`App::aged`]) — done 을 숨긴 동안은
+    /// done 이 먼저 숨기므로 다 거짓이다.
+    aged: Vec<bool>,
     /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
     /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
     /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
@@ -1480,7 +1481,7 @@ impl Site {
             commit_ids: Default::default(),
             shown: Vec::new(),
             seen_view: None,
-            aged: 0,
+            aged: Vec::new(),
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
@@ -3033,7 +3034,7 @@ impl App {
         if site.shown.len() == site.issues.len() && site.seen_view.as_ref() == Some(view) {
             return;
         }
-        let mut aged = 0;
+        let mut aged = Vec::with_capacity(site.issues.len());
         site.shown = (0..site.issues.len())
             .map(|at| {
                 let idea = crate::report::is_idea(&site.issues[at]);
@@ -3042,7 +3043,7 @@ impl App {
                 // 그렇게 걸러야 뱃지의 수가 "아카이브를 켜면 보일 줄" 이 된다.
                 let rest = view.shows(column, deferred, idea, &site.cfg.statuses);
                 let archived = rest && !view.show_archived && site.archived(at);
-                aged += usize::from(archived);
+                aged.push(archived);
                 rest && !archived
             })
             .collect();
@@ -4292,8 +4293,23 @@ impl App {
     }
 
     /// 화면에 선 프로젝트들([`App::sites`])에서 **아카이브라서만** 숨은 줄의 수(moai-47mz, [`Site::aged`]) — 뱃지가 댄다.
+    ///
+    /// **`SPC v o` 를 누르면 실제로 설 줄만 센다**(리뷰 moai-47mz.5il) — 걸린 거름망(`SPC f status=todo`)에 빠지는
+    /// 줄, 지금 자리 밖의 줄, 보드에서 카드가 못 되는 줄(묶음·닫힌 idea, [`App::cards_in`])을 세면 뱃지가 `아카이브
+    /// 600` 을 대는데 눌러도 아무것도 안 선다. 아카이브 줄만 되짚으므로 프레임마다 불려도 이슈 전부를 풀지 않는다.
     pub(super) fn aged(&self) -> usize {
-        self.sites().iter().map(|s| s.aged).sum()
+        let board = self.board();
+        self.sites()
+            .iter()
+            .map(|site| {
+                let card = |i: &Issue| !crate::report::is_group(i) && !crate::report::is_idea(i);
+                (0..site.aged.len())
+                    .filter(|&at| site.aged[at] && site.keep.get(at).copied().unwrap_or(true))
+                    .filter(|&at| site.index.home_of(at).starts_with(&site.path))
+                    .filter(|&at| !board || card(&site.issues[at]))
+                    .count()
+            })
+            .sum()
     }
 
     /// 이 화면이 번호를 매기고 뱃지에 대고 셈에 쓰는 **칸 이름** — 프로젝트 안에서는 그 설정
@@ -6036,7 +6052,18 @@ mod tests {
         a.layout = view::Layout::Board;
         a.see();
         assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "보드의 done 칸에 아카이브가 섰다");
+        // **뱃지는 `SPC v o` 로 실제로 설 줄만 센다**(리뷰 moai-47mz.5il) — 보드에서 에픽은 카드가 아니다.
+        assert_eq!(badge(&a).as_deref(), Some("아카이브 2 숨김"), "보드가 카드 못 될 묶음까지 셌다");
         a.layout = view::Layout::List;
+        // 거름망에 빠지는 줄도 안 센다 — 할 일만 거르면 아카이브를 켜도 설 줄이 없다.
+        a.hit("SPC f");
+        for c in "status=todo".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.hit("Enter");
+        assert_eq!(badge(&a), None, "거름망이 숨긴 아카이브를 셌다");
+        a.hit("Esc");
+        assert_eq!(badge(&a).as_deref(), Some("아카이브 3 숨김"), "시험의 전제 — 거름망을 풀었다");
 
         a.hit("SPC v o Esc");
         assert_eq!(

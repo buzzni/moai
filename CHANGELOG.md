@@ -65,8 +65,8 @@ does not tag — see `CONTRIBUTING.md`.
   with done shown and the path line counts it (`[archive 312 hidden]`);
   `SPC v o` shows it and is kept under `[tui]` as `show_archived`, and `/`
   search finds it anyway. `moai show --archived` brings it back, done and
-  deferred with it; the time filters find it too, and so does `-g` once done
-  is let in with `--all`. `moai status` lists only the milestones and epics
+  deferred with it; the time filters and `--stale` find it too, and so does
+  `-g` once done is let in with `--all`. `moai status` lists only the milestones and epics
   outside the archive and counts the rest in one line, `archived` in `--json`.
   `moai stats` counts it as before.
 
