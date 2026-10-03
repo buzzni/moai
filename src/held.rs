@@ -76,9 +76,20 @@ pub(crate) fn place(p: &Path, home: &Home) -> Result<PathBuf, Unheld> {
     let Some(real) = landing(p) else { return Ok(p.to_path_buf()) };
     match real.strip_prefix(&home.0) {
         Err(_) => Err(Unheld::Outside { to: real, home: home.0.clone() }),
-        Ok(rest) if rest.components().any(|c| c.as_os_str() == ".git") => Err(Unheld::IntoGit { to: real }),
+        Ok(rest) if into_git(rest) => Err(Unheld::IntoGit { to: real }),
         Ok(_) => Ok(real),
     }
+}
+
+/// 체크아웃 아래의 자리 `rest` 가 **git 의 자리(`.git/`)에 드는가** — 어느 조각이든 `.git` 이면 든다. 끝 이름도
+/// 센다 — 딸린 워크트리의 `.git` 은 디렉터리가 아니라 `gitdir:` 한 줄짜리 파일이다. 읽기([`place`])·쓰기
+/// (`store::resolve`)·규칙 줄(`cmd::init::inside`)이 이 하나로 잰다(리뷰 moai-x0o7.52k) — 셋이 저마다 적던 판은
+/// 한쪽을 고치는 날 나머지가 옛 답을 냈다.
+///
+/// **대소문자를 안 가린다** — 대소문자를 안 가르는 볼륨(macOS 의 기본 APFS)에서는 `.GIT` 도 그 자리다. git 도 트리
+/// 안의 그런 조각을 대소문자 없이 거절하므로(`verify_dotfile`) 받은 저장소가 담아 올 자리를 잘못 막을 일은 없다.
+pub(crate) fn into_git(rest: &Path) -> bool {
+    rest.components().any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
 }
 
 /// 받은 자리가 끝내 닿는 자리 — 통째로 풀리면 그 자리고, 못 풀리는 링크면 끝 조각의 사슬을 따라가 그 끝의
@@ -359,6 +370,18 @@ pub(crate) mod tests {
         // 안을 가리키는 끝 없는 링크는 그대로 안이다 — 읽는 쪽이 `NotFound` 로 넘긴다.
         let inside = link("dangling-in", Path::new("data/missing"));
         assert_eq!(place(&inside, &home), Ok(home.0.join("data/missing")));
+    }
+
+    /// **git 의 자리는 조각째, 대소문자 없이 잰다**(리뷰 moai-x0o7.52k) — 대소문자를 안 가르는 볼륨에서는 `.GIT` 도
+    /// 그 자리다. 끝 이름도 세고(딸린 워크트리의 `.git` 파일), `.github`·`.gitignore` 처럼 이름만 닮은 것은 안 센다.
+    #[test]
+    fn git_s_place_is_matched_by_whole_component_without_case() {
+        for p in [".git", ".git/config", "sub/.GIT/moai/issues.jsonl", "wt/.Git"] {
+            assert!(into_git(Path::new(p)), "{p} 를 git 의 자리로 안 셌다");
+        }
+        for p in [".github/workflows", "a.git", "git", "", ".gitignore"] {
+            assert!(!into_git(Path::new(p)), "{p} 를 git 의 자리로 셌다");
+        }
     }
 
     /// 일을 딴 실에서 돌려 **멈추면 기다리지 않고 진다** — 고침이 없으면 FIFO 를 여는 `open` 이 쓰는 쪽을 영영
