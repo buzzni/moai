@@ -425,6 +425,9 @@ pub struct Ground {
     /// 곁에 남지 않는다. 걸린 검색이 노트를 보면 스레드의 다시 읽기는 노트까지 읽어 오고(`App::follow`),
     /// 루프에서 부르는 다시 읽기(`App::reload`)는 거름망을 다시 거는 걸음(`App::reapply`)이 새로 읽는다.
     notes: Option<Noted>,
+    /// 그 프로젝트의 아카이브 날수(`Config::archive_days`, moai-47mz) — 적재가 설정에서 옮겨 둔다. 거름망의
+    /// 자([`Ground::here`])와 보기의 자([`Site::archived`])가 이 하나를 읽는다.
+    archive_days: i64,
 }
 
 /// 읽은 노트 한 벌(리뷰 moai-wcy8.rbj) — 글과, 거름망의 자로 접은 것과, 그것을 읽은 저널의 표식. **셋을 한
@@ -509,6 +512,7 @@ impl Ground {
             folded: soil.folded.iter().map(|k| k.to_string()).collect(),
             // 줄만으로는 모른다 — 노트를 보는 거름망이 처음 걸릴 때 읽는다([`Ground::read_notes`]).
             notes: None,
+            archive_days: cfg.archive_days,
         }
     }
 
@@ -603,6 +607,7 @@ impl Ground {
             notes: self.notes.as_ref().map(|n| crate::query::NoteView::Folded(&n.folded)),
             // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
             zone: None,
+            archive_days: self.archive_days,
         }
     }
 }
@@ -1105,6 +1110,9 @@ pub struct Site {
     /// `shown`·`lit` 을 다시 세던 자리다. 그 둘은 보기와 줄의 함수라, 둘 다 그대로면 답이 같다.
     /// 줄이 바뀌는 길은 둘뿐이다 — 새로 지은 [`Site`](여기가 `None`)와 [`App::take`](거기서 비운다).
     seen_view: Option<view::View>,
+    /// **아카이브라서만** 숨은 줄의 수(moai-47mz) — 아카이브를 켜면 보일 줄이다. `shown` 과 함께 센다([`App::see`]).
+    /// 뱃지가 이 수를 댄다([`view::View::badge`]) — done 을 숨긴 동안은 done 이 먼저 숨기므로 0 이다.
+    aged: usize,
     /// 보기에 보이는 줄이 사는 자리의 **모든 앞머리**([`App::see`]가 `shown` 과 함께 센다). 폴더가 검색 없이도
     /// 설지를 이 하나로 묻는다([`App::stands_in_view`]) — 폴더마다 이슈 전부를 훑으면 목록 한 번에 폴더 수 ×
     /// 이슈 수가 들고, 목록·머리 셈·열 셈이 프레임마다 그것을 묻는다(`Index::entries_sorted` 의 `lit` 과 같은 까닭).
@@ -1472,6 +1480,7 @@ impl Site {
             commit_ids: Default::default(),
             shown: Vec::new(),
             seen_view: None,
+            aged: 0,
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
@@ -1536,6 +1545,15 @@ impl Site {
     pub fn column(&self, at: usize) -> &str {
         let i = &self.issues[at];
         self.read_of(i).unwrap_or(i.status.as_str())
+    }
+
+    /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
+    /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 때(`report::Stand::since`)고 아니면 제 칸 시각이다. 시계는
+    /// 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
+    pub fn archived(&self, at: usize) -> bool {
+        let i = &self.issues[at];
+        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.since.as_str());
+        crate::report::archived(self.column(at), since, &self.now, self.ground.archive_days)
     }
 
     /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
@@ -1722,10 +1740,26 @@ struct Got {
 impl App {
     /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
     /// [`App::open`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
+    ///
+    /// **아카이브는 끈다**(moai-47mz) — 시험의 줄은 날짜를 박아 두고 화면의 시계는 벽시계라, 시험이 그대로여도
+    /// 날이 흐르면 끝난 줄이 하나씩 아카이브로 넘어가 다른 것을 재던 시험이 붉어진다. 아카이브를 재는 시험은
+    /// 시계를 박는 [`App::aging`] 으로 세운다.
     #[cfg(test)]
     pub fn new(issues: Vec<Issue>, cfg: Config, path: Path) -> App {
-        let (index, ground) = measure(&issues, &cfg);
+        let (index, mut ground) = measure(&issues, &cfg);
+        ground.archive_days = 0;
         App::build(issues, index, ground, cfg, path, Vec::new())
+    }
+
+    /// 아카이브를 켠 채로 **시계를 `now` 에 박아** 세운다(moai-47mz) — 아카이브를 재는 시험의 길이다.
+    #[cfg(test)]
+    pub fn aging(issues: Vec<Issue>, cfg: Config, now: &str) -> App {
+        let (index, ground) = measure(&issues, &cfg);
+        let mut a = App::build(issues, index, ground, cfg, Path::new(), Vec::new());
+        a.site.now = now.to_string();
+        a.site.seen_view = None;
+        a.see();
+        a
     }
 
     /// 저장소에서 읽어 세운다.
@@ -2272,9 +2306,12 @@ impl App {
     /// **커서는 번호가 아니라 정체로 따라간다**([`Anchor`]). 보던 줄이 아직 보이면
     /// 그 줄에 서고, 사라졌으면(지워졌거나 거름망에 빠졌으면) 전처럼 그 번호를 목록
     /// 안으로 자른 자리에 선다 — 보드는 그 카드가 섰던 칸 곁이다([`App::regrip`]).
+    ///
+    /// **아카이브를 켰는지는 지금 것을 잇는다** — [`App::new`] 가 끈 시험이 들이기 한 번에 다시 켜지면 안 된다.
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
-        let (index, ground) = measure(&issues, &self.site.cfg);
+        let (index, mut ground) = measure(&issues, &self.site.cfg);
+        ground.archive_days = self.site.ground.archive_days;
         let now = crate::model::now();
         self.site.warnings = warnings_of(&issues, &self.site.unreadable, &self.site.cfg, &now);
         self.take(issues, index, ground, now);
@@ -2889,7 +2926,11 @@ impl App {
     fn build_filter(&self, mode: &Mode) -> Result<Filter, String> {
         let raw = match mode {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
-            Mode::Filter(q) => Raw { filter: split_filter(q.text()), all: true, ideas: true, ..Raw::default() },
+            // **아카이브도 연다**(moai-47mz) — done 처럼 거름망이 아니라 보기(`SPC v o`)가 숨긴다. 거름망이 숨기면
+            // 보기를 켜도 `SPC f` 를 건 동안 아카이브가 안 돌아온다. 검색(`-g`)은 `Filter::build` 가 저절로 연다.
+            Mode::Filter(q) => {
+                Raw { filter: split_filter(q.text()), all: true, ideas: true, archived: true, ..Raw::default() }
+            }
             Mode::Browse
             | Mode::Ask(_)
             | Mode::Idea(_)
@@ -2992,12 +3033,20 @@ impl App {
         if site.shown.len() == site.issues.len() && site.seen_view.as_ref() == Some(view) {
             return;
         }
+        let mut aged = 0;
         site.shown = (0..site.issues.len())
             .map(|at| {
                 let idea = crate::report::is_idea(&site.issues[at]);
-                view.shows(site.column(at), site.index.shelved_at(at).is_some(), idea, &site.cfg.statuses)
+                let (column, deferred) = (site.column(at), site.index.shelved_at(at).is_some());
+                // **아카이브는 다른 숨김이 다 지난 줄에서만 잰다** — 숨길 줄이 아니면 시각을 풀 까닭이 없고,
+                // 그렇게 걸러야 뱃지의 수가 "아카이브를 켜면 보일 줄" 이 된다.
+                let rest = view.shows(column, deferred, idea, false, &site.cfg.statuses);
+                let archived = rest && !view.show_archived && site.archived(at);
+                aged += usize::from(archived);
+                rest && !archived
             })
             .collect();
+        site.aged = aged;
         let mut lit = std::collections::HashSet::new();
         for (at, _) in site.shown.iter().enumerate().filter(|(_, on)| **on) {
             let home = site.index.home_of(at);
@@ -3085,6 +3134,9 @@ impl App {
         }
         if let Some(i) = look.hide_ideas {
             self.view.hide_ideas = i;
+        }
+        if let Some(a) = look.show_archived {
+            self.view.show_archived = a;
         }
         // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
         // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
@@ -3191,6 +3243,7 @@ impl App {
             hidden: Some(self.view.hidden.clone()),
             hide_deferred: Some(self.view.hide_deferred),
             hide_ideas: Some(self.view.hide_ideas),
+            show_archived: Some(self.view.show_archived),
             sort: Some(self.order.by.name().to_string()),
             sort_reversed: Some(self.order.reversed),
             fields: Some(
@@ -3885,6 +3938,7 @@ impl App {
             }
             B::Deferred => self.view.hide_deferred = !self.view.hide_deferred,
             B::Ideas => self.view.hide_ideas = !self.view.hide_ideas,
+            B::Archived => self.view.show_archived = !self.view.show_archived,
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.screen_statuses()),
@@ -4232,6 +4286,11 @@ impl App {
     ///
     /// 한눈 보기의 `App::site` 는 **줄이 빈 자리 채우개**라(`App::leave_project`) 거기 섞지
     /// 않는다 — 그 설정은 마지막으로 떠난 프로젝트의 것이거나 `layer::blank_config` 다.
+    /// 화면에 선 프로젝트들에서 **아카이브라서만** 숨은 줄의 수(moai-47mz, [`Site::aged`]) — 뱃지가 댄다.
+    pub(super) fn aged(&self) -> usize {
+        self.sites().iter().map(|s| s.aged).sum()
+    }
+
     pub(super) fn sites(&self) -> Vec<&Site> {
         let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) else { return vec![&self.site] };
         l.places.iter().filter(|p| !self.folded.contains(&p.path)).filter_map(|p| p.site.as_ref()).collect()
@@ -4416,7 +4475,7 @@ impl App {
         let columns = board::columns(&statuses, &held, &|c| match c {
             board::Column::Idea => !self.view.hide_ideas,
             board::Column::Shelved => !self.view.hide_deferred,
-            board::Column::Status(s) => self.view.shows(s, false, false, &statuses),
+            board::Column::Status(s) => self.view.shows(s, false, false, false, &statuses),
         });
         // 프로젝트 하나가 `h`·`l` 의 울타리다([`board::Slot::group`]) — 프로젝트 안에서는 하나뿐이다.
         let group = |seat: Seat| match seat {
@@ -4979,7 +5038,7 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Deferred | B::Ideas | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::Ideas | B::Archived | B::ShowAll | B::Sort(_) => self.look(act, &rows),
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -5069,6 +5128,7 @@ impl App {
                 .fold(0, |bits, (n, _)| bits | 1 << n),
             deferred_hidden: self.view.hide_deferred,
             ideas_hidden: self.view.hide_ideas,
+            archived_hidden: !self.view.show_archived,
             detail_at: self.detail_at,
             board: self.board(),
             head: self.head_at(rows).is_some(),
@@ -5894,6 +5954,60 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **done 을 켜도 아카이브는 숨고, 뱃지가 그 수를 대며, `SPC v o` 가 보인다**(moai-47mz, 2026-10-03 사용자 결정).
+    /// 모두 보이기(`SPC v a`)는 아카이브를 안 열고, `/` 검색은 보기를 걷으므로 찾는다. 보드의 done 칸도 같은
+    /// 보기를 따른다. 묶음은 멤버가 마지막으로 done 에 든 때로 잰다 — 오래 끝난 멤버뿐인 에픽은 통째로 숨는다.
+    #[test]
+    fn done_shown_still_hides_the_archive_until_spc_v_o() {
+        let closed = |id: &str, at: &str| {
+            let mut i = make(id, Kind::Issue);
+            i.status = Status::new("done");
+            i.status_since = at.into();
+            i.done_at = Some(at.into());
+            i
+        };
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.title = "끝난 에픽".into();
+        let mut old_member = closed("argos-0002", "2026-09-02T00:00:00Z");
+        old_member.epic = Some("argos-0001".into());
+        let mut aged = closed("argos-0003", "2026-09-01T00:00:00Z");
+        aged.title = "오래 끝난 일".into();
+        let fresh = closed("argos-0004", "2026-09-25T00:00:00Z");
+        let issues = vec![epic, old_member, aged, fresh, make("argos-0005", Kind::Issue)];
+        let mut a = App::aging(issues, cfg(), "2026-09-30T00:00:00Z");
+        a.view = view::View::hiding("done");
+        a.see();
+        let badge = |a: &App| a.view.badge(&a.screen_statuses(), a.aged(), a.site.lang);
+
+        assert_eq!(row_ids(&a), ["argos-0005"], "시험의 전제 — done 이 숨었다");
+        assert_eq!(badge(&a).as_deref(), Some("done 숨김"), "done 을 숨긴 동안 아카이브를 따로 댔다");
+        a.hit("SPC v 4 Esc");
+        assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "done 을 켜자 아카이브가 쏟아졌다");
+        assert_eq!(badge(&a).as_deref(), Some("아카이브 3 숨김"), "에픽·멤버·일 셋이 아카이브라서만 숨었다");
+        a.hit("SPC v a Esc");
+        assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "모두 보이기가 아카이브를 열었다");
+
+        search(&mut a, "오래 끝난");
+        assert_eq!(row_ids(&a), ["argos-0003"], "검색이 아카이브를 못 찾았다");
+        a.hit("Esc");
+        a.hit("Esc");
+        assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "검색을 풀었는데 아카이브가 남았다");
+
+        a.layout = view::Layout::Board;
+        a.see();
+        assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "보드의 done 칸에 아카이브가 섰다");
+        a.layout = view::Layout::List;
+
+        a.hit("SPC v o Esc");
+        assert_eq!(
+            row_ids(&a),
+            ["argos-0001", "argos-0003", "argos-0004", "argos-0005"],
+            "SPC v o 가 아카이브를 안 열었다"
+        );
+        assert_eq!(badge(&a), None);
+        assert_eq!(a.look_now().show_archived, Some(true), "켠 아카이브가 설정에 안 실린다");
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),

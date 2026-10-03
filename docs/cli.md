@@ -388,6 +388,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
 Order and paging:
@@ -414,6 +415,15 @@ Order and paging:
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
+
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when its last member got to done. --all
+  and -s done leave it out and the tail says how many; --archived brings it
+  back, done and deferred with it. -g and asking by time find it anyway.
+  Nothing is stored: it is read from the column and the clock each time.
+
+    moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
@@ -503,6 +513,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
   Counts the rows the filters pick - the same filters as `moai show` -
@@ -1087,6 +1098,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
 Order and paging:
@@ -1113,6 +1125,15 @@ Order and paging:
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
+
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when its last member got to done. --all
+  and -s done leave it out and the tail says how many; --archived brings it
+  back, done and deferred with it. -g and asking by time find it anyway.
+  Nothing is stored: it is read from the column and the clock each time.
+
+    moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
@@ -1323,6 +1344,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
 Order and paging:
@@ -1349,6 +1371,15 @@ Order and paging:
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
+
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when its last member got to done. --all
+  and -s done leave it out and the tail says how many; --archived brings it
+  back, done and deferred with it. -g and asking by time find it anyway.
+  Nothing is stored: it is read from the column and the clock each time.
+
+    moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
@@ -1559,6 +1590,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
 Order and paging:
@@ -1585,6 +1617,15 @@ Order and paging:
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
+
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when its last member got to done. --all
+  and -s done leave it out and the tail says how many; --archived brings it
+  back, done and deferred with it. -g and asking by time find it anyway.
+  Nothing is stored: it is read from the column and the clock each time.
+
+    moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
@@ -1816,6 +1857,7 @@ Filters  (comma = or,  repeated = and):
       --done <from..to>                   Closed in that range (see below)
       --deferred                          Only what is deferred
       --all                               Include done and what is deferred
+      --archived                          Include the archive too (old done)
       --filter <item=value>               Filters as one string (`status=todo`)
 
 Order and paging:
@@ -1842,6 +1884,15 @@ Order and paging:
 
     moai show --sort id -n 100 --json
     moai show --sort id -n 100 --after <last id> --json
+
+  Archive: a row that has stood in done for archive_days (14 unless
+  .moai/config.toml says otherwise, 0 turns it off) is the archive - an
+  epic or milestone counted from when its last member got to done. --all
+  and -s done leave it out and the tail says how many; --archived brings it
+  back, done and deferred with it. -g and asking by time find it anyway.
+  Nothing is stored: it is read from the column and the clock each time.
+
+    moai show --archived -g parser
 
   Time: --since <when> keeps the rows whose own updated_at is at or after
   it. --created and --done take a range from..to with either side left
@@ -2002,6 +2053,8 @@ Options:
     SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v i  ideas              SPC v a  show all
+    SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
+             leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     SPC v b  list or board [list/board] — the board is described below
@@ -2056,6 +2109,11 @@ Options:
   The list hides done to begin with — the [done hidden] mark on the path line
   says so. The view is separate from the filter, so Esc does not clear it and
   the two apply together.
+  Done that has sat in done for a while is the archive (archive_days in
+  .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
+  the list and the board even with done shown, and the path line counts it
+  — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
+  show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top, and
   pressing the chosen one again turns it around. When it is not the default
   (priority) the path line says which order it is.

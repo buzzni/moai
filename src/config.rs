@@ -323,7 +323,20 @@ pub struct Config {
     pub naming: Naming,
     /// `moai status` 의 잔소리 문턱. 아무것도 막지 않는다.
     pub status: Thresholds,
+    /// done 칸에 든 지 **이 날수가 지난** 줄은 아카이브다(moai-47mz) — 목록·보드는 done 을 보여도 그 줄을
+    /// 숨기고, `/` 검색과 `show -g` 는 찾는다. `0` 이면 아카이브가 없다. 평평한 키 `archive_days` 다.
+    ///
+    /// **저장소의 값이다**(2026-10-03 사용자 결정) — 이 값이 `moai show --all` 이 내는 줄을 바꾸므로, 한
+    /// 저장소를 같이 쓰는 사람과 세션이 같은 답을 봐야 한다. 문턱([`Thresholds`])이 여기 사는 것과 같은 까닭이다.
+    /// 무엇이 아카이브인지 재는 자는 [`crate::report::archived`] 하나다 — 이것은 그 날수만 든다.
+    pub archive_days: i64,
 }
+
+/// [`Config::archive_days`] 를 안 적은 저장소가 받는 날수 — 두 주(2026-10-03 사용자 결정).
+pub const ARCHIVE_DAYS: i64 = 14;
+
+/// [`Config::archive_days`] 를 적는 키.
+pub const ARCHIVE_KEY: &str = "archive_days";
 
 impl Config {
     /// **저장소가 든 파일이라 그 체크아웃 안에서만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
@@ -371,8 +384,14 @@ impl Config {
 
         Thresholds::check_keys(es)?;
         let status = Thresholds::parse(es)?;
+        // **테이블 안에 적은 날수는 소리낸다** — 문턱과 같은 까닭이다([`Thresholds::check_keys`]). `[archive]`
+        // 밑의 `archive_days` 는 이 파서가 안 읽어, 조용히 넘기면 고친 값이 영영 안 먹는다.
+        if let Some(e) = es.iter().find(|e| e.table.is_some() && e.key == ARCHIVE_KEY) {
+            return Err(Trouble::ThresholdInTable { line: e.line, named: ARCHIVE_KEY.into() });
+        }
+        let archive_days = days(es, ARCHIVE_KEY, ARCHIVE_DAYS)?;
 
-        Ok(Config { prefix, statuses, naming, status })
+        Ok(Config { prefix, statuses, naming, status, archive_days })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -671,6 +690,22 @@ status_due_days      = 17
         assert_eq!((t.wip_limit, t.no_epic_min, t.idea_pile), (13, 14, 16));
         assert_eq!(t.no_epic_ratio, 0.5);
         assert_eq!(t.due_days, 17, "status_due_days 가 안 먹는다");
+    }
+
+    /// **아카이브 날수는 안 적으면 두 주, `0` 이면 끈다**(moai-47mz). 테이블 안에 적으면 문턱처럼 소리낸다 —
+    /// 이 파서는 테이블을 안 읽어, 넘기면 그 값이 영영 안 먹는다.
+    #[test]
+    fn archive_days_defaults_to_two_weeks() {
+        assert_eq!(Config::parse("prefix = \"a\"\n").unwrap().archive_days, ARCHIVE_DAYS);
+        assert_eq!(ARCHIVE_DAYS, 14, "사람이 정한 기본값이 바뀌었다");
+        assert_eq!(Config::parse("prefix = \"a\"\narchive_days = 30\n").unwrap().archive_days, 30);
+        assert_eq!(Config::parse("prefix = \"a\"\narchive_days = 0\n").unwrap().archive_days, 0);
+        let e = Config::parse("prefix = \"a\"\n[archive]\narchive_days = 3\n").unwrap_err();
+        assert_eq!(e, Trouble::ThresholdInTable { line: 3, named: "archive_days".into() });
+        assert!(matches!(
+            Config::parse("prefix = \"a\"\narchive_days = -1\n").unwrap_err(),
+            Trouble::NotANumber { line: 2, .. }
+        ));
     }
 
     /// 수는 따옴표 없이 적는다. 두르면 `toml` 크레이트로 갈아 끼우는 날 글이 되므로,

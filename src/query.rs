@@ -75,6 +75,10 @@ pub struct Where<'a> {
     /// 것은 명령 레이어(`cmd`)고, 날로 친 끝이 없으면 풀지도 얹지도 않는다([`Filter::needs_zone`]) — 탐색기도
     /// 같은 문으로 제 화면의 시간대(`tui::App::zone`)를 얹는다. 안 실렸으면(`None`) 도장 그대로, 곧 UTC 로 잰다.
     pub zone: Option<&'a crate::tz::Zone>,
+    /// done 칸에 든 지 이 날수가 지나면 아카이브다(`Config::archive_days`, moai-47mz). **설정에서 온다** —
+    /// [`Where::from_soil`] 이 설정을 받아 옮기고, 탐색기의 거름망은 적재가 설정에서 옮겨 둔 값을 받는다
+    /// (`tui::Ground::here`). 0 이면(`Where::default`) 아카이브가 없다.
+    pub archive_days: i64,
 }
 
 /// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
@@ -182,7 +186,18 @@ impl<'a> Where<'a> {
             all.iter().zip(&shelved).filter(|(i, _)| split.contains(i.id.as_str())).map(|(i, r)| (i, *r)).collect();
         let shelved = crate::report::Shelved::kept(roots, split, rows);
         let kinds = crate::report::Kinds::Own(kinds);
-        Where { epic, lines: Lined::Ready(lines), shelved, states, since, kinds, folded, notes: None, zone: None }
+        Where {
+            epic,
+            lines: Lined::Ready(lines),
+            shelved,
+            states,
+            since,
+            kinds,
+            folded,
+            notes: None,
+            zone: None,
+            archive_days: cfg.archive_days,
+        }
     }
 
     /// 그 줄의 노트 가운데 `q` 가 든 것이 있는가(moai-efoc.zyc). `q` 는 이미 소문자다([`Filter::build`]).
@@ -259,6 +274,13 @@ impl<'a> Where<'a> {
     /// 그 줄에서 올라가므로(`shelf.every(g)`), 줄마다의 판정이 묶음에도 참이다.
     pub fn deferred(&self, i: &Issue) -> bool {
         i.is_deferred() || self.shelved.root(i).is_some()
+    }
+
+    /// 아카이브인가(moai-47mz) — 칸과 그 칸에 든 때를 **목록이 고르고 재는 바로 그 자**([`Where::column`]·
+    /// [`Where::since`])로 읽어 [`crate::report::archived`] 에 댄다. `-s` 가 고른 칸과 `--done <폭>` 이 잰 때가
+    /// 아카이브와 한 줄을 다르게 보지 않는다.
+    pub fn archived(&self, i: &Issue, now: &str) -> bool {
+        crate::report::archived(self.column(i), self.since(i), now, self.archive_days)
     }
 }
 
@@ -366,8 +388,11 @@ pub struct Filter {
     /// **지금 done 에 선 줄이 거기 든 때**의 폭(`--done`). 재는 자는 [`Where::since`] 다 — 묶음이면 멤버가
     /// 마지막으로 done 에 든 때라, 남은 멤버를 미루거나 지우거나 빼서 닫힌 묶음도 그 앞선 때로 선다.
     pub done: Vec<Vec<Span>>,
-    /// done 을 포함한다.
+    /// done 을 포함한다. **아카이브는 아니다**(moai-47mz) — 그것은 [`Filter::archived`] 가 연다.
     pub all: bool,
+    /// 아카이브(done 에 든 지 오래된 줄, [`Where::archived`])까지 포함한다 — `--archived`. 글로 찾거나(`-g`)
+    /// 때로 물으면(`--since`·`--created`·`--done`) 저절로 켜진다: 찾는 물음과 때를 콕 집은 물음이다.
+    pub archived: bool,
     /// 미뤄 둔 것만 고른다. `Some(false)` 면 미루지 않은 것만.
     pub deferred: Option<bool>,
     /// 담아 둔 생각까지 포함한다. **`all` 과 같은 자리의 축이다** — 기본으로
@@ -500,6 +525,8 @@ pub struct Raw {
     pub created: Vec<String>,
     pub done: Vec<String>,
     pub all: bool,
+    /// `--archived` — 아카이브까지 연다. done 도 연다(`all` 을 품는다).
+    pub archived: bool,
     pub ideas: bool,
     pub deferred: bool,
     pub filter: Vec<String>,
@@ -514,6 +541,8 @@ pub enum Hide {
     Idea,
     /// `--deferred` 가 연다.
     Deferred,
+    /// `--archived` 가 연다 — done 칸에 든 지 오래된 줄(moai-47mz). `--all` 로는 안 열린다.
+    Archived,
     /// 어느 한 낱말로도 안 열린다 (닫아 둔 생각). 세지 않는다.
     Unopenable,
 }
@@ -555,6 +584,7 @@ impl Filter {
         if !done.is_empty() && !status.is_empty() && !status.iter().any(|s| s == crate::config::DONE) {
             return Err(BadFilter::DoneOutside { asked: status.join(",") });
         }
+        let archived = raw.archived || timed || raw.grep.is_some();
         Ok(Filter {
             status,
             tags: raw.tag.iter().map(|t| split_tags(t)).filter(|v: &Vec<String>| !v.is_empty()).collect(),
@@ -572,7 +602,12 @@ impl Filter {
             updated: spans(&raw.since, Span::since)?,
             created: spans(&raw.created, Span::parse)?,
             done,
-            all: raw.all || timed,
+            // **아카이브를 여는 말은 셋이다**(moai-47mz, 2026-10-03 사용자 결정). `--archived` 는 done 까지 열어
+            // 옛 `--all` 과 같은 줄을 낸다. 글로 찾으면(`-g`) 연다 — 아카이브는 숨는 것이지 지운 것이 아니라
+            // 찾아져야 한다. 때로 물으면 연다 — 위의 "숨김을 다 연다" 와 같은 까닭이다. **`-g` 는 done 은 안
+            // 연다** — 찾은 아카이브 줄은 done 처럼 꼬리에 세이고 `--all` 이 연다.
+            all: raw.all || timed || raw.archived,
+            archived,
             ideas,
             deferred,
         })
@@ -611,9 +646,18 @@ impl Filter {
     /// 여전히 숨겨 아무것도 안 낸다.
     ///   `--type idea` 는 idea 만 연다 (done·미룸은 그대로 숨긴다)
     ///   `--deferred`  는 미룸을 열고 생각까지 같이 연다 (done 은 아니다)
-    ///   `--all`       은 done 과 미룸을 연다 (생각은 아니다)
-    pub fn hidden_by(&self, i: &Issue, wh: &Where) -> Option<Hide> {
+    ///   `--all`       은 done 과 미룸을 연다 (생각과 아카이브는 아니다)
+    ///   `--archived`  는 아카이브까지 연다 (done·미룸도 연다, 생각은 아니다)
+    ///
+    /// - **아카이브는 done 안의 한 겹 더다**(moai-47mz). done 을 연 목록(`--all`·`-s done`)에서도 done 에 든 지
+    ///   오래된 줄은 빠지고, 그 줄을 여는 한 낱말은 `--archived` 다. 그래서 `--all` 없이 숨은 아카이브 줄도
+    ///   done 이 아니라 아카이브로 센다 — done 으로 세면 꼬리가 대는 `--all` 이 그 줄을 안 낸다.
+    ///   잴 때는 부르는 쪽이 건넨 `now` 다
+    pub fn hidden_by(&self, i: &Issue, now: &str, wh: &Where) -> Option<Hide> {
         let idea = crate::report::is_idea(i) && !self.ideas;
+        if !self.archived && wh.archived(i, now) {
+            return Some(if idea { Hide::Unopenable } else { Hide::Archived });
+        }
         let deferred = self.deferred.is_none() && !self.all && wh.deferred(i);
         // 묶음은 **읽은 칸**으로 닫혔는지 본다 — 멤버가 남은 에픽을 손으로
         // `done` 에 뒀다고 목록에서 숨기면, 진행 중인 묶음이 사라진다.
@@ -633,7 +677,7 @@ impl Filter {
         if self.deferred.is_some_and(|want| wh.deferred(i) != want) {
             return false;
         }
-        if self.hidden_by(i, wh).is_some() {
+        if self.hidden_by(i, now, wh).is_some() {
             return false;
         }
         // `-s todo` 는 **서 있는 칸**으로 고른다. 멤버가 집힌 에픽을 손으로 둔
@@ -1467,7 +1511,7 @@ mod tests {
         let plain = Filter::default();
         let why = |i: &Issue| {
             let all = [i.clone()];
-            plain.hidden_by(i, &Where::of(&all, &cfg()))
+            plain.hidden_by(i, NOW, &Where::of(&all, &cfg()))
         };
         let mut thought = issue("a-0001", "todo", &[]);
         thought.kind = Kind::Idea;
@@ -1491,6 +1535,98 @@ mod tests {
         for i in [&thought, &shelved, &closed_thought] {
             assert!(!hit(&plain, i), "{i:?}");
         }
+    }
+
+    /// done 칸에 그때 든 줄.
+    fn closed_at(id: &str, at: &str) -> Issue {
+        let mut i = issue(id, "done", &[]);
+        i.status_since = at.into();
+        i.done_at = Some(at.into());
+        i
+    }
+
+    /// **아카이브는 done 안의 한 겹 더고, 그것을 여는 한 낱말은 `--archived` 다**(moai-47mz, 2026-10-03 사용자
+    /// 결정). done 을 연 목록(`--all`·`-s done`)에서도 done 에 든 지 14일이 꼬박 찬 줄은 빠진다. 글로 찾거나
+    /// 때로 물으면 열리고, `-g` 는 done 은 그대로 숨긴다.
+    #[test]
+    fn archive_hides_aged_done_rows_until_archived_opens_them() {
+        let why = |f: &Filter, i: &Issue| {
+            let all = [i.clone()];
+            f.hidden_by(i, NOW, &Where::of(&all, &cfg()))
+        };
+        let build = |raw: Raw| Filter::build(raw).unwrap();
+        // NOW 는 09-11 이다 — 꼬박 14일 앞과 그보다 한 초 뒤.
+        let aged = closed_at("a-0001", "2026-08-28T00:00:00Z");
+        let fresh = closed_at("a-0002", "2026-08-28T00:00:01Z");
+
+        let plain = Filter::default();
+        assert_eq!(why(&plain, &aged), Some(Hide::Archived), "done 으로 세면 꼬리가 대는 --all 이 그 줄을 안 낸다");
+        assert_eq!(why(&plain, &fresh), Some(Hide::Done));
+        let all = build(Raw { all: true, ..Raw::default() });
+        assert_eq!((why(&all, &aged), why(&all, &fresh)), (Some(Hide::Archived), None), "--all 이 아카이브를 열었다");
+        let done_col = build(Raw { status: s(&["done"]), ..Raw::default() });
+        assert_eq!((why(&done_col, &aged), why(&done_col, &fresh)), (Some(Hide::Archived), None));
+        assert!(!hit(&all, &aged) && hit(&all, &fresh), "matches 가 hidden_by 와 갈렸다");
+
+        let archived = build(Raw { archived: true, ..Raw::default() });
+        assert_eq!((why(&archived, &aged), why(&archived, &fresh)), (None, None), "--archived 는 done 까지 연다");
+        let grep = build(Raw { grep: Some("제목".into()), ..Raw::default() });
+        assert_eq!(why(&grep, &aged), Some(Hide::Done), "-g 가 done 까지 열었거나 아카이브를 안 열었다");
+        let grep_all = build(Raw { grep: Some("제목".into()), all: true, ..Raw::default() });
+        assert_eq!(why(&grep_all, &aged), None, "-g --all 이 아카이브를 못 찾는다");
+        for timed in [
+            Raw { done: s(&["2026-08-01..2026-09-30"]), ..Raw::default() },
+            Raw { since: s(&["2026-08-01"]), ..Raw::default() },
+        ] {
+            assert_eq!(why(&build(timed), &aged), None, "때로 물은 목록이 아카이브를 숨겼다");
+        }
+
+        // 다시 연 줄은 `done_at` 이 남아도 done 이 아니다.
+        let mut reopened = aged.clone();
+        reopened.status = Status::new("todo");
+        assert_eq!(why(&plain, &reopened), None);
+        // 못 읽는 시각은 아카이브가 아니다 — 숨기면 손으로 고친 줄이 말없이 사라진다.
+        let mut unreadable = aged.clone();
+        unreadable.status_since = "언젠가".into();
+        assert_eq!(why(&all, &unreadable), None);
+        // 닫은 생각은 아카이브여도 한 낱말로 안 열린다 — `--type idea --archived` 둘이 든다.
+        let mut thought = aged.clone();
+        thought.kind = Kind::Idea;
+        assert_eq!(why(&archived, &thought), Some(Hide::Idea));
+        assert_eq!(why(&all, &thought), Some(Hide::Unopenable));
+        let ideas = build(Raw { kind: Some(Kind::Idea), all: true, ..Raw::default() });
+        assert_eq!(why(&ideas, &thought), Some(Hide::Archived), "닫힌 idea 도 같은 규칙이다");
+
+        // `archive_days = 0` 이면 아카이브가 없다.
+        let off = crate::config::Config::parse("prefix = \"argos\"\narchive_days = 0\n").unwrap();
+        let one = [aged.clone()];
+        assert_eq!(all.hidden_by(&aged, NOW, &Where::of(&one, &off)), None);
+    }
+
+    /// **묶음은 멤버가 마지막으로 done 에 든 때로 잰다**(moai-47mz, 사용자 결정) — 멤버 하나라도 최근에 끝났으면
+    /// 묶음은 안 숨는다. 묶음 제 줄에 손으로 친 `done` 과 그 시각은 안 본다.
+    #[test]
+    fn a_group_ages_by_its_last_member() {
+        let mut epic = issue("a-0010", "done", &[]);
+        epic.kind = Kind::Epic;
+        epic.status_since = "2026-01-01T00:00:00Z".into();
+        let member = |id: &str, at: &str| {
+            let mut i = closed_at(id, at);
+            i.epic = Some("a-0010".into());
+            i
+        };
+        let old = member("a-0011", "2026-08-01T00:00:00Z");
+        let late = member("a-0012", "2026-09-10T00:00:00Z");
+        let (both, c) = ([epic.clone(), old.clone(), late.clone()], cfg());
+        let wh = Where::of(&both, &c);
+        assert!(!wh.archived(&epic, NOW), "최근에 끝난 멤버가 있는데 묶음이 숨었다");
+        assert!(wh.archived(&old, NOW) && !wh.archived(&late, NOW));
+        let aged = [epic.clone(), old.clone(), member("a-0012", "2026-08-02T00:00:00Z")];
+        assert!(Where::of(&aged, &cfg()).archived(&epic, NOW), "멤버가 다 오래 끝난 묶음이 안 숨는다");
+        // 멤버가 남은 묶음은 제 줄을 손으로 done 에 뒀어도 done 이 아니다.
+        let mut open = late.clone();
+        open.status = Status::new("todo");
+        assert!(!Where::of(&[epic.clone(), old, open], &cfg()).archived(&epic, NOW));
     }
 
     /// 쉼표는 또는.

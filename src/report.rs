@@ -2056,6 +2056,25 @@ pub fn column<'x>(i: &'x Issue, states: &BTreeMap<GroupKey<'_>, &'x str>) -> &'x
     stands_on(i, |k| states.get(&k).copied()).unwrap_or(i.status.as_str())
 }
 
+/// 아카이브인가(moai-47mz) — **서 있는 칸이 done 이고, 그 칸에 든 지 `days` 날이 지났다.** `days` 가 0 이면
+/// 아카이브가 없다(`archive_days = 0`).
+///
+/// **저장하지 않는다** — 칸과 그 칸에 든 때와 지금 시각으로 재는 파생값이다. 새 필드도 칸도 명령도 없다
+/// (2026-10-03 사용자 결정). 지금 시각은 부르는 쪽이 건넨다(`MOAI_NOW` 로 시험한다).
+///
+/// - `column` 은 **서 있는 칸**([`column()`])이다 — 묶음이면 멤버에서 읽은 칸이라, 멤버가 남은 에픽을 손으로
+///   `done` 에 뒀다고 숨지 않는다. done 에서 되돌린 줄은 `done_at` 이 남아도 done 이 아니니 아니다
+/// - `since` 는 **그 칸에 든 때**다 — `show --done <폭>` 이 재는 시계와 같은 자(`query::Where::since`)라, 두
+///   물음이 한 줄을 다르게 재지 않는다(사용자 결정). `mv` 로 닫은 줄이면 `done_at` 과 같은 값이고, 그 필드 전에
+///   닫힌 옛 줄에도 있다. 묶음이면 멤버가 마지막으로 칸을 옮긴 때([`Stand::since`])라, 멤버 하나라도 최근에
+///   끝났으면 묶음도 안 숨는다 — 속이 빈 폴더가 안 선다. 닫힌 idea 와 묶음도 같은 규칙이다(사용자 결정)
+/// - **못 읽는 시각은 아카이브가 아니다** — 숨기면 손으로 고친 줄 하나가 말없이 사라진다. 보이는 쪽이 싸다
+///
+/// "지났다" 는 **온 날로 센다**([`crate::model::days_since`]) — `days` 날이 꼬박 찬 순간부터 숨는다.
+pub fn archived(column: &str, since: &str, now: &str, days: i64) -> bool {
+    days > 0 && column == crate::config::DONE && days_since(since, now).is_some_and(|d| d >= days)
+}
+
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
 /// 아니거나 못 받았으면 없다.
 ///

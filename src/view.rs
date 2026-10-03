@@ -298,6 +298,8 @@ pub struct Hidden {
     pub done: usize,
     pub ideas: usize,
     pub deferred: usize,
+    /// done 에 든 지 오래된 줄(moai-47mz) — `--all` 이 아니라 `--archived` 가 연다.
+    pub archived: usize,
 }
 
 impl Hidden {
@@ -305,12 +307,13 @@ impl Hidden {
     ///
     /// **`done`·`idea` 는 번역하지 않는다** — 칸 이름과 종류는 설정과 자료에서 오는 낱말이고,
     /// 바로 뒤의 플래그(`--all`·`--type idea`)가 그 글자를 그대로 받는다. 옮기면 화면이 대는
-    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸만 낱말이라 말묶음에서 온다(`status.put_off`).
+    /// 낱말과 쳐야 할 낱말이 갈린다. 미룸과 아카이브는 낱말이라 말묶음에서 온다(`status.put_off`·`list.archive`).
     fn says(&self, lang: Lang) -> Vec<String> {
         [
             (self.done, "done", "--all"),
             (self.deferred, say(lang, "status.put_off"), "--deferred"),
             (self.ideas, "idea", "--type idea"),
+            (self.archived, say(lang, "list.archive"), "--archived"),
         ]
         .into_iter()
         .filter(|(n, _, _)| *n > 0)
@@ -326,6 +329,7 @@ impl Hidden {
             Hide::Done => self.done += 1,
             Hide::Idea => self.ideas += 1,
             Hide::Deferred => self.deferred += 1,
+            Hide::Archived => self.archived += 1,
             Hide::Unopenable => {}
         }
     }
