@@ -1989,7 +1989,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     // 커서가 선 카드의 칸을 적어 둔다 — 누르기·휠로 카드에 섰어도 머리줄의 `j` 가 그 칸으로 돌아간다(`App::board_column`).
     app.note_board_column(&laid);
     // 창은 **지난 프레임이 세운 자리에 머문다**([`super::board::window`]) — `app.drawn` 은 아직 지난 프레임의 것이다
-    // (`screen` 이 이 그림 뒤에 새로 적는다). 마우스가 그 자리로 칸을 맞히므로, 머물러야 휠 밑의 칸이 안 바뀐다.
+    // (`screen` 이 이 그림 뒤에 새로 적는다).
     let was = app.drawn.columns.first().map_or(0, |&(_, c)| c);
     let win = super::board::window(laid.columns.len(), inner.width as usize, here.and_then(|p| p.column), was);
     let widths = super::board::widths(inner.width as usize, win.count);
@@ -2015,10 +2015,10 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     }
 
     app.list.fit(canvas.height as usize, laid.plan.height);
-    if let Some(p) = here {
-        // 레인의 첫 카드면 그 레인의 머리줄까지 보인다 — 머리줄 없이 선 카드는 어느 마일스톤인지 모른다.
-        let lead = usize::from(laid.plan.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
-        app.list.reveal_span(p.top - lead, p.height + lead);
+    // 레인의 첫 카드면 그 레인의 머리줄까지 보인다([`super::board::Plan::span`]). 화면을 굴린 뒤 커서가 보이는지도 이
+    // 자로 잰다([`super::board::pull`]) — 보인다고 남긴 커서를 여기서 다시 드러내느라 굴린 화면을 되돌리지 않는다.
+    if let Some((top, h)) = laid.plan.span(app.cursor) {
+        app.list.reveal_span(top, h);
     }
     let offset = app.list.offset();
     let seen = offset..offset + canvas.height as usize;

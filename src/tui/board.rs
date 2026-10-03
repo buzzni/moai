@@ -9,7 +9,7 @@
 //! `report`·`query` 는 안 바뀐다 — 칸은 데이터의 칸이 아니라 화면의 칸이다.
 
 use super::keys::Side;
-use super::scroll::{HALF, Move, PAGE};
+use super::scroll::Move;
 
 /// 카드 하나가 가져가는 가장 좁은 폭 — 테두리 안쪽에서 칸을 고르게 나눌 때 이보다 좁아지면 칸을 덜 세운다.
 /// 머리(`id · 글리프 · pN`)가 `moai-9nfw.isu ⠼▸ p1` 로 스무 칸 남짓이라, 이보다 좁으면 id 가 잘려 카드가
@@ -171,12 +171,21 @@ impl Plan {
         run
     }
 
-    /// 그 칸에서 `top` 에 가장 가까운 카드 — 칸을 옮길 때 높이를 지키는 자다. 같으면 위의 것. **`group` 을 주면
-    /// 그 프로젝트 안에서만 찾는다** — `h`·`l` 의 울타리다([`step`]). 휠은 없으면 울타리 없이 다시 찾는다([`roll`]).
-    fn nearest(&self, column: usize, top: usize, group: Option<usize>) -> Option<usize> {
+    /// 그 칸에서 `top` 에 가장 가까운 카드 — 칸을 옮길 때 높이를 지키는 자다. 같으면 위의 것. **`group` 프로젝트
+    /// 안에서만 찾는다** — `h`·`l` 의 울타리다([`step`]).
+    fn nearest(&self, column: usize, top: usize, group: usize) -> Option<usize> {
         (0..self.cards.len())
-            .filter(|&n| self.cards[n].column == Some(column) && group.is_none_or(|g| self.cards[n].group == g))
+            .filter(|&n| self.cards[n].column == Some(column) && self.cards[n].group == group)
             .min_by_key(|&n| (self.cards[n].top.abs_diff(top), self.cards[n].top))
+    }
+
+    /// 그 줄이 보여야 할 자리 — 윗줄과 줄 수. **레인의 첫 카드면 그 레인의 머리줄까지다** — 머리줄 없이 선 카드는
+    /// 어느 마일스톤인지 모른다. 그림이 커서를 드러내는 자(`draw::board`)와 화면을 굴린 뒤 커서가 보이는지 재는
+    /// 자([`pull`])가 이 하나다: 둘이 갈리면 굴린 화면을 다음 그림이 커서 쪽으로 되돌린다.
+    pub fn span(&self, n: usize) -> Option<(usize, usize)> {
+        let p = self.cards.get(n)?;
+        let lead = usize::from(self.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
+        Some((p.top - lead, p.height + lead))
     }
 
     /// 머리줄에서 한 걸음 — 아래(`down`)면 그 프로젝트의 카드로, 위면 앞 프로젝트의 카드로 간다. **`hint` 의 칸에
@@ -206,34 +215,17 @@ impl Plan {
             .unwrap_or(cursor)
     }
 
-    /// 커서의 칸 안에서 `by` 장 간다 — 끝에서 멈춘다. 키(`j`·`k`·반 쪽·한 쪽)와 휠이 같은 걸음을 탄다:
-    /// 둘이 저마다 적으면 끝에서 멈추는 자가 갈린다. 머리줄에 선 커서는 `hint` 의 칸을 걷는다([`step`]).
-    fn along(&self, cursor: usize, by: isize, hint: Option<usize>) -> usize {
+    /// 한 걸음 — `j`·`k` 의 걸음이다. 끝에서 멈춘다. 카드에서는 그 칸의 길로 다음 줄이고, 머리줄에서는 그 프로젝트의
+    /// 카드로 간다([`Plan::off_banner`]).
+    fn next(&self, cursor: usize, down: bool, hint: Option<usize>) -> usize {
         let Some(here) = self.cards.get(cursor) else { return cursor };
-        let run = self.run(here.column.or(hint));
-        let at = run.iter().position(|&n| n == cursor).unwrap_or(0);
-        run.get(at.saturating_add_signed(by).min(run.len().saturating_sub(1))).copied().unwrap_or(cursor)
-    }
-
-    /// `by` 걸음 간다 — 끝에서 멈춘다. **한 걸음은 `j`·`k` 의 걸음이다**: 카드에서는 그 칸의 길로([`Plan::along`]),
-    /// 머리줄에서는 그 프로젝트의 카드로([`Plan::off_banner`]). 반 쪽·한 쪽도 그 걸음을 그만큼 되풀이한다(리뷰) — 칸
-    /// 길로 한 번에 건너던 때는 머리줄에서 누른 반 쪽이 그 칸에 카드가 없는 프로젝트를 통째로 건너 다음 머리줄에
-    /// 섰다. 지나온 카드의 칸이 다음 머리줄의 `hint` 다 — 키로 걸을 때 `App::board_column` 이 서는 것과 같다.
-    fn walk(&self, cursor: usize, by: isize, hint: Option<usize>) -> usize {
-        let (mut at, mut hint) = (cursor, hint);
-        for _ in 0..by.unsigned_abs() {
-            let Some(here) = self.cards.get(at) else { break };
-            hint = here.column.or(hint);
-            let next = match here.column {
-                Some(_) => self.along(at, by.signum(), hint),
-                None => self.off_banner(at, by > 0, hint),
-            };
-            if next == at {
-                break;
-            }
-            at = next;
+        if here.column.is_none() {
+            return self.off_banner(cursor, down, hint);
         }
-        at
+        let run = self.run(here.column);
+        let at = run.iter().position(|&n| n == cursor).unwrap_or(0);
+        let to = if down { (at + 1).min(run.len() - 1) } else { at.saturating_sub(1) };
+        run[to]
     }
 }
 
@@ -246,28 +238,24 @@ pub enum Go {
 
 /// 커서를 옮긴다. 옮길 자리를 낸다 — 못 가면 제자리다.
 ///
-/// - `j`·`k`(그리고 반 쪽·한 쪽)는 **그 칸 안에서** 간다. 레인을 건너 이어진다 — 칸은 위에서 아래로 한 줄이다.
-///   반 쪽·한 쪽은 카드 수로 센다(`scroll::HALF`·`PAGE`) — 목록과 같은 걸음이라 `Tab` 하나에 키의 뜻이 안 바뀐다.
-///   `j`·`k` 의 걸음을 그만큼 되풀이한다([`Plan::walk`]) — 머리줄을 지나도 `j` 를 거듭 누른 것과 같은 자리다
+/// - `j`·`k` 는 **그 칸 안에서** 간다. 레인을 건너 이어진다 — 칸은 위에서 아래로 한 줄이다
+/// - 반 쪽·한 쪽(`Ctrl-d`·`Ctrl-u`·`Ctrl-f`·`Ctrl-b`)은 커서가 아니라 **화면을 굴린다**(moai-acfk, 사용자 결정
+///   2026-10-02) — 부르는 쪽이 굴리고 [`pull`] 로 커서를 맞춘다. 여기 오면 제자리다
 /// - `gg`·`G` 는 그 칸의 맨 위·맨 아래 카드다
 /// - `h`·`l` 은 **옆 칸**으로 가고 지금 높이에 가장 가까운 카드에 선다. 빈 칸은 건너뛴다 — 설 카드가 없다.
 ///   같은 프로젝트 안에서만 찾는다
 /// - 칸을 가로지르는 머리줄(한눈 보기의 프로젝트)에는 칸이 없어 **`hint` 의 칸을 걷는다** — 부르는 쪽이 커서가 마지막으로
 ///   선 카드의 칸을 들고 있다. `k` 로 머리줄에 올라온 칸으로 `j` 가 돌아가고, 그 칸이 그 프로젝트에서 비었으면 가장
-///   가까운 카드다([`Plan::off_banner`]). 아직 아무 카드에도 안 섰으면 `hint` 가 없다 — `j`·`k`·반 쪽·한 쪽은 가장
-///   가까운 카드로, 맨 위아래는 머리줄만의 길로 간다. 그 자리의 `h`·`l` 은 프로젝트를 접고 펴는 키라 여기 오지
-///   않는다 — 와도 제자리다
+///   가까운 카드다([`Plan::off_banner`]). 아직 아무 카드에도 안 섰으면 `hint` 가 없다 — `j`·`k` 는 가장 가까운 카드로,
+///   맨 위아래는 머리줄만의 길로 간다. 그 자리의 `h`·`l` 은 프로젝트를 접고 펴는 키라 여기 오지 않는다 — 와도
+///   제자리다
 pub fn step(plan: &Plan, cursor: usize, go: Go, hint: Option<usize>) -> usize {
     let Some(here) = plan.cards.get(cursor) else { return cursor };
-    let walk = |by: isize| plan.walk(cursor, by, hint);
     let column = here.column.or(hint);
     match go {
-        Go::Move(Move::LineDown) | Go::Side(Side::Down) => walk(1),
-        Go::Move(Move::LineUp) | Go::Side(Side::Up) => walk(-1),
-        Go::Move(Move::HalfDown) => walk(HALF as isize),
-        Go::Move(Move::HalfUp) => walk(-(HALF as isize)),
-        Go::Move(Move::PageDown) => walk(PAGE as isize),
-        Go::Move(Move::PageUp) => walk(-(PAGE as isize)),
+        Go::Move(Move::LineDown) | Go::Side(Side::Down) => plan.next(cursor, true, hint),
+        Go::Move(Move::LineUp) | Go::Side(Side::Up) => plan.next(cursor, false, hint),
+        Go::Move(Move::HalfDown | Move::HalfUp | Move::PageDown | Move::PageUp) => cursor,
         Go::Move(Move::Top) => plan.run(column).first().copied().unwrap_or(cursor),
         Go::Move(Move::Bottom) => plan.run(column).last().copied().unwrap_or(cursor),
         Go::Side(side) => {
@@ -276,31 +264,31 @@ pub fn step(plan: &Plan, cursor: usize, go: Go, hint: Option<usize>) -> usize {
                 Side::Right => Box::new(column + 1..plan.columns),
                 _ => Box::new((0..column).rev()),
             };
-            ahead.filter_map(|c| plan.nearest(c, here.top, Some(here.group))).next().unwrap_or(cursor)
+            ahead.filter_map(|c| plan.nearest(c, here.top, here.group)).next().unwrap_or(cursor)
         }
     }
 }
 
-/// 휠 한 칸(moai-irrj) — **마우스가 선 칸에서** 커서를 옮긴다. 커서가 다른 칸에 있으면 먼저 그 칸의 가장 가까운
-/// 카드로 건너온다: 굴린 칸과 커서가 선 칸이 다르면 굴린 손이 무엇을 움직였는지 안 보인다. 그 칸이 비었으면
-/// 제자리다.
+/// 화면을 굴린 뒤 커서가 설 자리(moai-acfk, 사용자 결정 2026-10-02). 휠과 반 쪽·한 쪽은 **화면만 굴린다** — 굴리는
+/// 것은 보드 통째로 하나뿐인 굴린 자리고, `shows(윗줄, 줄 수)` 가 굴린 뒤 그 자리가 보이는지 답한다.
 ///
-/// **머리줄에 선 커서는 그 칸의 길을 굴린 쪽으로 걷는다** — 머리줄은 모든 칸의 길에 든다([`Plan::run`]). 그 프로젝트의
-/// 카드로 늘 건너오던 때는(리뷰) 위로 굴린 휠이 머리줄과 그 밑 카드 사이를 오가 앞 프로젝트로 못 올라갔고, 그 칸에
-/// 카드가 없는 프로젝트의 머리줄에서는 아래로도 못 갔다.
+/// - 커서의 줄이 보이면 제자리다 — 커서도 상세도 그대로다
+/// - 밀려났으면 **그 칸의 길에서 보이는 가장 가까운 줄**로 끌려온다. 머리줄도 그 길에 들고([`Plan::run`]), 머리줄에 선
+///   커서는 `hint` 의 칸을 본다([`step`] 과 같다)
+/// - 그 길에 보이는 줄이 없으면 `None` 이다 — 부르는 쪽이 커서가 화면 끝에 닿는 데서 굴리기를 멈춘다(사용자 결정).
+///   딴 칸의 카드로 건너가면 굴린 손이 고른 칸을 바꾼다
 ///
-/// **건너올 때는 같은 프로젝트의 카드가 먼저고, 없으면 그 칸의 어느 카드든 가장 가까운 것이다**(리뷰) — 프로젝트의
-/// 울타리(`group`)는 `h`·`l` 의 것이다. 휠까지 그 울타리를 타던 때는 다른 프로젝트의 카드만 선 칸을 굴려도 커서가
-/// 꼼짝 않았다.
-pub fn roll(plan: &Plan, cursor: usize, column: usize, by: isize) -> usize {
-    let Some(here) = plan.cards.get(cursor) else { return cursor };
-    if here.column.is_some_and(|c| c != column) {
-        return plan
-            .nearest(column, here.top, Some(here.group))
-            .or_else(|| plan.nearest(column, here.top, None))
-            .unwrap_or(cursor);
+/// 보이는가는 [`Plan::span`] 으로 잰다 — 그림이 커서를 드러내는 자와 같아야 굴린 화면이 다음 그림에 안 되돌아간다.
+pub fn pull(plan: &Plan, cursor: usize, hint: Option<usize>, shows: impl Fn(usize, usize) -> bool) -> Option<usize> {
+    let seen = |n: usize| plan.span(n).is_some_and(|(top, h)| shows(top, h));
+    let Some(here) = plan.cards.get(cursor) else { return Some(cursor) };
+    if seen(cursor) {
+        return Some(cursor);
     }
-    plan.along(cursor, by, Some(column))
+    plan.run(here.column.or(hint))
+        .into_iter()
+        .filter(|&n| seen(n))
+        .min_by_key(|&n| (plan.cards[n].top.abs_diff(here.top), plan.cards[n].top))
 }
 
 /// 화면에 서는 칸의 창 — `first` 부터 `count` 개.
@@ -322,8 +310,7 @@ impl Window {
 ///
 /// **창은 지난 자리(`was`, 지난 프레임의 첫 칸)에 머물고, 커서가 창 밖으로 나갈 때만 가장 적게 민다** —
 /// 목록의 [`super::scroll::Scroll::reveal`] 과 같은 자다. 커서의 칸을 늘 오른쪽 끝에 붙이면 보이는 왼쪽 칸으로
-/// `h` 를 눌러도 창이 한 칸 밀리고, 휠은 마우스 밑의 칸이 걸음마다 바뀌어 굴린 손 밑의 칸 대신 왼쪽 끝까지
-/// 칸을 건너간다.
+/// `h` 를 눌러도 창이 한 칸 밀린다.
 pub fn window(columns: usize, width: usize, holding: Option<usize>, was: usize) -> Window {
     let count = (width / CARD_MIN).clamp(1, columns.max(1)).min(columns);
     let mut first = was.min(columns - count);
@@ -433,7 +420,9 @@ mod tests {
         assert_eq!(down(1), 1, "혼자 선 칸에서는 제자리다");
         assert_eq!(step(&p, 0, Go::Move(Move::Bottom)), 3);
         assert_eq!(step(&p, 3, Go::Move(Move::Top)), 0);
-        assert_eq!(step(&p, 0, Go::Move(Move::PageDown)), 3, "한 쪽이 끝을 넘지 않는다");
+        // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 커서는 [`pull`] 이 맞춘다.
+        assert_eq!(step(&p, 0, Go::Move(Move::PageDown)), 0, "한 쪽이 커서를 옮겼다");
+        assert_eq!(step(&p, 3, Go::Move(Move::HalfUp)), 3, "반 쪽이 커서를 옮겼다");
     }
 
     /// `h`·`l` 은 옆 칸의 **가장 가까운 높이**로 가고 빈 칸은 건너뛴다.
@@ -478,27 +467,67 @@ mod tests {
         assert_eq!(step(&p, 5, Go::Side(Side::Right)), 5, "다른 프로젝트의 카드로 건너갔다");
         assert_eq!(step(&p, 3, Go::Side(Side::Left)), 1);
         assert_eq!(step(&p, 0, Go::Side(Side::Right)), 0, "머리줄에서 옆 칸으로 갔다");
-        // 휠은 머리줄의 커서를 그 프로젝트의 카드로 건너오게 한다.
-        assert_eq!(roll(&p, 4, 0, 1), 5);
-        assert_eq!(roll(&p, 4, 1, 1), 4, "그 프로젝트에 없는 칸이면 제자리다");
     }
 
     #[test]
     fn an_empty_board_keeps_the_cursor_where_it_is() {
         let p = Plan::of(&[], 3, &[]);
         assert_eq!(step(&p, 0, Go::Move(Move::LineDown)), 0);
-        assert_eq!(roll(&p, 0, 1, 3), 0);
+        assert_eq!(pull(&p, 0, None, |_, _| false), Some(0));
         assert_eq!(p.height, 0);
     }
 
-    /// 휠은 마우스가 선 칸을 굴린다 — 커서가 딴 칸이면 먼저 그 칸으로 건너온다.
+    /// 굴린 화면 — `offset` 부터 `height` 줄이 보인다. 자는 [`super::super::scroll::Scroll::shows`] 다.
+    fn screen(offset: usize, height: usize, len: usize) -> super::super::scroll::Scroll {
+        let mut s = super::super::scroll::Scroll::default();
+        s.fit(height, len);
+        s.by(offset as isize);
+        s
+    }
+
+    /// **화면만 굴린다**(moai-acfk, 사용자 결정) — 커서의 카드가 보이는 동안은 제자리고, 밀려나면 그 칸에서 보이는 가장
+    /// 가까운 카드로 끌려온다. 그 칸에 보이는 카드가 없으면 `None` 이다 — 굴리기가 거기서 멈춘다.
     #[test]
-    fn the_wheel_moves_within_the_column_under_the_mouse() {
-        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 1)], 2, &[]);
-        assert_eq!(roll(&p, 0, 0, 3), 2, "끝에서 멈춘다");
-        assert_eq!(roll(&p, 2, 0, -3), 0);
-        assert_eq!(roll(&p, 2, 1, 3), 3, "딴 칸이면 그 칸으로 건너온다");
-        assert_eq!(roll(&p, 3, 0, 1), 0, "가장 가까운 높이로 건너온다");
+    fn rolling_keeps_a_visible_cursor_and_pulls_one_pushed_out_into_its_column() {
+        // 칸 0 에 다섯(윗줄 0·2·4·6·8), 칸 1 에 하나(윗줄 0).
+        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 0), slot(0, 1)], 2, &[]);
+        let at = |cursor, offset| {
+            let s = screen(offset, 4, p.height);
+            pull(&p, cursor, None, |top, h| s.shows(top, h))
+        };
+        assert_eq!(at(1, 1), Some(1), "보이는 커서가 움직였다");
+        assert_eq!(at(0, 3), Some(2), "아래로 굴려 밀려난 커서가 그 칸의 첫 보이는 카드로 안 왔다");
+        assert_eq!(at(4, 2), Some(2), "위로 굴려 밀려난 커서가 그 칸의 끝 보이는 카드로 안 왔다");
+        assert_eq!(at(0, 1), Some(1), "반쯤 가린 카드를 보인다고 셌다 — 다음 그림이 화면을 되돌린다");
+        assert_eq!(at(5, 3), None, "그 칸에 보이는 카드가 없는데 딴 칸으로 건너갔다");
+    }
+
+    /// **레인 머리줄까지 보여야 그 레인의 첫 카드가 보인다**([`Plan::span`]) — 그림이 커서를 드러내는 자와 같다. 머리줄이
+    /// 가린 첫 카드를 보인다고 두면 다음 그림이 머리줄을 드러내느라 굴린 화면을 한 줄 되돌린다.
+    #[test]
+    fn a_lane_first_card_counts_as_seen_only_with_its_lane_header() {
+        // 레인 0: 머리줄(0) 밑에 칸 0 의 카드 둘(1·3). 레인 1: 머리줄(5) 밑에 칸 0 의 카드(6).
+        let p = Plan::of(&[slot(0, 0), slot(0, 0), slot(1, 0)], 1, &[true, true]);
+        assert_eq!((p.span(0), p.span(1), p.span(2)), (Some((0, 3)), Some((3, 2)), Some((5, 3))));
+        let s = screen(1, 4, p.height);
+        assert_eq!(pull(&p, 0, None, |top, h| s.shows(top, h)), Some(1), "머리줄이 가린 카드를 보인다고 셌다");
+    }
+
+    /// **머리줄도 칸의 길에 든다**(moai-oagj.vcj) — 한눈 보기에서 밀려난 커서는 보이는 프로젝트 머리줄로도 끌려온다.
+    /// 머리줄에 선 커서는 들고 있는 칸(`hint`)을 본다.
+    #[test]
+    fn rolling_pulls_onto_a_project_header_on_the_column_path() {
+        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
+        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
+        // 0: A 머리줄(0), 1: A 의 칸 0(1), 2: A 의 칸 1(1), 3: B 머리줄(3), 4: B 의 칸 1(4).
+        let slots = [banner(0, 0), card(1, 0, 0), card(1, 1, 0), banner(2, 1), card(3, 1, 1)];
+        let p = Plan::of(&slots, 2, &[]);
+        let s = screen(3, 3, p.height);
+        let shows = |top, h| s.shows(top, h);
+        assert_eq!(pull(&p, 1, None, shows), Some(3), "칸 0 의 커서가 그 길의 머리줄로 안 왔다");
+        assert_eq!(pull(&p, 0, Some(1), shows), Some(3), "머리줄의 커서가 가장 가까운 보이는 줄로 안 왔다");
+        let s = screen(1, 2, p.height);
+        assert_eq!(pull(&p, 0, Some(1), |top, h| s.shows(top, h)), Some(2), "머리줄이 들고 있는 칸을 안 봤다");
     }
 
     /// 칸마다 [`CARD_MIN`] 을 못 받으면 덜 세우되, 커서가 선 칸은 늘 선다.
@@ -516,8 +545,7 @@ mod tests {
     }
 
     /// **창은 지난 자리에 머문다** — 보이는 칸으로 옮기면 창이 안 밀리고, 창 밖으로 나갈 때만 가장 적게 민다.
-    /// 커서의 칸을 늘 오른쪽 끝에 붙이던 때는 왼쪽 칸 위에서 굴린 휠이 걸음마다 마우스 밑의 칸을 바꿔 왼쪽 끝까지
-    /// 건너갔다.
+    /// 커서의 칸을 늘 오른쪽 끝에 붙이던 때는 보이는 왼쪽 칸으로 `h` 를 눌러도 창이 한 칸 밀렸다.
     #[test]
     fn the_window_stays_put_while_the_cursor_column_is_in_it() {
         // 칸 3·4 가 서 있고 커서가 3 으로 왔다 — 3 은 이미 보인다.
@@ -528,32 +556,6 @@ mod tests {
         assert_eq!(window(6, 40, Some(5), 2), Window { first: 4, count: 2 });
         // 칸이 줄어 지난 자리가 넘치면 끝에 맞춘다.
         assert_eq!(window(3, 40, Some(2), 5), Window { first: 1, count: 2 });
-    }
-
-    /// **휠은 머리줄을 굴린 쪽으로 지나간다**(리뷰) — 머리줄은 모든 칸의 길에 든다([`Plan::run`]). 그 프로젝트의 카드로 늘
-    /// 건너오던 때는 위로 굴린 휠이 머리줄과 그 밑 카드 사이를 오가 앞 프로젝트로 못 올라갔고, 그 칸에 카드가 없는
-    /// 프로젝트의 머리줄에서는 아래로도 못 갔다.
-    #[test]
-    fn the_wheel_passes_a_project_header_in_the_way_it_rolls() {
-        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
-        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
-        // 0: A 머리줄, 1: A 의 칸 0, 2: B 머리줄, 3: B 의 칸 0, 4: C 머리줄, 5: C 의 칸 1 뿐, 6: D 머리줄, 7: D 의 칸 0.
-        let slots = [
-            banner(0, 0),
-            card(1, 0, 0),
-            banner(2, 1),
-            card(3, 0, 1),
-            banner(4, 2),
-            card(5, 1, 2),
-            banner(6, 3),
-            card(7, 0, 3),
-        ];
-        let p = Plan::of(&slots, 2, &[]);
-        assert_eq!(roll(&p, 3, 0, -1), 2);
-        assert_eq!(roll(&p, 2, 0, -1), 1, "위로 굴린 휠이 머리줄에서 그 밑 카드로 되돌아갔다");
-        assert_eq!(roll(&p, 3, 0, 1), 4);
-        assert_eq!(roll(&p, 4, 0, 1), 6, "그 칸에 카드가 없는 프로젝트의 머리줄에서 휠이 멈췄다");
-        assert_eq!(roll(&p, 6, 0, 1), 7);
     }
 
     /// **아직 아무 카드에도 안 서 본 머리줄의 `j` 는 가장 가까운 카드다**(리뷰) — 처음값으로 첫 칸(idea)을 들던 때는 맨
@@ -569,35 +571,5 @@ mod tests {
         let p = Plan::of(&slots, 3, &[false, true, true]);
         assert_eq!(super::step(&p, 0, Go::Move(Move::LineDown), None), 1, "가장 가까운 카드로 안 갔다");
         assert_eq!(super::step(&p, 0, Go::Move(Move::LineDown), Some(0)), 2, "들고 있던 칸으로 안 갔다");
-    }
-
-    /// **휠은 그 프로젝트에 없는 칸이어도 그 칸의 카드로 건너온다**(리뷰) — 프로젝트의 울타리는 `h`·`l` 의 것이다. 휠까지
-    /// 그 울타리를 타던 때는 다른 프로젝트의 카드만 선 칸을 굴려도 커서가 꼼짝 않았다.
-    #[test]
-    fn the_wheel_crosses_into_a_column_only_another_project_has() {
-        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
-        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
-        // 0: A 머리줄, 1: A 의 칸 0, 2: B 머리줄, 3: B 의 칸 1.
-        let slots = [banner(0, 0), card(1, 0, 0), banner(2, 1), card(3, 1, 1)];
-        let p = Plan::of(&slots, 2, &[]);
-        assert_eq!(roll(&p, 1, 1, 1), 3, "다른 프로젝트의 카드만 선 칸을 굴렸는데 커서가 꼼짝 않았다");
-        assert_eq!(step(&p, 1, Go::Side(Side::Right)), 1, "l 이 다른 프로젝트의 카드로 건너갔다");
-    }
-
-    /// **머리줄에서 누른 반 쪽·한 쪽은 `j` 를 그만큼 누른 것과 같다**(리뷰) — 그 칸의 길로 한 번에 건너던 때는 그 칸에
-    /// 카드가 없는(아직 아무 칸도 안 든 머리줄이면 어느 프로젝트든) 프로젝트를 통째로 건너 다음 머리줄에 섰다.
-    #[test]
-    fn half_a_page_from_a_header_walks_into_its_project() {
-        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
-        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
-        // 0: A 머리줄, 1~6: A 의 칸 1, 7: B 머리줄, 8: B 의 칸 1.
-        let mut slots = vec![banner(0, 0)];
-        slots.extend(std::iter::repeat_n(card(1, 1, 0), 6));
-        slots.extend([banner(2, 1), card(3, 1, 1)]);
-        let p = Plan::of(&slots, 2, &[]);
-        let go = |n, m| super::step(&p, n, Go::Move(m), None);
-        assert_eq!(go(0, Move::HalfDown), 5, "반 쪽이 그 프로젝트를 건넜다");
-        assert_eq!(go(0, Move::PageDown), 8, "한 쪽이 머리줄을 지나 다음 프로젝트로 안 갔다");
-        assert_eq!(go(7, Move::HalfUp), 2, "위로 반 쪽이 앞 프로젝트로 안 들어갔다");
     }
 }
