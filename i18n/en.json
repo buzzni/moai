@@ -385,6 +385,8 @@
   "tui.jot.no_title": "not kept — the title is empty",
   "tui.jot.kept": "kept",
   "tui.veiled_row": "{id} is hidden by the view · {show} shows all",
+  "tui.veiled_archived": "{id} is in the archive · {old} shows the archive",
+  "tui.veiled_archived_too": "{id} is hidden by the view and in the archive · {show} shows all, {old} the archive",
   "tui.paste.no_field": "no field to paste into — {open} opens one first",
   "tui.prompt.filter": "filter",
   "tui.prompt.hang": "apply",

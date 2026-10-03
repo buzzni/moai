@@ -65,18 +65,22 @@ does not tag — see `CONTRIBUTING.md`.
   with done shown and the path line counts it (`[archive 312 hidden]`);
   `SPC v o` shows it and is kept under `[tui]` as `show_archived`, and `/`
   search finds it anyway. `moai show --archived` brings it back, done and
-  deferred with it, and `-g` and the time filters find it too. `moai status`
-  lists only the milestones and epics outside the archive and counts the rest
-  in one line, `archived` in `--json`. `moai stats` counts it as before.
+  deferred with it; the time filters find it too, and so does `-g` once done
+  is let in with `--all`. `moai status` lists only the milestones and epics
+  outside the archive and counts the rest in one line, `archived` in `--json`.
+  `moai stats` counts it as before.
 
 ### Changed
 
 - **`moai show --all` and `-s done` leave the archive out.** They used to give
   every closed row; now done rows past `archive_days` are left out and the tail
-  says how many, with `--archived` to bring them in. A script that pulls a
-  complete copy with `--all --json` should use `--archived --json`. The
+  says how many, with `--archived` to bring them in. `moai idea show --all`
+  leaves closed ideas past `archive_days` out the same way. A script that pulls
+  a complete copy with `--all --json` should use `--archived --json`. The
   `milestones` and `epics` of `moai status --json` leave archived groups out
-  the same way, counted in `archived`.
+  the same way, counted in `archived`, and so do the lists on the `moai status`
+  board. In the explorer, showing done (`SPC v <n>`) or everything (`SPC v a`)
+  no longer brings back done rows past `archive_days`; `SPC v o` does.
 
 - **The version line in the `moai tui` header names the latest release.** It
   reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it

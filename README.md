@@ -305,8 +305,9 @@ journal, so look at what the line held and then delete it by hand. A whole line
 that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
-`moai show --archived --json`, plus `moai idea show --all --json` since neither
-takes in ideas. `--all` is not enough on its own: it leaves the archive out. An
+`moai show --archived --json`, plus `moai idea show --archived --json` since
+`moai show` leaves ideas out. `--all` is not enough for either: it leaves the
+archive out, and a closed idea goes to the archive like any other done row. An
 id missing from the new pull was removed.
 
 ### Counting

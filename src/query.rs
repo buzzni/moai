@@ -671,6 +671,14 @@ impl Filter {
         }
     }
 
+    /// 기본 목록의 숨김을 다 연 거름망 — done·미룸·생각·아카이브(리뷰 moai-47mz.5il). **좁히는 말은 그대로 든다**
+    /// (`-s`·`--deferred`·`--type`…). 숨긴 수를 세는 목록(`cmd::show`)과 숨김 없이 세는 통계
+    /// (`report::stats::select`)가 이 하나로 연다 — 저마다 적던 때는 숨김 축이 하나 늘 때마다 두 자리를 다 찾아
+    /// 고쳐야 했고, 하나를 빠뜨려도 `..` 가 컴파일을 통과시켰다.
+    pub fn unhidden(&self) -> Filter {
+        Filter { all: true, ideas: true, archived: true, ..self.clone() }
+    }
+
     pub fn matches(&self, i: &Issue, now: &str, wh: &Where) -> bool {
         // `--deferred` 는 **좁히는 말**이기도 하다 — 미룬 것만 본다. 숨김이
         // 아니라 고르기라 `hidden_by` 에 넣지 않는다.

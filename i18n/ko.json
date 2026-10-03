@@ -385,6 +385,8 @@
   "tui.jot.no_title": "담지 않았다 — 제목이 비었다",
   "tui.jot.kept": "담김",
   "tui.veiled_row": "{id} 는 보기에 가려졌다 · {show} 로 모두 보인다",
+  "tui.veiled_archived": "{id} 는 아카이브에 있다 · {old} 로 아카이브를 보인다",
+  "tui.veiled_archived_too": "{id} 는 보기에 가렸고 아카이브에도 있다 · {show} 로 모두, {old} 로 아카이브까지 보인다",
   "tui.paste.no_field": "붙여 넣을 칸이 없다 — {open} 으로 칸을 열고 붙인다",
   "tui.prompt.filter": "거름망",
   "tui.prompt.hang": "걸기",

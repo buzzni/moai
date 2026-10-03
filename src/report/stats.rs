@@ -283,7 +283,7 @@ pub fn counted_kind(asked: Option<Kind>) -> Kind {
 /// 그대로 듣는다 — `--deferred` 는 미룬 것만, `-s` 는 그 칸만 고른다. **아카이브도 센다**(moai-47mz) — 오래전에
 /// 닫은 줄을 빼면 리드 타임과 닫은 수가 아카이브 날수에 따라 움직인다. 아카이브는 보기의 일이지 셈의 일이 아니다.
 pub fn select<'a>(all: &'a [Issue], filter: &Filter, wh: &Where, now: &str) -> Vec<&'a Issue> {
-    let open = Filter { all: true, ideas: true, archived: true, ..filter.clone() };
+    let open = filter.unhidden();
     all.iter().filter(|i| open.matches(i, now, wh)).collect()
 }
 

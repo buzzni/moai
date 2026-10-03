@@ -13123,12 +13123,9 @@ fn the_archive_hides_from_all_and_archived_opens_it() {
     let s = init("archive");
     let old = add(s.path(), &["오래전에 끝난 일"]);
     ok(s.path(), &["mv", &old, "done"]);
-    let at = |now: &str, args: &[&str]| {
-        let out = staged(args).current_dir(s.path()).env("MOAI_NOW", now).output().unwrap();
-        assert!(out.status.success(), "moai {args:?}\n{}", String::from_utf8_lossy(&out.stderr));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    let fresh = at("2026-09-20T00:00:00Z", &["add", "최근 일", "-q"]).trim().to_string();
+    // 시계만 옮겨 부른다 — 부르는 자는 [`ok_at`] 하나다(실패하면 stdout 도 낸다, `ok_env`).
+    let at = |now: &str, args: &[&str]| ok_at(s.path(), now, args);
+    let fresh = add_at(s.path(), "2026-09-20T00:00:00Z", &["최근 일"]);
     at("2026-09-20T00:00:00Z", &["mv", &fresh, "done"]);
     // NOW(09-11 04:12:03)에서 꼬박 14일.
     let later = "2026-09-25T04:12:03Z";

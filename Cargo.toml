@@ -80,6 +80,11 @@ type_complexity = "allow"
 # 모두 한 겹 깊어지는데, 이 경로는 사람이 한 번 부르는 명령이라 값어치가 없다.
 # 걸리는 자리는 `projects.rs` 하나다.
 result_large_err = "allow"
+# 같은 `projects::State` 의 `Open` 갈래는 `Repo`(설정을 통째로 든다)와 `Load` 를 들어 다른 갈래보다
+# 200바이트 넘게 크다 — 설정에 `archive_days` 가 더해지며 문턱을 넘었다(moai-47mz, 리뷰 moai-47mz.5il).
+# 위와 같은 까닭으로 박싱하지 않는다: 프로젝트마다 한 번 짓고 읽는 값이라, 박싱하면 읽는 자리만 한 겹
+# 깊어진다. 걸리는 자리는 `projects.rs` 하나다.
+large_enum_variant = "allow"
 
 [profile.release]
 lto = true

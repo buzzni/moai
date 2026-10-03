@@ -1044,8 +1044,9 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when its last member got to done. --all
   and -s done leave it out and the tail says how many; --archived brings it
-  back, done and deferred with it. -g and asking by time find it anyway.
-  Nothing is stored: it is read from the column and the clock each time.
+  back, done and deferred with it. Asking by time finds it anyway, and so
+  does -g once done is let in (-g --all). Nothing is stored: it is read
+  from the column and the clock each time.
 
     moai show --archived -g parser
 
@@ -1069,7 +1070,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --all` for ideas) and compare row by row.
+  (--archived, and `moai idea show --archived` for ideas) and compare row
+  by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -1378,7 +1380,7 @@ pub struct FilterArgs {
     #[arg(long)]
     pub deferred: bool,
 
-    /// Include done and what is deferred
+    /// Include done and deferred, no archive
     #[arg(long)]
     pub all: bool,
 

@@ -3040,7 +3040,7 @@ impl App {
                 let (column, deferred) = (site.column(at), site.index.shelved_at(at).is_some());
                 // **아카이브는 다른 숨김이 다 지난 줄에서만 잰다** — 숨길 줄이 아니면 시각을 풀 까닭이 없고,
                 // 그렇게 걸러야 뱃지의 수가 "아카이브를 켜면 보일 줄" 이 된다.
-                let rest = view.shows(column, deferred, idea, false, &site.cfg.statuses);
+                let rest = view.shows(column, deferred, idea, &site.cfg.statuses);
                 let archived = rest && !view.show_archived && site.archived(at);
                 aged += usize::from(archived);
                 rest && !archived
@@ -4286,14 +4286,14 @@ impl App {
     ///
     /// 한눈 보기의 `App::site` 는 **줄이 빈 자리 채우개**라(`App::leave_project`) 거기 섞지
     /// 않는다 — 그 설정은 마지막으로 떠난 프로젝트의 것이거나 `layer::blank_config` 다.
-    /// 화면에 선 프로젝트들에서 **아카이브라서만** 숨은 줄의 수(moai-47mz, [`Site::aged`]) — 뱃지가 댄다.
-    pub(super) fn aged(&self) -> usize {
-        self.sites().iter().map(|s| s.aged).sum()
-    }
-
     pub(super) fn sites(&self) -> Vec<&Site> {
         let Some(l) = self.layer.as_ref().filter(|_| self.on_layer()) else { return vec![&self.site] };
         l.places.iter().filter(|p| !self.folded.contains(&p.path)).filter_map(|p| p.site.as_ref()).collect()
+    }
+
+    /// 화면에 선 프로젝트들([`App::sites`])에서 **아카이브라서만** 숨은 줄의 수(moai-47mz, [`Site::aged`]) — 뱃지가 댄다.
+    pub(super) fn aged(&self) -> usize {
+        self.sites().iter().map(|s| s.aged).sum()
     }
 
     /// 이 화면이 번호를 매기고 뱃지에 대고 셈에 쓰는 **칸 이름** — 프로젝트 안에서는 그 설정
@@ -4475,7 +4475,7 @@ impl App {
         let columns = board::columns(&statuses, &held, &|c| match c {
             board::Column::Idea => !self.view.hide_ideas,
             board::Column::Shelved => !self.view.hide_deferred,
-            board::Column::Status(s) => self.view.shows(s, false, false, false, &statuses),
+            board::Column::Status(s) => self.view.shows(s, false, false, &statuses),
         });
         // 프로젝트 하나가 `h`·`l` 의 울타리다([`board::Slot::group`]) — 프로젝트 안에서는 하나뿐이다.
         let group = |seat: Seat| match seat {
@@ -5443,12 +5443,32 @@ impl App {
         let folded = near.is_none().then(|| self.folded_into(&rows, &want)).flatten();
         self.stand(&rows, near.or(folded).unwrap_or(self.cursor), None);
         if let Anchor::Issue(id) = &want
-            && self.site.index.find(id).map(|at| self.site.veil(at)).is_some_and(|v| v.viewed && !v.filtered)
+            && let Some(at) = self.site.index.find(id)
+            && self.site.veil(at).viewed
+            && !self.site.veil(at).filtered
         {
-            let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
-            self.notice = Some(fill(say(self.site.lang, "tui.veiled_row"), &[("id", id), ("show", &show)]));
+            self.notice = Some(self.veiled_row(id, at));
         }
         true
+    }
+
+    /// 보기가 가린 그 줄을 **도로 세우는 키**를 대는 알림(리뷰 moai-47mz.5il). 모두 보이기(`SPC v a`)는 아카이브를
+    /// 안 연다([`view::View::show_all`]) — 아카이브라서 가린 줄에 그 키만 대면 눌러도 줄이 그대로 숨는다(moai-1jay 가
+    /// 막으려던 "누른 키가 아무것도 안 한다"). 아카이브라서만 가렸으면 `SPC v o` 를, 다른 보기 숨김에도 걸렸으면
+    /// 둘을 함께 댄다. 가르는 자는 [`App::see_in`] 과 같다 — 그 줄이 아카이브인가([`Site::archived`])와, 아카이브를
+    /// 빼고 보기가 그 줄을 보이는가([`view::View::shows`]).
+    fn veiled_row(&self, id: &str, at: usize) -> String {
+        let (site, lang) = (&self.site, self.site.lang);
+        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+        if self.view.show_archived || !site.archived(at) {
+            return fill(say(lang, "tui.veiled_row"), &[("id", id), ("show", &show)]);
+        }
+        let old = keys::label(keys::BROWSE, keys::Browse::Archived);
+        let idea = crate::report::is_idea(&site.issues[at]);
+        match self.view.shows(site.column(at), site.index.shelved_at(at).is_some(), idea, &site.cfg.statuses) {
+            true => fill(say(lang, "tui.veiled_archived"), &[("id", id), ("old", &old)]),
+            false => fill(say(lang, "tui.veiled_archived_too"), &[("id", id), ("show", &show), ("old", &old)]),
+        }
     }
 
     /// 거름망이 바뀐 뒤 커서를 `at` 을 줄 수 안으로 자른 자리에 세운다. **그 자리의 줄이
@@ -5994,6 +6014,24 @@ mod tests {
         a.hit("Esc");
         a.hit("Esc");
         assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "검색을 풀었는데 아카이브가 남았다");
+
+        // **검색을 풀며 가린 줄에는 그 줄을 도로 세울 키를 댄다**(리뷰 moai-47mz.5il) — 모두 보이기는 아카이브를
+        // 안 열므로, done 을 켠 지금 그 줄을 가린 것은 아카이브 하나고 댈 키는 `SPC v o` 다.
+        search(&mut a, "오래 끝난");
+        a.hit("Enter");
+        a.hit("Esc");
+        assert_eq!(a.notice.as_deref(), Some("argos-0003 는 아카이브에 있다 · SPC v o 로 아카이브를 보인다"));
+        // done 도 숨겼으면 두 키가 다 든다 — 하나만 대면 그 키를 눌러도 줄이 그대로 숨는다.
+        a.hit("SPC v 4 Esc");
+        search(&mut a, "오래 끝난");
+        a.hit("Enter");
+        a.hit("Esc");
+        assert_eq!(
+            a.notice.as_deref(),
+            Some("argos-0003 는 보기에 가렸고 아카이브에도 있다 · SPC v a 로 모두, SPC v o 로 아카이브까지 보인다")
+        );
+        a.hit("SPC v 4 Esc");
+        assert_eq!(row_ids(&a), ["argos-0004", "argos-0005"], "시험의 전제 — done 을 도로 켰다");
 
         a.layout = view::Layout::Board;
         a.see();
