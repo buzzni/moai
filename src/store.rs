@@ -481,7 +481,7 @@ impl Repo {
     /// **재는 것은 여기고 읽는 것은 [`Repo::read`] 다.** 읽기는 화면 말을 모르는 자리라(락 안에서도
     /// 읽는다) 거절을 고른 말로 못 편다. 여기서 먼저 물어 흔한 경우는 고른 말로 서고, 그 뒤에 링크가 갈린
     /// 경우(탐색기가 떠 있는 동안 받은 `git pull`)는 읽기가 같은 자로 다시 재어 말 없는 꼴로 멈춘다. 쓰기는
-    /// 그 읽기보다 먼저 [`Repo::far_lock`] 의 [`target_of`] 가 같은 링크를 제 말(`error`)로 거절한다.
+    /// 그 읽기보다 먼저 [`Repo::far_lock`] 의 [`resolve`] 가 같은 링크를 제 말(`error`)로 거절한다.
     ///
     /// **뿌리는 한 번 푼다**([`crate::held::Home`]) — 설정과 스냅샷을 같은 뿌리로 잰다.
     fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
@@ -892,7 +892,7 @@ impl Repo {
         // **저장소 락은 받은 저장소가 커밋할 수 있는 자리다**([`Lock::inside`], moai-sn57) — 링크를 안 따르고
         // 체크아웃 안에만 짓는다. 두 락을 한 뿌리로 잰다. 못 잡으면 그 까닭도 자료로 들고 나간다.
         let home = crate::held::Home::of(&self.root);
-        let lock = Lock::inside(&self.dir().join("lock"), &home)?;
+        let lock = Lock::inside(&lock_at(&self.root), &home)?;
         // 링크 너머의 트래커 자리에도 그 자리의 락을 잡는다 — 까닭은 [`Repo::far_lock`] 에 있다. 차례는
         // 늘 제 락 → 너머의 락이다.
         let _far = self.far_lock(&lock, &home)?;
@@ -1101,7 +1101,7 @@ impl Repo {
 
     /// `issues.jsonl` 이 **다른 디렉터리의 파일을 가리키는 링크면** 그 디렉터리의 락(`<그 자리>/lock`)도
     /// 잡는다(moai-4oab 리뷰). 링크가 아니거나 이미 쥔 락이면 `None` 이다 — 흔한 경우(링크가 아닌 스냅샷)는
-    /// [`target_of`] 가 재고 끝난다.
+    /// [`resolve`] 가 재고 끝난다.
     ///
     /// 쓰기는 링크를 따라가 가리키는 파일에 든다([`write_atomic_inside`]). 링크는 체크아웃 안에서만
     /// 따라가지만, 한 트래커가 다른 트래커를 품으면(하위 디렉터리의 트래커) 둘이 한 파일을 가리킬 수 있다.
@@ -1117,7 +1117,7 @@ impl Repo {
     ///
     /// **이미 쥔 락인지는 철자가 아니라 파일로 견준다**([`Lock::holds`]) — 같은 `.moai` 안의 링크나 위
     /// 디렉터리가 링크라 철자만 다른 자리를 다시 잡으면, 제가 쥔 락을 제가 기다리다 `locked` 로 물러난다.
-    /// 쓸 자리가 못 쓰는 자리면([`target_of`] 의 거절 — 고리, 없는 디렉터리) 여기서 그 말로 멈춘다.
+    /// 쓸 자리가 못 쓰는 자리면([`resolve`] 의 거절 — 고리, 없는 디렉터리) 여기서 그 말로 멈춘다.
     ///
     /// **다만 그 자리가 링크면 쥔 락으로 치지 않는다**(리뷰 moai-sn57.kq4) — [`Lock::holds`] 는 링크를 따라
     /// 견주므로, 커밋된 `lock -> /proc/self/fd/3` 은 프로세스마다 제가 쥔 `.moai/lock` 으로 풀려 아무도 너머의
@@ -1130,12 +1130,12 @@ impl Repo {
     /// 것은 두 락을 다 잡은 뒤다.
     fn far_lock(&self, held: &Lock, home: &crate::held::Home) -> Result<Option<Lock>, Stop> {
         let here = self.issues_path();
-        let real = target_of(&here, Some(&self.root))?;
+        let real = resolve(&here, Some(&self.root))?;
         if real == here {
             return Ok(None);
         }
         let dir = crate::path::dir_of(&real);
-        let at = dir.join("lock");
+        let at = far_lock_at(&real);
         let linked = std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink());
         let far = match !linked && held.holds(&at).unwrap_or_else(|| crate::user_config::same_dir(dir, &self.dir())) {
             true => None,
@@ -2062,7 +2062,29 @@ fn parent_of<'a>(path: &'a Path, named: &Path) -> R<&'a Path> {
 /// `.moai/journal/<사람>.jsonl -> ../../.git/config` 를 커밋해 두면 흔한 `moai add` 가 git 설정에 JSON 한
 /// 줄을 덧붙여, 그 클론의 git 이 `bad config line` 으로 통째로 섰다. 저장소가 든 파일이 git 의 자리를
 /// 가리킬 까닭은 없다.
+///
+/// **체크아웃 안이라도 저장소 락 자리는 아니다**(moai-x0o7.97w, [`on_lock`]). 받은 저장소가
+/// `AGENTS.md -> .moai/lock` 을 커밋해 두면 `moai init` 이 그 링크를 따라 락을 `rename` 으로 한 번 갈아끼웠다 —
+/// 그때 다른 쓰기가 쥔 락은 지워진 아이노드에 남고, 그 사이에 든 쓰기 둘이 서로를 못 막았다. 스냅샷이 락에
+/// 닿는 [`Trouble::SnapshotOnLock`](moai-sn57)과 같은 자를 스냅샷 밖의 쓰기(`init` 의 뿌리 파일·저널·
+/// `skill install` 의 설정)에 편 것이다.
 fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
+    let real = resolve(path, within)?;
+    match within {
+        Some(root) if on_lock(&real, root) => Err(Fail::new(format!(
+            "{} points at {}, the lock moai holds while it writes — nothing is written, so the link is not \
+             replaced. Writing there would replace the lock, so writers would stop keeping each other out",
+            path.display(),
+            crate::text::one_line(&real.display().to_string())
+        ))),
+        _ => Ok(real),
+    }
+}
+
+/// [`target_of`] 에서 **락 자리만 빼고** 잰 자리 — [`Repo::far_lock`] 하나가 부른다. 스냅샷이 락에 닿는 것은
+/// 그 자리가 두 락을 쥔 뒤 파일로 견주어 [`Trouble::SnapshotOnLock`] 으로 멈춘다(moai-sn57). 여기서 글로 먼저
+/// 거절하면 그 갈래와 그 코드(`broken`)가 영영 안 선다.
+fn resolve(path: &Path, within: Option<&Path>) -> R<PathBuf> {
     let real = crate::path::follow_links(path).map_err(|e| Fail::new(format!("{}: {e}", path.display())))?;
     let linked = real != path;
     let end = || crate::text::one_line(&real.display().to_string());
@@ -2114,6 +2136,38 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
         }
         _ => Ok(real),
     }
+}
+
+/// 저장소 락의 이름 — 제 락([`lock_at`])도 너머의 락([`far_lock_at`])도 이 이름이다.
+const LOCK: &str = "lock";
+
+/// 이 뿌리의 **제 락** 자리(`.moai/lock`) — [`Repo::write_locked`] 가 잡고 [`target_of`] 가 거절하는 자리가 이
+/// 하나로 선다.
+fn lock_at(root: &Path) -> PathBuf {
+    root.join(".moai").join(LOCK)
+}
+
+/// 링크 너머 스냅샷 곁의 락 자리 — 푼 스냅샷 `real` 이 든 디렉터리의 `lock`. [`Repo::far_lock`] 이 잡고
+/// [`target_of`] 가 거절하는 자리가 이 하나로 선다.
+fn far_lock_at(real: &Path) -> PathBuf {
+    crate::path::dir_of(real).join(LOCK)
+}
+
+/// 푼 자리 `real` 이 `root` 의 **저장소 락 자리**인가(moai-x0o7.97w) — 제 락과, 스냅샷이 링크면 그 너머의 락.
+/// 견주는 것은 디렉터리를 푼 철자다. 락 자리의 끝 조각은 링크일 수 없으니([`crate::held::lock`]) `rename` 이
+/// 갈아끼울 이름이 곧 그것이다.
+///
+/// **이름이 `lock` 이 아니면 아무것도 안 잰다** — 두 자리 다 그 이름이라 흔한 쓰기(스냅샷·저널·딸린 파일)에는
+/// 묻는 것이 하나도 안 는다. 재는 길도 아무것도 안 연다(`canonicalize`·`readlink` 뿐이다) — FIFO 가 선 자리에서도
+/// 멈추지 않는다.
+fn on_lock(real: &Path, root: &Path) -> bool {
+    if real.file_name() != Some(std::ffi::OsStr::new(LOCK)) {
+        return false;
+    }
+    let spelled = |p: &Path| std::fs::canonicalize(crate::path::dir_of(p)).ok().map(|dir| dir.join(LOCK));
+    let Some(landed) = spelled(real) else { return false };
+    let far = crate::path::follow_links(&root.join(".moai").join("issues.jsonl")).ok().map(|s| far_lock_at(&s));
+    std::iter::once(lock_at(root)).chain(far).filter_map(|at| spelled(&at)).any(|at| at == landed)
 }
 
 /// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
@@ -4534,5 +4588,54 @@ mod tests {
         std::os::unix::fs::symlink(".git", tree.join("gitfile")).unwrap();
         append_inside(&tree.join("gitfile"), b"{}\n", &tree).expect_err("워크트리의 .git 파일에 덧붙였다");
         assert_eq!(std::fs::read_to_string(tree.join(".git")).unwrap(), "gitdir: /x\n");
+    }
+
+    /// **저장소가 든 파일은 저장소 락으로 풀리는 링크를 안 따라간다**(moai-x0o7.97w). 커밋된
+    /// `AGENTS.md -> .moai/lock` 에 `moai init` 이 락을 `rename` 으로 갈아끼우던 자리다 — 그때 다른 쓰기가 쥔 락은
+    /// 지워진 아이노드에 남는다. 제 락과, 스냅샷이 링크면 그 너머의 락 둘 다고, `.moai` 자체가 링크여도 같다.
+    /// 갈아끼우는 쪽도 덧붙이는 쪽도 같다. 이름만 같은 남의 `lock` 은 락 자리가 아니라 그대로 쓴다.
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_file_never_follows_a_link_onto_the_repository_lock() {
+        use std::os::unix::fs::{MetadataExt, symlink};
+        let ino = |p: &Path| std::fs::metadata(p).unwrap().ino();
+        let refused = |link: &Path, root: &Path| {
+            for e in [
+                write_atomic_inside(link, b"x\n", root).expect_err("락을 갈아끼웠다"),
+                write_atomic_in(link, b"x\n", &root.join(".moai"), root).expect_err("락을 갈아끼웠다"),
+                append_inside(link, b"x\n", root).expect_err("락에 덧붙였다"),
+            ] {
+                assert!(e.message.contains("the lock moai holds"), "락이라고 안 댔다 — {}", e.message);
+            }
+            assert!(is_link(link), "링크를 갈아끼웠다");
+        };
+
+        let s = Scratch::new("store-atomic-lock");
+        let root = s.path();
+        for dir in [".moai", "shared", "other"] {
+            std::fs::create_dir(root.join(dir)).unwrap();
+        }
+        for file in [".moai/lock", "shared/issues.jsonl", "shared/lock", "other/lock"] {
+            std::fs::write(root.join(file), "").unwrap();
+        }
+        symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+        let before = [ino(&root.join(".moai/lock")), ino(&root.join("shared/lock"))];
+        for (name, to) in [("own", ".moai/lock"), ("far", "shared/lock"), ("around", "other/../.moai/lock")] {
+            let link = root.join(name);
+            symlink(to, &link).unwrap();
+            refused(&link, root);
+        }
+        assert_eq!([ino(&root.join(".moai/lock")), ino(&root.join("shared/lock"))], before, "락의 아이노드가 갈렸다");
+        symlink("other/lock", root.join("plain")).unwrap();
+        write_atomic_inside(&root.join("plain"), b"x\n", root).expect("락 자리가 아닌 `lock` 을 거절했다");
+
+        // `.moai` 가 링크면 제 락은 그것이 풀린 자리에 선다 — 받은 철자(`.moai/lock`)가 아니라 푼 자리로 잰다.
+        let s = Scratch::new("store-atomic-lock-moved");
+        let root = s.path();
+        std::fs::create_dir(root.join("tracker")).unwrap();
+        std::fs::write(root.join("tracker/lock"), "").unwrap();
+        symlink("tracker", root.join(".moai")).unwrap();
+        symlink("tracker/lock", root.join("AGENTS.md")).unwrap();
+        refused(&root.join("AGENTS.md"), root);
     }
 }

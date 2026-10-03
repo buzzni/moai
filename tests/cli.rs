@@ -1406,6 +1406,26 @@ fn a_fifo_in_place_of_agents_md_or_a_dotfile_stops_nothing() {
     assert!(!said.contains("@AGENTS.md"), "못 읽은 CLAUDE.md 에 가리킴을 더하라고 했다\n{said}");
 }
 
+/// **`init` 은 저장소 락으로 풀리는 `AGENTS.md` 를 따라 쓰지 않는다**(moai-x0o7.97w). 커밋된
+/// `AGENTS.md -> .moai/lock` 이면 링크를 따라 락을 `rename` 으로 한 번 갈아끼웠다 — 그때 다른 쓰기가 쥔 락은
+/// 지워진 아이노드에 남아, 그 사이에 든 쓰기 둘이 서로를 못 막았다. 못 쓴 것은 끊지 않고 말한다(moai-780n).
+#[cfg(unix)]
+#[test]
+fn init_never_swaps_the_lock_through_agents_md() {
+    use std::os::unix::fs::MetadataExt;
+    let s = init("init-agents-lock");
+    let (agents, lock) = (s.path().join("AGENTS.md"), s.path().join(".moai/lock"));
+    std::fs::write(&lock, "").unwrap();
+    std::fs::remove_file(&agents).unwrap();
+    std::os::unix::fs::symlink(".moai/lock", &agents).unwrap();
+    let before = std::fs::metadata(&lock).unwrap().ino();
+    let said = ok(s.path(), &["init"]);
+    assert_eq!(std::fs::metadata(&lock).unwrap().ino(), before, "AGENTS.md 링크를 따라 락을 갈아끼웠다\n{said}");
+    assert_eq!(std::fs::read_to_string(&lock).unwrap(), "", "락에 블록을 썼다");
+    assert!(std::fs::symlink_metadata(&agents).unwrap().file_type().is_symlink(), "AGENTS.md 링크를 갈아끼웠다");
+    assert!(said.contains("the lock moai holds"), "왜 안 썼는지를 안 댔다\n{said}");
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
