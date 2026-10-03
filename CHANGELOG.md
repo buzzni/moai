@@ -82,13 +82,20 @@ does not tag — see `CONTRIBUTING.md`.
   person installed. Once a scope holds this version, nothing there is removed
   again, and nothing is removed when moai's own registration fails. A
   user-scope install another repository's moai also stands beside is left,
-  with the command to remove it printed. The marketplaces stay — `claude plugin
-  marketplace remove` reaches the whole machine. One line says what was
-  removed; a removal that fails prints the command to run by hand and does not
-  change the exit code. `--dry-run` lists the removals. In `--json`,
-  `skill install` reports them under `retired` (`id`, `scope`, `command`,
-  `ok`) and `kept` in place of `companions`; in `skill uninstall`, which
-  already had `kept`, `companions` becomes `retired` in the same shape.
+  with the command to remove it printed. The marketplaces stay on the machine —
+  `claude plugin marketplace remove` reaches the whole machine. At project
+  scope an earlier moai also declared them in the committed
+  `.claude/settings.json`, so the team kept being offered them: moai deletes
+  just those two entries itself, only when they point where an earlier moai
+  pointed them and nothing in that file still enables a plugin from them, and
+  leaves the rest of the file as it was — commit the change. One line
+  says what was removed; a removal that fails prints the command to run by
+  hand (for a declaration, where to delete it) and does not change the exit
+  code. `--dry-run` lists the removals. In `--json`, `skill install` reports
+  them under `retired` (`id`, `scope`, `command`, `ok`), the declarations
+  under `undeclared` (`marketplace`, `file`, `ok`), and `kept` in place of
+  `companions`; in `skill uninstall`, which already had `kept`, `companions`
+  becomes `retired` in the same shape, beside the same `undeclared`.
 
 - **The supervisor's worker brief stands an epic's members in `review` while
   its epic-end review runs.** Where the worker creates the review issue it now
