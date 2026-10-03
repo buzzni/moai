@@ -1497,7 +1497,7 @@ pub struct DeferArgs {
     #[arg(long)]
     pub undo: bool,
 
-    /// Why it is deferred (journal only)
+    /// Why it is deferred (journal only). `-` reads stdin
     #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
     pub msg: Option<String>,
 

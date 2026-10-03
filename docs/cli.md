@@ -833,7 +833,7 @@ Options:
           Pick it back up
 
   -m, --msg <text>
-          Why it is deferred (journal only)
+          Why it is deferred (journal only). `-` reads stdin
 
       --from <column>
           Only while it is in this column (racing pickups)

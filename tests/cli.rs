@@ -13350,6 +13350,32 @@ fn an_empty_reason_is_refused_like_an_empty_note() {
     assert!(!journal(s.path()).contains(r#""kind":"note""#), "거절해 놓고 적었다 — {}", journal(s.path()));
 }
 
+/// **`defer -m -` 도 stdin 을 읽는다 — `mv -m -` 와 한 자다**(moai-m1za, 사람이 정했다). `-m` 을 받는 명령은
+/// 둘뿐이고, 같은 깃발이 한쪽에서만 stdin 을 읽으면 다음 사람이 `-` 한 글자를 까닭으로 남긴다. 빈 stdin 은
+/// "까닭이 비었다" 가 아니라 stdin 이 비었다고 말한다 — 파일을 잘못 짚은 사람이 무엇을 고칠지 안다.
+#[test]
+fn defer_reads_its_reason_from_stdin_on_a_lone_dash() {
+    let s = init("defer-msg-stdin");
+    let id = add(s.path(), &["일"]);
+
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+    for input in ["", "\n \n"] {
+        let out = from_stdin(s.path(), &["defer", &id, "-m", "-", "--json"], input);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && err.contains(r#""code":"bad_input""#), "{input:?} → {err}");
+        assert!(err.contains("-m -") && !err.contains("까닭이 비었다"), "stdin 이 빈 것을 안 댄다 — {err}");
+    }
+    assert_eq!(issues(s.path()), before, "빈 stdin 으로 미뤘다");
+    assert_eq!(journal(s.path()), notes, "빈 stdin 이 저널에 남았다");
+
+    let out = from_stdin(s.path(), &["defer", &id, "-m", "-"], "다음 분기\n사람이 기다린다\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let j = journal(s.path());
+    assert!(j.contains(r#""text":"다음 분기\n사람이 기다린다""#), "stdin 의 글을 까닭으로 안 적었다\n{j}");
+    assert!(!j.contains(r#""text":"-""#), "`-` 한 글자를 적었다\n{j}");
+    assert!(issues(s.path()).contains("deferred_at"), "안 미뤘다");
+}
+
 // ── 훅 — 규칙을 읽히는 자리에 놓는다 ────────────────────────────────
 
 /// 훅은 stdin 으로 이벤트를 받고 stdout 으로 계약 JSON 을 낸다.
