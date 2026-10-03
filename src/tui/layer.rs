@@ -3111,8 +3111,9 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
     }
 
-    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 아직 아무 카드에도 안 선
-    /// 머리줄은 머리줄만의 길을 타던 때, 펼친 프로젝트가 화면보다 길면 다음 머리줄이 안 보여 굴리기가 첫 걸음부터 멈췄다.
+    /// **한눈 보기에서 `l` 로 펼친 바로 뒤에도 휠과 `Ctrl-d` 는 보드를 굴린다**(moai-acfk 리뷰). 밀려난 커서를 끌어오던
+    /// 때(moai-acfk), 아직 아무 카드에도 안 선 머리줄은 머리줄만의 길을 타 펼친 프로젝트가 화면보다 길면 다음 머리줄이
+    /// 안 보여 굴리기가 첫 걸음부터 멈췄다. 이제 굴리기는 화면만 굴리고 커서는 머리줄에 그대로다(moai-j0jf).
     #[test]
     fn the_overview_board_scrolls_right_after_unfolding_from_a_header() {
         let s = Scratch::fenced("layer-board-roll");
@@ -3130,7 +3131,10 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 펼친 머리줄에 섰다");
         a.hit("Ctrl-d");
         assert!(a.list.offset() > 0, "아직 칸이 없는 머리줄에서 Ctrl-d 가 보드를 안 굴렸다");
-        assert!(matches!(a.rows()[a.cursor], Row::Item(..)), "밀려난 머리줄이 보이는 카드로 안 끌려왔다");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "굴린 화면이 머리줄의 커서를 끌어 옮겼다");
+        let rolled = a.list.offset();
+        super::super::draw::tests::render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), rolled, "그림이 화면 밖의 머리줄을 드러내느라 굴린 화면을 되돌렸다");
     }
 
     /// **보기는 펼친 프로젝트 전부에 걸리고, 검색과 거름망은 프로젝트 안에서만 건다**(moai-1xo5,

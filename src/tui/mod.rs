@@ -1277,6 +1277,16 @@ pub struct App {
     /// `SPC v i` 한 번에 옆 칸을 가리킨다. 아직 아무 카드에도 안 섰으면 `None` 이고, 그때 머리줄의 `j` 는 가장 가까운
     /// 카드다 — 처음값 0 은 idea 칸이라 맨 아래 레인의 idea 로 내려갔다. 적는 자는 [`App::note_board_column`] 하나다.
     board_column: Option<board::Column>,
+    /// 보드의 화면을 굴려 커서에서 떼어 놓은 카드 — 휠·반 쪽·한 쪽이 화면을 굴리면 그때 커서가 선 줄의 정체를
+    /// 든다(moai-j0jf, 사용자 결정 2026-10-03). **커서가 이 줄에 선 동안 그림은 커서를 드러내지 않는다** — 고른 카드가
+    /// 화면 밖으로 나가도 커서와 상세는 그대로고 화면만 굴러 있다([`App::board_roll`]).
+    ///
+    /// 걷는 자는 둘이다. 보드의 커서 키는 옮겼든 못 옮겼든 걷는다([`App::board_step`]) — 다음 키가 그 카드에서
+    /// 움직이고 화면은 그 카드로 돌아간다. 커서가 다른 줄에 서면(누르기·검색·사라진 카드 대신 선 카드) 그림이 걷는다
+    /// ([`App::rolled_off`]). **번호가 아니라 정체로 든다** — 옆 세션의 쓰기로 다시 읽으면 같은 카드의 번호가 밀리는데,
+    /// 그때마다 굴린 화면이 커서로 돌아가면 안 된다. 목록과 보드를 오가면 굴린 자리가 첫 줄로 돌아가니 함께 걷는다
+    /// ([`App::flip_layout`]).
+    adrift: Option<Anchor>,
     /// 마우스를 잡는가(moai-irrj.9xq). **처음에는 잡는다**(사용자 결정 2026-10-01) — `SPC o m` 이 놓고
     /// 잡으며 설정에 남는다. 터미널에 그 글을 내는 것은 루프다(`cmd::tui`): 여기는 원하는 값만 든다.
     /// 이름이 `mouse` 가 아닌 것은 사건을 받는 [`App::mouse`] 와 가르려서다 — 같은 이름이면 문서의 고리가 말없이
@@ -1823,6 +1833,7 @@ impl App {
             detail_at: view::DetailAt::default(),
             layout: view::Layout::default(),
             board_column: None,
+            adrift: None,
             mouse_on: true,
             drawn: mouse::Drawn::default(),
             list_width: None,
@@ -4456,7 +4467,8 @@ impl App {
     /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
     ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다
     ///
-    /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다.
+    /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 카드
+    /// ([`App::adrift`])도 함께 걷는다: 첫 줄로 돌아간 보드에서 그 카드가 안 보여도 그림이 안 드러낸다.
     fn flip_layout(&mut self, rows: &[Row]) {
         let current = self.current_of(rows);
         let held = current.as_ref().map(|r| self.anchor_of(r));
@@ -4469,6 +4481,7 @@ impl App {
         };
         self.layout = self.layout.flip();
         self.list.rewind();
+        self.adrift = None;
         if let Some((seat, at)) = card
             && let Some(site) = self.site_mut(seat)
             && at < site.issues.len()
@@ -5061,7 +5074,7 @@ impl App {
     fn step(&mut self, m: Move, rows: &[Row]) {
         match self.focus {
             Pane::Explorer if self.board() => match m {
-                // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 상세의 그것과 같은 걸음이다.
+                // 반 쪽·한 쪽은 화면을 굴린다(moai-acfk) — 상세의 그것과 같은 걸음이다. 커서는 그대로다(moai-j0jf).
                 Move::HalfUp | Move::HalfDown | Move::PageUp | Move::PageDown => self.board_roll(rows, |s| s.go(m)),
                 _ => self.board_step(board::Go::Move(m), rows),
             },
@@ -5078,45 +5091,42 @@ impl App {
     ///
     /// **머리줄에 선 커서는 마지막으로 선 카드의 칸을 걷는다**(moai-oagj.vcj) — 머리줄에는 칸이 없어, `k` 로 올라온
     /// 칸을 들고 있어야 `j` 가 그 칸으로 돌아간다([`board::step`] 의 `hint`).
+    ///
+    /// **굴려 떼어 둔 화면을 걷는다**(moai-j0jf, [`App::adrift`]) — 옮겼든 끝이라 제자리든 커서 키 하나가 화면을 커서의
+    /// 카드로 되돌린다. 화면 밖에 선 카드에서 `j` 를 눌렀는데 칸 끝이라 안 움직였다고 화면도 그대로면, 키가 죽은
+    /// 것처럼 보인다.
     fn board_step(&mut self, go: board::Go, rows: &[Row]) {
-        let (laid, hint) = self.board_hint(rows);
-        let at = board::step(&laid.plan, self.cursor, go, hint);
-        self.move_to(at);
-    }
-
-    /// 보드 한 장과 머리줄에 선 커서가 볼 칸(`hint`, [`App::board_column`]) — 키로 옮기든([`App::board_step`]) 화면을
-    /// 굴리든([`App::board_roll`]) 같은 자다. 커서가 카드에 섰으면 그 칸을 먼저 적는다.
-    fn board_hint(&mut self, rows: &[Row]) -> (Laid, Option<usize>) {
         let laid = self.laid(rows);
         self.note_board_column(&laid);
         let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
-        (laid, hint)
+        let at = board::step(&laid.plan, self.cursor, go, hint);
+        self.adrift = None;
+        self.move_to(at);
     }
 
-    /// 보드의 화면을 굴린다 — 휠과 반 쪽·한 쪽이다(moai-acfk, 사용자 결정 2026-10-02). 굴리는 것은 보드 통째로 하나뿐인
-    /// 굴린 자리([`App::list`])고, 커서는 [`board::pull`] 이 맞춘다: 보이는 동안은 그대로고 밀려나면 그 칸에서 보이는
-    /// 가장 가까운 카드로 끌려온다.
+    /// 보드의 화면을 굴린다 — 휠과 반 쪽·한 쪽이다(moai-acfk). **화면만 굴린다**(moai-j0jf, 사용자 결정 2026-10-03):
+    /// 굴리는 것은 보드 통째로 하나뿐인 굴린 자리([`App::list`])고, 고른 카드가 화면 밖으로 나가도 커서와 상세는
+    /// 그대로다. 화면은 보드 끝까지 구른다.
     ///
-    /// **그 칸에 보이는 카드가 없으면 굴리기가 커서 카드가 화면 끝에 닿는 데서 멈춘다**(사용자 결정) — 그림이 커서를
-    /// 드러내는 자([`board::Plan::span`])로 여기서 되돌린다. 그림에 맡기면 그리기 전에 몰아 받은 휠(`cmd::tui::rolls`)이
-    /// 끝을 넘어 쌓여, 그 사이 거꾸로 굴린 칸이 넘친 만큼에 먹힌다.
+    /// 그 카드를 [`App::adrift`] 에 적어, 다음 그림이 커서를 드러내느라 굴린 화면을 되돌리지 않게 한다. 한때(moai-acfk)
+    /// 밀려난 커서를 그 칸에서 보이는 가장 가까운 카드로 끌어왔고, 그 칸에 보이는 카드가 없으면 굴리기를 멈췄다 — 멈춤은
+    /// 끌어오기 때문에 생긴 규칙이라 함께 걷었다.
     fn board_roll(&mut self, rows: &[Row], roll: impl FnOnce(&mut scroll::Scroll)) {
         let was = self.list.offset();
         roll(&mut self.list);
-        // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 보이던 커서가 그대로 보인다 — 몰아 받은 휠마다 보드를 다시
-        // 펴지 않는다(리뷰).
-        if self.list.offset() == was {
-            return;
+        // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 뗄 것도 없다 — 보이던 커서가 그대로 보인다.
+        if self.list.offset() != was {
+            self.adrift = rows.get(self.cursor).map(|r| self.anchor_of(r));
         }
-        let (laid, hint) = self.board_hint(rows);
-        match board::pull(&laid.plan, self.cursor, hint, |top, h| self.list.shows(top, h)) {
-            Some(at) => self.move_to(at),
-            None => {
-                if let Some((top, h)) = laid.plan.span(self.cursor) {
-                    self.list.reveal_span(top, h);
-                }
-            }
+    }
+
+    /// 보드의 화면이 커서에서 떨어져 있는가 — 그림이 커서를 드러낼지 가르는 물음이다(`draw::board`). 굴린 뒤 커서가
+    /// 다른 줄에 섰으면(누르기·검색·사라진 카드 대신 선 카드) 뗀 것을 걷는다: 그 줄은 사람이 굴려 떼어 둔 카드가 아니다.
+    pub(super) fn rolled_off(&mut self, rows: &[Row]) -> bool {
+        if self.adrift.is_some() && self.adrift != rows.get(self.cursor).map(|r| self.anchor_of(r)) {
+            self.adrift = None;
         }
+        self.adrift.is_some()
     }
 
     /// 커서가 카드에 섰으면 그 칸을 [`App::board_column`] 에 적는다. **키만이 아니라 그림도 부른다**(`draw::board`, 리뷰) —
@@ -6205,10 +6215,10 @@ mod tests {
         assert_eq!(on_id(&a), "argos-0005", "Esc 가 열기 전 번호로 돌아가 딴 카드에 섰다");
     }
 
-    /// **보드의 반 쪽·한 쪽은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — `Ctrl-d`·`Ctrl-u` 는 [`scroll::HALF`]
-    /// 줄, `Ctrl-f`·`Ctrl-b`·`PageDown`·`PageUp` 은 [`scroll::PAGE`] 줄이다. 상세의 그것과 같은 걸음이다. 고른 카드가
-    /// 보이는 동안 커서는 그대로고, 밀려나면 그 칸에서 보이는 가장 가까운 카드로 끌려온다. `j`·`k`·`G` 는 여전히
-    /// 커서를 옮긴다.
+    /// **보드의 반 쪽·한 쪽은 화면만 굴린다**(moai-acfk·moai-j0jf, 사용자 결정 2026-10-02·2026-10-03) — `Ctrl-d`·`Ctrl-u`
+    /// 는 [`scroll::HALF`] 줄, `Ctrl-f`·`Ctrl-b`·`PageDown`·`PageUp` 은 [`scroll::PAGE`] 줄이다. 상세의 그것과 같은
+    /// 걸음이다. 고른 카드가 화면 밖으로 나가도 커서는 그대로고, 그림도 화면을 그리로 되돌리지 않는다. 화면은 보드
+    /// 끝까지 구른다.
     #[test]
     fn on_the_board_half_and_whole_pages_scroll_the_screen() {
         // todo 칸에 서른 장 — 카드는 두 줄이라 윗줄은 0·2·4… 다.
@@ -6224,23 +6234,109 @@ mod tests {
         a.hit("Ctrl-d");
         assert_eq!((a.list.offset(), on_id(&a)), (half, "argos-0004".to_string()), "Ctrl-d 가 화면을 반 쪽 안 굴렸다");
         a.hit("Ctrl-d");
-        // 윗줄 10 부터 보인다 — 0004(6..8)가 밀려나 0006(10..12)으로 끌려온다.
-        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0006".to_string()), "밀려난 커서가 안 끌려왔다");
+        // 윗줄 10 부터 보인다 — 0004(6..8)는 화면 밖이지만 커서는 그대로다.
+        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0004".to_string()), "밀려난 커서가 끌려 나왔다");
+        super::draw::tests::render(&mut a, 100, 30);
+        assert_eq!(a.list.offset(), 2 * half, "그림이 화면 밖의 커서를 드러내느라 굴린 화면을 되돌렸다");
         a.hit("Ctrl-f");
         assert_eq!(
             (a.list.offset(), on_id(&a)),
-            (2 * half + page, "argos-0011".to_string()),
+            (2 * half + page, "argos-0004".to_string()),
             "Ctrl-f 가 한 쪽 안 굴렸다"
         );
         a.hit("PageUp");
-        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0011".to_string()), "PageUp 이 한 쪽 안 굴렸다");
+        assert_eq!((a.list.offset(), on_id(&a)), (2 * half, "argos-0004".to_string()), "PageUp 이 한 쪽 안 굴렸다");
         a.hit("Ctrl-u Ctrl-b");
         assert_eq!(a.list.offset(), 0, "위로 굴리기가 첫 줄에서 안 멈췄다");
-        let seen = on_id(&a);
+        a.hit("PageDown PageDown PageDown PageDown PageDown PageDown");
+        assert_eq!((a.list.below(), on_id(&a)), (0, "argos-0004".to_string()), "화면이 보드 끝까지 안 굴렀다");
         a.hit("j");
-        assert_ne!(on_id(&a), seen, "`j` 가 커서를 안 옮겼다");
+        assert_eq!(on_id(&a), "argos-0005", "`j` 가 커서가 선 카드에서 안 움직였다");
         a.hit("G");
         assert_eq!(on_id(&a), "argos-0030", "`G` 가 그 칸의 끝으로 안 갔다");
+    }
+
+    /// **다음 커서 키가 굴린 화면을 커서의 카드로 되돌린다**(moai-j0jf, 사용자 결정 2026-10-03) — 화면 밖에 선 카드에서
+    /// 움직이고, 그 칸 끝이라 제자리여도 되돌린다. 다시 읽기는 안 되돌린다: 옆 세션의 쓰기로 같은 카드의 번호가 밀려도
+    /// 굴린 화면은 그대로다. 그 카드가 사라져 커서가 딴 카드에 서면 화면이 그 카드로 간다.
+    #[test]
+    fn the_next_cursor_key_brings_the_rolled_board_back_to_the_card() {
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many.clone(), cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.detail_open = false;
+        let draw = |a: &mut App| super::draw::tests::render(a, 100, 30);
+        let shown = |a: &App| {
+            let card = a.laid(&a.rows()).plan.cards[a.cursor];
+            a.list.shows(card.top, card.height)
+        };
+        draw(&mut a);
+
+        // 아래로 굴려 0001 이 화면 밖이다 — `j` 는 0001 에서 움직여 0002 에 서고, 화면은 0002 로 돌아간다.
+        a.hit("PageDown PageDown");
+        draw(&mut a);
+        assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다");
+        a.hit("j");
+        draw(&mut a);
+        assert_eq!(on_id(&a), "argos-0002", "`j` 가 커서의 카드에서 안 움직였다");
+        assert!(shown(&a), "`j` 뒤에도 화면이 굴린 자리에 남았다 — {}", a.list.offset());
+
+        // 칸 끝의 카드에서 `j` 는 제자리지만 화면은 돌아온다.
+        a.hit("G");
+        draw(&mut a);
+        a.hit("Ctrl-b Ctrl-b");
+        draw(&mut a);
+        assert!(!shown(&a), "시험의 전제 — 끝 카드가 화면 밖이다");
+        a.hit("j");
+        draw(&mut a);
+        assert_eq!(on_id(&a), "argos-0030");
+        assert!(shown(&a), "제자리인 `j` 가 화면을 안 되돌렸다");
+
+        // 옆 세션이 p0 하나를 맨 앞에 더했다 — 0030 의 번호가 밀려도 굴린 화면은 그대로다.
+        a.hit("Ctrl-b Ctrl-b");
+        draw(&mut a);
+        let rolled = a.list.offset();
+        let mut issues = many.clone();
+        let mut urgent = make("argos-0031", Kind::Issue);
+        urgent.priority = Some(0);
+        issues.push(urgent);
+        a.adopt(issues);
+        draw(&mut a);
+        assert_eq!(on_id(&a), "argos-0030", "시험의 전제 — 다시 읽어도 같은 카드다");
+        assert_eq!(a.list.offset(), rolled, "다시 읽기가 굴린 화면을 커서로 되돌렸다");
+
+        // 그 카드가 사라졌다 — 대신 선 카드로 화면이 간다.
+        a.adopt(many.into_iter().filter(|i| i.id != "argos-0030").collect());
+        draw(&mut a);
+        assert_eq!(on_id(&a), "argos-0029", "시험의 전제 — 사라진 카드 대신 위 카드에 섰다");
+        assert!(shown(&a), "사라진 카드 대신 선 카드가 화면 밖에 남았다");
+    }
+
+    /// **목록을 다녀온 보드는 고른 카드를 드러낸다**(moai-j0jf) — 오가는 길(`SPC v b`)이 굴린 자리를 첫 줄로 돌리니,
+    /// 굴려 떼어 둔 카드([`App::adrift`])도 함께 걷는다. 남기면 첫 줄로 돌아온 보드에서 고른 카드가 화면 밖에 선 채다.
+    #[test]
+    fn a_trip_to_the_list_and_back_shows_the_chosen_card() {
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.detail_open = false;
+        let draw = |a: &mut App| super::draw::tests::render(a, 100, 30);
+        let shown = |a: &App| {
+            let card = a.laid(&a.rows()).plan.cards[a.cursor];
+            a.list.shows(card.top, card.height)
+        };
+        draw(&mut a);
+        a.hit("G");
+        draw(&mut a);
+        a.hit("Ctrl-b Ctrl-b");
+        draw(&mut a);
+        assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다");
+        a.hit("SPC v b Esc");
+        draw(&mut a);
+        a.hit("SPC v b Esc");
+        draw(&mut a);
+        assert_eq!((a.layout, on_id(&a)), (view::Layout::Board, "argos-0030".to_string()), "시험의 전제");
+        assert!(shown(&a), "목록을 다녀온 보드가 고른 카드를 화면 밖에 두었다 — {}", a.list.offset());
     }
 
     /// **보드에서 한 층 나오면 나온 폴더 밑의 첫 카드에 선다**(moai-9nfw) — 보드에는 폴더 줄이 없어, 목록처럼 나온
