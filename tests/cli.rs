@@ -5325,6 +5325,11 @@ fn show_filters_by_time() {
     assert_eq!(picked(&["--done", "2026-09-05"]), sorted(&[&closed, &epic, &member]), "묶음의 끝난 때를 못 쟀다");
     assert_eq!(picked(&["--created", "2026-09-02"]), sorted(&[&closed, &epic, &member]), "그날 만든 것이 아니다");
     assert_eq!(picked(&["--filter", "created=..2026-09-01"]), sorted(&[&old]), "`--filter` 가 안 먹었다");
+    // `*_at=` 은 줄 자신의 필드다(moai-97tn) — 묶음은 손으로 옮긴 적이 없어 `done_at` 도 `started_at` 도 없다.
+    // 첫 칸에서 done 으로 곧장 옮긴 줄은 시작과 끝이 같다. `~` 와 분은 옛 플래그에도 통한다.
+    assert_eq!(picked(&["--filter", "done_at=2026-09-05"]), sorted(&[&closed, &member]), "묶음을 멤버로 쟀다");
+    assert_eq!(picked(&["--filter", "started_at=2026-09-05 00:00~"]), sorted(&[&closed, &member]));
+    assert_eq!(picked(&["--created", "~2026-09-01 00:00"]), sorted(&[&old]), "`~` 와 분을 못 읽었다");
     // 다시 좁히는 것은 `-s` 다.
     assert_eq!(picked(&["--since", "2026-09-05", "-s", "todo"]), sorted(&[&old, &idea]));
     // 사람 화면도 같은 줄을 낸다.
@@ -5350,6 +5355,28 @@ fn show_filters_by_time() {
     }
     // done 이 든 `-s` 는 그대로 받는다.
     assert_eq!(picked(&["--done", "2026-09-05", "-s", "done,review"]), sorted(&[&closed, &epic, &member]));
+}
+
+/// **담당은 되풀이도 또는이다**(moai-97tn, 2026-10-03 사용자 결정) — `-a 철수 -a 영희` 는 한때 두 번 썼다고
+/// 거절됐다. 플래그와 거르개 글이 한 묶음으로 쌓인다.
+#[test]
+fn show_takes_several_assignees() {
+    let s = init("people");
+    let cs = ok(s.path(), &["add", "철수 일", "-a", "철수 (cs@x.io)", "-q"]).trim().to_string();
+    let yh = ok(s.path(), &["add", "영희 일", "-a", "영희 (yh@x.io)", "-q"]).trim().to_string();
+    ok(s.path(), &["add", "주인 없는 일", "-a", "none"]);
+    let picked = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        let mut v = ids_in(&ok(s.path(), &args));
+        v.sort();
+        v
+    };
+    let mut both = vec![cs.clone(), yh.clone()];
+    both.sort();
+    assert_eq!(picked(&["-a", "철수", "-a", "yh@x.io"]), both, "되풀이한 담당이 또는이 아니다");
+    assert_eq!(picked(&["-a", "철수", "--filter", "assignee=영희 (yh@x.io)"]), both);
+    assert_eq!(picked(&["--filter", "assignee=cs@x.io"]), [cs]);
 }
 
 /// **지운 이슈는 저널에서 받는다**(moai-7dmq) — `--since` 는 줄 자신의 도장으로 거르므로 `rm` 이 지운 줄을

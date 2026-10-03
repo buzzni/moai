@@ -3576,10 +3576,11 @@ impl Surface {
 
     /// 값까지 — `-s todo,review` 이거나 `status=todo,review`.
     ///
-    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로
-    /// `-a 홍 길동 (a@b.c),김 철수 (c@d.e)` 를 그대로 대면 옮겨 친 셸이 `(` 에서 멈춘다. 따옴표가 필요 없는
+    /// **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 칸 이름에 빈칸과 괄호가 들 수 있으므로
+    /// `-s to do (old),in review` 를 그대로 대면 옮겨 친 셸이 빈칸에서 가르고 `(` 에서 멈춘다. 따옴표가 필요 없는
     /// 값(`todo,review`)은 글자째 그대로다([`crate::text::quoted`]). 거름망은 `=` 없는 낱말을 앞 항목에 잇는
-    /// 칸이라 감싸지 않는다.
+    /// 칸이라 감싸지 않는다. (처음 든 까닭은 담당의 `이름 (메일)` 이었는데, 담당은 되풀이를 또는으로 받게 되어
+    /// 이 거절에 안 온다 — moai-97tn.)
     fn spell(self, field: crate::query::Once, value: &str) -> String {
         match self {
             Surface::Flags => format!("{} {}", field.flag(), crate::text::quoted(value)),
@@ -3611,7 +3612,6 @@ pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> 
                 Once::Milestone => fill(say(lang, "refuse.filter_twice_milestone"), &v),
                 Once::Parent => fill(say(lang, "refuse.filter_twice_parent"), &v),
                 Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
-                Once::Assignee => fill(say(lang, "refuse.filter_twice_assignee"), &v),
             };
             // 고칠 글은 준 값을 다 잇는다 — 말(`{a}`·`{b}`)은 앞의 둘로 서지만, 셋째를 빼면 그대로 친 사람이 그 줄을 잃는다.
             let all = [a, b].into_iter().chain(rest).map(String::as_str).collect::<Vec<_>>().join(",");
@@ -3987,7 +3987,6 @@ mod tests {
             twice(Once::Milestone),
             twice(Once::Parent),
             twice(Once::Priority),
-            twice(Once::Assignee),
             BadFilter::DoneOutside { asked: "review".into() },
             BadFilter::Endless("..".into()),
             BadFilter::Backwards("2026-09-03..2026-09-02".into()),
@@ -4013,7 +4012,6 @@ mod tests {
             (Once::Milestone, "milestone", "--milestone"),
             (Once::Parent, "parent", "--parent"),
             (Once::Priority, "priority", "-p"),
-            (Once::Assignee, "assignee", "-a"),
         ] {
             let said = bad_filter(Lang::En, &twice(field));
             assert!(said.starts_with(&format!("the {noun} cannot be")), "{field:?} — {said}");
@@ -4044,28 +4042,25 @@ mod tests {
                 assert!(flags.contains(want), "{lang:?} CLI 에 {want} 가 없다 — {flags}");
             }
         }
-        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 담당은 `이름 (메일)` 을 받으므로 그대로
-        // 대면 옮겨 친 셸이 `(` 에서 멈춘다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다.
-        let people = BadFilter::Twice {
-            field: Once::Assignee,
-            a: "홍 길동 (a@b.c)".into(),
-            b: "김 철수 (c@d.e)".into(),
-            rest: vec![],
-        };
+        // **CLI 꼴은 값을 껍데기의 낱말 하나로 감싼다**(리뷰 moai-efoc.3e1) — 칸 이름에 빈칸이 들 수 있으므로 그대로
+        // 대면 옮겨 친 셸이 빈칸에서 가른다. 거름망은 `=` 없는 낱말을 앞 항목에 잇는 칸이라 그대로 댄다. (처음 잰
+        // 값은 담당의 `이름 (메일)` 이었는데, 담당은 되풀이를 또는으로 받게 되어 이 거절이 안 선다 — moai-97tn.)
+        let spaced =
+            BadFilter::Twice { field: Once::Status, a: "to do (old)".into(), b: "in review".into(), rest: vec![] };
         // 셋째부터도 고칠 글에 든다(리뷰 moai-efoc.3e1).
         let three =
             BadFilter::Twice { field: Once::Status, a: "todo".into(), b: "review".into(), rest: vec!["done".into()] };
         assert!(bad_filter(Lang::En, &three).contains("`-s todo,review,done`"), "{}", bad_filter(Lang::En, &three));
         assert!(bad_filter_on(Lang::En, &three, Surface::Pairs).contains("`status=todo,review,done`"));
-        let said = bad_filter(Lang::En, &people);
-        assert!(said.contains("`-a '홍 길동 (a@b.c),김 철수 (c@d.e)'`"), "{said}");
-        let said = bad_filter_on(Lang::En, &people, Surface::Pairs);
-        assert!(said.contains("`assignee=홍 길동 (a@b.c),김 철수 (c@d.e)`"), "{said}");
+        let said = bad_filter(Lang::En, &spaced);
+        assert!(said.contains("`-s 'to do (old),in review'`"), "{said}");
+        let said = bad_filter_on(Lang::En, &spaced, Surface::Pairs);
+        assert!(said.contains("`status=to do (old),in review`"), "{said}");
         // 고쳐 칠 명령은 말과 무관하게 그대로 선다.
         for lang in [Lang::En, Lang::Ko] {
             let said = |why: &BadFilter| bad_filter(lang, why);
             assert!(said(&twice(Once::Status)).contains("`-s todo,review`"), "{}", said(&twice(Once::Status)));
-            assert!(said(&twice(Once::Assignee)).contains("`-a todo,review`"));
+            assert!(said(&twice(Once::Priority)).contains("`-p todo,review`"));
             assert!(said(&BadFilter::DoneOutside { asked: "review".into() }).contains("-s review,done"));
             assert!(said(&BadFilter::NoSuchKey("statu".into())).contains("status, tag"));
             assert!(said(&BadFilter::NotAPair("todo".into())).contains("status, tag"));
@@ -4074,6 +4069,24 @@ mod tests {
         // `type=` 는 `Kind` 의 거절문을 그대로 낸다 — `--type` 을 푸는 clap 과 한 말이다(moai-ivt9).
         let kind = "x".parse::<Kind>().unwrap_err();
         assert_eq!(bad_filter(Lang::Ko, &BadFilter::NotAKind(kind.clone())), kind);
+    }
+
+    /// **때를 거절하는 글은 받는 꼴을 다 댄다**(리뷰 moai-97tn.p44) — 분(`YYYY-MM-DD HH:MM`)과 `~` 를 받게 된 뒤에도
+    /// 글은 날과 순간과 `from..to` 만 댔다. 시를 한 자리로 친 사람(`9:05`)은 분 꼴이 없다는 말을 듣고, 그 말을 따라
+    /// `…T09:05:00Z` 를 치면 서울에서는 아홉 시간 어긋난 UTC 의 한 초를 묻는다. 꼴을 더하는 날 여기도 더한다.
+    #[test]
+    fn a_time_refusal_names_every_form_it_takes() {
+        use crate::query::BadFilter;
+        for lang in [Lang::En, Lang::Ko] {
+            for why in [BadFilter::NotATime("2026-10-03 9:05".into()), BadFilter::NoTime] {
+                let said = bad_filter(lang, &why);
+                for form in ["`YYYY-MM-DD`", "`YYYY-MM-DD HH:MM`", "`YYYY-MM-DDTHH:MM:SSZ`"] {
+                    assert!(said.contains(form), "{lang:?} 거절문에 {form} 이 없다 — {said}");
+                }
+            }
+            let said = bad_filter(lang, &BadFilter::Endless("~".into()));
+            assert!(said.contains("`from~to`") && said.contains("`from..to`"), "{lang:?} 가르개를 다 안 댔다 — {said}");
+        }
     }
 
     /// **TZif 가 아닌 시간대 파일도 고른 말로 선다**(리뷰 moai-efoc.3e1) — `tz::Trouble::Unreadable` 의 `said` 에

@@ -2931,9 +2931,13 @@ impl App {
             Mode::Grep(q, g) => Raw { grep: Some(q.text().to_string()), grep_in: *g, all: true, ..Raw::default() },
             // **아카이브도 연다**(moai-47mz) — done 처럼 거름망이 아니라 보기(`SPC v o`)가 숨긴다. 거름망이 숨기면
             // 보기를 켜도 `SPC f` 를 건 동안 아카이브가 안 돌아온다. 검색(`-g`)은 `Filter::build` 가 저절로 연다.
-            Mode::Filter(q) => {
-                Raw { filter: split_filter(q.text()), all: true, ideas: true, archived: true, ..Raw::default() }
-            }
+            Mode::Filter(q) => Raw {
+                filter: crate::query::split_items(q.text()),
+                all: true,
+                ideas: true,
+                archived: true,
+                ..Raw::default()
+            },
             Mode::Browse
             | Mode::Ask(_)
             | Mode::Idea(_)
@@ -5878,26 +5882,6 @@ fn settle_reads(a: &mut App) {
         std::thread::sleep(std::time::Duration::from_millis(2));
         a.follow();
     }
-}
-
-/// 한 줄을 `--filter` 토큰들로 쪼갠다.
-///
-/// **`항목=` 이 시작하는 데서만 쪼갠다.** 그냥 띄어쓰기로 쪼개면 값에 빈칸이
-/// 든 것(`grep=원자적 쓰기`, `status=to do`)을 이 칸에서는 아예 적을 수 없다 —
-/// CLI 는 그것을 인자 하나로 받으므로, "CLI 와 같은 문법" 이라던 약속이 거기서
-/// 깨진다. 항목 이름이 없는 조각은 앞 토큰의 값에 마저 붙는다.
-fn split_filter(q: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for w in q.split_whitespace() {
-        match out.last_mut() {
-            Some(prev) if !w.contains('=') => {
-                prev.push(' ');
-                prev.push_str(w);
-            }
-            _ => out.push(w.to_string()),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -9375,6 +9359,33 @@ mod tests {
         a.hit("SPC f");
         typed(&mut a, "type=epic status=todo");
         assert_eq!(shown(&a), ["argos-0001", "argos-0002"]);
+    }
+
+    /// **`=` 바로 뒤의 따옴표는 한 값이다**(moai-97tn, 리뷰 moai-97tn.p44) — 거름망도 `query::split_items` 로 쪼갠다.
+    /// 따옴표 안의 `=` 와 빈칸은 글자고, 사람이 든 예(분까지 친 `~` 폭)가 화면의 시간대로 선다. 시간대를 바꿔 다시
+    /// 걸 때도 친 글 그대로 다시 쪼갠다. 빈칸으로만 잇던 옛 쪼개기는 둘 다 따옴표를 글자로 남겨 못 걸었다.
+    #[test]
+    fn a_quoted_filter_value_is_one_value() {
+        let mut issues =
+            vec![make("argos-0001", Kind::Epic), make("argos-0008", Kind::Issue), make("argos-0009", Kind::Issue)];
+        issues[1].title = "a=b c 를 고친다".into();
+        issues[2].done_at = Some("2026-10-02T15:00:00Z".into()); // 서울로 10-03 00:00
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.zone = crate::tz::Zone::fixed("T", 9 * 3600);
+        a.hit("SPC f");
+        typed(&mut a, r#"grep="a=b c""#);
+        assert_eq!(a.mode, Mode::Browse, "따옴표 값을 거절했다 — {:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0008"]);
+
+        let asked = r#"done_at="2026-10-03 00:00~2026-10-05 23:59""#;
+        a.hit("SPC f");
+        typed(&mut a, asked);
+        assert_eq!(a.mode, Mode::Browse, "사람이 든 예를 거절했다 — {:?}", a.input_error());
+        assert_eq!(shown(&a), ["argos-0009"], "화면의 시간대로 안 쟀다");
+        assert_eq!(badge(&a).as_deref(), Some(asked), "뱃지가 친 글이 아니다");
+        a.set_zone("UTC");
+        assert!(shown(&a).is_empty(), "시간대를 바꿨는데 옛 날에 남았다 — {:?}", shown(&a));
+        assert_eq!(badge(&a).as_deref(), Some(asked), "다시 걸다가 거름망을 풀었다");
     }
 
     /// **모르는 칸은 거절한다.** `cmd/show.rs` 가 쓰는 것과 같은 자다 — 조용히
