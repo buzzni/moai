@@ -56,7 +56,9 @@ pub struct Slot<'a> {
     pub typed: &'a str,
     /// 고른 값으로 갈아 끼울 자리. 이 값이 따옴표로 열렸으면 여는 따옴표부터 닫는 따옴표까지다.
     pub span: Range<usize>,
-    /// `=` 바로 뒤의 값이다 — 쉼표 뒤의 값은 따옴표로 못 묶는다(문법이 `=` 바로 뒤의 따옴표만 읽는다).
+    /// 갈아 끼울 자리가 `=` 바로 뒤에서 시작한다 — **고른 값을 따옴표로 묶을 수 있는 자리는 여기뿐이다**(문법이
+    /// `=` 바로 뒤의 따옴표만 읽는다). 쉼표 뒤의 값도, 이미 연 따옴표 안의 값도 아니다 — 따옴표 안에서 또 묶으면
+    /// `assignee=""Kim Lee",bob"` 처럼 짝이 깨진다.
     pub first: bool,
 }
 
@@ -65,29 +67,34 @@ pub struct Slot<'a> {
 /// 값 자리는 `항목=` 이 든 낱말 안이거나, 그 값이 따옴표로 열렸으면 닫힐 때까지다. **따옴표 없이 빈칸 뒤에 이어
 /// 적은 낱말은 아니다** — 문법은 그것을 앞 값에 붙여 읽지만, 거기서 치는 것은 대개 다음 항목이다. 거기서 목록이
 /// 서면 `tag=bug st` 의 Enter 가 거름망을 걸지 않고 값을 넣는다.
+///
+/// **닫지 않은 따옴표의 갈 자리는 커서가 선 낱말까지다.** 문법으로는 줄 끝까지 한 값이지만, 줄 끝까지 갈면 커서
+/// 뒤에 이미 친 항목이 고른 값에 먹힌다 — `assignee="Ki| tag=bug` 에서 고르면 `tag=bug` 가 사라졌다.
 pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
     let item = items(text).into_iter().find(|it| it.eq < at && at <= it.end)?;
     let key = &text[item.start..item.eq];
     let field = Field::of(key)?;
     let open = item.eq + 1;
-    // 따옴표 안의 글 — 닫히지 않았으면 값의 끝까지.
-    let (inner, inner_end) = match item.quote {
-        Some((_, close)) => (open + 1, close.unwrap_or(item.end)),
-        None => (open, item.end),
-    };
+    let inner = if item.quote.is_some() { open + 1 } else { open };
     let at = at.max(inner);
+    // 따옴표 안의 글 — 닫히지 않았으면 커서가 선 낱말의 끝까지.
+    let inner_end = match item.quote {
+        Some((_, Some(close))) => close,
+        Some((_, None)) => text[at..].find(char::is_whitespace).map_or(text.len(), |p| at + p),
+        None => item.end,
+    };
     if at > inner_end {
         return None; // 닫는 따옴표 뒤 — 값은 끝났다
     }
     // 쉼표 뒤의 값만 본다 — 쉼표는 또는이다.
     let seg = text[inner..at].rfind(',').map_or(inner, |p| inner + p + 1);
-    let first = seg == inner;
     let end = text[at..inner_end].find(',').map_or(inner_end, |p| at + p);
     // 따옴표로 연 값을 통째로 갈 때만 따옴표까지 간다 — 반만 걷으면 짝이 깨진다.
     let span = match item.quote {
-        Some((_, close)) if first && end == inner_end => open..close.map_or(item.end, |c| c + 1),
+        Some((_, close)) if seg == inner && end == inner_end => open..close.map_or(inner_end, |c| c + 1),
         _ => seg..end,
     };
+    let first = span.start == open;
     Some(Slot { key, field, typed: &text[seg..at], span, first })
 }
 
@@ -157,9 +164,13 @@ pub fn narrow(offers: Vec<Offer>, typed: &str) -> Vec<Offer> {
         .collect()
 }
 
-/// 고른 값을 칸에 넣을 글. 빈칸·`=`·쉼표가 든 값은 따옴표로 묶는다 — `=` 바로 뒤일 때만 묶을 수 있다.
+/// 고른 값을 칸에 넣을 글. 빈칸·`=`·쉼표가 든 값은 따옴표로 묶는다 — `=` 바로 뒤일 때만 묶을 수 있다. **따옴표로
+/// 시작하는 값도 묶는다** — 맨몸으로 `=` 뒤에 서면 문법이 그 따옴표를 여는 따옴표로 읽어 벗긴다.
+///
+/// 쉼표는 묶어도 값 하나로 남지 않는다 — 문법이 따옴표를 벗긴 뒤에 쉼표로 가른다(또는). 묶는 것은 빈칸과 함께
+/// 든 쉼표가 낱말을 흩지 않게 할 뿐이다.
 pub fn quoted(put: &str, first: bool) -> String {
-    let needs = put.chars().any(|c| c.is_whitespace() || c == '=' || c == ',');
+    let needs = put.starts_with(['"', '\'']) || put.chars().any(|c| c.is_whitespace() || c == '=' || c == ',');
     match (needs && first, put.contains('"')) {
         (false, _) => put.to_string(),
         (true, false) => format!("\"{put}\""),
@@ -167,8 +178,10 @@ pub fn quoted(put: &str, first: bool) -> String {
     }
 }
 
-/// 값 목록에서 겨눈 줄. **겨눈 그 글과 커서에서만 선다** — 글자를 치거나 커서를 옮기면 첫 줄로 돌아간다. 칸을
-/// 열고 닫는 길마다 되돌리는 줄을 두지 않으려고 이렇게 든다.
+/// 값 목록에서 겨눈 줄. **겨눈 그 글과 커서에서만 선다** — 고른 값을 넣어 글이 바뀌면 첫 줄로 돌아간다.
+///
+/// 글과 커서만으로는 모자라다 — 칸을 닫았다 다시 열어 같은 `tag=` 를 치거나, 한 자 쳤다 지우면 같은 글과 커서로
+/// 돌아와 옛 줄이 되살아난다. 그래서 칸이 키나 붙여 넣기를 먹을 때마다 [`App`] 이 이것을 걷는다(`typing`·`paste`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Aim {
     text: String,
@@ -201,9 +214,13 @@ use crate::model::{Issue, Kind};
 
 impl App {
     /// 거름망 칸의 커서가 선 값 자리와 고를 값. **목록이 안 서면 `None`** 이다 — 값 자리가 아니거나, 좁혀 남은
-    /// 것이 없거나, 친 값이 이미 어느 값과 같으면.
+    /// 것이 없거나, 친 값이 이미 어느 값과 같거나, **창이 낮아 안내 칸이 한 줄도 못 서면**(`hint_room`). 안 보이는
+    /// 목록이 Enter 를 먹으면 거름망을 걸려던 사람의 칸에 보이지 않던 값이 들어간다.
     pub(super) fn offered(&self) -> Option<(Slot<'_>, Vec<Offer>)> {
         let Mode::Filter(q) = &self.mode else { return None };
+        if self.hint_room == Some(0) {
+            return None;
+        }
         let slot = slot(q.text(), q.cursor())?;
         let offers = narrow(offers(slot.field, &self.site.issues, self.site.lang), slot.typed);
         (!offers.is_empty()).then_some((slot, offers))
@@ -244,28 +261,38 @@ fn offers(field: Field, issues: &[Issue], lang: crate::i18n::Lang) -> Vec<Offer>
     let word = |s: &str, note: &'static str| Offer { shown: s.to_string(), put: s.to_string(), note: Some(note) };
     match field {
         Field::Assignee => {
+            // 열쇠는 거름망이 사람을 가르는 자와 같다(`query::is_assignee`) — 메일은 대소문자를 접고 이름은 글자
+            // 그대로다. 이름까지 접으면 `Anna` 와 `anna` 가 한 줄로 서고, 그 줄의 값은 둘 중 하나만 고른다.
             let mut people = std::collections::BTreeMap::new();
             for i in issues {
                 let Some(name) = i.assignee.as_deref().filter(|n| !n.trim().is_empty()) else { continue };
                 let email = i.assignee_email.as_deref().map(str::trim).filter(|e| !e.is_empty());
-                let put = email.unwrap_or(name).to_string();
-                people.entry(put.to_lowercase()).or_insert_with(|| Offer {
+                let key = match email {
+                    Some(e) => (true, e.to_lowercase()),
+                    None => (false, name.to_string()),
+                };
+                people.entry(key).or_insert_with(|| Offer {
                     shown: crate::model::label(name, email, crate::config::Naming::Full),
-                    put,
+                    put: email.unwrap_or(name).to_string(),
                     note: None,
                 });
             }
             let mut people: Vec<Offer> = people.into_values().collect();
-            people.sort_by_key(|o| o.shown.to_lowercase());
+            people.sort_by_cached_key(|o| o.shown.to_lowercase());
             [word("me", say(lang, "tui.hint.me")), word("none", say(lang, "tui.hint.nobody"))]
                 .into_iter()
                 .chain(people)
                 .collect()
         }
         Field::Tag => {
-            let tags: std::collections::BTreeSet<&str> =
-                issues.iter().flat_map(|i| i.tags.iter().map(String::as_str)).collect();
-            tags.into_iter().map(|t| Offer { shown: t.to_string(), put: t.to_string(), note: None }).collect()
+            // **거름망이 태그를 재는 자(`model::normalize_tag`)로 접는다** — 읽기는 정규화를 안 거쳐, 손으로 푼 머지의
+            // `Bug`·`#bug` 가 그대로 온다. 안 접으면 거름망에서는 한 태그인 것이 목록에 셋으로 선다.
+            let tags: std::collections::BTreeSet<String> = issues
+                .iter()
+                .flat_map(|i| i.tags.iter().map(|t| crate::model::normalize_tag(t)))
+                .filter(|t| !t.is_empty())
+                .collect();
+            tags.into_iter().map(|t| Offer { shown: t.clone(), put: t, note: None }).collect()
         }
         Field::Milestone => {
             let mut stones: Vec<&Issue> = issues.iter().filter(|i| i.kind == Kind::Milestone).collect();
@@ -345,6 +372,38 @@ mod tests {
         assert_eq!(slot_of("grep=\"a tag=|"), None, "따옴표 안의 tag= 가 항목으로 읽혔다");
     }
 
+    /// **이미 연 따옴표 안에서는 다시 묶지 않는다** — 쉼표 앞의 첫 값만 갈 때 `first` 가 서면 `""Kim Lee",bob"` 처럼
+    /// 짝이 깨진다. 묶을 수 있는 것은 갈 자리가 `=` 바로 뒤에서 시작할 때뿐이다.
+    #[test]
+    fn a_value_inside_an_open_quote_is_not_quoted_again() {
+        assert_eq!(
+            slot_of("assignee=\"Ki|,bob\""),
+            Some(("assignee".into(), Field::Assignee, "Ki".into(), "Ki".into(), false))
+        );
+        assert_eq!(
+            slot_of("assignee=\"bob,Ki|\""),
+            Some(("assignee".into(), Field::Assignee, "Ki".into(), "Ki".into(), false))
+        );
+        // 따옴표 없는 첫 값은 쉼표가 뒤에 있어도 `=` 바로 뒤라 묶을 수 있다.
+        assert_eq!(
+            slot_of("assignee=Ki|,bob"),
+            Some(("assignee".into(), Field::Assignee, "Ki".into(), "Ki".into(), true))
+        );
+    }
+
+    /// **닫지 않은 따옴표의 갈 자리는 커서가 선 낱말까지다** — 줄 끝까지 가면 커서 뒤에 친 항목이 고른 값에 먹힌다.
+    #[test]
+    fn an_unclosed_quote_does_not_swallow_what_follows_the_cursor() {
+        assert_eq!(
+            slot_of("assignee=\"Ki| tag=bug"),
+            Some(("assignee".into(), Field::Assignee, "Ki".into(), "\"Ki".into(), true))
+        );
+        assert_eq!(
+            slot_of("assignee=\"Kim L|e tag=bug"),
+            Some(("assignee".into(), Field::Assignee, "Kim L".into(), "\"Kim Le".into(), true))
+        );
+    }
+
     fn offer(shown: &str, put: &str) -> Offer {
         Offer { shown: shown.into(), put: put.into(), note: None }
     }
@@ -369,6 +428,9 @@ mod tests {
         assert_eq!(quoted("Kim Lee", true), "\"Kim Lee\"");
         assert_eq!(quoted("say \"hi\"", true), "'say \"hi\"'");
         assert_eq!(quoted("Kim Lee", false), "Kim Lee");
+        // 따옴표로 시작하는 값은 맨몸이면 문법이 여는 따옴표로 읽어 벗긴다.
+        assert_eq!(quoted("'Bob'", true), "\"'Bob'\"");
+        assert_eq!(quoted("\"Bob\"", true), "'\"Bob\"'");
     }
 
     #[test]
@@ -407,17 +469,16 @@ mod tests {
         let mut c = row("t-3", Kind::Issue);
         c.assignee = Some("anna".into());
         let d = row("t-4", Kind::Issue);
+        // 메일 없는 이름은 글자 그대로 가른다 — 거름망(`query::is_assignee`)이 이름을 대소문자째 잰다.
+        let mut e = row("t-5", Kind::Issue);
+        e.assignee = Some("Anna".into());
         let got: Vec<(String, String)> =
-            offers(Field::Assignee, &[a, b, c, d], Lang::En).into_iter().map(|o| (o.shown, o.put)).collect();
-        assert_eq!(
-            got,
-            [
-                ("me".into(), "me".into()),
-                ("none".into(), "none".into()),
-                ("anna".into(), "anna".into()),
-                ("레이븐 (raven@x.io)".into(), "raven@x.io".into()),
-            ]
-        );
+            offers(Field::Assignee, &[a, b, c, d, e], Lang::En).into_iter().map(|o| (o.shown, o.put)).collect();
+        assert_eq!(got.len(), 5, "{got:?}");
+        assert_eq!(got[..2], [("me".into(), "me".into()), ("none".into(), "none".into())]);
+        assert!(got.contains(&("anna".into(), "anna".into())), "{got:?}");
+        assert!(got.contains(&("Anna".into(), "Anna".into())), "이름만 다른 대소문자가 한 줄로 접혔다: {got:?}");
+        assert_eq!(got[4], ("레이븐 (raven@x.io)".into(), "raven@x.io".into()));
     }
 
     #[test]
@@ -426,7 +487,10 @@ mod tests {
         a.tags = vec!["ui".into(), "bug".into()];
         let mut b = row("t-2", Kind::Issue);
         b.tags = vec!["bug".into()];
-        let tags: Vec<String> = offers(Field::Tag, &[a, b], Lang::En).into_iter().map(|o| o.put).collect();
+        // 읽기는 정규화를 안 거친다 — 손으로 푼 머지의 `Bug`·`#bug` 도 거름망에서는 한 태그다.
+        let mut c = row("t-3", Kind::Issue);
+        c.tags = vec!["Bug".into(), "#bug".into(), " ".into()];
+        let tags: Vec<String> = offers(Field::Tag, &[a, b, c], Lang::En).into_iter().map(|o| o.put).collect();
         assert_eq!(tags, ["bug", "ui"]);
 
         let old = row("t-9", Kind::Milestone);
@@ -446,7 +510,10 @@ mod tests {
         );
     }
 
-    /// 담당 둘(레이븐·joseph), 태그 셋(bug·docs·ui), 마일스톤 하나인 탐색기.
+    /// 담당 셋(레이븐·joseph·메일 없는 Kim Lee), 태그 셋(bug·docs·ui), 마일스톤 하나인 탐색기.
+    ///
+    /// **보는 사람을 박아 둔다** — 예의 `assignee=me` 는 사람을 푼다. 안 박으면 사람을 모르는 기계(CI)에서 `me` 를
+    /// 거절해 예 시험이 붉어지고, 아는 기계에서는 시험이 그 사람을 묻는 프로세스를 띄운다.
     fn explorer() -> App {
         let mut a = row("argos-0001", Kind::Issue);
         (a.assignee, a.assignee_email) = (Some("레이븐".into()), Some("raven@x.io".into()));
@@ -455,8 +522,12 @@ mod tests {
         (b.assignee, b.assignee_email) = (Some("joseph".into()), Some("jo@x.io".into()));
         b.tags = vec!["ui".into()];
         let m = row("argos-0003", Kind::Milestone);
+        let mut k = row("argos-0004", Kind::Issue);
+        k.assignee = Some("Kim Lee".into());
         let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
-        App::new(vec![a, b, m], cfg, crate::nav::Path::new())
+        let mut app = App::new(vec![a, b, m, k], cfg, crate::nav::Path::new());
+        app.site.me = Some("레이븐 (raven@x.io)".into());
+        app
     }
 
     fn press(a: &mut App, code: ratatui::crossterm::event::KeyCode) {
@@ -510,6 +581,81 @@ mod tests {
         }
         press(&mut a, KeyCode::Enter);
         assert_eq!(typed(&a), "tag=bug ", "커서가 선 값을 통째로 안 갈았다");
+    }
+
+    /// **겨눈 줄은 칸을 다시 열거나 같은 글로 돌아와도 되살아나지 않는다** — 글과 커서만으로 가르던 때는 닫았다 다시
+    /// 열어 같은 `tag=` 를 치면, 또 한 자 쳤다 지우면 옛 줄이 겨눠져 Enter 가 첫 줄 아닌 값을 넣었다.
+    #[test]
+    fn the_aim_does_not_come_back_on_the_same_text() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        press(&mut a, KeyCode::Down);
+        press(&mut a, KeyCode::Down);
+        press(&mut a, KeyCode::Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "tag=bug ", "다시 연 칸에 옛 겨눔이 되살아났다");
+
+        press(&mut a, KeyCode::Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        press(&mut a, KeyCode::Down);
+        type_in(&mut a, "x");
+        press(&mut a, KeyCode::Backspace);
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "tag=bug ", "쳤다 지운 글에 옛 겨눔이 되살아났다");
+    }
+
+    /// **창이 낮아 안내 칸이 한 줄도 못 서면 Enter 는 건다** — 안 보이는 목록이 Enter 를 먹으면 보이지 않던 값이
+    /// 칸에 들어간다. 위·아래도 안 보이는 줄을 옮기지 않는다.
+    #[test]
+    fn a_list_the_window_cannot_show_does_not_take_enter() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        let screen = super::super::draw::tests::render(&mut a, 100, 7).join("\n");
+        assert!(!screen.contains("> bug"), "낮은 창에 목록이 섰다\n{screen}");
+        assert!(a.offered().is_none(), "안 그린 목록이 선 것으로 읽힌다");
+        press(&mut a, KeyCode::Down);
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(a.mode, Mode::Browse, "안 보이는 목록이 Enter 를 먹었다");
+        // 창이 다시 넓어지면 목록이 돌아온다.
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        super::super::draw::tests::render(&mut a, 100, 30);
+        assert!(a.offered().is_some());
+    }
+
+    /// 고른 값이 따옴표 안팎에서 짝을 지킨다 — 빈칸 든 이름은 `=` 바로 뒤에서만 묶고, 닫지 않은 따옴표 뒤에 친
+    /// 항목은 남는다.
+    #[test]
+    fn putting_a_value_keeps_the_quotes_balanced_and_the_rest_of_the_line() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "assignee=Kim");
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee\" ");
+
+        // 닫지 않은 따옴표 뒤에 이미 친 항목은 고른 값에 안 먹힌다.
+        a.mode = Mode::Filter(Input::new("assignee=\"Ki tag=bug"));
+        for _ in 0.." tag=bug".len() {
+            press(&mut a, KeyCode::Left);
+        }
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee\" tag=bug");
+
+        // 따옴표 안의 첫 값을 갈아도 다시 묶지 않는다.
+        a.mode = Mode::Filter(Input::new("assignee=\"Ki,jo@x.io\""));
+        for _ in 0..",jo@x.io\"".len() {
+            press(&mut a, KeyCode::Left);
+        }
+        press(&mut a, KeyCode::Enter);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee,jo@x.io\"");
     }
 
     /// 다 친 값이면 목록이 안 선다 — `milestone=none` 의 Enter 가 값을 다시 넣지 않고 건다.

@@ -139,8 +139,8 @@ per project — and keeps that choice for the next run. `SPC v i` hides the
 ideas, and a card that is not yours says whose it is.
 `SPC f` filters with the same `key=value` words as `--filter`. While you type,
 the keys it takes and a few examples stand above the field, and in the value of
-`assignee=`, `tag=` or `milestone=` the values this tracker holds do — typing
-narrows them, Up and Down pick one and Enter puts it in.
+`assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
+do — typing narrows them, Up and Down pick one and Enter puts it in.
 
 Done work that has sat in done for two weeks is the archive. It is not removed
 and nothing is stored for it — moai reads it off the column and the clock each

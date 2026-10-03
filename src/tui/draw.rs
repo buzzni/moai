@@ -163,14 +163,21 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     });
     // **거름망을 적는 동안은 메뉴 자리에 안내가 선다**(moai-h2rh, 2026-10-03 사용자 결정) — 쓸 수 있는 항목과 예, 커서가
     // 값 자리면 고를 값이다. 메뉴처럼 몸통을 밀어 올리고 덮지 않는다. 줄 수도 메뉴와 같은 자로 몸통의 몫을 먼저 남긴다.
-    let hint = matches!(app.mode, Mode::Filter(_))
-        .then(|| {
-            let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
-            hint_lines(app, (area.width as usize).saturating_sub(2), menu::rows_for(left).min(super::hint::ROWS))
-        })
-        .filter(|lines| !lines.is_empty());
+    //
+    // **받은 줄 수는 적어 둔다**(`App::hint_room`) — 0 이면 값 목록이 안 서는 것으로 쳐서 Enter 가 거름망을 건다. 창이
+    // 낮아 안 그린 목록이 Enter 를 먹으면 보이지 않던 값이 칸에 들어간다.
+    let hint = if matches!(app.mode, Mode::Filter(_)) {
+        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
+        let room = menu::rows_for(left).min(super::hint::ROWS);
+        app.hint_room = Some(room);
+        Some(hint_lines(app, (area.width as usize).saturating_sub(2), room)).filter(|(lines, _)| !lines.is_empty())
+    } else {
+        None
+    };
+    // 값 목록이 섰는지는 위에서 그린 것으로 읽는다 — 안내 줄이 따로 물으면 같은 목록을 한 그림에 두 번 모은다.
+    let listing = hint.as_ref().is_some_and(|(_, listing)| *listing);
     let panel_h = match &hint {
-        Some(lines) => lines.len() as u16 + 1,
+        Some((lines, _)) => lines.len() as u16 + 1,
         None => open_menu.as_ref().map_or(0, |(_, g, _)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 }),
     };
     let [head, top, note, body, panel, keys] = Layout::vertical([
@@ -255,7 +262,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     if let Some((_, grid, _)) = &open_menu {
         menu_panel(f, grid, panel);
     }
-    if let Some(lines) = hint {
+    if let Some((lines, _)) = hint {
         hint_panel(f, lines, panel);
     }
     // **도는 것이 화면에 남았는지는 다 그린 버퍼에서 읽는다**(moai-5jh6). 목록은 창 밖
@@ -297,16 +304,17 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                 f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::LightRed)))), more);
             }
             // 값 목록이 서 있으면 Enter 는 값을 넣는다 — 안내도 그 말을 한다(moai-h2rh).
-            let help = match app.offered() {
-                Some(_) => fill(
+            let help = if listing {
+                fill(
                     say(lang, "tui.hint.pick"),
                     &[
                         ("keys", &labels(PROMPT, &[Prompt::Up, Prompt::Down])),
                         ("ok", &label(PROMPT, Prompt::Apply)),
                         ("cancel", &label(PROMPT, Prompt::Cancel)),
                     ],
-                ),
-                None => prompt_help(say(lang, "tui.prompt.hang"), lang),
+                )
+            } else {
+                prompt_help(say(lang, "tui.prompt.hang"), lang)
             };
             prompt(f, line, say(lang, "tui.prompt.filter"), q, error, &help)
         }
@@ -4196,9 +4204,10 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
 ///
 /// 항목은 `query::KEYS` 를 그대로 늘어놓는다 — 문법이 항목을 더하면 여기도 따라온다. 예는 [`super::hint::EXAMPLES`]
 /// 한 곳에 있다.
-fn hint_lines(app: &App, width: usize, room: usize) -> Vec<Line<'static>> {
+///
+/// 둘째 값은 **값 목록을 그렸는가**다 — 칸 밑의 안내 줄이 그것으로 Enter 가 넣는지 거는지를 댄다.
+fn hint_lines(app: &App, width: usize, room: usize) -> (Vec<Line<'static>>, bool) {
     let lang = app.site.lang;
-    let pad = |s: &str, lead: usize| format!("{s}{}", " ".repeat(lead.saturating_sub(crate::text::width(s))));
     let Some((slot, offers)) = app.offered() else {
         let (heads, eg) = (say(lang, "tui.hint.keys"), say(lang, "tui.hint.examples"));
         let lead = crate::text::width(heads).max(crate::text::width(eg));
@@ -4220,21 +4229,26 @@ fn hint_lines(app: &App, width: usize, room: usize) -> Vec<Line<'static>> {
             let name = if i == 0 { eg } else { "" };
             vec![Span::styled(pad(name, lead), dim()), Span::raw("  "), Span::raw(*ex)]
         });
-        return keys.chain(examples).take(room).map(|spans| fit(Line::from(spans), width)).collect();
+        return (keys.chain(examples).take(room).map(|spans| fit(Line::from(spans), width)).collect(), false);
     };
-    let Mode::Filter(q) = &app.mode else { return Vec::new() };
+    let Mode::Filter(q) = &app.mode else { return (Vec::new(), false) };
     let aimed = app.offer_aim.row(q, offers.len());
     let rows = offers.len().min(room);
     let top = super::hint::window(aimed, rows);
-    // 다 안 들면 몇째를 겨눴는지 둘째 줄 이름표 자리에 댄다 — 말없이 잘리면 목록이 그것뿐인 줄 안다.
+    // 다 안 들면 몇째를 겨눴는지 둘째 줄 이름표 자리에 댄다 — 말없이 잘리면 목록이 그것뿐인 줄 안다. **한 줄뿐이면
+    // 둘째 줄이 없으니** 항목 이름 곁에 붙인다 — 그때가 가장 많이 잘린 때다.
     let count = if offers.len() > rows { format!("{}/{}", aimed + 1, offers.len()) } else { String::new() };
-    let lead = crate::text::width(slot.key).max(crate::text::width(&count));
-    offers[top..top + rows]
+    let (head, count) = match rows {
+        1 if !count.is_empty() => (format!("{} {count}", slot.key), String::new()),
+        _ => (slot.key.to_string(), count),
+    };
+    let lead = crate::text::width(&head).max(crate::text::width(&count));
+    let lines = offers[top..top + rows]
         .iter()
         .enumerate()
         .map(|(i, o)| {
             let name = match i {
-                0 => Span::styled(pad(slot.key, lead), bold()),
+                0 => Span::styled(pad(&head, lead), bold()),
                 1 => Span::styled(pad(&count, lead), dim()),
                 _ => Span::raw(pad("", lead)),
             };
@@ -4250,7 +4264,9 @@ fn hint_lines(app: &App, width: usize, room: usize) -> Vec<Line<'static>> {
             }
             fit(Line::from(spans), width)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let listing = !lines.is_empty();
+    (lines, listing)
 }
 
 /// [`hint_lines`] 를 메뉴와 같은 틀(윗선 하나)에 그린다.
