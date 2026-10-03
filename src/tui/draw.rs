@@ -1251,13 +1251,14 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 한 줄은 `~/.local/bin` 만 올려, 다른 자리에 선 moai 는 그 줄을 치고도 옛 판을 돌렸다.
     // 그 줄로 못 올리는 바이너리(소스에서 지은 판 따위)에는 안 댄다. **급하지 않다** — 고칠 것이
     // 아니라 받을 것이 있다는 말이다. 맨 끝에 서는 것도 그래서다: 좁은 창에서 잘려도 판 줄이
-    // 여전히 새 판을 말한다.
+    // 여전히 새 판의 번호를 댄다 — 못 물은 날(`Seen::Stale`)에는 "나왔다" 가 아니라 "며칠 전에
+    // 본 판" 으로 댄다(moai-ggxi).
     //
     // **명령 줄 자체는 나갈 때 찍는다**(리뷰, 2026-09-29 사용자 결정). 그 줄은 104칸이라 80칸
     // 창의 배너에서 늘 잘렸고, 앞에 경고가 서면 162칸이 들었다. 배너는 새 판과 나갈 때 줄이
     // 선다는 것만 말하고, 줄은 터미널을 걷은 뒤 셸에 남는다([`App::upgrade_note`]) — 거기서는
     // 잘리지 않고 그대로 복사된다.
-    if let (crate::latest::Seen::Newer { tag }, Some(_)) = (app.latest(), app.upgrade()) {
+    if let (Some(tag), Some(_)) = (app.latest().newer(), app.upgrade()) {
         parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
         soft += 1;
     }
@@ -1270,8 +1271,9 @@ fn banner(app: &App) -> Option<(String, bool)> {
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
 ///
-/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 못 읽은 저널이 있으면 셋째 줄이
-/// 그것을 댄다(moai-pvpb.6g6, [`journal_said`]).
+/// 파이프 오른쪽은 사람·판(moai-56jf) 두 줄과 번호 붙은 프로젝트(moai-mr83)다. 판 줄의 꼬리가 번호 칸을 밀어내면
+/// 그 꼬리가 아랫줄로 내려오고(moai-ggxi), 못 읽은 저널이 있으면 그다음 줄이 그것을 댄다(moai-pvpb.6g6,
+/// [`journal_said`]).
 ///
 /// 돌려주는 것은 둘이다 — **빛**("지금 선 프로젝트에 빛이 섰는가", [`screen`] 이 `App::spun` 에
 /// 함께 센다)과 **번호**("프로젝트 번호를 실제로 적었는가"). 번호는 키 바가 읽는다(리뷰):
@@ -1283,7 +1285,8 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 따로 맞추면 줄끼리 어긋나 그림이 깨진다. 문구 줄이 가장 넓어 그 줄은 제자리다.
     let art = &LOGO[..LOGO.len() - 1];
     let art_in = (logo_w - art.iter().map(|l| crate::text::width(l)).max().unwrap_or(0)) / 2;
-    let mut told = Vec::from(told_of(app));
+    let (told, tail) = told_of(app);
+    let mut told = Vec::from(told);
     // 번호 붙은 프로젝트는 재기 전에 한 덩이씩 짓는다 — **재는 쪽과 그리는 쪽이 같은 것을
     // 본다.** 폭만 따로 세면 로고를 물릴지 정한 자와 실제로 선 칸이 갈린다.
     let tags = numbered_projects(app);
@@ -1300,6 +1303,17 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
     // 만큼이 그 줄의 몫이고, 자리 글이 그 안에 맞춰 줄어든다([`journal_said`]). 자리 글 몫만 묶던 판은 줄이 60칸
     // 남짓이 되어, 80칸에서 `<1>` 부터의 번호를 통째로 지웠다(리뷰).
     let room = (at.width as usize).saturating_sub(1 + HEADER_GAP + want + HEADER_LABEL_W);
+    // **판 줄의 꼬리(지난 답과 들은 때)는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02
+    // 사용자 결정). 못 물은 줄은 63~67칸이라 80칸에서 번호 칸을 통째로 지웠다 — 자르면 들은 때가, 까닭을 빼면
+    // 까닭이 사라지므로 접는다. 남는 폭이 넉넉하면 한 줄 그대로라, 넓은 창의 헤더는 전과 같다.
+    if let Some(tail) = tail {
+        let joined = format!("{} · {tail}", told[1].1);
+        if crate::text::width(&joined) <= room {
+            told[1].1 = joined;
+        } else {
+            told.push(("", tail));
+        }
+    }
     told.extend(journal_said(app, room).map(|said| ("Journal", said)));
     // 라벨 칸은 `<라벨 칸> : ` 로 박았다 — [`HEADER_LABEL`] 칸과 " : " 세 칸.
     let told_w = told.iter().map(|(_, said)| HEADER_LABEL_W + crate::text::width(said)).max().unwrap_or(0);
@@ -1321,7 +1335,9 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
             spans.push(Span::styled("│", dim()));
             if let Some((label, said)) = told.get(n) {
                 spans.push(Span::raw(" ".repeat(HEADER_GAP)));
-                spans.push(Span::styled(format!("{} : ", pad(label, HEADER_LABEL)), dim()));
+                // 라벨 없는 줄은 윗줄의 이음이다 — 글은 윗줄 글과 같은 칸에서 시작한다.
+                let colon = if label.is_empty() { "   " } else { " : " };
+                spans.push(Span::styled(format!("{}{colon}", pad(label, HEADER_LABEL)), dim()));
                 spans.push(Span::raw(said.clone()));
             }
             Line::from(spans)
@@ -1448,10 +1464,13 @@ fn spans_width(spans: &[Span]) -> usize {
 /// **사람은 `App` 이 들고 있는 것을 받아 쓴다**(`App::told_user`). 여기서 `model::actor` 를
 /// 바로 부르면 `git config` 가 프레임마다 프로세스로 두 번 뜬다 — 그리는 함수는 키 하나,
 /// 깜빡임 한 번마다 도는 자리다.
-fn told_of(app: &mut App) -> [(&'static str, String); 2] {
-    let said = version_said(app.site.lang, app.latest());
+///
+/// **판 줄의 꼬리는 따로 돌려준다**([`version_said`]) — 한 줄로 이을지 아랫줄로 내릴지는 번호 칸을 잰
+/// [`header`] 가 정한다.
+fn told_of(app: &mut App) -> ([(&'static str, String); 2], Option<String>) {
+    let (said, tail) = version_said(app.site.lang, app.latest(), &app.site.now);
     let user = app.told_user().to_string();
-    [("User", user), ("Version", said)]
+    ([("User", user), ("Version", said)], tail)
 }
 
 /// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래([`crate::store::Unread::kind`] —
@@ -1514,16 +1533,40 @@ const JOURNAL_AT_W: usize = 32;
 /// **빌려 받는다**(리뷰). `Seen::Unasked` 가 낱말 없는 변형이던 때는 넘기며 베끼는 것이 공짜였는데,
 /// `Why` 가 `said` 를 들면서 프레임마다 그 글을 한 번씩 새로 담게 됐다 — 읽는 것은 `Copy` 인
 /// `kind` 뿐이라 통째로 버려지는 담기다.
-fn version_said(lang: Lang, latest: &crate::latest::Seen) -> String {
+///
+/// **넷 모두 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정) — 못 물은 것은
+/// 지난번에 들은 답이 있을 때만, 그 답을 들은 때와 함께 못 물었다는 말 **뒤에** 단다. 지난
+/// 값이라는 것이 글에 보여야 해서다. 지난 답이 없으면 번호를 안 댄다. 들은 때는 `now` 로 재고,
+/// 그 값은 [`App`] 이 든 시각이라 여기서 시계를 안 읽는다.
+///
+/// **지난 답은 꼬리로 따로 낸다** — `(줄, 꼬리)`. 이으면 `줄 · 꼬리` 고, 좁으면 [`header`] 가 꼬리를
+/// 아랫줄로 내린다(moai-ggxi 리뷰). 꼬리는 [`Seen::Stale`](crate::latest::Seen::Stale) 에만 선다.
+fn version_said(lang: Lang, latest: &crate::latest::Seen, now: &str) -> (String, Option<String>) {
     use crate::latest::Seen;
     let mine = env!("CARGO_PKG_VERSION");
-    let said = match latest {
-        Seen::Newer { tag } => crate::i18n::fill(say(lang, "tui.version.newer"), &[("tag", tag)]),
-        Seen::Same => say(lang, "tui.version.same").to_string(),
-        Seen::Ahead => say(lang, "tui.version.ahead").to_string(),
-        Seen::Unasked(why) => unchecked_said(lang, why.kind).to_string(),
+    let (said, tail) = match latest {
+        Seen::Newer { tag } => (fill(say(lang, "tui.version.newer"), &[("tag", tag)]), None),
+        Seen::Same { tag } => (fill(say(lang, "tui.version.same"), &[("tag", tag)]), None),
+        Seen::Ahead { tag } => (fill(say(lang, "tui.version.ahead"), &[("tag", tag)]), None),
+        Seen::Stale { why, tag, heard_at } => {
+            // 하루 단위로 잰다 — 창이 하루라 그보다 잘게 재도 사람이 할 일은 같다. 때를 못 읽으면
+            // 언제인지 모르는 것이지 오늘 본 것이 아니다. **크게 앞선 때도 모르는 것이다**(리뷰) —
+            // `days_since` 는 앞선 때를 0 으로 눌러 손으로 적은 2099 가 "오늘" 이 되고, 실패한 물음이
+            // 그 때를 날마다 들고 간다. 창([`crate::latest::Held::fresh`])과 같은 슬랙을 넘으면 안 믿는다.
+            let ahead = crate::model::parse_rfc3339(heard_at)
+                .zip(crate::model::parse_rfc3339(now))
+                .is_some_and(|(at, now)| at - now > crate::model::FUTURE_SLACK_SECS);
+            let seen = match crate::model::days_since(heard_at, now).filter(|_| !ahead) {
+                Some(0) => fill(say(lang, "tui.version.seen.today"), &[("tag", tag)]),
+                Some(1) => fill(say(lang, "tui.version.seen.day"), &[("tag", tag)]),
+                Some(d) => fill(say(lang, "tui.version.seen.days"), &[("tag", tag), ("d", &d.to_string())]),
+                None => fill(say(lang, "tui.version.seen.earlier"), &[("tag", tag)]),
+            };
+            (unchecked_said(lang, why.kind).to_string(), Some(seen))
+        }
+        Seen::Unasked(why) => (unchecked_said(lang, why.kind).to_string(), None),
     };
-    format!("{mine} · {said}")
+    (format!("{mine} · {said}"), tail)
 }
 
 /// 못 물은 까닭마다 다른 글 — 키 하나(moai-580l).
@@ -7102,6 +7145,63 @@ pub(super) mod tests {
         }
     }
 
+    /// **못 물은 줄의 꼬리는 번호 칸을 밀어낼 때만 아랫줄로 내린다**(moai-ggxi 리뷰, 2026-10-02 사용자 결정).
+    /// 63~67칸짜리 못 물은 줄이 80칸에서 `<0>` 부터의 번호를 통째로 지웠다 — 번호는 숫자 키를 대는 유일한 자리다.
+    /// 접어도 까닭과 들은 때는 다 서고, 꼬리는 판 줄의 글과 같은 칸에서 시작한다. 번호 칸이 없거나 넓은 창에서는
+    /// 한 줄 그대로다. 저널 줄은 그 아래로 밀린다.
+    #[test]
+    fn a_stale_version_line_folds_before_it_pushes_out_the_project_numbers() {
+        use super::super::layer::{At, Look, Shut};
+        let mine = env!("CARGO_PKG_VERSION");
+        let mut a = app();
+        a.site.lang = Lang::En;
+        a.site.now = "2026-09-21T09:00:00Z".into();
+        a.identify = |_, _| Ok(crate::model::Actor { name: "레이븐".into(), email: "raven@buzzni.com".into() });
+        a.set_latest(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        let head = |a: &mut App, w| render(a, w, 30)[..6].to_vec();
+        let at = |rows: &[String], text: &str| rows.iter().position(|l| l.contains(text));
+        let tail = "v0.3.0 seen 2 days ago";
+        // 번호 칸이 없으면 80칸에서도 한 줄이다.
+        let rows = head(&mut a, 80);
+        assert!(
+            rows.iter().any(|l| l.contains(&format!("Version : {mine} · latest not checked (no network) · {tail}"))),
+            "번호 칸이 없는데 접었다\n{}",
+            rows.join("\n")
+        );
+        let shut = Look::Shut { state: Shut::Uninit, said: "· init 전".into() };
+        a.layer = Some(super::super::layer::fake(vec![("moai-supervise", "/w/moai-supervise", shut)], At::Layer));
+        a.journals = || {
+            vec![crate::store::Unread {
+                root: "/w/argos".into(),
+                at: "/w/argos/.moai/journal/raven_buzzni_com.jsonl".into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied (os error 13)".into() },
+            }]
+        };
+        let rows = head(&mut a, 80);
+        let all = rows.join("\n");
+        assert!(all.contains("<0> all") && all.contains("<1> moai-supervise"), "못 물은 줄이 번호를 밀어냈다\n{all}");
+        let version = at(&rows, &format!("Version : {mine} · latest not checked (no network)")).expect(&all);
+        let folded = at(&rows, tail).unwrap_or_else(|| panic!("들은 때가 잘렸다\n{all}"));
+        assert_eq!(folded, version + 1, "꼬리가 판 줄 바로 아래가 아니다\n{all}");
+        let col = |row: &str, text: &str| row.find(text).map(|b| crate::text::width(&row[..b]));
+        assert_eq!(
+            col(&rows[folded], tail),
+            col(&rows[version], mine),
+            "꼬리가 판 줄의 글과 다른 칸에서 시작한다\n{all}"
+        );
+        assert!(at(&rows, "Journal : ").is_some_and(|j| j > folded), "저널 줄이 꼬리를 덮었다\n{all}");
+        // 저널 줄은 제 자리 글의 가운데를 `…` 로 줄인다(`journal_at`) — 재는 것은 판 줄과 꼬리뿐이다.
+        assert!(![version, folded].iter().any(|&r| rows[r].contains('…')), "접었는데도 잘렸다\n{all}");
+        // 넓은 창은 번호 칸이 있어도 한 줄이다 — 넓은 창의 헤더는 전과 같다.
+        let wide = head(&mut a, 140);
+        assert!(
+            wide.iter().any(|l| l.contains(&format!("(no network) · {tail}")))
+                && wide.join("\n").contains("<1> moai-supervise"),
+            "넓은 창에서 접었다\n{}",
+            wide.join("\n")
+        );
+    }
+
     /// **목록에 없는 시간대로 연 창**(moai-pvpb.1yh 리뷰) — 아무 줄도 안 가리키는 동안에도 커서 칸이 비어 있어 첫걸음에
     /// 이름이 밀리지 않고, 늘 서는 굴림 표시가 아랫줄의 말을 덮지 않아 80칸에서도 그냥 Enter 가 무엇을 하는지 보인다.
     /// 거른 글에 하나도 안 걸리면 "자료가 없다" 가 아니라 맞는 이름이 없다고 댄다.
@@ -7181,17 +7281,28 @@ pub(super) mod tests {
     fn the_version_line_says_which_of_the_four_it_is() {
         use crate::latest::Seen;
         let mine = env!("CARGO_PKG_VERSION");
-        let said = |seen| {
+        // 시험의 `App` 은 한국어로 선다(moai-9it4) — 글자를 견주는 줄은 영어로 못박고, 넷이 서로
+        // 다른 글인지는 두 말 모두에서 잰다(이 시험이 원래 한국어 표를 재던 자리다).
+        let said = |lang, seen| {
             let mut a = app();
+            a.site.lang = lang;
             a.set_latest(seen);
             let lines = render(&mut a, 100, 24);
             lines[..6].join("\n")
         };
-        let newer = said(Seen::Newer { tag: "v9.9.9".into() });
+        let four = |lang| {
+            [
+                said(lang, Seen::Newer { tag: "v9.9.9".into() }),
+                said(lang, Seen::Same { tag: "v7.7.7".into() }),
+                said(lang, Seen::Ahead { tag: "v0.0.1".into() }),
+                said(lang, unasked_for(Trouble::NotAsked)),
+            ]
+        };
+        let [newer, same, ahead, unasked] = four(Lang::En);
         assert!(newer.contains("v9.9.9"), "새 판의 태그가 없다\n{newer}");
-        let same = said(Seen::Same);
-        let ahead = said(Seen::Ahead);
-        let unasked = said(unasked_for(Trouble::NotAsked));
+        // **최신·앞섰다도 아는 최신 판의 번호를 댄다**(moai-ggxi, 2026-10-02 사용자 결정).
+        assert!(same.contains("latest (v7.7.7)"), "최신 판의 번호가 없다\n{same}");
+        assert!(ahead.contains("ahead of the latest release (v0.0.1)"), "앞섰을 때 최신 판의 번호가 없다\n{ahead}");
         for (what, head) in [("새 판", &newer), ("같은 판", &same), ("앞선 판", &ahead), ("못 물었다", &unasked)]
         {
             assert!(head.contains(&format!("Version : {mine}")), "{what} 에서 내 판이 사라졌다\n{head}");
@@ -7200,11 +7311,13 @@ pub(super) mod tests {
         let cut = |head: &str| {
             head.lines().find(|l| l.contains("Version")).map(|l| l.split("Version").nth(1).unwrap_or("").to_string())
         };
-        let four: Vec<_> = [&newer, &same, &ahead, &unasked].iter().filter_map(|h| cut(h)).collect();
-        assert_eq!(four.len(), 4, "판 줄을 못 찾았다");
-        for (i, a) in four.iter().enumerate() {
-            for b in &four[i + 1..] {
-                assert_ne!(a.trim(), b.trim(), "두 소식이 같은 글로 선다");
+        for (lang, heads) in [(Lang::En, [newer, same, ahead, unasked]), (Lang::Ko, four(Lang::Ko))] {
+            let four: Vec<_> = heads.iter().filter_map(|h| cut(h)).collect();
+            assert_eq!(four.len(), 4, "{lang:?}: 판 줄을 못 찾았다");
+            for (i, a) in four.iter().enumerate() {
+                for b in &four[i + 1..] {
+                    assert_ne!(a.trim(), b.trim(), "{lang:?}: 두 소식이 같은 글로 선다");
+                }
             }
         }
     }
@@ -7212,9 +7325,10 @@ pub(super) mod tests {
     /// **새 판이 나왔을 때만 배너가 그것을 말하고, 올리는 줄은 나갈 때 낸다**(moai-8rmw.665,
     /// 2026-09-29 사용자 결정). 판 줄은 나왔다는 것까지만 말할 자리고, 104칸짜리 명령 줄은 80칸
     /// 배너에서 늘 잘렸다 — 그래서 배너에는 명령이 **없어야** 하고, 줄은 `App::upgrade_note` 가
-    /// 통째로 든다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다. 나머지 세 경우
-    /// (`Seen::Same`·`Seen::Ahead`·`Seen::Unasked`)와, 도는 바이너리를 그 줄로 못 올리는 경우
-    /// (`App::upgrade` 가 `None`)에는 둘 다 서지 않는다.
+    /// 통째로 든다. 받을 것이 있다는 말이지 고칠 것이 아니라 `!` 를 안 단다. 같은 판·앞선 판·못
+    /// 물은 때(`Seen::Same`·`Seen::Ahead`·`Seen::Unasked`, 지난 태그가 새 판이 아닌 `Seen::Stale`)와,
+    /// 도는 바이너리를 그 줄로 못 올리는 경우(`App::upgrade` 가 `None`)에는 둘 다 서지 않는다. 지난
+    /// 태그가 새 판인 `Seen::Stale` 은 `Seen::newer` 가 새 판으로 읽어 둘 다 선다(moai-ggxi).
     #[test]
     fn a_newer_release_says_so_on_the_banner_and_leaves_the_line_for_the_quit() {
         use crate::latest::Seen;
@@ -7234,10 +7348,20 @@ pub(super) mod tests {
         assert!(!banner.contains('!'), "받을 것을 급한 것처럼 말한다\n{banner}");
         let note = note.expect("나갈 때 낼 글이 없다");
         assert!(note.contains("v9.9.9") && note.contains(&line), "도는 바이너리를 올리는 줄이 없다\n{note}");
-        for seen in [Seen::Same, Seen::Ahead, unasked_for(Trouble::NotAsked)] {
+        for seen in [
+            Seen::Same { tag: "v1.0.0".into() },
+            Seen::Ahead { tag: "v0.0.1".into() },
+            unasked_for(Trouble::NotAsked),
+            stale(Trouble::Offline, "v0.0.1", "2026-09-19T00:00:00Z"),
+        ] {
             let (banner, note) = both(seen, Some(&line));
             assert!(banner.is_empty() && note.is_none(), "새 판이 없는데 올리라고 한다\n{banner}\n{note:?}");
         }
+        // **못 물었어도 지난번에 들은 새 판은 그대로 받을 것이다**(moai-ggxi, 2026-10-02 사용자
+        // 결정) — 판 줄만 못 물었다고 말하고, 배너와 나갈 때 줄은 선다.
+        let (banner, note) = both(stale(Trouble::Offline, "v9999.0.0", "2026-09-19T00:00:00Z"), Some(&line));
+        assert!(banner.contains("v9999.0.0"), "네트워크가 끊겼다고 새 판을 잊었다\n{banner}");
+        assert!(note.is_some_and(|n| n.contains(&line)), "네트워크가 끊겼다고 올리는 줄을 잃었다");
         let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, None);
         assert!(banner.is_empty() && note.is_none(), "그 줄로 못 올리는 바이너리에 올리라고 한다\n{banner}");
     }
@@ -7245,6 +7369,107 @@ pub(super) mod tests {
     /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
     fn unasked_for(kind: Trouble) -> crate::latest::Seen {
         crate::latest::Seen::Unasked(crate::latest::Why { kind, said: String::new() })
+    }
+
+    /// 못 물었고 지난번에 `tag` 를 `heard_at` 에 들었다.
+    fn stale(kind: Trouble, tag: &str, heard_at: &str) -> crate::latest::Seen {
+        let why = crate::latest::Why { kind, said: String::new() };
+        crate::latest::Seen::Stale { why, tag: tag.into(), heard_at: heard_at.into() }
+    }
+
+    /// **못 물었으면 지난 답과 그 때를 못 물었다는 말 뒤에 단다**(moai-ggxi, 2026-10-02 사용자
+    /// 결정). 지난 값이라는 것이 글에 보여야 한다 — 번호만 달면 지금 들은 답으로 읽힌다. 지난
+    /// 답이 없으면 번호를 안 댄다. 들은 때는 `App` 이 든 시각으로 잰다.
+    #[test]
+    fn a_failed_ask_says_the_last_answer_and_when_it_was_heard() {
+        let mine = env!("CARGO_PKG_VERSION");
+        let line_at = |seen, now: &str, width| {
+            let mut a = app();
+            a.site.lang = Lang::En;
+            a.site.now = now.into();
+            a.set_latest(seen);
+            let head = render(&mut a, width, 24)[..6].join("\n");
+            head.lines()
+                .find_map(|l| l.split_once("Version : ").map(|(_, v)| v.trim().to_string()))
+                .unwrap_or_else(|| panic!("판 줄을 못 찾았다\n{head}"))
+        };
+        let line = |seen, now: &str| line_at(seen, now, 120);
+        let heard = "2026-09-19T08:00:00Z";
+        let at = |when| line(stale(Trouble::Offline, "v0.3.0", heard), when);
+        assert_eq!(
+            at("2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 2 days ago")
+        );
+        assert_eq!(
+            at("2026-09-20T09:00:00Z"),
+            format!("{mine} · latest not checked (no network) · v0.3.0 seen 1 day ago")
+        );
+        assert_eq!(at("2026-09-19T09:00:00Z"), format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
+        // 들은 때를 못 읽으면 모르는 것이지 오늘 본 것이 아니다.
+        let unknown = line(stale(Trouble::Offline, "v0.3.0", "어제"), "2026-09-21T09:00:00Z");
+        assert_eq!(unknown, format!("{mine} · latest not checked (no network) · v0.3.0 seen earlier"));
+        // **크게 앞선 들은 때도 모르는 것이다**(리뷰) — 손으로 적은 2099 가 날마다 "오늘" 로 서지
+        // 않는다. 슬랙(하루) 안쪽으로 앞선 것은 시계가 조금 어긋난 것이라 오늘로 읽는다.
+        let far = line(stale(Trouble::Offline, "v0.3.0", "2099-01-01T00:00:00Z"), "2026-09-21T09:00:00Z");
+        assert_eq!(far, format!("{mine} · latest not checked (no network) · v0.3.0 seen earlier"));
+        let near = line(stale(Trouble::Offline, "v0.3.0", "2026-09-21T21:00:00Z"), "2026-09-21T09:00:00Z");
+        assert_eq!(near, format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
+        // 까닭마다 글이 갈리던 것(moai-580l)은 그대로다 — 지난 답은 그 뒤에 붙을 뿐이다.
+        let limited = line(stale(Trouble::RateLimited, "v0.3.0", heard), "2026-09-21T09:00:00Z");
+        assert!(limited.starts_with(&format!("{mine} · latest not checked (rate limited) · ")), "{limited}");
+        // 처음 — 지난 답이 없으면 번호를 안 댄다.
+        assert_eq!(
+            line(unasked_for(Trouble::NotAsked), "2026-09-21T09:00:00Z"),
+            format!("{mine} · latest not checked")
+        );
+        // **80칸에서도 안 잘린다** — 갈래마다 두 자리 날 수를 단다. 넘치던 두 갈래의 까닭 글을 줄여
+        // 맞췄다(`bad answer`·`call failed`, 2026-10-02 사용자 결정). 잘려도 `latest not checked` 가 앞에
+        // 서므로 번호가 지금 들은 답으로 읽히지는 않지만, 지난 값이라는 말(들은 때)이 잘린다.
+        //
+        // **태그는 내 판과 같은 길이로 잰다**(리뷰). 남는 칸이 한 칸이라, 판에 두 자리 마디가 드는
+        // 날(0.10.0) 가장 긴 두 갈래가 넘친다 — `v0.3.0` 에 못박아 두면 그날도 이 시험은 파랗다.
+        let tag = format!("v{mine}");
+        for kind in [
+            Trouble::Offline,
+            Trouble::Timeout,
+            Trouble::RateLimited,
+            Trouble::Http,
+            Trouble::Tls,
+            Trouble::Garbled,
+            Trouble::Failed,
+        ] {
+            let long = line_at(stale(kind, &tag, heard), "2026-10-01T09:00:00Z", 80);
+            assert!(long.ends_with(&format!("{tag} seen 12 days ago")), "{kind:?} 가 80칸에서 잘렸다 — {long}");
+        }
+        // 갈래를 더하면 이 `match` 가 컴파일에서 위 목록을 댄다(`the_kind_words_are_the_contract` 의 자).
+        // 빠진 둘은 묻는 길(`latest::refresh`)이 태그 곁에 적지 않는 갈래다 — 손으로 고친 파일에서만 선다.
+        let _every = |kind: Trouble| match kind {
+            Trouble::Offline
+            | Trouble::Timeout
+            | Trouble::RateLimited
+            | Trouble::Http
+            | Trouble::Tls
+            | Trouble::Garbled
+            | Trouble::Failed
+            | Trouble::NotAsked
+            | Trouble::OddTag => (),
+        };
+    }
+
+    /// **한국어 판 줄도 같은 꼴이다** — 번호와 들은 때가 말묶음을 지나도 선다.
+    #[test]
+    fn the_korean_version_line_names_the_release_too() {
+        let line = |seen| {
+            let mut a = app();
+            a.site.lang = Lang::Ko;
+            a.site.now = "2026-09-21T09:00:00Z".into();
+            a.set_latest(seen);
+            render(&mut a, 120, 24)[..6].join("\n")
+        };
+        let same = line(crate::latest::Seen::Same { tag: "v0.3.0".into() });
+        assert!(same.contains("최신 (v0.3.0)"), "{same}");
+        let old = line(stale(Trouble::Offline, "v0.3.0", "2026-09-19T08:00:00Z"));
+        assert!(old.contains("최신 확인 안 함 (네트워크 없음) · 2일 전에 본 판 v0.3.0"), "{old}");
     }
 
     /// **못 물은 까닭마다 다른 글이 선다**(moai-580l). 부름 수를 태운 것과 네트워크가 없는 것은

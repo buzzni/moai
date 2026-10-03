@@ -42,6 +42,22 @@ does not tag — see `CONTRIBUTING.md`.
   the way `moai ready` decides it, and when who you are is unknown no card is
   set apart.
 
+### Changed
+
+- **The version line in the `moai tui` header names the latest release.** It
+  reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it
+  used to say only `latest` and `ahead of the latest release`. When the daily
+  check fails, the line no longer draws the last answer as if it were fresh: it
+  says the check did not happen, then the release it last heard and when —
+  `latest not checked (no network) · v0.3.0 seen 2 days ago`. With no earlier
+  answer it stays `latest not checked`. If the release last heard is newer than
+  yours, the banner and the upgrade line printed on quit still stand.
+  `latest.toml` gains a `heard_at` key and keeps `trouble` next to the tag; a
+  file written before reads as heard when it was asked. Two reasons were
+  shortened so the line fits 80 columns: `(bad answer)` and `(call failed)`.
+  When the project numbers need the room, the last answer moves to the row
+  under the version line instead of pushing them out.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
