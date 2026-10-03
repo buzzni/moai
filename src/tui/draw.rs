@@ -2058,9 +2058,13 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
     }
 
     app.list.fit(canvas.height as usize, laid.plan.height);
-    // 레인의 첫 카드면 그 레인의 머리줄까지 보인다([`super::board::Plan::span`]). 화면을 굴린 뒤 커서가 보이는지도 이
-    // 자로 잰다([`super::board::pull`]) — 보인다고 남긴 커서를 여기서 다시 드러내느라 굴린 화면을 되돌리지 않는다.
-    if let Some((top, h)) = laid.plan.span(app.cursor) {
+    // 커서의 카드가 안 보일 때만 굴린다 — 레인의 첫 카드면 그 레인의 머리줄까지 드러낸다([`super::board::Plan::span`]).
+    // 카드가 보이면 머리줄이 가렸어도 그대로다: 화면을 굴린 뒤 보이는 카드에 남긴 커서([`super::board::pull`])를 여기서
+    // 머리줄까지 드러내느라 굴린 화면을 되돌리지 않는다.
+    if let Some(p) = here
+        && !app.list.shows(p.top, p.height)
+        && let Some((top, h)) = laid.plan.span(app.cursor)
+    {
         app.list.reveal_span(top, h);
     }
     let offset = app.list.offset();
@@ -4589,6 +4593,20 @@ pub(super) mod tests {
         let lines = render(&mut a, 100, 14);
         let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
         assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
+    }
+
+    /// **고른 카드가 보이면 레인 머리줄이 가렸어도 그림이 안 굴린다**(moai-acfk 리뷰, 사용자 결정) — 머리줄까지 드러내던
+    /// 때는 화면을 한 줄 굴려 머리줄만 가려도 다음 그림이 도로 한 줄 되돌렸다. 카드가 안 보일 때는 여전히 머리줄까지다.
+    #[test]
+    fn a_visible_card_keeps_the_board_scrolled_past_its_lane_header() {
+        let mut a = board_app(12);
+        render(&mut a, 100, 14);
+        assert_eq!(a.list.offset(), 0);
+        a.list.by(1);
+        let lines = render(&mut a, 100, 14);
+        let text = lines.join("\n");
+        assert_eq!(a.list.offset(), 1, "카드가 보이는데 머리줄을 드러내느라 화면을 되돌렸다\n{text}");
+        assert!(text.contains("> argos-0100") && !text.contains("── argos-0001"), "{text}");
     }
 
     /// **이름 없는 레인에는 머리줄 글이 안 선다**(리뷰 moai-9nfw.fnb 8번) — 마일스톤을 안 쓰는 저장소에도 `(길 잃음)`

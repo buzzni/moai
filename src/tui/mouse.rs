@@ -407,21 +407,22 @@ mod tests {
         a
     }
 
-    /// 커서가 선 카드의 id.
-    fn on_card(a: &App) -> String {
-        match &a.rows()[a.cursor] {
+    /// 줄 `n` 에 선 카드의 id — 카드가 아니면 빈 글이다.
+    fn id_at(a: &App, n: usize) -> String {
+        match &a.rows()[n] {
             super::super::Row::Item(_, e, _) => a.site.issues[e.at().unwrap()].id.clone(),
             _ => String::new(),
         }
     }
 
+    /// 커서가 선 카드의 id.
+    fn on_card(a: &App) -> String {
+        id_at(a, a.cursor)
+    }
+
     /// 그린 카드의 자리.
     fn card_at(a: &App, want: &str) -> Rect {
-        let id = |n: usize| match &a.rows()[n] {
-            super::super::Row::Item(_, e, _) => a.site.issues[e.at().unwrap()].id.clone(),
-            _ => String::new(),
-        };
-        a.drawn.cards.iter().find(|(_, n)| id(*n) == want).map(|(r, _)| *r).expect("카드가 안 그려졌다")
+        a.drawn.cards.iter().find(|(_, n)| id_at(a, *n) == want).map(|(r, _)| *r).expect("카드가 안 그려졌다")
     }
 
     /// 그린 칸의 자리.

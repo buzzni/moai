@@ -4945,11 +4945,18 @@ impl App {
     /// **머리줄에 선 커서는 마지막으로 선 카드의 칸을 걷는다**(moai-oagj.vcj) — 머리줄에는 칸이 없어, `k` 로 올라온
     /// 칸을 들고 있어야 `j` 가 그 칸으로 돌아간다([`board::step`] 의 `hint`).
     fn board_step(&mut self, go: board::Go, rows: &[Row]) {
+        let (laid, hint) = self.board_hint(rows);
+        let at = board::step(&laid.plan, self.cursor, go, hint);
+        self.move_to(at);
+    }
+
+    /// 보드 한 장과 머리줄에 선 커서가 볼 칸(`hint`, [`App::board_column`]) — 키로 옮기든([`App::board_step`]) 화면을
+    /// 굴리든([`App::board_roll`]) 같은 자다. 커서가 카드에 섰으면 그 칸을 먼저 적는다.
+    fn board_hint(&mut self, rows: &[Row]) -> (Laid, Option<usize>) {
         let laid = self.laid(rows);
         self.note_board_column(&laid);
         let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
-        let at = board::step(&laid.plan, self.cursor, go, hint);
-        self.move_to(at);
+        (laid, hint)
     }
 
     /// 보드의 화면을 굴린다 — 휠과 반 쪽·한 쪽이다(moai-acfk, 사용자 결정 2026-10-02). 굴리는 것은 보드 통째로 하나뿐인
@@ -4960,10 +4967,14 @@ impl App {
     /// 드러내는 자([`board::Plan::span`])로 여기서 되돌린다. 그림에 맡기면 그리기 전에 몰아 받은 휠(`cmd::tui::rolls`)이
     /// 끝을 넘어 쌓여, 그 사이 거꾸로 굴린 칸이 넘친 만큼에 먹힌다.
     fn board_roll(&mut self, rows: &[Row], roll: impl FnOnce(&mut scroll::Scroll)) {
-        let laid = self.laid(rows);
-        self.note_board_column(&laid);
-        let hint = self.board_column.as_ref().and_then(|c| laid.columns.iter().position(|k| k == c));
+        let was = self.list.offset();
         roll(&mut self.list);
+        // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 보이던 커서가 그대로 보인다 — 몰아 받은 휠마다 보드를 다시
+        // 펴지 않는다(리뷰).
+        if self.list.offset() == was {
+            return;
+        }
+        let (laid, hint) = self.board_hint(rows);
         match board::pull(&laid.plan, self.cursor, hint, |top, h| self.list.shows(top, h)) {
             Some(at) => self.move_to(at),
             None => {
