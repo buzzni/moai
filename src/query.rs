@@ -1141,10 +1141,9 @@ pub fn items(text: &str) -> Vec<Item> {
         while chars.next_if(|(_, c)| c.is_whitespace()).is_some() {}
         let Some(&(start, _)) = chars.peek() else { return out };
         let mut word = String::new();
-        let (mut eq, mut quote, mut end) = (None, None, start);
+        let (mut eq, mut quote) = (None, None);
         while let Some((at, c)) = chars.next_if(|(_, c)| !c.is_whitespace()) {
             word.push(c);
-            end = at + c.len_utf8();
             if c == '=' && eq.is_none() {
                 eq = Some(at);
                 if let Some((open, q)) = chars.next_if(|(_, c)| matches!(c, '"' | '\'')) {
@@ -1156,11 +1155,12 @@ pub fn items(text: &str) -> Vec<Item> {
                         }
                         word.push(c);
                     }
-                    end = close.map_or(text.len(), |at| at + q.len_utf8());
                     quote = Some((open, close));
                 }
             }
         }
+        // 낱말을 멈춘 글자의 자리가 곧 끝이다 — 안 닫힌 따옴표는 글을 다 먹었으니 글 끝이다.
+        let end = chars.peek().map_or(text.len(), |&(at, _)| at);
         match out.last_mut() {
             Some(prev) if eq.is_none() => {
                 prev.text.push(' ');

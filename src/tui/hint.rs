@@ -1,8 +1,10 @@
 //! 거름망 칸(`SPC f`)의 안내 — 쓸 수 있는 항목과 예, 그리고 값을 고르는 목록(moai-h2rh).
 //!
-//! **위쪽은 조각이다.** 친 글과 커서만 받아 커서가 선 값 자리([`Slot`])를 읽고, 건넨 값([`Offer`])을 친 글로
-//! 좁힌다. 아래 `impl App` 이 저장소의 줄에서 고를 값을 모으고 키를 받는다 — 줄(`crate::model`)을 읽으므로
-//! 이 파일은 조각 목록(`input::NOT_COMPONENTS`)에 든다. `zones.rs` 와 같은 꼴이다.
+//! **위쪽은 터미널도 저장소도 모른다.** 친 글과 커서만 받아 커서가 선 값 자리([`Slot`])를 읽고, 건넨 값([`Offer`])을
+//! 친 글로 좁힌다. 값 자리를 읽는 데는 거름망과 한 벌인 쪼개는 자(`query::items`)를 빌린다 — 그래서 조각의 허락
+//! 목록(`input::foreign`)으로 재면 조각이 아니다(리뷰 moai-mkyg.n60). 아래 `impl App` 이 저장소의 줄에서 고를 값을
+//! 모으고 키를 받는다 — 줄(`crate::model`)을 읽으므로 이 파일은 조각 목록(`input::NOT_COMPONENTS`)에 든다. `zones.rs`
+//! 와 같은 꼴이다.
 //!
 //! 사용자가 정한 것(2026-10-03)
 //!
@@ -83,7 +85,8 @@ pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
     let key = &text[item.start..eq];
     let field = Field::of(key)?;
     let open = eq + 1;
-    let inner = if item.quote.is_some() { open + 1 } else { open };
+    // 따옴표의 자리는 쪼개는 자가 댄 것을 읽는다 — 여기서 `=` 로 셈하면 문법이 둘이 된다.
+    let inner = item.quote.map_or(open, |(q, _)| q + 1);
     let at = at.max(inner);
     // 따옴표 안의 글 — 닫히지 않았으면 커서가 선 낱말의 끝까지.
     let inner_end = match item.quote {
@@ -99,7 +102,7 @@ pub fn slot(text: &str, at: usize) -> Option<Slot<'_>> {
     let end = text[at..inner_end].find(',').map_or(inner_end, |p| at + p);
     // 따옴표로 연 값을 통째로 갈 때만 따옴표까지 간다 — 반만 걷으면 짝이 깨진다.
     let span = match item.quote {
-        Some((_, close)) if seg == inner && end == inner_end => open..close.map_or(inner_end, |c| c + 1),
+        Some((q, close)) if seg == inner && end == inner_end => q..close.map_or(inner_end, |c| c + 1),
         _ => seg..end,
     };
     let first = span.start == open;

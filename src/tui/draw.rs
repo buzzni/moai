@@ -1511,7 +1511,8 @@ fn told_of(app: &mut App) -> ([(&'static str, String); 2], Option<String>) {
 /// `permission`·`failed`·`outside`). 줄은 `room` 칸 안에 들게 짓는다([`header`] 가 번호 칸 앞까지 남은 폭을 준다).
 ///
 /// **고치면 1분 안에 걷힌다**([`App::unread_journals`], moai-mkyg.ncj) — 탐색기가 그 자리를 다시 재어 이제 읽히면
-/// 목록에서 뺀다. 남은 자리가 없으면 이 줄도 안 선다.
+/// 목록에서 뺀다. 남은 자리가 없으면 이 줄도 안 선다. **통계 창이 선 동안은 안 뺀다** — 그 창의 합은 연 순간에 센
+/// 것이라, 이 줄이 그 합이 모자랄 수 있다고 대는 유일한 말이다.
 ///
 /// **자리는 그 저장소 뿌리에서 본 길로 줄인다** — 통째의 절대 경로는 헤더의 좁은 칸에서 번호 칸까지
 /// 밀어낸다. 고치는 법(`chmod`)은 그 자리에 대는 것이라 파일까지는 남긴다. 뿌리가 이 화면의 것이
@@ -7540,7 +7541,9 @@ pub(super) mod tests {
     }
 
     /// **걷혔다가 다시 진 자리도 댄다**(moai-mkyg.ncj) — 목록이 이제 줄기도 한다(`App::reopen_journals`). 말한 수로
-    /// 세던 때는 하나가 걷히고 하나가 들면 수가 그대로라, 새로 진 자리를 이미 말한 것으로 셌다.
+    /// 세던 때는 하나가 걷히고 하나가 들면 수가 그대로라, 새로 진 자리를 이미 말한 것으로 셌다. **띠가 다른 말로 차
+    /// 있는 동안 걷혀도 말한 것에서 뺀다**(리뷰 moai-mkyg.n60) — 빼는 걸음이 띠를 기다리면, 띠가 빈 뒤에는 다시 진
+    /// 자리가 이미 말한 것으로 남는다.
     #[test]
     fn a_low_window_tells_a_journal_that_fails_again_after_it_was_dropped() {
         fn unread(who: &str) -> crate::store::Unread {
@@ -7561,6 +7564,15 @@ pub(super) mod tests {
         render(&mut a, 100, 12);
         let told = a.notice.clone().expect("다시 진 자리를 안 댔다");
         assert!(told.contains("/w/argos/.moai/journal/kim.jsonl") && told.ends_with("(+1)"), "{told}");
+
+        a.notice = Some("다른 말".into());
+        a.journals = || vec![unread("lee")];
+        render(&mut a, 100, 12);
+        a.journals = || vec![unread("lee"), unread("kim")];
+        a.notice = None;
+        render(&mut a, 100, 12);
+        let again = a.notice.clone().expect("띠가 차 있는 동안 걷혔다가 다시 진 자리를 안 댔다");
+        assert!(again.contains("/w/argos/.moai/journal/kim.jsonl"), "{again}");
     }
 
     /// **판 줄의 넷은 서로 다른 글이다**(moai-3gia, 사용자 결정 2026-09-21). 특히 못 물은 것과
