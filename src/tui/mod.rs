@@ -150,13 +150,20 @@ struct GrepWas {
 }
 
 /// 보드의 화면을 굴려 커서에서 떼어 놓은 자리([`App::adrift`], moai-j0jf) — 그때 커서가 선 줄과, 그 보드를 세운
-/// 디렉터리·거름망. **굴린 자리는 그 보드의 것이다**(리뷰): 폴더를 드나들거나 거르고 검색하면 보드가 다른 카드로 다시
-/// 서서, 커서가 같은 카드에 다시 서도 들고 온 굴린 자리는 다른 보드의 줄을 센다. 다시 읽기는 셋 다 안 바꾼다.
+/// 디렉터리·거름망·보기·차례·열. **굴린 자리는 그 보드의 것이다**(리뷰): 폴더를 드나들거나 거르고 검색하면 보드가 다른
+/// 카드로 다시 서서, 커서가 같은 카드에 다시 서도 들고 온 굴린 자리는 다른 보드의 줄을 센다. 보기(`SPC v`)·차례
+/// (`SPC s`)·열(`SPC c`)도 사람이 보드를 다시 세우는 토글이라 같다(사용자 결정 2026-10-03). 다시 읽기는 이 가운데
+/// 아무것도 안 바꾼다 — 굴린 화면이 그대로다. 창 크기와 상세 칸도 안 든다: 캔버스의 줄은 같은 보드의 줄이다(같은 결정).
+///
+/// 짓는 자는 [`App::adrift_here`] 하나다 — 굴릴 때 든 것과 그릴 때 견주는 것이 같은 자로 서야 한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Adrift {
     anchor: Anchor,
     path: Path,
     hung: Option<Hung>,
+    view: view::View,
+    order: keys::Sorting,
+    fields: view::Fields,
 }
 
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
@@ -1293,8 +1300,8 @@ pub struct App {
     ///
     /// 걷는 자는 다섯이다. 보드의 커서 키는 옮겼든 못 옮겼든 걷는다([`App::board_step`]) — 다음 키가 그 카드에서
     /// 움직이고 화면은 그 카드로 돌아간다. 프로젝트 머리줄의 `h`·`l`·`Tab` 도 그 줄의 커서 키라 걷는다([`App::unfold`]·
-    /// [`App::fold`]). 커서가 다른 줄에 서거나(누르기·검색·사라진 카드 대신 선 카드) 보드가 다른 디렉터리·거름망으로
-    /// 다시 서면(폴더 드나들기·검색·거름망) 그림이 걷는다([`App::rolled_off`]). **번호가 아니라 정체로 든다** — 옆
+    /// [`App::fold`]). 커서가 다른 줄에 서거나(누르기·검색·사라진 카드 대신 선 카드) 보드가 다시 서면(폴더 드나들기·
+    /// 검색·거름망·`SPC v`·`SPC s`·`SPC c`, [`Adrift`]) 그림이 걷는다([`App::rolled_off`]). **번호가 아니라 정체로 든다** — 옆
     /// 세션의 쓰기로 다시 읽으면 같은 카드의 번호가 밀리는데, 그때마다 굴린 화면이 커서로 돌아가면 안 된다. 목록과
     /// 보드를 오가면 굴린 자리가 첫 줄로 돌아가니 함께 걷는다([`App::flip_layout`]). 프로젝트를 떠날 때도 걷는다
     /// (`App::leave_project`) — 정체는 id 라, 같은 prefix 의 다음 프로젝트에서 같은 id 에 서면 떼어 둔 카드로 읽힌다.
@@ -5133,24 +5140,29 @@ impl App {
         roll(&mut self.list);
         // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 새로 뗄 것이 없다 — 떼어 둔 것이 있으면 그대로 둔다.
         if self.list.offset() != was {
-            self.adrift = rows.get(self.cursor).map(|r| Adrift {
-                anchor: self.anchor_of(r),
-                path: self.site.path.clone(),
-                hung: self.hung.clone(),
-            });
+            self.adrift = self.adrift_here(rows);
         }
+    }
+
+    /// 지금 커서가 선 줄과 지금 보드를 세운 것 — 굴릴 때 [`App::adrift`] 에 들고([`App::board_roll`]), 그릴 때 그것과
+    /// 견준다([`App::rolled_off`]). 두 자리가 같은 자로 서도록 짓는 자는 이것 하나다.
+    fn adrift_here(&self, rows: &[Row]) -> Option<Adrift> {
+        rows.get(self.cursor).map(|r| Adrift {
+            anchor: self.anchor_of(r),
+            path: self.site.path.clone(),
+            hung: self.hung.clone(),
+            view: self.view.clone(),
+            order: self.order,
+            fields: self.fields,
+        })
     }
 
     /// 보드의 화면이 커서에서 떨어져 있는가 — 그림이 커서를 드러낼지 가르는 물음이다(`draw::board`). 굴린 뒤 커서가
     /// 다른 줄에 섰으면(누르기·검색·사라진 카드 대신 선 카드) 뗀 것을 걷는다: 그 줄은 사람이 굴려 떼어 둔 카드가 아니다.
-    /// **보드가 다른 디렉터리·거름망으로 다시 섰어도 걷는다**(리뷰, [`Adrift`]) — 커서가 같은 카드에 다시 서도 굴린 자리는
-    /// 옛 보드의 줄이다.
+    /// **보드가 다른 디렉터리·거름망·보기·차례·열로 다시 섰어도 걷는다**(리뷰, [`Adrift`]) — 커서가 같은 카드에 다시
+    /// 서도 굴린 자리는 옛 보드의 줄이다.
     pub(super) fn rolled_off(&mut self, rows: &[Row]) -> bool {
-        if let Some(a) = &self.adrift
-            && (a.path != self.site.path
-                || a.hung != self.hung
-                || rows.get(self.cursor).map(|r| self.anchor_of(r)).as_ref() != Some(&a.anchor))
-        {
+        if self.adrift.is_some() && self.adrift != self.adrift_here(rows) {
             self.adrift = None;
         }
         self.adrift.is_some()
@@ -6419,6 +6431,31 @@ mod tests {
         assert_eq!(on_id(&a), "argos-0001", "시험의 전제 — 칸을 연 카드가 걸려 커서가 그대로다");
         draw(&mut a);
         assert!(shown(&a), "검색이 다시 세운 보드가 고른 카드를 화면 밖에 두었다 — {}", a.list.offset());
+    }
+
+    /// **굴린 보드에서 보기·차례·열을 바꾸면 커서의 카드를 드러낸다**(moai-j0jf, 사용자 결정 2026-10-03) — `SPC v`·
+    /// `SPC s`·`SPC c` 는 사람이 보드를 다시 세우는 토글이라 검색·거름망과 같다. 들고 온 굴린 자리는 옛 보드의 줄이다.
+    #[test]
+    fn a_toggle_on_a_rolled_board_shows_the_card() {
+        let many: Vec<Issue> = (1..=30).map(|n| make(&format!("argos-{n:04}"), Kind::Issue)).collect();
+        let mut a = App::new(many, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.detail_open = false;
+        let draw = |a: &mut App| super::draw::tests::render(a, 100, 30);
+        let shown = |a: &App| {
+            let card = a.laid(&a.rows()).plan.cards[a.cursor];
+            a.list.shows(card.top, card.height)
+        };
+        draw(&mut a);
+        for toggle in ["SPC v 4 Esc", "SPC s t Esc", "SPC c t Esc"] {
+            a.hit("PageDown PageDown");
+            draw(&mut a);
+            assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다 ({toggle})");
+            a.hit(toggle);
+            draw(&mut a);
+            assert_eq!(on_id(&a), "argos-0001", "시험의 전제 — 토글이 커서를 안 옮긴다 ({toggle})");
+            assert!(shown(&a), "`{toggle}` 이 다시 세운 보드가 고른 카드를 화면 밖에 두었다 — {}", a.list.offset());
+        }
     }
 
     /// **보드에서 한 층 나오면 나온 폴더 밑의 첫 카드에 선다**(moai-9nfw) — 보드에는 폴더 줄이 없어, 목록처럼 나온
