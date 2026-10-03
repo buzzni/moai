@@ -4284,6 +4284,10 @@ impl App {
     /// 보드의 카드 — 지금 디렉터리를 **통째로 펼친** 줄 가운데 묶음이 아닌 것(일과 idea)이다(moai-9nfw).
     /// 에픽·마일스톤·바구니는 카드가 아니다: 레인이 마일스톤이고, 에픽은 카드의 발줄에 이름으로 선다.
     ///
+    /// **닫힌 idea 도 카드가 아니다**(moai-r1ly.91p, 사용자 결정 2026-10-03). idea 의 닫힘은 "다 했다" 가 아니라
+    /// "처리했다" 다 — 펼친 idea 는 그것이 낳은 카드가 대신하고, 버린 idea 는 그냥 사라진다. idea 는 오른쪽 칸으로
+    /// 흐르지 않고 에픽 하나와 이슈 여럿으로 펼쳐지므로, done 칸에 세우면 끝낸 일로 읽힌다. 목록에는 그대로 선다.
+    ///
     /// **차례는 레인 먼저, 그 안에서는 목록의 차례(`SPC s`)다.** 트리 차례 그대로 두면 칸 하나에 에픽마다
     /// 덩어리가 져, 우선순위로 골라 놓아도 뒤 에픽의 p0 가 앞 에픽의 p3 밑에 선다. 레인의 차례는 펼친 트리에서
     /// 처음 나온 차례 — 목록이 마일스톤 폴더를 세우는 차례와 같다(바구니가 끝이다).
@@ -4296,7 +4300,10 @@ impl App {
         let tree =
             site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
         for (e, twig) in tree {
-            let Some(at) = e.at().filter(|&at| keep(at) && !crate::report::is_group(&site.issues[at])) else {
+            let card = |i: &Issue| {
+                !crate::report::is_group(i) && (crate::report::is_open_idea(i) || !crate::report::is_idea(i))
+            };
+            let Some(at) = e.at().filter(|&at| keep(at) && card(&site.issues[at])) else {
                 continue;
             };
             let lane = site.lane(at);
@@ -4332,8 +4339,7 @@ impl App {
                     Row::Item(seat, e, _) => {
                         let site = self.site_of_seat(*seat)?;
                         let at = e.at().filter(|&at| at < site.issues.len())?;
-                        // 닫힌 idea 는 담아 둔 생각이 아니다 — 닫힌 일처럼 제 칸에 선다(moai-r1ly.91p, [`board::column_of`]).
-                        let idea = crate::report::is_open_idea(&site.issues[at]);
+                        let idea = crate::report::is_idea(&site.issues[at]);
                         let column = board::column_of(idea, site.index.shelved_at(at).is_some(), site.column(at));
                         let height = draw::card_height(self.fields, || site.whose(at).is_some());
                         Some(Spot::Card(*seat, site.lane(at), column, height))
@@ -5905,31 +5911,31 @@ mod tests {
         assert_eq!(a.key_ctx(&rows).next_pane, say(a.site.lang, "tui.pane.board"));
     }
 
-    /// **닫힌 idea 는 done 칸에 선다**(moai-r1ly.91p, 사용자 결정 2026-10-03) — 종류가 칸을 정하는 것은 열린 동안뿐이다.
-    /// done 을 켜도 산 idea 곁에 안 쌓이고, done 을 숨기면 전처럼 안 보인다.
+    /// **닫힌 idea 는 보드에 안 선다**(moai-r1ly.91p, 사용자 결정 2026-10-03) — done 을 켜도, 검색이 맞혀도 카드가
+    /// 아니다. idea 칸에는 산 idea 만 서고, 목록에는 그대로 선다.
     #[test]
-    fn a_closed_idea_stands_in_the_done_column() {
+    fn a_closed_idea_stands_nowhere_on_the_board() {
         let mut a = boarded();
         let mut issues = a.site.issues.clone();
         let mut unfolded = make("argos-0009", Kind::Idea);
         unfolded.status = Status::new("done");
         issues.push(unfolded);
+        let mut finished = make("argos-0010", Kind::Issue);
+        finished.status = Status::new("done");
+        issues.push(finished);
         a.adopt(issues);
         a.layout = view::Layout::Board;
-        assert!(!row_ids(&a).contains(&"argos-0009".to_string()), "done 을 숨겼는데 닫힌 idea 가 섰다");
         a.hit("SPC v 4 Esc");
-        let rows = a.rows();
-        let laid = a.laid(&rows);
-        let column_of = |id: &str| {
-            let n = row_ids(&a).iter().position(|r| r == id).unwrap_or_else(|| panic!("{id} 카드가 안 섰다"));
-            laid.plan.cards[n].column.map(|c| laid.columns[c].clone())
-        };
-        assert_eq!(
-            column_of("argos-0009"),
-            Some(board::Column::Status("done".into())),
-            "닫힌 idea 가 done 칸에 안 섰다"
-        );
-        assert_eq!(column_of("argos-0006"), Some(board::Column::Idea), "산 idea 는 idea 칸이다");
+        let ids = row_ids(&a);
+        assert!(ids.contains(&"argos-0010".to_string()), "시험의 전제 — done 을 켰다");
+        assert!(!ids.contains(&"argos-0009".to_string()), "닫힌 idea 가 보드에 섰다");
+        assert!(ids.contains(&"argos-0006".to_string()), "산 idea 가 보드에서 빠졌다");
+        search(&mut a, "0009");
+        assert!(row_ids(&a).is_empty(), "검색이 닫힌 idea 를 카드로 세웠다");
+        a.hit("Esc");
+        // 보기는 그 줄을 안 가린다 — 보드의 카드에서만 빠진다.
+        let closed = a.site.index.find("argos-0009").unwrap();
+        assert!(a.visible(closed), "보기가 닫힌 idea 를 가렸다 — 목록에서도 빠진다");
     }
 
     /// **보던 카드가 사라지면 그 카드가 섰던 칸에서 가장 가까운 카드에 선다**(moai-r1ly.dwb, 사용자 결정 2026-10-03).

@@ -26,14 +26,12 @@ pub enum Column {
     Status(String),
 }
 
-/// 그 줄이 서는 칸 — `idea` 는 그 줄이 **아직** 담아 둔 생각인가(종류와 칸을 든 쪽이 잰다: 조각은 이슈를 모른다).
+/// 그 줄이 서는 칸 — `idea` 는 그 줄이 담아 둔 생각인가(종류를 든 쪽이 잰다: 조각은 이슈를 모른다).
 /// **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 idea 는 idea 칸에 선다: idea 는 아직 일이
 /// 아니라 미룸이 뜻이 없다(`moai idea` 는 미룰 일이 아니라 담아 둔 것이다). 미룬 일은 칸이 `in_progress`
 /// 여도 미룸 칸이다 — 지금 누가 손대는 줄이 아니다(`Site::spins` 가 미룬 줄을 안 돌리는 것과 같은 자).
 ///
-/// **종류가 칸을 정하는 것은 열린 동안뿐이다**(moai-r1ly.91p, 사용자 결정 2026-10-03) — 닫힌 idea(`promote` 로
-/// 펼쳤거나 닫은 것)는 `idea` 가 아니라 닫힌 일처럼 제 칸(`done`)에 선다. idea 칸에 두면 done 을 켰을 때 산 idea
-/// 곁에 쌓여, 둘을 가르는 것이 글리프 하나뿐이다.
+/// 닫힌 idea 는 여기 안 온다 — 보드의 카드가 아니다(`App::cards_in`, moai-r1ly.91p).
 pub fn column_of(idea: bool, shelved: bool, status: &str) -> Column {
     match (idea, shelved) {
         (true, _) => Column::Idea,
