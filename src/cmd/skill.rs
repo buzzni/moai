@@ -54,9 +54,16 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
     let clash = clash_of(&market, &dir);
     // **옛 판이 곁에 깐 것을 걷는다**(moai-vtfu). 범위는 등록하기 **전의** 장부로 잰다 — 옛 moai 가 서
-    // 있던 자리가 그것을 함께 깐 자리다. 등록 뒤에 재면 이번 `--scope` 가 섞여, 사람이 그 범위에 손으로
-    // 깐 것까지 걷는다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
-    let retiring = if clash.is_none() { retire(&root, &market) } else { Retired::default() };
+    // 있던 자리가 그것을 함께 깐 자리다. 등록 뒤에 재면 이번 `--scope` 로 처음 서는 범위가 섞여, 사람이 그
+    // 범위에 손으로 깐 것까지 이번 판에 걷는다. **막는 것은 이번 판뿐이다** — 다음 `install` 에서는 그
+    // 범위에도 moai 가 서 있어, 거기 선 두 플러그인을 누가 깔았든 moai 의 것으로 읽고 걷는다([`retire`] 의
+    // 대리). 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다.
+    let target = format!("moai@{market}");
+    let mut retiring = if clash.is_none() {
+        retire(&root, &target, &scopes_of(&installs_here(&target, &root)))
+    } else {
+        Retired::default()
+    };
 
     if dry_run {
         if ctx.json {
@@ -68,7 +75,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
                 "dry_run": true,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-                "retired": retiring.json(&[]),
+                "retired": retiring.json(),
                 "kept": retiring.kept,
             }));
         }
@@ -92,7 +99,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         for step in &retiring.steps {
             out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
-        out.extend(retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])));
+        out.extend(retiring.kept_lines(lang));
         return Ok(out);
     }
 
@@ -126,7 +133,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     // **옛 판이 곁에 깐 것을 걷는 일은 등록과 따로 센다**(사용자 결정, moai-vtfu.dvk). 못 걷어도 moai 의
     // 훅은 선다 — 종료 코드는 등록 결과만 따른다. 하나가 실패해도 다음 것을 부르고, 못 걷은 것은 손으로 칠
     // 줄로 낸다. 다시 부르면 같은 장부로 범위를 재어 남은 것을 또 걷는다.
-    let retired: Vec<bool> = retiring.steps.iter().map(|step| run(&root, &step.argv)).collect();
+    retiring.call(&root);
 
     if ctx.json {
         return super::json_line(&serde_json::json!({
@@ -140,7 +147,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
             // `registered: false` 만 보고 무엇을 해야 할지 모른다.
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "retired": retiring.json(&retired),
+            "retired": retiring.json(),
             "kept": retiring.kept,
         }));
     }
@@ -150,13 +157,13 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
     }
-    for (step, ok) in retiring.steps.iter().zip(&retired) {
-        out.push(match ok {
-            true => fill(say(lang, "skill.retired"), &[("id", step.id), ("scope", &step.scope)]),
-            false => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
+    for step in &retiring.steps {
+        out.push(match step.ok {
+            Some(true) => fill(say(lang, "skill.retired"), &[("id", step.id), ("scope", &step.scope)]),
+            _ => fill(say(lang, "skill.retire_failed"), &[("id", step.id), ("cmd", &step.shown())]),
         });
     }
-    out.extend(retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])));
+    out.extend(retiring.kept_lines(lang));
     if registered {
         out.push(String::new());
         out.push(say(lang, "skill.reopen_claude").to_string());
@@ -334,6 +341,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     let clash = clash_of(&market, &dir);
     let target = format!("moai@{market}");
     let installs = installs_here(&target, &root);
+    let scopes = scopes_of(&installs);
 
     // **남의 등록이면 아무것도 부르지 않는다.** 같은 이름이 다른 저장소를
     // 가리키는데 걷으면, 그 저장소의 규칙이 말없이 사라진다.
@@ -343,7 +351,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     // 옛 판이 곁에 깐 것을 걷는 걸음과, 사용자 범위라 두고 가는 것([`retire`]).
     let mut retiring = Retired::default();
     if clash.is_none() {
-        for scope in scopes_of(&installs) {
+        for &scope in &scopes {
             plan.push(argv(&["plugin", "uninstall", &target, "--scope", scope]));
         }
         unplug = plan.len();
@@ -351,7 +359,9 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             // 범위를 안 주면 모든 범위에서 걷는다.
             plan.push(argv(&["plugin", "marketplace", "remove", &market]));
         }
-        retiring = retire(&root, &market);
+        // **moai 를 걷는 그 범위로 잰다** — 장부를 다시 읽어 재던 판은 두 읽기 사이에 `claude` 가 장부를
+        // 고쳐 쓰면(옆 세션의 `skill install --scope user`) moai 를 안 걷는 범위의 것까지 걷을 수 있었다.
+        retiring = retire(&root, &target, &scopes);
     }
     let claude = which("claude").is_some();
     let mut steps: Vec<(String, bool)> = Vec::new();
@@ -371,8 +381,9 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     // 없다 — 하나가 실패해도 다음 것을 부르고, 실패는 moai 의 결과를 뒤집지 않는다. 못 걷은 것은 손으로 칠 줄로
     // 낸다. moai 플러그인을 못 걷었으면 안 부른다 — 다시 부르면 남은 moai 설치로 범위를 재어 함께 걷는다.
     let unplugged = !dry_run && claude && steps.len() >= unplug && steps[..unplug].iter().all(|(_, ok)| *ok);
-    let retired: Vec<bool> =
-        if unplugged { retiring.steps.iter().map(|step| run(&root, &step.argv)).collect() } else { Vec::new() };
+    if unplugged {
+        retiring.call(&root);
+    }
     let failed = steps.iter().any(|(_, ok)| !ok) || clash.is_some() || (!dry_run && !claude && !plan.is_empty());
     if failed {
         super::note_partial();
@@ -388,7 +399,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
             "removed": !dry_run && !failed && !plan.is_empty(),
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
             "claude": claude,
-            "retired": retiring.json(&retired),
+            "retired": retiring.json(),
             "kept": retiring.kept,
         }));
     }
@@ -403,7 +414,6 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     if plan.is_empty() {
         return Ok(vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]);
     }
-    let kept_lines = retiring.kept.iter().map(|id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]));
     if dry_run || !claude {
         let mut out = vec![match dry_run {
             true => say(lang, "skill.plan_calls").to_string(),
@@ -411,7 +421,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         }];
         out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
         out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
-        out.extend(kept_lines);
+        out.extend(retiring.kept_lines(lang));
         return Ok(out);
     }
     // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
@@ -428,17 +438,15 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     for a in &plan[steps.len()..] {
         out.push(format!("  - {}{skipped_tail}", shown(a)));
     }
-    if unplugged {
-        for (step, ok) in retiring.steps.iter().zip(&retired) {
-            out.push(match ok {
-                true => format!("  · {}", step.shown()),
-                false => format!("  ! {}  {}", step.shown(), say(lang, "skill.step_failed_retry")),
-            });
-        }
-    } else {
-        out.extend(retiring.steps.iter().map(|step| format!("  - {}{skipped_tail}", step.shown())));
+    // 안 부른 걸음(`ok` 가 없다)은 moai 를 다 못 걷어 안 부른 것이다.
+    for step in &retiring.steps {
+        out.push(match step.ok {
+            Some(true) => format!("  · {}", step.shown()),
+            Some(false) => format!("  ! {}  {}", step.shown(), say(lang, "skill.step_failed_retry")),
+            None => format!("  - {}{skipped_tail}", step.shown()),
+        });
     }
-    out.extend(kept_lines);
+    out.extend(retiring.kept_lines(lang));
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
     out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
@@ -560,17 +568,25 @@ fn stale_copies(installs: &[skill::Install]) -> usize {
 /// 간다: `marketplace remove` 는 기계 하나 전체에 걸려, 다른 저장소나 사람이 그것으로 깐 것까지 끊는다.
 const RETIRED: [&str; 2] = ["korean-skills@korean-skills", "humanize-korean@im-not-ai"];
 
-/// [`RETIRED`] 를 걷는 걸음 하나 — 무엇을, 어느 범위에서.
+/// [`RETIRED`] 를 걷는 걸음 하나 — 무엇을, 어느 범위에서, 그리고 부른 결과.
 struct Retire {
     id: &'static str,
     scope: String,
-    argv: Vec<String>,
+    /// **부르지 않았으면 `None` 이다**(연습, `claude` 가 없거나 moai 를 다 못 걷어 안 부른 `uninstall`).
+    /// 결과를 걸음 곁의 목록에 따로 두던 판은 차례로 짝지어, 걸음 하나를 건너뛰는 날이 오면 뒤의 결과가
+    /// 모두 남의 id 에 붙을 꼴이었다.
+    ok: Option<bool>,
 }
 
 impl Retire {
+    /// 부를 인자 — 부르는 것과 손으로 칠 줄이 이 하나에서 나온다.
+    fn argv(&self) -> Vec<String> {
+        argv(&["plugin", "uninstall", self.id, "--scope", &self.scope])
+    }
+
     /// 손으로 칠 한 줄 — 연습과 실패가 같은 글을 낸다.
     fn shown(&self) -> String {
-        shown(&self.argv)
+        shown(&self.argv())
     }
 }
 
@@ -583,14 +599,24 @@ struct Retired {
 }
 
 impl Retired {
-    /// `--json` 의 `retired` — 걸음마다 명령과 결과. **부르지 않은 걸음은 `ok` 가 `null` 이다**(연습, 또는
-    /// moai 를 못 걷어 안 부른 `uninstall`). `ok` 는 부른 차례대로 걸음에 짝지어진다.
-    fn json(&self, ok: &[bool]) -> Vec<serde_json::Value> {
+    /// 걸음마다 `claude` 를 부르고 결과를 그 걸음에 적는다 — **하나가 실패해도 다음 것을 부른다.**
+    fn call(&mut self, root: &Path) {
+        for step in &mut self.steps {
+            step.ok = Some(run(root, &step.argv()));
+        }
+    }
+
+    /// `--json` 의 `retired` — 걸음마다 명령과 결과. 부르지 않은 걸음은 `ok` 가 `null` 이다.
+    fn json(&self) -> Vec<serde_json::Value> {
         self.steps
             .iter()
-            .enumerate()
-            .map(|(i, step)| serde_json::json!({"id": step.id, "scope": step.scope, "command": step.shown(), "ok": ok.get(i)}))
+            .map(|step| serde_json::json!({"id": step.id, "scope": step.scope, "command": step.shown(), "ok": step.ok}))
             .collect()
+    }
+
+    /// 두고 가는 것마다 한 줄 — 연습·실행·`uninstall` 이 같은 글을 낸다.
+    fn kept_lines(&self, lang: crate::i18n::Lang) -> impl Iterator<Item = String> + '_ {
+        self.kept.iter().map(move |id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]))
     }
 }
 
@@ -609,29 +635,29 @@ fn scopes_of(installs: &[skill::Install]) -> Vec<&str> {
     scopes
 }
 
-/// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). 장부는 누가 깔았는지 안 적으니 **이 저장소의
-/// moai 가 서 있는 범위·자리의 설치**를 "moai 가 깐 것" 으로 읽는다 — 옛 `install` 이 정확히 그 자리에 깔았다.
+/// 옛 판이 곁에 깐 것을 걷는 걸음(사용자 결정 moai-vtfu.dvk). `scopes` 는 **이 저장소의 moai(`target`)가
+/// 서 있는 범위**고, 부르는 쪽이 저 쓸 값을 그대로 건넨다 — `uninstall` 은 moai 를 걷는 그 범위를, `install`
+/// 은 등록하기 전의 범위를.
+///
+/// 장부는 누가 깔았는지 안 적으니 **그 범위·자리의 설치**를 "moai 가 깐 것" 으로 읽는다 — 옛 `install` 이
+/// 바로 그 자리에 깔았다. 대리라서 그 자리에 사람이 손으로 깐 것도 moai 의 것으로 읽힌다.
 ///
 /// **사용자 범위의 설치는 다른 저장소의 moai 가 사용자 범위에 서 있으면 둔다** — 그 줄은 기계에 하나라 그
 /// 저장소의 옛 판도 그것을 함께 깔았다. 가리지 않던 판은 한 저장소의 걷기로 다른 저장소의 두 플러그인까지
 /// 지웠다(리뷰 moai-5wk4.76z).
-fn retire(root: &Path, market: &str) -> Retired {
-    let target = format!("moai@{market}");
-    let installs = installs_here(&target, root);
-    let scopes = scopes_of(&installs);
-    let shared = other_user_moai(&target);
+fn retire(root: &Path, target: &str, scopes: &[&str]) -> Retired {
+    let shared = other_user_moai(target);
     let mut out = Retired::default();
     for id in RETIRED {
         let theirs = installs_here(id, root);
-        for scope in &scopes {
+        for scope in scopes {
             if !theirs.iter().any(|i| i.scope == *scope) {
                 continue;
             }
             if *scope == "user" && shared {
                 out.kept.push(id);
             } else {
-                let argv = argv(&["plugin", "uninstall", id, "--scope", scope]);
-                out.steps.push(Retire { id, scope: scope.to_string(), argv });
+                out.steps.push(Retire { id, scope: scope.to_string(), ok: None });
             }
         }
     }

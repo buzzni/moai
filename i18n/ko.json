@@ -640,7 +640,7 @@
   "skill.plan_retire": "걷기: {cmd}",
   "skill.planted": "{dir} 에 심었다",
   "skill.hook_call": "  훅이 부를 것: {cmd}",
-  "skill.retired": "  · {id} 을 걷었다 — 옛 moai 가 함께 깔았던 것이다 (--scope {scope})",
+  "skill.retired": "  · {id} 을 걷었다 — moai 가 이제 곁에 깔지 않는다 (--scope {scope})",
   "skill.retire_failed": "  ! {id} 을 못 걷었다 — 손으로: {cmd}",
   "skill.market_taken": "`{market}` 이 이미 {at} 를 가리킨다 — 등록은 건너뛴다",
   "skill.reopen_claude": "Claude 를 다시 열면 든다. 이미 열려 있는 세션은 옛 판을 계속 쓴다",

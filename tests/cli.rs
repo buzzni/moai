@@ -882,19 +882,43 @@ fn the_issue_command_refusals_stand_in_one_language() {
 ///
 /// `init` 다음으로 새 사용자가 밟는 표면인데 설치·상태·걷기의 안내문이 통째로 박힌 한국어였다.
 /// 여기서 재는 것은 `claude` 가 없는 기계다 — 그 판이 훅·설치 줄을 한 화면에 다 낸다.
+///
+/// **장부가 빈 판과 옛 판이 곁에 깐 것이 선 판을 둘 다 잰다**(moai-vtfu). 걷기·두고 가기 줄은 장부에 그것이
+/// 있어야 서고, "심는다"·"걷어낼 것이 없다" 줄은 장부가 비어야 선다 — 한쪽만 재면 다른 쪽 줄에 박힌 한국어가
+/// 남아도 이 시험이 못 본다. 걷은 줄과 못 걷은 줄은 `claude` 가 있어야 서서 끝에서 가짜로 따로 잰다.
 #[test]
 fn the_skill_screens_stand_in_one_language() {
-    let screens = |name: &str, lang: Option<&str>| {
+    // `seeded` — 이 저장소의 moai 가 `local`·`user` 에, 다른 저장소의 moai 가 `user` 에 선 장부를 준다. `local` 의
+    // 둘은 걷고 `user` 의 korean-skills 는 두고 간다.
+    let screens = |name: &str, lang: Option<&str>, seeded: bool| {
         let s = init(name);
+        let plugins = Scratch::new(&format!("{name}-plugins"));
         let run = |args: &[&str]| {
             let mut cmd = isolated(BIN);
             cmd.args(args).current_dir(s.path()).env("MOAI_ACTOR", ACTOR).env("MOAI_NOW", NOW).env("NO_COLOR", "1");
             // `claude` 가 없는 기계 — 손으로 칠 줄과 건너뛴 까닭이 그때 다 선다.
             cmd.env("PATH", "/nonexistent");
+            cmd.env("CLAUDE_CODE_PLUGIN_CACHE_DIR", plugins.path());
             with_lang(&mut cmd, lang);
             let out = cmd.output().expect("moai 를 실행하지 못했다");
             format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
         };
+        if seeded {
+            let plan = run(&["skill", "install", "--dry-run", "--json"]);
+            let dir = PathBuf::from(field(&plan, "dir"));
+            let here = json_str(&dir.parent().unwrap().parent().unwrap().display().to_string());
+            let local =
+                format!("{{\"scope\":\"local\",\"projectPath\":{here},\"installPath\":\"/x\",\"version\":\"1\"}}");
+            let user = "{\"scope\":\"user\",\"installPath\":\"/x\",\"version\":\"1\"}";
+            std::fs::write(
+                plugins.path().join("installed_plugins.json"),
+                format!(
+                    "{{\"version\":2,\"plugins\":{{\"moai@{}\":[{local},{user}],\"moai@moai-other-1234\":[{user}],\"korean-skills@korean-skills\":[{local},{user}],\"humanize-korean@im-not-ai\":[{local}]}}}}",
+                    field(&plan, "market")
+                ),
+            )
+            .unwrap();
+        }
         vec![
             ("skill install --dry-run".to_string(), run(&["skill", "install", "--dry-run"])),
             ("skill install".to_string(), run(&["skill", "install"])),
@@ -903,12 +927,52 @@ fn the_skill_screens_stand_in_one_language() {
             ("skill uninstall".to_string(), run(&["skill", "uninstall"])),
         ]
     };
-    for (args, said) in screens("skilllangen", None) {
-        assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
-        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+    for seeded in [false, true] {
+        let tag = if seeded { "-seeded" } else { "" };
+        for (args, said) in screens(&format!("skilllangen{tag}"), None, seeded) {
+            assert!(!said.trim().is_empty(), "`{args}` 가 아무 말도 안 했다 — 재는 자가 헛돈다");
+            assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — `{args}`\n{said}");
+            // 걷기·두고 가기 줄이 섰는가 — 안 섰으면 위의 자가 그 줄을 못 잰다. 두고 가는 줄은 제 글로 찾는다 —
+            // 손으로 칠 명령은 걷는 줄에도 선다.
+            if seeded && args != "skill status" {
+                assert!(said.contains("humanize-korean@im-not-ai"), "걷기 줄이 안 섰다 — `{args}`\n{said}");
+                assert!(said.contains("is left in place"), "두고 가는 줄이 안 섰다 — `{args}`\n{said}");
+            }
+        }
+        for (args, said) in screens(&format!("skilllangko{tag}"), Some("ko"), seeded) {
+            assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
+        }
     }
-    for (args, said) in screens("skilllangko", Some("ko")) {
-        assert!(hangul(&said), "한국어를 골랐는데 영어만 섰다 — `{args}`\n{said}");
+
+    // 걷은 줄과 못 걷은 줄 — korean-skills 의 걷기만 실패하는 가짜로 둘 다 낸다.
+    let s = init("skilllangretire");
+    let c = Claude::failing_on("skilllangretire-home", Some("plugin uninstall korean-skills"));
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap();
+    ledger_with(
+        &c,
+        &market,
+        root,
+        &[("korean-skills@korean-skills", "local", Some(".")), ("humanize-korean@im-not-ai", "local", Some("."))],
+    );
+    let runs: [(&[&str], [&str; 2]); 2] = [
+        (&["skill", "install"], ["· humanize-korean@im-not-ai", "! korean-skills@korean-skills"]),
+        (
+            &["skill", "uninstall"],
+            [
+                "· claude plugin uninstall humanize-korean@im-not-ai",
+                "! claude plugin uninstall korean-skills@korean-skills",
+            ],
+        ),
+    ];
+    for (args, lines) in runs {
+        let mut cmd = c.command(Path::new(BIN), s.path(), args, true);
+        with_lang(&mut cmd, None);
+        let said = text(&cmd.output().expect("moai 를 실행하지 못했다"));
+        for line in lines {
+            assert!(said.contains(line), "걷은 줄이나 못 걷은 줄이 안 섰다 — {args:?}: {line}\n{said}");
+        }
+        assert!(!hangul(&said), "영어 화면에 박힌 한국어가 남았다 — {args:?}\n{said}");
     }
 }
 
@@ -3016,9 +3080,9 @@ fn with_lang(cmd: &mut Command, lang: Option<&str>) {
 
 /// 이 글에 **한글이 들었는가** — 음절과 자모 둘(초·중·종성 U+1100 블록, 호환 자모 U+3130 블록).
 ///
-/// **도구가 재는 자와 같은 자다**([`crate::hook`] 의 `hangul`, 리뷰 moai-8d49.ssb) — 음절만 보던
-/// 판은 `ㄱ`·`ㅅ` 만 남은 줄을 못 보고 푸른 채였다. 재는 자가 도구보다 좁으면 그 시험은 지키려던
-/// 것을 안 지킨다. 영어 화면에 한글이 남았는지를 재는 판이 넷이라 한 자리에 둔다.
+/// **단위 시험의 자와 같은 자다**(`src/hook.rs` 의 시험용 `hangul`, 리뷰 moai-8d49.ssb) — 음절만 보던
+/// 판은 `ㄱ`·`ㅅ` 만 남은 줄을 못 보고 푸른 채였다. 재는 자가 좁으면 그 시험은 지키려던 것을 안
+/// 지킨다. 영어 화면에 한글이 남았는지를 재는 판이 넷이라 한 자리에 둔다.
 fn hangul(t: &str) -> bool {
     t.chars().any(|c| matches!(c, '\u{AC00}'..='\u{D7A3}' | '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}'))
 }
@@ -13150,7 +13214,8 @@ fn hook_here(s: &Scratch, run_in: &Path, event: &str, input: &str) -> Output {
     hook_at_home(s, run_in, None, &[("MOAI_HERE", "1")], event, input)
 }
 
-/// [`hook_in`] 을 제 집(`claude` 의 장부가 놓이는 자리)과 환경을 더 주어 — 장부나 설정을 흉내 내는 시험이 쓴다.
+/// [`hook_in`] 을 제 집(훅 프로세스의 `HOME` — 그 `.gitconfig` 가 사람이다)과 환경을 더 주어 — 설정을 흉내 내는
+/// 시험이 쓴다. 훅은 `claude` 의 플러그인 장부를 안 읽는다(그것을 읽던 한국어 알림은 moai-vtfu 가 걷었다).
 fn hook_at_home(
     s: &Scratch,
     run_in: &Path,
@@ -16495,8 +16560,7 @@ fn skill_install_retires_the_korean_plugins_an_earlier_moai_installed() {
         &[
             ("korean-skills@korean-skills", "local", Some(".")),
             ("humanize-korean@im-not-ai", "local", Some(".")),
-            // 다른 저장소의 설치, 그리고 moai 가 안 선 범위의 설치 — 둘 다 moai 가 깐 것이 아니다.
-            ("humanize-korean@im-not-ai", "local", Some("/elsewhere")),
+            // moai 가 안 선 범위의 설치 — moai 가 깐 것이 아니다.
             ("korean-skills@korean-skills", "project", Some(".")),
         ],
     );
@@ -16506,6 +16570,12 @@ fn skill_install_retires_the_korean_plugins_an_earlier_moai_installed() {
     for id in RETIRED {
         assert!(plan.contains(&format!("claude plugin uninstall {id} --scope local")), "{plan}");
     }
+    // **범위는 이번 `--scope` 가 아니라 장부에서 moai 가 선 범위다** — `project` 로 불러도 moai 가 안 선
+    // `project` 의 줄은 안 걷고 moai 가 선 `local` 의 줄을 걷는다. 옛 곁 플러그인처럼 `--scope` 로 재는 판이
+    // 돌아오면 여기가 붉어진다.
+    let plan = text(&c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run"], true));
+    assert!(plan.contains("claude plugin uninstall korean-skills@korean-skills --scope local"), "{plan}");
+    assert!(!plan.contains("uninstall korean-skills@korean-skills --scope project"), "이번 --scope 로 걷는다\n{plan}");
 
     let out = c.run(s.path(), &["skill", "install", "--json"], true);
     assert!(out.status.success(), "{}", text(&out));
@@ -16529,6 +16599,13 @@ fn skill_install_retires_the_korean_plugins_an_earlier_moai_installed() {
 
     let said = text(&c.run(s.path(), &["skill", "install"], true));
     assert!(said.contains("korean-skills@korean-skills 을 걷었다"), "{said}");
+
+    // **다른 저장소의 자리에 깐 것은 안 걷는다** — 범위가 같아도 `projectPath` 가 여기가 아니면 이 저장소의
+    // moai 가 깐 것이 아니다. 같은 id 가 여기에도 서 있으면 걸음이 범위마다 하나라 이 갈래가 안 보여, 다른
+    // 자리에만 선 판으로 따로 잰다.
+    ledger_with(&c, &market, root, &[("humanize-korean@im-not-ai", "local", Some("/elsewhere"))]);
+    let plan = text(&c.run(s.path(), &["skill", "install", "--dry-run"], true));
+    assert!(!plan.contains("humanize-korean"), "다른 저장소의 설치를 걷는다\n{plan}");
 }
 
 /// **걷기가 실패해도 종료 코드는 등록만 따른다**(사용자 결정 moai-vtfu.dvk) — 옛 곁 플러그인 셈과 같다. 하나가
@@ -16578,6 +16655,101 @@ fn skill_install_counts_retiring_apart_and_leaves_a_shared_user_install() {
     assert!(out.status.success(), "{}", text(&out));
     assert!(!c.calls()[before..].contains("korean-skills"), "다른 저장소가 쓰는 것을 걷었다\n{}", c.calls());
     assert!(text(&out).contains("claude plugin uninstall korean-skills@korean-skills --scope user"), "{}", text(&out));
+}
+
+/// **범위는 등록하기 전의 장부로 잰다**(moai-vtfu.dvk) — 이번 `--scope` 로 처음 서는 범위에 사람이 깐 것은 이번
+/// 판에 안 걷는다. 공용 가짜 `claude` 는 받은 인자만 적어 장부가 등록 앞뒤로 같으므로, 이 시험의 가짜는 moai 를
+/// 등록할 때 그 범위를 장부에 적는다 — 등록 뒤에 재는 판이 돌아오면 여기가 붉어진다.
+#[test]
+fn skill_install_measures_the_scopes_before_registering() {
+    let s = init("skillkoreanbefore");
+    let c = Claude::new("skillkoreanbefore-home");
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap();
+    // moai 는 `local` 에만 서 있고, `project` 에는 사람이 손으로 깐 korean-skills 가 있다.
+    ledger_with(
+        &c,
+        &market,
+        root,
+        &[("korean-skills@korean-skills", "local", Some(".")), ("korean-skills@korean-skills", "project", Some("."))],
+    );
+    let ledger = c.home.path().join(".claude/plugins/installed_plugins.json");
+    // 등록한 뒤의 장부 — moai 가 `project` 에도 선다.
+    let moai_at_project = format!("\"moai@{market}\":[{{\"scope\":\"project\"");
+    let registered = c.home.path().join("registered.json");
+    std::fs::write(
+        &registered,
+        std::fs::read_to_string(&ledger).unwrap().replacen(
+            &format!("\"moai@{market}\":["),
+            &format!(
+                "{moai_at_project},\"projectPath\":{},\"installPath\":\"/x\",\"version\":\"1\"}},",
+                json_str(&root.display().to_string())
+            ),
+            1,
+        ),
+    )
+    .unwrap();
+    // `cp` 는 절대 경로로 부른다 — moai 가 넘기는 PATH 에는 가짜 `claude` 와 `sh` 만 있다. 원본은 `bin` 밖에 쓰고
+    // `place_exe` 로 내놓는다(ETXTBSY 의 까닭은 그 함수에 있다).
+    let source = c.home.path().join("claude-registering.sh");
+    std::fs::write(
+        &source,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> \"{}\"\ncase \"$*\" in *\"plugin install moai@\"*) /bin/cp \"{}\" \"{}\";; esac\nexit 0\n",
+            c.log.display(),
+            registered.display(),
+            ledger.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::remove_file(c.bin.join("claude")).unwrap();
+    place_exe(&source, &c.bin.join("claude"));
+
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "install", "--scope", "project"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let calls = c.calls()[before..].to_string();
+    assert!(calls.contains("plugin uninstall korean-skills@korean-skills --scope local"), "{calls}");
+    assert!(
+        !calls.contains("uninstall korean-skills@korean-skills --scope project"),
+        "이번 판에 처음 선 범위의 것을 걷었다\n{calls}"
+    );
+    // 가짜가 등록을 장부에 실제로 적었는가 — 안 적었으면 이 시험은 아무것도 안 잰다.
+    assert!(std::fs::read_to_string(&ledger).unwrap().contains(&moai_at_project), "가짜가 등록을 안 적었다");
+}
+
+/// **이름이 남의 저장소를 가리키면 옛 판이 곁에 깐 것도 안 걷는다**(moai-vtfu.dvk) — 그때 `moai@<이름>` 의 사용자
+/// 범위 줄은 그 저장소의 것이라, 그것을 이 저장소의 moai 로 읽고 걸으면 남의 두 플러그인을 걷는다. `install`
+/// 도 연습도 `uninstall` 도 걷을 것을 안 낸다.
+#[test]
+fn skill_retires_nothing_while_the_name_points_elsewhere() {
+    let s = init("skillkoreanclash");
+    let c = Claude::new("skillkoreanclash-home");
+    let (market, _) = installed(&s, &c, "0.0.1");
+    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"/elsewhere\"}}}}"));
+    let user = "{\"scope\":\"user\",\"installPath\":\"/x\",\"version\":\"1\"}";
+    c.ledger(
+        "installed_plugins.json",
+        &format!(
+            "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{user}],\"korean-skills@korean-skills\":[{user}],\"humanize-korean@im-not-ai\":[{user}]}}}}"
+        ),
+    );
+    let before = c.calls().len();
+    let runs: [&[&str]; 3] = [
+        &["skill", "install", "--dry-run", "--json"],
+        &["skill", "install", "--json"],
+        &["skill", "uninstall", "--json"],
+    ];
+    for args in runs {
+        let json = String::from_utf8(c.run(s.path(), args, true).stdout).unwrap();
+        assert!(
+            json.contains(r#""retired":[]"#) && json.contains(r#""kept":[]"#),
+            "{args:?}: 남의 이름 밑에서 걷는다\n{json}"
+        );
+    }
+    assert!(!c.calls()[before..].contains("korean"), "남의 저장소가 깐 것을 걷었다\n{}", c.calls());
 }
 
 /// **걷을 때는 moai 를 걷는 범위에서만 함께 걷고, 마켓플레이스는 둔다** — 이름이 기계 하나에서 전역이라
@@ -16647,6 +16819,43 @@ fn skill_uninstall_counts_the_korean_plugins_apart() {
     let said = text(&out);
     assert!(said.starts_with(&format!("`{market}` 을 걷었다")), "{said}");
     assert!(said.contains("! claude plugin uninstall korean-skills@korean-skills --scope local  — 실패"), "{said}");
+}
+
+/// **moai 를 다 못 걷었으면 옛 판이 곁에 깐 것도 안 부른다** — 걷기를 `retire` 로 옮긴 뒤에도(moai-vtfu.dvk) 옛
+/// 셈이다. 다시 부르면 남은 moai 의 설치로 범위를 재어 함께 걷는다. 안 부른 걸음은 `--json` 에서 `ok` 가
+/// `null` 이고, 사람 출력은 안 불렀다고 밝힌다.
+#[test]
+fn skill_uninstall_keeps_the_korean_plugins_while_moai_stays() {
+    let s = init("skillkoreanrmstay");
+    let c = Claude::failing_on("skillkoreanrmstay-home", Some("plugin uninstall moai@"));
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap();
+    ledger_with(
+        &c,
+        &market,
+        root,
+        &[("korean-skills@korean-skills", "local", Some(".")), ("humanize-korean@im-not-ai", "local", Some("."))],
+    );
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall", "--json"], true);
+    assert!(!out.status.success(), "moai 를 못 걷었는데 성공으로 끝났다\n{}", text(&out));
+    let calls = c.calls()[before..].to_string();
+    assert!(calls.contains(&format!("plugin uninstall moai@{market}")), "moai 의 걷기를 안 불렀다\n{calls}");
+    for id in RETIRED {
+        assert!(!calls.contains(id), "moai 를 못 걷었는데 {id} 를 걷었다\n{calls}");
+        let row = format!(
+            r#"{{"command":"claude plugin uninstall {id} --scope local","id":"{id}","ok":null,"scope":"local"}}"#
+        );
+        let json = String::from_utf8(out.stdout.clone()).unwrap();
+        assert!(json.contains(&row), "안 부른 걸음이 null 이 아니다\n{json}");
+    }
+    let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
+    assert!(
+        said.contains(
+            "  - claude plugin uninstall korean-skills@korean-skills --scope local  — 앞 걸음이 실패해 안 불렀다"
+        ),
+        "{said}"
+    );
 }
 
 /// **사용자 범위의 곁의 것은 다른 저장소의 moai 도 쓰면 두고 간다**(리뷰 moai-5wk4.76z). 그 줄은 기계에

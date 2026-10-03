@@ -984,7 +984,7 @@ impl<'a> Line<'a> {
         self.used().map(|s| s.words.as_slice())
     }
 
-    /// 읽기 전의 글 그대로 — 한글이 들었는지처럼 토막을 안 가르고 답하는 물음이 쓴다.
+    /// 읽기 전의 글 그대로 — 토막을 안 가르고 답하는 물음이 쓴다([`picked_in`] 의 `mv` 글자 앞문).
     fn text(&self) -> &'a str {
         self.cmd
     }
@@ -1105,10 +1105,8 @@ enum Aim {
     Word,
     /// `>`·`>>`·`>|`·`&>`·`<>` — 쓰는 파일.
     Write,
-    /// `<`·`<&` — 읽는 것. 낱말도 쓰기도 아니다.
+    /// `<`·`<&` — 읽는 것, `<<<` — 읽는 글 그 자체. 낱말도 쓰기도 아니다.
     Read,
-    /// `<<<` — 읽는 글 그 자체. 낱말도 쓰기도 아니다.
-    Here,
     /// `>&` — 숫자나 `-` 면 fd 를 잇는 것이고, 아니면 그 파일에 쓴다.
     Dup,
 }
@@ -1133,10 +1131,13 @@ struct Lexer<'a> {
     stack: Vec<Ctx>,
     /// `[[ … ]]` 안 — `>`·`<`·`&&`·`||`·괄호가 비교와 묶음이다.
     test: bool,
-    /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`), 본문을 적을 [`Lexer::docs`] 의 번호.
+    /// 이 줄이 끝나면 건너뛸 heredoc 본문들 — 종료어와, 앞 탭을 걷는가(`<<-`), 본문의 번호([`Lexer::docs`]),
+    /// 종료어에 따옴표가 있었나.
     heredocs: Vec<(String, bool, usize, bool)>,
-    /// 건너뛴 heredoc 본문들 — 연 토막이 [`Seg::docs`] 로 번호를 든다.
-    docs: Vec<String>,
+    /// 이 렉서가 연 heredoc 의 수 — 다음 본문의 번호다. 연 토막이 [`Seg::docs`] 로, 본문의 치환이
+    /// [`Lexer::later`] 로 그 번호를 든다. **본문은 들고 있지 않는다** — 읽는 것은 따옴표 없는 본문의 치환
+    /// 하나고, [`Lexer::skip_heredocs`] 가 본문을 모으는 그 자리에서 읽는다.
+    docs: usize,
     /// 지금 몇 겹의 `( … )` 묶음 안인가([`Seg::depth`]).
     group: usize,
     /// 마지막으로 읽은 이음사 — 다음에 쌓이는 토막의 [`Seg::join`] 이 된다.
@@ -1259,7 +1260,7 @@ impl<'a> Lexer<'a> {
             stack: Vec::new(),
             test: false,
             heredocs: Vec::new(),
-            docs: Vec::new(),
+            docs: 0,
             group: 0,
             join: Join::default(),
             braces: 0,
@@ -1431,8 +1432,10 @@ impl<'a> Lexer<'a> {
             .into_iter()
             .filter(|s| !s.words.is_empty() || !s.writes.is_empty())
             .map(|mut s| {
-                // 번호는 이 렉서의 것이다 — 비워 두지 않으면 바깥 렉서가 치환 안의 토막을 다시 쌓을 때
-                // 제 번호로 읽어 남의 본문의 치환을 그 앞에 심는다.
+                // 번호는 이 렉서의 것이다 — 바깥으로 나가는 토막에는 비워 보낸다. **지금은 읽는 이가 없다**:
+                // 바깥 렉서의 다시 읽기([`Lexer::relex`])는 겹이 든 토막을 건너뛰고, 겹 없이 오는 `eval` 의
+                // 토막은 그 다시 읽기가 도는 사이에 쌓여 다시 안 읽힌다. 남은 번호가 바깥 번호로 읽히는 길이
+                // 언젠가 생겨도 남의 본문의 치환을 그 앞에 심지 않게 지운다.
                 s.docs.clear();
                 s
             })
@@ -2148,7 +2151,8 @@ impl<'a> Lexer<'a> {
             Some('<') => {
                 self.chars.next();
                 if self.chars.next_if_eq(&'<').is_some() {
-                    self.aim = Aim::Here;
+                    // `<<<` — 읽는 글 그 자체라 `<` 의 과녁처럼 낱말에도 쓰기에도 안 든다.
+                    self.aim = Aim::Read;
                 } else {
                     self.heredoc();
                 }
@@ -2222,8 +2226,8 @@ impl<'a> Lexer<'a> {
             }
         }
         if !tag.is_empty() {
-            let n = self.docs.len();
-            self.docs.push(String::new());
+            let n = self.docs;
+            self.docs += 1;
             self.seg.docs.push(n);
             self.heredocs.push((tag, strip, n, quoted));
         }
@@ -2236,6 +2240,10 @@ impl<'a> Lexer<'a> {
     /// 끝내, 남은 본문을 명령으로 읽었다.
     fn skip_heredocs(&mut self) {
         for (tag, strip, n, quoted) in std::mem::take(&mut self.heredocs) {
+            // 본문은 명령이 아니다. **따옴표 없는 본문만 모은다** — 셸이 그 안의 치환을 돌리고(아래), 따옴표 친
+            // 본문은 아무도 안 읽는다. 다 모은 판이 `moai note <id> -b - <<'EOF'` 의 리뷰 원문(64KB 까지)을
+            // 도구 호출마다 버릴 사본으로 떴다.
+            let mut doc = String::new();
             loop {
                 let mut line = String::new();
                 let mut more = false;
@@ -2250,10 +2258,10 @@ impl<'a> Lexer<'a> {
                 if body.strip_suffix('\r').unwrap_or(body) == tag || (!more && body.is_empty()) {
                     break;
                 }
-                // 본문은 명령이 아니지만 그 토막에 흘러드는 글이다.
-                let doc = &mut self.docs[n];
-                doc.push_str(body);
-                doc.push('\n');
+                if !quoted {
+                    doc.push_str(body);
+                    doc.push('\n');
+                }
                 if !more {
                     break;
                 }
@@ -2264,7 +2272,7 @@ impl<'a> Lexer<'a> {
             // **본문을 다 모은 뒤에 한 번 본다.** 줄마다 보던 판은 줄을 넘는 `$( … )` 를 줄
             // 끝에서 잘라, 이어지는 줄의 `moai add` 를 놓쳤다(리뷰 moai-p836.rv).
             if !quoted {
-                let found = Lexer::subs_of(&self.docs[n], self.deep + 1);
+                let found = Lexer::subs_of(&doc, self.deep + 1);
                 self.later.extend(found.into_iter().map(|t| (n, t)));
             }
         }
@@ -2287,7 +2295,7 @@ impl<'a> Lexer<'a> {
                 self.seg.hung |= self.hung && self.seg.words.is_empty();
                 self.seg.writes.push(word);
             }
-            Aim::Read | Aim::Here => {}
+            Aim::Read => {}
             Aim::Dup if word.chars().all(|d| d.is_ascii_digit() || d == '-') => {}
             // `&>파일` 꼴도 묶음에 걸린 리다이렉션일 수 있다 — 위와 같이 적는다(리뷰 moai-514e).
             Aim::Dup => {
@@ -9187,8 +9195,8 @@ mod tests {
             assert!(said.contains("moai defer t-1"), "{lang:?}: 미룸 줄을 잃었다 — {said}");
         }
         // 영어로 부른 판에 한국어가 남으면 그 줄이 아직 글자로 박힌 것이다 — 거절문(guide)은 안 센다.
-        // **재는 자는 도구의 것 그대로다**([`super::hangul`]) — 음절만 보던 판은 자모만 남은 줄을
-        // 못 봤다(리뷰 moai-8d49.ssb).
+        // **재는 자는 화면 말을 재는 시험들이 함께 쓰는 하나다**([`super::hangul`]) — 음절만 보던 판은
+        // 자모만 남은 줄을 못 봤다(리뷰 moai-8d49.ssb).
         let english = |issues: &[Issue]| match super::closing(issues, issues, &cfg(), &here(), 3, Some(1), Lang::En) {
             Decision::Block(said) => said,
             other => panic!("안 붙들었다 — {other:?}"),

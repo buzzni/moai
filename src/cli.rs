@@ -1584,7 +1584,7 @@ pub enum SkillCmd {
   with `claude`. Your settings.json is not touched - putting the two keys in
   is `claude`'s job.
 
-  **Nothing is deleted.** Running again only overwrites. Deleting a hook file
+  **No file is deleted.** Running again only overwrites. Deleting a hook file
   a running session holds would block every tool call of that session.
 
   The version is a hash of what is installed. Same content, same version, so
@@ -1592,14 +1592,17 @@ pub enum SkillCmd {
 
   The two Korean text plugins an earlier moai installed alongside
   (korean-skills and humanize-korean) are **removed**, at the scopes where
-  this repository's moai stands. The marketplaces are left behind. If one
-  cannot be removed, moai's own registration still stands and the command
-  to remove it by hand is printed.
+  this repository's moai stands. `claude` does not record who installed a
+  plugin, so one installed at such a scope by hand is removed too, on every
+  run. A user-scope install is left behind when another repository's moai
+  stands there, and then the command to remove it is printed in one line.
+  The marketplaces are left behind. If one cannot be removed, moai's own
+  registration still stands and the command to remove it by hand is printed.
 
   moai skill install                  just me (the default. settings.local.json)
   moai skill install --scope user     every repository on this machine
   moai skill install --scope project  with the team (committed settings.json)
-  moai skill install --dry-run        only show what would be installed
+  moai skill install --dry-run        only show what would be done
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.")]
@@ -1616,7 +1619,7 @@ pub enum SkillCmd {
         )]
         scope: Scope,
 
-        /// Install nothing; only say what would be installed
+        /// Change nothing; only say what would be done
         #[arg(long)]
         dry_run: bool,
     },
@@ -1647,8 +1650,10 @@ pub enum SkillCmd {
   the session.
 
   The two Korean plugins an earlier moai installed alongside are removed **at
-  the scope moai was removed from**. The marketplace is left behind - the name
-  is global to one machine and another repository's install uses it.
+  the scope moai was removed from** - `claude` does not record who installed
+  a plugin, so one installed there by hand is removed too. The marketplace is
+  left behind - the name is global to one machine and another repository's
+  install uses it.
   A user-scope install is also left behind when another repository's moai
   stands there, and then the command to remove it is printed in one line.
 

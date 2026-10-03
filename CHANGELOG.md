@@ -73,14 +73,16 @@ does not tag — see `CONTRIBUTING.md`.
   moai installed alongside it** (`korean-skills@korean-skills` and
   `humanize-korean@im-not-ai`) instead of installing them. It removes them only
   at the scopes where this repository's moai stands, which is where an earlier
-  install put them; a user-scope install another repository's moai also stands
-  beside is left, with the command to remove it printed. The marketplaces stay
-  — `claude plugin marketplace remove` reaches the whole machine. One line says
-  what was removed; a removal that fails prints the command to run by hand and
-  does not change the exit code. `--dry-run` lists the removals. In `--json`,
-  `skill install` and `skill uninstall` report them under `retired`
-  (`id`, `scope`, `command`, `ok`) and `kept`; the `companions` key is gone from
-  `skill install`, `skill uninstall` and `skill status`.
+  install put them; `claude` does not record who installed a plugin, so one
+  installed at such a scope by hand is removed too, on every install. A
+  user-scope install another repository's moai also stands beside is left,
+  with the command to remove it printed. The marketplaces stay — `claude plugin
+  marketplace remove` reaches the whole machine. One line says what was
+  removed; a removal that fails prints the command to run by hand and does not
+  change the exit code. `--dry-run` lists the removals. In `--json`,
+  `skill install` reports them under `retired` (`id`, `scope`, `command`,
+  `ok`) and `kept` in place of `companions`; in `skill uninstall`, which
+  already had `kept`, `companions` becomes `retired` in the same shape.
 
 ### Removed
 
@@ -89,9 +91,10 @@ does not tag — see `CONTRIBUTING.md`.
   `references/commands.md` and the supervisor's worker brief, and the hook no
   longer adds a polishing notice to a `moai` write that carries Hangul. Korean
   text goes in as it is written. `moai skill status` no longer shows the
-  `alongside` row. Rule 2 counts a `_workspace/` folder like any other — the
-  exception existed only for the plugin that created it. Run `moai init` to
-  bring an existing `AGENTS.md` block up to date.
+  `alongside` row, and its `--json` no longer carries the `companions` key.
+  Rule 2 counts a `_workspace/` folder like any other — the exception existed
+  only for the plugin that created it. Run `moai init` to bring an existing
+  `AGENTS.md` block up to date.
 
 ## [0.3.0] - 2026-10-02
 

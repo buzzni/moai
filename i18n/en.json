@@ -640,7 +640,7 @@
   "skill.plan_retire": "retire: {cmd}",
   "skill.planted": "Planted in {dir}",
   "skill.hook_call": "  what the hooks call: {cmd}",
-  "skill.retired": "  · {id} removed — an earlier moai installed it alongside (--scope {scope})",
+  "skill.retired": "  · {id} removed — moai no longer installs it alongside (--scope {scope})",
   "skill.retire_failed": "  ! {id} could not be removed — by hand: {cmd}",
   "skill.market_taken": "`{market}` already points at {at} — registering is skipped",
   "skill.reopen_claude": "Reopen Claude and it is in. Sessions already open keep the old copy",
