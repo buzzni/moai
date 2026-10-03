@@ -1395,7 +1395,7 @@ impl App {
     /// 까닭은 이 부름이 방금 [`App::held`]·[`App::unlayered`] 에 적은 그 글이다 — 여기서 또
     /// 지어내면 배너와 알림이 갈린다.
     pub(super) fn relayer_with(&mut self, reg: Option<&user_config::Registry>, land: Option<&Path>) -> Relayered {
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let (held, stood) = self.grip_of(&self.rows());
         match self.layer.take() {
             None => {
                 // 프로젝트가 없으면 세울 층도 없다 — 이것은 탈이 아니라 그냥 세울 것이 없는 자리다.
@@ -1524,11 +1524,17 @@ impl App {
             layer.launch();
         }
         let rows = self.rows();
+        // 층의 첨자가 아니라 **그 머리줄의 줄 번호**다(moai-r1ly.f2x) — 한눈 보기에서 위 프로젝트가 펼쳐져 있으면 둘이
+        // 갈려, 방금 등록한 프로젝트 대신 위 프로젝트의 줄에 섰다.
         let landed = land.filter(|_| self.on_layer()).and_then(|want| {
             let l = self.layer.as_ref()?;
-            l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))
+            let n = l.position(want).or_else(|| l.places.iter().position(|p| same_dir(&p.path, want)))?;
+            rows.iter().position(|r| *r == Row::Project(n))
         });
-        let at = landed.or_else(|| held.as_ref().and_then(|a| self.row_of(&rows, a))).unwrap_or(self.cursor);
+        // 붙든 줄이 사라지는 것은 그 프로젝트가 목록에서 빠질 때다. 보드는 그 카드의 칸 곁에 선다([`App::regain`]) —
+        // `CardAt` 이 든 층의 첨자가 이제 그 자리를 넘겨받은 프로젝트를 가리켜, 그 프로젝트의 같은 칸이다. 번호로
+        // 물러서면 줄 차례(레인 → 우선순위)의 카드라 딴 칸에 서기 쉽다.
+        let at = landed.or_else(|| self.regain(&rows, held.as_ref(), stood.as_ref())).unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
         Relayered::Stood
     }
@@ -4721,6 +4727,86 @@ mod tests {
         assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — idea 카드에 섰다");
         a.hit("SPC v i Esc");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "카드가 다 숨은 프로젝트 밖으로 갔다");
+    }
+
+    /// **한눈 보기에서 위 프로젝트를 다시 읽어도 커서는 보던 줄에 남는다**(moai-r1ly.f2x). 한눈 보기의 줄은 펼친
+    /// 프로젝트의 줄을 다 이어 세운다. 다시 읽은 줄을 들이며 커서를 안 세우던 때는 위 프로젝트의 줄 수가 바뀌면 같은
+    /// 번호에 다른 줄이 섰다.
+    #[test]
+    fn rereading_a_project_above_on_the_overview_keeps_the_row() {
+        let s = Scratch::fenced("layer-reread-cursor");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        a.want_site(1);
+        settle(&mut a);
+        a.cursor = a.rows().iter().position(|r| *r == Row::Project(1)).unwrap() + 1;
+        let seen = title_at_cursor(&a);
+        assert!(seen.as_deref().is_some_and(|t| t.starts_with("two")), "시험의 전제 — two 의 줄에 섰다: {seen:?}");
+
+        write_lines(
+            &one,
+            &[
+                ("argos-0001", "one 의 첫 줄", "todo"),
+                ("argos-0002", "one 의 둘째 줄", "in_progress"),
+                ("argos-0003", "one 의 새 줄", "todo"),
+                ("argos-0004", "one 의 또 새 줄", "todo"),
+            ],
+        );
+        settle(&mut a);
+        assert_eq!(titles(&a).iter().filter(|t| t.starts_with("one")).count(), 4, "시험의 전제 — one 을 다시 읽었다");
+        assert_eq!(title_at_cursor(&a), seen, "위 프로젝트를 다시 읽자 커서가 딴 줄로 갔다");
+    }
+
+    /// **방금 등록한 프로젝트의 머리줄에 선다 — 위 프로젝트가 펼쳐져 있어도**(moai-r1ly.f2x). 층의 첨자를 줄 번호로
+    /// 쓰던 때는 위에 펼친 줄 수만큼 어긋나 위 프로젝트의 줄에 섰다.
+    #[test]
+    fn registering_stands_on_the_new_header_below_an_open_project() {
+        let s = Scratch::fenced("layer-land-open");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one]);
+        let mut a = layered(&cfg);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.rows().len() > 1, "시험의 전제 — one 이 펼쳐졌다");
+        s.register(&[&one, &two]);
+        a.relayer(Some(&two));
+        assert_eq!(a.rows()[a.cursor], Row::Project(1), "방금 등록한 프로젝트의 머리줄에 안 섰다");
+    }
+
+    /// **보던 카드의 프로젝트가 목록에서 빠지면 그 자리를 넘겨받은 프로젝트의 같은 칸에 선다**(moai-r1ly.f2x). 번호로
+    /// 물러서면 그 프로젝트의 줄이긴 해도 줄 차례(레인 → 우선순위)의 카드라 딴 칸에 선다.
+    #[test]
+    fn dropping_the_project_of_the_card_keeps_to_its_column_on_the_overview_board() {
+        let s = Scratch::fenced("layer-board-dropped");
+        let at = "2026-09-01T00:00:00Z";
+        let card = |id: &str, title: &str, status: &str, p: u8| {
+            let mut i = Issue::new(id.into(), title.into(), Kind::Issue, Status::new(status), at);
+            i.priority = Some(p);
+            i
+        };
+        let one = s.project("one", &[("argos-0001", "one 의 줄", "todo")]);
+        let two = s.project("two", &[]);
+        append_issue(&two, card("argos-0001", "two 의 집은 줄", "in_progress", 1));
+        append_issue(&two, card("argos-0002", "two 의 줄", "todo", 2));
+        let three = s.project("three", &[]);
+        append_issue(&three, card("argos-0001", "three 의 줄", "todo", 0));
+        append_issue(&three, card("argos-0002", "three 의 집은 줄", "in_progress", 2));
+        let cfg = s.register(&[&one, &two, &three]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        for n in 0..3 {
+            a.want_site(n);
+        }
+        settle(&mut a);
+        a.cursor = a.rows().iter().position(|r| *r == Row::Project(1)).unwrap() + 1;
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("two 의 집은 줄"), "시험의 전제");
+
+        s.register(&[&one, &three]);
+        a.relayer(None);
+        // 번호로 서면 three 의 첫 줄(p0 의 todo)이다.
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("three 의 집은 줄"), "빠진 카드의 칸을 떠났다");
     }
 
     /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i`
