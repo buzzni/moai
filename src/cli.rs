@@ -1068,8 +1068,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   the journal, not the row), a row whose derived value changed without a
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
-  falls in no time range. For a complete copy, pull the whole list and
-  compare row by row.
+  falls in no time range. For a complete copy, pull the whole list
+  (--archived, and `moai idea show --all` for ideas) and compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -1098,18 +1098,18 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
-    moai show --all --json | duckdb -c \"SELECT kind, count(*)
+    moai show --archived --json | duckdb -c \"SELECT kind, count(*)
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1\"";
 
 // **`--json` 의 모양을 여기 적는다** — 에이전트가 읽는 계약이라(moai-1hka.k16) 도움말이 그 문서다. 모양을
 // 바꾸면 이 글과 `report::stats::Stats` 를 함께 고치고, `docs/cli.md` 를 다시 짓는다.
 const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters as `moai show` -
-  with done, deferred and ideas in: it counts what happened, so nothing
-  finished is hidden. Every number counts one kind, issue unless --type
-  names another; a group is measured through its members (-e, --milestone).
-  The kind axis alone counts every row picked, to show what was left out.
-  --all is taken and changes nothing. The time filters read as in
-  `moai show --help`.
+  with done, deferred, ideas and the archive in: it counts what happened,
+  so nothing finished is hidden. Every number counts one kind, issue
+  unless --type names another; a group is measured through its members
+  (-e, --milestone). The kind axis alone counts every row picked, to show
+  what was left out. --all and --archived are taken and change nothing.
+  The time filters read as in `moai show --help`.
 
   Nothing is stored, and the journal's column moves are never folded in.
   The numbers come from the rows and from the `model:` lines in the notes -
