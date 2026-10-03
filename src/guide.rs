@@ -2136,6 +2136,23 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// 겹치지 않는다 — 겹치면 맡긴 idea 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
 const RECALL: &str = "moai -C <root> idea promote <idea id> -e <epic> --from -";
 
+/// 7 에서 리뷰 이슈를 세우며 멤버를 `review` 칸에 세우는 줄(사용자 결정 2026-10-03, moai-vxld).
+/// 리뷰가 도는 동안 아무도 손대지 않는 멤버가 보드에서 `in_progress` 로 "하는 중" 을 말했고,
+/// 브리프가 칸을 말하지 않아 창마다 옮기기도 두기도 했다.
+///
+/// **`--from in_progress` 가 첫 칸의 멤버를 거른다.** 4-3·7-1 로 남긴 멤버는 이 리뷰가 안 본
+/// 일이라 `review` 에 서면 안 되는데, 글로 "빼라" 고만 하면 옮겨 친 줄이 그것까지 세운다 —
+/// 본 칸이 다르면 옮기지 않는 `--from` 이 그 판단을 대신 한다.
+const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
+
+/// `review` 칸이 없는 저장소에서 [`TO_REVIEW`] 가 받는 거절의 머리. 칸 이름은 config 가
+/// 정하는데, 브리프는 2 에서 이미 `in_progress`·`todo` 를 이름으로 박았다 — 그래서 칸이 있는지
+/// 미리 알아내는 자리(감독이 채우는 `<review column>`, 보드를 먼저 읽는 걸음)를 두지 않고 이
+/// 거절을 답으로 읽게 한다(사용자 결정, moai-vxld). 기본 칸과 `init` 이 적는 config 에는
+/// `review` 가 든다 — 없는 것은 `statuses` 를 손으로 바꾼 저장소다.
+/// `the_brief_stands_members_in_review` 가 이 글을 `refuse.no_column` 의 영어 글과 견준다.
+const NO_REVIEW_COLUMN: &str = "`review` is not a column";
+
 /// 감독이 일꾼에게 `SendMessage` 로 싣는 글. **일꾼이 받는 것은 이것뿐이다** — 감독
 /// 스킬의 다른 절을 가리키면 일꾼에게 없는 글을 가리키는 것이라(첫 판의 "아래 공유
 /// main" 이 그랬다), 일꾼이 지킬 것은 모두 여기 적는다.
@@ -2273,8 +2290,17 @@ fn brief() -> String {
        <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
        (rule 3)
          {review}
-       This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1. What
-       you take in goes in a separate fix: commit; what you hand on goes in a note with the issue id.
+       This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
+       **In the same breath, stand the finished members in `review`** — while the review runs
+       nobody is working on them, and `in_progress` on the board says somebody is. One id per
+       call, as in 2
+         {TO_REVIEW}
+       `--from in_progress` passes over the members left in the first column by 4-3 and 7-1 —
+       this review does not see them, so they do not stand in it. If moai answers
+       "{NO_REVIEW_COLUMN}", this repository's columns have no `review` and the step does not
+       exist here: leave the members where they stand and go on. If it answers that the member
+       already stands `review`, you came back from 8 — leave it. What you take in goes in a
+       separate fix: commit; what you hand on goes in a note with the issue id.
        Only when the worktree's hook cannot see a review issue created or picked up in the root
        and blocks you — a binary from before the hook moved the tracker to the root reads that
        worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
@@ -2382,7 +2408,9 @@ fn brief() -> String {
        `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
          moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
     10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-       landed** — a worker moved them before the merge and had to undo it. Do not close the
+       landed** — a worker moved them before the merge and had to undo it. It closes a member
+       from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
+       alike. Do not close the
        members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
        the worktree still stands, the hook reads this work as a sibling worktree's and cannot
        refuse a review closed without `-m`. Close the review issue leaving what came out of it
@@ -3150,6 +3178,36 @@ stop sending outside work while a release runs",
         ] {
             assert!(step.contains(piece), "{why} — {piece}");
         }
+    }
+
+    /// **에픽 끝 리뷰가 도는 동안 멤버는 `review` 칸에 선다**(사용자 결정 2026-10-03, moai-vxld).
+    /// 브리프가 칸을 말하지 않아 한 창은 옮기고 여러 창은 `in_progress` 에 두었다.
+    ///
+    /// **거절의 글을 도구의 글과 견준다.** 브리프는 `review` 칸이 없는 저장소를 그 거절로 알아보게
+    /// 하는데, `refuse.no_column` 의 글이 바뀌고 브리프가 옛 글을 들고 있으면 일꾼은 거절을 "이
+    /// 걸음이 없다" 로 못 읽고 멈추거나 우회한다. 다시 돌아온 판의 `mv.stale` 도 같다.
+    #[test]
+    fn the_brief_stands_members_in_review() {
+        let brief = brief();
+        let at = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
+        let step = &brief[at..at + brief[at..].find("\n    7-1.").expect("7 뒤에 7-1 이 없다")];
+        let issue = step.find(&make_review("--parent <epic>")).expect("7 에 리뷰 이슈를 세우는 줄이 없다");
+        let moved = step.find(TO_REVIEW).expect("7 이 멤버를 review 칸에 세우지 않는다");
+        assert!(issue < moved, "리뷰 이슈보다 먼저 멤버를 옮긴다");
+        // 7 의 `--from` 은 2 가 멤버를 세운 칸이다 — 둘이 갈라지면 모든 멤버가 stale 로 남는다.
+        assert!(brief.contains("moai mv <member> in_progress --from todo"), "2 가 멤버를 세우는 칸이 바뀌었다");
+        assert!(TO_REVIEW.ends_with("--from in_progress"), "7 이 첫 칸의 멤버까지 옮긴다");
+
+        let refusal = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "refuse.no_column"), &[("name", "review"), ("known", "todo, done")]);
+        assert!(refusal.starts_with(NO_REVIEW_COLUMN), "브리프가 옮겨 적은 거절이 도구의 글과 다르다 — {refusal}");
+        assert!(step.contains(&format!("\"{NO_REVIEW_COLUMN}\"")), "칸이 없는 저장소에서 이 걸음을 건너뛰라는 말이 없다");
+        let stale = crate::i18n::fill(crate::i18n::say(crate::i18n::Lang::En, "mv.stale"), &[("id", "<member>"), ("now", "review")]);
+        assert!(stale.contains("already stands review"), "다시 돌아온 판의 거절 글이 바뀌었다 — {stale}");
+        assert!(step.contains("already stands `review`"), "이미 review 에 선 멤버를 두라는 말이 없다");
+
+        let close = brief.find("\n    10.").expect("10 이 없다");
+        let close = &brief[close..close + brief[close..].find("\n    11.").expect("10 뒤에 11 이 없다")];
+        assert!(close.contains("from `review`, where 7 stood it"), "10 이 review 에서 닫는다고 말하지 않는다");
     }
 
     /// **리뷰가 되풀이해 잡는 다섯 자리를 브리프가 싣는다**(moai-jza6). 그 전에는 감독이
