@@ -119,6 +119,25 @@ enum Anchor {
     Project(std::path::PathBuf),
 }
 
+/// 보드에서 커서가 선 카드의 자리(moai-r1ly.dwb) — 그 카드가 사라진 뒤 설 곳을 고르는 자다. **줄이 바뀌기 전에**
+/// 잰다: 바뀐 뒤에는 그 카드가 어느 칸의 어디에 섰는지 물을 데가 없다([`App::grip_of`]).
+///
+/// 칸은 번호가 아니라 이름으로 든다 — 보기가 칸 하나를 숨기면 번호가 밀린다.
+struct CardAt {
+    column: board::Column,
+    /// 옛 배치에서 그 칸의 이웃 — [`board::around`] 의 차례다.
+    around: Vec<Anchor>,
+    /// 옛 배치의 옆 칸 — [`board::beside`] 의 차례다.
+    beside: Vec<board::Column>,
+    /// 그 카드가 선 레인과 그 레인의 윗줄에서 카드까지의 줄 수. **높이는 레인 안에서 잰다**(리뷰) — 숨긴 칸이나 빠진
+    /// 카드가 위 레인을 줄이면 옛 캔버스의 줄은 새 배치에서 아래 레인을 가리킨다.
+    lane: LaneOf,
+    depth: usize,
+    /// 옛 캔버스의 줄 — 그 레인이 새 배치에 없을 때만 쓴다.
+    top: usize,
+    group: usize,
+}
+
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -2211,7 +2230,7 @@ impl App {
     ///
     /// **커서는 번호가 아니라 정체로 따라간다**([`Anchor`]). 보던 줄이 아직 보이면
     /// 그 줄에 서고, 사라졌으면(지워졌거나 거름망에 빠졌으면) 전처럼 그 번호를 목록
-    /// 안으로 자른 자리에 선다.
+    /// 안으로 자른 자리에 선다 — 보드는 그 카드가 섰던 칸 곁이다([`App::regrip`]).
     #[cfg(test)]
     pub fn adopt(&mut self, issues: Vec<Issue>) {
         let (index, ground) = measure(&issues, &self.site.cfg);
@@ -2224,7 +2243,7 @@ impl App {
     /// 지어 온 것([`Fresh`])이 함께 지나는 길이다.
     fn take(&mut self, issues: Vec<Issue>, index: Index, ground: Ground, now: String) {
         // **옛 자료로 잰다** — 줄의 첨자는 옛 `issues` 를 가리킨다.
-        let held = self.current().map(|r| self.anchor_of(&r));
+        let (held, stood) = self.grip_of(&self.rows());
         self.site.issues = issues;
         self.site.index = index;
         self.site.ground = ground;
@@ -2237,20 +2256,95 @@ impl App {
         self.repair_path();
         // 거름망은 이슈 첨자에 매인 것이라 반드시 다시 센다.
         self.reapply();
-        self.regrip(held);
+        self.regrip(held, stood);
+    }
+
+    /// 줄이 바뀌기 전에 붙들 것 — 커서의 정체와, 보드면 그 카드의 자리([`CardAt`]). `rows` 는 **바뀌기 전에** 센
+    /// 목록이다. 보드가 아니면 자리를 안 잰다 — 목록은 번호로 물러서도 같은 칸이다.
+    fn grip_of(&self, rows: &[Row]) -> (Option<Anchor>, Option<CardAt>) {
+        let held = self.current_of(rows).map(|r| self.anchor_of(&r));
+        let stood = if self.board() { self.stood_in(rows, self.cursor) } else { None };
+        (held, stood)
+    }
+
+    /// 보드의 `rows` 에서 `at` 번 카드의 자리([`CardAt`]). 머리줄이면 없다 — 칸이 없으니 칸을 지킬 것도 없다.
+    fn stood_in(&self, rows: &[Row], at: usize) -> Option<CardAt> {
+        let laid = self.laid(rows);
+        let here = laid.plan.cards.get(at)?;
+        let column = here.column?;
+        let lane_top = laid.plan.lanes.get(here.lane)?.top;
+        Some(CardAt {
+            column: laid.columns.get(column)?.clone(),
+            around: board::around(&laid.plan, at)
+                .into_iter()
+                .filter_map(|n| rows.get(n))
+                .map(|r| self.anchor_of(r))
+                .collect(),
+            beside: board::beside(laid.columns.len(), column)
+                .into_iter()
+                .filter_map(|c| laid.columns.get(c).cloned())
+                .collect(),
+            lane: laid.lanes.get(here.lane)?.clone(),
+            depth: here.top.saturating_sub(lane_top),
+            top: here.top,
+            group: here.group,
+        })
+    }
+
+    /// 사라진 카드 대신 설 카드(moai-r1ly.dwb, 사용자 결정 2026-10-03). 옛 이웃 가운데 아직 **그 칸에** 선 것이 먼저고,
+    /// 없으면 그 칸에서, 그 칸도 비었으면 옆 칸에서 옛 높이에 가장 가까운 카드다. 다른 칸으로 옮겨 선 이웃은 건너뛴다 —
+    /// 따라가면 커서가 딴 칸으로 튄다. 보드의 줄 차례는 레인 → 우선순위라, 번호로 물러서면 그 번호의 카드는 다른 칸이나
+    /// 다른 레인에 서기 쉽다.
+    ///
+    /// 높이는 **그 카드가 섰던 레인 안에서** 잰다(리뷰) — 숨긴 칸이나 빠진 카드가 위 레인을 줄이면 옛 캔버스의 줄은
+    /// 새 배치에서 아래 레인을 가리켜, 커서가 다른 마일스톤으로 건너간다. 그 레인이 새 배치에 없을 때만 옛 줄로 잰다.
+    ///
+    /// 그 프로젝트에 카드가 하나도 안 남았으면(한눈 보기) **그 프로젝트의 머리줄**이다 — 번호로 물러서면 딴 프로젝트에
+    /// 선다(`App::flip_layout` 이 같은 까닭으로 머리줄에 선다).
+    fn stand_near(&self, rows: &[Row], stood: &CardAt) -> Option<usize> {
+        let laid = self.laid(rows);
+        let column = |c: &board::Column| laid.columns.iter().position(|k| k == c);
+        // 그 칸은 빠졌을 수 있다 — 보기가 숨겼고 그 칸에 남은 카드도 없으면 보드에 안 선다([`board::columns`]).
+        let home = column(&stood.column);
+        let kept = home.and_then(|home| {
+            let anchors: Vec<Anchor> = rows.iter().map(|r| self.anchor_of(r)).collect();
+            stood
+                .around
+                .iter()
+                .filter_map(|a| anchors.iter().position(|b| b == a))
+                .find(|&n| laid.plan.cards.get(n).and_then(|p| p.column) == Some(home))
+        });
+        // 레인 안의 깊이는 그 레인의 높이 안으로 자른다 — 넘치면 다음 레인의 줄이다.
+        let top = laid
+            .lanes
+            .iter()
+            .position(|l| *l == stood.lane)
+            .and_then(|n| laid.plan.lanes.get(n))
+            .map_or(stood.top, |l| l.top + stood.depth.min(l.height.saturating_sub(1)));
+        kept.or_else(|| {
+            home.into_iter()
+                .chain(stood.beside.iter().filter_map(column))
+                .find_map(|c| laid.plan.nearest(c, top, stood.group))
+        })
+        .or_else(|| laid.plan.cards.iter().position(|p| p.column.is_none() && p.group == stood.group))
     }
 
     /// 줄이 바뀐 뒤(다시 읽기·보기 토글) 보기를 다시 세고 **붙들어 둔 정체의 줄에 커서를 다시 세운다.**
-    /// 그 줄이 사라졌으면(지워졌거나 가려졌으면) 전처럼 그 번호를 목록 안으로 자른 자리에 선다.
+    /// 그 줄이 사라졌으면(지워졌거나 가려졌으면) 전처럼 그 번호를 목록 안으로 자른 자리에 선다 — **보드는 그 카드가
+    /// 섰던 칸에서 가장 가까운 카드다**(`stood`, [`App::stand_near`]).
     /// `take`·`look` 이 같은 규칙을 저마다 다른 모양으로 적고 있었다(moai-y61p 단계 리뷰).
     ///
     /// **굴린 자리는 같은 줄일 때만 둔다.** 다른 이슈로 옮겨 섰는데 굴린 수가 남으면
     /// 그 이슈를 첫 줄부터 못 본다 — 커서를 옮길 때 0 으로 되돌리는 것(`move_to`)과
     /// 같은 까닭이다. 같은 줄이면 본문이 바뀌었어도 두고, 넘치면 그림이 자른다.
-    fn regrip(&mut self, held: Option<Anchor>) {
+    fn regrip(&mut self, held: Option<Anchor>, stood: Option<CardAt>) {
         self.see();
         let rows = self.rows();
-        let at = held.as_ref().and_then(|a| self.row_of(&rows, a)).unwrap_or(self.cursor);
+        let at = held
+            .as_ref()
+            .and_then(|a| self.row_of(&rows, a))
+            .or_else(|| stood.and_then(|s| self.stand_near(&rows, &s)))
+            .unwrap_or(self.cursor);
         self.stand(&rows, at, held.as_ref());
     }
 
@@ -3731,7 +3825,7 @@ impl App {
     /// 목록을 세 번 센다(키 처리·붙들 줄·바뀐 뒤).
     fn look(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
-        let held = self.current_of(rows).map(|r| self.anchor_of(&r));
+        let (held, stood) = self.grip_of(rows);
         match act {
             B::Column(n) => {
                 // 번호는 **이 화면의 칸**을 센다([`App::screen_statuses`]) — 한눈 보기에서는 줄을
@@ -3748,7 +3842,7 @@ impl App {
             B::Sort(o) => self.order = self.order.press(o),
             _ => return,
         }
-        self.regrip(held);
+        self.regrip(held, stood);
         self.save_look();
     }
 
@@ -4190,6 +4284,10 @@ impl App {
     /// 보드의 카드 — 지금 디렉터리를 **통째로 펼친** 줄 가운데 묶음이 아닌 것(일과 idea)이다(moai-9nfw).
     /// 에픽·마일스톤·바구니는 카드가 아니다: 레인이 마일스톤이고, 에픽은 카드의 발줄에 이름으로 선다.
     ///
+    /// **닫힌 idea 도 카드가 아니다**(moai-r1ly.91p, 사용자 결정 2026-10-03). idea 의 닫힘은 "다 했다" 가 아니라
+    /// "처리했다" 다 — 펼친 idea 는 그것이 낳은 카드가 대신하고, 버린 idea 는 그냥 사라진다. idea 는 오른쪽 칸으로
+    /// 흐르지 않고 에픽 하나와 이슈 여럿으로 펼쳐지므로, done 칸에 세우면 끝낸 일로 읽힌다. 목록에는 그대로 선다.
+    ///
     /// **차례는 레인 먼저, 그 안에서는 목록의 차례(`SPC s`)다.** 트리 차례 그대로 두면 칸 하나에 에픽마다
     /// 덩어리가 져, 우선순위로 골라 놓아도 뒤 에픽의 p0 가 앞 에픽의 p3 밑에 선다. 레인의 차례는 펼친 트리에서
     /// 처음 나온 차례 — 목록이 마일스톤 폴더를 세우는 차례와 같다(바구니가 끝이다).
@@ -4202,7 +4300,10 @@ impl App {
         let tree =
             site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
         for (e, twig) in tree {
-            let Some(at) = e.at().filter(|&at| keep(at) && !crate::report::is_group(&site.issues[at])) else {
+            let card = |i: &Issue| {
+                !crate::report::is_group(i) && (crate::report::is_open_idea(i) || !crate::report::is_idea(i))
+            };
+            let Some(at) = e.at().filter(|&at| keep(at) && card(&site.issues[at])) else {
                 continue;
             };
             let lane = site.lane(at);
@@ -5110,7 +5211,8 @@ impl App {
     ///   굴린 자리도 둔다(`stand` 는 정체로 가른다).
     /// - 보기가 도로 가렸으면 **보기를 안 건 차례에서 가장 가까운** 보이는 줄에 서고(아래 먼저), 가려졌다고
     ///   한 줄 댄다. 번호로 자르면 검색 때와 전혀 다른 자리의 줄에 선다. **보기가 가렸을 때만 댄다** — 검색
-    ///   대신 건 거름망(`f`)이 가린 줄에 `SPC v a` 를 대면 누른 키가 아무것도 안 한다.
+    ///   대신 건 거름망(`f`)이 가린 줄에 `SPC v a` 를 대면 누른 키가 아무것도 안 한다. **보드는 차례가 아니라
+    ///   그 카드의 칸에서 찾는다**(moai-r1ly.dwb, [`App::stand_near`]) — 보드의 줄 차례는 레인 → 우선순위다.
     /// - 검색 중 들어간 폴더가 보기에 가렸으면 보이는 폴더까지 나온다 — 가린 폴더 안에 남으면 "보기에 가려
     ///   비었다" 만 선 화면에서 왜 여기 있는지 모른다. 그때 붙들 줄은 나온 폴더다.
     ///
@@ -5156,6 +5258,11 @@ impl App {
         // 보기를 안 건 차례 — 거름망(`f`)은 그대로 건다. 검색이 풀린 뒤라 걸린 것은 거름망뿐이다.
         let all = self.rows_where(&|at| !self.site.veil(at).filtered);
         let near = self.row_of(&all, &want).and_then(|pos| {
+            // **보드는 그 카드의 칸에서 찾는다**(moai-r1ly.dwb) — 보드의 줄 차례는 레인 → 우선순위라, 그 차례의 이웃은
+            // 딴 칸의 카드이기 쉽다. 보기를 안 건 보드에서는 그 카드가 서 있으니 그 배치가 옛 배치다.
+            if self.board() {
+                return self.stood_in(&all, pos).and_then(|s| self.stand_near(&rows, &s));
+            }
             (1..all.len()).find_map(|d| {
                 [pos.checked_add(d), pos.checked_sub(d)]
                     .into_iter()
@@ -5802,6 +5909,125 @@ mod tests {
         // 키 바가 대는 칸 이름도 보드다.
         a.focus = Pane::Detail;
         assert_eq!(a.key_ctx(&rows).next_pane, say(a.site.lang, "tui.pane.board"));
+    }
+
+    /// **닫힌 idea 는 보드에 안 선다**(moai-r1ly.91p, 사용자 결정 2026-10-03) — done 을 켜도, 검색이 맞혀도 카드가
+    /// 아니다. idea 칸에는 산 idea 만 서고, 목록에는 그대로 선다.
+    #[test]
+    fn a_closed_idea_stands_nowhere_on_the_board() {
+        let mut a = boarded();
+        let mut issues = a.site.issues.clone();
+        let mut unfolded = make("argos-0009", Kind::Idea);
+        unfolded.status = Status::new("done");
+        issues.push(unfolded);
+        let mut finished = make("argos-0010", Kind::Issue);
+        finished.status = Status::new("done");
+        issues.push(finished);
+        a.adopt(issues);
+        a.layout = view::Layout::Board;
+        a.hit("SPC v 4 Esc");
+        let ids = row_ids(&a);
+        assert!(ids.contains(&"argos-0010".to_string()), "시험의 전제 — done 을 켰다");
+        assert!(!ids.contains(&"argos-0009".to_string()), "닫힌 idea 가 보드에 섰다");
+        assert!(ids.contains(&"argos-0006".to_string()), "산 idea 가 보드에서 빠졌다");
+        search(&mut a, "0009");
+        assert!(row_ids(&a).is_empty(), "검색이 닫힌 idea 를 카드로 세웠다");
+        a.hit("Esc");
+        // 보기는 그 줄을 안 가린다 — 보드의 카드에서만 빠진다.
+        let closed = a.site.index.find("argos-0009").unwrap();
+        assert!(a.visible(closed), "보기가 닫힌 idea 를 가렸다 — 목록에서도 빠진다");
+    }
+
+    /// **보던 카드가 사라지면 그 카드가 섰던 칸에서 가장 가까운 카드에 선다**(moai-r1ly.dwb, 사용자 결정 2026-10-03).
+    /// 보드의 줄 차례는 레인 → 우선순위라, 번호로 물러서면 딴 칸의 카드에 선다. 옛 이웃은 아래 먼저, 다른 칸으로
+    /// 옮겨 선 이웃은 건너뛰고, 칸이 비면 가까운 옆 칸(같으면 왼쪽)의 같은 높이다.
+    #[test]
+    fn a_vanished_card_hands_the_cursor_to_its_own_column() {
+        // 칸은 idea · 미룸 · todo · in_progress · review 다. 줄은 0003(todo)·0004(in_progress)·0007(미룸)·0006(idea)·0005(todo).
+        let without = |a: &App, id: &str| a.site.issues.iter().filter(|i| i.id != id).cloned().collect::<Vec<_>>();
+        let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
+        let on_board = |id: &str| {
+            let mut a = boarded();
+            a.layout = view::Layout::Board;
+            a.cursor = at(&a, id);
+            a
+        };
+
+        // 칸에 카드가 남았다 — 같은 todo 칸의 아래 카드다. 번호로 물러서면 0004(in_progress)다.
+        let mut a = on_board("argos-0003");
+        a.adopt(without(&a, "argos-0003"));
+        assert_eq!(on_id(&a), "argos-0005", "사라진 카드의 칸을 떠났다");
+
+        // 그 칸이 비었다 — 왼쪽 옆 칸(todo)에서 같은 높이다. 번호로 물러서면 0007(미룸)이다.
+        let mut a = on_board("argos-0004");
+        a.adopt(without(&a, "argos-0004"));
+        assert_eq!(on_id(&a), "argos-0003", "빈 칸에서 가까운 옆 칸의 같은 높이로 안 갔다");
+
+        // 이웃이 다른 칸으로 옮겨 섰으면 따라가지 않는다 — todo 가 비어 왼쪽 옆 칸(미룸)이다.
+        let mut a = on_board("argos-0003");
+        let mut issues = without(&a, "argos-0003");
+        issues.iter_mut().find(|i| i.id == "argos-0005").unwrap().status = Status::new("review");
+        a.adopt(issues);
+        assert_eq!(on_id(&a), "argos-0007", "다른 칸으로 옮겨 선 이웃을 따라갔다");
+
+        // 보기 토글로 숨어도 같다 — idea 를 숨기면 그 칸이 빠져 옆 칸(미룸)이다. 번호로 물러서면 0005(todo)다.
+        let mut a = on_board("argos-0006");
+        a.hit("SPC v i Esc");
+        assert!(!row_ids(&a).contains(&"argos-0006".to_string()), "시험의 전제 — idea 가 숨었다");
+        assert_eq!(on_id(&a), "argos-0007", "빠진 칸의 옆 칸으로 안 갔다");
+    }
+
+    /// **옆 칸의 같은 높이는 그 카드가 섰던 레인 안에서 잰다**(moai-r1ly.dwb 리뷰) — 숨긴 칸이 위 레인을 줄이면 옛
+    /// 캔버스의 줄은 새 배치에서 아래 레인을 가리킨다. 그 줄로 재면 커서가 다른 마일스톤의 카드로 건너간다.
+    #[test]
+    fn a_vanished_card_keeps_its_lane_when_the_lanes_above_shrink() {
+        let at = |id: &str, column: &str, m: Option<&str>| {
+            let mut i = make(id, Kind::Issue);
+            i.status = Status::new(column);
+            i.milestone = m.map(Into::into);
+            i
+        };
+        // 레인 A 는 review 셋으로 길고, 레인 B 의 review 하나에 커서가 선다. 바구니 레인에는 todo 하나뿐이다.
+        let issues = vec![
+            make("argos-0001", Kind::Milestone),
+            make("argos-0002", Kind::Milestone),
+            at("argos-0003", "review", Some("argos-0001")),
+            at("argos-0004", "review", Some("argos-0001")),
+            at("argos-0005", "review", Some("argos-0001")),
+            at("argos-0006", "todo", Some("argos-0001")),
+            at("argos-0007", "review", Some("argos-0002")),
+            at("argos-0008", "todo", Some("argos-0002")),
+            at("argos-0009", "todo", None),
+        ];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.layout = view::Layout::Board;
+        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0007").unwrap();
+        a.hit("SPC v 3 Esc");
+        assert!(!row_ids(&a).contains(&"argos-0007".to_string()), "시험의 전제 — review 가 숨었다");
+        assert_eq!(on_id(&a), "argos-0008", "숨은 칸이 위 레인을 줄였더니 다른 레인의 카드로 건너갔다");
+    }
+
+    /// **보드에서 검색을 풀어 카드가 도로 가려지면 그 카드의 칸 곁에 선다**(moai-r1ly.dwb) — 목록은 보기를 안 건
+    /// 차례의 이웃에 서는데, 보드의 차례는 레인 → 우선순위라 그 이웃은 딴 칸의 카드다.
+    #[test]
+    fn clearing_a_search_on_the_board_keeps_to_the_card_column() {
+        let mut a = boarded();
+        let mut issues = a.site.issues.clone();
+        // 끝난 p0 멤버 — 레인의 차례로는 0003(todo) 바로 앞이다.
+        let mut closed = member("argos-0008", "argos-0002");
+        closed.status = Status::new("done");
+        closed.priority = Some(0);
+        issues.push(closed);
+        a.adopt(issues);
+        a.layout = view::Layout::Board;
+        search(&mut a, "argos-0008");
+        a.key(key(KeyCode::Enter));
+        assert_eq!(on_id(&a), "argos-0008", "시험의 전제 — 검색이 done 카드를 세웠다");
+        a.hit("Esc");
+        assert!(!a.searching(), "검색이 안 풀렸다");
+        // done 의 왼쪽 review 는 비어 그 옆 in_progress 의 같은 높이다. 줄 차례의 이웃이면 0003(todo)이다.
+        assert_eq!(on_id(&a), "argos-0004", "가려진 카드의 칸 곁이 아니라 줄 차례의 이웃에 섰다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0008")), "가려졌다고 안 댔다 — {:?}", a.notice);
     }
 
     /// **보드의 반 쪽·한 쪽은 화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — `Ctrl-d`·`Ctrl-u` 는 [`scroll::HALF`]

@@ -30,6 +30,8 @@ pub enum Column {
 /// **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 idea 는 idea 칸에 선다: idea 는 아직 일이
 /// 아니라 미룸이 뜻이 없다(`moai idea` 는 미룰 일이 아니라 담아 둔 것이다). 미룬 일은 칸이 `in_progress`
 /// 여도 미룸 칸이다 — 지금 누가 손대는 줄이 아니다(`Site::spins` 가 미룬 줄을 안 돌리는 것과 같은 자).
+///
+/// 닫힌 idea 는 여기 안 온다 — 보드의 카드가 아니다(`App::cards_in`, moai-r1ly.91p).
 pub fn column_of(idea: bool, shelved: bool, status: &str) -> Column {
     match (idea, shelved) {
         (true, _) => Column::Idea,
@@ -172,8 +174,8 @@ impl Plan {
     }
 
     /// 그 칸에서 `top` 에 가장 가까운 카드 — 칸을 옮길 때 높이를 지키는 자다. 같으면 위의 것. **`group` 프로젝트
-    /// 안에서만 찾는다** — `h`·`l` 의 울타리다([`step`]).
-    fn nearest(&self, column: usize, top: usize, group: usize) -> Option<usize> {
+    /// 안에서만 찾는다** — `h`·`l` 의 울타리다([`step`]). 사라진 카드 대신 설 카드도 이 자로 고른다(`App::stand_near`).
+    pub fn nearest(&self, column: usize, top: usize, group: usize) -> Option<usize> {
         (0..self.cards.len())
             .filter(|&n| self.cards[n].column == Some(column) && self.cards[n].group == group)
             .min_by_key(|&n| (self.cards[n].top.abs_diff(top), self.cards[n].top))
@@ -302,6 +304,36 @@ pub fn pull(plan: &Plan, cursor: usize, hint: Option<usize>, shows: impl Fn(usiz
         .min_by_key(|&n| (plan.cards[n].top.abs_diff(here.top), plan.cards[n].top, plan.cards[n].column))
 }
 
+/// 사라진 카드 대신 설 카드의 차례(moai-r1ly.dwb, 사용자 결정 2026-10-03) — 카드 `n` 이 선 칸의 길([`Plan::run`])에서
+/// **아래 먼저, 다음 위**로 하나씩 멀어진다. 목록이 검색을 풀 때 이웃을 찾는 차례(`App::after_search`)와 같다 —
+/// 카드 하나가 빠지면 그 자리로 올라서는 것이 아래 카드다.
+///
+/// 머리줄과 다른 프로젝트의 카드는 안 든다 — 그 칸의 카드가 아니다. `n` 이 머리줄이면 비었다.
+pub fn around(plan: &Plan, n: usize) -> Vec<usize> {
+    let Some(here) = plan.cards.get(n).filter(|p| p.column.is_some()) else { return Vec::new() };
+    let run: Vec<usize> = plan
+        .run(here.column)
+        .into_iter()
+        .filter(|&m| plan.cards[m].column.is_some() && plan.cards[m].group == here.group)
+        .collect();
+    let at = run.iter().position(|&m| m == n).unwrap_or(0);
+    (1..run.len())
+        .flat_map(|d| [at.checked_add(d), at.checked_sub(d)])
+        .flatten()
+        .filter_map(|p| run.get(p).copied())
+        .collect()
+}
+
+/// 칸 `column` 의 옆 칸들 — **칸 거리가 가까운 차례, 같으면 왼쪽 먼저**(moai-r1ly.dwb, 사용자 결정 2026-10-03).
+/// 사라진 카드의 칸이 비었을 때 `h`·`l` 처럼 옆 칸으로 간다. `columns` 는 칸 수다.
+pub fn beside(columns: usize, column: usize) -> Vec<usize> {
+    (1..columns)
+        .flat_map(|d| [column.checked_sub(d), column.checked_add(d)])
+        .flatten()
+        .filter(|&c| c < columns)
+        .collect()
+}
+
 /// 화면에 서는 칸의 창 — `first` 부터 `count` 개.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
@@ -361,6 +393,35 @@ mod tests {
         assert_eq!(column_of(true, true, "in_progress"), Column::Idea, "미룬 idea 는 idea 칸이다");
         assert_eq!(column_of(false, true, "in_progress"), Column::Shelved, "미룬 일은 미룸 칸이다");
         assert_eq!(column_of(false, false, "review"), Column::Status("review".into()));
+    }
+
+    /// **사라진 카드 대신 설 차례는 그 칸의 길에서 아래 먼저, 다음 위다**(moai-r1ly.dwb) — 옆 칸의 카드와 머리줄,
+    /// 다른 프로젝트의 카드는 안 든다. 칸이 비면 옆 칸으로 가는 차례는 칸 거리가 가까운 것, 같으면 왼쪽이 먼저다.
+    #[test]
+    fn a_vanished_card_is_replaced_from_its_own_column_below_first() {
+        let banner = |lane, group| Slot { lane, column: None, height: 1, group };
+        let card = |lane, column, group| Slot { lane, column: Some(column), height: 2, group };
+        // 0: 프로젝트 A 머리줄. A 의 칸 0 에 1·3·4·5, 칸 1 에 2. 6: 프로젝트 B 머리줄, 7: B 의 칸 0 카드.
+        let slots = [
+            banner(0, 0),
+            card(1, 0, 0),
+            card(1, 1, 0),
+            card(1, 0, 0),
+            card(1, 0, 0),
+            card(1, 0, 0),
+            banner(2, 1),
+            card(3, 0, 1),
+        ];
+        let p = Plan::of(&slots, 2, &[false, false, false, false]);
+        assert_eq!(around(&p, 3), [4, 1, 5], "아래 먼저, 다음 위로 멀어지지 않았다");
+        assert_eq!(around(&p, 5), [4, 3, 1], "칸 끝의 카드는 위로만 간다");
+        assert_eq!(around(&p, 2), Vec::<usize>::new(), "혼자 선 칸에 이웃이 섰다");
+        assert_eq!(around(&p, 0), Vec::<usize>::new(), "머리줄에 이웃이 섰다");
+        assert_eq!(around(&p, 7), Vec::<usize>::new(), "다른 프로젝트의 카드가 이웃으로 섰다");
+        assert_eq!(beside(5, 2), [1, 3, 0, 4], "칸 거리가 같을 때 왼쪽이 먼저가 아니다");
+        assert_eq!(beside(4, 0), [1, 2, 3]);
+        assert_eq!(beside(3, 2), [1, 0]);
+        assert_eq!(beside(1, 0), Vec::<usize>::new());
     }
 
     /// 숨긴 칸은 빠지지만 **카드가 든 칸은 선다** — 검색이 드러낸 done 카드와 설정이 모르는 칸의 카드가

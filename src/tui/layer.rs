@@ -4703,6 +4703,26 @@ mod tests {
         assert_eq!(a.rows()[a.cursor], Row::Project(1), "보던 프로젝트 밖으로 갔다");
     }
 
+    /// **보기 토글이 그 프로젝트의 카드를 다 숨기면 그 프로젝트의 머리줄에 선다**(moai-r1ly.dwb 리뷰) — 번호로 물러서던
+    /// 때는 그 번호에 올라선 다음 프로젝트의 머리줄에 서, 보던 프로젝트를 잃었다.
+    #[test]
+    fn hiding_every_card_of_a_project_on_the_overview_keeps_to_its_header() {
+        let s = Scratch::fenced("layer-board-emptied");
+        let solo = s.project("solo", &[]);
+        let at = "2026-09-01T00:00:00Z";
+        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        let other = s.project("other", &[("argos-0001", "other 의 줄", "todo")]);
+        let cfg = s.register(&[&solo, &other]);
+        let mut a = layered(&cfg);
+        a.layout = crate::tui::view::Layout::Board;
+        a.hit("l");
+        settle(&mut a);
+        a.hit("j");
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — idea 카드에 섰다");
+        a.hit("SPC v i Esc");
+        assert_eq!(a.rows()[a.cursor], Row::Project(0), "카드가 다 숨은 프로젝트 밖으로 갔다");
+    }
+
     /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i`
     /// 를 누르면 줄이 다 빠진다. 줄이 없다고 그 키와 `SPC v a` 까지 끄던 때는 프로젝트에 들어가야만 되돌렸다.
     #[test]
