@@ -3283,3 +3283,12 @@
 {"ts":"2026-10-03T15:19:31Z","id":"moai-gu5m.9x9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T15:19:32Z","id":"moai-gu5m.ke0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"리뷰 13건 중 12건은 리뷰 고침 그대로 받았고, 3번은 사람 결정(같은 파일이면 심긴 철자를 잇는다)으로 고쳤다. 넘긴 것: idea moai-f6gq(spelled 와 hook::resolve_path 의 겹침)"}
 {"ts":"2026-10-03T15:21:16Z","id":"moai-gu5m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지 139ef47e. 루트의 release 바이너리는 아직 옛 판이라, 고친 판으로 루트에서 skill install 하려면 cargo build --release 뒤에 부른다. 남은 정리는 idea moai-f6gq"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-h2rh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거르개 입력 칸이 쓸 키와 값을 보인다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-h2rh.5zb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC f 입력 칸에 쓸 수 있는 키와 예제를 보인다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-h2rh.pjs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"user=·tag=·milestone= 뒤에 고를 수 있는 값 목록을 띄운다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-h2rh.jvh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 도움말과 README 에 거르개 입력 칸을 싣는다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-97tn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거르개가 user 여럿과 날짜·시각 범위를 받는다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-97tn.83z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"user= 가 이름이나 메일을 받고, 여러 번 쓰면 또는으로 고른다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-97tn.olw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"created·updated·started·ended 가 날짜·시각과 ~ 범위를 받는다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-97tn.v3v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거르개 글이 따옴표로 묶은 값을 한 값으로 읽는다"}
+{"ts":"2026-10-03T15:25:19Z","id":"moai-97tn.96h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--filter 도움말·docs/cli.md·CHANGELOG 에 새 문법을 싣는다"}
