@@ -3360,3 +3360,4 @@
 {"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.pjs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.jvh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-03T17:16:50Z","id":"moai-h2rh.koh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·2·3·4·5·7·8·9·10·11·13·14(fix 커밋), 6 은 moai-97tn 머지 뒤 develop 을 받아 풀고 끝에서 끝까지 시험을 더했다. 넘긴 것: 12 는 idea moai-e0qk(moai-zjez 와 같은 것), 15 는 역사를 다시 쓰지 않기로 했다"}
+{"ts":"2026-10-03T17:19:27Z","id":"moai-h2rh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 0f048043 에 머지했고 멤버·리뷰를 닫았다. 남은 것은 idea moai-e0qk(쪼개는 자를 하나로, moai-zjez 와 같은 것)뿐이다"}
