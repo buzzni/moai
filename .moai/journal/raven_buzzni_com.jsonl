@@ -3013,3 +3013,4 @@
 {"ts":"2026-10-03T00:44:27Z","id":"moai-ggxi.ypp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T00:44:28Z","id":"moai-ggxi.4lm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-03T00:44:28Z","id":"moai-ggxi.xwp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in the fixes for 2, 3, 5-9, 11-14, folded the line in header() for 1 (person chose this), fixed the banner comment for 10. Handed 4 and 7 on to idea moai-jh44, outside v0.4.0. Left 15."}
+{"ts":"2026-10-03T00:44:52Z","id":"moai-ggxi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged at 5d36f1d0, both members and the review are closed. Mixed-version latest.toml edge cases are idea moai-jh44 (outside v0.4.0)."}
