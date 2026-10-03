@@ -2283,7 +2283,14 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
         body.push(Span::styled(m, branch()));
         body.push(Span::raw(" "));
     }
-    let title = clip(&i.title, room.saturating_sub(spans_width(&body) + crate::text::width(tail)));
+    // **들어갈 수 있는 카드는 제목 끝에 `/`**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이다. 셈을 끄거나
+    // 자식이 모두 idea 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 늘 남는다.
+    let is_dir = matches!(e, Entry::Dir { .. });
+    let slash = usize::from(is_dir);
+    let mut title = clip(&i.title, room.saturating_sub(spans_width(&body) + crate::text::width(tail) + slash));
+    if is_dir {
+        title.push('/');
+    }
     if site.spins(at) {
         body.extend(mark(shimmer(title, app.spin), in_title));
     } else {
@@ -4719,6 +4726,42 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 20);
         let mine = at(&lines, "argos-0100");
         assert!(lines[mine + 2].contains("argos-0101"), "누군지 모르는데 카드를 갈랐다\n{}", lines.join("\n"));
+    }
+
+    /// **들어갈 수 있는 카드는 제목 끝에 `/` 를 단다**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이고, 제목을
+    /// 먼저 잘라 좁아도 `/` 가 남는다. 카드 높이는 그대로다.
+    #[test]
+    fn a_card_that_can_be_entered_ends_its_title_with_a_slash() {
+        let mut a = board_app(2);
+        a.site.issues[2].title = "자식이 있어 들어갈 수 있는 일의 아주 긴 제목".into();
+        let mut issues = a.site.issues.clone();
+        issues.push(Issue::new(
+            "argos-0100.c1a".into(),
+            "자식".into(),
+            Kind::Idea,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        ));
+        a.adopt(issues);
+        // 카드 한 장만 짓는다 — 보드의 한 줄에는 옆 칸의 카드가 함께 선다.
+        let body = |a: &App, id: &str, w: usize| {
+            let rows = a.rows();
+            let r = rows
+                .iter()
+                .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
+                .unwrap_or_else(|| panic!("{id} 카드가 없다"));
+            let lines = card(a, r, false, w, 2);
+            assert_eq!(lines.len(), 2, "`/` 가 카드 높이를 바꿨다");
+            lines[1].spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim_end().to_string()
+        };
+        let line = body(&a, "argos-0100", 80);
+        assert!(line.ends_with("아주 긴 제목/"), "들어갈 수 있는 카드에 `/` 가 없다 — {line:?}");
+        let line = body(&a, "argos-0101", 80);
+        assert!(!line.contains('/'), "잎 카드에 `/` 가 섰다 — {line:?}");
+
+        let line = body(&a, "argos-0100", 20);
+        assert!(line.ends_with("…/"), "좁은 카드에서 `/` 가 잘려 나갔다 — {line:?}");
+        assert!(crate::text::width(&line) < 20, "줄이 카드 폭을 넘었다 — 오른쪽 한 칸은 비운다 — {line:?}");
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에
