@@ -30,8 +30,10 @@ does not tag — see `CONTRIBUTING.md`.
   cursor: the cursor's card stays chosen while it is on screen, one pushed off
   is pulled to the nearest card on screen in its column, and the scrolling stops
   where that column has none left. When the cursor's card goes away — a reload,
-  a view toggle or a cleared search — the cursor stays in that column, on the
-  nearest card left in it, or else moves to the nearest column beside it. In the
+  a view toggle, a filter or a search — the cursor stays in that column, on the
+  nearest card left in it, or else moves to the nearest column beside it. While
+  a search is being typed it measures from the card the search opened on, so
+  fixing a typo brings the cursor back to that card. In the
   overview (`0`) every project stands as a header across the columns, with an
   unfolded project's milestone lanes under it, and the columns are those of
   every project shown; on a header `l`, `h`, `Tab` and `Enter` unfold, fold and
