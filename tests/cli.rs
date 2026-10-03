@@ -8021,20 +8021,31 @@ fn mv_reads_its_message_from_stdin_on_a_lone_dash() {
     let out = from_stdin(s.path(), &["mv", &id, "review", "-m", "-"], "\n받은 것: 1·2\n넘긴 것: moai-x\n\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let j = journal(s.path());
+    // 판이 되돌아가면 이 줄이 먼저 붉어져 무엇이 틀렸는지(`-` 한 글자)를 바로 댄다 — 아래 줄 뒤에 두면 늘 아래 줄이
+    // 먼저 붉어져 이 줄은 한 번도 안 선다(리뷰).
+    assert!(!j.contains(r#""note":"-""#), "`-` 한 글자를 적었다\n{j}");
     assert!(
         j.contains(r#""note":"받은 것: 1·2\n넘긴 것: moai-x""#),
         "stdin 의 글을 앞뒤 빈 줄만 걷고 적지 않았다\n{j}"
     );
-    assert!(!j.contains(r#""note":"-""#), "`-` 한 글자를 적었다\n{j}");
 
     // 이미 그 칸인 줄도 적어 온 말을 버리지 않는다 — 그 갈래도 같은 글을 받는다.
     let out = from_stdin(s.path(), &["mv", &id, "review", "-m", "-"], "다시 부른 까닭\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(journal(s.path()).contains(r#""text":"다시 부른 까닭""#), "{}", journal(s.path()));
 
-    // 빈 stdin·빈칸뿐인 stdin 은 거절한다 — 칸도 저널도 그대로다.
+    // **첫 줄의 들여쓰기는 남긴다**(리뷰) — 들여 쓴 `model:` 줄은 옮겨 적은 예라 `work` 에 안 든다. 다 걷던 판은
+    // 그 예를 일한 것으로 셌다(argv 로 준 같은 글은 안 셌다).
+    let other = add(s.path(), &["들여 쓴 예"]);
+    let example = "\n    model: anthropic/opus-5 tokens=7 (low — 꼴을 옮긴 예)\n받은 것: 1\n";
+    let out = from_stdin(s.path(), &["mv", &other, "review", "-m", "-"], example);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let shown = ok(s.path(), &["show", &other, "--json"]);
+    assert!(shown.contains(r#""work":[]"#), "들여 쓴 예를 일한 것으로 셌다\n{shown}");
+
+    // 빈 stdin·빈칸뿐인 stdin·BOM 만 든 stdin 은 거절한다 — 칸도 저널도 그대로다.
     let (before, notes) = (issues(s.path()), journal(s.path()));
-    for input in ["", " \n\n"] {
+    for input in ["", " \n\n", "\u{feff}\n", "\n\u{feff}\n"] {
         let out = from_stdin(s.path(), &["mv", &id, "done", "-m", "-", "--json"], input);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success() && err.contains(r#""code":"bad_input""#), "{input:?} → {err}");
@@ -8043,13 +8054,52 @@ fn mv_reads_its_message_from_stdin_on_a_lone_dash() {
     assert_eq!(issues(s.path()), before, "빈 stdin 으로 옮겼다");
     assert_eq!(journal(s.path()), notes, "빈 stdin 이 저널에 남았다");
 
-    // 틀린 칸은 stdin 을 기다리기 전에 갈린다 — 같은 거절(`bad_status`)이 그대로 선다.
+    // 갈 칸의 오타는 stdin 을 기다리기 전에 갈린다 — 같은 거절(`bad_status`)이 그대로 선다.
     let out = moai(s.path(), &["mv", &id, "없는칸", "-m", "-", "--json"]);
     assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_status""#));
+    // `--from` 의 칸은 줄을 봐야 갈려(락 안) stdin 을 읽은 뒤다 — 빈 stdin 이면 그 거절이 먼저 선다(리뷰).
+    let out = moai(s.path(), &["mv", &id, "done", "--from", "없는칸", "-m", "-", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(r#""code":"bad_input""#), "빈 stdin 보다 `--from` 의 칸을 먼저 쟀다 — {err}");
 
     // argv 에 적힌 글은 그대로다 — `-` 로 시작해도 `-` 하나가 아니면 글이다.
     ok(s.path(), &["mv", &id, "done", "-m", "-- 넘긴 것 없음"]);
     assert!(journal(s.path()).contains(r#""note":"-- 넘긴 것 없음""#));
+}
+
+/// **`-m -` 는 락보다 먼저 읽는다**(moai-m1za 리뷰) — stdin 을 기다리는 `mv`·`defer` 가 `.moai/lock` 을 쥐면
+/// 파이프가 닫힐 때까지 같은 `.moai` 의 쓰기가 다 멈추고, 5초 뒤 `locked` 로 물러난다. 기다리는 동안 옆의
+/// 쓰기가 지나가는지로 잰다 — 읽기를 락 안으로 옮긴 판은 그 쓰기가 진다.
+///
+/// 파이프는 옆의 쓰기가 끝난 **뒤에** 닫는다 — 먼저 닫으면 락을 쥔 판도 곧 놓아 옆의 쓰기가 기다리다 이긴다.
+/// 기다리는 자리까지 늦게 닿으면 이 시험은 그 판을 못 보고 푸르게 선다. 붉게 잘못 서지는 않는다.
+#[test]
+fn a_message_waiting_on_stdin_holds_no_lock() {
+    use std::io::Write as _;
+    let s = init("msg-stdin-lock");
+    let id = add(s.path(), &["제목"]);
+    for verb in [["mv", id.as_str(), "review", "-m", "-"].as_slice(), ["defer", id.as_str(), "-m", "-"].as_slice()] {
+        let mut child = staged(verb)
+            .current_dir(s.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let beside = moai(s.path(), &["add", "옆의 쓰기", "-q"]);
+        // 일찍 죽은 판의 EPIPE 로 여기서 넘어지면 그 판의 stderr 를 못 본다(`from_stdin` 과 같은 까닭).
+        let mut pipe = child.stdin.take().unwrap();
+        let _ = pipe.write_all("까닭\n".as_bytes());
+        drop(pipe);
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            beside.status.success(),
+            "{verb:?} 가 stdin 을 기다리며 락을 쥐었다 — {}",
+            String::from_utf8_lossy(&beside.stderr)
+        );
+        assert!(out.status.success(), "{verb:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
 }
 
 /// `--json` 의 `code` 는 받는 쪽이 분기하는 값이다. 명령마다 다르면 계약이
@@ -13347,6 +13397,9 @@ fn an_empty_reason_is_refused_like_an_empty_note() {
     let out = moai(s.path(), &["defer", &id, "-m", "   "]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("까닭이 비었다"), "{}", String::from_utf8_lossy(&out.stderr));
+    // 코드도 빈 메모·빈 `-m -` 와 같다(리뷰) — `error` 로 내던 판은 한 명령 안에서 같은 잘못을 두 코드로 냈다.
+    let err = String::from_utf8_lossy(&moai(s.path(), &["defer", &id, "-m", "", "--json"]).stderr).into_owned();
+    assert!(err.contains(r#""code":"bad_input""#), "{err}");
     assert!(!journal(s.path()).contains(r#""kind":"note""#), "거절해 놓고 적었다 — {}", journal(s.path()));
 }
 
@@ -13359,7 +13412,7 @@ fn defer_reads_its_reason_from_stdin_on_a_lone_dash() {
     let id = add(s.path(), &["일"]);
 
     let (before, notes) = (issues(s.path()), journal(s.path()));
-    for input in ["", "\n \n"] {
+    for input in ["", "\n \n", "\u{feff}\n"] {
         let out = from_stdin(s.path(), &["defer", &id, "-m", "-", "--json"], input);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success() && err.contains(r#""code":"bad_input""#), "{input:?} → {err}");
@@ -13372,7 +13425,6 @@ fn defer_reads_its_reason_from_stdin_on_a_lone_dash() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let j = journal(s.path());
     assert!(j.contains(r#""text":"다음 분기\n사람이 기다린다""#), "stdin 의 글을 까닭으로 안 적었다\n{j}");
-    assert!(!j.contains(r#""text":"-""#), "`-` 한 글자를 적었다\n{j}");
     assert!(issues(s.path()).contains("deferred_at"), "안 미뤘다");
 }
 

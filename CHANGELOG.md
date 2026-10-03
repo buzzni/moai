@@ -185,6 +185,21 @@ does not tag — see `CONTRIBUTING.md`.
   the one filter where repeating means or. The `AGENTS.md` block and the skill
   say so; run `moai init` and `moai skill install` to bring them in.
 
+- **`-m -` on `moai mv` and `moai defer` reads stdin instead of being the
+  text.** This breaks a caller that passed a lone `-` as the note: with
+  nothing on stdin, or only blank space, it used to write `-` and exit 0, and
+  it now exits 1 (`bad_input`) with nothing moved or deferred. With other
+  input waiting on stdin, such as a `while read` loop's, that input becomes
+  the note, and in a terminal the command waits for the text. The empty case
+  is refused because the hook reads only the command line and cannot see that
+  text, so this is where an empty closing line is caught.
+
+- **`moai defer` refuses an empty reason with the code `bad_input`.** `-m ''`
+  and a reason of blank space were refused with the code `error` under
+  `--json`, while an empty `-m -` and an empty `moai note` answer
+  `bad_input`. A loop that branches on `code` now reads all three as an
+  argument to fix.
+
 ### Removed
 
 - **Polishing Korean text is no longer part of moai.** The "Korean text" section
@@ -226,13 +241,12 @@ does not tag — see `CONTRIBUTING.md`.
   the same file keeps the planted one, so the tree does not change. `skill
   status` compares the hooks and the running moai by file, not by spelling.
 
-- **`moai mv -m -` and `moai defer -m -` read the text from stdin**, the way
-  `note -b -` and `add -b -` already did. They wrote a lone `-` as the note, so
-  `moai mv <review> done -m - < <file>` closed a review with `-` for its closing
-  line, and the hook let it through as a line that was not empty. An empty stdin
-  is refused and nothing is moved or deferred: the hook reads only the command
-  line and cannot see that text, so this is where an empty closing line is
-  caught. Text given on the command line is taken as before.
+- **`moai mv -m - < <file>` and `moai defer -m - < <file>` write the file's
+  text.** They wrote a lone `-` as the note, so a review closed that way had
+  `-` for its closing line, and the hook let it through as a line that was not
+  empty. `-m -` now reads stdin, the way `note -b -` and `add -b -` already
+  did; what that changes for a call that passed `-m -` is under **Changed**.
+  Text given on the command line is taken as before.
 
 ## [0.3.0] - 2026-10-02
 

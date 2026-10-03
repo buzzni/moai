@@ -134,8 +134,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
     let from = args.from.map(Status::new);
     // **`-m -` 는 stdin 을 읽는다**(moai-m1za) — `note -b -` 와 같은 까닭으로 락보다 먼저 읽는다: 락을 쥔 뒤에
-    // 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다. 갈 칸의 오타는 그 위에서 이미 갈렸다 — 틀린 부름이
-    // 터미널에서 stdin 을 기다리게 하지 않는다.
+    // 읽으면 파이프가 닫힐 때까지 남의 쓰기가 전부 멈춘다. **stdin 을 기다리기 전에 갈리는 것은 위의 셋뿐이다** —
+    // 저장소를 찾는 일, 인자 수, 갈 칸의 오타. 줄을 봐야 갈리는 것 — `--from` 의 오타, 묶음에 건 `--from`, 없는
+    // id — 은 락 안이라 stdin 을 다 읽은 뒤에 갈리고, 빈 stdin 이면 그보다 이 거절(`bad_input`)이 먼저 선다(리뷰).
+    // `note -b -` 가 없는 id 보다 빈 글을 먼저 대는 것과 같은 차례다.
     let msg = super::add::read_msg(args.msg, ctx.lang())?;
 
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
