@@ -56,7 +56,27 @@ does not tag — see `CONTRIBUTING.md`.
   set apart. On a narrow card the tags and the epic name shrink first, so the
   word stays in sight.
 
+- **Done work folds into an archive.** A row that has stood in done for
+  `archive_days` (14 unless `.moai/config.toml` says otherwise; `0` turns it
+  off) is the archive — an epic or a milestone counted from when its last
+  member got to done, so a group with one recent member stays. Nothing is
+  stored: no field, no column, no command; it is read off the column and the
+  clock each time. The explorer's list and board leave the archive out even
+  with done shown and the path line counts it (`[archive 312 hidden]`);
+  `SPC v o` shows it and is kept under `[tui]` as `show_archived`, and `/`
+  search finds it anyway. `moai show --archived` brings it back, done and
+  deferred with it, and `-g` and the time filters find it too. `moai status`
+  lists only the milestones and epics outside the archive and counts the rest
+  in one line, `archived` in `--json`. `moai stats` counts it as before.
+
 ### Changed
+
+- **`moai show --all` and `-s done` leave the archive out.** They used to give
+  every closed row; now done rows past `archive_days` are left out and the tail
+  says how many, with `--archived` to bring them in. A script that pulls a
+  complete copy with `--all --json` should use `--archived --json`. The
+  `milestones` and `epics` of `moai status --json` leave archived groups out
+  the same way, counted in `archived`.
 
 - **The version line in the `moai tui` header names the latest release.** It
   reads `latest (v0.3.0)` and `ahead of the latest release (v0.3.0)` where it
