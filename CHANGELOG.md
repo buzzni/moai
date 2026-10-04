@@ -53,7 +53,9 @@ does not tag — see `CONTRIBUTING.md`.
   takes a letter it reads busy, and a wait that runs out leaves it idle — a
   worker waits inside its turn, where no `Stop` hook marks it, and an agent
   without hooks would otherwise stay at the busy `moai hello` wrote. A name
-  with no row gets none from the wait. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
+  with no row gets none from the wait, and `--wake` passes over an agent whose
+  `moai inbox --wait` is running (Linux reads it from the processes): that wait
+  takes the letter itself. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
   its tmux pane when its presence row carries one, and for a Claude session the
   line printed tells the sender to use SendMessage. With neither it does
   nothing and says nothing; an agent at work is left alone. moai never runs an
@@ -121,12 +123,12 @@ does not tag — see `CONTRIBUTING.md`.
   waits for the report with `moai inbox --wait`. It no longer reads Claude
   Code's undocumented session files or sends and waits with SendMessage. A
   worker's report is now its last step, after its `Next:` note. On tmux a
-  supervisor in Claude Code still clears a Claude Code worker's window once the
-  report checks out, finding the pane from the worker's presence row, and wakes
-  it with SendMessage — a command line cannot, so any other supervisor tells its
-  workers to wait again instead. The clear stops when the worker turns out to be
-  waiting for a letter inside its turn. Another vendor's input box cannot be
-  read yet, so that window is left to the person.
+  supervisor of any vendor still clears a Claude Code worker's window once the
+  report checks out, finding the pane from the worker's presence row; the script
+  then sends the next letter and types `moai inbox` into the box it just emptied,
+  so the cleared window takes the next task. The clear stops when the worker
+  turns out to be waiting for a letter inside its turn. Another vendor's input
+  box cannot be read yet, so that window is left to the person.
 - **New worktrees stand in `<root>/.worktrees/`**, a place Claude Code, Codex
   and Antigravity share, instead of Claude's `.claude/worktrees/`. The worker
   and supervisor skills create them there, `moai init` adds `/.worktrees/` to

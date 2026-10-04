@@ -471,13 +471,15 @@ IDEA
   pane; a Claude session cannot be woken from a command line, so the line
   printed tells the sender to use SendMessage. With neither it does nothing
   and says nothing. moai never runs an agent's own program to wake it. An
-  agent at work is not woken. For any-idle-worker it knocks on the agent idle
-  the longest.
+  agent at work is not woken, nor one already waiting in `moai inbox --wait`
+  (Linux tells it from the processes). For any-idle-worker it knocks on the
+  agent idle the longest.
 
   --json gives the letter as written plus `id`, and `wake`
   ({\"to\",\"via\",\"done\",\"why\"}) when --wake was given. `via` is send_message,
-  tmux or none; `why` names what stood in the way (busy, ask_sender, no_way,
-  nobody, missing, failed, timeout).")]
+  tmux or none; `why` names what stood in the way (busy, ask_sender, waiting,
+  no_way, nobody, missing, failed, timeout) - `waiting` is an agent already in
+  `moai inbox --wait`, which takes the letter itself.")]
     Send(SendArgs),
 
     /// The letters for you - `--ack` marks them read

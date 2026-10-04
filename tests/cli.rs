@@ -23936,6 +23936,48 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
     }
 }
 
+/// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
+/// `send --wake` 가 그 칸에 `moai inbox`+Enter 를 쳤다 — 그 기다림은 턴 안의 셸 명령이라 도는 턴에 글자가 끼어든다.
+/// 기다림은 에이전트 프로세스 **아래**에서 도는 것으로 안다: 셸을 하나 끼워 그 셸을 에이전트로 등록하고, 그 아래에서
+/// 남의 이름으로 기다리게 한다(제 이름이면 보낸 편지가 기다림을 끝낸다). 기다림이 없는 에이전트는 예전처럼 칸이
+/// 없으니 `no_way` 다.
+#[test]
+#[cfg(target_os = "linux")]
+fn waking_passes_over_an_agent_already_waiting() {
+    let s = init("wake-waiting");
+    let mut shell = isolated("sh")
+        .args(["-c", "\"$0\" inbox --as somebody-else --wait 30; :", BIN])
+        .current_dir(s.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let idle = Sleeper::new();
+    hello_as(s.path(), "waiting", &shell.id().to_string(), &["--vendor", "codex", "--role", "worker"]);
+    hello_as(s.path(), "elsewhere", &idle.pid(), &["--vendor", "codex", "--role", "worker"]);
+    mark(s.path(), "waiting", "idle");
+    mark(s.path(), "elsewhere", "idle");
+    // 셸 아래의 기다림이 설 때까지 — 프로세스가 뜨기 전에 재면 기다리지 않는 것으로 읽는다.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let why = loop {
+        let out = ok(s.path(), &["send", "waiting", "일감", "--as", "boss", "--wake", "--json"]);
+        let why = field(&out, "why");
+        if why == "waiting" || std::time::Instant::now() > deadline {
+            break why;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let _ = shell.kill();
+    let _ = shell.wait();
+    assert_eq!(why, "waiting", "기다리는 에이전트의 칸을 두드리려 한다");
+    let out = ok(s.path(), &["send", "elsewhere", "일감", "--as", "boss", "--wake", "--json"]);
+    assert_eq!(field(&out, "why"), "no_way", "기다리지 않는 에이전트를 기다리는 것으로 읽는다 — {out}");
+    // 사람 화면은 입을 다문다 — 기다리는 에이전트는 편지를 스스로 가진다.
+    let said = text(&moai(s.path(), &["send", "elsewhere", "또", "--as", "boss", "--wake"]));
+    assert!(!said.contains("waiting"), "{said}");
+}
+
 // ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────
 
 /// 훅이 실은 글 — 계약 JSON 한 줄을 그대로 돌려준다. [`carried_text`] 는 첫 `"` 에서 끊는데, 보드와 함께 실린

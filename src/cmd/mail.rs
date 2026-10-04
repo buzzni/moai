@@ -122,7 +122,8 @@ fn woke_line(lang: Lang, w: &Woke) -> Option<String> {
     let to = w.to.as_str();
     Some(match (w.done, w.why) {
         (true, _) => fill(say(lang, "mail.wake_done"), &[("to", to), ("via", w.via)]),
-        (false, Some("no_way" | "nobody")) => return None,
+        // 기다리는 에이전트는 두드릴 까닭이 없다 — 그 기다림이 편지를 가진다. 말하지 않는다.
+        (false, Some("no_way" | "nobody" | "waiting")) => return None,
         (false, Some("ask_sender")) => fill(say(lang, "mail.wake_send_message"), &[("to", to)]),
         (false, Some("busy")) => fill(say(lang, "mail.wake_busy"), &[("to", to)]),
         (false, why) => fill(say(lang, "mail.wake_failed"), &[("to", to), ("via", w.via), ("why", why.unwrap_or("?"))]),
