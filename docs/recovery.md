@@ -12,9 +12,10 @@ answer is "look at it, then commit the version you want".
 .moai/journal.jsonl             the old single file. Still read; nothing is written there any more.
 ```
 
-`issues.jsonl` is what every command reads. The journal records `create`,
-`status`, `note` and `rm`; field edits are not recorded. If the journal is lost,
-you lose history, not state.
+`issues.jsonl`, the [snapshot](glossary.md#snapshot), is what every command
+reads. The [journal](glossary.md#journal) records `create`, `status`, `note` and
+`rm`; field edits are not recorded. If the journal is lost, you lose history, not
+state.
 
 **Several journal files is the normal shape.** The name comes from the writer's
 email with `@` and `.` folded to `_` (`raven@buzzni.com` →
@@ -229,8 +230,8 @@ to record a path that will outlive the worktree.
 
 ## A worktree wrote the tracker in the wrong place
 
-`moai` run inside a linked git worktree reads and writes the **main checkout's**
-tracker, and says on stderr where it wrote. That is deliberate: editing a
+`moai` run inside a linked git [worktree](glossary.md#worktree) reads and writes
+the **main checkout's** tracker, and says on stderr where it wrote. That is deliberate: editing a
 worktree's own `.moai` makes the snapshot conflict at merge time.
 
 If you find changes in a worktree's `.moai/` — from an older binary, or from a
@@ -240,7 +241,8 @@ worktree's copy.
 
 ## Work that was picked up twice
 
-Two sessions can take the same issue if neither passed `--from`:
+Two sessions can [pick up](glossary.md#pick-up) the same issue if neither passed
+`--from`:
 
 ```sh
 moai mv <id> in_progress --from todo
@@ -274,9 +276,9 @@ target text and nothing else, so the `grep` finds nothing and says nothing. A li
 that points outside the repository comes back as `symlink` and the target path —
 git holds no copy of that file, so read it there.
 
-Work you are not doing right now should be `moai defer <id> -m 'why'` rather than
-`done` — `--undo` brings back the same line, in the same column, with the same
-kind.
+Work you are not doing right now should be [deferred](glossary.md#deferred) —
+`moai defer <id> -m 'why'` rather than `done` — and `--undo` brings back the same
+line, in the same column, with the same kind.
 
 ## A release went out wrong
 

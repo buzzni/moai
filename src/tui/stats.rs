@@ -219,7 +219,7 @@ impl App {
     }
 
     /// 지금 선 프로젝트의 이름 — 층이 있으면 그 줄의 이름, 없으면 저장소 뿌리의 디렉터리 이름이다.
-    fn project_name(&self) -> String {
+    pub(super) fn project_name(&self) -> String {
         if let Some(p) = self.project() {
             return p.name.clone();
         }

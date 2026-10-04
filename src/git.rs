@@ -531,8 +531,8 @@ fn words(text: &str) -> impl Iterator<Item = &str> {
 /// **`-`·`.` 로 시작하는 낱말은 뺀다.** 접두어가 그 한 글자뿐인 것을 `id::is_valid` 는
 /// 통과시켜(`--json` 은 접두어 `-` 에 본체 `json`), 제목에 적힌 플래그가 id 로 읽힌다.
 ///
-/// 파일을 안 보고 묻는 자리가 시험뿐이라 시험 빌드에만 선다 — 쓰는 곳이 생기면 그때 연다.
-#[cfg(test)]
+/// 위키가 이것으로 페이지의 id 를 센다(moai-ihu4, `wiki::parse`) — 페이지는 없는 id 도 대야 하므로("없는 id"
+/// 알림) 파일의 id 와 견주는 [`table_of`] 의 길을 못 쓴다. 접두어는 그쪽이 따로 거른다.
 pub fn ids_in(text: &str) -> impl Iterator<Item = &str> {
     words(text).filter(|t| !t.starts_with(['-', '.']) && crate::id::is_valid(t))
 }

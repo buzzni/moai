@@ -1271,8 +1271,8 @@ impl App {
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
     fn leave_project(&mut self, park_at: Option<PathBuf>) {
-        // 굴려 떼어 둔 보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰, [`App::adrift`]) — 두 프로젝트가 같은
-        // prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 카드로 읽혀, 화면 밖에 선 채다.
+        // 굴려 떼어 둔 목록·보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰·moai-fyul, [`App::adrift`]) — 두 프로젝트가
+        // 같은 prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 줄로 읽혀, 화면 밖에 선 채다.
         self.adrift = None;
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
@@ -2575,7 +2575,8 @@ mod tests {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
-            | Mode::Stats(_) => None,
+            | Mode::Stats(_)
+            | Mode::Wiki(_) => None,
         }
     }
 
@@ -3673,6 +3674,41 @@ mod tests {
         // 영영 못 세고, 두 벌(글과 접은 글)이 쓸 데 없이 남는다(`App::leave_project` 가 걷는 그것이다).
         let held = a.layer.as_ref().and_then(|l| l.places[0].site.as_ref()).map(|site| site.ground.notes.is_some());
         assert_eq!(held, Some(false), "통계 창이 레이어의 프로젝트에 노트를 들였다");
+    }
+
+    /// **한눈 보기에서 `SPC g w` 는 커서가 선 줄의 프로젝트 위키를 연다**(moai-o3cb) — 아직 안 읽은 프로젝트도 그
+    /// 자리에서 연다. 여러 프로젝트의 위키를 한 목록에 섞지 않는다. 거기서 id 를 고르면 **그 프로젝트로 들어가 그 줄에
+    /// 선다**(2026-10-04 사용자 결정) — 두 프로젝트가 같은 id 를 써도 연 프로젝트의 줄이다.
+    #[test]
+    fn spc_g_w_on_the_layer_opens_the_wiki_of_the_row_under_the_cursor_and_an_id_enters_it() {
+        let s = Scratch::fenced("layer-wiki");
+        let one = s.project("one", &[("argos-0001", "one 의 줄", "todo")]);
+        let two = s.project("two", &[("argos-0001", "two 의 줄", "todo"), ("argos-0002", "two 의 둘째", "todo")]);
+        for (at, body) in [(&one, "# One\n"), (&two, "# Two home\n\nSee argos-0002.\n")] {
+            std::fs::create_dir_all(at.join("docs")).unwrap();
+            std::fs::write(at.join("docs/README.md"), body).unwrap();
+        }
+        let cfg = s.register(&[&one, &two]);
+        let mut a = layered(&cfg);
+
+        let head = a.rows().iter().position(|r| matches!(r, Row::Project(1))).expect("two 의 머리줄");
+        a.cursor = head;
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &a.mode else { panic!("창이 안 열렸다 — {:?} / {:?}", a.mode, a.notice) };
+        assert_eq!(w.project, "two");
+        assert_eq!(w.shown().iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["Two home"], "남의 위키가 섞였다");
+        assert_eq!(w.from.as_deref(), Some(two.as_path()));
+        a.key(key(KeyCode::Esc));
+        assert!(a.on_layer() && a.cursor == head, "닫으며 층을 떠났다");
+
+        a.hit("SPC g w Enter Enter Enter");
+        assert_eq!(a.mode, Mode::Browse, "id 를 골랐는데 창이 안 닫혔다 — {:?}", a.notice);
+        assert_eq!(a.here(), Some(two.clone()), "고른 id 의 프로젝트로 안 들어갔다");
+        let on = a.current().and_then(|r| match r {
+            Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].title.clone()),
+            _ => None,
+        });
+        assert_eq!(on.as_deref(), Some("two 의 둘째"), "고른 id 의 줄에 안 섰다");
     }
 
     /// **담을 곳은 여는 순간 경로로 박힌다.** 폼이 열린 동안 층이 다시 읽혀 차례가 바뀌고

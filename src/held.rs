@@ -154,9 +154,15 @@ pub(crate) fn read(p: &Path) -> Result<Vec<u8>, Fell> {
 /// 사람이 보는 말이 안 바뀐다.
 pub(crate) fn read_inside(p: &Path, home: &Home) -> Result<String, Fell> {
     let real = place(p, home).map_err(Fell::Unheld)?;
-    String::from_utf8(read(&real)?).map_err(|_| {
-        Fell::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8"))
-    })
+    utf8(read(&real)?).map_err(Fell::Io)
+}
+
+/// 읽은 바이트를 글로 — UTF-8 이 아니면 `fs::read_to_string` 과 같은 io 실패다(`InvalidData`, 같은 말).
+/// **그 말을 짓는 자리는 여기 하나다** — [`read_inside`] 와, 크기 상한을 제 손잡이로 재고 읽는 위키 페이지
+/// (`wiki::read`)가 함께 쓴다. 저마다 적으면 같은 처지가 자리마다 다른 말로 선다.
+pub(crate) fn utf8(bytes: Vec<u8>) -> std::io::Result<String> {
+    String::from_utf8(bytes)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8"))
 }
 
 /// [`place`] 로 재고 **푼 자리를** 막히지 않게 열어, 손잡이가 보통 파일이라 답할 때만 낸다 — 읽지는 않는다.

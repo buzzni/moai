@@ -131,8 +131,10 @@ Work you have decided not to do *right now* is deferred, not closed. `moai defer
 `moai tui` walks the same tracker on one screen — the list on one side, the
 issue under the cursor on the other. It answers keys and the mouse alike: click
 a pane or a row, roll the wheel over the pane you want to move, drag the line
-between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
-lets the mouse go when you would rather select or paste with it in the terminal.
+between the two to resize them, click an item in the `SPC` menu to press its
+key — a click outside the menu closes it and lands where you clicked. `moai tui
+--help` lists the keys, and `SPC o m` lets the mouse go when you would rather
+select or paste with it in the terminal.
 `SPC g` picks the screen: `SPC g b` lays the same list out as a kanban board —
 idea, deferred and your columns side by side, one lane per milestone, and in the
 overview one header per project — `SPC g l` brings the list back, and the choice
@@ -150,6 +152,32 @@ shown, and say how many they left; `SPC v o` in the explorer and `moai show
 --archived` bring it back. `/` search finds it anyway, and so does `moai show
 -g` once done is let in with `--all`.
 `archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns it off.
+
+## The project wiki
+
+The manual lives next to the code: markdown pages under `docs/` — or wherever
+`wiki_dir` in `.moai/config.toml` points, a path inside the checkout — one page
+per `.md` file.
+
+```sh
+moai wiki ls                 # every page, and what does not resolve
+moai wiki show <slug>        # one page, drawn; --json gives the raw body
+```
+
+Nothing about it is stored in the tracker. The list, the links between pages and
+the issue ids a page names are read from the files every time. Pages are
+documents, so they ride the branch: inside a worktree you read that worktree's
+pages, and they merge like any other file. No command writes a page — edit the
+file and commit it. A page names an issue by its bare id and another page by a
+relative link (`[the explorer](explorer.md)`), and `moai wiki ls` counts the
+links that lead to no page, the ids the tracker does not have and the pages left
+with conflict markers. It blocks nothing.
+
+In the explorer `SPC g w` opens the same pages in a window, read only — the
+pages on the left, the one under the cursor on the right. `Enter` on a page
+lists its links, the issue ids it names and the pages that link to it: a page goes
+there and `Bksp` comes back, an id closes the window onto that row. `/` searches the titles and
+bodies of the pages.
 
 ## Working in parallel
 
@@ -395,6 +423,7 @@ eventually needs.
 
 ## Documentation
 
+- `docs/` — the project wiki; `moai wiki ls` lists its pages
 - `docs/cli.md` — every command's `--help`, generated from the binary
 - `CONTRIBUTING.md` — building, testing, and what a commit here looks like
 - `SECURITY.md` — reporting a vulnerability

@@ -113,6 +113,8 @@ fn moves(k: KeyEvent, c: &Ctx) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub key: String,
+    /// 그 칸의 키를 누른 모양 — 칸을 마우스로 누르면 이 키를 친 것과 같은 길로 간다(moai-m6ni, `App::key`).
+    pub event: KeyEvent,
     /// 동작의 낱말, 하위 접두어면 `+이름`(doom which-key 의 모양 — moai-apsa).
     pub what: String,
     /// 켜고 끄는 것의 지금 상태(`[켜짐]`·`[원문]`).
@@ -154,10 +156,11 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
                     Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
                     _ => act.menu_word(c),
                 };
-                out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });
+                out.push(Entry { key: next.name(), event: next.event(), what: what.into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
-                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq, c.lang)), state: here(&seq, c) });
+                let what = format!("+{}", group(&seq, c.lang));
+                out.push(Entry { key: next.name(), event: next.event(), what, state: here(&seq, c) });
             }
             _ => {}
         }
@@ -212,6 +215,8 @@ pub struct Placed {
     pub text: String,
     /// 하위 접두어(`+이름`)인가 — 실행 항목과 색을 가른다. 뜻은 `+` 가 글자로 이미 댄다.
     pub group: bool,
+    /// 그 칸의 키([`Entry::event`]) — 칸을 누르면 이 키를 친 것이다(moai-m6ni).
+    pub event: KeyEvent,
 }
 
 /// 격자 — 열 우선으로 채운 칸들. `columns[c][r]` 이 c 열 r 줄이다.
@@ -274,6 +279,7 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
                         key: format!("{}{}", " ".repeat(key_w[c] - width(&e.key)), e.key),
                         text: format!("{text}{}", " ".repeat(tw.saturating_sub(width(&text)))),
                         group: e.is_group(),
+                        event: e.event,
                     }
                 })
                 .collect()
@@ -426,7 +432,7 @@ mod tests {
     }
 
     fn e(key: &str, what: &str) -> Entry {
-        Entry { key: key.into(), what: what.into(), state: None }
+        Entry { key: key.into(), event: k('x'), what: what.into(), state: None }
     }
 
     fn line(g: &Grid, r: usize) -> String {
@@ -813,14 +819,15 @@ mod tests {
         assert_eq!(at(inside()), "+화면 [목록]");
         assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
         assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
+        assert_eq!(at(Ctx { wiki: true, board: true, ..inside() }), "+화면 [위키]", "위키 창이 배치에 가렸다");
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "s"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "s", "w"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계", "위키"]);
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats)] {
+        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats), ('w', Screen::Wiki)] {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

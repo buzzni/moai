@@ -12,6 +12,140 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-04
+
+### Added
+
+- **`moai wiki ls` and `moai wiki show <slug>` read the project wiki.** The
+  wiki is the markdown pages under `docs/` — or the directory `wiki_dir` in
+  `.moai/config.toml` names, a relative path inside the checkout — one page per
+  `.md` file. A page's slug is its path without `.md` and its title is its first
+  `# ` heading. Nothing is stored in the tracker: the list, the links between
+  pages and the issue ids a page names are read from the files every time —
+  the name of a skill moai plants (`moai-wiki` has the shape of an id) is never
+  read as one.
+  Pages ride the branch, so inside a linked worktree that worktree's pages are
+  read while the ids are still looked up in the main checkout's tracker. `ls`
+  counts the links that lead to no page, the ids the tracker does not have and
+  the pages left with conflict markers, and blocks nothing; a page over 1 MB
+  stays in the list unread. `show` ends with the pages that link to the one
+  shown, and with one line counting the places it could not read when that
+  list may be short. `--json` gives each page's `slug`, `title`, `path`, `bytes`, `issues`,
+  `links`, `linked_from` (the slugs of the pages linking to it, in list order,
+  `[]` when none does — counted from the other pages' links every time, so
+  `show` reads every page) and `conflict`, an `error` on a page that could not
+  be read, `skipped` for what the walk left out (a link to a directory, a name
+  that is not UTF-8, a directory it could not open or list to the end, a name
+  whose kind it could not read), and `body` under `show`,
+  beside `linked_from_partial` (true) when another page could not be read or
+  the walk left something out, so `linked_from` may be short — absent when every
+  page was counted. A `wiki_dir` that does not exist yet exits
+  0; one that is absolute, climbs out with `..`, leads out of the checkout or
+  into `.git/`, or is not a directory fails `moai wiki` alone — every other
+  command reads the config as before.
+
+- **`moai skill install` plants a third skill, `moai-wiki`.** It keeps the
+  repository's manual — the markdown pages `moai wiki ls` lists — in step with
+  the work. A worker sent by `moai-supervise` now asks at the end of each epic
+  (brief step 7-4, beside the CHANGELOG's 7-3) whether the epic changed what a
+  person does — a key, a command, a flag, a file, a format, a procedure — and if
+  it did, fixes the page on its branch before the merge, so the page rides the
+  same merge. Called by a person, the skill sweeps the work closed since the last
+  release tag and shows the pages it would change once before writing. Nothing
+  checks any of it: an epic that changed nothing a person does writes nothing,
+  and no warning stands for a stale page. The AGENTS block carries a short
+  "The wiki" section — run `moai init` to bring it in.
+
+- **The explorer reads the wiki under `SPC g w`.** The window covers the list
+  and the detail the way the statistics window does: the pages `moai wiki ls`
+  lists stand on the left, home page first, and the right pane shows the page
+  under the cursor, drawn like an issue body. It reads the project you are in,
+  or on the overview (`0`) the project of the row under the cursor, and it only
+  reads — pages are files you edit and commit. On the page, `Tab` picks the
+  links drawn there in turn, from the first one on screen and round from the
+  last to the first, and `Shift-Tab` goes the other way from the last one on
+  screen: the picked link shows reversed, the key bar names where it goes,
+  `Enter` follows it and `Esc` drops it. A click on a link follows it at once.
+  With no link picked, `Enter` on a page lists its links, the issue ids it names
+  and then the pages that link to it, marked `←`: a page goes there and `Bksp`
+  comes back, an id closes the window onto that row (from the overview, inside
+  that project), and a link that leads nowhere, an address outside the wiki or
+  an id the tracker does not hold is marked and only says so — picking or
+  clicking one does the same. `/` searches the titles and bodies of the pages
+  and narrows the list; `Esc` drops a picked link first, then clears that
+  search, and then closes the window. The `SPC` menu over it holds the screens and `SPC v r`, the wheel
+  scrolls the pane under the pointer — on the list, as do `Ctrl-d`, `Ctrl-u`,
+  `Ctrl-f` and `Ctrl-b`, without moving the cursor or the page — and a click
+  picks the pane and the page. Dragging the line between the two panes resizes
+  them; that share is the window's own, kept under `[tui]` as `wiki_width`, and
+  until it is dragged the window splits by `list_width`. The
+  window is read fresh every time it opens and nothing of it is kept; a wiki that
+  does not exist or holds no page opens nothing and says why.
+
+- **A wiki link can land on a heading.** `[epic](glossary.md#epic)`, or
+  `[above](#epic)` on the same page, names the heading by its anchor as GitHub
+  makes it — lowercase, punctuation dropped, each space a `-`, a repeated heading
+  `-1`, `-2` — so the same link lands there on GitHub too. `moai wiki ls` and
+  `show` count a link to a heading the page does not have beside the links that
+  lead to no page, and block nothing. In `--json` such a link carries `anchor`,
+  the part after `#`, and `anchor_resolved`, false when that page has no such
+  heading and absent when the page could not be read; a same-page `#anchor`
+  stands with `to` naming its own page. The explorer's wiki window opens a heading
+  link at that heading, its line marked `▸` until you scroll or leave, and marks
+  a link whose heading the page lacks `(no heading)` and opens that page at its
+  top. The moai-wiki skill teaches linking to a heading and the two keys — run
+  `moai skill install` to bring it in.
+
+### Changed
+
+- **The explorer's list scrolls under the wheel instead of moving the cursor.**
+  The wheel over the list, and `Ctrl-d`, `Ctrl-u`, `Ctrl-f`, `Ctrl-b`,
+  `PageDown` and `PageUp` with the list focused, now scroll it the way they
+  already scroll the board: the chosen row and the detail stay put even once the
+  row is off screen, and the list scrolls to its end. The next cursor key (`j`,
+  `k`, `gg`, `G`, and `l`, `h` or `Tab` on a group row) moves from that row and
+  scrolls back to it, and a search, a filter, a view toggle or going into a
+  folder shows the cursor's row again; a reread from a write next door leaves
+  the scrolled list where it is. Before, the wheel moved the cursor three rows
+  at a time and those keys moved it half a page or a page, so the detail changed
+  under every roll. The wheel over the detail still scrolls the detail.
+
+- **The explorer's `SPC` menu takes the mouse.** A click on a menu item is
+  that item's key: a group (`+screen`) goes one level down, a toggle keeps the
+  menu open as its key does, and `Esc` and `Bksp` on the bottom line close it
+  or go up. A click or a wheel roll outside the menu closes it and does what it
+  does there — a click on a row puts the cursor on it — the way a movement key
+  already closes the menu and moves. Before, a click or the wheel over the open
+  menu was ignored and the menu waited for a key. Empty space inside the menu,
+  the wheel over it and the right or middle button still do nothing, the menu
+  over the statistics window follows the same rules, and a search or filter
+  prompt still leaves the mouse to the terminal.
+
+### Fixed
+
+- **The explorer's version line no longer calls a release build "ahead" of an
+  answer it heard before that release existed.** The answer from GitHub is kept
+  for a day, so after an upgrade a 0.5.0 binary went on reading the v0.3.0 heard
+  the day before and said `ahead of the latest release (v0.3.0)` while v0.5.0 was
+  out. Now, when the tag it holds is older than the moai you are running and this
+  version has not asked yet, it asks again straight away; until the answer comes
+  the line reads `latest not checked · v0.3.0 seen today`. A build from source
+  that really is ahead of every release asks once and hears the same tag; that
+  "ahead" answer is then kept for an hour rather than a day, so a build made from
+  the release commit before the release was published stops calling itself ahead
+  within the hour after it is. A failed ask counts as that once and is kept for
+  the day. `latest.toml` gains an `asked_by` key, the version that last asked.
+
+- **A new issue no longer leaves one yellow cell behind in the explorer.** When
+  a new card or row pushed the others down so that the `]` of its `[NEW]` mark
+  landed on the first half of a wide character (Hangul, say) that stood there a
+  frame before, the terminal blanked the other half in the mark's yellow, and
+  the explorer never drew that cell again — it was blank in both frames as far
+  as the explorer knew. The cell stayed yellow until something else covered it.
+  Now the half a wide character leaves behind is drawn again whenever something
+  covers the character. Seen in Ghostty; inside tmux the cell stood only on the
+  outer terminal, never on the pane tmux keeps, so `capture-pane` showed nothing.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added

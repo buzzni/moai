@@ -1964,8 +1964,17 @@ fn first_duplicate(sorted: &[Issue]) -> Option<&str> {
 /// 둘을 한 함수로 합쳐 두는 까닭은 한쪽만 넘기는 것이 불가능해야 하기
 /// 때문이다. 갈라 두면 부르는 쪽이 언젠가 하나를 잊고, 잊은 그날은 아무
 /// 증상도 없다.
+///
+/// **심는 스킬의 이름([`crate::skill::NAMES`])도 쓰인 것으로 친다**(moai-mdzx.3pm) — 위키가 그 낱말을 id 로 안 읽어,
+/// 접두어가 `moai` 인 저장소에서 `moai-wiki` 를 지으면 그 이슈를 페이지가 댈 길이 없다. 여기서 거르는 것은 `id` 가
+/// std 밖을 안 보기 때문이다(`tests/cli.rs` 가 그 파일을 `#[path]` 로 따로 읽는다).
 pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<String> {
-    issues.iter().map(|i| i.id.clone()).chain(reserved.iter().cloned()).collect()
+    issues
+        .iter()
+        .map(|i| i.id.clone())
+        .chain(reserved.iter().cloned())
+        .chain(crate::skill::NAMES.map(String::from))
+        .collect()
 }
 
 /// 하나짜리를 만들 때의 새 id. **[`Repo::with_write`] 안에서 부른다** — 락 안에서
@@ -4349,6 +4358,16 @@ mod tests {
             )
             .unwrap();
         assert_ne!(minted, "argos-9999", "못 읽는 줄과 같은 id 를 뽑았다");
+    }
+
+    /// **심는 스킬의 이름은 새 id 가 못 된다**(moai-mdzx.3pm) — 위키가 그 낱말을 id 로 안 읽는다. 해시가 `wiki` 를
+    /// 낼 씨앗을 찾는 대신 집합을 본다: 새 id 를 짓는 두 길(`new_id`, `add --from`)이 모두 이 집합으로 피한다.
+    #[test]
+    fn the_skill_names_are_taken() {
+        let taken = taken_ids(&[], &BTreeSet::new());
+        for name in crate::skill::NAMES {
+            assert!(taken.contains(name), "{name} 를 새 id 로 지을 수 있다");
+        }
     }
 
     /// 등록한 디렉터리 하나를 열 때 넷을 가른다 — 연 것, init 전, 사라짐, 깨짐.

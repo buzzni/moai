@@ -816,6 +816,32 @@ the next session to take over from. The next session reads it in the history und
 
     moai note <id> 'Next: <what comes next>'"#;
 
+/// 위키를 AGENTS 블록과 참고 문서에 알리는 조각(moai-bl3x). **짧게 둔다** — 어떻게 쓰는가는
+/// 셋째 스킬 [`wiki`] 에 있고, 언제나 읽히는 블록에 그 본문을 얹으면 모든 세션이 그 값을 낸다.
+/// 여기는 "있다·어디 있다·누가 고친다·아무것도 안 막는다" 네 가지만 말한다.
+const WIKI: &str = r#"The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
+in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
+prints one. When an epic changes what a person does, the window that did it fixes the page
+on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
+
+/// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
+/// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
+/// 물은 창이 같은 에픽을 다르게 가른다.
+const CHANGED_USE: &str = "a key, a command, a flag, a file, a format, a procedure";
+
+/// 위키 페이지를 머지에 태우는 커밋 줄. **일꾼 브리프 7-4 와 위키 스킬이 이 한 줄을 쓴다** — 7-3 의
+/// CHANGELOG 줄처럼 손으로 두 벌 적으면 한쪽만 고쳐져, 브리프를 따른 일꾼과 스킬을 따른 창이
+/// 다른 제목과 다른 경로로 커밋한다. `<wiki dir>` 은 `moai wiki ls --json` 의 `dir` 이다.
+///
+/// **`add` 가 앞에 선다**(리뷰 moai-bl3x.vbw 1번). `git commit -- <디렉터리>` 는 git 이 아직 모르는 파일을
+/// 안 담는다 — 고친 페이지가 하나라도 있으면 새 페이지만 빠진 채 0 으로 끝나고, 새 페이지뿐이면
+/// "nothing added" 로 진다. 새 페이지는 위키 걸음이 가장 자주 쓰는 것이라, 빠진 페이지는 머지에 안
+/// 실리고 `git worktree remove` 가 그 untracked 파일로 멈춘다. 두 줄로 두는 것은 `&&` 로 이은 한 줄을
+/// 워크트리 세션의 셸 가드가 통째로 거절해서다.
+const WIKI_COMMIT: &str = r#"git add -- <wiki dir>
+git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>"#;
+
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
 ///
@@ -990,6 +1016,10 @@ They stand once `moai skill install` has planted the hooks into Claude.
 the ideas that have piled up, one at a time, to the sessions idling on the same
 repository, and to take their reports — the supervisor picks, sends and checks;
 it does not fix and it does not merge.
+
+### The wiki
+
+{WIKI}
 
 ### Before you close the session
 
@@ -1239,6 +1269,10 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 
 {STATS}
 
+## The wiki
+
+{WIKI}
+
 ## How to find what a review said
 
 The full review text stays in a file. The notice that it finished carries a
@@ -1311,6 +1345,202 @@ that commit. In that spot, pin it with `--user "Name (email)"` or `MOAI_ACTOR`.
 commit column are read from that tracker's `.moai` root — even with another repository
 nested inside the project (a submodule, `vendor`), a `moai` called in there does not
 write that repository's name.
+"#
+    )
+}
+
+/// 셋째 스킬 `moai-wiki` 의 SKILL.md — 저장소의 매뉴얼(위키)을 개발 진척에 맞춰 고치는 걸음이다
+/// (moai-bl3x, 사용자 결정 2026-10-04).
+///
+/// **부르는 자리가 둘이다.** 일꾼이 에픽 끝(브리프 7-4)에서 그 에픽이 사람의 쓰임을 바꿨는지 묻고
+/// 고치는 것이 주된 길이고, 사람이 부르면 지난 릴리스 뒤 닫힌 에픽과 에픽 밖 이슈를 훑는다. 브리프의 7-4 는 짧게
+/// 두고 본문은 여기 둔다 — 브리프는 감독이 매 바퀴 통째로 싣는 글이라 한 줄이 일꾼 수만큼 값을 낸다.
+///
+/// **아무것도 막지 않는다.** 페이지가 안 고쳐졌다고 붉어지는 자리를 만들면 그것이 게이트고, 글이
+/// 릴리스를 세운다. 그래서 "하지 않는 것" 에 게이트를 첫 줄로 적는다.
+///
+/// **`--json` 의 키 이름은 위키 저장 에픽(moai-ihu4)이 정한 모양이다.** 그쪽이 키를 바꾸면 이 글이
+/// 없는 키를 가르친다 — `the_wiki_skill_names_the_wiki_commands` 가 이 글이 대는 키를 그 목록과 견주고,
+/// **그 목록은 실제 출력에 묶여 있다**(moai-ihu4.l2e): `the_wiki_skill_teaches_the_keys_the_wiki_prints` 가
+/// 명령과 같은 자(`cmd::wiki::listed_json`·`page_json`)로 지은 `--json` 에서 키와 `kind` 값을 읽어 두 쪽을 견준다.
+/// 명령이 키를 바꾸거나 더하면 거기서 붉어진다.
+///
+/// 발동어는 [`skill`] 과 같은 까닭으로 두 말을 함께 싣는다.
+pub fn wiki() -> String {
+    let [one, two, ..] = RULES;
+    let commit = indent(WIKI_COMMIT, "       ");
+    format!(
+        r#"---
+name: moai-wiki
+description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
+---
+
+# moai-wiki — keep the manual in step with the work
+
+The wiki is the repository's manual: markdown pages committed beside the code. It
+follows the work — **when an epic changes what a person does, the page that teaches
+it changes in the same merge.** Nothing checks this and nothing is blocked. An epic
+that changed nothing a person does writes nothing.
+
+## What the wiki is
+
+    moai wiki ls                           the pages: slug and title, and what does not resolve
+    moai wiki ls --json                    the same with each page's path, for a machine
+    moai wiki show <slug>                  one page, and the pages that link to it
+
+- **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
+  `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
+  stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
+  no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
+  not read — fix the key, not the pages — and `failed` is the disk refusing to open it
+- **One page is one `.md` file** — `path` in the list. Its `slug` is that path below
+  `dir` without `.md`. Name a new file in lowercase ASCII kebab case
+  (`merge-driver.md`) so its slug reads the same on every machine. `README.md` or
+  `index.md` at the top of `dir` is the home page
+- **One `# Title` line opens the page.** It is the `title` the list shows; without it
+  the file name stands in
+- **Pages link with plain relative links** — `[the explorer](explorer.md)`. Not
+  `[[wiki links]]`: GitHub does not draw them, and one link with two spellings is one
+  vocabulary too many
+- **A link can land on a heading** — `[epic](glossary.md#epic)`, or `[above](#epic)`
+  on the same page. The part after `#` is the heading's anchor as GitHub makes it:
+  lowercase, punctuation dropped, each space a `-` (`## The --json contract` is
+  `#the---json-contract`), and a repeated heading `-1`, `-2`. The same link lands on
+  that heading on GitHub and in the explorer's wiki window. Link to the heading that
+  says it, not to the top of a long page
+- **An issue is named by its bare id**, as a whole word — not a link. moai finds it
+  in prose and in inline code; an id inside a fenced or indented code block is read
+  as an example and is not counted
+- **The pages ride the branch.** Unlike `.moai/`, nothing moves them to the main
+  checkout: a page written in a worktree stands in that worktree and is merged with
+  the code, by git's own 3-way merge
+
+Every row under `pages` also says what to fix: `issues` (each `id`, and `exists`
+false for an id that names no issue), `links` (the links to other pages — each `text`,
+`to` as the slug it lands on, and `resolved` false when no such page stands; a link
+with a `#` also carries `anchor`, the part after it, and `anchor_resolved` false when
+that page has no such heading — absent when the page could not be read, so nobody can
+tell — and a same-page `#anchor` stands with `to` naming its own page) and
+`conflict` (true while merge conflict markers stand in the page). `linked_from` turns
+`links` around: the slugs of the pages that link to this one, in list order, `[]` when
+none does. A page other than the home page that nothing links to is found only through
+the list — link it from the page that should lead there. Judge that from
+`moai wiki ls --json`, not from one page: a page that could not be read links nowhere,
+and only the list shows it, with its `error`. `moai wiki show <slug> --json` says when
+its own count may be short — `linked_from_partial` stands `true` when some other page
+could not be read or the walk left a spot out, and is absent when every page was
+counted. A page that could
+not be read still stands in the list, under its file name, with an `error` of its own
+whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
+leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
+link to a directory, not followed), `not_utf8` (a file name that cannot be a slug) or
+`unreadable` (a directory it could not open or list to the end, or a name whose kind it
+could not read); with nothing left out the key is absent,
+and with it the exit code is non-zero although `pages` is whole. Branch on `kind`, not
+on the words beside it. Look at all of these after you write.
+
+## Two kinds of page
+
+- **Reference — generated.** A page whose first paragraph says it is generated and
+  not to be edited by hand ("Generated from … Do not edit by hand") is written by
+  the generator that paragraph names. Never edit it: when its source changed, run
+  the generator and commit what it wrote
+- **Guides — written by hand.** A guide teaches what a person does: what they came
+  to do, the steps in order, why, and what goes wrong. **Do not copy `--help` into
+  a guide** — name the command and say when to reach for it. The help is the truth
+  for flags, and a copy goes stale the day a flag changes
+
+## At the end of an epic
+
+Most pages are written here — the window that did the epic is the only one that knows
+what changed and why. It runs on that epic's branch — in its worktree, where it has
+one — after the review and the CHANGELOG line and before the merge.
+
+1. Read four things: `moai show <epic> --json` (the body and the notes say why it was
+   decided), the CHANGELOG line the epic wrote if the repository keeps one, the
+   `--help` of each command the epic touched, and `moai wiki ls --json`
+2. Ask once: **did this epic change what a person does** —
+   {CHANGED_USE}. A refactor
+   inside, or a fix that left the behaviour as it was, changed nothing a person
+   does. If nothing changed, stop — write nothing
+3. Change the page that teaches it — find it in `moai wiki ls`, or grep `dir` for the
+   command or the key. If no page covers it, write one from the template below. A
+   page ends with one `Decided in:` line naming the epics whose decisions it carries;
+   put this epic's id on it
+4. Commit on that branch, before the merge — the pages then ride the same merge, and
+   the merge diff is where they get read
+
+{commit}
+
+   `<wiki dir>` is `dir` from `moai wiki ls --json`. **Do not skip the `add`**: with a
+   path, `git commit` leaves out a file git does not know yet, so a new page stays
+   behind without a word
+5. Name the pages you changed in your report, or say that none changed
+
+## When a person asks you to sweep
+
+A person calls this skill to catch the wiki up — before a release, or after work
+merged without touching it.
+
+1. Find when the last release went out — `git tag --sort=-creatordate` lists the tags
+   newest first; take the newest release tag, and `git log -1 --format=%cs <tag>`
+   gives its day. Not `git describe`: it sees only the tags this branch can reach,
+   and a release tagged on another branch (a `main` that only releases merge into)
+   is not one of them. With no tag, ask the person how far back to go
+2. List the epics closed since the day before that, and the issues closed outside any
+   epic — `%cs` is the day on the tag's own clock and `--done` reads yours, so a day
+   earlier keeps what closed in between; one row too many is only one more to ask about
+
+       moai show --type epic --done '<day>..' --json
+       moai show --type issue -e none --done '<day>..' --json
+
+3. Ask each of them the question from the end of an epic (step 2 there), against
+   the pages `moai wiki ls --json` lists, and gather what to change — one line each:
+   the page, what changes in it, which epic or issue
+4. **Show the person that list once** and wait for a yes. They may cut it
+5. Pick the work up before you write — the pages are files in the repository, so
+   the hook counts them as a change, by rule 2:
+   "{two}"
+
+       moai add 'wiki: <what>' -t docs
+       moai mv <id> in_progress
+
+   If you still hold other work, the hook refuses that `add`, by rule 1:
+   "{one}". The sweep is not part of that work, so
+   finish it first or ask the person
+6. Write the pages where this repository does its work — in a worktree if it uses
+   them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
+   the end of an epic, and move the issue to `done`
+
+## A new page
+
+```markdown
+# <Title — what the reader came to do>
+
+<One paragraph: what this page is for and when to reach for it.>
+
+## <A task>
+
+<The steps in order. Each command in a code span, with what it is for — not its flags.>
+
+## When it goes wrong
+
+<What the reader sees, and what to do about it.>
+
+Decided in: <epic>
+```
+
+## What this skill does not do
+
+- **No gate.** Nothing checks that a page was written, and no warning stands for a
+  stale one. Do not add a check — a check here is a gate, and a release does not
+  wait on prose
+- **No page per epic.** Pages follow what a person does, not the order things were
+  built in. The history is the tracker and the CHANGELOG
+- **No to-do list in the wiki.** Work not done goes into the tracker — `moai add`, or
+  `moai idea add` for later
+- **No token counts.** What did the work and what it cost is a note on the issue,
+  never a page — and never an estimate
 "#
     )
 }
@@ -2182,6 +2412,7 @@ fn brief() -> String {
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
     let shapes = indent(GIT_SHAPES, "    ");
+    let wiki_commit = indent(WIKI_COMMIT, "         ");
     format!(
         r#"    Supervisor session (<my name>) is handing you idea <id> — <title>.
     Read first: moai show <id>
@@ -2378,6 +2609,12 @@ fn brief() -> String {
        section by version name and hands it to `--notes-file` as it is, so a missing section
        reads to whoever receives it as the whole release. **Nothing checks this** — a check here
        would be a gate, and an empty section must not stop a release
+    7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
+       epic changed what a person does — {CHANGED_USE}.
+       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
+       7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+{wiki_commit}
+       If it did not, write nothing. **Nothing checks this**
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
        session in the root again.
@@ -2426,8 +2663,8 @@ fn brief() -> String {
        Leave the tests passing in the root with a commit with a path, as in 2
     11. Report with SendMessage to "<my name>" — the merge hash, the unfolded epic's id, a line or
        two of summary, what you handed on and any new ideas, the members reclaimed in 7-1 and left
-       in the first column, and the members left in 4-3 because the work beside you held the file,
-       with that other work named
+       in the first column, the members left in 4-3 because the work beside you held the file,
+       with that other work named, and the wiki pages 7-4 changed — or that it changed none
     12. Finally, **say when the window can be cleared.** Leave the line to take over from
        (`moai note <epic> 'Next: …'`), take it into the root with a commit with a path as in 2 —
        it is written after the commit in 10, so leaving it out leaves it in the shared root where
@@ -2476,7 +2713,7 @@ mod tests {
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
         let ideas = ideas();
-        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS] {
+        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
@@ -2493,6 +2730,7 @@ mod tests {
             ("SKILL.md", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
+            ("위키 스킬", wiki()),
             ("일꾼 브리프", brief()),
         ] {
             for gone in ["Korean text", "korean-skills", "humanize-korean", "_workspace", "korean-terms"] {
@@ -2785,6 +3023,8 @@ mod tests {
                 head(&supervise()),
                 ["감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice(),
             ),
+            // 위키 스킬(moai-bl3x)의 발동어. 사람이 "위키 갱신" 이라고 불러야 훑기가 선다.
+            ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
         ] {
             for trigger in triggers {
                 assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
@@ -2803,8 +3043,12 @@ mod tests {
         // 글자 단위로 자른다 — 바이트로 자르면 한글 한가운데서 끊겨, 실패를 알리려던
         // 자리가 제가 먼저 죽는다.
         let head: String = skill.chars().take(40).collect();
-        assert!(skill.starts_with("---\nname: moai\ndescription: "), "{head}");
-        assert!(supervise().starts_with("---\nname: moai-supervise\ndescription: "), "감독 스킬의 머리가 없다");
+        // 이름은 `skill::NAMES` 의 것이다 — 위키가 그 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 머리의
+        // 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
+        let [moai, supervisor, wiki_skill] = crate::skill::NAMES;
+        assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
+        assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
+        assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
     }
 
     /// **감독이 일꾼에게 가르치는 펼치기는 참고 문서의 그 명령이다.** 길이 둘로
@@ -3286,6 +3530,222 @@ stop sending outside work while a release runs",
         assert!(end < brief.find("\n    10.").expect("닫는 걸음이 없다"), "CHANGELOG 를 닫은 뒤에 본다");
     }
 
+    /// **위키 스킬이 대는 명령과 `--json` 키는 위키 저장 에픽(moai-ihu4)이 정한 것이다.** 이 글은
+    /// 모든 저장소에 심겨 에이전트가 그 키로 갈라 읽는다 — 키 하나가 어긋나면 `jq` 가 `null` 을 돌려주고,
+    /// 에이전트는 "없다" 로 읽는다. 목록은 그 에픽 본문의 모양과 그쪽이 사람에게 물어 정한 것(2026-10-04)
+    /// 그대로다.
+    const WIKI_KEYS: &[&str] = &[
+        "dir",
+        "pages",
+        "slug",
+        "title",
+        "path",
+        "error",
+        "kind",
+        "no_dir",
+        "outside",
+        "not_a_dir",
+        "issues",
+        "id",
+        "exists",
+        "links",
+        "text",
+        "to",
+        "anchor",
+        "resolved",
+        "anchor_resolved",
+        "linked_from",
+        "linked_from_partial",
+        "conflict",
+        "too_large",
+        "refused",
+        "failed",
+        "skipped",
+        "dir_link",
+        "not_utf8",
+        "unreadable",
+    ];
+
+    /// 위키 명령이 내는데 스킬이 **일부러 안 대는** 키 — `bytes` 는 고칠 것을 안 말하고, `said` 는 사람이 읽는
+    /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
+    /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
+    /// 여기 둘지를 그때 정한다.
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
+
+    /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
+    /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
+    ///
+    /// 명령과 같은 자(`cmd::wiki::listed_json`·`page_json`)로, 모든 갈래가 서는 위키를 지어 견준다 — 읽은 페이지
+    /// (id·링크·충돌), 못 읽은 세 까닭(`too_large`·`refused`·`failed`), 디렉터리 거절 넷(`no_dir`·`outside`·
+    /// `not_a_dir`·`failed`), 그리고 `show` 의 한 페이지.
+    ///
+    /// - 스킬이 대는 키와 `kind` 값은 모두 출력에 선다 — 출력에 없는 것을 가르치면 붉어진다
+    /// - 출력의 키와 `kind` 값은 모두 스킬이 대거나 [`WIKI_UNTAUGHT`] 에 든다 — 명령이 더한 것을 스킬이 모르면 붉어진다
+    /// - 홈 페이지(`wiki::HOMES`)도 스킬이 이름으로 댄다
+    #[cfg(unix)]
+    #[test]
+    fn the_wiki_skill_teaches_the_keys_the_wiki_prints() {
+        use crate::wiki::{DirTrouble, HOMES, TOO_LARGE};
+        use std::collections::BTreeSet;
+        let s = crate::scratch::Scratch::new("guide-wiki-keys");
+        let away = crate::scratch::Scratch::new("guide-wiki-keys-away");
+        let docs = s.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md#a) [gone](gone.md) moai-ab12 moai-zz99\n").unwrap();
+        std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
+        std::fs::write(docs.join("big.md"), "x".repeat(TOO_LARGE as usize + 1)).unwrap();
+        std::fs::write(docs.join("latin1.md"), b"caf\xe9\n").unwrap();
+        std::fs::write(away.path().join("out.md"), "# Out\n").unwrap();
+        std::os::unix::fs::symlink(away.path().join("out.md"), docs.join("out.md")).unwrap();
+        std::fs::write(s.path().join("file"), "").unwrap();
+        // 걷기가 건너뛰는 자리 — 디렉터리 링크와 UTF-8 이 아닌 이름. 못 연 디렉터리는 아래에서 갈래로 짓는다.
+        std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+        let latin = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"caf\xe9.md");
+        std::fs::write(docs.join(latin), "# Name\n").unwrap();
+
+        let lang = crate::i18n::Lang::En;
+        let known = |id: &str| id == "moai-ab12";
+        let read = crate::wiki::load(s.path(), "docs", "moai", &known);
+        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
+        let loaded = read.unwrap();
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap()).unwrap());
+        for raw in ["missing", "/etc", "file"] {
+            let read = crate::wiki::load(s.path(), raw, "moai", &known);
+            assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
+            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read).unwrap());
+        }
+        // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
+        let failed = Err(DirTrouble::Failed("permission denied".into()));
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed).unwrap());
+        let unreadable = crate::wiki::Skipped {
+            path: "docs/locked".into(),
+            why: crate::wiki::Skip::Unreadable("permission denied".into()),
+        };
+        let walked = crate::wiki::Wiki { pages: Vec::new(), skipped: vec![unreadable] };
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked)).unwrap());
+
+        // 출력에 선 키와 `kind` 값을 모은다.
+        fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    for (k, v) in m {
+                        keys.insert(k.clone());
+                        if let ("kind", Some(kind)) = (k.as_str(), v.as_str()) {
+                            kinds.insert(kind.to_string());
+                        }
+                        gather(v, keys, kinds);
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|v| gather(v, keys, kinds)),
+                _ => {}
+            }
+        }
+        let (mut keys, mut kinds) = (BTreeSet::new(), BTreeSet::new());
+        for line in &printed {
+            gather(&serde_json::from_str(line).unwrap(), &mut keys, &mut kinds);
+        }
+        let want_kinds =
+            ["too_large", "refused", "failed", "no_dir", "outside", "not_a_dir", "dir_link", "not_utf8", "unreadable"];
+        assert_eq!(kinds, want_kinds.iter().map(|k| k.to_string()).collect(), "픽스처가 갈래를 다 안 세웠다");
+
+        for key in WIKI_KEYS {
+            assert!(
+                keys.contains(*key) || kinds.contains(*key),
+                "스킬이 대는 `{key}` 를 `moai wiki --json` 이 안 낸다"
+            );
+        }
+        for key in keys.iter().chain(&kinds) {
+            assert!(
+                WIKI_KEYS.contains(&key.as_str()) || WIKI_UNTAUGHT.contains(&key.as_str()),
+                "`moai wiki --json` 이 내는 `{key}` 를 스킬이 안 댄다 — `guide::wiki` 에 적고 WIKI_KEYS 에 더하거나, \
+                 일부러 안 대면 WIKI_UNTAUGHT 에 둔다"
+            );
+        }
+        for home in HOMES {
+            assert!(wiki().contains(&format!("`{home}.md`")), "스킬이 홈 페이지 `{home}.md` 를 안 댄다");
+        }
+        // 사람 화면이 대는 것만 가르친다 — 목록은 슬러그와 제목이고 경로는 `--json` 에만 선다.
+        let drawn = crate::view::wiki::list(lang, "docs", &loaded).join("\n");
+        assert!(!drawn.contains("docs/README.md"), "사람 목록에 경로가 섰다 — 스킬의 `moai wiki ls` 줄을 고친다");
+        assert!(wiki().contains("moai wiki ls                           the pages: slug and title"));
+    }
+
+    #[test]
+    fn the_wiki_skill_names_the_wiki_commands() {
+        let wiki = wiki();
+        for cmd in ["moai wiki ls", "moai wiki ls --json", "moai wiki show <slug>"] {
+            assert!(wiki.contains(cmd), "위키 스킬이 `{cmd}` 를 안 가르친다");
+        }
+        for key in WIKI_KEYS {
+            assert!(wiki.contains(&format!("`{key}`")), "위키 스킬이 `{key}` 키를 안 댄다");
+        }
+        // 브리프 7-4 와 같은 커밋 줄·같은 물음이다 — 따로 적으면 한쪽만 고쳐진다.
+        assert!(wiki.contains(&indent(WIKI_COMMIT, "       ")), "위키 스킬의 커밋 줄이 브리프와 갈라졌다");
+        assert!(wiki.contains(CHANGED_USE), "위키 스킬의 물음이 브리프와 갈라졌다");
+        // **새 페이지를 git 에 먼저 알린다**(리뷰 moai-bl3x.vbw 1번). 경로를 준 `git commit` 은 git 이 모르는
+        // 파일을 말없이 빼서, 새 페이지가 머지에 안 실린다 — `add` 를 걷으면 여기서 붉어진다.
+        let (add, commit) = WIKI_COMMIT.split_once('\n').expect("커밋 줄이 한 줄로 줄었다");
+        assert_eq!(add, "git add -- <wiki dir>", "새 페이지를 담는 `add` 가 커밋 앞에 없다");
+        assert!(commit.starts_with("git commit ") && commit.ends_with(" -- <wiki dir>"), "{commit}");
+        // 훑기는 이 브랜치가 닿는 태그만 보는 `git describe` 로 지난 릴리스를 찾지 않는다 — 릴리스를 다른
+        // 가지(`main`)에 다는 저장소에서 한참 옛 태그를 짚는다(리뷰 moai-bl3x.vbw 2번).
+        assert!(wiki.contains("git tag --sort=-creatordate"), "훑기가 지난 릴리스를 태그 날짜로 안 찾는다");
+        // 훑기는 에픽 밖에서 닫힌 이슈도 본다 — 에픽만 돌면 이슈 하나로 끝난 쓰임의 변화가 빠진다.
+        assert!(wiki.contains("moai show --type issue -e none --done"), "훑기가 에픽 밖 이슈를 안 본다");
+        // 모든 저장소에 심긴다 — 에픽이 건드린 명령은 그 저장소의 것이지 moai 의 것이 아니다.
+        assert!(!wiki.contains("moai <command> --help"), "위키 스킬이 남의 저장소에 moai 의 도움말을 읽힌다");
+        // **생성 페이지를 알아보는 낱말은 이 저장소의 생성 페이지가 실제로 쓰는 낱말이다.** 스킬은 첫
+        // 문단의 그 말로 "손대지 말 페이지" 를 가르는데, 생성기의 머리글이 바뀌면 스킬을 따른 창이
+        // `docs/cli.md` 를 손으로 고친다 — 다음 생성이 그것을 말없이 덮는다.
+        let cli = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/cli.md"))
+            .expect("docs/cli.md 를 못 읽는다");
+        let lead = cli.split("\n\n").find(|p| !p.starts_with('#')).expect("docs/cli.md 에 첫 문단이 없다");
+        for word in ["Generated from", "Do not edit by hand"] {
+            assert!(wiki.contains(word), "위키 스킬이 생성 페이지를 `{word}` 로 안 가른다");
+            assert!(lead.contains(word), "docs/cli.md 의 첫 문단이 스킬이 찾는 `{word}` 를 잃었다 — {lead}");
+        }
+        // 아무것도 막지 않는다 — "하지 않는 것" 의 첫 줄이 게이트다.
+        let not = &wiki[wiki.find("## What this skill does not do").expect("하지 않는 것 절이 없다")..];
+        assert!(not.contains("**No gate.**"), "위키 스킬이 게이트를 안 걷는다");
+    }
+
+    /// **에픽 끝의 위키 걸음(7-4)은 짧게 두고 본문은 스킬로 보낸다**(moai-bl3x, 사용자 결정 2026-10-04).
+    /// 브리프는 감독이 매 바퀴 통째로 싣는 글이라, 위키 쓰는 법을 여기 펴면 그 값을 일꾼마다 낸다.
+    /// 7-3 의 CHANGELOG 와 같은 까닭으로 워크트리에서 머지 전에 커밋하고, 아무것도 막지 않는다.
+    #[test]
+    fn the_brief_sends_the_wiki_step_to_the_skill() {
+        let brief = brief();
+        let changelog = brief.find("\n    7-3.").expect("7-3 이 없다");
+        let at = brief.find("\n    7-4.").expect("머지 전에 위키를 보는 걸음이 없다");
+        let end = at + brief[at..].find("\n    8.").expect("7-4 뒤에 8 이 없다");
+        assert!(changelog < at, "7-4 가 7-3 앞에 섰다");
+        let step = &brief[at..end];
+        let wiki = wiki();
+        let name = wiki.lines().find_map(|l| l.strip_prefix("name: ")).expect("위키 스킬에 이름이 없다");
+        for (piece, why) in [
+            (format!("`{name}` skill"), "심는 스킬의 이름으로 안 보낸다"),
+            ("`moai wiki ls`".to_string(), "위키가 있는지 무엇으로 아는지 안 적었다"),
+            (CHANGED_USE.to_string(), "스킬과 같은 물음을 안 묻는다"),
+            (indent(WIKI_COMMIT, "         "), "고친 페이지를 담을 커밋 줄이 없다"),
+            ("in the worktree, before the merge".to_string(), "워크트리에서 머지 전에 쓰라는 말이 없다"),
+            ("write nothing".to_string(), "쓰임이 안 바뀐 에픽은 안 쓴다는 말이 없다"),
+            ("**Nothing checks this**".to_string(), "게이트가 아니라는 말이 없다"),
+        ] {
+            assert!(step.contains(&piece), "{why} — {piece}");
+        }
+        // 본문은 스킬에 있다 — 틀·훑기·하지 않는 것이 브리프로 새어 나오면 걸음이 자란다.
+        assert!(step.lines().count() <= 8, "7-4 가 {}줄로 자랐다 — 본문은 스킬에 둔다\n{step}", step.lines().count());
+        // 닫기보다 앞이다 — 멤버가 닫히면 그 창은 규칙 2 로 저장소를 못 고친다.
+        assert!(end < brief.find("\n    10.").expect("닫는 걸음이 없다"), "위키를 닫은 뒤에 본다");
+        // 보고(11)가 고친 페이지를 댄다 — 감독은 위키를 따로 안 본다.
+        let report = brief.find("\n    11. ").expect("11 이 없다");
+        let twelve = brief.rfind("\n    12.").expect("12 가 없다");
+        assert!(
+            brief[report..twelve].contains("the wiki pages 7-4 changed — or that it changed none"),
+            "보고가 7-4 가 고친 위키 페이지를 안 댄다"
+        );
+    }
+
     /// **혼자 펼치는 세션도 마일스톤을 달고 본문을 옮긴다**(moai-fww7).
     ///
     /// 마일스톤 걸음은 감독 길에만 있었다(moai-6qgz) — 감독 없이 혼자 펼치는 세션이 읽는 글에는
@@ -3746,19 +4206,24 @@ sys.exit(1 if bad else 0)
     }
 
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
-    /// 아무것도 안 가리키고, 고친 뒤에는 거짓이 된다.
+    /// 아무것도 안 가리키고, 고친 뒤에는 거짓이 된다. 위키 스킬도 모든 저장소에 심긴다.
+    ///
+    /// 셋째 스킬의 이름 `moai-wiki` 는 id 의 꼴(`moai-` 뒤 네 글자)과 겹친다 — 스킬 이름은 `skill::NAMES` 로
+    /// 거른다. 위키가 거르는 그 목록이고, 스킬 머리의 이름과 갈리면 `the_frontmatter_opens_the_skill` 이 붉어진다.
     #[test]
     fn the_supervisor_names_no_issue_of_this_repo() {
-        let text = supervise();
-        let ids: Vec<&str> = text
-            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-            .filter(|w| {
-                w.strip_prefix("moai-").is_some_and(|rest| {
-                    rest.len() == 4 && rest.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki())] {
+            let ids: Vec<&str> = text
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .filter(|w| !crate::skill::NAMES.contains(w))
+                .filter(|w| {
+                    w.strip_prefix("moai-").is_some_and(|rest| {
+                        rest.len() == 4 && rest.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    })
                 })
-            })
-            .collect();
-        assert!(ids.is_empty(), "이 저장소의 이슈 id 가 섰다 — {ids:?}");
+                .collect();
+            assert!(ids.is_empty(), "{whose} 에 이 저장소의 이슈 id 가 섰다 — {ids:?}");
+        }
     }
     #[test]
     fn the_supervised_worker_settles_the_three_old_questions() {

@@ -48,6 +48,13 @@ pub enum Role {
 pub struct Span {
     pub text: String,
     pub role: Role,
+    /// 이 조각이 몇째 링크의 것인가 — 본문에서 링크가 열린 차례(0 부터, [`parse_links`] 가 내는 주소의 차례). 링크의
+    /// 글과 그 뒤에 붙인 ` (주소)` 가 같은 수를 든다. 링크 밖이면 없다.
+    ///
+    /// **뜻([`Role`])과 따로 든다** — 링크 안의 코드는 `Code` 로 서고, 주소는 `Mark` 로 선다. 뜻으로 링크를 가리면 그
+    /// 둘이 링크에서 빠지고, 맞닿은 두 링크(`<https://a><https://b>`)는 한 조각으로 붙는다. 위키 창이 펴진 줄의 어느
+    /// 칸이 어느 링크인지를 이것으로 잰다([`link_cells`], moai-p61w).
+    pub link: Option<usize>,
 }
 
 /// 목록의 한 줄. 깊이를 들고 있어 겹친 목록도 한 벌로 그린다 —
@@ -110,11 +117,22 @@ pub enum Block {
 /// 본문을 블록으로. **마크다운이 아닌 글도 그대로 통과한다** — 이 저장소의
 /// 본문은 마크다운을 조금 쓰는 산문이지 마크다운 문서가 아니다.
 pub fn parse(src: &str) -> Vec<Block> {
-    // 표는 크레이트 기능이 아니라 파서 옵션이다. 이 저장소 본문이 표를 쓴다.
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    Fold::default().run(Parser::new_ext(src, opts))
+    parse_links(src).0
 }
+
+/// [`parse`] 와 같되 링크마다 그 주소도 낸다 — `links[k]` 가 [`Span::link`] 이 `Some(k)` 인 조각의 주소다. 맞은 짝을
+/// 걷지 않는다: 같은 링크가 두 번 적혔으면 둘 다 선다(펴진 줄에 두 번 서기 때문이다).
+pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
+    let mut fold = Fold::default();
+    let blocks = fold.run(Parser::new_ext(src, OPTIONS));
+    (blocks, fold.dests)
+}
+
+/// 파서 옵션 — 표는 크레이트 기능이 아니라 파서 옵션이다. 이 저장소 본문이 표를 쓴다.
+///
+/// **마크다운을 읽는 자리가 이것 하나로 연다** — 그리는 [`parse`] 와, 같은 페이지에서 제목·링크·id 를 읽는
+/// `wiki::parse` 다. 옵션이 갈리면 한 페이지가 화면과 목록에서 다른 문서로 읽힌다.
+pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES;
 
 /// 이벤트를 받아 블록을 쌓는 자리.
 ///
@@ -131,6 +149,11 @@ struct Fold {
     link: u32,
     /// 여는 링크마다 그 주소. 겹칠 수 있으므로 쌓아 둔다.
     urls: Vec<String>,
+    /// 열린 링크의 차례([`Span::link`]) — 지금 모으는 글이 드는 수는 맨 위의 것이다. 링크는 링크를 못 품지만(CommonMark)
+    /// 쌓아 둔다 — `link` 를 세는 것과 같은 까닭이다.
+    open: Vec<usize>,
+    /// 연 링크마다 그 주소, 연 차례로 — [`parse_links`] 가 낸다.
+    dests: Vec<String>,
     /// 모인 목록 줄. 겹친 목록도 한 벌이라 평평한 열 하나다.
     list: Option<Vec<Item>>,
     /// 열려 있는 목록마다 (번호 매긴 목록인가, 다음 번호). 깊이는 이 높이다.
@@ -151,7 +174,7 @@ struct Fold {
 }
 
 impl Fold {
-    fn run(mut self, events: Parser) -> Vec<Block> {
+    fn run(&mut self, events: Parser) -> Vec<Block> {
         for e in events {
             self.one(e);
         }
@@ -164,7 +187,7 @@ impl Fold {
         if !spans.is_empty() {
             self.out.push(Block::Para(spans));
         }
-        self.out
+        std::mem::take(&mut self.out)
     }
 
     /// 모으던 글을 목록의 한 줄로 매듭짓는다. 글이 없으면 아무 일도 없다.
@@ -270,11 +293,13 @@ impl Fold {
         if text.is_empty() {
             return;
         }
+        let link = self.open.last().copied();
         // 같은 뜻이 이어지면 한 조각으로 잇는다. 파서는 줄 단위로 쪼개 주는데,
-        // 그대로 두면 그리는 쪽이 조각마다 헛되이 칠한다.
+        // 그대로 두면 그리는 쪽이 조각마다 헛되이 칠한다. **다른 링크와는 안 잇는다** — 맞닿은 두 링크가 한 조각이면
+        // 둘째 링크의 칸이 첫째 링크로 잡힌다.
         match self.spans.last_mut() {
-            Some(last) if last.role == role => last.text.push_str(text),
-            _ => self.spans.push(Span { text: text.to_string(), role }),
+            Some(last) if last.role == role && last.link == link => last.text.push_str(text),
+            _ => self.spans.push(Span { text: text.to_string(), role, link }),
         }
     }
 
@@ -329,6 +354,8 @@ impl Fold {
             Tag::Link { dest_url, .. } => {
                 self.link += 1;
                 self.urls.push(dest_url.to_string());
+                self.open.push(self.dests.len());
+                self.dests.push(dest_url.to_string());
             }
             // **그림도 주소를 남긴다.** 그림은 터미널에 뜨지 않으므로 대체글만
             // 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크에 대고
@@ -387,9 +414,11 @@ impl Fold {
         match t {
             TagEnd::Strong => self.strong = self.strong.saturating_sub(1),
             TagEnd::Emphasis => self.emphasis = self.emphasis.saturating_sub(1),
+            // 주소를 붙인 **뒤에** 링크를 닫는다 — 뒤에 붙인 ` (주소)` 도 그 링크의 칸이다.
             TagEnd::Link => {
                 self.link = self.link.saturating_sub(1);
                 self.trail_url();
+                self.open.pop();
             }
             TagEnd::Image => self.trail_url(),
             TagEnd::Heading(_) => {
@@ -486,11 +515,11 @@ pub fn wrap_spans(spans: &[Span], max: usize, overflow: Overflow) -> Vec<Vec<Spa
     if max == 0 {
         return vec![Vec::new()];
     }
-    // 글자마다 뜻을 달아 둔다. 접는 자리는 조각 경계와 무관하게 정해진다.
-    let chars: Vec<(char, Role)> = spans.iter().flat_map(|s| s.text.chars().map(|c| (c, s.role))).collect();
+    // 글자마다 뜻과 링크를 달아 둔다. 접는 자리는 조각 경계와 무관하게 정해진다.
+    let chars: Vec<Glyph> = spans.iter().flat_map(|s| s.text.chars().map(|c| (c, s.role, s.link))).collect();
 
-    let mut lines: Vec<Vec<(char, Role)>> = Vec::new();
-    let mut line: Vec<(char, Role)> = Vec::new();
+    let mut lines: Vec<Vec<Glyph>> = Vec::new();
+    let mut line: Vec<Glyph> = Vec::new();
     let mut w = 0usize;
     let mut space: Option<usize> = None;
 
@@ -519,15 +548,15 @@ pub fn wrap_spans(spans: &[Span], max: usize, overflow: Overflow) -> Vec<Vec<Spa
 
         // 단위의 폭이다 — 코드는 덩이째, 나머지는 글자 하나.
         let cw = span_cols(unit);
-        let (c, role) = unit[0];
+        let (c, role, _) = unit[0];
         // **코드 글자는 어느 표면에서도 잃지 않는다.** 끊는 표면에서 폭을 넘긴 덩이는
         // 글자로 되돌아오지만, 그 글자 사이의 공백을 접는 자리로 삼으면 거기서 공백이
         // 걷혀 명령의 낱말이 붙어 버린다 — 눈으로 읽을 수도 없는 줄이 된다.
         let breakable_space = c == ' ' && role != Role::Code;
         if w + cw > max && !line.is_empty() {
             if let Some(sp) = space.filter(|&sp| sp > 0) {
-                let mut rest: Vec<(char, Role)> = line.split_off(sp);
-                while rest.first().is_some_and(|(c, _)| *c == ' ') {
+                let mut rest: Vec<Glyph> = line.split_off(sp);
+                while rest.first().is_some_and(|(c, ..)| *c == ' ') {
                     rest.remove(0);
                 }
                 trim_end(&mut line);
@@ -573,24 +602,27 @@ pub fn wrap_spans(spans: &[Span], max: usize, overflow: Overflow) -> Vec<Vec<Spa
     lines.into_iter().map(regroup).collect()
 }
 
+/// 접는 동안의 글자 하나 — 글자와 그 뜻, 그 글자가 든 링크([`Span::link`]).
+type Glyph = (char, Role, Option<usize>);
+
 /// 글자마다 달아 둔 뜻을 걷고 **표시 폭**만 센다. 한글 한 자가 두 칸이라
 /// 글자 수로 세면 접는 자리가 밀린다.
-fn span_cols(chars: &[(char, Role)]) -> usize {
-    chars.iter().map(|(c, _)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum()
+fn span_cols(chars: &[Glyph]) -> usize {
+    chars.iter().map(|(c, ..)| crate::text::width(c.encode_utf8(&mut [0u8; 4]))).sum()
 }
 
-fn trim_end(line: &mut Vec<(char, Role)>) {
-    while line.last().is_some_and(|(c, _)| *c == ' ') {
+fn trim_end(line: &mut Vec<Glyph>) {
+    while line.last().is_some_and(|(c, ..)| *c == ' ') {
         line.pop();
     }
 }
 
-fn regroup(chars: Vec<(char, Role)>) -> Vec<Span> {
+fn regroup(chars: Vec<Glyph>) -> Vec<Span> {
     let mut out: Vec<Span> = Vec::new();
-    for (c, role) in chars {
+    for (c, role, link) in chars {
         match out.last_mut() {
-            Some(last) if last.role == role => last.text.push(c),
-            _ => out.push(Span { text: c.to_string(), role }),
+            Some(last) if last.role == role && last.link == link => last.text.push(c),
+            _ => out.push(Span { text: c.to_string(), role, link }),
         }
     }
     out
@@ -618,7 +650,7 @@ fn bars(depth: u8) -> String {
 }
 
 fn mark(t: impl Into<String>) -> Span {
-    Span { text: t.into(), role: Role::Mark }
+    Span { text: t.into(), role: Role::Mark, link: None }
 }
 
 /// 조각 열의 표시 폭. **한 자리에서만 센다** — 칸을 채우는 쪽과 자르는 쪽이
@@ -630,12 +662,52 @@ pub fn span_width(spans: &[Span]) -> usize {
 /// 블록들을 폭에 맞춰 **줄**로 편다. 줄 하나는 조각의 열이고, 글머리·막대·
 /// 들여쓰기도 조각으로 들어간다. 빈 줄은 빈 열이다.
 pub fn layout(blocks: &[Block], width: usize, overflow: Overflow) -> Vec<Vec<Span>> {
+    layout_at(blocks, width, overflow).0
+}
+
+/// [`layout`] 와 같되 블록마다 그 블록의 첫 줄도 낸다 — `starts[i]` 가 `blocks[i]` 의 첫 줄이다. 위키 창이 링크의
+/// `#앵커` 를 따라 그 머리글의 줄로 굴릴 때 쓴다(moai-tllo) — 줄은 폭에 따라 접히니 편 자리만 안다.
+pub fn layout_at(blocks: &[Block], width: usize, overflow: Overflow) -> (Vec<Vec<Span>>, Vec<usize>) {
     let mut out: Vec<Vec<Span>> = Vec::new();
+    let mut starts = Vec::with_capacity(blocks.len());
     for (n, b) in blocks.iter().enumerate() {
         if n > 0 {
             out.push(Vec::new());
         }
+        starts.push(out.len());
         lay_one(&mut out, b, width, overflow);
+    }
+    (out, starts)
+}
+
+/// 펴진 줄의 링크 칸 하나 — `line` 째 줄의 `from..to` 칸(표시 폭, 줄 머리부터)이 `link` 째 링크다([`Span::link`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkCell {
+    pub line: usize,
+    pub from: usize,
+    pub to: usize,
+    pub link: usize,
+}
+
+/// 펴진 줄([`layout`])에서 링크가 선 칸 — 줄 차례로, 한 줄 안에서는 왼쪽부터. 한 줄에서 맞닿은 같은 링크의 조각(글·
+/// 코드·` (주소)`)은 한 칸으로 잇고, 접혀 두 줄에 걸친 링크는 줄마다 하나씩 선다.
+///
+/// **링크 칸을 재는 자는 이것 하나다**(moai-p61w) — 위키 창이 칠하는 칸·누른 자리를 맞히는 칸·`Tab` 이 도는 차례가
+/// 다 이것에서 온다. 그리는 쪽과 맞히는 쪽이 저마다 재면 한글처럼 두 칸짜리 글자나 접힌 줄에서 둘이 갈린다.
+pub fn link_cells(lines: &[Vec<Span>]) -> Vec<LinkCell> {
+    let mut out: Vec<LinkCell> = Vec::new();
+    for (line, spans) in lines.iter().enumerate() {
+        let mut at = 0usize;
+        for s in spans {
+            let w = crate::text::width(&s.text);
+            if let Some(link) = s.link {
+                match out.last_mut() {
+                    Some(c) if c.line == line && c.link == link && c.to == at => c.to = at + w,
+                    _ => out.push(LinkCell { line, from: at, to: at + w, link }),
+                }
+            }
+            at += w;
+        }
     }
     out
 }
@@ -656,7 +728,7 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             let spans: Vec<Span> = marked(spans)
                 .into_iter()
                 .map(|s| match s.role {
-                    Role::Plain => Span { text: s.text, role: Role::Heading },
+                    Role::Plain => Span { role: Role::Heading, ..s },
                     _ => s,
                 })
                 .collect();
@@ -711,7 +783,7 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
                 };
                 for (n, piece) in pieces.into_iter().enumerate() {
                     let lead = if n == 0 { &lead } else { &cont };
-                    out.push(vec![mark(lead.clone()), Span { text: piece, role: Role::Code }]);
+                    out.push(vec![mark(lead.clone()), Span { text: piece, role: Role::Code, link: None }]);
                 }
             }
         }
@@ -878,7 +950,7 @@ fn fit(cell: &[Span], max: usize, head: bool) -> Vec<Span> {
     // 머리 칸의 맨글은 제목이 된다. 조각을 베끼지 않고 **뜻만** 고른다.
     let as_head = |r: Role| if head && r == Role::Plain { Role::Heading } else { r };
     if span_width(cell) <= max {
-        return cell.iter().map(|s| Span { text: s.text.clone(), role: as_head(s.role) }).collect();
+        return cell.iter().map(|s| Span { text: s.text.clone(), role: as_head(s.role), link: s.link }).collect();
     }
     // `…` 한 칸을 남겨 두고 폭으로만 자른다.
     let room = max.saturating_sub(1);
@@ -896,7 +968,7 @@ fn fit(cell: &[Span], max: usize, head: bool) -> Vec<Span> {
             break;
         }
         used += crate::text::width(&piece);
-        out.push(Span { text: piece, role: as_head(s.role) });
+        out.push(Span { text: piece, role: as_head(s.role), link: s.link });
     }
     out.push(mark("…"));
     out
@@ -946,7 +1018,7 @@ fn marked(spans: &[Span]) -> Vec<Span> {
     spans
         .iter()
         .map(|s| match s.role {
-            Role::Code => Span { text: format!("`{}`", s.text), role: s.role },
+            Role::Code => Span { text: format!("`{}`", s.text), ..s.clone() },
             _ => s.clone(),
         })
         .collect()
@@ -1021,13 +1093,13 @@ mod tests {
     use super::*;
 
     fn plain(t: &str) -> Span {
-        Span { text: t.into(), role: Role::Plain }
+        Span { text: t.into(), role: Role::Plain, link: None }
     }
     fn strong(t: &str) -> Span {
-        Span { text: t.into(), role: Role::Strong }
+        Span { text: t.into(), role: Role::Strong, link: None }
     }
     fn code(t: &str) -> Span {
-        Span { text: t.into(), role: Role::Code }
+        Span { text: t.into(), role: Role::Code, link: None }
     }
 
     /// 마크다운을 안 쓴 줄은 손대지 않는다. 본문 대부분이 그렇다.
@@ -1356,6 +1428,76 @@ mod tests {
             .collect();
         assert!(flat.contains("여기"), "{flat:?}");
         assert!(flat.contains("https://example.com/a"), "주소를 버렸다 — {flat:?}");
+    }
+
+    /// **링크마다 제 차례를 든다**(moai-p61w) — 글과 뒤에 붙인 ` (주소)` 가 같은 수고, 링크 안의 코드도 그 수다. 주소는
+    /// 연 차례로 하나씩 선다 — 같은 링크가 두 번 적혔으면 두 번이다(펴진 줄에 두 번 선다).
+    #[test]
+    fn every_link_carries_its_turn_and_its_address() {
+        let (blocks, links) = parse_links("[가](a.md) 와 [`b`](b.md) 와 [가](a.md)\n");
+        assert_eq!(links, ["a.md", "b.md", "a.md"]);
+        let Block::Para(spans) = &blocks[0] else { panic!("{blocks:?}") };
+        let of = |link: usize| -> String {
+            spans.iter().filter(|s| s.link == Some(link)).map(|s| s.text.as_str()).collect()
+        };
+        assert_eq!(of(0), "가 (a.md)");
+        assert_eq!(of(1), "b (b.md)", "링크 안의 코드도 그 링크다");
+        assert_eq!(of(2), "가 (a.md)");
+        assert!(spans.iter().any(|s| s.link == Some(1) && s.role == Role::Code));
+        let plain: String = spans.iter().filter(|s| s.link.is_none()).map(|s| s.text.as_str()).collect();
+        assert_eq!(plain, " 와  와 ");
+    }
+
+    /// **맞닿은 두 링크는 한 조각으로 안 붙는다** — 붙으면 둘째 링크의 칸이 첫째 링크로 잡힌다.
+    #[test]
+    fn two_links_side_by_side_stay_two() {
+        let (blocks, links) = parse_links("<https://a.example><https://b.example>\n");
+        assert_eq!(links.len(), 2);
+        let laid = layout(&blocks, 80, Overflow::Break);
+        let cells = link_cells(&laid);
+        assert_eq!(
+            cells,
+            [LinkCell { line: 0, from: 0, to: 17, link: 0 }, LinkCell { line: 0, from: 17, to: 34, link: 1 }]
+        );
+    }
+
+    /// **링크 칸은 표시 폭으로 잰다** — 한글 한 자가 두 칸이고, 접힌 링크는 줄마다 하나씩 선다. 칸을 이어 읽으면
+    /// 그 링크의 글이 빠짐없이 나온다.
+    #[test]
+    fn link_cells_count_wide_letters_and_follow_a_link_over_a_fold() {
+        let src = "앞 [한글 링크 글이 길게 이어진다](guide.md) 뒤\n";
+        let (blocks, _) = parse_links(src);
+        let laid = layout(&blocks, 12, Overflow::Break);
+        let cells = link_cells(&laid);
+        assert!(cells.len() >= 2, "접혀 두 줄 넘게 선다 — {cells:?}\n{laid:?}");
+        assert!(cells.iter().all(|c| c.link == 0));
+        // 첫 칸은 `앞 ` 세 칸 뒤에서 시작한다 — 글자 수(2)가 아니라 폭이다.
+        assert_eq!((cells[0].line, cells[0].from), (0, 3));
+        let mut read = String::new();
+        for c in &cells {
+            let mut at = 0;
+            for s in &laid[c.line] {
+                let w = crate::text::width(&s.text);
+                if at >= c.from && at + w <= c.to {
+                    read.push_str(&s.text);
+                }
+                at += w;
+            }
+            read.push(' ');
+        }
+        let squeezed: String = read.split_whitespace().collect();
+        assert_eq!(squeezed, "한글링크글이길게이어진다(guide.md)");
+    }
+
+    /// 제목과 표 칸 안의 링크도 그 링크다 — 제목은 맨글을 `Heading` 으로 바꾸고, 표는 칸을 다시 지으니 거기서 링크를
+    /// 잃기 쉽다.
+    #[test]
+    fn a_link_in_a_heading_or_a_table_keeps_its_turn() {
+        let (blocks, links) = parse_links("# 본 [제목](a.md)\n\n| 칸 |\n|---|\n| [표](b.md) |\n");
+        assert_eq!(links, ["a.md", "b.md"]);
+        let laid = layout(&blocks, 40, Overflow::Break);
+        let found: Vec<usize> = link_cells(&laid).iter().map(|c| c.link).collect();
+        assert_eq!(found, [0, 1]);
     }
 
     /// **표는 준 폭을 넘지 않는다.** 칸 사이가 칸보다 넓어지는 좁은 폭에서도

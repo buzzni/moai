@@ -39,6 +39,7 @@ Commands:
   epic          The verbs above, pinned to `--type epic`
   milestone     The verbs above, pinned to `--type milestone`
   idea          Jot a passing thought down where you are (`--type idea`)
+  wiki          Read the project wiki - the markdown pages under `docs/`
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
   hook          Called by Claude's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
@@ -75,6 +76,11 @@ When you are not doing an existing piece of work right now:
 
   moai defer <id> -m 'next quarter'  out of the plan for a while
   moai defer <id> --undo             pick it back up
+
+To read the project manual:
+
+  moai wiki ls                  the markdown pages under docs/ - the wiki
+  moai wiki show <slug>         one page
 
 To watch several projects from one place:
 
@@ -2114,6 +2120,131 @@ PLAN
   `--dry-run` is where a person looks at the unfolded plan once and says yes.
 ```
 
+## `moai wiki`
+
+```
+Read the project wiki - the markdown pages under `docs/`
+
+Usage: moai wiki [OPTIONS] <COMMAND>
+
+Commands:
+  ls    Every page - slug, title, and what does not resolve
+  show  One page, drawn (`--json` gives the raw body)
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  The wiki is the markdown files under one directory of this checkout -
+  `docs/` unless `.moai/config.toml` says otherwise (`wiki_dir = "manual"`,
+  a relative path inside the checkout). A page is one `.md` file below it.
+  Its slug is that path without `.md` (`guide/explorer`) and its title is the
+  first `# ` heading, else the file name. README.md and index.md at the top
+  come first, the rest by title.
+
+  moai wiki ls                  every page, and what does not resolve
+  moai wiki show <slug>         one page, drawn, and the pages linking to it.
+                                `--json` gives the raw body
+
+  **Nothing is stored.** The tracker holds no page and no index - the list,
+  the links, the pages linking to each page (`linked_from`) and the ids are
+  read from the files every time. Pages are documents, so they ride the
+  branch: inside a linked worktree they are read from that worktree, while
+  the tracker still goes to the main checkout. Git merges them like any
+  other file.
+
+  There is no command that writes a page - edit the file and commit it. A
+  page names an issue by its bare id, as a commit subject does, and another
+  page by a relative link: `[the explorer](explorer.md)`. A link can land on
+  a heading - `glossary.md#epic`, or `#epic` on the same page. The anchor is
+  the heading as GitHub makes it (lowercase, punctuation dropped, each space
+  a `-`, a repeated heading `-1`, `-2`), so the same link works there too.
+```
+
+## `moai wiki ls`
+
+```
+Every page - slug, title, and what does not resolve
+
+Usage: moai wiki ls [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  A page that cannot be read stays in the list with its file name as the
+  title and says why - over 1 MB, a link out of the checkout, not a regular
+  file, not UTF-8. Over 1 MB is left unread on purpose and the exit code
+  stays 0; any other page left unread, or a name or directory the walk had
+  to leave out (a line on stderr names it), makes it non-zero once the whole
+  list is out. No `wiki_dir` directory yet is not an error: there is no
+  wiki to list and the exit code is 0. A `wiki_dir` that is absolute, has
+  `..`, leads out of the checkout or into `.git/`, or is not a directory is.
+
+  Under the list, notices count pages with conflict markers, links leading to
+  no page, links to a heading the page does not have, and ids naming no
+  issue. They block nothing and leave the exit code alone.
+
+  --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
+  "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
+  ids with this tracker's prefix the page names outside code blocks; the name
+  of a skill moai plants (`moai-wiki`) is never one. `links` is
+  [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
+  `.md` page of this wiki, `to` being the target slug (the page itself for a
+  bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
+  whether that page has the heading; both are absent on a link with no `#`,
+  and `anchor_resolved` is absent when the page could not be read.
+  `linked_from` is the slugs of the pages linking to this one.
+  A page that could not be read carries `error` ({"kind","said"}, kind
+  too_large, refused or failed); absent, it was read whole. What the walk
+  left out stands in `skipped` ([{"path","kind","said"}], kind dir_link,
+  not_utf8 or unreadable); absent, nothing was left out. When the directory
+  itself cannot be used, `pages` gives way to `error` with kind no_dir,
+  outside, not_a_dir or failed.
+```
+
+## `moai wiki show`
+
+```
+One page, drawn (`--json` gives the raw body)
+
+Usage: moai wiki show [OPTIONS] <slug>
+
+Arguments:
+  <slug>  The page - its path under the wiki directory without `.md`
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  The slug is what `moai wiki ls` prints - matched letter for letter, so
+  `Guide` is not `guide`.
+
+  --json gives the page as `ls` does plus `body`, the file as written.
+  A page that could not be read has no `body`, carries `error`, and the exit
+  code is non-zero. When the wiki directory itself cannot be used - not there
+  yet included - it gives {"dir","error"} as `ls` does, non-zero.
+
+  `linked_from` counts only the pages that could be read. When another page
+  could not be read, or the walk left a name or directory out, the count may
+  be short: `--json` adds `linked_from_partial` (true) and a line under the
+  page says how many places were not read. With every page read, neither
+  stands. It leaves the exit code alone - `moai wiki ls` names those places.
+```
+
 ## `moai tui`
 
 ```
@@ -2141,8 +2272,11 @@ Options:
   fold. Tab unfolds everything under it recursively and folds it again on a
   second press. Unfolded members stand with branch marks in the title column,
   and that unfolding is not kept in the config. gg and Home go to the top,
-  G and End to the bottom, Ctrl-d and Ctrl-u half a page, Ctrl-f and Ctrl-b
-  (PageDown and PageUp) a whole page.
+  G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
+  Ctrl-b (PageDown and PageUp) a whole page and the wheel three rows — the
+  list, not the cursor: the chosen row and the detail stay put even once the
+  row is off screen, and the next cursor key moves from that row and scrolls
+  back to it.
   Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
   other way; Ctrl-w h and Ctrl-w l pick the left and right pane, Ctrl-w k and
   Ctrl-w j the top and bottom one when the detail is split that way), and every
@@ -2173,9 +2307,10 @@ Options:
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
-  Screen — which one stands; the root menu says which [list/board/statistics]:
+  Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
+    SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v i  ideas              SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
@@ -2206,16 +2341,23 @@ Options:
              done_at="2026-10-03 00:00~2026-10-05 23:59") is on this clock too
     SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
              Clicking puts the focus on the pane and the cursor on the row
-             under it. The wheel moves the pane under the pointer without
-             taking the focus there: the list's cursor, the detail, the
-             statistics window. Dragging the line between the list and the
-             detail resizes them, and the share the list takes is kept under
-             [tui] as list_width and list_height. Over the SPC menu the
-             mouse does nothing, and while a form, a picker or a prompt is
-             up it is the terminal's again — selecting and middle-button
-             paste work there as they always did. Over the list and the
-             detail, the terminal's own selection and paste need Shift held
-             in most terminals, Option in iTerm2
+             under it. The wheel scrolls the pane under the pointer, and
+             neither the focus nor a cursor follows: the list, the detail, the
+             statistics window, the wiki window's two panes (a click there
+             picks the pane and the page, and a click on a link follows it).
+             Dragging the line between the list and the detail resizes them,
+             and the share the list takes is kept under [tui] as list_width
+             and list_height. The wiki window's line drags the same way and
+             keeps a share of its own as wiki_width — until it is dragged it
+             splits by list_width. With the SPC menu open, a
+             click on an item is its key — a group goes down a level, a
+             toggle keeps the menu open, and Esc and Bksp on the bottom line
+             close it or go up — and a click or a roll outside the menu closes
+             it and does what it does there. While a form, a picker or
+             a prompt is up the mouse is the terminal's again — selecting and
+             middle-button paste work there as they always did. Over the list
+             and the detail, the terminal's own selection and paste need Shift
+             held in most terminals, Option in iTerm2
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -2329,6 +2471,39 @@ Options:
   counts again from scratch — the window is opened fresh every time and
   nothing of it is kept. On a narrow screen it shows the same figures as
   text.
+
+  SPC g w opens the wiki window in place of the list and the detail — the
+  project's manual, the markdown pages `moai wiki ls` lists (under docs/
+  unless wiki_dir in .moai/config.toml says otherwise). It reads the project
+  you are in, or on the one list (0) the project of the row under the
+  cursor, and it only reads: pages are files you edit and commit. The pages
+  stand on the left, the home page (README or index) first, and the right
+  pane shows the page under the cursor. j and k, Ctrl-d and Ctrl-u, Ctrl-f
+  and Ctrl-b, gg and G move the focused pane — on the list, Ctrl-d, Ctrl-u,
+  Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
+  where they are, as in the explorer's list. Enter on the list goes to the
+  page and Ctrl-w w goes back and forth. Tab picks the links drawn on the
+  page in turn, from the first one on screen and round from the last to the
+  first, and Shift-Tab goes the other way from the last one on screen: the
+  picked link shows reversed, the key bar names where it goes, Enter follows
+  it, and once it leaves the pane it is dropped. Clicking a link follows it
+  at once. On the page with no link picked, Enter opens
+  a list of its links and the issue ids it names, then the pages linking to
+  it (marked ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and
+  Ctrl-b, takes one with Enter and closes on Esc. Taking a page link or a
+  page linking here goes there and Bksp comes back the way you came. Links
+  to a heading (page.md#anchor) open at that heading, its line marked ▸
+  until you scroll; one to a heading the page does not have is marked and
+  opens the page at its top. Taking an id closes
+  the window onto that row (from the one list, inside that project). Links
+  that lead nowhere, addresses outside the wiki and ids the tracker does not
+  hold are marked and only say so. The page as written (SPC v r) marks no
+  link — Tab says so. / searches the titles and bodies of the pages and
+  narrows the list as you type, and Esc drops a picked link, then clears
+  that search, and then closes the window, with the cursor, the filter and
+  the detail as they were. SPC opens the menu over it with the screens and
+  SPC v r (raw or rendered). The window is read fresh every time and nothing
+  of it is kept.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

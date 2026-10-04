@@ -330,6 +330,12 @@ pub struct Config {
     /// 저장소를 같이 쓰는 사람과 세션이 같은 답을 봐야 한다. 문턱([`Thresholds`])이 여기 사는 것과 같은 까닭이다.
     /// 무엇이 아카이브인지 재는 자는 [`crate::report::archived`] 하나다 — 이것은 그 날수만 든다.
     pub archive_days: i64,
+    /// 위키 페이지가 사는 디렉터리 — **적힌 날글자 그대로다**(moai-ihu4). 평평한 키 `wiki_dir`, 안 적으면 `docs`.
+    ///
+    /// **여기서는 재지 않는다.** 상대 경로인가·`..` 이 없는가·체크아웃 안이고 `.git/` 밖인가는 쓰는 자리
+    /// ([`crate::wiki::dir_of`])가 잰다 — `Config::parse` 가 거절하면 경로 오타 하나가 위키와 아무 상관 없는
+    /// `moai status` 까지 세운다. 따옴표와 자리(테이블 밖)는 이 파일의 다른 글 키와 같은 자로 잰다.
+    pub wiki_dir: String,
 }
 
 /// [`Config::archive_days`] 를 안 적은 저장소가 받는 날수 — 두 주(2026-10-03 사용자 결정).
@@ -337,6 +343,13 @@ pub const ARCHIVE_DAYS: i64 = 14;
 
 /// [`Config::archive_days`] 를 적는 키.
 pub const ARCHIVE_KEY: &str = "archive_days";
+
+/// [`Config::wiki_dir`] 를 안 적은 저장소가 받는 자리 — 이 저장소의 `docs/cli.md`·`docs/recovery.md` 가 이미
+/// 매뉴얼의 시작이다(2026-10-04 사용자 결정).
+pub const WIKI_DIR: &str = "docs";
+
+/// [`Config::wiki_dir`] 를 적는 키.
+pub const WIKI_KEY: &str = "wiki_dir";
 
 impl Config {
     /// **저장소가 든 파일이라 그 체크아웃 안에서만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
@@ -386,12 +399,14 @@ impl Config {
         let status = Thresholds::parse(es)?;
         // **테이블 안에 적은 날수는 소리낸다** — 문턱과 같은 까닭이다([`Thresholds::check_keys`]). `[archive]`
         // 밑의 `archive_days` 는 이 파서가 안 읽어, 조용히 넘기면 고친 값이 영영 안 먹는다.
-        if let Some(e) = es.iter().find(|e| e.table.is_some() && e.key == ARCHIVE_KEY) {
-            return Err(Trouble::ThresholdInTable { line: e.line, named: ARCHIVE_KEY.into() });
+        // `[wiki]` 밑의 `wiki_dir` 도 같다 — 넘기면 고친 자리가 영영 안 먹고 위키는 `docs` 를 읽는다.
+        if let Some(e) = es.iter().find(|e| e.table.is_some() && [ARCHIVE_KEY, WIKI_KEY].contains(&e.key)) {
+            return Err(Trouble::ThresholdInTable { line: e.line, named: e.key.into() });
         }
         let archive_days = days(es, ARCHIVE_KEY, ARCHIVE_DAYS)?;
+        let wiki_dir = text(es, WIKI_KEY)?.unwrap_or_else(|| WIKI_DIR.into());
 
-        Ok(Config { prefix, statuses, naming, status, archive_days })
+        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -472,7 +487,7 @@ pub enum Trouble {
     FlowDaysZero,
     /// `status_` 로 시작하는데 없는 설정이다 — 그 줄·키. **아는 키는 [`Thresholds::KEYS`] 가 댄다.**
     NoSuchThreshold { line: usize, key: String },
-    /// 문턱을 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
+    /// 평평한 키(문턱·`archive_days`·`wiki_dir`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
     ThresholdInTable { line: usize, named: String },
     /// `prefix` 가 없다.
     NoPrefix,
@@ -706,6 +721,22 @@ status_due_days      = 17
             Config::parse("prefix = \"a\"\narchive_days = -1\n").unwrap_err(),
             Trouble::NotANumber { line: 2, .. }
         ));
+    }
+
+    /// **위키 자리는 안 적으면 `docs`, 적은 글은 날글자 그대로다**(moai-ihu4). 경로로서 맞는가는 여기서 안 잰다 —
+    /// 밖을 가리키는 값도 설정은 읽힌다. 따옴표와 자리(테이블 밖)는 다른 글 키와 같은 자로 잰다.
+    #[test]
+    fn wiki_dir_defaults_to_docs_and_is_held_as_written() {
+        assert_eq!(Config::parse("prefix = \"a\"\n").unwrap().wiki_dir, WIKI_DIR);
+        assert_eq!(WIKI_DIR, "docs", "사람이 정한 기본값이 바뀌었다");
+        for raw in ["manual", "docs/wiki", "/etc", "../elsewhere", "", "docs\\wiki", "안내서"] {
+            let src = format!("prefix = \"a\"\nwiki_dir = \"{raw}\"\n");
+            assert_eq!(Config::parse(&src).unwrap().wiki_dir, raw, "{raw:?} 를 날글자로 안 들었다");
+        }
+        let e = Config::parse("prefix = \"a\"\n[wiki]\nwiki_dir = \"manual\"\n").unwrap_err();
+        assert_eq!(e, Trouble::ThresholdInTable { line: 3, named: "wiki_dir".into() });
+        let e = Config::parse("prefix = \"a\"\nwiki_dir = manual\n").unwrap_err();
+        assert_eq!(e, Trouble::NotQuoted { line: 2, key: "wiki_dir".into(), raw: "manual".into() });
     }
 
     /// 수는 따옴표 없이 적는다. 두르면 `toml` 크레이트로 갈아 끼우는 날 글이 되므로,

@@ -630,6 +630,13 @@ worker reads in its own window in 9-1.
        section by version name and hands it to `--notes-file` as it is, so a missing section
        reads to whoever receives it as the whole release. **Nothing checks this** — a check here
        would be a gate, and an empty section must not stop a release
+    7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
+       epic changed what a person does — a key, a command, a flag, a file, a format, a procedure.
+       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
+       7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+         git add -- <wiki dir>
+         git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
+       If it did not, write nothing. **Nothing checks this**
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
        session in the root again.
@@ -680,8 +687,8 @@ worker reads in its own window in 9-1.
        Leave the tests passing in the root with a commit with a path, as in 2
     11. Report with SendMessage to "<my name>" — the merge hash, the unfolded epic's id, a line or
        two of summary, what you handed on and any new ideas, the members reclaimed in 7-1 and left
-       in the first column, and the members left in 4-3 because the work beside you held the file,
-       with that other work named
+       in the first column, the members left in 4-3 because the work beside you held the file,
+       with that other work named, and the wiki pages 7-4 changed — or that it changed none
     12. Finally, **say when the window can be cleared.** Leave the line to take over from
        (`moai note <epic> 'Next: …'`), take it into the root with a commit with a path as in 2 —
        it is written after the commit in 10, so leaving it out leaves it in the shared root where
