@@ -3964,3 +3964,8 @@
 {"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.sne","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"문서 칸의 링크를 누르면 그 문서로 간다"}
 {"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.ltr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Tab 이 링크를 돌며 하이라이트하고 Enter 로 간다"}
 {"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.jz9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/explorer.md·CHANGELOG"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.ho8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.ltr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.sne","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.uzr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.jz9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
