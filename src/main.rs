@@ -35,6 +35,7 @@ mod tui;
 mod tz;
 mod user_config;
 mod view;
+mod wiki;
 mod worktree;
 
 use clap::Parser;
