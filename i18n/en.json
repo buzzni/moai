@@ -1003,6 +1003,7 @@
   "wiki.skip_unreadable": "could not be opened — {said}",
   "wiki.notice_conflict": "Pages with conflict markers {n}  {which}",
   "wiki.notice_unresolved": "Links leading to no page {n}  {which}",
+  "wiki.notice_missed": "Links to a heading the page does not have {n}  {which}",
   "wiki.notice_missing": "Ids naming no issue {n}  {which}",
   "wiki.conflict_raw": "Conflict markers — shown as written. Resolve the merge in {path} and commit it",
   "wiki.linked_from": "Linked from  {which}"

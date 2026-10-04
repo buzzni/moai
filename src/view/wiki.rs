@@ -119,6 +119,17 @@ fn notice_lines(lang: Lang, n: &Notices, whole: bool) -> Vec<String> {
         say(lang, "wiki.notice_unresolved"),
         n.unresolved.iter().map(|(slug, to)| if whole { format!("{slug} → {to}") } else { to.to_string() }).collect(),
     );
+    // 링크 주소처럼 댄다 — 같은 페이지의 머리글이면 `#앵커` 하나, 다른 페이지면 `슬러그#앵커`(moai-tllo).
+    push(
+        say(lang, "wiki.notice_missed"),
+        n.missed
+            .iter()
+            .map(|(slug, to, anchor)| {
+                let aim = if slug == to { format!("#{anchor}") } else { format!("{to}#{anchor}") };
+                if whole { format!("{slug} → {aim}") } else { aim }
+            })
+            .collect(),
+    );
     push(
         say(lang, "wiki.notice_missing"),
         n.missing.iter().map(|(slug, id)| if whole { format!("{id} ({slug})") } else { id.to_string() }).collect(),

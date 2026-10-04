@@ -30,6 +30,12 @@ that changed nothing a person does writes nothing.
 - **Pages link with plain relative links** — `[the explorer](explorer.md)`. Not
   `[[wiki links]]`: GitHub does not draw them, and one link with two spellings is one
   vocabulary too many
+- **A link can land on a heading** — `[epic](glossary.md#epic)`, or `[above](#epic)`
+  on the same page. The part after `#` is the heading's anchor as GitHub makes it:
+  lowercase, punctuation dropped, each space a `-` (`## The --json contract` is
+  `#the---json-contract`), and a repeated heading `-1`, `-2`. The same link lands on
+  that heading on GitHub and in the explorer's wiki window. Link to the heading that
+  says it, not to the top of a long page
 - **An issue is named by its bare id**, as a whole word — not a link. moai finds it
   in prose and in inline code; an id inside a fenced or indented code block is read
   as an example and is not counted
@@ -39,7 +45,10 @@ that changed nothing a person does writes nothing.
 
 Every row under `pages` also says what to fix: `issues` (each `id`, and `exists`
 false for an id that names no issue), `links` (the links to other pages — each `text`,
-`to` as the slug it lands on, and `resolved` false when no such page stands) and
+`to` as the slug it lands on, and `resolved` false when no such page stands; a link
+with a `#` also carries `anchor`, the part after it, and `anchor_resolved` false when
+that page has no such heading — absent when the page could not be read, so nobody can
+tell — and a same-page `#anchor` stands with `to` naming its own page) and
 `conflict` (true while merge conflict markers stand in the page). `linked_from` turns
 `links` around: the slugs of the pages that link to this one, in list order, `[]` when
 none does. A page other than the home page that nothing links to is found only through

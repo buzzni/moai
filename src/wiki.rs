@@ -148,14 +148,15 @@ pub struct Link {
     /// 가리키는 페이지의 슬러그 — 링크를 적은 페이지의 폴더에서 푼다(`../x.md` → `x`). 같은 페이지의 `#앵커` 면
     /// 이 페이지다.
     pub to: String,
-    /// 주소의 `#` 뒤, 퍼센트 꼴을 푼 것 — 그 페이지의 머리글 앵커([`anchor`])와 견준다. `#` 가 없거나 그 뒤가 비면 없다.
-    #[serde(skip)]
+    /// 주소의 `#` 뒤, 퍼센트 꼴을 푼 것 — 그 페이지의 머리글 앵커([`anchor`])와 견준다. `#` 가 없거나 그 뒤가 비면
+    /// 없고, `--json` 에서도 키가 없다(2026-10-04 사용자 결정 — 없음이 답이다).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor: Option<String>,
-    /// 그 슬러그의 페이지가 있는가.
+    /// 그 슬러그의 페이지가 있는가. 앵커와 상관없다 — 머리글이 없어도 페이지가 있으면 참이다.
     pub resolved: bool,
     /// 그 페이지에 그 앵커의 머리글이 있는가 — [`Link::anchor`] 가 설 때만 선다. 페이지가 없으면 거짓이고, 페이지의
     /// 본문을 못 읽었으면 모르므로 없다([`Page::holds`]).
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor_resolved: Option<bool>,
 }
 
