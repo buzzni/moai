@@ -27,6 +27,9 @@ struct Place {
     /// PATH 에서 찾아지는 `moai` — 훅이 이름으로 적혔을 때 실제로 불리는 것.
     on_path: Option<PathBuf>,
     files: Vec<(PathBuf, String)>,
+    /// 심는 스킬의 글 — `files`(Claude 의 트리)와 [`skill::AGENTS_DIR`] 의 트리가 이 한 벌에서 나온다. 부르는 자리마다
+    /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
+    skills: Vec<skill::Skill>,
 }
 
 fn place(ctx: &Ctx) -> R<Place> {
@@ -46,8 +49,18 @@ fn place(ctx: &Ctx) -> R<Place> {
     let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
-    let files = plant(&prefix, &root, &exe);
-    Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
+    let skills = skill::skills();
+    let files = plant(&prefix, &root, &exe, &skills);
+    Ok(Place {
+        dir: root.join(skill::DIR),
+        market: skill::market(&prefix, &root),
+        root,
+        prefix,
+        exe,
+        on_path,
+        files,
+        skills,
+    })
 }
 
 /// 이 체크아웃에 이미 심긴 훅의 철자 — **같은 파일이면 그것을 잇는다**(사용자 결정 2026-10-03, 리뷰
@@ -90,8 +103,8 @@ fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
 }
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
-fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
-    skill::tree(prefix, root, exe, &skill::skills())
+fn plant(prefix: &str, root: &Path, exe: &str, skills: &[skill::Skill]) -> Vec<(PathBuf, String)> {
+    skill::tree(prefix, root, exe, skills)
 }
 
 /// 고른 에이전트를 심을 자리로 푼 것(moai-xs2h.ylx).
@@ -141,7 +154,8 @@ impl Chosen {
     }
 
     /// `auto` 가 무엇을 찾았는지 한 줄 — `auto` 를 안 줬으면 없다. 고른 까닭이 화면에 없으면, PATH 가 다른 기계에서
-    /// 같은 명령이 다른 것을 심는 것이 설명되지 않는다.
+    /// 같은 명령이 다른 것을 심는 것이 설명되지 않는다. `install` 과 `uninstall` 이 같은 줄을 내므로 "심는다" 를
+    /// 말하지 않는다 — 걷는 자리에서 "claude 로 심는다" 가 섰다.
     fn found_line(&self, lang: crate::i18n::Lang) -> Option<String> {
         self.found.as_ref().map(|found| match found.is_empty() {
             true => say(lang, "skill.auto_none").to_string(),
@@ -153,15 +167,39 @@ impl Chosen {
 /// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). [`skill::AGENTS_DIR`] 는 `write_atomic_inside` 로 쓴다 —
 /// 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를
 /// 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다. 그 자리는 이 판 전에 moai 가 한 번도 안 쓰던 곳이다.
+///
+/// **디렉터리를 짓기 전에도 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
+/// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
+/// `write_atomic_inside` 가 파일을 거절했다. 파일만 막고 디렉터리는 밖에 남기면 "체크아웃 안에서만 링크를 따른다"
+/// (moai-4oab) 가 반쪽이다.
 fn write_shared(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
     for (path, body) in files {
         let at = dir.join(path);
         if let Some(parent) = at.parent() {
+            if let Some(landed) = outside(parent, root) {
+                return Err(Fail::new(format!(
+                    "{} points at {}, outside {} — nothing is written there. A directory the repository holds is \
+                     followed only inside it: replace the link with a directory",
+                    parent.display(),
+                    crate::text::one_line(&landed.display().to_string()),
+                    root.display()
+                )));
+            }
             std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
         }
         crate::store::write_atomic_inside(&at, body.as_bytes(), root)?;
     }
     Ok(())
+}
+
+/// `dir` 이 링크를 다 푼 뒤 체크아웃 `root` 밖이나 그 `.git/` 안에 닿으면 그 자리 — 안이면 `None` 이다. 아직 없는
+/// 조각은 있는 조상까지 풀고 붙인다([`crate::path::real_prefix`]) — 짓기 전의 자리를 재는 것이라 끝이 없어도 된다.
+fn outside(dir: &Path, root: &Path) -> Option<PathBuf> {
+    let landed = crate::path::real_prefix(&crate::path::lexical(dir));
+    match landed.strip_prefix(crate::path::real(root)) {
+        Ok(rest) if !crate::held::into_git(rest) => None,
+        _ => Some(landed),
+    }
 }
 
 /// 스킬을 고른 에이전트들에 심는다(moai-xs2h.ylx). Codex·Antigravity 는 [`skill::AGENTS_DIR`] 에 파일을 쓰는 것으로
@@ -173,7 +211,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     let chosen = Chosen::of(agents);
     let place = place(ctx)?;
     let shared =
-        (!chosen.shared.is_empty()).then(|| (place.root.join(skill::AGENTS_DIR), skill::agents_tree(&skill::skills())));
+        (!chosen.shared.is_empty()).then(|| (place.root.join(skill::AGENTS_DIR), skill::agents_tree(&place.skills)));
     // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
     // 안 기댄다. 못 쓰면 `claude` 를 부르기 전에 멈춘다.
     if let (Some((dir, files)), false) = (&shared, dry_run) {
@@ -401,7 +439,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files } = place(ctx)?;
+    let Place { root, dir, market, prefix, exe, on_path, files, skills } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -421,14 +459,14 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let wants: Vec<String> = hooks
         .iter()
         .map(|h| match h.as_deref() {
-            Some(h) if h != exe => skill::version_in(&plant(&prefix, &root, h)).unwrap_or_default(),
+            Some(h) if h != exe => skill::version_in(&plant(&prefix, &root, h, &skills)).unwrap_or_default(),
             _ => want.clone(),
         })
         .collect();
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
-    let shared = Shared::read(&root);
+    let shared = Shared::read(&root, &skills);
     // Claude 는 위의 `claude` 줄이 이미 댄다 — 여기는 `.agents/skills` 를 읽는 둘이다.
     let others: Vec<(&str, bool)> =
         ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
@@ -574,12 +612,12 @@ impl Shared {
     /// 곳이라, 거기 선 FIFO 하나가 읽기를 멈춰 세우면 아무것도 안 막는다던 명령이 멈춘다. 못 읽은 파일은 낡은 것으로
     /// 센다 — 보통 파일이면 다시 심어 갈아끼우고, 보통 파일이 아닌 자리는 다시 심는 길이 그 자리를 대며 멈춘다
     /// ([`write_shared`]).
-    fn read(root: &Path) -> Shared {
+    fn read(root: &Path, skills: &[skill::Skill]) -> Shared {
         let dir = root.join(skill::AGENTS_DIR);
         let home = crate::held::Home::of(root);
         let mut stale = Vec::new();
         let mut planted = false;
-        for (path, body) in skill::agents_tree(&skill::skills()) {
+        for (path, body) in skill::agents_tree(skills) {
             let at = dir.join(&path);
             planted |= std::fs::symlink_metadata(&at).is_ok();
             if crate::held::read_inside(&at, &home).ok().as_deref() != Some(body.as_str()) {
@@ -624,9 +662,13 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
     let chosen = Chosen::of(agents);
     let place = place(ctx)?;
     let shared = place.root.join(skill::AGENTS_DIR);
-    // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다.
-    let left: Vec<PathBuf> =
-        skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect();
+    // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도
+    // 안 댄다**([`outside`]) — moai 는 거기 심지 않으므로(`write_shared`) 거기 선 것은 남의 것이고, 낸 `rm -r` 은 그
+    // 링크를 지나 밖의 디렉터리를 지운다.
+    let left: Vec<PathBuf> = match outside(&shared, &place.root) {
+        Some(_) => Vec::new(),
+        None => skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect(),
+    };
     let (mut json, claude) = match chosen.claude {
         true => claude_uninstall(ctx, place, dry_run)?,
         false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
@@ -1235,7 +1277,7 @@ mod tests {
     /// 서서, 모든 저장소에서 그 스킬이 조용히 안 뜬다.
     #[test]
     fn each_text_is_planted_at_its_own_path() {
-        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai")
+        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai", &skill::skills())
             .into_iter()
             .map(|(p, b)| (p.display().to_string(), b))
             .collect();

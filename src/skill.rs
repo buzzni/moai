@@ -1222,6 +1222,17 @@ mod tests {
             let description = field("description").unwrap_or_else(|| panic!("{name} 의 머리에 description 이 없다"));
             let n = description.chars().count();
             assert!((1..=1024).contains(&n), "{name} 의 description 이 {n}자다 — 1~1024자");
+            // **따옴표 없는 YAML 한 줄로 읽혀야 한다**(리뷰 moai-xs2h.dir) — 머리는 따옴표 없이 적혀, 글 안의 `: ` 는
+            // 둘째 키가 되고 ` #` 뒤는 주석으로 잘리며 표지 글자로 열면 다른 꼴로 읽힌다. Claude 는 너그럽게 읽어도 YAML 을
+            // 엄하게 읽는 에이전트는 그 스킬을 못 싣는다 — 글자 수와 이름만 재던 판은 이 금을 안 쟀다.
+            let indicator = |c: char| "-?:,[]{}#&*!|>'\"%@`".contains(c);
+            assert!(
+                !description.contains(": ")
+                    && !description.contains(" #")
+                    && !description.starts_with(indicator)
+                    && !description.ends_with(':'),
+                "{name} 의 description 이 따옴표 없는 YAML 한 줄로 안 읽힌다 — {description}"
+            );
         }
     }
 

@@ -18396,6 +18396,27 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     assert!(said.contains("moai 의 스킬이 남아 있다"), "고르지 않은 자리에 남은 것을 안 댄다\n{said}");
 }
 
+/// **`.agents` 가 체크아웃 밖을 가리키면 밖에 디렉터리도 안 짓는다**(리뷰 moai-xs2h.dir) — 파일은
+/// `write_atomic_inside` 가 막았지만 그 앞의 `create_dir_all` 이 링크를 지나 밖에 `skills/moai/references/` 를
+/// 지었다. 밖에 선 것은 moai 가 심은 것이 아니라 `uninstall` 도 `rm -r` 로 대지 않는다 — 대면 그 링크를 지나 밖을 지운다.
+#[cfg(unix)]
+#[test]
+fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
+    let s = init("skilloutside");
+    let c = Claude::new("skilloutside-home");
+    let away = Scratch::new("skilloutside-away");
+    std::os::unix::fs::symlink(away.path(), s.path().join(".agents")).unwrap();
+
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(!out.status.success(), "밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("outside"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert!(!away.path().join("skills").exists(), "체크아웃 밖에 디렉터리를 지었다");
+
+    std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
+    let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
+    assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
+}
+
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
 
 /// 리뷰 전문처럼 **긴 글**은 stdin 으로 들어간다.

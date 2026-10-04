@@ -146,8 +146,9 @@ writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
-what you are reviewing. The review is `/code-review` in Claude Code; the other agents'
-words are under "Words per agent" in the `moai` skill.
+what you are reviewing. The review is `/code-review` in Claude Code, `codex review` in Codex
+and a fresh `agy -p` session in Antigravity; the other steps that differ per agent are
+under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts

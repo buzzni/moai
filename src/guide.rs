@@ -936,7 +936,9 @@ fn rules() -> String {
     let [one, two, three, four, five] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <the issue>");
-    let review = REVIEW_VERB.words[0];
+    // **세 낱말을 다 싣는다**(리뷰 moai-xs2h.dir 9번) — 이 글은 AGENTS 블록에도 서고, 그 블록만 읽는 Codex 창에는
+    // 낱말표가 든 스킬이 안 심겼을 수 있다. 표를 가리키기만 하던 판은 그 창을 없는 표로 보냈다.
+    let [claude, codex, antigravity] = REVIEW_VERB.words;
     format!(
         r#"**1. {one}.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -953,8 +955,9 @@ writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
 **3. {three}.** Before you call a review, create a review issue tied to
-what you are reviewing. The review is {review} in Claude Code; the other agents'
-words are under "Words per agent" in the `moai` skill.
+what you are reviewing. The review is {claude} in Claude Code, {codex} in Codex
+and {antigravity} in Antigravity; the other steps that differ per agent are
+under "Words per agent" in the `moai` skill.
 
     {make}
 {steps}
@@ -4587,7 +4590,10 @@ sys.exit(1 if bad else 0)
         let three = rules();
         let three = &three[three.find("**3.").unwrap()..three.find("**4.").unwrap()];
         assert!(three.contains(&format!("\"{title}\"")), "규칙 3 이 낱말표를 안 가리킨다 — {three}");
-        assert!(three.contains(REVIEW_VERB.words[0]), "규칙 3 이 Claude 의 리뷰 낱말을 잃었다 — {three}");
+        // 세 에이전트의 리뷰 낱말을 다 싣는다 — AGENTS 블록만 읽는 창에는 표가 든 스킬이 없을 수 있다(리뷰 9번).
+        for (vendor, word) in VENDORS.iter().zip(REVIEW_VERB.words) {
+            assert!(three.contains(word), "규칙 3 에 {vendor} 의 리뷰 낱말이 없다 — {three}");
+        }
         assert!(VERBS.iter().any(|v| v.step == REVIEW_VERB.step), "규칙 3 이 대는 리뷰 걸음이 표에 없다");
     }
 }

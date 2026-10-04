@@ -658,7 +658,7 @@
   "skill.plan_retire": "retire: {cmd}",
   "skill.plan_lift": "bring up: {cmd}",
   "skill.auto_found": "auto: {agents} on PATH",
-  "skill.auto_none": "auto: none of claude, codex, agy is on PATH — planting for claude",
+  "skill.auto_none": "auto: none of claude, codex, agy is on PATH — taking claude",
   "skill.agents_plan": "To plant — {dir} (codex and antigravity read their skills there)",
   "skill.agents_planted": "Planted in {dir} — codex and antigravity read their skills there. Commit it and the team has them too",
   "skill.scope_is_claudes": "  --scope is where claude registers: codex and antigravity read {dir} in this repository, whatever the scope",
