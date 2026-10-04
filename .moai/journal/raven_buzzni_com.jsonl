@@ -4271,3 +4271,9 @@
 {"ts":"2026-10-04T19:27:04Z","id":"moai-u5wr.7xr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T19:27:04Z","id":"moai-j3n5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T19:27:04Z","id":"moai-e8lq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T19:27:53Z","id":"moai-b6cw.osp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T19:27:53Z","id":"moai-b6cw.suy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T19:27:53Z","id":"moai-b6cw.upn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T19:27:54Z","id":"moai-b6cw.udp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T19:28:03Z","id":"moai-u3t9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-snyk 의 b4c16655(docs(wiki): 일꾼 스킬과 편지로 일을 나누는 길, .worktrees 자리) 가 이미 고쳤다 — docs/glossary.md:129 가 agents.md#work-the-queue-from-a-session 을 가리키고, docs/·README 에 옛 앵커 run-agents-without-a-person 은 남지 않았다. 손댄 것 없이 닫는다"}
+{"ts":"2026-10-04T19:28:03Z","id":"moai-u3t9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
