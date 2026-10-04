@@ -123,8 +123,8 @@ between your `ready` and your `mv`. `--from <column>` moves it **only while the
 column you saw still holds** — it is re-read inside the lock, so a row that changed
 in between is not touched. Without it nothing is blocked, as before.
 
-In shell it is this — `col` is the column of that row as `ready` gave it, and `moved`
-says whether you got it.
+In shell, as one turn of a loop that takes the next row each time round, it is this —
+`col` is the column of that row as `ready` gave it, and `moved` says whether you got it.
 
 ```sh
 row=$(moai ready --json | jq -c '.ready[0]')
