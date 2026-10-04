@@ -4671,14 +4671,31 @@ impl Painter {
         term: &mut ratatui::Terminal<B>,
         app: &mut App,
     ) -> Result<(), B::Error> {
-        let last = self.last.take();
+        self.paint(term, |f| screen(f, app))
+    }
+
+    /// 그림을 받아 그린다 — [`draw`](Self::draw) 의 몸이다. 시험이 [`screen`] 없이 칸을 바로 놓으려고 가른다.
+    fn paint<B: ratatui::backend::Backend>(
+        &mut self,
+        term: &mut ratatui::Terminal<B>,
+        render: impl FnOnce(&mut Frame),
+    ) -> Result<(), B::Error> {
+        let mut last = self.last.take();
         let done = term.draw(|f| {
-            screen(f, app);
+            render(f);
             if let Some(last) = &last {
                 mend(last, f.buffer_mut());
             }
         })?;
-        self.last = Some(done.buffer.clone());
+        // 든 버퍼의 자리를 다시 쓴다 — 프레임마다 화면만 한 버퍼를 새로 잡고 버리지 않는다(derive 한 `clone_from` 은
+        // 통째로 새로 짓는다).
+        if let Some(keep) = &mut last {
+            keep.area = done.buffer.area;
+            keep.content.clone_from(&done.buffer.content);
+        } else {
+            last = Some(done.buffer.clone());
+        }
+        self.last = last;
         Ok(())
     }
 
@@ -10677,6 +10694,37 @@ pub(super) mod tests {
             let mut same = prev.clone();
             mend(&prev, &mut same);
             assert!(same.content.iter().all(|c| c.diff_option == CellDiffOption::None), "안 바뀐 그림에 적었다");
+        }
+
+        /// **왼쪽에서 걸친 넓은 글자도 머리를 덮는다** — 새 넓은 글자의 꼬리가 옛 넓은 글자의 머리에 앉으면 터미널은 옛
+        /// 꼬리를 새 글자의 바탕으로 지운다(Ghostty 의 `spacer_tail` 쓰기). ratatui 는 새 글자의 꼬리를 건너뛰고 그 옆
+        /// 칸을 견주는데, 거기는 두 프레임 다 빈칸이다.
+        #[test]
+        fn a_wide_glyph_straddling_onto_a_head_leaves_no_colour_behind() {
+            let plain = ratatui::style::Style::default();
+            let mut term = Terminal::new(Glass::new(6, 1)).unwrap();
+            let mut painter = Painter::default();
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "a가bc", plain)).unwrap();
+            assert_eq!(term.backend().row(0)[1].0, "가", "판이 안 섰다");
+
+            let yellow = ratatui::style::Style::new().bg(Color::LightYellow);
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "나", yellow)).unwrap();
+            let bgs: Vec<Color> = term.backend().row(0).iter().map(|(_, bg)| *bg).collect();
+            assert_eq!(bgs[2..], [Color::Reset; 4], "`나` 밖에 노란 칸이 남았다: {bgs:?}");
+        }
+
+        /// 크기가 바뀐 프레임은 견주지 않는다 — ratatui 가 앞 그림을 비웠고, 작은 옛 그림으로 큰 새 그림을 훑으면
+        /// 칸 밖을 읽어 탐색기가 패닉으로 끝난다.
+        #[test]
+        fn a_frame_of_another_size_is_not_mended_against_the_old_one() {
+            let plain = ratatui::style::Style::default();
+            let mut term = Terminal::new(Glass::new(4, 1)).unwrap();
+            let mut painter = Painter::default();
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "가나", plain)).unwrap();
+
+            *term.backend_mut() = Glass::new(6, 2);
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "가", plain)).unwrap();
+            assert_eq!(term.backend().row(0)[0].0, "가");
         }
     }
 }
