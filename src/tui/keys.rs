@@ -310,8 +310,8 @@ pub enum Browse {
     Jot,
     Pick,
     Unregister,
-    /// 화면을 고른다 — `SPC g l`·`b`·`s`(moai-z46r). **토글이 아니라 고르는 키다**: 지금 화면을 다시 골라도 그
-    /// 화면에 남는다. 통계만은 다시 고르면 새로 센다 — 열 때마다 새로 여는 창이다.
+    /// 화면을 고른다 — `SPC g l`·`b`·`s`·`w`(moai-z46r·moai-o3cb). **토글이 아니라 고르는 키다**: 지금 화면을 다시
+    /// 골라도 그 화면에 남는다. 통계와 위키는 다시 고르면 새로 읽는다 — 열 때마다 새로 여는 창이다.
     Go(Screen),
     ClearFilter,
     Worktree,
@@ -360,12 +360,14 @@ pub enum Browse {
 /// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
 ///
 /// **목록과 보드는 한 화면의 두 배치다**(moai-9nfw) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
-/// `[tui] layout` 에 남는다. **통계는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
+/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     List,
     Board,
     Stats,
+    /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
+    Wiki,
 }
 
 impl Screen {
@@ -375,6 +377,7 @@ impl Screen {
             Screen::List => say(lang, "tui.menu.list"),
             Screen::Board => say(lang, "tui.menu.board"),
             Screen::Stats => say(lang, "tui.menu.stats"),
+            Screen::Wiki => say(lang, "tui.menu.wiki"),
         }
     }
 
@@ -384,6 +387,7 @@ impl Screen {
             Screen::List => say(lang, "tui.state.list"),
             Screen::Board => say(lang, "tui.state.board"),
             Screen::Stats => say(lang, "tui.state.stats"),
+            Screen::Wiki => say(lang, "tui.state.wiki"),
         }
     }
 }
@@ -599,11 +603,13 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 여기에 `SPC g <글자>` 한 줄을 더해 든다. 옛 두 키는 별칭 없이 걷었다(1.0 전이라 지금 끊는다).
         //
         // **고르면 메뉴를 닫는다** — 상태를 대는 토글과 달리 한 번에 끝나는 일이다. 지금 화면은 뿌리 메뉴의 묶음 줄이
-        // 댄다(`g : +화면 [보드]`, `menu::entries`). **통계 창에서도 이 묶음만은 선다**(`Ctx::stats`) — 세 화면이
-        // 서로 오가는 자리라서다.
+        // 댄다(`g : +화면 [보드]`, `menu::entries`). **통계·위키 창에서도 이 묶음만은 선다**(`Ctx::stats`·`Ctx::wiki`)
+        // — 화면들이 서로 오가는 자리라서다.
         row!(Go(Screen::List), Some("SPC g l"), LEADER, Key::plain('g'), Key::plain('l')),
         row!(Go(Screen::Board), Some("SPC g b"), LEADER, Key::plain('g'), Key::plain('b')),
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
+        // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
+        row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -741,6 +747,9 @@ pub struct Ctx {
     /// 통계 창이 떠 있는가(moai-z46r). **메뉴에는 화면 고르기(`SPC g`)만 서고**, 메뉴를 닫는 이동키는 창을 굴린다 —
     /// 창이 목록과 상세를 통째로 덮어, 그 밖의 항목은 눌러도 보이는 것이 없다.
     pub stats: bool,
+    /// 위키 창이 떠 있는가(moai-o3cb). 통계 창과 같은 덮는 창이라 메뉴에는 화면 고르기만 서고, 하나가 더 선다 —
+    /// 원문·그린 글(`SPC v r`). 창의 본문이 마크다운이라 그 토글이 창 안에서 뜻이 있다.
+    pub wiki: bool,
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
@@ -763,12 +772,14 @@ pub struct Ctx {
 }
 
 impl Ctx {
-    /// 지금 화면 — 통계 창이 떠 있으면 통계, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미 그 답을 든다.
+    /// 지금 화면 — 덮는 창(통계·위키)이 떠 있으면 그 창, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미
+    /// 그 답을 든다. 두 창은 한 모드라 함께 서지 않는다(`Mode::Stats`·`Mode::Wiki`).
     pub fn screen(&self) -> Screen {
-        match (self.stats, self.board) {
-            (true, _) => Screen::Stats,
-            (false, true) => Screen::Board,
-            (false, false) => Screen::List,
+        match (self.stats, self.wiki, self.board) {
+            (true, _, _) => Screen::Stats,
+            (false, true, _) => Screen::Wiki,
+            (false, false, true) => Screen::Board,
+            (false, false, false) => Screen::List,
         }
     }
 }
@@ -800,8 +811,12 @@ impl Browse {
             // **통계 창 위에서는 화면 고르기만 선다**(moai-z46r, 사용자 결정) — 창이 목록과 상세를 통째로 덮어, 다른
             // 항목은 눌러도 보이는 것이 없다. 이동은 켜 둔다: 메뉴를 닫는 이동키(moai-y8v2)가 그 자리에서 창을 굴린다
             // (`App::stats_key`). 끄면 열린 메뉴에서 `j` 가 먹통이다.
-            Go(_) | Step(_) if c.stats => Ok(()),
-            _ if c.stats => Err(Off::Quiet),
+            //
+            // **위키 창도 같고, 원문·그린 글 하나가 더 선다**(moai-o3cb) — 창의 본문이 마크다운이다. 아래 상세 칸의
+            // 갈래(`!c.detail`)보다 먼저 선다: 상세를 숨긴 사람의 위키 창에서도 그 토글은 본문을 바꾼다.
+            Go(_) | Step(_) if c.stats || c.wiki => Ok(()),
+            Raw if c.wiki => Ok(()),
+            _ if c.stats || c.wiki => Err(Off::Quiet),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -1007,6 +1022,7 @@ impl Browse {
             Go(Screen::List) => say(c.lang, "tui.act.list"),
             Go(Screen::Board) => say(c.lang, "tui.act.board"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
+            Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
@@ -1177,6 +1193,125 @@ impl Stat {
             Stat::Bucket if weekly => say(lang, "tui.stats.to_day"),
             Stat::Bucket => say(lang, "tui.stats.to_week"),
             Stat::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
+/// 위키 창(moai-o3cb) — 굴리기·커서, 들어가기·되돌아가기, 찾기, 칸 옮기기, 닫기. **읽기만 하는 창이라 쓰는 키가
+/// 없다**(2026-10-04 사용자 결정).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wiki {
+    /// 포커스 칸에 — 목록이면 커서, 본문이면 굴리기. 탐색의 목록과 같은 키([`moves!`]).
+    Step(Move),
+    /// 목록에서는 본문 칸으로 간다(본문은 커서를 따라간다 — 2026-10-04 사용자 결정). 본문에서는 그 페이지의 링크와
+    /// 이슈 id 를 고르는 창을 연다.
+    Enter,
+    /// 링크로 건너오기 전의 페이지로 한 걸음 — `Bksp`·`h`·`←`. 건너온 자취가 없으면 아무 일도 없다.
+    Back,
+    /// 페이지의 제목과 본문을 찾는다. 본 화면의 `/` 와 같은 글자, 찾는 자리는 이 창의 페이지뿐이다.
+    Search,
+    /// 목록과 본문 사이 — `Ctrl-w w`. 칸이 둘이라 다음과 앞이 같다.
+    FocusNext,
+    /// 그쪽 칸으로 — `Ctrl-w h`(목록)·`Ctrl-w l`(본문). 목록이 늘 왼쪽이다.
+    Focus(Side),
+    /// 걸린 찾기를 풀고, 없으면 창을 닫는다(2026-10-04 사용자 결정) — 건너온 자취가 남았어도 닫는다.
+    Close,
+}
+
+/// **`q` 는 안 둔다** — 통계 창([`STATS`])과 같은 까닭이다. `l`·`→` 도 안 둔다: 목록에서는 본문 칸으로 가는 것이
+/// `Enter` 하나로 서고, 본문에서는 고를 것이 링크라 창이 뜬다 — 한 글자가 두 칸에서 뜻이 갈리면 손이 헷갈린다.
+pub const WIKI: &[Bind<Wiki>] = {
+    use KeyCode as C;
+    use Wiki::*;
+    const MOVES: [Bind<Wiki>; 14] = moves!(Wiki::Step, Key::bare);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Enter, Some("Enter"), Key::bare(C::Enter)),
+        row!(Back, Some("Bksp"), Key::bare(C::Backspace)),
+        row!(Back, None, Key::plain('h')),
+        row!(Back, None, Key::bare(C::Left)),
+        row!(Search, Some("/"), Key::plain('/')),
+        // 칸 옮기기는 탐색과 같은 vi 의 창 이동이다([`BROWSE`] 의 `Ctrl-w` 줄) — Ctrl 을 쥔 채 이어 누른 꼴도 받는다.
+        row!(FocusNext, Some("Ctrl-w w"), Key::chord('w'), Key::plain('w')),
+        row!(FocusNext, None, Key::chord('w'), Key::plain('W')),
+        row!(FocusNext, None, Key::chord('w'), Key::chord('w')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::plain('h')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(Close, Some("Esc"), Key::bare(C::Esc)),
+    ]
+};
+
+impl Wiki {
+    /// 바의 낱말. `on_page` 는 포커스가 본문 칸인가 — `Enter`·이동·칸 옮기기가 그것으로 갈린다. `searched` 는 찾기가
+    /// 걸려 있는가 — Esc 가 그것을 푼다.
+    pub fn what(self, on_page: bool, searched: bool, lang: Lang) -> &'static str {
+        match self {
+            Wiki::Step(_) if on_page => say(lang, "tui.act.scroll"),
+            Wiki::Step(_) => say(lang, "tui.act.move"),
+            Wiki::Enter if on_page => say(lang, "tui.wiki.links"),
+            Wiki::Enter => say(lang, "tui.wiki.read"),
+            Wiki::Back => say(lang, "tui.wiki.back"),
+            Wiki::Search => say(lang, "tui.act.grep"),
+            Wiki::FocusNext | Wiki::Focus(_) if on_page => say(lang, "tui.wiki.to_list"),
+            Wiki::FocusNext | Wiki::Focus(_) => say(lang, "tui.wiki.to_page"),
+            Wiki::Close if searched => say(lang, "tui.act.clear_filter"),
+            Wiki::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
+/// 위키 창의 링크 고르기(moai-o3cb) — 커서, 고르기, 닫기. 고르기 창([`PICK`])과 같은 걸음이되 고를 것이 링크뿐이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Link {
+    Step(Move),
+    Enter,
+    Close,
+}
+
+pub const LINKS: &[Bind<Link>] = {
+    use KeyCode as C;
+    const MOVES: [Bind<Link>; 14] = moves!(Link::Step, Key::bare);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Link::Enter, Some("Enter"), Key::bare(C::Enter)),
+        row!(Link::Close, Some("Esc"), Key::bare(C::Esc)),
+    ]
+};
+
+impl Link {
+    pub fn what(self, lang: Lang) -> &'static str {
+        match self {
+            Link::Step(_) => say(lang, "tui.act.move"),
+            Link::Enter => say(lang, "tui.wiki.go"),
+            Link::Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -1675,6 +1810,8 @@ mod tests {
         each("confirm", CONFIRM);
         each("menu", MENU);
         each("stats", STATS);
+        each("wiki", WIKI);
+        each("links", LINKS);
     }
 
     /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
@@ -1685,7 +1822,12 @@ mod tests {
     /// 창 안의 키는 적다: 굴리기, `b`(주↔날), Esc. **`q` 는 창을 안 닫는다** — 탐색에서 아무것도 안 하는 글자다(moai-en4u).
     #[test]
     fn screens_are_chosen_under_spc_g_and_the_stats_window_keeps_its_keys_few() {
-        for (keys, to) in [("SPC g l", Screen::List), ("SPC g b", Screen::Board), ("SPC g s", Screen::Stats)] {
+        for (keys, to) in [
+            ("SPC g l", Screen::List),
+            ("SPC g b", Screen::Board),
+            ("SPC g s", Screen::Stats),
+            ("SPC g w", Screen::Wiki),
+        ] {
             assert_eq!(lookup(BROWSE, &parse_seq(keys).unwrap()), Lookup::Run(Browse::Go(to)), "{keys}");
             assert_eq!(label(BROWSE, Browse::Go(to)), keys);
             assert_eq!(Browse::Go(to).enabled(&inside()), Ok(()), "{keys}");
@@ -1696,6 +1838,7 @@ mod tests {
                 "포커스가 {keys} 를 껐다"
             );
             assert_eq!(Browse::Go(to).enabled(&Ctx { stats: true, ..inside() }), Ok(()), "통계 창이 {keys} 를 껐다");
+            assert_eq!(Browse::Go(to).enabled(&Ctx { wiki: true, ..inside() }), Ok(()), "위키 창이 {keys} 를 껐다");
             assert!(!Browse::Go(to).stateful(), "{keys} 가 메뉴를 열어 둔다 — 고르는 키는 한 번에 끝난다");
         }
         for gone in ["SPC v b", "SPC p s"] {
@@ -1711,6 +1854,30 @@ mod tests {
         assert_eq!(lookup(STATS, &[press(KeyCode::Esc)]), Lookup::Run(Stat::Close));
         assert_eq!(lookup(STATS, &[press(KeyCode::Char('j'))]), Lookup::Run(Stat::Step(Move::LineDown)));
         assert_eq!(lookup(STATS, &[press(KeyCode::Char('q'))]), Lookup::Unknown, "q 가 창을 닫는다");
+    }
+
+    /// **위키 창 위에서는 화면 고르기·이동·원문만 켜진다**(moai-o3cb) — 원문·그린 글은 상세 칸을 숨겼어도 선다: 창의
+    /// 본문이 마크다운이라 그 토글이 창 안에서 뜻이 있다. 창 안의 키는 이동·Enter·Bksp·`/`·`Ctrl-w`·Esc 이고, **`q`·`l` 은
+    /// 없다** — 한 글자가 칸마다 뜻이 갈리지 않게.
+    #[test]
+    fn the_wiki_window_keeps_screens_moves_and_raw() {
+        let wiki = Ctx { wiki: true, detail: false, ..inside() };
+        assert_eq!(wiki.screen(), Screen::Wiki);
+        assert_eq!(Ctx { wiki: true, board: true, ..inside() }.screen(), Screen::Wiki, "보드가 위키 창을 가렸다");
+        assert_eq!(Browse::Raw.enabled(&wiki), Ok(()), "상세를 숨긴 위키 창에서 원문이 꺼졌다");
+        assert_eq!(Browse::Step(Move::LineDown).enabled(&wiki), Ok(()));
+        for off in [Browse::Quit, Browse::Grep, Browse::Jot, Browse::Detail, Browse::Read, Browse::Worktree] {
+            assert_eq!(off.enabled(&wiki), Err(Off::Quiet), "위키 창 위에서 {off:?} 가 섰다");
+        }
+        assert_eq!(lookup(WIKI, &[press(KeyCode::Enter)]), Lookup::Run(Wiki::Enter));
+        assert_eq!(lookup(WIKI, &[press(KeyCode::Backspace)]), Lookup::Run(Wiki::Back));
+        assert_eq!(lookup(WIKI, &[press(KeyCode::Char('h'))]), Lookup::Run(Wiki::Back));
+        assert_eq!(lookup(WIKI, &[press(KeyCode::Char('/'))]), Lookup::Run(Wiki::Search));
+        assert_eq!(lookup(WIKI, &[press(KeyCode::Esc)]), Lookup::Run(Wiki::Close));
+        assert_eq!(lookup(WIKI, &parse_seq("Ctrl-w w").unwrap()), Lookup::Run(Wiki::FocusNext));
+        for gone in ['q', 'l'] {
+            assert_eq!(lookup(WIKI, &[press(KeyCode::Char(gone))]), Lookup::Unknown, "위키 창에 {gone} 가 섰다");
+        }
     }
 
     /// **적힌 키 이름은 그 키다.** 이름을 키로 풀어 표에서 찾으면 그 줄의 동작이 나온다 — 바에
@@ -1733,6 +1900,8 @@ mod tests {
         each("confirm", CONFIRM);
         each("menu", MENU);
         each("stats", STATS);
+        each("wiki", WIKI);
+        each("links", LINKS);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
@@ -2062,6 +2231,8 @@ mod tests {
     const JOTTING: &str = "SPC n opens the jot form";
     /// 통계 창 문단(moai-1hka.bq9).
     const STATISTICS: &str = "SPC g s opens the statistics window";
+    /// 위키 창 문단(moai-o3cb).
+    const WIKIWIN: &str = "SPC g w opens the wiki window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -2091,6 +2262,8 @@ mod tests {
         ("MENU", SPC, "With the SPC menu open"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "field to type a path"),
+        // 위키 창(WIKI)과 Enter·Esc·이동키를 나눠 쓴다 — 여기 적힌 Enter 는 고르는 Enter, Esc 는 고르기 창을 닫는 Esc 다.
+        ("LINKS", WIKIWIN, "On the page, Enter opens"),
     ];
 
     /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.
@@ -2106,6 +2279,7 @@ mod tests {
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
         ("STATS", &[STATISTICS]),
+        ("WIKI", &[WIKIWIN]),
     ];
 
     /// `head` 로 시작하는 문단.
@@ -2142,7 +2316,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 9] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 11] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("MENU", named(MENU)),
@@ -2152,6 +2326,8 @@ mod tests {
             ("JOT", named(JOT)),
             ("CONFIRM", named(CONFIRM)),
             ("STATS", named(STATS)),
+            ("WIKI", named(WIKI)),
+            ("LINKS", named(LINKS)),
         ];
         // 고르기 창이 목록 문단에서 빌리는 이동 키 — 표와 같은 매크로에서 읽는다.
         // `const` 로 받는다 — 매크로의 `&[…]` 는 상수 자리에서만 `'static` 이다(표도 그렇게 받는다).
@@ -2222,6 +2398,8 @@ mod tests {
             bare(lookup(PATH, k)),
             bare(lookup(CONFIRM, k)),
             bare(lookup(STATS, k)),
+            bare(lookup(WIKI, k)),
+            bare(lookup(LINKS, k)),
         ];
         if tables.contains(&Lookup::Run(())) {
             Lookup::Run(())

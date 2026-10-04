@@ -44,6 +44,22 @@ does not tag — see `CONTRIBUTING.md`.
   and no warning stands for a stale page. The AGENTS block carries a short
   "The wiki" section — run `moai init` to bring it in.
 
+- **The explorer reads the wiki under `SPC g w`.** The window covers the list
+  and the detail the way the statistics window does: the pages `moai wiki ls`
+  lists stand on the left, home page first, and the right pane shows the page
+  under the cursor, drawn like an issue body. It reads the project you are in,
+  or on the overview (`0`) the project of the row under the cursor, and it only
+  reads — pages are files you edit and commit. `Enter` on a page lists its links
+  and the issue ids it names: a page link goes there and `Bksp` comes back, an id
+  closes the window onto that row (from the overview, inside that project), and
+  a link that leads nowhere, an address outside the wiki or an id the tracker
+  does not hold is marked and only says so. `/` searches the titles and bodies of
+  the pages and narrows the list; `Esc` clears that search first and then closes
+  the window. The `SPC` menu over it holds the screens and `SPC v r`, the wheel
+  moves the pane under the pointer and a click picks the pane and the page. The
+  window is read fresh every time it opens and nothing of it is kept; a wiki that
+  does not exist or holds no page opens nothing and says why.
+
 ### Changed
 
 - **The explorer's `SPC` menu takes the mouse.** A click on a menu item is
