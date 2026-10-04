@@ -18183,6 +18183,119 @@ fn skill_uninstall_without_claude_says_what_to_run() {
     assert!(text(&out).contains(&format!("claude plugin marketplace remove {market}")), "{}", text(&out));
 }
 
+// ── skill --agent — 세 에이전트에 심는다 (moai-xs2h) ─────────────────────
+//
+// Codex 와 Antigravity 는 등록이 없다 — `.agents/skills/` 에 쓰는 것으로 끝난다. 가짜 `codex`·`agy` 는 가짜
+// `claude` 곁(`bin`)에 서고, 시험이 진짜 것을 부르는 일은 없다(`Claude::command` 가 PATH 를 그 둘로만 둔다).
+
+impl Claude {
+    /// PATH 에 `name` 이라는 실행 파일 하나를 세운다 — `auto` 가 찾는 것은 있는가뿐이라 아무것도 안 한다.
+    fn tool(&self, name: &str) {
+        let source = self.home.path().join(format!("{name}.sh"));
+        std::fs::write(&source, "#!/bin/sh\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        place_exe(&source, &self.bin.join(name));
+    }
+}
+
+/// **`--agent codex` 는 `.agents/skills/` 에 쓰고 `claude` 를 안 부른다**(moai-xs2h.ylx). Claude 의 트리도 안 심는다 —
+/// 고르지 않은 에이전트의 디렉터리가 저장소에 서면 사람이 묻지 않은 것을 커밋하게 된다. 연습은 아무것도 안 쓴다.
+#[test]
+fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
+    let s = init("skillcodex");
+    let c = Claude::new("skillcodex-home");
+    let shared = s.path().join(".agents/skills");
+
+    let plan = text(&c.run(s.path(), &["skill", "install", "--agent", "codex", "--dry-run"], true));
+    assert!(plan.contains(&shared.display().to_string()) && plan.contains("moai/SKILL.md"), "{plan}");
+    assert!(!shared.exists(), "연습인데 썼다");
+
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    for skill in ["moai/SKILL.md", "moai/references/commands.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+        assert!(shared.join(skill).is_file(), "{skill} 를 안 심었다\n{}", text(&out));
+    }
+    assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
+    assert!(!s.path().join(".claude/moai-plugin").exists(), "고르지 않은 Claude 의 트리를 심었다");
+
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "install", "--agent", "codex", "--json"], true).stdout).unwrap();
+    one_json_value(&json);
+    assert_eq!(list_in(&json, "agents"), Some(vec!["codex".to_string()]), "{json}");
+    assert_eq!(field(&json, "agents_dir"), shared.display().to_string());
+    assert!(!json.contains("\"market\""), "고르지 않은 Claude 의 값을 낸다\n{json}");
+
+    // `--scope` 는 Claude 의 등록 범위다 — 안 고른 채로 주면 아무것도 안 바뀐다고 한 줄로 말한다. 막지는 않는다.
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--scope", "user"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("--scope 는 claude 가 등록하는 범위다"), "{}", text(&out));
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(!text(&out).contains("--scope"), "주지 않은 범위를 말한다\n{}", text(&out));
+}
+
+/// **두 트리는 같은 글을 받는다**(사용자 결정 2026-10-04) — 에이전트마다 다른 걸음은 글 안의 낱말표가 열로 가른다.
+/// 되풀이한 `--agent` 는 하나로 접히고, Codex 와 Antigravity 는 한 자리를 함께 쓴다.
+#[test]
+fn skill_install_plants_one_text_for_every_agent() {
+    let s = init("skillevery");
+    let c = Claude::new("skillevery-home");
+    let args =
+        ["skill", "install", "--agent", "codex", "--agent", "claude", "--agent", "antigravity", "--agent", "codex"];
+    let out = c.run(s.path(), &args, true);
+    assert!(out.status.success(), "{}", text(&out));
+    for skill in ["moai/SKILL.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+        let claude = std::fs::read_to_string(s.path().join(".claude/moai-plugin/skills").join(skill)).unwrap();
+        let shared = std::fs::read_to_string(s.path().join(".agents/skills").join(skill)).unwrap();
+        assert_eq!(claude, shared, "{skill} 가 두 트리에서 다르다");
+    }
+    assert!(c.calls().contains("plugin install"), "claude 를 골랐는데 등록을 안 했다\n{}", c.calls());
+    let mut json_args = args.to_vec();
+    json_args.extend(["--dry-run", "--json"]);
+    let json = String::from_utf8(c.run(s.path(), &json_args, true).stdout).unwrap();
+    assert_eq!(
+        list_in(&json, "agents"),
+        Some(vec!["claude".to_string(), "codex".to_string(), "antigravity".to_string()]),
+        "{json}"
+    );
+}
+
+/// **`--agent` 를 안 주면 지금처럼 `claude` 하나다**(사용자 결정 2026-10-04). `.agents/` 는 묻지 않고 서지 않는다.
+/// **`auto` 는 PATH 를 본다** — claude·codex·agy. 아무것도 없으면 `claude` 다.
+#[test]
+fn skill_install_picks_claude_alone_unless_asked_and_auto_reads_the_path() {
+    let s = init("skillauto");
+    let c = Claude::new("skillauto-home");
+    let plan = |args: &[&str], with_claude: bool| {
+        let mut all = vec!["skill", "install", "--dry-run", "--json"];
+        all.extend(args);
+        String::from_utf8(c.run(s.path(), &all, with_claude).stdout).unwrap()
+    };
+    let words = |v: &[&str]| v.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+
+    let json = plan(&[], true);
+    assert_eq!(list_in(&json, "agents"), Some(words(&["claude"])), "{json}");
+    assert!(json.contains("\"found\":null") && json.contains("\"agents_dir\":null"), "{json}");
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    assert!(!s.path().join(".agents").exists(), "고르지 않았는데 .agents 를 심었다");
+
+    let json = plan(&["--agent", "auto"], true);
+    assert_eq!(list_in(&json, "found"), Some(words(&["claude"])), "{json}");
+    assert_eq!(list_in(&json, "agents"), Some(words(&["claude"])), "{json}");
+    c.tool("codex");
+    c.tool("agy");
+    let json = plan(&["--agent", "auto"], true);
+    assert_eq!(list_in(&json, "found"), Some(words(&["claude", "codex", "antigravity"])), "{json}");
+    // 사람의 화면에는 무엇을 찾았는지 한 줄이 선다 — PATH 가 다른 기계에서 다른 것을 심는 까닭이다.
+    let said = text(&c.run(s.path(), &["skill", "install", "--agent", "auto", "--dry-run"], true));
+    assert!(said.contains("auto: PATH 에 claude, codex, antigravity"), "{said}");
+
+    // PATH 에 아무것도 없으면 `claude` 다 — 그래도 아무것도 못 찾았다고 말한다.
+    let json = plan(&["--agent", "auto"], false);
+    assert_eq!(list_in(&json, "found"), Some(Vec::new()), "{json}");
+    assert_eq!(list_in(&json, "agents"), Some(words(&["claude"])), "{json}");
+}
+
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
 
 /// 리뷰 전문처럼 **긴 글**은 stdin 으로 들어간다.

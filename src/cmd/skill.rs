@@ -11,6 +11,7 @@
 //! 절반을 해 놓고 아무 말 없이 실패하는 것이 제일 나쁘다.
 
 use super::{Ctx, Fail, R};
+use crate::cli::{Agent, Scope};
 use crate::i18n::{fill, say};
 use crate::skill;
 use std::path::{Path, PathBuf};
@@ -93,8 +94,141 @@ fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
     skill::tree(prefix, root, exe, &skill::skills())
 }
 
-pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files, .. } = place(ctx)?;
+/// 고른 에이전트를 심을 자리로 푼 것(moai-xs2h.ylx).
+struct Chosen {
+    /// Claude 의 플러그인을 심고 `claude` 에 등록하는가.
+    claude: bool,
+    /// [`skill::AGENTS_DIR`] 를 읽으려고 고른 에이전트 — 비면 그 자리를 안 심는다.
+    shared: Vec<&'static str>,
+    /// `auto` 가 PATH 에서 찾은 에이전트. `auto` 를 안 줬으면 `None` 이다.
+    found: Option<Vec<&'static str>>,
+}
+
+/// `auto` 가 PATH 에서 찾는 것 — 에이전트와 그 실행 파일(사용자 결정 2026-10-04). Antigravity 의 CLI 는 `agy` 다.
+/// 훅 한 줄과 `status` 가 이미 쓰는 [`which`] 로 묻는다 — 저장소의 표식(`.codex/` 등)은 새 저장소에 없어, 그것으로
+/// 고르면 Codex 를 쓰는 사람이 처음 부를 때 아무것도 못 받는다.
+const ON_PATH: [(Agent, &str); 3] = [(Agent::Claude, "claude"), (Agent::Codex, "codex"), (Agent::Antigravity, "agy")];
+
+impl Chosen {
+    /// **안 주면 `claude` 하나다**(사용자 결정 2026-10-04) — 지금 부르는 사람에게는 아무것도 안 바뀐다. `auto` 가
+    /// 아무것도 못 찾아도 `claude` 다. 되풀이한 값은 하나로 접힌다.
+    fn of(agents: &[Agent]) -> Chosen {
+        let found: Option<Vec<Agent>> = agents
+            .contains(&Agent::Auto)
+            .then(|| ON_PATH.iter().filter(|(_, bin)| which(bin).is_some()).map(|(a, _)| *a).collect());
+        let mut picked: Vec<Agent> = agents.iter().copied().filter(|a| *a != Agent::Auto).collect();
+        picked.extend(found.iter().flatten());
+        if picked.is_empty() {
+            picked.push(Agent::Claude);
+        }
+        let named = |all: &[Agent]| -> Vec<&'static str> {
+            [Agent::Claude, Agent::Codex, Agent::Antigravity]
+                .into_iter()
+                .filter(|a| all.contains(a))
+                .map(Agent::as_str)
+                .collect()
+        };
+        Chosen {
+            claude: picked.contains(&Agent::Claude),
+            shared: named(&picked).into_iter().filter(|a| *a != Agent::Claude.as_str()).collect(),
+            found: found.as_deref().map(named),
+        }
+    }
+
+    /// `--json` 의 `agents` — 고른 것 전부, 늘 같은 차례로.
+    fn names(&self) -> Vec<&'static str> {
+        self.claude.then_some(Agent::Claude.as_str()).into_iter().chain(self.shared.iter().copied()).collect()
+    }
+
+    /// `auto` 가 무엇을 찾았는지 한 줄 — `auto` 를 안 줬으면 없다. 고른 까닭이 화면에 없으면, PATH 가 다른 기계에서
+    /// 같은 명령이 다른 것을 심는 것이 설명되지 않는다.
+    fn found_line(&self, lang: crate::i18n::Lang) -> Option<String> {
+        self.found.as_ref().map(|found| match found.is_empty() {
+            true => say(lang, "skill.auto_none").to_string(),
+            false => fill(say(lang, "skill.auto_found"), &[("agents", &found.join(", "))]),
+        })
+    }
+}
+
+/// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). [`skill::AGENTS_DIR`] 는 `write_atomic_inside` 로 쓴다 —
+/// 임시 파일을 갈아끼우니 그 자리에 선 FIFO 앞에서 멈추지 않고, 링크는 체크아웃 안을 가리킬 때만 따라간다. 그
+/// 자리는 이 판 전에 moai 가 한 번도 안 쓰던 곳이다.
+fn write_shared(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+    for (path, body) in files {
+        let at = dir.join(path);
+        if let Some(parent) = at.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
+        }
+        crate::store::write_atomic_inside(&at, body.as_bytes(), root)?;
+    }
+    Ok(())
+}
+
+/// 스킬을 고른 에이전트들에 심는다(moai-xs2h.ylx). Codex·Antigravity 는 [`skill::AGENTS_DIR`] 에 파일을 쓰는 것으로
+/// 끝난다 — 등록이 없다. Claude 는 지금까지와 같다([`claude_install`]).
+///
+/// **`--scope` 는 Claude 의 등록 범위다.** Claude 를 안 고르고 준 범위는 아무것도 안 바꾸니 한 줄로 그렇게 말한다 —
+/// 안 말하면 `--scope user` 로 모든 저장소에 심었다고 믿는다. 막지는 않는다.
+pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+    let chosen = Chosen::of(agents);
+    let place = place(ctx)?;
+    let shared =
+        (!chosen.shared.is_empty()).then(|| (place.root.join(skill::AGENTS_DIR), skill::agents_tree(&skill::skills())));
+    // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
+    // 안 기댄다. 못 쓰면 `claude` 를 부르기 전에 멈춘다.
+    if let (Some((dir, files)), false) = (&shared, dry_run) {
+        write_shared(dir, files, &place.root)?;
+    }
+    let (mut json, claude) = match chosen.claude {
+        true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run)?,
+        false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
+    };
+
+    if ctx.json {
+        if let Some(o) = json.as_object_mut() {
+            o.insert("agents".into(), serde_json::json!(chosen.names()));
+            o.insert("found".into(), serde_json::json!(chosen.found));
+            o.insert("agents_dir".into(), serde_json::json!(shared.as_ref().map(|(d, _)| d.display().to_string())));
+            let listed: Vec<String> =
+                shared.iter().flat_map(|(_, f)| f.iter().map(|(p, _)| p.display().to_string())).collect();
+            o.insert("agents_files".into(), serde_json::json!(listed));
+        }
+        return super::json_line(&json);
+    }
+
+    let lang = ctx.lang();
+    let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
+    if let Some((dir, files)) = &shared {
+        let at = dir.display().to_string();
+        if dry_run {
+            out.push(fill(say(lang, "skill.agents_plan"), &[("dir", &at)]));
+            out.extend(plan_lines(lang, files));
+        } else {
+            out.push(fill(say(lang, "skill.agents_planted"), &[("dir", &at)]));
+        }
+        if scope.is_some() && !chosen.claude {
+            out.push(fill(say(lang, "skill.scope_is_claudes"), &[("dir", &at)]));
+        }
+        if chosen.claude {
+            out.push(String::new());
+        }
+    }
+    out.extend(claude);
+    Ok(out)
+}
+
+/// 연습이 심을 파일마다 내는 줄 — 두 트리가 같은 꼴로 선다.
+fn plan_lines<'a>(lang: crate::i18n::Lang, files: &'a [(PathBuf, String)]) -> impl Iterator<Item = String> + 'a {
+    files.iter().map(move |(path, body)| {
+        let n = body.lines().count().to_string();
+        format!("  {:<44} {}", path.display(), fill(say(lang, "skill.plan_lines"), &[("n", &n)]))
+    })
+}
+
+/// Claude 의 플러그인을 심고 등록한다. `--json` 이면 값만, 아니면 사람의 줄만 낸다 — 고른 에이전트를 함께 싣는
+/// 것은 [`install`] 이다.
+fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
+    let Place { root, dir, market, exe, files, .. } = place;
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -112,26 +246,26 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 
     if dry_run {
         if ctx.json {
-            return super::json_line(&serde_json::json!({
-                "dir": dir.display().to_string(),
-                "market": market,
-                "scope": scope,
-                "exe": exe,
-                "dry_run": true,
-                "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-                "lifted": retiring.lifted_json(),
-                "retired": retiring.json(),
-                "undeclared": retiring.undeclared_json(),
-                "kept": retiring.kept,
-            }));
+            return Ok((
+                serde_json::json!({
+                    "dir": dir.display().to_string(),
+                    "market": market,
+                    "scope": scope,
+                    "exe": exe,
+                    "dry_run": true,
+                    "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+                    "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                    "lifted": retiring.lifted_json(),
+                    "retired": retiring.json(),
+                    "undeclared": retiring.undeclared_json(),
+                    "kept": retiring.kept,
+                }),
+                Vec::new(),
+            ));
         }
         let lang = ctx.lang();
         let mut out = vec![fill(say(lang, "skill.plan_head"), &[("dir", &dir.display().to_string())])];
-        for (path, body) in &files {
-            let n = body.lines().count().to_string();
-            out.push(format!("  {:<44} {}", path.display(), fill(say(lang, "skill.plan_lines"), &[("n", &n)])));
-        }
+        out.extend(plan_lines(lang, &files));
         out.push(String::new());
         out.push(match &clash {
             Some(other) => fill(
@@ -151,7 +285,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         }
         out.extend(retiring.undeclare.iter().map(|u| fill(say(lang, "skill.plan_retire"), &[("cmd", &u.what(lang))])));
         out.extend(retiring.kept_lines(lang));
-        return Ok(out);
+        return Ok((serde_json::Value::Null, out));
     }
 
     // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다.
@@ -192,22 +326,25 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        return super::json_line(&serde_json::json!({
-            "dry_run": false,
-            "dir": dir.display().to_string(),
-            "market": market,
-            "scope": scope,
-            "exe": exe,
-            "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-            "registered": registered,
-            // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
-            // `registered: false` 만 보고 무엇을 해야 할지 모른다.
-            "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "lifted": retiring.lifted_json(),
-            "retired": retiring.json(),
-            "undeclared": retiring.undeclared_json(),
-            "kept": retiring.kept,
-        }));
+        return Ok((
+            serde_json::json!({
+                "dry_run": false,
+                "dir": dir.display().to_string(),
+                "market": market,
+                "scope": scope,
+                "exe": exe,
+                "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+                "registered": registered,
+                // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
+                // `registered: false` 만 보고 무엇을 해야 할지 모른다.
+                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "lifted": retiring.lifted_json(),
+                "retired": retiring.json(),
+                "undeclared": retiring.undeclared_json(),
+                "kept": retiring.kept,
+            }),
+            Vec::new(),
+        ));
     }
 
     let mut out = vec![fill(say(lang, "skill.planted"), &[("dir", &dir.display().to_string())])];
@@ -256,7 +393,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         ));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
-    Ok(out)
+    Ok((serde_json::Value::Null, out))
 }
 
 /// 무엇이 어디 심겼는지 보인다. **읽기만 하고, 무엇이 어긋나도 0 이다.**

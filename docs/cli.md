@@ -2658,6 +2658,7 @@ Usage: moai skill install [OPTIONS]
 
 Options:
       --scope <scope>        Where to register: local (default), project, user
+      --agent <agent>        Agent: claude (default), codex, antigravity, auto
       --dry-run              Change nothing; only say what would be done
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)

@@ -1828,15 +1828,16 @@ pub enum SkillCmd {
     Install {
         // 값과 기본값은 `--color` 처럼 글로 적는다 — clap 이 붙이는 괄호가 `-h` 에서
         // 98칸이 됐다(moai-x18p).
+        //
+        // **기본값을 clap 에 안 맡긴다**(moai-xs2h.ylx) — 준 값인지 알아야 `--agent codex --scope user` 에 "범위는
+        // Claude 의 것" 한 줄을 낸다. 기본값 `local` 은 부르는 쪽이 채운다.
         /// Where to register: local (default), project, user
-        #[arg(
-            long,
-            value_name = "scope",
-            default_value = "local",
-            hide_default_value = true,
-            hide_possible_values = true
-        )]
-        scope: Scope,
+        #[arg(long, value_name = "scope", hide_possible_values = true)]
+        scope: Option<Scope>,
+
+        /// Agent: claude (default), codex, antigravity, auto
+        #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]
+        agents: Vec<Agent>,
 
         /// Change nothing; only say what would be done
         #[arg(long)]
@@ -1887,6 +1888,33 @@ pub enum SkillCmd {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+/// 스킬을 심을 에이전트(moai-xs2h, 2026-10-04 사용자 결정). **안 주면 `claude` 하나다** — 지금 부르는 사람에게는
+/// 아무것도 안 바뀌고, 저장소에 새 디렉터리가 묻지 않고 서지 않는다.
+///
+/// Codex 와 Antigravity 는 **같은 자리**(`.agents/skills/`)를 읽어, 둘 중 하나를 고르면 둘 다 받는다.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Agent {
+    /// Claude Code: the plugin in `.claude/moai-plugin/`, registered with `claude` (default)
+    Claude,
+    /// Codex: the skills in `.agents/skills/`, which it reads by itself
+    Codex,
+    /// Antigravity: the same `.agents/skills/` Codex reads
+    Antigravity,
+    /// Whichever of claude, codex and agy is on PATH - claude when none is
+    Auto,
+}
+
+impl Agent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
+            Agent::Antigravity => "antigravity",
+            Agent::Auto => "auto",
+        }
+    }
 }
 
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.

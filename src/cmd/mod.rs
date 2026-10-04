@@ -467,7 +467,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
         Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(ctx, scope.as_str(), dry_run),
+        Cmd::Skill(SkillCmd::Install { scope, agents, dry_run }) => skill::install(ctx, scope, &agents, dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
         Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(ctx, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
