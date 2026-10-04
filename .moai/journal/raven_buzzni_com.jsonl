@@ -3681,3 +3681,13 @@
 {"ts":"2026-10-04T05:03:21Z","id":"moai-m6ni.k7y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"메뉴가 열린 채 밖을 누르면 메뉴를 닫고 그 클릭을 그대로 한다"}
 {"ts":"2026-10-04T05:03:21Z","id":"moai-m6ni.puw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"메뉴 안의 항목을 누르면 그 기능을 한다"}
 {"ts":"2026-10-04T05:03:21Z","id":"moai-m6ni.o5x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tui --help·README·CHANGELOG 에 싣는다"}
+{"ts":"2026-10-04T05:07:45Z","id":"moai-ihu4.8jt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 위키 저장과 moai wiki ls·show 에픽 전체"}
+{"ts":"2026-10-04T05:07:58Z","id":"moai-ihu4.bez","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:07:59Z","id":"moai-ihu4.ero","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:07:59Z","id":"moai-ihu4.yjf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:08:00Z","id":"moai-ihu4.083","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:08:00Z","id":"moai-ihu4.zdk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:08:00Z","id":"moai-ihu4.8jt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T05:08:35Z","id":"moai-ihu4.8jt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix 가 백그라운드에서 돈다(@code-review). 돌아오면 원문을 이 이슈에 노트하고, 고침을 시험한 뒤 CHANGELOG(초안 scratchpad/changelog-entry.md)를 담고 머지한다"}
+{"ts":"2026-10-04T05:12:25Z","id":"moai-m9w9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wiki 스킬이 대는 --json 키를 실제 moai wiki ls --json 과 견준다"}
+{"ts":"2026-10-04T05:12:27Z","id":"moai-1msg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-wiki 발동어가 doc 주석 요청까지 잡는다"}
