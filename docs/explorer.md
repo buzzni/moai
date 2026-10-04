@@ -142,10 +142,13 @@ of them all, a header row per project. `Enter` on a header goes into that projec
 ## The version line
 
 The header says whether a newer release is out — a new release, the latest, ahead
-of the latest (a build from source), or not asked. It asks GitHub at most once a
-day and only when a person is watching; `MOAI_NO_UPDATE_CHECK=1`, or
-`check = false` under `[update]` in your user config, stops it asking. When a new
-release is out, quitting prints the line that upgrades the moai you are running.
+of the latest (a build from source), or not asked. It asks GitHub once a day,
+and once more straight away when the answer it holds is older than the moai you
+are running — as after an upgrade. An answer that says your moai is ahead of the
+latest release is checked again after an hour. It asks only when a person is
+watching; `MOAI_NO_UPDATE_CHECK=1`, or `check = false` under `[update]` in your
+user config, stops it asking. When a new release is out, quitting prints the
+line that upgrades the moai you are running.
 
 ## When it goes wrong
 
@@ -162,4 +165,4 @@ release is out, quitting prints the line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9
