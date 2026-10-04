@@ -13894,10 +13894,22 @@ fn hook_at_home(
     event: &str,
     input: &str,
 ) -> Output {
+    hook_argv(s, run_in, home, env, &["hook", event], input)
+}
+
+/// [`hook_at_home`] 의 몸통 — 인자를 통째로 받는다(`--dialect`, moai-u5wr).
+fn hook_argv(
+    s: &Scratch,
+    run_in: &Path,
+    home: Option<&Path>,
+    env: &[(&str, &str)],
+    args: &[&str],
+    input: &str,
+) -> Output {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut cmd = staged(&["hook", event]);
+    let mut cmd = staged(args);
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
@@ -18434,6 +18446,61 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
     assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
+}
+
+/// **훅 파일은 고른 에이전트의 것만, moai 가 통째로 쓴 것만 쓴다**(moai-u5wr.kov) — `--agent codex` 는
+/// `.codex/hooks.json` 을, `--agent antigravity` 는 `.agents/hooks.json` 을 심는다. 스킬과 달리 한 자리를 나눠 쓰지 않아
+/// 안 고른 에이전트의 훅은 안 선다. 사람이 제 훅을 적어 둔 파일은 안 건드리고 한 줄로 댄다 — 갈아엎으면 그 사람의
+/// 훅이 말없이 사라진다. Codex 에는 `/hooks` 에서 믿어 달라는 한 줄이 선다. `status` 는 둘의 상태를, `uninstall` 은
+/// moai 의 것만 지울 줄로 댄다.
+#[test]
+fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
+    let s = init("skillhooks");
+    let c = Claude::new("skillhooks-home");
+    let codex = s.path().join(".codex/hooks.json");
+    let agy = s.path().join(".agents/hooks.json");
+
+    let plan = text(&c.run(s.path(), &["skill", "install", "--agent", "codex", "--dry-run"], true));
+    assert!(plan.contains(".codex/hooks.json"), "{plan}");
+    assert!(!codex.exists(), "연습인데 썼다");
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("/hooks"), "Codex 에 믿어 달라는 줄이 없다\n{}", text(&out));
+    let body = std::fs::read_to_string(&codex).unwrap();
+    for word in ["Planted by moai", "--dialect codex", "Bash|apply_patch", "\"Interrupt\"", "\"SessionEnd\""] {
+        assert!(body.contains(word), "{word} 가 없다\n{body}");
+    }
+    assert!(!agy.exists(), "고르지 않은 Antigravity 의 훅을 심었다");
+
+    // moai 가 쓴 파일은 낡았으면 다시 쓴다.
+    std::fs::write(&codex, body.replace("\"timeout\": 15", "\"timeout\": 99")).unwrap();
+    assert!(c.run(s.path(), &["skill", "install", "--agent", "codex"], true).status.success());
+    assert_eq!(std::fs::read_to_string(&codex).unwrap(), body, "낡은 moai 의 훅을 다시 안 썼다");
+
+    // 남의 훅이 든 파일은 그대로 둔다.
+    std::fs::create_dir_all(agy.parent().unwrap()).unwrap();
+    let theirs = "{\"mine\":{\"enabled\":true,\"Stop\":[]}}\n";
+    std::fs::write(&agy, theirs).unwrap();
+    let out = c.run(s.path(), &["skill", "install", "--agent", "antigravity"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains("moai 가 안 쓴 훅"), "남의 파일을 안 댄다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&agy).unwrap(), theirs, "남의 훅을 갈아엎었다");
+
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    one_json_value(&json);
+    let state = |path: &Path, agent: &str, state: &str| {
+        format!("{{\"agent\":\"{agent}\",\"path\":\"{}\",\"state\":\"{state}\"}}", path.display())
+    };
+    assert!(json.contains(&state(&codex, "codex", "current")), "{json}");
+    assert!(json.contains(&state(&agy, "antigravity", "foreign")), "{json}");
+    let said = text(&c.run(s.path(), &["skill", "status"], true));
+    assert!(said.contains("codex hooks") && said.contains("agy hooks"), "{said}");
+
+    let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--agent", "antigravity"], true);
+    let said = text(&out);
+    assert!(said.contains(&format!("rm {}", codex.display())), "moai 의 훅을 안 댄다\n{said}");
+    assert!(!said.contains(&format!("rm {}", agy.display())), "남의 훅을 지우라고 한다\n{said}");
+    assert!(codex.is_file() && agy.is_file(), "파일을 지웠다");
 }
 
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
@@ -23558,7 +23625,13 @@ fn waking_is_a_bonus_that_never_runs_an_agent() {
         wake("cl"),
         "\"wake\":{\"to\":\"cl\",\"via\":\"send_message\",\"done\":false,\"why\":\"ask_sender\"}}\n"
     );
-    assert_eq!(wake("busy1"), "\"wake\":{\"to\":\"busy1\",\"via\":\"none\",\"done\":false,\"why\":\"busy\"}}\n");
+    // 일하는 중이면 언제부터인지를 함께 댄다(moai-u5wr.f29) — 끊긴 턴은 끝이 안 와 "턴이 끝나면" 이 거짓일 수 있다.
+    assert_eq!(
+        wake("busy1"),
+        format!(
+            "\"wake\":{{\"to\":\"busy1\",\"via\":\"none\",\"done\":false,\"why\":\"busy\",\"since\":\"{NOW}\"}}}}\n"
+        )
+    );
     assert_eq!(wake("odd"), "\"wake\":{\"to\":\"odd\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
     assert_eq!(wake("ghost"), "\"wake\":{\"to\":\"ghost\",\"via\":\"none\",\"done\":false,\"why\":\"nobody\"}}\n");
     assert_eq!(wake("cx"), "\"wake\":{\"to\":\"cx\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
@@ -24008,4 +24081,193 @@ fn the_stop_does_not_hold_on_a_letter_to_itself() {
     ok(s.path(), &["send", me, "나에게 쓴 쪽지", "--as", me]);
     assert!(hook_out(&s, "stop", &ev).trim().is_empty(), "제 편지로 턴을 붙들었다");
     assert!(loaded(&hook_out(&s, "user-prompt-submit", &ev)).contains("나에게 쓴 쪽지"), "제 편지를 안 실었다");
+}
+
+// ── 훅의 말씨 — Codex·Antigravity(moai-u5wr) ──────────────────────────
+
+/// 기록한 훅 입력이 선 저장소 자리 — 시험은 이것을 제 저장소로 바꿔 넣는다(`tests/hooks/README.md`).
+const RECORDED_AT: &str = "/home/coder/workspace/moa-issue";
+
+/// 기록한 훅 입력(`tests/hooks/<말씨>/<이름>.json`)을 이 시험의 저장소 자리로 옮겨 낸다. 다른 글은 기록 그대로다.
+fn recorded(s: &Scratch, rel: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks").join(rel);
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let here = s.path().display().to_string();
+    assert!(!here.contains(['"', '\\']), "시험 경로에 따옴표가 있다 — {here}");
+    assert!(raw.contains(RECORDED_AT), "{rel} 에 기록한 자리가 없다 — 바꿔 넣을 것이 없으면 시험이 헛돈다");
+    raw.replace(RECORDED_AT, &here)
+}
+
+/// 그 말씨로 훅을 부른 stdout.
+fn dialect_out(s: &Scratch, dialect: &str, event: &str, input: &str) -> String {
+    let out = hook_argv(s, s.path(), None, &[], &["hook", event, "--dialect", dialect], input);
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// **Codex 의 부름은 Claude 의 것처럼 판정하고 같은 꼴로 답한다**(2026-10-04 실측 — `permissionDecision: deny` 가
+/// 막았다). 기록한 셸 부름이 지나가고, 같은 꼴로 저장소의 파일을 고치면 규칙 2 가 막는다.
+#[test]
+fn a_codex_call_is_judged_like_claudes() {
+    let s = init("codex-call");
+    let probe = recorded(&s, "codex/pre-tool-use-bash.json");
+    assert!(dialect_out(&s, "codex", "pre-tool-use", &probe).trim().is_empty(), "기록한 echo 를 막았다");
+    let write = probe.replace("echo moai-hook-probe", "sed -i s/a/b/ src/store.rs");
+    assert_ne!(write, probe, "시험이 명령을 못 바꿨다");
+    let why = refusal(&dialect_out(&s, "codex", "pre-tool-use", &write));
+    assert!(why.starts_with("Rule 2"), "Codex 의 쓰기를 안 막았다 — {why}");
+}
+
+/// **Codex 의 패치는 고치는 파일마다 판정한다**(moai-u5wr.fja) — 한 파일이라도 막히면 패치를 막고, 까닭은 막힌 그
+/// 파일을 댄다. 머리 줄을 하나도 못 읽는 패치와 저장소 밖만 고치는 패치는 지나간다. 집은 것이 있으면 다 지나간다.
+#[test]
+fn a_codex_patch_is_judged_file_by_file() {
+    let s = init("codex-patch");
+    let patch = recorded(&s, "codex/pre-tool-use-apply-patch.json");
+    let why = refusal(&dialect_out(&s, "codex", "pre-tool-use", &patch));
+    assert!(why.starts_with("Rule 2") && why.contains("notes/new.md"), "첫 파일로 안 막았다 — {why}");
+    // 첫 파일이 밖이어도 둘째 파일이 막는다 — 첫 파일만 보던 판이면 지나간다.
+    let second = patch.replace("notes/new.md", "/tmp/moai-u5wr-outside-a.md");
+    let why = refusal(&dialect_out(&s, "codex", "pre-tool-use", &second));
+    assert!(why.contains("src/store.rs"), "둘째 파일을 안 봤다 — {why}");
+    let outside = second
+        .replace("src/store.rs", "/tmp/moai-u5wr-outside-b.rs")
+        .replace("old.txt", "/tmp/moai-u5wr-outside-c.txt");
+    assert!(dialect_out(&s, "codex", "pre-tool-use", &outside).trim().is_empty(), "저장소 밖의 패치를 막았다");
+    let headless =
+        patch.replace("*** Add File: ", "").replace("*** Update File: ", "").replace("*** Delete File: ", "");
+    assert!(dialect_out(&s, "codex", "pre-tool-use", &headless).trim().is_empty(), "읽지 못한 패치를 막았다");
+    let id = add(s.path(), &["패치를 받는다"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    assert!(dialect_out(&s, "codex", "pre-tool-use", &patch).trim().is_empty(), "집고도 막았다");
+}
+
+/// **Antigravity 의 부름은 그 꼴로 답한다**(2026-10-04 agy 1.2.16 실측) — 막는 것은 맨 윗단 `decision: deny` 와
+/// `reason` 이고, 지나가는 것은 빈 출력이다. `allow` 는 안 낸다 — 사람이 물어야 할 부름까지 허락한다. 셸은
+/// `run_command`, 파일 쓰기는 `TargetFile` 이고, 읽기(`view_file`)는 규칙이 뜻을 안 둔다.
+#[test]
+fn antigravity_calls_are_answered_in_its_shape() {
+    let s = init("agy-call");
+    let run = recorded(&s, "antigravity/pre-tool-use-run-command.json");
+    assert!(dialect_out(&s, "antigravity", "pre-tool-use", &run).trim().is_empty(), "기록한 echo 를 막았다");
+    let refused = |input: &str| {
+        let out = dialect_out(&s, "antigravity", "pre-tool-use", input);
+        one_json_value(&out);
+        assert!(out.starts_with("{\"decision\":\"deny\",\"reason\":\"Rule 2"), "그 꼴로 안 막았다 — {out}");
+        assert!(!out.contains("allow") && !out.contains("hookSpecificOutput"), "{out}");
+    };
+    refused(&run.replace("echo moai-hook-probe", "sed -i s/a/b/ src/store.rs"));
+    let inside = format!("{}/src/store.rs", s.path().display());
+    for rel in ["antigravity/pre-tool-use-write-to-file.json", "antigravity/pre-tool-use-replace-file-content.json"] {
+        let tool = recorded(&s, rel);
+        assert!(
+            dialect_out(&s, "antigravity", "pre-tool-use", &tool).trim().is_empty(),
+            "{rel}: 저장소 밖의 쓰기를 막았다"
+        );
+        refused(&tool.replace("/tmp/moai-probe-agy.txt", &inside));
+    }
+    let view = recorded(&s, "antigravity/pre-tool-use-view-file.json");
+    assert!(dialect_out(&s, "antigravity", "pre-tool-use", &view).trim().is_empty(), "읽기를 막았다");
+}
+
+/// **Antigravity 는 턴의 첫 모델 부름이 `UserPromptSubmit` 이다** — `PreInvocation` 은 부를 때마다 오고 첫 부름이
+/// `invocationNum: 0` 이다. 보드는 그 자리에서 한 번, `injectSteps` 의 `ephemeralMessage` 로 싣는다(실측: 모델이
+/// 같은 턴에서 읽었다). `SessionStart` 가 없어 기준선도 거기서 적는다.
+#[test]
+fn antigravity_loads_the_board_at_the_head_of_a_turn() {
+    let s = init("agy-board");
+    ok(s.path(), &["add", "락을 잡는다"]);
+    let later = recorded(&s, "antigravity/pre-invocation-later.json");
+    assert!(dialect_out(&s, "antigravity", "user-prompt-submit", &later).trim().is_empty(), "턴 가운데 부름에 실었다");
+    let first = recorded(&s, "antigravity/pre-invocation-first.json");
+    let out = dialect_out(&s, "antigravity", "user-prompt-submit", &first);
+    one_json_value(&out);
+    assert!(out.starts_with("{\"injectSteps\":[{\"ephemeralMessage\":\"") && out.contains("락을 잡는다"), "{out}");
+    assert!(dialect_out(&s, "antigravity", "user-prompt-submit", &first).trim().is_empty(), "보드를 두 번 실었다");
+    assert!(baseline(&s, "96037d0e-4dd0-4715-acaf-8e9ee734bd75").is_some(), "기준선을 안 적었다");
+}
+
+/// **Antigravity 의 `Stop` 은 `decision: continue` 로 붙든다**(실측: 까닭이 시스템 메시지로 서고 다음 `Stop` 은
+/// `executionNum: 1` 이었다). 붙든 뒤의 `Stop` 은 보낸다 — 안 그러면 끝없이 돈다.
+#[test]
+fn antigravity_holds_the_turn_with_continue() {
+    let s = init("agy-stop");
+    let id = add(s.path(), &["락을 잡는다"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let out = dialect_out(&s, "antigravity", "stop", &recorded(&s, "antigravity/stop.json"));
+    one_json_value(&out);
+    assert!(out.starts_with("{\"decision\":\"continue\",\"reason\":\""), "그 꼴로 안 붙들었다 — {out}");
+    assert!(out.contains(&format!("moai mv {id} done")), "닫기 물음이 아니다 — {out}");
+    let held = recorded(&s, "antigravity/stop-held.json");
+    assert!(dialect_out(&s, "antigravity", "stop", &held).trim().is_empty(), "붙든 뒤에 또 붙들었다");
+}
+
+/// **`Stop` 없이 끝난 턴도 출석을 `idle` 로 돌린다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — Claude 의 API 오류
+/// (`StopFailure`)와 세션 닫기(`SessionEnd`), Codex 의 Esc(`Interrupt`)다. 장을 새로 짓지는 않는다. Claude 의 장은 닫혀도
+/// 남고(`/clear` 뒤 같은 프로세스가 잇는다), 일하는 중인 장을 깨우면 언제부터인지를 댄다 — 턴의 끝을 약속하지 않는다.
+#[test]
+fn a_turn_that_ends_without_a_stop_marks_the_session_idle() {
+    let s = init("hook-turn-broken");
+    let ev = event(&s, "sess0008-iiii");
+    let status = || presence_of(&s, "sess0008-iiii");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    for end in ["stop-failure", "session-end"] {
+        hook(&s, "user-prompt-submit", &ev);
+        assert!(status().contains("\"status\":\"busy\""), "프롬프트가 일하는 중을 안 적었다");
+        assert!(hook_out(&s, end, &ev).trim().is_empty(), "{end} 가 무언가 냈다");
+        assert!(status().contains("\"status\":\"idle\""), "{end} 뒤에도 일하는 중이다 — {}", status());
+    }
+    hook(&s, "session-end", &event(&s, "sess0009-jjjj"));
+    assert_eq!(names_in(&s.path().join(".moai/agents")), ["claude-sess0008.json"], "끝나는 세션의 장을 지었다");
+
+    hook(&s, "user-prompt-submit", &ev);
+    let sent = ok(s.path(), &["send", "claude-sess0008", "일감", "--wake", "--as", "boss", "--json"]);
+    assert!(sent.contains(&format!("\"why\":\"busy\",\"since\":\"{NOW}\"")), "언제부터인지를 안 댔다 — {sent}");
+    let said = ok(s.path(), &["send", "claude-sess0008", "일감", "--wake", "--as", "boss"]);
+    assert!(said.contains("부터 일하는 중이다") && !said.contains("그 턴의 끝"), "턴의 끝을 약속했다 — {said}");
+}
+
+/// **Codex 의 출석은 세션 id 로만 잇는다**(moai-sile) — Codex 의 훅은 세션 여럿이 함께 쓰는 `codex app-server`
+/// 데몬이 띄우고 환경도 그 데몬의 것이라(2026-10-04 실측), 프로세스로 이으면 두 세션이 한 장을 빼앗고 데몬의 tmux
+/// 칸에 글자가 쳐진다. 그래서 pid 와 tmux 칸을 모름으로 두고, `Interrupt` 는 `idle` 로, `SessionEnd` 는 장을 걷는다.
+#[test]
+fn codex_attendance_follows_the_session_not_the_process() {
+    let s = init("codex-presence");
+    let tmux = [("TMUX", "/tmp/moai-u5wr-not-this-session,1,0"), ("TMUX_PANE", "%77")];
+    let codex = |event: &str, input: &str| {
+        hook_argv(&s, s.path(), None, &tmux, &["hook", event, "--dialect", "codex"], input);
+    };
+    let start = recorded(&s, "codex/session-start.json");
+    codex("session-start", &start);
+    let other = start.replace("01a107b4-ee4b-7b13-9ae8-269f43b5a38f", "02b207b4-ee4b-7b13-9ae8-269f43b5a38f");
+    assert_ne!(other, start, "시험이 세션을 못 바꿨다");
+    codex("session-start", &other);
+    let agents = s.path().join(".moai/agents");
+    assert_eq!(names_in(&agents), ["codex-01a107b4.json", "codex-02b207b4.json"], "두 세션이 한 장을 나눴다");
+    let card = || std::fs::read_to_string(agents.join("codex-01a107b4.json")).unwrap();
+    assert!(card().contains("\"vendor\":\"codex\"") && card().contains("\"pid\":0,"), "{}", card());
+    assert!(!card().contains("%77") && !card().contains("tmux"), "데몬의 tmux 칸을 적었다 — {}", card());
+
+    codex("user-prompt-submit", &recorded(&s, "codex/user-prompt-submit.json"));
+    assert!(card().contains("\"status\":\"busy\""), "{}", card());
+    codex("interrupt", &recorded(&s, "codex/interrupt.json"));
+    assert!(card().contains("\"status\":\"idle\""), "Esc 뒤에도 일하는 중이다 — {}", card());
+    codex("session-end", &recorded(&s, "codex/session-end.json"));
+    assert_eq!(names_in(&agents), ["codex-02b207b4.json"], "닫힌 Codex 세션의 장이 남았다");
+}
+
+/// **새 이벤트와 말씨도 실패하지 않는다** — [`the_hook_never_fails`] 의 입력을 세 말씨로.
+#[test]
+fn every_dialect_and_event_never_fails() {
+    let s = init("hooksafe-dialects");
+    let outside = Scratch::new("hooksafe-dialects-outside");
+    let events =
+        ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "stop-failure", "interrupt", "session-end"];
+    for input in [event(&outside, "s1"), "not json at all".into(), String::new(), "{\"toolCall\":7}".into()] {
+        for dialect in ["claude", "codex", "antigravity"] {
+            for ev in events {
+                let out = dialect_out(&s, dialect, ev, &input);
+                assert!(out.trim().is_empty(), "{dialect} {ev} 가 {input:?} 에 무언가 냈다\n{out}");
+            }
+        }
+    }
 }

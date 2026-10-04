@@ -1,0 +1,25 @@
+{
+  "artifactDirectoryPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "conversationId": "96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "modelName": "gemini-3.8-flash-high",
+  "stepIdx": 41,
+  "toolCall": {
+    "args": {
+      "AllowMultiple": false,
+      "Description": "Change hi to bye in /tmp/moai-probe-agy.txt",
+      "EndLine": 1,
+      "Instruction": "Replace hi with bye",
+      "ReplacementContent": "bye",
+      "StartLine": 1,
+      "TargetContent": "hi",
+      "TargetFile": "/tmp/moai-probe-agy.txt",
+      "toolAction": "Replacing hi with bye",
+      "toolSummary": "Edit /tmp/moai-probe-agy.txt"
+    },
+    "name": "replace_file_content"
+  },
+  "transcriptPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/home/coder/workspace/moa-issue"
+  ]
+}

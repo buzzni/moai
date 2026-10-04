@@ -464,7 +464,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
             init::run(ctx, prefix.as_deref(), no_agents, no_driver)
         }
-        Cmd::Hook { event } => hook::run(ctx, event),
+        Cmd::Hook { event, dialect } => hook::run(ctx, event, dialect),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.

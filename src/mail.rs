@@ -644,6 +644,11 @@ pub struct Woke {
     pub done: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<&'static str>,
+    /// 일하는 중(`why: busy`)이면 언제부터인가 — 장의 `since` 다. **그 턴이 정말 도는지는 모른다**(moai-u5wr.f29):
+    /// Claude 와 Antigravity 는 사람이 Esc 로 끊은 턴에 훅을 하나도 안 내, 그 장은 다음 프롬프트까지 `busy` 로 남는다.
+    /// 그래서 "턴이 끝나면 싣는다" 를 약속하지 않고 이 값을 댄다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 /// 깨운다 — **덤이다**(2026-10-04 사용자 결정 "깨우기를 덤으로 낮춘다"). 편지를 받는 기본 길은 일꾼의 기다림
@@ -654,16 +659,16 @@ pub struct Woke {
 /// - **둘 다 아니면 아무것도 안 한다**(`no_way`) — tmux 를 안 쓰는 사람도 있다. 사람 화면은 이때 입을 다문다
 ///
 /// **moai 는 에이전트의 실행 파일을 안 띄운다**(같은 결정) — `codex queue --thread` 로 깨우던 길을 걷었다. 띄우는 것은
-/// `tmux` 하나다. **일하는 중이면 안 깨운다** — 그 턴의 끝(훅이 걸린 에이전트의 `Stop`)이나 다음 `moai inbox` 가
-/// 편지를 싣는다. Claude 는 tmux 칸이
+/// `tmux` 하나다. **일하는 중이면 안 깨운다** — 그 턴의 끝(훅이 걸린 에이전트의 `Stop`)이나 다음 프롬프트, 다음
+/// `moai inbox` 가 편지를 싣는다. 끊긴 턴은 끝이 안 오니 언제부터 일하는 중인지(`since`)를 함께 낸다. Claude 는 tmux 칸이
 /// 적혀 있어도 그 칸에 안 친다 — 사람이 앉아 있을 법한 창에 글자를 끼우지 않고, 결정이 댄 길(SendMessage)로 간다.
 ///
 /// 띄우는 프로세스는 입출력을 모두 닫는다 — 물려주면 훅처럼 stdout 을 받아 두는 쪽이 EOF 를 못 받는다
 /// (`skill::command` 의 "그 성질에 기대고 있다"). 10초 안에 안 끝나면 죽인다.
 pub fn wake(p: &Presence) -> Woke {
-    let woke = |via, done, why| Woke { to: p.name.clone(), via, done, why };
+    let woke = |via, done, why| Woke { to: p.name.clone(), via, done, why, since: None };
     if p.status == BUSY {
-        return woke("none", false, Some("busy"));
+        return Woke { since: Some(p.since.clone()).filter(|s| !s.is_empty()), ..woke("none", false, Some("busy")) };
     }
     if p.vendor == "claude" {
         return woke("send_message", false, Some("ask_sender"));
