@@ -12,6 +12,43 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai skill install --agent` plants the skills for Codex and Antigravity
+  too.** `--agent` takes `claude`, `codex`, `antigravity` or `auto` and can be
+  repeated; without it the install is Claude's alone, exactly as before. Codex
+  and Antigravity read the same `.agents/skills/` in the repository, so naming
+  either writes it for both — there is nothing to register, and committing the
+  directory hands it to the team. `auto` takes whichever of `claude`, `codex`
+  and `agy` is on PATH (`claude` when none is) and says what it found.
+  `--scope` stays Claude's registration; given without Claude, one line says
+  so. The hooks are planted for Claude only. `--json` adds `agents`, `found`,
+  `agents_dir` and `agents_files`, and Claude's keys stand only when Claude is
+  among the agents.
+- **One text for every agent.** The three trees get the same skills; the steps
+  only one agent has — entering a worktree, asking the person, calling the
+  review, changing the model, clearing the window, messaging a session,
+  stopping what a review left running — sit in a "Words per agent" table in the
+  `moai` and `moai-supervise` skills, one column per agent. A step an agent
+  does not have reads `—`: tell the person and go on.
+- **`moai skill status` shows `.agents/skills/`** — not planted, current, or
+  how many of its files differ from this version — and whether `codex` and
+  `agy` are on PATH. `--json` adds an `agents` object (`dir`, `state`,
+  `stale`, `codex`, `agy`). The exit code is still 0 whatever it finds.
+- **`moai skill uninstall --agent codex|antigravity` prints the `rm -r` lines**
+  for moai's skills in `.agents/skills/` and deletes nothing; a plain
+  `uninstall` says in one line when they are still there. `--json` adds
+  `agents`, `found` and `agents_left`.
+
+### Changed
+
+- **Rule 3 in the AGENTS block names the review as a step.** It used to say
+  `/code-review` alone, a command only Claude Code has, though Codex and
+  Antigravity read the same block; it now names the review in all three —
+  `/code-review`, `codex review`, a fresh `agy -p` session — and points at the
+  "Words per agent" table in the `moai` skill for the other steps. `moai init`
+  writes the new block.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added
