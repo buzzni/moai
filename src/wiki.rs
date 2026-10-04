@@ -54,7 +54,8 @@ impl Wiki {
 pub struct Notices<'a> {
     /// 충돌 표시가 든 페이지의 슬러그.
     pub conflict: Vec<&'a str>,
-    /// `(링크를 적은 페이지, 대상 슬러그)`.
+    /// `(링크를 적은 페이지, 대상 슬러그)` — 짝마다 한 번. 글이 다른 두 링크가 같은 없는 페이지를 가리켜도
+    /// 고칠 자리는 하나라 `README → gone` 이 두 번 서지 않는다.
     pub unresolved: Vec<(&'a str, &'a str)>,
     /// `(id 를 댄 페이지, 그 id)`.
     pub missing: Vec<(&'a str, &'a str)>,
@@ -73,7 +74,11 @@ pub fn notices<'a>(pages: impl IntoIterator<Item = &'a Page>) -> Notices<'a> {
         if p.conflict {
             n.conflict.push(&p.slug);
         }
-        n.unresolved.extend(p.links.iter().filter(|l| !l.resolved).map(|l| (p.slug.as_str(), l.to.as_str())));
+        for pair in p.links.iter().filter(|l| !l.resolved).map(|l| (p.slug.as_str(), l.to.as_str())) {
+            if !n.unresolved.contains(&pair) {
+                n.unresolved.push(pair);
+            }
+        }
         n.missing.extend(p.issues.iter().filter(|i| !i.exists).map(|i| (p.slug.as_str(), i.id.as_str())));
     }
     n
@@ -238,6 +243,30 @@ pub fn dir_of(here: &Path, raw: &str) -> Result<PathBuf, DirTrouble> {
 /// 위키 뿌리를 못 열면 [`DirTrouble`] 이다. 그 밑에서 못 연 디렉터리와 못 읽은 페이지는 멈추지 않고 [`Wiki`] 에
 /// 적는다 — 한 파일 때문에 나머지 페이지를 못 보면 무엇이 잘못됐는지 볼 길도 같이 사라진다.
 pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) -> Result<Wiki, DirTrouble> {
+    load_where(here, raw, None, prefix, known)
+}
+
+/// [`load`] 와 같되 **본문은 `slug` 페이지 하나만 읽는다** — `moai wiki show` 가 쓴다. 그 페이지의 링크가 풀리는가는
+/// 다른 페이지의 이름(슬러그)만 보면 되므로 나머지는 걷기만 하고 열지 않는다 — 다 읽던 판은 페이지 하나를 보려고
+/// 위키의 모든 본문을 읽고 파싱했다. 그 슬러그의 파일이 없으면 페이지가 빈 [`Wiki`] 다.
+pub fn load_one(
+    here: &Path,
+    raw: &str,
+    slug: &str,
+    prefix: &str,
+    known: &dyn Fn(&str) -> bool,
+) -> Result<Wiki, DirTrouble> {
+    load_where(here, raw, Some(slug), prefix, known)
+}
+
+/// [`load`]·[`load_one`] 의 몸통 — `only` 가 서면 그 슬러그의 페이지만 연다.
+fn load_where(
+    here: &Path,
+    raw: &str,
+    only: Option<&str>,
+    prefix: &str,
+    known: &dyn Fn(&str) -> bool,
+) -> Result<Wiki, DirTrouble> {
     let dir = dir_of(here, raw)?;
     let home = Home::of(here);
     let shown: Vec<String> = Path::new(raw)
@@ -250,12 +279,17 @@ pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) 
     let mut wiki = Wiki::default();
     let top = std::fs::read_dir(&dir).map_err(|e| DirTrouble::Failed(e.to_string()))?;
     walk(top, &dir, &mut Vec::new(), &shown, &mut files, &mut wiki.skipped);
-    for (rel, at) in files {
-        wiki.pages.push(page_at(&at, &rel, &shown, &home, prefix, known));
+    // **슬러그는 이름만으로 선다** — 링크가 풀리는가는 못 읽은 페이지와 안 연 페이지까지, 걸은 파일 모두의 이름과 견준다.
+    let named: Vec<(String, Vec<String>, PathBuf)> =
+        files.into_iter().map(|(rel, at)| (slug_of(&rel), rel, at)).collect();
+    for (slug, rel, at) in &named {
+        if only.is_none_or(|o| o == slug) {
+            wiki.pages.push(page_at(at, slug.clone(), rel, &shown, &home, prefix, known));
+        }
     }
-    let slugs: HashSet<String> = wiki.pages.iter().map(|p| p.slug.clone()).collect();
+    let slugs: HashSet<&str> = named.iter().map(|(slug, ..)| slug.as_str()).collect();
     for link in wiki.pages.iter_mut().flat_map(|p| p.links.iter_mut()) {
-        link.resolved = slugs.contains(&link.to);
+        link.resolved = slugs.contains(link.to.as_str());
     }
     wiki.pages.sort_by(|a, b| {
         let rank = |p: &Page| HOMES.iter().position(|h| *h == p.slug).unwrap_or(HOMES.len());
@@ -319,9 +353,18 @@ fn walk(
     }
 }
 
+/// 걸은 파일의 슬러그 — 위키 뿌리에서의 조각을 `/` 로 잇고 끝 조각의 `.md` 를 뗀다. **슬러그를 짓는 자리는
+/// 여기 하나다** — 페이지의 이름과, 링크가 풀리는가를 견줄 이름 모음이 같은 자로 선다.
+fn slug_of(rel: &[String]) -> String {
+    let (last, dirs) = rel.split_last().map_or(("", &[][..]), |(last, dirs)| (last.as_str(), dirs));
+    let stem = last.strip_suffix(".md").unwrap_or(last);
+    dirs.iter().map(String::as_str).chain([stem]).collect::<Vec<_>>().join("/")
+}
+
 /// 파일 하나를 페이지로 — 연 손잡이로 크기를 재고, 상한 안이면 그 손잡이로 읽는다.
 fn page_at(
     at: &Path,
+    slug: String,
     rel: &[String],
     shown: &[String],
     home: &Home,
@@ -330,23 +373,21 @@ fn page_at(
 ) -> Page {
     let file = rel.last().map_or("", String::as_str);
     let stem = file.strip_suffix(".md").unwrap_or(file);
-    let slug =
-        rel[..rel.len().saturating_sub(1)].iter().map(String::as_str).chain([stem]).collect::<Vec<_>>().join("/");
     let path = shown.iter().chain(rel).map(String::as_str).collect::<Vec<_>>().join("/");
+    let (bytes, body) = read(at, home);
     let mut page = Page {
         slug,
         title: stem.to_string(),
         path,
-        bytes: 0,
+        bytes,
         issues: Vec::new(),
         links: Vec::new(),
         conflict: false,
         error: None,
         body: None,
     };
-    match read(at, home) {
-        Ok((bytes, Some(body))) => {
-            page.bytes = bytes;
+    match body {
+        Ok(Some(body)) => {
             let parsed = parse(&page.slug, &body, prefix);
             if let Some(title) = parsed.title {
                 page.title = title;
@@ -356,36 +397,36 @@ fn page_at(
             page.conflict = parsed.conflict;
             page.body = Some(body);
         }
-        Ok((bytes, None)) => {
-            page.bytes = bytes;
-            page.error = Some(Unread::TooLarge);
-        }
+        Ok(None) => page.error = Some(Unread::TooLarge),
         Err(why) => page.error = Some(why),
     }
     page
 }
 
-/// 페이지 파일을 **연 손잡이로** 재고 읽는다 — 크기가 상한을 넘으면 본문 없이 크기만 낸다. 이름으로 잰 뒤
-/// 읽기 전에 파일이 갈려도 손잡이가 댄 크기까지만 읽는다([`crate::held::open_inside`]).
-fn read(at: &Path, home: &Home) -> Result<(u64, Option<String>), Unread> {
+/// 페이지 파일을 **연 손잡이로** 재고 읽는다 — `(크기, 본문)`. 크기는 그 손잡이가 댄 것이라 **열었으면 본문을 못
+/// 읽었어도 선다**(UTF-8 이 아닌 본문) — 못 열었을 때만 0 이다. 본문은 크기가 상한을 넘으면 `None` 이다. 이름으로
+/// 잰 뒤 읽기 전에 파일이 갈려도 손잡이가 댄 크기까지만 읽는다([`crate::held::open_inside`]).
+fn read(at: &Path, home: &Home) -> (u64, Result<Option<String>, Unread>) {
     use std::io::Read;
-    let f = crate::held::open_inside(at, home).map_err(|fell| match fell {
-        Fell::Unheld(why) => Unread::Refused(why),
-        Fell::Io(e) => Unread::Failed(e.to_string()),
-    })?;
-    let len = f.metadata().map_err(|e| Unread::Failed(e.to_string()))?.len();
+    let failed = |e: std::io::Error| Unread::Failed(e.to_string());
+    let f = match crate::held::open_inside(at, home) {
+        Ok(f) => f,
+        Err(Fell::Unheld(why)) => return (0, Err(Unread::Refused(why))),
+        Err(Fell::Io(e)) => return (0, Err(failed(e))),
+    };
+    let len = match f.metadata() {
+        Ok(m) => m.len(),
+        Err(e) => return (0, Err(failed(e))),
+    };
     if len > TOO_LARGE {
-        return Ok((len, None));
+        return (len, Ok(None));
     }
     let mut buf = Vec::new();
-    f.take(len).read_to_end(&mut buf).map_err(|e| Unread::Failed(e.to_string()))?;
-    // `held::read_inside` 와 같은 말이다 — 같은 처지가 자리마다 다른 말로 서지 않게.
-    let body = String::from_utf8(buf).map_err(|_| {
-        Unread::Failed(
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "stream did not contain valid UTF-8").to_string(),
-        )
-    })?;
-    Ok((len, Some(body)))
+    if let Err(e) = f.take(len).read_to_end(&mut buf) {
+        return (len, Err(failed(e)));
+    }
+    // UTF-8 이 아닌 본문은 `held::read_inside` 와 같은 말로 선다 — 같은 처지가 자리마다 다른 말로 서지 않게.
+    (len, crate::held::utf8(buf).map(Some).map_err(failed))
 }
 
 /// 본문 하나에서 읽은 것 — [`parse`] 가 낸다.
@@ -409,6 +450,7 @@ pub struct Parsed {
 ///   이름이지 id 가 아니다
 /// - 링크는 [`target`] 이 페이지 링크로 푸는 것만 든다
 pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
+    let body = unmarked(body);
     let mut out = Parsed { conflict: conflicted(body), ..Parsed::default() };
     let mut title: Option<String> = None;
     // 첫 1단 제목을 만났는가 — 그 제목이 비었어도 둘째로 넘어가지 않는다. "첫 `# ` 줄" 이다.
@@ -425,7 +467,7 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             }
         }
     };
-    for event in Parser::new(body) {
+    for event in Parser::new_ext(body, crate::markdown::OPTIONS) {
         match event {
             Event::Text(_) | Event::Code(_) if code_block > 0 => {}
             Event::Text(t) => {
@@ -481,6 +523,15 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     }
     ids(&text, &mut out.ids);
     out
+}
+
+/// 본문에서 **앞의 BOM 을 걷은** 글 — 읽는 [`parse`] 와 그리는 `view::wiki::page` 가 이것 하나로 걷는다.
+///
+/// 윈도 편집기가 붙이는 그 한 글자가 남으면 첫 `# 제목` 이 제목으로 안 읽혀, 페이지가 파일 줄기를 제목으로 달고
+/// 화면도 그 줄을 줄글로 그린다. 설정 파서(`config::entries`)가 걷는 것과 같은 까닭이다. 원문(`Page::body`,
+/// `--json` 의 `body`)은 그대로다.
+pub fn unmarked(body: &str) -> &str {
+    body.strip_prefix('\u{feff}').unwrap_or(body)
 }
 
 /// 링크의 주소를 **페이지 슬러그로** 푼다 — 페이지 링크가 아니면 `None`(2026-10-04 사용자 결정).
@@ -581,6 +632,7 @@ mod tests {
         assert_eq!(t("no heading at all\n"), None);
         assert_eq!(t("#\n\n# Second\n"), None, "빈 첫 제목은 제목이 없는 것이다 — 둘째로 넘어가지 않는다");
         assert_eq!(t("# First\n\n# Second\n").as_deref(), Some("First"));
+        assert_eq!(t("\u{feff}# Bom\n").as_deref(), Some("Bom"), "앞의 BOM 이 제목을 가렸다");
     }
 
     /// id 는 글과 인라인 코드에서 세고 코드 블록 안은 예시라 안 센다. 접두어가 맞는 낱말만, 처음 나온 차례로 하나씩.
@@ -737,6 +789,8 @@ mod tests {
         assert_eq!(kind("out"), Some("refused"));
         assert_eq!(kind("pipe"), Some("refused"));
         assert_eq!(kind("latin1"), Some("failed"));
+        assert_eq!(w.find("latin1").unwrap().bytes, 7, "열었으면 본문을 못 읽어도 크기는 선다");
+        assert_eq!(w.find("out").unwrap().bytes, 0, "못 연 페이지는 0 이다");
         assert_eq!(w.find("out").unwrap().title, "out", "밖의 글을 제목으로 읽었다");
         assert_eq!(w.skipped, [Skipped { path: "docs/away".into(), why: Skip::DirLink }]);
         assert!(w.fell_short());
@@ -746,16 +800,37 @@ mod tests {
     #[test]
     fn notices_count_conflicts_dangling_links_and_unknown_ids() {
         let s = Scratch::new("wiki-notices");
-        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md) [gone](gone.md) moai-ab12 moai-zz99\n");
+        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md) [gone](gone.md) [again](gone.md) moai-ab12 moai-zz99\n");
         write(s.path(), "docs/a.md", "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n");
         let known = |id: &str| id == "moai-ab12";
         let w = load(s.path(), "docs", "moai", &known).unwrap();
         let n = notices(&w.pages);
         assert_eq!(n.conflict, ["a"]);
-        assert_eq!(n.unresolved, [("README", "gone")]);
+        assert_eq!(n.unresolved, [("README", "gone")], "같은 없는 페이지로 가는 링크 둘은 고칠 자리 하나다");
         assert_eq!(n.missing, [("README", "moai-zz99")]);
         assert!(notices(w.find("a")).missing.is_empty() && !notices(w.find("a")).is_empty());
         assert!(notices(&w.pages[..0]).is_empty());
+    }
+
+    /// `load_one` 은 물은 페이지만 연다 — 나머지는 이름만 걸어, 그 페이지의 링크는 안 연 페이지로도 풀린다. 못 읽을
+    /// 페이지(FIFO)가 곁에 있어도 그것은 안 연다.
+    #[cfg(unix)]
+    #[test]
+    fn load_one_opens_only_the_page_asked_for() {
+        let s = Scratch::new("wiki-one");
+        write(s.path(), "docs/a.md", "# A\n\n[b](b.md) [gone](gone.md) [pipe](pipe.md)\n");
+        write(s.path(), "docs/b.md", "# B\n");
+        let fifo = s.join("docs/pipe.md");
+        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: 널로 끝나는 경로와 권한 비트만 넘긴다.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "FIFO 를 못 지었다");
+        let w = load_one(s.path(), "docs", "a", "moai", &none).unwrap();
+        assert_eq!(w.pages.iter().map(|p| p.slug.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(
+            w.pages[0].links.iter().map(|l| (l.to.as_str(), l.resolved)).collect::<Vec<_>>(),
+            [("b", true), ("gone", false), ("pipe", true)]
+        );
+        assert!(load_one(s.path(), "docs", "nope", "moai", &none).unwrap().pages.is_empty());
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

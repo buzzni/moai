@@ -7894,6 +7894,7 @@ fn every_command_still_speaks_json() {
         vec!["skill", "status", "--json"],
         // 공용 설정(없는 파일)을 읽기만 한다.
         vec!["project", "ls", "--json"],
+        // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
@@ -23381,12 +23382,15 @@ fn a_page_that_cannot_be_read_stays_listed_and_says_why() {
 
 /// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·없는 id 를 목록 꼬리에 세고, 종료 코드는
 /// 그대로 0 이다. 충돌 표시가 든 페이지는 그리지 않고 원문 그대로 보인다 — 그리면 표시가 제목·줄글로 섞인다.
+/// 그 페이지 하나를 볼 때 충돌은 본문 머리에 이미 섰으니 꼬리 알림에는 다시 안 선다. 같은 없는 페이지로 가는
+/// 링크 둘은 고칠 자리가 하나라 한 번 센다.
 #[test]
 fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
     let s = init("wiki-notices");
     let docs = s.path().join("docs");
     std::fs::create_dir_all(&docs).unwrap();
-    std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) argos-zz99\n").unwrap();
+    std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) [again](gone.md) argos-zz99\n")
+        .unwrap();
     std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
 
     let ls = ok(s.path(), &["wiki", "ls"]);
@@ -23400,8 +23404,48 @@ fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
         "충돌 페이지를 그렸다\n{conflicted}"
     );
     assert!(conflicted.contains("docs/a.md 의 병합을 풀고"), "{conflicted}");
+    assert!(!conflicted.contains("충돌 표시가 든 페이지"), "충돌을 머리와 꼬리에 두 번 댔다\n{conflicted}");
     let home = ok(s.path(), &["wiki", "show", "README"]);
-    assert!(home.contains("! 페이지로 안 풀리는 링크 1  gone"), "{home}");
+    assert!(home.contains("! 페이지로 안 풀리는 링크 1  gone\n"), "{home}");
     assert!(home.contains("! 트래커에 없는 id 1  argos-zz99"), "{home}");
-    assert!(!home.contains("충돌 표시가 든"), "{home}");
+}
+
+/// **못 읽는 줄이 쓰는 id 도 있는 id 다**(moai-ihu4) — 그 줄은 트래커 파일에 있다. 읽어 낸 줄만 견주면 그 id 를 댄
+/// 페이지가 "트래커에 없는 id" 로 서는데, 고칠 것은 페이지가 아니라 트래커의 그 줄이다. 못 읽는 줄은 늘 그렇듯
+/// stderr 로 대고 비영으로 끝난다.
+#[test]
+fn an_id_on_an_unreadable_line_still_exists_for_the_wiki() {
+    let s = init("wiki-reserved");
+    let at = s.path().join(".moai/issues.jsonl");
+    let mut rows = std::fs::read_to_string(&at).unwrap_or_default();
+    // 제목이 수라 `Issue` 로는 안 풀리고, JSON 으로는 성해 id 까지는 읽힌다(`Load::reserved_ids`).
+    rows.push_str("{\"id\":\"argos-zz11\",\"title\":0,\"kind\":\"issue\",\"status\":\"todo\"}\n");
+    std::fs::write(&at, &rows).unwrap();
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(s.path().join("docs/README.md"), "# Home\n\nargos-zz11 argos-zz22\n").unwrap();
+
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(!out.status.success(), "못 읽는 줄을 두고 0 으로 냈다\n{}", text(&out));
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#"{"id":"argos-zz11","exists":true}"#), "못 읽는 줄의 id 를 없는 id 로 댔다 — {listed}");
+    assert!(listed.contains(r#"{"id":"argos-zz22","exists":false}"#), "{listed}");
+}
+
+/// **앞에 BOM 이 붙은 페이지도 제목을 읽는다** — 윈도 편집기가 붙이는 그 한 글자가 남으면 `# 제목` 이 제목으로
+/// 안 읽혀 파일 줄기가 제목으로 섰다. 원문(`body`)은 그대로다. 열었으나 UTF-8 이 아닌 페이지는 크기가 선다 —
+/// 0 은 못 연 페이지의 것이다.
+#[test]
+fn a_bom_keeps_the_title_and_an_opened_page_keeps_its_size() {
+    let s = init("wiki-bom");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("bom.md"), "\u{feff}# Bom title\n").unwrap();
+    std::fs::write(docs.join("latin.md"), b"# caf\xe9\n").unwrap();
+
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#""slug":"bom","title":"Bom title","#), "{listed}");
+    assert!(listed.contains(r#""slug":"latin","title":"latin","path":"docs/latin.md","bytes":7,"#), "{listed}");
+    let shown = ok(s.path(), &["wiki", "show", "bom", "--json"]);
+    assert!(shown.contains("\"body\":\"\u{feff}# Bom title\\n\""), "원문을 고쳐 냈다 — {shown}");
 }

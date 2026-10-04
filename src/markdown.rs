@@ -110,11 +110,14 @@ pub enum Block {
 /// 본문을 블록으로. **마크다운이 아닌 글도 그대로 통과한다** — 이 저장소의
 /// 본문은 마크다운을 조금 쓰는 산문이지 마크다운 문서가 아니다.
 pub fn parse(src: &str) -> Vec<Block> {
-    // 표는 크레이트 기능이 아니라 파서 옵션이다. 이 저장소 본문이 표를 쓴다.
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_TABLES);
-    Fold::default().run(Parser::new_ext(src, opts))
+    Fold::default().run(Parser::new_ext(src, OPTIONS))
 }
+
+/// 파서 옵션 — 표는 크레이트 기능이 아니라 파서 옵션이다. 이 저장소 본문이 표를 쓴다.
+///
+/// **마크다운을 읽는 자리가 이것 하나로 연다** — 그리는 [`parse`] 와, 같은 페이지에서 제목·링크·id 를 읽는
+/// `wiki::parse` 다. 옵션이 갈리면 한 페이지가 화면과 목록에서 다른 문서로 읽힌다.
+pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES;
 
 /// 이벤트를 받아 블록을 쌓는 자리.
 ///

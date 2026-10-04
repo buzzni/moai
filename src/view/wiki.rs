@@ -29,9 +29,13 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
         let gap = " ".repeat(wide - width(slug));
         let mut line = format!("  {}{gap}  {}", paint(style::ID, slug), one_line(&p.title));
         if let Some(u) = &p.error {
+            // 옮겨 치라고 내미는 명령이라 슬러그는 원문을 셸 낱말로 감싼다(`text::quoted`) — `my page` 를 그대로
+            // 대면 `moai wiki show my page` 가 낱말 둘로 갈려 clap 이 거절한다.
             let mark = match u {
                 Unread::TooLarge => say(lang, "wiki.mark_too_large").to_string(),
-                Unread::Refused(_) | Unread::Failed(_) => fill(say(lang, "wiki.mark_unread"), &[("slug", slug)]),
+                Unread::Refused(_) | Unread::Failed(_) => {
+                    fill(say(lang, "wiki.mark_unread"), &[("slug", &crate::text::quoted(&p.slug))])
+                }
             };
             line.push_str(&format!("  {}", paint(style::WARN, &format!("! {mark}"))));
         }
@@ -67,7 +71,7 @@ pub fn page(lang: Lang, p: &Page) -> Vec<String> {
                     .map(|l| if l.is_empty() { String::new() } else { format!("  {l}") }),
             );
         }
-        (Some(body), _) => out.extend(crate::view::body_lines(body)),
+        (Some(body), _) => out.extend(crate::view::body_lines(crate::wiki::unmarked(body))),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &unread(lang, p, u))]);
             out.push(paint(style::WARN, &format!("! {said}")));
@@ -87,32 +91,29 @@ pub fn page(lang: Lang, p: &Page) -> Vec<String> {
 /// 페이지의 것인지 대고(`README → nope`, `moai-zz99 (README)`), 페이지 하나를 볼 때는 무엇만 댄다.
 fn notice_lines(lang: Lang, n: &Notices, whole: bool) -> Vec<String> {
     const SHOWN: usize = 3;
-    let which = |items: Vec<String>| {
-        let mut said = items.iter().take(SHOWN).map(|s| one_line(s)).collect::<Vec<_>>().join(", ");
-        if items.len() > SHOWN {
-            said.push_str(&format!(", +{}", items.len() - SHOWN));
-        }
-        said
-    };
-    let line = |text: String| paint(style::WARN, &format!("! {text}"));
     let mut out = Vec::new();
-    if !n.conflict.is_empty() {
-        let items = n.conflict.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let (count, which) = (items.len().to_string(), which(items));
-        out.push(line(fill(say(lang, "wiki.notice_conflict"), &[("n", &count), ("which", &which)])));
-    }
-    if !n.unresolved.is_empty() {
-        let items = n.unresolved.iter().map(|(slug, to)| if whole { format!("{slug} → {to}") } else { to.to_string() });
-        let items = items.collect::<Vec<_>>();
-        let (count, which) = (items.len().to_string(), which(items));
-        out.push(line(fill(say(lang, "wiki.notice_unresolved"), &[("n", &count), ("which", &which)])));
-    }
-    if !n.missing.is_empty() {
-        let items = n.missing.iter().map(|(slug, id)| if whole { format!("{id} ({slug})") } else { id.to_string() });
-        let items = items.collect::<Vec<_>>();
-        let (count, which) = (items.len().to_string(), which(items));
-        out.push(line(fill(say(lang, "wiki.notice_missing"), &[("n", &count), ("which", &which)])));
-    }
+    // 갈래 하나 — 빈 갈래는 줄이 없다. 말은 부르는 자리가 `say(lang, "…")` 로 글자째 넘긴다: `i18n` 의 시험이 그
+    // 글자를 훑어 표와 견주므로 키를 여기 숨기지 않는다.
+    let mut push = |head: &str, items: Vec<String>| {
+        if items.is_empty() {
+            return;
+        }
+        let mut which = items.iter().take(SHOWN).map(|s| one_line(s)).collect::<Vec<_>>().join(", ");
+        if items.len() > SHOWN {
+            which.push_str(&format!(", +{}", items.len() - SHOWN));
+        }
+        let text = fill(head, &[("n", &items.len().to_string()), ("which", &which)]);
+        out.push(paint(style::WARN, &format!("! {text}")));
+    };
+    push(say(lang, "wiki.notice_conflict"), n.conflict.iter().map(|s| s.to_string()).collect());
+    push(
+        say(lang, "wiki.notice_unresolved"),
+        n.unresolved.iter().map(|(slug, to)| if whole { format!("{slug} → {to}") } else { to.to_string() }).collect(),
+    );
+    push(
+        say(lang, "wiki.notice_missing"),
+        n.missing.iter().map(|(slug, id)| if whole { format!("{id} ({slug})") } else { id.to_string() }).collect(),
+    );
     out
 }
 

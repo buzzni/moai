@@ -2178,14 +2178,18 @@ Options:
 
   A page that cannot be read stays in the list with its file name as the
   title and says why - over 1 MB, a link out of the checkout, not a regular
-  file, not UTF-8. No `wiki_dir` directory yet is not an error: there is no
+  file, not UTF-8. Over 1 MB is left unread on purpose and the exit code
+  stays 0; any other page left unread, or a name or directory the walk had
+  to leave out (a line on stderr names it), makes it non-zero once the whole
+  list is out. No `wiki_dir` directory yet is not an error: there is no
   wiki to list and the exit code is 0. A `wiki_dir` that is absolute, has
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
   --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
-  "links","conflict"}]}. `issues` is [{"id","exists"}] - the ids the
-  page names outside code blocks. `links` is [{"text","to","resolved"}] -
-  relative links to a `.md` page of this wiki, `to` being the target slug.
+  "links","conflict"}]}. `issues` is [{"id","exists"}] - the ids with
+  this tracker's prefix the page names outside code blocks. `links` is
+  [{"text","to","resolved"}] - relative links to a `.md` page of this
+  wiki, `to` being the target slug.
   A page that could not be read carries `error` ({"kind","said"}, kind
   too_large, refused or failed); absent, it was read whole. When the
   directory itself cannot be used, `pages` gives way to `error` with kind
@@ -2215,7 +2219,8 @@ Options:
 
   --json gives the page as `ls` does plus `body`, the file as written.
   A page that could not be read has no `body`, carries `error`, and the exit
-  code is non-zero.
+  code is non-zero. When the wiki directory itself cannot be used - not there
+  yet included - it gives {"dir","error"} as `ls` does, non-zero.
 ```
 
 ## `moai tui`
