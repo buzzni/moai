@@ -149,6 +149,10 @@ git fetch origin && git tag v0.2.0 origin/main
 git push origin v0.2.0
 ```
 
+Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the epics
+closed since the last tag and lists the wiki pages they left behind. It is not a
+gate — nothing waits on it, and a release goes out whatever it finds.
+
 **The changelog picks the number.** `auto` reads the headings under
 `[Unreleased]` that hold entries. Before 1.0, `Fixed` and `Security` alone make a
 patch release, and any `Added`, `Changed`, `Deprecated` or `Removed` makes a minor
