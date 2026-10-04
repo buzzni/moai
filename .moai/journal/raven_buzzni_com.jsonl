@@ -4240,3 +4240,6 @@
 {"ts":"2026-10-04T19:08:57Z","id":"moai-ew4o.vuv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 시험이 시험을 돌리는 프로세스의 조상에 기댄다"}
 {"ts":"2026-10-04T19:08:57Z","id":"moai-ew4o.vuv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zyrv 에서 펼쳤다 — 훅 시험이 시험을 돌리는 프로세스의 조상에 기댄다"}
 {"ts":"2026-10-04T19:08:57Z","id":"moai-zyrv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ew4o 의 멤버 moai-ew4o.vuv 로 펼쳤다"}
+{"ts":"2026-10-04T19:09:11Z","id":"moai-5kk1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 moai-u5wr.e74 9번이 넘긴다 — 규칙 3 의 판정(src/hook.rs 의 calls_review)은 Claude 의 /code-review 만 리뷰로 안다. 훅이 Codex·agy 에도 서면서(moai-u5wr) Codex 의 `codex review`·agy 의 `agy -p …리뷰…` 는 리뷰 이슈 없이 지나간다(재현). 이 이슈가 그 낱말을 걷으니, 걷은 뒤 그 둘의 리뷰를 규칙 3 이 무엇으로 알아볼지(아니면 글로만 둘지) 여기서 정한다"}
+{"ts":"2026-10-04T19:09:13Z","id":"moai-8ze4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 패치를 파일마다 판정하면 파일 수만큼 판정을 통째로 다시 돈다"}
+{"ts":"2026-10-04T19:09:22Z","id":"moai-77ab","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"agy 의 manage_task send_input 으로 친 글은 규칙이 못 본다"}
