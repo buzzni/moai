@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.5.0 hash:d247bab7 -->
+<!-- moai:begin v:0.6.0 hash:d17d8a5f -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -442,8 +442,9 @@ anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. A review is an issue too.** Before you call `/code-review`, create a review issue tied to
-what you are reviewing.
+**3. A review is an issue too.** Before you call a review, create a review issue tied to
+what you are reviewing. The review is `/code-review` in Claude Code; the other agents'
+words are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts

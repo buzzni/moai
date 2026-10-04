@@ -36,6 +36,25 @@ Fill the name you read into `<base branch>` in the commands below and in the tex
 send the worker. **The worker does not read it again** — read inside a worktree, it
 gives that worktree's own branch.
 
+## Words per agent
+
+moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
+are named by what they do. Each agent types a step its own way — read your own column.
+
+| Step | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Enter the worktree | `EnterWorktree(path)` | run every command from that directory | run every command from that directory |
+| Come back to the root | `ExitWorktree(keep)` | run every command from the root | run every command from the root |
+| Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
+| Review the work | `/code-review` | `codex review` | a fresh `agy -p` session |
+| Change the model (the person does it) | `/model` | `/model` | — |
+| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | — |
+| Message another session | `SendMessage` | — | — |
+| Stop what a review left running | `TaskStop` | — | — |
+
+A `—` is a step that agent does not have, or one moai does not know yet: tell the
+person watching and go on without it.
+
 ## One round
 
 **0. Reclaim first — work that lost its place.** When a session dies the row it picked

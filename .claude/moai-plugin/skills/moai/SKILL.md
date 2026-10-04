@@ -145,8 +145,9 @@ anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. A review is an issue too.** Before you call `/code-review`, create a review issue tied to
-what you are reviewing.
+**3. A review is an issue too.** Before you call a review, create a review issue tied to
+what you are reviewing. The review is `/code-review` in Claude Code; the other agents'
+words are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts
@@ -182,6 +183,25 @@ You become the assignee in the same write, and a note `Taken-over: <who it was|n
 keeps whose it was. `moai ready` hands out only your own rows and sets the rest
 apart (`others`), and what someone else picked up is not your focus. When who you
 are is unknown, nothing is refused.
+
+## Words per agent
+
+moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
+are named by what they do. Each agent types a step its own way — read your own column.
+
+| Step | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Enter the worktree | `EnterWorktree(path)` | run every command from that directory | run every command from that directory |
+| Come back to the root | `ExitWorktree(keep)` | run every command from the root | run every command from the root |
+| Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
+| Review the work | `/code-review` | `codex review` | a fresh `agy -p` session |
+| Change the model (the person does it) | `/model` | `/model` | — |
+| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | — |
+| Message another session | `SendMessage` | — | — |
+| Stop what a review left running | `TaskStop` | — | — |
+
+A `—` is a step that agent does not have, or one moai does not know yet: tell the
+person watching and go on without it.
 
 ## Before you close the session
 

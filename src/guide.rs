@@ -856,11 +856,87 @@ pub fn handoff(id: &str) -> String {
 /// 적던 두 벌은 한쪽만 고쳐도 안 붉어졌다(moai-nxw8). 앞의 임자(`에픽이`·`<id> 가`)는 부르는 쪽이 붙인다.
 pub const PLEDGE: &str = "cannot deliver what it promised without this";
 
+/// 낱말표의 열 — 스킬을 심는 세 에이전트(moai-xs2h, 2026-10-04 사용자 결정). 차례가 [`Verb::words`] 의 차례다.
+pub const VENDORS: [&str; 3] = ["Claude Code", "Codex", "Antigravity"];
+
+/// 그 에이전트에 없는 걸음, 또는 moai 가 아직 모르는 걸음.
+const NO_VERB: &str = "—";
+
+/// 벤더 낱말표의 한 줄(moai-xs2h.r2d) — 걸음 하나를 **하는 일**로 이름 짓고, 세 에이전트가 그것을 치는 글을
+/// [`VENDORS`] 의 차례로 든다.
+pub struct Verb {
+    pub step: &'static str,
+    pub words: [&'static str; 3],
+}
+
+/// 리뷰를 부르는 걸음. 규칙 3 의 글이 Claude 칸을 여기서 읽는다 — 표와 규칙에 따로 적으면 한쪽만 고쳐진다.
+const REVIEW_VERB: Verb =
+    Verb { step: "Review the work", words: ["`/code-review`", "`codex review`", "a fresh `agy -p` session"] };
+
+/// **벤더 낱말표**(moai-xs2h.r2d, 2026-10-04 사용자 결정) — Claude Code 에만 있는 걸음을 세 에이전트의 열로 가른다.
+/// 스킬 본문은 하는 일로 말하고 칸을 이 표에서 읽게 한다. 에이전트마다 SKILL.md 를 따로 내면 같은 글이 세 벌이 되어
+/// 반드시 갈라진다(이 모듈 머리의 "왜 한 출처인가") — 그래서 세 트리가 같은 글을 받고, 다른 것은 이 표의 열 하나다.
+///
+/// **칸의 글은 기획 노트(마일스톤 moai-5m2h)의 조사에서 왔다** — Codex 의 `request_user_input`·`codex review`·`/new`,
+/// Antigravity 의 `agy -p`. 그 노트가 못 확인한 것은 지어 적지 않고 [`NO_VERB`] 로 둔다: 지어낸 명령은 치면 실패하고,
+/// 빈 칸은 표 아래 한 줄(사람에게 알리고 건너뛴다)이 받는다. 세션 사이 편지는 우편함 에픽(moai-h8tn)이 `moai send`
+/// 를 세운 뒤 감독·브리프 에픽(moai-snyk)이 채운다 — 이 바이너리에 없는 명령을 가르치지 않는다.
+///
+/// 표를 싣는 것은 `moai` 와 `moai-supervise` 두 스킬이다([`verbs_section`]). 감독과 브리프의 본문을 이 표로 옮기는
+/// 것은 moai-snyk 의 몫이다.
+pub const VERBS: [Verb; 8] = [
+    Verb {
+        step: "Enter the worktree",
+        words: [
+            "`EnterWorktree(path)`",
+            "run every command from that directory",
+            "run every command from that directory",
+        ],
+    },
+    Verb {
+        step: "Come back to the root",
+        words: ["`ExitWorktree(keep)`", "run every command from the root", "run every command from the root"],
+    },
+    Verb {
+        step: "Ask the person watching",
+        words: ["`AskUserQuestion`", "`request_user_input`", "ask in the conversation and wait"],
+    },
+    REVIEW_VERB,
+    Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
+    Verb { step: "Clear the window (the person, or a supervisor on tmux)", words: ["`/clear`", "`/new`", NO_VERB] },
+    Verb { step: "Message another session", words: ["`SendMessage`", NO_VERB, NO_VERB] },
+    Verb { step: "Stop what a review left running", words: ["`TaskStop`", NO_VERB, NO_VERB] },
+];
+
+/// 낱말표 절 — `moai` 와 `moai-supervise` 두 스킬이 같은 글을 싣는다(사용자 결정 2026-10-04). 머리까지 여기서 낸다 —
+/// 열의 차례는 [`VENDORS`] 에 있어, 머리를 표면에 따로 적으면 열을 바꿔 끼워도 머리가 엉뚱한 열을 이름 짓는다
+/// ([`difficulty_table`] 이 한 번 겪은 자리다).
+fn verbs_section() -> String {
+    let head = format!("| Step | {} |", VENDORS.join(" | "));
+    let rule = format!("|---|{}", "---|".repeat(VENDORS.len()));
+    let rows: Vec<String> = VERBS.iter().map(|v| format!("| {} | {} |", v.step, v.words.join(" | "))).collect();
+    format!(
+        r#"## Words per agent
+
+moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
+are named by what they do. Each agent types a step its own way — read your own column.
+
+{head}
+{rule}
+{rows}
+
+A `{NO_VERB}` is a step that agent does not have, or one moai does not know yet: tell the
+person watching and go on without it."#,
+        rows = rows.join("\n")
+    )
+}
+
 /// 규칙 다섯. 제목은 `RULES`, 리뷰 걸음은 `REVIEW_STEPS` 에서 온다.
 fn rules() -> String {
     let [one, two, three, four, five] = RULES;
     let steps = indent(REVIEW_STEPS, "  ");
     let make = make_review("--parent <the issue>");
+    let review = REVIEW_VERB.words[0];
     format!(
         r#"**1. {one}.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -876,8 +952,9 @@ anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. {three}.** Before you call `/code-review`, create a review issue tied to
-what you are reviewing.
+**3. {three}.** Before you call a review, create a review issue tied to
+what you are reviewing. The review is {review} in Claude Code; the other agents'
+words are under "Words per agent" in the `moai` skill.
 
     {make}
 {steps}
@@ -1066,13 +1143,16 @@ Whoever creates an issue is its assignee, for free.
 
 {rules}
 
+{verbs}
+
 ## Before you close the session
 
 {CLOSING}
 
 Every command and the `--from` syntax are in `references/commands.md`.
 "#,
-        rules = rules()
+        rules = rules(),
+        verbs = verbs_section()
     )
 }
 
@@ -1571,6 +1651,7 @@ pub fn supervise() -> String {
     let reclaim_model = indent(&model_line(), "      ");
     let reclaim_check = indent(BRANCH_CHECK, "      ");
     let reclaim_shapes = indent(GIT_SHAPES, "      ");
+    let verbs = verbs_section();
     format!(
         r#"---
 name: moai-supervise
@@ -1609,6 +1690,8 @@ accident. Ask the person to put the root on a branch, and stop.
 Fill the name you read into `<base branch>` in the commands below and in the text you
 send the worker. **The worker does not read it again** — read inside a worktree, it
 gives that worktree's own branch.
+
+{verbs}
 
 ## One round
 
@@ -4453,5 +4536,58 @@ sys.exit(1 if bad else 0)
             };
             return (!tag.is_empty()).then_some(tag);
         }
+    }
+
+    /// **Claude 전용 걸음은 다 표의 줄이다**(moai-xs2h.r2d). 에픽이 든 일곱 걸음(과 짝인 `ExitWorktree`)이 Claude
+    /// 열에 서고, 다른 두 열은 그 낱말을 하나도 안 쓴다 — Codex 창에 `EnterWorktree` 를 치라고 하면 그 걸음이 그냥
+    /// 실패한다. 칸이 빈 글이면 표가 아무것도 안 가르치니 빈 칸은 [`NO_VERB`] 로 적혀야 한다.
+    #[test]
+    fn the_words_table_splits_every_claude_only_step() {
+        let claude_only = [
+            "EnterWorktree",
+            "ExitWorktree",
+            "AskUserQuestion",
+            "/code-review",
+            "/model",
+            "/clear",
+            "SendMessage",
+            "TaskStop",
+        ];
+        for word in claude_only {
+            let row =
+                VERBS.iter().find(|v| v.words[0].contains(word)).unwrap_or_else(|| panic!("{word} 의 줄이 표에 없다"));
+            for (vendor, cell) in VENDORS.iter().zip(row.words).skip(1) {
+                // `/model` 은 Codex 도 같은 낱말이다 — 그 하나만 같은 글을 받는다.
+                if word != "/model" {
+                    assert!(!cell.contains(word), "{vendor} 열에 Claude 의 {word} 가 섰다 — {}", row.step);
+                }
+            }
+        }
+        for v in &VERBS {
+            for (vendor, cell) in VENDORS.iter().zip(v.words) {
+                assert!(!cell.trim().is_empty(), "{vendor} 의 `{}` 칸이 비었다 — 없으면 {NO_VERB} 로 적는다", v.step);
+            }
+        }
+    }
+
+    /// **표는 두 스킬에 같은 글로 서고, 규칙 3 이 그것을 가리킨다**(사용자 결정 2026-10-04). 규칙 3 은 AGENTS 블록에도
+    /// 서는데 그 블록은 세 에이전트가 다 읽는다 — `/code-review` 하나만 대던 판은 Codex 창에 없는 명령을 시켰다. 가리키는
+    /// 절 이름과 표의 머리가 갈리면 가리킨 자리가 없다.
+    #[test]
+    fn the_skills_carry_the_words_table_and_rule_three_points_at_it() {
+        let section = verbs_section();
+        let title = section.lines().next().unwrap().trim_start_matches("## ");
+        assert!(skill().contains(&section), "moai 스킬에 낱말표가 없다");
+        assert!(supervise().contains(&section), "감독 스킬에 낱말표가 없다");
+        let head = section.lines().find(|l| l.starts_with("| Step |")).expect("표 머리가 없다");
+        for vendor in VENDORS {
+            assert!(head.contains(vendor), "표 머리에 {vendor} 열이 없다 — {head}");
+        }
+        assert!(section.contains(&format!("A `{NO_VERB}` is")), "빈 칸을 어떻게 읽는지 안 말한다");
+        let three = rules();
+        let three = &three[three.find("**3.").unwrap()..three.find("**4.").unwrap()];
+        assert!(three.contains(&format!("\"{title}\"")), "규칙 3 이 낱말표를 안 가리킨다 — {three}");
+        assert!(three.contains(REVIEW_VERB.words[0]), "규칙 3 이 Claude 의 리뷰 낱말을 잃었다 — {three}");
+        assert!(VERBS.iter().any(|v| v.step == REVIEW_VERB.step), "규칙 3 이 대는 리뷰 걸음이 표에 없다");
     }
 }
