@@ -1214,7 +1214,13 @@ pub enum Wiki {
     FocusNext,
     /// 그쪽 칸으로 — `Ctrl-w h`(목록)·`Ctrl-w l`(본문). 목록이 늘 왼쪽이다.
     Focus(Side),
-    /// 걸린 찾기를 풀고, 없으면 창을 닫는다(2026-10-04 사용자 결정) — 건너온 자취가 남았어도 닫는다.
+    /// 본문의 다음 링크를 고른다 — `Tab`(2026-10-04 사용자 요청, moai-p61w). 끝에서 처음으로 돌고, 어느 칸에서 쳐도
+    /// 본문 칸으로 간다. 골라진 링크에서 `Enter` 가 그리로 간다.
+    NextLink,
+    /// 본문의 앞 링크를 고른다 — `Shift-Tab`. 처음에서 끝으로 돈다.
+    PrevLink,
+    /// 골라진 링크를 걷고, 없으면 걸린 찾기를 풀고, 그것도 없으면 창을 닫는다(2026-10-04 사용자 결정) — 건너온 자취가
+    /// 남았어도 닫는다.
     Close,
 }
 
@@ -1252,14 +1258,17 @@ pub const WIKI: &[Bind<Wiki>] = {
         row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(NextLink, Some("Tab"), Key::unshift(C::Tab)),
+        row!(PrevLink, Some("Shift-Tab"), Key::shift(C::Tab)),
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
     ]
 };
 
 impl Wiki {
     /// 바의 낱말. `on_page` 는 포커스가 본문 칸인가 — `Enter`·이동·칸 옮기기가 그것으로 갈린다. `searched` 는 찾기가
-    /// 걸려 있는가 — Esc 가 그것을 푼다.
-    pub fn what(self, on_page: bool, searched: bool, lang: Lang) -> &'static str {
+    /// 걸려 있는가, `picked` 는 본문의 링크가 골라졌는가 — Esc 가 그것을 푼다(링크가 먼저다). 골라진 링크의 `Enter` 는
+    /// 낱말이 아니라 그 대상을 대므로 바가 따로 짓는다(`draw::wiki_keys`).
+    pub fn what(self, on_page: bool, searched: bool, picked: bool, lang: Lang) -> &'static str {
         match self {
             Wiki::Step(_) if on_page => say(lang, "tui.act.scroll"),
             Wiki::Step(_) => say(lang, "tui.act.move"),
@@ -1269,6 +1278,9 @@ impl Wiki {
             Wiki::Search => say(lang, "tui.act.grep"),
             Wiki::FocusNext | Wiki::Focus(_) if on_page => say(lang, "tui.wiki.to_list"),
             Wiki::FocusNext | Wiki::Focus(_) => say(lang, "tui.wiki.to_page"),
+            Wiki::NextLink => say(lang, "tui.wiki.next_link"),
+            Wiki::PrevLink => say(lang, "tui.wiki.prev_link"),
+            Wiki::Close if picked => say(lang, "tui.wiki.unpick"),
             Wiki::Close if searched => say(lang, "tui.act.clear_filter"),
             Wiki::Close => say(lang, "tui.act.close"),
         }
@@ -2263,7 +2275,7 @@ mod tests {
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "field to type a path"),
         // 위키 창(WIKI)과 Enter·Esc·이동키를 나눠 쓴다 — 여기 적힌 Enter 는 고르는 Enter, Esc 는 고르기 창을 닫는 Esc 다.
-        ("LINKS", WIKIWIN, "On the page, Enter opens"),
+        ("LINKS", WIKIWIN, "On the page with no link picked, Enter opens"),
     ];
 
     /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.

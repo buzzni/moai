@@ -17,8 +17,14 @@
 //! 뒤에 이 페이지를 가리키는 페이지(역링크, `← 제목  슬러그`)를 세운다(2026-10-04 사용자 결정, moai-ogaw — 새 키 없이
 //! 한 창이다). 페이지를 고르면 그리로 건너가고, id 를 고르면 창을 닫고 그 줄에 선다(`App::land` — 한눈 보기에서 열었으면 그 프로젝트로 들어가
 //! 선다, 2026-10-04 사용자 결정). 풀리지 않는 링크와 위키 밖 주소, 트래커에 없는 id 도 창에 서고 고르면 알림만 낸다 —
-//! 말없이 빠지면 그 링크가 왜 안 가는지 볼 자리가 없다. 본문 안에서 링크를 `Tab` 으로 도는 길은 기획이 안 골랐다: 펴진
-//! 줄에는 주소가 표식으로만 남아 다시 세야 한다(moai-qunn 노트 C).
+//! 말없이 빠지면 그 링크가 왜 안 가는지 볼 자리가 없다.
+//!
+//! **본문의 링크는 누르거나 `Tab` 으로 고른다**(2026-10-04 사용자 요청·결정, moai-p61w). 기획은 한때 이 길을 안 골랐다 —
+//! 펴진 줄에는 주소가 표식으로만 남아 다시 세야 했다(moai-qunn 노트 C). 이제 펴는 쪽이 링크마다 그 칸을 낸다
+//! (`markdown::link_cells`, 그린 한 벌의 `draw::WikiLaid::cells`) — 칠하는 칸·누른 자리·`Tab` 의 차례가 다 그 하나에서
+//! 온다. `Tab`·`Shift-Tab` 은 링크를 돌며 반전으로 칠하고(끝에서 처음으로 돈다), 골라진 링크에서 `Enter` 는 그리로
+//! 간다 — 안 골라졌으면 `Enter` 는 위의 고르기 창이다. 링크를 누르면 고르고 곧 간다. 갈 데 없는 링크(밖·없는 페이지)는
+//! 고르기 창처럼 알림으로 까닭만 댄다. 이슈 id 는 고르지 않는다 — 고르기 창에 선다.
 //!
 //! **`#앵커` 가 붙은 링크는 그 머리글로 간다**(2026-10-04 사용자 결정, moai-tllo) — 그 머리글을 본문 칸 맨 위로 굴리고 그
 //! 줄 머리에 `▸` 를 단다. 본문을 굴리거나 떠나면 걷힌다. 앵커는 `wiki::anchor` 가 짓는 것 하나라 `moai wiki ls` 가 푸는
@@ -102,6 +108,11 @@ pub struct Window {
     titles: Titles,
     /// 링크·id·역링크 고르기 창 — 본문 칸의 `Enter` 가 연다.
     pub choose: Option<Choose>,
+    /// `Tab` 으로 골라진 본문의 링크 — 본문에서 링크가 열린 차례([`crate::markdown::Span::link`], moai-p61w). 그 칸이
+    /// 반전으로 칠해지고 `Enter` 가 그리로 간다. **보이는 하이라이트가 곧 `Enter` 가 갈 곳이다** — 굴려 화면 밖으로
+    /// 나가면 걷히고([`Window::roll_page`]), 다른 페이지로 가거나 원문을 보면 걷힌다. 링크의 칸은 그림이 편 한 벌
+    /// ([`Window::laid`])에서 읽는다.
+    picked: Option<usize>,
 }
 
 /// 링크와 id, 이 페이지를 가리키는 페이지를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
@@ -177,6 +188,91 @@ impl Window {
             typing: None,
             titles,
             choose: None,
+            picked: None,
+        }
+    }
+
+    /// 지금 페이지를 편 한 벌 — 그림이 다른 페이지를 펴 둔 채면 없다(키가 페이지를 바꾸고 아직 안 그렸다).
+    fn laid_here(&self) -> Option<&super::draw::WikiLaid> {
+        let slug = self.current()?.slug.as_str();
+        self.laid.as_ref().filter(|l| l.slug == slug)
+    }
+
+    /// 지금 페이지의 링크 칸 — 펴 둔 한 벌이 없으면 빈다.
+    fn cells(&self) -> &[crate::markdown::LinkCell] {
+        self.laid_here().map_or(&[], |l| l.cells.as_slice())
+    }
+
+    /// 골라진 링크 — 지금 편 한 벌에 그 칸이 있을 때만이다. 그림이 칠하고 바가 대상을 댄다.
+    pub fn picked(&self) -> Option<usize> {
+        self.picked.filter(|k| self.cells().iter().any(|c| c.link == *k))
+    }
+
+    /// 그 링크의 칸 하나라도 본문 칸에 보이는가.
+    fn shows_link(&self, k: usize) -> bool {
+        self.cells().iter().any(|c| c.link == k && self.page.shows(c.line, 1))
+    }
+
+    /// 지금 페이지의 원문을 보고 있는가 — 원문에는 링크 칸이 없다. `Tab` 이 그렇다고 댈지를 가른다.
+    pub(super) fn raw_here(&self) -> bool {
+        self.laid_here().is_some_and(|l| l.raw)
+    }
+
+    /// `Tab`(`back` 이면 `Shift-Tab`) — 다음 링크를 골라 칠하고 그 링크가 보이게 굴린다. 골라진 링크가 보이면 그 다음
+    /// (앞)이고, 끝에서 처음으로 돈다. 골라진 것이 없거나 화면 밖이면 **화면에 선 첫(끝) 링크**다 — 굴려 읽던 자리에서
+    /// 시작해야 `Tab` 한 번이 저 위의 링크로 화면을 끌어가지 않는다. 고를 링크가 없으면 거짓이다 — 부르는 쪽이 알린다.
+    pub(super) fn pick_step(&mut self, back: bool) -> bool {
+        let cells = self.cells();
+        // 링크의 차례 — 칸이 줄 차례라 처음 선 칸의 차례가 곧 읽는 차례다.
+        let mut order: Vec<usize> = Vec::new();
+        for c in cells {
+            if !order.contains(&c.link) {
+                order.push(c.link);
+            }
+        }
+        if order.is_empty() {
+            return false;
+        }
+        let top = self.page.offset();
+        let starts = |k: usize| cells.iter().find(|c| c.link == k).map_or(0, |c| c.line);
+        let next = match self.picked().filter(|&k| self.shows_link(k)).and_then(|k| order.iter().position(|&o| o == k))
+        {
+            Some(at) if back => order[(at + order.len() - 1) % order.len()],
+            Some(at) => order[(at + 1) % order.len()],
+            None => {
+                let seen: Vec<usize> = order.iter().copied().filter(|&k| self.shows_link(k)).collect();
+                let near = if back {
+                    seen.last().copied().or_else(|| order.iter().rev().copied().find(|&k| starts(k) < top))
+                } else {
+                    seen.first().copied().or_else(|| order.iter().copied().find(|&k| starts(k) >= top))
+                };
+                near.unwrap_or(if back { order[order.len() - 1] } else { order[0] })
+            }
+        };
+        let lines: Vec<usize> = cells.iter().filter(|c| c.link == next).map(|c| c.line).collect();
+        let (first, last) = (lines[0], lines[lines.len() - 1]);
+        self.picked = Some(next);
+        self.focus = Side::Page;
+        self.roll_page(|s| s.reveal_span(first, last - first + 1));
+        true
+    }
+
+    /// 본문의 그 링크가 가는 곳 — 고르기 창의 링크와 같은 자([`Window::aim`])로 푼다. 편 한 벌에 그 링크가 없으면 없다.
+    pub(super) fn link_target(&self, k: usize) -> Option<Target> {
+        let dest = self.laid_here()?.links.get(k)?.clone();
+        Some(self.aim(self.current()?, String::new(), dest))
+    }
+
+    /// 링크 하나를 고를 것으로 — 페이지로 풀리면 그 페이지가 있는가와 그 머리글이 있는가를, 아니면 위키 밖이다. **고르기
+    /// 창과 본문의 링크가 이것 하나로 푼다** — 둘이 저마다 풀면 같은 링크가 창에서는 `(없음)` 인데 누르면 가는 일이 선다.
+    fn aim(&self, here: &Page, text: String, dest: String) -> Target {
+        match crate::wiki::target(&here.slug, &dest) {
+            Some(crate::wiki::Aim { to, anchor }) => {
+                let page = self.pages.iter().find(|q| q.slug == to);
+                let held = anchor.as_deref().zip(page).and_then(|(a, q)| q.holds(a));
+                Target::Page { text, found: page.is_some(), to, anchor, held }
+            }
+            None => Target::Out { text, dest },
         }
     }
 
@@ -186,14 +282,7 @@ impl Window {
         let Some(p) = self.current() else { return false };
         let mut items: Vec<Target> = Vec::new();
         for (text, dest) in p.body.as_deref().map(crate::wiki::links_in).unwrap_or_default() {
-            items.push(match crate::wiki::target(&p.slug, &dest) {
-                Some(crate::wiki::Aim { to, anchor }) => {
-                    let page = self.pages.iter().find(|q| q.slug == to);
-                    let held = anchor.as_deref().zip(page).and_then(|(a, q)| q.holds(a));
-                    Target::Page { text, found: page.is_some(), to, anchor, held }
-                }
-                None => Target::Out { text, dest },
-            });
+            items.push(self.aim(p, text, dest));
         }
         for r in &p.issues {
             let title = r.exists.then(|| self.titles.get(&r.id).cloned().unwrap_or_default());
@@ -252,6 +341,7 @@ impl Window {
                 self.cursor = 0;
                 self.page.rewind();
                 self.landed = None;
+                self.picked = None;
             }
         }
     }
@@ -347,11 +437,17 @@ impl Window {
 
     /// 본문 칸을 굴린다 — **굴렀으면** 건너온 머리글의 `▸` 를 걷는다([`Window::roll_list`] 와 같은 규칙). 페이지 끝
     /// 가까이의 머리글로 왔을 때 그 표시가 서는데, 거기서 안 구르는 `j` 가 표시만 걷으면 어느 머리글로 왔는지를 잃는다.
+    ///
+    /// 골라진 링크가 화면 밖으로 나갔으면 고름도 걷는다(moai-p61w, 일꾼이 정했다) — 안 보이는 링크로 `Enter` 가 가면
+    /// 사람은 무엇을 골랐는지 모른 채 건너간다. 화면 안에 남았으면 그대로다: 고르고 몇 줄 읽어 내려가는 손짓이 흔하다.
     fn roll_page(&mut self, roll: impl FnOnce(&mut Scroll)) {
         let was = self.page.offset();
         roll(&mut self.page);
         if self.page.offset() != was {
             self.landed = None;
+            if self.picked.is_some_and(|k| !self.shows_link(k)) {
+                self.picked = None;
+            }
         }
     }
 
@@ -375,6 +471,7 @@ impl Window {
         if at != self.cursor {
             self.page.rewind();
             self.landed = None;
+            self.picked = None;
         }
         self.cursor = at;
     }
@@ -410,8 +507,10 @@ impl Window {
             return false;
         }
         self.trail.push((here, read));
-        // 같은 페이지로 가는 링크(`#앵커` 로 제 머리글에 가는 것)도 자취에 남는다 — 되돌아가면 읽던 줄로 온다.
+        // 같은 페이지로 가는 링크(`#앵커` 로 제 머리글에 가는 것)도 자취에 남는다 — 되돌아가면 읽던 줄로 온다. 고름은
+        // 걷는다 — 같은 페이지라도 건너간 자리에서는 고른 링크가 화면 밖이다.
         self.page.rewind();
+        self.picked = None;
         let heading = anchor.and_then(|a| self.current()?.headings.iter().position(|h| h.anchor == a));
         self.landed = heading.map(|heading| Landed { slug: to.to_string(), heading, settled: false });
         true
@@ -423,6 +522,7 @@ impl Window {
         while let Some((slug, read)) = self.trail.pop() {
             if self.land_on(&slug) {
                 self.landed = None;
+                self.picked = None;
                 self.page.rewind();
                 self.page.by(read as isize);
                 return true;
@@ -560,7 +660,6 @@ impl App {
     ///
     /// **이 키가 알림을 걷는가**를 답한다([`App::wiki_key`] 와 같은 규칙) — 둘째 키를 기다리는 `g` 만 거짓이다.
     fn choose_key(&mut self, k: KeyEvent) -> bool {
-        let lang = self.site.lang;
         let Mode::Wiki(w) = &mut self.mode else { return false };
         let Some(c) = &mut w.choose else { return false };
         let picked = match c.chord.feed(LINKS, k) {
@@ -578,35 +677,55 @@ impl App {
             None => return c.chord.held().is_empty(),
         };
         w.choose = None;
+        if let Some(t) = picked {
+            self.take_target(t);
+        }
+        true
+    }
+
+    /// 본문의 그 링크로 간다 — 골라진 링크의 `Enter` 와 링크를 누른 것이 이 길이다(moai-p61w). 먼저 그 링크를 고른다:
+    /// 갈 데 없는 링크는 알림만 서고 하이라이트가 남아 무엇을 눌렀는지가 보인다. 가면 고름은 건너간 자리에서 걷힌다.
+    pub(super) fn go_link(&mut self, k: usize) {
+        let Mode::Wiki(w) = &mut self.mode else { return };
+        let Some(t) = w.link_target(k) else { return };
+        w.picked = Some(k);
+        w.focus = Side::Page;
+        self.take_target(t);
+    }
+
+    /// 고른 것 하나로 간다 — 페이지면 그리로 건너가고, id 면 창을 닫고 그 줄에 서며, 갈 데가 없는 것은 알림으로 까닭을
+    /// 댄다. **고르기 창과 본문의 링크가 이 길 하나로 간다**(moai-p61w) — 같은 링크가 창에서 고를 때와 본문에서 누를 때
+    /// 다른 일을 하지 않는다.
+    fn take_target(&mut self, picked: Target) {
+        let lang = self.site.lang;
+        let Mode::Wiki(w) = &mut self.mode else { return };
         // 말의 키는 글자째 적는다 — `i18n` 의 시험이 `say(lang, "…")` 을 훑어 표와 견준다.
         let one = crate::text::one_line;
         match picked {
-            Some(Target::Page { to, found: true, anchor, held, .. }) => {
+            Target::Page { to, found: true, anchor, held, .. } => {
                 w.follow_to(&to, anchor.as_deref());
                 if let (Some(a), Some(false)) = (anchor, held) {
                     self.notice =
                         Some(fill(say(lang, "tui.wiki.no_heading"), &[("to", &one(&to)), ("anchor", &one(&a))]));
                 }
             }
-            Some(Target::LinkedFrom { slug: to, .. }) => {
+            Target::LinkedFrom { slug: to, .. } => {
                 w.follow(&to);
             }
-            Some(Target::Page { to, found: false, .. }) => {
+            Target::Page { to, found: false, .. } => {
                 self.notice = Some(fill(say(lang, "tui.wiki.missing_page"), &[("to", &one(&to))]));
             }
-            Some(Target::Out { dest, .. }) => {
+            Target::Out { dest, .. } => {
                 self.notice = Some(fill(say(lang, "tui.wiki.outside"), &[("dest", &one(&dest))]));
             }
-            Some(Target::Issue { id, title: None }) => {
+            Target::Issue { id, title: None } => {
                 self.notice = Some(fill(say(lang, "tui.wiki.missing_id"), &[("id", &one(&id))]));
             }
-            Some(Target::Issue { id, title: Some(_) }) => {
+            Target::Issue { id, title: Some(_) } => {
                 let from = w.from.clone();
                 self.wiki_land(&id, from);
             }
-            None => {}
         }
-        true
     }
 
     /// 고른 id 의 줄에 선다 — 창을 닫고 목록으로 돌아가 `App::land` 가 그 줄의 집으로 간다. **한눈 보기에서 연
@@ -704,9 +823,11 @@ impl App {
                 Some(Browse::Raw) => {
                     self.raw = !self.raw;
                     self.detail.rewind();
-                    // 건너온 머리글이 있으면 다시 편 그림이 그 줄로 굴린다(`Window::resettle`).
+                    // 건너온 머리글이 있으면 다시 편 그림이 그 줄로 굴린다(`Window::resettle`). 고른 링크는 걷는다 — 원문에는
+                    // 링크 칸이 없고, 돌아온 그린 글에서 첫 줄로 간 화면 밖의 링크가 다시 살면 안 보이는 고름이 선다.
                     if let Mode::Wiki(w) = &mut self.mode {
                         w.page.rewind();
+                        w.picked = None;
                     }
                     true
                 }
@@ -716,11 +837,22 @@ impl App {
         let Mode::Wiki(w) = &mut self.mode else { return false };
         match w.chord.feed(WIKI, k) {
             Some(keys::Wiki::Step(m)) => w.step(m),
-            // 목록에서는 본문 칸으로 — 본문은 이미 커서의 페이지다. 본문에서는 고르기 창이다.
+            // 목록에서는 본문 칸으로 — 본문은 이미 커서의 페이지다. 본문에서는 골라진 링크로 가고, 안 골라졌으면 고르기
+            // 창이다(2026-10-04 사용자 결정, moai-p61w).
             Some(keys::Wiki::Enter) if w.focus == Side::List => w.focus = Side::Page,
-            Some(keys::Wiki::Enter) => {
-                if !w.open_links() {
-                    self.notice = Some(say(self.site.lang, "tui.wiki.no_links").to_string());
+            Some(keys::Wiki::Enter) => match w.picked() {
+                Some(k) => self.go_link(k),
+                None if !w.open_links() => self.notice = Some(say(self.site.lang, "tui.wiki.no_links").to_string()),
+                None => {}
+            },
+            // 어느 칸에서 쳐도 본문의 링크를 고르고 본문 칸으로 간다 — 고를 것이 본문에만 있다.
+            // 고를 링크가 없으면 왜 없는지 댄다 — 원문 보기에는 링크 칸이 없다(그린 글로 돌아가면 선다).
+            Some(act @ (keys::Wiki::NextLink | keys::Wiki::PrevLink)) => {
+                if !w.pick_step(act == keys::Wiki::PrevLink) {
+                    let lang = self.site.lang;
+                    let said =
+                        if w.raw_here() { say(lang, "tui.wiki.raw_no_marks") } else { say(lang, "tui.wiki.no_marks") };
+                    self.notice = Some(said.to_string());
                 }
             }
             // 자취가 없으면 아무 일도 없다 — 바도 그때는 `Bksp` 를 안 댄다.
@@ -732,7 +864,9 @@ impl App {
             Some(keys::Wiki::Focus(side)) => {
                 w.focus = if side == keys::Side::Left { Side::List } else { Side::Page };
             }
-            // 걸린 찾기를 먼저 푼다 — 본 화면의 Esc 가 거름망을 푸는 것과 같은 손이다(2026-10-04 사용자 결정).
+            // 고른 링크를 먼저 걷고(moai-p61w, 일꾼이 정했다 — 가장 나중에 선 것부터 푼다), 그다음 걸린 찾기를 푼다 — 본
+            // 화면의 Esc 가 거름망을 푸는 것과 같은 손이다(2026-10-04 사용자 결정).
+            Some(keys::Wiki::Close) if w.picked().is_some() => w.picked = None,
             Some(keys::Wiki::Close) if w.searched() => w.clear_search(),
             Some(keys::Wiki::Close) => self.mode = Mode::Browse,
             // 뜻 없는 키는 열을 버리므로([`keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
@@ -1010,7 +1144,7 @@ pub(super) mod tests {
             let screen = draw::tests::render(&mut a, w, h).join("\n");
             assert!(matches!(a.mode, Mode::Wiki(_)), "{w}x{h} 에서 창이 닫혔다");
             if w < 20 {
-                assert_eq!(a.drawn.wiki.and_then(|d| d.page), None, "{w}칸에 본문이 섰다\n{screen}");
+                assert_eq!(a.drawn.wiki.clone().and_then(|d| d.page), None, "{w}칸에 본문이 섰다\n{screen}");
             }
         }
         // 좁아 본문이 접히면 포커스는 목록으로 돌아온다 — 안 보이는 칸을 굴리는 키가 생기지 않게.
@@ -1083,7 +1217,7 @@ pub(super) mod tests {
         let (_s, mut a) = wiki_app("mouse", PAGES);
         a.hit("SPC g w");
         let _ = draw::tests::render(&mut a, 100, 24);
-        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        let d = a.drawn.wiki.clone().expect("창의 자리가 안 섰다");
         let page = d.page.expect("본문 칸이 안 섰다");
         // 목록의 셋째 줄 — 낮은 창에서 굴릴 만큼 긴 Guide 다.
         click(&mut a, d.rows.x + 2, d.rows.y + 2);
@@ -1094,13 +1228,13 @@ pub(super) mod tests {
         wheel(&mut a, false, d.rows.x + 2, d.rows.y);
         assert_eq!((window(&a).cursor, window(&a).focus), (2, Side::Page), "목록 위의 휠이 커서나 포커스를 옮겼다");
         let _ = draw::tests::render(&mut a, 100, 8);
-        let page = a.drawn.wiki.and_then(|d| d.page).expect("낮은 창에 본문 칸이 안 섰다");
+        let page = a.drawn.wiki.clone().and_then(|d| d.page).expect("낮은 창에 본문 칸이 안 섰다");
         wheel(&mut a, true, page.x + 3, page.y + 1);
         assert!(window(&a).page.offset() > 0, "본문 위의 휠이 안 굴렸다");
         // 메뉴가 열린 채 목록 첫 줄을 누르면 메뉴가 닫히고 커서가 간다.
         a.hit("SPC");
         let _ = draw::tests::render(&mut a, 100, 24);
-        let d = a.drawn.wiki.unwrap();
+        let d = a.drawn.wiki.clone().unwrap();
         click(&mut a, d.rows.x + 2, d.rows.y);
         assert!(!super::super::menu::open(&a.chord), "창을 눌렀는데 메뉴가 안 닫혔다");
         assert_eq!((window(&a).cursor, window(&a).focus), (0, Side::List));
@@ -1128,7 +1262,7 @@ pub(super) mod tests {
         let (_s, mut a) = wiki_app("roll", &files);
         a.hit("SPC g w");
         let _ = draw::tests::render(&mut a, 100, 12);
-        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        let d = a.drawn.wiki.clone().expect("창의 자리가 안 섰다");
         let page = d.page.expect("본문 칸이 안 섰다");
         wheel(&mut a, true, page.x + 3, page.y + 1);
         let read = window(&a).page.offset();
@@ -1180,7 +1314,7 @@ pub(super) mod tests {
         let (_s, mut a) = wiki_app("click-roll", &files);
         a.hit("SPC g w");
         let _ = draw::tests::render(&mut a, 100, 12);
-        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        let d = a.drawn.wiki.clone().expect("창의 자리가 안 섰다");
         wheel(&mut a, true, d.rows.x + 2, d.rows.y);
         assert_eq!(window(&a).list.offset(), 3, "시험의 전제 — 휠이 목록을 굴렸다");
         click(&mut a, d.rows.x + 2, d.rows.y + 1);
@@ -1551,5 +1685,168 @@ pub(super) mod tests {
         let notice = a.notice.clone().unwrap_or_default();
         assert!(notice.contains("argos-0001") && notice.contains("SPC v a"), "{notice:?}");
         assert!(!notice.contains("Esc"), "거름망이 없는데 Esc 를 댔다: {notice:?}");
+    }
+
+    /// 본문에 링크 셋 — 접히는 한글 페이지 링크, 위키 밖 주소, 없는 페이지 — 과 그 링크가 가는 페이지(moai-p61w).
+    const LINKED: &[(&str, &str)] = &[
+        (
+            "README.md",
+            "# Home\n\n앞 [한글 링크 글이 길게 이어진다](guide.md) 뒤.\n\n[밖](https://example.com) 과 [없음](gone.md).\n",
+        ),
+        ("guide.md", "# Guide\n\nThe guide.\n"),
+    ];
+
+    /// 그 줄에서 글자가 시작하는 칸 — 두 칸짜리 글자의 뒤 칸은 칠이 안 붙으니 견주지 않는다.
+    fn starts(buf: &ratatui::buffer::Buffer, y: u16) -> Vec<u16> {
+        let mut out = Vec::new();
+        let mut x = 0;
+        while x < buf.area.width {
+            out.push(x);
+            x += crate::text::width(buf[(x, y)].symbol()).max(1) as u16;
+        }
+        out
+    }
+
+    /// **칠한 칸과 누르면 그 링크인 칸이 같은 자리인가**(moai-p61w) — 본문 칸 안에서 반전으로 칠한 칸과, 지난 그림이 낸
+    /// 골라진 링크의 맞히는 칸([`super::super::mouse::WikiAt::links`])을 글자가 시작하는 칸끼리 견준다. 칠한 글을 빈칸
+    /// 없이 이어 돌려준다.
+    fn agree(a: &App, buf: &ratatui::buffer::Buffer) -> String {
+        use ratatui::style::Modifier;
+        use std::collections::BTreeSet;
+        let d = a.drawn.wiki.clone().expect("창의 자리가 안 섰다");
+        let page = d.page.expect("본문 칸이 안 섰다");
+        let picked = window(a).picked();
+        let (mut painted, mut aimed) = (BTreeSet::new(), BTreeSet::new());
+        for y in page.y + 1..page.bottom().saturating_sub(1) {
+            for x in starts(buf, y).into_iter().filter(|x| (page.x + 1..page.right() - 1).contains(x)) {
+                if buf[(x, y)].modifier.contains(Modifier::REVERSED) {
+                    painted.insert((y, x));
+                }
+                if d.links.iter().any(|(r, k)| Some(*k) == picked && r.contains((x, y).into())) {
+                    aimed.insert((y, x));
+                }
+            }
+        }
+        assert_eq!(painted, aimed, "칠한 칸과 맞히는 칸이 갈렸다\n{}", draw::tests::lines_of(buf).join("\n"));
+        painted.iter().map(|&(y, x)| buf[(x, y)].symbol().to_string()).collect::<String>().split_whitespace().collect()
+    }
+
+    /// **`Tab` 과 누르기와 칠이 한 링크 지도를 읽는다**(2026-10-04 사용자 요청·결정, moai-p61w). `Tab` 은 본문 칸으로 가며
+    /// 화면의 첫 링크를 고르고, 끝에서 처음으로 돈다 — 밖 주소와 없는 페이지도 고른다. 골라진 링크는 반전이고 바가 그
+    /// 대상을 댄다. 접혀 두 줄에 선 한글 링크의 둘째 줄을 눌러도 그 링크로 가고, 갈 데 없는 링크를 누르면 알림만 서고
+    /// 칠이 남는다. Esc 는 고름을 먼저 걷는다.
+    #[test]
+    fn tab_click_and_the_highlight_read_one_link_map() {
+        let (_s, mut a) = wiki_app("links", LINKED);
+        a.hit("SPC g w");
+        let buf = draw::tests::render_buf(&mut a, 60, 20);
+        assert_eq!(agree(&a, &buf), "", "고르기 전에 칠했다");
+        a.hit("Tab");
+        assert_eq!((window(&a).focus, window(&a).picked()), (Side::Page, Some(0)));
+        let buf = draw::tests::render_buf(&mut a, 60, 20);
+        let lines = draw::tests::lines_of(&buf);
+        assert_eq!(agree(&a, &buf), "한글링크글이길게이어진다(guide.md)");
+        let d = a.drawn.wiki.clone().unwrap();
+        let rows: std::collections::BTreeSet<u16> = d.links.iter().filter(|(_, k)| *k == 0).map(|(r, _)| r.y).collect();
+        assert!(rows.len() >= 2, "링크가 안 접혔다 — 이 시험은 접힌 링크를 봐야 한다\n{}", lines.join("\n"));
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("Enter → guide") && bar.contains("Esc 고른 링크 걷기"), "{bar:?}");
+        a.hit("Tab");
+        let bar = draw::tests::render(&mut a, 60, 20).last().cloned().unwrap();
+        assert!(bar.contains("Enter → https://example.com (밖)"), "{bar:?}");
+        a.hit("Tab");
+        let bar = draw::tests::render(&mut a, 60, 20).last().cloned().unwrap();
+        assert!(bar.contains("Enter → gone (없음)"), "{bar:?}");
+        a.hit("Tab");
+        assert_eq!(window(&a).picked(), Some(0), "끝에서 처음으로 안 돌았다");
+        a.hit("Shift-Tab");
+        assert_eq!(window(&a).picked(), Some(2), "처음에서 끝으로 안 돌았다");
+        a.hit("Esc");
+        assert_eq!(
+            (window(&a).picked(), window(&a).focus),
+            (None, Side::Page),
+            "Esc 가 고름을 안 걷었거나 창을 닫았다"
+        );
+
+        // 접힌 둘째 줄을 누른다 — 칠한 칸과 같은 자리에서 잰 칸이다.
+        let _ = draw::tests::render(&mut a, 60, 20);
+        let d = a.drawn.wiki.clone().unwrap();
+        let second = d.links.iter().filter(|(_, k)| *k == 0).nth(1).unwrap().0;
+        click(&mut a, second.x + second.width / 2, second.y);
+        assert_eq!(slug(&a), "guide", "접힌 링크의 둘째 줄을 눌렀는데 안 갔다");
+        assert_eq!(window(&a).picked(), None, "건너간 페이지에 고름이 남았다");
+        a.hit("Bksp");
+        assert_eq!(slug(&a), "README");
+
+        // 링크 밖의 글을 누르면 포커스만 온다.
+        let _ = draw::tests::render(&mut a, 60, 20);
+        let d = a.drawn.wiki.clone().unwrap();
+        let page = d.page.unwrap();
+        click(&mut a, page.x + 3, page.y + 1);
+        assert_eq!((slug(&a), window(&a).picked()), ("README".to_string(), None), "링크 아닌 칸이 링크로 잡혔다");
+
+        // 갈 데 없는 링크 — 알림만 서고, 무엇을 눌렀는지 칠이 남는다.
+        let out = d.links.iter().find(|(_, k)| *k == 1).unwrap().0;
+        click(&mut a, out.x, out.y);
+        assert_eq!(slug(&a), "README");
+        assert_eq!(a.notice.as_deref(), Some("위키 밖 주소다: https://example.com"));
+        let buf = draw::tests::render_buf(&mut a, 60, 20);
+        assert_eq!(agree(&a, &buf), "밖(https://example.com)");
+
+        // 골라진 링크에서 Enter 는 그리로 간다.
+        a.hit("Esc Tab Enter");
+        assert_eq!(slug(&a), "guide", "골라진 링크로 Enter 가 안 갔다");
+    }
+
+    /// **링크 지도는 폭을 바꿔도, 원문을 봐도, 굴려도, 머리글에 `▸` 가 붙어도 칠과 맞힘이 갈리지 않는다**(moai-p61w). 폭이
+    /// 바뀌면 다시 편 칸이 서고, 원문에는 링크 칸이 없어 고름이 걷히고 `Tab` 이 그렇다고 댄다. 골라진 링크를 화면 밖으로
+    /// 굴리면 걷히고, 다음 `Tab` 은 화면의 첫 링크다. 앵커로 건너와 `▸` 가 붙은 머리글의 링크는 그 폭만큼 밀린 칸에서 칠하고
+    /// 맞힌다.
+    #[test]
+    fn the_link_map_holds_over_a_width_change_a_raw_toggle_a_scroll_and_a_landed_heading() {
+        let filler: String = (1..=30).map(|n| format!("Line {n:02}\n\n")).collect();
+        let readme = format!("# Home\n\n[아주 긴 한글 링크 글](guide.md#see-home) here.\n\n{filler}[last](guide.md)\n");
+        let guide = "# Guide\n\nTop.\n\n## See [home](README.md)\n\nEnd.\n";
+        let (_s, mut a) = wiki_app("map", &[("README.md", &readme), ("guide.md", guide)]);
+        // 링크 칸은 그림이 편 한 벌에서 읽는다 — 사람의 키는 늘 그린 화면 뒤에 온다.
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 60, 16);
+        a.hit("Tab");
+        for w in [60, 100, 44] {
+            let buf = draw::tests::render_buf(&mut a, w, 16);
+            assert_eq!(agree(&a, &buf), "아주긴한글링크글(guide.md#see-home)", "{w}칸");
+        }
+
+        a.hit("SPC v r Esc");
+        assert_eq!(window(&a).picked(), None, "원문으로 바꿨는데 고름이 남았다");
+        let _ = draw::tests::render(&mut a, 60, 16);
+        assert!(a.drawn.wiki.clone().unwrap().links.is_empty(), "원문에 링크 칸이 섰다");
+        a.hit("Tab");
+        assert_eq!(a.notice.as_deref(), Some("원문에는 링크 칸이 없다 — SPC v r 이 다시 그리고, Enter 가 링크를 댄다"));
+        a.hit("SPC v r Esc");
+        let _ = draw::tests::render(&mut a, 60, 16);
+        a.hit("Tab");
+        assert_eq!(window(&a).picked(), Some(0));
+        a.hit("G");
+        let _ = draw::tests::render(&mut a, 60, 16);
+        assert_eq!(window(&a).picked(), None, "화면 밖으로 굴린 링크가 골라진 채 남았다");
+        a.hit("Tab");
+        assert_eq!(window(&a).picked(), Some(1), "화면의 첫 링크가 아니라 저 위의 링크를 골랐다");
+        let buf = draw::tests::render_buf(&mut a, 60, 16);
+        assert_eq!(agree(&a, &buf), "last(guide.md)");
+
+        // 앵커로 건너와 `▸` 가 붙은 머리글의 링크.
+        a.hit("g g Tab Enter");
+        assert_eq!(slug(&a), "guide");
+        let buf = draw::tests::render_buf(&mut a, 60, 16);
+        assert!(draw::tests::lines_of(&buf).iter().any(|l| l.contains("▸ ## See home")), "머리글에 ▸ 가 안 붙었다");
+        a.hit("Tab");
+        let buf = draw::tests::render_buf(&mut a, 60, 16);
+        assert_eq!(agree(&a, &buf), "home(README.md)");
+        assert_eq!(window(&a).landed(), Some(1), "Tab 이 건너온 머리글의 표시를 걷었다 — 칸을 밀지 않고 견줬다");
+        let d = a.drawn.wiki.clone().unwrap();
+        let home = d.links[0].0;
+        click(&mut a, home.x, home.y);
+        assert_eq!(slug(&a), "README", "▸ 가 붙은 줄의 링크를 눌렀는데 안 갔다");
     }
 }

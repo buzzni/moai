@@ -61,7 +61,7 @@ pub struct Drawn {
 }
 
 /// 위키 창이 그린 자리 — `draw::wiki_window` 가 낸다.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WikiAt {
     /// 페이지 목록 — 테두리까지.
     pub list: Rect,
@@ -72,6 +72,9 @@ pub struct WikiAt {
     pub top: usize,
     /// 본문 칸 — 테두리까지. 좁아 안 섰으면 없다.
     pub page: Option<Rect>,
+    /// 본문 칸에 보이는 링크 칸과 그 링크(moai-p61w) — 본문에서 링크가 열린 차례다. 골라진 링크를 칠한 칸과 같은 자리에서
+    /// 잰다(`draw::shown_links`). 고르기 창이 본문을 덮었으면 비었다.
+    pub links: Vec<(Rect, usize)>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -210,6 +213,9 @@ impl App {
     /// 본문은 커서를 따라간다. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**(2026-10-04 사용자 결정 — 탐색기의
     /// 둘러보기와 같은 규칙, [`App::wheel`]). 칸 사이의 선은 이 창에서 끌리지 않는다 — 몫은 목록·상세의 것을 빌려 쓴다.
     ///
+    /// **본문의 링크를 누르면 그 링크로 간다**(2026-10-04 사용자 요청, moai-p61w) — 골라 `Enter` 를 친 것과 같은 길이다
+    /// (`App::go_link`). 맞히는 칸은 지난 프레임이 그린 링크 칸([`WikiAt::links`])이다.
+    ///
     /// **찾는 칸이나 고르기 창이 떠 있으면 버린다** — 그동안은 마우스를 놓는데([`App::wants_mouse`]), 놓는 글이 터미널에
     /// 닿기 전에 길에 있던 휠·누르기가 여기 닿는다. 받으면 고르기 창의 링크가 커서를 따라 바뀐 다른 페이지 머리 밑에
     /// 선다. 폼이 떠 있을 때 아래 갈래가 둘러보기 밖이라 버리는 것과 같은 자리다.
@@ -218,7 +224,7 @@ impl App {
         if !self.wants_mouse() {
             return;
         }
-        let Some(d) = self.drawn.wiki else { return };
+        let Some(d) = self.drawn.wiki.clone() else { return };
         let on = if d.page.is_some_and(|r| r.contains(at)) {
             Side::Page
         } else if d.list.contains(at) {
@@ -242,6 +248,9 @@ impl App {
                     if n < w.shown().len() {
                         w.move_to(n);
                     }
+                }
+                if let Some(&(_, k)) = d.links.iter().find(|(r, _)| on == Side::Page && r.contains(at)) {
+                    self.go_link(k);
                 }
             }
         }

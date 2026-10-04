@@ -1046,15 +1046,15 @@ fn wiki_window(
         w.focus = super::wiki::Side::List;
     }
     let rows = wiki_list(f, w, list_at, lang);
-    if let Some(page_at) = page_at {
-        wiki_page(f, w, page_at, raw, lang);
-    }
+    let links = page_at.map(|page_at| wiki_page(f, w, page_at, raw, lang)).unwrap_or_default();
     // 고르기 창은 본문 칸을 덮는다 — 고를 것이 그 페이지의 것이라 그 자리에 선다. 본문이 접혔으면 목록을 덮는다.
     let title = w.current().map(|p| crate::text::one_line(&p.title)).unwrap_or_default();
     if let Some(c) = &mut w.choose {
         wiki_choose(f, c, page_at.unwrap_or(list_at), &title, lang);
     }
-    super::mouse::WikiAt { list: list_at, rows, top: w.list.offset(), page: page_at }
+    // 고르기 창이 본문을 덮었으면 링크 칸은 안 보인다 — 맞힐 칸도 없다.
+    let links = if w.choose.is_some() { Vec::new() } else { links };
+    super::mouse::WikiAt { list: list_at, rows, top: w.list.offset(), page: page_at, links }
 }
 
 /// 위키 창의 페이지 목록 — 제목만 선다(경로는 본문 칸의 머리가 댄다). 못 읽은 페이지와 충돌 표시가 든 페이지는
@@ -1138,9 +1138,10 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
 /// 그 사이 글이 안 바뀌므로 글을 견줄 까닭이 없다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WikiLaid {
-    slug: String,
+    pub(super) slug: String,
     w: usize,
-    raw: bool,
+    /// 원문 보기로 편 한 벌인가 — 그때는 링크 칸이 없다([`WikiLaid::cells`]).
+    pub(super) raw: bool,
     lines: Vec<Line<'static>>,
     /// 머리글마다 그 머리글이 선 줄 — `Page::headings` 와 같은 차례다(moai-tllo). 링크의 `#앵커` 로 건너오면 창이 몇째
     /// 머리글인지를 들고, 그 줄을 여기서 찾는다.
@@ -1199,7 +1200,10 @@ fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
 
 /// 위키 창의 본문 칸 — 머리는 제목과 경로, 안은 커서가 선 페이지다. **보이는 줄만 자른다** — 생성 페이지
 /// (`docs/cli.md`)는 수천 줄이라 프레임마다 전부를 손보면 굴리는 키가 무거워진다.
-fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, lang: Lang) {
+///
+/// 보이는 링크 칸의 화면 자리를 낸다(moai-p61w) — 마우스가 다음 사건에서 맞힌다(`mouse::WikiAt::links`). 칠하는 칸과
+/// 같은 자리에서 잰다([`shown_links`]): 골라진 링크를 칠한 칸이 곧 누르면 그 링크인 칸이다.
+fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, lang: Lang) -> Vec<(Rect, usize)> {
     let focused = w.focus == super::wiki::Side::Page;
     let block = pane_frame(focused).padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
@@ -1228,9 +1232,9 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     };
     w.settle(&heads);
     let landed = w.landed().and_then(|k| heads.get(k).copied());
-    let lines: &[Line<'static>] = match (&w.laid, w.current()) {
-        (Some(l), Some(_)) => &l.lines,
-        _ => &[],
+    let (lines, cells): (&[Line<'static>], &[crate::markdown::LinkCell]) = match (&w.laid, w.current()) {
+        (Some(l), Some(_)) => (&l.lines, &l.cells),
+        _ => (&[], &[]),
     };
     let len = lines.len();
     // **재고 나서 자른다**(상세의 그림과 같은 차례) — 되돌아가기가 든 읽던 줄이나 재기 전의 `G` 는 끝을 지난 자리일 수
@@ -1240,13 +1244,20 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     // 찾는 글은 **보이는 줄에만** 칠한다(상세의 본문과 같은 자 — [`mark_line`]). 접힌 줄에 걸친 글은 안 칠해진다.
     let q = w.query();
     let top = w.page.offset().min(len);
+    let picked = w.picked();
+    let shown = shown_links(lines, cells, top, inner, landed);
     let visible: Vec<Line> = lines
         .iter()
         .enumerate()
         .skip(top)
         .take(inner.height as usize)
         .map(|(at, l)| {
-            let l = mark_line(l.clone(), q);
+            let mut l = mark_line(l.clone(), q);
+            // 골라진 링크의 칸을 반전으로 칠한다 — 반전은 색을 꺼도 선다(2026-10-04 사용자 결정, moai-p61w). `▸` 를 달기
+            // 전의 줄에서 칠하니 칸은 줄 머리부터 잰 그대로다.
+            for c in cells.iter().filter(|c| c.line == at && Some(c.link) == picked) {
+                l = reversed(l, c.from, c.to);
+            }
             fit(if landed == Some(at) { landed_line(l) } else { l }, width)
         })
         .collect();
@@ -1258,6 +1269,63 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     };
     scroll_mark(f, &w.page, at, &format!(" ({hint})"), focused, lang);
     f.render_widget(Paragraph::new(visible), inner);
+    shown
+}
+
+/// 본문 칸에 보이는 링크 칸의 화면 자리와 그 링크 — 펴진 줄의 칸([`WikiLaid::cells`])을 굴린 자리(`top`)와 칸의 안쪽
+/// (`inner`)에 놓는다. **줄 머리에 `▸` 가 붙은 줄**(`landed`)은 그 폭만큼 밀고, 칸보다 넓어져 끝이 `…` 로 잘린 줄은
+/// 잘린 데까지만 낸다 — 그리는 쪽([`wiki_page`])이 그 줄을 그렇게 그린다.
+fn shown_links(
+    lines: &[Line<'static>],
+    cells: &[crate::markdown::LinkCell],
+    top: usize,
+    inner: Rect,
+    landed: Option<usize>,
+) -> Vec<(Rect, usize)> {
+    let room = inner.width as usize;
+    let end = top + inner.height as usize;
+    let mut out = Vec::new();
+    for c in cells.iter().filter(|c| (top..end).contains(&c.line)) {
+        let shift = if landed == Some(c.line) { crate::text::width(LANDED) } else { 0 };
+        let drawn = shift + lines.get(c.line).map_or(0, |l| spans_width(&l.spans));
+        // 넘친 줄은 `fit` 이 끝 한 칸에 `…` 를 둔다.
+        let limit = if drawn > room { room.saturating_sub(1) } else { room };
+        let (from, to) = ((shift + c.from).min(limit), (shift + c.to).min(limit));
+        if from < to {
+            let y = inner.y + (c.line - top) as u16;
+            out.push((Rect::new(inner.x + from as u16, y, (to - from) as u16, 1), c.link));
+        }
+    }
+    out
+}
+
+/// 줄의 `from..to` 칸(표시 폭)을 반전으로 칠한다 — 조각이 그 칸에 걸치면 글자에서 가른다. 글자 자리는 안 바뀐다.
+fn reversed(line: Line<'static>, from: usize, to: usize) -> Line<'static> {
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut at = 0usize;
+    for s in line.spans {
+        let w = crate::text::width(&s.content);
+        if at + w <= from || at >= to {
+            at += w;
+            out.push(s);
+            continue;
+        }
+        // 걸친 조각 — 글자마다 칸 안인지 보고 같은 쪽끼리 잇는다.
+        let mut pieces: Vec<(bool, String)> = Vec::new();
+        for ch in s.content.chars() {
+            let inside = (from..to).contains(&at);
+            at += crate::text::width(ch.encode_utf8(&mut [0u8; 4]));
+            match pieces.last_mut() {
+                Some((was, text)) if *was == inside => text.push(ch),
+                _ => pieces.push((inside, ch.to_string())),
+            }
+        }
+        for (inside, text) in pieces {
+            let style = if inside { s.style.add_modifier(Modifier::REVERSED) } else { s.style };
+            out.push(Span::styled(text, style));
+        }
+    }
+    Line::from(out).style(line.style)
 }
 
 /// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`, 이 페이지를 가리키는 페이지는
@@ -1275,25 +1343,12 @@ fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str
         .iter()
         .map(|t| {
             let (main, tail, warn) = match t {
-                Target::Page { text, to, found, anchor, held } => {
-                    let aim = match anchor {
-                        Some(a) => format!("{to}#{a}"),
-                        None => to.clone(),
-                    };
-                    let tail = if !found {
-                        Some(none)
-                    } else if *held == Some(false) {
-                        Some(say(lang, "tui.wiki.no_heading_mark"))
-                    } else {
-                        None
-                    };
-                    (format!("{} → {}", crate::text::one_line(text), crate::text::one_line(&aim)), tail, true)
+                Target::Page { text, .. } | Target::Out { text, .. } => {
+                    let (aim, tail) = link_aim(t, lang).unwrap_or_default();
+                    // 페이지 링크는 노랗게, 위키 밖은 흐리게 — 낱말(`(없음)`·`(밖)`)이 함께 선다.
+                    let warn = matches!(t, Target::Page { .. });
+                    (format!("{} → {aim}", crate::text::one_line(text)), tail, warn)
                 }
-                Target::Out { text, dest } => (
-                    format!("{} → {}", crate::text::one_line(text), crate::text::one_line(dest)),
-                    Some(say(lang, "tui.wiki.external")),
-                    false,
-                ),
                 Target::Issue { id, title: Some(t) } => (format!("{id}  {}", crate::text::one_line(t)), None, false),
                 Target::Issue { id, title: None } => (id.clone(), Some(none), true),
                 Target::LinkedFrom { slug, title } => {
@@ -1323,8 +1378,34 @@ fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str
     scroll_mark(f, &c.list, at, "", true, lang);
 }
 
+/// 링크 하나가 가는 곳의 글 — 대상(`슬러그`·`슬러그#앵커`·밖 주소)과, 갈 데가 없으면 그 까닭의 낱말(`(없음)`·
+/// `(머리글 없음)`·`(밖)`). 고르기 창의 링크 줄과 골라진 링크를 대는 바가 같이 쓴다 — 같은 링크가 두 자리에서 다르게
+/// 읽히지 않는다. 링크가 아닌 것(id·역링크)은 없다.
+fn link_aim(t: &super::wiki::Target, lang: Lang) -> Option<(String, Option<&'static str>)> {
+    use super::wiki::Target;
+    match t {
+        Target::Page { to, found, anchor, held, .. } => {
+            let aim = match anchor {
+                Some(a) => format!("{to}#{a}"),
+                None => to.clone(),
+            };
+            let tail = if !found {
+                Some(say(lang, "tui.wiki.unresolved"))
+            } else if *held == Some(false) {
+                Some(say(lang, "tui.wiki.no_heading_mark"))
+            } else {
+                None
+            };
+            Some((crate::text::one_line(&aim), tail))
+        }
+        Target::Out { dest, .. } => Some((crate::text::one_line(dest), Some(say(lang, "tui.wiki.external")))),
+        Target::Issue { .. } | Target::LinkedFrom { .. } => None,
+    }
+}
+
 /// 위키 창의 키 바 — 이름과 낱말은 키 표([`keys::WIKI`])에서 읽는다. **듣는 키만 적는다**: 건너온 자취가 없으면
-/// `Bksp` 를 안 댄다(눌러도 아무 일이 없다).
+/// `Bksp` 를 안 댄다(눌러도 아무 일이 없다). 본문의 링크가 골라졌으면 `Enter` 곁에 그 대상이 낱말로 선다(2026-10-04
+/// 사용자 결정, moai-p61w) — 반전 하나로는 어디로 가는지가 안 읽힌다.
 fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     use super::keys::{WIKI, Wiki};
     // **치는 동안은 칸이 선다** — 하나도 안 걸렸으면 칸 곁에서 그렇다고 댄다(글을 버리지 않는다).
@@ -1350,7 +1431,8 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         return bar(f, at, optional, vec![hint(Link::Enter), hint(Link::Close)]);
     }
     let on_page = w.focus == super::wiki::Side::Page;
-    let what = |a: Wiki| a.what(on_page, w.searched(), lang);
+    let aim = w.picked().and_then(|k| w.link_target(k)).and_then(|t| link_aim(&t, lang));
+    let what = |a: Wiki| a.what(on_page, w.searched(), aim.is_some(), lang);
     if !w.chord.held().is_empty() {
         let next = keys::next_keys(WIKI, w.chord.held())
             .into_iter()
@@ -1360,8 +1442,14 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     }
     let hint = |a: Wiki| key(&label(WIKI, a), what(a));
     let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
-    let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext)];
-    let mut keep = vec![hint(Wiki::Enter)];
+    let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext), hint(Wiki::NextLink)];
+    let enter = match &aim {
+        Some((to, tail)) => {
+            key(&label(WIKI, Wiki::Enter), &format!("→ {to}{}", tail.map(|t| format!(" {t}")).unwrap_or_default()))
+        }
+        None => hint(Wiki::Enter),
+    };
+    let mut keep = vec![enter];
     if w.can_go_back() {
         keep.push(hint(Wiki::Back));
     }
@@ -5237,9 +5325,18 @@ pub(super) mod tests {
     /// **`&mut` 다.** 훑는 자리는 프레임을 넘어 살아야 하므로 `screen` 이
     /// App 에 되적는다 — 시험도 진짜 화면과 같은 길을 지난다.
     pub(in crate::tui) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
+        lines_of(&render_buf(app, w, h))
+    }
+
+    /// 그려 보고 칸째 꺼낸다 — 칠한 모양(반전 따위)까지 볼 때 쓴다. 글자는 [`lines_of`] 가 읽는다.
+    pub(in crate::tui) fn render_buf(app: &mut App, w: u16, h: u16) -> ratatui::buffer::Buffer {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| screen(f, app)).unwrap();
-        let buf = term.backend().buffer().clone();
+        term.backend().buffer().clone()
+    }
+
+    /// 그린 칸의 글자 — [`render`] 가 읽는 그대로다.
+    pub(in crate::tui) fn lines_of(buf: &ratatui::buffer::Buffer) -> Vec<String> {
         (0..buf.area.height)
             .map(|y| {
                 let mut line = String::new();
