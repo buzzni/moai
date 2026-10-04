@@ -2254,9 +2254,14 @@ mod tests {
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
+    ///
+    /// **세 에이전트의 트리를 다 본다**(moai-xs2h.zom) — 이 저장소는 Claude·Codex·Antigravity 로 자기 자신을
+    /// 관리한다. Codex 와 Antigravity 는 한 자리([`AGENTS_DIR`])를 함께 읽어 커밋된 트리는 둘이다. 그 자리는
+    /// 매니페스트가 없어 읽어 올 값이 없고 글만 견준다. 한쪽만 다시 쓰면 그 에이전트의 세션이 옛 글을 배운다.
     #[test]
     fn the_checked_in_plugin_matches_the_guide() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(DIR);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dir = root.join(DIR);
         let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
         // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
@@ -2276,9 +2281,21 @@ mod tests {
             .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(&name, &exe, &skills());
+        let all = skills();
+        for (at, want) in [(DIR, tree_named(&name, &exe, &all)), (AGENTS_DIR, agents_tree(&all))] {
+            let stale = checked_in(&root.join(at), &want, bless);
+            assert!(
+                stale.is_empty(),
+                "{at} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
+                 MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
+            );
+        }
+    }
+
+    /// 커밋된 트리 하나를 `want` 와 견주어 다른 파일을 낸다 — `bless` 면 먼저 그대로 다시 쓴다. 없는 파일도 다른 것이다.
+    fn checked_in(dir: &Path, want: &[(PathBuf, String)], bless: bool) -> Vec<String> {
         if bless {
-            for (path, body) in &want {
+            for (path, body) in want {
                 // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
                 if let Some(parent) = dir.join(path).parent() {
                     std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{}: {e}", parent.display()));
@@ -2286,16 +2303,10 @@ mod tests {
                 std::fs::write(dir.join(path), body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             }
         }
-        let stale: Vec<String> = want
-            .iter()
-            .filter(|(path, body)| read(&path.to_string_lossy()) != *body)
+        want.iter()
+            .filter(|(path, body)| std::fs::read_to_string(dir.join(path)).ok().as_deref() != Some(body.as_str()))
             .map(|(path, _)| path.display().to_string())
-            .collect();
-        assert!(
-            stale.is_empty(),
-            "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
-             MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
-        );
+            .collect()
     }
 
     /// `MOAI_BLESS` 를 켰다고 읽는가. 있기만 하면 참으로 읽으면 끄려고 적은
