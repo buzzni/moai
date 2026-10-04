@@ -4020,3 +4020,4 @@
 {"ts":"2026-10-04T12:41:51Z","id":"moai-p61w.jz9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-04T12:41:53Z","id":"moai-p61w.dd7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"판단: 15건 모두 들였다. 리뷰가 고친 13건은 확인하고 그대로 두되 CHANGELOG 의 줄 접기와 Esc 차례 문장을 마저 고쳤다. 리뷰가 넘긴 14(충돌 페이지에서 Tab 의 말)는 말을 \"고를 링크가 없다 — Enter 가 이 페이지가 대는 것과 이리 오는 페이지를 댄다\" 로 고쳤고, 15(고름을 차례만 든다)는 고른 페이지의 슬러그와 함께 들게 하고 그 가드를 시험이 잡는다(가드를 빼면 붉어지는 것을 확인했다). 넘긴 것은 없다"}
 {"ts":"2026-10-04T12:41:54Z","id":"moai-p61w.dd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"15건 모두 들였다(13 리뷰 고침 + 14·15 직접). 넘긴 것 없음"}
+{"ts":"2026-10-04T12:44:50Z","id":"moai-p61w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지(13b1cba5 의 merge 커밋), 멤버 다섯·리뷰 dd7 닫힘, 감독 보고까지. 넘긴 것·새 idea 없음. 위키 창의 몫은 [tui] wiki_width(끌기 전에는 list_width). 루트 release 바이너리는 아직 옛것이다"}
