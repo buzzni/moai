@@ -10,6 +10,7 @@
 
 use super::{Ctx, R, note_partial, tell};
 use crate::fail::{Fail, code};
+use crate::i18n::Lang;
 use crate::wiki::{self, DirTrouble, IssueRef, Link, Page, Wiki};
 use std::collections::HashSet;
 
@@ -26,8 +27,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
         note_partial();
     }
     if ctx.json {
-        let pages = wiki.pages.iter().map(|p| PageOut::of(ctx, p, false)).collect();
-        return super::json_line(&Listed { dir: &dir, pages });
+        return listed_json(ctx.lang(), &dir, &Ok(wiki));
     }
     Ok(crate::view::wiki::list(ctx.lang(), &dir, &wiki))
 }
@@ -46,7 +46,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
         note_partial();
     }
     if ctx.json {
-        return super::json_line(&PageOut::of(ctx, page, true));
+        return page_json(ctx.lang(), page);
     }
     Ok(crate::view::wiki::page(ctx.lang(), page))
 }
@@ -73,19 +73,43 @@ fn read(ctx: &Ctx, only: Option<&str>) -> R<(String, Result<Wiki, DirTrouble>)> 
 /// 위키 디렉터리를 못 쓴다. `--json` 은 `{"dir","error"}` 를 stdout 에 내고, 사람 화면은 없는 디렉터리면 한 줄로
 /// 알리고 나머지는 실패로 선다. 페이지를 물었으면(`asked`) 없는 디렉터리도 그 페이지를 못 낸 것이라 비영이다.
 fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> {
-    let said = crate::view::wiki::dir_trouble(ctx.lang(), dir, t);
     let fell = t.fell() || asked;
     if ctx.json {
         if fell {
             note_partial();
         }
-        return super::json_line(&Refused { dir, error: Told { kind: t.kind(), said } });
+        return listed_json(ctx.lang(), dir, &Err(t.clone()));
     }
+    let said = crate::view::wiki::dir_trouble(ctx.lang(), dir, t);
     if fell {
         let code = if asked && !t.fell() { code::NOT_FOUND } else { code::ERROR };
         return Err(Fail::coded(said, code));
     }
     Ok(vec![said])
+}
+
+/// `moai wiki ls --json` 의 한 줄 — 위키를 읽었으면 `{"dir","pages"}`, 디렉터리를 못 쓰면 `{"dir","error"}`.
+///
+/// **moai-wiki 스킬이 이 키 이름을 가르친다**(`guide::wiki`). 그 글이 대는 키를 이 출력에 묶는 시험
+/// (`guide::tests::the_wiki_skill_teaches_the_keys_the_wiki_prints`)이 이 함수를 부른다 — 명령과 시험이 같은 자로
+/// 짓지 않으면 그 시험은 손으로 옮긴 꼴과 견주게 되고, 키가 바뀌어도 초록이다(moai-ihu4.l2e).
+pub(crate) fn listed_json(lang: Lang, dir: &str, read: &Result<Wiki, DirTrouble>) -> R<Vec<String>> {
+    match read {
+        Ok(w) => {
+            let pages = w.pages.iter().map(|p| PageOut::of(lang, p, false)).collect();
+            super::json_line(&Listed { dir, pages })
+        }
+        Err(t) => {
+            let said = crate::view::wiki::dir_trouble(lang, dir, t);
+            super::json_line(&Refused { dir, error: Told { kind: t.kind(), said } })
+        }
+    }
+}
+
+/// `moai wiki show <slug> --json` 의 한 줄 — 목록의 페이지에 원문 `body` 를 더한 것. [`listed_json`] 과 같은 까닭으로
+/// 스킬의 키를 재는 시험이 함께 부른다.
+pub(crate) fn page_json(lang: Lang, p: &Page) -> R<Vec<String>> {
+    super::json_line(&PageOut::of(lang, p, true))
 }
 
 /// `moai wiki ls --json` — **moai-wiki 스킬이 이 키 이름을 읽는다**(moai-ihu4 본문의 계약). 키를 바꾸면 그 에픽에
@@ -128,7 +152,7 @@ struct PageOut<'a> {
 }
 
 impl<'a> PageOut<'a> {
-    fn of(ctx: &Ctx, p: &'a Page, body: bool) -> PageOut<'a> {
+    fn of(lang: Lang, p: &'a Page, body: bool) -> PageOut<'a> {
         PageOut {
             slug: &p.slug,
             title: &p.title,
@@ -137,7 +161,7 @@ impl<'a> PageOut<'a> {
             issues: &p.issues,
             links: &p.links,
             conflict: p.conflict,
-            error: p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(ctx.lang(), p, u) }),
+            error: p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(lang, p, u) }),
             body: if body { p.body.as_deref() } else { None },
         }
     }

@@ -12,8 +12,8 @@ that changed nothing a person does writes nothing.
 
 ## What the wiki is
 
-    moai wiki ls                           the pages: slug, title, path
-    moai wiki ls --json                    the same, for a machine
+    moai wiki ls                           the pages: slug and title, and what does not resolve
+    moai wiki ls --json                    the same with each page's path, for a machine
     moai wiki show <slug>                  one page
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
