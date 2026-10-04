@@ -3567,3 +3567,11 @@
 {"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.ug3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.8se","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.hc1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T02:43:31Z","id":"moai-z46r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04, 일꾼이 물은 넷 — 모두 권장안)\n- 통계 창 안에서도 SPC 가 메뉴를 연다. 서는 것은 `+화면`(SPC g) 하나다. `SPC g l`·`b` 는 통계를 닫고 그 배치로 간다\n- 통계가 열린 채 `SPC g s` 는 새로 센다 — \"열 때마다 새로 여는 창\" 그대로. 주/날과 굴린 자리는 처음으로 돌아간다\n- 지금 화면은 뿌리 메뉴의 묶음 줄에 선다: `g : +화면 [보드]`. `SPC g` 층의 항목에는 상태를 안 붙이고, l·b·s 는 고르면 메뉴를 닫는다\n- 옛 키 `SPC v b`·`SPC p s` 는 조용히 무시한다 — 메뉴의 다른 모르는 키와 같다. 알리는 한 줄을 두지 않는다"}
+{"ts":"2026-10-04T03:09:42Z","id":"moai-z46r.3vm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 화면을 SPC g 로 고른다"}
+{"ts":"2026-10-04T03:09:48Z","id":"moai-z46r.ug3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T03:09:48Z","id":"moai-z46r.8se","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T03:09:48Z","id":"moai-z46r.hc1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T03:09:49Z","id":"moai-z46r.3vm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T03:10:12Z","id":"moai-z46r.3vm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix 가 백그라운드에서 돈다(@code-review). 돌아오면 고침을 받고 CHANGELOG Changed 를 적은 뒤 develop 에 머지한다. 멤버 셋(ug3·8se·hc1)은 이 리뷰를 기다려 review 칸에 있다"}
+{"ts":"2026-10-04T03:25:25Z","id":"moai-0z6c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"통계 창의 이동키가 수식키를 안 받아 메뉴 길과 갈린다"}
