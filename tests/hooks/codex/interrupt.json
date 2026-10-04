@@ -1,0 +1,9 @@
+{
+  "session_id": "01a107b4-ee4b-7b13-9ae8-269f43b5a38f",
+  "turn_id": "01a107bc-7382-7f63-8411-835108925b91",
+  "transcript_path": "/home/coder/.codex/sessions/2026/10/04/rollout-2026-10-04T16-17-40-01a107b4-ee4b-7b13-9ae8-269f43b5a38f.jsonl",
+  "cwd": "/home/coder/workspace/moa-issue",
+  "hook_event_name": "Interrupt",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "default"
+}

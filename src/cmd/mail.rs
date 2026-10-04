@@ -105,27 +105,32 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         mail::ANY_IDLE_WORKER => mail::idle_worker(&agents, &from).map(mail::wake),
         _ => named.filter(|p| !p.gone()).map(mail::wake),
     });
-    let woke =
-        woke.map(|w| w.unwrap_or_else(|| Woke { to: to.clone(), via: "none", done: false, why: Some("nobody") }));
+    let woke = woke.map(|w| {
+        w.unwrap_or_else(|| Woke { to: to.clone(), via: "none", done: false, why: Some("nobody"), since: None })
+    });
 
     if ctx.json {
         return super::json_line(&Sent { id: &id, letter: &letter, wake: woke.as_ref() });
     }
     let mut out = vec![fill(say(ctx.lang(), "mail.sent"), &[("id", &paint(style::ID, &id)), ("to", &to)])];
-    out.extend(woke.as_ref().and_then(|w| woke_line(ctx.lang(), w)));
+    out.extend(woke.as_ref().and_then(|w| woke_line(ctx.lang(), ctx.zone(), w)));
     Ok(out)
 }
 
 /// 깨운 결과를 한 줄로 — **깨울 길도 이도 없으면 아무 말도 안 한다**(2026-10-04 사용자 결정 "깨우기는 덤"). 낱말
 /// (`via`·`why`)은 기계의 것이라 `--json` 은 그 판에도 `wake` 를 그대로 낸다. 사람 말은 여기서 짓는다.
-fn woke_line(lang: Lang, w: &Woke) -> Option<String> {
+fn woke_line(lang: Lang, zone: &crate::tz::Zone, w: &Woke) -> Option<String> {
     let to = w.to.as_str();
     Some(match (w.done, w.why) {
         (true, _) => fill(say(lang, "mail.wake_done"), &[("to", to), ("via", w.via)]),
         // 기다리는 에이전트는 두드릴 까닭이 없다 — 그 기다림이 편지를 가진다. 말하지 않는다.
         (false, Some("no_way" | "nobody" | "waiting")) => return None,
         (false, Some("ask_sender")) => fill(say(lang, "mail.wake_send_message"), &[("to", to)]),
-        (false, Some("busy")) => fill(say(lang, "mail.wake_busy"), &[("to", to)]),
+        // **턴이 끝나면 싣는다고 약속하지 않는다**(moai-u5wr.f29) — 끊긴 턴은 끝이 안 온다. 언제부터인지만 댄다.
+        (false, Some("busy")) => {
+            let since = w.since.as_deref().map(|s| crate::view::stamp(s, zone)).unwrap_or_else(|| "?".to_string());
+            fill(say(lang, "mail.wake_busy"), &[("to", to), ("since", &since)])
+        }
         (false, why) => fill(say(lang, "mail.wake_failed"), &[("to", to), ("via", w.via), ("why", why.unwrap_or("?"))]),
     })
 }

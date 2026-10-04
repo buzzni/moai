@@ -186,6 +186,15 @@ keeps whose it was. `moai ready` hands out only your own rows and sets the rest
 apart (`others`), and what someone else picked up is not your focus. When who you
 are is unknown, nothing is refused.
 
+**Where no hook stands, the rules are words only.** The hooks stand where
+`moai skill install` planted them for your agent — Claude's plugin, Codex's
+`.codex/hooks.json` once a person has trusted it in `/hooks`, Antigravity's
+`.agents/hooks.json`. An agent without them, and a tool call that sends no hook
+(Codex sends them only for its shell, `apply_patch` and MCP calls) or that the
+hooks do not read (input typed into a command already running), is refused
+nothing — keep the five yourself. Rules 4 and 5 most of all: they guard the
+person's other sessions and other people's work, and nothing else will.
+
 ## Words per agent
 
 moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them

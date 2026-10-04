@@ -810,8 +810,9 @@ IDEA
   tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
-    /// Called by Claude's hook. Reads an event on stdin
-    #[command(after_help = "  Nobody calls this by hand. The plugin installed into Claude calls it.
+    /// Called by an agent's hook. Reads an event on stdin
+    #[command(after_help = "  Nobody calls this by hand. The hooks `moai skill install` plants call it -
+  Claude's plugin, Codex's .codex/hooks.json, Antigravity's .agents/hooks.json.
 
   **It blocks nothing, and whatever goes wrong the exit code is 0.** A hook
   that spits errors makes every session start noisy, and then people turn the
@@ -825,6 +826,14 @@ IDEA
     user-prompt-submit  A person asked. Loads letters, and the board once
     pre-tool-use        Just before a tool call. The rules stand here
     stop                The turn ends. Loads letters, then checks the state
+    stop-failure        An API error ended a turn (Claude). Marks the agent idle
+    interrupt           A person broke off a turn (Codex). Marks the agent idle
+    session-end         The session closes. Marks it idle; drops a Codex row
+
+  --dialect says which agent's shapes come in and go out: claude (the
+  default), codex or antigravity. The rules are the same for all three.
+  Antigravity has no user-prompt-submit; its first model call of a turn
+  (PreInvocation) stands in for it.
 
   echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
     Hook {
@@ -833,6 +842,16 @@ IDEA
         /// Which place it was called from (see the list below)
         #[arg(value_name = "event", hide_possible_values = true)]
         event: crate::hook::Event,
+
+        /// Whose shapes: claude (default), codex, antigravity
+        #[arg(
+            long,
+            value_name = "agent",
+            hide_possible_values = true,
+            default_value = "claude",
+            hide_default_value = true
+        )]
+        dialect: Dialect,
     },
 
     // **이 첫 줄은 `install.sh` 가 읽는 계약이다**(moai-8rmw, 리뷰). 깔린 moai 가 이 moai 인지를
@@ -1972,7 +1991,14 @@ pub enum SkillCmd {
   naming either plants it for both. There is nothing to register: commit the
   directory and the team has it. --scope is Claude's registration only. The
   text is the one Claude gets; the steps that differ per agent are in the
-  skills' \"Words per agent\" table. The hooks are planted for Claude only.
+  skills' \"Words per agent\" table.
+
+  The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
+  --agent antigravity plants `.agents/hooks.json` - commit them too. Codex
+  runs project hooks only once you trust them: open /hooks in a codex session
+  in this repository, and again whenever they change. A hooks file moai did
+  not write is left as it is - merge moai's in by hand, or move it aside. Codex
+  sends hooks only for its shell, apply_patch and MCP calls.
 
   For Claude, skills and hooks are installed into `.claude/moai-plugin/` and
   registered with `claude`. Your settings.json is not touched - putting the
@@ -2053,6 +2079,8 @@ pub enum SkillCmd {
                   or removed)
     .agents       whether .agents/skills/ holds this version's skills
                   (codex and antigravity read it)
+    codex hooks   whether .codex/hooks.json is this version's, and moai's
+    agy hooks     whether .agents/hooks.json is this version's, and moai's
     codex, agy    whether they are on PATH")]
     Status,
 
@@ -2081,8 +2109,9 @@ pub enum SkillCmd {
 
   For codex and antigravity (--agent) there is no registration to remove,
   and no file is deleted either: the `rm -r` lines for moai's skills in
-  `.agents/skills/` are printed, to run once no session holds them. Without
-  that --agent, one line says when moai's skills are still there.
+  `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
+  wrote it, are printed, to run once no session holds them. Without that
+  --agent, one line says when moai's skills are still there.
 
   moai skill uninstall --dry-run      only show what would be called
   moai skill uninstall --agent codex  name what to delete in .agents/skills/")]
@@ -2105,9 +2134,9 @@ pub enum SkillCmd {
 pub enum Agent {
     /// Claude Code: the plugin in `.claude/moai-plugin/`, registered with `claude` (default)
     Claude,
-    /// Codex: the skills in `.agents/skills/`, which it reads by itself
+    /// Codex: the skills in `.agents/skills/` and the hooks in `.codex/hooks.json`
     Codex,
-    /// Antigravity: the same `.agents/skills/` Codex reads
+    /// Antigravity: the same `.agents/skills/` Codex reads, and `.agents/hooks.json`
     Antigravity,
     /// Whichever of claude, codex and agy is on PATH - claude when none is
     Auto,
@@ -2120,6 +2149,29 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::Antigravity => "antigravity",
             Agent::Auto => "auto",
+        }
+    }
+}
+
+/// 훅을 부른 에이전트의 말씨 — stdin 과 stdout 의 꼴(moai-u5wr). 판정은 셋이 같고 꼴만 다르다.
+/// `auto` 가 없다 — 심은 줄이 제 에이전트를 안다.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Dialect {
+    /// Claude Code (default)
+    #[default]
+    Claude,
+    /// Codex - the same shape as Claude's, plus apply_patch
+    Codex,
+    /// Antigravity (agy) - camelCase in, a top-level decision out
+    Antigravity,
+}
+
+impl Dialect {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Dialect::Claude => "claude",
+            Dialect::Codex => "codex",
+            Dialect::Antigravity => "antigravity",
         }
     }
 }

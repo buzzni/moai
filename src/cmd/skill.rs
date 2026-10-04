@@ -217,6 +217,12 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     if let (Some((dir, files)), false) = (&shared, dry_run) {
         write_shared(dir, files, &place.root)?;
     }
+    // **훅 파일도 Claude 보다 먼저다**(moai-u5wr.kov) — 같은 까닭이다. 남의 파일은 안 쓰고 한 줄로 댄다([`HookFile`]).
+    let root = place.root.clone();
+    let hooks: Vec<(HookFile, HookState)> = HookFile::chosen(&root, &place.exe, &chosen)
+        .into_iter()
+        .map(|h| h.plant(&root, dry_run).map(|state| (h, state)))
+        .collect::<R<_>>()?;
     let (mut json, claude) = match chosen.claude {
         true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run)?,
         false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
@@ -230,6 +236,19 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
             let listed: Vec<String> =
                 shared.iter().flat_map(|(_, f)| f.iter().map(|(p, _)| p.display().to_string())).collect();
             o.insert("agents_files".into(), serde_json::json!(listed));
+            // 쓰기 **전의** 상태다 — `missing`·`stale` 이면 (연습이 아닐 때) 이번에 썼고, `foreign` 은 안 썼다.
+            let hooked: Vec<serde_json::Value> = hooks
+                .iter()
+                .map(|(h, state)| {
+                    serde_json::json!({
+                        "agent": h.agent.as_str(),
+                        "path": h.path.display().to_string(),
+                        "was": state.as_str(),
+                        "written": !dry_run && matches!(state, HookState::Missing | HookState::Stale),
+                    })
+                })
+                .collect();
+            o.insert("hooks".into(), serde_json::json!(hooked));
         }
         return super::json_line(&json);
     }
@@ -246,6 +265,9 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
         }
         if scope.is_some() && !chosen.claude {
             out.push(fill(say(lang, "skill.scope_is_claudes"), &[("dir", &at)]));
+        }
+        for (h, state) in &hooks {
+            out.extend(h.said(&root, *state, dry_run, lang));
         }
         if chosen.claude {
             out.push(String::new());
@@ -470,6 +492,8 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     // Claude 는 위의 `claude` 줄이 이미 댄다 — 여기는 `.agents/skills` 를 읽는 둘이다.
     let others: Vec<(&str, bool)> =
         ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
+    // 두 에이전트의 훅 파일(moai-u5wr.kov) — Claude 의 훅은 위의 플러그인 줄들이 댄다.
+    let hook_files = HookFile::all(&root, &exe);
 
     if ctx.json {
         let rows: Vec<_> = installs
@@ -501,6 +525,14 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "stale_copies": stale,
             "claude": claude,
             "agents": shared.json(&others),
+            "hooks": hook_files
+                .iter()
+                .map(|h| serde_json::json!({
+                    "agent": h.agent.as_str(),
+                    "path": h.path.display().to_string(),
+                    "state": h.seen(&root).as_str(),
+                }))
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -588,6 +620,10 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         }
         (true, true) => row(true, shared_row, say(lang, "skill.agents_current")),
     });
+    for h in &hook_files {
+        let (ok, said) = h.row(&root, lang);
+        out.push(row(ok, h.label(), &said));
+    }
     for (bin, on) in &others {
         let said = match on {
             true => say(lang, "skill.on_path"),
@@ -646,6 +682,162 @@ impl Shared {
     }
 }
 
+/// Codex·Antigravity 의 훅 파일 하나(moai-u5wr.kov) — 그 에이전트, 자리, 지금 판의 글.
+///
+/// **moai 가 통째로 쓴 파일만 다시 쓴다**([`skill::hooks_are_ours`]) — 사람이 제 훅을 적어 둔 파일을 갈아엎으면 그
+/// 사람의 훅이 말없이 사라진다. 그 자리는 손대지 않고 한 줄로 댄다. 지우지도 않는다(이 모듈 머리).
+struct HookFile {
+    agent: Agent,
+    dialect: crate::cli::Dialect,
+    path: PathBuf,
+    want: String,
+}
+
+/// 훅 파일이 지금 어떤가.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HookState {
+    Missing,
+    Current,
+    /// moai 가 쓴 파일인데 지금 판과 다르다 — 다시 쓴다.
+    Stale,
+    /// moai 가 안 쓴 파일이다(못 읽는 자리도 여기다) — 안 건드린다.
+    Foreign,
+}
+
+impl HookState {
+    fn as_str(self) -> &'static str {
+        match self {
+            HookState::Missing => "missing",
+            HookState::Current => "current",
+            HookState::Stale => "stale",
+            HookState::Foreign => "foreign",
+        }
+    }
+}
+
+impl HookFile {
+    /// 두 에이전트의 훅 파일 — Codex 는 [`skill::CODEX_HOOKS`], Antigravity 는 [`skill::AGENTS_HOOKS`] 다.
+    fn all(root: &Path, exe: &str) -> Vec<HookFile> {
+        use crate::cli::Dialect;
+        vec![
+            HookFile {
+                agent: Agent::Codex,
+                dialect: Dialect::Codex,
+                path: root.join(skill::CODEX_HOOKS),
+                want: skill::codex_hooks(exe),
+            },
+            HookFile {
+                agent: Agent::Antigravity,
+                dialect: Dialect::Antigravity,
+                path: root.join(skill::AGENTS_HOOKS),
+                want: skill::antigravity_hooks(exe),
+            },
+        ]
+    }
+
+    /// 고른 에이전트의 것만 — **스킬과 달리 에이전트마다 따로다.** 스킬은 한 자리를 둘이 함께 읽지만 훅 파일은
+    /// 저마다의 것이라, `--agent codex` 가 Antigravity 의 훅까지 심으면 안 부른 에이전트에 규칙이 선다.
+    fn chosen(root: &Path, exe: &str, chosen: &Chosen) -> Vec<HookFile> {
+        HookFile::all(root, exe).into_iter().filter(|h| chosen.shared.contains(&h.agent.as_str())).collect()
+    }
+
+    /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`, [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
+    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다(`write_atomic_inside`). **뜻으로 견준다**
+    /// ([`skill::same_hooks`]) — agy 가 제 꼴로 다시 쓴 파일을 낡았다고 하면 다시 심을 때마다 커밋된 파일이 흔들린다.
+    fn state(&self, root: &Path) -> HookState {
+        self.judged(root).0
+    }
+
+    /// [`HookFile::state`] 와 읽은 글 — moai 의 파일일 때만 글이 선다.
+    fn judged(&self, root: &Path) -> (HookState, Option<String>) {
+        if std::fs::symlink_metadata(&self.path).is_err() {
+            return (HookState::Missing, None);
+        }
+        match crate::held::read_inside(&self.path, &crate::held::Home::of(root)) {
+            Ok(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
+            Ok(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
+            _ => (HookState::Foreign, None),
+        }
+    }
+
+    /// `status` 가 대는 상태 — **낡았는지는 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74). Claude 의 줄이 설치본의
+    /// 훅이 부르는 파일로 견주는 것과 같은 까닭이다(`status` 의 `wants`): 지금 부른 moai 로 견주던 판은 워크트리의 빌드나
+    /// `cargo run` 으로 부른 것만으로 멀쩡한 두 파일을 "다시 심는다" 고 했고, 시킨 대로 심으면 커밋된 훅이 그 빌드를 부르게
+    /// 바뀌었다 — 워크트리를 걷는 날 그 줄이 `|| exit 0` 으로 말없이 꺼지고, Codex 는 `/hooks` 에서 다시 믿어 달라고 한다.
+    /// `install` 은 이것을 안 쓴다 — 심는 것은 늘 지금 부른 moai 다(Claude 의 `install` 과 같다).
+    fn seen(&self, root: &Path) -> HookState {
+        match self.judged(root) {
+            (HookState::Stale, Some(text))
+                if skill::planted_exe(&text).is_some_and(|exe| skill::same_hooks(&text, &self.written_for(&exe))) =>
+            {
+                HookState::Current
+            }
+            (state, _) => state,
+        }
+    }
+
+    /// 이 에이전트의 훅 파일을 `exe` 로 지은 글.
+    fn written_for(&self, exe: &str) -> String {
+        match self.dialect {
+            crate::cli::Dialect::Codex => skill::codex_hooks(exe),
+            _ => skill::antigravity_hooks(exe),
+        }
+    }
+
+    /// 저장소 뿌리부터의 상대 자리 — 화면에 댄다.
+    fn shown(&self, root: &Path) -> String {
+        self.path.strip_prefix(root).unwrap_or(&self.path).display().to_string()
+    }
+
+    /// 심는다 — 없거나 moai 의 것일 때만 쓴다. 쓴 뒤의 상태가 아니라 **쓰기 전의 상태**를 돌려준다.
+    fn plant(&self, root: &Path, dry_run: bool) -> R<HookState> {
+        let state = self.state(root);
+        if matches!(state, HookState::Missing | HookState::Stale) && !dry_run {
+            write_shared(
+                root,
+                &[(self.path.strip_prefix(root).unwrap_or(&self.path).to_path_buf(), self.want.clone())],
+                root,
+            )?;
+        }
+        Ok(state)
+    }
+
+    /// `install` 이 내는 줄 — 심었는지, 그대로인지, 남의 것이라 안 썼는지. Codex 에는 믿어 달라는 한 줄을 붙인다.
+    fn said(&self, root: &Path, state: HookState, dry_run: bool, lang: crate::i18n::Lang) -> Vec<String> {
+        let (agent, path) = (self.agent.as_str(), self.shown(root));
+        let args = [("agent", agent), ("path", path.as_str())];
+        let head = match (state, dry_run) {
+            (HookState::Foreign, _) => fill(say(lang, "skill.hooks_foreign"), &args),
+            (HookState::Current, _) => fill(say(lang, "skill.hooks_current"), &args),
+            (_, true) => fill(say(lang, "skill.hooks_plan"), &args),
+            (_, false) => fill(say(lang, "skill.hooks_planted"), &args),
+        };
+        let trust = (self.agent == Agent::Codex && state != HookState::Foreign)
+            .then(|| say(lang, "skill.codex_trust").to_string());
+        std::iter::once(head).chain(trust).collect()
+    }
+
+    /// `status` 의 한 줄 — 상태는 [`HookFile::seen`] 이 댄다.
+    fn row(&self, root: &Path, lang: crate::i18n::Lang) -> (bool, String) {
+        let (agent, path) = (self.agent.as_str(), self.shown(root));
+        let args = [("agent", agent), ("path", path.as_str())];
+        match self.seen(root) {
+            HookState::Current => (true, fill(say(lang, "skill.hooks_row_current"), &args)),
+            HookState::Stale => (false, fill(say(lang, "skill.hooks_row_stale"), &args)),
+            HookState::Missing => (false, fill(say(lang, "skill.hooks_row_missing"), &args)),
+            HookState::Foreign => (false, fill(say(lang, "skill.hooks_row_foreign"), &args)),
+        }
+    }
+
+    /// `status` 의 이름 칸 — 실행 파일 이름으로 댄다(그 아래 PATH 줄과 같은 낱말).
+    fn label(&self) -> &'static str {
+        match self.agent {
+            Agent::Codex => "codex hooks",
+            _ => "agy hooks",
+        }
+    }
+}
+
 /// 이름 칸을 **표시 폭**으로 맞춘다(moai-uzgp). 한글은 한 글자가 두 칸이라 `{:<14}` 로 맞추면
 /// 말마다 이 표가 어긋난다 — `text::width` 가 CLI 표와 탐색기가 함께 쓰는 자다.
 fn label(what: &str) -> String {
@@ -669,6 +861,13 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
         Some(_) => Vec::new(),
         None => skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect(),
     };
+    // 고른 에이전트의 훅 파일 가운데 **moai 가 쓴 것만** 댄다(moai-u5wr.kov) — 남의 훅이 든 파일을 지우라고 하면 그
+    // 사람의 훅이 같이 사라진다.
+    let root = place.root.clone();
+    let hooks_left: Vec<HookFile> = HookFile::chosen(&root, &place.exe, &chosen)
+        .into_iter()
+        .filter(|h| matches!(h.state(&root), HookState::Current | HookState::Stale))
+        .collect();
     let (mut json, claude) = match chosen.claude {
         true => claude_uninstall(ctx, place, dry_run)?,
         false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
@@ -680,6 +879,8 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
             o.insert("found".into(), serde_json::json!(chosen.found));
             let left: Vec<String> = left.iter().map(|p| p.display().to_string()).collect();
             o.insert("agents_left".into(), serde_json::json!(left));
+            let hooks: Vec<String> = hooks_left.iter().map(|h| h.path.display().to_string()).collect();
+            o.insert("hooks_left".into(), serde_json::json!(hooks));
         }
         return super::json_line(&json);
     }
@@ -693,6 +894,10 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
         } else {
             out.push(say(lang, "skill.agents_by_hand").to_string());
             out.extend(left.iter().map(|p| format!("  rm -r {}", crate::text::shell_word(&p.display().to_string()))));
+        }
+        for h in &hooks_left {
+            out.push(fill(say(lang, "skill.hooks_by_hand"), &[("agent", h.agent.as_str())]));
+            out.push(format!("  rm {}", crate::text::shell_word(&h.path.display().to_string())));
         }
         if chosen.claude {
             out.push(String::new());

@@ -66,7 +66,7 @@ group moves its members along.
 
 ## Hook rules
 
-The five rules the hooks that `moai skill install` plants into Claude check
+The five rules the hooks that `moai skill install` plants for each agent check
 before a tool call: stay inside your [focus](#focus), pick up before you change
 the repository, a review is an issue, never kill the person's tmux server, and
 ask before you [take over](#take-over). A refusal hands over the command that
@@ -162,9 +162,11 @@ once, before writing code. More in
 
 The row that says an agent is here — `.moai/agents/<name>.json`, with its
 vendor, model, role, whether it is busy or idle, and its process. `moai hello`
-writes it, and the hooks write it for a Claude session as it starts and keep
-busy and idle up to date; `moai inbox --wait` marks it idle while it waits. `moai agents` lists them and sweeps a row whose
-process is gone. The name in it is what a [letter](#letter) is sent to.
+writes it, and the hooks write it for a session as it starts and keep
+busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
+`moai agents` lists them and sweeps a row whose process is gone; a Codex
+session's row carries no process and goes when the session ends. The name in
+it is what a [letter](#letter) is sent to.
 
 ## Regression-of
 
@@ -238,4 +240,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk
+Decided in: moai-tllo moai-snyk moai-u5wr

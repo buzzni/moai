@@ -4,8 +4,8 @@ moai is built so that AI agents run the tracker beside a person. There is no
 approval gate: an agent creates, moves and closes work without asking, and the
 one thing it asks about is picking up work that belongs to someone else — a
 [take over](glossary.md#take-over). This page covers what makes that work — the
-instructions an agent reads, the skills planted for Claude Code, Codex and
-Antigravity (with hooks for Claude Code), the letters agents leave each other,
+instructions an agent reads, the skills and hooks planted for Claude Code, Codex
+and Antigravity, the letters agents leave each other,
 and the `--json` surface a session reads its queue from. The commands'
 flags are in [the CLI reference](cli.md), and the words in
 [the glossary](glossary.md).
@@ -32,7 +32,8 @@ the journal are never touched.
 
     moai skill install                     Claude Code, just me (the default)
     moai skill install --scope project     Claude Code, the whole team through the committed settings
-    moai skill install --agent codex       Codex and Antigravity, through the committed .agents/skills/
+    moai skill install --agent codex       Codex: the committed .agents/skills/ and .codex/hooks.json
+    moai skill install --agent antigravity Antigravity: the same .agents/skills/ and .agents/hooks.json
     moai skill install --agent auto        whichever of claude, codex and agy is on PATH
     moai skill status                      what is planted where, and what differs
 
@@ -42,21 +43,33 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
 - **Claude Code gets a plugin.** `skill install` writes it into
   `.claude/moai-plugin/` and registers it with `claude`; your `settings.json` is
   `claude`'s to write, and `--scope` picks where it registers. A Claude session
-  that is already open keeps the old copy until you reopen it. The hooks come
-  with the plugin, and only with it
+  that is already open keeps the old copy until you reopen it. Claude's hooks
+  come with the plugin
 - **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
   naming either writes it for both. There is nothing to register — commit the
   directory and the team has the skills. `--scope` does not apply to them, and
   one line says so when you give it without Claude
+- **Their hooks are each agent's own file** — `.codex/hooks.json` for Codex,
+  `.agents/hooks.json` for Antigravity — so only the agent you name gets one.
+  Commit them with the skills. **Codex runs a project's hooks only once a person
+  trusts them:** open `/hooks` in a codex session in the repository and trust
+  moai's, and again after an install that changed them. A hooks file moai did
+  not write — one with your own hooks in it — is left exactly as it is, and one
+  line says so: merge moai's into it by hand, or move it aside and install again.
+  For Antigravity that includes moai's own group with a handler of yours added to
+  it, or turned off (`"enabled": false`)
 - **`auto` looks at PATH** for `claude`, `codex` and `agy`, says what it found,
   and plants for Claude when it finds none of them
 
 It is safe to run again: files are only overwritten, never deleted. `moai skill
 uninstall` takes Claude's registration away and leaves the files; with
-`--agent codex` it prints the `rm -r` lines for moai's skills in
-`.agents/skills/` and deletes nothing. `moai skill status` shows Claude's
-registration, whether `.agents/skills/` holds this version's skills, and whether
-`codex` and `agy` are on PATH — and exits 0 whatever it finds.
+`--agent codex` or `antigravity` it prints the `rm -r` lines for moai's skills
+in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
+wrote it, and deletes nothing. `moai skill status` shows Claude's registration,
+whether `.agents/skills/` holds this version's skills, whether each hooks file is
+this version's (or not moai's) — judged by the moai that file calls, the way the
+plugin is, so a different build running `status` does not ask to plant again —
+and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.
 
 **One text serves every agent.** Both trees get the same skills. The steps only
 one agent has — entering a worktree, asking the person, calling the review,
@@ -89,8 +102,8 @@ Four skills come with it:
 
 ## What the hooks do
 
-The plugin hooks four places in a Claude session. Each calls `moai hook`, which
-nobody runs by hand.
+The hooks catch the same few places in each agent's session. Each calls
+`moai hook`, which nobody runs by hand.
 
 | When | What happens |
 |---|---|
@@ -98,10 +111,34 @@ nobody runs by hand.
 | A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
 | Before a tool call | The five rules below are checked — nothing else; the mailbox is not opened |
 | The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
+| A turn ends without that | An API error (Claude, or an Antigravity run that stopped on one), an interrupt (Codex) or the session closing marks it idle and loads nothing — a Codex session that closes has its row taken away instead |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
 typing `moai` in a terminal never passes through it.
+
+**Each agent has its own shapes, the rules are one.** The hooks tell `moai hook`
+whose they are (`--dialect`), and what differs is only what goes in and out:
+
+- **Codex** sends hooks only for its shell, `apply_patch` and MCP calls — a
+  patch is checked file by file, whether it came through the `apply_patch` tool
+  or was typed as `apply_patch <<'EOF'` in the shell, and one file that breaks a
+  rule refuses the patch. Its hooks run from a daemon its sessions share, so a
+  Codex session's presence row follows its session id, carries no tmux pane to
+  wake, and goes away when the session ends — `moai agents` cannot sweep it by
+  its process, so a Codex session killed before its end leaves its row behind
+- **Antigravity** has no prompt event, so the first model call of each turn
+  loads the board and the letters; it has no session start either, so the
+  baseline is written there too. A line the rules only add to a tool call —
+  fork 1's second question, say — has nowhere to stand in its answer and is
+  not shown
+- **Esc sends no hook** in Claude or Antigravity: a turn broken off that way
+  leaves the session busy until its next prompt
+
+**Where no hook stands, the rules are words only** — an agent without them,
+Codex before the trust in `/hooks`, a tool call that sends none. Nothing is
+refused there; the `AGENTS.md` block asks the agent to keep the five itself,
+rules 4 and 5 most of all.
 
 ## The five rules
 
@@ -113,8 +150,9 @@ gets through — run it as given. None of them waits on a person except rule 5.
    [epic](glossary.md#epic) (`-e <epic>`) or under the held issue
    (`--parent <id>`). Something for later goes in as `moai idea add`, which this
    rule never stops; nor does it stop a whole plan created with `moai add --from`
-2. **Pick something up before you change the repository.** An `Edit`, a `Write`,
-   or a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
+2. **Pick something up before you change the repository.** A file edit
+   (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
+   a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.worktrees/`, `.git/`,
    `target/`, `node_modules/`, and anything outside the repository
@@ -142,7 +180,7 @@ Agents talk through a mailbox under `.moai/` — a [letter](glossary.md#letter) 
 one file, and who is around is one [presence](glossary.md#presence) file per
 agent.
 
-    moai hello --role worker                 register this agent (the hooks do it for Claude)
+    moai hello --role worker                 register this agent (the hooks do it too)
     moai agents                              who is here, busy or idle; sweeps the gone
     moai agents --role worker --status idle  the workers waiting for work
     moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
@@ -156,8 +194,9 @@ agent.
   every session of a repository — in any worktree — sees one mailbox, and
   `moai init` keeps both directories out of git
 - **Names are what you send to.** A Claude session is registered by its hooks
-  under the name Claude Code shows for it (the one `SendMessage` uses);
-  `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
+  under the name Claude Code shows for it (the one `SendMessage` uses); a Codex
+  or Antigravity session as `codex-` or `antigravity-` and the first eight
+  characters of its session id. `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
   `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
   registered agent they run under
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
@@ -165,7 +204,7 @@ agent.
   supervisor`) to take the letter keeps it. A hook takes one such letter per
   load, and so does one `moai inbox --ack`, so several of them spread over
   several agents; an `--ack` that tried in the same moment is told it was taken
-- **The hooks deliver.** With the plugin installed an agent rarely runs
+- **The hooks deliver.** With the hooks installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
   and mark them read — `moai inbox --all` shows them again, nothing is deleted.
   One load stays inside the 10,000 characters Claude Code carries per hook —
@@ -183,7 +222,9 @@ agent.
   pane; a Claude session cannot be woken from a command line, so the sender
   wakes it with `SendMessage`, as the printed line says. With neither, nothing
   happens and nothing is said — not everyone runs tmux. moai never runs an
-  agent's own program to wake it. An agent at work is left alone
+  agent's own program to wake it. An agent at work is left alone, and the line
+  says since when it has been at work — a turn broken off with Esc sends no
+  hook, so a session can look busy while it waits for its next prompt
 
 Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
 (each with `id` and `read` besides the letter's own keys) and `lost` — the ids
@@ -266,7 +307,15 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   command the refusal hands over. Do not stop to ask a person unless it is rule 5
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
-  before the install keeps the old hook until it is reopened
+  before the install keeps the old hook until it is reopened. The plugin hooks
+  `StopFailure`, which Claude Code knows from 2.1.78 — an older `claude` refuses
+  the plugin's hooks as a whole, so update it
+- **Codex runs none of moai's hooks.** Codex has not been told to trust them —
+  open `/hooks` in a codex session in the repository and trust them. An install
+  that changed them asks for that trust again
+- **`skill install` says a hooks file is not moai's.** It holds hooks someone
+  else wrote, and moai will not overwrite them. Merge moai's entries into it by
+  hand, or move it aside and install again
 - **`skill install` printed two `claude plugin` lines and failed.** The
   registration did not go through — most often `claude` is not on `PATH`; run
   those lines where it is
@@ -286,4 +335,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   letter sent then sits until that window's next prompt. Without hooks or tmux
   nothing wakes a window that is not waiting
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr
