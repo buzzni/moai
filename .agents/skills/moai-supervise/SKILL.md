@@ -297,12 +297,11 @@ round, and the files that work holds — `none` if there is none. What the super
 measured before sending cannot cover a file that turns out to be needed mid-epic, so when
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
-`<after>` is `end the turn` only when you will clear that window yourself in 5-1 and can
-wake it after — you run inside tmux, the worker's row carries a `tmux_pane` on your tmux
-server, its vendor is `claude` (5-1 reads Claude Code's screen only), and you are in Claude
-Code yourself: a cleared Claude Code window is woken only by SendMessage, never by a command
-line (*Wake a session that sits idle*). Otherwise it is `wait again`: the worker reports and
-goes straight back to waiting.
+`<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
+inside tmux, whatever your vendor, the worker's row carries a `tmux_pane` on your tmux
+server, and its vendor is `claude` (5-1 reads Claude Code's screen only). 5-1 then sends
+the next letter itself and wakes the emptied window. Otherwise it is `wait again`: the
+worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -322,9 +321,10 @@ worker reads in its own window in 9-1.
     Person: <person>
 
 **Waking is a bonus.** A worker that waits needs none. The one window to wake is one you
-just cleared in 5-1, and that is a Claude Code window, which a command line never types
-into: `--wake` only prints that SendMessage has to carry `moai inbox` there. Send that
-(*Wake a session that sits idle*), and the hooks load the letter as the prompt arrives.
+clear in 5-1, and the script does it: after the clear it sends the next letter and types
+`moai inbox` into the box it just emptied, and the hooks load the letter as that prompt
+arrives. `moai send --wake` never types into a Claude Code pane — for one you did not just
+clear, a Claude Code supervisor wakes it with SendMessage (*Wake a session that sits idle*).
 
 **4. Wait.** Wait for the reports the way a worker waits for work:
 
@@ -372,13 +372,15 @@ line about being unfolded.
 
 If the three hold, send the next idea. A worker whose letter said `wait again` is already
 waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
-right after the report: clear its window with 5-1 first, and once the script prints
-`cleared`, send the next letter and wake that window as above. If 5-1 prints `not
-clearing`, do what the end of its line says. Where that is pointing out to the person that
-the window is at a good place to be cleared, send the next only after the person has
-cleared it or said they will not — then wake it the same way, its turn has ended — a
-letter loaded into the window before a late clear disappears with it, and that idea and
-that worker sit out of the candidates waiting for a report that will never come.
+right after the report: write the next letter to a file and hand it to 5-1 — the script
+clears the window, sends that letter only once the clear went through, and wakes the
+window. With no next idea, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
+what the end of its line says. Where that is pointing out to the person that the window is
+at a good place to be cleared, send the next only after the person has cleared it or said
+they will not — a letter loaded into the window before a late clear disappears with it,
+and that idea and that worker sit out of the candidates waiting for a report that will
+never come. Its turn has ended, so that letter waits until a prompt comes into the window:
+a Claude Code supervisor wakes it with SendMessage, any other asks the person.
 
 If they do not hold, ask that worker with a letter what is left, and do not finish it in
 its place.
@@ -396,16 +398,18 @@ does not say the turn is over — `moai inbox --wait` writes it while its shell 
 so the script also stops when it finds that wait running under the worker: such a worker
 takes the next letter as it is. Clearing erases the whole conversation that worker holds,
 so never call it before the check. `<worker>` is the name of the worker that sent the
-report, and `<root>` is the `root dir` from 2 — the script asks `moai agents` there.
+report, `<root>` is the `root dir` from 2 — the script asks `moai agents` and sends there —
+`<letter file>` is the next letter for that worker, written as 3 says (`-` for none), and
+`<subject>` is its subject, `<id> — <title>`.
 
 The script reads Claude Code's screen — the input box under the prompt glyph — so it
 clears Claude Code workers only. For a worker on another vendor it prints `not clearing`,
 and the letter 3 sent it said `wait again`.
 
 ```sh
-python3 - '<worker>' '<epic>' '<my name>' '<root>' <<'PY'
+python3 - '<worker>' '<epic>' '<my name>' '<root>' '<letter file>' '<subject>' <<'PY'
 import json, os, re, subprocess, sys, time
-name, epic, me, root = sys.argv[1:5]
+name, epic, me, root, letter, subject = sys.argv[1:7]
 # Every line goes out as it is printed. Into a pipe Python holds them back, and the copy of
 # the person's draft printed below would die with the script if it were stopped mid-way.
 sys.stdout.reconfigure(line_buffering=True)
@@ -712,9 +716,37 @@ for _ in range(30):
     time.sleep(0.5)
     now = row()
     if now and now.get("session") != s.get("session"):
-        print("cleared —", name, pane, epic)
-        sys.exit(0)
-print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next letter")
+        break
+else:
+    print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next letter")
+    sys.exit(0)
+print("cleared —", name, pane, epic)
+if letter == "-":
+    sys.exit(0)
+# Send only now. A letter that waited while the old turn was ending would be loaded into the
+# conversation the clear just erased — the hooks mark it read as they load it, so it would be lost.
+try:
+    with open(letter) as fh:
+        sent = subprocess.run(["moai", "send", name, subject, "--as", me, "-b", "-"], cwd=root, stdin=fh, capture_output=True, text=True)
+except OSError as e:
+    print("not sent —", e, "— the window is cleared; send the letter yourself")
+    sys.exit(0)
+if sent.returncode != 0:
+    print("not sent —", sent.stderr.strip(), "— the window is cleared; send the letter yourself")
+    sys.exit(0)
+print("sent —", sent.stdout.strip())
+# Wake it — `moai send --wake` never types into a Claude Code pane, so the script does, into the box
+# the clear emptied a moment ago, behind the same fences as the clear: an idle row, no copy mode,
+# a box that is empty or holds only dim suggestion text. Otherwise the letter waits for the next prompt.
+time.sleep(1)
+box = draft(pane)
+if box is None or (box != "" and not dim_only(pane)) or (row() or {}).get("status") != "idle" or looks(QUIET) != "00":
+    print("not woken —", name, pane, "— the letter waits for the next prompt in that window; point the person at it")
+    sys.exit(0)
+tmux("send-keys", "-t", pane, "-l", "moai inbox")
+time.sleep(0.3)
+tmux("send-keys", "-t", pane, "Enter")
+print("woken —", name, pane)
 PY
 ```
 
@@ -783,10 +815,15 @@ PY
   do not stop: copy it out as `dim text that appeared meanwhile` and try erasing — if it
   erases, take it as the person's text and stop. Read the input box once more right before
   typing too
-- **Do not clear and assign in one breath.** A clear erases what is queued along with it.
-  Send the next letter after the script prints `cleared` — after the row's `session`
-  changed — and on `cannot tell whether it cleared`, do not send before you have looked at
-  that window
+- **Do not clear and assign in one breath.** A clear erases what is queued along with it,
+  and a letter the old turn loaded as it ended is read and gone. So the script sends the
+  letter it was handed only after the row's `session` changed — `cleared`, then `sent` —
+  and on `cannot tell whether it cleared` it sends nothing: look at that window before you
+  send. On `not sent` the window is cleared and idle — send the letter yourself, and wake it
+  as 5 says
+- **Wake only the window you just emptied.** After `sent` the script types `moai inbox` into
+  that box — the prompt the hooks load the letter on — behind the same fences as the clear.
+  On `not woken` the letter waits for the next prompt there; point the person at it
 - **Leave one line in your own window when you clear** — `cleared <worker> pane %N (<epic>)`.
   A person who was watching that window finds in the supervisor's window why the screen went
   away

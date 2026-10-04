@@ -918,8 +918,9 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 ///
 /// **세션 사이 편지는 표에 없다**(moai-snyk) — `moai send`·`moai inbox` 는 세 벤더가 같은 글로 친다. 표에 남은 것은
 /// 깨우기(덤)다: `moai send --wake` 는 tmux 칸이 있는 Claude 밖의 세션을 두드리고, Claude 세션은 칸이 있어도 안
-/// 친다(`mail::wake`) — 그 세션은 보낸 쪽의 `SendMessage` 만 깨운다. 그래서 감독이 비운 Claude 창을 깨우는 것도
-/// 감독이 Claude Code 일 때뿐이다(감독 3 의 `<after>`, 리뷰 moai-snyk.nic).
+/// 친다(`mail::wake`) — 그 세션은 보낸 쪽의 `SendMessage` 만 깨운다. 감독이 5-1 에서 비운 Claude 창 하나는 예외다 —
+/// 그 스크립트가 비운 뒤 다음 편지를 보내고 방금 비운 빈 칸에 `moai inbox` 를 친다(2026-10-04 사용자 결정, 리뷰
+/// moai-snyk.nic 1번). 그래서 어느 벤더의 감독이든 tmux 에서 돌면 Claude 일꾼의 창을 비우고 다음 일을 싣는다.
 ///
 /// 표를 싣는 것은 `moai`·`moai-supervise`·`moai-work` 세 스킬이다([`verbs_section`]). 감독과 일꾼의 걸음은 이 표의
 /// 걸음 이름을 *기울여* 적어 가리킨다.
@@ -1983,12 +1984,11 @@ round, and the files that work holds — `none` if there is none. What the super
 measured before sending cannot cover a file that turns out to be needed mid-epic, so when
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
-`<after>` is `end the turn` only when you will clear that window yourself in 5-1 and can
-wake it after — you run inside tmux, the worker's row carries a `tmux_pane` on your tmux
-server, its vendor is `claude` (5-1 reads Claude Code's screen only), and you are in Claude
-Code yourself: a cleared Claude Code window is woken only by SendMessage, never by a command
-line (*Wake a session that sits idle*). Otherwise it is `wait again`: the worker reports and
-goes straight back to waiting.
+`<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
+inside tmux, whatever your vendor, the worker's row carries a `tmux_pane` on your tmux
+server, and its vendor is `claude` (5-1 reads Claude Code's screen only). 5-1 then sends
+the next letter itself and wakes the emptied window. Otherwise it is `wait again`: the
+worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -1999,9 +1999,10 @@ worker reads in its own window in 9-1.
 {letter}
 
 **Waking is a bonus.** A worker that waits needs none. The one window to wake is one you
-just cleared in 5-1, and that is a Claude Code window, which a command line never types
-into: `--wake` only prints that SendMessage has to carry `moai inbox` there. Send that
-(*Wake a session that sits idle*), and the hooks load the letter as the prompt arrives.
+clear in 5-1, and the script does it: after the clear it sends the next letter and types
+`moai inbox` into the box it just emptied, and the hooks load the letter as that prompt
+arrives. `moai send --wake` never types into a Claude Code pane — for one you did not just
+clear, a Claude Code supervisor wakes it with SendMessage (*Wake a session that sits idle*).
 
 **4. Wait.** Wait for the reports the way a worker waits for work:
 
@@ -2049,13 +2050,15 @@ line about being unfolded.
 
 If the three hold, send the next idea. A worker whose letter said `wait again` is already
 waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
-right after the report: clear its window with 5-1 first, and once the script prints
-`cleared`, send the next letter and wake that window as above. If 5-1 prints `not
-clearing`, do what the end of its line says. Where that is pointing out to the person that
-the window is at a good place to be cleared, send the next only after the person has
-cleared it or said they will not — then wake it the same way, its turn has ended — a
-letter loaded into the window before a late clear disappears with it, and that idea and
-that worker sit out of the candidates waiting for a report that will never come.
+right after the report: write the next letter to a file and hand it to 5-1 — the script
+clears the window, sends that letter only once the clear went through, and wakes the
+window. With no next idea, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
+what the end of its line says. Where that is pointing out to the person that the window is
+at a good place to be cleared, send the next only after the person has cleared it or said
+they will not — a letter loaded into the window before a late clear disappears with it,
+and that idea and that worker sit out of the candidates waiting for a report that will
+never come. Its turn has ended, so that letter waits until a prompt comes into the window:
+a Claude Code supervisor wakes it with SendMessage, any other asks the person.
 
 If they do not hold, ask that worker with a letter what is left, and do not finish it in
 its place.
@@ -2073,16 +2076,18 @@ does not say the turn is over — `moai inbox --wait` writes it while its shell 
 so the script also stops when it finds that wait running under the worker: such a worker
 takes the next letter as it is. Clearing erases the whole conversation that worker holds,
 so never call it before the check. `<worker>` is the name of the worker that sent the
-report, and `<root>` is the `root dir` from 2 — the script asks `moai agents` there.
+report, `<root>` is the `root dir` from 2 — the script asks `moai agents` and sends there —
+`<letter file>` is the next letter for that worker, written as 3 says (`-` for none), and
+`<subject>` is its subject, `<id> — <title>`.
 
 The script reads Claude Code's screen — the input box under the prompt glyph — so it
 clears Claude Code workers only. For a worker on another vendor it prints `not clearing`,
 and the letter 3 sent it said `wait again`.
 
 ```sh
-python3 - '<worker>' '<epic>' '<my name>' '<root>' <<'PY'
+python3 - '<worker>' '<epic>' '<my name>' '<root>' '<letter file>' '<subject>' <<'PY'
 import json, os, re, subprocess, sys, time
-name, epic, me, root = sys.argv[1:5]
+name, epic, me, root, letter, subject = sys.argv[1:7]
 # Every line goes out as it is printed. Into a pipe Python holds them back, and the copy of
 # the person's draft printed below would die with the script if it were stopped mid-way.
 sys.stdout.reconfigure(line_buffering=True)
@@ -2389,9 +2394,37 @@ for _ in range(30):
     time.sleep(0.5)
     now = row()
     if now and now.get("session") != s.get("session"):
-        print("cleared —", name, pane, epic)
-        sys.exit(0)
-print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next letter")
+        break
+else:
+    print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next letter")
+    sys.exit(0)
+print("cleared —", name, pane, epic)
+if letter == "-":
+    sys.exit(0)
+# Send only now. A letter that waited while the old turn was ending would be loaded into the
+# conversation the clear just erased — the hooks mark it read as they load it, so it would be lost.
+try:
+    with open(letter) as fh:
+        sent = subprocess.run(["moai", "send", name, subject, "--as", me, "-b", "-"], cwd=root, stdin=fh, capture_output=True, text=True)
+except OSError as e:
+    print("not sent —", e, "— the window is cleared; send the letter yourself")
+    sys.exit(0)
+if sent.returncode != 0:
+    print("not sent —", sent.stderr.strip(), "— the window is cleared; send the letter yourself")
+    sys.exit(0)
+print("sent —", sent.stdout.strip())
+# Wake it — `moai send --wake` never types into a Claude Code pane, so the script does, into the box
+# the clear emptied a moment ago, behind the same fences as the clear: an idle row, no copy mode,
+# a box that is empty or holds only dim suggestion text. Otherwise the letter waits for the next prompt.
+time.sleep(1)
+box = draft(pane)
+if box is None or (box != "" and not dim_only(pane)) or (row() or {{}}).get("status") != "idle" or looks(QUIET) != "00":
+    print("not woken —", name, pane, "— the letter waits for the next prompt in that window; point the person at it")
+    sys.exit(0)
+tmux("send-keys", "-t", pane, "-l", "moai inbox")
+time.sleep(0.3)
+tmux("send-keys", "-t", pane, "Enter")
+print("woken —", name, pane)
 PY
 ```
 
@@ -2460,10 +2493,15 @@ PY
   do not stop: copy it out as `dim text that appeared meanwhile` and try erasing — if it
   erases, take it as the person's text and stop. Read the input box once more right before
   typing too
-- **Do not clear and assign in one breath.** A clear erases what is queued along with it.
-  Send the next letter after the script prints `cleared` — after the row's `session`
-  changed — and on `cannot tell whether it cleared`, do not send before you have looked at
-  that window
+- **Do not clear and assign in one breath.** A clear erases what is queued along with it,
+  and a letter the old turn loaded as it ended is read and gone. So the script sends the
+  letter it was handed only after the row's `session` changed — `cleared`, then `sent` —
+  and on `cannot tell whether it cleared` it sends nothing: look at that window before you
+  send. On `not sent` the window is cleared and idle — send the letter yourself, and wake it
+  as 5 says
+- **Wake only the window you just emptied.** After `sent` the script types `moai inbox` into
+  that box — the prompt the hooks load the letter on — behind the same fences as the clear.
+  On `not woken` the letter waits for the next prompt there; point the person at it
 - **Leave one line in your own window when you clear** — `cleared <worker> pane %N (<epic>)`.
   A person who was watching that window finds in the supervisor's window why the screen went
   away
@@ -4283,12 +4321,28 @@ stop sending outside work while a release runs",
             script[send..].contains("now.get(\"session\") != s.get(\"session\")"),
             "비워졌는지를 출석의 세션으로 안 본다"
         );
+        // **비운 뒤에 보내고, 보낸 뒤에 깨운다**(2026-10-04 사용자 결정, 리뷰 moai-snyk.nic 1번) — 어느 벤더의 감독이든
+        // 비운 Claude 창에 다음 일을 싣는다. `send --wake` 는 Claude 칸에 안 치니 스크립트가 방금 비운 빈 칸에 친다. 세션이
+        // 바뀌기 전에 보내면 끝나 가던 옛 턴이 그 편지를 싣고 읽음으로 옮긴 채 비우기에 지워진다.
+        let changed = script.find("now.get(\"session\") != s.get(\"session\")").expect("비워졌는지를 안 본다");
+        let sent = script.find("[\"moai\", \"send\", name, subject").expect("비운 뒤에 다음 편지를 안 보낸다");
+        let woke = script.find("\"-l\", \"moai inbox\"").expect("비운 창을 안 깨운다");
+        assert!(send < changed && changed < sent && sent < woke, "비우기·확인·보내기·깨우기의 차례가 어긋났다");
+        for (fence, why) in [
+            ("if letter == \"-\":", "보낼 편지가 없을 때도 보낸다"),
+            ("sent.returncode != 0", "못 보낸 편지를 보낸 것으로 읽고 깨운다"),
+            ("box != \"\" and not dim_only(pane)", "빈 칸이 아닌 판에 `moai inbox` 를 친다"),
+        ] {
+            let at = script.find(fence).unwrap_or_else(|| panic!("{why} — {fence}"));
+            assert!(changed < at && at < woke, "{why} — 깨우기 앞에서 안 거른다: {fence}");
+        }
+        assert!(supervise.contains("whatever your vendor"), "감독의 벤더를 비우기의 조건으로 둔다");
         // **일꾼은 `moai agents` 로 찾는다**(moai-snyk) — Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다.
         // 출석의 이름은 비워도 그대로라(같은 프로세스) 이름으로 다시 찾아도 같은 장이다.
         assert!(script.contains("[\"moai\", \"agents\", \"--json\"]"), "일꾼을 출석부로 안 찾는다");
         assert!(!script.contains("sessions"), "감독이 아직 Claude 의 세션 파일을 읽는다");
         let rest = &supervise[open..];
-        assert!(rest.contains("the script prints `cleared`"), "비운 뒤에 다음 idea 를 보내라는 말이 없다");
+        assert!(rest.contains("`cleared`, then `sent`"), "비운 뒤에야 다음 편지를 보낸다는 말이 없다");
         // 일꾼 쪽: 감독은 `Next:` 노트를 보고 친다 — 그 노트는 보고 앞이고, 보고가 일꾼의 마지막 걸음이다.
         assert!(supervise[at..open].contains("`Next:` note"), "감독이 일꾼의 11 을 마쳤는지 안 본다");
         let brief = brief();

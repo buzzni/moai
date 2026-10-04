@@ -205,7 +205,7 @@
   `origin/develop` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
   에 91커밋 뒤였다).
   `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
-- **워크트리 자리는 `.worktrees/<id>` 다**(2026-10-04 사용자 결정, `moai-5s9l`). 에이전트가 셋(Claude Code·
+- **워크트리 자리는 `.worktrees/moai-<id>` 다**(2026-10-04 사용자 결정, `moai-5s9l`). 에이전트가 셋(Claude Code·
   Codex·Antigravity)이 되어 Claude 의 자리 `.claude/worktrees/` 를 걷고 세 벤더가 함께 쓰는 자리로 옮겼다.
   저장소 밖(`../`)이 아닌 까닭은 Codex 의 신뢰와 Antigravity 의 workspace 가 루트 경로 기준이라서다.
   Claude Code 의 `EnterWorktree(path)` 는 루트에서 들어갈 때 이 자리를 받지만, 워크트리에서 다른 워크트리로
@@ -318,7 +318,7 @@
 - **에픽 끝에 일꾼이 고친다**(브리프 7-4). 그 에픽이 사람의 쓰임(키·명령·플래그·파일·형식·절차)을
   바꿨으면 그것을 가르치는 페이지를 워크트리에서 `docs(wiki):` 로 커밋해 머지에 태운다 — 경로를 준
   `git commit` 은 새 파일을 말없이 빼니 `git add -- docs` 가 먼저 선다. 안 바뀌었으면
-  안 쓴다. 고친 페이지는 감독에게 보내는 보고(11)에 한 토막으로 선다
+  안 쓴다. 고친 페이지는 감독에게 보내는 보고(12)에 한 토막으로 선다
 - **사람이 `moai-wiki` 를 부르면 훑는다** — 지난 릴리스 뒤 닫힌 에픽과 에픽 밖 이슈를 돌고 고칠 목록을 한 번 보인다.
   지난 릴리스는 태그 날짜로 찾는다 — 태그는 `main` 의 머지 커밋에 서서 `develop` 의 `git describe` 에 안 닿는다.
   릴리스 앞에 한 번 부르는 것을 `CONTRIBUTING.md` 의 Releasing 이 권한다
@@ -442,7 +442,9 @@
 
 ## 막혔을 때
 
-추측해서 진행하지 않는다. 다음 형식으로 보고하고 멈춘다.
+추측해서 진행하지 않는다. 다음 형식으로 보고하고 멈춘다. 감독의 편지가 `Person: away` 를 이른
+일꾼만 예외다 — `moai-work` 스킬의 "When the person is away" 대로 권장안으로 정하고
+`Decided alone:` 노트를 남기며, 되돌릴 수 없는 것에서만 멈춘다(`moai-snyk`).
 
     <id> 진행 중 결정이 필요합니다.
     - 상황:

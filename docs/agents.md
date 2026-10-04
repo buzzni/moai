@@ -223,13 +223,13 @@ the diff itself. It never starts another agent (`codex review`, `codex exec`,
 **Clearing a window is the person's, or the supervisor's on tmux.** A worker
 loaded with one epic's conversation may be cleared between tasks: stop the wait,
 clear it (`/clear`, `/new` in Codex) and call `moai-work` again — the context
-lives in the tracker. A supervisor in Claude Code running inside tmux clears a
+lives in the tracker. A supervisor running inside tmux — any vendor — clears a
 Claude Code worker's window itself once the report checks out: it reads the input
 box first so a person's half-typed text is copied out, never typed over, and the
-letter told that worker to end its turn instead of waiting. It then wakes that
-window with SendMessage — a command line cannot wake a Claude Code window, so any
-other supervisor has its workers wait again. Codex and Antigravity windows are
-left to the person — their input box is not read yet.
+letter told that worker to end its turn instead of waiting. Once the clear went
+through it sends the next letter and types `moai inbox` into the emptied box, and
+the hooks load the letter. Codex and Antigravity windows are left to the person —
+their input box is not read yet.
 
 **When the person steps away**, they tell the supervisor, and the letters say
 `Person: away`. The worker then settles a design question by its own
