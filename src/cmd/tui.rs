@@ -1191,9 +1191,11 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
     // 값도, 폼·글 받는 칸·고르는 창이 열리고 닫히며 바뀐 값도 사건을 받은 바로 뒤에 터미널로 낸다(아래). 편집기에서
     // 돌아올 때(`resume`)는 그때의 `wants_mouse` 대로 켜고 이 값도 그것으로 고쳐 적는다.
     let mut caught = app.wants_mouse();
+    // 앞 프레임을 들고 그린다 — 넓은 글자의 반쪽이 남긴 칸을 다시 내려고(moai-c6go, `draw::Painter`).
+    let mut painter = crate::tui::draw::Painter::default();
     while !app.quit {
         let began = std::time::Instant::now();
-        term.draw(|f| crate::tui::draw::screen(f, app))?;
+        painter.draw(term, app)?;
         let step = spin_step(began.elapsed());
         // **화면에 도는 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
         // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없고, 집은 일이 다른 에픽 안이나
@@ -1238,6 +1240,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
             // 옛 값을 들고 있으면 그 폼을 바로 닫은 사건 뒤에 `wants_mouse` 가 옛 값과 같아 다시 잡지 않는다.
             caught = app.wants_mouse();
             let up = resume(term, caught);
+            painter.forget();
             EDITING.release();
             up?;
         }
