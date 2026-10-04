@@ -45,7 +45,7 @@ Commands:
   agents        Who is here - the agents under .moai/agents (sweeps the gone)
   hello         Register this agent - name, vendor, model and role
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
-  hook          Called by Claude's hook. Reads an event on stdin
+  hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
@@ -2691,7 +2691,7 @@ Options:
 ## `moai hook`
 
 ```
-Called by Claude's hook. Reads an event on stdin
+Called by an agent's hook. Reads an event on stdin
 
 Usage: moai hook [OPTIONS] <event>
 
@@ -2699,6 +2699,7 @@ Arguments:
   <event>  Which place it was called from (see the list below)
 
 Options:
+      --dialect <agent>      Whose shapes: claude (default), codex, antigravity
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2706,7 +2707,8 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  Nobody calls this by hand. The plugin installed into Claude calls it.
+  Nobody calls this by hand. The hooks `moai skill install` plants call it -
+  Claude's plugin, Codex's .codex/hooks.json, Antigravity's .agents/hooks.json.
 
   **It blocks nothing, and whatever goes wrong the exit code is 0.** A hook
   that spits errors makes every session start noisy, and then people turn the
@@ -2720,6 +2722,14 @@ Options:
     user-prompt-submit  A person asked. Loads letters, and the board once
     pre-tool-use        Just before a tool call. The rules stand here
     stop                The turn ends. Loads letters, then checks the state
+    stop-failure        An API error ended a turn (Claude). Marks the agent idle
+    interrupt           A person broke off a turn (Codex). Marks the agent idle
+    session-end         The session closes (Claude, Codex). Marks the agent idle
+
+  --dialect says which agent's shapes come in and go out: claude (the
+  default), codex or antigravity. The rules are the same for all three.
+  Antigravity has no user-prompt-submit; its first model call of a turn
+  (PreInvocation) stands in for it.
 
   echo '{"session_id":"x","cwd":"/repo"}' | moai hook user-prompt-submit
 ```
@@ -2842,7 +2852,14 @@ Options:
   naming either plants it for both. There is nothing to register: commit the
   directory and the team has it. --scope is Claude's registration only. The
   text is the one Claude gets; the steps that differ per agent are in the
-  skills' "Words per agent" table. The hooks are planted for Claude only.
+  skills' "Words per agent" table.
+
+  The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
+  --agent antigravity plants `.agents/hooks.json` - commit them too. Codex
+  runs project hooks only once you trust them: open /hooks in a codex session
+  in this repository, and again whenever they change. A hooks file moai did
+  not write is left as it is - merge moai's in by hand, or move it aside. Codex
+  sends hooks only for its shell, apply_patch and MCP calls.
 
   For Claude, skills and hooks are installed into `.claude/moai-plugin/` and
   registered with `claude`. Your settings.json is not touched - putting the
@@ -2920,6 +2937,8 @@ Options:
                   or removed)
     .agents       whether .agents/skills/ holds this version's skills
                   (codex and antigravity read it)
+    codex hooks   whether .codex/hooks.json is this version's, and moai's
+    agy hooks     whether .agents/hooks.json is this version's, and moai's
     codex, agy    whether they are on PATH
 ```
 
@@ -2964,8 +2983,9 @@ Options:
 
   For codex and antigravity (--agent) there is no registration to remove,
   and no file is deleted either: the `rm -r` lines for moai's skills in
-  `.agents/skills/` are printed, to run once no session holds them. Without
-  that --agent, one line says when moai's skills are still there.
+  `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
+  wrote it, are printed, to run once no session holds them. Without that
+  --agent, one line says when moai's skills are still there.
 
   moai skill uninstall --dry-run      only show what would be called
   moai skill uninstall --agent codex  name what to delete in .agents/skills/
