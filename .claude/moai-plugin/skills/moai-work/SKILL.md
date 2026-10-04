@@ -86,7 +86,7 @@ types a step its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` | `cd` into it and run every command there | `cd` into it and run every command there |
+| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
 | Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
@@ -170,13 +170,13 @@ refusals in all.
    pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
    hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
    (*Enter the worktree*). The name is the unfolded epic's id, not the idea's. Until the
    worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
    it and work there — standing at the worktree top, `moai` walks up and finds the root's
-   `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+   `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
    **is** the top and this step does not exist
      cd <subdir>
@@ -373,7 +373,7 @@ refusals in all.
    resolve it in the root — undo with `git merge --abort`, go back into the worktree
    (*Enter the worktree*) and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
-   `git worktree remove .claude/worktrees/<epic>` and `git branch -d worktree-<epic>`
+   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
    suggestion in the letter but the model that **actually ran** in this window. The line below
@@ -439,12 +439,12 @@ notes), then
 - If the worktree is there, go in (*Enter the worktree*), read how far it got with
   `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
-  (`git worktree add .claude/worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>`
+  (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
+  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
 - **If the root is not the top of the repository** (a subdirectory project in a
   monorepo), go into the worktree and then move to the same subdirectory inside it and
   work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
   does not exist
     cd <subdir>

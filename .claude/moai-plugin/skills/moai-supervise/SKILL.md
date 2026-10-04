@@ -20,7 +20,7 @@ window (5-1), and that is all it adds.
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
 root mixes their edits and commits together. Worktrees stand in
-`<root>/.claude/worktrees/`, and `moai init` writes that path into the gitignore.
+`<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
 
 **Say hello first** — once per window, so the workers have someone to report to:
 
@@ -58,7 +58,7 @@ types a step its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` | `cd` into it and run every command there | `cd` into it and run every command there |
+| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
 | Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |

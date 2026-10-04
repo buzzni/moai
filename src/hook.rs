@@ -8287,9 +8287,11 @@ fn shelving_closes<'a>(
     aims.into_iter().filter(|(_, e)| after.get(&(crate::model::Kind::Epic, *e)) == Some(&crate::config::DONE)).collect()
 }
 
-/// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.
+/// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물, 그리고 옆 워크트리 —
+/// `.worktrees/` 는 세 벤더가 함께 쓰는 워크트리 자리다(moai-5s9l). 루트에서 보면 그 밑은 남의
+/// 체크아웃이라, 거기 고친 것은 그 워크트리의 일이지 루트의 일이 아니다.
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
-const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
+const SKIP: &[&str] = &[".moai", ".claude", ".worktrees", ".git", "target", "node_modules"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
 ///

@@ -926,7 +926,7 @@ pub const VERBS: [Verb; 9] = [
     Verb {
         step: "Enter the worktree",
         words: [
-            "`EnterWorktree(path)`",
+            "`EnterWorktree(path)` from the root",
             "`cd` into it and run every command there",
             "`cd` into it and run every command there",
         ],
@@ -1001,8 +1001,8 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. {two}.** `moai mv <id> in_progress`.
-What counts is work inside the repository — `.moai/`, `.claude/`, `target/` and
-anything outside the repository (scratchpad, temporary files) do not. Shell
+What counts is work inside the repository — `.moai/`, `.claude/`, `.worktrees/`, `target/`
+and anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
@@ -1734,7 +1734,7 @@ window (5-1), and that is all it adds.
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
 root mixes their edits and commits together. Worktrees stand in
-`<root>/.claude/worktrees/`, and `moai init` writes that path into the gitignore.
+`<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
 
 **Say hello first** — once per window, so the workers have someone to report to:
 
@@ -2616,12 +2616,12 @@ notes), then
 - If the worktree is there, go in (*Enter the worktree*), read how far it got with
   `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
-  (`git worktree add .claude/worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>`
+  (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
+  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
 - **If the root is not the top of the repository** (a subdirectory project in a
   monorepo), go into the worktree and then move to the same subdirectory inside it and
   work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.claude/`. `<subdir>` is that relative path, filled in
+  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
   does not exist
     {SUBDIR}
@@ -2705,13 +2705,13 @@ fn brief() -> String {
    pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
    hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .claude/worktrees/<epic> <base branch>` and go in
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
    (*Enter the worktree*). The name is the unfolded epic's id, not the idea's. Until the
    worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
    it and work there — standing at the worktree top, `moai` walks up and finds the root's
-   `.moai` to write, and the hook does not count edits under `.claude/`. `<subdir>` is that
+   `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
    **is** the top and this step does not exist
      {SUBDIR}
@@ -2883,7 +2883,7 @@ fn brief() -> String {
    resolve it in the root — undo with `git merge --abort`, go back into the worktree
    (*Enter the worktree*) and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
-   `git worktree remove .claude/worktrees/<epic>` and `git branch -d worktree-<epic>`
+   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
    suggestion in the letter but the model that **actually ran** in this window. The line below

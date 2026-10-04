@@ -140,8 +140,8 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
-What counts is work inside the repository — `.moai/`, `.claude/`, `target/` and
-anything outside the repository (scratchpad, temporary files) do not. Shell
+What counts is work inside the repository — `.moai/`, `.claude/`, `.worktrees/`, `target/`
+and anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
@@ -194,7 +194,7 @@ types a step its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` | `cd` into it and run every command there | `cd` into it and run every command there |
+| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
 | Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |

@@ -1773,6 +1773,8 @@ fn init_ignores_the_worktree_dir_once_and_respects_equivalent_spellings() {
     ok(&fresh, &["init", "argos"]);
     let got = std::fs::read_to_string(fresh.join(".gitignore")).unwrap();
     assert!(got.lines().any(|l| l == "/.claude/worktrees/"), "새 저장소에 워크트리 자리를 안 막았다\n{got}");
+    // 세 벤더가 함께 쓰는 자리도 막는다(moai-5s9l) — 옛 자리 줄은 남긴다, 그 자리에 선 워크트리가 아직 돈다.
+    assert!(got.lines().any(|l| l == "/.worktrees/"), "새 저장소에 공용 워크트리 자리를 안 막았다\n{got}");
     ok(&fresh, &["init"]);
     assert_eq!(
         std::fs::read_to_string(fresh.join(".gitignore")).unwrap(),
@@ -7162,7 +7164,7 @@ fn a_missing_dotfile_rule_shows_in_status_and_check() {
     let check = ok(s.path(), &["init", "--check"]);
     assert!(check.contains(".gitignore") && check.contains("worktrees"), "{check}");
     let cjs = ok(s.path(), &["init", "--check", "--json"]);
-    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.claude/worktrees/\"]}"), "{cjs}");
+    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.worktrees/\",\"/.claude/worktrees/\"]}"), "{cjs}");
 
     // **없는 파일은 통째로 빠진 것이다** — `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰
     // 자리라 입을 다물면 안 된다. 못 읽는 파일과 갈린다: 그쪽은 무엇이 들었는지 모른다.
@@ -14468,6 +14470,21 @@ fn rule_five_refuses_picking_up_someone_elses_row_and_hands_the_take_over() {
     let mine = add(s.path(), &["내 일"]);
     let mv = format!("{{\"command\":\"moai mv {mine} in_progress\"}}");
     assert!(call(&s, "Bash", &mv, "s1").trim().is_empty());
+}
+
+/// **옆 워크트리 자리는 루트의 일로 안 센다**(moai-5s9l) — 세 벤더가 함께 쓰는 `.worktrees/` 밑은 남의
+/// 체크아웃이라, 루트의 세션이 그 밑을 고친 것을 규칙 2 가 세면 집은 것 없는 세션이 옆 일꾼의 파일 하나로
+/// 막힌다. 옛 자리 `.claude/worktrees/` 는 `.claude` 가 이미 안 센다.
+#[test]
+fn an_edit_under_the_shared_worktree_dir_is_not_the_roots_work() {
+    let s = init("hookwtdir");
+    ok(s.path(), &["add", "무엇"]);
+    let refused = call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1");
+    assert!(!refused.trim().is_empty(), "집은 것 없이 고친 저장소 파일을 안 막는다 — 시험의 바닥이 무너졌다");
+    for path in [".worktrees/moai-ab12/src/store.rs", ".claude/worktrees/moai-ab12/src/store.rs"] {
+        let out = call(&s, "Edit", &format!("{{\"file_path\":\"{path}\"}}"), "s1");
+        assert!(out.trim().is_empty(), "{path} 를 루트의 일로 센다 — {out}");
+    }
 }
 
 /// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는
