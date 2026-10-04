@@ -456,7 +456,7 @@ It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
 `--milestone`). Done, deferred, ideas and the archive are opened, because a
 count of history that hides what closed would say nothing closed. In the explorer
-`SPC p s` opens the same numbers as bars, narrowed by the filter that is hung.
+`SPC g s` opens the same numbers as bars, narrowed by the filter that is hung.
 
 - **Unknown is not zero.** A done row with no `started_at` (it closed before that
   field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;

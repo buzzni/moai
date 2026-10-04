@@ -530,11 +530,13 @@ IDEA
   on every press and carry over to the next run and to other projects (the
   same file `moai project add` writes).
 
-  SPC v b lays the same rows out as a kanban board instead of a list. It is
-  the list's layout, not another window: the cursor, the filter, the view,
-  search, [NEW] and the detail are the list's, and the choice is kept under
-  [tui] as layout. The columns are idea, deferred and the config's columns in
-  order — idea is a kind and deferred an axis, so nothing is stored for them.
+  SPC g b lays the same rows out as a kanban board instead of a list, and
+  SPC g l brings the list back. It is the list's layout, not another window:
+  the cursor, the filter, the view, search, [NEW] and the detail are the
+  list's, and the choice is kept under [tui] as layout. The menu's root names
+  the screen that stands, as in +screen [board]. The columns are idea,
+  deferred and the config's columns in order — idea is a kind and deferred
+  an axis, so nothing is stored for them.
   SPC v i hides ideas, the idea column here and the idea rows in the list
   alike, and is kept under [tui] as hide_ideas.
   At the project root every milestone is a lane, with (no milestone) last;
@@ -594,7 +596,7 @@ IDEA
   y is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
 
-  SPC p s opens the statistics window in place of the list and the detail —
+  SPC g s opens the statistics window in place of the list and the detail —
   the numbers `moai stats` gives, drawn as bars: the flow per week, the
   columns and priorities, lead and cycle time, and AI work by model. It
   counts the project you are in, or on the one list (0) the project of the
@@ -602,7 +604,11 @@ IDEA
   passes, and the title says so. b switches the flow between weeks and
   days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
   Esc goes back to where you were, with the cursor, the filter and the
-  detail as they were. On a narrow screen it shows the same figures as text.
+  detail as they were. SPC opens the menu over it with the screens alone:
+  SPC g l and SPC g b close it onto the list or the board, and SPC g s
+  counts again from scratch — the window is opened fresh every time and
+  nothing of it is kept. On a narrow screen it shows the same figures as
+  text.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

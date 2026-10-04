@@ -1928,7 +1928,9 @@ mod tests {
             "SPC /",
             "SPC p a",
             "SPC p d",
-            "SPC p s",
+            "SPC g l",
+            "SPC g b",
+            "SPC g s",
             "SPC v w",
             "SPC v r",
             "SPC s p",
@@ -2058,7 +2060,7 @@ mod tests {
     /// 생각 담기 문단.
     const JOTTING: &str = "SPC n opens the jot form";
     /// 통계 창 문단(moai-1hka.bq9).
-    const STATISTICS: &str = "SPC p s opens the statistics window";
+    const STATISTICS: &str = "SPC g s opens the statistics window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선

@@ -133,10 +133,11 @@ issue under the cursor on the other. It answers keys and the mouse alike: click
 a pane or a row, roll the wheel over the pane you want to move, drag the line
 between the two to resize them. `moai tui --help` lists the keys, and `SPC o m`
 lets the mouse go when you would rather select or paste with it in the terminal.
-`SPC v b` lays the same list out as a kanban board — idea, deferred and your
-columns side by side, one lane per milestone, and in the overview one header
-per project — and keeps that choice for the next run. `SPC v i` hides the
-ideas, and a card that is not yours says whose it is.
+`SPC g` picks the screen: `SPC g b` lays the same list out as a kanban board —
+idea, deferred and your columns side by side, one lane per milestone, and in the
+overview one header per project — `SPC g l` brings the list back, and the choice
+is kept for the next run. `SPC v i` hides the ideas, and a card that is not
+yours says whose it is.
 `SPC f` filters with the same `key=value` words as `--filter`. While you type,
 the keys it takes and a few examples stand above the field, and in the value of
 `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
@@ -325,7 +326,7 @@ id missing from the new pull was removed.
 created and closed per week or day, lead time (created → done) and cycle time
 (started → done), and the AI work written in `model:` note lines, by model and by
 grade. It takes the filters `moai show` takes, and `--json` gives the same numbers
-to a machine. In the explorer `SPC p s` draws them as bars.
+to a machine. In the explorer `SPC g s` draws them as bars.
 
 ```sh
 moai stats                               # overview
