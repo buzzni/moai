@@ -179,6 +179,23 @@ session cannot yet tie the `moai` it runs in its shell to its own presence row
   supervisor's own `any-idle-worker` letter at the end of its turn. From a Codex
   supervisor, send to a worker by name
 
+### Antigravity
+
+    agy
+
+- **Open it the ordinary way**, not with `--dangerously-skip-permissions`. It
+  asks its person before a command, like the other two
+- **Pick the model as you open it** (`agy --model <model>`). The skills have no
+  step for changing it later, so a supervisor's letter to an Antigravity worker
+  leaves the model to you
+- **Its hooks are `.agents/hooks.json`.** Antigravity has no session start and
+  no prompt event, so the session first shows in `moai agents` once its first
+  turn reaches the model — until then a supervisor cannot see it
+- **Make it a worker** by asking it for the `moai-work` skill by name
+- **Waking**: inside tmux, `moai send --wake` types `moai inbox` into its pane
+  while it sits idle. Outside tmux nothing wakes it, and a worker gets its
+  letters by waiting
+
 ## What the hooks do
 
 The hooks catch the same few places in each agent's session. Each calls
