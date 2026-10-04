@@ -24901,6 +24901,65 @@ fn hello_under_a_new_name_carries_the_letters() {
     assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("\"letters\":[]"), "옛 이름에도 남았다");
 }
 
+/// **Codex 세션은 훅이 지어 준 장을 `--as` 로 잇는다**(moai-u5wr.7xr, 사용자 결정 A) — Codex 의 셸은 세션 모두가 함께 쓰는
+/// `codex app-server` 밑에서 돌아 `moai` 가 조상으로 이 세션을 못 찾는다. 훅은 첫 프롬프트에 그 장의 이름을 대고,
+/// `hello --as` 는 그 장을 이어받아 역할을 단다 — 프로세스·세션은 그 장의 것이고 데몬의 tmux 칸을 안 적는다. 이름 없는
+/// `hello` 는 Codex 에서 멈춘다: 데몬의 pid 로 지은 장은 창 둘이 한 장을 빼앗았다. 역할을 단 Codex 감독은 제 훅이
+/// `any-idle-worker` 일감을 가져가지 않는다.
+#[test]
+fn a_codex_session_takes_up_its_hook_row_with_as() {
+    let s = init("codex-as");
+    let tmux = [("TMUX", "/tmp/moai-7xr-not-this-session,1,0"), ("TMUX_PANE", "%78")];
+    let codex = |on: &str, input: &str| {
+        let out = hook_argv(&s, s.path(), None, &tmux, &["hook", on, "--dialect", "codex"], input);
+        String::from_utf8(out.stdout).unwrap()
+    };
+    codex("session-start", &recorded(&s, "codex/session-start.json"));
+    let first = codex("user-prompt-submit", &recorded(&s, "codex/user-prompt-submit.json"));
+    assert!(
+        first.contains("이 Codex 세션은 `moai agents` 에서 `codex-01a107b4` 이다"),
+        "제 장의 이름을 안 댔다 — {first}"
+    );
+    assert!(first.contains("--as codex-01a107b4"), "{first}");
+
+    // 이름 없는 인사는 Codex 에서 멈춘다 — 데몬의 pid 로는 세션을 못 가른다.
+    let in_codex = |args: &[&str]| {
+        isolated(fake_agent("codex"))
+            .args(["-c", "\"$0\" \"$@\"; exit $?", BIN])
+            .args(args)
+            .env("MOAI_ACTOR", ACTOR)
+            .env("MOAI_NOW", NOW)
+            .envs(tmux)
+            .current_dir(s.path())
+            .output()
+            .unwrap()
+    };
+    let bare = in_codex(&["hello", "--role", "supervisor", "--json"]);
+    assert!(!bare.status.success(), "Codex 에서 이름 없이 인사를 받았다");
+    assert_eq!(field(&String::from_utf8_lossy(&bare.stderr), "code"), "no_actor");
+    let card = in_codex(&["hello", "--as", "codex-01a107b4", "--role", "supervisor", "--json"]);
+    let said = String::from_utf8(card.stdout).unwrap();
+    assert!(card.status.success(), "{}", String::from_utf8_lossy(&card.stderr));
+    assert!(said.contains("\"name\":\"codex-01a107b4\"") && said.contains("\"role\":\"supervisor\""), "{said}");
+    assert!(said.contains("\"pid\":0,") && said.contains("\"session\":\"01a107b4-"), "훅의 장을 안 이었다 — {said}");
+    assert!(!said.contains("%78"), "데몬의 tmux 칸을 적었다 — {said}");
+    assert_eq!(names_in(&s.path().join(".moai/agents")), ["codex-01a107b4.json"], "장이 둘로 섰다");
+    // 제 이름을 댄 Codex 창은 그 이름의 새 장이다 — 프로세스도 칸도 모름이다.
+    let named = in_codex(&["hello", "--name", "cx-worker", "--json"]);
+    let said = String::from_utf8(named.stdout).unwrap();
+    assert!(said.contains("\"pid\":0,") && !said.contains("%78"), "{said}");
+
+    // 역할을 단 감독의 훅은 제 일감을 안 가진다.
+    ok(s.path(), &["send", "any-idle-worker", "일감", "--as", "boss"]);
+    assert!(!codex("stop", &recorded(&s, "codex/stop.json")).contains("일감"), "Codex 감독의 훅이 일감을 가졌다");
+    // `--as` 로 댄 이름이 없으면 멈추고, MOAI_AGENT 와 다른 --name 은 받지 않는다.
+    let code = |out: Output| field(&String::from_utf8_lossy(&out.stderr), "code");
+    assert_eq!(code(moai(s.path(), &["hello", "--as", "nobody", "--json"])), "not_found");
+    let told =
+        staged(&["hello", "--name", "y1", "--json"]).env("MOAI_AGENT", "x1").current_dir(s.path()).output().unwrap();
+    assert_eq!(code(told), "bad_input", "MOAI_AGENT 와 다른 이름을 받았다");
+}
+
 /// **새 이벤트와 말씨도 실패하지 않는다** — [`the_hook_never_fails`] 의 입력을 세 말씨로.
 #[test]
 fn every_dialect_and_event_never_fails() {

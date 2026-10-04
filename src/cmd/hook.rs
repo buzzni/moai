@@ -290,6 +290,17 @@ fn decide(
             // `send --wake` 가 몇 시간 전에 끊긴 턴의 시각을 "그때부터 일하는 중" 으로 댔다 — 그 값을 댄 까닭과 거꾸로다.
             let me = attendee(input, &repo, dialect).map(|p| mail::Presence { since: String::new(), ..p });
             attend(&repo, me.clone(), mail::BUSY);
+            // **Codex 세션에는 제 장의 이름을 댄다**(moai-u5wr.7xr) — 그 셸은 세션 모두가 함께 쓰는 데몬 밑에서 돌아 `moai` 가
+            // 조상으로 이 세션을 못 찾는다. 보드와 함께 세션에 한 번 싣고, `hello`·`inbox`·`send` 는 그 이름을 `--as` 로 받는다.
+            let board = match (&me, dialect) {
+                (Some(p), Dialect::Codex) if board != Decision::Pass => board.then(|| {
+                    Decision::Context(crate::i18n::fill(
+                        crate::i18n::say(ctx.lang(), "hook.you_are"),
+                        &[("name", &p.name)],
+                    ))
+                }),
+                _ => board,
+            };
             let letters =
                 me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&board), Mine::All));
             board.then(|| letters.map_or(Decision::Pass, Decision::Context))

@@ -1342,6 +1342,8 @@ mod tests {
                     .replace("<letter id>", "20261004-120000-abcd1234")
                     .replace("<letter file>", "/tmp/letter.txt")
                     .replace("<report file>", "/tmp/report.txt")
+                    // Codex 창이 훅이 지어 준 장을 잇는 자리(moai-u5wr.7xr).
+                    .replace("<that name>", "w1")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

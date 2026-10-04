@@ -89,6 +89,18 @@ fn cell(s: &str) -> String {
     if s.is_empty() { "-".to_string() } else { crate::text::one_line(s) }
 }
 
+/// 이 부름이 출석을 적을 에이전트 — 그 프로세스와, 조상에서 읽은 벤더.
+///
+/// **Codex 는 프로세스로 안 잇는다**(moai-u5wr.7xr, moai-sile) — 그 셸은 한 사람의 Codex 세션 모두가 함께 쓰는
+/// `codex app-server` 데몬 밑에서 돈다. 데몬의 pid 로 이으면 Codex 창 둘이 `hello` 한 번씩에 한 장을 빼앗고, 데몬이 뜬
+/// 칸의 `TMUX_PANE` 을 적어 `send --wake` 가 남의 창에 글자를 친다. 그래서 Codex 는 pid 를 모름(0)으로 둔다.
+enum Agent {
+    /// 프로세스를 아는 에이전트 — 준 pid, 조상의 에이전트, 그도 없으면 이 명령을 띄운 셸.
+    Known(mail::Proc, Option<&'static str>),
+    /// Codex — 프로세스로 못 가른다.
+    Codex,
+}
+
 pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let lang = ctx.lang();
@@ -102,61 +114,96 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             ));
         }
     }
-    if let Some(name) = args.name.as_deref()
-        && !mail::is_agent_name(name)
+    for name in [args.name.as_deref(), args.as_.as_deref()].into_iter().flatten() {
+        if !mail::is_agent_name(name) {
+            return Err(super::mail::bad_name(lang, name));
+        }
+    }
+    // **`MOAI_AGENT` 가 이 창의 이름이다**(moai-ew4o.e1m) — `send`·`inbox` 가 그 이름으로 돌고 훅도 그 이름으로 장을 세운다.
+    // 다른 `--name` 은 다음 훅이 도로 옮기니 받지 않는다.
+    let told = std::env::var("MOAI_AGENT").ok().map(|v| v.trim().to_string()).filter(|v| mail::is_agent_name(v));
+    if let (Some(name), Some(told)) = (args.name.as_deref(), told.as_deref())
+        && name != told
     {
-        return Err(super::mail::bad_name(lang, name));
+        return Err(Fail::coded(
+            fill(say(lang, "refuse.agents_told_name"), &[("name", name), ("told", told)]),
+            code::BAD_INPUT,
+        ));
     }
     // **낱말은 앞뒤를 다듬어 적는다**(리뷰 moai-h8tn.x4l) — `--role ' supervisor'` 를 그대로 적으면 `supervisor` 와 안
     // 맞아 감독이 `any-idle-worker` 일감을 가진다.
     let word = |v: &Option<String>| v.as_deref().map(|v| v.trim().to_string());
     let (vendor_given, model_given, role_given) = (word(&args.vendor), word(&args.model), word(&args.role));
 
-    // **에이전트 프로세스를 찾는다** — 준 pid, 아니면 조상 가운데 이름이 벤더인 것, 그것도 없으면 이 명령을
-    // 띄운 셸(사람이 터미널에서 인사한 판)이다. 셸의 pid 도 그 창이 닫히면 죽어 출석이 걷힌다.
-    let (agent, seen) = match args.pid {
-        Some(pid) => {
+    let dir = repo.agents_dir();
+    let (all, _) = mail::presences(&dir);
+    // **`--as` 는 이미 선 장을 이어받는다**(moai-u5wr.7xr) — 훅이 그 세션에 지어 준 장이다. 셸에서 제 세션을 못 찾는
+    // Codex 가 그 이름을 대고 역할을 단다. 프로세스·세션·칸은 그 장의 것을 그대로 둔다.
+    let adopted = match args.as_.as_deref() {
+        Some(name) => Some(all.iter().find(|p| p.name == name).cloned().ok_or_else(|| {
+            Fail::coded(fill(say(lang, "refuse.agents_no_card"), &[("name", name)]), code::NOT_FOUND)
+        })?),
+        None => None,
+    };
+    let agent = match (args.pid, &adopted) {
+        (_, Some(p)) => Agent::Known(mail::Proc { pid: p.pid, ppid: 0, start: p.pid_start, comm: String::new() }, None),
+        (Some(pid), None) => {
             let p = mail::proc_of(pid).ok_or_else(|| {
                 Fail::coded(fill(say(lang, "refuse.agents_no_pid"), &[("pid", &pid.to_string())]), code::NOT_FOUND)
             })?;
             let seen = mail::vendor_of(&p.comm);
-            (p, seen)
+            Agent::Known(p, seen)
         }
-        None => {
+        (None, None) => {
             let ancestors = mail::ancestors();
             match mail::agent_among(&ancestors) {
-                Some((p, v)) => (p.clone(), Some(v)),
+                Some((_, "codex")) => Agent::Codex,
+                Some((p, v)) => Agent::Known(p.clone(), Some(v)),
                 None => {
                     let shell = ancestors
                         .first()
                         .cloned()
                         .ok_or_else(|| Fail::new(say(lang, "refuse.agents_no_parent").to_string()))?;
-                    (shell, None)
+                    Agent::Known(shell, None)
                 }
             }
         }
     };
-
-    let dir = repo.agents_dir();
-    let (all, _) = mail::presences(&dir);
-    let before = all.iter().find(|p| p.runs_as(&agent)).cloned();
+    // 이 에이전트가 이미 든 장 — 이어받은 장, 아니면 같은 프로세스의 장. Codex 는 프로세스로 못 찾는다.
+    let before = adopted.clone().or_else(|| match &agent {
+        Agent::Known(proc, _) => all.iter().find(|p| p.runs_as(proc)).cloned(),
+        Agent::Codex => None,
+    });
+    let seen = match &agent {
+        Agent::Known(_, seen) => *seen,
+        Agent::Codex => Some("codex"),
+    };
     let vendor = vendor_given
         .or_else(|| before.as_ref().map(|p| p.vendor.clone()).filter(|v| !v.is_empty()))
         .or_else(|| seen.map(str::to_string))
         .unwrap_or_default();
-    // 이름: 준 것, 이 에이전트가 이미 든 것, Claude 가 보이는 세션 이름, `<벤더>-<pid>` 차례(사용자 결정).
-    let name = args
-        .name
-        .clone()
-        .or_else(|| before.as_ref().map(|p| p.name.clone()))
-        .or_else(|| (vendor == "claude").then(|| mail::claude_session_name(agent.pid)).flatten())
-        .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &agent.pid.to_string()))
-        .ok_or_else(|| super::mail::bad_name(lang, &vendor))?;
+    // 이름: 준 것, `MOAI_AGENT`, 이 에이전트가 이미 든 것, Claude 가 보이는 세션 이름, `<벤더>-<pid>` 차례(사용자 결정).
+    // **Codex 는 지어 주지 않는다** — 데몬의 pid 로 지은 이름은 창마다 같다. 훅이 지어 준 장을 `--as` 로 잇거나 이름을 댄다.
+    let generated = || match &agent {
+        Agent::Known(proc, _) => (vendor == "claude")
+            .then(|| mail::claude_session_name(proc.pid))
+            .flatten()
+            .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &proc.pid.to_string())),
+        Agent::Codex => None,
+    };
+    let name = match args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone())).or_else(generated) {
+        Some(name) => name,
+        None if matches!(agent, Agent::Codex) => {
+            return Err(Fail::coded(say(lang, "refuse.agents_codex_who").to_string(), code::NO_ACTOR));
+        }
+        None => return Err(super::mail::bad_name(lang, &vendor)),
+    };
     // **산 남의 이름은 안 뺏는다** — 두 에이전트가 한 이름이면 편지가 먼저 읽은 쪽으로 샌다. **대소문자만 다른
     // 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 이름이 파일 이름이라, 대소문자를 안 가리는 파일 시스템(macOS
     // 기본)에서는 `Worker` 와 `worker` 가 한 장이다.
     // 산 것을 찾는다 — 대소문자로 겹치는 장은 여럿일 수 있어, 첫 장이 죽은 것이면 뒤의 산 장을 가린다.
-    if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !p.runs_as(&agent) && !p.gone()) {
+    let mine = |p: &Presence| before.as_ref().is_some_and(|b| b.name == p.name);
+    if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !mine(p) && !p.gone()) {
         return Err(Fail::coded(
             fill(say(lang, "refuse.agents_name_taken"), &[("name", &name), ("pid", &other.pid.to_string())]),
             code::ALREADY_EXISTS,
@@ -164,13 +211,19 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     }
 
     let now = crate::model::now();
-    // **`--pid` 로 남을 가리켰으면 이 셸의 tmux 칸을 안 적는다** — 그 칸은 그 프로세스의 것이 아닐 수 있고,
-    // 깨우기가 그 칸에 글자를 친다. 엉뚱한 칸이면 사람의 창에 `moai inbox` 가 쳐진다.
-    let (tmux_pane, tmux_socket) = match args.pid {
-        None => Presence::tmux_here(),
-        Some(_) => before.as_ref().map(|p| (p.tmux_pane.clone(), p.tmux_socket.clone())).unwrap_or_default(),
-    };
     let keep = before.clone();
+    let (pid, pid_start) = match &agent {
+        Agent::Known(proc, _) => (proc.pid, proc.start),
+        Agent::Codex => (0, None),
+    };
+    // **남을 가리켰으면(`--pid`·`--as`) 이 셸의 tmux 칸을 안 적는다** — 그 칸은 그 프로세스의 것이 아닐 수 있고,
+    // 깨우기가 그 칸에 글자를 친다. 엉뚱한 칸이면 사람의 창에 `moai inbox` 가 쳐진다. **Codex 도 안 적는다** — 그 셸의
+    // 칸은 데몬이 뜬 칸이다(moai-u5wr.7xr 노트).
+    let (tmux_pane, tmux_socket) = match (&agent, args.pid.is_some() || adopted.is_some()) {
+        (Agent::Codex, _) => (None, None),
+        (_, false) => Presence::tmux_here(),
+        (_, true) => keep.as_ref().map(|p| (p.tmux_pane.clone(), p.tmux_socket.clone())).unwrap_or_default(),
+    };
     let presence = Presence {
         v: mail::VERSION,
         name: name.clone(),
@@ -181,10 +234,10 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         status: mail::BUSY.to_string(),
         since: match &keep {
             Some(p) if p.status == mail::BUSY => p.since.clone(),
-            _ => now,
+            _ => now.clone(),
         },
-        pid: agent.pid,
-        pid_start: agent.start,
+        pid,
+        pid_start,
         // **세션 id 는 조상에서 찾은 Claude 에게만 환경에서 읽는다** — `--pid` 로 남을 가리켰으면 이 셸의
         // 세션은 그 프로세스의 것이 아니다. 훅이 적어 둔 것이 있으면 그것이 먼저다.
         session: keep.as_ref().and_then(|p| p.session.clone()).or_else(|| {
@@ -195,7 +248,8 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
         tmux_socket,
-        seen: keep.as_ref().and_then(|p| p.seen.clone()),
+        // 프로세스를 모르는 장은 닻을 적는다(moai-j3n5) — 인사한 것이 곧 산 것이다.
+        seen: (pid == 0).then(|| now.clone()).or_else(|| keep.as_ref().and_then(|p| p.seen.clone())),
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
     };
     // **떠난 장의 이름을 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n) — 그 세션 앞으로 남은 편지가 보낸 이에게 돌아간다.

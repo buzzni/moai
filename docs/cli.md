@@ -2280,7 +2280,13 @@ Options:
   then the first agent that is neither the sender nor a supervisor to take
   it keeps it, and a hook takes one such letter per load. A name nobody has
   registered is still taken, with one line on stderr: the letter waits until
-  that agent says hello.
+  that agent says hello. Each recipient has a box of its own,
+  .moai/mail/<name>/ (and .moai/mail/any-idle-worker/).
+
+  A letter left unread for an agent that has gone comes back to its sender,
+  marked as returned: when `moai agents` sweeps a row whose process is gone,
+  when a new session takes over the name of a row that has gone, and when a
+  Codex session ends. A new --name in `moai hello` carries the letters along.
 
   **It is not the tracker.** Nothing goes into issues.jsonl or the journal -
   a letter is delivery, not record. A decision still goes on its issue as a
@@ -2289,8 +2295,9 @@ Options:
 
   Who sends is --as, else MOAI_AGENT, else the registered agent this command
   runs under (`moai hello`). With none of them it stops - a letter with no
-  sender cannot be answered. The body holds up to 64 KB, the subject one
-  line of up to 200 characters.
+  sender cannot be answered. A Codex session passes --as with the name its
+  hooks gave it: its shell runs under an app-server all sessions share.
+  The body holds up to 64 KB, the subject one line of up to 200 characters.
 
   **Waking is a bonus.** The way a worker gets its letters is waiting for them
   (`moai inbox --ack --wait`) or its hooks. --wake only knocks once on an idle
@@ -2339,10 +2346,12 @@ Options:
   wait that runs out leaves it idle. A name with no row is not registered by
   this - `moai hello` does that.
 
-  A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
-  and --all shows it again. The hooks do this by themselves: UserPromptSubmit
-  and Stop load the letters for the session into the conversation and mark
-  them read, so an agent with the hooks installed rarely needs this command.
+  A letter is read when it moves to read/ inside its box - nothing is
+  deleted, and --all shows it again. The hooks do this by themselves:
+  UserPromptSubmit and Stop load the letters for the session into the
+  conversation and mark them read, so an agent with the hooks installed
+  rarely needs this command. A letter marked returned is one you sent: its
+  recipient left before reading it.
 
   A letter to any-idle-worker shows to every agent but its sender and the
   supervisors, and the first --ack keeps it; another that tried in the same
@@ -2350,11 +2359,13 @@ Options:
   the hooks do, so several of them spread over the agents that wait.
 
   Who you are is --as, else MOAI_AGENT, else the registered agent this
-  command runs under (`moai hello`).
+  command runs under (`moai hello`). A Codex session passes --as with the
+  name its hooks gave it.
 
-  --json gives {"me","letters":[{"id","read","v","to","from","subject",
-  "body","sent_at","reply_to"}],"lost":[ids]}. Keys a letter carries that
-  this build does not know are passed through as they are.
+  --json gives {"me","letters":[{"id","read","returned","v","to",
+  "from","subject","body","sent_at","reply_to"}],"lost":[ids]}. Keys a
+  letter carries that this build does not know are passed through as they
+  are.
 ```
 
 ## `moai agents`
@@ -2381,17 +2392,20 @@ Options:
   starts. UserPromptSubmit marks it busy and Stop marks it idle, and
   `moai inbox --wait` marks it idle while it waits and busy once a letter
   comes. A row whose process is gone is swept here - on Linux a reused pid is
-  told apart by the time the process started. A row that cannot be told alive
-  or gone stays.
+  told apart by the time the process started - and the letters left unread
+  for it go back to their senders. A Codex row has no process to look at:
+  its hooks and its waits write `seen`, and once nothing has written it for
+  20 minutes it is swept (its letters wait for that session to come back).
+  Any other row that cannot be told alive or gone stays.
 
   --role and --status keep the rows whose word is exactly that one. A row a
   hook registered carries no role until the agent says `moai hello --role`.
   The sweep runs over every row either way.
 
   --json gives {"agents":[{"v","name","vendor","model","role","status",
-  "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket"}],
-  "swept":[names]}. pid_start, session and the two tmux keys are absent when
-  they are not known.
+  "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket",
+  "seen"}],"swept":[names]}. pid_start, session, the two tmux keys and seen
+  are absent when they are not known.
 ```
 
 ## `moai hello`
@@ -2407,6 +2421,7 @@ Options:
       --role <role>          worker, supervisor or another word
       --name <name>          The name others send to
       --pid <pid>            The agent's process (else found among the parents)
+      --as <name>            Take up the row of that name (Codex: its hook row)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2414,15 +2429,22 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  moai hello --vendor codex --model gpt-5.5 --role worker
+  moai hello --role worker
   moai hello --name reviewer-1 --role supervisor
+  moai hello --as codex-01a107b4 --role worker   in Codex
 
   Writes .moai/agents/<name>.json for the agent process this command runs
-  under - found among its parents by name (claude, codex, agy), or --pid.
-  The vendor defaults to what that name says. The name defaults to the one
-  this agent already has here, then to the session name Claude Code shows,
-  then to <vendor>-<pid>. Saying hello again updates the row; a new --name
-  replaces the old one.
+  under - found among its parents by name (claude, agy), or --pid. The
+  vendor defaults to what that name says. The name defaults to MOAI_AGENT,
+  then to the one this agent already has here, then to the session name
+  Claude Code shows, then to <vendor>-<pid>. Saying hello again updates the
+  row; a new --name replaces the old one and carries its letters along.
+
+  Codex runs its shell under an app-server all its sessions share, so moai
+  cannot tell its sessions apart from there: pass --as with the row its
+  hooks gave the session (named in its first context), or --name. --as takes
+  up a row already standing under that name, keeping its process and
+  session.
 
   A name is letters, digits, `.`, `_` and `-`, up to 64, not starting with
   `.` - it becomes a file name. any-idle-worker is not one an agent can take.

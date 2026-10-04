@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:ede78be8 -->
+<!-- moai:begin v:0.6.0 hash:9f7d2c43 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -518,7 +518,8 @@ registers with `moai hello --role supervisor` so it never takes those. Waking is
 `--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
 Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
 a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
-shows it idle.
+shows it idle. A Codex session passes `--as <name>` to `hello`, `inbox` and `send`: its
+shell runs outside its own process, and its hooks name it in its first context.
 
 ### The wiki
 

@@ -19,9 +19,13 @@ window, stop waiting and answer them.
        moai hello --role worker
 
    The name in the reply is the one the supervisor sends to. moai finds this agent among
-   the processes above the command (`claude`, `codex`, `agy`); a Claude Code session its
-   hooks already registered keeps its name and gains the role. If this window sets
-   `MOAI_AGENT`, say hello under that name (`--name`) — the wait below answers to it
+   the processes above the command (`claude`, `agy`); a session its hooks already
+   registered keeps its name and gains the role. If this window sets `MOAI_AGENT`, that is
+   its name — `hello`, the wait and the hooks all go by it. **Codex is the exception**: its
+   shell runs under an app-server all its sessions share, so moai cannot find this window
+   from there. Its hooks name the session in its first context (`codex-` and eight
+   characters) — say hello as that row, `moai hello --role worker --as <that name>`, and pass
+   the same `--as` to every `moai inbox` and `moai send` below
 2. **Wait for a letter**
 
        moai inbox --ack --wait 540
