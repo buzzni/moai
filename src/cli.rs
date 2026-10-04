@@ -872,7 +872,8 @@ pub enum WikiCmd {
 
   --json gives {\"dir\",\"pages\":[{\"slug\",\"title\",\"path\",\"bytes\",\"issues\",
   \"links\",\"linked_from\",\"conflict\"}]}. `issues` is [{\"id\",\"exists\"}] - the
-  ids with this tracker's prefix the page names outside code blocks. `links` is
+  ids with this tracker's prefix the page names outside code blocks; the name
+  of a skill moai plants (`moai-wiki`) is never one. `links` is
   [{\"text\",\"to\",\"anchor\",\"resolved\",\"anchor_resolved\"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -893,7 +894,13 @@ pub enum WikiCmd {
   --json gives the page as `ls` does plus `body`, the file as written.
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
-  yet included - it gives {\"dir\",\"error\"} as `ls` does, non-zero.")]
+  yet included - it gives {\"dir\",\"error\"} as `ls` does, non-zero.
+
+  `linked_from` counts only the pages that could be read. When another page
+  could not be read, or the walk left a name or directory out, the count may
+  be short: `--json` adds `linked_from_partial` (true) and a line under the
+  page says how many places were not read. With every page read, neither
+  stands. It leaves the exit code alone - `moai wiki ls` names those places.")]
     Show {
         /// The page - its path under the wiki directory without `.md`
         #[arg(value_name = "slug")]

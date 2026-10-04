@@ -53,7 +53,10 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
 /// 꼬리에 이 페이지를 가리키는 페이지의 슬러그가 한 줄로 선다(moai-ogaw) — 아무도 안 가리키면 줄이 없다. 슬러그는
 /// `moai wiki show` 에 그대로 건넬 이름이라 제목이 아니라 슬러그고, 목록의 `!` 표시처럼 셸 낱말로 감싼다
 /// (`text::quoted`) — `my page` 가 맨글로 서면 옮겨 친 명령이 낱말 둘로 갈린다.
-pub fn page(lang: Lang, p: &Page) -> Vec<String> {
+///
+/// `uncounted` 는 역링크를 세지 못한 자리의 수다(`Wiki::uncounted`). 0 이 아니면 그 밑에 한 줄이 더 선다 — 아무도
+/// 안 가리켜 역링크 줄이 없을 때도 선다: 그때가 "아무도 안 가리킨다" 와 "못 셌다" 가 같아 보이는 자리다(moai-mdzx.jty).
+pub fn page(lang: Lang, p: &Page, uncounted: usize) -> Vec<String> {
     let mut out = vec![
         format!("{}  {}", paint(style::ID, &one_line(&p.slug)), paint(style::HEAD, &one_line(&p.title))),
         paint(style::DIM, &one_line(&p.path)),
@@ -86,6 +89,12 @@ pub fn page(lang: Lang, p: &Page) -> Vec<String> {
             p.linked_from.iter().map(|s| paint(style::ID, &crate::text::quoted(s))).collect::<Vec<_>>().join(", ");
         out.push(String::new());
         out.push(fill(say(lang, "wiki.linked_from"), &[("which", &which)]));
+    }
+    if uncounted > 0 {
+        if p.linked_from.is_empty() {
+            out.push(String::new());
+        }
+        out.push(paint(style::DIM, &fill(say(lang, "wiki.linked_from_partial"), &[("n", &uncounted.to_string())])));
     }
     // 충돌은 본문 머리에 이미 섰다 — 꼬리에는 링크와 id 만 센다.
     let n = Notices { conflict: Vec::new(), ..crate::wiki::notices([p]) };
