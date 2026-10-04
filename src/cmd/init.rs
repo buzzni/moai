@@ -328,6 +328,10 @@ fn mirrored(block: &str, under: &str, dir: &str, name: Option<&str>) -> String {
         .lines()
         .filter_map(|l| l.strip_prefix(".moai/"))
         .filter(|rest| rest.starts_with(under))
+        // **파일 하나만 옮겨 갔으면 디렉터리 줄은 안 따라간다**(moai-h8tn) — 그 자리에 서는 것은 그 파일의 락과
+        // 임시 파일뿐이고, 우편함과 출석부(`mail/`·`agents/`)는 여전히 `.moai/` 밑이라 블록의 줄이 막는다.
+        // 따라 옮기면 사람의 디렉터리(`shared/mail/`)를 가린다.
+        .filter(|rest| name.is_none() || !rest.ends_with('/'))
         .map(|rest| {
             let rest = match name.zip(rest.strip_prefix('*')) {
                 Some((name, tail)) => format!("{name}{tail}"),
@@ -744,11 +748,19 @@ const GITATTRIBUTES: &str = "\
 // 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다. 넣는 것은
 // 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬·플러그인을 가린다. 끄는 길은
 // 두지 않는다: 워크트리를 안 쓰는 저장소에는 빈 자리를 막는 줄일 뿐이다.
+//
+// **우편함과 출석부도 막는다**(moai-h8tn, 2026-10-04 사용자 결정). 편지와 출석은 전달이지 기록이 아니라
+// 커밋할 것이 아니고, 출석에는 이 기계의 pid·경로·tmux 소켓이 든다. 두 디렉터리는 제 `.gitignore`(`*`)도
+// 들지만(`mail::ensure_dir`), 그것은 이 줄을 다시 심기 전의 저장소를 위한 것이고 선언은 여기다. **워크트리
+// 줄 뒤에 둔다** — 빠진 줄을 대는 알림은 앞의 셋만 보이는데, 그 알림의 머리가 "옆 워크트리가 `git add -A` 에
+// 딸려간다" 라 워크트리 줄이 가려지면 말과 줄이 어긋난다.
 const GITIGNORE: &str = "\
 # moai
 .moai/lock
 .moai/*.tmp.*
 /.claude/worktrees/
+.moai/mail/
+.moai/agents/
 ";
 
 /// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과
@@ -1683,6 +1695,8 @@ mod tests {
         symlink("tracker", dir.join(".moai")).unwrap();
         let (ignore, attrs) = (gitignore_for(&dir), attributes_for(&dir));
         assert!(has(&ignore, "/tracker/lock") && has(&ignore, "/tracker/*.tmp.*"), "{ignore}");
+        // 우편함과 출석부도 `.moai` 를 따라 그 자리에 선다(moai-h8tn).
+        assert!(has(&ignore, "/tracker/mail/") && has(&ignore, "/tracker/agents/"), "{ignore}");
         assert!(has(&attrs, "/tracker/journal.jsonl  text eol=lf merge=union"), "{attrs}");
         assert!(has(&attrs, "/tracker/journal/*.jsonl  text eol=lf merge=union"), "{attrs}");
         assert!(has(&attrs, "/tracker/issues.jsonl   text eol=lf merge=moai"), "{attrs}");
@@ -1694,6 +1708,8 @@ mod tests {
         let (ignore, attrs) = (gitignore_for(&file), attributes_for(&file));
         assert!(has(&ignore, "/shared/lock") && has(&ignore, "/shared/issues.jsonl.tmp.*"), "{ignore}");
         assert!(!ignore.contains("/shared/*.tmp.*"), "사람의 디렉터리의 임시 파일을 통째로 가렸다: {ignore}");
+        // 파일만 옮겼으면 우편함은 `.moai/` 밑 그대로다 — 사람의 디렉터리에 `mail/` 을 가리면 안 된다.
+        assert!(!ignore.contains("/shared/mail") && !ignore.contains("/shared/agents"), "{ignore}");
         assert!(!attrs.contains("/shared/journal"), "제자리 저널을 옮겼다: {attrs}");
         assert!(!ignore.contains("/.moai/"), "제자리를 한 벌 더 적었다: {ignore}");
 
