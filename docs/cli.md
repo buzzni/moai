@@ -39,6 +39,7 @@ Commands:
   epic          The verbs above, pinned to `--type epic`
   milestone     The verbs above, pinned to `--type milestone`
   idea          Jot a passing thought down where you are (`--type idea`)
+  wiki          Read the project wiki - the markdown pages under `docs/`
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
   hook          Called by Claude's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
@@ -2112,6 +2113,104 @@ moai idea promote <id> -e <epic> --from - <<'PLAN'
 PLAN
 
   `--dry-run` is where a person looks at the unfolded plan once and says yes.
+```
+
+## `moai wiki`
+
+```
+Read the project wiki - the markdown pages under `docs/`
+
+Usage: moai wiki [OPTIONS] <COMMAND>
+
+Commands:
+  ls    Every page - slug, title, and what does not resolve
+  show  One page, drawn (`--json` gives the raw body)
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  The wiki is the markdown files under one directory of this checkout -
+  `docs/` unless `.moai/config.toml` says otherwise (`wiki_dir = "manual"`,
+  a relative path inside the checkout). A page is one `.md` file below it.
+  Its slug is that path without `.md` (`guide/explorer`) and its title is the
+  first `# ` heading, else the file name. README.md and index.md at the top
+  come first, the rest by title.
+
+  moai wiki ls                  every page, and what does not resolve
+  moai wiki show <slug>         one page, drawn. `--json` gives the raw body
+
+  **Nothing is stored.** The tracker holds no page and no index - the list,
+  the links and the ids are read from the files every time. Pages are
+  documents, so they ride the branch: inside a linked worktree they are read
+  from that worktree, while the tracker still goes to the main checkout. Git
+  merges them like any other file.
+
+  There is no command that writes a page - edit the file and commit it. A
+  page names an issue by its bare id, as a commit subject does, and another
+  page by a relative link: `[the explorer](explorer.md)`.
+```
+
+## `moai wiki ls`
+
+```
+Every page - slug, title, and what does not resolve
+
+Usage: moai wiki ls [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  A page that cannot be read stays in the list with its file name as the
+  title and says why - over 1 MB, a link out of the checkout, not a regular
+  file, not UTF-8. No `wiki_dir` directory yet is not an error: there is no
+  wiki to list and the exit code is 0. A `wiki_dir` that is absolute, has
+  `..`, leads out of the checkout or into `.git/`, or is not a directory is.
+
+  --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
+  "links","conflict"}]}. `issues` is [{"id","exists"}] - the ids the
+  page names outside code blocks. `links` is [{"text","to","resolved"}] -
+  relative links to a `.md` page of this wiki, `to` being the target slug.
+  A page that could not be read carries `error` ({"kind","said"}, kind
+  too_large, refused or failed); absent, it was read whole. When the
+  directory itself cannot be used, `pages` gives way to `error` with kind
+  no_dir, outside, not_a_dir or failed.
+```
+
+## `moai wiki show`
+
+```
+One page, drawn (`--json` gives the raw body)
+
+Usage: moai wiki show [OPTIONS] <slug>
+
+Arguments:
+  <slug>  The page - its path under the wiki directory without `.md`
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  The slug is what `moai wiki ls` prints - matched letter for letter, so
+  `Guide` is not `guide`.
+
+  --json gives the page as `ls` does plus `body`, the file as written.
+  A page that could not be read has no `body`, carries `error`, and the exit
+  code is non-zero.
 ```
 
 ## `moai tui`

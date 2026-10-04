@@ -71,7 +71,7 @@ pub struct Page {
 }
 
 /// 페이지가 댄 이슈 id 하나.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct IssueRef {
     pub id: String,
     /// 그 id 의 줄이 트래커에 있는가.
@@ -79,7 +79,7 @@ pub struct IssueRef {
 }
 
 /// 페이지에서 페이지로 가는 링크 하나.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Link {
     /// 링크의 글.
     pub text: String,
