@@ -151,8 +151,8 @@ impl Chosen {
 }
 
 /// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). [`skill::AGENTS_DIR`] 는 `write_atomic_inside` 로 쓴다 —
-/// 임시 파일을 갈아끼우니 그 자리에 선 FIFO 앞에서 멈추지 않고, 링크는 체크아웃 안을 가리킬 때만 따라간다. 그
-/// 자리는 이 판 전에 moai 가 한 번도 안 쓰던 곳이다.
+/// 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를
+/// 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다. 그 자리는 이 판 전에 moai 가 한 번도 안 쓰던 곳이다.
 fn write_shared(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
     for (path, body) in files {
         let at = dir.join(path);
@@ -428,6 +428,10 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
+    let shared = Shared::read(&root);
+    // Claude 는 위의 `claude` 줄이 이미 댄다 — 여기는 `.agents/skills` 를 읽는 둘이다.
+    let others: Vec<(&str, bool)> =
+        ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
 
     if ctx.json {
         let rows: Vec<_> = installs
@@ -458,6 +462,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            "agents": shared.json(&others),
         }));
     }
 
@@ -536,7 +541,71 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         // 하나를 물고 있을 수 있다. 수만 비춘다.
         out.push(fill(say(lang, "skill.stale_copies"), &[("n", &stale.to_string())]));
     }
+    // **Claude 의 줄 밑에 `.agents` 한 줄과 그것을 읽는 둘의 PATH 줄**(사용자 결정 2026-10-04).
+    let shared_row = say(lang, "skill.row_agents");
+    out.push(match (shared.planted, shared.stale.is_empty()) {
+        (false, _) => row(false, shared_row, say(lang, "skill.agents_missing")),
+        (true, false) => {
+            row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &shared.stale.len().to_string())]))
+        }
+        (true, true) => row(true, shared_row, say(lang, "skill.agents_current")),
+    });
+    for (bin, on) in &others {
+        let said = match on {
+            true => say(lang, "skill.on_path"),
+            false => say(lang, "skill.not_on_path"),
+        };
+        out.push(row(*on, bin, said));
+    }
     Ok(out)
+}
+
+/// [`skill::AGENTS_DIR`] 가 지금 판의 글과 같은가(moai-xs2h.v2n) — `status` 가 Codex·Antigravity 의 자리를 대는 값.
+struct Shared {
+    dir: PathBuf,
+    /// 지금 판과 다르거나 없는 파일 — 그 자리부터의 상대 경로.
+    stale: Vec<String>,
+    /// 심을 파일 가운데 하나라도 서 있는가 — 없으면 "안 심겼다" 고, 있는데 다르면 "낡았다" 다.
+    planted: bool,
+}
+
+impl Shared {
+    /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`). 그 자리는 이 판 전의 `status` 가 한 번도 안 열던
+    /// 곳이라, 거기 선 FIFO 하나가 읽기를 멈춰 세우면 아무것도 안 막는다던 명령이 멈춘다. 못 읽은 파일은 낡은 것으로
+    /// 센다 — 보통 파일이면 다시 심어 갈아끼우고, 보통 파일이 아닌 자리는 다시 심는 길이 그 자리를 대며 멈춘다
+    /// ([`write_shared`]).
+    fn read(root: &Path) -> Shared {
+        let dir = root.join(skill::AGENTS_DIR);
+        let home = crate::held::Home::of(root);
+        let mut stale = Vec::new();
+        let mut planted = false;
+        for (path, body) in skill::agents_tree(&skill::skills()) {
+            let at = dir.join(&path);
+            planted |= std::fs::symlink_metadata(&at).is_ok();
+            if crate::held::read_inside(&at, &home).ok().as_deref() != Some(body.as_str()) {
+                stale.push(path.display().to_string());
+            }
+        }
+        Shared { dir, stale, planted }
+    }
+
+    /// `--json` 의 `agents` — 자리·상태(`current`·`stale`·`missing`)·낡은 파일·PATH 에 선 둘.
+    fn json(&self, others: &[(&str, bool)]) -> serde_json::Value {
+        let state = match (self.planted, self.stale.is_empty()) {
+            (false, _) => "missing",
+            (true, false) => "stale",
+            (true, true) => "current",
+        };
+        let mut v = serde_json::json!({
+            "dir": self.dir.display().to_string(),
+            "state": state,
+            "stale": self.stale,
+        });
+        for (bin, on) in others {
+            v[*bin] = serde_json::json!(on);
+        }
+        v
+    }
 }
 
 /// 이름 칸을 **표시 폭**으로 맞춘다(moai-uzgp). 한글은 한 글자가 두 칸이라 `{:<14}` 로 맞추면
@@ -546,9 +615,57 @@ fn label(what: &str) -> String {
     format!("{what}{}", " ".repeat(WIDE.saturating_sub(crate::text::width(what))))
 }
 
-/// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.**
-pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, .. } = place(ctx)?;
+/// 고른 에이전트에서 심은 것을 걷는다. **파일은 남긴다** — Claude 는 `claude` 의 등록만 걷고([`claude_uninstall`]),
+/// Codex·Antigravity 는 걷을 등록이 없어 손으로 지울 자리를 찍기만 한다(moai-xs2h.v2n, 이 모듈 머리의 "지우지 않는다").
+///
+/// **고르지 않은 자리에 moai 의 스킬이 남았으면 한 줄로 댄다.** `--agent codex` 로 심은 사람이 맨 `uninstall` 을 부르면
+/// Claude 쪽은 "걷을 것이 없다" 고 끝나는데, 그 줄만으로는 `.agents/skills` 가 그대로라는 것이 안 보인다.
+pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+    let chosen = Chosen::of(agents);
+    let place = place(ctx)?;
+    let shared = place.root.join(skill::AGENTS_DIR);
+    // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다.
+    let left: Vec<PathBuf> =
+        skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect();
+    let (mut json, claude) = match chosen.claude {
+        true => claude_uninstall(ctx, place, dry_run)?,
+        false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
+    };
+
+    if ctx.json {
+        if let Some(o) = json.as_object_mut() {
+            o.insert("agents".into(), serde_json::json!(chosen.names()));
+            o.insert("found".into(), serde_json::json!(chosen.found));
+            let left: Vec<String> = left.iter().map(|p| p.display().to_string()).collect();
+            o.insert("agents_left".into(), serde_json::json!(left));
+        }
+        return super::json_line(&json);
+    }
+
+    let lang = ctx.lang();
+    let at = shared.display().to_string();
+    let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
+    if !chosen.shared.is_empty() {
+        if left.is_empty() {
+            out.push(fill(say(lang, "skill.agents_nothing"), &[("dir", &at)]));
+        } else {
+            out.push(say(lang, "skill.agents_by_hand").to_string());
+            out.extend(left.iter().map(|p| format!("  rm -r {}", crate::text::shell_word(&p.display().to_string()))));
+        }
+        if chosen.claude {
+            out.push(String::new());
+        }
+    }
+    out.extend(claude);
+    if chosen.shared.is_empty() && !left.is_empty() {
+        out.push(fill(say(lang, "skill.agents_left_hint"), &[("dir", &at)]));
+    }
+    Ok(out)
+}
+
+/// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.** `--json` 이면 값만, 아니면 사람의 줄만 낸다.
+fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
+    let Place { root, dir, market, .. } = place;
     let clash = clash_of(&market, &dir);
     let target = format!("moai@{market}");
     let installs = installs_here(&target, &root);
@@ -601,30 +718,34 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        return super::json_line(&serde_json::json!({
-            "dry_run": dry_run,
-            "dir": dir.display().to_string(),
-            "market": market,
-            "planned": plan.iter().map(|a| shown(a)).collect::<Vec<_>>(),
-            "steps": steps.iter().map(|(c, ok)| serde_json::json!({"command": c, "ok": ok})).collect::<Vec<_>>(),
-            "removed": !dry_run && !failed && !plan.is_empty(),
-            "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "claude": claude,
-            "retired": retiring.json(),
-            "undeclared": retiring.undeclared_json(),
-            "kept": retiring.kept,
-        }));
+        return Ok((
+            serde_json::json!({
+                "dry_run": dry_run,
+                "dir": dir.display().to_string(),
+                "market": market,
+                "planned": plan.iter().map(|a| shown(a)).collect::<Vec<_>>(),
+                "steps": steps.iter().map(|(c, ok)| serde_json::json!({"command": c, "ok": ok})).collect::<Vec<_>>(),
+                "removed": !dry_run && !failed && !plan.is_empty(),
+                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "claude": claude,
+                "retired": retiring.json(),
+                "undeclared": retiring.undeclared_json(),
+                "kept": retiring.kept,
+            }),
+            Vec::new(),
+        ));
     }
 
     let lang = ctx.lang();
     if let Some(other) = &clash {
-        return Ok(vec![
+        let out = vec![
             fill(say(lang, "skill.remove_elsewhere"), &[("market", &market), ("at", &other.display().to_string())]),
             say(lang, "skill.remove_elsewhere_there").to_string(),
-        ]);
+        ];
+        return Ok((serde_json::Value::Null, out));
     }
     if plan.is_empty() {
-        return Ok(vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]);
+        return Ok((serde_json::Value::Null, vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]));
     }
     if dry_run || !claude {
         let mut out = vec![match dry_run {
@@ -635,7 +756,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
         out.extend(retiring.undeclare.iter().map(|u| format!("  {}", u.what(lang))));
         out.extend(retiring.kept_lines(lang));
-        return Ok(out);
+        return Ok((serde_json::Value::Null, out));
     }
     // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
     // 첫 줄이 성공이면 사람은 첫 줄을 믿는다.
@@ -664,7 +785,7 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
     out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
-    Ok(out)
+    Ok((serde_json::Value::Null, out))
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {

@@ -469,7 +469,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
         Cmd::Skill(SkillCmd::Install { scope, agents, dry_run }) => skill::install(ctx, scope, &agents, dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
-        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(ctx, dry_run),
+        Cmd::Skill(SkillCmd::Uninstall { agents, dry_run }) => skill::uninstall(ctx, &agents, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),

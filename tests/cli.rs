@@ -18296,6 +18296,106 @@ fn skill_install_picks_claude_alone_unless_asked_and_auto_reads_the_path() {
     assert_eq!(list_in(&json, "agents"), Some(words(&["claude"])), "{json}");
 }
 
+/// **`status` 는 Claude 의 줄 밑에 `.agents` 한 줄과 codex·agy 의 PATH 줄을 낸다**(사용자 결정 2026-10-04,
+/// moai-xs2h.v2n). 안 심겼다·지금 판·낡았다 셋을 가르고, 무엇이 어긋나도 0 이다. **그 자리의 FIFO 앞에서 멈추지
+/// 않는다** — `status` 가 이 판 전에 안 열던 자리라, 맨 `read_to_string` 이면 아무것도 안 막는다던 명령이 선다.
+#[cfg(unix)]
+#[test]
+fn skill_status_shows_the_shared_skills_and_the_two_on_path() {
+    let s = init("skillshared");
+    let c = Claude::new("skillshared-home");
+    // 멈추면 죽이고 진다 — 고침이 없으면 FIFO 를 연 `moai` 가 쓰는 쪽을 영영 기다린다.
+    let bounded = |args: &[&str]| -> Output {
+        let mut child = c
+            .command(Path::new(BIN), s.path(), args, true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("moai 를 못 띄웠다");
+        for _ in 0..600 {
+            if child.try_wait().unwrap().is_some() {
+                return child.wait_with_output().unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("moai {args:?} 가 멈췄다 — .agents 의 파일을 막히지 않게 열지 않았다");
+    };
+    let status = |json: bool| {
+        let out = bounded(if json { &["skill", "status", "--json"] } else { &["skill", "status"] });
+        assert!(out.status.success(), "status 가 비영으로 끝났다\n{}", text(&out));
+        text(&out)
+    };
+
+    let said = status(false);
+    assert!(said.contains(".agents") && said.contains("안 심겼다"), "{said}");
+    assert!(said.contains("codex") && said.contains("agy") && said.contains("PATH 에 없다"), "{said}");
+    let json = status(true);
+    one_json_value(&json);
+    assert!(json.contains("\"state\":\"missing\"") && json.contains("\"codex\":false"), "{json}");
+
+    assert!(c.run(s.path(), &["skill", "install", "--agent", "codex"], true).status.success());
+    c.tool("codex");
+    let said = status(false);
+    assert!(said.contains("지금 판"), "심은 것을 지금 판으로 안 읽는다\n{said}");
+    let json = status(true);
+    assert!(json.contains("\"state\":\"current\"") && json.contains("\"codex\":true"), "{json}");
+    assert!(json.contains("\"agy\":false"), "{json}");
+
+    let skill = s.path().join(".agents/skills/moai/SKILL.md");
+    std::fs::write(&skill, "# 옛 글\n").unwrap();
+    let json = status(true);
+    assert!(json.contains("\"state\":\"stale\"") && json.contains("\"stale\":[\"moai/SKILL.md\"]"), "{json}");
+    assert!(status(false).contains("파일 1개가 지금 판과 다르다"));
+
+    let wiki = s.path().join(".agents/skills/moai-wiki/SKILL.md");
+    std::fs::remove_file(&wiki).unwrap();
+    assert!(Command::new("mkfifo").arg(&wiki).status().unwrap().success(), "FIFO 를 못 지었다");
+    let json = status(true);
+    assert!(json.contains("moai-wiki/SKILL.md"), "읽지 못한 자리를 낡은 것으로 안 센다\n{json}");
+    // **다시 심는 길도 그 자리를 안 연다** — FIFO 에 쓰려고 열면 읽는 쪽을 영영 기다린다. 보통 파일이 아닌 자리는
+    // 갈아끼우지도 않고(`store::write_atomic_inside`, moai-4oab) 그 자리를 대며 비영으로 멈춘다.
+    let out = bounded(&["skill", "install", "--agent", "codex"]);
+    assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("moai-wiki/SKILL.md"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert!(!std::fs::symlink_metadata(&wiki).unwrap().is_file(), "FIFO 를 갈아끼웠다");
+}
+
+/// **`uninstall --agent codex` 는 지울 자리를 찍기만 한다**(moai-xs2h.v2n, 이 저장소의 "지우지 않는다") — 걷을 등록이
+/// 없고, 쥔 세션이 있는 파일을 지우면 그 세션이 막힐 수 있다. moai 가 심는 이름만 대고, 그 자리의 남의 스킬은 안
+/// 댄다. 고르지 않은 맨 `uninstall` 은 남은 자리를 한 줄로 댄다 — 안 대면 Claude 쪽의 "걷을 것이 없다" 만 선다.
+#[test]
+fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
+    let s = init("skillunshared");
+    let c = Claude::new("skillunshared-home");
+    let shared = s.path().join(".agents/skills");
+
+    let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
+    assert!(said.contains("moai 의 것이 없다"), "{said}");
+
+    assert!(c.run(s.path(), &["skill", "install", "--agent", "antigravity"], true).status.success());
+    std::fs::create_dir_all(shared.join("theirs")).unwrap();
+    let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    for name in ["moai", "moai-supervise", "moai-wiki"] {
+        assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
+        assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
+    }
+    assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
+    assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
+
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--json"], true).stdout).unwrap();
+    one_json_value(&json);
+    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(3), "{json}");
+
+    let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
+    assert!(said.contains("걷어낼 것이 없다"), "{said}");
+    assert!(said.contains("moai 의 스킬이 남아 있다"), "고르지 않은 자리에 남은 것을 안 댄다\n{said}");
+}
+
 // ── 메모 — 긴 글을 남기는 길 ────────────────────────────────────────
 
 /// 리뷰 전문처럼 **긴 글**은 stdin 으로 들어간다.

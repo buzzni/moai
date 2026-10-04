@@ -2748,6 +2748,7 @@ Remove the registration from `claude`. Installed files stay
 Usage: moai skill uninstall [OPTIONS]
 
 Options:
+      --agent <agent>        Agent: claude (default), codex, antigravity, auto
       --dry-run              Call nothing; only say what would be called
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)

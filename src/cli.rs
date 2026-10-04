@@ -1884,6 +1884,10 @@ pub enum SkillCmd {
 
   moai skill uninstall --dry-run      only show what would be called")]
     Uninstall {
+        /// Agent: claude (default), codex, antigravity, auto
+        #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]
+        agents: Vec<Agent>,
+
         /// Call nothing; only say what would be called
         #[arg(long)]
         dry_run: bool,
