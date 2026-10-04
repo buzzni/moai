@@ -52,7 +52,11 @@ does not tag — see `CONTRIBUTING.md`.
   lists stand on the left, home page first, and the right pane shows the page
   under the cursor, drawn like an issue body. It reads the project you are in,
   or on the overview (`0`) the project of the row under the cursor, and it only
-  reads — pages are files you edit and commit. `Enter` on a page lists its links,
+  reads — pages are files you edit and commit. On the page, `Tab` and
+  `Shift-Tab` pick the links drawn there in turn, from the first one on screen and
+  round from the last to the first: the picked link shows reversed, the key bar
+  names where it goes, `Enter` follows it and `Esc` drops it. A click on a link
+  follows it at once. With no link picked, `Enter` on a page lists its links,
   the issue ids it names and then the pages that link to it, marked `←`: a page
   goes there and `Bksp` comes back, an id
   closes the window onto that row (from the overview, inside that project), and
@@ -62,7 +66,9 @@ does not tag — see `CONTRIBUTING.md`.
   the window. The `SPC` menu over it holds the screens and `SPC v r`, the wheel
   scrolls the pane under the pointer — on the list, as do `Ctrl-d`, `Ctrl-u`,
   `Ctrl-f` and `Ctrl-b`, without moving the cursor or the page — and a click
-  picks the pane and the page. The
+  picks the pane and the page. Dragging the line between the two panes resizes
+  them; that share is the window's own, kept under `[tui]` as `wiki_width`, and
+  until it is dragged the window splits by `list_width`. The
   window is read fresh every time it opens and nothing of it is kept; a wiki that
   does not exist or holds no page opens nothing and says why.
 
