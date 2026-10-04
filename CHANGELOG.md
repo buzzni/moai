@@ -57,6 +57,21 @@ does not tag — see `CONTRIBUTING.md`.
   over the statistics window follows the same rules, and a search or filter
   prompt still leaves the mouse to the terminal.
 
+### Fixed
+
+- **The explorer's version line no longer calls a release build "ahead" of an
+  answer it heard before that release existed.** The answer from GitHub is kept
+  for a day, so after an upgrade a 0.5.0 binary went on reading the v0.3.0 heard
+  the day before and said `ahead of the latest release (v0.3.0)` while v0.5.0 was
+  out. Now, when the tag it holds is older than the moai you are running and this
+  version has not asked yet, it asks again straight away; until the answer comes
+  the line reads `latest not checked · v0.3.0 seen today`. A build from source
+  that really is ahead of every release asks once and hears the same tag; that
+  "ahead" answer is then kept for an hour rather than a day, so a build made from
+  the release commit before the release was published stops calling itself ahead
+  within the hour after it is. A failed ask counts as that once and is kept for
+  the day. `latest.toml` gains an `asked_by` key, the version that last asked.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added
