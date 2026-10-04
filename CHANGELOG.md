@@ -12,6 +12,20 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai skill install` plants a third skill, `moai-wiki`.** It keeps the
+  repository's manual — the markdown pages `moai wiki ls` lists — in step with
+  the work. A worker sent by `moai-supervise` now asks at the end of each epic
+  (brief step 7-4, beside the CHANGELOG's 7-3) whether the epic changed what a
+  person does — a key, a command, a flag, a file, a format, a procedure — and if
+  it did, fixes the page on its branch before the merge, so the page rides the
+  same merge. Called by a person, the skill sweeps the work closed since the last
+  release tag and shows the pages it would change once before writing. Nothing
+  checks any of it: an epic that changed nothing a person does writes nothing,
+  and no warning stands for a stale page. The AGENTS block carries a short
+  "The wiki" section — run `moai init` to bring it in.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added
