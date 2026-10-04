@@ -215,7 +215,8 @@ pub fn list(dir: &Path, with_read: bool) -> (Vec<Stored>, Vec<Garbled>) {
             continue;
         }
         match read_json::<Letter>(&path) {
-            Ok(letter) => letters.push(Stored { id: stem, reader: None, letter }),
+            Ok(Some(letter)) => letters.push(Stored { id: stem, reader: None, letter }),
+            Ok(None) => {}
             Err(why) => garbled.push(Garbled { path, why }),
         }
     }
@@ -226,7 +227,10 @@ pub fn list(dir: &Path, with_read: bool) -> (Vec<Stored>, Vec<Garbled>) {
                 continue;
             }
             match read_json::<Letter>(&path) {
-                Ok(letter) => letters.push(Stored { id: id.to_string(), reader: Some(reader.to_string()), letter }),
+                Ok(Some(letter)) => {
+                    letters.push(Stored { id: id.to_string(), reader: Some(reader.to_string()), letter })
+                }
+                Ok(None) => {}
                 Err(why) => garbled.push(Garbled { path, why }),
             }
         }
@@ -236,7 +240,7 @@ pub fn list(dir: &Path, with_read: bool) -> (Vec<Stored>, Vec<Garbled>) {
 }
 
 /// 편지 id 의 꼴인가 — [`mint`] 가 짓는 `<8>-<6>-<8>` 이다. 손으로 놓은 다른 이름의 파일은 편지로 안 센다.
-fn is_id(s: &str) -> bool {
+pub fn is_id(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     matches!(parts.as_slice(), [d, t, n]
         if d.len() == 8 && t.len() == 6 && n.len() == 8
@@ -266,7 +270,8 @@ pub enum Took {
 /// 편지를 읽음으로 옮긴다 — `rename` 하나다(모듈 머리글). 먼저 옮긴 쪽만 [`Took::Mine`] 을 받는다.
 ///
 /// **읽고 지우는 두 걸음으로 바꾸지 않는다** — 둘이 같이 읽고 같이 지우면 한 편지가 두 세션에 실린다.
-/// 겨루기 시험(`two_takers_never_share_a_letter`)이 그 자리를 잡는다.
+/// 겨루기 시험 둘(`tests/cli.rs` 의 `concurrent_acks_deliver_each_letter_once`·`an_open_letter_goes_to_exactly_one_worker`)이
+/// 그 자리를 잡는다 — 복사하고 지우는 꼴로 바꾸어 재 보니 둘 다 붉어졌다.
 pub fn take(dir: &Path, id: &str, reader: &str) -> std::io::Result<Took> {
     let read = dir.join("read");
     std::fs::create_dir_all(&read)?;
@@ -357,7 +362,8 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
         match read_json::<Presence>(&path) {
             // **파일 이름이 이름이다** — 안에 적힌 이름이 다르면 파일 쪽을 믿는다. 쓰는 쪽이 늘 같게 쓰니,
             // 다른 것은 손으로 옮긴 파일이다.
-            Ok(p) => out.push(Presence { name: stem, ..p }),
+            Ok(Some(p)) => out.push(Presence { name: stem, ..p }),
+            Ok(None) => {}
             Err(why) => garbled.push(Garbled { path, why }),
         }
     }
@@ -670,13 +676,26 @@ fn json_files(dir: &Path) -> Vec<(PathBuf, String)> {
 }
 
 /// JSON 파일 하나를 읽는다 — 크기 상한을 넘으면 안 읽는다. 까닭은 사람이 읽을 한 줄이다.
-fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+///
+/// **목록을 본 뒤에 사라진 파일은 못 읽은 것이 아니다**(`Ok(None)`) — 옆 세션이 그 사이에 읽음으로 옮긴
+/// 편지다. 못 읽은 것으로 세던 판은 여럿이 함께 `inbox --ack` 하는 자리에서 멀쩡한 편지를 "못 읽는 편지" 로
+/// 대고 비영으로 끝났다(겨루기 시험이 부하 아래에서 잡았다).
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+    let gone = |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound;
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if gone(&e) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
     if meta.len() > FILE_MAX {
         return Err(format!("{} bytes", meta.len()));
     }
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if gone(&e) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    serde_json::from_str(&text).map(Some).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -788,8 +807,8 @@ mod tests {
         );
     }
 
-    /// **두 쪽이 같은 편지를 가지려 하면 하나만 가진다** — `rename` 이 정한다. 읽고 지우는 두 걸음이면 둘 다
-    /// 가진다.
+    /// **먼저 옮긴 쪽만 가지고, 뒤의 쪽은 `Lost` 를 받는다** — 읽은 이는 파일 이름에 선다. 차례대로 부르는
+    /// 시험이라 겨룸은 못 잰다 — 그것은 `tests/cli.rs` 의 겨루기 시험 둘이 잰다([`take`]).
     #[test]
     fn two_takers_never_share_a_letter() {
         let s = Scratch::new("mail-take");
