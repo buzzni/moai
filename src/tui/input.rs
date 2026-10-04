@@ -656,7 +656,7 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 8] = [
+    const NOT_COMPONENTS: [(&str, &str); 9] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("draw.rs", "그림 — Frame 에 찍는다"),
         (
@@ -672,6 +672,10 @@ mod tests {
         (
             "stats.rs",
             "통계 창 — 저장소(Repo)를 열어 읽고 탐색기가 든 노트를 읽어 센다(report::stats). 창의 상태는 같은 파일 위쪽의 Window 가 든다",
+        ),
+        (
+            "wiki.rs",
+            "위키 창 — 저장소(Repo)를 열어 위키를 읽는다(crate::wiki). 창의 상태와 커서·자취는 같은 파일 위쪽의 Window 가 든다",
         ),
         (
             "zones.rs",
