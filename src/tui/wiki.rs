@@ -13,8 +13,9 @@
 //! 칠한다. 치는 동안 좁혀지고 Enter 가 걸고 Esc 가 친 것을 버린다(본 화면의 `/` 와 같은 손). 걸린 찾기는 창의 Esc 가
 //! 먼저 푼다(2026-10-04 사용자 결정). 본 화면의 `/` 와 `moai show -g` 는 위키를 안 본다 — 트래커의 줄을 찾는 자리다.
 //!
-//! **길찾기는 고르기 창이다**([`Choose`]) — 본문 칸의 `Enter` 가 그 페이지의 링크와 이슈 id 를 한 창에 세운다. 페이지를
-//! 고르면 그리로 건너가고, id 를 고르면 창을 닫고 그 줄에 선다(`App::land` — 한눈 보기에서 열었으면 그 프로젝트로 들어가
+//! **길찾기는 고르기 창이다**([`Choose`]) — 본문 칸의 `Enter` 가 그 페이지의 링크와 이슈 id 를 한 창에 세우고, 그
+//! 뒤에 이 페이지를 가리키는 페이지(역링크, `← 제목  슬러그`)를 세운다(2026-10-04 사용자 결정, moai-ogaw — 새 키 없이
+//! 한 창이다). 페이지를 고르면 그리로 건너가고, id 를 고르면 창을 닫고 그 줄에 선다(`App::land` — 한눈 보기에서 열었으면 그 프로젝트로 들어가
 //! 선다, 2026-10-04 사용자 결정). 풀리지 않는 링크와 위키 밖 주소, 트래커에 없는 id 도 창에 서고 고르면 알림만 낸다 —
 //! 말없이 빠지면 그 링크가 왜 안 가는지 볼 자리가 없다. 본문 안에서 링크를 `Tab` 으로 도는 길은 기획이 안 골랐다: 펴진
 //! 줄에는 주소가 표식으로만 남아 다시 세야 한다(moai-qunn 노트 C).
@@ -116,6 +117,9 @@ pub enum Target {
     Out { text: String, dest: String },
     /// 이슈 id — `title` 이 없으면 트래커에 그 줄이 없다(`(없음)`).
     Issue { id: String, title: Option<String> },
+    /// 이 페이지를 가리키는 페이지 — 역링크(moai-ogaw). 셈은 [`crate::wiki`] 가 한 값([`Page::linked_from`])이라 늘 있는
+    /// 페이지다. 고르면 링크처럼 건너가고 자취에 남는다.
+    LinkedFrom { slug: String, title: String },
 }
 
 /// 찾는 글을 치는 칸(`/`).
@@ -156,8 +160,8 @@ impl Window {
         }
     }
 
-    /// 본문 칸의 `Enter` — 커서가 선 페이지의 링크(적힌 차례)와 id(처음 나온 차례)로 고르기 창을 연다. 고를 것이
-    /// 없으면 거짓이다 — 부르는 쪽이 알림으로 댄다.
+    /// 본문 칸의 `Enter` — 커서가 선 페이지의 링크(적힌 차례)와 id(처음 나온 차례), 그 뒤에 이 페이지를 가리키는
+    /// 페이지(위키 목록의 차례)로 고르기 창을 연다. 고를 것이 없으면 거짓이다 — 부르는 쪽이 알림으로 댄다.
     fn open_links(&mut self) -> bool {
         let Some(p) = self.current() else { return false };
         let mut items: Vec<Target> = Vec::new();
@@ -173,6 +177,10 @@ impl Window {
         for r in &p.issues {
             let title = r.exists.then(|| self.titles.get(&r.id).cloned().unwrap_or_default());
             items.push(Target::Issue { id: r.id.clone(), title });
+        }
+        for slug in &p.linked_from {
+            let title = self.pages.iter().find(|q| q.slug == *slug).map_or_else(|| slug.clone(), |q| q.title.clone());
+            items.push(Target::LinkedFrom { slug: slug.clone(), title });
         }
         if items.is_empty() {
             return false;
@@ -499,7 +507,7 @@ impl App {
         // 말의 키는 글자째 적는다 — `i18n` 의 시험이 `say(lang, "…")` 을 훑어 표와 견준다.
         let one = crate::text::one_line;
         match picked {
-            Some(Target::Page { to, found: true, .. }) => {
+            Some(Target::Page { to, found: true, .. } | Target::LinkedFrom { slug: to, .. }) => {
                 w.follow(&to);
             }
             Some(Target::Page { to, found: false, .. }) => {
@@ -1215,6 +1223,34 @@ pub(super) mod tests {
         assert_eq!(slug(&a), "README");
     }
 
+    /// **이 페이지를 가리키는 페이지도 고르기 창에 선다**(2026-10-04 사용자 결정, moai-ogaw) — 링크와 id 뒤에, 위키
+    /// 목록의 차례로 `← 제목  슬러그`. 고르면 링크처럼 건너가고 `Bksp` 가 되돌린다. 나가는 링크가 없어도 들어오는
+    /// 페이지가 있으면 창이 선다.
+    #[test]
+    fn enter_on_the_page_lists_the_pages_linking_here_and_goes_there() {
+        use super::Target;
+        let (_s, mut a) = wiki_app("linked-from", PAGES);
+        a.hit("SPC g w G Enter Enter");
+        assert_eq!(slug(&a), "guide");
+        assert_eq!(
+            choose(&a).items,
+            [
+                Target::Page { text: "deeper".into(), to: "notes/deep".into(), found: true },
+                Target::LinkedFrom { slug: "README".into(), title: "Home".into() },
+            ]
+        );
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("← Home  README"), "들어오는 페이지가 고르기 창에 안 섰다\n{screen}");
+        a.hit("G Enter");
+        assert_eq!(slug(&a), "README", "들어오는 페이지를 골랐는데 안 건너갔다");
+        a.hit("Bksp");
+        assert_eq!(slug(&a), "guide", "되돌아가기가 들어오는 페이지로 건너온 길을 안 되감았다");
+        // 나가는 링크도 id 도 없는 페이지 — 들어오는 페이지만으로 창이 선다.
+        a.hit("Ctrl-w h k Enter Enter");
+        assert_eq!(slug(&a), "notes/deep");
+        assert_eq!(choose(&a).items, [Target::LinkedFrom { slug: "guide".into(), title: "Guide".into() }]);
+    }
+
     /// **갈 데가 없는 것도 창에 서고, 고르면 알림만 낸다** — 없는 페이지·위키 밖 주소는 `(없음)`·`(밖)` 으로 달리고,
     /// 트래커에 없는 id 도 `(없음)` 이다. 고를 것이 하나도 없는 페이지에서는 Enter 가 그렇다고 댄다.
     #[test]
@@ -1237,7 +1273,7 @@ pub(super) mod tests {
         a.hit("Ctrl-w h j Enter Enter");
         assert!(window(&a).choose.is_none());
         assert!(
-            a.notice.as_deref().is_some_and(|n| n.contains("대지 않는다")),
+            a.notice.as_deref().is_some_and(|n| n.contains("이리 오는 페이지도 없다")),
             "고를 것이 없다고 안 댔다: {:?}",
             a.notice
         );

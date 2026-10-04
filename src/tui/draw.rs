@@ -1211,7 +1211,8 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     f.render_widget(Paragraph::new(visible), inner);
 }
 
-/// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`. **갈 데가 없는 것은 낱말로 단다** — 없는
+/// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`, 이 페이지를 가리키는 페이지는
+/// `← 제목  슬러그`(moai-ogaw). 화살이 방향을 댄다 — 색이 혼자 뜻을 지지 않는다. **갈 데가 없는 것은 낱말로 단다** — 없는
 /// 페이지·트래커에 없는 id 는 `(없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
 fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str, lang: Lang) {
     use super::wiki::Target;
@@ -1236,6 +1237,9 @@ fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str
                 ),
                 Target::Issue { id, title: Some(t) } => (format!("{id}  {}", crate::text::one_line(t)), None, false),
                 Target::Issue { id, title: None } => (id.clone(), Some(none), true),
+                Target::LinkedFrom { slug, title } => {
+                    (format!("← {}  {}", crate::text::one_line(title), crate::text::one_line(slug)), None, false)
+                }
             };
             let tail = tail.map(|t| format!("  {t}")).unwrap_or_default();
             // 낱말이 먼저 자리를 얻는다 — 긴 주소가 `(없음)` 을 밀어내면 죽은 링크가 멀쩡한 줄로 선다.

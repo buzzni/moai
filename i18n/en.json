@@ -979,7 +979,7 @@
   "tui.wiki.choose_title": "links · {title}",
   "tui.wiki.unresolved": "(none)",
   "tui.wiki.external": "(outside)",
-  "tui.wiki.no_links": "this page names no page and no issue",
+  "tui.wiki.no_links": "this page names no page and no issue, and no page links here",
   "tui.wiki.missing_page": "no page {to} in the wiki — the link leads nowhere",
   "tui.wiki.outside": "outside the wiki: {dest}",
   "tui.wiki.missing_id": "{id} is not in the tracker",
