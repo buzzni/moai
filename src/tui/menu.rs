@@ -157,7 +157,7 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
                 out.push(Entry { key: next.name(), what: what.into(), state: act.state(c) });
             }
             Lookup::Pending if live(&seq, c) => {
-                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq, c.lang)), state: None });
+                out.push(Entry { key: next.name(), what: format!("+{}", group(&seq, c.lang)), state: here(&seq, c) });
             }
             _ => {}
         }
@@ -291,6 +291,7 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
 fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
     match title(seq).as_str() {
         "SPC p" => say(lang, "tui.group.project"),
+        "SPC g" => say(lang, "tui.group.screen"),
         "SPC v" => say(lang, "tui.group.view"),
         "SPC s" => say(lang, "tui.group.sort"),
         "SPC c" => say(lang, "tui.group.cell"),
@@ -298,6 +299,17 @@ fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
         "SPC o" => say(lang, "tui.group.options"),
         _ => "…",
     }
+}
+
+/// 묶음 줄에 붙일 지금 상태 — **화면 묶음(`SPC g`)이 지금 화면을 댄다**(moai-z46r, 사용자 결정: `g : +화면 [보드]`).
+/// 고르는 항목 셋에 저마다 붙이면 같은 낱말이 세 번 서거나 하나만 `[지금]` 을 달아, 고르기 전에 한 줄로 읽히지 않는다.
+///
+/// 화면 묶음인지는 **표에서 읽는다** — 그 밑의 줄이 모두 화면 고르기([`Browse::Go`])인 묶음이다. 접두어 글자로 가르면
+/// 글자를 옮기는 날 상태가 말없이 사라진다.
+fn here(seq: &[KeyEvent], c: &Ctx) -> Option<&'static str> {
+    let mut below = BROWSE.iter().filter(|b| b.seq.len() > seq.len() && under(b, seq)).peekable();
+    let screens = below.peek().is_some() && below.all(|b| matches!(b.act, Browse::Go(_)));
+    screens.then(|| c.screen().state(c.lang))
 }
 
 /// 이 줄이 `seq` 로 시작하나.
@@ -309,7 +321,7 @@ fn under(b: &Bind<Browse>, seq: &[KeyEvent]) -> bool {
 /// 기다린다(사용자 결정 2026-09-19). 접두어 줄의 `Esc 닫기` 가 이것으로 서고, 안 선 층은 한 번
 /// 받고 닫힌다는 뜻이라 있고 없음이 그대로 규칙을 댄다.
 ///
-/// 오늘 이것이 참인 층은 `SPC v`·`SPC c`·`SPC s` 고, 뿌리·`SPC p`·`SPC m` 은 거짓이다. **켜진
+/// 오늘 이것이 참인 층은 `SPC v`·`SPC c`·`SPC s` 고, 뿌리·`SPC p`·`SPC g`·`SPC m` 은 거짓이다. **켜진
 /// 것만 센다**([`entries`] 와 같은 판정) — 안 선 항목은 눌러도 모르는 키라, 그것으로 기다리면
 /// 아무 토글도 없는 층이 ESC 를 기다린다. 하위 층의 토글은 안 센다: 그 층은 제 차례에 스스로
 /// 답한다.
@@ -327,6 +339,7 @@ fn live(seq: &[KeyEvent], c: &Ctx) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::keys::Screen;
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
@@ -363,11 +376,12 @@ mod tests {
         let root = entries(ch.held(), &inside(), &[]);
         // **`+옵션` 은 끝이다**(moai-2g7d) — 표의 차례가 곧 메뉴의 차례고, 가장 드물게 누르는 묶음을
         // 끝에 둔다. 보기·정렬·열이 *무엇이 서는가* 라면 옵션은 *선 것을 이 사람에게 어떻게 그릴까* 다.
-        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "v", "s", "c", "m", "o"]);
+        // **`+화면` 은 프로젝트 곁이다**(moai-z46r) — 무엇을 보나(화면)를 고른 뒤 그 화면의 보기·정렬·열을 고른다.
+        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "g", "v", "s", "c", "m", "o"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
         assert_eq!(
             what,
-            ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+보기", "+정렬", "+열", "+읽음", "+옵션"]
+            ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+화면", "+보기", "+정렬", "+열", "+읽음", "+옵션"]
         );
     }
 
@@ -566,7 +580,7 @@ mod tests {
         for p in ["v", "c", "s"] {
             assert!(waits(&path(p), &c), "SPC {p} 에 토글이 섰는데 안 기다린다");
         }
-        for p in ["", "p", "m"] {
+        for p in ["", "p", "g", "m"] {
             assert!(!waits(&path(p), &c), "SPC {p} 에 토글이 없는데 기다린다");
         }
         // **켜진 것만 센다** — 층에서는 줄 보기·정렬·열이 다 꺼져, 상세 칸(`d`)이 남은 `SPC v` 만 기다린다.
@@ -637,7 +651,8 @@ mod tests {
             (ctrl('b'), Browse::Step(Move::PageUp)),
         ];
         // 뿌리 층, 그리고 Esc 까지 기다리는 토글 층(`SPC s` — 이 키들이 항목으로 안 선다)·한 번에
-        // 닫히는 층(`SPC p`). 항목과 부딪치는 자리는 `an_item_on_the_layer_wins_over_the_move` 가 본다.
+        // 닫히는 층(`SPC p`). 항목과 부딪치는 자리는 `an_item_on_the_layer_wins_over_the_move` 가 본다 — 뿌리의 `g` 가
+        // 그렇다(화면 묶음, moai-z46r). 그래서 `gg` 는 `g` 가 빈 층에서만 잰다.
         for layer in [&[][..], &[k('s')][..], &[k('p')][..]] {
             for (x, want) in cases {
                 let mut ch = Chord::default();
@@ -651,6 +666,9 @@ mod tests {
                 assert!(ch.held().is_empty(), "{layer:?} 에서 {x:?} 뒤에 열이 남았다");
             }
             // `gg` — 첫 `g` 가 메뉴를 닫고 둘째를 기다린다.
+            if layer.is_empty() {
+                continue;
+            }
             let mut ch = Chord::default();
             feed(&mut ch, &c, k(' '));
             for &l in layer {
@@ -663,13 +681,14 @@ mod tests {
     }
 
     /// **그 층에 선 항목이 이긴다**(moai-y8v2, 사용자 결정) — 메뉴 창에 적힌 키가 다른 일을 하는
-    /// 판이 없다. 오늘 부딪치는 자리는 셋이다: `SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
-    /// 읽음). 같은 글자가 **그 층 밖**에서는 이동이다.
+    /// 판이 없다. 오늘 부딪치는 자리는 넷이다: `SPC g l`(목록, moai-z46r)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
+    /// 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 — `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
     #[test]
     fn an_item_on_the_layer_wins_over_the_move() {
         use super::super::scroll::Move;
         let c = inside();
         for (layer, x, item) in [
+            ('g', 'l', Browse::Go(super::super::keys::Screen::List)),
             ('c', 'h', Browse::Cell(super::super::view::Field::Names)),
             ('v', 'l', Browse::Deferred),
             ('m', 'g', Browse::ReadGroup),
@@ -732,7 +751,7 @@ mod tests {
         // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
         // 옵션(`o`)은 층에서도 선다 — 상세 칸은 층에도 있고, 그리는 자리는 프로젝트의 것이 아니라
         // 보는 사람의 것이다.
-        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
+        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         // 통계(`s`)는 어디서든 선다 — 세는 것은 프로젝트라 포커스와 상관이 없다(moai-1hka.bq9).
@@ -783,6 +802,33 @@ mod tests {
             keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
             ["l", "i", "o", "a", "b", "d", "w"]
         );
+    }
+
+    /// **화면 묶음은 지금 화면을 단다**(moai-z46r, 사용자 결정 `g : +화면 [보드]`) — 고르는 항목 셋에는 상태가 없다.
+    /// 다른 묶음은 상태를 안 단다.
+    #[test]
+    fn the_screen_group_names_the_screen_that_stands() {
+        let at = |c: Ctx| {
+            entries(&[k(' ')], &c, &[]).into_iter().find(|e| e.key == "g").map(|e| e.text()).expect("g 가 없다")
+        };
+        assert_eq!(at(inside()), "+화면 [목록]");
+        assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
+        assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
+        let root = entries(&[k(' ')], &inside(), &[]);
+        assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
+        let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
+        assert_eq!(keys_of(&screens), ["l", "b", "s"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계"]);
+        // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
+        assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
+        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats)] {
+            let mut ch = Chord::default();
+            for y in [' ', 'g'] {
+                feed(&mut ch, &inside(), k(y));
+            }
+            assert_eq!(feed(&mut ch, &inside(), k(x)), Some(Browse::Go(to)));
+            assert!(!open(&ch), "SPC g {x} 가 메뉴를 안 닫았다");
+        }
     }
 
     /// **이름 없는 하위 접두어가 없다.** 표에 SPC 줄을 더하며 새 접두어를 만들면 여기서 멈춘다.

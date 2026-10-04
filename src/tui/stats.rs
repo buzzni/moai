@@ -1,4 +1,4 @@
-//! 통계 창 — `SPC p s`(moai-1hka.bq9). 목록과 상세 자리를 **통째로** 덮고, Esc 로 닫으면 보던 자리 그대로다.
+//! 통계 창 — `SPC g s`(moai-1hka.bq9). 목록과 상세 자리를 **통째로** 덮고, Esc 로 닫으면 보던 자리 그대로다.
 //!
 //! **세는 자는 CLI 와 하나다**([`crate::report::stats`]). 창이 따로 세면 같은 저장소를 두고 `moai stats` 와 창이
 //! 다른 수를 낸다 — 여기는 고를 줄과 거름망, 시간대를 대고 그 둘을 부르기만 한다.
@@ -21,8 +21,9 @@
 //! - **탐색기가 든 줄을 센다** — 옆 워크트리를 겹쳐 보고 있으면 거기서 온 줄도 든다. CLI 의 `moai stats` 는
 //!   안 겹치므로, 그때는 제목이 그렇다고 말한다
 
-use super::keys::{STATS, Stat};
+use super::keys::{Browse, LEADER, STATS, Stat};
 use super::layer::{Depth, Told};
+use super::menu;
 use super::scroll::Scroll;
 use super::{App, Ground, Mode, Row, Seat};
 use crate::config::Config;
@@ -120,7 +121,7 @@ fn count(
 }
 
 impl App {
-    /// `SPC p s` — 창을 연다. 셀 프로젝트를 못 정하거나 못 읽으면 알림 한 줄로 까닭을 대고 안 연다.
+    /// `SPC g s` — 창을 연다. 셀 프로젝트를 못 정하거나 못 읽으면 알림 한 줄로 까닭을 대고 안 연다.
     pub(super) fn open_stats(&mut self) {
         let lang = self.site.lang;
         let zone = self.zone.clone();
@@ -230,14 +231,52 @@ impl App {
     }
 
     /// 통계 창의 키 하나. **닫으면 탐색으로 돌아갈 뿐이다** — 커서·걸린 거름망·상세는 창이 안 건드려 그대로다.
-    pub(super) fn stats_key(&mut self, k: KeyEvent) {
-        let Mode::Stats(w) = &mut self.mode else { return };
+    ///
+    /// **SPC 는 메뉴를 연다**(moai-z46r, 사용자 결정) — 서는 것은 화면 고르기(`SPC g`)뿐이다(`keys::Ctx::stats`). 메뉴는
+    /// 탐색의 열([`App::chord`])이고 탐색과 같은 자([`menu::feed`])로 받는다: Esc·SPC 가 닫고 Bksp 가 한 층 올라가며,
+    /// 이동키는 메뉴를 닫고 그 자리에서 **창을** 굴린다(moai-y8v2). 창의 열은 따로라, 메뉴를 열면 기다리던 `g` 를 버린다.
+    ///
+    /// 메뉴로 동작을 돌렸으면 참이다 — 알림을 도로 세울지를 부르는 쪽이 이것으로 가른다.
+    pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
+        if menu::open(&self.chord) || LEADER.matches(k) {
+            if let Mode::Stats(w) = &mut self.mode {
+                w.chord.clear();
+            }
+            let rows = self.rows();
+            let ctx = self.key_ctx(&rows);
+            let act = menu::feed(&mut self.chord, &ctx, k);
+            // 메뉴를 닫은 `g` 는 탐색의 열에 남는다 — 창의 열로 옮겨 둘째 `g` 가 `gg` 로 잇게 한다.
+            if !menu::open(&self.chord) {
+                let held = self.chord.held().to_vec();
+                self.chord.clear();
+                if let Mode::Stats(w) = &mut self.mode {
+                    for k in held {
+                        w.chord.feed(STATS, k);
+                    }
+                }
+            }
+            return match act {
+                Some(Browse::Go(to)) => {
+                    self.go(to, &rows);
+                    true
+                }
+                Some(Browse::Step(m)) => {
+                    if let Mode::Stats(w) = &mut self.mode {
+                        w.scroll.go(m);
+                    }
+                    false
+                }
+                _ => false,
+            };
+        }
+        let Mode::Stats(w) = &mut self.mode else { return false };
         match w.chord.feed(STATS, k) {
             Some(Stat::Step(m)) => w.scroll.go(m),
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
             None => {}
         }
+        true
     }
 }
 
@@ -303,16 +342,16 @@ mod tests {
         }
     }
 
-    /// **`SPC p s` 가 창을 열고, Esc 는 보던 화면을 그대로 돌려준다** — 커서·포커스·상세의 굴린 자리·걸린
+    /// **`SPC g s` 가 창을 열고, Esc 는 보던 화면을 그대로 돌려준다** — 커서·포커스·상세의 굴린 자리·걸린
     /// 거름망을 창이 안 건드린다. 창 안의 `b` 는 흐름을 주와 날 사이에서 바꾼다.
     #[test]
-    fn spc_p_s_opens_the_window_and_esc_gives_the_screen_back_as_it_was() {
+    fn spc_g_s_opens_the_window_and_esc_gives_the_screen_back_as_it_was() {
         let mut a = app();
         a.cursor = 1;
         a.focus = Pane::Detail;
         let before = (a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail);
 
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         let w = window(&a);
         assert_eq!((w.stats().rows, w.filter.clone(), w.bucket), (3, None, Bucket::Week), "일 셋을 주마다 센다");
         assert_eq!(w.project, ".", "저장소 없이 세운 App 은 이름이 없다");
@@ -331,12 +370,90 @@ mod tests {
         assert_eq!((a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail), before, "창이 보던 자리를 바꿨다");
     }
 
+    /// **통계 창 위의 SPC 는 화면 고르기만 연다**(moai-z46r, 사용자 결정) — `SPC g l`·`b` 는 창을 닫고 그 배치로 서고,
+    /// `SPC g s` 는 새로 센다(주/날이 처음으로 돌아간다). 다른 묶음은 안 서서 옛 `SPC p s` 는 메뉴에서 모르는 키다.
+    /// 메뉴의 Esc 는 메뉴만 닫고 창은 남는다.
+    #[test]
+    fn spc_over_the_window_opens_only_the_screen_menu() {
+        use super::super::{keys::Screen, menu, view::Layout};
+        let mut a = app();
+        a.hit("SPC g s SPC");
+        assert!(menu::open(&a.chord), "통계 창 위에서 SPC 가 메뉴를 안 열었다");
+        let ctx = a.key_ctx(&a.rows());
+        assert_eq!(ctx.screen(), Screen::Stats);
+        let root = menu::entries(a.chord.held(), &ctx, &[]);
+        assert!(root.iter().any(|e| e.text() == "+화면 [통계]"), "화면 묶음이 지금 화면을 안 댄다");
+        assert!(root.iter().all(|e| e.is_group()), "통계 창 위에 묶음 아닌 항목이 섰다");
+        a.hit("Esc");
+        assert!(!menu::open(&a.chord));
+        window(&a);
+
+        // 다시 고른 통계는 새로 센다 — 바꿔 둔 칸 너비가 처음(주)으로 돌아온다.
+        a.hit("b");
+        assert_eq!(window(&a).bucket, Bucket::Day);
+        a.hit("SPC g s");
+        assert_eq!(window(&a).bucket, Bucket::Week, "SPC g s 가 창을 새로 안 셌다");
+        assert!(!menu::open(&a.chord), "SPC g s 가 메뉴를 열어 뒀다");
+
+        a.hit("SPC g b");
+        assert_eq!((&a.mode, a.layout), (&Mode::Browse, Layout::Board), "SPC g b 가 창을 닫고 보드로 안 갔다");
+        a.hit("SPC g s SPC g l");
+        assert_eq!((&a.mode, a.layout), (&Mode::Browse, Layout::List), "SPC g l 이 창을 닫고 목록으로 안 갔다");
+        // 같은 배치를 고르면 창만 닫힌다 — 토글이 아니다.
+        a.hit("SPC g s SPC g l");
+        assert_eq!((&a.mode, a.layout), (&Mode::Browse, Layout::List), "목록에서 연 창의 SPC g l 이 배치를 뒤집었다");
+    }
+
+    /// **창의 키 바가 SPC 를 댄다**(moai-z46r) — 안 대면 창 위에서 메뉴가 열린다는 것을 알 길이 없다. 메뉴가 뜨면 바
+    /// 자리에 접두어 줄이 서고 격자가 창을 밀어 올린다 — 목록 위의 메뉴와 같은 그림이다.
+    #[test]
+    fn the_window_bar_names_spc_and_the_menu_draws_over_the_window() {
+        let mut a = app();
+        a.hit("SPC g s");
+        let lines = draw::tests::render(&mut a, 80, 24);
+        let bar = lines.last().expect("빈 화면");
+        assert!(bar.contains("SPC 메뉴") && bar.contains("Esc 닫기"), "{bar:?}");
+        a.hit("SPC");
+        let lines = draw::tests::render(&mut a, 80, 24);
+        let screen = lines.join("\n");
+        assert!(lines.last().is_some_and(|l| l.starts_with("SPC- 메뉴")), "접두어 줄이 안 섰다\n{screen}");
+        assert!(screen.contains("g : +화면 [통계]"), "격자가 안 섰다\n{screen}");
+        assert!(screen.contains(" 통계 · . · "), "메뉴가 창을 덮었다\n{screen}");
+        a.hit("g");
+        let screen = draw::tests::render(&mut a, 80, 24).join("\n");
+        assert!(screen.contains("l : 목록") && screen.contains("s : 통계"), "SPC g 층이 안 섰다\n{screen}");
+    }
+
+    /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서) — `gg` 는 메뉴가 닫힌 뒤 창의 열로 이어진다.
+    /// 메뉴가 뜬 동안 휠은 아무것도 안 한다 — 목록 위의 메뉴와 같다.
+    #[test]
+    fn a_move_key_closes_the_menu_over_the_window_and_scrolls_it() {
+        use super::super::menu;
+        let mut a = app();
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        a.hit("SPC j");
+        assert!(!menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
+        assert_eq!(window(&a).scroll.offset(), 1, "j 가 창을 안 굴렸다");
+        a.hit("SPC Ctrl-d");
+        assert!(window(&a).scroll.offset() > 1, "Ctrl-d 가 창을 안 굴렸다");
+        a.hit("SPC s");
+        assert!(menu::open(&a.chord), "시험의 전제 — 통계 창 위의 SPC s 는 모르는 키라 메뉴가 남는다");
+        a.hit("Esc SPC g");
+        assert_eq!(menu::title(a.chord.held()), "SPC g");
+        a.hit("g");
+        assert!(!menu::open(&a.chord), "SPC g 층의 g 가 메뉴를 안 닫았다");
+        a.hit("g");
+        assert_eq!(window(&a).scroll.offset(), 0, "메뉴에서 시작한 gg 가 창의 맨 위로 안 갔다");
+        assert!(a.chord.held().is_empty(), "탐색의 열에 g 가 남았다");
+    }
+
     /// **걸린 거름망으로 좁혀 세고 제목이 그 글을 댄다** — 닫아도 거름망은 그대로 걸려 있다.
     #[test]
     fn a_hung_filter_narrows_what_the_window_counts() {
         let mut a = app();
         a.apply(&Mode::Filter(Input::new("tag=bug"))).unwrap();
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert_eq!(window(&a).stats().rows, 1, "거름망을 안 따랐다");
         assert_eq!(window(&a).filter.as_deref(), Some("tag=bug"));
         a.hit("Esc");
@@ -344,7 +461,7 @@ mod tests {
 
         // 검색(`/`)도 거르개다 — 뱃지 글 그대로 제목에 선다.
         a.apply(&Mode::Grep(Input::new("0003"), crate::query::GrepIn::All)).unwrap();
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert_eq!(window(&a).stats().rows, 1);
         assert_eq!(window(&a).filter.as_deref(), Some("/0003"));
     }
@@ -361,7 +478,7 @@ mod tests {
             ],
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert_eq!(window(&a).stats().work.all, Tally { lines: 1, tokened: 1, tokens: Some(1000) });
     }
 
@@ -370,7 +487,7 @@ mod tests {
     #[test]
     fn the_window_draws_at_any_size_and_falls_back_to_text_when_narrow() {
         let mut a = app();
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         // `edge` 와 그 한 칸 위는 여백이 안쪽을 0칸·1칸만 남기는 폭이고, `cut` 의 앞뒤는 차트와 글이 갈리는 폭이다
         // ([`draw::STATS_CHART_W`]). 둘 다 [`edge`] 에서 셈한다 — 커서 글리프의 폭이 바뀌어도 같은 경계를 잰다.
         let cut = draw::STATS_CHART_W + edge();
@@ -436,7 +553,7 @@ mod tests {
             ],
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         // 안쪽 폭 58 — 이 폭에서 이름이 `anthr…` 로 잘린다. 창 폭은 그 안쪽에 [`edge`] 를 더한 것이다.
         let screen = draw::tests::render(&mut a, 58 + edge(), 80).join("\n");
         // 막대 곁의 글 통째로 — 머리 줄(`AI 작업 …`)에도 같은 합이 서므로 막대 쪽에만 있는 머리(`2줄 · `)부터 잰다.

@@ -188,7 +188,7 @@ pub enum Mode {
     /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
     /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Zone(zones::Zones),
-    /// `SPC p s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다. **상자에 담는다** —
+    /// `SPC g s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다. **상자에 담는다** —
     /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
     Stats(Box<stats::Window>),
 }
@@ -1305,7 +1305,7 @@ pub struct App {
     /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
     /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
     pub detail_at: view::DetailAt,
-    /// 목록을 줄로 세우나 칸반 보드로 세우나 — `SPC v b`(moai-9nfw). **새 창이 아니라 배치다**: 커서·거름망·
+    /// 목록을 줄로 세우나 칸반 보드로 세우나 — `SPC g l`·`b`(moai-9nfw·moai-z46r). **새 창이 아니라 배치다**: 커서·거름망·
     /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
     /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
     pub layout: view::Layout,
@@ -4624,7 +4624,27 @@ impl App {
         })
     }
 
-    /// 목록과 보드를 오간다 — `SPC v b`(moai-9nfw). **고른 줄을 그대로 든다.**
+    /// 화면을 고른다 — `SPC g l`·`b`·`s`(moai-z46r). **토글이 아니라 고르기다**: 목록이나 보드를 다시 고르면 그 자리에
+    /// 그대로 남는다. 통계는 고를 때마다 새로 센다 — 열 때마다 새로 여는 창이고(사용자 결정), 그래서 통계 창 위의
+    /// `SPC g s` 도 눌러서 하는 일이 있다.
+    ///
+    /// **통계 창 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는 창이 안
+    /// 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
+    pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
+        let layout = match to {
+            keys::Screen::Stats => return self.open_stats(),
+            keys::Screen::List => view::Layout::List,
+            keys::Screen::Board => view::Layout::Board,
+        };
+        if matches!(self.mode, Mode::Stats(_)) {
+            self.mode = Mode::Browse;
+        }
+        if self.layout != layout {
+            self.flip_layout(rows);
+        }
+    }
+
+    /// 목록과 보드를 오간다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw). **고른 줄을 그대로 든다.**
     ///
     /// - 목록 → 보드: 그 줄이 카드면 그 카드에, 폴더(에픽·마일스톤·바구니)면 그 밑의 첫 카드에 선다
     /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
@@ -4963,6 +4983,14 @@ impl App {
         }
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
+        // **통계 창은 SPC 메뉴를 연다**(moai-z46r) — 그래서 탐색의 열을 비우지 않고 넘긴다. 메뉴가 열린 동안 그 열이
+        // 메뉴다([`menu::open`]). 메뉴만 만지고 아무 동작도 안 돈 키는 알림을 도로 세운다(위의 까닭과 같다).
+        if matches!(self.mode, Mode::Stats(_)) {
+            if !self.stats_key(k) {
+                self.notice = carried;
+            }
+            return;
+        }
         if !matches!(self.mode, Mode::Browse) {
             // 기다리던 열은 탐색의 것이다 — 글칸에서 돌아온 뒤의 `g` 가 옛 `g` 와 잇지 않게.
             self.chord.clear();
@@ -5084,7 +5112,7 @@ impl App {
             // 해제는 층의 줄에서만, 목록 포커스로(`enabled`) — 커서가 선 줄을 뺀다.
             B::Unregister => self.ask_unregister(),
             // **포커스와 상관없이 연다** — 세는 것은 프로젝트라 어느 칸을 보고 있었는지와 상관이 없다(moai-1hka.bq9).
-            B::Stats => self.open_stats(),
+            B::Go(s) => self.go(s, &rows),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             // **검색이 아니어도 커서를 다시 세운다**(리뷰 moai-r1ly.f2x) — `after_search` 는 검색을 풀 때만 세우므로,
@@ -5129,7 +5157,6 @@ impl App {
                 self.fields.toggle(f);
                 self.save_look();
             }
-            B::Board => self.flip_layout(&rows),
             // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
@@ -5216,6 +5243,7 @@ impl App {
             archived_hidden: !self.view.show_archived,
             detail_at: self.detail_at,
             board: self.board(),
+            stats: matches!(self.mode, Mode::Stats(_)),
             head: self.head_at(rows).is_some(),
             mouse: self.mouse_on,
             sorting: self.order,
@@ -5345,7 +5373,6 @@ impl App {
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
             Mode::Zone(_) => return self.pick_zone(k),
-            Mode::Stats(_) => return self.stats_key(k),
             _ => {}
         }
         let eaten = match &mut self.mode {
@@ -6185,14 +6212,14 @@ mod tests {
         }
     }
 
-    /// **`SPC v b` 는 같은 줄을 카드로 세운다**(moai-9nfw) — 묶음은 카드가 아니고, 레인(마일스톤 → 바구니) 안에서는
+    /// **`SPC g b` 는 같은 줄을 카드로 세운다**(moai-9nfw) — 묶음은 카드가 아니고, 레인(마일스톤 → 바구니) 안에서는
     /// 목록의 차례다. 고른 줄을 그대로 들고 오가며, 보드에서 목록으로 와도 디렉터리는 그대로다.
     #[test]
-    fn spc_v_b_lays_the_same_rows_out_as_cards_and_keeps_the_row() {
+    fn spc_g_b_lays_the_same_rows_out_as_cards_and_keeps_the_row() {
         let mut a = boarded();
         assert_eq!(a.layout, view::Layout::List);
         // 뿌리의 목록 — 마일스톤과 바구니 폴더뿐이다. 마일스톤에 서서 보드로 가면 그 밑의 첫 카드다.
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         assert_eq!(a.layout, view::Layout::Board);
         assert_eq!(
             row_ids(&a),
@@ -6205,14 +6232,29 @@ mod tests {
         // 보드 → 목록: 같은 디렉터리에 남고 그 카드를 품은 폴더가 열린다.
         a.hit("l");
         assert_eq!(on_id(&a), "argos-0004");
-        a.hit("SPC v b Esc");
+        a.hit("SPC g l");
         assert_eq!(a.layout, view::Layout::List);
         assert!(a.site.path.is_empty(), "목록으로 오며 디렉터리에 들어갔다");
         assert_eq!(on_id(&a), "argos-0004", "보드에서 고른 카드를 목록이 놓쳤다");
 
         // 목록 → 보드: 카드였던 줄은 그 카드에 선다.
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         assert_eq!(on_id(&a), "argos-0004");
+    }
+
+    /// **`SPC g` 는 토글이 아니라 고르기다**(moai-z46r, 사용자 결정) — 지금 배치를 다시 고르면 그대로 남고, 커서도 굴린
+    /// 자리도 안 흔든다. 고르면 메뉴는 닫힌다.
+    #[test]
+    fn choosing_the_layout_that_stands_leaves_it_as_it_is() {
+        let mut a = boarded();
+        a.hit("SPC g l");
+        assert_eq!(a.layout, view::Layout::List, "목록에서 고른 목록이 보드로 뒤집혔다");
+        assert!(!menu::open(&a.chord), "SPC g l 이 메뉴를 열어 뒀다");
+        a.hit("SPC g b j");
+        let held = (a.layout, on_id(&a), a.list.offset());
+        assert_eq!(held.0, view::Layout::Board, "시험의 전제");
+        a.hit("SPC g b");
+        assert_eq!((a.layout, on_id(&a), a.list.offset()), held, "보드에서 고른 보드가 무언가 바꿨다");
     }
 
     /// **`SPC v i` 는 보드의 idea 칸과 목록의 idea 줄을 함께 숨기고, 그 고름은 설정에 남는다**(moai-oagj.bjr).
@@ -6609,7 +6651,7 @@ mod tests {
         assert!(shown(&a), "사라진 카드 대신 선 카드가 화면 밖에 남았다");
     }
 
-    /// **목록을 다녀온 보드는 고른 카드를 드러낸다**(moai-j0jf) — 오가는 길(`SPC v b`)이 굴린 자리를 첫 줄로 돌리니,
+    /// **목록을 다녀온 보드는 고른 카드를 드러낸다**(moai-j0jf) — 오가는 길(`SPC g l`·`b`)이 굴린 자리를 첫 줄로 돌리니,
     /// 굴려 떼어 둔 카드([`App::adrift`])도 함께 걷는다. 남기면 첫 줄로 돌아온 보드에서 고른 카드가 화면 밖에 선 채다.
     #[test]
     fn a_trip_to_the_list_and_back_shows_the_chosen_card() {
@@ -6628,9 +6670,9 @@ mod tests {
         a.hit("Ctrl-b Ctrl-b");
         draw(&mut a);
         assert!(!shown(&a), "시험의 전제 — 고른 카드가 화면 밖이다");
-        a.hit("SPC v b Esc");
+        a.hit("SPC g l");
         draw(&mut a);
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         draw(&mut a);
         assert_eq!((a.layout, on_id(&a)), (view::Layout::Board, "argos-0030".to_string()), "시험의 전제");
         assert!(shown(&a), "목록을 다녀온 보드가 고른 카드를 화면 밖에 두었다 — {}", a.list.offset());
@@ -6653,7 +6695,7 @@ mod tests {
         };
         a.cursor = row_ids(&a).iter().position(|r| r == "argos-0100").unwrap();
         a.hit("Enter");
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         draw(&mut a);
         assert_eq!(on_id(&a), "argos-0101", "시험의 전제 — 에픽 보드의 첫 카드에 섰다");
         a.hit("PageDown PageDown");
@@ -6723,7 +6765,7 @@ mod tests {
         let mut a = boarded();
         a.hit("Enter");
         assert_eq!(a.crumbs(), "/argos-0001 제목");
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0004"], "마일스톤 안의 보드가 그 밑의 카드만 안 냈다");
         a.hit("Bksp");
         assert!(a.site.path.is_empty());
@@ -6781,7 +6823,7 @@ mod tests {
         let user = s.join("user.toml");
         let mut a = boarded();
         a.user_config = Some(user.clone());
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         let text = std::fs::read_to_string(&user).expect("배치가 설정에 안 적혔다");
         assert!(text.contains("layout = \"board\""), "{text}");
         let mut b = boarded();
@@ -8173,6 +8215,7 @@ mod tests {
 
     /// **메뉴의 이동키는 메뉴를 닫고 곧 목록을 움직인다**(moai-y8v2) — 한 누름이다. 토글 층에서도
     /// 같고, `gg` 는 첫 `g` 가 메뉴를 닫고 둘째가 맨 위로 간다. App 의 길을 지나 커서가 실제로 옮는지를 본다.
+    /// **뿌리의 `g` 는 화면 묶음이다**(moai-z46r) — 그 층이 쥔 글자라 항목이 이긴다. `gg` 는 `g` 가 비어 있는 층에서 잰다.
     #[test]
     fn a_move_key_in_the_menu_closes_it_and_moves() {
         let mut a = app();
@@ -8187,6 +8230,8 @@ mod tests {
         a.hit("SPC G");
         assert_eq!(a.cursor, a.rows().len() - 1, "G 가 맨 아래로 안 갔다");
         a.hit("SPC g");
+        assert_eq!(menu::title(a.chord.held()), "SPC g", "뿌리의 g 가 화면 묶음을 안 열었다");
+        a.hit("Esc SPC s g");
         assert!(!menu::open(&a.chord), "g 가 메뉴를 안 닫았다");
         a.hit("g");
         assert_eq!(a.cursor, 0, "메뉴에서 시작한 gg 가 맨 위로 안 갔다");
@@ -10222,7 +10267,7 @@ mod tests {
             CALLS.fetch_add(1, Ordering::SeqCst);
             1
         };
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert!(matches!(a.mode, Mode::Stats(_)), "시험의 전제 — 통계 창이 열렸다: {:?}", a.mode);
         let opened = a.reopened_at.expect("여는 걸음이 1분 시계를 안 세웠다");
         a.reopened_at = Some(opened.checked_sub(layer::REREAD_EVERY).expect("시계가 1분도 안 돌았다"));
