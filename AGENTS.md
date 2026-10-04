@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:3dbf35d3 -->
+<!-- moai:begin v:0.6.0 hash:bbd253b7 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -445,7 +445,7 @@ was not in the plan, create it with `moai add 'a title'` and pick that up.
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
 Antigravity it is the review this session has, else read the diff yourself.
-It runs inside your own session — never start another agent for it. The other
+It runs inside your own session — never start another agent program for it. The other
 steps that differ per agent are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'

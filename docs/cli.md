@@ -2344,7 +2344,8 @@ Options:
 
   A letter to any-idle-worker shows to every agent but its sender and the
   supervisors, and the first --ack keeps it; another that tried in the same
-  moment is told it was taken (`lost`).
+  moment is told it was taken (`lost`). One --ack keeps one such letter, as
+  the hooks do, so several of them spread over the agents that wait.
 
   Who you are is --as, else MOAI_AGENT, else the registered agent this
   command runs under (`moai hello`).

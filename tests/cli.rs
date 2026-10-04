@@ -23855,6 +23855,87 @@ fn a_waiting_worker_reads_idle_and_the_supervisor_filters_for_it() {
     assert!(swept.ends_with("\"swept\":[\"gone\"]}\n"), "거르개가 걷기를 좁혔다 — {swept}");
 }
 
+/// **편지를 가진 기다림만 `busy` 를 적고, 기다리지 않은 부름은 `idle` 을 안 적는다**(리뷰 moai-snyk.nic).
+///
+/// - 기다림을 시작하기 전에 `idle` 을 적던 판은 `--wait 0` 한 번이 일하는 장을 `idle` 로 남겼고, 편지가 이미 선
+///   판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다
+/// - 편지를 본 자리에서 `busy` 를 적던 판은 `any-idle-worker` 한 통을 두고 겨루다 **진** 일꾼까지 `busy` 로 세워,
+///   다시 걸기 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 겨룸은 늘 서지는 않아 여러 바퀴로
+///   잰다 — 바퀴마다 가진 하나만 `busy` 다
+/// - 한 `--ack` 는 열린 편지를 한 통만 가진다 — 훅이 한 번에 한 통만 싣는 것과 같다. 쌓인 열린 편지를 먼저 깬
+///   일꾼 하나가 다 가지면 나머지 일감이 그 일꾼의 읽음 속에 숨는다
+/// - 아무도 없는 출석부는 거르개를 줘도 등록하는 길을 댄다
+#[test]
+#[cfg(unix)]
+fn only_a_wait_that_took_a_letter_reads_busy() {
+    let s = init("agents-took");
+    let nobody = ok(s.path(), &["agents", "--role", "worker"]);
+    assert!(nobody.contains("`moai hello` 가 등록하고"), "빈 출석부가 등록하는 길을 안 댄다 — {nobody}");
+    let sleepers: Vec<Sleeper> = (0..6).map(|_| Sleeper::new()).collect();
+    let workers: Vec<String> = (0..6).map(|n| format!("w{n}")).collect();
+    for (w, p) in workers.iter().zip(&sleepers) {
+        hello_as(s.path(), w, &p.pid(), &["--role", "worker"]);
+    }
+    // 그 이름의 장 한 조각 — `name` 부터 그 장이 닫힐 때까지.
+    let row = |w: &str| -> String {
+        let out = ok(s.path(), &["agents", "--json"]);
+        let at = out.find(&format!("\"name\":\"{w}\"")).unwrap_or_else(|| panic!("{w} 의 장이 없다 — {out}"));
+        out[at..out[at..].find('}').map_or(out.len(), |n| at + n)].to_string()
+    };
+
+    // 기다리지 않은 부름은 장을 안 바꾼다 — `hello` 가 적은 `busy` 와 그 `since` 그대로다.
+    let before = row("w0");
+    ok(s.path(), &["inbox", "--as", "w0", "--wait", "0"]);
+    assert_eq!(row("w0"), before, "기다리지 않은 부름이 일하는 장을 고쳤다");
+    // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다.
+    ok(s.path(), &["send", "w0", "벌써 왔다", "--as", "boss"]);
+    let out =
+        staged_live(&["inbox", "--as", "w0", "--ack", "--wait", "5", "--json"]).current_dir(s.path()).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(ids_in(&String::from_utf8(out.stdout).unwrap()).len(), 1, "이미 선 편지를 안 가졌다");
+    assert_eq!(row("w0"), before, "편지가 선 채로 부른 기다림이 idle 을 적었다가 since 를 새로 세웠다");
+
+    // 한 `--ack` 에 열린 편지 한 통 — 남은 것은 다음 일꾼의 몫이다.
+    for n in 0..2 {
+        ok(s.path(), &["send", "any-idle-worker", &format!("쌓인 일감 {n}"), "--as", "boss"]);
+    }
+    for w in ["w1", "w2"] {
+        let got = ids_in(&ok(s.path(), &["inbox", "--as", w, "--ack", "--json"]));
+        assert_eq!(got.len(), 1, "{w} 가 열린 편지를 한 통이 아니라 {}통 가졌다", got.len());
+    }
+
+    for round in 0..3 {
+        for w in &workers {
+            mark(s.path(), w, "idle");
+        }
+        ok(s.path(), &["send", "any-idle-worker", &format!("일감 {round}"), "--as", "boss"]);
+        let children: Vec<std::process::Child> = workers
+            .iter()
+            .map(|w| {
+                staged(&["inbox", "--as", w, "--ack", "--wait", "1", "--json"])
+                    .current_dir(s.path())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        let mut took = Vec::new();
+        for (w, c) in workers.iter().zip(children) {
+            let out = c.wait_with_output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            if !ids_in(&String::from_utf8(out.stdout).unwrap()).is_empty() {
+                took.push(w.clone());
+            }
+        }
+        assert_eq!(took.len(), 1, "{round} 바퀴: 한 통이 하나에게 안 갔다 — {took:?}");
+        for w in &workers {
+            let want = if took.contains(w) { "busy" } else { "idle" };
+            assert_eq!(field(&row(w), "status"), want, "{round} 바퀴: {w} — 편지를 가진 기다림만 busy 다");
+        }
+    }
+}
+
 // ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────
 
 /// 훅이 실은 글 — 계약 JSON 한 줄을 그대로 돌려준다. [`carried_text`] 는 첫 `"` 에서 끊는데, 보드와 함께 실린

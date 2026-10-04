@@ -83,8 +83,10 @@ up stays `in_progress` and nobody carries it on. Look at this before picking new
 
 `stranded` is a row that was picked up while no live worktree holds that work — either
 the worktree is gone, or **the work was being done in the root with no worktree**. This
-row alone does not tell the two apart: if a worker in 2 is `busy` it may be that one, so
-ask it with a letter what it is holding before handing the work on.
+row alone does not tell the two apart: if `moai agents` — every row, not only the idle
+workers of 2 — shows a live session that is `busy`, it may be that one, so ask what it is
+holding before handing the work on: a worker with a letter, any other window through the
+person.
 
 The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
 
@@ -115,7 +117,7 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker is gone from `moai agents`.
+worker — the one you sent that work to — is gone from `moai agents`.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
   idea**. Send the letter in 3 with its first two lines changed to the two below, and the
@@ -194,6 +196,10 @@ of it sees the same one, and a row whose process is gone is swept as it is read.
 - **Leave out a worker whose sent idea has not had its report checked.** A worker reads
   `busy` while it unfolds, picks up and merges, and it may read `idle` for a moment between
   two waits
+- **`idle` also stands on a window whose turn ended without waiting again** — its person
+  stopped the wait to talk to it, or the window was just cleared. A letter sent there sits
+  until that window's next prompt: if the row still reads `idle` well after you sent, nobody
+  took the letter — ask the person watching that window
 - **If no row comes back, nobody waits here.** Ask the person to call `moai-work` in the
   windows that should take work (*Call a skill*), and stop — do not send to a session that
   is not a worker
@@ -283,16 +289,20 @@ the release `moai show --milestone` stands that idea under; do not write it from
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
 Do not use a single quote inside `<why>` — it closes the single quote in the worker's 9-1
-and the rest of the text leaks into the shell.
+and the rest of the text leaks into the shell. The same goes for `<title>` in the send line,
+and there the subject also has to stay within 200 characters — `moai send` refuses a longer
+one — so cut a long title in the send line; the letter's first line carries it whole.
 `<other work>` is the sibling worktrees you measured in 1, the work you send in this same
 round, and the files that work holds — `none` if there is none. What the supervisor
 measured before sending cannot cover a file that turns out to be needed mid-epic, so when
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
-`<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
-inside tmux, the worker's row carries a `tmux_pane` on your tmux server, and its vendor is
-`claude` (5-1 reads Claude Code's screen only). Otherwise it is `wait again`: the worker
-reports and goes straight back to waiting.
+`<after>` is `end the turn` only when you will clear that window yourself in 5-1 and can
+wake it after — you run inside tmux, the worker's row carries a `tmux_pane` on your tmux
+server, its vendor is `claude` (5-1 reads Claude Code's screen only), and you are in Claude
+Code yourself: a cleared Claude Code window is woken only by SendMessage, never by a command
+line (*Wake a session that sits idle*). Otherwise it is `wait again`: the worker reports and
+goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -311,14 +321,18 @@ worker reads in its own window in 9-1.
     After the report: <after>
     Person: <person>
 
-**Waking is a bonus.** A worker that waits needs none. Add `--wake` only for a window you
-just cleared in 5-1 — it types `moai inbox` into that pane, and the hooks load the letter.
+**Waking is a bonus.** A worker that waits needs none. The one window to wake is one you
+just cleared in 5-1, and that is a Claude Code window, which a command line never types
+into: `--wake` only prints that SendMessage has to carry `moai inbox` there. Send that
+(*Wake a session that sits idle*), and the hooks load the letter as the prompt arrives.
 
 **4. Wait.** Wait for the reports the way a worker waits for work:
 
     moai inbox --ack --wait 540
 
-and again when it runs out — keep one wait inside your own limit for a shell command. A
+and again when it runs out — keep one wait inside your own limit for a shell command, and
+ask for that limit: Claude Code's Bash tool gives a command two minutes unless you pass it a
+longer `timeout`, at most ten. A
 report is a letter from the worker (`report: <epic>`); with the hooks installed (Claude
 Code), one that comes as a turn ends or a prompt arrives is loaded into the conversation
 and marked read, and it is the same letter. **Do not sweep `moai agents` over and over** —
@@ -358,12 +372,13 @@ line about being unfolded.
 
 If the three hold, send the next idea. A worker whose letter said `wait again` is already
 waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
-right after the report: clear its window with 5-1 first, and send the next letter with
-`--wake` once the script prints `cleared`. If 5-1 prints `not clearing`, point out to the
-person that the window is at a good place to be cleared, and send the next only after the
-person has cleared it or said they will not — a letter loaded into the window before a
-late clear disappears with it, and that idea and that worker sit out of the candidates
-waiting for a report that will never come.
+right after the report: clear its window with 5-1 first, and once the script prints
+`cleared`, send the next letter and wake that window as above. If 5-1 prints `not
+clearing`, do what the end of its line says. Where that is pointing out to the person that
+the window is at a good place to be cleared, send the next only after the person has
+cleared it or said they will not — then wake it the same way, its turn has ended — a
+letter loaded into the window before a late clear disappears with it, and that idea and
+that worker sit out of the candidates waiting for a report that will never come.
 
 If they do not hold, ask that worker with a letter what is left, and do not finish it in
 its place.
@@ -375,18 +390,25 @@ worker leaves in its 11 stands in the history of `moai show <epic>`. Only a note
 stands **after the letter that sent this work** counts — `Next:` is also the hand-over
 line a session leaves when it could not finish, so an epic reclaimed in 0 already has the
 previous session's one. The report is the worker's last act, so when it arrives the turn
-is about to end; the script waits up to two minutes for the row to read `idle`. Clearing
-erases the whole conversation that worker holds, so never call it before the check.
-`<worker>` is the name of the worker that sent the report.
+is about to end; the script waits up to a minute for the row to read `idle`, so that all of
+it ends inside a shell tool's limit (two minutes by default in Claude Code). `idle` alone
+does not say the turn is over — `moai inbox --wait` writes it while its shell command runs —
+so the script also stops when it finds that wait running under the worker: such a worker
+takes the next letter as it is. Clearing erases the whole conversation that worker holds,
+so never call it before the check. `<worker>` is the name of the worker that sent the
+report, and `<root>` is the `root dir` from 2 — the script asks `moai agents` there.
 
 The script reads Claude Code's screen — the input box under the prompt glyph — so it
 clears Claude Code workers only. For a worker on another vendor it prints `not clearing`,
 and the letter 3 sent it said `wait again`.
 
 ```sh
-python3 - '<worker>' '<epic>' '<my name>' <<'PY'
+python3 - '<worker>' '<epic>' '<my name>' '<root>' <<'PY'
 import json, os, re, subprocess, sys, time
-name, epic, me = sys.argv[1:4]
+name, epic, me, root = sys.argv[1:5]
+# Every line goes out as it is printed. Into a pipe Python holds them back, and the copy of
+# the person's draft printed below would die with the script if it were stopped mid-way.
+sys.stdout.reconfigure(line_buffering=True)
 erased = False
 def gone(kept, left):
     """**Only the lines erased** from the draft. What is left stands in order as lines of the
@@ -431,10 +453,11 @@ def skip(why, then="only point out to the person that it can be cleared"):
 def tmux(*args):
     return subprocess.run(["tmux", *args], capture_output=True, text=True)
 def row():
-    """The worker's row in `moai agents --json`. The name is the key there, and a clear keeps
-    it — the row's `session` is what changes. None when moai cannot be asked or the row is gone."""
+    """The worker's row in `moai agents --json`, asked in the root (this shell may stand
+    elsewhere). The name is the key there, and a clear keeps it — the row's `session` is what
+    changes. None when moai cannot be asked or the row is gone."""
     try:
-        out = subprocess.run(["moai", "agents", "--json"], capture_output=True, text=True).stdout
+        out = subprocess.run(["moai", "agents", "--json"], cwd=root, capture_output=True, text=True).stdout
         found = [a for a in json.loads(out)["agents"] if a.get("name") == name]
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -447,6 +470,31 @@ def parents(pid):
         except OSError:
             return
         pid = int(out) if out.isdigit() else 0
+def waiting(pid):
+    """Does a `moai inbox --wait` run under that agent? Then the row's `idle` is the wait's,
+    written while a shell command of a running turn goes on — not a window back at its prompt."""
+    if pid <= 1:
+        return False
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,args="], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    kids = {}
+    for line in out.splitlines():
+        p = line.split(None, 2)
+        if len(p) == 3 and p[0].isdigit() and p[1].isdigit():
+            kids.setdefault(int(p[1]), []).append((int(p[0]), p[2].split()))
+    todo, seen = [pid], set()
+    while todo:
+        at = todo.pop()
+        if at in seen:
+            continue
+        seen.add(at)
+        for kid, words in kids.get(at, []):
+            if "inbox" in words and any(w.startswith("--wait") for w in words):
+                return True
+            todo.append(kid)
+    return False
 PROMPT = "\u276f"
 SGR = "\x1b\\[([0-9;:]*)m"
 def screen(pane, colour=False):
@@ -555,7 +603,7 @@ except OSError:
     skip("no tmux")
 s = row()
 if not s:
-    skip("could not find exactly one agent named " + name + " in `moai agents`")
+    skip("could not find exactly one agent named " + name + " in `moai agents` run in " + root + " — check that the `moai` on PATH answers `agents` there")
 if s.get("vendor") != "claude":
     skip("this reads Claude Code's input box only, and " + name + " runs " + str(s.get("vendor")))
 pane = str(s.get("tmux_pane") or "")
@@ -567,14 +615,18 @@ if pane == os.environ.get("TMUX_PANE"):
 server = os.environ["TMUX"].split(",")[0]
 if s.get("tmux_socket") and os.path.realpath(s["tmux_socket"]) != os.path.realpath(server):
     skip("that pane is on another tmux server")
-# The report is the worker's last act, so the turn is about to end — wait for it, a while.
-for _ in range(240):
-    if s.get("status") == "idle":
-        break
+# The report is the worker's last act, so the turn is about to end — wait for it, a minute at
+# most. A shell tool gives a command two minutes unless told otherwise (Claude Code's default),
+# and the steps below need their own seconds: stopped between erasing and typing, the box is
+# left erased with nothing typed.
+until = time.monotonic() + 60
+while s.get("status") != "idle" and time.monotonic() < until:
     time.sleep(0.5)
     s = row() or s
 if s.get("status") != "idle":
     skip("not idle — " + str(s.get("status")), "the worker is still in its turn — call again once it ends")
+if waiting(int(s["pid"])):
+    skip("it waits for a letter inside its turn", "send it the next letter as it is — it takes it without a clear")
 owner = looks('#{pane_pid}')
 if not owner.isdigit() or int(owner) not in parents(int(s["pid"])):
     skip("pane " + pane + " does not belong to that agent")
@@ -640,6 +692,8 @@ else:
         skip("could not empty the input box")
 if (row() or {}).get("status") != "idle":
     skip("no longer idle")
+if waiting(int(s["pid"])):
+    skip("it went back to waiting for a letter inside its turn meanwhile", "send it the next letter as it is — it takes it without a clear")
 if looks(QUIET) != "00":
     skip("the pane went into copy mode meanwhile")
 # If the person typed after the last read, the clear command lands after that text — read once more
@@ -664,15 +718,19 @@ print("cannot tell whether it cleared —", name, pane, "— look at that window
 PY
 ```
 
-- **Call it only on a worker you handed work to.** The worker that sent the report is the
-  one, so the supervisor's own window and another supervisor's window are already out by
-  name. The script filters its own pane (`$TMUX_PANE`) once more as well
+- **Call it only on a worker you handed work to, and whose letter said `end the turn`.** The
+  worker that sent the report is the one, so the supervisor's own window and another
+  supervisor's window are already out by name. The script filters its own pane
+  (`$TMUX_PANE`) once more as well. A worker that waits again is inside its turn
 - **With no tmux it skips quietly.** If `$TMUX` is unset or `tmux` is missing it prints one
   `not clearing` line and exits 0 — then point it out to the person and wait, as above. When
   the script prints `not clearing`, do what the end of that line says — only `not idle`
-  means call again; for the rest, point it out to the person
+  means call again, and a worker found waiting inside its turn takes the next letter as it
+  is; for the rest, point it out to the person
 - **Type only into an `idle` pane.** Typing into a `busy` one slips characters into a
-  running turn or between a person's answers. Read once more right before sending. The
+  running turn or between a person's answers — and `idle` is not enough on its own, since
+  `moai inbox --wait` writes it while a shell command of the turn runs, so the script also
+  looks for that wait under the agent's process. Read once more right before sending. The
   times the worker said "do not clear" in its 12 — a review running in the background, a
   merge conflict being resolved, waiting on a person's answer — hold here too. If the report
   or a letter after it says any of that is left, do not call it
@@ -739,12 +797,18 @@ PY
   the workers beside you or of a review subagent. To run the script in that pane, put a
   `tmux` wrapper that inserts `-L` at the front of `PATH` — the wrapper has to call the real
   `tmux` **by absolute path** so it does not call itself again. Call the script itself without
-  `env -u TMUX` — with no `$TMUX` it skips as `outside tmux`
+  `env -u TMUX` — with no `$TMUX` it skips as `outside tmux` — and with `$TMUX` naming that
+  test server's socket: the script stops at a row whose `tmux_socket` is not `$TMUX`'s, and
+  the test agent's row carries the test server's. The test agent has to stand in this
+  repository's `moai agents` too, or the script finds no row — say `moai -C <root> hello`
+  in its pane, with no role: no role keeps it out of 2's list, and its row is swept once
+  that agent is gone
 
       env -u TMUX tmux -L <unique name> new-session -d -s <pane> …
       env -u TMUX tmux -L <unique name> capture-pane -p -t <pane>
+      env -u TMUX tmux -L <unique name> display-message -p '#{socket_path}'          its socket
       mkdir -p <scratchpad>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <unique name> "$@"\n' "$(command -v tmux)" > <scratchpad>/bin/tmux
-      chmod +x <scratchpad>/bin/tmux; PATH=<scratchpad>/bin:$PATH python3 - …      the script into that pane
+      chmod +x <scratchpad>/bin/tmux; TMUX=<its socket>,0,0 PATH=<scratchpad>/bin:$PATH python3 - …      the script into that pane
       env -u TMUX tmux -L <unique name> kill-server          to clean up — only the server of that name dies
 
   **Never use `tmux kill-server` or `kill-session` without `-L`/`-S`.** Inside tmux a bare

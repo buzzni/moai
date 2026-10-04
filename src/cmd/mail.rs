@@ -142,9 +142,10 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // **넘치는 값은 끝없이 기다리는 것으로 읽는다**(리뷰 moai-h8tn.x4l) — `Instant + Duration` 은 넘치면 멈춘다(panic).
     // "끝없이" 를 `--wait 9223372036854775807` 로 적는 것은 자연스럽다.
     let until = args.wait.map(|s| std::time::Instant::now().checked_add(std::time::Duration::from_secs(s)));
-    if until.is_some() {
-        attend(&repo, &me, mail::IDLE);
-    }
+    // **`idle` 은 실제로 기다리기 시작할 때 적는다**(리뷰 moai-snyk.nic) — 첫 훑기에 편지가 이미 서 있거나 `--wait 0`
+    // 이면 기다린 것이 아니다. 훑기 앞에서 적던 판은 `--wait 0` 한 번이 일하는 장을 `idle` 로 남겼고, 편지가 이미 선
+    // 판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다.
+    let mut idled = false;
     let (mut mine, garbled) = loop {
         let (all, garbled) = mail::list(&dir, args.all.then_some(me.as_str()));
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
@@ -152,12 +153,12 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         if !waiting || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
+        if !idled {
+            attend(&repo, &me, mail::IDLE);
+            idled = true;
+        }
         std::thread::sleep(std::time::Duration::from_millis(500));
     };
-    // 기다림이 편지로 끝났으면 일하러 간다. 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은 곧 다시 건다.
-    if until.is_some() && mine.iter().any(|s| s.reader.is_none()) {
-        attend(&repo, &me, mail::BUSY);
-    }
     // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자). 자리도 남이 지은
     // 이름이라 한 줄로 접는다 — 파일 이름에 든 제어문자가 터미널을 움직이지 않게.
     //
@@ -175,15 +176,28 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     }
 
     let mut lost = Vec::new();
-    if args.ack {
+    // 이 부름이 얻은 편지의 수 — `--ack` 면 가진 것(과 옮기다 못 옮겨 그대로 보인 것)이고, 아니면 보인 못 읽은 것이다.
+    let gained = if args.ack {
         let mut kept = Vec::new();
+        let mut gained = 0;
+        // **열린 편지(`any-idle-worker`)는 한 부름에 한 통만 가진다**(리뷰 moai-snyk.nic) — 훅이 한 번에 한 통만 싣는
+        // 것([`crate::hook::deliverable`])과 같은 자다. 일꾼은 이 부름으로 일감을 기다리는데, 쌓인 열린 편지를 먼저 깬
+        // 하나가 다 가지면 그 받는 이 낱말이 거짓이 되고, 나머지 일감은 그 일꾼의 읽음 속에 숨어 아무도 못 가진다. 남에게
+        // 진 것은 다음 열린 편지로 간다 — 진 채로 멈추면 남은 일감이 이 부름에서 아무에게도 안 간다.
+        let mut opened = false;
         for mut s in mine {
             if s.reader.is_some() {
                 kept.push(s);
                 continue;
             }
+            let open = s.letter.to == mail::ANY_IDLE_WORKER;
+            if open && opened {
+                continue;
+            }
             match mail::take(&dir, &s.id, &me) {
                 Ok(mail::Took::Mine) => {
+                    opened |= open;
+                    gained += 1;
                     s.reader = Some(me.clone());
                     kept.push(s);
                 }
@@ -191,11 +205,22 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
                 Err(e) => {
                     tell(&format!("{}: {e}", dir.display()));
                     note_partial();
+                    gained += 1;
                     kept.push(s);
                 }
             }
         }
         mine = kept;
+        gained
+    } else {
+        mine.iter().filter(|s| s.reader.is_none()).count()
+    };
+    // 기다림이 편지로 끝났으면 일하러 간다 — **편지를 얻었을 때만**(리뷰 moai-snyk.nic). 남이 먼저 가진 열린 편지는
+    // 일이 아니다: 편지를 본 자리에서 `busy` 를 적던 판은 겨루기에 진 일꾼을 일 없이 바쁜 것으로 세워, 다시 걸기
+    // 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은
+    // 곧 다시 건다.
+    if until.is_some() && gained > 0 {
+        attend(&repo, &me, mail::BUSY);
     }
 
     if ctx.json {
@@ -224,14 +249,15 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 ///
 /// **없는 장은 안 세운다** — 등록은 `hello` 와 훅의 일이다. `--as` 로 남의 이름을 대도 그 이름의 장을 고친다: 그
 /// 이름으로 편지를 가지는 것이 곧 그 에이전트로 일하는 것이다. 상태가 같으면 안 쓴다 — `since` 가 "얼마나
-/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 못 적으면 조용히 지나간다 — 출석은 기록이
-/// 아니라 지금의 표다([`mail::write_presence`]).
+/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
+/// 자다. 빈 글은 가장 앞에 서서, 그대로 두면 `send --wake` 가 그 장을 가장 오래 논 일꾼으로 고른다(리뷰
+/// moai-snyk.nic). 못 적으면 조용히 지나간다 — 출석은 기록이 아니라 지금의 표다([`mail::write_presence`]).
 fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     let dir = repo.agents_dir();
     // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
     let (agents, _) = mail::presences(&dir);
     let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
-    if p.status == status {
+    if p.status == status && !p.since.is_empty() {
         return;
     }
     p.status = status.to_string();

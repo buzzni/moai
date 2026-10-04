@@ -116,8 +116,8 @@ gets through — run it as given. None of them waits on a person except rule 5.
 2. **Pick something up before you change the repository.** An `Edit`, a `Write`,
    or a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
-   the plan. Not counted: `.moai/`, `.claude/`, `.git/`, `target/`,
-   `node_modules/`, and anything outside the repository
+   the plan. Not counted: `.moai/`, `.claude/`, `.worktrees/`, `.git/`,
+   `target/`, `node_modules/`, and anything outside the repository
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -163,8 +163,8 @@ agent.
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
   neither the sender nor registered as a `supervisor` (`moai hello --role
   supervisor`) to take the letter keeps it. A hook takes one such letter per
-  load, so several of them spread over several agents; a `moai inbox --ack`
-  that tried in the same moment is told it was taken
+  load, and so does one `moai inbox --ack`, so several of them spread over
+  several agents; an `--ack` that tried in the same moment is told it was taken
 - **The hooks deliver.** With the plugin installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
   and mark them read — `moai inbox --all` shows them again, nothing is deleted.
@@ -223,11 +223,13 @@ the diff itself. It never starts another agent (`codex review`, `codex exec`,
 **Clearing a window is the person's, or the supervisor's on tmux.** A worker
 loaded with one epic's conversation may be cleared between tasks: stop the wait,
 clear it (`/clear`, `/new` in Codex) and call `moai-work` again — the context
-lives in the tracker. A supervisor running inside tmux clears a Claude Code
-worker's window itself once the report checks out: it reads the input box first
-so a person's half-typed text is copied out, never typed over, and the letter
-told that worker to end its turn instead of waiting. Codex and Antigravity
-windows are left to the person — their input box is not read yet.
+lives in the tracker. A supervisor in Claude Code running inside tmux clears a
+Claude Code worker's window itself once the report checks out: it reads the input
+box first so a person's half-typed text is copied out, never typed over, and the
+letter told that worker to end its turn instead of waiting. It then wakes that
+window with SendMessage — a command line cannot wake a Claude Code window, so any
+other supervisor has its workers wait again. Codex and Antigravity windows are
+left to the person — their input box is not read yet.
 
 **When the person steps away**, they tell the supervisor, and the letters say
 `Person: away`. The worker then settles a design question by its own
@@ -274,11 +276,14 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 - **The supervisor finds no worker.** `moai agents --role worker --status idle`
-  lists only windows where a person called `moai-work`, and only while they wait.
+  lists only windows where a person called `moai-work` and whose row reads idle.
   A session the hooks registered has no role until it says hello as a worker; a
   worker busy on its person's work reads busy
 - **A worker never answers.** A letter waits in `.moai/mail/` until that worker
   waits again or its hooks load it — `moai inbox --all --as <worker>` shows what
-  it has. Without hooks or tmux nothing wakes a window that is not waiting
+  it has. A row reads idle while its window waits, but also once a turn ended
+  without waiting again (its person stopped the wait, or cleared the window); a
+  letter sent then sits until that window's next prompt. Without hooks or tmux
+  nothing wakes a window that is not waiting
 
 Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk

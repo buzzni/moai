@@ -20,20 +20,24 @@ window, stop waiting and answer them.
 
    The name in the reply is the one the supervisor sends to. moai finds this agent among
    the processes above the command (`claude`, `codex`, `agy`); a Claude Code session its
-   hooks already registered keeps its name and gains the role
+   hooks already registered keeps its name and gains the role. If this window sets
+   `MOAI_AGENT`, say hello under that name (`--name`) — the wait below answers to it
 2. **Wait for a letter**
 
        moai inbox --ack --wait 540
 
    While it waits, `moai agents` shows this window `idle` — that is how the supervisor
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
-   Keep one wait inside your own limit for a shell command (Claude Code's is ten minutes,
-   and 540 seconds fits). Each wait that runs out costs one short turn of tokens — the
-   price of a worker that needs no tmux and nobody to wake it. With the hooks installed, a
-   letter that comes as a turn ends or a prompt arrives is loaded into the conversation and
-   marked read; it is the same letter, so do it
+   Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
+   Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
+   minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
+   one short turn of tokens — the price of a worker that needs no tmux and nobody to wake it.
+   With the hooks installed, a letter that comes as a turn ends or a prompt arrives is loaded
+   into the conversation and marked read; it is the same letter, so do it
 3. **Do what the letter hands over** — read it as "The letter" says, then follow "The
-   steps" from where its first line says to start
+   steps" from where its first line says to start. The steps begin in the root the letter
+   names (`Root:`) — if this window stands anywhere else, go there first: `cd` from a
+   subdirectory, *Come back to the root* from a worktree
 4. **Report it last** (12) and then do what `After the report:` says — wait again (2 here),
    or end the turn
 
@@ -45,7 +49,9 @@ A letter that hands over no work is not work: if it asks something, answer it wi
 The first line names the work and where to start — `from step 1` for a new idea,
 `from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
 already unfolded whose first-column members are left. The letter's `from` is the supervisor
-you report to, `<supervisor>` below. Every other line fills a slot the steps use.
+you report to, `<supervisor>` below. Every other line fills a slot the steps use; a line the
+supervisor adds beyond those — who already said yes to taking over a row that is not yours,
+say — belongs to the assignment as well.
 
 - `Model:` — `<model>` and `<difficulty>`.
   `Model:` is a suggestion picked by difficulty before anyone read the code. The model is
@@ -73,6 +79,11 @@ do not settle is not asked (4) — settle it the way you would have recommended,
 on the issue where the next person reads it
 
     moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
+
+Nothing else waits on the person either. A model the window is not on is not asked for —
+work on the window's model and say so in the reason of 9-1. A row that is someone else's or
+nobody's (rule 5) is taken over only on a yes the letter carries; without one, leave that row
+and name it in the report.
 
 **Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
 else has, a release, anything outside this repository — and report that instead of doing
@@ -167,8 +178,9 @@ refusals in all.
    refuses it, so wait for that merge to finish and run it again
      git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
-   pick-up (rule 5). Ask the person watching this window; on a yes, run the line the refusal
-   hands you (`--take -m '<who said yes>'`), on a no leave that member and tell the supervisor
+   pick-up (rule 5). Ask the person watching this window — a yes the letter already carries
+   counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
+   no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
    (*Enter the worktree*). The name is the unfolded epic's id, not the idea's. Until the
@@ -234,7 +246,7 @@ refusals in all.
    `/code-review <grade> --fix`. In Codex and Antigravity it is the review that session has,
    and where it has none, read the whole diff yourself with the angle and the five places
    below, and fix what you take in. **It runs inside this session** — never start another
-   agent for it: `codex review`, `codex exec` and `agy -p` each start one.
+   agent program for it: `codex review`, `codex exec` and `agy -p` each start one.
    **The grade is one step above the heaviest member's difficulty** — `medium` if the members
    are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
    **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
@@ -244,7 +256,8 @@ refusals in all.
    The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
    If the window is not on that model, ask the person watching it to change it
    (*Change the model*) before you call — as in `/model opus` in Claude Code (a review agent
-   inherits the window's model).
+   inherits the window's model). Those models are Claude Code's: in Codex and Antigravity the
+   grade still stands, and the window keeps the model its person picked.
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
    <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
@@ -409,13 +422,16 @@ refusals in all.
    with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
    leaves it in the shared root where someone else's commit sweeps it up. If anything is left
    (a background review, say), finish it before the note — the supervisor reads the note as
-   this work being over
+   this work being over; what you cannot finish, name in the report (12)
 12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
    the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
    the members reclaimed in 7-1 and left in the first column,
    the members left in 4-3 because the work beside you held the file, with that other work
-   named, and the wiki pages 7-4 changed — or that it changed none. Write it to a file and
-   send it
+   named, and the wiki pages 7-4 changed — or that it changed none — and anything still
+   running that 11 could not finish: the supervisor does not clear a window whose report
+   says so. Write it to a file outside the repository (your scratchpad, or a temporary
+   file) — nothing is held by now, so a file in the shared root is refused or left behind —
+   and send it
      moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
    Then **say when the window can be cleared**, in one line to the person watching. The
    context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
@@ -437,7 +453,8 @@ member still stands picked up. Read how far it got (`moai show <epic>`, its hist
 notes), then
 
 - If the worktree is there, go in (*Enter the worktree*), read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on
+  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
+  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`

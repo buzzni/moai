@@ -23,7 +23,10 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let (mut agents, garbled) = mail::presences(&dir);
     // 거르개는 걷기 **뒤**다 — 걸러 낸 줄도 죽었으면 걷힌다. 거르개가 걷기를 좁히면 감독이 부를 때마다 남의 죽은
     // 줄이 남는다.
-    let filtered = args.role.is_some() || args.status.is_some();
+    //
+    // 빈 끝의 말은 **거르기 전에 줄이 있었는가**로 가른다(리뷰 moai-snyk.nic) — 아무도 없으면 거르개를 줬어도 등록하는
+    // 길(`moai hello`)을 대는 말이 맞다. 감독의 2 가 빈손일 때 사람이 보는 자리다.
+    let registered = !agents.is_empty();
     let want = |given: &Option<String>, have: &str| given.as_deref().is_none_or(|w| w.trim() == have);
     agents.retain(|p| want(&args.role, &p.role) && want(&args.status, &p.status));
     for g in &garbled {
@@ -39,7 +42,7 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let mut out: Vec<String> = swept.iter().map(|n| fill(say(lang, "agents.swept"), &[("name", n)])).collect();
     if agents.is_empty() {
         // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
-        out.push(if filtered { say(lang, "agents.none_match") } else { say(lang, "agents.none") }.to_string());
+        out.push(if registered { say(lang, "agents.none_match") } else { say(lang, "agents.none") }.to_string());
         return Ok(out);
     }
     out.extend(table(&agents, ctx.zone()));
