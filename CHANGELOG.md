@@ -12,6 +12,45 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Agents leave each other letters: `moai send`, `moai inbox`, `moai agents`
+  and `moai hello`.** A letter is one file under `.moai/mail/` —
+  `{"v":1,"to","from","subject","body","sent_at","reply_to"}`, keys this build
+  does not know passed through — and its id is the file name. `moai send <to>
+  <subject> -b <text|->` leaves one for an agent name or for `any-idle-worker`,
+  which the first agent that is neither the sender nor a supervisor keeps.
+  `moai inbox` shows the letters for you, `--ack` moves them to
+  `.moai/mail/read/` (nothing is deleted; `--all` shows them again) and
+  `--wait <seconds>` waits for one to come. Who you are is `--as`, else
+  `MOAI_AGENT`, else the registered agent the command runs under.
+  **Nothing goes into `issues.jsonl` or the journal** — a letter is delivery,
+  not record, and the mailbox follows the tracker into the main checkout, so
+  every session of a repository sees one mailbox. There is no lock: sending
+  links a finished temporary file into place and never overwrites a letter,
+  and marking read is one rename, so two readers never both take a letter.
+- **`moai hello` and the hooks keep a presence row** in
+  `.moai/agents/<name>.json` — name, vendor, model, role, busy or idle, since
+  when, the agent's process and when it started, the session and the tmux
+  pane. The `SessionStart` hook registers a Claude session under the name
+  Claude Code shows for it, `UserPromptSubmit` marks it busy and `Stop` idle.
+  `moai agents` lists who is here and sweeps a row whose process is gone; a
+  reused pid is told apart by the time the process started.
+- **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
+  letters for the session into the conversation, the end of a turn (`Stop`)
+  holds the turn with them, and a session opened after a compaction gets them
+  with what it was holding. A delivered letter is marked read; one load carries
+  up to about 48 KB and says how many are still waiting. `PreToolUse`, `moai
+  status` and the other read commands never open the mailbox.
+- **`moai send --wake` wakes an idle recipient the vendor's way** — a Codex
+  session through `codex queue --thread`, an Antigravity session by typing
+  `moai inbox` into its tmux pane. A Claude session cannot be woken from a
+  command line, so the line printed tells the sender to use SendMessage; an
+  agent at work is left alone, and its `Stop` hook loads the letter.
+- **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
+  two directories also carry their own `.gitignore`, so a repository that has
+  not run `moai init` again does not commit them either.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added
