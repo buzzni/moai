@@ -4164,3 +4164,31 @@
 {"ts":"2026-10-04T16:56:56Z","id":"moai-5s9l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크트리 자리를 세 벤더 공용 .worktrees/ 로 옮긴다"}
 {"ts":"2026-10-04T16:56:56Z","id":"moai-5m2h","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04): 워크트리는 세 벤더 공용 .worktrees/ 하나에 둔다(옛 .claude/worktrees/ 는 Claude 자리). TUI·--json 은 지금처럼 루트 기준 상대 경로. v0.7.0 의 moai-snyk 멤버로 한다"}
 {"ts":"2026-10-04T16:57:39Z","id":"moai-5s9l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T17:20:07Z","id":"moai-yuy4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"5-1 이 Codex·Antigravity 입력 칸을 읽어 그 창도 비운다"}
+{"ts":"2026-10-04T17:22:31Z","id":"moai-snyk.nic","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 감독과 일꾼을 벤더 중립으로 (moai-snyk)"}
+{"ts":"2026-10-04T17:22:37Z","id":"moai-0x59","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:39Z","id":"moai-5kk1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:40Z","id":"moai-5s9l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:42Z","id":"moai-snyk.4zn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:43Z","id":"moai-snyk.cbs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:45Z","id":"moai-snyk.qv2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:46Z","id":"moai-snyk.4de","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:47Z","id":"moai-snyk.epv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:49Z","id":"moai-snyk.nq9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:50Z","id":"moai-snyk.xte","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:22:52Z","id":"moai-snyk.nic","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T17:24:17Z","id":"moai-snyk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"일꾼이 정한 것(사용자 결정 셋을 받은 뒤 걸음으로 옮기며 정했다)\n- 편지는 `letter()` 하나다 — 첫 줄이 맡길 일과 시작할 자리(`from step 1` 새 일 / `from \"Carrying on stalled work\"` 거둔 일 / `from step 2` 이미 펼친 에픽), 나머지 줄이 `Model:`·`Work running alongside:`·`Base branch:`·`Milestone:`·`Root:`·`Subdir:`·`After the report:`·`Person:`. 일꾼 스킬의 \"The letter\" 가 같은 줄을 같은 차례로 읽고, 시험(`the_letter_carries_every_slot_the_skill_reads`)이 둘과 감독의 채우는 목록을 맨다\n- 보고가 일꾼의 마지막 걸음이다 — 11 이 Next: 노트, 12 가 보고. 감독은 편지만 받고 노트가 섰는지 알 길이 없어, 노트 뒤의 보고를 그 신호로 쓴다. 5-1 스크립트는 보고 뒤 턴이 끝나길 2분까지 기다린다\n- `<after>` 는 감독이 그 창을 5-1 로 비울 수 있을 때만 `end the turn` — 감독이 tmux 안, 일꾼 장에 같은 서버의 tmux 칸, 벤더가 claude. 그 밖은 `wait again`\n- 5-1 은 `moai agents --json` 의 장(tmux_pane·tmux_socket·status·session)으로 찾는다. 장의 cwd 는 훅이 처음 등록할 때만 적어 믿을 수 없어 \"루트에 있나\" 검사는 걷었다 — Next: 노트(루트에서 적는 마지막 걸음 앞)가 그 자리를 받는다. 다른 tmux 서버의 칸 번호는 거른다\n- `Person: away` 는 감독이 사람에게 들은 것을 편지에 옮기는 자리(밤샘 모드). 일꾼은 권장안으로 정하고 `Decided alone:` 노트, 되돌릴 수 없는 것에서 멈춘다\n- 리뷰 낱말: Codex·Antigravity 칸은 \"the review this session has, else read the diff yourself\" 한 글. 7 은 `codex review`·`codex exec`·`agy -p` 를 하지 말라고 이름으로만 댄다\n- Codex·agy 창 비우기(입력 칸 재기)는 사용자 결정으로 idea moai-yuy4 로 뺐다"}
+{"ts":"2026-10-04T17:24:30Z","id":"moai-snyk.nic","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 도는 중(워크트리 .claude/worktrees/moai-snyk). 돌아오면 TaskStop·git status 로 남은 것을 거두고, 고침을 fix: 로 커밋, 원문과 판단을 두 노트로, 7-1·7-2 뒤 develop 에 머지(브리프 8~12)"}
+{"ts":"2026-10-04T17:27:55Z","id":"moai-u5wr.e74","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 훅의 세 말씨와 끊긴 턴, Codex 출석 (moai-u5wr 에픽 끝, max)"}
+{"ts":"2026-10-04T17:28:09Z","id":"moai-u5wr.fja","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:10Z","id":"moai-u5wr.e14","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:12Z","id":"moai-u5wr.kov","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:13Z","id":"moai-u5wr.amg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:15Z","id":"moai-u5wr.f29","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:16Z","id":"moai-u5wr.pej","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:18Z","id":"moai-sile","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T17:28:19Z","id":"moai-u5wr.e74","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T17:29:08Z","id":"moai-u5wr.e74","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드(@code-review)에서 돈다 — 돌아오면 남긴 수정을 읽고 받을 것은 fix: 커밋, 넘길 것은 id 와 노트. 그 뒤 7-1·7-2·8 머지·9 정리·10 닫기·11 보고"}
+{"ts":"2026-10-04T18:48:02Z","id":"moai-8iz2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 남은 워크트리를 그 일꾼에게 잇지 못한다"}
+{"ts":"2026-10-04T18:48:05Z","id":"moai-k567","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-work SKILL.md 의 걸음이 GitHub 마크다운에서 뭉개진다"}
+{"ts":"2026-10-04T18:48:08Z","id":"moai-fm87","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"규칙 2 의 SKIP 이 옆 워크트리를 디렉터리 이름으로 가른다"}
