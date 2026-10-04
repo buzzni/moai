@@ -2321,12 +2321,15 @@ Options:
              taking the focus there: the list's cursor, the detail, the
              statistics window. Dragging the line between the list and the
              detail resizes them, and the share the list takes is kept under
-             [tui] as list_width and list_height. Over the SPC menu the
-             mouse does nothing, and while a form, a picker or a prompt is
-             up it is the terminal's again — selecting and middle-button
-             paste work there as they always did. Over the list and the
-             detail, the terminal's own selection and paste need Shift held
-             in most terminals, Option in iTerm2
+             [tui] as list_width and list_height. With the SPC menu open, a
+             click on an item is its key — a group goes down a level, a
+             toggle keeps the menu open, and Esc and Bksp on the bottom line
+             close it or go up — and a click or a roll outside the menu closes
+             it and does what it does there. While a form, a picker or
+             a prompt is up the mouse is the terminal's again — selecting and
+             middle-button paste work there as they always did. Over the list
+             and the detail, the terminal's own selection and paste need Shift
+             held in most terminals, Option in iTerm2
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
