@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-04
+
 ### Added
 
 - **`mv -m` and `defer -m` say so when the text names a file.** `-m <text>`
