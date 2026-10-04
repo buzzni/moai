@@ -4964,6 +4964,93 @@ fn priority(p: u8) -> Style {
     from_anstyle(style::priority_style(p))
 }
 
+/// [`screen`] 을 그려 터미널로 내보낸다 — `Terminal::draw` 를 한 겹 감싸 **앞 프레임을 든다**(moai-c6go). 탐색기
+/// 루프의 그림은 모두 여기를 지난다. 드는 것은 ratatui 가 차이를 셀 때 견주는 것과 같은 그림, 그린 직후의 버퍼다.
+///
+/// **넓은 글자의 반쪽이 남긴 칸을 다시 내려고 든다.** 터미널은 넓은 글자(한글)의 머리 칸에 좁은 글자가 앉으면
+/// 남은 꼬리 칸을 제 손으로 지우는데, **그 순간의 펜 바탕색으로** 지운다 — Ghostty 의 `Screen::clearCells` 가
+/// `blankCell()`(커서 스타일의 바탕)로 채운다. ratatui 는 그 칸을 다시 안 낸다: 앞 프레임에서도 숨은 빈칸이었고
+/// 새 프레임도 빈칸이라 같다고 본다. 그래서 `[NEW]` 의 `]` 가 옛 제목의 넓은 글자 머리에 앉으면 바로 뒤 빈칸이
+/// 노랗게 남고, 그 칸을 바꿀 일이 없는 한 안 지워졌다. ratatui-core 의 차이 셈도 이 꼴을 알지만 **옛 글자의 바탕이
+/// 보일 때만** 꼬리를 다시 낸다 — 새 펜의 바탕은 안 본다. 그 구멍을 [`mend`] 가 메운다.
+///
+/// **tmux 의 화면에는 안 남는다.** tmux 는 고아가 된 칸을 기본 칸으로 지우고(`screen_write_overwrite`) 바깥
+/// 터미널에는 새 글자만 보낸다 — 지우기는 바깥 터미널이 제 규칙으로 한다. 그래서 `capture-pane` 에는 안 보이고
+/// 사람의 화면에서만 보였다.
+#[derive(Default)]
+pub struct Painter {
+    last: Option<ratatui::buffer::Buffer>,
+}
+
+impl Painter {
+    pub fn draw<B: ratatui::backend::Backend>(
+        &mut self,
+        term: &mut ratatui::Terminal<B>,
+        app: &mut App,
+    ) -> Result<(), B::Error> {
+        self.paint(term, |f| screen(f, app))
+    }
+
+    /// 그림을 받아 그린다 — [`draw`](Self::draw) 의 몸이다. 시험이 [`screen`] 없이 칸을 바로 놓으려고 가른다.
+    fn paint<B: ratatui::backend::Backend>(
+        &mut self,
+        term: &mut ratatui::Terminal<B>,
+        render: impl FnOnce(&mut Frame),
+    ) -> Result<(), B::Error> {
+        let mut last = self.last.take();
+        let done = term.draw(|f| {
+            render(f);
+            if let Some(last) = &last {
+                mend(last, f.buffer_mut());
+            }
+        })?;
+        // 든 버퍼의 자리를 다시 쓴다 — 프레임마다 화면만 한 버퍼를 새로 잡고 버리지 않는다(derive 한 `clone_from` 은
+        // 통째로 새로 짓는다).
+        if let Some(keep) = &mut last {
+            keep.area = done.buffer.area;
+            keep.content.clone_from(&done.buffer.content);
+        } else {
+            last = Some(done.buffer.clone());
+        }
+        self.last = last;
+        Ok(())
+    }
+
+    /// 터미널을 통째로 비웠다(편집기에서 돌아옴) — ratatui 도 앞 그림을 비웠으니 견줄 것이 없다.
+    pub fn forget(&mut self) {
+        self.last = None;
+    }
+}
+
+/// `prev` 에서 넓은 글자가 섰던 자리를 `next` 가 다른 것으로 덮으면 그 글자의 꼬리 칸을 **늘 내보내게** 적는다.
+/// 덮는 것이 그 자리의 칸이든 왼쪽에서 걸친 넓은 글자든 같다 — 어느 쪽이든 머리가 덮이고 꼬리가 고아가 된다.
+///
+/// 꼬리 칸이 새 넓은 글자에 가렸으면 ratatui 가 어차피 건너뛰므로 적어도 아무것도 안 나간다. 크기가 바뀌었으면
+/// ratatui 가 앞 그림을 비운 뒤라 견줄 것이 없다.
+fn mend(prev: &ratatui::buffer::Buffer, next: &mut ratatui::buffer::Buffer) {
+    use ratatui::buffer::{CellDiffOption, CellWidth};
+    if prev.area != next.area {
+        return;
+    }
+    let area = next.area;
+    for y in area.top()..area.bottom() {
+        let mut x = area.left();
+        while x < area.right() {
+            let was = &prev[(x, y)];
+            let w = was.cell_width().max(1);
+            if w > 1 && next[(x, y)] != *was {
+                for t in x + 1..x.saturating_add(w).min(area.right()) {
+                    let cell = &mut next[(t, y)];
+                    if cell.diff_option == CellDiffOption::None {
+                        cell.set_diff_option(CellDiffOption::AlwaysUpdate);
+                    }
+                }
+            }
+            x = x.saturating_add(w);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -10740,6 +10827,222 @@ pub(super) mod tests {
         assert!(bold.add_modifier.contains(Modifier::UNDERLINED), "굵은 조각의 칠이 색으로만 갈린다 {bold:?}");
         let link = hit(Style::new().fg(Color::LightBlue).add_modifier(Modifier::DIM));
         assert!(link.add_modifier.contains(Modifier::BOLD) && !link.add_modifier.contains(Modifier::DIM), "{link:?}");
+    }
+
+    /// 넓은 글자의 반쪽이 남긴 칸(moai-c6go) — [`Painter`]·[`mend`]. 그림은 늘 [`Painter`] 를 지나 그린다: 진짜
+    /// 루프가 그렇게 그린다.
+    mod painting {
+        use super::super::{App, Painter, mend};
+        use crate::config::Config;
+        use crate::i18n::Lang;
+        use crate::model::{Issue, Kind, Status};
+        use crate::nav::Path;
+        use ratatui::Terminal;
+        use ratatui::backend::{Backend, ClearType, WindowSize};
+        use ratatui::buffer::{Buffer, Cell, CellDiffOption, CellWidth};
+        use ratatui::layout::{Position, Rect, Size};
+        use ratatui::style::Color;
+
+        /// **넓은 글자의 반쪽에 글자가 앉으면 남은 반쪽을 펜의 바탕으로 지우는 터미널** — Ghostty 가 그렇다
+        /// (`Terminal::printCell` → `Screen::clearCells` → `blankCell`). `TestBackend` 는 받은 칸을 그대로 둘 뿐이라
+        /// 이 꼴을 못 본다. 칸마다 글자와 바탕만 든다 — 꼬리 칸의 글자는 빈 글이다.
+        struct Glass {
+            size: Size,
+            cells: Vec<(String, Color)>,
+        }
+
+        impl Glass {
+            fn new(w: u16, h: u16) -> Self {
+                Glass {
+                    size: Size::new(w, h),
+                    cells: vec![(" ".into(), Color::Reset); usize::from(w) * usize::from(h)],
+                }
+            }
+
+            fn at(&mut self, x: u16, y: u16) -> &mut (String, Color) {
+                &mut self.cells[usize::from(y) * usize::from(self.size.width) + usize::from(x)]
+            }
+
+            fn row(&self, y: u16) -> &[(String, Color)] {
+                let w = usize::from(self.size.width);
+                &self.cells[usize::from(y) * w..(usize::from(y) + 1) * w]
+            }
+
+            fn print(&mut self, x: u16, y: u16, cell: &Cell) {
+                let pen = cell.bg;
+                let w = cell.cell_width().max(1);
+                // 꼬리에 앉으면 머리가 고아가 된다.
+                if x > 0 && self.at(x, y).0.is_empty() {
+                    *self.at(x - 1, y) = (" ".into(), pen);
+                }
+                // 끝 칸이 머리면 그 꼬리가 고아가 된다.
+                let end = x + w - 1;
+                if end + 1 < self.size.width && !self.at(end, y).0.is_empty() && self.at(end + 1, y).0.is_empty() {
+                    *self.at(end + 1, y) = (" ".into(), pen);
+                }
+                *self.at(x, y) = (cell.symbol().into(), pen);
+                if w > 1 && x + 1 < self.size.width {
+                    *self.at(x + 1, y) = (String::new(), pen);
+                }
+            }
+
+            /// `[NEW]` 낱말 밖에 선 노란 바탕 칸 — 경고 줄(`!` 로 여는 줄)은 줄 전체가 노랗다.
+            fn stray_yellow(&self) -> Vec<(u16, u16)> {
+                let mut out = Vec::new();
+                for y in 0..self.size.height {
+                    let row = self.row(y);
+                    let text: String = row.iter().map(|(s, _)| if s.is_empty() { "\0" } else { s.as_str() }).collect();
+                    if text.trim_start().starts_with('!') {
+                        continue;
+                    }
+                    let syms: Vec<&str> = row.iter().map(|(s, _)| s.as_str()).collect();
+                    for (x, (_, bg)) in row.iter().enumerate() {
+                        let worded = (x.saturating_sub(4)..=x)
+                            .any(|s| syms.get(s..s + 5).is_some_and(|w| w.concat() == "[NEW]"));
+                        if *bg == Color::LightYellow && !worded {
+                            out.push((x as u16, y));
+                        }
+                    }
+                }
+                out
+            }
+        }
+
+        impl Backend for Glass {
+            type Error = std::convert::Infallible;
+
+            fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+            where
+                I: Iterator<Item = (u16, u16, &'a Cell)>,
+            {
+                for (x, y, cell) in content {
+                    self.print(x, y, cell);
+                }
+                Ok(())
+            }
+
+            fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+                Ok(())
+            }
+
+            fn show_cursor(&mut self) -> Result<(), Self::Error> {
+                Ok(())
+            }
+
+            fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+                Ok(Position::ORIGIN)
+            }
+
+            fn set_cursor_position<P: Into<Position>>(&mut self, _: P) -> Result<(), Self::Error> {
+                Ok(())
+            }
+
+            fn clear(&mut self) -> Result<(), Self::Error> {
+                self.cells.fill((" ".into(), Color::Reset));
+                Ok(())
+            }
+
+            fn clear_region(&mut self, _: ClearType) -> Result<(), Self::Error> {
+                self.clear()
+            }
+
+            fn size(&self) -> Result<Size, Self::Error> {
+                Ok(self.size)
+            }
+
+            fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+                Ok(WindowSize { columns_rows: self.size, pixels: Size::default() })
+            }
+
+            fn flush(&mut self) -> Result<(), Self::Error> {
+                Ok(())
+            }
+        }
+
+        fn todo(id: &str, title: &str) -> Issue {
+            Issue::new(id.into(), title.into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z")
+        }
+
+        /// **새 카드가 선 프레임에 `[NEW]` 밖의 노란 칸이 안 남는다**(moai-c6go, 사람이 본 화면). 다 읽은 카드의 제목이
+        /// 넓은 글자로 열리고 그 위에 안 읽은 카드가 새로 서면, 새 카드의 `[NEW]` 가 옛 제목이 섰던 줄에 내려앉아 `]` 가
+        /// 셋째 글자(`된`)의 머리를 덮는다. 고치기 전에는 그 꼬리 칸이 노랗게 남았다.
+        #[test]
+        fn a_new_card_leaves_no_yellow_cell_where_a_wide_glyph_stood() {
+            let read = todo("argos-0100", "커밋된 플러그인 시험");
+            let mut a = App::new(vec![read.clone()], Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+            a.site.lang = Lang::Ko;
+            a.layout = crate::tui::view::Layout::Board;
+            a.detail_open = false;
+            let mut term = Terminal::new(Glass::new(80, 14)).unwrap();
+            let mut painter = Painter::default();
+            painter.draw(&mut term, &mut a).unwrap();
+            let before = term.backend().cells.clone();
+
+            // 앞 id 라 같은 칸의 위에 선다.
+            a.adopt(vec![todo("argos-0050", "새 일"), read]);
+            a.site.unread.insert("argos-0050".into());
+            painter.draw(&mut term, &mut a).unwrap();
+
+            let glass = term.backend();
+            // 이 시험이 보려는 판이 섰는지 — `]` 가 앉은 칸이 앞 프레임에서는 넓은 글자의 머리였다.
+            let landed = glass
+                .cells
+                .iter()
+                .zip(&before)
+                .any(|((now, bg), (was, _))| now == "]" && *bg == Color::LightYellow && was == "된");
+            assert!(landed, "`[NEW]` 의 `]` 가 옛 넓은 글자 위에 앉지 않았다 — 판이 안 섰다");
+            assert_eq!(glass.stray_yellow(), vec![], "`[NEW]` 밖에 노란 칸이 남았다");
+        }
+
+        /// 덮인 넓은 글자의 꼬리만 적는다 — 그대로 선 넓은 글자와 좁은 글자 자리는 손대지 않는다.
+        #[test]
+        fn only_the_tail_of_a_covered_wide_glyph_is_forced_out() {
+            let area = Rect::new(0, 0, 6, 1);
+            let mut prev = Buffer::empty(area);
+            prev.set_string(0, 0, "가나x", ratatui::style::Style::default());
+            let mut next = Buffer::empty(area);
+            next.set_string(0, 0, "가]x", ratatui::style::Style::new().bg(Color::LightYellow));
+            // 머리 색만 바뀐 `가` 도 덮인 것이다 — 그 꼬리(1)는 새 넓은 글자가 가려 ratatui 가 건너뛴다.
+            mend(&prev, &mut next);
+            let forced: Vec<u16> =
+                (0..6).filter(|&x| next[(x, 0)].diff_option == CellDiffOption::AlwaysUpdate).collect();
+            assert_eq!(forced, vec![1, 3], "덮인 넓은 글자(0·2)의 꼬리만 적어야 한다");
+
+            let mut same = prev.clone();
+            mend(&prev, &mut same);
+            assert!(same.content.iter().all(|c| c.diff_option == CellDiffOption::None), "안 바뀐 그림에 적었다");
+        }
+
+        /// **왼쪽에서 걸친 넓은 글자도 머리를 덮는다** — 새 넓은 글자의 꼬리가 옛 넓은 글자의 머리에 앉으면 터미널은 옛
+        /// 꼬리를 새 글자의 바탕으로 지운다(Ghostty 의 `spacer_tail` 쓰기). ratatui 는 새 글자의 꼬리를 건너뛰고 그 옆
+        /// 칸을 견주는데, 거기는 두 프레임 다 빈칸이다.
+        #[test]
+        fn a_wide_glyph_straddling_onto_a_head_leaves_no_colour_behind() {
+            let plain = ratatui::style::Style::default();
+            let mut term = Terminal::new(Glass::new(6, 1)).unwrap();
+            let mut painter = Painter::default();
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "a가bc", plain)).unwrap();
+            assert_eq!(term.backend().row(0)[1].0, "가", "판이 안 섰다");
+
+            let yellow = ratatui::style::Style::new().bg(Color::LightYellow);
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "나", yellow)).unwrap();
+            let bgs: Vec<Color> = term.backend().row(0).iter().map(|(_, bg)| *bg).collect();
+            assert_eq!(bgs[2..], [Color::Reset; 4], "`나` 밖에 노란 칸이 남았다: {bgs:?}");
+        }
+
+        /// 크기가 바뀐 프레임은 견주지 않는다 — ratatui 가 앞 그림을 비웠고, 작은 옛 그림으로 큰 새 그림을 훑으면
+        /// 칸 밖을 읽어 탐색기가 패닉으로 끝난다.
+        #[test]
+        fn a_frame_of_another_size_is_not_mended_against_the_old_one() {
+            let plain = ratatui::style::Style::default();
+            let mut term = Terminal::new(Glass::new(4, 1)).unwrap();
+            let mut painter = Painter::default();
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "가나", plain)).unwrap();
+
+            *term.backend_mut() = Glass::new(6, 2);
+            painter.paint(&mut term, |f| f.buffer_mut().set_string(0, 0, "가", plain)).unwrap();
+            assert_eq!(term.backend().row(0)[0].0, "가");
+        }
     }
 }
 
