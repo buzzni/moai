@@ -487,7 +487,10 @@ IDEA
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
-  end of each task, again and again. Nothing has to wake it.
+  end of each task, again and again. Nothing has to wake it. While it waits,
+  its row in `moai agents` says idle; once a letter comes it says busy, and a
+  wait that runs out leaves it idle. A name with no row is not registered by
+  this - `moai hello` does that.
 
   A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
   and --all shows it again. The hooks do this by themselves: UserPromptSubmit
@@ -507,16 +510,25 @@ IDEA
     Inbox(InboxArgs),
 
     /// Who is here - the agents under .moai/agents (sweeps the gone)
-    #[command(after_help = "  An agent is registered by `moai hello`, or by the hooks when its session
-  starts. UserPromptSubmit marks it busy and Stop marks it idle. A row whose
-  process is gone is swept here - on Linux a reused pid is told apart by the
-  time the process started. A row that cannot be told alive or gone stays.
+    #[command(after_help = "  moai agents                               everyone registered here
+  moai agents --role worker --status idle   the workers waiting for work
+
+  An agent is registered by `moai hello`, or by the hooks when its session
+  starts. UserPromptSubmit marks it busy and Stop marks it idle, and
+  `moai inbox --wait` marks it idle while it waits and busy once a letter
+  comes. A row whose process is gone is swept here - on Linux a reused pid is
+  told apart by the time the process started. A row that cannot be told alive
+  or gone stays.
+
+  --role and --status keep the rows whose word is exactly that one. A row a
+  hook registered carries no role until the agent says `moai hello --role`.
+  The sweep runs over every row either way.
 
   --json gives {\"agents\":[{\"v\",\"name\",\"vendor\",\"model\",\"role\",\"status\",
   \"since\",\"pid\",\"pid_start\",\"session\",\"cwd\",\"tmux_pane\",\"tmux_socket\"}],
   \"swept\":[names]}. pid_start, session and the two tmux keys are absent when
   they are not known.")]
-    Agents,
+    Agents(AgentsArgs),
 
     /// Register this agent - name, vendor, model and role
     #[command(after_help = "  moai hello --vendor codex --model gpt-5.5 --role worker
@@ -1048,6 +1060,18 @@ pub struct InboxArgs {
     /// Who you are (else MOAI_AGENT or `moai hello`)
     #[arg(long = "as", value_name = "name")]
     pub me: Option<String>,
+}
+
+/// `moai agents`(moai-snyk). 감독이 일꾼을 고르는 거르개다 — 세션 파일을 읽던 파이썬 훑기를 이 두 깃발이 대신한다.
+/// **글자째 맞춘다** — `hello` 가 낱말을 다듬어 적으므로 거르는 쪽도 다듬은 글로 견준다.
+#[derive(Args, Debug)]
+pub struct AgentsArgs {
+    /// Only the agents with this role (worker, supervisor, ...)
+    #[arg(long, value_name = "role")]
+    pub role: Option<String>,
+    /// Only the agents in this state (idle, busy)
+    #[arg(long, value_name = "status")]
+    pub status: Option<String>,
 }
 
 /// `moai hello`(moai-h8tn). 값은 거르지 않고 받는다 — 벤더와 역할의 낱말은 열린 목록이고, 이름만

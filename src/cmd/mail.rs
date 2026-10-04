@@ -142,6 +142,9 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // **넘치는 값은 끝없이 기다리는 것으로 읽는다**(리뷰 moai-h8tn.x4l) — `Instant + Duration` 은 넘치면 멈춘다(panic).
     // "끝없이" 를 `--wait 9223372036854775807` 로 적는 것은 자연스럽다.
     let until = args.wait.map(|s| std::time::Instant::now().checked_add(std::time::Duration::from_secs(s)));
+    if until.is_some() {
+        attend(&repo, &me, mail::IDLE);
+    }
     let (mut mine, garbled) = loop {
         let (all, garbled) = mail::list(&dir, args.all.then_some(me.as_str()));
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
@@ -151,6 +154,10 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     };
+    // 기다림이 편지로 끝났으면 일하러 간다. 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은 곧 다시 건다.
+    if until.is_some() && mine.iter().any(|s| s.reader.is_none()) {
+        attend(&repo, &me, mail::BUSY);
+    }
     // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자). 자리도 남이 지은
     // 이름이라 한 줄로 접는다 — 파일 이름에 든 제어문자가 터미널을 움직이지 않게.
     //
@@ -208,6 +215,28 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         out.push(fill(say(lang, "mail.lost"), &[("id", id)]));
     }
     Ok(out)
+}
+
+/// 기다리는 동안의 출석 — `--wait` 가 그 이름의 장을 `idle` 로, 편지가 오면 `busy` 로 적는다(2026-10-04 사용자 결정,
+/// moai-snyk). 일꾼은 턴 **안에서** 기다린다 — Claude 의 `Stop` 훅은 턴이 끝나야 `idle` 을 적고, 훅이 없는 벤더는
+/// `hello` 가 적은 `busy` 에 머문다. 그래서 감독이 `agents --status idle` 로 일꾼을 찾으려면 기다리는 자리가 제
+/// 상태를 적어야 한다.
+///
+/// **없는 장은 안 세운다** — 등록은 `hello` 와 훅의 일이다. `--as` 로 남의 이름을 대도 그 이름의 장을 고친다: 그
+/// 이름으로 편지를 가지는 것이 곧 그 에이전트로 일하는 것이다. 상태가 같으면 안 쓴다 — `since` 가 "얼마나
+/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 못 적으면 조용히 지나간다 — 출석은 기록이
+/// 아니라 지금의 표다([`mail::write_presence`]).
+fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
+    let dir = repo.agents_dir();
+    // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
+    let (agents, _) = mail::presences(&dir);
+    let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
+    if p.status == status {
+        return;
+    }
+    p.status = status.to_string();
+    p.since = crate::model::now();
+    let _ = mail::write_presence(&dir, &p);
 }
 
 /// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다.

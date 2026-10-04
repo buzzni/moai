@@ -23774,6 +23774,70 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
 }
 
+/// **감독은 `agents --role worker --status idle` 로 일꾼을 찾는다**(moai-snyk, 2026-10-04 사용자 결정). 일꾼은 턴
+/// 안에서 `inbox --wait` 로 기다리므로 Claude 의 `Stop` 훅이 `idle` 을 못 적고, 훅이 없는 벤더는 `hello` 의 `busy`
+/// 에 머문다 — 그래서 기다리는 자리가 제 장을 고친다. 기다리면 `idle`, 편지가 오면 `busy`, 때가 다 되면 `idle`
+/// 그대로다. 걸러 낸 줄도 죽었으면 걷힌다.
+#[test]
+#[cfg(unix)]
+fn a_waiting_worker_reads_idle_and_the_supervisor_filters_for_it() {
+    let s = init("agents-filter");
+    let (w1, w2, boss) = (Sleeper::new(), Sleeper::new(), Sleeper::new());
+    let mut gone = Sleeper::new();
+    hello_as(s.path(), "w1", &w1.pid(), &["--vendor", "codex", "--role", "worker"]);
+    hello_as(s.path(), "w2", &w2.pid(), &["--vendor", "claude", "--role", "worker"]);
+    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
+    hello_as(s.path(), "gone", &gone.pid(), &["--role", "supervisor"]);
+    let names = |args: &[&str]| -> Vec<String> {
+        let out = ok(s.path(), &[&["agents", "--json"], args].concat());
+        out.match_indices("\"name\":\"")
+            .map(|(at, m)| out[at + m.len()..].split('"').next().unwrap().to_string())
+            .collect()
+    };
+    // `hello` 는 `busy` 를 적는다 — 아직 아무도 안 기다린다.
+    assert!(names(&["--role", "worker", "--status", "idle"]).is_empty());
+    assert_eq!(names(&["--role", "worker"]), ["w1", "w2"]);
+    // 낱말은 다듬어 견준다 — `hello` 가 다듬어 적는다.
+    assert_eq!(names(&["--role", " supervisor "]), ["boss", "gone"]);
+    let human = ok(s.path(), &["agents", "--role", "nobody"]);
+    assert!(
+        human.contains("그 역할과 상태의 에이전트가 여기 없다"),
+        "거른 끝이 빈 것을 등록이 없는 것으로 말한다 — {human}"
+    );
+
+    // 기다리는 동안 `idle` — 감독이 바로 그 줄을 찾는다.
+    let child = staged(&["inbox", "--as", "w1", "--ack", "--wait", "30", "--json"])
+        .current_dir(s.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while names(&["--role", "worker", "--status", "idle"]) != ["w1"] {
+        assert!(std::time::Instant::now() < deadline, "기다리는 일꾼이 idle 로 안 선다");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    ok(s.path(), &["send", "w1", "일감", "--as", "boss"]);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        names(&["--status", "busy", "--role", "worker"]),
+        ["w1", "w2"],
+        "편지를 가진 일꾼이 busy 로 안 돌아갔다"
+    );
+    // 때가 다 된 기다림은 `idle` 을 남긴다 — 일꾼은 곧 다시 건다.
+    ok(s.path(), &["inbox", "--as", "w2", "--ack", "--wait", "1"]);
+    assert_eq!(names(&["--status", "idle"]), ["w2"]);
+    // 장이 없는 이름의 기다림은 장을 안 세운다 — 등록은 `hello` 와 훅의 일이다.
+    ok(s.path(), &["inbox", "--as", "stranger", "--wait", "1"]);
+    assert!(!s.path().join(".moai/agents/stranger.json").exists(), "기다림이 출석을 세웠다");
+
+    // 거르개 밖의 죽은 줄도 걷힌다.
+    gone.end();
+    let swept = ok(s.path(), &["agents", "--role", "worker", "--json"]);
+    assert!(swept.ends_with("\"swept\":[\"gone\"]}\n"), "거르개가 걷기를 좁혔다 — {swept}");
+}
+
 // ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────
 
 /// 훅이 실은 글 — 계약 JSON 한 줄을 그대로 돌려준다. [`carried_text`] 는 첫 `"` 에서 끊는데, 보드와 함께 실린
