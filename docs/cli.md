@@ -2482,11 +2482,12 @@ Options:
   and Ctrl-b, gg and G move the focused pane — on the list, Ctrl-d, Ctrl-u,
   Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
   where they are, as in the explorer's list. Enter on the list goes to the
-  page and Ctrl-w w goes back and forth. Tab and Shift-Tab pick the links
-  drawn on the page in turn, from the first one on screen and round from the
-  last to the first: the picked link shows reversed, the key bar names where
-  it goes, Enter follows it, and scrolling it off the pane drops it. Clicking
-  a link follows it at once. On the page with no link picked, Enter opens
+  page and Ctrl-w w goes back and forth. Tab picks the links drawn on the
+  page in turn, from the first one on screen and round from the last to the
+  first, and Shift-Tab goes the other way from the last one on screen: the
+  picked link shows reversed, the key bar names where it goes, Enter follows
+  it, and once it leaves the pane it is dropped. Clicking a link follows it
+  at once. On the page with no link picked, Enter opens
   a list of its links and the issue ids it names, then the pages linking to
   it (marked ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and
   Ctrl-b, takes one with Enter and closes on Esc. Taking a page link or a

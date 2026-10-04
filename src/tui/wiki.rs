@@ -110,9 +110,13 @@ pub struct Window {
     pub choose: Option<Choose>,
     /// `Tab` 으로 골라진 본문의 링크 — 본문에서 링크가 열린 차례([`crate::markdown::Span::link`], moai-p61w). 그 칸이
     /// 반전으로 칠해지고 `Enter` 가 그리로 간다. **보이는 하이라이트가 곧 `Enter` 가 갈 곳이다** — 굴려 화면 밖으로
-    /// 나가면 걷히고([`Window::roll_page`]), 다른 페이지로 가거나 원문을 보면 걷힌다. 링크의 칸은 그림이 편 한 벌
-    /// ([`Window::laid`])에서 읽는다.
-    picked: Option<usize>,
+    /// 나가면 걷히고([`Window::roll_page`]), 창이 줄어 칸 밖으로 밀려도 그림이 걷으며([`Window::unpick_unseen`]), 다른
+    /// 페이지로 가거나 원문을 보면 걷힌다. 링크의 칸은 그림이 편 한 벌([`Window::laid`])에서 읽는다.
+    ///
+    /// **고른 페이지의 슬러그와 함께 든다**(moai-p61w 리뷰 15번) — 차례만 들면 페이지를 바꾸는 길마다 걷어야 하고, 걷기를
+    /// 잊은 새 길 하나가 다른 페이지의 같은 차례 링크로 `Enter` 를 보낸다. 슬러그가 지금 페이지가 아니면 없는 고름이다
+    /// ([`Window::picked`]). 페이지를 바꾸는 길이 걷는 것은 그대로 둔다 — 같은 페이지로 돌아왔을 때 옛 고름이 살지 않게.
+    picked: Option<(String, usize)>,
 }
 
 /// 링크와 id, 이 페이지를 가리키는 페이지를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
@@ -203,14 +207,31 @@ impl Window {
         self.laid_here().map_or(&[], |l| l.cells.as_slice())
     }
 
-    /// 골라진 링크 — 지금 편 한 벌에 그 칸이 있을 때만이다. 그림이 칠하고 바가 대상을 댄다.
+    /// 골라진 링크 — 지금 페이지에서 고른 것이고 지금 편 한 벌에 그 칸이 있을 때만이다. 그림이 칠하고 바가 대상을 댄다.
     pub fn picked(&self) -> Option<usize> {
-        self.picked.filter(|k| self.cells().iter().any(|c| c.link == *k))
+        let (slug, k) = self.picked.as_ref()?;
+        (self.current()?.slug == *slug && self.cells().iter().any(|c| c.link == *k)).then_some(*k)
+    }
+
+    /// 지금 페이지의 그 링크를 고른다.
+    fn pick(&mut self, k: usize) {
+        self.picked = self.current().map(|p| (p.slug.clone(), k));
     }
 
     /// 그 링크의 칸 하나라도 본문 칸에 보이는가.
     fn shows_link(&self, k: usize) -> bool {
         self.cells().iter().any(|c| c.link == k && self.page.shows(c.line, 1))
+    }
+
+    /// 골라진 링크가 본문 칸에 안 보이면 걷는다 — 그림이 칸을 잰 뒤에 부르고(`draw::wiki_page`), 본문 칸이 안 섰으면
+    /// (`page_drawn` 이 거짓 — 좁아 안 섰거나 글 줄이 하나도 안 서는 칸) 그대로 걷는다. 굴리는 키는
+    /// [`Window::roll_page`] 가 걷지만, 창의 크기가 바뀌어 다시 편 줄이 링크를 칸 밖으로 밀거나 건너온 머리글로 다시
+    /// 굴리면([`Window::settle`]) 키 없이 링크가 칸을 떠난다(moai-p61w 리뷰). 남기면 안 보이는 링크로 `Enter` 가 가고,
+    /// `Esc` 는 안 보이는 고름만 걷어 아무 일도 없어 보인다.
+    pub(super) fn unpick_unseen(&mut self, page_drawn: bool) {
+        if self.picked.is_some() && self.picked().is_none_or(|k| !page_drawn || !self.shows_link(k)) {
+            self.picked = None;
+        }
     }
 
     /// 지금 페이지의 원문을 보고 있는가 — 원문에는 링크 칸이 없다. `Tab` 이 그렇다고 댈지를 가른다.
@@ -251,7 +272,7 @@ impl Window {
         };
         let lines: Vec<usize> = cells.iter().filter(|c| c.link == next).map(|c| c.line).collect();
         let (first, last) = (lines[0], lines[lines.len() - 1]);
-        self.picked = Some(next);
+        self.pick(next);
         self.focus = Side::Page;
         self.roll_page(|s| s.reveal_span(first, last - first + 1));
         true
@@ -445,7 +466,7 @@ impl Window {
         roll(&mut self.page);
         if self.page.offset() != was {
             self.landed = None;
-            if self.picked.is_some_and(|k| !self.shows_link(k)) {
+            if self.picked.is_some() && self.picked().is_none_or(|k| !self.shows_link(k)) {
                 self.picked = None;
             }
         }
@@ -688,7 +709,7 @@ impl App {
     pub(super) fn go_link(&mut self, k: usize) {
         let Mode::Wiki(w) = &mut self.mode else { return };
         let Some(t) = w.link_target(k) else { return };
-        w.picked = Some(k);
+        w.pick(k);
         w.focus = Side::Page;
         self.take_target(t);
     }
@@ -1805,8 +1826,12 @@ pub(super) mod tests {
         let bar = lines.last().unwrap();
         assert!(bar.contains("Enter → guide") && bar.contains("Esc 고른 링크 걷기"), "{bar:?}");
         a.hit("Tab");
-        let bar = draw::tests::render(&mut a, 60, 20).last().cloned().unwrap();
+        let bar = draw::tests::render(&mut a, 100, 20).last().cloned().unwrap();
         assert!(bar.contains("Enter → https://example.com (밖)"), "{bar:?}");
+        // 좁은 바에서는 긴 대상을 줄인다 — 나갈 길(`Esc`·`SPC 메뉴`)이 바 밖으로 밀려 잘리지 않는다(moai-p61w 리뷰).
+        let bar = draw::tests::render(&mut a, 60, 20).last().cloned().unwrap();
+        assert!(bar.contains("Enter → https://") && bar.contains("…"), "긴 대상을 안 줄였다: {bar:?}");
+        assert!(bar.contains("Esc 고른 링크 걷기") && bar.ends_with("SPC 메뉴"), "나갈 길이 바에서 잘렸다: {bar:?}");
         a.hit("Tab");
         let bar = draw::tests::render(&mut a, 60, 20).last().cloned().unwrap();
         assert!(bar.contains("Enter → gone (없음)"), "{bar:?}");
@@ -1901,5 +1926,52 @@ pub(super) mod tests {
         let home = d.links[0].0;
         click(&mut a, home.x, home.y);
         assert_eq!(slug(&a), "README", "▸ 가 붙은 줄의 링크를 눌렀는데 안 갔다");
+    }
+
+    /// **고름은 보이는 동안만 산다**(moai-p61w 리뷰). 목록 칸에서는 바가 대상을 안 댄다 — 거기서 `Enter` 는 본문 칸으로 갈
+    /// 뿐이다. 창이 줄어 링크가 칸 밖으로 나가면 굴리는 키 없이 걷히고, 그때 `Enter` 는 안 보이는 링크로 안 가고 고르기
+    /// 창을 연다. 목록에서 다른 페이지로 가면 걷힌다 — 그 페이지에 같은 차례의 링크가 있어도 따라가지 않는다.
+    #[test]
+    fn a_pick_lives_only_while_it_shows() {
+        let filler: String = (1..=10).map(|n| format!("Line {n:02}\n\n")).collect();
+        let readme = format!("# Home\n\n{filler}[deep](guide.md)\n");
+        let (_s, mut a) = wiki_app("unseen", &[("README.md", &readme), ("guide.md", "# Guide\n\n[home](README.md)\n")]);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 60, 40);
+        a.hit("Tab");
+        assert_eq!(window(&a).picked(), Some(0), "시험의 전제 — 높은 창에서는 링크가 보인다");
+
+        a.hit("Ctrl-w h");
+        let bar = draw::tests::render(&mut a, 60, 40).last().cloned().unwrap();
+        assert!(!bar.contains("→ guide") && bar.contains("Esc 고른 링크 걷기"), "목록 칸의 바가 대상을 댔다: {bar:?}");
+        a.hit("Enter");
+        assert_eq!((slug(&a), window(&a).focus), ("README".to_string(), Side::Page), "목록의 Enter 가 링크로 갔다");
+
+        let _ = draw::tests::render(&mut a, 60, 10);
+        assert_eq!(window(&a).picked(), None, "창이 줄어 칸 밖으로 나간 링크가 골라진 채 남았다");
+        a.hit("Enter");
+        assert!(window(&a).choose.is_some(), "안 보이는 고름이 없는데 고르기 창이 안 열렸다");
+        assert_eq!(slug(&a), "README", "안 보이는 링크로 Enter 가 갔다");
+        a.hit("Esc");
+
+        let _ = draw::tests::render(&mut a, 60, 40);
+        a.hit("Tab");
+        assert_eq!(window(&a).picked(), Some(0));
+        a.hit("Ctrl-w h j");
+        let _ = draw::tests::render(&mut a, 60, 40);
+        assert_eq!(slug(&a), "guide");
+        assert_eq!(window(&a).picked(), None, "목록에서 옮겨 간 페이지에 고름이 따라왔다");
+
+        // 고름은 고른 페이지의 것이다(리뷰 15번) — 걷기를 잊은 길이 커서를 옮겨도 다른 페이지의 같은 차례 링크로 안 간다.
+        a.hit("Ctrl-w h k");
+        let _ = draw::tests::render(&mut a, 60, 40);
+        a.hit("Tab");
+        assert_eq!((slug(&a), window(&a).picked()), ("README".to_string(), Some(0)));
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        w.cursor = w.shown().iter().position(|p| p.slug == "guide").unwrap();
+        let _ = draw::tests::render(&mut a, 60, 40);
+        assert_eq!(window(&a).picked(), None, "다른 페이지의 같은 차례 링크가 골라진 채 섰다");
+        a.hit("Enter");
+        assert!(window(&a).choose.is_some() && slug(&a) == "guide", "남의 고름으로 Enter 가 건너갔다");
     }
 }

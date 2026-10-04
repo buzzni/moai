@@ -990,7 +990,7 @@
   "tui.wiki.next_link": "next link",
   "tui.wiki.prev_link": "previous link",
   "tui.wiki.unpick": "drop the link",
-  "tui.wiki.no_marks": "this page draws no link — Enter lists its issues and the pages linking here",
+  "tui.wiki.no_marks": "no link to pick on this page — Enter lists what it names and the pages linking here",
   "tui.wiki.raw_no_marks": "the page as written marks no link — SPC v r draws it again, Enter lists the links",
   "wiki.head": "Wiki  {dir}  pages {n}",
   "wiki.empty": "Wiki  {dir}  no pages yet — the first one goes in {dir}/README.md",

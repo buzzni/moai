@@ -64,10 +64,11 @@ are kept in your user config and carry over to the next run and to every project
   On the overview it reads the project of the row under the cursor. The wheel,
   `Ctrl-d`/`Ctrl-u` and `Ctrl-f`/`Ctrl-b` scroll the page list without moving
   the cursor, as on the main list. `Enter` on
-  the list goes to the page. On the page, `Tab` and `Shift-Tab` pick the links
-  drawn there in turn — from the first one on screen, round from the last to the
-  first. The picked link shows reversed and the key bar names where it goes;
-  `Enter` follows it, `Esc` drops it, and scrolling it off the pane drops it too.
+  the list goes to the page. On the page, `Tab` picks the links drawn there in
+  turn — from the first one on screen, round from the last to the first — and
+  `Shift-Tab` goes the other way, from the last one on screen. The picked link
+  shows reversed and the key bar names where it goes; `Enter` follows it, `Esc`
+  drops it, and once it leaves the pane it is dropped too.
   Clicking a link follows it at once. With no link picked, `Enter` on the page
   lists its links and the issue ids it names, then the pages that link to it,
   marked `←`. Taking a page — any of these ways — goes there and `Backspace`

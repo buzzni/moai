@@ -1043,9 +1043,11 @@ fn wiki_window(
         let [a, b] = Layout::horizontal([Constraint::Percentage(share), Constraint::Min(DETAIL_MIN_H)]).areas(at);
         (a, Some(b))
     };
-    // **안 선 칸에는 포커스가 못 선다** — 본문이 접혔으면 목록으로 되돌린다(`screen` 의 상세와 같은 자리).
+    // **안 선 칸에는 포커스가 못 선다** — 본문이 접혔으면 목록으로 되돌린다(`screen` 의 상세와 같은 자리). 안 선 본문의
+    // 골라진 링크도 걷는다 — 칠할 자리가 없는 고름으로 `Enter` 가 가면 안 된다.
     if page_at.is_none() {
         w.focus = super::wiki::Side::List;
+        w.unpick_unseen(false);
     }
     let rows = wiki_list(f, w, list_at, lang);
     let links = page_at.map(|page_at| wiki_page(f, w, page_at, raw, lang)).unwrap_or_default();
@@ -1234,19 +1236,28 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     };
     w.settle(&heads);
     let landed = w.landed().and_then(|k| heads.get(k).copied());
-    let (lines, cells): (&[Line<'static>], &[crate::markdown::LinkCell]) = match (&w.laid, w.current()) {
-        (Some(l), Some(_)) => (&l.lines, &l.cells),
-        _ => (&[], &[]),
+    let len = match (&w.laid, w.current()) {
+        (Some(l), Some(_)) => l.lines.len(),
+        _ => 0,
     };
-    let len = lines.len();
     // **재고 나서 자른다**(상세의 그림과 같은 차례) — 되돌아가기가 든 읽던 줄이나 재기 전의 `G` 는 끝을 지난 자리일 수
     // 있어, 먼저 자르면 이 그림 한 장이 아래를 빈 채로 서고 다음 키까지 그대로다. 머리글로 굴린 자리도 여기서 잘린다 —
     // 페이지 끝 가까이의 머리글은 맨 위까지 못 오르고, 그래서 그 줄에 `▸` 가 붙는다.
     w.page.fit(inner.height as usize, len);
+    // 칸을 잰 뒤에 — 창이 줄었거나 다시 편 줄이 골라진 링크를 칸 밖으로 밀었으면 걷는다(`Window::unpick_unseen`). 글 줄이
+    // 하나도 안 서는 칸은 안 선 칸과 같다 — 높이 0 을 "안 쟀다" 로 읽는 `Scroll::shows` 에 맡기면 다 보인다고 답한다.
+    w.unpick_unseen(inner.height > 0);
+    let (lines, cells): (&[Line<'static>], &[crate::markdown::LinkCell]) = match (&w.laid, w.current()) {
+        (Some(l), Some(_)) => (&l.lines, &l.cells),
+        _ => (&[], &[]),
+    };
     // 찾는 글은 **보이는 줄에만** 칠한다(상세의 본문과 같은 자 — [`mark_line`]). 접힌 줄에 걸친 글은 안 칠해진다.
     let q = w.query();
     let top = w.page.offset().min(len);
     let picked = w.picked();
+    // 보이는 줄의 링크 칸만 — 칸은 줄 차례라 잘라 낸다. 수천 줄짜리 생성 페이지에서 프레임마다 칸 전부를 훑지 않는다.
+    let end = top + inner.height as usize;
+    let cells = &cells[cells.partition_point(|c| c.line < top)..cells.partition_point(|c| c.line < end)];
     let shown = shown_links(lines, cells, top, inner, landed);
     let visible: Vec<Line> = lines
         .iter()
@@ -1302,21 +1313,31 @@ fn shown_links(
 }
 
 /// 줄의 `from..to` 칸(표시 폭)을 반전으로 칠한다 — 조각이 그 칸에 걸치면 글자에서 가른다. 글자 자리는 안 바뀐다.
+///
+/// **조각째 잰다** — 칸을 낸 [`crate::markdown::link_cells`] 가 조각의 폭(`text::width`)으로 쟀다. 글자마다 더한 폭은
+/// 그림 글자 고르개(`❤️`)나 이은 그림 글자에서 조각째 잰 폭과 갈려, 그 뒤의 칠이 누르면 맞는 칸에서 한 칸씩 밀린다.
+/// 글자로 가르는 것은 칸에 걸친 조각 하나뿐이고, 그 뒤의 자리는 조각째 잰 폭으로 되돌린다.
 fn reversed(line: Line<'static>, from: usize, to: usize) -> Line<'static> {
     let mut out: Vec<Span<'static>> = Vec::new();
     let mut at = 0usize;
     for s in line.spans {
         let w = crate::text::width(&s.content);
-        if at + w <= from || at >= to {
-            at += w;
+        let start = at;
+        at += w;
+        if start + w <= from || start >= to {
             out.push(s);
+            continue;
+        }
+        if from <= start && start + w <= to {
+            out.push(Span::styled(s.content, s.style.add_modifier(Modifier::REVERSED)));
             continue;
         }
         // 걸친 조각 — 글자마다 칸 안인지 보고 같은 쪽끼리 잇는다.
         let mut pieces: Vec<(bool, String)> = Vec::new();
+        let mut col = start;
         for ch in s.content.chars() {
-            let inside = (from..to).contains(&at);
-            at += crate::text::width(ch.encode_utf8(&mut [0u8; 4]));
+            let inside = (from..to).contains(&col);
+            col += crate::text::width(ch.encode_utf8(&mut [0u8; 4]));
             match pieces.last_mut() {
                 Some((was, text)) if *was == inside => text.push(ch),
                 _ => pieces.push((inside, ch.to_string())),
@@ -1433,8 +1454,11 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         return bar(f, at, optional, vec![hint(Link::Enter), hint(Link::Close)]);
     }
     let on_page = w.focus == super::wiki::Side::Page;
-    let aim = w.picked().and_then(|k| w.link_target(k)).and_then(|t| link_aim(&t, lang));
-    let what = |a: Wiki| a.what(on_page, w.searched(), aim.is_some(), lang);
+    let picked = w.picked();
+    // 대상은 **본문 칸에서만** 댄다 — 목록의 `Enter` 는 본문 칸으로 갈 뿐이라(`App::wiki_key`), 거기서 `Enter → 대상` 을
+    // 대면 누른 키가 바와 다른 일을 한다. `Esc` 는 어느 칸에서나 고름을 먼저 걷는다.
+    let aim = picked.filter(|_| on_page).and_then(|k| w.link_target(k)).and_then(|t| link_aim(&t, lang));
+    let what = |a: Wiki| a.what(on_page, w.searched(), picked.is_some(), lang);
     if !w.chord.held().is_empty() {
         let next = keys::next_keys(WIKI, w.chord.held())
             .into_iter()
@@ -1445,19 +1469,27 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     let hint = |a: Wiki| key(&label(WIKI, a), what(a));
     let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
     let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext), hint(Wiki::NextLink)];
+    let mut rest = Vec::new();
+    if w.can_go_back() {
+        rest.push(hint(Wiki::Back));
+    }
+    rest.push(hint(Wiki::Search));
+    rest.push(hint(Wiki::Close));
+    rest.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
     let enter = match &aim {
+        // **대상이 길면 줄인다** — 밖 주소는 수십 칸이라 그대로 대면 뒤의 `Esc`·`SPC 메뉴` 가 바 밖으로 밀려 말없이
+        // 잘린다(나갈 길을 못 찾는 것이 [`key`] 가 막는 일이다). 줄인 자리는 `…` 가 댄다.
         Some((to, tail)) => {
-            key(&label(WIKI, Wiki::Enter), &format!("→ {to}{}", tail.map(|t| format!(" {t}")).unwrap_or_default()))
+            let name = label(WIKI, Wiki::Enter);
+            let tail = tail.map(|t| format!(" {t}")).unwrap_or_default();
+            let fixed = crate::text::width(&format!(" {name} → {tail}")) + spans_width(&rest);
+            let to = clip(to, (at.width as usize).saturating_sub(fixed).max(1));
+            key(&name, &format!("→ {to}{tail}"))
         }
         None => hint(Wiki::Enter),
     };
     let mut keep = vec![enter];
-    if w.can_go_back() {
-        keep.push(hint(Wiki::Back));
-    }
-    keep.push(hint(Wiki::Search));
-    keep.push(hint(Wiki::Close));
-    keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
+    keep.extend(rest);
     bar(f, at, optional, keep);
 }
 
@@ -5243,6 +5275,22 @@ pub(super) mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+    /// **골라진 링크의 칠은 링크 칸과 같은 자로 잰다**(moai-p61w 리뷰) — 칸은 조각의 폭으로 섰다
+    /// ([`crate::markdown::link_cells`]). 그림 글자 고르개가 든 링크(`❤️`)를 글자마다 더해 재면 조각째 잰 폭보다 한 칸
+    /// 짧아, 링크 뒤의 맨글 첫 글자까지 반전이 번졌다.
+    #[test]
+    fn the_reversed_cells_are_measured_like_the_link_cells() {
+        assert_eq!(crate::text::width("❤\u{fe0f}x"), 3, "시험의 전제 — 고르개가 붙은 그림 글자는 두 칸이다");
+        let line = Line::from(vec![Span::raw("❤\u{fe0f}x"), Span::raw(" y")]);
+        let out = reversed(line, 0, 3);
+        let flipped: Vec<(String, bool)> = out
+            .spans
+            .iter()
+            .map(|s| (s.content.to_string(), s.style.add_modifier.contains(Modifier::REVERSED)))
+            .collect();
+        assert_eq!(flipped, [("❤\u{fe0f}x".to_string(), true), (" y".to_string(), false)]);
+    }
+
     /// **그린 본문의 머리글과 위키가 센 머리글은 하나씩 맞선다**(moai-tllo) — 위키 창은 링크의 `#앵커` 가 몇째 머리글인지를
     /// `wiki::Page::headings` 에서 찾고, 그 줄은 그린 본문의 몇째 머리글 블록에서 찾는다. 둘의 수가 갈리면 엉뚱한 머리글로
     /// 굴린다. 이 저장소의 위키 페이지 모두와, 목록·인용·밑줄 꼴·HTML 블록·코드 블록 속 `#` 이 섞인 글로 잰다.
@@ -5321,9 +5369,6 @@ pub(super) mod tests {
     /// 그려 보고 **글자만** 꺼낸다. 색은 여기서 따지지 않는다 —
     /// 색이 혼자 뜻을 지지 않는다는 규칙이 참이면 글자만으로 읽혀야 한다.
     ///
-    /// 두 칸짜리 글자는 칸 하나에 담기고 **다음 칸은 공백으로 채워진다.**
-    /// 그대로 이어 붙이면 "상 세" 가 되어, 있는 글자를 못 찾고 폭도 부풀어
-    /// 센다. 앞 글자의 폭만큼 건너뛰어야 화면에 있는 것과 같은 줄이 된다.
     /// **`&mut` 다.** 훑는 자리는 프레임을 넘어 살아야 하므로 `screen` 이
     /// App 에 되적는다 — 시험도 진짜 화면과 같은 길을 지난다.
     pub(in crate::tui) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
@@ -5338,6 +5383,10 @@ pub(super) mod tests {
     }
 
     /// 그린 칸의 글자 — [`render`] 가 읽는 그대로다.
+    ///
+    /// 두 칸짜리 글자는 칸 하나에 담기고 **다음 칸은 공백으로 채워진다.**
+    /// 그대로 이어 붙이면 "상 세" 가 되어, 있는 글자를 못 찾고 폭도 부풀어
+    /// 센다. 앞 글자의 폭만큼 건너뛰어야 화면에 있는 것과 같은 줄이 된다.
     pub(in crate::tui) fn lines_of(buf: &ratatui::buffer::Buffer) -> Vec<String> {
         (0..buf.area.height)
             .map(|y| {
