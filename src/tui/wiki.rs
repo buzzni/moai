@@ -70,8 +70,14 @@ pub struct Window {
     pub skipped: usize,
     /// 목록에서 선 줄 — 보이는 페이지([`Window::shown`])의 차례다.
     pub cursor: usize,
-    /// 목록의 굴린 자리 — 그림이 커서를 드러낸다.
+    /// 목록의 굴린 자리 — 그림이 커서를 드러낸다. 굴려 떼어 놓았으면([`Window::adrift`]) 안 드러낸다.
     pub list: Scroll,
+    /// 목록 칸의 화면을 굴려 커서에서 떼어 놓았는가 — 휠·반 쪽·한 쪽이 목록 칸을 굴리면 선다(moai-og9h, 사용자 결정
+    /// 2026-10-04 — 탐색기의 `App::adrift` 와 같은 규칙). **선 동안 그림은 커서를 드러내지 않는다**: 고른 페이지가 화면
+    /// 밖으로 나가도 커서와 본문은 그대로다. 걷는 자는 커서를 옮기는 길 하나([`Window::move_to`] — 키·누르기·링크·
+    /// 되돌아가기)와 목록을 다시 세우는 찾기([`Window::refilter`])다. 창이 떠 있는 동안 페이지를 다시 안 읽으니
+    /// 탐색기처럼 줄의 정체를 들 까닭이 없다.
+    pub(super) adrift: bool,
     /// 본문의 굴린 자리.
     pub page: Scroll,
     pub focus: Side,
@@ -137,6 +143,7 @@ impl Window {
             skipped: wiki.skipped.len(),
             cursor: 0,
             list: Scroll::default(),
+            adrift: false,
             page: Scroll::default(),
             focus: Side::List,
             trail: Vec::new(),
@@ -203,7 +210,10 @@ impl Window {
 
     /// 찾는 글이 바뀐 뒤 커서를 다시 세운다 — **보던 페이지가 남았으면 그 페이지에** 선다. 빠졌으면 첫 줄이고, 본문은
     /// 첫 줄로 돌아간다.
+    ///
+    /// 굴려 떼어 둔 화면([`Window::adrift`])은 걷는다 — 굴린 자리는 좁히기 전 목록의 줄이다.
     fn refilter(&mut self, was: Option<String>) {
+        self.adrift = false;
         let at = was.and_then(|slug| self.shown().iter().position(|p| p.slug == slug));
         match at {
             Some(at) => self.cursor = at,
@@ -276,23 +286,25 @@ impl Window {
         !self.trail.is_empty()
     }
 
-    /// 휠 한 칸(moai-o3cb) — **포인터 아래 칸이 받는다**(2026-10-04 사용자 결정, 탐색기의 2026-10-01 결정과 같다): 목록이면
-    /// 커서, 본문이면 굴리기. 포커스는 안 옮기고, 기다리던 접두어는 버린다 — 휠을 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면
-    /// 사람이 친 적 없는 맨 위로 가기가 선다(`stats::Window::roll` 과 같은 까닭).
+    /// 휠 한 칸(moai-o3cb) — **포인터 아래 칸이 받는다**(2026-10-04 사용자 결정, 탐색기와 같다): 목록이든 본문이든 그
+    /// 칸의 화면을 굴린다. 목록 위의 휠은 한때 커서를 옮겼다 — 탐색기 목록의 2026-10-01 결정을 따랐던 것이고, 탐색기와
+    /// 함께 뒤집었다(moai-og9h, [`Window::roll_list`]). 포커스는 안 옮기고, 기다리던 접두어는 버린다 — 휠을 사이에 둔
+    /// `g` 와 `g` 가 `gg` 로 이으면 사람이 친 적 없는 맨 위로 가기가 선다(`stats::Window::roll` 과 같은 까닭).
     pub(super) fn roll(&mut self, on: Side, by: isize) {
         self.chord.clear();
         match on {
-            Side::List => {
-                let len = self.shown().len();
-                self.move_to(scroll::cursor_by(by, self.cursor, || len));
-            }
+            Side::List => self.roll_list(|s| s.by(by)),
             Side::Page => self.page.by(by),
         }
     }
 
-    /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 본문이면 굴리기. 탐색기의 `App::step` 과 같은 자다.
+    /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 본문이면 굴리기. 탐색기의 `App::step` 과 같은 자다: 목록의
+    /// 반 쪽·한 쪽은 커서가 아니라 화면을 굴린다(moai-og9h).
     pub fn step(&mut self, m: Move) {
         match self.focus {
+            Side::List if matches!(m, Move::HalfUp | Move::HalfDown | Move::PageUp | Move::PageDown) => {
+                self.roll_list(|s| s.go(m));
+            }
             Side::List => {
                 let len = self.shown().len();
                 self.move_to(scroll::cursor(m, self.cursor, || len));
@@ -301,8 +313,23 @@ impl Window {
         }
     }
 
+    /// 목록 칸의 화면만 굴린다 — 휠과 반 쪽·한 쪽이다(moai-og9h, 탐색기의 `App::roll` 과 같은 규칙). 커서와 본문은
+    /// 그대로고, 굴렀으면 [`Window::adrift`] 를 세워 다음 그림이 커서를 드러내느라 화면을 되돌리지 않게 한다. 안
+    /// 굴렀으면(끝에 닿았거나 목록이 칸에 다 든다) 새로 뗄 것이 없다.
+    fn roll_list(&mut self, roll: impl FnOnce(&mut Scroll)) {
+        let was = self.list.offset();
+        roll(&mut self.list);
+        if self.list.offset() != was {
+            self.adrift = true;
+        }
+    }
+
     /// 커서를 옮기고, 다른 페이지로 갔으면 **본문을 첫 줄로 되돌린다** — 탐색기의 `App::move_to` 와 같은 까닭이다.
+    ///
+    /// 굴려 떼어 둔 목록([`Window::adrift`])은 걷는다 — 옮겼든 끝이라 제자리든 커서 키 하나가 화면을 커서로
+    /// 되돌린다. 링크·되돌아가기도 이 길로 그 페이지에 서니 함께 드러난다.
     pub(super) fn move_to(&mut self, at: usize) {
+        self.adrift = false;
         if at != self.cursor {
             self.page.rewind();
         }
@@ -958,7 +985,9 @@ pub(super) mod tests {
     }
 
     /// **누른 칸으로 포커스가 가고 목록의 줄을 누르면 그 페이지다**. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**
-    /// (2026-10-04 사용자 결정). 메뉴가 열린 채 창을 누르면 메뉴를 닫고 그 누르기를 한다(moai-m6ni).
+    /// (2026-10-04 사용자 결정). 목록 위의 휠은 커서를 안 옮긴다(moai-og9h) — 굴리는 것은
+    /// `the_wheel_and_half_pages_roll_the_list_and_leave_the_page` 가 잰다. 메뉴가 열린 채 창을 누르면 메뉴를 닫고 그
+    /// 누르기를 한다(moai-m6ni).
     #[test]
     fn a_click_picks_the_pane_and_the_page_and_the_wheel_moves_the_pane_under_it() {
         let (_s, mut a) = wiki_app("mouse", PAGES);
@@ -966,14 +995,14 @@ pub(super) mod tests {
         let _ = draw::tests::render(&mut a, 100, 24);
         let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
         let page = d.page.expect("본문 칸이 안 섰다");
-        // 목록의 둘째 줄.
-        click(&mut a, d.rows.x + 2, d.rows.y + 1);
-        assert_eq!((window(&a).cursor, window(&a).focus), (1, Side::List));
+        // 목록의 셋째 줄 — 낮은 창에서 굴릴 만큼 긴 Guide 다.
+        click(&mut a, d.rows.x + 2, d.rows.y + 2);
+        assert_eq!((window(&a).cursor, window(&a).focus), (2, Side::List));
         click(&mut a, page.x + 3, page.y + 2);
         assert_eq!(window(&a).focus, Side::Page, "본문을 눌렀는데 포커스가 안 갔다");
-        // 휠은 포인터 아래 칸 — 본문에 포커스가 있어도 목록 위의 휠은 커서를 옮긴다.
-        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
-        assert_eq!((window(&a).cursor, window(&a).focus), (2, Side::Page), "목록 위의 휠이 포커스를 옮겼다");
+        // 휠은 포인터 아래 칸 — 본문에 포커스가 있어도 목록 위의 휠은 목록 칸의 것이고, 커서는 안 옮긴다.
+        wheel(&mut a, false, d.rows.x + 2, d.rows.y);
+        assert_eq!((window(&a).cursor, window(&a).focus), (2, Side::Page), "목록 위의 휠이 커서나 포커스를 옮겼다");
         let _ = draw::tests::render(&mut a, 100, 8);
         let page = a.drawn.wiki.and_then(|d| d.page).expect("낮은 창에 본문 칸이 안 섰다");
         wheel(&mut a, true, page.x + 3, page.y + 1);
@@ -995,6 +1024,59 @@ pub(super) mod tests {
         a.hit("Esc /");
         wheel(&mut a, true, d.rows.x + 2, d.rows.y);
         assert_eq!(window(&a).cursor, 0, "찾는 칸이 열린 동안 휠이 먹었다");
+    }
+
+    /// **목록 칸의 휠과 반 쪽·한 쪽은 화면만 굴린다**(moai-og9h, 사용자 결정 2026-10-04 — 탐색기 목록과 같은 규칙). 커서와
+    /// 본문은 그대로고, 고른 페이지가 화면 밖으로 나가도 그림이 화면을 그리로 되돌리지 않는다. 다음 커서 키와 목록을
+    /// 다시 세우는 찾기가 화면을 커서로 되돌린다. 한때 목록 위의 휠은 커서를 세 줄씩 옮겼다.
+    #[test]
+    fn the_wheel_and_half_pages_roll_the_list_and_leave_the_page() {
+        let mut files: Vec<(String, String)> =
+            vec![("README.md".into(), format!("# Home\n\n{}", "line\n\n".repeat(20)))];
+        files.extend((1..=30).map(|n| (format!("p{n:02}.md"), format!("# Page {n:02}\n"))));
+        let files: Vec<(&str, &str)> = files.iter().map(|(f, b)| (f.as_str(), b.as_str())).collect();
+        let (_s, mut a) = wiki_app("roll", &files);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        let page = d.page.expect("본문 칸이 안 섰다");
+        wheel(&mut a, true, page.x + 3, page.y + 1);
+        let read = window(&a).page.offset();
+        assert!(read > 0, "시험의 전제 — 본문이 굴렀다");
+        let shown = |a: &App| window(a).list.shows(window(a).cursor, 1);
+
+        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
+        assert_eq!(window(&a).list.offset(), 3, "목록 위의 휠이 화면을 세 줄 안 굴렸다");
+        assert_eq!(
+            (slug(&a), window(&a).page.offset()),
+            ("README".to_string(), read),
+            "목록 위의 휠이 커서나 본문을 움직였다"
+        );
+        let lines = draw::tests::render(&mut a, 100, 12);
+        assert_eq!(window(&a).list.offset(), 3, "그림이 화면 밖의 커서를 드러내느라 굴린 화면을 되돌렸다");
+        assert!(!shown(&a), "시험의 전제 — 고른 페이지가 화면 밖이다");
+        let top = usize::from(d.rows.y);
+        assert!(lines[top].contains("Page 03"), "굴린 화면의 첫 줄이 아니다\n{}", lines.join("\n"));
+        a.hit("j");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        assert_eq!(slug(&a), "p01", "`j` 가 커서가 선 페이지에서 안 움직였다");
+        assert!(shown(&a), "`j` 뒤에도 화면이 굴린 자리에 남았다 — {}", window(&a).list.offset());
+
+        let before = window(&a).list.offset();
+        a.hit("Ctrl-d");
+        assert_eq!(
+            (window(&a).list.offset(), slug(&a)),
+            (before + super::super::scroll::HALF, "p01".to_string()),
+            "Ctrl-d 가 화면만 반 쪽 안 굴렸다"
+        );
+        a.hit("PageDown");
+        assert_eq!(slug(&a), "p01", "PageDown 이 커서를 옮겼다");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        assert!(!shown(&a), "시험의 전제 — 고른 페이지가 화면 밖이다");
+        a.hit("/ p Enter");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        assert_eq!(slug(&a), "p01", "시험의 전제 — 찾기가 보던 페이지에 그대로 선다");
+        assert!(shown(&a), "찾기가 다시 세운 목록이 고른 페이지를 화면 밖에 두었다 — {}", window(&a).list.offset());
     }
 
     fn slugs(a: &App) -> Vec<String> {

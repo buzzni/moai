@@ -1099,8 +1099,13 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
     let inner = block.inner(at);
     w.cursor = w.cursor.min(n.saturating_sub(1));
     w.list.fit(inner.height as usize, n);
-    w.list.reveal(w.cursor);
-    let selected = (n > 0).then_some(w.cursor);
+    // **굴려 떼어 놓았으면 커서를 안 드러낸다**(moai-og9h, `wiki::Window::adrift`) — 탐색기 목록과 같은 규칙이다. 화면
+    // 밖의 커서는 위젯에도 안 넘긴다: 위젯은 고른 줄이 창 밖이면 제 자리를 그리로 옮긴다(ratatui `List`).
+    if !w.adrift {
+        w.list.reveal(w.cursor);
+    }
+    let seen = w.list.offset()..w.list.offset() + inner.height as usize;
+    let selected = (n > 0).then_some(w.cursor).filter(|at| seen.contains(at));
     let mut state = ListState::default().with_offset(w.list.offset()).with_selected(selected);
     // **포커스가 본문에 있어도 커서 줄은 보인다** — 본문이 그 줄의 페이지라, 어느 페이지를 읽는지가 목록에서 읽혀야
     // 한다. 반전은 포커스 칸에만 두고 다른 칸에서는 굵게만 선다.
