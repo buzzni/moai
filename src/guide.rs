@@ -1434,7 +1434,8 @@ not be read still stands in the list, under its file name, with an `error` of it
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
 link to a directory, not followed), `not_utf8` (a file name that cannot be a slug) or
-`unreadable` (a directory it could not open); with nothing left out the key is absent,
+`unreadable` (a directory it could not open or list to the end, or a name whose kind it
+could not read); with nothing left out the key is absent,
 and with it the exit code is non-zero although `pages` is whole. Branch on `kind`, not
 on the words beside it. Look at all of these after you write.
 
