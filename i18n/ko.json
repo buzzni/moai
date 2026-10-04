@@ -1004,5 +1004,6 @@
   "wiki.notice_conflict": "충돌 표시가 든 페이지 {n}  {which}",
   "wiki.notice_unresolved": "페이지로 안 풀리는 링크 {n}  {which}",
   "wiki.notice_missing": "트래커에 없는 id {n}  {which}",
-  "wiki.conflict_raw": "충돌 표시가 있다 — 원문 그대로 보인다. {path} 의 병합을 풀고 커밋한다"
+  "wiki.conflict_raw": "충돌 표시가 있다 — 원문 그대로 보인다. {path} 의 병합을 풀고 커밋한다",
+  "wiki.linked_from": "이 페이지를 가리키는 페이지  {which}"
 }

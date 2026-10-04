@@ -155,7 +155,8 @@ struct Told {
 }
 
 /// 페이지 하나. `error` 는 본문을 못 읽은 페이지에만 서고 없으면 다 읽은 것이다 — `commits_error`·`journal_error`
-/// 와 같은 약속이다(2026-10-04 사용자 결정). `body` 는 `show` 만 낸다 — 늘 원문이다.
+/// 와 같은 약속이다(2026-10-04 사용자 결정). `body` 는 `show` 만 낸다 — 늘 원문이다. `linked_from` 은 이 페이지를
+/// 가리키는 페이지의 슬러그고 **늘 선다** — 아무도 안 가리키면 `[]` 다(2026-10-04 사용자 결정, moai-ogaw).
 #[derive(serde::Serialize)]
 struct PageOut<'a> {
     slug: &'a str,
@@ -164,6 +165,7 @@ struct PageOut<'a> {
     bytes: u64,
     issues: &'a [IssueRef],
     links: &'a [Link],
+    linked_from: &'a [String],
     conflict: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<Told>,
@@ -180,6 +182,7 @@ impl<'a> PageOut<'a> {
             bytes: p.bytes,
             issues: &p.issues,
             links: &p.links,
+            linked_from: &p.linked_from,
             conflict: p.conflict,
             error: p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(lang, p, u) }),
             body: if body { p.body.as_deref() } else { None },

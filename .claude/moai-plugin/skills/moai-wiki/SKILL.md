@@ -14,7 +14,7 @@ that changed nothing a person does writes nothing.
 
     moai wiki ls                           the pages: slug and title, and what does not resolve
     moai wiki ls --json                    the same with each page's path, for a machine
-    moai wiki show <slug>                  one page
+    moai wiki show <slug>                  one page, and the pages that link to it
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
   `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
@@ -40,7 +40,11 @@ that changed nothing a person does writes nothing.
 Every row under `pages` also says what to fix: `issues` (each `id`, and `exists`
 false for an id that names no issue), `links` (the links to other pages — each `text`,
 `to` as the slug it lands on, and `resolved` false when no such page stands) and
-`conflict` (true while merge conflict markers stand in the page). A page that could
+`conflict` (true while merge conflict markers stand in the page). `linked_from` turns
+`links` around: the slugs of the pages that link to this one, in list order, `[]` when
+none does (a page that could not be read links nowhere). A page other than the home
+page that nothing links to is found only through the list — link it from the page that
+should lead there. A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
