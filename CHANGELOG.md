@@ -56,6 +56,17 @@ does not tag — see `CONTRIBUTING.md`.
   that cannot be read for permissions or encoding still stops `init` before
   anything is planted.
 
+- **The explorer picks its screen under `SPC g`.** `SPC g l` shows the list,
+  `SPC g b` the board and `SPC g s` the statistics window. The board was
+  `SPC v b` and the statistics `SPC p s`; both keys are gone with no alias, and
+  pressed in the menu they now do nothing, like any key it does not know.
+  Choosing is not a toggle: picking the screen that already stands leaves it as
+  it is, and the menu closes once you pick. The root of the menu names the
+  screen that stands, as in `+screen [board]`, and the board is still kept
+  under `[tui]` as `layout`. Over the statistics window `SPC` now opens the
+  menu with the screens alone — `SPC g l` and `SPC g b` close the window onto
+  the list or the board, and `SPC g s` counts again from scratch.
+
 ### Fixed
 
 - **The explorer's `Journal` header row clears once the journal can be read
