@@ -1079,6 +1079,24 @@ pub(super) mod tests {
         assert!(shown(&a), "찾기가 다시 세운 목록이 고른 페이지를 화면 밖에 두었다 — {}", window(&a).list.offset());
     }
 
+    /// **휠에 이어 온 누르기는 사람이 보던 화면으로 맞힌다**(moai-fyul 리뷰) — 탐색기 목록과 같은 까닭이다
+    /// (`mouse::tests::a_click_right_after_the_wheel_takes_the_row_on_screen`): 휠은 목록의 굴린 자리를 바로 옮기는데,
+    /// 몰아 받는 동안에는 그리지 않아 그 뒤의 누르기도 그리기 전에 온다.
+    #[test]
+    fn a_click_right_after_the_wheel_takes_the_page_on_screen() {
+        let mut files: Vec<(String, String)> = vec![("README.md".into(), "# Home\n".into())];
+        files.extend((1..=30).map(|n| (format!("p{n:02}.md"), format!("# Page {n:02}\n"))));
+        let files: Vec<(&str, &str)> = files.iter().map(|(f, b)| (f.as_str(), b.as_str())).collect();
+        let (_s, mut a) = wiki_app("click-roll", &files);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
+        assert_eq!(window(&a).list.offset(), 3, "시험의 전제 — 휠이 목록을 굴렸다");
+        click(&mut a, d.rows.x + 2, d.rows.y + 1);
+        assert_eq!(slug(&a), "p01", "그리기 전의 누르기가 굴린 만큼 어긋난 페이지를 골랐다");
+    }
+
     fn slugs(a: &App) -> Vec<String> {
         window(a).shown().iter().map(|p| p.slug.clone()).collect()
     }

@@ -155,8 +155,9 @@ struct GrepWas {
 /// 선 줄과, 그 목록·보드를 세운 디렉터리·거름망·보기·차례·열. **굴린 자리는 그 목록·보드의 것이다**(리뷰): 폴더를
 /// 드나들거나 거르고 검색하면 다른 줄로 다시 서서, 커서가 같은 줄에 다시 서도 들고 온 굴린 자리는 다른 목록의 줄을
 /// 센다. 보기(`SPC v`)·차례(`SPC s`)·열(`SPC c`)도 사람이 목록을 다시 세우는 토글이라 같다(사용자 결정 2026-10-03).
-/// 다시 읽기는 이 가운데 아무것도 안 바꾼다 — 굴린 화면이 그대로다. 창 크기와 상세 칸도 안 든다: 캔버스의 줄은 같은
-/// 목록의 줄이다(같은 결정).
+/// 옆 워크트리 겹쳐 보기(`SPC v w`)도 그 보기 토글의 하나다 — 그 값은 [`App::view`] 가 아니라 [`App::worktree`] 에 있어
+/// 따로 든다(moai-fyul 리뷰). 다시 읽기는 이 가운데 아무것도 안 바꾼다 — 굴린 화면이 그대로다. 창 크기와 상세 칸도
+/// 안 든다: 캔버스의 줄은 같은 목록의 줄이다(같은 결정).
 ///
 /// 짓는 자는 [`App::adrift_here`] 하나다 — 굴릴 때 든 것과 그릴 때 견주는 것이 같은 자로 서야 한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +168,7 @@ struct Adrift {
     view: view::View,
     order: keys::Sorting,
     fields: view::Fields,
+    worktree: bool,
 }
 
 /// 무엇을 받고 있는가. 글을 받는 동안에는 이동키가 글자가 된다.
@@ -1328,9 +1330,9 @@ pub struct App {
     ///
     /// 걷는 자는 일곱이다. 커서 키는 옮겼든 못 옮겼든 걷는다(목록은 [`App::step`], 보드는 [`App::board_step`]) — 다음
     /// 키가 그 줄에서 움직이고 화면은 그 줄로 돌아간다. 펴고 접는 `l`·`h`·`Tab` 도 커서가 선 줄의 키라 걷는다 — 목록의
-    /// 묶음 줄은 [`App::key`] 가, 보드의 프로젝트 머리줄은 [`App::unfold`]·[`App::fold`] 가. 방금 쓴 줄이나 위키에서
-    /// 고른 id 에 서는 길도 그 줄을 보이러 가는 것이라 걷는다([`App::land`]). 커서가 다른 줄에 서거나(누르기·검색·사라진
-    /// 줄 대신 선 줄) 목록이 다시 서면(폴더 드나들기·검색·거름망·`SPC v`·`SPC s`·`SPC c`, [`Adrift`]) 그림이
+    /// 묶음 줄이든 프로젝트 머리줄이든 한 자리, [`App::key`] 가 걷는다. 방금 쓴 줄이나 위키에서 고른 id 에 서는 길도
+    /// 그 줄을 보이러 가는 것이라 걷는다([`App::land`]). 커서가 다른 줄에 서거나(누르기·검색·사라진 줄 대신 선 줄)
+    /// 목록이 다시 서면(폴더 드나들기·검색·거름망·`SPC v`(`SPC v w` 포함)·`SPC s`·`SPC c`, [`Adrift`]) 그림이
     /// 걷는다([`App::rolled_off`]). **번호가 아니라 정체로 든다** — 옆 세션의 쓰기로 다시 읽으면 같은 줄의 번호가
     /// 밀리는데, 그때마다 굴린 화면이 커서로 돌아가면 안 된다. 목록과 보드를 오가면 굴린 자리가 첫 줄로 돌아가니 함께
     /// 걷는다([`App::flip_layout`]). 프로젝트를 떠날 때도 걷는다(`App::leave_project`) — 정체는 id 라, 같은 prefix 의
@@ -4670,8 +4672,8 @@ impl App {
     /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
     ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다
     ///
-    /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 카드
-    /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드에서 그 카드가 안 보여도 그림이 안 드러낸다.
+    /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 줄
+    /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드나 목록에서 그 줄이 안 보여도 그림이 안 드러낸다.
     fn flip_layout(&mut self, rows: &[Row]) {
         let current = self.current_of(rows);
         let held = current.as_ref().map(|r| self.anchor_of(r));
@@ -4854,10 +4856,9 @@ impl App {
     /// `deep` 이면 그 밑의 묶음까지 다 편다(`Tab`). 이미 펼쳐져 있으면 `Tab` 은 통째로 접고
     /// `l` 은 아무 일도 안 한다 — 묶음 줄의 두 키와 같은 자다([`App::expand_all`]).
     ///
-    /// **굴려 떼어 둔 보드의 화면을 걷는다**(moai-j0jf 리뷰, [`App::adrift`]) — 보드의 머리줄에서 `l`·`Tab` 은 그 줄의
-    /// 커서 키다. 카드의 커서 키([`App::board_step`])처럼 아무것도 안 바뀌어도 화면을 머리줄로 되돌린다.
+    /// 굴려 떼어 둔 화면([`App::adrift`])은 이것을 부르는 [`App::key`] 가 걷는다(moai-j0jf 리뷰 · moai-fyul) — 머리줄의
+    /// `l`·`Tab` 은 그 줄의 커서 키라, 아무것도 안 바뀌어도 화면을 머리줄로 되돌린다. 목록의 묶음 줄과 한 자리에서 걷는다.
     fn unfold(&mut self, rows: &[Row], deep: bool) {
-        self.adrift = None;
         let Some(at) = self.head_at(rows) else { return };
         let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) else { return };
         let was = !self.folded.contains(&path) && self.site_of_place(at).is_some();
@@ -4889,9 +4890,8 @@ impl App {
     }
 
     /// 머리줄을 접는다 — 그 프로젝트의 줄이 목록에서 빠진다. **읽은 것은 안 버린다**: 다시 펴면
-    /// 그대로 서고, 낡았으면 표식과 시계가 다시 읽는다. 굴려 떼어 둔 보드의 화면은 [`App::unfold`] 처럼 걷는다.
+    /// 그대로 서고, 낡았으면 표식과 시계가 다시 읽는다. 굴려 떼어 둔 화면은 [`App::unfold`] 처럼 [`App::key`] 가 걷는다.
     fn fold(&mut self, rows: &[Row]) {
-        self.adrift = None;
         let Some(at) = self.head_at(rows) else { return };
         if let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) {
             // 밑의 펼침까지 걷는다 — 다 접기(`Tab`)와 같은 자다: 접힌 것을 다시 펼 때 접기 전
@@ -5064,7 +5064,7 @@ impl App {
         use keys::Browse as B;
         // **펴고 접는 키는 커서가 선 줄의 키다**(moai-fyul) — 굴려 떼어 둔 화면([`App::adrift`])을 걷어 그 줄로 되돌린다.
         // 아무것도 안 펴고 안 접혀도 걷는다: 화면 밖의 줄에서 누른 `l` 이 아무 일도 안 하면 키가 죽은 것처럼 보인다
-        // ([`App::board_step`] 과 같은 까닭). 보드의 카드·머리줄 갈래도 저마다 걷는다.
+        // ([`App::board_step`] 과 같은 까닭). 걷는 자리는 여기 하나다 — 보드의 머리줄(`unfold`·`fold`)도 이 갈래를 지난다.
         if matches!(act, B::Expand | B::Collapse | B::ExpandAll) {
             self.adrift = None;
         }
@@ -5351,7 +5351,7 @@ impl App {
     /// 멈춤은 끌어오기 때문에 생긴 규칙이라 함께 걷었다.
     ///
     /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::rolls`)이 사건마다 목록을 다시 세지 않게.
-    pub(super) fn roll(&mut self, roll: impl FnOnce(&mut scroll::Scroll)) {
+    fn roll(&mut self, roll: impl FnOnce(&mut scroll::Scroll)) {
         let was = self.list.offset();
         roll(&mut self.list);
         // 안 굴렀으면(끝에 닿았거나 보드가 화면에 다 든다) 새로 뗄 것이 없다 — 떼어 둔 것이 있으면 그대로 둔다.
@@ -5371,6 +5371,7 @@ impl App {
             view: self.view.clone(),
             order: self.order,
             fields: self.fields,
+            worktree: self.worktree,
         })
     }
 
@@ -6917,6 +6918,18 @@ mod tests {
         draw(&mut a);
         assert!(row_ids(&a).contains(&"argos-0101".to_string()), "시험의 전제 — `l` 이 에픽을 폈다");
         assert!(shown(&a), "펼친 `l` 이 화면을 그 줄로 안 되돌렸다 — {}", a.list.offset());
+
+        // 접는 `h` 와 다 펴는 `Tab` 도 그 줄의 키다(리뷰) — 셋을 한 자리(`App::key`)가 걷으니 셋 다 잰다.
+        for (press, open) in [("h", false), ("Tab", true)] {
+            a.hit("PageDown PageDown");
+            draw(&mut a);
+            assert!(!shown(&a), "시험의 전제 — 에픽 줄이 화면 밖이다 ({press})");
+            a.hit(press);
+            draw(&mut a);
+            assert_eq!(on_id(&a), "argos-0100", "시험의 전제 — `{press}` 가 에픽 줄에 남는다");
+            assert_eq!(row_ids(&a).contains(&"argos-0101".to_string()), open, "시험의 전제 — `{press}` 가 접고 폈다");
+            assert!(shown(&a), "`{press}` 가 화면을 그 줄로 안 되돌렸다 — {}", a.list.offset());
+        }
     }
 
     /// **굴린 목록을 다시 세우면 커서의 줄을 드러낸다**(moai-fyul) — 검색·거름망·보기·차례·열 토글은 목록을 다른 줄로
@@ -6928,7 +6941,8 @@ mod tests {
         let draw = |a: &mut App| super::draw::tests::render(a, 100, 30);
         let shown = |a: &App| a.list.shows(a.cursor, 1);
         draw(&mut a);
-        for toggle in ["SPC v 4 Esc", "SPC s t Esc", "SPC c t Esc"] {
+        // `SPC v w` 는 보기 토글이지만 그 값이 `App::view` 밖에 있다(`Adrift::worktree`, 리뷰).
+        for toggle in ["SPC v 4 Esc", "SPC s t Esc", "SPC c t Esc", "SPC v w Esc"] {
             a.hit("PageDown PageDown");
             draw(&mut a);
             assert!(!shown(&a), "시험의 전제 — 고른 줄이 화면 밖이다 ({toggle})");

@@ -59,9 +59,9 @@ are kept in your user config and carry over to the next run and to every project
   Nothing of it is kept; it counts afresh each time it opens
 - **`SPC g w` — the wiki.** The pages `moai wiki ls` lists, read only: the pages
   on the left with the home page first, the page under the cursor on the right.
-  On the overview it reads the project of the row under the cursor. The wheel
-  and `Ctrl-d`/`Ctrl-u` scroll the page list without moving the cursor, as on
-  the main list. `Enter` on
+  On the overview it reads the project of the row under the cursor. The wheel,
+  `Ctrl-d`/`Ctrl-u` and `Ctrl-f`/`Ctrl-b` scroll the page list without moving
+  the cursor, as on the main list. `Enter` on
   the list goes to the page; `Enter` on the page lists its links and the issue
   ids it names. Taking a page link goes there and `Backspace` comes back; taking
   an id closes the window onto that row, inside that project when you opened it

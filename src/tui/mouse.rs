@@ -35,9 +35,13 @@ pub struct Drawn {
     pub body: Rect,
     /// 목록 칸 — 테두리까지.
     pub list: Rect,
-    /// 목록의 줄이 서는 자리 — 테두리와 열 이름 줄을 뺀 안쪽. 이 자리의 n 번째 줄이 굴린 자리(`App::list`)에서
-    /// n 만큼 내려간 줄이다.
+    /// 목록의 줄이 서는 자리 — 테두리와 열 이름 줄을 뺀 안쪽. 이 자리의 n 번째 줄이 그 프레임의 굴린 자리
+    /// ([`Drawn::top`])에서 n 만큼 내려간 줄이다.
     pub rows: Rect,
+    /// 그 프레임이 목록을 그린 굴린 자리 — 맨 위에 선 줄(moai-fyul 리뷰). **누르기는 지금의 `App::list` 가 아니라 이것으로
+    /// 맞힌다** — 휠은 화면만 굴려 `App::list` 를 바로 옮기고, 몰아 받는 동안(`cmd::tui::rolls`)에는 그리지 않으므로 휠에
+    /// 이어 온 누르기는 아직 옛 화면을 본 사람의 손이다. 지금 자리로 맞히면 굴린 만큼 어긋난 줄을 고른다.
+    pub top: usize,
     /// 상세 칸 — 테두리까지. 숨겼거나 접혀 안 섰으면 없다(`draw::split_body`).
     pub detail: Option<Rect>,
     /// 보드의 카드가 보이는 자리와 그 줄(`App::rows` 의 첨자)(moai-9nfw). 목록으로 세웠으면 비었다 — 그때는
@@ -61,8 +65,11 @@ pub struct Drawn {
 pub struct WikiAt {
     /// 페이지 목록 — 테두리까지.
     pub list: Rect,
-    /// 목록의 줄이 서는 자리 — 테두리를 뺀 안쪽. 이 자리의 n 번째 줄이 목록의 굴린 자리에서 n 만큼 내려간 페이지다.
+    /// 목록의 줄이 서는 자리 — 테두리를 뺀 안쪽. 이 자리의 n 번째 줄이 그 프레임의 굴린 자리([`WikiAt::top`])에서 n 만큼
+    /// 내려간 페이지다.
     pub rows: Rect,
+    /// 그 프레임이 페이지 목록을 그린 굴린 자리 — [`Drawn::top`] 과 같은 까닭으로 누르기는 이것으로 맞힌다.
+    pub top: usize,
     /// 본문 칸 — 테두리까지. 좁아 안 섰으면 없다.
     pub page: Option<Rect>,
 }
@@ -231,7 +238,7 @@ impl App {
                 w.chord.clear();
                 w.focus = on;
                 if on == Side::List && d.rows.contains(at) {
-                    let n = w.list.offset() + usize::from(at.y - d.rows.y);
+                    let n = d.top + usize::from(at.y - d.rows.y);
                     if n < w.shown().len() {
                         w.move_to(n);
                     }
@@ -277,7 +284,7 @@ impl App {
         }
         let rows = self.drawn.rows;
         if pane == Pane::Explorer && rows.contains(at) {
-            let n = self.list.offset() + usize::from(at.y - rows.y);
+            let n = self.drawn.top + usize::from(at.y - rows.y);
             if n < self.rows().len() {
                 self.move_to(n);
             }
@@ -421,6 +428,21 @@ mod tests {
         assert!(top > 0, "목록이 안 굴렀다");
         click(&mut a, rows.x + 2, rows.y);
         assert_eq!(a.cursor, top, "굴린 만큼을 안 더했다");
+    }
+
+    /// **휠에 이어 온 누르기는 사람이 보던 화면으로 맞힌다**(moai-fyul 리뷰) — 휠은 화면만 굴려 굴린 자리를 바로
+    /// 옮기는데, 몰아 받는 동안(`cmd::tui::rolls`)에는 그리지 않아 그 뒤의 누르기까지 한 번에 받는다. 지금 자리로 맞히면
+    /// 사람이 누른 줄보다 굴린 만큼 아래 줄에 선다.
+    #[test]
+    fn a_click_right_after_the_wheel_takes_the_row_on_screen() {
+        let mut a = drawn(40, 100, 20);
+        let rows = a.drawn.rows;
+        let (lx, ly) = middle(a.drawn.list);
+        roll(&mut a, true, lx, ly);
+        roll(&mut a, true, lx, ly);
+        assert_eq!(a.list.offset(), 2 * WHEEL as usize, "시험의 전제 — 휠이 화면을 굴렸다");
+        click(&mut a, rows.x + 2, rows.y + 2);
+        assert_eq!(a.cursor, 2, "그리기 전의 누르기가 굴린 만큼 어긋난 줄을 골랐다");
     }
 
     /// 마지막 줄 밑의 빈 곳·테두리는 **커서를 안 옮긴다** — 없는 줄에 커서를 세우면 상세가 빈다.

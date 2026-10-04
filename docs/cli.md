@@ -2253,7 +2253,7 @@ Options:
   second press. Unfolded members stand with branch marks in the title column,
   and that unfolding is not kept in the config. gg and Home go to the top,
   G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
-  Ctrl-b (PageDown and PageUp) a whole page, and so does the wheel — the
+  Ctrl-b (PageDown and PageUp) a whole page and the wheel three rows — the
   list, not the cursor: the chosen row and the detail stay put even once the
   row is off screen, and the next cursor key moves from that row and scrolls
   back to it.
