@@ -825,6 +825,20 @@ prints one. When an epic changes what a person does, the window that did it fixe
 on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
 
+/// 우편함을 AGENTS 블록에 알리는 조각(moai-h8tn). **짧게 둔다** — 언제나 읽히는 블록이라 모든 세션이 그
+/// 값을 낸다. 동사 넷과 "기록이 아니다·훅이 싣는다·깨우기는 벤더의 길" 셋만 말하고, 꼴과 까닭은
+/// `moai send --help` 와 `src/mail.rs` 에 둔다.
+const MAILBOX: &str = r#"    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
+    moai send any-idle-worker '<subject>'   the first idle agent but you and supervisors takes it
+    moai inbox --ack                        the letters for you, marked read as they are shown
+    moai agents                             who is here - `moai hello` registers you
+
+A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
+on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
+and the end of each turn load the letters for this session and mark them read. `--wake`
+wakes an idle recipient the vendor's way (Codex through `codex queue`, Antigravity through
+its tmux pane); a Claude session is woken by the sender, with SendMessage."#;
+
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
 /// 물은 창이 같은 에픽을 다르게 가른다.
@@ -1016,6 +1030,10 @@ They stand once `moai skill install` has planted the hooks into Claude.
 the ideas that have piled up, one at a time, to the sessions idling on the same
 repository, and to take their reports — the supervisor picks, sends and checks;
 it does not fix and it does not merge.
+
+### Letters between agents
+
+{MAILBOX}
 
 ### The wiki
 
