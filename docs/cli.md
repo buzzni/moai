@@ -2196,7 +2196,8 @@ Options:
 
   --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
   "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
-  ids with this tracker's prefix the page names outside code blocks. `links` is
+  ids with this tracker's prefix the page names outside code blocks; the name
+  of a skill moai plants (`moai-wiki`) is never one. `links` is
   [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
