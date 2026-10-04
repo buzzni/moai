@@ -3737,3 +3737,12 @@
 {"ts":"2026-10-04T05:50:45Z","id":"moai-ihu4.x94","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-04T05:50:54Z","id":"moai-ihu4.8jt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 14건 중 12건을 리뷰가 고쳤고 시험으로 확인해 fix 커밋으로 담았다(BOM 제목, 연 페이지의 bytes, 슬러그 감싸기, 알림 중복, 죽은 단언, 못 읽는 줄의 id 시험, CHANGELOG, 도움말 종료 코드, show 가 한 페이지만 읽기, held::utf8, markdown::OPTIONS, notice_lines 접기). 넘긴 것: 8번(건너뛴 자리가 --json 에 없다)은 사람이 키를 더하기로 정해 멤버 moai-ihu4.x94 로 같은 에픽에서 고쳤다. wiki_dir 이 \".\" 이면 체크아웃 전체를 걷는 것은 정한 설계라 그대로 둔다. 리뷰 뒤에 든 l2e·x94 는 이 리뷰를 안 지났다 — 시험과 키 바꿈으로 붉어지는지 확인만 했다"}
 {"ts":"2026-10-04T05:51:21Z","id":"moai-ihu4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 머지(develop) 와 닫기 끝. 탐색기 위키 창 에픽 moai-o3cb 가 이제 열린다 — wiki::load·load_one·notices·target 를 그대로 쓴다. 첫 페이지 에픽 moai-gelm 도 열린다. 루트 release 바이너리는 아직 옛것이다(위키 명령 없음)"}
+{"ts":"2026-10-04T05:51:42Z","id":"moai-m6ni.pu3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — SPC 메뉴를 마우스로 쓴다 에픽 전체"}
+{"ts":"2026-10-04T05:51:49Z","id":"moai-m6ni.k7y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:51:49Z","id":"moai-m6ni.puw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:51:49Z","id":"moai-m6ni.o5x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T05:51:49Z","id":"moai-m6ni.pu3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T05:52:30Z","id":"moai-m6ni.pu3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix 가 백그라운드로 도는 중 — 돌아오면 원문을 노트로, 고침을 fix: 커밋으로, 이어서 CHANGELOG(7-3)와 머지(8). 멤버 셋은 머지 뒤 done"}
+{"ts":"2026-10-04T05:52:43Z","id":"moai-gelm.bwv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T05:52:43Z","id":"moai-gelm.igm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T05:52:44Z","id":"moai-gelm.sjt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
