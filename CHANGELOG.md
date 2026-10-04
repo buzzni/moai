@@ -26,7 +26,8 @@ does not tag — see `CONTRIBUTING.md`.
   the pages left with conflict markers, and blocks nothing; a page over 1 MB
   stays in the list unread. `--json` gives each page's `slug`, `title`, `path`,
   `bytes`, `issues`, `links` and `conflict`, an `error` on a page that could not
-  be read, and `body` under `show`. A `wiki_dir` that does not exist yet exits
+  be read, `skipped` for what the walk left out (a link to a directory, a name
+  that is not UTF-8, a directory it could not open), and `body` under `show`. A `wiki_dir` that does not exist yet exits
   0; one that is absolute, climbs out with `..`, leads out of the checkout or
   into `.git/`, or is not a directory fails `moai wiki` alone — every other
   command reads the config as before.
