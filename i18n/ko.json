@@ -877,7 +877,7 @@
   "config.prefix_dash": "`prefix` 는 `-` 로 시작하거나 끝날 수 없다 — {raw}",
   "config.flow_days_zero": "`status_flow_days` 는 1 이상이다 — 0 이면 흐름이 늘 0 으로 선다",
   "config.no_such_threshold": "{line}줄: `{key}` 라는 설정이 없다. 있는 것: {known}",
-  "config.threshold_in_table": "{line}줄: 문턱은 테이블 없이 맨 위에 적는다 — `{named} = …`",
+  "config.threshold_in_table": "{line}줄: 이 설정은 테이블 없이 맨 위에 적는다 — `{named} = …`",
   "config.no_prefix": "`prefix` 가 없다",
   "config.no_statuses": "`statuses` 가 비었다",
   "config.no_done": "`statuses` 에 `{done}` 이 있어야 한다 — {raw}",

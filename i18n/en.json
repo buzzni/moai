@@ -877,7 +877,7 @@
   "config.prefix_dash": "`prefix` cannot begin or end with `-` — {raw}",
   "config.flow_days_zero": "`status_flow_days` is 1 or more — at 0 the flow always stands at 0",
   "config.no_such_threshold": "line {line}: there is no setting called `{key}`. There are: {known}",
-  "config.threshold_in_table": "line {line}: thresholds are written at the top with no table — `{named} = …`",
+  "config.threshold_in_table": "line {line}: this setting is written at the top with no table — `{named} = …`",
   "config.no_prefix": "`prefix` is not there",
   "config.no_statuses": "`statuses` is empty",
   "config.no_done": "`statuses` must hold `{done}` — {raw}",
