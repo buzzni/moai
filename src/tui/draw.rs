@@ -2329,13 +2329,22 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
         f.render_widget(Paragraph::new(names_line(common, cols, tallied, inner)), names_at);
     }
     app.list.fit(list_at.height as usize, rows.len());
-    if let Some(at) = selected {
+    // **사람이 화면을 굴려 커서에서 떼어 놓았으면 안 드러낸다**(moai-fyul, [`App::rolled_off`]) — 보드와 같은 규칙이다.
+    // 고른 줄은 화면 밖에 있어도 그대로고, 다음 커서 키가 화면을 그리로 되돌린다.
+    let adrift = app.rolled_off(rows);
+    if let Some(at) = selected
+        && !adrift
+    {
         app.list.reveal(at);
     }
     // **보이는 창만 짓는다**(moai-wt4n) — 위젯은 `offset` 창만 그리는데, 창 밖 줄까지 지으면 에픽 500개
     // 뿌리에서 줄 짓기가 프레임의 4~8ms 였다. 창 밖은 빈 줄로 둬 줄 수와 `offset` 은 그대로다. 자리는
     // 위에서 이미 커서를 보이게 옮겼으므로 위젯이 다시 옮기지 않는다.
     let window = app.list.offset()..app.list.offset() + list_at.height as usize;
+    // **화면 밖의 커서는 위젯에 안 넘긴다** — 위젯은 고른 줄이 창 밖이면 제 자리를 그리로 옮긴다(ratatui `List`). 굴려
+    // 떼어 둔 화면이 그 길로 되돌아가면 빈 줄(창 밖은 안 지었다)이 선다. 커서 칸(`>`)의 자리는 늘 둔다
+    // (`HighlightSpacing::Always`) — 안 두면 커서가 화면을 벗어나는 순간 모든 줄이 그 폭만큼 왼쪽으로 밀린다.
+    let selected = selected.filter(|at| window.contains(at));
     let items: Vec<ListItem> = rows
         .iter()
         .zip(&tallies)
@@ -2353,7 +2362,8 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
         List::new(items)
             // 커서는 **색만으로 표시하지 않는다** — 반전과 `>` 를 함께 준다.
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(CURSOR),
+            .highlight_symbol(CURSOR)
+            .highlight_spacing(HighlightSpacing::Always),
         list_at,
         &mut state,
     );
