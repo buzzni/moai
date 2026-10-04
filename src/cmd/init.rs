@@ -755,10 +755,11 @@ const GITATTRIBUTES: &str = "\
 .moai/journal/*.jsonl  text eol=lf merge=union
 ";
 
-// **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 `.claude/worktrees/` 에
-// 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다. 넣는 것은
-// 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬·플러그인을 가린다. 끄는 길은
-// 두지 않는다: 워크트리를 안 쓰는 저장소에는 빈 자리를 막는 줄일 뿐이다.
+// **워크트리 자리도 막는다**(moai-mxtb, 사용자와 정함). 감독 일꾼 절차가 워크트리를 뜨는데, 그 자리가
+// 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다. 자리는 세 벤더가 함께 쓰는 `.worktrees/` 다
+// (moai-5s9l, 2026-10-04 사용자 결정) — Claude 의 자리 `.claude/worktrees/` 줄은 남긴다: 옛 자리에 선
+// 워크트리가 아직 도는 저장소가 있다. `.claude/` 통째는 저장소가 커밋하는 설정·스킬·플러그인을 가린다.
+// 끄는 길은 두지 않는다: 워크트리를 안 쓰는 저장소에는 빈 자리를 막는 줄일 뿐이다.
 //
 // **우편함과 출석부도 막는다**(moai-h8tn, 2026-10-04 사용자 결정). 편지와 출석은 전달이지 기록이 아니라
 // 커밋할 것이 아니고, 출석에는 이 기계의 pid·경로·tmux 소켓이 든다. 두 디렉터리는 제 `.gitignore`(`*`)도
@@ -769,6 +770,7 @@ const GITIGNORE: &str = "\
 # moai
 .moai/lock
 .moai/*.tmp.*
+/.worktrees/
 /.claude/worktrees/
 .moai/mail/
 .moai/agents/

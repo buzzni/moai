@@ -60,25 +60,29 @@ registration, whether `.agents/skills/` holds this version's skills, and whether
 
 **One text serves every agent.** Both trees get the same skills. The steps only
 one agent has — entering a worktree, asking the person, calling the review,
-changing the model, clearing the window, messaging another session, stopping
-what a review left running — sit in a "Words per agent" table in the `moai` and
-`moai-supervise` skills, one column per agent, and each agent reads its own. A
-step an agent does not have reads `—`: tell the person and go on.
+changing the model, clearing the window, calling a skill, waking a session,
+stopping what a review left running — sit in a "Words per agent" table in the
+`moai`, `moai-supervise` and `moai-work` skills, one column per agent, and each
+agent reads its own; the steps name a row in *italics*. A step an agent does not
+have reads `—`: tell the person and go on.
 
-Three skills come with it:
+Four skills come with it:
 
     moai              the tracker itself — what to pick up, issues, plans, ideas
-    moai-supervise    hands piled-up ideas to the sessions idling on the repository
+    moai-supervise    hands piled-up ideas to the workers waiting on the repository
     moai-wiki         keeps this wiki in step with the work
+    moai-work         makes a window a worker that waits for those ideas
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
 - **`moai-supervise`** makes a session the [supervisor](glossary.md#supervisor),
-  which hands the [ideas](glossary.md#idea), one at a time, to the Claude
-  sessions idling on the same repository and takes their reports. It picks, sends and checks; it does
-  not fix and it does not merge. The [workers](glossary.md#worker) follow a
-  numbered [brief](glossary.md#brief), and their way of working is on
-  [the workflow page](workflow.md#work-in-a-worktree)
+  which hands the [ideas](glossary.md#idea), one at a time, to the
+  [workers](glossary.md#worker) waiting on the same repository and takes their
+  reports. It picks, sends and checks; it does not fix and it does not merge
+- **`moai-work`** makes a window a worker: it waits for a supervisor's letter and
+  does the work by the numbered [brief](glossary.md#brief) the skill carries. Both
+  are in [Hand work to waiting workers](#hand-work-to-waiting-workers), and the
+  worker's way of working is on [the workflow page](workflow.md#work-in-a-worktree)
 - **`moai-wiki`** is followed by the window that did an epic, to fix the page
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
@@ -112,8 +116,8 @@ gets through — run it as given. None of them waits on a person except rule 5.
 2. **Pick something up before you change the repository.** An `Edit`, a `Write`,
    or a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
-   the plan. Not counted: `.moai/`, `.claude/`, `.git/`, `target/`,
-   `node_modules/`, and anything outside the repository
+   the plan. Not counted: `.moai/`, `.claude/`, `.worktrees/`, `.git/`,
+   `target/`, `node_modules/`, and anything outside the repository
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -140,6 +144,7 @@ agent.
 
     moai hello --role worker                 register this agent (the hooks do it for Claude)
     moai agents                              who is here, busy or idle; sweeps the gone
+    moai agents --role worker --status idle  the workers waiting for work
     moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
     moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
     moai inbox --ack                         the letters for you, marked read
@@ -158,8 +163,8 @@ agent.
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
   neither the sender nor registered as a `supervisor` (`moai hello --role
   supervisor`) to take the letter keeps it. A hook takes one such letter per
-  load, so several of them spread over several agents; a `moai inbox --ack`
-  that tried in the same moment is told it was taken
+  load, and so does one `moai inbox --ack`, so several of them spread over
+  several agents; an `--ack` that tried in the same moment is told it was taken
 - **The hooks deliver.** With the plugin installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
   and mark them read — `moai inbox --all` shows them again, nothing is deleted.
@@ -169,7 +174,10 @@ agent.
   rest. A letter's body holds up to 64 KB, its subject 200 characters
 - **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
   each task is how a worker session — one a person opened — gets its next one;
-  nothing has to wake it
+  nothing has to wake it. While it waits its row reads idle, and once a letter
+  comes, busy — a wait that runs out leaves it idle. That is what
+  `moai agents --status idle` finds: a worker waits inside its turn, where no
+  hook marks it
 - **Waking is a bonus.** `moai send --wake` knocks once on an idle recipient:
   when its presence row carries a tmux pane, `moai inbox` is typed into that
   pane; a Claude session cannot be woken from a command line, so the sender
@@ -180,6 +188,53 @@ agent.
 Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
 (each with `id` and `read` besides the letter's own keys) and `lost` — the ids
 another agent took first.
+
+## Hand work to waiting workers
+
+The supervisor and its workers are sessions a person opened — Claude Code, Codex
+or Antigravity in any mix, any of them in either role. moai never launches one or
+runs one headless, and nobody needs tmux.
+
+1. **Make the workers.** In each window that should take work, call the
+   `moai-work` skill once (`/moai-work` in Claude Code, `$moai-work` in Codex,
+   by name in Antigravity). The window says `moai hello --role worker` and waits
+   with `moai inbox --ack --wait`. Each wait that runs out costs one short turn of
+   tokens before it waits again
+2. **Make the supervisor.** In one window, call `moai-supervise`. It says
+   `moai hello --role supervisor`, picks ideas that do not collide with the work
+   open, finds the waiting workers with `moai agents --role worker --status idle`
+   and sends each one idea as a letter
+3. **The letter carries the assignment only** — the idea, the model and
+   difficulty picked for it, the work running alongside, the base branch, the
+   milestone, the root, whether to wait again or end the turn after the report,
+   and whether the person is away. The steps are in the worker's skill
+4. **The worker does the work in a worktree** — unfolds the idea into an epic,
+   picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
+   reviewed inside its own session, merges, closes, leaves a `Next:` note and,
+   last of all, reports with `moai send`
+5. **The supervisor checks the report** — the merge is on the base branch, the
+   epic is done, the worktree is gone — and sends the next idea
+
+**The review runs inside the worker's own session** — `/code-review` in Claude
+Code, the review the session has in Codex and Antigravity, or the worker reading
+the diff itself. It never starts another agent (`codex review`, `codex exec`,
+`agy -p`).
+
+**Clearing a window is the person's, or the supervisor's on tmux.** A worker
+loaded with one epic's conversation may be cleared between tasks: stop the wait,
+clear it (`/clear`, `/new` in Codex) and call `moai-work` again — the context
+lives in the tracker. A supervisor running inside tmux — any vendor — clears a
+Claude Code worker's window itself once the report checks out: it reads the input
+box first so a person's half-typed text is copied out, never typed over, and the
+letter told that worker to end its turn instead of waiting. Once the clear went
+through it sends the next letter and types `moai inbox` into the emptied box, and
+the hooks load the letter. Codex and Antigravity windows are left to the person —
+their input box is not read yet.
+
+**When the person steps away**, they tell the supervisor, and the letters say
+`Person: away`. The worker then settles a design question by its own
+recommendation and leaves `Decided alone: …` on the issue instead of waiting,
+and stops at anything that cannot be undone.
 
 ## Work the queue from a session
 
@@ -220,5 +275,15 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **The agent keeps writing into a worktree's `.moai/`.** It does not need to: a
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
+- **The supervisor finds no worker.** `moai agents --role worker --status idle`
+  lists only windows where a person called `moai-work` and whose row reads idle.
+  A session the hooks registered has no role until it says hello as a worker; a
+  worker busy on its person's work reads busy
+- **A worker never answers.** A letter waits in `.moai/mail/` until that worker
+  waits again or its hooks load it — `moai inbox --all --as <worker>` shows what
+  it has. A row reads idle while its window waits, but also once a turn ended
+  without waiting again (its person stopped the wait, or cleared the window); a
+  letter sent then sits until that window's next prompt. Without hooks or tmux
+  nothing wakes a window that is not waiting
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk

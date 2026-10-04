@@ -140,15 +140,16 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
-What counts is work inside the repository — `.moai/`, `.claude/`, `target/` and
-anything outside the repository (scratchpad, temporary files) do not. Shell
+What counts is work inside the repository — `.moai/`, `.claude/`, `.worktrees/`, `target/`
+and anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
-what you are reviewing. The review is `/code-review` in Claude Code, `codex review` in Codex
-and a fresh `agy -p` session in Antigravity; the other steps that differ per agent are
-under "Words per agent" in the `moai` skill.
+what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
+Antigravity it is the review this session has, else read the diff yourself.
+It runs inside your own session — never start another agent program for it. The other
+steps that differ per agent are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts
@@ -188,17 +189,19 @@ are is unknown, nothing is refused.
 ## Words per agent
 
 moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
-are named by what they do. Each agent types a step its own way — read your own column.
+are named by what they do — a step written in *italics* is a row of this table. Each agent
+types a step its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` | run every command from that directory | run every command from that directory |
-| Come back to the root | `ExitWorktree(keep)` | run every command from the root | run every command from the root |
+| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
+| Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
-| Review the work | `/code-review` | `codex review` | a fresh `agy -p` session |
+| Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
-| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | — |
-| Message another session | `SendMessage` | — | — |
+| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | `/clear` |
+| Call a skill (the person does it) | `/<skill>` | `$<skill>` | ask for the skill by name |
+| Wake a session that sits idle (a bonus) | `moai send --wake`, or `SendMessage` when it says so | `moai send --wake` | `moai send --wake` |
 | Stop what a review left running | `TaskStop` | — | — |
 
 A `—` is a step that agent does not have, or one moai does not know yet: tell the

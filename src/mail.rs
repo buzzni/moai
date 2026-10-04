@@ -491,6 +491,43 @@ pub fn idle_worker<'a>(presences: &'a [Presence], from: &str) -> Option<&'a Pres
 
 // ── 프로세스 ──────────────────────────────────────────────────────────
 
+/// 이 프로세스 아래에서 `moai inbox --wait` 가 도는가 — 그 에이전트가 턴 안에서 편지를 기다리는 중인가.
+///
+/// 리눅스만 잰다 — `/proc` 의 `stat`(부모)과 `cmdline`(인자)을 읽어 그 pid 의 자손을 훑는다. 못 재는 판(다른
+/// 유닉스·`/proc` 을 못 읽음)은 `false` 다: 모르는 것을 "기다린다" 로 읽으면 깨워야 할 에이전트를 안 깨운다. 깨우기는
+/// 덤이고, 그쪽으로 틀리는 값은 한 번 덜 두드리는 것보다 크다.
+pub fn waits(pid: u32) -> bool {
+    if pid <= 1 || !cfg!(target_os = "linux") {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir("/proc") else { return false };
+    let mut kids: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for e in entries.filter_map(Result::ok) {
+        let Some(n) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        if let Some(p) =
+            std::fs::read(format!("/proc/{n}/stat")).ok().and_then(|b| parse_stat(n, &String::from_utf8_lossy(&b)))
+        {
+            kids.entry(p.ppid).or_default().push(n);
+        }
+    }
+    let mut todo = vec![pid];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(at) = todo.pop() {
+        if !seen.insert(at) {
+            continue;
+        }
+        for &kid in kids.get(&at).into_iter().flatten() {
+            let args = std::fs::read(format!("/proc/{kid}/cmdline")).unwrap_or_default();
+            let args: Vec<&[u8]> = args.split(|b| *b == 0).collect();
+            if args.contains(&b"inbox".as_slice()) && args.iter().any(|a| a.starts_with(b"--wait")) {
+                return true;
+            }
+            todo.push(kid);
+        }
+    }
+    false
+}
+
 /// 프로세스 하나 — pid·부모·선 때·이름.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Proc {
@@ -667,6 +704,12 @@ pub fn wake(p: &Presence) -> Woke {
     }
     if p.vendor == "claude" {
         return woke("send_message", false, Some("ask_sender"));
+    }
+    // **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `moai inbox --wait` 는 기다리는 동안 장을 `idle` 로
+    // 적는다 — 감독이 일꾼을 찾는 표다. 그런데 그 기다림은 턴 **안의** 셸 명령이라, 그 칸에 `moai inbox`+Enter 를 치면
+    // 도는 턴에 글자가 끼어든다. 기다림이 편지를 스스로 가지니 두드릴 까닭도 없다.
+    if waits(p.pid) {
+        return woke("none", false, Some("waiting"));
     }
     // **소켓을 모르는 칸은 안 친다**(리뷰 moai-h8tn.x4l) — `-S` 없는 `tmux` 는 보내는 쪽의 `$TMUX`(사람의 서버)나
     // 기본 서버에 붙고, 칸 id(`%N`)는 서버마다 따로 세어 그 서버에서는 남의 칸이다. 사람의 창에 `moai inbox` 와

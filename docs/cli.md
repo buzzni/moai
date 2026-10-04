@@ -2298,13 +2298,15 @@ Options:
   pane; a Claude session cannot be woken from a command line, so the line
   printed tells the sender to use SendMessage. With neither it does nothing
   and says nothing. moai never runs an agent's own program to wake it. An
-  agent at work is not woken. For any-idle-worker it knocks on the agent idle
-  the longest.
+  agent at work is not woken, nor one already waiting in `moai inbox --wait`
+  (Linux tells it from the processes). For any-idle-worker it knocks on the
+  agent idle the longest.
 
   --json gives the letter as written plus `id`, and `wake`
   ({"to","via","done","why"}) when --wake was given. `via` is send_message,
-  tmux or none; `why` names what stood in the way (busy, ask_sender, no_way,
-  nobody, missing, failed, timeout).
+  tmux or none; `why` names what stood in the way (busy, ask_sender, waiting,
+  no_way, nobody, missing, failed, timeout) - `waiting` is an agent already in
+  `moai inbox --wait`, which takes the letter itself.
 ```
 
 ## `moai inbox`
@@ -2332,7 +2334,10 @@ Options:
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
-  end of each task, again and again. Nothing has to wake it.
+  end of each task, again and again. Nothing has to wake it. While it waits,
+  its row in `moai agents` says idle; once a letter comes it says busy, and a
+  wait that runs out leaves it idle. A name with no row is not registered by
+  this - `moai hello` does that.
 
   A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
   and --all shows it again. The hooks do this by themselves: UserPromptSubmit
@@ -2341,7 +2346,8 @@ Options:
 
   A letter to any-idle-worker shows to every agent but its sender and the
   supervisors, and the first --ack keeps it; another that tried in the same
-  moment is told it was taken (`lost`).
+  moment is told it was taken (`lost`). One --ack keeps one such letter, as
+  the hooks do, so several of them spread over the agents that wait.
 
   Who you are is --as, else MOAI_AGENT, else the registered agent this
   command runs under (`moai hello`).
@@ -2359,6 +2365,8 @@ Who is here - the agents under .moai/agents (sweeps the gone)
 Usage: moai agents [OPTIONS]
 
 Options:
+      --role <role>          Only the agents with this role (worker, supervisor)
+      --status <status>      Only the agents in this state (idle, busy)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2366,10 +2374,19 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
+  moai agents                               everyone registered here
+  moai agents --role worker --status idle   the workers waiting for work
+
   An agent is registered by `moai hello`, or by the hooks when its session
-  starts. UserPromptSubmit marks it busy and Stop marks it idle. A row whose
-  process is gone is swept here - on Linux a reused pid is told apart by the
-  time the process started. A row that cannot be told alive or gone stays.
+  starts. UserPromptSubmit marks it busy and Stop marks it idle, and
+  `moai inbox --wait` marks it idle while it waits and busy once a letter
+  comes. A row whose process is gone is swept here - on Linux a reused pid is
+  told apart by the time the process started. A row that cannot be told alive
+  or gone stays.
+
+  --role and --status keep the rows whose word is exactly that one. A row a
+  hook registered carries no role until the agent says `moai hello --role`.
+  The sweep runs over every row either way.
 
   --json gives {"agents":[{"v","name","vendor","model","role","status",
   "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket"}],
