@@ -85,7 +85,7 @@ pub fn notices<'a>(pages: impl IntoIterator<Item = &'a Page>) -> Notices<'a> {
 }
 
 /// 페이지 하나.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
     /// 위키 뿌리에서의 상대 경로에서 `.md` 를 뗀 것 — `guide/explorer`. 이름이 곧 id 다.
     pub slug: String,

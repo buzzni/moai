@@ -19,6 +19,7 @@ pub mod register;
 pub mod scroll;
 mod stats;
 pub mod view;
+mod wiki;
 mod zones;
 
 use crate::config::Config;
@@ -192,6 +193,9 @@ pub enum Mode {
     /// 닫고 그 배치로 선다(moai-z46r, [`App::go`]). **상자에 담는다** —
     /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
     Stats(Box<stats::Window>),
+    /// `SPC g w` 가 연 위키 창(moai-o3cb). 통계 창과 같은 덮는 창이다 — 읽기만 하고, 열 때마다 새로 읽고, 설정에 안
+    /// 남는다. 상자에 담는 까닭도 같다: 페이지 본문을 통째로 든다.
+    Wiki(Box<wiki::Window>),
 }
 
 /// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
@@ -2942,7 +2946,8 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
-            | Mode::Stats(_) => String::new(),
+            | Mode::Stats(_)
+            | Mode::Wiki(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.hung = None;
@@ -3008,7 +3013,8 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
-            | Mode::Stats(_) => Raw::default(),
+            | Mode::Stats(_)
+            | Mode::Wiki(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
@@ -4625,19 +4631,20 @@ impl App {
         })
     }
 
-    /// 화면을 고른다 — `SPC g l`·`b`·`s`(moai-z46r). **토글이 아니라 고르기다**: 목록이나 보드를 다시 고르면 그 자리에
-    /// 그대로 남는다. 통계는 고를 때마다 새로 센다 — 열 때마다 새로 여는 창이고(사용자 결정), 그래서 통계 창 위의
-    /// `SPC g s` 도 눌러서 하는 일이 있다.
+    /// 화면을 고른다 — `SPC g l`·`b`·`s`·`w`(moai-z46r·moai-o3cb). **토글이 아니라 고르기다**: 목록이나 보드를 다시
+    /// 고르면 그 자리에 그대로 남는다. 통계와 위키는 고를 때마다 새로 읽는다 — 열 때마다 새로 여는 창이고(사용자 결정),
+    /// 그래서 그 창 위의 `SPC g s`·`SPC g w` 도 눌러서 하는 일이 있다. 한 창에서 다른 창을 고르면 새 창이 그 자리를 덮는다.
     ///
-    /// **통계 창 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는 창이 안
-    /// 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
+    /// **덮는 창(통계·위키) 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는
+    /// 창이 안 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
         let layout = match to {
             keys::Screen::Stats => return self.open_stats(),
+            keys::Screen::Wiki => return self.open_wiki(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
         };
-        if matches!(self.mode, Mode::Stats(_)) {
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) {
             self.mode = Mode::Browse;
         }
         if self.layout != layout {
@@ -4991,6 +4998,13 @@ impl App {
             }
             return;
         }
+        // **위키 창도 같은 결이다**(moai-o3cb) — SPC 메뉴를 열고, 아무 동작도 안 돈 키는 알림을 도로 세운다.
+        if matches!(self.mode, Mode::Wiki(_)) {
+            if !self.wiki_key(k) {
+                self.notice = carried;
+            }
+            return;
+        }
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
@@ -5247,6 +5261,7 @@ impl App {
             detail_at: self.detail_at,
             board: self.board(),
             stats: matches!(self.mode, Mode::Stats(_)),
+            wiki: matches!(self.mode, Mode::Wiki(_)),
             head: self.head_at(rows).is_some(),
             mouse: self.mouse_on,
             sorting: self.order,
@@ -5387,7 +5402,13 @@ impl App {
                 }
                 eaten
             }
-            Mode::Browse | Mode::Idea(_) | Mode::Pick(_) | Mode::Unregister(_) | Mode::Zone(_) | Mode::Stats(_) => {
+            Mode::Browse
+            | Mode::Idea(_)
+            | Mode::Pick(_)
+            | Mode::Unregister(_)
+            | Mode::Zone(_)
+            | Mode::Stats(_)
+            | Mode::Wiki(_) => {
                 return;
             }
         };
@@ -5648,7 +5669,7 @@ impl App {
             Mode::Zone(z) => z.paste(s),
             Mode::Unregister(_) => self.mode = Mode::Browse,
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
-            Mode::Stats(_) => {}
+            Mode::Stats(_) | Mode::Wiki(_) => {}
         }
     }
 

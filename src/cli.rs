@@ -481,9 +481,10 @@ IDEA
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
-  Screen — which one stands; the root menu says which [list/board/statistics]:
+  Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
+    SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v i  ideas              SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a

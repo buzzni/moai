@@ -819,14 +819,15 @@ mod tests {
         assert_eq!(at(inside()), "+화면 [목록]");
         assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
         assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
+        assert_eq!(at(Ctx { wiki: true, board: true, ..inside() }), "+화면 [위키]", "위키 창이 배치에 가렸다");
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "s"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "s", "w"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계", "위키"]);
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats)] {
+        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats), ('w', Screen::Wiki)] {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

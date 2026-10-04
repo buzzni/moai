@@ -371,6 +371,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
         },
+        Mode::Wiki(_) => {}
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고

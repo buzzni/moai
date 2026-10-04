@@ -1,0 +1,511 @@
+//! 위키 창 — `SPC g w`(moai-o3cb). 목록과 상세 자리를 **통째로** 덮고, Esc 로 닫으면 보던 자리 그대로다 — 통계 창
+//! (`tui::stats`)과 같은 덮는 창이다.
+//!
+//! **읽기만 한다**(2026-10-04 사용자 결정). 페이지를 걷고 푸는 것은 [`crate::wiki`] 가 하고 — `moai wiki ls` 와 같은
+//! 자다 — 여기는 연 순간 그것을 한 번 불러 들고 다니며 고르고 굴리기만 한다. **설정에 안 남는다**: 열 때마다 새로
+//! 읽고, 닫으면 버린다. 다시 읽기(`App::follow`)도 창을 안 건드린다 — 페이지는 가지를 타는 파일이라 트래커의 쓰기로
+//! 바뀌지 않고, 보던 페이지가 읽는 사이에 바뀌어 커서가 튀는 것보다 다시 여는 키 하나가 싸다.
+//!
+//! **배치**: 왼쪽 페이지 목록(홈 먼저, `wiki::load` 의 차례 그대로), 오른쪽 본문. **본문은 목록 커서를 따라간다** —
+//! 탐색기의 상세 칸과 같다(2026-10-04 사용자 결정). 목록의 `Enter` 는 본문 칸으로 가고, 칸 사이는 `Ctrl-w w` 다.
+//!
+//! **되돌아가기는 링크로 건너온 길만 되감는다**([`Window::back`]) — 목록에서 커서를 옮긴 것은 고른 것이라 자취에
+//! 안 남는다. 자취가 남았어도 Esc 는 창을 닫는다(같은 결정): 되감는 키는 `Bksp`·`h` 하나다.
+//!
+//! **어느 위키인가**: 프로젝트 안이면 그 체크아웃(`Repo::here`)의 위키 — 딸린 워크트리에서 띄웠으면 그 가지의
+//! 페이지다(`moai wiki ls` 와 같다). 한눈 보기(`0`)면 **커서가 선 줄의 프로젝트**다(통계 창과 같은 규칙). 여러
+//! 프로젝트의 위키를 한 목록에 섞지 않는다.
+
+use super::keys::{self, Browse, Chord, LEADER, WIKI};
+use super::layer::Depth;
+use super::menu;
+use super::scroll::{self, Move, Scroll};
+use super::{App, Mode, Row, Seat};
+use crate::i18n::{fill, say};
+use crate::wiki::{DirTrouble, Page, Wiki};
+use ratatui::crossterm::event::KeyEvent;
+use std::path::PathBuf;
+
+/// 포커스가 선 칸. 목록이 늘 왼쪽, 본문이 오른쪽이다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Side {
+    /// 왼쪽 페이지 목록. **여기서 시작한다** — 탐색기와 같다.
+    #[default]
+    List,
+    /// 오른쪽 본문.
+    Page,
+}
+
+/// 창의 상태 — 연 순간 읽은 페이지들과 커서·굴린 자리·건너온 자취.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Window {
+    /// 어느 프로젝트의 위키인가 — 프로젝트 이름.
+    pub project: String,
+    /// `wiki_dir` 의 날글자 — 제목이 댄다.
+    pub dir: String,
+    /// 한눈 보기에서 열었으면 그 프로젝트의 자리. 고른 id 가 그 프로젝트로 들어가 선다(2026-10-04 사용자 결정).
+    /// **첨자가 아니라 경로다** — 창이 떠 있는 동안 층의 줄이 다시 서면 첨자는 다른 프로젝트를 가리킨다.
+    pub from: Option<PathBuf>,
+    pages: Vec<Page>,
+    /// 걷다가 페이지로 못 세운 자리 수 — 목록 밑에 선다. 말없이 빠지면 그 밑의 페이지가 없는 줄 안다.
+    pub skipped: usize,
+    /// 목록에서 선 줄 — 보이는 페이지([`Window::shown`])의 차례다.
+    pub cursor: usize,
+    /// 목록의 굴린 자리 — 그림이 커서를 드러낸다.
+    pub list: Scroll,
+    /// 본문의 굴린 자리.
+    pub page: Scroll,
+    pub focus: Side,
+    /// 링크로 건너오기 전의 페이지와 그때 굴린 자리 — 되돌아가면 읽던 줄로 돌아간다.
+    trail: Vec<(String, usize)>,
+    /// 접두어(`gg`·`Ctrl-w`)를 기다리는 열 — 탐색의 열과 따로다(통계 창과 같다).
+    pub chord: Chord,
+}
+
+impl Window {
+    fn new(project: String, dir: String, from: Option<PathBuf>, wiki: Wiki) -> Window {
+        Window {
+            project,
+            dir,
+            from,
+            pages: wiki.pages,
+            skipped: wiki.skipped.len(),
+            cursor: 0,
+            list: Scroll::default(),
+            page: Scroll::default(),
+            focus: Side::List,
+            trail: Vec::new(),
+            chord: Chord::default(),
+        }
+    }
+
+    /// 목록에 선 페이지들, 차례대로.
+    pub fn shown(&self) -> Vec<&Page> {
+        self.pages.iter().collect()
+    }
+
+    /// 커서가 선 페이지 — 본문 칸이 그리는 것.
+    pub fn current(&self) -> Option<&Page> {
+        self.shown().get(self.cursor).copied()
+    }
+
+    /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 본문이면 굴리기. 탐색기의 `App::step` 과 같은 자다.
+    pub fn step(&mut self, m: Move) {
+        match self.focus {
+            Side::List => {
+                let len = self.shown().len();
+                self.move_to(scroll::cursor(m, self.cursor, || len));
+            }
+            Side::Page => self.page.go(m),
+        }
+    }
+
+    /// 커서를 옮기고, 다른 페이지로 갔으면 **본문을 첫 줄로 되돌린다** — 탐색기의 `App::move_to` 와 같은 까닭이다.
+    pub(super) fn move_to(&mut self, at: usize) {
+        if at != self.cursor {
+            self.page.rewind();
+        }
+        self.cursor = at;
+    }
+
+    /// 그 슬러그의 페이지로 커서를 옮긴다 — 있으면 참.
+    fn land_on(&mut self, slug: &str) -> bool {
+        let Some(at) = self.shown().iter().position(|p| p.slug == slug) else { return false };
+        self.move_to(at);
+        true
+    }
+
+    /// 링크를 따라 그 페이지로 간다 — 지금 페이지와 읽던 자리를 자취에 민다. 그 페이지가 없으면 아무것도 안 바꾸고
+    /// 거짓이다.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn follow(&mut self, to: &str) -> bool {
+        let Some(here) = self.current().map(|p| p.slug.clone()) else { return false };
+        let read = self.page.offset();
+        if !self.land_on(to) {
+            return false;
+        }
+        self.trail.push((here, read));
+        // 같은 페이지로 가는 링크(`#앵커` 를 뗀 제 자신)도 자취에 남는다 — 되돌아가면 읽던 줄로 온다.
+        self.page.rewind();
+        true
+    }
+
+    /// 건너오기 전의 페이지로 한 걸음 — 읽던 줄로 돌아간다. 자취가 비었으면 거짓이다.
+    pub fn back(&mut self) -> bool {
+        while let Some((slug, read)) = self.trail.pop() {
+            if self.land_on(&slug) {
+                self.page.rewind();
+                self.page.by(read as isize);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 다른 칸으로 — 칸이 둘이라 다음과 앞이 같다.
+    fn focus_next(&mut self) {
+        self.focus = match self.focus {
+            Side::List => Side::Page,
+            Side::Page => Side::List,
+        };
+    }
+}
+
+impl App {
+    /// `SPC g w` — 창을 연다. 읽을 위키를 못 정하거나 못 읽으면, 또 페이지가 하나도 없으면 알림 한 줄로 까닭을 대고
+    /// 안 연다 — 통계 창이 못 셀 때와 같다(2026-10-04, 일꾼이 정했다 — 빈 창에는 할 일이 없다).
+    pub(super) fn open_wiki(&mut self) {
+        let lang = self.site.lang;
+        if !self.on_layer() {
+            let Some(repo) = self.site.repo.as_ref() else {
+                self.notice = Some(say(lang, "tui.wiki.no_project").to_string());
+                return;
+            };
+            let read = read_wiki(repo, &self.site.issues, &self.site.unreadable);
+            let (dir, name) = (repo.config.wiki_dir.clone(), self.project_name());
+            return self.show_wiki(name, dir, None, read);
+        }
+        // **한눈 보기에는 "지금 선 프로젝트" 가 없다 — 커서가 댄다**(`App::open_stats` 와 같은 규칙).
+        let at = match self.current() {
+            Some(Row::Project(at)) | Some(Row::Item(Seat::Place(at), ..)) => at,
+            _ => {
+                self.notice = Some(say(lang, "tui.wiki.no_target").to_string());
+                return;
+            }
+        };
+        let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
+        let (name, path) = (place.name.clone(), place.path.clone());
+        // **펼쳐 든 줄이 있으면 그 저장소와 줄을 쓴다** — id 가 있는가는 화면에 선 그 줄로 잰다.
+        if let Some(site) = self.site_of_seat(Seat::Place(at))
+            && let Some(repo) = site.repo.as_ref()
+        {
+            let read = read_wiki(repo, &site.issues, &site.unreadable);
+            let dir = repo.config.wiki_dir.clone();
+            return self.show_wiki(name, dir, Some(path), read);
+        }
+        // **접혀 아직 안 읽은 프로젝트는 그 자리에서 연다** — 통계 창과 같은 길이다(`App::open_stats`). 못 열 때만
+        // 그 줄을 고쳐 세우는 길(`open_place`)로 간다 — 까닭을 알림으로 대는 자가 거기 하나다.
+        let repo = match crate::projects::open_shallow(&path, lang) {
+            Ok(repo) => repo,
+            Err(_) => {
+                let Some(repo) = self.open_place(at, Depth::Lean) else { return };
+                repo
+            }
+        };
+        // id 가 있는가만 물으면 되니 스냅샷만 읽는다 — 겹쳐 보기와 요약은 위키가 안 쓴다.
+        match repo.read() {
+            Ok(load) => {
+                let unreadable: Vec<Option<String>> = load.reserved_ids().into_iter().map(Some).collect();
+                let read = read_wiki(&repo, &load.issues, &unreadable);
+                let dir = repo.config.wiki_dir.clone();
+                self.show_wiki(name, dir, Some(path), read);
+            }
+            Err(e) => {
+                self.notice = Some(fill(say(lang, "tui.wiki.unread"), &[("name", &name), ("why", &e.message)]));
+            }
+        }
+    }
+
+    /// 읽은 위키로 창을 세운다 — 못 쓰는 디렉터리나 빈 위키면 알림으로 까닭을 댄다. **창을 세우는 자리는 여기
+    /// 하나다** — 프로젝트 안과 한눈 보기의 두 갈래가 다 이리 온다.
+    fn show_wiki(&mut self, name: String, dir: String, from: Option<PathBuf>, read: Result<Wiki, DirTrouble>) {
+        let lang = self.site.lang;
+        let wiki = match read {
+            Ok(w) => w,
+            // 말은 `moai wiki ls` 와 한 자다(`view::wiki::dir_trouble`) — 없는 디렉터리면 첫 페이지 자리까지 댄다.
+            Err(t) => {
+                self.notice = Some(crate::view::wiki::dir_trouble(lang, &dir, &t));
+                return;
+            }
+        };
+        if wiki.pages.is_empty() {
+            self.notice = Some(crate::view::wiki::list(lang, &dir, &wiki).join(" "));
+            return;
+        }
+        // **연 키는 탐색의 열을 비운 뒤에 온다** — 메뉴로 열었으면 메뉴가 이미 닫혔다(`menu::feed`).
+        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki)));
+    }
+
+    /// 위키 창의 키 하나. **닫으면 탐색으로 돌아갈 뿐이다** — 커서·걸린 거름망·상세는 창이 안 건드려 그대로다.
+    ///
+    /// **SPC 는 메뉴를 연다** — 통계 창과 같은 자([`App::stats_key`] 의 몸)로 받고, 서는 것은 화면 고르기(`SPC g`)와
+    /// 원문·그린 글(`SPC v r`)이다(`keys::Ctx::wiki`). 메뉴를 닫는 이동키는 그 자리에서 **창의 포커스 칸을** 움직인다.
+    ///
+    /// **이 키가 알림을 걷는가**를 답한다 — 통계 창과 같은 규칙이다: 메뉴만 만진 키와 둘째 키를 기다리는 열은 거짓,
+    /// 창의 키와 화면을 고른 키, 모르는 키는 참이다.
+    pub(super) fn wiki_key(&mut self, k: KeyEvent) -> bool {
+        if menu::open(&self.chord) || LEADER.matches(k) {
+            if let Mode::Wiki(w) = &mut self.mode {
+                w.chord.clear();
+            }
+            let rows = self.rows();
+            let ctx = self.key_ctx(&rows);
+            let act = menu::feed(&mut self.chord, &ctx, k);
+            // 메뉴를 닫은 접두어(`g`)는 탐색의 열에 남는다 — 창의 열로 옮겨 둘째 키가 잇게 한다.
+            if !menu::open(&self.chord) {
+                let held = self.chord.held().to_vec();
+                self.chord.clear();
+                if let Mode::Wiki(w) = &mut self.mode {
+                    for k in held {
+                        w.chord.feed(WIKI, k);
+                    }
+                }
+            }
+            return match act {
+                Some(Browse::Go(to)) => {
+                    self.go(to, &rows);
+                    true
+                }
+                Some(Browse::Step(m)) => {
+                    if let Mode::Wiki(w) = &mut self.mode {
+                        w.step(m);
+                    }
+                    false
+                }
+                // **원문·그린 글은 탐색과 한 값이다**(`App::raw`) — 설정에 안 남는 값이라 창이 따로 들 까닭이 없고, 닫고
+                // 돌아간 상세도 같은 꼴로 선다. 줄 수가 바뀌니 두 굴린 자리를 첫 줄로 돌린다(탐색의 `B::Raw` 와 같다).
+                // 메뉴는 열린 채로 남는다(`Browse::stateful`).
+                Some(Browse::Raw) => {
+                    self.raw = !self.raw;
+                    self.detail.rewind();
+                    if let Mode::Wiki(w) = &mut self.mode {
+                        w.page.rewind();
+                    }
+                    true
+                }
+                _ => false,
+            };
+        }
+        let Mode::Wiki(w) = &mut self.mode else { return false };
+        match w.chord.feed(WIKI, k) {
+            Some(keys::Wiki::Step(m)) => w.step(m),
+            // 목록에서는 본문 칸으로 — 본문은 이미 커서의 페이지다.
+            Some(keys::Wiki::Enter) => {
+                if w.focus == Side::List {
+                    w.focus = Side::Page;
+                }
+            }
+            // 자취가 없으면 아무 일도 없다 — 바도 그때는 `Bksp` 를 안 댄다.
+            Some(keys::Wiki::Back) => {
+                w.back();
+            }
+            Some(keys::Wiki::Search) => {}
+            Some(keys::Wiki::FocusNext) => w.focus_next(),
+            Some(keys::Wiki::Focus(side)) => {
+                w.focus = if side == keys::Side::Left { Side::List } else { Side::Page };
+            }
+            Some(keys::Wiki::Close) => self.mode = Mode::Browse,
+            // 뜻 없는 키는 열을 버리므로([`keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
+            None => return w.chord.held().is_empty(),
+        }
+        true
+    }
+}
+
+/// 저장소 하나의 위키를 읽는다 — `wiki_dir` 은 그 저장소의 설정, id 가 있는가는 `issues` 와 못 읽는 줄의 id 로 잰다.
+/// **못 읽는 줄이 쓰는 id 도 있는 id 다** — `moai wiki ls` 와 같은 셈이다(`cmd::wiki::read`).
+fn read_wiki(
+    repo: &crate::store::Repo,
+    issues: &[crate::model::Issue],
+    unreadable: &[Option<String>],
+) -> Result<Wiki, DirTrouble> {
+    let ids: std::collections::HashSet<&str> =
+        issues.iter().map(|i| i.id.as_str()).chain(unreadable.iter().flatten().map(String::as_str)).collect();
+    let known = |id: &str| ids.contains(id);
+    crate::wiki::load(repo.here(), &repo.config.wiki_dir, &repo.config.prefix, &known)
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::super::{App, Mode, Pane};
+    use super::{Side, Window};
+    use crate::config::Config;
+    use crate::model::{Issue, Kind, Status};
+    use crate::nav::Path;
+    use crate::scratch::Scratch;
+
+    fn cfg() -> Config {
+        Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    /// 위키 페이지 셋을 든 임시 저장소와 그 저장소를 든 탐색기 — 홈(`README`)이 둘째 페이지와 이슈 하나를 댄다.
+    pub(in crate::tui) fn wiki_app(name: &str, pages: &[(&str, &str)]) -> (Scratch, App) {
+        let s = Scratch::new(&format!("tui-wiki-{name}"));
+        std::fs::create_dir_all(s.path().join("docs")).unwrap();
+        for (file, body) in pages {
+            let at = s.path().join("docs").join(file);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, body).unwrap();
+        }
+        let issues = vec![Issue::new(
+            "argos-0001".into(),
+            "첫 일".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        )];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.site.repo = Some(crate::store::Repo::at(s.path().to_path_buf(), cfg()));
+        (s, a)
+    }
+
+    /// 홈과 두 페이지 — 홈이 `guide` 를 링크하고 `guide` 가 `notes/deep` 을 링크한다.
+    pub(in crate::tui) const PAGES: &[(&str, &str)] = &[
+        ("README.md", "# Home\n\nRead the [guide](guide.md) and argos-0001.\n"),
+        ("guide.md", "# Guide\n\nGo [deeper](notes/deep.md).\n\nLine\n\nLine\n"),
+        ("notes/deep.md", "# Deep\n\nThe bottom.\n"),
+    ];
+
+    pub(in crate::tui) fn window(a: &App) -> &Window {
+        match &a.mode {
+            Mode::Wiki(w) => w,
+            other => panic!("위키 창이 안 열렸다 — {other:?}"),
+        }
+    }
+
+    fn slug(a: &App) -> String {
+        window(a).current().map(|p| p.slug.clone()).unwrap_or_default()
+    }
+
+    /// **`SPC g w` 가 창을 열고, Esc 는 보던 화면을 그대로 돌려준다** — 커서·포커스·상세를 창이 안 건드린다. 목록은
+    /// 홈이 먼저고 나머지는 제목순이며, 본문은 목록 커서를 따라간다.
+    #[test]
+    fn spc_g_w_opens_the_window_and_esc_gives_the_screen_back_as_it_was() {
+        let (_s, mut a) = wiki_app("open", PAGES);
+        a.focus = Pane::Detail;
+        let before = (a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail);
+        a.hit("SPC g w");
+        let w = window(&a);
+        assert_eq!(w.shown().iter().map(|p| p.slug.as_str()).collect::<Vec<_>>(), ["README", "notes/deep", "guide"]);
+        assert_eq!((w.focus, w.cursor, w.dir.as_str(), w.from.clone()), (Side::List, 0, "docs", None));
+        a.hit("j");
+        assert_eq!(slug(&a), "notes/deep", "본문이 커서를 안 따라갔다");
+        a.hit("G");
+        assert_eq!(slug(&a), "guide");
+        // `q` 는 창을 안 닫는다 — 탐색에서 아무것도 안 하는 글자다(moai-en4u).
+        a.hit("q");
+        window(&a);
+        a.hit("Esc");
+        assert_eq!(a.mode, Mode::Browse);
+        assert_eq!((a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail), before, "창이 보던 자리를 바꿨다");
+    }
+
+    /// **목록의 Enter 는 본문 칸으로 간다** — 이동키는 포커스 칸을 움직인다(목록이면 커서, 본문이면 굴리기). 칸 사이는
+    /// `Ctrl-w w`, `Ctrl-w h`·`l` 은 그쪽 칸이다.
+    #[test]
+    fn enter_moves_to_the_page_and_moves_go_to_the_focused_pane() {
+        let (_s, mut a) = wiki_app("focus", PAGES);
+        a.hit("SPC g w G Enter");
+        assert_eq!(window(&a).focus, Side::Page);
+        a.hit("j");
+        assert_eq!((window(&a).cursor, window(&a).page.offset()), (2, 1), "본문에서 j 가 커서를 옮겼다");
+        a.hit("Ctrl-w w");
+        assert_eq!(window(&a).focus, Side::List);
+        a.hit("Ctrl-w l");
+        assert_eq!(window(&a).focus, Side::Page);
+        a.hit("Ctrl-w h");
+        assert_eq!(window(&a).focus, Side::List);
+        // 다른 페이지로 가면 본문은 첫 줄로 돌아간다.
+        a.hit("k");
+        assert_eq!(window(&a).page.offset(), 0, "다른 페이지로 갔는데 굴린 자리가 남았다");
+    }
+
+    /// **되돌아가기는 링크로 건너온 길만 되감는다** — 읽던 줄로 돌아온다. 자취가 비면 `Bksp` 는 아무 일도 없고 창은
+    /// 남는다. 자취가 있어도 Esc 는 창을 닫는다(2026-10-04 사용자 결정).
+    #[test]
+    fn back_unwinds_only_the_links_followed_and_esc_closes_anyway() {
+        let (_s, mut a) = wiki_app("back", PAGES);
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        w.page.by(1);
+        assert!(w.follow("guide"));
+        assert!(w.follow("notes/deep"));
+        assert!(!w.follow("nope"), "없는 페이지로 갔다");
+        assert_eq!(slug(&a), "notes/deep");
+        a.hit("Bksp");
+        assert_eq!(slug(&a), "guide");
+        a.hit("h");
+        assert_eq!((slug(&a), window(&a).page.offset()), ("README".to_string(), 1), "읽던 줄로 안 돌아왔다");
+        assert!(window(&a).trail.is_empty());
+        a.hit("Bksp");
+        assert_eq!(slug(&a), "README", "자취가 빈 Bksp 가 무언가 했다");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        w.follow("guide");
+        a.hit("Esc");
+        assert_eq!(a.mode, Mode::Browse, "자취가 남았다고 Esc 가 창을 안 닫았다");
+    }
+
+    /// **위키 창 위의 SPC 는 화면 고르기와 원문·그린 글만 연다**(통계 창과 같은 자) — `SPC g l`·`b` 는 창을 닫고 그
+    /// 배치로 서고, `SPC g w` 는 새로 읽어 처음으로 돌아가며, `SPC g s` 는 통계 창으로 간다. 메뉴의 이동키는 메뉴를
+    /// 닫고 포커스 칸을 움직인다.
+    #[test]
+    fn spc_over_the_window_opens_only_the_screen_menu_and_raw() {
+        use super::super::{keys::Screen, menu, view::Layout};
+        let (_s, mut a) = wiki_app("menu", PAGES);
+        a.hit("SPC g w SPC");
+        assert!(menu::open(&a.chord));
+        let ctx = a.key_ctx(&a.rows());
+        assert_eq!(ctx.screen(), Screen::Wiki);
+        let root = menu::entries(a.chord.held(), &ctx, &[]);
+        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [위키]", "+보기"]);
+        a.hit("v");
+        let v = menu::entries(a.chord.held(), &a.key_ctx(&a.rows()), &[]);
+        assert_eq!(v.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["r"], "SPC v 밑에 원문 말고 다른 것이 섰다");
+        a.hit("Esc");
+        window(&a);
+
+        a.hit("SPC j");
+        assert!(!menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
+        assert_eq!(window(&a).cursor, 1, "메뉴를 닫은 j 가 커서를 안 옮겼다");
+        a.hit("SPC g w");
+        assert_eq!(window(&a).cursor, 0, "SPC g w 가 창을 새로 안 읽었다");
+        a.hit("SPC g s");
+        assert!(matches!(a.mode, Mode::Stats(_)), "위키 창의 SPC g s 가 통계로 안 갔다");
+        a.hit("SPC g w");
+        window(&a);
+        a.hit("SPC g b");
+        assert_eq!((&a.mode, a.layout), (&Mode::Browse, Layout::Board), "SPC g b 가 창을 닫고 보드로 안 갔다");
+        a.hit("SPC g w SPC g l");
+        assert_eq!((&a.mode, a.layout), (&Mode::Browse, Layout::List));
+    }
+
+    /// **못 열면 알림으로 까닭을 대고 안 연다** — 저장소가 없는 화면, 위키 디렉터리가 없는 저장소, 페이지가 하나도
+    /// 없는 위키. 말은 `moai wiki ls` 와 같은 자다.
+    #[test]
+    fn nothing_to_read_says_why_and_opens_nothing() {
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("위키")), "{:?}", a.notice);
+
+        let (s, mut a) = wiki_app("empty", &[]);
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(
+            a.notice.as_deref().is_some_and(|n| n.contains("README.md")),
+            "빈 위키가 첫 자리를 안 댔다: {:?}",
+            a.notice
+        );
+        std::fs::remove_dir(s.path().join("docs")).unwrap();
+        a.notice = None;
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "없는 디렉터리를 안 댔다: {:?}", a.notice);
+    }
+
+    /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다** — 메뉴만 만진 키와 기다리는 접두어는 알림을 안 걷고, 창의
+    /// 키는 걷는다.
+    #[test]
+    fn the_menu_over_the_window_keeps_the_notice_until_a_key_acts() {
+        let (_s, mut a) = wiki_app("notice", PAGES);
+        a.hit("SPC g w");
+        let said = "알림".to_string();
+        a.notice = Some(said.clone());
+        for keys in ["SPC", "g", "Bksp", "Esc", "SPC j", "Ctrl-w"] {
+            a.hit(keys);
+            assert_eq!(a.notice.as_deref(), Some(said.as_str()), "{keys:?} 가 알림을 걷었다");
+        }
+        a.hit("w");
+        assert_eq!(a.notice, None, "창의 키가 알림을 안 걷었다");
+    }
+}

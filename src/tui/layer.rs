@@ -2575,7 +2575,8 @@ mod tests {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
-            | Mode::Stats(_) => None,
+            | Mode::Stats(_)
+            | Mode::Wiki(_) => None,
         }
     }
 
