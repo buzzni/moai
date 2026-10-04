@@ -780,7 +780,7 @@ IDEA
   line instead is read as a gap, and the next `moai init` writes it back.")]
     MergeDriver(MergeDriverArgs),
 
-    /// Install the skills and hooks into Claude (safe to run again)
+    /// Plant skills for Claude, Codex, Antigravity (safe to run again)
     #[command(subcommand)]
     Skill(SkillCmd),
 
@@ -1782,10 +1782,21 @@ pub struct NoteArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCmd {
-    /// Install the plugin tree and register it with `claude`
-    #[command(after_help = "  Skills and hooks are installed into `.claude/moai-plugin/` and registered
-  with `claude`. Your settings.json is not touched - putting the two keys in
-  is `claude`'s job. The one exception is the old declarations below.
+    /// Plant the skills for each agent; register Claude's with `claude`
+    #[command(after_help = "  Which agents: --agent claude (the default), codex, antigravity or auto -
+  repeat it for several. auto takes whichever of claude, codex and agy is on
+  PATH, and claude when none is.
+
+  Codex and Antigravity read the same `.agents/skills/` in this repository, so
+  naming either plants it for both. There is nothing to register: commit the
+  directory and the team has it. --scope is Claude's registration only. The
+  text is the one Claude gets; the steps that differ per agent are in the
+  skills' \"Words per agent\" table. The hooks are planted for Claude only.
+
+  For Claude, skills and hooks are installed into `.claude/moai-plugin/` and
+  registered with `claude`. Your settings.json is not touched - putting the
+  two keys in is `claude`'s job. The one exception is the old declarations
+  below.
 
   **No file is deleted.** Running again only overwrites. Deleting a hook file
   a running session holds would block every tool call of that session.
@@ -1822,6 +1833,8 @@ pub enum SkillCmd {
   moai skill install --scope user     every repository on this machine
   moai skill install --scope project  with the team (committed settings.json)
   moai skill install --dry-run        only show what would be done
+  moai skill install --agent codex    .agents/skills/ for Codex and Antigravity
+  moai skill install --agent auto     whichever agent is on PATH
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.")]
@@ -1845,9 +1858,9 @@ pub enum SkillCmd {
     },
 
     /// What is installed at which scope, and where it differs
-    #[command(after_help = "  It **only reads** `claude`'s registry (~/.claude/plugins/). Whatever is out
-  of line the exit code is 0 - this is a command that shows, not one that
-  blocks.
+    #[command(after_help = "  It **only reads** - `claude`'s registry (~/.claude/plugins/) and the planted
+  files. Whatever is out of line the exit code is 0 - this is a command that
+  shows, not one that blocks.
 
   What it looks at:
     marketplace   registered under this repository's name, not pointing
@@ -1856,7 +1869,10 @@ pub enum SkillCmd {
                   version that would be installed now
     hook          whether the executable the install calls is still there
     claude        whether it is on PATH (without it nothing can be installed
-                  or removed)")]
+                  or removed)
+    .agents       whether .agents/skills/ holds this version's skills
+                  (codex and antigravity read it)
+    codex, agy    whether they are on PATH")]
     Status,
 
     /// Remove the registration from `claude`. Installed files stay
@@ -1882,7 +1898,13 @@ pub enum SkillCmd {
   A Claude session already open keeps calling the old hook - reopen it for
   the removal to land.
 
-  moai skill uninstall --dry-run      only show what would be called")]
+  For codex and antigravity (--agent) there is no registration to remove,
+  and no file is deleted either: the `rm -r` lines for moai's skills in
+  `.agents/skills/` are printed, to run once no session holds them. Without
+  that --agent, one line says when moai's skills are still there.
+
+  moai skill uninstall --dry-run      only show what would be called
+  moai skill uninstall --agent codex  name what to delete in .agents/skills/")]
     Uninstall {
         /// Agent: claude (default), codex, antigravity, auto
         #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]

@@ -43,7 +43,7 @@ Commands:
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
   hook          Called by Claude's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
-  skill         Install the skills and hooks into Claude (safe to run again)
+  skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
@@ -2630,12 +2630,12 @@ Options:
 ## `moai skill`
 
 ```
-Install the skills and hooks into Claude (safe to run again)
+Plant skills for Claude, Codex, Antigravity (safe to run again)
 
 Usage: moai skill [OPTIONS] <COMMAND>
 
 Commands:
-  install    Install the plugin tree and register it with `claude`
+  install    Plant the skills for each agent; register Claude's with `claude`
   status     What is installed at which scope, and where it differs
   uninstall  Remove the registration from `claude`. Installed files stay
   help       Print this message or the help of the given subcommand(s)
@@ -2652,7 +2652,7 @@ Options:
 ## `moai skill install`
 
 ```
-Install the plugin tree and register it with `claude`
+Plant the skills for each agent; register Claude's with `claude`
 
 Usage: moai skill install [OPTIONS]
 
@@ -2667,9 +2667,20 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  Skills and hooks are installed into `.claude/moai-plugin/` and registered
-  with `claude`. Your settings.json is not touched - putting the two keys in
-  is `claude`'s job. The one exception is the old declarations below.
+  Which agents: --agent claude (the default), codex, antigravity or auto -
+  repeat it for several. auto takes whichever of claude, codex and agy is on
+  PATH, and claude when none is.
+
+  Codex and Antigravity read the same `.agents/skills/` in this repository, so
+  naming either plants it for both. There is nothing to register: commit the
+  directory and the team has it. --scope is Claude's registration only. The
+  text is the one Claude gets; the steps that differ per agent are in the
+  skills' "Words per agent" table. The hooks are planted for Claude only.
+
+  For Claude, skills and hooks are installed into `.claude/moai-plugin/` and
+  registered with `claude`. Your settings.json is not touched - putting the
+  two keys in is `claude`'s job. The one exception is the old declarations
+  below.
 
   **No file is deleted.** Running again only overwrites. Deleting a hook file
   a running session holds would block every tool call of that session.
@@ -2706,6 +2717,8 @@ Options:
   moai skill install --scope user     every repository on this machine
   moai skill install --scope project  with the team (committed settings.json)
   moai skill install --dry-run        only show what would be done
+  moai skill install --agent codex    .agents/skills/ for Codex and Antigravity
+  moai skill install --agent auto     whichever agent is on PATH
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.
@@ -2726,9 +2739,9 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  It **only reads** `claude`'s registry (~/.claude/plugins/). Whatever is out
-  of line the exit code is 0 - this is a command that shows, not one that
-  blocks.
+  It **only reads** - `claude`'s registry (~/.claude/plugins/) and the planted
+  files. Whatever is out of line the exit code is 0 - this is a command that
+  shows, not one that blocks.
 
   What it looks at:
     marketplace   registered under this repository's name, not pointing
@@ -2738,6 +2751,9 @@ Options:
     hook          whether the executable the install calls is still there
     claude        whether it is on PATH (without it nothing can be installed
                   or removed)
+    .agents       whether .agents/skills/ holds this version's skills
+                  (codex and antigravity read it)
+    codex, agy    whether they are on PATH
 ```
 
 ## `moai skill uninstall`
@@ -2779,7 +2795,13 @@ Options:
   A Claude session already open keeps calling the old hook - reopen it for
   the removal to land.
 
+  For codex and antigravity (--agent) there is no registration to remove,
+  and no file is deleted either: the `rm -r` lines for moai's skills in
+  `.agents/skills/` are printed, to run once no session holds them. Without
+  that --agent, one line says when moai's skills are still there.
+
   moai skill uninstall --dry-run      only show what would be called
+  moai skill uninstall --agent codex  name what to delete in .agents/skills/
 ```
 
 ## `moai project`

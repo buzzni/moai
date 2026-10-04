@@ -227,6 +227,21 @@ moai init --print          # writes nothing, prints the block
 moai init --check          # writes nothing, says current / stale / missing
 ```
 
+`moai skill install` plants the skills — the tracker's rules, the supervisor and
+the wiki — for the agents you name. Claude Code gets a plugin in
+`.claude/moai-plugin/`, with the hooks, registered with `claude`. Codex and
+Antigravity both read `.agents/skills/`, so naming either plants it for both,
+and committing it hands it to the team. One text serves all three: the steps
+that differ per agent sit in the skills' "Words per agent" table. The hooks are
+planted for Claude Code only.
+
+```sh
+moai skill install                   # Claude Code (the default)
+moai skill install --agent codex     # .agents/skills/ for Codex and Antigravity
+moai skill install --agent auto      # whichever of claude, codex, agy is on PATH
+moai skill status                    # what is planted where, and what is stale
+```
+
 `examples/bash-agent/agent.sh` is a complete pick-work-close loop in bash and jq,
 and `examples/python-agents/agents.py` is the multi-agent version. Both are run
 by the test suite, so neither can rot quietly.
