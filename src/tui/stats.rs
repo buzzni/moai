@@ -236,7 +236,10 @@ impl App {
     /// 탐색의 열([`App::chord`])이고 탐색과 같은 자([`menu::feed`])로 받는다: Esc·SPC 가 닫고 Bksp 가 한 층 올라가며,
     /// 이동키는 메뉴를 닫고 그 자리에서 **창을** 굴린다(moai-y8v2). 창의 열은 따로라, 메뉴를 열면 기다리던 `g` 를 버린다.
     ///
-    /// 메뉴로 동작을 돌렸으면 참이다 — 알림을 도로 세울지를 부르는 쪽이 이것으로 가른다.
+    /// **이 키가 알림을 걷는가**를 답한다 — 부르는 쪽([`App::key`])이 거짓이면 알림을 도로 세운다. 거짓은 아무 동작도
+    /// 안 돈 키다: 메뉴만 만진 키(열기·닫기·한 층 오르내리기·모르는 키), 메뉴를 닫은 이동키(그 닫는 몫, moai-y8v2),
+    /// 그리고 둘째 키를 기다리는 `g` — 탐색의 규칙과 같다(`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
+    /// 고른 키와 창의 키(굴리기·`b`·Esc), 모르는 키는 참이다.
     pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
         if menu::open(&self.chord) || LEADER.matches(k) {
             if let Mode::Stats(w) = &mut self.mode {
@@ -274,7 +277,8 @@ impl App {
             Some(Stat::Step(m)) => w.scroll.go(m),
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
-            None => {}
+            // 뜻 없는 키는 열을 버리므로([`super::keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
+            None => return w.chord.held().is_empty(),
         }
         true
     }
@@ -430,7 +434,8 @@ mod tests {
     }
 
     /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서) — `gg` 는 메뉴가 닫힌 뒤 창의 열로 이어진다.
-    /// 메뉴가 뜬 동안 휠은 아무것도 안 한다 — 목록 위의 메뉴와 같다.
+    /// 메뉴를 여는 SPC 는 창이 기다리던 `g` 를 버리고, Bksp 는 한 층 오르다 뿌리에서 메뉴만 닫는다. 메뉴가 뜬 동안의
+    /// 휠은 `mouse::tests::the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker` 가 본다.
     #[test]
     fn a_move_key_closes_the_menu_over_the_window_and_scrolls_it() {
         use super::super::menu;
@@ -451,6 +456,42 @@ mod tests {
         a.hit("g");
         assert_eq!(window(&a).scroll.offset(), 0, "메뉴에서 시작한 gg 가 창의 맨 위로 안 갔다");
         assert!(a.chord.held().is_empty(), "탐색의 열에 g 가 남았다");
+
+        // **메뉴를 열면 창이 기다리던 `g` 를 버린다** — 메뉴를 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면 사람이 친 적 없는
+        // 맨 위로 가기가 선다(휠의 `Window::roll` 과 같은 까닭).
+        a.hit("G");
+        let bottom = window(&a).scroll.offset();
+        assert!(bottom > 0, "시험의 전제 — 창이 맨 위가 아니다");
+        a.hit("g SPC Esc g");
+        assert_eq!(window(&a).scroll.offset(), bottom, "메뉴를 사이에 둔 g 와 g 가 gg 로 이었다");
+        // 메뉴의 Bksp 는 한 층 오르고, 뿌리에서는 메뉴만 닫는다 — 창은 남는다.
+        a.hit("SPC g Bksp");
+        assert_eq!(menu::title(a.chord.held()), "SPC", "SPC g 의 Bksp 가 뿌리로 안 올랐다");
+        a.hit("Bksp");
+        assert!(!menu::open(&a.chord), "뿌리의 Bksp 가 메뉴를 안 닫았다");
+        assert_eq!(window(&a).scroll.offset(), bottom, "메뉴의 Bksp 가 창을 건드렸다");
+    }
+
+    /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다**(moai-g56h·moai-y8v2) — 메뉴만 만진 키(열기·내려가기·Bksp·Esc)와
+    /// 메뉴를 닫은 이동키, 둘째 키를 기다리는 창의 `g` 는 알림을 안 걷는다. 걷는 것은 창의 키와 화면을 고른 키다.
+    #[test]
+    fn the_menu_over_the_window_keeps_the_notice_until_a_key_acts() {
+        let mut a = app();
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        let said = "알림".to_string();
+        a.notice = Some(said.clone());
+        for keys in ["SPC", "g", "Bksp", "Esc", "SPC j", "g"] {
+            a.hit(keys);
+            assert_eq!(a.notice.as_deref(), Some(said.as_str()), "{keys:?} 가 알림을 걷었다");
+        }
+        a.hit("g");
+        assert_eq!(window(&a).scroll.offset(), 0, "시험의 전제 — 창의 gg 가 맨 위로 갔다");
+        assert_eq!(a.notice, None, "창의 키가 알림을 안 걷었다");
+
+        a.notice = Some(said);
+        a.hit("SPC g s");
+        assert_eq!(a.notice, None, "화면을 고른 키가 알림을 안 걷었다");
     }
 
     /// **걸린 거름망으로 좁혀 세고 제목이 그 글을 댄다** — 닫아도 거름망은 그대로 걸려 있다.

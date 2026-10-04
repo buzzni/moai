@@ -321,7 +321,7 @@ fn under(b: &Bind<Browse>, seq: &[KeyEvent]) -> bool {
 /// 기다린다(사용자 결정 2026-09-19). 접두어 줄의 `Esc 닫기` 가 이것으로 서고, 안 선 층은 한 번
 /// 받고 닫힌다는 뜻이라 있고 없음이 그대로 규칙을 댄다.
 ///
-/// 오늘 이것이 참인 층은 `SPC v`·`SPC c`·`SPC s` 고, 뿌리·`SPC p`·`SPC g`·`SPC m` 은 거짓이다. **켜진
+/// 오늘 이것이 참인 층은 `SPC v`·`SPC c`·`SPC s`·`SPC o` 고, 뿌리·`SPC p`·`SPC g`·`SPC m` 은 거짓이다. **켜진
 /// 것만 센다**([`entries`] 와 같은 판정) — 안 선 항목은 눌러도 모르는 키라, 그것으로 기다리면
 /// 아무 토글도 없는 층이 ESC 를 기다린다. 하위 층의 토글은 안 센다: 그 층은 제 차례에 스스로
 /// 답한다.
@@ -651,8 +651,8 @@ mod tests {
             (ctrl('b'), Browse::Step(Move::PageUp)),
         ];
         // 뿌리 층, 그리고 Esc 까지 기다리는 토글 층(`SPC s` — 이 키들이 항목으로 안 선다)·한 번에
-        // 닫히는 층(`SPC p`). 항목과 부딪치는 자리는 `an_item_on_the_layer_wins_over_the_move` 가 본다 — 뿌리의 `g` 가
-        // 그렇다(화면 묶음, moai-z46r). 그래서 `gg` 는 `g` 가 빈 층에서만 잰다.
+        // 닫히는 층(`SPC p`). 항목과 부딪치는 자리는 `an_item_on_the_layer_wins_over_the_move` 가 본다. 뿌리의 `g` 는
+        // 화면 묶음이 쥐어(moai-z46r) `gg` 는 `g` 가 빈 층에서만 재고, 뿌리에서는 그 묶음으로 내려가는지를 잰다.
         for layer in [&[][..], &[k('s')][..], &[k('p')][..]] {
             for (x, want) in cases {
                 let mut ch = Chord::default();
@@ -665,15 +665,18 @@ mod tests {
                 assert!(!open(&ch), "{layer:?} 에서 {x:?} 가 메뉴를 안 닫았다");
                 assert!(ch.held().is_empty(), "{layer:?} 에서 {x:?} 뒤에 열이 남았다");
             }
-            // `gg` — 첫 `g` 가 메뉴를 닫고 둘째를 기다린다.
-            if layer.is_empty() {
-                continue;
-            }
             let mut ch = Chord::default();
             feed(&mut ch, &c, k(' '));
             for &l in layer {
                 feed(&mut ch, &c, l);
             }
+            // 뿌리의 `g` 는 화면 묶음이 쥔다 — 메뉴를 안 닫고 그 층으로 내려간다.
+            if layer.is_empty() {
+                assert_eq!(feed(&mut ch, &c, k('g')), None);
+                assert_eq!(title(ch.held()), "SPC g", "뿌리의 g 가 화면 묶음을 안 열었다");
+                continue;
+            }
+            // `gg` — 첫 `g` 가 메뉴를 닫고 둘째를 기다린다.
             assert_eq!(feed(&mut ch, &c, k('g')), None);
             assert!(!open(&ch), "{layer:?} 에서 g 가 메뉴를 안 닫았다");
             assert_eq!(feed(&mut ch, &c, k('g')), Some(Browse::Step(Move::Top)), "{layer:?} 에서 gg");
