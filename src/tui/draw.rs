@@ -221,8 +221,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         (list(f, app, left, &rows), Vec::new(), Vec::new())
     };
     // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 안쪽이라 그린 쪽이 낸다.
-    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다.
-    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right, cards, columns };
+    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다. 메뉴는 격자 창과 접두어 줄을
+    // 합친 자리다(moai-m6ni) — 격자가 접혀 창이 0 줄이면 접두어 줄 하나다.
+    let menu = open_menu.is_some().then(|| panel.union(keys));
+    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right, cards, columns, menu };
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }

@@ -12,8 +12,11 @@
 //! 통계 창 위의 휠이다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는 칸이 떠 있으면 **마우스를 아예 놓는다**
 //! ([`App::wants_mouse`], 리뷰 뒤 사용자 결정 2026-10-01) — 그 창들은 키로 다루는 자리고, 뒤의 목록을 누른 것이
 //! 적던 글을 두고 커서를 옮기면 무엇에 대해 적던 것인지를 잃는다. 잡은 채 아무것도 안 하면 그 자리에서 터미널의
-//! 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의 것으로 돌려준다. SPC 메뉴는
-//! 둘러보기 위에 잠깐 뜨는 것이라 잡은 채 아무것도 안 한다.
+//! 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의 것으로 돌려준다.
+//!
+//! **SPC 메뉴는 둘러보기 위에 잠깐 뜨는 것이라 잡은 채 듣는다**(moai-m6ni, 사용자 결정 2026-10-04 — 메뉴가 열린 동안
+//! 뒤를 누른 것이 아무 일도 안 하던 2026-10-01 의 결정을 뒤집었다). 메뉴 밖에서 누르거나 굴리면 메뉴를 닫고 그 손짓을
+//! 그대로 한다 — 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 하는 것(moai-y8v2)과 같은 결이다. 통계 창 위의 메뉴도 같다.
 
 use super::{App, Mode, Pane, menu, scroll};
 use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -40,6 +43,9 @@ pub struct Drawn {
     pub cards: Vec<(Rect, usize)>,
     /// 보드의 칸 자리(머리줄부터 바닥까지)와 그 칸의 첨자 — 다음 프레임의 칸 창이 여기 머문다(`board::window` 의 `was`).
     pub columns: Vec<(Rect, usize)>,
+    /// SPC 메뉴가 선 자리 — 격자 창(윗 가름줄부터)과 맨 아랫줄의 접두어 줄을 합친 전체 폭이다(moai-m6ni). 메뉴가
+    /// 닫혔으면 없다. 이 밖을 누르면 메뉴를 닫고 그 누르기를 그대로 한다([`App::mouse`]).
+    pub menu: Option<Rect>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -92,13 +98,39 @@ impl App {
             MouseEventKind::ScrollDown => Some(WHEEL),
             _ => None,
         };
+        // **메뉴가 열렸으면 메뉴가 먼저 받는다**(moai-m6ni). 밖에서 누르거나 굴렸으면 메뉴를 닫고 그 손짓을 그대로
+        // 한다. **닫는 몫은 알림을 안 걷는다** — 메뉴를 닫은 이동키가 알림을 도로 세우는 것(`App::key`, moai-y8v2)과
+        // 같다: `SPC v w` 가 단 알림이 곧이은 누르기 하나에 사라지면 메뉴 창이 떠 있는 동안만 산다.
+        if menu::open(&self.chord) {
+            if !self.menu_mouse(m.kind, wheel, at) {
+                return;
+            }
+            let carried = self.notice.take();
+            self.chord.clear();
+            self.pointer(m.kind, wheel, at);
+            self.notice = self.notice.take().or(carried);
+            return;
+        }
+        self.pointer(m.kind, wheel, at);
+    }
+
+    /// 메뉴가 열린 채 온 사건(moai-m6ni). **메뉴 밖에서 누르거나 굴렸으면 참이다** — 부르는 쪽([`App::mouse`])이
+    /// 메뉴를 닫고 그 손짓을 그대로 한다(사용자 결정 2026-10-04). 메뉴 안([`Drawn::menu`])의 휠은 아무것도 안 한다 —
+    /// 메뉴는 구르지 않는다. 밖이라도 누르기·휠이 아닌 것(오른쪽·가운데 단추, 뗌)은 메뉴를 그대로 둔다 — 둘러볼 때도
+    /// 아무 일이 없는 손짓이라 닫기만 하면 메뉴가 까닭 없이 사라진다.
+    fn menu_mouse(&self, kind: MouseEventKind, wheel: Option<isize>, at: Position) -> bool {
+        if self.drawn.menu.is_some_and(|r| r.contains(at)) {
+            return false;
+        }
+        matches!(kind, MouseEventKind::Down(MouseButton::Left)) || wheel.is_some()
+    }
+
+    /// 메뉴 밖의 손짓 하나 — 메뉴가 닫혀 있었거나 방금 닫혔다([`App::mouse`]).
+    fn pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) {
         // **통계 창은 휠만 받는다**(사용자 결정 2026-10-01) — 목록·상세 자리를 통째로 덮은 창이라 그 위의 휠은
-        // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기는 것은 창이 한다(`stats::Window::roll`). **창 위에 SPC 메뉴가
-        // 떠 있으면 아무것도 안 한다**(moai-z46r) — 목록 위의 메뉴와 같다: 메뉴가 키를 기다린다.
-        let menu_open = menu::open(&self.chord);
+        // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기는 것은 창이 한다(`stats::Window::roll`).
         if let Mode::Stats(w) = &mut self.mode {
             if let Some(by) = wheel
-                && !menu_open
                 && self.drawn.body.contains(at)
             {
                 self.notice = None;
@@ -106,11 +138,10 @@ impl App {
             }
             return;
         }
-        // 메뉴가 열린 동안은 메뉴가 키를 기다린다 — 뒤의 칸을 누른 것으로 메뉴를 닫지 않는다.
-        if self.mode != Mode::Browse || menu::open(&self.chord) {
+        if self.mode != Mode::Browse {
             return;
         }
-        match (m.kind, wheel) {
+        match (kind, wheel) {
             (MouseEventKind::Down(MouseButton::Left), _) => {
                 self.acted();
                 match self.grab_at(at) {
@@ -333,17 +364,15 @@ mod tests {
         assert_eq!((a.focus, a.cursor), (Pane::Explorer, 1), "테두리를 눌러 커서가 움직였다");
     }
 
-    /// **듣는 것은 둘러볼 때뿐이다**(사용자 결정 2026-10-01) — 글을 받는 칸·메뉴가 떠 있으면 뒤의 목록을
-    /// 눌러도 아무 일이 없다. 오른쪽·가운데 단추도 아무 일이 없다. 누르기는 키 하나처럼 알림을 걷고
-    /// 기다리던 `g` 를 버린다 — 누르기를 사이에 둔 `g` 와 `g` 가 맨 위로 가지 않는다.
+    /// **듣는 것은 둘러볼 때뿐이다**(사용자 결정 2026-10-01) — 글을 받는 칸이 떠 있으면 뒤의 목록을 눌러도 아무
+    /// 일이 없다. 오른쪽·가운데 단추도 아무 일이 없다. 누르기는 키 하나처럼 알림을 걷고 기다리던 `g` 를 버린다 —
+    /// 누르기를 사이에 둔 `g` 와 `g` 가 맨 위로 가지 않는다. 메뉴 위의 누르기는 따로 본다
+    /// (`a_click_outside_the_menu_closes_it_and_does_the_click`).
     #[test]
-    fn a_click_does_nothing_over_a_menu_or_a_prompt_and_counts_as_a_keypress() {
+    fn a_click_does_nothing_over_a_prompt_and_counts_as_a_keypress() {
         let mut a = drawn(10, 100, 20);
         let rows = a.drawn.rows;
-        a.hit("SPC");
-        click(&mut a, rows.x + 2, rows.y + 4);
-        assert_eq!(a.cursor, 0, "메뉴가 열렸는데 목록이 움직였다");
-        a.hit("Esc /");
+        a.hit("/");
         click(&mut a, rows.x + 2, rows.y + 4);
         assert_eq!(a.cursor, 0, "글을 받는 중에 목록이 움직였다");
         a.hit("Esc");
@@ -357,6 +386,56 @@ mod tests {
         assert_eq!((a.cursor, a.notice.as_deref()), (4, None), "알림이 안 걷혔다");
         a.hit("g");
         assert_eq!(a.cursor, 4, "누르기 앞의 g 와 뒤의 g 가 gg 로 이었다");
+    }
+
+    /// **메뉴 밖을 누르면 메뉴를 닫고 그 누르기를 그대로 한다**(moai-m6ni, 사용자 결정 2026-10-04 — 아무 일도 안 하던
+    /// 2026-10-01 의 결정을 뒤집었다). 맞히는 바탕은 메뉴가 몸통을 밀어 올린 그 화면이다. 닫는 몫은 메뉴의 Esc 와 같아
+    /// 알림을 안 걷는다. 메뉴 안(접두어 줄의 이름)이나 오른쪽 단추는 메뉴를 그대로 둔다.
+    #[test]
+    fn a_click_outside_the_menu_closes_it_and_does_the_click() {
+        let mut a = drawn(10, 100, 20);
+        a.hit("SPC");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        let shut = a.drawn.menu.expect("메뉴가 선 자리를 안 남겼다");
+        let rows = a.drawn.rows;
+        assert!(rows.bottom() <= shut.y, "메뉴가 목록의 줄을 덮었다: {:?}", a.drawn);
+
+        a.mouse(event(MouseEventKind::Down(MouseButton::Right), rows.x + 2, rows.y + 4));
+        assert!(menu::open(&a.chord), "오른쪽 단추가 메뉴를 닫았다");
+        // 접두어 줄의 왼쪽 끝 — `SPC-` 이름이다. 메뉴 안의 빈 자리는 아무 일도 안 한다.
+        click(&mut a, shut.x, shut.bottom() - 1);
+        assert!(menu::open(&a.chord), "메뉴 안을 눌렀는데 메뉴가 닫혔다");
+
+        a.notice = Some("x".into());
+        click(&mut a, rows.x + 2, rows.y + 4);
+        assert!(!menu::open(&a.chord), "메뉴 밖을 눌렀는데 메뉴가 안 닫혔다");
+        assert_eq!((a.focus, a.cursor), (Pane::Explorer, 4), "메뉴를 닫은 누르기가 줄을 안 골랐다");
+        assert_eq!(a.notice.as_deref(), Some("x"), "메뉴를 닫은 누르기가 알림을 걷었다");
+
+        // 상세를 누르면 메뉴를 닫고 포커스가 상세로 간다.
+        a.hit("SPC");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        let (dx, dy) = middle(a.drawn.detail.expect("상세가 안 섰다"));
+        click(&mut a, dx, dy);
+        assert!(!menu::open(&a.chord));
+        assert_eq!(a.focus, Pane::Detail, "메뉴를 닫은 누르기가 포커스를 안 옮겼다");
+    }
+
+    /// **메뉴 밖의 휠은 메뉴를 닫고 그 자리를 굴린다**(moai-m6ni, 사용자 결정 2026-10-04) — 휠은 마우스의 `j`·`k` 고,
+    /// 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 한다(moai-y8v2). 메뉴 위의 휠은 아무것도 안 한다.
+    #[test]
+    fn the_wheel_outside_the_menu_closes_it_and_rolls() {
+        let mut a = drawn(10, 100, 20);
+        a.hit("SPC");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        let shut = a.drawn.menu.expect("메뉴가 선 자리를 안 남겼다");
+        roll(&mut a, true, shut.x + 2, shut.y + 1);
+        assert!(menu::open(&a.chord), "메뉴 위의 휠이 메뉴를 닫았다");
+        assert_eq!(a.cursor, 0, "메뉴 위의 휠이 목록을 움직였다");
+        let (lx, ly) = middle(a.drawn.list);
+        roll(&mut a, true, lx, ly);
+        assert!(!menu::open(&a.chord), "메뉴 밖의 휠이 메뉴를 안 닫았다");
+        assert_eq!(a.cursor, 3, "메뉴를 닫은 휠이 커서를 안 옮겼다");
     }
 
     /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 목록 위에서는 커서가 세 줄씩
@@ -505,7 +584,8 @@ mod tests {
     }
 
     /// **통계 창 위의 휠은 창을 굴린다**(사용자 결정 2026-10-01) — 키(`j`·`k`)가 옮기는 그 자리다. 덮인 목록은
-    /// 안 움직인다. 고르는 창처럼 키로만 다루는 창 위에서는 휠도 아무것도 안 한다.
+    /// 안 움직인다. 창 위의 메뉴는 목록 위의 메뉴와 같은 규칙이다(moai-m6ni). 고르는 창처럼 키로만 다루는 창 위에서는
+    /// 휠도 아무것도 안 한다.
     #[test]
     fn the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker() {
         let mut a = drawn(30, 100, 12);
@@ -520,15 +600,21 @@ mod tests {
         assert_eq!((at(&a), a.cursor), (3, 0), "휠이 통계 창을 안 굴렸다");
         roll(&mut a, false, bx, by);
         assert_eq!(at(&a), 0);
-        // 창 위에 SPC 메뉴가 뜨면 휠은 아무것도 안 한다(moai-z46r) — 목록 위의 메뉴와 같다. 메뉴가 몸통을 밀어 올려도
-        // 남은 몸통 자리에서 잰다.
+        // 창 위에 SPC 메뉴가 떠도 목록 위의 메뉴와 같다(moai-m6ni, 사용자 결정 2026-10-04) — 밖을 누르면 메뉴만 닫히고
+        // (창은 누르기를 안 받는다) 밖의 휠은 메뉴를 닫고 창을 굴린다. 메뉴가 몸통을 밀어 올려도 남은 몸통 자리에서 잰다.
+        a.hit("SPC");
+        super::super::draw::tests::render(&mut a, 100, 12);
+        let (bx, by) = middle(a.drawn.body);
+        click(&mut a, bx, by);
+        assert!(!menu::open(&a.chord), "통계 창을 눌렀는데 메뉴가 안 닫혔다");
+        assert!(matches!(a.mode, Mode::Stats(_)), "메뉴를 닫은 누르기가 통계 창을 닫았다");
+        assert_eq!(at(&a), 0, "누르기가 통계 창을 굴렸다");
         a.hit("SPC");
         super::super::draw::tests::render(&mut a, 100, 12);
         let (bx, by) = middle(a.drawn.body);
         roll(&mut a, true, bx, by);
-        assert_eq!(at(&a), 0, "메뉴가 뜬 통계 창을 휠이 굴렸다");
-        assert!(super::super::menu::open(&a.chord), "휠이 메뉴를 닫았다");
-        a.hit("Esc");
+        assert!(!menu::open(&a.chord), "휠이 메뉴를 안 닫았다");
+        assert_eq!(at(&a), 3, "메뉴를 닫은 휠이 통계 창을 안 굴렸다");
 
         a.hit("Esc SPC o t");
         let Mode::Zone(z) = &a.mode else { panic!("시간대 고르는 창이 안 열렸다: {:?}", a.mode) };
