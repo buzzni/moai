@@ -4005,3 +4005,4 @@
 {"ts":"2026-10-04T12:13:53Z","id":"moai-8zz4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — wiki walk counts what it cannot read)"}
 {"ts":"2026-10-04T12:13:59Z","id":"moai-8zz4.vlk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 2·3·4번(place 하나로 경로 잇기, load·cmd::wiki doc). 넘긴 것: 없음 — 1번(NotFound 경합도 unreadable)은 걷기의 다른 갈래와 같게 두기로 판단했고, 5번(시험의 Scratch)은 안전해서 둔다. 까닭은 앞 노트"}
 {"ts":"2026-10-04T12:14:00Z","id":"moai-8zz4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-04T12:14:20Z","id":"moai-8zz4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지, 리뷰 vlk 닫힘, 넘긴 것 없음. 루트 target/release 바이너리는 옛것이라 다시 짓기 전까지 skipped 에 끝까지 못 읽은 디렉터리·종류를 못 읽은 이름이 안 서고 화면 말도 옛 \"could not be opened\" 다"}
