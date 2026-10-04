@@ -155,8 +155,9 @@ a worker that waits needs no waking, and waking is a bonus.
   changed them. Until then Codex runs none of them, and the five rules are words
   only
 - **Make it a worker** with `$moai-work`
-- **Waking**: nothing wakes a Codex window. Its hooks' row carries no tmux pane,
-  so a worker gets its letters by waiting on `moai inbox --ack --wait`
+- **Waking**: nothing is meant to wake a Codex window. Its hooks' row carries no
+  tmux pane, so a worker gets its letters by waiting on `moai inbox --ack --wait`.
+  Do not pass `--wake` to a Codex worker for now (see below)
 
 **Keep the sandbox where it stands.** Codex runs commands in a sandbox of its
 own, and a machine where that works keeps it. `codex sandbox -- true` tells you:
@@ -187,6 +188,10 @@ session cannot yet tie the `moai` it runs in its shell to its own presence row
 - A Codex supervisor's own hook row has no role, so it can take the
   supervisor's own `any-idle-worker` letter at the end of its turn. From a Codex
   supervisor, send to a worker by name
+- The row `moai hello` writes can carry the tmux pane the shared `codex
+  app-server` was started from, which may be another window's. A
+  `moai send --wake` to that row while the worker is not waiting types
+  `moai inbox` into that pane — leave `--wake` off when sending to a Codex worker
 
 ### Antigravity
 
