@@ -1002,7 +1002,7 @@
   "wiki.no_page": "{dir}/ 에 {slug} 페이지가 없다 — 슬러그는 `moai wiki ls` 가 댄다",
   "wiki.skip_not_utf8": "이름이 UTF-8 이 아니라 페이지가 될 수 없다",
   "wiki.skip_dir_link": "디렉터리로 가는 링크는 안 따른다 — 그 너머의 페이지는 위키에 없다",
-  "wiki.skip_unreadable": "못 열었다 — {said}",
+  "wiki.skip_unreadable": "못 읽었다 — {said}",
   "wiki.notice_conflict": "충돌 표시가 든 페이지 {n}  {which}",
   "wiki.notice_unresolved": "페이지로 안 풀리는 링크 {n}  {which}",
   "wiki.notice_missed": "그 페이지에 없는 머리글로 가는 링크 {n}  {which}",

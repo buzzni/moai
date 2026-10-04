@@ -28,7 +28,8 @@ pub const HOMES: [&str; 2] = ["README", "index"];
 #[derive(Debug, Default)]
 pub struct Wiki {
     pub pages: Vec<Page>,
-    /// 페이지일 수 있는데 못 세운 자리 — 이름이 UTF-8 이 아니거나, 디렉터리로 가는 링크거나, 못 연 디렉터리.
+    /// 페이지일 수 있는데 못 세운 자리 — 이름이 UTF-8 이 아니거나, 디렉터리로 가는 링크거나, 못 열었거나 끝까지
+    /// 못 읽은 디렉터리거나, 종류를 못 읽은 이름.
     /// 말없이 넘기면 그 밑의 페이지가 아무 자취 없이 목록에서 빠진다.
     pub skipped: Vec<Skipped>,
 }
@@ -256,7 +257,8 @@ pub enum Skip {
     NotUtf8,
     /// 디렉터리로 가는 링크다 — 안 따른다. 따르면 체크아웃 밖이나 제 조상으로 도는 고리를 걷는다.
     DirLink,
-    /// 디렉터리를 못 열었다 — io 의 말.
+    /// io 가 졌다 — 디렉터리를 못 열었거나 그 목록을 끝까지 못 읽었거나(자리는 그 디렉터리), 항목의 종류를 못
+    /// 읽었다(자리는 그 이름). 말은 io 의 것이다.
     Unreadable(String),
 }
 
@@ -429,35 +431,77 @@ fn linked_from(pages: &[Page]) -> Vec<Vec<String>> {
     from
 }
 
+/// 걷기가 디렉터리 항목에서 읽는 둘 — [`std::fs::DirEntry`] 의 것이다. 시험이 io 가 진 항목을 세울 수 있게 이
+/// 꼴로 받는다(moai-8zz4): 읽다 지는 일은 경합과 장치 오류라 파일로는 못 짓는다.
+trait Entry {
+    fn file_name(&self) -> std::ffi::OsString;
+    fn file_type(&self) -> std::io::Result<std::fs::FileType>;
+}
+
+impl Entry for std::fs::DirEntry {
+    fn file_name(&self) -> std::ffi::OsString {
+        std::fs::DirEntry::file_name(self)
+    }
+
+    fn file_type(&self) -> std::io::Result<std::fs::FileType> {
+        std::fs::DirEntry::file_type(self)
+    }
+}
+
 /// 디렉터리 하나를 걸어 페이지 파일을 모은다 — 이름 차례로, `.` 으로 시작하는 이름은 건너뛴다.
 ///
 /// **디렉터리 링크는 안 따른다**([`Skip::DirLink`]). 파일 링크는 모으고, 그것이 어디로 가는지는 읽는 자리
 /// ([`crate::held::open_inside`])가 잰다.
-fn walk(
-    entries: std::fs::ReadDir,
+///
+/// **io 가 진 자리는 말없이 넘기지 않는다**([`Skip::Unreadable`]) — 목록을 끝까지 못 읽었으면 그 디렉터리를, 종류를
+/// 못 읽은 항목은 그 이름을 댄다. 넘기면 그 밑의 페이지가 자취 없이 빠지고, 역링크가 다 셌다고 말한다(moai-8zz4).
+fn walk<E: Entry>(
+    entries: impl Iterator<Item = std::io::Result<E>>,
     dir: &Path,
     rel: &mut Vec<String>,
     shown: &[String],
     files: &mut Vec<(Vec<String>, PathBuf)>,
     skipped: &mut Vec<Skipped>,
 ) {
-    let mut entries: Vec<std::fs::DirEntry> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let path_of = |rel: &[String], last: &str| {
+        shown.iter().chain(rel).map(String::as_str).chain([last]).collect::<Vec<_>>().join("/")
+    };
+    let mut listed = Vec::new();
+    let mut fell = None;
     for entry in entries {
+        match entry {
+            Ok(e) => listed.push(e),
+            // 디렉터리 하나에 한 줄이다 — 몇 번 졌든 그 밑을 다 못 본 것은 하나다. std 의 `ReadDir` 은 진 뒤 끝난다.
+            Err(e) => {
+                fell.get_or_insert_with(|| e.to_string());
+            }
+        }
+    }
+    if let Some(said) = fell {
+        let here = shown.iter().chain(rel.iter()).map(String::as_str).collect::<Vec<_>>().join("/");
+        let path = if here.is_empty() { ".".to_string() } else { here };
+        skipped.push(Skipped { path, why: Skip::Unreadable(said) });
+    }
+    listed.sort_by_key(E::file_name);
+    for entry in listed {
         let name = entry.file_name();
         let lossy = name.to_string_lossy();
         if lossy.starts_with('.') {
             continue;
         }
         let at = dir.join(&name);
-        let Ok(ft) = entry.file_type() else { continue };
+        // 종류를 모르면 `.md` 가 아니어도 댄다 — 디렉터리였을 수 있다.
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(e) => {
+                skipped.push(Skipped { path: path_of(rel, &lossy), why: Skip::Unreadable(e.to_string()) });
+                continue;
+            }
+        };
         let is_dir = ft.is_dir() || (ft.is_symlink() && std::fs::metadata(&at).is_ok_and(|m| m.is_dir()));
         if !is_dir && !lossy.ends_with(".md") {
             continue;
         }
-        let path_of = |rel: &[String], last: &str| {
-            shown.iter().chain(rel).map(String::as_str).chain([last]).collect::<Vec<_>>().join("/")
-        };
         let Some(name) = name.to_str() else {
             skipped.push(Skipped { path: path_of(rel, &lossy), why: Skip::NotUtf8 });
             continue;
@@ -1277,6 +1321,58 @@ mod tests {
         assert_eq!(w.uncounted("a"), 2, "못 읽은 페이지 하나와 건너뛴 디렉터리 링크 하나");
         assert_eq!(w.uncounted("latin1"), 1, "제 본문은 안 센다");
         assert_eq!(w.find("a").unwrap().linked_from, ["README"]);
+    }
+
+    /// 이름은 있는데 종류를 읽다 io 가 진 항목 — 읽다 지운 파일과의 경합이 낸다.
+    struct Lost(&'static str);
+
+    impl Entry for Lost {
+        fn file_name(&self) -> std::ffi::OsString {
+            self.0.into()
+        }
+
+        fn file_type(&self) -> std::io::Result<std::fs::FileType> {
+            Err(std::io::Error::other("type lost"))
+        }
+    }
+
+    /// **걷기는 io 가 진 자리를 `unreadable` 로 댄다**(moai-8zz4) — 목록을 끝까지 못 읽은 디렉터리는 그 경로로 한
+    /// 번, 종류를 못 읽은 항목은 `.md` 가 아니어도 그 이름으로(디렉터리였을 수 있다). `.` 으로 시작하는 이름은
+    /// 여전히 안 본다. 그러면 위키가 못 읽은 것이 있다고 하고(`wiki ls` 가 비영), 역링크가 덜 섰을 수 있다고 한다
+    /// (`linked_from_partial`). 전에는 둘 다 말없이 버려져 그 밑의 페이지가 자취 없이 빠졌다.
+    #[test]
+    fn what_the_walk_could_not_read_is_left_out_by_name() {
+        let s = Scratch::new("wiki-lost");
+        let (mut files, mut skipped) = (Vec::new(), Vec::new());
+        let entries = vec![
+            Ok(Lost("gone.md")),
+            Err(std::io::Error::other("listing lost")),
+            Ok(Lost(".draft.md")),
+            Ok(Lost("sub")),
+            Err(std::io::Error::other("again")),
+        ];
+        let shown = ["docs".to_string()];
+        walk(entries.into_iter(), &s.join("docs/guide"), &mut vec!["guide".into()], &shown, &mut files, &mut skipped);
+        let unreadable = |path: &str, said: &str| Skipped { path: path.into(), why: Skip::Unreadable(said.into()) };
+        assert!(files.is_empty());
+        assert_eq!(
+            skipped,
+            [
+                unreadable("docs/guide", "listing lost"),
+                unreadable("docs/guide/gone.md", "type lost"),
+                unreadable("docs/guide/sub", "type lost"),
+            ],
+            "디렉터리 하나에 목록 줄 하나, 이름은 이름마다, `.` 이름은 빼고"
+        );
+        let w = Wiki { pages: Vec::new(), skipped };
+        assert!(w.fell_short(), "못 읽은 자리가 있는데 다 읽었다고 했다");
+        assert_eq!(w.uncounted("a"), 3);
+
+        // 위키 뿌리가 체크아웃 뿌리면(`wiki_dir = "."`) 그 디렉터리의 자리는 `.` 이다 — 빈 글이 아니다.
+        let mut skipped = Vec::new();
+        let entries = [Err::<Lost, _>(std::io::Error::other("root lost"))];
+        walk(entries.into_iter(), s.path(), &mut Vec::new(), &[], &mut files, &mut skipped);
+        assert_eq!(skipped, [unreadable(".", "root lost")]);
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

@@ -1002,7 +1002,7 @@
   "wiki.no_page": "No page {slug} in {dir}/ — `moai wiki ls` lists the slugs",
   "wiki.skip_not_utf8": "the name is not UTF-8, so it cannot be a page",
   "wiki.skip_dir_link": "a link to a directory is not followed — the pages behind it are not in the wiki",
-  "wiki.skip_unreadable": "could not be opened — {said}",
+  "wiki.skip_unreadable": "could not be read — {said}",
   "wiki.notice_conflict": "Pages with conflict markers {n}  {which}",
   "wiki.notice_unresolved": "Links leading to no page {n}  {which}",
   "wiki.notice_missed": "Links to a heading the page does not have {n}  {which}",
