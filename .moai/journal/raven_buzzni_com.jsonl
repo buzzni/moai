@@ -4028,3 +4028,9 @@
 {"ts":"2026-10-04T13:01:09Z","id":"moai-0gz3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사람이 develop→main PR 을 만들어 merge commit 으로 머지한 뒤 origin/main 이 0.6.0 인 것을 보고 v0.6.0 태그를 민다 — 절차는 바로 앞 Next 노트"}
 {"ts":"2026-10-04T13:06:00Z","id":"moai-0gz3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #19(develop→main, https://github.com/buzzni/moai/pull/19)을 열었고 체크 8개 모두 pass. 남은 것 — merge commit 으로 머지(스쿼시 금지) → MERGED 확인 → git fetch origin → origin/main Cargo.toml 0.6.0 확인 → git tag v0.6.0 origin/main → git push origin v0.6.0 → 릴리스 워크플로·산출물 확인 → done"}
 {"ts":"2026-10-04T13:12:12Z","id":"moai-0gz3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.6.0 released: release commit dd658773, merge e714b7ed, PR #19 merged by the person as 92e98adf, tag v0.6.0 on 92e98adf, release run 37204504061 and smoke run 37204504065 succeeded; release lists both archives, SHA256SUMS and install.sh. The classifier refused preparing the PR body; the person asked for the PR and then merged and tagged by hand"}
+{"ts":"2026-10-04T13:13:59Z","id":"moai-h8tn.l0t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T13:14:00Z","id":"moai-h8tn.ek0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T13:14:00Z","id":"moai-h8tn.e69","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T13:14:00Z","id":"moai-h8tn.62h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T13:14:00Z","id":"moai-h8tn.p4j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T13:14:00Z","id":"moai-h8tn.h1h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
