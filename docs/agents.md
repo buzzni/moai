@@ -100,6 +100,42 @@ Four skills come with it:
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
 
+## Open a session for each agent
+
+The supervisor and its workers are sessions a person opened. moai never starts
+one, and nothing runs headless. Open each one interactively in the root of the
+main checkout, after `moai skill install` planted that agent's skills and hooks.
+Each session asks its person before it acts, the way it always does — none is
+opened in a mode that skips the asking.
+
+The root, not a worktree: a worker goes into its own worktree under
+`.worktrees/` by itself, and that directory sits inside the root, so whatever
+the root was given — Codex's trust, Antigravity's workspace — covers it too.
+
+A window becomes a worker when its person calls the `moai-work` skill once. It
+then says `moai hello --role worker` and waits with `moai inbox --ack --wait`;
+the supervisor finds it with `moai agents --role worker --status idle` and
+hands it work with `moai send`. [Hand work to waiting
+workers](#hand-work-to-waiting-workers) has the whole round. Nobody needs tmux:
+a worker that waits needs no waking, and waking is a bonus.
+
+### Claude Code
+
+    claude
+
+- **Open it the ordinary way**, not with `--dangerously-skip-permissions`
+- **The plugin's hooks register it** when the session starts, under the name
+  Claude Code shows for it — the name another Claude session's `SendMessage`
+  uses. `/moai-work` keeps that name and adds the role
+- **`/clear` keeps the row.** The same process takes it up again with its new
+  session, name and role included, so a worker cleared between tasks calls
+  `/moai-work` again and is the same worker
+- **A session opened before the install** keeps the hooks it started with —
+  older ones, or none — until it is reopened
+- **Waking**: `moai send --wake` never types into a Claude window. It prints a
+  line telling the sender to wake it with `SendMessage`, which only a Claude
+  session can send
+
 ## What the hooks do
 
 The hooks catch the same few places in each agent's session. Each calls
