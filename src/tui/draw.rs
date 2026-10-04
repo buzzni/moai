@@ -4202,15 +4202,17 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
 /// 줄이 목록의 줄로 읽힌다. 가름줄은 굵지 않다 — 키 먹는 칸의 굵은 선은 목록·상세의 것이다.
 ///
 /// **누를 수 있는 칸과 그 키를 돌려준다**(moai-m6ni, `mouse::Drawn::menu_keys`) — 칸 하나는 `키 : 낱말` 전체다(열 안의
-/// 채움까지). 칠하는 이 자리에서 잰다: 따로 재면 격자의 놓기를 고치는 날 누르는 자리가 칠한 자리와 말없이 갈린다.
+/// 채움까지). 칠하는 이 자리에서 잰다: 따로 재면 격자의 놓기를 고치는 날 누르는 자리가 칠한 자리와 말없이 갈린다. 칸이
+/// 서는 안쪽도 칠하는 틀(`block`)에서 읽는다 — 가름줄·여백을 따로 셈하면 틀을 고치는 날 같은 까닭으로 갈린다.
 fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) -> Vec<(Rect, KeyEvent)> {
-    let room = at.width.saturating_sub(2) as usize;
-    // 칸이 서는 안쪽 — 위 가름줄 한 줄과 왼쪽 여백 한 칸(아래 `block`) 안이다.
-    let (x0, y0) = (at.x + 1, at.y + 1);
+    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
+    let inner = block.inner(at);
+    let room = inner.width as usize;
     let mut hits = Vec::new();
     let lines: Vec<Line> = (0..grid.rows)
         .map(|r| {
             let mut spans = Vec::new();
+            let mut cells = Vec::new();
             for (c, p) in grid.row(r).enumerate() {
                 if c > 0 {
                     spans.push(Span::raw(" ".repeat(menu::GAP)));
@@ -4219,25 +4221,38 @@ fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) -> Vec<(Rect, KeyEvent
                 spans.push(Span::styled(p.key.clone(), bold().fg(MENU_KEY)));
                 spans.push(Span::styled(menu::SEP, Style::new().fg(MENU_SEP)));
                 spans.push(Span::styled(p.text.clone(), menu_word(p.group)));
-                if let Some(cell) = span_at(x0, y0 + r as u16, from, spans_width(&spans) - from, room) {
-                    hits.push((cell, p.event));
-                }
+                cells.push((from, spans_width(&spans) - from, p.event));
+            }
+            // 안쪽 높이를 넘는 줄은 안 그려진다 — 그 칸도 안 남긴다.
+            if r < usize::from(inner.height) {
+                hits.extend(cells_at(inner.x, inner.y + r as u16, cells, spans_width(&spans), room));
             }
             // 격자가 이미 폭에 맞췄다. 한 열도 안 드는 좁은 창만 여기서 잘린다.
             fit(Line::from(spans), room)
         })
         .collect();
-    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
     f.render_widget(Clear, at);
     f.render_widget(Paragraph::new(lines).block(block), at);
     hits
 }
 
-/// 줄 `y` 에서 `x0` 부터 `from` 칸 떨어져 `w` 칸 선 글의 자리 — 폭 `room` 을 넘는 몫은 `fit` 이 자른 대로 잘린다. 한 칸도
-/// 안 보이면 없다: 안 보이는 칸을 누를 수는 없다.
-fn span_at(x0: u16, y: u16, from: usize, w: usize, room: usize) -> Option<Rect> {
-    let w = w.min(room.saturating_sub(from));
-    (w > 0).then(|| Rect::new(x0 + from as u16, y, w as u16, 1))
+/// 한 줄에 선 칸들의 자리 — 칸은 `(앞에서 떨어진 칸, 폭, 키)` 이고 줄 `y` 의 `x0` 부터 잰다. 줄의 폭은 `line` 이다.
+///
+/// **[`fit`] 이 자른 대로 자른다.** 줄이 `room` 을 넘으면 `fit` 은 끝 칸을 `…` 에 내주므로 보이는 몫은 `room - 1` 칸이다
+/// — `room` 으로 자르면 키가 끝 칸에 걸린 칸이 `…` 만 보이는데도 눌린다(리뷰: 15칸 접힌 줄의 `…` 가 거름망을 열었다).
+/// 한 칸도 안 보이는 칸은 없다: 안 보이는 칸을 누를 수는 없다.
+fn cells_at(
+    x0: u16,
+    y: u16,
+    cells: Vec<(usize, usize, KeyEvent)>,
+    line: usize,
+    room: usize,
+) -> impl Iterator<Item = (Rect, KeyEvent)> {
+    let shown = if line > room { room.saturating_sub(1) } else { room };
+    cells.into_iter().filter_map(move |(from, w, k)| {
+        let w = w.min(shown.saturating_sub(from));
+        (w > 0).then(|| (Rect::new(x0 + from as u16, y, w as u16, 1), k))
+    })
 }
 
 /// 거름망 칸 위의 안내(moai-h2rh) — 커서가 값 자리에 서면 고를 값, 아니면 쓸 수 있는 항목과 예. **`room` 줄을 안
@@ -4351,7 +4366,8 @@ fn menu_line(
 ) -> Vec<(Rect, KeyEvent)> {
     let held = app.chord.held();
     let room = at.width as usize;
-    let mut hits = Vec::new();
+    // 누를 수 있는 칸 — `(앞에서 떨어진 칸, 폭, 키)`. 자리는 줄을 다 놓은 뒤 [`cells_at`] 이 `fit` 이 자른 대로 낸다.
+    let mut cells = Vec::new();
     let mut spans = vec![Span::styled(format!("{}-", menu::title(held)), bold())];
     if grid.rows == 0 {
         for e in items {
@@ -4359,9 +4375,7 @@ fn menu_line(
             let from = spans_width(&spans);
             spans.push(Span::styled(e.key.clone(), bold().fg(MENU_KEY)));
             spans.push(Span::styled(format!(" {}", e.text()), menu_word(e.is_group())));
-            if let Some(cell) = span_at(at.x, at.y, from, spans_width(&spans) - from, room) {
-                hits.push((cell, e.event));
-            }
+            cells.push((from, spans_width(&spans) - from, e.event));
         }
     } else {
         spans.push(Span::raw(format!(" {}", menu::name(held, app.site.lang))));
@@ -4380,20 +4394,16 @@ fn menu_line(
     if held.len() > 1 {
         exits.push(exit(Menu::Up));
     }
-    let (exits, exit_keys): (Vec<Span>, Vec<KeyEvent>) = exits.into_iter().unzip();
-    let used = spans_width(&spans) + spans_width(&exits);
+    let used = spans_width(&spans) + exits.iter().map(|(s, _)| crate::text::width(&s.content)).sum::<usize>();
     if used <= room {
         spans.push(Span::raw(" ".repeat(room - used)));
-        for (span, k) in exits.into_iter().zip(exit_keys) {
+        for (span, k) in exits {
             // 나가는 법 하나의 글은 ` 키 낱말` 이다([`key`]) — 앞의 빈칸은 칸 사이라 누르는 자리에서 뺀다.
-            let from = spans_width(&spans) + 1;
-            let w = crate::text::width(&span.content).saturating_sub(1);
+            cells.push((spans_width(&spans) + 1, crate::text::width(&span.content).saturating_sub(1), k));
             spans.push(span);
-            if let Some(cell) = span_at(at.x, at.y, from, w, room) {
-                hits.push((cell, k));
-            }
         }
     }
+    let hits = cells_at(at.x, at.y, cells, spans_width(&spans), room).collect();
     f.render_widget(Paragraph::new(fit(Line::from(spans), room)), at);
     hits
 }

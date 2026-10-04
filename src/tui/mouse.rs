@@ -9,14 +9,17 @@
 //! 그 화면이다. 키가 상세의 끝을 마지막으로 그린 줄 수로 가늠하는 것(`Scroll::go`)과 같은 결이다.
 //!
 //! **듣는 자리는 둘뿐이다**(사용자 결정 2026-10-01). 목록·상세를 둘러보는 동안(한눈 보기 `0` 도 같은 칸이다)과
-//! 통계 창 위의 휠이다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는 칸이 떠 있으면 **마우스를 아예 놓는다**
-//! ([`App::wants_mouse`], 리뷰 뒤 사용자 결정 2026-10-01) — 그 창들은 키로 다루는 자리고, 뒤의 목록을 누른 것이
-//! 적던 글을 두고 커서를 옮기면 무엇에 대해 적던 것인지를 잃는다. 잡은 채 아무것도 안 하면 그 자리에서 터미널의
-//! 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의 것으로 돌려준다.
+//! 통계 창 위의 휠이다 — 그 둘 위에 뜬 SPC 메뉴는 아래 문단이 본다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는
+//! 칸이 떠 있으면 **마우스를 아예 놓는다**([`App::wants_mouse`], 리뷰 뒤 사용자 결정 2026-10-01) — 그 창들은 키로
+//! 다루는 자리고, 뒤의 목록을 누른 것이 적던 글을 두고 커서를 옮기면 무엇에 대해 적던 것인지를 잃는다. 잡은 채
+//! 아무것도 안 하면 그 자리에서 터미널의 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의
+//! 것으로 돌려준다.
 //!
 //! **SPC 메뉴는 둘러보기 위에 잠깐 뜨는 것이라 잡은 채 듣는다**(moai-m6ni, 사용자 결정 2026-10-04 — 메뉴가 열린 동안
-//! 뒤를 누른 것이 아무 일도 안 하던 2026-10-01 의 결정을 뒤집었다). 메뉴 밖에서 누르거나 굴리면 메뉴를 닫고 그 손짓을
-//! 그대로 한다 — 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 하는 것(moai-y8v2)과 같은 결이다. 통계 창 위의 메뉴도 같다.
+//! 뒤를 누른 것이 아무 일도 안 하던 2026-10-01 의 결정을 뒤집었다). 메뉴의 칸(접두어 줄의 `Esc`·`Bksp` 도)을 누르면
+//! 그 칸의 키를 친 것이다 — 키와 같은 길(`App::key`)로 보내므로 묶음은 한 층 내려가고 토글은 메뉴를 열어 둔다. 메뉴 밖에서
+//! 누르거나 굴리면 메뉴를 닫고 그 손짓을 그대로 한다 — 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 하는 것(moai-y8v2)과
+//! 같은 결이다. 메뉴 안의 빈 자리, 메뉴 위의 휠, 오른쪽·가운데 단추와 뗌·끌기는 아무것도 안 한다. 통계 창 위의 메뉴도 같다.
 
 use super::{App, Mode, Pane, menu, scroll};
 use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
@@ -411,8 +414,18 @@ mod tests {
         let rows = a.drawn.rows;
         assert!(rows.bottom() <= shut.y, "메뉴가 목록의 줄을 덮었다: {:?}", a.drawn);
 
-        a.mouse(event(MouseEventKind::Down(MouseButton::Right), rows.x + 2, rows.y + 4));
-        assert!(menu::open(&a.chord), "오른쪽 단추가 메뉴를 닫았다");
+        // 왼쪽 누르기·휠이 아닌 손짓은 메뉴 밖에서도 아무것도 안 한다 — 둘러볼 때도 아무 일이 없는 손짓이다.
+        for kind in [
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+        ] {
+            a.mouse(event(kind, rows.x + 2, rows.y + 4));
+            assert!(menu::open(&a.chord), "메뉴 밖의 {kind:?} 가 메뉴를 닫았다");
+            assert_eq!(a.cursor, 0, "메뉴 밖의 {kind:?} 가 목록을 움직였다");
+        }
         // 접두어 줄의 왼쪽 끝 — `SPC-` 이름이다. 메뉴 안의 빈 자리는 아무 일도 안 한다.
         click(&mut a, shut.x, shut.bottom() - 1);
         assert!(menu::open(&a.chord), "메뉴 안을 눌렀는데 메뉴가 닫혔다");
@@ -479,6 +492,11 @@ mod tests {
         let shut = a.drawn.menu.expect("메뉴가 선 자리를 안 남겼다");
         click(&mut a, vx, shut.y);
         assert_eq!(layer_of(&a), "SPC", "가름줄을 눌렀는데 무언가 했다");
+        // 칸 위라도 왼쪽 누르기가 아니면 그 키가 아니다.
+        for button in [MouseButton::Right, MouseButton::Middle] {
+            a.mouse(event(MouseEventKind::Down(button), vx, vy));
+            assert_eq!(layer_of(&a), "SPC", "칸을 {button:?} 단추로 눌렀는데 그 키를 쳤다");
+        }
         // 칸의 끝(낱말 위)을 눌러도 그 칸이다.
         click(&mut a, vx + 6, vy);
         assert_eq!(layer_of(&a), "SPC v", "묶음을 눌렀는데 한 층 안 내려갔다");
@@ -533,6 +551,15 @@ mod tests {
         let (x, y) = spot(&lines, "g : +");
         click(&mut a, x, y);
         assert_eq!(layer_of(&a), "SPC g", "통계 창 위 메뉴의 묶음을 눌렀는데 한 층 안 내려갔다");
+        // 통계 창 위의 접두어 줄도 누른다 — 하위 층의 `Bksp` 는 한 층 올라간다.
+        let lines = super::super::draw::tests::render(&mut a, 100, 12);
+        let (x, y) = spot(&lines, "Bksp");
+        click(&mut a, x, y);
+        assert_eq!(layer_of(&a), "SPC", "통계 창 위 접두어 줄의 Bksp 를 눌렀는데 한 층 안 올라갔다");
+        assert!(matches!(a.mode, Mode::Stats(_)), "Bksp 를 누른 것이 통계 창을 닫았다");
+        let lines = super::super::draw::tests::render(&mut a, 100, 12);
+        let (x, y) = spot(&lines, "g : +");
+        click(&mut a, x, y);
         let lines = super::super::draw::tests::render(&mut a, 100, 12);
         let (x, y) = spot(&lines, "l : ");
         click(&mut a, x, y);
@@ -541,6 +568,32 @@ mod tests {
             (Mode::Browse, String::new()),
             "목록을 눌렀는데 통계 창이 안 닫혔다"
         );
+    }
+
+    /// **누를 수 있는 칸에는 그 칸의 키가 보인다**(moai-m6ni 리뷰) — 폭이 모자라 줄이 `…` 로 잘리면 그 `…` 칸은 뒤에 숨은
+    /// 칸의 것이 아니다. 한때 접힌 줄에서 키가 끝 칸에 걸린 항목은 `…` 만 보이는데도 눌렸다. 폭을 한 칸씩 늘려 가며 격자·
+    /// 접힌 줄·하위 층의 나가는 법까지 다 잰다 — 칠한 자리와 누르는 자리가 갈려도 여기서 붉어진다.
+    #[test]
+    fn a_menu_cell_takes_clicks_only_where_its_key_shows() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for (h, layer) in [(6, "SPC"), (6, "SPC v"), (20, "SPC"), (20, "SPC v")] {
+            for w in 8..=120u16 {
+                let mut a = drawn(10, w, h);
+                a.hit(layer);
+                let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+                term.draw(|f| super::super::draw::screen(f, &mut a)).unwrap();
+                let buf = term.backend().buffer();
+                assert!(a.drawn.menu.is_some(), "시험의 전제 — {w}x{h} 에 {layer} 메뉴가 섰다");
+                for (r, k) in &a.drawn.menu_keys {
+                    let shown: String = (r.x..r.right()).map(|x| buf[(x, r.y)].symbol()).collect();
+                    let name = super::super::keys::name_of(k.code);
+                    assert!(
+                        shown.contains(&name),
+                        "{w}x{h} {layer}: `{name}` 를 누르는 자리 {r:?} 에 `{shown}` 만 보인다"
+                    );
+                }
+            }
+        }
     }
 
     /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 목록 위에서는 커서가 세 줄씩
