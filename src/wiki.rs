@@ -47,6 +47,38 @@ impl Wiki {
     }
 }
 
+/// 사람 화면이 알림으로 세는 것(moai-ihu4.zdk) — 충돌 표시가 든 페이지, 페이지로 안 풀리는 링크, 트래커에 없는
+/// id. **아무것도 막지 않는다** — 세어 비출 뿐이고 종료 코드는 안 바뀐다. `--json` 은 같은 것을 페이지마다
+/// 든다(`conflict`·`resolved`·`exists`) — 세는 자는 여기 하나라 두 표면이 다른 수를 안 낸다.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Notices<'a> {
+    /// 충돌 표시가 든 페이지의 슬러그.
+    pub conflict: Vec<&'a str>,
+    /// `(링크를 적은 페이지, 대상 슬러그)`.
+    pub unresolved: Vec<(&'a str, &'a str)>,
+    /// `(id 를 댄 페이지, 그 id)`.
+    pub missing: Vec<(&'a str, &'a str)>,
+}
+
+impl Notices<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.conflict.is_empty() && self.unresolved.is_empty() && self.missing.is_empty()
+    }
+}
+
+/// 페이지들에서 알림을 센다 — 목록이면 위키 전부, `show` 면 그 페이지 하나다.
+pub fn notices<'a>(pages: impl IntoIterator<Item = &'a Page>) -> Notices<'a> {
+    let mut n = Notices::default();
+    for p in pages {
+        if p.conflict {
+            n.conflict.push(&p.slug);
+        }
+        n.unresolved.extend(p.links.iter().filter(|l| !l.resolved).map(|l| (p.slug.as_str(), l.to.as_str())));
+        n.missing.extend(p.issues.iter().filter(|i| !i.exists).map(|i| (p.slug.as_str(), i.id.as_str())));
+    }
+    n
+}
+
 /// 페이지 하나.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Page {
@@ -708,6 +740,22 @@ mod tests {
         assert_eq!(w.find("out").unwrap().title, "out", "밖의 글을 제목으로 읽었다");
         assert_eq!(w.skipped, [Skipped { path: "docs/away".into(), why: Skip::DirLink }]);
         assert!(w.fell_short());
+    }
+
+    /// 알림은 충돌 표시·풀리지 않는 링크·없는 id 셋을 페이지와 함께 센다. 풀리는 링크와 있는 id 는 안 센다.
+    #[test]
+    fn notices_count_conflicts_dangling_links_and_unknown_ids() {
+        let s = Scratch::new("wiki-notices");
+        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md) [gone](gone.md) moai-ab12 moai-zz99\n");
+        write(s.path(), "docs/a.md", "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n");
+        let known = |id: &str| id == "moai-ab12";
+        let w = load(s.path(), "docs", "moai", &known).unwrap();
+        let n = notices(&w.pages);
+        assert_eq!(n.conflict, ["a"]);
+        assert_eq!(n.unresolved, [("README", "gone")]);
+        assert_eq!(n.missing, [("README", "moai-zz99")]);
+        assert!(notices(w.find("a")).missing.is_empty() && !notices(w.find("a")).is_empty());
+        assert!(notices(&w.pages[..0]).is_empty());
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

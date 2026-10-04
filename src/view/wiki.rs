@@ -7,7 +7,7 @@ use crate::held;
 use crate::i18n::{Lang, fill, say};
 use crate::style::{self, paint};
 use crate::text::{one_line, width};
-use crate::wiki::{DirTrouble, Outside, Page, Skip, Skipped, Unread, Wiki};
+use crate::wiki::{DirTrouble, Notices, Outside, Page, Skip, Skipped, Unread, Wiki};
 
 /// `wiki_dir` 을 화면에 — 빈 글은 체크아웃 뿌리라 `.` 으로 댄다.
 fn shown(dir: &str) -> String {
@@ -37,6 +37,11 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
         }
         out.push(line);
     }
+    let n = crate::wiki::notices(&w.pages);
+    if !n.is_empty() {
+        out.push(String::new());
+        out.extend(notice_lines(lang, &n, true));
+    }
     out
 }
 
@@ -48,12 +53,65 @@ pub fn page(lang: Lang, p: &Page) -> Vec<String> {
         String::new(),
     ];
     match (&p.body, &p.error) {
+        // **충돌 표시가 든 페이지는 원문 그대로다**(설계 노트 moai-qunn) — 그리면 표시가 제목·줄글로 섞여 어디가
+        // 갈렸는지 안 보인다. 줄마다 제어문자만 걷는다.
+        (Some(body), _) if p.conflict => {
+            out.push(paint(
+                style::WARN,
+                &format!("! {}", fill(say(lang, "wiki.conflict_raw"), &[("path", &one_line(&p.path))])),
+            ));
+            out.push(String::new());
+            out.extend(
+                crate::text::sanitize(body)
+                    .lines()
+                    .map(|l| if l.is_empty() { String::new() } else { format!("  {l}") }),
+            );
+        }
         (Some(body), _) => out.extend(crate::view::body_lines(body)),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &unread(lang, p, u))]);
             out.push(paint(style::WARN, &format!("! {said}")));
         }
         (None, None) => {}
+    }
+    // 충돌은 본문 머리에 이미 섰다 — 꼬리에는 링크와 id 만 센다.
+    let n = Notices { conflict: Vec::new(), ..crate::wiki::notices([p]) };
+    if !n.is_empty() {
+        out.push(String::new());
+        out.extend(notice_lines(lang, &n, false));
+    }
+    out
+}
+
+/// 알림을 줄로 — 갈래마다 한 줄, 셈과 처음 몇 개. 셋을 넘으면 `+<나머지>` 로 접는다. 목록(`whole`)은 어느
+/// 페이지의 것인지 대고(`README → nope`, `moai-zz99 (README)`), 페이지 하나를 볼 때는 무엇만 댄다.
+fn notice_lines(lang: Lang, n: &Notices, whole: bool) -> Vec<String> {
+    const SHOWN: usize = 3;
+    let which = |items: Vec<String>| {
+        let mut said = items.iter().take(SHOWN).map(|s| one_line(s)).collect::<Vec<_>>().join(", ");
+        if items.len() > SHOWN {
+            said.push_str(&format!(", +{}", items.len() - SHOWN));
+        }
+        said
+    };
+    let line = |text: String| paint(style::WARN, &format!("! {text}"));
+    let mut out = Vec::new();
+    if !n.conflict.is_empty() {
+        let items = n.conflict.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let (count, which) = (items.len().to_string(), which(items));
+        out.push(line(fill(say(lang, "wiki.notice_conflict"), &[("n", &count), ("which", &which)])));
+    }
+    if !n.unresolved.is_empty() {
+        let items = n.unresolved.iter().map(|(slug, to)| if whole { format!("{slug} → {to}") } else { to.to_string() });
+        let items = items.collect::<Vec<_>>();
+        let (count, which) = (items.len().to_string(), which(items));
+        out.push(line(fill(say(lang, "wiki.notice_unresolved"), &[("n", &count), ("which", &which)])));
+    }
+    if !n.missing.is_empty() {
+        let items = n.missing.iter().map(|(slug, id)| if whole { format!("{id} ({slug})") } else { id.to_string() });
+        let items = items.collect::<Vec<_>>();
+        let (count, which) = (items.len().to_string(), which(items));
+        out.push(line(fill(say(lang, "wiki.notice_missing"), &[("n", &count), ("which", &which)])));
     }
     out
 }

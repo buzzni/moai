@@ -23378,3 +23378,30 @@ fn a_page_that_cannot_be_read_stays_listed_and_says_why() {
     assert!(!listed.contains("Secret"), "체크아웃 밖의 글을 읽었다 — {listed}");
     ok(s.path(), &["status"]);
 }
+
+/// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·없는 id 를 목록 꼬리에 세고, 종료 코드는
+/// 그대로 0 이다. 충돌 표시가 든 페이지는 그리지 않고 원문 그대로 보인다 — 그리면 표시가 제목·줄글로 섞인다.
+#[test]
+fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
+    let s = init("wiki-notices");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) argos-zz99\n").unwrap();
+    std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
+
+    let ls = ok(s.path(), &["wiki", "ls"]);
+    assert!(ls.contains("! 충돌 표시가 든 페이지 1  a"), "{ls}");
+    assert!(ls.contains("! 페이지로 안 풀리는 링크 1  README → gone"), "{ls}");
+    assert!(ls.contains("! 트래커에 없는 id 1  argos-zz99 (README)"), "{ls}");
+
+    let conflicted = ok(s.path(), &["wiki", "show", "a"]);
+    assert!(
+        conflicted.contains("  <<<<<<< HEAD\n  x\n  =======\n  y\n  >>>>>>> b"),
+        "충돌 페이지를 그렸다\n{conflicted}"
+    );
+    assert!(conflicted.contains("docs/a.md 의 병합을 풀고"), "{conflicted}");
+    let home = ok(s.path(), &["wiki", "show", "README"]);
+    assert!(home.contains("! 페이지로 안 풀리는 링크 1  gone"), "{home}");
+    assert!(home.contains("! 트래커에 없는 id 1  argos-zz99"), "{home}");
+    assert!(!home.contains("충돌 표시가 든"), "{home}");
+}
