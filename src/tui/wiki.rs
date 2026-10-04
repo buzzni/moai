@@ -31,7 +31,7 @@ use super::keys::{self, Browse, Chord, LEADER, LINKS, Lookup, PROMPT, Prompt, WI
 use super::layer::Depth;
 use super::menu;
 use super::scroll::{self, Move, Scroll};
-use super::{App, Landing, Mode, Pane, Row, Seat};
+use super::{App, Landing, Mode, Pane, Row, Seat, Veil};
 use crate::i18n::{fill, say};
 use crate::wiki::{DirTrouble, Page, Wiki};
 use ratatui::crossterm::event::KeyEvent;
@@ -62,6 +62,10 @@ pub struct Window {
     /// **첨자가 아니라 경로다** — 창이 떠 있는 동안 층의 줄이 다시 서면 첨자는 다른 프로젝트를 가리킨다.
     pub from: Option<PathBuf>,
     pages: Vec<Page>,
+    /// 찾기가 견줄 글 — 페이지마다 `(제목, 본문)` 을 소문자로 접은 것, [`Window::pages`] 와 같은 차례. **연 순간 한 번
+    /// 접는다** — 창은 그 사이 글이 안 바뀌는데, 견줄 때마다 접으면 커서·그림·치는 키마다 위키 전부(생성 페이지
+    /// `docs/cli.md` 만 128KB)를 몇 번씩 다시 접는다.
+    folded: Vec<(String, Option<String>)>,
     /// 걷다가 페이지로 못 세운 자리 수 — 목록 밑에 선다. 말없이 빠지면 그 밑의 페이지가 없는 줄 안다.
     pub skipped: usize,
     /// 목록에서 선 줄 — 보이는 페이지([`Window::shown`])의 차례다.
@@ -93,6 +97,8 @@ pub struct Choose {
     pub items: Vec<Target>,
     pub cursor: usize,
     pub list: Scroll,
+    /// 접두어(`gg`)를 기다리는 열 — 창의 열과 따로다. 키 하나씩 찾으면 `g` 가 늘 접두어라 `gg` 가 안 선다.
+    pub chord: Chord,
 }
 
 /// 고를 것 하나.
@@ -112,18 +118,22 @@ pub struct Typing {
     pub input: Input,
     /// 칸을 열기 전에 걸려 있던 찾기 — Esc 가 되돌린다.
     was: Option<String>,
-    /// 칸을 열 때 보던 페이지 — 하나도 안 걸려 목록이 빈 동안에도 돌아갈 자리다. 없으면 친 글자 하나가 비운 목록을
-    /// 지나며 보던 페이지를 잃는다.
+    /// 칸을 열 때 보던 페이지 — **치는 동안 돌아갈 자리는 늘 이것이다**([`Window::typed_slug`]). 치는 동안 커서는 사람이
+    /// 고른 적이 없다: 친 글자 하나가 그 페이지를 가려 커서가 첫 줄로 가도, 지우면 그 페이지로 돌아오고 Esc 도 그리로
+    /// 간다. 지금 선 페이지를 따르면 가렸다 다시 보이는 사이에 보던 페이지를 잃는다.
     from: Option<String>,
 }
 
 impl Window {
     fn new(project: String, dir: String, from: Option<PathBuf>, wiki: Wiki, titles: Titles) -> Window {
+        let folded =
+            wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
         Window {
             project,
             dir,
             from,
             pages: wiki.pages,
+            folded,
             skipped: wiki.skipped.len(),
             cursor: 0,
             list: Scroll::default(),
@@ -160,7 +170,7 @@ impl Window {
         if items.is_empty() {
             return false;
         }
-        self.choose = Some(Choose { items, cursor: 0, list: Scroll::default() });
+        self.choose = Some(Choose { items, cursor: 0, list: Scroll::default(), chord: Chord::default() });
         true
     }
 
@@ -179,14 +189,15 @@ impl Window {
     }
 
     /// 목록에 선 페이지들, 차례대로 — 찾는 글이 있으면 **제목이나 본문에 그 글이 든** 페이지만이다. 견주는 법은
-    /// 거름망과 같은 `to_lowercase` 다(`query::Filter`). 못 읽은 페이지는 제목으로만 걸린다.
+    /// 거름망과 같은 `to_lowercase` 다(`query::Filter`) — 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못
+    /// 읽은 페이지는 제목으로만 걸린다.
     pub fn shown(&self) -> Vec<&Page> {
         let Some(q) = self.query().map(str::to_lowercase) else { return self.pages.iter().collect() };
         self.pages
             .iter()
-            .filter(|p| {
-                p.title.to_lowercase().contains(&q) || p.body.as_deref().is_some_and(|b| b.to_lowercase().contains(&q))
-            })
+            .zip(&self.folded)
+            .filter(|(_, (title, body))| title.contains(&q) || body.as_deref().is_some_and(|b| b.contains(&q)))
+            .map(|(p, _)| p)
             .collect()
     }
 
@@ -211,9 +222,14 @@ impl Window {
         self.typing = Some(Typing { input: Input::new(was.as_deref().unwrap_or_default()), was, from });
     }
 
+    /// 치는 동안 커서를 다시 세울 페이지 — 칸을 열 때 보던 페이지([`Typing::from`]), 그것이 없었으면 지금 선 페이지다.
+    fn typed_slug(&self) -> Option<String> {
+        self.typing.as_ref().and_then(|t| t.from.clone()).or_else(|| self.current().map(|p| p.slug.clone()))
+    }
+
     /// 치는 칸의 키 하나 — 칸이 먹으면 치는 대로 좁히고, 안 먹은 Enter 는 걸고 Esc 는 열기 전으로 돌아간다.
     fn type_key(&mut self, k: KeyEvent) {
-        let slug = self.current().map(|p| p.slug.clone()).or_else(|| self.typing.as_ref()?.from.clone());
+        let slug = self.typed_slug();
         let Some(t) = &mut self.typing else { return };
         if t.input.key(k) {
             return self.refilter(slug);
@@ -236,7 +252,7 @@ impl Window {
 
     /// 붙여넣기 — 치는 칸이 있으면 거기 넣고 좁힌다. 없으면 아무 일도 없다(통계 창과 같다).
     pub(super) fn paste(&mut self, s: &str) {
-        let slug = self.current().map(|p| p.slug.clone()).or_else(|| self.typing.as_ref()?.from.clone());
+        let slug = self.typed_slug();
         if let Some(t) = &mut self.typing {
             t.input.paste(s);
             self.refilter(slug);
@@ -416,7 +432,14 @@ impl App {
             }
         };
         if wiki.pages.is_empty() {
-            self.notice = Some(crate::view::wiki::list(lang, &dir, &wiki).join(" "));
+            let mut said = crate::view::wiki::list(lang, &dir, &wiki).join(" ");
+            // **못 걸은 자리가 있으면 그 수도 댄다** — 창이 안 서니 목록 밑의 수([`Window::skipped`])가 설 자리가 없다.
+            // 빼면 "첫 페이지는 README.md" 만 남아, 디렉터리 링크 밑에 둔 페이지가 정말 없는 줄 안다.
+            if !wiki.skipped.is_empty() {
+                let n = wiki.skipped.len().to_string();
+                said = format!("{said} · {}", fill(say(lang, "tui.wiki.skipped"), &[("n", &n)]));
+            }
+            self.notice = Some(said);
             return;
         }
         // **연 키는 탐색의 열을 비운 뒤에 온다** — 메뉴로 열었으면 메뉴가 이미 닫혔다(`menu::feed`).
@@ -425,22 +448,25 @@ impl App {
 
     /// 고르기 창의 키 하나(본문 칸의 `Enter` 가 연 창). 고른 것이 페이지면 그리로 건너가고, id 면 창을 닫고 그 줄에 서며,
     /// 갈 데가 없는 것은 알림으로 까닭을 댄다. 어느 쪽이든 고르면 고르기 창은 닫힌다.
-    fn choose_key(&mut self, k: KeyEvent) {
+    ///
+    /// **이 키가 알림을 걷는가**를 답한다([`App::wiki_key`] 와 같은 규칙) — 둘째 키를 기다리는 `g` 만 거짓이다.
+    fn choose_key(&mut self, k: KeyEvent) -> bool {
         let lang = self.site.lang;
-        let Mode::Wiki(w) = &mut self.mode else { return };
-        let Some(c) = &mut w.choose else { return };
-        let picked = match keys::lookup(LINKS, &[k]) {
-            Lookup::Run(keys::Link::Step(m)) => {
+        let Mode::Wiki(w) = &mut self.mode else { return false };
+        let Some(c) = &mut w.choose else { return false };
+        let picked = match c.chord.feed(LINKS, k) {
+            Some(keys::Link::Step(m)) => {
                 let len = c.items.len();
                 c.cursor = scroll::cursor(m, c.cursor, || len);
-                return;
+                return true;
             }
-            Lookup::Run(keys::Link::Close) => {
+            Some(keys::Link::Close) => {
                 w.choose = None;
-                return;
+                return true;
             }
-            Lookup::Run(keys::Link::Enter) => c.items.get(c.cursor).cloned(),
-            _ => return,
+            Some(keys::Link::Enter) => c.items.get(c.cursor).cloned(),
+            // 뜻 없는 키는 열을 버리므로([`keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
+            None => return c.chord.held().is_empty(),
         };
         w.choose = None;
         // 말의 키는 글자째 적는다 — `i18n` 의 시험이 `say(lang, "…")` 을 훑어 표와 견준다.
@@ -464,12 +490,14 @@ impl App {
             }
             None => {}
         }
+        true
     }
 
     /// 고른 id 의 줄에 선다 — 창을 닫고 목록으로 돌아가 `App::land` 가 그 줄의 집으로 간다. **한눈 보기에서 연
     /// 창이면 그 프로젝트로 먼저 들어간다**(2026-10-04 사용자 결정) — 헤더 번호가 들어가는 길(`App::enter_project`)과
-    /// 같다. 못 들어가면 그 길이 단 알림이 까닭을 댄다. 거름망·보기가 그 줄을 가렸으면 무엇이 가렸는지 대고 커서는
-    /// 그대로 둔다(쓰기 뒤의 착지와 같은 갈래다).
+    /// 같다. 못 들어가면 그 길이 단 알림이 까닭을 댄다. 거름망·보기가 그 줄을 가렸으면 **무엇이 가렸는지 가려** 그것을
+    /// 푸는 키만 대고 커서는 그대로 둔다 — 쓰기 뒤의 착지와 같은 갈래다(moai-fmv5): 거름망이 없는데 Esc 를 대거나,
+    /// 아카이브라 가린 줄에 모두 보이기를 대면 누른 키가 아무것도 안 한다. 보기 쪽 말은 [`App::veiled_row`] 가 짓는다.
     fn wiki_land(&mut self, id: &str, from: Option<PathBuf>) {
         let lang = self.site.lang;
         self.mode = Mode::Browse;
@@ -484,13 +512,22 @@ impl App {
                 return;
             }
         }
-        let clear = keys::label(keys::BROWSE, Browse::ClearFilter);
-        let show = keys::label(keys::BROWSE, Browse::ShowAll);
         match self.land(id) {
             Landing::Shown => {}
             Landing::Hidden => {
-                self.notice =
-                    Some(fill(say(lang, "tui.wiki.hidden"), &[("id", id), ("clear", &clear), ("show", &show)]));
+                let clear = keys::label(keys::BROWSE, Browse::ClearFilter);
+                let filtered = || fill(say(lang, "tui.wiki.veiled_filter"), &[("id", id), ("clear", &clear)]);
+                let told = match self.site.index.find(id).map(|at| (at, self.site.veil(at))) {
+                    // **둘 다 가렸으면 둘 다 댄다** — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다(moai-2kyl).
+                    Some((at, Veil { filtered: true, viewed: true })) => {
+                        format!("{} · {}", filtered(), self.veiled_row(id, at))
+                    }
+                    Some((at, Veil { filtered: false, viewed: true })) => self.veiled_row(id, at),
+                    Some((_, Veil { filtered: true, viewed: false })) => filtered(),
+                    // 둘 다 안 가렸는데 줄이 안 섰다 — 오늘은 닿지 않는 갈래다. 누를 키를 대면 아무것도 안 한다(moai-1jay).
+                    _ => fill(say(lang, "tui.wiki.gone"), &[("id", id)]),
+                };
+                self.notice = Some(told);
             }
             Landing::Missing => self.notice = Some(fill(say(lang, "tui.wiki.gone"), &[("id", id)])),
         }
@@ -515,8 +552,7 @@ impl App {
         if let Mode::Wiki(w) = &self.mode
             && w.choose.is_some()
         {
-            self.choose_key(k);
-            return true;
+            return self.choose_key(k);
         }
         if menu::open(&self.chord) || LEADER.matches(k) {
             if let Mode::Wiki(w) = &mut self.mode {
@@ -781,6 +817,19 @@ pub(super) mod tests {
             "빈 위키가 첫 자리를 안 댔다: {:?}",
             a.notice
         );
+        // **못 걸은 자리만 있는 위키는 그 수를 함께 댄다** — 창이 안 서니 목록 밑의 수도 없다. 빼면 "첫 페이지는
+        // README.md" 만 남아 페이지가 정말 없는 줄 안다.
+        std::fs::create_dir_all(s.path().join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(s.path().join("elsewhere"), s.path().join("docs/linked")).unwrap();
+        a.notice = None;
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(
+            a.notice.as_deref().is_some_and(|n| n.contains("README.md") && n.contains("moai wiki ls")),
+            "못 걸은 자리를 안 댔다: {:?}",
+            a.notice
+        );
+        std::fs::remove_file(s.path().join("docs/linked")).unwrap();
         std::fs::remove_dir(s.path().join("docs")).unwrap();
         a.notice = None;
         a.hit("SPC g w");
@@ -853,6 +902,26 @@ pub(super) mod tests {
         assert_eq!(window(&a).focus, Side::List);
     }
 
+    /// **되돌아가 읽던 줄이 지금 칸의 끝을 지났으면 끝에서 그린다** — 굴린 자리를 재기(`Scroll::fit`) 전에 줄을 자르면 그
+    /// 그림 한 장이 아래를 빈 채로 서고, 다음 키까지 그대로다(상세의 그림과 같은 차례).
+    #[test]
+    fn going_back_past_the_end_of_a_taller_pane_draws_from_the_end() {
+        let long: String = (1..=40).map(|n| format!("- L{n:02}\n")).collect();
+        let long = format!("# Long\n\n{long}");
+        let (_s, mut a) = wiki_app("back-fit", &[("README.md", "# Home\n\n[long](long.md)\n"), ("long.md", &long)]);
+        a.hit("SPC g w j Enter");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        a.hit("G");
+        let _ = draw::tests::render(&mut a, 100, 12);
+        assert!(window(&a).page.offset() > 20, "끝으로 안 굴렀다");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        assert!(w.follow("README"));
+        let _ = draw::tests::render(&mut a, 100, 60);
+        a.hit("Bksp");
+        let screen = draw::tests::render(&mut a, 100, 60).join("\n");
+        assert!(screen.contains("L01") && screen.contains("L40"), "칸이 다 담는 페이지를 읽던 줄부터 잘랐다\n{screen}");
+    }
+
     /// **원문 토글이 창의 본문을 바꾼다**(`SPC v r`) — 메뉴는 열린 채 남고, 굴린 자리는 첫 줄로 돌아간다.
     #[test]
     fn spc_v_r_shows_the_page_as_written() {
@@ -916,6 +985,16 @@ pub(super) mod tests {
         click(&mut a, d.rows.x + 2, d.rows.y);
         assert!(!super::super::menu::open(&a.chord), "창을 눌렀는데 메뉴가 안 닫혔다");
         assert_eq!((window(&a).cursor, window(&a).focus), (0, Side::List));
+        // **놓은 동안 온 사건은 버린다** — 찾는 칸과 고르기 창이 떠 있으면 마우스를 놓는데, 놓는 글이 터미널에 닿기 전에
+        // 길에 있던 휠·누르기가 커서를 옮기면 고르기 창의 링크가 다른 페이지 머리 밑에 선다.
+        a.hit("Enter Enter");
+        assert!(window(&a).choose.is_some() && !a.wants_mouse());
+        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
+        click(&mut a, d.rows.x + 2, d.rows.y + 2);
+        assert_eq!((window(&a).cursor, window(&a).focus), (0, Side::Page), "고르기 창이 뜬 동안 마우스가 먹었다");
+        a.hit("Esc /");
+        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
+        assert_eq!(window(&a).cursor, 0, "찾는 칸이 열린 동안 휠이 먹었다");
     }
 
     fn slugs(a: &App) -> Vec<String> {
@@ -935,6 +1014,13 @@ pub(super) mod tests {
         a.hit("Esc");
         assert_eq!(slugs(&a), ["README", "notes/deep", "guide"], "Esc 가 친 것을 안 버렸다");
         assert_eq!(slug(&a), "guide", "좁혔다 푼 뒤 보던 페이지를 잃었다");
+        // **보던 페이지를 가린 글을 쳐도 Esc 는 열기 전의 페이지로 돌아간다** — 치는 동안 커서는 사람이 고른 적이 없다.
+        a.hit("/ H o m e");
+        assert_eq!(slugs(&a), ["README"]);
+        a.hit("Bksp Bksp Bksp Bksp");
+        assert_eq!(slug(&a), "guide", "넓혀 다시 보이는 보던 페이지로 안 돌아갔다");
+        a.hit("H o m e Esc");
+        assert_eq!(slug(&a), "guide", "칸의 Esc 가 열기 전의 페이지로 안 돌아갔다");
 
         a.hit("/ D E E P Enter");
         assert_eq!(slugs(&a), ["notes/deep", "guide"], "제목(Deep)과 본문(deeper)을 대소문자 없이 찾지 않았다");
@@ -1012,7 +1098,17 @@ pub(super) mod tests {
         assert!(screen.contains("argos-0001  첫 일"), "id 곁에 제목이 없다\n{screen}");
         a.hit("Esc");
         assert!(window(&a).choose.is_none() && slug(&a) == "README", "Esc 가 고르기 창 말고 다른 것을 했다");
-        a.hit("Enter Enter");
+        // **`gg` 는 둘째 키를 기다린다** — 도움말이 고르기 창의 이동으로 대는 키다. 키 하나씩 찾으면 `g` 가 늘 접두어라
+        // 맨 위로 가는 길이 없다.
+        a.hit("Enter G");
+        assert_eq!(choose(&a).cursor, 1);
+        let said = "알림".to_string();
+        a.notice = Some(said.clone());
+        a.hit("g");
+        assert_eq!(a.notice.as_deref(), Some(said.as_str()), "기다리는 g 가 알림을 걷었다");
+        a.hit("g");
+        assert_eq!(choose(&a).cursor, 0, "고르기 창의 gg 가 맨 위로 안 갔다");
+        a.hit("Esc Enter Enter");
         assert_eq!(slug(&a), "guide", "페이지 링크를 골랐는데 안 건너갔다");
         assert_eq!(window(&a).focus, Side::Page);
         a.hit("Bksp");
@@ -1071,6 +1167,26 @@ pub(super) mod tests {
         a.apply(&Mode::Filter(super::super::Input::new("grep=둘째"))).unwrap();
         a.hit("SPC g w Enter Enter G Enter");
         assert_eq!(a.mode, Mode::Browse);
-        assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0001") && n.contains("Esc")), "{:?}", a.notice);
+        let notice = a.notice.clone().unwrap_or_default();
+        assert!(notice.contains("argos-0001") && notice.contains("Esc"), "{notice:?}");
+        assert!(!notice.contains("SPC v a"), "거름망만 가렸는데 보기를 푸는 키를 댔다: {notice:?}");
+    }
+
+    /// **보기만 가린 줄에는 보기를 푸는 키만 댄다**(moai-fmv5 와 같은 까닭) — 거름망이 없는데 Esc 를 대면 누른 키가
+    /// 아무것도 안 한다. 쓰기 뒤의 착지와 같은 자([`App::veiled_row`])로 가른다.
+    #[test]
+    fn an_id_hidden_by_the_view_alone_names_only_the_view() {
+        let (_s, a) = wiki_app("veiled", PAGES);
+        let mut done =
+            Issue::new("argos-0001".into(), "끝난 일".into(), Kind::Issue, Status::new("done"), "2026-09-01T00:00:00Z");
+        done.status_since = "2026-09-30T00:00:00Z".into();
+        let mut b = App::new(vec![done], cfg(), Path::new());
+        b.site.repo = a.site.repo.clone();
+        let mut a = b;
+        a.hit("SPC g w Enter Enter G Enter");
+        assert_eq!(a.mode, Mode::Browse);
+        let notice = a.notice.clone().unwrap_or_default();
+        assert!(notice.contains("argos-0001") && notice.contains("SPC v a"), "{notice:?}");
+        assert!(!notice.contains("Esc"), "거름망이 없는데 Esc 를 댔다: {notice:?}");
     }
 }

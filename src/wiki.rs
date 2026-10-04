@@ -557,6 +557,12 @@ pub fn links_in(body: &str) -> Vec<(String, String)> {
                     words.push_str(&t);
                 }
             }
+            // 줄을 넘은 링크 글은 그 자리가 빈칸이다 — 안 넣으면 `[the\nguide]` 가 `theguide` 로 선다.
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some((_, words)) = &mut link {
+                    words.push(' ');
+                }
+            }
             Event::End(TagEnd::Link) => {
                 if let Some((dest, words)) = link.take() {
                     let pair = (words.trim().to_string(), dest);
@@ -707,6 +713,8 @@ mod tests {
                 ("code".to_string(), "a.md#top".to_string()),
             ]
         );
+        // 링크 글이 줄을 넘으면 그 자리는 빈칸이다 — 낱말이 붙으면 고르기 창에 없는 낱말이 선다.
+        assert_eq!(links_in("[the\nguide](guide.md)\n"), [("the guide".to_string(), "guide.md".to_string())]);
     }
 
     /// 페이지 링크만 슬러그로 푼다 — 폴더 기준, `#`·`?` 뗌, 퍼센트 풂. 바깥 주소·앵커·`.md` 아닌 것·위키 밖은 아니다.

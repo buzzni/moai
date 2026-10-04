@@ -203,8 +203,15 @@ impl App {
     /// 위키 창 위의 손짓(moai-o3cb). **누른 칸으로 포커스가 가고**, 목록의 줄을 눌렀으면 커서가 그 페이지로 간다 —
     /// 본문은 커서를 따라간다. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**(2026-10-04 사용자 결정 — 탐색기의
     /// 둘러보기와 같은 규칙, [`App::wheel`]). 칸 사이의 선은 이 창에서 끌리지 않는다 — 몫은 목록·상세의 것을 빌려 쓴다.
+    ///
+    /// **찾는 칸이나 고르기 창이 떠 있으면 버린다** — 그동안은 마우스를 놓는데([`App::wants_mouse`]), 놓는 글이 터미널에
+    /// 닿기 전에 길에 있던 휠·누르기가 여기 닿는다. 받으면 고르기 창의 링크가 커서를 따라 바뀐 다른 페이지 머리 밑에
+    /// 선다. 폼이 떠 있을 때 아래 갈래가 둘러보기 밖이라 버리는 것과 같은 자리다.
     fn wiki_pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) {
         use super::wiki::Side;
+        if !self.wants_mouse() {
+            return;
+        }
         let Some(d) = self.drawn.wiki else { return };
         let on = if d.page.is_some_and(|r| r.contains(at)) {
             Side::Page
