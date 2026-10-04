@@ -1212,8 +1212,8 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
 }
 
 /// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`, 이 페이지를 가리키는 페이지는
-/// `← 제목  슬러그`(moai-ogaw). 화살이 방향을 댄다 — 색이 혼자 뜻을 지지 않는다. **갈 데가 없는 것은 낱말로 단다** — 없는
-/// 페이지·트래커에 없는 id 는 `(없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
+/// `← 제목  슬러그`(moai-ogaw) — 화살이 방향을 댄다. **갈 데가 없는 것은 낱말로 단다** — 없는 페이지·트래커에 없는
+/// id 는 `(없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
 fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str, lang: Lang) {
     use super::wiki::Target;
     f.render_widget(Clear, at);

@@ -94,11 +94,11 @@ pub struct Window {
     pub typing: Option<Typing>,
     /// 연 순간의 id 제목.
     titles: Titles,
-    /// 링크·id 고르기 창 — 본문 칸의 `Enter` 가 연다.
+    /// 링크·id·역링크 고르기 창 — 본문 칸의 `Enter` 가 연다.
     pub choose: Option<Choose>,
 }
 
-/// 링크와 id 를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
+/// 링크와 id, 이 페이지를 가리키는 페이지를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choose {
     pub items: Vec<Target>,

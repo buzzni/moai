@@ -14,7 +14,7 @@
 
 use crate::held::{Fell, Home, Unheld};
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 /// 본문을 읽는 상한 — 이보다 큰 페이지는 목록에만 서고 본문은 안 읽는다([`Unread::TooLarge`]). 이 저장소에서
@@ -288,23 +288,35 @@ pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) 
             .then_with(|| a.slug.cmp(&b.slug))
     });
     // 차례를 세운 뒤에 센다 — 역링크는 위키 목록의 차례로 선다.
-    let from: Vec<Vec<String>> = (0..wiki.pages.len()).map(|at| linked_from(&wiki.pages, at)).collect();
+    let from = linked_from(&wiki.pages);
     for (page, from) in wiki.pages.iter_mut().zip(from) {
         page.linked_from = from;
     }
     Ok(wiki)
 }
 
-/// `pages[at]` 를 가리키는 페이지의 슬러그 — 역링크(moai-ogaw). **세는 자는 여기 하나다** — `moai wiki ls`·`show` 와
-/// 탐색기의 위키 창이 이 값([`Page::linked_from`])을 읽어 셋이 다른 수를 안 낸다.
+/// 페이지마다 그 페이지를 가리키는 페이지의 슬러그 — 역링크(moai-ogaw), `pages` 와 같은 차례로. **세는 자는 여기
+/// 하나다** — `moai wiki ls`·`show` 와 탐색기의 위키 창이 이 값([`Page::linked_from`])을 읽어 셋이 다른 수를 안 낸다.
 ///
 /// - `pages` 의 차례로, 가리키는 페이지마다 한 번 — 글이 다른 링크 둘로 가리켜도 한 번이다
 /// - 제 자신을 가리키는 링크(`#앵커` 를 뗀 제 슬러그)는 안 센다 — 들어오는 길이 아니다
 /// - 본문을 못 읽은 페이지([`Page::error`])는 링크가 없어 아무것도 안 가리킨다. 그러니 역링크는 **읽은 페이지가 적은
 ///   것만큼이다** — 그 페이지는 목록에 `error` 로 선다
-fn linked_from(pages: &[Page], at: usize) -> Vec<String> {
-    let to = &pages[at].slug;
-    pages.iter().filter(|p| p.slug != *to && p.links.iter().any(|l| l.to == *to)).map(|p| p.slug.clone()).collect()
+///
+/// 링크는 한 번만 훑는다 — 페이지마다 위키 전부의 링크를 다시 훑으면 페이지 수의 제곱이 들고, `show` 도 이 길을 탄다.
+fn linked_from(pages: &[Page]) -> Vec<Vec<String>> {
+    let at: HashMap<&str, usize> = pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
+    let mut from: Vec<Vec<String>> = vec![Vec::new(); pages.len()];
+    for (i, p) in pages.iter().enumerate() {
+        for l in &p.links {
+            let Some(&to) = at.get(l.to.as_str()) else { continue };
+            // 가리키는 페이지를 차례로 도니, 같은 페이지의 둘째 링크는 그 끝에 이미 섰다 — 끝만 보면 한 번이다.
+            if to != i && from[to].last() != Some(&p.slug) {
+                from[to].push(p.slug.clone());
+            }
+        }
+    }
+    from
 }
 
 /// 디렉터리 하나를 걸어 페이지 파일을 모은다 — 이름 차례로, `.` 으로 시작하는 이름은 건너뛴다.
@@ -883,25 +895,31 @@ mod tests {
     /// **역링크는 다른 페이지의 링크를 뒤집어 센다**(moai-ogaw) — 위키 목록의 차례로, 가리키는 페이지마다 한 번. 제
     /// 자신을 가리키는 링크·코드 블록 안의 링크·본문을 못 읽은 페이지의 링크는 안 센다. 못 읽은 페이지도 가리켜지면
     /// 역링크가 선다 — 그 페이지는 이름으로 서 있다.
+    ///
+    /// `m`(Mid)은 걷는 차례로는 `guide/z` 뒤고 제목 차례로는 앞이다 — 차례를 세우기 전에 세면 붉어진다.
     #[test]
     fn backlinks_invert_every_page_link_in_list_order() {
         let s = Scratch::new("wiki-backlinks");
         write(s.path(), "docs/README.md", "# Home\n\n[a](a.md) [again a](a.md) [gone](gone.md) [big](big.md)\n");
         write(s.path(), "docs/a.md", "# A\n\n[self](a.md#top) [zed](guide/z.md)\n");
         write(s.path(), "docs/guide/z.md", "# Zed\n\n[a](../a.md) [home](../README.md)\n");
+        write(s.path(), "docs/m.md", "# Mid\n\n[a](a.md)\n");
         write(s.path(), "docs/code.md", "# Code\n\n```md\n[a](a.md)\n```\n");
         write(s.path(), "docs/big.md", &format!("# Big\n\n[a](a.md)\n{}", "x".repeat(TOO_LARGE as usize)));
         let w = load(s.path(), "docs", "moai", &none).unwrap();
         let from = |slug: &str| w.find(slug).unwrap().linked_from.clone();
         assert_eq!(
             from("a"),
-            ["README", "guide/z"],
+            ["README", "m", "guide/z"],
             "목록 차례로, 글이 다른 두 링크는 한 번, 제 링크·코드·못 읽은 것은 빼고"
         );
         assert_eq!(from("README"), ["guide/z"]);
         assert_eq!(from("guide/z"), ["a"]);
         assert_eq!(from("big"), ["README"], "못 읽은 페이지도 가리켜지면 선다");
-        assert!(from("code").is_empty());
+        assert!(from("code").is_empty() && from("m").is_empty());
+        // 슬러그는 이름으로 선다 — 본문을 못 읽은 페이지로 가는 링크도 풀린다(걷어 낸 `load_one` 시험이 지키던 것).
+        let to_big = w.find("README").unwrap().links.iter().find(|l| l.to == "big").map(|l| l.resolved);
+        assert_eq!(to_big, Some(true), "못 읽은 페이지로 가는 링크가 안 풀렸다");
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

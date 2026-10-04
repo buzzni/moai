@@ -23283,7 +23283,8 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
 /// `linked_from`. 페이지 하나를 볼 때도 모든 본문을 읽어 센다. 아무도 안 가리키는 페이지는 줄이 없고 키는 `[]` 다.
 ///
 /// **종료 코드는 물은 페이지만 본다** — 곁의 페이지를 못 읽어도(체크아웃 밖 링크) 멀쩡한 페이지의 `show` 는 0 이다.
-/// 못 읽은 페이지는 링크가 없어 아무것도 안 가리킨다.
+/// 못 읽은 페이지는 링크가 없어 아무것도 안 가리킨다. 곁의 것은 stderr 에도 알림에도 안 선다 — 걸러 둔 디렉터리
+/// 링크(`ls` 는 stderr 로 댄다)도, 곁의 페이지의 없는 링크·없는 id 도. 빈칸이 든 슬러그는 셸 낱말로 감싸 선다.
 #[cfg(unix)]
 #[test]
 fn wiki_show_names_the_pages_that_link_to_it() {
@@ -23293,15 +23294,21 @@ fn wiki_show_names_the_pages_that_link_to_it() {
     std::fs::create_dir_all(docs.join("guide")).unwrap();
     std::fs::write(docs.join("README.md"), "# Home\n\n[target](guide/t.md)\n").unwrap();
     std::fs::write(docs.join("guide/t.md"), "# Target\n\n[me](t.md#top)\n").unwrap();
-    std::fs::write(docs.join("work.md"), "# Work\n\n[t](guide/t.md) [again](guide/t.md)\n").unwrap();
+    std::fs::write(docs.join("work.md"), "# Work\n\n[t](guide/t.md) [again](guide/t.md) [gone](gone.md) argos-zzzz\n")
+        .unwrap();
+    std::fs::write(docs.join("my page.md"), "# My page\n\n[t](guide/t.md)\n").unwrap();
     std::fs::write(away.path().join("secret.md"), "# Secret\n\n[t](guide/t.md)\n").unwrap();
     std::os::unix::fs::symlink(away.path().join("secret.md"), docs.join("out.md")).unwrap();
+    std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
 
-    let shown = ok(s.path(), &["wiki", "show", "guide/t"]);
-    assert!(shown.contains("이 페이지를 가리키는 페이지  README, work\n"), "{shown}");
+    let out = moai(s.path(), &["wiki", "show", "guide/t"]);
+    let (shown, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && err.is_empty(), "곁의 것이 `show` 의 종료 코드나 stderr 를 바꿨다 — {err}");
+    assert!(shown.contains("이 페이지를 가리키는 페이지  README, 'my page', work\n"), "{shown}");
+    assert!(!shown.contains("gone") && !shown.contains("argos-zzzz"), "곁의 페이지의 알림이 섰다\n{shown}");
     let json = ok(s.path(), &["wiki", "show", "guide/t", "--json"]);
     assert!(
-        json.contains(r#""linked_from":["README","work"]"#),
+        json.contains(r#""linked_from":["README","my page","work"]"#),
         "제 링크·두 번 건 링크·못 읽은 페이지를 셌다 — {json}"
     );
     let home = ok(s.path(), &["wiki", "show", "README", "--json"]);

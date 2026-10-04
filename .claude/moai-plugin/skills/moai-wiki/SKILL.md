@@ -42,9 +42,10 @@ false for an id that names no issue), `links` (the links to other pages — each
 `to` as the slug it lands on, and `resolved` false when no such page stands) and
 `conflict` (true while merge conflict markers stand in the page). `linked_from` turns
 `links` around: the slugs of the pages that link to this one, in list order, `[]` when
-none does (a page that could not be read links nowhere). A page other than the home
-page that nothing links to is found only through the list — link it from the page that
-should lead there. A page that could
+none does. A page other than the home page that nothing links to is found only through
+the list — link it from the page that should lead there. Judge that from
+`moai wiki ls --json`, not from one page: a page that could not be read links nowhere,
+and only the list shows it, with its `error`. A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
