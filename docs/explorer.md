@@ -144,10 +144,11 @@ of them all, a header row per project. `Enter` on a header goes into that projec
 The header says whether a newer release is out — a new release, the latest, ahead
 of the latest (a build from source), or not asked. It asks GitHub once a day,
 and once more straight away when the answer it holds is older than the moai you
-are running — as after an upgrade. It asks only when a person is watching;
-`MOAI_NO_UPDATE_CHECK=1`, or `check = false` under `[update]` in your user
-config, stops it asking. When a new release is out, quitting prints the line
-that upgrades the moai you are running.
+are running — as after an upgrade. An answer that says your moai is ahead of the
+latest release is checked again after an hour. It asks only when a person is
+watching; `MOAI_NO_UPDATE_CHECK=1`, or `check = false` under `[update]` in your
+user config, stops it asking. When a new release is out, quitting prints the
+line that upgrades the moai you are running.
 
 ## When it goes wrong
 
