@@ -2550,6 +2550,13 @@ fn brief() -> String {
        section by version name and hands it to `--notes-file` as it is, so a missing section
        reads to whoever receives it as the whole release. **Nothing checks this** — a check here
        would be a gate, and an empty section must not stop a release
+    7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
+       epic changed what a person does — {CHANGED_USE}.
+       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason
+       as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in
+       `moai wiki ls --json`
+         {WIKI_COMMIT}
+       If it did not, write nothing. **Nothing checks this**
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
        session in the root again.
@@ -2598,8 +2605,8 @@ fn brief() -> String {
        Leave the tests passing in the root with a commit with a path, as in 2
     11. Report with SendMessage to "<my name>" — the merge hash, the unfolded epic's id, a line or
        two of summary, what you handed on and any new ideas, the members reclaimed in 7-1 and left
-       in the first column, and the members left in 4-3 because the work beside you held the file,
-       with that other work named
+       in the first column, the members left in 4-3 because the work beside you held the file,
+       with that other work named, and the wiki pages 7-4 changed — or that it changed none
     12. Finally, **say when the window can be cleared.** Leave the line to take over from
        (`moai note <epic> 'Next: …'`), take it into the root with a commit with a path as in 2 —
        it is written after the commit in 10, so leaving it out leaves it in the shared root where
@@ -3515,6 +3522,43 @@ stop sending outside work while a release runs",
         // 아무것도 막지 않는다 — "하지 않는 것" 의 첫 줄이 게이트다.
         let not = &wiki[wiki.find("## What this skill does not do").expect("하지 않는 것 절이 없다")..];
         assert!(not.contains("**No gate.**"), "위키 스킬이 게이트를 안 걷는다");
+    }
+
+    /// **에픽 끝의 위키 걸음(7-4)은 짧게 두고 본문은 스킬로 보낸다**(moai-bl3x, 사용자 결정 2026-10-04).
+    /// 브리프는 감독이 매 바퀴 통째로 싣는 글이라, 위키 쓰는 법을 여기 펴면 그 값을 일꾼마다 낸다.
+    /// 7-3 의 CHANGELOG 와 같은 까닭으로 워크트리에서 머지 전에 커밋하고, 아무것도 막지 않는다.
+    #[test]
+    fn the_brief_sends_the_wiki_step_to_the_skill() {
+        let brief = brief();
+        let changelog = brief.find("\n    7-3.").expect("7-3 이 없다");
+        let at = brief.find("\n    7-4.").expect("머지 전에 위키를 보는 걸음이 없다");
+        let end = at + brief[at..].find("\n    8.").expect("7-4 뒤에 8 이 없다");
+        assert!(changelog < at, "7-4 가 7-3 앞에 섰다");
+        let step = &brief[at..end];
+        let wiki = wiki();
+        let name = wiki.lines().find_map(|l| l.strip_prefix("name: ")).expect("위키 스킬에 이름이 없다");
+        for (piece, why) in [
+            (format!("`{name}` skill"), "심는 스킬의 이름으로 안 보낸다"),
+            ("`moai wiki ls`".to_string(), "위키가 있는지 무엇으로 아는지 안 적었다"),
+            (CHANGED_USE.to_string(), "스킬과 같은 물음을 안 묻는다"),
+            (WIKI_COMMIT.to_string(), "고친 페이지를 담을 커밋 줄이 없다"),
+            ("in the worktree, before the merge".to_string(), "워크트리에서 머지 전에 쓰라는 말이 없다"),
+            ("write nothing".to_string(), "쓰임이 안 바뀐 에픽은 안 쓴다는 말이 없다"),
+            ("**Nothing checks this**".to_string(), "게이트가 아니라는 말이 없다"),
+        ] {
+            assert!(step.contains(&piece), "{why} — {piece}");
+        }
+        // 본문은 스킬에 있다 — 틀·훑기·하지 않는 것이 브리프로 새어 나오면 걸음이 자란다.
+        assert!(step.lines().count() <= 8, "7-4 가 {}줄로 자랐다 — 본문은 스킬에 둔다\n{step}", step.lines().count());
+        // 닫기보다 앞이다 — 멤버가 닫히면 그 창은 규칙 2 로 저장소를 못 고친다.
+        assert!(end < brief.find("\n    10.").expect("닫는 걸음이 없다"), "위키를 닫은 뒤에 본다");
+        // 보고(11)가 고친 페이지를 댄다 — 감독은 위키를 따로 안 본다.
+        let report = brief.find("\n    11. ").expect("11 이 없다");
+        let twelve = brief.rfind("\n    12.").expect("12 가 없다");
+        assert!(
+            brief[report..twelve].contains("the wiki pages 7-4 changed — or that it changed none"),
+            "보고가 7-4 가 고친 위키 페이지를 안 댄다"
+        );
     }
 
     /// **혼자 펼치는 세션도 마일스톤을 달고 본문을 옮긴다**(moai-fww7).
