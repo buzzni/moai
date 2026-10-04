@@ -149,8 +149,8 @@ git fetch origin && git tag v0.2.0 origin/main
 git push origin v0.2.0
 ```
 
-Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the epics
-closed since the last tag and lists the wiki pages they left behind. It is not a
+Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the work
+closed since the last tag and lists the wiki pages it left behind. It is not a
 gate — nothing waits on it, and a release goes out whatever it finds.
 
 **The changelog picks the number.** `auto` reads the headings under

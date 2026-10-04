@@ -482,7 +482,7 @@ count of history that hides what closed would say nothing closed. In the explore
 The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
-in its worktree before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
 
 ## How to find what a review said

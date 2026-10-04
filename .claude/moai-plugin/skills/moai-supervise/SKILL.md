@@ -632,9 +632,9 @@ worker reads in its own window in 9-1.
        would be a gate, and an empty section must not stop a release
     7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
        epic changed what a person does — a key, a command, a flag, a file, a format, a procedure.
-       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason
-       as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in
-       `moai wiki ls --json`
+       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
+       7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+         git add -- <wiki dir>
          git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
        If it did not, write nothing. **Nothing checks this**
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the

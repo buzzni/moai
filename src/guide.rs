@@ -822,7 +822,7 @@ the next session to take over from. The next session reads it in the history und
 const WIKI: &str = r#"The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
-in its worktree before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
@@ -833,7 +833,14 @@ const CHANGED_USE: &str = "a key, a command, a flag, a file, a format, a procedu
 /// 위키 페이지를 머지에 태우는 커밋 줄. **일꾼 브리프 7-4 와 위키 스킬이 이 한 줄을 쓴다** — 7-3 의
 /// CHANGELOG 줄처럼 손으로 두 벌 적으면 한쪽만 고쳐져, 브리프를 따른 일꾼과 스킬을 따른 창이
 /// 다른 제목과 다른 경로로 커밋한다. `<wiki dir>` 은 `moai wiki ls --json` 의 `dir` 이다.
-const WIKI_COMMIT: &str = r#"git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>"#;
+///
+/// **`add` 가 앞에 선다**(리뷰 moai-bl3x.vbw 1번). `git commit -- <디렉터리>` 는 git 이 아직 모르는 파일을
+/// 안 담는다 — 고친 페이지가 하나라도 있으면 새 페이지만 빠진 채 0 으로 끝나고, 새 페이지뿐이면
+/// "nothing added" 로 진다. 새 페이지는 위키 걸음이 가장 자주 쓰는 것이라, 빠진 페이지는 머지에 안
+/// 실리고 `git worktree remove` 가 그 untracked 파일로 멈춘다. 두 줄로 두는 것은 `&&` 로 이은 한 줄을
+/// 워크트리 세션의 셸 가드가 통째로 거절해서다.
+const WIKI_COMMIT: &str = r#"git add -- <wiki dir>
+git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>"#;
 
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
@@ -1346,7 +1353,7 @@ write that repository's name.
 /// (moai-bl3x, 사용자 결정 2026-10-04).
 ///
 /// **부르는 자리가 둘이다.** 일꾼이 에픽 끝(브리프 7-4)에서 그 에픽이 사람의 쓰임을 바꿨는지 묻고
-/// 고치는 것이 주된 길이고, 사람이 부르면 지난 릴리스 뒤 닫힌 에픽을 훑는다. 브리프의 7-4 는 짧게
+/// 고치는 것이 주된 길이고, 사람이 부르면 지난 릴리스 뒤 닫힌 에픽과 에픽 밖 이슈를 훑는다. 브리프의 7-4 는 짧게
 /// 두고 본문은 여기 둔다 — 브리프는 감독이 매 바퀴 통째로 싣는 글이라 한 줄이 일꾼 수만큼 값을 낸다.
 ///
 /// **아무것도 막지 않는다.** 페이지가 안 고쳐졌다고 붉어지는 자리를 만들면 그것이 게이트고, 글이
@@ -1354,10 +1361,13 @@ write that repository's name.
 ///
 /// **`--json` 의 키 이름은 위키 저장 에픽(moai-ihu4)이 정한 모양이다.** 그쪽이 키를 바꾸면 이 글이
 /// 없는 키를 가르친다 — `the_wiki_skill_names_the_wiki_commands` 가 이 글이 대는 키를 그 목록과 견준다.
+/// **그 목록은 손으로 옮긴 것이다** — 위키 명령이 이 가지에 없어 실제 `moai wiki ls --json` 과는 아직 안
+/// 견준다. 그쪽 키가 바뀌어도 여기는 초록이니, 키를 바꾸는 쪽이 이 글을 함께 고친다.
 ///
 /// 발동어는 [`skill`] 과 같은 까닭으로 두 말을 함께 싣는다.
 pub fn wiki() -> String {
     let [one, two, ..] = RULES;
+    let commit = indent(WIKI_COMMIT, "       ");
     format!(
         r#"---
 name: moai-wiki
@@ -1381,11 +1391,11 @@ that changed nothing a person does writes nothing.
   `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
   stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
-  not read — fix the key, not the pages
+  not read — fix the key, not the pages — and `failed` is the disk refusing to open it
 - **One page is one `.md` file** — `path` in the list. Its `slug` is that path below
   `dir` without `.md`. Name a new file in lowercase ASCII kebab case
   (`merge-driver.md`) so its slug reads the same on every machine. `README.md` or
-  `index.md` is the home page
+  `index.md` at the top of `dir` is the home page
 - **One `# Title` line opens the page.** It is the `title` the list shows; without it
   the file name stands in
 - **Pages link with plain relative links** — `[the explorer](explorer.md)`. Not
@@ -1420,12 +1430,12 @@ the words beside it. Look at all of these after you write.
 ## At the end of an epic
 
 Most pages are written here — the window that did the epic is the only one that knows
-what changed and why. It runs in that epic's worktree, after the review and the
-CHANGELOG line and before the merge.
+what changed and why. It runs on that epic's branch — in its worktree, where it has
+one — after the review and the CHANGELOG line and before the merge.
 
 1. Read four things: `moai show <epic> --json` (the body and the notes say why it was
-   decided), the CHANGELOG line the epic wrote, `moai <command> --help` for each
-   command the epic touched, and `moai wiki ls --json`
+   decided), the CHANGELOG line the epic wrote if the repository keeps one, the
+   `--help` of each command the epic touched, and `moai wiki ls --json`
 2. Ask once: **did this epic change what a person does** —
    {CHANGED_USE}. A refactor
    inside, or a fix that left the behaviour as it was, changed nothing a person
@@ -1434,29 +1444,36 @@ CHANGELOG line and before the merge.
    command or the key. If no page covers it, write one from the template below. A
    page ends with one `Decided in:` line naming the epics whose decisions it carries;
    put this epic's id on it
-4. Commit in the worktree, before the merge — the pages then ride the same merge, and
+4. Commit on that branch, before the merge — the pages then ride the same merge, and
    the merge diff is where they get read
 
-       {WIKI_COMMIT}
+{commit}
 
-   `<wiki dir>` is `dir` from `moai wiki ls --json`
+   `<wiki dir>` is `dir` from `moai wiki ls --json`. **Do not skip the `add`**: with a
+   path, `git commit` leaves out a file git does not know yet, so a new page stays
+   behind without a word
 5. Name the pages you changed in your report, or say that none changed
 
 ## When a person asks you to sweep
 
-A person calls this skill to catch the wiki up — before a release, or after epics
+A person calls this skill to catch the wiki up — before a release, or after work
 merged without touching it.
 
-1. Find when the last release went out — `git describe --tags --abbrev=0` gives the
-   tag and `git log -1 --format=%cs <tag>` its day. With no tag, ask the person how
-   far back to go
-2. List the epics closed since that day
+1. Find when the last release went out — `git tag --sort=-creatordate` lists the tags
+   newest first; take the newest release tag, and `git log -1 --format=%cs <tag>`
+   gives its day. Not `git describe`: it sees only the tags this branch can reach,
+   and a release tagged on another branch (a `main` that only releases merge into)
+   is not one of them. With no tag, ask the person how far back to go
+2. List the epics closed since the day before that, and the issues closed outside any
+   epic — `%cs` is the day on the tag's own clock and `--done` reads yours, so a day
+   earlier keeps what closed in between; one row too many is only one more to ask about
 
        moai show --type epic --done '<day>..' --json
+       moai show --type issue -e none --done '<day>..' --json
 
-3. Ask each of them the question in step 2 above, against the pages
-   `moai wiki ls --json` lists, and gather what to change — one line each: the page,
-   what changes in it, which epic
+3. Ask each of them the question from the end of an epic (step 2 there), against
+   the pages `moai wiki ls --json` lists, and gather what to change — one line each:
+   the page, what changes in it, which epic or issue
 4. **Show the person that list once** and wait for a yes. They may cut it
 5. Pick the work up before you write — the pages are files in the repository, so
    the hook counts them as a change, by rule 2:
@@ -1469,7 +1486,8 @@ merged without touching it.
    "{one}". The sweep is not part of that work, so
    finish it first or ask the person
 6. Write the pages where this repository does its work — in a worktree if it uses
-   them — commit with `docs(wiki): <what> (<id>)`, and move the issue to `done`
+   them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
+   the end of an epic, and move the issue to `done`
 
 ## A new page
 
@@ -2371,6 +2389,7 @@ fn brief() -> String {
     let angle = indent(REVIEW_ANGLE, "       ");
     let branch_check = indent(BRANCH_CHECK, "    ");
     let shapes = indent(GIT_SHAPES, "    ");
+    let wiki_commit = indent(WIKI_COMMIT, "         ");
     format!(
         r#"    Supervisor session (<my name>) is handing you idea <id> — <title>.
     Read first: moai show <id>
@@ -2569,10 +2588,9 @@ fn brief() -> String {
        would be a gate, and an empty section must not stop a release
     7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
        epic changed what a person does — {CHANGED_USE}.
-       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason
-       as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in
-       `moai wiki ls --json`
-         {WIKI_COMMIT}
+       If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
+       7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+{wiki_commit}
        If it did not, write nothing. **Nothing checks this**
     8. Come back to the root with ExitWorktree(keep) — remove it from inside the worktree and the
        session's place stays in a directory that is gone, and the supervisor never sees this
@@ -3524,8 +3542,20 @@ stop sending outside work while a release runs",
             assert!(wiki.contains(&format!("`{key}`")), "위키 스킬이 `{key}` 키를 안 댄다");
         }
         // 브리프 7-4 와 같은 커밋 줄·같은 물음이다 — 따로 적으면 한쪽만 고쳐진다.
-        assert!(wiki.contains(WIKI_COMMIT), "위키 스킬의 커밋 줄이 브리프와 갈라졌다");
+        assert!(wiki.contains(&indent(WIKI_COMMIT, "       ")), "위키 스킬의 커밋 줄이 브리프와 갈라졌다");
         assert!(wiki.contains(CHANGED_USE), "위키 스킬의 물음이 브리프와 갈라졌다");
+        // **새 페이지를 git 에 먼저 알린다**(리뷰 moai-bl3x.vbw 1번). 경로를 준 `git commit` 은 git 이 모르는
+        // 파일을 말없이 빼서, 새 페이지가 머지에 안 실린다 — `add` 를 걷으면 여기서 붉어진다.
+        let (add, commit) = WIKI_COMMIT.split_once('\n').expect("커밋 줄이 한 줄로 줄었다");
+        assert_eq!(add, "git add -- <wiki dir>", "새 페이지를 담는 `add` 가 커밋 앞에 없다");
+        assert!(commit.starts_with("git commit ") && commit.ends_with(" -- <wiki dir>"), "{commit}");
+        // 훑기는 이 브랜치가 닿는 태그만 보는 `git describe` 로 지난 릴리스를 찾지 않는다 — 릴리스를 다른
+        // 가지(`main`)에 다는 저장소에서 한참 옛 태그를 짚는다(리뷰 moai-bl3x.vbw 2번).
+        assert!(wiki.contains("git tag --sort=-creatordate"), "훑기가 지난 릴리스를 태그 날짜로 안 찾는다");
+        // 훑기는 에픽 밖에서 닫힌 이슈도 본다 — 에픽만 돌면 이슈 하나로 끝난 쓰임의 변화가 빠진다.
+        assert!(wiki.contains("moai show --type issue -e none --done"), "훑기가 에픽 밖 이슈를 안 본다");
+        // 모든 저장소에 심긴다 — 에픽이 건드린 명령은 그 저장소의 것이지 moai 의 것이 아니다.
+        assert!(!wiki.contains("moai <command> --help"), "위키 스킬이 남의 저장소에 moai 의 도움말을 읽힌다");
         // **생성 페이지를 알아보는 낱말은 이 저장소의 생성 페이지가 실제로 쓰는 낱말이다.** 스킬은 첫
         // 문단의 그 말로 "손대지 말 페이지" 를 가르는데, 생성기의 머리글이 바뀌면 스킬을 따른 창이
         // `docs/cli.md` 를 손으로 고친다 — 다음 생성이 그것을 말없이 덮는다.
@@ -3558,7 +3588,7 @@ stop sending outside work while a release runs",
             (format!("`{name}` skill"), "심는 스킬의 이름으로 안 보낸다"),
             ("`moai wiki ls`".to_string(), "위키가 있는지 무엇으로 아는지 안 적었다"),
             (CHANGED_USE.to_string(), "스킬과 같은 물음을 안 묻는다"),
-            (WIKI_COMMIT.to_string(), "고친 페이지를 담을 커밋 줄이 없다"),
+            (indent(WIKI_COMMIT, "         "), "고친 페이지를 담을 커밋 줄이 없다"),
             ("in the worktree, before the merge".to_string(), "워크트리에서 머지 전에 쓰라는 말이 없다"),
             ("write nothing".to_string(), "쓰임이 안 바뀐 에픽은 안 쓴다는 말이 없다"),
             ("**Nothing checks this**".to_string(), "게이트가 아니라는 말이 없다"),

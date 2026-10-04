@@ -20,11 +20,11 @@ that changed nothing a person does writes nothing.
   `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
   stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
-  not read — fix the key, not the pages
+  not read — fix the key, not the pages — and `failed` is the disk refusing to open it
 - **One page is one `.md` file** — `path` in the list. Its `slug` is that path below
   `dir` without `.md`. Name a new file in lowercase ASCII kebab case
   (`merge-driver.md`) so its slug reads the same on every machine. `README.md` or
-  `index.md` is the home page
+  `index.md` at the top of `dir` is the home page
 - **One `# Title` line opens the page.** It is the `title` the list shows; without it
   the file name stands in
 - **Pages link with plain relative links** — `[the explorer](explorer.md)`. Not
@@ -59,12 +59,12 @@ the words beside it. Look at all of these after you write.
 ## At the end of an epic
 
 Most pages are written here — the window that did the epic is the only one that knows
-what changed and why. It runs in that epic's worktree, after the review and the
-CHANGELOG line and before the merge.
+what changed and why. It runs on that epic's branch — in its worktree, where it has
+one — after the review and the CHANGELOG line and before the merge.
 
 1. Read four things: `moai show <epic> --json` (the body and the notes say why it was
-   decided), the CHANGELOG line the epic wrote, `moai <command> --help` for each
-   command the epic touched, and `moai wiki ls --json`
+   decided), the CHANGELOG line the epic wrote if the repository keeps one, the
+   `--help` of each command the epic touched, and `moai wiki ls --json`
 2. Ask once: **did this epic change what a person does** —
    a key, a command, a flag, a file, a format, a procedure. A refactor
    inside, or a fix that left the behaviour as it was, changed nothing a person
@@ -73,29 +73,37 @@ CHANGELOG line and before the merge.
    command or the key. If no page covers it, write one from the template below. A
    page ends with one `Decided in:` line naming the epics whose decisions it carries;
    put this epic's id on it
-4. Commit in the worktree, before the merge — the pages then ride the same merge, and
+4. Commit on that branch, before the merge — the pages then ride the same merge, and
    the merge diff is where they get read
 
+       git add -- <wiki dir>
        git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
 
-   `<wiki dir>` is `dir` from `moai wiki ls --json`
+   `<wiki dir>` is `dir` from `moai wiki ls --json`. **Do not skip the `add`**: with a
+   path, `git commit` leaves out a file git does not know yet, so a new page stays
+   behind without a word
 5. Name the pages you changed in your report, or say that none changed
 
 ## When a person asks you to sweep
 
-A person calls this skill to catch the wiki up — before a release, or after epics
+A person calls this skill to catch the wiki up — before a release, or after work
 merged without touching it.
 
-1. Find when the last release went out — `git describe --tags --abbrev=0` gives the
-   tag and `git log -1 --format=%cs <tag>` its day. With no tag, ask the person how
-   far back to go
-2. List the epics closed since that day
+1. Find when the last release went out — `git tag --sort=-creatordate` lists the tags
+   newest first; take the newest release tag, and `git log -1 --format=%cs <tag>`
+   gives its day. Not `git describe`: it sees only the tags this branch can reach,
+   and a release tagged on another branch (a `main` that only releases merge into)
+   is not one of them. With no tag, ask the person how far back to go
+2. List the epics closed since the day before that, and the issues closed outside any
+   epic — `%cs` is the day on the tag's own clock and `--done` reads yours, so a day
+   earlier keeps what closed in between; one row too many is only one more to ask about
 
        moai show --type epic --done '<day>..' --json
+       moai show --type issue -e none --done '<day>..' --json
 
-3. Ask each of them the question in step 2 above, against the pages
-   `moai wiki ls --json` lists, and gather what to change — one line each: the page,
-   what changes in it, which epic
+3. Ask each of them the question from the end of an epic (step 2 there), against
+   the pages `moai wiki ls --json` lists, and gather what to change — one line each:
+   the page, what changes in it, which epic or issue
 4. **Show the person that list once** and wait for a yes. They may cut it
 5. Pick the work up before you write — the pages are files in the repository, so
    the hook counts them as a change, by rule 2:
@@ -108,7 +116,8 @@ merged without touching it.
    "New issues stay inside what you picked up". The sweep is not part of that work, so
    finish it first or ask the person
 6. Write the pages where this repository does its work — in a worktree if it uses
-   them — commit with `docs(wiki): <what> (<id>)`, and move the issue to `done`
+   them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
+   the end of an epic, and move the issue to `done`
 
 ## A new page
 
