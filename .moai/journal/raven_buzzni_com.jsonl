@@ -4022,3 +4022,4 @@
 {"ts":"2026-10-04T12:41:54Z","id":"moai-p61w.dd7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"15건 모두 들였다(13 리뷰 고침 + 14·15 직접). 넘긴 것 없음"}
 {"ts":"2026-10-04T12:44:50Z","id":"moai-p61w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지(13b1cba5 의 merge 커밋), 멤버 다섯·리뷰 dd7 닫힘, 감독 보고까지. 넘긴 것·새 idea 없음. 위키 창의 몫은 [tui] wiki_width(끌기 전에는 list_width). 루트 release 바이너리는 아직 옛것이다"}
 {"ts":"2026-10-04T12:45:05Z","id":"moai-0gz3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판을 0.6.0 으로 올리고 CHANGELOG 의 [0.6.0] 절을 연다"}
+{"ts":"2026-10-04T12:45:39Z","id":"moai-0gz3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
