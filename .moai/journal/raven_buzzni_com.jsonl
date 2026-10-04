@@ -4137,3 +4137,9 @@
 {"ts":"2026-10-04T16:07:01Z","id":"moai-u5wr.f29","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끊긴 턴의 세션이 busy 로 남는다 — StopFailure·SessionEnd 훅"}
 {"ts":"2026-10-04T16:07:01Z","id":"moai-u5wr.f29","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-dkkh 에서 펼쳤다 — 끊긴 턴의 세션은 busy 로 남는다 — 그 턴에는 Stop 이 안 돈다"}
 {"ts":"2026-10-04T16:07:01Z","id":"moai-dkkh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-u5wr 의 멤버 moai-u5wr.f29 로 펼쳤다"}
+{"ts":"2026-10-04T16:08:35Z","id":"moai-u5wr.fja","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T16:08:37Z","id":"moai-u5wr.e14","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T16:08:40Z","id":"moai-u5wr.kov","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T16:08:42Z","id":"moai-u5wr.amg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T16:08:44Z","id":"moai-u5wr.f29","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T16:08:47Z","id":"moai-u5wr.pej","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
