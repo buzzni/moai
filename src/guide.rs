@@ -816,6 +816,15 @@ the next session to take over from. The next session reads it in the history und
 
     moai note <id> 'Next: <what comes next>'"#;
 
+/// 위키를 AGENTS 블록과 참고 문서에 알리는 조각(moai-bl3x). **짧게 둔다** — 어떻게 쓰는가는
+/// 셋째 스킬 [`wiki`] 에 있고, 언제나 읽히는 블록에 그 본문을 얹으면 모든 세션이 그 값을 낸다.
+/// 여기는 "있다·어디 있다·누가 고친다·아무것도 안 막는다" 네 가지만 말한다.
+const WIKI: &str = r#"The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
+in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
+prints one. When an epic changes what a person does, the window that did it fixes the page
+in its worktree before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
+
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
 /// 물은 창이 같은 에픽을 다르게 가른다.
@@ -1000,6 +1009,10 @@ They stand once `moai skill install` has planted the hooks into Claude.
 the ideas that have piled up, one at a time, to the sessions idling on the same
 repository, and to take their reports — the supervisor picks, sends and checks;
 it does not fix and it does not merge.
+
+### The wiki
+
+{WIKI}
 
 ### Before you close the session
 
@@ -1248,6 +1261,10 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 ## Statistics
 
 {STATS}
+
+## The wiki
+
+{WIKI}
 
 ## How to find what a review said
 
@@ -2655,7 +2672,7 @@ mod tests {
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
         let ideas = ideas();
-        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS] {
+        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
