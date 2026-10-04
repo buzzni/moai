@@ -3869,3 +3869,7 @@
 {"ts":"2026-10-04T08:47:30Z","id":"moai-ogaw.wys","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai wiki ls·show --json 에 역링크 키를 더하고 스킬 글을 맞춘다"}
 {"ts":"2026-10-04T08:47:30Z","id":"moai-ogaw.fve","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 창이 역링크를 보이고 고르면 그 페이지로 간다"}
 {"ts":"2026-10-04T08:47:30Z","id":"moai-ogaw.36g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/explorer.md·CHANGELOG"}
+{"ts":"2026-10-04T08:48:26Z","id":"moai-ogaw.otp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T08:48:26Z","id":"moai-ogaw.wys","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T08:48:26Z","id":"moai-ogaw.fve","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T08:48:26Z","id":"moai-ogaw.36g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
