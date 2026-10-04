@@ -174,7 +174,10 @@ does not tag — see `CONTRIBUTING.md`.
 - **`examples/bash-agent` and `examples/python-agents`.** Both ran a command per
   issue with no person watching — usually `claude -p` — and moai does not launch
   agents or run them headless: a person opens each session. The AGENTS block,
-  the skills, the README and the agents page no longer point at them.
+  the skills, the README and the agents page no longer point at them. In their
+  place the agents page says how to open a Claude Code, Codex or Antigravity
+  session in the repository and make it a worker — including Codex's trust in
+  `/hooks` and what to do on a machine where its sandbox cannot stand.
 
 ## [0.6.0] - 2026-10-04
 

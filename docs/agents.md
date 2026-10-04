@@ -100,6 +100,116 @@ Four skills come with it:
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
 
+## Open a session for each agent
+
+The supervisor and its workers are sessions a person opened. moai never starts
+one, and nothing runs headless. Open each one interactively in the root of the
+main checkout, after `moai skill install` planted that agent's skills and hooks.
+Each session asks its person before it acts, the way it always does — none is
+opened in a mode that skips the asking.
+
+The root, not a worktree: a worker goes into its own worktree under
+`.worktrees/` by itself, and that directory sits inside the root, so whatever
+the root was given — Codex's trust, Antigravity's workspace — covers it too.
+
+A window becomes a worker when its person calls the `moai-work` skill once. It
+then says `moai hello --role worker` and waits with `moai inbox --ack --wait`;
+the supervisor finds it with `moai agents --role worker --status idle` and
+hands it work with `moai send`. [Hand work to waiting
+workers](#hand-work-to-waiting-workers) has the whole round. Nobody needs tmux:
+a worker that waits needs no waking, and waking is a bonus.
+
+| | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Open it in the root | `claude` | `codex` | `agy` |
+| Plant | `moai skill install` | `moai skill install --agent codex` | `moai skill install --agent antigravity` |
+| Skills | the plugin in `.claude/moai-plugin/` | `.agents/skills/` | `.agents/skills/` |
+| Hooks | in the plugin | `.codex/hooks.json`, trusted once in `/hooks` | `.agents/hooks.json` |
+| Make it a worker | `/moai-work` | `$moai-work` | ask for `moai-work` by name |
+| Waking | `SendMessage` from a Claude session | none — it waits | its tmux pane, when it has one |
+
+### Claude Code
+
+    claude
+
+- **Open it the ordinary way**, not with `--dangerously-skip-permissions`
+- **The plugin's hooks register it** when the session starts, under the name
+  Claude Code shows for it — the name another Claude session's `SendMessage`
+  uses. `/moai-work` keeps that name and adds the role
+- **`/clear` keeps the row.** The same process takes it up again with its new
+  session, name and role included, so a worker cleared between tasks calls
+  `/moai-work` again and is the same worker
+- **A session opened before the install** keeps the hooks it started with —
+  older ones, or none — until it is reopened
+- **Waking**: `moai send --wake` never types into a Claude window. It prints a
+  line telling the sender to wake it with `SendMessage`, which only a Claude
+  session can send
+
+### Codex
+
+    codex
+
+- **Trust the repository** when Codex asks. It reads a project's own `.codex/`
+  only in a folder it trusts
+- **Trust moai's hooks in `/hooks`** once, and again after an install that
+  changed them. Until then Codex runs none of them, and the five rules are words
+  only
+- **Make it a worker** with `$moai-work`
+- **Waking**: nothing is meant to wake a Codex window. Its hooks' row carries no
+  tmux pane, so a worker gets its letters by waiting on `moai inbox --ack --wait`.
+  Do not pass `--wake` to a Codex worker for now (see below)
+
+**Keep the sandbox where it stands.** Codex runs commands in a sandbox of its
+own, and a machine where that works keeps it. `codex sandbox -- true` tells you:
+where the sandbox cannot stand — a container whose AppArmor stops bubblewrap
+from mounting, say — it fails with `bwrap: Failed to make / slave: Permission
+denied`. On such a machine this repository runs Codex without the sandbox,
+through a project file that stays out of git:
+
+    # .codex/config.toml
+    sandbox_mode = "danger-full-access"
+
+and one line, `/.codex/config.toml`, in `.git/info/exclude`. **Do not commit
+it**: anyone who clones the repository and says yes to Codex's trust question
+would run with the sandbox off, and the question does not say so.
+`.codex/hooks.json` in the same directory is committed — the two part ways
+there. Only the sandbox goes: the approval setting is left at Codex's default.
+
+**What holds today.** All of one user's Codex sessions on a machine run their
+hooks and their shell commands from one shared `codex app-server`, so a Codex
+session cannot yet tie the `moai` it runs in its shell to its own presence row
+(moai-u5wr.7xr, being fixed). Until that lands:
+
+- The row its hooks write (`codex-` and the first eight characters of its
+  session id, no role) and the row `moai hello` writes from its shell are two
+  rows. Send to the name `moai hello` printed — that is the one its wait reads
+- Two Codex windows on one machine that both say hello end up on one row. Keep
+  one Codex window per machine as a worker or a supervisor
+- A Codex supervisor's own hook row has no role, so it can take the
+  supervisor's own `any-idle-worker` letter at the end of its turn. From a Codex
+  supervisor, send to a worker by name
+- The row `moai hello` writes can carry the tmux pane the shared `codex
+  app-server` was started from, which may be another window's. A
+  `moai send --wake` to that row while the worker is not waiting types
+  `moai inbox` into that pane — leave `--wake` off when sending to a Codex worker
+
+### Antigravity
+
+    agy
+
+- **Open it the ordinary way**, not with `--dangerously-skip-permissions`. It
+  asks its person before a command, like the other two
+- **Pick the model as you open it** (`agy --model <model>`). The skills have no
+  step for changing it later, so a supervisor's letter to an Antigravity worker
+  leaves the model to you
+- **Its hooks are `.agents/hooks.json`.** Antigravity has no session start and
+  no prompt event, so the session first shows in `moai agents` once its first
+  turn reaches the model — until then a supervisor cannot see it
+- **Make it a worker** by asking it for the `moai-work` skill by name
+- **Waking**: inside tmux, `moai send --wake` types `moai inbox` into its pane
+  while it sits idle. Outside tmux nothing wakes it, and a worker gets its
+  letters by waiting
+
 ## What the hooks do
 
 The hooks catch the same few places in each agent's session. Each calls
@@ -335,4 +445,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   letter sent then sits until that window's next prompt. Without hooks or tmux
   nothing wakes a window that is not waiting
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw
