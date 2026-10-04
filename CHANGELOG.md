@@ -34,6 +34,10 @@ does not tag — see `CONTRIBUTING.md`.
   when, the agent's process and when it started, the session and the tmux
   pane. The `SessionStart` hook registers a Claude session under the name
   Claude Code shows for it, `UserPromptSubmit` marks it busy and `Stop` idle.
+  A turn that ends without a `Stop` is marked idle too — Claude's
+  `StopFailure` (an API error) and `SessionEnd`, Codex's `Interrupt` and
+  `SessionEnd`. A turn broken off with Esc in Claude or Antigravity sends no
+  hook at all, so that row stays busy until the next prompt.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
   session resumed in a new process moves its row there.
@@ -51,8 +55,9 @@ does not tag — see `CONTRIBUTING.md`.
   gets its next task. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
   its tmux pane when its presence row carries one, and for a Claude session the
   line printed tells the sender to use SendMessage. With neither it does
-  nothing and says nothing; an agent at work is left alone. moai never runs an
-  agent's own program to wake it.
+  nothing and says nothing; an agent at work is left alone, and the line says
+  since when it has been at work (`--json`: `since`) rather than promising the
+  end of its turn. moai never runs an agent's own program to wake it.
 - **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
   two directories also carry their own `.gitignore`, so a repository that has
   not run `moai init` again does not commit them either.
@@ -64,9 +69,23 @@ does not tag — see `CONTRIBUTING.md`.
   directory hands it to the team. `auto` takes whichever of `claude`, `codex`
   and `agy` is on PATH (`claude` when none is) and says what it found.
   `--scope` stays Claude's registration; given without Claude, one line says
-  so. The hooks are planted for Claude only. `--json` adds `agents`, `found`,
-  `agents_dir` and `agents_files`, and Claude's keys stand only when Claude is
-  among the agents.
+  so. `--json` adds `agents`, `found`, `agents_dir`, `agents_files` and
+  `hooks`, and Claude's keys stand only when Claude is among the agents.
+- **The hooks stand in Codex and Antigravity too.** `moai skill install --agent
+  codex` plants `.codex/hooks.json` and `--agent antigravity` plants
+  `.agents/hooks.json` — commit them with the skills. They call `moai hook
+  <event> --dialect codex|antigravity`: the five rules, the board and the
+  letters are the same, only the shapes in and out are each agent's. Codex
+  runs project hooks once a person trusts them in `/hooks`, and sends them only
+  for its shell, `apply_patch` (judged file by file) and MCP calls.
+  Antigravity has no prompt event, so its first model call of a turn loads the
+  board and the letters; a turn is held with `decision: continue`. A hooks
+  file moai did not write is left as it is, with one line saying so. Codex
+  runs its hooks from a daemon its sessions share, so a Codex session's
+  presence row follows its session id and records no pid or tmux pane.
+- **The AGENTS block says where no hook stands** — an agent without them, Codex
+  before the trust, a tool call that sends none — the rules are words only,
+  rules 4 and 5 most of all. `moai init` writes the new block.
 - **One text for every agent.** The three trees get the same skills; the steps
   only one agent has — entering a worktree, asking the person, calling the
   review, changing the model, clearing the window, messaging a session,
@@ -74,13 +93,15 @@ does not tag — see `CONTRIBUTING.md`.
   `moai` and `moai-supervise` skills, one column per agent. A step an agent
   does not have reads `—`: tell the person and go on.
 - **`moai skill status` shows `.agents/skills/`** — not planted, current, or
-  how many of its files differ from this version — and whether `codex` and
-  `agy` are on PATH. `--json` adds an `agents` object (`dir`, `state`,
-  `stale`, `codex`, `agy`). The exit code is still 0 whatever it finds.
+  how many of its files differ from this version — the two hooks files
+  (current, stale, missing, or not moai's), and whether `codex` and `agy` are
+  on PATH. `--json` adds an `agents` object (`dir`, `state`, `stale`, `codex`,
+  `agy`) and a `hooks` list. The exit code is still 0 whatever it finds.
 - **`moai skill uninstall --agent codex|antigravity` prints the `rm -r` lines**
-  for moai's skills in `.agents/skills/` and deletes nothing; a plain
-  `uninstall` says in one line when they are still there. `--json` adds
-  `agents`, `found` and `agents_left`.
+  for moai's skills in `.agents/skills/`, and the `rm` line for that agent's
+  hooks file when moai wrote it, and deletes nothing; a plain `uninstall` says
+  in one line when the skills are still there. `--json` adds `agents`, `found`,
+  `agents_left` and `hooks_left`.
 
 ### Changed
 
