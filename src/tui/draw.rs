@@ -84,6 +84,8 @@ const LIST_MIN_V: u16 = 3;
 
 /// 커서. 목록의 글자는 늘 이 폭만큼 안쪽에서 시작한다.
 const CURSOR: &str = "> ";
+/// 위키 창이 링크의 `#앵커` 로 건너와 선 머리글의 줄 머리(moai-tllo).
+const LANDED: &str = "▸ ";
 
 /// 맨 위 헤더 — 로고 다섯 줄과 문구 한 줄, 그래서 여섯 줄이다(moai-mzet).
 ///
@@ -1140,26 +1142,33 @@ pub(super) struct WikiLaid {
     w: usize,
     raw: bool,
     lines: Vec<Line<'static>>,
+    /// 머리글마다 그 머리글이 선 줄 — `Page::headings` 와 같은 차례다(moai-tllo). 링크의 `#앵커` 로 건너오면 창이 몇째
+    /// 머리글인지를 들고, 그 줄을 여기서 찾는다.
+    pub(super) heads: Vec<usize>,
 }
 
 /// 페이지 하나를 본문 칸의 줄로 — 충돌 표시가 든 페이지는 원문 그대로에 경고 한 줄, 못 읽은 페이지는 까닭 한 줄이다.
-/// 말과 꼴은 `moai wiki show` 와 같다(`view::wiki::page`).
-fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Vec<Line<'static>> {
+/// 말과 꼴은 `moai wiki show` 와 같다(`view::wiki::page`). 머리글마다 선 줄도 낸다([`WikiLaid::heads`]) — 원문으로 선
+/// 줄은 `wiki::Heading::line` 이 이미 세었고, 그린 본문은 `markdown::layout_at` 이 잰다.
+fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> (Vec<Line<'static>>, Vec<usize>) {
     let warn = from_anstyle(style::WARN);
+    let as_written = |above: usize| p.headings.iter().map(|h| above + h.line).collect();
     match (&p.body, &p.error) {
         (Some(body), _) if p.conflict => {
             let said = fill(say(lang, "wiki.conflict_raw"), &[("path", &crate::text::one_line(&p.path))]);
             let mut out = wrapped(&format!("! {said}"), w, warn);
             out.push(Line::from(""));
+            let heads = as_written(out.len());
             out.extend(crate::text::sanitize(body).lines().map(|l| Line::from(l.to_string())));
-            out
+            (out, heads)
         }
-        (Some(body), _) => body_lines(crate::wiki::unmarked(body), w, raw),
+        (Some(body), _) if raw => (body_lines(crate::wiki::unmarked(body), w, true), as_written(0)),
+        (Some(body), _) => laid_body(crate::wiki::unmarked(body), w),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
-            wrapped(&format!("! {said}"), w, warn)
+            (wrapped(&format!("! {said}"), w, warn), Vec::new())
         }
-        (None, None) => Vec::new(),
+        (None, None) => (Vec::new(), Vec::new()),
     }
 }
 
@@ -1177,29 +1186,42 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     // 든 것이 그 페이지·그 폭·그 토글의 것이 아닐 때만 다시 편다.
     let fresh = match w.current() {
         Some(p) if !w.laid.as_ref().is_some_and(|l| l.slug == p.slug && l.w == width && l.raw == raw) => {
-            Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines: wiki_lines(p, width, raw, lang) })
+            let (lines, heads) = wiki_lines(p, width, raw, lang);
+            Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines, heads })
         }
         _ => None,
     };
     if fresh.is_some() {
         w.laid = fresh;
     }
+    // 링크의 `#앵커` 로 건너왔으면 그 머리글의 줄로 굴린다 — 줄은 편 뒤에야 안다(moai-tllo).
+    let heads = match (&w.laid, w.current()) {
+        (Some(l), Some(_)) => l.heads.clone(),
+        _ => Vec::new(),
+    };
+    w.settle(&heads);
+    let landed = w.landed().and_then(|k| heads.get(k).copied());
     let lines: &[Line<'static>] = match (&w.laid, w.current()) {
         (Some(l), Some(_)) => &l.lines,
         _ => &[],
     };
     let len = lines.len();
     // **재고 나서 자른다**(상세의 그림과 같은 차례) — 되돌아가기가 든 읽던 줄이나 재기 전의 `G` 는 끝을 지난 자리일 수
-    // 있어, 먼저 자르면 이 그림 한 장이 아래를 빈 채로 서고 다음 키까지 그대로다.
+    // 있어, 먼저 자르면 이 그림 한 장이 아래를 빈 채로 서고 다음 키까지 그대로다. 머리글로 굴린 자리도 여기서 잘린다 —
+    // 페이지 끝 가까이의 머리글은 맨 위까지 못 오르고, 그래서 그 줄에 `▸` 가 붙는다.
     w.page.fit(inner.height as usize, len);
     // 찾는 글은 **보이는 줄에만** 칠한다(상세의 본문과 같은 자 — [`mark_line`]). 접힌 줄에 걸친 글은 안 칠해진다.
     let q = w.query();
+    let top = w.page.offset().min(len);
     let visible: Vec<Line> = lines
         .iter()
-        .skip(w.page.offset().min(len))
+        .enumerate()
+        .skip(top)
         .take(inner.height as usize)
-        .cloned()
-        .map(|l| fit(mark_line(l, q), width))
+        .map(|(at, l)| {
+            let l = mark_line(l.clone(), q);
+            fit(if landed == Some(at) { landed_line(l) } else { l }, width)
+        })
         .collect();
     f.render_widget(block.title(clip(&title, at.width.saturating_sub(2) as usize)), at);
     let hint = if focused {
@@ -1212,8 +1234,9 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
 }
 
 /// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`, 이 페이지를 가리키는 페이지는
-/// `← 제목  슬러그`(moai-ogaw) — 화살이 방향을 댄다. **갈 데가 없는 것은 낱말로 단다** — 없는 페이지·트래커에 없는
-/// id 는 `(없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
+/// `← 제목  슬러그`(moai-ogaw) — 화살이 방향을 댄다. 머리글로 가는 링크는 대상이 `슬러그#앵커` 다(moai-tllo). **갈 데가
+/// 없는 것은 낱말로 단다** — 없는 페이지·트래커에 없는 id 는 `(없음)`, 페이지는 있는데 그 머리글이 없으면
+/// `(머리글 없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
 fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str, lang: Lang) {
     use super::wiki::Target;
     f.render_widget(Clear, at);
@@ -1225,11 +1248,20 @@ fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str
         .iter()
         .map(|t| {
             let (main, tail, warn) = match t {
-                Target::Page { text, to, found } => (
-                    format!("{} → {}", crate::text::one_line(text), crate::text::one_line(to)),
-                    (!found).then_some(none),
-                    true,
-                ),
+                Target::Page { text, to, found, anchor, held } => {
+                    let aim = match anchor {
+                        Some(a) => format!("{to}#{a}"),
+                        None => to.clone(),
+                    };
+                    let tail = if !found {
+                        Some(none)
+                    } else if *held == Some(false) {
+                        Some(say(lang, "tui.wiki.no_heading_mark"))
+                    } else {
+                        None
+                    };
+                    (format!("{} → {}", crate::text::one_line(text), crate::text::one_line(&aim)), tail, true)
+                }
                 Target::Out { text, dest } => (
                     format!("{} → {}", crate::text::one_line(text), crate::text::one_line(dest)),
                     Some(say(lang, "tui.wiki.external")),
@@ -3996,11 +4028,18 @@ fn fill_note_hits(app: &mut App, rows: &[Row], w: usize) {
 /// 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다. 여기가 할 일은
 /// 뜻을 색으로 옮기는 것뿐이다.
 fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
-    // **파일에서 온 글이다.** 파서를 거쳐도 조각 안에 ESC 가 남으므로 먼저 거른다.
-    let clean = crate::text::sanitize(body);
     if raw {
-        return clean.lines().map(|l| Line::from(l.to_string())).collect();
+        // **파일에서 온 글이다.** 파서를 거쳐도 조각 안에 ESC 가 남으므로 먼저 거른다.
+        return crate::text::sanitize(body).lines().map(|l| Line::from(l.to_string())).collect();
     }
+    laid_body(body, w).0
+}
+
+/// 그린 본문과, 머리글마다 그 머리글의 첫 줄 — 위키 창이 링크의 `#앵커` 로 굴릴 자리다(moai-tllo). 머리글은 적힌
+/// 차례로 `wiki::Page::headings` 와 하나씩 맞선다: 둘 다 같은 옵션(`markdown::OPTIONS`)으로 한 파서를 돌리고,
+/// `markdown` 은 파서가 낸 머리글마다 [`crate::markdown::Block::Heading`] 하나를 낸다.
+fn laid_body<'a>(body: &str, w: usize) -> (Vec<Line<'a>>, Vec<usize>) {
+    let clean = crate::text::sanitize(body);
     let blocks = crate::markdown::parse(&clean);
     // **패널 폭 그대로 편다.** 넉넉한 바닥값을 얹으면 좁은 창에서 패널보다 넓은
     // 줄이 나오고, 그 줄은 `Paragraph` 가 말없이 다시 접는다 — 다시 접힌 줄은
@@ -4008,10 +4047,26 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
     // **여기는 끊는다.** 탐색기에는 소프트랩이 없어, 폭을 넘긴 줄은 아래
     // `fit` 이 `…` 로 잘라 꼬리가 화면에서 사라진다 — 셸과 달리 안 끊는 것이
     // 더 많이 잃는다(사용자 결정, moai-krh7). 원문은 `SPC v r` 에 있다.
-    crate::markdown::layout(&blocks, w, crate::markdown::Overflow::Break)
+    let (laid, starts) = crate::markdown::layout_at(&blocks, w, crate::markdown::Overflow::Break);
+    let heads = blocks
+        .iter()
+        .zip(starts)
+        .filter(|(b, _)| matches!(b, crate::markdown::Block::Heading { .. }))
+        .map(|(_, at)| at)
+        .collect();
+    let lines = laid
         .into_iter()
         .map(|line| Line::from(line.into_iter().map(|s| Span::styled(s.text, role_style(s.role))).collect::<Vec<_>>()))
-        .collect()
+        .collect();
+    (lines, heads)
+}
+
+/// 링크의 `#앵커` 로 건너와 선 머리글의 줄 — 앞에 [`LANDED`] 를 단다(2026-10-04 사용자 결정, moai-tllo). 페이지 끝
+/// 가까이의 머리글은 칸 맨 위까지 못 오르니, 이 표시가 어느 머리글로 왔는지를 댄다. 글자라 색을 꺼도 선다.
+fn landed_line(l: Line<'static>) -> Line<'static> {
+    let mut spans = vec![Span::styled(LANDED, Style::new().add_modifier(Modifier::BOLD))];
+    spans.extend(l.spans);
+    Line::from(spans).style(l.style)
 }
 
 /// 뜻을 ratatui 색으로. **CLI(`view::role_style`)와 같은 뜻이 같은 모양이어야
@@ -5067,6 +5122,30 @@ pub(super) mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// **그린 본문의 머리글과 위키가 센 머리글은 하나씩 맞선다**(moai-tllo) — 위키 창은 링크의 `#앵커` 가 몇째 머리글인지를
+    /// `wiki::Page::headings` 에서 찾고, 그 줄은 그린 본문의 몇째 머리글 블록에서 찾는다. 둘의 수가 갈리면 엉뚱한 머리글로
+    /// 굴린다. 이 저장소의 위키 페이지 모두와, 목록·인용·밑줄 꼴·HTML 블록·코드 블록 속 `#` 이 섞인 글로 잰다.
+    #[test]
+    fn laid_headings_line_up_with_the_wiki_headings() {
+        let odd = "# T\n\n- ## in a list\n  - ### deeper\n\n> ## quoted\n\nSetext\n------\n\n<div>\n\n## after html\n\n</div>\n\n\
+                   ```\n# not one\n```\n\n    # indented code\n\n#\n\n## `code` [link](x.md) ![img](p.png)\n\n| a |\n|---|\n| b |\n\n## end";
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
+        let mut bodies: Vec<(String, String)> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "md"))
+            .map(|p| (p.display().to_string(), std::fs::read_to_string(&p).unwrap()))
+            .collect();
+        assert!(bodies.len() >= 5, "위키 페이지를 못 읽었다 — {dir:?}");
+        bodies.push(("odd".into(), odd.into()));
+        for (name, body) in &bodies {
+            let wiki = crate::wiki::parse("x", body, "moai").headings.len();
+            let (_, heads) = laid_body(crate::wiki::unmarked(body), 80);
+            assert_eq!(heads.len(), wiki, "{name}: 그린 머리글 {} 대 위키가 센 머리글 {wiki}", heads.len());
+        }
+        assert_eq!(crate::wiki::parse("x", odd, "m").headings.len(), 9, "섞인 글의 머리글을 다 안 셌다");
+    }
 
     fn issues() -> Vec<Issue> {
         let mut epic = Issue::new(

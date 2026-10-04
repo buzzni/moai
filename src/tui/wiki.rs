@@ -20,6 +20,10 @@
 //! 말없이 빠지면 그 링크가 왜 안 가는지 볼 자리가 없다. 본문 안에서 링크를 `Tab` 으로 도는 길은 기획이 안 골랐다: 펴진
 //! 줄에는 주소가 표식으로만 남아 다시 세야 한다(moai-qunn 노트 C).
 //!
+//! **`#앵커` 가 붙은 링크는 그 머리글로 간다**(2026-10-04 사용자 결정, moai-tllo) — 그 머리글을 본문 칸 맨 위로 굴리고 그
+//! 줄 머리에 `▸` 를 단다. 본문을 굴리거나 떠나면 걷힌다. 앵커는 `wiki::anchor` 가 짓는 것 하나라 `moai wiki ls` 가 푸는
+//! 것과 같다. 페이지는 있는데 그 머리글이 없으면 그 페이지 맨 위로 가며 알린다 — GitHub 과 같다.
+//!
 //! **되돌아가기는 링크로 건너온 길만 되감는다**([`Window::back`]) — 목록에서 커서를 옮긴 것은 고른 것이라 자취에
 //! 안 남는다. 자취가 남았어도 Esc 는 창을 닫는다(같은 결정): 되감는 키는 `Bksp`·`h` 하나다.
 //!
@@ -84,6 +88,8 @@ pub struct Window {
     pub focus: Side,
     /// 링크로 건너오기 전의 페이지와 그때 굴린 자리 — 되돌아가면 읽던 줄로 돌아간다.
     trail: Vec<(String, usize)>,
+    /// 링크의 `#앵커` 로 건너와 선 머리글([`Landed`], moai-tllo). 본문을 굴리거나 다른 페이지로 가면 걷힌다.
+    landed: Option<Landed>,
     /// 접두어(`gg`·`Ctrl-w`)를 기다리는 열 — 탐색의 열과 따로다(통계 창과 같다).
     pub chord: Chord,
     /// 본문 칸에 선 페이지를 펴 둔 한 벌 — 그리는 쪽(`draw::wiki_page`)이 채우고 읽는다. 값일 뿐이라 없어도 그림이 같다.
@@ -108,12 +114,25 @@ pub struct Choose {
     pub chord: Chord,
 }
 
+/// 링크의 `#앵커` 로 건너와 선 머리글(moai-tllo) — 어느 페이지의 몇째 머리글인가(`Page::headings` 의 차례)와, 그
+/// 자리로 아직 안 굴렸는가. **굴리는 것은 그림이 한다**([`Window::settle`]) — 그 머리글이 몇째 줄인지는 칸의 폭으로
+/// 편 뒤에야 안다. 선 동안 그 줄에 `▸` 가 붙는다(2026-10-04 사용자 결정): 페이지 끝 가까이의 머리글은 칸 맨 위까지
+/// 못 오르니, 어느 머리글로 왔는지를 그 표시가 댄다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Landed {
+    slug: String,
+    heading: usize,
+    settled: bool,
+}
+
 /// 고를 것 하나.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    /// 위키 안의 페이지로 가는 링크 — `found` 가 거짓이면 그 슬러그의 파일이 없다(`(없음)`).
-    Page { text: String, to: String, found: bool },
-    /// 위키 밖 주소 — 바깥 URL·앵커·`.md` 아닌 파일·위키 뿌리 위(`(밖)`). 고르면 주소를 알림으로 댄다.
+    /// 위키 안의 페이지로 가는 링크 — `found` 가 거짓이면 그 슬러그의 파일이 없다(`(없음)`). `anchor` 는 주소의 `#`
+    /// 뒤(moai-tllo)고, `held` 는 그 페이지에 그 머리글이 있는가다([`Page::holds`] — 앵커가 없거나 페이지가 없거나 못
+    /// 읽었으면 없다). 거짓이면 `(머리글 없음)` 으로 달리고, 고르면 그 페이지 맨 위로 가며 알린다(2026-10-04 사용자 결정).
+    Page { text: String, to: String, found: bool, anchor: Option<String>, held: Option<bool> },
+    /// 위키 밖 주소 — 바깥 URL·`.md` 아닌 파일·위키 뿌리 위(`(밖)`). 고르면 주소를 알림으로 댄다.
     Out { text: String, dest: String },
     /// 이슈 id — `title` 이 없으면 트래커에 그 줄이 없다(`(없음)`).
     Issue { id: String, title: Option<String> },
@@ -151,6 +170,7 @@ impl Window {
             page: Scroll::default(),
             focus: Side::List,
             trail: Vec::new(),
+            landed: None,
             chord: Chord::default(),
             laid: None,
             search: None,
@@ -167,9 +187,10 @@ impl Window {
         let mut items: Vec<Target> = Vec::new();
         for (text, dest) in p.body.as_deref().map(crate::wiki::links_in).unwrap_or_default() {
             items.push(match crate::wiki::target(&p.slug, &dest) {
-                Some(crate::wiki::Aim { to, .. }) => {
-                    let found = self.pages.iter().any(|q| q.slug == to);
-                    Target::Page { text, to, found }
+                Some(crate::wiki::Aim { to, anchor }) => {
+                    let page = self.pages.iter().find(|q| q.slug == to);
+                    let held = anchor.as_deref().zip(page).and_then(|(a, q)| q.holds(a));
+                    Target::Page { text, found: page.is_some(), to, anchor, held }
                 }
                 None => Target::Out { text, dest },
             });
@@ -302,7 +323,10 @@ impl Window {
         self.chord.clear();
         match on {
             Side::List => self.roll_list(|s| s.by(by)),
-            Side::Page => self.page.by(by),
+            Side::Page => {
+                self.landed = None;
+                self.page.by(by);
+            }
         }
     }
 
@@ -317,7 +341,10 @@ impl Window {
                 let len = self.shown().len();
                 self.move_to(scroll::cursor(m, self.cursor, || len));
             }
-            Side::Page => self.page.go(m),
+            Side::Page => {
+                self.landed = None;
+                self.page.go(m);
+            }
         }
     }
 
@@ -340,6 +367,7 @@ impl Window {
         self.adrift = false;
         if at != self.cursor {
             self.page.rewind();
+            self.landed = None;
         }
         self.cursor = at;
     }
@@ -358,30 +386,67 @@ impl Window {
         true
     }
 
+    /// 링크를 따라 그 페이지의 맨 위로 간다 — [`Window::follow_to`] 에 앵커 없이.
+    pub(super) fn follow(&mut self, to: &str) -> bool {
+        self.follow_to(to, None)
+    }
+
     /// 링크를 따라 그 페이지로 간다 — 지금 페이지와 읽던 자리를 자취에 민다. 그 페이지가 없으면 아무것도 안 바꾸고
     /// 거짓이다.
-    pub(super) fn follow(&mut self, to: &str) -> bool {
+    ///
+    /// `anchor` 가 그 페이지의 머리글이면 그 머리글로 간다(moai-tllo) — 다음 그림이 그 줄로 굴리고 `▸` 를 단다
+    /// ([`Window::settle`]). 그 머리글이 없으면 페이지 맨 위다 — 알리는 것은 부르는 쪽이다(고르기 창이 미리 안다).
+    pub(super) fn follow_to(&mut self, to: &str, anchor: Option<&str>) -> bool {
         let Some(here) = self.current().map(|p| p.slug.clone()) else { return false };
         let read = self.page.offset();
         if !self.land_on(to) {
             return false;
         }
         self.trail.push((here, read));
-        // 같은 페이지로 가는 링크(`#앵커` 를 뗀 제 자신)도 자취에 남는다 — 되돌아가면 읽던 줄로 온다.
+        // 같은 페이지로 가는 링크(`#앵커` 로 제 머리글에 가는 것)도 자취에 남는다 — 되돌아가면 읽던 줄로 온다.
         self.page.rewind();
+        let heading = anchor.and_then(|a| self.current()?.headings.iter().position(|h| h.anchor == a));
+        self.landed = heading.map(|heading| Landed { slug: to.to_string(), heading, settled: false });
         true
     }
 
-    /// 건너오기 전의 페이지로 한 걸음 — 읽던 줄로 돌아간다. 자취가 비었으면 거짓이다.
+    /// 건너오기 전의 페이지로 한 걸음 — 읽던 줄로 돌아간다. 자취가 비었으면 거짓이다. 머리글 표시는 걷힌다 — 돌아간
+    /// 자리는 읽던 줄이지 건너온 머리글이 아니다.
     pub fn back(&mut self) -> bool {
         while let Some((slug, read)) = self.trail.pop() {
             if self.land_on(&slug) {
+                self.landed = None;
                 self.page.rewind();
                 self.page.by(read as isize);
                 return true;
             }
         }
         false
+    }
+
+    /// 건너온 머리글로 아직 안 굴렸으면 굴린다 — 그림이 본문을 편 뒤에 부른다(moai-tllo). `heads` 는 지금 페이지의
+    /// 머리글마다 그 줄이다(`draw::WikiLaid::heads`). 맨 위로 올린 자리는 그림의 `fit` 이 페이지 끝에서 자른다.
+    pub(super) fn settle(&mut self, heads: &[usize]) {
+        let here = self.current().map(|p| p.slug.clone());
+        let Some(l) = self.landed.as_mut().filter(|l| !l.settled && Some(&l.slug) == here.as_ref()) else { return };
+        l.settled = true;
+        if let Some(&line) = heads.get(l.heading) {
+            self.page.rewind();
+            self.page.by(line as isize);
+        }
+    }
+
+    /// 건너와 선 머리글 — 지금 페이지의 몇째 머리글인가. 그 줄에 `▸` 가 붙는다.
+    pub fn landed(&self) -> Option<usize> {
+        let l = self.landed.as_ref()?;
+        (self.current().map(|p| p.slug.as_str()) == Some(l.slug.as_str())).then_some(l.heading)
+    }
+
+    /// 원문·그린 글을 바꿨다 — 줄이 다시 펴지니 건너온 머리글이 있으면 그 자리로 다시 굴린다.
+    pub(super) fn resettle(&mut self) {
+        if let Some(l) = &mut self.landed {
+            l.settled = false;
+        }
     }
 
     /// 다른 칸으로 — 칸이 둘이라 다음과 앞이 같다.
@@ -507,7 +572,14 @@ impl App {
         // 말의 키는 글자째 적는다 — `i18n` 의 시험이 `say(lang, "…")` 을 훑어 표와 견준다.
         let one = crate::text::one_line;
         match picked {
-            Some(Target::Page { to, found: true, .. } | Target::LinkedFrom { slug: to, .. }) => {
+            Some(Target::Page { to, found: true, anchor, held, .. }) => {
+                w.follow_to(&to, anchor.as_deref());
+                if let (Some(a), Some(false)) = (anchor, held) {
+                    self.notice =
+                        Some(fill(say(lang, "tui.wiki.no_heading"), &[("to", &one(&to)), ("anchor", &one(&a))]));
+                }
+            }
+            Some(Target::LinkedFrom { slug: to, .. }) => {
                 w.follow(&to);
             }
             Some(Target::Page { to, found: false, .. }) => {
@@ -625,6 +697,7 @@ impl App {
                     self.detail.rewind();
                     if let Mode::Wiki(w) = &mut self.mode {
                         w.page.rewind();
+                        w.resettle();
                     }
                     true
                 }
@@ -1196,7 +1269,7 @@ pub(super) mod tests {
         assert_eq!(
             choose(&a).items,
             [
-                Target::Page { text: "guide".into(), to: "guide".into(), found: true },
+                Target::Page { text: "guide".into(), to: "guide".into(), found: true, anchor: None, held: None },
                 Target::Issue { id: "argos-0001".into(), title: Some("첫 일".into()) },
             ]
         );
@@ -1223,6 +1296,116 @@ pub(super) mod tests {
         assert_eq!(slug(&a), "README");
     }
 
+    /// 본문 칸의 첫 줄 — 칸의 머리(`제목 · 경로`)가 선 줄 바로 밑이다. 줄 하나에 목록 칸과 본문 칸이 함께 서니, 머리가
+    /// 시작한 화면 칸부터 잘라 테두리와 여백을 걷는다. 칸은 글자 폭으로 잰다 — 한글 머리와 테두리는 바이트 수가 달라
+    /// 바이트로 재면 밑줄의 다른 자리를 자른다.
+    fn page_top(screen: &[String], head: &str) -> String {
+        let row = screen.iter().position(|l| l.contains(head)).unwrap_or_else(|| panic!("{head} 가 없다"));
+        let col = crate::text::width(&screen[row][..screen[row].find(head).unwrap()]);
+        let below = &screen[row + 1];
+        let mut seen = 0;
+        let start = below
+            .char_indices()
+            .find(|(_, c)| {
+                let here = seen;
+                seen += crate::text::width(&c.to_string());
+                here >= col
+            })
+            .map_or(below.len(), |(i, _)| i);
+        below[start..].trim_start_matches(['┃', '│', ' ']).to_string()
+    }
+
+    /// **링크의 `#앵커` 는 그 머리글로 간다**(2026-10-04 사용자 결정, moai-tllo) — 그 머리글이 본문 칸 맨 위에 서고 그
+    /// 줄 머리에 `▸` 가 붙는다. 본문을 굴리면 표시가 걷히고, `Bksp` 는 읽던 줄로 돌아간다. 페이지 끝 가까이의 머리글은
+    /// 맨 위까지 못 오르지만 표시가 그 줄에 선다. 페이지는 있는데 머리글이 없으면 고르기 창이 `(머리글 없음)` 으로 미리
+    /// 대고, 고르면 그 페이지 맨 위로 가며 알린다. 같은 페이지의 `#앵커` 도 같고, 원문 보기로 바꾸면 그 머리글의 원문
+    /// 줄로 다시 굴린다.
+    #[test]
+    fn an_anchor_link_lands_on_its_heading_and_marks_it() {
+        use super::Target;
+        let filler = |from: usize| (from..from + 30).map(|n| format!("Line {n}.\n\n")).collect::<String>();
+        let home = format!(
+            "# Home\n\n[epic](glossary.md#epic) [gone](glossary.md#gone) [idea](glossary.md#idea) [below](#below)\n\n\
+             {}## Below\n\nend\n\n{}",
+            filler(0),
+            filler(100)
+        );
+        let glossary = format!("# Glossary\n\n{}## Epic\n\nEpic text.\n\n{}## Idea\n\nLast.\n", filler(0), filler(100));
+        let (_s, mut a) = wiki_app("anchor", &[("README.md", &home), ("glossary.md", &glossary)]);
+        a.hit("SPC g w Enter Enter");
+        let page = |to: &str, anchor: &str, held: bool| Target::Page {
+            text: anchor.into(),
+            to: to.into(),
+            found: true,
+            anchor: Some(anchor.into()),
+            held: Some(held),
+        };
+        assert_eq!(
+            choose(&a).items,
+            [
+                page("glossary", "epic", true),
+                page("glossary", "gone", false),
+                page("glossary", "idea", true),
+                page("README", "below", true)
+            ]
+        );
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("epic → glossary#epic\n") || screen.contains("epic → glossary#epic "), "{screen}");
+        assert!(screen.contains("gone → glossary#gone  (머리글 없음)"), "없는 머리글에 낱말이 없다\n{screen}");
+
+        // 머리글로 — 칸 맨 위에 `▸ ## Epic`.
+        a.hit("Enter");
+        assert_eq!(slug(&a), "glossary");
+        let screen = draw::tests::render(&mut a, 120, 24);
+        assert!(
+            page_top(&screen, " Glossary · ").starts_with("▸ ## Epic"),
+            "머리글이 맨 위에 안 섰다\n{}",
+            screen.join("\n")
+        );
+        let landed_at = window(&a).page.offset();
+        assert!(landed_at > 0);
+        // 굴리면 표시가 걷힌다.
+        a.hit("j");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert_eq!(window(&a).page.offset(), landed_at + 1);
+        assert!(!screen.contains("▸ "), "굴렸는데 표시가 남았다\n{screen}");
+        // 되돌아가면 읽던 줄(맨 위)이다.
+        a.hit("Bksp");
+        draw::tests::render(&mut a, 120, 24);
+        assert_eq!((slug(&a).as_str(), window(&a).page.offset()), ("README", 0));
+
+        // 페이지 끝 가까이의 머리글 — 맨 위까지 못 오르지만 표시가 그 줄에 선다.
+        a.hit("Enter j j Enter");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("▸ ## Idea") && screen.contains("Last."), "끝 가까이의 머리글에 표시가 없다\n{screen}");
+        assert!(!page_top(&screen.lines().map(str::to_string).collect::<Vec<_>>(), " Glossary · ").contains("Idea"));
+
+        // 없는 머리글 — 그 페이지 맨 위로 가고 알린다.
+        a.hit("Bksp Enter j Enter");
+        assert_eq!(slug(&a), "glossary");
+        let screen = draw::tests::render(&mut a, 120, 24);
+        assert_eq!(window(&a).page.offset(), 0, "없는 머리글인데 맨 위가 아니다");
+        assert!(page_top(&screen, " Glossary · ").starts_with("# Glossary"));
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("#gone") && n.contains("glossary")), "{:?}", a.notice);
+
+        // 같은 페이지의 `#앵커` — 그 페이지 안에서 굴리고, `Bksp` 가 읽던 줄로 되돌린다.
+        a.hit("Bksp Enter G Enter");
+        assert_eq!(slug(&a), "README");
+        let screen = draw::tests::render(&mut a, 120, 24);
+        assert!(page_top(&screen, " Home · ").starts_with("▸ ## Below"), "{}", screen.join("\n"));
+        // 원문 보기로 바꿔도 그 머리글의 원문 줄로 다시 굴린다.
+        a.hit("SPC v r Esc");
+        let screen = draw::tests::render(&mut a, 120, 24);
+        assert!(
+            page_top(&screen, " Home · ").starts_with("▸ ## Below"),
+            "원문 보기에서 머리글을 잃었다\n{}",
+            screen.join("\n")
+        );
+        a.hit("SPC v r Esc Bksp");
+        draw::tests::render(&mut a, 120, 24);
+        assert_eq!((slug(&a).as_str(), window(&a).page.offset()), ("README", 0));
+    }
+
     /// **이 페이지를 가리키는 페이지도 고르기 창에 선다**(2026-10-04 사용자 결정, moai-ogaw) — 링크와 id 뒤에, 위키
     /// 목록의 차례로 `← 제목  슬러그`. 고르면 링크처럼 건너가고 `Bksp` 가 되돌린다. 나가는 링크가 없어도 들어오는
     /// 페이지가 있으면 창이 선다.
@@ -1235,7 +1418,7 @@ pub(super) mod tests {
         assert_eq!(
             choose(&a).items,
             [
-                Target::Page { text: "deeper".into(), to: "notes/deep".into(), found: true },
+                Target::Page { text: "deeper".into(), to: "notes/deep".into(), found: true, anchor: None, held: None },
                 Target::LinkedFrom { slug: "README".into(), title: "Home".into() },
             ]
         );

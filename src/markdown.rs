@@ -633,14 +633,22 @@ pub fn span_width(spans: &[Span]) -> usize {
 /// 블록들을 폭에 맞춰 **줄**로 편다. 줄 하나는 조각의 열이고, 글머리·막대·
 /// 들여쓰기도 조각으로 들어간다. 빈 줄은 빈 열이다.
 pub fn layout(blocks: &[Block], width: usize, overflow: Overflow) -> Vec<Vec<Span>> {
+    layout_at(blocks, width, overflow).0
+}
+
+/// [`layout`] 와 같되 블록마다 그 블록의 첫 줄도 낸다 — `starts[i]` 가 `blocks[i]` 의 첫 줄이다. 위키 창이 링크의
+/// `#앵커` 를 따라 그 머리글의 줄로 굴릴 때 쓴다(moai-tllo) — 줄은 폭에 따라 접히니 편 자리만 안다.
+pub fn layout_at(blocks: &[Block], width: usize, overflow: Overflow) -> (Vec<Vec<Span>>, Vec<usize>) {
     let mut out: Vec<Vec<Span>> = Vec::new();
+    let mut starts = Vec::with_capacity(blocks.len());
     for (n, b) in blocks.iter().enumerate() {
         if n > 0 {
             out.push(Vec::new());
         }
+        starts.push(out.len());
         lay_one(&mut out, b, width, overflow);
     }
-    out
+    (out, starts)
 }
 
 fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow) {
