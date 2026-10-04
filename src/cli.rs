@@ -517,9 +517,11 @@ IDEA
              Clicking puts the focus on the pane and the cursor on the row
              under it. The wheel moves the pane under the pointer without
              taking the focus there: the list's cursor, the detail, the
-             statistics window. Dragging the line between the list and the
-             detail resizes them, and the share the list takes is kept under
-             [tui] as list_width and list_height. With the SPC menu open, a
+             statistics window, the wiki window's two panes (a click there
+             picks the pane and the page). Dragging the line between the
+             list and the detail resizes them, and the share the list takes
+             is kept under [tui] as list_width and list_height — the wiki
+             window splits by the same share. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and Esc and Bksp on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -641,6 +643,27 @@ IDEA
   counts again from scratch — the window is opened fresh every time and
   nothing of it is kept. On a narrow screen it shows the same figures as
   text.
+
+  SPC g w opens the wiki window in place of the list and the detail — the
+  project's manual, the markdown pages `moai wiki ls` lists (under docs/
+  unless wiki_dir in .moai/config.toml says otherwise). It reads the project
+  you are in, or on the one list (0) the project of the row under the
+  cursor, and it only reads: pages are files you edit and commit. The pages
+  stand on the left, the home page (README or index) first, and the right
+  pane shows the page under the cursor. j and k, Ctrl-d and Ctrl-u, Ctrl-f
+  and Ctrl-b, gg and G move the focused pane, Enter on the list goes to the
+  page and Ctrl-w w goes back and forth. On the page, Enter opens a list of
+  its links and the issue ids it names, which moves with j, k, gg, G,
+  Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes one with Enter and closes on Esc.
+  Taking a page link goes there and Bksp comes back the way you came. Taking
+  an id closes the window onto that row (from the one list, inside that
+  project). Links that lead nowhere, addresses outside the wiki and ids
+  the tracker does not hold are marked and only say so. / searches the
+  titles and bodies of the pages and narrows the list as you type, and Esc
+  clears that search first and then closes the window, with the cursor, the
+  filter and the detail as they were. SPC opens the menu over it with the
+  screens and SPC v r (raw or rendered). The window is read fresh every time
+  and nothing of it is kept.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

@@ -1811,6 +1811,7 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("links", LINKS);
     }
 
     /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
@@ -1900,6 +1901,7 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("links", LINKS);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
         assert_eq!(label(BROWSE, Browse::Step(Move::Top)), "gg", "숨은 별칭 Home 이 이름에 섰다");
@@ -2229,6 +2231,8 @@ mod tests {
     const JOTTING: &str = "SPC n opens the jot form";
     /// 통계 창 문단(moai-1hka.bq9).
     const STATISTICS: &str = "SPC g s opens the statistics window";
+    /// 위키 창 문단(moai-o3cb).
+    const WIKIWIN: &str = "SPC g w opens the wiki window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -2258,6 +2262,8 @@ mod tests {
         ("MENU", SPC, "With the SPC menu open"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "field to type a path"),
+        // 위키 창(WIKI)과 Enter·Esc·이동키를 나눠 쓴다 — 여기 적힌 Enter 는 고르는 Enter, Esc 는 고르기 창을 닫는 Esc 다.
+        ("LINKS", WIKIWIN, "On the page, Enter opens"),
     ];
 
     /// [`SENTENCES`] 에 없는 표 → 그 표를 말하는 문단들. 문단은 빈 줄로 나눈 덩어리다.
@@ -2273,6 +2279,7 @@ mod tests {
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
         ("STATS", &[STATISTICS]),
+        ("WIKI", &[WIKIWIN]),
     ];
 
     /// `head` 로 시작하는 문단.
@@ -2309,7 +2316,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 9] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 11] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("MENU", named(MENU)),
@@ -2319,6 +2326,8 @@ mod tests {
             ("JOT", named(JOT)),
             ("CONFIRM", named(CONFIRM)),
             ("STATS", named(STATS)),
+            ("WIKI", named(WIKI)),
+            ("LINKS", named(LINKS)),
         ];
         // 고르기 창이 목록 문단에서 빌리는 이동 키 — 표와 같은 매크로에서 읽는다.
         // `const` 로 받는다 — 매크로의 `&[…]` 는 상수 자리에서만 `'static` 이다(표도 그렇게 받는다).
@@ -2389,6 +2398,8 @@ mod tests {
             bare(lookup(PATH, k)),
             bare(lookup(CONFIRM, k)),
             bare(lookup(STATS, k)),
+            bare(lookup(WIKI, k)),
+            bare(lookup(LINKS, k)),
         ];
         if tables.contains(&Lookup::Run(())) {
             Lookup::Run(())
