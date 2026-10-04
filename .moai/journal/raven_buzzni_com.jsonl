@@ -3777,3 +3777,4 @@
 {"ts":"2026-10-04T06:12:33Z","id":"moai-gelm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — 머지·닫기·보고 끝. 남은 것은 idea 로 밖에 있다: 스킬 틈 moai-mutw·moai-z45z·moai-wd0q, 홈 페이지 moai-i98g, CLAUDE.md 의 까닭 moai-s0nj. moai-m6ni 의 7-4 가 docs/explorer.md 의 메뉴 클릭 문단을 고친다"}
 {"ts":"2026-10-04T06:13:33Z","id":"moai-p3r9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판 줄이 지난 최신 답을 지금 답처럼 낸다"}
 {"ts":"2026-10-04T06:13:33Z","id":"moai-p3r9.uvj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"실행 중인 판이 들어 둔 최신 태그보다 새면 다시 묻는다"}
+{"ts":"2026-10-04T06:14:31Z","id":"moai-p3r9.uvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
