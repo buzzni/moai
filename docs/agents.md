@@ -132,9 +132,9 @@ gets through — run it as given. None of them waits on a person except rule 5.
 `git config`. When none of them says, a write stops and asks for one — reads
 never ask — and rule 5 sets nothing apart.
 
-## Run agents without a person
+## Work the queue from a session
 
-Every command takes `--json`. Three are enough for a loop:
+Every command takes `--json`. Three are enough for a session to take its next row:
 
 - `moai ready --json` — `ready` is yours to pick up, `others` is ready work that
   belongs to someone else or nobody (ask first), `held` is what is deferred or
@@ -145,9 +145,8 @@ Every command takes `--json`. Three are enough for a loop:
 - `moai prime` — what this session holds and what is next, short enough to load
   into a prompt
 
-`examples/bash-agent/agent.sh` is a whole pick-work-close loop in bash and jq, and
-`examples/python-agents/agents.py` runs several agents at once. The test suite
-runs both.
+moai never launches a session or runs one headless. A person opens each one, and
+the session reads these the way that person would.
 
 **Name the AI that did the work** before closing an issue — one note, the
 [model line](glossary.md#model-line), one line per issue, read back as `work` in
