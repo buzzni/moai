@@ -72,6 +72,16 @@ does not tag — see `CONTRIBUTING.md`.
   within the hour after it is. A failed ask counts as that once and is kept for
   the day. `latest.toml` gains an `asked_by` key, the version that last asked.
 
+- **A new issue no longer leaves one yellow cell behind in the explorer.** When
+  a new card or row pushed the others down so that the `]` of its `[NEW]` mark
+  landed on the first half of a wide character (Hangul, say) that stood there a
+  frame before, the terminal blanked the other half in the mark's yellow, and
+  the explorer never drew that cell again — it was blank in both frames as far
+  as the explorer knew. The cell stayed yellow until something else covered it.
+  Now the half a wide character leaves behind is drawn again whenever something
+  covers the character. Seen in Ghostty; inside tmux the cell stood only on the
+  outer terminal, never on the pane tmux keeps, so `capture-pane` showed nothing.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added
