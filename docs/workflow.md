@@ -4,16 +4,18 @@ How work moves through moai when several sessions — people, agents, or both �
 share one repository: picking work up, planning it, doing it in a worktree,
 reviewing it and getting it merged. The first part holds in any repository that
 uses moai; the last section points at what this repository adds on top. Flags are
-in [the CLI reference](cli.md), and what to do when something ends up wrong is in
-[Recovery](recovery.md).
+in [the CLI reference](cli.md), what to do when something ends up wrong is in
+[Recovery](recovery.md), and the words this page leans on are in
+[the glossary](glossary.md).
 
 ## Pick up work
 
 1. `moai status` — start a session here. The board, the warnings and the flow come
    up on one screen, and nothing on it blocks
 2. `moai ready` — what you can pick up right now, most urgent first
-3. `moai mv <id> in_progress --from todo` — pick one up. `--from` names the
-   column you saw it in, and the move happens only while the row still stands
+3. `moai mv <id> in_progress --from todo` — [pick one up](glossary.md#pick-up).
+   `--from` names the [column](glossary.md#column) you saw it in, and the move
+   happens only while the row still stands
    there. If another session took it first, you get one line on stderr, `stale`
    under `--json` and a non-zero exit — move on to the next row. Give one id per
    call; with several, the rows you won and the rows you lost share one exit code
@@ -21,43 +23,46 @@ in [the CLI reference](cli.md), and what to do when something ends up wrong is i
    `review` and `done` unless `statuses` in `.moai/config.toml` says otherwise
 
 Work that belongs to someone else, or to nobody, stands apart under `others` in
-`moai ready`. Ask its person before you take it — the
-[agents page](agents.md) has the `--take` line, and why it is the one place moai
-asks.
+`moai ready`. Ask its person before you [take it over](glossary.md#take-over) —
+the [agents page](agents.md#the-five-rules) has the `--take` line, and why it is
+the one place moai asks.
 
 **Never move to `done` what you decided not to do.** `moai defer <id> -m '<why>'`
-takes it out of the plan without changing its column or its kind, and
+takes it out of the plan without changing its column or its
+[kind](glossary.md#kind) — it stands [deferred](glossary.md#deferred) — and
 `moai defer <id> --undo` brings the same row back. Leave a `moai note <id>` for
-whoever comes next when you stop halfway — `Next: …` is the usual first word.
+whoever comes next when you stop halfway — a [`Next:` note](glossary.md#next-note).
 
 ## Plan something bigger
 
-When a request will not end inside one file, split it into one epic and three to
-seven issues, show the plan to the person once, and on a yes create it in one go:
+When a request will not end inside one file, split it into one
+[epic](glossary.md#epic) and three to seven issues, show the
+[plan](glossary.md#plan) to the person once, and on a yes create it in one go:
 
     moai add --from - --dry-run      see what the plan would create
     moai add --from -                create it (the plan comes on stdin)
 
 A plan is markdown: `# Epic title` opens an epic and `- [p1] issue title #tag`
 puts an issue under it. Each issue gets an id under the epic's own,
-`<epic>.<body>`, so a member cannot leave its epic later.
+`<epic>.<body>`, so a [member](glossary.md#member) cannot leave its epic later.
 
-- **Do not move an epic or a milestone.** A group's column is read from its
-  members: pick one member up and the group stands `in_progress`, finish them all
-  and it stands `done`
-- **Something for later is an idea**, not an issue — `moai idea add`. Ideas stay
+- **Do not move an epic or a [milestone](glossary.md#milestone).** A
+  [group](glossary.md#group)'s column is read from its members: pick one member
+  up and the group stands `in_progress`, finish them all and it stands `done`
+- **Something for later is an [idea](glossary.md#idea)**, not an issue — `moai idea add`. Ideas stay
   off the board and out of `moai ready`, and `moai idea promote <id> --from -`
   unfolds one into an epic and issues when its time comes
-- **A running milestone is the person's to fill.** A milestone runs once any of
+- **A [running milestone](glossary.md#running-milestone) is the person's to fill.** A milestone runs once any of
   its members has started; from then `moai ready` hands out its work plus anything
   `p0`, and nothing else is pulled into it unless the person says so
 
 ## Work in a worktree
 
-Each piece of work goes on its own branch in a linked git worktree, so sessions do
-not pile commits onto one branch and wait on each other to merge.
+Each piece of work goes on its own branch in a linked git
+[worktree](glossary.md#worktree), so sessions do not pile commits onto one branch
+and wait on each other to merge.
 
-- **The tracker stays in the main checkout.** A `moai` run inside a linked
+- **The [tracker](glossary.md#tracker) stays in the main checkout.** A `moai` run inside a linked
   worktree reads and writes the main checkout's `.moai/`, and one line on stderr
   says where the write went. Commit tracker changes from the main checkout with
   `git commit -- .moai/`; the worktree's own copy stays as it was when it split
@@ -112,8 +117,8 @@ A review is an issue of its own, under the work it looks at:
 
 The angle (`-b`) and the closing line (`-m`) are what the next reader looks for,
 and for an agent the hook refuses a review without them (rule 3 on the
-[agents page](agents.md)). Before closing any issue, name the AI that did the
-work on it — the `model:` note on the same page.
+[agents page](agents.md#the-five-rules)). Before closing any issue, name the AI
+that did the work on it — the [model line](glossary.md#model-line).
 
 ## In this repository
 
@@ -124,7 +129,8 @@ where its contributors read them rather than repeated here:
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
   (which `/code-review` level an epic gets, moai-9793, moai-bx6t), the
-  `Regression-of:` line on bugs a merged epic caused (moai-21zt), and how a
+  [`Regression-of:` line](glossary.md#regression-of) on bugs a merged epic caused
+  (moai-21zt), and how a
   milestone is named before and after a release
 - **`CONTRIBUTING.md`** — building and testing, regenerating
   [the CLI reference](cli.md), and Releasing: the sections under `[Unreleased]` in
@@ -143,4 +149,4 @@ where its contributors read them rather than repeated here:
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo

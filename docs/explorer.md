@@ -5,7 +5,7 @@ the cursor described on the other. It is for reading — finding work, seeing ho
 milestone stands, catching up on what changed — and the one thing it writes to
 the tracker is a thought you park (`SPC n`). Moving, editing and noting are done
 with the CLI. Every key is in `moai tui --help`; this page says which ones to
-reach for.
+reach for, and [the glossary](glossary.md) says what the words mean.
 
 ## Open it
 
@@ -22,7 +22,8 @@ which prints the listing and opens no screen.
 
 ## Find your way around
 
-Milestones and epics behave like directories.
+[Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like
+directories.
 
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
@@ -37,7 +38,8 @@ Milestones and epics behave like directories.
 
 **What the list shows is the view.** Done is hidden to begin with, and the path
 line above the list says what is hidden and how it is sorted. The `SPC v` keys
-show or hide deferred work, ideas, each column, the detail and the archive;
+show or hide [deferred](glossary.md#deferred) work, [ideas](glossary.md#idea),
+each [column](glossary.md#column), the detail and the archive;
 `SPC s` sorts and `SPC c` picks the columns on the right of a row. These choices
 are kept in your user config and carry over to the next run and to every project.
 
@@ -137,7 +139,8 @@ and `0` turns the archive off (moai-47mz).
 
 ## Catch up on what changed
 
-Rows that came to you — assigned to you, or under something that is — and changed
+Rows that came to you — [assigned](glossary.md#assignee) to you, or under
+something that is — and changed
 since you last looked carry a `[NEW]` mark. `r` marks the row under the cursor
 read, `SPC m g` every member of the group it is in, and `SPC m a` everything.
 Read marks live in your own config, not in the tracker, so marking changes
@@ -146,7 +149,8 @@ nothing anyone else sees; the CLI side is `moai read`.
 ## Park a thought
 
 `SPC n` opens the jot form anywhere inside a project, and what you write is kept
-as an idea with no epic — off the board and out of `moai ready` until someone
+as an [idea](glossary.md#idea) with no epic — off the board and out of
+`moai ready` until someone
 unfolds it. With an editor on hand (`$VISUAL`, `$EDITOR`, `vi` or `nano`) it opens
 like a git commit message: the first line is the title. Without one, a built-in
 form opens and `Ctrl-S` keeps it. Leave the title empty and nothing is kept.
@@ -185,4 +189,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo

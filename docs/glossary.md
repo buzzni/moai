@@ -75,7 +75,8 @@ gets through. More in [working with agents](agents.md#the-five-rules).
 
 A thought parked for later — a row of kind `idea`, off the board and out of
 `moai ready`, so it does not blur the plan. `moai idea add` parks one (`SPC n`
-in the explorer), and `moai idea promote <id> --from -` unfolds it into an epic
+in [the explorer](explorer.md#park-a-thought)), and
+`moai idea promote <id> --from -` unfolds it into an epic
 and issues and closes it. An idea is "not work yet"; [deferred](#deferred) is
 "work, but not now".
 
