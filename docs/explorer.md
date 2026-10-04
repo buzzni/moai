@@ -66,7 +66,11 @@ are kept in your user config and carry over to the next run and to every project
   the cursor, as on the main list. `Enter` on
   the list goes to the page; `Enter` on the page lists its links and the issue
   ids it names, then the pages that link to it, marked `←`. Taking a page —
-  either way — goes there and `Backspace` comes back; taking an id closes the
+  either way — goes there and `Backspace` comes back to the line you were
+  reading. A link that names a heading (`glossary.md#epic`, or `#epic` on the
+  same page) opens at that heading, its line marked `▸` until you scroll or
+  leave; one whose heading the page does not have stands marked
+  `(no heading)` and opens the page at its top. Taking an id closes the
   window onto that row, inside that project when you opened it from the
   overview. A link that leads nowhere, an address outside the wiki and
   an id the tracker does not hold stay in that list marked `(none)` or

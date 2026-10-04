@@ -2160,7 +2160,10 @@ Options:
 
   There is no command that writes a page - edit the file and commit it. A
   page names an issue by its bare id, as a commit subject does, and another
-  page by a relative link: `[the explorer](explorer.md)`.
+  page by a relative link: `[the explorer](explorer.md)`. A link can land on
+  a heading - `glossary.md#epic`, or `#epic` on the same page. The anchor is
+  the heading as GitHub makes it (lowercase, punctuation dropped, each space
+  a `-`, a repeated heading `-1`, `-2`), so the same link works there too.
 ```
 
 ## `moai wiki ls`
@@ -2187,11 +2190,19 @@ Options:
   wiki to list and the exit code is 0. A `wiki_dir` that is absolute, has
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
+  Under the list, notices count pages with conflict markers, links leading to
+  no page, links to a heading the page does not have, and ids naming no
+  issue. They block nothing and leave the exit code alone.
+
   --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
-  "links","conflict"}]}. `issues` is [{"id","exists"}] - the ids with
-  this tracker's prefix the page names outside code blocks. `links` is
-  [{"text","to","resolved"}] - relative links to a `.md` page of this
-  wiki, `to` being the target slug.
+  "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
+  ids with this tracker's prefix the page names outside code blocks. `links` is
+  [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
+  `.md` page of this wiki, `to` being the target slug (the page itself for a
+  bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
+  whether that page has the heading; both are absent on a link with no `#`,
+  and `anchor_resolved` is absent when the page could not be read.
+  `linked_from` is the slugs of the pages linking to this one.
   A page that could not be read carries `error` ({"kind","said"}, kind
   too_large, refused or failed); absent, it was read whole. What the walk
   left out stands in `skipped` ([{"path","kind","said"}], kind dir_link,
@@ -2466,7 +2477,10 @@ Options:
   its links and the issue ids it names, then the pages linking to it (marked
   ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes
   one with Enter and closes on Esc. Taking a page link or a page linking
-  here goes there and Bksp comes back the way you came. Taking an id closes
+  here goes there and Bksp comes back the way you came. Links to a heading
+  (page.md#anchor) open at that heading, its line marked ▸ until you
+  scroll; one to a heading the page does not have is marked and opens the
+  page at its top. Taking an id closes
   the window onto that row (from the one list, inside that project). Links
   that lead nowhere, addresses outside the wiki and ids the tracker does not
   hold are marked and only say so. / searches the titles and bodies of the
