@@ -23,6 +23,7 @@ use crate::report::Blocker;
 use crate::style;
 use crate::text::clip;
 use ratatui::Frame;
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -221,8 +222,19 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         (list(f, app, left, &rows), Vec::new(), Vec::new())
     };
     // **마우스가 맞힐 자리를 남긴다**(moai-irrj) — 목록의 줄 자리는 목록이 열 이름 줄을 뗀 안쪽이라 그린 쪽이 낸다.
-    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다.
-    app.drawn = super::mouse::Drawn { body, list: left, rows: rows_at, detail: right, cards, columns };
+    // 보드는 줄 자리 대신 카드와 칸의 자리를 낸다 — 보드의 한 줄은 목록의 한 줄이 아니다. 메뉴는 격자 창과 접두어 줄을
+    // 합친 자리다(moai-m6ni) — 격자가 접혀 창이 0 줄이면 접두어 줄 하나다. 메뉴의 누를 칸은 메뉴를 칠한 뒤 맨 끝에서 채운다.
+    let menu = open_menu.is_some().then(|| panel.union(keys));
+    app.drawn = super::mouse::Drawn {
+        body,
+        list: left,
+        rows: rows_at,
+        detail: right,
+        cards,
+        columns,
+        menu,
+        menu_keys: Vec::new(),
+    };
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }
@@ -260,8 +272,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
+    let mut menu_keys = Vec::new();
     if let Some((_, grid, _)) = &open_menu {
-        menu_panel(f, grid, panel);
+        menu_keys = menu_panel(f, grid, panel);
     }
     if let Some((lines, _)) = hint {
         hint_panel(f, lines, panel);
@@ -286,7 +300,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         Mode::Browse => match &open_menu {
-            Some((items, grid, waits)) => menu_line(f, app, items, grid, *waits, keys),
+            Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
         },
         // 안내 속 키 이름은 표에서 읽는다 — 키를 옮기면 안내도 따라온다.
@@ -354,7 +368,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
         Mode::Stats(w) => match &open_menu {
-            Some((items, grid, waits)) => menu_line(f, app, items, grid, *waits, keys),
+            Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
         },
         Mode::Unregister(u) => {
@@ -372,6 +386,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
         }
     }
+    app.drawn.menu_keys = menu_keys;
 }
 
 /// 그린 화면에 도는 글리프가 한 칸이라도 있는가. 글자는 `style::SPIN` 에서 읽는다 —
@@ -4185,26 +4200,59 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
 ///
 /// 위 가름줄 하나가 몸통과 가른다 — 몸통의 아래 테두리에 바로 붙으므로 선이 없으면 격자의 첫
 /// 줄이 목록의 줄로 읽힌다. 가름줄은 굵지 않다 — 키 먹는 칸의 굵은 선은 목록·상세의 것이다.
-fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) {
-    let room = at.width.saturating_sub(2) as usize;
+///
+/// **누를 수 있는 칸과 그 키를 돌려준다**(moai-m6ni, `mouse::Drawn::menu_keys`) — 칸 하나는 `키 : 낱말` 전체다(열 안의
+/// 채움까지). 칠하는 이 자리에서 잰다: 따로 재면 격자의 놓기를 고치는 날 누르는 자리가 칠한 자리와 말없이 갈린다. 칸이
+/// 서는 안쪽도 칠하는 틀(`block`)에서 읽는다 — 가름줄·여백을 따로 셈하면 틀을 고치는 날 같은 까닭으로 갈린다.
+fn menu_panel(f: &mut Frame, grid: &menu::Grid, at: Rect) -> Vec<(Rect, KeyEvent)> {
+    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
+    let inner = block.inner(at);
+    let room = inner.width as usize;
+    let mut hits = Vec::new();
     let lines: Vec<Line> = (0..grid.rows)
         .map(|r| {
             let mut spans = Vec::new();
+            let mut cells = Vec::new();
             for (c, p) in grid.row(r).enumerate() {
                 if c > 0 {
                     spans.push(Span::raw(" ".repeat(menu::GAP)));
                 }
+                let from = spans_width(&spans);
                 spans.push(Span::styled(p.key.clone(), bold().fg(MENU_KEY)));
                 spans.push(Span::styled(menu::SEP, Style::new().fg(MENU_SEP)));
                 spans.push(Span::styled(p.text.clone(), menu_word(p.group)));
+                cells.push((from, spans_width(&spans) - from, p.event));
+            }
+            // 안쪽 높이를 넘는 줄은 안 그려진다 — 그 칸도 안 남긴다.
+            if r < usize::from(inner.height) {
+                hits.extend(cells_at(inner.x, inner.y + r as u16, cells, spans_width(&spans), room));
             }
             // 격자가 이미 폭에 맞췄다. 한 열도 안 드는 좁은 창만 여기서 잘린다.
             fit(Line::from(spans), room)
         })
         .collect();
-    let block = Block::default().borders(Borders::TOP).border_style(dim()).padding(Padding::horizontal(1));
     f.render_widget(Clear, at);
     f.render_widget(Paragraph::new(lines).block(block), at);
+    hits
+}
+
+/// 한 줄에 선 칸들의 자리 — 칸은 `(앞에서 떨어진 칸, 폭, 키)` 이고 줄 `y` 의 `x0` 부터 잰다. 줄의 폭은 `line` 이다.
+///
+/// **[`fit`] 이 자른 대로 자른다.** 줄이 `room` 을 넘으면 `fit` 은 끝 칸을 `…` 에 내주므로 보이는 몫은 `room - 1` 칸이다
+/// — `room` 으로 자르면 키가 끝 칸에 걸린 칸이 `…` 만 보이는데도 눌린다(리뷰: 15칸 접힌 줄의 `…` 가 거름망을 열었다).
+/// 한 칸도 안 보이는 칸은 없다: 안 보이는 칸을 누를 수는 없다.
+fn cells_at(
+    x0: u16,
+    y: u16,
+    cells: Vec<(usize, usize, KeyEvent)>,
+    line: usize,
+    room: usize,
+) -> impl Iterator<Item = (Rect, KeyEvent)> {
+    let shown = if line > room { room.saturating_sub(1) } else { room };
+    cells.into_iter().filter_map(move |(from, w, k)| {
+        let w = w.min(shown.saturating_sub(from));
+        (w > 0).then(|| (Rect::new(x0 + from as u16, y, w as u16, 1), k))
+    })
 }
 
 /// 거름망 칸 위의 안내(moai-h2rh) — 커서가 값 자리에 서면 고를 값, 아니면 쓸 수 있는 항목과 예. **`room` 줄을 안
@@ -4304,15 +4352,30 @@ fn menu_word(group: bool) -> Style {
 ///
 /// **격자 설 높이가 없으면 여기로 접는다** — `SPC-  / 검색  f 거름망 …`. 항목이 먼저고 나가는
 /// 법은 자리가 남을 때만 붙는다 — 못 누르는 항목은 댈 수 없다.
-fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid, waits: bool, at: Rect) {
+///
+/// **누를 수 있는 칸과 그 키를 돌려준다**(moai-m6ni) — 접혔으면 항목(`키 낱말`)이, 그리고 나가는 법(`Esc 닫기`·
+/// `Bksp 위로`)이 선 자리다. 나가는 법을 누르면 그 키를 친 것이다(사용자 결정 2026-10-04). [`menu_panel`] 과 같은 까닭으로
+/// 칠하는 자리에서 잰다.
+fn menu_line(
+    f: &mut Frame,
+    app: &App,
+    items: &[menu::Entry],
+    grid: &menu::Grid,
+    waits: bool,
+    at: Rect,
+) -> Vec<(Rect, KeyEvent)> {
     let held = app.chord.held();
     let room = at.width as usize;
+    // 누를 수 있는 칸 — `(앞에서 떨어진 칸, 폭, 키)`. 자리는 줄을 다 놓은 뒤 [`cells_at`] 이 `fit` 이 자른 대로 낸다.
+    let mut cells = Vec::new();
     let mut spans = vec![Span::styled(format!("{}-", menu::title(held)), bold())];
     if grid.rows == 0 {
         for e in items {
             spans.push(Span::raw("  "));
+            let from = spans_width(&spans);
             spans.push(Span::styled(e.key.clone(), bold().fg(MENU_KEY)));
             spans.push(Span::styled(format!(" {}", e.text()), menu_word(e.is_group())));
+            cells.push((from, spans_width(&spans) - from, e.event));
         }
     } else {
         spans.push(Span::raw(format!(" {}", menu::name(held, app.site.lang))));
@@ -4326,17 +4389,28 @@ fn menu_line(f: &mut Frame, app: &App, items: &[menu::Entry], grid: &menu::Grid,
     // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
     // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
     // `moai tui --help` 가 댄다.
-    let mut exits =
-        if waits { vec![key(&label(MENU, Menu::Close), Menu::Close.what(app.site.lang))] } else { Vec::new() };
+    let exit = |m: Menu| (key(&label(MENU, m), m.what(app.site.lang)), menu_event(m));
+    let mut exits = if waits { vec![exit(Menu::Close)] } else { Vec::new() };
     if held.len() > 1 {
-        exits.push(key(&label(MENU, Menu::Up), Menu::Up.what(app.site.lang)));
+        exits.push(exit(Menu::Up));
     }
-    let used = spans_width(&spans) + spans_width(&exits);
+    let used = spans_width(&spans) + exits.iter().map(|(s, _)| crate::text::width(&s.content)).sum::<usize>();
     if used <= room {
         spans.push(Span::raw(" ".repeat(room - used)));
-        spans.extend(exits);
+        for (span, k) in exits {
+            // 나가는 법 하나의 글은 ` 키 낱말` 이다([`key`]) — 앞의 빈칸은 칸 사이라 누르는 자리에서 뺀다.
+            cells.push((spans_width(&spans) + 1, crate::text::width(&span.content).saturating_sub(1), k));
+            spans.push(span);
+        }
     }
+    let hits = cells_at(at.x, at.y, cells, spans_width(&spans), room).collect();
     f.render_widget(Paragraph::new(fit(Line::from(spans), room)), at);
+    hits
+}
+
+/// 메뉴의 나가는 법 하나를 누른 모양 — 표([`MENU`])의 첫 키다. 표가 키를 옮기면 따라온다.
+fn menu_event(m: Menu) -> KeyEvent {
+    MENU.iter().find(|b| b.act == m).map(|b| b.seq[0].event()).expect("MENU 표에 없는 나가는 법")
 }
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.

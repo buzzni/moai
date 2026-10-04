@@ -2087,6 +2087,8 @@ mod tests {
         // 규칙이지, 목록 문단이 대야 할 이동키를 대신하지 않는다.
         ("MENU", SPC, "Keys that move"),
         ("MENU", SPC, "That level says so at the bottom right"),
+        // 메뉴를 마우스로 누르는 문장(moai-m6ni)도 메뉴의 것이다 — 여기 적힌 Esc·Bksp 는 접두어 줄의 나가는 법이다.
+        ("MENU", SPC, "With the SPC menu open"),
         // 고르기 창(PICK)과 Enter·Esc 를 나눠 쓴다. `g p` 는 창의 것이라 괄호부터 잡는다.
         ("PATH", PICKER, "field to type a path"),
     ];

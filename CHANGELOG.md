@@ -44,6 +44,19 @@ does not tag — see `CONTRIBUTING.md`.
   and no warning stands for a stale page. The AGENTS block carries a short
   "The wiki" section — run `moai init` to bring it in.
 
+### Changed
+
+- **The explorer's `SPC` menu takes the mouse.** A click on a menu item is
+  that item's key: a group (`+screen`) goes one level down, a toggle keeps the
+  menu open as its key does, and `Esc` and `Bksp` on the bottom line close it
+  or go up. A click or a wheel roll outside the menu closes it and does what it
+  does there — a click on a row puts the cursor on it — the way a movement key
+  already closes the menu and moves. Before, a click or the wheel over the open
+  menu was ignored and the menu waited for a key. Empty space inside the menu,
+  the wheel over it and the right or middle button still do nothing, the menu
+  over the statistics window follows the same rules, and a search or filter
+  prompt still leaves the mouse to the terminal.
+
 ### Fixed
 
 - **The explorer's version line no longer calls a release build "ahead" of an

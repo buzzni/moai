@@ -69,8 +69,11 @@ not know.
   that level says so with an `Esc` hint
 - A movement key closes it and makes the move in the same press
 
-Over the open menu the mouse does nothing: a click or the wheel is ignored and the
-menu stays open. Close it with `Esc` or `SPC` first.
+The mouse works on the open menu too. Click an item and it is as if you pressed
+its key — a group goes one level down and a toggle keeps the menu open. `Esc` and
+`Bksp` on the bottom line close it or go up. A click or the wheel outside the menu
+closes it and does what it does there, so clicking a row closes the menu and puts
+the cursor on that row. Empty space inside the menu does nothing.
 
 ## The mouse
 
@@ -78,7 +81,8 @@ The mouse is on to begin with; `SPC o m` turns it off and on, and the choice is
 kept.
 
 - **A click** puts the focus on the pane under it and the cursor on that row or
-  card
+  card. With the menu open, a click on an item presses its key and a click
+  outside closes the menu first — see [the menu](#the-menu)
 - **The wheel** moves the pane under the pointer — the list's cursor, the detail,
   the board, the statistics — without taking the focus there
 - **Dragging the line** between the list and the detail resizes them, and the
@@ -160,4 +164,4 @@ that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-p3r9
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9
