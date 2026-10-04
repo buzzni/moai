@@ -90,6 +90,9 @@ pub struct Grab {
     /// 잡기 전의 몫. 손이 잡은 칸으로 돌아오면 이 몫으로 돌아간다 — 선을 누르다 손이 옆으로 미끄러진 것만으로는
     /// 처음값이 설정에 박히지 않는다(`App::list_width`).
     was: Option<u16>,
+    /// 위키 창의 선을 잡았는가(moai-p61w) — 그때는 위키 창의 몫(`App::wiki_width`)을 옮긴다. 목록·상세의 선과
+    /// 몫이 따로라(2026-10-04 사용자 결정) 어느 선을 잡았는지를 끝까지 든다.
+    wiki: bool,
 }
 
 impl App {
@@ -211,7 +214,11 @@ impl App {
 
     /// 위키 창 위의 손짓(moai-o3cb). **누른 칸으로 포커스가 가고**, 목록의 줄을 눌렀으면 커서가 그 페이지로 간다 —
     /// 본문은 커서를 따라간다. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**(2026-10-04 사용자 결정 — 탐색기의
-    /// 둘러보기와 같은 규칙, [`App::wheel`]). 칸 사이의 선은 이 창에서 끌리지 않는다 — 몫은 목록·상세의 것을 빌려 쓴다.
+    /// 둘러보기와 같은 규칙, [`App::wheel`]).
+    ///
+    /// **칸 사이의 선을 끌면 두 칸의 폭이 바뀐다**(2026-10-04 사용자 요청, moai-p61w) — 목록·상세의 선과 같은 손짓
+    /// ([`App::wiki_grab_at`]·[`App::drag_to`])이고, 몫은 이 창의 것(`App::wiki_width`)이라 탐색기의 가름은 안 움직인다
+    /// (사용자 결정). 놓을 때 한 번 설정에 적는다([`App::drop_line`]).
     ///
     /// **본문의 링크를 누르면 그 링크로 간다**(2026-10-04 사용자 요청, moai-p61w) — 골라 `Enter` 를 친 것과 같은 길이다
     /// (`App::go_link`). 맞히는 칸은 지난 프레임이 그린 링크 칸([`WikiAt::links`])이다.
@@ -225,6 +232,16 @@ impl App {
             return;
         }
         let Some(d) = self.drawn.wiki.clone() else { return };
+        if let (MouseEventKind::Drag(MouseButton::Left), Some(grab)) = (kind, self.dragging) {
+            return self.drag_to(grab, at);
+        }
+        if matches!(kind, MouseEventKind::Down(MouseButton::Left))
+            && let Some(grab) = self.wiki_grab_at(&d, at)
+        {
+            self.acted();
+            self.dragging = Some(grab);
+            return;
+        }
         let on = if d.page.is_some_and(|r| r.contains(at)) {
             Side::Page
         } else if d.list.contains(at) {
@@ -315,7 +332,22 @@ impl App {
             (at.x, front.right(), self.list_width)
         };
         let line = end.checked_sub(1)?;
-        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was })
+        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was, wiki: false })
+    }
+
+    /// 위키 창의 칸 사이 선을 잡았는가(moai-p61w) — 목록의 끝 테두리와 본문의 첫 테두리, 둘 다 잡힌다([`App::grab_at`] 와
+    /// 같은 까닭). 본문이 안 섰으면(좁은 창) 선이 없다. 창은 늘 목록이 왼쪽이라 가르는 축이 하나다.
+    fn wiki_grab_at(&self, d: &WikiAt, at: Position) -> Option<Grab> {
+        let page = d.page?;
+        let end = d.list.right();
+        let line = end.checked_sub(1)?;
+        let rows = d.list.y..d.list.bottom();
+        (rows.contains(&at.y) && (at.x == line || at.x == end && page.x == end)).then_some(Grab {
+            from: at.x,
+            line,
+            was: self.wiki_width,
+            wiki: true,
+        })
     }
 
     /// 잡은 선을 `at` 으로 끈다. **선이 손을 따라온다** — 잡은 자리에서 손이 간 만큼 선이 가고, 앞에 선 칸이 그 자리까지
@@ -325,6 +357,9 @@ impl App {
     /// 몫은 백분율이라 100칸 넘는 몸통에서는 선이 손에서 한 칸 어긋날 수 있다(200칸 넘으면 두 칸 넘게씩 간다) — 설정에
     /// 사람이 읽고 고칠 수 있는 수로 남기는 값이고, 칸 단위로 들면 창 크기가 바뀔 때마다 뜻이 바뀐다.
     fn drag_to(&mut self, grab: Grab, at: Position) {
+        if grab.wiki {
+            return self.drag_wiki_to(grab, at);
+        }
         let body = self.drawn.body;
         let vertical = self.detail_at.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
@@ -346,6 +381,26 @@ impl App {
         } else {
             self.list_width = share;
         }
+    }
+
+    /// 위키 창의 선을 `at` 으로 끈다(moai-p61w) — [`App::drag_to`] 의 가로 갈래와 같은 셈이되, 몸통은 위키 창이 그린
+    /// 두 칸을 합친 자리이고 몫은 위키 창의 것이다. 창은 목록이 늘 왼쪽이라 앞에 선 칸이 곧 목록이다. 창이 닫혔으면
+    /// 아무 일도 없다.
+    fn drag_wiki_to(&mut self, grab: Grab, at: Position) {
+        let Some(page) = self.drawn.wiki.as_ref().and_then(|d| d.page.map(|p| (d.list, p))) else { return };
+        let (list, page) = page;
+        let body = Rect::new(list.x, list.y, page.right().saturating_sub(list.x), list.height);
+        if body.width == 0 {
+            return;
+        }
+        self.wiki_width = if at.x == grab.from {
+            grab.was
+        } else {
+            let line = (i32::from(grab.line) + i32::from(at.x) - i32::from(grab.from))
+                .clamp(i32::from(body.x), i32::from(body.x) + i32::from(body.width) - 1);
+            let front = (line - i32::from(body.x) + 1) as u16;
+            Some(super::draw::share_for(body, super::view::DetailAt::Right, front))
+        };
     }
 
     /// 끌기를 놓는다 — **그때 한 번** 설정에 적는다(`App::save_look`). 끄는 동안의 칸마다 적으면 손짓 하나가

@@ -526,10 +526,12 @@ IDEA
              under it. The wheel scrolls the pane under the pointer, and
              neither the focus nor a cursor follows: the list, the detail, the
              statistics window, the wiki window's two panes (a click there
-             picks the pane and the page). Dragging the line between the
-             list and the detail resizes them, and the share the list takes
-             is kept under [tui] as list_width and list_height — the wiki
-             window splits by the same share. With the SPC menu open, a
+             picks the pane and the page, and a click on a link follows it).
+             Dragging the line between the list and the detail resizes them,
+             and the share the list takes is kept under [tui] as list_width
+             and list_height. The wiki window's line drags the same way and
+             keeps a share of its own as wiki_width — until it is dragged it
+             splits by list_width. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and Esc and Bksp on the bottom line
              close it or go up — and a click or a roll outside the menu closes

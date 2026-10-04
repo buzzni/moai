@@ -266,8 +266,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     .unwrap_or_default();
     // 말도 **폼을 그리기 전에** 든다 — 밑의 `&mut app.mode` 가 `app` 을 통째로 빌린다.
     let lang = app.site.lang;
-    // 위키 창의 본문은 탐색과 한 원문 토글을 탄다(`App::raw`), 칸 몫도 목록·상세의 몫 그대로다(`App::list_width`).
-    let (raw, share) = (app.raw, app.list_width);
+    // 위키 창의 본문은 탐색과 한 원문 토글을 탄다(`App::raw`). 칸 몫은 그 창에서 끈 몫(`App::wiki_width`)이고, 끈 적
+    // 없으면 목록·상세의 몫(`App::list_width`)을 따른다(moai-p61w).
+    let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
     match &mut app.mode {
         Mode::Idea(form) => jot(f, form, body, true, tint, lang),
@@ -1017,8 +1018,9 @@ fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
 }
 
 /// 위키 창(moai-o3cb). 목록·상세 자리를 **통째로** 덮는다([`stats_window`] 와 같은 까닭) — 왼쪽은 페이지 목록, 오른쪽은
-/// 커서가 선 페이지의 본문이다. 칸 몫은 목록·상세의 몫([`split_body`] 의 좌우 갈래)을 그대로 쓴다: 사람이 끌어 고른
-/// 몫이 이 창에서만 다르면 같은 화면의 두 칸이 창을 열 때마다 너비를 바꾼다.
+/// 커서가 선 페이지의 본문이다. 칸 몫(`share`)은 이 창의 선을 끌어 고른 몫이다(`App::wiki_width`, moai-p61w — 2026-10-04
+/// 사용자 결정으로 목록·상세의 몫과 따로다). 끈 적 없으면 목록·상세의 몫을 따르고, 가르는 법은 [`split_body`] 의 좌우
+/// 갈래와 같다 — 끄는 쪽이 같은 자([`share_for`])로 몫을 거꾸로 푼다.
 ///
 /// 칸 자리를 낸다 — 마우스가 다음 사건에서 맞힌다(`mouse::Drawn::wiki`).
 fn wiki_window(

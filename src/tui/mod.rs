@@ -1353,6 +1353,10 @@ pub struct App {
     pub list_width: Option<u16>,
     /// 위아래로 가를 때 목록이 가져가는 높이의 몫(%). 폭과 **따로다** — 처음값부터 다르다(`draw::ABOVE`).
     pub list_height: Option<u16>,
+    /// 위키 창의 페이지 목록이 가져가는 폭의 몫(%) — 그 창의 칸 사이 선을 끌어 정하고 설정에 남는다(moai-p61w).
+    /// 목록·상세의 몫([`App::list_width`])과 **따로다**(2026-10-04 사용자 결정). 끈 적 없으면 `None` 이고 그동안 위키
+    /// 창은 `list_width` 를 따른다 — 끌기 전에는 이 에픽 전과 같은 폭이다.
+    pub wiki_width: Option<u16>,
     /// 칸 사이 선을 잡고 끄는 중이면 잡은 자리([`mouse::Grab`]). 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다
     /// 적으면 손짓 하나가 파일을 수십 번 다시 쓴다. 놓친 뗌은 다음 마우스 사건이나 다음 키가 대신한다(`App::drop_line`).
     dragging: Option<mouse::Grab>,
@@ -1924,6 +1928,7 @@ impl App {
             drawn: mouse::Drawn::default(),
             list_width: None,
             list_height: None,
+            wiki_width: None,
             dragging: None,
             offer_aim: hint::Aim::default(),
             hint_room: None,
@@ -3326,6 +3331,7 @@ impl App {
         // 끝으로 당긴 값은 입힌 뒤의 보기(`App::saved`)에 들어 이 세션이 끌기 전에는 파일의 줄을 안 건드린다.
         self.list_width = look.list_width.map(draw::share);
         self.list_height = look.list_height.map(draw::share);
+        self.wiki_width = look.wiki_width.map(draw::share);
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -3349,6 +3355,7 @@ impl App {
             mouse: Some(self.mouse_on),
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
+            wiki_width: self.wiki_width.map(i64::from),
         }
     }
 

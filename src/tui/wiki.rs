@@ -1687,6 +1687,59 @@ pub(super) mod tests {
         assert!(!notice.contains("Esc"), "거름망이 없는데 Esc 를 댔다: {notice:?}");
     }
 
+    /// **위키 창의 칸 사이 선을 끌면 두 칸의 폭이 바뀌고, 그 몫은 위키 창의 것이다**(2026-10-04 사용자 요청·결정,
+    /// moai-p61w). 맞닿은 두 테두리가 다 잡히고 선이 손을 따라오며, 놓을 때 한 번 `wiki_width` 로 설정에 적힌다. 끈 적
+    /// 없으면 목록·상세의 몫을 따르고, 끈 뒤에도 탐색기의 가름은 그대로다. 본문이 안 선 좁은 창에는 선이 없다.
+    #[test]
+    fn dragging_the_wiki_line_resizes_the_panes_and_keeps_a_share_of_its_own() {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let (s, mut a) = wiki_app("drag", PAGES);
+        let user = s.join("user.toml");
+        a.user_config = Some(user.clone());
+        a.list_width = Some(40);
+        let _ = draw::tests::render(&mut a, 100, 20);
+        let explorer = a.drawn.list;
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 100, 20);
+        let d = a.drawn.wiki.clone().unwrap();
+        assert_eq!(d.list.width, explorer.width, "끈 적 없는 위키 창이 목록·상세의 몫을 안 따랐다");
+
+        // 목록의 끝 테두리를 잡고 끈다 — 누르기로 안 읽힌다.
+        let (line, y) = (d.list.right() - 1, d.list.y + 3);
+        click(&mut a, line, y);
+        assert!(a.dragging.is_some(), "위키 창의 선을 못 잡았다");
+        assert_eq!(window(&a).cursor, 0, "선을 잡은 것이 누르기로 읽혔다");
+        press(&mut a, MouseEventKind::Drag(MouseButton::Left), 59, y);
+        let _ = draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.drawn.wiki.clone().unwrap().list.right() - 1, 59, "선이 손을 안 따라왔다");
+        assert_eq!((a.wiki_width, a.list_width), (Some(60), Some(40)), "끈 몫이 위키 창의 것이 아니다");
+        assert!(!user.exists(), "끄는 동안 설정을 적었다");
+        press(&mut a, MouseEventKind::Up(MouseButton::Left), 59, y);
+        assert!(a.dragging.is_none());
+        let text = std::fs::read_to_string(&user).expect("놓았는데 끈 몫이 설정에 안 적혔다");
+        assert!(text.contains("wiki_width = 60") && !text.contains("list_width = 60"), "{text}");
+
+        // 본문의 첫 테두리도 잡힌다 — 잡은 테두리가 손을 따라온다.
+        let page = a.drawn.wiki.clone().unwrap().page.unwrap();
+        click(&mut a, page.x, y);
+        press(&mut a, MouseEventKind::Drag(MouseButton::Left), 30, y);
+        press(&mut a, MouseEventKind::Up(MouseButton::Left), 30, y);
+        let _ = draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.drawn.wiki.clone().unwrap().page.unwrap().x, 30, "본문의 테두리를 잡은 끌기가 손을 안 따라왔다");
+
+        // 창을 닫으면 탐색기의 가름은 그대로다.
+        a.hit("Esc");
+        let _ = draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.drawn.list, explorer, "위키 창의 끌기가 탐색기의 가름을 옮겼다");
+
+        // 좁아 본문이 안 서면 선이 없다 — 목록의 끝 테두리를 눌러도 끌기가 아니다.
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 19, 10);
+        let d = a.drawn.wiki.clone().unwrap();
+        click(&mut a, d.list.right() - 1, d.list.y + 2);
+        assert!(a.dragging.is_none(), "본문이 없는데 선을 잡았다");
+    }
+
     /// 본문에 링크 셋 — 접히는 한글 페이지 링크, 위키 밖 주소, 없는 페이지 — 과 그 링크가 가는 페이지(moai-p61w).
     const LINKED: &[(&str, &str)] = &[
         (
