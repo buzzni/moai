@@ -50,6 +50,9 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
 }
 
 /// `moai wiki show <slug>` — 머리(슬러그·제목·경로), 빈 줄, 그린 본문. 본문을 못 읽었으면 그 까닭이 본문 자리에 선다.
+/// 꼬리에 이 페이지를 가리키는 페이지의 슬러그가 한 줄로 선다(moai-ogaw) — 아무도 안 가리키면 줄이 없다. 슬러그는
+/// `moai wiki show` 에 그대로 건넬 이름이라 제목이 아니라 슬러그고, 목록의 `!` 표시처럼 셸 낱말로 감싼다
+/// (`text::quoted`) — `my page` 가 맨글로 서면 옮겨 친 명령이 낱말 둘로 갈린다.
 pub fn page(lang: Lang, p: &Page) -> Vec<String> {
     let mut out = vec![
         format!("{}  {}", paint(style::ID, &one_line(&p.slug)), paint(style::HEAD, &one_line(&p.title))),
@@ -77,6 +80,12 @@ pub fn page(lang: Lang, p: &Page) -> Vec<String> {
             out.push(paint(style::WARN, &format!("! {said}")));
         }
         (None, None) => {}
+    }
+    if !p.linked_from.is_empty() {
+        let which =
+            p.linked_from.iter().map(|s| paint(style::ID, &crate::text::quoted(s))).collect::<Vec<_>>().join(", ");
+        out.push(String::new());
+        out.push(fill(say(lang, "wiki.linked_from"), &[("which", &which)]));
     }
     // 충돌은 본문 머리에 이미 섰다 — 꼬리에는 링크와 id 만 센다.
     let n = Notices { conflict: Vec::new(), ..crate::wiki::notices([p]) };
