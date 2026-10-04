@@ -45,6 +45,13 @@ impl Wiki {
         !self.skipped.is_empty()
             || self.pages.iter().any(|p| matches!(p.error, Some(Unread::Refused(_) | Unread::Failed(_))))
     }
+
+    /// `slug` 의 역링크([`Page::linked_from`])를 세지 못한 자리의 수 — 본문을 못 읽은 다른 페이지(크기 상한도 든다:
+    /// 일부러 안 읽었어도 그 링크는 안 셌다)와 걷기가 건너뛴 자리다. 0 이 아니면 역링크가 덜 섰을 수 있다
+    /// (2026-10-04 사용자 결정, moai-mdzx.jty). 물은 페이지 제 본문은 안 센다 — 제 자신을 가리키는 링크는 역링크가 아니다.
+    pub fn uncounted(&self, slug: &str) -> usize {
+        self.skipped.len() + self.pages.iter().filter(|p| p.slug != slug && p.body.is_none()).count()
+    }
 }
 
 /// 사람 화면이 알림으로 세는 것(moai-ihu4.zdk) — 충돌 표시가 든 페이지, 페이지로 안 풀리는 링크, 그 페이지에 없는
@@ -404,7 +411,7 @@ pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) 
 /// - `pages` 의 차례로, 가리키는 페이지마다 한 번 — 글이 다른 링크 둘로 가리켜도 한 번이다
 /// - 제 자신을 가리키는 링크(`#앵커` 를 뗀 제 슬러그)는 안 센다 — 들어오는 길이 아니다
 /// - 본문을 못 읽은 페이지([`Page::error`])는 링크가 없어 아무것도 안 가리킨다. 그러니 역링크는 **읽은 페이지가 적은
-///   것만큼이다** — 그 페이지는 목록에 `error` 로 선다
+///   것만큼이다** — 그 페이지는 목록에 `error` 로 서고, 덜 셌을 수 있는 자리의 수는 [`Wiki::uncounted`] 가 댄다
 ///
 /// 링크는 한 번만 훑는다 — 페이지마다 위키 전부의 링크를 다시 훑으면 페이지 수의 제곱이 들고, `show` 도 이 길을 탄다.
 fn linked_from(pages: &[Page]) -> Vec<Vec<String>> {
@@ -1250,6 +1257,26 @@ mod tests {
         // 슬러그는 이름으로 선다 — 본문을 못 읽은 페이지로 가는 링크도 풀린다(걷어 낸 `load_one` 시험이 지키던 것).
         let to_big = w.find("README").unwrap().links.iter().find(|l| l.to == "big").map(|l| l.resolved);
         assert_eq!(to_big, Some(true), "못 읽은 페이지로 가는 링크가 안 풀렸다");
+        // big 이 a 를 가리키지만 못 읽어 안 셌다 — 그 수를 [`Wiki::uncounted`] 가 댄다(moai-mdzx.jty).
+        assert_eq!(w.uncounted("a"), 1, "크기 상한으로 안 읽은 페이지도 역링크를 못 센 자리다");
+        assert_eq!(w.uncounted("big"), 0, "제 본문은 제 역링크와 상관없다");
+    }
+
+    /// 역링크를 못 센 자리는 본문이 없는 다른 페이지와 걷기가 건너뛴 자리다 — 다 읽었으면 0 이다(moai-mdzx.jty).
+    #[cfg(unix)]
+    #[test]
+    fn uncounted_names_what_the_backlinks_could_not_read() {
+        let s = Scratch::new("wiki-uncounted");
+        let away = Scratch::new("wiki-uncounted-away");
+        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md)\n");
+        write(s.path(), "docs/a.md", "# A\n");
+        assert_eq!(load(s.path(), "docs", "moai", &none).unwrap().uncounted("a"), 0, "다 읽은 위키다");
+        std::fs::write(s.path().join("docs/latin1.md"), b"[a](a.md) caf\xe9\n").unwrap();
+        std::os::unix::fs::symlink(away.path(), s.path().join("docs/away")).unwrap();
+        let w = load(s.path(), "docs", "moai", &none).unwrap();
+        assert_eq!(w.uncounted("a"), 2, "못 읽은 페이지 하나와 건너뛴 디렉터리 링크 하나");
+        assert_eq!(w.uncounted("latin1"), 1, "제 본문은 안 센다");
+        assert_eq!(w.find("a").unwrap().linked_from, ["README"]);
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

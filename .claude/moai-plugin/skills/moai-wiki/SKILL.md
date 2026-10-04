@@ -54,7 +54,10 @@ tell — and a same-page `#anchor` stands with `to` naming its own page) and
 none does. A page other than the home page that nothing links to is found only through
 the list — link it from the page that should lead there. Judge that from
 `moai wiki ls --json`, not from one page: a page that could not be read links nowhere,
-and only the list shows it, with its `error`. A page that could
+and only the list shows it, with its `error`. `moai wiki show <slug> --json` says when
+its own count may be short — `linked_from_partial` stands `true` when some other page
+could not be read or the walk left a spot out, and is absent when every page was
+counted. A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a

@@ -23287,6 +23287,11 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
 /// **종료 코드는 물은 페이지만 본다** — 곁의 페이지를 못 읽어도(체크아웃 밖 링크) 멀쩡한 페이지의 `show` 는 0 이다.
 /// 못 읽은 페이지는 링크가 없어 아무것도 안 가리킨다. 곁의 것은 stderr 에도 알림에도 안 선다 — 걸러 둔 디렉터리
 /// 링크(`ls` 는 stderr 로 댄다)도, 곁의 페이지의 없는 링크·없는 id 도. 빈칸이 든 슬러그는 셸 낱말로 감싸 선다.
+///
+/// **덜 셌을 수 있다는 것은 말한다**(2026-10-04 사용자 결정, moai-mdzx.jty) — 못 읽은 자리(여기서는 체크아웃 밖
+/// 링크 페이지와 디렉터리 링크, 둘)가 있으면 `--json` 에 `linked_from_partial: true` 가, 사람 화면 꼬리에 그 수의 한
+/// 줄이 선다. 아무도 안 가리키는 페이지에도 선다 — "아무도 안 가리킨다" 와 "못 셌다" 가 같아 보이던 자리다. 다
+/// 읽은 위키에서는 키도 줄도 없다.
 #[cfg(unix)]
 #[test]
 fn wiki_show_names_the_pages_that_link_to_it() {
@@ -23313,10 +23318,22 @@ fn wiki_show_names_the_pages_that_link_to_it() {
         json.contains(r#""linked_from":["README","my page","work"]"#),
         "제 링크·두 번 건 링크·못 읽은 페이지를 셌다 — {json}"
     );
+    assert!(json.contains(r#""linked_from_partial":true"#), "못 읽은 자리가 있는데 덜 셌다고 안 했다 — {json}");
+    assert!(shown.contains("위키에서 못 읽은 자리 2 — "), "덜 셌다는 줄이 없다\n{shown}");
     let home = ok(s.path(), &["wiki", "show", "README", "--json"]);
     assert!(home.contains(r#""linked_from":[]"#), "아무도 안 가리키는 페이지의 키가 빠졌다 — {home}");
-    assert!(!ok(s.path(), &["wiki", "show", "README"]).contains("가리키는 페이지"), "빈 역링크에 줄이 섰다");
+    assert!(home.contains(r#""linked_from_partial":true"#), "빈 역링크도 덜 셌을 수 있다 — {home}");
+    let lone = ok(s.path(), &["wiki", "show", "README"]);
+    assert!(!lone.contains("가리키는 페이지") && lone.contains("못 읽은 자리 2"), "빈 역링크에 줄이 섰다\n{lone}");
     assert!(!moai(s.path(), &["wiki", "ls"]).status.success(), "곁의 못 읽는 페이지가 목록에서 안 섰다");
+    let listed = String::from_utf8_lossy(&moai(s.path(), &["wiki", "ls", "--json"]).stdout).into_owned();
+    assert!(!listed.contains("linked_from_partial"), "목록이 줄마다 같은 말을 되풀이한다 — {listed}");
+
+    std::fs::remove_file(docs.join("out.md")).unwrap();
+    std::fs::remove_file(docs.join("away")).unwrap();
+    let whole = ok(s.path(), &["wiki", "show", "guide/t", "--json"]);
+    assert!(!whole.contains("linked_from_partial"), "다 읽은 위키에 키가 섰다 — {whole}");
+    assert!(!ok(s.path(), &["wiki", "show", "guide/t"]).contains("못 읽은 자리"), "다 읽은 위키에 줄이 섰다");
 }
 
 /// **위키는 이 체크아웃에서, 트래커는 루트에서 읽는다**(moai-ihu4). 워크트리에서 쓴 페이지는 그 워크트리의 목록에만

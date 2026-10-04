@@ -2236,6 +2236,12 @@ Options:
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
   yet included - it gives {"dir","error"} as `ls` does, non-zero.
+
+  `linked_from` counts only the pages that could be read. When another page
+  could not be read, or the walk left a name or directory out, the count may
+  be short: `--json` adds `linked_from_partial` (true) and a line under the
+  page says how many places were not read. With every page read, neither
+  stands. It leaves the exit code alone - `moai wiki ls` names those places.
 ```
 
 ## `moai tui`

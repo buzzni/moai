@@ -1008,5 +1008,6 @@
   "wiki.notice_missed": "그 페이지에 없는 머리글로 가는 링크 {n}  {which}",
   "wiki.notice_missing": "트래커에 없는 id {n}  {which}",
   "wiki.conflict_raw": "충돌 표시가 있다 — 원문 그대로 보인다. {path} 의 병합을 풀고 커밋한다",
-  "wiki.linked_from": "이 페이지를 가리키는 페이지  {which}"
+  "wiki.linked_from": "이 페이지를 가리키는 페이지  {which}",
+  "wiki.linked_from_partial": "위키에서 못 읽은 자리 {n} — 거기서 오는 링크는 여기 안 셌다. `moai wiki ls` 가 그 자리를 댄다"
 }

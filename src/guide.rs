@@ -1426,7 +1426,10 @@ tell — and a same-page `#anchor` stands with `to` naming its own page) and
 none does. A page other than the home page that nothing links to is found only through
 the list — link it from the page that should lead there. Judge that from
 `moai wiki ls --json`, not from one page: a page that could not be read links nowhere,
-and only the list shows it, with its `error`. A page that could
+and only the list shows it, with its `error`. `moai wiki show <slug> --json` says when
+its own count may be short — `linked_from_partial` stands `true` when some other page
+could not be read or the walk left a spot out, and is absent when every page was
+counted. A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
@@ -3551,6 +3554,7 @@ stop sending outside work while a release runs",
         "resolved",
         "anchor_resolved",
         "linked_from",
+        "linked_from_partial",
         "conflict",
         "too_large",
         "refused",
@@ -3603,7 +3607,7 @@ stop sending outside work while a release runs",
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
         let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
         let loaded = read.unwrap();
-        printed.extend(crate::cmd::wiki::page_json(lang, loaded.find("README").unwrap()).unwrap());
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap()).unwrap());
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
