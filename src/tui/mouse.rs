@@ -1,8 +1,7 @@
 //! 마우스 — 누르기·휠·칸 끌기(moai-irrj).
 //!
-//! **키와 같은 길로 옮긴다.** 누른 칸으로 포커스가 가는 것은 `Tab` 과, 휠이 목록을 움직이는 것은 `j`·`k`
-//! 와, 보드를 굴리는 것은 `Ctrl-d` 와 같은 자리를 바꾼다 — 마우스만의 상태를 두면 키로 한 일과 마우스로 한 일이
-//! 따로 논다.
+//! **키와 같은 길로 옮긴다.** 누른 칸으로 포커스가 가는 것은 `Tab` 과, 휠이 목록과 보드를 굴리는 것은 `Ctrl-d`
+//! 와 같은 자리를 바꾼다 — 마우스만의 상태를 두면 키로 한 일과 마우스로 한 일이 따로 논다.
 //!
 //! **맞히는 바탕은 지난 프레임이 그린 자리다**([`Drawn`]). 키와 누르기는 하나마다 한 번 그리고 휠·끌기는 몰아
 //! 받는데(`cmd::tui::rolls`), 몰아 받는 동안에는 화면도 지난 프레임 그대로라 맞히는 바탕은 늘 사람이 보고 있는
@@ -21,7 +20,7 @@
 //! 누르거나 굴리면 메뉴를 닫고 그 손짓을 그대로 한다 — 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 하는 것(moai-y8v2)과
 //! 같은 결이다. 메뉴 안의 빈 자리, 메뉴 위의 휠, 오른쪽·가운데 단추와 뗌·끌기는 아무것도 안 한다. 통계 창 위의 메뉴도 같다.
 
-use super::{App, Mode, Pane, menu, scroll};
+use super::{App, Mode, Pane, menu};
 use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
@@ -36,9 +35,13 @@ pub struct Drawn {
     pub body: Rect,
     /// 목록 칸 — 테두리까지.
     pub list: Rect,
-    /// 목록의 줄이 서는 자리 — 테두리와 열 이름 줄을 뺀 안쪽. 이 자리의 n 번째 줄이 굴린 자리(`App::list`)에서
-    /// n 만큼 내려간 줄이다.
+    /// 목록의 줄이 서는 자리 — 테두리와 열 이름 줄을 뺀 안쪽. 이 자리의 n 번째 줄이 그 프레임의 굴린 자리
+    /// ([`Drawn::top`])에서 n 만큼 내려간 줄이다.
     pub rows: Rect,
+    /// 그 프레임이 목록을 그린 굴린 자리 — 맨 위에 선 줄(moai-fyul 리뷰). **누르기는 지금의 `App::list` 가 아니라 이것으로
+    /// 맞힌다** — 휠은 화면만 굴려 `App::list` 를 바로 옮기고, 몰아 받는 동안(`cmd::tui::rolls`)에는 그리지 않으므로 휠에
+    /// 이어 온 누르기는 아직 옛 화면을 본 사람의 손이다. 지금 자리로 맞히면 굴린 만큼 어긋난 줄을 고른다.
+    pub top: usize,
     /// 상세 칸 — 테두리까지. 숨겼거나 접혀 안 섰으면 없다(`draw::split_body`).
     pub detail: Option<Rect>,
     /// 보드의 카드가 보이는 자리와 그 줄(`App::rows` 의 첨자)(moai-9nfw). 목록으로 세웠으면 비었다 — 그때는
@@ -62,8 +65,11 @@ pub struct Drawn {
 pub struct WikiAt {
     /// 페이지 목록 — 테두리까지.
     pub list: Rect,
-    /// 목록의 줄이 서는 자리 — 테두리를 뺀 안쪽. 이 자리의 n 번째 줄이 목록의 굴린 자리에서 n 만큼 내려간 페이지다.
+    /// 목록의 줄이 서는 자리 — 테두리를 뺀 안쪽. 이 자리의 n 번째 줄이 그 프레임의 굴린 자리([`WikiAt::top`])에서 n 만큼
+    /// 내려간 페이지다.
     pub rows: Rect,
+    /// 그 프레임이 페이지 목록을 그린 굴린 자리 — [`Drawn::top`] 과 같은 까닭으로 누르기는 이것으로 맞힌다.
+    pub top: usize,
     /// 본문 칸 — 테두리까지. 좁아 안 섰으면 없다.
     pub page: Option<Rect>,
 }
@@ -232,7 +238,7 @@ impl App {
                 w.chord.clear();
                 w.focus = on;
                 if on == Side::List && d.rows.contains(at) {
-                    let n = w.list.offset() + usize::from(at.y - d.rows.y);
+                    let n = d.top + usize::from(at.y - d.rows.y);
                     if n < w.shown().len() {
                         w.move_to(n);
                     }
@@ -278,7 +284,7 @@ impl App {
         }
         let rows = self.drawn.rows;
         if pane == Pane::Explorer && rows.contains(at) {
-            let n = self.list.offset() + usize::from(at.y - rows.y);
+            let n = self.drawn.top + usize::from(at.y - rows.y);
             if n < self.rows().len() {
                 self.move_to(n);
             }
@@ -348,20 +354,16 @@ impl App {
     /// 움직인다.
     ///
     /// - 상세는 굴린다 — 끝과 첫 줄 밖으로는 안 나간다(`Scroll::by`)
-    /// - 목록은 **커서를** 옮긴다 — 커서가 없는 줄을 굴려 보이게만 하면 상세는 그대로라, 굴려서 찾은
-    ///   줄을 보려면 다시 눌러야 한다. 끝에서는 멈춘다 — `j`·`k` 와 같은 자다(`scroll::cursor_by`)
-    /// - 보드는 **화면을 굴린다**(moai-acfk, 사용자 결정 2026-10-02) — 위아래를 빠르게 훑는 손짓이다. 굴리는 것은 보드
-    ///   통째로 하나라 마우스가 선 칸은 안 가린다. **커서와 상세는 그대로다** — 고른 카드가 화면 밖으로 나가도 끌려오지
-    ///   않고, 화면은 보드 끝까지 구른다(moai-j0jf, 사용자 결정 2026-10-03, `App::board_roll`). 걸음은 상세와 같은
-    ///   [`WHEEL`] 줄이다
+    /// - 목록과 보드는 **화면을 굴린다** — 위아래를 빠르게 훑는 손짓이다. **커서와 상세는 그대로다** — 고른 줄이
+    ///   화면 밖으로 나가도 끌려오지 않고, 화면은 끝까지 구른다. 다음 커서 키가 화면을 고른 줄로 되돌린다
+    ///   (`App::roll`). 보드는 moai-acfk·moai-j0jf(사용자 결정 2026-10-02·2026-10-03), 목록은 moai-fyul(사용자 결정
+    ///   2026-10-04)이다 — 목록은 한때(2026-10-01) 커서를 옮겼다: 굴려 찾은 줄을 보려면 다시 눌러야 한다는 까닭이었는데,
+    ///   휠 한 번에 상세가 바뀌어 고른 줄을 두고 아래만 볼 수 없었다. 보드의 굴리기는 보드 통째로 하나라 마우스가 선
+    ///   칸은 안 가린다. 걸음은 상세와 같은 [`WHEEL`] 줄이다
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
-            Some(Pane::Explorer) if self.board() => self.board_roll(|s| s.by(by)),
-            Some(Pane::Explorer) => {
-                let to = scroll::cursor_by(by, self.cursor, || self.rows().len());
-                self.move_to(to);
-            }
+            Some(Pane::Explorer) => self.roll(|s| s.by(by)),
             None => {}
         }
     }
@@ -426,6 +428,21 @@ mod tests {
         assert!(top > 0, "목록이 안 굴렀다");
         click(&mut a, rows.x + 2, rows.y);
         assert_eq!(a.cursor, top, "굴린 만큼을 안 더했다");
+    }
+
+    /// **휠에 이어 온 누르기는 사람이 보던 화면으로 맞힌다**(moai-fyul 리뷰) — 휠은 화면만 굴려 굴린 자리를 바로
+    /// 옮기는데, 몰아 받는 동안(`cmd::tui::rolls`)에는 그리지 않아 그 뒤의 누르기까지 한 번에 받는다. 지금 자리로 맞히면
+    /// 사람이 누른 줄보다 굴린 만큼 아래 줄에 선다.
+    #[test]
+    fn a_click_right_after_the_wheel_takes_the_row_on_screen() {
+        let mut a = drawn(40, 100, 20);
+        let rows = a.drawn.rows;
+        let (lx, ly) = middle(a.drawn.list);
+        roll(&mut a, true, lx, ly);
+        roll(&mut a, true, lx, ly);
+        assert_eq!(a.list.offset(), 2 * WHEEL as usize, "시험의 전제 — 휠이 화면을 굴렸다");
+        click(&mut a, rows.x + 2, rows.y + 2);
+        assert_eq!(a.cursor, 2, "그리기 전의 누르기가 굴린 만큼 어긋난 줄을 골랐다");
     }
 
     /// 마지막 줄 밑의 빈 곳·테두리는 **커서를 안 옮긴다** — 없는 줄에 커서를 세우면 상세가 빈다.
@@ -510,21 +527,21 @@ mod tests {
         assert_eq!(a.focus, Pane::Detail, "메뉴를 닫은 누르기가 포커스를 안 옮겼다");
     }
 
-    /// **메뉴 밖의 휠은 메뉴를 닫고 그 자리를 굴린다**(moai-m6ni, 사용자 결정 2026-10-04) — 휠은 마우스의 `j`·`k` 고,
-    /// 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 한다(moai-y8v2). 메뉴 위의 휠은 아무것도 안 한다.
+    /// **메뉴 밖의 휠은 메뉴를 닫고 그 자리를 굴린다**(moai-m6ni, 사용자 결정 2026-10-04) — 메뉴의 이동키가 메뉴를 닫고
+    /// 곧 그 이동을 하는 것(moai-y8v2)과 같은 결이다. 메뉴 위의 휠은 아무것도 안 한다.
     #[test]
     fn the_wheel_outside_the_menu_closes_it_and_rolls() {
-        let mut a = drawn(10, 100, 20);
+        let mut a = drawn(40, 100, 20);
         a.hit("SPC");
         super::super::draw::tests::render(&mut a, 100, 20);
         let shut = a.drawn.menu.expect("메뉴가 선 자리를 안 남겼다");
         roll(&mut a, true, shut.x + 2, shut.y + 1);
         assert!(menu::open(&a.chord), "메뉴 위의 휠이 메뉴를 닫았다");
-        assert_eq!(a.cursor, 0, "메뉴 위의 휠이 목록을 움직였다");
+        assert_eq!((a.cursor, a.list.offset()), (0, 0), "메뉴 위의 휠이 목록을 움직였다");
         let (lx, ly) = middle(a.drawn.list);
         roll(&mut a, true, lx, ly);
         assert!(!menu::open(&a.chord), "메뉴 밖의 휠이 메뉴를 안 닫았다");
-        assert_eq!(a.cursor, 3, "메뉴를 닫은 휠이 커서를 안 옮겼다");
+        assert_eq!((a.cursor, a.list.offset()), (0, 3), "메뉴를 닫은 휠이 목록을 안 굴렸다");
     }
 
     /// 그린 화면에서 `want` 가 처음 선 자리 — **화면에 보이는 그대로 누른다.** 누르는 자리를 `Drawn` 에서 꺼내 누르면
@@ -661,12 +678,14 @@ mod tests {
         }
     }
 
-    /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 목록 위에서는 커서가 세 줄씩
-    /// 가고 끝에서 멈춘다. 상세 위에서는 목록에 포커스가 선 채로 상세가 굴러, 다음 `j` 는 여전히 목록을
-    /// 움직인다.
+    /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 상세 위에서는 목록에 포커스가 선 채로
+    /// 상세가 굴러, 다음 `j` 는 여전히 목록을 움직인다. **목록 위에서는 화면만 세 줄씩 구른다**(moai-fyul, 사용자 결정
+    /// 2026-10-04 — 보드와 같은 규칙): 커서와 상세는 그대로고, 고른 줄이 화면 밖으로 나가도 그림이 화면을 그리로
+    /// 되돌리지 않는다. 화면은 목록 끝까지 구르고, 거꾸로 굴리면 곧바로 듣는다. 한때(2026-10-01) 목록의 휠은 커서를
+    /// 세 줄씩 옮겼다.
     #[test]
     fn the_wheel_moves_the_pane_under_the_pointer_and_leaves_the_focus() {
-        let mut a = drawn(5, 100, 20);
+        let mut a = drawn(40, 100, 20);
         a.site.issues[0].body = Some((1..=80).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n\n"));
         super::super::draw::tests::render(&mut a, 100, 20);
         let (lx, ly) = middle(a.drawn.list);
@@ -674,20 +693,30 @@ mod tests {
 
         roll(&mut a, true, dx, dy);
         assert_eq!((a.focus, a.cursor, a.detail.offset()), (Pane::Explorer, 0, 3), "상세가 세 줄 안 굴렀다");
+
+        roll(&mut a, true, lx, ly);
+        assert_eq!(a.list.offset(), 3, "목록 위의 휠이 화면을 세 줄 안 굴렸다");
+        assert_eq!((a.cursor, a.detail.offset()), (0, 3), "목록 위의 휠이 커서나 상세를 움직였다");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.list.offset(), 3, "화면 밖의 커서를 그림이 드러내느라 굴린 화면을 되돌렸다");
+        for _ in 0..20 {
+            roll(&mut a, true, lx, ly);
+        }
+        let end = a.list.offset();
+        assert!(end > 3 && a.list.below() == 0, "목록 끝까지 안 굴렀다 — {end}");
+        assert_eq!(a.cursor, 0, "굴린 휠이 커서를 옮겼다");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        assert_eq!(a.list.offset(), end, "그림이 굴린 화면을 커서로 되돌렸다");
+        roll(&mut a, false, lx, ly);
+        assert_eq!(a.list.offset(), end - 3, "끝에서 위로 굴린 휠이 곧바로 안 들었다");
+
         roll(&mut a, false, dx, dy);
         roll(&mut a, false, dx, dy);
         assert_eq!(a.detail.offset(), 0, "첫 줄 위로 굴렀다");
         a.hit("j");
         assert_eq!(a.cursor, 1, "휠이 포커스를 옮겼다");
-
-        roll(&mut a, true, lx, ly);
-        assert_eq!(a.cursor, 4, "목록 위의 휠이 커서를 세 줄 안 옮겼다");
-        roll(&mut a, true, lx, ly);
-        assert_eq!(a.cursor, 4, "끝을 지났다");
-        roll(&mut a, false, lx, ly);
-        assert_eq!(a.cursor, 1);
-        roll(&mut a, false, lx, ly);
-        assert_eq!(a.cursor, 0, "첫 줄 위로 갔다");
+        super::super::draw::tests::render(&mut a, 100, 20);
+        assert!(a.list.shows(1, 1), "`j` 가 굴린 화면을 커서로 안 되돌렸다 — {}", a.list.offset());
     }
 
     /// 보드 한 장(moai-9nfw) — todo 칸에 열여섯(0001~0016), in_progress 칸에 넷(0017~0020). 카드는 두 줄이라 칸이 그린

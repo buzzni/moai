@@ -56,11 +56,25 @@ does not tag — see `CONTRIBUTING.md`.
   does not hold is marked and only says so. `/` searches the titles and bodies of
   the pages and narrows the list; `Esc` clears that search first and then closes
   the window. The `SPC` menu over it holds the screens and `SPC v r`, the wheel
-  moves the pane under the pointer and a click picks the pane and the page. The
+  scrolls the pane under the pointer — on the list, as do `Ctrl-d`, `Ctrl-u`,
+  `Ctrl-f` and `Ctrl-b`, without moving the cursor or the page — and a click
+  picks the pane and the page. The
   window is read fresh every time it opens and nothing of it is kept; a wiki that
   does not exist or holds no page opens nothing and says why.
 
 ### Changed
+
+- **The explorer's list scrolls under the wheel instead of moving the cursor.**
+  The wheel over the list, and `Ctrl-d`, `Ctrl-u`, `Ctrl-f`, `Ctrl-b`,
+  `PageDown` and `PageUp` with the list focused, now scroll it the way they
+  already scroll the board: the chosen row and the detail stay put even once the
+  row is off screen, and the list scrolls to its end. The next cursor key (`j`,
+  `k`, `gg`, `G`, and `l`, `h` or `Tab` on a group row) moves from that row and
+  scrolls back to it, and a search, a filter, a view toggle or going into a
+  folder shows the cursor's row again; a reread from a write next door leaves
+  the scrolled list where it is. Before, the wheel moved the cursor three rows
+  at a time and those keys moved it half a page or a page, so the detail changed
+  under every roll. The wheel over the detail still scrolls the detail.
 
 - **The explorer's `SPC` menu takes the mouse.** A click on a menu item is
   that item's key: a group (`+screen`) goes one level down, a toggle keeps the

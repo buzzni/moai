@@ -449,8 +449,11 @@ IDEA
   fold. Tab unfolds everything under it recursively and folds it again on a
   second press. Unfolded members stand with branch marks in the title column,
   and that unfolding is not kept in the config. gg and Home go to the top,
-  G and End to the bottom, Ctrl-d and Ctrl-u half a page, Ctrl-f and Ctrl-b
-  (PageDown and PageUp) a whole page.
+  G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
+  Ctrl-b (PageDown and PageUp) a whole page and the wheel three rows — the
+  list, not the cursor: the chosen row and the detail stay put even once the
+  row is off screen, and the next cursor key moves from that row and scrolls
+  back to it.
   Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
   other way; Ctrl-w h and Ctrl-w l pick the left and right pane, Ctrl-w k and
   Ctrl-w j the top and bottom one when the detail is split that way), and every
@@ -515,8 +518,8 @@ IDEA
              done_at=\"2026-10-03 00:00~2026-10-05 23:59\") is on this clock too
     SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
              Clicking puts the focus on the pane and the cursor on the row
-             under it. The wheel moves the pane under the pointer without
-             taking the focus there: the list's cursor, the detail, the
+             under it. The wheel scrolls the pane under the pointer, and
+             neither the focus nor a cursor follows: the list, the detail, the
              statistics window, the wiki window's two panes (a click there
              picks the pane and the page). Dragging the line between the
              list and the detail resizes them, and the share the list takes
@@ -651,7 +654,9 @@ IDEA
   cursor, and it only reads: pages are files you edit and commit. The pages
   stand on the left, the home page (README or index) first, and the right
   pane shows the page under the cursor. j and k, Ctrl-d and Ctrl-u, Ctrl-f
-  and Ctrl-b, gg and G move the focused pane, Enter on the list goes to the
+  and Ctrl-b, gg and G move the focused pane — on the list, Ctrl-d, Ctrl-u,
+  Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
+  where they are, as in the explorer's list. Enter on the list goes to the
   page and Ctrl-w w goes back and forth. On the page, Enter opens a list of
   its links and the issue ids it names, which moves with j, k, gg, G,
   Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes one with Enter and closes on Esc.
