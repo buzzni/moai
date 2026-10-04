@@ -1066,7 +1066,7 @@ pub struct InboxArgs {
 /// **글자째 맞춘다** — `hello` 가 낱말을 다듬어 적으므로 거르는 쪽도 다듬은 글로 견준다.
 #[derive(Args, Debug)]
 pub struct AgentsArgs {
-    /// Only the agents with this role (worker, supervisor, ...)
+    /// Only the agents with this role (worker, supervisor)
     #[arg(long, value_name = "role")]
     pub role: Option<String>,
     /// Only the agents in this state (idle, busy)

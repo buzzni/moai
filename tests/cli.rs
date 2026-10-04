@@ -18398,7 +18398,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
-    for name in ["moai", "moai-supervise", "moai-wiki"] {
+    for name in ["moai", "moai-supervise", "moai-wiki", "moai-work"] {
         assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
@@ -18408,7 +18408,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let json =
         String::from_utf8(c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--json"], true).stdout).unwrap();
     one_json_value(&json);
-    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(3), "{json}");
+    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(4), "{json}");
 
     let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
     assert!(said.contains("걷어낼 것이 없다"), "{said}");

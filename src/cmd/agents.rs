@@ -38,7 +38,8 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let lang = ctx.lang();
     let mut out: Vec<String> = swept.iter().map(|n| fill(say(lang, "agents.swept"), &[("name", n)])).collect();
     if agents.is_empty() {
-        out.push(say(lang, if filtered { "agents.none_match" } else { "agents.none" }).to_string());
+        // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
+        out.push(if filtered { say(lang, "agents.none_match") } else { say(lang, "agents.none") }.to_string());
         return Ok(out);
     }
     out.extend(table(&agents, ctx.zone()));
