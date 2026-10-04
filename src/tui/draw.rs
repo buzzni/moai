@@ -1083,12 +1083,13 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
         })
         .collect();
     let n = shown.len();
-    let title = format!(
-        " {} · {} · {}/ ",
-        say(lang, "tui.wiki.title"),
-        crate::text::one_line(&w.project),
-        crate::text::one_line(&w.dir)
-    );
+    // **걸린 찾기는 늘 보인다** — 본 화면의 거름망 뱃지와 같은 까닭이다: 안 보이면 왜 페이지가 적은지 알 길이 없다.
+    // 그래서 찾는 글이 프로젝트 이름보다 먼저 자리를 얻는다.
+    let found = w.query().map(|q| format!(" · /{}", crate::text::one_line(q))).unwrap_or_default();
+    let head = format!(" {} · ", say(lang, "tui.wiki.title"));
+    let place = format!("{} · {}/", crate::text::one_line(&w.project), crate::text::one_line(&w.dir));
+    let room_for_place = inner_w.saturating_sub(crate::text::width(&head) + crate::text::width(&found) + 1);
+    let title = format!("{head}{}{found} ", crate::text::clip_front(&place, room_for_place));
     let mut block = wiki_frame(focused).title(clip(&title, inner_w));
     if w.skipped > 0 {
         let said = fill(say(lang, "tui.wiki.skipped"), &[("n", &w.skipped.to_string())]);
@@ -1114,6 +1115,11 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
     );
     let hint = if focused { String::new() } else { format!(" ({})", label(keys::WIKI, keys::Wiki::FocusNext)) };
     scroll_mark(f, &w.list, at, &hint, focused, lang);
+    // 찾기에 하나도 안 걸렸으면 빈 칸 대신 그렇다고 말한다 — 빈 목록은 위키가 사라진 것으로 읽힌다.
+    if n == 0 && inner.height > 0 {
+        let said = Line::from(Span::styled(say(lang, "tui.wiki.no_match"), dim()));
+        f.render_widget(Paragraph::new(fit(said, inner.width as usize)), inner);
+    }
     inner
 }
 
@@ -1175,12 +1181,14 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
         _ => &[],
     };
     let len = lines.len();
+    // 찾는 글은 **보이는 줄에만** 칠한다(상세의 본문과 같은 자 — [`mark_line`]). 접힌 줄에 걸친 글은 안 칠해진다.
+    let q = w.query();
     let visible: Vec<Line> = lines
         .iter()
         .skip(w.page.offset().min(len))
         .take(inner.height as usize)
         .cloned()
-        .map(|l| fit(l, width))
+        .map(|l| fit(mark_line(l, q), width))
         .collect();
     w.page.fit(inner.height as usize, len);
     f.render_widget(block.title(clip(&title, at.width.saturating_sub(2) as usize)), at);
@@ -1197,8 +1205,14 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
 /// `Bksp` 를 안 댄다(눌러도 아무 일이 없다).
 fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     use super::keys::{WIKI, Wiki};
+    // **치는 동안은 칸이 선다** — 하나도 안 걸렸으면 칸 곁에서 그렇다고 댄다(글을 버리지 않는다).
+    if let Some(t) = &w.typing {
+        let none = w.shown().is_empty().then(|| say(lang, "tui.wiki.no_match").to_string());
+        let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
+        return prompt(f, at, say(lang, "tui.wiki.search"), &t.input, none, &help);
+    }
     let on_page = w.focus == super::wiki::Side::Page;
-    let what = |a: Wiki| a.what(on_page, false, lang);
+    let what = |a: Wiki| a.what(on_page, w.searched(), lang);
     if !w.chord.held().is_empty() {
         let next = keys::next_keys(WIKI, w.chord.held())
             .into_iter()
@@ -1216,6 +1230,7 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     if w.can_go_back() {
         keep.push(hint(Wiki::Back));
     }
+    keep.push(hint(Wiki::Search));
     keep.push(hint(Wiki::Close));
     keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
     bar(f, at, optional, keep);

@@ -973,6 +973,8 @@
   "tui.wiki.back": "back",
   "tui.wiki.to_page": "page",
   "tui.wiki.to_list": "pages",
+  "tui.wiki.search": "search pages",
+  "tui.wiki.no_match": "no page holds that",
   "wiki.head": "Wiki  {dir}  pages {n}",
   "wiki.empty": "Wiki  {dir}  no pages yet — the first one goes in {dir}/README.md",
   "wiki.mark_too_large": "over 1 MB — body not read",

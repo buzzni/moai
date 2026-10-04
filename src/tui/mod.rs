@@ -2251,7 +2251,12 @@ impl App {
     pub fn tell_journals(&mut self) {
         let unread = self.unread_journals();
         self.journals_told.retain(|u| unread.contains(u));
-        if self.notice.is_some() || !matches!(self.mode, Mode::Browse | Mode::Stats(_)) {
+        let watching = match &self.mode {
+            Mode::Browse | Mode::Stats(_) => true,
+            Mode::Wiki(w) => w.typing.is_none(),
+            _ => false,
+        };
+        if self.notice.is_some() || !watching {
             return;
         }
         let Some(told) = unread
@@ -5669,7 +5674,9 @@ impl App {
             Mode::Zone(z) => z.paste(s),
             Mode::Unregister(_) => self.mode = Mode::Browse,
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
-            Mode::Stats(_) | Mode::Wiki(_) => {}
+            Mode::Stats(_) => {}
+            // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
+            Mode::Wiki(w) => w.paste(s),
         }
     }
 

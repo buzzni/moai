@@ -91,7 +91,13 @@ impl App {
     /// 단추 붙여넣기(X11 PRIMARY)가 말없이 사라지고, 휠도 이 에픽 전에는 터미널이 화살표 키로 바꿔 고르는 창을
     /// 굴렸다. 놓으면 그 둘이 이 에픽 전 그대로다.
     pub fn wants_mouse(&self) -> bool {
-        self.mouse_on && matches!(self.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
+        // 위키 창의 찾는 칸은 글을 받는 칸이다 — 그동안은 놓는다(위의 까닭).
+        self.mouse_on
+            && match &self.mode {
+                Mode::Browse | Mode::Stats(_) => true,
+                Mode::Wiki(w) => w.typing.is_none(),
+                _ => false,
+            }
     }
 
     /// 마우스 사건 하나. **루프가 받은 그대로 넘긴다**(`cmd::tui::take`).

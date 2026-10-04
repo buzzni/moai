@@ -973,6 +973,8 @@
   "tui.wiki.back": "뒤로",
   "tui.wiki.to_page": "본문",
   "tui.wiki.to_list": "목록",
+  "tui.wiki.search": "페이지 찾기",
+  "tui.wiki.no_match": "그 글이 든 페이지가 없다",
   "wiki.head": "위키  {dir}  페이지 {n}개",
   "wiki.empty": "위키  {dir}  아직 페이지가 없다 — 첫 페이지는 {dir}/README.md 다",
   "wiki.mark_too_large": "1MB 를 넘어 본문을 안 읽었다",
