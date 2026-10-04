@@ -182,9 +182,11 @@ pub struct Aim {
 ///
 /// 소문자로 접고, 글자·숫자·`-`·`_`·빈칸만 남기고, 빈칸 하나하나를 `-` 로 바꾼다. 빈칸을 몰아 접지 않고 앞뒤의 `-`
 /// 도 안 걷는다 — GitHub 이 그렇게 한다(`Foo  Bar` → `foo--bar`). 글자·숫자는 [`char::is_alphanumeric`] 이다: 한글·
-/// 악센트 붙은 라틴 글자는 남고, 문장부호·기호·이모지는 빠진다. 결합 부호 몇은 GitHub 과 갈릴 수 있다 — 표준
-/// 라이브러리에 유니코드 범주 표가 없다. **앵커를 짓는 자는 이것 하나다** — 같은 페이지의 둘째 머리글부터는
-/// [`Anchors`] 가 번호를 붙인다.
+/// 악센트 붙은 라틴 글자는 남고, 문장부호·기호·이모지는 빠진다. **GitHub 과 갈리는 자리가 둘 있다** — 표준
+/// 라이브러리에 유니코드 범주 표가 없어서다. 글자로 안 치는 결합 부호(데바나가리의 비라마 `्`, 타이 성조 부호,
+/// 풀어 쓴 악센트 U+0301)는 여기서 빠지는데 GitHub 은 남기고, 윗첨자·동그라미 숫자(`²`·`①`)는 여기서 남는데
+/// GitHub 은 뺀다. **앵커를 짓는 자는 이것 하나다** — 같은 페이지의 둘째 머리글부터는 [`Anchors`] 가 번호를
+/// 붙인다.
 pub fn anchor(text: &str) -> String {
     text.to_lowercase()
         .chars()
@@ -595,13 +597,14 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     let mut anchors = Anchors::default();
     // 그림 안 — 그 대체글은 머리글의 앵커에 안 든다(GitHub 이 그리는 머리글 글에 그림은 글자로 서지 않는다).
     let mut image = 0u32;
-    // `(이 바이트까지, 그 앞의 줄 수)` — 머리글은 적힌 차례로 오니 앞에서 센 데서 이어 센다.
+    // `(이 바이트까지, 그 앞의 줄 수)` — 머리글은 적힌 차례로 오니 앞에서 센 데서 이어 센다. 줄은 마크다운의 줄 끝
+    // 셋(`\n`·`\r\n`·`\r` 하나)으로 센다([`lines`]) — 위키 창은 그 셋을 `\n` 으로 고르게 펴 그 줄에 굴린다.
     let mut seen = (0usize, 0usize);
     let mut line_at = |at: usize| {
         if at < seen.0 {
-            return body[..at].matches('\n').count();
+            return lines(&body[..at]);
         }
-        seen = (at, seen.1 + body[seen.0..at].matches('\n').count());
+        seen = (at, seen.1 + lines(&body[seen.0..at]));
         seen.1
     };
     let ids = |s: &str, out: &mut Vec<String>| {
@@ -637,7 +640,10 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
                 if let Some((_, words)) = &mut link {
                     words.push_str(&t);
                 }
-                if let Some((words, _)) = &mut heading {
+                // 대체글 속의 인라인 코드도 대체글이다 — 글만 거르면 `![`x`](p.png)` 의 `x` 가 앵커에 든다.
+                if let Some((words, _)) = &mut heading
+                    && image == 0
+                {
                     words.push_str(&t);
                 }
             }
@@ -690,6 +696,20 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     }
     ids(&text, &mut out.ids);
     out
+}
+
+/// 글 속의 줄 끝 수 — 마크다운(CommonMark)의 줄 끝 셋, `\n`·`\r\n`·홀로 선 `\r` 이다. 머리글은 늘 줄 머리에서
+/// 시작하니 [`parse`] 가 끊어 세는 자리가 `\r\n` 사이에 서지 않는다.
+fn lines(s: &str) -> usize {
+    let b = s.as_bytes();
+    b.iter().enumerate().filter(|&(i, &c)| c == b'\n' || (c == b'\r' && b.get(i + 1) != Some(&b'\n'))).count()
+}
+
+/// 줄 끝을 `\n` 하나로 고른다 — 홀로 선 `\r` 도 줄 끝이다(CommonMark). 위키 창이 페이지를 펴기 전에 부른다: 그리는
+/// 쪽은 제어문자를 걷으면서(`text::sanitize`) `\r` 도 걷어, `\r` 로만 줄을 가른 페이지는 머리글이 문단 하나로 붙어
+/// [`Page::headings`] 와 줄이 어긋난다.
+pub fn unified(body: &str) -> std::borrow::Cow<'_, str> {
+    if body.contains('\r') { body.replace("\r\n", "\n").replace('\r', "\n").into() } else { body.into() }
 }
 
 /// 본문의 링크 전부 — `(글, 주소)`, 적힌 차례로, 같은 짝은 한 번. **순수 함수다.**
@@ -977,7 +997,7 @@ mod tests {
     #[test]
     fn every_heading_gets_an_anchor_and_its_line() {
         let body = "\u{feff}# Glossary\n\nintro\n\n## `Next:` note\n\n```sh\n# not a heading\n```\n\n\
-                    ### Link [to page](x.md) and ![pic](p.png) here\n\nSetext two\nlines\n----------\n\n\
+                    ### Link [to page](x.md) and ![pic `alt`](p.png) here\n\nSetext two\nlines\n----------\n\n\
                     ## Epic\n\n- ## in a list\n\n## Epic\n";
         let p = parse("glossary", body, "moai");
         let got: Vec<(&str, usize)> = p.headings.iter().map(|h| (h.anchor.as_str(), h.line)).collect();
@@ -1174,6 +1194,10 @@ mod tests {
             "없는 머리글은 셋마다 한 번, 없는 페이지와 못 읽은 페이지는 빼고"
         );
         assert_eq!(n.unresolved, [("README", "lost")]);
+        assert!(
+            !Notices { missed: n.missed.clone(), ..Notices::default() }.is_empty(),
+            "없는 머리글 알림 하나만 서도 알림이 있는 것이다 — 없으면 `wiki show` 가 꼬리를 안 단다"
+        );
         assert_eq!(w.find("glossary").unwrap().holds("idea"), Some(true));
         assert_eq!(w.find("big").unwrap().holds("y"), None, "못 읽은 본문의 머리글은 모른다");
         assert_eq!(w.find("glossary").unwrap().linked_from, ["README"], "앵커가 달라도 역링크는 한 번이다");

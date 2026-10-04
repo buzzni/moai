@@ -246,9 +246,12 @@ impl Window {
         let at = was.and_then(|slug| self.shown().iter().position(|p| p.slug == slug));
         match at {
             Some(at) => self.cursor = at,
+            // 보던 페이지를 떠났다 — 건너온 머리글의 표시도 걷는다. 남기면 찾기를 지워 그 페이지로 돌아왔을 때 첫 줄에
+            // 선 본문에 `▸` 만 선다.
             None => {
                 self.cursor = 0;
                 self.page.rewind();
+                self.landed = None;
             }
         }
     }
@@ -323,10 +326,7 @@ impl Window {
         self.chord.clear();
         match on {
             Side::List => self.roll_list(|s| s.by(by)),
-            Side::Page => {
-                self.landed = None;
-                self.page.by(by);
-            }
+            Side::Page => self.roll_page(|s| s.by(by)),
         }
     }
 
@@ -341,10 +341,17 @@ impl Window {
                 let len = self.shown().len();
                 self.move_to(scroll::cursor(m, self.cursor, || len));
             }
-            Side::Page => {
-                self.landed = None;
-                self.page.go(m);
-            }
+            Side::Page => self.roll_page(|s| s.go(m)),
+        }
+    }
+
+    /// 본문 칸을 굴린다 — **굴렀으면** 건너온 머리글의 `▸` 를 걷는다([`Window::roll_list`] 와 같은 규칙). 페이지 끝
+    /// 가까이의 머리글로 왔을 때 그 표시가 서는데, 거기서 안 구르는 `j` 가 표시만 걷으면 어느 머리글로 왔는지를 잃는다.
+    fn roll_page(&mut self, roll: impl FnOnce(&mut Scroll)) {
+        let was = self.page.offset();
+        roll(&mut self.page);
+        if self.page.offset() != was {
+            self.landed = None;
         }
     }
 
@@ -442,7 +449,9 @@ impl Window {
         (self.current().map(|p| p.slug.as_str()) == Some(l.slug.as_str())).then_some(l.heading)
     }
 
-    /// 원문·그린 글을 바꿨다 — 줄이 다시 펴지니 건너온 머리글이 있으면 그 자리로 다시 굴린다.
+    /// 본문을 다시 폈다 — 원문·그린 글을 바꿨거나 칸의 폭이 바뀌었다. 머리글이 선 줄이 옮겨 가니 건너온 머리글이
+    /// 있으면 그 자리로 다시 굴린다. 그림이 다시 펼 때마다 부른다(`draw::wiki_page`) — 그 사이 굴렸으면 표시가 이미
+    /// 걷혀 다시 굴릴 것이 없다.
     pub(super) fn resettle(&mut self) {
         if let Some(l) = &mut self.landed {
             l.settled = false;
@@ -695,9 +704,9 @@ impl App {
                 Some(Browse::Raw) => {
                     self.raw = !self.raw;
                     self.detail.rewind();
+                    // 건너온 머리글이 있으면 다시 편 그림이 그 줄로 굴린다(`Window::resettle`).
                     if let Mode::Wiki(w) = &mut self.mode {
                         w.page.rewind();
-                        w.resettle();
                     }
                     true
                 }
@@ -1330,7 +1339,13 @@ pub(super) mod tests {
             filler(0),
             filler(100)
         );
-        let glossary = format!("# Glossary\n\n{}## Epic\n\nEpic text.\n\n{}## Idea\n\nLast.\n", filler(0), filler(100));
+        // 머리 밑의 긴 문단은 칸의 폭에 따라 접히는 줄 수가 달라, 폭을 바꾸면 머리글이 선 줄이 옮겨 간다.
+        let glossary = format!(
+            "# Glossary\n\n{}\n\n{}## Epic\n\nEpic text.\n\n{}## Idea\n\nLast.\n",
+            "word ".repeat(80).trim_end(),
+            filler(0),
+            filler(100)
+        );
         let (_s, mut a) = wiki_app("anchor", &[("README.md", &home), ("glossary.md", &glossary)]);
         a.hit("SPC g w Enter Enter");
         let page = |to: &str, anchor: &str, held: bool| Target::Page {
@@ -1364,6 +1379,16 @@ pub(super) mod tests {
         );
         let landed_at = window(&a).page.offset();
         assert!(landed_at > 0);
+        // 칸의 폭이 바뀌면 줄이 다시 접힌다 — 그 머리글로 다시 굴려 맨 위에 그대로 선다.
+        let screen = draw::tests::render(&mut a, 90, 24);
+        assert!(
+            page_top(&screen, " Glossary · ").starts_with("▸ ## Epic"),
+            "폭을 바꾸니 머리글이 맨 위에서 밀렸다\n{}",
+            screen.join("\n")
+        );
+        assert_ne!(window(&a).page.offset(), landed_at, "좁힌 폭에서도 줄이 같다 — 시험이 다시 접는 것을 안 잰다");
+        draw::tests::render(&mut a, 120, 24);
+        assert_eq!(window(&a).page.offset(), landed_at);
         // 굴리면 표시가 걷힌다.
         a.hit("j");
         let screen = draw::tests::render(&mut a, 120, 24).join("\n");
@@ -1379,6 +1404,13 @@ pub(super) mod tests {
         let screen = draw::tests::render(&mut a, 120, 24).join("\n");
         assert!(screen.contains("▸ ## Idea") && screen.contains("Last."), "끝 가까이의 머리글에 표시가 없다\n{screen}");
         assert!(!page_top(&screen.lines().map(str::to_string).collect::<Vec<_>>(), " Glossary · ").contains("Idea"));
+        // 끝에 닿아 안 구르는 `j` 는 표시를 안 걷는다 — 그 표시가 서는 자리가 바로 여기다. 구르는 `k` 는 걷는다.
+        a.hit("j");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("▸ ## Idea"), "안 굴렀는데 표시가 걷혔다\n{screen}");
+        a.hit("k");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(!screen.contains("▸ "), "굴렸는데 표시가 남았다\n{screen}");
 
         // 없는 머리글 — 그 페이지 맨 위로 가고 알린다.
         a.hit("Bksp Enter j Enter");
@@ -1404,6 +1436,18 @@ pub(super) mod tests {
         a.hit("SPC v r Esc Bksp");
         draw::tests::render(&mut a, 120, 24);
         assert_eq!((slug(&a).as_str(), window(&a).page.offset()), ("README", 0));
+
+        // 찾기가 그 페이지를 가려 떠났다가 지우고 돌아오면 본문은 첫 줄이고 표시도 걷혀 있다 — 떠난 것이다.
+        a.hit("Enter Enter");
+        draw::tests::render(&mut a, 120, 24);
+        assert_eq!((slug(&a).as_str(), window(&a).landed()), ("glossary", Some(1)));
+        a.hit("/ z Esc");
+        draw::tests::render(&mut a, 120, 24);
+        assert_eq!(
+            (slug(&a).as_str(), window(&a).page.offset(), window(&a).landed()),
+            ("glossary", 0, None),
+            "첫 줄로 돌아간 본문에 머리글 표시가 남았다"
+        );
     }
 
     /// **이 페이지를 가리키는 페이지도 고르기 창에 선다**(2026-10-04 사용자 결정, moai-ogaw) — 링크와 id 뒤에, 위키

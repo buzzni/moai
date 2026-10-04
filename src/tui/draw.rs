@@ -1153,7 +1153,9 @@ pub(super) struct WikiLaid {
 fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> (Vec<Line<'static>>, Vec<usize>) {
     let warn = from_anstyle(style::WARN);
     let as_written = |above: usize| p.headings.iter().map(|h| above + h.line).collect();
-    match (&p.body, &p.error) {
+    // 줄 끝을 고른 뒤에 편다 — `\r` 로만 줄을 가른 페이지도 머리글이 `Page::headings` 와 한 줄씩 맞선다.
+    let body = p.body.as_deref().map(crate::wiki::unified);
+    match (body.as_deref(), &p.error) {
         (Some(body), _) if p.conflict => {
             let said = fill(say(lang, "wiki.conflict_raw"), &[("path", &crate::text::one_line(&p.path))]);
             let mut out = wrapped(&format!("! {said}"), w, warn);
@@ -1193,6 +1195,8 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     };
     if fresh.is_some() {
         w.laid = fresh;
+        // 머리글이 선 줄이 옮겨 갔다(원문 토글·폭) — 건너온 머리글이 있으면 그 자리로 다시 굴린다.
+        w.resettle();
     }
     // 링크의 `#앵커` 로 건너왔으면 그 머리글의 줄로 굴린다 — 줄은 편 뒤에야 안다(moai-tllo).
     let heads = match (&w.laid, w.current()) {
@@ -5145,6 +5149,31 @@ pub(super) mod tests {
             assert_eq!(heads.len(), wiki, "{name}: 그린 머리글 {} 대 위키가 센 머리글 {wiki}", heads.len());
         }
         assert_eq!(crate::wiki::parse("x", odd, "m").headings.len(), 9, "섞인 글의 머리글을 다 안 셌다");
+
+        // `\r` 로만 줄을 가른 페이지 — 그리는 쪽이 `\r` 를 제어문자로 걷으면 머리글이 문단 하나로 붙는다. 창은 줄 끝을
+        // 고른 뒤에 펴서, 그린 본문과 원문 보기 둘 다 그 머리글의 줄을 짚는다(리뷰 moai-tllo.s5z 7번).
+        let body = "# A\r\rtext\r\r## B\r\rmore\r\n\r\n## C\n";
+        let headings = crate::wiki::parse("x", body, "m").headings;
+        assert_eq!(headings.iter().map(|h| h.line).collect::<Vec<_>>(), [0, 4, 8], "줄 끝 셋을 다 안 셌다");
+        let page = crate::wiki::Page {
+            slug: "x".into(),
+            title: "A".into(),
+            path: "docs/x.md".into(),
+            bytes: body.len() as u64,
+            issues: Vec::new(),
+            links: Vec::new(),
+            headings,
+            linked_from: Vec::new(),
+            conflict: false,
+            error: None,
+            body: Some(body.into()),
+        };
+        for raw in [false, true] {
+            let (lines, heads) = wiki_lines(&page, 80, raw, Lang::En);
+            let at = |k: usize| lines[heads[k]].spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+            assert_eq!(heads.len(), 3, "원문 보기 {raw}: 머리글 셋을 다 못 짚었다");
+            assert!(at(1).contains("## B") && at(2).contains("## C"), "원문 보기 {raw}: 엉뚱한 줄 — {}", at(1));
+        }
     }
 
     fn issues() -> Vec<Issue> {
