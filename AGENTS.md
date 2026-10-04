@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:812f0e27 -->
+<!-- moai:begin v:0.6.0 hash:46c077a3 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -27,8 +27,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
-to pick it up again. That is enough to build a loop that runs without a person — one
-such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+to pick it up again. A session a person opened reads that shape to choose its next row —
+moai never launches or drives a session itself.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`

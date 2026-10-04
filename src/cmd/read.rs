@@ -128,7 +128,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         say_why(&wrote.problems, ctx, &mut said);
         // **막힌 id 는 이름으로 낸다**(리뷰 moai-kuib.g9c 9번). `Sheet::mark` 이 그 id 만 건너뛰게
         // 되면서(moai-l5ue) 시킨 id 가 `read` 에도 `missing` 에도 안 서고, 남는 것은 `problems` 의
-        // 산문뿐이었다 — 사람 없이 도는 고리(`examples/bash-agent`)는 그것을 "적혔다" 로 세고 지나가
+        // 산문뿐이었다 — `--json` 만 읽는 세션은 그것을 "적혔다" 로 세고 지나가
         // 그 줄이 영영 [NEW] 로 선다. `ready --json` 의 `held` 와 같은 꼴로 낸다.
         held.extend(wrote.problems.iter().flat_map(|w| match w {
             crate::read_marks::SheetTrouble::Held { ids, .. } => ids.clone(),

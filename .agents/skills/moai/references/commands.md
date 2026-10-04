@@ -123,8 +123,7 @@ between your `ready` and your `mv`. `--from <column>` moves it **only while the
 column you saw still holds** — it is re-read inside the lock, so a row that changed
 in between is not touched. Without it nothing is blocked, as before.
 
-The shape of the call is shown end to end in the moai repository's `examples/bash-agent/agent.sh`.
-Cut short it is this — `col` is the column of that row as `ready` gave it, and `moved`
+In shell it is this — `col` is the column of that row as `ready` gave it, and `moved`
 says whether you got it.
 
 ```sh
