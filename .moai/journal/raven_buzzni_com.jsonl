@@ -4113,3 +4113,5 @@
 {"ts":"2026-10-04T15:48:26Z","id":"moai-jo1u.d2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 참고 문서 --from 조각의 머리 문장이 고리 한 바퀴임을 다시 말하게 고친 리뷰의 fix 커밋(심긴 두 트리 다시 씀). 다섯 확인은 다 지나갔다. 넘긴 것: glossary.md:117 의 끊긴 앵커는 moai-u3t9(b6cw 멤버, h8tn 머지 뒤). 리뷰가 부른 moai skill install 의 저장소 밖 흔적은 ~/.claude·~/.codex 에서 새 파일을 찾지 못했다"}
 {"ts":"2026-10-04T15:49:08Z","id":"moai-jo1u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 예제 두 디렉터리와 시험을 걷고 AGENTS 블록 문장 하나를 바꿨다, 글과 걷기뿐이라 쓰기 경로 없음)"}
 {"ts":"2026-10-04T15:49:10Z","id":"moai-jo1u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-04T15:49:28Z","id":"moai-jo1u.d2s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=120205 (medium — 리뷰 서브에이전트, /code-review medium --fix)"}
+{"ts":"2026-10-04T15:49:36Z","id":"moai-jo1u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 이 멤버는 끝났다. b6cw 의 남은 일은 moai-u3t9(h8tn 머지 뒤 glossary.md:117 링크를 #work-the-queue-from-a-session 으로)와 osp·suy·udp·upn(snyk·h8tn 뒤) — 감독이 보낸다"}
