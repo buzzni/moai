@@ -33,7 +33,8 @@ does not tag — see `CONTRIBUTING.md`.
   `[]` when none does — counted from the other pages' links every time, so
   `show` reads every page) and `conflict`, an `error` on a page that could not
   be read, `skipped` for what the walk left out (a link to a directory, a name
-  that is not UTF-8, a directory it could not open), and `body` under `show`,
+  that is not UTF-8, a directory it could not open or list to the end, a name
+  whose kind it could not read), and `body` under `show`,
   beside `linked_from_partial` (true) when another page could not be read or
   the walk left something out, so `linked_from` may be short — absent when every
   page was counted. A `wiki_dir` that does not exist yet exits
