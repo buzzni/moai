@@ -93,9 +93,12 @@ impl App {
             _ => None,
         };
         // **통계 창은 휠만 받는다**(사용자 결정 2026-10-01) — 목록·상세 자리를 통째로 덮은 창이라 그 위의 휠은
-        // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기는 것은 창이 한다(`stats::Window::roll`).
+        // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기는 것은 창이 한다(`stats::Window::roll`). **창 위에 SPC 메뉴가
+        // 떠 있으면 아무것도 안 한다**(moai-z46r) — 목록 위의 메뉴와 같다: 메뉴가 키를 기다린다.
+        let menu_open = menu::open(&self.chord);
         if let Mode::Stats(w) = &mut self.mode {
             if let Some(by) = wheel
+                && !menu_open
                 && self.drawn.body.contains(at)
             {
                 self.notice = None;
@@ -506,7 +509,7 @@ mod tests {
     #[test]
     fn the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker() {
         let mut a = drawn(30, 100, 12);
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         super::super::draw::tests::render(&mut a, 100, 12);
         let (bx, by) = middle(a.drawn.body);
         let at = |a: &App| match &a.mode {
@@ -517,6 +520,15 @@ mod tests {
         assert_eq!((at(&a), a.cursor), (3, 0), "휠이 통계 창을 안 굴렸다");
         roll(&mut a, false, bx, by);
         assert_eq!(at(&a), 0);
+        // 창 위에 SPC 메뉴가 뜨면 휠은 아무것도 안 한다(moai-z46r) — 목록 위의 메뉴와 같다. 메뉴가 몸통을 밀어 올려도
+        // 남은 몸통 자리에서 잰다.
+        a.hit("SPC");
+        super::super::draw::tests::render(&mut a, 100, 12);
+        let (bx, by) = middle(a.drawn.body);
+        roll(&mut a, true, bx, by);
+        assert_eq!(at(&a), 0, "메뉴가 뜬 통계 창을 휠이 굴렸다");
+        assert!(super::super::menu::open(&a.chord), "휠이 메뉴를 닫았다");
+        a.hit("Esc");
 
         a.hit("Esc SPC o t");
         let Mode::Zone(z) = &a.mode else { panic!("시간대 고르는 창이 안 열렸다: {:?}", a.mode) };
@@ -767,11 +779,11 @@ mod tests {
         assert!(!a.wants_mouse(), "고르는 창에서 잡았다 — 휠이 이 에픽 전처럼 안 구른다");
         a.hit("Esc");
         assert!(a.wants_mouse(), "닫은 뒤 다시 안 잡았다");
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert!(a.wants_mouse(), "통계 창에서 놓았다 — 휠이 창을 못 굴린다");
         a.hit("Esc SPC o m Esc");
         assert!(!a.mouse_on && !a.wants_mouse(), "놓아 둔 마우스를 잡았다");
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         assert!(!a.wants_mouse(), "놓아 둔 마우스를 통계 창에서 잡았다");
     }
 }

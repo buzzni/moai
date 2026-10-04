@@ -753,7 +753,7 @@ work. It is a note, not a field.
   for `archive_days`), or let `moai stats --json` add them up: its `work` sums tokens
   by model and by grade and counts the lines that carry none apart"#;
 
-/// 통계(moai-1hka). **세는 자는 `report::stats` 하나다** — CLI 와 탐색기(`SPC p s`)가 같은 값을
+/// 통계(moai-1hka). **세는 자는 `report::stats` 하나다** — CLI 와 탐색기(`SPC g s`)가 같은 값을
 /// 읽으므로, 여기 적는 계약은 둘 다의 것이다. 읽는 것은 스냅샷의 필드와 노트의 `model:` 줄뿐이고
 /// 저널의 칸 옮김은 접지 않는다(CLAUDE.md "저널은 상태 계산에 읽히지 않는다").
 const STATS: &str = r#"    moai stats                           columns, priorities, flow, lead and cycle time, AI work
@@ -765,7 +765,7 @@ It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
 `--milestone`). Done, deferred, ideas and the archive are opened, because a
 count of history that hides what closed would say nothing closed. In the explorer
-`SPC p s` opens the same numbers as bars, narrowed by the filter that is hung.
+`SPC g s` opens the same numbers as bars, narrowed by the filter that is hung.
 
 - **Unknown is not zero.** A done row with no `started_at` (it closed before that
   field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;
