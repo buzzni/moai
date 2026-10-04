@@ -46,15 +46,15 @@ Three skills come with it:
     moai-supervise    hands piled-up ideas to the sessions idling on the repository
     moai-wiki         keeps this wiki in step with the work
 
-- **The tracker skill** is what an agent reaches for instead of a to-do list of
-  its own
-- **The [supervisor](glossary.md#supervisor)** hands the
-  [ideas](glossary.md#idea), one at a time, to the Claude sessions idling on the
-  same repository and takes their reports. It picks, sends and checks; it does
+- **`moai`** is the tracker skill — what an agent reaches for instead of a
+  to-do list of its own
+- **`moai-supervise`** makes a session the [supervisor](glossary.md#supervisor),
+  which hands the [ideas](glossary.md#idea), one at a time, to the Claude
+  sessions idling on the same repository and takes their reports. It picks, sends and checks; it does
   not fix and it does not merge. The [workers](glossary.md#worker) follow a
   numbered [brief](glossary.md#brief), and their way of working is on
   [the workflow page](workflow.md#work-in-a-worktree)
-- **The wiki skill** is followed by the window that did an epic, to fix the page
+- **`moai-wiki`** is followed by the window that did an epic, to fix the page
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
 
@@ -148,4 +148,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx
