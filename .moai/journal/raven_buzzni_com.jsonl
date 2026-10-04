@@ -3956,3 +3956,16 @@
 {"ts":"2026-10-04T10:45:12Z","id":"moai-31y4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-mdzx 의 멤버 moai-mdzx.jty 로 펼쳤다"}
 {"ts":"2026-10-04T10:45:28Z","id":"moai-mdzx.3pm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T10:45:30Z","id":"moai-mdzx.jty","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T10:50:21Z","id":"moai-mdzx.3pm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04, AskUserQuestion): 스킬 이름을 id 후보에서 뺀다. moai 가 심는 스킬 이름(moai·moai-supervise·moai-wiki)은 위키 페이지에서 이슈 id 로 안 읽는다 — skill install 이 심는 그 목록 하나에서 읽는다. 페이지는 스킬을 이름으로 그냥 댄다, docs/agents.md 의 들여 쓴 코드 블록 우회를 걷는다. 대가: id 가 우연히 moai-wiki 인 이슈(새 id 당 1/170만)는 페이지에서 못 댄다. 다른 안 둘(있으면 센다 / 스킬 글만 알린다)은 안 골랐다"}
+{"ts":"2026-10-04T10:50:22Z","id":"moai-mdzx.jty","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04, AskUserQuestion): show --json 에만 선택 키 linked_from_partial: true — 다른 페이지를 못 읽었거나(too_large·refused·failed) 걷기가 건너뛴 자리가 있을 때만 선다, 다 셌으면 키가 없다. ls --json 은 error·skipped 로 이미 줄마다 말하니 안 단다. 사람 화면 show 는 꼬리에 같은 뜻의 한 줄. 종료 코드는 그대로"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 문서 칸 — 끌어 넓히고, 링크를 누르고, Tab 으로 고른다"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.ho8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 창의 가름선을 마우스로 끌어 문서 칸 크기를 바꾼다"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.uzr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"펴진 본문의 링크 자리를 그리는 쪽이 낸다"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.sne","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"문서 칸의 링크를 누르면 그 문서로 간다"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.ltr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Tab 이 링크를 돌며 하이라이트하고 Enter 로 간다"}
+{"ts":"2026-10-04T11:00:29Z","id":"moai-p61w.jz9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/explorer.md·CHANGELOG"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.ho8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.ltr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.sne","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.uzr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.jz9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
