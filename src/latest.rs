@@ -23,7 +23,7 @@
 //!   다르지 않으니 사람마다 한 파일이다. **창의 예외는 하나다**(moai-p3r9, 2026-10-04 사용자 결정):
 //!   들어 둔 태그가 도는 판보다 낡았고 이 판이 아직 안 물었으면 그 답은 낡은 것이 확실해
 //!   창 안이어도 한 번 묻는다([`Held::outdated`]). 물은 판도 적어 두므로([`ASKED_BY`]) 같은 판은
-//!   두 번 안 묻는다
+//!   두 번 안 묻는다. 그렇게 물어 확인한 "앞선 판" 은 하루가 아니라 [`AHEAD_WINDOW`] 만 든다
 //! - **기본은 켬이되 사람이 보는 화면에서만이다**([`gate`]). `--json` 과 파이프는 안 묻는다 —
 //!   에이전트가 도는 기계가 매번 바깥을 두드리면 안 된다. **둘은 따로 묻는다**: 에이전트는
 //!   tmux 칸 안에서 치므로 표준 출력이 터미널이고, 화면만 재면 `--json` 이 그 문을 지난다
@@ -155,6 +155,15 @@ pub fn upgrade_here() -> Option<String> {
 
 /// 한 번 물으면 이만큼은 안 묻는다 — 들어 둔 답이 낡은 것이 확실할 때만 빼고([`Held::outdated`]).
 pub const WINDOW: i64 = 24 * 60 * 60;
+
+/// "릴리스보다 앞선 판" 이라는 답은 이만큼만 든다(moai-p3r9 리뷰 1번, 2026-10-04 사용자 결정).
+///
+/// 판 번호는 소스로 지은 판과 릴리스를 못 가른다. 판을 올린 커밋(`chore(release)`)에서 지은
+/// 바이너리가 태그가 나기 전에 물으면 [`ASKED_BY`] 는 그 판인데 들은 태그는 앞 판이라, 릴리스가 난
+/// 뒤에도 [`WINDOW`] 내내 "앞선 판" 이 섰다 — 사용자가 보고한 그 글이 이 저장소의 릴리스 길에서 다시
+/// 서는 자리다. 한 시간이면 그 꼬리가 한 시간으로 줄고, 정말 앞선 소스 빌드는 탐색기를 열 때
+/// 시간당 한 번까지만 묻는다. 새 판·같은 판·못 물음은 [`WINDOW`] 그대로다.
+pub const AHEAD_WINDOW: i64 = 60 * 60;
 
 /// 한 번 묻는 데 드는 시간의 상한. **짧다** — 이 답은 화면 한 줄이라, 느린 그물에서 오래
 /// 붙들고 있느니 "못 물었다" 가 낫다.
@@ -606,15 +615,15 @@ impl Held {
     /// [`Held::answer`] 는 그 태그를 지난 답으로 낸다.
     ///
     /// **이 판 이상이 물었으면 낡지 않았다.** 그 판이 물을 때 이 판은 이미 있었는데도 낡은 태그를
-    /// 들었으면, 이 판이 정말 앞선 것이다(소스로 지은 판). 다시 물어도 같은 답이라 하루 창으로
-    /// 돌아간다. **못 들은 물음도 물은 것으로 센다** — 안 세면 그물 없는 기계가 탐색기를 열 때마다
+    /// 들었으면, 이 판이 정말 앞선 것이다(소스로 지은 판). 다시 물어도 같은 답이라 창으로 돌아간다
+    /// — 그 답("앞선 판")의 창은 [`AHEAD_WINDOW`] 다. **못 들은 물음도 물은 것으로 센다** — 안 세면 그물 없는 기계가 탐색기를 열 때마다
     /// 묻는다([`refresh`] 가 못 들어도 도장을 찍는 까닭과 같다).
     ///
     /// **이 읽기가 틀리는 자리가 하나 있다**(리뷰). 판 번호는 소스로 지은 판과 릴리스로 받은 판을
     /// 못 가른다 — 판을 올린 커밋(`chore(release)`)에서 지은 바이너리가 태그가 나기 전에 물으면
     /// [`ASKED_BY`] 는 그 판인데 들은 태그는 앞 판이고, 릴리스가 난 뒤 같은 판(또는 그 판이 물을 때
-    /// 아직 안 났던 더 낮은 판)은 창이 남은 동안 "앞선 판" 을 댄다. 가르려면 판이 아닌 다른 값을
-    /// 적어야 해서 지금은 그대로 둔다 — 치르는 값은 그 하루 창 한 번이다.
+    /// 아직 안 났던 더 낮은 판)은 창이 남은 동안 "앞선 판" 을 댄다. 판이 아닌 다른 값을 적는 대신
+    /// 그 답의 창을 [`AHEAD_WINDOW`] 로 줄였다 — 치르는 값은 그 한 시간이다.
     ///
     /// **"판마다 한 번" 은 더 낮은 판이 그 사이 안 물을 때다.** 낮은 판이 물으면 [`ASKED_BY`] 가
     /// 그 판으로 내려가, 정말 앞선 판은 그 뒤에 한 번 더 묻는다 — 낮은 판이 하루 한 번 묻는 만큼이다.
@@ -631,7 +640,15 @@ impl Held {
     /// ([`Held::outdated`]). [`refresh`] 의 두 자리(처음 읽은 줄, 못 들은 뒤 다시 읽은 줄)가 한 자로
     /// 잰다 — 뒤의 자리가 창만 재면 못 들은 뒤 다시 읽은 낡은 줄을 옆이 방금 찍은 줄로 따라가 도장을
     /// 안 찍고, 그물 없는 기계는 탐색기를 열 때마다 다시 묻는다.
+    ///
+    /// **"앞선 판" 이라는 답의 창은 [`AHEAD_WINDOW`] 다**(2026-10-04 사용자 결정). 가르는 것은 이 줄이
+    /// 화면에 낼 답([`Held::answer`])이라, 못 물은 꼴로 서는 줄(까닭과 지난 태그)은 태그가 이 판보다
+    /// 낡아도 하루를 든다 — 그물 없는 기계가 한 시간마다 묻지 않는다.
     fn stands(&self, now: &str, window: i64) -> bool {
+        let window = match self.answer() {
+            Seen::Ahead { .. } => window.min(AHEAD_WINDOW),
+            _ => window,
+        };
         self.fresh(now, window) && !self.outdated()
     }
 
@@ -952,10 +969,14 @@ pub fn url_from(env: impl Fn(&str) -> Option<OsString>) -> String {
 /// 옆이 들었는데 이쪽이 지난 답과 까닭으로 덮으면 하루 동안 [`Seen::Stale`] 이 서고 들은 때도
 /// 앞으로 되돌아간다. 들은 쪽은 그대로 적는다: 옆의 실패를 덮는 것이 맞다.
 ///
-/// **다시 읽은 줄이 안 서도 그 줄의 태그를 먼저 들고 간다**(리뷰). 옆이 들은 태그가 이 판보다
-/// 낡으면([`Held::outdated`]) 그 줄은 안 서는데, 그때 첫 읽기의 태그를 들고 가면 옆이 방금 들은 답이
-/// 하루 앞의 답으로 덮인다 — 0.7.0 이 못 듣는 사이 0.6.0 이 v0.6.0 을 들었으면, 그 줄은 v0.5.0 과
-/// 까닭으로 돌아가고 [`ASKED_BY`] 가 0.7.0 이라 0.6.0 은 하루 동안 다시 안 묻는다.
+/// **옆이 그 사이 찍은 창 안의 줄은 이 판에 안 서도 따른다**(리뷰). 옆이 들은 태그가 이 판보다
+/// 낡으면([`Held::outdated`]) 그 줄은 이 판에 안 서는데, 그 위에 이쪽의 실패를 적으면 옆이 방금 들은
+/// 답이 까닭을 단 지난 답이 되고 [`ASKED_BY`] 는 이 판이 된다 — 0.7.0 이 못 듣는 사이 0.6.0 이
+/// v0.6.0 을 들었으면 0.6.0 은 하루 동안 "못 물었다" 를 댄다. 따르기만 하고 안 적으니 이 판은 다음에
+/// 한 번 더 묻는다(낮은 판이 물을 때마다 한 번 — [`Held::outdated`] 가 적어 둔 그 값이다). 옆이 찍은
+/// 줄인지는 첫 읽기와 견줘 가린다: 같은 줄을 따르면 낡은 줄 위에 도장이 안 찍힌다([`Held::stands`]).
+///
+/// 따르지 않는 줄(창 밖)이면 그 줄의 태그를 첫 읽기의 것보다 먼저 들고 간다 — 더 늦게 들은 답이다.
 pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     // **다른 자리에 물은 답은 이 자리의 답이 아니다**(moai-dael) — 창도 안 닫고, 못 들었을 때
     // 들고 갈 지난 답도 안 된다. 거울을 한 번 보고 온 사람에게 그 태그가 진짜 릴리스로 서던
@@ -969,7 +990,7 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     let asked = ask(url);
     let again = if asked.is_err() { read(dir).filter(|h| h.asked_here(url)) } else { None };
     if let Some(h) = &again
-        && h.stands(now, window)
+        && (h.stands(now, window) || (held.as_ref() != Some(h) && h.fresh(now, window)))
     {
         return h.answer();
     }
@@ -1689,42 +1710,51 @@ mod tests {
         assert_eq!(read(s.path()).as_ref(), Some(&sibling), "못 들은 쪽이 옆이 들은 줄을 덮었다");
     }
 
-    /// **옆이 들은 줄이 이 판에 안 서도 그 태그를 들고 간다**(리뷰, moai-p3r9). 낮은 판의 옆이 이 판보다
-    /// 낡은 태그를 들으면 그 줄은 낡은 답([`Held::outdated`])이라 안 따르는데, 그때 첫 읽기의 태그를
-    /// 들고 가면 옆이 방금 들은 답이 그보다 앞의 답으로 덮인다 — 물은 판은 이 판이 되어 옆은 하루
-    /// 동안 다시 안 묻는다.
+    /// **옆이 그 사이 들은 줄은 이 판에 안 서도 따른다**(리뷰, moai-p3r9). 낮은 판의 옆이 이 판보다
+    /// 낡은 태그를 들으면 그 줄은 이 판에 낡은 답([`Held::outdated`])이라 안 서는데, 그 위에 이쪽의
+    /// 실패를 적으면 옆이 방금 들은 답에 까닭이 붙고 물은 판이 이 판이 되어, 옆은 하루 동안 "못
+    /// 물었다" 를 댄다. 따르기만 하고 안 적는다 — 이 판에는 낡은 답이니 못 물은 꼴이다.
+    ///
+    /// 옆이 찍은 줄이 창 밖이면 따르지 않되 **그 태그를 첫 읽기의 것보다 먼저 들고 간다** — 더 늦게
+    /// 들은 답이다.
     #[test]
-    fn a_failed_ask_carries_the_tag_a_lower_sibling_heard_meanwhile() {
-        let s = Scratch::new("latest-sibling-lower");
-        let listener = TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
-        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
-        line_at(s.path(), &url, "v0.0.1", "");
-        let heard = "2026-09-21T00:00:01Z";
-        let sibling = Held {
-            asked_at: heard.into(),
+    fn a_failed_ask_follows_a_line_a_lower_sibling_heard_meanwhile() {
+        let at = |asked_at: &str, url: &str| Held {
+            asked_at: asked_at.into(),
             tag: Some("v0.0.2".into()),
-            heard_at: Some(heard.into()),
-            url: Some(place_of(&url)),
+            heard_at: Some(asked_at.into()),
+            url: Some(place_of(url)),
             trouble: None,
             asked_by: Some("0.0.1".into()),
         };
-        let dir = s.path().to_path_buf();
-        let handle = std::thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                write(&dir, &sibling).unwrap();
-                answer(stream, "200 OK", b"not json");
-            }
-        });
-        let got = refresh(s.path(), &url, "2026-09-21T00:00:02Z", WINDOW);
-        handle.join().unwrap();
+        // 옆이 이쪽이 묻는 사이 `sibling` 을 적고, 이쪽은 못 읽는 답을 받는다.
+        let race = |name: &str, asked_at: &str| {
+            let s = Scratch::new(name);
+            let listener = TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
+            let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+            line_at(s.path(), &url, "v0.0.1", "");
+            let sibling = at(asked_at, &url);
+            let (dir, wrote) = (s.path().to_path_buf(), sibling.clone());
+            let handle = std::thread::spawn(move || {
+                if let Ok((stream, _)) = listener.accept() {
+                    write(&dir, &wrote).unwrap();
+                    answer(stream, "200 OK", b"not json");
+                }
+            });
+            let got = refresh(s.path(), &url, "2026-09-21T00:00:02Z", WINDOW);
+            handle.join().unwrap();
+            (got, sibling, read(s.path()).unwrap())
+        };
+        let heard = "2026-09-21T00:00:01Z";
+        let (got, sibling, back) = race("latest-sibling-lower", heard);
+        assert_eq!(got, Seen::Stale { why: Why::not_asked(), tag: "v0.0.2".into(), heard_at: heard.into() });
+        assert_eq!(back, sibling, "못 들은 쪽이 옆이 들은 줄을 덮었다");
+
+        let old = "2026-09-19T00:00:00Z";
+        let (got, _, back) = race("latest-sibling-old", old);
         let Seen::Stale { why, tag, heard_at } = got else { panic!("지난 답을 못 들고 갔다 — {got:?}") };
-        assert_eq!(
-            (why.kind, tag.as_str(), heard_at.as_str()),
-            (Trouble::Garbled, "v0.0.2", heard),
-            "옆이 들은 답을 덮었다"
-        );
-        let back = read(s.path()).unwrap();
-        assert_eq!((back.tag.as_deref(), back.heard_at.as_deref()), (Some("v0.0.2"), Some(heard)));
+        assert_eq!((why.kind, tag.as_str(), heard_at.as_str()), (Trouble::Garbled, "v0.0.2", old), "옆의 답을 버렸다");
+        assert_eq!((back.tag.as_deref(), back.asked_by.as_deref()), (Some("v0.0.2"), Some(mine())));
     }
 
     /// **들은 때가 없는 옛 줄은 물은 때로 읽는다**(moai-ggxi). 이 필드 전의 바이너리가 적은
@@ -1799,11 +1829,14 @@ mod tests {
         }
     }
 
-    /// **정말 앞선 판은 한 번 묻고 하루 창으로 돌아간다**(같은 결정). 소스에서 지은 판은 다시 물어도
-    /// 같은 답을 듣고, 그때는 "앞선 판" 이 맞다 — 물은 판을 적어 두므로 다음 부름은 창을 지킨다.
-    /// 안 적으면 그 사람은 탐색기를 열 때마다 바깥을 두드린다.
+    /// **정말 앞선 판은 한 번 묻고, 그 답을 한 시간 든다**(같은 결정, [`AHEAD_WINDOW`]). 소스에서 지은
+    /// 판은 다시 물어도 같은 답을 듣고, 그때는 "앞선 판" 이 맞다 — 물은 판을 적어 두므로 다음 부름은
+    /// 창을 지킨다. 안 적으면 그 사람은 탐색기를 열 때마다 바깥을 두드린다.
+    ///
+    /// **창은 하루가 아니라 한 시간이다**(2026-10-04 사용자 결정, 리뷰 1번). 판을 올린 커밋의 빌드가
+    /// 태그 전에 물은 답이면 릴리스가 난 뒤 그 "앞선 판" 은 거짓인데, 판 번호로는 그것을 못 가린다.
     #[test]
-    fn a_build_ahead_of_every_tag_asks_once_then_keeps_the_window() {
+    fn a_build_ahead_of_every_tag_asks_once_then_holds_it_an_hour() {
         let s = Scratch::new("latest-ahead-once");
         let (url, handle) = server_once(r#"{"tag_name":"v0.0.1"}"#);
         line_at(s.path(), &url, "v0.0.1", "");
@@ -1813,8 +1846,13 @@ mod tests {
         assert_eq!(read(s.path()).unwrap().asked_at, "2026-09-21T01:00:00Z", "낡은 답을 다시 안 물었다");
         assert_eq!(handle.join().unwrap(), 1);
         // 서버는 닫혔다 — 또 물으면 "네트워크 없음" 이 선다.
-        assert_eq!(refresh(s.path(), &url, "2026-09-21T02:00:00Z", WINDOW), ahead, "같은 답을 듣고도 또 물었다");
+        assert_eq!(refresh(s.path(), &url, "2026-09-21T01:59:59Z", WINDOW), ahead, "같은 답을 듣고도 또 물었다");
         assert_eq!(held(s.path(), &url), ahead);
+        // 한 시간이 차면 다시 묻는다 — 하루를 기다리지 않는다.
+        let Seen::Stale { why, .. } = refresh(s.path(), &url, "2026-09-21T02:00:00Z", WINDOW) else {
+            panic!("앞선 판이라는 답을 한 시간 넘게 들었다");
+        };
+        assert_eq!(why.kind, Trouble::Offline);
     }
 
     /// **다시 물어 답이 오기 전에는 "앞선 판" 이라 안 한다**(같은 결정). 첫 프레임은 적어 둔
@@ -1838,7 +1876,8 @@ mod tests {
 
     /// **못 들은 다시 묻기도 한 번이다**(같은 자리). 못 들어도 도장을 찍는 것과 같은 까닭이다 —
     /// 그물이 없는 기계가 탐색기를 열 때마다 바깥을 두드리지 않는다. 그 하루 동안 판 줄은 그 까닭과
-    /// 지난 답을 대고, "앞선 판" 이라 안 한다.
+    /// 지난 답을 대고, "앞선 판" 이라 안 한다. **창은 하루다** — 한 시간 창([`AHEAD_WINDOW`])은 "앞선
+    /// 판" 이라는 답에만 서고, 못 물은 꼴은 태그가 이 판보다 낡아도 그 답이 아니다.
     #[test]
     fn a_failed_re_ask_counts_as_the_once() {
         let s = Scratch::new("latest-behind-failed");
@@ -1852,13 +1891,13 @@ mod tests {
         assert_eq!(stale(refresh(s.path(), &url, "2026-09-21T01:00:00Z", WINDOW)), want);
         assert_eq!(handle.join().unwrap(), 1, "낡은 답을 다시 안 물었다");
         // 서버는 닫혔다 — 또 물으면 갈래가 "네트워크 없음" 으로 바뀐다.
-        assert_eq!(stale(refresh(s.path(), &url, "2026-09-21T02:00:00Z", WINDOW)), want, "한 번 넘게 물었다");
+        assert_eq!(stale(refresh(s.path(), &url, "2026-09-21T23:00:00Z", WINDOW)), want, "한 번 넘게 물었다");
         assert_eq!(stale(held(s.path(), &url)), want);
     }
 
     /// **낡은 것이 확실한 답만 다시 묻는다.** 도는 판과 같거나 새로운 태그는 그대로 답이다. 이 판이나
     /// 더 새 판이 물어 들은 낡은 태그도 그렇다 — 그 판이 물을 때 이 판은 이미 있었으니 다시 물어도
-    /// 같은 답이다.
+    /// 같은 답이다. 새 판·같은 판은 하루를, "앞선 판" 은 한 시간([`AHEAD_WINDOW`])을 든다.
     #[test]
     fn only_an_answer_older_than_this_build_is_asked_again() {
         let s = Scratch::new("latest-not-behind");
@@ -1866,15 +1905,16 @@ mod tests {
         let same = format!("v{}", mine());
         let by_me = format!("asked_by = \"{}\"\n", mine());
         let ahead = Seen::Ahead { tag: "v0.0.1".into() };
-        for (tag, by, want) in [
-            ("v9999.0.0", "", Seen::Newer { tag: "v9999.0.0".into() }),
-            (same.as_str(), "", Seen::Same { tag: same.clone() }),
-            ("v0.0.1", by_me.as_str(), ahead.clone()),
-            ("v0.0.1", "asked_by = \"9999.0.0\"\n", ahead.clone()),
+        let (day, hour) = ("2026-09-21T23:00:00Z", "2026-09-21T00:59:59Z");
+        for (tag, by, now, want) in [
+            ("v9999.0.0", "", day, Seen::Newer { tag: "v9999.0.0".into() }),
+            (same.as_str(), "", day, Seen::Same { tag: same.clone() }),
+            ("v0.0.1", by_me.as_str(), hour, ahead.clone()),
+            ("v0.0.1", "asked_by = \"9999.0.0\"\n", hour, ahead.clone()),
         ] {
             line_at(s.path(), &url, tag, by);
             // 물으면 "네트워크 없음" 이 선다.
-            assert_eq!(refresh(s.path(), &url, "2026-09-21T01:00:00Z", WINDOW), want, "{tag} {by}");
+            assert_eq!(refresh(s.path(), &url, now, WINDOW), want, "{tag} {by}");
             assert_eq!(held(s.path(), &url), want, "{tag} {by}");
         }
     }
