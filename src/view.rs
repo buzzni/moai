@@ -13,6 +13,8 @@ use crate::worktree::Origin;
 use anstyle::Style;
 use std::collections::BTreeMap;
 
+pub mod wiki;
+
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
 ///
 /// **`guide` 의 예시가 이 자를 빌려 쓴다** — 제목을 짧게 쓰라고 가르치는 예시가 제 보드에서
