@@ -66,6 +66,20 @@ does not tag — see `CONTRIBUTING.md`.
   window is read fresh every time it opens and nothing of it is kept; a wiki that
   does not exist or holds no page opens nothing and says why.
 
+- **A wiki link can land on a heading.** `[epic](glossary.md#epic)`, or
+  `[above](#epic)` on the same page, names the heading by its anchor as GitHub
+  makes it — lowercase, punctuation dropped, each space a `-`, a repeated heading
+  `-1`, `-2` — so the same link lands there on GitHub too. `moai wiki ls` and
+  `show` count a link to a heading the page does not have beside the links that
+  lead to no page, and block nothing. In `--json` such a link carries `anchor`,
+  the part after `#`, and `anchor_resolved`, false when that page has no such
+  heading and absent when the page could not be read; a same-page `#anchor`
+  stands with `to` naming its own page. The explorer's wiki window opens a heading
+  link at that heading, its line marked `▸` until you scroll or leave, and marks
+  a link whose heading the page lacks `(no heading)` and opens that page at its
+  top. The moai-wiki skill teaches linking to a heading and the two keys — run
+  `moai skill install` to bring it in.
+
 ### Changed
 
 - **The explorer's list scrolls under the wheel instead of moving the cursor.**
