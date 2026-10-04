@@ -2332,7 +2332,10 @@ Options:
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
-  end of each task, again and again. Nothing has to wake it.
+  end of each task, again and again. Nothing has to wake it. While it waits,
+  its row in `moai agents` says idle; once a letter comes it says busy, and a
+  wait that runs out leaves it idle. A name with no row is not registered by
+  this - `moai hello` does that.
 
   A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
   and --all shows it again. The hooks do this by themselves: UserPromptSubmit
@@ -2359,6 +2362,8 @@ Who is here - the agents under .moai/agents (sweeps the gone)
 Usage: moai agents [OPTIONS]
 
 Options:
+      --role <role>          Only the agents with this role (worker, supervisor)
+      --status <status>      Only the agents in this state (idle, busy)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2366,10 +2371,19 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
+  moai agents                               everyone registered here
+  moai agents --role worker --status idle   the workers waiting for work
+
   An agent is registered by `moai hello`, or by the hooks when its session
-  starts. UserPromptSubmit marks it busy and Stop marks it idle. A row whose
-  process is gone is swept here - on Linux a reused pid is told apart by the
-  time the process started. A row that cannot be told alive or gone stays.
+  starts. UserPromptSubmit marks it busy and Stop marks it idle, and
+  `moai inbox --wait` marks it idle while it waits and busy once a letter
+  comes. A row whose process is gone is swept here - on Linux a reused pid is
+  told apart by the time the process started. A row that cannot be told alive
+  or gone stays.
+
+  --role and --status keep the rows whose word is exactly that one. A row a
+  hook registered carries no role until the agent says `moai hello --role`.
+  The sweep runs over every row either way.
 
   --json gives {"agents":[{"v","name","vendor","model","role","status",
   "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket"}],

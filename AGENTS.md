@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:3ec02764 -->
+<!-- moai:begin v:0.6.0 hash:0b56c49e -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -443,9 +443,10 @@ writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
-what you are reviewing. The review is `/code-review` in Claude Code, `codex review` in Codex
-and a fresh `agy -p` session in Antigravity; the other steps that differ per agent are
-under "Words per agent" in the `moai` skill.
+what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
+Antigravity it is the review this session has, else read the diff yourself.
+It runs inside your own session — never start another agent for it. The other
+steps that differ per agent are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts
@@ -482,12 +483,15 @@ keeps whose it was. `moai ready` hands out only your own rows and sets the rest
 apart (`others`), and what someone else picked up is not your focus. When who you
 are is unknown, nothing is refused.
 
-### The supervisor
+### The supervisor and its workers
 
-`moai skill install` also plants a second skill, `moai-supervise`. Call it to hand
-the ideas that have piled up, one at a time, to the sessions idling on the same
-repository, and to take their reports — the supervisor picks, sends and checks;
-it does not fix and it does not merge.
+`moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
+`moai-work` in a window to make it a worker — it says hello, waits for a letter,
+does the work the letter hands over in a worktree, reports and waits again — and
+`moai-supervise` in one window to hand the ideas that have piled up, one at a time,
+to those workers and take their reports. Claude Code, Codex and Antigravity can
+each be either, and every one of them is a session a person opened. The supervisor
+picks, sends and checks; it does not fix and it does not merge.
 
 ### Letters between agents
 
@@ -504,14 +508,15 @@ and the end of each turn load the letters for this session and mark them read, a
 registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
 `--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
 Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
-a worker waiting on `moai inbox --wait` needs no waking.
+a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
+shows it idle.
 
 ### The wiki
 
 The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
-on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
 
 ### Before you close the session
