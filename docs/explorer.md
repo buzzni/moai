@@ -64,20 +64,26 @@ are kept in your user config and carry over to the next run and to every project
   On the overview it reads the project of the row under the cursor. The wheel,
   `Ctrl-d`/`Ctrl-u` and `Ctrl-f`/`Ctrl-b` scroll the page list without moving
   the cursor, as on the main list. `Enter` on
-  the list goes to the page; `Enter` on the page lists its links and the issue
-  ids it names, then the pages that link to it, marked `←`. Taking a page —
-  either way — goes there and `Backspace` comes back to the line you were
-  reading. A link that names a heading (`glossary.md#epic`, or `#epic` on the
+  the list goes to the page. On the page, `Tab` and `Shift-Tab` pick the links
+  drawn there in turn — from the first one on screen, round from the last to the
+  first. The picked link shows reversed and the key bar names where it goes;
+  `Enter` follows it, `Esc` drops it, and scrolling it off the pane drops it too.
+  Clicking a link follows it at once. With no link picked, `Enter` on the page
+  lists its links and the issue ids it names, then the pages that link to it,
+  marked `←`. Taking a page — any of these ways — goes there and `Backspace`
+  comes back to the line you were reading. A link that names a heading (`glossary.md#epic`, or `#epic` on the
   same page) opens at that heading, its line marked `▸` until you scroll or
   leave; one whose heading the page does not have stands marked
   `(no heading)` and opens the page at its top. Taking an id closes the
   window onto that row, inside that project when you opened it from the
   overview. A link that leads nowhere, an address outside the wiki and
   an id the tracker does not hold stay in that list marked `(none)` or
-  `(outside)`, and taking one only says so. `/` searches the titles and bodies
-  and narrows the list. `Esc` clears that search first, then goes back to where
-  you were. `SPC v r` shows the page as written. It reads the pages afresh each
-  time it opens and writes none of them — a page is a file you edit and commit
+  `(outside)`, and taking one only says so — picking or clicking one does the
+  same. `/` searches the titles and bodies and narrows the list. `Esc` drops a
+  picked link first, then clears that search, then goes back to where you were.
+  `SPC v r` shows the page as written, where no link is marked for `Tab`. It
+  reads the pages afresh each time it opens and writes none of them — a page is
+  a file you edit and commit
 
 The list or the board you leave on is the one the next run opens with.
 
@@ -105,14 +111,16 @@ The mouse is on to begin with; `SPC o m` turns it off and on, and the choice is
 kept.
 
 - **A click** puts the focus on the pane under it and the cursor on that row or
-  card. With the menu open, a click on an item presses its key and a click
-  outside closes the menu first — see [the menu](#the-menu)
+  card. On a wiki page, a click on a link follows it. With the menu open, a click
+  on an item presses its key and a click outside closes the menu first — see
+  [the menu](#the-menu)
 - **The wheel** scrolls the pane under the pointer — the list, the board, the
   detail, the statistics, either pane of the wiki — without taking the focus
   there or moving a cursor. The row you chose stays chosen even once it is off
   screen; the next cursor key brings the list back to it
 - **Dragging the line** between the list and the detail resizes them, and the
-  share is kept
+  share is kept. The wiki window's line drags the same way and keeps a share of
+  its own (`wiki_width`); until you drag it, the wiki splits like the list
 - **To select or paste with the terminal**, hold `Shift` over the list and the
   detail (`Option` in iTerm2), or turn the mouse off. While a form, a picker or a
   prompt is open, the mouse is the terminal's again
