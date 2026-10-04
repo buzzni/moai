@@ -4115,3 +4115,6 @@
 {"ts":"2026-10-04T15:49:10Z","id":"moai-jo1u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-04T15:49:28Z","id":"moai-jo1u.d2s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=120205 (medium — 리뷰 서브에이전트, /code-review medium --fix)"}
 {"ts":"2026-10-04T15:49:36Z","id":"moai-jo1u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 이 멤버는 끝났다. b6cw 의 남은 일은 moai-u3t9(h8tn 머지 뒤 glossary.md:117 링크를 #work-the-queue-from-a-session 으로)와 osp·suy·udp·upn(snyk·h8tn 뒤) — 감독이 보낸다"}
+{"ts":"2026-10-04T15:53:48Z","id":"moai-a2y1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-04 사용자 결정 \"깨우기를 덤으로 낮춘다\" 로 이 갈림길이 접혔다 — codex queue 길을 걷었고 기본 길은 일꾼의 inbox --ack --wait 다. 훅 없는 벤더의 idle 은 moai-u5wr 의 훅 방언이 적으면 풀린다. 에픽 밖으로 낸다"}
+{"ts":"2026-10-04T15:53:48Z","id":"moai-w8z8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"감독 스킬 글이 고칠 자리라 moai-snyk 의 일이다. 우편함 에픽(moai-h8tn) 밖으로 낸다 — 감독에게 넘긴다"}
+{"ts":"2026-10-04T15:53:49Z","id":"moai-3u8n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04): 납작한 꼴로 머지하고 나중에 정한다. 읽은 편지는 이미 파일 이름으로 거른다. 받는 이별 디렉터리로 옮기는 날 읽는 쪽이 두 꼴을 함께 읽는다. v0.7.0 안에서 릴리스 전에 정한다"}
