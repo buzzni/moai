@@ -45,6 +45,13 @@ impl Wiki {
         !self.skipped.is_empty()
             || self.pages.iter().any(|p| matches!(p.error, Some(Unread::Refused(_) | Unread::Failed(_))))
     }
+
+    /// `slug` 의 역링크([`Page::linked_from`])를 세지 못한 자리의 수 — 본문을 못 읽은 다른 페이지(크기 상한도 든다:
+    /// 일부러 안 읽었어도 그 링크는 안 셌다)와 걷기가 건너뛴 자리다. 0 이 아니면 역링크가 덜 섰을 수 있다
+    /// (2026-10-04 사용자 결정, moai-mdzx.jty). 물은 페이지 제 본문은 안 센다 — 제 자신을 가리키는 링크는 역링크가 아니다.
+    pub fn uncounted(&self, slug: &str) -> usize {
+        self.skipped.len() + self.pages.iter().filter(|p| p.slug != slug && p.error.is_some()).count()
+    }
 }
 
 /// 사람 화면이 알림으로 세는 것(moai-ihu4.zdk) — 충돌 표시가 든 페이지, 페이지로 안 풀리는 링크, 그 페이지에 없는
@@ -404,7 +411,7 @@ pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) 
 /// - `pages` 의 차례로, 가리키는 페이지마다 한 번 — 글이 다른 링크 둘로 가리켜도 한 번이다
 /// - 제 자신을 가리키는 링크(`#앵커` 를 뗀 제 슬러그)는 안 센다 — 들어오는 길이 아니다
 /// - 본문을 못 읽은 페이지([`Page::error`])는 링크가 없어 아무것도 안 가리킨다. 그러니 역링크는 **읽은 페이지가 적은
-///   것만큼이다** — 그 페이지는 목록에 `error` 로 선다
+///   것만큼이다** — 그 페이지는 목록에 `error` 로 서고, 덜 셌을 수 있는 자리의 수는 [`Wiki::uncounted`] 가 댄다
 ///
 /// 링크는 한 번만 훑는다 — 페이지마다 위키 전부의 링크를 다시 훑으면 페이지 수의 제곱이 들고, `show` 도 이 길을 탄다.
 fn linked_from(pages: &[Page]) -> Vec<Vec<String>> {
@@ -578,6 +585,9 @@ pub struct Parsed {
 /// - id 는 글과 인라인 코드에서 센다. **울타리·들여쓴 코드 블록 안은 예시로 읽는다**(2026-10-04 사용자 결정) —
 ///   `work` 줄이 울타리 안을 안 세는 것과 같은 자다. 접두어가 맞는 낱말만 id 다: `worktree-moai-xxxx` 는 가지
 ///   이름이지 id 가 아니다
+/// - moai 가 심는 스킬의 이름([`crate::skill::NAMES`])은 id 가 아니다 — `moai-wiki` 는 접두어 `moai` 뒤 네 글자라
+///   꼴로는 id 다(2026-10-04 사용자 결정, moai-mdzx.3pm). 그 id 의 줄이 트래커에 있어도 안 센다 — 페이지에서 그
+///   낱말은 스킬이다
 /// - 링크는 [`target`] 이 페이지 링크로 푸는 것만 든다
 /// - 머리글은 모든 단이 앵커를 받는다([`Anchors`]). 앵커를 짓는 글은 GitHub 이 화면에 그리는 글이다 — 인라인 코드는
 ///   백틱 없이, 링크는 글만, 그림의 대체글은 빼고, 줄바꿈은 줄바꿈 글자로(그래서 [`anchor`] 가 걷는다)
@@ -609,7 +619,10 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     };
     let ids = |s: &str, out: &mut Vec<String>| {
         for id in crate::git::ids_in(s) {
-            if id.rsplit_once('-').is_some_and(|(p, _)| p == prefix) && !out.iter().any(|seen| seen == id) {
+            if id.rsplit_once('-').is_some_and(|(p, _)| p == prefix)
+                && !crate::skill::NAMES.contains(&id)
+                && !out.iter().any(|seen| seen == id)
+            {
                 out.push(id.to_string());
             }
         }
@@ -882,6 +895,18 @@ mod tests {
                     ```sh\nmoai show moai-zz99\n```\n\n    moai-yy88 indented\n\n[link moai-kk11](x.md)\n";
         assert_eq!(parse("a", body, "moai").ids, ["moai-ab12", "moai-cd34", "moai-ab12.x1y", "moai-kk11"]);
         assert_eq!(parse("a", "a-b e-mail x86-64\n", "e").ids, ["e-mail"], "접두어가 맞으면 꼴만 보는 것이 맞다");
+    }
+
+    /// moai 가 심는 스킬의 이름은 id 가 아니다(moai-mdzx.3pm) — `moai-wiki` 는 꼴로는 id 라 글에서도 인라인
+    /// 코드에서도 경로 조각에서도 없는 id 로 섰다. 이름이 같은 꼴의 다른 낱말은 그대로 센다.
+    #[test]
+    fn skill_names_are_not_issue_ids() {
+        let body = "Follow the moai-wiki skill, or `moai-wiki`, planted at `skills/moai-wiki/SKILL.md`.\n\n\
+                    moai-supervise and moai hand out moai-wik1 and moai-wiki.x1y.\n";
+        assert_eq!(parse("a", body, "moai").ids, ["moai-wik1", "moai-wiki.x1y"]);
+        for name in crate::skill::NAMES {
+            assert!(!parse("a", &format!("{name}\n"), "moai").ids.iter().any(|id| id == name), "{name} 를 id 로 셌다");
+        }
     }
 
     /// **링크 전부는 바깥 주소까지 든다** — 적힌 차례로, 같은 짝은 한 번, 코드 블록 안과 그림은 안 든다. 위키 창의
@@ -1232,6 +1257,26 @@ mod tests {
         // 슬러그는 이름으로 선다 — 본문을 못 읽은 페이지로 가는 링크도 풀린다(걷어 낸 `load_one` 시험이 지키던 것).
         let to_big = w.find("README").unwrap().links.iter().find(|l| l.to == "big").map(|l| l.resolved);
         assert_eq!(to_big, Some(true), "못 읽은 페이지로 가는 링크가 안 풀렸다");
+        // big 이 a 를 가리키지만 못 읽어 안 셌다 — 그 수를 [`Wiki::uncounted`] 가 댄다(moai-mdzx.jty).
+        assert_eq!(w.uncounted("a"), 1, "크기 상한으로 안 읽은 페이지도 역링크를 못 센 자리다");
+        assert_eq!(w.uncounted("big"), 0, "제 본문은 제 역링크와 상관없다");
+    }
+
+    /// 역링크를 못 센 자리는 본문이 없는 다른 페이지와 걷기가 건너뛴 자리다 — 다 읽었으면 0 이다(moai-mdzx.jty).
+    #[cfg(unix)]
+    #[test]
+    fn uncounted_names_what_the_backlinks_could_not_read() {
+        let s = Scratch::new("wiki-uncounted");
+        let away = Scratch::new("wiki-uncounted-away");
+        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md)\n");
+        write(s.path(), "docs/a.md", "# A\n");
+        assert_eq!(load(s.path(), "docs", "moai", &none).unwrap().uncounted("a"), 0, "다 읽은 위키다");
+        std::fs::write(s.path().join("docs/latin1.md"), b"[a](a.md) caf\xe9\n").unwrap();
+        std::os::unix::fs::symlink(away.path(), s.path().join("docs/away")).unwrap();
+        let w = load(s.path(), "docs", "moai", &none).unwrap();
+        assert_eq!(w.uncounted("a"), 2, "못 읽은 페이지 하나와 건너뛴 디렉터리 링크 하나");
+        assert_eq!(w.uncounted("latin1"), 1, "제 본문은 안 센다");
+        assert_eq!(w.find("a").unwrap().linked_from, ["README"]);
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.

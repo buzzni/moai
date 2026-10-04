@@ -19,18 +19,24 @@ does not tag — see `CONTRIBUTING.md`.
   `.moai/config.toml` names, a relative path inside the checkout — one page per
   `.md` file. A page's slug is its path without `.md` and its title is its first
   `# ` heading. Nothing is stored in the tracker: the list, the links between
-  pages and the issue ids a page names are read from the files every time.
+  pages and the issue ids a page names are read from the files every time —
+  the name of a skill moai plants (`moai-wiki` has the shape of an id) is never
+  read as one.
   Pages ride the branch, so inside a linked worktree that worktree's pages are
   read while the ids are still looked up in the main checkout's tracker. `ls`
   counts the links that lead to no page, the ids the tracker does not have and
   the pages left with conflict markers, and blocks nothing; a page over 1 MB
   stays in the list unread. `show` ends with the pages that link to the one
-  shown. `--json` gives each page's `slug`, `title`, `path`, `bytes`, `issues`,
+  shown, and with one line counting the places it could not read when that
+  list may be short. `--json` gives each page's `slug`, `title`, `path`, `bytes`, `issues`,
   `links`, `linked_from` (the slugs of the pages linking to it, in list order,
   `[]` when none does — counted from the other pages' links every time, so
   `show` reads every page) and `conflict`, an `error` on a page that could not
   be read, `skipped` for what the walk left out (a link to a directory, a name
-  that is not UTF-8, a directory it could not open), and `body` under `show`. A `wiki_dir` that does not exist yet exits
+  that is not UTF-8, a directory it could not open), and `body` under `show`,
+  beside `linked_from_partial` (true) when another page could not be read or
+  the walk left something out, so `linked_from` may be short — absent when every
+  page was counted. A `wiki_dir` that does not exist yet exits
   0; one that is absolute, climbs out with `..`, leads out of the checkout or
   into `.git/`, or is not a directory fails `moai wiki` alone — every other
   command reads the config as before.

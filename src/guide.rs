@@ -1426,7 +1426,10 @@ tell — and a same-page `#anchor` stands with `to` naming its own page) and
 none does. A page other than the home page that nothing links to is found only through
 the list — link it from the page that should lead there. Judge that from
 `moai wiki ls --json`, not from one page: a page that could not be read links nowhere,
-and only the list shows it, with its `error`. A page that could
+and only the list shows it, with its `error`. `moai wiki show <slug> --json` says when
+its own count may be short — `linked_from_partial` stands `true` when some other page
+could not be read or the walk left a spot out, and is absent when every page was
+counted. A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
 whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
 leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
@@ -3039,9 +3042,12 @@ mod tests {
         // 글자 단위로 자른다 — 바이트로 자르면 한글 한가운데서 끊겨, 실패를 알리려던
         // 자리가 제가 먼저 죽는다.
         let head: String = skill.chars().take(40).collect();
-        assert!(skill.starts_with("---\nname: moai\ndescription: "), "{head}");
-        assert!(supervise().starts_with("---\nname: moai-supervise\ndescription: "), "감독 스킬의 머리가 없다");
-        assert!(wiki().starts_with("---\nname: moai-wiki\ndescription: "), "위키 스킬의 머리가 없다");
+        // 이름은 `skill::NAMES` 의 것이다 — 위키가 그 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 머리의
+        // 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
+        let [moai, supervisor, wiki_skill] = crate::skill::NAMES;
+        assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
+        assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
+        assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
     }
 
     /// **감독이 일꾼에게 가르치는 펼치기는 참고 문서의 그 명령이다.** 길이 둘로
@@ -3548,6 +3554,7 @@ stop sending outside work while a release runs",
         "resolved",
         "anchor_resolved",
         "linked_from",
+        "linked_from_partial",
         "conflict",
         "too_large",
         "refused",
@@ -3600,7 +3607,7 @@ stop sending outside work while a release runs",
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
         let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
         let loaded = read.unwrap();
-        printed.extend(crate::cmd::wiki::page_json(lang, loaded.find("README").unwrap()).unwrap());
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap()).unwrap());
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
@@ -4200,16 +4207,14 @@ sys.exit(1 if bad else 0)
     /// **감독 스킬은 모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 적으면 남의 저장소에서는
     /// 아무것도 안 가리키고, 고친 뒤에는 거짓이 된다. 위키 스킬도 모든 저장소에 심긴다.
     ///
-    /// 셋째 스킬의 이름 `moai-wiki` 는 id 의 꼴(`moai-` 뒤 네 글자)과 겹친다 — 그 이름은 심는 스킬의
-    /// 머리에서 읽어 거른다. 손으로 적은 예외 목록은 스킬 이름이 바뀔 때 낡은 채 남는다.
+    /// 셋째 스킬의 이름 `moai-wiki` 는 id 의 꼴(`moai-` 뒤 네 글자)과 겹친다 — 스킬 이름은 `skill::NAMES` 로
+    /// 거른다. 위키가 거르는 그 목록이고, 스킬 머리의 이름과 갈리면 `the_frontmatter_opens_the_skill` 이 붉어진다.
     #[test]
     fn the_supervisor_names_no_issue_of_this_repo() {
-        let wiki = wiki();
-        let name = wiki.lines().find_map(|l| l.strip_prefix("name: ")).expect("위키 스킬에 이름이 없다");
-        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki.clone())] {
+        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki())] {
             let ids: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-                .filter(|w| *w != name)
+                .filter(|w| !crate::skill::NAMES.contains(w))
                 .filter(|w| {
                     w.strip_prefix("moai-").is_some_and(|rest| {
                         rest.len() == 4 && rest.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
