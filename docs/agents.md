@@ -4,8 +4,9 @@ moai is built so that AI agents run the tracker beside a person. There is no
 approval gate: an agent creates, moves and closes work without asking, and the
 one thing it asks about is picking up work that belongs to someone else — a
 [take over](glossary.md#take-over). This page covers the three things that make
-that work — the instructions an agent reads, the skills and hooks planted into
-Claude, and the `--json` surface a loop of your own can drive. The commands'
+that work — the instructions an agent reads, the skills planted for Claude Code,
+Codex and Antigravity (with hooks for Claude Code), and the `--json` surface a
+loop of your own can drive. The commands'
 flags are in [the CLI reference](cli.md), and the words in
 [the glossary](glossary.md).
 
@@ -27,18 +28,42 @@ the journal are never touched.
   by hand (`init` throws that edit away). `moai init --check` answers `current`,
   `stale` or `missing` and writes nothing
 
-## Plant the skills and hooks into Claude
+## Plant the skills
 
-    moai skill install                     just me (the default)
-    moai skill install --scope project     the whole team, through the committed settings
-    moai skill status                      what is installed where, and what differs
+    moai skill install                     Claude Code, just me (the default)
+    moai skill install --scope project     Claude Code, the whole team through the committed settings
+    moai skill install --agent codex       Codex and Antigravity, through the committed .agents/skills/
+    moai skill install --agent auto        whichever of claude, codex and agy is on PATH
+    moai skill status                      what is planted where, and what differs
 
-`skill install` writes the plugin into `.claude/moai-plugin/` and registers it
-with `claude`; your `settings.json` is `claude`'s to write. It is safe to run
-again, and a Claude session that is already open keeps the old copy until you
-reopen it. `moai skill uninstall` takes the registration away and leaves the
-files. The skills and hooks are for Claude Code today; other agents get the
-`AGENTS.md` block and the `--json` surface.
+`--agent` names who the skills are for — `claude` (what you get when it is left
+out), `codex`, `antigravity` or `auto` — and can be repeated.
+
+- **Claude Code gets a plugin.** `skill install` writes it into
+  `.claude/moai-plugin/` and registers it with `claude`; your `settings.json` is
+  `claude`'s to write, and `--scope` picks where it registers. A Claude session
+  that is already open keeps the old copy until you reopen it. The hooks come
+  with the plugin, and only with it
+- **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
+  naming either writes it for both. There is nothing to register — commit the
+  directory and the team has the skills. `--scope` does not apply to them, and
+  one line says so when you give it without Claude
+- **`auto` looks at PATH** for `claude`, `codex` and `agy`, says what it found,
+  and plants for Claude when it finds none of them
+
+It is safe to run again: files are only overwritten, never deleted. `moai skill
+uninstall` takes Claude's registration away and leaves the files; with
+`--agent codex` it prints the `rm -r` lines for moai's skills in
+`.agents/skills/` and deletes nothing. `moai skill status` shows Claude's
+registration, whether `.agents/skills/` holds this version's skills, and whether
+`codex` and `agy` are on PATH — and exits 0 whatever it finds.
+
+**One text serves every agent.** Both trees get the same skills. The steps only
+one agent has — entering a worktree, asking the person, calling the review,
+changing the model, clearing the window, messaging another session, stopping
+what a review left running — sit in a "Words per agent" table in the `moai` and
+`moai-supervise` skills, one column per agent, and each agent reads its own. A
+step an agent does not have reads `—`: tell the person and go on.
 
 Three skills come with it:
 
@@ -148,4 +173,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h
