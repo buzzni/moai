@@ -19,7 +19,7 @@
 //! 그대로 한다 — 메뉴의 이동키가 메뉴를 닫고 곧 그 이동을 하는 것(moai-y8v2)과 같은 결이다. 통계 창 위의 메뉴도 같다.
 
 use super::{App, Mode, Pane, menu, scroll};
-use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 
 /// 휠 한 칸에 가는 줄 수. 대개의 터미널·편집기가 그만큼 간다. **목록·상세·보드가 같은 걸음이다** — 칸마다
@@ -46,6 +46,9 @@ pub struct Drawn {
     /// SPC 메뉴가 선 자리 — 격자 창(윗 가름줄부터)과 맨 아랫줄의 접두어 줄을 합친 전체 폭이다(moai-m6ni). 메뉴가
     /// 닫혔으면 없다. 이 밖을 누르면 메뉴를 닫고 그 누르기를 그대로 한다([`App::mouse`]).
     pub menu: Option<Rect>,
+    /// 메뉴에서 누를 수 있는 칸과 그 칸의 키(moai-m6ni) — 격자의 항목(접혔으면 접두어 줄의 항목)과 접두어 줄의
+    /// 나가는 법(`Esc 닫기`·`Bksp 위로`)이다. 칠한 쪽(`draw::menu_panel`·`menu_line`)이 칠한 자리에서 잰다.
+    pub menu_keys: Vec<(Rect, KeyEvent)>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -115,11 +118,19 @@ impl App {
     }
 
     /// 메뉴가 열린 채 온 사건(moai-m6ni). **메뉴 밖에서 누르거나 굴렸으면 참이다** — 부르는 쪽([`App::mouse`])이
-    /// 메뉴를 닫고 그 손짓을 그대로 한다(사용자 결정 2026-10-04). 메뉴 안([`Drawn::menu`])의 휠은 아무것도 안 한다 —
-    /// 메뉴는 구르지 않는다. 밖이라도 누르기·휠이 아닌 것(오른쪽·가운데 단추, 뗌)은 메뉴를 그대로 둔다 — 둘러볼 때도
-    /// 아무 일이 없는 손짓이라 닫기만 하면 메뉴가 까닭 없이 사라진다.
-    fn menu_mouse(&self, kind: MouseEventKind, wheel: Option<isize>, at: Position) -> bool {
+    /// 메뉴를 닫고 그 손짓을 그대로 한다(사용자 결정 2026-10-04). 밖이라도 누르기·휠이 아닌 것(오른쪽·가운데 단추,
+    /// 뗌)은 메뉴를 그대로 둔다 — 둘러볼 때도 아무 일이 없는 손짓이라 닫기만 하면 메뉴가 까닭 없이 사라진다.
+    ///
+    /// 메뉴 안([`Drawn::menu`])에서 칸([`Drawn::menu_keys`])을 누르면 **그 칸의 키를 친 것이다** — 키와 같은 길
+    /// (`App::key`)로 보내므로 묶음(`+화면`)은 한 층 내려가고, 상태를 대는 항목은 메뉴를 열어 두고(moai-osgw), 나가는 법은
+    /// 닫거나 한 층 올라간다. 키로 칠 때와 마우스로 누를 때가 갈리지 않는다. 칸 사이·가름줄·접두어 이름은 아무 일도
+    /// 없고, 메뉴 위의 휠도 그렇다 — 메뉴는 구르지 않는다.
+    fn menu_mouse(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) -> bool {
         if self.drawn.menu.is_some_and(|r| r.contains(at)) {
+            let hit = self.drawn.menu_keys.iter().find(|(r, _)| r.contains(at)).map(|&(_, k)| k);
+            if let (MouseEventKind::Down(MouseButton::Left), Some(k)) = (kind, hit) {
+                self.key(k);
+            }
             return false;
         }
         matches!(kind, MouseEventKind::Down(MouseButton::Left)) || wheel.is_some()
@@ -436,6 +447,100 @@ mod tests {
         roll(&mut a, true, lx, ly);
         assert!(!menu::open(&a.chord), "메뉴 밖의 휠이 메뉴를 안 닫았다");
         assert_eq!(a.cursor, 3, "메뉴를 닫은 휠이 커서를 안 옮겼다");
+    }
+
+    /// 그린 화면에서 `want` 가 처음 선 자리 — **화면에 보이는 그대로 누른다.** 누르는 자리를 `Drawn` 에서 꺼내 누르면
+    /// 칠한 자리와 누르는 자리가 갈려도 시험이 초록이다.
+    fn spot(lines: &[String], want: &str) -> (u16, u16) {
+        lines
+            .iter()
+            .enumerate()
+            .find_map(|(y, l)| l.find(want).map(|i| (crate::text::width(&l[..i]) as u16, y as u16)))
+            .unwrap_or_else(|| panic!("화면에 `{want}` 가 없다\n{}", lines.join("\n")))
+    }
+
+    /// 메뉴가 선 층 — 닫혔으면 빈 글이다.
+    fn layer_of(a: &App) -> String {
+        if menu::open(&a.chord) { menu::title(a.chord.held()) } else { String::new() }
+    }
+
+    /// **메뉴의 칸을 누르면 그 칸의 키를 친 것이다**(moai-m6ni, 사용자 결정 2026-10-04) — 묶음은 한 층 내려가고, 상태를
+    /// 대는 항목은 메뉴를 열어 둔 채 바뀌고(moai-osgw), 한 번에 끝나는 항목은 하고 닫는다. 접두어 줄의 나가는 법도 그
+    /// 키다(`Esc` 닫기·`Bksp` 위로). 칸 사이와 가름줄은 아무 일도 없다.
+    #[test]
+    fn a_click_on_a_menu_item_is_its_key() {
+        let mut a = drawn(10, 100, 20);
+        a.hit("SPC");
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        // 뿌리는 두 열이다 — `v` 는 둘째 열 첫 줄이고, 그 앞 두 칸은 열 사이다.
+        let (vx, vy) = spot(&lines, "v : +");
+        click(&mut a, vx - 1, vy);
+        assert_eq!(layer_of(&a), "SPC", "열 사이를 눌렀는데 무언가 했다");
+        let shut = a.drawn.menu.expect("메뉴가 선 자리를 안 남겼다");
+        click(&mut a, vx, shut.y);
+        assert_eq!(layer_of(&a), "SPC", "가름줄을 눌렀는데 무언가 했다");
+        // 칸의 끝(낱말 위)을 눌러도 그 칸이다.
+        click(&mut a, vx + 6, vy);
+        assert_eq!(layer_of(&a), "SPC v", "묶음을 눌렀는데 한 층 안 내려갔다");
+
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        assert!(a.detail_open, "시험의 전제 — 상세가 보인다");
+        let (x, y) = spot(&lines, "d : ");
+        click(&mut a, x, y);
+        assert!(!a.detail_open, "상세 칸 토글을 눌렀는데 안 바뀌었다");
+        assert_eq!(layer_of(&a), "SPC v", "토글을 눌렀는데 메뉴가 닫혔다 — 키로 칠 때는 열려 있다");
+
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        let (x, y) = spot(&lines, "Bksp");
+        click(&mut a, x, y);
+        assert_eq!(layer_of(&a), "SPC", "Bksp 를 눌렀는데 한 층 안 올라갔다");
+
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        let (x, y) = spot(&lines, "v : +");
+        click(&mut a, x, y);
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        let (x, y) = spot(&lines, "Esc");
+        click(&mut a, x, y);
+        assert_eq!(layer_of(&a), "", "Esc 를 눌렀는데 메뉴가 안 닫혔다");
+
+        // 한 번에 끝나는 항목 — 화면 고르기는 하고 닫는다.
+        a.hit("SPC");
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        let (x, y) = spot(&lines, "g : +");
+        click(&mut a, x, y);
+        let lines = super::super::draw::tests::render(&mut a, 100, 20);
+        let (x, y) = spot(&lines, "b : ");
+        click(&mut a, x, y);
+        assert!(a.board(), "보드를 눌렀는데 보드가 안 섰다");
+        assert_eq!(layer_of(&a), "", "화면을 고르고도 메뉴가 열려 있다");
+    }
+
+    /// **격자가 접혀 접두어 줄 하나로 선 메뉴도 누른다**(moai-m6ni) — 낮은 창에서는 항목이 맨 아랫줄에 선다. 통계 창
+    /// 위의 메뉴도 같은 칸을 누른다(사용자 결정 2026-10-04).
+    #[test]
+    fn a_folded_menu_and_the_menu_over_the_stats_window_take_clicks_too() {
+        let mut a = drawn(10, 100, 6);
+        a.hit("SPC");
+        let lines = super::super::draw::tests::render(&mut a, 100, 6);
+        assert_eq!(a.drawn.menu.map(|r| r.height), Some(1), "시험의 전제 — 격자가 접혔다\n{}", lines.join("\n"));
+        let (x, y) = spot(&lines, "v +");
+        click(&mut a, x, y);
+        assert_eq!(layer_of(&a), "SPC v", "접힌 메뉴의 묶음을 눌렀는데 한 층 안 내려갔다");
+
+        let mut a = drawn(30, 100, 12);
+        a.hit("SPC g s SPC");
+        let lines = super::super::draw::tests::render(&mut a, 100, 12);
+        let (x, y) = spot(&lines, "g : +");
+        click(&mut a, x, y);
+        assert_eq!(layer_of(&a), "SPC g", "통계 창 위 메뉴의 묶음을 눌렀는데 한 층 안 내려갔다");
+        let lines = super::super::draw::tests::render(&mut a, 100, 12);
+        let (x, y) = spot(&lines, "l : ");
+        click(&mut a, x, y);
+        assert_eq!(
+            (a.mode.clone(), layer_of(&a)),
+            (Mode::Browse, String::new()),
+            "목록을 눌렀는데 통계 창이 안 닫혔다"
+        );
     }
 
     /// **휠은 마우스가 올라선 칸이 받고 포커스는 그대로다**(moai-irrj.6on). 목록 위에서는 커서가 세 줄씩
