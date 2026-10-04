@@ -310,9 +310,9 @@ pub enum Browse {
     Jot,
     Pick,
     Unregister,
-    /// 통계 창을 연다 — `SPC p s`(moai-1hka.bq9). 프로젝트 안이면 그 프로젝트를, 한눈 보기면 커서가
-    /// 선 줄의 프로젝트를 센다(`SPC n`·`r` 과 같은 규칙).
-    Stats,
+    /// 화면을 고른다 — `SPC g l`·`b`·`s`(moai-z46r). **토글이 아니라 고르는 키다**: 지금 화면을 다시 골라도 그
+    /// 화면에 남는다. 통계만은 다시 고르면 새로 센다 — 열 때마다 새로 여는 창이다.
+    Go(Screen),
     ClearFilter,
     Worktree,
     Raw,
@@ -339,9 +339,6 @@ pub enum Browse {
     Cell(super::view::Field),
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
     Detail,
-    /// 목록과 칸반 보드를 오간다 — `SPC v b`(moai-9nfw). **새 창이 아니라 목록의 배치다**: 커서·거름망·보기·
-    /// 상세는 둘이 한 벌이다. 고른 배치는 설정에 남는다.
-    Board,
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
     /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v d`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
@@ -358,6 +355,37 @@ pub enum Browse {
     ReadAll,
     /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
     ReadGroup,
+}
+
+/// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
+///
+/// **목록과 보드는 한 화면의 두 배치다**(moai-9nfw) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
+/// `[tui] layout` 에 남는다. **통계는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    List,
+    Board,
+    Stats,
+}
+
+impl Screen {
+    /// 메뉴의 낱말.
+    pub fn word(self, lang: Lang) -> &'static str {
+        match self {
+            Screen::List => say(lang, "tui.menu.list"),
+            Screen::Board => say(lang, "tui.menu.board"),
+            Screen::Stats => say(lang, "tui.menu.stats"),
+        }
+    }
+
+    /// 지금 화면이라는 표시 — 뿌리 메뉴의 `g : +화면 [보드]`. **색이 혼자 뜻을 지지 않는다.**
+    pub fn state(self, lang: Lang) -> &'static str {
+        match self {
+            Screen::List => say(lang, "tui.state.list"),
+            Screen::Board => say(lang, "tui.state.board"),
+            Screen::Stats => say(lang, "tui.state.stats"),
+        }
+    }
 }
 
 /// 칸을 옮기는 쪽. **조각이라 칸이 무엇인지 모른다** — 이름도 갈 곳도 든 쪽이 재서
@@ -485,7 +513,8 @@ pub const LEADER: Key = Key::plain(' ');
 /// `SPC r` 로 옮겼다가 걷었고(moai-en4u — 손으로 다시 읽을 까닭을 자동 갱신이 다 받았다,
 /// `App::follow`), 그 글자는 읽음이 받았다.
 ///
-/// **SPC 밑 묶음은 넷이다**(moai-en4u): `v` 보기 · `s` 정렬 · `c` 열 · `m` 읽음, 그리고 `p` 프로젝트.
+/// **SPC 밑 묶음은 넷이다**(moai-en4u): `v` 보기 · `s` 정렬 · `c` 열 · `m` 읽음, 그리고 `p` 프로젝트와 `g` 화면
+/// (moai-z46r)·`o` 옵션.
 /// 정렬과 열은 우선순위·생성·수정·담당(p·c·u·a)을 같은 글자로 부른다 — `SPC s a`·`SPC c a` 가 둘 다
 /// 담당이다. `t` 만 갈린다: 정렬의 `t` 는 제목, 열의 `t` 는 태그다(사용자 결정). 옛 키는
 /// 별칭으로 남기지 않았다(사용자 결정: 혼자 쓰는 지금이 끊을 때다).
@@ -565,8 +594,16 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
-        // **통계는 `p`(project) 밑이다**(moai-1hka.bq9, 2026-10-01 사용자 결정) — 세는 것이 한 프로젝트라서다.
-        row!(Stats, Some("SPC p s"), LEADER, Key::plain('p'), Key::plain('s')),
+        // **화면은 `SPC g`(go to)가 고른다**(moai-z46r, 2026-10-04 사용자 결정). 보드는 `SPC v b`, 통계는 `SPC p s` 에
+        // 있었다 — 보기 토글과 프로젝트 밑이라, 화면이 하나 늘 때마다 어느 묶음에 둘지를 새로 정해야 했다. 다음 화면은
+        // 여기에 `SPC g <글자>` 한 줄을 더해 든다. 옛 두 키는 별칭 없이 걷었다(1.0 전이라 지금 끊는다).
+        //
+        // **고르면 메뉴를 닫는다** — 상태를 대는 토글과 달리 한 번에 끝나는 일이다. 지금 화면은 뿌리 메뉴의 묶음 줄이
+        // 댄다(`g : +화면 [보드]`, `menu::entries`). **통계 창에서도 이 묶음만은 선다**(`Ctx::stats`) — 세 화면이
+        // 서로 오가는 자리라서다.
+        row!(Go(Screen::List), Some("SPC g l"), LEADER, Key::plain('g'), Key::plain('l')),
+        row!(Go(Screen::Board), Some("SPC g b"), LEADER, Key::plain('g'), Key::plain('b')),
+        row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -604,9 +641,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 상세 칸은 `d`(detail) — 자리 고르기 `SPC o d` 와 같은 글자다(moai-mxvn, 2026-09-22 사용자
         // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
         // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
-        // 보드는 `b`(board) — 무엇이 서는가가 아니라 선 줄을 **어떻게 놓는가**지만, 목록 칸을 켜고 끄는 상세(`d`)와
-        // 한 자리에 둔다: 둘 다 몸통의 꼴을 바꾸고, 사람이 고르는 것은 "무엇을 볼까" 의 한 갈래다(moai-9nfw).
-        row!(Board, Some("SPC v b"), LEADER, Key::plain('v'), Key::plain('b')),
         row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
@@ -704,6 +738,9 @@ pub struct Ctx {
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
     /// 빼고다.
     pub board: bool,
+    /// 통계 창이 떠 있는가(moai-z46r). **메뉴에는 화면 고르기(`SPC g`)만 서고**, 메뉴를 닫는 이동키는 창을 굴린다 —
+    /// 창이 목록과 상세를 통째로 덮어, 그 밖의 항목은 눌러도 보이는 것이 없다.
+    pub stats: bool,
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
@@ -723,6 +760,17 @@ pub struct Ctx {
     pub right_pane: &'static str,
     pub up_pane: &'static str,
     pub down_pane: &'static str,
+}
+
+impl Ctx {
+    /// 지금 화면 — 통계 창이 떠 있으면 통계, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미 그 답을 든다.
+    pub fn screen(&self) -> Screen {
+        match (self.stats, self.board) {
+            (true, _) => Screen::Stats,
+            (false, true) => Screen::Board,
+            (false, false) => Screen::List,
+        }
+    }
 }
 
 /// 켜지지 않은 까닭.
@@ -749,6 +797,11 @@ impl Browse {
     pub fn enabled(self, c: &Ctx) -> Result<(), Off> {
         use Browse::*;
         match self {
+            // **통계 창 위에서는 화면 고르기만 선다**(moai-z46r, 사용자 결정) — 창이 목록과 상세를 통째로 덮어, 다른
+            // 항목은 눌러도 보이는 것이 없다. 이동은 켜 둔다: 메뉴를 닫는 이동키(moai-y8v2)가 그 자리에서 창을 굴린다
+            // (`App::stats_key`). 끄면 열린 메뉴에서 `j` 가 먹통이다.
+            Go(_) | Step(_) if c.stats => Ok(()),
+            _ if c.stats => Err(Off::Quiet),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -857,12 +910,11 @@ impl Browse {
             Jot => say(c.lang, "tui.menu.jot"),
             Pick => say(c.lang, "tui.menu.pick"),
             Unregister => say(c.lang, "tui.menu.unregister"),
-            Stats => say(c.lang, "tui.menu.stats"),
+            Go(s) => s.word(c.lang),
             Worktree => say(c.lang, "tui.menu.worktree"),
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
             Detail => say(c.lang, "tui.menu.detail"),
-            Board => say(c.lang, "tui.menu.board"),
             Read => say(c.lang, "tui.menu.read"),
             ReadAll => say(c.lang, "tui.menu.read_all"),
             ReadGroup => say(c.lang, "tui.menu.read_group"),
@@ -895,9 +947,6 @@ impl Browse {
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
             Browse::DetailAt => Some(c.detail_at.word(c.lang)),
-            // **지금 선 배치를 낱말로 댄다** — 상세의 자리와 같다.
-            Browse::Board if c.board => Some(say(c.lang, "tui.state.board")),
-            Browse::Board => Some(say(c.lang, "tui.state.list")),
             Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on")),
             Browse::Mouse => Some(say(c.lang, "tui.state.off")),
             _ => None,
@@ -917,18 +966,7 @@ impl Browse {
         use Browse::*;
         matches!(
             self,
-            Worktree
-                | Raw
-                | Column(_)
-                | Deferred
-                | Ideas
-                | Archived
-                | Sort(_)
-                | Cell(_)
-                | Detail
-                | DetailAt
-                | Board
-                | Mouse
+            Worktree | Raw | Column(_) | Deferred | Ideas | Archived | Sort(_) | Cell(_) | Detail | DetailAt | Mouse
         )
     }
 
@@ -966,7 +1004,9 @@ impl Browse {
             Pick if c.layer => say(c.lang, "tui.act.pick"),
             Pick => say(c.lang, "tui.act.pick_project"),
             Unregister => say(c.lang, "tui.act.unregister"),
-            Stats => say(c.lang, "tui.act.stats"),
+            Go(Screen::List) => say(c.lang, "tui.act.list"),
+            Go(Screen::Board) => say(c.lang, "tui.act.board"),
+            Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
@@ -983,9 +1023,6 @@ impl Browse {
             Sort(_) => say(c.lang, "tui.act.sort"),
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
-            // 가는 곳을 댄다 — 보드에서는 목록으로, 목록에서는 보드로.
-            Board if c.board => say(c.lang, "tui.act.list"),
-            Board => say(c.lang, "tui.act.board"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
@@ -1452,14 +1489,14 @@ mod tests {
         assert_eq!(Browse::Collapse.enabled(&board), Ok(()), "뿌리의 보드에서 h 가 나가기로 읽혔다");
         assert_eq!(Browse::ExpandAll.enabled(&board), Err(Off::Quiet));
         assert_eq!(Browse::Expand.enabled(&Ctx { list_focus: false, ..board }), Err(Off::Quiet));
-        assert_eq!(Browse::Board.enabled(&board), Ok(()));
+        assert_eq!(Browse::Go(Screen::List).enabled(&board), Ok(()));
         // 한눈 보기에도 보드가 선다(moai-oagj.vcj) — 프로젝트 머리줄에서는 `Tab` 이 목록처럼 다 편다.
-        assert_eq!(Browse::Board.enabled(&Ctx { layer: true, rows_here: true, ..Ctx::default() }), Ok(()));
+        assert_eq!(Browse::Go(Screen::Board).enabled(&Ctx { layer: true, rows_here: true, ..Ctx::default() }), Ok(()));
         let head = Ctx { layer: true, head: true, group: true, leaf: false, root: true, ..board };
         assert_eq!(Browse::ExpandAll.enabled(&head), Ok(()), "머리줄의 Tab 이 조용하다");
         assert_eq!(Browse::Expand.enabled(&head), Ok(()));
-        assert_eq!(Browse::Board.state(&board), Some(say(board.lang, "tui.state.board")));
-        assert_eq!(Browse::Board.state(&Ctx::default()), Some(say(board.lang, "tui.state.list")));
+        assert_eq!(board.screen(), Screen::Board);
+        assert_eq!(Ctx::default().screen(), Screen::List);
     }
 
     /// **상태를 대는 동작은 모두 [`Browse::stateful`] 이다.** 둘이 갈리면 메뉴가 `[보임]` 을 단
@@ -1640,16 +1677,36 @@ mod tests {
         each("stats", STATS);
     }
 
-    /// **통계 창은 `SPC p s` 다**(moai-1hka.bq9) — `p`(project) 밑, 등록·해제 곁이다. 창 안의 키는 적다: 굴리기,
-    /// `b`(주↔날), Esc. **`q` 는 창을 안 닫는다** — 탐색에서 아무것도 안 하는 글자다(moai-en4u).
+    /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
+    /// (`SPC v b`·`SPC p s`)는 별칭 없이 걷었다. 어디서든 서고 포커스와 상관이 없다 — 한눈 보기에서도 보드가 서고,
+    /// 통계는 커서의 프로젝트를 센다.
+    ///
+    /// 통계 창 위에서는 화면 고르기와 이동만 켜진다 — 메뉴에 `SPC g` 하나가 서고, 메뉴를 닫는 이동키가 창을 굴린다.
+    /// 창 안의 키는 적다: 굴리기, `b`(주↔날), Esc. **`q` 는 창을 안 닫는다** — 탐색에서 아무것도 안 하는 글자다(moai-en4u).
     #[test]
-    fn statistics_open_from_spc_p_s_and_the_window_keeps_its_keys_few() {
-        let seq = parse_seq("SPC p s").unwrap();
-        assert_eq!(lookup(BROWSE, &seq), Lookup::Run(Browse::Stats));
-        assert_eq!(label(BROWSE, Browse::Stats), "SPC p s");
-        assert_eq!(Browse::Stats.enabled(&inside()), Ok(()));
-        assert_eq!(Browse::Stats.enabled(&layer()), Ok(()), "한눈 보기에서도 커서의 프로젝트를 센다");
-        assert_eq!(Browse::Stats.enabled(&Ctx { list_focus: false, ..inside() }), Ok(()), "포커스와 상관없이 연다");
+    fn screens_are_chosen_under_spc_g_and_the_stats_window_keeps_its_keys_few() {
+        for (keys, to) in [("SPC g l", Screen::List), ("SPC g b", Screen::Board), ("SPC g s", Screen::Stats)] {
+            assert_eq!(lookup(BROWSE, &parse_seq(keys).unwrap()), Lookup::Run(Browse::Go(to)), "{keys}");
+            assert_eq!(label(BROWSE, Browse::Go(to)), keys);
+            assert_eq!(Browse::Go(to).enabled(&inside()), Ok(()), "{keys}");
+            assert_eq!(Browse::Go(to).enabled(&layer()), Ok(()), "한눈 보기에서 {keys} 가 꺼졌다");
+            assert_eq!(
+                Browse::Go(to).enabled(&Ctx { list_focus: false, ..inside() }),
+                Ok(()),
+                "포커스가 {keys} 를 껐다"
+            );
+            assert_eq!(Browse::Go(to).enabled(&Ctx { stats: true, ..inside() }), Ok(()), "통계 창이 {keys} 를 껐다");
+            assert!(!Browse::Go(to).stateful(), "{keys} 가 메뉴를 열어 둔다 — 고르는 키는 한 번에 끝난다");
+        }
+        for gone in ["SPC v b", "SPC p s"] {
+            assert_eq!(lookup(BROWSE, &parse_seq(gone).unwrap()), Lookup::Unknown, "옛 키 {gone} 가 남았다");
+        }
+        let stats = Ctx { stats: true, ..inside() };
+        assert_eq!(stats.screen(), Screen::Stats);
+        assert_eq!(Browse::Step(Move::LineDown).enabled(&stats), Ok(()), "통계 창의 메뉴에서 이동키가 먹통이다");
+        for off in [Browse::Quit, Browse::Grep, Browse::Jot, Browse::Pick, Browse::Detail, Browse::Read] {
+            assert_eq!(off.enabled(&stats), Err(Off::Quiet), "통계 창 위에서 {off:?} 가 섰다");
+        }
         assert_eq!(lookup(STATS, &[press(KeyCode::Char('b'))]), Lookup::Run(Stat::Bucket));
         assert_eq!(lookup(STATS, &[press(KeyCode::Esc)]), Lookup::Run(Stat::Close));
         assert_eq!(lookup(STATS, &[press(KeyCode::Char('j'))]), Lookup::Run(Stat::Step(Move::LineDown)));
@@ -1872,7 +1929,9 @@ mod tests {
             "SPC /",
             "SPC p a",
             "SPC p d",
-            "SPC p s",
+            "SPC g l",
+            "SPC g b",
+            "SPC g s",
             "SPC v w",
             "SPC v r",
             "SPC s p",
@@ -2002,7 +2061,7 @@ mod tests {
     /// 생각 담기 문단.
     const JOTTING: &str = "SPC n opens the jot form";
     /// 통계 창 문단(moai-1hka.bq9).
-    const STATISTICS: &str = "SPC p s opens the statistics window";
+    const STATISTICS: &str = "SPC g s opens the statistics window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선

@@ -1277,6 +1277,9 @@ impl App {
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
         }
+        // 걷은 저널 자리로 다시 읽으라는 표도 그 프로젝트의 것이다(리뷰 moai-mkyg.n60, [`App::reread`]) — 들어가는
+        // 프로젝트는 새로 읽히므로, 남기면 그 읽기 바로 뒤에 한 번 더 읽는다.
+        self.reread = false;
         // 커밋 표도 프로젝트에 매인 것이다(moai-a4i0). 짓던 것을 놓지 않으면 떠난 프로젝트의
         // 이력을 마저 걷는 동안 층이 빠른 걸음으로 깨어 있고, 그 답이 다음 프로젝트의 표를
         // 세우는 자리를 막는다(`follow_commits` 는 도는 것이 있으면 새로 안 띄운다).
@@ -3634,11 +3637,11 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("✓ 담김 · one · ")), "{:?}", a.notice);
     }
 
-    /// **한눈 보기에서 `SPC p s` 는 커서가 선 줄의 프로젝트를 센다**(moai-1hka.bq9) — 머리줄이면 그 프로젝트,
+    /// **한눈 보기에서 `SPC g s` 는 커서가 선 줄의 프로젝트를 센다**(moai-1hka.bq9) — 머리줄이면 그 프로젝트,
     /// 펼친 이슈 줄이면 그 줄이 사는 프로젝트다(`SPC n`·`r` 과 같은 규칙). 아직 안 읽은 프로젝트도 그 자리에서
     /// 읽어 센다. 닫으면 층의 같은 자리다.
     #[test]
-    fn spc_p_s_on_the_layer_counts_the_project_of_the_row_under_the_cursor() {
+    fn spc_g_s_on_the_layer_counts_the_project_of_the_row_under_the_cursor() {
         let s = Scratch::fenced("layer-stats");
         let one = s.project("one", &[("argos-0001", "one 의 줄", "todo")]);
         let two = s.project("two", &[("argos-0001", "two 의 줄", "todo"), ("argos-0002", "two 의 둘째", "done")]);
@@ -3647,7 +3650,7 @@ mod tests {
 
         let head = a.rows().iter().position(|r| matches!(r, Row::Project(1))).expect("two 의 머리줄");
         a.cursor = head;
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         let Mode::Stats(w) = &a.mode else { panic!("창이 안 열렸다 — {:?} / {:?}", a.mode, a.notice) };
         assert_eq!((w.project.as_str(), w.stats().rows), ("two", 2), "머리줄의 프로젝트를 안 셌다");
         assert_eq!(w.filter, None, "한눈 보기에는 거름망이 없다");
@@ -3661,7 +3664,7 @@ mod tests {
         let item =
             a.rows().iter().position(|r| matches!(r, Row::Item(super::super::Seat::Place(0), ..))).expect("one 의 줄");
         a.cursor = item;
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         let Mode::Stats(w) = &a.mode else { panic!("창이 안 열렸다 — {:?} / {:?}", a.mode, a.notice) };
         assert_eq!((w.project.as_str(), w.stats().rows), ("one", 1), "이슈 줄의 프로젝트를 안 셌다");
         // 두 프로젝트가 같은 id 를 써도 남의 줄을 안 센다 — two 의 둘째(done)가 여기 없다.
@@ -4728,7 +4731,7 @@ mod tests {
     }
 
     /// **목록에서 보드로 오며 설 카드가 없으면 그 줄의 프로젝트 머리줄에 선다**(리뷰) — 첫 줄로 떨어지던 때는 빈 에픽
-    /// 하나에서 `SPC v b` 를 누르면 맨 위 프로젝트의 머리줄로 가, 보던 프로젝트를 잃었다.
+    /// 하나에서 `SPC g b` 를 누르면 맨 위 프로젝트의 머리줄로 가, 보던 프로젝트를 잃었다.
     #[test]
     fn flipping_to_the_board_from_a_group_with_no_card_stays_in_its_project() {
         use crate::tui::Seat;
@@ -4755,7 +4758,7 @@ mod tests {
             })
             .unwrap_or_else(|| panic!("빈 에픽이 목록에 없다: {rows:?}"));
         a.cursor = epic;
-        a.hit("SPC v b Esc");
+        a.hit("SPC g b");
         assert!(a.board(), "보드로 안 갔다");
         assert_eq!(a.rows()[a.cursor], Row::Project(1), "보던 프로젝트 밖으로 갔다");
     }

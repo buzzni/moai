@@ -174,7 +174,7 @@ pub enum Layout {
 }
 
 impl Layout {
-    /// 다른 쪽 — `SPC v b` 가 오간다.
+    /// 다른 쪽 — `SPC g l`·`b` 가 지금과 다른 배치를 고르면 이리 간다(`App::go`).
     pub fn flip(self) -> Layout {
         match self {
             Layout::List => Layout::Board,

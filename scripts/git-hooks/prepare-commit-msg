@@ -66,11 +66,16 @@ case $MOAI_ACTOR in
 *) exit 0 ;;
 esac
 
-# **뒤에서부터 여는 괄호를 찾는다** — `Actor::parse` 가 `rsplit_once('(')` 를 쓰는 것과 같은
-# 자다. 이름에 괄호가 든 사람이 실제로 있고(`model::tests::a_name_with_brackets_still_parses`),
+# **끝의 한 쌍만 문다.** 이름에 괄호가 든 사람이 실제로 있고(`model::tests::a_name_with_brackets_still_parses`),
 # BRE 의 `.*` 는 가장 긴 것을 물어 **앞** 괄호에서 자른다 — `레이븐 (부재중) (r@b.c)` 가
 # `레이븐 <부재중) (r@b.c>` 로 적히던 자리다. 안쪽에 괄호를 안 들이면(`[^()]*`) 마지막 한
-# 쌍만 걸려 Rust 쪽과 같은 곳에서 갈린다.
+# 쌍만 걸린다.
+#
+# `Actor::parse` 는 끝의 `)` 가 닫는 `(` 를 짝을 세어 찾아 메일 안의 괄호(`a(b)@x.io`)도 메일로
+# 든다(moai-v4p4.6w1). 여기는 짝을 안 센다 — 그런 메일은 바로 아래 `sed` 가 안 물어 그 밑의 `' <'`
+# 거르개에서 **아무것도 안 적고** 지나간다(`the_commit_hook_writes_the_same_actor_moai_itself_would_accept`
+# 가 붙잡는다). 반쪽만 적힌 트레일러는 없는 것보다 나쁘다는 자리에 서고, 껍데기로 짝을 세는 고리를
+# 들일 만큼 흔한 꼴이 아니다.
 moai_who=$(printf '%s' "$MOAI_ACTOR" | sed 's/[[:space:]]*(\([^()]*\))[[:space:]]*$/ <\1>/')
 moai_name=${moai_who%' <'*}
 moai_mail=${moai_who##*' <'}

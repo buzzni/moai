@@ -147,13 +147,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
     // 글에 밀려 사라진다.
     let keys_h = if matches!(app.mode, Mode::Ask(_) | Mode::Filter(_)) { 2 } else { 1 };
-    // SPC 메뉴는 탐색 중에만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다.
+    // SPC 메뉴는 탐색 중과 통계 창 위에서만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다. 통계 창 위에서는 화면
+    // 고르기 하나만 선다(moai-z46r, `keys::Ctx::stats`).
     //
     // **창은 몸통을 밀어 올린다**(moai-apsa). 덮으면 커서가 선 줄이 창 밑에 숨어, 메뉴가 무엇에
     // 대한 것인지를 잃는다. 목록·상세는 줄어든 높이로 커서를 드러내므로(`Scroll::reveal`) 따로
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
-    let open_menu = (matches!(app.mode, Mode::Browse) && menu::open(&app.chord)).then(|| {
+    let open_menu = (matches!(app.mode, Mode::Browse | Mode::Stats(_)) && menu::open(&app.chord)).then(|| {
         let ctx = app.key_ctx(&rows);
         let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
         let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
@@ -352,7 +353,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
-        Mode::Stats(w) => stats_keys(f, w, keys, app.site.lang),
+        Mode::Stats(w) => match &open_menu {
+            Some((items, grid, waits)) => menu_line(f, app, items, grid, *waits, keys),
+            None => stats_keys(f, w, keys, app.site.lang),
+        },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
@@ -962,7 +966,8 @@ fn stats_text(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<S
     vec![stat_lines(folded(lines, width))]
 }
 
-/// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기. 이름과 낱말은 키 표([`keys::STATS`])에서 읽는다.
+/// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기, 그리고 화면을 고르는 SPC 메뉴(moai-z46r). 이름과 낱말은 키 표
+/// ([`keys::STATS`])에서 읽는다.
 fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
     use super::keys::{STATS, Stat};
     let weekly = w.bucket == crate::report::stats::Bucket::Week;
@@ -976,7 +981,8 @@ fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
     let scroll = labels(STATS, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
     let optional = vec![key(&scroll, Stat::Step(Move::LineDown).what(weekly, lang))];
     let hint = |a: Stat| key(&label(STATS, a), a.what(weekly, lang));
-    bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close)]);
+    let menu = key(&menu::title(&[LEADER.event()]), menu::root(lang));
+    bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close), menu]);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
@@ -1510,7 +1516,9 @@ fn told_of(app: &mut App) -> ([(&'static str, String); 2], Option<String>) {
 /// 헤더 셋째 줄의 글 — 못 읽은 저널의 수와 **첫 자리**, 그 까닭의 갈래([`crate::store::Unread::kind`] —
 /// `permission`·`failed`·`outside`). 줄은 `room` 칸 안에 들게 짓는다([`header`] 가 번호 칸 앞까지 남은 폭을 준다).
 ///
-/// **목록은 탐색기를 나갈 때까지 줄지 않는다**([`App::unread_journals`]) — 파일을 고쳐도 이 줄은 그때까지 선다.
+/// **고치면 1분 안에 걷힌다**([`App::unread_journals`], moai-mkyg.ncj) — 탐색기가 그 자리를 다시 재어 이제 읽히면
+/// 목록에서 뺀다. 남은 자리가 없으면 이 줄도 안 선다. **통계 창이 선 동안은 안 뺀다** — 그 창의 합은 연 순간에 센
+/// 것이라, 이 줄이 그 합이 모자랄 수 있다고 대는 유일한 말이다.
 ///
 /// **자리는 그 저장소 뿌리에서 본 길로 줄인다** — 통째의 절대 경로는 헤더의 좁은 칸에서 번호 칸까지
 /// 밀어낸다. 고치는 법(`chmod`)은 그 자리에 대는 것이라 파일까지는 남긴다. 뿌리가 이 화면의 것이
@@ -4815,7 +4823,7 @@ pub(super) mod tests {
         let at = lines.iter().position(|l| l.contains("argos-0002.x1y")).unwrap_or_else(|| panic!("{lines:#?}"));
         assert!(lines[at + 2].contains("보드 에픽"), "카드의 발줄이 에픽을 안 댄다\n{}", lines.join("\n"));
 
-        a.hit("SPC v b Esc");
+        a.hit("SPC g l");
         let lines = render(&mut a, 120, 14);
         let row = lines.iter().find(|l| l.contains("계획의 멤버")).unwrap_or_else(|| panic!("{lines:#?}"));
         assert!(row.contains("보드 에픽"), "목록의 에픽 열이 그 줄의 에픽을 안 댄다\n{}", lines.join("\n"));
@@ -7222,7 +7230,7 @@ pub(super) mod tests {
     #[test]
     fn the_stats_window_keeps_the_detail_panes_gutter() {
         let mut a = app();
-        a.hit("SPC p s");
+        a.hit("SPC g s");
         let lines = render(&mut a, 100, 40);
         let top = lines.iter().position(|l| l.starts_with('┏')).expect("통계 창의 위 테두리가 없다");
         let bottom = lines.iter().rposition(|l| l.starts_with('┗')).expect("통계 창의 아래 테두리가 없다");
@@ -7536,6 +7544,41 @@ pub(super) mod tests {
         render(&mut a, 100, 12);
         let told = a.notice.clone().expect("늘었는데 아무 말도 안 했다");
         assert!(told.contains("/w/argos/.moai/journal/lee.jsonl") && told.ends_with("(+1)"), "{told}");
+    }
+
+    /// **걷혔다가 다시 진 자리도 댄다**(moai-mkyg.ncj) — 목록이 이제 줄기도 한다(`App::reopen_journals`). 말한 수로
+    /// 세던 때는 하나가 걷히고 하나가 들면 수가 그대로라, 새로 진 자리를 이미 말한 것으로 셌다. **띠가 다른 말로 차
+    /// 있는 동안 걷혀도 말한 것에서 뺀다**(리뷰 moai-mkyg.n60) — 빼는 걸음이 띠를 기다리면, 띠가 빈 뒤에는 다시 진
+    /// 자리가 이미 말한 것으로 남는다.
+    #[test]
+    fn a_low_window_tells_a_journal_that_fails_again_after_it_was_dropped() {
+        fn unread(who: &str) -> crate::store::Unread {
+            crate::store::Unread {
+                root: "/w/argos".into(),
+                at: format!("/w/argos/.moai/journal/{who}.jsonl").into(),
+                why: crate::store::Missed::Io { kind: "permission", said: "Permission denied".into() },
+            }
+        }
+        let mut a = app();
+        a.journals = || vec![unread("kim"), unread("lee")];
+        render(&mut a, 100, 12);
+        assert!(a.notice.take().is_some(), "시험의 전제 — 둘을 말했다");
+        a.journals = || vec![unread("lee")];
+        render(&mut a, 100, 12);
+        assert_eq!(a.notice, None, "걷혔을 뿐인데 말했다");
+        a.journals = || vec![unread("lee"), unread("kim")];
+        render(&mut a, 100, 12);
+        let told = a.notice.clone().expect("다시 진 자리를 안 댔다");
+        assert!(told.contains("/w/argos/.moai/journal/kim.jsonl") && told.ends_with("(+1)"), "{told}");
+
+        a.notice = Some("다른 말".into());
+        a.journals = || vec![unread("lee")];
+        render(&mut a, 100, 12);
+        a.journals = || vec![unread("lee"), unread("kim")];
+        a.notice = None;
+        render(&mut a, 100, 12);
+        let again = a.notice.clone().expect("띠가 차 있는 동안 걷혔다가 다시 진 자리를 안 댔다");
+        assert!(again.contains("/w/argos/.moai/journal/kim.jsonl"), "{again}");
     }
 
     /// **판 줄의 넷은 서로 다른 글이다**(moai-3gia, 사용자 결정 2026-09-21). 특히 못 물은 것과
@@ -9447,7 +9490,9 @@ pub(super) mod tests {
         a.hit("SPC");
         let lines = render(&mut a, 80, 20);
         let screen = lines.join("\n");
-        for row in ["/ : 검색", "f : 거름망", "n : 생각 담기", "q : 끝내기", "p : +프로젝트", "v : +보기"]
+        // 화면 묶음은 지금 화면을 단다(moai-z46r) — 처음에는 목록이다.
+        for row in
+            ["/ : 검색", "f : 거름망", "n : 생각 담기", "q : 끝내기", "p : +프로젝트", "g : +화면 [목록]", "v : +보기"]
         {
             assert!(screen.contains(row), "{row:?} 가 없다\n{screen}");
         }
@@ -9456,7 +9501,7 @@ pub(super) mod tests {
         assert_eq!(lines[n - 8], "─".repeat(80), "전체 폭 가름줄이 아니다\n{screen}");
         assert!(lines[n - 9].starts_with(['└', '┗']), "몸통이 창 위로 밀려 올라가지 않았다\n{screen}");
         assert!(
-            lines[n - 7].contains("/ : 검색") && lines[n - 2].contains("v : +보기"),
+            lines[n - 7].contains("/ : 검색") && lines[n - 2].contains("g : +화면"),
             "한 열이 여섯 칸으로 안 섰다\n{screen}"
         );
         let bar = &lines[n - 1];

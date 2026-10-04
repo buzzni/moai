@@ -145,6 +145,19 @@ pub fn lang_of(reg: &crate::user_config::Registry) -> crate::i18n::Lang {
 /// 이 깃발이 서면 결과를 다 낸 **뒤에** 종료 코드가 1 이 된다.
 static PARTIAL: AtomicBool = AtomicBool::new(false);
 
+/// 명령이 **선 뒤에만** 낼 stderr 줄 — [`tell_after`] 가 쌓고 [`run`] 이 낸다(리뷰 moai-yivo.b5h).
+///
+/// 쓰기 전에 고른 알림을 그 자리에서 내면 둘이 어긋난다. 넘어진 `--json` 의 stderr 는 기계의 것이라 오류 객체
+/// 하나만 서야 하는데(`main` 의 실패 길) 그 앞에 사람 말 한 줄이 끼어 `code` 로 가르던 고리가 파싱 실패를
+/// 만나고, 거절된 쓰기에 "글로 받았다" 를 대면 없던 쓰기를 말한다. 그래서 넘어진 판에서는 버린다. 끝에 한 번
+/// 읽는 것은 `store::MOVED` 와 같은 꼴이다.
+static AFTER: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// [`AFTER`] 에 한 줄 — 명령이 `Ok` 로 끝나면 [`run`] 이 [`tell`] 로 낸다.
+pub(crate) fn tell_after(line: String) {
+    AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+}
+
 /// `none` 은 "비운다" 는 뜻이다. 제목이 `none` 인 이슈를 만들 일은 없다.
 /// `add` 와 `edit` 이 같은 낱말을 써야 한다 — 한쪽만 알면 방금 만든 이슈를
 /// 같은 말로 비우지 못한다.
@@ -155,6 +168,38 @@ static PARTIAL: AtomicBool = AtomicBool::new(false);
 /// `model::split_assignee` 가 접는다.
 pub fn clearable(v: &str) -> Option<String> {
     (v != "none").then(|| v.to_string())
+}
+
+/// 담당 자리의 `me` — **지금 사람이다.** 거르개([`resolve_me`])와 쓰기([`assignee_arg`])가 이 한 자로
+/// 같은 낱말을 알아본다. 한쪽만 알던 때는 `show -a me` 가 나를 고르는데 `edit -a me` 는 `me` 라는
+/// 이름을 적었다(moai-v4p4.c2x).
+fn is_me(v: &str) -> bool {
+    v.trim() == "me"
+}
+
+/// `-a` 로 받은 한 덩이를 담당 칸 둘(`이름`, `메일`)로 — `add` 와 `edit` 이 **같이 부른다**.
+///
+/// - `none` 은 비운다([`clearable`]). **앞뒤 공백은 먼저 접는다**(리뷰 moai-v4p4.f4a) — 이름
+///   (`split_assignee`)도 `me` 도 공백을 접는데 `none` 만 안 접으면 `-a " none "` 이 `none` 이라는 사람을
+///   적고, 그 줄을 `show -a none` 은 못 찾으며 `ready` 는 남의 것으로 내민다. `clearable` 이 공백을 안 접게
+///   된 날 "담당 쪽은 `split_assignee` 가 접는다" 고 했지만 `none` 은 접기 전에 갈렸다
+/// - `me` 는 지금 사람이다. 글자 그대로 적던 판은 `assignee: "me"` 를 남겨, 그 줄을 `ready` 와
+///   훅 규칙 5 가 남의 것(`owner: theirs`)으로 읽었다 — 제 손으로 맡은 줄을 집으려면 `--take` 를
+///   받아야 했다(moai-v4p4.c2x)
+/// - 나머지는 [`crate::model::split_assignee`] 가 가른다
+///
+/// **사람은 `me` 를 적었을 때만 묻는다**(`who`, [`resolve_me`] 와 같은 이름) — `edit` 은 사람을 안 묻는
+/// 쓰기라, 남에게 맡기는 부름이 사람 설정 없는 기계에서 넘어지면 안 된다. 이미 `me` 로 적힌 줄은 그대로
+/// 둔다 — 누구의 `me` 였는지 글이 말하지 않으니 읽는 쪽이 지금 사람으로 풀면 남의 줄을 제 것으로 읽는다.
+pub fn assignee_arg<E>(
+    raw: &str,
+    who: impl FnOnce() -> Result<crate::model::Actor, E>,
+) -> Result<(Option<String>, Option<String>), E> {
+    match clearable(raw.trim()) {
+        None => Ok((None, None)),
+        Some(v) if is_me(&v) => who().map(|a| a.as_assignee()),
+        Some(v) => Ok(crate::model::split_assignee(&v)),
+    }
 }
 
 /// **있는 파일이고 내가 그것을 돌릴 수 있는가.** 재는 것은 딱 그것이다.
@@ -243,8 +288,10 @@ pub fn had_partial() -> bool {
 /// 이 줄은 `moai status` 의 첫 화면 곁에 서므로, 그 화면과 같은 말이어야 한다.
 pub fn gather(ctx: &Ctx, repo: &crate::store::Repo, worktree: bool) -> R<crate::worktree::Gathered> {
     let g = crate::worktree::gather(repo, worktree)?;
+    // **[`tell`] 로 낸다**(리뷰 moai-yivo.b5h) — `eprintln!` 은 읽는 쪽이 사라진 stderr 에서 패닉해, "언제나 0"
+    // 이라고 적은 `prime --worktree` 가 판 하나 못 내고 101 로 끝났다.
     for t in g.unfound.iter().chain(&g.trouble) {
-        eprintln!("{}", crate::view::trouble_line(ctx.lang(), t));
+        tell(&crate::view::trouble_line(ctx.lang(), t));
     }
     Ok(g)
 }
@@ -376,6 +423,11 @@ pub(crate) fn tell(line: &str) {
 pub fn run(mut cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
     let out = dispatch(&ctx, cli);
+    // **선 판에서만 낸다**([`AFTER`]) — 넘어진 판의 것은 버린다.
+    let after = std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()));
+    if out.is_ok() {
+        after.iter().for_each(|line| tell(line));
+    }
     // **시간대를 못 풀었으면 한 줄로 알린다**(moai-77ap) — 막지 않는다. 종료 코드도 안 건드리고,
     // `--json` 은 화면 글을 안 내므로 stderr 뿐이다. 시간대를 실제로 읽은 명령만 이 자리에 닿는다:
     // 화면을 지었어도 시각을 안 그린 판은 할 말이 없다([`Ctx::zone_trouble`]).
@@ -946,7 +998,7 @@ pub fn resolve_me(
     who: impl FnOnce() -> Result<String, crate::model::NoActor>,
 ) -> Result<(), crate::model::NoActor> {
     use crate::query::Sel;
-    let asked = |s: &Sel| matches!(s, Sel::Is(v) if v == "me");
+    let asked = |s: &Sel| matches!(s, Sel::Is(v) if is_me(v));
     if !sel.iter().any(asked) {
         return Ok(());
     }
@@ -1164,6 +1216,18 @@ mod tests {
         std::fs::write(&exe, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o011)).unwrap();
         assert!(!runnable(&exe), "임자가 못 돌리는 파일을 돈다고 한다");
+    }
+
+    /// **`-a` 의 낱말은 공백을 접고 읽는다**(리뷰 moai-v4p4.f4a) — 이름(`split_assignee`)도 `me` 도 접는데
+    /// `none` 만 안 접던 판은 `-a " none "` 으로 `none` 이라는 사람을 적었다. 사람은 `me` 일 때만 묻는다.
+    #[test]
+    fn the_assignee_words_fold_their_spaces() {
+        let me = || Ok::<_, ()>(crate::model::Actor { name: "레이븐".into(), email: "r@x.io".into() });
+        let never = || -> Result<crate::model::Actor, ()> { panic!("`me` 가 아닌데 사람을 물었다") };
+        assert_eq!(assignee_arg(" none ", never), Ok((None, None)), "공백 든 `none` 을 이름으로 적었다");
+        assert_eq!(assignee_arg("none", never), Ok((None, None)));
+        assert_eq!(assignee_arg(" me ", me), Ok((Some("레이븐".into()), Some("r@x.io".into()))));
+        assert_eq!(assignee_arg(" 철수 ", never), Ok((Some("철수".into()), None)));
     }
 
     fn row_with(rest: &[(&str, &str)]) -> Issue {

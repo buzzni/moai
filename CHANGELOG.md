@@ -12,6 +12,133 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-04
+
+### Added
+
+- **`mv -m` and `defer -m` say so when the text names a file.** `-m <text>`
+  takes the text itself, so `moai mv <review> done -m closing.md` closed the
+  review with the words `closing.md`, and nothing said so. When the value is one
+  line and a file by that name exists, one line on stderr now says the journal
+  got those words and how to stream the file instead (`-m - < closing.md`) — the
+  line `--body` has carried since 0.3.0, in words of its own. It stands only
+  once the words went into the journal; the text is kept as given and the exit
+  code does not change. The `-m` help of both now says it takes text, not a path.
+
+- **Under `--json`, a project that cannot be opened carries its `code`.** The
+  overview outside a tracker (`status`, `ready`, `tui`), `project ls` and
+  `project add` gave such a project only its `error` line, so telling a link to
+  fix by hand from anything else meant reading the words. `code` now stands
+  beside it with the value the project's own commands stop with: `broken` for a
+  snapshot or config moai will not read (a link out of the checkout or into
+  `.git/`, not a regular file), `error` otherwise.
+
+### Changed
+
+- **`moai prime` no longer reads a tracker it cannot open as no tracker.** A
+  snapshot link out of the checkout, a snapshot it cannot read or a broken config
+  printed "No `.moai` here. `moai init` starts one" and `no_tracker:true`, with
+  the reason only on stderr — an agent opening a session ran `moai init`, which
+  answered that everything was in line. The page now names the reason on its
+  first line and says `moai init` will not fix it, and the reason is no longer
+  repeated on stderr. Under `--json`, `no_tracker` stands only where there is no
+  tracker; a tracker that cannot be opened carries `tracker_error` with `code` —
+  the one the repository's other commands stop with — and `said`. The exit code
+  is still always 0.
+
+- **An `AGENTS.md` that links out of the checkout or into `.git/`, or is not a
+  regular file, is no longer read.** `moai init` leaves it alone, plants
+  everything else and names the file and why — put a regular file there to get
+  the block, or pass `--no-agents` — and under `--json` it stands in `untouched`
+  as `unreadable`. `moai init --check` exits non-zero naming it, and the
+  stale-block notice on `moai status` stays quiet. Such a link used to be read:
+  `init` said it could not write the block (`unwritable`), while `status` and
+  `--check` reported the block of a file outside the repository. A directory
+  there used to stop `init` with the system's `Is a directory`. An `AGENTS.md`
+  that cannot be read for permissions or encoding still stops `init` before
+  anything is planted.
+
+- **The explorer picks its screen under `SPC g`.** `SPC g l` shows the list,
+  `SPC g b` the board and `SPC g s` the statistics window. The board was
+  `SPC v b` and the statistics `SPC p s`; both keys are gone with no alias, and
+  pressed in the menu they now do nothing, like any key it does not know.
+  Choosing is not a toggle: picking the screen that already stands leaves it as
+  it is, and the menu closes once you pick. The root of the menu names the
+  screen that stands, as in `+screen [board]`, and the board is still kept
+  under `[tui]` as `layout`. Over the statistics window `SPC` now opens the
+  menu with the screens alone — `SPC g l` and `SPC g b` close the window onto
+  the list or the board, and `SPC g s` counts again from scratch.
+
+### Fixed
+
+- **The explorer's `Journal` header row clears once the journal can be read
+  again.** Since 0.3.0 the row named a journal it could not open until you quit,
+  so after a `chmod 644` it went on calling a readable file unreadable. The
+  explorer now checks those files again once a minute and drops the ones that
+  open; if a `/` note search is in effect, it re-reads the notes too, so the
+  search finds what the file holds. It does not check while the stats window is
+  open — that window's token totals were counted without the file, and the row is
+  what says so. What `moai tui` prints when it quits, and its exit code, still
+  name every journal it failed to read along the way.
+
+- **The board no longer hangs or runs out of memory on the files `moai init`
+  looks after.** `AGENTS.md`, `.gitignore`, `.gitattributes` and `CLAUDE.md` are
+  now read the way the snapshot is: only a regular file inside the checkout and
+  outside `.git/`, and no further than the size its open handle gives. A FIFO in
+  place of `AGENTS.md`, `.gitignore` or `.gitattributes` hung `moai status`, the
+  hook's first board, the overview outside a tracker and the explorer, `moai
+  init` waited on any of the four, and a committed `AGENTS.md -> /dev/zero` ran
+  them out of memory. In a git repository git itself still waits on a FIFO
+  `.gitattributes` under `moai init` and `init --check`. A dotfile that is not
+  read is passed over the way one that cannot be read always was, and `init` no
+  longer asks for an `@AGENTS.md` pointer in a `CLAUDE.md` it cannot read.
+
+- **`moai init` no longer swaps the repository lock through a link.** A
+  committed `AGENTS.md -> .moai/lock` made `init` replace the lock file once,
+  and writes running at that moment stopped keeping each other out. No file the
+  repository holds is written through a link that lands on a repository lock —
+  the one under `.moai`, the one beside a linked `.moai/issues.jsonl`, or those
+  of a tracker nested inside the checkout. The lock is matched as a file, so a
+  name in another case on a case-insensitive volume is caught too. Such a write
+  names the lock, says to put a regular file in place of the link, and changes
+  nothing.
+
+- **`moai init` no longer plants ignore or merge rules for a place inside
+  `.git/`.** When `.moai` or `.moai/issues.jsonl` linked into `.git/`, `init`
+  wrote rules for that place into `.gitignore` and `.gitattributes`, where git
+  never looks.
+
+- **`note -b <file name>` no longer calls the note a body.** The line saying
+  the text went in as those words now says the note is those words. The same
+  line, on every command that gives it, is said only once the command stands —
+  a failed call no longer puts it ahead of the `--json` refusal object on stderr
+  — and it looks for the file where you typed the command first, so
+  `moai -C <dir> …` from elsewhere names a file your shell can stream.
+
+- **A command run from a directory that has been removed says where it failed.**
+  It printed a bare `No such file or directory (os error 2)`; it now says it
+  cannot tell where you are.
+
+- **`moai edit -a me` and `moai add -a me` make you the assignee.** They wrote
+  a person named `me` into the row, and `moai ready`, `moai prime` and the hook
+  then read it as someone else's row — picking up a row you had just taken
+  needed `--take`. `me` now means you, as it already did in `moai show -a me`.
+  Who you are is asked only when `me` is given, and when that cannot be told
+  nothing is written. A row that already holds `me` is left as it is; run
+  `moai edit <id> -a me` on it again (`moai show --all --archived --json | jq
+  -r '.[] | select(.assignee == "me").id'` lists them). `-a ' none '` with
+  spaces around it now clears the assignee instead of naming a person `none`.
+
+- **An email with brackets in it stays whole in `Name (email)`.** `--user`,
+  `MOAI_ACTOR` and `-a` cut at the last `(`, so `Kim (k(work)@x.io)` stood as
+  the name `Kim (k` and the email `work)@x.io`. With such an email in `git
+  config`, `moai ready`, `moai prime`, `moai show -a me` and the hook read your
+  own rows as someone else's. The split now takes the `(` that the closing `)`
+  pairs with, and everything the old split accepted is still accepted. Rows
+  written before this release with the cut email keep it and now read as
+  someone else's for the same person — `moai edit <id> -a me` puts them right.
+  An email holding a `(` with no partner is still misread.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added

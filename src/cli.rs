@@ -179,6 +179,11 @@ pub enum Cmd {
   with a non-zero code, a session that wires it into a start-up hook would
   open on a failure - and then this is a lint, and a lint is a gate.
 
+  With no tracker here it says how to start one (--json: no_tracker). With a
+  tracker it cannot read - a link out of the checkout, a broken config - it
+  says why instead and does not send you to `moai init` (--json: tracker_error,
+  whose code is the one the other commands stop with).
+
   Wire it where your editor injects context at session start. For Claude Code
   that is a SessionStart hook, which fires again after a compact:
 
@@ -438,21 +443,23 @@ IDEA
   stands up only what works where you are, ignores keys it does not know,
   closes on Esc or SPC and goes one level up on Backspace. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC c h, SPC v l, SPC m g).
+  unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
+  SPC v l, SPC m g).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with Esc. That level says so at the bottom right with a
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
-    SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
+  Screen — which one stands; the root menu says which [list/board/statistics]:
+    SPC g l  list                SPC g b  board — described below
+    SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred            SPC v i  ideas              SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
-    SPC v b  list or board [list/board] — the board is described below
     SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered
@@ -521,11 +528,13 @@ IDEA
   on every press and carry over to the next run and to other projects (the
   same file `moai project add` writes).
 
-  SPC v b lays the same rows out as a kanban board instead of a list. It is
-  the list's layout, not another window: the cursor, the filter, the view,
-  search, [NEW] and the detail are the list's, and the choice is kept under
-  [tui] as layout. The columns are idea, deferred and the config's columns in
-  order — idea is a kind and deferred an axis, so nothing is stored for them.
+  SPC g b lays the same rows out as a kanban board instead of a list, and
+  SPC g l brings the list back. It is the list's layout, not another window:
+  the cursor, the filter, the view, search, [NEW] and the detail are the
+  list's, and the choice is kept under [tui] as layout. The menu's root names
+  the screen that stands, as in +screen [board]. The columns are idea,
+  deferred and the config's columns in order — idea is a kind and deferred
+  an axis, so nothing is stored for them.
   SPC v i hides ideas, the idea column here and the idea rows in the list
   alike, and is kept under [tui] as hide_ideas.
   At the project root every milestone is a lane, with (no milestone) last;
@@ -585,7 +594,7 @@ IDEA
   y is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
 
-  SPC p s opens the statistics window in place of the list and the detail —
+  SPC g s opens the statistics window in place of the list and the detail —
   the numbers `moai stats` gives, drawn as bars: the flow per week, the
   columns and priorities, lead and cycle time, and AI work by model. It
   counts the project you are in, or on the one list (0) the project of the
@@ -593,7 +602,11 @@ IDEA
   passes, and the title says so. b switches the flow between weeks and
   days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
   Esc goes back to where you were, with the cursor, the filter and the
-  detail as they were. On a narrow screen it shows the same figures as text.
+  detail as they were. SPC opens the menu over it with the screens alone:
+  SPC g l and SPC g b close it onto the list or the board, and SPC g s
+  counts again from scratch — the window is opened fresh every time and
+  nothing of it is kept. On a narrow screen it shows the same figures as
+  text.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
@@ -953,7 +966,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "text", verbatim_doc_comment)]
     pub body: Option<String>,
 
-    /// Assignee. The creator when absent; `none` clears it
+    /// Assignee. The creator when absent; `none` clears it, `me` is you
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
@@ -1427,7 +1440,11 @@ pub struct MvArgs {
     pub args: Vec<String>,
 
     /// A note on this move (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while still in this column (racing pickups)
@@ -1475,7 +1492,7 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "0-3")]
     pub priority: Option<u8>,
 
-    /// Give `name (email)`. `none` clears it
+    /// Give `name (email)`. `none` clears it, `me` is you
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
@@ -1498,7 +1515,11 @@ pub struct DeferArgs {
     pub undo: bool,
 
     /// Why it is deferred (journal only). `-` reads stdin
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
+    ///
+    /// Text, not a path - a file goes in as `-m - < <file>`. A one-line
+    /// text that names a file still goes in as those words, and one
+    /// stderr line says so.
+    #[arg(short, long, value_name = "text", allow_hyphen_values = true, verbatim_doc_comment)]
     pub msg: Option<String>,
 
     /// Only while it is in this column (racing pickups)
