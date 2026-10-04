@@ -3564,3 +3564,6 @@
 {"ts":"2026-10-04T02:33:39Z","id":"moai-z46r.ug3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC g l·b·s 로 목록·보드·통계를 고르고 메뉴에 지금 화면을 보인다"}
 {"ts":"2026-10-04T02:33:39Z","id":"moai-z46r.8se","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC v b 와 SPC p s 를 걷는다"}
 {"ts":"2026-10-04T02:33:39Z","id":"moai-z46r.hc1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·README·docs/cli.md·CHANGELOG 에 새 키를 싣는다"}
+{"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.ug3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.8se","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T02:34:24Z","id":"moai-z46r.hc1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
