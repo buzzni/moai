@@ -28,7 +28,10 @@ Milestones and epics behave like directories.
   out. Rows you can go into end their title with `/`
 - `l` unfolds a group one step where it stands and `h` folds it; `Tab` unfolds
   everything under it
-- `gg` and `G` go to the top and the bottom, `Ctrl-d`/`Ctrl-u` half a page
+- `gg` and `G` go to the top and the bottom. `Ctrl-d`/`Ctrl-u` scroll half a
+  page and `Ctrl-f`/`Ctrl-b` a whole one without moving the cursor: the row you
+  chose and its detail stay put even off screen, and the next `j` or `k` brings
+  the list back to it
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
   so the same keys scroll it, and back again
 
@@ -56,7 +59,9 @@ are kept in your user config and carry over to the next run and to every project
   Nothing of it is kept; it counts afresh each time it opens
 - **`SPC g w` — the wiki.** The pages `moai wiki ls` lists, read only: the pages
   on the left with the home page first, the page under the cursor on the right.
-  On the overview it reads the project of the row under the cursor. `Enter` on
+  On the overview it reads the project of the row under the cursor. The wheel
+  and `Ctrl-d`/`Ctrl-u` scroll the page list without moving the cursor, as on
+  the main list. `Enter` on
   the list goes to the page; `Enter` on the page lists its links and the issue
   ids it names. Taking a page link goes there and `Backspace` comes back; taking
   an id closes the window onto that row, inside that project when you opened it
@@ -95,9 +100,10 @@ kept.
 - **A click** puts the focus on the pane under it and the cursor on that row or
   card. With the menu open, a click on an item presses its key and a click
   outside closes the menu first — see [the menu](#the-menu)
-- **The wheel** moves the pane under the pointer — the list's cursor, the detail,
-  the board, the statistics, either pane of the wiki — without taking the focus
-  there
+- **The wheel** scrolls the pane under the pointer — the list, the board, the
+  detail, the statistics, either pane of the wiki — without taking the focus
+  there or moving a cursor. The row you chose stays chosen even once it is off
+  screen; the next cursor key brings the list back to it
 - **Dragging the line** between the list and the detail resizes them, and the
   share is kept
 - **To select or paste with the terminal**, hold `Shift` over the list and the
@@ -178,4 +184,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul
