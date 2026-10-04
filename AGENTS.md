@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:24b292b0 -->
+<!-- moai:begin v:0.6.0 hash:3ec02764 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -27,8 +27,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
-to pick it up again. That is enough to build a loop that runs without a person — one
-such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+to pick it up again. A session a person opened reads that shape to choose its next row —
+moai never launches or drives a session itself.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -442,8 +442,10 @@ anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. A review is an issue too.** Before you call `/code-review`, create a review issue tied to
-what you are reviewing.
+**3. A review is an issue too.** Before you call a review, create a review issue tied to
+what you are reviewing. The review is `/code-review` in Claude Code, `codex review` in Codex
+and a fresh `agy -p` session in Antigravity; the other steps that differ per agent are
+under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts

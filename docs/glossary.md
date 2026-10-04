@@ -198,7 +198,7 @@ A session running the `moai-supervise` skill. It hands the [ideas](#idea) that
 have piled up, one at a time, to the sessions idling on the repository, sends
 each a [brief](#brief) and takes their reports. It picks, sends and checks; it
 does not fix and it does not merge. More in
-[working with agents](agents.md#plant-the-skills-and-hooks-into-claude).
+[working with agents](agents.md#plant-the-skills).
 
 ## Take over
 

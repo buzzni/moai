@@ -4,9 +4,9 @@ moai is built so that AI agents run the tracker beside a person. There is no
 approval gate: an agent creates, moves and closes work without asking, and the
 one thing it asks about is picking up work that belongs to someone else — a
 [take over](glossary.md#take-over). This page covers what makes that work — the
-instructions an agent reads, the skills and hooks planted into Claude, the
-letters agents leave each other, and the `--json` surface a loop of your own can
-drive. The commands'
+instructions an agent reads, the skills planted for Claude Code, Codex and
+Antigravity (with hooks for Claude Code), the letters agents leave each other,
+and the `--json` surface a session reads its queue from. The commands'
 flags are in [the CLI reference](cli.md), and the words in
 [the glossary](glossary.md).
 
@@ -28,18 +28,42 @@ the journal are never touched.
   by hand (`init` throws that edit away). `moai init --check` answers `current`,
   `stale` or `missing` and writes nothing
 
-## Plant the skills and hooks into Claude
+## Plant the skills
 
-    moai skill install                     just me (the default)
-    moai skill install --scope project     the whole team, through the committed settings
-    moai skill status                      what is installed where, and what differs
+    moai skill install                     Claude Code, just me (the default)
+    moai skill install --scope project     Claude Code, the whole team through the committed settings
+    moai skill install --agent codex       Codex and Antigravity, through the committed .agents/skills/
+    moai skill install --agent auto        whichever of claude, codex and agy is on PATH
+    moai skill status                      what is planted where, and what differs
 
-`skill install` writes the plugin into `.claude/moai-plugin/` and registers it
-with `claude`; your `settings.json` is `claude`'s to write. It is safe to run
-again, and a Claude session that is already open keeps the old copy until you
-reopen it. `moai skill uninstall` takes the registration away and leaves the
-files. The skills and hooks are for Claude Code today; other agents get the
-`AGENTS.md` block and the `--json` surface.
+`--agent` names who the skills are for — `claude` (what you get when it is left
+out), `codex`, `antigravity` or `auto` — and can be repeated.
+
+- **Claude Code gets a plugin.** `skill install` writes it into
+  `.claude/moai-plugin/` and registers it with `claude`; your `settings.json` is
+  `claude`'s to write, and `--scope` picks where it registers. A Claude session
+  that is already open keeps the old copy until you reopen it. The hooks come
+  with the plugin, and only with it
+- **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
+  naming either writes it for both. There is nothing to register — commit the
+  directory and the team has the skills. `--scope` does not apply to them, and
+  one line says so when you give it without Claude
+- **`auto` looks at PATH** for `claude`, `codex` and `agy`, says what it found,
+  and plants for Claude when it finds none of them
+
+It is safe to run again: files are only overwritten, never deleted. `moai skill
+uninstall` takes Claude's registration away and leaves the files; with
+`--agent codex` it prints the `rm -r` lines for moai's skills in
+`.agents/skills/` and deletes nothing. `moai skill status` shows Claude's
+registration, whether `.agents/skills/` holds this version's skills, and whether
+`codex` and `agy` are on PATH — and exits 0 whatever it finds.
+
+**One text serves every agent.** Both trees get the same skills. The steps only
+one agent has — entering a worktree, asking the person, calling the review,
+changing the model, clearing the window, messaging another session, stopping
+what a review left running — sit in a "Words per agent" table in the `moai` and
+`moai-supervise` skills, one column per agent, and each agent reads its own. A
+step an agent does not have reads `—`: tell the person and go on.
 
 Three skills come with it:
 
@@ -144,8 +168,8 @@ agent.
   letter too long for that is cut there, naming `moai inbox --all` for the
   rest. A letter's body holds up to 64 KB, its subject 200 characters
 - **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
-  each task is how a worker without a person gets its next one — nothing has to
-  wake it
+  each task is how a worker session — one a person opened — gets its next one;
+  nothing has to wake it
 - **Waking is a bonus.** `moai send --wake` knocks once on an idle recipient:
   when its presence row carries a tmux pane, `moai inbox` is typed into that
   pane; a Claude session cannot be woken from a command line, so the sender
@@ -157,9 +181,9 @@ Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
 (each with `id` and `read` besides the letter's own keys) and `lost` — the ids
 another agent took first.
 
-## Run agents without a person
+## Work the queue from a session
 
-Every command takes `--json`. Three are enough for a loop:
+Every command takes `--json`. Three are enough for a session to take its next row:
 
 - `moai ready --json` — `ready` is yours to pick up, `others` is ready work that
   belongs to someone else or nobody (ask first), `held` is what is deferred or
@@ -170,9 +194,8 @@ Every command takes `--json`. Three are enough for a loop:
 - `moai prime` — what this session holds and what is next, short enough to load
   into a prompt
 
-`examples/bash-agent/agent.sh` is a whole pick-work-close loop in bash and jq, and
-`examples/python-agents/agents.py` runs several agents at once. The test suite
-runs both.
+moai never launches a session or runs one headless. A person opens each one, and
+the session reads these the way that person would.
 
 **Name the AI that did the work** before closing an issue — one note, the
 [model line](glossary.md#model-line), one line per issue, read back as `work` in
@@ -198,4 +221,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-h8tn
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn
