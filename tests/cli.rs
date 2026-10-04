@@ -23901,12 +23901,13 @@ fn the_inbox_waits_for_a_letter() {
     assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&id), "{}", text(&out));
 }
 
-/// **깨우기는 벤더의 길이다**(2026-10-04 사용자 결정). Claude 는 이 CLI 가 못 깨워 보낸 쪽에 SendMessage 를
-/// 대고, 일하는 중이면 안 깨우고, 길이 없는 벤더는 다음 턴까지 둔다. Codex 는 `codex queue --thread` 를
-/// 부른다 — 여기서는 받은 인자를 적는 가짜 `codex` 로 잰다.
+/// **깨우기는 덤이다**(2026-10-04 사용자 결정 "깨우기를 덤으로 낮춘다"). Claude 는 이 CLI 가 못 깨워 보낸 쪽에
+/// SendMessage 를 대고, 일하는 중이면 안 깨우고, tmux 칸이 없으면 아무것도 안 하고 **사람 화면은 입을 다문다.**
+/// **moai 는 에이전트의 실행 파일을 안 띄운다** — 세션 id 를 든 Codex 의 장 앞에서도 `codex` 가 안 불린다. 불리면
+/// 받은 인자를 남기는 가짜 `codex` 를 PATH 앞에 둬 잰다.
 #[test]
 #[cfg(unix)]
-fn waking_takes_each_vendors_way() {
+fn waking_is_a_bonus_that_never_runs_an_agent() {
     use std::os::unix::fs::PermissionsExt;
     let s = init("mail-wake");
     let (a, b, c, d) = (Sleeper::new(), Sleeper::new(), Sleeper::new(), Sleeper::new());
@@ -23917,7 +23918,7 @@ fn waking_takes_each_vendors_way() {
     for n in ["cl", "cx", "odd"] {
         mark(s.path(), n, "idle");
     }
-    // Codex 의 실을 길 — 세션 id 를 손으로 적는다(훅이 적는 자리다).
+    // 세션 id 를 든 Codex 의 장 — 옛 판은 이것으로 `codex queue --thread` 를 띄웠다.
     let at = s.path().join(".moai/agents/cx.json");
     let card = std::fs::read_to_string(&at).unwrap();
     std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"th-1\",\"cwd\":", 1)).unwrap();
@@ -23946,8 +23947,15 @@ fn waking_takes_each_vendors_way() {
     assert_eq!(wake("busy1"), "\"wake\":{\"to\":\"busy1\",\"via\":\"none\",\"done\":false,\"why\":\"busy\"}}\n");
     assert_eq!(wake("odd"), "\"wake\":{\"to\":\"odd\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
     assert_eq!(wake("ghost"), "\"wake\":{\"to\":\"ghost\",\"via\":\"none\",\"done\":false,\"why\":\"nobody\"}}\n");
-    assert_eq!(wake("cx"), "\"wake\":{\"to\":\"cx\",\"via\":\"codex\",\"done\":true}}\n");
-    assert_eq!(std::fs::read_to_string(&said).unwrap(), "queue|--thread|th-1|--message|moai inbox|");
+    assert_eq!(wake("cx"), "\"wake\":{\"to\":\"cx\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
+    assert!(!said.exists(), "에이전트의 실행 파일을 띄웠다 — {:?}", std::fs::read_to_string(&said));
+    // 길이 없으면 사람 화면은 보낸 줄 하나뿐이다 — 깨우기는 덤이라 "못 깨웠다" 를 안 댄다.
+    let quiet = staged(&["send", "odd", "조용히", "--as", "boss", "--wake"])
+        .current_dir(s.path())
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&quiet.stdout).lines().count(), 1, "{}", text(&quiet));
 
     // **소켓을 모르는 칸은 안 친다**(리뷰 moai-h8tn.x4l) — `-S` 없는 `tmux` 는 보내는 쪽의 `$TMUX` 서버에 붙어, 그
     // 서버의 같은 번호 칸(사람의 창일 수 있다)에 글자를 친다. 가짜 `tmux` 는 불리면 받은 인자를 남긴다.
@@ -23962,23 +23970,24 @@ fn waking_takes_each_vendors_way() {
         .unwrap();
     assert!(String::from_utf8_lossy(&out.stdout).contains("\"tmux_pane\":\"%999\""), "{}", text(&out));
     mark(s.path(), "agy0", "idle");
-    assert_eq!(wake("agy0"), "\"wake\":{\"to\":\"agy0\",\"via\":\"tmux\",\"done\":false,\"why\":\"no_pane\"}}\n");
+    assert_eq!(wake("agy0"), "\"wake\":{\"to\":\"agy0\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
     assert!(!typed.exists(), "소켓 없이 tmux 를 불렀다 — {:?}", std::fs::read_to_string(&typed));
 
-    // `any-idle-worker` 는 가장 오래 논 일꾼을 깨운다 — 보낸 이와 감독은 빼고.
+    // `any-idle-worker` 는 가장 오래 논 일꾼을 두드린다 — 보낸 이와 감독은 빼고.
     let at = s.path().join(".moai/agents/cx.json");
     let card = std::fs::read_to_string(&at).unwrap();
     std::fs::write(&at, card.replacen(&format!("\"since\":\"{NOW}\""), "\"since\":\"2026-01-01T00:00:00Z\"", 1))
         .unwrap();
     assert!(
-        wake("any-idle-worker").starts_with("\"wake\":{\"to\":\"cx\",\"via\":\"codex\""),
+        wake("any-idle-worker").starts_with("\"wake\":{\"to\":\"cx\",\"via\":\"none\""),
         "가장 오래 논 일꾼을 안 골랐다"
     );
+    assert!(!said.exists(), "에이전트의 실행 파일을 띄웠다");
 }
 
-/// **Antigravity 는 그 tmux 칸에 `moai inbox` 를 친다** — 시험은 **제 서버**(`tmux -L`)를 띄워 그 칸만 겨눈다.
-/// 사람의 tmux 에 붙지 않게 `TMUX` 를 걷고(`isolated`), 끝에 그 서버만 `-S` 로 내린다. tmux 가 없는 기계에서는
-/// 잴 것이 없어 지나간다.
+/// **tmux 칸이 적힌 에이전트는 그 칸에 `moai inbox` 를 친다 — 벤더를 안 가린다**(2026-10-04 사용자 결정, 여기서는
+/// Codex 의 장이다). 시험은 **제 서버**(`tmux -L`)를 띄워 그 칸만 겨눈다. 사람의 tmux 에 붙지 않게 `TMUX` 를
+/// 걷고(`isolated`), 끝에 그 서버만 `-L` 로 내린다. tmux 가 없는 기계에서는 잴 것이 없어 지나간다.
 #[test]
 #[cfg(unix)]
 fn waking_types_into_the_agents_own_tmux_pane() {
@@ -24003,7 +24012,7 @@ fn waking_types_into_the_agents_own_tmux_pane() {
     let (socket, pane) = (socket.trim().to_string(), pane.trim().to_string());
 
     let agent = Sleeper::new();
-    let out = staged(&["hello", "--name", "agy1", "--vendor", "antigravity", "--json"])
+    let out = staged(&["hello", "--name", "agy1", "--vendor", "codex", "--json"])
         .current_dir(s.path())
         .env("TMUX", format!("{socket},1,0"))
         .env("TMUX_PANE", &pane)

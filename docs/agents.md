@@ -143,12 +143,15 @@ agent.
   the board included, on the first prompt — and says how many still wait; a
   letter too long for that is cut there, naming `moai inbox --all` for the
   rest. A letter's body holds up to 64 KB, its subject 200 characters
-- **An idle agent is not running its hooks**, so `moai send --wake` wakes it the
-  vendor's way: a Codex session through `codex queue --thread`, an Antigravity
-  session by typing `moai inbox` into its tmux pane. A Claude session cannot be
-  woken from a command line — the sender wakes it with `SendMessage`, as the
-  printed line says. An agent at work is left alone; its turn's end loads the
-  letter
+- **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
+  each task is how a worker without a person gets its next one — nothing has to
+  wake it
+- **Waking is a bonus.** `moai send --wake` knocks once on an idle recipient:
+  when its presence row carries a tmux pane, `moai inbox` is typed into that
+  pane; a Claude session cannot be woken from a command line, so the sender
+  wakes it with `SendMessage`, as the printed line says. With neither, nothing
+  happens and nothing is said — not everyone runs tmux. moai never runs an
+  agent's own program to wake it. An agent at work is left alone
 
 Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
 (each with `id` and `read` besides the letter's own keys) and `lost` — the ids

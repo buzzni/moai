@@ -826,20 +826,22 @@ on its branch before the merge, and `moai skill install` plants a third skill, `
 that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
 
 /// 우편함을 AGENTS 블록에 알리는 조각(moai-h8tn). **짧게 둔다** — 언제나 읽히는 블록이라 모든 세션이 그
-/// 값을 낸다. 동사 넷과 "기록이 아니다·훅이 싣는다·깨우기는 벤더의 길" 셋만 말하고, 꼴과 까닭은
+/// 값을 낸다. 동사 넷과 "기록이 아니다·훅이 싣는다·깨우기는 덤" 셋만 말하고, 꼴과 까닭은
 /// `moai send --help` 와 `src/mail.rs` 에 둔다.
 const MAILBOX: &str = r#"    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
     moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
     moai inbox --ack                        the letters for you, marked read as they are shown
+    moai inbox --ack --wait 600             a worker waits here for its next letter
     moai agents                             who is here - `moai hello` registers you
 
 A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
 on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
 and the end of each turn load the letters for this session and mark them read, and an
 `any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
-registers with `moai hello --role supervisor` so it never takes those. `--wake` wakes an
-idle recipient the vendor's way (Codex through `codex queue`, Antigravity through its tmux
-pane); a Claude session is woken by the sender, with SendMessage."#;
+registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
+`--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
+Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
+a worker waiting on `moai inbox --wait` needs no waking."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로

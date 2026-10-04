@@ -112,23 +112,21 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         return super::json_line(&Sent { id: &id, letter: &letter, wake: woke.as_ref() });
     }
     let mut out = vec![fill(say(ctx.lang(), "mail.sent"), &[("id", &paint(style::ID, &id)), ("to", &to)])];
-    if let Some(w) = &woke {
-        out.push(woke_line(ctx.lang(), w));
-    }
+    out.extend(woke.as_ref().and_then(|w| woke_line(ctx.lang(), w)));
     Ok(out)
 }
 
-/// 깨운 결과를 한 줄로. 낱말(`via`·`why`)은 기계의 것이고, 사람 말은 여기서 짓는다.
-fn woke_line(lang: Lang, w: &Woke) -> String {
+/// 깨운 결과를 한 줄로 — **깨울 길도 이도 없으면 아무 말도 안 한다**(2026-10-04 사용자 결정 "깨우기는 덤"). 낱말
+/// (`via`·`why`)은 기계의 것이라 `--json` 은 그 판에도 `wake` 를 그대로 낸다. 사람 말은 여기서 짓는다.
+fn woke_line(lang: Lang, w: &Woke) -> Option<String> {
     let to = w.to.as_str();
-    match (w.done, w.why) {
+    Some(match (w.done, w.why) {
         (true, _) => fill(say(lang, "mail.wake_done"), &[("to", to), ("via", w.via)]),
+        (false, Some("no_way" | "nobody")) => return None,
         (false, Some("ask_sender")) => fill(say(lang, "mail.wake_send_message"), &[("to", to)]),
         (false, Some("busy")) => fill(say(lang, "mail.wake_busy"), &[("to", to)]),
-        (false, Some("nobody")) => fill(say(lang, "mail.wake_nobody"), &[("to", to)]),
-        (false, Some("no_way")) => fill(say(lang, "mail.wake_no_way"), &[("to", to)]),
         (false, why) => fill(say(lang, "mail.wake_failed"), &[("to", to), ("via", w.via), ("why", why.unwrap_or("?"))]),
-    }
+    })
 }
 
 pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {

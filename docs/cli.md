@@ -2263,7 +2263,7 @@ Arguments:
 Options:
   -b, --body <text>          Text, not a path. `-` reads stdin: `-b - < <file>`
       --reply-to <id>        The id of the letter this answers
-      --wake                 Wake the recipient the vendor's way when it is idle
+      --wake                 Knock once on an idle recipient (a bonus)
       --as <name>            Who sends (else MOAI_AGENT or `moai hello`)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2292,17 +2292,19 @@ Options:
   sender cannot be answered. The body holds up to 64 KB, the subject one
   line of up to 200 characters.
 
-  --wake wakes an idle recipient the vendor's way: a Codex session through
-  `codex queue --thread`, an Antigravity session by typing `moai inbox` into
-  its tmux pane. A Claude session cannot be woken from a command line - the
-  line printed tells the sender to use SendMessage. An agent at work is not
-  woken: its Stop hook loads the letter when the turn ends. For
-  any-idle-worker it wakes the agent idle the longest.
+  **Waking is a bonus.** The way a worker gets its letters is waiting for them
+  (`moai inbox --ack --wait`) or its hooks. --wake only knocks once on an idle
+  recipient: when its row carries a tmux pane, `moai inbox` is typed into that
+  pane; a Claude session cannot be woken from a command line, so the line
+  printed tells the sender to use SendMessage. With neither it does nothing
+  and says nothing. moai never runs an agent's own program to wake it. An
+  agent at work is not woken. For any-idle-worker it knocks on the agent idle
+  the longest.
 
   --json gives the letter as written plus `id`, and `wake`
   ({"to","via","done","why"}) when --wake was given. `via` is send_message,
-  codex, tmux or none; `why` names what stood in the way (busy, ask_sender,
-  no_session, no_pane, no_way, missing, failed, timeout, nobody).
+  tmux or none; `why` names what stood in the way (busy, ask_sender, no_way,
+  nobody, missing, failed, timeout).
 ```
 
 ## `moai inbox`
@@ -2328,6 +2330,9 @@ Options:
   moai inbox --ack              the same, and marks them read
   moai inbox --all              the ones already read too
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
+
+  **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
+  end of each task, again and again. Nothing has to wake it.
 
   A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
   and --all shows it again. The hooks do this by themselves: UserPromptSubmit

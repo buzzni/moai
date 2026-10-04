@@ -46,11 +46,13 @@ does not tag — see `CONTRIBUTING.md`.
   `any-idle-worker` letter at a time and says how many are still waiting. A
   turn held by letters still gets the closing check. `PreToolUse`, `moai
   status` and the other read commands never open the mailbox.
-- **`moai send --wake` wakes an idle recipient the vendor's way** — a Codex
-  session through `codex queue --thread`, an Antigravity session by typing
-  `moai inbox` into its tmux pane. A Claude session cannot be woken from a
-  command line, so the line printed tells the sender to use SendMessage; an
-  agent at work is left alone, and its `Stop` hook loads the letter.
+- **A worker waits for its letters, and `moai send --wake` is a bonus.**
+  `moai inbox --ack --wait` is how a worker without a person gets its next
+  task. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
+  its tmux pane when its presence row carries one, and for a Claude session the
+  line printed tells the sender to use SendMessage. With neither it does
+  nothing and says nothing; an agent at work is left alone. moai never runs an
+  agent's own program to wake it.
 - **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
   two directories also carry their own `.gitignore`, so a repository that has
   not run `moai init` again does not commit them either.
