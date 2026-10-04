@@ -119,6 +119,15 @@ hands it work with `moai send`. [Hand work to waiting
 workers](#hand-work-to-waiting-workers) has the whole round. Nobody needs tmux:
 a worker that waits needs no waking, and waking is a bonus.
 
+| | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Open it in the root | `claude` | `codex` | `agy` |
+| Plant | `moai skill install` | `moai skill install --agent codex` | `moai skill install --agent antigravity` |
+| Skills | the plugin in `.claude/moai-plugin/` | `.agents/skills/` | `.agents/skills/` |
+| Hooks | in the plugin | `.codex/hooks.json`, trusted once in `/hooks` | `.agents/hooks.json` |
+| Make it a worker | `/moai-work` | `$moai-work` | ask for `moai-work` by name |
+| Waking | `SendMessage` from a Claude session | none — it waits | its tmux pane, when it has one |
+
 ### Claude Code
 
     claude
@@ -431,4 +440,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   letter sent then sits until that window's next prompt. Without hooks or tmux
   nothing wakes a window that is not waiting
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw

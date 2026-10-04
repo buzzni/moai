@@ -244,8 +244,21 @@ moai skill install --agent auto            # whichever of claude, codex, agy is 
 moai skill status                          # what is planted where, and what is stale
 ```
 
-moai never launches an agent or runs one headless. A person opens each session,
-and the session reads `moai ready --json` to choose its next row.
+moai never launches an agent or runs one headless. A person opens each session
+in the repository root, the ordinary way — it asks that person before it acts,
+as it always does — and the session reads `moai ready --json` to choose its next
+row:
+
+| | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Open it | `claude` | `codex` | `agy` |
+| Make it a worker | `/moai-work` | `$moai-work` | ask for `moai-work` by name |
+
+A window becomes a worker when its person calls `moai-work` once, and a
+supervisor (`moai-supervise`) finds it with `moai agents` and hands it work with
+`moai send`. Nobody needs tmux. What each agent needs first — Codex's trust in
+`/hooks`, and its sandbox on a machine where that cannot stand — is in
+[working with agents](docs/agents.md#open-a-session-for-each-agent).
 
 ### The `--json` contract
 
