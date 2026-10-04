@@ -348,8 +348,9 @@ pub fn dir_of(here: &Path, raw: &str) -> Result<PathBuf, DirTrouble> {
 /// 이 체크아웃(`here`)의 위키를 읽는다. `raw` 는 `wiki_dir` 의 날글자, `prefix` 는 이슈 id 의 접두어, `known` 은
 /// 그 id 의 줄이 트래커에 있는가를 답한다.
 ///
-/// 위키 뿌리를 못 열면 [`DirTrouble`] 이다. 그 밑에서 못 연 디렉터리와 못 읽은 페이지는 멈추지 않고 [`Wiki`] 에
-/// 적는다 — 한 파일 때문에 나머지 페이지를 못 보면 무엇이 잘못됐는지 볼 길도 같이 사라진다.
+/// 위키 뿌리를 못 열면 [`DirTrouble`] 이다. 그 밑에서 못 열었거나 끝까지 못 읽은 디렉터리, 종류를 못 읽은 이름과
+/// 못 읽은 페이지는 멈추지 않고 [`Wiki`] 에 적는다 — 한 파일 때문에 나머지 페이지를 못 보면 무엇이 잘못됐는지
+/// 볼 길도 같이 사라진다.
 ///
 /// **페이지 하나를 볼 때도 모든 본문을 읽는다** — 역링크는 다른 페이지가 적은 링크라서다(2026-10-04 사용자 결정,
 /// moai-ogaw: `moai wiki show` 도 역링크를 낸다). 그 결정 전에는 물은 페이지 하나만 열던 `load_one` 이 있었다.
@@ -463,9 +464,7 @@ fn walk<E: Entry>(
     files: &mut Vec<(Vec<String>, PathBuf)>,
     skipped: &mut Vec<Skipped>,
 ) {
-    let path_of = |rel: &[String], last: &str| {
-        shown.iter().chain(rel).map(String::as_str).chain([last]).collect::<Vec<_>>().join("/")
-    };
+    let path_of = |rel: &[String], last: &str| place(shown, rel, Some(last));
     let mut listed = Vec::new();
     let mut fell = None;
     for entry in entries {
@@ -478,7 +477,7 @@ fn walk<E: Entry>(
         }
     }
     if let Some(said) = fell {
-        let here = shown.iter().chain(rel.iter()).map(String::as_str).collect::<Vec<_>>().join("/");
+        let here = place(shown, rel, None);
         let path = if here.is_empty() { ".".to_string() } else { here };
         skipped.push(Skipped { path, why: Skip::Unreadable(said) });
     }
@@ -533,6 +532,12 @@ fn slug_of(rel: &[String]) -> String {
     dirs.iter().map(String::as_str).chain([stem]).collect::<Vec<_>>().join("/")
 }
 
+/// 체크아웃에서의 상대 경로 — `wiki_dir` 의 조각(`shown`), 위키 뿌리에서의 조각(`rel`), 그리고 있으면 끝 이름을
+/// `/` 로 잇는다. 페이지의 `path` 와 `skipped` 의 `path` 가 이 하나로 선다.
+fn place(shown: &[String], rel: &[String], last: Option<&str>) -> String {
+    shown.iter().chain(rel).map(String::as_str).chain(last).collect::<Vec<_>>().join("/")
+}
+
 /// 파일 하나를 페이지로 — 연 손잡이로 크기를 재고, 상한 안이면 그 손잡이로 읽는다.
 fn page_at(
     at: &Path,
@@ -545,7 +550,7 @@ fn page_at(
 ) -> Page {
     let file = rel.last().map_or("", String::as_str);
     let stem = file.strip_suffix(".md").unwrap_or(file);
-    let path = shown.iter().chain(rel).map(String::as_str).collect::<Vec<_>>().join("/");
+    let path = place(shown, rel, None);
     let (bytes, body) = read(at, home);
     let mut page = Page {
         slug,
